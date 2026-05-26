@@ -31,7 +31,7 @@
       return new Promise(resolve => { tx.oncomplete = resolve; });
     }
 
-    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false };
+    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, autoDayNight: true, themeManualOverride: false };
     let currentGroup = 'all', selectedCardId = null, isNewCardMode = true, imageData = null;
     let currentTags = [], tempCustomFields = [];
     let batchMode = false, selectedCardIds = new Set();
@@ -47,6 +47,8 @@
       const savedFilters = JSON.parse(localStorage.getItem('promptrepo_filters') || '[]');
       if (Array.isArray(savedFilters)) activeFilters = new Set(savedFilters);
     } catch (e) { activeFilters = new Set(); }
+    const GUEST_CARD_LIMIT = 10;
+
     let cardColumns = Number(localStorage.getItem('promptrepo_card_columns') || 4);
     cardColumns = Math.min(5, Math.max(1, cardColumns || 4));
 
@@ -59,6 +61,9 @@
       const container = document.getElementById('cardsContainer');
       if (container) container.scrollTop = 0;
       if (typeof renderCards === 'function') renderCards(true);
+      if (document.getElementById('pageCommunity')?.classList.contains('active')) {
+        window.FeatureDraft?.scheduleLayout?.('communityGrid');
+      }
     }
     function toggleColumnUp() {
       if (cardColumns < 5) setCardColumns(cardColumns + 1);
@@ -226,6 +231,192 @@
       clearTimeout(toast._timeout);
       toast._timeout = setTimeout(() => toast.classList.remove('show'), 2000);
     }
+    window.showToast = showToast;
+
+    function isUserLoggedIn() {
+      return !!window.SupabaseSync?.isLoggedIn?.();
+    }
+
+    function promptLogin(message) {
+      if (message) showToast(message);
+      if (typeof openAuthModal === 'function') openAuthModal('login');
+    }
+
+    function canGuestCreateCard() {
+      if (isUserLoggedIn()) return { ok: true };
+      if (cards.length >= GUEST_CARD_LIMIT) {
+        return {
+          ok: false,
+          msg: `未登录最多创建 ${GUEST_CARD_LIMIT} 张卡片，登录后可继续创建并同步到云端`
+        };
+      }
+      return { ok: true, remaining: GUEST_CARD_LIMIT - cards.length };
+    }
+
+    function requireAuth(action) {
+      if (isUserLoggedIn()) return true;
+      const messages = {
+        copy: '登录后可复制社区提示词',
+        community: '登录后可使用社区互动功能',
+        imagegen: '登录后可生成图片（需消耗积分）',
+        redeem: '登录后可兑换激活码',
+        publish: '登录后可发布到社区'
+      };
+      promptLogin(messages[action] || '请先登录');
+      return false;
+    }
+
+    function updateGuestLimitUI() {
+      const el = document.getElementById('guestLimitHint');
+      if (!el) return;
+      if (isUserLoggedIn()) {
+        el.classList.add('hidden');
+        return;
+      }
+      el.classList.remove('hidden');
+      const left = Math.max(0, GUEST_CARD_LIMIT - cards.length);
+      el.textContent = `未登录：还可新建 ${left} / ${GUEST_CARD_LIMIT} 张卡片（登录后无限制并云同步）`;
+    }
+
+    window.AuthGate = {
+      GUEST_CARD_LIMIT,
+      isUserLoggedIn,
+      requireAuth,
+      canGuestCreateCard,
+      promptLogin,
+      updateGuestLimitUI
+    };
+
+    window.getDefaultPublishCommunity = function () {
+      return settings.defaultPublishCommunity !== false;
+    };
+
+    window.getDefaultImageGenAutoPublish = function () {
+      return settings.defaultImageGenAutoPublish !== false;
+    };
+
+    window.getWarehouseCardsForImageGen = function (opts) {
+      const group = opts?.group || 'all';
+      const tag = opts?.tag || 'all';
+      let list = cards.filter(c => (c.prompt || '').trim());
+      if (group === 'uncategorized') {
+        list = list.filter(c => !c.group);
+      } else if (group && group !== 'all') {
+        list = list.filter(c => c.group === group);
+      }
+      if (tag && tag !== 'all') {
+        list = list.filter(c => (c.tags || []).includes(tag));
+      }
+      return list
+        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
+        .map(c => ({
+          id: c.id,
+          title: (c.title || '').trim() || '',
+          prompt: c.prompt || '',
+          image: c.image || null,
+          tags: c.tags || [],
+          group: c.group || null
+        }));
+    };
+
+    window.getImageGenWarehouseFilterOptions = function () {
+      const groups = [
+        { value: 'all', label: '全部分组' },
+        { value: 'uncategorized', label: '未分类' },
+        ...customGroups.map(g => ({ value: g, label: g }))
+      ];
+      const tagSet = new Set();
+      cards.forEach(c => (c.tags || []).forEach(t => tagSet.add(t)));
+      const tags = [
+        { value: 'all', label: '全部标签' },
+        ...[...tagSet].sort().map(t => ({ value: t, label: '#' + t }))
+      ];
+      return { groups, tags };
+    };
+
+    window.redeemActivationCode = async function () {
+      if (!requireAuth('redeem')) return;
+      const input = document.getElementById('activationCodeInput');
+      const code = input?.value?.trim();
+      const result = await window.PointsSystem?.redeemActivationCode?.(code);
+      if (!result) return;
+      const status = document.getElementById('settingsStatus');
+      if (result.ok) {
+        if (input) input.value = '';
+        if (status) status.textContent = result.msg;
+        showToast(result.msg);
+        if (window.Membership?.isMemberCode?.(code)) {
+          enforcePinLimits();
+          renderCards(true);
+          updatePinToggleUI();
+          if (typeof window.FeatureDraft?.refreshImageGenCost === 'function') {
+            window.FeatureDraft.refreshImageGenCost();
+          }
+        }
+      } else {
+        if (status) status.textContent = result.msg;
+        showToast(result.msg);
+      }
+    };
+
+    window.addCardFromCommunity = function (post) {
+      if (!post || !post.prompt) return false;
+      if (cards.some(c => c.communitySourceId === post.id)) return false;
+      cards.push({
+        id: generateId(),
+        title: (post.title || '社区收藏') + '',
+        prompt: post.prompt,
+        image: post.image || null,
+        group: null,
+        tags: ['社区收藏'],
+        customFields: {},
+        communitySourceId: post.id,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+      saveAllData();
+      renderGroups();
+      renderCards(true);
+      return true;
+    };
+
+    window.addCardFromGenerated = function (payload) {
+      const { prompt, image, title, sourceId } = payload || {};
+      if (!image && !(prompt || '').trim()) {
+        showToast('无内容可保存');
+        return { ok: false };
+      }
+      if (sourceId && cards.some(c => c.genSourceId === sourceId)) {
+        showToast('该图已在卡片仓库中');
+        return { ok: false, duplicate: true };
+      }
+      if (!isUserLoggedIn()) {
+        const check = canGuestCreateCard();
+        if (!check.ok) {
+          promptLogin(check.msg);
+          return { ok: false };
+        }
+      }
+      const promptText = (prompt || '').trim();
+      cards.push({
+        id: generateId(),
+        title: (title || promptText.slice(0, 24) || '生成图') + '',
+        prompt: promptText,
+        image: image || null,
+        group: null,
+        tags: ['图片生成'],
+        customFields: {},
+        genSourceId: sourceId || null,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+      saveAllData();
+      renderGroups();
+      renderCards(true);
+      updateGuestLimitUI();
+      showToast('已保存到卡片仓库');
+      return { ok: true };
+    };
 
     function showCustomModal(title, content, onConfirm, onCancel, isPrompt = false, suggestions = []) {
       const overlay = document.getElementById('customModalOverlay');
@@ -703,8 +894,18 @@
       localStorage.setItem('promptrepo_app_page', app);
       if (app === 'warehouse') {
         applyFloatingState();
-        requestAnimationFrame(() => { if (typeof layoutMasonryGrid === 'function') layoutMasonryGrid(); });
+        requestAnimationFrame(() => {
+          const onWarehouse = document.getElementById('pageWarehouse')?.classList.contains('active');
+          if (!onWarehouse) return;
+          if (masonryInstance && document.querySelector('#cardsContainer .card')) {
+            masonryInstance.layout();
+          } else if (typeof scheduleLayoutMasonry === 'function') {
+            scheduleLayoutMasonry();
+          }
+        });
       }
+      window.FeatureDraft?.onAppChange?.(app);
+      window.mobileOnAppPageChange?.(app);
     }
     window.switchAppPage = switchAppPage;
 
@@ -850,39 +1051,867 @@
       }
     }
 
-    (async function init() {
-      await openDB();
-      const savedCards = await loadCardsFromDB();
-      cards = savedCards.length ? savedCards : JSON.parse(localStorage.getItem('promptrepo_cards') || '[]');
-      customGroups = JSON.parse(localStorage.getItem('promptrepo_groups') || '[]');
-      globalFields = JSON.parse(localStorage.getItem('promptrepo_fields') || '[]');
-      const savedSettings = JSON.parse(localStorage.getItem('promptrepo_settings') || '{}');
-      settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false }, savedSettings);
+    let cloudPushTimer = null;
+    let cloudSyncing = false;
+    let activeAccountId = null;
+    let cloudHydratedUid = null;
+
+    function userStorageKey(name, uid) {
+      const id = uid || activeAccountId;
+      return id ? `promptrepo_${name}_${id}` : `promptrepo_${name}`;
+    }
+
+    const BACKUP_FORMAT = 'prompt-hub-backup';
+    const BACKUP_VERSION = 1;
+
+    function getPinLimit() {
+      return window.Membership?.getPinLimit?.() ?? 2;
+    }
+
+    function countPinnedCards(excludeId) {
+      return cards.filter(c => c.pinnedAt && c.id !== excludeId).length;
+    }
+
+    function sortCardsWithPins(list) {
+      const pinned = list.filter(c => c.pinnedAt).sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
+      const rest = list.filter(c => !c.pinnedAt);
+      if (sortMode === 'updated-desc') {
+        rest.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+      } else if (sortMode === 'updated-asc') {
+        rest.sort((a, b) => (a.updatedAt || a.createdAt) - (b.updatedAt || b.createdAt));
+      }
+      return [...pinned, ...rest];
+    }
+
+    function normalizeCardPins() {
+      cards.forEach(c => {
+        if (c.pinnedAt != null && c.pinnedAt !== false) c.pinnedAt = Number(c.pinnedAt) || Date.now();
+        else delete c.pinnedAt;
+      });
+      enforcePinLimits();
+    }
+
+    function enforcePinLimits() {
+      if (window.Membership?.isUnlimitedPins?.()) return;
+      const limit = getPinLimit();
+      const pinned = cards.filter(c => c.pinnedAt).sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
+      if (pinned.length <= limit) return;
+      pinned.slice(limit).forEach(c => { delete c.pinnedAt; });
+    }
+
+    function updatePinToggleUI() {
+      const btn = document.getElementById('cardPinToggle');
+      if (!btn) return;
+      if (!selectedCardId || isNewCardMode) {
+        btn.classList.add('hidden');
+        return;
+      }
+      const card = cards.find(c => c.id === selectedCardId);
+      if (!card) {
+        btn.classList.add('hidden');
+        return;
+      }
+      btn.classList.remove('hidden');
+      const pinned = !!card.pinnedAt;
+      btn.classList.toggle('is-pinned', pinned);
+      btn.textContent = pinned ? '取消置顶' : '置顶';
+      const count = countPinnedCards();
+      if (window.Membership?.isUnlimitedPins?.()) {
+        btn.title = `会员置顶 ${count} 张（不限）`;
+      } else {
+        const limit = getPinLimit();
+        btn.title = `普通用户置顶 ${count}/${limit}`;
+      }
+    }
+
+    function toggleCardPinById(id) {
+      const card = cards.find(c => c.id === id);
+      if (!card) return;
+      if (card.pinnedAt) {
+        delete card.pinnedAt;
+        saveAllData();
+        renderCards(true);
+        updatePinToggleUI();
+        showToast('已取消置顶');
+        return;
+      }
+      if (!window.Membership?.isUnlimitedPins?.()) {
+        const limit = getPinLimit();
+        if (countPinnedCards(id) >= limit) {
+          showToast(`普通用户最多置顶 ${limit} 张，请先取消其他置顶`);
+          return;
+        }
+      }
+      card.pinnedAt = Date.now();
+      saveAllData();
+      renderCards(true);
+      updatePinToggleUI();
+      showToast('已置顶');
+    }
+
+    window.toggleCardPin = function () {
+      if (!selectedCardId) return;
+      toggleCardPinById(selectedCardId);
+    };
+
+    function buildBackupPayload() {
+      return {
+        format: BACKUP_FORMAT,
+        version: BACKUP_VERSION,
+        exportedAt: new Date().toISOString(),
+        cards,
+        customGroups,
+        globalFields,
+        settings,
+        account: window.Membership?.getAccountPayload?.() || null
+      };
+    }
+
+    function applyBackupPayload(d) {
+      if (!d || !Array.isArray(d.cards)) return false;
+      cards = d.cards;
+      customGroups = d.customGroups || [];
+      globalFields = d.globalFields || [];
+      if (d.settings && typeof d.settings === 'object') {
+        settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true }, d.settings);
+      }
+      window.Membership?.syncFromPayload?.(d.account);
+      normalizeCardPins();
+      return true;
+    }
+
+    function getDataPayload() {
+      return {
+        cards,
+        customGroups,
+        globalFields,
+        settings,
+        account: window.Membership?.getAccountPayload?.() || null
+      };
+    }
+
+    function applyDataPayload(payload) {
+      if (!payload || typeof payload !== 'object') return;
+      if (Array.isArray(payload.cards)) cards = payload.cards;
+      if (Array.isArray(payload.customGroups)) customGroups = payload.customGroups;
+      if (Array.isArray(payload.globalFields)) globalFields = payload.globalFields;
+      if (payload.settings && typeof payload.settings === 'object') {
+        settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, autoDayNight: true, themeManualOverride: false }, payload.settings);
+      }
+      window.Membership?.syncFromPayload?.(payload.account);
+      normalizeCardPins();
       floatingPromptActive = settings.floatingPrompt === true;
-      if (cards.length && !savedCards.length) await saveCardsToDB(cards);
       document.getElementById('imageClickZoomToggle').checked = settings.imageClickZoom;
+      if (settings.autoDayNight !== false && !settings.themeManualOverride) {
+        window.ThemeSchedule?.applyAutoThemeIfNeeded?.();
+      } else if (settings.theme && typeof window.applyAppTheme === 'function') {
+        window.applyAppTheme(settings.theme);
+      }
+    }
+
+    function updateAuthUI(session) {
+      const openBtn = document.getElementById('authOpenBtn');
+      const userBar = document.getElementById('authUserBar');
+      const hint = document.getElementById('authSyncHint');
+      const emailEl = document.getElementById('authUserEmail');
+      const configured = window.SupabaseSync?.isConfigured?.();
+      if (!openBtn) return;
+      if (!configured) {
+        openBtn.textContent = '云同步未配置';
+        openBtn.disabled = true;
+        userBar?.classList.add('hidden');
+        hint?.classList.add('hidden');
+        return;
+      }
+      openBtn.disabled = false;
+      if (session?.user) {
+        openBtn.classList.add('hidden');
+        userBar?.classList.remove('hidden');
+        hint?.classList.remove('hidden');
+        const label = session.user.email || session.user.phone || '已登录';
+        if (emailEl) {
+          emailEl.textContent = label;
+          emailEl.title = label;
+        }
+      } else {
+        openBtn.classList.remove('hidden');
+        openBtn.textContent = '登录 / 注册';
+        userBar?.classList.add('hidden');
+        hint?.classList.add('hidden');
+      }
+      updateGuestLimitUI();
+    }
+
+    let authMode = 'login';
+    let authChannel = 'email';
+    let authBusy = false;
+    let otpCooldownTimer = null;
+
+    function isValidEmail(email) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    }
+
+    function setAuthBusy(busy) {
+      authBusy = busy;
+      const btn = document.getElementById('authSubmitBtn');
+      const otpBtn = document.getElementById('authSendOtpBtn');
+      if (btn) btn.disabled = busy;
+      if (otpBtn && !otpCooldownTimer) otpBtn.disabled = busy;
+    }
+
+    function refreshAuthMethodUI() {
+      const phoneEnabled = window.SupabaseSync?.isPhoneAuthEnabled?.();
+      const phoneTab = document.getElementById('authPhoneMethodTab');
+      const methodTabs = document.getElementById('authMethodTabs');
+      if (phoneTab) phoneTab.classList.toggle('hidden', !phoneEnabled);
+      if (methodTabs && !phoneEnabled) methodTabs.classList.add('hidden');
+      const wechatBtn = document.getElementById('authWeChatBtn');
+      const social = document.getElementById('authSocial');
+      if (wechatBtn) {
+        wechatBtn.disabled = !window.SupabaseSync?.isWeChatAuthEnabled?.();
+        wechatBtn.title = wechatBtn.disabled ? '需先在 supabase-config.js 配置微信 OAuth' : '使用微信登录';
+      }
+    }
+
+    function switchAuthChannel(channel) {
+      if (channel === 'phone' && !window.SupabaseSync?.isPhoneAuthEnabled?.()) {
+        setAuthStatus('请先在 Supabase 开启手机登录，见 docs/SUPABASE-AUTH.md', 'error');
+        return;
+      }
+      authChannel = channel;
+      document.querySelectorAll('.auth-method-tab').forEach((t) => {
+        t.classList.toggle('active', t.dataset.authChannel === channel);
+      });
+      document.getElementById('authEmailPanel')?.classList.toggle('hidden', channel !== 'email');
+      document.getElementById('authPhonePanel')?.classList.toggle('hidden', channel !== 'phone');
+      document.getElementById('authTabs')?.classList.toggle('hidden', channel !== 'email' || authMode === 'forgot' || authMode === 'reset');
+      document.getElementById('authEmailLinks')?.classList.toggle('hidden', channel !== 'email');
+      document.getElementById('authSocial')?.classList.toggle('hidden', authMode === 'forgot' || authMode === 'reset');
+      const submitBtn = document.getElementById('authSubmitBtn');
+      if (channel === 'phone') {
+        document.getElementById('authTitle').textContent = '手机验证码登录';
+        document.getElementById('authDesc').textContent = '输入手机号获取验证码，未注册将自动创建账号。';
+        if (submitBtn) submitBtn.textContent = '登录 / 注册';
+        document.getElementById('authPhone')?.focus();
+      } else {
+        switchAuthMode(authMode || 'login');
+      }
+      setAuthStatus('');
+    }
+    window.switchAuthChannel = switchAuthChannel;
+
+    function switchAuthMode(mode) {
+      authMode = mode;
+      if (authChannel === 'phone' && mode !== 'reset') return;
+      const tabs = document.getElementById('authTabs');
+      const confirmWrap = document.getElementById('authConfirmWrap');
+      const newPwdWrap = document.getElementById('authNewPwdWrap');
+      const pwdField = document.querySelector('.auth-field-password');
+      const rememberWrap = document.getElementById('authRememberWrap');
+      const forgotLink = document.getElementById('authForgotLink');
+      const backLink = document.getElementById('authBackLoginLink');
+      const title = document.getElementById('authTitle');
+      const desc = document.getElementById('authDesc');
+      const submitBtn = document.getElementById('authSubmitBtn');
+      const pwdLabel = document.getElementById('authPasswordLabel');
+      const methodTabs = document.getElementById('authMethodTabs');
+
+      document.querySelectorAll('.auth-tab').forEach((t) => {
+        t.classList.toggle('active', t.dataset.authMode === mode);
+      });
+
+      tabs?.classList.toggle('hidden', mode === 'forgot' || mode === 'reset');
+      methodTabs?.classList.toggle('hidden', mode === 'forgot' || mode === 'reset' || !window.SupabaseSync?.isPhoneAuthEnabled?.());
+      document.getElementById('authEmailPanel')?.classList.remove('hidden');
+      document.getElementById('authPhonePanel')?.classList.add('hidden');
+      authChannel = 'email';
+      document.querySelectorAll('.auth-method-tab').forEach((t) => {
+        t.classList.toggle('active', t.dataset.authChannel === 'email');
+      });
+      confirmWrap?.classList.toggle('hidden', mode !== 'register');
+      newPwdWrap?.classList.toggle('hidden', mode !== 'reset');
+      pwdField?.classList.toggle('hidden', mode === 'forgot' || mode === 'reset');
+      rememberWrap?.classList.toggle('hidden', mode !== 'login');
+      forgotLink?.classList.toggle('hidden', mode !== 'login');
+      backLink?.classList.toggle('hidden', mode === 'login');
+      document.getElementById('authEmailLinks')?.classList.remove('hidden');
+      document.getElementById('authSocial')?.classList.toggle('hidden', mode === 'forgot' || mode === 'reset');
+
+      if (mode === 'login') {
+        title.textContent = '登录账号';
+        desc.textContent = '登录后卡片、分组会同步到云端，换设备也能用。';
+        submitBtn.textContent = '登录';
+        pwdLabel.textContent = '密码';
+        document.getElementById('authPassword')?.setAttribute('autocomplete', 'current-password');
+      } else if (mode === 'register') {
+        title.textContent = '注册账号';
+        desc.textContent = '创建账号后即可在多设备同步你的提示词库。';
+        submitBtn.textContent = '注册';
+        pwdLabel.textContent = '设置密码';
+        document.getElementById('authPassword')?.setAttribute('autocomplete', 'new-password');
+      } else if (mode === 'forgot') {
+        title.textContent = '找回密码';
+        desc.textContent = '输入注册邮箱，我们将发送重置链接（请查收邮件，含垃圾箱）。';
+        submitBtn.textContent = '发送重置邮件';
+      } else if (mode === 'reset') {
+        title.textContent = '设置新密码';
+        desc.textContent = '请设置新的登录密码（至少 6 位）。';
+        submitBtn.textContent = '更新密码';
+        methodTabs?.classList.add('hidden');
+        document.getElementById('authSocial')?.classList.add('hidden');
+      }
+      setAuthStatus('');
+    }
+    window.switchAuthMode = switchAuthMode;
+
+    function toggleAuthPassword() {
+      const input = document.getElementById('authPassword');
+      const btn = document.getElementById('authPwdToggle');
+      if (!input) return;
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      if (btn) btn.textContent = show ? '🙈' : '👁';
+    }
+    window.toggleAuthPassword = toggleAuthPassword;
+
+    function openAuthModal(mode) {
+      if (!window.SupabaseSync?.isConfigured?.()) {
+        showToast('请先在 supabase-config.js 填入项目地址和密钥');
+        return;
+      }
+      refreshAuthMethodUI();
+      setAuthStatus('');
+      setAuthBusy(false);
+      authChannel = 'email';
+      if (window.location.hash.includes('type=recovery')) {
+        switchAuthMode('reset');
+      } else {
+        switchAuthMode(mode || 'login');
+      }
+      document.getElementById('authOverlay')?.classList.add('open');
+      document.getElementById('authEmail')?.focus();
+    }
+    function closeAuthModal() {
+      document.getElementById('authOverlay')?.classList.remove('open');
+      if (window.location.hash.includes('type=recovery')) {
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    }
+    window.openAuthModal = openAuthModal;
+    window.closeAuthModal = closeAuthModal;
+
+    function setAuthStatus(msg, type) {
+      const el = document.getElementById('authStatus');
+      if (!el) return;
+      el.textContent = msg || '';
+      el.className = 'auth-status' + (type ? ' ' + type : '');
+    }
+
+    function authErrorMessage(e) {
+      return window.SupabaseSync?.formatAuthError?.(e) || e?.message || '操作失败';
+    }
+
+    async function authSignIn() {
+      const email = document.getElementById('authEmail')?.value?.trim();
+      const password = document.getElementById('authPassword')?.value;
+      if (!email || !password) { setAuthStatus('请填写邮箱和密码', 'error'); return; }
+      if (!isValidEmail(email)) { setAuthStatus('邮箱格式不正确', 'error'); return; }
+      try {
+        setAuthBusy(true);
+        setAuthStatus('登录中…');
+        await window.SupabaseSync.signIn(email, password);
+        closeAuthModal();
+        showToast('登录成功');
+      } catch (e) {
+        setAuthStatus(authErrorMessage(e), 'error');
+      } finally {
+        setAuthBusy(false);
+      }
+    }
+
+    async function authSignUp() {
+      const email = document.getElementById('authEmail')?.value?.trim();
+      const password = document.getElementById('authPassword')?.value;
+      const confirm = document.getElementById('authPasswordConfirm')?.value;
+      if (!email || !password) { setAuthStatus('请填写邮箱和密码', 'error'); return; }
+      if (!isValidEmail(email)) { setAuthStatus('邮箱格式不正确', 'error'); return; }
+      if (password.length < 6) { setAuthStatus('密码至少 6 位', 'error'); return; }
+      if (password !== confirm) { setAuthStatus('两次输入的密码不一致', 'error'); return; }
+      try {
+        setAuthBusy(true);
+        setAuthStatus('注册中…');
+        const data = await window.SupabaseSync.signUp(email, password);
+        if (data.session) {
+          closeAuthModal();
+          showToast('注册成功，已自动登录');
+        } else {
+          setAuthStatus('注册成功！请查收邮件点击确认链接后再登录（若未开启邮箱验证可直接登录）', 'ok');
+          switchAuthMode('login');
+        }
+      } catch (e) {
+        setAuthStatus(authErrorMessage(e), 'error');
+      } finally {
+        setAuthBusy(false);
+      }
+    }
+
+    async function authForgotPassword() {
+      const email = document.getElementById('authEmail')?.value?.trim();
+      if (!email) { setAuthStatus('请先填写注册邮箱', 'error'); return; }
+      if (!isValidEmail(email)) { setAuthStatus('邮箱格式不正确', 'error'); return; }
+      try {
+        setAuthBusy(true);
+        setAuthStatus('发送中…');
+        await window.SupabaseSync.resetPassword(email);
+        setAuthStatus('重置邮件已发送，请查收邮箱（含垃圾箱）', 'ok');
+      } catch (e) {
+        setAuthStatus(authErrorMessage(e), 'error');
+      } finally {
+        setAuthBusy(false);
+      }
+    }
+
+    async function authResetPassword() {
+      const pwd = document.getElementById('authNewPassword')?.value;
+      if (!pwd || pwd.length < 6) { setAuthStatus('新密码至少 6 位', 'error'); return; }
+      try {
+        setAuthBusy(true);
+        setAuthStatus('更新中…');
+        await window.SupabaseSync.updatePassword(pwd);
+        closeAuthModal();
+        showToast('密码已更新，请使用新密码登录');
+      } catch (e) {
+        setAuthStatus(authErrorMessage(e), 'error');
+      } finally {
+        setAuthBusy(false);
+      }
+    }
+
+    function startOtpCooldown(seconds) {
+      const btn = document.getElementById('authSendOtpBtn');
+      if (!btn) return;
+      let left = seconds;
+      btn.disabled = true;
+      btn.textContent = left + 's';
+      clearInterval(otpCooldownTimer);
+      otpCooldownTimer = setInterval(() => {
+        left -= 1;
+        if (left <= 0) {
+          clearInterval(otpCooldownTimer);
+          otpCooldownTimer = null;
+          btn.disabled = false;
+          btn.textContent = '获取验证码';
+        } else {
+          btn.textContent = left + 's';
+        }
+      }, 1000);
+    }
+
+    async function authSendPhoneOtp() {
+      const phone = document.getElementById('authPhone')?.value?.trim();
+      if (!phone) { setAuthStatus('请输入手机号', 'error'); return; }
+      try {
+        setAuthBusy(true);
+        setAuthStatus('发送中…');
+        await window.SupabaseSync.sendPhoneOtp(phone);
+        setAuthStatus('验证码已发送，请查收短信', 'ok');
+        startOtpCooldown(60);
+        document.getElementById('authOtp')?.focus();
+      } catch (e) {
+        setAuthStatus(authErrorMessage(e), 'error');
+      } finally {
+        setAuthBusy(false);
+      }
+    }
+    window.authSendPhoneOtp = authSendPhoneOtp;
+
+    async function authPhoneVerify() {
+      const phone = document.getElementById('authPhone')?.value?.trim();
+      const otp = document.getElementById('authOtp')?.value?.trim();
+      if (!phone) { setAuthStatus('请输入手机号', 'error'); return; }
+      if (!otp) { setAuthStatus('请输入验证码', 'error'); return; }
+      try {
+        setAuthBusy(true);
+        setAuthStatus('验证中…');
+        await window.SupabaseSync.verifyPhoneOtp(phone, otp);
+        closeAuthModal();
+        showToast('登录成功');
+      } catch (e) {
+        setAuthStatus(authErrorMessage(e), 'error');
+      } finally {
+        setAuthBusy(false);
+      }
+    }
+
+    function authWeChatLogin() {
+      if (window.SupabaseSync?.isWeChatAuthEnabled?.()) {
+        const url = window.WECHAT_OAUTH_URL;
+        const redirect = encodeURIComponent(window.location.href.split('#')[0]);
+        window.location.href = url + (url.includes('?') ? '&' : '?') + 'redirect=' + redirect;
+        return;
+      }
+      setAuthStatus('微信登录需配置开放平台与 OAuth 地址，详见项目 docs/SUPABASE-AUTH.md', 'ok');
+    }
+    window.authWeChatLogin = authWeChatLogin;
+
+    async function authSubmit() {
+      if (authBusy) return;
+      if (authChannel === 'phone') {
+        await authPhoneVerify();
+        return;
+      }
+      if (authMode === 'login') await authSignIn();
+      else if (authMode === 'register') await authSignUp();
+      else if (authMode === 'forgot') await authForgotPassword();
+      else if (authMode === 'reset') await authResetPassword();
+    }
+    window.authSubmit = authSubmit;
+
+    async function snapshotLocalForUser(uid) {
+      if (!uid) return;
+      try {
+        localStorage.setItem(userStorageKey('snapshot', uid), JSON.stringify(getDataPayload()));
+      } catch (e) { /* quota */ }
+    }
+
+    async function clearWorkspace() {
+      clearTimeout(cloudPushTimer);
+      cards = [];
+      customGroups = [];
+      await saveCardsToDB([]);
+      localStorage.removeItem('promptrepo_groups');
+      localStorage.removeItem('promptrepo_fields');
+    }
+
+    async function loadLocalSnapshotForUser(uid) {
+      const raw = localStorage.getItem(userStorageKey('snapshot', uid));
+      if (!raw) return false;
+      try {
+        applyDataPayload(JSON.parse(raw));
+        await saveCardsToDB(cards);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    async function authSignOut() {
+      try {
+        const uid = window.SupabaseSync?.getUserId?.();
+        if (uid) await snapshotLocalForUser(uid);
+        clearTimeout(cloudPushTimer);
+        await window.SupabaseSync.signOut();
+        activeAccountId = null;
+        cloudHydratedUid = null;
+        await clearWorkspace();
+        updateAuthUI(null);
+        updateTagFilter();
+        buildFilterMenu();
+        syncFilterBtnState();
+        renderGroups();
+        renderCards(true);
+        createNewCard();
+        showToast('已退出登录');
+      } catch (e) {
+        showToast('退出失败');
+      }
+    }
+    window.authSignIn = authSignIn;
+    window.authSignUp = authSignUp;
+    window.authSignOut = authSignOut;
+
+    document.getElementById('authOverlay')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && document.getElementById('authOverlay')?.classList.contains('open')) {
+        e.preventDefault();
+        authSubmit();
+      }
+    });
+
+    async function pullFromCloud() {
+      if (!window.SupabaseSync?.isLoggedIn?.()) return false;
+      const cloud = await window.SupabaseSync.pullCloudData();
+      if (cloud != null && typeof cloud === 'object') {
+        applyDataPayload(cloud);
+        await saveAllData({ skipCloud: true });
+        return true;
+      }
+      return false;
+    }
+
+    function formatSyncError(e) {
+      return window.SupabaseSync?.formatError?.(e) || e?.message || '请稍后重试';
+    }
+
+    async function pushToCloud() {
+      if (!window.SupabaseSync?.isLoggedIn?.() || cloudSyncing) return { ok: true };
+      cloudSyncing = true;
+      const status = document.getElementById('statusMsg');
+      try {
+        const payload = getDataPayload();
+        const hasBase64 = payload.cards?.some(c => window.SupabaseSync.isDataUrl(c.image));
+        if (hasBase64 && status) status.textContent = '正在上传图片到云端…';
+        const result = await window.SupabaseSync.pushCloudData(payload);
+        if (Array.isArray(payload.cards)) cards = payload.cards;
+        await saveAllData({ skipCloud: true });
+        if (result?.warnings?.length) {
+          showToast('文字已同步；图片未上传：' + result.warnings[0]);
+          return { ok: true, warnings: result.warnings };
+        }
+        return { ok: true };
+      } finally {
+        cloudSyncing = false;
+        if (status && !status.textContent.startsWith('❌')) status.textContent = '';
+      }
+    }
+
+    function scheduleCloudPush() {
+      if (!window.SupabaseSync?.isLoggedIn?.()) return;
+      clearTimeout(cloudPushTimer);
+      cloudPushTimer = setTimeout(() => {
+        pushToCloud().catch((e) => showToast('云端同步失败：' + formatSyncError(e)));
+      }, 1500);
+    }
+
+    async function hydrateWorkspaceFromLocal(uid) {
+      const hadSnapshot = await loadLocalSnapshotForUser(uid);
+      if (!hadSnapshot) {
+        cards = await loadCardsFromDB();
+      }
+      try {
+        const g = localStorage.getItem(userStorageKey('groups', uid)) || localStorage.getItem('promptrepo_groups');
+        if (g) customGroups = JSON.parse(g);
+      } catch (e) { customGroups = []; }
+      try {
+        const f = localStorage.getItem(userStorageKey('fields', uid)) || localStorage.getItem('promptrepo_fields');
+        if (f) globalFields = JSON.parse(f);
+      } catch (e) { globalFields = []; }
+      try {
+        const s = localStorage.getItem(userStorageKey('settings', uid)) || localStorage.getItem('promptrepo_settings');
+        if (s) settings = Object.assign(settings, JSON.parse(s));
+      } catch (e) { /* ignore */ }
+      normalizeCardPins();
+      return hadSnapshot || cards.length > 0;
+    }
+
+    async function handleCloudAfterLogin(opts = {}) {
+      const silent = opts.silent === true;
+      const force = opts.force === true;
+      const uid = window.SupabaseSync?.getUserId?.();
+      if (!uid) return;
+
+      if (window.PromptHubApi?.isConfigured?.()) {
+        await window.PromptHubApi.syncMe({ silent });
+      } else if (window.SupabaseSync?.isLoggedIn?.()) {
+        window.SubscriptionUI?.refreshOfferUI?.();
+      }
+
+      if (!force && cloudHydratedUid === uid && cards.length > 0) {
+        activeAccountId = uid;
+        refreshWarehouseUI({ softCards: true });
+        return;
+      }
+
+      const guestPayload = opts.migrateGuest ? JSON.parse(JSON.stringify(getDataPayload())) : null;
+      const uidChanged = activeAccountId && activeAccountId !== uid;
+      activeAccountId = uid;
+      window.Membership?.onAccountSwitch?.();
+      clearTimeout(cloudPushTimer);
+
+      if (uidChanged || force || !cards.length) {
+        await clearWorkspace();
+      }
+
+      let loaded = false;
+      if (!uidChanged && !force) {
+        await hydrateWorkspaceFromLocal(uid);
+      }
+
+      if (!cloudHydratedUid || uidChanged || force || opts.migrateGuest) {
+        try {
+          loaded = await pullFromCloud();
+        } catch (e) {
+          if (!silent && !cards.length) showToast('拉取云端数据失败');
+        }
+      }
+
+      if (!loaded && !cards.length) {
+        const hadSnapshot = await loadLocalSnapshotForUser(uid);
+        if (!hadSnapshot && guestPayload?.cards?.length) {
+          applyDataPayload(guestPayload);
+          await saveCardsToDB(cards);
+          try {
+            await pushToCloud();
+            if (!silent) showToast(`已将 ${guestPayload.cards.length} 张本地卡片同步到云端`);
+          } catch (e) {
+            if (!silent) showToast('本地卡片已恢复，云端同步失败：' + formatSyncError(e));
+          }
+        } else if (hadSnapshot && (cards.length > 0 || customGroups.length > 0)) {
+          try {
+            await pushToCloud();
+            if (!silent) showToast('已恢复本账号本地备份并同步到云端');
+          } catch (e) {
+            if (!silent) showToast('本地已恢复，云端同步失败：' + formatSyncError(e));
+          }
+        } else if (!silent && !uidChanged && !cloudHydratedUid) {
+          showToast('新账号空白开始（不会导入其他账号的数据）');
+        }
+      } else if (loaded) {
+        await snapshotLocalForUser(uid);
+        if (!silent && (!cloudHydratedUid || uidChanged || force)) {
+          showToast('已从云端加载本账号数据');
+        }
+      } else if (cards.length && !silent && (!cloudHydratedUid || uidChanged)) {
+        await snapshotLocalForUser(uid);
+      }
+
+      cloudHydratedUid = uid;
+      refreshWarehouseUI({ softCards: silent && !uidChanged && !force });
+    }
+
+    function refreshWarehouseUI(opts = {}) {
+      const soft = opts.softCards === true;
       updateTagFilter();
       buildFilterMenu();
       syncFilterBtnState();
+      renderGroups();
+      if (soft && masonryInstance && document.getElementById('pageWarehouse')?.classList.contains('active')) {
+        requestAnimationFrame(() => {
+          if (masonryInstance) masonryInstance.layout();
+          else scheduleLayoutMasonry();
+        });
+      } else {
+        renderCards(true);
+      }
+      updateGuestLimitUI();
+      if (!selectedCardId && isNewCardMode) createNewCard();
+      applyFloatingState();
+    }
+
+    async function syncCloudNow() {
+      if (!window.SupabaseSync?.isLoggedIn?.()) {
+        openAuthModal();
+        return;
+      }
+      const btn = document.getElementById('authSyncBtn');
+      if (btn) btn.disabled = true;
+      try {
+        const result = await pushToCloud();
+        if (result?.warnings?.length) {
+          showToast('已同步文字；图片问题：' + result.warnings[0]);
+        } else {
+          showToast('已同步到云端');
+        }
+      } catch (e) {
+        showToast('同步失败：' + formatSyncError(e));
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+    window.syncCloudNow = syncCloudNow;
+
+    async function initSupabaseAuth() {
+      if (!window.SupabaseSync?.isConfigured?.()) {
+        updateAuthUI(null);
+        return;
+      }
+      await window.SupabaseSync.init(async (session, event) => {
+        updateAuthUI(session);
+        if (event === 'PASSWORD_RECOVERY') {
+          openAuthModal('reset');
+        }
+        if (session?.user) {
+          if (event === 'SIGNED_IN') {
+            await handleCloudAfterLogin({ silent: false, migrateGuest: true });
+          } else if (event === 'INITIAL_SESSION') {
+            await handleCloudAfterLogin({ silent: true });
+          }
+        } else if (event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') {
+        activeAccountId = null;
+        cloudHydratedUid = null;
+        window.SubscriptionUI?.resetFirstOfferServerState?.();
+        window.Membership?.onAccountSwitch?.();
+        await clearWorkspace();
+          await loadGuestWorkspace();
+          renderGroups();
+          renderCards(true);
+          updateGuestLimitUI();
+          createNewCard({ silentMobile: true });
+        }
+      });
+    }
+
+    async function loadGuestWorkspace() {
+      cards = await loadCardsFromDB();
+      try {
+        const g = localStorage.getItem('promptrepo_groups');
+        if (g) customGroups = JSON.parse(g);
+      } catch (e) { customGroups = []; }
+      try {
+        const f = localStorage.getItem('promptrepo_fields');
+        if (f) globalFields = JSON.parse(f);
+      } catch (e) { globalFields = []; }
+      try {
+        const s = localStorage.getItem('promptrepo_settings');
+        if (s) settings = Object.assign(settings, JSON.parse(s));
+      } catch (e) { /* ignore */ }
+      floatingPromptActive = settings.floatingPrompt === true;
+      document.getElementById('imageClickZoomToggle').checked = settings.imageClickZoom;
+      normalizeCardPins();
+    }
+
+    (async function init() {
+      await openDB();
+      cards = [];
+      customGroups = [];
+      globalFields = [];
+      settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true }, {});
+      floatingPromptActive = false;
       initFilterMenu();
       initAppNav();
       initAppNavCollapse();
       initBackgroundEffect();
-      renderGroups(); renderCards(true); createNewCard();
+      if (window.location.hash.includes('type=recovery') && window.SupabaseSync?.isConfigured?.()) {
+        setTimeout(() => openAuthModal('reset'), 400);
+      }
+      await initSupabaseAuth();
+      refreshAuthMethodUI();
+      if (!window.SupabaseSync?.isLoggedIn?.()) {
+        await loadGuestWorkspace();
+        renderGroups();
+        renderCards(true);
+        updateGuestLimitUI();
+        createNewCard({ silentMobile: true });
+      }
       applyFloatingState();
       const mainArea = document.getElementById('mainContentArea');
       if (mainArea && typeof ResizeObserver !== 'undefined') {
-        new ResizeObserver(() => scheduleLayoutMasonry()).observe(mainArea);
+        new ResizeObserver(() => {
+          if (!document.getElementById('pageWarehouse')?.classList.contains('active')) return;
+          if (masonryInstance) masonryInstance.layout();
+          else scheduleLayoutMasonry();
+        }).observe(mainArea);
       }
     })();
 
-    async function saveAllData() {
+    async function saveAllData(opts = {}) {
       await saveCardsToDB(cards);
       settings.floatingPrompt = floatingPromptActive;
+      if (typeof window.getAppTheme === 'function') settings.theme = window.getAppTheme();
+      try {
+        const stored = JSON.parse(localStorage.getItem('promptrepo_settings') || '{}');
+        if ('themeManualOverride' in stored) settings.themeManualOverride = stored.themeManualOverride;
+        if ('autoDayNight' in stored) settings.autoDayNight = stored.autoDayNight;
+      } catch (e) { /* ignore */ }
+      const uid = window.SupabaseSync?.getUserId?.() || activeAccountId;
+      if (uid) {
+        await snapshotLocalForUser(uid);
+        localStorage.setItem(userStorageKey('settings', uid), JSON.stringify(settings));
+      }
       localStorage.setItem('promptrepo_groups', JSON.stringify(customGroups));
       localStorage.setItem('promptrepo_fields', JSON.stringify(globalFields));
       localStorage.setItem('promptrepo_settings', JSON.stringify(settings));
       if (fileHandle) { try { const w = await fileHandle.createWritable(); await w.write(JSON.stringify({cards,customGroups,globalFields,settings})); await w.close(); } catch(e) {} }
+      if (!opts.skipCloud) scheduleCloudPush();
     }
 
     function renderGroups() {
@@ -964,8 +1993,9 @@
     function formatCardTime(ts) {
       if (!ts) return '';
       const diff = Date.now() - ts;
-      if (diff < 3600000) return '刚刚';
-      if (diff < 86400000) return '今天';
+      if (diff < 60000) return '刚刚';
+      if (diff < 3600000) return `${Math.max(1, Math.floor(diff / 60000))} 分钟前`;
+      if (diff < 86400000) return `大约 ${Math.floor(diff / 3600000)} 小时前`;
       if (diff < 172800000) return '昨天';
       if (diff < 604800000) return `${Math.floor(diff / 86400000)} 天前`;
       const d = new Date(ts);
@@ -1013,7 +2043,10 @@
       const container = document.getElementById('cardsContainer');
       const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
       container.className = 'cards-container';
-      if (viewMode === 'list') container.classList.add('list-view');
+      if (viewMode === 'list') {
+        container.classList.add('list-view');
+        if (masonryInstance) { masonryInstance.destroy(); masonryInstance = null; }
+      }
       if (batchMode) container.classList.add('batch-mode');
       const search = document.getElementById('searchInput').value.toLowerCase();
       sortMode = document.getElementById('sortSelect').value;
@@ -1023,9 +2056,7 @@
         else if (currentGroup !== 'all') filtered = filtered.filter(c => c.group === currentGroup);
         if (search) filtered = filtered.filter(c => (c.title?.toLowerCase().includes(search)) || (c.prompt || '').toLowerCase().includes(search) || (c.tags?.some(t => t.toLowerCase().includes(search))));
         if (activeFilters.size > 0) filtered = filtered.filter(cardMatchesFilters);
-        if (sortMode === 'updated-desc') filtered.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
-        else if (sortMode === 'updated-asc') filtered.sort((a, b) => (a.updatedAt || a.createdAt) - (b.updatedAt || b.createdAt));
-        allFilteredCards = filtered;
+        allFilteredCards = sortCardsWithPins(filtered);
       }
       const start = (page - 1) * PER_PAGE;
       const pageCards = allFilteredCards.slice(start, start + PER_PAGE);
@@ -1037,7 +2068,7 @@
       const isAppend = !reset && page > 1;
       pageCards.forEach((card, idx) => {
         const div = document.createElement('div');
-        div.className = `card card-enter ${card.id === selectedCardId ? 'selected' : ''}`;
+        div.className = `card card-enter ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
         div.style.animationDelay = `${Math.min((isAppend ? idx : idx) * 0.045, 0.36)}s`;
         div.dataset.id = card.id;
         div.draggable = !globalViewActive;
@@ -1047,8 +2078,10 @@
           : '<div class="card-media-placeholder" aria-hidden="true"></div>';
         const timeLabel = formatCardTime(card.updatedAt || card.createdAt);
         const tagsHtml = buildCardTagsHtml(card.tags);
+        const pinBadge = card.pinnedAt ? '<span class="card-pin-badge" title="置顶">置顶</span>' : '';
         div.innerHTML = `
           <div class="card-checkbox ${checked ? 'checked' : ''}" onclick="event.stopPropagation(); toggleSelectCard('${card.id}', this)"></div>
+          ${pinBadge}
           <div class="card-media">${mediaInner}</div>
           <div class="card-body">
             <div class="card-head">
@@ -1091,7 +2124,9 @@
         div.addEventListener('dragend', () => endCardDragVisual());
         div.addEventListener('contextmenu', e => {
           e.preventDefault();
+          const pinLabel = card.pinnedAt ? '取消置顶' : '置顶';
           showContextMenu(e.clientX, e.clientY, [
+            { label: pinLabel, action: () => toggleCardPinById(card.id) },
             { label: '删除', action: () => deleteCardPermanently(card.id) }
           ]);
         });
@@ -1159,9 +2194,14 @@
       });
     }
     function deleteCardPermanently(id, confirm = true) {
-      const doDelete = () => {
+      const doDelete = async () => {
+        const card = cards.find(c => c.id === id);
+        if (card?.image && window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync.isStorageUrl(card.image)) {
+          try { await window.SupabaseSync.deleteCardImageByUrl(card.image); } catch (e) { /* ignore */ }
+        }
+        window.FeatureDraft?.removeCommunityByCardId?.(id);
         cards = cards.filter(c => c.id !== id);
-        saveAllData();
+        await saveAllData();
         renderGroups(); renderCards(true);
         if (selectedCardId === id) { selectedCardId = null; createNewCard(); }
       };
@@ -1182,12 +2222,19 @@
       document.getElementById('floatingPromptText').value = card.prompt || '';
       imageData = card.image || null; currentTags = [...(card.tags || [])]; tempCustomFields = [];
       currentCardCustomFields = card.customFields ? { ...card.customFields } : {};
+      window.FeatureDraft?.setPublishCheckbox?.(card);
       renderTags(); renderCustomFields(); updatePreview();
       updateDeleteClearButton();
+      updatePinToggleUI();
       openEditPanel();
     }
 
-    function createNewCard() {
+    function createNewCard(opts) {
+      const check = canGuestCreateCard();
+      if (!check.ok) {
+        promptLogin(check.msg);
+        return;
+      }
       selectedCardId = null; isNewCardMode = true;
       highlightSelectedCard(null);
       document.getElementById('panelTitle').textContent = '新建卡片';
@@ -1196,9 +2243,11 @@
       document.getElementById('floatingPromptText').value = '';
       imageData = null; currentTags = []; tempCustomFields = [];
       currentCardCustomFields = {};
+      window.FeatureDraft?.setPublishCheckbox?.(null);
       renderTags(); renderCustomFields(); updatePreview();
       updateDeleteClearButton();
-      openEditPanel();
+      updatePinToggleUI();
+      if (!(window.MobileUI?.isMobile?.() && opts?.silentMobile)) openEditPanel();
     }
 
     const TRASH_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
@@ -1406,7 +2455,14 @@
       }
     }
 
-    function removeImage() { imageData = null; updatePreview(); }
+    async function removeImage() {
+      const prev = imageData;
+      imageData = null;
+      updatePreview();
+      if (prev && window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync.isStorageUrl(prev)) {
+        try { await window.SupabaseSync.deleteCardImageByUrl(prev); } catch (e) { /* ignore */ }
+      }
+    }
     function handleSingleImage(file) { if (!file || !file.type.startsWith('image/')) return; const r = new FileReader(); r.onload = e => { imageData = e.target.result; updatePreview(); }; r.readAsDataURL(file); }
     const dropArea = document.getElementById('dropArea');
     dropArea.addEventListener('dragover', e => { e.preventDefault(); dropArea.classList.add('dragover'); });
@@ -1441,7 +2497,16 @@
 
     async function saveCard() {
       const prompt = floatingPromptActive ? document.getElementById('floatingPromptText').value.trim() : document.getElementById('cardPrompt').value.trim();
-      if (!prompt) { document.getElementById('statusMsg').textContent = '❌ 提示词不能为空'; return; }
+      const statusEl = document.getElementById('statusMsg');
+      if (!prompt) { statusEl.textContent = '❌ 提示词不能为空'; return; }
+      if (isNewCardMode) {
+        const check = canGuestCreateCard();
+        if (!check.ok) {
+          statusEl.textContent = '❌ ' + check.msg;
+          promptLogin(check.msg);
+          return;
+        }
+      }
       const title = document.getElementById('cardTitle').value.trim();
       const customData = {};
       globalFields.forEach(f => {
@@ -1454,21 +2519,64 @@
           customData[name] = el.value;
         }
       });
+      let cardId = selectedCardId;
+      let previousImage = null;
+      if (!isNewCardMode && cardId) {
+        previousImage = cards.find(c => c.id === cardId)?.image || null;
+      } else {
+        cardId = generateId();
+      }
+      let finalImage = imageData;
+      try {
+        if (window.SupabaseSync?.isLoggedIn?.()) {
+          if (imageData && !window.SupabaseSync.isStorageUrl(imageData)) {
+            statusEl.textContent = '上传图片中…';
+          }
+          finalImage = await window.SupabaseSync.resolveCardImageForSave(cardId, imageData, previousImage);
+        }
+      } catch (e) {
+        statusEl.textContent = '❌ ' + (e.message || '图片上传失败');
+        return;
+      }
+      imageData = finalImage;
+      const wantPublish = window.FeatureDraft?.readPublishCheckbox?.() ?? false;
+      if (wantPublish && !isUserLoggedIn()) {
+        statusEl.textContent = '❌ 发布到社区需先登录';
+        requireAuth('publish');
+        return;
+      }
+      let savedCard;
       if (!isNewCardMode && selectedCardId) {
         const card = cards.find(c => c.id === selectedCardId);
-        if (card) { card.title = title; card.prompt = prompt; card.image = imageData; card.tags = [...currentTags]; card.customFields = customData; card.updatedAt = Date.now(); }
+        if (card) {
+          card.title = title;
+          card.prompt = prompt;
+          card.image = finalImage;
+          card.tags = [...currentTags];
+          card.customFields = customData;
+          card.updatedAt = Date.now();
+          savedCard = card;
+        }
       } else {
-        cards.push({
-          id: generateId(), title, prompt, image: imageData,
+        savedCard = {
+          id: cardId, title, prompt, image: finalImage,
           group: (currentGroup !== 'all' && currentGroup !== 'uncategorized') ? currentGroup : null,
           tags: [...currentTags], customFields: customData,
           createdAt: Date.now(), updatedAt: Date.now()
-        });
-        selectedCardId = null; clearCardForm();
+        };
+        cards.push(savedCard);
+        selectedCardId = null;
+        clearCardForm();
+      }
+      if (savedCard && window.FeatureDraft?.syncCardToCommunity) {
+        window.FeatureDraft.syncCardToCommunity(savedCard, wantPublish);
       }
       await saveAllData();
       updateTagFilter();
-      renderGroups(); renderCards(true);
+      renderGroups();
+      renderCards(true);
+      updateGuestLimitUI();
+      statusEl.textContent = '';
       showToast('保存成功！');
     }
 
@@ -1481,6 +2589,7 @@
     }
     function openEditPanel() {
       if (globalViewActive) forceExitGlobalView(true);
+      window.MobileUI?.closeDrawers?.();
       document.getElementById('editPanel').classList.remove('hidden');
       document.getElementById('fabNewBtn').classList.remove('visible');
       document.body.classList.add('panel-open');
@@ -1500,6 +2609,7 @@
         img.src = src;
       }
     }
+    window.openLightbox = openLightbox;
     window.addEventListener('mousemove', (e) => {
       if (!imageZoom.dragging) return;
       imageZoom.tx = e.clientX - imageZoom.startX;
@@ -1634,17 +2744,273 @@
     modalDrop.addEventListener('drop', e => { e.preventDefault(); modalDrop.classList.remove('dragover'); handleModalImage(e.dataTransfer.files[0]); });
     document.getElementById('modalFileInput').addEventListener('change', e => handleModalImage(e.target.files[0]));
 
-    function openSettings() { document.getElementById('settingsOverlay').classList.add('active'); document.getElementById('ocrEngineSelect').value = settings.engine || 'tesseract'; document.getElementById('ocrApiKey').value = settings.apiKey || ''; document.getElementById('imageClickZoomToggle').checked = settings.imageClickZoom; renderFieldList(); }
-    function closeSettings() { document.getElementById('settingsOverlay').classList.remove('active'); }
-    function saveSettings() { settings.engine = document.getElementById('ocrEngineSelect').value; settings.apiKey = document.getElementById('ocrApiKey').value.trim(); settings.imageClickZoom = document.getElementById('imageClickZoomToggle').checked; saveAllData(); document.getElementById('settingsStatus').textContent = '设置已保存'; setTimeout(() => document.getElementById('settingsStatus').textContent = '', 2000); renderCards(true); }
-    function addGlobalField() { const n = document.getElementById('newFieldName').value.trim(); if (!n) return; globalFields.push({ id: generateId(), name: n, type: document.getElementById('newFieldType').value }); saveAllData(); document.getElementById('newFieldName').value = ''; renderFieldList(); }
-    function renderFieldList() { document.getElementById('fieldList').innerHTML = globalFields.map(f => `<div style="display:flex; justify-content:space-between; margin:4px 0; padding:4px 12px; background:var(--bg-card); border-radius:6px;"><span>${f.name} (${f.type})</span><button class="btn btn-secondary" style="padding:2px 10px; height:28px;" onclick="deleteGlobalField('${f.id}')">❌</button></div>`).join(''); }
-    function deleteGlobalField(id) { globalFields = globalFields.filter(f => f.id !== id); saveAllData(); renderFieldList(); }
-    async function saveToFile() { try { const h = await window.showSaveFilePicker({ suggestedName: 'promptrepo_data.json', types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] }); fileHandle = h; const w = await h.createWritable(); await w.write(JSON.stringify({ cards, customGroups, globalFields, settings })); await w.close(); document.getElementById('settingsStatus').textContent = '✅ 文件已保存'; } catch (e) { if (e.name !== 'AbortError') alert('保存失败'); } }
-    async function loadFromFile() { try { const [h] = await window.showOpenFilePicker({ types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] }); fileHandle = h; const f = await h.getFile(); const t = await f.text(); const d = JSON.parse(t); if (d.cards) { cards = d.cards; customGroups = d.customGroups || []; globalFields = d.globalFields || []; settings = d.settings || settings; await saveAllData(); renderGroups(); renderCards(true); createNewCard(); document.getElementById('settingsStatus').textContent = '✅ 文件已加载'; } } catch (e) { if (e.name !== 'AbortError') alert('打开文件失败'); } }
-    function exportData() { const d = { cards, customGroups, globalFields, settings }; const b = new Blob([JSON.stringify(d)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'promptrepo_backup.json'; a.click(); }
-    function importData(event) { const f = event.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = e => { try { const d = JSON.parse(e.target.result); if (d.cards && confirm('导入将覆盖当前数据，确定？')) { cards = d.cards; customGroups = d.customGroups || []; globalFields = d.globalFields || []; settings = d.settings || settings; saveAllData(); renderGroups(); renderCards(true); createNewCard(); } } catch (err) { alert('无效文件'); } }; r.readAsText(f); event.target.value = ''; }
-    function clearAllData() { customConfirm('确定删除所有数据？此操作不可恢复。', () => { cards = []; customGroups = []; globalFields = []; saveAllData(); renderGroups(); renderCards(true); createNewCard(); }); }
+    function onOcrEngineChange() {
+      const engine = document.getElementById('ocrEngineSelect')?.value;
+      document.getElementById('ocrApiKeyWrap')?.classList.toggle('hidden', engine !== 'ocrspace');
+    }
+    window.onOcrEngineChange = onOcrEngineChange;
+
+    function openAppSettings() {
+      document.getElementById('appSettingsOverlay')?.classList.add('active');
+      const autoDay = document.getElementById('autoDayNightToggle');
+      if (autoDay) autoDay.checked = settings.autoDayNight !== false;
+      const imgPub = document.getElementById('defaultImageGenAutoPublishToggle');
+      if (imgPub) imgPub.checked = settings.defaultImageGenAutoPublish !== false;
+      const status = document.getElementById('appSettingsStatus');
+      if (status) status.textContent = '';
+    }
+    function closeAppSettings() {
+      document.getElementById('appSettingsOverlay')?.classList.remove('active');
+    }
+    function saveAppSettings() {
+      const autoEl = document.getElementById('autoDayNightToggle');
+      const autoOn = autoEl ? autoEl.checked : true;
+      const imgPubEl = document.getElementById('defaultImageGenAutoPublishToggle');
+      settings.defaultImageGenAutoPublish = imgPubEl ? imgPubEl.checked : true;
+      const wasAuto = settings.autoDayNight !== false;
+      settings.autoDayNight = autoOn;
+      if (autoOn && !wasAuto) {
+        settings.themeManualOverride = false;
+        window.ThemeSchedule?.clearThemeManualOverride?.();
+      } else if (autoOn) {
+        settings.themeManualOverride = false;
+        window.ThemeSchedule?.applyAutoThemeIfNeeded?.();
+      }
+      saveAllData();
+      const status = document.getElementById('appSettingsStatus');
+      if (status) status.textContent = '已保存';
+      showToast('全局设置已保存');
+      setTimeout(() => { if (status) status.textContent = ''; }, 2000);
+    }
+    window.openAppSettings = openAppSettings;
+    window.closeAppSettings = closeAppSettings;
+    window.saveAppSettings = saveAppSettings;
+
+    function openWarehouseSettings() {
+      document.getElementById('settingsOverlay')?.classList.add('active');
+      document.getElementById('ocrEngineSelect').value = settings.engine || 'tesseract';
+      document.getElementById('ocrApiKey').value = settings.apiKey || '';
+      document.getElementById('imageClickZoomToggle').checked = settings.imageClickZoom;
+      const pubToggle = document.getElementById('defaultPublishCommunityToggle');
+      if (pubToggle) pubToggle.checked = settings.defaultPublishCommunity !== false;
+      window.PointsSystem?.updateCreditsUI?.();
+      document.getElementById('settingsStatus').textContent = '';
+      onOcrEngineChange();
+      renderFieldList();
+    }
+    function closeWarehouseSettings() {
+      document.getElementById('settingsOverlay')?.classList.remove('active');
+    }
+    window.openWarehouseSettings = openWarehouseSettings;
+    window.closeWarehouseSettings = closeWarehouseSettings;
+    window.openSettings = openWarehouseSettings;
+    window.closeSettings = closeWarehouseSettings;
+
+    function saveSettings() {
+      settings.engine = document.getElementById('ocrEngineSelect').value;
+      settings.apiKey = document.getElementById('ocrApiKey').value.trim();
+      settings.imageClickZoom = document.getElementById('imageClickZoomToggle').checked;
+      const pubToggle = document.getElementById('defaultPublishCommunityToggle');
+      settings.defaultPublishCommunity = pubToggle ? pubToggle.checked : true;
+      saveAllData();
+      const status = document.getElementById('settingsStatus');
+      if (status) status.textContent = '设置已保存';
+      setTimeout(() => { if (status) status.textContent = ''; }, 2500);
+      renderCards(true);
+      showToast('设置已保存');
+    }
+    window.saveSettings = saveSettings;
+
+    function openHelpPanel() {
+      document.getElementById('helpOverlay')?.classList.add('active');
+    }
+    function closeHelpPanel() {
+      document.getElementById('helpOverlay')?.classList.remove('active');
+    }
+    function openFeedbackPanel() {
+      document.getElementById('feedbackOverlay')?.classList.add('active');
+      const ta = document.getElementById('feedbackText');
+      if (ta) setTimeout(() => ta.focus(), 80);
+    }
+    function closeFeedbackPanel() {
+      document.getElementById('feedbackOverlay')?.classList.remove('active');
+    }
+    function submitFeedback() {
+      const text = (document.getElementById('feedbackText')?.value || '').trim();
+      if (!text) {
+        showToast('请先填写反馈内容');
+        return;
+      }
+      const payload = `[提示词仓库反馈]\n${text}\n\n---\n${new Date().toLocaleString()}`;
+      navigator.clipboard.writeText(payload).then(() => {
+        showToast('反馈内容已复制，可粘贴发送给我们');
+        closeFeedbackPanel();
+      }).catch(() => showToast('复制失败，请手动复制'));
+    }
+    function openContactPanel() {
+      document.getElementById('contactOverlay')?.classList.add('active');
+    }
+    function closeContactPanel() {
+      document.getElementById('contactOverlay')?.classList.remove('active');
+    }
+    function copyWechatId() {
+      const id = document.getElementById('contactWechatId')?.textContent?.trim() || 'bz4jx3jp2li1';
+      navigator.clipboard.writeText(id).then(() => showToast('微信号已复制')).catch(() => showToast('复制失败'));
+    }
+    window.openHelpPanel = openHelpPanel;
+    window.closeHelpPanel = closeHelpPanel;
+    window.openFeedbackPanel = openFeedbackPanel;
+    window.closeFeedbackPanel = closeFeedbackPanel;
+    window.submitFeedback = submitFeedback;
+    window.openContactPanel = openContactPanel;
+    window.closeContactPanel = closeContactPanel;
+    window.copyWechatId = copyWechatId;
+
+    function addGlobalField() {
+      const n = document.getElementById('newFieldName').value.trim();
+      if (!n) { showToast('请输入字段名称'); return; }
+      if (globalFields.some(f => f.name === n)) { showToast('字段名称已存在'); return; }
+      globalFields.push({ id: generateId(), name: n, type: document.getElementById('newFieldType').value });
+      saveAllData();
+      document.getElementById('newFieldName').value = '';
+      renderFieldList();
+    }
+    window.addGlobalField = addGlobalField;
+
+    function renderFieldList() {
+      const list = document.getElementById('fieldList');
+      const empty = document.getElementById('fieldListEmpty');
+      if (!list) return;
+      const typeLabel = { text: '文本', textarea: '多行' };
+      if (!globalFields.length) {
+        list.innerHTML = '';
+        empty?.classList.remove('hidden');
+        return;
+      }
+      empty?.classList.add('hidden');
+      list.innerHTML = globalFields.map(f => `
+        <div class="settings-field-item">
+          <span class="settings-field-item-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+          <span class="settings-field-item-type">${typeLabel[f.type] || f.type}</span>
+          <button type="button" class="btn btn-ghost settings-field-item-del" onclick="deleteGlobalField('${escapeJsString(f.id)}')">删除</button>
+        </div>
+      `).join('');
+    }
+
+    function deleteGlobalField(id) {
+      globalFields = globalFields.filter(f => f.id !== id);
+      saveAllData();
+      renderFieldList();
+    }
+    window.deleteGlobalField = deleteGlobalField;
+    function backupFileName() {
+      const d = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      return `prompt-hub-backup_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}.json`;
+    }
+
+    function exportBackup() {
+      const payload = buildBackupPayload();
+      const b = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(b);
+      a.download = backupFileName();
+      a.click();
+      URL.revokeObjectURL(a.href);
+      const status = document.getElementById('settingsStatus');
+      if (status) status.textContent = `✅ 已导出 ${payload.cards.length} 张卡片`;
+      showToast('备份已下载');
+    }
+    window.exportBackup = exportBackup;
+
+    function importBackup(event) {
+      const f = event.target.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = e => {
+        try {
+          const d = JSON.parse(e.target.result);
+          if (!Array.isArray(d.cards)) {
+            alert('无效的备份文件');
+            return;
+          }
+          const when = d.exportedAt ? new Date(d.exportedAt).toLocaleString() : '未知时间';
+          const msg = `将用备份（${when}，${d.cards.length} 张卡片）覆盖当前数据，确定恢复？`;
+          if (!confirm(msg)) return;
+          if (!applyBackupPayload(d)) {
+            alert('恢复失败');
+            return;
+          }
+          saveAllData();
+          renderGroups();
+          renderCards(true);
+          createNewCard();
+          const status = document.getElementById('settingsStatus');
+          if (status) status.textContent = '✅ 备份已恢复';
+          showToast('已恢复备份');
+        } catch (err) {
+          alert('无法读取备份文件');
+        }
+      };
+      r.readAsText(f);
+      event.target.value = '';
+    }
+    window.importBackup = importBackup;
+
+    async function saveToFile() {
+      try {
+        const h = await window.showSaveFilePicker({
+          suggestedName: backupFileName(),
+          types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }]
+        });
+        fileHandle = h;
+        const w = await h.createWritable();
+        await w.write(JSON.stringify(buildBackupPayload(), null, 2));
+        await w.close();
+        document.getElementById('settingsStatus').textContent = '✅ 备份已保存到本地文件';
+      } catch (e) {
+        if (e.name !== 'AbortError') alert('保存失败');
+      }
+    }
+    window.saveToFile = saveToFile;
+
+    async function loadFromFile() {
+      try {
+        const [h] = await window.showOpenFilePicker({ types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
+        fileHandle = h;
+        const f = await h.getFile();
+        const d = JSON.parse(await f.text());
+        if (!Array.isArray(d.cards)) {
+          alert('无效的备份文件');
+          return;
+        }
+        if (!confirm(`从文件恢复 ${d.cards.length} 张卡片，将覆盖当前数据，确定？`)) return;
+        applyBackupPayload(d);
+        await saveAllData();
+        renderGroups();
+        renderCards(true);
+        createNewCard();
+        document.getElementById('settingsStatus').textContent = '✅ 已从本地文件恢复';
+      } catch (e) {
+        if (e.name !== 'AbortError') alert('打开文件失败');
+      }
+    }
+    window.loadFromFile = loadFromFile;
+
+    function clearAllData() {
+      customConfirm('确定清除所有本地卡片、分组与字段？此操作不可恢复，建议先备份导出。', () => {
+        cards = [];
+        customGroups = [];
+        globalFields = [];
+        saveAllData();
+        renderGroups();
+        renderCards(true);
+        createNewCard();
+        const status = document.getElementById('settingsStatus');
+        if (status) status.textContent = '已清除本地数据';
+      });
+    }
+    window.clearAllData = clearAllData;
     
     function escapeHtml(str) { return String(str).replace(/[&<>]/g, function(m){ if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m;}); }
     function escapeJsString(str) { return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, ''); }

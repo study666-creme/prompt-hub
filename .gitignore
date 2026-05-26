@@ -3,5 +3,10 @@ Thumbs.db
 desktop.ini
 .env
 .env.local
+supabase-config.local.js
+api-config.local.js
 *.log
 node_modules/
+
+.vercel
+.env*

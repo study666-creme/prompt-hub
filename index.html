@@ -2,17 +2,30 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#121212">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="提示词仓库">
   <title>提示词仓库</title>
-  <link rel="icon" type="image/png" href="https://cdn.jsdelivr.net/gh/study666-creme/-@main/%E6%8F%90%E7%A4%BA%E8%AF%8D%E4%BB%93%E5%BA%93%E5%95%86%E6%A0%87.png">
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <link rel="apple-touch-icon" href="assets/logo.png">
+  <link rel="manifest" href="manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js"></script>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles-theme.css">
+  <link rel="stylesheet" href="styles-mobile.css">
+  <link rel="stylesheet" href="styles-settings.css">
+  <link rel="stylesheet" href="styles-features.css">
+  <script src="theme.js"></script>
 </head>
 <body>
+  <div class="mobile-drawer-overlay" id="mobileDrawerOverlay" aria-hidden="true"></div>
   <div id="rippleGridBg" class="ripple-grid-bg" aria-hidden="true"></div>
   <div class="ui-vignette" aria-hidden="true"></div>
   <div class="app-chrome">
@@ -40,44 +53,219 @@
     </div>
   </div>
 
-  <!-- 设置弹窗 -->
-  <div class="settings-overlay" id="settingsOverlay" onclick="if(event.target===this) closeSettings()">
-    <div class="settings-box">
-      <button onclick="closeSettings()" style="position:absolute; top:16px; right:16px; background:none; border:none; color:var(--text-muted); font-size:20px; cursor:pointer;">✕</button>
-      <h3>⚙️ 设置 & 字段管理</h3>
-      <label>OCR 引擎</label>
-      <select id="ocrEngineSelect"><option value="tesseract">Tesseract（离线免费）</option><option value="ocrspace">OCR.space（在线高精度）</option></select>
-      <label>OCR.space API Key</label>
-      <input type="text" id="ocrApiKey" placeholder="填入你的 Key">
-      <label class="custom-checkbox" style="margin-top:16px;">
-        <input type="checkbox" id="imageClickZoomToggle"> <span class="checkmark"></span> 单击卡片图片放大查看（默认进入编辑）
-      </label>
-      <hr style="margin:20px 0; border-color:var(--border);">
-      <h4 style="color:var(--accent);">全局固定字段</h4>
-      <div style="display:flex; gap:8px; margin-top:8px;">
-        <input type="text" id="newFieldName" placeholder="字段名称" style="flex:2;">
-        <select id="newFieldType" style="flex:1;"><option value="text">文本</option><option value="textarea">文本域</option></select>
-        <button class="btn btn-primary" onclick="addGlobalField()">添加</button>
+  <!-- 全局设置（侧栏）：外观 / 昼夜 -->
+  <div class="settings-overlay" id="appSettingsOverlay" onclick="if(event.target===this) closeAppSettings()">
+    <div class="settings-panel settings-panel-narrow" onclick="event.stopPropagation()">
+      <header class="settings-header">
+        <div class="settings-header-text">
+          <h3 class="settings-title">全局设置</h3>
+          <p class="settings-subtitle">外观、昼夜与生图默认项</p>
+        </div>
+        <button type="button" class="settings-close" onclick="closeAppSettings()" aria-label="关闭">✕</button>
+      </header>
+      <div class="settings-body">
+        <section class="settings-section">
+          <h4 class="settings-section-title">外观</h4>
+          <p class="settings-hint settings-hint-block">点击下方主题按钮可立即切换日光 / 夜间；手动切换后会暂停自动昼夜。</p>
+          <button type="button" class="btn btn-secondary app-settings-theme-btn" onclick="toggleAppTheme()">切换日光 / 夜间模式</button>
+          <label class="settings-check settings-check-spaced">
+            <input type="checkbox" id="autoDayNightToggle" checked>
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">自动昼夜（早 8:00 日光 / 晚 20:00 夜间）</span>
+          </label>
+        </section>
+        <section class="settings-section">
+          <h4 class="settings-section-title">生图</h4>
+          <label class="settings-check">
+            <input type="checkbox" id="defaultImageGenAutoPublishToggle" checked>
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">进入生图页时默认开启「自动发布社区」</span>
+          </label>
+          <p class="settings-hint">关闭后，每次打开生图页该选项默认关闭；在生图页临时关闭不影响下次打开</p>
+        </section>
       </div>
-      <div id="fieldList" style="margin-top:12px;"></div>
-      <hr style="margin:20px 0; border-color:var(--border);">
-      <h4 style="color:var(--accent);">数据管理</h4>
-      <div class="btn-group">
-        <button class="btn btn-primary" onclick="saveSettings()">保存设置</button>
-        <button class="btn btn-secondary" onclick="exportData()">导出数据</button>
-        <button class="btn btn-secondary" onclick="document.getElementById('importFileInput').click()">导入数据</button>
-        <input type="file" id="importFileInput" accept=".json" style="display:none;" onchange="importData(event)">
+      <footer class="settings-footer">
+        <span class="settings-status" id="appSettingsStatus"></span>
+        <button type="button" class="btn btn-primary" onclick="saveAppSettings()">保存</button>
+        <button type="button" class="btn btn-secondary" onclick="closeAppSettings()">完成</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 卡片库设置：OCR、字段、备份 -->
+  <div class="settings-overlay" id="settingsOverlay" onclick="if(event.target===this) closeWarehouseSettings()">
+    <div class="settings-panel" onclick="event.stopPropagation()">
+      <header class="settings-header">
+        <div class="settings-header-text">
+          <h3 class="settings-title">卡片库设置</h3>
+          <p class="settings-subtitle">OCR、字段与数据备份</p>
+        </div>
+        <button type="button" class="settings-close" onclick="closeWarehouseSettings()" aria-label="关闭">✕</button>
+      </header>
+
+      <div class="settings-body">
+        <section class="settings-section settings-section-help" id="settingsHelpSection">
+          <h4 class="settings-section-title">帮助</h4>
+          <ul class="settings-help-list">
+            <li><strong>卡片库</strong>：管理提示词与参考图；右键可置顶（普通用户 2 张 / 会员不限）。</li>
+            <li><strong>图片生成</strong>：需登录后生成并扣积分；点击图片可放大预览。</li>
+            <li><strong>数据备份</strong>：在下方「数据管理」中导出 JSON，用于换设备或灾备。</li>
+            <li><strong>云同步</strong>：登录后卡片自动同步；未登录仅保存在本浏览器。</li>
+            <li><strong>外观</strong>：请在左侧导航「设置」中调整日光 / 夜间与自动昼夜。</li>
+          </ul>
+        </section>
+
+        <section class="settings-section">
+          <h4 class="settings-section-title">文字识别（OCR）</h4>
+          <div class="settings-field">
+            <label for="ocrEngineSelect">识别引擎</label>
+            <select id="ocrEngineSelect" class="settings-input" onchange="onOcrEngineChange()">
+              <option value="tesseract">Tesseract（离线免费）</option>
+              <option value="ocrspace">OCR.space（在线高精度）</option>
+            </select>
+          </div>
+          <div class="settings-field" id="ocrApiKeyWrap">
+            <label for="ocrApiKey">OCR.space API Key</label>
+            <input type="text" id="ocrApiKey" class="settings-input" placeholder="在 ocr.space 申请后填入">
+            <p class="settings-hint">仅在选择 OCR.space 时需要</p>
+          </div>
+          <label class="settings-check">
+            <input type="checkbox" id="imageClickZoomToggle">
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">单击卡片图片时放大查看（否则进入编辑）</span>
+          </label>
+        </section>
+
+        <section class="settings-section">
+          <h4 class="settings-section-title">社区</h4>
+          <label class="settings-check">
+            <input type="checkbox" id="defaultPublishCommunityToggle" checked>
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">新建卡片时默认发布到提示词社区</span>
+          </label>
+          <p class="settings-hint">点赞奖励：100 赞 +100 积分（每人最多领 5 次）、1000 赞 +1000 积分（最多 2 次）；不可给自己点赞</p>
+        </section>
+
+        <section class="settings-section">
+          <h4 class="settings-section-title">全局固定字段</h4>
+          <p class="settings-section-desc">每张卡片编辑时都会显示这些字段</p>
+          <div class="settings-field-row">
+            <input type="text" id="newFieldName" class="settings-input" placeholder="字段名称">
+            <select id="newFieldType" class="settings-input settings-input-narrow">
+              <option value="text">文本</option>
+              <option value="textarea">多行文本</option>
+            </select>
+            <button type="button" class="btn btn-primary settings-add-btn" onclick="addGlobalField()">添加</button>
+          </div>
+          <div class="settings-field-list" id="fieldList"></div>
+          <p class="settings-empty-hint hidden" id="fieldListEmpty">暂无自定义字段</p>
+        </section>
+
+        <section class="settings-section">
+          <h4 class="settings-section-title">数据管理</h4>
+          <p class="settings-section-desc">导出 JSON 备份，用于换设备或灾备；多数平台无法直接导入本格式。</p>
+          <div class="settings-btn-grid settings-btn-grid-data">
+            <button type="button" class="btn btn-primary settings-save-top" onclick="saveSettings()">保存设置</button>
+            <button type="button" class="btn btn-secondary" onclick="exportBackup()">备份导出</button>
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('importFileInput').click()">恢复备份</button>
+            <input type="file" id="importFileInput" accept=".json,application/json" class="hidden-input" onchange="importBackup(event)">
+            <button type="button" class="btn btn-secondary" onclick="saveToFile()">保存到本地文件</button>
+            <button type="button" class="btn btn-secondary" onclick="loadFromFile()">从本地文件打开</button>
+          </div>
+          <p class="settings-hint settings-hint-block">登录后卡片与图片会同步到云端。未登录时数据仅保存在本浏览器，请定期备份导出。</p>
+          <button type="button" class="btn btn-danger settings-danger-btn" onclick="clearAllData()">清除所有本地数据</button>
+        </section>
       </div>
-      <div style="margin-top:12px;">
-        <button class="btn btn-secondary" onclick="saveToFile()">💾 保存到文件</button>
-        <button class="btn btn-secondary" onclick="loadFromFile()">📂 打开文件</button>
+
+      <footer class="settings-footer">
+        <span class="settings-status" id="settingsStatus"></span>
+        <button type="button" class="btn btn-secondary" onclick="closeWarehouseSettings()">完成</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 会员订阅 -->
+  <div class="subscribe-overlay" id="subscribeOverlay">
+    <div class="subscribe-panel" onclick="event.stopPropagation()">
+      <header class="subscribe-panel-head">
+        <div>
+          <h3>会员订阅</h3>
+          <p class="subscribe-panel-sub">连续包月 / 包年更优惠 · 单月或单年购买价格更高</p>
+        </div>
+        <button type="button" class="close-btn" onclick="closeSubscribePanel()" aria-label="关闭">✕</button>
+      </header>
+      <div class="subscribe-billing-tabs" role="tablist">
+        <button type="button" class="subscribe-billing-tab active" data-subscribe-billing="auto_month">连续包月</button>
+        <button type="button" class="subscribe-billing-tab" data-subscribe-billing="single_month">单月购买</button>
+        <button type="button" class="subscribe-billing-tab" data-subscribe-billing="auto_year">连续包年</button>
+        <button type="button" class="subscribe-billing-tab" data-subscribe-billing="single_year">单年购买</button>
       </div>
-      <p style="color:var(--text-muted); font-size:11px; margin-top:8px;">💡 数据优先存储于浏览器数据库，导出文件可备份到本地。</p>
-      <div style="margin-top:12px;">
-        <button class="btn btn-danger" onclick="clearAllData()">清除所有数据</button>
-        <button class="btn btn-secondary" onclick="closeSettings()">关闭</button>
+      <div class="subscribe-panel-body">
+        <div class="subscribe-first-offer hidden" id="subscribeFirstOffer"></div>
+        <div class="subscribe-plans-grid" id="subscribePlansGrid"></div>
+        <p class="subscribe-legal">支付接口筹备中。演示可用激活码 <code>MEMBER-VIP</code> 体验会员（无限置顶）。积分按月发放至账户。</p>
       </div>
-      <div class="status" id="settingsStatus"></div>
+    </div>
+  </div>
+
+  <!-- 功能反馈 -->
+  <div class="side-panel-overlay" id="feedbackOverlay" onclick="if(event.target===this) closeFeedbackPanel()">
+    <div class="side-panel-box" onclick="event.stopPropagation()">
+      <header class="side-panel-head">
+        <h3>功能反馈</h3>
+        <button type="button" class="close-btn" onclick="closeFeedbackPanel()" aria-label="关闭">✕</button>
+      </header>
+      <div class="side-panel-body">
+        <p class="side-panel-desc">欢迎提出改进建议或问题描述，我们会尽快查看。</p>
+        <textarea id="feedbackText" class="side-panel-textarea" rows="6" placeholder="请描述你的想法或遇到的问题…"></textarea>
+      </div>
+      <footer class="side-panel-foot">
+        <button type="button" class="btn btn-secondary" onclick="closeFeedbackPanel()">取消</button>
+        <button type="button" class="btn btn-primary" onclick="submitFeedback()">复制反馈内容</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 联系我们 -->
+  <div class="side-panel-overlay" id="contactOverlay" onclick="if(event.target===this) closeContactPanel()">
+    <div class="side-panel-box" onclick="event.stopPropagation()">
+      <header class="side-panel-head">
+        <h3>联系我们</h3>
+        <button type="button" class="close-btn" onclick="closeContactPanel()" aria-label="关闭">✕</button>
+      </header>
+      <div class="side-panel-body">
+        <p class="side-panel-desc">添加微信时请备注「提示词仓库」。</p>
+        <div class="contact-wechat-row">
+          <span class="contact-wechat-label">微信号</span>
+          <code class="contact-wechat-id" id="contactWechatId">bz4jx3jp2li1</code>
+        </div>
+      </div>
+      <footer class="side-panel-foot">
+        <button type="button" class="btn btn-primary" onclick="copyWechatId()">复制微信号</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 帮助（快捷入口，内容与设置内帮助一致） -->
+  <div class="side-panel-overlay" id="helpOverlay" onclick="if(event.target===this) closeHelpPanel()">
+    <div class="side-panel-box" onclick="event.stopPropagation()">
+      <header class="side-panel-head">
+        <h3>帮助</h3>
+        <button type="button" class="close-btn" onclick="closeHelpPanel()" aria-label="关闭">✕</button>
+      </header>
+      <div class="side-panel-body">
+        <ul class="settings-help-list">
+          <li><strong>卡片库</strong>：管理提示词与参考图；右键可置顶（普通用户 1 张 / 会员 5 张）。</li>
+          <li><strong>社区 / 创作</strong>：发布与浏览提示词作品；社区需登录后互动。</li>
+          <li><strong>图片生成</strong>：登录后生成扣积分；侧栏记录可预览、个人记录可存仓库。</li>
+          <li><strong>自动昼夜</strong>：默认早 8 点日光、晚 8 点夜间；可在设置中关闭。</li>
+          <li><strong>备份</strong>：设置 → 数据管理 → 备份导出，防止浏览器清数据丢失。</li>
+        </ul>
+      </div>
+      <footer class="side-panel-foot">
+        <button type="button" class="btn btn-secondary" onclick="closeHelpPanel()">关闭</button>
+        <button type="button" class="btn btn-primary" onclick="closeHelpPanel(); openWarehouseSettings();">打开卡片库设置</button>
+      </footer>
     </div>
   </div>
 
@@ -126,7 +314,7 @@
   <nav class="app-nav" id="appNav" aria-label="主导航">
     <div class="app-nav-head">
       <button type="button" class="app-brand" onclick="switchAppPage('warehouse')" title="提示词仓库">
-        <img class="app-brand-mark" src="https://cdn.jsdelivr.net/gh/study666-creme/-@main/%E6%8F%90%E7%A4%BA%E8%AF%8D%E4%BB%93%E5%BA%93%E5%95%86%E6%A0%87.png" alt="">
+        <img class="app-brand-mark" src="assets/logo.png" width="32" height="32" alt="">
         <span class="app-brand-name">提示词仓库</span>
       </button>
       <button type="button" class="app-nav-collapse-btn" id="appNavCollapseBtn" aria-label="收起侧栏" title="收起侧栏（仅图标）">
@@ -141,25 +329,139 @@
       <button type="button" class="app-nav-item" data-app="community">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <span class="app-nav-label">提示词社区</span>
-        <span class="app-nav-soon">敬请期待</span>
+        <span class="app-nav-soon">草案</span>
       </button>
       <button type="button" class="app-nav-item" data-app="creations">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
         <span class="app-nav-label">我的创作</span>
-        <span class="app-nav-soon">敬请期待</span>
+        <span class="app-nav-soon">草案</span>
       </button>
       <button type="button" class="app-nav-item" data-app="imagegen">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
         <span class="app-nav-label">图片生成</span>
-        <span class="app-nav-soon">敬请期待</span>
+        <span class="app-nav-soon">草案</span>
       </button>
     </div>
+    <div class="app-nav-footer">
+      <button type="button" class="app-nav-item app-nav-util" onclick="openAppSettings()">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        <span class="app-nav-label">设置</span>
+      </button>
+      <button type="button" class="app-nav-item app-nav-util" onclick="openHelpPanel()">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+        <span class="app-nav-label">帮助</span>
+      </button>
+      <button type="button" class="app-nav-item app-nav-util" onclick="openFeedbackPanel()">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span class="app-nav-label">功能反馈</span>
+      </button>
+      <button type="button" class="app-nav-item app-nav-util" onclick="openContactPanel()">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+        <span class="app-nav-label">联系我们</span>
+      </button>
+      <button type="button" class="theme-toggle-btn app-nav-theme-btn" id="themeToggleBtn" aria-label="切换主题" title="切换主题">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+        </svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+    </div>
+    <div class="app-nav-auth" id="appNavAuth">
+      <div class="app-nav-subscribe-wrap">
+        <button type="button" class="app-nav-subscribe-btn" onclick="openSubscribePanel()">
+          <span class="app-nav-subscribe-badge">一折起</span>
+          <span class="app-nav-subscribe-text">订阅会员</span>
+          <span class="app-nav-subscribe-shine" aria-hidden="true"></span>
+        </button>
+      </div>
+      <button type="button" class="auth-login-btn" id="authOpenBtn" onclick="openAuthModal()">登录 / 注册</button>
+      <div class="auth-user-bar hidden" id="authUserBar">
+        <span class="auth-user-email" id="authUserEmail" title=""></span>
+        <button type="button" class="auth-sync-btn" id="authSyncBtn" onclick="syncCloudNow()" title="立即同步到云端">同步</button>
+        <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
+      </div>
+      <p class="auth-sync-hint hidden" id="authSyncHint">已登录，数据自动云同步</p>
+    </div>
   </nav>
+
+  <div class="auth-overlay" id="authOverlay" onclick="if(event.target===this) closeAuthModal()">
+    <div class="auth-box" onclick="event.stopPropagation()">
+      <button type="button" class="auth-close" onclick="closeAuthModal()" aria-label="关闭">✕</button>
+      <h3 id="authTitle">登录账号</h3>
+      <p class="auth-desc" id="authDesc">登录后卡片、分组会同步到云端，换设备也能用。</p>
+      <div class="auth-method-tabs" id="authMethodTabs">
+        <button type="button" class="auth-method-tab active" data-auth-channel="email" onclick="switchAuthChannel('email')">邮箱</button>
+        <button type="button" class="auth-method-tab" data-auth-channel="phone" id="authPhoneMethodTab" onclick="switchAuthChannel('phone')">手机</button>
+      </div>
+      <div class="auth-tabs" id="authTabs">
+        <button type="button" class="auth-tab active" data-auth-mode="login" onclick="switchAuthMode('login')">登录</button>
+        <button type="button" class="auth-tab" data-auth-mode="register" onclick="switchAuthMode('register')">注册</button>
+      </div>
+      <div id="authEmailPanel">
+        <label for="authEmail">邮箱</label>
+        <input type="email" id="authEmail" placeholder="your@email.com" autocomplete="email">
+        <div class="auth-field auth-field-password">
+          <label for="authPassword" id="authPasswordLabel">密码</label>
+          <div class="auth-password-wrap">
+            <input type="password" id="authPassword" placeholder="至少 6 位" autocomplete="current-password">
+            <button type="button" class="auth-pwd-toggle" id="authPwdToggle" onclick="toggleAuthPassword()" aria-label="显示密码">👁</button>
+          </div>
+        </div>
+        <div class="auth-field auth-field-confirm hidden" id="authConfirmWrap">
+          <label for="authPasswordConfirm">确认密码</label>
+          <div class="auth-password-wrap">
+            <input type="password" id="authPasswordConfirm" placeholder="再次输入密码" autocomplete="new-password">
+          </div>
+        </div>
+        <div class="auth-field auth-field-newpwd hidden" id="authNewPwdWrap">
+          <label for="authNewPassword">新密码</label>
+          <div class="auth-password-wrap">
+            <input type="password" id="authNewPassword" placeholder="至少 6 位" autocomplete="new-password">
+          </div>
+        </div>
+        <label class="auth-remember" id="authRememberWrap">
+          <input type="checkbox" id="authRemember" checked>
+          <span>保持登录（本机记住）</span>
+        </label>
+      </div>
+      <div id="authPhonePanel" class="hidden">
+        <label for="authPhone">手机号</label>
+        <div class="auth-phone-wrap">
+          <span class="auth-phone-prefix">+86</span>
+          <input type="tel" id="authPhone" inputmode="numeric" maxlength="11" placeholder="11 位手机号" autocomplete="tel">
+        </div>
+        <div class="auth-field">
+          <label for="authOtp">验证码</label>
+          <div class="auth-otp-row">
+            <input type="text" id="authOtp" inputmode="numeric" maxlength="6" placeholder="6 位验证码" autocomplete="one-time-code">
+            <button type="button" class="btn btn-secondary auth-otp-btn" id="authSendOtpBtn" onclick="authSendPhoneOtp()">获取验证码</button>
+          </div>
+        </div>
+        <p class="auth-phone-hint">未注册的手机号验证通过后将自动创建账号</p>
+      </div>
+      <button type="button" class="btn btn-primary auth-submit-btn" id="authSubmitBtn" onclick="authSubmit()">登录</button>
+      <p class="auth-links" id="authEmailLinks">
+        <button type="button" class="auth-link-btn" id="authForgotLink" onclick="switchAuthMode('forgot')">忘记密码？</button>
+        <button type="button" class="auth-link-btn hidden" id="authBackLoginLink" onclick="switchAuthMode('login')">返回登录</button>
+      </p>
+      <div class="auth-social" id="authSocial">
+        <div class="auth-social-divider"><span>其他方式</span></div>
+        <button type="button" class="auth-wechat-btn" id="authWeChatBtn" onclick="authWeChatLogin()">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8.5 4C4.9 4 2 6.4 2 9.3c0 1.5.8 2.9 2.1 3.9l-.5 2 2.1-1.1c.7.2 1.4.3 2.1.3.1 0 .2 0 .3-.1-.3-.9-.5-1.8-.5-2.8 0-3.4 3.1-6.2 7-6.2.4 0 .8 0 1.2.1C14.4 5.2 11.7 4 8.5 4zm-2.6 3.5c-.6 0-1.1.5-1.1 1.1s.5 1.1 1.1 1.1 1.1-.5 1.1-1.1-.5-1.1-1.1-1.1zm5.2 0c-.6 0-1.1.5-1.1 1.1s.5 1.1 1.1 1.1 1.1-.5 1.1-1.1-.5-1.1-1.1-1.1zM15.5 8c-3.9 0-7 2.5-7 5.6 0 1.6.9 3.1 2.3 4.1l-.6 2.2 2.4-1.3c.8.2 1.7.4 2.6.4 3.9 0 7-2.5 7-5.6S19.4 8 15.5 8zm-2.4 4.8c-.5 0-1-.4-1-.9s.4-1 .9-1 1 .4 1 .9-.4.9-1 .9zm4.8 0c-.5 0-1-.4-1-.9s.4-1 .9-1 1 .4 1 .9-.4.9-1 .9z"/></svg>
+          微信登录
+        </button>
+      </div>
+      <p class="auth-status" id="authStatus"></p>
+    </div>
+  </div>
 
   <div class="app-main">
     <div class="app-page app-page-warehouse active" id="pageWarehouse">
   <div class="sidebar" id="sidebarArea">
     <button type="button" class="sidebar-new-btn" onclick="createNewCard()">+ 新建提示词</button>
+    <p class="guest-limit-hint hidden" id="guestLimitHint"></p>
     <div class="sidebar-section">
       <div class="sidebar-section-title">默认</div>
       <div class="group-list" id="defaultGroupList">
@@ -171,11 +473,17 @@
       <div class="sidebar-section-title">分组 <button class="add-btn" onclick="inlineAddGroup(event)">+</button></div>
       <div class="group-list" id="customGroupList"></div>
     </div>
-    <button class="action-btn" onclick="openSettings()">⚙️ 字段 & 设置</button>
+    <button class="action-btn" onclick="openWarehouseSettings()">⚙️ 字段 & 设置</button>
   </div>
 
   <div class="main-content" id="mainContentArea">
     <div class="main-header">
+      <button type="button" class="icon-btn mobile-only mobile-header-btn" id="mobileNavBtn" aria-label="菜单">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <button type="button" class="icon-btn mobile-only mobile-header-btn" id="mobileGroupsBtn" aria-label="分组">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      </button>
       <h3 id="currentGroupTitle">全部提示词</h3>
       <div class="header-actions">
         <div id="batchBar" class="batch-bar">
@@ -230,7 +538,10 @@
   <div class="edit-panel hidden" id="editPanel">
     <div class="panel-header">
       <h4 id="panelTitle">新建卡片</h4>
-      <button class="close-btn" onclick="closeEditPanel()">✕</button>
+      <div class="panel-header-actions">
+        <button type="button" class="btn btn-ghost btn-sm panel-pin-btn hidden" id="cardPinToggle" onclick="toggleCardPin()" title="置顶">置顶</button>
+        <button class="close-btn" onclick="closeEditPanel()">✕</button>
+      </div>
     </div>
     <div class="panel-body" id="panelBody">
       <div class="image-drop-area no-image" id="dropArea">
@@ -263,6 +574,13 @@
           <button type="button" class="btn btn-secondary tag-pick-btn" onclick="showExistingTags()">选择标签</button>
         </div>
         <div id="customFieldsContainer"></div>
+        <div class="panel-publish-row" id="panelCommunityPublish">
+          <div class="panel-publish-copy">
+            <span class="panel-publish-title">发布到提示词社区</span>
+            <p class="panel-hint">公开后可被查看、点赞与收藏；关闭将从社区下架</p>
+          </div>
+          <button type="button" class="publish-circle-btn" id="cardPublishToggle" aria-pressed="false" aria-label="发布到提示词社区" title="切换发布"></button>
+        </div>
       </div>
     </div>
     <div class="panel-footer">
@@ -277,33 +595,178 @@
   <button type="button" class="global-view-exit" id="globalViewExitBtn" onclick="exitGlobalView()">退出欣赏（Esc）</button>
     </div>
 
-    <div class="app-page app-page-placeholder" id="pageCommunity">
-      <div class="app-placeholder">
-        <div class="app-placeholder-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    <div class="app-page app-page-feature" id="pageCommunity">
+      <div class="feature-shell community-shell">
+        <header class="feature-header">
+          <h2>提示词社区</h2>
+          <div class="feature-header-grow">
+            <div class="feature-tabs">
+              <button type="button" class="feature-tab active" data-community-sort="hot">热门</button>
+              <button type="button" class="feature-tab" data-community-sort="new">最新</button>
+            </div>
+            <input type="search" class="feature-search" id="communitySearch" placeholder="搜索提示词…" autocomplete="off">
+          </div>
+        </header>
+        <div class="community-page-layout">
+          <div class="community-page-main">
+            <div class="feature-body feature-body-cards">
+              <p class="community-inline-hint">点击卡片在右侧查看详情，可随时切换。仅点击作者头像进入 TA 的主页。</p>
+              <div class="cards-container community-cards" id="communityGrid"><div class="grid-sizer"></div></div>
+            </div>
+          </div>
+          <aside class="community-side-panel hidden" id="communitySidePanel" aria-label="提示词详情">
+            <div class="community-side-head">
+              <h4 id="communitySideTitle">提示词详情</h4>
+              <button type="button" class="close-btn" id="communitySideClose" aria-label="关闭">✕</button>
+            </div>
+            <div class="community-side-body" id="communitySideBody"></div>
+          </aside>
         </div>
-        <h2>提示词社区</h2>
-        <p>正在开发中，后续可在此浏览、分享与交流优质提示词。</p>
       </div>
     </div>
 
-    <div class="app-page app-page-placeholder" id="pageCreations">
-      <div class="app-placeholder">
-        <div class="app-placeholder-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+    <div class="app-page app-page-feature" id="pageCreations">
+      <div class="feature-shell community-shell">
+        <header class="feature-header">
+          <h2>我的创作</h2>
+          <div class="feature-header-grow">
+            <div class="feature-tabs">
+              <button type="button" class="feature-tab active" data-creations-tab="private">私密</button>
+              <button type="button" class="feature-tab" data-creations-tab="published">已发布</button>
+            </div>
+          </div>
+        </header>
+        <div class="community-page-layout">
+          <div class="community-page-main">
+            <div class="feature-body feature-body-cards">
+              <p class="community-inline-hint" id="creationsHint">点击卡片在右侧查看详情 · 点击图片可一键保存到卡片仓库</p>
+              <div class="cards-container creations-cards" id="creationsGrid"><div class="grid-sizer"></div></div>
+            </div>
+          </div>
+          <aside class="community-side-panel hidden" id="creationsSidePanel" aria-label="创作详情">
+            <div class="community-side-head">
+              <h4>创作详情</h4>
+              <button type="button" class="close-btn" id="creationsSideClose" aria-label="关闭">✕</button>
+            </div>
+            <div class="community-side-body" id="creationsSideBody"></div>
+          </aside>
         </div>
-        <h2>我的创作</h2>
-        <p>正在开发中，后续可在此查看与管理你的 AI 创作内容。</p>
       </div>
     </div>
 
-    <div class="app-page app-page-placeholder" id="pageImageGen">
-      <div class="app-placeholder">
-        <div class="app-placeholder-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+    <div class="app-page app-page-feature" id="pageImageGen">
+      <div class="feature-shell">
+        <header class="feature-header feature-header-imagegen">
+          <button type="button" class="icon-btn mobile-only mobile-header-btn" id="imageGenMobileMenuBtn" aria-label="打开菜单">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          <h2>图片生成</h2>
+          <div class="imagegen-mobile-segments mobile-only" role="tablist" aria-label="生图视图">
+            <button type="button" class="imagegen-mobile-seg active" data-imagegen-view="form" role="tab" aria-selected="true">生成</button>
+            <button type="button" class="imagegen-mobile-seg" data-imagegen-view="feed" role="tab" aria-selected="false">作品</button>
+          </div>
+        </header>
+        <div class="imagegen-layout">
+          <div class="imagegen-form">
+            <div class="imagegen-credits-box">
+              <div class="imagegen-credits-top">
+                <span class="imagegen-credits-label">当前积分 <strong data-credits-display>0</strong> <span class="imagegen-credits-rate">（1 元 = 100 积分）</span></span>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openRechargePanel()">充值</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="showCreditLedger()">明细</button>
+              </div>
+              <div class="credit-ledger-panel hidden" id="creditLedgerPanel" aria-live="polite"></div>
+              <div class="imagegen-activate-row">
+                <input type="text" id="activationCodeInput" class="settings-input" placeholder="输入激活码" autocomplete="off">
+                <button type="button" class="btn btn-primary btn-sm" onclick="redeemActivationCode()">兑换</button>
+              </div>
+              <p class="imagegen-credits-note">会员生图享折扣（基础 9 折 / 标准 8 折 / 专业 7 折）· 演示码 MEMBER-BASIC / STD / PRO</p>
+            </div>
+            <label for="imageGenModel">生图模型</label>
+            <select id="imageGenModel" class="settings-input">
+              <option value="quanneng2">全能模型2</option>
+              <option value="jimeng">集梦 Seedream</option>
+            </select>
+            <div class="imagegen-params-row">
+              <div class="imagegen-param">
+                <label for="imageGenResolution">输出分辨率</label>
+                <select id="imageGenResolution" class="settings-input"></select>
+              </div>
+              <div class="imagegen-param">
+                <label for="imageGenSize">画面尺寸</label>
+                <select id="imageGenSize" class="settings-input">
+                  <option value="1:1">正方形 1∶1</option>
+                  <option value="16:9">横屏 16∶9</option>
+                  <option value="9:16">竖屏 9∶16</option>
+                  <option value="4:3">横屏 4∶3</option>
+                  <option value="3:4">竖屏 3∶4</option>
+                </select>
+              </div>
+            </div>
+            <label for="imageGenQuality">质量</label>
+            <select id="imageGenQuality" class="settings-input">
+              <option value="standard">标准</option>
+              <option value="high">高清</option>
+              <option value="ultra">超清</option>
+            </select>
+            <p class="imagegen-quality-note">质量仅影响出图效果，不额外加价</p>
+            <label for="imageGenPrompt">提示词</label>
+            <textarea id="imageGenPrompt" placeholder="描述你想生成的画面…"></textarea>
+            <label>参考图（可选）</label>
+            <div class="imagegen-ref" id="imageGenRefBox">
+              <div class="imagegen-ref-drop" id="imageGenRefDrop">
+                <p class="imagegen-ref-hint imagegen-ref-hint-desktop">拖拽图片到此处，或点击选择 · 支持 Ctrl+V 粘贴 · 可多张</p>
+                <p class="imagegen-ref-hint imagegen-ref-hint-mobile">点击选择相册图片 · 可多张</p>
+                <input type="file" id="imageGenRefInput" accept="image/*" multiple>
+              </div>
+              <div class="imagegen-ref-gallery" id="imageGenRefGallery" hidden></div>
+            </div>
+            <div class="panel-publish-row imagegen-publish-row" id="imageGenPublishRow">
+              <div class="panel-publish-copy">
+                <span class="panel-publish-title">自动发布社区</span>
+                <p class="panel-hint">生成完成后自动发布到社区；此处关闭后，下次进入生图页仍会默认开启（可在全局设置改为默认关闭）</p>
+              </div>
+              <button type="button" class="publish-circle-btn is-on" id="imageGenAutoPublishBtn" aria-pressed="true" aria-label="自动发布社区" title="切换自动发布"></button>
+            </div>
+            <div class="imagegen-form-actions">
+              <p class="imagegen-price-hint" id="imageGenCostHint" aria-live="polite"></p>
+              <button type="button" class="btn btn-primary imagegen-generate-btn" id="imageGenSubmit">生成图片 · 10 积分</button>
+            </div>
+          </div>
+          <aside class="imagegen-side">
+            <div class="imagegen-feed-tabs" role="tablist">
+              <button type="button" class="imagegen-feed-tab" data-feed-tab="warehouse" role="tab">仓库</button>
+              <button type="button" class="imagegen-feed-tab active" data-feed-tab="personal" role="tab">个人</button>
+              <button type="button" class="imagegen-feed-tab" data-feed-tab="community" role="tab">社区</button>
+            </div>
+            <div class="imagegen-warehouse-filters hidden" id="imageGenWarehouseFilters">
+              <label class="imagegen-filter-label" for="imageGenWhGroup">分组</label>
+              <select id="imageGenWhGroup" class="imagegen-filter-select"></select>
+              <label class="imagegen-filter-label" for="imageGenWhTag">标签</label>
+              <select id="imageGenWhTag" class="imagegen-filter-select"></select>
+            </div>
+            <p class="imagegen-feed-hint" id="imageGenFeedHint">我的生成记录 · 保留 3 天，发布到社区永久</p>
+            <div class="imagegen-feed" id="imageGenFeed"></div>
+          </aside>
         </div>
-        <h2>图片生成</h2>
-        <p>正在开发中，后续可在此使用提示词快速生成图片。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="community-detail-overlay" id="userProfileOverlay" role="dialog" aria-modal="true" aria-labelledby="userProfileTitle">
+    <div class="community-detail user-profile-panel" onclick="event.stopPropagation()">
+      <div class="community-detail-head">
+        <button type="button" class="btn btn-ghost btn-sm user-profile-back" id="userProfileBack">← 返回社区</button>
+        <button type="button" class="community-detail-close" id="userProfileClose" aria-label="关闭">✕</button>
+      </div>
+      <div class="user-profile-hero">
+        <div class="creations-avatar" id="userProfileAvatar">?</div>
+        <div class="creations-profile-text">
+          <h3 id="userProfileTitle">用户</h3>
+          <p id="userProfileSub">已发布作品</p>
+        </div>
+      </div>
+      <div class="user-profile-body">
+        <div class="cards-container community-cards user-profile-cards" id="userProfileGrid"><div class="grid-sizer"></div></div>
       </div>
     </div>
   </div>
@@ -322,7 +785,44 @@
 
   </div>
 
+  <nav class="mobile-bottom-nav mobile-only" id="mobileBottomNav" aria-label="手机底部导航">
+    <button type="button" class="mobile-tab active" data-mobile-tab="cards" onclick="mobileSwitchTab('cards')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      <span>卡片</span>
+    </button>
+    <button type="button" class="mobile-tab" data-mobile-tab="imagegen" onclick="mobileSwitchTab('imagegen')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+      <span>生图</span>
+    </button>
+    <button type="button" class="mobile-tab" data-mobile-tab="new" onclick="mobileSwitchTab('new')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      <span>新建</span>
+    </button>
+    <button type="button" class="mobile-tab" data-mobile-tab="me" onclick="mobileSwitchTab('me')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span>我的</span>
+    </button>
+  </nav>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.8/dist/umd/supabase.min.js"></script>
+  <script src="supabase-config.js"></script>
+  <script src="api-config.js"></script>
+  <script src="api-config.local.js" onerror=""></script>
+  <script src="api-client.js"></script>
+  <script src="supabase-sync.js"></script>
+  <script src="membership.js"></script>
+  <script src="subscription.js"></script>
   <script src="script.js"></script>
+  <script src="points-system.js"></script>
+  <script src="features-draft.js"></script>
+  <script src="mobile.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(() => {});
+      });
+    }
+  </script>
 </body>
 </html>
 
