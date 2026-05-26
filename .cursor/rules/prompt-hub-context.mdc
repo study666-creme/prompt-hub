@@ -1,0 +1,11 @@
+---
+description: Prompt Hub 项目总览；新对话先读 PROJECT_CONTEXT
+alwaysApply: true
+---
+
+# Prompt Hub 协作约定
+
+- 新任务先读 `docs/PROJECT_CONTEXT.md`（含**当前部署阶段**）。
+- 用户是纯小白：用分步说明 + 可复制命令；Cloudflare 写清菜单路径。
+- 部署/API 问题见 `docs/FIX-API-522-BEGINNER.md`、`docs/CUSTOM-DOMAIN.md`。
+- 最小 diff；简体中文；不提交密钥；仅用户要求时再 git commit。

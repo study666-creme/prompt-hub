@@ -155,6 +155,22 @@ prompt-hub/
 
 ---
 
+## 当前部署阶段（自动维护，2026-05-27）
+
+| 项 | 状态 |
+|----|------|
+| Worker | `prompt-hub-api`（账号 `2705367723`）已部署 |
+| **API 自定义域名** | **`https://api.prompt-hub.cn/health` ✅ 已通**（`ok:true`, `supabase:ok`） |
+| workers.dev | 国内常超时，生产走 `api.prompt-hub.cn` |
+| 自有域名 | `prompt-hub.cn` 已接入 Cloudflare |
+| 前端 API 配置 | `api-domain.config.js` → `CUSTOM_API_HOST = 'api.prompt-hub.cn'` |
+| **待做** | 重新部署 Pages 静态站（上传 `prompt-hub-deploy.zip`），让线上页面也用新 API |
+| Pages 静态站 | `prompt-hub-hub.pages.dev` / `prompt-hub-web.pages.dev` |
+
+文档每 **8 条用户消息** 由 `.cursor/hooks` + 规则自动提醒 AI 更新本节。
+
+---
+
 ## 当前未完成 / 路线图
 
 - [x] 支付 webhook 骨架（HMAC + 幂等 + 充值/会员）
