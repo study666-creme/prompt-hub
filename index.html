@@ -190,7 +190,7 @@
       <header class="subscribe-panel-head">
         <div>
           <h3>会员订阅</h3>
-          <p class="subscribe-panel-sub">连续包月 / 包年更优惠 · 单月或单年购买价格更高</p>
+          <p class="subscribe-panel-sub">3 天免费试用 · ¥1.9 续杯 14 天 · 会员积分可二选一领取</p>
         </div>
         <button type="button" class="close-btn" onclick="closeSubscribePanel()" aria-label="关闭">✕</button>
       </header>
@@ -201,9 +201,11 @@
         <button type="button" class="subscribe-billing-tab" data-subscribe-billing="single_year">单年购买</button>
       </div>
       <div class="subscribe-panel-body">
+        <div class="subscribe-trial-bar hidden" id="subscribeTrialBar"></div>
+        <div class="subscribe-credit-mode" id="subscribeCreditMode"></div>
         <div class="subscribe-first-offer hidden" id="subscribeFirstOffer"></div>
         <div class="subscribe-plans-grid" id="subscribePlansGrid"></div>
-        <p class="subscribe-legal">在线支付筹备中。积分与会员请通过淘宝购买激活码，在「图片生成」页兑换。详见 <a href="terms.html" class="link-inline">用户协议</a>。</p>
+        <p class="subscribe-legal">免费试用需绑定手机，每人一次。¥1.9 续杯请购 <code>STARTER-19-14D</code> 激活码。正式会员请在下方选择「每日积分」或「一次性积分」后兑换对应档位码。详见 <a href="terms.html" class="link-inline">用户协议</a>。</p>
       </div>
     </div>
   </div>
@@ -670,7 +672,7 @@
           <div class="imagegen-form">
             <div class="imagegen-credits-box">
               <div class="imagegen-credits-top">
-                <span class="imagegen-credits-label">当前积分 <strong data-credits-display>0</strong> <span class="imagegen-credits-rate">（1 元 = 100 积分）</span></span>
+                <span class="imagegen-credits-label">当前积分 <strong data-credits-display>0</strong> <span class="imagegen-credits-detail hidden" data-credits-detail></span> <span class="imagegen-credits-rate">（1 元 = 100 积分）</span></span>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="openRechargePanel()">充值</button>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="showCreditLedger()">明细</button>
               </div>
@@ -815,15 +817,15 @@
       document.head.appendChild(s);
     }
   </script>
-  <script src="api-client.js"></script>
-  <script src="cloud-sync-safety.js"></script>
-  <script src="supabase-sync.js"></script>
-  <script src="membership.js"></script>
-  <script src="subscription.js"></script>
-  <script src="script.js"></script>
-  <script src="points-system.js"></script>
-  <script src="features-draft.js"></script>
-  <script src="mobile.js"></script>
+  <script src="api-client.js?v=20260527b"></script>
+  <script src="cloud-sync-safety.js?v=20260527b"></script>
+  <script src="supabase-sync.js?v=20260527b"></script>
+  <script src="membership.js?v=20260527b"></script>
+  <script src="subscription.js?v=20260527b"></script>
+  <script src="script.js?v=20260527b"></script>
+  <script src="points-system.js?v=20260527b"></script>
+  <script src="features-draft.js?v=20260527b"></script>
+  <script src="mobile.js?v=20260527b"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {

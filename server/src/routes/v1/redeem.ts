@@ -2,6 +2,10 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Env } from '../../env';
 import { ApiError } from '../../lib/errors';
+import {
+  membershipCreditsPayload,
+  syncMembershipCredits
+} from '../../lib/membership-credits';
 import { createAdminClient, getOrCreateProfile } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
 
@@ -31,7 +35,8 @@ function throwDbError(err: { message?: string; code?: string }, fallback: string
 }
 
 const bodySchema = z.object({
-  code: z.string().min(1).max(64)
+  code: z.string().min(1).max(64),
+  creditGrantMode: z.enum(['daily', 'bundle']).optional()
 });
 
 export const redeemRoutes = new Hono<{ Bindings: Env }>();
@@ -106,13 +111,27 @@ redeemRoutes.post('/', async c => {
       : null;
     membershipUntil = until ? until.toISOString() : null;
 
-    await admin
-      .from('profiles')
-      .update({
-        membership_tier: row.membership_tier,
-        membership_until: membershipUntil
-      })
-      .eq('user_id', user.id);
+    const profileBefore = await getOrCreateProfile(admin, user.id);
+    const mode =
+      parsed.data.creditGrantMode ||
+      profileBefore.credit_grant_mode ||
+      'bundle';
+    const memberPatch: Record<string, unknown> = {
+      membership_tier: row.membership_tier,
+      membership_until: membershipUntil,
+      credit_grant_mode: mode,
+      bundle_granted_until: null
+    };
+    if (row.offer_kind === 'starter_14d') {
+      memberPatch.first_sub_offer_used = true;
+    }
+    if (mode === 'daily') {
+      memberPatch.daily_credits = 0;
+      memberPatch.daily_credits_date = null;
+    }
+
+    await admin.from('profiles').update(memberPatch).eq('user_id', user.id);
+    await syncMembershipCredits(admin, user.id);
   }
 
   const { error: redeemErr } = await admin
@@ -126,17 +145,27 @@ redeemRoutes.post('/', async c => {
     .eq('code', code);
   if (useErr) throwDbError(useErr, '更新激活码次数失败');
 
-  const profile = await getOrCreateProfile(admin, user.id);
+  const profile = await syncMembershipCredits(admin, user.id);
+  const creditsInfo = membershipCreditsPayload(profile);
 
   const parts: string[] = [];
   if (row.credits > 0) parts.push(`+${row.credits} 积分`);
-  if (row.membership_tier) parts.push(`已开通${row.membership_tier}会员`);
+  if (row.membership_tier) {
+    if (row.offer_kind === 'starter_14d') {
+      parts.push('已开通 14 天基础会员（¥1.9 续杯）');
+    } else {
+      parts.push(`已开通${row.membership_tier}会员`);
+    }
+  }
 
   return c.json({
     ok: true,
     data: {
       message: parts.length ? parts.join('，') : '兑换成功',
-      credits: profile.credits,
+      credits: creditsInfo.creditsSpendable,
+      creditsPermanent: creditsInfo.creditsPermanent,
+      dailyCredits: creditsInfo.dailyCredits,
+      creditGrantMode: creditsInfo.creditGrantMode,
       membershipTier: profile.membership_tier,
       membershipUntil: profile.membership_until
     }

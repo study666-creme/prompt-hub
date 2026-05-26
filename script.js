@@ -1207,6 +1207,7 @@
 
     function cardImgSrc(image) {
       if (!image) return '';
+      if (window.SupabaseSync?.safeImgSrc) return window.SupabaseSync.safeImgSrc(image);
       const url = window.SupabaseSync?.getCachedDisplayUrl?.(image) || image;
       if (typeof url === 'string' && url.startsWith('storage://')) return '';
       return url;
@@ -2154,10 +2155,9 @@
         div.dataset.id = card.id;
         div.draggable = !globalViewActive;
         const checked = selectedCardIds.has(card.id);
-        const imgSrc = escapeHtml(cardImgSrc(card.image));
-        const imgRefAttr = cardImgDataAttr(card.image);
+        const imgPlaceholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="#1a1a22" width="4" height="3"/></svg>');
         const mediaInner = card.image
-          ? `<img class="card-img" src="${imgSrc}"${imgRefAttr} loading="lazy" draggable="false" alt="" onload="if(typeof scheduleLayoutMasonry==='function') scheduleLayoutMasonry()">`
+          ? `<img class="card-img" src="${imgPlaceholder}" data-image-ref="${escapeHtml(card.image)}" loading="lazy" draggable="false" alt="" onload="if(typeof scheduleLayoutMasonry==='function') scheduleLayoutMasonry()">`
           : '<div class="card-media-placeholder" aria-hidden="true"></div>';
         const timeLabel = formatCardTime(card.updatedAt || card.createdAt);
         const tagsHtml = buildCardTagsHtml(card.tags);
@@ -2220,7 +2220,11 @@
         fragment.appendChild(div);
       });
       container.appendChild(fragment);
-      if (window.SupabaseSync?.hydrateImageElements) {
+      if (window.FeatureDraft?.hydrateFeedImages) {
+        void window.FeatureDraft.hydrateFeedImages(container).then(() => {
+          if (viewMode !== 'list') scheduleLayoutMasonry();
+        });
+      } else if (window.SupabaseSync?.hydrateImageElements) {
         void window.SupabaseSync.hydrateImageElements(container).then(() => {
           if (viewMode !== 'list') scheduleLayoutMasonry();
         });

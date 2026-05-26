@@ -84,7 +84,12 @@
     }
     const d = r.data;
     if (d && typeof d.credits === 'number' && window.PointsSystem?.setCreditsFromServer) {
-      window.PointsSystem.setCreditsFromServer(d.credits);
+      window.PointsSystem.setCreditsFromServer(d.credits, {
+        permanent: d.creditsPermanent,
+        daily: d.dailyCredits,
+        mode: d.creditGrantMode,
+        note: d.dailyCreditsNote
+      });
     }
     if (d?.membership && window.Membership?.applyServerState) {
       window.Membership.applyServerState(d.membership);
@@ -94,13 +99,28 @@
     } else if (window.SupabaseSync?.isLoggedIn?.()) {
       window.SubscriptionUI?.setFirstOfferUsedFromServer?.(false);
     }
+    if (d?.trial || d?.creditGrantMode) {
+      window.SubscriptionUI?.applyServerState?.(d);
+    }
     window.PointsSystem?.updateCreditsUI?.();
     window.SubscriptionUI?.refreshOfferUI?.();
     return r;
   }
 
-  async function redeem(code) {
-    return request('POST', '/api/v1/redeem', { code });
+  async function redeem(code, opts) {
+    const body = { code };
+    if (opts?.creditGrantMode) body.creditGrantMode = opts.creditGrantMode;
+    return request('POST', '/api/v1/redeem', body);
+  }
+
+  async function claimFreeTrial() {
+    return request('POST', '/api/v1/membership/trial-free');
+  }
+
+  async function setCreditGrantMode(mode) {
+    return request('POST', '/api/v1/membership/credit-mode', {
+      creditGrantMode: mode
+    });
   }
 
   async function getGenerationCost(resolution, quality, model) {
@@ -131,14 +151,45 @@
     });
   }
 
+  async function signMediaRef(ref) {
+    const q = encodeURIComponent(String(ref || ''));
+    return request('GET', `/api/v1/media/sign?ref=${q}`);
+  }
+
+  async function getGenerationImageUrl(jobId) {
+    return request('GET', `/api/v1/media/generation/${encodeURIComponent(jobId)}/url`);
+  }
+
+  async function fetchMediaAsBlobUrl(remoteUrl) {
+    if (!isConfigured() || !remoteUrl) return null;
+    const token = getAccessToken();
+    if (!token) return null;
+    const q = encodeURIComponent(remoteUrl);
+    try {
+      const res = await fetch(`${baseUrl()}/api/v1/media/fetch?url=${q}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return URL.createObjectURL(blob);
+    } catch (e) {
+      return null;
+    }
+  }
+
   window.PromptHubApi = {
     isConfigured,
     syncMe,
     redeem,
+    claimFreeTrial,
+    setCreditGrantMode,
     getGenerationCost,
     generateImage,
     getGenerationJob,
     getLedger,
-    checkLikeMilestone
+    checkLikeMilestone,
+    signMediaRef,
+    getGenerationImageUrl,
+    fetchMediaAsBlobUrl
   };
 })();

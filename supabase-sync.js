@@ -153,14 +153,30 @@
     if (!image || typeof image !== 'string') return image;
     if (isDataUrl(image) || image.startsWith('blob:')) return image;
     const path = storagePathFromRef(image);
-    if (!path) return image;
-    if (!isLoggedIn()) return image;
-    try {
-      return await getSignedUrlForPath(path);
-    } catch (e) {
-      console.warn('[SupabaseSync] signed url failed', path, e);
-      return publicUrlFromPath(path) || image;
+    if (path && isLoggedIn()) {
+      if (window.PromptHubApi?.isConfigured?.() && window.PromptHubApi.signMediaRef) {
+        try {
+          const r = await window.PromptHubApi.signMediaRef(image);
+          if (r.ok && r.data?.url) return r.data.url;
+        } catch (e) {
+          console.warn('[SupabaseSync] api sign failed', e);
+        }
+      }
+      try {
+        return await getSignedUrlForPath(path);
+      } catch (e) {
+        console.warn('[SupabaseSync] signed url failed', path, e);
+        return publicUrlFromPath(path) || image;
+      }
     }
+    if (/^https?:\/\//i.test(image)) {
+      if (window.PromptHubApi?.fetchMediaAsBlobUrl) {
+        const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(image);
+        if (blobUrl) return blobUrl;
+      }
+      return image;
+    }
+    return image;
   }
 
   async function prefetchDisplayUrls(images) {
@@ -182,15 +198,98 @@
     return image;
   }
 
+  function imgPlaceholderSrc() {
+    return 'data:image/svg+xml,' + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="#1a1a22" width="4" height="3"/></svg>'
+    );
+  }
+
+  function safeImgSrc(image) {
+    if (!image) return '';
+    if (isDataUrl(image) || image.startsWith('blob:') || /^https?:\/\//i.test(image)) {
+      return image;
+    }
+    if (isStorageRef(image)) {
+      const cached = getCachedDisplayUrl(image);
+      if (cached && !cached.startsWith(STORAGE_PREFIX)) return cached;
+      return imgPlaceholderSrc();
+    }
+    return image;
+  }
+
   async function hydrateImageElements(root) {
     const scope = root || document;
     const imgs = scope.querySelectorAll('img[data-storage-ref]');
     await Promise.all([...imgs].map(async (img) => {
       const ref = img.getAttribute('data-storage-ref');
       if (!ref) return;
-      const url = await resolveDisplayUrl(ref);
-      if (url && !url.startsWith(STORAGE_PREFIX)) img.src = url;
+      if (!img.getAttribute('src') || img.getAttribute('src')?.startsWith('data:image/svg')) {
+        img.src = imgPlaceholderSrc();
+      }
+      try {
+        const url = await resolveDisplayUrl(ref);
+        if (url && !url.startsWith(STORAGE_PREFIX)) {
+          img.src = url;
+          img.classList.remove('img-load-failed');
+        }
+      } catch (e) {
+        console.warn('[SupabaseSync] hydrate failed', ref, e);
+      }
+      if (!img.dataset.hydrateBound) {
+        img.dataset.hydrateBound = '1';
+        img.addEventListener('error', () => {
+          if (img.dataset.retryHydrate === '1') return;
+          img.dataset.retryHydrate = '1';
+          void resolveDisplayUrl(ref).then(url => {
+            if (url && !url.startsWith(STORAGE_PREFIX)) {
+              img.src = url;
+              img.classList.remove('img-load-failed');
+            } else {
+              img.classList.add('img-load-failed');
+            }
+          });
+        });
+      }
     }));
+  }
+
+  async function persistGenerationImage(assetId, image) {
+    if (!image || typeof image !== 'string') return image;
+    if (!isLoggedIn()) return image;
+    if (isStorageRef(image)) return normalizeImageRef(image);
+    await ensureSession();
+    const id = String(assetId || Date.now());
+    if (isDataUrl(image) || image.startsWith('blob:')) {
+      return uploadGeneratedImage(id, image);
+    }
+    if (/^https?:\/\//i.test(image)) {
+      try {
+        const res = await fetch(image, { mode: 'cors' });
+        if (!res.ok) throw new Error('fetch_failed');
+        const blob = await res.blob();
+        return uploadGeneratedImage(id, blob);
+      } catch (e) {
+        console.warn('[SupabaseSync] remote persist failed, keep url', e);
+        return image;
+      }
+    }
+    return image;
+  }
+
+  async function uploadGeneratedImage(assetId, source) {
+    await ensureSession();
+    const sb = getClient();
+    const uid = getUserId();
+    if (!sb || !uid || !assetId) throw new Error('未登录');
+    const blob = await compressImage(source);
+    const path = `${uid}/generated/${assetId}.jpg`;
+    const { error } = await sb.storage.from(BUCKET).upload(path, blob, {
+      contentType: 'image/jpeg',
+      upsert: true,
+      cacheControl: '3600'
+    });
+    if (error) throw error;
+    return toStorageRef(path);
   }
 
   function loadImageFromSource(source) {
@@ -280,6 +379,19 @@
       const url = await uploadCardImage(cardId, imageValue);
       if (previousUrl && previousUrl !== url) await deleteCardImageByUrl(previousUrl);
       return url;
+    }
+    if (/^https?:\/\//i.test(imageValue)) {
+      try {
+        const res = await fetch(imageValue, { mode: 'cors' });
+        if (res.ok) {
+          const blob = await res.blob();
+          const url = await uploadCardImage(cardId, blob);
+          if (previousUrl && previousUrl !== url) await deleteCardImageByUrl(previousUrl);
+          return url;
+        }
+      } catch (e) {
+        console.warn('[SupabaseSync] card image fetch failed', e);
+      }
     }
     return imageValue;
   }
@@ -528,8 +640,11 @@
     resolveDisplayUrl,
     prefetchDisplayUrls,
     getCachedDisplayUrl,
+    safeImgSrc,
     publicUrlFromPath,
     hydrateImageElements,
+    persistGenerationImage,
+    uploadGeneratedImage,
     clearSignedUrlCache,
     init,
     signUp,

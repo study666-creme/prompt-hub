@@ -1,6 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchApimartTaskOnce } from './apimart';
 import { ApiError } from './errors';
+import { archiveRemoteImage } from './image-archive';
+import { type DebitSplit, refundUserCredits } from './membership-credits';
 
 type JobRow = {
   id: string;
@@ -28,14 +30,20 @@ export async function refundGenerationCredits(
   const meta = (job?.meta as Record<string, unknown>) || {};
   if (meta.refunded) return;
 
-  const { error } = await admin.rpc('apply_credit_delta', {
-    p_user_id: userId,
-    p_delta: amount,
-    p_reason: 'image_generation_refund',
-    p_ref_id: jobId,
-    p_meta: { reason: meta.failReason || 'generation_failed' }
-  });
-  if (error) throw error;
+  const split = (meta.debitSplit as DebitSplit | undefined) || {
+    fromDaily: 0,
+    fromPermanent: amount
+  };
+
+  await refundUserCredits(
+    admin,
+    userId,
+    amount,
+    'image_generation_refund',
+    jobId,
+    split,
+    { reason: meta.failReason || 'generation_failed' }
+  );
 
   await admin
     .from('generation_requests')
@@ -132,18 +140,29 @@ export async function pollAndUpdateJob(
   const polled = await fetchApimartTaskOnce(imageApiKey, imageApiBaseUrl, taskId);
 
   if (polled.status === 'completed' && polled.imageUrl) {
+    let storedUrl = polled.imageUrl;
+    try {
+      storedUrl = await archiveRemoteImage(
+        admin,
+        userId,
+        job.id,
+        polled.imageUrl
+      );
+    } catch (e) {
+      console.warn('[generation] archive image failed, keep remote url', e);
+    }
     await admin
       .from('generation_requests')
       .update({
         status: 'completed',
-        result_image_url: polled.imageUrl,
+        result_image_url: storedUrl,
         error_message: null,
         completed_at: new Date().toISOString()
       })
       .eq('id', job.id);
     return {
       status: 'completed',
-      imageUrl: polled.imageUrl,
+      imageUrl: storedUrl,
       errorMessage: null,
       refunded: false
     };

@@ -48,11 +48,30 @@ app.get('/api/v1/billing/plans', c =>
     ok: true,
     data: {
       plans: [
-        { id: 'basic', name: '基础版', genDiscount: '9折', monthlyCredits: 100 },
-        { id: 'standard', name: '标准版', genDiscount: '8折', monthlyCredits: 310 },
-        { id: 'pro', name: '专业版', genDiscount: '7折', monthlyCredits: 1000 }
+        {
+          id: 'basic',
+          name: '基础版',
+          genDiscount: '9折',
+          dailyCredits: 10,
+          lumpCredits: 100
+        },
+        {
+          id: 'standard',
+          name: '标准版',
+          genDiscount: '8折',
+          dailyCredits: 10,
+          lumpCredits: 310
+        },
+        {
+          id: 'pro',
+          name: '专业版',
+          genDiscount: '7折',
+          dailyCredits: 10,
+          lumpCredits: 1000
+        }
       ],
-      note: '支付 webhook 待接入；当前请用激活码或联系运营开通'
+      trial: { freeDays: 3, dailyCredits: 10, starterDays: 14, starterPriceYuan: 1.9 },
+      note: '支付 webhook 待接入；试用与 ¥1.9 续杯见 /api/v1/membership 与激活码 STARTER-19-14D'
     }
   })
 );

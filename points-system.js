@@ -31,6 +31,7 @@
 
   /** 登录后积分以 Supabase profiles 为准（/api/v1/me 同步） */
   let serverCreditsKnown = false;
+  let creditsBreakdown = { permanent: 0, daily: 0, mode: 'bundle', note: '' };
 
   /** 每用户可领取次数上限（每档里程碑） */
   const LIKE_MILESTONE_REWARDS = [
@@ -67,9 +68,17 @@
     updateCreditsUI();
   }
 
-  /** 服务端同步后的积分（覆盖本地，避免双写不一致） */
-  function setCreditsFromServer(n) {
+  /** 服务端同步后的可用积分（含当日会员日积分） */
+  function setCreditsFromServer(n, breakdown) {
     serverCreditsKnown = true;
+    if (breakdown && typeof breakdown === 'object') {
+      creditsBreakdown = {
+        permanent: Number(breakdown.permanent) || 0,
+        daily: Number(breakdown.daily) || 0,
+        mode: breakdown.mode === 'daily' ? 'daily' : 'bundle',
+        note: breakdown.note || ''
+      };
+    }
     setCredits(n);
   }
 
@@ -188,9 +197,18 @@
       return { ok: false, msg: '后端 API 未连接，暂无法兑换（请检查网络或等待 api 域名生效）' };
     }
 
-    const api = await window.PromptHubApi.redeem(key);
+    const mode = window.SubscriptionUI?.getCreditGrantMode?.();
+    const api = await window.PromptHubApi.redeem(key, {
+      creditGrantMode: mode
+    });
     if (api.ok) {
-      if (typeof api.data.credits === 'number') setCreditsFromServer(api.data.credits);
+      if (typeof api.data.credits === 'number') {
+        setCreditsFromServer(api.data.credits, {
+          permanent: api.data.creditsPermanent,
+          daily: api.data.dailyCredits,
+          mode: api.data.creditGrantMode
+        });
+      }
       if (api.data.membershipTier && window.Membership?.applyServerState) {
         window.Membership.applyServerState({
           active: true,
@@ -284,8 +302,21 @@
   }
 
   function updateCreditsUI() {
+    const total = getCredits();
     document.querySelectorAll('[data-credits-display]').forEach(el => {
-      el.textContent = String(getCredits());
+      el.textContent = String(total);
+    });
+    document.querySelectorAll('[data-credits-detail]').forEach(el => {
+      if (creditsBreakdown.daily > 0) {
+        el.textContent = `含今日 ${creditsBreakdown.daily}（当日有效）+ 永久 ${creditsBreakdown.permanent}`;
+        el.classList.remove('hidden');
+      } else if (creditsBreakdown.mode === 'daily' && creditsBreakdown.note) {
+        el.textContent = creditsBreakdown.note;
+        el.classList.remove('hidden');
+      } else {
+        el.textContent = '';
+        el.classList.add('hidden');
+      }
     });
     if (typeof window.updateImageGenPricingUI === 'function') {
       window.updateImageGenPricingUI();

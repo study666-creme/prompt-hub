@@ -1,6 +1,11 @@
 import { Hono } from 'hono';
 import type { Env } from '../../env';
-import { createAdminClient, getOrCreateProfile, isMembershipActive } from '../../lib/supabase';
+import {
+  DAILY_CREDITS_AMOUNT,
+  membershipCreditsPayload,
+  syncMembershipCredits
+} from '../../lib/membership-credits';
+import { createAdminClient, isMembershipActive } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
 
 export const meRoutes = new Hono<{ Bindings: Env }>();
@@ -10,15 +15,21 @@ meRoutes.use('*', rateLimit(120, 60_000));
 meRoutes.get('/', async c => {
   const user = c.get('user');
   const admin = createAdminClient(c.env);
-  const profile = await getOrCreateProfile(admin, user.id);
+  const profile = await syncMembershipCredits(admin, user.id);
   const memberActive = isMembershipActive(profile);
+  const credits = membershipCreditsPayload(profile);
 
   return c.json({
     ok: true,
     data: {
       userId: user.id,
       email: user.email ?? null,
-      credits: profile.credits,
+      phoneVerified: user.phoneVerified,
+      credits: credits.creditsSpendable,
+      creditsPermanent: credits.creditsPermanent,
+      dailyCredits: credits.dailyCredits,
+      creditGrantMode: credits.creditGrantMode,
+      dailyCreditsNote: credits.dailyCreditsNote,
       membership: {
         tier: memberActive ? profile.membership_tier : null,
         until: profile.membership_until,
@@ -27,7 +38,15 @@ meRoutes.get('/', async c => {
           ? { basic: '9折', standard: '8折', pro: '7折' }[profile.membership_tier!]
           : null
       },
-      firstSubOfferUsed: profile.first_sub_offer_used
+      firstSubOfferUsed: profile.first_sub_offer_used,
+      trialFreeUsed: profile.trial_free_used,
+      trial: {
+        canClaimFree: !profile.trial_free_used && !memberActive,
+        dailyCreditsPerDay: DAILY_CREDITS_AMOUNT,
+        freeDays: 3,
+        starterDays: 14,
+        starterPriceYuan: 1.9
+      }
     }
   });
 });
@@ -38,7 +57,8 @@ const REASON_LABELS: Record<string, string> = {
   image_generation_refund: '生图退款',
   payment_topup: '充值',
   subscription_grant: '订阅开通',
-  like_milestone: '点赞奖励'
+  like_milestone: '点赞奖励',
+  daily_grant: '每日会员积分'
 };
 
 meRoutes.get('/ledger', async c => {

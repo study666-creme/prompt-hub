@@ -7,6 +7,10 @@ grant select, insert, update on public.generation_requests to service_role;
 
 grant execute on function public.apply_credit_delta(uuid, integer, text, text, jsonb) to service_role;
 
+-- Worker 归档生图 / 签名 URL
+grant select, insert, update, delete on storage.objects to service_role;
+grant select, update on storage.buckets to service_role;
+
 -- 若仍报错，确认已跑过：supabase/migrations/20260526000000_backend_core.sql
 -- 数据安全加固（收回 anon、禁止客户端改积分）：supabase/migrations/20260526180000_data_security_hardening.sql
 -- 卡片图私有桶：supabase/migrations/20260526190000_private_card_images.sql

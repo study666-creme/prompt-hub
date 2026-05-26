@@ -10,6 +10,11 @@ import {
 } from '../../lib/generation-jobs';
 import { computeGenerationCost, type ImageModelId } from '../../lib/pricing';
 import {
+  deductUserCredits,
+  spendableCredits,
+  syncMembershipCredits
+} from '../../lib/membership-credits';
+import {
   createAdminClient,
   getOrCreateProfile,
   isMembershipActive
@@ -38,7 +43,7 @@ generateRoutes.post('/', async c => {
   }
 
   const admin = createAdminClient(c.env);
-  const profile = await getOrCreateProfile(admin, user.id);
+  let profile = await syncMembershipCredits(admin, user.id);
   const memberActive = isMembershipActive(profile);
   const modelId = parsed.data.model as ImageModelId;
   const { final, base, discountLabel, modelLabel } = computeGenerationCost(
@@ -48,11 +53,12 @@ generateRoutes.post('/', async c => {
     memberActive
   );
 
-  if (profile.credits < final) {
+  const balance = spendableCredits(profile);
+  if (balance < final) {
     throw new ApiError(
       402,
       'INSUFFICIENT_CREDITS',
-      `积分不足（需要 ${final}，当前 ${profile.credits}）`
+      `积分不足（需要 ${final}，当前 ${balance}）`
     );
   }
 
@@ -87,20 +93,38 @@ generateRoutes.post('/', async c => {
 
   if (jobErr) throw jobErr;
 
-  const { error: debitErr } = await admin.rpc('apply_credit_delta', {
-    p_user_id: user.id,
-    p_delta: -final,
-    p_reason: 'image_generation',
-    p_ref_id: job.id,
-    p_meta: { model: modelId, resolution: parsed.data.resolution, base, discountLabel }
-  });
-
-  if (debitErr) {
+  let debitSplit = { fromDaily: 0, fromPermanent: 0 };
+  try {
+    const debited = await deductUserCredits(
+      admin,
+      user.id,
+      final,
+      'image_generation',
+      job.id,
+      { model: modelId, resolution: parsed.data.resolution, base, discountLabel }
+    );
+    profile = debited.profile;
+    debitSplit = debited.split;
+    await admin
+      .from('generation_requests')
+      .update({
+        meta: {
+          model: modelId,
+          modelLabel,
+          refImageUrls: refUrls,
+          base,
+          discountLabel,
+          size: parsed.data.size ?? null,
+          debitSplit
+        }
+      })
+      .eq('id', job.id);
+  } catch (debitErr) {
     await admin
       .from('generation_requests')
       .update({ status: 'failed', error_message: 'debit_failed' })
       .eq('id', job.id);
-    if (String(debitErr.message).includes('insufficient')) {
+    if (String((debitErr as Error).message).includes('insufficient')) {
       throw new ApiError(402, 'INSUFFICIENT_CREDITS', '积分不足');
     }
     throw debitErr;
@@ -123,17 +147,25 @@ generateRoutes.post('/', async c => {
           refImageUrls: refUrls
         }
       );
+      const { data: curJob } = await admin
+        .from('generation_requests')
+        .select('meta')
+        .eq('id', job.id)
+        .maybeSingle();
+      const curMeta = (curJob?.meta as Record<string, unknown>) || {};
       await admin
         .from('generation_requests')
         .update({
           meta: {
+            ...curMeta,
             model: modelId,
             modelLabel,
             refImageUrls: refUrls,
             base,
             discountLabel,
             size: parsed.data.size ?? null,
-            apimartTaskId
+            apimartTaskId,
+            debitSplit
           }
         })
         .eq('id', job.id);
@@ -161,7 +193,7 @@ generateRoutes.post('/', async c => {
       .eq('id', job.id);
   }
 
-  const updated = await getOrCreateProfile(admin, user.id);
+  const updated = await syncMembershipCredits(admin, user.id);
 
   return c.json({
     ok: true,
@@ -171,7 +203,7 @@ generateRoutes.post('/', async c => {
       model: modelId,
       modelLabel,
       creditsCharged: final,
-      creditsRemaining: updated.credits,
+      creditsRemaining: spendableCredits(updated),
       cost: { base, final, discountLabel },
       imageUrl: null,
       demo: !imageApiKey
@@ -204,7 +236,7 @@ generateRoutes.get('/jobs/:jobId', async c => {
     c.env.IMAGE_API_BASE_URL
   );
 
-  const profile = await getOrCreateProfile(admin, user.id);
+  const profile = await syncMembershipCredits(admin, user.id);
   const meta = (job.meta as Record<string, unknown>) || {};
 
   if (polled.status === 'failed') {
@@ -215,7 +247,7 @@ generateRoutes.get('/jobs/:jobId', async c => {
         status: 'failed',
         imageUrl: null,
         errorMessage: polled.errorMessage,
-        creditsRemaining: profile.credits,
+        creditsRemaining: spendableCredits(profile),
         refunded: polled.refunded,
         message: '生图失败，积分已全额退回'
       }
@@ -228,7 +260,7 @@ generateRoutes.get('/jobs/:jobId', async c => {
       jobId: job.id,
       status: polled.status,
       imageUrl: polled.imageUrl,
-      creditsRemaining: profile.credits,
+      creditsRemaining: spendableCredits(profile),
       model: meta.model,
       modelLabel: meta.modelLabel
     }
@@ -246,7 +278,7 @@ generateRoutes.get('/cost', async c => {
   }
   const user = c.get('user');
   const admin = createAdminClient(c.env);
-  const profile = await getOrCreateProfile(admin, user.id);
+  const profile = await syncMembershipCredits(admin, user.id);
   const memberActive = isMembershipActive(profile);
   const cost = computeGenerationCost(
     model,

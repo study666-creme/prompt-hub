@@ -6,6 +6,8 @@ import type { Env } from '../env';
 export type AuthUser = {
   id: string;
   email?: string;
+  phone?: string;
+  phoneVerified: boolean;
 };
 
 declare module 'hono' {
@@ -35,7 +37,9 @@ export const requireAuth = createMiddleware<{ Bindings: Env }>(async (c, next) =
 
   c.set('user', {
     id: data.user.id,
-    email: data.user.email
+    email: data.user.email,
+    phone: data.user.phone ?? undefined,
+    phoneVerified: !!data.user.phone_confirmed_at
   });
   await next();
 });

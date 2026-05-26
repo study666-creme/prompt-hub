@@ -8,6 +8,11 @@ export type Profile = {
   membership_until: string | null;
   first_sub_offer_used: boolean;
   storage_bytes: number;
+  credit_grant_mode: 'daily' | 'bundle';
+  daily_credits: number;
+  daily_credits_date: string | null;
+  bundle_granted_until: string | null;
+  trial_free_used: boolean;
 };
 
 export function createAdminClient(env: Env): SupabaseClient {

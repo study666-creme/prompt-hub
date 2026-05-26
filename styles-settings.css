@@ -324,6 +324,103 @@ body.subscribe-open {
   letter-spacing: 0.02em;
 }
 
+.subscribe-trial-bar {
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.subscribe-trial-bar.hidden {
+  display: none;
+}
+.subscribe-trial-block {
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-light);
+  background: var(--bg-card);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.subscribe-trial-block p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 200px;
+}
+.subscribe-trial-starter {
+  border-color: var(--accent-border, var(--border-light));
+  background: linear-gradient(135deg, var(--accent-bg) 0%, var(--bg-card) 100%);
+}
+.subscribe-credit-mode {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated, var(--bg-card));
+}
+.subscribe-credit-mode-label {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.subscribe-credit-mode-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+@media (max-width: 520px) {
+  .subscribe-credit-mode-options {
+    grid-template-columns: 1fr;
+  }
+}
+.subscribe-credit-mode-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: border-color 0.15s, background 0.15s;
+}
+.subscribe-credit-mode-opt input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.subscribe-credit-mode-opt span {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.subscribe-credit-mode-opt small {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.subscribe-credit-mode-opt.active,
+.subscribe-credit-mode-opt:has(input:checked) {
+  border-color: var(--accent, #6366f1);
+  background: var(--accent-bg);
+}
+.imagegen-credits-detail {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+.imagegen-credits-detail.hidden {
+  display: none;
+}
+
 .subscribe-first-offer {
   margin-bottom: 16px;
   padding: 14px 16px;

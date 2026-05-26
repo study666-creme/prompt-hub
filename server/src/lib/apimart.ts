@@ -40,21 +40,57 @@ function extractTaskId(payload: unknown): string | null {
   return null;
 }
 
+function pickUrl(value: unknown): string | null {
+  if (typeof value === 'string' && /^https?:\/\//i.test(value)) return value;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const u = pickUrl(item);
+      if (u) return u;
+    }
+  }
+  if (value && typeof value === 'object') {
+    const o = value as Record<string, unknown>;
+    return (
+      pickUrl(o.url) ||
+      pickUrl(o.image_url) ||
+      pickUrl(o.imageUrl) ||
+      pickUrl(o.uri) ||
+      pickUrl(o.href)
+    );
+  }
+  return null;
+}
+
 function extractImageUrl(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null;
   const p = payload as Record<string, unknown>;
   const data = p.data;
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
+
+  const direct =
+    pickUrl(d.output_url) ||
+    pickUrl(d.image_url) ||
+    pickUrl(d.imageUrl) ||
+    pickUrl(d.url) ||
+    pickUrl(d.output);
+  if (direct) return direct;
+
   const result = d.result;
   if (!result || typeof result !== 'object') return null;
-  const images = (result as Record<string, unknown>).images;
+  const r = result as Record<string, unknown>;
+  const fromResult =
+    pickUrl(r.url) ||
+    pickUrl(r.image_url) ||
+    pickUrl(r.imageUrl) ||
+    pickUrl(r.output_url) ||
+    pickUrl(r.images) ||
+    pickUrl(r.image);
+  if (fromResult) return fromResult;
+
+  const images = r.images;
   if (!Array.isArray(images) || !images[0]) return null;
-  const first = images[0] as Record<string, unknown>;
-  const url = first.url;
-  if (typeof url === 'string') return url;
-  if (Array.isArray(url) && typeof url[0] === 'string') return url[0];
-  return null;
+  return pickUrl(images[0]);
 }
 
 function buildRequestBody(params: SubmitParams): Record<string, unknown> {

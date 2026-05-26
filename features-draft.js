@@ -86,7 +86,14 @@
     creations = loadJson(LS_CREATIONS, []);
     likedIds = new Set(loadJson(LS_LIKES, []));
     favIds = new Set(loadJson(LS_FAVS, []));
+    stripDemoCreations();
     pruneCreations();
+  }
+
+  function stripDemoCreations() {
+    const before = creations.length;
+    creations = creations.filter(c => !isDemoPlaceholderImage(c?.image));
+    if (creations.length !== before) persistCreations();
   }
 
   function pruneCreations() {
@@ -165,7 +172,60 @@
 
   function featureImgSrc(image) {
     if (!image) return '';
-    return window.SupabaseSync?.getCachedDisplayUrl?.(image) || image;
+    if (window.SupabaseSync?.safeImgSrc) return window.SupabaseSync.safeImgSrc(image);
+    if (window.SupabaseSync?.isStorageRef?.(image)) {
+      const c = window.SupabaseSync.getCachedDisplayUrl?.(image);
+      return c && !c.startsWith('storage://') ? c : '';
+    }
+    return image;
+  }
+
+  function isDemoPlaceholderImage(image) {
+    if (typeof image !== 'string' || !image.startsWith('data:image/')) return false;
+    if (image.length < 120000) return true;
+    return image.includes('演示生成');
+  }
+
+  async function resolveImageDisplayUrl(image, jobId) {
+    if (!image) return '';
+    if (jobId && window.PromptHubApi?.getGenerationImageUrl) {
+      const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
+      if (r.ok && r.data?.url) return r.data.url;
+    }
+    if (window.SupabaseSync?.resolveDisplayUrl) {
+      try {
+        return await window.SupabaseSync.resolveDisplayUrl(image);
+      } catch (e) {
+        console.warn('resolve image failed', e);
+      }
+    }
+    if (typeof image === 'string' && /^https?:\/\//i.test(image)) return image;
+    return '';
+  }
+
+  const IMG_LOADING_PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect fill="#1e1e24" width="8" height="8"/></svg>'
+  );
+
+  async function hydrateFeedImages(root) {
+    const scope = root || document;
+    const imgs = scope.querySelectorAll('img[data-image-ref]');
+    await Promise.all([...imgs].map(async img => {
+      const ref = img.getAttribute('data-image-ref');
+      const jobId = img.getAttribute('data-job-id') || '';
+      if (!ref) return;
+      img.src = IMG_LOADING_PLACEHOLDER;
+      const url = await resolveImageDisplayUrl(ref, jobId || null);
+      if (url && !url.startsWith('storage://')) {
+        img.src = url;
+        img.classList.remove('img-load-failed');
+      } else {
+        img.classList.add('img-load-failed');
+      }
+    }));
+    if (window.SupabaseSync?.hydrateImageElements) {
+      await window.SupabaseSync.hydrateImageElements(scope);
+    }
   }
 
   function getPostsByAuthor(authorId) {
@@ -331,11 +391,8 @@
       div.style.animationDelay = `${Math.min(idx * 0.045, 0.36)}s`;
       div.dataset.postId = post.id;
       const liked = likedIds.has(post.id);
-      const imgRefAttr = window.SupabaseSync?.isStorageRef?.(post.image)
-        ? ` data-storage-ref="${esc(post.image)}"`
-        : '';
       const mediaInner = post.image
-        ? `<img class="card-img" src="${esc(featureImgSrc(post.image))}"${imgRefAttr} loading="lazy" draggable="false" alt="" onload="if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleLayout('${containerId}')">`
+        ? `<img class="card-img" src="${IMG_LOADING_PLACEHOLDER}" data-image-ref="${esc(post.image)}" loading="lazy" draggable="false" alt="" onload="if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleLayout('${containerId}')">`
         : '<div class="card-media-placeholder" aria-hidden="true"></div>';
       const timeLabel = `♥ ${post.likes || 0}`;
       const desc = getPostDesc(post);
@@ -360,11 +417,7 @@
 
     container.innerHTML = '';
     container.appendChild(fragment);
-    if (window.SupabaseSync?.hydrateImageElements) {
-      void window.SupabaseSync.hydrateImageElements(container).then(() => scheduleCommunityLayout(containerId));
-    } else {
-      scheduleCommunityLayout(containerId);
-    }
+    void hydrateFeedImages(container).then(() => scheduleCommunityLayout(containerId));
   }
 
   function filterAndSortPosts(list) {
@@ -764,7 +817,7 @@
       div.dataset.creationId = c.id;
       const badge = c.visibility === 'published' ? '已发布' : '私密';
       div.innerHTML = `
-        <div class="card-media"><img class="card-img" src="${esc(featureImgSrc(c.image))}" loading="lazy" alt="" onload="if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleCreationsLayout()"></div>
+        <div class="card-media"><img class="card-img" src="${IMG_LOADING_PLACEHOLDER}" data-image-ref="${esc(c.image)}"${c.jobId ? ` data-job-id="${esc(c.jobId)}"` : ''} loading="lazy" alt="" onload="if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleCreationsLayout()"></div>
         <div class="card-body">
           <div class="card-head">
             <div class="card-title">${esc((c.prompt || '').slice(0, 28) || '无标题')}</div>
@@ -778,7 +831,7 @@
     });
     container.innerHTML = '';
     container.appendChild(fragment);
-    scheduleCommunityLayout('creationsGrid');
+    void hydrateFeedImages(container).then(() => scheduleCommunityLayout('creationsGrid'));
     if (creationsSideId && list.some(c => c.id === creationsSideId)) {
       renderCreationsSidePanel(creationsSideId);
     } else if (creationsSideId) {
@@ -1245,7 +1298,7 @@
   async function pollGenerationJobUntilDone(jobId, pendingId, ctx) {
     const maxAttempts = 80;
     for (let i = 0; i < maxAttempts; i++) {
-      await new Promise(r => setTimeout(r, 3000));
+      await new Promise(r => setTimeout(r, i === 0 ? 1500 : 3000));
       const still = imageGenPendingJobs.some(j => j.id === pendingId);
       if (!still) return;
 
@@ -1286,10 +1339,11 @@
           toast('生图未返回图片，若积分未退回请点同步或联系客服');
           return;
         }
-        finishImageGenRun({
+        void finishImageGenRun({
           ...ctx,
           image: imageUrl,
-          cost: ctx.cost
+          cost: ctx.cost,
+          jobId
         });
         return;
       }
@@ -1399,14 +1453,15 @@
 
       if (gen.data.status === 'completed' && gen.data.imageUrl) {
         removePendingJob(pendingId);
-        finishImageGenRun({
+        void finishImageGenRun({
           prompt,
           model,
           resolution,
           quality,
           size,
           image: gen.data.imageUrl,
-          cost
+          cost,
+          jobId: gen.data.jobId
         });
         return;
       }
@@ -1426,48 +1481,44 @@
         resolution,
         quality,
         size,
-        cost
+        cost,
+        jobId
       });
       return;
     }
 
-    if (!window.PointsSystem?.deductCredits?.(cost)) {
-      removePendingJob(pendingId);
-      renderImageGenFeed();
-      toast('积分扣除失败');
-      return;
-    }
+    removePendingJob(pendingId);
+    renderImageGenFeed();
     if (btn) {
       btn.disabled = false;
       restoreImageGenSubmitLabel();
     }
-    setTimeout(() => {
-      removePendingJob(pendingId);
-      finishImageGenRun({
-        prompt,
-        model,
-        resolution,
-        quality,
-        size,
-        image: makePlaceholderDataUrl(prompt + resolution, creations.length),
-        cost
-      });
-    }, 900);
+    toast('请登录并连接后端 API 后使用真实生图（演示占位已关闭）');
   }
 
-  function finishImageGenRun({ prompt, model, resolution, quality, size, image, cost, btn }) {
-    if (!image || (typeof image === 'string' && image.startsWith('storage://'))) {
+  async function finishImageGenRun({ prompt, model, resolution, quality, size, image, cost, btn, jobId }) {
+    if (!image) {
       toast('图片地址无效，请重试');
       return;
     }
-    imageGenLastResult = image;
+    const creationId = genId('cr');
+    let storedImage = image;
+    if (window.SupabaseSync?.persistGenerationImage) {
+      try {
+        storedImage = await window.SupabaseSync.persistGenerationImage(creationId, image);
+      } catch (e) {
+        console.warn('生成图归档失败', e);
+      }
+    }
+    imageGenLastResult = storedImage;
     const primaryRef = getImageGenPrimaryRef();
     const modelId = model || 'quanneng2';
     const modelLabel = window.PointsSystem?.getImageGenModel?.(modelId)?.label || modelId;
     const creation = {
-      id: genId('cr'),
+      id: creationId,
+      jobId: jobId || null,
       prompt,
-      image,
+      image: storedImage,
       refImage: primaryRef,
       refImages: imageGenRefImages.length ? [...imageGenRefImages] : null,
       model: modelId,
@@ -1517,25 +1568,18 @@
     }
   }
 
-  function feedImageAttrs(image) {
-    if (!image) return { src: '', refAttr: '' };
-    const src = featureImgSrc(image);
-    const refAttr = window.SupabaseSync?.isStorageRef?.(image)
-      ? ` data-storage-ref="${esc(image)}"`
-      : '';
-    return { src: esc(src), refAttr };
-  }
 
   function buildFeedPendingCardHtml(job) {
     const badges = [job.modelLabel || '生图中', (job.resolution || '1k').toUpperCase()];
     const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${esc(b)}</span>`).join('');
     return `<article class="imagegen-feed-card imagegen-feed-card-tile imagegen-feed-card--pending" data-feed-id="${esc(job.id)}" data-pending="1">
       <div class="imagegen-feed-media imagegen-gen-pending" aria-busy="true">
-        <div class="imagegen-gen-pending-inner">
-          <div class="imagegen-gen-pending-orb"></div>
-          <div class="imagegen-gen-pending-orb imagegen-gen-pending-orb--delay"></div>
-          <span class="imagegen-gen-pending-label">生成中</span>
+        <div class="imagegen-gen-grid" aria-hidden="true">
+          <div class="imagegen-gen-grid-layer imagegen-gen-grid-layer--base"></div>
+          <div class="imagegen-gen-grid-layer imagegen-gen-grid-layer--wave"></div>
+          <div class="imagegen-gen-grid-layer imagegen-gen-grid-layer--wave imagegen-gen-grid-layer--wave2"></div>
         </div>
+        <span class="imagegen-gen-pending-label">生成中</span>
       </div>
       <div class="imagegen-feed-content">
         <p class="imagegen-feed-prompt">${esc((job.prompt || '').slice(0, 120))}</p>
@@ -1549,13 +1593,13 @@
 
   function buildFeedCardHtml(opts) {
     const {
-      id, prompt, image, title, badges = [], meta = '', active = false,
+      id, prompt, image, jobId, title, badges = [], meta = '', active = false,
       showLike = false, liked = false, likeCount = 0, showSave = false
     } = opts;
-    const { src: imgSrc, refAttr: imgRefAttr } = feedImageAttrs(image);
-    const previewSrc = image && !imgSrc.startsWith('storage://') ? image : imgSrc;
+    const refAttr = image ? ` data-image-ref="${esc(image)}"` : '';
+    const jobAttr = jobId ? ` data-job-id="${esc(jobId)}"` : '';
     const imgBlock = image
-      ? `<button type="button" class="imagegen-feed-thumb-btn" data-preview-src="${esc(previewSrc)}" title="放大预览"><img src="${imgSrc}"${imgRefAttr} alt="" loading="lazy"></button>`
+      ? `<button type="button" class="imagegen-feed-thumb-btn" data-preview-src="" title="放大预览"><img src="${IMG_LOADING_PLACEHOLDER}"${refAttr}${jobAttr} alt="" loading="lazy"></button>`
       : '<div class="imagegen-feed-img-empty">无图</div>';
     const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${esc(b)}</span>`).join('');
     const likeBtn = showLike
@@ -1649,6 +1693,7 @@
           id: c.id,
           prompt: c.prompt,
           image: c.image,
+          jobId: c.jobId,
           badges: [c.modelLabel || '全能模型2', (c.resolution || '1k').toUpperCase()],
           meta: formatExpiryLabel(c),
           active: c.id === imageGenActiveHistoryId,
@@ -1658,34 +1703,22 @@
     }
     wrap.className = 'imagegen-feed imagegen-feed--tiles';
     wrap.innerHTML = html;
-    const allImages = [];
-    wrap.querySelectorAll('img[data-storage-ref]').forEach(img => {
-      allImages.push(img.getAttribute('data-storage-ref'));
-    });
-    if (window.SupabaseSync?.prefetchDisplayUrls && allImages.length) {
-      void window.SupabaseSync.prefetchDisplayUrls(allImages).then(() => {
-        if (window.SupabaseSync.hydrateImageElements) {
-          void window.SupabaseSync.hydrateImageElements(wrap);
-        }
-      });
-    } else if (window.SupabaseSync?.hydrateImageElements) {
-      void window.SupabaseSync.hydrateImageElements(wrap);
-    }
+    void hydrateFeedImages(wrap);
     wrap.querySelectorAll('.imagegen-feed-card').forEach(card => {
       if (card.dataset.pending === '1') return;
       const feedId = card.dataset.feedId;
       card.querySelector('.imagegen-feed-thumb-btn')?.addEventListener('click', e => {
         e.stopPropagation();
         const btnEl = e.currentTarget;
-        const rawRef = btnEl.querySelector('img')?.getAttribute('data-storage-ref');
-        const src = btnEl.dataset.previewSrc;
-        if (rawRef && window.SupabaseSync?.resolveDisplayUrl) {
-          void window.SupabaseSync.resolveDisplayUrl(rawRef).then(url => {
-            if (url && typeof window.openLightbox === 'function') window.openLightbox(url);
-          });
-        } else if (src && typeof window.openLightbox === 'function') {
-          window.openLightbox(src);
-        }
+        const imgEl = btnEl.querySelector('img');
+        const rawRef = imgEl?.getAttribute('data-image-ref');
+        const jobId = imgEl?.getAttribute('data-job-id');
+        const src = imgEl?.src && !imgEl.src.startsWith('data:image/svg') ? imgEl.src : '';
+        void (async () => {
+          let url = src;
+          if (rawRef) url = await resolveImageDisplayUrl(rawRef, jobId);
+          if (url && typeof window.openLightbox === 'function') window.openLightbox(url);
+        })();
       });
       card.querySelector('.imagegen-feed-save-btn')?.addEventListener('click', e => {
         e.stopPropagation();
@@ -1885,6 +1918,7 @@
     getCloudSlice,
     applyCloudSlice,
     reconcileCommunityWithCards,
+    hydrateFeedImages,
     scheduleLayout: scheduleCommunityLayout,
     scheduleCreationsLayout: () => scheduleCommunityLayout('creationsGrid')
   };
