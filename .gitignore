@@ -6,6 +6,10 @@ desktop.ini
 supabase-config.local.js
 api-config.local.js
 scripts/admin.local.env
+server/.dev.vars
+server/.dev.vars.*
+scripts/taobao-*.txt
+scripts/activation-codes-insert.sql
 *.log
 node_modules/
 

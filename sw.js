@@ -1,4 +1,4 @@
-const CACHE = 'prompt-hub-v33';
+const CACHE = 'prompt-hub-v37';
 const ASSETS = [
   './',
   './index.html',
@@ -15,8 +15,10 @@ const ASSETS = [
   './subscription.js',
   './mobile.js',
   './supabase-config.js',
+  './api-domain.config.js',
   './api-config.js',
   './api-client.js',
+  './cloud-sync-safety.js',
   './supabase-sync.js',
   './ripple-grid.js',
   './manifest.webmanifest',
@@ -44,6 +46,10 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== self.location.origin) return;
   if (e.request.method !== 'GET') return;
 
+  const isHtml =
+    e.request.mode === 'navigate' ||
+    url.pathname === '/' ||
+    url.pathname.endsWith('.html');
   const isScriptOrStyle = /\.(css|js)$/.test(url.pathname);
 
   e.respondWith(
@@ -55,6 +61,9 @@ self.addEventListener('fetch', (e) => {
         }
         return res;
       };
+      if (isHtml) {
+        return fetch(e.request).then(putCache).catch(() => cached);
+      }
       if (isScriptOrStyle) {
         return fetch(e.request).then(putCache).catch(() => cached);
       }

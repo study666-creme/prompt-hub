@@ -13,14 +13,35 @@ app.use('*', async (c, next) => {
   return corsMw(c, next);
 });
 
-app.get('/health', c =>
-  c.json({
-    ok: true,
+app.get('/health', async c => {
+  const key = c.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || '';
+  let db: 'ok' | 'misconfigured' | 'error' = 'ok';
+  if (!key || key.startsWith('sb_publishable_')) {
+    db = 'misconfigured';
+  } else if (c.env.SUPABASE_URL) {
+    try {
+      const { createAdminClient } = await import('./lib/supabase');
+      const admin = createAdminClient(c.env);
+      const { error } = await admin.from('activation_codes').select('code').limit(1);
+      if (error) db = 'error';
+    } catch {
+      db = 'error';
+    }
+  }
+  return c.json({
+    ok: db === 'ok',
     service: 'prompt-hub-api',
     version: '0.1.0',
-    environment: c.env.ENVIRONMENT
-  })
-);
+    environment: c.env.ENVIRONMENT,
+    supabase: db,
+    hint:
+      db === 'misconfigured'
+        ? 'SUPABASE_SERVICE_ROLE_KEY 需为 sb_secret_，请 wrangler secret put 后重新 deploy'
+        : db === 'error'
+          ? '执行 scripts/apply-grants-once.sql'
+          : undefined
+  });
+});
 
 app.get('/api/v1/billing/plans', c =>
   c.json({

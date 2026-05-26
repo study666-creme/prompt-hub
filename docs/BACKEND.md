@@ -84,6 +84,8 @@ Content-Type: application/json
 1. `20260526000000_backend_core.sql`
 2. `20260526120000_points_scale_x10.sql`（若已用旧积分）
 3. `20260526140000_generation_meta_webhooks.sql`
+4. `20260526150000_like_milestone_claims.sql`
+5. `20260526160000_activation_codes_grants.sql`
 
 ## 本地开发
 
@@ -105,15 +107,21 @@ window.API_BASE_URL = 'http://127.0.0.1:8787';
 
 ## 部署 API（Cloudflare）
 
+> **Node 版本**：请在本项目 `server/` 目录用 **`npm run deploy`** 或 **`npm exec wrangler`**（锁定 Wrangler 3，支持 Node 18/20）。  
+> 不要单独运行 `npx wrangler`（可能安装 Wrangler 4，要求 Node 22 并报错）。
+
 ```bash
 cd server
-npx wrangler secret put SUPABASE_URL
-npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
-# 可选
-npx wrangler secret put IMAGE_API_KEY
-npx wrangler secret put IMAGE_API_BASE_URL
+npm install
+npm run secret-supabase
+npm run secret-service-role
+# 真生图（APIMart）
+npm run secret-image-key
+npm run secret-image-base
 npm run deploy
 ```
+
+Windows 也可：`.\deploy.ps1`、`.\secrets.ps1 -Which image-key`
 
 在 `api-config.js` 或生产环境注入 `window.API_BASE_URL = 'https://prompt-hub-api.<account>.workers.dev'`。
 

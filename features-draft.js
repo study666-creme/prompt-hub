@@ -141,10 +141,16 @@
 
   function persistCommunity() {
     saveJson(LS_COMMUNITY, communityPosts.filter(p => !p.isMock));
+    if (window.SupabaseSync?.isLoggedIn?.()) {
+      window.scheduleCloudPush?.();
+    }
   }
 
   function persistCreations() {
     saveJson(LS_CREATIONS, creations);
+    if (window.SupabaseSync?.isLoggedIn?.()) {
+      window.scheduleCloudPush?.();
+    }
   }
 
   function persistLikes() {
@@ -157,8 +163,14 @@
 
   function getAllCommunityPosts() {
     const userPosts = communityPosts.filter(p => !p.isMock);
+    if (window.SupabaseSync?.isLoggedIn?.()) return userPosts;
     const mocks = MOCK_POSTS.filter(m => !userPosts.some(u => u.id === m.id));
     return [...userPosts, ...mocks];
+  }
+
+  function featureImgSrc(image) {
+    if (!image) return '';
+    return window.SupabaseSync?.getCachedDisplayUrl?.(image) || image;
   }
 
   function getPostsByAuthor(authorId) {
@@ -289,7 +301,7 @@
     });
   }
 
-  function renderPostsIntoContainer(posts, containerId) {
+  async function renderPostsIntoContainer(posts, containerId) {
     const container = document.getElementById(containerId);
     if (!container) return;
     const isProfile = containerId === 'userProfileGrid';
@@ -309,6 +321,10 @@
       return;
     }
 
+    if (window.SupabaseSync?.prefetchDisplayUrls) {
+      await window.SupabaseSync.prefetchDisplayUrls(posts.map(p => p.image).filter(Boolean));
+    }
+
     const fragment = document.createDocumentFragment();
     const sizer = document.createElement('div');
     sizer.className = 'grid-sizer';
@@ -321,7 +337,7 @@
       div.dataset.postId = post.id;
       const liked = likedIds.has(post.id);
       const mediaInner = post.image
-        ? `<img class="card-img" src="${esc(post.image)}" loading="lazy" draggable="false" alt="" onload="if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleLayout('${containerId}')">`
+        ? `<img class="card-img" src="${esc(featureImgSrc(post.image))}" loading="lazy" draggable="false" alt="" onload="if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleLayout('${containerId}')">`
         : '<div class="card-media-placeholder" aria-hidden="true"></div>';
       const timeLabel = `♥ ${post.likes || 0}`;
       const desc = getPostDesc(post);
@@ -376,14 +392,14 @@
       container.innerHTML = '<div class="feature-empty"><p>暂无社区内容</p><button type="button" class="btn btn-primary" onclick="switchAppPage(\'warehouse\')">去卡片库发布</button></div>';
       return;
     }
-    renderPostsIntoContainer(list, 'communityGrid');
+    void renderPostsIntoContainer(list, 'communityGrid');
   }
 
   function renderUserProfileGrid() {
     if (!openProfileAuthorId) return;
     const posts = getPostsByAuthor(openProfileAuthorId);
     posts.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    renderPostsIntoContainer(posts, 'userProfileGrid');
+    void renderPostsIntoContainer(posts, 'userProfileGrid');
   }
 
   function openUserProfile(authorId, authorName) {
@@ -525,7 +541,7 @@
     });
   }
 
-  function renderCommunitySidePanel(id) {
+  async function renderCommunitySidePanel(id) {
     const post = findPost(id);
     const body = document.getElementById('communitySideBody');
     const titleEl = document.getElementById('communitySideTitle');
@@ -533,8 +549,12 @@
     if (titleEl) titleEl.textContent = getPostTitle(post);
     const faved = favIds.has(id);
     const liked = likedIds.has(id);
-    const imgBlock = post.image
-      ? `<img class="community-side-img" src="${esc(post.image)}" alt="">`
+    let sideImgSrc = post.image || '';
+    if (sideImgSrc && window.SupabaseSync?.resolveDisplayUrl) {
+      sideImgSrc = await window.SupabaseSync.resolveDisplayUrl(sideImgSrc);
+    }
+    const imgBlock = sideImgSrc
+      ? `<img class="community-side-img" src="${esc(sideImgSrc)}" alt="">`
       : '';
     body.innerHTML = `
       ${imgBlock}
@@ -703,7 +723,7 @@
     document.querySelectorAll('#creationsGrid .creation-post-card.selected').forEach(el => el.classList.remove('selected'));
   }
 
-  function renderCreations() {
+  async function renderCreations() {
     const container = document.getElementById('creationsGrid');
     const hintEl = document.getElementById('creationsHint');
     if (!container) return;
@@ -725,6 +745,9 @@
       container.innerHTML = `<div class="feature-empty"><p>${creationsTab === 'private' ? '暂无私密作品' : '暂无已发布作品'}</p><button type="button" class="btn btn-primary" onclick="switchAppPage('imagegen')">去图片生成</button></div>`;
       return;
     }
+    if (window.SupabaseSync?.prefetchDisplayUrls) {
+      await window.SupabaseSync.prefetchDisplayUrls(list.map(c => c.image).filter(Boolean));
+    }
     const fragment = document.createDocumentFragment();
     const sizer = document.createElement('div');
     sizer.className = 'grid-sizer';
@@ -736,7 +759,7 @@
       div.dataset.creationId = c.id;
       const badge = c.visibility === 'published' ? '已发布' : '私密';
       div.innerHTML = `
-        <div class="card-media"><img class="card-img" src="${esc(c.image)}" loading="lazy" alt="" onload="if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleCreationsLayout()"></div>
+        <div class="card-media"><img class="card-img" src="${esc(featureImgSrc(c.image))}" loading="lazy" alt="" onload="if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleCreationsLayout()"></div>
         <div class="card-body">
           <div class="card-head">
             <div class="card-title">${esc((c.prompt || '').slice(0, 28) || '无标题')}</div>
@@ -1614,6 +1637,48 @@
     updateImageGenCostHint();
   }
 
+  function getCloudSlice() {
+    return {
+      communityPosts: communityPosts.filter(p => !p.isMock),
+      creations,
+      communityLikes: [...likedIds],
+      communityFavorites: [...favIds]
+    };
+  }
+
+  function applyCloudSlice(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    if (Array.isArray(payload.communityPosts)) {
+      communityPosts = payload.communityPosts.filter(p => !p.isMock).map(p => {
+        if (!p?.image || !window.SupabaseSync?.normalizeImageRef) return p;
+        return { ...p, image: window.SupabaseSync.normalizeImageRef(p.image) };
+      });
+      saveJson(LS_COMMUNITY, communityPosts);
+    }
+    if (Array.isArray(payload.creations)) {
+      creations = payload.creations.map(c => {
+        if (!c?.image || !window.SupabaseSync?.normalizeImageRef) return c;
+        return { ...c, image: window.SupabaseSync.normalizeImageRef(c.image) };
+      });
+      pruneCreations();
+      saveJson(LS_CREATIONS, creations);
+    }
+    if (Array.isArray(payload.communityLikes)) {
+      likedIds = new Set(payload.communityLikes);
+      saveJson(LS_LIKES, [...likedIds]);
+    }
+    if (Array.isArray(payload.communityFavorites)) {
+      favIds = new Set(payload.communityFavorites);
+      saveJson(LS_FAVS, [...favIds]);
+    }
+    if (document.getElementById('pageCommunity')?.classList.contains('active')) {
+      renderCommunity();
+    }
+    if (document.getElementById('pageCreations')?.classList.contains('active')) {
+      renderCreations();
+    }
+  }
+
   window.FeatureDraft = {
     init,
     onAppChange,
@@ -1622,6 +1687,8 @@
     removeCommunityByCardId,
     setPublishCheckbox,
     readPublishCheckbox,
+    getCloudSlice,
+    applyCloudSlice,
     scheduleLayout: scheduleCommunityLayout,
     scheduleCreationsLayout: () => scheduleCommunityLayout('creationsGrid')
   };

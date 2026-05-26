@@ -1,9 +1,18 @@
 /**
- * 后端 API 根地址（Cloudflare Workers）
- * 本地开发：创建 api-config.local.js 覆盖，例如 window.API_BASE_URL = 'http://127.0.0.1:8787';
+ * 后端 API 根地址
+ * 优先：api-domain.config.js 里的 CUSTOM_API_HOST（国内可访问）
+ * 其次：Pages 默认域名 → workers.dev
+ * 本地：api-config.local.js 覆盖
  */
 (function () {
   if (window.API_BASE_URL) return;
+
+  var custom = String(window.CUSTOM_API_HOST || '').trim();
+  if (custom) {
+    window.API_BASE_URL =
+      'https://' + custom.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+    return;
+  }
 
   var host = (typeof location !== 'undefined' && location.hostname) || '';
   var prodByHost = {

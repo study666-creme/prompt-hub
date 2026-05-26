@@ -14,7 +14,13 @@ export function createAdminClient(env: Env): SupabaseClient {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error('Supabase admin credentials not configured');
   }
-  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+  const key = env.SUPABASE_SERVICE_ROLE_KEY.trim();
+  if (key.startsWith('sb_publishable_')) {
+    throw new Error(
+      'SUPABASE_SERVICE_ROLE_KEY must be Secret key (sb_secret_), not Publishable'
+    );
+  }
+  return createClient(env.SUPABASE_URL, key, {
     auth: { persistSession: false, autoRefreshToken: false }
   });
 }

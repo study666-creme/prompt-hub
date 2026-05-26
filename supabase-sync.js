@@ -1,6 +1,9 @@
 (function () {
   const PLACEHOLDER = /YOUR_/;
   const BUCKET = 'card-images';
+  const STORAGE_PREFIX = `storage://${BUCKET}/`;
+  const SIGNED_TTL_SEC = 3600;
+  const signedUrlCache = new Map();
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
   const MAX_SIDE = 1600;
   const JPEG_QUALITY = 0.82;
@@ -72,18 +75,99 @@
   }
 
   function isStorageUrl(str) {
+    return isStorageRef(str);
+  }
+
+  function isStorageRef(str) {
     if (!str || typeof str !== 'string') return false;
+    if (str.startsWith(STORAGE_PREFIX)) return true;
     if (!window.SUPABASE_URL) return false;
     const base = window.SUPABASE_URL.replace(/\/$/, '');
-    return str.startsWith(`${base}/storage/v1/object/public/${BUCKET}/`);
+    return (
+      str.startsWith(`${base}/storage/v1/object/public/${BUCKET}/`) ||
+      str.startsWith(`${base}/storage/v1/object/sign/${BUCKET}/`) ||
+      str.startsWith(`${base}/storage/v1/object/authenticated/${BUCKET}/`)
+    );
   }
 
   function storagePathFromUrl(url) {
-    if (!isStorageUrl(url)) return null;
-    const marker = `/storage/v1/object/public/${BUCKET}/`;
-    const i = url.indexOf(marker);
-    if (i === -1) return null;
-    return url.slice(i + marker.length).split('?')[0];
+    if (!url || typeof url !== 'string') return null;
+    if (url.startsWith(STORAGE_PREFIX)) return url.slice(STORAGE_PREFIX.length).split('?')[0];
+    const markers = [
+      `/storage/v1/object/public/${BUCKET}/`,
+      `/storage/v1/object/sign/${BUCKET}/`,
+      `/storage/v1/object/authenticated/${BUCKET}/`
+    ];
+    for (const marker of markers) {
+      const i = url.indexOf(marker);
+      if (i !== -1) return url.slice(i + marker.length).split('?')[0];
+    }
+    return null;
+  }
+
+  function storagePathFromRef(value) {
+    return storagePathFromUrl(value);
+  }
+
+  function toStorageRef(path) {
+    return STORAGE_PREFIX + path.replace(/^\//, '');
+  }
+
+  function normalizeImageRef(value) {
+    if (!value || typeof value !== 'string') return value;
+    const path = storagePathFromRef(value);
+    if (path) return toStorageRef(path);
+    return value;
+  }
+
+  function clearSignedUrlCache() {
+    signedUrlCache.clear();
+  }
+
+  async function getSignedUrlForPath(path) {
+    const key = path.replace(/^\//, '');
+    const cached = signedUrlCache.get(key);
+    if (cached && cached.expiresAt > Date.now() + 120000) return cached.url;
+    await ensureSession();
+    const sb = getClient();
+    const { data, error } = await sb.storage.from(BUCKET).createSignedUrl(key, SIGNED_TTL_SEC);
+    if (error) throw error;
+    signedUrlCache.set(key, {
+      url: data.signedUrl,
+      expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
+    });
+    return data.signedUrl;
+  }
+
+  async function resolveDisplayUrl(image) {
+    if (!image || typeof image !== 'string') return image;
+    if (isDataUrl(image) || image.startsWith('blob:')) return image;
+    const path = storagePathFromRef(image);
+    if (!path) return image;
+    if (!isLoggedIn()) return image;
+    try {
+      return await getSignedUrlForPath(path);
+    } catch (e) {
+      console.warn('[SupabaseSync] signed url failed', path, e);
+      return image;
+    }
+  }
+
+  async function prefetchDisplayUrls(images) {
+    if (!isLoggedIn()) return;
+    const paths = [...new Set(
+      (images || []).map(storagePathFromRef).filter(Boolean)
+    )];
+    await Promise.all(paths.map(p => getSignedUrlForPath(p).catch(() => {})));
+  }
+
+  function getCachedDisplayUrl(image) {
+    if (!image || typeof image !== 'string') return image;
+    if (isDataUrl(image) || image.startsWith('blob:')) return image;
+    const path = storagePathFromRef(image);
+    if (!path) return image;
+    const cached = signedUrlCache.get(path.replace(/^\//, ''));
+    return cached?.url || image;
   }
 
   function loadImageFromSource(source) {
@@ -135,8 +219,7 @@
       cacheControl: '3600'
     });
     if (error) throw error;
-    const { data } = sb.storage.from(BUCKET).getPublicUrl(path);
-    return data.publicUrl;
+    return toStorageRef(path);
   }
 
   async function uploadCardImage(cardId, source) {
@@ -152,25 +235,24 @@
       cacheControl: '3600'
     });
     if (error) throw error;
-    const { data } = sb.storage.from(BUCKET).getPublicUrl(path);
-    return data.publicUrl;
+    return toStorageRef(path);
   }
 
   async function deleteCardImageByUrl(url) {
-    if (!url || !isStorageUrl(url)) return;
+    if (!url || !isStorageRef(url)) return;
     const sb = getClient();
-    const path = storagePathFromUrl(url);
+    const path = storagePathFromRef(url);
     if (!sb || !path) return;
     await sb.storage.from(BUCKET).remove([path]);
   }
 
   async function resolveCardImageForSave(cardId, imageValue, previousUrl) {
     if (!imageValue) {
-      if (previousUrl && isStorageUrl(previousUrl)) await deleteCardImageByUrl(previousUrl);
+      if (previousUrl && isStorageRef(previousUrl)) await deleteCardImageByUrl(previousUrl);
       return null;
     }
     if (!isLoggedIn()) return imageValue;
-    if (isStorageUrl(imageValue)) return imageValue;
+    if (isStorageRef(imageValue)) return normalizeImageRef(imageValue);
     if (isDataUrl(imageValue) || imageValue.startsWith('blob:')) {
       const url = await uploadCardImage(cardId, imageValue);
       if (previousUrl && previousUrl !== url) await deleteCardImageByUrl(previousUrl);
@@ -185,7 +267,9 @@
     const warnings = [];
     for (const card of cards) {
       const copy = { ...card };
-      if (copy.image && isDataUrl(copy.image)) {
+      if (copy.image && isStorageRef(copy.image)) {
+        copy.image = normalizeImageRef(copy.image);
+      } else if (copy.image && isDataUrl(copy.image)) {
         try {
           copy.image = await uploadCardImage(copy.id, copy.image);
         } catch (e) {
@@ -349,6 +433,7 @@
     if (!sb) return;
     await sb.auth.signOut();
     session = null;
+    clearSignedUrlCache();
   }
 
   async function pullCloudData() {
@@ -361,13 +446,41 @@
     return data?.data || null;
   }
 
-  async function pushCloudData(payload) {
+  async function pushCloudData(payload, opts = {}) {
     await ensureSession();
     const sb = getClient();
     const uid = getUserId();
     if (!sb || !uid) return { warnings: [] };
+
+    let cloudPayload = null;
+    if (!opts.skipSafety && window.CloudSyncSafety?.validatePush) {
+      try {
+        const { data, error: pullErr } = await sb
+          .from('user_data')
+          .select('data')
+          .eq('user_id', uid)
+          .maybeSingle();
+        if (pullErr) throw pullErr;
+        cloudPayload = data?.data || null;
+        const check = window.CloudSyncSafety.validatePush(payload, cloudPayload);
+        if (!check.allow) {
+          throw new Error(check.reason || '为保护云端数据，已取消同步');
+        }
+        if (check.merged) payload = check.merged;
+      } catch (e) {
+        if (e.message && e.message.includes('已阻止')) throw e;
+        if (!opts.allowWithoutCloudCheck) {
+          throw new Error('无法校验云端数据，已取消上传：' + formatError(e));
+        }
+      }
+    }
+
     const { cards: preparedCards, warnings } = await prepareCardsForCloud(payload.cards || []);
-    const prepared = { ...payload, cards: preparedCards };
+    const prepared = {
+      ...payload,
+      cards: preparedCards,
+      schemaVersion: window.CloudSyncSafety?.SCHEMA_VERSION || 2
+    };
     const { error } = await sb.from('user_data').upsert({
       user_id: uid,
       data: prepared,
@@ -386,6 +499,13 @@
     getUserEmail,
     isDataUrl,
     isStorageUrl,
+    isStorageRef,
+    storagePathFromRef,
+    normalizeImageRef,
+    resolveDisplayUrl,
+    prefetchDisplayUrls,
+    getCachedDisplayUrl,
+    clearSignedUrlCache,
     init,
     signUp,
     signIn,

@@ -6,6 +6,10 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "secret-supabase": "wrangler secret put SUPABASE_URL",
+    "secret-service-role": "wrangler secret put SUPABASE_SERVICE_ROLE_KEY",
+    "secret-image-key": "wrangler secret put IMAGE_API_KEY",
+    "secret-image-base": "wrangler secret put IMAGE_API_BASE_URL",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

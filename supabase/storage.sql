@@ -5,7 +5,7 @@ insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_typ
 values (
   'card-images',
   'card-images',
-  true,
+  false,
   5242880,
   array['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 )
@@ -20,9 +20,13 @@ drop policy if exists "card_images_update_own" on storage.objects;
 drop policy if exists "card_images_delete_own" on storage.objects;
 drop policy if exists "card_images_owner_all" on storage.objects;
 
-create policy "card_images_public_read"
+create policy "card_images_select_own"
   on storage.objects for select
-  using (bucket_id = 'card-images');
+  to authenticated
+  using (
+    bucket_id = 'card-images'
+    and (name like (auth.uid()::text || '/%'))
+  );
 
 create policy "card_images_owner_all"
   on storage.objects

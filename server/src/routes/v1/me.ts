@@ -1,8 +1,11 @@
 import { Hono } from 'hono';
 import type { Env } from '../../env';
 import { createAdminClient, getOrCreateProfile, isMembershipActive } from '../../lib/supabase';
+import { rateLimit } from '../../middleware/rate-limit';
 
 export const meRoutes = new Hono<{ Bindings: Env }>();
+
+meRoutes.use('*', rateLimit(120, 60_000));
 
 meRoutes.get('/', async c => {
   const user = c.get('user');

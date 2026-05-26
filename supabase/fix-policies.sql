@@ -28,7 +28,7 @@ insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_typ
 values (
   'card-images',
   'card-images',
-  true,
+  false,
   5242880,
   array['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 )
@@ -43,10 +43,14 @@ drop policy if exists "card_images_update_own" on storage.objects;
 drop policy if exists "card_images_delete_own" on storage.objects;
 drop policy if exists "card_images_owner_all" on storage.objects;
 
--- 任何人可读图片（公开桶）
-create policy "card_images_public_read"
+-- 私有桶：仅本人可读（展示时用 createSignedUrl）
+create policy "card_images_select_own"
   on storage.objects for select
-  using (bucket_id = 'card-images');
+  to authenticated
+  using (
+    bucket_id = 'card-images'
+    and (name like (auth.uid()::text || '/%'))
+  );
 
 -- 登录用户只能操作自己 UUID 文件夹下的文件（路径：你的用户id/xxx.jpg）
 create policy "card_images_owner_all"

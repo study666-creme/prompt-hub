@@ -4,11 +4,15 @@ import type { Env } from '../env';
 
 export function createCorsMiddleware(env: Env) {
   const origins = parseCorsOrigins(env.CORS_ORIGINS || '');
+  const isProd = env.ENVIRONMENT === 'production';
   return cors({
     origin: origin => {
-      if (!origins.length) return '*';
+      if (!origins.length) {
+        if (isProd) return null;
+        return '*';
+      }
       if (origin && origins.includes(origin)) return origin;
-      return origins[0];
+      return null;
     },
     allowMethods: ['GET', 'POST', 'OPTIONS'],
     allowHeaders: ['Authorization', 'Content-Type'],

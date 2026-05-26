@@ -17,6 +17,8 @@
     return session?.access_token || null;
   }
 
+  const API_TIMEOUT_MS = 12000;
+
   async function request(method, path, body) {
     if (!isConfigured()) {
       return { ok: false, code: 'API_NOT_CONFIGURED', message: '未配置 API 地址' };
@@ -25,6 +27,8 @@
     if (!token) {
       return { ok: false, code: 'UNAUTHORIZED', message: '请先登录' };
     }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
     let res;
     try {
       res = await fetch(`${baseUrl()}${path}`, {
@@ -33,14 +37,20 @@
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: body != null ? JSON.stringify(body) : undefined
+        body: body != null ? JSON.stringify(body) : undefined,
+        signal: controller.signal
       });
     } catch (e) {
+      const aborted = e && (e.name === 'AbortError' || String(e).includes('abort'));
       return {
         ok: false,
         code: 'NETWORK_ERROR',
-        message: '无法连接后端，请检查网络或 API 地址'
+        message: aborted
+          ? '连接后端超时，请稍后重试或等待 api.prompt-hub.cn 生效'
+          : '无法连接后端，请检查网络或 API 地址'
       };
+    } finally {
+      clearTimeout(timer);
     }
     let json = {};
     try {

@@ -27,12 +27,18 @@ export function jsonError(c: Context, err: unknown) {
     );
   }
   console.error(err);
+  const msg = err instanceof Error ? err.message : String(err);
+  const configHint =
+    msg.includes('sb_secret_') || msg.includes('Publishable')
+      ? '请在 server 执行 npm run secret-service-role 并粘贴 sb_secret_ 密钥后 npm run deploy'
+      : undefined;
   return c.json(
     {
       ok: false,
       error: {
         code: 'INTERNAL_ERROR',
-        message: '服务器内部错误'
+        message: configHint || '服务器内部错误',
+        details: configHint ? undefined : msg.slice(0, 200)
       }
     },
     500

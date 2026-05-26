@@ -7,7 +7,7 @@ export const IMAGE_MODELS = {
   quanneng2: {
     id: 'quanneng2',
     label: '全能模型2',
-    upstream: 'gpt-image-2-official',
+    upstream: 'gpt-image-2',
     pricing: 'resolution' as const
   },
   jimeng: {
