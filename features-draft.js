@@ -24,6 +24,8 @@
   let imageGenLastResult = null;
   let imageGenActiveHistoryId = null;
   let imageGenFeedTab = 'personal';
+  /** @type {Array<{id:string,prompt:string,model:string,modelLabel:string,resolution:string,quality:string,size:string,cost:number,startedAt:number,jobId?:string}>} */
+  let imageGenPendingJobs = [];
   /** null = 本次进入生图页尚未手动改过；离开后再进会重置 */
   let imageGenAutoPublishSession = null;
   let imageGenWhGroup = 'all';
@@ -1213,8 +1215,11 @@
     const urls = [];
     for (let i = 0; i < imageGenRefImages.length; i++) {
       const src = imageGenRefImages[i];
-      if (window.SupabaseSync?.isStorageUrl?.(src)) {
-        urls.push(src);
+      if (window.SupabaseSync?.isStorageRef?.(src)) {
+        try {
+          const url = await window.SupabaseSync.resolveDisplayUrl(src);
+          if (url && !url.startsWith('storage://')) urls.push(url);
+        } catch (e) { /* ignore */ }
         continue;
       }
       if (
@@ -1231,6 +1236,67 @@
       }
     }
     return urls;
+  }
+
+  function removePendingJob(pendingId) {
+    imageGenPendingJobs = imageGenPendingJobs.filter(j => j.id !== pendingId);
+  }
+
+  async function pollGenerationJobUntilDone(jobId, pendingId, ctx) {
+    const maxAttempts = 80;
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      const still = imageGenPendingJobs.some(j => j.id === pendingId);
+      if (!still) return;
+
+      const poll = await window.PromptHubApi.getGenerationJob(jobId);
+      if (!poll.ok) {
+        if (poll.code === 'NETWORK_ERROR' && i < maxAttempts - 1) continue;
+        removePendingJob(pendingId);
+        await window.PointsSystem?.refreshCreditsFromServer?.();
+        renderImageGenFeed();
+        toast(poll.message || '查询生图进度失败，请稍后在「个人」查看或联系客服');
+        return;
+      }
+
+      if (typeof poll.data.creditsRemaining === 'number') {
+        window.PointsSystem?.setCreditsFromServer?.(poll.data.creditsRemaining);
+        window.PointsSystem?.updateCreditsUI?.();
+      }
+
+      if (poll.data.status === 'processing') {
+        if (imageGenFeedTab === 'personal') renderImageGenFeed();
+        continue;
+      }
+
+      removePendingJob(pendingId);
+
+      if (poll.data.status === 'failed') {
+        await window.PointsSystem?.refreshCreditsFromServer?.();
+        renderImageGenFeed();
+        toast(poll.data.message || poll.data.errorMessage || '生图失败，积分已全额退回');
+        return;
+      }
+
+      if (poll.data.status === 'completed') {
+        const imageUrl = poll.data.imageUrl;
+        if (!imageUrl) {
+          await window.PointsSystem?.refreshCreditsFromServer?.();
+          renderImageGenFeed();
+          toast('生图未返回图片，若积分未退回请点同步或联系客服');
+          return;
+        }
+        finishImageGenRun({
+          ...ctx,
+          image: imageUrl,
+          cost: ctx.cost
+        });
+        return;
+      }
+    }
+    removePendingJob(pendingId);
+    toast('生图时间较长，请稍后在「个人」刷新页面查看；若失败积分会自动退回');
+    renderImageGenFeed();
   }
 
   async function runImageGenDemo() {
@@ -1273,7 +1339,35 @@
       quality,
       size
     });
-    if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
+
+    const modelLabel = window.PointsSystem?.getImageGenModel?.(model)?.label || model;
+    const pendingId = genId('pending');
+    const pendingJob = {
+      id: pendingId,
+      prompt,
+      model,
+      modelLabel,
+      resolution,
+      quality,
+      size,
+      cost,
+      startedAt: Date.now()
+    };
+    imageGenPendingJobs.unshift(pendingJob);
+    imageGenFeedTab = 'personal';
+    document.querySelectorAll('[data-feed-tab]').forEach(b => {
+      b.classList.toggle('active', b.dataset.feedTab === 'personal');
+    });
+    updateImageGenFeedHint();
+    renderImageGenFeed();
+    if (window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
+      window.MobileUI.setImageGenView('feed');
+    }
+
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '提交中…';
+    }
 
     if (useApi) {
       const refUrls = await resolveRefUrlsForApi();
@@ -1285,34 +1379,70 @@
         size,
         refImageUrls: refUrls.length ? refUrls : undefined
       });
+      if (btn) {
+        btn.disabled = false;
+        restoreImageGenSubmitLabel();
+      }
       if (!gen.ok) {
-        if (btn) { btn.disabled = false; restoreImageGenSubmitLabel(); }
+        removePendingJob(pendingId);
+        renderImageGenFeed();
+        await window.PointsSystem?.refreshCreditsFromServer?.();
         toast(gen.message || '生图失败');
         return;
       }
       if (typeof gen.data.creditsRemaining === 'number') {
         window.PointsSystem?.setCreditsFromServer?.(gen.data.creditsRemaining);
+        window.PointsSystem?.updateCreditsUI?.();
       }
       cost = gen.data.creditsCharged ?? cost;
-      finishImageGenRun({
+      pendingJob.cost = cost;
+
+      if (gen.data.status === 'completed' && gen.data.imageUrl) {
+        removePendingJob(pendingId);
+        finishImageGenRun({
+          prompt,
+          model,
+          resolution,
+          quality,
+          size,
+          image: gen.data.imageUrl,
+          cost
+        });
+        return;
+      }
+
+      const jobId = gen.data.jobId;
+      if (!jobId) {
+        removePendingJob(pendingId);
+        renderImageGenFeed();
+        toast('未收到任务编号，请重试');
+        return;
+      }
+      pendingJob.jobId = jobId;
+      toast('已提交生图，右侧可查看进度，可继续点击生成');
+      void pollGenerationJobUntilDone(jobId, pendingId, {
         prompt,
         model,
         resolution,
         quality,
         size,
-        image: gen.data.imageUrl || makePlaceholderDataUrl(prompt + resolution, creations.length),
-        cost,
-        btn
+        cost
       });
       return;
     }
 
     if (!window.PointsSystem?.deductCredits?.(cost)) {
+      removePendingJob(pendingId);
+      renderImageGenFeed();
       toast('积分扣除失败');
-      if (btn) { btn.disabled = false; restoreImageGenSubmitLabel(); }
       return;
     }
+    if (btn) {
+      btn.disabled = false;
+      restoreImageGenSubmitLabel();
+    }
     setTimeout(() => {
+      removePendingJob(pendingId);
       finishImageGenRun({
         prompt,
         model,
@@ -1320,13 +1450,16 @@
         quality,
         size,
         image: makePlaceholderDataUrl(prompt + resolution, creations.length),
-        cost,
-        btn
+        cost
       });
     }, 900);
   }
 
   function finishImageGenRun({ prompt, model, resolution, quality, size, image, cost, btn }) {
+    if (!image || (typeof image === 'string' && image.startsWith('storage://'))) {
+      toast('图片地址无效，请重试');
+      return;
+    }
     imageGenLastResult = image;
     const primaryRef = getImageGenPrimaryRef();
     const modelId = model || 'quanneng2';
@@ -1377,8 +1510,41 @@
     } else if (imageGenFeedTab === 'community') {
       el.textContent = '社区作品 · 点击图片放大 · 点击卡片填入并点赞';
     } else {
-      el.textContent = '我的生成记录 · 点击图片放大 · 可存仓库 · 保留 3 天';
+      const n = imageGenPendingJobs.length;
+      el.textContent = n
+        ? `我的生成 · ${n} 个任务进行中（右侧显示）· 可连续提交`
+        : '我的生成记录 · 点击图片放大 · 可存仓库 · 保留 3 天';
     }
+  }
+
+  function feedImageAttrs(image) {
+    if (!image) return { src: '', refAttr: '' };
+    const src = featureImgSrc(image);
+    const refAttr = window.SupabaseSync?.isStorageRef?.(image)
+      ? ` data-storage-ref="${esc(image)}"`
+      : '';
+    return { src: esc(src), refAttr };
+  }
+
+  function buildFeedPendingCardHtml(job) {
+    const badges = [job.modelLabel || '生图中', (job.resolution || '1k').toUpperCase()];
+    const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${esc(b)}</span>`).join('');
+    return `<article class="imagegen-feed-card imagegen-feed-card-tile imagegen-feed-card--pending" data-feed-id="${esc(job.id)}" data-pending="1">
+      <div class="imagegen-feed-media imagegen-gen-pending" aria-busy="true">
+        <div class="imagegen-gen-pending-inner">
+          <div class="imagegen-gen-pending-orb"></div>
+          <div class="imagegen-gen-pending-orb imagegen-gen-pending-orb--delay"></div>
+          <span class="imagegen-gen-pending-label">生成中</span>
+        </div>
+      </div>
+      <div class="imagegen-feed-content">
+        <p class="imagegen-feed-prompt">${esc((job.prompt || '').slice(0, 120))}</p>
+        <div class="imagegen-feed-tags">${badgeHtml}</div>
+        <div class="imagegen-feed-foot">
+          <span class="imagegen-feed-meta">预计 1–3 分钟 · 可继续提交</span>
+        </div>
+      </div>
+    </article>`;
   }
 
   function buildFeedCardHtml(opts) {
@@ -1386,8 +1552,10 @@
       id, prompt, image, title, badges = [], meta = '', active = false,
       showLike = false, liked = false, likeCount = 0, showSave = false
     } = opts;
+    const { src: imgSrc, refAttr: imgRefAttr } = feedImageAttrs(image);
+    const previewSrc = image && !imgSrc.startsWith('storage://') ? image : imgSrc;
     const imgBlock = image
-      ? `<button type="button" class="imagegen-feed-thumb-btn" data-preview-src="${esc(image)}" title="放大预览"><img src="${esc(image)}" alt="" loading="lazy"></button>`
+      ? `<button type="button" class="imagegen-feed-thumb-btn" data-preview-src="${esc(previewSrc)}" title="放大预览"><img src="${imgSrc}"${imgRefAttr} alt="" loading="lazy"></button>`
       : '<div class="imagegen-feed-img-empty">无图</div>';
     const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${esc(b)}</span>`).join('');
     const likeBtn = showLike
@@ -1472,11 +1640,12 @@
         })).join('');
       }
     } else {
+      const pending = imageGenPendingJobs.slice(0, 8);
       const list = getGenHistoryItems().slice(0, 40);
-      if (!list.length) {
+      if (!pending.length && !list.length) {
         html = '<p class="imagegen-feed-empty">暂无生成记录，点击下方按钮开始创作</p>';
       } else {
-        html = list.map(c => buildFeedCardHtml({
+        html = pending.map(j => buildFeedPendingCardHtml(j)).join('') + list.map(c => buildFeedCardHtml({
           id: c.id,
           prompt: c.prompt,
           image: c.image,
@@ -1489,12 +1658,34 @@
     }
     wrap.className = 'imagegen-feed imagegen-feed--tiles';
     wrap.innerHTML = html;
+    const allImages = [];
+    wrap.querySelectorAll('img[data-storage-ref]').forEach(img => {
+      allImages.push(img.getAttribute('data-storage-ref'));
+    });
+    if (window.SupabaseSync?.prefetchDisplayUrls && allImages.length) {
+      void window.SupabaseSync.prefetchDisplayUrls(allImages).then(() => {
+        if (window.SupabaseSync.hydrateImageElements) {
+          void window.SupabaseSync.hydrateImageElements(wrap);
+        }
+      });
+    } else if (window.SupabaseSync?.hydrateImageElements) {
+      void window.SupabaseSync.hydrateImageElements(wrap);
+    }
     wrap.querySelectorAll('.imagegen-feed-card').forEach(card => {
+      if (card.dataset.pending === '1') return;
       const feedId = card.dataset.feedId;
       card.querySelector('.imagegen-feed-thumb-btn')?.addEventListener('click', e => {
         e.stopPropagation();
-        const src = e.currentTarget.dataset.previewSrc;
-        if (src && typeof window.openLightbox === 'function') window.openLightbox(src);
+        const btnEl = e.currentTarget;
+        const rawRef = btnEl.querySelector('img')?.getAttribute('data-storage-ref');
+        const src = btnEl.dataset.previewSrc;
+        if (rawRef && window.SupabaseSync?.resolveDisplayUrl) {
+          void window.SupabaseSync.resolveDisplayUrl(rawRef).then(url => {
+            if (url && typeof window.openLightbox === 'function') window.openLightbox(url);
+          });
+        } else if (src && typeof window.openLightbox === 'function') {
+          window.openLightbox(src);
+        }
       });
       card.querySelector('.imagegen-feed-save-btn')?.addEventListener('click', e => {
         e.stopPropagation();
@@ -1625,6 +1816,7 @@
       initImageGenForm();
       updateImageGenFeedHint();
       renderImageGenFeed();
+      void window.PointsSystem?.refreshCreditsFromServer?.();
       window.PointsSystem?.updateCreditsUI?.();
     }
   }

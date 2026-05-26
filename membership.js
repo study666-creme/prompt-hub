@@ -6,15 +6,6 @@
   const PIN_LIMIT_FREE = 2;
   const PIN_LIMIT_MEMBER = Infinity;
 
-  /** tier: basic | standard | pro */
-  const MEMBER_CODES = {
-    'MEMBER-VIP': { tier: 'pro', days: null },
-    'MEMBER-PRO': { tier: 'pro', days: null },
-    'MEMBER-STD': { tier: 'standard', days: null },
-    'MEMBER-BASIC': { tier: 'basic', days: null },
-    'MEMBER-30D': { tier: 'basic', days: 30 }
-  };
-
   /** 会员生图积分折扣（乘数） */
   const GEN_DISCOUNT_BY_TIER = {
     basic: 0.9,
@@ -95,24 +86,12 @@
     return isMember();
   }
 
-  function activateByCode(code) {
-    const key = (code || '').trim().toUpperCase();
-    const spec = MEMBER_CODES[key];
-    if (!spec) return null;
-    const until = spec.days == null ? null : Date.now() + spec.days * 86400000;
-    writeRow({ active: true, until, tier: spec.tier });
-    const tierName = { basic: '基础', standard: '标准', pro: '专业' }[spec.tier] || '会员';
-    return {
-      ok: true,
-      msg: spec.days == null
-        ? `已开通${tierName}会员（演示）`
-        : `已开通${tierName}会员 ${spec.days} 天`
-    };
+  function activateByCode() {
+    return null;
   }
 
-  function isMemberCode(code) {
-    const key = (code || '').trim().toUpperCase();
-    return Object.prototype.hasOwnProperty.call(MEMBER_CODES, key);
+  function isMemberCode() {
+    return false;
   }
 
   function getAccountPayload() {

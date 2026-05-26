@@ -61,6 +61,7 @@ export function mapQualityForGptImage(quality: string): string {
 }
 
 export function mapResolutionForSeedream(resolution: string): string {
-  const map: Record<string, string> = { '1k': '1K', '2k': '2K', '4k': '4K' };
+  /** 上游 Seedream 仅稳定支持 2K/3K，1K 会失败 */
+  const map: Record<string, string> = { '1k': '2K', '2k': '2K', '4k': '4K' };
   return map[resolution] ?? '2K';
 }

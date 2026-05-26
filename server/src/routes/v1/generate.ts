@@ -1,8 +1,13 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Env } from '../../env';
-import { pollApimartTask, submitApimartImageJob } from '../../lib/apimart';
+import { submitApimartImageJob } from '../../lib/apimart';
 import { ApiError } from '../../lib/errors';
+import {
+  assertJobOwner,
+  finalizeFailedJob,
+  pollAndUpdateJob
+} from '../../lib/generation-jobs';
 import { computeGenerationCost, type ImageModelId } from '../../lib/pricing';
 import {
   createAdminClient,
@@ -23,7 +28,7 @@ const bodySchema = z.object({
 
 export const generateRoutes = new Hono<{ Bindings: Env }>();
 
-generateRoutes.use('*', rateLimit(30, 60_000));
+generateRoutes.use('*', rateLimit(60, 60_000));
 
 generateRoutes.post('/', async c => {
   const user = c.get('user');
@@ -102,13 +107,11 @@ generateRoutes.post('/', async c => {
   }
 
   const imageApiKey = c.env.IMAGE_API_KEY;
-  let resultUrl: string | null = null;
-  let status: 'completed' | 'failed' = 'completed';
-  let errorMessage: string | null = null;
+  let apimartTaskId: string | null = null;
 
   if (imageApiKey) {
     try {
-      const taskId = await submitApimartImageJob(
+      apimartTaskId = await submitApimartImageJob(
         imageApiKey,
         c.env.IMAGE_API_BASE_URL,
         {
@@ -120,43 +123,42 @@ generateRoutes.post('/', async c => {
           refImageUrls: refUrls
         }
       );
-
-      const polled = await pollApimartTask(imageApiKey, c.env.IMAGE_API_BASE_URL, taskId);
-      if (polled.status === 'completed' && polled.imageUrl) {
-        resultUrl = polled.imageUrl;
-        status = 'completed';
-      } else {
-        status = 'failed';
-        errorMessage = polled.errorMessage || polled.status;
-      }
+      await admin
+        .from('generation_requests')
+        .update({
+          meta: {
+            model: modelId,
+            modelLabel,
+            refImageUrls: refUrls,
+            base,
+            discountLabel,
+            size: parsed.data.size ?? null,
+            apimartTaskId
+          }
+        })
+        .eq('id', job.id);
     } catch (e) {
-      status = 'failed';
-      errorMessage = e instanceof ApiError ? e.message : 'upstream_error';
+      const msg = e instanceof ApiError ? e.message : 'upstream_submit_failed';
+      await finalizeFailedJob(admin, user.id, {
+        id: job.id,
+        user_id: user.id,
+        credits_charged: final,
+        status: 'processing',
+        result_image_url: null,
+        error_message: null,
+        meta: {},
+        created_at: new Date().toISOString()
+      }, msg);
+      throw new ApiError(502, 'GENERATION_FAILED', `生图提交失败，积分已全额退回：${msg}`);
     }
   } else {
-    status = 'completed';
-    resultUrl = null;
-  }
-
-  await admin
-    .from('generation_requests')
-    .update({
-      status,
-      result_image_url: resultUrl,
-      error_message: errorMessage,
-      completed_at: new Date().toISOString()
-    })
-    .eq('id', job.id);
-
-  if (status === 'failed' && imageApiKey) {
-    await admin.rpc('apply_credit_delta', {
-      p_user_id: user.id,
-      p_delta: final,
-      p_reason: 'image_generation_refund',
-      p_ref_id: job.id,
-      p_meta: {}
-    });
-    throw new ApiError(502, 'GENERATION_FAILED', '生图服务暂时不可用，积分已退回');
+    await admin
+      .from('generation_requests')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString()
+      })
+      .eq('id', job.id);
   }
 
   const updated = await getOrCreateProfile(admin, user.id);
@@ -165,14 +167,70 @@ generateRoutes.post('/', async c => {
     ok: true,
     data: {
       jobId: job.id,
-      status,
+      status: imageApiKey ? 'processing' : 'completed',
       model: modelId,
       modelLabel,
       creditsCharged: final,
       creditsRemaining: updated.credits,
       cost: { base, final, discountLabel },
-      imageUrl: resultUrl,
+      imageUrl: null,
       demo: !imageApiKey
+    }
+  });
+});
+
+generateRoutes.get('/jobs/:jobId', async c => {
+  const user = c.get('user');
+  const jobId = c.req.param('jobId');
+  const admin = createAdminClient(c.env);
+
+  const { data: job, error } = await admin
+    .from('generation_requests')
+    .select('*')
+    .eq('id', jobId)
+    .maybeSingle();
+
+  if (error || !job) {
+    throw new ApiError(404, 'NOT_FOUND', '任务不存在');
+  }
+
+  assertJobOwner(job, user.id);
+
+  const polled = await pollAndUpdateJob(
+    admin,
+    user.id,
+    job,
+    c.env.IMAGE_API_KEY || '',
+    c.env.IMAGE_API_BASE_URL
+  );
+
+  const profile = await getOrCreateProfile(admin, user.id);
+  const meta = (job.meta as Record<string, unknown>) || {};
+
+  if (polled.status === 'failed') {
+    return c.json({
+      ok: true,
+      data: {
+        jobId: job.id,
+        status: 'failed',
+        imageUrl: null,
+        errorMessage: polled.errorMessage,
+        creditsRemaining: profile.credits,
+        refunded: polled.refunded,
+        message: '生图失败，积分已全额退回'
+      }
+    });
+  }
+
+  return c.json({
+    ok: true,
+    data: {
+      jobId: job.id,
+      status: polled.status,
+      imageUrl: polled.imageUrl,
+      creditsRemaining: profile.credits,
+      model: meta.model,
+      modelLabel: meta.modelLabel
     }
   });
 });

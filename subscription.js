@@ -195,7 +195,7 @@
         const plan = PLANS.find(x => x.id === planId);
         const price = getDisplayPrice(planId, billing);
         if (!plan || !price) return;
-        const msg = `「${plan.name}」${BILLING_LABELS[billing]} ¥${price.price} — 支付筹备中；演示码 MEMBER-BASIC / MEMBER-STD / MEMBER-PRO`;
+        const msg = `「${plan.name}」${BILLING_LABELS[billing]} ¥${price.price} — 在线支付筹备中，请先在「图片生成」页用淘宝激活码兑换积分或会员`;
         if (typeof showToast === 'function') showToast(msg);
         else alert(msg);
       });

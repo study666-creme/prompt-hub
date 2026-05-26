@@ -937,6 +937,79 @@
   color: #f472b6;
 }
 
+.imagegen-feed-card--pending {
+  pointer-events: none;
+  border-color: rgba(99, 102, 241, 0.35);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.12), 0 12px 40px rgba(99, 102, 241, 0.08);
+}
+
+.imagegen-gen-pending {
+  aspect-ratio: 1;
+  min-height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(30, 27, 46, 0.95), rgba(17, 24, 39, 0.98));
+  position: relative;
+  overflow: hidden;
+}
+
+.imagegen-gen-pending::before {
+  content: '';
+  position: absolute;
+  inset: -50%;
+  background: conic-gradient(from 0deg, transparent, rgba(129, 140, 248, 0.25), transparent 35%);
+  animation: imagegen-spin 4s linear infinite;
+}
+
+.imagegen-gen-pending-inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.imagegen-gen-pending-orb {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #a5b4fc, #6366f1 45%, transparent 70%);
+  filter: blur(0.5px);
+  animation: imagegen-pulse 1.8s ease-in-out infinite;
+}
+
+.imagegen-gen-pending-orb--delay {
+  position: absolute;
+  width: 72px;
+  height: 72px;
+  opacity: 0.35;
+  animation-delay: 0.4s;
+}
+
+.imagegen-gen-pending-label {
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(199, 210, 254, 0.9);
+  animation: imagegen-shimmer-text 2s ease-in-out infinite;
+}
+
+@keyframes imagegen-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes imagegen-pulse {
+  0%, 100% { transform: scale(0.92); opacity: 0.75; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+
+@keyframes imagegen-shimmer-text {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
 /* 社区详情弹窗 */
 .community-detail-overlay {
   position: fixed;

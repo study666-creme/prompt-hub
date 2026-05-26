@@ -31,7 +31,7 @@
       return new Promise(resolve => { tx.oncomplete = resolve; });
     }
 
-    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: false, defaultImageGenAutoPublish: true, autoDayNight: true, themeManualOverride: false };
+    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, autoDayNight: true, themeManualOverride: false };
     let currentGroup = 'all', selectedCardId = null, isNewCardMode = true, imageData = null;
     let currentTags = [], tempCustomFields = [];
     let batchMode = false, selectedCardIds = new Set();
@@ -1648,6 +1648,7 @@
         if (uid) await snapshotLocalForUser(uid);
         clearTimeout(cloudPushTimer);
         await window.SupabaseSync.signOut();
+        window.PointsSystem?.resetServerCreditsState?.();
         activeAccountId = null;
         cloudHydratedUid = null;
         await clearWorkspace();
@@ -1937,7 +1938,7 @@
       cards = [];
       customGroups = [];
       globalFields = [];
-      settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: false, defaultImageGenAutoPublish: true }, {});
+      settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true }, {});
       floatingPromptActive = false;
       initFilterMenu();
       initAppNav();

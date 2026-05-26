@@ -18,8 +18,10 @@
   }
 
   const API_TIMEOUT_MS = 12000;
+  const API_GENERATE_TIMEOUT_MS = 45000;
+  const API_JOB_POLL_TIMEOUT_MS = 35000;
 
-  async function request(method, path, body) {
+  async function request(method, path, body, opts = {}) {
     if (!isConfigured()) {
       return { ok: false, code: 'API_NOT_CONFIGURED', message: '未配置 API 地址' };
     }
@@ -27,8 +29,9 @@
     if (!token) {
       return { ok: false, code: 'UNAUTHORIZED', message: '请先登录' };
     }
+    const timeoutMs = opts.timeoutMs || API_TIMEOUT_MS;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     let res;
     try {
       res = await fetch(`${baseUrl()}${path}`, {
@@ -107,7 +110,13 @@
   }
 
   async function generateImage(payload) {
-    return request('POST', '/api/v1/generate', payload);
+    return request('POST', '/api/v1/generate', payload, { timeoutMs: API_GENERATE_TIMEOUT_MS });
+  }
+
+  async function getGenerationJob(jobId) {
+    return request('GET', `/api/v1/generate/jobs/${encodeURIComponent(jobId)}`, null, {
+      timeoutMs: API_JOB_POLL_TIMEOUT_MS
+    });
   }
 
   async function getLedger(limit) {
@@ -128,6 +137,7 @@
     redeem,
     getGenerationCost,
     generateImage,
+    getGenerationJob,
     getLedger,
     checkLikeMilestone
   };

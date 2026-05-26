@@ -29,12 +29,8 @@
     }
   };
 
-  const ACTIVATION_CODES = {
-    'PROMPT-HUB-100': 1000,
-    'PROMPT-HUB-500': 5000,
-    'WELCOME-2026': 500,
-    'TEST-10': 100
-  };
+  /** 登录后积分以 Supabase profiles 为准（/api/v1/me 同步） */
+  let serverCreditsKnown = false;
 
   /** 每用户可领取次数上限（每档里程碑） */
   const LIKE_MILESTONE_REWARDS = [
@@ -58,6 +54,10 @@
   }
 
   function getCredits() {
+    if (useApiForAccount() && serverCreditsKnown) {
+      const n = Number(loadJson(LS_CREDITS, 0));
+      return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+    }
     const n = Number(loadJson(LS_CREDITS, 0));
     return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
   }
@@ -69,7 +69,12 @@
 
   /** 服务端同步后的积分（覆盖本地，避免双写不一致） */
   function setCreditsFromServer(n) {
+    serverCreditsKnown = true;
     setCredits(n);
+  }
+
+  function resetServerCreditsState() {
+    serverCreditsKnown = false;
   }
 
   function useApiForAccount() {
@@ -176,43 +181,37 @@
     const key = (code || '').trim().toUpperCase();
     if (!key) return { ok: false, msg: '请输入激活码' };
 
-    if (useApiForAccount()) {
-      const api = await window.PromptHubApi.redeem(key);
-      if (api.ok) {
-        if (typeof api.data.credits === 'number') setCreditsFromServer(api.data.credits);
-        if (api.data.membershipTier && window.Membership?.applyServerState) {
-          window.Membership.applyServerState({
-            active: true,
-            tier: api.data.membershipTier,
-            until: api.data.membershipUntil
-          });
-        }
-        updateCreditsUI();
-        return { ok: true, msg: api.data.message || '兑换成功' };
-      }
-      if (api.code !== 'NETWORK_ERROR' && api.code !== 'API_NOT_CONFIGURED') {
-        const hint =
-          api.code === 'INVALID_CODE'
-            ? '（请确认激活码已导入 Supabase，且 Worker 已配置 sb_secret_）'
-            : api.code === 'DB_PERMISSION'
-              ? '（请在 Supabase 执行 scripts/apply-grants-once.sql）'
-              : '';
-        return { ok: false, msg: (api.message || '兑换失败') + hint };
-      }
+    if (!window.SupabaseSync?.isLoggedIn?.()) {
+      return { ok: false, msg: '请先登录后再兑换' };
+    }
+    if (!window.PromptHubApi?.isConfigured?.()) {
+      return { ok: false, msg: '后端 API 未连接，暂无法兑换（请检查网络或等待 api 域名生效）' };
     }
 
-    if (window.Membership?.isMemberCode?.(key)) {
-      const memberResult = window.Membership.activateByCode(key);
-      if (memberResult?.ok) return memberResult;
+    const api = await window.PromptHubApi.redeem(key);
+    if (api.ok) {
+      if (typeof api.data.credits === 'number') setCreditsFromServer(api.data.credits);
+      if (api.data.membershipTier && window.Membership?.applyServerState) {
+        window.Membership.applyServerState({
+          active: true,
+          tier: api.data.membershipTier,
+          until: api.data.membershipUntil
+        });
+      }
+      updateCreditsUI();
+      return { ok: true, msg: api.data.message || '兑换成功' };
     }
-    const credits = ACTIVATION_CODES[key];
-    if (!credits) return { ok: false, msg: '无效的激活码' };
-    const redeemed = getRedeemedSet();
-    if (redeemed.has(key)) return { ok: false, msg: '该激活码已使用过' };
-    redeemed.add(key);
-    saveRedeemed(redeemed);
-    addCredits(credits);
-    return { ok: true, msg: `已兑换 ${credits} 积分` };
+    const hint =
+      api.code === 'INVALID_CODE'
+        ? '（请使用淘宝发货的真实激活码，演示码已停用）'
+        : api.code === 'DB_PERMISSION'
+          ? '（请在 Supabase 执行 scripts/apply-grants-once.sql）'
+          : api.code === 'NETWORK_ERROR'
+            ? '（国内若打不开 workers.dev，需绑定 api.你的域名）'
+            : api.code === 'API_NOT_CONFIGURED'
+              ? '（未配置 API 地址）'
+              : '';
+    return { ok: false, msg: (api.message || '兑换失败') + hint };
   }
 
   function getClaimedMilestones(postId) {
@@ -293,9 +292,15 @@
     }
   }
 
+  async function refreshCreditsFromServer() {
+    if (!useApiForAccount()) return;
+    await window.PromptHubApi.syncMe({ silent: true });
+  }
+
   function initCreditsUI() {
     migrateLocalPointsScale();
     updateCreditsUI();
+    void refreshCreditsFromServer();
   }
 
   function formatLedgerTime(iso) {
@@ -359,6 +364,8 @@
   window.PointsSystem = {
     getCredits,
     setCreditsFromServer,
+    resetServerCreditsState,
+    refreshCreditsFromServer,
     useApiForAccount,
     addCredits,
     deductCredits,

@@ -121,6 +121,57 @@ export async function submitApimartImageJob(
   return taskId;
 }
 
+export async function fetchApimartTaskOnce(
+  apiKey: string,
+  baseUrl: string | undefined,
+  taskId: string
+): Promise<TaskPollResult> {
+  const res = await fetch(`${apiBase(baseUrl)}/v1/tasks/${encodeURIComponent(taskId)}`, {
+    headers: { Authorization: `Bearer ${apiKey}` }
+  });
+
+  let json: unknown = {};
+  try {
+    json = await res.json();
+  } catch {
+    json = {};
+  }
+
+  if (!res.ok) {
+    return { status: 'pending', imageUrl: null, errorMessage: null };
+  }
+
+  const data =
+    json && typeof json === 'object' && 'data' in json
+      ? (json as { data: Record<string, unknown> }).data
+      : null;
+  if (!data) {
+    return { status: 'pending', imageUrl: null, errorMessage: null };
+  }
+
+  const status = String(data.status || '');
+  if (status === 'completed') {
+    const imageUrl = extractImageUrl(json);
+    if (!imageUrl) {
+      return {
+        status: 'failed',
+        imageUrl: null,
+        errorMessage: 'upstream_no_image'
+      };
+    }
+    return { status, imageUrl, errorMessage: null };
+  }
+  if (status === 'failed') {
+    return {
+      status,
+      imageUrl: null,
+      errorMessage: String(data.error_message || data.error || 'upstream_failed')
+    };
+  }
+
+  return { status: 'pending', imageUrl: null, errorMessage: null };
+}
+
 export async function pollApimartTask(
   apiKey: string,
   baseUrl: string | undefined,
@@ -131,42 +182,11 @@ export async function pollApimartTask(
   const intervalMs = 4000;
 
   while (Date.now() < deadline) {
+    const result = await fetchApimartTaskOnce(apiKey, baseUrl, taskId);
+    if (result.status === 'completed' || result.status === 'failed') {
+      return result;
+    }
     await new Promise(resolve => setTimeout(resolve, intervalMs));
-
-    const res = await fetch(`${apiBase(baseUrl)}/v1/tasks/${encodeURIComponent(taskId)}`, {
-      headers: { Authorization: `Bearer ${apiKey}` }
-    });
-
-    let json: unknown = {};
-    try {
-      json = await res.json();
-    } catch {
-      json = {};
-    }
-
-    if (!res.ok) continue;
-
-    const data =
-      json && typeof json === 'object' && 'data' in json
-        ? (json as { data: Record<string, unknown> }).data
-        : null;
-    if (!data) continue;
-
-    const status = String(data.status || '');
-    if (status === 'completed') {
-      return {
-        status,
-        imageUrl: extractImageUrl(json),
-        errorMessage: null
-      };
-    }
-    if (status === 'failed') {
-      return {
-        status,
-        imageUrl: null,
-        errorMessage: String(data.error_message || data.error || 'upstream_failed')
-      };
-    }
   }
 
   return { status: 'timeout', imageUrl: null, errorMessage: 'upstream_timeout' };
