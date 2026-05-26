@@ -1,0 +1,328 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>提示词仓库</title>
+  <link rel="icon" type="image/png" href="https://cdn.jsdelivr.net/gh/study666-creme/-@main/%E6%8F%90%E7%A4%BA%E8%AF%8D%E4%BB%93%E5%BA%93%E5%95%86%E6%A0%87.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="rippleGridBg" class="ripple-grid-bg" aria-hidden="true"></div>
+  <div class="ui-vignette" aria-hidden="true"></div>
+  <div class="app-chrome">
+  <div class="context-menu" id="contextMenu"></div>
+  <!-- OCR 弹窗 -->
+  <div class="modal-overlay" id="ocrModal" onclick="if(event.target===this) closeOcrModal()">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:var(--radius); width:480px; max-width:90vw; padding:28px; color:var(--text-primary); position:relative;">
+      <button onclick="closeOcrModal()" style="position:absolute; top:16px; right:16px; background:none; border:none; color:var(--text-muted); font-size:20px; cursor:pointer;">✕</button>
+      <h3 style="color:var(--accent);">🔍 提取图片文字</h3>
+      <div id="modalDropArea" style="border:2px dashed var(--border); border-radius:var(--radius); padding:20px; text-align:center; cursor:pointer;">
+        <span id="modalPlaceholder">拖拽、点击或 Ctrl+V 粘贴截图</span>
+        <img id="modalPreview" style="display:none; max-width:100%; height:auto; max-height:200px; border-radius:8px; margin-top:8px;">
+        <input type="file" id="modalFileInput" accept="image/*" style="display:none;">
+      </div>
+      <div class="ocr-progress" id="ocrProgress"><div class="ocr-progress-bar" id="ocrProgressBar"></div></div>
+      <div id="modalOcrResult" style="display:none; margin-top:16px;">
+        <label>识别文字</label>
+        <textarea id="modalOcrText" readonly style="width:100%; height:80px; background:var(--bg-card); border:1px solid var(--border); border-radius:8px; color:var(--text-primary); padding:10px; margin-top:8px;"></textarea>
+        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+          <button class="btn btn-secondary" onclick="closeOcrModal()">取消</button>
+          <button class="btn btn-primary" onclick="useOcrResult('fill')">填入提示词</button>
+        </div>
+      </div>
+      <div class="status-message" id="modalStatus"></div>
+    </div>
+  </div>
+
+  <!-- 设置弹窗 -->
+  <div class="settings-overlay" id="settingsOverlay" onclick="if(event.target===this) closeSettings()">
+    <div class="settings-box">
+      <button onclick="closeSettings()" style="position:absolute; top:16px; right:16px; background:none; border:none; color:var(--text-muted); font-size:20px; cursor:pointer;">✕</button>
+      <h3>⚙️ 设置 & 字段管理</h3>
+      <label>OCR 引擎</label>
+      <select id="ocrEngineSelect"><option value="tesseract">Tesseract（离线免费）</option><option value="ocrspace">OCR.space（在线高精度）</option></select>
+      <label>OCR.space API Key</label>
+      <input type="text" id="ocrApiKey" placeholder="填入你的 Key">
+      <label class="custom-checkbox" style="margin-top:16px;">
+        <input type="checkbox" id="imageClickZoomToggle"> <span class="checkmark"></span> 单击卡片图片放大查看（默认进入编辑）
+      </label>
+      <hr style="margin:20px 0; border-color:var(--border);">
+      <h4 style="color:var(--accent);">全局固定字段</h4>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <input type="text" id="newFieldName" placeholder="字段名称" style="flex:2;">
+        <select id="newFieldType" style="flex:1;"><option value="text">文本</option><option value="textarea">文本域</option></select>
+        <button class="btn btn-primary" onclick="addGlobalField()">添加</button>
+      </div>
+      <div id="fieldList" style="margin-top:12px;"></div>
+      <hr style="margin:20px 0; border-color:var(--border);">
+      <h4 style="color:var(--accent);">数据管理</h4>
+      <div class="btn-group">
+        <button class="btn btn-primary" onclick="saveSettings()">保存设置</button>
+        <button class="btn btn-secondary" onclick="exportData()">导出数据</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('importFileInput').click()">导入数据</button>
+        <input type="file" id="importFileInput" accept=".json" style="display:none;" onchange="importData(event)">
+      </div>
+      <div style="margin-top:12px;">
+        <button class="btn btn-secondary" onclick="saveToFile()">💾 保存到文件</button>
+        <button class="btn btn-secondary" onclick="loadFromFile()">📂 打开文件</button>
+      </div>
+      <p style="color:var(--text-muted); font-size:11px; margin-top:8px;">💡 数据优先存储于浏览器数据库，导出文件可备份到本地。</p>
+      <div style="margin-top:12px;">
+        <button class="btn btn-danger" onclick="clearAllData()">清除所有数据</button>
+        <button class="btn btn-secondary" onclick="closeSettings()">关闭</button>
+      </div>
+      <div class="status" id="settingsStatus"></div>
+    </div>
+  </div>
+
+  <!-- 自定义弹窗 -->
+  <div class="custom-modal-overlay" id="customModalOverlay" onclick="if(event.target===this) closeCustomModal()">
+    <div class="custom-modal" id="customModal"></div>
+  </div>
+
+  <!-- 欣赏模式：居中看图 -->
+  <div class="appreciate-viewer" id="appreciateViewer" onclick="closeAppreciateViewer(event)">
+    <button type="button" class="appreciate-viewer-close" onclick="closeAppreciateViewer(event)" title="关闭">✕</button>
+    <div class="appreciate-viewer-inner" onclick="event.stopPropagation()">
+      <div class="appreciate-viewer-stage" id="appreciateViewerStage">
+        <img id="appreciateViewerImg" src="" alt="" draggable="false">
+      </div>
+      <p class="appreciate-viewer-hint">滚轮缩放 · 拖拽移动 · 双击还原</p>
+      <p class="appreciate-viewer-caption" id="appreciateViewerCaption"></p>
+    </div>
+  </div>
+
+  <!-- 图片灯箱 -->
+  <div class="image-lightbox" id="imageLightbox" onclick="closeLightbox(event)">
+    <div class="lightbox-container">
+      <button class="close-lightbox" onclick="closeLightbox(event)">✕</button>
+      <img id="lightboxImage" src="" alt="放大图片">
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <!-- 浮动提示词框 -->
+  <div class="floating-prompt hidden" id="floatingPrompt">
+    <div class="floating-prompt-header" id="floatingPromptHeader">
+      <span>提示词</span>
+      <button class="fp-close-btn" onclick="toggleFloatingPrompt()" title="固定到面板">
+        <svg viewBox="0 0 24 24" width="14" height="14"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+      </button>
+    </div>
+    <textarea id="floatingPromptText" oninput="document.getElementById('cardPrompt').value = this.value"></textarea>
+    <button class="fp-copy-btn" onclick="copyPromptFromFloating()" title="复制">
+      <svg viewBox="0 0 24 24" width="14" height="14"><path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1S9.6 1.84 9.18 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm6 16H6V5h2v3h8V5h2v14z"/></svg>
+    </button>
+  </div>
+
+  <nav class="app-nav" id="appNav" aria-label="主导航">
+    <div class="app-nav-head">
+      <button type="button" class="app-brand" onclick="switchAppPage('warehouse')" title="提示词仓库">
+        <img class="app-brand-mark" src="https://cdn.jsdelivr.net/gh/study666-creme/-@main/%E6%8F%90%E7%A4%BA%E8%AF%8D%E4%BB%93%E5%BA%93%E5%95%86%E6%A0%87.png" alt="">
+        <span class="app-brand-name">提示词仓库</span>
+      </button>
+      <button type="button" class="app-nav-collapse-btn" id="appNavCollapseBtn" aria-label="收起侧栏" title="收起侧栏（仅图标）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+      </button>
+    </div>
+    <div class="app-nav-menu">
+      <button type="button" class="app-nav-item active" data-app="warehouse">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        <span class="app-nav-label">卡片库</span>
+      </button>
+      <button type="button" class="app-nav-item" data-app="community">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span class="app-nav-label">提示词社区</span>
+        <span class="app-nav-soon">敬请期待</span>
+      </button>
+      <button type="button" class="app-nav-item" data-app="creations">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+        <span class="app-nav-label">我的创作</span>
+        <span class="app-nav-soon">敬请期待</span>
+      </button>
+      <button type="button" class="app-nav-item" data-app="imagegen">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+        <span class="app-nav-label">图片生成</span>
+        <span class="app-nav-soon">敬请期待</span>
+      </button>
+    </div>
+  </nav>
+
+  <div class="app-main">
+    <div class="app-page app-page-warehouse active" id="pageWarehouse">
+  <div class="sidebar" id="sidebarArea">
+    <button type="button" class="sidebar-new-btn" onclick="createNewCard()">+ 新建提示词</button>
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">默认</div>
+      <div class="group-list" id="defaultGroupList">
+        <div class="group-item active" data-group="all">全部 <span class="count" id="allCount">0</span></div>
+        <div class="group-item" data-group="uncategorized">未分类 <span class="count" id="uncategorizedCount">0</span></div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">分组 <button class="add-btn" onclick="inlineAddGroup(event)">+</button></div>
+      <div class="group-list" id="customGroupList"></div>
+    </div>
+    <button class="action-btn" onclick="openSettings()">⚙️ 字段 & 设置</button>
+  </div>
+
+  <div class="main-content" id="mainContentArea">
+    <div class="main-header">
+      <h3 id="currentGroupTitle">全部提示词</h3>
+      <div class="header-actions">
+        <div id="batchBar" class="batch-bar">
+          <button class="btn btn-ghost btn-sm" onclick="batchMoveGroup()">移动</button>
+          <button class="btn btn-ghost btn-sm" onclick="batchAddTag()">标签</button>
+          <button class="btn btn-danger btn-sm" onclick="batchDelete()">删除</button>
+          <button class="btn btn-ghost btn-sm" onclick="cancelBatch()">取消</button>
+          <span class="batch-count" id="batchCountLabel"></span>
+        </div>
+        <div id="normalBar" class="toolbar-row">
+          <div class="toolbar-cluster">
+            <div class="column-toggle" title="每排列数 1～5">
+              <button type="button" class="icon-btn" onclick="toggleColumnUp()" title="每排加一张（最多五张）">▲</button>
+              <button type="button" class="icon-btn" onclick="toggleColumnDown()" title="每排减一张（最少一张）">▼</button>
+            </div>
+            <div class="view-toggle" id="viewToggle">
+              <button class="active" data-view="grid" title="网格">▦</button>
+              <button data-view="list" title="列表">☰</button>
+            </div>
+            <button type="button" class="icon-btn icon-btn-accent" id="globalViewBtn" onclick="toggleGlobalView()" title="欣赏卡片">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            </button>
+          </div>
+          <div class="toolbar-cluster toolbar-cluster-grow">
+            <select class="toolbar-select" id="sortSelect" onchange="renderCards(true)" title="排序">
+              <option value="default">默认</option>
+              <option value="updated-desc">最近</option>
+              <option value="updated-asc">最远</option>
+            </select>
+            <div class="filter-menu-wrap">
+              <button type="button" class="icon-btn" id="filterBtn" title="筛选">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+              </button>
+              <div class="filter-dropdown" id="filterDropdown"></div>
+            </div>
+            <input type="text" class="search-box" placeholder="搜索…" oninput="renderCards(true)" id="searchInput">
+          </div>
+          <div class="toolbar-cluster">
+            <button type="button" class="icon-btn icon-btn-labeled" id="ocrBtn" onclick="openOcrModal()" title="从图片提取文字到提示词">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>
+              <span>文字提取</span>
+            </button>
+            <button class="btn btn-primary btn-sm" onclick="createNewCard()">新建</button>
+            <button class="btn btn-ghost btn-sm" id="batchToggleBtn" onclick="toggleBatchMode()">选择</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="cards-container" id="cardsContainer"><div class="grid-sizer"></div></div>
+  </div>
+
+  <div class="edit-panel hidden" id="editPanel">
+    <div class="panel-header">
+      <h4 id="panelTitle">新建卡片</h4>
+      <button class="close-btn" onclick="closeEditPanel()">✕</button>
+    </div>
+    <div class="panel-body" id="panelBody">
+      <div class="image-drop-area no-image" id="dropArea">
+        <span class="placeholder-text" id="dropPlaceholder">点击、拖拽或 Ctrl+V 粘贴图片</span>
+        <img id="previewImage" style="display:none;" onclick="if(imageData) openLightbox(imageData)">
+        <button class="remove-image-btn" id="removeImageBtn" onclick="event.stopPropagation(); removeImage()">✕</button>
+        <input type="file" id="fileInput" accept="image/*" style="display:none;">
+      </div>
+      <div class="panel-form">
+        <label>标题</label>
+        <input type="text" id="cardTitle">
+        <div class="prompt-field">
+          <div class="prompt-field-bar">
+            <label class="prompt-label-text" for="cardPrompt">提示词<span class="required-mark">*</span></label>
+            <div class="prompt-field-actions">
+              <button type="button" class="prompt-header-copy" onclick="copyPromptFromPanel()" title="复制提示词">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+              <button type="button" class="fp-toggle-btn" id="fpToggleBtn" onclick="toggleFloatingPrompt()" title="浮动提示词框" aria-label="浮动提示词框">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+              </button>
+            </div>
+          </div>
+          <textarea id="cardPrompt" oninput="if(!floatingPromptActive) document.getElementById('floatingPromptText').value = this.value"></textarea>
+        </div>
+        <label>标签</label>
+        <div class="tag-input-area" id="tagContainer">
+          <div class="tag-chips-wrap" id="tagChipsWrap"></div>
+          <input type="text" class="tag-input" id="tagInput" placeholder="输入后回车">
+          <button type="button" class="btn btn-secondary tag-pick-btn" onclick="showExistingTags()">选择标签</button>
+        </div>
+        <div id="customFieldsContainer"></div>
+      </div>
+    </div>
+    <div class="panel-footer">
+      <button type="button" class="btn btn-primary btn-footer-save" onclick="saveCard()">保存</button>
+      <button type="button" class="btn btn-ghost btn-footer-copy" onclick="copyPromptFromPanel()">复制</button>
+      <button type="button" class="btn-icon-danger" id="actionDeleteClearBtn" title="删除"></button>
+      <span class="status-message" id="statusMsg"></span>
+    </div>
+  </div>
+
+  <button class="fab-new visible" id="fabNewBtn" onclick="createNewCard()">＋</button>
+  <button type="button" class="global-view-exit" id="globalViewExitBtn" onclick="exitGlobalView()">退出欣赏（Esc）</button>
+    </div>
+
+    <div class="app-page app-page-placeholder" id="pageCommunity">
+      <div class="app-placeholder">
+        <div class="app-placeholder-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <h2>提示词社区</h2>
+        <p>正在开发中，后续可在此浏览、分享与交流优质提示词。</p>
+      </div>
+    </div>
+
+    <div class="app-page app-page-placeholder" id="pageCreations">
+      <div class="app-placeholder">
+        <div class="app-placeholder-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+        </div>
+        <h2>我的创作</h2>
+        <p>正在开发中，后续可在此查看与管理你的 AI 创作内容。</p>
+      </div>
+    </div>
+
+    <div class="app-page app-page-placeholder" id="pageImageGen">
+      <div class="app-placeholder">
+        <div class="app-placeholder-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+        </div>
+        <h2>图片生成</h2>
+        <p>正在开发中，后续可在此使用提示词快速生成图片。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tag-sheet-overlay" id="tagSheetOverlay" onclick="if(event.target===this) closeTagSheet()">
+    <div class="tag-sheet" id="tagSheet" onclick="event.stopPropagation()">
+      <div class="tag-sheet-handle"></div>
+      <div class="tag-sheet-title">选择标签</div>
+      <div class="tag-sheet-list" id="tagSheetList"></div>
+      <div class="tag-sheet-footer" id="tagSheetFooter">
+        <button type="button" class="btn btn-secondary" onclick="closeTagSheet()">取消</button>
+        <button type="button" class="btn btn-primary" onclick="confirmTagSheet()">确认</button>
+      </div>
+    </div>
+  </div>
+
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
+
