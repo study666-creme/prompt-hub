@@ -191,7 +191,13 @@
         return { ok: true, msg: api.data.message || '兑换成功' };
       }
       if (api.code !== 'NETWORK_ERROR' && api.code !== 'API_NOT_CONFIGURED') {
-        return { ok: false, msg: api.message || '兑换失败' };
+        const hint =
+          api.code === 'INVALID_CODE'
+            ? '（请确认激活码已导入 Supabase，且 Worker 已配置 sb_secret_）'
+            : api.code === 'DB_PERMISSION'
+              ? '（请在 Supabase 执行 scripts/apply-grants-once.sql）'
+              : '';
+        return { ok: false, msg: (api.message || '兑换失败') + hint };
       }
     }
 

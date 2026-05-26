@@ -31,7 +31,7 @@
       return new Promise(resolve => { tx.oncomplete = resolve; });
     }
 
-    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, autoDayNight: true, themeManualOverride: false };
+    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: false, defaultImageGenAutoPublish: true, autoDayNight: true, themeManualOverride: false };
     let currentGroup = 'all', selectedCardId = null, isNewCardMode = true, imageData = null;
     let currentTags = [], tempCustomFields = [];
     let batchMode = false, selectedCardIds = new Set();
@@ -1207,7 +1207,33 @@
 
     function cardImgSrc(image) {
       if (!image) return '';
-      return window.SupabaseSync?.getCachedDisplayUrl?.(image) || image;
+      const url = window.SupabaseSync?.getCachedDisplayUrl?.(image) || image;
+      if (typeof url === 'string' && url.startsWith('storage://')) return '';
+      return url;
+    }
+
+    function cardImgDataAttr(image) {
+      if (!image || typeof image !== 'string') return '';
+      if (window.SupabaseSync?.isStorageRef?.(image)) {
+        return ` data-storage-ref="${escapeHtml(image)}"`;
+      }
+      return '';
+    }
+
+    function mergeCardsByUpdatedAt(localList, cloudList) {
+      const map = new Map();
+      for (const c of cloudList || []) {
+        if (c && c.id != null) map.set(String(c.id), c);
+      }
+      for (const c of localList || []) {
+        if (!c || c.id == null) continue;
+        const id = String(c.id);
+        const ex = map.get(id);
+        if (!ex || (c.updatedAt || c.createdAt || 0) >= (ex.updatedAt || ex.createdAt || 0)) {
+          map.set(id, c);
+        }
+      }
+      return [...map.values()];
     }
 
     function applyDataPayload(payload) {
@@ -1652,7 +1678,14 @@
       if (!window.SupabaseSync?.isLoggedIn?.()) return false;
       const cloud = await window.SupabaseSync.pullCloudData();
       if (cloud != null && typeof cloud === 'object') {
+        const localCards = cards.slice();
+        if ((!cloud.cards || cloud.cards.length === 0) && localCards.length > 0) {
+          cloud.cards = localCards;
+        } else if (cloud.cards?.length && localCards.length) {
+          cloud.cards = mergeCardsByUpdatedAt(localCards, cloud.cards);
+        }
         applyDataPayload(cloud);
+        window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
         await saveAllData({ skipCloud: true });
         return true;
       }
@@ -1801,6 +1834,7 @@
       }
 
       cloudHydratedUid = uid;
+      window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
       try {
         await Promise.race([syncPromise, new Promise(r => setTimeout(r, 6000))]);
       } catch (e) { /* ignore */ }
@@ -1834,11 +1868,6 @@
       const btn = document.getElementById('authSyncBtn');
       if (btn) btn.disabled = true;
       try {
-        try {
-          await pullFromCloud();
-        } catch (e) {
-          showToast('拉取云端失败，将仅尝试上传本地数据');
-        }
         const result = await pushToCloud();
         if (result?.warnings?.length) {
           showToast('已同步文字；图片问题：' + result.warnings[0]);
@@ -1908,7 +1937,7 @@
       cards = [];
       customGroups = [];
       globalFields = [];
-      settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true }, {});
+      settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: false, defaultImageGenAutoPublish: true }, {});
       floatingPromptActive = false;
       initFilterMenu();
       initAppNav();
@@ -1921,6 +1950,7 @@
       refreshAuthMethodUI();
       if (!window.SupabaseSync?.isLoggedIn?.()) {
         await loadGuestWorkspace();
+        window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
         renderGroups();
         renderCards(true);
         updateGuestLimitUI();
@@ -1937,7 +1967,10 @@
       }
     })();
 
+    window.__promptHubCards = cards;
+
     async function saveAllData(opts = {}) {
+      window.__promptHubCards = cards;
       await saveCardsToDB(cards);
       settings.floatingPrompt = floatingPromptActive;
       if (typeof window.getAppTheme === 'function') settings.theme = window.getAppTheme();
@@ -2121,8 +2154,9 @@
         div.draggable = !globalViewActive;
         const checked = selectedCardIds.has(card.id);
         const imgSrc = escapeHtml(cardImgSrc(card.image));
+        const imgRefAttr = cardImgDataAttr(card.image);
         const mediaInner = card.image
-          ? `<img class="card-img" src="${imgSrc}" loading="lazy" draggable="false" alt="" onload="if(typeof scheduleLayoutMasonry==='function') scheduleLayoutMasonry()">`
+          ? `<img class="card-img" src="${imgSrc}"${imgRefAttr} loading="lazy" draggable="false" alt="" onload="if(typeof scheduleLayoutMasonry==='function') scheduleLayoutMasonry()">`
           : '<div class="card-media-placeholder" aria-hidden="true"></div>';
         const timeLabel = formatCardTime(card.updatedAt || card.createdAt);
         const tagsHtml = buildCardTagsHtml(card.tags);
@@ -2185,7 +2219,11 @@
         fragment.appendChild(div);
       });
       container.appendChild(fragment);
-      if (viewMode !== 'list') {
+      if (window.SupabaseSync?.hydrateImageElements) {
+        void window.SupabaseSync.hydrateImageElements(container).then(() => {
+          if (viewMode !== 'list') scheduleLayoutMasonry();
+        });
+      } else if (viewMode !== 'list') {
         scheduleLayoutMasonry();
       } else if (masonryInstance) {
         masonryInstance.destroy();
@@ -2593,6 +2631,9 @@
         return;
       }
       imageData = finalImage;
+      if (finalImage && window.SupabaseSync?.prefetchDisplayUrls) {
+        await window.SupabaseSync.prefetchDisplayUrls([finalImage]);
+      }
       const wantPublish = window.FeatureDraft?.readPublishCheckbox?.() ?? false;
       if (wantPublish && !isUserLoggedIn()) {
         statusEl.textContent = '❌ 发布到社区需先登录';
@@ -2625,6 +2666,7 @@
       if (savedCard && window.FeatureDraft?.syncCardToCommunity) {
         window.FeatureDraft.syncCardToCommunity(savedCard, wantPublish);
       }
+      window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
       await saveAllData();
       updateTagFilter();
       renderGroups();

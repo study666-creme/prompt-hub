@@ -9,42 +9,6 @@
   const LS_IMAGEGEN = 'promptrepo_imagegen_draft';
   const PREFILL_KEY = 'promptrepo_imagegen_prefill';
 
-  const MOCK_POSTS = [
-    {
-      id: 'mock_1',
-      authorId: 'user_light',
-      authorName: '光影旅人',
-      title: '赛博雨夜街巷',
-      prompt: 'cyberpunk alley at night, neon reflections on wet asphalt, cinematic lighting, 8k, highly detailed, moody atmosphere',
-      image: 'https://picsum.photos/seed/cyber1/400/400',
-      likes: 128,
-      createdAt: Date.now() - 18 * 3600000,
-      isMock: true
-    },
-    {
-      id: 'mock_2',
-      authorId: 'user_lab',
-      authorName: '插画实验室',
-      title: '治愈系室内',
-      prompt: 'cozy sunlit room, plants by the window, soft pastel colors, studio ghibli inspired, warm afternoon light, illustration',
-      image: 'https://picsum.photos/seed/cozy2/400/400',
-      likes: 86,
-      createdAt: Date.now() - 2 * 86400000,
-      isMock: true
-    },
-    {
-      id: 'mock_3',
-      authorId: 'user_portrait',
-      authorName: '人像工坊',
-      title: '胶片人像',
-      prompt: 'portrait photography, 35mm film grain, natural makeup, shallow depth of field, golden hour, editorial style',
-      image: null,
-      likes: 42,
-      createdAt: Date.now() - 5 * 86400000,
-      isMock: true
-    }
-  ];
-
   const GEN_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 
   let communityPosts = [];
@@ -116,7 +80,7 @@
   }
 
   function loadStores() {
-    communityPosts = loadJson(LS_COMMUNITY, []);
+    communityPosts = loadJson(LS_COMMUNITY, []).filter(p => !p.isMock);
     creations = loadJson(LS_CREATIONS, []);
     likedIds = new Set(loadJson(LS_LIKES, []));
     favIds = new Set(loadJson(LS_FAVS, []));
@@ -162,10 +126,39 @@
   }
 
   function getAllCommunityPosts() {
-    const userPosts = communityPosts.filter(p => !p.isMock);
-    if (window.SupabaseSync?.isLoggedIn?.()) return userPosts;
-    const mocks = MOCK_POSTS.filter(m => !userPosts.some(u => u.id === m.id));
-    return [...userPosts, ...mocks];
+    return communityPosts.filter(p => !p.isMock);
+  }
+
+  /** 与卡片库对齐：去掉演示帖、孤儿帖、同一卡片的重复社区帖 */
+  function reconcileCommunityWithCards(cardList) {
+    const cardIds = new Set((cardList || []).map(c => c.id));
+    const hasCards = cardIds.size > 0;
+    const user = getActiveUser();
+    const ownBySource = new Map();
+    const kept = [];
+    for (const p of communityPosts) {
+      if (p.isMock) continue;
+      if (p.authorId !== user.id) {
+        kept.push(p);
+        continue;
+      }
+      if (hasCards && (!p.sourceCardId || !cardIds.has(p.sourceCardId))) continue;
+      if (!p.sourceCardId) continue;
+      const prev = ownBySource.get(p.sourceCardId);
+      const ts = p.updatedAt || p.createdAt || 0;
+      const prevTs = prev ? (prev.updatedAt || prev.createdAt || 0) : -1;
+      if (!prev || ts >= prevTs) ownBySource.set(p.sourceCardId, p);
+    }
+    communityPosts = [...kept, ...ownBySource.values()];
+    if (hasCards) {
+      for (const c of cardList) {
+        if (c.communityPostId && !communityPosts.some(p => p.id === c.communityPostId)) {
+          c.publishedToCommunity = false;
+          c.communityPostId = null;
+        }
+      }
+    }
+    persistCommunity();
   }
 
   function featureImgSrc(image) {
@@ -336,8 +329,11 @@
       div.style.animationDelay = `${Math.min(idx * 0.045, 0.36)}s`;
       div.dataset.postId = post.id;
       const liked = likedIds.has(post.id);
+      const imgRefAttr = window.SupabaseSync?.isStorageRef?.(post.image)
+        ? ` data-storage-ref="${esc(post.image)}"`
+        : '';
       const mediaInner = post.image
-        ? `<img class="card-img" src="${esc(featureImgSrc(post.image))}" loading="lazy" draggable="false" alt="" onload="if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleLayout('${containerId}')">`
+        ? `<img class="card-img" src="${esc(featureImgSrc(post.image))}"${imgRefAttr} loading="lazy" draggable="false" alt="" onload="if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleLayout('${containerId}')">`
         : '<div class="card-media-placeholder" aria-hidden="true"></div>';
       const timeLabel = `♥ ${post.likes || 0}`;
       const desc = getPostDesc(post);
@@ -362,7 +358,11 @@
 
     container.innerHTML = '';
     container.appendChild(fragment);
-    scheduleCommunityLayout(containerId);
+    if (window.SupabaseSync?.hydrateImageElements) {
+      void window.SupabaseSync.hydrateImageElements(container).then(() => scheduleCommunityLayout(containerId));
+    } else {
+      scheduleCommunityLayout(containerId);
+    }
   }
 
   function filterAndSortPosts(list) {
@@ -386,6 +386,9 @@
   function renderCommunity() {
     const container = document.getElementById('communityGrid');
     if (!container) return;
+    if (window.__promptHubCards?.length) {
+      reconcileCommunityWithCards(window.__promptHubCards);
+    }
     let list = filterAndSortPosts(getAllCommunityPosts());
     if (!list.length) {
       if (communityMasonry) { communityMasonry.destroy(); communityMasonry = null; }
@@ -1689,6 +1692,7 @@
     readPublishCheckbox,
     getCloudSlice,
     applyCloudSlice,
+    reconcileCommunityWithCards,
     scheduleLayout: scheduleCommunityLayout,
     scheduleCreationsLayout: () => scheduleCommunityLayout('creationsGrid')
   };

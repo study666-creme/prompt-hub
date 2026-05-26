@@ -113,6 +113,16 @@
     return STORAGE_PREFIX + path.replace(/^\//, '');
   }
 
+  function publicUrlFromPath(path) {
+    if (!path || !window.SUPABASE_URL) return null;
+    const base = window.SUPABASE_URL.replace(/\/$/, '');
+    return `${base}/storage/v1/object/public/${BUCKET}/${path.replace(/^\//, '')}`;
+  }
+
+  function isResolvableStorageRef(value) {
+    return !!value && typeof value === 'string' && value.startsWith(STORAGE_PREFIX);
+  }
+
   function normalizeImageRef(value) {
     if (!value || typeof value !== 'string') return value;
     const path = storagePathFromRef(value);
@@ -149,7 +159,7 @@
       return await getSignedUrlForPath(path);
     } catch (e) {
       console.warn('[SupabaseSync] signed url failed', path, e);
-      return image;
+      return publicUrlFromPath(path) || image;
     }
   }
 
@@ -167,7 +177,20 @@
     const path = storagePathFromRef(image);
     if (!path) return image;
     const cached = signedUrlCache.get(path.replace(/^\//, ''));
-    return cached?.url || image;
+    if (cached?.url) return cached.url;
+    if (isResolvableStorageRef(image)) return publicUrlFromPath(path) || '';
+    return image;
+  }
+
+  async function hydrateImageElements(root) {
+    const scope = root || document;
+    const imgs = scope.querySelectorAll('img[data-storage-ref]');
+    await Promise.all([...imgs].map(async (img) => {
+      const ref = img.getAttribute('data-storage-ref');
+      if (!ref) return;
+      const url = await resolveDisplayUrl(ref);
+      if (url && !url.startsWith(STORAGE_PREFIX)) img.src = url;
+    }));
   }
 
   function loadImageFromSource(source) {
@@ -505,6 +528,8 @@
     resolveDisplayUrl,
     prefetchDisplayUrls,
     getCachedDisplayUrl,
+    publicUrlFromPath,
+    hydrateImageElements,
     clearSignedUrlCache,
     init,
     signUp,

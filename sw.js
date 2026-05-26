@@ -1,4 +1,4 @@
-const CACHE = 'prompt-hub-v37';
+const CACHE = 'prompt-hub-v38';
 const ASSETS = [
   './',
   './index.html',
