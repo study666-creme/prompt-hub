@@ -36,6 +36,7 @@
 | GET | `/api/v1/billing/plans` | 否 | 套餐说明（支付待接） |
 | GET | `/api/v1/me` | Bearer | 积分与会员状态 |
 | POST | `/api/v1/redeem` | Bearer | 激活码兑换 |
+| POST | `/api/admin/codes` | `X-Admin-Secret` | 运营批量生成激活码（见 `scripts/generate-codes.ps1`） |
 | GET | `/api/v1/generate/cost` | Bearer | 生图报价（含会员折扣） |
 | POST | `/api/v1/webhooks/payment` | HMAC 签名 | 支付入账（充值 / 开通会员） |
 | GET | `/api/v1/me/ledger` | Bearer | 积分流水（最近 N 条） |

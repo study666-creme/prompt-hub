@@ -9,6 +9,8 @@ export type Env = {
   IMAGE_API_BASE_URL?: string;
   /** 支付 webhook HMAC 密钥：wrangler secret put PAYMENT_WEBHOOK_SECRET */
   PAYMENT_WEBHOOK_SECRET?: string;
+  /** 运营批量造激活码：wrangler secret put ADMIN_API_SECRET */
+  ADMIN_API_SECRET?: string;
 };
 
 export function parseCorsOrigins(raw: string): string[] {

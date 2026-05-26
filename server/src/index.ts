@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { jsonError } from './lib/errors';
 import { createCorsMiddleware } from './middleware/cors';
+import { adminRoutes } from './routes/admin';
 import { v1 } from './routes/v1';
 import { webhookRoutes } from './routes/webhooks/payment';
 import type { Env } from './env';
@@ -36,6 +37,8 @@ app.get('/api/v1/billing/plans', c =>
 );
 
 app.route('/api/v1/webhooks', webhookRoutes);
+
+app.route('/api/admin', adminRoutes);
 
 app.route('/api/v1', v1);
 

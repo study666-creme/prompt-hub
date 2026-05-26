@@ -447,6 +447,13 @@
   line-height: 1.45;
 }
 
+.imagegen-credits-note .link-inline,
+.subscribe-legal .link-inline {
+  color: var(--accent, #93c5fd);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .imagegen-layout {
   flex: 1;
   display: grid;

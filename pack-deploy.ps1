@@ -1,7 +1,9 @@
-# 打包网站文件，用于 Cloudflare 网页上传
+# 打包静态站文件，用于 Cloudflare「上传项目」部署（非 Git 自动部署）
+$root = $PSScriptRoot
 $files = @(
   "index.html",
   "privacy.html",
+  "terms.html",
   "styles.css",
   "styles-mobile.css",
   "styles-theme.css",
@@ -11,17 +13,32 @@ $files = @(
   "script.js",
   "points-system.js",
   "features-draft.js",
+  "membership.js",
+  "subscription.js",
   "mobile.js",
+  "api-config.js",
+  "api-client.js",
+  "supabase-config.js",
+  "supabase-sync.js",
   "sw.js",
   "manifest.webmanifest",
   "ripple-grid.js",
-  "supabase-config.js",
-  "supabase-sync.js",
-  "package.json",
+  "wrangler.toml",
+  "vercel.json",
   "assets\logo.png"
 )
-$dest = Join-Path $PSScriptRoot "prompt-hub-deploy.zip"
+$missing = @()
+$paths = foreach ($f in $files) {
+  $p = Join-Path $root $f
+  if (-not (Test-Path $p)) { $missing += $f; continue }
+  $p
+}
+if ($missing.Count) {
+  Write-Warning "以下文件不存在，已跳过: $($missing -join ', ')"
+}
+$dest = Join-Path $root "prompt-hub-deploy.zip"
 if (Test-Path $dest) { Remove-Item $dest -Force }
-Compress-Archive -Path ($files | ForEach-Object { Join-Path $PSScriptRoot $_ }) -DestinationPath $dest -Force
+Compress-Archive -Path $paths -DestinationPath $dest -Force
 Write-Host "已生成: $dest"
-Write-Host "请到 Cloudflare -> Workers 和 Pages -> prompt-hub-web -> 创建部署 -> 上传 ZIP"
+Write-Host "Cloudflare: prompt-hub-web -> Create deployment -> 上传此 ZIP -> Save and deploy"
+Write-Host "提示: 若要用 GitHub 自动部署，不要走上传页，应选 Connect to Git。"

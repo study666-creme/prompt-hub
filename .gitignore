@@ -5,6 +5,7 @@ desktop.ini
 .env.local
 supabase-config.local.js
 api-config.local.js
+scripts/admin.local.env
 *.log
 node_modules/
 
