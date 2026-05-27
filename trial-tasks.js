@@ -212,10 +212,6 @@
       e.stopPropagation();
       closeTrialTasksPanel();
     });
-    document.getElementById('trialTasksFooterClose')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      closeTrialTasksPanel();
-    });
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       if (overlay?.classList.contains('active')) closeTrialTasksPanel();

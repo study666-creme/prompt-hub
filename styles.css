@@ -1,6 +1,6 @@
 ﻿    /* ===== 提示词仓库 · 高级灰设计系统 ===== */
    :root {
-  --ui-scale: 0.75;
+  --ui-scale: 1;
   --card-columns: 4;
   --card-gap: 16px;
   --card-row-gap: 16px;
@@ -69,14 +69,13 @@ body {
   margin: 0;
 }
 
-/* 仅缩放主界面；弹层在 app-chrome 外。高度用 flex 填满视口，避免 133% 把侧栏底部裁掉 */
+/* 主界面不缩放（弹层在 app-chrome 外，无需 zoom 修遮罩） */
 .app-chrome {
-  zoom: 0.75;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  width: 133.333vw;
-  max-width: 133.333vw;
+  width: 100%;
+  max-width: 100%;
   height: 100vh;
   max-height: 100vh;
   overflow: hidden;
@@ -2030,10 +2029,10 @@ body {
     }
 .image-drop-area.has-image {
   width: 100%;
-  height: min(48vh, 420px);
-  max-height: min(48vh, 420px);
+  height: auto;
+  max-height: none;
   background: var(--bg-hover);
-  overflow: hidden;
+  overflow: visible;
   display: block;
   border: none;
   border-radius: 0;
@@ -2044,12 +2043,12 @@ body {
 
 .image-drop-area.has-image img {
   width: 100%;
-  height: 100%;
-  min-height: 180px;
-  max-height: min(48vh, 420px);
-  object-fit: cover;
+  height: auto;
+  max-height: none;
+  object-fit: contain;
   object-position: center top;
   display: block;
+  vertical-align: top;
 }
     .image-drop-area .remove-image-btn {
       position: absolute;
