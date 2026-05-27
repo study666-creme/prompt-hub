@@ -30,6 +30,14 @@ alter table public.profiles
 comment on column public.profiles.lifetime_credits_spent is '累计消耗积分（生图等），用于任务里程碑';
 comment on column public.profiles.membership_task_flags is '任务进度标记：login_desktop, login_mobile, pwa_installed, community_qualified_count 等';
 
+-- 旧迁移只允许 starter_14d；扩展为含 mini_3d（¥0.99/3 天）
+alter table public.activation_codes
+  drop constraint if exists activation_codes_offer_kind_check;
+
+alter table public.activation_codes
+  add constraint activation_codes_offer_kind_check
+  check (offer_kind is null or offer_kind in ('starter_14d', 'mini_3d'));
+
 -- ¥0.99 购 3 天基础会员（替代已停售的 ¥1.9/14 天公开码）
 insert into public.activation_codes (
   code, credits, membership_tier, membership_days, max_uses, active, note, offer_kind

@@ -56,6 +56,39 @@
     }, 2000);
   }
 
+  async function diagnoseApiConnection() {
+    const pageOrigin = typeof location !== 'undefined' ? location.origin : '';
+    const pageHref = typeof location !== 'undefined' ? location.href : '';
+    if (typeof location !== 'undefined' && location.protocol === 'file:') {
+      return {
+        ok: false,
+        hint:
+          '当前是本地文件打开（地址栏以 file:// 开头），浏览器禁止访问 API。请用 https://prompt-hub.cn 打开本站。'
+      };
+    }
+    const api = String(window.API_BASE_URL || '').replace(/\/$/, '');
+    if (!api) {
+      return {
+        ok: false,
+        hint: `未配置 API。当前页面：${pageOrigin || pageHref || '未知'}，请用 https://prompt-hub.cn 打开。`
+      };
+    }
+    try {
+      const r = await fetch(`${api}/health`, { method: 'GET', cache: 'no-store' });
+      if (r.ok) return { ok: true, hint: '' };
+      return {
+        ok: false,
+        hint: `API 返回 ${r.status}。页面来源：${pageOrigin || pageHref}`
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        hint:
+          `浏览器拦住了对 ${api} 的请求（页面来源：${pageOrigin || '未知'}）。请确认用 https://prompt-hub.cn 打开；Edge 请关闭「跟踪防护」；或换 Chrome 并关闭广告拦截。`
+      };
+    }
+  }
+
   async function loadTasks() {
     if (!isLoggedIn()) return { items: [], lifetimeCreditsSpent: 0, error: null };
     if (!window.PromptHubApi?.isConfigured?.()) {
@@ -97,11 +130,13 @@
       return { items: [], lifetimeCreditsSpent: 0, error: 'session_expired', errorDetail: msg };
     }
     if (r?.code === 'NETWORK_ERROR' || /无法连接|failed to fetch|network|超时/i.test(msg)) {
+      const diag = await diagnoseApiConnection();
       const api = String(window.API_BASE_URL || 'api.prompt-hub.cn').replace(/\/$/, '');
+      const extra = diag.hint ? ` ${diag.hint}` : '';
       return {
         items: [],
         lifetimeCreditsSpent: 0,
-        error: `连不上 ${api}（浏览器拦截或网络问题）。Edge：对本站关闭「跟踪防护」；或换 Chrome / 关广告拦截后点重试。`,
+        error: `连不上 ${api}。${extra}`.trim(),
         retryable: true
       };
     }
