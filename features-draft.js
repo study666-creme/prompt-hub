@@ -9,7 +9,12 @@
   const LS_IMAGEGEN = 'promptrepo_imagegen_draft';
   const PREFILL_KEY = 'promptrepo_imagegen_prefill';
 
-  const GEN_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+  const GEN_RETENTION_MIN_MS = 1 * 24 * 60 * 60 * 1000;
+  const GEN_RETENTION_MAX_MS = 3 * 24 * 60 * 60 * 1000;
+
+  function randomGenRetentionMs() {
+    return GEN_RETENTION_MIN_MS + Math.floor(Math.random() * (GEN_RETENTION_MAX_MS - GEN_RETENTION_MIN_MS + 1));
+  }
 
   let communityPosts = [];
   let creations = [];
@@ -1171,7 +1176,7 @@
     if (!container) return;
     if (hintEl) {
       hintEl.textContent = creationsTab === 'private'
-        ? '点击卡片在右侧查看详情 · 生成图保留 3 天'
+        ? '点击卡片在右侧查看详情 · 生成图保留 1～3 天，请及时存仓库'
         : '点击卡片在右侧查看详情 · 已发布作品永久保留';
     }
     if (creationsMasonry) {
@@ -2007,7 +2012,7 @@
       hasRefImage: imageGenRefImages.length > 0,
       visibility: 'private',
       createdAt: Date.now(),
-      expiresAt: Date.now() + GEN_RETENTION_MS
+      expiresAt: Date.now() + randomGenRetentionMs()
     };
     creations.unshift(creation);
     imageGenActiveHistoryId = creation.id;
@@ -2024,7 +2029,7 @@
       publishCreation(creation.id, { silent: true });
       toast(`已生成并发布（-${cost} 积分）· 可在「我的创作」→「已发布」查看`);
     } else {
-      toast(`已生成（-${cost} 积分，保留 3 天；发布到社区可永久保留）`);
+      toast(`已生成（-${cost} 积分，保留 1～3 天，请及时存仓库；发布到社区可永久保留）`);
     }
     if (isImageGenAutoSaveChecked() && storedImage) {
       saveGeneratedToWarehouse({
@@ -2054,10 +2059,10 @@
     } else {
       const n = imageGenPendingJobs.length;
       el.textContent = mobile
-        ? (n ? `生成中 ${n} 项 · 点图放大 · 按钮复制/填入/存仓库` : '点图放大 · 按钮复制或填入生图 · 保留 3 天')
+        ? (n ? `生成中 ${n} 项 · 点图放大 · 按钮复制/填入/存仓库` : '点图放大 · 按钮复制或填入生图 · 保留 1～3 天，请及时存仓库')
         : (n
           ? `我的生成 · ${n} 个任务进行中（右侧显示）· 可连续提交`
-          : '我的生成记录 · 点击图片放大 · 可存仓库 · 保留 3 天');
+          : '我的生成记录 · 点击图片放大 · 可存仓库 · 保留 1～3 天，请及时存仓库');
     }
   }
 

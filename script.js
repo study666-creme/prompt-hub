@@ -1219,10 +1219,13 @@
 
     function getDataPayload() {
       const base = {
-        cards,
+        cards: filterTombstonedCards(cards),
         customGroups,
         globalFields,
-        settings,
+        settings: {
+          ...settings,
+          deletedCardTombstones: { ...(settings.deletedCardTombstones || {}) }
+        },
         account: window.Membership?.getAccountPayload?.() || null,
         schemaVersion: window.CloudSyncSafety?.SCHEMA_VERSION || 2
       };
@@ -1255,20 +1258,30 @@
       return '';
     }
 
+    function mergeDeletedCardTombstones(a, b) {
+      return { ...(a || {}), ...(b || {}) };
+    }
+
     function recordCardDeletion(id) {
       if (id == null) return;
       if (!settings.deletedCardTombstones || typeof settings.deletedCardTombstones !== 'object') {
         settings.deletedCardTombstones = {};
       }
       settings.deletedCardTombstones[String(id)] = Date.now();
+      try {
+        localStorage.setItem('promptrepo_settings', JSON.stringify(settings));
+        const uid = window.SupabaseSync?.getUserId?.() || activeAccountId;
+        if (uid) localStorage.setItem(userStorageKey('settings', uid), JSON.stringify(settings));
+      } catch (e) { /* ignore */ }
     }
 
     function isCardTombstoned(card) {
       if (!card || card.id == null) return false;
-      const tombAt = settings.deletedCardTombstones?.[String(card.id)];
-      if (!tombAt) return false;
-      const cardTs = card.updatedAt || card.createdAt || 0;
-      return tombAt >= cardTs;
+      return Boolean(settings.deletedCardTombstones?.[String(card.id)]);
+    }
+
+    function filterTombstonedCards(list) {
+      return (list || []).filter(c => c && c.id != null && !isCardTombstoned(c));
     }
 
     /** 本地列表为准：已删卡片不会从云端“复活”；同 id 取 updatedAt 较新者 */
@@ -1348,12 +1361,22 @@
 
     function applyDataPayload(payload) {
       if (!payload || typeof payload !== 'object') return;
-      if (Array.isArray(payload.cards)) cards = normalizeCardImages(payload.cards);
+      const prevTombstones = { ...(settings.deletedCardTombstones || {}) };
+      if (Array.isArray(payload.cards)) {
+        cards = filterTombstonedCards(normalizeCardImages(payload.cards));
+      }
       if (Array.isArray(payload.customGroups)) customGroups = payload.customGroups;
       if (Array.isArray(payload.globalFields)) globalFields = payload.globalFields;
       if (payload.settings && typeof payload.settings === 'object') {
         settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, autoDayNight: true, themeManualOverride: false }, payload.settings);
+        settings.deletedCardTombstones = mergeDeletedCardTombstones(
+          prevTombstones,
+          payload.settings.deletedCardTombstones
+        );
+      } else if (Object.keys(prevTombstones).length) {
+        settings.deletedCardTombstones = prevTombstones;
       }
+      cards = filterTombstonedCards(cards);
       window.Membership?.syncFromPayload?.(payload.account);
       window.FeatureDraft?.applyCloudSlice?.(payload);
       normalizeCardPins();
@@ -1788,15 +1811,24 @@
 
     async function pullFromCloud() {
       if (!window.SupabaseSync?.isLoggedIn?.()) return false;
+      const prevTombstones = { ...(settings.deletedCardTombstones || {}) };
       const cloud = await window.SupabaseSync.pullCloudData();
       if (cloud != null && typeof cloud === 'object') {
-        const localCards = cards.slice();
+        const localCards = filterTombstonedCards(cards.slice());
         if ((!cloud.cards || cloud.cards.length === 0) && localCards.length > 0) {
           cloud.cards = localCards;
         } else if (cloud.cards?.length) {
           cloud.cards = localCards.length
             ? mergeCardsByUpdatedAt(localCards, cloud.cards)
-            : (cloud.cards || []).filter(c => c && !isCardTombstoned(c));
+            : filterTombstonedCards(cloud.cards);
+        }
+        if (cloud.settings && typeof cloud.settings === 'object') {
+          cloud.settings.deletedCardTombstones = mergeDeletedCardTombstones(
+            prevTombstones,
+            cloud.settings.deletedCardTombstones
+          );
+        } else {
+          cloud.settings = { ...(cloud.settings || {}), deletedCardTombstones: prevTombstones };
         }
         applyDataPayload(cloud);
         window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
@@ -2134,6 +2166,12 @@
         const stored = JSON.parse(localStorage.getItem('promptrepo_settings') || '{}');
         if ('themeManualOverride' in stored) settings.themeManualOverride = stored.themeManualOverride;
         if ('autoDayNight' in stored) settings.autoDayNight = stored.autoDayNight;
+        if (stored.deletedCardTombstones) {
+          settings.deletedCardTombstones = mergeDeletedCardTombstones(
+            stored.deletedCardTombstones,
+            settings.deletedCardTombstones
+          );
+        }
       } catch (e) { /* ignore */ }
       const uid = window.SupabaseSync?.getUserId?.() || activeAccountId;
       if (uid) {

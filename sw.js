@@ -1,4 +1,4 @@
-const CACHE = 'prompt-hub-v59';
+const CACHE = 'prompt-hub-v60';
 /** 仅预缓存壳资源；JS/CSS 不预缓存，避免强刷仍命中旧脚本 */
 const ASSETS = [
   './',
