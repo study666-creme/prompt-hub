@@ -1,4 +1,4 @@
-const CACHE = 'prompt-hub-v85';
+const CACHE = 'prompt-hub-v86';
 /** 不缓存 index.html / JS / CSS，避免版本切换时死循环刷新 */
 const ASSETS = [
   './manifest.webmanifest',

@@ -1511,6 +1511,7 @@
   }
 
   let imageGenCostHintSeq = 0;
+  let imageGenCostDebounceTimer = null;
 
   function applyImageGenCostDisplay(detail, final, quality, size) {
     const hint = document.getElementById('imageGenCostHint');
@@ -1541,7 +1542,10 @@
     const detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution);
     const final = detail?.final ?? 10;
     applyImageGenCostDisplay(detail, final, quality, size);
-    refreshImageGenCostFromApi(model, resolution, quality, size);
+    clearTimeout(imageGenCostDebounceTimer);
+    imageGenCostDebounceTimer = setTimeout(() => {
+      void refreshImageGenCostFromApi(model, resolution, quality, size);
+    }, 500);
   }
 
   async function refreshImageGenCostFromApi(model, resolution, quality, size) {

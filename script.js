@@ -49,16 +49,22 @@
     } catch (e) { activeFilters = new Set(); }
     const GUEST_CARD_LIMIT = 10;
 
+    if (localStorage.getItem('promptrepo_card_columns_v3') !== '1') {
+      localStorage.setItem('promptrepo_card_columns', '4');
+      localStorage.setItem('promptrepo_card_columns_v3', '1');
+    }
     let cardColumns = Number(localStorage.getItem('promptrepo_card_columns'));
     if (!Number.isFinite(cardColumns) || cardColumns < 1) cardColumns = 4;
+    if (!window.matchMedia('(max-width: 900px)').matches && cardColumns < 4) cardColumns = 4;
     cardColumns = Math.min(5, Math.max(1, cardColumns));
 
-    document.documentElement.style.setProperty('--card-columns', cardColumns);
+    document.documentElement.style.setProperty('--card-columns', String(cardColumns));
 
     function setCardColumns(cols) {
       cardColumns = Math.min(5, Math.max(1, cols));
-      document.documentElement.style.setProperty('--card-columns', cardColumns);
+      document.documentElement.style.setProperty('--card-columns', String(cardColumns));
       localStorage.setItem('promptrepo_card_columns', String(cardColumns));
+      localStorage.setItem('promptrepo_card_columns_v3', '1');
       const container = document.getElementById('cardsContainer');
       if (container) container.scrollTop = 0;
       if (typeof renderCards === 'function') renderCards(true);
@@ -576,18 +582,12 @@
 
     let layoutMasonryTimer = null;
 
-    function getDesktopCardMinWidth() {
-      if (cardColumns >= 4) return 72;
-      if (cardColumns >= 3) return 88;
-      return 100;
-    }
-
     function getDesktopCardColumnWidth() {
       const gap = getMasonryGap();
       const innerW = getCardsInnerWidth();
-      if (innerW < 80) return 280;
-      const minCol = getDesktopCardMinWidth();
-      return Math.max(minCol, Math.floor((innerW - gap * (cardColumns - 1)) / cardColumns));
+      if (innerW < 80) return 200;
+      const cols = Math.max(1, cardColumns);
+      return Math.max(64, Math.floor((innerW - gap * (cols - 1)) / cols));
     }
 
     function primeDesktopCardGrid(container) {

@@ -1380,6 +1380,9 @@ body {
     }
     .cards-container:not(.list-view) .card {
       display: flex;
+      flex-direction: column;
+      height: auto !important;
+      min-height: 0;
       box-sizing: border-box;
       margin-bottom: var(--card-row-gap);
     }
@@ -1559,6 +1562,9 @@ body {
       width: 100%;
       min-height: 120px;
       background: linear-gradient(145deg, #1a1a1a 0%, #262626 100%);
+    }
+    .cards-container:not(.list-view) .card .card-body {
+      flex: 0 0 auto;
     }
     .card .card-body {
       padding: var(--padding-card);

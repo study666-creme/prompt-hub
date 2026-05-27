@@ -38,21 +38,47 @@ const claimParamsSchema = z.object({
 export const membershipTaskRoutes = new Hono<{ Bindings: Env }>();
 
 membershipTaskRoutes.get('/', async c => {
+  const user = c.get('user');
+  const admin = createAdminClient(c.env);
   try {
-    const user = c.get('user');
-    const admin = createAdminClient(c.env);
     const ua = c.req.header('user-agent') || '';
-
     const device = detectDeviceFromUa(ua);
-    if (device === 'desktop') {
-      await mergeTaskFlags(admin, user.id, { login_desktop: true });
-    } else if (device === 'mobile') {
-      await mergeTaskFlags(admin, user.id, { login_mobile: true });
+    let flags: ReturnType<typeof parseTaskFlags> = {};
+    try {
+      if (device === 'desktop') {
+        flags = await mergeTaskFlags(admin, user.id, { login_desktop: true });
+      } else if (device === 'mobile') {
+        flags = await mergeTaskFlags(admin, user.id, { login_mobile: true });
+      } else {
+        const profile = await getOrCreateProfile(admin, user.id);
+        flags = parseTaskFlags(profile);
+      }
+    } catch (mergeErr) {
+      if (isSchemaMigrationError(mergeErr)) {
+        throw new ApiError(
+          503,
+          'MIGRATION_REQUIRED',
+          '请在 Supabase SQL 编辑器执行迁移 20260528120000_membership_tasks.sql'
+        );
+      }
+      const profile = await getOrCreateProfile(admin, user.id);
+      flags = parseTaskFlags(profile);
     }
 
     const profile = await getOrCreateProfile(admin, user.id);
-    const flags = parseTaskFlags(profile);
-    const claimed = await listClaimedKeys(admin, user.id);
+    let claimed: Set<string>;
+    try {
+      claimed = await listClaimedKeys(admin, user.id);
+    } catch (claimErr) {
+      if (isSchemaMigrationError(claimErr)) {
+        throw new ApiError(
+          503,
+          'MIGRATION_REQUIRED',
+          '请在 Supabase SQL 编辑器执行迁移 20260528120000_membership_tasks.sql'
+        );
+      }
+      throw claimErr;
+    }
     const list = buildTaskList(profile, flags, claimed, user.phoneVerified);
 
     return c.json({
@@ -64,6 +90,7 @@ membershipTaskRoutes.get('/', async c => {
       }
     });
   } catch (err) {
+    if (err instanceof ApiError) throw err;
     if (isSchemaMigrationError(err)) {
       throw new ApiError(
         503,
@@ -71,7 +98,8 @@ membershipTaskRoutes.get('/', async c => {
         '请在 Supabase SQL 编辑器执行迁移 20260528120000_membership_tasks.sql'
       );
     }
-    throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new ApiError(500, 'TASKS_LOAD_FAILED', msg.slice(0, 180));
   }
 });
 

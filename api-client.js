@@ -80,7 +80,8 @@
         ok: false,
         status: res.status,
         code,
-        message
+        message,
+        details: err.details
       };
     }
     return { ok: true, data: json.data };

@@ -102,6 +102,15 @@
     const r = await window.PromptHubApi?.getMembershipTasks?.();
     if (r?.ok && Array.isArray(r.data?.items)) return { ...r.data, error: null };
     const msg = r?.message || r?.code || '任务列表加载失败';
+    if (r?.code === 'TASKS_LOAD_FAILED' || r?.code === 'INTERNAL_ERROR') {
+      return {
+        items: [],
+        lifetimeCreditsSpent: 0,
+        error: msg || '任务接口服务器错误',
+        errorDetail: typeof r?.details === 'string' ? r.details : '',
+        retryable: true
+      };
+    }
     if (r?.code === 'MIGRATION_REQUIRED' || /membership_tasks\.sql/i.test(msg)) {
       return {
         items: [],
@@ -140,7 +149,13 @@
         retryable: true
       };
     }
-    return { items: [], lifetimeCreditsSpent: 0, error: msg };
+    return {
+      items: [],
+      lifetimeCreditsSpent: 0,
+      error: msg,
+      errorDetail: (typeof r?.details === 'string' ? r.details : '') || (r?.status ? `HTTP ${r.status}` : ''),
+      retryable: true
+    };
   }
 
   function renderTasks(data) {
@@ -157,10 +172,11 @@
       return;
     }
     if (data?.error) {
+      const detail = data.errorDetail ? `<p class="trial-tasks-hint">${esc(data.errorDetail)}</p>` : '';
       const retryBtn = data.retryable
         ? '<p class="trial-tasks-hint"><button type="button" class="btn btn-secondary btn-sm" id="trialTasksRetryBtn">重试</button></p>'
-        : '<p class="trial-tasks-hint">若持续失败：在 Supabase SQL 编辑器执行迁移 <code>20260528120000_membership_tasks.sql</code>，并确认已登录。</p>';
-      list.innerHTML = `<p class="trial-tasks-empty">${esc(data.error)}</p>${retryBtn}`;
+        : '<p class="trial-tasks-hint">若提示迁移：在 Supabase SQL 编辑器执行 <code>20260528120000_membership_tasks.sql</code>。</p>';
+      list.innerHTML = `<p class="trial-tasks-empty">${esc(data.error)}</p>${detail}${retryBtn}`;
       document.getElementById('trialTasksRetryBtn')?.addEventListener('click', () => {
         void openTrialTasksPanel();
       });

@@ -45,7 +45,30 @@ function friendlyGenerationError(raw: string): string {
   return s || '上游生图失败，您的积分已全额退回';
 }
 
-generateRoutes.use('*', rateLimit(60, 60_000));
+/** 报价接口：轻量、不限流（避免生图页拖动参数时卡 20s+） */
+generateRoutes.get('/cost', async c => {
+  const resolution = c.req.query('resolution') || '1k';
+  const model = c.req.query('model') || 'quanneng2';
+  if (!['1k', '2k', '4k'].includes(resolution)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '无效的分辨率');
+  }
+  if (!['quanneng2', 'jimeng'].includes(model)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '无效的模型');
+  }
+  const user = c.get('user');
+  const admin = createAdminClient(c.env);
+  const profile = await getOrCreateProfile(admin, user.id);
+  const memberActive = isMembershipActive(profile);
+  const cost = computeGenerationCost(
+    model as ImageModelId,
+    resolution as '1k' | '2k' | '4k',
+    profile.membership_tier,
+    memberActive
+  );
+  return c.json({ ok: true, data: cost });
+});
+
+generateRoutes.use('*', rateLimit(120, 60_000));
 
 generateRoutes.post('/', async c => {
   const user = c.get('user');
@@ -283,24 +306,3 @@ generateRoutes.get('/jobs/:jobId', async c => {
   });
 });
 
-generateRoutes.get('/cost', async c => {
-  const resolution = c.req.query('resolution') || '1k';
-  const model = c.req.query('model') || 'quanneng2';
-  if (!['1k', '2k', '4k'].includes(resolution)) {
-    throw new ApiError(400, 'VALIDATION_ERROR', '无效的分辨率');
-  }
-  if (!['quanneng2', 'jimeng'].includes(model)) {
-    throw new ApiError(400, 'VALIDATION_ERROR', '无效的模型');
-  }
-  const user = c.get('user');
-  const admin = createAdminClient(c.env);
-  const profile = await syncMembershipCredits(admin, user.id);
-  const memberActive = isMembershipActive(profile);
-  const cost = computeGenerationCost(
-    model,
-    resolution,
-    profile.membership_tier,
-    memberActive
-  );
-  return c.json({ ok: true, data: cost });
-});
