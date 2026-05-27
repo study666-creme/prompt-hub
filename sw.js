@@ -1,8 +1,6 @@
-const CACHE = 'prompt-hub-v62';
-/** 仅预缓存壳资源；JS/CSS 不预缓存，避免强刷仍命中旧脚本 */
+const CACHE = 'prompt-hub-v63';
+/** 不缓存 index.html / JS / CSS，避免版本切换时死循环刷新 */
 const ASSETS = [
-  './',
-  './index.html',
   './manifest.webmanifest',
   './assets/logo.png'
 ];
@@ -36,10 +34,11 @@ self.addEventListener('fetch', (e) => {
 
   e.respondWith(
     (async () => {
-      if (isScriptOrStyle) {
+      if (isHtml || isScriptOrStyle) {
         try {
           return await fetch(e.request, { cache: 'no-store' });
         } catch (err) {
+          if (isHtml) throw err;
           const cached = await caches.match(e.request);
           if (cached) return cached;
           throw err;
@@ -53,14 +52,6 @@ self.addEventListener('fetch', (e) => {
         }
         return res;
       };
-      if (isHtml) {
-        try {
-          return await fetch(e.request, { cache: 'no-store' }).then(putCache);
-        } catch (err) {
-          if (cached) return cached;
-          throw err;
-        }
-      }
       try {
         return await fetch(e.request).then(putCache);
       } catch (err) {
