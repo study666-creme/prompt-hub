@@ -1907,6 +1907,18 @@
       btn.textContent = '提交中…';
     }
 
+    function friendlyGenErrorMessage(msg) {
+      const s = String(msg || '');
+      if (/insufficient balance/i.test(s) || (/insufficient/i.test(s) && /balance/i.test(s))) {
+        return '生图服务商账户余额不足，请联系站长充值；您的积分已全额退回';
+      }
+      if (/invalid.*api.*key|unauthorized|401/i.test(s)) {
+        return '生图接口密钥无效或已过期，请联系站长检查配置；您的积分已全额退回';
+      }
+      if (s.length > 120) return s.slice(0, 120) + '…';
+      return s || '生图失败，您的积分已全额退回';
+    }
+
     if (useApi) {
       const refUrls = await resolveRefUrlsForApi();
       const gen = await window.PromptHubApi.generateImage({
@@ -1925,7 +1937,7 @@
         removePendingJob(pendingId);
         renderImageGenFeed();
         await window.PointsSystem?.refreshCreditsFromServer?.();
-        toast(gen.message || '生图失败');
+        toast(friendlyGenErrorMessage(gen.message));
         return;
       }
       if (typeof gen.data.creditsRemaining === 'number') {

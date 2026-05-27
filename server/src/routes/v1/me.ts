@@ -42,8 +42,7 @@ meRoutes.get('/', async c => {
       trialFreeUsed: profile.trial_free_used,
       lifetimeCreditsSpent: profile.lifetime_credits_spent ?? 0,
       dailyCreditsByTier: DAILY_CREDITS_BY_TIER,
-      lumpCreditsByTier: { basic: 100, standard: 310, pro: 620 },
-      miniOffer: { priceYuan: 0.99, days: 3, code: 'MINI-99-3D' }
+      lumpCreditsByTier: { basic: 100, standard: 310, pro: 620 }
     }
   });
 });

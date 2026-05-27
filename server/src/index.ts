@@ -70,8 +70,7 @@ app.get('/api/v1/billing/plans', c =>
           lumpCredits: 620
         }
       ],
-      miniOffer: { priceYuan: 0.99, days: 3, code: 'MINI-99-3D' },
-      note: '支付 webhook 待接入；免费会员见任务中心；¥0.99 体验码 MINI-99-3D'
+      note: '支付 webhook 待接入；免费会员请完成任务中心领取（直接到账，无需激活码）'
     }
   })
 );

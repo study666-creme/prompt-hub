@@ -1357,6 +1357,14 @@ body {
     }
     .cards-container:not(.list-view):not(.cards-grid-primed) .card {
       visibility: hidden;
+      pointer-events: none;
+    }
+    .cards-container:not(.list-view):not(.cards-grid-primed) {
+      opacity: 0;
+    }
+    .cards-container.cards-grid-primed:not(.list-view) {
+      opacity: 1;
+      transition: opacity 0.12s ease-out;
     }
     .cards-container:not(.list-view) .card {
       display: flex;

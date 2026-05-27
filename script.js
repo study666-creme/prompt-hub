@@ -675,7 +675,6 @@
         masonryInstance.reloadItems();
         masonryInstance.layout();
       } else {
-        resetCardLayoutStyles(container);
         masonryInstance = new Masonry(container, msnryOpts);
         masonryInstance.layout();
       }
