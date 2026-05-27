@@ -625,7 +625,7 @@
         masonryInstance = null;
       }
       container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
-      container.classList.add('mobile-grid');
+      container.classList.add('mobile-grid', 'cards-grid-primed');
       container.removeAttribute('style');
       resetCardLayoutStyles(container);
     }
@@ -2544,6 +2544,7 @@
       }
       updateBatchCountLabel();
       if (mobileGrid) {
+        container.classList.add('cards-grid-primed');
         enforceMobileCardGrid();
         requestAnimationFrame(() => enforceMobileCardGrid());
       }

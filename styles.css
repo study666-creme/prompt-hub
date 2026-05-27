@@ -1355,17 +1355,6 @@ body {
       visibility: hidden;
       display: block;
     }
-    .cards-container:not(.list-view):not(.cards-grid-primed) .card {
-      visibility: hidden;
-      pointer-events: none;
-    }
-    .cards-container:not(.list-view):not(.cards-grid-primed) {
-      opacity: 0;
-    }
-    .cards-container.cards-grid-primed:not(.list-view) {
-      opacity: 1;
-      transition: opacity 0.12s ease-out;
-    }
     .cards-container:not(.list-view) .card {
       display: flex;
       box-sizing: border-box;
@@ -2983,4 +2972,18 @@ body {
     .modal-overlay.active { display: flex; }
     /* 辅助 */
     .no-image-placeholder { display: none; }
+
+@media (min-width: 901px) {
+  .cards-container:not(.list-view):not(.cards-grid-primed) .card {
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .cards-container:not(.list-view):not(.cards-grid-primed) {
+    opacity: 0;
+  }
+  .cards-container.cards-grid-primed:not(.list-view) {
+    opacity: 1;
+    transition: opacity 0.12s ease-out;
+  }
+}
 

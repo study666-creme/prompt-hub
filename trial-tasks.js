@@ -48,6 +48,14 @@
     const r = await window.PromptHubApi?.getMembershipTasks?.();
     if (r?.ok && Array.isArray(r.data?.items)) return { ...r.data, error: null };
     const msg = r?.message || r?.code || '任务列表加载失败';
+    if (r?.code === 'NOT_FOUND' || /接口不存在/.test(msg)) {
+      return {
+        items: [],
+        lifetimeCreditsSpent: 0,
+        error:
+          '会员任务接口未部署：请在电脑打开项目 server 文件夹，执行 npm run deploy（需已登录 Cloudflare）'
+      };
+    }
     return { items: [], lifetimeCreditsSpent: 0, error: msg };
   }
 

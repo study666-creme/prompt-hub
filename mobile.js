@@ -160,7 +160,15 @@
     const navBtn = document.getElementById('mobileNavBtn');
     const groupsBtn = document.getElementById('mobileGroupsBtn');
 
-    overlay?.addEventListener('click', closeDrawers);
+    overlay?.addEventListener('click', (e) => {
+      if (e.target === overlay) closeDrawers();
+    });
+    overlay?.addEventListener('touchend', (e) => {
+      if (e.target === overlay) {
+        e.preventDefault();
+        closeDrawers();
+      }
+    });
     navBtn?.addEventListener('click', () => {
       if (document.body.classList.contains('mobile-nav-open')) closeDrawers();
       else openNavDrawer();
