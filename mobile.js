@@ -25,6 +25,26 @@
     ov.setAttribute('aria-hidden', open ? 'false' : 'true');
   }
 
+  function forceHideBlockingLayers() {
+    const drawer = document.getElementById('mobileDrawerOverlay');
+    if (drawer && !document.body.classList.contains('mobile-nav-open') && !document.body.classList.contains('mobile-groups-open')) {
+      drawer.hidden = true;
+      drawer.style.display = 'none';
+      drawer.style.pointerEvents = 'none';
+    }
+    document.querySelectorAll('.filter-sheet-overlay, .tag-sheet-overlay').forEach((el) => {
+      if (!el.classList.contains('open')) {
+        el.hidden = true;
+        el.style.display = 'none';
+        el.style.pointerEvents = 'none';
+      }
+    });
+    document.querySelectorAll('.subscribe-overlay:not(.active), .community-detail-overlay:not(.active)').forEach((el) => {
+      el.hidden = true;
+      el.style.pointerEvents = 'none';
+    });
+  }
+
   function closeAllMobileOverlays() {
     closeDrawers();
     document.body.classList.remove(
@@ -41,6 +61,8 @@
     ).forEach((el) => {
       el.classList.remove('open', 'active');
       el.hidden = true;
+      el.style.display = 'none';
+      el.style.pointerEvents = 'none';
     });
     if (typeof closeTagSheet === 'function') closeTagSheet();
     window.FeatureDraft?.closeImageGenFilterSheet?.();
@@ -51,6 +73,7 @@
       el.classList.remove('active');
     });
     syncDrawerOverlayVisibility();
+    forceHideBlockingLayers();
   }
 
   function closeDrawers() {
@@ -217,7 +240,10 @@
     if (!isMobile()) return;
     const tab = tabForApp(app);
     if (tab) setBottomTab(tab);
-    if (app === 'imagegen') initImageGenMobileView();
+    if (app === 'imagegen') {
+      closeAllMobileOverlays();
+      initImageGenMobileView();
+    }
   };
 
   function onViewportChange() {
@@ -297,6 +323,15 @@
 
   if (isMobile()) {
     closeAllMobileOverlays();
+    document.addEventListener(
+      'touchstart',
+      () => {
+        if (!document.body.classList.contains('mobile-nav-open') && !document.body.classList.contains('mobile-groups-open')) {
+          forceHideBlockingLayers();
+        }
+      },
+      { passive: true, capture: true }
+    );
     window.addEventListener('pageshow', (e) => {
       if (e.persisted) closeAllMobileOverlays();
     });

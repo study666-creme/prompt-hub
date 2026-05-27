@@ -40,6 +40,21 @@
     display: flex !important;
   }
 
+  /* mobile-only 会盖掉 display:none，筛选 sheet 未打开时必须关掉挡点击 */
+  .filter-sheet-overlay.mobile-only:not(.open) {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    opacity: 0 !important;
+  }
+
+  .filter-sheet-overlay.mobile-only.open {
+    display: flex !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+    opacity: 1 !important;
+  }
+
   .desktop-only {
     display: none !important;
   }
@@ -1227,6 +1242,10 @@
 
 @media (min-width: 901px) {
   .mobile-only {
+    display: none !important;
+  }
+
+  .filter-sheet-overlay {
     display: none !important;
   }
 

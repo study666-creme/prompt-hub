@@ -2371,6 +2371,8 @@
       });
     });
     overlay.hidden = false;
+    overlay.style.removeProperty('display');
+    overlay.style.pointerEvents = '';
     overlay.classList.add('open');
   }
 
