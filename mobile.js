@@ -183,7 +183,9 @@
       applyMobileColumns();
       if (typeof closeEditPanel === 'function') closeEditPanel();
       window.FeatureDraft?.resetMobileFeedGridStyles?.();
-      if (typeof scheduleLayoutMasonry === 'function') scheduleLayoutMasonry();
+      window.FeatureDraft?.enforceMobileImageGenFeed?.();
+      if (typeof enforceMobileCardGrid === 'function') enforceMobileCardGrid();
+      else if (typeof scheduleLayoutMasonry === 'function') scheduleLayoutMasonry();
       if (typeof renderCards === 'function') renderCards(true);
       if (document.getElementById('pageImageGen')?.classList.contains('active')) {
         initImageGenMobileView();
@@ -209,8 +211,10 @@
     if (isMobile()) {
       applyMobileColumns();
       if (typeof closeEditPanel === 'function') closeEditPanel();
-      if (typeof scheduleLayoutMasonry === 'function') scheduleLayoutMasonry();
+      if (typeof enforceMobileCardGrid === 'function') enforceMobileCardGrid();
+      else if (typeof scheduleLayoutMasonry === 'function') scheduleLayoutMasonry();
       window.FeatureDraft?.resetMobileFeedGridStyles?.();
+      window.FeatureDraft?.enforceMobileImageGenFeed?.();
       const saved = localStorage.getItem('promptrepo_app_page');
       if (saved) {
         window.mobileOnAppPageChange?.(saved);

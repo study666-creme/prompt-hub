@@ -578,14 +578,7 @@
     function scheduleLayoutMasonry() {
       if (isMobileViewport()) {
         clearTimeout(layoutMasonryTimer);
-        layoutMasonryTimer = setTimeout(() => {
-          const container = document.getElementById('cardsContainer');
-          if (masonryInstance) {
-            masonryInstance.destroy();
-            masonryInstance = null;
-          }
-          resetCardLayoutStyles(container);
-        }, 50);
+        layoutMasonryTimer = setTimeout(() => enforceMobileCardGrid(), 50);
         return;
       }
       clearTimeout(layoutMasonryTimer);
@@ -599,16 +592,27 @@
       });
     }
 
+    function enforceMobileCardGrid() {
+      if (!isMobileViewport()) return;
+      const container = document.getElementById('cardsContainer');
+      if (!container) return;
+      if (masonryInstance) {
+        try { masonryInstance.destroy(); } catch (e) { /* ignore */ }
+        masonryInstance = null;
+      }
+      container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
+      container.classList.add('mobile-grid');
+      container.removeAttribute('style');
+      resetCardLayoutStyles(container);
+    }
+    window.enforceMobileCardGrid = enforceMobileCardGrid;
+
     function layoutMasonryGrid() {
       const container = document.getElementById('cardsContainer');
       const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
       if (!container || viewMode === 'list') return;
       if (isMobileViewport()) {
-        if (masonryInstance) {
-          masonryInstance.destroy();
-          masonryInstance = null;
-        }
-        resetCardLayoutStyles(container);
+        enforceMobileCardGrid();
         return;
       }
       if (!container.querySelector('.card')) {
@@ -930,7 +934,8 @@
         requestAnimationFrame(() => {
           const onWarehouse = document.getElementById('pageWarehouse')?.classList.contains('active');
           if (!onWarehouse) return;
-          if (masonryInstance && document.querySelector('#cardsContainer .card')) {
+          if (isMobileViewport()) enforceMobileCardGrid();
+          else if (masonryInstance && document.querySelector('#cardsContainer .card')) {
             masonryInstance.layout();
           } else if (typeof scheduleLayoutMasonry === 'function') {
             scheduleLayoutMasonry();
@@ -1310,8 +1315,8 @@
       if (isMobileViewport()) {
         if (media.closest('#imageGenFeed')) {
           window.FeatureDraft?.resetMobileFeedGridStyles?.();
-        } else if (media.closest('#cardsContainer')) {
-          resetCardLayoutStyles(document.getElementById('cardsContainer'));
+        }         else if (media.closest('#cardsContainer')) {
+          enforceMobileCardGrid();
         }
         return;
       }
@@ -1342,7 +1347,7 @@
         media.classList.remove('is-loading');
         if (!mobile) scheduleMasonryForMedia(media);
         else if (media.closest('#imageGenFeed')) window.FeatureDraft?.resetMobileFeedGridStyles?.();
-        else if (media.closest('#cardsContainer')) resetCardLayoutStyles(document.getElementById('cardsContainer'));
+        else if (media.closest('#cardsContainer')) enforceMobileCardGrid();
       }, wait);
     }
     window.finishCardMediaShine = finishCardMediaShine;
@@ -1997,9 +2002,10 @@
       buildFilterMenu();
       syncFilterBtnState();
       renderGroups();
-      if (soft && masonryInstance && document.getElementById('pageWarehouse')?.classList.contains('active')) {
+      if (soft && document.getElementById('pageWarehouse')?.classList.contains('active')) {
         requestAnimationFrame(() => {
-          if (masonryInstance) masonryInstance.layout();
+          if (isMobileViewport()) enforceMobileCardGrid();
+          else if (masonryInstance) masonryInstance.layout();
           else scheduleLayoutMasonry();
         });
       } else {
@@ -2445,7 +2451,7 @@
       container.appendChild(fragment);
       const afterImages = () => {
         if (!mobileGrid && viewMode !== 'list') scheduleLayoutMasonry();
-        else if (mobileGrid) resetCardLayoutStyles(container);
+        else if (mobileGrid) enforceMobileCardGrid();
       };
       if (!mobileGrid && viewMode !== 'list') scheduleLayoutMasonry();
       void prefetchPromise.then(() => {
@@ -2461,7 +2467,10 @@
         masonryInstance = null;
       }
       updateBatchCountLabel();
-      if (mobileGrid) resetCardLayoutStyles(container);
+      if (mobileGrid) {
+        enforceMobileCardGrid();
+        requestAnimationFrame(() => enforceMobileCardGrid());
+      }
     }
 
     document.getElementById('cardsContainer')?.addEventListener('click', (e) => {
@@ -2760,9 +2769,11 @@
       });
       html += `<div class="panel-temp-field-row">
         <input type="text" id="tempFieldName" placeholder="字段名">
-        <select id="tempFieldType"><option value="text">文本</option><option value="textarea">多行文本</option></select>
-        <label class="custom-checkbox"><input type="checkbox" id="tempFieldFixed"><span class="checkmark"></span> 固定</label>
-        <button type="button" class="btn btn-secondary panel-temp-add-btn" onclick="addTempField()">+</button>
+        <div class="panel-temp-field-actions">
+          <select id="tempFieldType"><option value="text">文本</option><option value="textarea">多行文本</option></select>
+          <label class="custom-checkbox panel-temp-fixed-label"><input type="checkbox" id="tempFieldFixed"><span class="checkmark"></span><span class="custom-checkbox-text">固定</span></label>
+          <button type="button" class="btn btn-secondary panel-temp-add-btn" onclick="addTempField()" aria-label="添加字段">+</button>
+        </div>
       </div>`;
       container.innerHTML = html;
     }

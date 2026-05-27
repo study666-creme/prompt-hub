@@ -470,14 +470,14 @@
   function scheduleImageGenFeedLayout() {
     clearTimeout(imageGenLayoutTimer);
     imageGenLayoutTimer = setTimeout(() => {
-      if (isMobileFeedViewport()) resetMobileFeedGridStyles();
+      if (isMobileFeedViewport()) enforceMobileImageGenFeed();
       else layoutImageGenFeedMasonry();
     }, 80);
   }
 
   function layoutImageGenFeedMasonry() {
     if (isMobileFeedViewport()) {
-      resetMobileFeedGridStyles();
+      enforceMobileImageGenFeed();
       return;
     }
     const wrap = document.getElementById('imageGenFeed');
@@ -2102,16 +2102,22 @@
   }
 
   function resetMobileFeedGridStyles() {
+    enforceMobileImageGenFeed();
+  }
+
+  function enforceMobileImageGenFeed() {
+    if (!isMobileFeedViewport()) return;
     if (imageGenMasonry) {
       imageGenMasonry.destroy();
       imageGenMasonry = null;
     }
     const wrap = document.getElementById('imageGenFeed');
     if (!wrap) return;
+    wrap.classList.remove('imagegen-feed--masonry');
+    wrap.classList.add('imagegen-feed--tiles', 'mobile-feed-grid');
     wrap.removeAttribute('style');
-    wrap.querySelectorAll('.imagegen-feed-card, .grid-sizer').forEach(el => {
-      el.removeAttribute('style');
-    });
+    wrap.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
+    wrap.querySelectorAll('.imagegen-feed-card').forEach((el) => el.removeAttribute('style'));
   }
 
   function buildFeedCardHtml(opts) {
@@ -2184,7 +2190,8 @@
     document.getElementById('imageGenPreviewPanel')?.classList.add('hidden');
     document.querySelector('.imagegen-side')?.classList.remove('imagegen-preview-open');
     document.querySelectorAll('.imagegen-feed-card.active-preview').forEach(el => el.classList.remove('active-preview'));
-    requestAnimationFrame(() => scheduleImageGenFeedLayout());
+    if (isMobileFeedViewport()) enforceMobileImageGenFeed();
+    else requestAnimationFrame(() => scheduleImageGenFeedLayout());
   }
 
   function buildPreviewFillActions(hasRef, extraActionsHtml) {
@@ -2322,9 +2329,49 @@
       el.classList.toggle('active-preview', kind === 'warehouse' ? fid === 'wh_' + id : fid === id);
     });
     void renderImageGenPreview();
-    requestAnimationFrame(() => scheduleImageGenFeedLayout());
-    setTimeout(() => scheduleImageGenFeedLayout(), 120);
-    setTimeout(() => scheduleImageGenFeedLayout(), 400);
+    if (!isMobileFeedViewport()) {
+      requestAnimationFrame(() => scheduleImageGenFeedLayout());
+      setTimeout(() => scheduleImageGenFeedLayout(), 120);
+      setTimeout(() => scheduleImageGenFeedLayout(), 400);
+    }
+  }
+
+  function closeImageGenFilterSheet() {
+    document.getElementById('imageGenFilterSheetOverlay')?.classList.remove('open');
+  }
+
+  function openImageGenFilterSheet(kind) {
+    if (!isMobileFeedViewport()) return;
+    const opts = window.getImageGenWarehouseFilterOptions?.() || { groups: [], tags: [] };
+    const list = kind === 'group' ? opts.groups : opts.tags;
+    const current = kind === 'group' ? imageGenWhGroup : imageGenWhTag;
+    const titleEl = document.getElementById('imageGenFilterSheetTitle');
+    const listEl = document.getElementById('imageGenFilterSheetList');
+    const overlay = document.getElementById('imageGenFilterSheetOverlay');
+    if (!titleEl || !listEl || !overlay) return;
+    titleEl.textContent = kind === 'group' ? '选择分组' : '选择标签';
+    listEl.innerHTML = list.map((o) =>
+      `<button type="button" class="filter-sheet-row${o.value === current ? ' selected' : ''}" data-value="${esc(o.value)}">
+        <span class="filter-sheet-name">${esc(o.label)}</span>
+        <span class="filter-sheet-check" aria-hidden="true"></span>
+      </button>`
+    ).join('');
+    listEl.querySelectorAll('.filter-sheet-row').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-value') || 'all';
+        if (kind === 'group') imageGenWhGroup = v;
+        else imageGenWhTag = v;
+        closeImageGenFilterSheet();
+        syncImageGenWarehouseFiltersUI();
+        renderImageGenFeed();
+      });
+    });
+    overlay.classList.add('open');
+  }
+
+  function bindImageGenWarehouseFilterMobileUI() {
+    document.getElementById('imageGenWhGroupBtn')?.addEventListener('click', () => openImageGenFilterSheet('group'));
+    document.getElementById('imageGenWhTagBtn')?.addEventListener('click', () => openImageGenFilterSheet('tag'));
   }
 
   function syncImageGenWarehouseFiltersUI() {
@@ -2345,6 +2392,12 @@
     if (!opts.tags.some(o => o.value === imageGenWhTag)) imageGenWhTag = 'all';
     groupEl.value = imageGenWhGroup;
     tagEl.value = imageGenWhTag;
+    const gLabel = opts.groups.find((o) => o.value === imageGenWhGroup)?.label || '全部分组';
+    const tLabel = opts.tags.find((o) => o.value === imageGenWhTag)?.label || '全部标签';
+    const gLabelEl = document.getElementById('imageGenWhGroupLabel');
+    const tLabelEl = document.getElementById('imageGenWhTagLabel');
+    if (gLabelEl) gLabelEl.textContent = gLabel;
+    if (tLabelEl) tLabelEl.textContent = tLabel;
   }
 
   async function renderImageGenFeed() {
@@ -2441,15 +2494,16 @@
     }
     resetMobileFeedGridStyles();
     bindImageGenFeedCardEvents(wrap);
-    if (!mobileFeed) scheduleImageGenFeedLayout();
+    if (mobileFeed) enforceMobileImageGenFeed();
+    else scheduleImageGenFeedLayout();
 
     void (async () => {
       if (window.SupabaseSync?.prefetchDisplayUrls && refsSlice.length) {
         await window.SupabaseSync.prefetchDisplayUrls(refsSlice);
       }
       await hydrateFeedImages(wrap);
-      resetMobileFeedGridStyles();
-      if (!mobileFeed) scheduleImageGenFeedLayout();
+      if (mobileFeed) enforceMobileImageGenFeed();
+      else scheduleImageGenFeedLayout();
     })();
   }
 
@@ -2591,6 +2645,7 @@
       imageGenWhTag = e.target.value || 'all';
       renderImageGenFeed();
     });
+    bindImageGenWarehouseFilterMobileUI();
     bindImageGenUpload();
     bindImageGenAutoPublish();
     bindImageGenAutoSave();
@@ -2721,6 +2776,8 @@
     reconcileCommunityWithCards,
     hydrateFeedImages,
     resetMobileFeedGridStyles,
+    enforceMobileImageGenFeed,
+    closeImageGenFilterSheet,
     renderImageGenFeed,
     isDisplayableImage,
     scheduleImageGenFeedLayout: scheduleImageGenFeedLayout,

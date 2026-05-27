@@ -1820,6 +1820,9 @@ body {
       margin-top: 8px;
       flex-wrap: wrap;
     }
+    .panel-temp-field-actions {
+      display: contents;
+    }
     .panel-temp-field-row #tempFieldName {
       flex: 1.5;
       min-width: 100px;

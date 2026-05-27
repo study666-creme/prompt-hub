@@ -310,29 +310,35 @@
     min-width: 0;
   }
 
-  /* 手机固定两列网格，不用 Masonry 绝对定位 */
+  /* 手机固定两列：flex 流式布局，避免 Masonry 绝对定位叠在一起 */
   .cards-container.mobile-grid,
   .cards-container {
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    grid-auto-rows: auto !important;
-    align-items: start !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    flex-direction: row !important;
+    align-content: flex-start !important;
+    align-items: stretch !important;
     gap: 10px !important;
     padding: 12px 10px calc(88px + env(safe-area-inset-bottom)) !important;
     position: relative !important;
+    height: auto !important;
+    min-height: 0 !important;
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
+    contain: layout;
   }
 
-  .cards-container.mobile-grid .card,
-  .cards-container .card {
-    width: 100% !important;
-    max-width: none !important;
+  .cards-container.mobile-grid > .card,
+  .cards-container > .card {
+    flex: 0 0 calc((100% - 10px) / 2) !important;
+    width: calc((100% - 10px) / 2) !important;
+    max-width: calc((100% - 10px) / 2) !important;
+    box-sizing: border-box !important;
     height: auto !important;
     min-height: 0 !important;
     display: flex !important;
     flex-direction: column !important;
-    position: static !important;
+    position: relative !important;
     left: auto !important;
     top: auto !important;
     right: auto !important;
@@ -340,6 +346,7 @@
     transform: none !important;
     margin: 0 !important;
     margin-bottom: 0 !important;
+    contain: layout;
   }
 
   .cards-container .grid-sizer {
@@ -474,73 +481,124 @@
   }
 
   .edit-panel .panel-temp-field-row {
-    display: grid;
-    grid-template-columns: 92px 1fr 44px;
-    grid-template-rows: auto auto;
-    gap: 10px 10px;
-    align-items: center;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
     margin-top: 10px;
   }
 
   .edit-panel .panel-temp-field-row #tempFieldName {
-    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    height: 40px;
+  }
+
+  .edit-panel .panel-temp-field-actions {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
     width: 100%;
     min-width: 0;
   }
 
-  .edit-panel .panel-temp-field-row #tempFieldType {
-    grid-column: 1;
-    grid-row: 2;
-    width: 100% !important;
-    max-width: 92px;
+  .edit-panel .panel-temp-field-actions #tempFieldType {
+    flex: 0 0 96px;
+    width: 96px;
+    max-width: 32%;
     min-width: 0;
     height: 40px;
     padding-left: 8px;
     padding-right: 24px;
     font-size: 13px;
+    box-sizing: border-box;
   }
 
-  .edit-panel .panel-temp-field-row .custom-checkbox {
-    grid-column: 2;
-    grid-row: 2;
-    justify-self: start;
-    white-space: nowrap;
-    font-size: 13px;
-    gap: 6px;
-    margin: 0;
+  .edit-panel .panel-temp-field-actions .panel-temp-fixed-label {
+    flex: 1 1 auto;
     min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    height: 40px;
+    margin: 0;
+    padding: 0 10px;
+    font-size: 13px;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    box-sizing: border-box;
   }
 
-  .edit-panel .panel-temp-field-row .panel-temp-add-btn {
-    grid-column: 3;
-    grid-row: 2;
+  .edit-panel .panel-temp-field-actions .panel-temp-fixed-label .checkmark {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+
+  .edit-panel .panel-temp-field-actions .custom-checkbox-text {
+    flex-shrink: 0;
+  }
+
+  .edit-panel .panel-temp-field-actions .panel-temp-add-btn {
+    flex: 0 0 44px;
     width: 44px;
+    min-width: 44px;
     height: 40px;
     padding: 0;
-    justify-self: end;
+    font-size: 20px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
   }
 
   #imageGenFeed.mobile-feed-grid,
-  #imageGenFeed.imagegen-feed--tiles.mobile-feed-grid {
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    grid-auto-flow: row dense;
-    align-items: start !important;
+  #imageGenFeed.imagegen-feed--tiles.mobile-feed-grid,
+  body.imagegen-mobile-view-feed .imagegen-feed,
+  .imagegen-feed.imagegen-feed--tiles,
+  .imagegen-feed.imagegen-feed--masonry {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-content: flex-start !important;
+    align-items: flex-start !important;
     gap: 10px !important;
+    height: auto !important;
+    contain: layout;
   }
 
-  #imageGenFeed.mobile-feed-grid .imagegen-feed-card {
-    position: static !important;
-    width: 100% !important;
+  #imageGenFeed.mobile-feed-grid > .imagegen-feed-card,
+  #imageGenFeed.imagegen-feed--tiles.mobile-feed-grid > .imagegen-feed-card,
+  body.imagegen-mobile-view-feed .imagegen-feed > .imagegen-feed-card,
+  .imagegen-feed.imagegen-feed--tiles > .imagegen-feed-card,
+  .imagegen-feed.imagegen-feed--masonry > .imagegen-feed-card {
+    flex: 0 0 calc((100% - 10px) / 2) !important;
+    width: calc((100% - 10px) / 2) !important;
+    max-width: calc((100% - 10px) / 2) !important;
+    box-sizing: border-box !important;
+    position: relative !important;
     height: auto !important;
+    min-height: 0 !important;
     display: flex !important;
     flex-direction: column !important;
     transform: none !important;
     margin: 0 !important;
+    left: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    contain: layout;
   }
 
-  #cardsContainer.mobile-grid .card {
-    position: static !important;
+  .imagegen-feed.imagegen-feed--masonry .imagegen-feed-card {
+    margin-bottom: 0 !important;
+  }
+
+  .cards-container:not(.list-view) .card {
+    margin-bottom: 0 !important;
   }
 
   .cards-container.mobile-grid .card.card-enter {
@@ -737,8 +795,170 @@
     min-height: 0;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    align-content: start !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-content: flex-start !important;
     padding: 12px 10px calc(80px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .imagegen-warehouse-filters {
+    padding: 10px 12px;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+  }
+
+  .imagegen-filter-pills {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .imagegen-filter-pill {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .imagegen-filter-pill:active {
+    background: var(--bg-hover);
+  }
+
+  .imagegen-filter-pill-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.2;
+  }
+
+  .imagegen-filter-pill-value {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .filter-sheet-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 500;
+    background: rgba(0, 0, 0, 0.45);
+    align-items: flex-end;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .filter-sheet-overlay.open {
+    display: flex;
+  }
+
+  .filter-sheet {
+    width: 100%;
+    max-height: min(70vh, 520px);
+    background: var(--bg-secondary);
+    border-radius: 16px 16px 0 0;
+    transform: translateY(100%);
+    transition: transform 0.28s var(--ease-out, ease-out);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.2);
+  }
+
+  .filter-sheet-overlay.open .filter-sheet {
+    transform: translateY(0);
+  }
+
+  .filter-sheet-title {
+    padding: 4px 18px 12px;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .filter-sheet-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 8px 0 calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .filter-sheet-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 14px 18px;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 15px;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .filter-sheet-row:last-child {
+    border-bottom: none;
+  }
+
+  .filter-sheet-row.selected {
+    background: var(--accent-bg);
+  }
+
+  .filter-sheet-row:active {
+    background: var(--bg-hover);
+  }
+
+  .filter-sheet-name {
+    flex: 1;
+    min-width: 0;
+    font-weight: 500;
+  }
+
+  .filter-sheet-check {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--border-light);
+    position: relative;
+    background: var(--bg-card);
+  }
+
+  .filter-sheet-row.selected .filter-sheet-check {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+
+  .filter-sheet-row.selected .filter-sheet-check::after {
+    content: '';
+    position: absolute;
+    left: 6px;
+    top: 3px;
+    width: 5px;
+    height: 9px;
+    border: solid var(--accent-on, #fff);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
   }
 
   .imagegen-preview-panel,
@@ -823,35 +1043,8 @@
     padding-right: 12px !important;
   }
 
-  .imagegen-feed.imagegen-feed--tiles,
-  .imagegen-feed.imagegen-feed--masonry {
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    grid-auto-rows: auto !important;
-    align-items: start !important;
-    gap: 10px !important;
-    position: relative !important;
-  }
-
   .imagegen-feed.imagegen-feed--masonry .grid-sizer {
     display: none !important;
-  }
-
-  .imagegen-feed.imagegen-feed--masonry .imagegen-feed-card,
-  .imagegen-feed.imagegen-feed--tiles .imagegen-feed-card {
-    width: 100% !important;
-    max-width: none !important;
-    height: auto !important;
-    min-height: 0 !important;
-    display: flex !important;
-    flex-direction: column !important;
-    position: relative !important;
-    left: auto !important;
-    top: auto !important;
-    right: auto !important;
-    bottom: auto !important;
-    transform: none !important;
-    margin: 0 !important;
   }
 
   .edit-panel .panel-footer .panel-close-mobile {
