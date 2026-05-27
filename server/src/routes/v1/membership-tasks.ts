@@ -37,8 +37,6 @@ const claimParamsSchema = z.object({
 
 export const membershipTaskRoutes = new Hono<{ Bindings: Env }>();
 
-membershipTaskRoutes.use('*', rateLimit(180, 60_000));
-
 membershipTaskRoutes.get('/', async c => {
   try {
     const user = c.get('user');
@@ -52,7 +50,7 @@ membershipTaskRoutes.get('/', async c => {
       await mergeTaskFlags(admin, user.id, { login_mobile: true });
     }
 
-    const profile = await syncMembershipCredits(admin, user.id);
+    const profile = await getOrCreateProfile(admin, user.id);
     const flags = parseTaskFlags(profile);
     const claimed = await listClaimedKeys(admin, user.id);
     const list = buildTaskList(profile, flags, claimed, user.phoneVerified);
@@ -77,7 +75,7 @@ membershipTaskRoutes.get('/', async c => {
   }
 });
 
-membershipTaskRoutes.post('/sync', async c => {
+membershipTaskRoutes.post('/sync', rateLimit(120, 60_000), async c => {
   const user = c.get('user');
   const parsed = syncBodySchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
@@ -111,7 +109,7 @@ membershipTaskRoutes.post('/sync', async c => {
   return c.json({ ok: true, data: list });
 });
 
-membershipTaskRoutes.post('/:taskKey/claim', async c => {
+membershipTaskRoutes.post('/:taskKey/claim', rateLimit(60, 60_000), async c => {
   const user = c.get('user');
   const taskKey = c.req.param('taskKey');
   const parsed = claimParamsSchema.safeParse({ taskKey });

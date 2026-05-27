@@ -2470,7 +2470,7 @@
         return;
       }
       const pageImages = pageCards.map(c => c.image).filter(Boolean);
-      const prefetchLimit = mobileGrid ? 12 : 28;
+      const prefetchLimit = mobileGrid ? 8 : 12;
       const prefetchPromise = window.SupabaseSync?.prefetchDisplayUrls
         ? window.SupabaseSync.prefetchDisplayUrls(pageImages.slice(0, prefetchLimit))
         : Promise.resolve();
@@ -2481,6 +2481,7 @@
       if (desktopColWidth && reset) {
         container.classList.remove('cards-grid-primed');
       }
+      const eagerImgCount = mobileGrid ? 6 : 8;
       pageCards.forEach((card, idx) => {
         const div = document.createElement('div');
         div.className = `card card-enter ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
@@ -2502,7 +2503,7 @@
           ? "if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.card-media'))"
           : "if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.card-media'));if(typeof scheduleLayoutMasonry==='function')scheduleLayoutMasonry()";
         const mediaHtml = showImage
-          ? `<div class="card-media${imgLoading ? ' is-loading' : ''}"${imgLoading ? ` data-shine-at="${Date.now()}"` : ''}><img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(card.image)} data-image-ref="${escapeHtml(card.image)}" loading="lazy" draggable="false" alt="" onload="${imgOnload}"></div>`
+          ? `<div class="card-media${imgLoading ? ' is-loading' : ''}"${imgLoading ? ` data-shine-at="${Date.now()}"` : ''}><img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(card.image)} data-image-ref="${escapeHtml(card.image)}" loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" draggable="false" alt="" onload="${imgOnload}"></div>`
           : '';
         const headHtml = titleTrim
           ? `<div class="card-head"><div class="card-title">${escapeHtml(titleTrim)}</div>${timeLabel ? `<time class="card-time">${escapeHtml(timeLabel)}</time>` : ''}</div>`

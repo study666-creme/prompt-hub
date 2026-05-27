@@ -252,7 +252,7 @@
   async function hydrateImageElements(root) {
     const scope = root || document;
     const imgs = [...scope.querySelectorAll('img[data-storage-ref], img[data-image-ref]')];
-    const concurrency = 10;
+    const concurrency = 6;
     let idx = 0;
     async function hydrateOne(img) {
       const ref = img.getAttribute('data-storage-ref') || img.getAttribute('data-image-ref');

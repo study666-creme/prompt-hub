@@ -1517,7 +1517,6 @@ body {
       background: var(--bg-hover);
       flex-shrink: 0;
       line-height: 0;
-      max-height: 340px;
     }
     .card-media.is-loading::after {
       content: '';
@@ -1550,8 +1549,7 @@ body {
       width: 100%;
       height: auto;
       max-width: 100%;
-      max-height: 340px;
-      object-fit: cover;
+      object-fit: contain;
       object-position: center top;
       display: block;
       cursor: pointer;
@@ -1653,12 +1651,12 @@ body {
     }
     .list-view .card {
       width: 100%;
-      height: 92px;
+      height: auto;
       min-height: 92px;
-      max-height: 92px;
+      max-height: none;
       display: flex;
       flex-direction: row;
-      align-items: stretch;
+      align-items: center;
       margin: 0;
       padding: 0;
       overflow: hidden;
@@ -1684,10 +1682,10 @@ body {
       z-index: 3;
     }
     .list-view .card .card-media {
-      width: 92px;
-      min-width: 92px;
-      height: 92px;
-      max-height: none;
+      width: 112px;
+      min-width: 112px;
+      height: auto;
+      max-height: 160px;
       flex-shrink: 0;
       border-radius: 0;
       overflow: hidden;
@@ -1697,11 +1695,10 @@ body {
     }
     .list-view .card .card-img {
       width: 100%;
-      height: 100%;
-      min-height: 100%;
-      max-height: none;
-      object-fit: cover;
-      object-position: center top;
+      height: auto;
+      max-height: 160px;
+      object-fit: contain;
+      object-position: center center;
       display: block;
     }
     .list-view .card .card-media-placeholder {
