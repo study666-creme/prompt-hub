@@ -62,11 +62,20 @@ body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
-  zoom: 0.75;
-  width: 133.333vw;
-  height: 133.333vh;
   display: flex;
   overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+}
+
+/* 仅缩放主界面；全局弹层在 body 下不缩放，避免遮罩点穿 */
+.app-chrome {
+  zoom: 0.75;
+  width: 133.333%;
+  height: 133.333%;
+  max-width: 133.333%;
+  max-height: 133.333%;
 }
 
     .drag-layer-root {
@@ -112,7 +121,7 @@ body {
       flex: 1;
       min-width: 0;
       min-height: 0;
-      width: 100%;
+      box-sizing: border-box;
     }
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -2974,14 +2983,15 @@ body {
     .no-image-placeholder { display: none; }
 
 @media (min-width: 901px) {
-  .cards-container:not(.list-view):not(.cards-grid-primed) .card {
+  /* 仅卡片库 Masonry 防闪烁；社区/创作用独立布局，勿隐藏 */
+  #cardsContainer.cards-container:not(.list-view):not(.cards-grid-primed) .card {
     visibility: hidden;
     pointer-events: none;
   }
-  .cards-container:not(.list-view):not(.cards-grid-primed) {
+  #cardsContainer.cards-container:not(.list-view):not(.cards-grid-primed) {
     opacity: 0;
   }
-  .cards-container.cards-grid-primed:not(.list-view) {
+  #cardsContainer.cards-container.cards-grid-primed:not(.list-view) {
     opacity: 1;
     transition: opacity 0.12s ease-out;
   }

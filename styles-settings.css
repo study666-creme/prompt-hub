@@ -187,23 +187,47 @@
   word-break: break-word;
 }
 
-/* 会员订阅弹层 */
+/* 全局弹层遮罩（不受 body zoom 影响） */
+.app-modal-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+}
+.app-modal-backdrop.active {
+  display: block;
+}
+body.app-modal-open {
+  overflow: hidden !important;
+}
+body.app-modal-open .app-chrome {
+  pointer-events: none !important;
+  user-select: none;
+}
+
+/* 会员订阅 / 任务中心弹层 */
 .subscribe-overlay {
   display: none;
   position: fixed;
   inset: 0;
   z-index: 10060;
-  background: rgba(0, 0, 0, 0.82);
-  backdrop-filter: blur(6px);
+  background: transparent;
   align-items: center;
   justify-content: center;
   padding: 16px;
   overflow-y: auto;
+  pointer-events: none;
 }
 .subscribe-overlay.active {
-  display: flex;
+  display: flex !important;
+  pointer-events: auto !important;
+  z-index: 10060;
 }
-body.subscribe-open {
+body.subscribe-open,
+body.trial-tasks-open {
   overflow: hidden;
 }
 .subscribe-panel {
@@ -236,6 +260,60 @@ body.subscribe-open {
   margin: 0;
   font-size: 12px;
   color: var(--text-muted);
+}
+.modal-close-btn,
+.subscribe-close-btn {
+  flex-shrink: 0;
+  min-width: 72px;
+  height: 36px;
+  margin: 0;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-light, var(--border));
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.modal-close-btn span[aria-hidden="true"] {
+  display: none;
+}
+.modal-close-btn::before {
+  content: '关闭';
+}
+.modal-close-btn:hover,
+.subscribe-close-btn:hover {
+  background: var(--accent-bg-strong, var(--bg-card));
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.subscribe-panel-head .modal-close-btn,
+.subscribe-panel-head .subscribe-close-btn {
+  position: relative;
+  z-index: 10;
+  pointer-events: auto;
+}
+.subscribe-panel {
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+.trial-tasks-footer {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--border);
+}
+.trial-tasks-panel {
+  max-height: min(92vh, 720px);
 }
 .subscribe-billing-tabs {
   display: flex;

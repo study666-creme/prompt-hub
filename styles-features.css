@@ -120,6 +120,66 @@
   min-height: 0;
 }
 
+/* 社区/创作卡片始终可见（避免 Masonry 防闪规则或旧缓存导致空网格） */
+#communityGrid.cards-container,
+#creationsGrid.cards-container,
+#userProfileGrid.cards-container {
+  opacity: 1 !important;
+}
+#communityGrid .card,
+#creationsGrid .card,
+#userProfileGrid .card {
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.app-page-feature.active .community-page-layout {
+  flex: 1;
+  min-height: 0;
+}
+.app-page-feature.active .community-page-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.app-page-feature.active .feature-body-cards {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 901px) {
+  #communityGrid.cards-container:not(.list-view),
+  #creationsGrid.cards-container:not(.list-view) {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: var(--card-row-gap, 16px);
+    align-content: start;
+    padding: 12px var(--padding-page) 24px;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 280px;
+    height: auto;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  #communityGrid .card,
+  #creationsGrid .card {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    width: auto !important;
+    margin-bottom: 0 !important;
+  }
+  #communityGrid .grid-sizer,
+  #creationsGrid .grid-sizer {
+    display: none !important;
+  }
+}
+
 .community-post-card,
 .creation-post-card {
   cursor: pointer;

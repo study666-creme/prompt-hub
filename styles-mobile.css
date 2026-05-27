@@ -14,6 +14,14 @@
     overflow: hidden;
   }
 
+  .app-chrome {
+    zoom: 1 !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+  }
+
   #rippleGridBg {
     display: none !important;
   }
@@ -95,6 +103,16 @@
   body.subscribe-open .subscribe-overlay.active {
     pointer-events: auto;
     z-index: 9800;
+  }
+
+  /* 弹层已关但 body 仍带 *-open 时恢复主界面可点（避免只能刷新） */
+  body.subscribe-open:not(:has(#subscribeOverlay.active)) .app-chrome,
+  body.trial-tasks-open:not(:has(#trialTasksOverlay.active)) .app-chrome {
+    pointer-events: auto;
+  }
+  body.subscribe-open:not(:has(#subscribeOverlay.active)),
+  body.trial-tasks-open:not(:has(#trialTasksOverlay.active)) {
+    overflow: auto;
   }
 
   body.panel-open .edit-panel {

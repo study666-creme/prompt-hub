@@ -93,9 +93,14 @@
     return Number.isFinite(n) ? n : 16;
   }
 
+  function filterCreationsForCloud(list) {
+    const tomb = window.getDeletedCreationTombstones?.() || {};
+    return (list || []).filter((c) => c && c.id != null && !tomb[String(c.id)]);
+  }
+
   function loadStores() {
     communityPosts = loadJson(LS_COMMUNITY, []).filter(p => !p.isMock);
-    creations = loadJson(LS_CREATIONS, []);
+    creations = filterCreationsForCloud(loadJson(LS_CREATIONS, []));
     likedIds = new Set(loadJson(LS_LIKES, []));
     favIds = new Set(loadJson(LS_FAVS, []));
     stripDemoCreations();
@@ -163,8 +168,11 @@
         kept.push(p);
         continue;
       }
-      if (hasCards && (!p.sourceCardId || !cardIds.has(p.sourceCardId))) continue;
-      if (!p.sourceCardId) continue;
+      if (!p.sourceCardId) {
+        kept.push(p);
+        continue;
+      }
+      if (hasCards && !cardIds.has(p.sourceCardId)) continue;
       const prev = ownBySource.get(p.sourceCardId);
       const ts = p.updatedAt || p.createdAt || 0;
       const prevTs = prev ? (prev.updatedAt || prev.createdAt || 0) : -1;
@@ -552,26 +560,38 @@
     bindCommunityGridImageRelayout(containerId);
   }
 
+  function useCssGridForCommunityFeed(containerId) {
+    return (
+      containerId === 'communityGrid' ||
+      containerId === 'creationsGrid' ||
+      window.MobileUI?.isMobile?.()
+    );
+  }
+
+  function resetCommunityGridCardLayout(container, containerId) {
+    if (containerId === 'creationsGrid' && creationsMasonry) {
+      creationsMasonry.destroy();
+      creationsMasonry = null;
+    } else if (containerId === 'userProfileGrid' && profileMasonry) {
+      profileMasonry.destroy();
+      profileMasonry = null;
+    } else if (communityMasonry) {
+      communityMasonry.destroy();
+      communityMasonry = null;
+    }
+    container.querySelectorAll('.card').forEach((card) => {
+      card.style.width = '';
+      card.style.left = '';
+      card.style.top = '';
+      card.style.position = '';
+    });
+  }
+
   function layoutCommunityMasonry(containerId) {
     const container = document.getElementById(containerId);
     if (!container || typeof Masonry === 'undefined') return;
-    if (window.MobileUI?.isMobile?.()) {
-      if (containerId === 'creationsGrid' && creationsMasonry) {
-        creationsMasonry.destroy();
-        creationsMasonry = null;
-      } else if (containerId === 'userProfileGrid' && profileMasonry) {
-        profileMasonry.destroy();
-        profileMasonry = null;
-      } else if (communityMasonry) {
-        communityMasonry.destroy();
-        communityMasonry = null;
-      }
-      container.querySelectorAll('.card').forEach(card => {
-        card.style.width = '';
-        card.style.left = '';
-        card.style.top = '';
-        card.style.position = '';
-      });
+    if (useCssGridForCommunityFeed(containerId)) {
+      resetCommunityGridCardLayout(container, containerId);
       return;
     }
     const cardEls = container.querySelectorAll('.card');
@@ -722,6 +742,7 @@
 
     container.innerHTML = '';
     container.appendChild(fragment);
+    container.classList.add('cards-grid-primed');
     scheduleLayoutAfterImages(containerId);
     void hydrateFeedImages(container).then(() => scheduleLayoutAfterImages(containerId));
   }
@@ -752,13 +773,13 @@
   function renderCommunity() {
     const container = document.getElementById('communityGrid');
     if (!container) return;
-    if (window.__promptHubCards?.length) {
-      reconcileCommunityWithCards(window.__promptHubCards);
-    }
     let list = filterAndSortPosts(getAllCommunityPosts());
     if (!list.length) {
       if (communityMasonry) { communityMasonry.destroy(); communityMasonry = null; }
-      container.innerHTML = '<div class="feature-empty"><p>暂无社区内容</p><button type="button" class="btn btn-primary" onclick="switchAppPage(\'warehouse\')">去卡片库发布</button></div>';
+      const syncHint = window.SupabaseSync?.isLoggedIn?.()
+        ? '<button type="button" class="btn btn-secondary" onclick="syncCloudNow()">从云端同步</button>'
+        : '';
+      container.innerHTML = `<div class="feature-empty"><p>暂无社区内容</p><button type="button" class="btn btn-primary" onclick="switchAppPage('warehouse')">去卡片库发布</button>${syncHint}</div>`;
       return;
     }
     void renderPostsIntoContainer(list, 'communityGrid');
@@ -1185,6 +1206,14 @@
       creationsMasonry = null;
     }
     pruneCreations();
+    const privCount = creations.filter(c => c.visibility === 'private' && (c.prompt || '').trim()).length;
+    const pubCount = creations.filter(c => c.visibility === 'published' && (c.prompt || '').trim()).length;
+    if (creationsTab === 'private' && !privCount && pubCount) {
+      creationsTab = 'published';
+      document.querySelectorAll('[data-creations-tab]').forEach((b) => {
+        b.classList.toggle('active', b.dataset.creationsTab === 'published');
+      });
+    }
     const list = creations
       .filter(c => c.visibility === creationsTab && (c.prompt || '').trim())
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -1233,6 +1262,7 @@
     });
     container.innerHTML = '';
     container.appendChild(fragment);
+    container.classList.add('cards-grid-primed');
     scheduleLayoutAfterImages('creationsGrid');
     void hydrateFeedImages(container).then(() => scheduleLayoutAfterImages('creationsGrid'));
     if (creationsSideId && list.some(c => c.id === creationsSideId)) {
@@ -1280,13 +1310,33 @@
     else if (confirm(msg)) doDel();
   }
 
+  function recordCreationDeletion(id) {
+    if (id == null) return;
+    try {
+      const key = 'promptrepo_deleted_creations';
+      const raw = localStorage.getItem(key);
+      const map = raw ? JSON.parse(raw) : {};
+      map[String(id)] = Date.now();
+      localStorage.setItem(key, JSON.stringify(map));
+    } catch (e) { /* ignore */ }
+    if (typeof window.recordCreationDeletionGlobal === 'function') {
+      window.recordCreationDeletionGlobal(id);
+    }
+  }
+
   function deleteCreation(id) {
     if (creationsSideId === id) closeCreationsSidePanel();
     if (imageGenPreviewId === id) closeImageGenPreview();
     const removed = creations.find(c => c.id === id);
     if (removed?.communityPostId) performCommunityPostRemoval(removed.communityPostId, { silent: true });
+    recordCreationDeletion(id);
     creations = creations.filter(c => c.id !== id);
     persistCreations();
+    if (window.SupabaseSync?.isLoggedIn?.() && typeof window.pushToCloud === 'function') {
+      void window.pushToCloud({ skipSafety: true }).catch(() => {
+        if (typeof window.scheduleCloudPush === 'function') window.scheduleCloudPush();
+      });
+    }
     renderCreations();
     if (document.getElementById('pageImageGen')?.classList.contains('active')) {
       renderImageGenFeed();
@@ -2700,7 +2750,9 @@
     if (fab) fab.classList.toggle('hidden-by-app', app !== 'warehouse');
     if (app === 'community') {
       renderCommunity();
-      requestAnimationFrame(() => scheduleCommunityLayout('communityGrid'));
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => scheduleCommunityLayout('communityGrid'));
+      });
     }
     if (app === 'creations') {
       const priv = creations.filter(c => c.visibility === 'private' && (c.prompt || '').trim()).length;
@@ -2712,6 +2764,9 @@
         });
       }
       void renderCreations();
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => scheduleCommunityLayout('creationsGrid'));
+      });
     }
     if (app !== 'community') closeCommunitySidePanel();
     if (app !== 'creations') closeCreationsSidePanel();
@@ -2743,7 +2798,7 @@
   function getCloudSlice() {
     return {
       communityPosts: communityPosts.filter(p => !p.isMock),
-      creations,
+      creations: filterCreationsForCloud(creations),
       communityLikes: [...likedIds],
       communityFavorites: [...favIds]
     };
@@ -2759,10 +2814,13 @@
       saveJson(LS_COMMUNITY, communityPosts);
     }
     if (Array.isArray(payload.creations)) {
-      creations = payload.creations.map(c => {
-        if (!c?.image || !window.SupabaseSync?.normalizeImageRef) return c;
-        return { ...c, image: window.SupabaseSync.normalizeImageRef(c.image) };
-      });
+      const tomb = window.getDeletedCreationTombstones?.() || {};
+      creations = payload.creations
+        .filter((c) => c && c.id != null && !tomb[String(c.id)])
+        .map((c) => {
+          if (!c?.image || !window.SupabaseSync?.normalizeImageRef) return c;
+          return { ...c, image: window.SupabaseSync.normalizeImageRef(c.image) };
+        });
       pruneCreations();
       saveJson(LS_CREATIONS, creations);
     }

@@ -50,6 +50,32 @@
   function isConfigured() { return configured(); }
   function isLoggedIn() { return !!session?.user; }
   function getSession() { return session; }
+
+  /** 在 access_token 将过期时刷新，避免 UI 仍显示已登录但 API 返回「登录已过期」 */
+  async function getValidAccessToken() {
+    const sb = getClient();
+    if (!sb) return null;
+    if (!session?.access_token) {
+      try {
+        const { data } = await sb.auth.getSession();
+        session = data?.session ?? null;
+      } catch (e) {
+        return null;
+      }
+    }
+    if (!session?.access_token) return null;
+    const exp = session.expires_at;
+    const now = Math.floor(Date.now() / 1000);
+    if (exp != null && exp - now < 120) {
+      try {
+        const { data, error } = await sb.auth.refreshSession();
+        if (!error && data?.session) {
+          session = data.session;
+        }
+      } catch (e) { /* 仍尝试用旧 token */ }
+    }
+    return session?.access_token || null;
+  }
   function getUserEmail() { return session?.user?.email || ''; }
 
   function isDataUrl(str) {
@@ -662,6 +688,7 @@
     isLoggedIn,
     getUserId,
     getSession,
+    getValidAccessToken,
     getUserEmail,
     isDataUrl,
     isStorageUrl,

@@ -12,20 +12,23 @@
     return !!u && u !== 'disabled';
   }
 
-  function getAccessToken() {
+  async function getAccessToken() {
+    if (window.SupabaseSync?.getValidAccessToken) {
+      return window.SupabaseSync.getValidAccessToken();
+    }
     const session = window.SupabaseSync?.getSession?.();
     return session?.access_token || null;
   }
 
-  const API_TIMEOUT_MS = 12000;
+  const API_TIMEOUT_MS = 22000;
   const API_GENERATE_TIMEOUT_MS = 45000;
   const API_JOB_POLL_TIMEOUT_MS = 35000;
 
-  async function request(method, path, body, opts = {}) {
+  async function request(method, path, body, opts = {}, attempt = 0) {
     if (!isConfigured()) {
       return { ok: false, code: 'API_NOT_CONFIGURED', message: '未配置 API 地址' };
     }
-    const token = getAccessToken();
+    const token = await getAccessToken();
     if (!token) {
       return { ok: false, code: 'UNAUTHORIZED', message: '请先登录' };
     }
@@ -45,12 +48,16 @@
       });
     } catch (e) {
       const aborted = e && (e.name === 'AbortError' || String(e).includes('abort'));
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 600 + attempt * 400));
+        return request(method, path, body, opts, attempt + 1);
+      }
       return {
         ok: false,
         code: 'NETWORK_ERROR',
         message: aborted
-          ? '连接后端超时，请稍后重试或等待 api.prompt-hub.cn 生效'
-          : '无法连接后端，请检查网络或 API 地址'
+          ? '连接 api.prompt-hub.cn 超时，请换网络或稍后再试'
+          : '无法连接 api.prompt-hub.cn，请检查网络或 VPN'
       };
     } finally {
       clearTimeout(timer);
@@ -63,11 +70,17 @@
     }
     if (!res.ok || json.ok === false) {
       const err = json.error || {};
+      const code = err.code || 'REQUEST_FAILED';
+      const message = err.message || `请求失败 (${res.status})`;
+      if (res.status === 401 && attempt < 1 && window.SupabaseSync?.getValidAccessToken) {
+        const refreshed = await window.SupabaseSync.getValidAccessToken();
+        if (refreshed) return request(method, path, body, opts, attempt + 1);
+      }
       return {
         ok: false,
         status: res.status,
-        code: err.code || 'REQUEST_FAILED',
-        message: err.message || `请求失败 (${res.status})`
+        code,
+        message
       };
     }
     return { ok: true, data: json.data };
@@ -77,7 +90,7 @@
     const silent = opts?.silent === true;
     const r = await request('GET', '/api/v1/me');
     if (!r.ok) {
-      if (!silent && typeof showToast === 'function') {
+      if (!silent && typeof showToast === 'function' && r.code !== 'NETWORK_ERROR') {
         showToast(r.message);
       }
       return r;

@@ -17,14 +17,20 @@
     return Array.isArray(payload?.creations) ? payload.creations.length : 0;
   }
 
-  function byIdMerge(localList, cloudList, prefer) {
+  function filterTombstonedCreations(list, tombstones) {
+    if (!tombstones || typeof tombstones !== 'object') return list || [];
+    return (list || []).filter((c) => c && c.id != null && !tombstones[String(c.id)]);
+  }
+
+  function byIdMerge(localList, cloudList, prefer, tombstones) {
     const map = new Map();
-    for (const item of cloudList || []) {
+    for (const item of filterTombstonedCreations(cloudList, tombstones)) {
       if (item && item.id != null) map.set(String(item.id), item);
     }
     for (const item of localList || []) {
       if (!item || item.id == null) continue;
       const id = String(item.id);
+      if (tombstones && tombstones[id]) continue;
       if (prefer === 'local' || !map.has(id)) map.set(id, item);
       else map.set(id, item);
     }
@@ -53,7 +59,12 @@
         (cloud.communityPosts || []).filter(p => !p.isMock),
         'local'
       ),
-      creations: byIdMerge(local.creations, cloud.creations, 'local'),
+      creations: byIdMerge(
+        local.creations,
+        cloud.creations,
+        'local',
+        local.settings?.deletedCreationTombstones || cloud.settings?.deletedCreationTombstones
+      ),
       communityLikes: [...new Set([...(cloud.communityLikes || []), ...(local.communityLikes || [])])],
       communityFavorites: [
         ...new Set([...(cloud.communityFavorites || []), ...(local.communityFavorites || [])])

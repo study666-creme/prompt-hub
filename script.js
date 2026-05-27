@@ -1259,7 +1259,8 @@
         globalFields,
         settings: {
           ...settings,
-          deletedCardTombstones: { ...(settings.deletedCardTombstones || {}) }
+          deletedCardTombstones: { ...(settings.deletedCardTombstones || {}) },
+          deletedCreationTombstones: { ...(settings.deletedCreationTombstones || {}) }
         },
         account: window.Membership?.getAccountPayload?.() || null,
         schemaVersion: window.CloudSyncSafety?.SCHEMA_VERSION || 2
@@ -1296,6 +1297,31 @@
     function mergeDeletedCardTombstones(a, b) {
       return { ...(a || {}), ...(b || {}) };
     }
+
+    function mergeDeletedCreationTombstones(a, b) {
+      return { ...(a || {}), ...(b || {}) };
+    }
+
+    function recordCreationDeletionGlobal(id) {
+      if (id == null) return;
+      if (!settings.deletedCreationTombstones || typeof settings.deletedCreationTombstones !== 'object') {
+        settings.deletedCreationTombstones = {};
+      }
+      settings.deletedCreationTombstones[String(id)] = Date.now();
+      try {
+        localStorage.setItem('promptrepo_settings', JSON.stringify(settings));
+        const uid = window.SupabaseSync?.getUserId?.() || activeAccountId;
+        if (uid) localStorage.setItem(userStorageKey('settings', uid), JSON.stringify(settings));
+      } catch (e) { /* ignore */ }
+    }
+
+    function filterTombstonedCreations(list) {
+      const t = settings.deletedCreationTombstones || {};
+      return (list || []).filter((c) => c && c.id != null && !t[String(c.id)]);
+    }
+
+    window.recordCreationDeletionGlobal = recordCreationDeletionGlobal;
+    window.getDeletedCreationTombstones = () => ({ ...(settings.deletedCreationTombstones || {}) });
 
     function recordCardDeletion(id) {
       if (id == null) return;
@@ -1431,6 +1457,7 @@
     function applyDataPayload(payload) {
       if (!payload || typeof payload !== 'object') return;
       const prevTombstones = { ...(settings.deletedCardTombstones || {}) };
+      const prevCreTombstones = { ...(settings.deletedCreationTombstones || {}) };
       if (Array.isArray(payload.cards)) {
         cards = filterTombstonedCards(normalizeCardImages(payload.cards));
       }
@@ -1442,8 +1469,16 @@
           prevTombstones,
           payload.settings.deletedCardTombstones
         );
-      } else if (Object.keys(prevTombstones).length) {
-        settings.deletedCardTombstones = prevTombstones;
+        settings.deletedCreationTombstones = mergeDeletedCreationTombstones(
+          prevCreTombstones,
+          payload.settings.deletedCreationTombstones
+        );
+      } else {
+        if (Object.keys(prevTombstones).length) settings.deletedCardTombstones = prevTombstones;
+        if (Object.keys(prevCreTombstones).length) settings.deletedCreationTombstones = prevCreTombstones;
+      }
+      if (Array.isArray(payload.creations)) {
+        payload.creations = filterTombstonedCreations(payload.creations);
       }
       cards = filterTombstonedCards(cards);
       window.Membership?.syncFromPayload?.(payload.account);
@@ -1891,13 +1926,25 @@
             ? mergeCardsByUpdatedAt(localCards, cloud.cards)
             : filterTombstonedCards(cloud.cards);
         }
+        const prevCreTombstones = { ...(settings.deletedCreationTombstones || {}) };
         if (cloud.settings && typeof cloud.settings === 'object') {
           cloud.settings.deletedCardTombstones = mergeDeletedCardTombstones(
             prevTombstones,
             cloud.settings.deletedCardTombstones
           );
+          cloud.settings.deletedCreationTombstones = mergeDeletedCreationTombstones(
+            prevCreTombstones,
+            cloud.settings.deletedCreationTombstones
+          );
         } else {
-          cloud.settings = { ...(cloud.settings || {}), deletedCardTombstones: prevTombstones };
+          cloud.settings = {
+            ...(cloud.settings || {}),
+            deletedCardTombstones: prevTombstones,
+            deletedCreationTombstones: prevCreTombstones
+          };
+        }
+        if (Array.isArray(cloud.creations)) {
+          cloud.creations = filterTombstonedCreations(cloud.creations);
         }
         applyDataPayload(cloud);
         window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
@@ -1910,6 +1957,8 @@
     function formatSyncError(e) {
       return window.SupabaseSync?.formatError?.(e) || e?.message || '请稍后重试';
     }
+
+    window.pushToCloud = pushToCloud;
 
     async function pushToCloud(opts = {}) {
       if (!window.SupabaseSync?.isLoggedIn?.() || cloudSyncing) return { ok: true };

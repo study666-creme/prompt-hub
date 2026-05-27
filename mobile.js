@@ -43,6 +43,11 @@
       el.hidden = true;
       el.style.pointerEvents = 'none';
     });
+    document.querySelectorAll('.subscribe-overlay.active, .trial-tasks-overlay.active').forEach((el) => {
+      el.hidden = false;
+      el.style.removeProperty('display');
+      el.style.pointerEvents = 'auto';
+    });
   }
 
   function closeAllMobileOverlays() {
@@ -66,6 +71,7 @@
     });
     if (typeof closeTagSheet === 'function') closeTagSheet();
     window.FeatureDraft?.closeImageGenFilterSheet?.();
+    window.AppModalHub?.unlockAll?.();
     window.SubscriptionUI?.close?.();
     window.TrialTasksUI?.close?.();
     document.getElementById('authOverlay')?.classList.remove('open');

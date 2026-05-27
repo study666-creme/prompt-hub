@@ -142,13 +142,7 @@
     const trialBadge = document.querySelector('.app-nav-trial-badge');
     const subBadge = document.querySelector('.app-nav-subscribe-badge');
     if (trialBadge) trialBadge.textContent = '任务';
-    if (subBadge) {
-      if (window.Membership?.isMember?.()) {
-        subBadge.textContent = '会员';
-      } else {
-        subBadge.textContent = '五折';
-      }
-    }
+    if (subBadge) subBadge.textContent = '五折';
   }
 
   function renderMiniOfferBar() {
@@ -276,32 +270,67 @@
     updateSubscribeNavBadge();
   }
 
+  function ensureModalOverlaysOnBody() {
+    ['trialTasksOverlay', 'subscribeOverlay'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el && el.parentElement !== document.body) document.body.appendChild(el);
+    });
+  }
+
   function openSubscribePanel() {
+    ensureModalOverlaysOnBody();
     const el = document.getElementById('subscribeOverlay');
     if (!el) return;
-    el.hidden = false;
-    el.classList.add('active');
-    document.body.classList.add('subscribe-open');
+    if (window.AppModalHub) window.AppModalHub.open('subscribeOverlay');
+    else {
+      el.hidden = false;
+      el.classList.add('active');
+      document.body.classList.add('subscribe-open');
+    }
     if (isLoggedIn()) void window.PromptHubApi?.syncMe?.({ silent: true });
     renderPlans();
     updateSubscribeNavBadge();
   }
 
+  function unlockPageInteraction() {
+    window.AppModalHub?.unlockAll?.();
+  }
+
   function closeSubscribePanel() {
+    if (window.AppModalHub) {
+      window.AppModalHub.close('subscribeOverlay');
+      return;
+    }
     const el = document.getElementById('subscribeOverlay');
     if (el) {
       el.classList.remove('active');
       el.hidden = true;
     }
-    document.body.classList.remove('subscribe-open');
+    document.body.classList.remove('subscribe-open', 'app-modal-open');
   }
 
   function bind() {
+    ensureModalOverlaysOnBody();
     document.querySelectorAll('[data-subscribe-billing]').forEach(btn => {
       btn.addEventListener('click', () => setBilling(btn.dataset.subscribeBilling));
     });
-    document.getElementById('subscribeOverlay')?.addEventListener('click', e => {
-      if (e.target.id === 'subscribeOverlay') closeSubscribePanel();
+    const overlay = document.getElementById('subscribeOverlay');
+    const panel = overlay?.querySelector('.subscribe-panel:not(.trial-tasks-panel)');
+    panel?.addEventListener('click', (e) => e.stopPropagation());
+    overlay?.addEventListener('click', (e) => {
+      if (e.target === overlay) closeSubscribePanel();
+    });
+    document.getElementById('subscribeCloseBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSubscribePanel();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (overlay?.classList.contains('active')) closeSubscribePanel();
+      else if (document.getElementById('trialTasksOverlay')?.classList.contains('active')) {
+        window.closeTrialTasksPanel?.();
+      }
     });
   }
 
@@ -324,6 +353,7 @@
   };
   window.openSubscribePanel = openSubscribePanel;
   window.closeSubscribePanel = closeSubscribePanel;
+  window.unlockPageInteraction = unlockPageInteraction;
   window.openRechargePanel = openSubscribePanel;
 
   if (document.readyState === 'loading') {

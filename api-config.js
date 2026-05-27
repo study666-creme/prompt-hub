@@ -16,8 +16,10 @@
 
   var host = (typeof location !== 'undefined' && location.hostname) || '';
   var prodByHost = {
-    'prompt-hub-hub.pages.dev': 'https://prompt-hub-api.2705367723.workers.dev',
-    'prompt-hub-web.pages.dev': 'https://prompt-hub-api.2705367723.workers.dev'
+    'prompt-hub.cn': 'https://api.prompt-hub.cn',
+    'www.prompt-hub.cn': 'https://api.prompt-hub.cn',
+    'prompt-hub-hub.pages.dev': 'https://api.prompt-hub.cn',
+    'prompt-hub-web.pages.dev': 'https://api.prompt-hub.cn'
   };
 
   if (prodByHost[host]) {
