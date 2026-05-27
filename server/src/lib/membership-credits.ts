@@ -4,7 +4,24 @@ import { getOrCreateProfile, isMembershipActive } from './supabase';
 
 export type CreditGrantMode = 'daily' | 'bundle';
 
+/** 兼容旧引用；新逻辑请用 dailyCreditsForTier */
 export const DAILY_CREDITS_AMOUNT = 10;
+
+export const DAILY_CREDITS_BY_TIER: Record<
+  NonNullable<Profile['membership_tier']>,
+  number
+> = {
+  basic: 10,
+  standard: 20,
+  pro: 40
+};
+
+export function dailyCreditsForTier(
+  tier: Profile['membership_tier']
+): number {
+  if (!tier) return DAILY_CREDITS_BY_TIER.basic;
+  return DAILY_CREDITS_BY_TIER[tier] ?? 10;
+}
 
 export const TIER_LUMP_CREDITS: Record<
   NonNullable<Profile['membership_tier']>,
@@ -12,7 +29,7 @@ export const TIER_LUMP_CREDITS: Record<
 > = {
   basic: 100,
   standard: 310,
-  pro: 1000
+  pro: 620
 };
 
 /** 中国时区自然日 YYYY-MM-DD */
@@ -45,10 +62,12 @@ export async function refreshDailyCredits(
   const today = chinaDateKey();
   if (profile.daily_credits_date === today) return profile;
 
+  const amount = dailyCreditsForTier(profile.membership_tier);
+
   const { data, error } = await admin
     .from('profiles')
     .update({
-      daily_credits: DAILY_CREDITS_AMOUNT,
+      daily_credits: amount,
       daily_credits_date: today
     })
     .eq('user_id', profile.user_id)
@@ -162,6 +181,11 @@ export async function deductUserCredits(
     profile = await getOrCreateProfile(admin, userId);
   }
 
+  if (reason === 'image_generation' && amount > 0) {
+    await incrementLifetimeCreditsSpent(admin, userId, amount);
+    profile = await getOrCreateProfile(admin, userId);
+  }
+
   return { profile, split: { fromDaily, fromPermanent: left } };
 }
 
@@ -221,8 +245,26 @@ export function membershipCreditsPayload(profile: Profile) {
     dailyCredits: dailyActive ? profile.daily_credits : 0,
     creditsSpendable: spendableCredits(profile),
     dailyCreditsNote:
-      profile.credit_grant_mode === 'daily'
-        ? `每日 ${DAILY_CREDITS_AMOUNT} 积分，当日有效`
-        : null
+      profile.credit_grant_mode === 'daily' && profile.membership_tier
+        ? `每日 ${dailyCreditsForTier(profile.membership_tier)} 积分，当日有效`
+        : profile.credit_grant_mode === 'daily'
+          ? `每日 ${DAILY_CREDITS_AMOUNT} 积分，当日有效`
+          : null,
+    dailyCreditsPerTier: DAILY_CREDITS_BY_TIER
   };
+}
+
+export async function incrementLifetimeCreditsSpent(
+  admin: SupabaseClient,
+  userId: string,
+  amount: number
+): Promise<void> {
+  if (amount <= 0) return;
+  const profile = await getOrCreateProfile(admin, userId);
+  const next = (profile.lifetime_credits_spent ?? 0) + amount;
+  const { error } = await admin
+    .from('profiles')
+    .update({ lifetime_credits_spent: next })
+    .eq('user_id', userId);
+  if (error) throw error;
 }

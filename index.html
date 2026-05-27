@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__APP_BUILD__ = '20260528s';
+    window.__APP_BUILD__ = '20260529c';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -13,14 +13,12 @@
         var onceKey = 'promptrepo_build_reload_once_' + cur;
         if (sessionStorage.getItem(onceKey)) return;
         sessionStorage.setItem(onceKey, '1');
-        var reloadOnce = function () { location.reload(); };
         if ('caches' in window) {
           caches.keys().then(function (keys) {
             return Promise.all(keys.map(function (k) { return caches.delete(k); }));
-          }).finally(reloadOnce);
-        } else {
-          reloadOnce();
+          });
         }
+        location.reload();
         return;
       }
       if (!prev) localStorage.setItem(key, cur);
@@ -28,6 +26,22 @@
   </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#121212">
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('promptrepo_theme');
+        if (t !== 'light' && t !== 'dark') {
+          var h = new Date().getHours();
+          t = h >= 8 && h < 20 ? 'light' : 'dark';
+        }
+        if (t === 'light') {
+          document.documentElement.setAttribute('data-theme', 'light');
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) m.setAttribute('content', '#f2f2f7');
+        }
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -39,17 +53,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20260528s">
-  <link rel="stylesheet" href="styles-theme.css?v=20260528s">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260528s">
-  <link rel="stylesheet" href="styles-settings.css?v=20260528s">
-  <link rel="stylesheet" href="styles-features.css?v=20260528s">
-  <script src="theme.js?v=20260528s"></script>
+  <link rel="stylesheet" href="styles.css?v=20260529c">
+  <link rel="stylesheet" href="styles-theme.css?v=20260529c">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260529c">
+  <link rel="stylesheet" href="styles-settings.css?v=20260529c">
+  <link rel="stylesheet" href="styles-features.css?v=20260529c">
+  <script src="theme.js?v=20260529c"></script>
 </head>
 <body>
-  <div class="mobile-drawer-overlay" id="mobileDrawerOverlay" aria-hidden="true"></div>
+  <div class="mobile-drawer-overlay" id="mobileDrawerOverlay" hidden aria-hidden="true" style="display:none"></div>
   <div id="rippleGridBg" class="ripple-grid-bg" aria-hidden="true"></div>
   <div class="ui-vignette" aria-hidden="true"></div>
   <div class="app-chrome">
@@ -214,13 +226,32 @@
     </div>
   </div>
 
+  <!-- 免费试用 · 任务中心 -->
+  <div class="subscribe-overlay trial-tasks-overlay" id="trialTasksOverlay" hidden onclick="if(event.target===this) closeTrialTasksPanel()">
+    <div class="subscribe-panel trial-tasks-panel" onclick="event.stopPropagation()">
+      <header class="subscribe-panel-head">
+        <div>
+          <h3>免费试用会员</h3>
+          <p class="subscribe-panel-sub">完成任务领取会员天数与积分 · 防刷：社区作品需有效提示词与配图</p>
+        </div>
+        <button type="button" class="close-btn" onclick="closeTrialTasksPanel()" aria-label="关闭">✕</button>
+      </header>
+      <div class="subscribe-panel-body trial-tasks-body">
+        <p class="trial-tasks-login-hint hidden" id="trialTasksLoginHint">请先登录后查看任务进度并领取奖励。</p>
+        <div id="trialTasksMiniOffer"></div>
+        <div class="trial-tasks-list" id="trialTasksList"></div>
+        <p class="subscribe-legal">社区任务仅统计有效发布（提示词≥24字、含配图、非重复乱码）。消耗积分任务以生图扣费为准。</p>
+      </div>
+    </div>
+  </div>
+
   <!-- 会员订阅 -->
-  <div class="subscribe-overlay" id="subscribeOverlay">
+  <div class="subscribe-overlay" id="subscribeOverlay" hidden>
     <div class="subscribe-panel" onclick="event.stopPropagation()">
       <header class="subscribe-panel-head">
         <div>
           <h3>会员订阅</h3>
-          <p class="subscribe-panel-sub">3 天免费试用 · ¥1.9 续杯 14 天 · 会员积分可二选一领取</p>
+          <p class="subscribe-panel-sub">三档会员 · 每日或一次性积分二选一 · ¥0.99 体验 3 天</p>
         </div>
         <button type="button" class="close-btn" onclick="closeSubscribePanel()" aria-label="关闭">✕</button>
       </header>
@@ -231,11 +262,10 @@
         <button type="button" class="subscribe-billing-tab" data-subscribe-billing="single_year">单年购买</button>
       </div>
       <div class="subscribe-panel-body">
-        <div class="subscribe-trial-bar hidden" id="subscribeTrialBar"></div>
+        <div class="subscribe-mini-offer" id="subscribeMiniOffer"></div>
         <div class="subscribe-credit-mode" id="subscribeCreditMode"></div>
-        <div class="subscribe-first-offer hidden" id="subscribeFirstOffer"></div>
         <div class="subscribe-plans-grid" id="subscribePlansGrid"></div>
-        <p class="subscribe-legal">免费试用需绑定手机，每人一次。¥1.9 续杯请购 <code>STARTER-19-14D</code> 激活码。正式会员请在下方选择「每日积分」或「一次性积分」后兑换对应档位码。详见 <a href="terms.html" class="link-inline">用户协议</a>。</p>
+        <p class="subscribe-legal">¥0.99 体验请购激活码 <code>MINI-99-3D</code>。正式会员请选择积分领取方式后兑换对应档位码。免费会员请点侧栏「免费试用」。详见 <a href="terms.html" class="link-inline">用户协议</a>。</p>
       </div>
     </div>
   </div>
@@ -402,9 +432,13 @@
     </div>
     <div class="app-nav-auth" id="appNavAuth">
       <div class="app-nav-subscribe-wrap">
+        <button type="button" class="app-nav-trial-btn" onclick="openTrialTasksPanel()">
+          <span class="app-nav-trial-badge">任务</span>
+          <span>免费试用</span>
+        </button>
         <button type="button" class="app-nav-subscribe-btn" onclick="openSubscribePanel()">
-          <span class="app-nav-subscribe-badge">一折起</span>
-          <span class="app-nav-subscribe-text">订阅会员</span>
+          <span class="app-nav-subscribe-badge">订阅</span>
+          <span class="app-nav-subscribe-text">会员</span>
           <span class="app-nav-subscribe-shine" aria-hidden="true"></span>
         </button>
       </div>
@@ -842,7 +876,7 @@
     </div>
   </div>
 
-  <div class="filter-sheet-overlay mobile-only" id="imageGenFilterSheetOverlay" onclick="if(event.target===this) window.FeatureDraft?.closeImageGenFilterSheet?.()">
+  <div class="filter-sheet-overlay mobile-only" id="imageGenFilterSheetOverlay" hidden onclick="if(event.target===this) window.FeatureDraft?.closeImageGenFilterSheet?.()">
     <div class="filter-sheet" onclick="event.stopPropagation()">
       <div class="tag-sheet-handle"></div>
       <div class="filter-sheet-title" id="imageGenFilterSheetTitle">选择分组</div>
@@ -850,7 +884,7 @@
     </div>
   </div>
 
-  <div class="tag-sheet-overlay" id="tagSheetOverlay" onclick="if(event.target===this) closeTagSheet()">
+  <div class="tag-sheet-overlay" id="tagSheetOverlay" hidden onclick="if(event.target===this) closeTagSheet()">
     <div class="tag-sheet" id="tagSheet" onclick="event.stopPropagation()">
       <div class="tag-sheet-handle"></div>
       <div class="tag-sheet-title">选择标签</div>
@@ -894,22 +928,25 @@
       document.head.appendChild(s);
     }
   </script>
-  <script src="api-client.js?v=20260528s"></script>
-  <script src="cloud-sync-safety.js?v=20260528s"></script>
-  <script src="supabase-sync.js?v=20260528s"></script>
-  <script src="membership.js?v=20260528s"></script>
-  <script src="subscription.js?v=20260528s"></script>
-  <script src="script.js?v=20260528s"></script>
-  <script src="points-system.js?v=20260528s"></script>
-  <script src="features-draft.js?v=20260528s"></script>
-  <script src="mobile.js?v=20260528s"></script>
+  <script src="api-client.js?v=20260529c"></script>
+  <script src="cloud-sync-safety.js?v=20260529c"></script>
+  <script src="supabase-sync.js?v=20260529c"></script>
+  <script src="membership.js?v=20260529c"></script>
+  <script src="subscription.js?v=20260529c"></script>
+  <script src="trial-tasks.js?v=20260529c"></script>
+  <script src="script.js?v=20260529c"></script>
+  <script src="points-system.js?v=20260529c"></script>
+  <script src="features-draft.js?v=20260529c"></script>
+  <script src="mobile.js?v=20260529c"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        const swUrl = './sw.js?v=' + encodeURIComponent(window.__APP_BUILD__ || '55');
-        navigator.serviceWorker.register(swUrl).then((reg) => {
-          reg.update();
-        }).catch(() => {});
+        setTimeout(() => {
+          const swUrl = './sw.js?v=' + encodeURIComponent(window.__APP_BUILD__ || '55');
+          navigator.serviceWorker.register(swUrl).then((reg) => {
+            reg.update();
+          }).catch(() => {});
+        }, 1500);
       });
     }
   </script>

@@ -347,6 +347,36 @@ body {
     .app-nav-subscribe-wrap {
       margin-bottom: 12px;
       padding: 0 2px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .app-nav-trial-btn {
+      position: relative;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-primary);
+      font-size: var(--font-sm);
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .app-nav-trial-btn:hover {
+      background: var(--bg-hover);
+    }
+    .app-nav-trial-badge {
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-bg-strong);
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 700;
     }
     .app-nav-subscribe-btn {
       position: relative;
@@ -1461,7 +1491,7 @@ body {
     .card-media {
       position: relative;
       overflow: hidden;
-      background: #161616;
+      background: var(--bg-hover);
       flex-shrink: 0;
       line-height: 0;
     }
@@ -1977,7 +2007,7 @@ body {
   width: 100%;
   height: auto;
   max-height: none;
-  background: #000;
+  background: var(--bg-hover);
   overflow: visible;
   display: block;
   border: none;
@@ -2064,16 +2094,14 @@ body {
       inset: 0;
       z-index: 2100;
       background: rgba(0, 0, 0, 0.5);
-      display: flex;
+      display: none;
       align-items: flex-end;
       justify-content: flex-end;
-      opacity: 0;
       pointer-events: none;
-      transition: opacity 0.22s var(--ease-out);
       backdrop-filter: blur(4px);
     }
     .tag-sheet-overlay.open {
-      opacity: 1;
+      display: flex;
       pointer-events: auto;
     }
     .tag-sheet {

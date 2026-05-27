@@ -619,6 +619,10 @@
         if (masonryInstance) { masonryInstance.destroy(); masonryInstance = null; }
         return;
       }
+      if (typeof Masonry === 'undefined') {
+        void ensureMasonryScript().then(() => layoutMasonryGrid()).catch(() => {});
+        return;
+      }
       const savedScroll = container.scrollTop;
       const gap = getMasonryGap();
       const innerW = getCardsInnerWidth();
@@ -1339,19 +1343,53 @@
       if (!media) return;
       const mobile = isMobileViewport();
       if (!mobile) scheduleMasonryForMedia(media);
+      const img = media.querySelector('img');
+      const loaded = img && img.complete && img.naturalWidth > 0;
       const t0 = Number(media.dataset.shineAt || 0) || Date.now();
       if (!media.dataset.shineAt) media.dataset.shineAt = String(t0);
       const inFeatureGrid = media.closest('#creationsGrid, #communityGrid, #userProfileGrid');
-      const minShine = mobile ? 0 : (media.classList?.contains('imagegen-feed-media') ? 520 : (inFeatureGrid ? 360 : 720));
+      const minShine = mobile || loaded ? 0 : (media.classList?.contains('imagegen-feed-media') ? 280 : (inFeatureGrid ? 180 : 320));
       const wait = Math.max(0, minShine - (Date.now() - t0));
-      setTimeout(() => {
+      const done = () => {
         media.classList.remove('is-loading');
         if (!mobile) scheduleMasonryForMedia(media);
         else if (media.closest('#imageGenFeed')) window.FeatureDraft?.resetMobileFeedGridStyles?.();
         else if (media.closest('#cardsContainer')) enforceMobileCardGrid();
-      }, wait);
+      };
+      if (wait <= 0) done();
+      else setTimeout(done, wait);
     }
     window.finishCardMediaShine = finishCardMediaShine;
+
+    let masonryScriptPromise = null;
+    function ensureMasonryScript() {
+      if (typeof Masonry !== 'undefined') return Promise.resolve();
+      if (masonryScriptPromise) return masonryScriptPromise;
+      masonryScriptPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js';
+        s.async = true;
+        s.onload = () => resolve();
+        s.onerror = () => reject(new Error('Masonry load failed'));
+        document.head.appendChild(s);
+      });
+      return masonryScriptPromise;
+    }
+
+    let tesseractScriptPromise = null;
+    function ensureTesseractScript() {
+      if (typeof Tesseract !== 'undefined') return Promise.resolve();
+      if (tesseractScriptPromise) return tesseractScriptPromise;
+      tesseractScriptPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+        s.async = true;
+        s.onload = () => resolve();
+        s.onerror = () => reject(new Error('Tesseract load failed'));
+        document.head.appendChild(s);
+      });
+      return tesseractScriptPromise;
+    }
 
     function cardImgInitialSrc(image) {
       const placeholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="#e4e4ea" width="4" height="3"/></svg>');
@@ -2139,7 +2177,7 @@
         renderGroups();
         renderCards(true);
         updateGuestLimitUI();
-        createNewCard({ silentMobile: true });
+        if (!isMobileViewport()) createNewCard({ silentMobile: true });
       }
       applyFloatingState();
       if (typeof ResizeObserver !== 'undefined') {
@@ -2147,7 +2185,7 @@
         const onWarehouseResize = () => {
           if (!document.getElementById('pageWarehouse')?.classList.contains('active')) return;
           clearTimeout(masonryResizeTimer);
-          masonryResizeTimer = setTimeout(() => scheduleLayoutMasonry(), 80);
+          masonryResizeTimer = setTimeout(() => scheduleLayoutMasonry(), 200);
         };
         const masonryResizeObs = new ResizeObserver(onWarehouseResize);
         const mainArea = document.getElementById('mainContentArea');
@@ -2685,6 +2723,7 @@
       const overlay = document.getElementById('tagSheetOverlay');
       if (!overlay) return;
       overlay.classList.remove('open', 'multi');
+      overlay.hidden = true;
       tagSheetMultiMode = false;
       tagSheetPending.clear();
       document.getElementById('tagSheetList').innerHTML = '';
@@ -2739,6 +2778,7 @@
           list.appendChild(row);
         });
       }
+      overlay.hidden = false;
       overlay.classList.add('open');
       const onKey = e => { if (e.key === 'Escape') { closeTagSheet(); document.removeEventListener('keydown', onKey); } };
       document.addEventListener('keydown', onKey);
@@ -3113,6 +3153,7 @@
         } catch (e) { status.textContent = '接口失败'; }
       } else {
         try {
+          await ensureTesseractScript();
           const result = await Tesseract.recognize(modalImageData, 'chi_sim+eng', {
             tessedit_pageseg_mode: '6',
             logger: m => {

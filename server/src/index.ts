@@ -59,19 +59,19 @@ app.get('/api/v1/billing/plans', c =>
           id: 'standard',
           name: '标准版',
           genDiscount: '8折',
-          dailyCredits: 10,
+          dailyCredits: 20,
           lumpCredits: 310
         },
         {
           id: 'pro',
           name: '专业版',
           genDiscount: '7折',
-          dailyCredits: 10,
-          lumpCredits: 1000
+          dailyCredits: 40,
+          lumpCredits: 620
         }
       ],
-      trial: { freeDays: 3, dailyCredits: 10, starterDays: 14, starterPriceYuan: 1.9 },
-      note: '支付 webhook 待接入；试用与 ¥1.9 续杯见 /api/v1/membership 与激活码 STARTER-19-14D'
+      miniOffer: { priceYuan: 0.99, days: 3, code: 'MINI-99-3D' },
+      note: '支付 webhook 待接入；免费会员见任务中心；¥0.99 体验码 MINI-99-3D'
     }
   })
 );

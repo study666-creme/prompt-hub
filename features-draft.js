@@ -824,6 +824,7 @@
     if (idx >= 0) communityPosts[idx] = post;
     else communityPosts.push(post);
     card.publishedToCommunity = true;
+    window.TrialTasksUI?.syncTaskProgress?.();
     card.communityPostId = post.id;
     persistCommunity();
     renderCommunity();
@@ -2337,7 +2338,10 @@
   }
 
   function closeImageGenFilterSheet() {
-    document.getElementById('imageGenFilterSheetOverlay')?.classList.remove('open');
+    const overlay = document.getElementById('imageGenFilterSheetOverlay');
+    if (!overlay) return;
+    overlay.classList.remove('open');
+    overlay.hidden = true;
   }
 
   function openImageGenFilterSheet(kind) {
@@ -2366,6 +2370,7 @@
         renderImageGenFeed();
       });
     });
+    overlay.hidden = false;
     overlay.classList.add('open');
   }
 
@@ -2785,7 +2790,16 @@
     scheduleCreationsLayout: () => scheduleCommunityLayout('creationsGrid'),
     fillFormPromptOnly,
     copyFeedPromptText,
-    fillFeedPromptToImageGen
+    fillFeedPromptToImageGen,
+    getCommunityPostsForTasks() {
+      return communityPosts
+        .filter(p => !p.isMock)
+        .map(p => ({
+          prompt: p.prompt || '',
+          title: p.title || '',
+          image: p.image || null
+        }));
+    }
   };
 
   if (document.readyState === 'loading') {

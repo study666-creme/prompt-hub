@@ -164,10 +164,19 @@ prompt-hub/
 | workers.dev | 国内常超时，生产走 `api.prompt-hub.cn` |
 | 自有域名 | `prompt-hub.cn` 已接入 Cloudflare |
 | 前端 API 配置 | `api-domain.config.js` → `CUSTOM_API_HOST = 'api.prompt-hub.cn'` |
-| **待做** | 重新部署 Pages 静态站（上传 `prompt-hub-deploy.zip`），让线上页面也用新 API |
-| Pages 静态站 | `prompt-hub-hub.pages.dev` / `prompt-hub-web.pages.dev` |
+| Pages 静态站 | `prompt-hub.cn` / Pages 预览域 |
+| 构建号 | `20260529b`；SW `prompt-hub-v66` |
+| 会员任务 | 侧栏「免费试用」任务中心；API `/api/v1/membership/tasks`（需跑迁移 `20260528120000_membership_tasks.sql`） |
+| 试用码 | `MINI-99-3D`（¥0.99/3 天）；已停用 `STARTER-19-14D` |
+| 会员积分 | 日赠：基础 10 / 标准 20 / 专业 40；一次性：100 / 310 / 620 |
 
-文档每 **8 条用户消息** 由 `.cursor/hooks` + 规则自动提醒 AI 更新本节。
+**已知问题 / 下一步**
+
+- 手机 PWA：启动屏偏黑属系统 splash；进入后若仍有半透明黑幕，部署 `20260529b`（强化 `closeAllMobileOverlays` + 标签 sheet 关闭时不挡点击）。
+- 部署静态站后让用户清一次站点数据或等版本脚本自动 reload 一次。
+- 会员任务迁移 + Worker 重部署后，登录用户可在任务中心领取奖励。
+
+文档每 **8 条用户消息** 由 `.cursor/hooks` + 规则 `.cursor/rules/doc-auto-sync.mdc` 提醒 AI 更新本节（计数见 `.cursor/doc-sync-state.json`）。
 
 ---
 

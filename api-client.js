@@ -99,7 +99,7 @@
     } else if (window.SupabaseSync?.isLoggedIn?.()) {
       window.SubscriptionUI?.setFirstOfferUsedFromServer?.(false);
     }
-    if (d?.trial || d?.creditGrantMode) {
+    if (d?.creditGrantMode || d?.dailyCreditsByTier) {
       window.SubscriptionUI?.applyServerState?.(d);
     }
     window.PointsSystem?.updateCreditsUI?.();
@@ -144,6 +144,21 @@
     return request('GET', `/api/v1/me/ledger?limit=${n}`);
   }
 
+  async function getMembershipTasks() {
+    return request('GET', '/api/v1/membership/tasks');
+  }
+
+  async function syncMembershipTasks(payload) {
+    return request('POST', '/api/v1/membership/tasks/sync', payload || {});
+  }
+
+  async function claimMembershipTask(taskKey) {
+    return request(
+      'POST',
+      `/api/v1/membership/tasks/${encodeURIComponent(taskKey)}/claim`
+    );
+  }
+
   async function checkLikeMilestone(postId, likes) {
     return request('POST', '/api/v1/community/like-milestone', {
       postId: String(postId || ''),
@@ -182,6 +197,9 @@
     syncMe,
     redeem,
     claimFreeTrial,
+    getMembershipTasks,
+    syncMembershipTasks,
+    claimMembershipTask,
     setCreditGrantMode,
     getGenerationCost,
     generateImage,

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../../env';
 import {
-  DAILY_CREDITS_AMOUNT,
+  DAILY_CREDITS_BY_TIER,
   membershipCreditsPayload,
   syncMembershipCredits
 } from '../../lib/membership-credits';
@@ -40,13 +40,10 @@ meRoutes.get('/', async c => {
       },
       firstSubOfferUsed: profile.first_sub_offer_used,
       trialFreeUsed: profile.trial_free_used,
-      trial: {
-        canClaimFree: !profile.trial_free_used && !memberActive,
-        dailyCreditsPerDay: DAILY_CREDITS_AMOUNT,
-        freeDays: 3,
-        starterDays: 14,
-        starterPriceYuan: 1.9
-      }
+      lifetimeCreditsSpent: profile.lifetime_credits_spent ?? 0,
+      dailyCreditsByTier: DAILY_CREDITS_BY_TIER,
+      lumpCreditsByTier: { basic: 100, standard: 310, pro: 620 },
+      miniOffer: { priceYuan: 0.99, days: 3, code: 'MINI-99-3D' }
     }
   });
 });
@@ -58,7 +55,8 @@ const REASON_LABELS: Record<string, string> = {
   payment_topup: '充值',
   subscription_grant: '订阅开通',
   like_milestone: '点赞奖励',
-  daily_grant: '每日会员积分'
+  daily_grant: '每日会员积分',
+  membership_task: '会员任务奖励'
 };
 
 meRoutes.get('/ledger', async c => {

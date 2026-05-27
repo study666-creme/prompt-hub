@@ -503,6 +503,94 @@ body.subscribe-open {
   width: 100%;
   margin-top: auto;
 }
+.subscribe-mini-offer,
+.trial-mini-offer {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.subscribe-mini-offer strong,
+.trial-mini-offer strong {
+  color: var(--text-primary);
+}
+.trial-tasks-panel {
+  max-width: 520px;
+}
+.trial-tasks-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.trial-tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.trial-task-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+.trial-task-card.is-ready {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.trial-task-card.is-claimed {
+  opacity: 0.72;
+}
+.trial-task-main h4 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+.trial-task-main p {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.trial-task-reward {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.trial-task-progress {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.trial-task-action {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+.trial-task-pending {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.trial-task-done {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.trial-tasks-empty,
+.trial-tasks-login-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 20px 8px;
+}
+body.trial-tasks-open {
+  overflow: hidden;
+}
+
 .subscribe-legal {
   margin: 14px 0 0;
   font-size: 11px;

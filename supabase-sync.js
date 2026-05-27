@@ -204,7 +204,7 @@
 
   function imgPlaceholderSrc() {
     return 'data:image/svg+xml,' + encodeURIComponent(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="#1a1a22" width="4" height="3"/></svg>'
+      '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="#e4e4ea" width="4" height="3"/></svg>'
     );
   }
 

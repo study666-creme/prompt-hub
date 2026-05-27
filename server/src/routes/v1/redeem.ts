@@ -151,8 +151,10 @@ redeemRoutes.post('/', async c => {
   const parts: string[] = [];
   if (row.credits > 0) parts.push(`+${row.credits} 积分`);
   if (row.membership_tier) {
-    if (row.offer_kind === 'starter_14d') {
-      parts.push('已开通 14 天基础会员（¥1.9 续杯）');
+    if (row.offer_kind === 'mini_3d') {
+      parts.push('已开通 3 天基础会员（¥0.99 体验）');
+    } else if (row.offer_kind === 'starter_14d') {
+      parts.push('已开通 14 天基础会员');
     } else {
       parts.push(`已开通${row.membership_tier}会员`);
     }

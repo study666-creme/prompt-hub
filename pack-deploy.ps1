@@ -15,6 +15,7 @@ $files = @(
   "features-draft.js",
   "membership.js",
   "subscription.js",
+  "trial-tasks.js",
   "mobile.js",
   "api-domain.config.js",
   "api-config.js",

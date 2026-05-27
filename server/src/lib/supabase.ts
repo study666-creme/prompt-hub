@@ -13,6 +13,8 @@ export type Profile = {
   daily_credits_date: string | null;
   bundle_granted_until: string | null;
   trial_free_used: boolean;
+  lifetime_credits_spent?: number;
+  membership_task_flags?: Record<string, unknown>;
 };
 
 export function createAdminClient(env: Env): SupabaseClient {

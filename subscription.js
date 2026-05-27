@@ -1,26 +1,16 @@
 /**
- * 会员订阅：3 天免费试用（每日 10 积分）· ¥1.9 续杯 14 天 · 积分领取方式二选一
+ * 会员订阅：三档每日/一次性积分 · 任务中心另入口
  */
 (function () {
-  const LS_FIRST_OFFER = 'promptrepo_first_sub_used';
-  const LS_FIRST_OFFER_MIGRATE = 'promptrepo_first_offer_migrate_v2';
   const LS_CREDIT_MODE = 'promptrepo_credit_grant_mode';
 
-  let serverFirstSubOfferUsed;
-  let serverTrial = { canClaimFree: false, trialFreeUsed: true, phoneVerified: false };
+  const DAILY_BY_TIER = { basic: 10, standard: 20, pro: 40 };
+  const LUMP_BY_TIER = { basic: 100, standard: 310, pro: 620 };
+
   let serverCreditMode = 'bundle';
 
   function isLoggedIn() {
     return window.SupabaseSync?.isLoggedIn?.() === true;
-  }
-
-  function migrateStaleFirstOfferFlag() {
-    try {
-      if (localStorage.getItem(LS_FIRST_OFFER_MIGRATE)) return;
-      localStorage.removeItem(LS_FIRST_OFFER);
-      localStorage.setItem(LS_FIRST_OFFER_MIGRATE, '1');
-      serverFirstSubOfferUsed = undefined;
-    } catch (e) { /* ignore */ }
   }
 
   function getCreditGrantMode() {
@@ -43,9 +33,6 @@
     renderCreditModePicker();
   }
 
-  const LUMP_BY_TIER = { basic: 100, standard: 310, pro: 1000 };
-  const DAILY_AMOUNT = 10;
-
   const PLANS = [
     {
       id: 'basic',
@@ -54,7 +41,7 @@
       storage: '10 GB',
       genDiscount: '9折',
       features: [
-        `积分：每日 ${DAILY_AMOUNT}（当日有效）或一次性 ${LUMP_BY_TIER.basic}（永久）`,
+        `每日 ${DAILY_BY_TIER.basic} 积分（当日有效）或一次性 ${LUMP_BY_TIER.basic}`,
         '生图积分 9 折',
         '无限置顶',
         '10 GB 云存储',
@@ -68,7 +55,7 @@
       storage: '30 GB',
       genDiscount: '8折',
       features: [
-        `积分：每日 ${DAILY_AMOUNT} 或一次性 ${LUMP_BY_TIER.standard}`,
+        `每日 ${DAILY_BY_TIER.standard} 积分或一次性 ${LUMP_BY_TIER.standard}`,
         '生图积分 8 折',
         '无限置顶',
         '30 GB 云存储',
@@ -82,7 +69,7 @@
       storage: '100 GB',
       genDiscount: '7折',
       features: [
-        `积分：每日 ${DAILY_AMOUNT} 或一次性 ${LUMP_BY_TIER.pro}`,
+        `每日 ${DAILY_BY_TIER.pro} 积分或一次性 ${LUMP_BY_TIER.pro}`,
         '生图积分 7 折',
         '无限置顶',
         '100 GB 云存储',
@@ -129,25 +116,6 @@
       .replace(/"/g, '&quot;');
   }
 
-  function hasUsedFirstOffer() {
-    if (serverFirstSubOfferUsed !== undefined) return serverFirstSubOfferUsed;
-    if (isLoggedIn()) return false;
-    return localStorage.getItem(LS_FIRST_OFFER) === '1';
-  }
-
-  function setFirstOfferUsedFromServer(used) {
-    serverFirstSubOfferUsed = !!used;
-    if (used) localStorage.setItem(LS_FIRST_OFFER, '1');
-    else localStorage.removeItem(LS_FIRST_OFFER);
-    refreshOfferUI();
-  }
-
-  function resetFirstOfferServerState() {
-    serverFirstSubOfferUsed = undefined;
-    serverTrial = { canClaimFree: false, trialFreeUsed: true, phoneVerified: false };
-    refreshOfferUI();
-  }
-
   function applyServerState(me) {
     if (!me || typeof me !== 'object') return;
     if (me.creditGrantMode === 'daily' || me.creditGrantMode === 'bundle') {
@@ -156,49 +124,37 @@
         localStorage.setItem(LS_CREDIT_MODE, serverCreditMode);
       } catch (e) { /* ignore */ }
     }
-    if (me.trial) {
-      serverTrial = {
-        canClaimFree: !!me.trial.canClaimFree,
-        trialFreeUsed: !!me.trialFreeUsed,
-        phoneVerified: !!me.phoneVerified
-      };
-    } else {
-      serverTrial.phoneVerified = !!me.phoneVerified;
-      serverTrial.trialFreeUsed = !!me.trialFreeUsed;
-    }
     refreshOfferUI();
   }
 
   function refreshOfferUI() {
     updateSubscribeNavBadge();
-    renderTrialBar();
     renderCreditModePicker();
-    renderFirstOfferBanner();
+    renderMiniOfferBar();
     const overlay = document.getElementById('subscribeOverlay');
     if (overlay?.classList.contains('active')) renderPlans();
   }
 
   function updateSubscribeNavBadge() {
-    const badge = document.querySelector('.app-nav-subscribe-badge');
-    if (!badge) return;
-    if (isLoggedIn() && serverTrial.canClaimFree) {
-      badge.textContent = '免费试用';
-      return;
-    }
-    if (!hasUsedFirstOffer()) {
-      badge.textContent = '¥1.9续杯';
-      return;
-    }
-    if (window.Membership?.isMember?.()) {
-      const tier = window.Membership.getMemberTier?.();
-      if (tier === 'basic') {
-        badge.textContent = '约五折';
-        return;
+    const trialBadge = document.querySelector('.app-nav-trial-badge');
+    const subBadge = document.querySelector('.app-nav-subscribe-badge');
+    if (trialBadge) trialBadge.textContent = '任务';
+    if (subBadge) {
+      if (window.Membership?.isMember?.()) {
+        subBadge.textContent = window.Membership.getGenDiscountLabel?.() || '会员';
+      } else {
+        subBadge.textContent = '订阅';
       }
-      badge.textContent = window.Membership.getGenDiscountLabel?.() || '会员';
-      return;
     }
-    badge.textContent = '会员';
+  }
+
+  function renderMiniOfferBar() {
+    const el = document.getElementById('subscribeMiniOffer');
+    if (!el) return;
+    el.innerHTML = `
+      <div class="subscribe-mini-offer">
+        <p><strong>¥0.99 体验 3 天</strong> 基础会员 · 兑换码 <code>MINI-99-3D</code>（图片生成页）</p>
+      </div>`;
   }
 
   function getDisplayPrice(planId, billing) {
@@ -216,61 +172,6 @@
     return `省 ${pct}%`;
   }
 
-  function renderTrialBar() {
-    const el = document.getElementById('subscribeTrialBar');
-    if (!el) return;
-    const parts = [];
-    if (isLoggedIn() && serverTrial.canClaimFree) {
-      parts.push(`
-        <div class="subscribe-trial-block">
-          <p><strong>3 天免费试用</strong> · 每日 ${DAILY_AMOUNT} 积分（当日有效，需绑定手机）</p>
-          <button type="button" class="btn btn-secondary btn-sm" id="subscribeTrialFreeBtn">领取试用</button>
-        </div>`);
-    }
-    if (!hasUsedFirstOffer()) {
-      parts.push(`
-        <div class="subscribe-trial-block subscribe-trial-starter">
-          <p><strong>¥1.9 续杯 14 天</strong> 基础会员 · 淘宝购码后在「图片生成」兑换 <code>STARTER-19-14D</code></p>
-        </div>`);
-    }
-    if (!parts.length) {
-      el.innerHTML = '';
-      el.classList.add('hidden');
-      return;
-    }
-    el.classList.remove('hidden');
-    el.innerHTML = parts.join('');
-    el.querySelector('#subscribeTrialFreeBtn')?.addEventListener('click', onClaimFreeTrial);
-  }
-
-  async function onClaimFreeTrial() {
-    if (!isLoggedIn()) {
-      if (typeof showToast === 'function') showToast('请先登录');
-      return;
-    }
-    if (!serverTrial.phoneVerified) {
-      const msg =
-        '请先绑定并验证手机号（Supabase 控制台开启 Phone Auth，或在账号设置中绑定）';
-      if (typeof showToast === 'function') showToast(msg);
-      else alert(msg);
-      return;
-    }
-    const r = await window.PromptHubApi?.claimFreeTrial?.();
-    if (r?.ok) {
-      if (typeof showToast === 'function') showToast(r.data.message || '试用已开通');
-      await window.PromptHubApi?.syncMe?.({ silent: true });
-      refreshOfferUI();
-      return;
-    }
-    const hint =
-      r?.code === 'PHONE_REQUIRED'
-        ? '（需先绑定手机）'
-        : r?.code === 'TRIAL_USED'
-          ? '（每人仅限一次）'
-          : '';
-    if (typeof showToast === 'function') showToast((r?.message || '领取失败') + hint);
-  }
-
   function renderCreditModePicker() {
     const el = document.getElementById('subscribeCreditMode');
     if (!el) return;
@@ -281,13 +182,13 @@
       <div class="subscribe-credit-mode-options" role="radiogroup">
         <label class="subscribe-credit-mode-opt${mode === 'daily' ? ' active' : ''}">
           <input type="radio" name="creditGrantMode" value="daily"${mode === 'daily' ? ' checked' : ''}>
-          <span>每日 ${DAILY_AMOUNT} 积分</span>
-          <small>当日有效，不用作废</small>
+          <span>每日积分（按档位）</span>
+          <small>基础 ${DAILY_BY_TIER.basic} / 标准 ${DAILY_BY_TIER.standard} / 专业 ${DAILY_BY_TIER.pro}，当日有效</small>
         </label>
         <label class="subscribe-credit-mode-opt${mode === 'bundle' ? ' active' : ''}">
           <input type="radio" name="creditGrantMode" value="bundle"${mode === 'bundle' ? ' checked' : ''}>
           <span>一次性到账</span>
-          <small>基础 100 / 标准 310 / 专业 1000，永久有效</small>
+          <small>基础 ${LUMP_BY_TIER.basic} / 标准 ${LUMP_BY_TIER.standard} / 专业 ${LUMP_BY_TIER.pro}，永久有效</small>
         </label>
       </div>`;
     el.querySelectorAll('input[name="creditGrantMode"]').forEach(input => {
@@ -308,18 +209,13 @@
     });
   }
 
-  function renderFirstOfferBanner() {
-    const el = document.getElementById('subscribeFirstOffer');
-    if (!el) return;
-    el.classList.add('hidden');
-  }
-
   function renderPlans() {
     const grid = document.getElementById('subscribePlansGrid');
     if (!grid) return;
-    renderTrialBar();
     renderCreditModePicker();
+    renderMiniOfferBar();
     const billingLabel = BILLING_LABELS[currentBilling] || '';
+    const mode = getCreditGrantMode();
     grid.innerHTML = PLANS.map(plan => {
       const p = getDisplayPrice(plan.id, currentBilling);
       if (!p) return '';
@@ -331,12 +227,16 @@
         ? `<span class="subscribe-plan-save">${esc(saveText)}</span>`
         : '';
       const featHtml = plan.features.map(f => `<li>${esc(f)}</li>`).join('');
+      const creditHint =
+        mode === 'daily'
+          ? `每日 ${DAILY_BY_TIER[plan.id]} 积分`
+          : `一次性 ${LUMP_BY_TIER[plan.id]} 积分`;
       return `<article class="subscribe-plan-card${plan.id === 'standard' ? ' featured' : ''}" data-plan="${plan.id}">
         <div class="subscribe-plan-head">
           <span class="subscribe-plan-tag">${esc(plan.tag)}</span>
           ${saveBadge}
           <h4>${esc(plan.name)}</h4>
-          <p class="subscribe-plan-billing-type">${esc(billingLabel)}</p>
+          <p class="subscribe-plan-billing-type">${esc(billingLabel)} · ${esc(creditHint)}</p>
         </div>
         <div class="subscribe-plan-price">
           ${originalHtml}
@@ -357,9 +257,9 @@
         if (!plan || !price) return;
         const modeLabel =
           getCreditGrantMode() === 'daily'
-            ? `每日 ${DAILY_AMOUNT} 积分（当日有效）`
-            : `一次性 ${LUMP_BY_TIER[planId] || 100} 积分（永久）`;
-        const msg = `「${plan.name}」${BILLING_LABELS[billing]} ¥${price.price}，${modeLabel} — 在线支付筹备中，请用淘宝激活码在「图片生成」页兑换`;
+            ? `每日 ${DAILY_BY_TIER[planId]} 积分（当日有效）`
+            : `一次性 ${LUMP_BY_TIER[planId]} 积分（永久）`;
+        const msg = `「${plan.name}」${BILLING_LABELS[billing]} ¥${price.price}，${modeLabel} — 在线支付筹备中，请用激活码在「图片生成」页兑换`;
         if (typeof showToast === 'function') showToast(msg);
         else alert(msg);
       });
@@ -378,6 +278,7 @@
   function openSubscribePanel() {
     const el = document.getElementById('subscribeOverlay');
     if (!el) return;
+    el.hidden = false;
     el.classList.add('active');
     document.body.classList.add('subscribe-open');
     if (isLoggedIn()) void window.PromptHubApi?.syncMe?.({ silent: true });
@@ -386,7 +287,11 @@
   }
 
   function closeSubscribePanel() {
-    document.getElementById('subscribeOverlay')?.classList.remove('active');
+    const el = document.getElementById('subscribeOverlay');
+    if (el) {
+      el.classList.remove('active');
+      el.hidden = true;
+    }
     document.body.classList.remove('subscribe-open');
   }
 
@@ -399,24 +304,26 @@
     });
   }
 
+  function setFirstOfferUsedFromServer() { /* 已停售 ¥1.9 续杯 */ }
+  function resetFirstOfferServerState() { refreshOfferUI(); }
+
   window.SubscriptionUI = {
     open: openSubscribePanel,
     close: closeSubscribePanel,
     PLANS,
-    hasUsedFirstOffer,
     getCreditGrantMode,
     setCreditGrantModeLocal,
     setFirstOfferUsedFromServer,
     resetFirstOfferServerState,
     applyServerState,
     updateSubscribeNavBadge,
-    refreshOfferUI
+    refreshOfferUI,
+    DAILY_BY_TIER,
+    LUMP_BY_TIER
   };
   window.openSubscribePanel = openSubscribePanel;
   window.closeSubscribePanel = closeSubscribePanel;
   window.openRechargePanel = openSubscribePanel;
-
-  migrateStaleFirstOfferFlag();
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {

@@ -45,20 +45,28 @@
   }
 
   .mobile-drawer-overlay {
-    display: none;
+    display: none !important;
     position: fixed;
     inset: 0;
     z-index: 4500;
     background: rgba(0, 0, 0, 0.52);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    pointer-events: auto;
+    pointer-events: none;
     touch-action: manipulation;
   }
 
   body.mobile-nav-open .mobile-drawer-overlay,
   body.mobile-groups-open .mobile-drawer-overlay {
-    display: block;
+    display: block !important;
+    pointer-events: auto;
+  }
+
+  /* 关闭时勿留透明层挡点击（部分 WebView 对 opacity+flex 组合异常） */
+  .tag-sheet-overlay:not(.open) {
+    display: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
   }
 
   body.mobile-nav-open .mobile-bottom-nav,

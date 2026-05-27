@@ -4,7 +4,7 @@ import type { Env } from '../../env';
 import { ApiError } from '../../lib/errors';
 import {
   chinaDateKey,
-  DAILY_CREDITS_AMOUNT,
+  dailyCreditsForTier,
   type CreditGrantMode,
   membershipCreditsPayload,
   syncMembershipCredits
@@ -58,7 +58,7 @@ membershipRoutes.post('/trial-free', async c => {
       membership_tier: 'basic',
       membership_until: until,
       credit_grant_mode: 'daily',
-      daily_credits: DAILY_CREDITS_AMOUNT,
+      daily_credits: dailyCreditsForTier('basic'),
       daily_credits_date: chinaDateKey(),
       bundle_granted_until: null,
       trial_free_used: true
@@ -73,7 +73,7 @@ membershipRoutes.post('/trial-free', async c => {
   return c.json({
     ok: true,
     data: {
-      message: `已开通 3 天试用：每日 ${DAILY_CREDITS_AMOUNT} 积分（当日有效）`,
+      message: `已开通 3 天试用：每日 ${dailyCreditsForTier('basic')} 积分（当日有效）`,
       membership: {
         tier: 'basic',
         until,
@@ -132,7 +132,7 @@ membershipRoutes.post('/credit-mode', async c => {
     data: {
       message:
         mode === 'daily'
-          ? `已切换为每日 ${DAILY_CREDITS_AMOUNT} 积分（当日有效）`
+          ? `已切换为每日 ${dailyCreditsForTier(profile.membership_tier)} 积分（当日有效）`
           : '已切换为一次性到账积分（永久有效，用完为止）',
       ...membershipCreditsPayload(synced || (data as typeof profile))
     }
