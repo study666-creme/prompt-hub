@@ -446,9 +446,9 @@
 
   .edit-panel .panel-temp-field-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto 44px;
+    grid-template-columns: 92px 1fr 44px;
     grid-template-rows: auto auto;
-    gap: 10px 12px;
+    gap: 10px 10px;
     align-items: center;
     margin-top: 10px;
   }
@@ -463,18 +463,23 @@
     grid-column: 1;
     grid-row: 2;
     width: 100% !important;
+    max-width: 92px;
     min-width: 0;
     height: 40px;
+    padding-left: 8px;
+    padding-right: 24px;
+    font-size: 13px;
   }
 
   .edit-panel .panel-temp-field-row .custom-checkbox {
     grid-column: 2;
     grid-row: 2;
-    flex-shrink: 0;
+    justify-self: start;
     white-space: nowrap;
     font-size: 13px;
     gap: 6px;
     margin: 0;
+    min-width: 0;
   }
 
   .edit-panel .panel-temp-field-row .panel-temp-add-btn {
@@ -483,6 +488,34 @@
     width: 44px;
     height: 40px;
     padding: 0;
+    justify-self: end;
+  }
+
+  #imageGenFeed.mobile-feed-grid,
+  #imageGenFeed.imagegen-feed--tiles.mobile-feed-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-auto-flow: row dense;
+    align-items: start !important;
+    gap: 10px !important;
+  }
+
+  #imageGenFeed.mobile-feed-grid .imagegen-feed-card {
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    transform: none !important;
+    margin: 0 !important;
+  }
+
+  #cardsContainer.mobile-grid .card {
+    position: static !important;
+  }
+
+  .cards-container.mobile-grid .card.card-enter {
+    animation: none;
   }
 
   body.panel-open .mobile-bottom-nav,

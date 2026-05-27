@@ -116,7 +116,6 @@
 
     const mobileSearchBtn = document.getElementById('mobileSearchBtn');
     const mobileSearchBar = document.getElementById('mobileSearchBar');
-    const mobileSearchClose = document.getElementById('mobileSearchClose');
     const searchDesktop = document.getElementById('searchInput');
     const searchMobile = document.getElementById('searchInputMobile');
 
@@ -124,19 +123,27 @@
       if (!mobileSearchBar || !mobileSearchBtn) return;
       mobileSearchBar.hidden = !open;
       mobileSearchBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      mobileSearchBtn.classList.toggle('active', open);
       document.body.classList.toggle('mobile-search-open', open);
       if (open) {
         if (searchMobile && searchDesktop) searchMobile.value = searchDesktop.value;
-        searchMobile?.focus();
+        setTimeout(() => searchMobile?.focus(), 50);
       }
     }
 
     mobileSearchBtn?.addEventListener('click', () => {
       syncMobileSearchOpen(mobileSearchBar?.hidden !== false);
     });
-    mobileSearchClose?.addEventListener('click', () => syncMobileSearchOpen(false));
+    searchMobile?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') syncMobileSearchOpen(false);
+    });
     searchMobile?.addEventListener('input', () => {
       if (searchDesktop) searchDesktop.value = searchMobile.value;
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && document.body.classList.contains('mobile-search-open')) {
+        syncMobileSearchOpen(false);
+      }
     });
   }
 

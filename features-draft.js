@@ -320,7 +320,8 @@
       }
     }));
     stripFailedFeedMedia(scope);
-    scheduleImageGenFeedLayout();
+    if (isMobileFeedViewport()) resetMobileFeedGridStyles();
+    else scheduleImageGenFeedLayout();
   }
 
   function getPostsByAuthor(authorId) {
@@ -457,13 +458,23 @@
     if (favBtn) favBtn.textContent = faved ? '已收藏' : '收藏';
   }
 
+  function isMobileFeedViewport() {
+    return window.MobileUI?.isMobile?.() || window.matchMedia('(max-width: 900px)').matches;
+  }
+
   function scheduleImageGenFeedLayout() {
     clearTimeout(imageGenLayoutTimer);
-    imageGenLayoutTimer = setTimeout(() => layoutImageGenFeedMasonry(), 80);
+    imageGenLayoutTimer = setTimeout(() => {
+      if (isMobileFeedViewport()) resetMobileFeedGridStyles();
+      else layoutImageGenFeedMasonry();
+    }, 80);
   }
 
   function layoutImageGenFeedMasonry() {
-    if (window.MobileUI?.isMobile?.()) return;
+    if (isMobileFeedViewport()) {
+      resetMobileFeedGridStyles();
+      return;
+    }
     const wrap = document.getElementById('imageGenFeed');
     if (!wrap || typeof Masonry === 'undefined') return;
     const cardEls = wrap.querySelectorAll('.imagegen-feed-card');
@@ -2086,7 +2097,6 @@
   }
 
   function resetMobileFeedGridStyles() {
-    if (!window.MobileUI?.isMobile?.()) return;
     if (imageGenMasonry) {
       imageGenMasonry.destroy();
       imageGenMasonry = null;
@@ -2111,7 +2121,7 @@
     const loadingCls = imgSrc && imgSrc === IMG_LOADING_PLACEHOLDER ? ' is-loading' : (isDisplayableImage(image) ? ' is-loading' : '');
     const shineAt = loadingCls ? ` data-shine-at="${Date.now()}"` : '';
     const imgBlock = isDisplayableImage(image)
-      ? `<div class="imagegen-feed-media${loadingCls}"${shineAt}><button type="button" class="imagegen-feed-thumb-btn" title="放大预览"><img src="${esc(imgSrc || IMG_LOADING_PLACEHOLDER)}" data-image-ref="${esc(image)}"${storageAttr}${jobAttr} alt="" decoding="async" onload="if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.imagegen-feed-media'));else this.closest('.imagegen-feed-media')?.classList.remove('is-loading')"></button></div>`
+      ? `<div class="imagegen-feed-media${loadingCls}"${shineAt}><button type="button" class="imagegen-feed-thumb-btn" title="放大预览"><img src="${esc(imgSrc || IMG_LOADING_PLACEHOLDER)}" data-image-ref="${esc(image)}"${storageAttr}${jobAttr} alt="" decoding="async" loading="lazy" onload="if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.imagegen-feed-media'));else this.closest('.imagegen-feed-media')?.classList.remove('is-loading')"></button></div>`
       : '';
     const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${esc(b)}</span>`).join('');
     const metaRowHtml = (metaLine || '').trim()
@@ -2410,29 +2420,36 @@
     } else if (imageGenFeedTab === 'community') {
       filterAndSortPosts(getAllCommunityPosts()).slice(0, 40).forEach(p => { if (p.image) refsToPrefetch.push(p.image); });
     }
-    if (window.SupabaseSync?.prefetchDisplayUrls && refsToPrefetch.length) {
-      await window.SupabaseSync.prefetchDisplayUrls(refsToPrefetch);
-    }
-    if (imageGenFeedTab === 'personal') {
-      const items = getGenHistoryItems().slice(0, 40);
-      await Promise.all(
-        items.filter(c => c.image).map(c => resolveImageDisplayUrl(c.image, c.jobId || null).catch(() => ''))
-      );
-    }
+    const mobileFeed = isMobileFeedViewport();
+    const prefetchLimit = mobileFeed ? 12 : 32;
+    const refsSlice = refsToPrefetch.slice(0, prefetchLimit);
+
     if (imageGenMasonry) {
       imageGenMasonry.destroy();
       imageGenMasonry = null;
     }
-    const mobileFeed = window.MobileUI?.isMobile?.();
-    wrap.className = mobileFeed ? 'imagegen-feed imagegen-feed--tiles' : 'imagegen-feed imagegen-feed--masonry';
+    wrap.className = mobileFeed ? 'imagegen-feed imagegen-feed--tiles mobile-feed-grid' : 'imagegen-feed imagegen-feed--masonry';
     if (!mobileFeed && html.includes('imagegen-feed-card')) {
       wrap.innerHTML = '<div class="grid-sizer"></div>' + html;
     } else {
       wrap.innerHTML = html;
     }
-    await hydrateFeedImages(wrap);
     resetMobileFeedGridStyles();
+    bindImageGenFeedCardEvents(wrap);
     if (!mobileFeed) scheduleImageGenFeedLayout();
+
+    void (async () => {
+      if (window.SupabaseSync?.prefetchDisplayUrls && refsSlice.length) {
+        await window.SupabaseSync.prefetchDisplayUrls(refsSlice);
+      }
+      await hydrateFeedImages(wrap);
+      resetMobileFeedGridStyles();
+      if (!mobileFeed) scheduleImageGenFeedLayout();
+    })();
+  }
+
+  function bindImageGenFeedCardEvents(wrap) {
+    if (!wrap) return;
     wrap.querySelectorAll('.imagegen-feed-card').forEach(card => {
       if (card.dataset.pending === '1') return;
       const feedId = card.dataset.feedId;

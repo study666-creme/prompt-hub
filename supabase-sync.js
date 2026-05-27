@@ -184,7 +184,11 @@
     const paths = [...new Set(
       (images || []).map(storagePathFromRef).filter(Boolean)
     )];
-    await Promise.all(paths.map(p => getSignedUrlForPath(p).catch(() => {})));
+    const batchSize = 6;
+    for (let i = 0; i < paths.length; i += batchSize) {
+      const batch = paths.slice(i, i + batchSize);
+      await Promise.all(batch.map(p => getSignedUrlForPath(p).catch(() => {})));
+    }
   }
 
   function getCachedDisplayUrl(image) {

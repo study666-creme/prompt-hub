@@ -1294,12 +1294,22 @@
 
     function scheduleMasonryForMedia(media) {
       if (!media) return;
+      if (isMobileViewport()) {
+        if (media.closest('#imageGenFeed')) {
+          window.FeatureDraft?.resetMobileFeedGridStyles?.();
+        } else if (media.closest('#cardsContainer')) {
+          resetCardLayoutStyles(document.getElementById('cardsContainer'));
+        }
+        return;
+      }
       if (media.closest('#creationsGrid')) {
         window.FeatureDraft?.scheduleCreationsLayout?.();
       } else if (media.closest('#communityGrid')) {
         window.FeatureDraft?.scheduleLayout?.('communityGrid');
       } else if (media.closest('#userProfileGrid')) {
         window.FeatureDraft?.scheduleLayout?.('userProfileGrid');
+      } else if (media.closest('#imageGenFeed')) {
+        window.FeatureDraft?.scheduleImageGenFeedLayout?.();
       } else if (typeof scheduleLayoutMasonry === 'function') {
         scheduleLayoutMasonry();
       }
@@ -1308,15 +1318,18 @@
 
     function finishCardMediaShine(media) {
       if (!media) return;
-      scheduleMasonryForMedia(media);
+      const mobile = isMobileViewport();
+      if (!mobile) scheduleMasonryForMedia(media);
       const t0 = Number(media.dataset.shineAt || 0) || Date.now();
       if (!media.dataset.shineAt) media.dataset.shineAt = String(t0);
       const inFeatureGrid = media.closest('#creationsGrid, #communityGrid, #userProfileGrid');
-      const minShine = media.classList?.contains('imagegen-feed-media') ? 520 : (inFeatureGrid ? 360 : 720);
+      const minShine = mobile ? 0 : (media.classList?.contains('imagegen-feed-media') ? 520 : (inFeatureGrid ? 360 : 720));
       const wait = Math.max(0, minShine - (Date.now() - t0));
       setTimeout(() => {
         media.classList.remove('is-loading');
-        scheduleMasonryForMedia(media);
+        if (!mobile) scheduleMasonryForMedia(media);
+        else if (media.closest('#imageGenFeed')) window.FeatureDraft?.resetMobileFeedGridStyles?.();
+        else if (media.closest('#cardsContainer')) resetCardLayoutStyles(document.getElementById('cardsContainer'));
       }, wait);
     }
     window.finishCardMediaShine = finishCardMediaShine;
@@ -2290,15 +2303,16 @@
         return;
       }
       const pageImages = pageCards.map(c => c.image).filter(Boolean);
+      const prefetchLimit = mobileGrid ? 12 : 28;
       const prefetchPromise = window.SupabaseSync?.prefetchDisplayUrls
-        ? window.SupabaseSync.prefetchDisplayUrls(pageImages)
+        ? window.SupabaseSync.prefetchDisplayUrls(pageImages.slice(0, prefetchLimit))
         : Promise.resolve();
       const fragment = document.createDocumentFragment();
       const isAppend = !reset && page > 1;
       pageCards.forEach((card, idx) => {
         const div = document.createElement('div');
         div.className = `card card-enter ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
-        div.style.animationDelay = `${Math.min((isAppend ? idx : idx) * 0.045, 0.36)}s`;
+        if (!mobileGrid) div.style.animationDelay = `${Math.min((isAppend ? idx : idx) * 0.045, 0.36)}s`;
         div.dataset.id = card.id;
         div.draggable = !globalViewActive;
         const checked = selectedCardIds.has(card.id);
@@ -2505,16 +2519,20 @@
       highlightSelectedCard(id);
       openEditPanel();
       document.getElementById('panelTitle').textContent = '编辑卡片';
-      document.getElementById('cardTitle').value = card.title || '';
-      document.getElementById('cardPrompt').value = card.prompt || '';
-      document.getElementById('floatingPromptText').value = card.prompt || '';
-      imageData = card.image || null; currentTags = [...(card.tags || [])]; tempCustomFields = [];
-      currentCardCustomFields = card.customFields ? { ...card.customFields } : {};
-      window.FeatureDraft?.setPublishCheckbox?.(card);
-      renderTags(); renderCustomFields();
-      updateDeleteClearButton();
-      updatePinToggleUI();
-      void updatePreview();
+      const fillForm = () => {
+        document.getElementById('cardTitle').value = card.title || '';
+        document.getElementById('cardPrompt').value = card.prompt || '';
+        document.getElementById('floatingPromptText').value = card.prompt || '';
+        imageData = card.image || null; currentTags = [...(card.tags || [])]; tempCustomFields = [];
+        currentCardCustomFields = card.customFields ? { ...card.customFields } : {};
+        window.FeatureDraft?.setPublishCheckbox?.(card);
+        renderTags(); renderCustomFields();
+        updateDeleteClearButton();
+        updatePinToggleUI();
+        void updatePreview();
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fillForm);
+      else fillForm();
     }
 
     function createNewCard(opts) {
