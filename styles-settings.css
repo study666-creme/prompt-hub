@@ -581,11 +581,17 @@ body.subscribe-open {
   color: var(--text-muted);
 }
 .trial-tasks-empty,
-.trial-tasks-login-hint {
+.trial-tasks-login-hint,
+.trial-tasks-hint {
   font-size: 13px;
   color: var(--text-muted);
   text-align: center;
   padding: 20px 8px;
+}
+.trial-tasks-hint {
+  padding-top: 0;
+  font-size: 12px;
+  line-height: 1.5;
 }
 body.trial-tasks-open {
   overflow: hidden;

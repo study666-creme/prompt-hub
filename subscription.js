@@ -39,10 +39,11 @@
       name: '基础版',
       tag: '入门',
       storage: '10 GB',
-      genDiscount: '9折',
+      genDiscount: '五折起',
       features: [
+        `连续包月/包年订阅价约五折（见下方标价）`,
         `每日 ${DAILY_BY_TIER.basic} 积分（当日有效）或一次性 ${LUMP_BY_TIER.basic}`,
-        '生图积分 9 折',
+        '会员生图享积分折扣',
         '无限置顶',
         '10 GB 云存储',
         '全站云同步'
@@ -53,10 +54,11 @@
       name: '标准版',
       tag: '推荐',
       storage: '30 GB',
-      genDiscount: '8折',
+      genDiscount: '五折起',
       features: [
+        `连续包月/包年订阅价约五折（见下方标价）`,
         `每日 ${DAILY_BY_TIER.standard} 积分或一次性 ${LUMP_BY_TIER.standard}`,
-        '生图积分 8 折',
+        '会员生图享更高折扣',
         '无限置顶',
         '30 GB 云存储',
         '优先生图队列'
@@ -67,10 +69,11 @@
       name: '专业版',
       tag: '专业',
       storage: '100 GB',
-      genDiscount: '7折',
+      genDiscount: '五折起',
       features: [
+        `连续包月/包年订阅价约五折（见下方标价）`,
         `每日 ${DAILY_BY_TIER.pro} 积分或一次性 ${LUMP_BY_TIER.pro}`,
-        '生图积分 7 折',
+        '会员生图享最高折扣',
         '无限置顶',
         '100 GB 云存储',
         '最高优先级'
@@ -141,9 +144,9 @@
     if (trialBadge) trialBadge.textContent = '任务';
     if (subBadge) {
       if (window.Membership?.isMember?.()) {
-        subBadge.textContent = window.Membership.getGenDiscountLabel?.() || '会员';
+        subBadge.textContent = '会员';
       } else {
-        subBadge.textContent = '订阅';
+        subBadge.textContent = '五折';
       }
     }
   }
@@ -151,10 +154,8 @@
   function renderMiniOfferBar() {
     const el = document.getElementById('subscribeMiniOffer');
     if (!el) return;
-    el.innerHTML = `
-      <div class="subscribe-mini-offer">
-        <p><strong>¥0.99 体验 3 天</strong> 基础会员 · 兑换码 <code>MINI-99-3D</code>（图片生成页）</p>
-      </div>`;
+    el.innerHTML = '';
+    el.hidden = true;
   }
 
   function getDisplayPrice(planId, billing) {
@@ -259,7 +260,7 @@
           getCreditGrantMode() === 'daily'
             ? `每日 ${DAILY_BY_TIER[planId]} 积分（当日有效）`
             : `一次性 ${LUMP_BY_TIER[planId]} 积分（永久）`;
-        const msg = `「${plan.name}」${BILLING_LABELS[billing]} ¥${price.price}，${modeLabel} — 在线支付筹备中，请用激活码在「图片生成」页兑换`;
+        const msg = `「${plan.name}」${BILLING_LABELS[billing]} ¥${price.price}（约五折），${modeLabel} — 在线支付筹备中，开通后将自动到账`;
         if (typeof showToast === 'function') showToast(msg);
         else alert(msg);
       });

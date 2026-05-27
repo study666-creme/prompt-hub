@@ -40,26 +40,35 @@
   }
 
   async function loadTasks() {
-    if (!isLoggedIn()) return { items: [], lifetimeCreditsSpent: 0 };
+    if (!isLoggedIn()) return { items: [], lifetimeCreditsSpent: 0, error: null };
+    if (!window.PromptHubApi?.isConfigured?.()) {
+      return { items: [], lifetimeCreditsSpent: 0, error: '未配置后端 API（api-domain.config.js）' };
+    }
     await syncTaskProgress();
     const r = await window.PromptHubApi?.getMembershipTasks?.();
-    if (r?.ok && r.data?.items) return r.data;
-    return { items: [], lifetimeCreditsSpent: 0 };
+    if (r?.ok && Array.isArray(r.data?.items)) return { ...r.data, error: null };
+    const msg = r?.message || r?.code || '任务列表加载失败';
+    return { items: [], lifetimeCreditsSpent: 0, error: msg };
   }
 
   function renderTasks(data) {
     const list = document.getElementById('trialTasksList');
     if (!list) return;
     const items = data?.items || [];
+    if (data?.error) {
+      list.innerHTML = `<p class="trial-tasks-empty">${esc(data.error)}</p>
+        <p class="trial-tasks-hint">请确认 Worker 已部署且 Supabase 已执行迁移 <code>20260528120000_membership_tasks.sql</code>。</p>`;
+      return;
+    }
     if (!items.length) {
       list.innerHTML =
-        '<p class="trial-tasks-empty">登录后加载任务列表；若为空请确认已配置后端 API。</p>';
+        '<p class="trial-tasks-empty">暂无任务数据，请稍后刷新或联系管理员检查后端。</p>';
       return;
     }
     list.innerHTML = items
       .map(task => {
         const reward = [
-          task.rewardDays ? `${task.rewardDays} 天会员` : '',
+          task.rewardDays ? `${task.rewardDays} 天基础会员（直接到账）` : '',
           task.rewardCredits ? `${task.rewardCredits} 积分` : ''
         ]
           .filter(Boolean)
@@ -67,7 +76,7 @@
         const btn = task.claimed
           ? '<span class="trial-task-done">已领取</span>'
           : task.ready
-            ? `<button type="button" class="btn btn-primary btn-sm trial-task-claim" data-task-key="${esc(task.key)}">领取</button>`
+            ? `<button type="button" class="btn btn-primary btn-sm trial-task-claim" data-task-key="${esc(task.key)}">领取会员</button>`
             : '<span class="trial-task-pending">未完成</span>';
         const progress = task.progress
           ? `<span class="trial-task-progress">${esc(task.progress)}</span>`
@@ -115,25 +124,12 @@
     if (isLoggedIn()) void syncTaskProgress();
   }
 
-  function renderMiniOffer() {
-    const el = document.getElementById('trialTasksMiniOffer');
-    if (!el) return;
-    el.innerHTML = `
-      <div class="trial-mini-offer">
-        <div>
-          <strong>¥0.99 体验 3 天</strong>
-          <p>基础会员 · 淘宝购码后在「图片生成」兑换 <code>MINI-99-3D</code></p>
-        </div>
-      </div>`;
-  }
-
   async function openTrialTasksPanel() {
     const el = document.getElementById('trialTasksOverlay');
     if (!el) return;
     el.hidden = false;
     el.classList.add('active');
     document.body.classList.add('trial-tasks-open');
-    renderMiniOffer();
     if (!isLoggedIn()) {
       renderTasks({ items: [] });
       const hint = document.getElementById('trialTasksLoginHint');
@@ -141,6 +137,8 @@
       return;
     }
     document.getElementById('trialTasksLoginHint')?.classList.add('hidden');
+    const list = document.getElementById('trialTasksList');
+    if (list) list.innerHTML = '<p class="trial-tasks-empty">任务加载中…</p>';
     const data = await loadTasks();
     renderTasks(data);
   }

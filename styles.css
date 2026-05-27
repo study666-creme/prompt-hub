@@ -1355,6 +1355,9 @@ body {
       visibility: hidden;
       display: block;
     }
+    .cards-container:not(.list-view):not(.cards-grid-primed) .card {
+      visibility: hidden;
+    }
     .cards-container:not(.list-view) .card {
       display: flex;
       box-sizing: border-box;

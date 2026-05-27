@@ -575,6 +575,30 @@
 
     let layoutMasonryTimer = null;
 
+    function getDesktopCardColumnWidth() {
+      const gap = getMasonryGap();
+      const innerW = getCardsInnerWidth();
+      if (innerW < 80) return 280;
+      return Math.max(120, Math.floor((innerW - gap * (cardColumns - 1)) / cardColumns));
+    }
+
+    function primeDesktopCardGrid(container) {
+      if (!container || isMobileViewport()) return;
+      const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
+      if (viewMode === 'list') return;
+      const colWidth = getDesktopCardColumnWidth();
+      let sizer = container.querySelector('.grid-sizer');
+      if (!sizer) {
+        sizer = document.createElement('div');
+        sizer.className = 'grid-sizer';
+        container.insertBefore(sizer, container.firstChild);
+      }
+      sizer.style.width = colWidth + 'px';
+      container.querySelectorAll('.card').forEach(card => {
+        card.style.width = colWidth + 'px';
+      });
+    }
+
     function scheduleLayoutMasonry() {
       if (isMobileViewport()) {
         clearTimeout(layoutMasonryTimer);
@@ -582,7 +606,7 @@
         return;
       }
       clearTimeout(layoutMasonryTimer);
-      layoutMasonryTimer = setTimeout(() => layoutMasonryGrid(), 100);
+      layoutMasonryTimer = setTimeout(() => layoutMasonryGrid(), 16);
     }
 
     function resetCardLayoutStyles(container) {
@@ -655,10 +679,12 @@
         masonryInstance = new Masonry(container, msnryOpts);
         masonryInstance.layout();
       }
+      container.classList.add('cards-grid-primed');
       container.scrollTop = savedScroll;
       requestAnimationFrame(() => {
         if (masonryInstance) masonryInstance.layout();
         container.scrollTop = savedScroll;
+        container.classList.add('cards-grid-primed');
       });
     }
 
@@ -2393,10 +2419,18 @@
         : Promise.resolve();
       const fragment = document.createDocumentFragment();
       const isAppend = !reset && page > 1;
+      const desktopColWidth =
+        !mobileGrid && viewMode !== 'list' ? getDesktopCardColumnWidth() : 0;
+      if (desktopColWidth && reset) {
+        container.classList.remove('cards-grid-primed');
+      }
       pageCards.forEach((card, idx) => {
         const div = document.createElement('div');
         div.className = `card card-enter ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
-        if (!mobileGrid) div.style.animationDelay = `${Math.min((isAppend ? idx : idx) * 0.045, 0.36)}s`;
+        if (!mobileGrid) {
+          div.style.animationDelay = `${Math.min((isAppend ? idx : idx) * 0.045, 0.36)}s`;
+          if (desktopColWidth) div.style.width = desktopColWidth + 'px';
+        }
         div.dataset.id = card.id;
         div.draggable = !globalViewActive;
         const checked = selectedCardIds.has(card.id);
@@ -2488,11 +2522,15 @@
         fragment.appendChild(div);
       });
       container.appendChild(fragment);
+      if (desktopColWidth) primeDesktopCardGrid(container);
       const afterImages = () => {
         if (!mobileGrid && viewMode !== 'list') scheduleLayoutMasonry();
         else if (mobileGrid) enforceMobileCardGrid();
       };
-      if (!mobileGrid && viewMode !== 'list') scheduleLayoutMasonry();
+      if (!mobileGrid && viewMode !== 'list') {
+        primeDesktopCardGrid(container);
+        scheduleLayoutMasonry();
+      }
       void prefetchPromise.then(() => {
         if (window.SupabaseSync?.hydrateImageElements) {
           return window.SupabaseSync.hydrateImageElements(container);
