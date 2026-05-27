@@ -27,5 +27,15 @@
     return;
   }
 
+  if (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    /\.prompt-hub-hub\.pages\.dev$/i.test(host) ||
+    /\.prompt-hub-web\.pages\.dev$/i.test(host)
+  ) {
+    window.API_BASE_URL = 'https://api.prompt-hub.cn';
+    return;
+  }
+
   window.API_BASE_URL = '';
 })();

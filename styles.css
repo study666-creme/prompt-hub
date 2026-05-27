@@ -69,7 +69,7 @@ body {
   margin: 0;
 }
 
-/* 主界面缩放（弹层在 app-chrome 外）；宽度补偿 zoom，高度保持 100vh 避免裁切侧栏底 */
+/* 主界面缩放：宽高都补偿 zoom，缩放后刚好铺满视口（避免底下空一大块） */
 .app-chrome {
   zoom: var(--ui-scale);
   flex: 1 1 auto;
@@ -77,8 +77,8 @@ body {
   min-height: 0;
   width: calc(100% / var(--ui-scale));
   max-width: calc(100% / var(--ui-scale));
-  height: 100vh;
-  max-height: 100vh;
+  height: calc(100vh / var(--ui-scale));
+  max-height: calc(100vh / var(--ui-scale));
   overflow: hidden;
   display: flex;
   box-sizing: border-box;

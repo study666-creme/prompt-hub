@@ -59,7 +59,12 @@
   async function loadTasks() {
     if (!isLoggedIn()) return { items: [], lifetimeCreditsSpent: 0, error: null };
     if (!window.PromptHubApi?.isConfigured?.()) {
-      return { items: [], lifetimeCreditsSpent: 0, error: '未配置后端 API（api-domain.config.js）' };
+      const host = typeof location !== 'undefined' ? location.hostname : '';
+      return {
+        items: [],
+        lifetimeCreditsSpent: 0,
+        error: `当前页面（${host}）未配置 API。请用 https://prompt-hub.cn 打开，或在 api-domain.config.js 设置 CUSTOM_API_HOST。`
+      };
     }
     const r = await window.PromptHubApi?.getMembershipTasks?.();
     if (r?.ok && Array.isArray(r.data?.items)) return { ...r.data, error: null };
@@ -83,12 +88,13 @@
     if (r?.code === 'UNAUTHORIZED' || /登录已过期|请先登录/.test(msg)) {
       return { items: [], lifetimeCreditsSpent: 0, error: 'session_expired', errorDetail: msg };
     }
-    if (r?.code === 'NETWORK_ERROR' || /无法连接|failed to fetch|network/i.test(msg)) {
+    if (r?.code === 'NETWORK_ERROR' || /无法连接|failed to fetch|network|超时/i.test(msg)) {
+      const api = String(window.API_BASE_URL || 'api.prompt-hub.cn').replace(/\/$/, '');
       return {
         items: [],
         lifetimeCreditsSpent: 0,
-        error:
-          '连不上 API 服务器 api.prompt-hub.cn：请换网络/VPN，或关闭广告拦截；Edge 用户请关闭「跟踪防护」对本站限制'
+        error: `连不上 ${api}（浏览器拦截或网络问题）。Edge：对本站关闭「跟踪防护」；或换 Chrome / 关广告拦截后点重试。`,
+        retryable: true
       };
     }
     return { items: [], lifetimeCreditsSpent: 0, error: msg };
