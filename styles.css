@@ -1813,6 +1813,29 @@ body {
     .panel-form > label {
       margin-bottom: 0;
     }
+    .panel-temp-field-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    .panel-temp-field-row #tempFieldName {
+      flex: 1.5;
+      min-width: 100px;
+    }
+    .panel-temp-field-row #tempFieldType {
+      width: 70px;
+    }
+    .panel-temp-field-row .panel-temp-add-btn {
+      padding: 4px 8px;
+      height: 34px;
+      font-size: 11px;
+    }
+    .panel-close-mobile,
+    #actionDeleteClearBtnMobileTop {
+      display: none;
+    }
     .prompt-field {
       display: flex;
       flex-direction: column;

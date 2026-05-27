@@ -177,6 +177,8 @@
     if (isMobile()) {
       applyMobileColumns();
       if (typeof closeEditPanel === 'function') closeEditPanel();
+      if (typeof scheduleLayoutMasonry === 'function') scheduleLayoutMasonry();
+      window.FeatureDraft?.resetMobileFeedGridStyles?.();
       const saved = localStorage.getItem('promptrepo_app_page');
       if (saved) {
         window.mobileOnAppPageChange?.(saved);

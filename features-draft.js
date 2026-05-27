@@ -2093,8 +2093,9 @@
     }
     const wrap = document.getElementById('imageGenFeed');
     if (!wrap) return;
-    wrap.querySelectorAll('.imagegen-feed-card').forEach(card => {
-      card.removeAttribute('style');
+    wrap.removeAttribute('style');
+    wrap.querySelectorAll('.imagegen-feed-card, .grid-sizer').forEach(el => {
+      el.removeAttribute('style');
     });
   }
 

@@ -581,14 +581,9 @@
     }
 
     function resetCardLayoutStyles(container) {
+      if (!container) return;
       container.querySelectorAll('.card').forEach(card => {
-        card.style.left = '';
-        card.style.top = '';
-        card.style.right = '';
-        card.style.bottom = '';
-        card.style.position = '';
-        card.style.transform = '';
-        card.style.width = '';
+        card.removeAttribute('style');
       });
     }
 
@@ -2393,6 +2388,9 @@
         masonryInstance = null;
       }
       updateBatchCountLabel();
+      if (window.MobileUI?.isMobile?.()) {
+        resetCardLayoutStyles(container);
+      }
     }
 
     document.getElementById('cardsContainer')?.addEventListener('click', (e) => {
@@ -2528,16 +2526,23 @@
 
     function updateDeleteClearButton() {
       const btn = document.getElementById('actionDeleteClearBtn');
-      if (!btn) return;
-      btn.style.display = 'inline-flex';
+      const mobileTop = document.getElementById('actionDeleteClearBtnMobileTop');
+      const targets = [btn, mobileTop].filter(Boolean);
+      if (!targets.length) return;
       if (isNewCardMode) {
-        btn.title = '清空表单';
-        btn.className = 'btn-icon-muted';
-        btn.innerHTML = '✕';
-        btn.onclick = () => clearCardForm();
+        targets.forEach(el => {
+          el.style.display = 'inline-flex';
+          el.title = '清空表单';
+          el.className = el.id === 'actionDeleteClearBtnMobileTop' ? 'btn-icon-muted mobile-only' : 'btn-icon-muted desktop-only';
+          el.innerHTML = '✕';
+          el.onclick = () => clearCardForm();
+        });
       } else {
+        if (mobileTop) mobileTop.style.display = 'none';
+        if (!btn) return;
+        btn.style.display = 'inline-flex';
         btn.title = '删除卡片';
-        btn.className = 'btn-icon-danger';
+        btn.className = 'btn-icon-danger desktop-only';
         btn.innerHTML = TRASH_SVG;
         btn.onclick = () => {
           if (selectedCardId) deleteCardPermanently(selectedCardId, true);
@@ -2678,11 +2683,11 @@
         html += `<label>${tf.name} <span style="color:var(--danger); cursor:pointer;" onclick="removeTempField(${idx})">×</span></label>`;
         html += tf.type === 'textarea' ? `<textarea class="temp-field" data-temp-idx="${idx}" data-field-name="${tf.name}">${tf.value || ''}</textarea>` : `<input type="text" class="temp-field" data-temp-idx="${idx}" data-field-name="${tf.name}" value="${tf.value || ''}">`;
       });
-      html += `<div style="display:flex; gap:6px; align-items:center; margin-top:8px;">
-        <input type="text" id="tempFieldName" placeholder="字段名" style="flex:1.5;">
-        <select id="tempFieldType" style="width:70px;"><option value="text">文本</option><option value="textarea">文本域</option></select>
-        <label class="custom-checkbox" style="white-space:nowrap; gap:4px;"><input type="checkbox" id="tempFieldFixed"><span class="checkmark"></span> 固定</label>
-        <button class="btn btn-secondary" style="padding:4px 8px; height:34px; font-size:11px;" onclick="addTempField()">+</button>
+      html += `<div class="panel-temp-field-row">
+        <input type="text" id="tempFieldName" placeholder="字段名">
+        <select id="tempFieldType"><option value="text">文本</option><option value="textarea">多行文本</option></select>
+        <label class="custom-checkbox"><input type="checkbox" id="tempFieldFixed"><span class="checkmark"></span> 固定</label>
+        <button type="button" class="btn btn-secondary panel-temp-add-btn" onclick="addTempField()">+</button>
       </div>`;
       container.innerHTML = html;
     }

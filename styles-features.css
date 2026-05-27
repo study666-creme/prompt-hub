@@ -1725,7 +1725,7 @@
   .imagegen-side {
     border-left: none;
     border-top: 1px solid var(--border);
-    max-height: 55vh;
+    max-height: none;
   }
   .imagegen-preview-panel {
     width: min(280px, 92%);
