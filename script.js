@@ -929,6 +929,7 @@
         document.getElementById(id)?.classList.toggle('active', key === app);
       });
       localStorage.setItem('promptrepo_app_page', app);
+      window.MobileUI?.closeAllMobileOverlays?.();
       if (app === 'warehouse') {
         applyFloatingState();
         requestAnimationFrame(() => {
@@ -2742,6 +2743,7 @@
       const onKey = e => { if (e.key === 'Escape') { closeTagSheet(); document.removeEventListener('keydown', onKey); } };
       document.addEventListener('keydown', onKey);
     }
+    window.showExistingTags = showExistingTags;
     window.closeTagSheet = closeTagSheet;
     window.confirmTagSheet = confirmTagSheet;
     
@@ -2960,6 +2962,8 @@
 
     function copyCardPrompt(id) { const c = cards.find(x => x.id === id); if (c && c.prompt) { navigator.clipboard.writeText(c.prompt); showToast('提示词已复制'); } }
     function closeEditPanel() {
+      closeTagSheet();
+      window.FeatureDraft?.closeImageGenFilterSheet?.();
       document.getElementById('editPanel').classList.add('hidden');
       document.getElementById('fabNewBtn').classList.add('visible');
       document.body.classList.remove('panel-open');

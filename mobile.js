@@ -9,6 +9,13 @@
     return isMobile();
   }
 
+  function closeAllMobileOverlays() {
+    closeDrawers();
+    document.body.classList.remove('mobile-search-open');
+    if (typeof closeTagSheet === 'function') closeTagSheet();
+    window.FeatureDraft?.closeImageGenFilterSheet?.();
+  }
+
   function closeDrawers() {
     document.body.classList.remove('mobile-nav-open', 'mobile-groups-open');
   }
@@ -149,18 +156,16 @@
 
   window.mobileSwitchTab = function (tab) {
     if (!isMobile()) return;
+    closeAllMobileOverlays();
     setBottomTab(tab);
     if (tab === 'cards') {
-      closeDrawers();
       if (typeof closeEditPanel === 'function') closeEditPanel();
       if (typeof switchAppPage === 'function') switchAppPage('warehouse');
     } else if (tab === 'groups') {
       openGroupsDrawer();
     } else if (tab === 'imagegen') {
-      closeDrawers();
       if (typeof switchAppPage === 'function') switchAppPage('imagegen');
     } else if (tab === 'new') {
-      closeDrawers();
       if (typeof switchAppPage === 'function') switchAppPage('warehouse');
       if (typeof createNewCard === 'function') createNewCard({ forceOpenPanel: true });
     } else if (tab === 'me') {
@@ -202,6 +207,7 @@
     openNavDrawer,
     openGroupsDrawer,
     closeDrawers,
+    closeAllMobileOverlays,
     setImageGenView,
     initImageGenMobileView
   };
@@ -209,6 +215,7 @@
   function init() {
     bindMobileUI();
     if (isMobile()) {
+      closeAllMobileOverlays();
       applyMobileColumns();
       if (typeof closeEditPanel === 'function') closeEditPanel();
       if (typeof enforceMobileCardGrid === 'function') enforceMobileCardGrid();
