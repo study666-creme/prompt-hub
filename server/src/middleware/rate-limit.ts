@@ -1,4 +1,5 @@
 import { createMiddleware } from 'hono/factory';
+import { applyCorsHeaders } from '../lib/cors-headers';
 
 type Bucket = { count: number; resetAt: number };
 
@@ -17,6 +18,7 @@ export function rateLimit(max: number, windowMs: number) {
     }
     bucket.count += 1;
     if (bucket.count > max) {
+      applyCorsHeaders(c);
       return c.json(
         {
           ok: false,

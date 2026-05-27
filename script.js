@@ -49,8 +49,9 @@
     } catch (e) { activeFilters = new Set(); }
     const GUEST_CARD_LIMIT = 10;
 
-    let cardColumns = Number(localStorage.getItem('promptrepo_card_columns') || 4);
-    cardColumns = Math.min(5, Math.max(1, cardColumns || 4));
+    let cardColumns = Number(localStorage.getItem('promptrepo_card_columns'));
+    if (!Number.isFinite(cardColumns) || cardColumns < 1) cardColumns = 4;
+    cardColumns = Math.min(5, Math.max(1, cardColumns));
 
     document.documentElement.style.setProperty('--card-columns', cardColumns);
 
@@ -575,11 +576,18 @@
 
     let layoutMasonryTimer = null;
 
+    function getDesktopCardMinWidth() {
+      if (cardColumns >= 4) return 72;
+      if (cardColumns >= 3) return 88;
+      return 100;
+    }
+
     function getDesktopCardColumnWidth() {
       const gap = getMasonryGap();
       const innerW = getCardsInnerWidth();
       if (innerW < 80) return 280;
-      return Math.max(120, Math.floor((innerW - gap * (cardColumns - 1)) / cardColumns));
+      const minCol = getDesktopCardMinWidth();
+      return Math.max(minCol, Math.floor((innerW - gap * (cardColumns - 1)) / cardColumns));
     }
 
     function primeDesktopCardGrid(container) {
@@ -639,6 +647,7 @@
         enforceMobileCardGrid();
         return;
       }
+      container.classList.remove('mobile-grid');
       if (!container.querySelector('.card')) {
         if (masonryInstance) { masonryInstance.destroy(); masonryInstance = null; }
         return;
@@ -654,7 +663,7 @@
         scheduleLayoutMasonry();
         return;
       }
-      const colWidth = Math.max(120, Math.floor((innerW - gap * (cardColumns - 1)) / cardColumns));
+      const colWidth = getDesktopCardColumnWidth();
       let sizer = container.querySelector('.grid-sizer');
       if (!sizer) {
         sizer = document.createElement('div');

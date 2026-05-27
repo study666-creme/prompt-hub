@@ -70,8 +70,8 @@
     }
     if (!res.ok || json.ok === false) {
       const err = json.error || {};
-      const code = err.code || 'REQUEST_FAILED';
-      const message = err.message || `请求失败 (${res.status})`;
+      const code = err.code || (res.status === 429 ? 'RATE_LIMITED' : 'REQUEST_FAILED');
+      const message = err.message || (res.status === 429 ? '操作过于频繁，请稍后再试' : `请求失败 (${res.status})`);
       if (res.status === 401 && attempt < 1 && window.SupabaseSync?.getValidAccessToken) {
         const refreshed = await window.SupabaseSync.getValidAccessToken();
         if (refreshed) return request(method, path, body, opts, attempt + 1);
