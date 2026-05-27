@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__APP_BUILD__ = '20260528l';
+    window.__APP_BUILD__ = '20260528m';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -43,12 +43,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20260528l">
-  <link rel="stylesheet" href="styles-theme.css?v=20260528l">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260528l">
-  <link rel="stylesheet" href="styles-settings.css?v=20260528l">
-  <link rel="stylesheet" href="styles-features.css?v=20260528l">
-  <script src="theme.js?v=20260528l"></script>
+  <link rel="stylesheet" href="styles.css?v=20260528m">
+  <link rel="stylesheet" href="styles-theme.css?v=20260528m">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260528m">
+  <link rel="stylesheet" href="styles-settings.css?v=20260528m">
+  <link rel="stylesheet" href="styles-features.css?v=20260528m">
+  <script src="theme.js?v=20260528m"></script>
 </head>
 <body>
   <div class="mobile-drawer-overlay" id="mobileDrawerOverlay" aria-hidden="true"></div>
@@ -547,13 +547,16 @@
               <option value="updated-desc">最近</option>
               <option value="updated-asc">最远</option>
             </select>
-            <div class="filter-menu-wrap">
+            <button type="button" class="icon-btn mobile-only" id="mobileSearchBtn" aria-label="搜索" aria-expanded="false" title="搜索">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/></svg>
+            </button>
+            <div class="filter-menu-wrap desktop-only">
               <button type="button" class="icon-btn" id="filterBtn" title="筛选">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
               </button>
               <div class="filter-dropdown" id="filterDropdown"></div>
             </div>
-            <input type="text" class="search-box" placeholder="搜索…" oninput="renderCards(true)" id="searchInput">
+            <input type="text" class="search-box desktop-only" placeholder="搜索…" oninput="renderCards(true)" id="searchInput">
           </div>
           <div class="toolbar-cluster">
             <button type="button" class="icon-btn icon-btn-labeled" id="ocrBtn" onclick="openOcrModal()" title="从图片提取文字到提示词">
@@ -563,6 +566,10 @@
             <button class="btn btn-primary btn-sm" onclick="createNewCard()">新建</button>
             <button class="btn btn-ghost btn-sm" id="batchToggleBtn" onclick="toggleBatchMode()">选择</button>
           </div>
+        </div>
+        <div class="mobile-search-bar mobile-only" id="mobileSearchBar" hidden>
+          <input type="search" class="search-box mobile-search-input" placeholder="搜索标题、提示词、标签…" oninput="renderCards(true)" id="searchInputMobile" enterkeyhint="search">
+          <button type="button" class="btn btn-ghost btn-sm" id="mobileSearchClose" aria-label="关闭搜索">完成</button>
         </div>
       </div>
     </div>
@@ -872,15 +879,15 @@
       document.head.appendChild(s);
     }
   </script>
-  <script src="api-client.js?v=20260528l"></script>
-  <script src="cloud-sync-safety.js?v=20260528l"></script>
-  <script src="supabase-sync.js?v=20260528l"></script>
-  <script src="membership.js?v=20260528l"></script>
-  <script src="subscription.js?v=20260528l"></script>
-  <script src="script.js?v=20260528l"></script>
-  <script src="points-system.js?v=20260528l"></script>
-  <script src="features-draft.js?v=20260528l"></script>
-  <script src="mobile.js?v=20260528l"></script>
+  <script src="api-client.js?v=20260528m"></script>
+  <script src="cloud-sync-safety.js?v=20260528m"></script>
+  <script src="supabase-sync.js?v=20260528m"></script>
+  <script src="membership.js?v=20260528m"></script>
+  <script src="subscription.js?v=20260528m"></script>
+  <script src="script.js?v=20260528m"></script>
+  <script src="points-system.js?v=20260528m"></script>
+  <script src="features-draft.js?v=20260528m"></script>
+  <script src="mobile.js?v=20260528m"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {

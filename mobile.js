@@ -113,6 +113,31 @@
     });
 
     bindImageGenMobileUI();
+
+    const mobileSearchBtn = document.getElementById('mobileSearchBtn');
+    const mobileSearchBar = document.getElementById('mobileSearchBar');
+    const mobileSearchClose = document.getElementById('mobileSearchClose');
+    const searchDesktop = document.getElementById('searchInput');
+    const searchMobile = document.getElementById('searchInputMobile');
+
+    function syncMobileSearchOpen(open) {
+      if (!mobileSearchBar || !mobileSearchBtn) return;
+      mobileSearchBar.hidden = !open;
+      mobileSearchBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      document.body.classList.toggle('mobile-search-open', open);
+      if (open) {
+        if (searchMobile && searchDesktop) searchMobile.value = searchDesktop.value;
+        searchMobile?.focus();
+      }
+    }
+
+    mobileSearchBtn?.addEventListener('click', () => {
+      syncMobileSearchOpen(mobileSearchBar?.hidden !== false);
+    });
+    mobileSearchClose?.addEventListener('click', () => syncMobileSearchOpen(false));
+    searchMobile?.addEventListener('input', () => {
+      if (searchDesktop) searchDesktop.value = searchMobile.value;
+    });
   }
 
   window.mobileSwitchTab = function (tab) {

@@ -144,36 +144,75 @@
   }
 
   .main-header {
-    flex-wrap: wrap;
-    align-items: flex-start;
+    flex-wrap: nowrap;
+    align-items: center;
     height: auto;
-    min-height: var(--toolbar-h);
-    padding: 8px 10px;
-    gap: 8px;
+    min-height: 44px;
+    padding: 6px 8px;
+    gap: 4px;
   }
 
   .main-header h3 {
-    order: 1;
-    flex: 1 1 calc(100% - 96px);
+    order: 3;
+    flex: 1 1 auto;
     min-width: 0;
-    font-size: 14px;
+    max-width: 36vw;
+    font-size: 13px;
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     margin: 0;
-    line-height: 40px;
+    line-height: 36px;
   }
 
   .main-header > .mobile-header-btn {
     order: 0;
     flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+  }
+
+  #mobileNavBtn {
+    order: 1;
+  }
+
+  #mobileGroupsBtn {
+    order: 2;
   }
 
   .header-actions {
-    order: 2;
-    flex: 1 1 100%;
-    width: 100%;
+    order: 4;
+    flex: 0 1 auto;
+    width: auto;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .header-actions #normalBar {
+    display: flex;
+  }
+
+  .mobile-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 4px 0 0;
+  }
+
+  #normalBar.toolbar-row {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 4px;
+    width: auto;
+  }
+
+  .toolbar-row > .toolbar-cluster:first-child {
+    display: none !important;
   }
 
   .column-toggle,
@@ -184,86 +223,79 @@
     display: none !important;
   }
 
-  .main-header {
-    padding-bottom: 4px;
-  }
-
-  .main-header h3 {
-    order: 2;
-    flex: 1 1 auto;
-    line-height: 36px;
-    font-size: 15px;
-  }
-
-  #mobileNavBtn {
-    order: 0;
-  }
-
-  #mobileGroupsBtn {
-    order: 1;
-    margin-right: 4px;
-  }
-
-  .header-actions {
-    order: 3;
-  }
-
-  .toolbar-row {
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 6px;
-  }
-
   .toolbar-cluster-grow {
-    flex: 1 1 auto;
-    order: 0;
-    min-width: 0;
+    flex: 0 1 auto;
     display: flex;
     align-items: center;
-    gap: 6px;
-  }
-
-  .toolbar-cluster-grow .search-box {
-    flex: 1;
+    gap: 4px;
     min-width: 0;
-  }
-
-  .toolbar-row > .toolbar-cluster:last-child {
-    flex: 0 0 auto;
-    order: 1;
-    width: auto;
   }
 
   .toolbar-select {
     flex: 0 0 auto;
-    max-width: 88px;
-    min-width: 72px;
+    max-width: 72px;
+    min-width: 64px;
+    font-size: 13px;
+    padding-left: 6px;
+    padding-right: 22px;
   }
 
-  .search-box input {
+  #mobileSearchBtn {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+  }
+
+  .toolbar-row > .toolbar-cluster:last-child {
+    flex: 0 0 auto;
+  }
+
+  .toolbar-row > .toolbar-cluster:last-child .btn-ghost {
+    padding: 0 10px;
+    min-height: 36px;
+    font-size: 13px;
+  }
+
+  .mobile-search-bar[hidden] {
+    display: none !important;
+  }
+
+  body.mobile-search-open .main-header {
+    flex-wrap: wrap;
+  }
+
+  body.mobile-search-open .header-actions {
+    flex: 1 1 100%;
+    order: 10;
+  }
+
+  .mobile-search-input {
+    flex: 1;
     min-width: 0;
-    width: 100%;
     font-size: 16px;
+    min-height: 40px;
+  }
+
+  .search-box input,
+  .search-box {
+    min-width: 0;
   }
 
   /* 手机固定两列网格，不用 Masonry 绝对定位 */
+  .cards-container.mobile-grid,
   .cards-container {
     display: grid !important;
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     grid-auto-rows: auto !important;
     align-items: start !important;
     gap: 10px !important;
-    padding: 12px 10px calc(80px + env(safe-area-inset-bottom)) !important;
+    padding: 12px 10px calc(88px + env(safe-area-inset-bottom)) !important;
     position: relative !important;
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
   }
 
-  .cards-container .grid-sizer {
-    display: none !important;
-    height: 0 !important;
-  }
-
+  .cards-container.mobile-grid .card,
   .cards-container .card {
     width: 100% !important;
     max-width: none !important;
@@ -271,15 +303,19 @@
     min-height: 0 !important;
     display: flex !important;
     flex-direction: column !important;
-    position: relative !important;
+    position: static !important;
     left: auto !important;
     top: auto !important;
     right: auto !important;
     bottom: auto !important;
     transform: none !important;
     margin: 0 !important;
-    grid-column: auto !important;
-    grid-row: auto !important;
+    margin-bottom: 0 !important;
+  }
+
+  .cards-container .grid-sizer {
+    display: none !important;
+    height: 0 !important;
   }
 
   .cards-container .card .card-media {
@@ -409,32 +445,41 @@
   }
 
   .edit-panel .panel-temp-field-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 44px;
+    grid-template-rows: auto auto;
+    gap: 10px 12px;
     align-items: center;
-    margin-top: 8px;
+    margin-top: 10px;
   }
 
   .edit-panel .panel-temp-field-row #tempFieldName {
-    flex: 1 1 100%;
+    grid-column: 1 / -1;
+    width: 100%;
     min-width: 0;
   }
 
   .edit-panel .panel-temp-field-row #tempFieldType {
-    flex: 1 1 calc(50% - 4px);
+    grid-column: 1;
+    grid-row: 2;
+    width: 100% !important;
     min-width: 0;
-    width: auto !important;
+    height: 40px;
   }
 
   .edit-panel .panel-temp-field-row .custom-checkbox {
-    flex: 1 1 calc(50% - 4px);
-    min-width: 0;
+    grid-column: 2;
+    grid-row: 2;
+    flex-shrink: 0;
+    white-space: nowrap;
     font-size: 13px;
+    gap: 6px;
+    margin: 0;
   }
 
   .edit-panel .panel-temp-field-row .panel-temp-add-btn {
-    flex: 0 0 44px;
+    grid-column: 3;
+    grid-row: 2;
     width: 44px;
     height: 40px;
     padding: 0;
@@ -481,7 +526,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    z-index: 4000;
+    z-index: 5000;
     display: flex;
     align-items: stretch;
     justify-content: space-around;
