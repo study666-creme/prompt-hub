@@ -2159,6 +2159,7 @@
         renderGroups();
         renderCards(true);
       };
+      cards = filterTombstonedCards(cards);
       await saveCardsToDB(cards);
       settings.floatingPrompt = floatingPromptActive;
       if (typeof window.getAppTheme === 'function') settings.theme = window.getAppTheme();
