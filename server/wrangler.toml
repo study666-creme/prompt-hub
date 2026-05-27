@@ -5,7 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 ENVIRONMENT = "production"
-CORS_ORIGINS = "https://prompt-hub-hub.pages.dev,https://prompt-hub-web.pages.dev"
+CORS_ORIGINS = "https://prompt-hub.cn,https://www.prompt-hub.cn,https://prompt-hub-hub.pages.dev,https://prompt-hub-web.pages.dev"
 
 # 敏感项请用 wrangler secret put：
 # SUPABASE_URL

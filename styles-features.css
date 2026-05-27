@@ -159,12 +159,14 @@
     gap: var(--card-row-gap, 16px);
     align-content: start;
     padding: 12px var(--padding-page) 24px;
-    overflow-y: auto;
-    flex: 1 1 auto;
-    min-height: 280px;
-    height: auto;
+    overflow-x: hidden;
+    overflow-y: auto !important;
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: 100%;
     width: 100%;
     box-sizing: border-box;
+    -webkit-overflow-scrolling: touch;
   }
   #communityGrid .card,
   #creationsGrid .card {
@@ -1634,16 +1636,27 @@
   padding: 16px;
 }
 
-.community-post-card .card-media {
+.community-post-card .card-media,
+.creation-post-card .card-media {
   background: var(--bg-hover);
+  max-height: 280px;
+  overflow: hidden;
+  line-height: 0;
 }
 
-.community-post-card .card-img {
+.community-post-card .card-img,
+.creation-post-card .card-img {
   width: 100%;
-  height: auto;
-  max-height: none;
-  object-fit: contain;
-  object-position: center top;
+  height: 100%;
+  max-height: 280px;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+
+.community-post-card .card-body,
+.creation-post-card .card-body {
+  flex-shrink: 0;
 }
 
 .community-side-img {
