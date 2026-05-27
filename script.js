@@ -1399,7 +1399,7 @@
       const t0 = Number(media.dataset.shineAt || 0) || Date.now();
       if (!media.dataset.shineAt) media.dataset.shineAt = String(t0);
       const inFeatureGrid = media.closest('#creationsGrid, #communityGrid, #userProfileGrid');
-      const minShine = mobile || loaded ? 0 : (media.classList?.contains('imagegen-feed-media') ? 280 : (inFeatureGrid ? 180 : 320));
+      const minShine = mobile || loaded ? 0 : (media.classList?.contains('imagegen-feed-media') ? 90 : (inFeatureGrid ? 100 : 120));
       const wait = Math.max(0, minShine - (Date.now() - t0));
       const done = () => {
         media.classList.remove('is-loading');

@@ -69,13 +69,19 @@ body {
   margin: 0;
 }
 
-/* 仅缩放主界面；全局弹层在 body 下不缩放，避免遮罩点穿 */
+/* 仅缩放主界面；弹层在 app-chrome 外。高度用 flex 填满视口，避免 133% 把侧栏底部裁掉 */
 .app-chrome {
   zoom: 0.75;
-  width: 133.333%;
-  height: 133.333%;
-  max-width: 133.333%;
-  max-height: 133.333%;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 133.333vw;
+  max-width: 133.333vw;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+  display: flex;
+  box-sizing: border-box;
 }
 
     .drag-layer-root {
@@ -270,7 +276,9 @@ body {
       display: flex;
       flex-direction: column;
       gap: 4px;
-      flex: 1;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
     }
     .app-nav-item {
       display: flex;
@@ -337,7 +345,7 @@ body {
       flex-direction: column;
       gap: 2px;
       padding: 8px 0 4px;
-      margin-top: auto;
+      margin-top: 0;
       border-top: 1px solid var(--border);
     }
     .app-nav-util {
@@ -454,8 +462,10 @@ body {
     }
     .app-nav-auth {
       flex-shrink: 0;
-      padding: 10px 8px 4px;
+      margin-top: auto;
+      padding: 10px 8px 12px;
       border-top: 1px solid var(--border);
+      background: var(--bg-secondary);
     }
     .auth-login-btn {
       width: 100%;
@@ -1503,6 +1513,7 @@ body {
       background: var(--bg-hover);
       flex-shrink: 0;
       line-height: 0;
+      max-height: 340px;
     }
     .card-media.is-loading::after {
       content: '';
@@ -1535,6 +1546,9 @@ body {
       width: 100%;
       height: auto;
       max-width: 100%;
+      max-height: 340px;
+      object-fit: cover;
+      object-position: center top;
       display: block;
       cursor: pointer;
       vertical-align: top;
@@ -2016,7 +2030,8 @@ body {
     }
 .image-drop-area.has-image {
   width: 100%;
-  max-height: min(42vh, 380px);
+  height: min(48vh, 420px);
+  max-height: min(48vh, 420px);
   background: var(--bg-hover);
   overflow: hidden;
   display: block;
@@ -2029,9 +2044,10 @@ body {
 
 .image-drop-area.has-image img {
   width: 100%;
-  height: auto;
-  max-height: min(42vh, 380px);
-  object-fit: contain;
+  height: 100%;
+  min-height: 180px;
+  max-height: min(48vh, 420px);
+  object-fit: cover;
   object-position: center top;
   display: block;
 }

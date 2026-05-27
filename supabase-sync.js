@@ -180,6 +180,13 @@
     if (isDataUrl(image) || image.startsWith('blob:')) return image;
     const path = storagePathFromRef(image);
     if (path && isLoggedIn()) {
+      const cached = getCachedDisplayUrl(image);
+      if (cached && /^https?:\/\//i.test(cached)) return cached;
+      try {
+        return await getSignedUrlForPath(path);
+      } catch (e) {
+        console.warn('[SupabaseSync] signed url failed', path, e);
+      }
       if (window.PromptHubApi?.isConfigured?.() && window.PromptHubApi.signMediaRef) {
         try {
           const r = await window.PromptHubApi.signMediaRef(image);
@@ -188,12 +195,7 @@
           console.warn('[SupabaseSync] api sign failed', e);
         }
       }
-      try {
-        return await getSignedUrlForPath(path);
-      } catch (e) {
-        console.warn('[SupabaseSync] signed url failed', path, e);
-        return publicUrlFromPath(path) || image;
-      }
+      return publicUrlFromPath(path) || image;
     }
     if (/^https?:\/\//i.test(image)) {
       if (window.PromptHubApi?.fetchMediaAsBlobUrl) {
@@ -210,7 +212,7 @@
     const paths = [...new Set(
       (images || []).map(storagePathFromRef).filter(Boolean)
     )];
-    const batchSize = 6;
+    const batchSize = 16;
     for (let i = 0; i < paths.length; i += batchSize) {
       const batch = paths.slice(i, i + batchSize);
       await Promise.all(batch.map(p => getSignedUrlForPath(p).catch(() => {})));
@@ -249,8 +251,10 @@
 
   async function hydrateImageElements(root) {
     const scope = root || document;
-    const imgs = scope.querySelectorAll('img[data-storage-ref], img[data-image-ref]');
-    await Promise.all([...imgs].map(async (img) => {
+    const imgs = [...scope.querySelectorAll('img[data-storage-ref], img[data-image-ref]')];
+    const concurrency = 10;
+    let idx = 0;
+    async function hydrateOne(img) {
       const ref = img.getAttribute('data-storage-ref') || img.getAttribute('data-image-ref');
       if (!ref) return;
       const media = img.closest('.card-media, .imagegen-feed-media');
@@ -307,7 +311,15 @@
           });
         });
       }
-    }));
+    }
+    async function worker() {
+      while (idx < imgs.length) {
+        const i = idx++;
+        await hydrateOne(imgs[i]);
+      }
+    }
+    const workers = Array.from({ length: Math.min(concurrency, imgs.length) }, () => worker());
+    await Promise.all(workers);
   }
 
   async function persistGenerationImage(assetId, image) {

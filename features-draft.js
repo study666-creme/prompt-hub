@@ -218,7 +218,17 @@
     const hit = displayUrlCache.get(cacheKey);
     if (hit) return hit;
     let url = '';
-    if (jobId && window.PromptHubApi?.getGenerationImageUrl) {
+    const cached = window.SupabaseSync?.getCachedDisplayUrl?.(image);
+    if (cached && /^https?:\/\//i.test(cached)) url = cached;
+    if (!url && window.SupabaseSync?.resolveDisplayUrl
+      && (window.SupabaseSync.isStorageRef?.(image) || String(image).startsWith('storage://'))) {
+      try {
+        url = await window.SupabaseSync.resolveDisplayUrl(image);
+      } catch (e) {
+        console.warn('resolve image failed', e);
+      }
+    }
+    if (!url && jobId && window.PromptHubApi?.getGenerationImageUrl) {
       const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
       if (r.ok && r.data?.url) url = r.data.url;
     }
@@ -473,6 +483,18 @@
 
   function isMobileFeedViewport() {
     return window.MobileUI?.isMobile?.() || window.matchMedia('(max-width: 900px)').matches;
+  }
+
+  function bindImageGenFeedImageRelayout() {
+    const wrap = document.getElementById('imageGenFeed');
+    if (!wrap) return;
+    wrap.querySelectorAll('.imagegen-feed-media img, .imagegen-feed-thumb-btn img').forEach(img => {
+      if (img.dataset.masonryRelayoutBound) return;
+      img.dataset.masonryRelayoutBound = '1';
+      const relayout = () => scheduleImageGenFeedLayout();
+      img.addEventListener('load', relayout, { once: true });
+      img.addEventListener('error', relayout, { once: true });
+    });
   }
 
   function scheduleImageGenFeedLayout() {
@@ -1559,7 +1581,17 @@
 
   function getGenHistoryItems() {
     pruneCreations();
-    return creations.filter(c => (c.prompt || '').trim());
+    const seen = new Set();
+    const list = [];
+    for (const c of creations) {
+      if (!(c.prompt || '').trim()) continue;
+      const key = c.jobId ? `job:${c.jobId}` : `id:${String(c.id)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      list.push(c);
+    }
+    list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    return list;
   }
 
   function fillFormFromData({ prompt, refImage, refImages, model, resolution, quality, size, sourceId, sourceType }) {
@@ -2520,7 +2552,13 @@
       }
     } else {
       const pending = imageGenPendingJobs.slice(0, 8);
-      const list = getGenHistoryItems().slice(0, 40);
+      const seenFeed = new Set();
+      const list = getGenHistoryItems().filter((c) => {
+        const key = c.jobId ? `job:${c.jobId}` : `id:${String(c.id)}`;
+        if (seenFeed.has(key)) return false;
+        seenFeed.add(key);
+        return true;
+      }).slice(0, 40);
       if (!pending.length && !list.length) {
         html = '<p class="imagegen-feed-empty">暂无生成记录，点击下方按钮开始创作</p>';
       } else {
@@ -2563,6 +2601,7 @@
     }
     resetMobileFeedGridStyles();
     bindImageGenFeedCardEvents(wrap);
+    bindImageGenFeedImageRelayout();
     if (mobileFeed) enforceMobileImageGenFeed();
     else scheduleImageGenFeedLayout();
 
@@ -2571,6 +2610,7 @@
         await window.SupabaseSync.prefetchDisplayUrls(refsSlice);
       }
       await hydrateFeedImages(wrap);
+      bindImageGenFeedImageRelayout();
       if (mobileFeed) enforceMobileImageGenFeed();
       else scheduleImageGenFeedLayout();
     })();

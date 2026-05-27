@@ -17,6 +17,7 @@
 | **图片生成** | 扣积分生图（当前多为本地占位图；配置 API 后走服务端扣费） |
 
 部署：静态资源（**Cloudflare Pages** `wrangler.toml` 或 **Vercel** `vercel.json`），无构建步骤，根目录即站点。  
+**推荐（一劳永逸）**：① GitHub 已 SSH → `git push` 且 Pages 已 **Connect to Git** 则自动上线；② 或本机一次 `server` 里 `npm exec wrangler login` 后，根目录 `.\deploy-pages.ps1` 命令行部署。ZIP 上传仅作无法登录 Wrangler 时的备用。  
 **移动端**（≤900px）：底部导航含「生图」；生图页「生成 / 作品」切换；`styles-mobile.css` + `mobile.js`。
 
 ---
@@ -162,18 +163,17 @@ prompt-hub/
 | Worker | `prompt-hub-api`（账号 `2705367723`）已部署 |
 | **API 自定义域名** | **`https://api.prompt-hub.cn/health` ✅ 已通**（`ok:true`, `supabase:ok`） |
 | workers.dev | 国内常超时，生产走 `api.prompt-hub.cn` |
-| 自有域名 | `prompt-hub.cn` 已接入 Cloudflare |
-| 前端 API 配置 | `api-domain.config.js` → `CUSTOM_API_HOST = 'api.prompt-hub.cn'` |
-| Pages 静态站 | `prompt-hub.cn` / Pages 预览域 |
-| 构建号 | `20260529b`；SW `prompt-hub-v66` |
-| 会员任务 | 侧栏「免费试用」任务中心；API `/api/v1/membership/tasks`（需跑迁移 `20260528120000_membership_tasks.sql`） |
-| 试用码 | `MINI-99-3D`（¥0.99/3 天）；已停用 `STARTER-19-14D` |
-| 会员积分 | 日赠：基础 10 / 标准 20 / 专业 40；一次性：100 / 310 / 620 |
+| 自有域名 | `prompt-hub.cn` / Pages：`prompt-hub.cn`、`www.prompt-hub.cn` |
+| 前端 API | `api-domain.config.js` → `api.prompt-hub.cn`；CORS 含 `prompt-hub.cn` / `www` |
+| 构建号 | **`20260531b`**（待部署）；SW `prompt-hub-v78` |
+| 会员任务 | 侧栏任务中心；API `/api/v1/membership/tasks`（需迁移 `20260528120000_membership_tasks.sql`） |
+| 试用码 | `MINI-99-3D`（¥0.99/3 天） |
 
 **已知问题 / 下一步**
 
-- 手机 PWA：启动屏偏黑属系统 splash；进入后若仍有半透明黑幕，部署 `20260529b`（强化 `closeAllMobileOverlays` + 标签 sheet 关闭时不挡点击）。
-- 部署静态站后让用户清一次站点数据或等版本脚本自动 reload 一次。
+- 部署 `20260531b`：修侧栏底部裁切、编辑区图片铺满、生图记录去重、图片优先 Supabase 签名（避免 API CORS 拖慢）。
+- 部署后 **Ctrl+F5**；控制台 `window.__APP_BUILD__` 应为 `20260531b`。
+- Edge「跟踪防护」若拦 Supabase，改用本地 `vendor/supabase.min.js`（已内置）。
 - 会员任务迁移 + Worker 重部署后，登录用户可在任务中心领取奖励。
 
 文档每 **8 条用户消息** 由 `.cursor/hooks` + 规则 `.cursor/rules/doc-auto-sync.mdc` 提醒 AI 更新本节（计数见 `.cursor/doc-sync-state.json`）。

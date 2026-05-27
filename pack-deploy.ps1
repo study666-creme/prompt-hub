@@ -1,4 +1,4 @@
-# 打包静态站文件，用于 Cloudflare「上传项目」部署（非 Git 自动部署）
+# Pack static site for Cloudflare Pages manual upload (not Git auto-deploy)
 $root = $PSScriptRoot
 $files = @(
   "index.html",
@@ -39,11 +39,11 @@ $paths = foreach ($f in $files) {
   $p
 }
 if ($missing.Count) {
-  Write-Warning "以下文件不存在，已跳过: $($missing -join ', ')"
+  Write-Warning "Missing (skipped): $($missing -join ', ')"
 }
 $dest = Join-Path $root "prompt-hub-deploy.zip"
 if (Test-Path $dest) { Remove-Item $dest -Force }
 Compress-Archive -Path $paths -DestinationPath $dest -Force
-Write-Host "已生成: $dest"
-Write-Host "Cloudflare: prompt-hub-web -> Create deployment -> 上传此 ZIP -> Save and deploy"
-Write-Host "提示: 若要用 GitHub 自动部署，不要走上传页，应选 Connect to Git。"
+Write-Host "OK: $dest"
+Write-Host "Cloudflare: Workers and Pages -> your project -> Create deployment -> Upload assets -> pick ZIP -> Deploy"
+Write-Host "Tip: use Connect to Git for auto deploy; manual ZIP is for upload-only projects."
