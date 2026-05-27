@@ -76,6 +76,21 @@
   background: linear-gradient(165deg, #ffffff 0%, #f5f5f7 100%) !important;
 }
 
+[data-theme="light"] .custom-modal {
+  background: var(--bg-elevated);
+  border-color: var(--border);
+  box-shadow: var(--shadow-lg);
+}
+
+[data-theme="light"] .custom-modal-overlay {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+[data-theme="dark"] .custom-modal,
+:root:not([data-theme="light"]) .custom-modal {
+  background: var(--bg-elevated);
+}
+
 [data-theme="light"] .settings-section {
   background: #ffffff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);

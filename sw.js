@@ -1,26 +1,8 @@
-const CACHE = 'prompt-hub-v43';
+const CACHE = 'prompt-hub-v56';
+/** 仅预缓存壳资源；JS/CSS 不预缓存，避免强刷仍命中旧脚本 */
 const ASSETS = [
   './',
   './index.html',
-  './styles.css',
-  './styles-mobile.css',
-  './styles-theme.css',
-  './styles-settings.css',
-  './styles-features.css',
-  './theme.js',
-  './script.js',
-  './points-system.js',
-  './features-draft.js',
-  './membership.js',
-  './subscription.js',
-  './mobile.js',
-  './supabase-config.js',
-  './api-domain.config.js',
-  './api-config.js',
-  './api-client.js',
-  './cloud-sync-safety.js',
-  './supabase-sync.js',
-  './ripple-grid.js',
   './manifest.webmanifest',
   './assets/logo.png'
 ];
@@ -53,22 +35,38 @@ self.addEventListener('fetch', (e) => {
   const isScriptOrStyle = /\.(css|js)$/.test(url.pathname);
 
   e.respondWith(
-    caches.match(e.request).then((cached) => {
+    (async () => {
+      if (isScriptOrStyle) {
+        try {
+          return await fetch(e.request, { cache: 'no-store' });
+        } catch (err) {
+          const cached = await caches.match(e.request);
+          if (cached) return cached;
+          throw err;
+        }
+      }
+      const cached = await caches.match(e.request);
       const putCache = (res) => {
-        if (res.ok && url.pathname.match(/\.(css|js|png|svg|webmanifest)$/)) {
+        if (res.ok && url.pathname.match(/\.(png|svg|webmanifest)$/)) {
           const clone = res.clone();
           caches.open(CACHE).then((c) => c.put(e.request, clone));
         }
         return res;
       };
       if (isHtml) {
-        return fetch(e.request).then(putCache).catch(() => cached);
+        try {
+          return await fetch(e.request, { cache: 'no-store' }).then(putCache);
+        } catch (err) {
+          if (cached) return cached;
+          throw err;
+        }
       }
-      if (isScriptOrStyle) {
-        return fetch(e.request).then(putCache).catch(() => cached);
+      try {
+        return await fetch(e.request).then(putCache);
+      } catch (err) {
+        if (cached) return cached;
+        throw err;
       }
-      const network = fetch(e.request).then(putCache).catch(() => cached);
-      return cached || network;
-    })
+    })()
   );
 });

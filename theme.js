@@ -80,8 +80,13 @@
   function toggleTheme() {
     const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
     applyTheme(next);
-    if (typeof showToast === 'function') {
-      showToast(next === 'light' ? '已切换日光模式（已暂停自动昼夜）' : '已切换夜间模式（已暂停自动昼夜）');
+    if (isAutoDayNightEnabled()) {
+      setThemeManualOverride(true);
+      if (typeof showToast === 'function') {
+        showToast(next === 'light' ? '已切换日光模式（本次浏览有效，刷新后按 8–20 点自动）' : '已切换夜间模式（本次浏览有效，刷新后按 8–20 点自动）');
+      }
+    } else if (typeof showToast === 'function') {
+      showToast(next === 'light' ? '已切换日光模式' : '已切换夜间模式');
     }
   }
 
@@ -101,11 +106,12 @@
   }
 
   function initTheme() {
-    if (isAutoDayNightEnabled() && !isThemeManualOverride()) {
+    if (isAutoDayNightEnabled()) {
+      setThemeManualOverride(false);
       applyTheme(getScheduledTheme(), { fromAuto: true });
-    } else {
-      applyTheme(getPreferred(), { fromAuto: true });
+      return;
     }
+    applyTheme(getPreferred(), { fromAuto: false });
   }
   initTheme();
   scheduleAutoCheck();

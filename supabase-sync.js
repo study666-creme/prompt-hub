@@ -219,33 +219,60 @@
 
   async function hydrateImageElements(root) {
     const scope = root || document;
-    const imgs = scope.querySelectorAll('img[data-storage-ref]');
+    const imgs = scope.querySelectorAll('img[data-storage-ref], img[data-image-ref]');
     await Promise.all([...imgs].map(async (img) => {
-      const ref = img.getAttribute('data-storage-ref');
+      const ref = img.getAttribute('data-storage-ref') || img.getAttribute('data-image-ref');
       if (!ref) return;
+      const media = img.closest('.card-media, .imagegen-feed-media');
+      if (media?.classList.contains('imagegen-gen-pending')) return;
+      if (!media?.dataset.shineAt) media.dataset.shineAt = String(Date.now());
+      media?.classList.add('is-loading');
       if (!img.getAttribute('src') || img.getAttribute('src')?.startsWith('data:image/svg')) {
         img.src = imgPlaceholderSrc();
       }
+      const endShine = () => {
+        if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
+        else media?.classList.remove('is-loading');
+      };
       try {
         const url = await resolveDisplayUrl(ref);
         if (url && !url.startsWith(STORAGE_PREFIX)) {
-          img.src = url;
+          const onFail = () => {
+            img.src = imgPlaceholderSrc();
+            img.classList.remove('img-load-failed');
+            endShine();
+          };
+          if (img.complete && img.src === url && img.naturalWidth > 0) endShine();
+          else {
+            img.addEventListener('load', endShine, { once: true });
+            img.addEventListener('error', onFail, { once: true });
+            img.src = url;
+          }
           img.classList.remove('img-load-failed');
+          if (img.complete && img.naturalWidth > 0) endShine();
+        } else {
+          endShine();
         }
       } catch (e) {
         console.warn('[SupabaseSync] hydrate failed', ref, e);
+        endShine();
       }
       if (!img.dataset.hydrateBound) {
         img.dataset.hydrateBound = '1';
         img.addEventListener('error', () => {
-          if (img.dataset.retryHydrate === '1') return;
+          if (img.dataset.retryHydrate === '1') {
+            img.src = imgPlaceholderSrc();
+            img.classList.remove('img-load-failed');
+            return;
+          }
           img.dataset.retryHydrate = '1';
           void resolveDisplayUrl(ref).then(url => {
             if (url && !url.startsWith(STORAGE_PREFIX)) {
               img.src = url;
               img.classList.remove('img-load-failed');
             } else {
-              img.classList.add('img-load-failed');
+              img.src = imgPlaceholderSrc();
+              img.classList.remove('img-load-failed');
             }
           });
         });

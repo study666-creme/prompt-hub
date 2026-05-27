@@ -31,7 +31,7 @@
       return new Promise(resolve => { tx.oncomplete = resolve; });
     }
 
-    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, autoDayNight: true, themeManualOverride: false };
+    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, defaultImageGenAutoSaveWarehouse: true, autoDayNight: true, themeManualOverride: false };
     let currentGroup = 'all', selectedCardId = null, isNewCardMode = true, imageData = null;
     let currentTags = [], tempCustomFields = [];
     let batchMode = false, selectedCardIds = new Set();
@@ -146,35 +146,44 @@
       const caption = document.getElementById('appreciateViewerCaption');
       const hint = document.querySelector('.appreciate-viewer-hint');
       if (!viewer || !img) return;
-      if (card.image) {
-        img.style.display = 'block';
-        if (hint) hint.style.display = 'block';
-        const displaySrc = window.SupabaseSync?.resolveDisplayUrl
-          ? await window.SupabaseSync.resolveDisplayUrl(card.image)
-          : card.image;
-        const onReady = () => {
-          resetImageZoom(img);
-          attachImageZoom(img);
-        };
-        if (img.src === displaySrc && img.complete) onReady();
-        else {
-          img.onload = () => { img.onload = null; onReady(); };
-          img.src = displaySrc;
-        }
-      } else {
-        img.src = '';
-        img.style.display = 'none';
-        if (hint) hint.style.display = 'none';
-        imageZoom.img = null;
-      }
+      viewer.classList.remove('active');
+      document.body.classList.remove('appreciate-viewing');
       const title = (card.title || '').trim();
       const prompt = (card.prompt || '').trim();
       if (caption) {
         caption.textContent = title || (prompt ? prompt.slice(0, 120) + (prompt.length > 120 ? '…' : '') : '');
         caption.style.display = caption.textContent ? 'block' : 'none';
       }
-      viewer.classList.add('active');
-      document.body.classList.add('appreciate-viewing');
+      const reveal = () => {
+        viewer.classList.add('active');
+        document.body.classList.add('appreciate-viewing');
+      };
+      if (card.image) {
+        img.style.display = 'block';
+        if (hint) hint.style.display = 'block';
+        img.removeAttribute('src');
+        const displaySrc = window.SupabaseSync?.resolveDisplayUrl
+          ? await window.SupabaseSync.resolveDisplayUrl(card.image)
+          : card.image;
+        let revealed = false;
+        const onReady = () => {
+          if (revealed) return;
+          revealed = true;
+          img.onload = null;
+          resetImageZoom(img);
+          attachImageZoom(img);
+          reveal();
+        };
+        img.onload = onReady;
+        img.src = displaySrc;
+        if (img.complete && img.naturalWidth > 0) onReady();
+      } else {
+        img.src = '';
+        img.style.display = 'none';
+        if (hint) hint.style.display = 'none';
+        imageZoom.img = null;
+        reveal();
+      }
     }
     window.closeAppreciateViewer = closeAppreciateViewer;
 
@@ -298,6 +307,10 @@
       return settings.defaultImageGenAutoPublish !== false;
     };
 
+    window.getDefaultImageGenAutoSaveWarehouse = function () {
+      return settings.defaultImageGenAutoSaveWarehouse !== false;
+    };
+
     window.getWarehouseCardsForImageGen = function (opts) {
       const group = opts?.group || 'all';
       const tag = opts?.tag || 'all';
@@ -403,7 +416,7 @@
       const promptText = (prompt || '').trim();
       cards.push({
         id: generateId(),
-        title: (title || promptText.slice(0, 24) || '生成图') + '',
+        title: (title || '').trim(),
         prompt: promptText,
         image: image || null,
         group: null,
@@ -438,6 +451,7 @@
     }
     function closeCustomModal() { document.getElementById('customModalOverlay').classList.remove('active'); }
     function customConfirm(msg, onConfirm, onCancel) { showCustomModal('确认', msg, onConfirm, onCancel); }
+    window.customConfirm = customConfirm;
     function customPrompt(msg, defaultText, onConfirm, onCancel, suggestions = []) {
       showCustomModal('输入', msg, (val) => onConfirm(val), onCancel, true, suggestions);
       if (defaultText) setTimeout(() => { const inp = document.getElementById('customModalInput'); if(inp) inp.value = defaultText; }, 50);
@@ -574,6 +588,7 @@
         card.style.bottom = '';
         card.style.position = '';
         card.style.transform = '';
+        card.style.width = '';
       });
     }
 
@@ -581,6 +596,14 @@
       const container = document.getElementById('cardsContainer');
       const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
       if (!container || viewMode === 'list') return;
+      if (window.MobileUI?.isMobile?.()) {
+        if (masonryInstance) {
+          masonryInstance.destroy();
+          masonryInstance = null;
+        }
+        resetCardLayoutStyles(container);
+        return;
+      }
       if (!container.querySelector('.card')) {
         if (masonryInstance) { masonryInstance.destroy(); masonryInstance = null; }
         return;
@@ -1046,6 +1069,10 @@
     async function initBackgroundEffect() {
       const bg = document.getElementById('rippleGridBg');
       if (!bg || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      if (window.matchMedia('(max-width: 900px)').matches) {
+        bg.style.display = 'none';
+        return;
+      }
       try {
         const mod = await import('./ripple-grid.js');
         mod.initRippleGrid(bg, RIPPLE_BG_OPTS);
@@ -1221,20 +1248,82 @@
       return '';
     }
 
+    function recordCardDeletion(id) {
+      if (id == null) return;
+      if (!settings.deletedCardTombstones || typeof settings.deletedCardTombstones !== 'object') {
+        settings.deletedCardTombstones = {};
+      }
+      settings.deletedCardTombstones[String(id)] = Date.now();
+    }
+
+    function isCardTombstoned(card) {
+      if (!card || card.id == null) return false;
+      const tombAt = settings.deletedCardTombstones?.[String(card.id)];
+      if (!tombAt) return false;
+      const cardTs = card.updatedAt || card.createdAt || 0;
+      return tombAt >= cardTs;
+    }
+
+    /** 本地列表为准：已删卡片不会从云端“复活”；同 id 取 updatedAt 较新者 */
     function mergeCardsByUpdatedAt(localList, cloudList) {
       const map = new Map();
-      for (const c of cloudList || []) {
+      for (const c of localList || []) {
         if (c && c.id != null) map.set(String(c.id), c);
       }
-      for (const c of localList || []) {
-        if (!c || c.id == null) continue;
+      for (const c of cloudList || []) {
+        if (!c || c.id == null || isCardTombstoned(c)) continue;
         const id = String(c.id);
-        const ex = map.get(id);
-        if (!ex || (c.updatedAt || c.createdAt || 0) >= (ex.updatedAt || ex.createdAt || 0)) {
+        const local = map.get(id);
+        if (!local) {
           map.set(id, c);
+          continue;
         }
+        const localTs = local.updatedAt || local.createdAt || 0;
+        const cloudTs = c.updatedAt || c.createdAt || 0;
+        if (cloudTs > localTs) map.set(id, c);
       }
       return [...map.values()];
+    }
+
+    function scheduleMasonryForMedia(media) {
+      if (!media) return;
+      if (media.closest('#creationsGrid')) {
+        window.FeatureDraft?.scheduleCreationsLayout?.();
+      } else if (media.closest('#communityGrid')) {
+        window.FeatureDraft?.scheduleLayout?.('communityGrid');
+      } else if (media.closest('#userProfileGrid')) {
+        window.FeatureDraft?.scheduleLayout?.('userProfileGrid');
+      } else if (typeof scheduleLayoutMasonry === 'function') {
+        scheduleLayoutMasonry();
+      }
+    }
+    window.scheduleMasonryForMedia = scheduleMasonryForMedia;
+
+    function finishCardMediaShine(media) {
+      if (!media) return;
+      scheduleMasonryForMedia(media);
+      const t0 = Number(media.dataset.shineAt || 0) || Date.now();
+      if (!media.dataset.shineAt) media.dataset.shineAt = String(t0);
+      const inFeatureGrid = media.closest('#creationsGrid, #communityGrid, #userProfileGrid');
+      const minShine = media.classList?.contains('imagegen-feed-media') ? 520 : (inFeatureGrid ? 360 : 720);
+      const wait = Math.max(0, minShine - (Date.now() - t0));
+      setTimeout(() => {
+        media.classList.remove('is-loading');
+        scheduleMasonryForMedia(media);
+      }, wait);
+    }
+    window.finishCardMediaShine = finishCardMediaShine;
+
+    function cardImgInitialSrc(image) {
+      const placeholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="#e4e4ea" width="4" height="3"/></svg>');
+      if (!image || !cardHasDisplayImage({ image })) return placeholder;
+      const cached = window.SupabaseSync?.getCachedDisplayUrl?.(image);
+      if (cached && typeof cached === 'string' && !cached.startsWith('storage://') && !cached.startsWith('data:image/svg')) {
+        return cached;
+      }
+      if (typeof image === 'string' && /^https?:\/\//i.test(image)) return image;
+      if (typeof image === 'string' && image.startsWith('data:image/')) return image;
+      return placeholder;
     }
 
     function applyDataPayload(payload) {
@@ -1250,7 +1339,8 @@
       normalizeCardPins();
       floatingPromptActive = settings.floatingPrompt === true;
       document.getElementById('imageClickZoomToggle').checked = settings.imageClickZoom;
-      if (settings.autoDayNight !== false && !settings.themeManualOverride) {
+      if (settings.autoDayNight !== false) {
+        settings.themeManualOverride = false;
         window.ThemeSchedule?.applyAutoThemeIfNeeded?.();
       } else if (settings.theme && typeof window.applyAppTheme === 'function') {
         window.applyAppTheme(settings.theme);
@@ -1659,7 +1749,7 @@
         syncFilterBtnState();
         renderGroups();
         renderCards(true);
-        createNewCard();
+        createNewCard({ silentMobile: true });
         showToast('已退出登录');
       } catch (e) {
         showToast('退出失败');
@@ -1683,8 +1773,10 @@
         const localCards = cards.slice();
         if ((!cloud.cards || cloud.cards.length === 0) && localCards.length > 0) {
           cloud.cards = localCards;
-        } else if (cloud.cards?.length && localCards.length) {
-          cloud.cards = mergeCardsByUpdatedAt(localCards, cloud.cards);
+        } else if (cloud.cards?.length) {
+          cloud.cards = localCards.length
+            ? mergeCardsByUpdatedAt(localCards, cloud.cards)
+            : (cloud.cards || []).filter(c => c && !isCardTombstoned(c));
         }
         applyDataPayload(cloud);
         window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
@@ -1843,6 +1935,10 @@
       refreshWarehouseUI({ softCards: silent && !uidChanged && !force });
     }
 
+    function isMobileViewport() {
+      return window.MobileUI?.isMobileViewport?.() || window.matchMedia('(max-width: 900px)').matches;
+    }
+
     function refreshWarehouseUI(opts = {}) {
       const soft = opts.softCards === true;
       updateTagFilter();
@@ -1858,9 +1954,37 @@
         renderCards(true);
       }
       updateGuestLimitUI();
-      if (!selectedCardId && isNewCardMode) createNewCard();
+      if (isMobileViewport()) {
+        if (typeof closeEditPanel === 'function') closeEditPanel();
+        isNewCardMode = false;
+      } else if (!selectedCardId && isNewCardMode) {
+        createNewCard();
+      }
       applyFloatingState();
     }
+
+    function copyCardPromptById(cardId) {
+      const card = cards.find(c => c.id === cardId);
+      const text = (card?.prompt || '').trim();
+      if (!text) {
+        showToast('暂无提示词');
+        return;
+      }
+      navigator.clipboard.writeText(text).then(() => showToast('已复制提示词'));
+    }
+
+    function fillCardToImageGen(cardId) {
+      const card = cards.find(c => c.id === cardId);
+      if (!card?.prompt) {
+        showToast('暂无提示词');
+        return;
+      }
+      if (typeof switchAppPage === 'function') switchAppPage('imagegen');
+      window.FeatureDraft?.fillFormPromptOnly?.(card.prompt);
+      window.MobileUI?.setImageGenView?.('form');
+    }
+    window.copyCardPromptById = copyCardPromptById;
+    window.fillCardToImageGen = fillCardToImageGen;
 
     async function syncCloudNow() {
       if (!window.SupabaseSync?.isLoggedIn?.()) {
@@ -1959,13 +2083,18 @@
         createNewCard({ silentMobile: true });
       }
       applyFloatingState();
-      const mainArea = document.getElementById('mainContentArea');
-      if (mainArea && typeof ResizeObserver !== 'undefined') {
-        new ResizeObserver(() => {
+      if (typeof ResizeObserver !== 'undefined') {
+        let masonryResizeTimer = null;
+        const onWarehouseResize = () => {
           if (!document.getElementById('pageWarehouse')?.classList.contains('active')) return;
-          if (masonryInstance) masonryInstance.layout();
-          else scheduleLayoutMasonry();
-        }).observe(mainArea);
+          clearTimeout(masonryResizeTimer);
+          masonryResizeTimer = setTimeout(() => scheduleLayoutMasonry(), 80);
+        };
+        const masonryResizeObs = new ResizeObserver(onWarehouseResize);
+        const mainArea = document.getElementById('mainContentArea');
+        const editPanelEl = document.getElementById('editPanel');
+        if (mainArea) masonryResizeObs.observe(mainArea);
+        if (editPanelEl) masonryResizeObs.observe(editPanelEl);
       }
     })();
 
@@ -1973,6 +2102,11 @@
 
     async function saveAllData(opts = {}) {
       window.__promptHubCards = cards;
+      window.persistPromptHubCards = async () => {
+        await saveAllData();
+        renderGroups();
+        renderCards(true);
+      };
       await saveCardsToDB(cards);
       settings.floatingPrompt = floatingPromptActive;
       if (typeof window.getAppTheme === 'function') settings.theme = window.getAppTheme();
@@ -2087,13 +2221,14 @@
     }
 
     function getCardDisplayTitle(card) {
-      const title = (card.title || '').trim();
-      if (title) return title;
-      const prompt = (card.prompt || '').trim();
-      if (!prompt) return '未命名';
-      if (looksLikeCodeSnippet(prompt)) return '未命名提示词';
-      if (prompt.length <= 36) return prompt;
-      return prompt.slice(0, 36) + '…';
+      return (card.title || '').trim();
+    }
+
+    function cardHasDisplayImage(card) {
+      const image = card?.image;
+      if (!image || typeof image !== 'string') return false;
+      if (window.FeatureDraft?.isDisplayableImage) return window.FeatureDraft.isDisplayableImage(image);
+      return true;
     }
 
     function getCardDisplayDesc(card) {
@@ -2143,9 +2278,10 @@
         container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:60px;">📦 暂无卡片</div>';
         return;
       }
-      if (window.SupabaseSync?.prefetchDisplayUrls) {
-        await window.SupabaseSync.prefetchDisplayUrls(pageCards.map(c => c.image).filter(Boolean));
-      }
+      const pageImages = pageCards.map(c => c.image).filter(Boolean);
+      const prefetchPromise = window.SupabaseSync?.prefetchDisplayUrls
+        ? window.SupabaseSync.prefetchDisplayUrls(pageImages)
+        : Promise.resolve();
       const fragment = document.createDocumentFragment();
       const isAppend = !reset && page > 1;
       pageCards.forEach((card, idx) => {
@@ -2155,26 +2291,37 @@
         div.dataset.id = card.id;
         div.draggable = !globalViewActive;
         const checked = selectedCardIds.has(card.id);
-        const imgPlaceholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="#1a1a22" width="4" height="3"/></svg>');
-        const mediaInner = card.image
-          ? `<img class="card-img" src="${imgPlaceholder}" data-image-ref="${escapeHtml(card.image)}" loading="lazy" draggable="false" alt="" onload="if(typeof scheduleLayoutMasonry==='function') scheduleLayoutMasonry()">`
-          : '<div class="card-media-placeholder" aria-hidden="true"></div>';
+        const showImage = cardHasDisplayImage(card);
+        const imgSrc = showImage ? cardImgInitialSrc(card.image) : '';
+        const imgLoading = showImage && imgSrc.startsWith('data:image/svg');
+        const titleTrim = getCardDisplayTitle(card);
         const timeLabel = formatCardTime(card.updatedAt || card.createdAt);
         const tagsHtml = buildCardTagsHtml(card.tags);
         const pinBadge = card.pinnedAt ? '<span class="card-pin-badge" title="置顶">置顶</span>' : '';
+        const mediaHtml = showImage
+          ? `<div class="card-media${imgLoading ? ' is-loading' : ''}"${imgLoading ? ` data-shine-at="${Date.now()}"` : ''}><img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(card.image)} data-image-ref="${escapeHtml(card.image)}" loading="lazy" draggable="false" alt="" onload="if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.card-media'));if(typeof scheduleLayoutMasonry==='function')scheduleLayoutMasonry()"></div>`
+          : '';
+        const headHtml = titleTrim
+          ? `<div class="card-head"><div class="card-title">${escapeHtml(titleTrim)}</div>${timeLabel ? `<time class="card-time">${escapeHtml(timeLabel)}</time>` : ''}</div>`
+          : (timeLabel ? `<div class="card-head card-head--meta-only"><time class="card-time">${escapeHtml(timeLabel)}</time></div>` : '');
+        const mobileActions = window.MobileUI?.isMobile?.()
+          ? `<div class="card-mobile-actions mobile-only">
+              <button type="button" class="card-mobile-btn" data-mobile-copy="${escapeHtml(card.id)}">复制</button>
+              <button type="button" class="card-mobile-btn" data-mobile-fill="${escapeHtml(card.id)}">填入生图</button>
+            </div>`
+          : '';
         div.innerHTML = `
           <div class="card-checkbox ${checked ? 'checked' : ''}" onclick="event.stopPropagation(); toggleSelectCard('${card.id}', this)"></div>
           ${pinBadge}
-          <div class="card-media">${mediaInner}</div>
+          ${mediaHtml}
           <div class="card-body">
-            <div class="card-head">
-              <div class="card-title">${escapeHtml(getCardDisplayTitle(card))}</div>
-              ${timeLabel ? `<time class="card-time">${escapeHtml(timeLabel)}</time>` : ''}
-            </div>
+            ${headHtml}
             <div class="card-desc">${escapeHtml(getCardDisplayDesc(card))}</div>
             ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ''}
+            ${mobileActions}
           </div>`;
         div.addEventListener('click', (e) => {
+          if (e.target.closest('.card-mobile-actions')) return;
           if (globalViewActive) {
             e.preventDefault();
             openAppreciateViewer(card.id);
@@ -2182,7 +2329,11 @@
           }
           if (e.target.closest('.card-checkbox')) return;
           if (batchMode) { const cb = div.querySelector('.card-checkbox'); toggleSelectCard(card.id, cb); }
-          else editCard(card.id);
+          else if (window.MobileUI?.isMobile?.()) {
+            /* 手机端点卡片不打开全屏编辑，用底部按钮操作 */
+          } else {
+            editCard(card.id);
+          }
         });
         const img = div.querySelector('.card-img');
         if (img && card.image) {
@@ -2196,6 +2347,11 @@
             else if (settings.imageClickZoom) {
               void (window.SupabaseSync?.resolveDisplayUrl
                 ? window.SupabaseSync.resolveDisplayUrl(card.image).then(openLightbox)
+                : Promise.resolve(openLightbox(card.image)));
+            }
+            else if (isMobileViewport()) {
+              void (window.SupabaseSync?.resolveDisplayUrl
+                ? window.SupabaseSync.resolveDisplayUrl(card.image).then(url => { if (url) openLightbox(url); })
                 : Promise.resolve(openLightbox(card.image)));
             }
             else editCard(card.id);
@@ -2220,22 +2376,38 @@
         fragment.appendChild(div);
       });
       container.appendChild(fragment);
-      if (window.FeatureDraft?.hydrateFeedImages) {
-        void window.FeatureDraft.hydrateFeedImages(container).then(() => {
-          if (viewMode !== 'list') scheduleLayoutMasonry();
-        });
-      } else if (window.SupabaseSync?.hydrateImageElements) {
-        void window.SupabaseSync.hydrateImageElements(container).then(() => {
-          if (viewMode !== 'list') scheduleLayoutMasonry();
-        });
-      } else if (viewMode !== 'list') {
-        scheduleLayoutMasonry();
-      } else if (masonryInstance) {
+      const afterImages = () => {
+        if (viewMode !== 'list') scheduleLayoutMasonry();
+      };
+      if (viewMode !== 'list') scheduleLayoutMasonry();
+      void prefetchPromise.then(() => {
+        if (window.SupabaseSync?.hydrateImageElements) {
+          return window.SupabaseSync.hydrateImageElements(container);
+        }
+        if (window.FeatureDraft?.hydrateFeedImages) {
+          return window.FeatureDraft.hydrateFeedImages(container);
+        }
+      }).then(afterImages).catch(afterImages);
+      if (viewMode === 'list' && masonryInstance) {
         masonryInstance.destroy();
         masonryInstance = null;
       }
       updateBatchCountLabel();
     }
+
+    document.getElementById('cardsContainer')?.addEventListener('click', (e) => {
+      const copyId = e.target.closest('[data-mobile-copy]')?.getAttribute('data-mobile-copy');
+      if (copyId) {
+        e.stopPropagation();
+        copyCardPromptById(copyId);
+        return;
+      }
+      const fillId = e.target.closest('[data-mobile-fill]')?.getAttribute('data-mobile-fill');
+      if (fillId) {
+        e.stopPropagation();
+        fillCardToImageGen(fillId);
+      }
+    });
 
     document.querySelector('.cards-container')?.addEventListener('scroll', function() {
       if (this.scrollTop + this.clientHeight >= this.scrollHeight - 150 && (page * PER_PAGE) < allFilteredCards.length) { page++; renderCards(); }
@@ -2294,11 +2466,15 @@
         if (card?.image && window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync.isStorageRef(card.image)) {
           try { await window.SupabaseSync.deleteCardImageByUrl(card.image); } catch (e) { /* ignore */ }
         }
+        recordCardDeletion(id);
         window.FeatureDraft?.removeCommunityByCardId?.(id);
         cards = cards.filter(c => c.id !== id);
         await saveAllData();
+        if (window.SupabaseSync?.isLoggedIn?.()) {
+          try { await pushToCloud({ skipSafety: true }); } catch (e) { scheduleCloudPush(); }
+        }
         renderGroups(); renderCards(true);
-        if (selectedCardId === id) { selectedCardId = null; createNewCard(); }
+        if (selectedCardId === id) { selectedCardId = null; createNewCard({ silentMobile: true }); }
       };
       if (confirm) {
         customConfirm('确定永久删除该卡片？此操作不可恢复。', doDelete);
@@ -2311,6 +2487,7 @@
       const card = cards.find(c => c.id === id); if (!card) return;
       selectedCardId = id; isNewCardMode = false;
       highlightSelectedCard(id);
+      openEditPanel();
       document.getElementById('panelTitle').textContent = '编辑卡片';
       document.getElementById('cardTitle').value = card.title || '';
       document.getElementById('cardPrompt').value = card.prompt || '';
@@ -2318,10 +2495,10 @@
       imageData = card.image || null; currentTags = [...(card.tags || [])]; tempCustomFields = [];
       currentCardCustomFields = card.customFields ? { ...card.customFields } : {};
       window.FeatureDraft?.setPublishCheckbox?.(card);
-      renderTags(); renderCustomFields(); updatePreview();
+      renderTags(); renderCustomFields();
       updateDeleteClearButton();
       updatePinToggleUI();
-      openEditPanel();
+      void updatePreview();
     }
 
     function createNewCard(opts) {
@@ -2342,7 +2519,9 @@
       renderTags(); renderCustomFields(); updatePreview();
       updateDeleteClearButton();
       updatePinToggleUI();
-      if (!(window.MobileUI?.isMobile?.() && opts?.silentMobile)) openEditPanel();
+      const mobile = isMobileViewport();
+      const shouldOpenPanel = !mobile || opts?.forceOpenPanel === true;
+      if (shouldOpenPanel && !(mobile && opts?.silentMobile)) openEditPanel();
     }
 
     const TRASH_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
@@ -2535,14 +2714,21 @@
       const img = document.getElementById('previewImage'), p = document.getElementById('dropPlaceholder');
       const removeBtn = document.getElementById('removeImageBtn'), dropArea = document.getElementById('dropArea');
       if (imageData) {
-        img.src = window.SupabaseSync?.resolveDisplayUrl
-          ? await window.SupabaseSync.resolveDisplayUrl(imageData)
-          : imageData;
+        let src = cardImgInitialSrc(imageData);
+        if (src.startsWith('data:image/svg') && window.SupabaseSync?.safeImgSrc) {
+          const safe = window.SupabaseSync.safeImgSrc(imageData);
+          if (safe && !safe.startsWith('data:image/svg')) src = safe;
+        }
+        img.src = src;
         img.style.display = 'block';
         p.style.display = 'none';
         removeBtn.style.display = 'flex';
         dropArea.classList.add('has-image');
         dropArea.classList.remove('no-image');
+        if (window.SupabaseSync?.resolveDisplayUrl && window.SupabaseSync?.isStorageRef?.(imageData)) {
+          const url = await window.SupabaseSync.resolveDisplayUrl(imageData);
+          if (url && url !== img.src) img.src = url;
+        }
       } else {
         img.style.display = 'none';
         p.style.display = 'block';
@@ -2688,28 +2874,52 @@
       document.body.classList.remove('panel-open');
       scheduleLayoutMasonry();
     }
+    window.closeEditPanel = closeEditPanel;
     function openEditPanel() {
       if (globalViewActive) forceExitGlobalView(true);
       window.MobileUI?.closeDrawers?.();
       document.getElementById('editPanel').classList.remove('hidden');
       document.getElementById('fabNewBtn').classList.remove('visible');
       document.body.classList.add('panel-open');
+      requestAnimationFrame(() => {
+        scheduleLayoutMasonry();
+        setTimeout(scheduleLayoutMasonry, 360);
+      });
     }
 
     function openLightbox(src) {
+      if (!src || typeof src !== 'string') return;
       const lightbox = document.getElementById('imageLightbox');
       const img = document.getElementById('lightboxImage');
+      if (!lightbox || !img) return;
+      let shown = false;
       const onReady = () => {
+        if (shown) return;
+        shown = true;
+        img.onload = null;
+        img.onerror = null;
         resetImageZoom(img);
         attachImageZoom(img);
+        lightbox.classList.add('active');
       };
-      lightbox.classList.add('active');
-      const displaySrc = src || '';
-      if (img.src === displaySrc && img.complete) onReady();
-      else {
-        img.onload = () => { img.onload = null; onReady(); };
-        img.src = displaySrc;
+      lightbox.classList.remove('active');
+      img.onwheel = null;
+      img.onmousedown = null;
+      img.ondblclick = null;
+      img.removeAttribute('src');
+      const displaySrc = src;
+      if (img.src === displaySrc && img.complete && img.naturalWidth > 0) {
+        onReady();
+        return;
       }
+      img.onerror = () => {
+        img.onerror = null;
+        img.onload = null;
+        lightbox.classList.remove('active');
+      };
+      img.onload = onReady;
+      img.src = displaySrc;
+      if (img.complete && img.naturalWidth > 0) onReady();
     }
     window.openLightbox = openLightbox;
     window.addEventListener('mousemove', (e) => {
@@ -2726,9 +2936,13 @@
     });
     function closeLightbox(e) {
       if (e && e.target !== document.getElementById('imageLightbox') && e.target !== document.querySelector('.close-lightbox')) return;
-      document.getElementById('imageLightbox').classList.remove('active');
+      const lightbox = document.getElementById('imageLightbox');
+      lightbox?.classList.remove('active');
       const img = document.getElementById('lightboxImage');
       if (img) {
+        img.onload = null;
+        img.onerror = null;
+        img.removeAttribute('src');
         img.onwheel = null;
         img.onmousedown = null;
         img.ondblclick = null;
@@ -2858,6 +3072,8 @@
       if (autoDay) autoDay.checked = settings.autoDayNight !== false;
       const imgPub = document.getElementById('defaultImageGenAutoPublishToggle');
       if (imgPub) imgPub.checked = settings.defaultImageGenAutoPublish !== false;
+      const imgSave = document.getElementById('defaultImageGenAutoSaveToggle');
+      if (imgSave) imgSave.checked = settings.defaultImageGenAutoSaveWarehouse !== false;
       const status = document.getElementById('appSettingsStatus');
       if (status) status.textContent = '';
     }
@@ -2869,6 +3085,8 @@
       const autoOn = autoEl ? autoEl.checked : true;
       const imgPubEl = document.getElementById('defaultImageGenAutoPublishToggle');
       settings.defaultImageGenAutoPublish = imgPubEl ? imgPubEl.checked : true;
+      const imgSaveEl = document.getElementById('defaultImageGenAutoSaveToggle');
+      settings.defaultImageGenAutoSaveWarehouse = imgSaveEl ? imgSaveEl.checked : true;
       const wasAuto = settings.autoDayNight !== false;
       settings.autoDayNight = autoOn;
       if (autoOn && !wasAuto) {

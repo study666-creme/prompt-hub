@@ -1047,16 +1047,16 @@ body {
       position: absolute;
       top: calc(100% + 8px);
       right: 0;
-      min-width: 160px;
+      min-width: 180px;
       max-height: 280px;
       overflow-y: auto;
-      background: rgba(15, 20, 29, 0.98);
-      border: 1px solid var(--border-light);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 6px;
       z-index: 100;
       box-shadow: var(--shadow-lg);
-      backdrop-filter: blur(16px);
+      color: var(--text-primary);
     }
     .filter-dropdown.open { display: block; animation: menuIn 0.2s var(--ease-out); }
     .filter-dropdown button {
@@ -1104,10 +1104,13 @@ body {
       border: none;
       border-radius: var(--radius-sm);
       background: transparent;
-      color: var(--text-secondary);
+      color: var(--text-primary);
       font-size: var(--font-sm);
       cursor: pointer;
       transition: var(--transition);
+    }
+    .filter-option .filter-label {
+      color: var(--text-primary);
     }
     .filter-option:hover { background: var(--bg-hover); color: var(--text-primary); }
     .filter-option.active { background: var(--accent-bg-strong); color: var(--text-primary); }
@@ -1461,6 +1464,33 @@ body {
       background: #161616;
       flex-shrink: 0;
       line-height: 0;
+    }
+    .card-media.is-loading::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      background: linear-gradient(
+        135deg,
+        transparent 32%,
+        rgba(255, 255, 255, 0.05) 40%,
+        rgba(255, 255, 255, 0.22) 50%,
+        rgba(255, 255, 255, 0.05) 60%,
+        transparent 68%
+      );
+      background-size: 240% 240%;
+      animation: card-media-shine 1.05s ease-out 1;
+    }
+    @keyframes card-media-shine {
+      0% { background-position: 115% 0%; }
+      100% { background-position: -15% 100%; }
+    }
+    .card-head--meta-only {
+      justify-content: flex-end;
+    }
+    .card-head--meta-only .card-time {
+      margin-left: auto;
     }
     .card .card-img {
       width: 100%;
@@ -2160,29 +2190,40 @@ body {
       left: 0;
       width: 100%;
       height: 100%;
-      background: rgba(0,0,0,0.6);
+      background: color-mix(in srgb, var(--bg-primary) 55%, transparent);
       z-index: 500;
       display: none;
       align-items: center;
       justify-content: center;
-      backdrop-filter: blur(8px);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
     }
     .custom-modal-overlay.active { display: flex; }
     .custom-modal {
-      background: rgba(17, 24, 39, 0.96);
-      backdrop-filter: blur(16px);
+      background: var(--bg-elevated);
       border: 1px solid var(--border);
-      border-radius: 32px;
-      width: 420px;
+      border-radius: 20px;
+      width: 400px;
       max-width: 90vw;
-      padding: 32px 36px 36px;
+      padding: 24px 26px 22px;
       color: var(--text-primary);
       box-shadow: var(--shadow-lg);
       max-height: 80vh;
       overflow-y: auto;
     }
-    .custom-modal h3 { color: var(--accent); margin: 0 0 18px; font-weight: 700; font-size: 18px; }
-    .custom-modal p { color: var(--text-secondary); margin: 0 0 28px; line-height: 1.6; font-size: var(--font-sm); }
+    .custom-modal h3 {
+      color: var(--text-primary);
+      margin: 0 0 12px;
+      font-weight: 700;
+      font-size: 17px;
+      letter-spacing: -0.02em;
+    }
+    .custom-modal p {
+      color: var(--text-secondary);
+      margin: 0 0 22px;
+      line-height: 1.55;
+      font-size: var(--font-sm);
+    }
     .modal-actions {
       display: flex;
       justify-content: flex-end;

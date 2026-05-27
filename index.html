@@ -2,6 +2,32 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <script>
+    window.__APP_BUILD__ = '20260528k';
+    (function () {
+      var key = 'promptrepo_app_build';
+      var cur = window.__APP_BUILD__;
+      var prev = localStorage.getItem(key);
+      if (prev && prev !== cur) {
+        localStorage.setItem(key, cur);
+        var clearAndReload = function () { location.reload(); };
+        if ('caches' in window) {
+          caches.keys().then(function (keys) {
+            return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+          }).then(clearAndReload).catch(clearAndReload);
+        } else {
+          clearAndReload();
+        }
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function (regs) {
+            return Promise.all(regs.map(function (r) { return r.unregister(); }));
+          }).catch(function () {});
+        }
+        return;
+      }
+      if (!prev) localStorage.setItem(key, cur);
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#121212">
   <meta name="mobile-web-app-capable" content="yes">
@@ -17,12 +43,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js"></script>
-  <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="styles-theme.css">
-  <link rel="stylesheet" href="styles-mobile.css">
-  <link rel="stylesheet" href="styles-settings.css">
-  <link rel="stylesheet" href="styles-features.css">
-  <script src="theme.js"></script>
+  <link rel="stylesheet" href="styles.css?v=20260528k">
+  <link rel="stylesheet" href="styles-theme.css?v=20260528k">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260528k">
+  <link rel="stylesheet" href="styles-settings.css?v=20260528k">
+  <link rel="stylesheet" href="styles-features.css?v=20260528k">
+  <script src="theme.js?v=20260528k"></script>
 </head>
 <body>
   <div class="mobile-drawer-overlay" id="mobileDrawerOverlay" aria-hidden="true"></div>
@@ -80,6 +106,12 @@
             <input type="checkbox" id="defaultImageGenAutoPublishToggle" checked>
             <span class="settings-check-box" aria-hidden="true"></span>
             <span class="settings-check-label">进入生图页时默认开启「自动发布社区」</span>
+          </label>
+          <p class="settings-hint">关闭后，每次打开生图页该选项默认关闭；在生图页临时关闭不影响下次打开</p>
+          <label class="settings-check settings-check-spaced">
+            <input type="checkbox" id="defaultImageGenAutoSaveToggle" checked>
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">进入生图页时默认开启「自动存仓库」</span>
           </label>
           <p class="settings-hint">关闭后，每次打开生图页该选项默认关闭；在生图页临时关闭不影响下次打开</p>
         </section>
@@ -606,6 +638,11 @@
               <button type="button" class="feature-tab active" data-community-sort="hot">热门</button>
               <button type="button" class="feature-tab" data-community-sort="new">最新</button>
             </div>
+            <div class="feature-tabs community-media-tabs" role="group" aria-label="内容类型">
+              <button type="button" class="feature-tab active" data-community-media="all">全部</button>
+              <button type="button" class="feature-tab" data-community-media="image">仅图片</button>
+              <button type="button" class="feature-tab" data-community-media="text">仅文字</button>
+            </div>
             <input type="search" class="feature-search" id="communitySearch" placeholder="搜索提示词…" autocomplete="off">
           </div>
         </header>
@@ -670,6 +707,7 @@
         </header>
         <div class="imagegen-layout">
           <div class="imagegen-form">
+            <div class="imagegen-form-scroll">
             <div class="imagegen-credits-box">
               <div class="imagegen-credits-top">
                 <span class="imagegen-credits-label">当前积分 <strong data-credits-display>0</strong> <span class="imagegen-credits-detail hidden" data-credits-detail></span> <span class="imagegen-credits-rate">（1 元 = 100 积分）</span></span>
@@ -714,9 +752,9 @@
             <label for="imageGenPrompt">提示词</label>
             <textarea id="imageGenPrompt" placeholder="描述你想生成的画面…"></textarea>
             <label>参考图（可选）</label>
-            <div class="imagegen-ref" id="imageGenRefBox">
+            <div class="imagegen-ref imagegen-ref-zone" id="imageGenRefBox">
               <div class="imagegen-ref-drop" id="imageGenRefDrop">
-                <p class="imagegen-ref-hint imagegen-ref-hint-desktop">拖拽图片到此处，或点击选择 · 支持 Ctrl+V 粘贴 · 可多张</p>
+                <p class="imagegen-ref-hint imagegen-ref-hint-desktop">拖拽到本区域（虚线框外也可）或点击选择 · 支持 Ctrl+V · 可多张</p>
                 <p class="imagegen-ref-hint imagegen-ref-hint-mobile">点击选择相册图片 · 可多张</p>
                 <input type="file" id="imageGenRefInput" accept="image/*" multiple>
               </div>
@@ -725,11 +763,19 @@
             <div class="panel-publish-row imagegen-publish-row" id="imageGenPublishRow">
               <div class="panel-publish-copy">
                 <span class="panel-publish-title">自动发布社区</span>
-                <p class="panel-hint">生成完成后自动发布到社区；此处关闭后，下次进入生图页仍会默认开启（可在全局设置改为默认关闭）</p>
+                <p class="panel-hint">生成完成后自动发布到社区；</p>
               </div>
               <button type="button" class="publish-circle-btn is-on" id="imageGenAutoPublishBtn" aria-pressed="true" aria-label="自动发布社区" title="切换自动发布"></button>
             </div>
-            <div class="imagegen-form-actions">
+            <div class="panel-publish-row imagegen-publish-row" id="imageGenAutoSaveRow">
+              <div class="panel-publish-copy">
+                <span class="panel-publish-title">自动存仓库</span>
+                <p class="panel-hint">生成完成后自动保存到卡片仓库；</p>
+              </div>
+              <button type="button" class="publish-circle-btn is-on" id="imageGenAutoSaveBtn" aria-pressed="true" aria-label="自动存仓库" title="切换自动存仓库"></button>
+            </div>
+            </div>
+            <div class="imagegen-form-footer">
               <p class="imagegen-price-hint" id="imageGenCostHint" aria-live="polite"></p>
               <button type="button" class="btn btn-primary imagegen-generate-btn" id="imageGenSubmit">生成图片 · 10 积分</button>
             </div>
@@ -748,6 +794,13 @@
             </div>
             <p class="imagegen-feed-hint" id="imageGenFeedHint">我的生成记录 · 保留 3 天，发布到社区永久</p>
             <div class="imagegen-feed" id="imageGenFeed"></div>
+            <aside class="imagegen-preview-panel hidden" id="imageGenPreviewPanel" aria-label="作品详情">
+              <div class="imagegen-preview-head">
+                <h4>作品详情</h4>
+                <button type="button" class="imagegen-preview-close" id="imageGenPreviewClose" aria-label="关闭">✕</button>
+              </div>
+              <div class="imagegen-preview-body" id="imageGenPreviewBody"></div>
+            </aside>
           </aside>
         </div>
       </div>
@@ -817,19 +870,28 @@
       document.head.appendChild(s);
     }
   </script>
-  <script src="api-client.js?v=20260527b"></script>
-  <script src="cloud-sync-safety.js?v=20260527b"></script>
-  <script src="supabase-sync.js?v=20260527b"></script>
-  <script src="membership.js?v=20260527b"></script>
-  <script src="subscription.js?v=20260527b"></script>
-  <script src="script.js?v=20260527b"></script>
-  <script src="points-system.js?v=20260527b"></script>
-  <script src="features-draft.js?v=20260527b"></script>
-  <script src="mobile.js?v=20260527b"></script>
+  <script src="api-client.js?v=20260528k"></script>
+  <script src="cloud-sync-safety.js?v=20260528k"></script>
+  <script src="supabase-sync.js?v=20260528k"></script>
+  <script src="membership.js?v=20260528k"></script>
+  <script src="subscription.js?v=20260528k"></script>
+  <script src="script.js?v=20260528k"></script>
+  <script src="points-system.js?v=20260528k"></script>
+  <script src="features-draft.js?v=20260528k"></script>
+  <script src="mobile.js?v=20260528k"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').catch(() => {});
+        const swUrl = './sw.js?v=' + encodeURIComponent(window.__APP_BUILD__ || '55');
+        navigator.serviceWorker.register(swUrl).then((reg) => {
+          reg.update();
+          let reloaded = false;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (reloaded) return;
+            reloaded = true;
+            location.reload();
+          });
+        }).catch(() => {});
       });
     }
   </script>

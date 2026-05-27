@@ -189,6 +189,15 @@
       badge.textContent = '¥1.9续杯';
       return;
     }
+    if (window.Membership?.isMember?.()) {
+      const tier = window.Membership.getMemberTier?.();
+      if (tier === 'basic') {
+        badge.textContent = '约五折';
+        return;
+      }
+      badge.textContent = window.Membership.getGenDiscountLabel?.() || '会员';
+      return;
+    }
     badge.textContent = '会员';
   }
 

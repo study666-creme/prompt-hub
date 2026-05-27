@@ -17,6 +17,7 @@
   let favIds = new Set();
   let creationsTab = 'private';
   let communitySort = 'hot';
+  let communityMediaFilter = 'all';
   let openPostId = null;
   let openProfileAuthorId = null;
   const MAX_REF_IMAGES = 16;
@@ -28,6 +29,8 @@
   let imageGenPendingJobs = [];
   /** null = 本次进入生图页尚未手动改过；离开后再进会重置 */
   let imageGenAutoPublishSession = null;
+  let imageGenAutoSaveSession = null;
+  let imageGenMasonry = null;
   let imageGenWhGroup = 'all';
   let imageGenWhTag = 'all';
   let communityMasonry = null;
@@ -35,7 +38,11 @@
   let creationsMasonry = null;
   let communitySidePostId = null;
   let creationsSideId = null;
+  let imageGenPreviewId = null;
+  let imageGenPreviewKind = null;
   let layoutCommunityTimer = null;
+  let imageGenLayoutTimer = null;
+  const displayUrlCache = new Map();
 
   function esc(s) {
     const d = document.createElement('div');
@@ -186,46 +193,134 @@
     return image.includes('演示生成');
   }
 
+  function isDisplayableImage(image) {
+    if (!image || typeof image !== 'string') return false;
+    if (isDemoPlaceholderImage(image)) return false;
+    return true;
+  }
+
   async function resolveImageDisplayUrl(image, jobId) {
     if (!image) return '';
+    const cacheKey = jobId ? `job:${jobId}` : image;
+    const hit = displayUrlCache.get(cacheKey);
+    if (hit) return hit;
+    let url = '';
     if (jobId && window.PromptHubApi?.getGenerationImageUrl) {
       const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
-      if (r.ok && r.data?.url) return r.data.url;
+      if (r.ok && r.data?.url) url = r.data.url;
     }
-    if (window.SupabaseSync?.resolveDisplayUrl) {
+    if (!url && window.SupabaseSync?.resolveDisplayUrl) {
       try {
-        return await window.SupabaseSync.resolveDisplayUrl(image);
+        url = await window.SupabaseSync.resolveDisplayUrl(image);
       } catch (e) {
         console.warn('resolve image failed', e);
       }
     }
-    if (typeof image === 'string' && /^https?:\/\//i.test(image)) return image;
-    return '';
+    if (!url && typeof image === 'string' && /^https?:\/\//i.test(image)) url = image;
+    if (url && !url.startsWith('storage://')) displayUrlCache.set(cacheKey, url);
+    return url || '';
   }
 
   const IMG_LOADING_PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect fill="#1e1e24" width="8" height="8"/></svg>'
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect fill="#e4e4ea" width="16" height="16"/></svg>'
   );
+
+  function bindFeedImgErrorFallback(img) {
+    if (!img || img.dataset.feedImgErrBound) return;
+    img.dataset.feedImgErrBound = '1';
+    img.addEventListener('error', () => {
+      const cur = img.getAttribute('src') || '';
+      if (!cur.startsWith('data:image/svg')) {
+        img.src = IMG_LOADING_PLACEHOLDER;
+        img.classList.remove('img-load-failed');
+      }
+    });
+  }
+
+  async function applyFeedImageSrc(img, ref, jobId) {
+    const feedMedia = img.closest('.imagegen-feed-media');
+    if (!ref || !isDisplayableImage(ref)) return false;
+    bindFeedImgErrorFallback(img);
+    let url = displayUrlCache.get(jobId ? `job:${jobId}` : ref) || '';
+    if (!url) {
+      const cached = window.SupabaseSync?.getCachedDisplayUrl?.(ref);
+      if (cached && typeof cached === 'string' && !cached.startsWith('storage://') && !cached.startsWith('data:image/svg')) {
+        url = cached;
+      }
+    }
+    if (!url) url = await resolveImageDisplayUrl(ref, jobId || null);
+    if (!url || url.startsWith('storage://')) return false;
+    const endLoad = () => {
+      if (feedMedia) {
+        if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(feedMedia);
+        else feedMedia.classList.remove('is-loading');
+      }
+    };
+    if (img.complete && img.src === url && img.naturalWidth > 0) {
+      endLoad();
+      return true;
+    }
+    img.addEventListener('load', endLoad, { once: true });
+    img.src = url;
+    img.classList.remove('img-load-failed');
+    if (img.complete && img.naturalWidth > 0) endLoad();
+    return true;
+  }
+
+  function feedImgStorageAttr(image) {
+    if (!image || typeof image !== 'string') return '';
+    if (window.SupabaseSync?.isStorageRef?.(image)) {
+      return ` data-storage-ref="${esc(image)}"`;
+    }
+    return '';
+  }
+
+  function stripFailedFeedMedia(scope) {
+    scope.querySelectorAll('.imagegen-feed-media img.img-load-failed').forEach(img => {
+      const media = img.closest('.imagegen-feed-media');
+      media?.remove();
+      const card = img.closest('.imagegen-feed-card');
+      if (card) card.classList.add('imagegen-feed-card--no-media');
+    });
+  }
 
   async function hydrateFeedImages(root) {
     const scope = root || document;
-    const imgs = scope.querySelectorAll('img[data-image-ref]');
+    const imgs = scope.querySelectorAll(
+      '.imagegen-feed img[data-image-ref], #imageGenFeed img[data-image-ref], #creationsSideBody img[data-image-ref], #creationsGrid img[data-image-ref], #communityGrid img[data-image-ref], #userProfileGrid img[data-image-ref]'
+    );
     await Promise.all([...imgs].map(async img => {
       const ref = img.getAttribute('data-image-ref');
       const jobId = img.getAttribute('data-job-id') || '';
-      if (!ref) return;
-      img.src = IMG_LOADING_PLACEHOLDER;
-      const url = await resolveImageDisplayUrl(ref, jobId || null);
-      if (url && !url.startsWith('storage://')) {
-        img.src = url;
-        img.classList.remove('img-load-failed');
-      } else {
-        img.classList.add('img-load-failed');
+      const media = img.closest('.imagegen-feed-media');
+      const sideBtn = img.closest('.community-side-img-btn');
+      if (!ref || !isDisplayableImage(ref)) {
+        media?.remove();
+        img.closest('.imagegen-feed-card')?.classList.add('imagegen-feed-card--no-media');
+        return;
+      }
+      if (media?.classList.contains('imagegen-gen-pending')) return;
+      if (media) {
+        if (!media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
+        media.classList.add('is-loading');
+      }
+      if (!img.getAttribute('src') || !img.getAttribute('src').startsWith('data:image/svg')) {
+        img.src = IMG_LOADING_PLACEHOLDER;
+      }
+      img.classList.remove('img-load-failed');
+      const ok = await applyFeedImageSrc(img, ref, jobId || null);
+      if (!ok) {
+        media?.classList.remove('is-loading');
+        if (media) {
+          media.remove();
+          img.closest('.imagegen-feed-card')?.classList.add('imagegen-feed-card--no-media');
+        } else if (sideBtn) {
+          img.src = IMG_LOADING_PLACEHOLDER;
+        }
       }
     }));
-    if (window.SupabaseSync?.hydrateImageElements) {
-      await window.SupabaseSync.hydrateImageElements(scope);
-    }
+    stripFailedFeedMedia(scope);
+    scheduleImageGenFeedLayout();
   }
 
   function getPostsByAuthor(authorId) {
@@ -244,6 +339,17 @@
     if (!prompt) return '暂无提示词';
     if (prompt.length <= 80) return prompt;
     return prompt.slice(0, 80) + '…';
+  }
+
+  /** 侧栏标题最多 10 字 */
+  function getPostSideTitle(post) {
+    const title = (post.title || '').trim();
+    if (title && !isGenericPostTitle(title)) {
+      return title.length > 10 ? title.slice(0, 10) + '…' : title;
+    }
+    const prompt = (post.prompt || '').trim();
+    if (!prompt) return '提示词详情';
+    return prompt.length > 10 ? prompt.slice(0, 10) + '…' : prompt;
   }
 
   function getPostDesc(post) {
@@ -283,14 +389,175 @@
     return c.toDataURL('image/jpeg', 0.85);
   }
 
+  function isGenericFeedTitle(title) {
+    const t = (title || '').trim();
+    return !t || t === '未命名' || t === '未命名提示词' || t === '我的作品' || t === '生成图';
+  }
+
+  /** 标题行仅显示真实标题；勿把提示词首行当标题 */
+  function resolveFeedCardDisplay(title, prompt) {
+    const t = (title || '').trim();
+    const p = (prompt || '').trim();
+    let showTitle = '';
+    if (t && !isGenericFeedTitle(t) && t !== p) {
+      if (!(p && p.startsWith(t) && t.length >= 6)) showTitle = t;
+    }
+    const showPrompt = p || '';
+    return { showTitle, showPrompt };
+  }
+
+  function feedImgInitialSrc(image, jobId) {
+    if (!image || !isDisplayableImage(image)) return '';
+    const cached = window.SupabaseSync?.getCachedDisplayUrl?.(image);
+    if (cached && typeof cached === 'string' && !cached.startsWith('storage://') && !cached.startsWith('data:image/svg')) {
+      return cached;
+    }
+    if (jobId) {
+      const jobCached = displayUrlCache.get(`job:${jobId}`);
+      if (jobCached && !jobCached.startsWith('storage://')) return jobCached;
+    }
+    return IMG_LOADING_PLACEHOLDER;
+  }
+
+  function communityImgInitialSrc(image) {
+    return feedImgInitialSrc(image, null);
+  }
+
+  function patchCommunityLikeUI(id) {
+    const post = findPost(id);
+    if (!post) return;
+    const label = `♥ ${post.likes || 0}`;
+    const liked = likedIds.has(id);
+    document.querySelectorAll(`#communityGrid .card[data-post-id="${id}"] .card-time`).forEach(el => {
+      el.textContent = label;
+      el.classList.toggle('liked', liked);
+    });
+    if (openProfileAuthorId) {
+      document.querySelectorAll(`#userProfileGrid .card[data-post-id="${id}"] .card-time`).forEach(el => {
+        el.textContent = label;
+        el.classList.toggle('liked', liked);
+      });
+    }
+  }
+
+  function patchCommunitySidePanelUI(id) {
+    if (communitySidePostId !== id) return;
+    const post = findPost(id);
+    const body = document.getElementById('communitySideBody');
+    if (!post || !body) return;
+    const liked = likedIds.has(id);
+    const faved = favIds.has(id);
+    const stats = body.querySelector('.community-side-stats');
+    if (stats) {
+      stats.innerHTML = `<span>♥ ${post.likes || 0} 点赞</span><span>${faved ? '已收藏' : '未收藏'}</span>`;
+    }
+    const likeBtn = body.querySelector('[data-action="like"]');
+    if (likeBtn) likeBtn.textContent = `♥ ${liked ? '已点赞' : '点赞'}`;
+    const favBtn = body.querySelector('[data-action="fav"]');
+    if (favBtn) favBtn.textContent = faved ? '已收藏' : '收藏';
+  }
+
+  function scheduleImageGenFeedLayout() {
+    clearTimeout(imageGenLayoutTimer);
+    imageGenLayoutTimer = setTimeout(() => layoutImageGenFeedMasonry(), 80);
+  }
+
+  function layoutImageGenFeedMasonry() {
+    if (window.MobileUI?.isMobile?.()) return;
+    const wrap = document.getElementById('imageGenFeed');
+    if (!wrap || typeof Masonry === 'undefined') return;
+    const cardEls = wrap.querySelectorAll('.imagegen-feed-card');
+    if (!cardEls.length) {
+      if (imageGenMasonry) {
+        imageGenMasonry.destroy();
+        imageGenMasonry = null;
+      }
+      return;
+    }
+    const gap = getMasonryGap();
+    const style = getComputedStyle(wrap);
+    const innerW = wrap.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    if (innerW < 80) {
+      scheduleImageGenFeedLayout();
+      return;
+    }
+    const minCol = 148;
+    const cols = Math.max(2, Math.min(6, Math.floor((innerW + gap) / (minCol + gap))));
+    const colWidth = Math.max(120, Math.floor((innerW - gap * (cols - 1)) / cols));
+    let sizer = wrap.querySelector('.grid-sizer');
+    if (!sizer) {
+      sizer = document.createElement('div');
+      sizer.className = 'grid-sizer';
+      wrap.insertBefore(sizer, wrap.firstChild);
+    }
+    sizer.style.width = colWidth + 'px';
+    cardEls.forEach(card => { card.style.width = colWidth + 'px'; });
+    const opts = {
+      itemSelector: '.imagegen-feed-card',
+      columnWidth: '.grid-sizer',
+      gutter: gap,
+      percentPosition: false,
+      transitionDuration: '0.35s'
+    };
+    if (imageGenMasonry) {
+      imageGenMasonry.option(opts);
+      imageGenMasonry.reloadItems();
+      imageGenMasonry.layout();
+    } else {
+      cardEls.forEach(card => {
+        card.style.left = '';
+        card.style.top = '';
+        card.style.position = '';
+      });
+      imageGenMasonry = new Masonry(wrap, opts);
+    }
+    requestAnimationFrame(() => imageGenMasonry?.layout());
+  }
+
   function scheduleCommunityLayout(containerId) {
     clearTimeout(layoutCommunityTimer);
-    layoutCommunityTimer = setTimeout(() => layoutCommunityMasonry(containerId), 100);
+    layoutCommunityTimer = setTimeout(() => layoutCommunityMasonry(containerId), 80);
+  }
+
+  function bindCommunityGridImageRelayout(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.querySelectorAll('img.card-img, .card-media img').forEach(img => {
+      if (img.dataset.masonryRelayoutBound) return;
+      img.dataset.masonryRelayoutBound = '1';
+      const relayout = () => scheduleCommunityLayout(containerId);
+      img.addEventListener('load', relayout, { once: true });
+      img.addEventListener('error', relayout, { once: true });
+    });
+  }
+
+  function scheduleLayoutAfterImages(containerId) {
+    scheduleCommunityLayout(containerId);
+    bindCommunityGridImageRelayout(containerId);
   }
 
   function layoutCommunityMasonry(containerId) {
     const container = document.getElementById(containerId);
     if (!container || typeof Masonry === 'undefined') return;
+    if (window.MobileUI?.isMobile?.()) {
+      if (containerId === 'creationsGrid' && creationsMasonry) {
+        creationsMasonry.destroy();
+        creationsMasonry = null;
+      } else if (containerId === 'userProfileGrid' && profileMasonry) {
+        profileMasonry.destroy();
+        profileMasonry = null;
+      } else if (communityMasonry) {
+        communityMasonry.destroy();
+        communityMasonry = null;
+      }
+      container.querySelectorAll('.card').forEach(card => {
+        card.style.width = '';
+        card.style.left = '';
+        card.style.top = '';
+        card.style.position = '';
+      });
+      return;
+    }
     const cardEls = container.querySelectorAll('.card');
     const isProfile = containerId === 'userProfileGrid';
     const isCreations = containerId === 'creationsGrid';
@@ -346,6 +613,7 @@
       else communityMasonry = instance;
     }
     requestAnimationFrame(() => instance?.layout());
+    bindCommunityGridImageRelayout(containerId);
   }
 
   function bindAuthorLink(el, authorId, authorName) {
@@ -391,25 +659,46 @@
       div.style.animationDelay = `${Math.min(idx * 0.045, 0.36)}s`;
       div.dataset.postId = post.id;
       const liked = likedIds.has(post.id);
-      const mediaInner = post.image
-        ? `<img class="card-img" src="${IMG_LOADING_PLACEHOLDER}" data-image-ref="${esc(post.image)}" loading="lazy" draggable="false" alt="" onload="if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleLayout('${containerId}')">`
-        : '<div class="card-media-placeholder" aria-hidden="true"></div>';
+      const showImage = isDisplayableImage(post.image);
+      const titleTrim = (post.title || '').trim();
+      const hasRealTitle = titleTrim && !isGenericPostTitle(titleTrim);
+      const storageAttr = feedImgStorageAttr(post.image);
+      const imgSrc = showImage ? communityImgInitialSrc(post.image) : '';
+      const imgLoading = showImage && imgSrc === IMG_LOADING_PLACEHOLDER;
+      const mediaHtml = showImage
+        ? `<div class="card-media${imgLoading ? ' is-loading' : ''}"${imgLoading ? ` data-shine-at="${Date.now()}"` : ''}><img class="card-img" src="${esc(imgSrc)}" data-image-ref="${esc(post.image)}"${storageAttr} loading="lazy" draggable="false" alt="" onload="if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.card-media'));if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleLayout('${containerId}')"></div>`
+        : '';
       const timeLabel = `♥ ${post.likes || 0}`;
-      const desc = getPostDesc(post);
-      const descHtml = desc ? `<div class="card-desc">${esc(desc)}</div>` : '';
+      const promptTrim = (post.prompt || '').trim();
+      const headHtml = hasRealTitle
+        ? `<div class="card-head"><div class="card-title">${esc(titleTrim)}</div><time class="card-time ${liked ? 'liked' : ''}">${esc(timeLabel)}</time></div>`
+        : '';
+      const descHtml = promptTrim ? `<div class="card-desc">${esc(promptTrim)}</div>` : '';
+      const likeInTags = !hasRealTitle
+        ? `<span class="card-time card-time-inline ${liked ? 'liked' : ''}">${esc(timeLabel)}</span>`
+        : '';
       div.innerHTML = `
-        <div class="card-media">${mediaInner}</div>
+        ${mediaHtml}
         <div class="card-body">
-          <div class="card-head">
-            <div class="card-title card-title-prompt">${esc(getPostTitle(post))}</div>
-            <time class="card-time ${liked ? 'liked' : ''}">${esc(timeLabel)}</time>
-          </div>
+          ${headHtml}
           ${descHtml}
-          <div class="card-tags">
+          <div class="card-tags">${likeInTags}
             <button type="button" class="tag community-author-link" data-author-id="${esc(post.authorId)}" data-author-name="${esc(post.authorName)}">${esc(post.authorName)}</button>
           </div>
         </div>`;
       div.addEventListener('click', () => openCommunitySidePanel(post.id));
+      const user = getActiveUser();
+      if (user.id !== 'guest' && post.authorId === user.id) {
+        div.addEventListener('contextmenu', e => {
+          e.preventDefault();
+          e.stopPropagation();
+          const menuFn = window.showContextMenu;
+          if (typeof menuFn !== 'function') return;
+          menuFn(e.clientX, e.clientY, [
+            { label: '从社区删除', danger: true, action: () => confirmDeleteCommunityPost(post.id) }
+          ]);
+        });
+      }
       const authorBtn = div.querySelector('.community-author-link');
       if (authorBtn) bindAuthorLink(authorBtn, post.authorId, post.authorName);
       fragment.appendChild(div);
@@ -417,7 +706,8 @@
 
     container.innerHTML = '';
     container.appendChild(fragment);
-    void hydrateFeedImages(container).then(() => scheduleCommunityLayout(containerId));
+    scheduleLayoutAfterImages(containerId);
+    void hydrateFeedImages(container).then(() => scheduleLayoutAfterImages(containerId));
   }
 
   function filterAndSortPosts(list) {
@@ -429,6 +719,11 @@
         (p.prompt || '').toLowerCase().includes(q) ||
         (p.authorName || '').toLowerCase().includes(q)
       );
+    }
+    if (communityMediaFilter === 'image') {
+      filtered = filtered.filter(p => isDisplayableImage(p.image));
+    } else if (communityMediaFilter === 'text') {
+      filtered = filtered.filter(p => !isDisplayableImage(p.image));
     }
     if (communitySort === 'new') {
       filtered.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -523,12 +818,61 @@
   function removeCommunityByCardId(cardId) {
     const i = communityPosts.findIndex(p => p.sourceCardId === cardId);
     if (i >= 0) {
-      const authorId = communityPosts[i].authorId;
-      communityPosts.splice(i, 1);
-      persistCommunity();
-      renderCommunity();
-      if (openProfileAuthorId === authorId) renderUserProfileGrid();
+      const postId = communityPosts[i].id;
+      performCommunityPostRemoval(postId, { silent: true });
     }
+  }
+
+  function confirmDeleteCommunityPost(id) {
+    const post = findPost(id);
+    if (!post) return;
+    const user = getActiveUser();
+    if (user.id === 'guest') {
+      window.AuthGate?.requireAuth?.('community');
+      return;
+    }
+    if (post.authorId !== user.id) {
+      toast('只能删除自己的作品');
+      return;
+    }
+    const msg = '确定从社区永久删除该作品？无回收站，删除后不可恢复。';
+    const doDel = () => performCommunityPostRemoval(id);
+    if (typeof window.customConfirm === 'function') window.customConfirm(msg, doDel);
+    else if (confirm(msg)) doDel();
+  }
+
+  function performCommunityPostRemoval(id, opts = {}) {
+    const post = findPost(id);
+    if (!post) return;
+    const authorId = post.authorId;
+    if (post.sourceCardId) {
+      const card = window.__promptHubCards?.find(c => c.id === post.sourceCardId);
+      if (card) {
+        syncCardToCommunity(card, false);
+        if (typeof window.persistPromptHubCards === 'function') void window.persistPromptHubCards();
+      } else {
+        communityPosts = communityPosts.filter(p => p.id !== id);
+        persistCommunity();
+      }
+    } else {
+      communityPosts = communityPosts.filter(p => p.id !== id);
+      persistCommunity();
+    }
+    const cIdx = creations.findIndex(c => c.communityPostId === id);
+    if (cIdx >= 0) {
+      creations[cIdx].visibility = 'private';
+      creations[cIdx].communityPostId = null;
+      creations[cIdx].permanent = false;
+      persistCreations();
+    }
+    likedIds.delete(id);
+    favIds.delete(id);
+    persistLikes();
+    if (communitySidePostId === id) closeCommunitySidePanel();
+    renderCommunity();
+    if (openProfileAuthorId === authorId) renderUserProfileGrid();
+    if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed();
+    if (!opts.silent) toast('已从社区删除');
   }
 
   function setPublishCheckbox(card) {
@@ -579,11 +923,13 @@
     persistLikes();
     persistCommunity();
     window.PointsSystem?.onPostLikesUpdated?.(post, getActiveUser);
-    renderCommunity();
-    if (openProfileAuthorId) renderUserProfileGrid();
-    if (communitySidePostId === id) renderCommunitySidePanel(id);
+    patchCommunityLikeUI(id);
+    patchCommunitySidePanelUI(id);
     if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-      renderImageGenFeed();
+      document.querySelectorAll(`.imagegen-feed-like[data-like-id="${id}"]`).forEach(btn => {
+        btn.textContent = `♥ ${post.likes || 0}`;
+        btn.classList.add('liked');
+      });
     }
     return true;
   }
@@ -604,15 +950,14 @@
     const body = document.getElementById('communitySideBody');
     const titleEl = document.getElementById('communitySideTitle');
     if (!post || !body) return;
-    if (titleEl) titleEl.textContent = getPostTitle(post);
+    if (titleEl) titleEl.textContent = getPostSideTitle(post);
     const faved = favIds.has(id);
     const liked = likedIds.has(id);
-    let sideImgSrc = post.image || '';
-    if (sideImgSrc && window.SupabaseSync?.resolveDisplayUrl) {
-      sideImgSrc = await window.SupabaseSync.resolveDisplayUrl(sideImgSrc);
-    }
-    const imgBlock = sideImgSrc
-      ? `<img class="community-side-img" src="${esc(sideImgSrc)}" alt="">`
+    const storageAttr = feedImgStorageAttr(post.image);
+    const showSideImg = post.image && isDisplayableImage(post.image);
+    const sideInitial = showSideImg ? communityImgInitialSrc(post.image) : '';
+    const imgBlock = showSideImg
+      ? `<button type="button" class="community-side-img-btn" data-side-zoom title="点击放大"><img class="community-side-img" src="${esc(sideInitial)}" data-image-ref="${esc(post.image)}"${storageAttr} alt=""></button>`
       : '';
     body.innerHTML = `
       ${imgBlock}
@@ -630,15 +975,25 @@
         <button type="button" class="btn btn-secondary" data-action="copy">复制</button>
         <button type="button" class="btn btn-secondary" data-action="fav">${faved ? '已收藏' : '收藏'}</button>
         <button type="button" class="btn btn-primary" data-action="remix">制作同款</button>
+        ${getActiveUser().id !== 'guest' && post.authorId === getActiveUser().id ? '<button type="button" class="btn btn-secondary community-side-del" data-action="del-post">删除作品</button>' : ''}
       </div>
-      <p class="panel-hint">复制、收藏、制作同款会自动点赞</p>`;
+      <p class="panel-hint">点赞、收藏、制作同款需单独点击；「复制」仅复制提示词${getActiveUser().id !== 'guest' && post.authorId === getActiveUser().id ? '；删除后不可恢复' : ''}</p>`;
     body.querySelector('[data-action="like"]')?.addEventListener('click', () => likeCommunityPostOnly(id));
     body.querySelector('[data-action="copy"]')?.addEventListener('click', () => copyPostPrompt(post));
     body.querySelector('[data-action="fav"]')?.addEventListener('click', () => favoritePost(id, post));
     body.querySelector('[data-action="remix"]')?.addEventListener('click', () => remixToImageGen(post));
+    body.querySelector('[data-action="del-post"]')?.addEventListener('click', () => confirmDeleteCommunityPost(id));
+    body.querySelector('[data-side-zoom]')?.addEventListener('click', () => {
+      void (async () => {
+        const url = await resolveImageDisplayUrl(post.image, null);
+        if (url && typeof window.openLightbox === 'function') window.openLightbox(url);
+        else toast('图片尚未加载完成，请稍候再试');
+      })();
+    });
     const authorBtn = body.querySelector('.community-detail-author-btn');
     if (authorBtn) bindAuthorLink(authorBtn, post.authorId, post.authorName);
     highlightCommunityCard(id);
+    if (showSideImg) await hydrateFeedImages(body);
     const timeEl = document.querySelector(`#communityGrid .card[data-post-id="${id}"] .card-time`);
     if (timeEl) {
       timeEl.textContent = `♥ ${post.likes || 0}`;
@@ -654,8 +1009,8 @@
     const panel = document.getElementById('communitySidePanel');
     panel?.classList.remove('hidden');
     document.body.classList.add('community-panel-open');
-    renderCommunitySidePanel(id);
-    scheduleCommunityLayout('communityGrid');
+    void renderCommunitySidePanel(id);
+    requestAnimationFrame(() => scheduleCommunityLayout('communityGrid'));
   }
 
   function closeCommunitySidePanel() {
@@ -678,10 +1033,15 @@
     closeCommunitySidePanel();
   }
 
-  function copyPostPrompt(post) {
+  function copyPostPromptOnly(post) {
     if (!window.AuthGate?.requireAuth?.('copy')) return;
-    ensureLike(post.id);
-    navigator.clipboard.writeText(post.prompt || '').then(() => toast('已复制，已为作者点赞'));
+    const text = post?.prompt || '';
+    if (!text) { toast('暂无提示词'); return; }
+    navigator.clipboard.writeText(text).then(() => toast('已复制提示词'));
+  }
+
+  function copyPostPrompt(post) {
+    copyPostPromptOnly(post);
   }
 
   function favoritePost(id, post) {
@@ -689,14 +1049,14 @@
     ensureLike(id);
     if (favIds.has(id)) {
       toast('已在卡片库中');
-      if (communitySidePostId === id) renderCommunitySidePanel(id);
+      if (communitySidePostId === id) patchCommunitySidePanelUI(id);
       return;
     }
     favIds.add(id);
     addCardFromPost(post);
     persistFavs();
     toast('已收藏到卡片库，已为作者点赞');
-    if (communitySidePostId === id) renderCommunitySidePanel(id);
+    if (communitySidePostId === id) patchCommunitySidePanelUI(id);
   }
 
   function addCardFromPost(post) {
@@ -730,13 +1090,16 @@
     });
   }
 
-  function renderCreationsSidePanel(id) {
+  async function renderCreationsSidePanel(id) {
     const body = document.getElementById('creationsSideBody');
     const c = creations.find(x => x.id === id);
     if (!body || !c) return;
     const badge = c.visibility === 'published' ? '已发布' : '私密';
-    const imgHtml = c.image
-      ? `<button type="button" class="community-side-img-btn" data-save-img title="点击保存到卡片仓库"><img class="community-side-img" src="${esc(c.image)}" alt=""><span class="community-side-img-hint">点击保存到卡片仓库</span></button>`
+    const storageAttr = feedImgStorageAttr(c.image);
+    const jobAttr = c.jobId ? ` data-job-id="${esc(c.jobId)}"` : '';
+    const showImg = c.image && isDisplayableImage(c.image);
+    const imgHtml = showImg
+      ? `<button type="button" class="community-side-img-btn" data-side-zoom title="点击放大"><img class="community-side-img" src="${IMG_LOADING_PLACEHOLDER}" data-image-ref="${esc(c.image)}"${storageAttr}${jobAttr} alt=""></button>`
       : '';
     body.innerHTML = `
       ${imgHtml}
@@ -748,9 +1111,13 @@
         <button type="button" class="btn btn-secondary" data-action="remix">再生成</button>
         <button type="button" class="btn btn-secondary" data-action="del">删除</button>
       </div>
-      <p class="panel-hint">点击图片或「保存到仓库」可将提示词与图片写入卡片库</p>`;
-    body.querySelector('[data-save-img]')?.addEventListener('click', () => {
-      saveGeneratedToWarehouse({ prompt: c.prompt, image: c.image, sourceId: c.id });
+      <p class="panel-hint">点击图片可放大查看；使用「保存到仓库」将作品写入卡片库</p>`;
+    body.querySelector('[data-side-zoom]')?.addEventListener('click', () => {
+      void (async () => {
+        const url = await resolveImageDisplayUrl(c.image, c.jobId || null);
+        if (url && typeof window.openLightbox === 'function') window.openLightbox(url);
+        else toast('图片尚未加载完成，请稍候再试');
+      })();
     });
     body.querySelector('[data-action="save"]')?.addEventListener('click', () => {
       saveGeneratedToWarehouse({ prompt: c.prompt, image: c.image, sourceId: c.id });
@@ -758,10 +1125,16 @@
     body.querySelector('[data-action="publish"]')?.addEventListener('click', () => publishCreation(id));
     body.querySelector('[data-action="remix"]')?.addEventListener('click', () => remixCreation(id));
     body.querySelector('[data-action="del"]')?.addEventListener('click', () => {
-      deleteCreation(id);
-      closeCreationsSidePanel();
+      const doDel = () => {
+        deleteCreation(id);
+        closeCreationsSidePanel();
+      };
+      if (typeof window.customConfirm === 'function') {
+        window.customConfirm('确定删除该创作？无回收站，删除后不可恢复。', doDel);
+      } else if (confirm('确定删除该创作？')) doDel();
     });
     highlightCreationCard(id);
+    if (showImg) await hydrateFeedImages(body);
   }
 
   function openCreationsSidePanel(id) {
@@ -770,7 +1143,7 @@
     creationsSideId = id;
     document.getElementById('creationsSidePanel')?.classList.remove('hidden');
     document.body.classList.add('community-panel-open');
-    renderCreationsSidePanel(id);
+    void renderCreationsSidePanel(id);
     scheduleCommunityLayout('creationsGrid');
   }
 
@@ -796,11 +1169,14 @@
     }
     pruneCreations();
     const list = creations
-      .filter(c => c.visibility === creationsTab && c.image)
+      .filter(c => c.visibility === creationsTab && (c.prompt || '').trim())
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     if (!list.length) {
       closeCreationsSidePanel();
-      container.innerHTML = `<div class="feature-empty"><p>${creationsTab === 'private' ? '暂无私密作品' : '暂无已发布作品'}</p><button type="button" class="btn btn-primary" onclick="switchAppPage('imagegen')">去图片生成</button></div>`;
+      const emptyMsg = creationsTab === 'private'
+        ? '暂无私密作品（若已开启自动发布，请到「已发布」查看）'
+        : '暂无已发布作品';
+      container.innerHTML = `<div class="feature-empty"><p>${emptyMsg}</p><button type="button" class="btn btn-primary" onclick="switchAppPage('imagegen')">去图片生成</button></div>`;
       return;
     }
     if (window.SupabaseSync?.prefetchDisplayUrls) {
@@ -816,14 +1192,23 @@
       div.style.animationDelay = `${Math.min(idx * 0.045, 0.36)}s`;
       div.dataset.creationId = c.id;
       const badge = c.visibility === 'published' ? '已发布' : '私密';
+      const showImage = isDisplayableImage(c.image);
+      const promptTrim = (c.prompt || '').trim();
+      const storageAttr = feedImgStorageAttr(c.image);
+      const jobAttr = c.jobId ? ` data-job-id="${esc(c.jobId)}"` : '';
+      const imgSrc = showImage ? communityImgInitialSrc(c.image) : '';
+      const imgLoading = showImage && imgSrc === IMG_LOADING_PLACEHOLDER;
+      const mediaHtml = showImage
+        ? `<div class="card-media${imgLoading ? ' is-loading' : ''}"${imgLoading ? ` data-shine-at="${Date.now()}"` : ''}><img class="card-img" src="${esc(imgSrc)}" data-image-ref="${esc(c.image)}"${storageAttr}${jobAttr} loading="lazy" alt="" onload="if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.card-media'));if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleCreationsLayout()"></div>`
+        : '';
+      const descHtml = promptTrim
+        ? `<div class="card-desc">${esc(promptTrim.length > 120 ? promptTrim.slice(0, 120) + '…' : promptTrim)}</div>`
+        : '';
       div.innerHTML = `
-        <div class="card-media"><img class="card-img" src="${IMG_LOADING_PLACEHOLDER}" data-image-ref="${esc(c.image)}"${c.jobId ? ` data-job-id="${esc(c.jobId)}"` : ''} loading="lazy" alt="" onload="if(typeof FeatureDraft!=='undefined')FeatureDraft.scheduleCreationsLayout()"></div>
+        ${mediaHtml}
         <div class="card-body">
-          <div class="card-head">
-            <div class="card-title">${esc((c.prompt || '').slice(0, 28) || '无标题')}</div>
-            <time class="card-time">${esc(formatExpiryLabel(c))}</time>
-          </div>
-          <div class="card-desc">${esc((c.prompt || '').slice(0, 80))}</div>
+          <div class="card-head card-head--meta-only"><time class="card-time">${esc(formatExpiryLabel(c))}</time></div>
+          ${descHtml}
           <div class="card-tags"><span class="tag">${esc(badge)}</span><span class="tag">${esc((c.resolution || '1k').toUpperCase())}</span></div>
         </div>`;
       div.addEventListener('click', () => openCreationsSidePanel(c.id));
@@ -831,9 +1216,10 @@
     });
     container.innerHTML = '';
     container.appendChild(fragment);
-    void hydrateFeedImages(container).then(() => scheduleCommunityLayout('creationsGrid'));
+    scheduleLayoutAfterImages('creationsGrid');
+    void hydrateFeedImages(container).then(() => scheduleLayoutAfterImages('creationsGrid'));
     if (creationsSideId && list.some(c => c.id === creationsSideId)) {
-      renderCreationsSidePanel(creationsSideId);
+      void renderCreationsSidePanel(creationsSideId);
     } else if (creationsSideId) {
       closeCreationsSidePanel();
     }
@@ -864,14 +1250,30 @@
     if (!opts?.silent) toast('已发布到社区');
     renderCreations();
     renderCommunity();
+    if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+      renderImageGenFeed();
+    }
     if (creationsSideId === id) renderCreationsSidePanel(id);
+  }
+
+  function confirmDeleteCreation(id) {
+    const msg = '确定删除该生成记录？无回收站，删除后不可恢复。';
+    const doDel = () => deleteCreation(id);
+    if (typeof window.customConfirm === 'function') window.customConfirm(msg, doDel);
+    else if (confirm(msg)) doDel();
   }
 
   function deleteCreation(id) {
     if (creationsSideId === id) closeCreationsSidePanel();
+    if (imageGenPreviewId === id) closeImageGenPreview();
+    const removed = creations.find(c => c.id === id);
+    if (removed?.communityPostId) performCommunityPostRemoval(removed.communityPostId, { silent: true });
     creations = creations.filter(c => c.id !== id);
     persistCreations();
     renderCreations();
+    if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+      renderImageGenFeed();
+    }
     toast('已删除');
   }
 
@@ -906,6 +1308,7 @@
     }
     bindImageGenUpload();
     syncImageGenAutoPublishUI();
+    syncImageGenAutoSaveUI();
     updateImageGenPricingUI();
     applyImageGenPrefill();
     updateImageGenFeedHint();
@@ -985,6 +1388,35 @@
     });
   }
 
+  function getImageGenAutoSaveDefault() {
+    return window.getDefaultImageGenAutoSaveWarehouse?.() !== false;
+  }
+
+  function syncImageGenAutoSaveUI() {
+    const btn = document.getElementById('imageGenAutoSaveBtn');
+    if (!btn) return;
+    const globalOn = getImageGenAutoSaveDefault();
+    const on = imageGenAutoSaveSession === null ? globalOn : imageGenAutoSaveSession;
+    btn.classList.toggle('is-on', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+
+  function isImageGenAutoSaveChecked() {
+    return document.getElementById('imageGenAutoSaveBtn')?.classList.contains('is-on') === true;
+  }
+
+  function bindImageGenAutoSave() {
+    const btn = document.getElementById('imageGenAutoSaveBtn');
+    if (!btn || btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => {
+      const on = !btn.classList.contains('is-on');
+      btn.classList.toggle('is-on', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      imageGenAutoSaveSession = on;
+    });
+  }
+
   function restoreImageGenSubmitLabel() {
     updateImageGenCostHint();
   }
@@ -1060,14 +1492,16 @@
 
   function getGenHistoryItems() {
     pruneCreations();
-    return creations.filter(c => c.prompt && c.image);
+    return creations.filter(c => (c.prompt || '').trim());
   }
 
   function fillFormFromData({ prompt, refImage, refImages, model, resolution, quality, size, sourceId, sourceType }) {
     const promptEl = document.getElementById('imageGenPrompt');
     if (promptEl) promptEl.value = prompt || '';
-    if (refImages?.length) setImageGenRefs(refImages);
-    else if (refImage) setImageGenRefs(Array.isArray(refImage) ? refImage : [refImage]);
+    const refs = (refImages || []).filter(r => isDisplayableImage(r));
+    const singleRef = refImage && isDisplayableImage(refImage) ? refImage : null;
+    if (refs.length) setImageGenRefs(refs);
+    else if (singleRef) setImageGenRefs([singleRef]);
     else clearImageGenRef();
     const modelEl = document.getElementById('imageGenModel');
     if (modelEl && model) modelEl.value = model;
@@ -1083,34 +1517,50 @@
     toast('已填入生图框');
   }
 
+  function fillFormPromptOnly(prompt) {
+    const promptEl = document.getElementById('imageGenPrompt');
+    if (promptEl) promptEl.value = prompt || '';
+    toast('已填入提示词');
+  }
+
+  function fillFormRefOnly(refImage, refImages) {
+    const refs = (refImages || []).filter(r => isDisplayableImage(r));
+    const single = refImage && isDisplayableImage(refImage) ? refImage : null;
+    if (refs.length) setImageGenRefs(refs);
+    else if (single) setImageGenRefs([single]);
+    else {
+      toast('当前作品没有可填入的参考图');
+      return;
+    }
+    toast('已填入参考图');
+  }
+
   function applyHistoryToForm(item) {
     if (!item) return;
-    fillFormFromData({
+    const payload = {
       prompt: item.prompt,
-      refImages: item.refImages,
-      refImage: item.refImage || item.image,
       model: item.model,
       resolution: item.resolution,
       quality: item.quality,
       size: item.size,
       sourceId: item.id,
       sourceType: 'personal'
-    });
+    };
+    if (item.hasRefImage) {
+      if (item.refImages?.length) payload.refImages = item.refImages;
+      else if (item.refImage) payload.refImage = item.refImage;
+    }
+    fillFormFromData(payload);
   }
 
   function fillFromCommunityPost(post, autoLike) {
     if (!post) return;
     if (autoLike) ensureLike(post.id);
-    fillFormFromData({
-      prompt: post.prompt,
-      refImage: post.image || null
-    });
+    fillFormFromData({ prompt: post.prompt });
   }
 
   function likeCommunityPostOnly(postId) {
     const wasNew = ensureLike(postId);
-    renderImageGenFeed();
-    if (communitySidePostId === postId) renderCommunitySidePanel(postId);
     toast(wasNew ? '已点赞' : '你已经点过赞了');
   }
 
@@ -1122,7 +1572,8 @@
       const data = JSON.parse(raw);
       fillFormFromData({
         prompt: data.prompt,
-        refImage: data.image || null,
+        refImages: data.refImages,
+        refImage: data.refImage,
         resolution: data.resolution
       });
     } catch (e) { /* ignore */ }
@@ -1181,10 +1632,19 @@
     box.classList.add('has-refs');
     gallery.innerHTML = imageGenRefImages.map((src, i) => `
       <div class="imagegen-ref-thumb">
-        <img src="${esc(src)}" alt="参考图 ${i + 1}">
+        <button type="button" class="imagegen-ref-preview-btn" data-ref-idx="${i}" title="点击放大">
+          <img src="${esc(src)}" alt="参考图 ${i + 1}">
+        </button>
         <button type="button" class="imagegen-ref-rm" data-ref-idx="${i}" aria-label="移除">×</button>
       </div>
     `).join('');
+    gallery.querySelectorAll('.imagegen-ref-preview-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const src = imageGenRefImages[Number(btn.dataset.refIdx)];
+        if (src && typeof window.openLightbox === 'function') window.openLightbox(src);
+      });
+    });
     gallery.querySelectorAll('.imagegen-ref-rm').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
@@ -1210,36 +1670,43 @@
 
   function bindImageGenUpload() {
     const drop = document.getElementById('imageGenRefDrop');
+    const box = document.getElementById('imageGenRefBox');
     const input = document.getElementById('imageGenRefInput');
-    if (!drop || !input) return;
+    if (!drop || !input || !box) return;
     if (drop.dataset.bound === '1') return;
     drop.dataset.bound = '1';
 
+    const bindDragZone = (el) => {
+      ['dragenter', 'dragover'].forEach(ev => {
+        el.addEventListener(ev, e => {
+          if (!document.getElementById('pageImageGen')?.classList.contains('active')) return;
+          e.preventDefault();
+          e.stopPropagation();
+          box.classList.add('drag-over');
+        });
+      });
+      el.addEventListener('dragleave', e => {
+        if (!box.contains(e.relatedTarget)) box.classList.remove('drag-over');
+      });
+      el.addEventListener('drop', e => {
+        if (!document.getElementById('pageImageGen')?.classList.contains('active')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        box.classList.remove('drag-over');
+        if (e.dataTransfer?.files?.length) addImageGenRefFiles(e.dataTransfer.files);
+      });
+    };
+
     drop.addEventListener('click', e => {
-      if (e.target.closest('.imagegen-ref-rm')) return;
+      if (e.target.closest('.imagegen-ref-rm') || e.target.closest('.imagegen-ref-preview-btn')) return;
       input.click();
     });
     input.addEventListener('change', () => {
       if (input.files?.length) addImageGenRefFiles(input.files);
       input.value = '';
     });
-    ['dragenter', 'dragover'].forEach(ev => {
-      drop.addEventListener(ev, e => {
-        e.preventDefault();
-        e.stopPropagation();
-        drop.classList.add('drag-over');
-      });
-    });
-    drop.addEventListener('dragleave', e => {
-      e.preventDefault();
-      drop.classList.remove('drag-over');
-    });
-    drop.addEventListener('drop', e => {
-      e.preventDefault();
-      e.stopPropagation();
-      drop.classList.remove('drag-over');
-      if (e.dataTransfer?.files?.length) addImageGenRefFiles(e.dataTransfer.files);
-    });
+    bindDragZone(drop);
+    bindDragZone(box);
 
     if (!document.body.dataset.imageGenPasteBound) {
       document.body.dataset.imageGenPasteBound = '1';
@@ -1544,9 +2011,17 @@
     if (btn) { btn.disabled = false; restoreImageGenSubmitLabel(); }
     if (isImageGenAutoPublishChecked()) {
       publishCreation(creation.id, { silent: true });
-      toast(`已生成并发布到社区（-${cost} 积分）`);
+      toast(`已生成并发布（-${cost} 积分）· 可在「我的创作」→「已发布」查看`);
     } else {
       toast(`已生成（-${cost} 积分，保留 3 天；发布到社区可永久保留）`);
+    }
+    if (isImageGenAutoSaveChecked() && storedImage) {
+      saveGeneratedToWarehouse({
+        prompt: creation.prompt,
+        image: storedImage,
+        sourceId: creation.id,
+        title: ''
+      });
     }
     if (window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
       window.MobileUI.setImageGenView('feed');
@@ -1556,16 +2031,37 @@
   function updateImageGenFeedHint() {
     const el = document.getElementById('imageGenFeedHint');
     if (!el) return;
+    const mobile = window.MobileUI?.isMobile?.();
     if (imageGenFeedTab === 'warehouse') {
-      el.textContent = '按分组或标签筛选 · 点击图片放大 · 点击卡片填入生图框';
+      el.textContent = mobile
+        ? '两列浏览 · 点图放大 · 用卡片上按钮复制或填入生图'
+        : '按分组或标签筛选 · 点击图片放大 · 点击卡片打开右侧详情';
     } else if (imageGenFeedTab === 'community') {
-      el.textContent = '社区作品 · 点击图片放大 · 点击卡片填入并点赞';
+      el.textContent = mobile
+        ? '社区作品 · 点图放大 · 按钮复制或填入生图'
+        : '社区作品 · 点击图片放大 · 点击卡片查看详情';
     } else {
       const n = imageGenPendingJobs.length;
-      el.textContent = n
-        ? `我的生成 · ${n} 个任务进行中（右侧显示）· 可连续提交`
-        : '我的生成记录 · 点击图片放大 · 可存仓库 · 保留 3 天';
+      el.textContent = mobile
+        ? (n ? `生成中 ${n} 项 · 点图放大 · 按钮复制/填入/存仓库` : '点图放大 · 按钮复制或填入生图 · 保留 3 天')
+        : (n
+          ? `我的生成 · ${n} 个任务进行中（右侧显示）· 可连续提交`
+          : '我的生成记录 · 点击图片放大 · 可存仓库 · 保留 3 天');
     }
+  }
+
+  function copyFeedPromptText(prompt) {
+    const text = (prompt || '').trim();
+    if (!text) {
+      toast('暂无提示词');
+      return;
+    }
+    navigator.clipboard.writeText(text).then(() => toast('已复制提示词'));
+  }
+
+  function fillFeedPromptToImageGen(prompt) {
+    fillFormPromptOnly(prompt || '');
+    if (window.MobileUI?.isMobile?.()) window.MobileUI?.setImageGenView?.('form');
   }
 
 
@@ -1576,8 +2072,6 @@
       <div class="imagegen-feed-media imagegen-gen-pending" aria-busy="true">
         <div class="imagegen-gen-grid" aria-hidden="true">
           <div class="imagegen-gen-grid-layer imagegen-gen-grid-layer--base"></div>
-          <div class="imagegen-gen-grid-layer imagegen-gen-grid-layer--wave"></div>
-          <div class="imagegen-gen-grid-layer imagegen-gen-grid-layer--wave imagegen-gen-grid-layer--wave2"></div>
         </div>
         <span class="imagegen-gen-pending-label">生成中</span>
       </div>
@@ -1591,35 +2085,230 @@
     </article>`;
   }
 
+  function resetMobileFeedGridStyles() {
+    if (!window.MobileUI?.isMobile?.()) return;
+    if (imageGenMasonry) {
+      imageGenMasonry.destroy();
+      imageGenMasonry = null;
+    }
+    const wrap = document.getElementById('imageGenFeed');
+    if (!wrap) return;
+    wrap.querySelectorAll('.imagegen-feed-card').forEach(card => {
+      card.removeAttribute('style');
+    });
+  }
+
   function buildFeedCardHtml(opts) {
     const {
-      id, prompt, image, jobId, title, badges = [], meta = '', active = false,
-      showLike = false, liked = false, likeCount = 0, showSave = false
+      id, prompt, image, jobId, title, badges = [], metaLine = '', meta = '', active = false,
+      showLike = false, liked = false, likeCount = 0, showSave = false, showDel = false
     } = opts;
-    const refAttr = image ? ` data-image-ref="${esc(image)}"` : '';
+    const { showTitle, showPrompt } = resolveFeedCardDisplay(title, prompt);
+    const storageAttr = feedImgStorageAttr(image);
     const jobAttr = jobId ? ` data-job-id="${esc(jobId)}"` : '';
-    const imgBlock = image
-      ? `<button type="button" class="imagegen-feed-thumb-btn" data-preview-src="" title="放大预览"><img src="${IMG_LOADING_PLACEHOLDER}"${refAttr}${jobAttr} alt="" loading="lazy"></button>`
-      : '<div class="imagegen-feed-img-empty">无图</div>';
+    const imgSrc = isDisplayableImage(image) ? feedImgInitialSrc(image, jobId) : '';
+    const loadingCls = imgSrc && imgSrc === IMG_LOADING_PLACEHOLDER ? ' is-loading' : (isDisplayableImage(image) ? ' is-loading' : '');
+    const shineAt = loadingCls ? ` data-shine-at="${Date.now()}"` : '';
+    const imgBlock = isDisplayableImage(image)
+      ? `<div class="imagegen-feed-media${loadingCls}"${shineAt}><button type="button" class="imagegen-feed-thumb-btn" title="放大预览"><img src="${esc(imgSrc || IMG_LOADING_PLACEHOLDER)}" data-image-ref="${esc(image)}"${storageAttr}${jobAttr} alt="" decoding="async" onload="if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.imagegen-feed-media'));else this.closest('.imagegen-feed-media')?.classList.remove('is-loading')"></button></div>`
+      : '';
     const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${esc(b)}</span>`).join('');
+    const metaRowHtml = (metaLine || '').trim()
+      ? `<p class="imagegen-feed-meta-row">${esc(metaLine.trim())}</p>`
+      : (badgeHtml ? `<div class="imagegen-feed-tags">${badgeHtml}</div>` : '');
+    const metaTrim = (meta || '').trim();
+    const metaRedundant = !metaTrim || badges.some(b => b === metaTrim) || metaTrim === showTitle;
+    const metaHtml = metaTrim && !metaRedundant
+      ? `<span class="imagegen-feed-meta">${esc(metaTrim)}</span>`
+      : '';
     const likeBtn = showLike
       ? `<button type="button" class="imagegen-feed-like ${liked ? 'liked' : ''}" data-like-id="${esc(id)}" title="点赞">♥ ${likeCount}</button>`
       : '';
     const saveBtn = showSave
       ? '<button type="button" class="btn btn-ghost btn-sm imagegen-feed-save-btn" data-save-feed="1">存仓库</button>'
       : '';
-    return `<article class="imagegen-feed-card imagegen-feed-card-tile${active ? ' active' : ''}" data-feed-id="${esc(id)}" tabindex="0">
-      <div class="imagegen-feed-media">${imgBlock}</div>
+    const delBtn = showDel
+      ? '<button type="button" class="imagegen-feed-del" data-delete-feed="1" title="删除" aria-label="删除">×</button>'
+      : '';
+    const titleHtml = showTitle
+      ? `<p class="imagegen-feed-title">${esc(showTitle)}</p>`
+      : '';
+    const promptHtml = showPrompt
+      ? `<p class="imagegen-feed-prompt">${esc(showPrompt)}</p>`
+      : '<p class="imagegen-feed-prompt imagegen-feed-prompt--empty">暂无提示词</p>';
+    const noMedia = !imgBlock ? ' imagegen-feed-card--no-media' : '';
+    const mobileActs = window.MobileUI?.isMobile?.()
+      ? `<div class="imagegen-feed-mobile-actions mobile-only">
+          <button type="button" class="imagegen-feed-mobile-btn" data-feed-copy>复制</button>
+          <button type="button" class="imagegen-feed-mobile-btn" data-feed-fill-prompt>填入生图</button>
+        </div>`
+      : '';
+    const fillHint = window.MobileUI?.isMobile?.()
+      ? ''
+      : '<span class="imagegen-feed-fill-hint">点击查看详情 · 在侧栏填入或复制</span>';
+    return `<article class="imagegen-feed-card imagegen-feed-card-tile${noMedia}${active ? ' active' : ''}" data-feed-id="${esc(id)}" data-feed-prompt="${esc(prompt || '')}" tabindex="0">
+      ${imgBlock}
       <div class="imagegen-feed-content">
-        <p class="imagegen-feed-prompt">${esc(prompt || title || '无提示词')}</p>
-        <div class="imagegen-feed-tags">${badgeHtml}</div>
+        ${titleHtml}
+        ${promptHtml}
+        ${metaRowHtml}
         <div class="imagegen-feed-foot">
-          <span class="imagegen-feed-meta">${esc(meta)}</span>
-          <div class="imagegen-feed-actions">${likeBtn}${saveBtn}</div>
+          ${metaHtml}
+          <div class="imagegen-feed-actions">${likeBtn}${saveBtn}${delBtn}</div>
         </div>
-        <span class="imagegen-feed-fill-hint">点击卡片填入生图框</span>
+        ${mobileActs}
+        ${fillHint}
       </div>
     </article>`;
+  }
+
+  function closeImageGenPreview() {
+    imageGenPreviewId = null;
+    imageGenPreviewKind = null;
+    document.getElementById('imageGenPreviewPanel')?.classList.add('hidden');
+    document.querySelector('.imagegen-side')?.classList.remove('imagegen-preview-open');
+    document.querySelectorAll('.imagegen-feed-card.active-preview').forEach(el => el.classList.remove('active-preview'));
+    requestAnimationFrame(() => scheduleImageGenFeedLayout());
+  }
+
+  function buildPreviewFillActions(hasRef, extraActionsHtml) {
+    const refDisabled = hasRef ? '' : ' disabled title="暂无参考图"';
+    return `
+      <div class="imagegen-preview-copy-row">
+        <button type="button" class="btn btn-secondary btn-sm" data-preview-copy-prompt>复制提示词</button>
+      </div>
+      <div class="imagegen-preview-fill">
+        <span class="imagegen-preview-fill-label">填入生图框</span>
+        <div class="imagegen-preview-fill-btns">
+          <button type="button" class="btn btn-primary btn-sm" data-preview-fill-all>全部</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-preview-fill-prompt>仅提示词</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-preview-fill-ref${refDisabled}>仅参考图</button>
+        </div>
+      </div>
+      ${extraActionsHtml ? `<div class="imagegen-preview-actions-secondary">${extraActionsHtml}</div>` : ''}`;
+  }
+
+  async function renderImageGenPreview() {
+    const body = document.getElementById('imageGenPreviewBody');
+    if (!body || !imageGenPreviewId || !imageGenPreviewKind) return;
+    let prompt = '';
+    let image = '';
+    let jobId = '';
+    let refImages = null;
+    let refImage = null;
+    let extraActions = '';
+    if (imageGenPreviewKind === 'personal') {
+      const c = creations.find(x => x.id === imageGenPreviewId);
+      if (!c) { closeImageGenPreview(); return; }
+      prompt = c.prompt || '';
+      image = c.image || '';
+      jobId = c.jobId || '';
+      if (c.hasRefImage) {
+        refImages = c.refImages;
+        refImage = c.refImage;
+      }
+      extraActions = `
+        <button type="button" class="btn btn-secondary btn-sm" data-preview-save>存仓库</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-preview-del>删除</button>`;
+    } else if (imageGenPreviewKind === 'community') {
+      const post = findPost(imageGenPreviewId);
+      if (!post) { closeImageGenPreview(); return; }
+      prompt = post.prompt || '';
+      image = post.image || '';
+      const liked = likedIds.has(post.id);
+      extraActions = `
+        <button type="button" class="btn btn-secondary btn-sm" data-preview-like>♥ ${liked ? '已赞' : '点赞'}</button>`;
+    } else {
+      const rawId = imageGenPreviewId.replace(/^wh_/, '');
+      const c = (window.getWarehouseCardsForImageGen?.() || []).find(x => x.id === rawId);
+      if (!c) { closeImageGenPreview(); return; }
+      prompt = c.prompt || '';
+      image = c.image || '';
+      if (isDisplayableImage(c.image)) refImage = c.image;
+    }
+    const hasRef = !!(refImages?.length || (refImage && isDisplayableImage(refImage)));
+    const fillHtml = buildPreviewFillActions(hasRef, extraActions);
+    const imgHtml = isDisplayableImage(image)
+      ? `<button type="button" class="imagegen-preview-img-btn" data-preview-zoom title="点击放大"><span class="media-skeleton"></span></button>`
+      : '';
+    body.innerHTML = `${imgHtml}<div class="imagegen-preview-prompt">${esc(prompt)}</div>${fillHtml}`;
+    body.dataset.previewPrompt = prompt;
+    body.dataset.previewRef = refImage || '';
+    if (refImages?.length) body.dataset.previewRefs = JSON.stringify(refImages);
+    else delete body.dataset.previewRefs;
+    const zoomBtn = body.querySelector('[data-preview-zoom]');
+    if (zoomBtn && isDisplayableImage(image)) {
+      void resolveImageDisplayUrl(image, jobId).then(url => {
+        if (!url) { zoomBtn.remove(); return; }
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = '';
+        zoomBtn.replaceChildren(img);
+        zoomBtn.addEventListener('click', () => {
+          if (typeof window.openLightbox === 'function') window.openLightbox(url);
+        });
+      });
+    }
+    const getPreviewRefs = () => {
+      let refs = [];
+      try {
+        if (body.dataset.previewRefs) refs = JSON.parse(body.dataset.previewRefs) || [];
+      } catch (e) { /* ignore */ }
+      return { refImages: refs, refImage: body.dataset.previewRef || '' };
+    };
+    body.querySelector('[data-preview-fill-all]')?.addEventListener('click', () => {
+      if (imageGenPreviewKind === 'personal') {
+        const c = creations.find(x => x.id === imageGenPreviewId);
+        if (c) applyHistoryToForm(c);
+        return;
+      }
+      const { refImages: ri, refImage: r1 } = getPreviewRefs();
+      fillFormFromData({
+        prompt: body.dataset.previewPrompt || '',
+        refImages: ri.length ? ri : undefined,
+        refImage: ri.length ? undefined : r1
+      });
+    });
+    body.querySelector('[data-preview-fill-prompt]')?.addEventListener('click', () => {
+      fillFormPromptOnly(body.dataset.previewPrompt || '');
+    });
+    body.querySelector('[data-preview-fill-ref]')?.addEventListener('click', () => {
+      const { refImages: ri, refImage: r1 } = getPreviewRefs();
+      fillFormRefOnly(r1, ri);
+    });
+    body.querySelector('[data-preview-like]')?.addEventListener('click', () => {
+      likeCommunityPostOnly(imageGenPreviewId);
+      renderImageGenPreview();
+    });
+    body.querySelector('[data-preview-copy-prompt]')?.addEventListener('click', () => {
+      const text = body.dataset.previewPrompt || '';
+      if (!text) { toast('暂无提示词'); return; }
+      navigator.clipboard.writeText(text).then(() => toast('已复制提示词'));
+    });
+    body.querySelector('[data-preview-save]')?.addEventListener('click', () => {
+      const c = creations.find(x => x.id === imageGenPreviewId);
+      if (c?.image) saveGeneratedToWarehouse({ prompt: c.prompt, image: c.image, sourceId: c.id });
+    });
+    body.querySelector('[data-preview-del]')?.addEventListener('click', () => {
+      const doDel = () => deleteCreation(imageGenPreviewId);
+      if (typeof window.customConfirm === 'function') window.customConfirm('删除这条生成记录？', doDel);
+      else if (confirm('删除这条生成记录？')) doDel();
+    });
+  }
+
+  function openImageGenPreview(kind, id) {
+    imageGenPreviewKind = kind;
+    imageGenPreviewId = id;
+    document.getElementById('imageGenPreviewPanel')?.classList.remove('hidden');
+    document.querySelector('.imagegen-side')?.classList.add('imagegen-preview-open');
+    document.querySelectorAll('.imagegen-feed-card').forEach(el => {
+      const fid = el.dataset.feedId;
+      el.classList.toggle('active-preview', kind === 'warehouse' ? fid === 'wh_' + id : fid === id);
+    });
+    void renderImageGenPreview();
+    requestAnimationFrame(() => scheduleImageGenFeedLayout());
+    setTimeout(() => scheduleImageGenFeedLayout(), 120);
+    setTimeout(() => scheduleImageGenFeedLayout(), 400);
   }
 
   function syncImageGenWarehouseFiltersUI() {
@@ -1642,7 +2331,7 @@
     tagEl.value = imageGenWhTag;
   }
 
-  function renderImageGenFeed() {
+  async function renderImageGenFeed() {
     const wrap = document.getElementById('imageGenFeed');
     if (!wrap) return;
     syncImageGenWarehouseFiltersUI();
@@ -1655,14 +2344,16 @@
       } else {
         html = list.map(c => {
           const groupLabel = c.group || '未分类';
-          const titleLine = (c.title || '').trim() || (c.prompt || '').slice(0, 24);
+          const titleTrim = (c.title || '').trim();
+          const tagPart = (c.tags || []).slice(0, 2).join(' · ');
+          const whMeta = tagPart ? `${groupLabel} · ${tagPart}` : groupLabel;
           return buildFeedCardHtml({
             id: 'wh_' + c.id,
             prompt: c.prompt,
             image: c.image,
-            title: c.title,
-            badges: [groupLabel, ...(c.tags || []).slice(0, 2)],
-            meta: titleLine || groupLabel
+            title: titleTrim,
+            metaLine: whMeta,
+            meta: ''
           });
         }).join('');
       }
@@ -1671,17 +2362,23 @@
       if (!list.length) {
         html = '<p class="imagegen-feed-empty">社区暂无内容</p>';
       } else {
-        html = list.map(p => buildFeedCardHtml({
-          id: p.id,
-          prompt: p.prompt,
-          image: p.image,
-          title: p.title,
-          badges: [p.authorName, p.modelLabel || '全能模型2'],
-          meta: `♥ ${p.likes || 0} · ${formatTime(p.createdAt)}`,
-          showLike: true,
-          liked: likedIds.has(p.id),
-          likeCount: p.likes || 0
-        })).join('');
+        html = list.map(p => {
+          const postTitle = (p.title || '').trim();
+          const useTitle = postTitle && !isGenericPostTitle(postTitle) ? postTitle : '';
+          const author = (p.authorName || '').trim() || '用户';
+          const model = (p.modelLabel || '全能模型2').trim();
+          return buildFeedCardHtml({
+            id: p.id,
+            prompt: p.prompt,
+            image: p.image,
+            title: useTitle,
+            metaLine: `${author} · ${model}`,
+            meta: `♥ ${p.likes || 0} · ${formatTime(p.createdAt)}`,
+            showLike: true,
+            liked: likedIds.has(p.id),
+            likeCount: p.likes || 0
+          });
+        }).join('');
       }
     } else {
       const pending = imageGenPendingJobs.slice(0, 8);
@@ -1694,16 +2391,47 @@
           prompt: c.prompt,
           image: c.image,
           jobId: c.jobId,
-          badges: [c.modelLabel || '全能模型2', (c.resolution || '1k').toUpperCase()],
+          metaLine: `${c.modelLabel || '全能模型2'} · ${(c.resolution || '1k').toUpperCase()}`,
           meta: formatExpiryLabel(c),
           active: c.id === imageGenActiveHistoryId,
-          showSave: true
+          showSave: true,
+          showDel: true
         })).join('');
       }
     }
-    wrap.className = 'imagegen-feed imagegen-feed--tiles';
-    wrap.innerHTML = html;
-    void hydrateFeedImages(wrap);
+    const refsToPrefetch = [];
+    if (imageGenFeedTab === 'personal') {
+      getGenHistoryItems().slice(0, 40).forEach(c => { if (c.image) refsToPrefetch.push(c.image); });
+    } else if (imageGenFeedTab === 'warehouse') {
+      (typeof window.getWarehouseCardsForImageGen === 'function'
+        ? window.getWarehouseCardsForImageGen({ group: imageGenWhGroup, tag: imageGenWhTag }) : []
+      ).forEach(c => { if (c.image) refsToPrefetch.push(c.image); });
+    } else if (imageGenFeedTab === 'community') {
+      filterAndSortPosts(getAllCommunityPosts()).slice(0, 40).forEach(p => { if (p.image) refsToPrefetch.push(p.image); });
+    }
+    if (window.SupabaseSync?.prefetchDisplayUrls && refsToPrefetch.length) {
+      await window.SupabaseSync.prefetchDisplayUrls(refsToPrefetch);
+    }
+    if (imageGenFeedTab === 'personal') {
+      const items = getGenHistoryItems().slice(0, 40);
+      await Promise.all(
+        items.filter(c => c.image).map(c => resolveImageDisplayUrl(c.image, c.jobId || null).catch(() => ''))
+      );
+    }
+    if (imageGenMasonry) {
+      imageGenMasonry.destroy();
+      imageGenMasonry = null;
+    }
+    const mobileFeed = window.MobileUI?.isMobile?.();
+    wrap.className = mobileFeed ? 'imagegen-feed imagegen-feed--tiles' : 'imagegen-feed imagegen-feed--masonry';
+    if (!mobileFeed && html.includes('imagegen-feed-card')) {
+      wrap.innerHTML = '<div class="grid-sizer"></div>' + html;
+    } else {
+      wrap.innerHTML = html;
+    }
+    await hydrateFeedImages(wrap);
+    resetMobileFeedGridStyles();
+    if (!mobileFeed) scheduleImageGenFeedLayout();
     wrap.querySelectorAll('.imagegen-feed-card').forEach(card => {
       if (card.dataset.pending === '1') return;
       const feedId = card.dataset.feedId;
@@ -1727,23 +2455,47 @@
         if (!item?.image) return;
         saveGeneratedToWarehouse({ prompt: item.prompt, image: item.image, sourceId: item.id });
       });
+      card.querySelector('[data-delete-feed]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        if (imageGenFeedTab !== 'personal') return;
+        const doDel = () => deleteCreation(feedId);
+        if (typeof window.customConfirm === 'function') window.customConfirm('删除这条生成记录？', doDel);
+        else if (confirm('删除这条生成记录？')) doDel();
+      });
+      card.querySelector('[data-feed-copy]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        copyFeedPromptText(card.dataset.feedPrompt || '');
+      });
+      card.querySelector('[data-feed-fill-prompt]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        fillFeedPromptToImageGen(card.dataset.feedPrompt || '');
+      });
       card.addEventListener('click', e => {
         if (e.target.closest('.imagegen-feed-like')) return;
         if (e.target.closest('.imagegen-feed-thumb-btn')) return;
         if (e.target.closest('.imagegen-feed-save-btn')) return;
+        if (e.target.closest('[data-delete-feed]')) return;
+        if (e.target.closest('.imagegen-feed-mobile-actions')) return;
+        if (window.MobileUI?.isMobile?.()) return;
         if (imageGenFeedTab === 'warehouse') {
-          const rawId = feedId.replace(/^wh_/, '');
-          const list = window.getWarehouseCardsForImageGen?.() || [];
-          const c = list.find(x => x.id === rawId);
-          if (c) fillFormFromData({ prompt: c.prompt, refImage: c.image });
+          openImageGenPreview('warehouse', feedId.replace(/^wh_/, ''));
         } else if (imageGenFeedTab === 'community') {
-          const post = findPost(feedId);
-          if (post) fillFromCommunityPost(post, true);
+          openImageGenPreview('community', feedId);
         } else {
-          const item = creations.find(x => x.id === feedId);
-          if (item) applyHistoryToForm(item);
+          openImageGenPreview('personal', feedId);
         }
       });
+      if (imageGenFeedTab === 'personal' && feedId && !feedId.startsWith('wh_')) {
+        card.addEventListener('contextmenu', e => {
+          e.preventDefault();
+          e.stopPropagation();
+          const menuFn = window.showContextMenu;
+          if (typeof menuFn !== 'function') return;
+          menuFn(e.clientX, e.clientY, [
+            { label: '删除记录', danger: true, action: () => confirmDeleteCreation(feedId) }
+          ]);
+        });
+      }
       card.querySelector('.imagegen-feed-like')?.addEventListener('click', e => {
         e.stopPropagation();
         likeCommunityPostOnly(feedId);
@@ -1770,6 +2522,16 @@
         renderCommunity();
       });
     });
+    document.querySelectorAll('[data-community-media]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        communityMediaFilter = btn.dataset.communityMedia || 'all';
+        document.querySelectorAll('[data-community-media]').forEach(b => {
+          b.classList.toggle('active', b === btn);
+        });
+        closeCommunitySidePanel();
+        renderCommunity();
+      });
+    });
     document.querySelectorAll('[data-creations-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
         creationsTab = btn.dataset.creationsTab;
@@ -1792,10 +2554,12 @@
       btn.addEventListener('click', () => {
         imageGenFeedTab = btn.dataset.feedTab;
         document.querySelectorAll('[data-feed-tab]').forEach(b => b.classList.toggle('active', b === btn));
+        closeImageGenPreview();
         updateImageGenFeedHint();
         renderImageGenFeed();
       });
     });
+    document.getElementById('imageGenPreviewClose')?.addEventListener('click', closeImageGenPreview);
     document.getElementById('imageGenWhGroup')?.addEventListener('change', e => {
       imageGenWhGroup = e.target.value || 'all';
       renderImageGenFeed();
@@ -1806,6 +2570,7 @@
     });
     bindImageGenUpload();
     bindImageGenAutoPublish();
+    bindImageGenAutoSave();
     document.getElementById('imageGenModel')?.addEventListener('change', updateImageGenPricingUI);
     document.getElementById('imageGenResolution')?.addEventListener('input', updateImageGenCostHint);
     document.getElementById('imageGenQuality')?.addEventListener('change', updateImageGenCostHint);
@@ -1817,6 +2582,9 @@
       if (document.getElementById('pageCreations')?.classList.contains('active')) {
         scheduleCommunityLayout('creationsGrid');
       }
+      if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+        scheduleImageGenFeedLayout();
+      }
       if (document.getElementById('userProfileOverlay')?.classList.contains('active')) {
         scheduleCommunityLayout('userProfileGrid');
       }
@@ -1824,6 +2592,7 @@
     document.addEventListener('keydown', e => {
       if (e.key !== 'Escape') return;
       if (document.getElementById('userProfileOverlay')?.classList.contains('active')) closeUserProfile();
+      else if (imageGenPreviewId) closeImageGenPreview();
       else if (creationsSideId) closeCreationsSidePanel();
       else if (document.body.classList.contains('community-panel-open')) closeCommunitySidePanel();
     });
@@ -1837,13 +2606,22 @@
       requestAnimationFrame(() => scheduleCommunityLayout('communityGrid'));
     }
     if (app === 'creations') {
-      renderCreations();
-      requestAnimationFrame(() => scheduleCommunityLayout('creationsGrid'));
+      const priv = creations.filter(c => c.visibility === 'private' && (c.prompt || '').trim()).length;
+      const pub = creations.filter(c => c.visibility === 'published' && (c.prompt || '').trim()).length;
+      if (creationsTab === 'private' && !priv && pub) {
+        creationsTab = 'published';
+        document.querySelectorAll('[data-creations-tab]').forEach(b => {
+          b.classList.toggle('active', b.dataset.creationsTab === 'published');
+        });
+      }
+      void renderCreations();
     }
     if (app !== 'community') closeCommunitySidePanel();
     if (app !== 'creations') closeCreationsSidePanel();
+    if (app !== 'imagegen') closeImageGenPreview();
     if (app === 'imagegen') {
       imageGenAutoPublishSession = null;
+      imageGenAutoSaveSession = null;
       window.MobileUI?.initImageGenMobileView?.();
       pruneCreations();
       initImageGenForm();
@@ -1919,8 +2697,15 @@
     applyCloudSlice,
     reconcileCommunityWithCards,
     hydrateFeedImages,
+    resetMobileFeedGridStyles,
+    renderImageGenFeed,
+    isDisplayableImage,
+    scheduleImageGenFeedLayout: scheduleImageGenFeedLayout,
     scheduleLayout: scheduleCommunityLayout,
-    scheduleCreationsLayout: () => scheduleCommunityLayout('creationsGrid')
+    scheduleCreationsLayout: () => scheduleCommunityLayout('creationsGrid'),
+    fillFormPromptOnly,
+    copyFeedPromptText,
+    fillFeedPromptToImageGen
   };
 
   if (document.readyState === 'loading') {

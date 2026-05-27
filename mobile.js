@@ -5,6 +5,10 @@
     return MQ.matches;
   }
 
+  function isMobileViewport() {
+    return isMobile();
+  }
+
   function closeDrawers() {
     document.body.classList.remove('mobile-nav-open', 'mobile-groups-open');
   }
@@ -116,6 +120,7 @@
     setBottomTab(tab);
     if (tab === 'cards') {
       closeDrawers();
+      if (typeof closeEditPanel === 'function') closeEditPanel();
       if (typeof switchAppPage === 'function') switchAppPage('warehouse');
     } else if (tab === 'groups') {
       openGroupsDrawer();
@@ -125,7 +130,7 @@
     } else if (tab === 'new') {
       closeDrawers();
       if (typeof switchAppPage === 'function') switchAppPage('warehouse');
-      if (typeof createNewCard === 'function') createNewCard({ silentMobile: false });
+      if (typeof createNewCard === 'function') createNewCard({ forceOpenPanel: true });
     } else if (tab === 'me') {
       openNavDrawer();
     }
@@ -144,9 +149,13 @@
       document.body.classList.remove('panel-open', 'imagegen-mobile-view-form', 'imagegen-mobile-view-feed');
     } else {
       applyMobileColumns();
+      if (typeof closeEditPanel === 'function') closeEditPanel();
+      window.FeatureDraft?.resetMobileFeedGridStyles?.();
       if (typeof scheduleLayoutMasonry === 'function') scheduleLayoutMasonry();
+      if (typeof renderCards === 'function') renderCards(true);
       if (document.getElementById('pageImageGen')?.classList.contains('active')) {
         initImageGenMobileView();
+        window.FeatureDraft?.renderImageGenFeed?.();
       }
     }
   }
@@ -155,6 +164,7 @@
 
   window.MobileUI = {
     isMobile,
+    isMobileViewport,
     openNavDrawer,
     openGroupsDrawer,
     closeDrawers,
@@ -166,6 +176,7 @@
     bindMobileUI();
     if (isMobile()) {
       applyMobileColumns();
+      if (typeof closeEditPanel === 'function') closeEditPanel();
       const saved = localStorage.getItem('promptrepo_app_page');
       if (saved) {
         window.mobileOnAppPageChange?.(saved);
