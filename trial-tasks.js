@@ -5,6 +5,9 @@
   const LS_PWA_FLAG = 'promptrepo_pwa_task_flag';
   let syncDebounceTimer = null;
   let panelBound = false;
+  let lastTaskSyncAt = 0;
+  const TASK_SYNC_MIN_GAP_MS = 90000;
+  let tasksLoadSerial = null;
 
   function isLoggedIn() {
     return window.SupabaseSync?.isLoggedIn?.() === true;
@@ -34,16 +37,23 @@
     return { cardsCount: Array.isArray(cards) ? cards.length : 0, communityPosts, pwaInstalled };
   }
 
-  async function syncTaskProgress() {
+  async function syncTaskProgress(force) {
     if (!isLoggedIn() || !window.PromptHubApi?.syncMembershipTasks) return null;
-    return window.PromptHubApi.syncMembershipTasks(collectSyncPayload());
+    if (!force && Date.now() - lastTaskSyncAt < TASK_SYNC_MIN_GAP_MS) return null;
+    const r = await window.PromptHubApi.syncMembershipTasks(collectSyncPayload());
+    if (r?.ok) lastTaskSyncAt = Date.now();
+    return r;
   }
 
-  function scheduleSyncTaskProgress() {
+  function scheduleSyncTaskProgress(force) {
     clearTimeout(syncDebounceTimer);
+    if (force) {
+      void syncTaskProgress(true);
+      return;
+    }
     syncDebounceTimer = setTimeout(() => {
-      void syncTaskProgress();
-    }, 800);
+      void syncTaskProgress(false);
+    }, 2000);
   }
 
   async function loadTasks() {
@@ -51,7 +61,6 @@
     if (!window.PromptHubApi?.isConfigured?.()) {
       return { items: [], lifetimeCreditsSpent: 0, error: '未配置后端 API（api-domain.config.js）' };
     }
-    await syncTaskProgress();
     const r = await window.PromptHubApi?.getMembershipTasks?.();
     if (r?.ok && Array.isArray(r.data?.items)) return { ...r.data, error: null };
     const msg = r?.message || r?.code || '任务列表加载失败';
@@ -63,11 +72,12 @@
           '会员任务接口未部署：请在 server 目录执行 npm run deploy（需已登录 Cloudflare）'
       };
     }
-    if (/过于频繁|rate limit|too many/i.test(msg)) {
+    if (r?.code === 'RATE_LIMITED' || /过于频繁|rate limit|too many/i.test(msg)) {
       return {
         items: [],
         lifetimeCreditsSpent: 0,
-        error: '请求过于频繁，请 30 秒后再打开任务中心'
+        error: '请求过于频繁，请约 1 分钟后再试',
+        retryable: true
       };
     }
     if (r?.code === 'UNAUTHORIZED' || /登录已过期|请先登录/.test(msg)) {
@@ -98,8 +108,13 @@
       return;
     }
     if (data?.error) {
-      list.innerHTML = `<p class="trial-tasks-empty">${esc(data.error)}</p>
-        <p class="trial-tasks-hint">请确认 Worker 已部署且 Supabase 已执行迁移 <code>20260528120000_membership_tasks.sql</code>。</p>`;
+      const retryBtn = data.retryable
+        ? '<p class="trial-tasks-hint"><button type="button" class="btn btn-secondary btn-sm" id="trialTasksRetryBtn">重试</button></p>'
+        : '<p class="trial-tasks-hint">若持续失败：在 Supabase SQL 编辑器执行迁移 <code>20260528120000_membership_tasks.sql</code>，并确认已登录。</p>';
+      list.innerHTML = `<p class="trial-tasks-empty">${esc(data.error)}</p>${retryBtn}`;
+      document.getElementById('trialTasksRetryBtn')?.addEventListener('click', () => {
+        void openTrialTasksPanel();
+      });
       return;
     }
     if (!items.length) {
@@ -195,7 +210,20 @@
     document.getElementById('trialTasksLoginHint')?.classList.add('hidden');
     const list = document.getElementById('trialTasksList');
     if (list) list.innerHTML = '<p class="trial-tasks-empty">任务加载中…</p>';
-    renderTasks(await loadTasks());
+    if (tasksLoadSerial) return tasksLoadSerial;
+    tasksLoadSerial = (async () => {
+      try {
+        const data = await loadTasks();
+        renderTasks(data);
+        if (!data?.error && Date.now() - lastTaskSyncAt >= TASK_SYNC_MIN_GAP_MS) {
+          await syncTaskProgress(true);
+          renderTasks(await loadTasks());
+        }
+      } finally {
+        tasksLoadSerial = null;
+      }
+    })();
+    return tasksLoadSerial;
   }
 
   function bindTrialTasksPanel() {

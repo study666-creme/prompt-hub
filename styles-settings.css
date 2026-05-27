@@ -289,6 +289,21 @@ body.trial-tasks-open {
 .modal-close-btn::before {
   content: '关闭';
 }
+.modal-close-btn--icon {
+  min-width: 36px;
+  width: 36px;
+  padding: 0;
+  border-radius: 10px;
+}
+.modal-close-btn--icon::before {
+  content: none;
+}
+.modal-close-btn--icon span[aria-hidden="true"] {
+  display: inline;
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 400;
+}
 .modal-close-btn:hover,
 .subscribe-close-btn:hover {
   background: var(--accent-bg-strong, var(--bg-card));

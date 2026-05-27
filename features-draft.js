@@ -867,7 +867,7 @@
     if (idx >= 0) communityPosts[idx] = post;
     else communityPosts.push(post);
     card.publishedToCommunity = true;
-    window.TrialTasksUI?.syncTaskProgress?.();
+    window.TrialTasksUI?.syncTaskProgress?.(true);
     card.communityPostId = post.id;
     persistCommunity();
     renderCommunity();

@@ -36,7 +36,7 @@ const claimParamsSchema = z.object({
 
 export const membershipTaskRoutes = new Hono<{ Bindings: Env }>();
 
-membershipTaskRoutes.use('*', rateLimit(60, 60_000));
+membershipTaskRoutes.use('*', rateLimit(180, 60_000));
 
 membershipTaskRoutes.get('/', async c => {
   const user = c.get('user');

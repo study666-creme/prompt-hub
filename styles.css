@@ -1,6 +1,6 @@
 ﻿    /* ===== 提示词仓库 · 高级灰设计系统 ===== */
    :root {
-  --ui-scale: 1;
+  --ui-scale: 0.75;
   --card-columns: 4;
   --card-gap: 16px;
   --card-row-gap: 16px;
@@ -69,13 +69,14 @@ body {
   margin: 0;
 }
 
-/* 主界面不缩放（弹层在 app-chrome 外，无需 zoom 修遮罩） */
+/* 主界面缩放（弹层在 app-chrome 外）；宽度补偿 zoom，高度保持 100vh 避免裁切侧栏底 */
 .app-chrome {
+  zoom: var(--ui-scale);
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  width: 100%;
-  max-width: 100%;
+  width: calc(100% / var(--ui-scale));
+  max-width: calc(100% / var(--ui-scale));
   height: 100vh;
   max-height: 100vh;
   overflow: hidden;
@@ -1020,7 +1021,7 @@ body {
     .sidebar .action-btn:hover { border-color: var(--border-light); color: var(--text-primary); background: var(--bg-hover); transform: translateY(-1px); }
     .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
     .main-header {
-      padding: 0 16px 0 20px;
+      padding: 0 12px 0 16px;
       height: var(--toolbar-h);
       min-height: var(--toolbar-h);
       background: rgba(10, 14, 22, 0.52);
@@ -1031,10 +1032,11 @@ body {
       display: flex;
       align-items: center;
       flex-wrap: nowrap;
-      gap: 12px;
+      gap: 8px;
       flex-shrink: 0;
       z-index: 20;
-      overflow: visible;
+      overflow: hidden;
+      min-width: 0;
     }
     .main-header h3 {
       font-weight: 600;
@@ -1051,16 +1053,19 @@ body {
       flex: 1;
       min-width: 0;
       justify-content: flex-end;
-      overflow: visible;
-      gap: 8px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      gap: 6px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
     }
     .toolbar-row {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 6px;
       flex-wrap: nowrap;
-      flex: 1;
-      min-width: 0;
+      flex: 1 1 auto;
+      min-width: min(100%, 520px);
       justify-content: flex-end;
     }
     .toolbar-cluster {
