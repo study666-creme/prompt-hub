@@ -256,6 +256,13 @@
     font-size: 13px;
   }
 
+  .mobile-search-bar {
+    display: flex;
+    width: 100%;
+    flex: 1 1 100%;
+    padding: 6px 0 2px;
+  }
+
   .mobile-search-bar[hidden] {
     display: none !important;
   }
@@ -269,11 +276,33 @@
     order: 10;
   }
 
+  body.mobile-search-open #normalBar {
+    display: none;
+  }
+
   .mobile-search-input {
-    flex: 1;
-    min-width: 0;
+    width: 100%;
+    min-height: 42px;
+    padding: 0 14px;
     font-size: 16px;
-    min-height: 40px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    box-sizing: border-box;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .mobile-search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-bg);
+  }
+
+  #mobileSearchBtn.active {
+    color: var(--accent);
+    background: var(--accent-bg);
   }
 
   .search-box input,
