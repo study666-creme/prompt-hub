@@ -1,4 +1,5 @@
 import type { Context } from 'hono';
+import { applyCorsHeaders } from './cors-headers';
 
 export class ApiError extends Error {
   constructor(
@@ -13,6 +14,7 @@ export class ApiError extends Error {
 }
 
 export function jsonError(c: Context, err: unknown) {
+  applyCorsHeaders(c);
   if (err instanceof ApiError) {
     return c.json(
       {

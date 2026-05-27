@@ -69,6 +69,14 @@
     const r = await window.PromptHubApi?.getMembershipTasks?.();
     if (r?.ok && Array.isArray(r.data?.items)) return { ...r.data, error: null };
     const msg = r?.message || r?.code || '任务列表加载失败';
+    if (r?.code === 'MIGRATION_REQUIRED' || /membership_tasks\.sql/i.test(msg)) {
+      return {
+        items: [],
+        lifetimeCreditsSpent: 0,
+        error:
+          '数据库尚未执行任务迁移。请打开 Supabase → SQL Editor，粘贴并运行文件 20260528120000_membership_tasks.sql'
+      };
+    }
     if (r?.code === 'NOT_FOUND' || /接口不存在/.test(msg)) {
       return {
         items: [],

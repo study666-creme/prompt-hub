@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { applyCorsHeaders } from './lib/cors-headers';
 import { jsonError } from './lib/errors';
 import { createCorsMiddleware } from './middleware/cors';
 import { adminRoutes } from './routes/admin';
@@ -83,11 +84,12 @@ app.route('/api/v1', v1);
 
 app.onError((err, c) => jsonError(c, err));
 
-app.notFound(c =>
-  c.json(
+app.notFound(c => {
+  applyCorsHeaders(c);
+  return c.json(
     { ok: false, error: { code: 'NOT_FOUND', message: '接口不存在' } },
     404
-  )
-);
+  );
+});
 
 export default app;
