@@ -131,6 +131,11 @@
 #userProfileGrid .card {
   visibility: visible !important;
   pointer-events: auto !important;
+  cursor: pointer;
+}
+#communityGrid.feed-layout-pending .card,
+#creationsGrid.feed-layout-pending .card {
+  cursor: pointer;
 }
 
 /* 社区/我发布的：布局与拉图期间限制配图高度，避免大图「突脸」（含手机 CSS Grid） */
@@ -144,8 +149,16 @@
 #communityGrid .card-media.is-loading,
 #creationsGrid .card-media.is-loading {
   min-height: 88px;
+  max-height: min(42vh, 360px);
+  overflow: hidden;
   background: var(--bg-hover);
   border-radius: 10px;
+}
+#communityGrid.feed-layout-pending .card-media .card-img,
+#creationsGrid.feed-layout-pending .card-media .card-img {
+  max-height: min(42vh, 360px);
+  width: 100%;
+  object-fit: contain;
 }
 #communityGrid .card-media.is-loading .card-img,
 #creationsGrid .card-media.is-loading .card-img,
@@ -202,9 +215,7 @@
 
 @media (max-width: 900px) {
   #communityGrid.community-mobile-feed.cards-container:not(.list-view),
-  #creationsGrid.community-mobile-feed.cards-container:not(.list-view),
-  #communityGrid.cards-container:not(.list-view),
-  #creationsGrid.cards-container:not(.list-view) {
+  #creationsGrid.community-mobile-feed.cards-container:not(.list-view) {
     display: grid !important;
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 10px !important;
@@ -215,9 +226,7 @@
     align-content: start;
   }
   #communityGrid.community-mobile-feed:not(.list-view) .card,
-  #creationsGrid.community-mobile-feed:not(.list-view) .card,
-  #communityGrid:not(.list-view) .card,
-  #creationsGrid:not(.list-view) .card {
+  #creationsGrid.community-mobile-feed:not(.list-view) .card {
     display: flex !important;
     flex-direction: column;
     width: 100% !important;
@@ -263,10 +272,16 @@
     overflow-x: hidden;
     overflow-y: auto !important;
   }
-  #communityGrid:not(.list-view) .card,
-  #creationsGrid:not(.list-view) .card {
+  #communityGrid:not(.list-view):not(.community-mobile-feed) .card,
+  #creationsGrid:not(.list-view):not(.community-mobile-feed) .card {
     display: block;
-    margin-bottom: var(--card-row-gap) !important;
+    margin-bottom: 0 !important;
+    box-sizing: border-box;
+  }
+  #communityGrid.community-mobile-feed:not(.list-view) .card,
+  #creationsGrid.community-mobile-feed:not(.list-view) .card {
+    display: block;
+    margin-bottom: 0 !important;
     box-sizing: border-box;
   }
   #communityGrid:not(.list-view) .card-media,
@@ -592,9 +607,21 @@
 .imagegen-credits-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 10px;
+}
+
+.imagegen-credits-top .imagegen-credits-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.imagegen-credits-top-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .imagegen-credits-label strong {
@@ -691,10 +718,12 @@
 .imagegen-layout {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
-  gap: 0;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  gap: 14px;
   min-height: 0;
   overflow: hidden;
+  padding: 0 14px 14px;
+  box-sizing: border-box;
 }
 
 .feature-header-imagegen {
@@ -710,7 +739,8 @@
   min-height: 0;
   overflow: hidden;
   padding: 0;
-  border-right: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   background: var(--bg-secondary);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -940,7 +970,7 @@
 }
 
 .imagegen-side {
-  --imagegen-preview-width: min(300px, 36vw);
+  --imagegen-preview-width: min(320px, 30vw);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -952,8 +982,54 @@
   background: rgba(10, 14, 22, 0.38);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  border-left: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   overflow: hidden;
+}
+
+.imagegen-side.imagegen-preview-open {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, var(--imagegen-preview-width));
+  column-gap: 12px;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-areas:
+    "tabs tabs"
+    "filters filters"
+    "hint hint"
+    "feed preview";
+}
+
+.imagegen-side.imagegen-preview-open .imagegen-feed-tabs { grid-area: tabs; }
+.imagegen-side.imagegen-preview-open .imagegen-community-filters,
+.imagegen-side.imagegen-preview-open .imagegen-warehouse-filters { grid-area: filters; }
+.imagegen-side.imagegen-preview-open .imagegen-recover-row { grid-area: hint; }
+.imagegen-side.imagegen-preview-open .imagegen-feed {
+  grid-area: feed;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding-right: 6px !important;
+  margin-right: 0 !important;
+}
+.imagegen-side.imagegen-preview-open .imagegen-feed.imagegen-feed--masonry {
+  height: 100%;
+  box-sizing: border-box;
+}
+.imagegen-side.imagegen-preview-open .imagegen-preview-panel:not(.hidden) {
+  grid-area: preview;
+  position: relative;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  width: 100%;
+  min-width: 0;
+  max-height: none;
+  height: 100%;
+  box-shadow: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
 }
 
 .imagegen-feed-tabs {
@@ -984,16 +1060,6 @@
 
 .imagegen-preview-panel.hidden {
   display: none;
-}
-
-.imagegen-side.imagegen-preview-open .imagegen-feed {
-  box-sizing: border-box;
-  padding-right: calc(var(--imagegen-preview-width) + 12px);
-}
-
-.imagegen-side.imagegen-preview-open .imagegen-feed {
-  box-sizing: border-box;
-  padding-right: calc(var(--imagegen-preview-width) + 12px);
 }
 
 .imagegen-preview-head {
@@ -1088,8 +1154,11 @@
 .imagegen-preview-img-btn {
   display: block;
   width: 100%;
+  flex: 0 0 auto;
+  min-height: 200px;
+  max-height: min(52vh, 480px);
   padding: 0;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: var(--radius-sm);
   overflow: hidden;
   background: var(--bg-hover);
@@ -1098,14 +1167,20 @@
 
 .imagegen-preview-img-btn img {
   width: 100%;
+  height: 100%;
+  min-height: 200px;
+  max-height: min(52vh, 480px);
   display: block;
-  aspect-ratio: 1;
   object-fit: cover;
+  object-position: center center;
 }
 
 .imagegen-feed-card.active-preview {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  position: relative;
+  z-index: 2;
 }
 
 .imagegen-feed-tabs {
@@ -1902,7 +1977,43 @@ body.user-profile-open {
   padding: 16px;
 }
 
-.community-post-card .card-media,
+.community-post-card--visual {
+  cursor: pointer;
+  position: relative;
+}
+
+.community-post-card--visual .card-media {
+  margin: 0;
+}
+
+.community-card-visual-meta {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 2;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-card) 72%, transparent);
+  backdrop-filter: blur(6px);
+  font-size: 11px;
+}
+
+.community-card-no-media {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+}
+
+.tag-chip-locked {
+  opacity: 0.85;
+  border-style: dashed;
+}
+
 .creation-post-card .card-media {
   background: var(--bg-hover);
   overflow: hidden;
@@ -1939,32 +2050,107 @@ body.user-profile-open {
   flex-shrink: 0;
 }
 
+/* 社区 Feed：仅大图 + 底部叠层（点赞/作者），不显示提示词 */
+#communityGrid .community-feed-image-only {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+}
+#communityGrid .community-feed-image-only .card-media {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  background: var(--bg-hover);
+  line-height: 0;
+}
+#communityGrid .community-feed-image-only .card-media .card-img,
+#communityGrid:not(.list-view) .community-feed-image-only .card-media:not(.is-loading) .card-img,
+#communityGrid:not(.list-view) .community-feed-image-only .card-media.is-loading .card-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  object-fit: contain;
+  object-position: center center;
+}
+/* 效率模式：固定方框 + 铺满裁剪（更省性能，横图会被裁边） */
+body.efficiency-mode #communityGrid.community-mobile-feed .community-feed-image-only .card-media,
+body.efficiency-mode #communityGrid .community-feed-image-only .card-media,
+body.efficiency-mode #creationsGrid.community-mobile-feed .community-feed-image-only .card-media,
+body.efficiency-mode #creationsGrid .community-feed-image-only .card-media {
+  aspect-ratio: 3 / 4;
+  max-height: min(52vh, 420px);
+  min-height: 120px;
+}
+body.efficiency-mode #communityGrid .community-feed-image-only .card-media .card-img,
+body.efficiency-mode #communityGrid:not(.list-view) .community-feed-image-only .card-media:not(.is-loading) .card-img,
+body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  min-height: 0;
+  object-fit: cover !important;
+  object-position: center center;
+}
+#communityGrid .community-feed-image-only .community-feed-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 28px 10px 8px;
+  background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.55) 100%);
+  pointer-events: none;
+}
+#communityGrid .community-feed-image-only .community-feed-overlay .card-time,
+#communityGrid .community-feed-image-only .community-feed-overlay .community-author-link {
+  pointer-events: auto;
+}
+#communityGrid .community-feed-image-only .community-feed-overlay .card-time {
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+#communityGrid .community-feed-image-only .community-feed-author {
+  max-width: 58%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .community-side-img-btn {
   display: block;
   width: 100%;
-  overflow: hidden;
-  border-radius: var(--radius);
-  background: var(--bg-hover);
+  height: min(72vh, 640px);
+  max-height: min(72vh, 640px);
   padding: 0;
+  margin: 0 0 12px;
   border: none;
+  background: var(--bg-hover);
   cursor: zoom-in;
+  position: relative;
+  border-radius: var(--radius);
+  overflow: hidden;
   line-height: 0;
 }
 .community-side-img {
   width: 100%;
-  height: auto;
-  max-height: none;
-  object-fit: unset;
-  object-position: top center;
+  height: 100%;
+  object-fit: cover;
+  object-position: center center;
   display: block;
-  border-radius: var(--radius);
+  border-radius: 0;
   background: var(--bg-hover);
   transition: opacity 0.3s ease;
 }
 .community-side-img-btn.is-loading .community-side-img {
   opacity: 0;
   visibility: hidden;
-  min-height: 120px;
 }
 
 .community-side-panel.community-side-panel--open {
@@ -1993,22 +2179,6 @@ body.user-profile-open {
 .card-time-inline:hover {
   background: var(--bg-hover);
   color: var(--text-muted);
-}
-
-.community-side-img-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  padding: 0;
-  margin: 0 0 12px;
-  border: none;
-  background: var(--bg-hover);
-  cursor: zoom-in;
-  position: relative;
-  border-radius: var(--radius);
-  overflow: hidden;
-  max-height: min(72vh, 640px);
 }
 
 .community-side-img-btn:hover .community-side-img-hint {
@@ -2105,14 +2275,18 @@ body.user-profile-open {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto;
     justify-content: stretch;
+    gap: 0;
+    padding: 0;
   }
   .imagegen-form {
-    border-right: none;
+    border: none;
+    border-radius: 0;
     border-bottom: 1px solid var(--border);
     max-height: none;
   }
   .imagegen-side {
-    border-left: none;
+    border: none;
+    border-radius: 0;
     border-top: 1px solid var(--border);
     max-height: none;
   }
@@ -2157,6 +2331,20 @@ body.user-profile-open {
   gap: 8px;
   margin-left: auto;
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.community-layout-tools {
+  flex-shrink: 0;
+}
+
+body.community-appreciate #communityGrid .community-post-card {
+  cursor: zoom-in;
+}
+
+body.community-appreciate .community-side-panel {
+  display: none !important;
 }
 
 .community-header-grow {

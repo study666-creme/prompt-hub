@@ -3,26 +3,27 @@
  */
 (function () {
   const LS_CREDIT_MODE = 'promptrepo_credit_grant_mode';
+  const SHOP_URL = 'https://pay.ldxp.cn/shop/1NLSZGJS';
+
+  const CREDIT_PACKS = [
+    { id: 'cr10k', label: '10000 积分', credits: 10000, price: 95, bonusDays: 40 },
+    { id: 'cr5k', label: '5000 积分', credits: 5000, price: 48, bonusDays: 18 },
+    { id: 'cr3k', label: '3000 积分', credits: 3000, price: 29.5, bonusDays: 10 },
+    { id: 'cr1k', label: '1000 积分', credits: 1000, price: 9.8, bonusDays: 3 },
+    { id: 'cr500', label: '500 积分', credits: 500, price: 4.9, bonusDays: 1 },
+    { id: 'cr100', label: '100 积分', credits: 100, price: 0.99, bonusDays: 0 }
+  ];
 
   const DAILY_BY_TIER = { basic: 10, standard: 20, pro: 40 };
-  const LUMP_BY_TIER = { basic: 100, standard: 310, pro: 620 };
 
-  let serverCreditMode = 'bundle';
+  let serverCreditMode = 'daily';
 
   function isLoggedIn() {
     return window.SupabaseSync?.isLoggedIn?.() === true;
   }
 
   function getCreditGrantMode() {
-    if (serverCreditMode === 'daily' || serverCreditMode === 'bundle') {
-      return serverCreditMode;
-    }
-    try {
-      const v = localStorage.getItem(LS_CREDIT_MODE);
-      return v === 'daily' ? 'daily' : 'bundle';
-    } catch (e) {
-      return 'bundle';
-    }
+    return 'daily';
   }
 
   function setCreditGrantModeLocal(mode) {
@@ -42,7 +43,7 @@
       genDiscount: '五折起',
       features: [
         `连续包月/包年订阅价约五折（见下方标价）`,
-        `每日 ${DAILY_BY_TIER.basic} 积分（当日有效）或一次性 ${LUMP_BY_TIER.basic}`,
+        `每日 ${DAILY_BY_TIER.basic} 积分（任务中心领取，当日有效）`,
         '会员生图享积分折扣',
         '无限置顶',
         '10 GB 云存储',
@@ -57,7 +58,7 @@
       genDiscount: '五折起',
       features: [
         `连续包月/包年订阅价约五折（见下方标价）`,
-        `每日 ${DAILY_BY_TIER.standard} 积分或一次性 ${LUMP_BY_TIER.standard}`,
+        `每日 ${DAILY_BY_TIER.standard} 积分（任务中心领取，当日有效）`,
         '会员生图享更高折扣',
         '无限置顶',
         '30 GB 云存储',
@@ -72,7 +73,7 @@
       genDiscount: '五折起',
       features: [
         `连续包月/包年订阅价约五折（见下方标价）`,
-        `每日 ${DAILY_BY_TIER.pro} 积分或一次性 ${LUMP_BY_TIER.pro}`,
+        `每日 ${DAILY_BY_TIER.pro} 积分（任务中心领取，当日有效）`,
         '会员生图享最高折扣',
         '无限置顶',
         '100 GB 云存储',
@@ -110,6 +111,11 @@
   };
 
   let currentBilling = 'auto_month';
+  let currentMainTab = 'membership';
+
+  function openShop() {
+    window.open(SHOP_URL, '_blank', 'noopener,noreferrer');
+  }
 
   function esc(s) {
     return String(s)
@@ -136,7 +142,10 @@
     renderCreditModePicker();
     renderMiniOfferBar();
     const overlay = document.getElementById('subscribeOverlay');
-    if (overlay?.classList.contains('active')) renderPlans();
+    if (overlay?.classList.contains('active')) {
+      if (currentMainTab === 'credits') renderCreditPacks();
+      else renderPlans();
+    }
   }
 
   function renderMembershipStatus() {
@@ -191,37 +200,50 @@
   function renderCreditModePicker() {
     const el = document.getElementById('subscribeCreditMode');
     if (!el) return;
-    const mode = getCreditGrantMode();
     el.classList.remove('hidden');
-    el.innerHTML = `
-      <p class="subscribe-credit-mode-label">会员积分领取方式（开通/兑换时生效，可随时切换）</p>
-      <div class="subscribe-credit-mode-options" role="radiogroup">
-        <label class="subscribe-credit-mode-opt${mode === 'daily' ? ' active' : ''}">
-          <input type="radio" name="creditGrantMode" value="daily"${mode === 'daily' ? ' checked' : ''}>
-          <span>每日积分（按档位）</span>
-          <small>基础 ${DAILY_BY_TIER.basic} / 标准 ${DAILY_BY_TIER.standard} / 专业 ${DAILY_BY_TIER.pro}，当日有效</small>
-        </label>
-        <label class="subscribe-credit-mode-opt${mode === 'bundle' ? ' active' : ''}">
-          <input type="radio" name="creditGrantMode" value="bundle"${mode === 'bundle' ? ' checked' : ''}>
-          <span>一次性到账</span>
-          <small>基础 ${LUMP_BY_TIER.basic} / 标准 ${LUMP_BY_TIER.standard} / 专业 ${LUMP_BY_TIER.pro}，永久有效</small>
-        </label>
-      </div>`;
-    el.querySelectorAll('input[name="creditGrantMode"]').forEach(input => {
-      input.addEventListener('change', async () => {
-        if (!input.checked) return;
-        setCreditGrantModeLocal(input.value);
-        if (!isLoggedIn()) return;
-        const r = await window.PromptHubApi?.setCreditGrantMode?.(input.value);
-        if (r?.ok) {
-          await window.PromptHubApi?.syncMe?.({ silent: true });
-          if (typeof showToast === 'function') showToast(r.data.message || '已更新');
-        } else if (r?.code === 'NOT_MEMBER') {
-          /* 未开通会员时仅本地记住偏好 */
-        } else if (typeof showToast === 'function') {
-          showToast(r?.message || '更新失败');
-        }
-      });
+    el.innerHTML = '<p class="subscribe-credit-mode-label">会员每日积分请在侧栏「免费试用 · 任务中心」领取（按档位，当日有效）</p>';
+  }
+
+  function setMainTab(tab) {
+    currentMainTab = tab === 'credits' ? 'credits' : 'membership';
+    document.querySelectorAll('[data-subscribe-main]').forEach(btn => {
+      const on = btn.dataset.subscribeMain === currentMainTab;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.getElementById('subscribeCreditsSection')?.classList.toggle('hidden', currentMainTab !== 'credits');
+    document.getElementById('subscribeMembershipSection')?.classList.toggle('hidden', currentMainTab !== 'membership');
+    const title = document.getElementById('subscribePanelTitle');
+    const sub = document.getElementById('subscribePanelSub');
+    if (title) title.textContent = currentMainTab === 'credits' ? '积分充值' : '会员订阅';
+    if (sub) {
+      sub.textContent = currentMainTab === 'credits'
+        ? '1 元 = 100 积分 · 购买后在小店复制激活码，在上方兑换'
+        : '三档会员 · 连续包月/包年约五折';
+    }
+    if (currentMainTab === 'credits') renderCreditPacks();
+    else renderPlans();
+  }
+
+  function renderCreditPacks() {
+    const grid = document.getElementById('subscribeCreditsGrid');
+    if (!grid) return;
+    grid.innerHTML = CREDIT_PACKS.map(p => {
+      const bonus = p.bonusDays > 0
+        ? ` · 赠送 ${p.bonusDays} 天基础会员（每日积分模式）`
+        : '';
+      return `
+      <article class="subscribe-shop-card">
+        <div class="subscribe-shop-card-head">
+          <h4 class="subscribe-shop-card-title">${esc(p.label)}</h4>
+          <span class="subscribe-shop-card-price">¥${p.price}</span>
+        </div>
+        <p class="subscribe-shop-card-meta">到账 ${p.credits.toLocaleString('zh-CN')} 积分${bonus}</p>
+        <button type="button" class="btn btn-primary subscribe-shop-buy-btn" data-shop-buy="${esc(p.id)}">去小店购买</button>
+      </article>`;
+    }).join('');
+    grid.querySelectorAll('[data-shop-buy]').forEach(btn => {
+      btn.addEventListener('click', () => openShop());
     });
   }
 
@@ -231,7 +253,6 @@
     renderCreditModePicker();
     renderMiniOfferBar();
     const billingLabel = BILLING_LABELS[currentBilling] || '';
-    const mode = getCreditGrantMode();
     grid.innerHTML = PLANS.map(plan => {
       const p = getDisplayPrice(plan.id, currentBilling);
       if (!p) return '';
@@ -243,10 +264,7 @@
         ? `<span class="subscribe-plan-save">${esc(saveText)}</span>`
         : '';
       const featHtml = plan.features.map(f => `<li>${esc(f)}</li>`).join('');
-      const creditHint =
-        mode === 'daily'
-          ? `每日 ${DAILY_BY_TIER[plan.id]} 积分`
-          : `一次性 ${LUMP_BY_TIER[plan.id]} 积分`;
+      const creditHint = `每日 ${DAILY_BY_TIER[plan.id]} 积分（任务中心领取）`;
       return `<article class="subscribe-plan-card${plan.id === 'standard' ? ' featured' : ''}" data-plan="${plan.id}">
         <div class="subscribe-plan-head">
           <span class="subscribe-plan-tag">${esc(plan.tag)}</span>
@@ -260,25 +278,12 @@
           <span class="subscribe-plan-unit">/${esc(p.unit)}</span>
         </div>
         <ul class="subscribe-plan-features">${featHtml}</ul>
-        <button type="button" class="btn btn-primary subscribe-plan-btn" data-plan="${plan.id}" data-billing="${currentBilling}">立即订阅</button>
+        <button type="button" class="btn btn-primary subscribe-plan-btn" data-plan="${plan.id}" data-billing="${currentBilling}">去小店购买</button>
       </article>`;
     }).join('');
 
     grid.querySelectorAll('.subscribe-plan-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const planId = btn.dataset.plan;
-        const billing = btn.dataset.billing;
-        const plan = PLANS.find(x => x.id === planId);
-        const price = getDisplayPrice(planId, billing);
-        if (!plan || !price) return;
-        const modeLabel =
-          getCreditGrantMode() === 'daily'
-            ? `每日 ${DAILY_BY_TIER[planId]} 积分（当日有效）`
-            : `一次性 ${LUMP_BY_TIER[planId]} 积分（永久）`;
-        const msg = `「${plan.name}」${BILLING_LABELS[billing]} ¥${price.price}（约五折），${modeLabel} — 在线支付筹备中，开通后将自动到账`;
-        if (typeof showToast === 'function') showToast(msg);
-        else alert(msg);
-      });
+      btn.addEventListener('click', () => openShop());
     });
   }
 
@@ -298,7 +303,7 @@
     });
   }
 
-  function openSubscribePanel() {
+  function openSubscribePanel(opts) {
     window.MobileUI?.closeDrawers?.();
     ensureModalOverlaysOnBody();
     const el = document.getElementById('subscribeOverlay');
@@ -310,8 +315,15 @@
       document.body.classList.add('subscribe-open');
     }
     if (isLoggedIn()) void window.PromptHubApi?.syncMe?.({ silent: true });
-    renderPlans();
+    setMainTab(opts?.tab === 'credits' ? 'credits' : 'membership');
     updateSubscribeNavBadge();
+  }
+
+  function openRechargePanel() {
+    if (typeof window.closeImageGenCreditsSheet === 'function') {
+      window.closeImageGenCreditsSheet();
+    }
+    openSubscribePanel({ tab: 'credits' });
   }
 
   function unlockPageInteraction() {
@@ -333,6 +345,9 @@
 
   function bind() {
     ensureModalOverlaysOnBody();
+    document.querySelectorAll('[data-subscribe-main]').forEach(btn => {
+      btn.addEventListener('click', () => setMainTab(btn.dataset.subscribeMain));
+    });
     document.querySelectorAll('[data-subscribe-billing]').forEach(btn => {
       btn.addEventListener('click', () => setBilling(btn.dataset.subscribeBilling));
     });
@@ -370,13 +385,12 @@
     applyServerState,
     updateSubscribeNavBadge,
     refreshOfferUI,
-    DAILY_BY_TIER,
-    LUMP_BY_TIER
+    DAILY_BY_TIER
   };
   window.openSubscribePanel = openSubscribePanel;
   window.closeSubscribePanel = closeSubscribePanel;
   window.unlockPageInteraction = unlockPageInteraction;
-  window.openRechargePanel = openSubscribePanel;
+  window.openRechargePanel = openRechargePanel;
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {

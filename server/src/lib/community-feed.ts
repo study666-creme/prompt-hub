@@ -156,12 +156,17 @@ export function dedupeCommunityFeedPosts(posts: CommunityPostDto[]): CommunityPo
 }
 
 export function validatePostPayload(post: CommunityPostPayload): string | null {
+  if (!post.id || String(post.id).length > 128) return '帖子 ID 无效';
   const prompt = String(post.prompt || '').trim();
   if (prompt.length < MIN_COMMUNITY_PROMPT_LEN) {
     return `提示词至少 ${MIN_COMMUNITY_PROMPT_LEN} 字`;
   }
-  if (!post.id || String(post.id).length > 128) return '帖子 ID 无效';
-  return null;
+  const image = String(post.image || '').trim();
+  if (!image) return '发布到社区需要配图';
+  if (image.startsWith('data:image/')) return null;
+  if (isStorageRef(image)) return null;
+  if (/^https?:\/\//i.test(image)) return null;
+  return '发布到社区需要配图';
 }
 
 const AUTHOR_UUID_RE =
@@ -193,8 +198,11 @@ export async function unpublishGhostCommunityPosts(
     const ghostAuthor =
       !isAuthorUuid(aid) || aid === '888' || name === '888' || /^local_/i.test(aid);
     let missingFile = false;
-    if (row.image) {
-      const path = storagePathFromRef(row.image);
+    const img = String(row.image || '').trim();
+    if (!img) {
+      missingFile = true;
+    } else {
+      const path = storagePathFromRef(img);
       if (path) missingFile = !(await storageObjectExists(admin, path));
     }
     if (!ghostAuthor && !missingFile) continue;
@@ -284,12 +292,16 @@ export async function listPublicCommunityFeed(
   admin: SupabaseClient,
   limit: number,
   offset: number,
-  opts?: { repairAuthors?: boolean }
+  opts?: { repairAuthors?: boolean; runMaintenance?: boolean }
 ): Promise<CommunityPostDto[]> {
-  if (opts?.repairAuthors !== false && offset === 0) {
+  if (offset === 0) {
     try {
-      await repairMisattributedCommunityAuthors(admin);
-      await unpublishGhostCommunityPosts(admin);
+      if (opts?.runMaintenance) {
+        if (opts.repairAuthors !== false) {
+          await repairMisattributedCommunityAuthors(admin);
+        }
+        await unpublishGhostCommunityPosts(admin);
+      }
       await unpublishDuplicateCommunityPosts(admin);
     } catch (e) {
       console.warn('[community-feed] repair skipped', e);
@@ -307,7 +319,9 @@ export async function listPublicCommunityFeed(
 
   if (error) throw error;
   const deduped = dedupeCommunityFeedPosts((data as CommunityRow[]).map(mapRowToDto));
-  return deduped.slice(offset, offset + limit);
+  return deduped
+    .filter((p) => String(p.image || '').trim())
+    .slice(offset, offset + limit);
 }
 
 export async function upsertCommunityPost(
@@ -387,8 +401,37 @@ export async function syncAuthorCommunityPosts(
   userId: string,
   authorName: string,
   posts: CommunityPostPayload[]
-): Promise<number> {
-  let n = 0;
+): Promise<{ synced: number; unpublished: number }> {
+  const keepIds = new Set<string>();
+  const keepCardIds = new Set<string>();
+  for (const p of posts.slice(0, 80)) {
+    if (p.id) keepIds.add(String(p.id));
+    if (p.sourceCardId) keepCardIds.add(String(p.sourceCardId));
+  }
+
+  let unpublished = 0;
+  const { data: existing, error: listErr } = await admin
+    .from('community_posts')
+    .select('id, source_card_id, image, author_id')
+    .eq('published', true);
+  if (listErr) throw listErr;
+
+  const now = new Date().toISOString();
+  for (const row of (existing || []) as CommunityRow[]) {
+    const owner = inferOwnerIdFromImageRef(row.image) || String(row.author_id || '');
+    if (owner !== userId && String(row.author_id) !== userId) continue;
+    const id = String(row.id);
+    const cardId = row.source_card_id ? String(row.source_card_id) : '';
+    if (keepIds.has(id)) continue;
+    if (cardId && keepCardIds.has(cardId)) continue;
+    const { error } = await admin
+      .from('community_posts')
+      .update({ published: false, updated_at: now })
+      .eq('id', id);
+    if (!error) unpublished += 1;
+  }
+
+  let synced = 0;
   for (const p of posts.slice(0, 80)) {
     const err = validatePostPayload(p);
     if (err) continue;
@@ -396,10 +439,10 @@ export async function syncAuthorCommunityPosts(
     if (owner && owner !== userId) continue;
     try {
       await upsertCommunityPost(admin, userId, { ...p, authorName });
-      n += 1;
+      synced += 1;
     } catch {
       /* 跳过无权发布的串号帖 */
     }
   }
-  return n;
+  return { synced, unpublished };
 }

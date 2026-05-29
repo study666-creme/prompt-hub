@@ -82,6 +82,7 @@
     if (overlayId === 'trialTasksOverlay') document.body.classList.add('trial-tasks-open');
     if (overlayId === 'subscribeOverlay') document.body.classList.add('subscribe-open');
     syncBackdrop();
+    window.syncToastStacking?.();
   }
 
   function closeModal(overlayId, silent) {

@@ -1032,6 +1032,20 @@
     top: max(10px, env(safe-area-inset-top));
     right: 12px;
     z-index: 2;
+    max-width: calc(100% - 24px);
+  }
+
+  #pageCommunity .community-layout-tools {
+    display: inline-flex !important;
+    gap: 4px;
+  }
+
+  #pageCommunity .community-layout-tools .column-toggle {
+    display: inline-flex;
+  }
+
+  #pageCommunity #communityAppreciateBtn {
+    display: none !important;
   }
 
   #pageCommunity .community-notify-panel {
@@ -1089,9 +1103,90 @@
   }
 
   .feature-header-imagegen h2 {
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     font-size: 16px;
+  }
+
+  .feature-header-imagegen {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+  }
+
+  .imagegen-header-credits {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+
+  .imagegen-header-balance strong {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+  }
+
+  .imagegen-credits-box--form {
+    display: none !important;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-form-scroll label {
+    margin: 8px 0 4px;
+    font-size: 12px;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-form-scroll > label:first-child {
+    margin-top: 0;
+  }
+
+  body.imagegen-mobile-view-form #imageGenPrompt {
+    min-height: 72px;
+    max-height: 88px;
+    resize: vertical;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-quality-note {
+    display: none;
+    margin: 0;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-ref-drop {
+    min-height: 56px;
+    padding: 8px 10px;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-ref-hint-mobile {
+    font-size: 12px;
+    margin: 0;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-form-scroll {
+    padding: 10px 12px 6px;
+  }
+
+  .imagegen-credits-sheet .imagegen-credits-sheet-body {
+    padding: 0 4px 12px;
+  }
+
+  .imagegen-credits-sheet-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin: 8px 0 10px;
+  }
+
+  .imagegen-credits-sheet-actions {
+    display: inline-flex;
+    gap: 6px;
+    margin: 0;
+  }
+
+  .imagegen-credits-sheet-actions .btn {
+    min-width: 64px;
+    padding-left: 12px;
+    padding-right: 12px;
   }
 
   .imagegen-mobile-segments {
@@ -1569,9 +1664,9 @@
     flex-direction: column;
   }
 
-  .community-page-layout .cards-container,
-  #creationsGrid.cards-container,
-  #communityGrid.cards-container {
+  body.efficiency-mode .community-page-layout .cards-container,
+  body.efficiency-mode #creationsGrid.cards-container,
+  body.efficiency-mode #communityGrid.cards-container {
     display: grid !important;
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 10px !important;
@@ -1583,8 +1678,8 @@
     align-content: start;
   }
 
-  #creationsGrid .card,
-  #communityGrid .card {
+  body.efficiency-mode #creationsGrid .card,
+  body.efficiency-mode #communityGrid .card {
     width: 100% !important;
     position: relative !important;
     left: auto !important;
@@ -1593,9 +1688,8 @@
     margin: 0 !important;
   }
 
-  /* 与卡片库手机两列一致：固定比例 + cover，避免细条/空白 */
-  #communityGrid .card-media,
-  #creationsGrid .card-media {
+  body.efficiency-mode #communityGrid .card-media,
+  body.efficiency-mode #creationsGrid .card-media {
     width: 100% !important;
     aspect-ratio: 3 / 4 !important;
     max-height: 220px !important;
@@ -1606,10 +1700,10 @@
     line-height: 0;
   }
 
-  #communityGrid .card-media .card-img,
-  #creationsGrid .card-media .card-img,
-  #communityGrid .card-media.media-revealed .card-img,
-  #creationsGrid .card-media.media-revealed .card-img {
+  body.efficiency-mode #communityGrid .card-media .card-img,
+  body.efficiency-mode #creationsGrid .card-media .card-img,
+  body.efficiency-mode #communityGrid .card-media.media-revealed .card-img,
+  body.efficiency-mode #creationsGrid .card-media.media-revealed .card-img {
     position: static !important;
     width: 100% !important;
     height: auto !important;
@@ -1617,6 +1711,27 @@
     object-fit: contain !important;
     object-position: center center !important;
     display: block !important;
+  }
+
+  #communityGrid .community-feed-image-only .card-media .card-img {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    object-fit: contain !important;
+    object-position: center center !important;
+  }
+
+  body.efficiency-mode #communityGrid .community-feed-image-only .card-media .card-img,
+  body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card-img {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-height: none !important;
+    object-fit: cover !important;
+    object-position: center center !important;
   }
 
   #communityGrid .card-media.is-loading .card-img,

@@ -368,6 +368,159 @@ body.trial-tasks-open {
 .subscribe-billing-tabs {
   display: flex;
   flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.subscribe-main-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 0 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.subscribe-main-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition);
+  text-align: left;
+}
+
+.subscribe-main-tab:hover {
+  border-color: var(--border-light);
+  background: var(--bg-hover);
+}
+
+.subscribe-main-tab.active {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.subscribe-main-tab-label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.subscribe-main-tab-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.subscribe-main-tab.active .subscribe-main-tab-meta {
+  color: var(--text-secondary);
+}
+
+.subscribe-shop-section.hidden {
+  display: none !important;
+}
+
+.subscribe-redeem-box {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+
+.subscribe-redeem-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.subscribe-redeem-row {
+  margin-top: 10px;
+}
+
+.subscribe-shop-section-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.subscribe-shop-section-title--spaced {
+  margin-top: 18px;
+}
+
+.subscribe-shop-hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.subscribe-shop-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (min-width: 640px) {
+  .subscribe-shop-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.subscribe-shop-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+
+.subscribe-shop-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 8px;
+}
+
+.subscribe-shop-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.subscribe-shop-card-price {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.subscribe-shop-card-meta {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.subscribe-shop-buy-btn {
+  width: 100%;
+  margin-top: auto;
+}
+
+.subscribe-billing-tabs {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 12px 18px;
   border-bottom: 1px solid var(--border);

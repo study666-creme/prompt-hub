@@ -11,6 +11,10 @@ import {
   type CommunityPostPayload
 } from '../../lib/community-feed';
 import { tryGrantLikeMilestone } from '../../lib/like-milestone';
+import {
+  listCommunityNotifications,
+  pushCommunityNotification
+} from '../../lib/community-notify';
 import { createAdminClient } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
 
@@ -35,6 +39,15 @@ const syncBodySchema = z.object({
   posts: z.array(postBodySchema).max(80)
 });
 
+const notifyBodySchema = z.object({
+  targetUserId: z.string().uuid(),
+  type: z.enum(['like', 'favorite', 'follow']),
+  postId: z.string().max(128).optional().nullable(),
+  postTitle: z.string().max(120).optional().nullable(),
+  message: z.string().max(240).optional().nullable(),
+  actorName: z.string().max(80).optional().nullable()
+});
+
 export const communityRoutes = new Hono<{ Bindings: Env }>();
 
 communityRoutes.use('*', rateLimit(60, 60_000));
@@ -50,7 +63,7 @@ export async function communityFeedHandler(c: Context<{ Bindings: Env }>) {
   const offset = Math.max(0, Number(c.req.query('offset') || 0));
   const admin = createAdminClient(c.env);
   try {
-    const posts = await listPublicCommunityFeed(admin, limit, offset);
+    const posts = await listPublicCommunityFeed(admin, limit, offset, { repairAuthors: false });
     return c.json({ ok: true, data: { posts, limit, offset } });
   } catch (e) {
     if (isMissingCommunityTable(e)) {
@@ -112,13 +125,13 @@ communityRoutes.post('/posts/sync', async c => {
   const authorName =
     user.email?.split('@')[0] || '用户';
   try {
-    const synced = await syncAuthorCommunityPosts(
+    const result = await syncAuthorCommunityPosts(
       admin,
       user.id,
       authorName,
       parsed.data.posts as CommunityPostPayload[]
     );
-    return c.json({ ok: true, data: { synced } });
+    return c.json({ ok: true, data: result });
   } catch (e) {
     if (isMissingCommunityTable(e)) {
       throw new ApiError(503, 'MIGRATION_REQUIRED', '社区表未就绪，请执行数据库迁移');
@@ -140,4 +153,44 @@ communityRoutes.post('/like-milestone', async c => {
   const result = await tryGrantLikeMilestone(admin, user.id, postId, likes);
 
   return c.json({ ok: true, data: result });
+});
+
+communityRoutes.post('/notify', rateLimit(120, 60_000), async c => {
+  const user = c.get('user');
+  const parsed = notifyBodySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '通知参数无效');
+  }
+  const admin = createAdminClient(c.env);
+  try {
+    await pushCommunityNotification(
+      admin,
+      user.id,
+      parsed.data.actorName || user.email || '用户',
+      parsed.data
+    );
+    return c.json({ ok: true, data: { sent: true } });
+  } catch (e) {
+    const msg = String((e as Error).message || e);
+    if (/community_notifications|does not exist|schema cache/i.test(msg)) {
+      throw new ApiError(503, 'MIGRATION_REQUIRED', '请执行 20260529120000_community_notifications.sql');
+    }
+    throw new ApiError(500, 'NOTIFY_FAILED', msg.slice(0, 180));
+  }
+});
+
+communityRoutes.get('/notifications', async c => {
+  const user = c.get('user');
+  const limit = Math.min(80, Math.max(1, Number(c.req.query('limit') || 40)));
+  const admin = createAdminClient(c.env);
+  try {
+    const items = await listCommunityNotifications(admin, user.id, limit);
+    return c.json({ ok: true, data: { items } });
+  } catch (e) {
+    const msg = String((e as Error).message || e);
+    if (/community_notifications|does not exist|schema cache/i.test(msg)) {
+      return c.json({ ok: true, data: { items: [] } });
+    }
+    throw new ApiError(500, 'NOTIFY_LIST_FAILED', msg.slice(0, 180));
+  }
 });

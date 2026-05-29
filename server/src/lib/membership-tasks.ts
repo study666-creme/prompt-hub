@@ -1,7 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Profile } from './supabase';
 import { getOrCreateProfile, isMembershipActive } from './supabase';
-import { chinaDateKey, grantUniversalDailyBonus, syncMembershipCredits } from './membership-credits';
+import {
+  chinaDateKey,
+  claimMemberDailyCredits,
+  dailyCreditsForTier,
+  grantUniversalDailyBonus,
+  syncMembershipCredits
+} from './membership-credits';
 
 export const COMMUNITY_QUALIFY_PROMPT_LEN = 15;
 
@@ -74,6 +80,14 @@ export function dailyBonusTaskKey(d = new Date()): string {
   return `daily_bonus_${chinaDateKey(d)}`;
 }
 
+export function isMemberDailyTaskKey(key: string): boolean {
+  return key.startsWith('member_daily_');
+}
+
+export function memberDailyTaskKey(d = new Date()): string {
+  return `member_daily_${chinaDateKey(d)}`;
+}
+
 export function taskRewardForKey(
   key: string
 ): { days: number; credits: number; title: string; description: string } | null {
@@ -85,25 +99,33 @@ export function taskRewardForKey(
       description: '领取 5 积分即计入连续签到，满 7 天额外 +10 积分（积分仅限当天使用）'
     };
   }
+  if (isMemberDailyTaskKey(key)) {
+    return {
+      days: 0,
+      credits: 0,
+      title: '会员每日积分',
+      description: '按会员档位领取当日有效积分'
+    };
+  }
   const staticTasks: Record<
     string,
     { days: number; credits: number; title: string; description: string }
   > = {
     login_desktop: {
       days: 1,
-      credits: 10,
+      credits: 0,
       title: '电脑网页登录',
       description: '在电脑浏览器登录账号'
     },
     login_mobile: {
       days: 1,
-      credits: 10,
+      credits: 0,
       title: '手机端登录',
       description: '在手机浏览器登录账号'
     },
     pwa_install: {
       days: 2,
-      credits: 10,
+      credits: 0,
       title: '添加到桌面',
       description: '从手机桌面图标打开本站（添加到主屏幕后点开即可）'
     },
@@ -111,41 +133,41 @@ export function taskRewardForKey(
       days: 1,
       credits: 50,
       title: '填写邀请码',
-      description: '填写好友邀请码，双方各得 1 天基础会员 + 50 积分（每人仅一次）'
+      description: '填写好友邀请码，双方各得 1 天基础会员 + 50 积分（须先绑定手机号，每人仅一次）'
     },
     bind_phone: {
       days: 1,
-      credits: 10,
+      credits: 0,
       title: '绑定手机号',
-      description: '完成手机号验证绑定（领取任务奖励前须先绑定）'
+      description: '完成手机号验证绑定（邀请码兑换须先绑定）'
     },
     community_publish_5: {
       days: 1,
-      credits: 10,
+      credits: 0,
       title: '社区发布 5 张',
       description: '发布 5 张有效社区卡片（含图、有效提示词）'
     },
     community_publish_15: {
       days: 1,
-      credits: 10,
+      credits: 0,
       title: '社区再发布 10 张',
       description: '完成上一档后，累计再发布 10 张有效社区卡片（共 15 张）'
     },
     cards_count_25: {
       days: 1,
-      credits: 10,
+      credits: 0,
       title: '卡片库达 25 张',
       description: '卡片库首次达到 25 张（不含已删除）'
     },
     spend_1000: {
       days: 1,
-      credits: 10,
+      credits: 0,
       title: '累计消耗 1000 积分',
       description: '生图等累计消耗达 1000 积分'
     },
     spend_2000: {
       days: 1,
-      credits: 10,
+      credits: 0,
       title: '累计消耗 2000 积分',
       description: '生图等累计消耗达 2000 积分'
     }
@@ -157,7 +179,7 @@ export function taskRewardForKey(
     if (n >= REPEATABLE_SPEND_START && (n - REPEATABLE_SPEND_START) % REPEATABLE_SPEND_STEP === 0) {
       return {
         days: 1,
-        credits: 10,
+        credits: 0,
         title: n >= REPEATABLE_SPEND_START ? `每消耗 ${REPEATABLE_SPEND_STEP} 积分（已达 ${n}）` : `累计消耗 ${n} 积分`,
         description:
           n >= REPEATABLE_SPEND_START
@@ -212,6 +234,13 @@ export function isTaskProgressMet(
   phoneVerified: boolean
 ): boolean {
   if (isDailyBonusTaskKey(key)) return true;
+  if (isMemberDailyTaskKey(key)) {
+    return (
+      isMembershipActive(profile) &&
+      profile.credit_grant_mode === 'daily' &&
+      !!profile.membership_tier
+    );
+  }
   const spent = profile.lifetime_credits_spent ?? 0;
   switch (key) {
     case 'login_desktop':
@@ -427,7 +456,7 @@ export async function claimMembershipTask(
   taskKey: string,
   phoneVerified: boolean
 ): Promise<{ message: string; profile: Profile }> {
-  if (!isDailyBonusTaskKey(taskKey)) {
+  if (taskKey === 'redeem_invite_code') {
     assertPhoneVerified(phoneVerified);
   }
 
@@ -465,7 +494,9 @@ export async function claimMembershipTask(
     profile = await extendMembershipDays(admin, profile, reward.days, 'basic');
   }
   let signStreakMsg = '';
-  if (isDailyBonusTaskKey(taskKey)) {
+  if (isMemberDailyTaskKey(taskKey)) {
+    profile = await claimMemberDailyCredits(admin, profile);
+  } else if (isDailyBonusTaskKey(taskKey)) {
     profile = await grantUniversalDailyBonus(admin, userId, reward.credits || 5);
     const flagsAfter = parseTaskFlags(profile);
     const claimedAfter = await listClaimedKeys(admin, userId);
@@ -495,7 +526,9 @@ export async function claimMembershipTask(
   }
   const parts: string[] = [];
   if (reward.days) parts.push(`${reward.days} 天基础会员`);
-  if (isDailyBonusTaskKey(taskKey)) {
+  if (isMemberDailyTaskKey(taskKey)) {
+    parts.push(`${dailyCreditsForTier(profile.membership_tier)} 积分（今日有效）`);
+  } else if (isDailyBonusTaskKey(taskKey)) {
     parts.push(`${reward.credits || 5} 积分（今日有效）`);
   } else if (reward.credits) {
     parts.push(`${reward.credits} 积分`);
@@ -553,6 +586,12 @@ export type TaskHubData = {
     claimed: boolean;
     ready: boolean;
   };
+  memberDaily: {
+    key: string;
+    claimed: boolean;
+    ready: boolean;
+    amount: number;
+  } | null;
 };
 
 export function buildTaskHub(
@@ -563,8 +602,13 @@ export function buildTaskHub(
   opts: { inviteCode: string; siteUrl: string; referred: boolean }
 ): TaskHubData {
   const dailyKey = dailyBonusTaskKey();
-  const dailyClaimed = claimed.has(dailyKey);
+  const memberDailyKey = memberDailyTaskKey();
+  const memberActive =
+    isMembershipActive(profile) &&
+    profile.credit_grant_mode === 'daily' &&
+    !!profile.membership_tier;
   const streak = readSignStreak(flags);
+  const dailyClaimed = claimed.has(dailyKey);
   const checkedInToday =
     dailyClaimed || hasCheckedInToday(flags) || claimed.has(checkinTaskKey());
   const mod = streak % 7;
@@ -584,7 +628,15 @@ export function buildTaskHub(
       key: dailyKey,
       claimed: claimed.has(dailyKey),
       ready: !claimed.has(dailyKey)
-    }
+    },
+    memberDaily: memberActive
+      ? {
+          key: memberDailyKey,
+          claimed: claimed.has(memberDailyKey),
+          ready: !claimed.has(memberDailyKey),
+          amount: dailyCreditsForTier(profile.membership_tier)
+        }
+      : null
   };
 }
 

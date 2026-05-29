@@ -6,8 +6,13 @@ import {
   membershipCreditsPayload,
   syncMembershipCredits
 } from '../../lib/membership-credits';
+import { extendMembershipDays } from '../../lib/membership-tasks';
 import { createAdminClient, getOrCreateProfile } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
+
+function isShopRechargeCode(note: string | null | undefined): boolean {
+  return typeof note === 'string' && /^shop-cr\d/i.test(note);
+}
 
 function throwDbError(err: { message?: string; code?: string }, fallback: string): never {
   const msg = String(err.message || '');
@@ -104,34 +109,30 @@ redeemRoutes.post('/', async c => {
   }
 
   let membershipUntil: string | null = null;
-  if (row.membership_tier) {
-    const days = row.membership_days ?? null;
-    const until = days
-      ? new Date(Date.now() + days * 86400000)
-      : null;
-    membershipUntil = until ? until.toISOString() : null;
-
+  const hasMembership =
+    !!row.membership_tier || (row.membership_days != null && row.membership_days > 0);
+  if (hasMembership) {
+    const tier = (row.membership_tier || 'basic') as NonNullable<
+      import('../../lib/supabase').Profile['membership_tier']
+    >;
+    const days = row.membership_days ?? 30;
+    const shopRecharge = isShopRechargeCode(row.note);
     const profileBefore = await getOrCreateProfile(admin, user.id);
-    const mode =
-      parsed.data.creditGrantMode ||
-      profileBefore.credit_grant_mode ||
-      'bundle';
+    const mode = shopRecharge
+      ? 'daily'
+      : parsed.data.creditGrantMode || profileBefore.credit_grant_mode || 'daily';
+
+    const profileAfter = await extendMembershipDays(admin, profileBefore, days, tier);
+    membershipUntil = profileAfter.membership_until;
+
     const memberPatch: Record<string, unknown> = {
-      membership_tier: row.membership_tier,
-      membership_until: membershipUntil,
-      credit_grant_mode: mode,
-      bundle_granted_until: null
+      credit_grant_mode: mode
     };
     if (row.offer_kind === 'starter_14d') {
       memberPatch.first_sub_offer_used = true;
     }
-    if (mode === 'daily') {
-      memberPatch.daily_credits = 0;
-      memberPatch.daily_credits_date = null;
-    }
 
     await admin.from('profiles').update(memberPatch).eq('user_id', user.id);
-    await syncMembershipCredits(admin, user.id);
   }
 
   const { error: redeemErr } = await admin
@@ -150,13 +151,19 @@ redeemRoutes.post('/', async c => {
 
   const parts: string[] = [];
   if (row.credits > 0) parts.push(`+${row.credits} 积分`);
-  if (row.membership_tier) {
+  if (hasMembership) {
+    const tier = row.membership_tier || 'basic';
+    const days = row.membership_days ?? 30;
+    const tierLabel =
+      tier === 'pro' ? '专业' : tier === 'standard' ? '标准' : '基础';
     if (row.offer_kind === 'mini_3d') {
       parts.push('已开通 3 天基础会员（¥0.99 体验）');
     } else if (row.offer_kind === 'starter_14d') {
       parts.push('已开通 14 天基础会员');
+    } else if (isShopRechargeCode(row.note) && row.credits > 0) {
+      parts.push(`赠送 ${days} 天${tierLabel}会员（每日积分模式）`);
     } else {
-      parts.push(`已开通${row.membership_tier}会员`);
+      parts.push(`已开通 ${days} 天${tierLabel}会员`);
     }
   }
 

@@ -89,14 +89,16 @@ export async function redeemInviteCode(
   for (const uid of [inviteeId, inviter.user_id]) {
     let p = await getOrCreateProfile(admin, uid);
     p = await extendMembershipDays(admin, p, rewardDays, 'basic');
-    const { error: creditErr } = await admin.rpc('apply_credit_delta', {
-      p_user_id: uid,
-      p_delta: rewardCredits,
-      p_reason: 'invite_redeem',
-      p_ref_id: `${inviteeId}:${inviter.user_id}`,
-      p_meta: { code, role: uid === inviteeId ? 'invitee' : 'inviter' }
-    });
-    if (creditErr) throw creditErr;
+    if (rewardCredits > 0) {
+      const { error: creditErr } = await admin.rpc('apply_credit_delta', {
+        p_user_id: uid,
+        p_delta: rewardCredits,
+        p_reason: 'invite_redeem',
+        p_ref_id: `${inviteeId}:${inviter.user_id}`,
+        p_meta: { code, role: uid === inviteeId ? 'invitee' : 'inviter' }
+      });
+      if (creditErr) throw creditErr;
+    }
   }
 
   const { error: claimErr } = await admin.from('membership_task_claims').insert({

@@ -7,9 +7,9 @@
   const inflight = new WeakMap();
   const resolveQueue = [];
   let resolveActive = 0;
-  const MAX_RESOLVE = 6;
-  const WAREHOUSE_PREFETCH_CAP = 32;
-  const WAREHOUSE_IMMEDIATE_LOAD = 14;
+  const MAX_RESOLVE = 8;
+  const WAREHOUSE_PREFETCH_CAP = 40;
+  const WAREHOUSE_IMMEDIATE_LOAD = 18;
 
   function runResolveQueue() {
     while (resolveActive < MAX_RESOLVE && resolveQueue.length) {
@@ -30,9 +30,28 @@
   }
 
   function cardIdFromImg(img) {
-    return img.closest('.card[data-id]')?.dataset?.id
+    return img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
+      || img.closest('.card[data-id]')?.dataset?.id
       || img.closest('.card[data-post-id]')?.dataset?.postId
+      || img.closest('[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '')
       || undefined;
+  }
+
+  function communityResolveOpts(img) {
+    const inFeed = !!img.closest('#communityGrid, #creationsGrid, #userProfileGrid');
+    if (!inFeed) return {};
+    const authorId = img.closest('.card')?.dataset?.authorId || '';
+    const ref = img.getAttribute('data-image-ref') || '';
+    if (window.SupabaseSync?.isInvalidMediaUrl?.(ref)) return { skip: true };
+    const path = window.SupabaseSync?.storagePathFromRef?.(ref) || '';
+    const uid = window.SupabaseSync?.getUserId?.();
+    const own = !!(path && uid && path.replace(/^\//, '').startsWith(`${uid}/`));
+    return {
+      communityFeed: !window.SupabaseSync?.isLoggedIn?.() || !own,
+      authorId: authorId || undefined,
+      cardId: cardIdFromImg(img),
+      tryAllPaths: !own
+    };
   }
 
   function cachedUrl(ref, cardId) {
@@ -40,15 +59,27 @@
   }
 
   function isReadySrc(src) {
-    return src && src.startsWith('http') && !src.includes('data:image/svg');
+    if (!src || !src.startsWith('http') || src.includes('data:image/svg')) return false;
+    if (window.SupabaseSync?.isValidSignedDisplayUrl) {
+      return window.SupabaseSync.isValidSignedDisplayUrl(src);
+    }
+    if (window.SupabaseSync?.isFreshSignedDisplayUrl) {
+      return window.SupabaseSync.isFreshSignedDisplayUrl(src, 60000);
+    }
+    return true;
   }
 
-  async function resolveUrl(ref, cardId) {
+  async function resolveUrl(ref, cardId, extraOpts) {
     const hit = cachedUrl(ref, cardId);
     if (isReadySrc(hit)) return hit;
+    if (extraOpts?.skip) return '';
     if (!window.SupabaseSync?.resolveDisplayUrl) return '';
     try {
-      const url = await window.SupabaseSync.resolveDisplayUrl(ref, { assetId: cardId, variant: 'grid' });
+      const url = await window.SupabaseSync.resolveDisplayUrl(ref, {
+        assetId: cardId,
+        variant: 'grid',
+        ...(extraOpts || {})
+      });
       return isReadySrc(url) ? url : '';
     } catch (e) {
       console.warn('[CardImageLoader] resolve failed', ref, e);
@@ -63,6 +94,7 @@
     media.classList.remove('card-media--await');
     if (!media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
     if (!media.classList.contains('is-loading')) media.classList.add('is-loading');
+    media.classList.remove('card-media--await');
     const finish = () => {
       if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
       else media.classList.remove('is-loading');
@@ -70,6 +102,16 @@
     const fail = () => {
       media.classList.remove('is-loading', 'media-shine-reveal');
       media.classList.add('card-media--load-failed');
+      const ref = img.getAttribute('data-image-ref');
+      const cardId = cardIdFromImg(img);
+      if (ref && img.dataset.imgRetry !== '1') {
+        img.dataset.imgRetry = '1';
+        window.SupabaseSync?.invalidateSignedCacheForRef?.(ref, cardId);
+        const extra = communityResolveOpts(img);
+        void resolveUrl(ref, cardId, { ...extra, tryAllPaths: true }).then((retryUrl) => {
+          if (retryUrl) applyUrlToImg(img, retryUrl);
+        });
+      }
     };
     if (img.src === url && img.complete && img.naturalWidth > 0 && !img.src.includes('data:image/svg')) {
       finish();
@@ -96,6 +138,12 @@
   function loadImg(img) {
     const ref = img.getAttribute('data-image-ref');
     if (!ref) return;
+    const extra = communityResolveOpts(img);
+    if (extra.skip) {
+      const media = img.closest('.card-media');
+      media?.remove();
+      return;
+    }
     const cardId = cardIdFromImg(img);
     const primary = window.SupabaseSync?.primaryImagePath?.(ref, cardId);
     if (primary && window.SupabaseSync?.isPathKnownMissing?.(primary)) {
@@ -110,11 +158,11 @@
       return;
     }
     if (inflight.has(img)) return;
-    const run = () => resolveUrl(ref, cardId).then((url) => {
+    const run = () => resolveUrl(ref, cardId, extra).then((url) => {
       inflight.delete(img);
       if (url) applyUrlToImg(img, url);
     });
-    const p = img.closest('#cardsContainer') ? run() : enqueueResolve(() => resolveUrl(ref, cardId)).then((url) => {
+    const p = img.closest('#cardsContainer') ? run() : enqueueResolve(() => resolveUrl(ref, cardId, extra)).then((url) => {
       inflight.delete(img);
       if (url) applyUrlToImg(img, url);
     });
@@ -143,7 +191,8 @@
   function prefetchRefsInContainer(container) {
     if (!container || !window.SupabaseSync?.prefetchDisplayUrls) return;
     const warehouse = container.id === 'cardsContainer';
-    const cap = warehouse ? WAREHOUSE_PREFETCH_CAP : 12;
+    const communityFeed = container.id === 'communityGrid' || container.id === 'creationsGrid' || container.id === 'userProfileGrid';
+    const cap = warehouse ? WAREHOUSE_PREFETCH_CAP : (communityFeed ? 16 : 12);
     const refs = [];
     container.querySelectorAll('img.card-img[data-image-ref]').forEach((img) => {
       if (refs.length >= cap) return;
@@ -169,7 +218,9 @@
     if (observedRoot !== container) {
       disconnect();
       observedRoot = container;
-      const rootMargin = window.matchMedia('(max-width: 900px)').matches ? '400px 0px' : '80px 0px';
+      const rootMargin = window.matchMedia('(max-width: 900px)').matches
+      ? '400px 0px'
+      : (container.id === 'communityGrid' || container.id === 'creationsGrid' ? '240px 0px' : '80px 0px');
       observer = new IntersectionObserver(onIntersect, {
         root: scrollRootFor(container) || null,
         rootMargin,

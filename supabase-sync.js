@@ -9,7 +9,7 @@
   const imageUploadSkipUntil = new Map();
   const MISSING_PATH_TTL_MS = 20 * 60 * 1000;
   const IMAGE_UPLOAD_SKIP_MS = 24 * 60 * 60 * 1000;
-  const SIGN_REQUEST_TIMEOUT_MS = 3500;
+  const SIGN_REQUEST_TIMEOUT_MS = 6000;
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
   const MAX_SIDE = 1024;
   const JPEG_QUALITY = 0.78;
@@ -17,7 +17,70 @@
   const VARIANT_GRID = 'grid';
   const VARIANT_FULL = 'full';
   const USE_STORAGE_TRANSFORM = false;
-  const GRID_SIGN_CONCURRENCY = 12;
+  const GRID_SIGN_CONCURRENCY = 8;
+
+  function parseSignedUrlExpiry(url) {
+    if (!url || typeof url !== 'string') return 0;
+    try {
+      const token = new URL(url).searchParams.get('token');
+      if (!token) return 0;
+      const parts = token.split('.');
+      if (parts.length < 2) return 0;
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+      return (payload.exp || 0) * 1000;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function isIncompleteSignedStorageUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    if (!/\/storage\/v1\/object\/sign\//i.test(url)) return false;
+    try {
+      const token = new URL(url).searchParams.get('token');
+      return !token || token.length < 8;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  function isValidSignedDisplayUrl(url) {
+    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false;
+    if (isIncompleteSignedStorageUrl(url)) return false;
+    const path = storagePathFromRef(url);
+    if (!path) return true;
+    return isFreshSignedDisplayUrl(url, 60000);
+  }
+
+  function isFreshSignedDisplayUrl(url, minRemainingMs = 120000) {
+    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false;
+    if (isIncompleteSignedStorageUrl(url)) return false;
+    const path = storagePathFromRef(url);
+    if (!path) return true;
+    const exp = parseSignedUrlExpiry(url);
+    if (exp) return exp > Date.now() + minRemainingMs;
+    const cached = signedUrlCache.get(signedCacheKey(path.replace(/^\//, ''), VARIANT_GRID));
+    return !!(cached?.url === url && cached.expiresAt > Date.now() + minRemainingMs);
+  }
+
+  function invalidateSignedCache(path) {
+    const key = String(path || '').replace(/^\//, '').split('?')[0];
+    if (!key) return;
+    signedUrlCache.delete(signedCacheKey(key, VARIANT_GRID));
+    signedUrlCache.delete(signedCacheKey(key, VARIANT_FULL));
+  }
+
+  function invalidateSignedCacheForRef(ref, assetId) {
+    for (const p of listImagePathCandidates(normalizeImageRef(ref), assetId)) {
+      invalidateSignedCache(p);
+    }
+    const fromUrl = storagePathFromRef(ref);
+    if (fromUrl) invalidateSignedCache(fromUrl);
+  }
+
+  function isUsableLoadedImgSrc(src) {
+    return !!(src && src.startsWith('http') && !src.includes('data:image/svg') && isValidSignedDisplayUrl(src));
+  }
 
   function configured() {
     return !!(window.SUPABASE_URL && window.SUPABASE_ANON_KEY
@@ -49,20 +112,78 @@
   }
 
   let ensureSessionPromise = null;
+  let refreshSessionPromise = null;
+  const REFRESH_AHEAD_SEC = 300;
+
+  function tokenExpiresInSec(sess) {
+    const exp = (sess || session)?.expires_at;
+    if (exp == null) return -1;
+    return exp - Math.floor(Date.now() / 1000);
+  }
+
+  function isAccessTokenFresh(sess, minRemainingSec = REFRESH_AHEAD_SEC) {
+    const left = tokenExpiresInSec(sess);
+    if (left < 0) return false;
+    return left >= minRemainingSec;
+  }
+
+  async function refreshSessionOnce() {
+    const sb = getClient();
+    if (!sb) return null;
+    if (refreshSessionPromise) return refreshSessionPromise;
+    refreshSessionPromise = (async () => {
+      try {
+        const { data, error } = await sb.auth.refreshSession();
+        if (error) throw error;
+        if (data?.session?.access_token) {
+          session = data.session;
+          return session;
+        }
+        const { data: fresh } = await sb.auth.getSession();
+        session = fresh?.session ?? null;
+        return session;
+      } catch (e) {
+        console.warn('[SupabaseSync] refreshSession failed', e);
+        return null;
+      } finally {
+        refreshSessionPromise = null;
+      }
+    })();
+    return refreshSessionPromise;
+  }
+
+  async function healSessionOnResume() {
+    if (!configured()) return false;
+    const sb = getClient();
+    if (!sb) return false;
+    try {
+      const { data } = await sb.auth.getSession();
+      if (data?.session) session = data.session;
+      if (!session?.user) return false;
+      if (isAccessTokenFresh(session, 60)) return true;
+      const refreshed = await refreshSessionOnce();
+      return !!(refreshed?.access_token && isAccessTokenFresh(refreshed, 0));
+    } catch (e) {
+      console.warn('[SupabaseSync] healSessionOnResume', e);
+      return false;
+    }
+  }
 
   async function ensureSession() {
-    if (session?.access_token) {
-      const expMs = session.expires_at ? session.expires_at * 1000 : 0;
-      if (!expMs || expMs > Date.now() + 60_000) return session;
-    }
+    if (session?.access_token && isAccessTokenFresh(session, 60)) return session;
     if (ensureSessionPromise) return ensureSessionPromise;
     ensureSessionPromise = (async () => {
       const sb = getClient();
       if (!sb) throw new Error('Supabase 未配置');
       const { data, error } = await sb.auth.getSession();
       if (error) throw error;
-      if (!data.session?.user) throw new Error('登录已过期，请重新登录');
-      session = data.session;
+      session = data?.session ?? null;
+      if (!session?.user) throw new Error('登录已过期，请重新登录');
+      if (!isAccessTokenFresh(session, 60)) {
+        const refreshed = await refreshSessionOnce();
+        if (refreshed?.access_token) session = refreshed;
+        else if (!isAccessTokenFresh(session, 0)) throw new Error('登录已过期，请重新登录');
+      }
       return session;
     })();
     try {
@@ -77,29 +198,23 @@
   function getSession() { return session; }
 
   /** 在 access_token 将过期时刷新，避免 UI 仍显示已登录但 API 返回「登录已过期」 */
-  async function getValidAccessToken() {
+  async function getValidAccessToken(opts = {}) {
+    const force = opts.force === true;
     const sb = getClient();
     if (!sb) return null;
-    if (!session?.access_token) {
+    if (!session?.access_token || force) {
       try {
         const { data } = await sb.auth.getSession();
-        session = data?.session ?? null;
-      } catch (e) {
-        return null;
-      }
+        if (data?.session) session = data.session;
+      } catch (e) { /* ignore */ }
     }
     if (!session?.access_token) return null;
-    const exp = session.expires_at;
-    const now = Math.floor(Date.now() / 1000);
-    if (exp != null && exp - now < 120) {
-      try {
-        const { data, error } = await sb.auth.refreshSession();
-        if (!error && data?.session) {
-          session = data.session;
-        }
-      } catch (e) { /* 仍尝试用旧 token */ }
+    if (force || !isAccessTokenFresh(session)) {
+      const refreshed = await refreshSessionOnce();
+      if (refreshed?.access_token) session = refreshed;
+      if (!isAccessTokenFresh(session, 0)) return null;
     }
-    return session?.access_token || null;
+    return session.access_token || null;
   }
   function getUserEmail() { return session?.user?.email || ''; }
 
@@ -188,9 +303,9 @@
   }
 
   try {
-    if (localStorage.getItem('promptrepo_sign_v') !== '3') {
+    if (localStorage.getItem('promptrepo_sign_v') !== '4') {
       clearSignedUrlCache();
-      localStorage.setItem('promptrepo_sign_v', '3');
+      localStorage.setItem('promptrepo_sign_v', '4');
     }
   } catch (e) { /* ignore */ }
 
@@ -242,6 +357,20 @@
     return code === 404 || code === 400 || /not found|object not found|does not exist/.test(msg);
   }
 
+  function isInvalidMediaUrl(url) {
+    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false;
+    try {
+      const u = new URL(url);
+      const host = u.hostname.toLowerCase();
+      const path = u.pathname || '/';
+      if (host === 'api.prompt-hub.cn' && !path.startsWith('/api/')) return true;
+      if ((host === 'prompt-hub.cn' || host === 'www.prompt-hub.cn') && /\.(jpe?g|png|webp|gif)$/i.test(path)) {
+        return true;
+      }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
   function primaryImagePath(image, assetId) {
     const fromRef = storagePathFromRef(image);
     if (fromRef) return fromRef.replace(/^\//, '');
@@ -281,6 +410,9 @@
         })
       ]);
       if (error) throw error;
+      if (!data?.signedUrl || isIncompleteSignedStorageUrl(data.signedUrl)) {
+        throw new Error('invalid_signed_url');
+      }
       signedUrlCache.set(cacheKey, {
         url: data.signedUrl,
         expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
@@ -337,7 +469,7 @@
         authorId: signOpts.authorId,
         cardId: signOpts.cardId
       });
-      if (r.ok && r.data?.url) {
+      if (r.ok && r.data?.url && !isIncompleteSignedStorageUrl(r.data.url)) {
         const v = variant || VARIANT_GRID;
         signedUrlCache.set(signedCacheKey(path.replace(/^\//, ''), v), {
           url: r.data.url,
@@ -345,7 +477,7 @@
         });
         return r.data.url;
       }
-      if (r?.status === 404 || r?.code === 'VALIDATION_ERROR') {
+      if (r?.status === 404 || r?.code === 'NOT_FOUND') {
         markPathMissing(fileKey);
       }
     } catch (e) {
@@ -366,7 +498,7 @@
     if (!apiSignAllowed(opts)) return null;
     try {
       const r = await window.PromptHubApi.signMediaRef(toStorageRef(path), { variant });
-      if (r.ok && r.data?.url) {
+      if (r.ok && r.data?.url && !isIncompleteSignedStorageUrl(r.data.url)) {
         const v = variant || VARIANT_GRID;
         signedUrlCache.set(signedCacheKey(path.replace(/^\//, ''), v), {
           url: r.data.url,
@@ -403,6 +535,10 @@
       if (!storagePathOwnedByCurrentUser(path)) return null;
     }
     if (isLoggedIn() && storagePathOwnedByCurrentUser(path)) {
+      if (apiSignAllowed(opts)) {
+        const apiUrl = await signPathViaApi(path, v, opts);
+        if (apiUrl) return apiUrl;
+      }
       try {
         const ownUrl = await getSignedUrlForPath(path, { variant: v });
         if (ownUrl) return ownUrl;
@@ -491,12 +627,22 @@
     const bucketPath = storagePathFromRef(normalized);
     if (bucketPath && (isLoggedIn() || communityFeed)) {
       const primary = primaryImagePath(normalized, assetId);
+      const fromRef = bucketPath.replace(/^\//, '');
       const all = listImagePathCandidates(normalized, assetId, authorId).filter(
         (p) => !isPathKnownMissing(p)
       );
-      const candidates = o.tryAllPaths === true || communityFeed
-        ? all
-        : (primary ? [primary] : all.slice(0, 1));
+      let candidates;
+      if (o.tryAllPaths === true) {
+        candidates = all;
+      } else if (fromRef) {
+        candidates = assetId && all.length ? all : [fromRef];
+      } else if (primary) {
+        candidates = [primary];
+      } else if (communityFeed) {
+        candidates = all.slice(0, 2);
+      } else {
+        candidates = all.slice(0, 1);
+      }
       for (const path of candidates) {
         const cached = signedUrlCache.get(signedCacheKey(path.replace(/^\//, ''), variant));
         if (cached?.url && cached.expiresAt > Date.now() + 120000) return cached.url;
@@ -512,22 +658,39 @@
       return null;
     }
     if (/^https?:\/\//i.test(image)) {
+      if (isInvalidMediaUrl(image)) return null;
       const legacyPath = storagePathFromRef(image);
-      if (legacyPath && isLoggedIn()) {
-        return resolveDisplayUrl(toStorageRef(legacyPath), { assetId });
+      if (legacyPath) {
+        const uid = getUserId();
+        const own = !!(uid && legacyPath.replace(/^\//, '').startsWith(`${uid}/`));
+        const useCommunity = communityFeed || (isLoggedIn() && !own);
+        return resolveDisplayUrl(toStorageRef(legacyPath), {
+          assetId,
+          authorId,
+          cardId: o.cardId || assetId,
+          communityFeed: useCommunity,
+          tryAllPaths: useCommunity || o.tryAllPaths === true
+        });
       }
       if (window.PromptHubApi?.fetchMediaAsBlobUrl) {
         const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(image);
         if (blobUrl) return blobUrl;
       }
-      return image;
+      return null;
     }
     return image;
   }
 
   function communityPrefetchPaths(imagesOrPosts) {
     const paths = new Set();
-    for (const item of imagesOrPosts || []) {
+    const list = Array.isArray(imagesOrPosts)
+      ? imagesOrPosts
+      : imagesOrPosts == null
+        ? []
+        : typeof imagesOrPosts === 'string'
+          ? [imagesOrPosts]
+          : [imagesOrPosts];
+    for (const item of list) {
       if (typeof item === 'string') {
         const p = storagePathFromRef(item);
         if (p) paths.add(p.replace(/^\//, ''));
@@ -536,17 +699,19 @@
       if (!item || typeof item !== 'object') continue;
       const ref = item.image;
       if (ref) {
+        if (isInvalidMediaUrl(ref)) continue;
         const p = storagePathFromRef(ref);
-        if (p) paths.add(p.replace(/^\//, ''));
+        if (p) {
+          paths.add(p.replace(/^\//, ''));
+          continue;
+        }
       }
       const authorId = item.authorId && String(item.authorId) !== 'guest' ? String(item.authorId) : '';
       const cardId = item.sourceCardId ? String(item.sourceCardId) : '';
       if (authorId && cardId) {
         const base = String(cardId).replace(/[^a-zA-Z0-9_-]/g, '_');
-        paths.add(`${authorId}/${base}.jpg`);
-        paths.add(`${authorId}/${cardId}.jpg`);
-        paths.add(`${authorId}/${base}.webp`);
-        paths.add(`${authorId}/${base}.png`);
+        const primary = `${authorId}/${base}.jpg`;
+        if (!isPathKnownMissing(primary)) paths.add(primary);
       }
     }
     return [...paths];
@@ -554,20 +719,29 @@
 
   async function prefetchCommunityDisplayUrls(images, capMs) {
     if (!window.PromptHubApi?.signCommunityMediaRef) return;
-    const paths = communityPrefetchPaths(images).slice(0, 24);
-    if (!paths.length) return;
-    const limit = Math.max(800, Number(capMs) || 6000);
+    const items = (images || []).slice(0, 16);
+    if (!items.length) return;
+    const limit = Math.max(800, Number(capMs) || 4000);
     const started = Date.now();
     let i = 0;
-    const concurrency = 2;
-    async function worker() {
-      while (i < paths.length && Date.now() - started < limit) {
-        const path = paths[i++];
-        if (signedUrlCache.get(signedCacheKey(path, VARIANT_GRID))?.expiresAt > Date.now() + 120000) continue;
-        await signPathViaCommunityApi(path, VARIANT_GRID);
+    const concurrency = 6;
+    async function signItem(item) {
+      const authorId = item && typeof item === 'object' ? item.authorId : '';
+      const cardId = item && typeof item === 'object' ? (item.sourceCardId || item.id) : '';
+      const paths = communityPrefetchPaths(item).slice(0, 3);
+      for (const path of paths) {
+        if (Date.now() - started >= limit) return;
+        const key = path.replace(/^\//, '');
+        if (signedUrlCache.get(signedCacheKey(key, VARIANT_GRID))?.expiresAt > Date.now() + 120000) continue;
+        await signPathViaCommunityApi(path, VARIANT_GRID, { authorId, cardId });
       }
     }
-    await Promise.all(Array.from({ length: Math.min(concurrency, paths.length) }, () => worker()));
+    async function worker() {
+      while (i < items.length && Date.now() - started < limit) {
+        await signItem(items[i++]);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
   }
 
   async function prefetchDisplayUrls(images) {
@@ -586,7 +760,13 @@
     for (let i = 0; i < pending.length; i += GRID_SIGN_CONCURRENCY) {
       const batch = pending.slice(i, i + GRID_SIGN_CONCURRENCY);
       await Promise.all(
-        batch.map((p) => getSignedUrlForPath(p, { variant: VARIANT_GRID }).catch(() => {}))
+        batch.map(async (p) => {
+          if (apiSignAllowed({}) && storagePathOwnedByCurrentUser(p)) {
+            const apiUrl = await signPathViaApi(p, VARIANT_GRID, {});
+            if (apiUrl) return;
+          }
+          await getSignedUrlForPath(p, { variant: VARIANT_GRID }).catch(() => {});
+        })
       );
     }
   }
@@ -605,12 +785,14 @@
     }
     const path = storagePathFromRef(image);
     if (!path) {
-      if (/^https?:\/\//i.test(image)) return image;
+      if (/^https?:\/\//i.test(image) && isValidSignedDisplayUrl(image)) return image;
       return '';
     }
     const cached = signedUrlCache.get(signedCacheKey(path.replace(/^\//, ''), variant));
-    if (cached?.url) return cached.url;
-    if (/^https?:\/\//i.test(image)) return image;
+    if (cached?.url && cached.expiresAt > Date.now() + 120000 && !isIncompleteSignedStorageUrl(cached.url)) {
+      return cached.url;
+    }
+    if (/^https?:\/\//i.test(image) && isValidSignedDisplayUrl(image)) return image;
     return '';
   }
 
@@ -645,7 +827,8 @@
       url &&
       typeof url === 'string' &&
       !url.startsWith(STORAGE_PREFIX) &&
-      !isPlaceholderImgSrc(url)
+      !isPlaceholderImgSrc(url) &&
+      !isIncompleteSignedStorageUrl(url)
     );
   }
 
@@ -657,12 +840,26 @@
       return;
     }
     media.classList.remove('is-loading');
-    if (state === 'failed') media.classList.add('card-media--load-failed');
+    if (state === 'failed') {
+      if (media.closest('#communityGrid, #creationsGrid, #userProfileGrid')) {
+        media.remove();
+        return;
+      }
+      media.classList.add('card-media--load-failed');
+    }
   }
 
   function safeImgSrc(image) {
     if (!image) return '';
-    if (isDataUrl(image) || image.startsWith('blob:') || /^https?:\/\//i.test(image)) {
+    if (isDataUrl(image) || image.startsWith('blob:')) return image;
+    if (/^https?:\/\//i.test(image)) {
+      if (isInvalidMediaUrl(image) || isIncompleteSignedStorageUrl(image)) return imgPlaceholderSrc();
+      const path = storagePathFromRef(image);
+      if (path) {
+        const cached = getCachedDisplayUrl(toStorageRef(path));
+        if (cached && !cached.startsWith(STORAGE_PREFIX)) return cached;
+        return imgPlaceholderSrc();
+      }
       return image;
     }
     if (isStorageRef(image)) {
@@ -679,13 +876,15 @@
       const ref = img.getAttribute('data-image-ref') || img.getAttribute('data-storage-ref');
       if (!ref) return;
       const cur = img.currentSrc || img.src || '';
-      if (cur.startsWith('http') && !cur.includes('data:image/svg')) return;
-      const assetId = img.closest('.card[data-id]')?.dataset?.id
+      if (isUsableLoadedImgSrc(cur)) return;
+      const assetId = img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
+        || img.closest('.card[data-id]')?.dataset?.id
         || img.closest('.card[data-post-id]')?.dataset?.postId
         || undefined;
       const url = getCachedDisplayUrl(ref, { assetId, variant: VARIANT_GRID });
-      if (url && /^https?:\/\//i.test(url)) {
+      if (url && /^https?:\/\//i.test(url) && isValidSignedDisplayUrl(url)) {
         const media = img.closest('.card-media, .imagegen-feed-media');
+        media?.classList.remove('card-media--await');
         if (media && !media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
         if (media && !media.classList.contains('is-loading')) media.classList.add('is-loading');
         const done = () => {
@@ -722,7 +921,7 @@
       if (aVis !== bVis) return aVis ? -1 : 1;
       return ar.top - br.top;
     });
-    const concurrency = window.matchMedia('(max-width: 900px)').matches ? 8 : 10;
+    const concurrency = window.matchMedia('(max-width: 900px)').matches ? 6 : 8;
     let idx = 0;
     async function hydrateOne(img) {
       const ref = img.getAttribute('data-storage-ref') || img.getAttribute('data-image-ref');
@@ -730,22 +929,26 @@
       const media = img.closest('.card-media, .imagegen-feed-media');
       if (media?.classList.contains('imagegen-gen-pending')) return;
       const cur = img.currentSrc || img.src || '';
-      if (onlyMissing && cur.startsWith('http') && !cur.includes('data:image/svg')) {
+      if (onlyMissing && isUsableLoadedImgSrc(cur)) {
         media?.classList.remove('is-loading');
         return;
       }
-      const assetId = img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
+      const inFeed = !!img.closest('#communityGrid, #creationsGrid, #userProfileGrid');
+      const authorId = img.dataset?.authorId
+        || img.closest('.card')?.dataset?.authorId
+        || '';
+      const refPath = storagePathFromRef(ref) || '';
+      const uid = getUserId();
+      const ownFeedPath = !!(refPath && uid && refPath.replace(/^\//, '').startsWith(`${uid}/`));
+      const inSide = !!img.closest('#communitySideBody, #creationsSideBody, .community-side-img-btn');
+      const communityFeed = (inFeed && (!isLoggedIn() || !ownFeedPath)) || inSide;
+      const assetId = img.dataset?.sourceCardId
+        || img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
         || img.closest('.card[data-id]')?.dataset?.id
         || img.closest('.card[data-post-id]')?.dataset?.postId
         || img.closest('.card[data-creation-id]')?.dataset?.creationId
         || img.closest('[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '')
         || undefined;
-      const inFeed = !!img.closest('#communityGrid, #creationsGrid, #userProfileGrid');
-      const authorId = img.closest('.card')?.dataset?.authorId || '';
-      const refPath = storagePathFromRef(ref) || '';
-      const uid = getUserId();
-      const ownFeedPath = !!(refPath && uid && refPath.replace(/^\//, '').startsWith(`${uid}/`));
-      const communityFeed = inFeed && (!isLoggedIn() || !ownFeedPath);
       const resolveOpts = {
         assetId,
         authorId: authorId || undefined,
@@ -832,8 +1035,9 @@
             return;
           }
           img.dataset.retryHydrate = '1';
+          invalidateSignedCacheForRef(ref, assetId);
           setCardMediaLoadState(media, 'loading');
-          void resolveDisplayUrl(ref, resolveOpts).then((url) => {
+          void resolveDisplayUrl(ref, { ...resolveOpts, tryAllPaths: true }).then((url) => {
             if (isResolvableDisplayUrl(url)) {
               img.src = url;
               img.classList.remove('img-load-failed');
@@ -1297,6 +1501,9 @@
     let initialHandled = false;
     sb.auth.onAuthStateChange((event, newSession) => {
       session = newSession;
+      if (event === 'TOKEN_REFRESHED' && newSession?.access_token) {
+        session = newSession;
+      }
       if (event === 'INITIAL_SESSION') {
         if (initialHandled) return;
         initialHandled = true;
@@ -1306,6 +1513,14 @@
     if (!initialHandled && typeof onAuthChange === 'function') {
       initialHandled = true;
       onAuthChange(session, 'INITIAL_SESSION');
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && session?.user) {
+        void healSessionOnResume();
+      }
+    });
+    if (session?.user && !isAccessTokenFresh(session, 60)) {
+      void healSessionOnResume();
     }
     return session;
   }
@@ -1546,6 +1761,8 @@
     getUserId,
     getSession,
     getValidAccessToken,
+    healSessionOnResume,
+    refreshSessionOnce,
     getUserEmail,
     isDataUrl,
     isStorageUrl,
@@ -1553,6 +1770,7 @@
     storagePathFromRef,
     primaryImagePath,
     isPathKnownMissing,
+    isInvalidMediaUrl,
     normalizeImageRef,
     resolveDisplayUrl,
     prefetchDisplayUrls,
@@ -1561,6 +1779,11 @@
     prefetchCommunityDisplayUrls,
     patchImageSrcFromCache,
     getCachedDisplayUrl,
+    invalidateSignedCache,
+    invalidateSignedCacheForRef,
+    isFreshSignedDisplayUrl,
+    isValidSignedDisplayUrl,
+    isIncompleteSignedStorageUrl,
     VARIANT_GRID,
     VARIANT_FULL,
     safeImgSrc,

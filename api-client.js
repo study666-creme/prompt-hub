@@ -48,6 +48,18 @@
     );
   }
 
+  async function recoverSessionForApi() {
+    if (window.SupabaseSync?.healSessionOnResume) {
+      const healed = await window.SupabaseSync.healSessionOnResume();
+      if (healed) return true;
+    }
+    if (window.SupabaseSync?.getValidAccessToken) {
+      const token = await window.SupabaseSync.getValidAccessToken({ force: true });
+      return !!token;
+    }
+    return false;
+  }
+
   async function request(method, path, body, opts = {}, attempt = 0) {
     if (isFileOrigin()) {
       return {
@@ -120,9 +132,9 @@
             : res.status === 429
               ? '操作过于频繁，请稍后再试'
               : `请求失败 (${res.status})`;
-      if (res.status === 401 && attempt < 1 && window.SupabaseSync?.getValidAccessToken) {
-        const refreshed = await window.SupabaseSync.getValidAccessToken();
-        if (refreshed) return request(method, path, body, opts, attempt + 1);
+      if (res.status === 401 && attempt < 2) {
+        const recovered = await recoverSessionForApi();
+        if (recovered) return request(method, path, body, opts, attempt + 1);
       }
       if (res.status === 429 && attempt < 4) {
         await new Promise((r) => setTimeout(r, 1200 + attempt * 800));
@@ -187,8 +199,39 @@
     }
     const silent = opts?.silent === true;
     const r = await request('GET', '/api/v1/me', null, { timeoutMs: API_FAST_TIMEOUT_MS, noRetry: true });
+    if (!r.ok && r.code === 'UNAUTHORIZED') {
+      const recovered = await recoverSessionForApi();
+      if (recovered) {
+        const retry = await request('GET', '/api/v1/me', null, { timeoutMs: API_FAST_TIMEOUT_MS, noRetry: true });
+        if (retry.ok) {
+          const d = retry.data;
+          if (d && typeof d.credits === 'number' && window.PointsSystem?.setCreditsFromServer) {
+            window.PointsSystem.setCreditsFromServer(d.credits, {
+              permanent: d.creditsPermanent,
+              daily: d.dailyCredits,
+              mode: d.creditGrantMode,
+              note: d.dailyCreditsNote
+            });
+          }
+          if (d?.membership && window.Membership?.applyServerState) {
+            window.Membership.applyServerState(d.membership);
+          }
+          if (d && 'firstSubOfferUsed' in d) {
+            window.SubscriptionUI?.setFirstOfferUsedFromServer?.(!!d.firstSubOfferUsed);
+          } else if (window.SupabaseSync?.isLoggedIn?.()) {
+            window.SubscriptionUI?.setFirstOfferUsedFromServer?.(false);
+          }
+          if (d?.creditGrantMode || d?.dailyCreditsByTier) {
+            window.SubscriptionUI?.applyServerState?.(d);
+          }
+          window.PointsSystem?.updateCreditsUI?.();
+          window.SubscriptionUI?.refreshOfferUI?.();
+          return retry;
+        }
+      }
+    }
     if (!r.ok) {
-      if (!silent && typeof showToast === 'function' && r.code !== 'NETWORK_ERROR') {
+      if (!silent && typeof showToast === 'function' && r.code !== 'NETWORK_ERROR' && r.code !== 'UNAUTHORIZED') {
         showToast(r.message);
       }
       return r;
@@ -378,6 +421,15 @@
     return request('POST', '/api/v1/community/posts/sync', { posts: posts || [] });
   }
 
+  async function pushCommunityNotify(payload) {
+    return request('POST', '/api/v1/community/notify', payload || {});
+  }
+
+  async function fetchCommunityNotifications(opts = {}) {
+    const limit = Math.min(80, Math.max(1, Number(opts.limit) || 40));
+    return request('GET', `/api/v1/community/notifications?limit=${limit}`);
+  }
+
   async function signCommunityMediaRef(ref, opts) {
     if (!isConfigured()) {
       return { ok: false, code: 'API_NOT_CONFIGURED', message: '未配置 API 地址' };
@@ -454,6 +506,8 @@
     publishCommunityPost,
     unpublishCommunityPost,
     syncCommunityPostsBatch,
+    pushCommunityNotify,
+    fetchCommunityNotifications,
     getGenerationImageUrl,
     fetchMediaAsBlobUrl
   };

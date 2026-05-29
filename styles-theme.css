@@ -41,8 +41,30 @@
 [data-theme="light"] .feature-body-cards,
 [data-theme="light"] .community-cards,
 [data-theme="light"] #pageCommunity,
-[data-theme="light"] #pageCreations {
+[data-theme="light"] #pageCreations,
+[data-theme="light"] #pageImageGen {
   background-color: var(--bg-primary);
+}
+
+[data-theme="light"] body:not(.efficiency-mode) .app-page-feature,
+[data-theme="light"] body:not(.efficiency-mode) .feature-shell,
+[data-theme="light"] body:not(.efficiency-mode) .community-page-layout,
+[data-theme="light"] body:not(.efficiency-mode) .community-page-main,
+[data-theme="light"] body:not(.efficiency-mode) .feature-body-cards,
+[data-theme="light"] body:not(.efficiency-mode) .community-cards,
+[data-theme="light"] body:not(.efficiency-mode) #pageCommunity,
+[data-theme="light"] body:not(.efficiency-mode) #pageCreations,
+[data-theme="light"] body:not(.efficiency-mode) #pageImageGen {
+  background-color: transparent;
+}
+
+[data-theme="light"] body:not(.efficiency-mode) .feature-header {
+  background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+}
+
+body.efficiency-mode #rippleGridBg,
+body.efficiency-mode .ui-vignette {
+  display: none !important;
 }
 
 [data-theme="light"] .feature-header {
@@ -153,6 +175,18 @@
   background: #ebebf0;
 }
 
+[data-theme="light"] .card-copy-btn {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #6b7280;
+}
+
+[data-theme="light"] .card-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(0, 0, 0, 0.14);
+  color: #374151;
+}
+
 [data-theme="light"] ::-webkit-scrollbar-thumb {
   background: #c7c7cc;
 }
@@ -224,24 +258,38 @@ body.app-nav-collapsed .app-nav-theme-btn {
 .theme-toggle-btn:hover {
   border-color: var(--border-light);
   background: var(--bg-hover);
-  transform: scale(1.05);
+}
+
+.theme-toggle-btn.app-nav-theme-btn {
+  position: relative;
+  overflow: hidden;
 }
 
 .theme-toggle-btn svg {
   width: 22px;
   height: 22px;
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  opacity: 0;
+  transition: opacity 0.42s ease;
+  pointer-events: none;
+}
+
+.theme-toggle-btn .icon-sun {
+  opacity: 1;
 }
 
 .theme-toggle-btn .icon-moon {
-  display: none;
+  opacity: 0;
 }
 
 [data-theme="light"] .theme-toggle-btn .icon-sun {
-  display: none;
+  opacity: 0;
 }
 
 [data-theme="light"] .theme-toggle-btn .icon-moon {
-  display: block;
+  opacity: 1;
 }
 
 .theme-toggle-btn.app-nav-theme-btn svg {

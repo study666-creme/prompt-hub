@@ -28,10 +28,18 @@
   }
 
   function markTaskClaimedOptimistic(taskKey) {
-    if (!cachedTaskList?.items) return;
+    if (!cachedTaskList) return;
+    const hub = { ...(cachedTaskList.hub || {}) };
+    if (hub.dailyBonus?.key === taskKey) {
+      hub.dailyBonus = { ...hub.dailyBonus, claimed: true, ready: false };
+    }
+    if (hub.memberDaily?.key === taskKey) {
+      hub.memberDaily = { ...hub.memberDaily, claimed: true, ready: false };
+    }
     cachedTaskList = {
       ...cachedTaskList,
-      items: cachedTaskList.items.map((t) =>
+      hub,
+      items: (cachedTaskList.items || []).map((t) =>
         t.key === taskKey ? { ...t, claimed: true, ready: false } : t
       )
     };
@@ -40,6 +48,34 @@
 
   function isLoggedIn() {
     return window.SupabaseSync?.isLoggedIn?.() === true;
+  }
+
+  function countPendingTaskClaims(data) {
+    if (!data || data.error) return { total: 0, memberDaily: false };
+    let total = 0;
+    if (data.hub?.dailyBonus?.ready && !data.hub?.dailyBonus?.claimed) total += 1;
+    if (data.hub?.memberDaily?.ready && !data.hub?.memberDaily?.claimed) total += 1;
+    for (const t of data.items || []) {
+      if (t.ready && !t.claimed) total += 1;
+    }
+    return {
+      total,
+      memberDaily: !!(data.hub?.memberDaily?.ready && !data.hub?.memberDaily?.claimed)
+    };
+  }
+
+  function updateTaskNavBadges(data) {
+    const { total, memberDaily } = countPendingTaskClaims(data);
+    const trialBadge = document.querySelector('.app-nav-trial-badge');
+    const subBadge = document.querySelector('.app-nav-subscribe-badge');
+    if (trialBadge) {
+      trialBadge.textContent = total > 0 ? String(total) : '任务';
+      trialBadge.classList.toggle('nav-badge-pending', total > 0);
+    }
+    if (subBadge) {
+      subBadge.textContent = memberDaily ? '领取' : '五折';
+      subBadge.classList.toggle('nav-badge-pending', memberDaily);
+    }
   }
 
   function esc(s) {
@@ -265,12 +301,12 @@
   let trialPhoneOtpCooldownTimer = null;
 
   function taskKeyNeedsPhone(taskKey) {
-    return !String(taskKey || '').startsWith('daily_bonus_');
+    return String(taskKey || '') === 'redeem_invite_code';
   }
 
   function phoneRequiredTip() {
     if (typeof showToast === 'function') {
-      showToast('请先绑定手机号（可点下方「绑定手机号」）', 5000);
+      showToast('填写邀请码须先绑定手机号', 5000);
     }
     openTrialPhoneBindForm();
   }
@@ -401,9 +437,9 @@
     }
     const phoneOk = hub.phoneVerified === true;
     const phoneNote = phoneOk
-      ? '<p class="trial-hub-note trial-hub-note-ok">已绑定手机号，可领取全部任务奖励</p>'
+      ? ''
       : `<div class="trial-hub-phone-block">
-          <p class="trial-hub-note trial-hub-note-warn">每日积分无需绑手机；其它任务奖励与邀请码兑换需先绑定手机号</p>
+          <p class="trial-hub-note trial-hub-note-warn">填写邀请码须先绑定手机号</p>
           <button type="button" class="btn btn-primary btn-sm" id="trialHubPhoneBindOpen">绑定手机号</button>
           <div class="trial-hub-phone-form hidden" id="trialHubPhoneBindForm">
             <div class="trial-hub-phone-row-inputs">
@@ -423,6 +459,20 @@
     const streakTip = hub.dailyBonus?.claimed
       ? `已连续签到 ${hub.signStreak || 0} 天 · 再领 ${hub.daysToStreakBonus || 7} 天额外 +10 积分`
       : `领取即签到 · 已连续 ${hub.signStreak || 0} 天 · 满 7 天额外 +10 积分`;
+    const memberDaily = hub.memberDaily;
+    const memberDailyRow = memberDaily
+      ? `<div class="trial-hub-row">
+          <div class="trial-hub-row-main">
+            <strong>会员每日积分</strong>
+            <p class="trial-hub-desc">按当前会员档位领取 ${memberDaily.amount || 0} 积分 · 当日有效</p>
+          </div>
+          <div class="trial-hub-row-action">${
+            memberDaily.claimed
+              ? '<span class="trial-task-done">今日已领</span>'
+              : `<button type="button" class="btn btn-primary btn-sm" id="trialHubMemberDailyBtn">领取 ${memberDaily.amount || 0} 积分</button>`
+          }</div>
+        </div>`
+      : '';
     const inviteFilled = hub.referred === true;
     let pendingInvite = '';
     try {
@@ -447,10 +497,11 @@
           </div>
           <div class="trial-hub-row-action">${dailyBtn}</div>
         </div>
+        ${memberDailyRow}
       </section>
       <section class="trial-hub-block">
         <h4 class="trial-hub-title">邀请好友</h4>
-        <p class="trial-hub-desc">好友注册并填写你的邀请码，双方各得 1 天基础会员 + 50 积分</p>
+        <p class="trial-hub-desc">好友注册并填写你的邀请码，双方各得 1 天基础会员 + 50 积分（须绑定手机号）</p>
         <div class="trial-hub-link-row">
           <span class="trial-hub-label">网站</span>
           <code class="trial-hub-code" id="trialHubSiteLink">${esc(hub.inviteLink || hub.siteUrl || '')}</code>
@@ -469,6 +520,9 @@
 
     document.getElementById('trialHubDailyBtn')?.addEventListener('click', () => {
       void onClaim(hub.dailyBonus.key, document.getElementById('trialHubDailyBtn'));
+    });
+    document.getElementById('trialHubMemberDailyBtn')?.addEventListener('click', () => {
+      void onClaim(hub.memberDaily.key, document.getElementById('trialHubMemberDailyBtn'));
     });
     document.getElementById('trialHubCopyLink')?.addEventListener('click', () => {
       void copyText(hub.inviteLink || hub.siteUrl || '', '已复制邀请链接');
@@ -566,12 +620,17 @@
     if (!list) return;
     const items = sortTaskItems(taskItemsWithoutDaily(data?.items || []));
     if (data?.error === 'session_expired') {
-      list.innerHTML = `<p class="trial-tasks-empty">登录凭证已过期，请点「重新登录」后再试（侧栏邮箱仍显示属正常）。</p>
+      list.innerHTML = `<p class="trial-tasks-empty">登录状态正在恢复中…若仍无法使用，请点「重新登录」（无需先退出，直接登录即可）。</p>
         <p class="trial-tasks-hint"><button type="button" class="btn btn-primary btn-sm" id="trialTasksReloginBtn">重新登录</button></p>`;
       document.getElementById('trialTasksReloginBtn')?.addEventListener('click', () => {
-        closeTrialTasksPanel();
-        if (typeof openAuthModal === 'function') openAuthModal('login');
-      });
+        void window.SupabaseSync?.healSessionOnResume?.().then((ok) => {
+          if (ok) void openTrialTasksPanel();
+          else {
+            closeTrialTasksPanel();
+            if (typeof openAuthModal === 'function') openAuthModal('login');
+          }
+        });
+      }, { once: true });
       return;
     }
     if (data?.error) {
@@ -639,6 +698,7 @@
         }
       });
     });
+    updateTaskNavBadges(data);
   }
 
   async function onClaim(taskKey, btnEl) {
@@ -709,6 +769,12 @@
   function onAuthReady() {
     if (isHomescreenLaunch()) markPwaInstalled();
     else if (localStorage.getItem(LS_PWA_FLAG) === '1') void syncTaskProgress(true);
+    if (isLoggedIn()) {
+      void loadTasks().then((data) => {
+        cachedTaskList = data;
+        updateTaskNavBadges(data);
+      });
+    }
   }
 
   function closeTrialTasksPanel() {

@@ -197,9 +197,8 @@
       return { ok: false, msg: '后端 API 未连接，暂无法兑换（请检查网络或等待 api 域名生效）' };
     }
 
-    const mode = window.SubscriptionUI?.getCreditGrantMode?.();
     const api = await window.PromptHubApi.redeem(key, {
-      creditGrantMode: mode
+      creditGrantMode: 'daily'
     });
     if (api.ok) {
       if (typeof api.data.credits === 'number') {
@@ -332,6 +331,28 @@
     migrateLocalPointsScale();
     updateCreditsUI();
     void refreshCreditsFromServer();
+    document.getElementById('imageGenCreditsOpenBtn')?.addEventListener('click', () => {
+      openImageGenCreditsSheet();
+    });
+  }
+
+  function openImageGenCreditsSheet() {
+    const overlay = document.getElementById('imageGenCreditsSheetOverlay');
+    if (!overlay) return;
+    overlay.hidden = false;
+    overlay.classList.add('open');
+    document.body.classList.add('imagegen-credits-sheet-open');
+    void refreshCreditsFromServer();
+    updateCreditsUI();
+  }
+
+  function closeImageGenCreditsSheet() {
+    const overlay = document.getElementById('imageGenCreditsSheetOverlay');
+    if (!overlay) return;
+    overlay.classList.remove('open');
+    overlay.hidden = true;
+    document.body.classList.remove('imagegen-credits-sheet-open');
+    document.getElementById('creditLedgerPanelSheet')?.classList.add('hidden');
   }
 
   function formatLedgerTime(iso) {
@@ -345,7 +366,12 @@
   }
 
   async function showCreditLedger() {
-    const panel = document.getElementById('creditLedgerPanel');
+    const sheet = document.getElementById('imageGenCreditsSheetOverlay');
+    const isMobileSheet = window.matchMedia('(max-width: 900px)').matches
+      && sheet?.classList.contains('open');
+    const panel = isMobileSheet
+      ? document.getElementById('creditLedgerPanelSheet')
+      : document.getElementById('creditLedgerPanel');
     if (!panel) return;
     if (!window.SupabaseSync?.isLoggedIn?.()) {
       if (typeof showToast === 'function') showToast('请先登录后查看积分明细');
@@ -421,6 +447,8 @@
 
   window.showRechargePlaceholder = showRechargePlaceholder;
   window.showCreditLedger = showCreditLedger;
+  window.openImageGenCreditsSheet = openImageGenCreditsSheet;
+  window.closeImageGenCreditsSheet = closeImageGenCreditsSheet;
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initCreditsUI);

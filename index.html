@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__APP_BUILD__ = '20260614b';
+    window.__APP_BUILD__ = '20260616f';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -57,13 +57,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260613e">
-  <link rel="stylesheet" href="styles-theme.css?v=20260606m">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260613e">
-  <link rel="stylesheet" href="styles-settings.css?v=20260606m">
-  <link rel="stylesheet" href="styles-features.css?v=20260613e">
+  <link rel="stylesheet" href="styles.css?v=20260616d">
+  <link rel="stylesheet" href="styles-theme.css?v=20260615z">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260615w">
+  <link rel="stylesheet" href="styles-settings.css?v=20260615w">
+  <link rel="stylesheet" href="styles-features.css?v=20260616d">
   <script src="file-origin-guard.js?v=20260606m"></script>
-  <script src="theme.js?v=20260606m"></script>
+  <script src="theme.js?v=20260615z"></script>
 </head>
 <body>
   <div id="rippleGridBg" class="ripple-grid-bg" aria-hidden="true"></div>
@@ -113,6 +113,12 @@
             <span class="settings-check-box" aria-hidden="true"></span>
             <span class="settings-check-label">自动昼夜（早 8:00 日光 / 晚 20:00 夜间）</span>
           </label>
+          <label class="settings-check settings-check-spaced">
+            <input type="checkbox" id="efficiencyModeToggle">
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">效率模式（关闭背景动效；社区改用固定方框布局，更流畅）</span>
+          </label>
+          <p class="settings-hint">默认关闭，社区为瀑布流（横图完整显示）。电脑较慢或社区卡顿时可开启效率模式。</p>
         </section>
         <section class="settings-section">
           <h4 class="settings-section-title">生图</h4>
@@ -199,11 +205,10 @@
           </label>
           <p class="settings-hint">发布社区：提示词至少 15 字，配图可选。点赞奖励：100 赞 +100 积分（每人最多 5 次）、1000 赞 +1000 积分（最多 2 次）</p>
           <div class="settings-btn-grid settings-btn-grid-data" style="margin-top:12px">
-            <button type="button" class="btn btn-primary" id="settingsSyncCommunityBtn" onclick="runSyncCardLibraryToCommunity()">同步卡片库 → 社区</button>
             <button type="button" class="btn btn-secondary" onclick="typeof restoreCardsFromCommunityFeed==='function'&&restoreCardsFromCommunityFeed()">从社区恢复卡片库</button>
             <button type="button" class="btn btn-secondary" onclick="typeof syncCloudNow==='function'&&syncCloudNow()">从云端恢复卡片库</button>
           </div>
-          <p class="settings-hint settings-hint-block">登录后使用。「从社区恢复」：数据库里已有你的社区帖、但卡片库不见时用；「同步到社区」：把卡片库推到全站 Feed。</p>
+          <p class="settings-hint settings-hint-block">登录后使用。「从社区恢复」：只把<strong>社区帖 ID 在卡片库里找不到</strong>的作品新建进库；提示会写「13 张 → 18 张」这种前后数量。若显示「无需新建」说明 ID 已在库里。「同步到社区」：把卡片库推到全站 Feed。</p>
         </section>
 
         <section class="settings-section">
@@ -240,24 +245,6 @@
       <footer class="settings-footer">
         <span class="settings-status" id="settingsStatus"></span>
         <button type="button" class="btn btn-secondary" onclick="closeWarehouseSettings()">完成</button>
-      </footer>
-    </div>
-  </div>
-
-  <!-- 功能反馈 -->
-  <div class="side-panel-overlay" id="feedbackOverlay" onclick="if(event.target===this) closeFeedbackPanel()">
-    <div class="side-panel-box" onclick="event.stopPropagation()">
-      <header class="side-panel-head">
-        <h3>功能反馈</h3>
-        <button type="button" class="side-panel-close-btn" onclick="closeFeedbackPanel()" aria-label="关闭"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
-      </header>
-      <div class="side-panel-body">
-        <p class="side-panel-desc">欢迎提出改进建议或问题描述，我们会尽快查看。</p>
-        <textarea id="feedbackText" class="side-panel-textarea" rows="6" placeholder="请描述你的想法或遇到的问题…"></textarea>
-      </div>
-      <footer class="side-panel-foot">
-        <button type="button" class="btn btn-secondary" onclick="closeFeedbackPanel()">取消</button>
-        <button type="button" class="btn btn-primary" onclick="submitFeedback()">复制反馈内容</button>
       </footer>
     </div>
   </div>
@@ -319,6 +306,9 @@
       </div>
       <p class="appreciate-viewer-hint">滚轮缩放 · 拖拽移动 · 双击还原</p>
       <p class="appreciate-viewer-caption" id="appreciateViewerCaption"></p>
+      <div class="appreciate-viewer-actions hidden" id="appreciateViewerActions">
+        <button type="button" class="btn btn-secondary btn-sm" id="appreciateViewerFavBtn">收藏到卡片库</button>
+      </div>
     </div>
   </div>
 
@@ -329,9 +319,6 @@
       <img id="lightboxImage" src="" alt="放大图片">
     </div>
   </div>
-
-  <!-- Toast -->
-  <div class="toast" id="toast"></div>
 
   <!-- 浮动提示词框 -->
   <div class="floating-prompt hidden" id="floatingPrompt">
@@ -387,10 +374,6 @@
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
         <span class="app-nav-label">帮助</span>
       </button>
-      <button type="button" class="app-nav-item app-nav-util" onclick="openFeedbackPanel()">
-        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        <span class="app-nav-label">功能反馈</span>
-      </button>
       <button type="button" class="app-nav-item app-nav-util" onclick="openContactPanel()">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
         <span class="app-nav-label">联系我们</span>
@@ -423,7 +406,7 @@
         <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260614b</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260616f</p>
     </div>
   </nav>
 
@@ -603,6 +586,10 @@
         <button type="button" class="remove-image-btn" id="removeImageBtn" onclick="event.stopPropagation(); removeImage()" title="从编辑区去掉图片（须保存后才真正删除）" aria-label="去掉图片"><span aria-hidden="true">×</span></button>
         <input type="file" id="fileInput" accept="image/*" style="display:none;">
       </div>
+      <button type="button" class="panel-ocr-btn" id="panelOcrBtn" onclick="runPanelImageOcr()" title="识别图中文字并填入提示词" aria-label="提取图中文字">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>
+        <span>提取图中文字</span>
+      </button>
       <div class="panel-form">
         <label>标题</label>
         <input type="text" id="cardTitle">
@@ -654,7 +641,15 @@
         <header class="feature-header community-header">
           <h2>提示词社区</h2>
           <div class="community-header-tools">
-            <button type="button" class="btn btn-secondary btn-sm hidden" id="communitySyncLibraryBtn" onclick="runSyncCardLibraryToCommunity()" title="把卡片库作品推到全站社区">同步卡片库</button>
+            <div class="community-layout-tools toolbar-cluster" id="communityLayoutTools">
+              <div class="column-toggle" title="每排列数 1～5">
+                <button type="button" class="icon-btn" onclick="toggleColumnUp()" title="每排加一张（最多五张）" aria-label="每排加一张">▲</button>
+                <button type="button" class="icon-btn" onclick="toggleColumnDown()" title="每排减一张（最少一张）" aria-label="每排减一张">▼</button>
+              </div>
+              <button type="button" class="icon-btn icon-btn-accent" id="communityAppreciateBtn" onclick="window.FeatureDraft?.toggleCommunityAppreciate?.()" title="欣赏作品" aria-label="欣赏作品">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+              </button>
+            </div>
             <button type="button" class="icon-btn community-notify-btn" id="communityNotifyBtn" aria-label="消息通知" title="消息通知">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
               <span class="community-notify-badge hidden" id="communityNotifyBadge" aria-hidden="true">0</span>
@@ -668,11 +663,6 @@
             <div class="feature-tabs community-scope-tabs" role="group" aria-label="浏览范围">
               <button type="button" class="feature-tab active" data-community-scope="all">全部作品</button>
               <button type="button" class="feature-tab" data-community-scope="following">我的关注</button>
-            </div>
-            <div class="feature-tabs community-media-tabs" role="group" aria-label="内容类型">
-              <button type="button" class="feature-tab active" data-community-media="all">全部</button>
-              <button type="button" class="feature-tab" data-community-media="image">仅图片</button>
-              <button type="button" class="feature-tab" data-community-media="text">仅文字</button>
             </div>
             <input type="search" class="feature-search" id="communitySearch" placeholder="搜索提示词…" autocomplete="off">
           </div>
@@ -734,6 +724,10 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
           </button>
           <h2>图片生成</h2>
+          <div class="imagegen-header-credits mobile-only" id="imageGenHeaderCredits">
+            <span class="imagegen-header-balance">积分 <strong data-credits-display>0</strong></span>
+            <button type="button" class="btn btn-secondary btn-sm" id="imageGenCreditsOpenBtn">获取</button>
+          </div>
           <div class="imagegen-mobile-segments mobile-only" role="tablist" aria-label="生图视图">
             <button type="button" class="imagegen-mobile-seg active" data-imagegen-view="form" role="tab" aria-selected="true">生成</button>
             <button type="button" class="imagegen-mobile-seg" data-imagegen-view="feed" role="tab" aria-selected="false">作品</button>
@@ -742,18 +736,16 @@
         <div class="imagegen-layout">
           <div class="imagegen-form">
             <div class="imagegen-form-scroll">
-            <div class="imagegen-credits-box">
+            <div class="imagegen-credits-box imagegen-credits-box--form">
               <div class="imagegen-credits-top">
                 <span class="imagegen-credits-label">当前积分 <strong data-credits-display>0</strong> <span class="imagegen-credits-detail hidden" data-credits-detail></span> <span class="imagegen-credits-rate">（1 元 = 100 积分）</span></span>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openRechargePanel()">充值</button>
-                <button type="button" class="btn btn-ghost btn-sm" onclick="showCreditLedger()">明细</button>
+                <span class="imagegen-credits-top-actions">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="openRechargePanel()">充值</button>
+                  <button type="button" class="btn btn-ghost btn-sm" onclick="showCreditLedger()">明细</button>
+                </span>
               </div>
               <div class="credit-ledger-panel hidden" id="creditLedgerPanel" aria-live="polite"></div>
-              <div class="imagegen-activate-row">
-                <input type="text" id="activationCodeInput" class="settings-input" placeholder="输入激活码" autocomplete="off">
-                <button type="button" class="btn btn-primary btn-sm" onclick="redeemActivationCode()">兑换</button>
-              </div>
-              <p class="imagegen-credits-note">会员订阅限时约五折；生图享积分折扣。充值积分请在下方兑换区操作；<a href="terms.html" class="link-inline">用户协议</a> · <a href="privacy.html" class="link-inline">隐私政策</a></p>
+              <p class="imagegen-credits-note">会员订阅限时约五折；生图享积分折扣。充值与激活码兑换请点「充值」。<a href="terms.html" class="link-inline">用户协议</a> · <a href="privacy.html" class="link-inline">隐私政策</a></p>
             </div>
             <label for="imageGenModel">生图模型</label>
             <select id="imageGenModel" class="settings-input">
@@ -822,11 +814,6 @@
                   <button type="button" class="feature-tab active" data-imagegen-community-scope="all">全部</button>
                   <button type="button" class="feature-tab" data-imagegen-community-scope="following">关注</button>
                 </div>
-                <div class="feature-tabs imagegen-community-tabs" role="group" aria-label="类型">
-                  <button type="button" class="feature-tab active" data-imagegen-community-media="all">全部</button>
-                  <button type="button" class="feature-tab" data-imagegen-community-media="image">图片</button>
-                  <button type="button" class="feature-tab" data-imagegen-community-media="text">文字</button>
-                </div>
               </div>
             </div>
             <div class="imagegen-warehouse-filters hidden" id="imageGenWarehouseFilters">
@@ -864,6 +851,9 @@
   </div>
   </div><!-- /app-chrome -->
 
+  <!-- Toast（须在 app-chrome 外，否则会被任务/会员弹层挡住） -->
+  <div class="toast" id="toast"></div>
+
   <div class="community-detail-overlay" id="userProfileOverlay" role="dialog" aria-modal="true" aria-labelledby="userProfileTitle">
     <div class="community-detail user-profile-panel" onclick="event.stopPropagation()">
       <div class="community-detail-head">
@@ -889,6 +879,24 @@
       <div class="tag-sheet-handle"></div>
       <div class="filter-sheet-title" id="imageGenFilterSheetTitle">选择分组</div>
       <div class="filter-sheet-list" id="imageGenFilterSheetList"></div>
+    </div>
+  </div>
+
+  <div class="filter-sheet-overlay mobile-only" id="imageGenCreditsSheetOverlay" hidden onclick="if(event.target===this) window.closeImageGenCreditsSheet?.()">
+    <div class="filter-sheet imagegen-credits-sheet" onclick="event.stopPropagation()">
+      <div class="tag-sheet-handle"></div>
+      <div class="filter-sheet-title">积分</div>
+      <div class="imagegen-credits-sheet-body">
+        <p class="imagegen-credits-sheet-balance">当前积分 <strong data-credits-display>0</strong> <span class="imagegen-credits-rate">（1 元 = 100 积分）</span></p>
+        <div class="imagegen-credits-sheet-toolbar">
+          <div class="imagegen-credits-sheet-actions">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openRechargePanel()">充值</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="showCreditLedger()">明细</button>
+          </div>
+        </div>
+        <div class="credit-ledger-panel hidden" id="creditLedgerPanelSheet" aria-live="polite"></div>
+        <p class="imagegen-credits-note">会员订阅限时约五折；生图享积分折扣。充值与激活码兑换请点「充值」。<a href="terms.html" class="link-inline">用户协议</a> · <a href="privacy.html" class="link-inline">隐私政策</a></p>
+      </div>
     </div>
   </div>
 
@@ -929,23 +937,48 @@
     <div class="subscribe-panel" role="dialog" aria-modal="true">
       <header class="subscribe-panel-head">
         <div>
-          <h3>会员订阅</h3>
-          <p class="subscribe-panel-sub">三档会员 · 连续包月/包年约五折 · 完成任务可免费领会员</p>
+          <h3 id="subscribePanelTitle">会员与积分</h3>
+          <p class="subscribe-panel-sub" id="subscribePanelSub">积分充值 · 会员订阅 · 购买后在小店收货激活码兑换</p>
         </div>
-        <button type="button" class="modal-close-btn" id="subscribeCloseBtn" aria-label="关闭会员订阅"><span aria-hidden="true">×</span></button>
+        <button type="button" class="modal-close-btn" id="subscribeCloseBtn" aria-label="关闭"><span aria-hidden="true">×</span></button>
       </header>
-      <div class="subscribe-billing-tabs" role="tablist">
-        <button type="button" class="subscribe-billing-tab active" data-subscribe-billing="auto_month">连续包月</button>
-        <button type="button" class="subscribe-billing-tab" data-subscribe-billing="single_month">单月购买</button>
-        <button type="button" class="subscribe-billing-tab" data-subscribe-billing="auto_year">连续包年</button>
-        <button type="button" class="subscribe-billing-tab" data-subscribe-billing="single_year">单年购买</button>
+      <div class="subscribe-main-tabs" role="tablist" aria-label="商店分类">
+        <button type="button" class="subscribe-main-tab" data-subscribe-main="credits" role="tab" aria-selected="false">
+          <span class="subscribe-main-tab-label">积分</span>
+          <span class="subscribe-main-tab-meta">6 种商品</span>
+        </button>
+        <button type="button" class="subscribe-main-tab active" data-subscribe-main="membership" role="tab" aria-selected="true">
+          <span class="subscribe-main-tab-label">会员</span>
+          <span class="subscribe-main-tab-meta">订阅</span>
+        </button>
       </div>
       <div class="subscribe-panel-body">
         <div class="subscribe-membership-status-wrap" id="subscribeMembershipStatus" hidden></div>
+        <div class="subscribe-redeem-box" id="subscribeRedeemBox">
+          <p class="subscribe-redeem-title">激活码兑换</p>
+          <p class="subscribe-shop-hint">积分卡密、会员卡密都在此兑换。充值积分套餐赠送的基础会员为每日积分模式，请在任务中心领取日积分。</p>
+          <div class="imagegen-activate-row subscribe-redeem-row">
+            <input type="text" id="activationCodeInputSubscribe" class="settings-input" placeholder="输入激活码" autocomplete="off">
+            <button type="button" class="btn btn-primary btn-sm" onclick="redeemActivationCode()">兑换</button>
+          </div>
+        </div>
+        <section class="subscribe-shop-section hidden" id="subscribeCreditsSection" data-subscribe-section="credits">
+          <p class="subscribe-shop-section-title">选择积分套餐</p>
+          <p class="subscribe-shop-hint">支付后在小店订单中复制激活码，在上方「激活码兑换」输入即可。</p>
+          <div class="subscribe-shop-grid" id="subscribeCreditsGrid"></div>
+        </section>
+        <section class="subscribe-shop-section" id="subscribeMembershipSection" data-subscribe-section="membership">
+        <div class="subscribe-billing-tabs" role="tablist" id="subscribeBillingTabs">
+          <button type="button" class="subscribe-billing-tab active" data-subscribe-billing="auto_month">连续包月</button>
+          <button type="button" class="subscribe-billing-tab" data-subscribe-billing="single_month">单月购买</button>
+          <button type="button" class="subscribe-billing-tab" data-subscribe-billing="auto_year">连续包年</button>
+          <button type="button" class="subscribe-billing-tab" data-subscribe-billing="single_year">单年购买</button>
+        </div>
         <div class="subscribe-mini-offer" id="subscribeMiniOffer"></div>
         <div class="subscribe-credit-mode" id="subscribeCreditMode"></div>
         <div class="subscribe-plans-grid" id="subscribePlansGrid"></div>
         <p class="subscribe-legal">连续包月/包年订阅价约五折（见各档原价对比）。免费会员请点侧栏「免费试用」完成任务直接领取。详见 <a href="terms.html" class="link-inline">用户协议</a>。</p>
+        </section>
       </div>
     </div>
   </div>
@@ -975,18 +1008,18 @@
   <script src="supabase-config.js"></script>
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="api-client.js?v=20260613e"></script>
+  <script src="api-client.js?v=20260615y"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260613e"></script>
-  <script src="card-image-loader.js?v=20260612l"></script>
+  <script src="supabase-sync.js?v=20260616d"></script>
+  <script src="card-image-loader.js?v=20260616d"></script>
   <script src="membership.js?v=20260606m"></script>
   <script src="modal-hub.js?v=20260606m"></script>
-  <script src="subscription.js?v=20260606m"></script>
-  <script src="trial-tasks.js?v=20260612j"></script>
+  <script src="subscription.js?v=20260615y"></script>
+  <script src="trial-tasks.js?v=20260615y"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="script.js?v=20260613e"></script>
+  <script src="script.js?v=20260616d"></script>
   <script src="points-system.js?v=20260606m"></script>
-  <script src="features-draft.js?v=20260613e"></script>
+  <script src="features-draft.js?v=20260616d"></script>
   <script src="hotfix-image-layout.js?v=20260606m"></script>
   <script src="mobile.js?v=20260606m"></script>
   <script>

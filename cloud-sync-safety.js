@@ -55,13 +55,33 @@
   }
 
   /** 同 id 合并：文字取较新 updatedAt，图片优先保留「更有内容」的一方 */
+  function mergePublishFlag(local, cloud, localTs, cloudTs) {
+    if (local?.publishedToCommunity === false) return false;
+    if (local?.publishedToCommunity === true) {
+      if (cloud?.publishedToCommunity === false && cloudTs > localTs) return false;
+      return true;
+    }
+    if (cloud?.publishedToCommunity === true) return true;
+    if (cloud?.publishedToCommunity === false) return false;
+    return false;
+  }
+
   function mergeCardPair(local, cloud) {
     if (!local) return cloud;
     if (!cloud) return local;
     const localTs = local.updatedAt || local.createdAt || 0;
     const cloudTs = cloud.updatedAt || cloud.createdAt || 0;
     const base = cloudTs > localTs ? { ...local, ...cloud } : { ...cloud, ...local };
-    return mergeImageField(base, local.image, cloud.image);
+    const merged = mergeImageField(base, local.image, cloud.image);
+    merged.publishedToCommunity = mergePublishFlag(local, cloud, localTs, cloudTs);
+    if (merged.publishedToCommunity) {
+      merged.communityPostId = local.communityPostId || cloud.communityPostId || null;
+    } else if (local.communityPostId && cloud.communityPostId && local.communityPostId !== cloud.communityPostId) {
+      merged.communityPostId = cloudTs > localTs ? cloud.communityPostId : local.communityPostId;
+    } else {
+      merged.communityPostId = null;
+    }
+    return merged;
   }
 
   function mergeCreationPair(local, cloud) {

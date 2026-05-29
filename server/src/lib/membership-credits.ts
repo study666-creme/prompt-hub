@@ -138,15 +138,43 @@ export async function grantBundleForActiveMembership(
   return data as Profile;
 }
 
-/** 登录 /me 时同步日积分与一次性积分 */
+/** 登录 /me 时不再自动发放会员积分（每日积分改在任务中心领取） */
 export async function syncMembershipCredits(
   admin: SupabaseClient,
   userId: string
 ): Promise<Profile> {
-  let profile = await getOrCreateProfile(admin, userId);
-  profile = await refreshDailyCredits(admin, profile);
-  profile = await grantBundleForActiveMembership(admin, profile);
-  return profile;
+  return getOrCreateProfile(admin, userId);
+}
+
+/** 任务中心领取当日会员每日积分 */
+export async function claimMemberDailyCredits(
+  admin: SupabaseClient,
+  profile: Profile
+): Promise<Profile> {
+  if (!isMembershipActive(profile)) throw new Error('membership_inactive');
+  if (profile.credit_grant_mode !== 'daily') {
+    throw new Error('credit_mode_not_daily');
+  }
+  const amount = dailyCreditsForTier(profile.membership_tier);
+  if (amount <= 0) throw new Error('no_daily_credits');
+
+  const today = chinaDateKey();
+  const sameDay = profile.daily_credits_date === today;
+  const nextDaily = sameDay
+    ? Math.max(profile.daily_credits || 0, amount)
+    : amount;
+
+  const { data, error } = await admin
+    .from('profiles')
+    .update({
+      daily_credits: nextDaily,
+      daily_credits_date: today
+    })
+    .eq('user_id', profile.user_id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Profile;
 }
 
 export type DebitSplit = { fromDaily: number; fromPermanent: number };
@@ -263,7 +291,7 @@ export function membershipCreditsPayload(profile: Profile) {
         ? `含今日 ${profile.daily_credits} 积分（当日有效，含会员日额与每日领取）`
         : `含今日 ${profile.daily_credits} 积分（当日有效，未用完次日清零）`
       : memberActive && profile.credit_grant_mode === 'daily' && profile.membership_tier
-        ? `每日 ${dailyCreditsForTier(profile.membership_tier)} 积分，当日有效`
+        ? `每日 ${dailyCreditsForTier(profile.membership_tier)} 积分，请在任务中心领取（当日有效）`
         : null,
     dailyCreditsPerTier: DAILY_CREDITS_BY_TIER
   };
