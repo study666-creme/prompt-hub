@@ -9,7 +9,9 @@ const buckets = new Map<string, Bucket>();
 export function rateLimit(max: number, windowMs: number) {
   return createMiddleware(async (c, next) => {
     const user = c.get('user') as { id: string } | undefined;
-    const key = user?.id || c.req.header('cf-connecting-ip') || 'anon';
+    const ip = c.req.header('cf-connecting-ip') || 'anon';
+    const route = c.req.path || 'unknown';
+    const key = `${route}:${user?.id || ip}`;
     const now = Date.now();
     let bucket = buckets.get(key);
     if (!bucket || now >= bucket.resetAt) {

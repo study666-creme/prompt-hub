@@ -14,6 +14,15 @@ app.use('*', async (c, next) => {
   return corsMw(c, next);
 });
 
+/** 确保错误/边缘响应也带 CORS（避免浏览器只报 CORS 不报真实 500） */
+app.use('*', async (c, next) => {
+  try {
+    await next();
+  } finally {
+    applyCorsHeaders(c);
+  }
+});
+
 app.get('/health', async c => {
   const key = c.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || '';
   let db: 'ok' | 'misconfigured' | 'error' = 'ok';

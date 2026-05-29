@@ -41,12 +41,34 @@ export function chinaDateKey(d = new Date()): string {
 
 export function spendableCredits(profile: Profile): number {
   const daily =
-    profile.credit_grant_mode === 'daily' &&
-    isMembershipActive(profile) &&
-    profile.daily_credits_date === chinaDateKey()
-      ? profile.daily_credits
-      : 0;
+    profile.daily_credits_date === chinaDateKey() ? profile.daily_credits : 0;
   return profile.credits + daily;
+}
+
+/** 任务中心每日 5 积分：写入当日有效额度（可与会员日积分叠加取较大值） */
+export async function grantUniversalDailyBonus(
+  admin: SupabaseClient,
+  userId: string,
+  amount = 5
+): Promise<Profile> {
+  const today = chinaDateKey();
+  const profile = await getOrCreateProfile(admin, userId);
+  const sameDay = profile.daily_credits_date === today;
+  const nextDaily = sameDay
+    ? Math.max(profile.daily_credits || 0, amount)
+    : amount;
+  const { data, error } = await admin
+    .from('profiles')
+    .update({
+      daily_credits: nextDaily,
+      daily_credits_date: today,
+      credit_grant_mode: profile.credit_grant_mode || 'daily'
+    })
+    .eq('user_id', userId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Profile;
 }
 
 export async function refreshDailyCredits(
@@ -151,12 +173,7 @@ export async function deductUserCredits(
   let left = amount;
   let fromDaily = 0;
 
-  if (
-    profile.credit_grant_mode === 'daily' &&
-    profile.daily_credits_date === chinaDateKey() &&
-    profile.daily_credits > 0 &&
-    left > 0
-  ) {
+  if (profile.daily_credits_date === chinaDateKey() && profile.daily_credits > 0 && left > 0) {
     fromDaily = Math.min(profile.daily_credits, left);
     left -= fromDaily;
     const { data, error } = await admin
@@ -232,24 +249,22 @@ export async function refundUserCredits(
 }
 
 export function membershipCreditsPayload(profile: Profile) {
-  const memberActive = isMembershipActive(profile);
   const today = chinaDateKey();
-  const dailyActive =
-    memberActive &&
-    profile.credit_grant_mode === 'daily' &&
-    profile.daily_credits_date === today;
+  const dailyActive = profile.daily_credits_date === today && profile.daily_credits > 0;
+  const memberActive = isMembershipActive(profile);
 
   return {
     creditGrantMode: profile.credit_grant_mode,
     creditsPermanent: profile.credits,
     dailyCredits: dailyActive ? profile.daily_credits : 0,
     creditsSpendable: spendableCredits(profile),
-    dailyCreditsNote:
-      profile.credit_grant_mode === 'daily' && profile.membership_tier
+    dailyCreditsNote: dailyActive
+      ? memberActive && profile.credit_grant_mode === 'daily' && profile.membership_tier
+        ? `含今日 ${profile.daily_credits} 积分（当日有效，含会员日额与每日领取）`
+        : `含今日 ${profile.daily_credits} 积分（当日有效，未用完次日清零）`
+      : memberActive && profile.credit_grant_mode === 'daily' && profile.membership_tier
         ? `每日 ${dailyCreditsForTier(profile.membership_tier)} 积分，当日有效`
-        : profile.credit_grant_mode === 'daily'
-          ? `每日 ${DAILY_CREDITS_AMOUNT} 积分，当日有效`
-          : null,
+        : null,
     dailyCreditsPerTier: DAILY_CREDITS_BY_TIER
   };
 }

@@ -2,7 +2,7 @@
   "name": "提示词仓库",
   "short_name": "提示词仓库",
   "description": "管理、同步与复用 AI 提示词卡片",
-  "start_url": "/",
+  "start_url": "/?launch=homescreen",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",

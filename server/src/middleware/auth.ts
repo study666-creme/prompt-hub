@@ -18,6 +18,9 @@ declare module 'hono' {
 }
 
 export const requireAuth = createMiddleware<{ Bindings: Env }>(async (c, next) => {
+  if (c.req.method === 'OPTIONS') {
+    return next();
+  }
   const env = c.env;
   const header = c.req.header('Authorization');
   if (!header?.startsWith('Bearer ')) {

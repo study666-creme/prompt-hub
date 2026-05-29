@@ -4,7 +4,7 @@
 (function () {
   const LS_MEMBERSHIP = 'promptrepo_membership';
   const PIN_LIMIT_FREE = 2;
-  const PIN_LIMIT_MEMBER = Infinity;
+  const PIN_LIMIT_BASIC = 3;
 
   /** 会员生图积分折扣（乘数） */
   const GEN_DISCOUNT_BY_TIER = {
@@ -79,11 +79,16 @@
   }
 
   function getPinLimit() {
-    return isMember() ? PIN_LIMIT_MEMBER : PIN_LIMIT_FREE;
+    const tier = getMemberTier();
+    if (!tier) return PIN_LIMIT_FREE;
+    if (tier === 'basic') return PIN_LIMIT_BASIC;
+    if (tier === 'standard' || tier === 'pro') return Infinity;
+    return PIN_LIMIT_BASIC;
   }
 
   function isUnlimitedPins() {
-    return isMember();
+    const tier = getMemberTier();
+    return tier === 'standard' || tier === 'pro';
   }
 
   function activateByCode() {
@@ -114,6 +119,31 @@
     }
   }
 
+  function getMembershipDisplay() {
+    if (!isMember()) {
+      return {
+        active: false,
+        tierLabel: '免费用户',
+        untilLabel: '',
+        summary: '未开通 · 完成任务可免费领会员'
+      };
+    }
+    const row = readRow();
+    const tierLabels = { basic: '基础会员', standard: '标准会员', pro: '专业会员' };
+    const tierLabel = tierLabels[row.tier] || '基础会员';
+    let untilLabel = '长期有效';
+    if (row.until) {
+      const d = new Date(row.until);
+      untilLabel = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} 到期`;
+    }
+    return {
+      active: true,
+      tierLabel,
+      untilLabel,
+      summary: `${tierLabel} · ${untilLabel}`
+    };
+  }
+
   /** 与 GET /api/v1/me 的 membership 字段对齐 */
   function applyServerState(membership) {
     if (!membership || typeof membership !== 'object') return;
@@ -129,19 +159,31 @@
       if (typeof window.updateImageGenPricingUI === 'function') {
         window.updateImageGenPricingUI();
       }
+      window.SubscriptionUI?.refreshOfferUI?.();
       return;
     }
     writeRow({ active: false, until: null, tier: null });
     if (typeof window.updateImageGenPricingUI === 'function') {
       window.updateImageGenPricingUI();
     }
+    window.SubscriptionUI?.refreshOfferUI?.();
   }
 
   function onAccountSwitch() {}
 
+  function clearLocalState() {
+    try {
+      localStorage.removeItem(LS_MEMBERSHIP);
+    } catch (e) { /* ignore */ }
+    if (typeof window.updateImageGenPricingUI === 'function') {
+      window.updateImageGenPricingUI();
+    }
+    window.SubscriptionUI?.refreshOfferUI?.();
+  }
+
   window.Membership = {
     PIN_LIMIT_FREE,
-    PIN_LIMIT_MEMBER,
+    PIN_LIMIT_BASIC,
     GEN_DISCOUNT_BY_TIER,
     isMember,
     getMemberTier,
@@ -154,6 +196,8 @@
     getAccountPayload,
     syncFromPayload,
     applyServerState,
-    onAccountSwitch
+    getMembershipDisplay,
+    onAccountSwitch,
+    clearLocalState
   };
 })();

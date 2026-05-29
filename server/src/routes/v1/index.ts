@@ -4,12 +4,19 @@ import { requireAuth } from '../../middleware/auth';
 import { meRoutes } from './me';
 import { redeemRoutes } from './redeem';
 import { generateRoutes } from './generate';
-import { communityRoutes } from './community';
+import { communityFeedHandler, communityRoutes } from './community';
 import { membershipRoutes } from './membership';
 import { membershipTaskRoutes } from './membership-tasks';
-import { mediaRoutes } from './media';
+import { communityMediaSignHandler, mediaRoutes } from './media';
+import { rateLimit } from '../../middleware/rate-limit';
 
 export const v1 = new Hono<{ Bindings: Env }>();
+
+/** 社区公开图：游客可浏览，无需登录 */
+v1.get('/media/community/sign', rateLimit(400, 60_000), communityMediaSignHandler);
+
+/** 全站社区 Feed：游客与所有用户可见 */
+v1.get('/community/feed', rateLimit(180, 60_000), communityFeedHandler);
 
 v1.use('*', requireAuth);
 

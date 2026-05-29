@@ -4,9 +4,20 @@
   const STORAGE_PREFIX = `storage://${BUCKET}/`;
   const SIGNED_TTL_SEC = 3600;
   const signedUrlCache = new Map();
+  /** 云端不存在的路径，避免每张图重复签名 400（拖慢首屏 30s～2min） */
+  const missingPathCache = new Map();
+  const imageUploadSkipUntil = new Map();
+  const MISSING_PATH_TTL_MS = 20 * 60 * 1000;
+  const IMAGE_UPLOAD_SKIP_MS = 24 * 60 * 60 * 1000;
+  const SIGN_REQUEST_TIMEOUT_MS = 3500;
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-  const MAX_SIDE = 1600;
-  const JPEG_QUALITY = 0.82;
+  const MAX_SIDE = 1024;
+  const JPEG_QUALITY = 0.78;
+  /** 列表用 grid 缓存键；签名不再走 Storage transform（易 500） */
+  const VARIANT_GRID = 'grid';
+  const VARIANT_FULL = 'full';
+  const USE_STORAGE_TRANSFORM = false;
+  const GRID_SIGN_CONCURRENCY = 12;
 
   function configured() {
     return !!(window.SUPABASE_URL && window.SUPABASE_ANON_KEY
@@ -37,14 +48,28 @@
     return session?.user?.id || null;
   }
 
+  let ensureSessionPromise = null;
+
   async function ensureSession() {
-    const sb = getClient();
-    if (!sb) throw new Error('Supabase 未配置');
-    const { data, error } = await sb.auth.getSession();
-    if (error) throw error;
-    if (!data.session?.user) throw new Error('登录已过期，请重新登录');
-    session = data.session;
-    return session;
+    if (session?.access_token) {
+      const expMs = session.expires_at ? session.expires_at * 1000 : 0;
+      if (!expMs || expMs > Date.now() + 60_000) return session;
+    }
+    if (ensureSessionPromise) return ensureSessionPromise;
+    ensureSessionPromise = (async () => {
+      const sb = getClient();
+      if (!sb) throw new Error('Supabase 未配置');
+      const { data, error } = await sb.auth.getSession();
+      if (error) throw error;
+      if (!data.session?.user) throw new Error('登录已过期，请重新登录');
+      session = data.session;
+      return session;
+    })();
+    try {
+      return await ensureSessionPromise;
+    } finally {
+      ensureSessionPromise = null;
+    }
   }
 
   function isConfigured() { return configured(); }
@@ -158,46 +183,339 @@
 
   function clearSignedUrlCache() {
     signedUrlCache.clear();
+    missingPathCache.clear();
+    imageUploadSkipUntil.clear();
   }
 
-  async function getSignedUrlForPath(path) {
-    const key = path.replace(/^\//, '');
-    const cached = signedUrlCache.get(key);
+  try {
+    if (localStorage.getItem('promptrepo_sign_v') !== '3') {
+      clearSignedUrlCache();
+      localStorage.setItem('promptrepo_sign_v', '3');
+    }
+  } catch (e) { /* ignore */ }
+
+  function shouldSkipImageUploadAttempt(cardId) {
+    if (!cardId) return false;
+    const until = imageUploadSkipUntil.get(String(cardId));
+    if (!until) return false;
+    if (until > Date.now()) return true;
+    imageUploadSkipUntil.delete(String(cardId));
+    return false;
+  }
+
+  function markImageUploadSkip(cardId) {
+    if (cardId) imageUploadSkipUntil.set(String(cardId), Date.now() + IMAGE_UPLOAD_SKIP_MS);
+  }
+
+  function cardNeedsCloudImageUpload(card) {
+    if (!card?.id || !card.image) return false;
+    if (isDataUrl(card.image) || (typeof card.image === 'string' && card.image.startsWith('blob:'))) {
+      return true;
+    }
+    if (!isStorageRef(card.image)) return false;
+    const primary = primaryImagePath(card.image, card.id);
+    return !!(primary && isPathKnownMissing(primary));
+  }
+
+  function normalizePathKey(path) {
+    return String(path || '').replace(/^\//, '').split('@')[0];
+  }
+
+  function isPathKnownMissing(path) {
+    const key = normalizePathKey(path);
+    if (!key) return false;
+    const exp = missingPathCache.get(key);
+    if (!exp) return false;
+    if (exp > Date.now()) return true;
+    missingPathCache.delete(key);
+    return false;
+  }
+
+  function markPathMissing(path) {
+    const key = normalizePathKey(path);
+    if (key) missingPathCache.set(key, Date.now() + MISSING_PATH_TTL_MS);
+  }
+
+  function isStorageNotFoundError(e) {
+    const msg = String(e?.message || e?.error || e?.error_description || '').toLowerCase();
+    const code = e?.statusCode ?? e?.status;
+    return code === 404 || code === 400 || /not found|object not found|does not exist/.test(msg);
+  }
+
+  function primaryImagePath(image, assetId) {
+    const fromRef = storagePathFromRef(image);
+    if (fromRef) return fromRef.replace(/^\//, '');
+    const canonical = cardImageStoragePath(assetId);
+    return canonical ? canonical.replace(/^\//, '') : null;
+  }
+
+  function signedCacheKey(path, variant) {
+    const p = String(path || '').replace(/^\//, '');
+    return variant === VARIANT_FULL ? p : `${p}@g640`;
+  }
+
+  function displayVariantFromOpts(opts) {
+    if (!opts || typeof opts !== 'object') return VARIANT_GRID;
+    return opts.variant === VARIANT_FULL ? VARIANT_FULL : VARIANT_GRID;
+  }
+
+  async function getSignedUrlForPath(path, opts) {
+    const variant = displayVariantFromOpts(opts);
+    const fileKey = path.replace(/^\//, '');
+    if (isPathKnownMissing(fileKey)) return null;
+    const cacheKey = signedCacheKey(fileKey, variant);
+    const cached = signedUrlCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now() + 120000) return cached.url;
     await ensureSession();
     const sb = getClient();
-    const { data, error } = await sb.storage.from(BUCKET).createSignedUrl(key, SIGNED_TTL_SEC);
-    if (error) throw error;
-    signedUrlCache.set(key, {
-      url: data.signedUrl,
-      expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
-    });
-    return data.signedUrl;
+    const signOpts =
+      USE_STORAGE_TRANSFORM && variant !== VARIANT_FULL
+        ? { transform: { width: 640, quality: 78, resize: 'contain' } }
+        : undefined;
+    try {
+      const signWork = sb.storage.from(BUCKET).createSignedUrl(fileKey, SIGNED_TTL_SEC, signOpts);
+      const { data, error } = await Promise.race([
+        signWork,
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('sign_timeout')), SIGN_REQUEST_TIMEOUT_MS);
+        })
+      ]);
+      if (error) throw error;
+      signedUrlCache.set(cacheKey, {
+        url: data.signedUrl,
+        expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
+      });
+      return data.signedUrl;
+    } catch (e) {
+      if (isStorageNotFoundError(e)) {
+        markPathMissing(fileKey);
+        return null;
+      }
+      if (variant === VARIANT_GRID) {
+        return getSignedUrlForPath(path, { variant: VARIANT_FULL });
+      }
+      throw e;
+    }
   }
 
-  async function resolveDisplayUrl(image) {
-    if (!image || typeof image !== 'string') return image;
-    if (isDataUrl(image) || image.startsWith('blob:')) return image;
-    const path = storagePathFromRef(image);
-    if (path && isLoggedIn()) {
-      const cached = getCachedDisplayUrl(image);
-      if (cached && /^https?:\/\//i.test(cached)) return cached;
-      try {
-        return await getSignedUrlForPath(path);
-      } catch (e) {
-        console.warn('[SupabaseSync] signed url failed', path, e);
+  function cardImageStoragePath(cardId, ownerId) {
+    const uid = ownerId || getUserId();
+    if (!uid || !cardId) return null;
+    const base = String(cardId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    return `${uid}/${base}.jpg`;
+  }
+
+  function listImagePathCandidates(image, assetId, ownerId) {
+    const paths = [];
+    const add = (p) => {
+      const key = (p || '').replace(/^\//, '');
+      if (key && !paths.includes(key)) paths.push(key);
+    };
+    add(storagePathFromRef(image));
+    const canonical = cardImageStoragePath(assetId, ownerId);
+    if (canonical) add(canonical);
+    const uid = ownerId || getUserId();
+    if (uid && assetId) {
+      const base = String(assetId).replace(/[^a-zA-Z0-9_-]/g, '_');
+      add(`${uid}/${base}.jpg`);
+      add(`${uid}/${assetId}.jpg`);
+      add(`${uid}/${base}.webp`);
+      add(`${uid}/${base}.png`);
+      const stripped = String(assetId).replace(/^wh_/, '');
+      if (stripped !== String(assetId)) add(`${uid}/${stripped}.jpg`);
+    }
+    return paths;
+  }
+
+  async function signPathViaCommunityApi(path, variant, signOpts = {}) {
+    if (!window.PromptHubApi?.isConfigured?.() || !window.PromptHubApi.signCommunityMediaRef) return null;
+    const fileKey = String(path || '').replace(/^\//, '');
+    if (isPathKnownMissing(fileKey)) return null;
+    try {
+      const r = await window.PromptHubApi.signCommunityMediaRef(toStorageRef(path), {
+        variant,
+        authorId: signOpts.authorId,
+        cardId: signOpts.cardId
+      });
+      if (r.ok && r.data?.url) {
+        const v = variant || VARIANT_GRID;
+        signedUrlCache.set(signedCacheKey(path.replace(/^\//, ''), v), {
+          url: r.data.url,
+          expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
+        });
+        return r.data.url;
       }
-      if (window.PromptHubApi?.isConfigured?.() && window.PromptHubApi.signMediaRef) {
-        try {
-          const r = await window.PromptHubApi.signMediaRef(image);
-          if (r.ok && r.data?.url) return r.data.url;
-        } catch (e) {
-          console.warn('[SupabaseSync] api sign failed', e);
+      if (r?.status === 404 || r?.code === 'VALIDATION_ERROR') {
+        markPathMissing(fileKey);
+      }
+    } catch (e) {
+      console.warn('[SupabaseSync] community api sign failed', path, e);
+    }
+    return null;
+  }
+
+  function apiSignAllowed(opts) {
+    if (window.PromptHubApi?.isApiUnreachable?.()) return false;
+    if (isLoggedIn() && !isCommunityFeedOpts(opts)) {
+      return !!(window.PromptHubApi?.isConfigured?.() && window.PromptHubApi.signMediaRef);
+    }
+    return !!(window.PromptHubApi?.isConfigured?.() && window.PromptHubApi.signMediaRef);
+  }
+
+  async function signPathViaApi(path, variant, opts) {
+    if (!apiSignAllowed(opts)) return null;
+    try {
+      const r = await window.PromptHubApi.signMediaRef(toStorageRef(path), { variant });
+      if (r.ok && r.data?.url) {
+        const v = variant || VARIANT_GRID;
+        signedUrlCache.set(signedCacheKey(path.replace(/^\//, ''), v), {
+          url: r.data.url,
+          expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
+        });
+        return r.data.url;
+      }
+    } catch (e) {
+      console.warn('[SupabaseSync] api sign failed', path, e);
+    }
+    return null;
+  }
+
+  function storagePathOwnedByCurrentUser(path) {
+    const uid = getUserId();
+    const key = String(path || '').replace(/^\//, '');
+    if (!uid || !key) return false;
+    return key.startsWith(`${uid}/`);
+  }
+
+  async function resolvePathToUrl(path, variant, opts) {
+    const fileKey = String(path || '').replace(/^\//, '');
+    if (isPathKnownMissing(fileKey)) return null;
+    const v = variant || VARIANT_GRID;
+    const communityFeed = opts?.communityFeed === true;
+    const signMeta = {
+      authorId: opts?.authorId,
+      cardId: opts?.cardId
+    };
+    if (communityFeed) {
+      const publicUrl = await signPathViaCommunityApi(path, v, signMeta);
+      if (publicUrl) return publicUrl;
+      if (!isLoggedIn()) return null;
+      if (!storagePathOwnedByCurrentUser(path)) return null;
+    }
+    if (isLoggedIn() && storagePathOwnedByCurrentUser(path)) {
+      try {
+        const ownUrl = await getSignedUrlForPath(path, { variant: v });
+        if (ownUrl) return ownUrl;
+      } catch (e) {
+        if (!isStorageNotFoundError(e)) {
+          console.warn('[SupabaseSync] own signed url failed', path, e);
         }
       }
-      return publicUrlFromPath(path) || image;
+    }
+    try {
+      const url = await getSignedUrlForPath(path, { variant: v });
+      if (url) return url;
+      if (isPathKnownMissing(fileKey)) return null;
+    } catch (e) {
+      if (!isStorageNotFoundError(e)) {
+        console.warn('[SupabaseSync] signed url failed', path, e);
+      }
+    }
+    if (isPathKnownMissing(fileKey)) return null;
+    if (!apiSignAllowed(opts)) return null;
+    return signPathViaApi(path, v, opts);
+  }
+
+  async function verifyImageUrl(url) {
+    if (!url || url.startsWith('data:image/svg')) return false;
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img.naturalWidth > 0);
+      img.onerror = () => resolve(false);
+      img.src = url;
+    });
+  }
+
+  async function findCardImageInStorage(cardId) {
+    if (!isLoggedIn() || !cardId) return null;
+    await ensureSession();
+    const uid = getUserId();
+    const sb = getClient();
+    if (!sb || !uid) return null;
+    const cid = String(cardId).replace(/^wh_/, '');
+    try {
+      const { data, error } = await sb.storage.from(BUCKET).list(uid, {
+        limit: 200,
+        sortBy: { column: 'name', order: 'asc' }
+      });
+      if (error || !data?.length) return null;
+      const matches = data.filter((f) => {
+        const name = f?.name || '';
+        return name === `${cid}.jpg` || name.startsWith(`${cid}.`) || name.includes(cid);
+      });
+      for (const file of matches) {
+        const path = `${uid}/${file.name}`;
+        const ref = toStorageRef(path);
+        const url = await resolveDisplayUrl(ref, { assetId: cardId });
+        if (url && await verifyImageUrl(url)) return ref;
+      }
+    } catch (e) {
+      console.warn('[SupabaseSync] list storage failed', e);
+    }
+    return null;
+  }
+
+  async function repairCardImageIfMissing(cardId, currentRef) {
+    const found = await findCardImageInStorage(cardId);
+    if (found && found !== currentRef) return found;
+    if (currentRef) {
+      const url = await resolveDisplayUrl(currentRef, { assetId: cardId });
+      if (url && await verifyImageUrl(url)) return normalizeImageRef(currentRef);
+    }
+    return null;
+  }
+
+  function isCommunityFeedOpts(opts) {
+    return !!(opts && typeof opts === 'object' && opts.communityFeed === true);
+  }
+
+  async function resolveDisplayUrl(image, opts) {
+    if (!image || typeof image !== 'string') return image;
+    if (isDataUrl(image) || image.startsWith('blob:')) return image;
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const assetId = o.assetId;
+    const authorId = o.authorId;
+    const variant = displayVariantFromOpts(opts);
+    const communityFeed = isCommunityFeedOpts(opts);
+    const normalized = normalizeImageRef(image);
+    const bucketPath = storagePathFromRef(normalized);
+    if (bucketPath && (isLoggedIn() || communityFeed)) {
+      const primary = primaryImagePath(normalized, assetId);
+      const all = listImagePathCandidates(normalized, assetId, authorId).filter(
+        (p) => !isPathKnownMissing(p)
+      );
+      const candidates = o.tryAllPaths === true || communityFeed
+        ? all
+        : (primary ? [primary] : all.slice(0, 1));
+      for (const path of candidates) {
+        const cached = signedUrlCache.get(signedCacheKey(path.replace(/^\//, ''), variant));
+        if (cached?.url && cached.expiresAt > Date.now() + 120000) return cached.url;
+      }
+      for (const path of candidates) {
+        const url = await resolvePathToUrl(path, variant, {
+          communityFeed,
+          authorId,
+          cardId: assetId
+        });
+        if (url) return url;
+      }
+      return null;
     }
     if (/^https?:\/\//i.test(image)) {
+      const legacyPath = storagePathFromRef(image);
+      if (legacyPath && isLoggedIn()) {
+        return resolveDisplayUrl(toStorageRef(legacyPath), { assetId });
+      }
       if (window.PromptHubApi?.fetchMediaAsBlobUrl) {
         const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(image);
         if (blobUrl) return blobUrl;
@@ -207,33 +525,139 @@
     return image;
   }
 
+  function communityPrefetchPaths(imagesOrPosts) {
+    const paths = new Set();
+    for (const item of imagesOrPosts || []) {
+      if (typeof item === 'string') {
+        const p = storagePathFromRef(item);
+        if (p) paths.add(p.replace(/^\//, ''));
+        continue;
+      }
+      if (!item || typeof item !== 'object') continue;
+      const ref = item.image;
+      if (ref) {
+        const p = storagePathFromRef(ref);
+        if (p) paths.add(p.replace(/^\//, ''));
+      }
+      const authorId = item.authorId && String(item.authorId) !== 'guest' ? String(item.authorId) : '';
+      const cardId = item.sourceCardId ? String(item.sourceCardId) : '';
+      if (authorId && cardId) {
+        const base = String(cardId).replace(/[^a-zA-Z0-9_-]/g, '_');
+        paths.add(`${authorId}/${base}.jpg`);
+        paths.add(`${authorId}/${cardId}.jpg`);
+        paths.add(`${authorId}/${base}.webp`);
+        paths.add(`${authorId}/${base}.png`);
+      }
+    }
+    return [...paths];
+  }
+
+  async function prefetchCommunityDisplayUrls(images, capMs) {
+    if (!window.PromptHubApi?.signCommunityMediaRef) return;
+    const paths = communityPrefetchPaths(images).slice(0, 24);
+    if (!paths.length) return;
+    const limit = Math.max(800, Number(capMs) || 6000);
+    const started = Date.now();
+    let i = 0;
+    const concurrency = 2;
+    async function worker() {
+      while (i < paths.length && Date.now() - started < limit) {
+        const path = paths[i++];
+        if (signedUrlCache.get(signedCacheKey(path, VARIANT_GRID))?.expiresAt > Date.now() + 120000) continue;
+        await signPathViaCommunityApi(path, VARIANT_GRID);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, paths.length) }, () => worker()));
+  }
+
   async function prefetchDisplayUrls(images) {
     if (!isLoggedIn()) return;
     const paths = [...new Set(
-      (images || []).map(storagePathFromRef).filter(Boolean)
+      (images || []).map(storagePathFromRef).filter(Boolean).map(p => p.replace(/^\//, ''))
     )];
-    const batchSize = 16;
-    for (let i = 0; i < paths.length; i += batchSize) {
-      const batch = paths.slice(i, i + batchSize);
-      await Promise.all(batch.map(p => getSignedUrlForPath(p).catch(() => {})));
+    if (!paths.length) return;
+    const pending = paths.filter(p => {
+      if (isPathKnownMissing(p)) return false;
+      const cached = signedUrlCache.get(signedCacheKey(p, VARIANT_GRID));
+      return !(cached && cached.expiresAt > Date.now() + 120000);
+    });
+    if (!pending.length) return;
+    await ensureSession();
+    for (let i = 0; i < pending.length; i += GRID_SIGN_CONCURRENCY) {
+      const batch = pending.slice(i, i + GRID_SIGN_CONCURRENCY);
+      await Promise.all(
+        batch.map((p) => getSignedUrlForPath(p, { variant: VARIANT_GRID }).catch(() => {}))
+      );
     }
   }
 
-  function getCachedDisplayUrl(image) {
+  function getCachedDisplayUrl(image, assetIdOrOpts) {
     if (!image || typeof image !== 'string') return image;
     if (isDataUrl(image) || image.startsWith('blob:')) return image;
+    const opts = typeof assetIdOrOpts === 'object' ? assetIdOrOpts : { assetId: assetIdOrOpts };
+    const assetId = opts?.assetId;
+    const variant = displayVariantFromOpts(opts);
+    if (isLoggedIn() && (storagePathFromRef(image) || assetId)) {
+      for (const path of listImagePathCandidates(image, assetId)) {
+        const cached = signedUrlCache.get(signedCacheKey(path.replace(/^\//, ''), variant));
+        if (cached?.url && cached.expiresAt > Date.now() + 120000) return cached.url;
+      }
+    }
     const path = storagePathFromRef(image);
-    if (!path) return image;
-    const cached = signedUrlCache.get(path.replace(/^\//, ''));
+    if (!path) {
+      if (/^https?:\/\//i.test(image)) return image;
+      return '';
+    }
+    const cached = signedUrlCache.get(signedCacheKey(path.replace(/^\//, ''), variant));
     if (cached?.url) return cached.url;
-    if (isResolvableStorageRef(image)) return publicUrlFromPath(path) || '';
-    return image;
+    if (/^https?:\/\//i.test(image)) return image;
+    return '';
+  }
+
+  /** 按卡片 id 收集 canonical 路径，一次 batch 签完（避免列表每张图多次试探） */
+  async function prefetchCardsImages(cards, capMs) {
+    if (!isLoggedIn()) return;
+    const pathSet = new Set();
+    const list = (cards || []).slice(0, 32);
+    for (const c of list) {
+      if (!c?.image) continue;
+      const p = primaryImagePath(c.image, c.id);
+      if (p && !isPathKnownMissing(p)) pathSet.add(p);
+    }
+    if (!pathSet.size) return;
+    const refs = [...pathSet].map((p) => toStorageRef(p));
+    const limit = capMs != null ? Math.min(Math.max(800, capMs), 15000) : 8000;
+    await prefetchDisplayUrlsWithCap(refs, limit);
   }
 
   function imgPlaceholderSrc() {
     return 'data:image/svg+xml,' + encodeURIComponent(
       '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="#e4e4ea" width="4" height="3"/></svg>'
     );
+  }
+
+  function isPlaceholderImgSrc(src) {
+    return !src || (typeof src === 'string' && src.includes('data:image/svg'));
+  }
+
+  function isResolvableDisplayUrl(url) {
+    return !!(
+      url &&
+      typeof url === 'string' &&
+      !url.startsWith(STORAGE_PREFIX) &&
+      !isPlaceholderImgSrc(url)
+    );
+  }
+
+  function setCardMediaLoadState(media, state) {
+    if (!media) return;
+    media.classList.remove('card-media--missing', 'card-media--load-failed');
+    if (state === 'loading') {
+      media.classList.add('is-loading');
+      return;
+    }
+    media.classList.remove('is-loading');
+    if (state === 'failed') media.classList.add('card-media--load-failed');
   }
 
   function safeImgSrc(image) {
@@ -249,64 +673,173 @@
     return image;
   }
 
-  async function hydrateImageElements(root) {
+  function patchImageSrcFromCache(root) {
+    const scope = root || document;
+    scope.querySelectorAll('img[data-image-ref], img[data-storage-ref]').forEach((img) => {
+      const ref = img.getAttribute('data-image-ref') || img.getAttribute('data-storage-ref');
+      if (!ref) return;
+      const cur = img.currentSrc || img.src || '';
+      if (cur.startsWith('http') && !cur.includes('data:image/svg')) return;
+      const assetId = img.closest('.card[data-id]')?.dataset?.id
+        || img.closest('.card[data-post-id]')?.dataset?.postId
+        || undefined;
+      const url = getCachedDisplayUrl(ref, { assetId, variant: VARIANT_GRID });
+      if (url && /^https?:\/\//i.test(url)) {
+        const media = img.closest('.card-media, .imagegen-feed-media');
+        if (media && !media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
+        if (media && !media.classList.contains('is-loading')) media.classList.add('is-loading');
+        const done = () => {
+          if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
+          else media?.classList.remove('is-loading');
+        };
+        if (img.complete && img.naturalWidth > 0 && img.src === url) done();
+        else {
+          img.addEventListener('load', done, { once: true });
+          img.addEventListener('error', done, { once: true });
+          img.src = url;
+        }
+      }
+    });
+  }
+
+  async function prefetchDisplayUrlsWithCap(images, capMs) {
+    const limit = Math.max(800, Number(capMs) || 5000);
+    await Promise.race([
+      prefetchDisplayUrls(images),
+      new Promise((r) => setTimeout(r, limit))
+    ]);
+  }
+
+  async function hydrateImageElements(root, opts) {
+    const onlyMissing = opts?.onlyMissing === true;
     const scope = root || document;
     const imgs = [...scope.querySelectorAll('img[data-storage-ref], img[data-image-ref]')];
-    const concurrency = 6;
+    imgs.sort((a, b) => {
+      const ar = a.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+      const aVis = ar.top < window.innerHeight && ar.bottom > 0;
+      const bVis = br.top < window.innerHeight && br.bottom > 0;
+      if (aVis !== bVis) return aVis ? -1 : 1;
+      return ar.top - br.top;
+    });
+    const concurrency = window.matchMedia('(max-width: 900px)').matches ? 8 : 10;
     let idx = 0;
     async function hydrateOne(img) {
       const ref = img.getAttribute('data-storage-ref') || img.getAttribute('data-image-ref');
       if (!ref) return;
       const media = img.closest('.card-media, .imagegen-feed-media');
       if (media?.classList.contains('imagegen-gen-pending')) return;
-      if (!media?.dataset.shineAt) media.dataset.shineAt = String(Date.now());
-      media?.classList.add('is-loading');
-      if (!img.getAttribute('src') || img.getAttribute('src')?.startsWith('data:image/svg')) {
+      const cur = img.currentSrc || img.src || '';
+      if (onlyMissing && cur.startsWith('http') && !cur.includes('data:image/svg')) {
+        media?.classList.remove('is-loading');
+        return;
+      }
+      const assetId = img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
+        || img.closest('.card[data-id]')?.dataset?.id
+        || img.closest('.card[data-post-id]')?.dataset?.postId
+        || img.closest('.card[data-creation-id]')?.dataset?.creationId
+        || img.closest('[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '')
+        || undefined;
+      const inFeed = !!img.closest('#communityGrid, #creationsGrid, #userProfileGrid');
+      const authorId = img.closest('.card')?.dataset?.authorId || '';
+      const refPath = storagePathFromRef(ref) || '';
+      const uid = getUserId();
+      const ownFeedPath = !!(refPath && uid && refPath.replace(/^\//, '').startsWith(`${uid}/`));
+      const communityFeed = inFeed && (!isLoggedIn() || !ownFeedPath);
+      const resolveOpts = {
+        assetId,
+        authorId: authorId || undefined,
+        cardId: assetId,
+        variant: VARIANT_GRID,
+        communityFeed,
+        tryAllPaths: communityFeed
+      };
+      const cached = communityFeed ? '' : getCachedDisplayUrl(ref, { assetId, variant: VARIANT_GRID });
+      if (cached && isResolvableDisplayUrl(cached)) {
+        const mediaWrapCached = media || img.closest('.community-side-img-btn');
+        if (cur !== cached) {
+          if (mediaWrapCached && !mediaWrapCached.dataset.shineAt) {
+            mediaWrapCached.dataset.shineAt = String(Date.now());
+          }
+          setCardMediaLoadState(mediaWrapCached, 'loading');
+          img.src = cached;
+          if (img.complete && img.naturalWidth > 0) {
+            if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(mediaWrapCached);
+            else mediaWrapCached?.classList.remove('is-loading');
+          }
+        } else if (!isPlaceholderImgSrc(cur)) {
+          mediaWrapCached?.classList.remove('is-loading');
+        }
+        return;
+      }
+      const mediaWrap = media || img.closest('.community-side-img-btn');
+      if (mediaWrap) {
+        if (!mediaWrap.dataset.shineAt) mediaWrap.dataset.shineAt = String(Date.now());
+        setCardMediaLoadState(mediaWrap, 'loading');
+      }
+      if (!img.getAttribute('src') || isPlaceholderImgSrc(img.getAttribute('src'))) {
         img.src = imgPlaceholderSrc();
       }
       const endShine = () => {
-        if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
-        else media?.classList.remove('is-loading');
+        if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(mediaWrap);
+        else mediaWrap?.classList.remove('is-loading');
       };
       try {
-        const url = await resolveDisplayUrl(ref);
-        if (url && !url.startsWith(STORAGE_PREFIX)) {
+        let url = await resolveDisplayUrl(ref, resolveOpts);
+        if (!isResolvableDisplayUrl(url) && assetId && typeof window.getCardImageBackup === 'function') {
+          const backup = await window.getCardImageBackup(assetId);
+          if (backup && (isDataUrl(backup) || backup.startsWith('blob:'))) url = backup;
+        }
+        if (!isResolvableDisplayUrl(url) && communityFeed && assetId && typeof window.getCardImageBackup === 'function') {
+          const backup = await window.getCardImageBackup(assetId);
+          if (backup && (isDataUrl(backup) || backup.startsWith('blob:'))) url = backup;
+        }
+        if (isResolvableDisplayUrl(url)) {
           const onFail = () => {
+            if (media?.classList.contains('is-loading')) return;
             img.src = imgPlaceholderSrc();
             img.classList.remove('img-load-failed');
+            setCardMediaLoadState(media, 'failed');
             endShine();
           };
           if (img.complete && img.src === url && img.naturalWidth > 0) endShine();
           else {
-            img.addEventListener('load', endShine, { once: true });
+            img.addEventListener('load', () => {
+              setCardMediaLoadState(media, 'loading');
+              media?.classList.remove('card-media--load-failed');
+              endShine();
+            }, { once: true });
             img.addEventListener('error', onFail, { once: true });
             img.src = url;
           }
           img.classList.remove('img-load-failed');
           if (img.complete && img.naturalWidth > 0) endShine();
-        } else {
+        } else if (!isPlaceholderImgSrc(cur) && cur.startsWith('http')) {
           endShine();
+        } else {
+          setCardMediaLoadState(media, 'loading');
         }
       } catch (e) {
         console.warn('[SupabaseSync] hydrate failed', ref, e);
-        endShine();
+        setCardMediaLoadState(media, 'loading');
       }
       if (!img.dataset.hydrateBound) {
         img.dataset.hydrateBound = '1';
         img.addEventListener('error', () => {
+          if (media?.classList.contains('is-loading')) return;
           if (img.dataset.retryHydrate === '1') {
-            img.src = imgPlaceholderSrc();
-            img.classList.remove('img-load-failed');
+            setCardMediaLoadState(media, 'failed');
             return;
           }
           img.dataset.retryHydrate = '1';
-          void resolveDisplayUrl(ref).then(url => {
-            if (url && !url.startsWith(STORAGE_PREFIX)) {
+          setCardMediaLoadState(media, 'loading');
+          void resolveDisplayUrl(ref, resolveOpts).then((url) => {
+            if (isResolvableDisplayUrl(url)) {
               img.src = url;
               img.classList.remove('img-load-failed');
+              media?.classList.remove('card-media--load-failed');
             } else {
-              img.src = imgPlaceholderSrc();
-              img.classList.remove('img-load-failed');
+              setCardMediaLoadState(media, 'failed');
             }
           });
         });
@@ -322,10 +855,77 @@
     await Promise.all(workers);
   }
 
+  async function verifyStorageRef(ref, assetId, opts = {}) {
+    if (!ref || !isStorageRef(ref)) return false;
+    const attempts = opts.quick ? 1 : 2;
+    const all = listImagePathCandidates(normalizeImageRef(ref), assetId);
+    const candidates = (opts.quick ? [primaryImagePath(ref, assetId)].filter(Boolean) : all)
+      .filter((p) => !isPathKnownMissing(p));
+    for (let round = 0; round < attempts; round++) {
+      for (const path of candidates) {
+        try {
+          const url = await resolvePathToUrl(path.replace(/^\//, ''));
+          if (url && await verifyImageUrl(url)) return true;
+        } catch (e) {
+          if (!isStorageNotFoundError(e)) {
+            console.warn('[SupabaseSync] verifyStorageRef', path, e);
+          }
+        }
+      }
+      if (round < attempts - 1) {
+        await new Promise((r) => setTimeout(r, opts.quick ? 80 : 300));
+      }
+    }
+    return false;
+  }
+
+  async function uploadStorageBlob(path, blob, opts = {}) {
+    const maxAttempts = Math.max(1, opts.maxAttempts || 3);
+    await ensureSession();
+    const sb = getClient();
+    if (!sb) throw new Error('未登录');
+    const cleanPath = String(path || '').replace(/^\//, '');
+    if (!cleanPath) throw new Error('图片路径无效');
+    let lastErr = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const { error } = await sb.storage.from(BUCKET).upload(cleanPath, blob, {
+        contentType: 'image/jpeg',
+        upsert: true,
+        cacheControl: '3600'
+      });
+      if (error) {
+        lastErr = error;
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, 350 * attempt));
+          continue;
+        }
+        break;
+      }
+      const url = await resolvePathToUrl(cleanPath);
+      if (url) {
+        if (opts.skipVerify) return toStorageRef(cleanPath);
+        if (await verifyImageUrl(url)) return toStorageRef(cleanPath);
+      }
+      if (opts.skipVerify && url) return toStorageRef(cleanPath);
+      await new Promise((r) => setTimeout(r, opts.skipVerify ? 120 : 450));
+      const retryUrl = await resolvePathToUrl(cleanPath);
+      if (retryUrl) {
+        if (opts.skipVerify || (await verifyImageUrl(retryUrl))) return toStorageRef(cleanPath);
+      }
+      lastErr = new Error('上传后校验失败');
+      if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, opts.skipVerify ? 200 : 350 * attempt));
+    }
+    throw lastErr || new Error('图片上传失败，请检查网络后重试');
+  }
+
   async function persistGenerationImage(assetId, image) {
     if (!image || typeof image !== 'string') return image;
     if (!isLoggedIn()) return image;
-    if (isStorageRef(image)) return normalizeImageRef(image);
+    if (isStorageRef(image)) {
+      const normalized = normalizeImageRef(image);
+      if (await verifyStorageRef(normalized, assetId)) return normalized;
+      return normalized;
+    }
     await ensureSession();
     const id = String(assetId || Date.now());
     if (isDataUrl(image) || image.startsWith('blob:')) {
@@ -334,31 +934,25 @@
     if (/^https?:\/\//i.test(image)) {
       try {
         const res = await fetch(image, { mode: 'cors' });
-        if (!res.ok) throw new Error('fetch_failed');
-        const blob = await res.blob();
-        return uploadGeneratedImage(id, blob);
+        if (res.ok) {
+          const blob = await res.blob();
+          return uploadGeneratedImage(id, blob);
+        }
       } catch (e) {
-        console.warn('[SupabaseSync] remote persist failed, keep url', e);
-        return image;
+        console.warn('[SupabaseSync] 生成图 CORS 拉取失败，保留 Worker 链接', e);
       }
+      return image;
     }
     return image;
   }
 
   async function uploadGeneratedImage(assetId, source) {
     await ensureSession();
-    const sb = getClient();
     const uid = getUserId();
-    if (!sb || !uid || !assetId) throw new Error('未登录');
+    if (!uid || !assetId) throw new Error('未登录');
     const blob = await compressImage(source);
     const path = `${uid}/generated/${assetId}.jpg`;
-    const { error } = await sb.storage.from(BUCKET).upload(path, blob, {
-      contentType: 'image/jpeg',
-      upsert: true,
-      cacheControl: '3600'
-    });
-    if (error) throw error;
-    return toStorageRef(path);
+    return uploadStorageBlob(path, blob, { skipVerify: true });
   }
 
   function loadImageFromSource(source) {
@@ -399,34 +993,19 @@
 
   async function uploadImageGenRef(refId, source) {
     await ensureSession();
-    const sb = getClient();
     const uid = getUserId();
-    if (!sb || !uid || !refId) throw new Error('未登录或参考图无效');
+    if (!uid || !refId) throw new Error('未登录或参考图无效');
     const blob = await compressImage(source);
     const path = `${uid}/imagegen/${refId}.jpg`;
-    const { error } = await sb.storage.from(BUCKET).upload(path, blob, {
-      contentType: 'image/jpeg',
-      upsert: true,
-      cacheControl: '3600'
-    });
-    if (error) throw error;
-    return toStorageRef(path);
+    return uploadStorageBlob(path, blob, { skipVerify: true });
   }
 
   async function uploadCardImage(cardId, source) {
     await ensureSession();
-    const sb = getClient();
-    const uid = getUserId();
-    if (!sb || !uid || !cardId) throw new Error('未登录或卡片无效');
+    const path = cardImageStoragePath(cardId);
+    if (!path) throw new Error('未登录或卡片无效');
     const blob = await compressImage(source);
-    const path = `${uid}/${cardId}.jpg`;
-    const { error } = await sb.storage.from(BUCKET).upload(path, blob, {
-      contentType: 'image/jpeg',
-      upsert: true,
-      cacheControl: '3600'
-    });
-    if (error) throw error;
-    return toStorageRef(path);
+    return uploadStorageBlob(path, blob, { skipVerify: true });
   }
 
   async function deleteCardImageByUrl(url) {
@@ -437,16 +1016,140 @@
     await sb.storage.from(BUCKET).remove([path]);
   }
 
+  function clearPathMissingForCard(cardId, image) {
+    for (const p of listImagePathCandidates(image, cardId)) {
+      missingPathCache.delete(normalizePathKey(p));
+    }
+  }
+
+  /** 登录态：保证卡片图在 Storage（可上传则上传，已有则校验） */
+  async function ensureCardImageOnCloud(card) {
+    const cardId = card?.id;
+    if (!cardId || !isLoggedIn()) {
+      return { ok: true, image: card?.image ?? null };
+    }
+    const image = card?.image;
+    if (!image) return { ok: true, image: null };
+
+    if (isDataUrl(image) || (typeof image === 'string' && image.startsWith('blob:'))) {
+      try {
+        const url = await uploadCardImage(cardId, image);
+        if (typeof window.clearCardImageBackup === 'function') {
+          await window.clearCardImageBackup(cardId);
+        }
+        clearPathMissingForCard(cardId, url);
+        return { ok: true, image: url, uploaded: true };
+      } catch (e) {
+        return { ok: false, image, error: formatError(e) };
+      }
+    }
+
+    if (!isStorageRef(image)) {
+      return { ok: true, image };
+    }
+
+    const normalized = normalizeImageRef(image);
+    if (await verifyStorageRef(normalized, cardId, { quick: true })) {
+      return { ok: true, image: normalized };
+    }
+
+    const fallback = await resolveLocalImageFallback(cardId, image);
+    if (!fallback) {
+      markImageUploadSkip(cardId);
+      markPathMissing(primaryImagePath(image, cardId) || normalized);
+      return { ok: false, image: normalized, error: '云端无图且本机无备份，请重新添加图片' };
+    }
+    try {
+      const url = await uploadCardImage(cardId, fallback);
+      if (typeof window.clearCardImageBackup === 'function') {
+        await window.clearCardImageBackup(cardId);
+      }
+      clearPathMissingForCard(cardId, url);
+      return { ok: true, image: url, uploaded: true, repaired: true };
+    } catch (e) {
+      return { ok: false, image: normalized, error: formatError(e) };
+    }
+  }
+
+  async function repairMissingCardImages(cards, opts = {}) {
+    if (!isLoggedIn() || !Array.isArray(cards) || !cards.length) {
+      return { fixed: 0, skipped: 0, failed: [] };
+    }
+    const capMs = Math.max(5000, Number(opts.capMs) || 120000);
+    const deadline = Date.now() + capMs;
+    let fixed = 0;
+    let skipped = 0;
+    const failed = [];
+
+    for (const card of cards) {
+      if (Date.now() > deadline) {
+        failed.push({ id: '_timeout', title: '补传超时', error: '请稍后重试或分批保存' });
+        break;
+      }
+      if (!card?.id || !card.image) {
+        skipped += 1;
+        continue;
+      }
+      if (shouldSkipImageUploadAttempt(card.id)) {
+        skipped += 1;
+        continue;
+      }
+
+      const needsUpload = cardNeedsCloudImageUpload(card)
+        || (opts.fullCheck === true && isStorageRef(card.image)
+          && !(await verifyStorageRef(card.image, card.id, { quick: true })));
+
+      if (!needsUpload) {
+        skipped += 1;
+        continue;
+      }
+
+      const before = card.image;
+      const r = await ensureCardImageOnCloud(card);
+      if (r.ok && r.image) {
+        card.image = r.image;
+        if (r.uploaded || r.repaired || r.image !== before) fixed += 1;
+        else skipped += 1;
+      } else {
+        failed.push({
+          id: card.id,
+          title: (card.title || card.prompt || card.id || '').toString().slice(0, 40),
+          error: r.error || '无法上传'
+        });
+      }
+    }
+    return { fixed, skipped, failed };
+  }
+
   async function resolveCardImageForSave(cardId, imageValue, previousUrl) {
     if (!imageValue) {
       if (previousUrl && isStorageRef(previousUrl)) await deleteCardImageByUrl(previousUrl);
       return null;
     }
     if (!isLoggedIn()) return imageValue;
-    if (isStorageRef(imageValue)) return normalizeImageRef(imageValue);
+    if (isStorageRef(imageValue)) {
+      const normalized = normalizeImageRef(imageValue);
+      if (previousUrl && normalizeImageRef(previousUrl) === normalized) return normalized;
+      if (await verifyStorageRef(normalized, cardId, { quick: true })) return normalized;
+      const fallback = await resolveLocalImageFallback(cardId, imageValue);
+      if (fallback) {
+        const url = await uploadCardImage(cardId, fallback);
+        clearPathMissingForCard(cardId, url);
+        if (previousUrl && previousUrl !== url && isStorageRef(previousUrl)) {
+          await deleteCardImageByUrl(previousUrl);
+        }
+        if (typeof window.clearCardImageBackup === 'function') {
+          await window.clearCardImageBackup(cardId);
+        }
+        return url;
+      }
+      throw new Error('图片在云端已丢失，请重新选择图片后再保存');
+    }
     if (isDataUrl(imageValue) || imageValue.startsWith('blob:')) {
       const url = await uploadCardImage(cardId, imageValue);
-      if (previousUrl && previousUrl !== url) await deleteCardImageByUrl(previousUrl);
+      if (previousUrl && previousUrl !== url && isStorageRef(previousUrl)) {
+        await deleteCardImageByUrl(previousUrl);
+      }
       return url;
     }
     if (/^https?:\/\//i.test(imageValue)) {
@@ -455,36 +1158,134 @@
         if (res.ok) {
           const blob = await res.blob();
           const url = await uploadCardImage(cardId, blob);
-          if (previousUrl && previousUrl !== url) await deleteCardImageByUrl(previousUrl);
+          if (previousUrl && previousUrl !== url && isStorageRef(previousUrl)) {
+            await deleteCardImageByUrl(previousUrl);
+          }
           return url;
         }
       } catch (e) {
         console.warn('[SupabaseSync] card image fetch failed', e);
       }
+      throw new Error('远程图片下载失败，请换一张本地图片重试');
     }
     return imageValue;
   }
 
-  async function prepareCardsForCloud(cards) {
+  async function resolveLocalImageFallback(cardId, currentImage) {
+    if (currentImage && isDataUrl(currentImage)) return currentImage;
+    if (currentImage && typeof currentImage === 'string' && currentImage.startsWith('blob:')) {
+      return currentImage;
+    }
+    if (typeof window.getCardImageBackup === 'function') {
+      const backup = await window.getCardImageBackup(cardId);
+      if (backup && isDataUrl(backup)) return backup;
+    }
+    const sel = cardId ? `.card[data-id="${CSS.escape(String(cardId))}"] .card-img` : null;
+    const img = sel ? document.querySelector(sel) : null;
+    if (img?.src && isDataUrl(img.src)) return img.src;
+    if (img?.src && /^https?:\/\//i.test(img.src) && img.naturalWidth > 8) {
+      try {
+        const res = await fetch(img.src, { mode: 'cors' });
+        if (res.ok) return await res.blob();
+      } catch (e) {
+        console.warn('[SupabaseSync] fallback fetch card img failed', cardId, e);
+      }
+    }
+    return null;
+  }
+
+  async function repairAllCardImagesBeforeSync(cards, opts = {}) {
+    const r = await repairMissingCardImages(cards, { capMs: opts.capMs || 8000 });
+    const warnings = r.failed
+      .filter((f) => f.id !== '_timeout')
+      .map((f) => `「${f.title}」${f.error}`);
+    if (r.failed.some((f) => f.id === '_timeout')) {
+      warnings.unshift('图片补传超时，已继续同步文字数据');
+    }
+    return { fixed: r.fixed, warnings: [...new Set(warnings)] };
+  }
+
+  async function prepareCardsForCloud(cards, opts = {}) {
     if (!isLoggedIn() || !Array.isArray(cards)) return { cards: cards || [], warnings: [] };
-    const out = [];
+    const strict = opts.strict === true;
     const warnings = [];
-    for (const card of cards) {
+    const warnedOnce = new Set();
+    const out = [];
+    for (const card of cards || []) {
       const copy = { ...card };
-      if (copy.image && isStorageRef(copy.image)) {
-        copy.image = normalizeImageRef(copy.image);
-      } else if (copy.image && isDataUrl(copy.image)) {
-        try {
-          copy.image = await uploadCardImage(copy.id, copy.image);
-        } catch (e) {
-          const msg = formatError(e);
+      if (!copy?.id || !copy.image) {
+        out.push(copy);
+        continue;
+      }
+      const mustUpload = cardNeedsCloudImageUpload(copy)
+        || (strict && isStorageRef(copy.image) && !shouldSkipImageUploadAttempt(copy.id));
+      if (!mustUpload) {
+        out.push(copy);
+        continue;
+      }
+      if (shouldSkipImageUploadAttempt(copy.id)) {
+        out.push(copy);
+        continue;
+      }
+      const r = await ensureCardImageOnCloud(copy);
+      if (r.image) copy.image = r.image;
+      if (!r.ok) {
+        const label = (copy.title || copy.prompt || copy.id || '').toString().slice(0, 24);
+        const msg = `「${label}」${r.error || '图片未上传'}`;
+        if (!warnedOnce.has(copy.id)) {
+          warnedOnce.add(copy.id);
           warnings.push(msg);
-          delete copy.image;
         }
       }
       out.push(copy);
     }
     return { cards: out, warnings: [...new Set(warnings)] };
+  }
+
+  async function auditBrokenCardImages(cards, opts = {}) {
+    if (!isLoggedIn() || !Array.isArray(cards)) return { broken: [], repaired: [] };
+    const capMs = Math.max(2000, Number(opts.capMs) || 6000);
+    const deadline = Date.now() + capMs;
+    const skipStorageList = opts.skipStorageList !== false;
+    const broken = [];
+    const repaired = [];
+    for (const card of cards) {
+      if (Date.now() > deadline) break;
+      if (!card?.image) continue;
+      if (isDataUrl(card.image) || card.image.startsWith('blob:')) continue;
+      if (!isStorageRef(card.image)) continue;
+      const ok = await verifyStorageRef(card.image, card.id, { quick: true });
+      if (ok) continue;
+      let fixed = skipStorageList ? null : await findCardImageInStorage(card.id);
+      if (!fixed && typeof window.getCardImageBackup === 'function') {
+        const backup = await window.getCardImageBackup(card.id);
+        if (backup && isDataUrl(backup)) {
+          try {
+            fixed = await uploadCardImage(card.id, backup);
+            if (typeof window.clearCardImageBackup === 'function') {
+              await window.clearCardImageBackup(card.id);
+            }
+          } catch (e) {
+            console.warn('[SupabaseSync] backup re-upload failed', card.id, e);
+          }
+        }
+      }
+      if (fixed) {
+        repaired.push({
+          id: card.id,
+          title: card.title || card.prompt || card.id,
+          from: card.image,
+          to: fixed
+        });
+        card.image = fixed;
+      } else {
+        broken.push({
+          id: card.id,
+          title: (card.title || card.prompt || card.id || '').toString().slice(0, 40)
+        });
+      }
+    }
+    return { broken, repaired };
   }
 
   async function init(callback) {
@@ -593,6 +1394,35 @@
     return data;
   }
 
+  /** 已登录账号在任务中心绑定/验证手机号 */
+  async function sendPhoneOtpForBind(phone) {
+    await ensureSession();
+    const sb = getClient();
+    if (!sb || !session?.user) throw new Error('请先登录');
+    const normalized = normalizePhone(phone);
+    if (!normalized) throw new Error('请输入正确的 11 位中国大陆手机号');
+    const { error } = await sb.auth.updateUser({ phone: normalized });
+    if (error) throw new Error(formatAuthError(error));
+  }
+
+  async function verifyPhoneOtpForBind(phone, token) {
+    await ensureSession();
+    const sb = getClient();
+    if (!sb || !session?.user) throw new Error('请先登录');
+    const normalized = normalizePhone(phone);
+    if (!normalized) throw new Error('请输入正确的手机号');
+    const code = String(token || '').trim();
+    if (!/^\d{6}$/.test(code)) throw new Error('请输入 6 位数字验证码');
+    const { data, error } = await sb.auth.verifyOtp({
+      phone: normalized,
+      token: code,
+      type: 'phone_change'
+    });
+    if (error) throw new Error(formatAuthError(error));
+    session = data.session;
+    return data;
+  }
+
   async function signUp(email, password) {
     const sb = getClient();
     if (!sb) throw new Error('Supabase 未配置');
@@ -612,7 +1442,11 @@
     const { data, error } = await sb.auth.signInWithPassword({ email, password });
     if (error) throw new Error(formatAuthError(error));
     session = data.session;
-    return data;
+    if (!session) {
+      const { data: fresh } = await sb.auth.getSession();
+      session = fresh.session;
+    }
+    return { ...data, session: session || data.session };
   }
 
   async function resetPassword(email) {
@@ -679,10 +1513,21 @@
       }
     }
 
-    const { cards: preparedCards, warnings } = await prepareCardsForCloud(payload.cards || []);
+    const imageSnapshot = (payload.cards || []).map((c) => ({
+      id: c?.id,
+      image: c?.image
+    }));
+    const { cards: preparedCards, warnings } = await prepareCardsForCloud(payload.cards || [], {
+      strict: opts.strictImageCheck === true
+    });
+    const restoredCards = (preparedCards || []).map((c) => {
+      const snap = imageSnapshot.find((s) => String(s.id) === String(c.id));
+      if (snap?.image && !c.image) return { ...c, image: snap.image };
+      return c;
+    });
     const prepared = {
       ...payload,
-      cards: preparedCards,
+      cards: restoredCards,
       schemaVersion: window.CloudSyncSafety?.SCHEMA_VERSION || 2
     };
     const { error } = await sb.from('user_data').upsert({
@@ -692,7 +1537,7 @@
     }, { onConflict: 'user_id' });
     if (error) throw new Error(formatError(error));
     if (Array.isArray(prepared.cards)) payload.cards = prepared.cards;
-    return { warnings };
+    return { warnings, data: prepared };
   }
 
   window.SupabaseSync = {
@@ -706,12 +1551,26 @@
     isStorageUrl,
     isStorageRef,
     storagePathFromRef,
+    primaryImagePath,
+    isPathKnownMissing,
     normalizeImageRef,
     resolveDisplayUrl,
     prefetchDisplayUrls,
+    prefetchDisplayUrlsWithCap,
+    prefetchCardsImages,
+    prefetchCommunityDisplayUrls,
+    patchImageSrcFromCache,
     getCachedDisplayUrl,
+    VARIANT_GRID,
+    VARIANT_FULL,
     safeImgSrc,
     publicUrlFromPath,
+    repairAllCardImagesBeforeSync,
+    resolveLocalImageFallback,
+    uploadStorageBlob,
+    auditBrokenCardImages,
+    repairCardImageIfMissing,
+    findCardImageInStorage,
     hydrateImageElements,
     persistGenerationImage,
     uploadGeneratedImage,
@@ -724,6 +1583,8 @@
     updatePassword,
     sendPhoneOtp,
     verifyPhoneOtp,
+    sendPhoneOtpForBind,
+    verifyPhoneOtpForBind,
     normalizePhone,
     isPhoneAuthEnabled,
     isWeChatAuthEnabled,
@@ -734,6 +1595,8 @@
     uploadImageGenRef,
     deleteCardImageByUrl,
     resolveCardImageForSave,
+    ensureCardImageOnCloud,
+    repairMissingCardImages,
     prepareCardsForCloud,
     formatError
   };

@@ -68,9 +68,7 @@ generateRoutes.get('/cost', async c => {
   return c.json({ ok: true, data: cost });
 });
 
-generateRoutes.use('*', rateLimit(120, 60_000));
-
-generateRoutes.post('/', async c => {
+generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   const user = c.get('user');
   const parsed = bodySchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
@@ -248,6 +246,53 @@ generateRoutes.post('/', async c => {
       demo: !imageApiKey
     }
   });
+});
+
+generateRoutes.get('/jobs', async c => {
+  const user = c.get('user');
+  const admin = createAdminClient(c.env);
+  const since = new Date(Date.now() - 72 * 3600 * 1000).toISOString();
+  const { data: rows, error } = await admin
+    .from('generation_requests')
+    .select('*')
+    .eq('user_id', user.id)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(48);
+  if (error) throw error;
+
+  const jobs = [];
+  for (const job of rows || []) {
+    let status = job.status as string;
+    let imageUrl = job.result_image_url as string | null;
+    if (job.status === 'processing') {
+      const polled = await pollAndUpdateJob(
+        admin,
+        user.id,
+        job,
+        c.env.IMAGE_API_KEY || '',
+        c.env.IMAGE_API_BASE_URL
+      );
+      status = polled.status;
+      imageUrl = polled.imageUrl;
+    }
+    const meta = (job.meta as Record<string, unknown>) || {};
+    jobs.push({
+      id: job.id,
+      prompt: job.prompt,
+      status,
+      imageUrl,
+      creditsCharged: job.credits_charged,
+      resolution: job.resolution,
+      quality: job.quality,
+      size: job.size_label,
+      model: meta.model,
+      modelLabel: meta.modelLabel,
+      createdAt: job.created_at
+    });
+  }
+
+  return c.json({ ok: true, data: { jobs } });
 });
 
 generateRoutes.get('/jobs/:jobId', async c => {

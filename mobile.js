@@ -18,6 +18,7 @@
     if (open) {
       ov.hidden = false;
       ov.style.removeProperty('display');
+      if (ov.parentElement !== document.body) document.body.appendChild(ov);
     } else {
       ov.hidden = true;
       ov.style.display = 'none';
@@ -50,8 +51,26 @@
     });
   }
 
-  function closeAllMobileOverlays() {
+  function closeAllMobileOverlays(opts) {
+    const keepModals = opts?.keepModals === true;
     closeDrawers();
+    if (!keepModals) {
+      window.AppModalHub?.close?.('trialTasksOverlay', true);
+      window.AppModalHub?.close?.('subscribeOverlay', true);
+      window.SubscriptionUI?.close?.();
+      window.TrialTasksUI?.close?.();
+    }
+    if (typeof closeEditPanel === 'function') closeEditPanel({ skipHistory: true });
+    if (typeof window.closeMobileSearch === 'function') window.closeMobileSearch();
+    else {
+      const bar = document.getElementById('mobileSearchBar');
+      const btn = document.getElementById('mobileSearchBtn');
+      if (bar) bar.hidden = true;
+      if (btn) {
+        btn.setAttribute('aria-expanded', 'false');
+        btn.classList.remove('active');
+      }
+    }
     document.body.classList.remove(
       'mobile-search-open',
       'subscribe-open',
@@ -72,9 +91,9 @@
     if (typeof closeTagSheet === 'function') closeTagSheet();
     window.FeatureDraft?.closeImageGenFilterSheet?.();
     window.AppModalHub?.unlockAll?.();
-    window.SubscriptionUI?.close?.();
-    window.TrialTasksUI?.close?.();
-    document.getElementById('authOverlay')?.classList.remove('open');
+    if (!keepModals) {
+      document.getElementById('authOverlay')?.classList.remove('open');
+    }
     document.querySelectorAll('.settings-overlay.active, .modal-overlay.active').forEach((el) => {
       el.classList.remove('active');
     });
@@ -85,6 +104,7 @@
   function closeDrawers() {
     document.body.classList.remove('mobile-nav-open', 'mobile-groups-open');
     syncDrawerOverlayVisibility();
+    forceHideBlockingLayers();
   }
 
   function openNavDrawer() {
@@ -107,6 +127,7 @@
 
   function tabForApp(app) {
     if (app === 'imagegen') return 'imagegen';
+    if (app === 'community') return 'community';
     if (app === 'warehouse') return 'cards';
     return null;
   }
@@ -156,9 +177,19 @@
   }
 
   function applyMobileColumns() {
-    if (!isMobile() || typeof window.setCardColumns !== 'function') return;
-    const cur = Number(getComputedStyle(document.documentElement).getPropertyValue('--card-columns')) || 4;
-    if (cur > 2) window.setCardColumns(2);
+    if (!isMobile()) return;
+    document.documentElement.style.setProperty('--card-columns', '2');
+  }
+
+  function restoreDesktopLayout() {
+    if (isMobile()) return;
+    document.getElementById('cardsContainer')?.classList.remove('mobile-grid');
+    if (typeof window.restoreDesktopCardColumns === 'function') {
+      window.restoreDesktopCardColumns();
+    } else if (typeof scheduleLayoutMasonry === 'function') {
+      scheduleLayoutMasonry();
+    }
+    window.FeatureDraft?.renderImageGenFeed?.();
   }
 
   function bindMobileUI() {
@@ -166,15 +197,15 @@
     const navBtn = document.getElementById('mobileNavBtn');
     const groupsBtn = document.getElementById('mobileGroupsBtn');
 
-    overlay?.addEventListener('click', (e) => {
-      if (e.target === overlay) closeDrawers();
-    });
-    overlay?.addEventListener('touchend', (e) => {
-      if (e.target === overlay) {
-        e.preventDefault();
-        closeDrawers();
-      }
-    });
+    const onDrawerBackdropTap = (e) => {
+      if (e.target !== overlay) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeDrawers();
+    };
+    overlay?.addEventListener('click', onDrawerBackdropTap);
+    overlay?.addEventListener('touchend', onDrawerBackdropTap, { passive: false });
+    overlay?.addEventListener('pointerdown', onDrawerBackdropTap);
     navBtn?.addEventListener('click', () => {
       if (document.body.classList.contains('mobile-nav-open')) closeDrawers();
       else openNavDrawer();
@@ -198,6 +229,20 @@
 
     bindImageGenMobileUI();
 
+    document.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (!isMobile()) return;
+        if (!document.body.classList.contains('mobile-nav-open') && !document.body.classList.contains('mobile-groups-open')) return;
+        if (e.target.closest('.app-nav, .sidebar, .mobile-bottom-nav, .mobile-drawer-overlay')) {
+          if (e.target === overlay) closeDrawers();
+          return;
+        }
+        closeDrawers();
+      },
+      true
+    );
+
     const mobileSearchBtn = document.getElementById('mobileSearchBtn');
     const mobileSearchBar = document.getElementById('mobileSearchBar');
     const searchDesktop = document.getElementById('searchInput');
@@ -212,8 +257,15 @@
       if (open) {
         if (searchMobile && searchDesktop) searchMobile.value = searchDesktop.value;
         setTimeout(() => searchMobile?.focus(), 50);
+      } else {
+        searchMobile?.blur();
       }
     }
+
+    function closeMobileSearch() {
+      syncMobileSearchOpen(false);
+    }
+    window.closeMobileSearch = closeMobileSearch;
 
     mobileSearchBtn?.addEventListener('click', () => {
       syncMobileSearchOpen(mobileSearchBar?.hidden !== false);
@@ -226,9 +278,20 @@
     });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && document.body.classList.contains('mobile-search-open')) {
-        syncMobileSearchOpen(false);
+        closeMobileSearch();
       }
     });
+
+    document.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (!isMobile()) return;
+        if (!document.body.classList.contains('mobile-search-open')) return;
+        if (e.target.closest('#mobileSearchBar, #mobileSearchBtn')) return;
+        closeMobileSearch();
+      },
+      true
+    );
   }
 
   window.mobileSwitchTab = function (tab) {
@@ -242,9 +305,9 @@
       openGroupsDrawer();
     } else if (tab === 'imagegen') {
       if (typeof switchAppPage === 'function') switchAppPage('imagegen');
-    } else if (tab === 'new') {
-      if (typeof switchAppPage === 'function') switchAppPage('warehouse');
-      if (typeof createNewCard === 'function') createNewCard({ forceOpenPanel: true });
+    } else if (tab === 'community') {
+      if (typeof switchAppPage === 'function') switchAppPage('community');
+      window.FeatureDraft?.renderCommunity?.();
     } else if (tab === 'me') {
       openNavDrawer();
     }
@@ -264,6 +327,7 @@
     if (!isMobile()) {
       closeDrawers();
       document.body.classList.remove('panel-open', 'imagegen-mobile-view-form', 'imagegen-mobile-view-feed');
+      restoreDesktopLayout();
     } else {
       applyMobileColumns();
       if (typeof closeEditPanel === 'function') closeEditPanel();
@@ -299,7 +363,8 @@
       syncDrawerOverlayVisibility();
       requestAnimationFrame(() => closeAllMobileOverlays());
       applyMobileColumns();
-      if (typeof closeEditPanel === 'function') closeEditPanel();
+      if (typeof window.resetMobileEditPanelState === 'function') window.resetMobileEditPanelState();
+      else if (typeof closeEditPanel === 'function') closeEditPanel({ skipHistory: true });
       if (typeof enforceMobileCardGrid === 'function') enforceMobileCardGrid();
       else if (typeof scheduleLayoutMasonry === 'function') scheduleLayoutMasonry();
       window.FeatureDraft?.resetMobileFeedGridStyles?.();
@@ -314,7 +379,13 @@
         initImageGenMobileView();
       }
       if (window.SupabaseSync?.isLoggedIn?.()) {
-        const runSync = () => window.TrialTasksUI?.syncTaskProgress?.();
+        const runSync = () => {
+          if (window.TrialTasksUI?.isHomescreenLaunch?.()) {
+            window.TrialTasksUI?.markPwaInstalled?.();
+          } else {
+            window.TrialTasksUI?.syncTaskProgress?.(true);
+          }
+        };
         if (typeof requestIdleCallback === 'function') requestIdleCallback(runSync, { timeout: 4000 });
         else setTimeout(runSync, 2000);
       }
@@ -332,6 +403,7 @@
     else {
       closeAllMobileOverlays();
       document.getElementById('cardsContainer')?.classList.remove('mobile-grid');
+      restoreDesktopLayout();
     }
   });
 

@@ -1,12 +1,20 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Profile } from './supabase';
 import { getOrCreateProfile, isMembershipActive } from './supabase';
-import {
-  chinaDateKey,
-  dailyCreditsForTier,
-  syncMembershipCredits
-} from './membership-credits';
+import { chinaDateKey, grantUniversalDailyBonus, syncMembershipCredits } from './membership-credits';
 
+export const COMMUNITY_QUALIFY_PROMPT_LEN = 15;
+
+export class PhoneRequiredError extends Error {
+  constructor() {
+    super('phone_required');
+    this.name = 'PhoneRequiredError';
+  }
+}
+
+export function assertPhoneVerified(phoneVerified: boolean) {
+  if (!phoneVerified) throw new PhoneRequiredError();
+}
 export type TaskKey =
   | 'login_desktop'
   | 'login_mobile'
@@ -25,6 +33,8 @@ export type TaskFlags = {
   pwa_installed?: boolean;
   community_qualified_count?: number;
   cards_count_synced?: number;
+  sign_streak?: number;
+  last_sign_date?: string;
 };
 
 const REPEATABLE_SPEND_START = 5000;
@@ -56,22 +66,38 @@ export function nextSpendMilestone(lifetimeSpent: number): number | null {
   return t;
 }
 
+export function isDailyBonusTaskKey(key: string): boolean {
+  return key.startsWith('daily_bonus_');
+}
+
+export function dailyBonusTaskKey(d = new Date()): string {
+  return `daily_bonus_${chinaDateKey(d)}`;
+}
+
 export function taskRewardForKey(
   key: string
 ): { days: number; credits: number; title: string; description: string } | null {
+  if (isDailyBonusTaskKey(key)) {
+    return {
+      days: 0,
+      credits: 5,
+      title: '每日免费积分',
+      description: '领取 5 积分即计入连续签到，满 7 天额外 +10 积分（积分仅限当天使用）'
+    };
+  }
   const staticTasks: Record<
     string,
     { days: number; credits: number; title: string; description: string }
   > = {
     login_desktop: {
       days: 1,
-      credits: 0,
+      credits: 10,
       title: '电脑网页登录',
       description: '在电脑浏览器登录账号'
     },
     login_mobile: {
       days: 1,
-      credits: 0,
+      credits: 10,
       title: '手机端登录',
       description: '在手机浏览器登录账号'
     },
@@ -79,41 +105,47 @@ export function taskRewardForKey(
       days: 2,
       credits: 10,
       title: '添加到桌面',
-      description: '将本站添加到手机主屏幕（PWA）'
+      description: '从手机桌面图标打开本站（添加到主屏幕后点开即可）'
+    },
+    redeem_invite_code: {
+      days: 1,
+      credits: 50,
+      title: '填写邀请码',
+      description: '填写好友邀请码，双方各得 1 天基础会员 + 50 积分（每人仅一次）'
     },
     bind_phone: {
       days: 1,
-      credits: 0,
+      credits: 10,
       title: '绑定手机号',
-      description: '完成手机号验证绑定'
+      description: '完成手机号验证绑定（领取任务奖励前须先绑定）'
     },
     community_publish_5: {
       days: 1,
-      credits: 0,
+      credits: 10,
       title: '社区发布 5 张',
       description: '发布 5 张有效社区卡片（含图、有效提示词）'
     },
     community_publish_15: {
       days: 1,
-      credits: 0,
+      credits: 10,
       title: '社区再发布 10 张',
-      description: '累计发布 15 张有效社区卡片'
+      description: '完成上一档后，累计再发布 10 张有效社区卡片（共 15 张）'
     },
     cards_count_25: {
       days: 1,
-      credits: 0,
+      credits: 10,
       title: '卡片库达 25 张',
       description: '卡片库首次达到 25 张（不含已删除）'
     },
     spend_1000: {
       days: 1,
-      credits: 0,
+      credits: 10,
       title: '累计消耗 1000 积分',
       description: '生图等累计消耗达 1000 积分'
     },
     spend_2000: {
       days: 1,
-      credits: 0,
+      credits: 10,
       title: '累计消耗 2000 积分',
       description: '生图等累计消耗达 2000 积分'
     }
@@ -125,9 +157,12 @@ export function taskRewardForKey(
     if (n >= REPEATABLE_SPEND_START && (n - REPEATABLE_SPEND_START) % REPEATABLE_SPEND_STEP === 0) {
       return {
         days: 1,
-        credits: 0,
-        title: `累计消耗 ${n} 积分`,
-        description: `生图等累计消耗达 ${n} 积分`
+        credits: 10,
+        title: n >= REPEATABLE_SPEND_START ? `每消耗 ${REPEATABLE_SPEND_STEP} 积分（已达 ${n}）` : `累计消耗 ${n} 积分`,
+        description:
+          n >= REPEATABLE_SPEND_START
+            ? `生图等累计消耗每满 ${REPEATABLE_SPEND_STEP} 积分可领 1 天（当前档位 ${n}）`
+            : `生图等累计消耗达 ${n} 积分`
       };
     }
   }
@@ -141,7 +176,7 @@ export function isQualifyingCommunityPost(post: {
   title?: string;
 }): boolean {
   const prompt = String(post.prompt || post.title || '').trim();
-  if (prompt.length < 24) return false;
+  if (prompt.length < COMMUNITY_QUALIFY_PROMPT_LEN) return false;
   if (/^[\d\s\W]+$/.test(prompt)) return false;
   if (/(.)\1{10,}/u.test(prompt)) return false;
   const compact = prompt.replace(/\s/g, '');
@@ -176,6 +211,7 @@ export function isTaskProgressMet(
   profile: Profile,
   phoneVerified: boolean
 ): boolean {
+  if (isDailyBonusTaskKey(key)) return true;
   const spent = profile.lifetime_credits_spent ?? 0;
   switch (key) {
     case 'login_desktop':
@@ -186,6 +222,10 @@ export function isTaskProgressMet(
       return !!flags.pwa_installed;
     case 'bind_phone':
       return phoneVerified;
+    case 'redeem_invite_code': {
+      const referred = (profile as Profile & { referred_by?: string | null }).referred_by;
+      return !!referred;
+    }
     case 'community_publish_5':
       return (flags.community_qualified_count ?? 0) >= 5;
     case 'community_publish_15':
@@ -260,11 +300,6 @@ export async function extendMembershipDays(
     membership_tier: tier,
     membership_until: until
   };
-  if (!profile.credit_grant_mode) {
-    patch.credit_grant_mode = 'daily';
-    patch.daily_credits = dailyCreditsForTier(tier);
-    patch.daily_credits_date = chinaDateKey();
-  }
 
   const { data, error } = await admin
     .from('profiles')
@@ -272,8 +307,118 @@ export async function extendMembershipDays(
     .eq('user_id', profile.user_id)
     .select()
     .single();
-  if (error) throw error;
+  if (error) {
+    const pgMsg =
+      typeof error.message === 'string'
+        ? error.message
+        : 'extend_membership_failed';
+    throw new Error(pgMsg);
+  }
   return data as Profile;
+}
+
+export function checkinTaskKey(d = new Date()): string {
+  return `checkin_${chinaDateKey(d)}`;
+}
+
+export function isCheckinTaskKey(key: string): boolean {
+  return key.startsWith('checkin_');
+}
+
+function yesterdayDateKey(todayKey: string): string {
+  const [y, m, d] = todayKey.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  return chinaDateKey(dt);
+}
+
+export function readSignStreak(flags: TaskFlags): number {
+  return Math.max(0, Number(flags.sign_streak) || 0);
+}
+
+export function hasCheckedInToday(flags: TaskFlags, d = new Date()): boolean {
+  return flags.last_sign_date === chinaDateKey(d);
+}
+
+/** 每日领取积分或旧版签到接口共用：一天只计一次连续签到 */
+export async function applySignStreakForToday(
+  admin: SupabaseClient,
+  userId: string,
+  flags: TaskFlags,
+  claimed: Set<string>
+): Promise<{
+  flags: TaskFlags;
+  streak: number;
+  bonusCredits: number;
+  alreadySigned: boolean;
+}> {
+  const today = chinaDateKey();
+  const taskKey = checkinTaskKey();
+  const streakNow = readSignStreak(flags);
+  if (flags.last_sign_date === today || claimed.has(taskKey)) {
+    return { flags, streak: streakNow, bonusCredits: 0, alreadySigned: true };
+  }
+
+  const yesterday = yesterdayDateKey(today);
+  const streak = flags.last_sign_date === yesterday ? streakNow + 1 : 1;
+  const newFlags = await mergeTaskFlags(admin, userId, {
+    sign_streak: streak,
+    last_sign_date: today
+  });
+
+  const { error: insErr } = await admin.from('membership_task_claims').insert({
+    user_id: userId,
+    task_key: taskKey,
+    reward_days: 0,
+    reward_credits: 0,
+    meta: { streak, type: 'checkin' }
+  });
+  if (insErr) {
+    if (insErr.code === '23505') {
+      return {
+        flags: newFlags,
+        streak: readSignStreak(newFlags),
+        bonusCredits: 0,
+        alreadySigned: true
+      };
+    }
+    throw insErr;
+  }
+
+  let bonusCredits = 0;
+  if (streak > 0 && streak % 7 === 0) {
+    bonusCredits = 10;
+    const { error: creditErr } = await admin.rpc('apply_credit_delta', {
+      p_user_id: userId,
+      p_delta: bonusCredits,
+      p_reason: 'checkin_streak_bonus',
+      p_ref_id: taskKey,
+      p_meta: { streak }
+    });
+    if (creditErr) throw creditErr;
+  }
+
+  return { flags: newFlags, streak, bonusCredits, alreadySigned: false };
+}
+
+export async function claimDailyCheckin(
+  admin: SupabaseClient,
+  userId: string,
+  _phoneVerified: boolean
+): Promise<{ message: string; profile: Profile; streak: number; bonusCredits: number }> {
+
+  let profile = await getOrCreateProfile(admin, userId);
+  const flags = parseTaskFlags(profile);
+  const claimed = await listClaimedKeys(admin, userId);
+  const sign = await applySignStreakForToday(admin, userId, flags, claimed);
+  if (sign.alreadySigned) throw new Error('already_checked_in');
+
+  profile = await syncMembershipCredits(admin, userId);
+  const msg =
+    sign.bonusCredits > 0
+      ? `已连续签到 ${sign.streak} 天，额外获得 ${sign.bonusCredits} 积分`
+      : `已连续签到 ${sign.streak} 天`;
+  return { message: msg, profile, streak: sign.streak, bonusCredits: sign.bonusCredits };
 }
 
 export async function claimMembershipTask(
@@ -282,6 +427,10 @@ export async function claimMembershipTask(
   taskKey: string,
   phoneVerified: boolean
 ): Promise<{ message: string; profile: Profile }> {
+  if (!isDailyBonusTaskKey(taskKey)) {
+    assertPhoneVerified(phoneVerified);
+  }
+
   const reward = taskRewardForKey(taskKey);
   if (!reward) throw new Error('unknown_task');
 
@@ -303,13 +452,31 @@ export async function claimMembershipTask(
   });
   if (insErr) {
     if (insErr.code === '23505') throw new Error('already_claimed');
-    throw insErr;
+    const pgMsg =
+      typeof insErr.message === 'string'
+        ? insErr.message
+        : typeof (insErr as { details?: string }).details === 'string'
+          ? (insErr as { details: string }).details
+          : 'claim_insert_failed';
+    throw new Error(pgMsg);
   }
 
   if (reward.days > 0) {
     profile = await extendMembershipDays(admin, profile, reward.days, 'basic');
   }
-  if (reward.credits > 0) {
+  let signStreakMsg = '';
+  if (isDailyBonusTaskKey(taskKey)) {
+    profile = await grantUniversalDailyBonus(admin, userId, reward.credits || 5);
+    const flagsAfter = parseTaskFlags(profile);
+    const claimedAfter = await listClaimedKeys(admin, userId);
+    const sign = await applySignStreakForToday(admin, userId, flagsAfter, claimedAfter);
+    if (!sign.alreadySigned) {
+      signStreakMsg =
+        sign.bonusCredits > 0
+          ? `，连续签到 ${sign.streak} 天，额外 +${sign.bonusCredits} 积分`
+          : `，已连续签到 ${sign.streak} 天`;
+    }
+  } else if (reward.credits > 0) {
     const { error: creditErr } = await admin.rpc('apply_credit_delta', {
       p_user_id: userId,
       p_delta: reward.credits,
@@ -320,13 +487,104 @@ export async function claimMembershipTask(
     if (creditErr) throw creditErr;
   }
 
-  profile = await syncMembershipCredits(admin, userId);
+  try {
+    profile = await syncMembershipCredits(admin, userId);
+  } catch (syncErr) {
+    console.error('syncMembershipCredits after task claim failed', syncErr);
+    profile = await getOrCreateProfile(admin, userId);
+  }
   const parts: string[] = [];
   if (reward.days) parts.push(`${reward.days} 天基础会员`);
-  if (reward.credits) parts.push(`${reward.credits} 积分`);
+  if (isDailyBonusTaskKey(taskKey)) {
+    parts.push(`${reward.credits || 5} 积分（今日有效）`);
+  } else if (reward.credits) {
+    parts.push(`${reward.credits} 积分`);
+  }
   return {
-    message: `已领取：${parts.join(' + ') || '奖励'}`,
+    message: `已领取：${parts.join(' + ') || '奖励'}${signStreakMsg}`,
     profile
+  };
+}
+
+export function nextCommunityPublishKey(claimed: Set<string>): string | null {
+  if (!claimed.has('community_publish_5')) return 'community_publish_5';
+  if (!claimed.has('community_publish_15')) return 'community_publish_15';
+  return null;
+}
+
+export function nextSpendTaskKey(spent: number, claimed: Set<string>): string | null {
+  const keys: string[] = ['spend_1000', 'spend_2000'];
+  let t = REPEATABLE_SPEND_START;
+  const horizon = Math.max(spent + REPEATABLE_SPEND_STEP * 2, REPEATABLE_SPEND_START);
+  while (t <= horizon) {
+    keys.push(`spend_${t}`);
+    t += REPEATABLE_SPEND_STEP;
+  }
+  for (const key of keys) {
+    if (!claimed.has(key)) return key;
+  }
+  const next = nextSpendMilestone(spent);
+  return next ? `spend_${next}` : null;
+}
+
+export type TaskListItem = {
+  key: string;
+  title: string;
+  description: string;
+  rewardDays: number;
+  rewardCredits: number;
+  claimed: boolean;
+  ready: boolean;
+  progress: string | null;
+  kind: 'claim' | 'promo';
+};
+
+export type TaskHubData = {
+  phoneVerified: boolean;
+  siteUrl: string;
+  inviteCode: string;
+  inviteLink: string;
+  referred: boolean;
+  signStreak: number;
+  checkedInToday: boolean;
+  daysToStreakBonus: number;
+  dailyBonus: {
+    key: string;
+    claimed: boolean;
+    ready: boolean;
+  };
+};
+
+export function buildTaskHub(
+  profile: Profile,
+  flags: TaskFlags,
+  claimed: Set<string>,
+  phoneVerified: boolean,
+  opts: { inviteCode: string; siteUrl: string; referred: boolean }
+): TaskHubData {
+  const dailyKey = dailyBonusTaskKey();
+  const dailyClaimed = claimed.has(dailyKey);
+  const streak = readSignStreak(flags);
+  const checkedInToday =
+    dailyClaimed || hasCheckedInToday(flags) || claimed.has(checkinTaskKey());
+  const mod = streak % 7;
+  const daysToStreakBonus = checkedInToday ? (mod === 0 ? 7 : 7 - mod) : mod === 0 ? 7 : 7 - mod;
+  const code = opts.inviteCode || '';
+  const site = opts.siteUrl.replace(/\/$/, '');
+  return {
+    phoneVerified,
+    siteUrl: site,
+    inviteCode: code,
+    inviteLink: code ? `${site}/?invite=${encodeURIComponent(code)}` : site,
+    referred: opts.referred,
+    signStreak: streak,
+    checkedInToday,
+    daysToStreakBonus,
+    dailyBonus: {
+      key: dailyKey,
+      claimed: claimed.has(dailyKey),
+      ready: !claimed.has(dailyKey)
+    }
   };
 }
 
@@ -334,22 +592,43 @@ export function buildTaskList(
   profile: Profile,
   flags: TaskFlags,
   claimed: Set<string>,
-  phoneVerified: boolean
+  phoneVerified: boolean,
+  opts?: { mini99Redeemed?: boolean; includeDailyInList?: boolean }
 ) {
   const spent = profile.lifetime_credits_spent ?? 0;
+  const dailyKey = dailyBonusTaskKey();
+  const communityKey = nextCommunityPublishKey(claimed);
+  const spendKey = nextSpendTaskKey(spent, claimed);
   const keys = [
     'login_desktop',
     'login_mobile',
     'pwa_install',
     'bind_phone',
-    'community_publish_5',
-    'community_publish_15',
+    communityKey,
     'cards_count_25',
-    ...spendMilestoneKeys(spent)
-  ];
+    spendKey
+  ].filter((k): k is string => !!k);
 
-  const items = keys.map(key => {
-    const reward = taskRewardForKey(key)!;
+  const dailyReward = taskRewardForKey(dailyKey);
+  const items: TaskListItem[] = [];
+  if (opts?.includeDailyInList && dailyReward) {
+    const dailyClaimed = claimed.has(dailyKey);
+    items.push({
+      key: dailyKey,
+      title: dailyReward.title,
+      description: dailyReward.description,
+      rewardDays: 0,
+      rewardCredits: dailyReward.credits,
+      claimed: dailyClaimed,
+      ready: !dailyClaimed,
+      progress: dailyClaimed ? '今日已领' : null,
+      kind: 'claim'
+    });
+  }
+
+  items.push(...keys.flatMap(key => {
+    const reward = taskRewardForKey(key);
+    if (!reward) return [];
     const claimedAt = claimed.has(key);
     const ready = !claimedAt && isTaskProgressMet(key, flags, profile, phoneVerified);
     let progress: string | null = null;
@@ -371,9 +650,24 @@ export function buildTaskList(
       rewardCredits: reward.credits,
       claimed: claimedAt,
       ready,
-      progress
+      progress,
+      kind: 'claim' as const
     };
-  });
+  }));
+
+  if (!opts?.mini99Redeemed) {
+    items.push({
+      key: 'mini_99_membership',
+      title: '¥0.99 体验三天基础会员',
+      description: '淘宝购买后，在生图页「兑换」输入激活码（一人一码，支付后发货）',
+      rewardDays: 3,
+      rewardCredits: 0,
+      claimed: false,
+      ready: false,
+      progress: null,
+      kind: 'promo' as const
+    });
+  }
 
   const nextSpend = nextSpendMilestone(spent);
   return { items, lifetimeCreditsSpent: spent, nextSpendMilestone: nextSpend };

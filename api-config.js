@@ -27,9 +27,12 @@
     return;
   }
 
+  if (host === 'localhost' || host === '127.0.0.1') {
+    window.API_BASE_URL = 'http://127.0.0.1:8787';
+    return;
+  }
+
   if (
-    host === 'localhost' ||
-    host === '127.0.0.1' ||
     /\.prompt-hub-hub\.pages\.dev$/i.test(host) ||
     /\.prompt-hub-web\.pages\.dev$/i.test(host)
   ) {
@@ -38,4 +41,22 @@
   }
 
   window.API_BASE_URL = '';
+})();
+
+/** 防止误部署的 api-config.local.js 把生产站指到本机 8787 */
+(function () {
+  var host = (typeof location !== 'undefined' && location.hostname) || '';
+  var prod = {
+    'prompt-hub.cn': 'https://api.prompt-hub.cn',
+    'www.prompt-hub.cn': 'https://api.prompt-hub.cn',
+    'prompt-hub-hub.pages.dev': 'https://api.prompt-hub.cn',
+    'prompt-hub-web.pages.dev': 'https://api.prompt-hub.cn'
+  };
+  var expected = prod[host];
+  if (!expected) return;
+  var cur = String(window.API_BASE_URL || '').trim();
+  if (/127\.0\.0\.1|localhost/i.test(cur)) {
+    window.API_BASE_URL = expected;
+    console.warn('[PromptHub] 生产环境已忽略本地 API 配置，使用', expected);
+  }
 })();

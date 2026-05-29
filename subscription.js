@@ -131,6 +131,7 @@
   }
 
   function refreshOfferUI() {
+    renderMembershipStatus();
     updateSubscribeNavBadge();
     renderCreditModePicker();
     renderMiniOfferBar();
@@ -138,9 +139,29 @@
     if (overlay?.classList.contains('active')) renderPlans();
   }
 
+  function renderMembershipStatus() {
+    const info = window.Membership?.getMembershipDisplay?.();
+    const metaEl = document.getElementById('appNavSubscribeMeta');
+    const panelEl = document.getElementById('subscribeMembershipStatus');
+    if (!info) return;
+    if (metaEl) {
+      metaEl.textContent = info.active ? info.summary : info.summary;
+      metaEl.classList.toggle('is-member', info.active);
+    }
+    if (panelEl) {
+      panelEl.hidden = false;
+      if (info.active) {
+        panelEl.innerHTML = `<div class="subscribe-membership-status is-active"><span class="subscribe-membership-tier">${esc(info.tierLabel)}</span><span class="subscribe-membership-until">${esc(info.untilLabel)}</span></div>`;
+      } else {
+        panelEl.innerHTML = `<div class="subscribe-membership-status"><span class="subscribe-membership-tier">免费用户</span><span class="subscribe-membership-until">完成任务可领取基础会员天数</span></div>`;
+      }
+    }
+  }
+
   function updateSubscribeNavBadge() {
     const trialBadge = document.querySelector('.app-nav-trial-badge');
     const subBadge = document.querySelector('.app-nav-subscribe-badge');
+    const isMember = window.Membership?.isMember?.();
     if (trialBadge) trialBadge.textContent = '任务';
     if (subBadge) subBadge.textContent = '五折';
   }
@@ -278,6 +299,7 @@
   }
 
   function openSubscribePanel() {
+    window.MobileUI?.closeDrawers?.();
     ensureModalOverlaysOnBody();
     const el = document.getElementById('subscribeOverlay');
     if (!el) return;

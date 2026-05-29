@@ -18,7 +18,7 @@
   }
 
   function getOverlayIds() {
-    return ['trialTasksOverlay', 'subscribeOverlay'];
+    return ['userProfileOverlay', 'trialTasksOverlay', 'subscribeOverlay'];
   }
 
   function activeOverlay() {
@@ -29,17 +29,34 @@
     return null;
   }
 
+  function isMobileModal() {
+    return window.matchMedia('(max-width: 900px)').matches;
+  }
+
   function syncBackdrop() {
     const el = activeOverlay();
     const bd = ensureBackdrop();
+    const mobile = isMobileModal();
     if (el) {
-      bd.hidden = false;
-      bd.classList.add('active');
+      if (mobile) {
+        bd.classList.remove('active');
+        bd.hidden = true;
+      } else {
+        bd.hidden = false;
+        bd.classList.add('active');
+      }
       document.body.classList.add(OPEN_CLASS);
       if (el.parentElement !== document.body) document.body.appendChild(el);
-      document.body.appendChild(bd);
+      if (!mobile) {
+        document.body.appendChild(bd);
+      }
       document.body.appendChild(el);
       el.style.pointerEvents = 'auto';
+      if (mobile) {
+        el.style.background = 'rgba(0, 0, 0, 0.48)';
+      } else {
+        el.style.removeProperty('background');
+      }
     } else {
       bd.classList.remove('active');
       bd.hidden = true;
@@ -49,6 +66,8 @@
   }
 
   function openModal(overlayId) {
+    window.MobileUI?.closeDrawers?.();
+    document.body.classList.remove('mobile-nav-open', 'mobile-groups-open');
     const el = document.getElementById(overlayId);
     if (!el) return;
     getOverlayIds().forEach((id) => {
@@ -59,6 +78,7 @@
     el.classList.add('active');
     el.style.removeProperty('display');
     el.style.pointerEvents = 'auto';
+    if (overlayId === 'userProfileOverlay') document.body.classList.add('user-profile-open');
     if (overlayId === 'trialTasksOverlay') document.body.classList.add('trial-tasks-open');
     if (overlayId === 'subscribeOverlay') document.body.classList.add('subscribe-open');
     syncBackdrop();
@@ -73,6 +93,7 @@
       el.style.removeProperty('pointer-events');
       el.style.removeProperty('display');
     }
+    if (overlayId === 'userProfileOverlay') document.body.classList.remove('user-profile-open');
     if (overlayId === 'trialTasksOverlay') document.body.classList.remove('trial-tasks-open');
     if (overlayId === 'subscribeOverlay') document.body.classList.remove('subscribe-open');
     if (!silent) syncBackdrop();
@@ -82,7 +103,8 @@
   function closeTopModal() {
     const el = activeOverlay();
     if (!el) return;
-    if (el.id === 'trialTasksOverlay') window.closeTrialTasksPanel?.();
+    if (el.id === 'userProfileOverlay') window.closeUserProfile?.();
+    else if (el.id === 'trialTasksOverlay') window.closeTrialTasksPanel?.();
     else if (el.id === 'subscribeOverlay') window.closeSubscribePanel?.();
     else closeModal(el.id);
   }
@@ -95,8 +117,16 @@
       (e) => {
         if (!activeOverlay()) return;
         const overlay = activeOverlay();
-        if (e.target.closest('.modal-close-btn, #trialTasksFooterClose, #subscribeCloseBtn')) return;
-        if (e.target.closest('.subscribe-panel')) return;
+        if (e.target.closest('.modal-close-btn, #trialTasksFooterClose, #subscribeCloseBtn, #userProfileClose, #userProfileBack')) return;
+        if (e.target.closest('.subscribe-panel, .trial-tasks-panel, .user-profile-panel')) return;
+        if (isMobileModal()) {
+          if (e.target === overlay) {
+            e.preventDefault();
+            e.stopPropagation();
+            closeTopModal();
+          }
+          return;
+        }
         if (e.target === overlay || e.target === backdropEl) {
           e.preventDefault();
           e.stopPropagation();
@@ -107,6 +137,16 @@
           e.preventDefault();
           e.stopPropagation();
           closeTopModal();
+        }
+      },
+      true
+    );
+    document.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (!activeOverlay() || !isMobileModal()) return;
+        if (e.target.closest('.subscribe-panel, .trial-tasks-panel, .user-profile-panel')) {
+          e.stopPropagation();
         }
       },
       true

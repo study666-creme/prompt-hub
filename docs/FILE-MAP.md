@@ -1,0 +1,121 @@
+# 代码导航图（按任务找文件）
+
+> 不必全仓搜索；按任务跳到文件 + 函数名。
+
+---
+
+## 一页总览
+
+| 你想改… | 主文件 | 次要文件 |
+|---------|--------|----------|
+| 卡片库 CRUD、分组、Masonry | `script.js` | `styles.css`, `mobile.js` |
+| 登录 / 登出 / 云拉取 | `script.js` | `supabase-sync.js`, `cloud-sync-safety.js` |
+| 社区 Feed、发布、我发布的 | `features-draft.js` | `api-client.js`, `styles-features.css` |
+| 图片签名 URL | `supabase-sync.js` | `server/src/routes/v1/media.ts` |
+| 全站社区 API / DB | `server/src/lib/community-feed.ts` | `server/src/routes/v1/community.ts` |
+| 生图扣费 | `features-draft.js` + `api-client.js` | `server/src/routes/v1/generate.ts` |
+| 会员 / 积分 UI | `membership.js`, `subscription.js` | `server/src/routes/v1/me.ts` |
+| 部署 Pages | `deploy-pages.ps1` | `index.html`（`__APP_BUILD__`）, `sw.js` |
+| 部署 Worker | `server/package.json` scripts | `server/wrangler.toml` |
+| 数据库表 | `supabase/migrations/*.sql` | Supabase SQL Editor |
+
+---
+
+## `script.js`（卡片库 + Auth，约 5000+ 行）
+
+| 区域 | 函数/变量 | 作用 |
+|------|-----------|------|
+| 初始化 | `init()` IIFE 末尾 | `openDB`, `initSupabaseAuth`, `finishAppBootstrap` |
+| 登录后 | `handleCloudAfterLogin` | 拉 `user_data`、合并卡片、触发 `FeatureDraft.reconcileCommunityWithCards` |
+| 登录 UI | `completeAuthSession`, `authSignIn` | Supabase session；`promptrepo_post_logout` 标志 |
+| 退出 | `purgeSignedOutLocalData`, `bootstrapWhenLoggedOut` | 清本地卡/社区缓存 |
+| 卡片数据 | `cards`, `window.__promptHubCards` | 内存主列表；`persistPromptHubCards` 写 IDB+云 |
+| 墓碑 | `recordCardDeletion`, `getDeletedCardTombstones` | 删卡后防止云端复活 |
+| 导航 | `switchAppPage` | `warehouse` / `community` / `creations` / `imagegen` |
+| 云同步 | `pullFromCloud`, `pushToCloud`, `syncCloudNow` | `user_data` JSON |
+
+---
+
+## `features-draft.js`（社区 + 生图，约 5000+ 行）
+
+| 区域 | 函数/变量 | 作用 |
+|------|-----------|------|
+| 状态 | `communityPosts` | 账号私有社区帖（localStorage + 云 JSON） |
+| 状态 | `publicFeedPosts` | **全站 API Feed 缓存**（`20260614b` 新增） |
+| 拉 Feed | `refreshPublicCommunityFeed` | `PromptHubApi.getCommunityFeed` |
+| 展示列表 | `getAllCommunityPosts` | 合并 public + local + `buildPostsFromPublishedCards` |
+| 对齐卡片库 | `reconcileCommunityWithCards`, `pruneOwnOrphanCommunityPosts` | **易误删「库中无卡」的社区帖** |
+| 渲染 | `renderCommunity`, `renderCommunityNow`, `renderPostsIntoContainer` | Masonry / 空态 / loading |
+| 布局 | `layoutCommunityMasonry`, `scheduleCommunityLayout` | 抖动相关 |
+| 同步 | `runSyncCardLibraryToCommunity`, `syncEligibleCardsToCommunity` | 卡片库 → 社区 |
+| 恢复 | `restoreCardsFromCommunityFeed` | 社区 → 卡片库（`20260614b`） |
+| 导出 | `window.FeatureDraft` | 外部调用入口 |
+
+---
+
+## `supabase-sync.js`
+
+| 函数 | 作用 |
+|------|------|
+| `init`, `onAuthStateChange` | Session |
+| `pullCloudData` / `pushCloudData` | `user_data` 表 |
+| `signCommunityMediaRef`, `prefetchCommunityDisplayUrls` | 社区图签名 |
+| `uploadCardImage`, `normalizeImageRef` | Storage `card-images/{uid}/…` |
+
+---
+
+## `cloud-sync-safety.js`
+
+| 函数 | 作用 |
+|------|------|
+| `mergePayload` | 登录拉云时合并 cards / communityPosts |
+| `mergeCommunityPostsList` | 按 `sourceCardId` / `id` 合并社区帖 |
+| `validatePush` | 防止空数组覆盖云端 |
+
+---
+
+## `api-client.js`
+
+| 函数 | 路径 |
+|------|------|
+| `getCommunityFeed` | `GET /api/v1/community/feed` |
+| `publishCommunityPost` | `POST /api/v1/community/posts` |
+| `syncCommunityPostsBatch` | `POST /api/v1/community/posts/sync` |
+| `signCommunityMediaRef` | `GET /api/v1/media/community/sign` |
+
+---
+
+## `server/src/lib/community-feed.ts`
+
+| 函数 | 作用 |
+|------|------|
+| `listPublicCommunityFeed` | 读 `community_posts`，去重，可选 repair |
+| `repairMisattributedCommunityAuthors` | 图片路径 UUID ≠ author_id 时修正 |
+| `unpublishGhostCommunityPosts` | 下架无效作者/无图帖 |
+| `upsertCommunityPost` | 发布；校验图片归属 |
+| `dedupeCommunityFeedPosts` | 同 `source_card_id` 保留最新 |
+
+---
+
+## `index.html` 脚本加载顺序（节选）
+
+1. `supabase-config.js` / `api-config.js`
+2. `supabase-sync.js`
+3. `cloud-sync-safety.js`
+4. `api-client.js`
+5. `script.js`
+6. `features-draft.js`
+
+---
+
+## localStorage / sessionStorage 键（社区相关）
+
+| 键 | 含义 |
+|----|------|
+| `promptrepo_community_posts` | 本地社区帖副本 |
+| `promptrepo_public_feed_cache` | 游客/离线 Feed 缓存 |
+| `promptrepo_post_logout` | 退出标志（影响登录） |
+| `promptrepo_last_uid` | 上次登录 uid |
+| `promptrepo_app_build` | 构建号比对自动刷新 |
+
+详见 `docs/DATA-MODEL.md`。

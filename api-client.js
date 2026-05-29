@@ -21,10 +21,42 @@
   }
 
   const API_TIMEOUT_MS = 22000;
+  const API_FAST_TIMEOUT_MS = 2800;
+  const API_SIGN_TIMEOUT_MS = 3500;
+  const API_HEALTH_TIMEOUT_MS = 2000;
   const API_GENERATE_TIMEOUT_MS = 45000;
   const API_JOB_POLL_TIMEOUT_MS = 35000;
+  const API_UNREACHABLE_COOLDOWN_MS = 10 * 60 * 1000;
+
+  function markApiUnreachable() {
+    window.__PH_API_DOWN_UNTIL__ = Date.now() + API_UNREACHABLE_COOLDOWN_MS;
+  }
+
+  function isApiUnreachable() {
+    return !!(window.__PH_API_DOWN_UNTIL__ && Date.now() < window.__PH_API_DOWN_UNTIL__);
+  }
+
+  function isNetworkFetchError(e) {
+    const s = String(e && (e.message || e) || '');
+    return /Failed to fetch|NetworkError|ERR_CONNECTION|ENOTFOUND|ECONNREFUSED|refused/i.test(s);
+  }
+
+  function isFileOrigin() {
+    return (
+      window.__PH_FILE_ORIGIN__ === true
+      || (typeof location !== 'undefined' && location.protocol === 'file:')
+    );
+  }
 
   async function request(method, path, body, opts = {}, attempt = 0) {
+    if (isFileOrigin()) {
+      return {
+        ok: false,
+        code: 'FILE_ORIGIN',
+        message:
+          '当前用 file:// 打开页面，浏览器禁止访问 API。请用 https://prompt-hub.cn 或运行 .\\serve-local.ps1 后访问 http://127.0.0.1:5500'
+      };
+    }
     if (!isConfigured()) {
       return { ok: false, code: 'API_NOT_CONFIGURED', message: '未配置 API 地址' };
     }
@@ -48,16 +80,21 @@
       });
     } catch (e) {
       const aborted = e && (e.name === 'AbortError' || String(e).includes('abort'));
-      if (attempt < 2) {
+      if (isNetworkFetchError(e)) markApiUnreachable();
+      if (attempt < 2 && !opts.noRetry && !isNetworkFetchError(e)) {
         await new Promise((r) => setTimeout(r, 600 + attempt * 400));
         return request(method, path, body, opts, attempt + 1);
       }
+      const fileHint = isFileOrigin()
+        ? '请用 https://prompt-hub.cn 打开，或运行 .\\serve-local.ps1'
+        : '';
       return {
         ok: false,
-        code: 'NETWORK_ERROR',
-        message: aborted
-          ? '连接 api.prompt-hub.cn 超时，请换网络或稍后再试'
-          : '无法连接 api.prompt-hub.cn，请检查网络或 VPN'
+        code: isFileOrigin() ? 'FILE_ORIGIN' : 'NETWORK_ERROR',
+        message: fileHint
+          || (aborted
+            ? '连接 api.prompt-hub.cn 超时，请换网络或稍后再试'
+            : '无法连接 api.prompt-hub.cn，请检查网络或 VPN')
       };
     } finally {
       clearTimeout(timer);
@@ -69,27 +106,87 @@
       json = {};
     }
     if (!res.ok || json.ok === false) {
-      const err = json.error || {};
+      const errRaw = json.error;
+      const err =
+        typeof errRaw === 'object' && errRaw !== null
+          ? errRaw
+          : { message: errRaw != null ? String(errRaw) : '' };
       const code = err.code || (res.status === 429 ? 'RATE_LIMITED' : 'REQUEST_FAILED');
-      const message = err.message || (res.status === 429 ? '操作过于频繁，请稍后再试' : `请求失败 (${res.status})`);
+      const message =
+        typeof err.message === 'string'
+          ? err.message
+          : err.message != null
+            ? JSON.stringify(err.message)
+            : res.status === 429
+              ? '操作过于频繁，请稍后再试'
+              : `请求失败 (${res.status})`;
       if (res.status === 401 && attempt < 1 && window.SupabaseSync?.getValidAccessToken) {
         const refreshed = await window.SupabaseSync.getValidAccessToken();
         if (refreshed) return request(method, path, body, opts, attempt + 1);
+      }
+      if (res.status === 429 && attempt < 4) {
+        await new Promise((r) => setTimeout(r, 1200 + attempt * 800));
+        return request(method, path, body, opts, attempt + 1);
       }
       return {
         ok: false,
         status: res.status,
         code,
         message,
-        details: err.details
+        details:
+          typeof err.details === 'string'
+            ? err.details
+            : err.details != null
+              ? JSON.stringify(err.details)
+              : undefined
       };
     }
     return { ok: true, data: json.data };
   }
 
+  let syncMePromise = null;
+
   async function syncMe(opts) {
+    if (syncMePromise) return syncMePromise;
+    syncMePromise = (async () => {
+      try {
+        return await syncMeOnce(opts);
+      } finally {
+        syncMePromise = null;
+      }
+    })();
+    return syncMePromise;
+  }
+
+  let apiHealthPromise = null;
+
+  async function probeApiHealth() {
+    if (!isConfigured() || isApiUnreachable()) return false;
+    if (apiHealthPromise) return apiHealthPromise;
+    apiHealthPromise = (async () => {
+      try {
+        const c = new AbortController();
+        const t = setTimeout(() => c.abort(), API_HEALTH_TIMEOUT_MS);
+        const r = await fetch(`${baseUrl()}/health`, { method: 'GET', cache: 'no-store', signal: c.signal });
+        clearTimeout(t);
+        if (!r.ok) markApiUnreachable();
+        return r.ok;
+      } catch (e) {
+        if (isNetworkFetchError(e)) markApiUnreachable();
+        return false;
+      } finally {
+        apiHealthPromise = null;
+      }
+    })();
+    return apiHealthPromise;
+  }
+
+  async function syncMeOnce(opts) {
+    if (isApiUnreachable()) {
+      return { ok: false, code: 'API_UNREACHABLE', message: 'API 暂不可用' };
+    }
     const silent = opts?.silent === true;
-    const r = await request('GET', '/api/v1/me');
+    const r = await request('GET', '/api/v1/me', null, { timeoutMs: API_FAST_TIMEOUT_MS, noRetry: true });
     if (!r.ok) {
       if (!silent && typeof showToast === 'function' && r.code !== 'NETWORK_ERROR') {
         showToast(r.message);
@@ -137,10 +234,24 @@
     });
   }
 
+  const costCache = new Map();
+  const costInflight = new Map();
+
   async function getGenerationCost(resolution, quality, model) {
+    const key = `${model || 'quanneng2'}|${resolution || '1k'}|${quality || ''}`;
+    const hit = costCache.get(key);
+    if (hit && hit.exp > Date.now()) return hit.data;
+    if (costInflight.has(key)) return costInflight.get(key);
     const r = encodeURIComponent(resolution || '1k');
     const m = encodeURIComponent(model || 'quanneng2');
-    return request('GET', `/api/v1/generate/cost?resolution=${r}&model=${m}`);
+    const p = request('GET', `/api/v1/generate/cost?resolution=${r}&model=${m}`)
+      .then((res) => {
+        if (res.ok) costCache.set(key, { data: res, exp: Date.now() + 90_000 });
+        return res;
+      })
+      .finally(() => costInflight.delete(key));
+    costInflight.set(key, p);
+    return p;
   }
 
   async function generateImage(payload) {
@@ -153,6 +264,10 @@
     });
   }
 
+  async function listRecentGenerationJobs() {
+    return request('GET', '/api/v1/generate/jobs', null, { timeoutMs: API_TIMEOUT_MS });
+  }
+
   async function getLedger(limit) {
     const n = Math.min(50, Math.max(1, Number(limit) || 20));
     return request('GET', `/api/v1/me/ledger?limit=${n}`);
@@ -163,7 +278,13 @@
   }
 
   async function syncMembershipTasks(payload) {
-    return request('POST', '/api/v1/membership/tasks/sync', payload || {});
+    if (isApiUnreachable()) {
+      return { ok: false, code: 'API_UNREACHABLE', message: 'API 暂不可用' };
+    }
+    return request('POST', '/api/v1/membership/tasks/sync', payload || {}, {
+      timeoutMs: API_FAST_TIMEOUT_MS,
+      noRetry: true
+    });
   }
 
   async function claimMembershipTask(taskKey) {
@@ -173,6 +294,14 @@
     );
   }
 
+  async function checkinMembershipTask() {
+    return request('POST', '/api/v1/membership/tasks/checkin');
+  }
+
+  async function redeemInviteCode(code) {
+    return request('POST', '/api/v1/membership/tasks/redeem-invite', { code: String(code || '').trim() });
+  }
+
   async function checkLikeMilestone(postId, likes) {
     return request('POST', '/api/v1/community/like-milestone', {
       postId: String(postId || ''),
@@ -180,9 +309,98 @@
     });
   }
 
-  async function signMediaRef(ref) {
-    const q = encodeURIComponent(String(ref || ''));
-    return request('GET', `/api/v1/media/sign?ref=${q}`);
+  async function signMediaRef(ref, opts) {
+    if (isApiUnreachable()) {
+      return { ok: false, code: 'API_UNREACHABLE', message: 'API 暂不可用' };
+    }
+    const normalized = window.SupabaseSync?.normalizeImageRef?.(ref) || ref;
+    const q = encodeURIComponent(String(normalized || ''));
+    return request('GET', `/api/v1/media/sign?ref=${q}`, null, {
+      timeoutMs: API_SIGN_TIMEOUT_MS,
+      noRetry: true
+    });
+  }
+
+  /** 游客浏览社区：无需登录 */
+  async function publicGet(path, opts = {}, attempt = 0) {
+    if (!isConfigured()) {
+      return { ok: false, code: 'API_NOT_CONFIGURED', message: '未配置 API 地址' };
+    }
+    const timeoutMs = opts.timeoutMs || API_FAST_TIMEOUT_MS;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${baseUrl()}${path}`, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: controller.signal
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.ok === false) {
+        const code = json.error?.code || (res.status === 429 ? 'RATE_LIMITED' : 'REQUEST_FAILED');
+        if (res.status === 429 && attempt < 4) {
+          await new Promise((r) => setTimeout(r, 1000 + attempt * 900));
+          return publicGet(path, opts, attempt + 1);
+        }
+        return {
+          ok: false,
+          status: res.status,
+          code,
+          message: json.error?.message || (res.status === 429 ? '操作过于频繁，请稍后再试' : `HTTP ${res.status}`)
+        };
+      }
+      return json;
+    } catch (e) {
+      if (isNetworkFetchError(e)) markApiUnreachable();
+      return { ok: false, code: 'NETWORK_ERROR', message: '无法连接社区服务' };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function getCommunityFeed(opts = {}) {
+    const limit = Math.min(100, Math.max(1, Number(opts.limit) || 60));
+    const offset = Math.max(0, Number(opts.offset) || 0);
+    return publicGet(`/api/v1/community/feed?limit=${limit}&offset=${offset}`, {
+      timeoutMs: opts.timeoutMs || 12000
+    });
+  }
+
+  async function publishCommunityPost(post) {
+    return request('POST', '/api/v1/community/posts', post);
+  }
+
+  async function unpublishCommunityPost(postId) {
+    return request('DELETE', `/api/v1/community/posts/${encodeURIComponent(String(postId || ''))}`);
+  }
+
+  async function syncCommunityPostsBatch(posts) {
+    return request('POST', '/api/v1/community/posts/sync', { posts: posts || [] });
+  }
+
+  async function signCommunityMediaRef(ref, opts) {
+    if (!isConfigured()) {
+      return { ok: false, code: 'API_NOT_CONFIGURED', message: '未配置 API 地址' };
+    }
+    const normalized = window.SupabaseSync?.normalizeImageRef?.(ref) || ref;
+    const q = encodeURIComponent(String(normalized || ''));
+    const aid = opts?.authorId ? `&authorId=${encodeURIComponent(String(opts.authorId))}` : '';
+    const cid = opts?.cardId ? `&cardId=${encodeURIComponent(String(opts.cardId))}` : '';
+    try {
+      const res = await fetch(`${baseUrl()}/api/v1/media/community/sign?ref=${q}${aid}${cid}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return {
+          ok: false,
+          status: res.status,
+          code: data.error?.code || data.code || 'SIGN_FAILED',
+          message: data.error?.message || data.message || '社区图片签名失败'
+        };
+      }
+      return data;
+    } catch (e) {
+      return { ok: false, code: 'NETWORK_ERROR', message: '无法连接图片服务' };
+    }
   }
 
   async function getGenerationImageUrl(jobId) {
@@ -206,7 +424,14 @@
     }
   }
 
+  if (isConfigured()) {
+    void probeApiHealth();
+  }
+
   window.PromptHubApi = {
+    isApiUnreachable,
+    markApiUnreachable,
+    probeApiHealth,
     isConfigured,
     syncMe,
     redeem,
@@ -214,13 +439,21 @@
     getMembershipTasks,
     syncMembershipTasks,
     claimMembershipTask,
+    checkinMembershipTask,
+    redeemInviteCode,
     setCreditGrantMode,
     getGenerationCost,
     generateImage,
     getGenerationJob,
+    listRecentGenerationJobs,
     getLedger,
     checkLikeMilestone,
     signMediaRef,
+    signCommunityMediaRef,
+    getCommunityFeed,
+    publishCommunityPost,
+    unpublishCommunityPost,
+    syncCommunityPostsBatch,
     getGenerationImageUrl,
     fetchMediaAsBlobUrl
   };

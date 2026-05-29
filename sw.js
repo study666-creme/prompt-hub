@@ -1,9 +1,16 @@
-const CACHE = 'prompt-hub-v86';
-/** 不缓存 index.html / JS / CSS，避免版本切换时死循环刷新 */
+const CACHE = 'prompt-hub-v208';
+/** 仅缓存静态小资源；HTML/JS/CSS 始终走网络，避免误显示「暂时无法连接」 */
 const ASSETS = [
   './manifest.webmanifest',
   './assets/logo.png'
 ];
+
+const OFFLINE_HTML =
+  '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>提示词仓库</title></head>' +
+  '<body style="font-family:sans-serif;padding:2rem;background:#121212;color:#eee">' +
+  '<h1>暂时无法连接</h1><p>请检查网络后按 Ctrl+Shift+R 强刷，或稍后再试。</p>' +
+  '<p style="color:#888;font-size:14px">若在本机开发，请运行 <code>serve-local.ps1</code> 后访问 http://127.0.0.1:5500 ，不要直接打开 file://。</p>' +
+  '</body></html>';
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
@@ -38,9 +45,18 @@ self.addEventListener('fetch', (e) => {
         try {
           return await fetch(e.request, { cache: 'no-store' });
         } catch (err) {
-          if (isHtml) throw err;
-          const cached = await caches.match(e.request);
+          const cached =
+            (await caches.match(e.request)) ||
+            (await caches.match('/index.html')) ||
+            (await caches.match('./index.html'));
           if (cached) return cached;
+          /** 仅真离线时显示离线页；在线但连不上（如本地服务未启动）交给浏览器报错，避免误报 */
+          if (!navigator.onLine && isHtml) {
+            return new Response(OFFLINE_HTML, {
+              status: 503,
+              headers: { 'Content-Type': 'text/html; charset=utf-8' }
+            });
+          }
           throw err;
         }
       }

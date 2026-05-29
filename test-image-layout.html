@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>图片布局修复测试</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .test-section {
+      background: white;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .test-section h2 {
+      margin-top: 0;
+      color: #333;
+    }
+    .test-result {
+      padding: 12px;
+      border-radius: 4px;
+      margin: 10px 0;
+      font-family: monospace;
+    }
+    .test-pass {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .test-fail {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    .test-info {
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin: 5px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .code-block {
+      background: #f8f9fa;
+      padding: 12px;
+      border-radius: 4px;
+      border: 1px solid #dee2e6;
+      font-family: monospace;
+      font-size: 13px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔧 图片布局修复测试工具</h1>
+  
+  <div class="test-section">
+    <h2>1. 检查修复补丁是否加载</h2>
+    <button onclick="testHotfixLoaded()">运行测试</button>
+    <div id="result1"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>2. 检查 Masonry 实例管理</h2>
+    <button onclick="testMasonryManagement()">运行测试</button>
+    <div id="result2"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>3. 检查图片刷新功能</h2>
+    <button onclick="testImageRefresh()">运行测试</button>
+    <div id="result3"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>4. 检查布局函数</h2>
+    <button onclick="testLayoutFunctions()">运行测试</button>
+    <div id="result4"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>5. 手动刷新所有图片</h2>
+    <p>如果图片仍然不显示，点击下方按钮强制刷新：</p>
+    <button onclick="manualRefresh()">强制刷新所有图片</button>
+    <div id="result5"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>6. 诊断信息</h2>
+    <button onclick="showDiagnostics()">显示诊断信息</button>
+    <div id="diagnostics"></div>
+  </div>
+
+  <script>
+    function showResult(elementId, message, type) {
+      const el = document.getElementById(elementId);
+      el.innerHTML = `<div class="test-result test-${type}">${message}</div>`;
+    }
+
+    function testHotfixLoaded() {
+      const result = document.getElementById('result1');
+      result.innerHTML = '<div class="test-info">检查中...</div>';
+      
+      setTimeout(() => {
+        const checks = [];
+        
+        // 检查全局刷新函数
+        if (typeof window.forceRefreshAllImages === 'function') {
+          checks.push('✅ forceRefreshAllImages 函数已加载');
+        } else {
+          checks.push('❌ forceRefreshAllImages 函数未找到');
+        }
+
+        // 检查 SupabaseSync 优化
+        if (window.SupabaseSync?.prefetchDisplayUrlsWithCap) {
+          checks.push('✅ 图片预加载优化已应用');
+        } else {
+          checks.push('⚠️ SupabaseSync 未配置或预加载未优化');
+        }
+
+        // 检查 FeatureDraft 布局函数
+        if (window.FeatureDraft?.layoutCommunityMasonry) {
+          checks.push('✅ 社区布局函数已加载');
+        } else {
+          checks.push('❌ 社区布局函数未找到');
+        }
+
+        if (window.FeatureDraft?.layoutImageGenFeedMasonry) {
+          checks.push('✅ 图片生成布局函数已加载');
+        } else {
+          checks.push('❌ 图片生成布局函数未找到');
+        }
+
+        const allPass = checks.every(c => c.startsWith('✅'));
+        const type = allPass ? 'pass' : (checks.some(c => c.startsWith('❌')) ? 'fail' : 'info');
+        
+        showResult('result1', checks.join('<br>'), type);
+      }, 100);
+    }
+
+    function testMasonryManagement() {
+      showResult('result2', '检查中...', 'info');
+      
+      setTimeout(() => {
+        const checks = [];
+        
+        // 检查 Masonry 库
+        if (typeof Masonry !== 'undefined') {
+          checks.push('✅ Masonry 库已加载');
+        } else {
+          checks.push('❌ Masonry 库未加载（可能正在加载中）');
+        }
+
+        // 检查容器
+        const containers = ['communityGrid', 'creationsGrid', 'imageGenFeed', 'cardsContainer'];
+        containers.forEach(id => {
+          const el = document.getElementById(id);
+          if (el) {
+            checks.push(`✅ 容器 #${id} 存在`);
+          } else {
+            checks.push(`⚠️ 容器 #${id} 未找到（可能在其他页面）`);
+          }
+        });
+
+        const allPass = checks.filter(c => c.startsWith('❌')).length === 0;
+        const type = allPass ? 'pass' : 'fail';
+        
+        showResult('result2', checks.join('<br>'), type);
+      }, 100);
+    }
+
+    function testImageRefresh() {
+      showResult('result3', '检查中...', 'info');
+      
+      setTimeout(() => {
+        const checks = [];
+        
+        // 检查图片元素
+        const imgs = document.querySelectorAll('img[data-image-ref], img[data-storage-ref]');
+        checks.push(`📊 找到 ${imgs.length} 个需要水合的图片元素`);
+
+        // 检查缓存
+        if (window.SupabaseSync?.getCachedDisplayUrl) {
+          checks.push('✅ 图片缓存功能可用');
+        } else {
+          checks.push('❌ 图片缓存功能不可用');
+        }
+
+        // 检查水合函数
+        if (window.SupabaseSync?.hydrateImageElements) {
+          checks.push('✅ 图片水合函数可用');
+        } else {
+          checks.push('❌ 图片水合函数不可用');
+        }
+
+        const type = checks.some(c => c.startsWith('❌')) ? 'fail' : 'pass';
+        showResult('result3', checks.join('<br>'), type);
+      }, 100);
+    }
+
+    function testLayoutFunctions() {
+      showResult('result4', '检查中...', 'info');
+      
+      setTimeout(() => {
+        const checks = [];
+        
+        // 检查布局函数
+        const functions = [
+          'layoutMasonryGrid',
+          'scheduleLayoutMasonry',
+          'enforceMobileCardGrid'
+        ];
+
+        functions.forEach(fn => {
+          if (typeof window[fn] === 'function') {
+            checks.push(`✅ ${fn} 函数存在`);
+          } else {
+            checks.push(`❌ ${fn} 函数未找到`);
+          }
+        });
+
+        // 检查 FeatureDraft 函数
+        if (window.FeatureDraft) {
+          const draftFns = [
+            'layoutCommunityMasonry',
+            'layoutImageGenFeedMasonry',
+            'scheduleLayout'
+          ];
+          
+          draftFns.forEach(fn => {
+            if (typeof window.FeatureDraft[fn] === 'function') {
+              checks.push(`✅ FeatureDraft.${fn} 函数存在`);
+            } else {
+              checks.push(`⚠️ FeatureDraft.${fn} 函数未找到`);
+            }
+          });
+        } else {
+          checks.push('❌ FeatureDraft 模块未加载');
+        }
+
+        const allPass = checks.filter(c => c.startsWith('❌')).length === 0;
+        const type = allPass ? 'pass' : 'fail';
+        
+        showResult('result4', checks.join('<br>'), type);
+      }, 100);
+    }
+
+    function manualRefresh() {
+      const result = document.getElementById('result5');
+      result.innerHTML = '<div class="test-info">正在刷新...</div>';
+      
+      if (typeof window.forceRefreshAllImages === 'function') {
+        try {
+          window.forceRefreshAllImages();
+          setTimeout(() => {
+            showResult('result5', '✅ 刷新命令已执行，请查看控制台日志', 'pass');
+          }, 500);
+        } catch (e) {
+          showResult('result5', `❌ 刷新失败: ${e.message}`, 'fail');
+        }
+      } else {
+        showResult('result5', '❌ forceRefreshAllImages 函数未找到，请确认修复补丁已加载', 'fail');
+      }
+    }
+
+    function showDiagnostics() {
+      const diag = document.getElementById('diagnostics');
+      diag.innerHTML = '<div class="test-info">收集诊断信息...</div>';
+      
+      setTimeout(() => {
+        const info = {
+          '浏览器': navigator.userAgent,
+          '视口宽度': window.innerWidth + 'px',
+          '视口高度': window.innerHeight + 'px',
+          '是否移动端': window.matchMedia('(max-width: 900px)').matches ? '是' : '否',
+          'Masonry 已加载': typeof Masonry !== 'undefined' ? '是' : '否',
+          'SupabaseSync 已配置': window.SupabaseSync?.isConfigured?.() ? '是' : '否',
+          '当前页面': document.querySelector('.app-page.active')?.id || '未知',
+          '卡片列数': getComputedStyle(document.documentElement).getPropertyValue('--card-columns') || '未设置',
+          '图片元素数量': document.querySelectorAll('img[data-image-ref], img[data-storage-ref]').length
+        };
+
+        let html = '<div class="code-block">';
+        for (const [key, value] of Object.entries(info)) {
+          html += `<strong>${key}:</strong> ${value}<br>`;
+        }
+        html += '</div>';
+
+        html += '<h3>控制台命令</h3>';
+        html += '<div class="code-block">';
+        html += '// 强制刷新所有图片<br>';
+        html += 'forceRefreshAllImages()<br><br>';
+        html += '// 重新布局社区页面<br>';
+        html += 'FeatureDraft.layoutCommunityMasonry("communityGrid")<br><br>';
+        html += '// 重新布局图片生成页面<br>';
+        html += 'FeatureDraft.layoutImageGenFeedMasonry()<br><br>';
+        html += '// 检查 Masonry 实例<br>';
+        html += 'console.log(window.masonryInstance)<br>';
+        html += '</div>';
+
+        diag.innerHTML = html;
+      }, 100);
+    }
+
+    // 页面加载时自动运行第一个测试
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        testHotfixLoaded();
+      }, 500);
+    });
+  </script>
+</body>
+</html>

@@ -34,6 +34,7 @@ export function initRippleGrid(container, options = {}) {
   let uniforms = null;
   let rafId = 0;
   let destroyed = false;
+  let paused = false;
 
   const renderer = new Renderer({
     dpr: Math.min(window.devicePixelRatio, 2),
@@ -186,6 +187,10 @@ void main() {
 
   const render = (t) => {
     if (destroyed) return;
+    if (paused || document.hidden) {
+      rafId = requestAnimationFrame(render);
+      return;
+    }
     uniforms.iTime.value = t * 0.001;
     mousePosition.x += (targetMouse.x - mousePosition.x) * 0.14;
     mousePosition.y += (targetMouse.y - mousePosition.y) * 0.14;
@@ -201,6 +206,9 @@ void main() {
   rafId = requestAnimationFrame(render);
 
   return {
+    setPaused(value) {
+      paused = !!value;
+    },
     destroy() {
       destroyed = true;
       cancelAnimationFrame(rafId);

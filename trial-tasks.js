@@ -3,11 +3,40 @@
  */
 (function () {
   const LS_PWA_FLAG = 'promptrepo_pwa_task_flag';
+  const LS_PENDING_INVITE = 'promptrepo_pending_invite';
   let syncDebounceTimer = null;
   let panelBound = false;
   let lastTaskSyncAt = 0;
   const TASK_SYNC_MIN_GAP_MS = 90000;
   let tasksLoadSerial = null;
+  let cachedTaskList = null;
+
+  function applyClaimResultToAccount(data) {
+    if (data?.membership && window.Membership?.applyServerState) {
+      window.Membership.applyServerState(data.membership);
+    }
+    if (typeof data?.creditsSpendable === 'number' && window.PointsSystem?.setCreditsFromServer) {
+      window.PointsSystem.setCreditsFromServer(data.creditsSpendable, {
+        permanent: data.creditsPermanent,
+        daily: data.dailyCredits,
+        mode: data.creditGrantMode,
+        note: data.dailyCreditsNote
+      });
+    }
+    window.PointsSystem?.updateCreditsUI?.();
+    window.SubscriptionUI?.refreshOfferUI?.();
+  }
+
+  function markTaskClaimedOptimistic(taskKey) {
+    if (!cachedTaskList?.items) return;
+    cachedTaskList = {
+      ...cachedTaskList,
+      items: cachedTaskList.items.map((t) =>
+        t.key === taskKey ? { ...t, claimed: true, ready: false } : t
+      )
+    };
+    renderTasks(cachedTaskList);
+  }
 
   function isLoggedIn() {
     return window.SupabaseSync?.isLoggedIn?.() === true;
@@ -21,24 +50,60 @@
       .replace(/"/g, '&quot;');
   }
 
+  function formatErrText(v) {
+    if (v == null || v === '') return '';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object') {
+      if (typeof v.message === 'string') return v.message;
+      try {
+        return JSON.stringify(v);
+      } catch (e) {
+        return String(v);
+      }
+    }
+    return String(v);
+  }
+
+  function isHomescreenLaunch() {
+    try {
+      if (window.navigator.standalone === true) return true;
+      const mq = window.matchMedia?.bind(window);
+      if (mq) {
+        if (mq('(display-mode: standalone)').matches) return true;
+        if (mq('(display-mode: fullscreen)').matches) return true;
+        if (mq('(display-mode: minimal-ui)').matches) return true;
+      }
+      if (/[?&]launch=homescreen\b/.test(location.search || '')) return true;
+      if (/android-app:\/\//.test(document.referrer || '')) return true;
+      if (localStorage.getItem(LS_PWA_FLAG) === '1') return true;
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
   function collectSyncPayload() {
     const cards =
       window.__promptHubCards ||
       (typeof cards !== 'undefined' ? cards : []) ||
       [];
-    const communityPosts = window.FeatureDraft?.getCommunityPostsForTasks?.() || [];
-    let pwaInstalled = false;
+    let communityPosts = [];
     try {
-      pwaInstalled =
-        window.matchMedia('(display-mode: standalone)').matches ||
-        window.navigator.standalone === true ||
-        localStorage.getItem(LS_PWA_FLAG) === '1';
+      const raw = window.FeatureDraft?.getCommunityPostsForTasks?.() || [];
+      communityPosts = raw.slice(0, 40).map((p) => ({
+        prompt: String(p.prompt || p.title || '').slice(0, 800),
+        title: String(p.title || '').slice(0, 200),
+        image: p.image ? String(p.image).slice(0, 512) : null
+      }));
     } catch (e) { /* ignore */ }
-    return { cardsCount: Array.isArray(cards) ? cards.length : 0, communityPosts, pwaInstalled };
+    return {
+      cardsCount: Array.isArray(cards) ? cards.length : 0,
+      communityPosts,
+      pwaInstalled: isHomescreenLaunch()
+    };
   }
 
   async function syncTaskProgress(force) {
     if (!isLoggedIn() || !window.PromptHubApi?.syncMembershipTasks) return null;
+    if (window.PromptHubApi?.isApiUnreachable?.()) return null;
     if (!force && Date.now() - lastTaskSyncAt < TASK_SYNC_MIN_GAP_MS) return null;
     const r = await window.PromptHubApi.syncMembershipTasks(collectSyncPayload());
     if (r?.ok) lastTaskSyncAt = Date.now();
@@ -89,6 +154,12 @@
     }
   }
 
+  function taskErrorText(v, fallback) {
+    const t = formatErrText(v);
+    if (!t || t === '[object Object]') return fallback || '任务加载失败，请稍后重试';
+    return t;
+  }
+
   async function loadTasks() {
     if (!isLoggedIn()) return { items: [], lifetimeCreditsSpent: 0, error: null };
     if (!window.PromptHubApi?.isConfigured?.()) {
@@ -99,24 +170,53 @@
         error: `当前页面（${host}）未配置 API。请用 https://prompt-hub.cn 打开，或在 api-domain.config.js 设置 CUSTOM_API_HOST。`
       };
     }
-    const r = await window.PromptHubApi?.getMembershipTasks?.();
-    if (r?.ok && Array.isArray(r.data?.items)) return { ...r.data, error: null };
-    const msg = r?.message || r?.code || '任务列表加载失败';
+    let r;
+    try {
+      r = await window.PromptHubApi?.getMembershipTasks?.();
+    } catch (e) {
+      return {
+        items: [],
+        lifetimeCreditsSpent: 0,
+        error: taskErrorText(e, '任务接口请求异常'),
+        retryable: true
+      };
+    }
+    if (!r) {
+      return { items: [], lifetimeCreditsSpent: 0, error: 'API 客户端未就绪', retryable: true };
+    }
+    if (r?.ok && r.data && Array.isArray(r.data.items)) {
+      cachedTaskList = { ...r.data, error: null };
+      return cachedTaskList;
+    }
+    if (r?.ok && r.data && !Array.isArray(r.data.items)) {
+      return {
+        items: [],
+        lifetimeCreditsSpent: 0,
+        error: formatErrText(r.data.error) || formatErrText(r.data.message) || '任务数据格式异常',
+        retryable: true
+      };
+    }
+    const msg =
+      taskErrorText(r?.message, '') ||
+      taskErrorText(r?.code, '') ||
+      (r?.status ? `服务器错误 (${r.status})` : '') ||
+      '任务列表加载失败';
+    const detailHint = taskErrorText(r?.details, '');
     if (r?.code === 'TASKS_LOAD_FAILED' || r?.code === 'INTERNAL_ERROR') {
       return {
         items: [],
         lifetimeCreditsSpent: 0,
         error: msg || '任务接口服务器错误',
-        errorDetail: typeof r?.details === 'string' ? r.details : '',
+        errorDetail: detailHint || (r?.status ? `HTTP ${r.status}，请在 server 目录执行 npm run deploy 后重试` : ''),
         retryable: true
       };
     }
-    if (r?.code === 'MIGRATION_REQUIRED' || /membership_tasks\.sql/i.test(msg)) {
+    if (r?.code === 'MIGRATION_REQUIRED' || /membership_task_claims_grants|membership_tasks\.sql/i.test(msg)) {
       return {
         items: [],
         lifetimeCreditsSpent: 0,
         error:
-          '数据库尚未执行任务迁移。请打开 Supabase → SQL Editor，粘贴并运行文件 20260528120000_membership_tasks.sql'
+          '数据库任务表未就绪。请打开 Supabase → SQL Editor，依次运行 20260528120000_membership_tasks.sql 与 20260528120200_membership_task_claims_grants.sql'
       };
     }
     if (r?.code === 'NOT_FOUND' || /接口不存在/.test(msg)) {
@@ -153,15 +253,318 @@
       items: [],
       lifetimeCreditsSpent: 0,
       error: msg,
-      errorDetail: (typeof r?.details === 'string' ? r.details : '') || (r?.status ? `HTTP ${r.status}` : ''),
+      errorDetail: formatErrText(r?.details) || (r?.status ? `HTTP ${r.status}` : ''),
       retryable: true
     };
   }
 
+    function isPhoneVerified(data) {
+    return data?.hub?.phoneVerified === true || data?.phoneVerified === true;
+  }
+
+  let trialPhoneOtpCooldownTimer = null;
+
+  function taskKeyNeedsPhone(taskKey) {
+    return !String(taskKey || '').startsWith('daily_bonus_');
+  }
+
+  function phoneRequiredTip() {
+    if (typeof showToast === 'function') {
+      showToast('请先绑定手机号（可点下方「绑定手机号」）', 5000);
+    }
+    openTrialPhoneBindForm();
+  }
+
+  function setTrialPhoneBindStatus(msg, kind) {
+    const el = document.getElementById('trialHubPhoneBindStatus');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('is-error', kind === 'error');
+    el.classList.toggle('is-ok', kind === 'ok');
+  }
+
+  function openTrialPhoneBindForm() {
+    const form = document.getElementById('trialHubPhoneBindForm');
+    if (form) {
+      form.classList.remove('hidden');
+      document.getElementById('trialHubPhone')?.focus();
+    }
+  }
+
+  function startTrialPhoneOtpCooldown(seconds) {
+    const btn = document.getElementById('trialHubPhoneSendOtp');
+    if (!btn) return;
+    let left = seconds;
+    btn.disabled = true;
+    btn.textContent = left + 's';
+    clearInterval(trialPhoneOtpCooldownTimer);
+    trialPhoneOtpCooldownTimer = setInterval(() => {
+      left -= 1;
+      if (left <= 0) {
+        clearInterval(trialPhoneOtpCooldownTimer);
+        trialPhoneOtpCooldownTimer = null;
+        btn.disabled = false;
+        btn.textContent = '获取验证码';
+      } else {
+        btn.textContent = left + 's';
+      }
+    }, 1000);
+  }
+
+  async function trialSendPhoneOtp() {
+    if (!isLoggedIn()) {
+      if (typeof openAuthModal === 'function') openAuthModal('login');
+      return;
+    }
+    if (!window.AUTH_PHONE_ENABLED) {
+      setTrialPhoneBindStatus('手机验证未开启，见 docs/SUPABASE-AUTH.md', 'error');
+      return;
+    }
+    const phone = document.getElementById('trialHubPhone')?.value?.trim();
+    if (!phone) {
+      setTrialPhoneBindStatus('请输入 11 位手机号', 'error');
+      return;
+    }
+    const btn = document.getElementById('trialHubPhoneSendOtp');
+    try {
+      if (btn) btn.disabled = true;
+      setTrialPhoneBindStatus('发送中…');
+      if (window.SupabaseSync?.sendPhoneOtpForBind) {
+        await window.SupabaseSync.sendPhoneOtpForBind(phone);
+      } else {
+        await window.SupabaseSync.sendPhoneOtp(phone);
+      }
+      setTrialPhoneBindStatus('验证码已发送，请查收短信', 'ok');
+      startTrialPhoneOtpCooldown(60);
+      document.getElementById('trialHubPhoneOtp')?.focus();
+    } catch (e) {
+      setTrialPhoneBindStatus(e?.message || '发送失败', 'error');
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function trialVerifyPhoneBind() {
+    if (!isLoggedIn()) {
+      if (typeof openAuthModal === 'function') openAuthModal('login');
+      return;
+    }
+    const phone = document.getElementById('trialHubPhone')?.value?.trim();
+    const otp = document.getElementById('trialHubPhoneOtp')?.value?.trim();
+    if (!phone || !otp) {
+      setTrialPhoneBindStatus('请输入手机号与 6 位验证码', 'error');
+      return;
+    }
+    const btn = document.getElementById('trialHubPhoneVerify');
+    try {
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '验证中…';
+      }
+      setTrialPhoneBindStatus('验证中…');
+      if (window.SupabaseSync?.verifyPhoneOtpForBind) {
+        await window.SupabaseSync.verifyPhoneOtpForBind(phone, otp);
+      } else {
+        await window.SupabaseSync.verifyPhoneOtp(phone, otp);
+      }
+      setTrialPhoneBindStatus('手机号已绑定', 'ok');
+      if (typeof showToast === 'function') showToast('手机号绑定成功', 4000);
+      void refreshTasksPanel();
+    } catch (e) {
+      setTrialPhoneBindStatus(e?.message || '验证失败', 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '确认绑定';
+      }
+    }
+  }
+
+  function captureInviteFromUrl() {
+    try {
+      const inv = new URLSearchParams(location.search).get('invite');
+      if (inv && inv.trim()) {
+        localStorage.setItem(LS_PENDING_INVITE, inv.trim().toUpperCase());
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function taskItemsWithoutDaily(items) {
+    return (items || []).filter((t) => !String(t.key || '').startsWith('daily_bonus_'));
+  }
+
+  function renderTaskHub(hub) {
+    const el = document.getElementById('trialTasksHub');
+    if (!el) return;
+    if (!hub) {
+      el.innerHTML = '';
+      return;
+    }
+    const phoneOk = hub.phoneVerified === true;
+    const phoneNote = phoneOk
+      ? '<p class="trial-hub-note trial-hub-note-ok">已绑定手机号，可领取全部任务奖励</p>'
+      : `<div class="trial-hub-phone-block">
+          <p class="trial-hub-note trial-hub-note-warn">每日积分无需绑手机；其它任务奖励与邀请码兑换需先绑定手机号</p>
+          <button type="button" class="btn btn-primary btn-sm" id="trialHubPhoneBindOpen">绑定手机号</button>
+          <div class="trial-hub-phone-form hidden" id="trialHubPhoneBindForm">
+            <div class="trial-hub-phone-row-inputs">
+              <input type="tel" class="trial-hub-phone-input" id="trialHubPhone" inputmode="numeric" maxlength="11" placeholder="11 位手机号" autocomplete="tel">
+              <button type="button" class="btn btn-secondary btn-sm" id="trialHubPhoneSendOtp">获取验证码</button>
+            </div>
+            <div class="trial-hub-phone-row-inputs">
+              <input type="text" class="trial-hub-phone-input" id="trialHubPhoneOtp" inputmode="numeric" maxlength="6" placeholder="6 位验证码" autocomplete="one-time-code">
+              <button type="button" class="btn btn-primary btn-sm" id="trialHubPhoneVerify">确认绑定</button>
+            </div>
+            <p class="trial-hub-phone-status" id="trialHubPhoneBindStatus" aria-live="polite"></p>
+          </div>
+        </div>`;
+    const dailyBtn = hub.dailyBonus?.claimed
+      ? '<span class="trial-task-done">今日已领</span>'
+      : '<button type="button" class="btn btn-primary btn-sm" id="trialHubDailyBtn">领取 5 积分</button>';
+    const streakTip = hub.dailyBonus?.claimed
+      ? `已连续签到 ${hub.signStreak || 0} 天 · 再领 ${hub.daysToStreakBonus || 7} 天额外 +10 积分`
+      : `领取即签到 · 已连续 ${hub.signStreak || 0} 天 · 满 7 天额外 +10 积分`;
+    const inviteFilled = hub.referred === true;
+    let pendingInvite = '';
+    try {
+      pendingInvite = localStorage.getItem(LS_PENDING_INVITE) || '';
+    } catch (e) { /* ignore */ }
+    const inviteInput = inviteFilled
+      ? '<span class="trial-task-done">已填写邀请码</span>'
+      : `<div class="trial-hub-invite-form">
+          <input type="text" class="trial-hub-invite-input" id="trialHubInviteInput" placeholder="填写好友邀请码" value="${esc(pendingInvite)}" maxlength="32" autocomplete="off">
+          <button type="button" class="btn btn-primary btn-sm" id="trialHubInviteSubmit">兑换</button>
+        </div>
+        ${phoneOk ? '' : '<p class="trial-hub-desc">兑换前须先绑定手机号（见上方）</p>'}`;
+
+    el.innerHTML = `
+      <section class="trial-hub-block">
+        <h4 class="trial-hub-title">每日福利</h4>
+        ${phoneNote}
+        <div class="trial-hub-row">
+          <div class="trial-hub-row-main">
+            <strong>每日 5 积分</strong>
+            <p class="trial-hub-desc">${esc(streakTip)} · 积分仅限当天使用</p>
+          </div>
+          <div class="trial-hub-row-action">${dailyBtn}</div>
+        </div>
+      </section>
+      <section class="trial-hub-block">
+        <h4 class="trial-hub-title">邀请好友</h4>
+        <p class="trial-hub-desc">好友注册并填写你的邀请码，双方各得 1 天基础会员 + 50 积分</p>
+        <div class="trial-hub-link-row">
+          <span class="trial-hub-label">网站</span>
+          <code class="trial-hub-code" id="trialHubSiteLink">${esc(hub.inviteLink || hub.siteUrl || '')}</code>
+          <button type="button" class="btn btn-ghost btn-sm" id="trialHubCopyLink">复制链接</button>
+        </div>
+        <div class="trial-hub-link-row">
+          <span class="trial-hub-label">我的邀请码</span>
+          <code class="trial-hub-code" id="trialHubInviteCode">${esc(hub.inviteCode || '—')}</code>
+          <button type="button" class="btn btn-ghost btn-sm" id="trialHubCopyCode">复制</button>
+        </div>
+        <div class="trial-hub-invite-task">
+          <span class="trial-hub-label">填写邀请码</span>
+          ${inviteInput}
+        </div>
+      </section>`;
+
+    document.getElementById('trialHubDailyBtn')?.addEventListener('click', () => {
+      void onClaim(hub.dailyBonus.key, document.getElementById('trialHubDailyBtn'));
+    });
+    document.getElementById('trialHubCopyLink')?.addEventListener('click', () => {
+      void copyText(hub.inviteLink || hub.siteUrl || '', '已复制邀请链接');
+    });
+    document.getElementById('trialHubCopyCode')?.addEventListener('click', () => {
+      void copyText(hub.inviteCode || '', '已复制邀请码');
+    });
+    document.getElementById('trialHubInviteSubmit')?.addEventListener('click', () => {
+      if (!phoneOk) return phoneRequiredTip();
+      const code = document.getElementById('trialHubInviteInput')?.value?.trim();
+      void onRedeemInvite(code);
+    });
+    document.getElementById('trialHubPhoneBindOpen')?.addEventListener('click', () => {
+      openTrialPhoneBindForm();
+    });
+    document.getElementById('trialHubPhoneSendOtp')?.addEventListener('click', () => {
+      void trialSendPhoneOtp();
+    });
+    document.getElementById('trialHubPhoneVerify')?.addEventListener('click', () => {
+      void trialVerifyPhoneBind();
+    });
+    document.getElementById('trialHubInviteInput')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        document.getElementById('trialHubInviteSubmit')?.click();
+      }
+    });
+  }
+
+  async function copyText(text, okMsg) {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      if (typeof showToast === 'function') showToast(okMsg || '已复制');
+    } catch (e) {
+      if (typeof showToast === 'function') showToast('复制失败，请手动复制');
+    }
+  }
+
+  async function onRedeemInvite(code) {
+    if (!code) {
+      if (typeof showToast === 'function') showToast('请输入邀请码');
+      return;
+    }
+    const btn = document.getElementById('trialHubInviteSubmit');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '兑换中…';
+    }
+    const r = await window.PromptHubApi?.redeemInviteCode?.(code);
+    if (r?.ok) {
+      try {
+        localStorage.removeItem(LS_PENDING_INVITE);
+      } catch (e) { /* ignore */ }
+      applyClaimResultToAccount(r.data || {});
+      if (typeof showToast === 'function') showToast(r.data?.message || '邀请兑换成功', 6000);
+      void refreshTasksPanel();
+      return;
+    }
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '兑换';
+    }
+    if (typeof showToast === 'function') {
+      showToast(taskErrorText(r?.message, '邀请码兑换失败'));
+    }
+  }
+
+  async function refreshTasksPanel() {
+    const data = await loadTasks();
+    cachedTaskList = data;
+    renderTasks(data);
+  }
+
+  function sortTaskItems(items) {
+    return [...items].sort((a, b) => {
+      const rank = (t) => {
+        if (t.claimed) return 2;
+        if (t.ready) return 0;
+        return 1;
+      };
+      const diff = rank(a) - rank(b);
+      if (diff !== 0) return diff;
+      return String(a.key || '').localeCompare(String(b.key || ''));
+    });
+  }
+
   function renderTasks(data) {
     const list = document.getElementById('trialTasksList');
+    const phoneHint = document.getElementById('trialTasksPhoneHint');
+    if (phoneHint) {
+      phoneHint.classList.toggle('hidden', true);
+    }
+    renderTaskHub(isLoggedIn() ? data?.hub : null);
     if (!list) return;
-    const items = data?.items || [];
+    const items = sortTaskItems(taskItemsWithoutDaily(data?.items || []));
     if (data?.error === 'session_expired') {
       list.innerHTML = `<p class="trial-tasks-empty">登录凭证已过期，请点「重新登录」后再试（侧栏邮箱仍显示属正常）。</p>
         <p class="trial-tasks-hint"><button type="button" class="btn btn-primary btn-sm" id="trialTasksReloginBtn">重新登录</button></p>`;
@@ -172,11 +575,12 @@
       return;
     }
     if (data?.error) {
-      const detail = data.errorDetail ? `<p class="trial-tasks-hint">${esc(data.errorDetail)}</p>` : '';
+      const errText = taskErrorText(data.error, '任务加载失败，请稍后重试');
+      const detail = data.errorDetail ? `<p class="trial-tasks-hint">${esc(formatErrText(data.errorDetail))}</p>` : '';
       const retryBtn = data.retryable
         ? '<p class="trial-tasks-hint"><button type="button" class="btn btn-secondary btn-sm" id="trialTasksRetryBtn">重试</button></p>'
         : '<p class="trial-tasks-hint">若提示迁移：在 Supabase SQL 编辑器执行 <code>20260528120000_membership_tasks.sql</code>。</p>';
-      list.innerHTML = `<p class="trial-tasks-empty">${esc(data.error)}</p>${detail}${retryBtn}`;
+      list.innerHTML = `<p class="trial-tasks-empty">${esc(errText)}</p>${detail}${retryBtn}`;
       document.getElementById('trialTasksRetryBtn')?.addEventListener('click', () => {
         void openTrialTasksPanel();
       });
@@ -195,11 +599,19 @@
         ]
           .filter(Boolean)
           .join(' + ');
+        const claimLabel =
+          task.rewardDays && task.rewardCredits
+            ? '领取奖励'
+            : task.rewardCredits && !task.rewardDays
+              ? '领取积分'
+              : '领取会员';
         const btn = task.claimed
           ? '<span class="trial-task-done">已领取</span>'
-          : task.ready
-            ? `<button type="button" class="btn btn-primary btn-sm trial-task-claim" data-task-key="${esc(task.key)}">领取会员</button>`
-            : '<span class="trial-task-pending">未完成</span>';
+          : task.kind === 'promo'
+            ? `<button type="button" class="btn btn-secondary btn-sm trial-task-promo" data-promo="${esc(task.key)}">去兑换</button>`
+            : task.ready
+              ? `<button type="button" class="btn btn-primary btn-sm trial-task-claim" data-task-key="${esc(task.key)}">${claimLabel}</button>`
+              : '<span class="trial-task-pending">未完成</span>';
         const progress = task.progress
           ? `<span class="trial-task-progress">${esc(task.progress)}</span>`
           : '';
@@ -216,33 +628,87 @@
       .join('');
 
     list.querySelectorAll('.trial-task-claim').forEach((btn) => {
-      btn.addEventListener('click', () => void onClaim(btn.dataset.taskKey));
+      btn.addEventListener('click', () => void onClaim(btn.dataset.taskKey, btn));
+    });
+    list.querySelectorAll('.trial-task-promo').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        closeTrialTasksPanel();
+        if (typeof switchAppPage === 'function') switchAppPage('imagegen');
+        if (typeof showToast === 'function') {
+          showToast('请前往生图页「兑换」，输入淘宝购买的激活码', 5000);
+        }
+      });
     });
   }
 
-  async function onClaim(taskKey) {
+  async function onClaim(taskKey, btnEl) {
     if (!taskKey) return;
     if (!isLoggedIn()) {
       if (typeof showToast === 'function') showToast('请先登录');
       if (typeof openAuthModal === 'function') openAuthModal('login');
       return;
     }
-    const r = await window.PromptHubApi?.claimMembershipTask?.(taskKey);
-    if (r?.ok) {
-      if (typeof showToast === 'function') showToast(r.data.message || '领取成功');
-      await window.PromptHubApi?.syncMe?.({ silent: true });
-      renderTasks(await loadTasks());
-      window.SubscriptionUI?.refreshOfferUI?.();
+    if (taskKeyNeedsPhone(taskKey) && cachedTaskList && !isPhoneVerified(cachedTaskList)) {
+      phoneRequiredTip();
       return;
     }
-    if (typeof showToast === 'function') showToast(r?.message || '领取失败');
+    const btn = btnEl || document.querySelector(`.trial-task-claim[data-task-key="${taskKey}"]`);
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '领取中…';
+    }
+    const r = await window.PromptHubApi?.claimMembershipTask?.(taskKey);
+    if (r?.ok) {
+      const msg = r.data?.message || '领取成功！会员天数已到账';
+      applyClaimResultToAccount(r.data || {});
+      markTaskClaimedOptimistic(taskKey);
+      if (btn) btn.outerHTML = '<span class="trial-task-done">已领取</span>';
+      if (typeof window.showAchievementToast === 'function') {
+        window.showAchievementToast(`🎉 ${msg}`);
+      } else if (typeof showToast === 'function') {
+        showToast(`🎉 ${msg}`, 5200);
+      }
+      void window.PromptHubApi?.syncMe?.({ silent: true });
+      void loadTasks().then((data) => {
+        cachedTaskList = data;
+        renderTasks(data);
+      });
+      return;
+    }
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.taskKey?.startsWith('daily_bonus_') ? '领取积分' : '领取奖励';
+    }
+    if (typeof showToast === 'function') {
+      let tip =
+        taskErrorText(r?.message) ||
+        taskErrorText(r?.details) ||
+        (r?.code === 'PHONE_REQUIRED'
+          ? '领取任务奖励前须先绑定手机号'
+          : r?.code === 'NOT_READY'
+          ? '请先打开任务中心刷新进度后再领取（电脑登录会自动标记）'
+          : r?.code === 'MIGRATION_REQUIRED'
+            ? '数据库缺少领取权限：请在 Supabase SQL Editor 运行 20260528120200_membership_task_claims_grants.sql'
+            : r?.code === 'CLAIM_FAILED'
+              ? `领取失败：${taskErrorText(r?.details, r?.message || '服务器错误')}`
+              : '领取失败');
+      if (/permission denied.*membership_task_claims/i.test(tip)) {
+        tip = '数据库缺少领取权限：请在 Supabase SQL Editor 运行 20260528120200_membership_task_claims_grants.sql';
+      }
+      showToast(tip);
+    }
   }
 
   function markPwaInstalled() {
     try {
       localStorage.setItem(LS_PWA_FLAG, '1');
     } catch (e) { /* ignore */ }
-    if (isLoggedIn()) scheduleSyncTaskProgress();
+    if (isLoggedIn()) void syncTaskProgress(true);
+  }
+
+  function onAuthReady() {
+    if (isHomescreenLaunch()) markPwaInstalled();
+    else if (localStorage.getItem(LS_PWA_FLAG) === '1') void syncTaskProgress(true);
   }
 
   function closeTrialTasksPanel() {
@@ -259,6 +725,7 @@
   }
 
   async function openTrialTasksPanel() {
+    window.MobileUI?.closeDrawers?.();
     const el = document.getElementById('trialTasksOverlay');
     if (!el) return;
     if (window.AppModalHub) window.AppModalHub.open('trialTasksOverlay');
@@ -273,6 +740,9 @@
       return;
     }
     document.getElementById('trialTasksLoginHint')?.classList.add('hidden');
+    if (window.TrialTasksUI?.isHomescreenLaunch?.()) {
+      window.TrialTasksUI?.markPwaInstalled?.();
+    }
     const list = document.getElementById('trialTasksList');
     if (list) list.innerHTML = '<p class="trial-tasks-empty">任务加载中…</p>';
     if (tasksLoadSerial) return tasksLoadSerial;
@@ -281,9 +751,17 @@
         const data = await loadTasks();
         renderTasks(data);
         if (!data?.error && Date.now() - lastTaskSyncAt >= TASK_SYNC_MIN_GAP_MS) {
-          await syncTaskProgress(true);
-          renderTasks(await loadTasks());
+          void syncTaskProgress(true).then(async (sr) => {
+            if (sr?.ok) renderTasks(await loadTasks());
+          });
         }
+      } catch (e) {
+        renderTasks({
+          items: [],
+          lifetimeCreditsSpent: 0,
+          error: taskErrorText(e, '任务加载失败'),
+          retryable: true
+        });
       } finally {
         tasksLoadSerial = null;
       }
@@ -312,30 +790,37 @@
   }
 
   function initPwaDetection() {
-    if (
-      window.matchMedia('(display-mode: standalone)').matches ||
-      window.navigator.standalone === true
-    ) {
-      markPwaInstalled();
-    }
+    if (isHomescreenLaunch()) markPwaInstalled();
     window.addEventListener('appinstalled', markPwaInstalled);
+    try {
+      window.matchMedia('(display-mode: standalone)').addEventListener?.('change', () => {
+        if (isHomescreenLaunch()) markPwaInstalled();
+      });
+    } catch (e) { /* ignore */ }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && isHomescreenLaunch()) markPwaInstalled();
+    });
   }
 
   window.TrialTasksUI = {
     open: openTrialTasksPanel,
     close: closeTrialTasksPanel,
     syncTaskProgress: scheduleSyncTaskProgress,
-    markPwaInstalled
+    markPwaInstalled,
+    onAuthReady,
+    isHomescreenLaunch
   };
   window.openTrialTasksPanel = openTrialTasksPanel;
   window.closeTrialTasksPanel = closeTrialTasksPanel;
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
+      captureInviteFromUrl();
       bindTrialTasksPanel();
       initPwaDetection();
     });
   } else {
+    captureInviteFromUrl();
     bindTrialTasksPanel();
     initPwaDetection();
   }

@@ -35,7 +35,7 @@ export function applyCorsHeaders(c: Context) {
 }
 
 export function isSchemaMigrationError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = extractErrorMessage(err);
   const code = (err as { code?: string })?.code;
   return (
     code === '42P01' ||
@@ -43,6 +43,23 @@ export function isSchemaMigrationError(err: unknown): boolean {
     /membership_task_claims|membership_task_flags|lifetime_credits_spent/i.test(
       msg
     ) ||
-    /does not exist|Could not find the table|schema cache/i.test(msg)
+    /does not exist|Could not find the table|schema cache/i.test(msg) ||
+    (code === '42501' && /membership_task_claims/i.test(msg))
   );
+}
+
+export function extractErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message || err.name || '';
+  if (err && typeof err === 'object') {
+    const o = err as Record<string, unknown>;
+    if (typeof o.message === 'string' && o.message) return o.message;
+    if (typeof o.details === 'string' && o.details) return o.details;
+    if (typeof o.hint === 'string' && o.hint) return o.hint;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return '';
+    }
+  }
+  return String(err ?? '');
 }

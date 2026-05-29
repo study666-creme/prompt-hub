@@ -53,3 +53,6 @@ insert into public.activation_codes (
 update public.activation_codes
 set active = false, note = coalesce(note, '') || ' [已停售]'
 where offer_kind = 'starter_14d' and code = 'STARTER-19-14D';
+
+-- Worker 领取任务时需写入此表（与 20260526170000_service_role_grants.sql 配套）
+grant select, insert on public.membership_task_claims to service_role;

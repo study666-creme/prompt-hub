@@ -22,6 +22,106 @@
     return (list || []).filter((c) => c && c.id != null && !tombstones[String(c.id)]);
   }
 
+  function imagePresenceScore(image) {
+    if (!image || typeof image !== 'string') return 0;
+    if (image.startsWith('data:image/')) return 5;
+    if (/^https?:\/\//i.test(image)) return 4;
+    if (image.startsWith('blob:')) return 3;
+    if (image.startsWith('storage://')) return 2;
+    return 0;
+  }
+
+  function mergeImageField(base, a, b) {
+    const hasA = !!(a && String(a).trim());
+    const hasB = !!(b && String(b).trim());
+    if (hasA && !hasB) {
+      base.image = a;
+      return base;
+    }
+    if (!hasA && hasB) {
+      base.image = b;
+      return base;
+    }
+    if (!hasA && !hasB) {
+      base.image = null;
+      return base;
+    }
+    const sa = imagePresenceScore(a);
+    const sb = imagePresenceScore(b);
+    if (sa > sb) base.image = a;
+    else if (sb > sa) base.image = b;
+    else base.image = a;
+    return base;
+  }
+
+  /** 同 id 合并：文字取较新 updatedAt，图片优先保留「更有内容」的一方 */
+  function mergeCardPair(local, cloud) {
+    if (!local) return cloud;
+    if (!cloud) return local;
+    const localTs = local.updatedAt || local.createdAt || 0;
+    const cloudTs = cloud.updatedAt || cloud.createdAt || 0;
+    const base = cloudTs > localTs ? { ...local, ...cloud } : { ...cloud, ...local };
+    return mergeImageField(base, local.image, cloud.image);
+  }
+
+  function mergeCreationPair(local, cloud) {
+    if (!local) return cloud;
+    if (!cloud) return local;
+    const localTs = local.updatedAt || local.createdAt || 0;
+    const cloudTs = cloud.updatedAt || cloud.createdAt || 0;
+    const base = cloudTs > localTs ? { ...local, ...cloud } : { ...cloud, ...local };
+    return mergeImageField(base, local.image, cloud.image);
+  }
+
+  function mergeCommunityPair(local, cloud) {
+    return mergeCardPair(local, cloud);
+  }
+
+  function communityPostMergeKey(p) {
+    if (!p || typeof p !== 'object') return '';
+    if (p.sourceCardId) return `card:${p.sourceCardId}`;
+    if (p.sourceCreationId) return `cre:${p.sourceCreationId}`;
+    if (p.id != null) return `id:${p.id}`;
+    return '';
+  }
+
+  function mergeCommunityPostsList(localList, cloudList) {
+    const map = new Map();
+    for (const item of [...(cloudList || []), ...(localList || [])]) {
+      if (!item || item.isMock) continue;
+      const key = communityPostMergeKey(item);
+      if (!key) continue;
+      const prev = map.get(key);
+      map.set(key, prev ? mergeCommunityPair(prev, item) : item);
+    }
+    return [...map.values()];
+  }
+
+  function byIdMergeWithPair(localList, cloudList, mergePair, tombstones) {
+    const map = new Map();
+    for (const item of filterTombstonedCreations(cloudList, tombstones)) {
+      if (item && item.id != null) map.set(String(item.id), item);
+    }
+    for (const item of localList || []) {
+      if (!item || item.id == null) continue;
+      const id = String(item.id);
+      if (tombstones && tombstones[id]) {
+        map.delete(id);
+        continue;
+      }
+      const cloudItem = map.get(id);
+      map.set(id, cloudItem ? mergePair(item, cloudItem) : item);
+    }
+    if (tombstones) {
+      for (const id of Object.keys(tombstones)) map.delete(id);
+    }
+    return [...map.values()];
+  }
+
+  function mergeCardsList(localList, cloudList, tombstones) {
+    return byIdMergeWithPair(localList, cloudList, mergeCardPair, tombstones);
+  }
+
   function byIdMerge(localList, cloudList, prefer, tombstones) {
     const map = new Map();
     for (const item of filterTombstonedCreations(cloudList, tombstones)) {
@@ -37,13 +137,33 @@
     return [...map.values()];
   }
 
+  function mergeTombstoneMaps(a, b) {
+    return { ...(b || {}), ...(a || {}) };
+  }
+
   function mergePayload(local, cloud) {
     if (!cloud || typeof cloud !== 'object') {
       return { ...local, schemaVersion: SCHEMA_VERSION };
     }
+    const cardTombstones = mergeTombstoneMaps(
+      local.settings?.deletedCardTombstones,
+      cloud.settings?.deletedCardTombstones
+    );
+    const creationTombstones = mergeTombstoneMaps(
+      local.settings?.deletedCreationTombstones,
+      cloud.settings?.deletedCreationTombstones
+    );
+    const jobTombstones = mergeTombstoneMaps(
+      local.settings?.deletedGenerationJobTombstones,
+      cloud.settings?.deletedGenerationJobTombstones
+    );
+    const postTombstones = mergeTombstoneMaps(
+      local.settings?.deletedCommunityPostTombstones,
+      cloud.settings?.deletedCommunityPostTombstones
+    );
     const merged = {
       schemaVersion: SCHEMA_VERSION,
-      cards: byIdMerge(local.cards, cloud.cards, 'local'),
+      cards: mergeCardsList(local.cards, cloud.cards, cardTombstones),
       customGroups:
         Array.isArray(local.customGroups) && local.customGroups.length
           ? local.customGroups
@@ -52,25 +172,116 @@
         Array.isArray(local.globalFields) && local.globalFields.length
           ? local.globalFields
           : cloud.globalFields || [],
-      settings: { ...(cloud.settings || {}), ...(local.settings || {}) },
+      settings: {
+        ...(cloud.settings || {}),
+        ...(local.settings || {}),
+        deletedCardTombstones: cardTombstones,
+        deletedCreationTombstones: creationTombstones,
+        deletedGenerationJobTombstones: jobTombstones,
+        deletedCommunityPostTombstones: postTombstones
+      },
       account: local.account || cloud.account || null,
-      communityPosts: byIdMerge(
+      communityPosts: mergeCommunityPostsList(
         (local.communityPosts || []).filter(p => !p.isMock),
-        (cloud.communityPosts || []).filter(p => !p.isMock),
-        'local'
+        (cloud.communityPosts || []).filter(p => !p.isMock)
       ),
-      creations: byIdMerge(
+      creations: byIdMergeWithPair(
         local.creations,
         cloud.creations,
-        'local',
-        local.settings?.deletedCreationTombstones || cloud.settings?.deletedCreationTombstones
+        mergeCreationPair,
+        creationTombstones
       ),
       communityLikes: [...new Set([...(cloud.communityLikes || []), ...(local.communityLikes || [])])],
       communityFavorites: [
         ...new Set([...(cloud.communityFavorites || []), ...(local.communityFavorites || [])])
-      ]
+      ],
+      follows: [...new Set([...(cloud.follows || []), ...(local.follows || [])])],
+      communityEvents: byIdMergeWithPair(
+        local.communityEvents || [],
+        cloud.communityEvents || [],
+        (a, b) => ({ ...b, ...a })
+      ),
+      notifications: byIdMergeWithPair(
+        local.notifications || [],
+        cloud.notifications || [],
+        (a, b) => ({ ...b, ...a, read: !!(a.read && b.read) })
+      )
     };
     return merged;
+  }
+
+  function cardIdSet(payload) {
+    const ids = new Set();
+    for (const c of payload?.cards || []) {
+      if (c?.id != null) ids.add(String(c.id));
+    }
+    return ids;
+  }
+
+  function countImageRegression(local, merged) {
+    const localMap = new Map();
+    for (const c of local?.cards || []) {
+      if (c?.id != null) localMap.set(String(c.id), c);
+    }
+    let n = 0;
+    for (const c of merged?.cards || []) {
+      if (c?.id == null) continue;
+      const prev = localMap.get(String(c.id));
+      if (!prev?.image || !c) continue;
+      if (prev.image && !c.image) n += 1;
+      else if (prev.image && c.image && imagePresenceScore(prev.image) > imagePresenceScore(c.image)) {
+        n += 1;
+      }
+    }
+    return n;
+  }
+
+  /** 合并结果中卡片 id 与本地一致时，避免云端空图覆盖本地有效图 */
+  function preferLocalCardsImages(local, payload) {
+    if (!payload || typeof payload !== 'object') return payload;
+    const localMap = new Map();
+    for (const c of local?.cards || []) {
+      if (c?.id != null) localMap.set(String(c.id), c);
+    }
+    if (!localMap.size || !Array.isArray(payload.cards)) return payload;
+    const cards = payload.cards.map((c) => {
+      if (!c || c.id == null) return c;
+      const localCard = localMap.get(String(c.id));
+      if (!localCard?.image) return c;
+      if (!c.image) return { ...c, image: localCard.image };
+      const sl = imagePresenceScore(localCard.image);
+      const sc = imagePresenceScore(c.image);
+      if (sl > sc) return { ...c, image: localCard.image };
+      return c;
+    });
+    return { ...payload, cards };
+  }
+
+  /**
+   * 拉取被安全策略拦截时：保留本机卡片库，仍合并社区/创作/设置等
+   */
+  function pullPreserveLocalWarehouse(local, merged) {
+    if (!merged || typeof merged !== 'object') return null;
+    if (cardCount(local) === 0) return preferLocalCardsImages(local, merged);
+    return preferLocalCardsImages(local, {
+      ...merged,
+      cards: Array.isArray(local.cards) ? local.cards.map((c) => ({ ...c })) : []
+    });
+  }
+
+  function countUnexplainedCardLoss(local, cloud, merged) {
+    const tomb = merged?.settings?.deletedCardTombstones || {};
+    const mergedIds = cardIdSet(merged);
+    const seen = new Set();
+    let lost = 0;
+    for (const c of [...(local?.cards || []), ...(cloud?.cards || [])]) {
+      if (!c || c.id == null) continue;
+      const id = String(c.id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (!mergedIds.has(id) && !tomb[id]) lost += 1;
+    }
+    return lost;
   }
 
   /**
@@ -90,27 +301,99 @@
         reason: `云端有 ${cloudCards} 张卡片，本地为空，已阻止上传以免覆盖云端数据`
       };
     }
-    if (localComm === 0 && cloudComm > 0) {
-      return {
-        allow: false,
-        reason: `云端有 ${cloudComm} 条社区记录，本地为空，已阻止上传`
-      };
-    }
-    if (localCre === 0 && cloudCre > 0) {
-      return {
-        allow: false,
-        reason: `云端有 ${cloudCre} 条创作记录，本地为空，已阻止上传`
-      };
-    }
 
     const merged = mergePayload(local, cloud || {});
-    return { allow: true, merged };
+
+    if (localComm === 0 && cloudComm > 0) {
+      return { allow: true, merged: preferLocalCardsImages(local, merged) };
+    }
+    if (localCre === 0 && cloudCre > 0) {
+      return { allow: true, merged: preferLocalCardsImages(local, merged) };
+    }
+    const mergedCards = cardCount(merged);
+    const unexplained = countUnexplainedCardLoss(local, cloud, merged);
+    if (unexplained > 0) {
+      return {
+        allow: false,
+        reason: `合并后将丢失 ${unexplained} 张无删除记录的卡片，已阻止上传`
+      };
+    }
+    if (Math.max(localCards, cloudCards) >= 3 && mergedCards < Math.max(localCards, cloudCards)) {
+      const localOnlyLoss = localCards - mergedCards;
+      if (localOnlyLoss >= 2 && localCards > cloudCards) {
+        return {
+          allow: false,
+          reason: `上传将丢失 ${localOnlyLoss} 张本地卡片，已取消同步`
+        };
+      }
+    }
+
+    return { allow: true, merged: preferLocalCardsImages(local, merged) };
+  }
+
+  /**
+   * 拉取云端前校验：禁止无删除记录的大幅缩库
+   * @returns {{ allow: boolean, reason?: string, payload?: object }}
+   */
+  function validatePull(local, cloud, merged) {
+    const localN = cardCount(local);
+    const cloudN = cardCount(cloud);
+    const mergedN = cardCount(merged);
+    const unexplained = countUnexplainedCardLoss(local, cloud, merged);
+
+    if (localN > 0 && cloudN === 0 && mergedN < localN) {
+      return {
+        allow: false,
+        reason: `云端为空但本地有 ${localN} 张卡片，已保留本地`,
+        payload: merged
+      };
+    }
+    const localIds = cardIdSet(local);
+    const mergedIds = cardIdSet(merged);
+    let localIdsMissing = 0;
+    for (const id of localIds) {
+      if (!mergedIds.has(id)) localIdsMissing += 1;
+    }
+    const imageRegress = countImageRegression(local, merged);
+
+    if (unexplained >= 1 && (unexplained >= 2 || (localN >= 4 && mergedN < localN * 0.75))) {
+      if (localIdsMissing === 0 && mergedN >= localN) {
+        return {
+          allow: true,
+          payload: preferLocalCardsImages(local, merged)
+        };
+      }
+      return {
+        allow: false,
+        reason: `云端合并将丢失 ${unexplained} 张卡片（无删除记录），已保留本地`,
+        payload: preferLocalCardsImages(local, merged)
+      };
+    }
+    if (imageRegress > 0 && localN > 0 && localIdsMissing === 0) {
+      return {
+        allow: true,
+        payload: preferLocalCardsImages(local, merged)
+      };
+    }
+    return { allow: true, payload: preferLocalCardsImages(local, merged) };
+  }
+
+  function mergeCreationsList(localList, cloudList, tombstones) {
+    return byIdMergeWithPair(localList, cloudList, mergeCreationPair, tombstones || {});
   }
 
   window.CloudSyncSafety = {
     SCHEMA_VERSION,
     validatePush,
+    validatePull,
     mergePayload,
+    mergeCardPair,
+    mergeCardsList,
+    mergeCommunityPostsList,
+    mergeCreationsList,
+    imagePresenceScore,
+    preferLocalCardsImages,
+    pullPreserveLocalWarehouse,
     cardCount,
     communityCount
   };

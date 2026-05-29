@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchApimartTaskOnce } from './apimart';
 import { ApiError } from './errors';
-import { archiveRemoteImage } from './image-archive';
+import { archiveRemoteImage, isStorageRef } from './image-archive';
 import { type DebitSplit, refundUserCredits } from './membership-credits';
 
 type JobRow = {
@@ -85,9 +85,10 @@ export async function pollAndUpdateJob(
   refunded: boolean;
 }> {
   if (job.status === 'completed') {
+    const archived = await ensureJobImageArchived(admin, userId, job);
     return {
       status: 'completed',
-      imageUrl: job.result_image_url,
+      imageUrl: archived,
       errorMessage: null,
       refunded: !!(job.meta as Record<string, unknown>)?.refunded
     };
@@ -140,17 +141,11 @@ export async function pollAndUpdateJob(
   const polled = await fetchApimartTaskOnce(imageApiKey, imageApiBaseUrl, taskId);
 
   if (polled.status === 'completed' && polled.imageUrl) {
-    let storedUrl = polled.imageUrl;
-    try {
-      storedUrl = await archiveRemoteImage(
-        admin,
-        userId,
-        job.id,
-        polled.imageUrl
-      );
-    } catch (e) {
-      console.warn('[generation] archive image failed, keep remote url', e);
-    }
+    const storedUrl = await ensureJobImageArchived(admin, userId, {
+      ...job,
+      status: 'completed',
+      result_image_url: polled.imageUrl
+    });
     await admin
       .from('generation_requests')
       .update({
@@ -175,6 +170,45 @@ export async function pollAndUpdateJob(
   }
 
   return { status: 'processing', imageUrl: null, errorMessage: null, refunded: false };
+}
+
+/** 已完成任务：远程 URL 必须归档到 Storage；已是 storage:// 则直接返回 */
+async function ensureJobImageArchived(
+  admin: SupabaseClient,
+  userId: string,
+  job: JobRow
+): Promise<string | null> {
+  const url = job.result_image_url;
+  if (!url) return null;
+  if (isStorageRef(url)) return url;
+
+  const meta = (job.meta as Record<string, unknown>) || {};
+  try {
+    const stored = await archiveRemoteImage(admin, userId, job.id, url, {
+      maxAttempts: 3
+    });
+    if (stored !== url) {
+      await admin
+        .from('generation_requests')
+        .update({
+          result_image_url: stored,
+          meta: { ...meta, archived: true, archivePending: false }
+        })
+        .eq('id', job.id);
+    }
+    return stored;
+  } catch (e) {
+    console.warn('[generation] archive pending', job.id, e);
+    if (!meta.archivePending) {
+      await admin
+        .from('generation_requests')
+        .update({
+          meta: { ...meta, archivePending: true, archiveError: String(e instanceof Error ? e.message : e) }
+        })
+        .eq('id', job.id);
+    }
+    return url;
+  }
 }
 
 export function assertJobOwner(job: JobRow, userId: string) {
