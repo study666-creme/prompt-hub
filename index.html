@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__APP_BUILD__ = '20260622a';
+    window.__APP_BUILD__ = '20260622d';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -61,7 +61,7 @@
   <link rel="stylesheet" href="styles-theme.css?v=20260615z">
   <link rel="stylesheet" href="styles-mobile.css?v=20260619j">
   <link rel="stylesheet" href="styles-settings.css?v=20260616n">
-  <link rel="stylesheet" href="styles-features.css?v=20260619j">
+  <link rel="stylesheet" href="styles-features.css?v=20260622c">
   <link rel="stylesheet" href="styles-assets.css?v=20260619j">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
@@ -454,24 +454,22 @@
       </button>
       <button type="button" class="app-nav-item" data-app="creations">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-        <span class="app-nav-label">我发布的</span>
-        <span class="app-nav-soon">草案</span>
+        <span class="app-nav-label">我的主页</span>
       </button>
       <button type="button" class="app-nav-item" data-app="imagegen">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
         <span class="app-nav-label">图片生成</span>
         <span class="app-nav-soon">草案</span>
       </button>
-      <button type="button" class="app-nav-item" data-app="assetstudio">
-        <img class="app-nav-icon app-nav-icon-img" src="assets/asset-studio-icon.png" width="24" height="24" alt="">
-        <span class="app-nav-label">资产创作</span>
-        <span class="app-nav-soon">基础会员+</span>
-      </button>
-
       <button type="button" class="app-nav-item" data-app="assetmarket">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
         <span class="app-nav-label">卡片资产</span>
         <span class="app-nav-soon">草案</span>
+      </button>
+      <button type="button" class="app-nav-item" data-app="assetstudio">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"/><path d="M3 12h18"/><path d="m19 5-2 2"/><path d="m5 19 2-2"/></svg>
+        <span class="app-nav-label">资产创作</span>
+        <span class="app-nav-soon">限免</span>
       </button>
     </div>
     <div class="app-nav-footer">
@@ -519,7 +517,7 @@
         <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260622a</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260622d</p>
     </div>
   </nav>
 
@@ -641,6 +639,7 @@
       <div class="header-actions">
         <div id="batchBar" class="batch-bar">
           <button class="btn btn-ghost btn-sm" onclick="batchMoveGroup()">移动</button>
+          <button class="btn btn-ghost btn-sm" onclick="batchMoveWarehouse()">移库</button>
           <button class="btn btn-ghost btn-sm" onclick="batchAddTag()">标签</button>
           <button class="btn btn-danger btn-sm" onclick="batchDelete()">删除</button>
           <button class="btn btn-ghost btn-sm" onclick="cancelBatch()">取消</button>
@@ -851,11 +850,17 @@
     </div>
 
     <div class="app-page app-page-feature" id="pageCreations">
-      <div class="feature-shell community-shell">
+      <div class="feature-shell community-shell my-home-shell">
         <header class="feature-header">
-          <h2>我发布的</h2>
+          <h2>我的主页</h2>
         </header>
-        <div class="community-page-layout">
+        <div class="my-home-profile" id="myHomeProfile" aria-label="个人主页信息"></div>
+        <div class="my-home-tabs" id="myHomeTabs" role="tablist">
+          <button type="button" class="my-home-tab active" data-home-tab="posts" role="tab">发布作品</button>
+          <button type="button" class="my-home-tab" data-home-tab="owned-packages" role="tab">拥有的资产包</button>
+          <button type="button" class="my-home-tab" data-home-tab="published-packages" role="tab">发布的资产包</button>
+        </div>
+        <div class="community-page-layout my-home-pane active" data-home-pane="posts">
           <div class="community-page-main">
             <div class="feature-body feature-body-cards">
               <div class="published-reward-rules" id="publishedRewardRules"></div>
@@ -871,6 +876,8 @@
             <div class="community-side-body" id="creationsSideBody"></div>
           </aside>
         </div>
+        <div class="my-home-pane hidden" data-home-pane="owned-packages" id="myHomeOwnedPackages"></div>
+        <div class="my-home-pane hidden" data-home-pane="published-packages" id="myHomePublishedPackages"></div>
       </div>
     </div>
 
@@ -1149,7 +1156,7 @@
         <div class="subscribe-mini-offer" id="subscribeMiniOffer"></div>
         <div class="subscribe-lite-plan-row" id="subscribeLitePlanRow"></div>
         <div class="subscribe-plans-grid" id="subscribePlansGrid"></div>
-        <p class="subscribe-legal">普通用户免费：每日 5 积分、100 张卡片。<strong>基础会员及以上</strong>可用资产创作工作台。连续包月价见各档对比。免费会员请点侧栏「免费试用」完成任务领取。详见 <a href="terms.html" class="link-inline">用户协议</a>。</p>
+        <p class="subscribe-legal">普通用户免费：每日 5 积分、100 张卡片。资产创作<strong>限免</strong>（登录可用，对话/生图按积分计费）。连续包月价见各档对比。免费会员请点侧栏「免费试用」完成任务领取。详见 <a href="terms.html" class="link-inline">用户协议</a>。</p>
         </section>
       </div>
     </div>
@@ -1183,16 +1190,16 @@
   <script src="api-client.js?v=20260616n"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
   <script src="supabase-sync.js?v=20260622a"></script>
-  <script src="card-image-loader.js?v=20260622a"></script>
+  <script src="card-image-loader.js?v=20260622c"></script>
   <script src="membership.js?v=20260616n"></script>
   <script src="modal-hub.js?v=20260606m"></script>
   <script src="subscription.js?v=20260619j"></script>
-  <script src="trial-tasks.js?v=20260619j"></script>
+  <script src="trial-tasks.js?v=20260622d"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="script.js?v=20260622a"></script>
+  <script src="script.js?v=20260622d"></script>
   <script src="points-system.js?v=20260606m"></script>
-  <script src="features-draft.js?v=20260622a"></script>
-  <script src="features-assets.js?v=20260619j"></script>
+  <script src="features-draft.js?v=20260622d"></script>
+  <script src="features-assets.js?v=20260622d"></script>
   <script src="hotfix-image-layout.js?v=20260606m"></script>
   <script src="mobile.js?v=20260606m"></script>
   <script>

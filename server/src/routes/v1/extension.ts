@@ -2,7 +2,13 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Env } from '../../env';
 import { ApiError } from '../../lib/errors';
-import { appendQuickCard, listUserTags } from '../../lib/extension-card';
+import {
+  appendQuickCard,
+  listUserTags,
+  readDefaultPublishCommunity,
+  readShowTrimBlackBorderTool
+} from '../../lib/extension-card';
+import { mergeTaskFlags } from '../../lib/membership-tasks';
 import { createAdminClient, getOrCreateProfile } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
 
@@ -11,7 +17,8 @@ const quickCardSchema = z.object({
   title: z.string().max(200).optional(),
   imageBase64: z.string().max(7_000_000).optional().nullable(),
   sourceUrl: z.string().max(500).optional().nullable(),
-  tags: z.array(z.string().max(40)).max(20).optional()
+  tags: z.array(z.string().max(40)).max(20).optional(),
+  publishToCommunity: z.boolean().optional()
 });
 
 export const extensionRoutes = new Hono<{ Bindings: Env }>();
@@ -22,6 +29,12 @@ extensionRoutes.get('/status', async c => {
   const user = c.get('user');
   const admin = createAdminClient(c.env);
   const profile = await getOrCreateProfile(admin, user.id);
+  const { data: row } = await admin
+    .from('user_data')
+    .select('data')
+    .eq('user_id', user.id)
+    .maybeSingle();
+  const payload = (row?.data || {}) as Parameters<typeof readDefaultPublishCommunity>[0];
   return c.json({
     ok: true,
     data: {
@@ -30,7 +43,9 @@ extensionRoutes.get('/status', async c => {
       memberActive: !!profile.membership_tier && (
         !profile.membership_until
         || new Date(profile.membership_until).getTime() > Date.now()
-      )
+      ),
+      defaultPublishCommunity: readDefaultPublishCommunity(payload),
+      showTrimBlackBorderTool: readShowTrimBlackBorderTool(payload)
     }
   });
 });
@@ -66,12 +81,20 @@ extensionRoutes.post('/quick-card', async c => {
 
   try {
     const result = await appendQuickCard(admin, user.id, profile, parsed.data);
+    void mergeTaskFlags(admin, user.id, { extension_card_saved: true }).catch((err) => {
+      console.error('extension task flag merge failed', err);
+    });
+    const message = result.publishedToCommunity
+      ? '已保存到仓库并公开到社区'
+      : (result.publishNote || '已保存到 Prompt Hub 仓库');
     return c.json({
       ok: true,
       data: {
-        message: '已保存到 Prompt Hub 仓库',
+        message,
         cardId: result.cardId,
-        cardCount: result.cardCount
+        cardCount: result.cardCount,
+        publishedToCommunity: result.publishedToCommunity,
+        communityPostId: result.communityPostId
       }
     });
   } catch (e) {

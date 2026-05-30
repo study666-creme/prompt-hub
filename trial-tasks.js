@@ -3,11 +3,13 @@
  */
 (function () {
   const LS_PWA_FLAG = 'promptrepo_pwa_task_flag';
+  const LS_ASSET_STUDIO_LINK = 'promptrepo_task_asset_studio_link';
   const LS_PENDING_INVITE = 'promptrepo_pending_invite';
   let syncDebounceTimer = null;
+  let syncInflight = null;
   let panelBound = false;
   let lastTaskSyncAt = 0;
-  const TASK_SYNC_MIN_GAP_MS = 90000;
+  const TASK_SYNC_MIN_GAP_MS = 180000;
   let tasksLoadSerial = null;
   let cachedTaskList = null;
 
@@ -131,6 +133,10 @@
       }));
     } catch (e) { /* ignore */ }
     const qp = window.__phQuickPreviewTask || {};
+    let assetStudioLinkCard = false;
+    try {
+      assetStudioLinkCard = localStorage.getItem(LS_ASSET_STUDIO_LINK) === '1';
+    } catch (e) { /* ignore */ }
     return {
       cardsCount: Array.isArray(cards) ? cards.length : 0,
       communityPosts,
@@ -138,28 +144,37 @@
       quickPreviewWarehouseUsed: !!qp.warehouseUsed,
       quickPreviewWarehouseGotoGen: !!qp.warehouseGotoGen,
       quickPreviewCommunityUsed: !!qp.communityUsed,
-      quickPreviewCommunityFavorited: !!qp.communityFavorited
+      quickPreviewCommunityFavorited: !!qp.communityFavorited,
+      assetStudioLinkCard
     };
   }
 
   async function syncTaskProgress(force) {
     if (!isLoggedIn() || !window.PromptHubApi?.syncMembershipTasks) return null;
-    if (window.PromptHubApi?.isApiUnreachable?.()) return null;
+    if (window.PromptHubApi?.isApiUnreachable?.() || window.PromptHubApi?.isApiRateLimited?.()) return null;
     if (!force && Date.now() - lastTaskSyncAt < TASK_SYNC_MIN_GAP_MS) return null;
-    const r = await window.PromptHubApi.syncMembershipTasks(collectSyncPayload());
-    if (r?.ok) lastTaskSyncAt = Date.now();
-    return r;
+    if (syncInflight) return syncInflight;
+    syncInflight = (async () => {
+      try {
+        const r = await window.PromptHubApi.syncMembershipTasks(collectSyncPayload());
+        if (r?.ok) lastTaskSyncAt = Date.now();
+        else if (r?.status === 429 || r?.code === 'RATE_LIMITED') {
+          lastTaskSyncAt = Date.now() - TASK_SYNC_MIN_GAP_MS + 300000;
+        }
+        return r;
+      } finally {
+        syncInflight = null;
+      }
+    })();
+    return syncInflight;
   }
 
   function scheduleSyncTaskProgress(force) {
     clearTimeout(syncDebounceTimer);
-    if (force) {
-      void syncTaskProgress(true);
-      return;
-    }
+    if (force && Date.now() - lastTaskSyncAt < TASK_SYNC_MIN_GAP_MS) return;
     syncDebounceTimer = setTimeout(() => {
-      void syncTaskProgress(false);
-    }, 2000);
+      void syncTaskProgress(!!force);
+    }, force ? 400 : 3500);
   }
 
   async function diagnoseApiConnection() {
@@ -494,6 +509,7 @@
     el.innerHTML = `
       <section class="trial-hub-block">
         <h4 class="trial-hub-title">每日福利</h4>
+        <p class="trial-hub-desc">资产创作工作台<strong>限免</strong>开放（登录即可用，AI 对话与生图按积分计费）。</p>
         ${phoneNote}
         <div class="trial-hub-row">
           <div class="trial-hub-row-main">

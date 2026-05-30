@@ -3,6 +3,8 @@
  */
 (function () {
   const LS_WAREHOUSES = 'promptrepo_warehouses_v1';
+  const LS_OWNED_PACKAGES = 'promptrepo_owned_packages';
+  const LS_PUBLISHED_PACKAGES = 'promptrepo_published_packages';
 
   const EXTRA_WAREHOUSE_BY_TIER = {
     standard: 1,
@@ -104,7 +106,7 @@
     } catch (e) { /* ignore */ }
     return {
       activeId: 'default',
-      warehouses: [{ id: 'default', name: '我的卡片库', isDefault: true }]
+      warehouses: [{ id: 'default', name: '默认库', isDefault: true }]
     };
   }
 
@@ -124,28 +126,234 @@
     return store.warehouses.filter((w) => !w.isDefault).length;
   }
 
+  function migrateWarehouseStore(store) {
+    if (!store?.warehouses?.length) return store;
+    store.warehouses.forEach((w) => {
+      if (w.isDefault && (w.name === '我的卡片库' || w.name === '我的卡片库 ')) w.name = '默认库';
+    });
+    return store;
+  }
+
+  function cardWarehouseId(card) {
+    return card?.warehouseId || 'default';
+  }
+
+  function getActiveWarehouseId() {
+    return migrateWarehouseStore(loadWarehouseStore()).activeId || 'default';
+  }
+
+  function getWarehouseById(id) {
+    const store = migrateWarehouseStore(loadWarehouseStore());
+    return store.warehouses.find((w) => w.id === id);
+  }
+
+  function filterCardsByWarehouse(cardList, warehouseId) {
+    const wid = warehouseId || getActiveWarehouseId();
+    return (cardList || []).filter((c) => cardWarehouseId(c) === wid);
+  }
+
+  function countWarehouseCards(warehouseId) {
+    return filterCardsByWarehouse(window.__promptHubCards || [], warehouseId).length;
+  }
+
+  function packagesStorageKey(kind) {
+    const base = kind === 'published' ? LS_PUBLISHED_PACKAGES : LS_OWNED_PACKAGES;
+    return `${base}_${accountKey()}`;
+  }
+
+  function loadPackageIds(kind) {
+    try {
+      const raw = localStorage.getItem(packagesStorageKey(kind));
+      const list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list.map(String) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function savePackageIds(kind, ids) {
+    try {
+      localStorage.setItem(packagesStorageKey(kind), JSON.stringify([...new Set(ids.map(String))]));
+    } catch (e) { /* ignore */ }
+  }
+
+  function recordOwnedPackage(pkgId) {
+    const ids = loadPackageIds('owned');
+    if (!ids.includes(pkgId)) {
+      ids.push(pkgId);
+      savePackageIds('owned', ids);
+    }
+  }
+
+  function recordPublishedPackage(pkgId) {
+    const ids = loadPackageIds('published');
+    if (!ids.includes(pkgId)) {
+      ids.push(pkgId);
+      savePackageIds('published', ids);
+    }
+  }
+
+  function renderMyHomePackages(container, kind) {
+    if (!container) return;
+    const ids = loadPackageIds(kind);
+    const list = ids.map((id) => MOCK_PACKAGES.find((p) => p.id === id)).filter(Boolean);
+    if (!list.length) {
+      container.innerHTML =
+        kind === 'published'
+          ? '<div class="feature-empty"><p>暂无发布的资产包</p><p class="panel-hint">在「卡片资产」购买或发布资产包后，会显示在这里。</p><button type="button" class="btn btn-secondary btn-sm" onclick="switchAppPage(\'assetmarket\')">去卡片资产</button></div>'
+          : '<div class="feature-empty"><p>暂无拥有的资产包</p><p class="panel-hint">在「卡片资产」购买资产包后，会显示在这里。</p><button type="button" class="btn btn-secondary btn-sm" onclick="switchAppPage(\'assetmarket\')">去卡片资产</button></div>';
+      return;
+    }
+    container.innerHTML = `<div class="my-home-package-grid">${list
+      .map(
+        (pkg) => `<article class="asset-market-card my-home-package-card" data-pkg-id="${esc(pkg.id)}">
+        <div class="asset-market-card-cover" style="--asset-hue:${pkg.previewThumbs[0]?.hue || 200}"><span class="asset-market-card-tag">${esc(pkg.tag)}</span></div>
+        <div class="asset-market-card-body">
+          <h3 class="asset-market-card-title">${esc(pkg.title)}</h3>
+          <p class="asset-market-card-meta">${esc(pkg.countLabel)}</p>
+          <button type="button" class="btn btn-secondary btn-sm" data-action="preview">查看</button>
+        </div>
+      </article>`
+      )
+      .join('')}</div>`;
+    container.querySelectorAll('[data-action="preview"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.closest('[data-pkg-id]')?.dataset?.pkgId;
+        if (id) openPackagePreview(id);
+      });
+    });
+  }
+
   function renderWarehouseSidebar() {
     const list = document.getElementById('warehouseList');
     if (!list) return;
-    const store = loadWarehouseStore();
+    const store = migrateWarehouseStore(loadWarehouseStore());
+    saveWarehouseStore(store);
     list.innerHTML = store.warehouses
       .map(
-        (w) =>
-          `<button type="button" class="group-item warehouse-item${store.activeId === w.id ? ' active' : ''}" data-warehouse-id="${esc(w.id)}" title="${esc(w.name)}">${esc(w.name)}</button>`
+        (w) => {
+          const n = countWarehouseCards(w.id);
+          return `<button type="button" class="group-item warehouse-item${store.activeId === w.id ? ' active' : ''}" data-warehouse-id="${esc(w.id)}" title="${esc(w.name)}">${esc(w.name)} <span class="count">${n}</span></button>`;
+        }
       )
       .join('');
     list.querySelectorAll('.warehouse-item').forEach((btn) => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.warehouseId;
-        const s = loadWarehouseStore();
+        const s = migrateWarehouseStore(loadWarehouseStore());
         if (s.activeId === id) return;
         s.activeId = id;
         saveWarehouseStore(s);
         renderWarehouseSidebar();
-        const name = s.warehouses.find((w) => w.id === id)?.name || '卡片库';
-        toast(`已切换到「${name}」（演示：卡片数据尚未分库，正式版将独立存储）`);
+        updateWarehouseTitle();
+        if (typeof window.refreshWarehouseUI === 'function') {
+          window.refreshWarehouseUI({ softCards: false });
+        }
+      });
+      btn.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        const s = migrateWarehouseStore(loadWarehouseStore());
+        const w = s.warehouses.find((x) => x.id === btn.dataset.warehouseId);
+        if (!w) return;
+        const promptFn = window.customPrompt;
+        const finish = (name) => {
+          if (!name?.trim()) return;
+          w.name = name.trim().slice(0, 16);
+          saveWarehouseStore(s);
+          renderWarehouseSidebar();
+          updateWarehouseTitle();
+        };
+        if (typeof promptFn === 'function') {
+          promptFn(w.isDefault ? '默认库名称' : '卡片库名称', w.name, finish);
+        } else {
+          const name = window.prompt(w.isDefault ? '默认库名称' : '卡片库名称', w.name);
+          finish(name);
+        }
+      });
+      if (btn.dataset.warehouseId?.includes('default')) return;
+      btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const whId = btn.dataset.warehouseId;
+        const s = migrateWarehouseStore(loadWarehouseStore());
+        const w = s.warehouses.find((x) => x.id === whId);
+        if (!w || w.isDefault) return;
+        const items = [
+          {
+            label: '重命名',
+            action: () => {
+              const promptFn = window.customPrompt;
+              const finish = (name) => {
+                if (!name?.trim()) return;
+                w.name = name.trim().slice(0, 16);
+                saveWarehouseStore(s);
+                renderWarehouseSidebar();
+                updateWarehouseTitle();
+              };
+              if (typeof promptFn === 'function') promptFn('卡片库名称', w.name, finish);
+              else finish(window.prompt('卡片库名称', w.name));
+            }
+          },
+          {
+            label: '删除空库',
+            action: () => {
+              const n = countWarehouseCards(whId);
+              if (n > 0) {
+                toast(`库内还有 ${n} 张卡片，请先移回默认库或删除卡片`);
+                return;
+              }
+              s.warehouses = s.warehouses.filter((x) => x.id !== whId);
+              if (s.activeId === whId) s.activeId = 'default';
+              saveWarehouseStore(s);
+              renderWarehouseSidebar();
+              updateWarehouseTitle();
+              if (typeof window.refreshWarehouseUI === 'function') window.refreshWarehouseUI({ softCards: false });
+              toast('已删除卡片库');
+            }
+          }
+        ];
+        if (typeof window.showContextMenu === 'function') window.showContextMenu(e.clientX, e.clientY, items);
       });
     });
+  }
+
+  function updateWarehouseTitle() {
+    const w = getWarehouseById(getActiveWarehouseId());
+    const titleEl = document.getElementById('currentGroupTitle');
+    if (!titleEl || !w) return;
+    const groupLabel =
+      typeof window.currentGroup === 'string'
+        ? window.currentGroup === 'all'
+          ? '全部提示词'
+          : window.currentGroup === 'uncategorized'
+            ? '未分类'
+            : window.currentGroup
+        : '全部提示词';
+    titleEl.textContent = w.isDefault ? groupLabel : `${w.name} · ${groupLabel}`;
+  }
+
+  function getOtherWarehouses() {
+    const active = getActiveWarehouseId();
+    return migrateWarehouseStore(loadWarehouseStore()).warehouses.filter((w) => w.id !== active);
+  }
+
+  function moveCardsToWarehouse(cardIds, warehouseId) {
+    const target = getWarehouseById(warehouseId);
+    if (!target || !Array.isArray(cardIds) || !cardIds.length) return 0;
+    const list = window.__promptHubCards || [];
+    let n = 0;
+    cardIds.forEach((id) => {
+      const c = list.find((x) => x.id === id);
+      if (!c) return;
+      c.warehouseId = target.id;
+      n += 1;
+    });
+    if (n) {
+      window.__promptHubCards = list;
+      renderWarehouseSidebar();
+      if (typeof window.persistPromptHubCards === 'function') void window.persistPromptHubCards({ skipCloud: true });
+      else if (typeof window.refreshWarehouseUI === 'function') window.refreshWarehouseUI({ softCards: false });
+    }
+    return n;
   }
 
   function tryCreateWarehouse() {
@@ -187,7 +395,9 @@
     store.activeId = id;
     saveWarehouseStore(store);
     renderWarehouseSidebar();
-    toast(`已创建卡片库「${name}」（演示：后续版本将支持独立存卡）`);
+    updateWarehouseTitle();
+    if (typeof window.refreshWarehouseUI === 'function') window.refreshWarehouseUI({ softCards: false });
+    toast(`已创建卡片库「${name}」，当前库为空，可将卡片移入或在此新建`);
   }
 
   function renderMarketplace() {
@@ -209,6 +419,7 @@
               <span class="asset-market-price">${esc(pkg.priceLabel)}${buyout ? ' <em>买断</em>' : ''}</span>
               <div class="asset-market-card-actions">
                 <button type="button" class="btn btn-secondary btn-sm" data-action="preview">预览结构</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-action="publish-demo">发布（演示）</button>
                 <button type="button" class="btn btn-primary btn-sm" data-action="buy">${buyout ? '买断（演示）' : '购买（演示）'}</button>
               </div>
             </div>
@@ -226,13 +437,30 @@
         e.stopPropagation();
         fakePurchase(id);
       });
+      card.querySelector('[data-action="publish-demo"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fakePublish(id);
+      });
     });
+  }
+
+  function fakePublish(id) {
+    if (!window.SupabaseSync?.isLoggedIn?.()) {
+      toast('发布资产包需先登录');
+      window.openAuthModal?.();
+      return;
+    }
+    const pkg = MOCK_PACKAGES.find((p) => p.id === id);
+    if (!pkg) return;
+    recordPublishedPackage(id);
+    toast(`「${pkg.title}」已加入你发布的资产包（演示）`, 5000);
   }
 
   function fakePurchase(id) {
     const pkg = MOCK_PACKAGES.find((p) => p.id === id);
     if (!pkg) return;
-    toast(`「${pkg.title}」购买功能即将上线，当前为演示，不会扣款。`, 5000);
+    recordOwnedPackage(id);
+    toast(`「${pkg.title}」已加入你的资产包（演示，未扣款）`, 5000);
   }
 
   function renderPreviewTree(nodes, depth) {
@@ -303,33 +531,44 @@
   function renderStudio() {
     const root = document.getElementById('assetStudioRoot');
     if (!root) return;
+    const cardN = (window.__promptHubCards || []).length;
     root.innerHTML = `
       <div class="asset-studio-launch">
-        <p class="community-inline-hint">资产创作已独立为全屏工作台，与卡片库联动（当前为骨架 Demo）。</p>
+        <header class="feature-header asset-studio-launch-head">
+          <h2>资产创作</h2>
+          <div class="asset-studio-launch-actions">
+            <button type="button" class="btn btn-primary" id="assetStudioOpenBtn">进入创作工作台</button>
+            <button type="button" class="btn btn-secondary" id="assetStudioExportBtn">打开并同步卡片库</button>
+          </div>
+        </header>
+        <p class="community-inline-hint">全屏写作台：拖入卡片关联文档、悬浮查看设定、右侧可生图。与主站卡片库实时联动。</p>
         <ul class="asset-studio-launch-list">
-          <li>左：卡片库 / 资产包，可多文件夹同时展开</li>
-          <li>左中：项目文档分类</li>
-          <li>中：写作区 + 首字段拖入关联卡片</li>
-          <li>右：对话 / 生图 / 生视频（占位）</li>
-          <li>关联卡片可悬浮拖动，文中名称可点击查看</li>
+          <li>左侧卡片库按主站<strong>分组文件夹</strong>展示，支持筛选与详情编辑</li>
+          <li>文档分类可自建文件夹，拖入首字段建立卡片 ↔ 文档关联</li>
+          <li>右侧生图对接主站积分与 API；对话区可汇总当前文档上下文</li>
         </ul>
-        <div class="asset-studio-launch-actions">
-          <button type="button" class="btn btn-primary" id="assetStudioOpenBtn">进入创作工作台</button>
-          <button type="button" class="btn btn-secondary" id="assetStudioExportBtn">导出当前卡片库并打开</button>
-        </div>
+        <p class="panel-hint">当前主站卡片库约 <strong>${cardN}</strong> 张；进入工作台后可一键导入。</p>
       </div>`;
     document.getElementById('assetStudioOpenBtn')?.addEventListener('click', () => {
       window.location.href = 'asset-studio.html';
     });
     document.getElementById('assetStudioExportBtn')?.addEventListener('click', () => {
-      exportCardsForStudio();
-      window.location.href = 'asset-studio.html';
+      exportCardsForStudio({ silent: true });
+      window.location.href = 'asset-studio.html?import=1';
     });
   }
 
   function exportCardsForStudio(opts) {
     const silent = opts && opts.silent;
     const raw = window.__promptHubCards || [];
+    let groups = [];
+    try {
+      const uid = window.SupabaseSync?.getUserId?.() || localStorage.getItem('promptrepo_last_uid') || '';
+      const key = uid ? `promptrepo_groups_${uid}` : 'promptrepo_groups';
+      const g = localStorage.getItem(key) || localStorage.getItem('promptrepo_groups');
+      if (g) groups = JSON.parse(g);
+    } catch (e) { groups = []; }
+    if (!Array.isArray(groups)) groups = [];
     const list = raw.slice(0, 200).map((c) => ({
       id: c.id,
       title: c.title,
@@ -339,9 +578,9 @@
       tags: c.tags
     }));
     try {
-      localStorage.setItem('promptrepo_studio_import_cards', JSON.stringify(list));
+      localStorage.setItem('promptrepo_studio_import_cards', JSON.stringify({ cards: list, groups }));
       if (!silent) {
-        toast(list.length ? `已准备 ${list.length} 张卡片，正在打开工作台…` : '卡片库为空，工作台将加载演示数据');
+        toast(list.length ? `已准备 ${list.length} 张卡片，请点击工作台「导入卡片库」` : '卡片库为空');
       }
     } catch (e) {
       if (!silent) toast('导出失败，请直接打开工作台');
@@ -366,7 +605,6 @@
   function init() {
     const saved = localStorage.getItem('promptrepo_app_page');
     if (saved === 'assetstudio' && !/\/asset-studio\.html$/i.test(window.location.pathname || '')) {
-      exportCardsForStudio({ silent: true });
       window.location.href = 'asset-studio.html';
       return;
     }
@@ -383,6 +621,20 @@
     tryCreateWarehouse,
     getExtraWarehouseLimit,
     exportCardsForStudio,
-    MOCK_PACKAGES
+    MOCK_PACKAGES,
+    getActiveWarehouseId,
+    getWarehouseById,
+    filterCardsByWarehouse,
+    cardWarehouseId,
+    countWarehouseCards,
+    getOtherWarehouses,
+    moveCardsToWarehouse,
+    updateWarehouseTitle,
+    recordOwnedPackage,
+    recordPublishedPackage,
+    loadPackageIds,
+    renderMyHomePackages,
+    openPackagePreview,
+    closePackagePreview
   };
 })();

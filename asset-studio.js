@@ -37,7 +37,7 @@
   let mentionApplying = false;
 
   function canUseAssetStudio() {
-    return !!window.Membership?.isUnlimitedPins?.();
+    return window.SupabaseSync?.isLoggedIn?.() === true;
   }
 
   function isViewOnly() {
@@ -46,7 +46,7 @@
 
   function guardEdit(msg) {
     if (!isViewOnly()) return true;
-    setStatus(msg || '基础会员及以上可编辑创作，当前为只读预览');
+    setStatus(msg || '请先登录后使用资产创作（当前为只读预览）');
     return false;
   }
 
@@ -1747,7 +1747,7 @@
   }
 
   function addCardToDoc(cardId) {
-    if (!guardEdit('基础会员及以上可拖入卡片关联文档')) return;
+    if (!guardEdit('请先登录后拖入卡片关联文档')) return;
     const doc = getActiveDoc();
     const c = getCard(cardId);
     if (!doc || !c) return;
@@ -1761,6 +1761,12 @@
     saveState();
     renderAll();
     openFloatCardForHero(cardId);
+    try {
+      localStorage.setItem('promptrepo_task_asset_studio_link', '1');
+    } catch (e) { /* ignore */ }
+    if (window.PromptHubApi?.syncMembershipTasks) {
+      void window.PromptHubApi.syncMembershipTasks({ assetStudioLinkCard: true });
+    }
   }
 
   function getActiveFolderId() {
@@ -2176,7 +2182,7 @@
     const input = document.getElementById('studioChatInput');
     const text = input?.value?.trim();
     if (!text) return;
-    if (!guardEdit('基础会员及以上可使用 AI 对话')) return;
+    if (!guardEdit('请先登录后使用 AI 对话')) return;
     if (!window.PromptHubApi?.studioChat) {
       setStatus('对话 API 未加载，请刷新页面');
       return;
@@ -2280,7 +2286,7 @@
   }
 
   async function runStudioImageGen() {
-    if (!guardEdit('基础会员及以上可生图')) return;
+    if (!guardEdit('请先登录后生图')) return;
     const promptEl = document.getElementById('studioImagePrompt');
     const btn = document.getElementById('studioImageSubmit');
     const hint = document.getElementById('studioImageHint');
@@ -2703,7 +2709,7 @@
   }
 
   function tryImportFromMain() {
-    if (!guardEdit('基础会员及以上可导入卡片库')) return;
+    if (!guardEdit('请先登录后导入卡片库')) return;
     if (mergeImportFromMain(false)) return;
     void (async () => {
       setStatus('正在读取主站卡片库…');

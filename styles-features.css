@@ -520,6 +520,78 @@
   color: var(--text-muted);
 }
 
+.my-home-shell .feature-header {
+  margin-bottom: 0;
+}
+
+.my-home-profile {
+  padding: 0 16px 12px;
+}
+
+.my-home-profile-card {
+  margin-bottom: 0;
+}
+
+.my-home-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-left: auto;
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.my-home-stats strong {
+  display: block;
+  font-size: 18px;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.my-home-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.my-home-tab {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: var(--font-xs);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+
+.my-home-tab:hover {
+  border-color: var(--border-light);
+  color: var(--text-primary);
+}
+
+.my-home-tab.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+  color: var(--text-primary);
+}
+
+.my-home-pane {
+  padding: 16px;
+}
+
+.my-home-pane.hidden {
+  display: none !important;
+}
+
+.my-home-package-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
 .creations-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -2210,17 +2282,16 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
 }
 
 .community-side-img-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto 12px;
   height: auto;
   max-height: none;
-  min-height: 120px;
+  min-height: 0;
   padding: 0;
-  margin: 0 0 12px;
   border: none;
-  background: var(--bg-hover);
+  background: #06080c;
   cursor: zoom-in;
   position: relative;
   border-radius: var(--radius);
@@ -2229,7 +2300,8 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
   pointer-events: auto;
 }
 .community-side-img {
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   height: auto;
   max-height: min(72vh, 560px);
   min-height: 0;
@@ -2237,7 +2309,8 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
   object-position: center center;
   display: block;
   border-radius: 0;
-  background: var(--bg-hover);
+  background: transparent;
+  vertical-align: top;
   transition: opacity 0.3s ease;
   pointer-events: none;
 }

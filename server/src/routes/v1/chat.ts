@@ -15,6 +15,7 @@ import {
   syncMembershipCredits
 } from '../../lib/membership-credits';
 import { createAdminClient, getOrCreateProfile, isMembershipActive } from '../../lib/supabase';
+import { mergeTaskFlags } from '../../lib/membership-tasks';
 import { rateLimit } from '../../middleware/rate-limit';
 
 const messageSchema = z.object({
@@ -83,9 +84,6 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
 
   const admin = createAdminClient(c.env);
   let profile = await syncMembershipCredits(admin, user.id);
-  if (!isMembershipActive(profile)) {
-    throw new ApiError(403, 'MEMBERSHIP_REQUIRED', '基础会员及以上可使用 AI 对话');
-  }
 
   const apiKey = c.env.CHAT_API_KEY;
   if (!apiKey) {
@@ -188,6 +186,10 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
     }
     throw debitErr;
   }
+
+  void mergeTaskFlags(admin, user.id, { asset_studio_chat_used: true }).catch((err) => {
+    console.error('asset studio chat task flag merge failed', err);
+  });
 
   return c.json({
     ok: true,

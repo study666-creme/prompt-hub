@@ -3585,14 +3585,8 @@
       container.dataset.fastHydrate = '1';
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
       try {
-        await Promise.all([
-          window.SupabaseSync?.prefetchCardsImages?.(pageCards, 2800) || Promise.resolve(),
-          hydrateWarehouseBackupsFromIdb(container, pageCards)
-        ]);
+        await hydrateWarehouseBackupsFromIdb(container, pageCards);
         window.SupabaseSync?.patchImageSrcFromCache?.(container);
-        if (window.SupabaseSync?.hydrateImageElements) {
-          await window.SupabaseSync.hydrateImageElements(container, { onlyMissing: true });
-        }
       } catch (e) {
         console.warn('[cards] warehouse fast hydrate', e);
         delete container.dataset.fastHydrate;
@@ -3805,6 +3799,8 @@
     }
 
     function refreshWarehouseUI(opts = {}) {
+      window.currentGroup = currentGroup;
+      window.FeatureAssets?.updateWarehouseTitle?.();
       const soft = opts.softCards === true;
       updateTagFilter();
       buildFilterMenu();
@@ -4358,7 +4354,7 @@
     window.persistPromptHubCards = window.savePromptHubCardsNow;
 
     function renderGroups() {
-      const visible = filterTombstonedCards(cards);
+      const visible = cardsForActiveWarehouse(filterTombstonedCards(cards));
       document.getElementById('allCount').textContent = visible.length;
       document.getElementById('uncategorizedCount').textContent = visible.filter(c => !c.group).length;
       document.querySelectorAll('.group-item').forEach(el => el.classList.remove('active'));
@@ -4384,7 +4380,8 @@
 
     function switchGroup(g) {
       currentGroup = g;
-      document.getElementById('currentGroupTitle').textContent = g === 'all' ? '全部提示词' : (g === 'uncategorized' ? '未分类' : g);
+      window.currentGroup = g;
+      window.FeatureAssets?.updateWarehouseTitle?.();
       document.getElementById('searchInput').value = '';
       renderGroups(); renderCards(true);
     }
@@ -4505,7 +4502,7 @@
       const search = (searchEl?.value || '').toLowerCase();
       sortMode = document.getElementById('sortSelect').value;
       if (reset || allFilteredCards.length === 0) {
-        let filtered = filterTombstonedCards([...cards]);
+        let filtered = cardsForActiveWarehouse(filterTombstonedCards([...cards]));
         if (currentGroup === 'uncategorized') filtered = filtered.filter(c => !c.group);
         else if (currentGroup !== 'all') filtered = filtered.filter(c => c.group === currentGroup);
         if (search) filtered = filtered.filter(c => (c.title?.toLowerCase().includes(search)) || (c.prompt || '').toLowerCase().includes(search) || (c.tags?.some(t => t.toLowerCase().includes(search))));
@@ -4521,12 +4518,9 @@
         container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:60px;">📦 暂无卡片</div>';
         return;
       }
-      const prefetchCards =
-        allFilteredCards.length <= 80
-          ? allFilteredCards
-          : allFilteredCards.slice(0, Math.min(allFilteredCards.length, start + PER_PAGE * 2));
+      const prefetchCards = pageCards.slice(0, PER_PAGE);
       if (page === 1 && prefetchCards.length && window.SupabaseSync?.prefetchCardsImages) {
-        void window.SupabaseSync.prefetchCardsImages(prefetchCards, 2500);
+        void window.SupabaseSync.prefetchCardsImages(prefetchCards, 1800);
       }
       const fragment = document.createDocumentFragment();
       const isAppend = !reset && page > 1;
@@ -4632,10 +4626,25 @@
         div.addEventListener('contextmenu', e => {
           e.preventDefault();
           const pinLabel = card.pinnedAt ? '取消置顶' : '置顶';
-          showContextMenu(e.clientX, e.clientY, [
+          const items = [
             { label: pinLabel, action: () => toggleCardPinById(card.id) },
             { label: '删除', action: () => deleteCardPermanently(card.id) }
-          ]);
+          ];
+          const others = window.FeatureAssets?.getOtherWarehouses?.() || [];
+          others.forEach((w) => {
+            items.unshift({
+              label: `移到「${w.name}」`,
+              action: () => {
+                const n = window.FeatureAssets?.moveCardsToWarehouse?.([card.id], w.id);
+                if (n) {
+                  showToast(`已移到「${w.name}」`);
+                  renderGroups();
+                  renderCards(true);
+                }
+              }
+            });
+          });
+          showContextMenu(e.clientX, e.clientY, items);
         });
         fragment.appendChild(div);
       });
@@ -4736,6 +4745,24 @@
     function cancelBatch() { batchMode = false; selectedCardIds.clear(); document.getElementById('batchToggleBtn').classList.remove('active'); document.getElementById('batchBar').classList.remove('active'); document.getElementById('normalBar').style.display = 'flex'; renderCards(true); }
     function toggleSelectCard(id, el) { if (selectedCardIds.has(id)) { selectedCardIds.delete(id); if(el) el.classList.remove('checked'); } else { selectedCardIds.add(id); if(el) el.classList.add('checked'); } updateBatchCountLabel(); }
     function batchMoveGroup() { if(!selectedCardIds.size) return; const groups = ['all','uncategorized',...customGroups]; customPrompt(`输入目标分组 (${groups.join('/')})`, '', (target) => { if(!target||!groups.includes(target)) return; const gv = (target==='all'||target==='uncategorized')?null:target; selectedCardIds.forEach(id=>{const c=cards.find(x=>x.id===id); if(c)c.group=gv;}); saveAllData(); cancelBatch(); renderGroups(); renderCards(true); }, null, groups); }
+    function batchMoveWarehouse() {
+      if (!selectedCardIds.size) return;
+      const others = window.FeatureAssets?.getOtherWarehouses?.() || [];
+      if (!others.length) { showToast('请先创建其他卡片库'); return; }
+      const labels = others.map(w => w.name);
+      customPrompt('输入目标卡片库名称', '', (name) => {
+        const target = others.find(w => w.name === name);
+        if (!target) return;
+        const n = window.FeatureAssets?.moveCardsToWarehouse?.([...selectedCardIds], target.id);
+        if (n) {
+          saveAllData({ skipCloud: true });
+          showToast(`已将 ${n} 张卡片移到「${target.name}」`);
+          cancelBatch();
+          renderGroups();
+          renderCards(true);
+        }
+      }, null, labels);
+    }
     function batchAddTag() { if(!selectedCardIds.size) return; const allTags = [...new Set(cards.flatMap(c=>c.tags||[]))]; customPrompt('输入标签名（不含#）', '', (tag) => { if(!tag) return; selectedCardIds.forEach(id=>{const c=cards.find(x=>x.id===id); if(c){ if(!c.tags) c.tags=[]; if(!c.tags.includes(tag)) c.tags.push(tag); }}); saveAllData(); cancelBatch(); renderCards(true); }, null, allTags); }
     function batchDelete() {
       if (!window.SupabaseSync?.isLoggedIn?.()) {
@@ -5416,6 +5443,7 @@
           id: cardId, title, prompt, image: finalImage,
           group: (currentGroup !== 'all' && currentGroup !== 'uncategorized') ? currentGroup : null,
           tags: [...currentTags], customFields: customData,
+          warehouseId: getActiveWarehouseId(),
           createdAt: Date.now(), updatedAt: Date.now()
         };
         cards.push(savedCard);
@@ -5637,6 +5665,19 @@
       imageZoom.dragging = false;
     }
 
+    function cardsForActiveWarehouse(list) {
+      if (window.FeatureAssets?.filterCardsByWarehouse) {
+        return window.FeatureAssets.filterCardsByWarehouse(list || cards);
+      }
+      return list || cards;
+    }
+
+    function getActiveWarehouseId() {
+      return window.FeatureAssets?.getActiveWarehouseId?.() || 'default';
+    }
+
+    window.currentGroup = currentGroup;
+
     function showContextMenu(x, y, items) {
       const menu = document.getElementById('contextMenu');
       menu.innerHTML = items.map(i => `<button>${i.label}</button>`).join('');
@@ -5645,6 +5686,8 @@
       const close = () => { menu.style.display = 'none'; document.removeEventListener('click', close); };
       setTimeout(() => document.addEventListener('click', close, { once: true }), 0);
     }
+    window.showContextMenu = showContextMenu;
+    window.refreshWarehouseUI = refreshWarehouseUI;
 
     document.getElementById('sidebarArea').addEventListener('contextmenu', e => { if (e.target.closest('.group-item')) return; e.preventDefault(); });
     document.getElementById('mainContentArea').addEventListener('contextmenu', e => { if (e.target.closest('.card') || e.target.closest('.main-header')) return; e.preventDefault(); showContextMenu(e.clientX, e.clientY, [{ label: '新建卡片', action: () => createNewCard() }]); });

@@ -28,6 +28,11 @@ export type TaskKey =
   | 'bind_phone'
   | 'community_publish_5'
   | 'community_publish_15'
+  | 'warehouse_quick_preview_fav'
+  | 'community_quick_preview_fav'
+  | 'extension_save_card'
+  | 'asset_studio_chat'
+  | 'asset_studio_link_card'
   | 'cards_count_25'
   | 'spend_1000'
   | 'spend_2000'
@@ -39,6 +44,14 @@ export type TaskFlags = {
   pwa_installed?: boolean;
   community_qualified_count?: number;
   cards_count_synced?: number;
+  warehouse_quick_preview_used?: boolean;
+  warehouse_quick_preview_goto_gen?: boolean;
+  warehouse_quick_preview_favorited?: boolean;
+  community_quick_preview_used?: boolean;
+  community_quick_preview_favorited?: boolean;
+  extension_card_saved?: boolean;
+  asset_studio_chat_used?: boolean;
+  asset_studio_link_card?: boolean;
   sign_streak?: number;
   last_sign_date?: string;
 };
@@ -153,6 +166,36 @@ export function taskRewardForKey(
       title: '社区再发布 10 张',
       description: '完成上一档后，累计再发布 10 张有效社区卡片（共 15 张）'
     },
+    warehouse_quick_preview_fav: {
+      days: 1,
+      credits: 0,
+      title: '卡片库快速预览并去生图',
+      description: '在卡片库打开左上角「快速预览」，在预览中点击「去生图」'
+    },
+    community_quick_preview_fav: {
+      days: 1,
+      credits: 0,
+      title: '社区快速预览并收藏',
+      description: '在社区打开左上角「快速预览」，在预览中收藏一张作品到卡片库'
+    },
+    extension_save_card: {
+      days: 3,
+      credits: 0,
+      title: '浏览器插件保存卡片',
+      description: '登录浏览器插件，在任意网页用插件保存 1 张卡片到仓库'
+    },
+    asset_studio_chat: {
+      days: 1,
+      credits: 0,
+      title: '资产创作 AI 对话',
+      description: '在资产创作工作台向 AI 发起一次对话（消耗积分按实际 token 计费）'
+    },
+    asset_studio_link_card: {
+      days: 2,
+      credits: 0,
+      title: '资产创作关联卡片',
+      description: '在资产创作将卡片库卡片拖入文档「关联图」框，完成一次文档关联'
+    },
     cards_count_25: {
       days: 1,
       credits: 0,
@@ -259,6 +302,16 @@ export function isTaskProgressMet(
       return (flags.community_qualified_count ?? 0) >= 5;
     case 'community_publish_15':
       return (flags.community_qualified_count ?? 0) >= 15;
+    case 'warehouse_quick_preview_fav':
+      return !!(flags.warehouse_quick_preview_used && flags.warehouse_quick_preview_goto_gen);
+    case 'community_quick_preview_fav':
+      return !!(flags.community_quick_preview_used && flags.community_quick_preview_favorited);
+    case 'extension_save_card':
+      return !!flags.extension_card_saved;
+    case 'asset_studio_chat':
+      return !!flags.asset_studio_chat_used;
+    case 'asset_studio_link_card':
+      return !!flags.asset_studio_link_card;
     case 'cards_count_25':
       return (flags.cards_count_synced ?? 0) >= 25;
     case 'spend_1000':
@@ -657,6 +710,11 @@ export function buildTaskList(
     'pwa_install',
     'bind_phone',
     communityKey,
+    'warehouse_quick_preview_fav',
+    'community_quick_preview_fav',
+    'extension_save_card',
+    'asset_studio_chat',
+    'asset_studio_link_card',
     'cards_count_25',
     spendKey
   ].filter((k): k is string => !!k);

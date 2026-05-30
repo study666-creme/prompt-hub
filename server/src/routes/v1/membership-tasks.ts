@@ -23,6 +23,12 @@ import { rateLimit } from '../../middleware/rate-limit';
 const syncBodySchema = z.object({
   cardsCount: z.number().int().min(0).max(50_000).optional(),
   pwaInstalled: z.boolean().optional(),
+  quickPreviewWarehouseUsed: z.boolean().optional(),
+  quickPreviewWarehouseGotoGen: z.boolean().optional(),
+  quickPreviewWarehouseFavorited: z.boolean().optional(),
+  quickPreviewCommunityUsed: z.boolean().optional(),
+  quickPreviewCommunityFavorited: z.boolean().optional(),
+  assetStudioLinkCard: z.boolean().optional(),
   communityPosts: z
     .array(
       z.object({
@@ -177,6 +183,18 @@ membershipTaskRoutes.post('/sync', rateLimit(120, 60_000), async c => {
 
   if (parsed.data.pwaInstalled === true) patch.pwa_installed = true;
   if (typeof parsed.data.cardsCount === 'number') patch.cards_count_synced = parsed.data.cardsCount;
+  if (parsed.data.quickPreviewWarehouseUsed === true) patch.warehouse_quick_preview_used = true;
+  if (parsed.data.quickPreviewWarehouseGotoGen === true) {
+    patch.warehouse_quick_preview_goto_gen = true;
+  }
+  if (parsed.data.quickPreviewWarehouseFavorited === true) {
+    patch.warehouse_quick_preview_favorited = true;
+  }
+  if (parsed.data.quickPreviewCommunityUsed === true) patch.community_quick_preview_used = true;
+  if (parsed.data.quickPreviewCommunityFavorited === true) {
+    patch.community_quick_preview_favorited = true;
+  }
+  if (parsed.data.assetStudioLinkCard === true) patch.asset_studio_link_card = true;
   if (parsed.data.communityPosts?.length) {
     patch.community_qualified_count = countQualifyingPosts(parsed.data.communityPosts);
   }

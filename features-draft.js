@@ -2479,12 +2479,15 @@
     if (!id || id === user.id || id === 'guest') return false;
     if (follows.has(id)) {
       follows.delete(id);
+      adjustFollowerList(id, user.id, false);
       toast(`已取消关注 ${authorName || '用户'}`);
       persistFollows();
       syncFollowUI(authorId);
+      syncMyHomeProfileStats();
       return false;
     }
     follows.add(id);
+    adjustFollowerList(id, user.id, true);
     pushCommunityEvent({
       type: 'follow',
       targetUserId: id,
@@ -2495,7 +2498,114 @@
     toast(`已关注 ${authorName || '用户'}`);
     persistFollows();
     syncFollowUI(authorId);
+    syncMyHomeProfileStats();
     return true;
+  }
+
+  function followersStorageKey(userId) {
+    return `promptrepo_followers_${String(userId || '')}`;
+  }
+
+  function loadFollowersSet(userId) {
+    try {
+      const raw = localStorage.getItem(followersStorageKey(userId));
+      const list = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(list) ? list.map(String) : []);
+    } catch (e) {
+      return new Set();
+    }
+  }
+
+  function persistFollowersSet(userId, set) {
+    try {
+      localStorage.setItem(followersStorageKey(userId), JSON.stringify([...set]));
+    } catch (e) { /* ignore */ }
+  }
+
+  function adjustFollowerList(targetUserId, followerId, add) {
+    const set = loadFollowersSet(targetUserId);
+    const fid = String(followerId);
+    if (add) set.add(fid);
+    else set.delete(fid);
+    persistFollowersSet(targetUserId, set);
+  }
+
+  function countFollowers(userId) {
+    return loadFollowersSet(userId).size;
+  }
+
+  function syncMyHomeProfileStats() {
+    const user = getActiveUser();
+    if (user.id === 'guest') return;
+    const root = document.getElementById('myHomeProfile');
+    if (!root) return;
+    const postsEl = root.querySelector('[data-stat="posts"]');
+    const followingEl = root.querySelector('[data-stat="following"]');
+    const followersEl = root.querySelector('[data-stat="followers"]');
+    if (postsEl) postsEl.textContent = String(getMyPublishedPosts().length);
+    if (followingEl) followingEl.textContent = String(follows.size);
+    if (followersEl) followersEl.textContent = String(countFollowers(user.id));
+  }
+
+  function renderMyHomeProfile() {
+    const el = document.getElementById('myHomeProfile');
+    if (!el) return;
+    const user = getActiveUser();
+    if (user.id === 'guest') {
+      el.innerHTML = `<div class="creations-profile my-home-profile-card">
+        <div class="creations-avatar">?</div>
+        <div class="creations-profile-text">
+          <h3>访客</h3>
+          <p>登录后查看你的主页、关注与资产包</p>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="openAuthModal()">登录</button>
+      </div>`;
+      return;
+    }
+    const avatar = ((user.displayName || user.name || user.email || '?')[0] || '?').toUpperCase();
+    const posts = getMyPublishedPosts().length;
+    const following = follows.size;
+    const followers = countFollowers(user.id);
+    el.innerHTML = `<div class="creations-profile my-home-profile-card">
+      <div class="creations-avatar" aria-hidden="true">${esc(avatar)}</div>
+      <div class="creations-profile-text">
+        <h3>${esc(user.displayName || user.name)}</h3>
+        <p>${esc(user.email || '已登录用户')}</p>
+      </div>
+      <div class="my-home-stats" aria-label="主页统计">
+        <span><strong data-stat="posts">${posts}</strong> 作品</span>
+        <span><strong data-stat="following">${following}</strong> 关注</span>
+        <span><strong data-stat="followers">${followers}</strong> 粉丝</span>
+      </div>
+    </div>`;
+  }
+
+  function initMyHomeTabs() {
+    const tabs = document.getElementById('myHomeTabs');
+    if (!tabs || tabs.dataset.bound) return;
+    tabs.dataset.bound = '1';
+    tabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-home-tab]');
+      if (!btn) return;
+      const tab = btn.dataset.homeTab;
+      tabs.querySelectorAll('.my-home-tab').forEach((b) => {
+        const on = b === btn;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      document.querySelectorAll('[data-home-pane]').forEach((pane) => {
+        const on = pane.dataset.homePane === tab;
+        pane.classList.toggle('hidden', !on);
+        pane.classList.toggle('active', on);
+      });
+      if (tab === 'owned-packages') {
+        window.FeatureAssets?.renderMyHomePackages?.(document.getElementById('myHomeOwnedPackages'), 'owned');
+      } else if (tab === 'published-packages') {
+        window.FeatureAssets?.renderMyHomePackages?.(document.getElementById('myHomePublishedPackages'), 'published');
+      } else {
+        void renderCreations();
+      }
+    });
   }
 
   function persistFollows() {
@@ -4071,6 +4181,7 @@
   }
 
   async function renderCreations() {
+    renderMyHomeProfile();
     const container = document.getElementById('creationsGrid');
     const hintEl = document.getElementById('creationsHint');
     if (!container) return;
@@ -5962,7 +6073,15 @@
     }
     if (app === 'creations') {
       if (!document.getElementById('pageCreations')?.classList.contains('active')) return;
-      void renderCreations();
+      renderMyHomeProfile();
+      const activeTab = document.querySelector('#myHomeTabs .my-home-tab.active')?.dataset?.homeTab || 'posts';
+      if (activeTab === 'owned-packages') {
+        window.FeatureAssets?.renderMyHomePackages?.(document.getElementById('myHomeOwnedPackages'), 'owned');
+      } else if (activeTab === 'published-packages') {
+        window.FeatureAssets?.renderMyHomePackages?.(document.getElementById('myHomePublishedPackages'), 'published');
+      } else {
+        void renderCreations();
+      }
     }
     if (app !== 'community') closeCommunitySidePanel();
     if (app !== 'creations') closeCreationsSidePanel();
@@ -5989,6 +6108,7 @@
     loadStores();
     bindUI();
     bindPublishToggle();
+    initMyHomeTabs();
     onAppChange(localStorage.getItem('promptrepo_app_page') || 'community');
   }
 
@@ -6149,6 +6269,7 @@
     recoverLostGenerationsManual,
     recoverRecentGenerationJobs,
     renderCreations,
+    renderMyHomeProfile,
     scheduleCreationsLayout: () => scheduleCommunityLayout('creationsGrid'),
     fillFormPromptOnly,
     copyFeedPromptText,
