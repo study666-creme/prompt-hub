@@ -25,8 +25,8 @@
 | 项 | 状态 |
 |----|------|
 | 构建号 | **`20260616n`** / SW **`prompt-hub-v252`** |
-| 已打通 | `/health`、兑换、生图、社区 Feed、社区点赞 API、收藏独立副本 |
-| **本轮** | 社区点赞全站计数；会员 lite 档 + 新价；激活码兑换前自选每日/一次性（同码通用）；轻量会员紧凑面板 |
+| 已打通 | 社区点赞 API、会员 lite 档、扩展 `POST /extension/quick-card` |
+| **浏览器插件** | `extension/` v1.0 — 见 **`docs/BROWSER-EXTENSION.md`** |
 
 ### 待用户执行（SQL）
 
@@ -40,7 +40,7 @@
 
 ### 已知 / 待验收
 
-- 浏览器插件：见 **`docs/BROWSER-EXTENSION.md`**（规划，未开发）
+- 浏览器插件 v1.0：`extension/` 目录，需 Worker 部署 + 加载 unpacked 扩展
 - 单卡「发布到社区」开关 UI 与 `publishedToCommunity` 仍可能不同步
 - Worker + SQL 都部署后点赞才全站持久
 

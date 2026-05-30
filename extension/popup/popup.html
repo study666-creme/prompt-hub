@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="ph-popup-head">
+    <img src="../icons/icon48.png" width="28" height="28" alt="">
+    <div>
+      <h1>Prompt Hub 存卡</h1>
+      <p id="phAuthLine">检查登录…</p>
+    </div>
+  </header>
+  <section class="ph-popup-actions">
+    <button type="button" class="ph-btn primary" id="phLoginBtn">登录 / 同步</button>
+    <button type="button" class="ph-btn" id="phLogoutBtn">退出</button>
+  </section>
+  <section class="ph-popup-row">
+    <label class="ph-switch">
+      <input type="checkbox" id="phPanelToggle" checked>
+      <span>在当前页显示存卡面板</span>
+    </label>
+  </section>
+  <button type="button" class="ph-btn primary block" id="phOpenPanelBtn">在当前页打开面板</button>
+  <p class="ph-hint">需先授予「访问所有网站」权限，面板才能在任意网页显示。</p>
+  <p class="ph-legal">仅保存您手动选择/拖入的内容。请遵守所浏览网站条款与版权规定。</p>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,197 @@
+.ph-ext-root {
+  all: initial;
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483646;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+  color: #e8e8ed;
+  pointer-events: none;
+}
+
+.ph-ext-root * {
+  box-sizing: border-box;
+}
+
+.ph-ext-panel {
+  pointer-events: auto;
+  width: 280px;
+  background: #1c1c1e;
+  border: 1px solid #3a3a3c;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.ph-ext-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: #2c2c2e;
+  cursor: grab;
+  user-select: none;
+}
+
+.ph-ext-head:active {
+  cursor: grabbing;
+}
+
+.ph-ext-title {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.ph-ext-hide {
+  border: none;
+  background: transparent;
+  color: #98989d;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.ph-ext-body {
+  padding: 10px;
+}
+
+.ph-ext-drop {
+  height: 88px;
+  border: 1.5px dashed #48484a;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: #98989d;
+  font-size: 11px;
+  line-height: 1.4;
+  background: #141416;
+  overflow: hidden;
+  position: relative;
+}
+
+.ph-ext-drop.dragover {
+  border-color: #6366f1;
+  color: #a5b4fc;
+}
+
+.ph-ext-drop img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.ph-ext-prompt {
+  width: 100%;
+  margin-top: 8px;
+  min-height: 72px;
+  max-height: 140px;
+  resize: vertical;
+  border: 1px solid #3a3a3c;
+  border-radius: 8px;
+  padding: 8px;
+  background: #141416;
+  color: #f2f2f7;
+  font: inherit;
+  line-height: 1.45;
+}
+
+.ph-ext-prompt:focus {
+  outline: none;
+  border-color: #6366f1;
+}
+
+.ph-ext-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.ph-ext-save {
+  flex: 1;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #6366f1;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ph-ext-save:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ph-ext-clear {
+  border: none;
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: transparent;
+  color: #636366;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ph-ext-clear:hover {
+  color: #ff6b6b;
+}
+
+.ph-ext-status {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #98989d;
+  min-height: 16px;
+}
+
+.ph-ext-legal {
+  margin-top: 8px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: #636366;
+}
+
+.ph-ext-disclaimer {
+  padding: 12px;
+}
+
+.ph-ext-disclaimer p {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #98989d;
+}
+
+.ph-ext-disclaimer button {
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  padding: 10px;
+  background: #6366f1;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ph-ext-copy-btn {
+  position: absolute;
+  z-index: 2147483647;
+  pointer-events: auto;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  background: #6366f1;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+.ph-ext-copy-btn.hidden {
+  display: none;
+}

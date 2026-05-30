@@ -8,7 +8,7 @@ import { communityFeedHandler, communityRoutes } from './community';
 import { membershipRoutes } from './membership';
 import { membershipTaskRoutes } from './membership-tasks';
 import { communityMediaSignHandler, mediaRoutes } from './media';
-import { rateLimit } from '../../middleware/rate-limit';
+import { extensionRoutes } from './extension';
 
 export const v1 = new Hono<{ Bindings: Env }>();
 
@@ -27,3 +27,4 @@ v1.route('/media', mediaRoutes);
 v1.route('/redeem', redeemRoutes);
 v1.route('/generate', generateRoutes);
 v1.route('/community', communityRoutes);
+v1.route('/extension', extensionRoutes);

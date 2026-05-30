@@ -1,0 +1,68 @@
+body {
+  width: 300px;
+  margin: 0;
+  padding: 14px;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  color: #1c1c1e;
+  background: #f2f2f7;
+}
+
+.ph-popup-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.ph-popup-head h1 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.ph-popup-head p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #636366;
+}
+
+.ph-popup-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ph-btn {
+  border: 1px solid #c7c7cc;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.ph-btn.primary {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #fff;
+}
+
+.ph-btn.block {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.ph-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.ph-hint,
+.ph-legal {
+  font-size: 10px;
+  line-height: 1.4;
+  color: #636366;
+  margin: 8px 0 0;
+}
