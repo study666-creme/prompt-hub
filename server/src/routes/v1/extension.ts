@@ -56,6 +56,9 @@ extensionRoutes.post('/quick-card', async c => {
     });
   } catch (e) {
     const msg = String((e as Error).message || e);
+    if (msg.includes('DB_PERMISSION') || msg.includes('permission denied')) {
+      throw new ApiError(503, 'DB_PERMISSION', msg.replace(/^DB_PERMISSION:\s*/, ''));
+    }
     if (msg.includes('最多')) throw new ApiError(400, 'CARD_LIMIT', msg);
     if (msg.includes('图片')) throw new ApiError(400, 'IMAGE_ERROR', msg);
     throw new ApiError(500, 'SAVE_FAILED', msg.slice(0, 180));

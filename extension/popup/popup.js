@@ -8,11 +8,16 @@ async function send(type, extra = {}) {
 
 async function refreshAuth() {
   const line = document.getElementById('phAuthLine');
+  const loginBtn = document.getElementById('phLoginBtn');
   const res = await send('PH_GET_AUTH');
   if (res?.loggedIn) {
     line.textContent = `已登录：${res.email || '账号'}`;
+    loginBtn.textContent = '打开主站';
+    loginBtn.title = '在新标签页打开 Prompt Hub';
   } else {
     line.textContent = '未登录 — 请打开主站登录';
+    loginBtn.textContent = '去登录';
+    loginBtn.title = '打开 prompt-hub.cn 登录';
   }
 }
 

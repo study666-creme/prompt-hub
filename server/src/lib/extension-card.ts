@@ -125,7 +125,15 @@ export async function appendQuickCard(
     },
     { onConflict: 'user_id' }
   );
-  if (upsertErr) throw upsertErr;
+  if (upsertErr) {
+    const msg = String(upsertErr.message || upsertErr);
+    if (/permission denied.*user_data/i.test(msg)) {
+      throw new Error(
+        'DB_PERMISSION: 请在 Supabase 执行 supabase/migrations/20260530100000_user_data_service_role.sql'
+      );
+    }
+    throw upsertErr;
+  }
 
   return { cardId, cardCount: cards.length };
 }
