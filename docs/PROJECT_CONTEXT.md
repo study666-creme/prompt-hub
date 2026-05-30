@@ -25,8 +25,15 @@
 | 项 | 状态 |
 |----|------|
 | 构建号 | **`20260616n`** / SW **`prompt-hub-v252`** |
-| 已打通 | 社区点赞 API、会员 lite 档、扩展 `POST /extension/quick-card` |
-| **浏览器插件** | `extension/` v1.0 — 见 **`docs/BROWSER-EXTENSION.md`** |
+| 已打通 | 社区点赞 API、会员 lite 档、扩展 quick-card + tags API |
+| **浏览器插件** | `extension/` **v1.0.3** — 见 **`docs/BROWSER-EXTENSION.md`** |
+
+### 插件 v1.0.3 要点
+
+- **× 真正关闭**本页面板；**−** 仅收起
+- 面板内拖/贴图片**仅预览**，点保存才提交
+- **标签选择**（`GET /extension/tags`）
+- 无网页输入框聚焦时 **Ctrl+V 截图直接保存**
 
 ### 待用户执行（SQL）
 
@@ -35,12 +42,13 @@
 1. `20260529140000_community_post_likes.sql`
 2. `20260529150000_membership_lite_tier.sql`
 3. `20260529160000_new_membership_codes_daily.sql`
+4. **`20260530100000_user_data_service_role.sql`**（扩展保存必需）
 
 （若更早未跑：`20260529120000_community_notifications.sql`、`20260529130000_profiles_display_name.sql`）
 
 ### 已知 / 待验收
 
-- 浏览器插件 v1.0：`extension/` 目录，需 Worker 部署 + 加载 unpacked 扩展
+- 扩展改代码后：Chrome 扩展页 → **重新加载** + `server` 部署 API
 - 单卡「发布到社区」开关 UI 与 `publishedToCommunity` 仍可能不同步
 - Worker + SQL 都部署后点赞才全站持久
 

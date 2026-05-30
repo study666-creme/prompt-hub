@@ -11,7 +11,58 @@ export type QuickCardInput = {
   title?: string;
   imageBase64?: string | null;
   sourceUrl?: string | null;
+  tags?: string[];
 };
+
+function normalizeTag(raw: string): string {
+  const t = String(raw || '').trim().replace(/^#+/, '');
+  if (!t) return '';
+  return `#${t.slice(0, 40)}`;
+}
+
+function normalizeTags(list?: string[]): string[] {
+  const out = new Set<string>();
+  for (const raw of list || []) {
+    const t = normalizeTag(raw);
+    if (t) out.add(t);
+  }
+  return [...out];
+}
+
+type UserDataPayload = {
+  cards?: Array<Record<string, unknown>>;
+  customGroups?: unknown[];
+  globalFields?: unknown[];
+  settings?: Record<string, unknown>;
+  schemaVersion?: number;
+  [key: string]: unknown;
+};
+
+export function collectUserTags(payload: UserDataPayload): string[] {
+  const set = new Set<string>();
+  for (const c of payload.cards || []) {
+    const tags = (c as { tags?: string[] }).tags;
+    if (!Array.isArray(tags)) continue;
+    for (const raw of tags) {
+      const t = normalizeTag(String(raw));
+      if (t) set.add(t);
+    }
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+}
+
+export async function listUserTags(
+  admin: SupabaseClient,
+  userId: string
+): Promise<string[]> {
+  const { data: row, error } = await admin
+    .from('user_data')
+    .select('data')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return collectUserTags((row?.data || {}) as UserDataPayload);
+}
 
 function generateCardId(): string {
   return `card_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
@@ -48,15 +99,6 @@ async function uploadCardImage(
   if (error) throw error;
   return `storage://${BUCKET}/${path}`;
 }
-
-type UserDataPayload = {
-  cards?: Array<Record<string, unknown>>;
-  customGroups?: unknown[];
-  globalFields?: unknown[];
-  settings?: Record<string, unknown>;
-  schemaVersion?: number;
-  [key: string]: unknown;
-};
 
 export async function appendQuickCard(
   admin: SupabaseClient,
@@ -97,13 +139,16 @@ export async function appendQuickCard(
     String(input.title || '').trim().slice(0, 200)
     || (prompt ? prompt.slice(0, 48) : '网页摘录');
 
+  let tags = normalizeTags(input.tags);
+  if (!tags.length && input.sourceUrl) tags = ['#浏览器插件'];
+
   const card = {
     id: cardId,
     title,
     prompt: prompt || title,
     image,
     group: null,
-    tags: input.sourceUrl ? ['#浏览器插件'] : [],
+    tags,
     customFields: input.sourceUrl ? { extSourceUrl: String(input.sourceUrl).slice(0, 500) } : {},
     createdAt: now,
     updatedAt: now,

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Prompt Hub 快捷存卡",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "在任意网页快速保存提示词与图片到 Prompt Hub 仓库（需登录 prompt-hub.cn）",
   "icons": {
     "16": "icons/icon16.png",

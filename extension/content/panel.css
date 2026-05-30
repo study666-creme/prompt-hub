@@ -22,6 +22,7 @@
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
   overflow: hidden;
+  position: relative;
 }
 
 .ph-ext-float-layer {
@@ -58,6 +59,26 @@
   font-size: 16px;
   line-height: 1;
   padding: 2px 6px;
+}
+
+.ph-ext-head-btns {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.ph-ext-close {
+  border: none;
+  background: transparent;
+  color: #98989d;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.ph-ext-close:hover {
+  color: #ff6b6b;
 }
 
 .ph-ext-body {
@@ -225,4 +246,133 @@
 
 .ph-ext-copy-btn.hover-mode {
   background: #4f46e5;
+}
+
+.ph-ext-tags-wrap {
+  margin-top: 8px;
+}
+
+.ph-ext-tags-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: #98989d;
+}
+
+.ph-ext-tags-label span {
+  font-weight: 600;
+  color: #c7c7cc;
+}
+
+.ph-ext-pick-tags {
+  border: none;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  background: #2c2c2e;
+  color: #a5b4fc;
+  cursor: pointer;
+}
+
+.ph-ext-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 22px;
+}
+
+.ph-ext-tags-empty {
+  font-size: 11px;
+  color: #636366;
+}
+
+.ph-ext-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: #2c2c2e;
+  color: #e8e8ed;
+}
+
+.ph-ext-tag-chip button {
+  border: none;
+  background: transparent;
+  color: #98989d;
+  cursor: pointer;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.ph-ext-tag-sheet {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  max-height: 180px;
+  background: #2c2c2e;
+  border: 1px solid #48484a;
+  border-radius: 10px;
+  padding: 8px;
+  z-index: 5;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.ph-ext-tag-sheet.hidden {
+  display: none;
+}
+
+.ph-ext-tag-sheet-head {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ph-ext-tag-new {
+  flex: 1;
+  border: 1px solid #48484a;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #141416;
+  color: #f2f2f7;
+  font-size: 12px;
+}
+
+.ph-ext-tag-add {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: #6366f1;
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ph-ext-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.ph-ext-tag-opt {
+  border: 1px solid #48484a;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  background: #141416;
+  color: #e8e8ed;
+  cursor: pointer;
+}
+
+.ph-ext-tag-opt.selected {
+  border-color: #6366f1;
+  background: #312e81;
 }

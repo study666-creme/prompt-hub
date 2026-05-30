@@ -4,6 +4,7 @@ const SESSION_KEY = 'ph_session';
 const PANEL_ENABLED_KEY = 'ph_panel_enabled';
 const DISCLAIMER_KEY = 'ph_disclaimer_ok';
 const injectedTabs = new Set();
+const closedTabs = new Set();
 
 function sessionFromBridge(raw) {
   if (!raw?.access_token) return null;
@@ -94,6 +95,7 @@ async function injectPanelIntoTab(tabId, force) {
 
 async function tryAutoInjectTab(tab) {
   if (!tab?.id || !canInjectUrl(tab.url)) return;
+  if (closedTabs.has(tab.id)) return;
   if (!(await shouldAutoInject())) return;
   await injectPanelIntoTab(tab.id, false);
 }
@@ -149,9 +151,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         prompt: msg.prompt || '',
         title: msg.title || '',
         imageBase64: msg.imageBase64 || null,
-        sourceUrl: msg.sourceUrl || null
+        sourceUrl: msg.sourceUrl || null,
+        tags: msg.tags || []
       });
       sendResponse(result);
+      return;
+    }
+    if (msg?.type === 'PH_GET_TAGS') {
+      const result = await apiRequest('GET', '/api/v1/extension/tags');
+      sendResponse(result);
+      return;
+    }
+    if (msg?.type === 'PH_CLOSE_PANEL') {
+      const tabId = sender.tab?.id || msg.tabId;
+      if (tabId) {
+        closedTabs.add(tabId);
+        injectedTabs.delete(tabId);
+      }
+      sendResponse({ ok: true });
       return;
     }
     if (msg?.type === 'PH_SET_PANEL') {
@@ -185,6 +202,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, message: '无标签页' });
         return;
       }
+      closedTabs.delete(tabId);
       const res = await injectPanelIntoTab(tabId, true);
       sendResponse(res);
       return;
@@ -210,6 +228,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   injectedTabs.delete(tabId);
+  closedTabs.delete(tabId);
 });
 
 chrome.runtime.onInstalled.addListener(async () => {

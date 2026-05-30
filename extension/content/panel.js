@@ -15,6 +15,8 @@
   let hoverBlockText = '';
   let panelHovered = false;
   let hoverTimer = null;
+  let allTags = [];
+  const currentTags = new Set();
 
   const root = document.createElement('div');
   root.className = 'ph-ext-root';
@@ -44,6 +46,23 @@
     return r === shadow || r === root;
   }
 
+  function pageHasEditablePasteTarget() {
+    const el = document.activeElement;
+    if (!el || nodeInPanel(el)) return false;
+    const tag = el.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') {
+      return !el.readOnly && !el.disabled;
+    }
+    if (el.isContentEditable) return true;
+    return false;
+  }
+
+  function normalizeTag(raw) {
+    const t = String(raw || '').trim().replace(/^#+/, '');
+    if (!t) return '';
+    return `#${t.slice(0, 40)}`;
+  }
+
   function setStatus(text, isErr) {
     const el = wrap.querySelector('.ph-ext-status');
     if (!el) return;
@@ -64,6 +83,72 @@
     });
   }
 
+  function renderTagChips() {
+    const box = wrap.querySelector('#phExtTagChips');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!currentTags.size) {
+      box.innerHTML = '<span class="ph-ext-tags-empty">未选标签</span>';
+      return;
+    }
+    for (const tag of currentTags) {
+      const chip = document.createElement('span');
+      chip.className = 'ph-ext-tag-chip';
+      chip.innerHTML = `${tag}<button type="button" data-tag="${tag}" title="移除">×</button>`;
+      chip.querySelector('button').addEventListener('click', (e) => {
+        e.stopPropagation();
+        currentTags.delete(tag);
+        renderTagChips();
+        renderTagOptions();
+      });
+      box.appendChild(chip);
+    }
+  }
+
+  function renderTagOptions() {
+    const list = wrap.querySelector('#phExtTagList');
+    if (!list) return;
+    list.innerHTML = '';
+    const merged = [...new Set([...allTags, ...currentTags])].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    if (!merged.length) {
+      list.innerHTML = '<span class="ph-ext-tags-empty">仓库暂无标签，可在上方新建</span>';
+      return;
+    }
+    for (const tag of merged) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ph-ext-tag-opt' + (currentTags.has(tag) ? ' selected' : '');
+      btn.textContent = tag;
+      btn.addEventListener('click', () => {
+        if (currentTags.has(tag)) currentTags.delete(tag);
+        else currentTags.add(tag);
+        renderTagChips();
+        renderTagOptions();
+      });
+      list.appendChild(btn);
+    }
+  }
+
+  function toggleTagSheet(show) {
+    const sheet = wrap.querySelector('#phExtTagSheet');
+    if (!sheet) return;
+    if (show) {
+      sheet.classList.remove('hidden');
+      renderTagOptions();
+    } else {
+      sheet.classList.add('hidden');
+    }
+  }
+
+  function fetchAllTags() {
+    chrome.runtime.sendMessage({ type: 'PH_GET_TAGS' }, (res) => {
+      if (res?.ok && Array.isArray(res.data?.tags)) {
+        allTags = res.data.tags;
+        renderTagOptions();
+      }
+    });
+  }
+
   function bindImageDrop(drop) {
     ['dragenter', 'dragover'].forEach((ev) => {
       drop.addEventListener(ev, (e) => {
@@ -81,50 +166,92 @@
       drop.classList.remove('dragover');
       const file = e.dataTransfer?.files?.[0];
       if (file && file.type.startsWith('image/')) {
-        void loadImageFile(file, true);
+        void loadImageFile(file, false);
         return;
       }
       const html = e.dataTransfer?.getData('text/html') || '';
       const src = html.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1];
-      if (src) void loadImageFromUrl(src, true);
+      if (src) void loadImageFromUrl(src, false);
     });
   }
 
   function bindPasteHandlers() {
-    const onPasteImage = (e) => {
-      if (!panelHovered && !nodeInPanel(document.activeElement)) return;
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (item.type && item.type.indexOf('image') !== -1) {
-          e.preventDefault();
-          e.stopPropagation();
-          const file = item.getAsFile();
-          if (file) void loadImageFile(file, true);
-          return;
-        }
-      }
-    };
     window.addEventListener('paste', onPasteImage, true);
-    wrap.addEventListener('paste', onPasteImage, true);
+  }
+
+  function onPasteImage(e) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    let imageItem = null;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type && items[i].type.indexOf('image') !== -1) {
+        imageItem = items[i];
+        break;
+      }
+    }
+    if (!imageItem) return;
+
+    const inPanel = nodeInPanel(document.activeElement) || panelHovered;
+    if (!inPanel && pageHasEditablePasteTarget()) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    const file = imageItem.getAsFile();
+    if (!file) return;
+
+    if (inPanel) {
+      void loadImageFile(file, false);
+      setStatus('已粘贴图片（点保存提交）');
+    } else {
+      void globalPasteSave(file);
+    }
+  }
+
+  async function globalPasteSave(file) {
+    await loadImageFile(file, false);
+    setStatus('检测到截图，正在保存…');
+    await doSave(true);
+  }
+
+  function closePanel() {
+    chrome.runtime.sendMessage({ type: 'PH_CLOSE_PANEL' }, () => {
+      root.remove();
+      window.__PH_EXT_PANEL__ = false;
+    });
   }
 
   function renderMain() {
     wrap.innerHTML = `
       <div class="ph-ext-head" id="phExtHead">
         <span class="ph-ext-title">Prompt Hub 存卡</span>
-        <button type="button" class="ph-ext-hide" id="phExtMin" title="收起">−</button>
+        <div class="ph-ext-head-btns">
+          <button type="button" class="ph-ext-hide" id="phExtMin" title="收起">−</button>
+          <button type="button" class="ph-ext-close" id="phExtClose" title="关闭面板">×</button>
+        </div>
       </div>
       <div class="ph-ext-body" id="phExtBody">
-        <div class="ph-ext-drop" id="phExtDrop" tabindex="0">点击此处后 Ctrl+V 粘贴截图<br><small>或拖入图片 · 自动保存</small></div>
+        <div class="ph-ext-drop" id="phExtDrop" tabindex="0">拖入图片或 Ctrl+V 粘贴<br><small>面板内仅预览 · 点保存才提交</small></div>
         <textarea class="ph-ext-prompt" id="phExtPrompt" placeholder="提示词（悬停段落或划选文字可复制）"></textarea>
+        <div class="ph-ext-tags-wrap">
+          <div class="ph-ext-tags-label">
+            <span>标签</span>
+            <button type="button" class="ph-ext-pick-tags" id="phExtPickTags">选择标签</button>
+          </div>
+          <div class="ph-ext-tags" id="phExtTagChips"></div>
+        </div>
         <div class="ph-ext-actions">
           <button type="button" class="ph-ext-save" id="phExtSave">保存到仓库</button>
           <button type="button" class="ph-ext-clear" id="phExtClear" title="清空">清空</button>
         </div>
         <div class="ph-ext-status"></div>
-        <p class="ph-ext-legal">仅保存您主动操作的内容 · 请遵守网站使用条款</p>
+        <p class="ph-ext-legal">页面无输入框时 Ctrl+V 截图可直接保存 · 请遵守网站使用条款</p>
+        <div class="ph-ext-tag-sheet hidden" id="phExtTagSheet">
+          <div class="ph-ext-tag-sheet-head">
+            <input type="text" class="ph-ext-tag-new" id="phExtTagNew" placeholder="新建标签（无需 #）" maxlength="40">
+            <button type="button" class="ph-ext-tag-add" id="phExtTagAdd">添加</button>
+          </div>
+          <div class="ph-ext-tag-list" id="phExtTagList"></div>
+        </div>
       </div>`;
 
     const drop = wrap.querySelector('#phExtDrop');
@@ -137,12 +264,37 @@
     wrap.querySelector('#phExtMin').addEventListener('click', () => {
       body.hidden = !body.hidden;
     });
+    wrap.querySelector('#phExtClose').addEventListener('click', closePanel);
+
+    wrap.querySelector('#phExtPickTags').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const sheet = wrap.querySelector('#phExtTagSheet');
+      toggleTagSheet(sheet.classList.contains('hidden'));
+    });
+
+    wrap.querySelector('#phExtTagAdd').addEventListener('click', () => {
+      const input = wrap.querySelector('#phExtTagNew');
+      const tag = normalizeTag(input?.value || '');
+      if (!tag) return;
+      if (!allTags.includes(tag)) allTags.push(tag);
+      currentTags.add(tag);
+      if (input) input.value = '';
+      renderTagChips();
+      renderTagOptions();
+    });
+
+    wrap.querySelector('#phExtTagNew').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        wrap.querySelector('#phExtTagAdd').click();
+      }
+    });
 
     clearBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!imageBase64 && !promptEl.value.trim()) return;
-      if (!confirm('确定清空当前图片和提示词？')) return;
+      if (!imageBase64 && !promptEl.value.trim() && !currentTags.size) return;
+      if (!confirm('确定清空当前内容？')) return;
       resetForm();
     });
 
@@ -154,6 +306,8 @@
     bindImageDrop(drop);
     bindPasteHandlers();
     drop.addEventListener('click', () => drop.focus());
+    renderTagChips();
+    fetchAllTags();
 
     let dragOffset = { x: 0, y: 0 };
     head.addEventListener('mousedown', (e) => {
@@ -178,12 +332,15 @@
   function resetForm() {
     imageBase64 = null;
     imageName = '';
+    currentTags.clear();
     const drop = wrap.querySelector('#phExtDrop');
     const promptEl = wrap.querySelector('#phExtPrompt');
     if (drop) {
-      drop.innerHTML = '点击此处后 Ctrl+V 粘贴截图<br><small>或拖入图片 · 自动保存</small>';
+      drop.innerHTML = '拖入图片或 Ctrl+V 粘贴<br><small>面板内仅预览 · 点保存才提交</small>';
     }
     if (promptEl) promptEl.value = '';
+    renderTagChips();
+    toggleTagSheet(false);
     setStatus('');
   }
 
@@ -239,7 +396,7 @@
     }
   }
 
-  async function doSave(fromDrop) {
+  async function doSave(fromAuto) {
     if (saving) return;
     const promptEl = wrap.querySelector('#phExtPrompt');
     const prompt = (promptEl?.value || '').trim();
@@ -250,13 +407,14 @@
     saving = true;
     const saveBtn = wrap.querySelector('#phExtSave');
     if (saveBtn) saveBtn.disabled = true;
-    setStatus(fromDrop ? '图片保存中…' : '保存中…');
+    setStatus(fromAuto ? '截图保存中…' : '保存中…');
     chrome.runtime.sendMessage({
       type: 'PH_SAVE_CARD',
       prompt,
       title: prompt.slice(0, 48) || imageName.replace(/\.[^.]+$/, '') || '网页摘录',
       imageBase64,
-      sourceUrl: location.href
+      sourceUrl: location.href,
+      tags: [...currentTags]
     }, (res) => {
       saving = false;
       if (saveBtn) saveBtn.disabled = false;
@@ -276,6 +434,7 @@
       }
       setStatus(res.data?.message || '已保存');
       resetForm();
+      fetchAllTags();
     });
   }
 
@@ -399,6 +558,7 @@
     if (e.key === 'Escape') {
       hideCopyBtn();
       hideHoverCopyBtn();
+      toggleTagSheet(false);
     }
   });
   document.addEventListener('scroll', () => {
