@@ -3314,6 +3314,69 @@
     });
   }
 
+  function loadedCommunitySideImgSrc(body) {
+    const imgEl = body?.querySelector?.('.community-side-img');
+    const cur = imgEl?.currentSrc || imgEl?.src || '';
+    if (!imgEl || !cur || cur.includes('data:image/svg')) return '';
+    if (!cur.startsWith('http')) return '';
+    if (!imgEl.complete || imgEl.naturalWidth < 1) return '';
+    if (window.SupabaseSync?.isValidSignedDisplayUrl && !window.SupabaseSync.isValidSignedDisplayUrl(cur)) return '';
+    return cur;
+  }
+
+  function communitySideZoomSignOpts(post, sideRef, postId) {
+    const guest = !window.SupabaseSync?.isLoggedIn?.();
+    const uid = window.SupabaseSync?.getUserId?.();
+    const path = window.SupabaseSync?.storagePathFromRef?.(sideRef) || '';
+    const own = !!(path && uid && path.replace(/^\//, '').startsWith(`${uid}/`));
+    return {
+      fromPublicFeed: guest || !own,
+      authorId: post?.authorId || '',
+      cardId: post?.sourceCardId || postId
+    };
+  }
+
+  async function openCommunitySideImageZoom(body, post, sideRef, postId, extra = {}) {
+    const ready = loadedCommunitySideImgSrc(body);
+    if (ready && typeof window.openLightbox === 'function') {
+      window.openLightbox(ready);
+      return;
+    }
+    const signOpts = communitySideZoomSignOpts(post, sideRef, postId);
+    let url = await resolveImageDisplayUrl(sideRef, extra.jobId || null, post?.sourceCardId || postId, signOpts);
+    if (!url && window.SupabaseSync?.resolveDisplayUrl && sideRef) {
+      try {
+        url = await window.SupabaseSync.resolveDisplayUrl(sideRef, {
+          assetId: post?.sourceCardId || postId,
+          authorId: signOpts.authorId || undefined,
+          cardId: signOpts.cardId || undefined,
+          variant: 'full',
+          communityFeed: signOpts.fromPublicFeed === true,
+          tryAllPaths: signOpts.fromPublicFeed === true
+        });
+      } catch (e) { /* ignore */ }
+    }
+    if (url && typeof window.openLightbox === 'function') {
+      window.openLightbox(url);
+      return;
+    }
+    if (post && typeof openCommunityAppreciateViewer === 'function') {
+      void openCommunityAppreciateViewer(post);
+      return;
+    }
+    toast('图片尚未加载完成，请稍候再试');
+  }
+
+  function bindCommunitySideImageZoom(body, post, sideRef, postId, extra = {}) {
+    const btn = body?.querySelector?.('[data-side-zoom]');
+    if (!btn || btn.dataset.sideZoomBound === '1') return;
+    btn.dataset.sideZoomBound = '1';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      void openCommunitySideImageZoom(body, post, sideRef, postId, extra);
+    });
+  }
+
   async function renderCommunitySidePanel(id, opts = {}) {
     const post = findPost(id);
     const bodyId = opts.bodyId || 'communitySideBody';
@@ -3361,19 +3424,7 @@
         if (typeof switchAppPage === 'function') switchAppPage('warehouse');
         if (typeof window.editCardById === 'function') window.editCardById(card.id);
       });
-      body.querySelector('[data-side-zoom]')?.addEventListener('click', () => {
-        void (async () => {
-          const uid = window.SupabaseSync?.getUserId?.();
-          const path = window.SupabaseSync?.storagePathFromRef?.(sideRef) || '';
-          const own = !!(path && uid && path.replace(/^\//, '').startsWith(`${uid}/`));
-          const url = await resolveImageDisplayUrl(sideRef, null, post.sourceCardId || id, {
-            fromPublicFeed: !own,
-            authorId: post.authorId || ''
-          });
-          if (url && typeof window.openLightbox === 'function') window.openLightbox(url);
-          else toast('图片尚未加载完成，请稍候再试');
-        })();
-      });
+      bindCommunitySideImageZoom(body, post, sideRef, id);
       highlightCreationsPost(id);
       if (showSideImg) await hydrateFeedImages(body);
       return;
@@ -3402,20 +3453,7 @@
     body.querySelector('[data-action="copy"]')?.addEventListener('click', () => copyPostPrompt(post));
     body.querySelector('[data-action="fav"]')?.addEventListener('click', () => favoritePost(id, post));
     body.querySelector('[data-action="remix"]')?.addEventListener('click', () => remixToImageGen(post));
-    body.querySelector('[data-side-zoom]')?.addEventListener('click', () => {
-      void (async () => {
-        const guest = !window.SupabaseSync?.isLoggedIn?.();
-        const uid = window.SupabaseSync?.getUserId?.();
-        const path = window.SupabaseSync?.storagePathFromRef?.(sideRef) || '';
-        const own = !!(path && uid && path.replace(/^\//, '').startsWith(`${uid}/`));
-        const url = await resolveImageDisplayUrl(sideRef, null, post.sourceCardId || id, {
-          fromPublicFeed: guest || !own,
-          authorId: post.authorId || ''
-        });
-        if (url && typeof window.openLightbox === 'function') window.openLightbox(url);
-        else toast('图片尚未加载完成，请稍候再试');
-      })();
-    });
+    bindCommunitySideImageZoom(body, post, sideRef, id);
     const authorBtn = body.querySelector('.community-detail-author-btn');
     if (authorBtn) bindAuthorLink(authorBtn, post.authorId, post.authorName);
     highlightCommunityCard(id);
@@ -3837,13 +3875,7 @@
         <button type="button" class="btn btn-secondary" data-action="del">删除记录</button>
       </div>
       <p class="panel-hint">生成记录保留 1～3 天。发布到社区请打开卡片库对应卡片并开启「发布到提示词社区」</p>`;
-    body.querySelector('[data-side-zoom]')?.addEventListener('click', () => {
-      void (async () => {
-        const url = await resolveImageDisplayUrl(c.image, c.jobId || null, id);
-        if (url && typeof window.openLightbox === 'function') window.openLightbox(url);
-        else toast('图片尚未加载完成，请稍候再试');
-      })();
-    });
+    bindCommunitySideImageZoom(body, null, c.image, id, { jobId: c.jobId || null });
     body.querySelector('[data-action="remix"]')?.addEventListener('click', () => remixCreation(id));
     body.querySelector('[data-action="del"]')?.addEventListener('click', () => {
       const doDel = () => {

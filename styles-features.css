@@ -2124,10 +2124,13 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
 }
 
 .community-side-img-btn {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
-  height: min(72vh, 640px);
-  max-height: min(72vh, 640px);
+  height: auto;
+  max-height: none;
+  min-height: 120px;
   padding: 0;
   margin: 0 0 12px;
   border: none;
@@ -2137,16 +2140,20 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
   border-radius: var(--radius);
   overflow: hidden;
   line-height: 0;
+  pointer-events: auto;
 }
 .community-side-img {
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  height: auto;
+  max-height: min(72vh, 560px);
+  min-height: 0;
+  object-fit: contain;
   object-position: center center;
   display: block;
   border-radius: 0;
   background: var(--bg-hover);
   transition: opacity 0.3s ease;
+  pointer-events: none;
 }
 .community-side-img-btn.is-loading .community-side-img {
   opacity: 0;
