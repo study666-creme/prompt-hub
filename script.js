@@ -340,7 +340,8 @@
     async function openAppreciateViewer(cardId) {
       const card = cards.find(c => c.id === cardId);
       if (!card) return;
-      const gen = ++(window.__appreciateViewerGen = (window.__appreciateViewerGen || 0) + 1);
+      window.__appreciateViewerGen = (window.__appreciateViewerGen || 0) + 1;
+      const gen = window.__appreciateViewerGen;
       const viewer = document.getElementById('appreciateViewer');
       const img = document.getElementById('appreciateViewerImg');
       const caption = document.getElementById('appreciateViewerCaption');
