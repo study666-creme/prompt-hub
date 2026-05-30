@@ -51,7 +51,7 @@ const notifyBodySchema = z.object({
 
 export const communityRoutes = new Hono<{ Bindings: Env }>();
 
-communityRoutes.use('*', rateLimit(60, 60_000));
+communityRoutes.use('*', rateLimit(180, 60_000));
 
 function isMissingCommunityTable(err: unknown): boolean {
   const msg = String((err as { message?: string })?.message || err || '');

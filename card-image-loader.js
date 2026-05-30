@@ -7,9 +7,9 @@
   const inflight = new WeakMap();
   const resolveQueue = [];
   let resolveActive = 0;
-  const MAX_RESOLVE = 6;
-  const WAREHOUSE_PREFETCH_CAP = 24;
-  const WAREHOUSE_IMMEDIATE_LOAD = 12;
+  const MAX_RESOLVE = 10;
+  const WAREHOUSE_PREFETCH_CAP = 12;
+  const WAREHOUSE_IMMEDIATE_LOAD = 10;
 
   function runResolveQueue() {
     while (resolveActive < MAX_RESOLVE && resolveQueue.length) {
@@ -220,7 +220,9 @@
       observedRoot = container;
       const rootMargin = window.matchMedia('(max-width: 900px)').matches
       ? '400px 0px'
-      : (container.id === 'communityGrid' || container.id === 'creationsGrid' ? '240px 0px' : '80px 0px');
+      : (container.id === 'communityGrid' || container.id === 'creationsGrid'
+        ? '240px 0px'
+        : (container.id === 'cardsContainer' ? '280px 0px' : '80px 0px'));
       observer = new IntersectionObserver(onIntersect, {
         root: scrollRootFor(container) || null,
         rootMargin,

@@ -846,15 +846,20 @@
         <button type="button" class="btn btn-primary studio-import-cta" id="studioImportCta">点击导入卡片库</button>
         <p class="panel-hint studio-import-empty-tip">同一浏览器下会自动读取主站卡片库，无需先导出</p>
       </div>`;
-    document.getElementById('studioImportCta')?.addEventListener('click', () => openImportPicker());
   }
 
+  let mainSiteCardsCache = null;
+  let mainSiteCardsLoadPromise = null;
+
   function readMainSiteCardsAll() {
+    if (mainSiteCardsCache?.length) return mainSiteCardsCache;
     if (Array.isArray(window.__promptHubCards) && window.__promptHubCards.length) {
-      return window.__promptHubCards;
+      mainSiteCardsCache = window.__promptHubCards;
+      return mainSiteCardsCache;
     }
     if (Array.isArray(window.opener?.__promptHubCards) && window.opener.__promptHubCards.length) {
-      return window.opener.__promptHubCards;
+      mainSiteCardsCache = window.opener.__promptHubCards;
+      return mainSiteCardsCache;
     }
     try {
       const uid = window.SupabaseSync?.getUserId?.() || localStorage.getItem('promptrepo_last_uid') || '';
@@ -865,10 +870,38 @@
         const raw = localStorage.getItem(key);
         if (!raw) continue;
         const data = JSON.parse(raw);
-        if (Array.isArray(data?.cards) && data.cards.length) return data.cards;
+        if (Array.isArray(data?.cards) && data.cards.length) {
+          mainSiteCardsCache = data.cards;
+          return mainSiteCardsCache;
+        }
       }
     } catch (e) { /* ignore */ }
     return [];
+  }
+
+  async function ensureMainSiteCardsLoaded() {
+    const cached = readMainSiteCardsAll();
+    if (cached.length) return cached;
+    if (mainSiteCardsLoadPromise) return mainSiteCardsLoadPromise;
+    mainSiteCardsLoadPromise = (async () => {
+      const idbRows = await loadMainSiteCardsList();
+      if (idbRows.length) {
+        mainSiteCardsCache = idbRows;
+        return idbRows;
+      }
+      const autosave = readCardsFromLocalAutosave();
+      if (autosave.length) {
+        mainSiteCardsCache = autosave;
+        return autosave;
+      }
+      mainSiteCardsCache = [];
+      return [];
+    })();
+    try {
+      return await mainSiteCardsLoadPromise;
+    } finally {
+      mainSiteCardsLoadPromise = null;
+    }
   }
 
   function readCommunityPostsForCover() {
@@ -925,49 +958,36 @@
     return '';
   }
 
-  function probeImageAspect(url) {
-    return new Promise((resolve) => {
-      if (!url) {
-        resolve(null);
-        return;
-      }
-      const img = new Image();
-      img.onload = () => {
-        const w = img.naturalWidth || img.width;
-        const h = img.naturalHeight || img.height;
-        if (!w || !h) resolve(null);
-        else resolve(w / h);
-      };
-      img.onerror = () => resolve(null);
-      img.src = url;
-    });
-  }
-
   async function pickCoverImageUrl(cards, communityPosts) {
-    const cardRefs = (cards || []).map((c) => c.image).filter(Boolean);
-    const commRefs = (communityPosts || []).map((p) => p.image).filter(Boolean);
-    const tryRefs = (refs, require169) => {
-      const tasks = refs.map(async (ref) => {
-        const url = resolveCardDisplayUrl(ref);
-        if (!url) return null;
-        const aspect = await probeImageAspect(url);
-        if (require169 && aspect != null && aspect >= 1.55 && aspect <= 1.85) return url;
-        if (!require169 && aspect != null) return url;
-        return null;
-      });
-      return Promise.all(tasks).then((urls) => urls.find(Boolean) || null);
-    };
-    let url = await tryRefs(cardRefs, true);
-    if (url) return url;
-    url = await tryRefs(cardRefs, false);
-    if (url) return url;
-    url = await tryRefs(commRefs, true);
-    if (url) return url;
-    return tryRefs(commRefs, false);
+    const withImg = (cards || []).filter((c) => c?.image);
+    if (withImg.length && window.SupabaseSync?.prefetchCardsImages) {
+      await window.SupabaseSync.prefetchCardsImages(withImg.slice(0, 8), 6000);
+    }
+    for (const c of withImg.slice(0, 16)) {
+      const hit = resolveCardDisplayUrl(c.image);
+      if (hit && !hit.includes('data:image/svg')) return hit;
+      if (window.SupabaseSync?.resolveDisplayUrl) {
+        try {
+          const signed = await window.SupabaseSync.resolveDisplayUrl(c.image, {
+            assetId: c.id,
+            variant: 'grid'
+          });
+          if (signed && !String(signed).includes('data:image/svg')) return signed;
+        } catch (e) { /* ignore */ }
+      }
+    }
+    for (const p of (communityPosts || []).slice(0, 6)) {
+      if (!p?.image) continue;
+      const hit = resolveCardDisplayUrl(p.image);
+      if (hit && !hit.includes('data:image/svg')) return hit;
+    }
+    return null;
   }
 
   function closeImportPicker() {
-    document.getElementById('studioImportOverlay')?.classList.add('hidden');
+    const overlay = document.getElementById('studioImportOverlay');
+    overlay?.classList.add('hidden');
+    overlay?.classList.remove('active');
   }
   window.__studioCloseImportPicker = closeImportPicker;
 
@@ -976,53 +996,61 @@
     if (!root) return;
     const list = warehouses.length ? warehouses : [{ id: 'default', name: '默认库', isDefault: true }];
     const count = list.length;
-    root.className = `studio-import-covers count-${Math.min(count, 4)}`;
+    root.className = `studio-import-cards-row count-${Math.min(count, 4)}`;
     const community = readCommunityPostsForCover();
     root.innerHTML = list
       .map((w) => {
-        const cards = cardsForWarehouse(w.id);
-        const n = cards.length;
-        return `<button type="button" class="studio-import-cover" data-wh-id="${esc(w.id)}">
-          <div class="studio-import-cover-media" data-cover-for="${esc(w.id)}">
-            <div class="studio-import-cover-fallback" aria-hidden="true">📂</div>
-          </div>
-          <div class="studio-import-cover-body">
-            <p class="studio-import-cover-title">${esc(w.name)}</p>
-            <p class="studio-import-cover-meta">${n} 张卡片</p>
-          </div>
+        const n = cardsForWarehouse(w.id).length;
+        return `<button type="button" class="studio-library-pick-card" data-wh-id="${esc(w.id)}" aria-label="导入 ${esc(w.name)}">
+          <span class="studio-library-pick-bg" data-cover-for="${esc(w.id)}"></span>
+          <span class="studio-library-pick-overlay" aria-hidden="true"></span>
+          <span class="studio-library-pick-label">
+            <span class="studio-library-pick-name">${esc(w.name)}</span>
+            <span class="studio-library-pick-meta">${n} 张卡片</span>
+          </span>
         </button>`;
       })
       .join('');
-    root.querySelectorAll('.studio-import-cover').forEach((btn) => {
+    root.querySelectorAll('.studio-library-pick-card').forEach((btn) => {
       btn.addEventListener('click', () => {
         void importFromMainWarehouse(btn.dataset.whId);
       });
     });
     await Promise.all(
       list.map(async (w) => {
-        const media = root.querySelector(`[data-cover-for="${w.id}"]`);
-        if (!media) return;
+        const bg = root.querySelector(`[data-cover-for="${w.id}"]`);
+        if (!bg) return;
         const url = await pickCoverImageUrl(cardsForWarehouse(w.id), community);
         if (!url) return;
-        media.innerHTML = `<img src="${esc(url)}" alt="" loading="lazy" decoding="async">`;
+        bg.style.backgroundImage = `url("${String(url).replace(/"/g, '%22')}")`;
+        bg.closest('.studio-library-pick-card')?.classList.add('has-cover');
       })
     );
   }
 
-  function openImportPicker() {
+  async function openImportPicker() {
     if (!guardEdit('请先登录后导入卡片库')) return;
-    const warehouses = listMainSiteWarehouses();
-    const hasAny = warehouses.some((w) => cardsForWarehouse(w.id).length > 0);
-    if (!hasAny && !readMainSiteCardsAll().length) {
-      window.alert(
-        '未找到可导入的卡片。\n\n请确认：\n1. 已在同一浏览器打开过主站卡片库\n2. 主站里至少有一张卡片'
-      );
-      setStatus('未找到主站卡片库');
-      return;
+    try {
+      setStatus('正在读取主站卡片库…');
+      await ensureMainSiteCardsLoaded();
+      const warehouses = listMainSiteWarehouses();
+      const hasAny = warehouses.some((w) => cardsForWarehouse(w.id).length > 0);
+      if (!hasAny && !readMainSiteCardsAll().length) {
+        window.alert(
+          '未找到可导入的卡片。\n\n请确认：\n1. 已在同一浏览器打开过主站卡片库\n2. 主站里至少有一张卡片'
+        );
+        setStatus('未找到主站卡片库');
+        return;
+      }
+      const overlay = document.getElementById('studioImportOverlay');
+      overlay?.classList.remove('hidden');
+      overlay?.classList.add('active');
+      setStatus('');
+      void renderImportPickerCovers(warehouses);
+    } catch (e) {
+      console.warn('[studio] openImportPicker', e);
+      setStatus('打开导入失败，请重试');
     }
-    const overlay = document.getElementById('studioImportOverlay');
-    overlay?.classList.remove('hidden');
-    void renderImportPickerCovers(warehouses);
   }
 
   async function importFromMainWarehouse(warehouseId) {
@@ -3117,6 +3145,12 @@
       startInlineNewFolder(null);
     });
     document.getElementById('studioImportClose')?.addEventListener('click', closeImportPicker);
+    document.getElementById('studioAssetFolders')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.studio-import-cta, #studioImportCta');
+      if (!btn) return;
+      e.preventDefault();
+      void openImportPicker();
+    });
     document.getElementById('studioGuideOk')?.addEventListener('click', closeStudioGuide);
     document.getElementById('studioChatThreadSelect')?.addEventListener('change', (e) => {
       switchChatThread(e.target.value);

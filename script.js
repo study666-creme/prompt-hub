@@ -1317,9 +1317,11 @@
       }
       const imgs = (list || []).map((c) => c?.image).filter(Boolean);
       if (!imgs.length) return;
-      void (window.SupabaseSync?.prefetchCardsImages
-        ? window.SupabaseSync.prefetchCardsImages(list, capMs)
-        : window.SupabaseSync?.prefetchDisplayUrlsWithCap?.(imgs, capMs));
+      void (window.SupabaseSync?.prefetchWarehousePage
+        ? window.SupabaseSync.prefetchWarehousePage(list, capMs || 2800)
+        : window.SupabaseSync?.prefetchCardsImages
+          ? window.SupabaseSync.prefetchCardsImages(list, capMs || 2800)
+          : window.SupabaseSync?.prefetchDisplayUrlsWithCap?.(imgs, capMs));
     }
 
     function bindCardGridImageRelayout(container) {
@@ -3176,7 +3178,7 @@
         });
       }
       if (cards.length > 0) {
-        warmVisibleCardsOnly(cards, 3000);
+        warmVisibleCardsOnly(cards, 2200);
         window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
       }
       window.FeatureDraft?.renderCommunity?.();
@@ -3400,7 +3402,7 @@
           if (uid) await snapshotLocalForUser(uid);
           refreshWarehouseUI();
           window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
-          warmVisibleCardsOnly(cards, 3000);
+          warmVisibleCardsOnly(cards, 2200);
           void prefetchVisibleCardImages(4000);
         }
         setCloudSyncPhase(cards.length ? 'saved' : 'idle');
@@ -3750,7 +3752,7 @@
       if (cards.length > 0) {
         refreshWarehouseUI();
         paintedFromLocal = true;
-        warmVisibleCardsOnly(cards, 2500);
+        warmVisibleCardsOnly(cards, 2200);
         prefetchVisibleCardImages(2500);
       }
 
@@ -3810,7 +3812,7 @@
         await snapshotLocalForUser(uid, { allowEmpty: true });
         await saveCardsToDB(cards, { ownerUid: uid });
         refreshWarehouseUI();
-        warmVisibleCardsOnly(cards, 3000);
+        warmVisibleCardsOnly(cards, 2200);
         prefetchVisibleCardImages(4000);
         if (!silent && (!cloudHydratedUid || accountSwitch || force)) {
           showToast('已从云端加载本账号数据');
@@ -4561,12 +4563,13 @@
         return;
       }
       const prefetchCards = pageCards.slice(0, PER_PAGE);
-      if (page === 1 && prefetchCards.length && window.SupabaseSync?.prefetchCardsImages) {
-        void window.SupabaseSync.prefetchCardsImages(prefetchCards, 1800);
+      let prefetchP = Promise.resolve();
+      if (page === 1 && prefetchCards.length && window.SupabaseSync?.prefetchWarehousePage) {
+        prefetchP = window.SupabaseSync.prefetchWarehousePage(prefetchCards, 2200);
       }
       const fragment = document.createDocumentFragment();
       const isAppend = !reset && page > 1;
-      const eagerImgCount = mobileGrid ? 6 : (pageCards.length <= WAREHOUSE_RENDER_ALL_CAP ? pageCards.length : 8);
+      const eagerImgCount = mobileGrid ? 6 : Math.min(12, pageCards.length);
       pageCards.forEach((card, idx) => {
         const div = document.createElement('div');
         div.className = `card card-enter ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
@@ -4595,8 +4598,9 @@
         const tagsHtml = buildCardTagsHtml(card.tags);
         const pinBadge = card.pinnedAt ? '<span class="card-pin-badge" title="置顶">置顶</span>' : '';
         const imgOnload = "if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.card-media'))";
+        const fetchPri = !isAppend && idx < 6 ? ' fetchpriority="high"' : '';
         const mediaHtml = showImage
-          ? `<div class="card-media${mediaLoadingCls}"${shineAt}><img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(card.image)} data-image-ref="${escapeHtml(card.image)}" loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async" draggable="false" alt="" onload="${imgOnload}"></div>`
+          ? `<div class="card-media${mediaLoadingCls}"${shineAt}><img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(card.image)} data-image-ref="${escapeHtml(card.image)}" loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async"${fetchPri} draggable="false" alt="" onload="${imgOnload}"></div>`
           : '';
         const headHtml = titleTrim
           ? `<div class="card-head"><div class="card-title">${escapeHtml(titleTrim)}</div>${timeLabel ? `<time class="card-time">${escapeHtml(timeLabel)}</time>` : ''}</div>`
@@ -4693,13 +4697,31 @@
       container.appendChild(fragment);
       bindCardGridImageErrors(container);
       bindCardGridImageRelayout(container);
-      window.SupabaseSync?.patchImageSrcFromCache?.(container);
-      if (!mobileGrid && pageCards.length > 0 && pageCards.length <= WAREHOUSE_RENDER_ALL_CAP) {
-        void hydrateWarehouseImagesFast(container, pageCards);
-      } else if (window.CardImageLoader) {
-        window.CardImageLoader.observeContainer(container);
+      const patchWarehouseImages = () => {
+        window.SupabaseSync?.patchWarehouseImagesFromCache?.(container, { visibleFirst: true, max: 12 })
+          || window.SupabaseSync?.patchImageSrcFromCache?.(container, { visibleFirst: true, max: 12 });
+        window.CardImageLoader?.patchVisibleFromCache?.(container);
+      };
+      if (page === 1 && prefetchCards.length) {
+        await Promise.race([
+          prefetchP,
+          new Promise((r) => setTimeout(r, 2200))
+        ]);
+        patchWarehouseImages();
+        void prefetchP.then(() => {
+          window.SupabaseSync?.patchImageSrcFromCache?.(container);
+          window.CardImageLoader?.patchVisibleFromCache?.(container);
+        });
+        window.CardImageLoader?.observeContainer?.(container);
       } else {
-        void window.SupabaseSync?.hydrateImageElements?.(container, { onlyMissing: true });
+        patchWarehouseImages();
+        if (!mobileGrid && pageCards.length > 0 && pageCards.length <= WAREHOUSE_RENDER_ALL_CAP) {
+          void hydrateWarehouseImagesFast(container, pageCards);
+        } else if (window.CardImageLoader) {
+          window.CardImageLoader.observeContainer(container);
+        } else {
+          void window.SupabaseSync?.hydrateImageElements?.(container, { onlyMissing: true });
+        }
       }
       if (!mobileGrid && viewMode !== 'list') {
         resetWarehouseGridLayout(container);
@@ -5792,7 +5814,7 @@
       }
     }
 
-    window.runPanelImageOcr = runPanelImageOcr;
+    window.runPanelImageOcr = recognizeImageText;
 
     async function runModalOCR() {
       if (!modalImageData) return;

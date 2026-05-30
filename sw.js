@@ -1,4 +1,4 @@
-const CACHE = 'prompt-hub-v279';
+const CACHE = 'prompt-hub-v286';
 /** 仅缓存静态小资源；HTML/JS/CSS 始终走网络，避免误显示「暂时无法连接」 */
 const ASSETS = [
   './manifest.webmanifest',

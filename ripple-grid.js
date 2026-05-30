@@ -1,7 +1,7 @@
 /**
  * RippleGrid — vanilla port (React Bits / ogl)
  */
-import { Renderer, Program, Triangle, Mesh } from 'https://cdn.jsdelivr.net/npm/ogl@1.0.11/src/index.mjs';
+import { Renderer, Program, Triangle, Mesh } from 'https://esm.sh/ogl@1.0.11';
 
 function hexToRgb(hex) {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);

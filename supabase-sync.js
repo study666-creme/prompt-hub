@@ -9,7 +9,7 @@
   const imageUploadSkipUntil = new Map();
   const MISSING_PATH_TTL_MS = 20 * 60 * 1000;
   const IMAGE_UPLOAD_SKIP_MS = 24 * 60 * 60 * 1000;
-  const SIGN_REQUEST_TIMEOUT_MS = 6000;
+  const SIGN_REQUEST_TIMEOUT_MS = 4500;
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
   const MAX_SIDE = 1024;
   const JPEG_QUALITY = 0.78;
@@ -17,8 +17,40 @@
   const VARIANT_GRID = 'grid';
   const VARIANT_FULL = 'full';
   const USE_STORAGE_TRANSFORM = false;
-  const GRID_SIGN_CONCURRENCY = 4;
+  const GRID_SIGN_CONCURRENCY = 12;
+  const WAREHOUSE_PREFETCH_CARD_CAP = 48;
+  const WAREHOUSE_FAST_FIRST = 12;
+  const SS_SIGN_CACHE = 'ph_signed_urls_v1';
   const signInflight = new Map();
+
+  function loadSessionSignCache() {
+    try {
+      const raw = sessionStorage.getItem(SS_SIGN_CACHE);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      const now = Date.now();
+      for (const [key, entry] of Object.entries(data || {})) {
+        if (entry?.url && entry.expiresAt > now + 60000) signedUrlCache.set(key, entry);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  let persistSignCacheTimer = null;
+  function persistSessionSignCache() {
+    clearTimeout(persistSignCacheTimer);
+    persistSignCacheTimer = setTimeout(() => {
+      try {
+        const now = Date.now();
+        const data = {};
+        signedUrlCache.forEach((entry, key) => {
+          if (entry?.url && entry.expiresAt > now + 60000) data[key] = entry;
+        });
+        sessionStorage.setItem(SS_SIGN_CACHE, JSON.stringify(data));
+      } catch (e) { /* ignore */ }
+    }, 120);
+  }
+
+  loadSessionSignCache();
 
   function parseSignedUrlExpiry(url) {
     if (!url || typeof url !== 'string') return 0;
@@ -551,6 +583,44 @@
     return key.startsWith(`${uid}/`);
   }
 
+  function cacheSignedPath(path, url, variant) {
+    if (!path || !url) return;
+    const fileKey = String(path).replace(/^\//, '');
+    const v = variant || VARIANT_GRID;
+    signedUrlCache.set(signedCacheKey(fileKey, v), {
+      url,
+      expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
+    });
+  }
+
+  async function batchSignPaths(paths, variant) {
+    const v = variant || VARIANT_GRID;
+    const pending = [...new Set((paths || []).map((p) => String(p || '').replace(/^\//, '')).filter(Boolean))].filter((p) => {
+      if (isPathKnownMissing(p)) return false;
+      const cached = signedUrlCache.get(signedCacheKey(p, v));
+      return !(cached?.url && cached.expiresAt > Date.now() + 120000);
+    });
+    if (!pending.length) return 0;
+    if (!apiSignAllowed({}) || !window.PromptHubApi?.signMediaRefsBatch) return 0;
+    await ensureSession();
+    try {
+      const refs = pending.map((p) => toStorageRef(p));
+      const r = await window.PromptHubApi.signMediaRefsBatch(refs, { timeoutMs: 4200 });
+      if (!r?.ok || !r.data?.urls) return 0;
+      let n = 0;
+      for (const [path, url] of Object.entries(r.data.urls)) {
+        if (!url || isIncompleteSignedStorageUrl(url)) continue;
+        cacheSignedPath(path, url, v);
+        n += 1;
+      }
+      if (n) persistSessionSignCache();
+      return n;
+    } catch (e) {
+      console.warn('[SupabaseSync] batch sign failed', e);
+      return 0;
+    }
+  }
+
   async function resolvePathToUrl(path, variant, opts) {
     const fileKey = String(path || '').replace(/^\//, '');
     if (isPathKnownMissing(fileKey)) return null;
@@ -575,7 +645,7 @@
         const ownUrl = await getSignedUrlForPath(path, { variant: v });
         if (ownUrl) return ownUrl;
       } catch (e) {
-        if (!isStorageNotFoundError(e)) {
+        if (!isStorageNotFoundError(e) && String(e?.message || e) !== 'sign_timeout') {
           console.warn('[SupabaseSync] own signed url failed', path, e);
         }
       }
@@ -751,12 +821,12 @@
 
   async function prefetchCommunityDisplayUrls(images, capMs) {
     if (!window.PromptHubApi?.signCommunityMediaRef) return;
-    const items = (images || []).slice(0, 16);
+    const items = (images || []).slice(0, 24);
     if (!items.length) return;
     const limit = Math.max(800, Number(capMs) || 4000);
     const started = Date.now();
     let i = 0;
-    const concurrency = 3;
+    const concurrency = 6;
     async function signItem(item) {
       const authorId = item && typeof item === 'object' ? item.authorId : '';
       const cardId = item && typeof item === 'object' ? (item.sourceCardId || item.id) : '';
@@ -789,13 +859,19 @@
     });
     if (!pending.length) return;
     await ensureSession();
-    for (let i = 0; i < pending.length; i += GRID_SIGN_CONCURRENCY) {
-      const batch = pending.slice(i, i + GRID_SIGN_CONCURRENCY);
+    await batchSignPaths(pending, VARIANT_GRID);
+    const still = pending.filter((p) => {
+      const cached = signedUrlCache.get(signedCacheKey(p, VARIANT_GRID));
+      return !(cached?.url && cached.expiresAt > Date.now() + 120000);
+    });
+    if (!still.length) return;
+    for (let i = 0; i < still.length; i += GRID_SIGN_CONCURRENCY) {
+      const batch = still.slice(i, i + GRID_SIGN_CONCURRENCY);
       await Promise.all(
         batch.map(async (p) => {
-          if (apiSignAllowed({}) && storagePathOwnedByCurrentUser(p)) {
-            const apiUrl = await signPathViaApi(p, VARIANT_GRID, {});
-            if (apiUrl) return;
+          if (apiSignAllowed({})) {
+            const url = await signPathViaApi(p, VARIANT_GRID, {});
+            if (url) return;
           }
           await getSignedUrlForPath(p, { variant: VARIANT_GRID }).catch(() => {});
         })
@@ -810,6 +886,11 @@
     const assetId = opts?.assetId;
     const variant = displayVariantFromOpts(opts);
     if (isLoggedIn() && (storagePathFromRef(image) || assetId)) {
+      const primary = primaryImagePath(image, assetId);
+      if (primary) {
+        const hit = signedUrlCache.get(signedCacheKey(primary.replace(/^\//, ''), variant));
+        if (hit?.url && hit.expiresAt > Date.now() + 120000) return hit.url;
+      }
       for (const path of listImagePathCandidates(image, assetId)) {
         const cached = signedUrlCache.get(signedCacheKey(path.replace(/^\//, ''), variant));
         if (cached?.url && cached.expiresAt > Date.now() + 120000) return cached.url;
@@ -832,7 +913,7 @@
   async function prefetchCardsImages(cards, capMs) {
     if (!isLoggedIn()) return;
     const pathSet = new Set();
-    const list = (cards || []).slice(0, 16);
+    const list = (cards || []).slice(0, WAREHOUSE_PREFETCH_CARD_CAP);
     for (const c of list) {
       if (!c?.image) continue;
       const p = primaryImagePath(c.image, c.id);
@@ -840,8 +921,24 @@
     }
     if (!pathSet.size) return;
     const refs = [...pathSet].map((p) => toStorageRef(p));
-    const limit = capMs != null ? Math.min(Math.max(800, capMs), 15000) : 8000;
+    const limit = capMs != null ? Math.min(Math.max(800, capMs), 8000) : 2800;
     await prefetchDisplayUrlsWithCap(refs, limit);
+  }
+
+  /** 卡片库首屏：先签可见 12 张（≈2s），其余后台签 */
+  async function prefetchWarehousePage(cards, capMs) {
+    if (!isLoggedIn()) return;
+    const list = (cards || []).slice(0, 24);
+    if (!list.length) return;
+    const budget = capMs == null ? 2200 : Math.min(capMs, 2800);
+    const first = list.slice(0, WAREHOUSE_FAST_FIRST);
+    const rest = list.slice(WAREHOUSE_FAST_FIRST);
+    await prefetchCardsImages(first, budget);
+    if (rest.length) void prefetchCardsImages(rest, 6000);
+  }
+
+  function patchWarehouseImagesFromCache(container, opts) {
+    patchImageSrcFromCache(container, opts);
   }
 
   function imgPlaceholderSrc() {
@@ -902,9 +999,21 @@
     return image;
   }
 
-  function patchImageSrcFromCache(root) {
+  function patchImageSrcFromCache(root, opts) {
     const scope = root || document;
-    scope.querySelectorAll('img[data-image-ref], img[data-storage-ref]').forEach((img) => {
+    let imgs = [...scope.querySelectorAll('img[data-image-ref], img[data-storage-ref]')];
+    if (opts?.visibleFirst) {
+      imgs.sort((a, b) => {
+        const ar = a.getBoundingClientRect();
+        const br = b.getBoundingClientRect();
+        const aVis = ar.top < window.innerHeight + 120 && ar.bottom > -80;
+        const bVis = br.top < window.innerHeight + 120 && br.bottom > -80;
+        if (aVis !== bVis) return aVis ? -1 : 1;
+        return ar.top - br.top;
+      });
+      if (opts.max > 0) imgs = imgs.slice(0, opts.max);
+    }
+    imgs.forEach((img) => {
       const ref = img.getAttribute('data-image-ref') || img.getAttribute('data-storage-ref');
       if (!ref) return;
       const cur = img.currentSrc || img.src || '';
@@ -1811,6 +1920,9 @@
     prefetchDisplayUrls,
     prefetchDisplayUrlsWithCap,
     prefetchCardsImages,
+    prefetchWarehousePage,
+    patchWarehouseImagesFromCache,
+    batchSignPaths,
     prefetchCommunityDisplayUrls,
     patchImageSrcFromCache,
     getCachedDisplayUrl,

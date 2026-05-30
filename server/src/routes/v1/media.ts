@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
+import { z } from 'zod';
 import type { Env } from '../../env';
 import { ApiError } from '../../lib/errors';
 import { storagePathFromRef } from '../../lib/image-archive';
@@ -43,7 +44,7 @@ function isAllowedRemoteUrl(url: string): boolean {
 
 export const mediaRoutes = new Hono<{ Bindings: Env }>();
 
-mediaRoutes.use('*', rateLimit(180, 60_000));
+mediaRoutes.use('*', rateLimit(480, 60_000));
 
 /** 仅原图短时签名（不用 Storage transform，避免未开通图像处理时整站 500） */
 async function createSignedUrlSafe(
@@ -133,6 +134,48 @@ mediaRoutes.get('/sign', async c => {
     ok: true,
     data: { url: data.signedUrl, expiresIn: SIGNED_SEC }
   });
+});
+
+const signBatchBodySchema = z.object({
+  refs: z.array(z.string().max(500)).max(48)
+});
+
+/** 列表首屏：一次请求批量签名（避免浏览器对 Supabase 逐张 sign 超时） */
+mediaRoutes.post('/sign-batch', async c => {
+  const user = c.get('user');
+  const parsed = signBatchBodySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '批量签名参数无效');
+  }
+  const admin = createAdminClient(c.env);
+  const pathSet = new Set<string>();
+  for (const ref of parsed.data.refs) {
+    const path = storagePathFromRef(ref);
+    if (!path) continue;
+    try {
+      assertOwnPath(user.id, path);
+    } catch {
+      continue;
+    }
+    pathSet.add(path.replace(/^\//, ''));
+  }
+  const paths = [...pathSet];
+  if (!paths.length) {
+    return c.json({ ok: true, data: { urls: {}, expiresIn: SIGNED_SEC } });
+  }
+  const urls: Record<string, string> = {};
+  const concurrency = 20;
+  let idx = 0;
+  async function worker() {
+    while (idx < paths.length) {
+      const i = idx++;
+      const key = paths[i];
+      const { data, error } = await createSignedUrlSafe(admin, key);
+      if (!error && data?.signedUrl) urls[key] = data.signedUrl;
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, paths.length) }, () => worker()));
+  return c.json({ ok: true, data: { urls, expiresIn: SIGNED_SEC } });
 });
 
 /** 从已完成生图任务取可展示 URL（优先 storage 签名） */

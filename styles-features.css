@@ -264,6 +264,19 @@
 }
 
 @media (min-width: 901px) {
+  /* 桌面端：即使误加 community-mobile-feed 也保持多列 Masonry/Grid */
+  body.efficiency-mode #communityGrid.community-mobile-feed.cards-container:not(.list-view),
+  body.efficiency-mode #creationsGrid.community-mobile-feed.cards-container:not(.list-view) {
+    display: block !important;
+    position: relative !important;
+  }
+  body.efficiency-mode #communityGrid.community-mobile-feed:not(.list-view) .card,
+  body.efficiency-mode #creationsGrid.community-mobile-feed:not(.list-view) .card {
+    display: block;
+    width: auto !important;
+    max-width: none !important;
+  }
+
   #communityGrid.cards-container:not(.list-view),
   #creationsGrid.cards-container:not(.list-view) {
     display: block !important;

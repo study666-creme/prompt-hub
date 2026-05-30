@@ -384,6 +384,18 @@
     });
   }
 
+  async function signMediaRefsBatch(refs, opts) {
+    if (isApiUnreachable()) {
+      return { ok: false, code: 'API_UNREACHABLE', message: 'API 暂不可用' };
+    }
+    const list = (refs || []).filter(Boolean).slice(0, 48);
+    if (!list.length) return { ok: true, data: { urls: {} } };
+    return request('POST', '/api/v1/media/sign-batch', { refs: list }, {
+      timeoutMs: opts?.timeoutMs || 4500,
+      noRetry: true
+    });
+  }
+
   /** 游客浏览社区：无需登录 */
   async function publicGet(path, opts = {}, attempt = 0) {
     if (!isConfigured()) {
@@ -535,6 +547,7 @@
     getLedger,
     checkLikeMilestone,
     signMediaRef,
+    signMediaRefsBatch,
     signCommunityMediaRef,
     getCommunityFeed,
     publishCommunityPost,

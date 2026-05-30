@@ -1,6 +1,6 @@
-# 当前问题与进度（2026-05-29）
+# 当前问题与进度（2026-05-30）
 
-> **接手顺序**：本文 → `PROJECT_CONTEXT.md` → `AI-HANDOFF.md`
+> **接手顺序**：本文 → `PROJECT_CONTEXT.md` → `PROJECT-SNAPSHOT.md`（详细规划）→ `AI-HANDOFF.md`
 
 ---
 
@@ -8,50 +8,53 @@
 
 | 项 | 值 |
 |----|-----|
-| `__APP_BUILD__` | **`20260616n`** |
-| SW `CACHE` | **`prompt-hub-v252`** |
+| `__APP_BUILD__` | **`20260530c`** |
+| SW `CACHE` | **`prompt-hub-v282`** |
 | Pages | https://prompt-hub.cn |
 | API | https://api.prompt-hub.cn |
 
 ---
 
-## 2026-05-29 已交付（构建 20260616m～n）
+## 2026-05-30 刚修复（20260530c）
 
 | 项 | 说明 |
 |----|------|
-| 社区点赞 | 本地 + `POST /community/posts/:id/like` 全站计数；需 SQL `20260529140000` + Worker 部署 |
-| 会员档位 | 普通 / 轻量 lite / 基础 / 标准 / 专业；新价与新积分规则 |
-| 激活码 | 旧会员卡密停用；新码每档 2 个；**同码**兑换前自选每日/一次性（lite 仅每日） |
-| 轻量面板 | 单行紧凑布局 |
-| 浏览器插件 | 规划文档 `docs/BROWSER-EXTENSION.md`（未开发） |
+| 社区只剩一张 | `renderPosts` 在声明前被调用 → TDZ 报错，整页渲染中断 |
+| 社区图慢 | 预取等待从 2s 提到 12s；社区签图并发 6、最多 24 条 |
 
-### 用户待做
+## 2026-05-30（20260530b）
 
-1. Supabase 依次执行：`20260529140000` → `20260529150000` → `20260529160000`
-2. `.\deploy-pages.ps1` + `server\deploy.ps1`
-3. 硬刷新确认 **20260616n**
+| 项 | 说明 |
+|----|------|
+| 导入 UI | 两张**独立**封面卡片；库名叠在库内图片背景上 |
+| 图片加载 | 批量签名 32 张、并发 8、首屏预取 12s、渲染后 patch 缓存 |
+| 背景 ogl | `ripple-grid.js` 改用 esm.sh，避免 jsdelivr 404 |
+
+## 2026-05-30（20260530a）
+
+| 项 | 说明 |
+|----|------|
+| OCR 报错 | `runPanelImageOcr` 未定义导致脚本中断 |
+| 导入无反应 | 弹窗缺 `active`；资产页从 IndexedDB 读卡片 |
 
 ---
 
 ## 仍未解决（P0）
 
-| # | 现象 |
-|---|------|
-| 1 | **发布开关像全局开关** — 单卡 `publishedToCommunity` 与 UI/云端不同步 |
-| 2 | **他人社区图慢** — 偶发像没图，等签名 |
-| 3 | **卡片库整体偏慢** — 进库、拉图、云同步 |
+| # | 现象 | 备注 |
+|---|------|------|
+| 1 | **卡片库拉图慢** | 已加大预取；若仍慢查 Network 是否大量 404 或 API 签失败 |
+| 2 | **历史卡片 Storage 404** | 文件已删，需重传或等清理 |
+| 3 | **他人社区图慢** | 偶发等签名 |
 
 ---
 
 ## 控制台验证
 
 ```javascript
-window.__APP_BUILD__  // 应为 20260616n
-await window.PromptHubApi.getCommunityFeed({ limit: 20 })
-// 点赞（需登录）
-await window.PromptHubApi.likeCommunityPost?.('帖子ID')
+window.__APP_BUILD__  // 应为 20260530b
 ```
 
 ---
 
-*最后更新：2026-05-29*
+*最后更新：2026-05-30*

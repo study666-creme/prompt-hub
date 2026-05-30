@@ -11,10 +11,12 @@
 
 所以不是「几张卡就该卡」，而是 **每张图多了一步「换链接」+ 瀑布流重排」**。15 张在弱网下也会明显慢。
 
-## 当前加载管线（构建号 `20260606m` 起）
+## 当前加载管线（构建号 `20260530d` 起）
 
-1. **立刻渲染文字和卡片骨架**（不再 `await` 等 6 秒签名）
-2. **后台** `prefetchCardsImages`：批量签名；列表默认 **宽 640px 缩略图**（`createSignedUrl` + `transform`），避免下载 2MB 原图 PNG
+1. **立刻渲染文字和卡片骨架**（不再 `await` 等签名才插入 DOM）
+2. **自有图片**：优先 **Supabase 客户端批量签名**（不走 Worker，避免 429）
+3. **后台** `prefetchCardsImages`：最多 **48** 张、并发 **12**；签完 `patchImageSrcFromCache` + `patchVisibleFromCache`
+4. **社区同步**：`posts/sync` **批量一条**，禁止对每张卡 `POST /community/posts`（曾触发 429）
 3. **视口懒加载** `card-image-loader.js`：只给看得见（+ 下方 280px）的图设 `src`；放大预览用 `variant: 'full'` 原图
 4. **Masonry**：合并重排（约 160ms 防抖），避免每张图 load 都 destroy 布局
 

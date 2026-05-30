@@ -882,6 +882,15 @@
     return String(image);
   }
 
+  let publicFeedBatchSyncTimer = null;
+  function scheduleSyncMyPostsToPublicFeed(delayMs) {
+    if (!window.SupabaseSync?.isLoggedIn?.() || !window.PromptHubApi?.syncCommunityPostsBatch) return;
+    clearTimeout(publicFeedBatchSyncTimer);
+    publicFeedBatchSyncTimer = setTimeout(() => {
+      void syncMyPostsToPublicFeed();
+    }, delayMs == null ? 2500 : delayMs);
+  }
+
   /** 卡片库里的作品：社区帖作者必须与当前登录账号一致（修复换号串号后 author=888 等） */
   function reconcileOwnedPostAuthors() {
     const user = getActiveUser();
@@ -903,13 +912,13 @@
       if (cardImg) p.image = cardImg;
       p.updatedAt = Date.now();
       changed = true;
-      void pushPostToPublicFeed(p);
     }
     if (changed) {
       persistCommunity();
       rebuildOwnPostFilterCache();
       invalidateCommunityReconcileCache();
       publicFeedAt = 0;
+      scheduleSyncMyPostsToPublicFeed(2500);
     }
     return changed;
   }
@@ -966,7 +975,9 @@
     if (mat.dirty || mat.added > 0) persistCommunity();
     const user = getActiveUser();
     if (user.id !== 'guest') {
-      return mat.added + syncMissingPublishedCardsToCommunity({ silent: true, skipRender: true });
+      const added = mat.added + syncMissingPublishedCardsToCommunity({ silent: true, skipRender: true });
+      if (added > 0 || mat.dirty) scheduleSyncMyPostsToPublicFeed(3000);
+      return added;
     }
     return mat.added;
   }
@@ -2251,11 +2262,10 @@
 
   function useCssGridForCommunityFeed(containerId) {
     if (containerId === 'userProfileGrid') return true;
-    const efficiencyGrid = document.body.classList.contains('efficiency-mode');
-    if (efficiencyGrid && (containerId === 'communityGrid' || containerId === 'creationsGrid')) {
-      return true;
-    }
-    return false;
+    if (containerId !== 'communityGrid' && containerId !== 'creationsGrid') return false;
+    // 效率模式 / 手机端用 CSS Grid；桌面端仍走 Masonry，才能调列数
+    if (!isMobileFeedLayout()) return false;
+    return true;
   }
 
   function relayoutCommunityFeeds() {
@@ -2325,7 +2335,11 @@
     }
     if (useCssGridForCommunityFeed(containerId)) {
       resetCommunityGridCardLayout(container, containerId);
-      container.classList.add('community-mobile-feed');
+      if (containerId === 'communityGrid' || containerId === 'creationsGrid') {
+        container.classList.add('community-mobile-feed');
+      } else {
+        container.classList.remove('community-mobile-feed');
+      }
       requestAnimationFrame(() => setFeedLayoutPending(containerId, false));
       if (window.CardImageLoader?.observeContainer) window.CardImageLoader.observeContainer(container);
       return;
@@ -2818,11 +2832,13 @@
     }
     container.dataset.feedSig = sig;
     delete container.dataset.feedFinalized;
+    const isProfile = containerId === 'userProfileGrid';
+    const isCommunityFeed = containerId === 'communityGrid' || containerId === 'userProfileGrid';
+    const renderPosts = isCommunityFeed ? posts.filter(isFeedRenderablePost) : posts;
     if (containerId === 'communityGrid' && communitySidePostId) {
       const stillThere = renderPosts.some((p) => p.id === communitySidePostId);
       if (!stillThere) closeCommunitySidePanel();
     }
-    const isProfile = containerId === 'userProfileGrid';
     if (isProfile && profileMasonry) {
       profileMasonry.destroy();
       profileMasonry = null;
@@ -2833,9 +2849,6 @@
       communityMasonry.destroy();
       communityMasonry = null;
     }
-
-    const isCommunityFeed = containerId === 'communityGrid' || containerId === 'userProfileGrid';
-    const renderPosts = isCommunityFeed ? posts.filter(isFeedRenderablePost) : posts;
 
     if (!renderPosts.length) {
       container.innerHTML = '<div class="feature-empty" style="grid-column:1/-1;padding:40px"><p>暂无已发布作品</p></div>';
@@ -2989,7 +3002,7 @@
       const hydrateP = hydrateFeedImages(container);
       await Promise.race([
         prefetchP,
-        new Promise((r) => setTimeout(r, mobile ? 1200 : 2000))
+        new Promise((r) => setTimeout(r, mobile ? 8000 : 12000))
       ]);
       if (renderGen !== communityFeedRenderGen) return;
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
