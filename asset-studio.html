@@ -4,24 +4,64 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0a0c10">
+  <link rel="icon" href="assets/asset-studio-icon.png" type="image/png">
   <title>资产创作 · Prompt Hub</title>
+  <link rel="stylesheet" href="styles.css?v=20260619j">
+  <link rel="stylesheet" href="styles-features.css?v=20260619j">
   <link rel="stylesheet" href="styles-theme.css?v=20260615z">
-  <link rel="stylesheet" href="asset-studio.css?v=20260618c">
+  <link rel="stylesheet" href="asset-studio.css?v=20260622a">
+  <script src="vendor/supabase.min.js?v=20260606m"></script>
+  <script src="supabase-config.js"></script>
+  <script src="api-domain.config.js"></script>
+  <script src="api-config.js"></script>
+  <script src="api-client.js?v=20260620b"></script>
+  <script src="supabase-sync.js?v=20260616t"></script>
+  <script src="membership.js?v=20260616n"></script>
+  <script src="points-system.js?v=20260619j"></script>
   <script src="theme.js?v=20260615z"></script>
+  <script type="module" src="ui-background.js?v=20260615z"></script>
 </head>
 <body class="asset-studio-body">
-  <header class="studio-topbar">
+  <div id="rippleGridBg" class="ripple-grid-bg" aria-hidden="true"></div>
+  <div class="ui-vignette" aria-hidden="true"></div>
+  <div class="app-chrome studio-chrome">
+    <div class="studio-app-root">
+  <div class="studio-viewonly-banner hidden" id="studioViewOnlyBanner">
+    资产创作为<strong>基础会员</strong>及以上可用，当前为只读预览。
+    <a href="index.html" id="studioUpgradeLink">返回主站开通会员</a>
+  </div>
+  <header class="studio-topbar main-header">
     <div class="studio-topbar-left">
       <a class="studio-back-link" href="index.html" title="返回主站">← 主站</a>
-      <select id="studioProjectSelect" class="studio-select" aria-label="项目"></select>
+      <h3 class="studio-topbar-title">资产创作</h3>
+      <select id="studioProjectSelect" class="studio-select toolbar-select" aria-label="项目"></select>
       <button type="button" class="btn btn-ghost btn-sm" id="studioNewProjectBtn">新建项目</button>
+      <button type="button" class="studio-icon-btn" id="studioFieldSettingsBtn" title="字段管理" aria-label="字段管理">⚙</button>
+      <button type="button" class="studio-icon-btn studio-delete-project-btn" id="studioDeleteProjectBtn" title="删除当前项目" aria-label="删除当前项目">🗑</button>
     </div>
     <div class="studio-topbar-center">
-      <span class="studio-draft-badge" id="studioStatusBadge">本地已自动保存</span>
+      <div class="studio-hero-drop" id="studioHeroDrop">
+        <div class="studio-hero-inline">
+          <p class="studio-hero-hint" id="studioHeroHint" title="关联图：拖入与本篇相关的卡片">关联图</p>
+          <div class="studio-hero-thumbs" id="studioHeroThumbs"></div>
+        </div>
+      </div>
     </div>
-    <div class="studio-topbar-right">
-      <button type="button" class="btn btn-secondary btn-sm" id="studioImportBtn">导入卡片库</button>
-      <button type="button" class="btn btn-ghost btn-sm" id="studioFullscreenBtn">文档全屏</button>
+    <div class="studio-topbar-right header-actions">
+      <button type="button" class="theme-toggle-btn studio-theme-btn" id="studioThemeToggleBtn" aria-label="切换主题" title="切换主题">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+        </svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+      <div class="studio-credits-wrap">
+        <span class="studio-credits-badge" id="studioCreditsBadge">积分 —</span>
+        <button type="button" class="btn btn-secondary btn-sm" id="studioRechargeBtn">充值</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="studioLedgerBtn">明细</button>
+        <div class="studio-credit-ledger hidden" id="studioCreditLedgerPanel"></div>
+      </div>
     </div>
   </header>
 
@@ -33,20 +73,25 @@
           <button type="button" class="studio-tab active" data-asset-tab="warehouse">卡片库</button>
           <button type="button" class="studio-tab" data-asset-tab="market">资产包</button>
         </div>
-        <input type="search" class="studio-search" id="studioAssetFilter" placeholder="筛选卡片…" autocomplete="off">
+        <input type="search" class="studio-search" id="studioAssetFilter" placeholder="搜索卡片…" autocomplete="off">
+        <button type="button" class="studio-filter-btn" id="studioFilterBtn" title="筛选">筛选</button>
+        <div class="studio-filter-dropdown hidden" id="studioFilterDropdown"></div>
       </div>
       <div class="studio-asset-scroll" id="studioAssetFolders"></div>
     </aside>
+
+    <div class="studio-resizer" data-resize="assets" title="拖动调整宽度"></div>
 
     <!-- 左：项目文档树 -->
     <aside class="studio-panel studio-panel-docs" aria-label="文档分类">
       <div class="studio-panel-head">
         <span class="studio-panel-title">文档</span>
-        <button type="button" class="studio-icon-btn" id="studioNewFolderBtn" title="新建分类">+夹</button>
-        <button type="button" class="studio-icon-btn" id="studioNewDocBtn" title="新建文档">+文</button>
+        <button type="button" class="studio-icon-btn" id="studioDocAddBtn" title="新建文档">+</button>
       </div>
       <div class="studio-doc-tree" id="studioDocTree"></div>
     </aside>
+
+    <div class="studio-resizer" data-resize="docs" title="拖动调整宽度"></div>
 
     <!-- 中：写作区 -->
     <main class="studio-main" id="studioMain">
@@ -54,14 +99,12 @@
         <input type="text" class="studio-doc-title" id="studioDocTitle" placeholder="文档标题">
         <span class="studio-doc-meta" id="studioDocMeta"></span>
       </div>
-      <div class="studio-hero-drop" id="studioHeroDrop">
-        <p class="studio-hero-hint">首字段：拖入与本篇相关的卡片（人设 / 场景 / 配角）</p>
-        <div class="studio-hero-thumbs" id="studioHeroThumbs"></div>
-      </div>
       <div class="studio-editor-wrap">
         <div class="studio-editor" id="studioEditor" contenteditable="true" spellcheck="true" data-placeholder="开始写作… 文中出现的卡片名会自动高亮，点击可查看卡片。"></div>
       </div>
     </main>
+
+    <div class="studio-resizer" data-resize="ai" title="拖动调整宽度"></div>
 
     <!-- 右：AI / 生图 / 生视频 -->
     <aside class="studio-panel studio-panel-ai" id="studioAiPanel" aria-label="助手">
@@ -73,24 +116,108 @@
           <button type="button" class="studio-tab" data-ai-tab="video">生视频</button>
         </div>
         <div class="studio-ai-pane active" data-ai-pane="chat">
+          <div class="studio-chat-thread-bar">
+            <select id="studioChatThreadSelect" class="settings-input studio-chat-thread-select" aria-label="对话会话"></select>
+            <button type="button" class="studio-icon-btn" id="studioChatNewThread" title="新对话">+</button>
+          </div>
+          <div class="studio-chat-toolbar">
+            <label class="studio-chat-field" for="studioChatModel">
+              <span>对话模型</span>
+              <select id="studioChatModel" class="settings-input studio-gen-select">
+                <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
+                <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+              </select>
+            </label>
+            <label class="studio-chat-thinking">
+              <input type="checkbox" id="studioChatThinking">
+              <span>思考模式</span>
+            </label>
+          </div>
+          <p class="studio-chat-cost panel-hint" id="studioChatCostHint">按 token 计费 · 1000 积分约可输入 769 万 token（Flash）</p>
           <div class="studio-chat-log" id="studioChatLog">
-            <p class="studio-chat-system">可将左侧卡片拖入此处，或复制卡片信息到对话（Demo 占位）。</p>
+            <p class="studio-chat-system">已接入 AI 对话：可描述镜头、对白或扩写需求；发送时会自动附带当前文档与关联卡片上下文。</p>
           </div>
           <div class="studio-chat-compose">
-            <textarea id="studioChatInput" rows="3" placeholder="向模型描述你的镜头…"></textarea>
-            <button type="button" class="btn btn-primary btn-sm" id="studioChatSend">发送（演示）</button>
+            <textarea id="studioChatInput" rows="3" placeholder="描述镜头、对白或需要扩写的内容… Enter 发送，Shift+Enter 换行"></textarea>
+            <div class="studio-chat-compose-actions">
+              <button type="button" class="btn btn-ghost btn-sm" id="studioChatContextBtn" title="预览文档上下文">预览上下文</button>
+              <button type="button" class="btn btn-primary btn-sm" id="studioChatSend">发送</button>
+            </div>
           </div>
         </div>
         <div class="studio-ai-pane" data-ai-pane="image">
-          <p class="panel-hint">生图面板占位：正式版将联动主站积分与生图 API。</p>
-          <textarea class="studio-gen-prompt" rows="4" placeholder="提示词…"></textarea>
-          <button type="button" class="btn btn-secondary btn-sm">生成（演示）</button>
+          <div class="studio-gen-scroll" id="studioImageScroll">
+            <div class="studio-gen-form">
+              <p class="studio-gen-credits" id="studioImageHint">积分与主站共用 · 生成后自动保存到主站卡片库</p>
+              <label for="studioImageModel">生图模型</label>
+              <select id="studioImageModel" class="settings-input studio-gen-select">
+                <option value="quanneng2">全能模型2</option>
+                <option value="jimeng">集梦 Seedream</option>
+              </select>
+              <div class="studio-gen-row">
+                <div>
+                  <label for="studioImageResolution">分辨率</label>
+                  <select id="studioImageResolution" class="settings-input studio-gen-select">
+                    <option value="1k">1K</option>
+                    <option value="2k">2K</option>
+                    <option value="4k">4K</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="studioImageSize">比例</label>
+                  <select id="studioImageSize" class="settings-input studio-gen-select">
+                    <option value="1:1">1∶1</option>
+                    <option value="16:9">16∶9</option>
+                    <option value="9:16">9∶16</option>
+                    <option value="4:3">4∶3</option>
+                    <option value="3:4">3∶4</option>
+                  </select>
+                </div>
+              </div>
+              <div class="studio-gen-ref-block">
+                <label class="studio-gen-ref-label">参考图（可选）</label>
+                <div class="imagegen-ref studio-gen-ref-zone" id="studioImageRefBox">
+                  <div class="imagegen-ref-drop" id="studioImageRefDrop">
+                    <p class="imagegen-ref-hint imagegen-ref-hint-desktop">拖拽、点击或 Ctrl+V · 可多张</p>
+                    <input type="file" id="studioImageRefInput" accept="image/*" multiple>
+                  </div>
+                  <div class="imagegen-ref-gallery" id="studioImageRefGallery" hidden></div>
+                </div>
+              </div>
+              <label for="studioImagePrompt">提示词</label>
+              <textarea id="studioImagePrompt" class="studio-gen-prompt" rows="5" placeholder="描述画面… 可点「从文档填入」"></textarea>
+              <div class="studio-gen-actions">
+                <button type="button" class="btn btn-ghost btn-sm" id="studioImageFillDoc">从文档填入</button>
+                <button type="button" class="btn btn-primary btn-sm studio-gen-submit-btn" id="studioImageSubmit">生成图片 · — 积分</button>
+              </div>
+            </div>
+            <div class="studio-gen-preview" id="studioImagePreviewArea">
+              <p class="studio-gen-preview-label">生成结果</p>
+              <p class="studio-gen-idle panel-hint" id="studioImageIdle">提交后将在此显示</p>
+              <div class="studio-gen-pending imagegen-gen-pending hidden" id="studioImagePending" aria-busy="true">
+                <span class="imagegen-gen-pending-label">生成中</span>
+              </div>
+              <div class="studio-gen-result hidden" id="studioImageResult">
+                <img id="studioImagePreview" alt="生成结果">
+                <div class="studio-gen-result-actions">
+                  <button type="button" class="btn btn-ghost btn-sm" id="studioImageDownload">下载图片</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="studioImageAddCard">保存到主站卡片库</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="studio-ai-pane" data-ai-pane="video">
-          <p class="panel-hint">生视频占位：可基于文档分镜与关联卡片扩展。</p>
-          <textarea class="studio-gen-prompt" rows="4" placeholder="分镜 / 运动描述…"></textarea>
-          <button type="button" class="btn btn-secondary btn-sm">生成（演示）</button>
+          <div class="studio-gen-form">
+            <p class="panel-hint">视频生成即将接入。可先使用「生图」出关键帧，或在主站图片生成中继续创作。</p>
+            <label for="studioVideoPrompt">分镜 / 运动描述</label>
+            <textarea id="studioVideoPrompt" class="studio-gen-prompt" rows="4" placeholder="镜头运动、时长、主体动作…"></textarea>
+            <button type="button" class="btn btn-secondary btn-sm" id="studioVideoCopyBtn">复制到剪贴板</button>
+          </div>
         </div>
+      </div>
+      <div class="studio-ai-footer">
+        <span class="studio-draft-badge" id="studioStatusBadge">本地已自动保存</span>
       </div>
     </aside>
   </div>
@@ -114,6 +241,62 @@
     </div>
   </div>
 
-  <script src="asset-studio.js?v=20260618c"></script>
+    </div>
+  </div>
+
+  <div class="studio-settings-overlay hidden" id="studioSettingsOverlay" role="dialog" aria-modal="true" aria-labelledby="studioSettingsTitle">
+    <div class="studio-settings-backdrop" id="studioSettingsBackdrop"></div>
+    <div class="studio-settings-panel">
+      <header class="studio-settings-head">
+        <h2 id="studioSettingsTitle">字段管理</h2>
+        <button type="button" class="studio-settings-close" id="studioSettingsClose" aria-label="关闭">×</button>
+      </header>
+      <div class="studio-settings-body">
+        <section class="studio-settings-section">
+          <h3>AI 对话</h3>
+          <label class="studio-settings-check">
+            <input type="checkbox" id="studioChatAttachDoc" checked>
+            <span>发送消息时附带当前文档与关联卡片</span>
+          </label>
+        </section>
+        <section class="studio-settings-section">
+          <h3>关联图说明</h3>
+          <p class="panel-hint">显示在顶栏关联图拖入区的提示文字</p>
+          <input type="text" class="settings-input" id="studioHeroLabelInput" maxlength="80">
+        </section>
+        <section class="studio-settings-section">
+          <h3>卡片固定字段名称</h3>
+          <p class="panel-hint">双击卡片详情里各区块的显示名称，仅影响当前项目</p>
+          <div class="studio-field-label-grid" id="studioCoreFieldLabels"></div>
+        </section>
+        <section class="studio-settings-section">
+          <h3>全局自定义字段</h3>
+          <p class="panel-hint">与主站类似，每张卡片详情都会显示这些字段</p>
+          <div class="studio-field-add-row">
+            <input type="text" class="settings-input" id="studioNewFieldName" placeholder="字段名称" maxlength="24">
+            <select class="settings-input studio-field-type-select" id="studioNewFieldType">
+              <option value="text">文本</option>
+              <option value="textarea">多行文本</option>
+            </select>
+            <button type="button" class="btn btn-primary btn-sm" id="studioAddFieldBtn">添加</button>
+          </div>
+          <div class="studio-field-list" id="studioFieldList"></div>
+          <p class="panel-hint hidden" id="studioFieldListEmpty">暂无自定义字段</p>
+        </section>
+      </div>
+      <footer class="studio-settings-foot">
+        <button type="button" class="btn btn-primary btn-sm" id="studioSettingsSaveBtn">保存</button>
+      </footer>
+    </div>
+  </div>
+
+  <div class="studio-tree-menu hidden" id="studioTreeMenu" role="menu"></div>
+
+  <div class="custom-modal-overlay" id="studioModalOverlay" onclick="if(event.target===this) window.__studioCloseModal?.()">
+    <div class="custom-modal studio-modal" id="studioModal" onclick="event.stopPropagation()"></div>
+  </div>
+
+  <script src="subscription.js?v=20260619j"></script>
+  <script src="asset-studio.js?v=20260622a"></script>
 </body>
 </html>

@@ -17,7 +17,8 @@
   const VARIANT_GRID = 'grid';
   const VARIANT_FULL = 'full';
   const USE_STORAGE_TRANSFORM = false;
-  const GRID_SIGN_CONCURRENCY = 8;
+  const GRID_SIGN_CONCURRENCY = 4;
+  const signInflight = new Map();
 
   function parseSignedUrlExpiry(url) {
     if (!url || typeof url !== 'string') return 0;
@@ -297,6 +298,12 @@
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/[^/?#]+\.(jpe?g|png|webp|gif)$/i.test(bare)) {
       return toStorageRef(bare);
     }
+    if (/^https?:\/\//i.test(bare) && isInvalidMediaUrl(bare)) {
+      try {
+        const p = new URL(bare).pathname.replace(/^\//, '');
+        if (/^[^/]+\/.+\.(jpe?g|png|webp|gif)$/i.test(p)) return toStorageRef(p);
+      } catch (e) { /* ignore */ }
+    }
     return value;
   }
 
@@ -307,9 +314,9 @@
   }
 
   try {
-    if (localStorage.getItem('promptrepo_sign_v') !== '4') {
+    if (localStorage.getItem('promptrepo_sign_v') !== '5') {
       clearSignedUrlCache();
-      localStorage.setItem('promptrepo_sign_v', '4');
+      localStorage.setItem('promptrepo_sign_v', '5');
     }
   } catch (e) { /* ignore */ }
 
@@ -467,27 +474,37 @@
     if (!window.PromptHubApi?.isConfigured?.() || !window.PromptHubApi.signCommunityMediaRef) return null;
     const fileKey = String(path || '').replace(/^\//, '');
     if (isPathKnownMissing(fileKey)) return null;
-    try {
-      const r = await window.PromptHubApi.signCommunityMediaRef(toStorageRef(path), {
-        variant,
-        authorId: signOpts.authorId,
-        cardId: signOpts.cardId
-      });
-      if (r.ok && r.data?.url && !isIncompleteSignedStorageUrl(r.data.url)) {
-        const v = variant || VARIANT_GRID;
-        signedUrlCache.set(signedCacheKey(path.replace(/^\//, ''), v), {
-          url: r.data.url,
-          expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
+    const v = variant || VARIANT_GRID;
+    const inflightKey = `community:${fileKey}:${v}:${signOpts.authorId || ''}:${signOpts.cardId || ''}`;
+    if (signInflight.has(inflightKey)) return signInflight.get(inflightKey);
+    const task = (async () => {
+      try {
+        const r = await window.PromptHubApi.signCommunityMediaRef(toStorageRef(path), {
+          variant: v,
+          authorId: signOpts.authorId,
+          cardId: signOpts.cardId
         });
-        return r.data.url;
+        if (r.ok && r.data?.url && !isIncompleteSignedStorageUrl(r.data.url)) {
+          signedUrlCache.set(signedCacheKey(fileKey, v), {
+            url: r.data.url,
+            expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
+          });
+          return r.data.url;
+        }
+        if (r?.status === 404 || r?.code === 'NOT_FOUND') {
+          markPathMissing(fileKey);
+        }
+      } catch (e) {
+        console.warn('[SupabaseSync] community api sign failed', path, e);
       }
-      if (r?.status === 404 || r?.code === 'NOT_FOUND') {
-        markPathMissing(fileKey);
-      }
-    } catch (e) {
-      console.warn('[SupabaseSync] community api sign failed', path, e);
+      return null;
+    })();
+    signInflight.set(inflightKey, task);
+    try {
+      return await task;
+    } finally {
+      signInflight.delete(inflightKey);
     }
-    return null;
   }
 
   function apiSignAllowed(opts) {
@@ -500,20 +517,31 @@
 
   async function signPathViaApi(path, variant, opts) {
     if (!apiSignAllowed(opts)) return null;
-    try {
-      const r = await window.PromptHubApi.signMediaRef(toStorageRef(path), { variant });
-      if (r.ok && r.data?.url && !isIncompleteSignedStorageUrl(r.data.url)) {
-        const v = variant || VARIANT_GRID;
-        signedUrlCache.set(signedCacheKey(path.replace(/^\//, ''), v), {
-          url: r.data.url,
-          expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
-        });
-        return r.data.url;
+    const fileKey = String(path || '').replace(/^\//, '');
+    const v = variant || VARIANT_GRID;
+    const inflightKey = `api:${fileKey}:${v}`;
+    if (signInflight.has(inflightKey)) return signInflight.get(inflightKey);
+    const task = (async () => {
+      try {
+        const r = await window.PromptHubApi.signMediaRef(toStorageRef(path), { variant: v });
+        if (r.ok && r.data?.url && !isIncompleteSignedStorageUrl(r.data.url)) {
+          signedUrlCache.set(signedCacheKey(fileKey, v), {
+            url: r.data.url,
+            expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
+          });
+          return r.data.url;
+        }
+      } catch (e) {
+        console.warn('[SupabaseSync] api sign failed', path, e);
       }
-    } catch (e) {
-      console.warn('[SupabaseSync] api sign failed', path, e);
+      return null;
+    })();
+    signInflight.set(inflightKey, task);
+    try {
+      return await task;
+    } finally {
+      signInflight.delete(inflightKey);
     }
-    return null;
   }
 
   function storagePathOwnedByCurrentUser(path) {
@@ -728,7 +756,7 @@
     const limit = Math.max(800, Number(capMs) || 4000);
     const started = Date.now();
     let i = 0;
-    const concurrency = 6;
+    const concurrency = 3;
     async function signItem(item) {
       const authorId = item && typeof item === 'object' ? item.authorId : '';
       const cardId = item && typeof item === 'object' ? (item.sourceCardId || item.id) : '';
@@ -804,7 +832,7 @@
   async function prefetchCardsImages(cards, capMs) {
     if (!isLoggedIn()) return;
     const pathSet = new Set();
-    const list = (cards || []).slice(0, 32);
+    const list = (cards || []).slice(0, 16);
     for (const c of list) {
       if (!c?.image) continue;
       const p = primaryImagePath(c.image, c.id);
@@ -818,7 +846,7 @@
 
   function imgPlaceholderSrc() {
     return 'data:image/svg+xml,' + encodeURIComponent(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="#e4e4ea" width="4" height="3"/></svg>'
+      '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="#18181c" width="4" height="3"/></svg>'
     );
   }
 
@@ -889,8 +917,11 @@
       if (url && /^https?:\/\//i.test(url) && isValidSignedDisplayUrl(url)) {
         const media = img.closest('.card-media, .imagegen-feed-media');
         media?.classList.remove('card-media--await');
-        if (media && !media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
-        if (media && !media.classList.contains('is-loading')) media.classList.add('is-loading');
+        const alreadyVisible = img.complete && img.naturalWidth > 8 && isUsableLoadedImgSrc(cur);
+        if (media && !alreadyVisible) {
+          if (!media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
+          if (!media.classList.contains('is-loading')) media.classList.add('is-loading');
+        }
         const done = () => {
           if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
           else media?.classList.remove('is-loading');
@@ -925,7 +956,7 @@
       if (aVis !== bVis) return aVis ? -1 : 1;
       return ar.top - br.top;
     });
-    const concurrency = window.matchMedia('(max-width: 900px)').matches ? 6 : 8;
+    const concurrency = window.matchMedia('(max-width: 900px)').matches ? 4 : 5;
     let idx = 0;
     async function hydrateOne(img) {
       const ref = img.getAttribute('data-storage-ref') || img.getAttribute('data-image-ref');

@@ -36,6 +36,15 @@
     return !!(window.__PH_API_DOWN_UNTIL__ && Date.now() < window.__PH_API_DOWN_UNTIL__);
   }
 
+  function isApiRateLimited() {
+    return !!(window.__PH_API_RATE_LIMITED_UNTIL__ && Date.now() < window.__PH_API_RATE_LIMITED_UNTIL__);
+  }
+
+  function markApiRateLimited(ms) {
+    const until = Date.now() + Math.max(15000, Number(ms) || 90000);
+    window.__PH_API_RATE_LIMITED_UNTIL__ = Math.max(window.__PH_API_RATE_LIMITED_UNTIL__ || 0, until);
+  }
+
   function isNetworkFetchError(e) {
     const s = String(e && (e.message || e) || '');
     return /Failed to fetch|NetworkError|ERR_CONNECTION|ENOTFOUND|ECONNREFUSED|refused/i.test(s);
@@ -136,9 +145,12 @@
         const recovered = await recoverSessionForApi();
         if (recovered) return request(method, path, body, opts, attempt + 1);
       }
-      if (res.status === 429 && attempt < 4) {
-        await new Promise((r) => setTimeout(r, 1200 + attempt * 800));
-        return request(method, path, body, opts, attempt + 1);
+      if (res.status === 429) {
+        markApiRateLimited(90000 + attempt * 30000);
+        if (!opts.noRetry && attempt < 2) {
+          await new Promise((r) => setTimeout(r, 1800 + attempt * 1200));
+          return request(method, path, body, opts, attempt + 1);
+        }
       }
       return {
         ok: false,
@@ -302,6 +314,19 @@
     });
   }
 
+  async function studioChat(payload) {
+    return request('POST', '/api/v1/chat', payload, { timeoutMs: 120000 });
+  }
+
+  async function studioChatQuote(params) {
+    const q = new URLSearchParams();
+    if (params?.model) q.set('model', params.model);
+    if (params?.thinking) q.set('thinking', '1');
+    if (params?.inputTokens) q.set('inputTokens', String(params.inputTokens));
+    const qs = q.toString();
+    return request('GET', `/api/v1/chat/cost${qs ? `?${qs}` : ''}`, null, { timeoutMs: API_FAST_TIMEOUT_MS });
+  }
+
   async function listRecentGenerationJobs() {
     return request('GET', '/api/v1/generate/jobs', null, { timeoutMs: API_TIMEOUT_MS });
   }
@@ -316,7 +341,7 @@
   }
 
   async function syncMembershipTasks(payload) {
-    if (isApiUnreachable()) {
+    if (isApiUnreachable() || isApiRateLimited()) {
       return { ok: false, code: 'API_UNREACHABLE', message: 'API 暂不可用' };
     }
     return request('POST', '/api/v1/membership/tasks/sync', payload || {}, {
@@ -413,7 +438,13 @@
   }
 
   async function syncCommunityPostsBatch(posts) {
-    return request('POST', '/api/v1/community/posts/sync', { posts: posts || [] });
+    if (isApiUnreachable() || isApiRateLimited()) {
+      return { ok: false, code: 'API_UNREACHABLE', message: 'API 暂不可用' };
+    }
+    return request('POST', '/api/v1/community/posts/sync', { posts: posts || [] }, {
+      timeoutMs: API_FAST_TIMEOUT_MS,
+      noRetry: true
+    });
   }
 
   async function likeCommunityPost(postId) {
@@ -481,6 +512,7 @@
 
   window.PromptHubApi = {
     isApiUnreachable,
+    isApiRateLimited,
     markApiUnreachable,
     probeApiHealth,
     isConfigured,
@@ -497,6 +529,8 @@
     getGenerationCost,
     generateImage,
     getGenerationJob,
+    studioChat,
+    studioChatQuote,
     listRecentGenerationJobs,
     getLedger,
     checkLikeMilestone,

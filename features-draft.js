@@ -90,6 +90,9 @@
   const displayUrlCache = new Map();
   let publicFeedAt = 0;
   let publicFeedLoading = false;
+  let communityPostsSyncInflight = null;
+  let lastCommunityPostsSyncAt = 0;
+  const COMMUNITY_POSTS_SYNC_GAP_MS = 120000;
   const PUBLIC_FEED_TTL_MS = 120_000;
   const PUBLIC_FEED_CACHE_VERSION = 2;
   const LS_PUBLIC_FEED_CACHE = 'promptrepo_public_feed_cache';
@@ -496,29 +499,43 @@
 
   async function syncMyPostsToPublicFeed() {
     if (!window.SupabaseSync?.isLoggedIn?.() || !window.PromptHubApi?.syncCommunityPostsBatch) return 0;
-    const mine = collectMyCommunityPostsForSync();
-    for (const p of mine) {
-      if (p.sourceCardId && window.SupabaseSync?.repairCardImageIfMissing) {
-        try {
-          const repaired = await window.SupabaseSync.repairCardImageIfMissing(p.sourceCardId, p.image);
-          if (repaired) p.image = repaired;
-        } catch (e) { /* ignore */ }
+    if (window.PromptHubApi?.isApiUnreachable?.() || window.PromptHubApi?.isApiRateLimited?.()) return 0;
+    if (Date.now() - lastCommunityPostsSyncAt < COMMUNITY_POSTS_SYNC_GAP_MS) return 0;
+    if (communityPostsSyncInflight) return communityPostsSyncInflight;
+    communityPostsSyncInflight = (async () => {
+      const mine = collectMyCommunityPostsForSync();
+      for (const p of mine) {
+        if (p.sourceCardId && window.SupabaseSync?.repairCardImageIfMissing) {
+          try {
+            const repaired = await window.SupabaseSync.repairCardImageIfMissing(p.sourceCardId, p.image);
+            if (repaired) p.image = repaired;
+          } catch (e) { /* ignore */ }
+        }
       }
-    }
-    if (mine.length) {
-      communityPosts = mergePostsLists(communityPosts, mine);
-      persistCommunity();
-    }
+      if (mine.length) {
+        communityPosts = mergePostsLists(communityPosts, mine);
+        persistCommunity();
+      }
+      try {
+        const r = await window.PromptHubApi.syncCommunityPostsBatch(mine.map(postForPublicApi));
+        if (r?.ok) {
+          lastCommunityPostsSyncAt = Date.now();
+          return mine.length;
+        }
+        if (r?.status === 429 || r?.code === 'RATE_LIMITED') {
+          lastCommunityPostsSyncAt = Date.now() - COMMUNITY_POSTS_SYNC_GAP_MS + 300000;
+        }
+        console.warn('[community] sync public posts failed', r);
+      } catch (e) {
+        console.warn('[community] sync public posts failed', e);
+      }
+      return 0;
+    })();
     try {
-      const r = await window.PromptHubApi.syncCommunityPostsBatch(mine.map(postForPublicApi));
-      if (r?.ok) {
-        return mine.length;
-      }
-      console.warn('[community] sync public posts failed', r);
-    } catch (e) {
-      console.warn('[community] sync public posts failed', e);
+      return await communityPostsSyncInflight;
+    } finally {
+      communityPostsSyncInflight = null;
     }
-    return 0;
   }
 
   function esc(s) {
@@ -692,12 +709,12 @@
     return Number.isFinite(n) ? n : 16;
   }
 
-  /** 社区/我发布 Masonry：纵向留白略大、横向略紧，避免「左右宽、上下挤」 */
+  /** 社区/我发布 Masonry：与卡片库同一套列宽与间距算法 */
   function getCommunityFeedGaps() {
-    const base = getMasonryGap();
-    const colGap = Math.min(12, Math.max(8, Math.round(base * 0.55)));
-    const rowGap = Math.max(14, Math.round(base * 0.72));
-    return { colGap, rowGap };
+    const gap = getMasonryGap();
+    const rowRaw = getComputedStyle(document.documentElement).getPropertyValue('--card-row-gap').trim();
+    const rowGap = Number.parseFloat(rowRaw) || gap;
+    return { colGap: gap, rowGap };
   }
 
   function filterCreationsForCloud(list) {
@@ -1646,7 +1663,7 @@
   }
 
   const IMG_LOADING_PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect fill="%232a2a30" width="16" height="16"/></svg>'
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect fill="%2318181c" width="16" height="16"/></svg>'
   );
 
   function bindFeedImgErrorFallback(img) {
@@ -1828,9 +1845,10 @@
           media.classList.add('card-media--load-failed');
         } else if (sideBtn) {
           img.src = IMG_LOADING_PLACEHOLDER;
+          releaseFeedMediaLoading(media);
         }
       }
-    } finally {
+    } catch (e) {
       releaseFeedMediaLoading(media);
     }
   }
@@ -2169,6 +2187,9 @@
     if (!container || useCssGridForCommunityFeed(containerId)) return 0;
     const colWidth = getCommunityFeedColumnWidth(container);
     if (!colWidth) return 0;
+    container.style.removeProperty('max-width');
+    container.style.removeProperty('margin-left');
+    container.style.removeProperty('margin-right');
     const sizer = container.querySelector('.grid-sizer');
     if (sizer) sizer.style.width = colWidth + 'px';
     container.querySelectorAll('.card').forEach((card) => {
@@ -2336,7 +2357,10 @@
       scheduleCommunityLayout(containerId, { force: true });
       return;
     }
-    const colWidth = Math.max(120, Math.floor((innerW - gap * (cols - 1)) / cols));
+    let colWidth = Math.max(120, Math.floor((innerW - gap * (cols - 1)) / cols));
+    container.style.removeProperty('max-width');
+    container.style.removeProperty('margin-left');
+    container.style.removeProperty('margin-right');
     let sizer = container.querySelector('.grid-sizer');
     if (!sizer) {
       sizer = document.createElement('div');
@@ -2346,6 +2370,7 @@
     sizer.style.width = colWidth + 'px';
     cardEls.forEach(card => {
       card.style.width = colWidth + 'px';
+      card.style.maxWidth = colWidth + 'px';
       card.style.marginBottom = rowGap + 'px';
     });
     const opts = {
@@ -2353,7 +2378,7 @@
       columnWidth: '.grid-sizer',
       gutter: gap,
       percentPosition: false,
-      horizontalOrder: cols <= 3,
+      horizontalOrder: false,
       transitionDuration: '0s'
     };
     const scrollTop = container.scrollTop;
@@ -2763,14 +2788,18 @@
           </div>
         </div>`;
       }
-      div.addEventListener('click', () => {
+      div.addEventListener('click', (e) => {
         if (containerId === 'userProfileGrid') closeUserProfile();
         if (containerId === 'creationsGrid') {
           openPostSidePanel(post.id, 'creations', { post });
           return;
         }
-        if (containerId === 'communityGrid' && communityAppreciateActive) {
-          void openCommunityAppreciateViewer(post);
+        if (containerId === 'communityGrid') {
+          if (communityAppreciateActive && showImage) {
+            void openCommunityAppreciateViewer(post);
+            return;
+          }
+          openPostSidePanel(post.id, 'community', { post });
           return;
         }
         openPostSidePanel(post.id, 'community', { post });
@@ -3157,7 +3186,7 @@
     if (idx >= 0) communityPosts[idx] = post;
     else communityPosts.push(post);
     card.publishedToCommunity = true;
-    window.TrialTasksUI?.syncTaskProgress?.(true);
+    window.TrialTasksUI?.syncTaskProgress?.();
     card.communityPostId = post.id;
     if (opts.skipPersist !== true) {
       persistCommunity();
@@ -3433,6 +3462,10 @@
   }
 
   async function openCommunitySideImageZoom(body, post, sideRef, postId, extra = {}) {
+    if (post && typeof openCommunityAppreciateViewer === 'function') {
+      void openCommunityAppreciateViewer(post);
+      return;
+    }
     const ready = loadedCommunitySideImgSrc(body);
     if (ready && typeof window.openLightbox === 'function') {
       window.openLightbox(ready);
@@ -3482,7 +3515,7 @@
     const titleEl = document.getElementById(titleId);
     if (!post || !body) return;
     if (titleEl) titleEl.textContent = getPostSideTitle(post);
-    const sideRef = canonicalCommunityImageRef(post);
+    const sideRef = communityPostDisplayImageRef(post);
     const storageAttr = feedImgStorageAttr(sideRef);
     const showSideImg = sideRef && isDisplayableImage(sideRef);
     const sideInitial = showSideImg ? communityImgInitialSrc(sideRef) : '';
@@ -3684,12 +3717,10 @@
     const favBtn = document.getElementById('appreciateViewerFavBtn');
     if (!viewer || !img) return;
     appreciateViewerPostId = post.id;
-    const alreadyOpen = viewer.classList.contains('active');
-    if (!alreadyOpen) {
-      viewer.classList.remove('active');
-      document.body.classList.remove('appreciate-viewing');
-    }
     window.setAppreciateViewerLoading?.(true);
+    if (typeof window.resetImageZoom === 'function') window.resetImageZoom(img);
+    viewer.classList.add('active');
+    document.body.classList.add('appreciate-viewing');
     const title = getPostTitle(post);
     const prompt = (post.prompt || '').trim();
     if (caption) {
@@ -3701,12 +3732,7 @@
       favBtn.disabled = favIds.has(post.id);
     }
     actions?.classList.remove('hidden');
-    const imageRef = canonicalCommunityImageRef(post);
-    const reveal = () => {
-      if (gen !== appreciateViewerGen) return;
-      viewer.classList.add('active');
-      document.body.classList.add('appreciate-viewing');
-    };
+    const imageRef = communityPostDisplayImageRef(post);
     if (imageRef && isDisplayableImage(imageRef)) {
       img.style.display = 'block';
       if (hint) hint.style.display = 'block';
@@ -3721,9 +3747,6 @@
         tryAllPaths: true,
         variant: 'full'
       };
-      const displaySrc = window.SupabaseSync?.resolveDisplayUrl
-        ? await window.SupabaseSync.resolveDisplayUrl(imageRef, signOpts)
-        : imageRef;
       let revealed = false;
       const onReady = () => {
         if (gen !== appreciateViewerGen || revealed) return;
@@ -3736,24 +3759,36 @@
         if (typeof window.resetImageZoom === 'function') window.resetImageZoom(img);
         if (typeof window.attachImageZoom === 'function') window.attachImageZoom(img);
         window.finishAppreciateViewerReveal?.();
-        reveal();
       };
       img.onload = onReady;
       img.onerror = () => {
         if (gen !== appreciateViewerGen) return;
         img.onload = null;
         img.onerror = null;
+        window.setAppreciateViewerLoading?.(false);
         img.style.display = 'none';
         if (hint) hint.style.display = 'none';
-        reveal();
       };
-      if (displaySrc) img.src = displaySrc;
-      if (img.complete && img.naturalWidth > 0) onReady();
+      void (async () => {
+        let displaySrc = imageRef;
+        try {
+          if (window.SupabaseSync?.resolveDisplayUrl) {
+            displaySrc = await window.SupabaseSync.resolveDisplayUrl(imageRef, signOpts);
+          }
+        } catch (e) { /* ignore */ }
+        if (gen !== appreciateViewerGen) return;
+        if (displaySrc) {
+          img.src = displaySrc;
+          if (img.complete && img.naturalWidth > 0) onReady();
+          return;
+        }
+        img.onerror?.();
+      })();
     } else {
       img.src = '';
       img.style.display = 'none';
       if (hint) hint.style.display = 'none';
-      reveal();
+      window.setAppreciateViewerLoading?.(false);
     }
   }
 
@@ -5317,11 +5352,38 @@
     else requestAnimationFrame(() => scheduleImageGenFeedLayout());
   }
 
+  async function downloadImageFromUrl(url, filename) {
+    if (!url) return;
+    try {
+      const res = await fetch(url, { mode: 'cors' });
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename || `prompt-hub-${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      if (typeof showToast === 'function') showToast('图片已开始下载');
+    } catch (e) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.download = filename || `prompt-hub-${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      if (typeof showToast === 'function') showToast('若未自动下载，请在新标签页右键保存');
+    }
+  }
+
   function buildPreviewFillActions(hasRef, extraActionsHtml) {
     const refDisabled = hasRef ? '' : ' disabled title="暂无参考图"';
     return `
       <div class="imagegen-preview-copy-row">
         <button type="button" class="btn btn-secondary btn-sm" data-preview-copy-prompt>复制提示词</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-preview-download>下载图片</button>
       </div>
       <div class="imagegen-preview-fill">
         <span class="imagegen-preview-fill-label">填入生图框</span>
@@ -5375,7 +5437,12 @@
     const zoomBtn = body.querySelector('[data-preview-zoom]');
     if (zoomBtn && isDisplayableImage(image)) {
       void resolveImageDisplayUrl(image, jobId, imageGenPreviewId).then(url => {
-        if (!url) { zoomBtn.remove(); return; }
+        if (!url) {
+          zoomBtn.remove();
+          body.querySelector('[data-preview-download]')?.remove();
+          return;
+        }
+        body.dataset.previewImageUrl = url;
         const img = document.createElement('img');
         img.src = url;
         img.alt = '';
@@ -5384,6 +5451,8 @@
           if (typeof window.openLightbox === 'function') window.openLightbox(url);
         });
       });
+    } else {
+      body.querySelector('[data-preview-download]')?.remove();
     }
     const getPreviewRefs = () => {
       let refs = [];
@@ -5413,8 +5482,15 @@
     });
     body.querySelector('[data-preview-copy-prompt]')?.addEventListener('click', () => {
       const text = body.dataset.previewPrompt || '';
-      if (!text) { toast('暂无提示词'); return; }
-      navigator.clipboard.writeText(text).then(() => toast('已复制提示词'));
+      if (!text) return;
+      navigator.clipboard?.writeText(text).then(
+        () => { if (typeof showToast === 'function') showToast('提示词已复制'); },
+        () => { if (typeof showToast === 'function') showToast('复制失败'); }
+      );
+    });
+    body.querySelector('[data-preview-download]')?.addEventListener('click', () => {
+      const url = body.dataset.previewImageUrl || zoomBtn?.querySelector('img')?.src || '';
+      void downloadImageFromUrl(url, `prompt-hub-gen-${Date.now()}.png`);
     });
   }
 
@@ -5913,7 +5989,7 @@
     loadStores();
     bindUI();
     bindPublishToggle();
-    onAppChange(localStorage.getItem('promptrepo_app_page') || 'warehouse');
+    onAppChange(localStorage.getItem('promptrepo_app_page') || 'community');
   }
 
   function refreshImageGenCost() {
@@ -6061,6 +6137,7 @@
     closeImageGenFilterSheet,
     renderImageGenFeed,
     canonicalCommunityImageRef,
+    communityPostDisplayImageRef,
     isCommunityCollectCard,
     COMMUNITY_COLLECT_TAG,
     isDisplayableImage,

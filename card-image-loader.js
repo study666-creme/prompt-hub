@@ -7,9 +7,9 @@
   const inflight = new WeakMap();
   const resolveQueue = [];
   let resolveActive = 0;
-  const MAX_RESOLVE = 8;
-  const WAREHOUSE_PREFETCH_CAP = 40;
-  const WAREHOUSE_IMMEDIATE_LOAD = 18;
+  const MAX_RESOLVE = 6;
+  const WAREHOUSE_PREFETCH_CAP = 24;
+  const WAREHOUSE_IMMEDIATE_LOAD = 8;
 
   function runResolveQueue() {
     while (resolveActive < MAX_RESOLVE && resolveQueue.length) {

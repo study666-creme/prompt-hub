@@ -6,11 +6,15 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 ENVIRONMENT = "production"
 CORS_ORIGINS = "https://prompt-hub.cn,https://www.prompt-hub.cn,https://prompt-hub-hub.pages.dev,https://prompt-hub-web.pages.dev"
+CHAT_API_BASE_URL = "https://api.deepseek.com"
+CHAT_MODEL = "deepseek-chat"
 
 # 敏感项请用 wrangler secret put：
 # SUPABASE_URL
 # SUPABASE_SERVICE_ROLE_KEY
 # SUPABASE_JWT_SECRET（可选，用于本地 JWT 校验加速）
+# IMAGE_API_KEY（生图）
+# CHAT_API_KEY（对话 · DeepSeek 官方 API Key）
 # ADMIN_API_SECRET（运营批量造激活码，见 scripts/generate-codes.ps1）
 
 

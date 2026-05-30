@@ -231,7 +231,10 @@
         if (container) container.scrollTop = 0;
         if (typeof renderCards === 'function') renderCards(true);
         if (document.getElementById('pageCommunity')?.classList.contains('active')) {
-          window.FeatureDraft?.scheduleLayout?.('communityGrid');
+          window.FeatureDraft?.scheduleLayout?.('communityGrid', { force: true, immediate: true });
+        }
+        if (document.getElementById('pageCreations')?.classList.contains('active')) {
+          window.FeatureDraft?.scheduleLayout?.('creationsGrid', { force: true, immediate: true });
         }
       });
     }
@@ -283,29 +286,136 @@
       window.__appreciateViewerMode = mode || 'warehouse';
       communityActs?.classList.toggle('hidden', !isCommunity);
       warehouseActs?.classList.toggle('hidden', isCommunity);
-      document.querySelector('.appreciate-viewer-hint-nav')?.classList.toggle('hidden', isCommunity);
     }
 
+    function getAppreciateViewerFrame() {
+      return document.getElementById('appreciateViewerFrame')
+        || document.querySelector('#appreciateViewerMedia .viewer-image-frame');
+    }
+
+    function getLightboxFrame() {
+      return document.getElementById('lightboxFrame');
+    }
+
+    function setViewerFrameLoading(frame, loading) {
+      if (!frame) return;
+      frame.classList.toggle('is-loading', !!loading);
+      frame.classList.remove('viewer-glow-active');
+      frame.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal');
+    }
+
+    function finishViewerFrameReveal(frame) {
+      if (!frame) return;
+      frame.classList.remove('is-loading', 'viewer-glow-active');
+      const shineWrap = frame.querySelector('.viewer-image-shine-wrap');
+      if (!shineWrap) return;
+      shineWrap.classList.remove('viewer-glow-active');
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      shineWrap.classList.remove('media-shine-reveal');
+      void shineWrap.offsetWidth;
+      shineWrap.classList.add('media-shine-reveal');
+    }
+
+    function layoutViewerBorderSvg(frame) {
+      const border = frame?.querySelector('.viewer-frame-border');
+      const wrap = frame?.querySelector('.viewer-image-shine-wrap');
+      const svg = border?.querySelector('.viewer-border-svg');
+      if (!border || !wrap || !svg) return;
+      const w = wrap.offsetWidth;
+      const h = wrap.offsetHeight;
+      if (w < 8 || h < 8) return;
+      const pad = 1.5;
+      const r = 12;
+      const attrs = {
+        x: pad,
+        y: pad,
+        width: Math.max(0, w - pad * 2),
+        height: Math.max(0, h - pad * 2),
+        rx: r,
+        ry: r
+      };
+      svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+      svg.setAttribute('width', String(w));
+      svg.setAttribute('height', String(h));
+      ['track', 'sweep'].forEach((kind) => {
+        const rect = svg.querySelector(`.viewer-border-${kind}`);
+        if (!rect) return;
+        Object.entries(attrs).forEach(([key, val]) => rect.setAttribute(key, String(val)));
+      });
+      const sweep = svg.querySelector('.viewer-border-sweep');
+      if (!sweep) return;
+      const perimeter = 2 * (attrs.width + attrs.height - 4 * r) + 2 * Math.PI * r;
+      const dashLen = Math.max(40, Math.min(110, perimeter * 0.07));
+      sweep.style.strokeDasharray = `${dashLen} ${Math.max(perimeter, dashLen + 1)}`;
+      sweep.style.strokeDashoffset = '0';
+    }
+
+    function applyViewerAdaptiveGlow(frame, img) {
+      const border = frame?.querySelector('.viewer-frame-border');
+      if (!border || !img?.naturalWidth) return;
+      let r = 160;
+      let g = 195;
+      let b = 255;
+      try {
+        const size = 24;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, 0, 0, size, size);
+        const data = ctx.getImageData(0, 0, size, size).data;
+        let sr = 0;
+        let sg = 0;
+        let sb = 0;
+        let n = 0;
+        const pick = (x, y) => {
+          const i = (y * size + x) * 4;
+          const a = data[i + 3];
+          if (a < 24) return;
+          sr += data[i];
+          sg += data[i + 1];
+          sb += data[i + 2];
+          n += 1;
+        };
+        for (let x = 0; x < size; x += 1) {
+          pick(x, 0);
+          pick(x, size - 1);
+        }
+        for (let y = 1; y < size - 1; y += 1) {
+          pick(0, y);
+          pick(size - 1, y);
+        }
+        if (n > 0) {
+          r = Math.round(sr / n);
+          g = Math.round(sg / n);
+          b = Math.round(sb / n);
+        }
+      } catch (e) { /* CORS 或采样失败时用默认 */ }
+      const mix = (c) => Math.min(255, Math.round(c * 0.72 + 255 * 0.28));
+      border.style.setProperty('--viewer-edge-r', String(r));
+      border.style.setProperty('--viewer-edge-g', String(g));
+      border.style.setProperty('--viewer-edge-b', String(b));
+      border.style.setProperty('--viewer-edge-light-r', String(mix(r)));
+      border.style.setProperty('--viewer-edge-light-g', String(mix(g)));
+      border.style.setProperty('--viewer-edge-light-b', String(mix(b)));
+      frame.classList.add('viewer-edge-glow-ready');
+      layoutViewerBorderSvg(frame);
+    }
+    window.applyViewerAdaptiveGlow = applyViewerAdaptiveGlow;
+    window.layoutViewerBorderSvg = layoutViewerBorderSvg;
+
     function setAppreciateViewerLoading(loading) {
-      const media = document.getElementById('appreciateViewerMedia');
-      if (!media) return;
-      media.classList.toggle('is-loading', !!loading);
-      media.classList.remove('media-shine-reveal', 'viewer-glow-active');
+      setViewerFrameLoading(getAppreciateViewerFrame(), loading);
+      document.getElementById('appreciateViewerMedia')?.classList.remove('media-shine-reveal', 'viewer-glow-active');
     }
 
     function finishAppreciateViewerReveal() {
-      const media = document.getElementById('appreciateViewerMedia');
-      if (!media) return;
-      media.classList.remove('is-loading');
-      media.classList.add('viewer-glow-active');
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-      media.classList.remove('media-shine-reveal');
-      void media.offsetWidth;
-      media.classList.add('media-shine-reveal');
-      setTimeout(() => media.classList.remove('media-shine-reveal'), 1250);
+      finishViewerFrameReveal(getAppreciateViewerFrame());
     }
     window.setAppreciateViewerLoading = setAppreciateViewerLoading;
     window.finishAppreciateViewerReveal = finishAppreciateViewerReveal;
+    window.finishViewerFrameReveal = finishViewerFrameReveal;
 
     let viewerNav = { items: [], index: -1 };
 
@@ -334,7 +444,6 @@
     function onViewerShellWheel(e) {
       const t = e.target;
       if (t?.id === 'appreciateViewerImg' || t?.id === 'lightboxImage') return;
-      if (window.__appreciateViewerMode === 'community') return;
       if (!viewerNav.items.length) return;
       e.preventDefault();
       navigateViewerByWheel(e.deltaY);
@@ -398,9 +507,12 @@
     function closeAppreciateViewer(e) {
       const viewer = document.getElementById('appreciateViewer');
       if (!viewer?.classList.contains('active')) return;
-      if (e) {
+      const fromCloseBtn = e?.target?.closest?.('.appreciate-viewer-close');
+      if (e && !fromCloseBtn) {
         const t = e.target;
-        if (t !== viewer && !t?.classList?.contains('appreciate-viewer-close')) return;
+        if (t?.closest?.('button')) return;
+        if (t?.closest?.('.viewer-image-frame, .viewer-image-shine-wrap, #appreciateViewerImg, #lightboxImage')) return;
+        if (t !== viewer && !t?.closest?.('.appreciate-viewer-inner') && !t?.classList?.contains('appreciate-viewer-close')) return;
       }
       if (typeof window.FeatureDraft?.bumpAppreciateViewerGen === 'function') {
         window.FeatureDraft.bumpAppreciateViewerGen();
@@ -492,9 +604,9 @@
           img.style.maxWidth = '';
           img.style.maxHeight = '';
           img.style.objectFit = '';
-          resetImageZoom(img);
-          attachImageZoom(img);
-          finishAppreciateViewerReveal();
+        resetImageZoom(img);
+        attachImageZoom(img);
+        finishAppreciateViewerReveal();
           reveal();
         };
         img.onload = onReady;
@@ -791,7 +903,8 @@
       }
       const cardId = generateId();
       let image = null;
-      const imageRef = window.FeatureDraft?.canonicalCommunityImageRef?.(post)
+      const imageRef = window.FeatureDraft?.communityPostDisplayImageRef?.(post)
+        || window.FeatureDraft?.canonicalCommunityImageRef?.(post)
         || (post.image && window.SupabaseSync?.normalizeImageRef?.(post.image))
         || post.image
         || null;
@@ -1628,9 +1741,6 @@
     function switchAppPage(app) {
       if (!APP_PAGE_IDS[app]) return;
       if (app === 'assetstudio') {
-        try {
-          window.FeatureAssets?.exportCardsForStudio?.({ silent: true });
-        } catch (e) { /* ignore */ }
         window.location.href = 'asset-studio.html';
         return;
       }
@@ -3015,13 +3125,12 @@
     }
 
     function finishAppBootstrap() {
-      switchAppPage('warehouse');
-      try {
-        localStorage.setItem('promptrepo_app_page', 'warehouse');
-      } catch (e) { /* ignore */ }
+      const page = localStorage.getItem('promptrepo_app_page') || 'community';
+      switchAppPage(page);
       if (window.MobileUI?.isMobile?.()) {
+        const mobileTab = page === 'community' ? 'community' : page === 'imagegen' ? 'imagegen' : 'cards';
         document.querySelectorAll('.mobile-tab').forEach((btn) => {
-          btn.classList.toggle('active', btn.dataset.mobileTab === 'cards');
+          btn.classList.toggle('active', btn.dataset.mobileTab === mobileTab);
         });
       }
       if (cards.length > 0) {
@@ -3293,6 +3402,7 @@
       const myRun = ++cloudPushRunId;
       const stillCurrent = () => myRun === cloudPushRunId;
       const silent = opts.silent === true;
+      if (silent && opts.skipSafety !== false) opts.skipSafety = true;
       cloudSyncing = true;
       if (!silent) setCloudSyncPhase('syncing', '正在保存到云端');
       const status = document.getElementById('statusMsg');
@@ -3370,7 +3480,7 @@
         pushToCloud({ silent: true }).catch((e) => {
           console.warn('[cloud] silent push failed', e);
         });
-      }, 8000);
+      }, 15000);
     }
     window.scheduleCloudPush = scheduleCloudPush;
 
@@ -3476,7 +3586,7 @@
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
       try {
         await Promise.all([
-          window.SupabaseSync?.prefetchCardsImages?.(pageCards, 20000) || Promise.resolve(),
+          window.SupabaseSync?.prefetchCardsImages?.(pageCards, 2800) || Promise.resolve(),
           hydrateWarehouseBackupsFromIdb(container, pageCards)
         ]);
         window.SupabaseSync?.patchImageSrcFromCache?.(container);
@@ -3604,8 +3714,8 @@
       if (cards.length > 0) {
         refreshWarehouseUI();
         paintedFromLocal = true;
-        warmVisibleCardsOnly(cards, 12000);
-        prefetchVisibleCardImages(12000);
+        warmVisibleCardsOnly(cards, 2500);
+        prefetchVisibleCardImages(2500);
       }
 
       const shouldPull = cloudHydratedUid !== uid || accountSwitch || force || opts.migrateGuest;
@@ -4146,6 +4256,10 @@
       refreshAuthMethodUI();
       refreshAppBuildLabel();
       finishAppBootstrap();
+      if (/[?&]panel=recharge(?:&|$)/.test(location.search || '')) {
+        setTimeout(() => window.openRechargePanel?.(), 600);
+        try { history.replaceState(null, '', location.pathname); } catch (e) { /* ignore */ }
+      }
       bindQuickPreviewButtons();
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
@@ -4412,7 +4526,7 @@
           ? allFilteredCards
           : allFilteredCards.slice(0, Math.min(allFilteredCards.length, start + PER_PAGE * 2));
       if (page === 1 && prefetchCards.length && window.SupabaseSync?.prefetchCardsImages) {
-        void window.SupabaseSync.prefetchCardsImages(prefetchCards, 12000);
+        void window.SupabaseSync.prefetchCardsImages(prefetchCards, 2500);
       }
       const fragment = document.createDocumentFragment();
       const isAppend = !reset && page > 1;
@@ -4546,7 +4660,7 @@
           page = Math.max(1, Math.ceil(allFilteredCards.length / PER_PAGE));
         }
       } else if (mobileGrid) {
-        warmCardImagesBackground(pageCards, 4000);
+        warmCardImagesBackground(pageCards, 2500);
         enforceMobileCardGrid();
       }
       if (viewMode === 'list' && masonryInstance) {
@@ -5443,7 +5557,9 @@
       }
       const lightbox = document.getElementById('imageLightbox');
       const img = document.getElementById('lightboxImage');
+      const frame = getLightboxFrame();
       if (!lightbox || !img) return;
+      setViewerFrameLoading(frame, true);
       let shown = false;
       const onReady = () => {
         if (shown) return;
@@ -5457,9 +5573,12 @@
         img.style.objectFit = '';
         resetImageZoom(img);
         attachImageZoom(img);
+        finishViewerFrameReveal(frame);
         lightbox.classList.add('active');
       };
       lightbox.classList.remove('active');
+      frame?.classList.remove('viewer-glow-active');
+      frame?.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal');
       img.onwheel = null;
       img.onmousedown = null;
       img.ondblclick = null;
@@ -5472,6 +5591,7 @@
       img.onerror = () => {
         img.onerror = null;
         img.onload = null;
+        setViewerFrameLoading(frame, false);
         lightbox.classList.remove('active');
       };
       img.onload = onReady;
@@ -5495,6 +5615,9 @@
       if (e && e.target !== document.getElementById('imageLightbox') && e.target !== document.querySelector('.close-lightbox')) return;
       const lightbox = document.getElementById('imageLightbox');
       lightbox?.classList.remove('active');
+      const frame = getLightboxFrame();
+      frame?.classList.remove('is-loading', 'viewer-glow-active');
+      frame?.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal');
       const img = document.getElementById('lightboxImage');
       if (img) {
         img.onload = null;
@@ -5780,6 +5903,16 @@
       const id = document.getElementById('contactWechatId')?.textContent?.trim() || 'bz4jx3jp2li1';
       navigator.clipboard.writeText(id).then(() => showToast('微信号已复制')).catch(() => showToast('复制失败'));
     }
+    function openCommunityPanel() {
+      document.getElementById('communityOverlay')?.classList.add('active');
+    }
+    function closeCommunityPanel() {
+      document.getElementById('communityOverlay')?.classList.remove('active');
+    }
+    function copyCommunityQqId() {
+      const id = document.getElementById('communityQqId')?.textContent?.trim() || '222653426';
+      navigator.clipboard.writeText(id).then(() => showToast('QQ 群号已复制')).catch(() => showToast('复制失败'));
+    }
     window.openExtensionCollectPanel = openExtensionCollectPanel;
     window.closeExtensionCollectPanel = closeExtensionCollectPanel;
     window.openHelpPanel = openHelpPanel;
@@ -5787,6 +5920,9 @@
     window.openContactPanel = openContactPanel;
     window.closeContactPanel = closeContactPanel;
     window.copyWechatId = copyWechatId;
+    window.openCommunityPanel = openCommunityPanel;
+    window.closeCommunityPanel = closeCommunityPanel;
+    window.copyCommunityQqId = copyCommunityQqId;
 
     function addGlobalField() {
       const n = document.getElementById('newFieldName').value.trim();

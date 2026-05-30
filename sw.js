@@ -1,8 +1,9 @@
-const CACHE = 'prompt-hub-v264';
+const CACHE = 'prompt-hub-v275';
 /** 仅缓存静态小资源；HTML/JS/CSS 始终走网络，避免误显示「暂时无法连接」 */
 const ASSETS = [
   './manifest.webmanifest',
-  './assets/logo.png'
+  './assets/logo.png',
+  './assets/asset-studio-icon.png'
 ];
 
 const OFFLINE_HTML =
