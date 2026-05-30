@@ -3,6 +3,7 @@ importScripts('config.js');
 const SESSION_KEY = 'ph_session';
 const PANEL_ENABLED_KEY = 'ph_panel_enabled';
 const DISCLAIMER_KEY = 'ph_disclaimer_ok';
+const injectedTabs = new Set();
 
 function sessionFromBridge(raw) {
   if (!raw?.access_token) return null;
@@ -12,6 +13,12 @@ function sessionFromBridge(raw) {
     expires_at: raw.expires_at || raw.expiresAt || null,
     user: raw.user || null
   };
+}
+
+function canInjectUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  const blocked = ['chrome://', 'edge://', 'about:', 'chrome-extension://', 'devtools://'];
+  return !blocked.some((p) => url.startsWith(p));
 }
 
 async function loadSession() {
@@ -57,6 +64,38 @@ async function getValidSession() {
   if (!session) return null;
   session = await refreshSessionIfNeeded(session);
   return session;
+}
+
+async function shouldAutoInject() {
+  const data = await chrome.storage.local.get([PANEL_ENABLED_KEY, DISCLAIMER_KEY]);
+  if (data[PANEL_ENABLED_KEY] === false) return false;
+  if (!data[DISCLAIMER_KEY]) return false;
+  return chrome.permissions.contains({ origins: ['<all_urls>'] });
+}
+
+async function injectPanelIntoTab(tabId, force) {
+  if (!tabId) return { ok: false, message: '无标签页' };
+  if (!force && injectedTabs.has(tabId)) return { ok: true, skipped: true };
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content/panel.js']
+    });
+    await chrome.scripting.insertCSS({
+      target: { tabId },
+      files: ['content/panel.css']
+    });
+    injectedTabs.add(tabId);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: String(e.message || e) };
+  }
+}
+
+async function tryAutoInjectTab(tab) {
+  if (!tab?.id || !canInjectUrl(tab.url)) return;
+  if (!(await shouldAutoInject())) return;
+  await injectPanelIntoTab(tab.id, false);
 }
 
 async function apiRequest(method, path, body) {
@@ -117,6 +156,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     if (msg?.type === 'PH_SET_PANEL') {
       await chrome.storage.local.set({ [PANEL_ENABLED_KEY]: msg.enabled !== false });
+      if (msg.enabled !== false) {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab) await tryAutoInjectTab(tab);
+      }
       sendResponse({ ok: true });
       return;
     }
@@ -131,28 +174,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     if (msg?.type === 'PH_ACCEPT_DISCLAIMER') {
       await chrome.storage.local.set({ [DISCLAIMER_KEY]: true });
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab) await tryAutoInjectTab(tab);
       sendResponse({ ok: true });
       return;
     }
-    if (msg?.type === 'PH_INJECT_PANEL') {
+    if (msg?.type === 'PH_INJECT_PANEL' || msg?.type === 'PH_AUTO_INJECT_ACTIVE') {
       const tabId = sender.tab?.id || msg.tabId;
       if (!tabId) {
         sendResponse({ ok: false, message: '无标签页' });
         return;
       }
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          files: ['content/panel.js']
-        });
-        await chrome.scripting.insertCSS({
-          target: { tabId },
-          files: ['content/panel.css']
-        });
-        sendResponse({ ok: true });
-      } catch (e) {
-        sendResponse({ ok: false, message: String(e.message || e) });
-      }
+      const res = await injectPanelIntoTab(tabId, true);
+      sendResponse(res);
       return;
     }
     sendResponse({ ok: false, message: 'unknown' });
@@ -160,6 +194,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.set({ [PANEL_ENABLED_KEY]: true });
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (info.status !== 'complete') return;
+  void tryAutoInjectTab(tab || { id: tabId, url: tab?.url });
+});
+
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  try {
+    const tab = await chrome.tabs.get(activeInfo.tabId);
+    void tryAutoInjectTab(tab);
+  } catch {
+    /* tab closed */
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  injectedTabs.delete(tabId);
+});
+
+chrome.runtime.onInstalled.addListener(async () => {
+  await chrome.storage.local.set({ [PANEL_ENABLED_KEY]: true });
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab) void tryAutoInjectTab(tab);
 });

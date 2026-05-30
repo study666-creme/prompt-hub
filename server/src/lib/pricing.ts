@@ -46,9 +46,10 @@ export function computeGenerationCost(
   const mult = active && tier ? membershipGenMultiplier(tier) : 1;
   const final =
     mult < 1 ? Math.max(MIN_GENERATION_CHARGE, Math.floor(base * mult)) : base;
+  const discountLabels = { basic: '9折', standard: '8折', pro: '7折' } as const;
   const discountLabel =
-    mult < 1 && tier
-      ? ({ basic: '9折', standard: '8折', pro: '7折' } as const)[tier]
+    mult < 1 && tier && tier in discountLabels
+      ? discountLabels[tier as keyof typeof discountLabels]
       : null;
 
   return { base, final, discountLabel, modelLabel: model.label };

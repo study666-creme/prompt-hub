@@ -22,13 +22,15 @@ function cardStoragePath(userId: string, cardId: string): string {
   return `${userId}/${base}.jpg`;
 }
 
-function decodeBase64Image(raw: string): Buffer {
+function decodeBase64Image(raw: string): Uint8Array {
   const m = raw.match(/^data:image\/[\w+.-]+;base64,(.+)$/i);
   const body = m ? m[1] : raw;
-  const buf = Buffer.from(body, 'base64');
-  if (!buf.length) throw new Error('图片数据无效');
-  if (buf.length > MAX_IMAGE_BYTES) throw new Error('图片过大（最大 5MB）');
-  return buf;
+  const binary = atob(body);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  if (!bytes.length) throw new Error('图片数据无效');
+  if (bytes.length > MAX_IMAGE_BYTES) throw new Error('图片过大（最大 5MB）');
+  return bytes;
 }
 
 async function uploadCardImage(

@@ -50,7 +50,7 @@
         <button type="button" class="ph-ext-hide" id="phExtMin" title="收起">−</button>
       </div>
       <div class="ph-ext-body" id="phExtBody">
-        <div class="ph-ext-drop" id="phExtDrop">拖入图片到此处<br>松手后自动保存</div>
+        <div class="ph-ext-drop" id="phExtDrop" tabindex="0">拖入或粘贴截图<br><small>Ctrl+V · 松手/粘贴后自动保存</small></div>
         <textarea class="ph-ext-prompt" id="phExtPrompt" placeholder="提示词（可划选网页文字后点「复制到提示词」）"></textarea>
         <div class="ph-ext-actions">
           <button type="button" class="ph-ext-save" id="phExtSave">保存到仓库</button>
@@ -98,6 +98,25 @@
       }
     });
 
+    const onPasteImage = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type && item.type.indexOf('image') !== -1) {
+          e.preventDefault();
+          e.stopPropagation();
+          const file = item.getAsFile();
+          if (file) void loadImageFile(file, true);
+          return;
+        }
+      }
+    };
+    wrap.addEventListener('paste', onPasteImage);
+    drop.addEventListener('paste', onPasteImage);
+    promptEl.addEventListener('paste', onPasteImage);
+    drop.addEventListener('click', () => drop.focus());
+
     let dragOffset = { x: 0, y: 0 };
     head.addEventListener('mousedown', (e) => {
       if (e.target.closest('button')) return;
@@ -123,7 +142,7 @@
     imageName = '';
     const drop = wrap.querySelector('#phExtDrop');
     const promptEl = wrap.querySelector('#phExtPrompt');
-    if (drop) drop.innerHTML = '拖入图片到此处<br>松手后自动保存';
+    if (drop) drop.innerHTML = '拖入或粘贴截图<br><small>Ctrl+V · 自动保存</small>';
     if (promptEl) promptEl.value = '';
     setStatus('');
   }
@@ -144,7 +163,7 @@
     }
     try {
       imageBase64 = await readFileAsDataUrl(file);
-      imageName = file.name || 'image';
+      imageName = file.name || 'pasted-image.png';
       const drop = wrap.querySelector('#phExtDrop');
       if (drop) {
         drop.innerHTML = '';

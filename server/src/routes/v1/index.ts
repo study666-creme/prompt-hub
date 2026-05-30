@@ -9,6 +9,7 @@ import { membershipRoutes } from './membership';
 import { membershipTaskRoutes } from './membership-tasks';
 import { communityMediaSignHandler, mediaRoutes } from './media';
 import { extensionRoutes } from './extension';
+import { rateLimit } from '../../middleware/rate-limit';
 
 export const v1 = new Hono<{ Bindings: Env }>();
 

@@ -44,7 +44,15 @@ document.getElementById('phLogoutBtn').addEventListener('click', async () => {
 });
 
 document.getElementById('phPanelToggle').addEventListener('change', async (e) => {
-  await send('PH_SET_PANEL', { enabled: e.target.checked });
+  const on = e.target.checked;
+  await send('PH_SET_PANEL', { enabled: on });
+  if (on) {
+    const granted = await ensureAllUrlsPermission();
+    if (granted) {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) await send('PH_INJECT_PANEL', { tabId: tab.id });
+    }
+  }
 });
 
 document.getElementById('phOpenPanelBtn').addEventListener('click', async () => {
