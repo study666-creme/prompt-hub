@@ -6,6 +6,7 @@
   const LS_IMPORT = 'promptrepo_studio_import_cards';
   const LS_FILTERS = 'promptrepo_studio_filters';
   const LS_PANEL_WIDTHS = 'promptrepo_studio_panel_widths';
+  const LS_GUIDE = 'promptrepo_studio_hero_guide_seen';
 
   const PANEL_WIDTH_DEFAULTS = { assets: 240, docs: 220, ai: 320 };
   const PANEL_WIDTH_LIMITS = {
@@ -845,7 +846,226 @@
         <button type="button" class="btn btn-primary studio-import-cta" id="studioImportCta">点击导入卡片库</button>
         <p class="panel-hint studio-import-empty-tip">同一浏览器下会自动读取主站卡片库，无需先导出</p>
       </div>`;
-    document.getElementById('studioImportCta')?.addEventListener('click', () => tryImportFromMain());
+    document.getElementById('studioImportCta')?.addEventListener('click', () => openImportPicker());
+  }
+
+  function readMainSiteCardsAll() {
+    if (Array.isArray(window.__promptHubCards) && window.__promptHubCards.length) {
+      return window.__promptHubCards;
+    }
+    if (Array.isArray(window.opener?.__promptHubCards) && window.opener.__promptHubCards.length) {
+      return window.opener.__promptHubCards;
+    }
+    try {
+      const uid = window.SupabaseSync?.getUserId?.() || localStorage.getItem('promptrepo_last_uid') || '';
+      const keys = uid
+        ? [`promptrepo_autosave_${uid}`, `promptrepo_snapshot_${uid}`]
+        : ['promptrepo_autosave_snapshot'];
+      for (const key of keys) {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const data = JSON.parse(raw);
+        if (Array.isArray(data?.cards) && data.cards.length) return data.cards;
+      }
+    } catch (e) { /* ignore */ }
+    return [];
+  }
+
+  function readCommunityPostsForCover() {
+    try {
+      const raw = localStorage.getItem('promptrepo_community_posts');
+      const list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list.filter((p) => p?.image && !p.isMock) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function cardWarehouseIdLocal(card) {
+    return card?.warehouseId || 'default';
+  }
+
+  function listMainSiteWarehouses() {
+    if (window.FeatureAssets?.listWarehousesForAccount) {
+      return window.FeatureAssets.listWarehousesForAccount();
+    }
+    try {
+      const uid = window.SupabaseSync?.getUserId?.() || 'guest';
+      const raw = localStorage.getItem(`promptrepo_warehouses_v1_${uid}`);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed?.warehouses?.length) return parsed.warehouses;
+    } catch (e) { /* ignore */ }
+    return [{ id: 'default', name: '默认库', isDefault: true }];
+  }
+
+  function cardsForWarehouse(warehouseId) {
+    const wid = warehouseId || 'default';
+    if (window.FeatureAssets?.getMainSiteCardsForWarehouse) {
+      return window.FeatureAssets.getMainSiteCardsForWarehouse(wid);
+    }
+    return readMainSiteCardsAll().filter((c) => cardWarehouseIdLocal(c) === wid);
+  }
+
+  function groupsForWarehouse(warehouseId) {
+    try {
+      const uid = window.SupabaseSync?.getUserId?.() || localStorage.getItem('promptrepo_last_uid') || 'guest';
+      const raw = localStorage.getItem(`promptrepo_groups_${uid}_${warehouseId || 'default'}`);
+      const list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function resolveCardDisplayUrl(imageRef) {
+    if (!imageRef || typeof imageRef !== 'string') return '';
+    const cached = window.SupabaseSync?.getCachedDisplayUrl?.(imageRef, { variant: 'grid' });
+    if (cached && !cached.startsWith('data:image/svg')) return cached;
+    if (/^https?:\/\//i.test(imageRef) || imageRef.startsWith('data:')) return imageRef;
+    return '';
+  }
+
+  function probeImageAspect(url) {
+    return new Promise((resolve) => {
+      if (!url) {
+        resolve(null);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        if (!w || !h) resolve(null);
+        else resolve(w / h);
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  }
+
+  async function pickCoverImageUrl(cards, communityPosts) {
+    const cardRefs = (cards || []).map((c) => c.image).filter(Boolean);
+    const commRefs = (communityPosts || []).map((p) => p.image).filter(Boolean);
+    const tryRefs = (refs, require169) => {
+      const tasks = refs.map(async (ref) => {
+        const url = resolveCardDisplayUrl(ref);
+        if (!url) return null;
+        const aspect = await probeImageAspect(url);
+        if (require169 && aspect != null && aspect >= 1.55 && aspect <= 1.85) return url;
+        if (!require169 && aspect != null) return url;
+        return null;
+      });
+      return Promise.all(tasks).then((urls) => urls.find(Boolean) || null);
+    };
+    let url = await tryRefs(cardRefs, true);
+    if (url) return url;
+    url = await tryRefs(cardRefs, false);
+    if (url) return url;
+    url = await tryRefs(commRefs, true);
+    if (url) return url;
+    return tryRefs(commRefs, false);
+  }
+
+  function closeImportPicker() {
+    document.getElementById('studioImportOverlay')?.classList.add('hidden');
+  }
+  window.__studioCloseImportPicker = closeImportPicker;
+
+  async function renderImportPickerCovers(warehouses) {
+    const root = document.getElementById('studioImportCovers');
+    if (!root) return;
+    const list = warehouses.length ? warehouses : [{ id: 'default', name: '默认库', isDefault: true }];
+    const count = list.length;
+    root.className = `studio-import-covers count-${Math.min(count, 4)}`;
+    const community = readCommunityPostsForCover();
+    root.innerHTML = list
+      .map((w) => {
+        const cards = cardsForWarehouse(w.id);
+        const n = cards.length;
+        return `<button type="button" class="studio-import-cover" data-wh-id="${esc(w.id)}">
+          <div class="studio-import-cover-media" data-cover-for="${esc(w.id)}">
+            <div class="studio-import-cover-fallback" aria-hidden="true">📂</div>
+          </div>
+          <div class="studio-import-cover-body">
+            <p class="studio-import-cover-title">${esc(w.name)}</p>
+            <p class="studio-import-cover-meta">${n} 张卡片</p>
+          </div>
+        </button>`;
+      })
+      .join('');
+    root.querySelectorAll('.studio-import-cover').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        void importFromMainWarehouse(btn.dataset.whId);
+      });
+    });
+    await Promise.all(
+      list.map(async (w) => {
+        const media = root.querySelector(`[data-cover-for="${w.id}"]`);
+        if (!media) return;
+        const url = await pickCoverImageUrl(cardsForWarehouse(w.id), community);
+        if (!url) return;
+        media.innerHTML = `<img src="${esc(url)}" alt="" loading="lazy" decoding="async">`;
+      })
+    );
+  }
+
+  function openImportPicker() {
+    if (!guardEdit('请先登录后导入卡片库')) return;
+    const warehouses = listMainSiteWarehouses();
+    const hasAny = warehouses.some((w) => cardsForWarehouse(w.id).length > 0);
+    if (!hasAny && !readMainSiteCardsAll().length) {
+      window.alert(
+        '未找到可导入的卡片。\n\n请确认：\n1. 已在同一浏览器打开过主站卡片库\n2. 主站里至少有一张卡片'
+      );
+      setStatus('未找到主站卡片库');
+      return;
+    }
+    const overlay = document.getElementById('studioImportOverlay');
+    overlay?.classList.remove('hidden');
+    void renderImportPickerCovers(warehouses);
+  }
+
+  async function importFromMainWarehouse(warehouseId) {
+    if (!guardEdit()) return;
+    const cards = cardsForWarehouse(warehouseId);
+    if (!cards.length) {
+      setStatus('该卡片库暂无卡片');
+      return;
+    }
+    const groups = groupsForWarehouse(warehouseId);
+    const p = getProject();
+    p.cards = cards.slice(0, 200).map((c) => normalizeImportedCard(c));
+    p.cardGroups = groups.slice();
+    const doc = getActiveDoc();
+    if (doc) {
+      doc.heroCardIds = [];
+      doc.floatPositions = {};
+      doc.closedFloatIds = [];
+    }
+    document.getElementById('studioFloatLayer')?.replaceChildren();
+    saveState();
+    closeImportPicker();
+    renderAll();
+    const wh = listMainSiteWarehouses().find((w) => w.id === warehouseId);
+    setStatus(`已从「${wh?.name || '卡片库'}」导入 ${p.cards.length} 张卡片`);
+    maybeShowStudioGuide();
+  }
+
+  function maybeShowStudioGuide() {
+    try {
+      if (localStorage.getItem(LS_GUIDE) === '1') return;
+    } catch (e) { /* ignore */ }
+    document.getElementById('studioGuideOverlay')?.classList.remove('hidden');
+  }
+
+  function closeStudioGuide() {
+    const skip = document.getElementById('studioGuideSkip')?.checked;
+    if (skip) {
+      try {
+        localStorage.setItem(LS_GUIDE, '1');
+      } catch (e) { /* ignore */ }
+    }
+    document.getElementById('studioGuideOverlay')?.classList.add('hidden');
   }
 
   function sortFolderNames(names) {
@@ -1215,7 +1435,7 @@
     let html = roots.map((fld) => renderFolderNode(p, fld, 0)).join('');
     root.innerHTML =
       html ||
-      '<p class="panel-hint">点击右上角 + 新建文档；文件夹右侧 + 可在该分类下新建</p>';
+      '<p class="panel-hint">点击右上角 + 新建文件夹；文件夹右侧 + 新建文档</p>';
     root.querySelectorAll('.studio-doc-folder-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         p.activeFolderId = btn.dataset.folderId;
@@ -2709,17 +2929,7 @@
   }
 
   function tryImportFromMain() {
-    if (!guardEdit('请先登录后导入卡片库')) return;
-    if (mergeImportFromMain(false)) return;
-    void (async () => {
-      setStatus('正在读取主站卡片库…');
-      const n = await importCardsFromMainSiteDirect();
-      if (n) return;
-      window.alert(
-        '未找到可导入的卡片。\n\n请确认：\n1. 已在同一浏览器打开过主站卡片库\n2. 主站里至少有一张卡片\n\n若仍失败，可返回主站侧栏「资产创作」→「导出并打开」后再试。'
-      );
-      setStatus('未找到主站卡片库');
-    })();
+    openImportPicker();
   }
 
   function loadPanelWidths() {
@@ -2904,9 +3114,10 @@
     });
     document.getElementById('studioDocAddBtn')?.addEventListener('click', () => {
       if (!guardEdit()) return;
-      const fldId = getActiveFolderId();
-      if (fldId) startInlineNewDoc(fldId);
+      startInlineNewFolder(null);
     });
+    document.getElementById('studioImportClose')?.addEventListener('click', closeImportPicker);
+    document.getElementById('studioGuideOk')?.addEventListener('click', closeStudioGuide);
     document.getElementById('studioChatThreadSelect')?.addEventListener('change', (e) => {
       switchChatThread(e.target.value);
     });
@@ -3038,15 +3249,12 @@
     const imgScroll = document.getElementById('studioImageScroll');
     imgScroll?.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
     if (/[?&]import=1(?:&|$)/.test(location.search || '')) {
-      void (async () => {
-        let n = mergeImportFromMain(false);
-        if (!n) n = await importCardsFromMainSiteDirect();
-        if (n) setStatus(`已导入 ${n} 张主站卡片`);
-        try {
-          history.replaceState(null, '', location.pathname);
-        } catch (e) { /* ignore */ }
-      })();
+      try {
+        history.replaceState(null, '', location.pathname);
+      } catch (e) { /* ignore */ }
+      requestAnimationFrame(() => openImportPicker());
     }
+    maybeShowStudioGuide();
     renderAll();
   }
 

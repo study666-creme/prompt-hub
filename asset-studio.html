@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="styles.css?v=20260619j">
   <link rel="stylesheet" href="styles-features.css?v=20260619j">
   <link rel="stylesheet" href="styles-theme.css?v=20260615z">
-  <link rel="stylesheet" href="asset-studio.css?v=20260622d">
+  <link rel="stylesheet" href="asset-studio.css?v=20260622e">
   <script src="vendor/supabase.min.js?v=20260606m"></script>
   <script src="supabase-config.js"></script>
   <script src="api-domain.config.js"></script>
@@ -86,7 +86,7 @@
     <aside class="studio-panel studio-panel-docs" aria-label="文档分类">
       <div class="studio-panel-head">
         <span class="studio-panel-title">文档</span>
-        <button type="button" class="studio-icon-btn" id="studioDocAddBtn" title="新建文档">+</button>
+        <button type="button" class="studio-icon-btn" id="studioDocAddBtn" title="新建文件夹" aria-label="新建文件夹">+</button>
       </div>
       <div class="studio-doc-tree" id="studioDocTree"></div>
     </aside>
@@ -290,6 +290,34 @@
     </div>
   </div>
 
+  <div class="custom-modal-overlay hidden" id="studioImportOverlay" onclick="if(event.target===this) window.__studioCloseImportPicker?.()">
+    <div class="studio-import-dialog" onclick="event.stopPropagation()">
+      <header class="studio-import-dialog-head">
+        <h3>选择要导入的卡片库</h3>
+        <button type="button" class="modal-close-btn modal-close-btn--icon" id="studioImportClose" aria-label="关闭"><span aria-hidden="true">×</span></button>
+      </header>
+      <p class="panel-hint">导入后分类与所选库的分组一致；可随时重新导入覆盖本项目卡片库。</p>
+      <div class="studio-import-covers" id="studioImportCovers"></div>
+    </div>
+  </div>
+
+  <div class="studio-guide-overlay hidden" id="studioGuideOverlay" role="dialog" aria-modal="true" aria-labelledby="studioGuideTitle">
+    <div class="studio-guide-panel" onclick="event.stopPropagation()">
+      <h3 id="studioGuideTitle">关联图怎么用？</h3>
+      <ol class="studio-guide-steps">
+        <li><strong>导入卡片库</strong>：左侧点「点击导入卡片库」，选择主站里的某个卡片库。</li>
+        <li><strong>拖入关联图</strong>：从左侧卡片缩略图<strong>拖到顶部「关联图」框</strong>（或写作区上方的关联图区域）。</li>
+        <li><strong>与文档绑定</strong>：每张关联图会挂到<strong>当前文档</strong>，切换文档可换一套参考图。</li>
+        <li><strong>AI 与生图</strong>：对话、生图会参考关联图与文档正文；点击浮窗卡片可查看提示词。</li>
+      </ol>
+      <p class="panel-hint">提示：关联图相当于「本篇参考资料」，人设 / 场景 / 配角卡片各拖一张即可。</p>
+      <footer class="studio-guide-foot">
+        <label class="studio-guide-skip"><input type="checkbox" id="studioGuideSkip"> 不再提示</label>
+        <button type="button" class="btn btn-primary btn-sm" id="studioGuideOk">知道了</button>
+      </footer>
+    </div>
+  </div>
+
   <div class="studio-tree-menu hidden" id="studioTreeMenu" role="menu"></div>
 
   <div class="custom-modal-overlay" id="studioModalOverlay" onclick="if(event.target===this) window.__studioCloseModal?.()">
@@ -297,6 +325,6 @@
   </div>
 
   <script src="subscription.js?v=20260619j"></script>
-  <script src="asset-studio.js?v=20260622d"></script>
+  <script src="asset-studio.js?v=20260622e"></script>
 </body>
 </html>

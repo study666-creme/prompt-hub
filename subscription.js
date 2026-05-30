@@ -57,9 +57,9 @@
         '生图优先队列 · 积分 9 折',
         `额外每日 ${DAILY_BY_TIER.basic} 积分或一次性 ${LUMP_BY_TIER.basic} 积分`,
         '无限置顶',
+        '资产创作工作台',
         '5 GB 云存储',
-        '全站云同步',
-        '仅默认卡片库（不可另建）'
+        '全站云同步'
       ]
     },
     {
@@ -72,6 +72,7 @@
         '生图优先队列 · 积分 8 折',
         `额外每日 ${DAILY_BY_TIER.standard} 积分或一次性 ${LUMP_BY_TIER.standard} 积分`,
         '无限置顶',
+        '资产创作工作台',
         '10 GB 云存储',
         '优先生图队列',
         '可另建 1 个自命名卡片库'
@@ -87,6 +88,7 @@
         '最高优先级 · 积分 7 折',
         `额外每日 ${DAILY_BY_TIER.pro} 积分或一次性 ${LUMP_BY_TIER.pro} 积分`,
         '无限置顶',
+        '资产创作工作台',
         '30 GB 云存储',
         '最高生图优先级',
         '可另建 2 个自命名卡片库'
@@ -173,7 +175,11 @@
     if (!info) return;
     if (metaEl) {
       metaEl.textContent = info.active ? info.summary : info.summary;
-      metaEl.classList.toggle('is-member', info.active);
+      metaEl.className = 'app-nav-subscribe-meta';
+      if (info.active) {
+        metaEl.classList.add('is-member');
+        if (info.tier) metaEl.classList.add(`is-member-${info.tier}`);
+      }
     }
     if (panelEl) {
       panelEl.hidden = false;
@@ -272,17 +278,19 @@
       ? `<span class="subscribe-plan-save">${esc(saveText)}</span>`
       : '';
     row.innerHTML = `<article class="subscribe-plan-card subscribe-lite-plan subscribe-lite-compact" data-plan="lite">
-      <div class="subscribe-lite-compact-main">
-        <span class="subscribe-plan-tag subscribe-plan-tag-deal">🔥 ${esc(LITE_PLAN.tag)}</span>
-        <h4 class="subscribe-lite-title">${esc(LITE_PLAN.name)}</h4>
-        <p class="subscribe-lite-meta">${esc(billingLabel)} · ${esc(LITE_PLAN.summary)}</p>
+      <div class="subscribe-lite-compact-top">
+        <div class="subscribe-lite-compact-main">
+          <span class="subscribe-plan-tag subscribe-plan-tag-deal">🔥 ${esc(LITE_PLAN.tag)}</span>
+          <h4 class="subscribe-lite-title">${esc(LITE_PLAN.name)}</h4>
+        </div>
+        <div class="subscribe-lite-compact-price">
+          ${originalHtml}
+          ${saveBadge}
+          <span class="subscribe-plan-amount">¥${p.price}</span>
+          <span class="subscribe-plan-unit">/${esc(p.unit)}</span>
+        </div>
       </div>
-      <div class="subscribe-lite-compact-price">
-        ${originalHtml}
-        ${saveBadge}
-        <span class="subscribe-plan-amount">¥${p.price}</span>
-        <span class="subscribe-plan-unit">/${esc(p.unit)}</span>
-      </div>
+      <p class="subscribe-lite-meta">${esc(billingLabel)} · ${esc(LITE_PLAN.summary)}</p>
       <button type="button" class="btn btn-primary btn-sm subscribe-plan-btn subscribe-lite-buy" data-plan="lite" data-billing="${currentBilling}">购买</button>
     </article>`;
     row.querySelector('.subscribe-plan-btn')?.addEventListener('click', () => openShop());

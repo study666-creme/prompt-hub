@@ -1943,6 +1943,48 @@
       return id ? `promptrepo_${name}_${id}` : `promptrepo_${name}`;
     }
 
+    function warehouseGroupsKey(warehouseId, uid) {
+      const id = uid || activeAccountId;
+      const wid = warehouseId || getActiveWarehouseId();
+      return id ? `promptrepo_groups_${id}_${wid}` : `promptrepo_groups_${wid}`;
+    }
+
+    function persistWarehouseGroups(warehouseId) {
+      const wid = warehouseId || getActiveWarehouseId();
+      const uid = window.SupabaseSync?.getUserId?.() || activeAccountId;
+      try {
+        localStorage.setItem(warehouseGroupsKey(wid, uid), JSON.stringify(customGroups));
+        if (wid === 'default' && uid) {
+          localStorage.setItem(userStorageKey('groups', uid), JSON.stringify(customGroups));
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    function loadWarehouseGroups(warehouseId) {
+      const wid = warehouseId || getActiveWarehouseId();
+      const uid = window.SupabaseSync?.getUserId?.() || activeAccountId;
+      try {
+        const key = warehouseGroupsKey(wid, uid);
+        let raw = localStorage.getItem(key);
+        if (!raw && wid === 'default') {
+          raw = localStorage.getItem(userStorageKey('groups', uid)) || localStorage.getItem('promptrepo_groups');
+          if (raw) localStorage.setItem(key, raw);
+        }
+        customGroups = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(customGroups)) customGroups = [];
+      } catch (e) {
+        customGroups = [];
+      }
+    }
+
+    window.onWarehouseSwitched = function onWarehouseSwitched(prevId, nextId) {
+      if (prevId && prevId !== nextId) persistWarehouseGroups(prevId);
+      loadWarehouseGroups(nextId);
+      currentGroup = 'all';
+      window.currentGroup = 'all';
+      renderGroups();
+    };
+
     const BACKUP_FORMAT = 'prompt-hub-backup';
     const BACKUP_VERSION = 1;
 
@@ -3222,7 +3264,8 @@
       }
       if (!restored) restored = await tryRestoreFromEmergencyBackup(uid);
       try {
-        const g = localStorage.getItem(userStorageKey('groups', uid));
+        const g = localStorage.getItem(warehouseGroupsKey(getActiveWarehouseId(), uid))
+          || localStorage.getItem(userStorageKey('groups', uid));
         if (g) customGroups = JSON.parse(g);
       } catch (e) { customGroups = []; }
       try {
@@ -3490,8 +3533,7 @@
         cards = await loadCardsFromDB();
       }
       try {
-        const g = localStorage.getItem(userStorageKey('groups', uid)) || localStorage.getItem('promptrepo_groups');
-        if (g) customGroups = JSON.parse(g);
+        loadWarehouseGroups(getActiveWarehouseId());
       } catch (e) { customGroups = []; }
       try {
         const f = localStorage.getItem(userStorageKey('fields', uid)) || localStorage.getItem('promptrepo_fields');
@@ -4334,7 +4376,7 @@
         } catch (e) { /* quota */ }
       }
       if (uid) {
-        localStorage.setItem(userStorageKey('groups', uid), JSON.stringify(customGroups));
+        persistWarehouseGroups(getActiveWarehouseId());
         localStorage.setItem(userStorageKey('fields', uid), JSON.stringify(globalFields));
         localStorage.setItem(userStorageKey('settings', uid), JSON.stringify(settings));
       }

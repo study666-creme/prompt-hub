@@ -242,8 +242,10 @@
         const id = btn.dataset.warehouseId;
         const s = migrateWarehouseStore(loadWarehouseStore());
         if (s.activeId === id) return;
+        const prevId = s.activeId;
         s.activeId = id;
         saveWarehouseStore(s);
+        if (typeof window.onWarehouseSwitched === 'function') window.onWarehouseSwitched(prevId, id);
         renderWarehouseSidebar();
         updateWarehouseTitle();
         if (typeof window.refreshWarehouseUI === 'function') {
@@ -389,11 +391,26 @@
     });
   }
 
+  function listWarehousesForAccount() {
+    return migrateWarehouseStore(loadWarehouseStore()).warehouses;
+  }
+
+  function getMainSiteCardsForWarehouse(warehouseId) {
+    const wid = warehouseId || getActiveWarehouseId();
+    const all = window.__promptHubCards || [];
+    return all.filter((c) => cardWarehouseId(c) === wid);
+  }
+
   function finishCreateWarehouse(name, store) {
     const id = `wh_${Date.now().toString(36)}`;
+    const prevId = store.activeId;
     store.warehouses.push({ id, name, isDefault: false, createdAt: Date.now() });
     store.activeId = id;
     saveWarehouseStore(store);
+    try {
+      localStorage.setItem(`promptrepo_groups_${accountKey()}_${id}`, '[]');
+    } catch (e) { /* ignore */ }
+    if (typeof window.onWarehouseSwitched === 'function') window.onWarehouseSwitched(prevId, id);
     renderWarehouseSidebar();
     updateWarehouseTitle();
     if (typeof window.refreshWarehouseUI === 'function') window.refreshWarehouseUI({ softCards: false });
@@ -632,7 +649,9 @@
     updateWarehouseTitle,
     recordOwnedPackage,
     recordPublishedPackage,
-    loadPackageIds,
+    listWarehousesForAccount,
+    getMainSiteCardsForWarehouse,
+    loadWarehouseStore,
     renderMyHomePackages,
     openPackagePreview,
     closePackagePreview

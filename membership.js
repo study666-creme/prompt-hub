@@ -147,6 +147,7 @@
     }
     return {
       active: true,
+      tier: row.tier || 'basic',
       tierLabel,
       untilLabel,
       summary: `${tierLabel} · ${untilLabel}`

@@ -2305,3 +2305,171 @@ body.studio-modal-open {
     display: none;
   }
 }
+
+/* 导入卡片库选择 */
+#studioImportOverlay {
+  z-index: 12000;
+}
+
+.studio-import-dialog {
+  width: min(920px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
+  padding: 20px 22px 24px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+}
+
+.studio-import-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.studio-import-dialog-head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.studio-import-covers {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+  justify-content: center;
+}
+
+.studio-import-covers.count-1 {
+  grid-template-columns: minmax(280px, 520px);
+}
+
+.studio-import-covers.count-2 {
+  grid-template-columns: repeat(2, minmax(200px, 1fr));
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.studio-import-covers.count-3,
+.studio-import-covers.count-4 {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.studio-import-cover {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  text-align: left;
+  transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
+}
+
+.studio-import-cover:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.studio-import-cover-media {
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(135deg, var(--bg-hover), var(--bg-card));
+  position: relative;
+  overflow: hidden;
+}
+
+.studio-import-cover-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.studio-import-cover-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 28px;
+}
+
+.studio-import-cover-body {
+  padding: 12px 14px 14px;
+}
+
+.studio-import-cover-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.studio-import-cover-meta {
+  margin: 0;
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+/* 新手指引 */
+.studio-guide-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 13000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.studio-guide-overlay.hidden {
+  display: none !important;
+}
+
+.studio-guide-panel {
+  width: min(520px, 96vw);
+  padding: 22px 22px 18px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+}
+
+.studio-guide-panel h3 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.studio-guide-steps {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  line-height: 1.55;
+}
+
+.studio-guide-steps li + li {
+  margin-top: 8px;
+}
+
+.studio-guide-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.studio-guide-skip {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
