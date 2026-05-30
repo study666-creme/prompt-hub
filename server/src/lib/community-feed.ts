@@ -230,11 +230,12 @@ export async function repairMisattributedCommunityAuthors(
     if (!owner || owner === row.author_id) continue;
     const { data: prof } = await admin
       .from('profiles')
-      .select('email')
-      .eq('id', owner)
+      .select('display_name, user_id')
+      .eq('user_id', owner)
       .maybeSingle();
     const authorName =
-      (prof as { email?: string } | null)?.email?.split('@')[0] || '用户';
+      String((prof as { display_name?: string | null } | null)?.display_name || '').trim() ||
+      '用户';
     const { error: upErr } = await admin
       .from('community_posts')
       .update({
@@ -345,6 +346,16 @@ export async function upsertCommunityPost(
   }
   const authorId = ownerFromImage || userId;
 
+  const incomingLikes = Math.max(0, Math.floor(Number(post.likes) || 0));
+  const { data: existingRow } = await admin
+    .from('community_posts')
+    .select('likes')
+    .eq('id', String(post.id))
+    .maybeSingle();
+  const likes = existingRow
+    ? Math.max(Number(existingRow.likes) || 0, incomingLikes)
+    : incomingLikes;
+
   const row = {
     id: String(post.id),
     author_id: authorId,
@@ -352,7 +363,7 @@ export async function upsertCommunityPost(
     title: String(post.title || '').slice(0, 200),
     prompt: String(post.prompt).trim(),
     image: resolvedImage,
-    likes: Math.max(0, Math.floor(Number(post.likes) || 0)),
+    likes,
     source_card_id: post.sourceCardId ? String(post.sourceCardId) : null,
     published: true,
     created_at: created,
@@ -445,4 +456,53 @@ export async function syncAuthorCommunityPosts(
     }
   }
   return { synced, unpublished };
+}
+
+export async function likeCommunityPost(
+  admin: SupabaseClient,
+  userId: string,
+  postId: string
+): Promise<{ likes: number; alreadyLiked: boolean }> {
+  const id = String(postId || '').trim();
+  if (!id) throw new Error('缺少帖子 ID');
+
+  const { data: postRow, error: postErr } = await admin
+    .from('community_posts')
+    .select('id, author_id, likes, published')
+    .eq('id', id)
+    .maybeSingle();
+  if (postErr) throw postErr;
+  if (!postRow || !postRow.published) throw new Error('帖子不存在');
+
+  if (String(postRow.author_id) === String(userId)) {
+    throw new Error('不能给自己的作品点赞');
+  }
+
+  const { error: likeInsertErr } = await admin
+    .from('community_post_likes')
+    .insert({ post_id: id, user_id: userId });
+
+  if (likeInsertErr) {
+    if (likeInsertErr.code === '23505') {
+      return {
+        likes: Math.max(0, Number(postRow.likes) || 0),
+        alreadyLiked: true
+      };
+    }
+    throw likeInsertErr;
+  }
+
+  const nextLikes = Math.max(0, (Number(postRow.likes) || 0) + 1);
+  const { data: updated, error: updErr } = await admin
+    .from('community_posts')
+    .update({ likes: nextLikes, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('likes')
+    .single();
+  if (updErr) throw updErr;
+
+  return {
+    likes: Math.max(0, Number(updated?.likes) || nextLikes),
+    alreadyLiked: false
+  };
 }

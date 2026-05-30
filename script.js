@@ -163,7 +163,7 @@
     }
     window.getCardImageBackup = getCardImageBackup;
 
-    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, defaultImageGenAutoSaveWarehouse: true, communityNotificationsEnabled: true, communityNotifyBadge: true, autoDayNight: true, themeManualOverride: false };
+    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, autoPromptOcr: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, defaultImageGenAutoSaveWarehouse: true, communityNotificationsEnabled: true, communityNotifyBadge: true, autoDayNight: true, themeManualOverride: false };
     let currentGroup = 'all', selectedCardId = null, isNewCardMode = false, imageData = null;
     let imageRemovalPending = false;
     let mobileEditPanelHistory = false;
@@ -508,7 +508,17 @@
     }
 
     function canGuestCreateCard() {
-      if (isUserLoggedIn()) return { ok: true };
+      if (isUserLoggedIn()) {
+        if (window.Membership?.isMember?.()) return { ok: true };
+        const limit = window.Membership?.FREE_CARD_LIMIT ?? 100;
+        if (cards.length >= limit) {
+          return {
+            ok: false,
+            msg: `普通用户最多创建 ${limit} 张卡片，开通会员后可扩展存储`
+          };
+        }
+        return { ok: true, remaining: limit - cards.length };
+      }
       if (cards.length >= GUEST_CARD_LIMIT) {
         return {
           ok: false,
@@ -535,12 +545,19 @@
       const el = document.getElementById('guestLimitHint');
       if (!el) return;
       if (isUserLoggedIn()) {
-        el.classList.add('hidden');
+        if (window.Membership?.isMember?.()) {
+          el.classList.add('hidden');
+          return;
+        }
+        const limit = window.Membership?.FREE_CARD_LIMIT ?? 100;
+        el.classList.remove('hidden');
+        const left = Math.max(0, limit - cards.length);
+        el.textContent = `普通用户：还可新建 ${left} / ${limit} 张卡片（会员享更大存储）`;
         return;
       }
       el.classList.remove('hidden');
       const left = Math.max(0, GUEST_CARD_LIMIT - cards.length);
-      el.textContent = `未登录：还可新建 ${left} / ${GUEST_CARD_LIMIT} 张卡片（登录后无限制并云同步）`;
+      el.textContent = `未登录：还可新建 ${left} / ${GUEST_CARD_LIMIT} 张卡片（登录后最多 100 张，会员扩展存储）`;
     }
 
     window.AuthGate = {
@@ -2467,6 +2484,7 @@
       if (authChannel === 'phone' && mode !== 'reset') return;
       const tabs = document.getElementById('authTabs');
       const confirmWrap = document.getElementById('authConfirmWrap');
+      const displayNameWrap = document.getElementById('authDisplayNameWrap');
       const newPwdWrap = document.getElementById('authNewPwdWrap');
       const pwdField = document.querySelector('.auth-field-password');
       const rememberWrap = document.getElementById('authRememberWrap');
@@ -2491,6 +2509,7 @@
         t.classList.toggle('active', t.dataset.authChannel === 'email');
       });
       confirmWrap?.classList.toggle('hidden', mode !== 'register');
+      displayNameWrap?.classList.toggle('hidden', mode !== 'register');
       newPwdWrap?.classList.toggle('hidden', mode !== 'reset');
       pwdField?.classList.toggle('hidden', mode === 'forgot' || mode === 'reset');
       rememberWrap?.classList.toggle('hidden', mode !== 'login');
@@ -2601,10 +2620,15 @@
       const email = document.getElementById('authEmail')?.value?.trim();
       const password = document.getElementById('authPassword')?.value;
       const confirm = document.getElementById('authPasswordConfirm')?.value;
+      const nickRaw = document.getElementById('authDisplayName')?.value?.trim() || '';
       if (!email || !password) { setAuthStatus('请填写邮箱和密码', 'error'); return; }
       if (!isValidEmail(email)) { setAuthStatus('邮箱格式不正确', 'error'); return; }
       if (password.length < 6) { setAuthStatus('密码至少 6 位', 'error'); return; }
       if (password !== confirm) { setAuthStatus('两次输入的密码不一致', 'error'); return; }
+      if (nickRaw && !/^[\u4e00-\u9fa5a-zA-Z0-9_\-]{2,20}$/.test(nickRaw)) {
+        setAuthStatus('昵称需 2～20 字，仅支持中文、字母、数字、下划线或连字符', 'error');
+        return;
+      }
       try {
         setAuthBusy(true);
         setAuthStatus('注册中…');
@@ -2612,6 +2636,10 @@
         if (data.session) {
           closeAuthModal();
           await completeAuthSession({ silent: false, migrateGuest: true });
+          if (nickRaw && window.PromptHubApi?.setDisplayName) {
+            const nr = await window.PromptHubApi.setDisplayName(nickRaw);
+            if (!nr.ok) showToast(nr.message || '昵称设置失败，已自动生成昵称');
+          }
           showToast('注册成功，已自动登录');
         } else {
           setAuthStatus('注册成功！请查收邮件点击确认链接后再登录（若未开启邮箱验证可直接登录）', 'ok');
@@ -2977,6 +3005,7 @@
         cloudHydratedUid = null;
         window.Membership?.clearLocalState?.();
         window.PointsSystem?.resetServerCreditsState?.();
+        window.__userDisplayName = '';
         window.SubscriptionUI?.refreshOfferUI?.();
         await window.SupabaseSync.signOut();
         await purgeSignedOutLocalData();
@@ -3947,14 +3976,16 @@
       cards = [];
       customGroups = [];
       globalFields = [];
-      settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, efficiencyMode: false }, {});
+      settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, autoPromptOcr: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, efficiencyMode: false }, {});
       floatingPromptActive = false;
       try {
         const s = localStorage.getItem('promptrepo_settings');
         if (s) settings = Object.assign(settings, JSON.parse(s));
       } catch (e) { /* ignore */ }
+      updatePanelOcrBoxVisibility();
       applyEfficiencyMode();
       initFilterMenu();
+      bindPanelOcrDrop();
       initAppNav();
       initAppNavCollapse();
       initBackgroundEffect();
@@ -4668,8 +4699,9 @@
     function closeTagSheet() {
       const overlay = document.getElementById('tagSheetOverlay');
       if (!overlay) return;
-      overlay.classList.remove('open', 'multi');
-      overlay.hidden = true;
+      overlay.classList.remove('multi');
+      overlay.classList.remove('open');
+      overlay.setAttribute('hidden', '');
       tagSheetMultiMode = false;
       tagSheetPending.clear();
       document.getElementById('tagSheetList').innerHTML = '';
@@ -4724,7 +4756,7 @@
           list.appendChild(row);
         });
       }
-      overlay.hidden = false;
+      overlay.removeAttribute('hidden');
       overlay.classList.add('open');
       const onKey = e => { if (e.key === 'Escape') { closeTagSheet(); document.removeEventListener('keydown', onKey); } };
       document.addEventListener('keydown', onKey);
@@ -4841,6 +4873,84 @@
         window.customConfirm(msg, apply);
       } else if (confirm(msg.replace(/\n/g, ''))) apply();
     }
+    function updatePanelOcrBoxVisibility() {
+      const on = settings.autoPromptOcr === true;
+      document.getElementById('panelOcrDrop')?.classList.toggle('hidden', !on);
+    }
+    window.updatePanelOcrBoxVisibility = updatePanelOcrBoxVisibility;
+
+    async function handleOcrOnlyImage(file) {
+      if (!file || !file.type.startsWith('image/')) return;
+      if (!isEditPanelOpen() || settings.autoPromptOcr !== true) return;
+      const inner = document.getElementById('panelOcrDropInner');
+      const hint = document.getElementById('panelOcrDropHint');
+      const status = document.getElementById('panelOcrDropStatus');
+      inner?.classList.add('is-busy');
+      hint?.classList.add('hidden');
+      status?.classList.remove('hidden');
+      const r = new FileReader();
+      r.onload = async (e) => {
+        try {
+          const text = await recognizeImageText(e.target.result);
+          if (text) {
+            const promptEl = document.getElementById('cardPrompt');
+            if (promptEl) {
+              promptEl.value = text;
+              if (floatingPromptActive) {
+                const fp = document.getElementById('floatingPromptText');
+                if (fp) fp.value = text;
+              }
+              window.FeatureDraft?.syncCardPublishFromPrompt?.(text);
+            }
+            showToast('已填入提示词');
+          } else {
+            showToast('未识别到文字');
+          }
+        } finally {
+          inner?.classList.remove('is-busy');
+          hint?.classList.remove('hidden');
+          status?.classList.add('hidden');
+        }
+      };
+      r.onerror = () => {
+        inner?.classList.remove('is-busy');
+        hint?.classList.remove('hidden');
+        status?.classList.add('hidden');
+        showToast('无法读取图片');
+      };
+      r.readAsDataURL(file);
+    }
+
+    function bindPanelOcrDrop() {
+      const inner = document.getElementById('panelOcrDropInner');
+      const input = document.getElementById('panelOcrFileInput');
+      if (!inner || !input || inner.dataset.bound === '1') return;
+      inner.dataset.bound = '1';
+      inner.setAttribute('tabindex', '0');
+      inner.addEventListener('click', (e) => {
+        e.stopPropagation();
+        input.click();
+      });
+      ['dragenter', 'dragover'].forEach((ev) => {
+        inner.addEventListener(ev, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          inner.classList.add('dragover');
+        });
+      });
+      inner.addEventListener('dragleave', () => inner.classList.remove('dragover'));
+      inner.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        inner.classList.remove('dragover');
+        handleOcrOnlyImage(e.dataTransfer.files[0]);
+      });
+      input.addEventListener('change', (e) => {
+        handleOcrOnlyImage(e.target.files[0]);
+        e.target.value = '';
+      });
+    }
+
     function isEditPanelOpen() {
       return !document.getElementById('editPanel')?.classList.contains('hidden');
     }
@@ -4851,7 +4961,6 @@
       r.onload = e => {
         imageData = e.target.result;
         updatePreview();
-        void autoOcrPanelImage();
       };
       r.readAsDataURL(file);
     }
@@ -4887,10 +4996,14 @@
         return;
       }
       if (!editPanel.classList.contains('hidden')) {
+        const ocrDrop = document.getElementById('panelOcrDrop');
+        const ocrEnabled = settings.autoPromptOcr === true && ocrDrop && !ocrDrop.classList.contains('hidden');
+        const ocrFocused = ocrDrop?.contains(document.activeElement);
         const items = e.clipboardData.items;
         for (let i of items) {
           if (i.type.indexOf('image') !== -1) {
-            handleSingleImage(i.getAsFile());
+            if (ocrEnabled && ocrFocused) handleOcrOnlyImage(i.getAsFile());
+            else handleSingleImage(i.getAsFile());
             break;
           }
         }
@@ -5259,36 +5372,6 @@
       }
     }
 
-    async function autoOcrPanelImage() {
-      if (!imageData || !isEditPanelOpen()) return;
-      const promptEl = document.getElementById('cardPrompt');
-      if (promptEl?.value?.trim()) return;
-      await runPanelImageOcr({ silent: true });
-    }
-
-    async function runPanelImageOcr(opts = {}) {
-      if (!imageData) {
-        if (!opts.silent) showToast('请先添加图片');
-        return;
-      }
-      const btn = document.getElementById('panelOcrBtn');
-      const promptEl = document.getElementById('cardPrompt');
-      if (!promptEl) return;
-      if (btn) btn.disabled = true;
-      if (!opts.silent) showToast('正在识别图中文字…', 2800);
-      const text = await recognizeImageText(imageData);
-      if (btn) btn.disabled = false;
-      if (text) {
-        promptEl.value = text;
-        if (floatingPromptActive) {
-          const fp = document.getElementById('floatingPromptText');
-          if (fp) fp.value = text;
-        }
-        if (!opts.silent) showToast('已填入提示词');
-      } else if (!opts.silent) {
-        showToast('未识别到文字');
-      }
-    }
     window.runPanelImageOcr = runPanelImageOcr;
 
     async function runModalOCR() {
@@ -5420,6 +5503,9 @@
       document.getElementById('ocrEngineSelect').value = settings.engine || 'tesseract';
       document.getElementById('ocrApiKey').value = settings.apiKey || '';
       document.getElementById('imageClickZoomToggle').checked = settings.imageClickZoom;
+      const autoOcrToggle = document.getElementById('autoPromptOcrToggle');
+      if (autoOcrToggle) autoOcrToggle.checked = settings.autoPromptOcr === true;
+      updatePanelOcrBoxVisibility();
       const pubToggle = document.getElementById('defaultPublishCommunityToggle');
       if (pubToggle) pubToggle.checked = settings.defaultPublishCommunity !== false;
       window.PointsSystem?.updateCreditsUI?.();
@@ -5439,6 +5525,9 @@
       settings.engine = document.getElementById('ocrEngineSelect').value;
       settings.apiKey = document.getElementById('ocrApiKey').value.trim();
       settings.imageClickZoom = document.getElementById('imageClickZoomToggle').checked;
+      const autoOcrToggle = document.getElementById('autoPromptOcrToggle');
+      settings.autoPromptOcr = autoOcrToggle ? autoOcrToggle.checked : false;
+      updatePanelOcrBoxVisibility();
       const pubToggle = document.getElementById('defaultPublishCommunityToggle');
       settings.defaultPublishCommunity = pubToggle ? pubToggle.checked : true;
       saveAllData();

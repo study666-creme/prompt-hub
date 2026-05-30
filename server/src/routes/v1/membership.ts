@@ -99,6 +99,9 @@ membershipRoutes.post('/credit-mode', async c => {
   if (!isMembershipActive(profile)) {
     throw new ApiError(400, 'NOT_MEMBER', '开通会员后可选择积分方式');
   }
+  if (profile.membership_tier === 'lite' && parsed.data.creditGrantMode === 'bundle') {
+    throw new ApiError(400, 'LITE_DAILY_ONLY', '轻量会员仅支持每日领取积分');
+  }
 
   const mode = parsed.data.creditGrantMode as CreditGrantMode;
   if (profile.credit_grant_mode === mode) {

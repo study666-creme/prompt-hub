@@ -11,9 +11,10 @@ export const DAILY_CREDITS_BY_TIER: Record<
   NonNullable<Profile['membership_tier']>,
   number
 > = {
-  basic: 10,
-  standard: 20,
-  pro: 40
+  lite: 10,
+  basic: 13,
+  standard: 32,
+  pro: 64
 };
 
 export function dailyCreditsForTier(
@@ -27,9 +28,10 @@ export const TIER_LUMP_CREDITS: Record<
   NonNullable<Profile['membership_tier']>,
   number
 > = {
-  basic: 100,
-  standard: 310,
-  pro: 620
+  lite: 0,
+  basic: 130,
+  standard: 320,
+  pro: 700
 };
 
 /** 中国时区自然日 YYYY-MM-DD */

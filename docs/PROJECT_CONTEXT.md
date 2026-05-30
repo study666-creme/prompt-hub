@@ -20,28 +20,33 @@
 
 ---
 
-## 当前部署阶段（2026-05-29 · 构建 **20260616f**）
+## 当前部署阶段（2026-05-29 · 构建 **20260616n**）
 
 | 项 | 状态 |
 |----|------|
-| 构建号 | **`20260616f`** / SW **`prompt-hub-v244`** |
-| 已打通 | `/health`、兑换、生图、社区 Feed、收藏独立副本、社区 Masonry 瀑布流 |
-| **本轮** | 社区/我发布恢复瀑布流（≤3 列 horizontalOrder）；欣赏模式退出修复；移除「同步卡片库」UI；手机隐藏欣赏按钮；社区通知 API（点赞/收藏推作者）；任务中心每日 5 积分保留、仅邀请要绑手机 |
+| 构建号 | **`20260616n`** / SW **`prompt-hub-v252`** |
+| 已打通 | `/health`、兑换、生图、社区 Feed、社区点赞 API、收藏独立副本 |
+| **本轮** | 社区点赞全站计数；会员 lite 档 + 新价；激活码兑换前自选每日/一次性（同码通用）；轻量会员紧凑面板 |
 
 ### 待用户执行（SQL）
 
-- Supabase SQL Editor 运行：`supabase/migrations/20260529120000_community_notifications.sql`（社区消息收件箱）
+按顺序执行：
+
+1. `20260529140000_community_post_likes.sql`
+2. `20260529150000_membership_lite_tier.sql`
+3. `20260529160000_new_membership_codes_daily.sql`
+
+（若更早未跑：`20260529120000_community_notifications.sql`、`20260529130000_profiles_display_name.sql`）
 
 ### 已知 / 待验收
 
-- 单卡「发布到社区」开关 UI 与 `publishedToCommunity` 仍可能不同步（见 CURRENT-ISSUES P0）
-- 社区他人配图加载仍可能偏慢（签名/预取）
-- Worker 未部署时任务中心仍会要求绑手机（旧 API）
+- 浏览器插件：见 **`docs/BROWSER-EXTENSION.md`**（规划，未开发）
+- 单卡「发布到社区」开关 UI 与 `publishedToCommunity` 仍可能不同步
+- Worker + SQL 都部署后点赞才全站持久
 
 ### 测试账号
 
 - 邮箱 `2705367723@qq.com`
-- UUID `ab5c77dc-570e-4af7-ac38-2d311be96244`
 
 ### 部署
 
@@ -58,35 +63,19 @@ cd server
 
 | 文档 | 何时读 |
 |------|--------|
-| **[CURRENT-ISSUES.md](./CURRENT-ISSUES.md)** | **必读** — P0、实测、验证命令 |
-| **[AI-HANDOFF.md](./AI-HANDOFF.md)** | Grep 表、接手流程 |
-| [FILE-MAP.md](./FILE-MAP.md) | 按任务找文件 |
-| [COMMUNITY-ARCHITECTURE.md](./COMMUNITY-ARCHITECTURE.md) | 社区数据流 |
-| [AUTH-AND-SYNC.md](./AUTH-AND-SYNC.md) | 登录、云合并、超时 |
-
----
-
-## 仓库关键路径
-
-```
-index.html          # __APP_BUILD__
-script.js           # 卡片库、pushToCloud、欣赏模式
-features-draft.js   # 社区 Feed、Masonry、通知、欣赏模式
-supabase-sync.js    # 图片签名、缺 token 校验
-server/src/lib/community-notify.ts  # 点赞/收藏通知收件箱
-server/src/lib/membership-tasks.ts  # 任务中心规则
-trial-tasks.js      # 任务中心 UI
-```
+| **[CURRENT-ISSUES.md](./CURRENT-ISSUES.md)** | **必读** — P0、实测 |
+| **[MEMBERSHIP-CREDITS.md](./MEMBERSHIP-CREDITS.md)** | 会员档位、激活码、领取方式 |
+| **[BROWSER-EXTENSION.md](./BROWSER-EXTENSION.md)** | 插件可行性 / 合规 |
+| [AI-HANDOFF.md](./AI-HANDOFF.md) | Grep 表、接手流程 |
 
 ---
 
 ## 开发约定
 
-1. 最小 diff；先浏览器/API 验证再改
-2. 改静态资源：bump `__APP_BUILD__` + `sw.js` CACHE
-3. 仅用户要求时 `git commit`
-4. **`publishedToCommunity` 是单卡字段**，开关不是全局状态
+1. 最小 diff；改静态资源 bump `__APP_BUILD__` + `sw.js`
+2. 会员卡密**不按**领取方式分批发码；兑换时传 `creditGrantMode`
+3. 轻量会员 `lite` 仅 `daily` 积分
 
 ---
 
-*最后更新：2026-05-29 — 构建 20260616f；社区瀑布流/通知/任务中心；用户自行跑 SQL*
+*最后更新：2026-05-29 — 构建 20260616n；点赞/会员/插件文档*

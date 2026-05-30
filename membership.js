@@ -4,7 +4,8 @@
 (function () {
   const LS_MEMBERSHIP = 'promptrepo_membership';
   const PIN_LIMIT_FREE = 2;
-  const PIN_LIMIT_BASIC = 3;
+  const PIN_LIMIT_LITE = 3;
+  const FREE_CARD_LIMIT = 100;
 
   /** 会员生图积分折扣（乘数） */
   const GEN_DISCOUNT_BY_TIER = {
@@ -61,19 +62,19 @@
   function getMemberTier() {
     if (!isMember()) return null;
     const tier = readRow().tier;
-    if (tier === 'basic' || tier === 'standard' || tier === 'pro') return tier;
+    if (tier === 'lite' || tier === 'basic' || tier === 'standard' || tier === 'pro') return tier;
     return 'basic';
   }
 
   function getGenDiscountMultiplier() {
     const tier = getMemberTier();
-    if (!tier) return 1;
+    if (!tier || tier === 'lite') return 1;
     return GEN_DISCOUNT_BY_TIER[tier] ?? 1;
   }
 
   function getGenDiscountLabel() {
     const tier = getMemberTier();
-    if (!tier) return '';
+    if (!tier || tier === 'lite') return '';
     const map = { basic: '9折', standard: '8折', pro: '7折' };
     return map[tier] || '';
   }
@@ -81,14 +82,17 @@
   function getPinLimit() {
     const tier = getMemberTier();
     if (!tier) return PIN_LIMIT_FREE;
-    if (tier === 'basic') return PIN_LIMIT_BASIC;
-    if (tier === 'standard' || tier === 'pro') return Infinity;
-    return PIN_LIMIT_BASIC;
+    if (tier === 'lite') return PIN_LIMIT_LITE;
+    return Infinity;
   }
 
   function isUnlimitedPins() {
     const tier = getMemberTier();
-    return tier === 'standard' || tier === 'pro';
+    return tier === 'basic' || tier === 'standard' || tier === 'pro';
+  }
+
+  function getFreeCardLimit() {
+    return isMember() ? Infinity : FREE_CARD_LIMIT;
   }
 
   function activateByCode() {
@@ -123,13 +127,18 @@
     if (!isMember()) {
       return {
         active: false,
-        tierLabel: '免费用户',
-        untilLabel: '',
-        summary: '未开通 · 完成任务可免费领会员'
+        tierLabel: '普通用户',
+        untilLabel: '每日 5 积分 · 100 张卡片',
+        summary: '免费 · 每日 5 积分'
       };
     }
     const row = readRow();
-    const tierLabels = { basic: '基础会员', standard: '标准会员', pro: '专业会员' };
+    const tierLabels = {
+      lite: '轻量会员',
+      basic: '基础会员',
+      standard: '标准会员',
+      pro: '专业会员'
+    };
     const tierLabel = tierLabels[row.tier] || '基础会员';
     let untilLabel = '长期有效';
     if (row.until) {
@@ -160,6 +169,9 @@
         window.updateImageGenPricingUI();
       }
       window.SubscriptionUI?.refreshOfferUI?.();
+      if (typeof window.AuthGate?.updateGuestLimitUI === 'function') {
+        window.AuthGate.updateGuestLimitUI();
+      }
       return;
     }
     writeRow({ active: false, until: null, tier: null });
@@ -167,6 +179,9 @@
       window.updateImageGenPricingUI();
     }
     window.SubscriptionUI?.refreshOfferUI?.();
+    if (typeof window.AuthGate?.updateGuestLimitUI === 'function') {
+      window.AuthGate.updateGuestLimitUI();
+    }
   }
 
   function onAccountSwitch() {}
@@ -183,7 +198,8 @@
 
   window.Membership = {
     PIN_LIMIT_FREE,
-    PIN_LIMIT_BASIC,
+    PIN_LIMIT_LITE,
+    FREE_CARD_LIMIT,
     GEN_DISCOUNT_BY_TIER,
     isMember,
     getMemberTier,
@@ -191,6 +207,7 @@
     getGenDiscountLabel,
     getPinLimit,
     isUnlimitedPins,
+    getFreeCardLimit,
     activateByCode,
     isMemberCode,
     getAccountPayload,

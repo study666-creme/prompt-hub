@@ -218,7 +218,7 @@
   #creationsGrid.community-mobile-feed.cards-container:not(.list-view) {
     display: grid !important;
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 10px !important;
+    gap: 12px 10px !important;
     position: relative !important;
     height: auto !important;
     overflow-y: auto !important;
@@ -275,7 +275,7 @@
   #communityGrid:not(.list-view):not(.community-mobile-feed) .card,
   #creationsGrid:not(.list-view):not(.community-mobile-feed) .card {
     display: block;
-    margin-bottom: 0 !important;
+    margin-bottom: 14px !important;
     box-sizing: border-box;
   }
   #communityGrid.community-mobile-feed:not(.list-view) .card,
@@ -312,8 +312,15 @@
     width: 100%;
     height: auto;
     max-width: 100%;
+    max-height: none;
     object-fit: contain;
     object-position: center center;
+  }
+  #communityGrid:not(.list-view) .community-post-card--visual .card-media,
+  #creationsGrid:not(.list-view) .community-post-card--visual .card-media {
+    width: 100%;
+    overflow: hidden;
+    line-height: 0;
   }
   #communityGrid .grid-sizer,
   #creationsGrid .grid-sizer {
@@ -810,6 +817,64 @@
   min-height: 120px;
   resize: vertical;
   line-height: 1.5;
+}
+
+.imagegen-prompt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 18px;
+  margin-bottom: 8px;
+}
+
+.imagegen-prompt-head label {
+  margin: 0 !important;
+}
+
+.imagegen-ref-block > .imagegen-ref-label {
+  display: block;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 18px 0 8px;
+}
+
+.imagegen-prompt-tools {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.imagegen-prompt-tool-btn {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.imagegen-prompt-tool-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--border-light);
+}
+
+.imagegen-prompt-tool-btn--clear:hover {
+  color: #e57373;
+  border-color: rgba(229, 115, 115, 0.45);
+}
+
+.imagegen-prompt-tool-btn svg {
+  width: 16px;
+  height: 16px;
+  display: block;
 }
 
 .imagegen-params-row {
@@ -1986,6 +2051,11 @@ body.user-profile-open {
   margin: 0;
 }
 
+#communityGrid .card.community-post-card:hover,
+#creationsGrid .card.community-post-card:hover {
+  z-index: 4;
+}
+
 .community-card-visual-meta {
   position: absolute;
   left: 8px;
@@ -2026,6 +2096,7 @@ body.user-profile-open {
 .creation-post-card .card-img {
   width: 100%;
   height: auto;
+  max-height: none;
   object-fit: contain;
   object-position: center center;
   display: block;

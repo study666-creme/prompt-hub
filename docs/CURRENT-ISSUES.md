@@ -8,31 +8,28 @@
 
 | 项 | 值 |
 |----|-----|
-| `__APP_BUILD__` | **`20260616f`** |
-| SW `CACHE` | **`prompt-hub-v244`** |
+| `__APP_BUILD__` | **`20260616n`** |
+| SW `CACHE` | **`prompt-hub-v252`** |
 | Pages | https://prompt-hub.cn |
 | API | https://api.prompt-hub.cn |
 
 ---
 
-## 2026-05-29 晚已交付（构建 20260616d～f）
+## 2026-05-29 已交付（构建 20260616m～n）
 
 | 项 | 说明 |
 |----|------|
-| 社区/我发布布局 | 恢复 Masonry 瀑布流；≤3 列 `horizontalOrder` + 去 margin 减少留白 |
-| 欣赏模式 | 关闭时取消未完成 onload，清空 caption，防遮罩/提示词残留 |
-| 手机社区 | 隐藏「欣赏作品」按钮 |
-| 同步卡片库 | UI 已移除（顶栏、设置、空状态） |
-| 社区图 400 | 缺 `?token=` 的签名 URL 不再写入 `img.src` |
-| 我发布的闪屏 | `renderCreations` 先比对签名再重绘 |
-| 任务中心 | 每日 5 积分 + 邀请 50 积分保留；其它任务只给会员天数；**仅邀请**要绑手机 |
-| 社区通知 | 服务端 `community_notifications` + `/community/notify`；点赞/收藏推作者 |
+| 社区点赞 | 本地 + `POST /community/posts/:id/like` 全站计数；需 SQL `20260529140000` + Worker 部署 |
+| 会员档位 | 普通 / 轻量 lite / 基础 / 标准 / 专业；新价与新积分规则 |
+| 激活码 | 旧会员卡密停用；新码每档 2 个；**同码**兑换前自选每日/一次性（lite 仅每日） |
+| 轻量面板 | 单行紧凑布局 |
+| 浏览器插件 | 规划文档 `docs/BROWSER-EXTENSION.md`（未开发） |
 
 ### 用户待做
 
-1. Supabase 执行 `supabase/migrations/20260529120000_community_notifications.sql`
-2. 硬刷新确认左下角 **20260616f**
-3. 用另一账号点赞/收藏，作者刷新社区看铃铛
+1. Supabase 依次执行：`20260529140000` → `20260529150000` → `20260529160000`
+2. `.\deploy-pages.ps1` + `server\deploy.ps1`
+3. 硬刷新确认 **20260616n**
 
 ---
 
@@ -41,7 +38,7 @@
 | # | 现象 |
 |---|------|
 | 1 | **发布开关像全局开关** — 单卡 `publishedToCommunity` 与 UI/云端不同步 |
-| 2 | **他人社区图慢** — 偶发像没图，等 30s 或签名慢 |
+| 2 | **他人社区图慢** — 偶发像没图，等签名 |
 | 3 | **卡片库整体偏慢** — 进库、拉图、云同步 |
 
 ---
@@ -49,9 +46,10 @@
 ## 控制台验证
 
 ```javascript
-window.__APP_BUILD__  // 应为 20260616f
+window.__APP_BUILD__  // 应为 20260616n
 await window.PromptHubApi.getCommunityFeed({ limit: 20 })
-await window.PromptHubApi.fetchCommunityNotifications?.({ limit: 10 })
+// 点赞（需登录）
+await window.PromptHubApi.likeCommunityPost?.('帖子ID')
 ```
 
 ---

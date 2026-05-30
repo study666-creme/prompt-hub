@@ -640,7 +640,9 @@
 
   .edit-panel .image-drop-area.has-image {
     height: auto;
-    max-height: none;
+    max-height: min(60vh, 420px);
+    min-height: 160px;
+    aspect-ratio: 4 / 5;
     overflow: hidden;
     border-radius: 12px;
     margin: 8px 12px 0;
@@ -650,11 +652,12 @@
   }
 
   .edit-panel .image-drop-area.has-image img#previewImage {
-    height: auto;
+    height: 100%;
     min-height: 0;
-    max-height: min(60vh, 420px);
+    max-height: none;
     width: 100%;
-    object-fit: contain;
+    object-fit: cover;
+    object-position: center center;
   }
 
   .image-lightbox {
@@ -1142,15 +1145,43 @@
     margin-top: 0;
   }
 
+  body.imagegen-mobile-view-form .imagegen-form-scroll {
+    display: flex;
+    flex-direction: column;
+    padding: 10px 12px 6px;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-ref-block {
+    order: 1;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-prompt-block {
+    order: 2;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-publish-row {
+    order: 3;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-prompt-head {
+    margin-top: 8px;
+    margin-bottom: 4px;
+  }
+
   body.imagegen-mobile-view-form #imageGenPrompt {
-    min-height: 72px;
-    max-height: 88px;
+    min-height: 120px;
+    max-height: 200px;
     resize: vertical;
   }
 
   body.imagegen-mobile-view-form .imagegen-quality-note {
     display: none;
     margin: 0;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-ref-block > .imagegen-ref-label {
+    margin: 8px 0 4px;
+    font-size: 12px;
   }
 
   body.imagegen-mobile-view-form .imagegen-ref-drop {
@@ -1161,10 +1192,6 @@
   body.imagegen-mobile-view-form .imagegen-ref-hint-mobile {
     font-size: 12px;
     margin: 0;
-  }
-
-  body.imagegen-mobile-view-form .imagegen-form-scroll {
-    padding: 10px 12px 6px;
   }
 
   .imagegen-credits-sheet .imagegen-credits-sheet-body {

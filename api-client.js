@@ -198,34 +198,42 @@
       return { ok: false, code: 'API_UNREACHABLE', message: 'API 暂不可用' };
     }
     const silent = opts?.silent === true;
+
+    function applyMePayload(d) {
+      if (!d) return;
+      if (typeof d.displayName === 'string' && d.displayName.trim()) {
+        window.__userDisplayName = d.displayName.trim();
+      }
+      if (typeof d.credits === 'number' && window.PointsSystem?.setCreditsFromServer) {
+        window.PointsSystem.setCreditsFromServer(d.credits, {
+          permanent: d.creditsPermanent,
+          daily: d.dailyCredits,
+          mode: d.creditGrantMode,
+          note: d.dailyCreditsNote
+        });
+      }
+      if (d.membership && window.Membership?.applyServerState) {
+        window.Membership.applyServerState(d.membership);
+      }
+      if ('firstSubOfferUsed' in d) {
+        window.SubscriptionUI?.setFirstOfferUsedFromServer?.(!!d.firstSubOfferUsed);
+      } else if (window.SupabaseSync?.isLoggedIn?.()) {
+        window.SubscriptionUI?.setFirstOfferUsedFromServer?.(false);
+      }
+      if (d.creditGrantMode || d.dailyCreditsByTier) {
+        window.SubscriptionUI?.applyServerState?.(d);
+      }
+      window.PointsSystem?.updateCreditsUI?.();
+      window.SubscriptionUI?.refreshOfferUI?.();
+    }
+
     const r = await request('GET', '/api/v1/me', null, { timeoutMs: API_FAST_TIMEOUT_MS, noRetry: true });
     if (!r.ok && r.code === 'UNAUTHORIZED') {
       const recovered = await recoverSessionForApi();
       if (recovered) {
         const retry = await request('GET', '/api/v1/me', null, { timeoutMs: API_FAST_TIMEOUT_MS, noRetry: true });
         if (retry.ok) {
-          const d = retry.data;
-          if (d && typeof d.credits === 'number' && window.PointsSystem?.setCreditsFromServer) {
-            window.PointsSystem.setCreditsFromServer(d.credits, {
-              permanent: d.creditsPermanent,
-              daily: d.dailyCredits,
-              mode: d.creditGrantMode,
-              note: d.dailyCreditsNote
-            });
-          }
-          if (d?.membership && window.Membership?.applyServerState) {
-            window.Membership.applyServerState(d.membership);
-          }
-          if (d && 'firstSubOfferUsed' in d) {
-            window.SubscriptionUI?.setFirstOfferUsedFromServer?.(!!d.firstSubOfferUsed);
-          } else if (window.SupabaseSync?.isLoggedIn?.()) {
-            window.SubscriptionUI?.setFirstOfferUsedFromServer?.(false);
-          }
-          if (d?.creditGrantMode || d?.dailyCreditsByTier) {
-            window.SubscriptionUI?.applyServerState?.(d);
-          }
-          window.PointsSystem?.updateCreditsUI?.();
-          window.SubscriptionUI?.refreshOfferUI?.();
+          applyMePayload(retry.data);
           return retry;
         }
       }
@@ -236,28 +244,15 @@
       }
       return r;
     }
-    const d = r.data;
-    if (d && typeof d.credits === 'number' && window.PointsSystem?.setCreditsFromServer) {
-      window.PointsSystem.setCreditsFromServer(d.credits, {
-        permanent: d.creditsPermanent,
-        daily: d.dailyCredits,
-        mode: d.creditGrantMode,
-        note: d.dailyCreditsNote
-      });
+    applyMePayload(r.data);
+    return r;
+  }
+
+  async function setDisplayName(displayName) {
+    const r = await request('PATCH', '/api/v1/me/display-name', { displayName });
+    if (r.ok && r.data?.displayName) {
+      window.__userDisplayName = String(r.data.displayName);
     }
-    if (d?.membership && window.Membership?.applyServerState) {
-      window.Membership.applyServerState(d.membership);
-    }
-    if (d && 'firstSubOfferUsed' in d) {
-      window.SubscriptionUI?.setFirstOfferUsedFromServer?.(!!d.firstSubOfferUsed);
-    } else if (window.SupabaseSync?.isLoggedIn?.()) {
-      window.SubscriptionUI?.setFirstOfferUsedFromServer?.(false);
-    }
-    if (d?.creditGrantMode || d?.dailyCreditsByTier) {
-      window.SubscriptionUI?.applyServerState?.(d);
-    }
-    window.PointsSystem?.updateCreditsUI?.();
-    window.SubscriptionUI?.refreshOfferUI?.();
     return r;
   }
 
@@ -421,6 +416,10 @@
     return request('POST', '/api/v1/community/posts/sync', { posts: posts || [] });
   }
 
+  async function likeCommunityPost(postId) {
+    return request('POST', `/api/v1/community/posts/${encodeURIComponent(String(postId || ''))}/like`, {});
+  }
+
   async function pushCommunityNotify(payload) {
     return request('POST', '/api/v1/community/notify', payload || {});
   }
@@ -486,6 +485,7 @@
     probeApiHealth,
     isConfigured,
     syncMe,
+    setDisplayName,
     redeem,
     claimFreeTrial,
     getMembershipTasks,
@@ -506,6 +506,7 @@
     publishCommunityPost,
     unpublishCommunityPost,
     syncCommunityPostsBatch,
+    likeCommunityPost,
     pushCommunityNotify,
     fetchCommunityNotifications,
     getGenerationImageUrl,

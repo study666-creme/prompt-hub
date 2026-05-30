@@ -59,25 +59,32 @@ app.get('/api/v1/billing/plans', c =>
     data: {
       plans: [
         {
+          id: 'lite',
+          name: '轻量会员包',
+          genDiscount: null,
+          dailyCredits: 10,
+          lumpCredits: 0
+        },
+        {
           id: 'basic',
           name: '基础版',
           genDiscount: '9折',
-          dailyCredits: 10,
-          lumpCredits: 100
+          dailyCredits: 13,
+          lumpCredits: 130
         },
         {
           id: 'standard',
           name: '标准版',
           genDiscount: '8折',
-          dailyCredits: 20,
-          lumpCredits: 310
+          dailyCredits: 32,
+          lumpCredits: 320
         },
         {
           id: 'pro',
           name: '专业版',
           genDiscount: '7折',
-          dailyCredits: 40,
-          lumpCredits: 620
+          dailyCredits: 64,
+          lumpCredits: 700
         }
       ],
       note: '支付 webhook 待接入；免费会员请完成任务中心领取（直接到账，无需激活码）'

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__APP_BUILD__ = '20260616h';
+    window.__APP_BUILD__ = '20260616n';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -57,11 +57,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260616d">
+  <link rel="stylesheet" href="styles.css?v=20260616n">
   <link rel="stylesheet" href="styles-theme.css?v=20260615z">
   <link rel="stylesheet" href="styles-mobile.css?v=20260615w">
-  <link rel="stylesheet" href="styles-settings.css?v=20260615w">
-  <link rel="stylesheet" href="styles-features.css?v=20260616d">
+  <link rel="stylesheet" href="styles-settings.css?v=20260616n">
+  <link rel="stylesheet" href="styles-features.css?v=20260616n">
   <script src="file-origin-guard.js?v=20260606m"></script>
   <script src="theme.js?v=20260615z"></script>
 </head>
@@ -194,6 +194,12 @@
             <span class="settings-check-box" aria-hidden="true"></span>
             <span class="settings-check-label">单击卡片图片时放大查看（否则进入编辑）</span>
           </label>
+          <label class="settings-check settings-check-spaced">
+            <input type="checkbox" id="autoPromptOcrToggle">
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">编辑卡片时显示「文字识别专用图片框」</span>
+          </label>
+          <p class="settings-hint">默认关闭。开启后，编辑区会出现独立小图框：拖入/点击/粘贴图片仅用于 OCR，识别结果写入提示词，不会保存为卡片配图。</p>
         </section>
 
         <section class="settings-section">
@@ -406,7 +412,7 @@
         <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260616h</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260616n</p>
     </div>
   </nav>
 
@@ -432,6 +438,11 @@
             <input type="password" id="authPassword" placeholder="至少 6 位" autocomplete="current-password">
             <button type="button" class="auth-pwd-toggle" id="authPwdToggle" onclick="toggleAuthPassword()" aria-label="显示密码">👁</button>
           </div>
+        </div>
+        <div class="auth-field auth-field-displayname hidden" id="authDisplayNameWrap">
+          <label for="authDisplayName">社区昵称</label>
+          <input type="text" id="authDisplayName" maxlength="20" placeholder="2～20 字，社区显示用" autocomplete="nickname">
+          <p class="auth-field-hint">不会公开邮箱；留空将自动生成昵称，之后可在设置里改</p>
         </div>
         <div class="auth-field auth-field-confirm hidden" id="authConfirmWrap">
           <label for="authPasswordConfirm">确认密码</label>
@@ -586,10 +597,13 @@
         <button type="button" class="remove-image-btn" id="removeImageBtn" onclick="event.stopPropagation(); removeImage()" title="从编辑区去掉图片（须保存后才真正删除）" aria-label="去掉图片"><span aria-hidden="true">×</span></button>
         <input type="file" id="fileInput" accept="image/*" style="display:none;">
       </div>
-      <button type="button" class="panel-ocr-btn" id="panelOcrBtn" onclick="runPanelImageOcr()" title="识别图中文字并填入提示词" aria-label="提取图中文字">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>
-        <span>提取图中文字</span>
-      </button>
+      <div class="panel-ocr-drop hidden" id="panelOcrDrop" aria-label="文字识别专用图片框">
+        <div class="panel-ocr-drop-inner" id="panelOcrDropInner">
+          <span class="panel-ocr-drop-hint" id="panelOcrDropHint">拖入或点击，仅识别文字（不保存图片）</span>
+          <span class="panel-ocr-drop-status hidden" id="panelOcrDropStatus">识别中…</span>
+        </div>
+        <input type="file" id="panelOcrFileInput" accept="image/*" hidden>
+      </div>
       <div class="panel-form">
         <label>标题</label>
         <input type="text" id="cardTitle">
@@ -775,9 +789,22 @@
               <option value="ultra">超清</option>
             </select>
             <p class="imagegen-quality-note">质量仅影响出图效果，不额外加价</p>
-            <label for="imageGenPrompt">提示词</label>
-            <textarea id="imageGenPrompt" placeholder="描述你想生成的画面…"></textarea>
-            <label>参考图（可选）</label>
+            <div class="imagegen-prompt-block">
+              <div class="imagegen-prompt-head">
+                <label for="imageGenPrompt">提示词</label>
+                <div class="imagegen-prompt-tools">
+                  <button type="button" class="imagegen-prompt-tool-btn" id="imageGenPromptPaste" title="粘贴剪贴板" aria-label="粘贴">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 2h-4.18C14.4.84 13.3 0 12 0S9.6.84 9.18 2H5a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z"/></svg>
+                  </button>
+                  <button type="button" class="imagegen-prompt-tool-btn imagegen-prompt-tool-btn--clear" id="imageGenPromptClear" title="清空提示词" aria-label="清空">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                  </button>
+                </div>
+              </div>
+              <textarea id="imageGenPrompt" placeholder="描述你想生成的画面…"></textarea>
+            </div>
+            <div class="imagegen-ref-block">
+            <label class="imagegen-ref-label">参考图（可选）</label>
             <div class="imagegen-ref imagegen-ref-zone" id="imageGenRefBox">
               <div class="imagegen-ref-drop" id="imageGenRefDrop">
                 <p class="imagegen-ref-hint imagegen-ref-hint-desktop">拖拽到本区域（虚线框外也可）或点击选择 · 支持 Ctrl+V · 可多张</p>
@@ -785,6 +812,7 @@
                 <input type="file" id="imageGenRefInput" accept="image/*" multiple>
               </div>
               <div class="imagegen-ref-gallery" id="imageGenRefGallery" hidden></div>
+            </div>
             </div>
             <div class="panel-publish-row imagegen-publish-row" id="imageGenGenPublicRow">
               <div class="panel-publish-copy">
@@ -956,7 +984,8 @@
         <div class="subscribe-membership-status-wrap" id="subscribeMembershipStatus" hidden></div>
         <div class="subscribe-redeem-box" id="subscribeRedeemBox">
           <p class="subscribe-redeem-title">激活码兑换</p>
-          <p class="subscribe-shop-hint">积分卡密、会员卡密都在此兑换。充值积分套餐赠送的基础会员为每日积分模式，请在任务中心领取日积分。</p>
+          <div class="subscribe-credit-mode" id="subscribeCreditMode"></div>
+          <p class="subscribe-shop-hint">积分卡密、会员卡密都在此兑换。会员卡：先选上方「每日 / 一次性」，再输入激活码（同一码通用；轻量会员固定每日）。</p>
           <div class="imagegen-activate-row subscribe-redeem-row">
             <input type="text" id="activationCodeInputSubscribe" class="settings-input" placeholder="输入激活码" autocomplete="off">
             <button type="button" class="btn btn-primary btn-sm" onclick="redeemActivationCode()">兑换</button>
@@ -975,9 +1004,9 @@
           <button type="button" class="subscribe-billing-tab" data-subscribe-billing="single_year">单年购买</button>
         </div>
         <div class="subscribe-mini-offer" id="subscribeMiniOffer"></div>
-        <div class="subscribe-credit-mode" id="subscribeCreditMode"></div>
+        <div class="subscribe-lite-plan-row" id="subscribeLitePlanRow"></div>
         <div class="subscribe-plans-grid" id="subscribePlansGrid"></div>
-        <p class="subscribe-legal">连续包月/包年订阅价约五折（见各档原价对比）。免费会员请点侧栏「免费试用」完成任务直接领取。详见 <a href="terms.html" class="link-inline">用户协议</a>。</p>
+        <p class="subscribe-legal">普通用户免费：每日 5 积分、100 张卡片。连续包月价见各档对比。免费会员请点侧栏「免费试用」完成任务领取。详见 <a href="terms.html" class="link-inline">用户协议</a>。</p>
         </section>
       </div>
     </div>
@@ -1008,18 +1037,18 @@
   <script src="supabase-config.js"></script>
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="api-client.js?v=20260615y"></script>
+  <script src="api-client.js?v=20260616n"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260616d"></script>
-  <script src="card-image-loader.js?v=20260616d"></script>
-  <script src="membership.js?v=20260606m"></script>
+  <script src="supabase-sync.js?v=20260616n"></script>
+  <script src="card-image-loader.js?v=20260616n"></script>
+  <script src="membership.js?v=20260616n"></script>
   <script src="modal-hub.js?v=20260606m"></script>
-  <script src="subscription.js?v=20260615y"></script>
+  <script src="subscription.js?v=20260616n"></script>
   <script src="trial-tasks.js?v=20260615y"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="script.js?v=20260616d"></script>
+  <script src="script.js?v=20260616n"></script>
   <script src="points-system.js?v=20260606m"></script>
-  <script src="features-draft.js?v=20260616d"></script>
+  <script src="features-draft.js?v=20260616n"></script>
   <script src="hotfix-image-layout.js?v=20260606m"></script>
   <script src="mobile.js?v=20260606m"></script>
   <script>

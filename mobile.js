@@ -307,7 +307,7 @@
       if (typeof switchAppPage === 'function') switchAppPage('imagegen');
     } else if (tab === 'community') {
       if (typeof switchAppPage === 'function') switchAppPage('community');
-      window.FeatureDraft?.renderCommunity?.();
+      window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true });
     } else if (tab === 'me') {
       openNavDrawer();
     }

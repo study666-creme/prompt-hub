@@ -5,6 +5,7 @@ import type { Env } from '../../env';
 import { ApiError } from '../../lib/errors';
 import {
   listPublicCommunityFeed,
+  likeCommunityPost,
   syncAuthorCommunityPosts,
   unpublishCommunityPost,
   upsertCommunityPost,
@@ -137,6 +138,37 @@ communityRoutes.post('/posts/sync', async c => {
       throw new ApiError(503, 'MIGRATION_REQUIRED', '社区表未就绪，请执行数据库迁移');
     }
     throw new ApiError(500, 'SYNC_FAILED', String((e as Error).message || e).slice(0, 180));
+  }
+});
+
+/** 点赞（全站计数，每账号每帖一次） */
+communityRoutes.post('/posts/:id/like', async c => {
+  const user = c.get('user');
+  const postId = String(c.req.param('id') || '').trim();
+  if (!postId) throw new ApiError(400, 'VALIDATION_ERROR', '缺少帖子 ID');
+  const admin = createAdminClient(c.env);
+  try {
+    const result = await likeCommunityPost(admin, user.id, postId);
+    return c.json({
+      ok: true,
+      data: { likes: result.likes, alreadyLiked: result.alreadyLiked }
+    });
+  } catch (e) {
+    const msg = String((e as Error).message || e);
+    if (isMissingCommunityTable(e) || /community_post_likes|does not exist/i.test(msg)) {
+      throw new ApiError(
+        503,
+        'MIGRATION_REQUIRED',
+        '请执行 20260529140000_community_post_likes.sql'
+      );
+    }
+    if (msg.includes('不能给自己')) {
+      throw new ApiError(400, 'SELF_LIKE', msg);
+    }
+    if (msg.includes('不存在')) {
+      throw new ApiError(404, 'NOT_FOUND', msg);
+    }
+    throw new ApiError(500, 'LIKE_FAILED', msg.slice(0, 180));
   }
 });
 

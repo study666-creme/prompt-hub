@@ -749,6 +749,12 @@ body {
     .auth-tabs.hidden { display: none; }
     .auth-field { margin-bottom: 12px; }
     .auth-field.hidden { display: none; }
+    .auth-field-hint {
+      margin: 6px 0 0;
+      font-size: 11px;
+      line-height: 1.45;
+      color: var(--text-muted);
+    }
     .auth-box label {
       display: block;
       font-size: var(--font-xs);
@@ -2260,8 +2266,9 @@ body {
 .image-drop-area.has-image {
   width: 100%;
   height: auto;
-  max-height: none;
-  min-height: 120px;
+  max-height: min(72vh, 560px);
+  min-height: 160px;
+  aspect-ratio: 4 / 5;
   background: var(--bg-hover);
   overflow: hidden;
   display: flex;
@@ -2277,14 +2284,21 @@ body {
 .image-drop-area.has-image img,
 .image-drop-area.has-image img#previewImage {
   width: 100%;
-  height: auto;
-  max-height: min(72vh, 560px);
+  height: 100%;
+  max-height: none;
   min-height: 0;
-  object-fit: contain;
+  object-fit: cover;
   object-position: center center;
   display: block;
   vertical-align: top;
   cursor: zoom-in;
+}
+
+.placeholder-text-ocr {
+  font-size: var(--font-xs);
+  line-height: 1.5;
+  text-align: center;
+  padding: 0 12px;
 }
     .image-drop-area .remove-image-btn {
       position: absolute;
@@ -2372,6 +2386,10 @@ body {
       justify-content: flex-end;
       pointer-events: none;
       backdrop-filter: blur(4px);
+    }
+    .tag-sheet-overlay[hidden] {
+      display: none !important;
+      pointer-events: none !important;
     }
     .tag-sheet-overlay.open {
       display: flex;
@@ -3214,6 +3232,43 @@ body {
       font-weight: 600;
       cursor: pointer;
       transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+    .panel-ocr-drop {
+      margin: 0 14px 12px;
+    }
+    .panel-ocr-drop.hidden {
+      display: none !important;
+    }
+    .panel-ocr-drop-inner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 56px;
+      padding: 10px 12px;
+      border: 1px dashed var(--border-light);
+      border-radius: var(--radius-sm);
+      background: rgba(0, 0, 0, 0.12);
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      text-align: center;
+    }
+    .panel-ocr-drop-inner:hover,
+    .panel-ocr-drop-inner.dragover {
+      border-color: var(--text-muted);
+      background: var(--bg-hover);
+    }
+    .panel-ocr-drop-inner.is-busy {
+      pointer-events: none;
+      opacity: 0.72;
+    }
+    .panel-ocr-drop-hint {
+      font-size: var(--font-xs);
+      color: var(--text-muted);
+      line-height: 1.45;
+    }
+    .panel-ocr-drop-status {
+      font-size: var(--font-xs);
+      color: var(--accent);
     }
     .panel-ocr-btn:hover:not(:disabled) {
       color: var(--text-secondary);

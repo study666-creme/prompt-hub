@@ -234,6 +234,19 @@
     return image;
   }
 
+  /** 社区展示用图：与 isFeedRenderablePost / 渲染卡片保持一致，避免「有图却显示无配图」 */
+  function communityPostDisplayImageRef(post) {
+    const canonical = canonicalCommunityImageRef(post);
+    if (canonical && isDisplayableImage(canonical)) return canonical;
+    const raw = post?.image;
+    if (!raw || !isDisplayableImage(raw)) return null;
+    if (window.SupabaseSync?.isInvalidMediaUrl?.(raw)) return null;
+    if (window.SupabaseSync?.normalizeImageRef) {
+      return window.SupabaseSync.normalizeImageRef(raw) || raw;
+    }
+    return raw;
+  }
+
   function feedAssetIdFromImg(img) {
     const card = img?.closest?.('.card');
     if (!card) return undefined;
@@ -431,9 +444,13 @@
       if (!r?.ok || !Array.isArray(r.data?.posts)) {
         const cached = loadPublicFeedCache();
         if (cached?.posts?.length) {
-          publicFeedPosts = cached.posts.map(normalizeFeedPost).filter(Boolean);
-          publicFeedAt = cached.cachedAt || Date.now();
-          return true;
+          const cachedSig = cached.posts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
+          if (cachedSig !== prevPubSig) {
+            publicFeedPosts = cached.posts.map(normalizeFeedPost).filter(Boolean);
+            publicFeedAt = cached.cachedAt || Date.now();
+            return true;
+          }
+          return false;
         }
         return false;
       }
@@ -454,11 +471,13 @@
       invalidateCommunityReconcileCache();
       pruneLocalCommunityNotOnServer();
       const nextPubSig = publicFeedPosts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
-      return nextPubSig !== prevPubSig || publicFeedPosts.length !== 0;
+      return nextPubSig !== prevPubSig;
     } catch (e) {
       console.warn('[community] public feed failed', e);
       const cached = loadPublicFeedCache();
       if (cached?.posts?.length) {
+        const cachedSig = cached.posts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
+        if (cachedSig === prevPubSig) return false;
         publicFeedPosts = cached.posts.map(normalizeFeedPost).filter(Boolean);
         publicFeedAt = cached.cachedAt || Date.now();
         return true;
@@ -544,8 +563,10 @@
     const uid = window.SupabaseSync?.getUserId?.();
     const email = document.getElementById('authUserEmail')?.textContent?.trim()
       || window.SupabaseSync?.getUserEmail?.() || '';
+    const displayName = String(window.__userDisplayName || '').trim();
     if (uid) {
-      return { id: uid, name: email ? email.split('@')[0] : '用户', email };
+      const name = displayName || '用户';
+      return { id: uid, name, email, displayName: name };
     }
     if (email) return { id: 'local_' + email, name: email.split('@')[0] || '用户', email };
     return { id: 'guest', name: '访客', email: '' };
@@ -663,6 +684,14 @@
       || getComputedStyle(document.documentElement).getPropertyValue('--card-row-gap').trim();
     const n = parseFloat(v);
     return Number.isFinite(n) ? n : 16;
+  }
+
+  /** 社区/我发布 Masonry：纵向留白略大、横向略紧，避免「左右宽、上下挤」 */
+  function getCommunityFeedGaps() {
+    const base = getMasonryGap();
+    const colGap = Math.min(12, Math.max(8, Math.round(base * 0.55)));
+    const rowGap = Math.max(14, Math.round(base * 0.72));
+    return { colGap, rowGap };
   }
 
   function filterCreationsForCloud(list) {
@@ -1123,7 +1152,7 @@
 
   function isFeedRenderablePost(p) {
     if (!p || p.isMock) return false;
-    const ref = canonicalCommunityImageRef(p) || p.image;
+    const ref = communityPostDisplayImageRef(p);
     return !!(ref && isDisplayableImage(ref));
   }
 
@@ -1495,7 +1524,9 @@
       }
       const onCommunity = document.getElementById('pageCommunity')?.classList.contains('active');
       const afterFeed = () => {
-        if (onCommunity) renderCommunity({ skipFeedFetch: true, forceRepaint: true });
+        if (onCommunity && communityFeedNeedsRerender('communityGrid')) {
+          renderCommunity({ skipFeedFetch: true });
+        }
         if (
           document.getElementById('pageCreations')?.classList.contains('active')
           && communityFeedNeedsRerender('creationsGrid')
@@ -1900,7 +1931,7 @@
   }
 
   function feedListSignature(posts, containerId) {
-    return `${containerId}:${posts.map((p) => `${p.id}:${p.updatedAt || p.createdAt || 0}:${p.likes || 0}:${p.image || ''}`).join('|')}`;
+    return `${containerId}:${posts.map((p) => `${p.id}:${p.updatedAt || p.createdAt || 0}:${p.likes || 0}`).join('|')}`;
   }
 
   function patchFeedLikeLabels(container, posts) {
@@ -2106,7 +2137,7 @@
     const style = getComputedStyle(container);
     const innerW = container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     if (innerW < 80) return 0;
-    const gap = getMasonryGap();
+    const gap = getCommunityFeedGaps().colGap;
     const cols = getCardColumns();
     return Math.max(120, Math.floor((innerW - gap * (cols - 1)) / cols));
   }
@@ -2120,6 +2151,7 @@
     container.querySelectorAll('.card').forEach((card) => {
       card.style.width = colWidth + 'px';
       card.style.maxWidth = colWidth + 'px';
+      card.style.marginBottom = getCommunityFeedGaps().rowGap + 'px';
     });
     container.style.setProperty('--feed-col-width', `${colWidth}px`);
     return colWidth;
@@ -2272,7 +2304,7 @@
       return;
     }
 
-    const gap = getMasonryGap();
+    const { colGap: gap, rowGap } = getCommunityFeedGaps();
     const cols = getCardColumns();
     const style = getComputedStyle(container);
     const innerW = container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
@@ -2288,7 +2320,10 @@
       container.insertBefore(sizer, container.firstChild);
     }
     sizer.style.width = colWidth + 'px';
-    cardEls.forEach(card => { card.style.width = colWidth + 'px'; });
+    cardEls.forEach(card => {
+      card.style.width = colWidth + 'px';
+      card.style.marginBottom = rowGap + 'px';
+    });
     const opts = {
       itemSelector: '.card',
       columnWidth: '.grid-sizer',
@@ -2625,7 +2660,8 @@
     container.dataset.feedSig = sig;
     delete container.dataset.feedFinalized;
     if (containerId === 'communityGrid' && communitySidePostId) {
-      closeCommunitySidePanel();
+      const stillThere = renderPosts.some((p) => p.id === communitySidePostId);
+      if (!stillThere) closeCommunitySidePanel();
     }
     const isProfile = containerId === 'userProfileGrid';
     if (isProfile && profileMasonry) {
@@ -2658,8 +2694,8 @@
     }
 
     renderPosts.forEach((post, idx) => {
-      const displayRef = canonicalCommunityImageRef(post);
-      const showImage = isDisplayableImage(displayRef);
+      const displayRef = communityPostDisplayImageRef(post);
+      const showImage = !!(displayRef && isDisplayableImage(displayRef));
       const div = document.createElement('div');
       const visualOnly = containerId === 'communityGrid';
       div.className = visualOnly
@@ -2706,14 +2742,14 @@
       div.addEventListener('click', () => {
         if (containerId === 'userProfileGrid') closeUserProfile();
         if (containerId === 'creationsGrid') {
-          openPostSidePanel(post.id, 'creations');
+          openPostSidePanel(post.id, 'creations', { post });
           return;
         }
         if (containerId === 'communityGrid' && communityAppreciateActive) {
           void openCommunityAppreciateViewer(post);
           return;
         }
-        openCommunitySidePanel(post.id);
+        openPostSidePanel(post.id, 'community', { post });
       });
       const authorBtn = div.querySelector('.community-author-link');
       if (authorBtn) bindAuthorLink(authorBtn, post.authorId, post.authorName);
@@ -2827,6 +2863,9 @@
 
   let renderCommunityTimer = null;
   function renderCommunity(opts = {}) {
+    if (opts.skipFeedFetch === undefined && publicFeedAt > 0 && Date.now() - publicFeedAt < PUBLIC_FEED_TTL_MS) {
+      opts = { ...opts, skipFeedFetch: true };
+    }
     if (opts.immediate) {
       clearTimeout(renderCommunityTimer);
       renderCommunityNow(opts);
@@ -2899,7 +2938,14 @@
     }
     if (!opts.skipFeedFetch && publicFeedAt > 0) {
       void refreshPublicCommunityFeed({ force: opts.forceRepaint === true }).then((changed) => {
-        if (changed && gen === communityFeedRenderGen) renderCommunityNow({ skipFeedFetch: true, forceRepaint: true });
+        if (!changed || gen !== communityFeedRenderGen) return;
+        const freshList = filterAndSortPosts(getCommunityFeedForDisplay());
+        const freshSig = feedListSignature(freshList, 'communityGrid');
+        if (container.dataset.feedSig === freshSig && container.querySelector('.community-post-card')) {
+          patchFeedLikeLabels(container, freshList);
+          return;
+        }
+        renderCommunityNow({ skipFeedFetch: true });
       });
     }
     let list = filterAndSortPosts(getCommunityFeedForDisplay());
@@ -2961,13 +3007,21 @@
     if (!authorId) return;
     openProfileAuthorId = authorId;
     const posts = getPostsByAuthor(authorId);
+    const newestName = posts.reduce(
+      (best, p) => {
+        const ts = p.updatedAt || p.createdAt || 0;
+        if (p.authorName && ts >= best.ts) return { name: p.authorName, ts };
+        return best;
+      },
+      { name: authorName || '用户', ts: 0 }
+    ).name;
     const overlay = document.getElementById('userProfileOverlay');
     const titleEl = document.getElementById('userProfileTitle');
     const subEl = document.getElementById('userProfileSub');
     const avatarEl = document.getElementById('userProfileAvatar');
-    if (titleEl) titleEl.textContent = authorName || '用户';
+    if (titleEl) titleEl.textContent = newestName || '用户';
     if (subEl) subEl.textContent = `已发布 ${posts.length} 个提示词`;
-    if (avatarEl) avatarEl.textContent = ((authorName || '?')[0] || '?').toUpperCase();
+    if (avatarEl) avatarEl.textContent = ((newestName || '?')[0] || '?').toUpperCase();
     const followBtn = document.getElementById('userProfileFollowBtn');
     const me = getActiveUser();
     if (followBtn) {
@@ -3102,7 +3156,7 @@
       await pushPostToPublicFeed(post);
     }
     if (!silent && opts.skipRender !== true) {
-      renderCommunity();
+      renderCommunity({ skipFeedFetch: true });
       if (openProfileAuthorId === user.id) renderUserProfileGrid();
       checkOwnPostMilestones(post.id);
     }
@@ -3219,8 +3273,35 @@
     });
   }
 
-  function findPost(id) {
-    return getAllCommunityPosts().find(p => p.id === id);
+  function findPost(id, hint) {
+    const sid = hint?.sourceCardId ? String(hint.sourceCardId) : '';
+    const matchIn = (list) => {
+      if (!Array.isArray(list)) return null;
+      let p = list.find((x) => x.id === id);
+      if (p) return p;
+      if (sid) p = list.find((x) => String(x.sourceCardId || '') === sid);
+      return p || null;
+    };
+    return matchIn(getCommunityFeedForDisplay())
+      || matchIn(getAllCommunityPosts())
+      || null;
+  }
+
+  function setPostLikes(id, likes) {
+    const n = Math.max(0, Math.floor(Number(likes) || 0));
+    for (const list of [publicFeedPosts, communityPosts]) {
+      const p = list.find((x) => x.id === id);
+      if (p) p.likes = n;
+    }
+    savePublicFeedCache(publicFeedPosts);
+  }
+
+  function bumpPostLikes(id, delta = 1) {
+    const post = findPost(id);
+    const next = Math.max(0, (post?.likes || 0) + delta);
+    setPostLikes(id, next);
+    if (post) post.likes = next;
+    return next;
   }
 
   /** 点赞（仅增加一次），返回是否为新点赞 */
@@ -3235,12 +3316,7 @@
     }
     if (likedIds.has(id)) return false;
     likedIds.add(id);
-    if (!post.isMock) {
-      const p = communityPosts.find(x => x.id === id);
-      if (p) p.likes = (p.likes || 0) + 1;
-    } else {
-      post.likes = (post.likes || 0) + 1;
-    }
+    const likes = bumpPostLikes(id, 1);
     persistLikes();
     persistCommunity();
     if (post.authorId !== user.id) {
@@ -3251,7 +3327,7 @@
         actorName: user.name,
         postId: id,
         postTitle: post.title || (post.prompt || '').slice(0, 24),
-        likes: post.likes || 0,
+        likes,
         message: `${user.name} 赞了你的作品`
       });
     }
@@ -3260,9 +3336,21 @@
     patchCommunitySidePanelUI(id);
     if (document.getElementById('pageImageGen')?.classList.contains('active')) {
       document.querySelectorAll(`.imagegen-feed-like[data-like-id="${id}"]`).forEach(btn => {
-        btn.textContent = `♥ ${post.likes || 0}`;
+        btn.textContent = `♥ ${likes}`;
         btn.classList.add('liked');
       });
+    }
+    if (window.PromptHubApi?.likeCommunityPost) {
+      void window.PromptHubApi.likeCommunityPost(id).then((r) => {
+        if (r?.ok && typeof r.data?.likes === 'number') {
+          setPostLikes(id, r.data.likes);
+          const synced = findPost(id);
+          if (synced) synced.likes = r.data.likes;
+          persistCommunity();
+          patchCommunityLikeUI(id);
+          patchCommunitySidePanelUI(id);
+        }
+      }).catch(() => {});
     }
     return true;
   }
@@ -3493,9 +3581,15 @@
     delete panel.dataset.mountedOnBody;
   }
 
-  function openPostSidePanel(id, ctx) {
-    const post = findPost(id);
-    if (!post) return;
+  function openPostSidePanel(id, ctx, opts = {}) {
+    const post = opts.post || findPost(id, {
+      sourceCardId: opts.sourceCardId
+    });
+    if (!post) {
+      console.warn('[community] post not found for side panel', id);
+      return;
+    }
+    id = post.id;
     const isCreations = ctx === 'creations';
     communitySidePostId = id;
     openPostId = id;
@@ -3521,8 +3615,8 @@
     });
   }
 
-  function openCommunitySidePanel(id) {
-    openPostSidePanel(id, 'community');
+  function openCommunitySidePanel(id, opts = {}) {
+    openPostSidePanel(id, 'community', opts);
   }
 
   function exitCommunityAppreciate(skipLayout) {
@@ -4036,6 +4130,7 @@
       if (szEl && draft.size) szEl.value = draft.size;
     }
     bindImageGenUpload();
+    bindImageGenPromptTools();
     bindImageGenGenPublic();
     syncImageGenGenPublicUI();
     updateImageGenPricingUI();
@@ -4454,6 +4549,43 @@
   function clearImageGenRef() {
     imageGenRefImages = [];
     renderImageGenRefGallery();
+  }
+
+  function bindImageGenPromptTools() {
+    const pasteBtn = document.getElementById('imageGenPromptPaste');
+    const clearBtn = document.getElementById('imageGenPromptClear');
+    const promptEl = document.getElementById('imageGenPrompt');
+    if (!pasteBtn || !clearBtn || !promptEl) return;
+    if (pasteBtn.dataset.bound === '1') return;
+    pasteBtn.dataset.bound = '1';
+    clearBtn.dataset.bound = '1';
+
+    pasteBtn.addEventListener('click', async () => {
+      try {
+        if (!navigator.clipboard?.readText) {
+          toast('当前浏览器不支持剪贴板粘贴');
+          return;
+        }
+        const text = await navigator.clipboard.readText();
+        if (!text?.trim()) {
+          toast('剪贴板为空');
+          return;
+        }
+        promptEl.value = text.trim();
+        promptEl.dispatchEvent(new Event('input', { bubbles: true }));
+        promptEl.focus();
+      } catch (e) {
+        toast('无法读取剪贴板，请检查浏览器权限');
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      if (!promptEl.value.trim()) return;
+      if (!window.confirm('确定清空提示词？')) return;
+      promptEl.value = '';
+      promptEl.dispatchEvent(new Event('input', { bubbles: true }));
+      promptEl.focus();
+    });
   }
 
   function bindImageGenUpload() {
@@ -5537,7 +5669,7 @@
         document.querySelectorAll('[data-imagegen-community-sort]').forEach(b => {
           b.classList.toggle('active', (b.dataset.imagegenCommunitySort || 'hot') === communitySort);
         });
-        renderCommunity();
+        renderCommunity({ skipFeedFetch: true });
       });
     });
     document.querySelectorAll('[data-community-scope]').forEach(btn => {
@@ -5550,7 +5682,7 @@
           b.classList.toggle('active', (b.dataset.imagegenCommunityScope || 'all') === communityScope);
         });
         closeCommunitySidePanel();
-        renderCommunity();
+        renderCommunity({ skipFeedFetch: true });
         if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed();
       });
     });
@@ -5638,6 +5770,7 @@
     });
     bindImageGenWarehouseFilterMobileUI();
     bindImageGenUpload();
+    bindImageGenPromptTools();
     document.getElementById('imageGenRecoverBtn')?.addEventListener('click', () => {
       void recoverLostGenerationsManual();
     });
@@ -5684,9 +5817,9 @@
     if (app === 'community') {
       if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
       ensureCommunityFromCards();
-      renderCommunity({ immediate: true, skipFeedFetch: false, syncFromCards: true });
-      void refreshPublicCommunityFeed({ force: true }).then(() => {
-        renderCommunity({ skipFeedFetch: true, forceRepaint: true });
+      renderCommunity({ immediate: true, skipFeedFetch: true, syncFromCards: true });
+      void refreshPublicCommunityFeed({ force: false }).then((changed) => {
+        if (changed) renderCommunity({ skipFeedFetch: true });
       });
       const warmPosts = filterAndSortPosts(getCommunityFeedForDisplay()).slice(0, 24);
       const warmCards = warmPosts.map((p) => ({
@@ -5810,7 +5943,13 @@
       mergeNotifications(payload.notifications);
     }
     if (document.getElementById('pageCommunity')?.classList.contains('active')) {
-      renderCommunity();
+      if (communityFeedNeedsRerender('communityGrid')) {
+        renderCommunity({ skipFeedFetch: true });
+      } else {
+        const container = document.getElementById('communityGrid');
+        const list = filterAndSortPosts(getCommunityFeedForDisplay());
+        if (container) patchFeedLikeLabels(container, list);
+      }
     }
     if (
       document.getElementById('pageCreations')?.classList.contains('active')

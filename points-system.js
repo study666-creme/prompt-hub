@@ -198,7 +198,7 @@
     }
 
     const api = await window.PromptHubApi.redeem(key, {
-      creditGrantMode: 'daily'
+      creditGrantMode: window.SubscriptionUI?.getCreditGrantMode?.() || 'daily'
     });
     if (api.ok) {
       if (typeof api.data.credits === 'number') {

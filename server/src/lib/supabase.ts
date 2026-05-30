@@ -1,10 +1,11 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Env } from '../env';
+import { defaultDisplayName } from './display-name';
 
 export type Profile = {
   user_id: string;
   credits: number;
-  membership_tier: 'basic' | 'standard' | 'pro' | null;
+  membership_tier: 'lite' | 'basic' | 'standard' | 'pro' | null;
   membership_until: string | null;
   first_sub_offer_used: boolean;
   storage_bytes: number;
@@ -15,6 +16,7 @@ export type Profile = {
   trial_free_used: boolean;
   lifetime_credits_spent?: number;
   membership_task_flags?: Record<string, unknown>;
+  display_name?: string | null;
 };
 
 export function createAdminClient(env: Env): SupabaseClient {
@@ -32,6 +34,22 @@ export function createAdminClient(env: Env): SupabaseClient {
   });
 }
 
+async function ensureProfileDisplayName(
+  admin: SupabaseClient,
+  profile: Profile
+): Promise<Profile> {
+  if (String(profile.display_name || '').trim()) return profile;
+  const name = defaultDisplayName(profile.user_id);
+  const { data, error } = await admin
+    .from('profiles')
+    .update({ display_name: name })
+    .eq('user_id', profile.user_id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as Profile;
+}
+
 export async function getOrCreateProfile(
   admin: SupabaseClient,
   userId: string
@@ -43,7 +61,7 @@ export async function getOrCreateProfile(
     .maybeSingle();
 
   if (error) throw error;
-  if (data) return data as Profile;
+  if (data) return ensureProfileDisplayName(admin, data as Profile);
 
   const { data: inserted, error: insertErr } = await admin
     .from('profiles')
@@ -52,7 +70,7 @@ export async function getOrCreateProfile(
     .single();
 
   if (insertErr) throw insertErr;
-  return inserted as Profile;
+  return ensureProfileDisplayName(admin, inserted as Profile);
 }
 
 export function isMembershipActive(profile: Profile): boolean {
@@ -62,7 +80,7 @@ export function isMembershipActive(profile: Profile): boolean {
 }
 
 export function membershipGenMultiplier(tier: Profile['membership_tier']): number {
-  if (!tier) return 1;
+  if (!tier || tier === 'lite') return 1;
   const map = { basic: 0.9, standard: 0.8, pro: 0.7 } as const;
   return map[tier] ?? 1;
 }

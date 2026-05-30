@@ -118,9 +118,10 @@ redeemRoutes.post('/', async c => {
     const days = row.membership_days ?? 30;
     const shopRecharge = isShopRechargeCode(row.note);
     const profileBefore = await getOrCreateProfile(admin, user.id);
-    const mode = shopRecharge
+    let mode = shopRecharge
       ? 'daily'
       : parsed.data.creditGrantMode || profileBefore.credit_grant_mode || 'daily';
+    if (tier === 'lite') mode = 'daily';
 
     const profileAfter = await extendMembershipDays(admin, profileBefore, days, tier);
     membershipUntil = profileAfter.membership_until;
@@ -155,7 +156,7 @@ redeemRoutes.post('/', async c => {
     const tier = row.membership_tier || 'basic';
     const days = row.membership_days ?? 30;
     const tierLabel =
-      tier === 'pro' ? '专业' : tier === 'standard' ? '标准' : '基础';
+      tier === 'pro' ? '专业' : tier === 'standard' ? '标准' : tier === 'lite' ? '轻量' : '基础';
     if (row.offer_kind === 'mini_3d') {
       parts.push('已开通 3 天基础会员（¥0.99 体验）');
     } else if (row.offer_kind === 'starter_14d') {

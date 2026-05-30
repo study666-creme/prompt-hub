@@ -1,5 +1,5 @@
 /**
- * 会员订阅：三档每日/一次性积分 · 任务中心另入口
+ * 会员订阅：轻量 + 三档 · 每日/一次性积分
  */
 (function () {
   const LS_CREDIT_MODE = 'promptrepo_credit_grant_mode';
@@ -14,7 +14,8 @@
     { id: 'cr100', label: '100 积分', credits: 100, price: 0.99, bonusDays: 0 }
   ];
 
-  const DAILY_BY_TIER = { basic: 10, standard: 20, pro: 40 };
+  const DAILY_BY_TIER = { lite: 10, basic: 13, standard: 32, pro: 64 };
+  const LUMP_BY_TIER = { basic: 130, standard: 320, pro: 700 };
 
   let serverCreditMode = 'daily';
 
@@ -23,7 +24,11 @@
   }
 
   function getCreditGrantMode() {
-    return 'daily';
+    try {
+      const saved = localStorage.getItem(LS_CREDIT_MODE);
+      if (saved === 'daily' || saved === 'bundle') return saved;
+    } catch (e) { /* ignore */ }
+    return serverCreditMode || 'daily';
   }
 
   function setCreditGrantModeLocal(mode) {
@@ -34,19 +39,25 @@
     renderCreditModePicker();
   }
 
+  const LITE_PLAN = {
+    id: 'lite',
+    name: '轻量会员包',
+    tag: '特惠',
+    summary: '每日 10 积分 · 2 GB · 置顶 3 张 · 仅每日领取'
+  };
+
   const PLANS = [
     {
       id: 'basic',
       name: '基础版',
       tag: '入门',
-      storage: '10 GB',
-      genDiscount: '五折起',
+      storage: '5 GB',
+      genDiscount: '9折',
       features: [
-        `连续包月/包年订阅价约五折（见下方标价）`,
-        `每日 ${DAILY_BY_TIER.basic} 积分（任务中心领取，当日有效）`,
-        '会员生图享积分折扣',
+        '生图优先队列 · 积分 9 折',
+        `额外每日 ${DAILY_BY_TIER.basic} 积分或一次性 ${LUMP_BY_TIER.basic} 积分`,
         '无限置顶',
-        '10 GB 云存储',
+        '5 GB 云存储',
         '全站云同步'
       ]
     },
@@ -54,14 +65,13 @@
       id: 'standard',
       name: '标准版',
       tag: '推荐',
-      storage: '30 GB',
-      genDiscount: '五折起',
+      storage: '10 GB',
+      genDiscount: '8折',
       features: [
-        `连续包月/包年订阅价约五折（见下方标价）`,
-        `每日 ${DAILY_BY_TIER.standard} 积分（任务中心领取，当日有效）`,
-        '会员生图享更高折扣',
+        '生图优先队列 · 积分 8 折',
+        `额外每日 ${DAILY_BY_TIER.standard} 积分或一次性 ${LUMP_BY_TIER.standard} 积分`,
         '无限置顶',
-        '30 GB 云存储',
+        '10 GB 云存储',
         '优先生图队列'
       ]
     },
@@ -69,37 +79,42 @@
       id: 'pro',
       name: '专业版',
       tag: '专业',
-      storage: '100 GB',
-      genDiscount: '五折起',
+      storage: '30 GB',
+      genDiscount: '7折',
       features: [
-        `连续包月/包年订阅价约五折（见下方标价）`,
-        `每日 ${DAILY_BY_TIER.pro} 积分（任务中心领取，当日有效）`,
-        '会员生图享最高折扣',
+        '最高优先级 · 积分 7 折',
+        `额外每日 ${DAILY_BY_TIER.pro} 积分或一次性 ${LUMP_BY_TIER.pro} 积分`,
         '无限置顶',
-        '100 GB 云存储',
-        '最高优先级'
+        '30 GB 云存储',
+        '最高生图优先级'
       ]
     }
   ];
 
   const PRICES = {
+    lite: {
+      auto_month: { price: 6, original: 9, unit: '月' },
+      single_month: { price: 9, original: null, unit: '月' },
+      auto_year: { price: 58, original: 108, unit: '年' },
+      single_year: { price: 88, original: null, unit: '年' }
+    },
     basic: {
-      auto_month: { price: 9.9, original: 19.9, unit: '月' },
-      single_month: { price: 19.9, original: null, unit: '月' },
-      auto_year: { price: 99, original: 199, unit: '年' },
-      single_year: { price: 149, original: null, unit: '年' }
+      auto_month: { price: 12.9, original: 15.9, unit: '月' },
+      single_month: { price: 15.9, original: null, unit: '月' },
+      auto_year: { price: 129, original: 190, unit: '年' },
+      single_year: { price: 169, original: null, unit: '年' }
     },
     standard: {
-      auto_month: { price: 29.9, original: 59.9, unit: '月' },
+      auto_month: { price: 31.9, original: 39.9, unit: '月' },
       single_month: { price: 39.9, original: null, unit: '月' },
-      auto_year: { price: 299, original: 599, unit: '年' },
+      auto_year: { price: 319, original: 479, unit: '年' },
       single_year: { price: 399, original: null, unit: '年' }
     },
     pro: {
-      auto_month: { price: 69.9, original: 139.9, unit: '月' },
-      single_month: { price: 89.9, original: null, unit: '月' },
-      auto_year: { price: 699, original: 1399, unit: '年' },
-      single_year: { price: 899, original: null, unit: '年' }
+      auto_month: { price: 63.9, original: 69.9, unit: '月' },
+      single_month: { price: 69.9, original: null, unit: '月' },
+      auto_year: { price: 639, original: 839, unit: '年' },
+      single_year: { price: 699, original: null, unit: '年' }
     }
   };
 
@@ -162,7 +177,7 @@
       if (info.active) {
         panelEl.innerHTML = `<div class="subscribe-membership-status is-active"><span class="subscribe-membership-tier">${esc(info.tierLabel)}</span><span class="subscribe-membership-until">${esc(info.untilLabel)}</span></div>`;
       } else {
-        panelEl.innerHTML = `<div class="subscribe-membership-status"><span class="subscribe-membership-tier">免费用户</span><span class="subscribe-membership-until">完成任务可领取基础会员天数</span></div>`;
+        panelEl.innerHTML = `<div class="subscribe-membership-status"><span class="subscribe-membership-tier">普通用户</span><span class="subscribe-membership-until">免费 · 每日 5 积分 · 100 张卡片存储</span></div>`;
       }
     }
   }
@@ -170,9 +185,8 @@
   function updateSubscribeNavBadge() {
     const trialBadge = document.querySelector('.app-nav-trial-badge');
     const subBadge = document.querySelector('.app-nav-subscribe-badge');
-    const isMember = window.Membership?.isMember?.();
     if (trialBadge) trialBadge.textContent = '任务';
-    if (subBadge) subBadge.textContent = '五折';
+    if (subBadge) subBadge.textContent = '特惠';
   }
 
   function renderMiniOfferBar() {
@@ -200,8 +214,75 @@
   function renderCreditModePicker() {
     const el = document.getElementById('subscribeCreditMode');
     if (!el) return;
+    const mode = getCreditGrantMode();
+    const isMember = window.Membership?.isMember?.();
+    const tier = window.Membership?.getMemberTier?.();
+    const canPick = isMember && tier && tier !== 'lite';
     el.classList.remove('hidden');
-    el.innerHTML = '<p class="subscribe-credit-mode-label">会员每日积分请在侧栏「免费试用 · 任务中心」领取（按档位，当日有效）</p>';
+    el.innerHTML = `
+      <p class="subscribe-credit-mode-label">兑换会员卡密前先选领取方式（同一码通用，轻量会员固定每日）</p>
+      <div class="subscribe-credit-mode-options">
+        <label class="subscribe-credit-mode-opt${mode === 'daily' ? ' active' : ''}">
+          <input type="radio" name="creditGrantMode" value="daily" ${mode === 'daily' ? 'checked' : ''}>
+          <span>每日领取</span>
+          <small>任务中心按日领（基础 ${DAILY_BY_TIER.basic} / 标准 ${DAILY_BY_TIER.standard} / 专业 ${DAILY_BY_TIER.pro}）</small>
+        </label>
+        <label class="subscribe-credit-mode-opt${mode === 'bundle' ? ' active' : ''}">
+          <input type="radio" name="creditGrantMode" value="bundle" ${mode === 'bundle' ? 'checked' : ''}>
+          <span>一次性领取</span>
+          <small>开通当期一次性到账（${LUMP_BY_TIER.basic} / ${LUMP_BY_TIER.standard} / ${LUMP_BY_TIER.pro} 积分）</small>
+        </label>
+      </div>
+      ${!canPick && isMember && tier === 'lite' ? '<p class="subscribe-credit-mode-hint">轻量会员仅支持每日领取</p>' : ''}`;
+    el.querySelectorAll('input[name="creditGrantMode"]').forEach((input) => {
+      input.addEventListener('change', async () => {
+        if (!input.checked) return;
+        const next = input.value === 'bundle' ? 'bundle' : 'daily';
+        setCreditGrantModeLocal(next);
+        if (isLoggedIn() && canPick) {
+          const r = await window.PromptHubApi?.setCreditGrantMode?.(next);
+          if (r?.ok) {
+            window.showToast?.(r.data?.message || '已更新积分领取方式');
+            if (r.data) window.SubscriptionUI?.applyServerState?.(r.data);
+          } else if (r?.message) {
+            window.showToast?.(r.message);
+          }
+        }
+      });
+    });
+  }
+
+  function renderLitePlanRow() {
+    const row = document.getElementById('subscribeLitePlanRow');
+    if (!row) return;
+    const billingLabel = BILLING_LABELS[currentBilling] || '';
+    const p = getDisplayPrice('lite', currentBilling);
+    if (!p) {
+      row.innerHTML = '';
+      return;
+    }
+    const originalHtml = p.original
+      ? `<span class="subscribe-plan-original">¥${p.original}</span>`
+      : '';
+    const saveText = saveLabel(p.original, p.price);
+    const saveBadge = saveText
+      ? `<span class="subscribe-plan-save">${esc(saveText)}</span>`
+      : '';
+    row.innerHTML = `<article class="subscribe-plan-card subscribe-lite-plan subscribe-lite-compact" data-plan="lite">
+      <div class="subscribe-lite-compact-main">
+        <span class="subscribe-plan-tag subscribe-plan-tag-deal">🔥 ${esc(LITE_PLAN.tag)}</span>
+        <h4 class="subscribe-lite-title">${esc(LITE_PLAN.name)}</h4>
+        <p class="subscribe-lite-meta">${esc(billingLabel)} · ${esc(LITE_PLAN.summary)}</p>
+      </div>
+      <div class="subscribe-lite-compact-price">
+        ${originalHtml}
+        ${saveBadge}
+        <span class="subscribe-plan-amount">¥${p.price}</span>
+        <span class="subscribe-plan-unit">/${esc(p.unit)}</span>
+      </div>
+      <button type="button" class="btn btn-primary btn-sm subscribe-plan-btn subscribe-lite-buy" data-plan="lite" data-billing="${currentBilling}">购买</button>
+    </article>`;
+    row.querySelector('.subscribe-plan-btn')?.addEventListener('click', () => openShop());
   }
 
   function setMainTab(tab) {
@@ -219,7 +300,7 @@
     if (sub) {
       sub.textContent = currentMainTab === 'credits'
         ? '1 元 = 100 积分 · 购买后在小店复制激活码，在上方兑换'
-        : '三档会员 · 连续包月/包年约五折';
+        : '轻量特惠 + 三档会员 · 连续包月更省';
     }
     if (currentMainTab === 'credits') renderCreditPacks();
     else renderPlans();
@@ -252,6 +333,7 @@
     if (!grid) return;
     renderCreditModePicker();
     renderMiniOfferBar();
+    renderLitePlanRow();
     const billingLabel = BILLING_LABELS[currentBilling] || '';
     grid.innerHTML = PLANS.map(plan => {
       const p = getDisplayPrice(plan.id, currentBilling);
@@ -264,7 +346,7 @@
         ? `<span class="subscribe-plan-save">${esc(saveText)}</span>`
         : '';
       const featHtml = plan.features.map(f => `<li>${esc(f)}</li>`).join('');
-      const creditHint = `每日 ${DAILY_BY_TIER[plan.id]} 积分（任务中心领取）`;
+      const creditHint = `每日 ${DAILY_BY_TIER[plan.id]} 或一次性 ${LUMP_BY_TIER[plan.id]}`;
       return `<article class="subscribe-plan-card${plan.id === 'standard' ? ' featured' : ''}" data-plan="${plan.id}">
         <div class="subscribe-plan-head">
           <span class="subscribe-plan-tag">${esc(plan.tag)}</span>
@@ -378,6 +460,7 @@
     open: openSubscribePanel,
     close: closeSubscribePanel,
     PLANS,
+    LITE_PLAN,
     getCreditGrantMode,
     setCreditGrantModeLocal,
     setFirstOfferUsedFromServer,
@@ -385,7 +468,8 @@
     applyServerState,
     updateSubscribeNavBadge,
     refreshOfferUI,
-    DAILY_BY_TIER
+    DAILY_BY_TIER,
+    LUMP_BY_TIER
   };
   window.openSubscribePanel = openSubscribePanel;
   window.closeSubscribePanel = closeSubscribePanel;
