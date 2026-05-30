@@ -43,7 +43,7 @@
     id: 'lite',
     name: '轻量会员包',
     tag: '特惠',
-    summary: '每日 10 积分 · 2 GB · 置顶 3 张 · 仅每日领取'
+    summary: '在免费每日 5 积分基础上额外 +5（共 10 积分/天）· 2 GB · 置顶 3 张 · 仅每日领取'
   };
 
   const PLANS = [
@@ -58,7 +58,8 @@
         `额外每日 ${DAILY_BY_TIER.basic} 积分或一次性 ${LUMP_BY_TIER.basic} 积分`,
         '无限置顶',
         '5 GB 云存储',
-        '全站云同步'
+        '全站云同步',
+        '仅默认卡片库（不可另建）'
       ]
     },
     {
@@ -72,7 +73,8 @@
         `额外每日 ${DAILY_BY_TIER.standard} 积分或一次性 ${LUMP_BY_TIER.standard} 积分`,
         '无限置顶',
         '10 GB 云存储',
-        '优先生图队列'
+        '优先生图队列',
+        '可另建 1 个自命名卡片库'
       ]
     },
     {
@@ -86,7 +88,8 @@
         `额外每日 ${DAILY_BY_TIER.pro} 积分或一次性 ${LUMP_BY_TIER.pro} 积分`,
         '无限置顶',
         '30 GB 云存储',
-        '最高生图优先级'
+        '最高生图优先级',
+        '可另建 2 个自命名卡片库'
       ]
     }
   ];
@@ -233,7 +236,7 @@
           <small>开通当期一次性到账（${LUMP_BY_TIER.basic} / ${LUMP_BY_TIER.standard} / ${LUMP_BY_TIER.pro} 积分）</small>
         </label>
       </div>
-      ${!canPick && isMember && tier === 'lite' ? '<p class="subscribe-credit-mode-hint">轻量会员仅支持每日领取</p>' : ''}`;
+      ${!canPick && isMember && tier === 'lite' ? '<p class="subscribe-credit-mode-hint">轻量会员：在免费每日 5 积分基础上额外 +5（共 10 积分/天），仅支持每日领取</p>' : ''}`;
     el.querySelectorAll('input[name="creditGrantMode"]').forEach((input) => {
       input.addEventListener('change', async () => {
         if (!input.checked) return;

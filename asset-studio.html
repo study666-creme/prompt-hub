@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0c10">
+  <title>资产创作 · Prompt Hub</title>
+  <link rel="stylesheet" href="styles-theme.css?v=20260615z">
+  <link rel="stylesheet" href="asset-studio.css?v=20260618c">
+  <script src="theme.js?v=20260615z"></script>
+</head>
+<body class="asset-studio-body">
+  <header class="studio-topbar">
+    <div class="studio-topbar-left">
+      <a class="studio-back-link" href="index.html" title="返回主站">← 主站</a>
+      <select id="studioProjectSelect" class="studio-select" aria-label="项目"></select>
+      <button type="button" class="btn btn-ghost btn-sm" id="studioNewProjectBtn">新建项目</button>
+    </div>
+    <div class="studio-topbar-center">
+      <span class="studio-draft-badge" id="studioStatusBadge">本地已自动保存</span>
+    </div>
+    <div class="studio-topbar-right">
+      <button type="button" class="btn btn-secondary btn-sm" id="studioImportBtn">导入卡片库</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="studioFullscreenBtn">文档全屏</button>
+    </div>
+  </header>
+
+  <div class="studio-shell" id="studioShell">
+    <!-- 最左：卡片资产池（可多文件夹同时展开） -->
+    <aside class="studio-panel studio-panel-assets" aria-label="卡片资产">
+      <div class="studio-panel-head">
+        <div class="studio-tabs" role="tablist">
+          <button type="button" class="studio-tab active" data-asset-tab="warehouse">卡片库</button>
+          <button type="button" class="studio-tab" data-asset-tab="market">资产包</button>
+        </div>
+        <input type="search" class="studio-search" id="studioAssetFilter" placeholder="筛选卡片…" autocomplete="off">
+      </div>
+      <div class="studio-asset-scroll" id="studioAssetFolders"></div>
+    </aside>
+
+    <!-- 左：项目文档树 -->
+    <aside class="studio-panel studio-panel-docs" aria-label="文档分类">
+      <div class="studio-panel-head">
+        <span class="studio-panel-title">文档</span>
+        <button type="button" class="studio-icon-btn" id="studioNewFolderBtn" title="新建分类">+夹</button>
+        <button type="button" class="studio-icon-btn" id="studioNewDocBtn" title="新建文档">+文</button>
+      </div>
+      <div class="studio-doc-tree" id="studioDocTree"></div>
+    </aside>
+
+    <!-- 中：写作区 -->
+    <main class="studio-main" id="studioMain">
+      <div class="studio-doc-toolbar">
+        <input type="text" class="studio-doc-title" id="studioDocTitle" placeholder="文档标题">
+        <span class="studio-doc-meta" id="studioDocMeta"></span>
+      </div>
+      <div class="studio-hero-drop" id="studioHeroDrop">
+        <p class="studio-hero-hint">首字段：拖入与本篇相关的卡片（人设 / 场景 / 配角）</p>
+        <div class="studio-hero-thumbs" id="studioHeroThumbs"></div>
+      </div>
+      <div class="studio-editor-wrap">
+        <div class="studio-editor" id="studioEditor" contenteditable="true" spellcheck="true" data-placeholder="开始写作… 文中出现的卡片名会自动高亮，点击可查看卡片。"></div>
+      </div>
+    </main>
+
+    <!-- 右：AI / 生图 / 生视频 -->
+    <aside class="studio-panel studio-panel-ai" id="studioAiPanel" aria-label="助手">
+      <button type="button" class="studio-ai-collapse" id="studioAiCollapse" title="收起">⟩</button>
+      <div class="studio-ai-inner">
+        <div class="studio-tabs studio-ai-tabs" role="tablist">
+          <button type="button" class="studio-tab active" data-ai-tab="chat">对话</button>
+          <button type="button" class="studio-tab" data-ai-tab="image">生图</button>
+          <button type="button" class="studio-tab" data-ai-tab="video">生视频</button>
+        </div>
+        <div class="studio-ai-pane active" data-ai-pane="chat">
+          <div class="studio-chat-log" id="studioChatLog">
+            <p class="studio-chat-system">可将左侧卡片拖入此处，或复制卡片信息到对话（Demo 占位）。</p>
+          </div>
+          <div class="studio-chat-compose">
+            <textarea id="studioChatInput" rows="3" placeholder="向模型描述你的镜头…"></textarea>
+            <button type="button" class="btn btn-primary btn-sm" id="studioChatSend">发送（演示）</button>
+          </div>
+        </div>
+        <div class="studio-ai-pane" data-ai-pane="image">
+          <p class="panel-hint">生图面板占位：正式版将联动主站积分与生图 API。</p>
+          <textarea class="studio-gen-prompt" rows="4" placeholder="提示词…"></textarea>
+          <button type="button" class="btn btn-secondary btn-sm">生成（演示）</button>
+        </div>
+        <div class="studio-ai-pane" data-ai-pane="video">
+          <p class="panel-hint">生视频占位：可基于文档分镜与关联卡片扩展。</p>
+          <textarea class="studio-gen-prompt" rows="4" placeholder="分镜 / 运动描述…"></textarea>
+          <button type="button" class="btn btn-secondary btn-sm">生成（演示）</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 悬浮卡片层 -->
+  <div class="studio-float-layer" id="studioFloatLayer"></div>
+
+  <!-- 卡片详情（双击打开：左卡片库样式 · 右完整信息） -->
+  <div class="studio-card-detail hidden" id="studioCardDetail" role="dialog" aria-modal="true" aria-labelledby="studioCardDetailTitle">
+    <div class="studio-card-detail-backdrop" id="studioCardDetailBackdrop"></div>
+    <div class="studio-card-detail-panel">
+      <header class="studio-card-detail-head">
+        <h2 id="studioCardDetailTitle">卡片详情</h2>
+        <div class="studio-card-detail-head-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="studioCardCopyPrompt">复制提示词</button>
+          <button type="button" class="btn btn-primary btn-sm" id="studioCardSaveBtn">保存设定</button>
+          <button type="button" class="studio-card-detail-close" id="studioCardDetailClose" aria-label="关闭">×</button>
+        </div>
+      </header>
+      <div class="studio-card-detail-body" id="studioCardDetailBody"></div>
+    </div>
+  </div>
+
+  <script src="asset-studio.js?v=20260618c"></script>
+</body>
+</html>

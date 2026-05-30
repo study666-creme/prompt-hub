@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__APP_BUILD__ = '20260616n';
+    window.__APP_BUILD__ = '20260618c';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -57,11 +57,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260616n">
+  <link rel="stylesheet" href="styles.css?v=20260618c">
   <link rel="stylesheet" href="styles-theme.css?v=20260615z">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260615w">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260618c">
   <link rel="stylesheet" href="styles-settings.css?v=20260616n">
-  <link rel="stylesheet" href="styles-features.css?v=20260616n">
+  <link rel="stylesheet" href="styles-features.css?v=20260618c">
+  <link rel="stylesheet" href="styles-assets.css?v=20260618c">
+  <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
   <script src="theme.js?v=20260615z"></script>
 </head>
@@ -203,6 +205,16 @@
         </section>
 
         <section class="settings-section">
+          <h4 class="settings-section-title">图片</h4>
+          <label class="settings-check">
+            <input type="checkbox" id="showTrimBlackBorderToggle">
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">编辑卡片时显示「裁除黑边」</span>
+          </label>
+          <p class="settings-hint">默认关闭。开启后，编辑区图片下方会出现小链接，一键去掉截图四周的黑边（适合录屏/截图留白）。</p>
+        </section>
+
+        <section class="settings-section">
           <h4 class="settings-section-title">社区</h4>
           <label class="settings-check">
             <input type="checkbox" id="defaultPublishCommunityToggle" checked>
@@ -298,24 +310,78 @@
     </div>
   </div>
 
+  <!-- 提示词采集（浏览器插件说明） -->
+  <div class="side-panel-overlay" id="extensionCollectOverlay" onclick="if(event.target===this) closeExtensionCollectPanel()">
+    <div class="side-panel-box side-panel-box-wide" onclick="event.stopPropagation()">
+      <header class="side-panel-head">
+        <h3>提示词采集</h3>
+        <button type="button" class="side-panel-close-btn" onclick="closeExtensionCollectPanel()" aria-label="关闭"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      </header>
+      <div class="side-panel-body">
+        <p class="collect-hook">让你在任何页面<strong>光速保存图片和文字</strong>到 Prompt Hub 卡片库。</p>
+        <div class="collect-download-row">
+          <a class="btn btn-primary collect-download-btn" href="downloads/prompt-hub-extension.zip" download="prompt-hub-extension.zip">下载浏览器插件（zip）</a>
+          <p class="settings-hint">Chrome / Edge 通用 · 约 200KB · 下载后解压到任意文件夹</p>
+        </div>
+        <h4 class="collect-section-title">安装（2 分钟）</h4>
+        <ol class="settings-help-list collect-steps-list">
+          <li>点击上方按钮下载 zip，解压到电脑（例如「下载/PromptHub扩展」）。</li>
+          <li>打开 Chrome 或 Edge → 地址栏输入 <strong>chrome://extensions</strong>（Edge 为 <strong>edge://extensions</strong>）。</li>
+          <li>打开右上角<strong>开发者模式</strong> → 点<strong>加载已解压的扩展程序</strong> → 选中刚解压的文件夹。</li>
+          <li>打开 <a href="https://prompt-hub.cn" target="_blank" rel="noopener">prompt-hub.cn</a> 并<strong>登录</strong>，扩展会自动同步账号。</li>
+        </ol>
+        <h4 class="collect-section-title">怎么用</h4>
+        <ol class="settings-help-list collect-steps-list">
+          <li>点击浏览器右上角 <strong>Prompt Hub 存卡</strong> 图标 → <strong>在当前页打开面板</strong>（首次需允许访问当前网站）。</li>
+          <li><strong>划选文字</strong> → 点「复制到提示词」；或<strong>鼠标悬停段落</strong> →「复制段落」。</li>
+          <li><strong>拖入 / 粘贴图片</strong>到面板（仅预览，点保存才提交）。</li>
+          <li>需要公开时，点<strong>公开到社区</strong>旁的开关（提示词 ≥15 字且须配图；可在面板 ⚙ 设置里关闭自动开启）。</li>
+          <li>点<strong>保存到仓库</strong>。若在设置里开启「自动保存」，提示词与图片都填入后会自动保存；关闭则需手动点保存。</li>
+        </ol>
+        <h4 class="collect-section-title">小提示</h4>
+        <ul class="settings-help-list">
+          <li>面板 <strong>×</strong> 关闭本页；<strong>−</strong> 只是收起，内容不会丢。</li>
+          <li>只保存您<strong>手动选择 / 拖入 / 粘贴</strong>的内容，不会自动抓取整页。</li>
+          <li>保存后回到卡片库刷新即可看到新卡片（已登录会自动云同步）。</li>
+        </ul>
+      </div>
+      <footer class="side-panel-foot">
+        <button type="button" class="btn btn-secondary" onclick="closeExtensionCollectPanel()">关闭</button>
+        <button type="button" class="btn btn-primary" onclick="closeExtensionCollectPanel(); openAuthModal();">登录后开始用</button>
+      </footer>
+    </div>
+  </div>
+
   <!-- 自定义弹窗 -->
   <div class="custom-modal-overlay" id="customModalOverlay" onclick="if(event.target===this) closeCustomModal()">
     <div class="custom-modal" id="customModal"></div>
   </div>
 
-  <!-- 欣赏模式：居中看图 -->
+  <!-- 快速预览：居中看图 -->
   <div class="appreciate-viewer" id="appreciateViewer" onclick="closeAppreciateViewer(event)">
     <button type="button" class="appreciate-viewer-close" onclick="closeAppreciateViewer(event)" title="关闭">✕</button>
     <div class="appreciate-viewer-inner" onclick="event.stopPropagation()">
       <div class="appreciate-viewer-stage" id="appreciateViewerStage">
-        <img id="appreciateViewerImg" src="" alt="" draggable="false">
+        <div class="appreciate-viewer-media" id="appreciateViewerMedia">
+          <div class="appreciate-viewer-glow-ring" aria-hidden="true"></div>
+          <img id="appreciateViewerImg" src="" alt="" draggable="false">
+        </div>
       </div>
-      <p class="appreciate-viewer-hint">滚轮缩放 · 拖拽移动 · 双击还原</p>
+      <p class="appreciate-viewer-hint">图片上：滚轮缩放 · 拖拽移动 · 双击还原</p>
+      <p class="appreciate-viewer-hint-nav">图片外：滚轮切换上一张 / 下一张</p>
       <p class="appreciate-viewer-caption" id="appreciateViewerCaption"></p>
       <div class="appreciate-viewer-actions hidden" id="appreciateViewerActions">
         <button type="button" class="btn btn-secondary btn-sm" id="appreciateViewerFavBtn">收藏到卡片库</button>
       </div>
+      <div class="appreciate-viewer-actions hidden" id="appreciateViewerWarehouseActions">
+        <button type="button" class="btn btn-primary btn-sm" id="appreciateViewerGenBtn">去生图</button>
+      </div>
     </div>
+  </div>
+  <button type="button" class="global-view-exit" id="globalViewExitBtn" onclick="exitGlobalView()">退出快速预览（Esc）</button>
+
+  <div class="asset-preview-overlay hidden" id="assetPreviewOverlay" role="dialog" aria-modal="true" aria-labelledby="assetPreviewTitle">
+    <div class="asset-preview-panel" id="assetPreviewBody" onclick="event.stopPropagation()"></div>
   </div>
 
   <!-- 图片灯箱 -->
@@ -354,6 +420,15 @@
       <button type="button" class="app-nav-item active" data-app="warehouse">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
         <span class="app-nav-label">卡片库</span>
+      </button>
+      <button type="button" class="app-nav-item" data-app="assetmarket">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+        <span class="app-nav-label">卡片资产</span>
+        <span class="app-nav-soon">草案</span>
+      </button>
+      <button type="button" class="app-nav-item" data-app="assetstudio">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"/><path d="M3 12h18"/><path d="m19 5-2 2"/><path d="m5 19 2-2"/></svg>
+        <span class="app-nav-label">资产创作</span>
       </button>
       <button type="button" class="app-nav-item" data-app="community">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -412,7 +487,7 @@
         <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260616n</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260618c</p>
     </div>
   </nav>
 
@@ -496,7 +571,18 @@
     <div class="app-page app-page-warehouse active" id="pageWarehouse">
   <div class="sidebar" id="sidebarArea">
     <button type="button" class="sidebar-new-btn" onclick="createNewCard()">+ 新建提示词</button>
+    <button type="button" class="sidebar-collect-btn" onclick="openExtensionCollectPanel()" title="下载插件，在任意网页保存图片和文字">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      提示词采集
+    </button>
     <p class="guest-limit-hint hidden" id="guestLimitHint"></p>
+    <div class="sidebar-section sidebar-warehouses">
+      <div class="sidebar-section-title sidebar-warehouses-head">
+        <span>卡片库</span>
+        <button type="button" class="sidebar-warehouse-add" id="sidebarWarehouseAddBtn" title="新建卡片库（标准版 1 个 / 专业版 2 个）" aria-label="新建卡片库">+</button>
+      </div>
+      <div class="group-list" id="warehouseList"></div>
+    </div>
     <div class="sidebar-section">
       <div class="sidebar-section-title">默认</div>
       <div class="group-list" id="defaultGroupList">
@@ -538,7 +624,7 @@
               <button class="active" data-view="grid" title="网格">▦</button>
               <button data-view="list" title="列表">☰</button>
             </div>
-            <button type="button" class="icon-btn icon-btn-accent" id="globalViewBtn" onclick="toggleGlobalView()" title="欣赏卡片">
+            <button type="button" class="icon-btn icon-btn-accent" id="globalViewBtn" onclick="toggleGlobalView()" title="快速预览">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
             </button>
           </div>
@@ -597,6 +683,9 @@
         <button type="button" class="remove-image-btn" id="removeImageBtn" onclick="event.stopPropagation(); removeImage()" title="从编辑区去掉图片（须保存后才真正删除）" aria-label="去掉图片"><span aria-hidden="true">×</span></button>
         <input type="file" id="fileInput" accept="image/*" style="display:none;">
       </div>
+      <div class="panel-image-tools hidden" id="panelImageTools">
+        <button type="button" class="panel-image-tool-btn" id="trimBlackBorderBtn" onclick="trimPanelImageBlackBorder()">裁除黑边</button>
+      </div>
       <div class="panel-ocr-drop hidden" id="panelOcrDrop" aria-label="文字识别专用图片框">
         <div class="panel-ocr-drop-inner" id="panelOcrDropInner">
           <span class="panel-ocr-drop-hint" id="panelOcrDropHint">拖入或点击，仅识别文字（不保存图片）</span>
@@ -647,7 +736,29 @@
   </div>
 
   <button class="fab-new visible" id="fabNewBtn" onclick="createNewCard()">＋</button>
-  <button type="button" class="global-view-exit" id="globalViewExitBtn" onclick="exitGlobalView()">退出欣赏（Esc）</button>
+    </div>
+
+    <div class="app-page app-page-feature" id="pageAssetMarket">
+      <div class="feature-shell">
+        <header class="feature-header feature-header-assets">
+          <h2>卡片资产</h2>
+          <span class="asset-draft-banner">演示 · 暂不可真实购买</span>
+        </header>
+        <div class="feature-body asset-market-body">
+          <p class="community-inline-hint">购买后可任意商用图、提示词及附属文档。以下为示例商品，点击「购买」不会扣款。</p>
+          <div class="asset-market-grid" id="assetMarketGrid"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-page app-page-feature" id="pageAssetStudio">
+      <div class="feature-shell">
+        <header class="feature-header feature-header-assets">
+          <h2>资产创作</h2>
+          <span class="asset-draft-banner">所有人可用 · 上架即将开放</span>
+        </header>
+        <div class="feature-body asset-studio-root" id="assetStudioRoot"></div>
+      </div>
     </div>
 
     <div class="app-page app-page-feature" id="pageCommunity">
@@ -660,7 +771,7 @@
                 <button type="button" class="icon-btn" onclick="toggleColumnUp()" title="每排加一张（最多五张）" aria-label="每排加一张">▲</button>
                 <button type="button" class="icon-btn" onclick="toggleColumnDown()" title="每排减一张（最少一张）" aria-label="每排减一张">▼</button>
               </div>
-              <button type="button" class="icon-btn icon-btn-accent" id="communityAppreciateBtn" onclick="window.FeatureDraft?.toggleCommunityAppreciate?.()" title="欣赏作品" aria-label="欣赏作品">
+              <button type="button" class="icon-btn icon-btn-accent" id="communityAppreciateBtn" onclick="window.FeatureDraft?.toggleCommunityAppreciate?.()" title="快速预览" aria-label="快速预览">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
               </button>
             </div>
@@ -1039,16 +1150,17 @@
   <script src="api-config.js"></script>
   <script src="api-client.js?v=20260616n"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260616n"></script>
+  <script src="supabase-sync.js?v=20260616t"></script>
   <script src="card-image-loader.js?v=20260616n"></script>
   <script src="membership.js?v=20260616n"></script>
   <script src="modal-hub.js?v=20260606m"></script>
-  <script src="subscription.js?v=20260616n"></script>
-  <script src="trial-tasks.js?v=20260615y"></script>
+  <script src="subscription.js?v=20260618c"></script>
+  <script src="trial-tasks.js?v=20260618c"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="script.js?v=20260616n"></script>
+  <script src="script.js?v=20260618c"></script>
   <script src="points-system.js?v=20260606m"></script>
-  <script src="features-draft.js?v=20260616n"></script>
+  <script src="features-draft.js?v=20260618c"></script>
+  <script src="features-assets.js?v=20260618c"></script>
   <script src="hotfix-image-layout.js?v=20260606m"></script>
   <script src="mobile.js?v=20260606m"></script>
   <script>

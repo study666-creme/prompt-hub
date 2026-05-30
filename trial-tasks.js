@@ -130,10 +130,15 @@
         image: p.image ? String(p.image).slice(0, 512) : null
       }));
     } catch (e) { /* ignore */ }
+    const qp = window.__phQuickPreviewTask || {};
     return {
       cardsCount: Array.isArray(cards) ? cards.length : 0,
       communityPosts,
-      pwaInstalled: isHomescreenLaunch()
+      pwaInstalled: isHomescreenLaunch(),
+      quickPreviewWarehouseUsed: !!qp.warehouseUsed,
+      quickPreviewWarehouseGotoGen: !!qp.warehouseGotoGen,
+      quickPreviewCommunityUsed: !!qp.communityUsed,
+      quickPreviewCommunityFavorited: !!qp.communityFavorited
     };
   }
 

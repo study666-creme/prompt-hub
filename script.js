@@ -163,7 +163,7 @@
     }
     window.getCardImageBackup = getCardImageBackup;
 
-    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, autoPromptOcr: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, defaultImageGenAutoSaveWarehouse: true, communityNotificationsEnabled: true, communityNotifyBadge: true, autoDayNight: true, themeManualOverride: false };
+    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, autoPromptOcr: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, defaultImageGenAutoSaveWarehouse: true, communityNotificationsEnabled: true, communityNotifyBadge: true, autoDayNight: true, themeManualOverride: false, showTrimBlackBorderTool: false };
     let currentGroup = 'all', selectedCardId = null, isNewCardMode = false, imageData = null;
     let imageRemovalPending = false;
     let mobileEditPanelHistory = false;
@@ -260,6 +260,97 @@
 
     let imageZoom = { scale: 1, tx: 0, ty: 0, dragging: false, startX: 0, startY: 0, img: null };
 
+    window.__phQuickPreviewTask = window.__phQuickPreviewTask || {
+      warehouseUsed: false,
+      warehouseGotoGen: false,
+      communityUsed: false,
+      communityFavorited: false
+    };
+
+    function markQuickPreviewTask(patch) {
+      if (!patch || typeof patch !== 'object') return;
+      window.__phQuickPreviewTask = { ...window.__phQuickPreviewTask, ...patch };
+      window.TrialTasks?.scheduleSyncTaskProgress?.();
+    }
+    window.markQuickPreviewTask = markQuickPreviewTask;
+
+    let warehousePreviewCardId = null;
+
+    function syncAppreciateViewerActions(mode) {
+      const communityActs = document.getElementById('appreciateViewerActions');
+      const warehouseActs = document.getElementById('appreciateViewerWarehouseActions');
+      const isCommunity = mode === 'community';
+      window.__appreciateViewerMode = mode || 'warehouse';
+      communityActs?.classList.toggle('hidden', !isCommunity);
+      warehouseActs?.classList.toggle('hidden', isCommunity);
+      document.querySelector('.appreciate-viewer-hint-nav')?.classList.toggle('hidden', isCommunity);
+    }
+
+    function setAppreciateViewerLoading(loading) {
+      const media = document.getElementById('appreciateViewerMedia');
+      if (!media) return;
+      media.classList.toggle('is-loading', !!loading);
+      media.classList.remove('media-shine-reveal', 'viewer-glow-active');
+    }
+
+    function finishAppreciateViewerReveal() {
+      const media = document.getElementById('appreciateViewerMedia');
+      if (!media) return;
+      media.classList.remove('is-loading');
+      media.classList.add('viewer-glow-active');
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      media.classList.remove('media-shine-reveal');
+      void media.offsetWidth;
+      media.classList.add('media-shine-reveal');
+      setTimeout(() => media.classList.remove('media-shine-reveal'), 1250);
+    }
+    window.setAppreciateViewerLoading = setAppreciateViewerLoading;
+    window.finishAppreciateViewerReveal = finishAppreciateViewerReveal;
+
+    let viewerNav = { items: [], index: -1 };
+
+    function setViewerNav(items, currentKey) {
+      viewerNav.items = Array.isArray(items) ? items : [];
+      viewerNav.index = viewerNav.items.findIndex((it) => it.key === currentKey);
+    }
+
+    function navigateViewerByWheel(delta) {
+      if (!viewerNav.items.length || viewerNav.index < 0) return false;
+      const next = viewerNav.index + (delta > 0 ? 1 : -1);
+      if (next < 0 || next >= viewerNav.items.length) return false;
+      const item = viewerNav.items[next];
+      viewerNav.index = next;
+      if (item.type === 'card') {
+        void openAppreciateViewer(item.id);
+        return true;
+      }
+      if (item.type === 'post' && window.FeatureDraft?.openCommunityAppreciateById) {
+        void window.FeatureDraft.openCommunityAppreciateById(item.id);
+        return true;
+      }
+      return false;
+    }
+
+    function onViewerShellWheel(e) {
+      const t = e.target;
+      if (t?.id === 'appreciateViewerImg' || t?.id === 'lightboxImage') return;
+      if (window.__appreciateViewerMode === 'community') return;
+      if (!viewerNav.items.length) return;
+      e.preventDefault();
+      navigateViewerByWheel(e.deltaY);
+    }
+
+    function bindViewerShellWheelNav() {
+      ['appreciateViewer', 'imageLightbox'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el || el.dataset.viewerWheelBound) return;
+        el.dataset.viewerWheelBound = '1';
+        el.addEventListener('wheel', onViewerShellWheel, { passive: false });
+      });
+    }
+    bindViewerShellWheelNav();
+    window.setViewerNav = setViewerNav;
+
     function applyImageZoom() {
       const img = imageZoom.img;
       if (!img) return;
@@ -319,9 +410,13 @@
       viewer.classList.remove('active');
       document.body.classList.remove('appreciate-viewing');
       document.getElementById('appreciateViewerActions')?.classList.add('hidden');
+      document.getElementById('appreciateViewerWarehouseActions')?.classList.add('hidden');
+      warehousePreviewCardId = null;
+      window.__appreciateViewerMode = null;
       window.FeatureDraft?.onAppreciateViewerClose?.();
       const img = document.getElementById('appreciateViewerImg');
       const caption = document.getElementById('appreciateViewerCaption');
+      setAppreciateViewerLoading(false);
       if (caption) {
         caption.textContent = '';
         caption.style.display = 'none';
@@ -333,6 +428,11 @@
         img.onwheel = null;
         img.onmousedown = null;
         img.ondblclick = null;
+        img.style.width = '';
+        img.style.height = '';
+        img.style.maxWidth = '';
+        img.style.maxHeight = '';
+        img.style.objectFit = '';
       }
       imageZoom.img = null;
     }
@@ -340,6 +440,13 @@
     async function openAppreciateViewer(cardId) {
       const card = cards.find(c => c.id === cardId);
       if (!card) return;
+      warehousePreviewCardId = cardId;
+      markQuickPreviewTask({ warehouseUsed: true });
+      syncAppreciateViewerActions('warehouse');
+      const navItems = cards
+        .filter((c) => c.image && cardHasDisplayImage(c))
+        .map((c) => ({ type: 'card', id: c.id, key: `card:${c.id}` }));
+      setViewerNav(navItems, `card:${cardId}`);
       window.__appreciateViewerGen = (window.__appreciateViewerGen || 0) + 1;
       const gen = window.__appreciateViewerGen;
       const viewer = document.getElementById('appreciateViewer');
@@ -347,8 +454,12 @@
       const caption = document.getElementById('appreciateViewerCaption');
       const hint = document.querySelector('.appreciate-viewer-hint');
       if (!viewer || !img) return;
-      viewer.classList.remove('active');
-      document.body.classList.remove('appreciate-viewing');
+      const alreadyOpen = viewer.classList.contains('active');
+      if (!alreadyOpen) {
+        viewer.classList.remove('active');
+        document.body.classList.remove('appreciate-viewing');
+      }
+      setAppreciateViewerLoading(true);
       const title = (card.title || '').trim();
       const prompt = (card.prompt || '').trim();
       if (caption) {
@@ -376,8 +487,14 @@
           revealed = true;
           img.onload = null;
           img.onerror = null;
+          img.style.width = '';
+          img.style.height = '';
+          img.style.maxWidth = '';
+          img.style.maxHeight = '';
+          img.style.objectFit = '';
           resetImageZoom(img);
           attachImageZoom(img);
+          finishAppreciateViewerReveal();
           reveal();
         };
         img.onload = onReady;
@@ -412,6 +529,11 @@
     }
 
     function exitGlobalView() {
+      if (document.body.classList.contains('community-appreciate')) {
+        closeAppreciateViewer();
+        window.FeatureDraft?.toggleCommunityAppreciate?.();
+        return;
+      }
       if (!globalViewActive) return;
       closeAppreciateViewer();
       globalViewActive = false;
@@ -434,6 +556,7 @@
       closeEditPanel();
       if (batchMode) cancelBatch();
       globalViewActive = true;
+      markQuickPreviewTask({ warehouseUsed: true });
       document.getElementById('globalViewBtn')?.classList.add('active');
       document.body.classList.add('global-view-entering');
       setTimeout(() => {
@@ -1456,7 +1579,14 @@
       }
     })();
 
-    const APP_PAGE_IDS = { warehouse: 'pageWarehouse', community: 'pageCommunity', creations: 'pageCreations', imagegen: 'pageImageGen' };
+    const APP_PAGE_IDS = {
+      warehouse: 'pageWarehouse',
+      assetmarket: 'pageAssetMarket',
+      assetstudio: 'pageAssetStudio',
+      community: 'pageCommunity',
+      creations: 'pageCreations',
+      imagegen: 'pageImageGen'
+    };
 
     function pauseRippleBackground() {
       window.__rippleGridBg?.setPaused?.(true);
@@ -1497,6 +1627,13 @@
 
     function switchAppPage(app) {
       if (!APP_PAGE_IDS[app]) return;
+      if (app === 'assetstudio') {
+        try {
+          window.FeatureAssets?.exportCardsForStudio?.({ silent: true });
+        } catch (e) { /* ignore */ }
+        window.location.href = 'asset-studio.html';
+        return;
+      }
       pauseRippleBackground();
       if (app !== 'warehouse' && activeFilters.size > 0) {
         clearWarehouseFilters({ toast: false });
@@ -2894,6 +3031,18 @@
       window.FeatureDraft?.renderCommunity?.();
       window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
     }
+    function bindQuickPreviewButtons() {
+      document.getElementById('appreciateViewerGenBtn')?.addEventListener('click', () => {
+        const card = cards.find((c) => c.id === warehousePreviewCardId);
+        if (!card) return;
+        markQuickPreviewTask({ warehouseGotoGen: true });
+        closeAppreciateViewer();
+        forceExitGlobalView(true);
+        void window.FeatureDraft?.fillCardToImageGen?.(card);
+      });
+    }
+    window.syncAppreciateViewerActions = syncAppreciateViewerActions;
+
     window.finishAppBootstrap = finishAppBootstrap;
 
     async function tryRestoreFromEmergencyBackup(uid) {
@@ -3988,6 +4137,7 @@
       bindPanelOcrDrop();
       initAppNav();
       initAppNavCollapse();
+      window.FeatureAssets?.init?.();
       initBackgroundEffect();
       if (window.location.hash.includes('type=recovery') && window.SupabaseSync?.isConfigured?.()) {
         setTimeout(() => openAuthModal('reset'), 400);
@@ -3996,6 +4146,7 @@
       refreshAuthMethodUI();
       refreshAppBuildLabel();
       finishAppBootstrap();
+      bindQuickPreviewButtons();
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
           void window.SupabaseSync?.healSessionOnResume?.();
@@ -4573,6 +4724,7 @@
       imageRemovalPending = false;
       currentTags = []; tempCustomFields = [];
       currentCardCustomFields = {};
+      window.FeatureDraft?.clearPublishDraft?.();
       window.FeatureDraft?.setPublishCheckbox?.(null);
       renderTags(); renderCustomFields(); updatePreview();
       updateDeleteClearButton();
@@ -4821,6 +4973,46 @@
 
     function removeTempField(idx) { tempCustomFields.splice(idx, 1); renderCustomFields(); }
 
+    function updatePanelTrimToolVisibility() {
+      const el = document.getElementById('panelImageTools');
+      if (!el) return;
+      el.classList.toggle('hidden', settings.showTrimBlackBorderTool !== true || !imageData);
+    }
+    window.updatePanelTrimToolVisibility = updatePanelTrimToolVisibility;
+
+    async function trimPanelImageBlackBorder() {
+      if (!imageData || !window.ImageTrim?.trimBlackBorders) {
+        showToast('暂无法裁切');
+        return;
+      }
+      const btn = document.getElementById('trimBlackBorderBtn');
+      if (btn) btn.disabled = true;
+      try {
+        let src = imageData;
+        if (window.SupabaseSync?.isStorageRef?.(imageData)) {
+          src = await window.SupabaseSync.resolveDisplayUrl(imageData, { assetId: selectedCardId });
+        }
+        if (!src || String(src).includes('data:image/svg')) {
+          showToast('请先加载图片');
+          return;
+        }
+        const result = await window.ImageTrim.trimBlackBorders(src);
+        if (!result?.trimmed) {
+          showToast('未检测到明显黑边');
+          return;
+        }
+        imageData = result.dataUrl;
+        imageRemovalPending = false;
+        await updatePreview();
+        showToast('已裁除黑边');
+      } catch (e) {
+        showToast('裁切失败');
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+    window.trimPanelImageBlackBorder = trimPanelImageBlackBorder;
+
     async function updatePreview() {
       const img = document.getElementById('previewImage'), p = document.getElementById('dropPlaceholder');
       const removeBtn = document.getElementById('removeImageBtn'), dropArea = document.getElementById('dropArea');
@@ -4849,7 +5041,9 @@
         dropArea.classList.remove('no-image');
         if (window.SupabaseSync?.resolveDisplayUrl && window.SupabaseSync?.isStorageRef?.(imageData)) {
           const url = await window.SupabaseSync.resolveDisplayUrl(imageData, { assetId: selectedCardId });
-          if (url && !url.startsWith('data:image/svg')) img.src = url;
+          if (url && !url.startsWith('data:image/svg')) {
+            img.src = url;
+          }
         }
       } else {
         img.style.display = 'none';
@@ -4858,6 +5052,7 @@
         dropArea.classList.add('no-image');
         dropArea.classList.remove('has-image');
       }
+      updatePanelTrimToolVisibility();
     }
 
     function removeImage() {
@@ -5240,6 +5435,12 @@
 
     function openLightbox(src) {
       if (!src || typeof src !== 'string') return;
+      if (selectedCardId && imageData) {
+        const navItems = cards
+          .filter((c) => c.image && cardHasDisplayImage(c))
+          .map((c) => ({ type: 'card', id: c.id, key: `card:${c.id}` }));
+        setViewerNav(navItems, `card:${selectedCardId}`);
+      }
       const lightbox = document.getElementById('imageLightbox');
       const img = document.getElementById('lightboxImage');
       if (!lightbox || !img) return;
@@ -5249,6 +5450,11 @@
         shown = true;
         img.onload = null;
         img.onerror = null;
+        img.style.width = '';
+        img.style.height = '';
+        img.style.maxWidth = '';
+        img.style.maxHeight = '';
+        img.style.objectFit = '';
         resetImageZoom(img);
         attachImageZoom(img);
         lightbox.classList.add('active');
@@ -5297,7 +5503,13 @@
         img.onwheel = null;
         img.onmousedown = null;
         img.ondblclick = null;
+        img.style.width = '';
+        img.style.height = '';
+        img.style.maxWidth = '';
+        img.style.maxHeight = '';
+        img.style.objectFit = '';
       }
+      viewerNav = { items: [], index: -1 };
       if (imageZoom.img === document.getElementById('lightboxImage')) imageZoom.img = null;
       imageZoom.dragging = false;
     }
@@ -5329,7 +5541,7 @@
         closeAppreciateViewer();
         return;
       }
-      if (globalViewActive) exitGlobalView();
+      if (globalViewActive || document.body.classList.contains('community-appreciate')) exitGlobalView();
     });
 
     let modalImageData = null;
@@ -5508,6 +5720,9 @@
       updatePanelOcrBoxVisibility();
       const pubToggle = document.getElementById('defaultPublishCommunityToggle');
       if (pubToggle) pubToggle.checked = settings.defaultPublishCommunity !== false;
+      const trimToggle = document.getElementById('showTrimBlackBorderToggle');
+      if (trimToggle) trimToggle.checked = settings.showTrimBlackBorderTool === true;
+      updatePanelTrimToolVisibility();
       window.PointsSystem?.updateCreditsUI?.();
       document.getElementById('settingsStatus').textContent = '';
       onOcrEngineChange();
@@ -5530,6 +5745,9 @@
       updatePanelOcrBoxVisibility();
       const pubToggle = document.getElementById('defaultPublishCommunityToggle');
       settings.defaultPublishCommunity = pubToggle ? pubToggle.checked : true;
+      const trimToggle = document.getElementById('showTrimBlackBorderToggle');
+      settings.showTrimBlackBorderTool = trimToggle ? trimToggle.checked : false;
+      updatePanelTrimToolVisibility();
       saveAllData();
       const status = document.getElementById('settingsStatus');
       if (status) status.textContent = '设置已保存';
@@ -5540,6 +5758,12 @@
     }
     window.saveSettings = saveSettings;
 
+    function openExtensionCollectPanel() {
+      document.getElementById('extensionCollectOverlay')?.classList.add('active');
+    }
+    function closeExtensionCollectPanel() {
+      document.getElementById('extensionCollectOverlay')?.classList.remove('active');
+    }
     function openHelpPanel() {
       document.getElementById('helpOverlay')?.classList.add('active');
     }
@@ -5556,6 +5780,8 @@
       const id = document.getElementById('contactWechatId')?.textContent?.trim() || 'bz4jx3jp2li1';
       navigator.clipboard.writeText(id).then(() => showToast('微信号已复制')).catch(() => showToast('复制失败'));
     }
+    window.openExtensionCollectPanel = openExtensionCollectPanel;
+    window.closeExtensionCollectPanel = closeExtensionCollectPanel;
     window.openHelpPanel = openHelpPanel;
     window.closeHelpPanel = closeHelpPanel;
     window.openContactPanel = openContactPanel;

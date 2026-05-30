@@ -355,18 +355,24 @@
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
 
+  function resolvePublishCard(card) {
+    if (card) return card;
+    return window.__promptHubGetEditingCard?.() || null;
+  }
+
   function publishDraftKey(card) {
-    if (card?.id) return String(card.id);
+    const resolved = resolvePublishCard(card);
+    if (resolved?.id) return String(resolved.id);
     if (typeof window.__promptHubIsNewCard === 'function' && window.__promptHubIsNewCard()) return '__new__';
-    const editing = window.__promptHubGetEditingCard?.();
-    return editing?.id ? String(editing.id) : null;
+    return null;
   }
 
   function getCardPublishIntent(card) {
-    if (isCommunityCollectCard(card)) return false;
-    const key = card?.id ? String(card.id) : '__new__';
+    const resolved = resolvePublishCard(card);
+    if (isCommunityCollectCard(resolved)) return false;
+    const key = resolved?.id ? String(resolved.id) : '__new__';
     if (publishDrafts.has(key)) return publishDrafts.get(key) === true;
-    if (card) return card.publishedToCommunity === true;
+    if (resolved) return resolved.publishedToCommunity === true;
     const prompt = getCardFormPromptText();
     return computeAutoCommunityToggle(prompt, getDefaultPublishChecked(), null);
   }
@@ -924,6 +930,13 @@
       }
     }
     if (changed) persistCommunity();
+  }
+
+  let lastEnsureCommunityAt = 0;
+  function ensureCommunityFromCardsThrottled(force) {
+    if (!force && Date.now() - lastEnsureCommunityAt < 10000) return 0;
+    lastEnsureCommunityAt = Date.now();
+    return ensureCommunityFromCards();
   }
 
   function ensureCommunityFromCards() {
@@ -1529,9 +1542,15 @@
         }
         if (
           document.getElementById('pageCreations')?.classList.contains('active')
-          && communityFeedNeedsRerender('creationsGrid')
         ) {
-          void renderCreations();
+          const container = document.getElementById('creationsGrid');
+          const list = getMyPublishedPosts();
+          const sig = feedListSignature(list, 'creationsGrid');
+          if (container?.dataset.feedSig === sig && container.querySelector('.community-post-card')) {
+            patchFeedLikeLabels(container, list);
+          } else if (communityFeedNeedsRerender('creationsGrid')) {
+            void renderCreations();
+          }
         }
       };
       void syncMyPostsToPublicFeed().finally(() => {
@@ -1820,6 +1839,7 @@
     if (!container) return;
     if (container.dataset.feedFinalized === '1') return;
     container.dataset.feedFinalized = '1';
+    container.dataset.feedLayoutReady = '1';
     container.querySelectorAll('.card-media.is-loading').forEach((m) => releaseFeedMediaLoading(m));
     setFeedLayoutPending(containerId, false);
     if (useCssGridForCommunityFeed(containerId)) {
@@ -1931,7 +1951,10 @@
   }
 
   function feedListSignature(posts, containerId) {
-    return `${containerId}:${posts.map((p) => `${p.id}:${p.updatedAt || p.createdAt || 0}:${p.likes || 0}`).join('|')}`;
+    if (containerId === 'creationsGrid') {
+      return `${containerId}:${posts.map((p) => p.id).join('|')}`;
+    }
+    return `${containerId}:${posts.map((p) => `${p.id}:${p.updatedAt || p.createdAt || 0}`).join('|')}`;
   }
 
   function patchFeedLikeLabels(container, posts) {
@@ -2190,6 +2213,7 @@
       img.addEventListener('load', () => {
         const src = img.currentSrc || img.src || '';
         if (src.includes('data:image/svg') || !(img.complete && img.naturalWidth > 8)) return;
+        if (container.dataset.feedLayoutReady === '1') return;
         scheduleCommunityLayout(containerId);
       }, { once: true });
     });
@@ -2757,6 +2781,8 @@
     });
 
     container.innerHTML = '';
+    delete container.dataset.feedFinalized;
+    delete container.dataset.feedLayoutReady;
     setFeedLayoutPending(containerId, true);
     container.appendChild(fragment);
     container.classList.add('cards-grid-primed');
@@ -2834,10 +2860,6 @@
       finalizeFeedContainer(container, containerId);
       finishLayout();
     })();
-    setTimeout(() => {
-      if (renderGen !== communityFeedRenderGen) return;
-      finalizeFeedContainer(container, containerId);
-    }, 4500);
   }
 
   function filterAndSortPosts(list) {
@@ -2931,22 +2953,10 @@
     }
     if (window.SupabaseSync?.isLoggedIn?.()) {
       maybeReconcileCommunityWithCards(window.__promptHubCards || []);
-      ensureCommunityFromCards();
+      ensureCommunityFromCardsThrottled(!!opts.syncFromCards);
       void refreshRemoteNotifications();
     } else if (window.__promptHubCards?.length) {
-      ensureCommunityFromCards();
-    }
-    if (!opts.skipFeedFetch && publicFeedAt > 0) {
-      void refreshPublicCommunityFeed({ force: opts.forceRepaint === true }).then((changed) => {
-        if (!changed || gen !== communityFeedRenderGen) return;
-        const freshList = filterAndSortPosts(getCommunityFeedForDisplay());
-        const freshSig = feedListSignature(freshList, 'communityGrid');
-        if (container.dataset.feedSig === freshSig && container.querySelector('.community-post-card')) {
-          patchFeedLikeLabels(container, freshList);
-          return;
-        }
-        renderCommunityNow({ skipFeedFetch: true });
-      });
+      ensureCommunityFromCardsThrottled(false);
     }
     let list = filterAndSortPosts(getCommunityFeedForDisplay());
     const guestUser = getActiveUser().id === 'guest';
@@ -3244,8 +3254,6 @@
 
   function setPublishCheckbox(card) {
     if (!document.getElementById('cardPublishToggle')) return;
-    if (card?.id) publishDrafts.delete(String(card.id));
-    else if (!card) publishDrafts.delete('__new__');
     applyPublishToggleUi(getCardPublishIntent(card));
   }
 
@@ -3619,6 +3627,11 @@
     openPostSidePanel(id, 'community', opts);
   }
 
+  function openCommunityAppreciateById(postId) {
+    const post = findPost(postId);
+    if (post) return openCommunityAppreciateViewer(post);
+  }
+
   function exitCommunityAppreciate(skipLayout) {
     communityAppreciateActive = false;
     appreciateViewerPostId = null;
@@ -3641,6 +3654,7 @@
       exitCommunityAppreciate();
       return;
     }
+    window.markQuickPreviewTask?.({ communityUsed: true });
     communityAppreciateActive = true;
     closeCommunitySidePanel();
     document.getElementById('communityAppreciateBtn')?.classList.add('active');
@@ -3654,6 +3668,13 @@
 
   async function openCommunityAppreciateViewer(post) {
     if (!post) return;
+    window.markQuickPreviewTask?.({ communityUsed: true });
+    window.syncAppreciateViewerActions?.('community');
+    const list = filterAndSortPosts(getCommunityFeedForDisplay()).filter(isFeedRenderablePost);
+    const navItems = list.map((p) => ({ type: 'post', id: p.id, key: `post:${p.id}` }));
+    if (typeof window.setViewerNav === 'function') {
+      window.setViewerNav(navItems, `post:${post.id}`);
+    }
     const gen = ++appreciateViewerGen;
     const viewer = document.getElementById('appreciateViewer');
     const img = document.getElementById('appreciateViewerImg');
@@ -3663,8 +3684,12 @@
     const favBtn = document.getElementById('appreciateViewerFavBtn');
     if (!viewer || !img) return;
     appreciateViewerPostId = post.id;
-    viewer.classList.remove('active');
-    document.body.classList.remove('appreciate-viewing');
+    const alreadyOpen = viewer.classList.contains('active');
+    if (!alreadyOpen) {
+      viewer.classList.remove('active');
+      document.body.classList.remove('appreciate-viewing');
+    }
+    window.setAppreciateViewerLoading?.(true);
     const title = getPostTitle(post);
     const prompt = (post.prompt || '').trim();
     if (caption) {
@@ -3705,8 +3730,12 @@
         revealed = true;
         img.onload = null;
         img.onerror = null;
+        img.style.maxWidth = '';
+        img.style.maxHeight = '';
+        img.style.objectFit = '';
         if (typeof window.resetImageZoom === 'function') window.resetImageZoom(img);
         if (typeof window.attachImageZoom === 'function') window.attachImageZoom(img);
+        window.finishAppreciateViewerReveal?.();
         reveal();
       };
       img.onload = onReady;
@@ -5158,6 +5187,25 @@
     if (window.MobileUI?.isMobile?.()) window.MobileUI?.setImageGenView?.('form');
   }
 
+  async function fillCardToImageGen(card) {
+    if (!card) return;
+    if (typeof switchAppPage === 'function') switchAppPage('imagegen');
+    fillFormPromptOnly(card.prompt || '');
+    const ref = card.image;
+    if (ref && isDisplayableImage(ref)) {
+      let url = ref;
+      if (window.SupabaseSync?.resolveDisplayUrl) {
+        try {
+          const resolved = await window.SupabaseSync.resolveDisplayUrl(ref, { assetId: card.id });
+          if (resolved && !String(resolved).includes('data:image/svg')) url = resolved;
+        } catch (e) { /* ignore */ }
+      }
+      fillFormRefOnly(url, [url]);
+    }
+    if (window.MobileUI?.isMobile?.()) window.MobileUI?.setImageGenView?.('form');
+    toast('已填入生图（提示词与参考图）');
+  }
+
 
   function buildFeedPendingCardHtml(job) {
     const badges = [job.modelLabel || '生图中', (job.resolution || '1k').toUpperCase()];
@@ -5754,6 +5802,7 @@
       const post = findPost(appreciateViewerPostId);
       if (!post) return;
       favoritePost(appreciateViewerPostId, post);
+      window.markQuickPreviewTask?.({ communityFavorited: true });
       const btn = document.getElementById('appreciateViewerFavBtn');
       if (btn && favIds.has(appreciateViewerPostId)) {
         btn.textContent = '已收藏';
@@ -5810,6 +5859,7 @@
   function onAppChange(app) {
     const fab = document.getElementById('fabNewBtn');
     if (fab) fab.classList.toggle('hidden-by-app', app !== 'warehouse');
+    window.FeatureAssets?.onAppChange?.(app);
     if (app !== 'community' && communityAppreciateActive) {
       window.closeAppreciateViewer?.();
       exitCommunityAppreciate(true);
@@ -5951,11 +6001,15 @@
         if (container) patchFeedLikeLabels(container, list);
       }
     }
-    if (
-      document.getElementById('pageCreations')?.classList.contains('active')
-      && communityFeedNeedsRerender('creationsGrid')
-    ) {
-      renderCreations();
+    if (document.getElementById('pageCreations')?.classList.contains('active')) {
+      const container = document.getElementById('creationsGrid');
+      const list = getMyPublishedPosts();
+      const sig = feedListSignature(list, 'creationsGrid');
+      if (container?.dataset.feedSig === sig && container.querySelector('.community-post-card')) {
+        patchFeedLikeLabels(container, list);
+      } else if (communityFeedNeedsRerender('creationsGrid')) {
+        renderCreations();
+      }
     }
     updateNotifyBadge();
   }
@@ -5972,6 +6026,7 @@
     unpublishCommunityByCardId,
     isCommunityPublishEligible,
     readPublishCheckbox,
+    setPublishCheckbox,
     syncCardPublishFromPrompt,
     getCloudSlice,
     applyCloudSlice,
@@ -5997,6 +6052,7 @@
     onAppreciateViewerClose,
     bumpAppreciateViewerGen,
     openCommunityAppreciateViewer,
+    openCommunityAppreciateById,
     pruneOrphanFeatureData,
     purgeGhostCommunityData,
     hydrateFeedImages,
@@ -6020,6 +6076,7 @@
     fillFormPromptOnly,
     copyFeedPromptText,
     fillFeedPromptToImageGen,
+    fillCardToImageGen,
     updateNotifyBadge,
     getCommunityPostsForTasks() {
       return communityPosts
