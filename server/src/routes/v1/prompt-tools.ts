@@ -28,11 +28,11 @@ const reverseSchema = z.object({
   imageUrl: z.string().url().max(2048).optional()
 });
 
-const REVERSE_PROMPT_CREDITS = 5;
-/** 反推上游：IMAGE_API_KEY → Apimart（默认 api.apimart.ai）OpenAI 兼容 /v1/chat/completions */
-const REVERSE_VISION_MODEL = 'gpt-4o-mini';
-/** 优化上游：CHAT_API_KEY → DeepSeek（默认 api.deepseek.com）/v1/chat/completions */
-const OPTIMIZE_CHAT_MODEL = 'deepseek-v4-flash';
+const REVERSE_PROMPT_CREDITS = 2;
+/** 反推默认视觉模型（Apimart 视觉 · 成本约 $0.002/次，收 2 积分保本） */
+const DEFAULT_REVERSE_VISION_MODEL = 'gemini-2.5-flash';
+/** 优化走 DeepSeek 官方 CHAT_MODEL（wrangler 默认 deepseek-chat） */
+const OPTIMIZE_PRICING_MODEL = 'deepseek-v4-flash';
 
 const OPTIMIZE_SYSTEM: Record<string, string> = {
   general:
@@ -48,20 +48,23 @@ const REVERSE_SYSTEM =
 export const promptToolsRoutes = new Hono<{ Bindings: Env }>();
 
 promptToolsRoutes.get('/info', async c => {
+  const reverseModel = c.env.REVERSE_VISION_MODEL || DEFAULT_REVERSE_VISION_MODEL;
+  const chatModel = c.env.CHAT_MODEL || 'deepseek-chat';
   return c.json({
     ok: true,
     data: {
       reverse: {
-        model: REVERSE_VISION_MODEL,
-        upstream: 'IMAGE_API_KEY → /v1/chat/completions（Apimart 等，需支持 vision）',
+        model: reverseModel,
+        upstream: 'IMAGE_API_KEY → Apimart /v1/chat/completions（vision）',
         creditsPerCall: REVERSE_PROMPT_CREDITS,
-        note: '固定扣积分；请对照 Apimart 上 gpt-4o-mini 视觉单价核算成本'
+        note: 'Apimart gemini-2.5-flash 约 $0.24/M 入 · $2/M 出；收 2 积分/次（保本微利）'
       },
       optimize: {
-        model: OPTIMIZE_CHAT_MODEL,
-        upstream: 'CHAT_API_KEY → /v1/chat/completions（DeepSeek 官方等）',
-        creditsPerCall: '按 token，通常 1～3 积分',
-        note: '见 chat-pricing.ts TOKEN_RATES；最低 1 积分/次'
+        model: chatModel,
+        pricingModel: OPTIMIZE_PRICING_MODEL,
+        upstream: 'CHAT_API_KEY → DeepSeek /v1/chat/completions',
+        creditsPerCall: '按 token，通常 1～2 积分',
+        note: 'DeepSeek 官方价见文档；最低 1 积分/次'
       }
     }
   });
@@ -82,7 +85,8 @@ promptToolsRoutes.post('/optimize', rateLimit(90, 60_000), async c => {
   const admin = createAdminClient(c.env);
   let profile = await syncMembershipCredits(admin, user.id);
   const memberActive = isMembershipActive(profile);
-  const modelId = OPTIMIZE_CHAT_MODEL;
+  const modelId = OPTIMIZE_PRICING_MODEL;
+  const upstreamModel = c.env.CHAT_MODEL || 'deepseek-chat';
   const target = parsed.data.target || 'general';
   const messages = [
     { role: 'system' as const, content: OPTIMIZE_SYSTEM[target] || OPTIMIZE_SYSTEM.general },
@@ -97,7 +101,7 @@ promptToolsRoutes.post('/optimize', rateLimit(90, 60_000), async c => {
 
   const toolId = `opt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
   const result = await submitChatCompletions(apiKey, c.env.CHAT_API_BASE_URL, {
-    model: modelId,
+    model: upstreamModel,
     messages,
     thinking: false
   });
@@ -134,7 +138,7 @@ promptToolsRoutes.post('/optimize', rateLimit(90, 60_000), async c => {
       prompt: result.content,
       creditsCharged: cost.final,
       creditsRemaining: spendableCredits(profile),
-      model: modelId,
+      model: upstreamModel,
       modelLabel: cost.modelLabel,
       upstream: 'CHAT_API'
     }
@@ -170,12 +174,13 @@ promptToolsRoutes.post('/reverse', rateLimit(60, 60_000), async c => {
     imageUrl = raw.startsWith('data:') ? raw : `data:image/jpeg;base64,${raw}`;
   }
 
+  const reverseModel = c.env.REVERSE_VISION_MODEL || DEFAULT_REVERSE_VISION_MODEL;
   const toolId = `rev_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
   const prompt = await submitVisionChat(apiKey, c.env.IMAGE_API_BASE_URL, {
     system: REVERSE_SYSTEM,
     userText: '请反推这张图的 AI 生图提示词。',
     imageUrl,
-    model: REVERSE_VISION_MODEL
+    model: reverseModel
   });
 
   const debited = await deductUserCredits(
@@ -198,8 +203,8 @@ promptToolsRoutes.post('/reverse', rateLimit(60, 60_000), async c => {
       prompt,
       creditsCharged: REVERSE_PROMPT_CREDITS,
       creditsRemaining: spendableCredits(profile),
-      model: REVERSE_VISION_MODEL,
-      modelLabel: 'GPT-4o Mini Vision',
+      model: reverseModel,
+      modelLabel: 'Gemini 2.5 Flash Vision',
       upstream: 'IMAGE_API'
     }
   });

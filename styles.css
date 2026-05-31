@@ -2745,8 +2745,8 @@ body {
     .image-lightbox.active { display: flex; }
     .lightbox-container {
       width: auto;
-      max-width: 96vw;
-      max-height: 94vh;
+      max-width: 98vw;
+      max-height: 96vh;
       background: transparent;
       border-radius: 0;
       overflow: visible;
@@ -2757,8 +2757,8 @@ body {
       display: block;
       width: auto;
       height: auto;
-      max-width: min(96vw, 1280px);
-      max-height: 94vh;
+      max-width: min(98vw, 1400px);
+      max-height: 96vh;
       object-fit: contain;
       border-radius: inherit;
     }
@@ -3253,7 +3253,7 @@ body {
       backdrop-filter: blur(12px);
       align-items: center;
       justify-content: center;
-      padding: 56px 12px calc(96px + env(safe-area-inset-bottom, 0px));
+      padding: 48px 8px calc(72px + env(safe-area-inset-bottom, 0px));
     }
     .appreciate-viewer.active { display: flex; }
     .appreciate-viewer-close {
@@ -3291,14 +3291,14 @@ body {
       overflow: hidden;
     }
     .appreciate-viewer-stage {
-      max-width: min(94vw, 980px);
-      flex: 0 1 auto;
+      max-width: min(96vw, 1320px);
+      flex: 1 1 auto;
       min-height: 0;
       overflow: visible;
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 12px 10px 4px;
+      padding: 8px 6px 4px;
       border-radius: var(--radius-lg);
       background: transparent;
       box-shadow: none;
@@ -3308,8 +3308,8 @@ body {
       position: relative;
       display: inline-block;
       line-height: 0;
-      max-width: min(94vw, 980px);
-      max-height: calc(90vh - 120px);
+      max-width: min(96vw, 1320px);
+      max-height: calc(100vh - 140px);
       overflow: visible;
       background: transparent;
       box-shadow: none;
@@ -3318,8 +3318,8 @@ body {
       position: relative;
       display: inline-block;
       line-height: 0;
-      max-width: min(94vw, 980px);
-      max-height: calc(90vh - 120px);
+      max-width: min(96vw, 1320px);
+      max-height: calc(100vh - 140px);
       overflow: visible;
       background: transparent;
       box-shadow: none;
@@ -3328,8 +3328,8 @@ body {
       position: relative;
       display: inline-block;
       line-height: 0;
-      max-width: min(92vw, 980px);
-      max-height: min(calc(100dvh - 240px), 820px);
+      max-width: min(95vw, 1320px);
+      max-height: min(calc(100dvh - 120px), calc(100vh - 120px));
       border-radius: var(--radius-lg);
       overflow: hidden;
       background: #06080c;
@@ -3436,8 +3436,8 @@ body {
     }
     .appreciate-viewer-stage img,
     .viewer-image-shine-wrap img {
-      max-width: min(92vw, 980px);
-      max-height: min(calc(100dvh - 260px), 720px);
+      max-width: min(95vw, 1320px);
+      max-height: min(calc(100dvh - 120px), calc(100vh - 120px));
       width: auto;
       height: auto;
       object-fit: contain;

@@ -11,6 +11,8 @@ export type Env = {
   CHAT_API_KEY?: string;
   CHAT_API_BASE_URL?: string;
   CHAT_MODEL?: string;
+  /** 反推提示词视觉模型（Apimart 等，默认 gemini-2.5-flash） */
+  REVERSE_VISION_MODEL?: string;
   /** 支付 webhook HMAC 密钥：wrangler secret put PAYMENT_WEBHOOK_SECRET */
   PAYMENT_WEBHOOK_SECRET?: string;
   /** 运营批量造激活码：wrangler secret put ADMIN_API_SECRET */

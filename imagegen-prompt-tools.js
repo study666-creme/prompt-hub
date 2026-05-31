@@ -276,7 +276,7 @@
       return;
     }
     if (!window.PointsSystem?.useApiForAccount?.()) {
-      toast('反推提示词需登录并连接 API（5 积分/次）');
+      toast('反推提示词需登录并连接 API（2 积分/次）');
       return;
     }
     const btn = $('imageGenReverseBtn');
@@ -294,7 +294,7 @@
         window.PointsSystem?.updateCreditsUI?.();
       }
       const modelHint = r.data?.modelLabel || r.data?.model || 'gpt-4o-mini';
-      toast(`已反推（${modelHint} · -${r.data?.creditsCharged ?? 5} 积分）`);
+      toast(`已反推（${modelHint} · -${r.data?.creditsCharged ?? 2} 积分）`);
     } catch (e) {
       toast(e.message || '反推失败');
     } finally {
