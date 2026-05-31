@@ -168,7 +168,14 @@ export async function importAssetPackageToWarehouse(
   );
   if (upsertErr) throw upsertErr;
 
-  return { imported: importedCards.length, cardIds: newIds };
+  const groups = [
+    ...new Set(
+      importedCards
+        .map((c) => (c.group != null ? String(c.group).trim() : ''))
+        .filter(Boolean)
+    )
+  ];
+  return { imported: importedCards.length, cardIds: newIds, groups };
 }
 
 export async function signPreviewImagesForPackage(

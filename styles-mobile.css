@@ -493,9 +493,9 @@
     min-width: 0;
   }
 
-  /* 手机固定两列：flex 流式布局，避免 Masonry 绝对定位叠在一起 */
-  .cards-container.mobile-grid,
-  .cards-container {
+  /* 手机固定两列：仅卡片库用 flex；社区/创作走下方 CSS Grid，避免 Masonry 绝对定位叠在一起 */
+  .cards-container.mobile-grid:not(#communityGrid):not(#creationsGrid),
+  .cards-container:not(#communityGrid):not(#creationsGrid) {
     display: flex !important;
     flex-wrap: wrap !important;
     flex-direction: row !important;
@@ -511,8 +511,8 @@
     contain: layout;
   }
 
-  .cards-container.mobile-grid > .card,
-  .cards-container > .card {
+  .cards-container.mobile-grid:not(#communityGrid):not(#creationsGrid) > .card,
+  .cards-container:not(#communityGrid):not(#creationsGrid) > .card {
     flex: 0 0 calc((100% - 10px) / 2) !important;
     width: calc((100% - 10px) / 2) !important;
     max-width: calc((100% - 10px) / 2) !important;
@@ -530,6 +530,57 @@
     margin: 0 !important;
     margin-bottom: 0 !important;
     contain: layout;
+  }
+
+  #communityGrid.cards-container.community-cards:not(.list-view),
+  #creationsGrid.cards-container:not(.list-view) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 12px 10px !important;
+    align-content: start !important;
+    flex: 1 1 auto !important;
+    min-height: 120px !important;
+    max-height: none !important;
+    position: relative !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    contain: none !important;
+    flex-wrap: unset !important;
+    padding: 12px 10px calc(88px + env(safe-area-inset-bottom)) !important;
+  }
+
+  #communityGrid.cards-container:not(.list-view) > .card,
+  #creationsGrid.cards-container:not(.list-view) > .card,
+  #communityGrid.cards-container:not(.list-view) > .feature-empty,
+  #creationsGrid.cards-container:not(.list-view) > .feature-empty {
+    grid-column: auto !important;
+    flex: none !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: auto !important;
+    align-self: start !important;
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    margin: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    contain: none !important;
+  }
+
+  #communityGrid .card-media.is-loading,
+  #creationsGrid .card-media.is-loading {
+    min-height: 88px !important;
+  }
+
+  #communityGrid.cards-container:not(.list-view) > .feature-empty,
+  #creationsGrid.cards-container:not(.list-view) > .feature-empty {
+    grid-column: 1 / -1 !important;
+    display: block !important;
   }
 
   .cards-container .grid-sizer {
@@ -966,7 +1017,7 @@
 
   body.panel-open .custom-modal-overlay,
   body.custom-modal-open .custom-modal-overlay {
-    z-index: 10100 !important;
+    z-index: 14000 !important;
   }
 
   body.panel-open .custom-modal-overlay .custom-modal {

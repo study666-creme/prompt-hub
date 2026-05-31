@@ -1,6 +1,6 @@
 # Prompt Hub — 项目规划与现状（详细版）
 
-> 更新：**2026-05-30** · 构建 **20260530b**  
+> 更新：**2026-05-30** · 构建 **20260602w**  
 > 给产品/协作方阅读；技术接手仍优先 `CURRENT-ISSUES.md` + `AI-HANDOFF.md`。
 
 ---
@@ -145,7 +145,7 @@ cd server
 浏览器控制台：
 
 ```javascript
-window.__APP_BUILD__   // 应为 20260530b
+window.__APP_BUILD__   // 应为 20260602w
 ```
 
 **强刷**：主站与 `asset-studio.html` 各 **Ctrl+Shift+R** 一次。

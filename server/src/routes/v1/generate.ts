@@ -41,7 +41,9 @@ function friendlyGenerationError(raw: string): string {
   if (/invalid.*api.*key|unauthorized|401/i.test(s)) {
     return '生图接口密钥无效或已过期，请联系站长检查配置；您的积分已全额退回';
   }
-  if (s.length > 160) return `${s.slice(0, 160)}…`;
+  if (/content.*policy|safety|moderation|blocked|违规|敏感/i.test(s)) {
+    return '提示词可能触发内容审核，请调整描述后重试；您的积分已全额退回';
+  }
   return s || '上游生图失败，您的积分已全额退回';
 }
 
@@ -75,6 +77,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     throw new ApiError(400, 'VALIDATION_ERROR', '请填写有效的提示词与参数');
   }
 
+  const promptText = parsed.data.prompt.slice(0, 8000);
   const admin = createAdminClient(c.env);
   let profile = await syncMembershipCredits(admin, user.id);
   const memberActive = isMembershipActive(profile);
@@ -106,7 +109,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     .from('generation_requests')
     .insert({
       user_id: user.id,
-      prompt: parsed.data.prompt,
+      prompt: promptText,
       resolution: parsed.data.resolution,
       quality: parsed.data.quality,
       size_label: parsed.data.size ?? null,
@@ -173,7 +176,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
         c.env.IMAGE_API_BASE_URL,
         {
           modelId,
-          prompt: parsed.data.prompt,
+          prompt: promptText,
           resolution: parsed.data.resolution,
           quality: parsed.data.quality,
           size: parsed.data.size,

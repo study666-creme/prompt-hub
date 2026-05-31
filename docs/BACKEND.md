@@ -41,6 +41,11 @@
 | POST | `/api/v1/webhooks/payment` | HMAC 签名 | 支付入账（充值 / 开通会员） |
 | GET | `/api/v1/me/ledger` | Bearer | 积分流水（最近 N 条） |
 | POST | `/api/v1/community/like-milestone` | Bearer | 作者领取点赞里程碑积分（100/1000 赞） |
+| GET | `/api/v1/community/gacha/quota` | Bearer | 随心一抽今日配额 |
+| POST | `/api/v1/community/gacha/draw` | Bearer | 消耗一次随心一抽（跨端同步） |
+| GET | `/api/v1/asset-packages` | 可选 Bearer | 资产包市场列表 |
+| POST | `/api/v1/asset-packages/:id/claim` | Bearer | 领取免费包（写入 entitlement） |
+| POST | `/api/v1/asset-packages/:id/import` | Bearer | 一键导入到指定卡片库（含文件夹） |
 | GET | `/api/v1/extension/status` | Bearer | 浏览器插件登录态 |
 | POST | `/api/v1/extension/quick-card` | Bearer | 插件快捷追加卡片（含图片 base64） |
 | POST | `/api/v1/generate` | Bearer | 扣积分并记录任务；配置 `IMAGE_API_*` 后代理上游 |

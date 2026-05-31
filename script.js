@@ -1,4 +1,4 @@
-﻿    // ---------- 数据库 ----------
+    // ---------- 数据库 ----------
     const DB_NAME = 'PromptRepoDB', DB_VERSION = 3;
     const EMERGENCY_BACKUP_MAX = 12;
     const LS_IDB_OWNER = 'promptrepo_idb_owner_uid';
@@ -1054,7 +1054,7 @@
       return { ok: true, cardId: card.id };
     };
 
-    function showCustomModal(title, content, onConfirm, onCancel, isPrompt = false, suggestions = []) {
+    function showCustomModal(title, content, onConfirm, onCancel, isPrompt = false, suggestions = [], opts = {}) {
       const overlay = document.getElementById('customModalOverlay');
       const modal = document.getElementById('customModal');
       let inputHtml = '';
@@ -1063,7 +1063,10 @@
       if (suggestions.length) {
         suggestionsHtml = '<div class="suggestions">' + suggestions.map(s => `<span onclick="document.getElementById('customModalInput').value='${escapeJsString(s)}'; document.getElementById('customModalConfirm').focus();">${escapeHtml(s)}</span>`).join('') + '</div>';
       }
-      modal.innerHTML = `<h3>${title}</h3><p>${content}</p>${inputHtml}${suggestionsHtml}<div class="modal-actions"><button class="btn btn-primary" id="customModalConfirm">确定</button><button class="btn btn-secondary" id="customModalCancel">取消</button></div>`;
+      const bodyHtml = escapeHtml(String(content || '')).replace(/\n/g, '<br>');
+      const confirmLabel = opts.confirmLabel || '确定';
+      const confirmClass = opts.danger ? 'btn btn-danger' : 'btn btn-primary';
+      modal.innerHTML = `<h3>${escapeHtml(title)}</h3><p class="custom-modal-body">${bodyHtml}</p>${inputHtml}${suggestionsHtml}<div class="modal-actions"><button type="button" class="${confirmClass}" id="customModalConfirm">${escapeHtml(confirmLabel)}</button><button type="button" class="btn btn-secondary" id="customModalCancel">取消</button></div>`;
       overlay.classList.add('active');
       document.body.classList.add('custom-modal-open');
       document.getElementById('customModalCancel').onclick = () => { closeCustomModal(); if(onCancel) onCancel(); };
@@ -1074,8 +1077,9 @@
       document.getElementById('customModalOverlay')?.classList.remove('active');
       document.body.classList.remove('custom-modal-open');
     }
-    function customConfirm(msg, onConfirm, onCancel) {
-      showCustomModal('确认', msg, onConfirm, onCancel);
+    window.closeCustomModal = closeCustomModal;
+    function customConfirm(msg, onConfirm, onCancel, opts) {
+      showCustomModal('确认', msg, onConfirm, onCancel, false, [], opts || {});
     }
     window.customConfirm = customConfirm;
     function customPrompt(msg, defaultText, onConfirm, onCancel, suggestions = []) {
@@ -1933,6 +1937,7 @@
     }
 
     let cloudPushTimer = null;
+    let localSnapshotTimer = null;
     let cloudSyncing = false;
     let cloudPushRunId = 0;
     let activeAccountId = null;
@@ -1964,6 +1969,26 @@
         }
       } catch (e) { /* ignore */ }
     }
+
+    function mergeWarehouseGroupsFromList(names, warehouseId) {
+      const list = Array.isArray(names) ? names : [];
+      if (!list.length) return false;
+      loadWarehouseGroups(warehouseId);
+      let changed = false;
+      list.forEach((name) => {
+        const g = String(name || '').trim();
+        if (g && g !== '未分类' && !customGroups.includes(g)) {
+          customGroups.push(g);
+          changed = true;
+        }
+      });
+      if (changed) {
+        persistWarehouseGroups(warehouseId);
+        renderGroups();
+      }
+      return changed;
+    }
+    window.mergeWarehouseGroupsFromList = mergeWarehouseGroupsFromList;
 
     function loadWarehouseGroups(warehouseId) {
       const wid = warehouseId || getActiveWarehouseId();
@@ -2290,9 +2315,8 @@
     function scheduleMasonryForMedia(media) {
       if (!media) return;
       if (isMobileViewport()) {
-        if (media.closest('#imageGenFeed')) {
-          window.FeatureDraft?.resetMobileFeedGridStyles?.();
-        }         else if (media.closest('#cardsContainer')) {
+        if (media.closest('#communityGrid, #creationsGrid, #imageGenFeed')) return;
+        if (media.closest('#cardsContainer')) {
           enforceMobileCardGrid();
         }
         return;
@@ -2598,6 +2622,7 @@
       migrateCommunityCollectCards();
       window.Membership?.syncFromPayload?.(payload.account);
       window.FeatureDraft?.applyCloudSlice?.(payload);
+      loadWarehouseGroups(getActiveWarehouseId());
       normalizeCardPins();
       floatingPromptActive = settings.floatingPrompt === true;
       document.getElementById('imageClickZoomToggle').checked = settings.imageClickZoom;
@@ -3241,38 +3266,61 @@
 
     async function restoreAccountPrivateData(uid) {
       if (!uid) return false;
-      let restored = false;
-      if (await loadLocalSnapshotForUser(uid)) restored = cards.length > 0;
-      if (!restored) {
+      const tombstones = settings.deletedCardTombstones || {};
+      const idbCards = await loadCardsFromDB({ ownerUid: uid });
+      let autoPayload = null;
+      let snapshotPayload = null;
+      try {
+        autoPayload = JSON.parse(localStorage.getItem(userStorageKey('autosave', uid)) || 'null');
+      } catch (e) { /* ignore */ }
+      if (!autoPayload?.cards?.length) {
         try {
-          const autoKey = userStorageKey('autosave', uid);
-          let auto = JSON.parse(localStorage.getItem(autoKey) || 'null');
-          if (!auto?.cards?.length) {
-            const legacy = JSON.parse(localStorage.getItem('promptrepo_autosave_snapshot') || 'null');
-            const lastUid = localStorage.getItem('promptrepo_last_uid');
-            if (legacy?.cards?.length && lastUid === uid) {
-              auto = legacy;
-              localStorage.setItem(autoKey, JSON.stringify(legacy));
-              localStorage.removeItem('promptrepo_autosave_snapshot');
-            }
-          }
-          if (auto?.cards?.length) {
-            applyDataPayload(auto);
-            await saveCardsToDB(cards, { ownerUid: uid });
-            setIdbOwnerUid(uid);
-            restored = cards.length > 0;
+          const legacy = JSON.parse(localStorage.getItem('promptrepo_autosave_snapshot') || 'null');
+          const lastUid = localStorage.getItem('promptrepo_last_uid');
+          if (legacy?.cards?.length && lastUid === uid) {
+            autoPayload = legacy;
+            localStorage.setItem(userStorageKey('autosave', uid), JSON.stringify(legacy));
+            localStorage.removeItem('promptrepo_autosave_snapshot');
           }
         } catch (e) { /* ignore */ }
       }
-      if (!restored) {
-        cards = await loadCardsFromDB({ ownerUid: uid });
-        restored = cards.length > 0;
+      try {
+        const raw = localStorage.getItem(userStorageKey('snapshot', uid));
+        if (raw) snapshotPayload = JSON.parse(raw);
+      } catch (e) { /* ignore */ }
+
+      const mergeLists = window.CloudSyncSafety?.mergeCardsList;
+      let mergedCards = idbCards;
+      if (mergeLists && autoPayload?.cards?.length) {
+        mergedCards = mergeLists(mergedCards, autoPayload.cards, tombstones);
+      }
+      if (mergeLists && snapshotPayload?.cards?.length) {
+        mergedCards = mergeLists(mergedCards, snapshotPayload.cards, tombstones);
+      }
+
+      let restored = false;
+      if (mergedCards.length > 0) {
+        cards = filterTombstonedCards(normalizeCardImages(mergedCards));
+        restored = true;
+        await saveCardsToDB(cards, { ownerUid: uid });
+        setIdbOwnerUid(uid);
       }
       if (!restored) restored = await tryRestoreFromEmergencyBackup(uid);
+
+      const metaPayload = autoPayload?.cards?.length ? autoPayload : snapshotPayload;
+      if (metaPayload && typeof metaPayload === 'object') {
+        if (Array.isArray(metaPayload.customGroups) && metaPayload.customGroups.length) {
+          customGroups = metaPayload.customGroups;
+        }
+        if (Array.isArray(metaPayload.globalFields) && metaPayload.globalFields.length) {
+          globalFields = metaPayload.globalFields;
+        }
+        if (metaPayload.settings && typeof metaPayload.settings === 'object') {
+          settings = Object.assign(settings, metaPayload.settings);
+        }
+      }
       try {
-        const g = localStorage.getItem(warehouseGroupsKey(getActiveWarehouseId(), uid))
-          || localStorage.getItem(userStorageKey('groups', uid));
-        if (g) customGroups = JSON.parse(g);
+        loadWarehouseGroups(getActiveWarehouseId());
       } catch (e) { customGroups = []; }
       try {
         const f = localStorage.getItem(userStorageKey('fields', uid));
@@ -3293,7 +3341,18 @@
       const raw = localStorage.getItem(userStorageKey('snapshot', uid));
       if (!raw) return false;
       try {
-        applyDataPayload(JSON.parse(raw));
+        const snapshotPayload = JSON.parse(raw);
+        const idbCards = await loadCardsFromDB({ ownerUid: uid });
+        const tombstones = settings.deletedCardTombstones || {};
+        let mergedCards = idbCards;
+        if (window.CloudSyncSafety?.mergeCardsList && snapshotPayload?.cards?.length) {
+          mergedCards = window.CloudSyncSafety.mergeCardsList(mergedCards, snapshotPayload.cards, tombstones);
+        }
+        if (!mergedCards.length && !snapshotPayload?.cards?.length) return false;
+        applyDataPayload({
+          ...snapshotPayload,
+          cards: mergedCards.length ? mergedCards : snapshotPayload.cards
+        });
         await saveCardsToDB(cards, { ownerUid: uid });
         setIdbOwnerUid(uid);
         return cards.length > 0;
@@ -4355,6 +4414,14 @@
       window.__promptHubCards = cards;
     };
 
+    function scheduleLocalSnapshot(uid) {
+      if (!uid) return;
+      clearTimeout(localSnapshotTimer);
+      localSnapshotTimer = setTimeout(() => {
+        void snapshotLocalForUser(uid, { allowEmpty: true });
+      }, 600);
+    }
+
     async function saveAllData(opts = {}) {
       if (Array.isArray(window.__promptHubCards) && window.__promptHubCards.length > cards.length) {
         cards = window.__promptHubCards;
@@ -4386,6 +4453,7 @@
         persistWarehouseGroups(getActiveWarehouseId());
         localStorage.setItem(userStorageKey('fields', uid), JSON.stringify(globalFields));
         localStorage.setItem(userStorageKey('settings', uid), JSON.stringify(settings));
+        scheduleLocalSnapshot(uid);
       }
       if (fileHandle) { try { const w = await fileHandle.createWritable(); await w.write(JSON.stringify({cards,customGroups,globalFields,settings})); await w.close(); } catch(e) {} }
       if (!opts.skipCloud) scheduleCloudPush();
@@ -4801,10 +4869,18 @@
           const targetGroup = item.dataset.group;
           cardIds.forEach(id => {
             const c = cards.find(x => x.id === id);
-            if (c) { c.group = (targetGroup === 'all' || targetGroup === 'uncategorized') ? null : targetGroup; }
+            if (c) {
+              c.group = (targetGroup === 'all' || targetGroup === 'uncategorized') ? null : targetGroup;
+              c.updatedAt = Date.now();
+            }
           });
-          saveAllData(); renderGroups(); renderCards(true);
+          void (async () => {
+            await saveAllData();
+            renderGroups();
+            preserveCardsContainerScroll(() => renderCards(true));
+          })();
           if (batchMode) { selectedCardIds.clear(); cancelBatch(); }
+          return;
         });
       });
     }
@@ -4813,7 +4889,26 @@
     function toggleBatchMode() { batchMode = !batchMode; selectedCardIds.clear(); const btn = document.getElementById('batchToggleBtn'); btn.classList.toggle('active', batchMode); document.getElementById('batchBar').classList.toggle('active', batchMode); document.getElementById('normalBar').style.display = batchMode ? 'none' : 'flex'; renderCards(true); }
     function cancelBatch() { batchMode = false; selectedCardIds.clear(); document.getElementById('batchToggleBtn').classList.remove('active'); document.getElementById('batchBar').classList.remove('active'); document.getElementById('normalBar').style.display = 'flex'; renderCards(true); }
     function toggleSelectCard(id, el) { if (selectedCardIds.has(id)) { selectedCardIds.delete(id); if(el) el.classList.remove('checked'); } else { selectedCardIds.add(id); if(el) el.classList.add('checked'); } updateBatchCountLabel(); }
-    function batchMoveGroup() { if(!selectedCardIds.size) return; const groups = ['all','uncategorized',...customGroups]; customPrompt(`输入目标分组 (${groups.join('/')})`, '', (target) => { if(!target||!groups.includes(target)) return; const gv = (target==='all'||target==='uncategorized')?null:target; selectedCardIds.forEach(id=>{const c=cards.find(x=>x.id===id); if(c)c.group=gv;}); saveAllData(); cancelBatch(); renderGroups(); renderCards(true); }, null, groups); }
+    function batchMoveGroup() {
+      if (!selectedCardIds.size) return;
+      const groups = ['all', 'uncategorized', ...customGroups];
+      customPrompt(`输入目标分组 (${groups.join('/')})`, '', (target) => {
+        if (!target || !groups.includes(target)) return;
+        const gv = target === 'all' || target === 'uncategorized' ? null : target;
+        const now = Date.now();
+        selectedCardIds.forEach((id) => {
+          const c = cards.find((x) => x.id === id);
+          if (c) {
+            c.group = gv;
+            c.updatedAt = now;
+          }
+        });
+        saveAllData();
+        cancelBatch();
+        renderGroups();
+        preserveCardsContainerScroll(() => renderCards(true));
+      }, null, groups);
+    }
     function batchMoveWarehouse() {
       if (!selectedCardIds.size) return;
       const others = window.FeatureAssets?.getOtherWarehouses?.() || [];
@@ -4860,26 +4955,35 @@
       }
       const doDelete = async () => {
         const card = cards.find(c => c.id === id);
-        if (card?.image && window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync.isStorageRef(card.image)) {
-          try { await window.SupabaseSync.deleteCardImageByUrl(card.image); } catch (e) { /* ignore */ }
-        }
+        if (!card) return;
         recordCardDeletion(id);
         window.FeatureDraft?.onCardDeletedForGen?.(card);
         const cardPostId = card?.communityPostId;
         if (cardPostId) recordCommunityPostDeletion(cardPostId);
-        await window.FeatureDraft?.unpublishCommunityByCardId?.(id, { silent: true });
-        if (window.SupabaseSync?.isLoggedIn?.()) {
-          await window.FeatureDraft?.syncMyPostsToPublicFeed?.();
-        }
         cards = cards.filter(c => c.id !== id);
-        await saveAllData();
-        if (window.SupabaseSync?.isLoggedIn?.()) {
-          try { await pushToCloud(); } catch (e) { scheduleCloudPush(); }
+        window.__promptHubCards = cards;
+        if (selectedCardId === id) {
+          selectedCardId = null;
+          createNewCard({ silentMobile: true });
         }
         renderGroups();
         renderCards(true);
         window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true, forceRepaint: true });
-        if (selectedCardId === id) { selectedCardId = null; createNewCard({ silentMobile: true }); }
+        showToast('已删除卡片');
+        void (async () => {
+          try {
+            if (card?.image && window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync.isStorageRef(card.image)) {
+              try { await window.SupabaseSync.deleteCardImageByUrl(card.image); } catch (e) { /* ignore */ }
+            }
+            await window.FeatureDraft?.unpublishCommunityByCardId?.(id, { silent: true });
+            await saveAllData();
+            if (window.SupabaseSync?.isLoggedIn?.()) {
+              try { await pushToCloud({ silent: true }); } catch (e) { scheduleCloudPush(); }
+            }
+          } catch (e) {
+            console.warn('[deleteCard] background cleanup failed', e);
+          }
+        })();
       };
       if (confirm) {
         customConfirm('确定永久删除该卡片？此操作不可恢复。', () => { void doDelete(); });

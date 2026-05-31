@@ -5,6 +5,7 @@
   const LS_PWA_FLAG = 'promptrepo_pwa_task_flag';
   const LS_ASSET_STUDIO_LINK = 'promptrepo_task_asset_studio_link';
   const LS_INSPIRE_DRAW = 'promptrepo_inspire_draw_used';
+  const LS_GACHA_COLLECT = 'promptrepo_gacha_collect_used';
   const LS_PENDING_INVITE = 'promptrepo_pending_invite';
   let syncDebounceTimer = null;
   let syncInflight = null;
@@ -69,8 +70,8 @@
 
   function updateTaskNavBadges(data) {
     const { total, memberDaily } = countPendingTaskClaims(data);
-    const trialBadge = document.querySelector('.app-nav-trial-badge');
-    const subBadge = document.querySelector('.app-nav-subscribe-badge');
+    const trialBadge = document.getElementById('appNavTaskBadge');
+    const subBadge = document.getElementById('appNavSubscribeBadge');
     if (trialBadge) {
       trialBadge.textContent = total > 0 ? String(total) : '任务';
       trialBadge.classList.toggle('nav-badge-pending', total > 0);
@@ -136,9 +137,11 @@
     const qp = window.__phQuickPreviewTask || {};
     let assetStudioLinkCard = false;
     let inspirationDrawUsed = false;
+    let communityGachaCollectUsed = false;
     try {
       assetStudioLinkCard = localStorage.getItem(LS_ASSET_STUDIO_LINK) === '1';
       inspirationDrawUsed = localStorage.getItem(LS_INSPIRE_DRAW) === '1';
+      communityGachaCollectUsed = localStorage.getItem(LS_GACHA_COLLECT) === '1';
     } catch (e) { /* ignore */ }
     return {
       cardsCount: Array.isArray(cards) ? cards.length : 0,
@@ -149,7 +152,8 @@
       quickPreviewCommunityUsed: !!qp.communityUsed,
       quickPreviewCommunityFavorited: !!qp.communityFavorited,
       assetStudioLinkCard,
-      inspirationDrawUsed
+      inspirationDrawUsed,
+      communityGachaCollectUsed
     };
   }
 
@@ -488,7 +492,7 @@
       ? `<div class="trial-hub-row">
           <div class="trial-hub-row-main">
             <strong>会员每日积分</strong>
-            <p class="trial-hub-desc">按当前会员档位领取 ${memberDaily.amount || 0} 积分 · 当日有效</p>
+            <p class="trial-hub-desc">按当前会员档位领取 ${memberDaily.amount || 0} 积分 · 可与上方每日 5 积分叠加 · 当日有效</p>
           </div>
           <div class="trial-hub-row-action">${
             memberDaily.claimed

@@ -40,7 +40,7 @@
 
 ```javascript
 // 登录后 F12 Console
-window.__APP_BUILD__                                    // 应与左下角一致，当前 20260616f
+window.__APP_BUILD__                                    // 应与左下角一致，当前 20260602w
 await window.PromptHubApi.getCommunityFeed({ limit: 80 }) // posts.length、是否含他人 authorId
 window.__promptHubCards.filter(c => c.publishedToCommunity) // 应与卡片库开关一致（用户反馈目前不一致）
 console.time('feed'); await window.PromptHubApi.getCommunityFeed({ limit: 20 }); console.timeEnd('feed')

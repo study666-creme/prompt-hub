@@ -16,11 +16,12 @@ import {
 } from '../../lib/membership-credits';
 import { createAdminClient, getOrCreateProfile, isMembershipActive } from '../../lib/supabase';
 import { submitVisionChat } from '../../lib/vision-chat';
+import { consumeInspirationDraw, INSPIRE_DRAW_DAILY_LIMIT } from '../../lib/inspiration-draw';
 import { rateLimit } from '../../middleware/rate-limit';
 
 const optimizeSchema = z.object({
   prompt: z.string().min(2).max(4000),
-  target: z.enum(['general', 'sd', 'anime', 'jimeng', 'guofeng', 'realistic', 'glamour']).optional()
+  target: z.enum(['general', 'sd', 'anime', 'jimeng', 'guofeng', 'realistic', 'glamour', 'malePower', 'bodyBeauty']).optional()
 });
 
 const reverseSchema = z.object({
@@ -65,8 +66,12 @@ const OPTIMIZE_SYSTEM: Record<string, string> = {
     '你是国风 / 仙侠 / 汉服生图提示词专家。优化用户提示词：补充朝代感服饰、发饰、场景（园林/山水/宫殿）、丁达尔光/柔雾/飘带动态、水墨或工笔质感、仙气氛围与质量词。输出仅一段中文提示词，不要解释。',
   realistic:
     '你是写实摄影 / 写真提示词专家。优化用户提示词：补充镜头焦段感（如 85mm/35mm）、光线（伦勃朗/自然光/胶片）、肤质与材质真实感、景深、构图与 4K 画质描述。输出仅一段中文提示词，不要解释。',
+  bodyBeauty:
+    '你是艺术人体摄影 / fine art 提示词专家。优化用户提示词：强调人体线条、姿态、光影与古典/现代艺术构图，性感来自氛围与结构美（舞蹈、运动、雕塑感），禁止裸露私密部位与色情描写。人物须衣着完整（泳装/练功服/礼服/运动装等）。参考 Avedon、Lindbergh、Vogue 艺术人体专题。输出仅一段中文提示词，不要解释。',
+  malePower:
+    '你是男性力量 / 健身 / 运动员肖像提示词专家。优化用户提示词：强调宽肩窄腰倒三角、薄肌或运动员体格、人鱼线、背阔肌与力量姿态，雄性魅力来自体态与气场而非裸露。人物须男性、衣着完整（泳裤/运动装/西装/训练服等），禁止裸露私密部位与色情描写。风格参考 GQ、Men\'s Health、Sports Illustrated 男体专题。输出仅一段中文提示词，不要解释。',
   glamour:
-    '你是高级时尚性感人像提示词专家。优化用户提示词：强调女性身体线条、肤质与氛围张力，姿态要有呼吸感与吸引力，但人物必须穿着完整（泳装/礼服/连体衣/运动装/时尚外搭等），禁止裸露私密部位、禁止色情与性暗示描写。补充 S 曲线构图、锁骨肩线腰臀比例、轮廓光与肤光、浅景深、电影级调色。风格参考高级时尚杂志/泳装画报，适合社区公开发布。输出仅一段中文提示词，不要解释。'
+    '你是高级时尚性感人像提示词专家（女性专属）。优化用户提示词：主体必须为女性，强调不写实/漫画化夸张身材比例（九头身、极细腰、夸张胸胯比等）、非常规/avant-garde 时装设计与血脉贲张的感官张力，但人物必须穿着完整，禁止裸露私密部位与色情描写。输出仅一段中文提示词，不要解释。',
 };
 
 const REVERSE_SYSTEM =
@@ -157,9 +162,20 @@ promptToolsRoutes.get('/info', async c => {
         creditsPerDescribe: PURIFY_DESCRIBE_CREDITS,
         creditsPerImageEstimate: PURIFY_DESCRIBE_CREDITS + 7,
         note: '读图 2 积分/张 + 参考图重绘（与普通生图同价）；保持内容仅净化画质'
+      },
+      inspirationDraw: {
+        limits: INSPIRE_DRAW_DAILY_LIMIT,
+        note: '普通用户 3 次/天 · 轻量会员 20 次/天 · 基础及以上无限（仅「随机抽卡」计次）'
       }
     }
   });
+});
+
+promptToolsRoutes.post('/inspiration-draw', rateLimit(120, 60_000), async c => {
+  const user = c.get('user');
+  const admin = createAdminClient(c.env);
+  const { quota } = await consumeInspirationDraw(admin, user.id);
+  return c.json({ ok: true, data: { quota } });
 });
 
 promptToolsRoutes.post('/optimize', rateLimit(90, 60_000), async c => {

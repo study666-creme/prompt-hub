@@ -34,6 +34,7 @@ export type TaskKey =
   | 'asset_studio_chat'
   | 'asset_studio_link_card'
   | 'inspiration_draw'
+  | 'community_gacha_collect'
   | 'cards_count_25'
   | 'spend_1000'
   | 'spend_2000'
@@ -54,6 +55,11 @@ export type TaskFlags = {
   asset_studio_chat_used?: boolean;
   asset_studio_link_card?: boolean;
   inspiration_draw_used?: boolean;
+  community_gacha_collect_used?: boolean;
+  inspiration_draw_daily_date?: string;
+  inspiration_draw_daily_count?: number;
+  community_gacha_daily_date?: string;
+  community_gacha_daily_count?: number;
   sign_streak?: number;
   last_sign_date?: string;
 };
@@ -204,6 +210,12 @@ export function taskRewardForKey(
       title: '使用灵感抽卡',
       description: '在生图页灵感工具箱点击「随机抽卡」生成提示词（本地免费）'
     },
+    community_gacha_collect: {
+      days: 1,
+      credits: 0,
+      title: '随心一抽并收藏',
+      description: '在社区点击「随心一抽」，将抽到的作品收藏入卡片仓库'
+    },
     cards_count_25: {
       days: 1,
       credits: 0,
@@ -322,6 +334,8 @@ export function isTaskProgressMet(
       return !!flags.asset_studio_link_card;
     case 'inspiration_draw':
       return !!flags.inspiration_draw_used;
+    case 'community_gacha_collect':
+      return !!flags.community_gacha_collect_used;
     case 'cards_count_25':
       return (flags.cards_count_synced ?? 0) >= 25;
     case 'spend_1000':
@@ -379,7 +393,8 @@ export async function extendMembershipDays(
   admin: SupabaseClient,
   profile: Profile,
   days: number,
-  tier: NonNullable<Profile['membership_tier']> = 'basic'
+  tier: NonNullable<Profile['membership_tier']> = 'basic',
+  opts?: { creditGrantMode?: 'daily' | 'bundle' }
 ): Promise<Profile> {
   const now = Date.now();
   const curUntil = profile.membership_until
@@ -392,6 +407,9 @@ export async function extendMembershipDays(
     membership_tier: tier,
     membership_until: until
   };
+  if (opts?.creditGrantMode) {
+    patch.credit_grant_mode = opts.creditGrantMode;
+  }
 
   const { data, error } = await admin
     .from('profiles')
@@ -406,6 +424,29 @@ export async function extendMembershipDays(
         : 'extend_membership_failed';
     throw new Error(pgMsg);
   }
+  return data as Profile;
+}
+
+/** 任务/邀请赠送的会员走 daily；老数据若仍是 bundle 且几乎无永久积分则自动修正 */
+export async function ensureTaskMembershipDailyMode(
+  admin: SupabaseClient,
+  profile: Profile
+): Promise<Profile> {
+  if (
+    !isMembershipActive(profile) ||
+    !profile.membership_tier ||
+    profile.credit_grant_mode === 'daily'
+  ) {
+    return profile;
+  }
+  if ((profile.credits ?? 0) > 50) return profile;
+  const { data, error } = await admin
+    .from('profiles')
+    .update({ credit_grant_mode: 'daily' })
+    .eq('user_id', profile.user_id)
+    .select()
+    .single();
+  if (error) return profile;
   return data as Profile;
 }
 
@@ -554,7 +595,9 @@ export async function claimMembershipTask(
   }
 
   if (reward.days > 0) {
-    profile = await extendMembershipDays(admin, profile, reward.days, 'basic');
+    profile = await extendMembershipDays(admin, profile, reward.days, 'basic', {
+      creditGrantMode: 'daily'
+    });
   }
   let signStreakMsg = '';
   if (isMemberDailyTaskKey(taskKey)) {
@@ -726,6 +769,7 @@ export function buildTaskList(
     'asset_studio_chat',
     'asset_studio_link_card',
     'inspiration_draw',
+    'community_gacha_collect',
     'cards_count_25',
     spendKey
   ].filter((k): k is string => !!k);

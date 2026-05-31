@@ -7,6 +7,8 @@ import {
   syncMembershipCredits
 } from '../../lib/membership-credits';
 import { normalizeDisplayName, resolveDisplayName } from '../../lib/display-name';
+import { buildCommunityGachaQuota } from '../../lib/community-gacha';
+import { buildInspirationDrawQuota } from '../../lib/inspiration-draw';
 import { createAdminClient, isMembershipActive } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
 
@@ -45,7 +47,9 @@ meRoutes.get('/', async c => {
       trialFreeUsed: profile.trial_free_used,
       lifetimeCreditsSpent: profile.lifetime_credits_spent ?? 0,
       dailyCreditsByTier: DAILY_CREDITS_BY_TIER,
-      lumpCreditsByTier: { lite: 0, basic: 130, standard: 320, pro: 700 }
+      lumpCreditsByTier: { lite: 0, basic: 130, standard: 320, pro: 700 },
+      inspirationDraw: buildInspirationDrawQuota(profile),
+      communityGacha: buildCommunityGachaQuota(profile)
     }
   });
 });

@@ -47,20 +47,43 @@ export function formatPriceLabel(priceCents: number): string {
   return yuan % 1 === 0 ? `¥${yuan.toFixed(0)}` : `¥${yuan.toFixed(2)}`;
 }
 
-function normalizePreviewTree(raw: unknown): Array<{ name: string; children?: unknown[] }> {
+function normalizePreviewTree(
+  raw: unknown
+): Array<{ name: string; cardCount?: number; previewCardIds?: string[]; children?: string[] }> {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((node) => {
       if (!node || typeof node !== 'object') return null;
-      const n = node as { name?: string; children?: unknown[] };
+      const n = node as {
+        name?: string;
+        cardCount?: number;
+        previewCardIds?: unknown[];
+        children?: unknown[];
+      };
       const name = String(n.name || '').trim();
       if (!name) return null;
-      const children = Array.isArray(n.children)
-        ? n.children.map((c) => (typeof c === 'string' ? c : String((c as { name?: string })?.name || ''))).filter(Boolean)
+      const previewCardIds = Array.isArray(n.previewCardIds)
+        ? n.previewCardIds.map(String).filter(Boolean)
         : undefined;
-      return children?.length ? { name, children } : { name };
+      const cardCount = Number.isFinite(Number(n.cardCount))
+        ? Math.max(0, Number(n.cardCount))
+        : undefined;
+      if (previewCardIds?.length || cardCount != null) {
+        return { name, cardCount, previewCardIds };
+      }
+      const children = Array.isArray(n.children)
+        ? n.children
+            .map((c) => (typeof c === 'string' ? c : String((c as { name?: string })?.name || '')))
+            .filter(Boolean)
+        : undefined;
+      return children?.length ? { name, children, cardCount: children.length } : { name };
     })
-    .filter(Boolean) as Array<{ name: string; children?: unknown[] }>;
+    .filter(Boolean) as Array<{
+      name: string;
+      cardCount?: number;
+      previewCardIds?: string[];
+      children?: string[];
+    }>;
 }
 
 function normalizePreviewThumbs(raw: unknown): Array<{ label: string; hue: number }> {
@@ -280,7 +303,7 @@ export async function createAssetPackage(
   const previewCardIds = (input.previewCardIds?.length ? input.previewCardIds : cards.slice(0, 4).map((c) => c.id))
     .map(String)
     .filter((id) => cards.some((c) => c.id === id))
-    .slice(0, 8);
+    .slice(0, 60);
   const countLabel =
     String(input.countLabel || '').trim() || `${cards.length} 张卡片${cards.some((c) => c.prompt) ? ' + 提示词' : ''}`;
   const previewTree = input.previewTree

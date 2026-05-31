@@ -1880,7 +1880,14 @@
       character: c.character || '',
       relations: c.relations || ''
     };
-    let html = getCoreFieldOrder()
+    const fieldsTip = readonly
+      ? ''
+      : `<div class="studio-card-fields-tip">
+        <span><strong>字段可自定义</strong>：名称、顺序与新增字段可在「字段设置」中配置，仅影响当前项目。</span>
+        <button type="button" class="btn btn-ghost btn-sm" data-action="open-field-settings">字段设置</button>
+      </div>`;
+    let html = fieldsTip;
+    html += getCoreFieldOrder()
       .map((key) => {
         const meta = coreMeta[key];
         if (!meta) return '';
@@ -1911,6 +1918,12 @@
     return html;
   }
 
+  function bindCardDetailFieldSettings(root) {
+    root?.querySelectorAll('[data-action="open-field-settings"]').forEach((btn) => {
+      btn.addEventListener('click', () => openFieldSettings());
+    });
+  }
+
   function openCardDetailPanel(cardId) {
     const c = getCard(cardId);
     const root = document.getElementById('studioCardDetail');
@@ -1934,16 +1947,39 @@
       : '<p class="panel-hint" style="margin:0">暂无关联文档。拖入写作区首字段后会自动关联当前文档。</p>';
     const readonly = isViewOnly();
     body.innerHTML = `
-      <div class="studio-card-detail-visual">${cardDetailThumbHtml(c)}</div>
-      <div class="studio-card-detail-info">
-        ${buildCardDetailFieldsHtml(c, readonly)}
-        <div class="studio-doc-links">
-          <h3>关联文档</h3>
-          ${docLinksHtml}
+      <div class="studio-card-detail-compose">
+        <div class="studio-card-float studio-card-float--visual">
+          ${cardDetailThumbHtml(c)}
+          <p class="studio-card-float-caption">参考图 · 来自卡片库</p>
+        </div>
+        <div class="studio-card-bridge" aria-hidden="true">
+          <div class="studio-card-bridge-line"></div>
+          <div class="studio-card-bridge-node studio-card-bridge-node--a"></div>
+          <div class="studio-card-bridge-link" title="卡片与设定文档关联"></div>
+          <div class="studio-card-bridge-node studio-card-bridge-node--b"></div>
+        </div>
+        <div class="studio-card-float studio-card-float--info">
+          <div class="studio-card-float-head">
+            <div>
+              <span class="studio-card-float-kicker">设定文档</span>
+              <p class="studio-card-float-hint">拖入写作区后，此处字段会随卡片一起被 AI 与生图引用</p>
+            </div>
+            ${readonly ? '' : '<button type="button" class="btn btn-ghost btn-sm" data-action="open-field-settings">字段设置</button>'}
+          </div>
+          <div class="studio-card-detail-info">
+            ${buildCardDetailFieldsHtml(c, readonly)}
+            <div class="studio-doc-links">
+              <h3>关联文档</h3>
+              ${docLinksHtml}
+            </div>
+          </div>
         </div>
       </div>`;
     const saveBtn = document.getElementById('studioCardSaveBtn');
+    const fieldBtn = document.getElementById('studioCardFieldSettingsBtn');
     if (saveBtn) saveBtn.style.display = readonly ? 'none' : '';
+    if (fieldBtn) fieldBtn.style.display = readonly ? 'none' : '';
+    bindCardDetailFieldSettings(body);
     body.querySelectorAll('[data-goto-doc]').forEach((btn) => {
       btn.addEventListener('click', () => jumpToDoc(btn.dataset.gotoDoc));
     });
@@ -1953,7 +1989,7 @@
     });
     root.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
-    void hydrateStudioCardImages(body.querySelector('.studio-card-detail-visual'));
+    void hydrateStudioCardImages(body.querySelector('.studio-card-float--visual'));
   }
 
   function bindCardDrag(nodes) {
@@ -2899,7 +2935,9 @@
     if (order.length) p.coreFieldOrder = order;
     saveState();
     renderEditor();
+    const reopenId = detailCardId;
     closeFieldSettings();
+    if (reopenId) openCardDetailPanel(reopenId);
     setStatus('字段设置已保存');
   }
 
@@ -3158,6 +3196,7 @@
     document.getElementById('studioChatNewThread')?.addEventListener('click', createNewChatThread);
     document.getElementById('studioCardDetailClose')?.addEventListener('click', closeCardDetailPanel);
     document.getElementById('studioCardDetailBackdrop')?.addEventListener('click', closeCardDetailPanel);
+    document.getElementById('studioCardFieldSettingsBtn')?.addEventListener('click', openFieldSettings);
     document.getElementById('studioCardSaveBtn')?.addEventListener('click', saveCardFromDetail);
     document.getElementById('studioCardCopyPrompt')?.addEventListener('click', () => {
       const c = detailCardId ? getCard(detailCardId) : null;

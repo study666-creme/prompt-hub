@@ -15,27 +15,31 @@
 | **提示词社区** | 全站 Feed（`community_posts` + API） |
 | **我的主页** | 发布作品、关注/粉丝、拥有的/发布的资产包 |
 | **图片生成** | 扣积分；`POST /api/v1/generate` |
+| **资产包** | 领取存入「拥有」、封面预览、一键导入建文件夹 |
+| **资产创作** | `asset-studio.html` · 左图右文档悬浮详情 + 字段设置 |
 
 部署：**Pages** https://prompt-hub.cn · **API** https://api.prompt-hub.cn · Worker 名 `prompt-hub-api`
 
 ---
 
-## 当前部署阶段（2026-05-31 · 构建 **20260602e**）
+## 当前部署阶段（2026-05-30 · 构建 **20260602w** · 已部署）
 
 | 项 | 状态 |
 |----|------|
 | Worker | `prompt-hub-api` · API https://api.prompt-hub.cn |
 | Pages | https://prompt-hub.cn |
-| 构建号 | **20260602e**（已部署 Pages） |
+| 构建号 | **20260602w** · SW `prompt-hub-v314` |
 | `/health`、兑换、生图 | 已打通 |
-| 资产包 | 选卡发布 / 层叠封面 / 开包导入 / 下架；需 Supabase 迁移 |
-| 生图仓库详情 | 右侧预览栏收窄，竖图两侧留白优化 |
+| 资产包 | 领取后存入「拥有」；封面点击预览；一键导入自动建文件夹 |
+| 随心一抽 | 每日 10 次 · `GET/POST /api/v1/community/gacha/*` + `/me` 同步 |
+| 手机社区 | Grid 两列（20260602u 修空白叠卡） |
+| 资产创作详情 | 左悬浮图 · 中链接 · 右悬浮文档 + 字段设置入口 |
 
 ### 已知问题 / 下一步
 
-- 强刷确认 `window.__APP_BUILD__ === '20260602e'`
-- 资产包迁移：`20260530120000` + `20260530130000`（若未跑）
-- 加入社群 +100 积分：入群后人工引导领取
+- 强刷或注销 SW 后确认 `window.__APP_BUILD__ === '20260602w'`
+- 资产包分批选择性导入（当前：浏览全部 + 一键全量导入）
+- 大体积图包「浏览包内图片」加载速度待优化
 
 ### 测试账号
 
@@ -47,10 +51,7 @@
 cd d:\prompt-hub
 .\deploy-pages.ps1
 cd server
-npm exec wrangler deploy
-```
-cd server
-.\deploy.ps1
+npx wrangler deploy
 ```
 
 ---

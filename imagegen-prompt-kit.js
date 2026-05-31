@@ -282,7 +282,8 @@
     pixel: 'illustration',
     comic: 'illustration',
     flat: 'illustration',
-    cyber_render: 'illustration'
+    cyber_render: 'illustration',
+    dark_aesthetic: 'illustration'
   };
 
   function resolveStyleId(styleId) {
@@ -339,6 +340,18 @@
     return WORDS.glamourSubject;
   }
 
+  function glamourMaleSubjectPool(family) {
+    if (family === 'photo') return WORDS.glamourSubjectMalePhoto;
+    if (family === 'anime') return WORDS.glamourSubjectMaleAnime;
+    if (family === 'cg3d') return WORDS.glamourSubjectMale3d;
+    if (family === 'painterly' || family === 'illustration') return WORDS.glamourSubjectMaleAnime;
+    return WORDS.glamourSubjectMale;
+  }
+
+  function malePowerSubjectPool(family) {
+    return glamourMaleSubjectPool(family);
+  }
+
   function lightPoolForCharacter(family) {
     if (family === 'anime' || family === 'illustration') return WORDS.animeLight;
     if (family === 'cg3d') return WORDS.cg3dLight;
@@ -366,7 +379,21 @@
     'speed lines 仅背景区域',
     '花瓣/羽毛轨迹弧线引导视线',
     '单一强光源形成长 shadow',
-    '画面边缘 anime film grain 轻微'
+    '画面边缘 anime film grain 轻微',
+    '远处飞鸟或纸屑形成引导线',
+    '前景虚化遮挡增加层次',
+    '画面一角 small 道具呼应主题',
+    '统一风向的布料/发丝/烟',
+    '地面水洼倒映主体半身',
+    '窗框或门框自然框景',
+    '星芒滤镜点光源',
+    '薄雾仅远景，焦内清晰',
+    '色彩仅一处饱和其余灰',
+    '镜头光晕克制单一',
+    '背景重复图案弱化',
+    '主体脚下 contact shadow 真实',
+    '环境粒子：萤光/尘埃/花瓣',
+    '时间感：黄昏长影或蓝调'
   ];
 
   const WORDS = {
@@ -759,50 +786,76 @@
       '对称构图，仪式感', '底部 15% 留字幕安全区'
     ],
     glamourSubject: [
-      '气质角色，肩颈线条优美', '神秘旅人，斗篷与腰带', '舞台表演者，肢体舒展',
-      '剑士卸甲，侧脸与锁骨', '精灵射手，长腿与弓', '和风舞姬，扇与足袋',
-      '爵士歌手，丝绒裙麦前', '泳池边模特，健康曲线', '芭蕾体态，颈项修长',
-      '红毯女星，高开衩礼服', '健身模特，力量与柔软', '艺术系女生，慵懒书卷气'
+      '气质角色，肩颈丰润线条优美', '神秘旅人，斗篷下腰臀曲线饱满', '舞台表演者，肢体舒展肉感健康',
+      '剑士卸甲，侧脸锁骨与胸廓轮廓', '精灵射手，长腿浑圆有力', '和风舞姬，扇与足袋，腰肢柔软',
+      '爵士歌手，丝绒裙麦前，曲线丰盈', '泳池边模特，饱满比基尼曲线', '芭蕾体态，颈项修长肩背圆润',
+      '红毯女星，高开衩礼服包臀', '健身模特，力量与柔软并存', '艺术系女生，慵懒书卷气与 soft curves',
+      '丰腴女郎，骨肉匀亭', '肉感健康模特，腰臀比自然浑圆', '泳装画报女郎，胸型丰盈但衣着完整',
+      '法式熟女魅力，小腹微隆的柔软感', '拉丁身材，胯部与大腿曲线饱满', '港风丰腴美人，波浪卷发',
+      '温泉和服，腰带下腰线柔软', '比基尼广告，健康肉感非骨感', '晚礼服丰臀，S 曲线明显'
     ],
     glamourSubjectPhoto: [
-      '拉丁裔模特，湿发贴颈', '东亚混血女郎，锁骨清晰', '金发比基尼模特，小麦肤',
-      '黑发御姐，肩线利落', '健身模特，腹肌线条柔和', '芭蕾体态少女，颈项修长',
-      '港风女郎，波浪卷发', '泳池边的法国模特', '红毯女星，高开衩礼服',
-      '瑜伽教练，柔韧身姿', '冲浪女孩，盐渍肌肤', '爵士酒吧歌手，丝绒裙',
-      '北欧冷白皮模特，肩背线条', '深肤模特，光泽肌与健康曲线', '短发中性魅力模特',
-      '拉丁舞教师，腰臀比自然', '艺术系女生，慵懒书卷气', '马术女孩，长腿与晒痕',
-      '复古好莱坞 starlet', '现代极简超模脸', '温泉旅馆和服浴衣改良',
-      '泳池救生员体态，健康力量感', '钢琴家，背脊与手臂线条', '晨跑后的自然红晕',
-      '法式公寓窗边的慵懒女郎', '比基尼广告模特，健康曲线', '丝绒酒吧驻唱，麦前侧光'
+      '拉丁裔模特，湿发贴颈，腰臀曲线饱满', '东亚混血女郎，锁骨清晰，胸型丰盈泳装完整',
+      '金发比基尼模特，小麦肤，肉感健康曲线', '黑发御姐，肩线利落，胯部线条浑圆',
+      '健身模特，腹肌柔和，整体丰腴不消瘦', '芭蕾体态少女，颈项修长，肩背圆润',
+      '港风丰腴女郎，波浪卷发，S 曲线', '泳池边法国模特，比基尼包裹饱满身材',
+      '红毯女星，高开衩礼服，臀线包臀', '瑜伽教练，柔韧身姿，大腿有肉感',
+      '冲浪女孩，盐渍肌肤，健康肉感', '爵士酒吧歌手，丝绒裙，胸腰曲线明显',
+      '北欧模特，肩背线条，整体匀称偏丰', '深肤模特，光泽肌与饱满曲线', '短发中性魅力模特',
+      '拉丁舞教师，腰臀比自然浑圆', '艺术系女生，慵懒书卷气，soft body', '马术女孩，长腿与晒痕，肌肉柔软',
+      '复古好莱坞 starlet，丰唇与曲线', '现代超模，骨肉匀亭', '温泉旅馆和服浴衣，腰带下腰线柔软',
+      '泳池救生员，健康力量与肉感', '钢琴家，背脊与手臂线条', '晨跑后自然红晕，汗湿肌肤',
+      '法式公寓窗边慵懒女郎， linen 睡裙', '比基尼广告，voluptuous but tasteful', '丝绒酒吧驻唱，麦前侧光',
+      '丰腴 bikini 模特，胸型与胯部饱满', '肉感写真女郎，非骨感审美', '泳装画报，曲线夸张但衣着完整',
+      '成熟女性魅力，小腹微隆柔软感', '健康 plus-curve 模特，自信性感'
     ],
     glamourSubjectAnime: [
-      '银发剑士少女，甲胄半卸', '和风巫女，浴衣腰带松散', '精灵射手，长腿拉弓',
-      '猫耳侦探，风衣与耳', '魔法学院学姐，制服与披风', '吸血鬼贵族，礼服与披风',
-      '机甲驾驶员，休息舱便装', '偶像 backstage，麦克风与彩带', '炼金术士，实验袍敞开',
-      '龙角少女，鳞片微光', '阴阳师，和服与式神光', '不良少年，制服敞开',
-      '体操少女，彩带缠绕', '海盗副官，眼罩与弯刀', '天文社少女，望远镜与星图',
+      '银发剑士少女，甲胄半卸，腰肢柔软', '和风巫女，浴衣腰带松散，曲线丰盈',
+      '精灵射手，长腿拉弓，大腿有肉感', '猫耳侦探，风衣与耳，胸腰比例 anime 化饱满',
+      '魔法学院学姐，制服与披风，S 曲线', '吸血鬼贵族，礼服与披风，胸型丰盈插画',
+      '机甲驾驶员，休息舱便装，肉感健康', '偶像 backstage，麦克风与彩带', '炼金术士，实验袍敞开',
+      '龙角少女，鳞片微光', '阴阳师，和服与式神光', '体操少女，彩带缠绕，肢体柔软', '海盗副官，眼罩与弯刀', '天文社少女，望远镜与星图',
       '兽耳冒险者，地图与背包', '黑客少女，耳机与透明键盘', '女仆咖啡厅，托盘与咖啡',
-      '乐队贝斯手，挑染发', '和风舞姬，扇与足袋', '科幻机娘，维护中半甲',
+      '乐队贝斯手，挑染发', '和风舞姬，扇与足袋，胯线圆润', '科幻机娘，维护中半甲',
       '转校生，书包与樱花', '魔法使，星核法杖', '剑士，和风外套半敞',
-      '温泉旅馆和服少女，腰带松垮', '泳池边 anime 少女，泳装与阳伞',
-      '晚礼服 anime 女郎，高开衩但插画', '健身系 anime 少女，运动内衣与外套',
-      '爵士 bar 歌手 anime 版，丝绒裙', '雨夜 window 边的 anime 少女，侧脸'
+      '温泉旅馆和服少女，腰带松垮', '泳池边 anime 少女，比基尼饱满曲线',
+      '晚礼服 anime 女郎，高开衩包臀', '健身系 anime 少女，运动内衣与外套，腹肌 soft',
+      '爵士 bar 歌手 anime 版，丝绒裙', '雨夜 window 边的 anime 少女，侧脸',
+      '肉感 anime  heroine，胸腰臀比例夸张但泳装完整', '丰腴巫女，和服领口锁骨与肩',
+      '韩漫 webtoon 身材，腰细胯圆', 'SSR 泳装卡面，voluptuous anime proportions'
     ],
     glamourSubject3d: [
-      '3D 赛博女郎，义体接缝微光', '3D 精灵射手，PBR 皮甲', '3D 和服巫女，丝绸物理',
-      '3D 机甲少女，外甲半卸', '3D 吸血鬼贵族，披风物理', '3D 偶像，舞台灯光',
-      '3D 剑士，金属护甲划痕', '3D 泳装少女，水面 caustics', '3D 晚礼服女郎，布料垂坠',
-      '3D 健身模特，肌肉线条 CG', '3D 酒吧歌手，丝绒材质', '3D 冒险者，皮革与金属'
+      '3D 赛博女郎，义体接缝微光，腰臀曲线饱满', '3D 精灵射手，PBR 皮甲，大腿有肉感',
+      '3D 和服巫女，丝绸物理，S 曲线', '3D 机甲少女，外甲半卸，肉感健康',
+      '3D 吸血鬼贵族，披风物理，胸型丰盈', '3D 偶像，舞台灯光，voluptuous silhouette',
+      '3D 剑士，金属护甲划痕，薄肌倒三角', '3D 泳装少女，水面 caustics，比基尼完整包裹',
+      '3D 晚礼服女郎，布料垂坠，臀线浑圆', '3D 健身模特，肌肉与 soft flesh 并存',
+      '3D 酒吧歌手，丝绒材质', '3D 冒险者，皮革与金属',
+      'UE5 写实角色，皮肤 subsurface，胸腰曲线饱满', 'Blender 男角色，布料贴身，athletic build',
+      '游戏 CG 男主，战损甲胄半卸', 'voluptuous 3D character，tasteful swimwear'
     ],
     glamourOutfit: [
-      '黑色连体泳装，剪裁利落', '白色比基尼 + 半透明纱笼', '丝质吊带晚礼服，开衩及腿',
-      '露背红裙，腰侧镂空但遮挡完整', '蕾丝连体衣外搭西装外套', '运动内衣 + 高腰瑜伽裤',
-      '湿身衬衫（内衬可见但不露点）', '金属感 bodycon 短裙', '香槟色 silk slip 睡裙',
-      '高叉旗袍改良款', '一字肩鱼尾礼服', '海边 linen 罩衫 + 比基尼',
-      '针织 wrap 连衣裙，侧绑带', '缎面 corset 外搭廓形大衣', '网球风 polo + 百褶短裙',
-      '丝质和服浴衣改良，腰带松垮', '皮革迷你裙 + 过膝靴，克制性感', '泳装外搭 oversize 男友衬衫',
-      '深 V 丝绒 jumpsuit，腰线明确', '蕾丝 bodysuit + 高腰阔腿裤', '比基尼 + 长纱裙叠穿',
-      '运动拉链上衣半开，健康性感', '丝绸 scarf 当上衣，艺术化遮挡', '晚礼服披肩滑落肩线一瞬'
+      '黑色连体泳装，剪裁利落，包覆饱满曲线', '白色比基尼 + 半透明纱笼，胸腰臀线条',
+      '丝质吊带晚礼服，开衩及腿，包臀', '露背红裙，腰侧镂空但遮挡完整',
+      '蕾丝连体衣外搭西装外套', '运动内衣 + 高腰瑜伽裤，肉感健康',
+      '湿身衬衫（内衬可见但不露点）', '金属感 bodycon 短裙，S 曲线',
+      '香槟色 silk slip 睡裙', '高叉旗袍改良款，胯线强调',
+      '一字肩鱼尾礼服，胸型轮廓', '海边 linen 罩衫 + 比基尼，voluptuous',
+      '针织 wrap 连衣裙，侧绑带', '缎面 corset 外搭廓形大衣',
+      '网球风 polo + 百褶短裙', '丝质和服浴衣改良，腰带松垮',
+      '皮革迷你裙 + 过膝靴，克制性感', '泳装外搭 oversize 男友衬衫',
+      '深 V 丝绒 jumpsuit，腰线明确', '蕾丝 bodysuit + 高腰阔腿裤',
+      '比基尼 + 长纱裙叠穿', '运动拉链上衣半开，健康性感',
+      '丝绸 scarf 当上衣，艺术化遮挡', '晚礼服披肩滑落肩线一瞬',
+      'high-cut 泳装，大腿与胯部饱满', 'string bikini tasteful，曲线夸张但完整',
+      'one-piece 泳装，胸型丰盈轮廓', '健身 bikini 套装，肉感非骨感',
+      '解构主义不对称裁片，镂空几何', '单肩礼服，结构反常规',
+      '液态金属 drapery 包裹曲线', '透明 PVC 叠蕾丝 art 层',
+      '胸衣外穿 + 巨大廓形袖', '绑带 art 装，非日常结构',
+      '机械感 exoskeleton 时装轮廓', '纸雕立体造型裙，超现实',
+      '超现实 collage 物件点缀（钟表/花）', '反向结构时装艺术',
+      '超短 crop + 极宽喇叭裤对比', '单腿裤 asymmetrical 剪裁',
+      'body chain 外搭 minimal 布料', '乳胶质感几何 cut-out 艺术化'
     ],
     glamourPose: [
       'S 曲线站立，一手抚发', '回眸过肩，眼神带笑', '坐池边，双足轻点水面',
@@ -821,7 +874,9 @@
       '成熟魅力，不讨好镜头', '少年感与女人味并存', '运动后的健康 glow',
       '深夜私密，但画面干净', '度假松弛，阳光与盐', '都市夜归，疲惫中的美',
       '艺术摄影感，非电商摆拍', '情绪在眼神，不在裸露', '高级 lingerie 广告调性',
-      '法式 effortless chic', '意式热情但画面克制', '东亚清冷感性感'
+      '法式 effortless chic', '意式热情但画面克制', '东亚清冷感性感',
+      '血脉贲张的吸引力，但衣着完整', '肾上腺素飙升的感官张力', '让人心跳加速的撩感',
+      '刺激感官却不越界', '欲念在眼神与曲线，非裸露'
     ],
     glamourExpression: [
       '眼神慵懒半阖，视线落向镜头', '嘴唇微张欲言又止', '轻咬下唇，克制又撩',
@@ -898,12 +953,244 @@
       '锁骨的 shadow 恰好一道', '发丝扫过唇角', '肩带滑落一寸定格',
       '水珠沿颈线滑落', '戒指反光在暗部', '耳坠轻晃 motion blur',
       '睫毛投影在颊上', '手套半脱，指节修长', '纹身/痣作为点睛',
-      '项链坠子在锁骨窝', '背后蝴蝶骨线条', '腰侧 fabric 被风贴肤'
+      '项链坠子在锁骨窝', '背后蝴蝶骨线条', '腰侧 fabric 被风贴肤',
+      '胯骨转折高光', '大腿外侧 soft flesh 轮廓', '小腹微隆的 soft curve',
+      '臀线被 fabric 勾勒', '胸型轮廓在泳装下', '臂弯与腋下 soft shadow',
+      '膝窝与小腿肚曲线', '颈侧动脉微红', '腰窝浅凹与浑圆腰臀对比'
+    ],
+    malePowerMood: [
+      '雄性力量感，自信压迫场', '运动员的专注与爆发', '倒三角轮廓，健康健美',
+      '荷尔蒙张力但不低俗', 'GQ / Men\'s Health 封面级', '泳池/健身场景的力量美',
+      '硬朗下颌与颈线', '薄肌线条，非夸张健美', '征服感来自体态非裸露'
+    ],
+    malePowerPose: [
+      '宽肩展开，一手叉腰', '回眸过肩，下颌线锋利', '健身后拉伸，背阔肌展开',
+      '倚墙，单臂撑楣', '低机位仰拍，倒三角', '游泳出水，甩发与肩背',
+      '拳击抱架，核心收紧', '橄榄球起跑姿态', '攀岩挂点，前臂与背肌',
+      '剑士拔刀蓄力', '拉引体向上 mid-rep', '西装整理领带，胸廓挺起'
+    ],
+    malePowerAtmosphere: [
+      '健身房侧光，器械 bokeh', '泳池边蒸汽与蝉鸣', '拳击馆顶光',
+      '海边日落，盐渍肌肤', '赛车 pit lane', '雪山训练营',
+      '爵士酒吧暗角，丝绒西装', '晨跑后城市天际线', '温泉旅馆木栏'
+    ],
+    malePowerVibe: [
+      'GQ 封面级男性力量', 'Sports Illustrated 男体专题', '健身杂志 editorial',
+      '电影男主海报张力', '游泳选手广告', '橄榄球/格斗运动员肖像',
+      '硬朗雄性魅力，非色情'
+    ],
+    malePowerDetail: [
+      '人鱼线侧影', '胸肌下缘 shadow', '肱二头肌与 forearm 线条', 'V 型背阔肌',
+      '锁骨的 shadow', '下颌与胡茬轮廓', '晒痕与肌肉分界', '汗水沿颈线',
+      '三角肌与斜方肌', '前臂 vein 与 tendon'
     ],
     glamourVibe: [
       '像 Celine 广告而非地摊写真', 'Vogue 内页而非成人向', '电影剧照暧昧而非露骨',
       '艺术摄影画册质感', '高级 lingerie campaign', '度假 lookbook 自然',
-      'after-party 松弛感', '清晨 intimacy 但公开安全', '舞台后台 documentary 感'
+      'after-party 松弛感', '清晨 intimacy 但公开安全', '舞台后台 documentary 感',
+      'Sports Illustrated 泳装刊级别', '丰腴曲线 celebration',
+      '肉感健康 body positive', '比基尼 bold but tasteful',
+      '血脉贲张的封面级张力', '让人移不开眼的感官冲击', '高级撩感非低俗',
+      '不写实身材比例 + 非常规时装', 'fantasy proportions editorial'
+    ],
+    avantFrameComp: [
+      '荷兰角 15～25 度，地平线倾斜失衡', '主体被裁切在画面边缘，70% 负空间',
+      '极端 off-center，主体只占一角', '荷兰角 + 超低角度，不安定张力',
+      '鱼眼边缘畸变但中心主体锐利', '虫视：主体在顶部，地面占 80%',
+      '鸟瞰：主体在底部边缘，天空压迫', '倾斜 horizon + 水面反射错位',
+      '前景巨大 blur 遮挡半幅画面', '镜面上下颠倒，双重构图',
+      '极近特写半脸出框，其余被裁', '竖长画幅，主体偏上 1/5',
+      '画中画多重框景错位', '刻意打破对称的不对称 balance',
+      '动态模糊背景 + off-center 清晰主体', '镜头光晕切过画面对角',
+      '主体被柱/墙切分一半出画', '极端 crop 只留眼与唇',
+      '旋转 90 度构图，重力感错乱', '前景黑影剪影框住远处主体'
+    ],
+    avantFrameMood: [
+      '瞬时抓拍 decisive moment', '不落俗套 editorial', '画廊摄影 prize 级',
+      '时尚 avant-garde campaign', '刻意失衡的对称破坏', '日本摄影集 snapshot 美学',
+      '电影长镜头一帧的疏离', '挑衅性构图选择', '视觉冲击力先于叙事',
+      '艺术摄影展级', '第一眼即被构图击中', '反常规但不混乱', '张力来自失衡而非动作'
+    ],
+    avantFrameLight: [
+      '硬光切过画面斜线', '单灯侧光，半脸沉入暗部', '闪光灯直打 snapshot 感',
+      '窗光条纹与荷兰角叠加', '逆光剪影 + 边缘 rim', '霓虹色块分割画面',
+      '高对比黑白', '过曝背景 + 清晰主体', '体积光但构图倾斜'
+    ],
+    avantFrameSubject: [
+      '独行人物占画面一角', '建筑线条切割人像', '静物与负空间对话',
+      '街头抓拍路人半脸', '舞者肢体冲出画框', '动物与失衡地平线',
+      '时装模特 off-center', '空椅与窗光', '手部特写占满前景'
+    ],
+    mechaSubject: [
+      '重型高达式双足机甲，肩甲展开', '流线型 EVA 式生物机甲，发光核心',
+      '六臂工业机甲，液压关节外露', '变形战机 mid-transform 机械结构',
+      '泰坦级步行堡垒，炮塔阵列', '轻型侦察机甲，全向推进器',
+      '古武士甲胄 × 现代机甲 hybrid', '龙形仿生机甲，鳞片装甲',
+      '四足蜘蛛机甲，多眼传感器', '浮空炮艇式上半身机甲',
+      '骑士型全覆装甲，巨剑能源刃', '工程机甲，抓斗与焊枪臂',
+      '赛博朋克外骨骼 power suit', '轨道空降突击机甲',
+      '废土改装拼接机甲，管线外露', '白色实验室原型机，洁净高光',
+      '黑色 stealth 机甲，消光涂层', '红蓝对决双色竞技机甲',
+      '巨型肩部导弹舱开启', '背部展开翼状散热板'
+    ],
+    mechaPose: [
+      '落地跪姿，尘土冲击波', '拔刀/拔枪蓄力一瞬', '双拳对撞火花四溅',
+      '空中滞空，推进器全功率', '单膝跪地，武器插地', '转身挥砍动态 blur',
+      '防御姿态，盾牌前顶', '胜利站立，背景爆炸', '从烟雾中走出',
+      '与敌机对峙，低机位仰拍', '弹射起飞，地面裂纹', '维修中，舱盖打开',
+      '城市废墟间疾走', '能量剑划出光轨', '肩炮齐射后坐力'
+    ],
+    mechaVfx: [
+      '推进器尾焰蓝白渐变', '能量护盾 hex 网格', '粒子炮充能光晕',
+      '金属刮擦火花', 'rain 在装甲上滑落', '全息 HUD 环绕',
+      '电磁干扰电弧', '蒸汽从关节喷出', '导弹尾迹交叉',
+      '核心反应堆 pulse 光', '装甲划痕与战损', 'neon 警示灯闪烁',
+      '尘暴与体积光', '等离子刀刃残影', '爆炸冲击环'
+    ],
+    mechaScene: [
+      '未来都市天际线战场', '月球基地环形山', '工业港集装箱迷宫',
+      '雨夜霓虹巷道', '轨道电梯基座', '沙漠试验场',
+      '海底压力舱外', '火山口边缘', '太空碎片带',
+      '古代神庙废墟与现代战', '雪原极寒测试', '台风眼中心 calm'
+    ],
+    mechaMood: [
+      '极致炫酷，SSR 机甲卡面', '电影级机甲大战一帧', '模型盒封级完成度',
+      'Bandai 官方设定图质感', '机甲迷梦想中的机体', '力量与精密并存',
+      '金属重量感与速度感对撞', '少年热血 × 工业美学', '收藏级 mecha key visual'
+    ],
+    megaPersComp: [
+      '14mm 超广角，消失点在地平线深处', '蚁视角仰望，主体如巨塔', '鱼眼畸变，边缘建筑弯曲',
+      '一点透视隧道，线条汇聚于画面中心', '极低机位贴地，前景占 40%', '鸟瞰垂直俯视，地面图案化',
+      'forced perspective 近大远小极端', '阶梯式纵深，三层景别清晰', '螺旋楼梯向下大透视',
+      '长走廊消失点刺穿背景', '桥梁透视线指向远方', '峡谷式街道，两侧建筑向内倾斜',
+      '广角贴脸，背景建筑后倒', '无人机俯冲角度，地面向镜头扑来', '仰拍摩天，塔尖刺破画面',
+      '隧道尽头的白光大透视', '铁轨/公路透视线无限延伸', '中轴对称 + 极端透视汇聚'
+    ],
+    megaPersSubject: [
+      '渺小人物站在透视线尽头', '机甲/巨构占满透视框架', '单人剪影在隧道光中',
+      '车辆/列车向消失点疾驰', '建筑内部中庭，多层回廊', '竞技场环形观众席透视',
+      '森林小径透视线', '玻璃幕墙反射双重透视', '古桥与远山一点透视',
+      '地下铁站台纵深', '教堂中殿中轴大透视', '工厂管道迷宫透视'
+    ],
+    megaPersMood: [
+      '大透视构图，空间吞噬感', '纵深拉满，视线被吸向消失点', '建筑摄影级透视线',
+      '游戏场景概念图大透视', '第一人称冲击感', '史诗 scale 但构图优先',
+      '反常规但不混乱的透视张力', '镜头贴近地面，世界倾斜压来', '全景接片级透视控制'
+    ],
+    megaPersLight: [
+      '消失点处强光源', '隧道尽头体积光', '侧光强化透视线明暗',
+      '逆光剪影 + 透视线', '霓虹在湿地面反射延伸', '顶光切割中庭层次',
+      '黄金时刻，长影沿透视线拉伸', '单灯照亮透视线中心'
+    ],
+    bodyBeautySubject: [
+      '芭蕾舞者，肢体延伸与肌肉线条', '古典雕塑感人体，博物馆灯光', '瑜伽修行者，柔韧与力量',
+      '游泳运动员，肩背与腰线', '现代舞演员，动态定格', '艺术摄影模特，fine art nude 但着泳装',
+      '希腊雕像式比例，倒三角或沙漏', '文艺复兴绘画人体参考，着 drapery', '时尚 editorial 人体',
+      '冲浪者，晒痕与健康肌理', '体操选手，线条与柔软', '剑舞者，背阔肌与腰线',
+      '温泉浴衣，肩颈与锁骨艺术', '晨跑后，汗光与呼吸', '钢琴家，手臂与背脊线条',
+      '男性舞者，V 型背与长腿', '女性舞者，颈项与腰臀比', '双人性体构图，距离感'
+    ],
+    bodyBeautyPose: [
+      '四肢延伸，像 Bernini 雕塑动态', 'S 曲线或 contrapposto 站姿', '舞蹈 arabesque，脚背绷直',
+      '侧光勾勒肌肉起伏', '回眸，颈项线条完整', '坐地抱膝，肢体几何',
+      '伸展，指间到脚尖一条线', '低机位仰拍，腿线与人鱼线', '背对镜头，肩胛与脊柱沟',
+      '水中半身，波纹贴肤', 'mirror 对称构图', '剪影轮廓，边缘清晰'
+    ],
+    bodyBeautyLight: [
+      '博物馆顶光，明暗对照', '伦勃朗光，半脸阴影', '侧逆光勾轮廓', '柔光箱，肤质细腻',
+      '窗光漫射，阴影柔和', '黄金时刻，肤光通透', '黑白 fine art 高对比', '烛光暖调',
+      '泳池 caustics 在肌肤', 'rim light 分离肢体', '单灯雕塑感'
+    ],
+    bodyBeautyMood: [
+      '人体之美，艺术而非色情', '性感来自氛围与线条', '古典美学，神性与人性',
+      '呼吸感，静止中的动势', '肌肤是光与影的画布', '力量与柔软的平衡',
+      '克制的高级性感', '舞蹈/运动的身体尊严', 'fine art photography 调性',
+      '博物馆画册级', '情绪在姿态不在裸露', '东方含蓄的性感氛围'
+    ],
+    bodyBeautyArt: [
+      '参考 Michelangelo 人体结构但衣着完整', 'Caravaggio 明暗法', 'Rodin 雕塑感',
+      'Richard Avedon 人体摄影', 'Peter Lindbergh 黑白人体', 'Harper 艺术大片',
+      'Vogue 艺术人体专题', '国家地理人体专题（非猎奇）', '舞蹈摄影经典构图',
+      '希腊 vase painting 比例感', '文艺复兴 sfumato 肤感'
+    ],
+    bodyBeautyDetail: [
+      '锁骨的 shadow', '脊柱沟 shadow', '膝窝与跟腱线条', '肩峰与三角肌轮廓',
+      '腹斜肌侧影', '前臂与腕骨', '颈侧线条', '踝骨与足弓', '肋廓呼吸感',
+      '汗珠沿颈线', '肌肉 soft 与 hard 对比', '关节转折高光'
+    ],
+    bodyBeautyOutfit: [
+      '连体泳装完整', '芭蕾练功服', '运动背心与短裤', '和服浴衣', 'linen 衬衫 unbuttoned',
+      '深 V 礼服但不露点', '运动 compression 装', '男士 swim trunks', '舞蹈 wrap skirt',
+      '艺术 drapery 裹身', '健身 bodysuit', '丝绸 slip 睡裙'
+    ],
+    glamourBodyFemale: [
+      '丰腴饱满身材，腰臀曲线浑圆有肉感', '骨肉匀亭，胸型丰盈，整体 soft voluptuous',
+      '肉感健康曲线，非消瘦骨感', 'S 曲线明显，胯部与大腿饱满', '健康 plus-curve，自信性感',
+      '比基尼身材，胸腰臀比例自然夸张', '拉丁式丰胯与圆润大腿', '法式 soft curves，小腹微隆',
+      '泳装画报体型，voluptuous but clothed', '健身后的紧致与柔软并存', '港风丰腴，肩臂圆润',
+      '温泉后肌肤 bloated soft glow', '晚礼服包臀，臀线浑圆', 'high-cut 泳装强调胯线',
+      'full bust and hips in tasteful swimwear', 'curvy hourglass silhouette', 'thick thighs soft flesh',
+      'rounded shoulders and soft arms', 'healthy flesh tone，肉感光泽肌',
+      '九头身漫画比例，腰极细胯极宽', '胸腰臀比 exaggerated 非写实',
+      '韩漫/webtoon 夸张曲线，SSR 卡面比例', 'pin-up 比例放大，fantasy 身材',
+      'fantasy 不写实比例，胸胯夸张但泳装完整', '游戏立绘级 voluptuous proportions',
+      '腰臀比超越现实，S 曲线极致化', '肉感丰腴 + 漫画化长腿'
+    ],
+    glamourBodyMale: [
+      '宽肩窄腰倒三角，男模标准比例', '薄肌运动员体格，胸肌腹肌线条清晰', '游泳选手肩背，臂围饱满',
+      '人鱼线隐约，八头身', '硬朗下颌与颈线，锁骨分明', '健身模特，肱二头肌与 forearm 轮廓',
+      '冲浪少年，晒痕与 lean muscle', '西装下胸廓与腰臀比', '泳池边 male model physique',
+      'V 型背阔肌，腰细', '运动员大腿与小腿肌肉线条', 'GQ 封面级身材，不夸张健美',
+      '拉丁裔男性，小麦肤与肌肉 soft', '东亚清爽薄肌，肩线利落', '橄榄球体型，宽厚肩胸',
+      '瑜伽男教练，柔韧与肌肉并存', '赛车手 lean athletic build', '酒吧调酒师，卷袖 forearm',
+      'classic Adonis proportions', 'athletic but not bodybuilder'
+    ],
+    glamourSubjectMale: [
+      '气质男模，宽肩倒三角', '神秘旅人，斗篷下薄肌轮廓', '舞台歌手，麦前侧脸与颈线',
+      '剑士卸甲，胸廓与锁骨', '精灵射手，长腿修直', '和风武士，浴衣半敞',
+      '爵士酒吧驻唱，丝绒西装', '泳池边男模，泳裤完整', '芭蕾男舞者，颈项修长',
+      '红毯男星，开领礼服', '健身模特，力量线条', '艺术系男生，慵懒书卷气',
+      '冲浪少年，盐渍肌肤', '马术骑手，长腿与晒痕', '钢琴家，背脊与手臂',
+      '法式公寓窗边慵懒男生', '比基尼广告男模搭档', '温泉和服男士，腰带松垮'
+    ],
+    glamourSubjectMalePhoto: [
+      '拉丁裔男模，湿发贴颈，小麦肤肌肉', '东亚混血男生，锁骨清晰，薄肌倒三角',
+      '金发泳池男模，肩宽腰窄', '黑发禁欲系，肩线利落，人鱼线',
+      '健身男模，腹肌清晰但不夸张', '芭蕾男舞者，颈项与背阔肌',
+      '港风型男，波浪侧分', '法国男模，泳池边 swim trunks',
+      '红毯男星，开领黑西装', '瑜伽男教练，柔韧肌肉', '冲浪少年，lean athletic',
+      '爵士酒吧歌手，丝绒西装', '北欧男模，肩背线条', '深肤男模，光泽肌与肌肉',
+      '短发硬朗魅力', '拉丁舞男教师，腰胯律动', '艺术系男生，慵懒', '马术男孩，长腿',
+      '复古好莱坞 leading man', '现代极简男模脸', '温泉旅馆浴衣男士',
+      '救生员体态，健康力量', '晨跑后自然红晕', 'GQ 封面级 physique',
+      '游泳选手肩背', '橄榄球体型宽肩', '调酒师卷袖 forearm vein'
+    ],
+    glamourSubjectMaleAnime: [
+      '银发剑士少年，甲胄半卸，薄肌', '和风武士，浴衣腰带松散', '精灵弓手，长腿拉弓',
+      '狼耳侦探，风衣', '魔法学院学长，制服与披风', '吸血鬼贵族，礼服',
+      '机甲驾驶员，休息舱便装', '偶像 backstage', '炼金术士，实验袍',
+      '龙角少年', '阴阳师，和服', '不良组长，制服敞开，倒三角',
+      '体操少年，彩带', '海盗副官', '天文社男生',
+      '兽耳冒险者', '黑客少年', '咖啡厅服务生',
+      '乐队主唱', '和风舞男，扇', '科幻机兵，维护半甲',
+      '转校生', '魔法使', '剑士和风外套',
+      '温泉和服少年', '泳池边 anime 少年，泳裤', '晚礼服 anime 王子',
+      '健身系 anime 少年，运动背心', '韩漫 webtoon 男身，宽肩窄腰', 'SSR 泳装卡面 male'
+    ],
+    glamourSubjectMale3d: [
+      'UE5 写实男性，皮肤 subsurface，肌肉 soft', 'Blender 男角色，布料贴身',
+      '游戏 CG 男主，战损甲胄半卸', '虚拟男偶像，舞台光', '科幻机兵，维护半甲',
+      '写实和服男性', '泳池 3D 男模', '酒吧 3D 角色，丝绒与侧光',
+      '健身 3D 角色', '红毯 3D 西装', 'athletic 3D male model'
+    ],
+    glamourOutfitMale: [
+      '泳裤完整，健康肌肉线条', '开领晚礼服，胸廓轮廓', '丝绸睡袍半敞，内里完整',
+      '运动背心与短裤，腹肌', '和服浴衣，腰带松垮，领口锁骨',
+      '泳池阳伞下 swim trunks', '丝绒西装，领带松', '牛仔与 open shirt',
+      '湿发泳裤，小麦肤', '芭蕾练功服 male', '赛车服，拉链半开',
+      '温泉 towel 裹身，肩线', 'oversized 衬衫，下装完整',
+      '比基尼场景 male 搭档，泳裤', '健身 compression top', 'linen 衬衫 unbuttoned tasteful',
+      '皮革夹克与 tee', '和服 yukata male', 'board shorts 冲浪装'
     ],
     doujinArchetype: [
       '双马尾魔法少女，星核法杖', '银发剑士，和风外套', '机甲驾驶员，休息舱便装',
@@ -1064,6 +1351,87 @@
       'Magazine hero shot', 'Cyberpunk product ad', '自然光 lifestyle 但产品 sharp',
       '暗调 premium，单灯侧光', '悬浮 hero + 镜面底', 'gradient backdrop 无缝',
       'macro 微距质感，细节锐利', 'motion splash 冻结瞬间', 'minimal 白底电商标准'
+    ],
+    foodSubject: [
+      '和牛切面大理石纹', '抹茶千层切面', '爆浆芝士汉堡', '生腌海鲜拼盘', '法式可颂黄油层',
+      '火锅红油翻滚', '寿司握饭特写', '草莓奶油蛋糕', '拉面溏心蛋', '珍珠奶茶冷凝珠',
+      '马卡龙塔', '炭烤牛排切面', '小笼包蒸汽', '意面番茄酱汁', '冰糖葫芦晶莹',
+      '咖啡拉花天鹅', '广式早茶蒸笼', '刺身拼盘冰床', '巧克力熔岩', '彩虹沙拉碗'
+    ],
+    foodScene: [
+      '深色石板背景一束侧光', '木桌自然窗光', '餐厅 bokeh 暖调', '夜市霓虹反射',
+      '极简白底电商风', '烟雾缭绕铁板', '水滴飞溅冻结', '蒸汽上升逆光',
+      '俯拍 flat lay', '45 度食欲角', '浅景深主体锐利', '镜面托盘倒影'
+    ],
+    petSubject: [
+      '布偶猫蓝瞳', '柴犬微笑', '金毛幼犬', '英短圆脸', '萨摩耶微笑',
+      '柯基短腿', '暹罗猫', '哈士奇蓝眼', '橘猫慵懒', '边牧聪明眼神',
+      '垂耳兔', '仓鼠捧瓜子', '鹦鹉站在枝头', '锦鲤游动', '刺猬抱苹果'
+    ],
+    petScene: [
+      '草地 golden hour', '家居沙发暖光', '窗边逆光绒毛', '雪地脚印',
+      '极简纯色背景', '花园 shallow DOF', '宠物用品旁', '主人手虚化入镜',
+      '动态奔跑尘土', '打哈欠瞬间', '与玩具互动', '雨天玻璃水珠背景'
+    ],
+    moodScene: [
+      '雨后空街倒影', '黄昏列车窗', '雾中灯塔', '雪夜路灯',
+      '废弃游乐园', '海边长椅', '图书馆空廊', '樱花隧道',
+      '咖啡馆角落', '屋顶城市天际', '麦田风车', '竹林小径',
+      '地铁空厢', '旧公寓楼梯', '河面薄雾', '秋叶公路'
+    ],
+    moodTone: [
+      '孤独但温柔', '怀旧胶片', '宁静治愈', '淡淡忧伤',
+      '希望感逆光', '电影叙事停顿', '梦境薄雾', '诗意留白',
+      '时间凝固感', '远方微光', '雨声可视的潮湿', '冬日暖炉感'
+    ],
+    archSubject: [
+      '扎哈曲线博物馆', '哥特教堂玫瑰窗', '苏州园林漏窗', '未来主义车站',
+      'Brutalist 混凝土', '日式枯山水庭院', 'Art Deco 大堂', '玻璃幕墙摩天',
+      '土楼环形聚落', '巴洛克宫殿楼梯', '工业厂房改造', '悬浮楼梯室内',
+      '清真寺几何穹顶', '古镇青瓦巷', '图书馆螺旋书墙', '桥梁钢结构'
+    ],
+    archLight: [
+      '清晨侧光拉长线影', '正午硬光几何阴影', '蓝调时刻内外透光',
+      '室内天窗 God rays', '雨后材质反光', '夜景内透光暖窗',
+      '雾中轮廓渐隐', '雪地冷调建筑', '夕阳镀金立面'
+    ],
+    fashionLook: [
+      '高定礼服拖地', '街头潮牌叠穿', '职场极简套装', 'Y2K 金属未来',
+      '汉服改良走秀', '机能风外套', '复古牛仔全套', '泳装编辑大片',
+      '皮草与丝绒', '解构主义剪裁', '运动 luxury 混搭', '婚纱拖尾'
+    ],
+    fashionSet: [
+      'T 台聚光', '纽约街头', 'studio 无缝背景', '废墟工业风',
+      '镜面电梯', '沙漠荒原', '霓虹巷弄', '纯白画廊',
+      '老钱风酒店大堂', '风吹布料动态', '坐椅 editorial pose', '低角度仰拍拉长比例'
+    ],
+    horrorMood: [
+      '月光狼影', '娃娃凝视', '长廊尽头人影', '血月森林',
+      '雾中白衣', '旧照片鬼影', '镜中第二人', '蜡烛教堂',
+      '深海未知轮廓', '废弃医院走廊', '乌鸦栖枝', '时钟零点'
+    ],
+    horrorStyle: [
+      '低饱和冷绿', '单一底光面部半暗', '胶片颗粒脏污', '轻微畸变镜头',
+      '雾气吞没远景', '高光仅眼睛', '剪影威胁感', '潮湿反光地面'
+    ],
+    romanceBeat: [
+      '伞下两人距离', '牵手逆光剪影', '信件与干花', '窗边等待',
+      '樱花落肩', '海边日落并肩', '咖啡杯对坐', '围巾缠绕',
+      '自行车后座', '雨中共伞', '舞会慢舞', '机场送别'
+    ],
+    romanceTone: [
+      '柔焦梦幻', '暖粉金调', '胶片颗粒怀旧', '浅景深情绪',
+      '逆光光晕', '微雨浪漫', '窗光侧脸', '烛光晚餐'
+    ],
+    macroDetail: [
+      '露珠叶脉', '昆虫复眼', '织物经纬', '金属划痕',
+      '冰晶结构', '花瓣绒毛', '皮革毛孔', '水珠冠',
+      '木纹年轮', '盐晶', '蝴蝶翅膀鳞片', '咖啡油脂'
+    ],
+    seasonalCue: [
+      '立春嫩芽', '清明雨丝', '夏至蝉鸣感', '中秋月色',
+      '重阳菊', '冬至热汤蒸汽', '大雪封门', '小暑荷塘',
+      '惊蛰桃花', '霜降红叶', '处暑稻浪', '大寒冰凌'
     ]
   };
 
@@ -1150,6 +1518,124 @@
       pick(WORDS.productStyle),
       ctx?.tail?.()
     ], { keepFirst: true });
+  }
+
+  function buildFood(ctx) {
+    return combineParts([
+      pick(WORDS.foodSubject),
+      pick(WORDS.foodScene),
+      pick(WORDS.productStyle),
+      pickMaybe(TWIST, 0.5),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildPet(ctx) {
+    return combineParts([
+      pick(WORDS.petSubject),
+      pick(WORDS.petScene),
+      pick(WORDS.viralLook),
+      pick(WORDS.sceneColor),
+      pickMaybe(TWIST, 0.55),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildMood(ctx) {
+    return combineParts([
+      pick(WORDS.moodScene),
+      pick(WORDS.moodTone),
+      pick(WORDS.sceneComp),
+      pick(WORDS.sceneColor),
+      pickMaybe(TWIST, 0.6),
+      ctx?.tail?.()
+    ]);
+  }
+
+  function buildArchitecture(ctx) {
+    return combineParts([
+      pick(WORDS.archSubject),
+      pick(WORDS.archLight),
+      pick(WORDS.sceneComp),
+      pick(WORDS.epicScale),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildFashion(ctx) {
+    return combineParts([
+      pick(WORDS.fashionLook),
+      pick(WORDS.characterSubject),
+      pick(WORDS.fashionSet),
+      pick(WORDS.viralLook),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildHorror(ctx) {
+    return combineParts([
+      pick(WORDS.horrorMood),
+      pick(WORDS.horrorStyle),
+      pick(WORDS.sceneComp),
+      pickMaybe(TWIST, 0.45),
+      ctx?.tail?.()
+    ]);
+  }
+
+  function buildRomance(ctx) {
+    return combineParts([
+      pick(WORDS.romanceBeat),
+      pick(WORDS.romanceTone),
+      pick(WORDS.characterFace),
+      pick(WORDS.sceneColor),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildMacro(ctx) {
+    return combineParts([
+      `${pick(WORDS.macroDetail)} 微距特写`,
+      pick(WORDS.productDrama),
+      pick(WORDS.sceneColor),
+      pickMaybe(TWIST, 0.4),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildSeasonal(ctx) {
+    return combineParts([
+      pick(WORDS.seasonalCue),
+      pick(WORDS.moodScene),
+      pick(WORDS.guofengScene),
+      pick(WORDS.sceneColor),
+      pickMaybe(TWIST, 0.5),
+      ctx?.tail?.()
+    ]);
+  }
+
+  function clipPromptLead(text, maxParts = 3) {
+    return String(text || '')
+      .split(/[；;]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 2)
+      .join('，')
+      .split(/[，,]/)
+      .filter(Boolean)
+      .slice(0, maxParts)
+      .join('，');
+  }
+
+  function buildPromptForTypes(typeIds, ctx) {
+    const pool = typeIds.filter((t) => CONTENT_TEMPLATES[t]);
+    if (!pool.length) return CONTENT_TEMPLATES.viral.build(ctx);
+    if (pool.length === 1) return CONTENT_TEMPLATES[pool[0]].build(ctx);
+    const a = pick(pool);
+    const rest = pool.filter((t) => t !== a);
+    const b = pick(rest.length ? rest : pool);
+    const segA = clipPromptLead(CONTENT_TEMPLATES[a].build(ctx));
+    const segB = clipPromptLead(CONTENT_TEMPLATES[b].build(ctx));
+    return combineParts([segA, segB, pickMaybe(TWIST, 0.65), ctx?.tail?.()], { keepFirst: true });
   }
 
   function buildViral(ctx) {
@@ -1334,6 +1820,7 @@
   function buildGlamour(ctx) {
     const family = ctx?.family || 'neutral';
     const subject = pick(glamourSubjectPool(family));
+    const bodyLine = pick(WORDS.glamourBodyFemale);
     const outfit = pick(WORDS.glamourOutfit);
     const pose = pick([...WORDS.glamourPose, ...WORDS.glamourPoseArt]);
     const gaze = pick(WORDS.glamourGaze);
@@ -1345,23 +1832,103 @@
       ? pick(WORDS.glamourLight)
       : pick(lightPoolForCharacter(family));
     const prop = pickMaybe(WORDS.glamourProp, 0.65);
-    const detail = pickMaybe(WORDS.glamourDetail, 0.55);
-    const vibe = pickMaybe(WORDS.glamourVibe, 0.45);
-    const safe = '衣着完整，可公开发布';
+    const detail = pickMaybe(WORDS.glamourDetail, 0.6);
+    const vibe = pickMaybe(WORDS.glamourVibe, 0.5);
+    const genderTag = '女性主体';
+    const safe = '衣着完整、泳装/礼服/运动装规范，社区可发，性感但不露点';
+    const fantasyTag = pickMaybe(['不写实身材比例', '漫画化夸张曲线', 'SSR 卡面级比例'], 0.55);
     const recipe = pick([1, 2, 3, 4, 5]);
     let parts;
     if (recipe === 1) {
-      parts = [subject, outfit, pose, gaze, emotion, expression, atmosphere, mood, light, prop, detail, vibe, safe, ctx?.tail?.()];
+      parts = [subject, bodyLine, outfit, pose, gaze, emotion, expression, atmosphere, mood, light, prop, detail, vibe, fantasyTag, genderTag, safe, ctx?.tail?.()];
     } else if (recipe === 2) {
-      parts = [atmosphere, subject, emotion, gaze, expression, outfit, mood, light, pose, detail, prop, vibe, safe, ctx?.tail?.()];
+      parts = [atmosphere, subject, bodyLine, emotion, gaze, expression, outfit, mood, light, pose, detail, prop, vibe, fantasyTag, genderTag, safe, ctx?.tail?.()];
     } else if (recipe === 3) {
-      parts = [subject, gaze, emotion, detail, outfit, atmosphere, pose, expression, mood, light, vibe, safe, ctx?.tail?.()];
+      parts = [subject, bodyLine, gaze, emotion, detail, outfit, atmosphere, pose, expression, mood, light, vibe, fantasyTag, genderTag, safe, ctx?.tail?.()];
     } else if (recipe === 4) {
-      parts = [mood, subject, atmosphere, emotion, gaze, light, outfit, pose, expression, prop, detail, safe, ctx?.tail?.()];
+      parts = [mood, subject, bodyLine, atmosphere, emotion, gaze, light, outfit, pose, expression, prop, detail, fantasyTag, genderTag, safe, ctx?.tail?.()];
     } else {
-      parts = [emotion, gaze, subject, pose, expression, outfit, atmosphere, mood, light, detail, vibe, safe, ctx?.tail?.()];
+      parts = [emotion, gaze, subject, bodyLine, pose, expression, outfit, atmosphere, mood, light, detail, vibe, fantasyTag, genderTag, safe, ctx?.tail?.()];
     }
     return combineParts(parts, { keepFirst: recipe !== 4 });
+  }
+
+  function buildMalePower(ctx) {
+    const family = ctx?.family || 'neutral';
+    const subject = pick(malePowerSubjectPool(family));
+    const bodyLine = pick(WORDS.glamourBodyMale);
+    const outfit = pick(WORDS.glamourOutfitMale);
+    const pose = pick(WORDS.malePowerPose);
+    const atmosphere = pick(WORDS.malePowerAtmosphere);
+    const mood = pick(WORDS.malePowerMood);
+    const light = family === 'photo'
+      ? pick(WORDS.glamourLight)
+      : pick(lightPoolForCharacter(family));
+    const detail = pickMaybe(WORDS.malePowerDetail, 0.65);
+    const vibe = pickMaybe(WORDS.malePowerVibe, 0.5);
+    const prop = pickMaybe(WORDS.glamourProp, 0.45);
+    const genderTag = '男性主体';
+    const safe = '衣着完整、泳裤/运动装/西装规范，社区可发，力量感非裸露';
+    return combineParts(
+      [subject, bodyLine, outfit, pose, mood, atmosphere, light, detail, prop, vibe, genderTag, safe, ctx?.tail?.()],
+      { keepFirst: true }
+    );
+  }
+
+  function buildAvantFrame(ctx) {
+    const family = ctx?.family || 'neutral';
+    const recipe = pick([1, 2, 3]);
+    let parts;
+    if (recipe === 1) {
+      parts = [
+        pick(WORDS.avantFrameComp),
+        pick(WORDS.avantFrameSubject),
+        pick(WORDS.avantFrameMood),
+        pick(WORDS.avantFrameLight),
+        pick(WORDS.sceneColor),
+        pick(lightPoolForCharacter(family)),
+        ctx?.tail?.()
+      ];
+    } else if (recipe === 2) {
+      parts = [
+        pick(WORDS.avantFrameMood),
+        pick(WORDS.avantFrameComp),
+        pick(WORDS.characterSubject),
+        pick(WORDS.avantFrameLight),
+        pick(WORDS.avantFrameSubject),
+        pickMaybe(TWIST, 0.5),
+        ctx?.tail?.()
+      ];
+    } else {
+      parts = [
+        pick(WORDS.avantFrameComp),
+        pick(WORDS.avantFrameComp),
+        pick(WORDS.avantFrameSubject),
+        pick(WORDS.avantFrameMood),
+        pick(WORDS.avantFrameLight),
+        '构图优先，瞬时冲击力，艺术感',
+        ctx?.tail?.()
+      ];
+    }
+    return combineParts(parts, { keepFirst: true });
+  }
+
+  function buildBodyBeauty(ctx) {
+    const family = ctx?.family || 'neutral';
+    const isMale = Math.random() < 0.42;
+    const subject = pick(WORDS.bodyBeautySubject);
+    const pose = pick(WORDS.bodyBeautyPose);
+    const light = family === 'photo' ? pick(WORDS.bodyBeautyLight) : pick(lightPoolForCharacter(family));
+    const mood = pick(WORDS.bodyBeautyMood);
+    const art = pick(WORDS.bodyBeautyArt);
+    const detail = pickMaybe(WORDS.bodyBeautyDetail, 0.65);
+    const outfit = pick(WORDS.bodyBeautyOutfit);
+    const genderTag = isMale ? '男性人体' : '女性人体';
+    const safe = '衣着完整，艺术人体摄影，社区可发，性感来自氛围非裸露';
+    return combineParts(
+      [subject, pose, outfit, light, mood, art, detail, genderTag, safe, ctx?.tail?.()],
+      { keepFirst: true }
+    );
   }
 
   function buildDoujin(ctx) {
@@ -1529,6 +2096,93 @@
     return combineParts(parts, { keepFirst: true });
   }
 
+  function buildCoolMecha(ctx) {
+    const family = ctx?.family || 'neutral';
+    const recipe = pick([1, 2, 3]);
+    let parts;
+    if (recipe === 1) {
+      parts = [
+        pick(WORDS.mechaSubject),
+        pick(WORDS.mechaPose),
+        pick(WORDS.mechaVfx),
+        pick(WORDS.mechaScene),
+        pick(WORDS.mechaMood),
+        pick(WORDS.sceneColor),
+        pick(lightPoolForCharacter(family)),
+        ctx?.tail?.()
+      ];
+    } else if (recipe === 2) {
+      parts = [
+        pick(WORDS.mechaMood),
+        pick(WORDS.mechaSubject),
+        pick(WORDS.mechaVfx),
+        pick(WORDS.mechaPose),
+        pick(WORDS.mechaScene),
+        pickMaybe(WORDS.cyberFx, 0.45),
+        ctx?.tail?.()
+      ];
+    } else {
+      parts = [
+        pick(WORDS.mechaScene),
+        pick(WORDS.mechaSubject),
+        pick(WORDS.mechaSubject),
+        pick(WORDS.mechaPose),
+        pick(WORDS.mechaVfx),
+        pick(WORDS.mechaMood),
+        pick(WORDS.epicTension),
+        ctx?.tail?.()
+      ];
+    }
+    return combineParts(parts, { keepFirst: true });
+  }
+
+  function buildMegaPerspective(ctx) {
+    const family = ctx?.family || 'neutral';
+    const recipe = pick([1, 2, 3, 4]);
+    let parts;
+    if (recipe === 1) {
+      parts = [
+        pick(WORDS.megaPersComp),
+        pick(WORDS.megaPersComp),
+        pick(WORDS.megaPersSubject),
+        pick(WORDS.megaPersMood),
+        pick(WORDS.megaPersLight),
+        pick(WORDS.sceneColor),
+        ctx?.tail?.()
+      ];
+    } else if (recipe === 2) {
+      parts = [
+        pick(WORDS.megaPersMood),
+        pick(WORDS.megaPersSubject),
+        pick(WORDS.megaPersComp),
+        pick(WORDS.epicScale),
+        pick(WORDS.megaPersLight),
+        pick(lightPoolForCharacter(family)),
+        ctx?.tail?.()
+      ];
+    } else if (recipe === 3) {
+      parts = [
+        pick(WORDS.megaPersComp),
+        pick(WORDS.epicArchitecture),
+        pick(WORDS.megaPersSubject),
+        pick(WORDS.megaPersLight),
+        pick(WORDS.epicTension),
+        ctx?.tail?.()
+      ];
+    } else {
+      parts = [
+        pick(WORDS.megaPersComp),
+        pick(WORDS.characterSubject),
+        pick(WORDS.megaPersSubject),
+        pick(WORDS.megaPersMood),
+        pick(WORDS.impactComp),
+        pick(WORDS.megaPersLight),
+        ctx?.tail?.()
+      ];
+    }
+    return combineParts(parts, { keepFirst: true });
+  }
+
   const CONTENT_TEMPLATES = {
     character: { label: '人物', hint: '人像 / 半身 / 特写', build: buildCharacter },
     scene: { label: '场景', hint: '环境 / 氛围 / 建筑', build: buildScene },
@@ -1540,10 +2194,24 @@
     guofeng: { label: '国风仙侠', hint: '汉服 / 水墨 / 仙侠', build: buildGuofeng },
     cyber: { label: '赛博科幻', hint: '霓虹 / 机甲 / 未来城', build: buildCyber },
     cover916: { label: '竖屏封面', hint: '9:16 短剧 / 封面级', build: buildCover916 },
-    glamour: { label: '官感美学', hint: '姿态眼神 · 情绪韵味 · 高级性感', build: buildGlamour },
+    glamour: { label: '官感美学', hint: '女性专属 · 夸张比例 · 非常规时装', build: buildGlamour },
+    malePower: { label: '男性力量', hint: '男性专属 · 倒三角 · 运动员体态', build: buildMalePower },
+    avantFrame: { label: '非常规构图', hint: '失衡镜头 · 瞬时冲击 · 艺术感', build: buildAvantFrame },
+    coolMecha: { label: '酷炫机甲', hint: '极致炫酷 · 机体 · 战损光效', build: buildCoolMecha },
+    megaPerspective: { label: '大透视', hint: '消失点 · 纵深 · 空间吞噬', build: buildMegaPerspective },
+    bodyBeauty: { label: '人体美学', hint: '人体之美 · 艺术构图 · 氛围性感', build: buildBodyBeauty },
     doujin: { label: '同人动漫', hint: '随机动漫角色 · 同人插画', build: buildDoujin },
     animeillust: { label: '动漫插画', hint: '角色 / 场景 / SSR 立绘', build: buildAnimeIllust },
-    originalchar: { label: '原创主角', hint: '人物锚点 · 三视图/设定图 · 故事感', build: buildOriginalCharacter }
+    originalchar: { label: '原创主角', hint: '人物锚点 · 三视图/设定图 · 故事感', build: buildOriginalCharacter },
+    food: { label: '美食', hint: '食欲 / 静物 / 商业', build: buildFood },
+    pet: { label: '萌宠', hint: '猫狗 / 治愈 / 动态', build: buildPet },
+    mood: { label: '氛围叙事', hint: '情绪 / 空镜 / 电影感', build: buildMood },
+    architecture: { label: '建筑空间', hint: '地标 / 室内 / 光影', build: buildArchitecture },
+    fashion: { label: '时尚穿搭', hint: '秀场 / 街拍 / editorial', build: buildFashion },
+    horror: { label: '悬疑惊悚', hint: '暗调 / 心理压迫', build: buildHorror },
+    romance: { label: '浪漫叙事', hint: '情侣 / 柔光 / 情绪', build: buildRomance },
+    macro: { label: '微距特写', hint: '材质 / 细节 / 质感', build: buildMacro },
+    seasonal: { label: '节气时令', hint: '四季 / 节日 / 东方意境', build: buildSeasonal }
   };
 
   const ART_STYLES = {
@@ -1570,13 +2238,21 @@
     flat: { label: '扁平插画', hint: '矢量 / 海报', tag: '【画风锁定】扁平矢量插画，非摄影' },
     lineart: { label: '线稿厚涂', hint: '动画 key visual', tag: '【画风锁定】动画 key visual 线稿厚涂，非摄影' },
     cyber_render: { label: '赛博渲染', hint: 'Blade Runner 美术', tag: '【画风锁定】赛博朋克概念 art，非真人写真' },
+    dark_aesthetic: { label: '暗黑美学', hint: '哥特 / 暗调 / 颓废华丽', tag: '【画风锁定】暗黑美学，低明度高对比，哥特/颓废/神秘氛围，非明亮卡通非真人摄影' },
     weta: { label: 'Weta 写实 CG', hint: '电影级角色', tag: '【画风锁定】Weta 级写实 CG，非真人照片' }
   };
 
   const AUTO_STYLE_POOL = [
     'anime', 'dongman', 'semireal', 'lineart', 'cg_3d', 'makoto', 'ghibli', 'photo', 'photo_film',
-    'manhwa', 'arcane', 'oil', 'ink', 'pixel', 'cyber_render', 'cg_3d_toon', 'unreal', 'anime_90s'
+    'manhwa', 'arcane', 'oil', 'ink', 'pixel', 'cyber_render', 'dark_aesthetic', 'cg_3d_toon', 'unreal', 'anime_90s'
   ];
+
+  function clipPrompt(text, maxLen) {
+    const s = String(text || '').replace(/\s+/g, ' ').trim();
+    const max = Math.max(500, Number(maxLen) || 7500);
+    if (s.length <= max) return s;
+    return s.slice(0, max - 1) + '…';
+  }
 
   function promptSignature(text) {
     const s = String(text || '').replace(/\s+/g, ' ').trim();
@@ -1586,7 +2262,13 @@
   }
 
   function generateInspirationPrompts(contentType, count, styleId) {
-    const tpl = CONTENT_TEMPLATES[contentType] || CONTENT_TEMPLATES.viral;
+    const types = Array.isArray(contentType)
+      ? contentType.filter(Boolean)
+      : [contentType || 'viral'];
+    const stylePick = Array.isArray(styleId) ? styleId[0] || 'auto' : styleId || 'auto';
+    const typePool = types.filter((t) => CONTENT_TEMPLATES[t]).length
+      ? types.filter((t) => CONTENT_TEMPLATES[t])
+      : ['viral'];
     const n = Math.min(8, Math.max(1, Number(count) || 3));
     const prompts = [];
     const seen = new Set();
@@ -1594,8 +2276,8 @@
     const maxGuard = n * 80;
     while (prompts.length < n && guard < maxGuard) {
       guard += 1;
-      const ctx = buildCtx(styleId);
-      let p = applyArtStyle(tpl.build(ctx), ctx.styleId);
+      const ctx = buildCtx(stylePick);
+      let p = applyArtStyle(buildPromptForTypes(typePool, ctx), ctx.styleId);
       if (guard > n * 8) {
         p += `；${pick(TWIST)}`;
       }
@@ -1605,7 +2287,7 @@
       const sig = promptSignature(p);
       if (seen.has(sig)) continue;
       seen.add(sig);
-      prompts.push(p);
+      prompts.push(clipPrompt(p, 7500));
     }
     return prompts;
   }

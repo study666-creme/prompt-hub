@@ -15,7 +15,7 @@ export function createCorsMiddleware(env: Env) {
       if (isAllowedCorsOrigin(origin, origins)) return origin;
       return null;
     },
-    allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Authorization', 'Content-Type'],
     maxAge: 86400,
     credentials: true

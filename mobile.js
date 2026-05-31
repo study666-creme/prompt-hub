@@ -308,7 +308,7 @@
       if (typeof switchAppPage === 'function') switchAppPage('imagegen');
     } else if (tab === 'community') {
       if (typeof switchAppPage === 'function') switchAppPage('community');
-      window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true });
+      window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true, forceRepaint: true });
     } else if (tab === 'me') {
       openNavDrawer();
     }
@@ -336,6 +336,9 @@
       window.FeatureDraft?.enforceMobileImageGenFeed?.();
       if (typeof enforceMobileCardGrid === 'function') enforceMobileCardGrid();
       else if (typeof scheduleLayoutMasonry === 'function') scheduleLayoutMasonry();
+      if (document.getElementById('pageCommunity')?.classList.contains('active')) {
+        window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true, forceRepaint: true });
+      }
       if (typeof renderCards === 'function') renderCards(true);
       if (document.getElementById('pageImageGen')?.classList.contains('active')) {
         initImageGenMobileView();

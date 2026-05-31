@@ -110,11 +110,18 @@
       });
     } catch (e) {
       const aborted = e && (e.name === 'AbortError' || String(e).includes('abort'));
-      if (isNetworkFetchError(e)) markApiUnreachable();
-      if (attempt < 2 && !opts.noRetry && !isNetworkFetchError(e)) {
+      const network = isNetworkFetchError(e) || aborted;
+      if (attempt < 2 && !opts.noRetry && network) {
+        window.__PH_API_DOWN_UNTIL__ = 0;
+        await recoverSessionForApi();
+        await new Promise((r) => setTimeout(r, 900 + attempt * 700));
+        return request(method, path, body, opts, attempt + 1);
+      }
+      if (attempt < 2 && !opts.noRetry && !network) {
         await new Promise((r) => setTimeout(r, 600 + attempt * 400));
         return request(method, path, body, opts, attempt + 1);
       }
+      if (network) markApiUnreachable();
       const fileHint = isFileOrigin()
         ? '请用 https://prompt-hub.cn 打开，或运行 .\\serve-local.ps1'
         : '';
@@ -174,6 +181,7 @@
               : undefined
       };
     }
+    window.__PH_API_DOWN_UNTIL__ = 0;
     return { ok: true, data: json.data };
   }
 
@@ -193,25 +201,50 @@
 
   let apiHealthPromise = null;
 
-  async function probeApiHealth() {
-    if (!isConfigured() || isApiUnreachable()) return false;
-    if (apiHealthPromise) return apiHealthPromise;
-    apiHealthPromise = (async () => {
+  async function probeApiHealth(opts) {
+    if (!isConfigured()) return false;
+    if (!opts?.force && isApiUnreachable()) return false;
+    if (apiHealthPromise && !opts?.force) return apiHealthPromise;
+    const run = (async () => {
       try {
         const c = new AbortController();
         const t = setTimeout(() => c.abort(), API_HEALTH_TIMEOUT_MS);
         const r = await fetch(`${baseUrl()}/health`, { method: 'GET', cache: 'no-store', signal: c.signal });
         clearTimeout(t);
-        if (!r.ok) markApiUnreachable();
-        return r.ok;
-      } catch (e) {
-        if (isNetworkFetchError(e)) markApiUnreachable();
+        if (r.ok) {
+          window.__PH_API_DOWN_UNTIL__ = 0;
+          return true;
+        }
+        if (!opts?.skipMark) markApiUnreachable();
         return false;
-      } finally {
-        apiHealthPromise = null;
+      } catch (e) {
+        if (!opts?.skipMark && isNetworkFetchError(e)) markApiUnreachable();
+        return false;
       }
     })();
-    return apiHealthPromise;
+    if (opts?.force) return run;
+    apiHealthPromise = run;
+    try {
+      return await apiHealthPromise;
+    } finally {
+      apiHealthPromise = null;
+    }
+  }
+
+  async function prepareApiCall() {
+    window.__PH_API_DOWN_UNTIL__ = 0;
+    await recoverSessionForApi();
+    return probeApiHealth({ force: true, skipMark: true });
+  }
+
+  async function requestWithPrepare(method, path, body, opts) {
+    await prepareApiCall();
+    let r = await request(method, path, body, opts);
+    if (!r.ok && (r.code === 'NETWORK_ERROR' || r.code === 'API_UNREACHABLE')) {
+      await prepareApiCall();
+      r = await request(method, path, body, opts);
+    }
+    return r;
   }
 
   async function syncMeOnce(opts) {
@@ -244,6 +277,12 @@
       if (d.creditGrantMode || d.dailyCreditsByTier) {
         window.SubscriptionUI?.applyServerState?.(d);
       }
+      if (d.inspirationDraw) {
+        window.ImageGenPromptTools?.applyQuota?.(d.inspirationDraw);
+      }
+      if (d.communityGacha) {
+        window.CommunityGacha?.applyQuota?.(d.communityGacha);
+      }
       window.PointsSystem?.updateCreditsUI?.();
       window.SubscriptionUI?.refreshOfferUI?.();
     }
@@ -269,8 +308,8 @@
     return r;
   }
 
-    async function setDisplayName(displayName) {
-    const r = await request('PATCH', '/api/v1/me/display-name', { displayName });
+  async function setDisplayName(displayName) {
+    const r = await requestWithPrepare('PATCH', '/api/v1/me/display-name', { displayName });
     if (r.ok && r.data?.displayName) {
       window.__userDisplayName = String(r.data.displayName);
       window.FeatureDraft?.onDisplayNameChanged?.();
@@ -299,11 +338,19 @@
   }
 
   async function updateAssetPackage(id, payload) {
-    return request('PATCH', `/api/v1/asset-packages/${encodeURIComponent(id)}`, payload);
+    return requestWithPrepare('PATCH', `/api/v1/asset-packages/${encodeURIComponent(id)}`, payload);
   }
 
   async function getAssetPackageContent(id) {
     return request('GET', `/api/v1/asset-packages/${encodeURIComponent(id)}/content`);
+  }
+
+  async function getCommunityGachaQuota() {
+    return request('GET', '/api/v1/community/gacha/quota');
+  }
+
+  async function consumeCommunityGachaDraw() {
+    return request('POST', '/api/v1/community/gacha/draw');
   }
 
   async function importAssetPackage(id, warehouseId) {
@@ -422,6 +469,10 @@
 
   async function promptToolsInfo() {
     return request('GET', '/api/v1/prompt-tools/info', null, { timeoutMs: API_FAST_TIMEOUT_MS });
+  }
+
+  async function consumeInspirationDraw() {
+    return requestWithPrepare('POST', '/api/v1/prompt-tools/inspiration-draw', {});
   }
 
   async function listRecentGenerationJobs() {
@@ -624,6 +675,7 @@
     isApiRateLimited,
     markApiUnreachable,
     probeApiHealth,
+    prepareApiCall,
     isConfigured,
     syncMe,
     setDisplayName,
@@ -645,6 +697,7 @@
     promptToolsFission,
     promptToolsPurifyDescribe,
     promptToolsInfo,
+    consumeInspirationDraw,
     listRecentGenerationJobs,
     getLedger,
     checkLikeMilestone,
@@ -667,6 +720,8 @@
     publishAssetPackage,
     updateAssetPackage,
     getAssetPackageContent,
+    getCommunityGachaQuota,
+    consumeCommunityGachaDraw,
     importAssetPackage,
     downloadAssetPackageJson
   };

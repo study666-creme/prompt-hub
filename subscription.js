@@ -192,8 +192,8 @@
   }
 
   function updateSubscribeNavBadge() {
-    const trialBadge = document.querySelector('.app-nav-trial-badge');
-    const subBadge = document.querySelector('.app-nav-subscribe-badge');
+    const trialBadge = document.getElementById('appNavTaskBadge');
+    const subBadge = document.getElementById('appNavSubscribeBadge');
     if (trialBadge) trialBadge.textContent = '任务';
     if (subBadge) subBadge.textContent = '特惠';
   }

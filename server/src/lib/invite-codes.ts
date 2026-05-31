@@ -88,7 +88,9 @@ export async function redeemInviteCode(
 
   for (const uid of [inviteeId, inviter.user_id]) {
     let p = await getOrCreateProfile(admin, uid);
-    p = await extendMembershipDays(admin, p, rewardDays, 'basic');
+    p = await extendMembershipDays(admin, p, rewardDays, 'basic', {
+      creditGrantMode: 'daily'
+    });
     if (rewardCredits > 0) {
       const { error: creditErr } = await admin.rpc('apply_credit_delta', {
         p_user_id: uid,

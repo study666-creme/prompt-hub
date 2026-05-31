@@ -42,10 +42,13 @@ const packCardSchema = z.object({
   id: z.string().min(1).max(120),
   title: z.string().max(200).optional(),
   prompt: z.string().max(8000).optional(),
-  image: z.string().max(4000).optional().nullable(),
+  image: z.string().max(8000).optional().nullable(),
   group: z.string().max(80).optional().nullable(),
   tags: z.array(z.string().max(40)).max(12).optional()
 });
+
+const PACK_CARD_MAX = 500;
+const PACK_FOLDER_PREVIEW_MAX = 5;
 
 const publishSchema = z.object({
   title: z.string().min(2).max(120),
@@ -59,9 +62,28 @@ const publishSchema = z.object({
   previewThumbs: z.array(z.object({ label: z.string().max(80), hue: z.number().optional() })).optional(),
   sourceWarehouseId: z.string().max(120).optional(),
   sourceWarehouseName: z.string().max(120).optional(),
-  previewCardIds: z.array(z.string().max(120)).max(12).optional(),
-  cards: z.array(packCardSchema).min(1).max(200)
+  previewCardIds: z.array(z.string().max(120)).max(60).optional(),
+  cards: z.array(packCardSchema).min(1).max(PACK_CARD_MAX)
 });
+
+function validationErrorMessage(err: z.ZodError): string {
+  const issue = err.issues[0];
+  if (!issue) return '请填写有效的资产包信息';
+  const path = issue.path.join('.');
+  if (path === 'cards' && issue.code === 'too_big') {
+    return `卡片数量不能超过 ${issue.maximum ?? PACK_CARD_MAX} 张，请减少勾选`;
+  }
+  if (path === 'cards' && issue.code === 'too_small') {
+    return '请至少选择一张卡片';
+  }
+  if (path === 'title' && issue.code === 'too_small') {
+    return '标题至少 2 个字';
+  }
+  if (path.startsWith('cards') && issue.code === 'too_big') {
+    return '部分卡片字段过长（提示词或图片引用），请减少或联系支持';
+  }
+  return `请填写有效的资产包信息（${path}: ${issue.message}）`;
+}
 
 const patchSchema = publishSchema.partial().extend({
   status: z.enum(['published', 'archived']).optional()
@@ -107,7 +129,7 @@ assetPackagesRoutes.get('/mine/published', rateLimit(90, 60_000), async c => {
 assetPackagesRoutes.post('/', rateLimit(30, 60_000), async c => {
   const user = c.get('user');
   const parsed = publishSchema.safeParse(await c.req.json().catch(() => ({})));
-  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', '请填写有效的资产包信息');
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', validationErrorMessage(parsed.error));
   const admin = createAdminClient(c.env);
   const profile = await getOrCreateProfile(admin, user.id);
   const pkg = await createAssetPackage(admin, user.id, profile, parsed.data);

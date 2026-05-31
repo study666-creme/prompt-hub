@@ -173,6 +173,7 @@
       if (typeof window.AuthGate?.updateGuestLimitUI === 'function') {
         window.AuthGate.updateGuestLimitUI();
       }
+      window.ImageGenPromptTools?.updateQuotaUI?.();
       return;
     }
     writeRow({ active: false, until: null, tier: null });
@@ -183,6 +184,7 @@
     if (typeof window.AuthGate?.updateGuestLimitUI === 'function') {
       window.AuthGate.updateGuestLimitUI();
     }
+    window.ImageGenPromptTools?.updateQuotaUI?.();
   }
 
   function onAccountSwitch() {}

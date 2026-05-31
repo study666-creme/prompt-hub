@@ -18,7 +18,11 @@ import {
   listCommunityNotifications,
   pushCommunityNotification
 } from '../../lib/community-notify';
-import { createAdminClient } from '../../lib/supabase';
+import {
+  buildCommunityGachaQuota,
+  consumeCommunityGachaDraw
+} from '../../lib/community-gacha';
+import { createAdminClient, getOrCreateProfile } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
 
 const bodySchema = z.object({
@@ -258,4 +262,27 @@ communityRoutes.get('/notifications', async c => {
     }
     throw new ApiError(500, 'NOTIFY_LIST_FAILED', msg.slice(0, 180));
   }
+});
+
+communityRoutes.get('/gacha/quota', async c => {
+  const user = c.get('user');
+  const admin = createAdminClient(c.env);
+  const profile = await getOrCreateProfile(admin, user.id);
+  return c.json({ ok: true, data: buildCommunityGachaQuota(profile) });
+});
+
+communityRoutes.post('/gacha/draw', async c => {
+  const user = c.get('user');
+  const admin = createAdminClient(c.env);
+  const result = await consumeCommunityGachaDraw(admin, user.id);
+  const profile = await getOrCreateProfile(admin, user.id);
+  return c.json({
+    ok: true,
+    data: {
+      used: result.used,
+      remaining: result.remaining,
+      limit: result.limit,
+      quota: buildCommunityGachaQuota(profile)
+    }
+  });
 });

@@ -53,7 +53,9 @@
   let likedIds = new Set();
   let favIds = new Set();
   let creationsTab = 'private';
-  let communitySort = 'hot';
+  let communitySort = 'random';
+  let communityRandomSig = '';
+  let communityRandomOrder = new Map();
   let communityMediaFilter = 'all';
   let communityScope = 'all';
   let follows = new Set();
@@ -1703,6 +1705,9 @@
 
   async function resolveImageDisplayUrl(image, jobId, assetId, opts = {}) {
     if (!image) return '';
+    if (window.SupabaseSync?.normalizeImageRef) {
+      image = window.SupabaseSync.normalizeImageRef(image) || image;
+    }
     const publicFeed = opts.fromPublicFeed === true;
     const authorId = opts.authorId || '';
     const cardId = opts.cardId || assetId || '';
@@ -2245,6 +2250,10 @@
   }
 
   function layoutCommunityWhenImagesReady(containerId) {
+    if (useCssGridForCommunityFeed(containerId)) {
+      layoutCommunityMasonry(containerId);
+      return;
+    }
     const container = document.getElementById(containerId);
     if (!container) return;
     const run = () => scheduleCommunityLayout(containerId);
@@ -2303,6 +2312,10 @@
   function runCommunityFeedLayoutPass(containerId, opts = {}) {
     const container = document.getElementById(containerId);
     if (!container) return false;
+    if (useCssGridForCommunityFeed(containerId)) {
+      layoutCommunityMasonry(containerId);
+      return true;
+    }
     if (!primeCommunityFeedColumnWidths(container, containerId) && !opts.allowNarrow) {
       return false;
     }
@@ -2313,6 +2326,10 @@
   let layoutCommunityDebounce = {};
   const layoutCommunityCooldown = {};
   function scheduleCommunityLayout(containerId, opts = {}) {
+    if (useCssGridForCommunityFeed(containerId)) {
+      layoutCommunityMasonry(containerId);
+      return;
+    }
     if (!opts.force && layoutCommunityCooldown[containerId]) return;
     clearTimeout(layoutCommunityDebounce[containerId]);
     layoutCommunityDebounce[containerId] = setTimeout(() => {
@@ -2357,6 +2374,10 @@
   }
 
   function relayoutCommunityFeeds() {
+    if (isMobileFeedLayout()) {
+      enforceMobileCommunityFeedGrid('communityGrid');
+      enforceMobileCommunityFeedGrid('creationsGrid');
+    }
     ['communityGrid', 'creationsGrid', 'userProfileGrid'].forEach((id) => {
       layoutCommunityMasonry(id);
     });
@@ -2406,13 +2427,32 @@
       communityMasonry.destroy();
       communityMasonry = null;
     }
-    container.style.height = '';
+    container.style.removeProperty('height');
+    container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
     container.querySelectorAll('.card').forEach((card) => {
-      card.style.width = '';
-      card.style.left = '';
-      card.style.top = '';
-      card.style.position = '';
+      card.classList.remove('is-masonry-positioned');
+      card.style.removeProperty('position');
+      card.style.removeProperty('left');
+      card.style.removeProperty('top');
+      card.style.removeProperty('right');
+      card.style.removeProperty('bottom');
+      card.style.removeProperty('width');
+      card.style.removeProperty('max-width');
+      card.style.removeProperty('margin-bottom');
+      card.style.removeProperty('transform');
     });
+  }
+
+  /** 手机社区/创作：销毁 Masonry、清 inline 定位，强制 CSS Grid 两列 */
+  function enforceMobileCommunityFeedGrid(containerId) {
+    if (!isMobileFeedLayout()) return;
+    if (containerId !== 'communityGrid' && containerId !== 'creationsGrid') return;
+    const container = document.getElementById(containerId);
+    if (!container || !container.querySelector('.card')) return;
+    resetCommunityGridCardLayout(container, containerId);
+    container.classList.add('community-mobile-feed');
+    container.classList.remove('masonry-ready');
+    setFeedLayoutPending(containerId, false);
   }
 
   function layoutCommunityMasonry(containerId) {
@@ -2422,18 +2462,23 @@
       container.classList.remove('community-mobile-feed');
     }
     if (useCssGridForCommunityFeed(containerId)) {
-      resetCommunityGridCardLayout(container, containerId);
       if (containerId === 'communityGrid' || containerId === 'creationsGrid') {
-        container.classList.add('community-mobile-feed');
+        enforceMobileCommunityFeedGrid(containerId);
+        if (window.CardImageLoader?.observeContainer) window.CardImageLoader.observeContainer(container);
       } else {
+        resetCommunityGridCardLayout(container, containerId);
         container.classList.remove('community-mobile-feed');
+        requestAnimationFrame(() => setFeedLayoutPending(containerId, false));
+        if (window.CardImageLoader?.observeContainer) window.CardImageLoader.observeContainer(container);
       }
-      requestAnimationFrame(() => setFeedLayoutPending(containerId, false));
-      if (window.CardImageLoader?.observeContainer) window.CardImageLoader.observeContainer(container);
       return;
     }
     container?.classList.remove('community-mobile-feed');
     const runMasonryLayout = () => {
+    if (isMobileFeedLayout() && (containerId === 'communityGrid' || containerId === 'creationsGrid')) {
+      enforceMobileCommunityFeedGrid(containerId);
+      return;
+    }
     if (typeof Masonry === 'undefined') return;
     const cardEls = container.querySelectorAll('.card');
     const isProfile = containerId === 'userProfileGrid';
@@ -2728,24 +2773,10 @@
     const btn = document.querySelector('#myHomeNameForm button[type="submit"]');
     if (btn) btn.disabled = true;
     try {
-      window.__PH_API_DOWN_UNTIL__ = 0;
-      if (window.SupabaseSync?.healSessionOnResume) {
-        await window.SupabaseSync.healSessionOnResume();
-      }
-      if (window.PromptHubApi?.probeApiHealth) {
-        await window.PromptHubApi.probeApiHealth();
-      }
-      let r = await window.PromptHubApi.setDisplayName(name);
-      if (!r?.ok && r?.code === 'NETWORK_ERROR') {
-        if (window.SupabaseSync?.healSessionOnResume) {
-          await window.SupabaseSync.healSessionOnResume();
-        }
-        window.__PH_API_DOWN_UNTIL__ = 0;
-        r = await window.PromptHubApi.setDisplayName(name);
-      }
+      const r = await window.PromptHubApi.setDisplayName(name);
       if (!r?.ok) {
         const hint =
-          r?.code === 'NETWORK_ERROR'
+          r?.code === 'NETWORK_ERROR' || r?.code === 'API_UNREACHABLE'
             ? '无法连接 api.prompt-hub.cn，请检查网络/VPN 后重试，或稍后再试'
             : r?.message || '保存失败';
         toast(hint, 6000);
@@ -3109,6 +3140,7 @@
     setFeedLayoutPending(containerId, true);
     container.appendChild(fragment);
     container.classList.add('cards-grid-primed');
+    if (useGrid) container.classList.add('community-mobile-feed');
     runCommunityFeedLayoutPass(containerId);
     const renderGen = ++communityFeedRenderGen;
     const finishLayout = () => {
@@ -3171,18 +3203,54 @@
             ? window.SupabaseSync.prefetchDisplayUrlsWithCap(imageRefs.slice(0, 20), mobile ? 8000 : 10000)
             : Promise.resolve();
       const hydrateP = hydrateFeedImages(container);
+      void prefetchP.catch(() => {});
       await Promise.race([
-        prefetchP,
-        new Promise((r) => setTimeout(r, mobile ? 8000 : 12000))
+        Promise.all([hydrateP, prefetchP]),
+        new Promise((r) => setTimeout(r, mobile ? 4000 : 5500))
       ]);
       if (renderGen !== communityFeedRenderGen) return;
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
       window.CardImageLoader?.observeContainer?.(container);
-      await hydrateP;
-      if (renderGen !== communityFeedRenderGen) return;
       finalizeFeedContainer(container, containerId);
       finishLayout();
+      void hydrateP.then(() => {
+        if (renderGen !== communityFeedRenderGen) return;
+        window.SupabaseSync?.patchImageSrcFromCache?.(container);
+        window.CardImageLoader?.observeContainer?.(container);
+      });
     })();
+  }
+
+  function shuffleCommunityPosts(posts) {
+    const list = Array.isArray(posts) ? posts : [];
+    if (!list.length) return list;
+    const sig = list.map((p) => String(p.id)).sort().join('|');
+    if (communityRandomSig !== sig) {
+      communityRandomSig = sig;
+      const ids = list.map((p) => p.id);
+      for (let i = ids.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [ids[i], ids[j]] = [ids[j], ids[i]];
+      }
+      communityRandomOrder = new Map(ids.map((id, idx) => [id, idx]));
+    }
+    return [...list].sort((a, b) => {
+      const ai = communityRandomOrder.get(a.id) ?? 0;
+      const bi = communityRandomOrder.get(b.id) ?? 0;
+      return ai - bi;
+    });
+  }
+
+  function applyCommunitySort(mode) {
+    const next = mode || 'random';
+    if (next === 'random' && communitySort !== 'random') communityRandomSig = '';
+    communitySort = next;
+    document.querySelectorAll('[data-community-sort]').forEach((b) => {
+      b.classList.toggle('active', (b.dataset.communitySort || 'random') === communitySort);
+    });
+    document.querySelectorAll('[data-imagegen-community-sort]').forEach((b) => {
+      b.classList.toggle('active', (b.dataset.imagegenCommunitySort || 'random') === communitySort);
+    });
   }
 
   function filterAndSortPosts(list) {
@@ -3200,8 +3268,10 @@
     }
     if (communitySort === 'new') {
       filtered.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    } else {
+    } else if (communitySort === 'hot') {
       filtered.sort((a, b) => (b.likes || 0) - (a.likes || 0));
+    } else {
+      filtered = shuffleCommunityPosts(filtered);
     }
     return filtered;
   }
@@ -4725,8 +4795,9 @@
   function confirmDeleteCreation(id) {
     const msg = '确定删除该生成记录？无回收站，删除后不可恢复。';
     const doDel = () => deleteCreation(id);
-    if (typeof window.customConfirm === 'function') window.customConfirm(msg, doDel);
-    else if (confirm(msg)) doDel();
+    if (typeof window.customConfirm === 'function') {
+      window.customConfirm(msg, doDel, null, { danger: true, confirmLabel: '删除' });
+    } else if (confirm(msg)) doDel();
   }
 
   function recordCreationDeletion(id, jobId) {
@@ -5013,7 +5084,8 @@
     }, 800);
   }
 
-  const GEN_COST_QUOTE_TIMEOUT_MS = 12000;
+  const GEN_COST_QUOTE_TIMEOUT_MS = 6000;
+  const REF_URL_RESOLVE_TIMEOUT_MS = 8000;
 
   async function quoteGenerationCost(resolution, quality, model, localFallback) {
     const fallback = Number(localFallback) || 10;
@@ -5382,23 +5454,40 @@
       const src = list[i];
       try {
         let apiUrl = null;
-        if (/^https?:\/\//i.test(src)) {
-          apiUrl = src;
-        } else if (window.SupabaseSync?.isStorageRef?.(src)) {
-          apiUrl = await window.SupabaseSync.resolveDisplayUrl(src);
-        } else if (window.SupabaseSync?.isDataUrl?.(src)) {
-          if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.uploadImageGenRef) {
-            const stored = await window.SupabaseSync.uploadImageGenRef(genId('ref'), src);
-            apiUrl = await window.SupabaseSync.resolveDisplayUrl(stored);
-          } else {
-            apiUrl = src;
+        const resolveOne = (async () => {
+          if (/^https?:\/\//i.test(src)) {
+            if (window.SupabaseSync?.isInvalidMediaUrl?.(src) && window.SupabaseSync?.normalizeImageRef) {
+              const fixed = window.SupabaseSync.normalizeImageRef(src);
+              if (fixed && fixed !== src) {
+                return window.SupabaseSync.resolveDisplayUrl(fixed);
+              }
+            }
+            return src;
           }
-        } else if (String(src).startsWith('blob:')) {
-          if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.uploadImageGenRef) {
-            const stored = await window.SupabaseSync.uploadImageGenRef(genId('ref'), src);
-            apiUrl = await window.SupabaseSync.resolveDisplayUrl(stored);
+          if (window.SupabaseSync?.isStorageRef?.(src)) {
+            return window.SupabaseSync.resolveDisplayUrl(src);
           }
-        }
+          if (window.SupabaseSync?.isDataUrl?.(src)) {
+            if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.uploadImageGenRef) {
+              const stored = await window.SupabaseSync.uploadImageGenRef(genId('ref'), src);
+              return window.SupabaseSync.resolveDisplayUrl(stored);
+            }
+            return src;
+          }
+          if (String(src).startsWith('blob:')) {
+            if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.uploadImageGenRef) {
+              const stored = await window.SupabaseSync.uploadImageGenRef(genId('ref'), src);
+              return window.SupabaseSync.resolveDisplayUrl(stored);
+            }
+          }
+          return null;
+        })();
+        apiUrl = await Promise.race([
+          resolveOne,
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('ref resolve timeout')), REF_URL_RESOLVE_TIMEOUT_MS);
+          })
+        ]);
         if (apiUrl && /^https?:\/\//i.test(apiUrl)) urls.push(apiUrl);
         else if (apiUrl && window.SupabaseSync?.isDataUrl?.(apiUrl)) urls.push(apiUrl);
       } catch (e) {
@@ -5611,8 +5700,7 @@
     const btn = document.getElementById('imageGenSubmit');
     const singleRun = !batchOpts.batch;
     if (singleRun && btn?.disabled && !imageGenBatchRunning) {
-      toast('提交按钮暂不可用，请稍候或刷新页面');
-      return { ok: false };
+      btn.disabled = false;
     }
     if (singleRun && btn) {
       btn.disabled = true;
@@ -6403,7 +6491,7 @@
     bar.classList.toggle('hidden', !show);
     if (!show) return;
     document.querySelectorAll('[data-imagegen-community-sort]').forEach(btn => {
-      btn.classList.toggle('active', (btn.dataset.imagegenCommunitySort || 'hot') === communitySort);
+      btn.classList.toggle('active', (btn.dataset.imagegenCommunitySort || 'random') === communitySort);
     });
     document.querySelectorAll('[data-imagegen-community-scope]').forEach(btn => {
       btn.classList.toggle('active', (btn.dataset.imagegenCommunityScope || 'all') === communityScope);
@@ -6640,12 +6728,9 @@
     document.getElementById('communitySearch')?.addEventListener('input', () => renderCommunity());
     document.querySelectorAll('[data-community-sort]').forEach(btn => {
       btn.addEventListener('click', () => {
-        communitySort = btn.dataset.communitySort;
-        document.querySelectorAll('[data-community-sort]').forEach(b => b.classList.toggle('active', b === btn));
-        document.querySelectorAll('[data-imagegen-community-sort]').forEach(b => {
-          b.classList.toggle('active', (b.dataset.imagegenCommunitySort || 'hot') === communitySort);
-        });
+        applyCommunitySort(btn.dataset.communitySort);
         renderCommunity({ skipFeedFetch: true });
+        if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed();
       });
     });
     document.querySelectorAll('[data-community-scope]').forEach(btn => {
@@ -6709,11 +6794,8 @@
     });
     document.querySelectorAll('[data-imagegen-community-sort]').forEach(btn => {
       btn.addEventListener('click', () => {
-        communitySort = btn.dataset.imagegenCommunitySort || 'hot';
+        applyCommunitySort(btn.dataset.imagegenCommunitySort);
         document.querySelectorAll('[data-imagegen-community-sort]').forEach(b => b.classList.toggle('active', b === btn));
-        document.querySelectorAll('[data-community-sort]').forEach(b => {
-          b.classList.toggle('active', (b.dataset.communitySort || 'hot') === communitySort);
-        });
         renderImageGenFeed();
         if (document.getElementById('pageCommunity')?.classList.contains('active')) renderCommunity();
       });
@@ -7006,6 +7088,7 @@
     hydrateFeedImages,
     resetMobileFeedGridStyles,
     enforceMobileImageGenFeed,
+    enforceMobileCommunityFeedGrid,
     closeImageGenFilterSheet,
     renderImageGenFeed,
     canonicalCommunityImageRef,

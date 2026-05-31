@@ -3,13 +3,13 @@
  */
 (function () {
   let batchRunning = false;
+  let inspireDrawQuota = null;
   let reversePreviewUrl = '';
   let fissionPreviewUrl = '';
   let fissionPlanCreditsHint = 5;
   let batchCostSeq = 0;
   let toolboxBound = false;
   let fissionPickerLock = false;
-  const MAX_PURIFY_IMAGES = 16;
   /** 排队提交间隔：避免上游 Apimart 限流导致失败 */
   const BATCH_SUBMIT_GAP_MS = 1000;
   const BATCH_SUBMIT_JITTER_MS = 600;
@@ -63,11 +63,6 @@
     }
     return { results, charged, total, batchId };
   }
-
-  const PURIFY_GENERIC_PROMPT =
-    'exact same image content and composition as reference, faithful redraw, image cleanup and denoising, remove AI generation noise grain smudges dirty artifacts and compression blocks, cleaner edges smoother gradients sharper details, no new elements no content change, masterpiece, best quality';
-  let purifyItems = [];
-  let purifyDescribeCredits = 2;
 
   function $(id) {
     return document.getElementById(id);
@@ -149,7 +144,7 @@
 
   function resetBatchState() {
     batchRunning = false;
-    ['imageGenInspireBatchBtn', 'imageGenFissionBatchBtn', 'imageGenPurifyBatchBtn'].forEach((id) => {
+    ['imageGenInspireBatchBtn', 'imageGenFissionBatchBtn'].forEach((id) => {
       const b = $(id);
       if (b) b.disabled = false;
     });
@@ -182,20 +177,6 @@
       fissionBtn.textContent = n > 0
         ? `排队裂变生图 ${n} 张 · 约 ${total} 积分（${unit} 积分/张）`
         : '排队裂变生图 · 先分析并勾选变体';
-    }
-
-    const purifyBtn = $('imageGenPurifyBatchBtn');
-    if (purifyBtn) {
-      const selected = getSelectedPurifyItems();
-      const n = selected.length;
-      const fast = $('imageGenPurifyFastMode')?.checked;
-      const describeEach = fast ? 0 : purifyDescribeCredits;
-      const per = unit + describeEach;
-      const total = per * n;
-      purifyBtn.disabled = n === 0;
-      purifyBtn.textContent = n > 0
-        ? `排队净化 ${n} 张 · 约 ${total} 积分（${per} 积分/张）`
-        : '排队净化 · 先上传并勾选图片';
     }
   }
 
@@ -236,16 +217,98 @@
     window.TrialTasks?.syncTaskProgress?.(true);
   }
 
-  function onDrawInspiration() {
-    markInspirationDrawUsed();
-    const type = $('imageGenInspireType')?.value || 'viral';
-    const style = $('imageGenInspireStyle')?.value || 'none';
-    const count = Number($('imageGenInspireCount')?.value || 3);
-    const prompts = window.ImageGenPromptKit?.generateInspirationPrompts?.(type, count, style) || [];
-    renderInspirationList(prompts);
-    if (prompts[0]) setPrompt(prompts[0]);
-    const styleLabel = $('imageGenInspireStyle')?.selectedOptions?.[0]?.textContent || '不指定';
-    toast(`已生成 ${prompts.length} 条（内容 + 画风：${styleLabel.split('（')[0]}）`);
+  function applyInspireDrawQuota(quota) {
+    if (!quota || typeof quota !== 'object') return;
+    inspireDrawQuota = {
+      unlimited: !!quota.unlimited,
+      limit: quota.limit == null ? null : Number(quota.limit),
+      used: Math.max(0, Number(quota.used) || 0),
+      remaining: quota.remaining == null ? null : Math.max(0, Number(quota.remaining) || 0),
+      tier: quota.tier || 'free',
+      label: String(quota.label || '')
+    };
+    updateInspireDrawQuotaUI();
+  }
+
+  function updateInspireDrawQuotaUI() {
+    const hint = $('imageGenInspireQuotaHint');
+    const drawBtn = $('imageGenInspireDrawBtn');
+    if (!window.SupabaseSync?.isLoggedIn?.()) {
+      if (hint) hint.textContent = '登录后可用灵感抽卡（普通 3 次/天 · 轻量 20 次/天 · 基础及以上无限）';
+      if (drawBtn) drawBtn.disabled = false;
+      return;
+    }
+    if (!inspireDrawQuota) {
+      if (hint) hint.textContent = '普通用户 3 次/天 · 轻量会员 20 次/天 · 基础及以上无限';
+      return;
+    }
+    if (hint) {
+      hint.textContent = inspireDrawQuota.unlimited
+        ? `${inspireDrawQuota.label || '基础会员及以上 · 无限'}（仅「随机抽卡」计次）`
+        : `${inspireDrawQuota.label || '今日剩余'}（仅「随机抽卡」计次）`;
+    }
+    if (drawBtn && !inspireDrawQuota.unlimited && inspireDrawQuota.remaining === 0) {
+      drawBtn.disabled = true;
+    } else if (drawBtn) {
+      drawBtn.disabled = false;
+    }
+  }
+
+  async function onDrawInspiration() {
+    if (!window.AuthGate?.requireAuth?.('imagegen')) return;
+    const btn = $('imageGenInspireDrawBtn');
+    if (btn?.disabled) return;
+    if (btn) btn.disabled = true;
+    try {
+      if (!window.PromptHubApi?.consumeInspirationDraw) {
+        toast('API 未就绪，请刷新页面');
+        return;
+      }
+      const r = await window.PromptHubApi.consumeInspirationDraw();
+      if (!r?.ok) {
+        toast(r?.message || '抽卡失败，请稍后再试', 5000);
+        updateInspireDrawQuotaUI();
+        return;
+      }
+      if (r.data?.quota) applyInspireDrawQuota(r.data.quota);
+      markInspirationDrawUsed();
+      const types = getSelectedInspireTypes();
+      const style = getSelectedInspireStyle();
+      const count = Number($('imageGenInspireCount')?.value || 3);
+      const prompts = window.ImageGenPromptKit?.generateInspirationPrompts?.(types, count, style) || [];
+      renderInspirationList(prompts);
+      if (prompts[0]) setPrompt(prompts[0]);
+      const typeLabels = types.map((id) => window.ImageGenPromptKit?.CONTENT_TEMPLATES?.[id]?.label || id).join('、');
+      const styleSel = $('imageGenInspireStyle');
+      const styleLabel = styleSel?.selectedOptions?.[0]?.textContent?.split('（')[0] || '不指定';
+      toast(`已生成 ${prompts.length} 条（内容：${typeLabels || '爆款'}；画风：${styleLabel}）`);
+    } finally {
+      updateInspireDrawQuotaUI();
+    }
+  }
+
+  function getSelectedInspireTypes() {
+    const root = $('imageGenInspireTypeChips');
+    if (!root) return ['viral'];
+    const ids = [...root.querySelectorAll('input[type="checkbox"]:checked')].map((i) => i.value);
+    return ids.length ? ids : ['viral'];
+  }
+
+  function getSelectedInspireStyle() {
+    return $('imageGenInspireStyle')?.value || 'auto';
+  }
+
+  function renderInspireChipGroup(container, items, defaultIds) {
+    if (!container || !items?.length) return;
+    const defaults = new Set(defaultIds || []);
+    container.innerHTML = items
+      .map(
+        (t) =>
+          `<label class="imagegen-inspire-chip"><input type="checkbox" value="${escapeHtml(t.id)}"${
+            defaults.has(t.id) ? ' checked' : ''
+          }><span>${escapeHtml(t.label)}</span></label>`
+      )
+      .join('');
   }
 
   async function onQueueBatch() {
@@ -634,225 +697,6 @@
     }
   }
 
-  function genPurifyId() {
-    return `pur_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  }
-
-  function getSelectedPurifyItems() {
-    return purifyItems.filter((item) => item.selected);
-  }
-
-  function renderPurifyGallery() {
-    const gallery = $('imageGenPurifyGallery');
-    const idle = $('imageGenPurifyIdle');
-    if (!gallery) return;
-    if (!purifyItems.length) {
-      gallery.hidden = true;
-      gallery.innerHTML = '';
-      if (idle) idle.hidden = false;
-      void updateBatchCostLabel();
-      return;
-    }
-    if (idle) idle.hidden = true;
-    gallery.hidden = false;
-    gallery.innerHTML = purifyItems.map((item, idx) => (
-      `<div class="imagegen-purify-thumb${item.selected ? ' is-selected' : ''}" data-purify-idx="${idx}">` +
-      `<label class="imagegen-purify-check"><input type="checkbox"${item.selected ? ' checked' : ''} data-purify-check="${idx}"><img src="${escapeHtml(item.dataUrl)}" alt="净化 ${idx + 1}"></label>` +
-      `<button type="button" class="imagegen-ref-rm" data-purify-rm="${idx}" aria-label="移除">×</button>` +
-      '</div>'
-    )).join('');
-    gallery.querySelectorAll('[data-purify-check]').forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const i = Number(cb.dataset.purifyCheck);
-        if (purifyItems[i]) {
-          purifyItems[i].selected = cb.checked;
-          cb.closest('.imagegen-purify-thumb')?.classList.toggle('is-selected', cb.checked);
-          void updateBatchCostLabel();
-        }
-      });
-    });
-    gallery.querySelectorAll('[data-purify-rm]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        purifyItems.splice(Number(btn.dataset.purifyRm), 1);
-        renderPurifyGallery();
-      });
-    });
-    void updateBatchCostLabel();
-  }
-
-  function addPurifyFiles(fileList) {
-    const files = [...(fileList || [])].filter((f) => f && f.type.startsWith('image/'));
-    if (!files.length) {
-      toast('请选择图片文件');
-      return;
-    }
-    if (purifyItems.length >= MAX_PURIFY_IMAGES) {
-      toast(`最多 ${MAX_PURIFY_IMAGES} 张`);
-      return;
-    }
-    let pending = 0;
-    let skipped = 0;
-    files.forEach((file) => {
-      if (purifyItems.length + pending >= MAX_PURIFY_IMAGES) {
-        skipped += 1;
-        return;
-      }
-      pending += 1;
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (purifyItems.length < MAX_PURIFY_IMAGES) {
-          purifyItems.push({
-            id: genPurifyId(),
-            dataUrl: String(reader.result || ''),
-            selected: true
-          });
-        }
-        pending -= 1;
-        if (pending === 0) {
-          renderPurifyGallery();
-          if (skipped > 0) toast(`最多 ${MAX_PURIFY_IMAGES} 张，已忽略 ${skipped} 张`);
-        }
-      };
-      reader.onerror = () => {
-        pending -= 1;
-        toast('图片读取失败');
-        if (pending === 0) renderPurifyGallery();
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-
-  function ensurePurifyPaneVisible() {
-    ensureToolboxExpanded();
-    switchToolboxTab('purify');
-  }
-
-  function openPurifyFilePicker() {
-    if (fissionPickerLock) return;
-    fissionPickerLock = true;
-    setTimeout(() => { fissionPickerLock = false; }, 600);
-    ensurePurifyPaneVisible();
-    const input = $('imageGenPurifyFile');
-    if (!input) return;
-    requestAnimationFrame(() => input.click());
-  }
-
-  async function refreshPurifyPricingHint() {
-    if (!window.PointsSystem?.useApiForAccount?.()) return;
-    try {
-      const r = await window.PromptHubApi.promptToolsInfo();
-      const n = r.data?.purify?.creditsPerDescribe;
-      if (r.ok && typeof n === 'number' && n > 0) purifyDescribeCredits = n;
-    } catch (e) { /* 默认 2 */ }
-  }
-
-  async function onQueuePurifyBatch() {
-    if (batchRunning) {
-      toast('批量任务进行中，请稍候');
-      return;
-    }
-    if (!window.AuthGate?.requireAuth?.('imagegen')) return;
-    const fast = $('imageGenPurifyFastMode')?.checked;
-    if (!fast && !ensurePromptApi('promptToolsPurifyDescribe')) return;
-    const items = getSelectedPurifyItems();
-    if (!items.length) {
-      toast('请先上传并勾选要净化的图片');
-      return;
-    }
-    if (!window.PointsSystem?.useApiForAccount?.()) {
-      toast('图片净化需登录并连接 API');
-      return;
-    }
-    const run = window.FeatureDraft?.runImageGenWithPrompt;
-    if (typeof run !== 'function') {
-      toast('生图模块未就绪，请刷新页面');
-      return;
-    }
-    const unit = await getUnitImageGenCost();
-    const describeEach = fast ? 0 : purifyDescribeCredits;
-    const per = unit + describeEach;
-    const balance = window.PointsSystem?.getCredits?.() ?? 0;
-    if (balance < per) {
-      toast(`积分不足（每张约 ${per}，当前 ${balance}）`);
-      return;
-    }
-
-    batchRunning = true;
-    const btn = $('imageGenPurifyBatchBtn');
-    if (btn) btn.disabled = true;
-    const batchId = makeBatchId();
-    const total = items.length;
-    try {
-      const results = [];
-      let charged = 0;
-      for (let i = 0; i < items.length; i += 1) {
-        const item = items[i];
-        const batchIndex = i + 1;
-        if (btn) btn.textContent = `净化中 ${batchIndex}/${total}…`;
-        let prompt = PURIFY_GENERIC_PROMPT;
-        if (!fast) {
-          try {
-            const compressed = await compressImageDataUrl(item.dataUrl, 1280);
-            const r = await window.PromptHubApi.promptToolsPurifyDescribe({ imageBase64: compressed });
-            if (!r.ok) throw new Error(r.message || '读图失败');
-            prompt = r.data?.prompt || PURIFY_GENERIC_PROMPT;
-            if (typeof r.data?.creditsRemaining === 'number') {
-              window.PointsSystem?.setCreditsFromServer?.(r.data.creditsRemaining);
-              window.PointsSystem?.updateCreditsUI?.();
-            }
-            charged += r.data?.creditsCharged || purifyDescribeCredits;
-          } catch (e) {
-            const msg = e.message || '净化读图失败';
-            window.FeatureDraft?.recordImageGenFailure?.({
-              prompt: `【净化第 ${batchIndex} 张】${PURIFY_GENERIC_PROMPT.slice(0, 80)}…`,
-              errorMessage: msg,
-              batchIndex,
-              batchTotal: total,
-              batchId
-            });
-            results.push({ ok: false, batchIndex, message: msg });
-            toast(`第 ${batchIndex}/${total} 张读图失败：${msg}`);
-            continue;
-          }
-        }
-        setPrompt(prompt);
-        const res = await run(prompt, {
-          silentToast: true,
-          batch: true,
-          refImages: [item.dataUrl],
-          batchId,
-          batchIndex,
-          batchTotal: total
-        });
-        results.push({
-          ok: !!res?.ok,
-          batchIndex,
-          message: res?.message || (res?.ok ? '' : '提交失败')
-        });
-        if (res?.ok) charged += res.creditsCharged || unit;
-        else if (res?.reason === 'credits') break;
-        await batchSubmitSleep();
-      }
-      await window.PointsSystem?.refreshCreditsFromServer?.();
-      window.PointsSystem?.updateCreditsUI?.();
-      toast(`${summarizeBatchResults(results, total, '净化')}，约 ${charged} 积分`);
-      if (results.some((r) => !r.ok)) {
-        window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: true });
-      }
-      if (window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
-        window.MobileUI.setImageGenView('feed');
-      }
-    } catch (e) {
-      console.error('[imagegen] purify batch failed', e);
-      toast('净化排队生图失败，请刷新页面后重试');
-    } finally {
-      batchRunning = false;
-      if (btn) btn.disabled = false;
-      void updateBatchCostLabel();
-    }
-  }
-
   function switchToolboxTab(tab) {
     document.querySelectorAll('[data-imagegen-tool-tab]').forEach((btn) => {
       const on = btn.dataset.imagegenToolTab === tab;
@@ -894,16 +738,6 @@
     $('imageGenFissionAnalyzeBtn')?.addEventListener('click', () => void onFissionAnalyze());
     $('imageGenFissionBatchBtn')?.addEventListener('click', () => void onQueueFissionBatch());
     $('imageGenFissionFromRefBtn')?.addEventListener('click', () => void onFissionFromRef());
-    $('imageGenPurifyPickBtn')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      openPurifyFilePicker();
-    });
-    $('imageGenPurifyBatchBtn')?.addEventListener('click', () => void onQueuePurifyBatch());
-    $('imageGenPurifyClearBtn')?.addEventListener('click', () => {
-      purifyItems = [];
-      renderPurifyGallery();
-    });
-    $('imageGenPurifyFastMode')?.addEventListener('change', () => void updateBatchCostLabel());
     $('imageGenInspireCount')?.addEventListener('change', () => void updateBatchCostLabel());
     $('imageGenFissionCount')?.addEventListener('change', () => void updateBatchCostLabel());
     ['imageGenModel', 'imageGenResolution', 'imageGenQuality'].forEach((id) => {
@@ -931,43 +765,10 @@
       });
     }
 
-    const purifyFile = $('imageGenPurifyFile');
-    if (purifyFile && !purifyFile.dataset.bound) {
-      purifyFile.dataset.bound = '1';
-      purifyFile.addEventListener('change', () => {
-        if (purifyFile.files?.length) addPurifyFiles(purifyFile.files);
-        purifyFile.value = '';
-      });
-    }
-
-    const purifyDrop = $('imageGenPurifyDropZone');
-    if (purifyDrop && !purifyDrop.dataset.bound) {
-      purifyDrop.dataset.bound = '1';
-      ['dragenter', 'dragover'].forEach((ev) => {
-        purifyDrop.addEventListener(ev, (e) => {
-          e.preventDefault();
-          purifyDrop.classList.add('drag-over');
-        });
-      });
-      purifyDrop.addEventListener('dragleave', () => purifyDrop.classList.remove('drag-over'));
-      purifyDrop.addEventListener('drop', (e) => {
-        e.preventDefault();
-        purifyDrop.classList.remove('drag-over');
-        if (e.dataTransfer?.files?.length) addPurifyFiles(e.dataTransfer.files);
-      });
-    }
-
-    const typeSel = $('imageGenInspireType');
-    if (typeSel && window.ImageGenPromptKit?.listContentTypes && !typeSel.dataset.filled) {
-      typeSel.dataset.filled = '1';
-      typeSel.innerHTML = '';
-      window.ImageGenPromptKit.listContentTypes().forEach((t) => {
-        const opt = document.createElement('option');
-        opt.value = t.id;
-        opt.textContent = `${t.label}（${t.hint}）`;
-        typeSel.appendChild(opt);
-      });
-      typeSel.value = 'viral';
+    const typeChips = $('imageGenInspireTypeChips');
+    if (typeChips && window.ImageGenPromptKit?.listContentTypes && !typeChips.dataset.filled) {
+      typeChips.dataset.filled = '1';
+      renderInspireChipGroup(typeChips, window.ImageGenPromptKit.listContentTypes(), ['viral']);
     }
 
     const styleSel = $('imageGenInspireStyle');
@@ -1005,14 +806,16 @@
   function initImageGenPromptTools() {
     resetBatchState();
     bindToolbox();
+    updateInspireDrawQuotaUI();
     void refreshFissionPricingHint();
-    void refreshPurifyPricingHint();
     void updateBatchCostLabel();
   }
 
   window.ImageGenPromptTools = {
     init: initImageGenPromptTools,
     updateBatchCostLabel,
-    resetBatchState
+    resetBatchState,
+    applyQuota: applyInspireDrawQuota,
+    updateQuotaUI: updateInspireDrawQuotaUI
   };
 })();

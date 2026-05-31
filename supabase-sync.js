@@ -309,6 +309,21 @@
   function storagePathFromUrl(url) {
     if (!url || typeof url !== 'string') return null;
     if (url.startsWith(STORAGE_PREFIX)) return url.slice(STORAGE_PREFIX.length).split('?')[0];
+    const bare = url.trim();
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/[^/?#]+\.(jpe?g|png|webp|gif)$/i.test(bare)) {
+      return bare;
+    }
+    try {
+      const u = new URL(url);
+      const host = u.hostname.toLowerCase();
+      const p = u.pathname.replace(/^\//, '');
+      if (
+        (host === 'api.prompt-hub.cn' || host.endsWith('.prompt-hub.cn')) &&
+        /^[^/]+\/.+\.(jpe?g|png|webp|gif)$/i.test(p)
+      ) {
+        return p;
+      }
+    } catch (e) { /* ignore */ }
     const markers = [
       `/storage/v1/object/public/${BUCKET}/`,
       `/storage/v1/object/sign/${BUCKET}/`,

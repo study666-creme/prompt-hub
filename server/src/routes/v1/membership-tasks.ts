@@ -6,6 +6,7 @@ import { isSchemaMigrationError, extractErrorMessage } from '../../lib/cors-head
 import {
   buildTaskHub,
   buildTaskList,
+  ensureTaskMembershipDailyMode,
   claimDailyCheckin,
   claimMembershipTask,
   countQualifyingPosts,
@@ -30,6 +31,7 @@ const syncBodySchema = z.object({
   quickPreviewCommunityFavorited: z.boolean().optional(),
   assetStudioLinkCard: z.boolean().optional(),
   inspirationDrawUsed: z.boolean().optional(),
+  communityGachaCollectUsed: z.boolean().optional(),
   communityPosts: z
     .array(
       z.object({
@@ -126,6 +128,7 @@ async function loadTaskPayload(
 
   const inviteCode = await ensureInviteCode(admin, profile);
   profile = await getOrCreateProfile(admin, user.id);
+  profile = await ensureTaskMembershipDailyMode(admin, profile);
   const referred = !!(profile as { referred_by?: string | null }).referred_by;
   const siteUrl = siteUrlFromRequest(c);
   const hub = buildTaskHub(profile, flags, claimed, user.phoneVerified, {
@@ -197,6 +200,7 @@ membershipTaskRoutes.post('/sync', rateLimit(120, 60_000), async c => {
   }
   if (parsed.data.assetStudioLinkCard === true) patch.asset_studio_link_card = true;
   if (parsed.data.inspirationDrawUsed === true) patch.inspiration_draw_used = true;
+  if (parsed.data.communityGachaCollectUsed === true) patch.community_gacha_collect_used = true;
   if (parsed.data.communityPosts?.length) {
     patch.community_qualified_count = countQualifyingPosts(parsed.data.communityPosts);
   }

@@ -3,7 +3,9 @@
  */
 (function () {
   const LS_PREFIX = 'ph_community_gacha_';
+  const LS_GACHA_COLLECT_TASK = 'promptrepo_gacha_collect_used';
   const GACHA_DAILY_LIMIT = 10;
+  let serverQuota = null;
 
   function $(id) {
     return document.getElementById(id);
@@ -37,6 +39,9 @@
   }
 
   function remainingDraws() {
+    if (serverQuota && serverQuota.date === chinaDateKey()) {
+      return Math.max(0, Number(serverQuota.remaining) || 0);
+    }
     return Math.max(0, GACHA_DAILY_LIMIT - readTodayState().count);
   }
 
@@ -44,13 +49,53 @@
     return remainingDraws() > 0;
   }
 
-  function recordDraw() {
+  function recordDrawLocal() {
     const state = readTodayState();
     const count = state.count + 1;
     try {
       localStorage.setItem(storageKey(), JSON.stringify({ count, date: chinaDateKey() }));
     } catch (e) { /* ignore */ }
     return count;
+  }
+
+  function applyQuota(quota) {
+    if (!quota || typeof quota !== 'object') return;
+    serverQuota = {
+      limit: Number(quota.limit) || GACHA_DAILY_LIMIT,
+      used: Math.max(0, Number(quota.used) || 0),
+      remaining: Math.max(0, Number(quota.remaining) || 0),
+      date: String(quota.date || chinaDateKey())
+    };
+    try {
+      localStorage.setItem(
+        storageKey(),
+        JSON.stringify({ count: serverQuota.used, date: serverQuota.date })
+      );
+    } catch (e) { /* ignore */ }
+    refreshEntryButton();
+  }
+
+  async function syncQuotaFromServer() {
+    if (!window.SupabaseSync?.isLoggedIn?.()) return;
+    const fn = window.PromptHubApi?.getCommunityGachaQuota;
+    if (typeof fn !== 'function') return;
+    const r = await fn();
+    if (r?.ok && r.data) applyQuota(r.data);
+  }
+
+  async function recordDraw() {
+    if (window.SupabaseSync?.isLoggedIn?.() && window.PromptHubApi?.consumeCommunityGachaDraw) {
+      const r = await window.PromptHubApi.consumeCommunityGachaDraw();
+      if (r?.ok && r.data?.quota) {
+        applyQuota(r.data.quota);
+        return r.data.quota.used;
+      }
+      if (r?.code === 'GACHA_LIMIT') {
+        if (r.data?.quota) applyQuota(r.data.quota);
+        throw new Error(r.message || '今日已抽满');
+      }
+    }
+    return recordDrawLocal();
   }
 
   function cachedPostImageUrl(post) {
@@ -391,6 +436,14 @@
     refreshEntryButton();
   }
 
+  function markGachaCollectTask() {
+    try {
+      localStorage.setItem(LS_GACHA_COLLECT_TASK, '1');
+    } catch (e) { /* ignore */ }
+    window.TrialTasks?.scheduleSyncTaskProgress?.(true);
+  }
+  window.markCommunityGachaCollectTask = markGachaCollectTask;
+
   async function onCollect() {
     const post = currentDraw?.post;
     if (!post) return;
@@ -413,6 +466,7 @@
     const r = await window.addCardFromCommunity?.(post);
     collectBtn?.classList.remove('is-loading');
     if (r?.duplicate) {
+      markGachaCollectTask();
       collectBtn?.classList.add('is-collected', 'is-bounce');
       if (collectBtn) {
         collectBtn.textContent = '已在仓库';
@@ -423,6 +477,7 @@
       return;
     }
     if (r?.ok) {
+      markGachaCollectTask();
       collectBtn?.classList.add('is-collected', 'is-bounce');
       if (collectBtn) {
         collectBtn.textContent = '已收藏 ✓';
@@ -460,7 +515,14 @@
       refreshEntryButton();
       return null;
     }
-    recordDraw();
+    try {
+      await recordDraw();
+    } catch (e) {
+      toast(String(e.message || e) || `今日已抽满 ${GACHA_DAILY_LIMIT} 次`);
+      refreshFootAndRedraw();
+      refreshEntryButton();
+      return null;
+    }
     return drawFromPool(posts);
   }
 
@@ -508,12 +570,15 @@
   function init() {
     ensureOverlay();
     bindEntry();
+    void syncQuotaFromServer();
     refreshEntryButton();
   }
 
   window.CommunityGacha = {
     init,
     open: openGacha,
-    refreshEntryButton
+    refreshEntryButton,
+    applyQuota,
+    syncQuotaFromServer
   };
 })();

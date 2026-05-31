@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="styles.css?v=20260619j">
   <link rel="stylesheet" href="styles-features.css?v=20260619j">
   <link rel="stylesheet" href="styles-theme.css?v=20260615z">
-  <link rel="stylesheet" href="asset-studio.css?v=20260601e">
+  <link rel="stylesheet" href="asset-studio.css?v=20260602w">
   <script src="vendor/supabase.min.js?v=20260606m"></script>
   <script src="supabase-config.js"></script>
   <script src="api-domain.config.js"></script>
@@ -225,13 +225,17 @@
   <!-- 悬浮卡片层 -->
   <div class="studio-float-layer" id="studioFloatLayer"></div>
 
-  <!-- 卡片详情（双击打开：左卡片库样式 · 右完整信息） -->
+  <!-- 卡片详情（双击：左悬浮图 · 中链接 · 右悬浮文档） -->
   <div class="studio-card-detail hidden" id="studioCardDetail" role="dialog" aria-modal="true" aria-labelledby="studioCardDetailTitle">
     <div class="studio-card-detail-backdrop" id="studioCardDetailBackdrop"></div>
-    <div class="studio-card-detail-panel">
-      <header class="studio-card-detail-head">
-        <h2 id="studioCardDetailTitle">卡片详情</h2>
+    <div class="studio-card-detail-stage">
+      <header class="studio-card-detail-toolbar">
+        <div class="studio-card-detail-toolbar-main">
+          <span class="studio-card-detail-kicker">卡片设定</span>
+          <h2 id="studioCardDetailTitle">卡片详情</h2>
+        </div>
         <div class="studio-card-detail-head-actions">
+          <button type="button" class="btn btn-ghost btn-sm studio-card-field-settings-btn" id="studioCardFieldSettingsBtn" title="自定义字段名称与顺序">字段设置</button>
           <button type="button" class="btn btn-ghost btn-sm" id="studioCardCopyPrompt">复制提示词</button>
           <button type="button" class="btn btn-primary btn-sm" id="studioCardSaveBtn">保存设定</button>
           <button type="button" class="studio-card-detail-close" id="studioCardDetailClose" aria-label="关闭">×</button>
@@ -306,7 +310,7 @@
       <h3 id="studioGuideTitle">关联图怎么用？</h3>
       <ol class="studio-guide-steps">
         <li><strong>导入卡片库</strong>：左侧点「点击导入卡片库」，选择主站里的某个卡片库。</li>
-        <li><strong>拖入关联图</strong>：从左侧卡片缩略图<strong>拖到顶部「关联图」框</strong>（或写作区上方的关联图区域）。</li>
+        <li><strong>拖入关联图</strong>：从左侧卡片缩略图<strong>拖到顶部「关联图」框</strong>。</li>
         <li><strong>与文档绑定</strong>：每张关联图会挂到<strong>当前文档</strong>，切换文档可换一套参考图。</li>
         <li><strong>AI 与生图</strong>：对话、生图会参考关联图与文档正文；点击浮窗卡片可查看提示词。</li>
       </ol>
@@ -325,6 +329,6 @@
   </div>
 
   <script src="subscription.js?v=20260619j"></script>
-  <script src="asset-studio.js?v=20260530b"></script>
+  <script src="asset-studio.js?v=20260602w"></script>
 </body>
 </html>

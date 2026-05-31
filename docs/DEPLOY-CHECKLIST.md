@@ -92,9 +92,9 @@ cd d:\prompt-hub
 
 | 项 | 值 |
 |----|-----|
-| `__APP_BUILD__` | `20260614b` |
-| SW CACHE | `prompt-hub-v208` |
+| `__APP_BUILD__` | `20260602w` |
+| SW CACHE | `prompt-hub-v314` |
 | 站点 | https://prompt-hub.cn |
 | API | https://api.prompt-hub.cn |
 
-（以 `index.html` / `sw.js` 为准，部署后可能落后仓库。）
+（以 `index.html` / `sw.js` 为准；2026-05-30 已部署 Pages + Worker。）

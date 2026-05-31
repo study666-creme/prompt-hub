@@ -66,6 +66,20 @@
     return false;
   }
 
+  function cardGroupValue(c) {
+    const g = c?.group;
+    return g != null && g !== '' ? String(g) : '';
+  }
+
+  function mergeCardGroup(local, cloud, localTs, cloudTs) {
+    const lg = cardGroupValue(local);
+    const cg = cardGroupValue(cloud);
+    if (lg && !cg) return lg;
+    if (cg && !lg) return cg;
+    if (lg && cg) return localTs >= cloudTs ? lg : cg;
+    return null;
+  }
+
   function mergeCardPair(local, cloud) {
     if (!local) return cloud;
     if (!cloud) return local;
@@ -73,6 +87,15 @@
     const cloudTs = cloud.updatedAt || cloud.createdAt || 0;
     const base = cloudTs > localTs ? { ...local, ...cloud } : { ...cloud, ...local };
     const merged = mergeImageField(base, local.image, cloud.image);
+    merged.group = mergeCardGroup(local, cloud, localTs, cloudTs);
+    if (local.warehouseId && !cloud.warehouseId) merged.warehouseId = local.warehouseId;
+    else if (cloud.warehouseId && !local.warehouseId) merged.warehouseId = cloud.warehouseId;
+    else if (local.warehouseId && cloud.warehouseId && localTs !== cloudTs) {
+      merged.warehouseId = localTs >= cloudTs ? local.warehouseId : cloud.warehouseId;
+    }
+    if (Array.isArray(local.tags) && local.tags.length && (!cloud.tags || !cloud.tags.length)) {
+      merged.tags = local.tags;
+    }
     merged.publishedToCommunity = mergePublishFlag(local, cloud, localTs, cloudTs);
     if (merged.publishedToCommunity) {
       merged.communityPostId = local.communityPostId || cloud.communityPostId || null;
@@ -267,12 +290,21 @@
     const cards = payload.cards.map((c) => {
       if (!c || c.id == null) return c;
       const localCard = localMap.get(String(c.id));
-      if (!localCard?.image) return c;
-      if (!c.image) return { ...c, image: localCard.image };
-      const sl = imagePresenceScore(localCard.image);
-      const sc = imagePresenceScore(c.image);
-      if (sl > sc) return { ...c, image: localCard.image };
-      return c;
+      if (!localCard) return c;
+      let out = c;
+      if (localCard.image) {
+        if (!c.image) out = { ...out, image: localCard.image };
+        else {
+          const sl = imagePresenceScore(localCard.image);
+          const sc = imagePresenceScore(c.image);
+          if (sl > sc) out = { ...out, image: localCard.image };
+        }
+      }
+      const lg = cardGroupValue(localCard);
+      const cg = cardGroupValue(out);
+      if (lg && !cg) out = { ...out, group: lg };
+      if (localCard.warehouseId && !out.warehouseId) out = { ...out, warehouseId: localCard.warehouseId };
+      return out;
     });
     return { ...payload, cards };
   }

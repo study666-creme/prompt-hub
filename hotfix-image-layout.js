@@ -10,6 +10,10 @@
       if (!el) return;
       window.SupabaseSync?.patchImageSrcFromCache?.(el);
       if (id === 'imageGenFeed') window.FeatureDraft?.layoutImageGenFeedMasonry?.();
+      else if (
+        (id === 'communityGrid' || id === 'creationsGrid')
+        && window.matchMedia('(max-width: 900px)').matches
+      ) window.FeatureDraft?.enforceMobileCommunityFeedGrid?.(id);
       else window.FeatureDraft?.layoutCommunityMasonry?.(id);
     });
   };

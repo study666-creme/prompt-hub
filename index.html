@@ -1,10 +1,10 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260602e';
+    window.__APP_BUILD__ = '20260602w';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -60,10 +60,10 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css?v=20260601y">
   <link rel="stylesheet" href="styles-theme.css?v=20260615z">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260619j">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260602w">
   <link rel="stylesheet" href="styles-settings.css?v=20260616n">
-  <link rel="stylesheet" href="styles-features.css?v=20260602e">
-  <link rel="stylesheet" href="styles-assets.css?v=20260602e">
+  <link rel="stylesheet" href="styles-features.css?v=20260602w">
+  <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
   <script src="theme.js?v=20260615z"></script>
@@ -502,7 +502,7 @@
       <button type="button" class="app-nav-item app-nav-util" onclick="openCommunityPanel()">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <span class="app-nav-label">加入社群</span>
-        <span class="app-nav-trial-badge" title="入群后联系管理员领取">+100积分</span>
+        <span class="app-nav-community-badge" title="入群后联系管理员领取">+100积分</span>
       </button>
       <button type="button" class="app-nav-item app-nav-util" onclick="openContactPanel()">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
@@ -520,11 +520,11 @@
     <div class="app-nav-auth" id="appNavAuth">
       <div class="app-nav-subscribe-wrap">
         <button type="button" class="app-nav-trial-btn" onclick="openTrialTasksPanel()">
-          <span class="app-nav-trial-badge">任务</span>
+          <span class="app-nav-trial-badge" id="appNavTaskBadge">任务</span>
           <span>免费试用</span>
         </button>
         <button type="button" class="app-nav-subscribe-btn" onclick="openSubscribePanel()">
-          <span class="app-nav-subscribe-badge">五折</span>
+          <span class="app-nav-subscribe-badge" id="appNavSubscribeBadge">五折</span>
           <span class="app-nav-subscribe-text">会员</span>
           <span class="app-nav-subscribe-shine" aria-hidden="true"></span>
         </button>
@@ -536,7 +536,7 @@
         <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260602e</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260602w</p>
     </div>
   </nav>
 
@@ -554,6 +554,11 @@
         <button type="button" class="auth-tab" data-auth-mode="register" onclick="switchAuthMode('register')">注册</button>
       </div>
       <div id="authEmailPanel">
+        <div class="auth-field auth-field-displayname hidden" id="authDisplayNameWrap">
+          <label for="authDisplayName">社区昵称</label>
+          <input type="text" id="authDisplayName" class="auth-text-input" maxlength="20" placeholder="2～20 字" autocomplete="nickname">
+          <p class="auth-field-hint">社区显示用，不会公开邮箱；留空将自动生成，之后可在「我的主页」修改</p>
+        </div>
         <label for="authEmail">邮箱</label>
         <input type="email" id="authEmail" placeholder="your@email.com" autocomplete="email">
         <div class="auth-field auth-field-password">
@@ -562,11 +567,6 @@
             <input type="password" id="authPassword" placeholder="至少 6 位" autocomplete="current-password">
             <button type="button" class="auth-pwd-toggle" id="authPwdToggle" onclick="toggleAuthPassword()" aria-label="显示密码">👁</button>
           </div>
-        </div>
-        <div class="auth-field auth-field-displayname hidden" id="authDisplayNameWrap">
-          <label for="authDisplayName">社区昵称</label>
-          <input type="text" id="authDisplayName" maxlength="20" placeholder="2～20 字，社区显示用" autocomplete="nickname">
-          <p class="auth-field-hint">不会公开邮箱；留空将自动生成昵称，之后可在设置里改</p>
         </div>
         <div class="auth-field auth-field-confirm hidden" id="authConfirmWrap">
           <label for="authPasswordConfirm">确认密码</label>
@@ -835,7 +835,8 @@
           </div>
           <div class="feature-header-grow">
             <div class="feature-tabs">
-              <button type="button" class="feature-tab active" data-community-sort="hot">热门</button>
+              <button type="button" class="feature-tab active" data-community-sort="random">随机</button>
+              <button type="button" class="feature-tab" data-community-sort="hot">热门</button>
               <button type="button" class="feature-tab" data-community-sort="new">最新</button>
             </div>
             <div class="feature-tabs community-scope-tabs" role="group" aria-label="浏览范围">
@@ -857,7 +858,7 @@
             <div class="feature-body feature-body-cards">
               <p class="community-inline-hint mobile-only">点击卡片查看详情；点头像进作者主页。</p>
               <p class="community-inline-hint desktop-only">点击卡片在右侧查看详情，可随时切换。仅点击作者头像进入 TA 的主页。</p>
-              <div class="cards-container community-cards" id="communityGrid"><div class="grid-sizer"></div></div>
+              <div class="cards-container community-cards" id="communityGrid"></div>
             </div>
           </div>
           <aside class="community-side-panel hidden" id="communitySidePanel" aria-label="提示词详情">
@@ -905,7 +906,6 @@
 
     <div class="app-page app-page-feature" id="pageImageGen">
       <input type="file" id="imageGenFissionFile" accept="image/*" hidden>
-      <input type="file" id="imageGenPurifyFile" accept="image/*" multiple hidden>
       <div class="feature-shell">
         <header class="feature-header feature-header-imagegen">
           <button type="button" class="icon-btn mobile-only mobile-header-btn" id="imageGenMobileMenuBtn" aria-label="打开菜单">
@@ -991,12 +991,11 @@
                   <button type="button" class="imagegen-tool-tab" data-imagegen-tool-tab="optimize" role="tab" aria-selected="false">优化</button>
                   <button type="button" class="imagegen-tool-tab" data-imagegen-tool-tab="reverse" role="tab" aria-selected="false">反推</button>
                   <button type="button" class="imagegen-tool-tab" data-imagegen-tool-tab="fission" role="tab" aria-selected="false">裂变</button>
-                  <button type="button" class="imagegen-tool-tab" data-imagegen-tool-tab="purify" role="tab" aria-selected="false">净化</button>
                 </div>
                 <div class="imagegen-tool-pane" data-imagegen-tool-pane="inspire">
                   <div class="imagegen-inspire-controls">
-                    <label for="imageGenInspireType">内容</label>
-                    <select id="imageGenInspireType" class="settings-input"></select>
+                    <label class="imagegen-inspire-multi-label">内容（可多选）</label>
+                    <div class="imagegen-inspire-chips" id="imageGenInspireTypeChips"></div>
                     <label for="imageGenInspireStyle">画风</label>
                     <select id="imageGenInspireStyle" class="settings-input"></select>
                     <label for="imageGenInspireCount">条数</label>
@@ -1007,9 +1006,10 @@
                     </select>
                     <button type="button" class="btn btn-secondary btn-sm" id="imageGenInspireDrawBtn">随机抽卡</button>
                   </div>
+                  <p class="panel-hint imagegen-inspire-quota-hint" id="imageGenInspireQuotaHint">普通用户 3 次/天 · 轻量会员 20 次/天 · 基础及以上无限</p>
                   <div class="imagegen-inspire-list" id="imageGenInspireList"></div>
                   <button type="button" class="btn btn-primary btn-sm imagegen-inspire-batch-btn" id="imageGenInspireBatchBtn">排队生图 · — 积分/张</button>
-                  <p class="panel-hint imagegen-inspire-batch-hint" id="imageGenInspireBatchHint">内容决定「画什么」，画风决定「怎么画」；勾选后批量生图，会共用下方「参考图」（若有）。</p>
+                  <p class="panel-hint imagegen-inspire-batch-hint" id="imageGenInspireBatchHint">内容可多选并随机组合；画风单选。勾选后批量生图共用参考图（若有），排队不额外计抽卡次数。</p>
                 </div>
                 <div class="imagegen-tool-pane" data-imagegen-tool-pane="optimize" hidden>
                   <p class="panel-hint">用 AI 润色当前提示词（上游 DeepSeek V4 Flash · 约 1～3 积分/次）。</p>
@@ -1019,7 +1019,8 @@
                     <option value="jimeng">即梦爆款（竖屏封面）</option>
                     <option value="guofeng">国风仙侠</option>
                     <option value="realistic">写实摄影</option>
-                    <option value="glamour">官感美学（时尚性感）</option>
+                    <option value="glamour">官感美学（女性专属）</option>
+                    <option value="malePower">男性力量</option>
                     <option value="sd">写实 / SD 标签风</option>
                     <option value="anime">二次元插画</option>
                   </select>
@@ -1064,23 +1065,6 @@
                   <div class="imagegen-inspire-list" id="imageGenFissionList"></div>
                   <button type="button" class="btn btn-primary btn-sm imagegen-inspire-batch-btn" id="imageGenFissionBatchBtn">排队裂变生图 · 先分析方案</button>
                   <p class="panel-hint imagegen-inspire-batch-hint">分析后勾选变体；可选画风覆盖 DNA 中的渲染方式。批量提交每张与普通生图同价，不绑源图参考。</p>
-                </div>
-                <div class="imagegen-tool-pane" data-imagegen-tool-pane="purify" hidden>
-                  <p class="panel-hint">上传多张 AI 图，以原图为参考重绘：去除 GPT 噪点、脏污颗粒与糊感，尽量保持内容不变（读图 2 积分/张 + 生图同价）。</p>
-                  <div class="imagegen-reverse-preview-wrap imagegen-purify-dropzone" id="imageGenPurifyDropZone">
-                    <p class="panel-hint" id="imageGenPurifyIdle">点击「添加图片」或拖拽到此处 · 最多 16 张 · 勾选后批量净化</p>
-                    <div class="imagegen-purify-gallery imagegen-ref-gallery" id="imageGenPurifyGallery" hidden></div>
-                  </div>
-                  <div class="imagegen-reverse-actions">
-                    <button type="button" class="btn btn-ghost btn-sm" id="imageGenPurifyPickBtn">添加图片</button>
-                    <button type="button" class="btn btn-ghost btn-sm" id="imageGenPurifyClearBtn">清空</button>
-                  </div>
-                  <label class="imagegen-purify-fast">
-                    <input type="checkbox" id="imageGenPurifyFastMode">
-                    <span>快速模式（跳过读图，省 2 积分/张，内容保真略弱）</span>
-                  </label>
-                  <button type="button" class="btn btn-primary btn-sm imagegen-inspire-batch-btn" id="imageGenPurifyBatchBtn">排队净化 · 先添加图片</button>
-                  <p class="panel-hint imagegen-inspire-batch-hint">使用下方生图模型/分辨率设置；结果进入右侧仓库，可按需公开社区。</p>
                 </div>
               </div>
             </div>
@@ -1128,7 +1112,8 @@
             <div class="imagegen-community-filters hidden" id="imageGenCommunityFilters">
               <div class="imagegen-community-filter-row">
                 <div class="feature-tabs imagegen-community-tabs" role="group" aria-label="排序">
-                  <button type="button" class="feature-tab active" data-imagegen-community-sort="hot">热门</button>
+                  <button type="button" class="feature-tab active" data-imagegen-community-sort="random">随机</button>
+                  <button type="button" class="feature-tab" data-imagegen-community-sort="hot">热门</button>
                   <button type="button" class="feature-tab" data-imagegen-community-sort="new">最新</button>
                 </div>
                 <div class="feature-tabs imagegen-community-tabs" role="group" aria-label="范围">
@@ -1327,23 +1312,23 @@
   <script src="supabase-config.js"></script>
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="api-client.js?v=20260602e"></script>
+  <script src="api-client.js?v=20260602w"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260530f"></script>
+  <script src="supabase-sync.js?v=20260602p"></script>
   <script src="card-image-loader.js?v=20260530f"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
   <script src="subscription.js?v=20260622e"></script>
-  <script src="trial-tasks.js?v=20260622d"></script>
+  <script src="trial-tasks.js?v=20260602r"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="script.js?v=20260601y"></script>
+  <script src="script.js?v=20260602w"></script>
   <script src="points-system.js?v=20260606m"></script>
-  <script src="imagegen-prompt-kit.js?v=20260602c"></script>
-  <script src="imagegen-prompt-tools.js?v=20260602c"></script>
-  <script src="features-draft.js?v=20260602e"></script>
-  <script src="community-gacha.js?v=20260601y"></script>
-  <script src="features-assets.js?v=20260602e"></script>
-  <script src="hotfix-image-layout.js?v=20260606m"></script>
+  <script src="imagegen-prompt-kit.js?v=20260602p"></script>
+  <script src="imagegen-prompt-tools.js?v=20260602h"></script>
+  <script src="features-draft.js?v=20260602t"></script>
+  <script src="community-gacha.js?v=20260602w"></script>
+  <script src="features-assets.js?v=20260602w"></script>
+  <script src="hotfix-image-layout.js?v=20260602t"></script>
   <script src="mobile.js?v=20260606m"></script>
   <script>
     window.addEventListener('load', function () {
