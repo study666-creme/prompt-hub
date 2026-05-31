@@ -532,12 +532,15 @@
     contain: layout;
   }
 
+  /* 手机社区/创作：flex 两列（比 Grid 更稳，避免 overflow:hidden 卡片行高塌缩） */
   #communityGrid.cards-container.community-cards:not(.list-view),
   #creationsGrid.cards-container:not(.list-view) {
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    flex-direction: row !important;
+    align-content: flex-start !important;
+    align-items: flex-start !important;
     gap: 12px 10px !important;
-    align-content: start !important;
     flex: 1 1 auto !important;
     min-height: 120px !important;
     max-height: none !important;
@@ -546,20 +549,18 @@
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
     contain: none !important;
-    flex-wrap: unset !important;
     padding: 12px 10px calc(88px + env(safe-area-inset-bottom)) !important;
   }
 
   #communityGrid.cards-container:not(.list-view) > .card,
-  #creationsGrid.cards-container:not(.list-view) > .card,
-  #communityGrid.cards-container:not(.list-view) > .feature-empty,
-  #creationsGrid.cards-container:not(.list-view) > .feature-empty {
-    grid-column: auto !important;
-    flex: none !important;
-    width: 100% !important;
-    max-width: none !important;
-    min-height: auto !important;
-    align-self: start !important;
+  #creationsGrid.cards-container:not(.list-view) > .card {
+    flex: 0 0 calc((100% - 10px) / 2) !important;
+    width: calc((100% - 10px) / 2) !important;
+    max-width: calc((100% - 10px) / 2) !important;
+    box-sizing: border-box !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
     position: relative !important;
     left: auto !important;
     top: auto !important;
@@ -572,15 +573,23 @@
     contain: none !important;
   }
 
+  #communityGrid.cards-container:not(.list-view) > .feature-empty,
+  #creationsGrid.cards-container:not(.list-view) > .feature-empty {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    display: block !important;
+  }
+
+  #communityGrid:not(.list-view) .card-media,
+  #creationsGrid:not(.list-view) .card-media {
+    border-radius: var(--radius-lg);
+    overflow: hidden !important;
+  }
+
   #communityGrid .card-media.is-loading,
   #creationsGrid .card-media.is-loading {
     min-height: 88px !important;
-  }
-
-  #communityGrid.cards-container:not(.list-view) > .feature-empty,
-  #creationsGrid.cards-container:not(.list-view) > .feature-empty {
-    grid-column: 1 / -1 !important;
-    display: block !important;
   }
 
   .cards-container .grid-sizer {
@@ -1159,7 +1168,8 @@
     flex-direction: column;
   }
 
-  .feature-header-imagegen h2 {
+  .feature-header-imagegen h2,
+  .feature-header-imagegen .imagegen-header-title {
     flex: 0 1 auto;
     min-width: 0;
     font-size: 16px;
@@ -1169,6 +1179,12 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 6px 8px;
+  }
+
+  .imagegen-header-mode {
+    order: 3;
+    flex: 1 1 100%;
+    justify-content: center;
   }
 
   .imagegen-header-credits {
@@ -1187,7 +1203,7 @@
   }
 
   .imagegen-credits-box--form {
-    display: none !important;
+    display: block;
   }
 
   body.imagegen-mobile-view-form .imagegen-form-scroll label {
@@ -1205,16 +1221,30 @@
     padding: 10px 12px 6px;
   }
 
-  body.imagegen-mobile-view-form .imagegen-ref-block {
+  body.imagegen-mobile-view-form .imagegen-mode-banner {
+    order: 0;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-mode-credits {
     order: 1;
   }
 
-  body.imagegen-mobile-view-form .imagegen-prompt-block {
+  body.imagegen-mobile-view-form .imagegen-shared-params {
     order: 2;
   }
 
-  body.imagegen-mobile-view-form .imagegen-publish-row {
+  body.imagegen-mobile-view-form .imagegen-ref-block {
+    order: 5;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-prompt-block,
+  body.imagegen-mobile-view-form .imagegen-mode-panel--gen,
+  body.imagegen-mobile-view-form .imagegen-mode-panel--inspire {
     order: 3;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-publish-row {
+    order: 4;
   }
 
   body.imagegen-mobile-view-form .imagegen-prompt-head {
@@ -1233,9 +1263,21 @@
     margin: 0;
   }
 
-  body.imagegen-mobile-view-form .imagegen-ref-block > .imagegen-ref-label {
+  body.imagegen-mobile-view-form .imagegen-ref-block > .imagegen-ref-label,
+  body.imagegen-mobile-view-form .imagegen-ref-head .imagegen-ref-label {
     margin: 8px 0 4px;
     font-size: 12px;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-mode-panel--inspire,
+  body.imagegen-mobile-view-form .imagegen-mode-panel--gen {
+    order: 2;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-form-legal {
+    order: 4;
+    margin-top: 8px;
+    padding-top: 8px;
   }
 
   body.imagegen-mobile-view-form .imagegen-ref-drop {
@@ -1329,17 +1371,16 @@
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     padding: 14px 14px 8px;
   }
 
-  body.imagegen-mobile-view-form .imagegen-form-footer {
-    position: relative;
-    flex-shrink: 0;
-    margin: 0;
+  body.imagegen-mobile-view-form .imagegen-form-dock {
     padding: 10px 14px calc(68px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--border);
-    background: var(--bg-secondary);
-    box-shadow: none;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-inspire-chips {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   body.imagegen-mobile-view-feed .imagegen-side {
@@ -1748,20 +1789,26 @@
   body.efficiency-mode .community-page-layout .cards-container,
   body.efficiency-mode #creationsGrid.cards-container,
   body.efficiency-mode #communityGrid.cards-container {
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    flex-direction: row !important;
+    align-content: flex-start !important;
+    align-items: flex-start !important;
     gap: 10px !important;
     overflow-y: auto !important;
     flex: 1 1 auto !important;
     min-height: 120px !important;
     max-height: none !important;
     height: auto !important;
-    align-content: start;
   }
 
   body.efficiency-mode #creationsGrid .card,
   body.efficiency-mode #communityGrid .card {
-    width: 100% !important;
+    flex: 0 0 calc((100% - 10px) / 2) !important;
+    width: calc((100% - 10px) / 2) !important;
+    max-width: calc((100% - 10px) / 2) !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
     position: relative !important;
     left: auto !important;
     top: auto !important;

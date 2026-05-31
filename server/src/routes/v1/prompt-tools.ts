@@ -165,7 +165,7 @@ promptToolsRoutes.get('/info', async c => {
       },
       inspirationDraw: {
         limits: INSPIRE_DRAW_DAILY_LIMIT,
-        note: '普通用户 3 次/天 · 轻量会员 20 次/天 · 基础及以上无限（仅「随机抽卡」计次）'
+        note: '普通用户 10 次/天 · 轻量会员 30 次/天 · 基础及以上无限（仅「随机抽卡」计次）'
       }
     }
   });

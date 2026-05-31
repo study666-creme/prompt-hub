@@ -5046,12 +5046,15 @@
   function applyImageGenCostDisplay(detail, final, quality, size) {
     const hint = document.getElementById('imageGenCostHint');
     const btn = document.getElementById('imageGenSubmit');
+    const inspireBtn = document.getElementById('imageGenInspireSubmit');
     const count = getImageGenBatchCount();
     const total = final * count;
-    if (btn && !btn.disabled && !imageGenBatchRunning) {
-      btn.textContent = count > 1
-        ? `生成 ${count} 张 · ${total} 积分`
-        : `生成图片 · ${final} 积分`;
+    const submitLabel = count > 1
+      ? `生成 ${count} 张 · ${total} 积分`
+      : `生成图片 · ${final} 积分`;
+    if (btn && !btn.disabled && !imageGenBatchRunning) btn.textContent = submitLabel;
+    if (inspireBtn && !inspireBtn.disabled && !imageGenBatchRunning) {
+      inspireBtn.textContent = `生成图片 · ${final} 积分`;
     }
     if (!hint) return;
     const modelLabel = detail?.modelLabel || '全能模型2';
@@ -5306,6 +5309,7 @@
       gallery.hidden = true;
       gallery.innerHTML = '';
       box.classList.remove('has-refs');
+      window.ImageGenPromptTools?.updateRefToolState?.();
       return;
     }
     gallery.hidden = false;
@@ -5332,6 +5336,7 @@
       });
     });
     updateImageGenCostHint();
+    window.ImageGenPromptTools?.updateRefToolState?.();
   }
 
   function setImageGenRefs(urls) {
@@ -5540,9 +5545,9 @@
           cost: ctx.cost,
           jobId: ctx.jobId || jobId,
           silentToast: !!ctx.silentToast,
-          isRecovery: !!ctx.isRecovery
+          isRecovery: !!ctx.isRecovery,
+          pendingId
         });
-        removePendingJob(pendingId);
         return true;
       }
       return false;
@@ -5697,7 +5702,7 @@
       return { ok: false };
     }
 
-    const btn = document.getElementById('imageGenSubmit');
+    const btn = document.getElementById(batchOpts.submitBtnId || 'imageGenSubmit');
     const singleRun = !batchOpts.batch;
     if (singleRun && btn?.disabled && !imageGenBatchRunning) {
       btn.disabled = false;
@@ -5840,9 +5845,8 @@
         pendingJob.cost = cost;
 
         if (gen.data.status === 'completed' && gen.data.imageUrl) {
-          removePendingJob(pendingId);
           if (gen.data.jobId) trackSessionGenJob(gen.data.jobId);
-          void finishImageGenRun({
+          await finishImageGenRun({
             prompt,
             model,
             resolution,
@@ -5852,7 +5856,8 @@
             cost,
             jobId: gen.data.jobId,
             silentToast: batchOpts.silentToast,
-            fromInspirationDraw: !!batchOpts.fromInspirationDraw
+            fromInspirationDraw: !!batchOpts.fromInspirationDraw,
+            pendingId
           });
           return { ok: true, creditsCharged: cost };
         }
@@ -5982,7 +5987,7 @@
     }
   }
 
-  async function finishImageGenRun({ prompt, model, resolution, quality, size, image, cost, btn, jobId, silentToast, isRecovery, fromInspirationDraw }) {
+  async function finishImageGenRun({ prompt, model, resolution, quality, size, image, cost, btn, jobId, silentToast, isRecovery, fromInspirationDraw, pendingId }) {
     if (!image) {
       toast('图片地址无效，请重试');
       return;
@@ -6053,6 +6058,7 @@
       fromInspirationDraw: !!fromInspirationDraw,
       silentToast: !!silentToast
     });
+    if (pendingId) removePendingJob(pendingId);
     renderImageGenFeed({ preserveScroll: true });
     if (isRecovery) {
       /* 恢复流程在 recoverRecentGenerationJobs 末尾统一提示 */
@@ -6599,25 +6605,18 @@
     const refsSlice = refsToPrefetch.slice(0, prefetchLimit);
 
     resetImageGenFeedCardLayout();
-    setFeedLayoutPending(wrap, true);
+    setFeedLayoutPending(wrap, false);
     wrap.className = mobileFeed
-      ? 'imagegen-feed imagegen-feed--tiles mobile-feed-grid'
-      : 'imagegen-feed imagegen-feed--masonry';
+      ? 'imagegen-feed imagegen-feed--tiles mobile-feed-grid feed-layout-ready'
+      : 'imagegen-feed imagegen-feed--desktop-grid feed-layout-ready';
 
     wrap.innerHTML = html;
-    if (!html.includes('grid-sizer') && !mobileFeed) {
-      const sizer = document.createElement('div');
-      sizer.className = 'grid-sizer';
-      wrap.insertBefore(sizer, wrap.firstChild);
-    }
     resetMobileFeedGridStyles();
     bindImageGenFeedCardEvents(wrap);
     bindImageGenFeedImageRelayout();
     if (mobileFeed) {
       enforceMobileImageGenFeed();
       setFeedLayoutPending(wrap, false);
-    } else {
-      layoutImageGenFeedMasonry();
     }
     wrap.scrollTop = scrollTop;
 
@@ -6639,7 +6638,7 @@
         enforceMobileImageGenFeed();
         setFeedLayoutPending(wrap, false);
       } else {
-        layoutImageGenFeedMasonry();
+        setFeedLayoutPending(wrap, false);
       }
       wrap.scrollTop = scrollTop;
       window.SupabaseSync?.patchImageSrcFromCache?.(wrap);

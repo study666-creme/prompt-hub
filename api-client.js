@@ -321,6 +321,10 @@
     return request('GET', '/api/v1/asset-packages');
   }
 
+  async function getAssetPackageCovers(id) {
+    return request('GET', `/api/v1/asset-packages/${encodeURIComponent(id)}/covers`);
+  }
+
   async function listMyOwnedAssetPackages() {
     return request('GET', '/api/v1/asset-packages/mine/owned');
   }
@@ -353,8 +357,15 @@
     return request('POST', '/api/v1/community/gacha/draw');
   }
 
-  async function importAssetPackage(id, warehouseId) {
-    return request('POST', `/api/v1/asset-packages/${encodeURIComponent(id)}/import`, { warehouseId });
+  async function importAssetPackage(id, warehouseId, folders) {
+    const body = { warehouseId };
+    if (Array.isArray(folders) && folders.length) body.folders = folders;
+    return request('POST', `/api/v1/asset-packages/${encodeURIComponent(id)}/import`, body);
+  }
+
+  async function getAssetPackageFolderImages(id, folder) {
+    const f = encodeURIComponent(folder || '');
+    return request('GET', `/api/v1/asset-packages/${encodeURIComponent(id)}/folders/${f}/images`);
   }
 
   async function downloadAssetPackageJson(id) {
@@ -714,6 +725,7 @@
     getGenerationImageUrl,
     fetchMediaAsBlobUrl,
     listAssetPackages,
+    getAssetPackageCovers,
     listMyOwnedAssetPackages,
     listMyPublishedAssetPackages,
     claimAssetPackage,
@@ -723,6 +735,7 @@
     getCommunityGachaQuota,
     consumeCommunityGachaDraw,
     importAssetPackage,
+    getAssetPackageFolderImages,
     downloadAssetPackageJson
   };
 })();

@@ -38,6 +38,8 @@ meRoutes.get('/', async c => {
       membership: {
         tier: memberActive ? profile.membership_tier : null,
         until: profile.membership_until,
+        queuedTier: profile.membership_queued_tier || null,
+        queuedUntil: profile.membership_queued_until || null,
         active: memberActive,
         genDiscount: memberActive && profile.membership_tier && profile.membership_tier !== 'lite'
           ? { basic: '9折', standard: '8折', pro: '7折' }[profile.membership_tier!]

@@ -4,15 +4,36 @@
 (function () {
   let batchRunning = false;
   let inspireDrawQuota = null;
-  let reversePreviewUrl = '';
-  let fissionPreviewUrl = '';
   let fissionPlanCreditsHint = 5;
   let batchCostSeq = 0;
   let toolboxBound = false;
-  let fissionPickerLock = false;
+  let currentImageGenMode = 'gen';
+  let activeRefTool = '';
   /** 排队提交间隔：避免上游 Apimart 限流导致失败 */
   const BATCH_SUBMIT_GAP_MS = 1000;
   const BATCH_SUBMIT_JITTER_MS = 600;
+
+  function getFirstRefImage() {
+    const refs = window.FeatureDraft?.getImageGenRefImages?.() || [];
+    return refs[0] || '';
+  }
+
+  function updateRefToolState() {
+    const ref = getFirstRefImage();
+    const reverseStatus = $('imageGenReverseRefStatus');
+    const fissionStatus = $('imageGenFissionRefStatus');
+    const reverseBtn = $('imageGenReverseBtn');
+    const fissionBtn = $('imageGenFissionAnalyzeBtn');
+    const label = ref ? '已就绪：将使用参考图第一张' : '请先在上方添加参考图';
+    if (reverseStatus) reverseStatus.textContent = label;
+    if (fissionStatus) fissionStatus.textContent = label;
+    if (reverseBtn && reverseBtn.textContent === '反推提示词') reverseBtn.disabled = !ref;
+    if (fissionBtn && !fissionBtn.disabled && fissionBtn.textContent === fissionAnalyzeBtnLabel()) {
+      fissionBtn.disabled = !ref;
+    } else if (fissionBtn && fissionBtn.textContent === fissionAnalyzeBtnLabel()) {
+      fissionBtn.disabled = !ref;
+    }
+  }
 
   function makeBatchId() {
     return `batch_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -73,10 +94,14 @@
   }
 
   function setPrompt(text) {
-    const ta = $('imageGenPrompt');
-    if (!ta) return;
-    ta.value = text || '';
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    const val = text || '';
+    const genTa = $('imageGenPrompt');
+    const inspireTa = $('imageGenInspirePrompt');
+    if (genTa) {
+      genTa.value = val;
+      genTa.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    if (inspireTa) inspireTa.value = val;
     window.FeatureDraft?.syncCardPublishFromPrompt?.();
   }
 
@@ -102,6 +127,29 @@
 
   function getSelectedFissionPrompts() {
     return getSelectedPromptsFromList('imageGenFissionList');
+  }
+
+  let optimizeCreditsHint = '约 1 积分';
+
+  async function refreshOptimizePricingHint() {
+    if (!window.PointsSystem?.useApiForAccount?.()) return;
+    try {
+      const r = await window.PromptHubApi.promptToolsInfo();
+      const est = r.data?.optimize?.creditsPerCall;
+      if (r.ok && est) {
+        const raw = String(est);
+        optimizeCreditsHint = raw.includes('积分') && raw.length <= 12
+          ? raw
+          : '约 1～2 积分';
+        document.querySelectorAll('#imageGenOptimizeCostHint, .imagegen-optimize-btn-cost').forEach((el) => {
+          el.textContent = optimizeCreditsHint;
+        });
+      }
+    } catch (e) { /* 本地默认 */ }
+  }
+
+  function optimizeBtnLabel() {
+    return `优化提示词 · ${optimizeCreditsHint}`;
   }
 
   function fissionAnalyzeBtnLabel() {
@@ -234,12 +282,12 @@
     const hint = $('imageGenInspireQuotaHint');
     const drawBtn = $('imageGenInspireDrawBtn');
     if (!window.SupabaseSync?.isLoggedIn?.()) {
-      if (hint) hint.textContent = '登录后可用灵感抽卡（普通 3 次/天 · 轻量 20 次/天 · 基础及以上无限）';
+      if (hint) hint.textContent = '登录后可用灵感抽卡（普通 10 次/天 · 轻量 30 次/天 · 基础及以上无限）';
       if (drawBtn) drawBtn.disabled = false;
       return;
     }
     if (!inspireDrawQuota) {
-      if (hint) hint.textContent = '普通用户 3 次/天 · 轻量会员 20 次/天 · 基础及以上无限';
+      if (hint) hint.textContent = '普通用户 10 次/天 · 轻量会员 30 次/天 · 基础及以上无限';
       return;
     }
     if (hint) {
@@ -287,10 +335,27 @@
     }
   }
 
+  const INSPIRE_PRIMARY_TYPES = [
+    'viral', 'premium', 'character', 'scene', 'product', 'guofeng', 'cyber', 'epic'
+  ];
+
+  function preserveFormScroll(fn) {
+    const scrollEl = document.querySelector('.imagegen-form-scroll');
+    const st = scrollEl?.scrollTop ?? 0;
+    fn();
+    if (!scrollEl) return;
+    scrollEl.scrollTop = st;
+    requestAnimationFrame(() => { scrollEl.scrollTop = st; });
+  }
+
   function getSelectedInspireTypes() {
-    const root = $('imageGenInspireTypeChips');
-    if (!root) return ['viral'];
-    const ids = [...root.querySelectorAll('input[type="checkbox"]:checked')].map((i) => i.value);
+    const roots = [$('imageGenInspireTypeChips'), $('imageGenInspireTypeChipsExtra')];
+    const ids = roots.flatMap((root) => {
+      if (!root) return [];
+      return [...root.querySelectorAll('.imagegen-inspire-chip[aria-pressed="true"]')].map(
+        (chip) => chip.dataset.inspireType || ''
+      );
+    }).filter(Boolean);
     return ids.length ? ids : ['viral'];
   }
 
@@ -298,17 +363,66 @@
     return $('imageGenInspireStyle')?.value || 'auto';
   }
 
-  function renderInspireChipGroup(container, items, defaultIds) {
+  function setInspireChipActive(chip, on) {
+    if (!chip) return;
+    chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+    chip.classList.toggle('is-active', on);
+  }
+
+  function renderInspireChipButtons(container, items, defaultIds) {
     if (!container || !items?.length) return;
     const defaults = new Set(defaultIds || []);
     container.innerHTML = items
-      .map(
-        (t) =>
-          `<label class="imagegen-inspire-chip"><input type="checkbox" value="${escapeHtml(t.id)}"${
-            defaults.has(t.id) ? ' checked' : ''
-          }><span>${escapeHtml(t.label)}</span></label>`
-      )
+      .map((t) => {
+        const on = defaults.has(t.id);
+        return `<button type="button" class="imagegen-inspire-chip${on ? ' is-active' : ''}" data-inspire-type="${escapeHtml(t.id)}" aria-pressed="${on ? 'true' : 'false'}">${escapeHtml(t.label)}</button>`;
+      })
       .join('');
+  }
+
+  function bindInspireChipRoot(root) {
+    if (!root || root.dataset.bound) return;
+    root.dataset.bound = '1';
+    root.addEventListener('click', (e) => {
+      const chip = e.target.closest('.imagegen-inspire-chip');
+      if (!chip || !root.contains(chip)) return;
+      e.preventDefault();
+      preserveFormScroll(() => {
+        const on = chip.getAttribute('aria-pressed') === 'true';
+        setInspireChipActive(chip, !on);
+      });
+    });
+  }
+
+  function renderInspireTypeChips() {
+    const all = window.ImageGenPromptKit?.listContentTypes?.() || [];
+    if (!all.length) return;
+    const primaryIds = new Set(INSPIRE_PRIMARY_TYPES);
+    const primary = INSPIRE_PRIMARY_TYPES.map((id) => all.find((t) => t.id === id)).filter(Boolean);
+    const extra = all.filter((t) => !primaryIds.has(t.id));
+    renderInspireChipButtons($('imageGenInspireTypeChips'), primary, ['viral']);
+    renderInspireChipButtons($('imageGenInspireTypeChipsExtra'), extra, []);
+    bindInspireChipRoot($('imageGenInspireTypeChips'));
+    bindInspireChipRoot($('imageGenInspireTypeChipsExtra'));
+    const toggle = $('imageGenInspireTypesToggle');
+    const extraEl = $('imageGenInspireTypeChipsExtra');
+    if (toggle && extraEl && !toggle.dataset.bound) {
+      toggle.dataset.bound = '1';
+      toggle.hidden = !extra.length;
+      toggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        const willOpen = extraEl.hasAttribute('hidden');
+        if (willOpen) {
+          extraEl.removeAttribute('hidden');
+          toggle.setAttribute('aria-expanded', 'true');
+          toggle.textContent = '收起词条';
+        } else {
+          extraEl.setAttribute('hidden', '');
+          toggle.setAttribute('aria-expanded', 'false');
+          toggle.textContent = '更多词条';
+        }
+      });
+    }
   }
 
   async function onQueueBatch() {
@@ -427,75 +541,16 @@
     }
   }
 
-  function ensureToolboxExpanded() {
-    const body = $('imageGenToolboxBody');
-    const toggle = $('imageGenToolboxToggle');
-    if (body?.hidden) {
-      body.hidden = false;
-      if (toggle) {
-        toggle.textContent = '收起';
-        toggle.setAttribute('aria-expanded', 'true');
-      }
-    }
-  }
-
-  function ensureFissionPaneVisible() {
-    ensureToolboxExpanded();
-    switchToolboxTab('fission');
-  }
-
-  function openFissionFilePicker() {
-    if (fissionPickerLock) return;
-    fissionPickerLock = true;
-    setTimeout(() => { fissionPickerLock = false; }, 600);
-    ensureFissionPaneVisible();
-    const fissionFile = $('imageGenFissionFile');
-    if (!fissionFile) return;
-    requestAnimationFrame(() => fissionFile.click());
-  }
-
-  function setFissionPreview(url) {
-    fissionPreviewUrl = url || '';
-    const img = $('imageGenFissionPreview');
-    const idle = $('imageGenFissionIdle');
-    if (img) {
-      img.src = fissionPreviewUrl;
-      img.hidden = !fissionPreviewUrl;
-    }
-    if (idle) idle.hidden = !!fissionPreviewUrl;
-  }
-
-  async function onFissionPickFile(file) {
-    if (!file || !file.type.startsWith('image/')) {
-      toast('请选择图片文件');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setFissionPreview(String(reader.result || ''));
-      const fissionFile = $('imageGenFissionFile');
-      if (fissionFile) fissionFile.value = '';
-    };
-    reader.onerror = () => toast('图片读取失败，请重试');
-    reader.readAsDataURL(file);
-  }
-
-  async function onFissionFromRef() {
-    const refs = window.FeatureDraft?.getImageGenRefImages?.() || [];
-    const first = refs[0] || null;
-    if (!first) {
-      toast('请先在下方「参考图」添加一张图片，或在本页上传');
-      return;
-    }
-    setFissionPreview(first);
-    toast('已载入参考图作为裂变源');
+  function ensureRefToolVisible(tool) {
+    switchRefTool(tool);
   }
 
   async function onFissionAnalyze() {
     if (!window.AuthGate?.requireAuth?.('imagegen')) return;
     if (!ensurePromptApi('promptToolsFission')) return;
-    if (!fissionPreviewUrl) {
-      toast('请先上传裂变源图');
+    const refImage = getFirstRefImage();
+    if (!refImage) {
+      toast('请先在上方参考图添加一张图片');
       return;
     }
     if (!window.PointsSystem?.useApiForAccount?.()) {
@@ -509,7 +564,7 @@
       btn.textContent = '分析中…';
     }
     try {
-      const compressed = await compressImageDataUrl(fissionPreviewUrl, 1280);
+      const compressed = await compressImageDataUrl(refImage, 1280);
       const styleId = $('imageGenFissionStyle')?.value || 'inherit';
       let styleTag = '';
       if (styleId && styleId !== 'inherit' && styleId !== 'none') {
@@ -541,6 +596,7 @@
         btn.disabled = false;
         btn.textContent = fissionAnalyzeBtnLabel();
       }
+      updateRefToolState();
     }
   }
 
@@ -561,7 +617,7 @@
   async function onOptimizePrompt() {
     if (!window.AuthGate?.requireAuth?.('imagegen')) return;
     if (!ensurePromptApi('promptToolsOptimize')) return;
-    const raw = $('imageGenPrompt')?.value?.trim();
+    const raw = ($('imageGenPrompt')?.value || $('imageGenInspirePrompt')?.value || '').trim();
     if (!raw) {
       toast('请先填写要优化的提示词');
       return;
@@ -591,7 +647,7 @@
     } finally {
       if (btn) {
         btn.disabled = false;
-        btn.textContent = '优化提示词';
+        btn.textContent = optimizeBtnLabel();
       }
     }
   }
@@ -628,43 +684,12 @@
     });
   }
 
-  function setReversePreview(url) {
-    reversePreviewUrl = url || '';
-    const img = $('imageGenReversePreview');
-    const idle = $('imageGenReverseIdle');
-    if (img) {
-      img.src = reversePreviewUrl;
-      img.hidden = !reversePreviewUrl;
-    }
-    if (idle) idle.hidden = !!reversePreviewUrl;
-  }
-
-  async function onReversePickFile(file) {
-    if (!file || !file.type.startsWith('image/')) {
-      toast('请选择图片文件');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => setReversePreview(String(reader.result || ''));
-    reader.readAsDataURL(file);
-  }
-
-  async function onReverseFromRef() {
-    const refs = window.FeatureDraft?.getImageGenRefImages?.() || [];
-    const first = refs[0] || null;
-    if (!first) {
-      toast('请先在上方「参考图」添加一张图片');
-      return;
-    }
-    setReversePreview(first);
-    toast('已载入当前参考图');
-  }
-
   async function onReversePrompt() {
     if (!window.AuthGate?.requireAuth?.('imagegen')) return;
     if (!ensurePromptApi('promptToolsReverse')) return;
-    if (!reversePreviewUrl) {
-      toast('请先上传或载入要反推的图片');
+    const refImage = getFirstRefImage();
+    if (!refImage) {
+      toast('请先在上方参考图添加一张图片');
       return;
     }
     if (!window.PointsSystem?.useApiForAccount?.()) {
@@ -677,7 +702,7 @@
       btn.textContent = '反推中…';
     }
     try {
-      const compressed = await compressImageDataUrl(reversePreviewUrl, 1280);
+      const compressed = await compressImageDataUrl(refImage, 1280);
       const r = await window.PromptHubApi.promptToolsReverse({ imageBase64: compressed });
       if (!r.ok) throw new Error(r.message || '反推失败');
       setPrompt(r.data?.prompt || '');
@@ -694,81 +719,118 @@
         btn.disabled = false;
         btn.textContent = '反推提示词';
       }
+      updateRefToolState();
     }
   }
 
-  function switchToolboxTab(tab) {
-    document.querySelectorAll('[data-imagegen-tool-tab]').forEach((btn) => {
-      const on = btn.dataset.imagegenToolTab === tab;
+  function switchRefTool(tool) {
+    const next = activeRefTool === tool ? '' : (tool || '');
+    activeRefTool = next;
+    document.querySelectorAll('[data-ref-tool]').forEach((btn) => {
+      const on = btn.dataset.refTool === next;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-ref-tool-panel]').forEach((pane) => {
+      pane.hidden = pane.dataset.refToolPanel !== next;
+    });
+  }
+
+  function updateImageGenModeFooter(_mode) {
+    /* 生成 / 批量按钮已移入各模式面板内 */
+  }
+
+  function switchImageGenMode(mode) {
+    const next = mode === 'inspire' ? 'inspire' : 'gen';
+    currentImageGenMode = next;
+    document.body.dataset.imagegenMode = next;
+    document.querySelectorAll('[data-imagegen-mode]').forEach((btn) => {
+      const on = btn.dataset.imagegenMode === next;
       btn.classList.toggle('active', on);
       btn.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    document.querySelectorAll('[data-imagegen-tool-pane]').forEach((pane) => {
-      pane.hidden = pane.dataset.imagegenToolPane !== tab;
+    document.querySelectorAll('[data-imagegen-mode-panel]').forEach((pane) => {
+      const on = pane.dataset.imagegenModePanel === next;
+      pane.classList.toggle('active', on);
+      pane.hidden = !on;
     });
+    const layout = $('imageGenLayout');
+    layout?.classList.toggle('imagegen-layout--inspire-mode', next === 'inspire');
+    layout?.classList.toggle('imagegen-layout--gen-mode', next === 'gen');
+    const genHero = $('imageGenGenHero');
+    const inspireHero = $('imageGenInspireHero');
+    if (genHero) genHero.hidden = next !== 'gen';
+    if (inspireHero) inspireHero.hidden = next !== 'inspire';
+    const veil = $('imageGenInspireVeil');
+    const genVeil = $('imageGenGenVeil');
+    if (veil) veil.setAttribute('aria-hidden', next === 'inspire' ? 'false' : 'true');
+    if (genVeil) genVeil.setAttribute('aria-hidden', next === 'gen' ? 'false' : 'true');
+    const ledger = $('creditLedgerPanel');
+    if (ledger) ledger.classList.add('hidden');
+    $('imageGenDockGen')?.toggleAttribute('hidden', next !== 'gen');
+    $('imageGenDockInspire')?.toggleAttribute('hidden', next !== 'inspire');
+    $('imageGenInspirePromptSection')?.toggleAttribute('hidden', next !== 'inspire');
+    updateImageGenModeFooter(next);
+    void updateBatchCostLabel();
   }
 
   function bindToolbox() {
     if (toolboxBound) return;
     toolboxBound = true;
 
-    const toggle = $('imageGenToolboxToggle');
-    const body = $('imageGenToolboxBody');
-    if (toggle && body && !toggle.dataset.bound) {
-      toggle.dataset.bound = '1';
-      toggle.addEventListener('click', () => {
-        const open = body.hidden;
-        body.hidden = !open;
-        toggle.textContent = open ? '收起' : '展开';
-        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    document.querySelectorAll('[data-imagegen-mode]').forEach((btn) => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => switchImageGenMode(btn.dataset.imagegenMode));
+    });
+
+    const optimizeToggle = $('imageGenOptimizeToggle');
+    const optimizePop = $('imageGenOptimizePop');
+    if (optimizeToggle && optimizePop && !optimizeToggle.dataset.bound) {
+      optimizeToggle.dataset.bound = '1';
+      optimizeToggle.addEventListener('click', () => {
+        const open = optimizePop.hidden;
+        optimizePop.hidden = !open;
+        optimizeToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
       });
     }
 
-    document.querySelectorAll('[data-imagegen-tool-tab]').forEach((btn) => {
-      if (btn.dataset.bound) return;
-      btn.dataset.bound = '1';
-      btn.addEventListener('click', () => switchToolboxTab(btn.dataset.imagegenToolTab));
-    });
+    $('imageGenReverseToolBtn')?.addEventListener('click', () => switchRefTool('reverse'));
+    $('imageGenFissionToolBtn')?.addEventListener('click', () => switchRefTool('fission'));
 
     $('imageGenInspireDrawBtn')?.addEventListener('click', onDrawInspiration);
     $('imageGenInspireBatchBtn')?.addEventListener('click', () => void onQueueBatch());
+    $('imageGenInspireSubmit')?.addEventListener('click', () => {
+      const prompt = $('imageGenInspirePrompt')?.value?.trim();
+      if (!prompt) {
+        toast('请先填写或抽卡获得提示词');
+        return;
+      }
+      void window.FeatureDraft?.runImageGenWithPrompt?.(prompt, { fromInspirationDraw: true, submitBtnId: 'imageGenInspireSubmit' });
+    });
     $('imageGenOptimizeBtn')?.addEventListener('click', () => void onOptimizePrompt());
     $('imageGenReverseBtn')?.addEventListener('click', () => void onReversePrompt());
-    $('imageGenReverseFromRefBtn')?.addEventListener('click', () => void onReverseFromRef());
     $('imageGenFissionAnalyzeBtn')?.addEventListener('click', () => void onFissionAnalyze());
     $('imageGenFissionBatchBtn')?.addEventListener('click', () => void onQueueFissionBatch());
-    $('imageGenFissionFromRefBtn')?.addEventListener('click', () => void onFissionFromRef());
     $('imageGenInspireCount')?.addEventListener('change', () => void updateBatchCostLabel());
     $('imageGenFissionCount')?.addEventListener('change', () => void updateBatchCostLabel());
     ['imageGenModel', 'imageGenResolution', 'imageGenQuality'].forEach((id) => {
       $(id)?.addEventListener('change', () => void updateBatchCostLabel());
     });
 
-    const fileInput = $('imageGenReverseFile');
-    $('imageGenReversePickBtn')?.addEventListener('click', () => fileInput?.click());
-    fileInput?.addEventListener('change', () => {
-      const f = fileInput.files?.[0];
-      fileInput.value = '';
-      if (f) void onReversePickFile(f);
+    $('imageGenInspirePrompt')?.addEventListener('input', () => {
+      const inspireTa = $('imageGenInspirePrompt');
+      const genTa = $('imageGenPrompt');
+      if (inspireTa && genTa && genTa.value !== inspireTa.value) {
+        genTa.value = inspireTa.value;
+        genTa.dispatchEvent(new Event('input', { bubbles: true }));
+      }
     });
-
-    const fissionFile = $('imageGenFissionFile');
-    $('imageGenFissionPickBtn')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      openFissionFilePicker();
-    });
-    if (fissionFile && !fissionFile.dataset.bound) {
-      fissionFile.dataset.bound = '1';
-      fissionFile.addEventListener('change', () => {
-        const f = fissionFile.files?.[0];
-        if (f) void onFissionPickFile(f);
-      });
-    }
 
     const typeChips = $('imageGenInspireTypeChips');
     if (typeChips && window.ImageGenPromptKit?.listContentTypes && !typeChips.dataset.filled) {
       typeChips.dataset.filled = '1';
-      renderInspireChipGroup(typeChips, window.ImageGenPromptKit.listContentTypes(), ['viral']);
+      renderInspireTypeChips();
     }
 
     const styleSel = $('imageGenInspireStyle');
@@ -778,7 +840,7 @@
       window.ImageGenPromptKit.listArtStyles().forEach((t) => {
         const opt = document.createElement('option');
         opt.value = t.id;
-        opt.textContent = `${t.label}（${t.hint}）`;
+        opt.textContent = t.label;
         styleSel.appendChild(opt);
       });
       styleSel.value = 'auto';
@@ -801,21 +863,28 @@
       });
       fissionStyleSel.value = 'inherit';
     }
+
+    switchImageGenMode('gen');
+    updateRefToolState();
   }
 
   function initImageGenPromptTools() {
     resetBatchState();
     bindToolbox();
+    updateRefToolState();
     updateInspireDrawQuotaUI();
     void refreshFissionPricingHint();
+    void refreshOptimizePricingHint();
     void updateBatchCostLabel();
   }
 
   window.ImageGenPromptTools = {
     init: initImageGenPromptTools,
+    switchMode: switchImageGenMode,
     updateBatchCostLabel,
     resetBatchState,
     applyQuota: applyInspireDrawQuota,
-    updateQuotaUI: updateInspireDrawQuotaUI
+    updateQuotaUI: updateInspireDrawQuotaUI,
+    updateRefToolState
   };
 })();

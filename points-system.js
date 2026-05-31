@@ -212,7 +212,9 @@
         window.Membership.applyServerState({
           active: true,
           tier: api.data.membershipTier,
-          until: api.data.membershipUntil
+          until: api.data.membershipUntil,
+          queuedTier: api.data.membershipQueuedTier || null,
+          queuedUntil: api.data.membershipQueuedUntil || null
         });
       }
       updateCreditsUI();
@@ -332,7 +334,12 @@
     updateCreditsUI();
     void refreshCreditsFromServer();
     document.getElementById('imageGenCreditsOpenBtn')?.addEventListener('click', () => {
-      openImageGenCreditsSheet();
+      if (window.MobileUI?.isMobile?.()) openImageGenCreditsSheet();
+      else if (typeof window.openRechargePanel === 'function') window.openRechargePanel();
+      else openImageGenCreditsSheet();
+    });
+    document.getElementById('imageGenLedgerToggleBtn')?.addEventListener('click', () => {
+      void showCreditLedger();
     });
   }
 
@@ -377,6 +384,10 @@
       if (typeof showToast === 'function') showToast('请先登录后查看积分明细');
       return;
     }
+    if (!panel.classList.contains('hidden') && panel.innerHTML && !panel.innerHTML.includes('加载中')) {
+      panel.classList.add('hidden');
+      return;
+    }
     if (!window.PromptHubApi?.isConfigured?.()) {
       panel.classList.remove('hidden');
       panel.innerHTML = '<p class="credit-ledger-empty">未连接云端 API，当前为本地积分模式。</p>';
@@ -402,6 +413,10 @@
         <span class="credit-ledger-time">${formatLedgerTime(row.createdAt)}</span>
       </div>`;
     }).join('');
+  }
+
+  function toggleCreditLedger() {
+    void showCreditLedger();
   }
 
   function showRechargePlaceholder() {

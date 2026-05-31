@@ -263,6 +263,7 @@
     auto: null,
     photo: 'photo',
     photo_film: 'photo',
+    hyperreal: 'photo',
     anime: 'anime',
     dongman: 'anime',
     anime_90s: 'anime',
@@ -1432,8 +1433,55 @@
       '立春嫩芽', '清明雨丝', '夏至蝉鸣感', '中秋月色',
       '重阳菊', '冬至热汤蒸汽', '大雪封门', '小暑荷塘',
       '惊蛰桃花', '霜降红叶', '处暑稻浪', '大寒冰凌'
+    ],
+    premiumHook: [
+      'Editorial hero，封面级第一眼', '奢侈品广告级主次', 'Vogue 内页大片感',
+      '获奖 campaign key visual', '美术馆 catalog 完成度', '奈良美智式克制留白',
+      '高定 lookbook 一页', '独立杂志封面气质', '品牌 manifesto 单帧',
+      '拍卖 catalog 级静物', '建筑杂志跨页感', '香水广告叙事一帧'
+    ],
+    premiumSubject: [
+      '单一主体 + 大面积负空间', '雕塑感姿态，静止但有张力',
+      '非流俗脸型，记忆点清晰', '非常规比例但和谐', '物件叙事：一个道具讲完整故事',
+      '身体语言克制，情绪满溢', '对称中藏一丝失衡', '主体占画面不足四成，背景服务',
+      'hands / 细节特写也有主角感', '侧脸或背影，留想象空间'
+    ],
+    premiumComp: [
+      '黄金螺旋构图，视线自然引导', '不对称平衡，高级猎奇但不乱',
+      '对角线切割画面，动势含蓄', '中心留白，主体贴边三分之一',
+      '框中框，景深三层分离', '极低角度仰拍，英雄感但不俗',
+      '俯拍 flat lay 但非电商廉价', '竖构图呼吸感，上下留白 intentional',
+      '宽银幕裁切，电影 pause 帧', '单一消失点，纵深准确'
+    ],
+    premiumLight: [
+      '单灯侧光 + 深灰无缝背景', '窗光一条，其余沉入暗',
+      '轮廓光勾边，面部 soft fill', '顶光戏剧化，肤质仍真实',
+      '冷环境 + 暖 rim，Editorial 经典', 'overcast soft，fabric 与 skin 同清晰',
+      '烛光级 warm key，暗部有细节', '霓虹仅作 edge，面部中性',
+      '体积雾分层，空气透视准确', '反射板补光极克制'
+    ],
+    premiumFinish: [
+      '修图克制，肤质有毛孔', '色彩 science 统一，无廉价 HDR',
+      '胶片颗粒均匀，非数码噪点', '微反差 rich tonal range',
+      '材质物理正确，拒绝塑料 CG', '印刷级锐度，边缘无 halo',
+      '低饱和统一 + 单一点睛色', 'luxury retouch restraint，不过磨',
+      '封面级完成度，主次分明', 'high-end finish，controlled color'
     ]
   };
+
+  function buildPremium(ctx) {
+    const family = ctx?.family || 'neutral';
+    const finishPool = family === 'anime' ? WORDS.animeStyle : WORDS.premiumFinish;
+    return combineParts([
+      pick(WORDS.premiumHook),
+      pick(WORDS.premiumSubject),
+      pick(WORDS.premiumComp),
+      pick(WORDS.premiumLight),
+      pick(finishPool),
+      pickMaybe(TWIST, 0.35),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
 
   function buildCharacter(ctx) {
     const family = ctx?.family || 'neutral';
@@ -2188,6 +2236,7 @@
     scene: { label: '场景', hint: '环境 / 氛围 / 建筑', build: buildScene },
     product: { label: '产品', hint: '静物 / 商业摄影', build: buildProduct },
     viral: { label: '爆款', hint: '小红书 / 抖音向', build: buildViral },
+    premium: { label: '精品', hint: 'Editorial / 奢侈品 / 封面级', build: buildPremium },
     epic: { label: '史诗巨构', hint: '大透视 / 强张力 / 巨型建筑', build: buildEpic },
     impact: { label: '高冲击力', hint: '构图 / 姿态 / 强氛围', build: buildImpact },
     stylized: { label: '高风格化', hint: '怪诞 / 小众 / 高级猎奇', build: buildStylized },
@@ -2219,6 +2268,7 @@
     auto: { label: '智能匹配', hint: '每条随机画风', tag: '' },
     photo: { label: '真人摄影', hint: '写真 / 胶片', tag: '【画风锁定】真人摄影写真，85mm 浅景深，自然肤质，非插画' },
     photo_film: { label: '胶片人像', hint: '柯达 / 富士', tag: '【画风锁定】35mm 胶片人像，Portra 颗粒，真人摄影' },
+    hyperreal: { label: '超写实', hint: '毛孔级写实 / 商业人像', tag: '【画风锁定】超写实摄影，毛孔级肤质与微距级细节，商业广告级 retouch，非插画非动漫' },
     anime: { label: '二次元插画', hint: 'Pixiv / 厚涂 / 立绘', tag: '【画风锁定】日系二次元插画，线稿上色，非摄影非真人' },
     dongman: { label: '动漫画风', hint: 'TV动画 / 漫画 / 番剧截图感', tag: '【画风锁定】日本动漫画风，动画或漫画插画，赛璐璐或数字上色，非真人摄影' },
     anime_90s: { label: '90s 赛璐璐', hint: '复古 TV 动画', tag: '【画风锁定】90 年代赛璐璐动画风，非真人' },
@@ -2243,7 +2293,7 @@
   };
 
   const AUTO_STYLE_POOL = [
-    'anime', 'dongman', 'semireal', 'lineart', 'cg_3d', 'makoto', 'ghibli', 'photo', 'photo_film',
+    'anime', 'dongman', 'semireal', 'lineart', 'cg_3d', 'makoto', 'ghibli', 'photo', 'photo_film', 'hyperreal',
     'manhwa', 'arcane', 'oil', 'ink', 'pixel', 'cyber_render', 'dark_aesthetic', 'cg_3d_toon', 'unreal', 'anime_90s'
   ];
 

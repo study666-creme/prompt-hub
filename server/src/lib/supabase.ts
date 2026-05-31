@@ -7,6 +7,8 @@ export type Profile = {
   credits: number;
   membership_tier: 'lite' | 'basic' | 'standard' | 'pro' | null;
   membership_until: string | null;
+  membership_queued_tier: 'lite' | 'basic' | 'standard' | 'pro' | null;
+  membership_queued_until: string | null;
   first_sub_offer_used: boolean;
   storage_bytes: number;
   credit_grant_mode: 'daily' | 'bundle';
@@ -50,6 +52,69 @@ async function ensureProfileDisplayName(
   return data as Profile;
 }
 
+export const MEMBERSHIP_TIER_RANK = {
+  lite: 1,
+  basic: 2,
+  standard: 3,
+  pro: 4
+} as const;
+
+export function tierRank(tier: Profile['membership_tier']): number {
+  if (!tier) return 0;
+  return MEMBERSHIP_TIER_RANK[tier] ?? 0;
+}
+
+/** 主档到期后自动切换到排队档 */
+export async function resolveMembershipRollover(
+  admin: SupabaseClient,
+  profile: Profile
+): Promise<Profile> {
+  const now = Date.now();
+  const untilMs = profile.membership_until ? new Date(profile.membership_until).getTime() : 0;
+  const primaryActive = !!profile.membership_tier && (!untilMs || untilMs > now);
+
+  if (primaryActive) return profile;
+
+  const qTier = profile.membership_queued_tier;
+  const qUntilMs = profile.membership_queued_until
+    ? new Date(profile.membership_queued_until).getTime()
+    : 0;
+
+  if (qTier && qUntilMs > now) {
+    const { data, error } = await admin
+      .from('profiles')
+      .update({
+        membership_tier: qTier,
+        membership_until: profile.membership_queued_until,
+        membership_queued_tier: null,
+        membership_queued_until: null
+      })
+      .eq('user_id', profile.user_id)
+      .select('*')
+      .single();
+    if (error) return profile;
+    return data as Profile;
+  }
+
+  if (profile.membership_tier || profile.membership_queued_tier) {
+    const { data, error } = await admin
+      .from('profiles')
+      .update({
+        membership_tier: null,
+        membership_until: null,
+        membership_queued_tier: null,
+        membership_queued_until: null
+      })
+      .eq('user_id', profile.user_id)
+      .select('*')
+      .single();
+    if (error) return profile;
+    return data as Profile;
+  }
+
+  return profile;
+}
+
 export async function getOrCreateProfile(
   admin: SupabaseClient,
   userId: string
@@ -61,7 +126,10 @@ export async function getOrCreateProfile(
     .maybeSingle();
 
   if (error) throw error;
-  if (data) return ensureProfileDisplayName(admin, data as Profile);
+  if (data) {
+    const named = await ensureProfileDisplayName(admin, data as Profile);
+    return resolveMembershipRollover(admin, named);
+  }
 
   const { data: inserted, error: insertErr } = await admin
     .from('profiles')
@@ -76,7 +144,15 @@ export async function getOrCreateProfile(
 export function isMembershipActive(profile: Profile): boolean {
   if (!profile.membership_tier) return false;
   if (!profile.membership_until) return true;
-  return new Date(profile.membership_until).getTime() > Date.now();
+  if (new Date(profile.membership_until).getTime() > Date.now()) return true;
+  if (
+    profile.membership_queued_tier &&
+    profile.membership_queued_until &&
+    new Date(profile.membership_queued_until).getTime() > Date.now()
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function membershipGenMultiplier(tier: Profile['membership_tier']): number {

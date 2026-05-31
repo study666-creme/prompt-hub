@@ -35,11 +35,15 @@
   function readRow() {
     const all = loadJson(LS_MEMBERSHIP, {});
     const row = all[accountKey()];
-    if (!row || typeof row !== 'object') return { active: false, until: null, tier: null };
+    if (!row || typeof row !== 'object') {
+      return { active: false, until: null, tier: null, queuedTier: null, queuedUntil: null };
+    }
     return {
       active: !!row.active,
       until: row.until || null,
-      tier: row.tier || null
+      tier: row.tier || null,
+      queuedTier: row.queuedTier || null,
+      queuedUntil: row.queuedUntil || null
     };
   }
 
@@ -53,7 +57,17 @@
     const row = readRow();
     if (!row.active) return false;
     if (row.until && Date.now() > row.until) {
-      writeRow({ active: false, until: null, tier: null });
+      if (row.queuedUntil && Date.now() < row.queuedUntil && row.queuedTier) {
+        writeRow({
+          active: true,
+          until: row.queuedUntil,
+          tier: row.queuedTier,
+          queuedTier: null,
+          queuedUntil: null
+        });
+        return true;
+      }
+      writeRow({ active: false, until: null, tier: null, queuedTier: null, queuedUntil: null });
       return false;
     }
     return true;
@@ -145,6 +159,11 @@
       const d = new Date(row.until);
       untilLabel = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} 到期`;
     }
+    if (row.queuedTier && row.queuedUntil) {
+      const qLabels = { lite: '轻量', basic: '基础', standard: '标准', pro: '专业' };
+      const qd = new Date(row.queuedUntil);
+      untilLabel += ` · 之后接续${qLabels[row.queuedTier] || '会员'}至 ${qd.getMonth() + 1}/${qd.getDate()}`;
+    }
     return {
       active: true,
       tier: row.tier || 'basic',
@@ -164,7 +183,9 @@
       writeRow({
         active: true,
         until: untilMs,
-        tier: membership.tier
+        tier: membership.tier,
+        queuedTier: membership.queuedTier || null,
+        queuedUntil: membership.queuedUntil ? new Date(membership.queuedUntil).getTime() : null
       });
       if (typeof window.updateImageGenPricingUI === 'function') {
         window.updateImageGenPricingUI();
@@ -176,7 +197,7 @@
       window.ImageGenPromptTools?.updateQuotaUI?.();
       return;
     }
-    writeRow({ active: false, until: null, tier: null });
+    writeRow({ active: false, until: null, tier: null, queuedTier: null, queuedUntil: null });
     if (typeof window.updateImageGenPricingUI === 'function') {
       window.updateImageGenPricingUI();
     }

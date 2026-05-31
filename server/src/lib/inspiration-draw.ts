@@ -6,8 +6,8 @@ import type { Profile } from './supabase';
 import { getOrCreateProfile, isMembershipActive } from './supabase';
 
 export const INSPIRE_DRAW_DAILY_LIMIT = {
-  free: 3,
-  lite: 20
+  free: 10,
+  lite: 30
 } as const;
 
 export type InspirationDrawTier = 'free' | 'lite' | 'basic' | 'standard' | 'pro';
@@ -80,10 +80,10 @@ export function buildInspirationDrawQuota(profile: Profile): InspirationDrawQuot
 
 export function inspireDrawLimitMessage(tier: InspirationDrawTier): string {
   if (tier === 'free') {
-    return '今日灵感抽卡已达 3 次上限。开通轻量会员 20 次/天，基础会员及以上无限。';
+    return '今日灵感抽卡已达 10 次上限。开通轻量会员 30 次/天，基础会员及以上无限。';
   }
   if (tier === 'lite') {
-    return '今日灵感抽卡已达 20 次上限。升级基础会员可无限抽卡。';
+    return '今日灵感抽卡已达 30 次上限。升级基础会员可无限抽卡。';
   }
   return '今日灵感抽卡次数已用完';
 }

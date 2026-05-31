@@ -47,6 +47,38 @@ export function formatPriceLabel(priceCents: number): string {
   return yuan % 1 === 0 ? `¥${yuan.toFixed(0)}` : `¥${yuan.toFixed(2)}`;
 }
 
+export function buildFolderPreviewTree(
+  cards: PackCard[],
+  previewCardIds: string[]
+): Array<{ name: string; cardCount: number; previewCardIds: string[] }> {
+  const previewSet = new Set(previewCardIds.map(String));
+  const groups = new Map<string, PackCard[]>();
+  for (const c of cards) {
+    const g = String(c.group || '').trim() || '未分类';
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g)!.push(c);
+  }
+  if (!groups.size) {
+    return [{ name: '包内卡片', cardCount: cards.length, previewCardIds: previewCardIds.slice(0, 5) }];
+  }
+  return Array.from(groups.entries()).map(([name, list]) => ({
+    name,
+    cardCount: list.length,
+    previewCardIds: list
+      .filter((c) => previewSet.has(c.id))
+      .slice(0, 5)
+      .map((c) => c.id)
+  }));
+}
+
+function previewTreeNeedsRebuild(tree: ReturnType<typeof normalizePreviewTree>): boolean {
+  if (!tree.length) return true;
+  return tree.some(
+    (n) =>
+      (Array.isArray(n.children) && n.children.length && !n.previewCardIds?.length) ||
+      n.cardCount == null
+  );
+}
 function normalizePreviewTree(
   raw: unknown
 ): Array<{ name: string; cardCount?: number; previewCardIds?: string[]; children?: string[] }> {
@@ -106,6 +138,10 @@ export function mapAssetPackage(row: AssetPackageRow, opts: { owned?: boolean; i
   const previewIds = Array.isArray(row.preview_card_ids)
     ? row.preview_card_ids.map(String).filter(Boolean)
     : [];
+  let previewTree = normalizePreviewTree(row.preview_tree);
+  if (previewTreeNeedsRebuild(previewTree)) {
+    previewTree = buildFolderPreviewTree(cards, previewIds);
+  }
   return {
     id: row.id,
     title: row.title,
@@ -117,7 +153,7 @@ export function mapAssetPackage(row: AssetPackageRow, opts: { owned?: boolean; i
     commercialUseAllowed: !!row.commercial_use_allowed,
     countLabel: row.count_label || (cards.length ? `${cards.length} 张卡片` : ''),
     license: row.license_text || buildLicenseText(!!row.commercial_use_allowed, saleType),
-    previewTree: normalizePreviewTree(row.preview_tree),
+    previewTree: previewTree,
     previewThumbs: normalizePreviewThumbs(row.preview_thumbs),
     previewCardIds: previewIds,
     cardCount: cards.length,
@@ -147,19 +183,7 @@ async function enrichPackagePreview(
 }
 
 function buildPreviewTreeFromCards(cards: PackCard[], previewIds: string[]) {
-  const previewSet = new Set(previewIds);
-  const groups = new Map<string, string[]>();
-  for (const c of cards) {
-    const g = c.group || '未分类';
-    const name = (c.title || c.prompt || '未命名').slice(0, 28);
-    const label = `${name}${previewSet.has(c.id) ? ' · 可预览' : ' · 领取后可见'}`;
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g)!.push(label);
-  }
-  if (!groups.size) {
-    return [{ name: '包内卡片', children: ['领取后可见'] }];
-  }
-  return Array.from(groups.entries()).map(([name, children]) => ({ name, children }));
+  return buildFolderPreviewTree(cards, previewIds);
 }
 
 export function newPackageId(): string {
@@ -196,14 +220,31 @@ export async function listPublishedAssetPackages(
   }
 
   return Promise.all(
-    (data as AssetPackageRow[] | null || []).map(async (row) => {
+    (data as AssetPackageRow[] | null || []).map((row) => {
       const pkg = mapAssetPackage(row, {
         owned: owned.has(row.id),
         isAuthor: userId ? String(row.author_id) === String(userId) : false
       });
-      return enrichPackagePreview(admin, row, pkg);
+      return pkg;
     })
   );
+}
+
+export async function getPackagePreviewCovers(
+  admin: SupabaseClient,
+  packageId: string
+): Promise<Array<{ cardId: string; label: string; imageUrl: string | null }>> {
+  const { data, error } = await admin
+    .from('asset_packages')
+    .select('preview_card_ids, cards_payload, status')
+    .eq('id', packageId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data || data.status !== 'published') return [];
+  const previewIds = Array.isArray(data.preview_card_ids)
+    ? data.preview_card_ids.map(String).filter(Boolean)
+    : [];
+  return signPreviewImagesForPackage(admin, previewIds, data.cards_payload);
 }
 
 export async function getAssetPackageById(admin: SupabaseClient, id: string, userId?: string | null) {
@@ -241,11 +282,8 @@ export async function listEntitlementsForUser(
       .neq('status', 'archived')
       .order('updated_at', { ascending: false });
     if (error) throw error;
-    return Promise.all(
-      (data as AssetPackageRow[] | null || []).map(async (row) => {
-        const pkg = mapAssetPackage(row, { owned: true, isAuthor: true });
-        return enrichPackagePreview(admin, row, pkg);
-      })
+    return (data as AssetPackageRow[] | null || []).map((row) =>
+      mapAssetPackage(row, { owned: true, isAuthor: true })
     );
   }
 
@@ -261,15 +299,10 @@ export async function listEntitlementsForUser(
   const { data, error } = await admin.from('asset_packages').select('*').in('id', ids);
   if (error) throw error;
   const byId = new Map((data as AssetPackageRow[] | null || []).map((r) => [r.id, r]));
-  return Promise.all(
-    ids
-      .map((id) => byId.get(id))
-      .filter(Boolean)
-      .map(async (row) => {
-        const pkg = mapAssetPackage(row as AssetPackageRow, { owned: true });
-        return enrichPackagePreview(admin, row as AssetPackageRow, pkg);
-      })
-  );
+  return ids
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map((row) => mapAssetPackage(row as AssetPackageRow, { owned: true }));
 }
 
 export async function createAssetPackage(
@@ -366,6 +399,8 @@ export async function updateAssetPackage(
     countLabel?: string;
     previewTree?: unknown;
     previewThumbs?: unknown;
+    previewCardIds?: string[];
+    cards?: PackCard[];
     status?: 'published' | 'archived';
   }
 ) {
@@ -381,11 +416,32 @@ export async function updateAssetPackage(
   }
 
   const cur = existing as AssetPackageRow;
+  const curCards = normalizePackCards(cur.cards_payload);
   const saleType = patch.saleType === 'buyout' ? 'buyout' : patch.saleType === 'bulk' ? 'bulk' : cur.sale_type;
   const commercialUseAllowed =
     patch.commercialUseAllowed === undefined ? !!cur.commercial_use_allowed : patch.commercialUseAllowed !== false;
   const priceCents =
     patch.priceCents === undefined ? Number(cur.price_cents) || 0 : Math.max(0, Math.floor(Number(patch.priceCents) || 0));
+  const cards = patch.cards !== undefined ? normalizePackCards(patch.cards) : curCards;
+  if (!cards.length) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '资产包至少保留一张卡片');
+  }
+  const previewCardIds = (
+    patch.previewCardIds !== undefined
+      ? patch.previewCardIds
+      : Array.isArray(cur.preview_card_ids)
+        ? cur.preview_card_ids.map(String)
+        : []
+  )
+    .map(String)
+    .filter((id) => cards.some((c) => c.id === id))
+    .slice(0, 60);
+  const previewTree =
+    patch.previewTree !== undefined
+      ? normalizePreviewTree(patch.previewTree)
+      : previewTreeNeedsRebuild(normalizePreviewTree(cur.preview_tree))
+        ? buildFolderPreviewTree(cards, previewCardIds)
+        : normalizePreviewTree(cur.preview_tree);
 
   const next = {
     title: patch.title != null ? String(patch.title).slice(0, 120) : cur.title,
@@ -394,12 +450,16 @@ export async function updateAssetPackage(
     price_cents: priceCents,
     sale_type: saleType,
     commercial_use_allowed: commercialUseAllowed,
-    count_label: patch.countLabel != null ? String(patch.countLabel).slice(0, 120) : cur.count_label,
+    count_label:
+      patch.countLabel != null
+        ? String(patch.countLabel).slice(0, 120)
+        : cur.count_label || `${cards.length} 张卡片`,
     license_text: buildLicenseText(commercialUseAllowed, saleType),
-    preview_tree:
-      patch.previewTree !== undefined ? normalizePreviewTree(patch.previewTree) : cur.preview_tree,
+    preview_tree: previewTree,
     preview_thumbs:
       patch.previewThumbs !== undefined ? normalizePreviewThumbs(patch.previewThumbs) : cur.preview_thumbs,
+    preview_card_ids: previewCardIds,
+    cards_payload: cards,
     status: patch.status === 'archived' ? 'archived' : patch.status === 'published' ? 'published' : cur.status,
     updated_at: new Date().toISOString()
   };

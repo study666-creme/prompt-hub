@@ -8,11 +8,13 @@ import {
   getAssetPackageById,
   listEntitlementsForUser,
   listPublishedAssetPackages,
+  getPackagePreviewCovers,
   updateAssetPackage
 } from '../../lib/asset-packages';
 import {
   assertPackageEntitlement,
   getPackageCardsPayload,
+  getPackageFolderImages,
   importAssetPackageToWarehouse
 } from '../../lib/asset-package-import';
 import { ApiError } from '../../lib/errors';
@@ -99,6 +101,13 @@ assetPackagesPublicRoutes.get('/', rateLimit(120, 60_000), async c => {
   return c.json({ ok: true, data: { items } });
 });
 
+assetPackagesPublicRoutes.get('/:id/covers', rateLimit(180, 60_000), async c => {
+  const id = c.req.param('id');
+  const admin = createAdminClient(c.env);
+  const previewImages = await getPackagePreviewCovers(admin, id);
+  return c.json({ ok: true, data: { id, previewImages } });
+});
+
 assetPackagesPublicRoutes.get('/:id', rateLimit(120, 60_000), async c => {
   const id = c.req.param('id');
   if (id === 'mine') throw new ApiError(404, 'NOT_FOUND', '资产包不存在');
@@ -107,6 +116,15 @@ assetPackagesPublicRoutes.get('/:id', rateLimit(120, 60_000), async c => {
   const pkg = await getAssetPackageById(admin, id, user?.id || null);
   if (!pkg) throw new ApiError(404, 'NOT_FOUND', '资产包不存在');
   return c.json({ ok: true, data: pkg });
+});
+
+assetPackagesPublicRoutes.get('/:id/folders/:folder/images', rateLimit(180, 60_000), async c => {
+  const id = c.req.param('id');
+  const folder = decodeURIComponent(c.req.param('folder') || '');
+  const admin = createAdminClient(c.env);
+  const user = await optionalUser(c);
+  const data = await getPackageFolderImages(admin, id, folder, user?.id || null);
+  return c.json({ ok: true, data });
 });
 
 /** 需登录 */
@@ -192,7 +210,8 @@ assetPackagesRoutes.get('/:id/export', rateLimit(60, 60_000), async c => {
 });
 
 const importBodySchema = z.object({
-  warehouseId: z.string().min(1).max(120)
+  warehouseId: z.string().min(1).max(120),
+  folders: z.array(z.string().min(1).max(80)).max(50).optional()
 });
 
 assetPackagesRoutes.post('/:id/import', rateLimit(30, 60_000), async c => {
@@ -202,6 +221,13 @@ assetPackagesRoutes.post('/:id/import', rateLimit(30, 60_000), async c => {
   if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', '请选择要导入的卡片库');
   const admin = createAdminClient(c.env);
   const profile = await getOrCreateProfile(admin, user.id);
-  const result = await importAssetPackageToWarehouse(admin, user.id, profile, id, parsed.data.warehouseId);
+  const result = await importAssetPackageToWarehouse(
+    admin,
+    user.id,
+    profile,
+    id,
+    parsed.data.warehouseId,
+    parsed.data.folders
+  );
   return c.json({ ok: true, data: result });
 });

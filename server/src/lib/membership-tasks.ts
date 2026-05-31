@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Profile } from './supabase';
-import { getOrCreateProfile, isMembershipActive } from './supabase';
+import { getOrCreateProfile, isMembershipActive, tierRank, resolveMembershipRollover } from './supabase';
 import {
   chinaDateKey,
   claimMemberDailyCredits,
@@ -396,17 +396,54 @@ export async function extendMembershipDays(
   tier: NonNullable<Profile['membership_tier']> = 'basic',
   opts?: { creditGrantMode?: 'daily' | 'bundle' }
 ): Promise<Profile> {
+  profile = await resolveMembershipRollover(admin, profile);
+
   const now = Date.now();
   const curUntil = profile.membership_until
     ? new Date(profile.membership_until).getTime()
     : 0;
-  const base = Math.max(now, curUntil);
-  const until = new Date(base + days * 86400000).toISOString();
+  const curActive = !!profile.membership_tier && curUntil > now;
+  const curRank = tierRank(profile.membership_tier);
+  const newRank = tierRank(tier);
+  const addMs = Math.max(1, days) * 86400000;
 
-  const patch: Record<string, unknown> = {
-    membership_tier: tier,
-    membership_until: until
-  };
+  const patch: Record<string, unknown> = {};
+
+  if (curActive && newRank > curRank) {
+    const remainingMs = Math.max(0, curUntil - now);
+    const newUntilMs = now + addMs;
+    patch.membership_tier = tier;
+    patch.membership_until = new Date(newUntilMs).toISOString();
+    patch.membership_queued_tier = profile.membership_tier;
+    patch.membership_queued_until = new Date(newUntilMs + remainingMs).toISOString();
+  } else if (curActive && newRank === curRank) {
+    const oldPrimaryUntil = curUntil;
+    const base = Math.max(now, curUntil);
+    const newUntilMs = base + addMs;
+    patch.membership_tier = tier;
+    patch.membership_until = new Date(newUntilMs).toISOString();
+    if (profile.membership_queued_until && profile.membership_queued_tier) {
+      const shift = newUntilMs - oldPrimaryUntil;
+      if (shift > 0) {
+        patch.membership_queued_until = new Date(
+          new Date(profile.membership_queued_until).getTime() + shift
+        ).toISOString();
+        patch.membership_queued_tier = profile.membership_queued_tier;
+      }
+    }
+  } else if (curActive && newRank < curRank) {
+    const chainEnd = profile.membership_queued_until
+      ? Math.max(curUntil, new Date(profile.membership_queued_until).getTime())
+      : curUntil;
+    patch.membership_queued_tier = tier;
+    patch.membership_queued_until = new Date(chainEnd + addMs).toISOString();
+  } else {
+    patch.membership_tier = tier;
+    patch.membership_until = new Date(now + addMs).toISOString();
+    patch.membership_queued_tier = null;
+    patch.membership_queued_until = null;
+  }
+
   if (opts?.creditGrantMode) {
     patch.credit_grant_mode = opts.creditGrantMode;
   }

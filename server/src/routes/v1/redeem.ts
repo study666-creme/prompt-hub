@@ -166,6 +166,17 @@ redeemRoutes.post('/', async c => {
     } else {
       parts.push(`已开通 ${days} 天${tierLabel}会员`);
     }
+    if (profile.membership_queued_tier && profile.membership_queued_until) {
+      const qLabel =
+        profile.membership_queued_tier === 'pro'
+          ? '专业'
+          : profile.membership_queued_tier === 'standard'
+            ? '标准'
+            : profile.membership_queued_tier === 'lite'
+              ? '轻量'
+              : '基础';
+      parts.push(`${tierLabel}会员先用，到期后自动接续${qLabel}剩余时长`);
+    }
   }
 
   return c.json({
@@ -177,7 +188,9 @@ redeemRoutes.post('/', async c => {
       dailyCredits: creditsInfo.dailyCredits,
       creditGrantMode: creditsInfo.creditGrantMode,
       membershipTier: profile.membership_tier,
-      membershipUntil: profile.membership_until
+      membershipUntil: profile.membership_until,
+      membershipQueuedTier: profile.membership_queued_tier || null,
+      membershipQueuedUntil: profile.membership_queued_until || null
     }
   });
 });

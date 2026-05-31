@@ -14,6 +14,47 @@
 
   const MOCK_PACKAGES = [];
 
+  const DEMO_FEATURED_PACKAGE = {
+    id: '__demo_featured_system__',
+    title: '精选体系 · 完整世界观剧本包',
+    tag: '精选体系',
+    featured: true,
+    isDemo: true,
+    priceCents: 3999900,
+    priceLabel: '¥39999',
+    saleType: 'bulk',
+    countLabel: '216 张设定卡 + 5 万字文档',
+    description:
+      '拥有完整剧本三万字加世界观文档两万字，重要人物设定卡14张，配角形象卡103张，怪物形象卡43张，场景卡56张，均已关联资产创作文档，导入即用，关系一目了然，设定剧情微调无障碍。提示词和图片均为自己创作，无任何版权风险，购买即拥有该图包卡片文档商用版权。如预览图无法下定决断，可联系本人商议更多信息。',
+    license:
+      '购买即拥有该图包内卡片、提示词及附属文档的商用版权；演示包仅供预览结构，正式内容以购买后交付为准。',
+    commercialUseAllowed: true,
+    authorName: 'Prompt Hub 演示',
+    previewTree: [
+      { name: '重要人物设定', cardCount: 14, previewCardIds: [] },
+      { name: '配角形象', cardCount: 103, previewCardIds: [] },
+      { name: '怪物形象', cardCount: 43, previewCardIds: [] },
+      { name: '场景卡', cardCount: 56, previewCardIds: [] },
+      { name: '完整剧本', cardCount: 1, previewCardIds: [] },
+      { name: '世界观文档', cardCount: 1, previewCardIds: [] }
+    ],
+    previewThumbs: [{ label: '精选', hue: 28 }],
+    previewImages: [],
+    cardCount: 216,
+    owned: false,
+    isAuthor: false
+  };
+
+  function getDemoPackages() {
+    return [normalizePackage(DEMO_FEATURED_PACKAGE)].filter(Boolean);
+  }
+
+  function mergeMarketPackageList(items) {
+    const demos = getDemoPackages();
+    const rest = (items || []).filter((p) => p && p.id !== DEMO_FEATURED_PACKAGE.id);
+    return [...demos, ...rest];
+  }
+
   const PACK_CARD_MAX = 500;
   const PACK_FOLDER_PREVIEW_MAX = 5;
 
@@ -157,34 +198,85 @@
       previewTree: Array.isArray(pkg.previewTree) ? pkg.previewTree : [],
       previewThumbs: Array.isArray(pkg.previewThumbs) ? pkg.previewThumbs : [],
       previewImages: Array.isArray(pkg.previewImages) ? pkg.previewImages : [],
+      previewCardIds: Array.isArray(pkg.previewCardIds) ? pkg.previewCardIds.map(String) : [],
       authorId: pkg.authorId,
       authorName: pkg.authorName || '',
       owned: !!pkg.owned,
-      isAuthor: !!pkg.isAuthor
+      isAuthor: !!pkg.isAuthor,
+      featured: !!pkg.featured || String(pkg.tag || '').includes('精选体系'),
+      isDemo: !!pkg.isDemo
     };
+  }
+
+  function renderFakePackLayers(hue, count = 3) {
+    return Array.from({ length: count }, (_, i) =>
+      `<span class="asset-pack-fake-card asset-pack-fake-card--${i}" style="--card-hue:${(hue || 200) + i * 18}" aria-hidden="true"></span>`
+    ).join('');
   }
 
   function renderStackCover(pkg) {
     const tag = pkg.tag || '免费';
-    const imgs = (pkg.previewImages || []).filter((p) => p?.imageUrl).slice(0, 5);
-    const hue = pkg.previewThumbs?.[0]?.hue || 200;
-    if (!imgs.length) {
-      return `<button type="button" class="asset-market-card-cover asset-stack-cover asset-stack-cover--empty asset-stack-cover--pack" data-action="preview-cover" style="--asset-hue:${hue}" aria-label="预览结构">
-        <span class="asset-stack-pack-shimmer" aria-hidden="true"></span>
-        <span class="asset-market-card-tag">${esc(tag)}</span>
-      </button>`;
-    }
-    const layers = imgs
+    const featured = pkg.featured;
+    const tagHtml = featured
+      ? `<span class="asset-market-card-tag asset-market-card-tag--featured">${esc(tag)}</span>`
+      : `<span class="asset-market-card-tag">${esc(tag)}</span>`;
+    const imgs = (pkg.previewImages || []).filter((p) => p?.imageUrl).slice(0, 3);
+    const hue = pkg.previewThumbs?.[0]?.hue ?? (featured ? 28 : pkg.priceCents ? 34 : 42);
+    const fakeLayers = renderFakePackLayers(hue, featured ? 4 : 3);
+    const imgLayers = imgs.length
+      ? imgs
+          .map(
+            (p, i) =>
+              `<img class="asset-stack-layer asset-stack-layer--${i}" src="${esc(p.imageUrl)}" alt="" loading="${i === 0 ? 'eager' : 'lazy'}"${i === 0 ? ' fetchpriority="high" decoding="async"' : ' decoding="async"'} draggable="false">`
+          )
+          .join('')
+      : '';
+    const layers = `${fakeLayers}${imgLayers}`;
+    return `<button type="button" class="asset-market-card-cover asset-stack-cover asset-stack-cover--pack" data-action="preview-cover" data-pkg-id="${esc(pkg.id)}" style="--asset-hue:${hue}" aria-label="预览结构">
+      <div class="asset-pack-shell">
+        <div class="asset-pack-shimmer" aria-hidden="true"></div>
+        <div class="asset-pack-stage">
+          <div class="asset-stack-inner">${layers}</div>
+        </div>
+        <div class="asset-pack-band" aria-hidden="true"></div>
+      </div>
+      ${tagHtml}
+    </button>`;
+  }
+
+  function updatePackageCoverDom(pkg) {
+    const card = document.querySelector(`.asset-market-card[data-pkg-id="${pkg.id}"]`);
+    const inner = card?.querySelector('.asset-stack-inner');
+    if (!inner || !pkg) return;
+    const featured = pkg.featured;
+    const hue = pkg.previewThumbs?.[0]?.hue ?? (featured ? 28 : pkg.priceCents ? 34 : 42);
+    const imgs = (pkg.previewImages || []).filter((p) => p?.imageUrl).slice(0, 3);
+    const fakeLayers = renderFakePackLayers(hue, featured ? 4 : 3);
+    const imgLayers = imgs
       .map(
         (p, i) =>
-          `<img class="asset-stack-layer asset-stack-layer--${i}" src="${esc(p.imageUrl)}" alt="" loading="lazy" draggable="false">`
+          `<img class="asset-stack-layer asset-stack-layer--${i}" src="${esc(p.imageUrl)}" alt="" loading="${i === 0 ? 'eager' : 'lazy'}" decoding="async" draggable="false">`
       )
       .join('');
-    return `<button type="button" class="asset-market-card-cover asset-stack-cover asset-stack-cover--pack" data-action="preview-cover" aria-label="预览结构">
-      <span class="asset-stack-pack-shimmer" aria-hidden="true"></span>
-      <div class="asset-stack-inner">${layers}</div>
-      <span class="asset-market-card-tag">${esc(tag)}</span>
-    </button>`;
+    inner.innerHTML = `${fakeLayers}${imgLayers}`;
+  }
+
+  async function hydrateMarketCovers(list) {
+    if (!window.PromptHubApi?.getAssetPackageCovers || !list?.length) return;
+    await Promise.all(
+      list.map(async (pkg) => {
+        if ((pkg.previewImages || []).some((p) => p?.imageUrl)) return;
+        try {
+          const r = await window.PromptHubApi.getAssetPackageCovers(pkg.id);
+          if (r?.ok && Array.isArray(r.data?.previewImages) && r.data.previewImages.length) {
+            pkg.previewImages = r.data.previewImages;
+            updatePackageCoverDom(pkg);
+          }
+        } catch (e) {
+          /* ignore cover load errors */
+        }
+      })
+    );
   }
 
   function commercialBadge(pkg) {
@@ -202,15 +294,15 @@
     try {
       const r = await window.PromptHubApi.listAssetPackages();
       if (r.ok && Array.isArray(r.data?.items)) {
-        marketPackages = r.data.items.map(normalizePackage).filter(Boolean);
+        marketPackages = mergeMarketPackageList(r.data.items.map(normalizePackage).filter(Boolean));
       } else if (/DB_MIGRATION|asset_packages/i.test(String(r.message || ''))) {
-        marketPackages = [];
+        marketPackages = getDemoPackages();
         toast('资产包功能需先在 Supabase 运行迁移 SQL', 6000);
       } else {
-        marketPackages = MOCK_PACKAGES.map(normalizePackage).filter(Boolean);
+        marketPackages = mergeMarketPackageList(MOCK_PACKAGES.map(normalizePackage).filter(Boolean));
       }
     } catch (e) {
-      marketPackages = MOCK_PACKAGES.map(normalizePackage).filter(Boolean);
+      marketPackages = mergeMarketPackageList(MOCK_PACKAGES.map(normalizePackage).filter(Boolean));
     } finally {
       marketLoading = false;
     }
@@ -218,6 +310,7 @@
   }
 
   function findPackage(id) {
+    if (id === DEMO_FEATURED_PACKAGE.id) return normalizePackage(DEMO_FEATURED_PACKAGE);
     return marketPackages.find((p) => p.id === id) || null;
   }
 
@@ -321,7 +414,7 @@
     }
     container.innerHTML = `<div class="my-home-package-grid">${list
       .map(
-        (pkg) => `<article class="asset-market-card my-home-package-card" data-pkg-id="${esc(pkg.id)}">
+        (pkg) => `<article class="asset-market-card asset-market-card--bundle my-home-package-card" data-pkg-id="${esc(pkg.id)}">
         ${renderStackCover(pkg)}
         <div class="asset-market-card-body">
           <h3 class="asset-market-card-title">${esc(pkg.title)}</h3>
@@ -330,6 +423,7 @@
           <div class="asset-market-card-actions">
             <button type="button" class="btn btn-secondary btn-sm" data-action="preview">查看</button>
             ${kind === 'owned' ? '<button type="button" class="btn btn-primary btn-sm" data-action="import">导入卡片库</button>' : ''}
+            ${kind === 'published' ? '<button type="button" class="btn btn-ghost btn-sm" data-action="edit">编辑</button>' : ''}
             ${kind === 'published' ? '<button type="button" class="btn btn-ghost btn-sm asset-pack-archive-btn" data-action="archive">下架删除</button>' : ''}
           </div>
         </div>
@@ -355,6 +449,13 @@
         const id = btn.closest('[data-pkg-id]')?.dataset?.pkgId;
         const pkg = list.find((p) => p.id === id);
         if (pkg) void openImportModal(pkg);
+      });
+    });
+    container.querySelectorAll('[data-action="edit"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.closest('[data-pkg-id]')?.dataset?.pkgId;
+        const pkg = list.find((p) => p.id === id);
+        if (pkg) void openEditPublishModal(pkg);
       });
     });
     container.querySelectorAll('[data-action="archive"]').forEach((btn) => {
@@ -677,6 +778,59 @@
     openWarehouseImportDialog(id, name);
   }
 
+  function bindMarketGridEvents(grid, list) {
+    grid.querySelectorAll('.asset-market-card').forEach((card) => {
+      const id = card.dataset.pkgId;
+      const pkg = (list || marketPackages).find((p) => p.id === id) || findPackage(id);
+      card.querySelector('[data-action="preview-cover"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (pkg) void openPackagePreview(pkg);
+      });
+      card.querySelector('[data-action="buy"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (pkg?.isDemo) {
+          toast('演示包：付费购买即将开放，如需了解更多请联系作者商议', 6000);
+          return;
+        }
+        if (pkg && !pkg.owned) void claimPackage(pkg);
+        else if (pkg?.owned) void openImportModal(pkg);
+      });
+    });
+  }
+
+  function paintMarketGrid(list) {
+    const grid = document.getElementById('assetMarketGrid');
+    if (!grid || !list?.length) return false;
+    grid.innerHTML = list.map((pkg) => {
+      const buyout = pkg.saleType === 'buyout';
+      const owned = pkg.owned;
+      const isFree = !pkg.priceCents;
+      const buyLabel = owned ? '管理' : isFree ? '免费领取' : buyout ? '买断' : '购买';
+      const buyClass = owned ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm';
+      return `
+        <article class="asset-market-card asset-market-card--bundle${pkg.featured ? ' asset-market-card--featured' : ''}" data-pkg-id="${esc(pkg.id)}">
+          ${renderStackCover(pkg)}
+          <div class="asset-market-card-body">
+            <p class="asset-market-card-author">${esc(pkg.authorName || '作者')}</p>
+            <h3 class="asset-market-card-title">${esc(pkg.title)}</h3>
+            <p class="asset-market-card-meta">${esc(pkg.countLabel)}</p>
+            <p class="asset-market-card-meta">${commercialBadge(pkg)}</p>
+            <p class="asset-market-card-desc">${esc(pkg.desc)}</p>
+            <p class="asset-market-card-license">${esc(pkg.license)}</p>
+            <div class="asset-market-card-foot">
+              <span class="asset-market-price">${esc(pkg.priceLabel)}${buyout ? ' <em>买断</em>' : ''}</span>
+              <div class="asset-market-card-actions">
+                <button type="button" class="${buyClass}" data-action="buy">${buyLabel}</button>
+              </div>
+            </div>
+          </div>
+        </article>`;
+    }).join('');
+    bindMarketGridEvents(grid, list);
+    void hydrateMarketCovers(list);
+    return true;
+  }
+
   async function renderMarketplace() {
     const grid = document.getElementById('assetMarketGrid');
     if (!grid) return;
@@ -690,8 +844,15 @@
         });
       });
     }
-    grid.innerHTML = '<p class="panel-hint">加载资产包…</p>';
+    if (marketPackages.length) {
+      paintMarketGrid(marketPackages);
+    } else {
+      grid.innerHTML = '<p class="panel-hint">加载资产包…</p>';
+    }
     await refreshMarketPackages();
+    if (!marketPackages.length) {
+      marketPackages = getDemoPackages();
+    }
     if (!marketPackages.length) {
       grid.innerHTML = `<div class="feature-empty"><p>暂无资产包</p><p class="panel-hint">登录后可发布你的第一个免费资产包。</p><button type="button" class="btn btn-primary btn-sm" id="assetPublishEmptyBtn">发布资产包</button></div>`;
       const emptyBtn = document.getElementById('assetPublishEmptyBtn');
@@ -702,46 +863,7 @@
       }
       return;
     }
-    grid.innerHTML = marketPackages.map((pkg) => {
-      const buyout = pkg.saleType === 'buyout';
-      const owned = pkg.owned;
-      const isFree = !pkg.priceCents;
-      const buyLabel = owned ? '管理' : isFree ? '免费领取' : buyout ? '买断' : '购买';
-      const buyClass = owned ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm';
-      const buyDisabled = '';
-      return `
-        <article class="asset-market-card" data-pkg-id="${esc(pkg.id)}">
-          ${renderStackCover(pkg)}
-          <div class="asset-market-card-body">
-            <p class="asset-market-card-author">${esc(pkg.authorName || '作者')}</p>
-            <h3 class="asset-market-card-title">${esc(pkg.title)}</h3>
-            <p class="asset-market-card-meta">${esc(pkg.countLabel)}</p>
-            <p class="asset-market-card-meta">${commercialBadge(pkg)}</p>
-            <p class="asset-market-card-desc">${esc(pkg.desc)}</p>
-            <p class="asset-market-card-license">${esc(pkg.license)}</p>
-            <div class="asset-market-card-foot">
-              <span class="asset-market-price">${esc(pkg.priceLabel)}${buyout ? ' <em>买断</em>' : ''}</span>
-              <div class="asset-market-card-actions">
-                <button type="button" class="${buyClass}" data-action="buy"${buyDisabled}>${buyLabel}</button>
-              </div>
-            </div>
-          </div>
-        </article>`;
-    }).join('');
-
-    grid.querySelectorAll('.asset-market-card').forEach((card) => {
-      const id = card.dataset.pkgId;
-      const pkg = findPackage(id);
-      card.querySelector('[data-action="preview-cover"]')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (pkg) void openPackagePreview(pkg);
-      });
-      card.querySelector('[data-action="buy"]')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (pkg && !pkg.owned) void claimPackage(pkg);
-        else if (pkg?.owned) void openImportModal(pkg);
-      });
-    });
+    paintMarketGrid(marketPackages);
   }
 
   async function claimPackage(pkg) {
@@ -815,23 +937,37 @@
     const whOptions = warehouses
       .map((w) => `<option value="${esc(w.id)}"${w.id === getActiveWarehouseId() ? ' selected' : ''}>${esc(w.name)}</option>`)
       .join('');
+    const folders = getPreviewFolderNodes(normalizePackage(pkg));
+    const folderChecks = folders.length
+      ? `<div class="asset-import-folder-pick">
+        <span class="panel-hint">选择要导入的分组（不选 = 导入全部）</span>
+        <div class="asset-import-folder-list">${folders
+          .map(
+            (f) =>
+              `<label class="asset-import-folder-item"><input type="checkbox" class="asset-import-folder-cb" value="${esc(f.name)}" checked> ${esc(f.name)} <em>${f.cardCount} 张</em></label>`
+          )
+          .join('')}</div>
+      </div>`
+      : '';
     body.innerHTML = `
       <header class="asset-preview-head">
         <div>
-          <h3 id="assetImportTitle">管理「${esc(pkg.title)}」</h3>
-          <p class="panel-hint">已存入「拥有的资产包」。你可随时浏览全部图片、分批导入或下载 JSON；仅在你确认「一键导入全部」时才会写入卡片库并自动创建包内文件夹结构。</p>
+          <h3 id="assetImportTitle">保存「${esc(pkg.title)}」到卡片库</h3>
+          <p class="panel-hint">已存入「拥有的资产包」。可勾选部分文件夹导入，或一键导入全部；导入时会自动创建包内文件夹结构。</p>
         </div>
         <button type="button" class="modal-close-btn modal-close-btn--icon" id="assetImportClose" aria-label="关闭"><span aria-hidden="true">×</span></button>
       </header>
       <div class="asset-import-body">
-        <div class="asset-import-actions asset-import-actions--stack">
-          <button type="button" class="btn btn-secondary" id="assetImportBrowseBtn">浏览包内图片</button>
-          <button type="button" class="btn btn-primary" id="assetImportDoBtn">一键导入全部</button>
-          <button type="button" class="btn btn-secondary" id="assetImportJsonBtn">下载 JSON 文件</button>
-        </div>
+        ${folderChecks}
         <label class="asset-import-wh-row">导入到卡片库
           <select class="settings-input" id="assetImportWarehouse">${whOptions}</select>
         </label>
+        <div class="asset-import-actions asset-import-actions--grid">
+          <button type="button" class="btn btn-primary btn-sm" id="assetImportDoBtn">导入选中分组</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="assetImportAllBtn">导入全部</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="assetImportJsonBtn">下载 JSON</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="assetImportBrowseBtn">浏览包内图片</button>
+        </div>
         <p class="panel-hint" id="assetImportStatus"></p>
       </div>`;
     overlay.classList.remove('hidden');
@@ -850,9 +986,14 @@
       void openPackagePreview({ ...normalizePackage(pkg), owned: true });
     });
     document.getElementById('assetImportJsonBtn')?.addEventListener('click', () => void downloadPackageJson(pkg));
+    document.getElementById('assetImportAllBtn')?.addEventListener('click', () => {
+      const wh = document.getElementById('assetImportWarehouse')?.value || 'default';
+      void importPackageToWarehouse(pkg, wh, null);
+    });
     document.getElementById('assetImportDoBtn')?.addEventListener('click', () => {
       const wh = document.getElementById('assetImportWarehouse')?.value || 'default';
-      void importPackageToWarehouse(pkg, wh);
+      const picked = [...(body.querySelectorAll('.asset-import-folder-cb:checked') || [])].map((el) => el.value);
+      void importPackageToWarehouse(pkg, wh, picked.length ? picked : null);
     });
   }
 
@@ -875,13 +1016,16 @@
     toast('JSON 已下载');
   }
 
-  async function importPackageToWarehouse(pkg, warehouseId) {
+  async function importPackageToWarehouse(pkg, warehouseId, folders) {
     const btn = document.getElementById('assetImportDoBtn');
+    const btnAll = document.getElementById('assetImportAllBtn');
     const status = document.getElementById('assetImportStatus');
     if (btn) btn.disabled = true;
+    if (btnAll) btnAll.disabled = true;
     if (status) status.textContent = '正在导入…';
-    const r = await window.PromptHubApi.importAssetPackage(pkg.id, warehouseId);
+    const r = await window.PromptHubApi.importAssetPackage(pkg.id, warehouseId, folders);
     if (btn) btn.disabled = false;
+    if (btnAll) btnAll.disabled = false;
     if (!r?.ok) {
       const msg = r?.message || '导入失败';
       if (status) status.textContent = msg;
@@ -1153,12 +1297,15 @@
     return `${renderPackFolderToolbar(packEditor, warehouseId)}${isCustom ? renderPackCustomFolderList(packEditor.folders) : ''}${assignBanner}${tagChips}${searchRow}<div class="asset-publish-tree">${folderHtml}</div>`;
   }
 
-  async function openPublishModal() {
+  async function openPublishModal(opts) {
     if (!window.SupabaseSync?.isLoggedIn?.()) {
       toast('发布资产包需先登录');
       window.openAuthModal?.();
       return;
     }
+    const editOpts = opts && typeof opts === 'object' ? opts : null;
+    const editPackageId = editOpts?.editPackageId || null;
+    const packCardsOverride = editOpts?.packCards || null;
     const overlay = document.getElementById('assetPublishOverlay');
     const body = document.getElementById('assetPublishBody');
     if (!overlay || !body) {
@@ -1175,36 +1322,54 @@
       mode: 'library',
       folders: buildPackFoldersFromLibraryGroups(whId)
     };
+    if (packCardsOverride?.length) {
+      packEditor.mode = 'custom';
+      const groupNames = [...new Set(packCardsOverride.map((c) => String(c.group || '').trim() || '未分类'))];
+      packEditor.folders = groupNames.map((name) => ({
+        id: newPackFolderId(),
+        name,
+        cardIds: new Set(packCardsOverride.filter((c) => (String(c.group || '').trim() || '未分类') === name).map((c) => c.id)),
+        previewIds: new Set()
+      }));
+      packCardsOverride.forEach((c) => selectedIds.add(c.id));
+      (editOpts?.previewCardIds || []).forEach((id) => {
+        previewIds.add(id);
+        packEditor.folders.forEach((f) => {
+          if (f.cardIds.has(id)) f.previewIds.add(id);
+        });
+      });
+    }
     const pickerState = { expandedFolders: new Set(), filterTags: new Set(), tagSearch: '', assignTargetFolderId: null };
     let searchDebounce = null;
+    const init = editOpts?.initial || {};
     body.innerHTML = `
       <header class="asset-preview-head">
         <div>
-          <h3 id="assetPublishTitle">发布资产包</h3>
+          <h3 id="assetPublishTitle">${editPackageId ? '编辑资产包' : '发布资产包'}</h3>
           <p class="panel-hint">勾选卡片打包；可「按卡片库分组」或「自定义文件夹」组织结构，每文件夹可选 0～5 张市场预览图。</p>
         </div>
         <button type="button" class="modal-close-btn modal-close-btn--icon" id="assetPublishClose" aria-label="关闭"><span aria-hidden="true">×</span></button>
       </header>
       <form class="asset-publish-form" id="assetPublishForm">
-        <label>标题 <input class="settings-input" name="title" maxlength="120" required placeholder="例如：精品人设包 30 张"></label>
-        <label>简介 <textarea class="settings-input" name="description" rows="2" maxlength="2000" placeholder="说明包内有什么、适合什么用途"></textarea></label>
+        <label>标题 <input class="settings-input" name="title" maxlength="120" required placeholder="例如：精品人设包 30 张" value="${esc(init.title || '')}"></label>
+        <label>简介 <textarea class="settings-input" name="description" rows="2" maxlength="2000" placeholder="说明包内有什么、适合什么用途">${esc(init.description || '')}</textarea></label>
         <div class="asset-publish-row">
-          <label>价格（元，0=免费） <input class="settings-input" name="priceYuan" type="number" min="0" step="0.01" value="0"></label>
-          <label>标签 <input class="settings-input" name="tag" maxlength="40" placeholder="免费 / 套装"></label>
+          <label>价格（元，0=免费） <input class="settings-input" name="priceYuan" type="number" min="0" step="0.01" value="${esc(init.priceYuan != null ? init.priceYuan : 0)}"></label>
+          <label>标签 <input class="settings-input" name="tag" maxlength="40" placeholder="免费 / 套装" value="${esc(init.tag || '')}"></label>
         </div>
         <label class="asset-publish-check">
-          <input type="checkbox" name="commercialUseAllowed" checked>
+          <input type="checkbox" name="commercialUseAllowed"${init.commercialUseAllowed !== false ? ' checked' : ''}>
           <span>购买者可商用</span>
         </label>
         <div class="asset-publish-cards-section">
           <div class="asset-publish-cards-head">
-            <label>来源卡片库 <select class="settings-input" id="assetPublishWarehouse">${whOptions}</select></label>
-            <span class="panel-hint" id="assetPublishCardCount">已选 0 张</span>
+            <label>来源卡片库 <select class="settings-input" id="assetPublishWarehouse"${packCardsOverride ? ' disabled' : ''}>${whOptions}</select></label>
+            <span class="panel-hint" id="assetPublishCardCount">已选 ${selectedIds.size} 张</span>
           </div>
           <div id="assetPublishCardPicker"><p class="panel-hint">加载卡片…</p></div>
         </div>
         <footer class="asset-preview-foot">
-          <button type="submit" class="btn btn-primary">发布上架</button>
+          <button type="submit" class="btn btn-primary">${editPackageId ? '保存修改' : '发布上架'}</button>
         </footer>
       </form>`;
     overlay.classList.remove('hidden');
@@ -1225,7 +1390,9 @@
         document.querySelector('#assetPublishOverlay .asset-preview-panel') ||
         pickerEl;
       const scrollTop = scrollEl?.scrollTop ?? 0;
-      const cards = getMainSiteCardsForWarehouse(wid);
+      const cards = packCardsOverride?.length
+        ? packCardsOverride
+        : getMainSiteCardsForWarehouse(wid);
       const thumbMap = await resolveCardThumbs(cards);
       const searchFocused = document.activeElement?.id === 'assetPublishTagSearch';
       const selStart = searchFocused ? document.activeElement.selectionStart : null;
@@ -1448,12 +1615,16 @@
 
     document.getElementById('assetPublishForm')?.addEventListener('submit', (e) => {
       e.preventDefault();
-      void submitPublishForm(e.target, {
+      const ctx = {
         selectedIds,
         previewIds,
         warehouseId: whSelect?.value || whId,
-        packEditor
-      });
+        packEditor,
+        editPackageId,
+        packCards: packCardsOverride
+      };
+      if (editPackageId) void submitEditPublishForm(e.target, ctx);
+      else void submitPublishForm(e.target, ctx);
     });
     } catch (e) {
       console.error('[assets] openPublishModal failed', e);
@@ -1542,92 +1713,242 @@
     void renderMarketplace();
   }
 
-  function renderPreviewTree(nodes, previewImages, opts) {
-    const imgMap = new Map((previewImages || []).map((p) => [p.cardId, p]));
-    const owned = !!opts?.owned;
-    return (nodes || [])
+  async function submitEditPublishForm(form, ctx) {
+    const fd = new FormData(form);
+    const editId = ctx?.editPackageId;
+    if (!editId) return submitPublishForm(form, ctx);
+    const title = String(fd.get('title') || '').trim();
+    if (title.length < 2) {
+      toast('标题至少 2 个字');
+      return;
+    }
+    const packEditor = ctx?.packEditor || { mode: 'library', folders: [] };
+    const packCards = Array.isArray(ctx?.packCards) ? ctx.packCards : [];
+    const selectedIds = ctx?.selectedIds || new Set();
+    const cards = packCards
+      .filter((c) => selectedIds.has(c.id))
+      .map((c) => {
+        let group = c.group || null;
+        if (packEditor.mode === 'custom') {
+          const folder = packEditor.folders.find((f) => f.cardIds.has(c.id));
+          group = folder?.name || null;
+        }
+        return sanitizePackCardForPublish({ ...c, group });
+      });
+    if (!cards.length) {
+      toast('请至少保留一张卡片');
+      return;
+    }
+    const previewCardIds = collectPreviewCardIds(
+      packEditor.folders,
+      ctx?.previewIds || new Set(),
+      packEditor.mode
+    ).filter((id) => selectedIds.has(id));
+    const previewTree = buildPreviewTreeForPack(
+      cards,
+      packEditor.folders,
+      packEditor.mode,
+      ctx?.previewIds || new Set()
+    );
+    const priceYuan = Math.max(0, Number(fd.get('priceYuan')) || 0);
+    const payload = {
+      title,
+      description: String(fd.get('description') || '').trim(),
+      tag: String(fd.get('tag') || (priceYuan ? '套装' : '免费')).trim(),
+      priceCents: Math.round(priceYuan * 100),
+      saleType: 'bulk',
+      commercialUseAllowed: fd.get('commercialUseAllowed') === 'on',
+      previewCardIds,
+      previewTree,
+      cards
+    };
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
+    const r = await window.PromptHubApi.updateAssetPackage(editId, payload);
+    if (btn) btn.disabled = false;
+    if (!r?.ok) {
+      toast(r?.message || '保存失败');
+      return;
+    }
+    toast(`「${title}」已更新（${cards.length} 张 · 预览 ${previewCardIds.length} 张）`);
+    closePublishModal();
+    closePackagePreview();
+    await refreshMarketPackages();
+    void renderMarketplace();
+  }
+
+  async function openEditPublishModal(pkg) {
+    if (!pkg?.isAuthor || pkg.isDemo) {
+      toast('仅可编辑自己发布的资产包');
+      return;
+    }
+    if (!window.PromptHubApi?.getAssetPackageContent) {
+      toast('API 未就绪');
+      return;
+    }
+    const contentR = await window.PromptHubApi.getAssetPackageContent(pkg.id);
+    if (!contentR?.ok || !Array.isArray(contentR.data?.cards)) {
+      toast(contentR?.message || '无法加载包内卡片');
+      return;
+    }
+    const packCards = contentR.data.cards.map((c) => ({
+      id: c.id,
+      title: c.title || '',
+      prompt: c.prompt || '',
+      image: c.image || '',
+      group: c.group || null,
+      tags: c.tags || []
+    }));
+    const norm = findPackage(pkg.id) || normalizePackage(pkg);
+    const previewCardIds = norm.previewCardIds || [];
+    await openPublishModal({
+      editPackageId: pkg.id,
+      initial: {
+        title: norm.title,
+        description: norm.desc,
+        tag: norm.tag,
+        priceYuan: (norm.priceCents || 0) / 100,
+        commercialUseAllowed: norm.commercialUseAllowed
+      },
+      packCards,
+      previewCardIds
+    });
+  }
+
+  function openAssetPreviewLightbox(src, opts) {
+    if (!src) return;
+    const allowSave = !!opts?.allowSave;
+    const dlBtn = document.getElementById('lightboxDownloadBtn');
+    const prevDisplay = dlBtn?.style.display;
+    if (dlBtn) {
+      dlBtn.style.display = allowSave ? '' : 'none';
+      dlBtn.disabled = !allowSave;
+    }
+    if (typeof window.openLightbox === 'function') window.openLightbox(src);
+    else window.open(src, '_blank');
+    if (!allowSave && dlBtn) {
+      setTimeout(() => {
+        dlBtn.style.display = prevDisplay || '';
+      }, 300);
+    }
+  }
+
+  function getPreviewFolderNodes(pkg) {
+    const tree = Array.isArray(pkg?.previewTree) ? pkg.previewTree : [];
+    return tree
       .map((node) => {
-        if (!node || typeof node !== 'object') return '';
+        if (!node || typeof node !== 'object') return null;
         const name = String(node.name || '').trim();
-        if (!name) return '';
-        const legacyChildren = Array.isArray(node.children)
-          ? node.children.filter((c) => typeof c === 'string')
-          : [];
-        const previewIds = Array.isArray(node.previewCardIds) ? node.previewCardIds : [];
-        const count =
-          Number(node.cardCount) ||
-          (legacyChildren.length ? legacyChildren.length : previewIds.length) ||
-          0;
-        const previews = previewIds.map((id) => imgMap.get(id)).filter((p) => p?.imageUrl);
-        const thumbs = previews
-          .map(
-            (p) =>
-              `<div class="asset-tree-preview-thumb"><img src="${esc(p.imageUrl)}" alt="" loading="lazy"></div>`
-          )
-          .join('');
-        const emptyHint = previews.length
-          ? ''
-          : owned
-            ? '<p class="panel-hint asset-tree-no-preview">该文件夹暂无可预览图片</p>'
-            : '<p class="panel-hint asset-tree-no-preview">购买后可查看全部 · 作者未开放预览图</p>';
-        return `<li class="asset-tree-branch">
-          <span class="asset-tree-folder">${esc(name)} <em>${count} 张</em></span>
-          ${thumbs ? `<div class="asset-tree-previews">${thumbs}</div>` : emptyHint}
-        </li>`;
+        if (!name) return null;
+        const legacy = Array.isArray(node.children) ? node.children.length : 0;
+        return {
+          name,
+          cardCount: Number(node.cardCount) || legacy || 0,
+          previewCount: Array.isArray(node.previewCardIds) ? node.previewCardIds.length : 0
+        };
       })
+      .filter(Boolean);
+  }
+
+  function renderPreviewFolderList(nodes, owned) {
+    if (!nodes.length) return '<li class="panel-hint">暂无目录信息</li>';
+    return nodes
+      .map(
+        (node) => `<li class="asset-preview-folder" data-folder="${esc(node.name)}">
+        <button type="button" class="asset-preview-folder-toggle" aria-expanded="false">
+          <span class="asset-preview-folder-chevron" aria-hidden="true">▶</span>
+          <span class="asset-preview-folder-name">${esc(node.name)}</span>
+          <em>${node.cardCount} 张</em>
+          <span class="asset-preview-folder-hint">${owned ? '点击展开浏览' : '展开查看公开预览（最多 5 张）'}</span>
+        </button>
+        <div class="asset-preview-folder-body hidden" data-folder-body>
+          <p class="panel-hint asset-preview-folder-loading hidden">加载中…</p>
+          <div class="asset-tree-previews" data-folder-thumbs></div>
+          <p class="panel-hint asset-preview-folder-empty hidden">该文件夹暂无可预览图片</p>
+        </div>
+      </li>`
+      )
       .join('');
   }
 
-  function buildPreviewTreeFromOwnedCards(cards) {
-    return groupCardsByFolder(cards, [])
-      .filter((g) => g.cards.length)
-      .map((g) => ({
-        name: g.name,
-        cardCount: g.cards.length,
-        previewCardIds: g.cards.map((c) => c.id)
-      }));
-  }
+  async function loadPreviewFolderImages(folderEl, pkg, owned) {
+    if (!folderEl || folderEl.dataset.loaded === '1') return;
+    const folder = folderEl.dataset.folder;
+    const body = folderEl.querySelector('[data-folder-body]');
+    const loading = folderEl.querySelector('.asset-preview-folder-loading');
+    const thumbs = folderEl.querySelector('[data-folder-thumbs]');
+    const empty = folderEl.querySelector('.asset-preview-folder-empty');
+    if (loading) loading.classList.remove('hidden');
+    if (empty) empty.classList.add('hidden');
+    if (thumbs) thumbs.innerHTML = '';
 
-  async function resolvePackCardImages(cards) {
-    const out = [];
-    for (const c of cards || []) {
-      let url = '';
-      const img = c?.image;
-      if (img && /^data:|^https?:\/\//i.test(img)) url = img;
-      else if (img && window.SupabaseSync?.getCachedDisplayUrl) {
-        url = window.SupabaseSync.getCachedDisplayUrl(img) || '';
+    if (pkg.isDemo) {
+      if (loading) loading.classList.add('hidden');
+      if (empty) {
+        empty.textContent = '演示包：正式预览图与文档在购买后交付';
+        empty.classList.remove('hidden');
       }
-      if (!url && img && window.SupabaseSync?.resolveDisplayUrl) {
-        try {
-          url = await window.SupabaseSync.resolveDisplayUrl(img);
-        } catch (e) {
-          url = '';
-        }
-      }
-      if (url) {
-        out.push({
-          cardId: c.id,
-          label: (c.title || '预览').slice(0, 40),
-          imageUrl: url
-        });
-      }
+      folderEl.dataset.loaded = '1';
+      return;
     }
-    return out;
+
+    const fn = window.PromptHubApi?.getAssetPackageFolderImages;
+    if (typeof fn !== 'function') {
+      if (loading) loading.classList.add('hidden');
+      return;
+    }
+    const r = await fn(pkg.id, folder);
+    if (loading) loading.classList.add('hidden');
+    if (!r?.ok || !Array.isArray(r.data?.items)) {
+      if (empty) {
+        empty.textContent = r?.message || '加载失败';
+        empty.classList.remove('hidden');
+      }
+      return;
+    }
+    const items = r.data.items.filter((it) => it?.imageUrl);
+    if (!items.length) {
+      if (empty) {
+        empty.textContent = owned
+          ? '该文件夹暂无图片'
+          : '作者未在本文件夹开放预览图';
+        empty.classList.remove('hidden');
+      }
+      folderEl.dataset.loaded = '1';
+      return;
+    }
+    const fullAccess = !!r.data.fullAccess;
+    if (thumbs) {
+      thumbs.innerHTML = items
+        .map(
+          (it) =>
+            `<button type="button" class="asset-tree-preview-thumb asset-tree-preview-thumb--btn" data-preview-url="${esc(it.imageUrl)}" title="${esc(it.label)}">
+              <img src="${esc(it.imageUrl)}" alt="" loading="lazy" draggable="false">
+            </button>`
+        )
+        .join('');
+      thumbs.querySelectorAll('[data-preview-url]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          openAssetPreviewLightbox(btn.dataset.previewUrl, { allowSave: fullAccess && owned });
+        });
+      });
+    }
+    folderEl.dataset.loaded = '1';
   }
 
-  function enrichPreviewTreeWithImages(tree, previewImages) {
-    const nodes = Array.isArray(tree) ? tree : [];
-    const imgs = previewImages || [];
-    if (!imgs.length) return nodes;
-    if (nodes.some((n) => Array.isArray(n?.previewCardIds) && n.previewCardIds.length)) return nodes;
-    return [
-      ...nodes,
-      {
-        name: '公开预览样图',
-        cardCount: imgs.length,
-        previewCardIds: imgs.map((p) => p.cardId).filter(Boolean)
-      }
-    ];
+  function bindPreviewFolderTree(root, pkg, owned) {
+    root?.querySelectorAll('.asset-preview-folder-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const folderEl = btn.closest('.asset-preview-folder');
+        const body = folderEl?.querySelector('[data-folder-body]');
+        const expanded = btn.getAttribute('aria-expanded') === 'true';
+        btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+        body?.classList.toggle('hidden', expanded);
+        const chev = btn.querySelector('.asset-preview-folder-chevron');
+        if (chev) chev.textContent = expanded ? '▶' : '▼';
+        if (!expanded) void loadPreviewFolderImages(folderEl, pkg, owned);
+      });
+    });
   }
 
   async function openPackagePreview(pkgOrId) {
@@ -1635,28 +1956,20 @@
     const overlay = document.getElementById('assetPreviewOverlay');
     const body = document.getElementById('assetPreviewBody');
     if (!pkg || !overlay || !body) return;
-    body.innerHTML = `<header class="asset-preview-head"><div><p class="panel-hint">加载预览…</p></div></header>`;
-    overlay.classList.remove('hidden');
-    overlay.classList.add('active');
-
-    let previewTree = pkg.previewTree || [];
-    let previewImages = (pkg.previewImages || []).filter((p) => p?.imageUrl);
     const owned = !!pkg.owned;
-
-    if (owned && window.PromptHubApi?.getAssetPackageContent) {
-      const r = await window.PromptHubApi.getAssetPackageContent(pkg.id);
-      if (r?.ok && Array.isArray(r.data?.cards) && r.data.cards.length) {
-        previewTree = buildPreviewTreeFromOwnedCards(r.data.cards);
-        previewImages = await resolvePackCardImages(r.data.cards);
-      }
-    } else {
-      previewTree = enrichPreviewTreeWithImages(previewTree, previewImages);
-    }
-
+    const folders = getPreviewFolderNodes(pkg);
     const buyout = pkg.saleType === 'buyout';
     const isFree = !pkg.priceCents;
-    const buyLabel = owned ? '已拥有' : isFree ? '免费领取' : buyout ? '买断' : '购买';
-    const treeHtml = renderPreviewTree(previewTree, previewImages, { owned });
+    const buyLabel = pkg.isDemo
+      ? '联系购买'
+      : owned
+        ? '已拥有'
+        : isFree
+          ? '免费领取'
+          : buyout
+            ? '买断'
+            : '购买';
+
     body.innerHTML = `
       <header class="asset-preview-head">
         <div>
@@ -1668,27 +1981,38 @@
       </header>
       <div class="asset-preview-layout asset-preview-layout--tree-only">
         <section class="asset-preview-section">
-          <h4>${owned ? '包内目录（已拥有 · 可浏览全部图片）' : '目录结构（仅展示开放预览的图片）'}</h4>
-          <ul class="asset-preview-tree">${treeHtml || '<li class="panel-hint">暂无目录信息</li>'}</ul>
+          <h4>${owned ? '包内目录（已拥有 · 展开文件夹浏览全部图片）' : '目录结构（展开查看公开预览，点击放大）'}</h4>
+          <ul class="asset-preview-tree asset-preview-tree--folders">${renderPreviewFolderList(folders, owned)}</ul>
         </section>
       </div>
       <footer class="asset-preview-foot">
-        <p>${esc(pkg.license)}</p>
+        <p>${esc(pkg.license || pkg.desc || '')}</p>
         <div class="asset-preview-foot-actions">
-          ${owned ? '<button type="button" class="btn btn-secondary btn-sm" id="assetPreviewImportBtn">导入 / 下载</button>' : ''}
+          ${owned ? '<button type="button" class="btn btn-secondary btn-sm" id="assetPreviewImportBtn">保存到卡片库</button>' : ''}
+          ${pkg.isAuthor ? '<button type="button" class="btn btn-ghost btn-sm" id="assetPreviewEditBtn">编辑卡片</button>' : ''}
           ${pkg.isAuthor ? '<button type="button" class="btn btn-ghost btn-sm" id="assetPreviewArchiveBtn">下架删除</button>' : ''}
-          <button type="button" class="btn btn-primary btn-sm" id="assetPreviewBuyBtn"${owned ? ' disabled' : ''}>${buyLabel}</button>
+          <button type="button" class="btn btn-primary btn-sm" id="assetPreviewBuyBtn"${owned || pkg.isDemo ? ' disabled' : ''}>${buyLabel}</button>
         </div>
       </footer>`;
+    overlay.classList.remove('hidden');
+    overlay.classList.add('active');
+    bindPreviewFolderTree(body, pkg, owned);
     document.getElementById('assetPreviewClose')?.addEventListener('click', closePackagePreview);
     overlay.onclick = (e) => {
       if (e.target === overlay) closePackagePreview();
     };
     document.getElementById('assetPreviewBuyBtn')?.addEventListener('click', () => {
+      if (pkg.isDemo) {
+        toast('演示包：如需购买或了解更多，请联系作者商议', 6000);
+        return;
+      }
       if (!owned) void claimPackage(pkg);
     });
     document.getElementById('assetPreviewImportBtn')?.addEventListener('click', () => {
       void openImportModal(pkg);
+    });
+    document.getElementById('assetPreviewEditBtn')?.addEventListener('click', () => {
+      void openEditPublishModal(pkg);
     });
     document.getElementById('assetPreviewArchiveBtn')?.addEventListener('click', () => {
       void archivePublishedPackage(pkg);
@@ -1804,6 +2128,7 @@
     }
     bindUI();
     renderWarehouseSidebar();
+    void refreshMarketPackages();
   }
 
   window.FeatureAssets = {
@@ -1831,6 +2156,7 @@
     renderMyHomePackages,
     openPackagePreview,
     closePackagePreview,
+    openEditPublishModal,
     openPublishModal,
     closePublishModal,
     openImportModal,

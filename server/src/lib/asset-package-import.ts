@@ -107,9 +107,20 @@ export async function importAssetPackageToWarehouse(
   userId: string,
   profile: Profile,
   packageId: string,
-  warehouseId: string
-): Promise<{ imported: number; cardIds: string[] }> {
+  warehouseId: string,
+  folders?: string[] | null
+): Promise<{ imported: number; cardIds: string[]; groups: string[] }> {
   const { cards, title } = await getPackageCardsPayload(admin, userId, packageId);
+  const folderFilter =
+    Array.isArray(folders) && folders.length
+      ? new Set(folders.map((f) => String(f || '').trim()).filter(Boolean))
+      : null;
+  const toImport = folderFilter
+    ? cards.filter((c) => folderFilter.has(String(c.group || '').trim() || '未分类'))
+    : cards;
+  if (!toImport.length) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '所选文件夹中没有可导入的卡片');
+  }
   const wid = String(warehouseId || 'default').slice(0, 64);
 
   const { data: row, error: pullErr } = await admin
@@ -121,7 +132,7 @@ export async function importAssetPackageToWarehouse(
 
   const payload = (row?.data || {}) as { cards?: Array<Record<string, unknown>>; schemaVersion?: number };
   const existing = Array.isArray(payload.cards) ? [...payload.cards] : [];
-  if (!isMembershipActive(profile) && existing.length + cards.length > FREE_CARD_LIMIT) {
+  if (!isMembershipActive(profile) && existing.length + toImport.length > FREE_CARD_LIMIT) {
     throw new ApiError(402, 'CARD_LIMIT', `导入后将超过普通用户 ${FREE_CARD_LIMIT} 张上限，请开通会员或删除旧卡`);
   }
 
@@ -129,7 +140,7 @@ export async function importAssetPackageToWarehouse(
   const newIds: string[] = [];
   const importedCards: Array<Record<string, unknown>> = [];
 
-  for (const src of cards) {
+  for (const src of toImport) {
     const newId = generateCardId();
     let image: string | null = src.image || null;
     if (image && isStorageRef(image)) {
@@ -178,6 +189,78 @@ export async function importAssetPackageToWarehouse(
   return { imported: importedCards.length, cardIds: newIds, groups };
 }
 
+const PACK_FOLDER_PREVIEW_MAX = 5;
+
+async function signPackCardImage(
+  admin: SupabaseClient,
+  imageRef: string | null | undefined
+): Promise<string | null> {
+  const path = storagePathFromRef(String(imageRef || ''));
+  if (path) {
+    const { data } = await admin.storage.from(BUCKET).createSignedUrl(path, 3600);
+    return data?.signedUrl || null;
+  }
+  if (imageRef && /^https?:\/\//i.test(String(imageRef))) return String(imageRef);
+  return null;
+}
+
+export async function getPackageFolderImages(
+  admin: SupabaseClient,
+  packageId: string,
+  folderName: string,
+  userId: string | null
+): Promise<{
+  folder: string;
+  fullAccess: boolean;
+  items: Array<{ cardId: string; label: string; imageUrl: string | null }>;
+}> {
+  const { data, error } = await admin
+    .from('asset_packages')
+    .select('*')
+    .eq('id', packageId)
+    .eq('status', 'published')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ApiError(404, 'NOT_FOUND', '资产包不存在');
+
+  const row = data as { author_id: string; cards_payload: unknown; preview_card_ids: unknown };
+  const cards = normalizePackCards(row.cards_payload);
+  const folder = String(folderName || '').trim() || '未分类';
+  const inFolder = cards.filter((c) => (String(c.group || '').trim() || '未分类') === folder);
+
+  let fullAccess = false;
+  if (userId) {
+    if (String(row.author_id) === String(userId)) fullAccess = true;
+    else {
+      const { data: ent } = await admin
+        .from('asset_package_entitlements')
+        .select('package_id')
+        .eq('user_id', userId)
+        .eq('package_id', packageId)
+        .maybeSingle();
+      fullAccess = !!ent;
+    }
+  }
+
+  const previewIds = new Set(
+    (Array.isArray(row.preview_card_ids) ? row.preview_card_ids : []).map(String).filter(Boolean)
+  );
+  const picks = fullAccess
+    ? inFolder
+    : inFolder.filter((c) => previewIds.has(c.id)).slice(0, PACK_FOLDER_PREVIEW_MAX);
+
+  const items: Array<{ cardId: string; label: string; imageUrl: string | null }> = [];
+  for (const c of picks) {
+    items.push({
+      cardId: c.id,
+      label: (c.title || c.prompt || '预览').slice(0, 40),
+      imageUrl: await signPackCardImage(admin, c.image)
+    });
+  }
+
+  return { folder, fullAccess, items };
+}
+
 export async function signPreviewImagesForPackage(
   admin: SupabaseClient,
   previewCardIds: string[],
@@ -185,27 +268,27 @@ export async function signPreviewImagesForPackage(
 ): Promise<Array<{ cardId: string; label: string; imageUrl: string | null }>> {
   const cards = normalizePackCards(cardsPayload);
   const idSet = new Set(previewCardIds.map(String));
-  const picks = cards.filter((c) => idSet.has(c.id)).slice(0, 4);
-  const fallback = cards.slice(0, 4);
+  const picks = cards.filter((c) => idSet.has(c.id)).slice(0, 3);
+  const fallback = cards.slice(0, 3);
   const list = picks.length ? picks : fallback;
 
-  const out: Array<{ cardId: string; label: string; imageUrl: string | null }> = [];
-  for (const c of list) {
-    let imageUrl: string | null = null;
-    const path = storagePathFromRef(String(c.image || ''));
-    if (path) {
-      const { data } = await admin.storage.from(BUCKET).createSignedUrl(path, 3600);
-      imageUrl = data?.signedUrl || null;
-    } else if (c.image && /^https?:\/\//i.test(c.image)) {
-      imageUrl = c.image;
-    }
-    out.push({
-      cardId: c.id,
-      label: (c.title || c.prompt || '预览').slice(0, 40),
-      imageUrl
-    });
-  }
-  return out;
+  return Promise.all(
+    list.map(async (c) => {
+      let imageUrl: string | null = null;
+      const path = storagePathFromRef(String(c.image || ''));
+      if (path) {
+        const { data } = await admin.storage.from(BUCKET).createSignedUrl(path, 7200);
+        imageUrl = data?.signedUrl || null;
+      } else if (c.image && /^https?:\/\//i.test(c.image)) {
+        imageUrl = c.image;
+      }
+      return {
+        cardId: c.id,
+        label: (c.title || c.prompt || '预览').slice(0, 40),
+        imageUrl
+      };
+    })
+  );
 }
 
 export { normalizePackCards };
