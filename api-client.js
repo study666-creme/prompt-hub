@@ -327,6 +327,14 @@
     return request('GET', `/api/v1/chat/cost${qs ? `?${qs}` : ''}`, null, { timeoutMs: API_FAST_TIMEOUT_MS });
   }
 
+  async function promptToolsOptimize(payload) {
+    return request('POST', '/api/v1/prompt-tools/optimize', payload, { timeoutMs: 90000 });
+  }
+
+  async function promptToolsReverse(payload) {
+    return request('POST', '/api/v1/prompt-tools/reverse', payload, { timeoutMs: 120000 });
+  }
+
   async function listRecentGenerationJobs() {
     return request('GET', '/api/v1/generate/jobs', null, { timeoutMs: API_TIMEOUT_MS });
   }
@@ -543,6 +551,8 @@
     getGenerationJob,
     studioChat,
     studioChatQuote,
+    promptToolsOptimize,
+    promptToolsReverse,
     listRecentGenerationJobs,
     getLedger,
     checkLikeMilestone,

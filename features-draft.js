@@ -4319,6 +4319,7 @@
     }
     bindImageGenUpload();
     bindImageGenPromptTools();
+    window.ImageGenPromptTools?.init?.();
     bindImageGenGenPublic();
     syncImageGenGenPublicUI();
     updateImageGenPricingUI();
@@ -5050,12 +5051,15 @@
     }
   }
 
-  async function runImageGenDemo() {
-    if (!window.AuthGate?.requireAuth?.('imagegen')) return;
-    const prompt = document.getElementById('imageGenPrompt')?.value?.trim();
+  async function runImageGenWithPrompt(promptOverride, opts) {
+    const batchOpts = opts && typeof opts === 'object' ? opts : {};
+    if (!window.AuthGate?.requireAuth?.('imagegen')) return { ok: false };
+    const prompt = String(
+      promptOverride ?? document.getElementById('imageGenPrompt')?.value ?? ''
+    ).trim();
     if (!prompt) {
       toast('请先填写提示词');
-      return;
+      return { ok: false };
     }
     const meta = getImageGenFormMeta();
     const { model, resolution, quality, size } = meta;
@@ -5073,12 +5077,12 @@
 
     if (balance < cost) {
       toast(`积分不足（需要 ${cost}，当前 ${balance}）。请使用激活码兑换`);
-      return;
+      return { ok: false };
     }
 
     if (!useApi && !window.PointsSystem?.deductCredits?.(cost)) {
       toast('积分扣除失败');
-      return;
+      return { ok: false };
     }
 
     saveJson(LS_IMAGEGEN, {
@@ -5111,11 +5115,11 @@
     });
     updateImageGenFeedHint();
     renderImageGenFeed();
-    if (window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
+    if (!batchOpts.batch && window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
       window.MobileUI.setImageGenView('feed');
     }
 
-    if (btn) {
+    if (btn && !batchOpts.batch) {
       btn.disabled = true;
       btn.textContent = '提交中…';
     }
@@ -5145,9 +5149,9 @@
           restoreImageGenSubmitLabel();
         }
         toast('参考图无法用于生图（须为网络图片），请去掉参考图或重新上传后再试');
-        return;
+        return { ok: false };
       }
-      if (imageGenRefImages.length && refUrls.length < imageGenRefImages.length) {
+      if (imageGenRefImages.length && refUrls.length < imageGenRefImages.length && !batchOpts.silentToast) {
         toast(`已使用 ${refUrls.length}/${imageGenRefImages.length} 张参考图继续生成`);
       }
       const gen = await window.PromptHubApi.generateImage({
@@ -5158,7 +5162,7 @@
         size,
         refImageUrls: refUrls.length ? refUrls : undefined
       });
-      if (btn) {
+      if (btn && !batchOpts.batch) {
         btn.disabled = false;
         restoreImageGenSubmitLabel();
       }
@@ -5166,8 +5170,8 @@
         removePendingJob(pendingId);
         renderImageGenFeed();
         await window.PointsSystem?.refreshCreditsFromServer?.();
-        toast(friendlyGenErrorMessage(gen.message));
-        return;
+        if (!batchOpts.silentToast) toast(friendlyGenErrorMessage(gen.message));
+        return { ok: false };
       }
       if (typeof gen.data.creditsRemaining === 'number') {
         window.PointsSystem?.setCreditsFromServer?.(gen.data.creditsRemaining);
@@ -5187,21 +5191,22 @@
           size,
           image: gen.data.imageUrl,
           cost,
-          jobId: gen.data.jobId
+          jobId: gen.data.jobId,
+          silentToast: batchOpts.silentToast
         });
-        return;
+        return { ok: true };
       }
 
       const jobId = gen.data.jobId;
       if (!jobId) {
         removePendingJob(pendingId);
         renderImageGenFeed();
-        toast('未收到任务编号，请重试');
-        return;
+        if (!batchOpts.silentToast) toast('未收到任务编号，请重试');
+        return { ok: false };
       }
       pendingJob.jobId = jobId;
       trackSessionGenJob(jobId);
-      toast('已提交生图，右侧可查看进度，可继续点击生成');
+      if (!batchOpts.silentToast) toast('已提交生图，右侧可查看进度，可继续点击生成');
       void pollGenerationJobUntilDone(jobId, pendingId, {
         prompt,
         model,
@@ -5211,16 +5216,21 @@
         cost,
         jobId
       });
-      return;
+      return { ok: true };
     }
 
     removePendingJob(pendingId);
     renderImageGenFeed();
-    if (btn) {
+    if (btn && !batchOpts.batch) {
       btn.disabled = false;
       restoreImageGenSubmitLabel();
     }
-    toast('请登录并连接后端 API 后使用真实生图（演示占位已关闭）');
+    if (!batchOpts.silentToast) toast('请登录并连接后端 API 后使用真实生图（演示占位已关闭）');
+    return { ok: false };
+  }
+
+  function runImageGenDemo() {
+    return runImageGenWithPrompt();
   }
 
   async function finishImageGenRun({ prompt, model, resolution, quality, size, image, cost, btn, jobId, silentToast, isRecovery }) {
@@ -6288,6 +6298,8 @@
     copyFeedPromptText,
     fillFeedPromptToImageGen,
     fillCardToImageGen,
+    runImageGenWithPrompt,
+    getImageGenRefImages: () => [...imageGenRefImages],
     updateNotifyBadge,
     getCommunityPostsForTasks() {
       return communityPosts

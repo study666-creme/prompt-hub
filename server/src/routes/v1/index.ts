@@ -10,6 +10,7 @@ import { membershipTaskRoutes } from './membership-tasks';
 import { communityMediaSignHandler, mediaRoutes } from './media';
 import { extensionRoutes } from './extension';
 import { chatRoutes } from './chat';
+import { promptToolsRoutes } from './prompt-tools';
 import { rateLimit } from '../../middleware/rate-limit';
 
 export const v1 = new Hono<{ Bindings: Env }>();
@@ -29,5 +30,6 @@ v1.route('/media', mediaRoutes);
 v1.route('/redeem', redeemRoutes);
 v1.route('/generate', generateRoutes);
 v1.route('/chat', chatRoutes);
+v1.route('/prompt-tools', promptToolsRoutes);
 v1.route('/community', communityRoutes);
 v1.route('/extension', extensionRoutes);

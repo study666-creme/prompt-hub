@@ -964,6 +964,146 @@
   display: block;
 }
 
+.imagegen-toolbox {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.imagegen-toolbox-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.imagegen-toolbox-title {
+  display: block;
+  font-size: var(--font-sm);
+  color: var(--text-primary);
+}
+
+.imagegen-toolbox-sub {
+  margin: 4px 0 0;
+  font-size: 11px;
+}
+
+.imagegen-toolbox-body {
+  padding: 12px 14px 14px;
+}
+
+.imagegen-tool-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.imagegen-tool-tab {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.imagegen-tool-tab.active {
+  color: var(--text-primary);
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.imagegen-inspire-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.imagegen-inspire-controls label {
+  margin: 0 !important;
+  grid-column: span 1;
+}
+
+.imagegen-inspire-controls select {
+  grid-column: span 1;
+}
+
+.imagegen-inspire-controls button {
+  grid-column: span 2;
+  justify-self: start;
+}
+
+.imagegen-inspire-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+  margin-bottom: 10px;
+}
+
+.imagegen-inspire-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+
+.imagegen-inspire-check {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.imagegen-inspire-check input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.imagegen-inspire-batch-btn {
+  width: 100%;
+}
+
+.imagegen-reverse-preview-wrap {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: var(--bg-secondary);
+}
+
+.imagegen-reverse-preview-wrap img {
+  max-width: 100%;
+  max-height: 180px;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+}
+
+.imagegen-reverse-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .imagegen-params-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
