@@ -132,8 +132,9 @@
     return null;
   }
 
-  function setImageGenView(view) {
+  function setImageGenView(view, opts) {
     const v = view === 'feed' ? 'feed' : 'form';
+    const wasFeed = document.body.classList.contains('imagegen-mobile-view-feed');
     document.body.classList.toggle('imagegen-mobile-view-form', v === 'form');
     document.body.classList.toggle('imagegen-mobile-view-feed', v === 'feed');
     document.querySelectorAll('[data-imagegen-view]').forEach((btn) => {
@@ -144,7 +145,7 @@
     try {
       localStorage.setItem('promptrepo_imagegen_mobile_view', v);
     } catch (e) { /* ignore */ }
-    if (v === 'feed') {
+    if (v === 'feed' && opts?.scrollToTop && !wasFeed) {
       requestAnimationFrame(() => {
         document.getElementById('imageGenFeed')?.scrollTo?.(0, 0);
       });
@@ -383,7 +384,7 @@
           if (window.TrialTasksUI?.isHomescreenLaunch?.()) {
             window.TrialTasksUI?.markPwaInstalled?.();
           } else {
-            window.TrialTasksUI?.syncTaskProgress?.(true);
+            window.TrialTasksUI?.syncTaskProgress?.();
           }
         };
         if (typeof requestIdleCallback === 'function') requestIdleCallback(runSync, { timeout: 4000 });

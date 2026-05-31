@@ -16,32 +16,357 @@
     return arr.slice();
   }
 
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  /** 2～3 段为一组，组序随机，提升同词不同排列的新鲜感 */
+  function combineParts(segments, opts = {}) {
+    const segs = segments.filter(Boolean).map((s) => String(s).trim()).filter(Boolean);
+    if (segs.length <= 1) return segs.join('，');
+
+    if (opts.mode === 'flat') {
+      const list = opts.keepFirst && segs.length > 2
+        ? [segs[0], ...shuffle(segs.slice(1))]
+        : shuffle(segs);
+      return list.join('，');
+    }
+
+    const groups = [];
+    let i = 0;
+    while (i < segs.length) {
+      const size = i === 0 && opts.keepFirst ? 1 : (Math.random() > 0.55 ? 2 : 3);
+      groups.push(segs.slice(i, i + size));
+      i += size;
+    }
+    const ordered = shuffle(groups).map((g) => g.join('，'));
+    return ordered.join('；');
+  }
+
+  function pickMaybe(arr, chance = 0.45) {
+    return Math.random() < chance ? pick(arr) : '';
+  }
+
   const PUNCH = [
-    '视觉冲击力强，第一眼抓人，适合封面',
-    '高对比配色，社交媒体爆款质感',
-    '电影级调色，暗部深、高光干净',
-    '强 rim light 轮廓光，主体从背景跳出',
-    '粒子光斑飞溅，画面有事件感与动感',
-    '极端浅景深，主体锐利背景梦幻',
-    '中心构图 + 四周暗角，视线锁定主体',
-    '超现实元素一个就够，其余极简'
+    '主体清晰、背景克制，封面级构图',
+    '电影级调色，暗部透气、高光不过曝',
+    '轮廓光勾勒主体，与背景自然分离',
+    '浅景深但焦内纹理锐利',
+    '中心构图 + 轻微暗角，视线锁定主体',
+    '单一超现实元素点睛，其余极简',
+    '主次分明，留白呼吸，拒绝元素堆砌',
+    '边缘过渡自然，无廉价 HDR 光晕'
   ];
 
-  const QUALITY = [
-    'masterpiece, best quality, ultra detailed, bold composition, striking visual impact',
-    '8k uhd, cinematic color grading, high contrast, dramatic lighting, trending on artstation',
-    '超精细纹理，高饱和点睛色，画面张力强，封面级'
+  const PALETTE = [
+    '低饱和莫兰迪底 + 单一琥珀点睛色',
+    '青蓝阴影 + 暖金高光，电影 teal-gold',
+    '墨绿 + 象牙白 + 古铜，奢侈品广告色',
+    '柯达 2383 胶片调色，肤色温润',
+    '暗部偏青、高光偏奶白，层次丰富',
+    '银灰单色 + 一丝深红点缀',
+    '棕褐胶片 + 深巧克力暗部',
+    '午夜蓝 + 香槟金，高级商业感',
+    '雾紫天空 + 暖灰地面，低饱和统一',
+    '炭黑背景 + 单一冷暖对比光源',
+    '灰绿苔藓色 + 锈铜，末世高级感',
+    '藏青 + 雾粉 + 米白，克制东方色',
+    '深紫罗兰 + 冷灰 + 一点金，Editorial 配色'
   ];
+
+  const TEXTURE = [
+    '皮肤次表面散射，肤质细腻不假',
+    '织物编织纹理可见，金属有微划与指纹',
+    '胶片颗粒均匀，非数码噪点',
+    '微反差 rich tonal range，拒绝廉价 HDR',
+    '体积雾分层，空气透视准确',
+    '材质物理正确：玻璃折射、皮革毛孔、丝绸高光',
+    '边缘微光晕自然，无过度锐化',
+    '环境光反弹柔和，暗部仍有细节',
+    '金属氧化层与指纹级微痕，非塑料 CG',
+    '织物垂坠与褶皱物理正确，有重量感',
+    '皮肤毛孔与绒毛光，修图克制不过磨',
+    '玻璃/水面菲涅尔反射准确，高光干净'
+  ];
+
+  const QUALITY_NEUTRAL = [
+    'high-end illustration finish, controlled color, premium composition',
+    '封面级完成度，主次分明，质感统一',
+    'key visual quality, polished but not overprocessed'
+  ];
+
+  const QUALITY_PHOTO = [
+    'photorealistic portrait, natural skin texture, editorial retouch restraint',
+    '85mm shallow DOF, analog color science, magazine cover finish',
+    'medium format film quality, tactile skin and fabric',
+    'cinematic portrait grading, subtle grain, luxe mood'
+  ];
+
+  const QUALITY_ANIME = [
+    'anime key visual illustration, NOT photograph, clean art finish',
+    'Pixiv 日榜级插画完成度，非相机直出，非写实写真',
+    'animation promotional art, cel shading or soft gradient, sharp lineart',
+    'game SSR splash art quality, illustrated character, not live-action',
+    '轻小说封面级精度，线稿闭合，色块干净',
+    '动画 OP 第一帧完成度，角色清晰背景服务',
+    'Vtuber 封面插画质，非 3D 真人',
+    '同人展签售级 poster，印刷清晰',
+    'TV 动画总集篇 key visual，赛璐璐或数字上色',
+    '漫画单行本封面级，网点或渐变阴影可选',
+    '手游卡面 SSR 精度，立绘半身或全身',
+    '动画截图级色彩分层，非摄影',
+    'Manga color page quality, illustrated only',
+    'anime magazine pin-up finish, stylized skin'
+  ];
+
+  const QUALITY_CG3D = [
+    '3D CG render, PBR materials, Octane-quality lighting, NOT live photo',
+    'Unreal cinematic still, subsurface skin, fabric physics',
+    'stylized 3D character render, high detail, not real person photography'
+  ];
+
+  const QUALITY_PAINTERLY = [
+    'painterly illustration, visible brushwork or ink wash, fine art print',
+    '油画/水彩插画完成度，非摄影，非真人',
+    'traditional media texture on canvas or rice paper'
+  ];
+
+  const QUALITY_ILLUST = [
+    'graphic illustration, bold shapes, poster-grade finish, not photograph',
+    '矢量/扁平/美漫插画完成度，非写实摄影',
+    'concept art key art, stylized, not live-action'
+  ];
+
+  const TEXTURE_PHOTO = [
+    '皮肤次表面散射，毛孔可见但修图克制',
+    '织物编织与皮革毛孔，金属微划',
+    '胶片颗粒均匀，暗部透气',
+    '微反差 rich tonal range，拒绝廉价 HDR'
+  ];
+
+  const TEXTURE_ANIME = [
+    '赛璐璐阴影边界清晰，高光形明确',
+    '线稿闭合，发色/瞳色分层上色',
+    '厚涂过渡柔和，仍保持插画感',
+    '动画截图级材质简化，色块干净',
+    '渐变阴影韩漫风，肤质柔和非写实',
+    '细线稿 + 平涂底色 + 柔和阴影两层',
+    '水彩边缘晕染但角色轮廓清晰',
+    '动画 cel 高光块面明确，非摄影肤质',
+    '游戏立绘金属与布料简化纹理',
+    '漫画 screentone 质感，印刷友好',
+    '数字厚涂笔触感，仍非真人照片',
+    '发丝分组上色，高光条形状明确',
+    '瞳色双层渐变 + 星形高光点',
+    '皮肤仅用两阶阴影，插画化简化',
+    '和服纹样平面装饰，不抢主体'
+  ];
+
+  const TEXTURE_CG3D = [
+    'PBR 金属/布料/皮肤，高光物理正确',
+    '次表面散射 + 细微毛孔，CG 而非照片',
+    '体积光与 fog 分层，渲染感明确'
+  ];
+
+  const TEXTURE_PAINTERLY = [
+    '笔触/水痕/纸纹可见，艺术介质感',
+    '墨分五色或 impasto 厚涂肌理',
+    '颜料堆积与留白，非数码磨皮'
+  ];
+
+  const TEXTURE_ILLUST = [
+    '大色块平涂或 halftone 网点，图形化',
+    '像素边缘清晰或矢量边缘锐利',
+    '海报级简化纹理，非写实肤质'
+  ];
+
+  const PALETTE_ANIME = [
+    '低饱和灰紫底 + 单一高饱和点睛', '墨蓝夜空 + 暖窗光', 'pastel 高明度 + 深紫阴影',
+    '黑金 + 深红少量点缀', '炭灰 + 珍珠白，克制配色', '青白冷色 + 暖色肤光',
+    '日落橙紫但阴影压暗', '金属冷色 + 丝绸暖反光',
+    '樱粉 + 雾灰 + 深棕阴影，春日番剧感', '钴蓝天空 + 奶白云 + 暖肤，新海诚式',
+    '暗红 + 玄黑 + 金线，和风水墨点缀', '薄荷绿 + 浅灰 + 一点珊瑚，清新日常番',
+    '紫罗兰 + 冷灰 + 荧光青点睛，赛博二次元', '焦糖暖棕 + 米白 + 深绿，吉卜力 earthy',
+    '单色蓝灰底 + 仅瞳色饱和，极简 poster', '夕照橙 + 群青阴影，动画黄昏帧',
+    '白 + 藏青 + 一点红，校园番经典', '霓虹粉紫 + 深灰街景，都市夜番',
+    '雪白带蓝灰阴影，冬番清冷', '琥珀金点缀于低饱和灰绿，奇幻冒险番',
+    'lavender + slate + warm skin tone，柔光少女向', '铁锈红 + 烟灰 + 象牙，末世番',
+    '水色 + 白 + 浅黄，夏祭典灯笼感', '深紫夜空 + 星芒白 + 暖肤，魔法夜'
+  ];
+
+  const PUNCH_ANIME = [
+    '单人 poster 构图，背景简化服务角色', '动态 pose + 速度线或粒子点睛',
+    '动画 key visual 留白，标题区可扩展', '角色占画面 60%+，视觉焦点明确',
+    'SSR 卡面级半身或全身', '轻小说封面构图，情绪优先',
+    '漫画跨页大格，主体居中张力', '动画 climax 帧定格，背景 motion blur',
+    '视觉 novel 立绘，半身清晰表情', '同人志 cover，角色 solo 无 clutter',
+    '游戏 gacha splash，角色几乎占满画幅', '番剧 OP 人物特写，天空或城景简化',
+    '对角线构图 + 武器/道具引导视线', '低角度仰拍，角色 dominant',
+    '对称构图 + 魔法阵/符文底纹', '三分法，角色偏一侧留故事空间',
+    '近景脸部 + 远景 simplified 背景', '多人构图但主角前景最大'
+  ];
+
+  const PUNCH_PHOTO = [
+    '主体清晰、背景克制，封面级构图',
+    '电影级调色，暗部透气、高光不过曝',
+    '轮廓光勾勒主体，与背景自然分离',
+    '浅景深但焦内纹理锐利',
+    '中心构图 + 轻微暗角，视线锁定主体'
+  ];
+
+  const STYLE_FAMILIES = {
+    neutral: { lock: '', quality: QUALITY_NEUTRAL, texture: TEXTURE, palette: PALETTE, punch: PUNCH },
+    photo: {
+      lock: '真人摄影或胶片人像',
+      quality: QUALITY_PHOTO,
+      texture: TEXTURE_PHOTO,
+      palette: PALETTE,
+      punch: PUNCH_PHOTO
+    },
+    anime: {
+      lock: '必须是二次元插画，禁止真人摄影、禁止写实写真、禁止相机直出',
+      quality: QUALITY_ANIME,
+      texture: TEXTURE_ANIME,
+      palette: PALETTE_ANIME,
+      punch: PUNCH_ANIME
+    },
+    cg3d: {
+      lock: '必须是 3D CG 渲染，禁止真人摄影与写实写真',
+      quality: QUALITY_CG3D,
+      texture: TEXTURE_CG3D,
+      palette: PALETTE,
+      punch: PUNCH
+    },
+    painterly: {
+      lock: '必须是手绘/油画/水墨插画，禁止真人摄影',
+      quality: QUALITY_PAINTERLY,
+      texture: TEXTURE_PAINTERLY,
+      palette: PALETTE,
+      punch: PUNCH
+    },
+    illustration: {
+      lock: '必须是平面/像素/美漫等插画，禁止真人摄影与写实写真',
+      quality: QUALITY_ILLUST,
+      texture: TEXTURE_ILLUST,
+      palette: PALETTE,
+      punch: PUNCH
+    }
+  };
+
+  const STYLE_TO_FAMILY = {
+    none: 'neutral',
+    auto: null,
+    photo: 'photo',
+    photo_film: 'photo',
+    anime: 'anime',
+    dongman: 'anime',
+    anime_90s: 'anime',
+    semireal: 'anime',
+    manhwa: 'anime',
+    lineart: 'anime',
+    makoto: 'anime',
+    ghibli: 'anime',
+    cg_3d: 'cg3d',
+    cg_3d_toon: 'cg3d',
+    unreal: 'cg3d',
+    weta: 'cg3d',
+    arcane: 'cg3d',
+    oil: 'painterly',
+    watercolor: 'painterly',
+    ink: 'painterly',
+    pixel: 'illustration',
+    comic: 'illustration',
+    flat: 'illustration',
+    cyber_render: 'illustration'
+  };
+
+  function resolveStyleId(styleId) {
+    const id = styleId || 'none';
+    if (id === 'auto') return pick(AUTO_STYLE_POOL);
+    return ART_STYLES[id] ? id : 'none';
+  }
+
+  function getStyleFamily(styleId) {
+    return STYLE_TO_FAMILY[styleId] || 'neutral';
+  }
+
+  function premiumTail(family) {
+    const f = STYLE_FAMILIES[family] || STYLE_FAMILIES.neutral;
+    return combineParts([
+      pick(f.palette),
+      pick(f.texture),
+      pick(f.punch),
+      pick(f.quality)
+    ], { mode: 'flat' });
+  }
+
+  function buildCtx(styleId) {
+    const resolved = resolveStyleId(styleId);
+    const family = getStyleFamily(resolved);
+    return { styleId: resolved, family, tail: () => premiumTail(family) };
+  }
+
+  function applyArtStyle(prompt, styleId) {
+    const resolved = resolveStyleId(styleId);
+    const family = getStyleFamily(resolved);
+    const style = ART_STYLES[resolved];
+    const fam = STYLE_FAMILIES[family] || STYLE_FAMILIES.neutral;
+    const parts = [];
+    if (style?.tag) parts.push(style.tag);
+    if (fam.lock && family !== 'neutral') parts.push(fam.lock);
+    parts.push(prompt);
+    return parts.join('，');
+  }
+
+  function subjectPoolForCharacter(family) {
+    if (family === 'anime') return WORDS.characterSubjectAnime;
+    if (family === 'cg3d') return WORDS.characterSubject3d;
+    if (family === 'photo') return WORDS.characterSubjectPhoto;
+    if (family === 'painterly' || family === 'illustration') return WORDS.characterSubjectIllust;
+    return WORDS.characterSubject;
+  }
+
+  function glamourSubjectPool(family) {
+    if (family === 'photo') return WORDS.glamourSubjectPhoto;
+    if (family === 'anime') return WORDS.glamourSubjectAnime;
+    if (family === 'cg3d') return WORDS.glamourSubject3d;
+    if (family === 'painterly' || family === 'illustration') return WORDS.glamourSubjectAnime;
+    return WORDS.glamourSubject;
+  }
+
+  function lightPoolForCharacter(family) {
+    if (family === 'anime' || family === 'illustration') return WORDS.animeLight;
+    if (family === 'cg3d') return WORDS.cg3dLight;
+    if (family === 'painterly') return WORDS.painterlyLight;
+    return WORDS.characterLight;
+  }
 
   const TWIST = [
     '画面边缘轻微胶片颗粒',
-    '局部 chromatic aberration 色散',
     '前景飘浮尘埃被光照亮',
     '背景 bokeh 呈六边形光斑',
     '空气中可见丁达尔光束',
     '地面有镜面反射倒影',
     '风扬起微尘与碎屑',
-    '画面角落有飞鸟剪影'
+    '画面角落有飞鸟剪影',
+    '飘落的樱瓣/雪花每片有高光',
+    '镜头边缘轻微 vignette',
+    '前景 out-of-focus 枝叶框景',
+    '玻璃/水面折射变形背景',
+    '逆光 dust motes 可见',
+    '雨丝斜线统一方向',
+    '画面一角 small mascot 或使魔',
+    '背景简化成 gradient + 少量纹理',
+    '对话框/拟声词留白区（无文字）',
+    'speed lines 仅背景区域',
+    '花瓣/羽毛轨迹弧线引导视线',
+    '单一强光源形成长 shadow',
+    '画面边缘 anime film grain 轻微'
   ];
 
   const WORDS = {
@@ -86,6 +411,59 @@
       '冰蓝月光 + 暖色窗光', '火焰映照橙红', '屏幕光打在脸上', '频闪灯冻结动作',
       '柔光箱正面 + 边缘 kicker', '顶光戏剧化', '彩色 gel 片红绿对比'
     ],
+    characterSubjectPhoto: [
+      '都市白领女性，自然妆容', '健身女性，线条健康', '混血模特，高颧骨',
+      '街头滑板少年', '咖啡馆读书女孩', '乐队主唱，舞台灯光', '芭蕾舞者，踮脚旋转',
+      '潜水员，水下气泡', '滑雪者，雪粉飞扬', '银发老人，故事感皱纹', '新生儿与母亲',
+      '厨师，火焰映照', '运动员冲刺瞬间', '程序员，屏幕光打脸', '农民，晒谷场'
+    ],
+    characterSubjectAnime: [
+      '银发剑士少女，和风外套', '双马尾魔法使，星形发饰', '兽耳侦探，风衣与耳',
+      '和风巫女，御币与铃', '机甲驾驶员，休息舱便装', '精灵弓手，箭搭弦上',
+      '吸血鬼贵族，披风与红酒', '偶像 backstage，麦克风与彩带', '炼金术士，药瓶与火花',
+      '龙角少女，鳞片微光', '阴阳师，式神火焰', '不良少年，制服敞开',
+      '黑客少女，透明键盘', '体操少女，彩带飞旋', '海盗副官，眼罩与弯刀',
+      '魔法学院学姐，法袍与魔导书', '猫耳摇滚主唱', '九尾妖狐，尾巴展开',
+      '圣骑士，巨剑插地', '死神，镰刀与锁链', '飞行员，护目镜', '女仆，托盘与咖啡',
+      '风纪委员，臂章严肃', '天文社少女，望远镜', '剑道部主将，竹刀',
+      '轻音部贝斯，挑染发', '异世界勇者，盾与短剑', '机娘维护，半甲工具',
+      '和风舞姬，扇与足袋', '怪盗，礼帽扑克', '元素使，四属性 orb',
+      '退魔师，念珠符纸', '龙骑士，骑枪鳞甲', '时间旅人，怀表长 coat',
+      '地下偶像，荧光棒汗', '游戏 NPC 旅人，斗篷灯', '图书委员，眼镜书堆',
+      '魔法学院新生，法袍书', '兽化混血，耳尾绷带', '咒物商人，面具灯笼'
+    ],
+    characterSubject3d: [
+      '赛博女猎手，义眼发光', '半机械剑士，装甲接缝微光', '浮空摩托骑手',
+      'AI 歌姬，全息舞台', '企业特工，战术装甲', '废土拾荒者，护目镜',
+      '龙血战士，角与鳞', '太空殖民者，透明头盔', '纳米医生，光针',
+      '机甲少女，破损外甲', '数据幽灵，半透明', '地下拳手，机械臂'
+    ],
+    characterSubjectIllust: [
+      '剪影刺客，纯黑轮廓 + 一抹红', '几何面具舞者', '纸艺折纸武士',
+      '霓虹线框少女', '浮世绘风格鬼面武士', '美漫英雄，粗墨线',
+      '像素冒险者，16-bit 装备', '扁平矢量女巫', '水墨侠客，留白',
+      '蒸汽朋克发明家，铜管与护目镜', '塔罗牌女祭司', '剪纸风凤凰少女'
+    ],
+    animeLight: [
+      '动画 cel shading 硬边高光', 'key visual 侧光，阴影形简化',
+      '新海诚式天空光溢出', '吉卜力式柔和顶光', 'Ufotable 式强对比 rim light',
+      '韩漫柔光，渐变阴影', '90s 赛璐璐电视色 + 粗线稿阴影',
+      '魔法 glow 来自道具，非 cheap bloom', '樱花/backlit 轮廓', '雨夜霓虹 edge light',
+      '教室窗光侧照，窗帘半透明', '祭典灯笼暖光 + 面部冷补', '月光银蓝 + 室内暖光对比',
+      '闪电瞬间 flash，角色轮廓清晰', '舞台 spotlight + 观众席暗', '神社树影斑驳光',
+      '水下 caustics 在发丝', '屏幕光映在脸上（游戏/手机）', '蜡烛暖光 + 深紫阴影',
+      'overcast 柔光，肤质插画化', 'rim light 勾发丝与武器', '体积光穿过窗格',
+      'neon sign 反射在 wet pavement', '魔法阵自发光映脸', '夕照 golden rim + 冷色 fill'
+    ],
+    cg3dLight: [
+      '三点布光 + HDRI 环境', '体积雾 god rays', '霓虹 rim + 冷色 fill',
+      '演播室级 area light', '火星夕照 + 长 shadow', '水下 caustics',
+      'Unreal 级 lumen 反弹', '电影级 anamorphic streak'
+    ],
+    painterlyLight: [
+      '伦勃朗式明暗', '印象派破碎高光', '水墨留白无强光源',
+      '窗光油画侧照', '烛光暖调厚涂', '水彩透明叠色光'
+    ],
     characterStyle: [
       '时尚大片 editorial', '赛博朋克电影剧照', '港风复古胶片', '暗黑 fantasy portrait',
       '小红书爆款封面人像', 'Vogue 商业人像', 'Weta 级写实 CG', '90s 杂志扫描质感',
@@ -108,9 +486,10 @@
       '沙尘暴逼近', '海啸浪墙在远处', '极光与暴雪同时', '日食边缘光'
     ],
     sceneColor: [
-      'Teal and Orange 青橙互补', '洋红 + 电光蓝 Cyber', '黑金奢华', '单色系只剩红',
-      '高饱和糖果 + 暗角', '莫奈紫 + 柠檬黄点缀', '纯黑白 + 一抹红', '翡翠绿 + 金',
-      '日落紫粉渐变', '冰蓝 + 暖橙对撞', '故障 RGB 分离', '银灰 + 荧光绿'
+      'Teal and Orange 青橙互补，电影常用', '黑金奢华，低饱和背景', '纯黑白 + 一抹深红',
+      '莫奈紫灰 + 暖金点缀', '翡翠绿 + 哑光金，东方高级感', '日落紫粉但整体低饱和',
+      '冰蓝环境 + 暖肤补光', '银灰 + 深棕，工业电影感', '橄榄绿 + 奶油白，自然高级',
+      '海军蓝 + 铜色，复古轻奢'
     ],
     sceneComp: [
       '超广角透视夸张', '韦斯·安德森对称', '人小景大史诗感', '无人机俯冲',
@@ -130,7 +509,14 @@
       '黑客少女，全息键盘', '巫女，御币与铃', '海盗船长，望远镜', '炼金术士，药瓶爆炸',
       '死神，镰刀与锁链', '精灵弓手，箭搭弦上', '魔王，角与 throne', '女仆，托盘与咖啡',
       '赛车手，头盔抱怀', '阴阳师，式神火焰', '体操少女， ribbons 飞', '侦探，放大镜',
-      '厨师，火焰炒锅', 'DJ，耳机与控制台', '幽灵，半透明飘浮'
+      '厨师，火焰炒锅', 'DJ，耳机与控制台', '幽灵，半透明飘浮',
+      '转校生，樱花与书包', '风纪委员，臂章与严肃脸', '图书委员，眼镜与书堆',
+      '天文社部长，望远镜与星图', '游戏部宅，手柄与耳机', '剑道部主将，竹刀与护具',
+      '轻音部贝斯，挑染与贴纸', '魔法学院新生，法袍与魔导书', '异世界勇者，盾与短剑',
+      '兽化混血，耳尾与绷带', '机娘维护中，半甲与工具', '和风舞姬，扇与足袋',
+      '科幻舰长，制服与舷窗', '地下偶像，荧光棒与汗', '退魔师，念珠与符纸',
+      '怪盗，礼帽与扑克', '时间旅行者，怀表与长 coat', '龙骑士，骑枪与鳞甲',
+      '元素使，四属性 orb 环绕', '咒物商人，面具与灯笼', '失忆剑士，绷带与旧刀'
     ],
     animeAction: [
       '施法，魔法阵铺满地面', '居合拔刀，刀光划雨', '跳跃空中，衣摆放射',
@@ -138,23 +524,61 @@
       '召唤 lightning 劈下', '展开 wings 遮天', 'time stop 悬浮水滴', 'rage aura 气焰',
       'dance spin，丝带轨迹', 'hug 自己，孤独感', 'eat 拉面， steam 升腾',
       'play guitar，音波可视化', 'cry 眼泪反光', 'laugh 仰天', 'sleep 漂浮 dream',
-      'run 带 speed lines', 'block 盾牌碎裂', 'die 倒地但眼神坚定'
+      'run 带 speed lines', 'block 盾牌碎裂', 'die 倒地但眼神坚定',
+      '整理领带，日常帅气', '撑伞回头，雨丝高光', '吹泡泡，童心与梦',
+      '射箭 mid-release，弦振动', '咏唱咒文，书页翻飞', '格斗 kick，冲击波环',
+      '变身 pose，光柱包裹', '喂猫，温柔一瞬', '打游戏，屏幕反光脸',
+      '举奖杯，背景简化', '写情书，脸红侧脸', '观星，望远镜与银河',
+      '祭典捞金鱼，灯笼暖光', '滑雪 jump，雪粉飞扬', '游泳出水，发丝贴脸',
+      '骑扫帚飞行，云隙光', '弹键盘，代码 hologram', '泡茶，蒸汽与和服袖'
     ],
     animePalette: [
-      '霓虹紫粉 + 电光蓝高饱和', '黑金 + 血红点缀', '青白冷色 + 暖色点睛',
-      '日落橙紫天空', 'Glitch 色块穿插', '荧光赛璐璐硬边阴影', ' pastel 但阴影深紫',
-      '金属色 + 洋红', '毒液绿 + 黑', ' sakura 粉 + 天青', ' lava 橙 + 炭灰'
+      '低饱和灰紫底 + 单一高饱和点睛', '黑金 + 深红少量点缀', '青白冷色 + 暖色肤光',
+      '日落橙紫但阴影压暗', 'pastel 高明度 + 深紫阴影', '金属冷色 + 丝绸暖反光',
+      '墨蓝夜空 + 暖窗光', '炭灰 + 珍珠白，克制配色',
+      '樱粉灰底 + 深红 accent', '钴蓝 + 奶白 + 暖肤', '紫灰 + 荧光青点睛',
+      '焦糖 + 米白 + 深绿 earthy', '雪白带蓝灰阴影', '霓虹粉紫 + 深灰街景',
+      'amber gold on desaturated teal', 'lavender mist + warm skin', '铁锈 + 烟灰 + 象牙'
     ],
     animeFx: [
       '火花闪电羽毛粒子飞', '镜头光晕星芒', '速度线冲击波环', '魔法符文漂浮发光',
       '雨滴/樱花每片高光', '烟雾体积光溢出', 'confetti 彩纸', 'bubble 魔法泡',
       'fire embers 上升', 'ice crystal 悬浮', 'blood splatter 艺术化', 'hologram UI 环绕',
-      'petals tornado', 'lightning chain', 'aura 粒子环', 'lens dirt flare'
+      'petals tornado', 'lightning chain', 'aura 粒子环', 'lens dirt flare',
+      '魔法阵 floor glow', '羽毛/纸片 slow fall', 'energy wings 半透明',
+      'slash trail 刀光残像', 'rain ripple 地面', 'snow sparkle 每片反光',
+      'cherry blossom spiral', 'dark mote 漂浮', 'screen tone sparkle',
+      'summoning circle 旋转', 'healing light particles', 'wind pressure lines'
     ],
     animeStyle: [
       'Pixiv 日榜 key visual', '动画 OP 第一帧', 'Ufotable 厚涂 + 强线稿',
       '90s 赛璐璐现代上色', '韩漫半写实二次元脸', 'SSR 游戏立绘', 'Vtuber 封面',
-      '轻小说封面', 'Mappa 级动态感', 'Kyoto Animation 柔光', 'Arcane 风手绘纹理'
+      '轻小说封面', 'Mappa 级动态感', 'Kyoto Animation 柔光', 'Arcane 风手绘纹理',
+      'Jump 漫画彩页', 'TV 动画总集篇 key visual', 'Galgame 立绘精度',
+      'Bones 级动作帧', 'Shaft 倾斜构图番剧风', 'CloverWorks 柔色日常番',
+      'Trigger 夸张 dynamic', 'Production I.G 科幻硬边', 'Madhouse 电影感单帧',
+      'Webtoon 条漫竖构图', '同人志 cover 印刷级', '动画设定集 turnaround 风',
+      '手游 splash art', '番剧 ED 静帧诗意', '漫画单行本封面'
+    ],
+    animeScene: [
+      '樱花飘落的学校天台', '雨夜霓虹 alley', '神社鸟居逆光台阶',
+      '异世界传送门边缘', '机甲 cockpit 仪表光', '魔法学院图书馆高窗',
+      '祭典灯笼街道', '废弃游乐园 carousel', '星空 camp 篝火',
+      '电车窗外城市流动', '温泉旅馆木走廊', '战斗后废墟尘光',
+      '咖啡厅靠窗蒸汽', '演唱会舞台侧光', '海底神殿光束',
+      '哥特教堂彩窗', 'Cyberpunk 窄巷全息广告', '雪线经幡山坡',
+      '游戏 title 画面式留白', '训练场木剑与汗', '卧室海报墙手办柜',
+      '便利店深夜荧光', '屋顶水箱与城市夜景', '异空间星空地板',
+      '和风庭院枯山水', '浮空岛云隙', '地下城入口 torch 光'
+    ],
+    animeMood: [
+      '日常 slice-of-life 松弛', '战斗前一瞬蓄力', '离别车站风吹围巾',
+      '胜利 pose 背景简化', '雨中共伞距离感', 'SSR 卡面级半身构图',
+      '动画 key visual 单人', '轻小说封面标题留白', '战斗后喘息战损帅气',
+      '生日 surprise 彩带飞', '毕业册回眸', '深夜 convenience 孤独感',
+      '祭典热闹但主角 quiet moment', '告白前 silence', '复仇决心眼神',
+      '治愈系 warm fluff', '致郁系 beautiful sadness', '热血 shout 前一帧',
+      'comedy 夸张表情 freeze', 'mysterious 半脸 shadow', 'epic 渺小人巨大背景'
     ],
     viralHook: [
       '雨夜分手，电话亭 alone', '神明少女降临废弃商场', '赛博观音，霓虹 halo 机械臂',
@@ -169,10 +593,458 @@
       '所有路牌指向不同方向', '破碎镜面每个碎片不同场景', '电梯门开是森林'
     ],
     viralLook: [
-      '小红书封面，主体居中偏上', '抖音 9:16，人物占 60%', '强情绪：孤独/燃/诡谲/浪漫拉满',
-      '单主体 + 极简背景', '一个超现实元素让人停滑', '对比色块背景 split',
-      '文字留白区在上方 30%', '眼神直视镜头', '低饱和环境 + 高饱和主体',
-      'snapshot 抓拍感，非摆拍', 'flash 直打，hard shadow', 'film grain 重'
+      '竖屏 9:16，人物占 55～65%', '主体居中偏上，留顶留白', '强情绪但色调克制',
+      '单主体 + 极简背景', '一个超现实元素点睛', '眼神直视镜头',
+      '低饱和环境 + 单一高饱和主体', '纪实抓拍感，非摆拍', '自然侧光，阴影有层次'
+    ],
+    epicScale: [
+      '14mm 超广角大透视，地平线极低', '蚁视角仰望，人物仅占画面 5%', '鱼眼畸变强化空间压迫感',
+      '无人机俯冲，建筑向镜头扑来', '消失点刺入云层深处', 'forced perspective 近大远小极端',
+      '全景接片史诗宽幅', '垂直构图，天际线被巨构占满', '隧道式纵深，两侧建筑向内倾斜'
+    ],
+    epicArchitecture: [
+      '千尺赛博 temple 刺破云层', '巴比伦级空中花园叠城', '环形太空电梯基座', '哥特 megacathedral 玻璃尖塔',
+      '巨型机械齿轮咬合的城市心脏', '悬浮反重力金字塔群', '瀑布从摩天楼边缘倾泻', '古代长城与未来玻璃幕墙叠合',
+      '深空巨构 Dyson 环片段', '工业巨塔烟囱吐云', '水晶穹顶覆盖整片都市', '断裂的环形世界残骸',
+      '巨型佛像半埋沙海', '钢铁树状支撑的超级枢纽', '冰原上的黑色 monolith 阵列'
+    ],
+    epicSubject: [
+      '渺小旅人站在巨构阴影下', '单人剪影对抗风暴与巨城', '飞行器掠过塔尖之间',
+      '探险队仰望不可名状的高墙', '机甲列队行进于峡谷般的街道', '僧侣独坐悬崖边 mega 城市之上',
+      '鲸鱼般巨舰停靠云端港口', '光柱从建筑裂缝射出', '旗帜在百米高台飘扬',
+      '流浪者穿越巨型拱门', '骑士与龙盘踞在废墟之巅', '人群如蚁流涌入 mega gate'
+    ],
+    epicTension: [
+      '雷暴云压顶，体积光撕开暗部', '末日橙红天际与冷蓝建筑对撞', '狂风卷起沙尘与碎屑',
+      '建筑边缘火花飞溅，工业感爆棚', '极地平线光，长阴影切割画面', '浓雾中仅巨构轮廓可见',
+      '双闪电同时劈下，瞬间照亮', '熔岩色天空，建筑剪影如刀', '暴雪与探照灯交叉',
+      '海啸浪墙在远处，城市仍亮着', '日食边缘光，一切濒临熄灭'
+    ],
+    impactComp: [
+      '极端低角度仰拍，主体如纪念碑', '对角线构图贯穿全画，动势拉满', '中心对称 + 强烈透视汇聚',
+      '前景巨大遮挡框景，主体在光门中', '超广角边缘畸变强化压迫', '留白一侧，主体占 70% 画面',
+      '荷兰角倾斜，不安与张力', '剪影轮廓占满天际线', '多层景深，近中远三级叙事',
+      '破框构图，元素冲出画面边缘', '环形构图，视线被锁在中心', '垂直长构图，上下压迫感'
+    ],
+    impactPose: [
+      '蓄力待发的一瞬，肌肉/衣摆冻结', '逆风站立，发丝与披风狂舞', '跪地抬头，逆光轮廓',
+      '回眸一瞥，眼神穿透镜头', '跃起滞空，裙摆/武器展开', '背靠巨物，渺小与伟大对撞',
+      '双手展开，拥抱风暴或光芒', '剑/杖指天，仪式感拉满', '蜷缩后即将爆发的蜷缩姿态',
+      '侧脸特写，情绪在眼角', 'walk toward camera，步伐带风', '悬浮/失重，衣摆无重力飘动'
+    ],
+    impactScene: [
+      '雷暴云隙光柱直插地面', '末日余烬，天空燃烧', '深海幽蓝，唯一暖光',
+      '暴雪中心，能见度极低', '废墟中最后一盏灯', '巨构阴影吞没城市',
+      '樱花/灰烬如雪飘落', '镜面水面倒映双世界', '隧道尽头纯白圣光',
+      '霓虹雨夜，地面如河', '日蚀边缘，万物濒死', '火山灰与金色阳光对撞'
+    ],
+    impactHook: [
+      '一个超现实元素打破常识', '主体与环境的尺度极端反差', '静止中的即将爆发',
+      '孤独个体对抗庞大世界', '神圣感与危险感并存', '记忆闪回式的强烈情绪',
+      '禁忌之美，克制而危险', '史诗叙事的一帧定格', '命运转折前的静默',
+      '希望与毁灭同框', '神话感降临日常', '时间凝固的 decisive moment'
+    ],
+    impactStyle: [
+      '电影 key visual 级完成度', 'SSR 收藏卡/游戏立绘张力', '概念艺术海报',
+      '动画高潮帧定格', '时尚大片级姿态与光', '概念设定集扉页',
+      '轻小说封面级情绪', '游戏过场 CG 质感', '展览级数字绘画',
+      'Billboard 级视觉张力', '预告片 thumbnail 一帧', '收藏级 art book 插页',
+      '动画剧场版 poster', '独立游戏 key art', '体育品牌 campaign 级'
+    ],
+    stylizedMood: [
+      '怪诞而高级的超现实静穆', '小众审美、冷门但精致', '猎奇但不低俗的异质美感',
+      '梦境逻辑、似曾相识的陌生感', '仪式感的诡异庄严', '冷冽贵族式的疏离',
+      '废墟美学中的神圣感', '生物异化与优雅并存', '暗黑童话的精致残酷'
+    ],
+    stylizedSubject: [
+      '非人类混血体，轮廓却极度优雅', '戴面具的异端祭司', '水晶骨骼的透明人形',
+      '多头生物但构图克制', '机械与有机融合的朝圣者', '漂浮的残缺神像',
+      '被藤蔓缠绕的古典雕塑复活', '异色瞳的静默观测者', '半溶解半重组的人形',
+      '昆虫翅与维多利亚礼服的拼贴', '深海发光体拟人', '纸艺折纸化活人'
+    ],
+    stylizedVisual: [
+      '不对称构图但视觉平衡', '极端长宽比画幅', '负空间大面积留白',
+      '单一异色光源', '轮廓光切出异形剪影', '重复纹样形成催眠感',
+      '微距质感与宏大背景对撞', '颗粒胶片 + 超清晰主体', '霓虹与灰雾并置',
+      '巴洛克装饰 × 极简主体', '故障艺术点缀但主体完整', '湿画法与硬边并置'
+    ],
+    stylizedPalette: [
+      '灰绿 + 锈铜 + 一点磷光', '黑檀 + 珍珠白 + 深紫', '氧化银 + 枯粉 + 墨蓝',
+      '琥珀金点缀于全灰画面', '荧光青仅出现在瞳孔', '血橙与冷灰对撞',
+      '象牙白 × 炭黑 × 单一高饱和', '莫兰迪底 + 酸性绿点睛', '钴蓝阴影 + 暖灰高光'
+    ],
+    stylizedCraft: [
+      'Editorial 时尚摄影 × 概念 art', '独立游戏概念设定集', 'A24 电影海报气质',
+      '先锋时装大片', '博物馆级数字绘画', 'Zine 独立出版物封面',
+      '实验动画背景美术', '高端香水广告视觉', '暗黑艺术书插页',
+      'Gallery 展览 opening poster', '独立音乐专辑封面', '艺术书 limited edition',
+      'Concept zine risograph 质感', 'Biennale 级装置摄影', 'NFT 艺术精品级完成度'
+    ],
+    guofengRole: [
+      '白衣剑仙，长发束冠', '红衣贵妃，凤冠霞帔', '青衣琴师，抚琴于亭', '黑衣刺客，面罩半遮',
+      '敦煌飞天，飘带凌空', '竹林隐士，蓑衣斗笠', '宫廷画师，执笔作画', '江湖女侠，马尾高束',
+      '龙袍帝王，金线刺绣', '狐妖少女，九尾展开', '僧侣行脚，木鱼在手', '绣娘，针尖挑花',
+      '战甲将军，披风猎猎', '采药少女，竹篓背身', '月宫仙子，玉兔在侧', '书院学子，折扇轻摇'
+    ],
+    guofengScene: [
+      '烟雨江南园林曲桥', '华山云海日出', '长安朱雀大街夜景', '竹林深处小径',
+      '宫殿飞檐斗拱', '水墨山水间孤舟', '古城墙下灯笼街', '桃花坞落英缤纷',
+      '昆仑雪线经幡', '洛阳牡丹花会', '沙漠驼队与残阳', '瀑布下练剑',
+      '荷塘月色', '边关烽火台', '茶肆内景，蒸汽升腾', '悬崖边古松'
+    ],
+    guofengMood: [
+      '仙气缥缈，柔雾缭绕', '侠骨柔情，剑意凛然', '宫廷华美，金箔点缀',
+      '水墨留白，意境深远', '工笔细描，丝绢质感', '敦煌配色，矿物颜料感',
+      '丁达尔光束穿林', '飘带与花瓣随风', '烛火暖光，夜色静谧', '雨丝斜打，油纸伞下'
+    ],
+    guofengStyle: [
+      '国风电影剧照', '新中式插画', '《长安三万里》美术风', '游戏 CG 过场',
+      '工笔画质感', '影视级汉服写真', 'Pixiv 国风日榜', '3D 东方奇幻',
+      '水墨动画《山水情》意境', '宋代美学设色', '敦煌壁画现代演绎',
+      '《黑神话》级东方奇幻', '汉服电商 lookbook 高级', '国潮品牌 campaign',
+      '仙侠剧概念设定', '故宫文创插画风', '新水墨 digital ink'
+    ],
+    realisticSubject: [
+      '都市白领女性，自然妆容', '健身男性，肌肉线条', '银发老人，故事感皱纹',
+      '混血模特，高颧骨', '街头滑板少年', '咖啡馆读书女孩', '厨师，火焰映照',
+      '运动员冲刺瞬间', '新生儿与母亲', '乐队主唱，舞台灯光', '农民，晒谷场',
+      '潜水员，水下气泡', '滑雪者，雪粉飞扬', '芭蕾舞者，踮脚旋转', '程序员，屏幕光打脸'
+    ],
+    realisticLight: [
+      '自然窗光，柔和漫射', '黄金时刻侧逆光', '伦勃朗光，半脸阴影',
+      '胶片闪光灯直打', '阴天柔光，肤色通透', '霓虹招牌反射', '演播室柔光箱',
+      '清晨薄雾散射', '烛光唯一光源', '背光轮廓清晰', '商业棚拍，三点布光'
+    ],
+    realisticLens: [
+      '85mm f/1.4 浅景深', '35mm 环境人像', '105mm 微距肤质', '50mm 标准视角',
+      '24mm 广角环境', '200mm 长焦压缩', '中画幅胶片质感', '大光圈 bokeh 奶油'
+    ],
+    realisticStyle: [
+      'Vogue 时尚大片', '国家地理纪实', 'Apple 广告级极简', '柯达 Portra 400 胶片',
+      '黑白高对比时尚', '生活方式杂志', '商业产品 hero shot', '婚礼摄影纪实'
+    ],
+    cyberSubject: [
+      '赛博女猎手，义眼发光', '机械僧侣，全息经文', '霓虹黑客，透明键盘',
+      '半机械警察', '浮空摩托骑手', 'AI 歌姬，全息舞台', '废土拾荒者',
+      '企业特工，战术装甲', '地下拳手，机械臂', '数据幽灵，半透明', '赛博医生，纳米针'
+    ],
+    cyberScene: [
+      '雨夜 Chinatown 窄巷', '摩天楼间无人机航道', '地下数据中心', '霓虹天桥',
+      '全息广告牌森林', '废弃地铁，积水反光', '太空港候机厅', '黑市交易角',
+      '屋顶花园与雾霾', '巨型 LED 幕墙', '工业管道迷宫', '赛博寺庙'
+    ],
+    cyberFx: [
+      '全息 UI 低饱和点缀', '雨水在霓虹上折射', '蒸汽与体积光',
+      '湿地面镜面反射', '远处车灯 bokeh', '义体接缝微光',
+      '全息广告 glitch 一瞬', '电缆与 steam vent', '无人机 swarm 远景',
+      '霓虹 sign 反射护目镜', 'rain streak on glass', 'data stream particles',
+      'smoke + laser grid', 'wet asphalt mirror', 'hologram ad 半透明'
+    ],
+    cover916Hook: [
+      '分手雨夜，电话亭 alone', '神明少女降临商场', '透明水母裙走沙漠',
+      '黑猫与红裙女孩纯黑背景', '巨人手从云下探出', '双生镜像对称',
+      '血月婚礼', '千纸鹤风暴', '雪地里唯一红伞', '蝴蝶停在枪口',
+      '电梯门开是森林', '时钟融化 dripping', '机器人抱人类婴儿',
+      '深海中发光的人形', '荆棘王座上的少女', '公路尽头站着过去的自己',
+      '玻璃罐中困住的 galaxy', '燃烧的书本飘雪', '影子与本体不同步',
+      '天空裂开展现另一维度', '破碎镜面每个碎片不同场景', '门后是无尽楼梯'
+    ],
+    cover916Layout: [
+      '竖屏 9:16，人物占 55～65%', '主体居中偏上，顶部留白', '强情绪但配色高级',
+      '单主体 + 极简背景', '眼神直视镜头', '低饱和环境 + 单一点睛色',
+      '中心构图 + 轻微暗角', '自然光或侧光，避免廉价闪光灯',
+      '标题区留白在上方 20%', '人物偏左三分，右侧故事空间',
+      '近景脸 + 远景 simplified', '膝上构图，适合短剧封面',
+      '全身 small in frame，环境叙事', '对角线构图，动势向上',
+      '对称构图，仪式感', '底部 15% 留字幕安全区'
+    ],
+    glamourSubject: [
+      '气质角色，肩颈线条优美', '神秘旅人，斗篷与腰带', '舞台表演者，肢体舒展',
+      '剑士卸甲，侧脸与锁骨', '精灵射手，长腿与弓', '和风舞姬，扇与足袋',
+      '爵士歌手，丝绒裙麦前', '泳池边模特，健康曲线', '芭蕾体态，颈项修长',
+      '红毯女星，高开衩礼服', '健身模特，力量与柔软', '艺术系女生，慵懒书卷气'
+    ],
+    glamourSubjectPhoto: [
+      '拉丁裔模特，湿发贴颈', '东亚混血女郎，锁骨清晰', '金发比基尼模特，小麦肤',
+      '黑发御姐，肩线利落', '健身模特，腹肌线条柔和', '芭蕾体态少女，颈项修长',
+      '港风女郎，波浪卷发', '泳池边的法国模特', '红毯女星，高开衩礼服',
+      '瑜伽教练，柔韧身姿', '冲浪女孩，盐渍肌肤', '爵士酒吧歌手，丝绒裙',
+      '北欧冷白皮模特，肩背线条', '深肤模特，光泽肌与健康曲线', '短发中性魅力模特',
+      '拉丁舞教师，腰臀比自然', '艺术系女生，慵懒书卷气', '马术女孩，长腿与晒痕',
+      '复古好莱坞 starlet', '现代极简超模脸', '温泉旅馆和服浴衣改良',
+      '泳池救生员体态，健康力量感', '钢琴家，背脊与手臂线条', '晨跑后的自然红晕',
+      '法式公寓窗边的慵懒女郎', '比基尼广告模特，健康曲线', '丝绒酒吧驻唱，麦前侧光'
+    ],
+    glamourSubjectAnime: [
+      '银发剑士少女，甲胄半卸', '和风巫女，浴衣腰带松散', '精灵射手，长腿拉弓',
+      '猫耳侦探，风衣与耳', '魔法学院学姐，制服与披风', '吸血鬼贵族，礼服与披风',
+      '机甲驾驶员，休息舱便装', '偶像 backstage，麦克风与彩带', '炼金术士，实验袍敞开',
+      '龙角少女，鳞片微光', '阴阳师，和服与式神光', '不良少年，制服敞开',
+      '体操少女，彩带缠绕', '海盗副官，眼罩与弯刀', '天文社少女，望远镜与星图',
+      '兽耳冒险者，地图与背包', '黑客少女，耳机与透明键盘', '女仆咖啡厅，托盘与咖啡',
+      '乐队贝斯手，挑染发', '和风舞姬，扇与足袋', '科幻机娘，维护中半甲',
+      '转校生，书包与樱花', '魔法使，星核法杖', '剑士，和风外套半敞',
+      '温泉旅馆和服少女，腰带松垮', '泳池边 anime 少女，泳装与阳伞',
+      '晚礼服 anime 女郎，高开衩但插画', '健身系 anime 少女，运动内衣与外套',
+      '爵士 bar 歌手 anime 版，丝绒裙', '雨夜 window 边的 anime 少女，侧脸'
+    ],
+    glamourSubject3d: [
+      '3D 赛博女郎，义体接缝微光', '3D 精灵射手，PBR 皮甲', '3D 和服巫女，丝绸物理',
+      '3D 机甲少女，外甲半卸', '3D 吸血鬼贵族，披风物理', '3D 偶像，舞台灯光',
+      '3D 剑士，金属护甲划痕', '3D 泳装少女，水面 caustics', '3D 晚礼服女郎，布料垂坠',
+      '3D 健身模特，肌肉线条 CG', '3D 酒吧歌手，丝绒材质', '3D 冒险者，皮革与金属'
+    ],
+    glamourOutfit: [
+      '黑色连体泳装，剪裁利落', '白色比基尼 + 半透明纱笼', '丝质吊带晚礼服，开衩及腿',
+      '露背红裙，腰侧镂空但遮挡完整', '蕾丝连体衣外搭西装外套', '运动内衣 + 高腰瑜伽裤',
+      '湿身衬衫（内衬可见但不露点）', '金属感 bodycon 短裙', '香槟色 silk slip 睡裙',
+      '高叉旗袍改良款', '一字肩鱼尾礼服', '海边 linen 罩衫 + 比基尼',
+      '针织 wrap 连衣裙，侧绑带', '缎面 corset 外搭廓形大衣', '网球风 polo + 百褶短裙',
+      '丝质和服浴衣改良，腰带松垮', '皮革迷你裙 + 过膝靴，克制性感', '泳装外搭 oversize 男友衬衫',
+      '深 V 丝绒 jumpsuit，腰线明确', '蕾丝 bodysuit + 高腰阔腿裤', '比基尼 + 长纱裙叠穿',
+      '运动拉链上衣半开，健康性感', '丝绸 scarf 当上衣，艺术化遮挡', '晚礼服披肩滑落肩线一瞬'
+    ],
+    glamourPose: [
+      'S 曲线站立，一手抚发', '回眸过肩，眼神带笑', '坐池边，双足轻点水面',
+      '躺沙发侧姿，肢体延伸', '伸展懒腰，腰线拉长', '倚墙，单膝微曲',
+      '水中半身，波纹贴肤', '楼梯上回头，透视修长', '风吹起裙摆瞬间定格',
+      '镜前整理肩带，抓拍感', '舞蹈拉伸，线条流畅', '低机位仰拍，腿线延伸',
+      '侧卧床畔，手肘撑头', '坐窗框，逆光轮廓', '半蹲系鞋带，动态自然',
+      '手扶栏杆俯身，背线拉长', '抱膝坐地，亲密但不低俗', '走路回头 mid-step',
+      '淋浴后裹毛巾，肩颈线条', '倚吧台，鸡尾酒在指间', '瑜伽 bridge，力量与柔软',
+      '坐在钢琴凳，侧光勾腿线', '沙滩行走，脚印与裙摆', '电梯镜前整理耳环'
+    ],
+    glamourMood: [
+      '健康性感，自信不媚俗', '私密但不越界，杂志内页感', '氛围暧昧但衣着完整',
+      '肌肤光泽自然，非塑料感', '呼吸感姿态，有温度', '克制的高级撩感',
+      '力量与柔软并存', '雨后清透，欲说还休',
+      '成熟魅力，不讨好镜头', '少年感与女人味并存', '运动后的健康 glow',
+      '深夜私密，但画面干净', '度假松弛，阳光与盐', '都市夜归，疲惫中的美',
+      '艺术摄影感，非电商摆拍', '情绪在眼神，不在裸露', '高级 lingerie 广告调性',
+      '法式 effortless chic', '意式热情但画面克制', '东亚清冷感性感'
+    ],
+    glamourExpression: [
+      '眼神慵懒半阖，视线落向镜头', '嘴唇微张欲言又止', '轻咬下唇，克制又撩',
+      '直视镜头，自信带笑', '侧脸垂眸，神秘距离感', '刚被逗笑，眼角微弯',
+      '雨后含泪但不悲伤', '迷离但不失焦，情绪在眼底', '挑眉坏笑，攻击性魅力',
+      '害羞躲闪一瞬又回看', '呼吸略急，脸颊微红', '冷静御姐，嘴角一丝弧度',
+      '微醺眼神，笑意藏不住', '若有所思，唇角轻扬', '被风迷眼，自然眨眼',
+      '舌尖轻触上唇，极克制', '闭一只眼 wink，俏皮', '泪光盈盈，故事感',
+      '下颌微抬，傲慢又邀请', '鼻尖轻皱，可爱性感', '眼神向下再抬起，慢节奏撩',
+      '刚听见秘密，惊讶转媚', '咬吸管，日常亲密感', '睡眼惺忪，晨间真实'
+    ],
+    glamourGaze: [
+      '眼神半阖，视线从睫毛缝隙筛出', '瞳孔微缩，像被强光刺到的一瞬', '眼尾上挑，三白眼式冷漠审视',
+      '垂眸再抬眼，慢半拍的对视', '视线落在锁骨而非镜头，刻意回避', '直视镜头的长凝视，不闪躲',
+      '侧目斜睨，只露出半只眼的锋利', '失焦望向窗外，像在等不会来的人', '泪膜将落未落，眼眶微红',
+      '眯眼笑，眼纹也是魅力', '半阖眼像刚睡醒，睫毛投下阴影', '眼神向下，睫毛在颊上画弧',
+      '瞳孔里映出窗光，有故事', '一眼扫过又收回，像评估又像挑逗', '视线追着指尖移动，自我沉浸',
+      '眼角一点红，像哭过又像笑过', '眼神放空，身体在场灵魂游离', '聚焦在唇，暗示大于直白',
+      '眉心微蹙，克制的不悦', '眼波流转，像水面上晃的灯', '瞳孔高光清晰，眼神极亮',
+      '半遮面后的只眼，神秘感加倍', '视线越过镜头看更远处，疏离', '眨眼慢动作，像电影 pause'
+    ],
+    glamourEmotion: [
+      '嫌弃地侧目，嘴角下撇但仍有美感', '明显厌恶，像闻到不喜欢的味道却维持仪态',
+      '傲娇别过头，耳根微红嘴硬说不要', '冷淡拒绝，眼神像在说「别靠近」',
+      '轻蔑一瞥，下巴微抬，贵气里的距离', '赌气嘟嘴，眼神却在偷看对方反应',
+      '欲拒还迎，推开的手停在半空', '被冒犯后的不悦，眉梢微压但不失态',
+      '「才不是为你」的别扭温柔', '嘴上说烦，眼神却软下来', '嫌弃里藏着熟稔，像老夫老妻的拌嘴',
+      '厌恶是假的，嘴角压不住弧度', '傲娇到极点，抱臂转身留一个侧脸', '冷淡外壳，眼底一点热',
+      '轻蔑里带玩味，像猫看老鼠', '被戳中弱点后的羞恼', '故意疏远，等对方先低头',
+      '嫌弃你的品味，却愿意多停一秒', '厌恶接近，身体后退眼神却钉住', '口是心非，说走开却不挪步',
+      '被惹恼的微怒，颊侧一点红', '高傲的拒绝，像女王抬手示意停', '别扭的关心，眼神比嘴诚实',
+      '厌倦一切，却对镜头例外', '「别误会」的慌张一瞬', '克制到极点的渴望，全在眼神'
+    ],
+    glamourPoseArt: [
+      '单膝点地仰头，颈线与锁骨完整呈现', '双手抱胸防御，肩线仍打开', '背对镜头回眸，肩带滑落一寸',
+      '坐高脚凳，一腿搭另一膝，鞋跟轻晃', '倚门框，一手撑楣，腰线S形', '躺侧榻，手肘撑头，腿线延伸',
+      '半跪沙发，上身前倾，发丝垂落', '站镜前，一手拉肩带，抓拍瞬间', '坐台阶，抱膝但露出脚踝',
+      '撑洗手台，镜中双重视线', '舞蹈 fourth position，脚背绷直', '靠墙滑坐，像刚卸下防备',
+      '手扶后颈，腋下线条与腰线', '单手提裙角，另一手触唇', '俯身捡物，背线拉长（衣着完整）',
+      '坐床沿，双足点地，背微弓', '跨坐椅背，反常规构图', '手遮半脸，只露一只眼',
+      '伸展懒腰，指间到脚尖一条线', '侧躺，一手枕头，另一手搭腰', '跪坐和式，背直而放松',
+      '手插袋，肩耸一点，痞气魅力', '拉窗帘，逆光剪影勾轮廓', '手抵下颌，思考者的性感',
+      '转身 mid-step，裙摆/衣摆甩出弧度', '双手背后，胸廓自然挺起', '单指勾领，动作极小却撩'
+    ],
+    glamourAtmosphere: [
+      '深夜酒店套房，窗帘半开城市光', '泳池畔夏夜，水汽与蝉鸣', '爵士酒吧暗角，萨克斯 bokeh',
+      '浴室蒸汽边缘，柔焦光晕', '海边日落，风扬起发丝', '霓虹映进半暗房间',
+      '雨夜窗玻璃反光，室内暖光', '摄影棚单灯，其余沉入暗部', '丝绒沙发与暗调墙色',
+      '清晨床畔自然光，空气安静', '红毯后台更衣间，镜面反射',
+      '私人游艇甲板，海平线余晖', 'loft 落地窗，城市灯火 bokeh', '老式电梯间，金属反光',
+      '温泉雾气，木栏与石阶', '衣帽间试衣，暖灯与镜子', '录音棚隔音墙，麦克风侧光',
+      '屋顶泳池，星空与城市', '雨后天台，地面镜面', '蜡烛与暗红墙，电影感',
+      '百叶窗条纹光，午后私密', '雪后窗景，室内暖炉', '画廊空白墙，极简高级',
+      '复古浴室瓷砖，水渍与蒸汽', '阳台晾衣绳，生活感性感'
+    ],
+    glamourLight: [
+      '轮廓光勾出肩线与腰窝', '黄金时刻侧逆光，肤光通透', '泳池水面反射光斑',
+      '百叶窗条纹光打在锁骨', '柔光箱 + 边缘 kicker', '烛光暖调但画面清晰',
+      '霓虹映肤但色调高级', '浴室蒸汽柔焦边缘',
+      '单灯顶光 + 反光板补眼窝', '窗光漫射，阴影柔和', 'rim light 分离发丝',
+      '水下 caustics 在肌肤游走', '红色 gel 片仅边缘，面部中性', '月光 + 暖色 practical 灯',
+      '环形灯 catchlight 在瞳孔', '烟雾中光束，体积感', '镜面地板反射，腿线加倍',
+      '冷色环境 + 暖色肤光补', '频闪冻结水滴，皮肤仍细腻', '柔光 + 硬光对比，杂志感'
+    ],
+    glamourProp: [
+      '手持香槟杯，气泡反光', '丝质床单半遮，材质对比', '复古电话听筒贴耳',
+      '花束挡半脸，色彩点睛', '墨镜推至头顶', '珍珠项链垂落锁骨',
+      '湿发滴水，极简背景', '羽毛扇半遮，复古', '书页散落，知性性感',
+      '吉他斜抱，摇滚与柔', '草帽与比基尼，度假', '长手套至肘，礼仪与撩',
+      '丝带缠腕，动态', '面具半戴，神秘', '阳伞投下 shadow pattern',
+      '猫在膝上，日常亲密', '旧照片散落，故事感', '香水瓶与镜面'
+    ],
+    glamourDetail: [
+      '锁骨的 shadow 恰好一道', '发丝扫过唇角', '肩带滑落一寸定格',
+      '水珠沿颈线滑落', '戒指反光在暗部', '耳坠轻晃 motion blur',
+      '睫毛投影在颊上', '手套半脱，指节修长', '纹身/痣作为点睛',
+      '项链坠子在锁骨窝', '背后蝴蝶骨线条', '腰侧 fabric 被风贴肤'
+    ],
+    glamourVibe: [
+      '像 Celine 广告而非地摊写真', 'Vogue 内页而非成人向', '电影剧照暧昧而非露骨',
+      '艺术摄影画册质感', '高级 lingerie campaign', '度假 lookbook 自然',
+      'after-party 松弛感', '清晨 intimacy 但公开安全', '舞台后台 documentary 感'
+    ],
+    doujinArchetype: [
+      '双马尾魔法少女，星核法杖', '银发剑士，和风外套', '机甲驾驶员，休息舱便装',
+      '兽耳冒险者，地图与背包', '校园风不良少年，制服敞开', '和风巫女，御币与铃',
+      '黑客少女，透明键盘与耳机', '精灵弓手，箭搭弦上', '吸血鬼贵族，披风与红酒',
+      '偶像 backstage，麦克风与彩带', '忍者，面罩半遮', '炼金术士，药瓶与火花',
+      '龙角少女，鳞片微光', '女仆咖啡厅，托盘与咖啡', '阴阳师，式神火焰',
+      '赛车手，头盔抱怀', '体操少女，彩带飞旋', '侦探，放大镜与风衣',
+      '转校生，书包与樱花', '不良组长，创可贴与指节', '魔法学院新生，法袍与魔导书',
+      '兽化半妖，尾巴与耳', '乐队贝斯手，挑染发', '游戏 NPC 风旅人，斗篷与灯',
+      '运动社王牌，护腕与汗巾', '天文社少女，望远镜与星图', '和风舞姬，扇与足袋',
+      '科幻机娘，维护中半甲', '海盗副官，眼罩与弯刀', '图书委员，眼镜与书堆'
+    ],
+    doujinScene: [
+      '樱花飘落的学校天台', '同人展签售台背景板', '游戏 loading 界面式构图',
+      '雨夜霓虹 alley，角色 solo', '神社台阶，鸟居逆光', '卧室海报墙与手办柜',
+      '战斗后废墟，尘光丁达尔', '咖啡厅靠窗，蒸汽升腾', '演唱会舞台边缘侧光',
+      '温泉旅馆走廊，木质感', '星空 camp，篝火暖光', '图书馆高窗，尘埃光束',
+      '电车窗外，城市流动', '游戏 title 画面式大标题留白', '祭典捞金鱼，灯笼暖光',
+      '训练场木剑与汗', '异世界传送门边缘', '机甲 cockpit 内仪表光'
+    ],
+    doujinMood: [
+      '角色单人 poster 构图', '二人剪影互动但不写具体 CP 名', '战斗前一瞬蓄力',
+      '日常 slice-of-life 松弛', '节日祭典，灯笼与浴衣', '离别车站，风吹围巾',
+      '胜利 pose，背景简化', '雨中共伞，距离感', '深夜 convenience store 荧光',
+      'SSR 卡面级半身构图', '动画 key visual 单人', '轻小说封面，标题留白区',
+      '战斗后喘息，战损但帅气', '生日 surprise，彩带飞', '毕业册回眸'
+    ],
+    doujinAction: [
+      '施法，魔法阵铺地', '居合拔刀，刀光划雨', '跳跃空中，衣摆放射',
+      '回眸，花瓣飞散', '双眼发光，能量溢出', '演奏吉他，音波可视化',
+      '奔跑回头，速度线背景', '展开 wings 遮天', '召唤 lightning 劈下',
+      '吃拉面， steam 升腾', '舞蹈 spin，丝带轨迹', '格斗蓄力，肌肉绷紧',
+      '整理领带，日常帅气', '举奖杯，背景简化', '喂猫，温柔一瞬',
+      '打游戏手柄，屏幕反光', '撑伞回头，雨丝高光', '吹泡泡，童心与梦'
+    ],
+    ocIdentity: [
+      '失忆的星舰导航员，左颊有旧伤疤', '被放逐的王国末裔，瞳孔异色',
+      '地下城地图绘制者，手套沾墨', '时间裂缝修补匠，怀表永远停在 3:07',
+      '用音乐封印怪物的吟游诗人', '只在雨天出现的邮差，伞骨是旧剑',
+      '收集他人梦境的古董商', '替神执笔的抄写员，指尖有金粉',
+      '深海潜水族混血，耳后有鳞光', '沙漠行宫的傀儡师，线轴别在腰后',
+      '会读唇语的哑女剑士', '用火焰画画的街头艺术家', '记忆只能保留七天的侦探',
+      '背负家族诅咒的调香师', '最后一名龙语者，颈间有细鳞', '机械心脏的赏金猎人',
+      '在废墟开花店的战争孤儿', '能听见城市心跳的地铁维修工', '用冰晶做首饰的北境工匠',
+      '失去名字的神明碎片容器'
+    ],
+    ocStoryBeat: [
+      '刚做出改变一生的决定，眼神坚定', '告别昨日，站在十字路口',
+      '第一次掌握力量的瞬间，光在掌心', '失去重要之人后的第一个黎明',
+      '在无人看见的角落偷偷练习', '收到一封改变命运的信',
+      '雨停后第一次抬头看天', '把旧物埋入土中，转身离开',
+      '与过去的自己和解，微微笑', '踏上无人走过的长路，背影孤独但明亮',
+      '在废墟里发现一朵活花，愣住', '决定不再逃避，系紧鞋带',
+      '午夜许愿，流星划过眼角', '把徽章收进抽屉，选择新生活',
+      '第一次为他人而战，握紧武器'
+    ],
+    ocCostume: [
+      '改良和风长外套，不对称剪裁 + 金属扣', '机能风斗篷叠传统纹样内衬',
+      '维多利亚 corset 外搭工装背心', '和服 sleeve 改短 + 战术绑腿',
+      '丝绸 shirt 塞进高腰阔腿裤，腰带是旧家族徽记', '皮革 harness 仅作结构线，不色情化',
+      '双层 skirt，外层透明纱内层几何印花', '不对称 shoulder armor，露出非战斗侧',
+      '长 coat 内藏多口袋，每件有故事', '改良 nun habit，现代 fabric 与旧十字',
+      '赛博 kimono，光纤 embroidery', '流浪者 layered robes，每件不同年代',
+      '学生制服改短 + 自定义 embroidery', '潜水服改日常，拉链与反光条当装饰',
+      '舞者的 wrap 装束 + 护腕，可战斗可表演', '工匠 apron 叠 elegant coat',
+      '披风内衬星空图案，外素内华', '机甲驾驶员便服，领口仍有编号'
+    ],
+    ocPalette: [
+      '灰蓝 + 枯玫瑰 + 一点琥珀，低饱和故事感', '墨绿 + 铁锈红 + 米白，末世温柔',
+      '深紫 + 冷灰 + 金线，神秘贵族', '橄榄 + 陶土 + 奶油，大地系主角',
+      '海军蓝 + 铜绿 + 珍珠白，航海奇幻', '炭黑 + 靛青 + 一点珊瑚，夜行者',
+      '雾粉 + 灰绿 + 深棕，不流俗少女', '银灰 + 酒红 + 黑，冷峻主角',
+      '藏青 + 芥末黄 + 灰，复古 adventure', '冰蓝 + 暖褐 + 白，北境旅人',
+      '紫褐 + 古铜 + 深绿，炼金/神秘', '单一主色 + 两个点缀，拒绝彩虹'
+    ],
+    ocDistinctive: [
+      '不对称刘海遮住一只眼', '颈侧有发光 rune 纹身', '永远戴一只手套',
+      '武器是改过的日常物件（伞/手杖/剪刀）', '发尾挑染与瞳色呼应',
+      '耳坠是家族遗物，形状独特', '披风内衬有 hand-drawn map',
+      '戒指刻满 tiny symbols', '鞋跟有 secret compartment',
+      '围巾是重要之人留下的，旧但干净', '护目镜推在额头，镜片有 crack',
+      '随身 notebook 边有焦痕', '武器鞘上有 notches 计数',
+      '指甲有 subtle color gradient', '沉默但眼神极亮'
+    ],
+    ocPresence: [
+      '主角光环：视线自然落在身上', '静立也有叙事，像电影 pause 帧',
+      '不是最强但最坚定', '温柔里有刀，笑里藏故事',
+      '孤独但不 miserable，有自洽', '少年/少女气与沧桑并存',
+      '站在人群边缘，却像画面中心', '动作不大，情绪满溢',
+      '让人想知道「接下来发生什么」', 'hero shot 级构图，背景服务人物',
+      '像动画第一话 opening 的主角 introduction', 'design 一眼记住，非模板脸'
+    ],
+    ocAnchor: [
+      '人物锚点：左颊旧疤与右耳缺角', '人物锚点：异色瞳左金右灰，永不摘下',
+      '人物锚点：永远只穿一只长靴', '人物锚点：发尾挑染与武器同色',
+      '人物锚点：颈侧 rune 随情绪微光', '人物锚点：手套下露出机械指节',
+      '人物锚点：围巾是某人遗物，旧但干净', '人物锚点：随身怀表永远停在同一刻',
+      '人物锚点：武器鞘上刻满 tiny notches', '人物锚点：指甲渐变与瞳色呼应',
+      '人物锚点：护目镜镜片有 crack 不更换', '人物锚点：戒指内侧刻满 tiny symbols'
+    ],
+    ocHumanCore: [
+      '之所以为人：会害怕但仍前进', '之所以为人：笑里藏着未说出口的告别',
+      '之所以为人：对陌生人仍留一份温柔', '之所以为人：失败后会系紧鞋带再试',
+      '之所以为人：沉默但眼神极亮', '之所以为人：背负却仍能开玩笑',
+      '之所以为人：记得每一个帮过自己的人', '之所以为人：选择保护弱者而非最强',
+      '之所以为人：有缺点但自洽', '之所以为人：像真实会呼吸的人而非模板'
+    ],
+    ocWeapon: [
+      '武器：改过的日常物件（旧伞骨作剑）', '武器：双手巨镰，柄上缠布条',
+      '武器：符咒纸刃，战斗时纸边燃火', '武器：可折叠长弓，箭羽是羽毛笔',
+      '武器：链刃与怀表联动', '武器：无刃，以掌风与步法战斗',
+      '武器：巨型扳手改战锤', '武器：琴弓兼弦刃，演奏即攻击',
+      '武器：冰晶短刃，融化后重凝', '武器：傀儡线轴，十米外控敌'
+    ],
+    ocCombat: [
+      '战斗方式：以静制动，一招定胜负', '战斗方式：高速连击后突然停步',
+      '战斗方式：用环境物件借力', '战斗方式：以音乐节奏驱动招式',
+      '战斗方式：防守反击，破绽极小', '战斗方式：牺牲防御换爆发',
+      '战斗方式：与使魔/傀儡协同', '战斗方式：以幻术误导再近身'
+    ],
+    ocFormat: [
+      '三视图设定：正面 / 侧面 / 背面同页，标注身高与配色',
+      '人物设定图：全身 + 表情差分 + 武器特写',
+      '故事感立绘：背景含关键道具与场景线索',
+      '角色介绍卡：左侧立绘右侧文字设定区留白',
+      'turnaround sheet，线稿清晰，配色标注',
+      'key visual 单人 + 小字设定注释区'
+    ],
+    ocMemorable: [
+      '难忘点：第一眼记住发型轮廓', '难忘点：配色不超过三色却极识别',
+      '难忘点：一个怪癖（只喝某种茶）', '难忘点：与武器/道具的绑定关系',
+      '难忘点：反差（外表冷 inner 热）', '难忘点：非流俗脸型与比例',
+      '难忘点：专属 symbol 重复出现', '难忘点：像某部未问世动画的主角'
+    ],
+    ocLight: [
+      '侧逆光勾轮廓，面部 soft fill', '顶光戏剧化但肤色仍自然',
+      '窗光 + dust motes，故事开场感', '冷环境 + 暖色 rim on 主角',
+      '单一 spotlight，其余沉入暗', 'golden hour，长 shadow 有叙事',
+      'neon 仅作 edge light，面部中性', '烛光 + deep shadow，油画感',
+      'overcast soft，肤质与 fabric 清晰', 'magic glow 来自道具而非 cheap bloom'
     ],
     productItem: [
       '限量版香水瓶', '霓虹渐变运动鞋', '机械键盘 RGB', '黑金口红微距',
@@ -189,93 +1061,547 @@
     ],
     productStyle: [
       'Apple 级极简高对比', '奢侈品广告', '电商爆款主图 70% 占比',
-      'Magazine hero shot', 'Cyberpunk product ad', '自然光 lifestyle 但产品 sharp'
+      'Magazine hero shot', 'Cyberpunk product ad', '自然光 lifestyle 但产品 sharp',
+      '暗调 premium，单灯侧光', '悬浮 hero + 镜面底', 'gradient backdrop 无缝',
+      'macro 微距质感，细节锐利', 'motion splash 冻结瞬间', 'minimal 白底电商标准'
     ]
   };
 
-  function buildCharacter() {
-    const s = pickFromPool(clonePool(WORDS.characterSubject));
-    const f = pick(WORDS.characterFace);
-    const o = pick(WORDS.characterOutfit);
-    const p = pick(WORDS.characterPose);
-    const l = pick(WORDS.characterLight);
-    const st = pick(WORDS.characterStyle);
-    return `${s}，${f}，${o}，${p}，${l}，${st}，${pick(PUNCH)}，${pick(TWIST)}，${pick(QUALITY)}`;
+  function buildCharacter(ctx) {
+    const family = ctx?.family || 'neutral';
+    if (family === 'anime') {
+      const recipe = pick([1, 2, 3, 4]);
+      let parts;
+      if (recipe === 1) {
+        parts = [
+          pick(WORDS.animeRole),
+          pick(WORDS.characterFace),
+          pick(WORDS.characterOutfit),
+          pick(WORDS.animeAction),
+          pick(WORDS.animeLight),
+          pickMaybe(WORDS.animeFx, 0.55),
+          pick(WORDS.animeStyle),
+          pickMaybe(TWIST, 0.4),
+          ctx?.tail?.()
+        ];
+      } else if (recipe === 2) {
+        parts = [
+          pick(WORDS.characterSubjectAnime),
+          pick(WORDS.animeAction),
+          pick(WORDS.animeScene),
+          pick(WORDS.animeMood),
+          pick(WORDS.animePalette),
+          pick(WORDS.animeLight),
+          pickMaybe(WORDS.animeFx, 0.45),
+          ctx?.tail?.()
+        ];
+      } else if (recipe === 3) {
+        parts = [
+          pick(WORDS.animeRole),
+          pick(WORDS.animeMood),
+          pick(WORDS.animeScene),
+          pick(WORDS.animeStyle),
+          pick(WORDS.animeLight),
+          pick(WORDS.animePalette),
+          pickMaybe(WORDS.animeFx, 0.5),
+          ctx?.tail?.()
+        ];
+      } else {
+        parts = [
+          pick(WORDS.doujinArchetype),
+          pick(WORDS.animeAction),
+          pick(WORDS.animeScene),
+          pick(WORDS.animeStyle),
+          pick(WORDS.animeLight),
+          pickMaybe(TWIST, 0.35),
+          ctx?.tail?.()
+        ];
+      }
+      return combineParts(parts, { keepFirst: true });
+    }
+    const s = pick(subjectPoolForCharacter(family));
+    const parts = [
+      s,
+      pick(WORDS.characterFace),
+      pick(WORDS.characterOutfit),
+      pick(WORDS.characterPose),
+      lightPoolForCharacter(family) && pick(lightPoolForCharacter(family)),
+      pickMaybe(TWIST, 0.5),
+      ctx?.tail?.()
+    ];
+    return combineParts(parts, { keepFirst: true });
   }
 
-  function buildScene() {
-    return [
+  function buildScene(ctx) {
+    return combineParts([
       pick(WORDS.scenePlace),
       pick(WORDS.sceneDrama),
       pick(WORDS.sceneColor),
       pick(WORDS.sceneComp),
-      pick(WORDS.sceneStyle),
-      pick(PUNCH),
-      pick(TWIST),
-      pick(QUALITY)
-    ].join('，');
+      pickMaybe(TWIST, 0.55),
+      ctx?.tail?.()
+    ]);
   }
 
-  function buildProduct() {
-    return [
+  function buildProduct(ctx) {
+    return combineParts([
       `${pick(WORDS.productItem)} 商业静物`,
       pick(WORDS.productDrama),
       pick(WORDS.productStyle),
-      pick(PUNCH),
-      pick(QUALITY)
-    ].join('，');
+      ctx?.tail?.()
+    ], { keepFirst: true });
   }
 
-  function buildAnime() {
-    return [
-      pick(WORDS.animeRole),
-      pick(WORDS.animeAction),
-      pick(WORDS.animePalette),
-      pick(WORDS.animeFx),
-      '背景层次丰富',
-      pick(WORDS.animeStyle),
-      pick(PUNCH),
-      pick(QUALITY)
-    ].join('，');
-  }
-
-  function buildViral() {
-    return [
+  function buildViral(ctx) {
+    const family = ctx?.family || 'neutral';
+    if (family === 'anime') {
+      return combineParts([
+        pick(WORDS.viralHook),
+        pick(WORDS.animeRole),
+        pick(WORDS.animeAction),
+        pick(WORDS.viralLook),
+        pick(WORDS.animePalette),
+        pick(WORDS.animeLight),
+        pickMaybe(WORDS.animeFx, 0.5),
+        pick(WORDS.animeStyle),
+        ctx?.tail?.()
+      ], { keepFirst: true });
+    }
+    return combineParts([
       pick(WORDS.viralHook),
       pick(WORDS.viralLook),
       pick(WORDS.sceneColor),
-      pick(WORDS.characterLight),
-      pick(WORDS.animeStyle),
-      pick(PUNCH),
-      pick(QUALITY)
-    ].join('，');
+      pick(lightPoolForCharacter(family)),
+      pickMaybe(WORDS.animeFx, family === 'anime' ? 0.35 : 0),
+      ctx?.tail?.()
+    ], { keepFirst: true });
   }
 
-  const TEMPLATES = {
+  function buildEpic(ctx) {
+    return combineParts([
+      pick(WORDS.epicScale),
+      pick(WORDS.epicArchitecture),
+      pick(WORDS.epicSubject),
+      pick(WORDS.epicTension),
+      pick(WORDS.sceneColor),
+      pick(WORDS.sceneComp),
+      ctx?.tail?.()
+    ]);
+  }
+
+  function buildImpact(ctx) {
+    const family = ctx?.family || 'neutral';
+    const recipe = pick([1, 2, 3, 4, 5]);
+    let parts;
+    if (recipe === 1) {
+      parts = [
+        pick(WORDS.impactHook),
+        pick(WORDS.impactComp),
+        pick(WORDS.impactPose),
+        pick(WORDS.impactScene),
+        pick(WORDS.impactStyle),
+        pick(WORDS.sceneColor),
+        pick(lightPoolForCharacter(family))
+      ];
+    } else if (recipe === 2) {
+      parts = [
+        pick(WORDS.impactScene),
+        pick(WORDS.impactComp),
+        pick(WORDS.characterSubject),
+        pick(WORDS.impactPose),
+        pick(WORDS.impactHook),
+        pick(WORDS.impactStyle),
+        ctx?.tail?.()
+      ];
+    } else if (recipe === 3) {
+      parts = [
+        pick(WORDS.impactStyle),
+        pick(WORDS.epicScale),
+        pick(WORDS.impactScene),
+        pick(WORDS.impactComp),
+        pick(WORDS.epicTension),
+        pick(WORDS.sceneColor),
+        ctx?.tail?.()
+      ];
+    } else if (recipe === 4) {
+      parts = [
+        pick(WORDS.impactHook),
+        pick(WORDS.guofengRole),
+        pick(WORDS.impactPose),
+        pick(WORDS.impactScene),
+        pick(WORDS.impactComp),
+        pick(WORDS.impactStyle),
+        ctx?.tail?.()
+      ];
+    } else {
+      parts = [
+        pick(WORDS.cyberSubject),
+        pick(WORDS.impactPose),
+        pick(WORDS.impactScene),
+        pick(WORDS.impactComp),
+        pick(WORDS.impactHook),
+        pick(WORDS.cyberFx),
+        ctx?.tail?.()
+      ];
+    }
+    return combineParts(parts, { keepFirst: recipe <= 2 });
+  }
+
+  function buildStylized(ctx) {
+    const family = ctx?.family || 'neutral';
+    const recipe = pick([1, 2, 3, 4]);
+    let parts;
+    if (recipe === 1) {
+      parts = [
+        pick(WORDS.stylizedMood),
+        pick(WORDS.stylizedSubject),
+        pick(WORDS.stylizedVisual),
+        pick(WORDS.stylizedPalette),
+        pick(WORDS.stylizedCraft),
+        pickMaybe(lightPoolForCharacter(family), 0.5),
+        ctx?.tail?.()
+      ];
+    } else if (recipe === 2) {
+      parts = [
+        pick(WORDS.stylizedCraft),
+        pick(WORDS.stylizedSubject),
+        pick(WORDS.stylizedVisual),
+        pick(WORDS.stylizedMood),
+        pick(WORDS.stylizedPalette),
+        pick(WORDS.impactComp),
+        ctx?.tail?.()
+      ];
+    } else if (recipe === 3) {
+      parts = [
+        pick(WORDS.stylizedVisual),
+        pick(WORDS.epicArchitecture),
+        pick(WORDS.stylizedMood),
+        pick(WORDS.stylizedPalette),
+        pick(WORDS.stylizedCraft),
+        '尺度夸张但细节精致',
+        ctx?.tail?.()
+      ];
+    } else {
+      parts = [
+        pick(WORDS.stylizedMood),
+        pick(WORDS.glamourSubjectAnime),
+        pick(WORDS.stylizedVisual),
+        pick(WORDS.stylizedPalette),
+        '衣着完整，猎奇气质但可公开发布',
+        pick(WORDS.stylizedCraft),
+        ctx?.tail?.()
+      ];
+    }
+    return combineParts(parts, { keepFirst: true });
+  }
+
+  function buildGuofeng(ctx) {
+    const family = ctx?.family || 'neutral';
+    return combineParts([
+      pick(WORDS.guofengRole),
+      pick(WORDS.characterOutfit),
+      pick(WORDS.guofengScene),
+      pick(WORDS.guofengMood),
+      pick(lightPoolForCharacter(family)),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildCyber(ctx) {
+    const family = ctx?.family || 'neutral';
+    return combineParts([
+      pick(WORDS.cyberSubject),
+      pick(WORDS.cyberScene),
+      pick(WORDS.cyberFx),
+      pick(WORDS.sceneColor),
+      pick(lightPoolForCharacter(family)),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildCover916(ctx) {
+    const family = ctx?.family || 'neutral';
+    return combineParts([
+      pick(WORDS.cover916Hook),
+      pick(WORDS.cover916Layout),
+      pick(WORDS.viralLook),
+      pick(WORDS.sceneColor),
+      pick(lightPoolForCharacter(family)),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildGlamour(ctx) {
+    const family = ctx?.family || 'neutral';
+    const subject = pick(glamourSubjectPool(family));
+    const outfit = pick(WORDS.glamourOutfit);
+    const pose = pick([...WORDS.glamourPose, ...WORDS.glamourPoseArt]);
+    const gaze = pick(WORDS.glamourGaze);
+    const emotion = pick(WORDS.glamourEmotion);
+    const expression = pick(WORDS.glamourExpression);
+    const atmosphere = pick(WORDS.glamourAtmosphere);
+    const mood = pick(WORDS.glamourMood);
+    const light = family === 'photo'
+      ? pick(WORDS.glamourLight)
+      : pick(lightPoolForCharacter(family));
+    const prop = pickMaybe(WORDS.glamourProp, 0.65);
+    const detail = pickMaybe(WORDS.glamourDetail, 0.55);
+    const vibe = pickMaybe(WORDS.glamourVibe, 0.45);
+    const safe = '衣着完整，可公开发布';
+    const recipe = pick([1, 2, 3, 4, 5]);
+    let parts;
+    if (recipe === 1) {
+      parts = [subject, outfit, pose, gaze, emotion, expression, atmosphere, mood, light, prop, detail, vibe, safe, ctx?.tail?.()];
+    } else if (recipe === 2) {
+      parts = [atmosphere, subject, emotion, gaze, expression, outfit, mood, light, pose, detail, prop, vibe, safe, ctx?.tail?.()];
+    } else if (recipe === 3) {
+      parts = [subject, gaze, emotion, detail, outfit, atmosphere, pose, expression, mood, light, vibe, safe, ctx?.tail?.()];
+    } else if (recipe === 4) {
+      parts = [mood, subject, atmosphere, emotion, gaze, light, outfit, pose, expression, prop, detail, safe, ctx?.tail?.()];
+    } else {
+      parts = [emotion, gaze, subject, pose, expression, outfit, atmosphere, mood, light, detail, vibe, safe, ctx?.tail?.()];
+    }
+    return combineParts(parts, { keepFirst: recipe !== 4 });
+  }
+
+  function buildDoujin(ctx) {
+    const family = ctx?.family || 'anime';
+    const effectiveFamily = family === 'neutral' || family === 'photo' ? 'anime' : family;
+    const tailFn = () => premiumTail(effectiveFamily === 'photo' ? 'anime' : effectiveFamily);
+    const recipe = pick([1, 2, 3]);
+    let parts;
+    if (recipe === 1) {
+      parts = [
+        pick(WORDS.doujinArchetype),
+        pick(WORDS.doujinAction),
+        pick(WORDS.doujinScene),
+        pick(WORDS.doujinMood),
+        pick(WORDS.animePalette),
+        pickMaybe(WORDS.animeFx, 0.7),
+        pick(WORDS.animeStyle)
+      ];
+    } else if (recipe === 2) {
+      parts = [
+        pick(WORDS.animeRole),
+        pick(WORDS.animeAction),
+        pick(WORDS.animeScene),
+        pick(WORDS.animeMood),
+        pick(WORDS.animeLight),
+        pick(WORDS.animeStyle),
+        pickMaybe(WORDS.animeFx, 0.55)
+      ];
+    } else {
+      parts = [
+        pick(WORDS.doujinScene),
+        pick(WORDS.animeRole),
+        pick(WORDS.doujinAction),
+        pick(WORDS.animePalette),
+        pick(WORDS.animeStyle),
+        pick(WORDS.animeLight),
+        pickMaybe(WORDS.animeFx, 0.6)
+      ];
+    }
+    return combineParts([
+      ...parts,
+      '同人向随机动漫角色插画，原创设定，不出现具体 IP 角色名或标志造型',
+      tailFn()
+    ], { keepFirst: true });
+  }
+
+  function buildAnimeIllust(ctx) {
+    const recipe = pick([1, 2, 3, 4, 5]);
+    let parts;
+    if (recipe === 1) {
+      parts = [
+        pick(WORDS.animeRole),
+        pick(WORDS.animeAction),
+        pick(WORDS.animeScene),
+        pick(WORDS.animeMood),
+        pick(WORDS.animeStyle),
+        pick(WORDS.animeLight),
+        pickMaybe(WORDS.animeFx, 0.6)
+      ];
+    } else if (recipe === 2) {
+      parts = [
+        pick(WORDS.animeScene),
+        pick(WORDS.animeRole),
+        pick(WORDS.animeAction),
+        pick(WORDS.animePalette),
+        pick(WORDS.animeStyle),
+        pick(WORDS.animeLight),
+        pickMaybe(TWIST, 0.4)
+      ];
+    } else if (recipe === 3) {
+      parts = [
+        pick(WORDS.doujinArchetype),
+        pick(WORDS.animeAction),
+        pick(WORDS.animeMood),
+        pick(WORDS.animeStyle),
+        pick(WORDS.animeLight),
+        pick(WORDS.animePalette),
+        pickMaybe(WORDS.animeFx, 0.55)
+      ];
+    } else if (recipe === 4) {
+      parts = [
+        pick(WORDS.animeRole),
+        pick(WORDS.characterFace),
+        pick(WORDS.characterOutfit),
+        pick(WORDS.animeAction),
+        pick(WORDS.animeStyle),
+        pick(WORDS.animeLight),
+        pick(WORDS.animeMood)
+      ];
+    } else {
+      parts = [
+        pick(WORDS.animeMood),
+        pick(WORDS.animeRole),
+        pick(WORDS.animeScene),
+        pick(WORDS.animeAction),
+        pick(WORDS.animeStyle),
+        pick(WORDS.animePalette),
+        pick(WORDS.animeLight),
+        pickMaybe(WORDS.animeFx, 0.5)
+      ];
+    }
+    return combineParts([...parts, ctx?.tail?.()], { keepFirst: true });
+  }
+
+  function buildOriginalCharacter(ctx) {
+    const family = ctx?.family || 'neutral';
+    const format = pick(WORDS.ocFormat);
+    const recipe = pick([1, 2, 3]);
+    let parts;
+    if (recipe === 1) {
+      parts = [
+        format,
+        pick(WORDS.ocIdentity),
+        pick(WORDS.ocAnchor),
+        pick(WORDS.ocHumanCore),
+        pick(WORDS.ocDistinctive),
+        pick(WORDS.ocWeapon),
+        pick(WORDS.ocCombat),
+        pick(WORDS.ocCostume),
+        pick(WORDS.ocPalette),
+        pick(WORDS.ocStoryBeat),
+        pick(WORDS.ocMemorable),
+        pick(WORDS.ocPresence),
+        pick(WORDS.ocLight),
+        pickMaybe(lightPoolForCharacter(family), 0.35),
+        '全原创主角级角色设计，非任何现有 IP，非模板脸，强调人与设定',
+        ctx?.tail?.()
+      ];
+    } else if (recipe === 2) {
+      parts = [
+        pick(WORDS.ocHumanCore),
+        pick(WORDS.ocIdentity),
+        pick(WORDS.ocStoryBeat),
+        pick(WORDS.ocAnchor),
+        pick(WORDS.ocWeapon),
+        pick(WORDS.ocCostume),
+        pick(WORDS.ocDistinctive),
+        pick(WORDS.ocMemorable),
+        format,
+        pick(WORDS.ocPalette),
+        pick(WORDS.ocPresence),
+        pick(WORDS.ocLight),
+        '主角级原创人设，自带故事感，与众不同，可公开发布',
+        ctx?.tail?.()
+      ];
+    } else {
+      parts = [
+        format,
+        pick(WORDS.ocMemorable),
+        pick(WORDS.ocIdentity),
+        pick(WORDS.ocCombat),
+        pick(WORDS.ocWeapon),
+        pick(WORDS.ocCostume),
+        pick(WORDS.ocAnchor),
+        pick(WORDS.ocHumanCore),
+        pick(WORDS.ocStoryBeat),
+        pick(WORDS.ocDistinctive),
+        pick(WORDS.ocPresence),
+        pick(WORDS.ocPalette),
+        pick(WORDS.ocLight),
+        '原创主角：人物锚点 + 战斗方式 + 穿着 + 长相一体设计',
+        ctx?.tail?.()
+      ];
+    }
+    return combineParts(parts, { keepFirst: true });
+  }
+
+  const CONTENT_TEMPLATES = {
     character: { label: '人物', hint: '人像 / 半身 / 特写', build: buildCharacter },
     scene: { label: '场景', hint: '环境 / 氛围 / 建筑', build: buildScene },
     product: { label: '产品', hint: '静物 / 商业摄影', build: buildProduct },
-    anime: { label: '动漫', hint: '二次元 / 插画', build: buildAnime },
-    viral: { label: '爆款', hint: '小红书 / 抖音向', build: buildViral }
+    viral: { label: '爆款', hint: '小红书 / 抖音向', build: buildViral },
+    epic: { label: '史诗巨构', hint: '大透视 / 强张力 / 巨型建筑', build: buildEpic },
+    impact: { label: '高冲击力', hint: '构图 / 姿态 / 强氛围', build: buildImpact },
+    stylized: { label: '高风格化', hint: '怪诞 / 小众 / 高级猎奇', build: buildStylized },
+    guofeng: { label: '国风仙侠', hint: '汉服 / 水墨 / 仙侠', build: buildGuofeng },
+    cyber: { label: '赛博科幻', hint: '霓虹 / 机甲 / 未来城', build: buildCyber },
+    cover916: { label: '竖屏封面', hint: '9:16 短剧 / 封面级', build: buildCover916 },
+    glamour: { label: '官感美学', hint: '姿态眼神 · 情绪韵味 · 高级性感', build: buildGlamour },
+    doujin: { label: '同人动漫', hint: '随机动漫角色 · 同人插画', build: buildDoujin },
+    animeillust: { label: '动漫插画', hint: '角色 / 场景 / SSR 立绘', build: buildAnimeIllust },
+    originalchar: { label: '原创主角', hint: '人物锚点 · 三视图/设定图 · 故事感', build: buildOriginalCharacter }
   };
 
+  const ART_STYLES = {
+    none: { label: '不指定', hint: '仅内容词', tag: '' },
+    auto: { label: '智能匹配', hint: '每条随机画风', tag: '' },
+    photo: { label: '真人摄影', hint: '写真 / 胶片', tag: '【画风锁定】真人摄影写真，85mm 浅景深，自然肤质，非插画' },
+    photo_film: { label: '胶片人像', hint: '柯达 / 富士', tag: '【画风锁定】35mm 胶片人像，Portra 颗粒，真人摄影' },
+    anime: { label: '二次元插画', hint: 'Pixiv / 厚涂 / 立绘', tag: '【画风锁定】日系二次元插画，线稿上色，非摄影非真人' },
+    dongman: { label: '动漫画风', hint: 'TV动画 / 漫画 / 番剧截图感', tag: '【画风锁定】日本动漫画风，动画或漫画插画，赛璐璐或数字上色，非真人摄影' },
+    anime_90s: { label: '90s 赛璐璐', hint: '复古 TV 动画', tag: '【画风锁定】90 年代赛璐璐动画风，非真人' },
+    semireal: { label: '半写实二次元', hint: '韩漫 / 游戏立绘', tag: '【画风锁定】半写实二次元插画，游戏立绘，非摄影' },
+    manhwa: { label: '韩漫风', hint: '条漫 / Webtoon', tag: '【画风锁定】韩漫 webtoon 插画，非真人写真' },
+    cg_3d: { label: '3D CG', hint: '写实渲染', tag: '【画风锁定】3D CG 渲染，PBR 材质，非真人照片' },
+    cg_3d_toon: { label: '3D 卡通', hint: '皮克斯 / 盲盒', tag: '【画风锁定】3D 卡通渲染，非真人' },
+    unreal: { label: '虚幻引擎风', hint: '游戏过场', tag: '【画风锁定】Unreal Engine 5 过场 CG，非摄影' },
+    ghibli: { label: '吉卜力风', hint: '手绘动画背景', tag: '【画风锁定】吉卜力手绘动画美术，非真人' },
+    makoto: { label: '新海诚风', hint: '光与天空', tag: '【画风锁定】新海诚式动画背景与光晕，非摄影' },
+    arcane: { label: 'Arcane 风', hint: '手绘纹理 3D', tag: '【画风锁定】Arcane 风手绘纹理 3D，非真人' },
+    oil: { label: '油画', hint: '古典 / 印象', tag: '【画风锁定】古典油画插画，非摄影' },
+    watercolor: { label: '水彩', hint: '透明水色', tag: '【画风锁定】水彩插画，非摄影' },
+    ink: { label: '水墨', hint: '国画 / 墨韵', tag: '【画风锁定】中国水墨写意插画，非摄影' },
+    pixel: { label: '像素风', hint: '16-bit / 复古游戏', tag: '【画风锁定】像素 art 插画，非摄影' },
+    comic: { label: '美漫', hint: 'Marvel / DC 封面', tag: '【画风锁定】美式漫画插画，非摄影' },
+    flat: { label: '扁平插画', hint: '矢量 / 海报', tag: '【画风锁定】扁平矢量插画，非摄影' },
+    lineart: { label: '线稿厚涂', hint: '动画 key visual', tag: '【画风锁定】动画 key visual 线稿厚涂，非摄影' },
+    cyber_render: { label: '赛博渲染', hint: 'Blade Runner 美术', tag: '【画风锁定】赛博朋克概念 art，非真人写真' },
+    weta: { label: 'Weta 写实 CG', hint: '电影级角色', tag: '【画风锁定】Weta 级写实 CG，非真人照片' }
+  };
+
+  const AUTO_STYLE_POOL = [
+    'anime', 'dongman', 'semireal', 'lineart', 'cg_3d', 'makoto', 'ghibli', 'photo', 'photo_film',
+    'manhwa', 'arcane', 'oil', 'ink', 'pixel', 'cyber_render', 'cg_3d_toon', 'unreal', 'anime_90s'
+  ];
+
   function promptSignature(text) {
-    return String(text || '')
-      .replace(/\s+/g, '')
-      .slice(0, 48);
+    const s = String(text || '').replace(/\s+/g, ' ').trim();
+    if (s.length <= 120) return s;
+    const mid = Math.floor(s.length / 2);
+    return s.slice(0, 48) + '|' + s.slice(mid - 16, mid + 16) + '|' + s.slice(-48);
   }
 
-  function generateInspirationPrompts(type, count) {
-    const tpl = TEMPLATES[type] || TEMPLATES.viral;
+  function generateInspirationPrompts(contentType, count, styleId) {
+    const tpl = CONTENT_TEMPLATES[contentType] || CONTENT_TEMPLATES.viral;
     const n = Math.min(8, Math.max(1, Number(count) || 3));
     const prompts = [];
     const seen = new Set();
     let guard = 0;
-    const maxGuard = n * 40;
+    const maxGuard = n * 80;
     while (prompts.length < n && guard < maxGuard) {
       guard += 1;
-      let p = tpl.build();
-      if (guard > n * 8) p += `，${pick(TWIST)}`;
+      const ctx = buildCtx(styleId);
+      let p = applyArtStyle(tpl.build(ctx), ctx.styleId);
+      if (guard > n * 8) {
+        p += `；${pick(TWIST)}`;
+      }
+      if (guard > n * 20) {
+        p += `；变体 ${prompts.length + 1}-${Math.random().toString(36).slice(2, 6)}`;
+      }
       const sig = promptSignature(p);
       if (seen.has(sig)) continue;
       seen.add(sig);
@@ -285,14 +1611,34 @@
   }
 
   global.ImageGenPromptKit = {
-    TEMPLATES,
+    CONTENT_TEMPLATES,
+    ART_STYLES,
     generateInspirationPrompts,
-    listTypes() {
-      return Object.entries(TEMPLATES).map(([id, t]) => ({
+    listContentTypes() {
+      return Object.entries(CONTENT_TEMPLATES).map(([id, t]) => ({
         id,
         label: t.label,
         hint: t.hint
       }));
+    },
+    listArtStyles() {
+      return Object.entries(ART_STYLES).map(([id, t]) => ({
+        id,
+        label: t.label,
+        hint: t.hint
+      }));
+    },
+    getArtStyleTag(styleId) {
+      const resolved = resolveStyleId(styleId);
+      return ART_STYLES[resolved]?.tag || '';
+    },
+    /** @deprecated 使用 listContentTypes */
+    listTypes() {
+      return global.ImageGenPromptKit.listContentTypes();
+    },
+    /** 兼容旧名 */
+    get TEMPLATES() {
+      return CONTENT_TEMPLATES;
     }
   };
 })(typeof window !== 'undefined' ? window : globalThis);

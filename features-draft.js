@@ -7,6 +7,9 @@
   const LS_LIKES = 'promptrepo_community_likes';
   const LS_FAVS = 'promptrepo_community_favorites';
   const LS_IMAGEGEN = 'promptrepo_imagegen_draft';
+  const LS_SESSION_GEN_JOBS = 'promptrepo_session_gen_jobs';
+  const LS_PENDING_GEN_JOBS = 'promptrepo_pending_gen_jobs';
+  const LS_FAILED_GEN_JOBS = 'promptrepo_failed_gen_jobs';
   const PREFILL_KEY = 'promptrepo_imagegen_prefill';
 
   const GEN_RETENTION_MIN_MS = 1 * 24 * 60 * 60 * 1000;
@@ -66,8 +69,10 @@
   let imageGenLastResult = null;
   let imageGenActiveHistoryId = null;
   let imageGenFeedTab = 'warehouse';
-  /** @type {Array<{id:string,prompt:string,model:string,modelLabel:string,resolution:string,quality:string,size:string,cost:number,startedAt:number,jobId?:string}>} */
+  /** @type {Array<{id:string,prompt:string,model:string,modelLabel:string,resolution:string,quality:string,size:string,cost:number,startedAt:number,jobId?:string,batchIndex?:number,batchTotal?:number,batchId?:string}>} */
   let imageGenPendingJobs = [];
+  /** @type {Array<{id:string,prompt:string,errorMessage:string,failedAt:number,modelLabel?:string,batchIndex?:number,batchTotal?:number,batchId?:string}>} */
+  let imageGenFailedJobs = [];
   /** null = 本次进入生图页尚未手动改过；离开后再进会重置 */
   let imageGenAutoPublishSession = null;
   let imageGenAutoSaveSession = null;
@@ -200,7 +205,7 @@
         image: c.image ?? existing?.image ?? null,
         likes: existing?.likes || 0,
         createdAt: existing?.createdAt || c.createdAt || c.updatedAt || Date.now(),
-        updatedAt: Math.max(existing?.updatedAt || 0, c.updatedAt || 0, Date.now())
+        updatedAt: Math.max(existing?.updatedAt || 0, c.updatedAt || 0) || existing?.createdAt || c.createdAt || 0
       });
     }
     return out;
@@ -286,13 +291,34 @@
   async function pushPostToPublicFeed(post) {
     if (!post?.id || !window.PromptHubApi?.publishCommunityPost) return;
     if (!window.SupabaseSync?.isLoggedIn?.()) return;
+    if (!communityPromptPassesLocalModeration(post.prompt)) {
+      toast('内容不符合社区规范，无法发布');
+      return;
+    }
     try {
       const r = await window.PromptHubApi.publishCommunityPost(postForPublicApi(post));
-      if (!r?.ok) console.warn('[community] publish public failed', r);
-      else publicFeedAt = 0;
+      if (!r?.ok) {
+        const msg = r?.error?.message || r?.message || '';
+        if (r?.error?.code === 'CONTENT_REJECTED' || /CONTENT_REJECTED|社区规范/.test(msg)) {
+          toast(msg || '配图或提示词不符合社区规范');
+        } else {
+          console.warn('[community] publish public failed', r);
+        }
+      } else publicFeedAt = 0;
     } catch (e) {
       console.warn('[community] publish public error', e);
     }
+  }
+
+  function communityPromptPassesLocalModeration(prompt) {
+    const text = String(prompt || '').trim();
+    if (!text) return false;
+    const blocked = [
+      /儿童色情|幼女|萝莉控|恋童|未成年.{0,6}(裸|裸体)/i,
+      /强奸|轮奸|乱伦|兽交/i,
+      /制毒|贩毒|吸毒|冰毒|海洛因/i
+    ];
+    return !blocked.some((re) => re.test(text));
   }
 
   function ownPostAllowedInFeed(post) {
@@ -575,7 +601,59 @@
   }
 
   function saveJson(key, val) {
-    localStorage.setItem(key, JSON.stringify(val));
+    try {
+      localStorage.setItem(key, JSON.stringify(val));
+      return true;
+    } catch (e) {
+      const quota = e && (e.name === 'QuotaExceededError' || /quota|exceeded/i.test(String(e.message || '')));
+      if (quota && val && typeof val === 'object') {
+        try {
+          const slim = { ...val };
+          delete slim.refImages;
+          delete slim.refImage;
+          if (typeof slim.prompt === 'string' && slim.prompt.length > 4000) {
+            slim.prompt = slim.prompt.slice(0, 4000);
+          }
+          localStorage.setItem(key, JSON.stringify(slim));
+          return true;
+        } catch (e2) {
+          /* fall through */
+        }
+      }
+      console.warn('[storage] saveJson failed', key, e);
+      return false;
+    }
+  }
+
+  /** 生图草稿：不把 data URL 大参考图写入 localStorage，避免 QuotaExceeded 阻断提交 */
+  function compactRefsForDraft(refs) {
+    return (refs || [])
+      .filter((u) => typeof u === 'string' && u && !/^data:/i.test(u))
+      .map((u) => u.slice(0, 800))
+      .slice(0, 4);
+  }
+
+  function saveImageGenDraft(meta) {
+    const draft = {
+      prompt: String(meta.prompt || '').slice(0, 8000),
+      model: meta.model,
+      refImages: compactRefsForDraft(meta.refImages),
+      refImage: compactRefsForDraft([meta.refImage])[0] || null,
+      resolution: meta.resolution,
+      quality: meta.quality,
+      size: meta.size,
+      count: meta.count
+    };
+    if (!saveJson(LS_IMAGEGEN, draft)) {
+      saveJson(LS_IMAGEGEN, {
+        prompt: draft.prompt.slice(0, 2000),
+        model: draft.model,
+        resolution: draft.resolution,
+        quality: draft.quality,
+        size: draft.size,
+        count: draft.count
+      });
+    }
   }
 
   function genId(prefix) {
@@ -833,7 +911,13 @@
       localStorage.removeItem(LS_PUBLIC_FEED_CACHE);
       sessionStorage.removeItem('promptrepo_guest_session');
       sessionStorage.removeItem('promptrepo_pending_guest_migrate');
+      sessionStorage.removeItem(LS_PENDING_GEN_JOBS);
+      sessionStorage.removeItem(LS_FAILED_GEN_JOBS);
+      sessionStorage.removeItem(LS_SESSION_GEN_JOBS);
     } catch (e) { /* ignore */ }
+    imageGenPendingJobs = [];
+    imageGenFailedJobs = [];
+    activePollJobIds.clear();
     resetFeatureFeedDom();
     updateNotifyBadge();
     closeCommunitySidePanel();
@@ -870,6 +954,9 @@
     pruneCreations();
     migrateCommunityAuthorIds();
     pruneOrphanFeatureData();
+    loadPendingGenJobs();
+    loadFailedGenJobs();
+    scheduleGenJobsSync(600);
   }
 
   function normalizeImageRefForCompare(image) {
@@ -1980,10 +2067,8 @@
   }
 
   function feedListSignature(posts, containerId) {
-    if (containerId === 'creationsGrid') {
-      return `${containerId}:${posts.map((p) => p.id).join('|')}`;
-    }
-    return `${containerId}:${posts.map((p) => `${p.id}:${p.updatedAt || p.createdAt || 0}`).join('|')}`;
+    const ids = posts.map((p) => String(p.id)).sort().join('|');
+    return `${containerId}:${posts.length}:${ids}`;
   }
 
   function patchFeedLikeLabels(container, posts) {
@@ -2124,6 +2209,7 @@
         horizontalOrder: false,
         transitionDuration: 0
       };
+      const scrollTop = wrap.scrollTop;
       if (imageGenMasonry) {
         imageGenMasonry.option(opts);
         imageGenMasonry.reloadItems();
@@ -2139,8 +2225,10 @@
       }
       requestAnimationFrame(() => {
         imageGenMasonry?.layout();
+        wrap.scrollTop = scrollTop;
         setFeedLayoutPending(wrap, false);
       });
+      wrap.scrollTop = scrollTop;
       bindImageGenFeedImageRelayout();
     };
 
@@ -2576,15 +2664,25 @@
       </div>`;
       return;
     }
-    const avatar = ((user.displayName || user.name || user.email || '?')[0] || '?').toUpperCase();
+    const displayName = user.displayName || user.name || '用户';
+    const avatar = (displayName[0] || '?').toUpperCase();
     const posts = getMyPublishedPosts().length;
     const following = follows.size;
     const followers = countFollowers(user.id);
     el.innerHTML = `<div class="creations-profile my-home-profile-card">
       <div class="creations-avatar" aria-hidden="true">${esc(avatar)}</div>
-      <div class="creations-profile-text">
-        <h3>${esc(user.displayName || user.name)}</h3>
-        <p>${esc(user.email || '已登录用户')}</p>
+      <div class="creations-profile-text my-home-profile-text">
+        <div class="my-home-name-row">
+          <h3 id="myHomeDisplayName">${esc(displayName)}</h3>
+          <button type="button" class="btn btn-ghost btn-sm" id="myHomeEditNameBtn">修改用户名</button>
+        </div>
+        <p class="my-home-name-hint">社区显示名 · 2～20 字，与社区发帖作者名一致</p>
+        <p class="my-home-email-line">${esc(user.email || '已登录用户')}</p>
+        <form class="my-home-name-form hidden" id="myHomeNameForm">
+          <input type="text" class="settings-input my-home-name-input" id="myHomeNameInput" maxlength="20" value="${esc(displayName)}" autocomplete="nickname">
+          <button type="submit" class="btn btn-primary btn-sm">保存</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="myHomeNameCancel">取消</button>
+        </form>
       </div>
       <div class="my-home-stats" aria-label="主页统计">
         <span><strong data-stat="posts">${posts}</strong> 作品</span>
@@ -2592,6 +2690,79 @@
         <span><strong data-stat="followers">${followers}</strong> 粉丝</span>
       </div>
     </div>`;
+
+    el.querySelector('#myHomeEditNameBtn')?.addEventListener('click', () => {
+      el.querySelector('#myHomeNameForm')?.classList.remove('hidden');
+      el.querySelector('#myHomeEditNameBtn')?.classList.add('hidden');
+      el.querySelector('#myHomeDisplayName')?.classList.add('hidden');
+      el.querySelector('.my-home-name-hint')?.classList.add('hidden');
+      const input = el.querySelector('#myHomeNameInput');
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+    el.querySelector('#myHomeNameCancel')?.addEventListener('click', () => {
+      el.querySelector('#myHomeNameForm')?.classList.add('hidden');
+      el.querySelector('#myHomeEditNameBtn')?.classList.remove('hidden');
+      el.querySelector('#myHomeDisplayName')?.classList.remove('hidden');
+      el.querySelector('.my-home-name-hint')?.classList.remove('hidden');
+    });
+    el.querySelector('#myHomeNameForm')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      void saveMyHomeDisplayName();
+    });
+  }
+
+  async function saveMyHomeDisplayName() {
+    const input = document.getElementById('myHomeNameInput');
+    const name = String(input?.value || '').trim();
+    if (name.length < 2) {
+      toast('用户名至少 2 个字');
+      return;
+    }
+    if (!window.PromptHubApi?.setDisplayName) {
+      toast('请先连接 API 后再修改用户名');
+      return;
+    }
+    const btn = document.querySelector('#myHomeNameForm button[type="submit"]');
+    if (btn) btn.disabled = true;
+    try {
+      window.__PH_API_DOWN_UNTIL__ = 0;
+      if (window.SupabaseSync?.healSessionOnResume) {
+        await window.SupabaseSync.healSessionOnResume();
+      }
+      if (window.PromptHubApi?.probeApiHealth) {
+        await window.PromptHubApi.probeApiHealth();
+      }
+      let r = await window.PromptHubApi.setDisplayName(name);
+      if (!r?.ok && r?.code === 'NETWORK_ERROR') {
+        if (window.SupabaseSync?.healSessionOnResume) {
+          await window.SupabaseSync.healSessionOnResume();
+        }
+        window.__PH_API_DOWN_UNTIL__ = 0;
+        r = await window.PromptHubApi.setDisplayName(name);
+      }
+      if (!r?.ok) {
+        const hint =
+          r?.code === 'NETWORK_ERROR'
+            ? '无法连接 api.prompt-hub.cn，请检查网络/VPN 后重试，或稍后再试'
+            : r?.message || '保存失败';
+        toast(hint, 6000);
+        return;
+      }
+      toast('用户名已更新，社区作品将显示新名称');
+      renderMyHomeProfile();
+      renderCommunity();
+      void renderCreations();
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function onDisplayNameChanged() {
+    reconcileOwnedPostAuthors();
+    migrateCommunityAuthorIds();
   }
 
   function initMyHomeTabs() {
@@ -3103,14 +3274,26 @@
       });
       return;
     }
+    let list = filterAndSortPosts(getCommunityFeedForDisplay());
+    const earlySig = feedListSignature(list, 'communityGrid');
+    if (
+      !opts.forceRepaint
+      && container.dataset.feedSig === earlySig
+      && container.querySelector('.community-post-card')
+    ) {
+      patchFeedLikeLabels(container, list);
+      if (window.SupabaseSync?.isLoggedIn?.()) void refreshRemoteNotifications();
+      return;
+    }
     if (window.SupabaseSync?.isLoggedIn?.()) {
       maybeReconcileCommunityWithCards(window.__promptHubCards || []);
       ensureCommunityFromCardsThrottled(!!opts.syncFromCards);
       void refreshRemoteNotifications();
+      list = filterAndSortPosts(getCommunityFeedForDisplay());
     } else if (window.__promptHubCards?.length) {
       ensureCommunityFromCardsThrottled(false);
+      list = filterAndSortPosts(getCommunityFeedForDisplay());
     }
-    let list = filterAndSortPosts(getCommunityFeedForDisplay());
     const guestUser = getActiveUser().id === 'guest';
     const loggedInUser = window.SupabaseSync?.isLoggedIn?.();
     if (!list.length && (guestUser || loggedInUser) && (publicFeedLoading || !publicFeedAt)) {
@@ -3840,10 +4023,12 @@
     const favBtn = document.getElementById('appreciateViewerFavBtn');
     if (!viewer || !img) return;
     appreciateViewerPostId = post.id;
-    window.setAppreciateViewerLoading?.(true);
+    const alreadyOpen = viewer.classList.contains('active');
+    if (!alreadyOpen) {
+      viewer.classList.remove('active');
+      document.body.classList.remove('appreciate-viewing');
+    }
     if (typeof window.resetImageZoom === 'function') window.resetImageZoom(img);
-    viewer.classList.add('active');
-    document.body.classList.add('appreciate-viewing');
     const title = getPostTitle(post);
     const prompt = (post.prompt || '').trim();
     if (caption) {
@@ -3856,20 +4041,38 @@
     }
     actions?.classList.remove('hidden');
     const imageRef = communityPostDisplayImageRef(post);
+    const signOpts = {
+      assetId: post.sourceCardId || post.id,
+      authorId: post.authorId || undefined,
+      cardId: post.sourceCardId || undefined,
+      communityFeed: true,
+      tryAllPaths: true,
+      variant: 'full'
+    };
+    const isPlaceholderSrc = (src) => !src || String(src).includes('data:image/svg');
+    let instantSrc = '';
+    if (imageRef && isDisplayableImage(imageRef)) {
+      instantSrc = window.SupabaseSync?.getCachedDisplayUrl?.(imageRef, {
+        assetId: post.sourceCardId || post.id,
+        authorId: post.authorId || undefined,
+        variant: 'grid'
+      }) || '';
+      const gridImg = document.querySelector(`#communityGrid .community-post-card[data-post-id="${post.id}"] img.card-img`);
+      const gridSrc = gridImg?.currentSrc || gridImg?.src || '';
+      if (isPlaceholderSrc(instantSrc) && !isPlaceholderSrc(gridSrc)) instantSrc = gridSrc;
+    }
+    const hasInstant = !isPlaceholderSrc(instantSrc);
+    window.setAppreciateViewerLoading?.(!hasInstant);
+    const reveal = () => {
+      if (gen !== appreciateViewerGen) return;
+      viewer.classList.add('active');
+      document.body.classList.add('appreciate-viewing');
+    };
     if (imageRef && isDisplayableImage(imageRef)) {
       img.style.display = 'block';
       if (hint) hint.style.display = 'block';
-      img.removeAttribute('src');
       img.onload = null;
       img.onerror = null;
-      const signOpts = {
-        assetId: post.sourceCardId || post.id,
-        authorId: post.authorId || undefined,
-        cardId: post.sourceCardId || undefined,
-        communityFeed: true,
-        tryAllPaths: true,
-        variant: 'full'
-      };
       let revealed = false;
       const onReady = () => {
         if (gen !== appreciateViewerGen || revealed) return;
@@ -3882,8 +4085,8 @@
         if (typeof window.resetImageZoom === 'function') window.resetImageZoom(img);
         if (typeof window.attachImageZoom === 'function') window.attachImageZoom(img);
         window.finishAppreciateViewerReveal?.();
+        reveal();
       };
-      img.onload = onReady;
       img.onerror = () => {
         if (gen !== appreciateViewerGen) return;
         img.onload = null;
@@ -3891,7 +4094,16 @@
         window.setAppreciateViewerLoading?.(false);
         img.style.display = 'none';
         if (hint) hint.style.display = 'none';
+        reveal();
       };
+      if (hasInstant) {
+        img.src = instantSrc;
+        if (img.complete && img.naturalWidth > 0) onReady();
+        else img.onload = onReady;
+      } else {
+        img.removeAttribute('src');
+        img.onload = onReady;
+      }
       void (async () => {
         let displaySrc = imageRef;
         try {
@@ -3900,18 +4112,32 @@
           }
         } catch (e) { /* ignore */ }
         if (gen !== appreciateViewerGen) return;
-        if (displaySrc) {
-          img.src = displaySrc;
-          if (img.complete && img.naturalWidth > 0) onReady();
+        if (!displaySrc || isPlaceholderSrc(displaySrc)) {
+          if (!hasInstant) img.onerror?.();
           return;
         }
-        img.onerror?.();
+        if (displaySrc === img.src) {
+          if (img.complete && img.naturalWidth > 0 && !revealed) onReady();
+          return;
+        }
+        if (hasInstant && revealed) {
+          img.onload = () => {
+            if (gen !== appreciateViewerGen) return;
+            img.onload = null;
+            if (typeof window.resetImageZoom === 'function') window.resetImageZoom(img);
+          };
+          img.src = displaySrc;
+          return;
+        }
+        img.src = displaySrc;
+        if (img.complete && img.naturalWidth > 0) onReady();
       })();
     } else {
       img.src = '';
       img.style.display = 'none';
       if (hint) hint.style.display = 'none';
       window.setAppreciateViewerLoading?.(false);
+      reveal();
     }
   }
 
@@ -4026,11 +4252,153 @@
       jobId: opts.jobId || null,
       title: opts.title,
       publishToCommunity: !!opts.publishToCommunity,
+      fromInspirationDraw: !!opts.fromInspirationDraw,
       silentToast: !!opts.silentToast
     })).then((r) => r?.ok ?? false);
   }
 
-  const LS_SESSION_GEN_JOBS = 'promptrepo_session_gen_jobs';
+  const RECENT_GEN_RECOVER_MS = 72 * 3600 * 1000;
+  const activePollJobIds = new Set();
+  let resumeGenJobsInflight = null;
+  let genJobsSyncTimer = null;
+  let genJobsSyncInterval = null;
+  let genJobsSyncRetry = 0;
+
+  function persistPendingGenJobs() {
+    try {
+      sessionStorage.setItem(LS_PENDING_GEN_JOBS, JSON.stringify(imageGenPendingJobs.slice(0, 32)));
+    } catch (e) { /* ignore */ }
+  }
+
+  function loadPendingGenJobs() {
+    try {
+      const raw = sessionStorage.getItem(LS_PENDING_GEN_JOBS);
+      const list = raw ? JSON.parse(raw) : [];
+      imageGenPendingJobs = Array.isArray(list) ? list : [];
+    } catch (e) {
+      imageGenPendingJobs = [];
+    }
+  }
+
+  function persistFailedGenJobs() {
+    try {
+      sessionStorage.setItem(LS_FAILED_GEN_JOBS, JSON.stringify(imageGenFailedJobs.slice(0, 24)));
+    } catch (e) { /* ignore */ }
+  }
+
+  function loadFailedGenJobs() {
+    try {
+      const raw = sessionStorage.getItem(LS_FAILED_GEN_JOBS);
+      const list = raw ? JSON.parse(raw) : [];
+      imageGenFailedJobs = Array.isArray(list) ? list : [];
+    } catch (e) {
+      imageGenFailedJobs = [];
+    }
+  }
+
+  function batchIndexLabel(index, total) {
+    if (index && total && total > 1) return `第 ${index}/${total} 张`;
+    return '';
+  }
+
+  function addFailedGenJob(job) {
+    const entry = {
+      id: job.id || genId('fail'),
+      prompt: String(job.prompt || '').trim(),
+      errorMessage: String(job.errorMessage || '生图失败').slice(0, 200),
+      failedAt: job.failedAt || Date.now(),
+      modelLabel: job.modelLabel || '',
+      batchIndex: job.batchIndex || null,
+      batchTotal: job.batchTotal || null,
+      batchId: job.batchId || null
+    };
+    if (!entry.prompt) return;
+    imageGenFailedJobs = [entry, ...imageGenFailedJobs.filter((f) => f.id !== entry.id)].slice(0, 24);
+    persistFailedGenJobs();
+  }
+
+  function removeFailedGenJob(failId) {
+    imageGenFailedJobs = imageGenFailedJobs.filter((f) => f.id !== failId);
+    persistFailedGenJobs();
+  }
+
+  function failPendingJob(pendingId, errorMessage) {
+    const job = imageGenPendingJobs.find((j) => j.id === pendingId);
+    if (job) {
+      addFailedGenJob({
+        prompt: job.prompt,
+        modelLabel: job.modelLabel,
+        batchIndex: job.batchIndex,
+        batchTotal: job.batchTotal,
+        batchId: job.batchId,
+        errorMessage
+      });
+    }
+    removePendingJob(pendingId);
+  }
+
+  function toastGenFailure(ctx, message) {
+    const label = batchIndexLabel(ctx?.batchIndex, ctx?.batchTotal);
+    const msg = String(message || '生图失败，积分已全额退回');
+    toast(label ? `${label} ${msg}` : msg);
+  }
+
+  function pendingJobToPollCtx(job) {
+    return {
+      prompt: job.prompt || '',
+      model: job.model || 'quanneng2',
+      resolution: job.resolution || '1k',
+      quality: job.quality || 'standard',
+      size: job.size || '1:1',
+      cost: job.cost || 0,
+      jobId: job.jobId,
+      fromInspirationDraw: !!job.fromInspirationDraw,
+      batchIndex: job.batchIndex || null,
+      batchTotal: job.batchTotal || null,
+      batchId: job.batchId || null,
+      silentToast: !!job.silentToast
+    };
+  }
+
+  function isRecentGenJob(job) {
+    const t = Date.parse(job?.createdAt || '');
+    return Number.isFinite(t) && Date.now() - t < RECENT_GEN_RECOVER_MS;
+  }
+
+  function shouldAutoRecoverCompletedJob(job) {
+    if (isGenerationJobDeleted(job.id)) return false;
+    if (hasWarehouseCardForJob(job.id)) return false;
+    if (creations.some((c) => c.jobId === job.id)) return false;
+    return isSessionGenJob(job.id) || isRecentGenJob(job);
+  }
+
+  /** 延迟/重试同步：登录尚未就绪时也会再次拉取 */
+  function scheduleGenJobsSync(delayMs) {
+    clearTimeout(genJobsSyncTimer);
+    genJobsSyncTimer = setTimeout(() => {
+      void resumePendingGenerationJobs().then((ok) => {
+        if (!ok && genJobsSyncRetry < 6) {
+          genJobsSyncRetry += 1;
+          scheduleGenJobsSync(Math.min(8000, 800 + genJobsSyncRetry * 1200));
+        } else if (ok) {
+          genJobsSyncRetry = 0;
+        }
+      });
+    }, delayMs == null ? 400 : delayMs);
+  }
+
+  function startGenJobsBackgroundSync() {
+    if (genJobsSyncInterval) return;
+    genJobsSyncInterval = setInterval(() => {
+      if (!window.PointsSystem?.useApiForAccount?.()) return;
+      if (imageGenPendingJobs.length || getSessionGenJobIds().length) {
+        void resumePendingGenerationJobs();
+      }
+    }, 18000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') scheduleGenJobsSync(300);
+    });
+  }
 
   function getSessionGenJobIds() {
     try {
@@ -4115,19 +4483,131 @@
     });
   }
 
-  async function recoverLostGenerationsManual() {
-    if (!window.AuthGate?.requireAuth?.('imagegen')) return;
-    const orphans = await listRecoverableOrphanJobs();
-    if (!orphans.length) {
-      toast('没有可恢复的生图（您删除过的不会出现在此列表）');
-      return;
-    }
-    const sample = orphans.slice(0, 2).map((j) => (j.prompt || '').slice(0, 20)).join('、');
-    const extra = orphans.length > 2 ? ` 等 ${orphans.length} 张` : '';
-    const msg = `服务器上有 ${orphans.length} 张本地缺失的生图（${sample}${extra}）。\n恢复后写入卡片仓库；您已删除的生图不会被恢复。`;
-    const run = () => void recoverRecentGenerationJobs({ manual: true });
-    if (typeof window.customConfirm === 'function') window.customConfirm(msg, run);
-    else if (confirm(msg)) run();
+  /** 刷新/登录后：恢复进行中的卡片、续轮询、静默补全已完成任务 */
+  async function resumePendingGenerationJobs() {
+    if (!window.PromptHubApi?.listRecentGenerationJobs) return false;
+    if (!window.PointsSystem?.useApiForAccount?.()) return false;
+    if (resumeGenJobsInflight) return resumeGenJobsInflight;
+
+    resumeGenJobsInflight = (async () => {
+      for (const job of imageGenPendingJobs.slice()) {
+        if (!job.jobId || activePollJobIds.has(job.jobId)) continue;
+        void pollGenerationJobUntilDone(job.jobId, job.id, pendingJobToPollCtx(job));
+      }
+
+      const r = await window.PromptHubApi.listRecentGenerationJobs();
+      if (!r?.ok || !Array.isArray(r.data?.jobs)) return false;
+
+      let changed = false;
+      const apiById = new Map();
+      const attachedJobIds = new Set();
+
+      for (const job of r.data.jobs) {
+        if (!job?.id) continue;
+        apiById.set(job.id, job);
+        if (isGenerationJobDeleted(job.id)) continue;
+
+        if (job.status === 'processing') {
+          const hasCreation = creations.some((c) => c.jobId === job.id);
+          if (hasCreation || hasWarehouseCardForJob(job.id)) continue;
+          let pending = imageGenPendingJobs.find((j) => j.jobId === job.id);
+          if (!pending) {
+            const pendingId = genId('pending');
+            pending = {
+              id: pendingId,
+              jobId: job.id,
+              prompt: job.prompt || '',
+              model: job.model || 'quanneng2',
+              modelLabel: job.modelLabel || '全能模型2',
+              resolution: job.resolution || '1k',
+              quality: job.quality || 'standard',
+              size: job.size || '1:1',
+              cost: job.creditsCharged || 0,
+              startedAt: Date.parse(job.createdAt) || Date.now()
+            };
+            imageGenPendingJobs.unshift(pending);
+            trackSessionGenJob(job.id);
+            changed = true;
+          }
+          attachedJobIds.add(job.id);
+          if (!activePollJobIds.has(job.id)) {
+            void pollGenerationJobUntilDone(job.id, pending.id, pendingJobToPollCtx(pending));
+          }
+          continue;
+        }
+
+        if (job.status !== 'completed' || !job.imageUrl) continue;
+        if (!shouldAutoRecoverCompletedJob(job)) continue;
+
+        const existingCard = (window.__promptHubCards || []).find((c) => c.genJobId === job.id);
+        if (existingCard && hasWarehouseCardForJob(job.id)) continue;
+        if (!existingCard && creations.some((c) => c.jobId === job.id)) continue;
+
+        changed = true;
+        attachedJobIds.add(job.id);
+        imageGenPendingJobs = imageGenPendingJobs.filter((p) => p.jobId !== job.id);
+        if (existingCard && !existingCard.image) {
+          await repairWarehouseCardImageFromJob(existingCard, job.imageUrl, job.id);
+          continue;
+        }
+        await finishImageGenRun({
+          prompt: job.prompt || '',
+          model: job.model || 'quanneng2',
+          resolution: job.resolution || '1k',
+          quality: job.quality || 'standard',
+          size: job.size || '1:1',
+          cost: job.creditsCharged || 0,
+          jobId: job.id,
+          image: job.imageUrl,
+          silentToast: true,
+          isRecovery: true
+        });
+      }
+
+      // 无 jobId 的占位（提交中）：尝试按提示词匹配 API 进行中任务
+      const processingOnApi = r.data.jobs.filter(
+        (j) => j?.id && j.status === 'processing' && !attachedJobIds.has(j.id) && !isGenerationJobDeleted(j.id)
+      );
+      for (const p of imageGenPendingJobs.filter((x) => !x.jobId)) {
+        if (Date.now() - (p.startedAt || 0) > 15 * 60 * 1000) continue;
+        const match = processingOnApi.find(
+          (j) => !attachedJobIds.has(j.id) && (j.prompt || '').trim() === (p.prompt || '').trim()
+        );
+        if (!match) continue;
+        p.jobId = match.id;
+        trackSessionGenJob(match.id);
+        attachedJobIds.add(match.id);
+        changed = true;
+        if (!activePollJobIds.has(match.id)) {
+          void pollGenerationJobUntilDone(match.id, p.id, pendingJobToPollCtx(p));
+        }
+      }
+
+      const before = imageGenPendingJobs.length;
+      imageGenPendingJobs = imageGenPendingJobs.filter((p) => {
+        if (!p.jobId) {
+          return Date.now() - (p.startedAt || 0) < 15 * 60 * 1000;
+        }
+        const aj = apiById.get(p.jobId);
+        if (!aj) return true;
+        return aj.status === 'processing';
+      });
+      if (imageGenPendingJobs.length !== before) {
+        persistPendingGenJobs();
+        changed = true;
+      } else if (changed) {
+        persistPendingGenJobs();
+      }
+
+      if (changed) {
+        renderImageGenFeed({ preserveScroll: true });
+      }
+      return true;
+    })().finally(() => {
+      resumeGenJobsInflight = null;
+    });
+
+    return resumeGenJobsInflight;
   }
 
   function highlightCreationCard(id) {
@@ -4200,7 +4680,7 @@
     if (!container) return;
     const user = getActiveUser();
     if (window.__promptHubCards?.length) {
-      ensureCommunityFromCards();
+      ensureCommunityFromCardsThrottled(false);
     } else {
       dedupeCommunityPosts();
       migrateCommunityAuthorIds();
@@ -4301,6 +4781,7 @@
   }
 
   function initImageGenForm() {
+    resetImageGenSubmitState();
     const draft = loadJson(LS_IMAGEGEN, null);
     if (draft) {
       const promptEl = document.getElementById('imageGenPrompt');
@@ -4316,6 +4797,11 @@
       if (modelEl && draft.model) modelEl.value = draft.model;
       const szEl = document.getElementById('imageGenSize');
       if (szEl && draft.size) szEl.value = draft.size;
+      const countEl = document.getElementById('imageGenCount');
+      if (countEl && draft.count) {
+        const c = Math.min(5, Math.max(1, Number(draft.count) || 1));
+        countEl.value = String(c);
+      }
     }
     bindImageGenUpload();
     bindImageGenPromptTools();
@@ -4479,12 +4965,22 @@
 
   let imageGenCostHintSeq = 0;
   let imageGenCostDebounceTimer = null;
+  let imageGenBatchRunning = false;
+
+  function getImageGenBatchCount() {
+    const n = Number(document.getElementById('imageGenCount')?.value || 1);
+    return Math.min(5, Math.max(1, Math.floor(n) || 1));
+  }
 
   function applyImageGenCostDisplay(detail, final, quality, size) {
     const hint = document.getElementById('imageGenCostHint');
     const btn = document.getElementById('imageGenSubmit');
-    if (btn && !btn.disabled) {
-      btn.textContent = `生成图片 · ${final} 积分`;
+    const count = getImageGenBatchCount();
+    const total = final * count;
+    if (btn && !btn.disabled && !imageGenBatchRunning) {
+      btn.textContent = count > 1
+        ? `生成 ${count} 张 · ${total} 积分`
+        : `生成图片 · ${final} 积分`;
     }
     if (!hint) return;
     const modelLabel = detail?.modelLabel || '全能模型2';
@@ -4493,8 +4989,9 @@
     const qualLabel =
       { standard: '标准', high: '高清', ultra: '超清' }[quality] || quality;
     const parts = [modelLabel, qualLabel, sizeLabel];
+    if (count > 1) parts.push(`${count} 张 · 共 ${total} 积分（${final}/张）`);
     if (detail?.saved > 0 && detail.label) {
-      parts.push(`会员${detail.label} 省 ${detail.saved}`);
+      parts.push(`会员${detail.label} 省 ${detail.saved}/张`);
     } else if (detail?.fixed) {
       parts.push('固定价');
     }
@@ -4516,11 +5013,49 @@
     }, 800);
   }
 
+  const GEN_COST_QUOTE_TIMEOUT_MS = 12000;
+
+  async function quoteGenerationCost(resolution, quality, model, localFallback) {
+    const fallback = Number(localFallback) || 10;
+    if (!window.PointsSystem?.useApiForAccount?.()) {
+      return { cost: fallback, fromApi: false };
+    }
+    try {
+      const quote = await Promise.race([
+        window.PromptHubApi.getGenerationCost(resolution, quality, model),
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('cost quote timeout')), GEN_COST_QUOTE_TIMEOUT_MS);
+        })
+      ]);
+      if (quote.ok && quote.data?.final != null) {
+        return { cost: quote.data.final, fromApi: true };
+      }
+    } catch (e) {
+      console.warn('[imagegen] cost quote fallback', e);
+    }
+    return { cost: fallback, fromApi: false };
+  }
+
+  function resetImageGenSubmitState() {
+    imageGenBatchRunning = false;
+    window.ImageGenPromptTools?.resetBatchState?.();
+    const btn = document.getElementById('imageGenSubmit');
+    if (btn) {
+      btn.disabled = false;
+      restoreImageGenSubmitLabel();
+    }
+  }
+
   async function refreshImageGenCostFromApi(model, resolution, quality, size) {
     if (!window.PointsSystem?.useApiForAccount?.()) return;
     const seq = ++imageGenCostHintSeq;
     try {
-      const quote = await window.PromptHubApi.getGenerationCost(resolution, quality, model);
+      const quote = await Promise.race([
+        window.PromptHubApi.getGenerationCost(resolution, quality, model),
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('cost quote timeout')), GEN_COST_QUOTE_TIMEOUT_MS);
+        })
+      ]);
       if (seq !== imageGenCostHintSeq) return;
       if (!quote.ok || quote.data?.final == null) return;
 
@@ -4771,7 +5306,6 @@
 
     clearBtn.addEventListener('click', () => {
       if (!promptEl.value.trim()) return;
-      if (!window.confirm('确定清空提示词？')) return;
       promptEl.value = '';
       promptEl.dispatchEvent(new Event('input', { bubbles: true }));
       promptEl.focus();
@@ -4840,11 +5374,12 @@
     }
   }
 
-  async function resolveRefUrlsForApi() {
-    if (!imageGenRefImages.length) return [];
+  async function resolveRefUrlsFromList(sources) {
+    const list = Array.isArray(sources) ? sources.filter(Boolean) : [];
+    if (!list.length) return [];
     const urls = [];
-    for (let i = 0; i < imageGenRefImages.length; i++) {
-      const src = imageGenRefImages[i];
+    for (let i = 0; i < list.length; i++) {
+      const src = list[i];
       try {
         let apiUrl = null;
         if (/^https?:\/\//i.test(src)) {
@@ -4873,33 +5408,44 @@
     return urls;
   }
 
+  async function resolveRefUrlsForApi() {
+    return resolveRefUrlsFromList(imageGenRefImages);
+  }
+
   function removePendingJob(pendingId) {
     imageGenPendingJobs = imageGenPendingJobs.filter(j => j.id !== pendingId);
+    persistPendingGenJobs();
   }
 
   async function pollGenerationJobUntilDone(jobId, pendingId, ctx) {
+    if (activePollJobIds.has(jobId)) return;
+    activePollJobIds.add(jobId);
+    try {
     const maxAttempts = 80;
     const finishFromPoll = async (poll) => {
-      removePendingJob(pendingId);
       if (poll.data.status === 'failed') {
+        const msg = poll.data.message || poll.data.errorMessage || '生图失败，积分已全额退回';
+        failPendingJob(pendingId, msg);
         await window.PointsSystem?.refreshCreditsFromServer?.();
-        renderImageGenFeed();
-        toast(poll.data.message || poll.data.errorMessage || '生图失败，积分已全额退回');
+        renderImageGenFeed({ preserveScroll: true });
+        toastGenFailure(ctx, msg);
         return true;
       }
       if (poll.data.status === 'completed') {
         const imageUrl = poll.data.imageUrl;
         if (!imageUrl) {
+          failPendingJob(pendingId, '生图未返回图片');
           await window.PointsSystem?.refreshCreditsFromServer?.();
-          renderImageGenFeed();
-          toast('生图未返回图片，若积分未退回请点同步或联系客服');
+          renderImageGenFeed({ preserveScroll: true });
+          toastGenFailure(ctx, '生图未返回图片，若积分未退回请点同步或联系客服');
           return true;
         }
         if (ctx.jobId && creations.some(c => c.jobId === ctx.jobId)) {
-          renderImageGenFeed();
+          removePendingJob(pendingId);
+          renderImageGenFeed({ preserveScroll: true });
           return true;
         }
-        void finishImageGenRun({
+        await finishImageGenRun({
           ...ctx,
           image: imageUrl,
           cost: ctx.cost,
@@ -4907,6 +5453,7 @@
           silentToast: !!ctx.silentToast,
           isRecovery: !!ctx.isRecovery
         });
+        removePendingJob(pendingId);
         return true;
       }
       return false;
@@ -4920,15 +5467,12 @@
           await new Promise(r => setTimeout(r, poll.code === 'RATE_LIMITED' ? 5000 : 2000));
           continue;
         }
-        removePendingJob(pendingId);
-        await window.PointsSystem?.refreshCreditsFromServer?.();
-        renderImageGenFeed();
         if (poll.code === 'RATE_LIMITED') {
           toast('查询进度稍慢（服务器繁忙），正在后台恢复结果…');
         } else {
           toast(poll.message || '查询生图进度失败，正在尝试恢复…');
         }
-        void recoverRecentGenerationJobs({ sessionOnly: true });
+        void resumePendingGenerationJobs();
         return;
       }
 
@@ -4938,7 +5482,6 @@
       }
 
       if (poll.data.status === 'processing') {
-        if (imageGenFeedTab === 'warehouse') renderImageGenFeed();
         continue;
       }
 
@@ -4948,10 +5491,12 @@
     const last = await window.PromptHubApi.getGenerationJob(jobId);
     if (last.ok && await finishFromPoll(last)) return;
 
-    removePendingJob(pendingId);
     toast('生图时间较长，正在恢复本次任务…');
-    void recoverRecentGenerationJobs({ sessionOnly: true });
-    renderImageGenFeed();
+    void resumePendingGenerationJobs();
+    renderImageGenFeed({ preserveScroll: true });
+    } finally {
+      activePollJobIds.delete(jobId);
+    }
   }
 
   /**
@@ -5062,179 +5607,294 @@
       toast('请先填写提示词');
       return { ok: false };
     }
-    const meta = getImageGenFormMeta();
-    const { model, resolution, quality, size } = meta;
-    let cost = window.PointsSystem?.getImageGenCost?.(model, resolution) ?? 10;
-    let balance = window.PointsSystem?.getCredits?.() ?? 0;
 
     const btn = document.getElementById('imageGenSubmit');
-    const useApi = window.PointsSystem?.useApiForAccount?.();
-
-    if (useApi) {
-      const quote = await window.PromptHubApi.getGenerationCost(resolution, quality, model);
-      if (quote.ok && quote.data?.final != null) cost = quote.data.final;
-      balance = window.PointsSystem?.getCredits?.() ?? 0;
-    }
-
-    if (balance < cost) {
-      toast(`积分不足（需要 ${cost}，当前 ${balance}）。请使用激活码兑换`);
-      return { ok: false, reason: 'credits' };
-    }
-
-    if (!useApi && !window.PointsSystem?.deductCredits?.(cost)) {
-      toast('积分扣除失败');
+    const singleRun = !batchOpts.batch;
+    if (singleRun && btn?.disabled && !imageGenBatchRunning) {
+      toast('提交按钮暂不可用，请稍候或刷新页面');
       return { ok: false };
     }
-
-    saveJson(LS_IMAGEGEN, {
-      prompt,
-      model,
-      refImages: imageGenRefImages,
-      refImage: getImageGenPrimaryRef(),
-      resolution,
-      quality,
-      size
-    });
-
-    const modelLabel = window.PointsSystem?.getImageGenModel?.(model)?.label || model;
-    const pendingId = genId('pending');
-    const pendingJob = {
-      id: pendingId,
-      prompt,
-      model,
-      modelLabel,
-      resolution,
-      quality,
-      size,
-      cost,
-      startedAt: Date.now()
-    };
-    imageGenPendingJobs.unshift(pendingJob);
-    imageGenFeedTab = 'warehouse';
-    document.querySelectorAll('[data-feed-tab]').forEach(b => {
-      b.classList.toggle('active', b.dataset.feedTab === 'warehouse');
-    });
-    updateImageGenFeedHint();
-    renderImageGenFeed();
-    if (!batchOpts.batch && window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
-      window.MobileUI.setImageGenView('feed');
-    }
-
-    if (btn && !batchOpts.batch) {
+    if (singleRun && btn) {
       btn.disabled = true;
-      btn.textContent = '提交中…';
+      btn.textContent = '准备中…';
     }
 
-    function friendlyGenErrorMessage(msg) {
-      const s = String(msg || '');
-      if (/登录已过期|请先登录|UNAUTHORIZED/i.test(s)) {
-        return '登录状态已失效，请点侧栏「退出」后重新登录，或直接关闭页面再打开';
-      }
-      if (/insufficient balance/i.test(s) || (/insufficient/i.test(s) && /balance/i.test(s))) {
-        return '生图服务商账户余额不足，请联系站长充值；您的积分已全额退回';
-      }
-      if (/invalid.*api.*key/i.test(s)) {
-        return '生图接口密钥无效或已过期，请联系站长检查配置；您的积分已全额退回';
-      }
-      if (s.length > 120) return s.slice(0, 120) + '…';
-      return s || '生图失败，您的积分已全额退回';
-    }
+    try {
+      const meta = getImageGenFormMeta();
+      const { model, resolution, quality, size } = meta;
+      let cost = window.PointsSystem?.getImageGenCost?.(model, resolution) ?? 10;
+      let balance = window.PointsSystem?.getCredits?.() ?? 0;
+      const useApi = window.PointsSystem?.useApiForAccount?.();
 
-    if (useApi) {
-      const refUrls = await resolveRefUrlsForApi();
-      if (imageGenRefImages.length && !refUrls.length) {
-        removePendingJob(pendingId);
-        renderImageGenFeed();
-        if (btn) {
-          btn.disabled = false;
-          restoreImageGenSubmitLabel();
-        }
-        toast('参考图无法用于生图（须为网络图片），请去掉参考图或重新上传后再试');
+      if (useApi) {
+        const quoted = await quoteGenerationCost(resolution, quality, model, cost);
+        cost = quoted.cost;
+        balance = window.PointsSystem?.getCredits?.() ?? 0;
+      }
+
+      if (balance < cost) {
+        toast(`积分不足（需要 ${cost}，当前 ${balance}）。请使用激活码兑换`);
+        return { ok: false, reason: 'credits' };
+      }
+
+      if (!useApi && !window.PointsSystem?.deductCredits?.(cost)) {
+        toast('积分扣除失败');
         return { ok: false };
       }
-      if (imageGenRefImages.length && refUrls.length < imageGenRefImages.length && !batchOpts.silentToast) {
-        toast(`已使用 ${refUrls.length}/${imageGenRefImages.length} 张参考图继续生成`);
-      }
-      const gen = await window.PromptHubApi.generateImage({
+
+      saveImageGenDraft({
         prompt,
         model,
+        refImages: imageGenRefImages,
+        refImage: getImageGenPrimaryRef(),
         resolution,
         quality,
         size,
-        refImageUrls: refUrls.length ? refUrls : undefined
+        count: getImageGenBatchCount()
       });
-      if (btn && !batchOpts.batch) {
-        btn.disabled = false;
-        restoreImageGenSubmitLabel();
-      }
-      if (!gen.ok) {
-        removePendingJob(pendingId);
-        renderImageGenFeed();
-        await window.PointsSystem?.refreshCreditsFromServer?.();
-        if (!batchOpts.silentToast) toast(friendlyGenErrorMessage(gen.message));
-        return { ok: false };
-      }
-      if (typeof gen.data.creditsRemaining === 'number') {
-        window.PointsSystem?.setCreditsFromServer?.(gen.data.creditsRemaining);
-        window.PointsSystem?.updateCreditsUI?.();
-      }
-      cost = gen.data.creditsCharged ?? cost;
-      pendingJob.cost = cost;
 
-      if (gen.data.status === 'completed' && gen.data.imageUrl) {
-        removePendingJob(pendingId);
-        if (gen.data.jobId) trackSessionGenJob(gen.data.jobId);
-        void finishImageGenRun({
+      const modelLabel = window.PointsSystem?.getImageGenModel?.(model)?.label || model;
+      const pendingId = genId('pending');
+      const pendingJob = {
+        id: pendingId,
+        prompt,
+        model,
+        modelLabel,
+        resolution,
+        quality,
+        size,
+        cost,
+        fromInspirationDraw: !!batchOpts.fromInspirationDraw,
+        batchIndex: batchOpts.batchIndex || null,
+        batchTotal: batchOpts.batchTotal || null,
+        batchId: batchOpts.batchId || null,
+        silentToast: !!batchOpts.silentToast,
+        startedAt: Date.now()
+      };
+      imageGenPendingJobs.unshift(pendingJob);
+      persistPendingGenJobs();
+      imageGenFeedTab = 'warehouse';
+      document.querySelectorAll('[data-feed-tab]').forEach(b => {
+        b.classList.toggle('active', b.dataset.feedTab === 'warehouse');
+      });
+      updateImageGenFeedHint();
+      renderImageGenFeed();
+      if (singleRun && window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
+        window.MobileUI.setImageGenView('feed', { scrollToTop: true });
+      }
+
+      if (singleRun && btn) {
+        btn.textContent = '提交中…';
+      }
+
+      function friendlyGenErrorMessage(msg) {
+        const s = String(msg || '');
+        if (/登录已过期|请先登录|UNAUTHORIZED/i.test(s)) {
+          return '登录状态已失效，请点侧栏「退出」后重新登录，或直接关闭页面再打开';
+        }
+        if (/insufficient balance/i.test(s) || (/insufficient/i.test(s) && /balance/i.test(s))) {
+          return '生图服务商账户余额不足，请联系站长充值；您的积分已全额退回';
+        }
+        if (/invalid.*api.*key/i.test(s)) {
+          return '生图接口密钥无效或已过期，请联系站长检查配置；您的积分已全额退回';
+        }
+        if (s.length > 120) return s.slice(0, 120) + '…';
+        return s || '生图失败，您的积分已全额退回';
+      }
+
+      if (useApi) {
+        const refSources = batchOpts.skipRefImages
+          ? []
+          : Array.isArray(batchOpts.refImages) && batchOpts.refImages.length
+            ? batchOpts.refImages
+            : imageGenRefImages;
+        const refUrls = await resolveRefUrlsFromList(refSources);
+        if (refSources.length && !refUrls.length) {
+          failPendingJob(pendingId, '参考图无法用于生图');
+          renderImageGenFeed();
+          toast('参考图无法用于生图（须为网络图片），请去掉参考图或重新上传后再试');
+          return { ok: false, message: '参考图无法用于生图' };
+        }
+        if (refSources.length && refUrls.length < refSources.length && !batchOpts.silentToast) {
+          toast(`已使用 ${refUrls.length}/${refSources.length} 张参考图继续生成`);
+        }
+        const genPayload = {
           prompt,
           model,
           resolution,
           quality,
           size,
-          image: gen.data.imageUrl,
+          refImageUrls: refUrls.length ? refUrls : undefined
+        };
+        let gen = await window.PromptHubApi.generateImage(genPayload);
+        if (!gen.ok && batchOpts.batch) {
+          const retryable = gen.code === 'RATE_LIMITED'
+            || gen.status === 429
+            || /过于频繁|upstream|502|503|429|rate limit/i.test(String(gen.message || ''));
+          for (let attempt = 0; attempt < 2 && !gen.ok && retryable; attempt += 1) {
+            await new Promise((r) => setTimeout(r, 2000 + attempt * 2500));
+            gen = await window.PromptHubApi.generateImage(genPayload);
+          }
+        }
+        if (!gen.ok) {
+          const errMsg = friendlyGenErrorMessage(gen.message);
+          failPendingJob(pendingId, errMsg);
+          renderImageGenFeed();
+          await window.PointsSystem?.refreshCreditsFromServer?.();
+          if (!batchOpts.silentToast) toast(errMsg);
+          return { ok: false, message: errMsg, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
+        }
+        if (typeof gen.data.creditsRemaining === 'number') {
+          window.PointsSystem?.setCreditsFromServer?.(gen.data.creditsRemaining);
+          window.PointsSystem?.updateCreditsUI?.();
+        }
+        cost = gen.data.creditsCharged ?? cost;
+        pendingJob.cost = cost;
+
+        if (gen.data.status === 'completed' && gen.data.imageUrl) {
+          removePendingJob(pendingId);
+          if (gen.data.jobId) trackSessionGenJob(gen.data.jobId);
+          void finishImageGenRun({
+            prompt,
+            model,
+            resolution,
+            quality,
+            size,
+            image: gen.data.imageUrl,
+            cost,
+            jobId: gen.data.jobId,
+            silentToast: batchOpts.silentToast,
+            fromInspirationDraw: !!batchOpts.fromInspirationDraw
+          });
+          return { ok: true, creditsCharged: cost };
+        }
+
+        const jobId = gen.data.jobId;
+        if (!jobId) {
+          failPendingJob(pendingId, '未收到任务编号');
+          renderImageGenFeed();
+          if (!batchOpts.silentToast) toast('未收到任务编号，请重试');
+          return { ok: false, message: '未收到任务编号', batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
+        }
+        pendingJob.jobId = jobId;
+        trackSessionGenJob(jobId);
+        persistPendingGenJobs();
+        if (!batchOpts.silentToast) toast('已提交生图，右侧可查看进度，可继续点击生成');
+        void pollGenerationJobUntilDone(jobId, pendingId, {
+          prompt,
+          model,
+          resolution,
+          quality,
+          size,
           cost,
-          jobId: gen.data.jobId,
-          silentToast: batchOpts.silentToast
+          jobId,
+          fromInspirationDraw: !!batchOpts.fromInspirationDraw,
+          silentToast: !!batchOpts.silentToast,
+          batchIndex: batchOpts.batchIndex || null,
+          batchTotal: batchOpts.batchTotal || null,
+          batchId: batchOpts.batchId || null
         });
         return { ok: true, creditsCharged: cost };
       }
 
-      const jobId = gen.data.jobId;
-      if (!jobId) {
-        removePendingJob(pendingId);
-        renderImageGenFeed();
-        if (!batchOpts.silentToast) toast('未收到任务编号，请重试');
-        return { ok: false };
+      removePendingJob(pendingId);
+      renderImageGenFeed();
+      if (!batchOpts.silentToast) toast('请登录并连接后端 API 后使用真实生图（演示占位已关闭）');
+      return { ok: false };
+    } catch (e) {
+      console.error('[imagegen] runImageGenWithPrompt failed', e);
+      if (!batchOpts.silentToast) {
+        const msg = String(e?.message || '');
+        const hint = /quota|exceeded/i.test(msg)
+          ? '浏览器存储已满，已跳过草稿保存；请清除站点数据或减少参考图后重试'
+          : msg || '请刷新页面后重试';
+        toast('生图提交失败：' + hint);
       }
-      pendingJob.jobId = jobId;
-      trackSessionGenJob(jobId);
-      if (!batchOpts.silentToast) toast('已提交生图，右侧可查看进度，可继续点击生成');
-      void pollGenerationJobUntilDone(jobId, pendingId, {
-        prompt,
-        model,
-        resolution,
-        quality,
-        size,
-        cost,
-        jobId
-      });
-      return { ok: true, creditsCharged: cost };
+      return { ok: false, message: e?.message || 'submit failed' };
+    } finally {
+      if (singleRun && btn) {
+        btn.disabled = false;
+        restoreImageGenSubmitLabel();
+      }
     }
-
-    removePendingJob(pendingId);
-    renderImageGenFeed();
-    if (btn && !batchOpts.batch) {
-      btn.disabled = false;
-      restoreImageGenSubmitLabel();
-    }
-    if (!batchOpts.silentToast) toast('请登录并连接后端 API 后使用真实生图（演示占位已关闭）');
-    return { ok: false };
   }
 
-  function runImageGenDemo() {
-    return runImageGenWithPrompt();
+  async function runImageGenDemo() {
+    if (imageGenBatchRunning) {
+      toast('生图任务提交中，请稍候');
+      return;
+    }
+    const count = getImageGenBatchCount();
+    if (count <= 1) {
+      await runImageGenWithPrompt();
+      return;
+    }
+
+    const prompt = String(document.getElementById('imageGenPrompt')?.value || '').trim();
+    if (!prompt) {
+      toast('请先填写提示词');
+      return;
+    }
+    if (!window.AuthGate?.requireAuth?.('imagegen')) return;
+
+    const meta = getImageGenFormMeta();
+    let unit = window.PointsSystem?.getImageGenCost?.(meta.model, meta.resolution) ?? 10;
+    if (window.PointsSystem?.useApiForAccount?.()) {
+      const quoted = await quoteGenerationCost(meta.resolution, meta.quality, meta.model, unit);
+      unit = quoted.cost;
+    }
+    const balance = window.PointsSystem?.getCredits?.() ?? 0;
+    const totalNeed = unit * count;
+    if (balance < unit) {
+      toast(`积分不足（每张 ${unit}，当前 ${balance}）`);
+      return;
+    }
+    if (balance < totalNeed) {
+      toast(`积分约够 ${Math.floor(balance / unit)} 张，将按顺序提交直到不足（${unit} 积分/张）`);
+    }
+
+    imageGenBatchRunning = true;
+    const btn = document.getElementById('imageGenSubmit');
+    if (btn) btn.disabled = true;
+    try {
+      let ok = 0;
+      let charged = 0;
+      for (let i = 0; i < count; i += 1) {
+        const curBalance = window.PointsSystem?.getCredits?.() ?? 0;
+        if (curBalance < unit && i > 0) break;
+        if (btn) btn.textContent = `提交中 ${i + 1}/${count}…`;
+        const res = await runImageGenWithPrompt(undefined, { silentToast: true, batch: true });
+        if (res?.ok) {
+          ok += 1;
+          charged += res.creditsCharged || unit;
+        } else if (res?.reason === 'credits') {
+          break;
+        } else if (i === 0) {
+          break;
+        }
+        if (i < count - 1) await new Promise((r) => setTimeout(r, 1000 + Math.floor(Math.random() * 600)));
+      }
+      await window.PointsSystem?.refreshCreditsFromServer?.();
+      window.PointsSystem?.updateCreditsUI?.();
+      if (ok > 0) {
+        toast(`已提交 ${ok}/${count} 张生图，已扣约 ${charged} 积分（${unit} 积分/张）`);
+        if (window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
+          window.MobileUI.setImageGenView('feed', { scrollToTop: true });
+        }
+      }
+    } catch (e) {
+      console.error('[imagegen] batch submit failed', e);
+      toast('批量生图提交失败，请刷新页面后重试');
+    } finally {
+      imageGenBatchRunning = false;
+      if (btn) {
+        btn.disabled = false;
+        restoreImageGenSubmitLabel();
+      }
+    }
   }
 
-  async function finishImageGenRun({ prompt, model, resolution, quality, size, image, cost, btn, jobId, silentToast, isRecovery }) {
+  async function finishImageGenRun({ prompt, model, resolution, quality, size, image, cost, btn, jobId, silentToast, isRecovery, fromInspirationDraw }) {
     if (!image) {
       toast('图片地址无效，请重试');
       return;
@@ -5245,7 +5905,7 @@
       if (creations.some(c => c.jobId === jid)) {
         clearSessionGenJob(jid);
         imageGenFeedTab = 'warehouse';
-        renderImageGenFeed();
+        renderImageGenFeed({ preserveScroll: true });
         return;
       }
       if (finishingJobIds.has(jid)) return;
@@ -5302,9 +5962,10 @@
       jobId: jid,
       title: '',
       publishToCommunity: publish,
+      fromInspirationDraw: !!fromInspirationDraw,
       silentToast: !!silentToast
     });
-    renderImageGenFeed();
+    renderImageGenFeed({ preserveScroll: true });
     if (isRecovery) {
       /* 恢复流程在 recoverRecentGenerationJobs 末尾统一提示 */
     } else if (!silentToast) {
@@ -5316,9 +5977,6 @@
         toast(`已生成（-${cost} 积分）`);
       }
     }
-    if (window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
-      window.MobileUI.setImageGenView('feed');
-    }
     if (jid) clearSessionGenJob(jid);
     } finally {
       if (jid) finishingJobIds.delete(jid);
@@ -5327,15 +5985,16 @@
 
   function updateImageGenFeedHint() {
     const el = document.getElementById('imageGenFeedHint');
-    const recoverRow = document.getElementById('imageGenRecoverRow');
     if (!el) return;
     const mobile = window.MobileUI?.isMobile?.();
     const warehouse = imageGenFeedTab === 'warehouse';
-    if (recoverRow) recoverRow.classList.toggle('hidden', !warehouse);
     if (warehouse) {
+      const pendingN = imageGenPendingJobs.length;
+      const failedN = imageGenFailedJobs.length;
+      const extra = failedN ? ` · 失败 ${failedN} 张可重试` : '';
       el.textContent = mobile
-        ? '两列浏览 · 生成完成后自动入库 · 真丢图可点「恢复丢失的生图」'
-        : '卡片仓库 · 生成中任务显示在顶部 · 丢失的生图请点「恢复丢失的生图」（已删除的不会恢复）';
+        ? `两列浏览 · 进行中 ${pendingN} 张${extra}`
+        : `卡片仓库 · 进行中 ${pendingN} 张显示在顶部${extra} · 失败项带序号与提示词`;
     } else if (imageGenFeedTab === 'community') {
       el.textContent = mobile
         ? '社区作品 · 点图放大 · 按钮复制或填入生图'
@@ -5379,16 +6038,45 @@
 
   function buildFeedPendingCardHtml(job) {
     const badges = [job.modelLabel || '生图中', (job.resolution || '1k').toUpperCase()];
+    const batchTag = batchIndexLabel(job.batchIndex, job.batchTotal);
+    if (batchTag) badges.unshift(batchTag);
     const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${esc(b)}</span>`).join('');
+    const pendingLabel = batchTag ? `${batchTag} · 生成中` : '生成中';
     return `<article class="imagegen-feed-card imagegen-feed-card-tile imagegen-feed-card--pending" data-feed-id="${esc(job.id)}" data-pending="1">
       <div class="imagegen-feed-media imagegen-gen-pending" aria-busy="true">
-        <span class="imagegen-gen-pending-label">生成中</span>
+        <span class="imagegen-gen-pending-label">${esc(pendingLabel)}</span>
       </div>
       <div class="imagegen-feed-content">
         <p class="imagegen-feed-prompt">${esc((job.prompt || '').slice(0, 120))}</p>
         <div class="imagegen-feed-tags">${badgeHtml}</div>
         <div class="imagegen-feed-foot">
           <span class="imagegen-feed-meta">预计 1–3 分钟 · 可继续提交</span>
+        </div>
+      </div>
+    </article>`;
+  }
+
+  function buildFeedFailedCardHtml(job) {
+    const batchTag = batchIndexLabel(job.batchIndex, job.batchTotal);
+    const badges = [];
+    if (batchTag) badges.push(batchTag);
+    if (job.modelLabel) badges.push(job.modelLabel);
+    badges.push('失败');
+    const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge imagegen-feed-badge--fail">${esc(b)}</span>`).join('');
+    const err = (job.errorMessage || '生图失败').slice(0, 100);
+    const failLabel = batchTag ? `${batchTag} · 失败` : '生成失败';
+    return `<article class="imagegen-feed-card imagegen-feed-card-tile imagegen-feed-card--failed" data-feed-id="${esc(job.id)}" data-failed="1" data-feed-prompt="${esc(job.prompt || '')}"${job.batchIndex ? ` data-batch-index="${job.batchIndex}"` : ''}${job.batchTotal ? ` data-batch-total="${job.batchTotal}"` : ''}>
+      <div class="imagegen-feed-media imagegen-gen-failed">
+        <span class="imagegen-gen-failed-label">${esc(failLabel)}</span>
+      </div>
+      <div class="imagegen-feed-content">
+        <p class="imagegen-feed-prompt">${esc((job.prompt || '').slice(0, 120))}</p>
+        <p class="imagegen-gen-failed-error" title="${esc(job.errorMessage || '')}">${esc(err)}</p>
+        <div class="imagegen-feed-tags">${badgeHtml}</div>
+        <div class="imagegen-feed-foot imagegen-feed-foot--failed">
+          <button type="button" class="btn btn-primary btn-sm" data-failed-retry>重试</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-failed-copy>复制提示词</button>
+          <button type="button" class="btn btn-ghost btn-sm imagegen-feed-del" data-failed-dismiss title="关闭">×</button>
         </div>
       </div>
     </article>`;
@@ -5750,20 +6438,25 @@
     if (tLabelEl) tLabelEl.textContent = tLabel;
   }
 
-  async function renderImageGenFeed() {
+  async function renderImageGenFeed(opts = {}) {
+    const preserveScroll = opts.preserveScroll !== false;
     const wrap = document.getElementById('imageGenFeed');
     if (!wrap) return;
+    const scrollTop = preserveScroll ? wrap.scrollTop : 0;
     syncImageGenWarehouseFiltersUI();
     syncImageGenCommunityFiltersUI();
     let html = '';
     if (imageGenFeedTab === 'warehouse') {
-      const pending = imageGenPendingJobs.slice(0, 8);
+      const pending = imageGenPendingJobs.slice(0, 16);
+      const failed = imageGenFailedJobs.slice(0, 12);
       const list = typeof window.getWarehouseCardsForImageGen === 'function'
         ? window.getWarehouseCardsForImageGen({ group: imageGenWhGroup, tag: imageGenWhTag }) : [];
-      if (!pending.length && !list.length) {
+      if (!pending.length && !failed.length && !list.length) {
         html = '<p class="imagegen-feed-empty">仓库暂无卡片<br><button type="button" class="btn btn-primary btn-sm" onclick="createNewCard({forceOpenPanel:true})">新建卡片</button></p>';
       } else {
-        html = pending.map(j => buildFeedPendingCardHtml(j)).join('') + list.map(c => {
+        html = pending.map(j => buildFeedPendingCardHtml(j)).join('')
+          + failed.map(j => buildFeedFailedCardHtml(j)).join('')
+          + list.map(c => {
           const groupLabel = c.group || '未分类';
           const titleTrim = (c.title || '').trim();
           const tagPart = (c.tags || []).slice(0, 2).join(' · ');
@@ -5838,6 +6531,7 @@
     } else {
       layoutImageGenFeedMasonry();
     }
+    wrap.scrollTop = scrollTop;
 
     void (async () => {
       const prefetchPromise = refsSlice.length && window.SupabaseSync?.prefetchDisplayUrlsWithCap
@@ -5859,14 +6553,37 @@
       } else {
         layoutImageGenFeedMasonry();
       }
+      wrap.scrollTop = scrollTop;
       window.SupabaseSync?.patchImageSrcFromCache?.(wrap);
     })();
   }
 
   function bindImageGenFeedCardEvents(wrap) {
     if (!wrap) return;
+    wrap.querySelectorAll('.imagegen-feed-card[data-failed="1"]').forEach(card => {
+      const failId = card.dataset.feedId;
+      const prompt = card.dataset.feedPrompt || '';
+      card.querySelector('[data-failed-retry]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fillFeedPromptToImageGen(prompt);
+        const label = batchIndexLabel(
+          Number(card.dataset.batchIndex) || null,
+          Number(card.dataset.batchTotal) || null
+        );
+        toast(label ? `${label} 已填入提示词，可再次生图` : '已填入提示词，可再次生图');
+      });
+      card.querySelector('[data-failed-copy]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        copyFeedPromptText(prompt);
+      });
+      card.querySelector('[data-failed-dismiss]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeFailedGenJob(failId);
+        renderImageGenFeed({ preserveScroll: true });
+      });
+    });
     wrap.querySelectorAll('.imagegen-feed-card').forEach(card => {
-      if (card.dataset.pending === '1') return;
+      if (card.dataset.pending === '1' || card.dataset.failed === '1') return;
       const feedId = card.dataset.feedId;
       card.querySelector('.imagegen-feed-thumb-btn')?.addEventListener('click', e => {
         e.stopPropagation();
@@ -5973,7 +6690,13 @@
         closeUserProfile();
       }
     });
-    document.getElementById('imageGenSubmit')?.addEventListener('click', runImageGenDemo);
+    document.getElementById('imageGenSubmit')?.addEventListener('click', () => {
+      void runImageGenDemo().catch((e) => {
+        console.error('[imagegen] submit click failed', e);
+        toast('生图提交异常，请刷新页面后重试');
+        resetImageGenSubmitState();
+      });
+    });
     document.getElementById('imageGenResolution')?.addEventListener('change', updateImageGenPricingUI);
     document.querySelectorAll('[data-feed-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -6031,9 +6754,8 @@
     bindImageGenWarehouseFilterMobileUI();
     bindImageGenUpload();
     bindImageGenPromptTools();
-    document.getElementById('imageGenRecoverBtn')?.addEventListener('click', () => {
-      void recoverLostGenerationsManual();
-    });
+    document.getElementById('imageGenRecoverBtn')?.remove();
+    document.getElementById('imageGenCount')?.addEventListener('change', updateImageGenCostHint);
     document.getElementById('imageGenModel')?.addEventListener('change', updateImageGenPricingUI);
     document.getElementById('imageGenResolution')?.addEventListener('input', updateImageGenCostHint);
     document.getElementById('imageGenQuality')?.addEventListener('change', updateImageGenCostHint);
@@ -6094,6 +6816,8 @@
       } else if (warmCards.length && window.SupabaseSync?.prefetchCardsImages) {
         void window.SupabaseSync.prefetchCardsImages(warmCards, 4000);
       }
+      window.CommunityGacha?.init?.();
+      window.CommunityGacha?.refreshEntryButton?.();
     }
     if (app === 'creations') {
       if (!document.getElementById('pageCreations')?.classList.contains('active')) return;
@@ -6118,6 +6842,8 @@
       pruneCreations();
       initImageGenForm();
       updateImageGenFeedHint();
+      void resumePendingGenerationJobs();
+      scheduleGenJobsSync(800);
       if (!feedHasRenderedContent('imageGenFeed', '.imagegen-feed-card')) {
         renderImageGenFeed();
       } else {
@@ -6133,6 +6859,7 @@
     bindUI();
     bindPublishToggle();
     initMyHomeTabs();
+    startGenJobsBackgroundSync();
     onAppChange(localStorage.getItem('promptrepo_app_page') || 'community');
   }
 
@@ -6267,6 +6994,7 @@
     syncPublishToggleForOpenCard,
     syncMyPostsToPublicFeed,
     renderCommunity,
+    getCommunityFeedForDisplay,
     toggleCommunityAppreciate,
     exitCommunityAppreciate,
     onAppreciateViewerClose,
@@ -6290,16 +7018,19 @@
     layoutCommunityMasonry,
     relayoutCommunityFeeds,
     onCardDeletedForGen,
-    recoverLostGenerationsManual,
     recoverRecentGenerationJobs,
+    resumePendingGenerationJobs,
+    scheduleGenJobsSync,
     renderCreations,
     renderMyHomeProfile,
+    onDisplayNameChanged,
     scheduleCreationsLayout: () => scheduleCommunityLayout('creationsGrid'),
     fillFormPromptOnly,
     copyFeedPromptText,
     fillFeedPromptToImageGen,
     fillCardToImageGen,
     runImageGenWithPrompt,
+    recordImageGenFailure: addFailedGenJob,
     getImageGenRefImages: () => [...imageGenRefImages],
     updateNotifyBadge,
     getCommunityPostsForTasks() {

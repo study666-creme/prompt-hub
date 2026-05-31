@@ -1,6 +1,6 @@
 # 浏览器插件（Prompt Hub 快捷存卡）
 
-> 状态：**v1.0.3** · 目录 `extension/`
+> 状态：**v1.0.4** · 目录 `extension/`
 
 ## 安装（个人 / 内测）
 
@@ -17,13 +17,14 @@
 | **Microsoft Edge 加载项** | [Partner Center](https://partner.microsoft.com/dashboard/microsoftedge/) 提交同一套扩展，审核通常较快。 |
 | **官网下载（进阶）** | 在 prompt-hub.cn 提供「安装说明 + zip 包」；企业环境可组策略推送。普通用户仍推荐商店安装。 |
 
-**建议流程**：内测稳定 → 上架 Edge + Chrome → 在 Prompt Hub 设置页增加「安装浏览器插件」链接。
+**建议流程**：内测稳定 → 上架 Edge + Chrome → 在 Prompt Hub 设置页增加「安装浏览器插件」链接。详见 **`docs/CHROME-WEB-STORE.md`**。
 
-## 功能（v1.0.3）
+## 功能（v1.0.4）
 
 | 功能 | 说明 |
 |------|------|
 | **悬浮存卡面板** | 拖入/粘贴图片、填写提示词、**选择标签**后点「保存到仓库」 |
+| **公开到社区** | 与主页卡片库相同：开启后保存即公开；默认跟随设置「新建默认发布」；须提示词 ≥15 字且配图 |
 | **真正关闭** | 标题栏 **×** 关闭本页面板；本标签不再自动出现，需扩展弹窗「在当前页打开面板」 |
 | **收起** | **−** 仅折叠内容，面板仍保留 |
 | **内容不丢失** | 面板内拖入/粘贴图片**仅预览**，点保存才提交；成功保存后才清空 |
@@ -51,9 +52,9 @@ grant select, insert, update on public.user_data to service_role;
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/v1/extension/quick-card` | 保存卡片（body 可含 `tags: string[]`） |
+| POST | `/api/v1/extension/quick-card` | 保存卡片（body 可含 `tags`、`publishToCommunity`） |
 | GET | `/api/v1/extension/tags` | 读取用户仓库已有标签 |
-| GET | `/api/v1/extension/status` | 登录与会员状态 |
+| GET | `/api/v1/extension/status` | 登录、会员、`defaultPublishCommunity` |
 
 ## 合规
 

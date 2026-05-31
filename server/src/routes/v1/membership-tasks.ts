@@ -29,6 +29,7 @@ const syncBodySchema = z.object({
   quickPreviewCommunityUsed: z.boolean().optional(),
   quickPreviewCommunityFavorited: z.boolean().optional(),
   assetStudioLinkCard: z.boolean().optional(),
+  inspirationDrawUsed: z.boolean().optional(),
   communityPosts: z
     .array(
       z.object({
@@ -195,6 +196,7 @@ membershipTaskRoutes.post('/sync', rateLimit(120, 60_000), async c => {
     patch.community_quick_preview_favorited = true;
   }
   if (parsed.data.assetStudioLinkCard === true) patch.asset_studio_link_card = true;
+  if (parsed.data.inspirationDrawUsed === true) patch.inspiration_draw_used = true;
   if (parsed.data.communityPosts?.length) {
     patch.community_qualified_count = countQualifyingPosts(parsed.data.communityPosts);
   }

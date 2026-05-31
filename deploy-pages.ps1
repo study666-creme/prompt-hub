@@ -39,9 +39,13 @@ try {
   }
 }
 if ($code -ne 0) {
-  Write-Host "Failed. If not logged in, run once:"
-  Write-Host "  cd server"
-  Write-Host "  npm exec wrangler login"
+  Write-Host ""
+  Write-Host "部署失败（常见原因：Cloudflare 登录过期，错误码 10000）" -ForegroundColor Red
+  Write-Host "请按下面步骤重新登录后再部署：" -ForegroundColor Yellow
+  Write-Host "  第 1 步  cd server"
+  Write-Host "  第 2 步  npm exec wrangler login"
+  Write-Host "  第 3 步  浏览器完成授权后，回到项目根目录再运行 deploy-pages.ps1"
+  Write-Host ""
   exit $code
 }
 Write-Host "OK. Open your site and hard refresh (Ctrl+Shift+R)."

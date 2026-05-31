@@ -248,8 +248,119 @@
   background: #4f46e5;
 }
 
+.ph-ext-settings-btn {
+  border: none;
+  background: transparent;
+  color: #98989d;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+.ph-ext-settings-btn:hover,
+.ph-ext-settings-btn.is-active {
+  color: #a5b4fc;
+}
+
+.ph-ext-settings {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #141416;
+  border: 1px solid #3a3a3c;
+}
+.ph-ext-settings.hidden {
+  display: none;
+}
+.ph-ext-settings-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #c7c7cc;
+}
+.ph-ext-pref {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #98989d;
+  cursor: pointer;
+}
+.ph-ext-pref:last-of-type {
+  margin-bottom: 0;
+}
+.ph-ext-pref input {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.ph-ext-settings-action {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #2c2c2e;
+  color: #a5b4fc;
+  font-size: 11px;
+  cursor: pointer;
+}
+.ph-ext-settings-action.hidden {
+  display: none;
+}
+.ph-ext-settings-action:hover:not(:disabled) {
+  background: #3a3a3c;
+}
+.ph-ext-settings-action:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
 .ph-ext-tags-wrap {
   margin-top: 8px;
+}
+
+.ph-ext-publish-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #3a3a3c;
+}
+
+.ph-ext-publish-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e8e8ed;
+}
+
+.ph-ext-toggle-btn {
+  flex-shrink: 0;
+  min-width: 44px;
+  border: 1px solid #48484a;
+  border-radius: 6px;
+  padding: 4px 12px;
+  background: #2c2c2e;
+  color: #98989d;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.ph-ext-toggle-btn:hover {
+  border-color: #6366f1;
+  color: #c7c7cc;
+}
+
+.ph-ext-toggle-btn.is-on {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #fff;
 }
 
 .ph-ext-tags-label {

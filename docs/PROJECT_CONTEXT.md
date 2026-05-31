@@ -20,39 +20,22 @@
 
 ---
 
-## 当前部署阶段（2026-05-30 · 构建 **20260530c**）
+## 当前部署阶段（2026-05-31 · 构建 **20260602e**）
 
 | 项 | 状态 |
 |----|------|
 | Worker | `prompt-hub-api` · API https://api.prompt-hub.cn |
-| Pages | https://prompt-hub.cn · 资产创作 `asset-studio.html` |
-| 构建号 | 主站 **20260530c** · SW **prompt-hub-v282** |
-| 卡片库 | 批量签名 32 张/并发 8；首屏 patch 缓存 |
-| 资产创作 | 导入 UI 两张独立封面卡；IndexedDB 读主站 |
-| 详细规划 | **[PROJECT-SNAPSHOT.md](./PROJECT-SNAPSHOT.md)** |
+| Pages | https://prompt-hub.cn |
+| 构建号 | **20260602e**（已部署 Pages） |
+| `/health`、兑换、生图 | 已打通 |
+| 资产包 | 选卡发布 / 层叠封面 / 开包导入 / 下架；需 Supabase 迁移 |
+| 生图仓库详情 | 右侧预览栏收窄，竖图两侧留白优化 |
 
-### 本轮改动（20260530c）
+### 已知问题 / 下一步
 
-- 修复社区 `renderPosts` 初始化顺序错误（只显示一张的根因）
-- 社区图片预取时间加长、签图并发提高
-
-### 上轮（20260530b）
-
-- 导入弹窗：两张独立卡片，库内图作背景、库名作封面字
-- 卡片图：预取 12s、warm 12s、签并发 8
-- ogl 背景改 esm.sh
-
-### 待用户执行
-
-- **Ctrl+Shift+R** 强刷主站 + 资产创作页
-
-### 已知问题
-
-- 部分历史卡片 Storage 404（已删文件）
-
-### 下一步
-
-- 验收首屏图片是否在数秒内批量出现
+- 强刷确认 `window.__APP_BUILD__ === '20260602e'`
+- 资产包迁移：`20260530120000` + `20260530130000`（若未跑）
+- 加入社群 +100 积分：入群后人工引导领取
 
 ### 测试账号
 
@@ -63,6 +46,9 @@
 ```powershell
 cd d:\prompt-hub
 .\deploy-pages.ps1
+cd server
+npm exec wrangler deploy
+```
 cd server
 .\deploy.ps1
 ```
@@ -78,15 +64,3 @@ cd server
 | **[BROWSER-EXTENSION.md](./BROWSER-EXTENSION.md)** | 插件可行性 / 合规 |
 | **[PROJECT-SNAPSHOT.md](./PROJECT-SNAPSHOT.md)** | **详细** 规划 + 现状 |
 | [AI-HANDOFF.md](./AI-HANDOFF.md) | Grep 表、接手流程 |
-
----
-
-## 开发约定
-
-1. 最小 diff；改静态资源 bump `__APP_BUILD__` + `sw.js`
-2. 会员卡密**不按**领取方式分批发码；兑换时传 `creditGrantMode`
-3. 轻量会员 `lite` 仅 `daily` 积分
-
----
-
-*最后更新：2026-05-30 — 构建 20260530b*

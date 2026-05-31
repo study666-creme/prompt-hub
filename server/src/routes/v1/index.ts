@@ -11,6 +11,7 @@ import { communityMediaSignHandler, mediaRoutes } from './media';
 import { extensionRoutes } from './extension';
 import { chatRoutes } from './chat';
 import { promptToolsRoutes } from './prompt-tools';
+import { assetPackagesPublicRoutes, assetPackagesRoutes } from './asset-packages';
 import { rateLimit } from '../../middleware/rate-limit';
 
 export const v1 = new Hono<{ Bindings: Env }>();
@@ -21,7 +22,12 @@ v1.get('/media/community/sign', rateLimit(400, 60_000), communityMediaSignHandle
 /** 全站社区 Feed：游客与所有用户可见 */
 v1.get('/community/feed', rateLimit(180, 60_000), communityFeedHandler);
 
+/** 卡片资产包市场：游客可浏览列表 */
+v1.route('/asset-packages', assetPackagesPublicRoutes);
+
 v1.use('*', requireAuth);
+
+v1.route('/asset-packages', assetPackagesRoutes);
 
 v1.route('/me', meRoutes);
 v1.route('/membership', membershipRoutes);

@@ -160,21 +160,38 @@
     return left >= minRemainingSec;
   }
 
+  const SESSION_OP_TIMEOUT_MS = 12000;
+
+  function withSessionTimeout(promise, ms = SESSION_OP_TIMEOUT_MS) {
+    return Promise.race([
+      promise,
+      new Promise((resolve) => setTimeout(() => resolve('__ph_session_timeout__'), ms))
+    ]);
+  }
+
   async function refreshSessionOnce() {
     const sb = getClient();
     if (!sb) return null;
     if (refreshSessionPromise) return refreshSessionPromise;
     refreshSessionPromise = (async () => {
       try {
-        const { data, error } = await sb.auth.refreshSession();
-        if (error) throw error;
-        if (data?.session?.access_token) {
-          session = data.session;
+        const work = (async () => {
+          const { data, error } = await sb.auth.refreshSession();
+          if (error) throw error;
+          if (data?.session?.access_token) {
+            session = data.session;
+            return session;
+          }
+          const { data: fresh } = await sb.auth.getSession();
+          session = fresh?.session ?? null;
           return session;
+        })();
+        const result = await withSessionTimeout(work);
+        if (result === '__ph_session_timeout__') {
+          console.warn('[SupabaseSync] refreshSession timed out');
+          return session?.access_token ? session : null;
         }
-        const { data: fresh } = await sb.auth.getSession();
-        session = fresh?.session ?? null;
-        return session;
+        return result;
       } catch (e) {
         console.warn('[SupabaseSync] refreshSession failed', e);
         return null;

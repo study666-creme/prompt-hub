@@ -12,12 +12,21 @@
     return !!u && u !== 'disabled';
   }
 
+  const ACCESS_TOKEN_TIMEOUT_MS = 10000;
+
   async function getAccessToken() {
-    if (window.SupabaseSync?.getValidAccessToken) {
-      return window.SupabaseSync.getValidAccessToken();
-    }
-    const session = window.SupabaseSync?.getSession?.();
-    return session?.access_token || null;
+    const task = (async () => {
+      if (window.SupabaseSync?.getValidAccessToken) {
+        return window.SupabaseSync.getValidAccessToken();
+      }
+      const session = window.SupabaseSync?.getSession?.();
+      return session?.access_token || null;
+    })();
+    const token = await Promise.race([
+      task,
+      new Promise((resolve) => setTimeout(() => resolve(null), ACCESS_TOKEN_TIMEOUT_MS))
+    ]);
+    return token || null;
   }
 
   const API_TIMEOUT_MS = 22000;
@@ -260,12 +269,80 @@
     return r;
   }
 
-  async function setDisplayName(displayName) {
+    async function setDisplayName(displayName) {
     const r = await request('PATCH', '/api/v1/me/display-name', { displayName });
     if (r.ok && r.data?.displayName) {
       window.__userDisplayName = String(r.data.displayName);
+      window.FeatureDraft?.onDisplayNameChanged?.();
     }
     return r;
+  }
+
+  async function listAssetPackages() {
+    return request('GET', '/api/v1/asset-packages');
+  }
+
+  async function listMyOwnedAssetPackages() {
+    return request('GET', '/api/v1/asset-packages/mine/owned');
+  }
+
+  async function listMyPublishedAssetPackages() {
+    return request('GET', '/api/v1/asset-packages/mine/published');
+  }
+
+  async function claimAssetPackage(id) {
+    return request('POST', `/api/v1/asset-packages/${encodeURIComponent(id)}/claim`);
+  }
+
+  async function publishAssetPackage(payload) {
+    return request('POST', '/api/v1/asset-packages', payload);
+  }
+
+  async function updateAssetPackage(id, payload) {
+    return request('PATCH', `/api/v1/asset-packages/${encodeURIComponent(id)}`, payload);
+  }
+
+  async function getAssetPackageContent(id) {
+    return request('GET', `/api/v1/asset-packages/${encodeURIComponent(id)}/content`);
+  }
+
+  async function importAssetPackage(id, warehouseId) {
+    return request('POST', `/api/v1/asset-packages/${encodeURIComponent(id)}/import`, { warehouseId });
+  }
+
+  async function downloadAssetPackageJson(id) {
+    if (!isConfigured()) {
+      return { ok: false, code: 'API_NOT_CONFIGURED', message: '未配置 API 地址' };
+    }
+    const token = await getAccessToken();
+    if (!token) return { ok: false, code: 'UNAUTHORIZED', message: '请先登录' };
+    try {
+      const res = await fetch(`${baseUrl()}/api/v1/asset-packages/${encodeURIComponent(id)}/export`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        let json = {};
+        try {
+          json = await res.json();
+        } catch (e) {
+          json = {};
+        }
+        const err = json.error || {};
+        return {
+          ok: false,
+          code: err.code || 'REQUEST_FAILED',
+          message: err.message || `下载失败 (${res.status})`
+        };
+      }
+      const blob = await res.blob();
+      const disp = res.headers.get('Content-Disposition') || '';
+      const m = /filename="([^"]+)"/.exec(disp);
+      const filename = m?.[1] || `asset-pack-${id}.json`;
+      return { ok: true, blob, filename };
+    } catch (e) {
+      if (isNetworkFetchError(e)) markApiUnreachable();
+      return { ok: false, code: 'NETWORK_ERROR', message: '无法连接 api.prompt-hub.cn，请检查网络或 VPN' };
+    }
   }
 
   async function redeem(code, opts) {
@@ -333,6 +410,18 @@
 
   async function promptToolsReverse(payload) {
     return request('POST', '/api/v1/prompt-tools/reverse', payload, { timeoutMs: 120000 });
+  }
+
+  async function promptToolsFission(payload) {
+    return request('POST', '/api/v1/prompt-tools/fission', payload, { timeoutMs: 120000 });
+  }
+
+  async function promptToolsPurifyDescribe(payload) {
+    return request('POST', '/api/v1/prompt-tools/purify-describe', payload, { timeoutMs: 120000 });
+  }
+
+  async function promptToolsInfo() {
+    return request('GET', '/api/v1/prompt-tools/info', null, { timeoutMs: API_FAST_TIMEOUT_MS });
   }
 
   async function listRecentGenerationJobs() {
@@ -553,6 +642,9 @@
     studioChatQuote,
     promptToolsOptimize,
     promptToolsReverse,
+    promptToolsFission,
+    promptToolsPurifyDescribe,
+    promptToolsInfo,
     listRecentGenerationJobs,
     getLedger,
     checkLikeMilestone,
@@ -567,6 +659,15 @@
     pushCommunityNotify,
     fetchCommunityNotifications,
     getGenerationImageUrl,
-    fetchMediaAsBlobUrl
+    fetchMediaAsBlobUrl,
+    listAssetPackages,
+    listMyOwnedAssetPackages,
+    listMyPublishedAssetPackages,
+    claimAssetPackage,
+    publishAssetPackage,
+    updateAssetPackage,
+    getAssetPackageContent,
+    importAssetPackage,
+    downloadAssetPackageJson
   };
 })();

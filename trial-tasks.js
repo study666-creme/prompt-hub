@@ -4,6 +4,7 @@
 (function () {
   const LS_PWA_FLAG = 'promptrepo_pwa_task_flag';
   const LS_ASSET_STUDIO_LINK = 'promptrepo_task_asset_studio_link';
+  const LS_INSPIRE_DRAW = 'promptrepo_inspire_draw_used';
   const LS_PENDING_INVITE = 'promptrepo_pending_invite';
   let syncDebounceTimer = null;
   let syncInflight = null;
@@ -134,8 +135,10 @@
     } catch (e) { /* ignore */ }
     const qp = window.__phQuickPreviewTask || {};
     let assetStudioLinkCard = false;
+    let inspirationDrawUsed = false;
     try {
       assetStudioLinkCard = localStorage.getItem(LS_ASSET_STUDIO_LINK) === '1';
+      inspirationDrawUsed = localStorage.getItem(LS_INSPIRE_DRAW) === '1';
     } catch (e) { /* ignore */ }
     return {
       cardsCount: Array.isArray(cards) ? cards.length : 0,
@@ -145,7 +148,8 @@
       quickPreviewWarehouseGotoGen: !!qp.warehouseGotoGen,
       quickPreviewCommunityUsed: !!qp.communityUsed,
       quickPreviewCommunityFavorited: !!qp.communityFavorited,
-      assetStudioLinkCard
+      assetStudioLinkCard,
+      inspirationDrawUsed
     };
   }
 

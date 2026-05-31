@@ -6,11 +6,13 @@ import { ApiError } from '../../lib/errors';
 import {
   listPublicCommunityFeed,
   likeCommunityPost,
+  resolvePublicImageRef,
   syncAuthorCommunityPosts,
   unpublishCommunityPost,
   upsertCommunityPost,
   type CommunityPostPayload
 } from '../../lib/community-feed';
+import { moderateCommunityContent } from '../../lib/community-moderation';
 import { tryGrantLikeMilestone } from '../../lib/like-milestone';
 import {
   listCommunityNotifications,
@@ -78,6 +80,25 @@ export async function communityFeedHandler(c: Context<{ Bindings: Env }>) {
   }
 }
 
+async function assertCommunityPublishAllowed(
+  c: Context<{ Bindings: Env }>,
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  payload: CommunityPostPayload
+) {
+  const resolvedImage = await resolvePublicImageRef(admin, userId, payload);
+  const mod = await moderateCommunityContent({
+    admin,
+    prompt: payload.prompt,
+    imageRef: resolvedImage || payload.image,
+    imageApiKey: c.env.IMAGE_API_KEY,
+    imageApiBaseUrl: c.env.IMAGE_API_BASE_URL
+  });
+  if (!mod.safe) {
+    throw new ApiError(400, 'CONTENT_REJECTED', mod.reason || '内容不符合社区规范');
+  }
+}
+
 /** 发布 / 更新自己的社区帖到全站 Feed */
 communityRoutes.post('/posts', async c => {
   const user = c.get('user');
@@ -87,9 +108,11 @@ communityRoutes.post('/posts', async c => {
   }
   const admin = createAdminClient(c.env);
   try {
+    await assertCommunityPublishAllowed(c, admin, user.id, parsed.data as CommunityPostPayload);
     const post = await upsertCommunityPost(admin, user.id, parsed.data as CommunityPostPayload);
     return c.json({ ok: true, data: { post } });
   } catch (e) {
+    if (e instanceof ApiError) throw e;
     const msg = String((e as Error).message || e);
     if (isMissingCommunityTable(e)) {
       throw new ApiError(503, 'MIGRATION_REQUIRED', '社区表未就绪，请执行数据库迁移');
@@ -126,11 +149,21 @@ communityRoutes.post('/posts/sync', async c => {
   const authorName =
     user.email?.split('@')[0] || '用户';
   try {
+    const allowed: CommunityPostPayload[] = [];
+    for (const p of parsed.data.posts as CommunityPostPayload[]) {
+      try {
+        await assertCommunityPublishAllowed(c, admin, user.id, p);
+        allowed.push(p);
+      } catch (e) {
+        if (e instanceof ApiError && e.code === 'CONTENT_REJECTED') continue;
+        if (e instanceof ApiError) throw e;
+      }
+    }
     const result = await syncAuthorCommunityPosts(
       admin,
       user.id,
       authorName,
-      parsed.data.posts as CommunityPostPayload[]
+      allowed
     );
     return c.json({ ok: true, data: result });
   } catch (e) {

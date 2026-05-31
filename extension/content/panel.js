@@ -3,10 +3,12 @@
   window.__PH_EXT_PANEL__ = true;
 
   const MAX_SELECTION = 8000;
+  const MIN_COMMUNITY_PROMPT_LEN = 15;
   const BLOCK_TAGS = new Set([
     'P', 'LI', 'TD', 'TH', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
     'BLOCKQUOTE', 'PRE', 'FIGCAPTION', 'ARTICLE', 'SECTION', 'DIV', 'SPAN'
   ]);
+
   let imageBase64 = null;
   let imageName = '';
   let saving = false;
@@ -15,8 +17,155 @@
   let hoverBlockText = '';
   let panelHovered = false;
   let hoverTimer = null;
+  let pageCaptureActive = false;
+  let pasteCaptureActive = false;
   let allTags = [];
   const currentTags = new Set();
+
+  let defaultPublishOn = true;
+  let publishOn = false;
+  let publishUserOff = false;
+
+  let panelPrefs = {
+    autoSaveWhenReady: true,
+    autoTrimOnSave: false,
+    autoEnablePublish: true
+  };
+
+  function getPromptText() {
+    return (wrap.querySelector('#phExtPrompt')?.value || '').trim();
+  }
+
+  function canPublishEligible() {
+    return getPromptText().length >= MIN_COMMUNITY_PROMPT_LEN && !!imageBase64;
+  }
+
+  function getPublishMissing() {
+    const missing = [];
+    if (getPromptText().length < MIN_COMMUNITY_PROMPT_LEN) {
+      missing.push(`提示词至少 ${MIN_COMMUNITY_PROMPT_LEN} 字`);
+    }
+    if (!imageBase64) missing.push('配图');
+    return missing;
+  }
+
+  function syncPublishState() {
+    if (publishUserOff) {
+      publishOn = false;
+      return;
+    }
+    if (panelPrefs.autoEnablePublish && defaultPublishOn) {
+      publishOn = canPublishEligible();
+      return;
+    }
+    if (publishOn && !canPublishEligible()) {
+      publishOn = false;
+    }
+  }
+
+  function applyPublishUi() {
+    syncPublishState();
+    const btn = wrap.querySelector('#phExtPublishBtn');
+    if (!btn) return;
+    btn.textContent = publishOn ? '开' : '关';
+    btn.classList.toggle('is-on', publishOn);
+    btn.setAttribute('aria-pressed', publishOn ? 'true' : 'false');
+  }
+
+  function readPublishIntent() {
+    syncPublishState();
+    return publishOn === true;
+  }
+
+  function onPublishBtnClick() {
+    if (publishOn) {
+      publishOn = false;
+      publishUserOff = true;
+      applyPublishUi();
+      return;
+    }
+    const missing = getPublishMissing();
+    if (missing.length) {
+      setStatus(`公开需：${missing.join('、')}`, true);
+      return;
+    }
+    publishOn = true;
+    publishUserOff = false;
+    applyPublishUi();
+  }
+
+  function onContentChanged() {
+    if (panelPrefs.autoEnablePublish && defaultPublishOn && !publishUserOff) {
+      publishOn = canPublishEligible();
+    }
+    applyPublishUi();
+    updateSettingsActions();
+    maybeAutoSave();
+  }
+
+  function maybeAutoSave() {
+    if (panelPrefs.autoSaveWhenReady === false) return;
+    if (saving) return;
+    if (!imageBase64 || !getPromptText()) return;
+    void doSave(true);
+  }
+
+  function loadPanelPrefs(cb) {
+    chrome.runtime.sendMessage({ type: 'PH_GET_PREFS' }, (res) => {
+      if (res?.ok && res.prefs) {
+        panelPrefs = { ...panelPrefs, ...res.prefs };
+      }
+      syncPrefsUi();
+      if (cb) cb();
+    });
+  }
+
+  function savePanelPrefs(patch) {
+    panelPrefs = { ...panelPrefs, ...patch };
+    chrome.runtime.sendMessage({ type: 'PH_SET_PREFS', prefs: panelPrefs });
+    syncPrefsUi();
+    onContentChanged();
+  }
+
+  function syncPrefsUi() {
+    const autoSave = wrap.querySelector('#phExtPrefAutoSave');
+    const autoTrim = wrap.querySelector('#phExtPrefAutoTrim');
+    const autoPub = wrap.querySelector('#phExtPrefAutoPublish');
+    if (autoSave) autoSave.checked = panelPrefs.autoSaveWhenReady !== false;
+    if (autoTrim) autoTrim.checked = panelPrefs.autoTrimOnSave === true;
+    if (autoPub) autoPub.checked = panelPrefs.autoEnablePublish !== false;
+    updatePasteHint();
+  }
+
+  function updatePasteHint() {
+    const el = wrap.querySelector('#phExtPasteHint');
+    if (!el) return;
+    el.textContent = panelPrefs.autoSaveWhenReady !== false
+      ? '提示词与图片都填入后将自动保存（可在设置关闭）'
+      : '自动保存已关闭，请手动点「保存到仓库」';
+  }
+
+  function updateSettingsActions() {
+    const trimBtn = wrap.querySelector('#phExtTrimBtnManual');
+    if (trimBtn) trimBtn.classList.toggle('hidden', !imageBase64);
+  }
+
+  function toggleSettingsSheet() {
+    const sheet = wrap.querySelector('#phExtSettings');
+    const btn = wrap.querySelector('#phExtSettingsBtn');
+    if (!sheet) return;
+    const open = sheet.classList.toggle('hidden');
+    if (btn) btn.classList.toggle('is-active', !open);
+  }
+
+  function fetchExtensionStatus() {
+    chrome.runtime.sendMessage({ type: 'PH_GET_STATUS' }, (res) => {
+      if (res?.ok && res.data) {
+        defaultPublishOn = res.data.defaultPublishCommunity !== false;
+      }
+      onContentChanged();
+    });
+  }
 
   const root = document.createElement('div');
   root.className = 'ph-ext-root';
@@ -61,6 +210,46 @@
     const t = String(raw || '').trim().replace(/^#+/, '');
     if (!t) return '';
     return `#${t.slice(0, 40)}`;
+  }
+
+  async function trimExtImageBlackBorder() {
+    if (!imageBase64 || !window.ImageTrim?.trimBlackBorders) {
+      setStatus('暂无图片可裁切', true);
+      return false;
+    }
+    const btn = wrap.querySelector('#phExtTrimBtnManual');
+    if (btn) btn.disabled = true;
+    setStatus('裁切中…');
+    try {
+      const result = await window.ImageTrim.trimBlackBorders(imageBase64);
+      if (!result?.trimmed) {
+        setStatus('未检测到明显黑边');
+        return false;
+      }
+      imageBase64 = result.dataUrl;
+      const drop = wrap.querySelector('#phExtDrop');
+      if (drop) {
+        drop.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = imageBase64;
+        img.alt = '';
+        drop.appendChild(img);
+      }
+      setStatus('已裁除黑边');
+      onContentChanged();
+      return true;
+    } catch (e) {
+      setStatus('裁切失败', true);
+      return false;
+    } finally {
+      if (btn) btn.disabled = false;
+      updateSettingsActions();
+    }
+  }
+
+  async function maybeAutoTrimBeforeSave() {
+    if (panelPrefs.autoTrimOnSave !== true || !imageBase64) return;
+    await trimExtImageBlackBorder();
   }
 
   function setStatus(text, isErr) {
@@ -166,17 +355,25 @@
       drop.classList.remove('dragover');
       const file = e.dataTransfer?.files?.[0];
       if (file && file.type.startsWith('image/')) {
-        void loadImageFile(file, false);
+        void loadImageFile(file);
         return;
       }
       const html = e.dataTransfer?.getData('text/html') || '';
       const src = html.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1];
-      if (src) void loadImageFromUrl(src, false);
+      if (src) void loadImageFromUrl(src);
     });
   }
 
   function bindPasteHandlers() {
+    if (pasteCaptureActive) return;
     window.addEventListener('paste', onPasteImage, true);
+    pasteCaptureActive = true;
+  }
+
+  function unbindPasteHandlers() {
+    if (!pasteCaptureActive) return;
+    window.removeEventListener('paste', onPasteImage, true);
+    pasteCaptureActive = false;
   }
 
   function onPasteImage(e) {
@@ -200,24 +397,32 @@
     if (!file) return;
 
     if (inPanel) {
-      void loadImageFile(file, false);
-      setStatus('已粘贴图片（点保存提交）');
+      void loadImageFile(file);
+      setStatus('已粘贴图片');
     } else {
-      void globalPasteSave(file);
+      void loadImageFile(file);
+      if (panelPrefs.autoSaveWhenReady !== false && !getPromptText()) {
+        setStatus('已粘贴截图，填写提示词后将自动保存');
+      } else if (panelPrefs.autoSaveWhenReady === false) {
+        setStatus('已粘贴截图到面板，请点保存');
+      }
     }
   }
 
-  async function globalPasteSave(file) {
-    await loadImageFile(file, false);
-    setStatus('检测到截图，正在保存…');
-    await doSave(true);
+  function closePanel() {
+    teardownPanel();
+    chrome.runtime.sendMessage({ type: 'PH_CLOSE_PANEL' });
   }
 
-  function closePanel() {
-    chrome.runtime.sendMessage({ type: 'PH_CLOSE_PANEL' }, () => {
-      root.remove();
-      window.__PH_EXT_PANEL__ = false;
-    });
+  function teardownPanel() {
+    detachPageCapture();
+    unbindPasteHandlers();
+    hideCopyBtn();
+    hideHoverCopyBtn();
+    copyBtn = null;
+    hoverCopyBtn = null;
+    if (root.parentNode) root.remove();
+    window.__PH_EXT_PANEL__ = false;
   }
 
   function renderMain() {
@@ -225,11 +430,28 @@
       <div class="ph-ext-head" id="phExtHead">
         <span class="ph-ext-title">Prompt Hub 存卡</span>
         <div class="ph-ext-head-btns">
+          <button type="button" class="ph-ext-settings-btn" id="phExtSettingsBtn" title="面板设置">⚙</button>
           <button type="button" class="ph-ext-hide" id="phExtMin" title="收起">−</button>
-          <button type="button" class="ph-ext-close" id="phExtClose" title="关闭面板">×</button>
+          <button type="button" class="ph-ext-close" id="phExtClose" title="退出存卡模式">×</button>
         </div>
       </div>
       <div class="ph-ext-body" id="phExtBody">
+        <div class="ph-ext-settings hidden" id="phExtSettings">
+          <p class="ph-ext-settings-title">面板设置</p>
+          <label class="ph-ext-pref">
+            <input type="checkbox" id="phExtPrefAutoSave">
+            <span>提示词与图片都填入后自动保存</span>
+          </label>
+          <label class="ph-ext-pref">
+            <input type="checkbox" id="phExtPrefAutoTrim">
+            <span>保存前自动裁黑边</span>
+          </label>
+          <label class="ph-ext-pref">
+            <input type="checkbox" id="phExtPrefAutoPublish">
+            <span>满足条件时自动开启公开</span>
+          </label>
+          <button type="button" class="ph-ext-settings-action hidden" id="phExtTrimBtnManual">裁除当前图片黑边</button>
+        </div>
         <div class="ph-ext-drop" id="phExtDrop" tabindex="0">拖入图片或 Ctrl+V 粘贴<br><small>面板内仅预览 · 点保存才提交</small></div>
         <textarea class="ph-ext-prompt" id="phExtPrompt" placeholder="提示词（悬停段落或划选文字可复制）"></textarea>
         <div class="ph-ext-tags-wrap">
@@ -239,12 +461,16 @@
           </div>
           <div class="ph-ext-tags" id="phExtTagChips"></div>
         </div>
+        <div class="ph-ext-publish-row">
+          <span class="ph-ext-publish-label">公开到社区</span>
+          <button type="button" class="ph-ext-toggle-btn" id="phExtPublishBtn" aria-pressed="false">关</button>
+        </div>
         <div class="ph-ext-actions">
           <button type="button" class="ph-ext-save" id="phExtSave">保存到仓库</button>
           <button type="button" class="ph-ext-clear" id="phExtClear" title="清空">清空</button>
         </div>
         <div class="ph-ext-status"></div>
-        <p class="ph-ext-legal">页面无输入框时 Ctrl+V 截图可直接保存 · 请遵守网站使用条款</p>
+        <p class="ph-ext-legal" id="phExtPasteHint">提示词与图片都填入后将自动保存（可在设置关闭）</p>
         <div class="ph-ext-tag-sheet hidden" id="phExtTagSheet">
           <div class="ph-ext-tag-sheet-head">
             <input type="text" class="ph-ext-tag-new" id="phExtTagNew" placeholder="新建标签（无需 #）" maxlength="40">
@@ -265,6 +491,25 @@
       body.hidden = !body.hidden;
     });
     wrap.querySelector('#phExtClose').addEventListener('click', closePanel);
+    wrap.querySelector('#phExtSettingsBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSettingsSheet();
+    });
+
+    wrap.querySelector('#phExtPrefAutoSave').addEventListener('change', (e) => {
+      savePanelPrefs({ autoSaveWhenReady: e.target.checked });
+    });
+    wrap.querySelector('#phExtPrefAutoTrim').addEventListener('change', (e) => {
+      savePanelPrefs({ autoTrimOnSave: e.target.checked });
+    });
+    wrap.querySelector('#phExtPrefAutoPublish').addEventListener('change', (e) => {
+      savePanelPrefs({ autoEnablePublish: e.target.checked });
+      if (e.target.checked) publishUserOff = false;
+    });
+    wrap.querySelector('#phExtTrimBtnManual').addEventListener('click', (e) => {
+      e.preventDefault();
+      void trimExtImageBlackBorder();
+    });
 
     wrap.querySelector('#phExtPickTags').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -290,6 +535,14 @@
       }
     });
 
+    wrap.querySelector('#phExtPublishBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onPublishBtnClick();
+    });
+
+    promptEl?.addEventListener('input', () => onContentChanged());
+
     clearBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -308,6 +561,10 @@
     drop.addEventListener('click', () => drop.focus());
     renderTagChips();
     fetchAllTags();
+    loadPanelPrefs(() => {
+      fetchExtensionStatus();
+      onContentChanged();
+    });
 
     let dragOffset = { x: 0, y: 0 };
     head.addEventListener('mousedown', (e) => {
@@ -327,12 +584,15 @@
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     });
+    attachPageCapture();
   }
 
   function resetForm() {
     imageBase64 = null;
     imageName = '';
     currentTags.clear();
+    publishOn = false;
+    publishUserOff = false;
     const drop = wrap.querySelector('#phExtDrop');
     const promptEl = wrap.querySelector('#phExtPrompt');
     if (drop) {
@@ -341,6 +601,7 @@
     if (promptEl) promptEl.value = '';
     renderTagChips();
     toggleTagSheet(false);
+    onContentChanged();
     setStatus('');
   }
 
@@ -350,6 +611,7 @@
     const cur = promptEl.value.trim();
     promptEl.value = cur ? `${cur}\n\n${text}` : text;
     promptEl.focus();
+    onContentChanged();
     setStatus('已填入提示词');
   }
 
@@ -362,19 +624,19 @@
     });
   }
 
-  async function loadImageFromUrl(url, autoSave) {
+  async function loadImageFromUrl(url) {
     try {
       setStatus('正在读取图片…');
       const res = await fetch(url);
       const blob = await res.blob();
       if (!blob.type.startsWith('image/')) throw new Error('不是有效图片');
-      await loadImageFile(new File([blob], 'web-image.jpg', { type: blob.type }), autoSave);
+      await loadImageFile(new File([blob], 'web-image.jpg', { type: blob.type }));
     } catch (e) {
       setStatus('无法读取该图片（可能受网站保护）', true);
     }
   }
 
-  async function loadImageFile(file, autoSave) {
+  async function loadImageFile(file) {
     if (file.size > 5 * 1024 * 1024) {
       setStatus('图片过大（最大 5MB）', true);
       return;
@@ -390,7 +652,7 @@
         img.alt = '';
         drop.appendChild(img);
       }
-      if (autoSave) await doSave(true);
+      onContentChanged();
     } catch (e) {
       setStatus(String(e.message || e), true);
     }
@@ -407,14 +669,16 @@
     saving = true;
     const saveBtn = wrap.querySelector('#phExtSave');
     if (saveBtn) saveBtn.disabled = true;
-    setStatus(fromAuto ? '截图保存中…' : '保存中…');
+    setStatus(fromAuto ? '自动保存中…' : '保存中…');
+    await maybeAutoTrimBeforeSave();
     chrome.runtime.sendMessage({
       type: 'PH_SAVE_CARD',
       prompt,
       title: prompt.slice(0, 48) || imageName.replace(/\.[^.]+$/, '') || '网页摘录',
       imageBase64,
       sourceUrl: location.href,
-      tags: [...currentTags]
+      tags: [...currentTags],
+      publishToCommunity: readPublishIntent()
     }, (res) => {
       saving = false;
       if (saveBtn) saveBtn.disabled = false;
@@ -427,7 +691,7 @@
         if (res?.code === 'UNAUTHORIZED') {
           msg = '请先登录：打开 prompt-hub.cn 并保持登录';
         } else if (res?.code === 'DB_PERMISSION') {
-          msg = '数据库权限未开：请在 Supabase 执行 20260530100000_user_data_service_role.sql';
+          msg = '服务端未就绪，请稍后再试或联系站点管理员';
         }
         setStatus(msg, true);
         return;
@@ -529,11 +793,12 @@
     hideHoverCopyBtn();
   }
 
-  document.addEventListener('mouseup', () => {
+  function onSelectionMouseUp() {
     setTimeout(onSelectionMaybeShow, 10);
-  });
+  }
 
-  document.addEventListener('mousemove', (e) => {
+  function onPageMouseMove(e) {
+    if (!pageCaptureActive) return;
     if (nodeInPanel(e.target)) {
       hideHoverCopyBtn();
       return;
@@ -552,19 +817,53 @@
       btn.style.top = `${Math.max(8, e.clientY - 28)}px`;
       btn.classList.remove('hidden');
     }, 350);
-  }, { passive: true });
+  }
 
-  document.addEventListener('keydown', (e) => {
+  function onPageKeyDown(e) {
+    if (!pageCaptureActive) return;
     if (e.key === 'Escape') {
       hideCopyBtn();
       hideHoverCopyBtn();
       toggleTagSheet(false);
+      const settings = wrap.querySelector('#phExtSettings');
+      if (settings && !settings.classList.contains('hidden')) toggleSettingsSheet();
     }
-  });
-  document.addEventListener('scroll', () => {
+  }
+
+  function onPageScroll() {
+    if (!pageCaptureActive) return;
     hideCopyBtn();
     hideHoverCopyBtn();
-  }, true);
+  }
+
+  function attachPageCapture() {
+    if (pageCaptureActive) return;
+    document.addEventListener('mouseup', onSelectionMouseUp);
+    document.addEventListener('mousemove', onPageMouseMove, { passive: true });
+    document.addEventListener('keydown', onPageKeyDown);
+    document.addEventListener('scroll', onPageScroll, true);
+    pageCaptureActive = true;
+  }
+
+  function detachPageCapture() {
+    if (!pageCaptureActive) return;
+    document.removeEventListener('mouseup', onSelectionMouseUp);
+    document.removeEventListener('mousemove', onPageMouseMove);
+    document.removeEventListener('keydown', onPageKeyDown);
+    document.removeEventListener('scroll', onPageScroll, true);
+    clearTimeout(hoverTimer);
+    hoverTimer = null;
+    pageCaptureActive = false;
+  }
+
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type === 'PH_TEARDOWN_PANEL') {
+      teardownPanel();
+      sendResponse({ ok: true });
+      return true;
+    }
+    return false;
+  });
 
   chrome.runtime.sendMessage({ type: 'PH_GET_PANEL' }, (res) => {
     if (res?.disclaimerOk) renderMain();

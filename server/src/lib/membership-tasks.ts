@@ -33,6 +33,7 @@ export type TaskKey =
   | 'extension_save_card'
   | 'asset_studio_chat'
   | 'asset_studio_link_card'
+  | 'inspiration_draw'
   | 'cards_count_25'
   | 'spend_1000'
   | 'spend_2000'
@@ -52,6 +53,7 @@ export type TaskFlags = {
   extension_card_saved?: boolean;
   asset_studio_chat_used?: boolean;
   asset_studio_link_card?: boolean;
+  inspiration_draw_used?: boolean;
   sign_streak?: number;
   last_sign_date?: string;
 };
@@ -196,6 +198,12 @@ export function taskRewardForKey(
       title: '资产创作关联卡片',
       description: '在资产创作将卡片库卡片拖入文档「关联图」框，完成一次文档关联'
     },
+    inspiration_draw: {
+      days: 1,
+      credits: 0,
+      title: '使用灵感抽卡',
+      description: '在生图页灵感工具箱点击「随机抽卡」生成提示词（本地免费）'
+    },
     cards_count_25: {
       days: 1,
       credits: 0,
@@ -312,6 +320,8 @@ export function isTaskProgressMet(
       return !!flags.asset_studio_chat_used;
     case 'asset_studio_link_card':
       return !!flags.asset_studio_link_card;
+    case 'inspiration_draw':
+      return !!flags.inspiration_draw_used;
     case 'cards_count_25':
       return (flags.cards_count_synced ?? 0) >= 25;
     case 'spend_1000':
@@ -715,6 +725,7 @@ export function buildTaskList(
     'extension_save_card',
     'asset_studio_chat',
     'asset_studio_link_card',
+    'inspiration_draw',
     'cards_count_25',
     spendKey
   ].filter((k): k is string => !!k);

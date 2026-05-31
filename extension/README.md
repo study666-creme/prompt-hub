@@ -2,7 +2,7 @@
 
 在任意网页快速把**您手动选择**的文字和**您粘贴/拖入**的图片保存到 [Prompt Hub](https://prompt-hub.cn) 仓库。
 
-**当前版本：1.0.3**
+**当前版本：1.0.4**
 
 ## 安装（开发者模式）
 
@@ -18,7 +18,8 @@
 2. 点击 **在当前页打开面板**（首次需允许「访问所有网站」）
 3. **划选**网页文字 → 点 **复制到提示词**；或 **悬停段落** → **复制段落**
 4. 点 **选择标签** 勾选/新建标签（与主站仓库标签一致）
-5. **保存到仓库** 提交（面板内图片/文字在保存前不会消失）
+5. 需要时可开启 **公开到提示词社区**（与主站默认规则一致：设置里默认开启 + 提示词 ≥15 字；实际公开还须配图）
+6. **保存到仓库** 提交（面板内图片/文字在保存前不会消失）
 
 ### 截图快捷保存
 
@@ -41,11 +42,12 @@
 
 | 接口 | 用途 |
 |------|------|
-| `POST /api/v1/extension/quick-card` | 保存卡片（含 `tags`） |
+| `POST /api/v1/extension/quick-card` | 保存卡片（含 `tags`、`publishToCommunity`） |
 | `GET /api/v1/extension/tags` | 读取已有标签 |
+| `GET /api/v1/extension/status` | 登录与 `defaultPublishCommunity` |
 
 需 Worker 已部署。本地开发时修改 `extension/config.js` 里的 `API_BASE`。
 
 ## 隐私
 
-见 [PRIVACY.md](./PRIVACY.md)。
+见 [PRIVACY.md](./PRIVACY.md)。上架商店见 [../docs/CHROME-WEB-STORE.md](../docs/CHROME-WEB-STORE.md)。

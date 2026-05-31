@@ -1,0 +1,48 @@
+=== Chrome Web Store 上架文案（复制粘贴用）===
+
+【扩展名称】
+Prompt Hub 快捷存卡
+
+【简短说明】（132 字以内）
+在任意网页手动摘录提示词与图片，保存到 prompt-hub.cn 卡片库；支持标签与公开到社区。
+
+【详细说明】
+Prompt Hub 快捷存卡是 prompt-hub.cn 的官方浏览器伴侣扩展。
+
+功能：
+• 悬浮存卡面板：拖入/粘贴图片、编辑提示词、选择标签后保存到您的 Prompt Hub 仓库
+• 划选复制：选中网页文字后点「复制到提示词」
+• 悬停复制：鼠标悬停段落可「复制段落」
+• 智能粘贴：页面无输入框聚焦时，Ctrl+V 截图可直接保存
+• 公开到社区：与主站一致，开启后保存即发布（提示词至少 15 字且需配图）
+• 登录同步：在 prompt-hub.cn 登录后，扩展自动同步账号
+
+合规与隐私：
+• 仅处理您手动选择、拖入或粘贴的内容
+• 不会自动抓取整页或浏览历史
+• 数据经 HTTPS 上传至 Prompt Hub 服务器，详见隐私政策
+
+使用要求：
+• 需拥有 prompt-hub.cn 账号并登录
+• 首次使用需阅读并同意扩展内使用须知
+
+【分类】
+Productivity / 生产力
+
+【Single purpose 单用途描述（英文，审核用）】
+Save user-selected text and images from web pages to the user's Prompt Hub account at prompt-hub.cn. No automatic page scraping.
+
+【权限说明（Permission justification）】
+storage — Store Supabase session tokens locally after user logs in on prompt-hub.cn.
+scripting — Inject the save panel only when the user opens it on a tab.
+host_permissions (prompt-hub.cn, api.prompt-hub.cn) — Sync login and upload cards via HTTPS API.
+optional_host_permissions (<all_urls>) — Requested only when user clicks "Open panel on this page"; needed to show panel on arbitrary sites user chooses.
+
+【隐私政策 URL】（提交前请改为主站真实地址）
+https://prompt-hub.cn/privacy-extension.html
+
+【主页 URL】
+https://prompt-hub.cn
+
+【支持 URL】
+https://prompt-hub.cn

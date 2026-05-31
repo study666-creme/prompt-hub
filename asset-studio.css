@@ -2312,7 +2312,7 @@ body.studio-modal-open {
 }
 
 .studio-import-dialog {
-  width: min(960px, 96vw);
+  width: min(440px, 96vw);
   max-height: 92vh;
   overflow: auto;
   padding: 8px 4px 20px;
@@ -2347,36 +2347,34 @@ body.studio-modal-open {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  align-items: stretch;
+  align-items: center;
   margin-top: 4px;
   padding: 0 4px;
+  width: 100%;
 }
 
 .studio-import-cards-row.count-2 {
   gap: 24px;
 }
 
-@media (min-width: 720px) {
-  .studio-import-cards-row.count-2 {
-    flex-direction: row;
-    align-items: stretch;
-  }
-}
-
 .studio-library-pick-card {
   position: relative;
-  flex: 1;
-  min-height: 200px;
-  aspect-ratio: 16 / 9;
+  flex: 0 0 auto;
+  width: min(100%, 380px);
+  min-height: 320px;
+  aspect-ratio: 3 / 4;
   border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  border-radius: 18px;
+  border-radius: 22px;
   padding: 0;
   cursor: pointer;
   overflow: hidden;
   text-align: left;
-  background: var(--bg-card);
+  background: #12141a;
+  isolation: isolate;
   transition: border-color 0.2s, transform 0.18s, box-shadow 0.2s;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.28);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 16px 48px rgba(0, 0, 0, 0.42);
 }
 
 .studio-library-pick-card:hover {
@@ -2388,9 +2386,9 @@ body.studio-modal-open {
 .studio-library-pick-bg {
   position: absolute;
   inset: 0;
-  background: linear-gradient(145deg, #2a2f3a 0%, #1a1d24 55%, #12141a 100%);
+  background: linear-gradient(165deg, #2a3140 0%, #1a1f28 48%, #0e1016 100%);
   background-size: cover;
-  background-position: center;
+  background-position: center top;
   transition: transform 0.35s ease;
 }
 
@@ -2420,19 +2418,19 @@ body.studio-modal-open {
   right: 0;
   bottom: 0;
   z-index: 2;
-  padding: 18px 20px 20px;
+  padding: 22px 22px 24px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   pointer-events: none;
 }
 
 .studio-library-pick-name {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
   color: #fff;
   letter-spacing: 0.02em;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.65);
 }
 
 .studio-library-pick-meta {

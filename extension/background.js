@@ -3,6 +3,12 @@ importScripts('config.js');
 const SESSION_KEY = 'ph_session';
 const PANEL_ENABLED_KEY = 'ph_panel_enabled';
 const DISCLAIMER_KEY = 'ph_disclaimer_ok';
+const PANEL_PREFS_KEY = 'ph_panel_prefs';
+const DEFAULT_PANEL_PREFS = {
+  autoSaveWhenReady: true,
+  autoTrimOnSave: false,
+  autoEnablePublish: true
+};
 const injectedTabs = new Set();
 const closedTabs = new Set();
 
@@ -74,13 +80,28 @@ async function shouldAutoInject() {
   return chrome.permissions.contains({ origins: ['<all_urls>'] });
 }
 
+async function teardownPanelInTab(tabId) {
+  if (!tabId) return;
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: 'PH_TEARDOWN_PANEL' });
+  } catch {
+    /* 页面未注入或已关闭 */
+  }
+  injectedTabs.delete(tabId);
+}
+
+async function teardownAllInjectedPanels() {
+  const tabIds = [...injectedTabs];
+  await Promise.all(tabIds.map((tabId) => teardownPanelInTab(tabId)));
+}
+
 async function injectPanelIntoTab(tabId, force) {
   if (!tabId) return { ok: false, message: '无标签页' };
   if (!force && injectedTabs.has(tabId)) return { ok: true, skipped: true };
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['content/panel.js']
+      files: ['lib/image-trim.js', 'content/panel.js']
     });
     await chrome.scripting.insertCSS({
       target: { tabId },
@@ -152,8 +173,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         title: msg.title || '',
         imageBase64: msg.imageBase64 || null,
         sourceUrl: msg.sourceUrl || null,
-        tags: msg.tags || []
+        tags: msg.tags || [],
+        publishToCommunity: msg.publishToCommunity === true
       });
+      sendResponse(result);
+      return;
+    }
+    if (msg?.type === 'PH_GET_STATUS') {
+      const result = await apiRequest('GET', '/api/v1/extension/status');
       sendResponse(result);
       return;
     }
@@ -162,20 +189,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse(result);
       return;
     }
+    if (msg?.type === 'PH_GET_PREFS') {
+      const data = await chrome.storage.local.get(PANEL_PREFS_KEY);
+      const raw = data[PANEL_PREFS_KEY] || {};
+      const prefs = { ...DEFAULT_PANEL_PREFS, ...raw };
+      if (raw.autoSavePaste !== undefined && raw.autoSaveWhenReady === undefined) {
+        prefs.autoSaveWhenReady = raw.autoSavePaste !== false;
+      }
+      sendResponse({ ok: true, prefs });
+      return;
+    }
+    if (msg?.type === 'PH_SET_PREFS') {
+      const prefs = { ...DEFAULT_PANEL_PREFS, ...(msg.prefs || {}) };
+      await chrome.storage.local.set({ [PANEL_PREFS_KEY]: prefs });
+      sendResponse({ ok: true, prefs });
+      return;
+    }
     if (msg?.type === 'PH_CLOSE_PANEL') {
       const tabId = sender.tab?.id || msg.tabId;
       if (tabId) {
         closedTabs.add(tabId);
-        injectedTabs.delete(tabId);
+        await teardownPanelInTab(tabId);
       }
+      await chrome.storage.local.set({ [PANEL_ENABLED_KEY]: false });
       sendResponse({ ok: true });
       return;
     }
     if (msg?.type === 'PH_SET_PANEL') {
       await chrome.storage.local.set({ [PANEL_ENABLED_KEY]: msg.enabled !== false });
-      if (msg.enabled !== false) {
+      if (msg.enabled === false) {
+        await teardownAllInjectedPanels();
+      } else {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tab) await tryAutoInjectTab(tab);
+        if (tab?.id) {
+          closedTabs.delete(tab.id);
+          await tryAutoInjectTab(tab);
+        }
       }
       sendResponse({ ok: true });
       return;
@@ -203,6 +252,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
       closedTabs.delete(tabId);
+      await chrome.storage.local.set({ [PANEL_ENABLED_KEY]: true });
       const res = await injectPanelIntoTab(tabId, true);
       sendResponse(res);
       return;

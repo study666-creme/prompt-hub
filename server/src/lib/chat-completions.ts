@@ -30,7 +30,8 @@ export async function submitChatCompletions(
     model: params.model || 'deepseek-v4-flash',
     messages: params.messages,
     temperature: 0.7,
-    max_tokens: 2048
+    max_tokens: 2048,
+    stream: false
   };
   if (params.thinking) {
     body.thinking = { type: 'enabled' };

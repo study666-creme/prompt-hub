@@ -426,7 +426,7 @@
 
     function navigateViewerByWheel(delta) {
       if (!viewerNav.items.length || viewerNav.index < 0) return false;
-      const next = viewerNav.index + (delta > 0 ? 1 : -1);
+      const next = viewerNav.index + (delta > 0 ? -1 : 1);
       if (next < 0 || next >= viewerNav.items.length) return false;
       const item = viewerNav.items[next];
       viewerNav.index = next;
@@ -888,6 +888,7 @@
     };
 
     window.COMMUNITY_COLLECT_TAG = '社区收藏';
+    window.INSPIRE_DRAW_TAG = '灵感抽卡';
     window.isCommunityCollectCard = (card) =>
       window.FeatureDraft?.isCommunityCollectCard?.(card)
       || !!(card && (card.tags || []).includes(window.COMMUNITY_COLLECT_TAG));
@@ -1023,13 +1024,15 @@
         }
       }
       const promptText = (prompt || '').trim();
+      const tags = ['图片生成'];
+      if (payload.fromInspirationDraw) tags.push(window.INSPIRE_DRAW_TAG || '灵感抽卡');
       const card = {
         id: generateId(),
         title: (title || '').trim(),
         prompt: promptText,
         image: image || null,
         group: null,
-        tags: ['图片生成'],
+        tags,
         customFields: {},
         genSourceId: sourceId || null,
         genJobId: jobId || null,
@@ -3160,6 +3163,7 @@
       } else {
         await loadGuestWorkspace();
         window.FeatureDraft?.reloadStores?.();
+        window.FeatureDraft?.scheduleGenJobsSync?.(500);
       }
       window.__promptHubCards = cards;
       renderGroups();
@@ -3281,6 +3285,7 @@
       normalizeCardPins();
       window.__promptHubCards = cards;
       window.FeatureDraft?.reloadStores?.();
+      window.FeatureDraft?.scheduleGenJobsSync?.(500);
       return restored;
     }
 
@@ -5262,16 +5267,10 @@
 
     function removeImage() {
       if (!imageData) return;
-      const apply = () => {
-        imageData = null;
-        imageRemovalPending = true;
-        updatePreview();
-        showToast('已从编辑区去掉图片；点「保存」后才会真正删除', 4000);
-      };
-      const msg = '确定去掉这张图片？\n只有点击「保存」后才会从卡片库删除；直接关闭本页可取消。';
-      if (typeof window.customConfirm === 'function') {
-        window.customConfirm(msg, apply);
-      } else if (confirm(msg.replace(/\n/g, ''))) apply();
+      imageData = null;
+      imageRemovalPending = true;
+      updatePreview();
+      showToast('已从编辑区去掉图片；点「保存」后才会真正删除', 4000);
     }
     function updatePanelOcrBoxVisibility() {
       const on = settings.autoPromptOcr === true;
@@ -5650,7 +5649,9 @@
       const lightbox = document.getElementById('imageLightbox');
       const img = document.getElementById('lightboxImage');
       const frame = getLightboxFrame();
+      const dlBtn = document.getElementById('lightboxDownloadBtn');
       if (!lightbox || !img) return;
+      if (dlBtn) dlBtn.disabled = true;
       setViewerFrameLoading(frame, true);
       let shown = false;
       const onReady = () => {
@@ -5667,6 +5668,7 @@
         attachImageZoom(img);
         finishViewerFrameReveal(frame);
         lightbox.classList.add('active');
+        if (dlBtn) dlBtn.disabled = !(img.src && !img.src.includes('data:image/svg'));
       };
       lightbox.classList.remove('active');
       frame?.classList.remove('viewer-glow-active');
@@ -5691,6 +5693,45 @@
       if (img.complete && img.naturalWidth > 0) onReady();
     }
     window.openLightbox = openLightbox;
+
+    async function downloadLightboxImage() {
+      const img = document.getElementById('lightboxImage');
+      const url = img?.src;
+      if (!url || String(url).includes('data:image/svg')) {
+        if (typeof showToast === 'function') showToast('图片尚未加载完成');
+        return;
+      }
+      const filename = `prompt-hub-${Date.now()}.png`;
+      try {
+        const res = await fetch(url, { mode: 'cors' });
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+        if (typeof showToast === 'function') showToast('图片已开始下载');
+      } catch (e) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        if (typeof showToast === 'function') showToast('若未自动下载，请在新标签页右键保存');
+      }
+    }
+    window.downloadLightboxImage = downloadLightboxImage;
+    document.getElementById('lightboxDownloadBtn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      void downloadLightboxImage();
+    });
+
     window.addEventListener('mousemove', (e) => {
       if (!imageZoom.dragging) return;
       imageZoom.tx = e.clientX - imageZoom.startX;

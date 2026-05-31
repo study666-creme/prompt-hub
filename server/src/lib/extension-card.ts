@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { MIN_COMMUNITY_PROMPT_LEN, upsertCommunityPost } from './community-feed';
 import { isMembershipActive, type Profile } from './supabase';
 
 const BUCKET = 'card-images';
@@ -12,7 +13,41 @@ export type QuickCardInput = {
   imageBase64?: string | null;
   sourceUrl?: string | null;
   tags?: string[];
+  publishToCommunity?: boolean;
 };
+
+export type QuickCardResult = {
+  cardId: string;
+  cardCount: number;
+  publishedToCommunity: boolean;
+  communityPostId: string | null;
+  publishNote?: string | null;
+};
+
+type UserDataPayload = {
+  cards?: Array<Record<string, unknown>>;
+  customGroups?: unknown[];
+  globalFields?: unknown[];
+  settings?: Record<string, unknown>;
+  schemaVersion?: number;
+  [key: string]: unknown;
+};
+
+function isCommunityPromptEligible(prompt: string): boolean {
+  return String(prompt || '').trim().length >= MIN_COMMUNITY_PROMPT_LEN;
+}
+
+export function readDefaultPublishCommunity(payload: UserDataPayload): boolean {
+  const settings = payload.settings;
+  if (!settings || typeof settings !== 'object') return true;
+  return (settings as { defaultPublishCommunity?: boolean }).defaultPublishCommunity !== false;
+}
+
+export function readShowTrimBlackBorderTool(payload: UserDataPayload): boolean {
+  const settings = payload.settings;
+  if (!settings || typeof settings !== 'object') return false;
+  return (settings as { showTrimBlackBorderTool?: boolean }).showTrimBlackBorderTool === true;
+}
 
 function normalizeTag(raw: string): string {
   const t = String(raw || '').trim().replace(/^#+/, '');
@@ -28,15 +63,6 @@ function normalizeTags(list?: string[]): string[] {
   }
   return [...out];
 }
-
-type UserDataPayload = {
-  cards?: Array<Record<string, unknown>>;
-  customGroups?: unknown[];
-  globalFields?: unknown[];
-  settings?: Record<string, unknown>;
-  schemaVersion?: number;
-  [key: string]: unknown;
-};
 
 export function collectUserTags(payload: UserDataPayload): string[] {
   const set = new Set<string>();
@@ -105,7 +131,7 @@ export async function appendQuickCard(
   userId: string,
   profile: Profile,
   input: QuickCardInput
-): Promise<{ cardId: string; cardCount: number }> {
+): Promise<QuickCardResult> {
   const prompt = String(input.prompt || '').trim();
   if (!prompt && !input.imageBase64) {
     throw new Error('请填写提示词或添加图片');
@@ -142,6 +168,22 @@ export async function appendQuickCard(
   let tags = normalizeTags(input.tags);
   if (!tags.length && input.sourceUrl) tags = ['#浏览器插件'];
 
+  const wantPublish = input.publishToCommunity === true;
+  let publishedToCommunity = false;
+  let communityPostId: string | null = null;
+  let publishNote: string | null = null;
+
+  if (wantPublish) {
+    if (!isCommunityPromptEligible(prompt)) {
+      publishNote = `公开到社区需要提示词至少 ${MIN_COMMUNITY_PROMPT_LEN} 字，已仅保存到仓库`;
+    } else if (!image) {
+      publishNote = '公开到社区需要配图，已仅保存到仓库';
+    } else {
+      publishedToCommunity = true;
+      communityPostId = `cp_${cardId}`;
+    }
+  }
+
   const card = {
     id: cardId,
     title,
@@ -152,7 +194,8 @@ export async function appendQuickCard(
     customFields: input.sourceUrl ? { extSourceUrl: String(input.sourceUrl).slice(0, 500) } : {},
     createdAt: now,
     updatedAt: now,
-    publishedToCommunity: false
+    publishedToCommunity,
+    communityPostId
   };
 
   cards.unshift(card);
@@ -162,23 +205,57 @@ export async function appendQuickCard(
     schemaVersion: payload.schemaVersion || 2
   };
 
-  const { error: upsertErr } = await admin.from('user_data').upsert(
-    {
-      user_id: userId,
-      data: nextPayload,
-      updated_at: new Date().toISOString()
-    },
-    { onConflict: 'user_id' }
-  );
-  if (upsertErr) {
-    const msg = String(upsertErr.message || upsertErr);
-    if (/permission denied.*user_data/i.test(msg)) {
-      throw new Error(
-        'DB_PERMISSION: 请在 Supabase 执行 supabase/migrations/20260530100000_user_data_service_role.sql'
-      );
+  const upsertUserData = async () => {
+    const { error: upsertErr } = await admin.from('user_data').upsert(
+      {
+        user_id: userId,
+        data: nextPayload,
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: 'user_id' }
+    );
+    if (upsertErr) {
+      const msg = String(upsertErr.message || upsertErr);
+      if (/permission denied.*user_data/i.test(msg)) {
+        throw new Error(
+          'DB_PERMISSION: 请在 Supabase 执行 supabase/migrations/20260530100000_user_data_service_role.sql'
+        );
+      }
+      throw upsertErr;
     }
-    throw upsertErr;
+  };
+
+  await upsertUserData();
+
+  if (publishedToCommunity && communityPostId && image) {
+    try {
+      await upsertCommunityPost(admin, userId, {
+        id: communityPostId,
+        sourceCardId: cardId,
+        authorName: String(profile.display_name || '用户').slice(0, 80),
+        title,
+        prompt: prompt || title,
+        image,
+        likes: 0,
+        createdAt: now,
+        updatedAt: now
+      });
+    } catch (e) {
+      card.publishedToCommunity = false;
+      card.communityPostId = null;
+      publishedToCommunity = false;
+      communityPostId = null;
+      publishNote = `已保存到仓库；公开失败：${String((e as Error).message || e).slice(0, 80)}`;
+      nextPayload.cards = cards;
+      await upsertUserData();
+    }
   }
 
-  return { cardId, cardCount: cards.length };
+  return {
+    cardId,
+    cardCount: cards.length,
+    publishedToCommunity,
+    communityPostId,
+    publishNote
+  };
 }

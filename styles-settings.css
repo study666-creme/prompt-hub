@@ -89,6 +89,40 @@
   box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
+.side-panel-box-wide {
+  max-width: 520px;
+  max-height: min(90vh, 640px);
+}
+.collect-section-title {
+  margin: 16px 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.collect-section-title:first-of-type {
+  margin-top: 0;
+}
+.collect-hook {
+  margin: 0 0 14px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.collect-download-row {
+  margin-bottom: 18px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+.collect-download-btn {
+  display: inline-flex;
+  margin-bottom: 8px;
+}
+.collect-steps-list {
+  margin-bottom: 4px;
+}
 .side-panel-head {
   display: flex;
   align-items: center;
@@ -549,7 +583,7 @@ body.trial-tasks-open {
 .subscribe-panel-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 18px 18px;
+  padding: 12px 12px 16px;
 }
 .subscribe-membership-status-wrap {
   margin-bottom: 14px;
@@ -584,45 +618,54 @@ body.trial-tasks-open {
 .subscribe-plans-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 14px;
+  gap: 10px;
 }
 .subscribe-lite-plan-row {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 .subscribe-lite-compact {
-  flex-direction: row;
-  align-items: center;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 10px 12px;
   border-color: var(--accent-border, var(--accent));
+}
+.subscribe-lite-compact-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
 }
 .subscribe-lite-compact-main {
   flex: 1;
   min-width: 0;
 }
 .subscribe-lite-title {
-  margin: 4px 0 2px;
-  font-size: 14px;
+  margin: 4px 0 0;
+  font-size: 15px;
+  line-height: 1.25;
 }
 .subscribe-lite-meta {
   margin: 0;
   font-size: 11px;
   color: var(--text-muted);
-  line-height: 1.35;
+  line-height: 1.4;
 }
 .subscribe-lite-compact-price {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 8px;
+  justify-content: flex-end;
+  gap: 2px 6px;
   flex-shrink: 0;
+  text-align: right;
 }
 .subscribe-lite-compact-price .subscribe-plan-amount {
-  font-size: 18px;
+  font-size: 20px;
 }
 .subscribe-lite-buy {
-  flex-shrink: 0;
-  min-width: 64px;
+  width: 100%;
+  min-width: 0;
 }
 .subscribe-credit-mode-hint {
   margin: 8px 0 0;
@@ -630,11 +673,13 @@ body.trial-tasks-open {
   color: var(--text-muted);
 }
 @media (max-width: 640px) {
-  .subscribe-lite-compact {
+  .subscribe-lite-compact-top {
     flex-wrap: wrap;
   }
-  .subscribe-lite-buy {
+  .subscribe-lite-compact-price {
     width: 100%;
+    justify-content: flex-start;
+    text-align: left;
   }
 }
 .subscribe-plan-tag-deal {
@@ -650,7 +695,7 @@ body.trial-tasks-open {
 .subscribe-plan-card {
   display: flex;
   flex-direction: column;
-  padding: 16px;
+  padding: 14px 12px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--bg-card);
@@ -856,8 +901,8 @@ body.trial-tasks-open {
   color: var(--text-muted);
 }
 .subscribe-plan-features {
-  margin: 0 0 14px;
-  padding-left: 18px;
+  margin: 0 0 12px;
+  padding-left: 16px;
   flex: 1;
   font-size: 12px;
   line-height: 1.65;

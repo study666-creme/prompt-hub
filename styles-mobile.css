@@ -500,7 +500,7 @@
     flex-wrap: wrap !important;
     flex-direction: row !important;
     align-content: flex-start !important;
-    align-items: stretch !important;
+    align-items: flex-start !important;
     gap: 10px !important;
     padding: 12px 10px calc(88px + env(safe-area-inset-bottom)) !important;
     position: relative !important;
@@ -555,7 +555,7 @@
   }
 
   .cards-container .card .card-body {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     min-height: 0;
     padding: 8px 10px 10px;
   }
@@ -642,22 +642,25 @@
   }
 
   .edit-panel .image-drop-area.has-image {
+    width: fit-content;
+    max-width: calc(100% - 24px);
     height: auto;
     max-height: none;
     overflow: hidden;
     border-radius: 12px;
-    margin: 8px 12px 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    margin: 8px auto 0;
+    display: block;
+    background: #06080c;
   }
 
   .edit-panel .image-drop-area.has-image img#previewImage {
     height: auto;
     min-height: 0;
     max-height: min(60vh, 420px);
-    width: 100%;
+    width: auto;
+    max-width: 100%;
     object-fit: contain;
+    background: transparent;
   }
 
   .image-lightbox {
