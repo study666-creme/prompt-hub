@@ -4509,6 +4509,7 @@
     const detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution);
     const final = detail?.final ?? 10;
     applyImageGenCostDisplay(detail, final, quality, size);
+    window.ImageGenPromptTools?.updateBatchCostLabel?.();
     clearTimeout(imageGenCostDebounceTimer);
     imageGenCostDebounceTimer = setTimeout(() => {
       void refreshImageGenCostFromApi(model, resolution, quality, size);
@@ -5077,7 +5078,7 @@
 
     if (balance < cost) {
       toast(`积分不足（需要 ${cost}，当前 ${balance}）。请使用激活码兑换`);
-      return { ok: false };
+      return { ok: false, reason: 'credits' };
     }
 
     if (!useApi && !window.PointsSystem?.deductCredits?.(cost)) {
@@ -5194,7 +5195,7 @@
           jobId: gen.data.jobId,
           silentToast: batchOpts.silentToast
         });
-        return { ok: true };
+        return { ok: true, creditsCharged: cost };
       }
 
       const jobId = gen.data.jobId;
@@ -5216,7 +5217,7 @@
         cost,
         jobId
       });
-      return { ok: true };
+      return { ok: true, creditsCharged: cost };
     }
 
     removePendingJob(pendingId);

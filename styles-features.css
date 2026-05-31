@@ -1079,6 +1079,12 @@
   width: 100%;
 }
 
+.imagegen-inspire-batch-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .imagegen-reverse-preview-wrap {
   border: 1px dashed var(--border);
   border-radius: var(--radius-sm);

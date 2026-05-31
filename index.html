@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260601b';
+    window.__APP_BUILD__ = '20260601c';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -62,7 +62,7 @@
   <link rel="stylesheet" href="styles-theme.css?v=20260615z">
   <link rel="stylesheet" href="styles-mobile.css?v=20260619j">
   <link rel="stylesheet" href="styles-settings.css?v=20260616n">
-  <link rel="stylesheet" href="styles-features.css?v=20260601b">
+  <link rel="stylesheet" href="styles-features.css?v=20260601c">
   <link rel="stylesheet" href="styles-assets.css?v=20260622e">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
@@ -518,7 +518,7 @@
         <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260601b</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260601c</p>
     </div>
   </nav>
 
@@ -958,7 +958,7 @@
               <div class="imagegen-toolbox-head">
                 <div>
                   <strong class="imagegen-toolbox-title">灵感工具箱</strong>
-                  <p class="panel-hint imagegen-toolbox-sub">抽卡免费 · 优化/反推需 API 扣积分</p>
+                  <p class="panel-hint imagegen-toolbox-sub">抽卡免费 · 排队生图按张扣积分（与普通生图相同）</p>
                 </div>
                 <button type="button" class="btn btn-ghost btn-sm" id="imageGenToolboxToggle" aria-expanded="false">展开</button>
               </div>
@@ -981,10 +981,11 @@
                     <button type="button" class="btn btn-secondary btn-sm" id="imageGenInspireDrawBtn">随机抽卡</button>
                   </div>
                   <div class="imagegen-inspire-list" id="imageGenInspireList"></div>
-                  <button type="button" class="btn btn-primary btn-sm imagegen-inspire-batch-btn" id="imageGenInspireBatchBtn">勾选全部排队生图</button>
+                  <button type="button" class="btn btn-primary btn-sm imagegen-inspire-batch-btn" id="imageGenInspireBatchBtn">排队生图 · — 积分/张</button>
+                  <p class="panel-hint imagegen-inspire-batch-hint" id="imageGenInspireBatchHint">勾选提示词后批量提交；每张与普通「生成图片」同价，提交即扣积分。</p>
                 </div>
                 <div class="imagegen-tool-pane" data-imagegen-tool-pane="optimize" hidden>
-                  <p class="panel-hint">用 AI 润色当前提示词，更适合出图（约 1～3 积分/次，需登录）。</p>
+                  <p class="panel-hint">用 AI 润色当前提示词（上游 DeepSeek V4 Flash · 约 1～3 积分/次）。</p>
                   <label for="imageGenOptimizeTarget">优化风格</label>
                   <select id="imageGenOptimizeTarget" class="settings-input">
                     <option value="general">通用（中文为主）</option>
@@ -994,7 +995,7 @@
                   <button type="button" class="btn btn-secondary btn-sm" id="imageGenOptimizeBtn">优化提示词</button>
                 </div>
                 <div class="imagegen-tool-pane" data-imagegen-tool-pane="reverse" hidden>
-                  <p class="panel-hint">从图片反推生图提示词（约 5 积分/次，需 IMAGE API 视觉模型）。</p>
+                  <p class="panel-hint">从图片反推提示词（上游 Apimart · gpt-4o-mini 视觉 · 5 积分/次）。</p>
                   <div class="imagegen-reverse-preview-wrap">
                     <p class="panel-hint" id="imageGenReverseIdle">上传图片或使用当前参考图</p>
                     <img id="imageGenReversePreview" alt="反推预览" hidden>
@@ -1253,9 +1254,9 @@
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
   <script src="script.js?v=20260530f"></script>
   <script src="points-system.js?v=20260606m"></script>
-  <script src="imagegen-prompt-kit.js?v=20260601b"></script>
-  <script src="imagegen-prompt-tools.js?v=20260601b"></script>
-  <script src="features-draft.js?v=20260601b"></script>
+  <script src="imagegen-prompt-kit.js?v=20260601c"></script>
+  <script src="imagegen-prompt-tools.js?v=20260601c"></script>
+  <script src="features-draft.js?v=20260601c"></script>
   <script src="features-assets.js?v=20260622e"></script>
   <script src="hotfix-image-layout.js?v=20260606m"></script>
   <script src="mobile.js?v=20260606m"></script>

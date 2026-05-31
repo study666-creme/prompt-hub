@@ -29,6 +29,10 @@ const reverseSchema = z.object({
 });
 
 const REVERSE_PROMPT_CREDITS = 5;
+/** 反推上游：IMAGE_API_KEY → Apimart（默认 api.apimart.ai）OpenAI 兼容 /v1/chat/completions */
+const REVERSE_VISION_MODEL = 'gpt-4o-mini';
+/** 优化上游：CHAT_API_KEY → DeepSeek（默认 api.deepseek.com）/v1/chat/completions */
+const OPTIMIZE_CHAT_MODEL = 'deepseek-v4-flash';
 
 const OPTIMIZE_SYSTEM: Record<string, string> = {
   general:
@@ -42,6 +46,26 @@ const REVERSE_SYSTEM =
   '你是 AI 绘图提示词反推专家。根据图片内容，写一段可直接用于 AI 生图的详细提示词。描述主体、外观、服装、动作、背景、光线、镜头、风格与质量词。输出仅一段提示词，不要标题、不要分点、不要解释。';
 
 export const promptToolsRoutes = new Hono<{ Bindings: Env }>();
+
+promptToolsRoutes.get('/info', async c => {
+  return c.json({
+    ok: true,
+    data: {
+      reverse: {
+        model: REVERSE_VISION_MODEL,
+        upstream: 'IMAGE_API_KEY → /v1/chat/completions（Apimart 等，需支持 vision）',
+        creditsPerCall: REVERSE_PROMPT_CREDITS,
+        note: '固定扣积分；请对照 Apimart 上 gpt-4o-mini 视觉单价核算成本'
+      },
+      optimize: {
+        model: OPTIMIZE_CHAT_MODEL,
+        upstream: 'CHAT_API_KEY → /v1/chat/completions（DeepSeek 官方等）',
+        creditsPerCall: '按 token，通常 1～3 积分',
+        note: '见 chat-pricing.ts TOKEN_RATES；最低 1 积分/次'
+      }
+    }
+  });
+});
 
 promptToolsRoutes.post('/optimize', rateLimit(90, 60_000), async c => {
   const user = c.get('user');
@@ -58,7 +82,7 @@ promptToolsRoutes.post('/optimize', rateLimit(90, 60_000), async c => {
   const admin = createAdminClient(c.env);
   let profile = await syncMembershipCredits(admin, user.id);
   const memberActive = isMembershipActive(profile);
-  const modelId = 'deepseek-v4-flash';
+  const modelId = OPTIMIZE_CHAT_MODEL;
   const target = parsed.data.target || 'general';
   const messages = [
     { role: 'system' as const, content: OPTIMIZE_SYSTEM[target] || OPTIMIZE_SYSTEM.general },
@@ -109,7 +133,10 @@ promptToolsRoutes.post('/optimize', rateLimit(90, 60_000), async c => {
     data: {
       prompt: result.content,
       creditsCharged: cost.final,
-      creditsRemaining: spendableCredits(profile)
+      creditsRemaining: spendableCredits(profile),
+      model: modelId,
+      modelLabel: cost.modelLabel,
+      upstream: 'CHAT_API'
     }
   });
 });
@@ -147,7 +174,8 @@ promptToolsRoutes.post('/reverse', rateLimit(60, 60_000), async c => {
   const prompt = await submitVisionChat(apiKey, c.env.IMAGE_API_BASE_URL, {
     system: REVERSE_SYSTEM,
     userText: '请反推这张图的 AI 生图提示词。',
-    imageUrl
+    imageUrl,
+    model: REVERSE_VISION_MODEL
   });
 
   const debited = await deductUserCredits(
@@ -169,7 +197,10 @@ promptToolsRoutes.post('/reverse', rateLimit(60, 60_000), async c => {
     data: {
       prompt,
       creditsCharged: REVERSE_PROMPT_CREDITS,
-      creditsRemaining: spendableCredits(profile)
+      creditsRemaining: spendableCredits(profile),
+      model: REVERSE_VISION_MODEL,
+      modelLabel: 'GPT-4o Mini Vision',
+      upstream: 'IMAGE_API'
     }
   });
 });

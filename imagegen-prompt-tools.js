@@ -4,6 +4,7 @@
 (function () {
   let batchRunning = false;
   let reversePreviewUrl = '';
+  let batchCostSeq = 0;
 
   function $(id) {
     return document.getElementById(id);
@@ -19,6 +20,51 @@
     ta.value = text || '';
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     window.FeatureDraft?.syncCardPublishFromPrompt?.();
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function getSelectedInspirationPrompts() {
+    const list = $('imageGenInspireList');
+    if (!list) return [];
+    return [...list.querySelectorAll('.imagegen-inspire-row')].filter((row) => {
+      return row.querySelector('input[type=checkbox]')?.checked;
+    }).map((row) => row.dataset.prompt || '').filter(Boolean);
+  }
+
+  async function getUnitImageGenCost() {
+    const model = $('imageGenModel')?.value || 'quanneng2';
+    const resolution = $('imageGenResolution')?.value || '1k';
+    const quality = $('imageGenQuality')?.value || 'standard';
+    let cost = window.PointsSystem?.getImageGenCost?.(model, resolution) ?? 10;
+    if (window.PointsSystem?.useApiForAccount?.()) {
+      try {
+        const quote = await window.PromptHubApi.getGenerationCost(resolution, quality, model);
+        if (quote.ok && quote.data?.final != null) cost = quote.data.final;
+      } catch (e) { /* 本地估价 */ }
+    }
+    return cost;
+  }
+
+  async function updateBatchCostLabel() {
+    const btn = $('imageGenInspireBatchBtn');
+    if (!btn || batchRunning) return;
+    const seq = ++batchCostSeq;
+    const selected = getSelectedInspirationPrompts();
+    const count = selected.length || Number($('imageGenInspireCount')?.value || 3);
+    const unit = await getUnitImageGenCost();
+    if (seq !== batchCostSeq) return;
+    const n = selected.length || count;
+    const total = unit * n;
+    btn.textContent = n > 0
+      ? `排队生图 ${n} 张 · 约 ${total} 积分（${unit} 积分/张）`
+      : `排队生图 · ${unit} 积分/张`;
   }
 
   function renderInspirationList(prompts) {
@@ -40,31 +86,19 @@
         if (row?.dataset.prompt) setPrompt(row.dataset.prompt);
       });
     });
-  }
-
-  function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  function getSelectedInspirationPrompts() {
-    const list = $('imageGenInspireList');
-    if (!list) return [];
-    return [...list.querySelectorAll('.imagegen-inspire-row')].filter((row) => {
-      return row.querySelector('input[type=checkbox]')?.checked;
-    }).map((row) => row.dataset.prompt || '').filter(Boolean);
+    list.querySelectorAll('input[type=checkbox]').forEach((cb) => {
+      cb.addEventListener('change', () => void updateBatchCostLabel());
+    });
+    void updateBatchCostLabel();
   }
 
   function onDrawInspiration() {
-    const type = $('imageGenInspireType')?.value || 'character';
+    const type = $('imageGenInspireType')?.value || 'viral';
     const count = Number($('imageGenInspireCount')?.value || 3);
     const prompts = window.ImageGenPromptKit?.generateInspirationPrompts?.(type, count) || [];
     renderInspirationList(prompts);
     if (prompts[0]) setPrompt(prompts[0]);
-    toast(`已生成 ${prompts.length} 条灵感提示词（本地抽卡，不扣积分）`);
+    toast(`已生成 ${prompts.length} 条灵感（抽卡免费；生图按张扣积分）`);
   }
 
   async function onQueueBatch() {
@@ -83,27 +117,40 @@
       toast('生图模块未就绪，请刷新页面');
       return;
     }
+    const unit = await getUnitImageGenCost();
+    const totalNeed = unit * prompts.length;
+    const balance = window.PointsSystem?.getCredits?.() ?? 0;
+    if (balance < unit) {
+      toast(`积分不足（每张 ${unit}，当前 ${balance}）`);
+      return;
+    }
+    if (balance < totalNeed) {
+      toast(`积分约够 ${Math.floor(balance / unit)} 张，将按顺序提交直到不足（${unit} 积分/张）`);
+    }
+
     batchRunning = true;
     const btn = $('imageGenInspireBatchBtn');
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = `排队中 0/${prompts.length}`;
-    }
+    if (btn) btn.disabled = true;
     let ok = 0;
+    let charged = 0;
     for (let i = 0; i < prompts.length; i += 1) {
-      if (btn) btn.textContent = `排队中 ${i + 1}/${prompts.length}`;
+      if (btn) btn.textContent = `提交中 ${i + 1}/${prompts.length}…`;
       setPrompt(prompts[i]);
       const res = await run(prompts[i], { silentToast: true, batch: true });
-      if (res?.ok) ok += 1;
-      else if (i === 0 || res?.reason === 'credits') break;
-      await sleep(400);
+      if (res?.ok) {
+        ok += 1;
+        charged += res.creditsCharged || unit;
+      } else if (res?.reason === 'credits') {
+        break;
+      }
+      await sleep(350);
     }
+    await window.PointsSystem?.refreshCreditsFromServer?.();
+    window.PointsSystem?.updateCreditsUI?.();
     batchRunning = false;
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = '勾选全部排队生图';
-    }
-    toast(`已提交 ${ok}/${prompts.length} 个生图任务，请在右侧查看进度`);
+    if (btn) btn.disabled = false;
+    void updateBatchCostLabel();
+    toast(`已提交 ${ok}/${prompts.length} 张生图，已扣约 ${charged} 积分（${unit} 积分/张）`);
     if (window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
       window.MobileUI.setImageGenView('feed');
     }
@@ -145,7 +192,8 @@
         window.PointsSystem?.setCreditsFromServer?.(r.data.creditsRemaining);
         window.PointsSystem?.updateCreditsUI?.();
       }
-      toast(`已优化（-${r.data?.creditsCharged ?? '?'} 积分）`);
+      const modelHint = r.data?.modelLabel || r.data?.model || 'DeepSeek Flash';
+      toast(`已优化（${modelHint} · -${r.data?.creditsCharged ?? '?'} 积分）`);
     } catch (e) {
       toast(e.message || '优化失败');
     } finally {
@@ -228,7 +276,7 @@
       return;
     }
     if (!window.PointsSystem?.useApiForAccount?.()) {
-      toast('反推提示词需登录并连接 API（约 5 积分/次）');
+      toast('反推提示词需登录并连接 API（5 积分/次）');
       return;
     }
     const btn = $('imageGenReverseBtn');
@@ -245,7 +293,8 @@
         window.PointsSystem?.setCreditsFromServer?.(r.data.creditsRemaining);
         window.PointsSystem?.updateCreditsUI?.();
       }
-      toast(`已反推提示词（-${r.data?.creditsCharged ?? 5} 积分）`);
+      const modelHint = r.data?.modelLabel || r.data?.model || 'gpt-4o-mini';
+      toast(`已反推（${modelHint} · -${r.data?.creditsCharged ?? 5} 积分）`);
     } catch (e) {
       toast(e.message || '反推失败');
     } finally {
@@ -291,6 +340,10 @@
     $('imageGenOptimizeBtn')?.addEventListener('click', () => void onOptimizePrompt());
     $('imageGenReverseBtn')?.addEventListener('click', () => void onReversePrompt());
     $('imageGenReverseFromRefBtn')?.addEventListener('click', () => void onReverseFromRef());
+    $('imageGenInspireCount')?.addEventListener('change', () => void updateBatchCostLabel());
+    ['imageGenModel', 'imageGenResolution', 'imageGenQuality'].forEach((id) => {
+      $(id)?.addEventListener('change', () => void updateBatchCostLabel());
+    });
 
     const fileInput = $('imageGenReverseFile');
     $('imageGenReversePickBtn')?.addEventListener('click', () => fileInput?.click());
@@ -316,7 +369,11 @@
 
   function initImageGenPromptTools() {
     bindToolbox();
+    void updateBatchCostLabel();
   }
 
-  window.ImageGenPromptTools = { init: initImageGenPromptTools };
+  window.ImageGenPromptTools = {
+    init: initImageGenPromptTools,
+    updateBatchCostLabel
+  };
 })();
