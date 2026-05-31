@@ -1262,7 +1262,7 @@
 }
 
 .imagegen-side {
-  --imagegen-preview-width: min(320px, 30vw);
+  --imagegen-preview-width: min(460px, 42vw);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1281,7 +1281,7 @@
 
 .imagegen-side.imagegen-preview-open {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, var(--imagegen-preview-width));
+  grid-template-columns: minmax(0, 1fr) minmax(320px, var(--imagegen-preview-width));
   column-gap: 12px;
   grid-template-rows: auto auto auto minmax(0, 1fr);
   grid-template-areas:
@@ -1447,8 +1447,8 @@
   display: block;
   width: 100%;
   flex: 0 0 auto;
-  min-height: 200px;
-  max-height: min(52vh, 480px);
+  min-height: 280px;
+  max-height: min(72vh, 680px);
   padding: 0;
   border: none;
   border-radius: var(--radius-sm);
@@ -1459,11 +1459,11 @@
 
 .imagegen-preview-img-btn img {
   width: 100%;
-  height: 100%;
-  min-height: 200px;
-  max-height: min(52vh, 480px);
+  height: auto;
+  min-height: 280px;
+  max-height: min(72vh, 680px);
   display: block;
-  object-fit: cover;
+  object-fit: contain;
   object-position: center center;
 }
 

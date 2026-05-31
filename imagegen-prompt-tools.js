@@ -113,8 +113,15 @@
     return new Promise((r) => setTimeout(r, ms));
   }
 
+  function ensurePromptApi(method) {
+    if (typeof window.PromptHubApi?.[method] === 'function') return true;
+    toast('脚本版本过旧，请按 Ctrl+Shift+R 强刷后再试');
+    return false;
+  }
+
   async function onOptimizePrompt() {
     if (!window.AuthGate?.requireAuth?.('imagegen')) return;
+    if (!ensurePromptApi('promptToolsOptimize')) return;
     const raw = $('imageGenPrompt')?.value?.trim();
     if (!raw) {
       toast('请先填写要优化的提示词');
@@ -215,6 +222,7 @@
 
   async function onReversePrompt() {
     if (!window.AuthGate?.requireAuth?.('imagegen')) return;
+    if (!ensurePromptApi('promptToolsReverse')) return;
     if (!reversePreviewUrl) {
       toast('请先上传或载入要反推的图片');
       return;
@@ -302,6 +310,7 @@
         opt.textContent = `${t.label}（${t.hint}）`;
         typeSel.appendChild(opt);
       });
+      typeSel.value = 'viral';
     }
   }
 

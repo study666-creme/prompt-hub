@@ -2745,8 +2745,8 @@ body {
     .image-lightbox.active { display: flex; }
     .lightbox-container {
       width: auto;
-      max-width: 90vw;
-      max-height: 80vh;
+      max-width: 96vw;
+      max-height: 94vh;
       background: transparent;
       border-radius: 0;
       overflow: visible;
@@ -2757,8 +2757,8 @@ body {
       display: block;
       width: auto;
       height: auto;
-      max-width: min(90vw, 980px);
-      max-height: 80vh;
+      max-width: min(96vw, 1280px);
+      max-height: 94vh;
       object-fit: contain;
       border-radius: inherit;
     }
