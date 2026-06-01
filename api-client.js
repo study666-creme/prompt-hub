@@ -628,7 +628,7 @@
   }
 
   async function fetchCommunityNotifications(opts = {}) {
-    const limit = Math.min(80, Math.max(1, Number(opts.limit) || 40));
+    const limit = Math.min(200, Math.max(1, Number(opts.limit) || 120));
     return request('GET', `/api/v1/community/notifications?limit=${limit}`);
   }
 

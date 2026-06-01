@@ -4072,11 +4072,46 @@ body.community-gacha-open {
 }
 .community-gacha-actions {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
-  justify-content: center;
-  flex-wrap: wrap;
+  width: min(100%, 280px);
+  margin: 0 auto;
 }
-.community-gacha-redraw:disabled {
+.community-gacha-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+.community-gacha-action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+.community-gacha-action:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.community-gacha-collect {
+  background: rgba(255, 255, 255, 0.94);
+  color: #14141a;
+  border-color: rgba(255, 255, 255, 0.94);
+}
+.community-gacha-collect:hover:not(:disabled) {
+  background: #fff;
+  border-color: #fff;
+}
+.community-gacha-redraw:disabled,
+.community-gacha-action:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }

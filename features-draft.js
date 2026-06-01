@@ -478,7 +478,7 @@
     publicFeedLoading = true;
     const prevPubSig = publicFeedPosts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
     try {
-      const r = await window.PromptHubApi.getCommunityFeed({ limit: 80, timeoutMs: opts.timeoutMs || 15000 });
+      const r = await window.PromptHubApi.getCommunityFeed({ limit: 200, timeoutMs: opts.timeoutMs || 15000 });
       if (!r?.ok || !Array.isArray(r.data?.posts)) {
         const cached = loadPublicFeedCache();
         if (cached?.posts?.length) {
@@ -3163,6 +3163,7 @@
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
       window.CardImageLoader?.observeContainer?.(container);
       const mobile = isMobileFeedLayout();
+      const prefetchCap = mobile ? 28 : 48;
       const cardLike = posts.map((p) => ({
         id: p.sourceCardId || p.id,
         image: canonicalCommunityImageRef(p) || p.image,
@@ -3176,7 +3177,7 @@
       const ownCards = [];
       const publicPosts = [];
       if (inCommunityFeed && loggedIn && uid) {
-        for (const p of posts.slice(0, 24)) {
+        for (const p of posts.slice(0, prefetchCap)) {
           const ref = canonicalCommunityImageRef(p) || p.image;
           const path = window.SupabaseSync?.storagePathFromRef?.(ref) || '';
           const item = {
@@ -3190,24 +3191,24 @@
         }
       }
       const prefetchP = inCommunityFeed && !loggedIn && imageRefs.length && window.SupabaseSync?.prefetchCommunityDisplayUrls
-        ? window.SupabaseSync.prefetchCommunityDisplayUrls(cardLike.slice(0, 20), mobile ? 8000 : 10000)
+        ? window.SupabaseSync.prefetchCommunityDisplayUrls(cardLike.slice(0, prefetchCap), mobile ? 5000 : 7000)
         : inCommunityFeed && loggedIn
           ? Promise.all([
               ownCards.length && window.SupabaseSync?.prefetchCardsImages
-                ? window.SupabaseSync.prefetchCardsImages(ownCards, mobile ? 6000 : 8000)
+                ? window.SupabaseSync.prefetchCardsImages(ownCards, mobile ? 5000 : 6500)
                 : Promise.resolve(),
               publicPosts.length && window.SupabaseSync?.prefetchCommunityDisplayUrls
-                ? window.SupabaseSync.prefetchCommunityDisplayUrls(publicPosts, mobile ? 6000 : 8000)
+                ? window.SupabaseSync.prefetchCommunityDisplayUrls(publicPosts, mobile ? 5000 : 6500)
                 : Promise.resolve()
             ])
           : imageRefs.length && window.SupabaseSync?.prefetchDisplayUrlsWithCap
-            ? window.SupabaseSync.prefetchDisplayUrlsWithCap(imageRefs.slice(0, 20), mobile ? 8000 : 10000)
+            ? window.SupabaseSync.prefetchDisplayUrlsWithCap(imageRefs.slice(0, prefetchCap), mobile ? 5000 : 7000)
             : Promise.resolve();
       const hydrateP = hydrateFeedImages(container);
       void prefetchP.catch(() => {});
       await Promise.race([
         Promise.all([hydrateP, prefetchP]),
-        new Promise((r) => setTimeout(r, mobile ? 4000 : 5500))
+        new Promise((r) => setTimeout(r, mobile ? 2200 : 2800))
       ]);
       if (renderGen !== communityFeedRenderGen) return;
       window.SupabaseSync?.patchImageSrcFromCache?.(container);

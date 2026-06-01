@@ -508,12 +508,11 @@
     function closeAppreciateViewer(e) {
       const viewer = document.getElementById('appreciateViewer');
       if (!viewer?.classList.contains('active')) return;
-      const fromCloseBtn = e?.target?.closest?.('.appreciate-viewer-close');
-      if (e && !fromCloseBtn) {
+      if (e) {
         const t = e.target;
-        if (t?.closest?.('button')) return;
-        if (t?.closest?.('.viewer-image-frame, .viewer-image-shine-wrap, #appreciateViewerImg, #lightboxImage')) return;
-        if (t !== viewer && !t?.closest?.('.appreciate-viewer-inner') && !t?.classList?.contains('appreciate-viewer-close')) return;
+        if (t?.closest?.('.appreciate-viewer-actions button, .appreciate-viewer-gen-btn')) return;
+        if (t?.closest?.('#appreciateViewerImg, .viewer-image-shine-wrap, #lightboxImage')) return;
+        if (t?.closest?.('button') && !t?.closest?.('.appreciate-viewer-close')) return;
       }
       if (typeof window.FeatureDraft?.bumpAppreciateViewerGen === 'function') {
         window.FeatureDraft.bumpAppreciateViewerGen();
@@ -949,6 +948,10 @@
         return null;
       }
       if (imageRef && window.SupabaseSync?.isLoggedIn?.()) {
+        const normalizedRef = window.SupabaseSync?.normalizeImageRef?.(imageRef) || imageRef;
+        if (typeof normalizedRef === 'string' && normalizedRef.startsWith('storage://')) {
+          image = normalizedRef;
+        } else {
         try {
           let source = await blobFromRef(imageRef);
           if (!source && post.authorId && post.sourceCardId) {
@@ -970,6 +973,7 @@
         } catch (e) {
           console.warn('[addCardFromCommunity] image copy failed', e);
         }
+        }
       }
       const newCard = {
         id: cardId,
@@ -985,13 +989,13 @@
         updatedAt: Date.now()
       };
       cards.push(newCard);
-      if (image && window.SupabaseSync?.ensureCardImageOnCloud) {
+      if (image && !String(image).startsWith('storage://') && window.SupabaseSync?.ensureCardImageOnCloud) {
         try {
           const up = await window.SupabaseSync.ensureCardImageOnCloud(newCard);
           if (up?.image) newCard.image = up.image;
         } catch (e) { /* ignore */ }
       }
-      await saveAllData();
+      await saveAllData({ skipCloud: true });
       if (window.SupabaseSync?.isLoggedIn?.()) {
         scheduleCloudPush();
       }
@@ -5863,8 +5867,14 @@
       }
     });
     function closeLightbox(e) {
-      if (e && e.target !== document.getElementById('imageLightbox') && e.target !== document.querySelector('.close-lightbox')) return;
       const lightbox = document.getElementById('imageLightbox');
+      if (!lightbox?.classList.contains('active')) return;
+      if (e) {
+        const t = e.target;
+        if (t?.closest?.('.lightbox-actions, #lightboxImage, .viewer-image-shine-wrap')) return;
+        if (t?.closest?.('.close-lightbox')) { /* fall through */ }
+        else if (t !== lightbox && !t?.closest?.('.lightbox-container')) return;
+      }
       lightbox?.classList.remove('active');
       const frame = getLightboxFrame();
       frame?.classList.remove('is-loading', 'viewer-glow-active');

@@ -2312,7 +2312,7 @@
     root.innerHTML = `
       <div class="asset-studio-launch">
         <header class="feature-header asset-studio-launch-head">
-          <h2>资产创作</h2>
+          <h2>卡片式创作</h2>
           <div class="asset-studio-launch-actions">
             <button type="button" class="btn btn-primary" id="assetStudioOpenBtn">进入创作工作台</button>
             <button type="button" class="btn btn-secondary" id="assetStudioExportBtn">打开并同步卡片库</button>

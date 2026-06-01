@@ -276,9 +276,9 @@
       '<span class="community-gacha-rarity"></span>' +
       '<p class="community-gacha-prompt"></p>' +
       '<div class="community-gacha-actions">' +
-      '<button type="button" class="btn btn-primary btn-sm community-gacha-collect">收藏入仓库</button>' +
-      '<button type="button" class="btn btn-secondary btn-sm community-gacha-redraw">再抽一次</button>' +
-      '<button type="button" class="btn btn-ghost btn-sm community-gacha-view">查看详情</button>' +
+      '<button type="button" class="community-gacha-action community-gacha-collect">收藏入仓库</button>' +
+      '<button type="button" class="community-gacha-action community-gacha-redraw">再抽一次</button>' +
+      '<button type="button" class="community-gacha-action community-gacha-view">查看详情</button>' +
       '</div>' +
       '</div>' +
       '<p class="community-gacha-foot hidden" id="communityGachaFoot"></p>' +
