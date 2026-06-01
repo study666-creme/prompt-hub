@@ -74,6 +74,71 @@ export async function communityMediaSignHandler(c: Context<{ Bindings: Env }>) {
   throw new ApiError(404, 'NOT_FOUND', 'Object not found');
 }
 
+const communitySignBatchBodySchema = z.object({
+  items: z
+    .array(
+      z.object({
+        ref: z.string().max(500),
+        authorId: z.string().max(80).optional().nullable(),
+        cardId: z.string().max(128).optional().nullable()
+      })
+    )
+    .max(40)
+});
+
+/** 社区 Feed 批量签名：一次请求签多张公开图，减少首屏 RTT */
+export async function communityMediaSignBatchHandler(c: Context<{ Bindings: Env }>) {
+  const parsed = communitySignBatchBodySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '批量社区签名参数无效');
+  }
+
+  const admin = createAdminClient(c.env);
+  const urls: Record<string, string> = {};
+  const refMap: Record<string, string> = {};
+  const seen = new Set<string>();
+
+  const items = parsed.data.items.filter(item => {
+    const ref = String(item.ref || '').trim();
+    if (!ref) return false;
+    const key = `${ref}|${item.authorId || ''}|${item.cardId || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  let idx = 0;
+  const concurrency = 10;
+  async function worker() {
+    while (idx < items.length) {
+      const item = items[idx];
+      idx += 1;
+      const ref = String(item.ref || '').trim();
+      const paths = communityImagePathCandidates(
+        ref,
+        item.authorId || undefined,
+        item.cardId || undefined
+      );
+      const found = await findFirstExistingStoragePath(admin, paths, BUCKET);
+      if (!found) continue;
+      if (urls[found]) {
+        refMap[ref] = urls[found];
+        continue;
+      }
+      const url = await buildPublicMediaCdnUrl(c, found);
+      urls[found] = url;
+      refMap[ref] = url;
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length || 1) }, () => worker()));
+
+  return c.json({
+    ok: true,
+    data: { urls, refMap, expiresIn: MEDIA_CDN_TOKEN_TTL_SEC, cdn: true }
+  });
+}
+
 /** 将 storage:// 转为 CDN 代理 URL */
 mediaRoutes.get('/sign', async c => {
   const user = c.get('user');

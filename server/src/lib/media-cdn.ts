@@ -126,27 +126,51 @@ export function sanitizeCardFileBase(cardId: string): string {
 export function communityImagePathCandidates(
   ref: string,
   authorId?: string,
-  cardId?: string
+  cardId?: string,
+  opts?: { preferGrid?: boolean }
 ): string[] {
+  const preferGrid = opts?.preferGrid !== false;
   const out: string[] = [];
   const add = (p: string) => {
     const key = p.replace(/^\//, '');
     if (key && isAllowedCommunityMediaPath(key) && !out.includes(key)) out.push(key);
   };
   const fromRef = storagePathFromRef(ref);
-  if (fromRef) add(fromRef);
+  if (fromRef) {
+    if (preferGrid) {
+      const grid = gridPathFromPrimary(fromRef.replace(/^\//, ''));
+      if (grid) add(grid);
+    }
+    add(fromRef);
+  }
   const aid = (authorId || '').trim();
   const cid = (cardId || '').trim();
   if (aid && cid) {
     const base = sanitizeCardFileBase(cid);
+    if (preferGrid) {
+      add(`${aid}/${base}_grid.jpg`);
+      add(`${aid}/${cid}_grid.jpg`);
+    }
     add(`${aid}/${base}.jpg`);
     add(`${aid}/${cid}.jpg`);
     add(`${aid}/${base}.webp`);
     add(`${aid}/${base}.png`);
+    if (preferGrid) {
+      add(`${aid}/generated/${base}_grid.jpg`);
+      add(`${aid}/generated/${cid}_grid.jpg`);
+    }
     add(`${aid}/generated/${base}.jpg`);
     add(`${aid}/generated/${cid}.jpg`);
   }
   return out;
+}
+
+function gridPathFromPrimary(path: string): string | null {
+  const clean = path.replace(/^\//, '');
+  if (!clean || /_grid\.(jpe?g|webp|png)$/i.test(clean)) return null;
+  const m = clean.match(/^(.+\/)([^/]+)\.(jpe?g|webp|png)$/i);
+  if (!m) return null;
+  return `${m[1]}${m[2]}_grid.jpg`;
 }
 
 function contentTypeForPath(path: string): string {

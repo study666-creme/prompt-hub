@@ -632,6 +632,59 @@
     return request('GET', `/api/v1/community/notifications?limit=${limit}`);
   }
 
+  async function publicPost(path, body, opts = {}, attempt = 0) {
+    if (!isConfigured()) {
+      return { ok: false, code: 'API_NOT_CONFIGURED', message: '未配置 API 地址' };
+    }
+    const timeoutMs = opts.timeoutMs || API_FAST_TIMEOUT_MS;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${baseUrl()}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+        cache: 'no-store',
+        signal: controller.signal
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.ok === false) {
+        const code = json.error?.code || (res.status === 429 ? 'RATE_LIMITED' : 'REQUEST_FAILED');
+        if (res.status === 429 && attempt < 4) {
+          await new Promise((r) => setTimeout(r, 1000 + attempt * 900));
+          return publicPost(path, body, opts, attempt + 1);
+        }
+        return {
+          ok: false,
+          status: res.status,
+          code,
+          message: json.error?.message || (res.status === 429 ? '操作过于频繁，请稍后再试' : `HTTP ${res.status}`)
+        };
+      }
+      return json;
+    } catch (e) {
+      if (isNetworkFetchError(e)) markApiUnreachable();
+      return { ok: false, code: 'NETWORK_ERROR', message: '无法连接社区服务' };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function signCommunityMediaRefsBatch(items, opts) {
+    const list = (items || [])
+      .filter((item) => item && String(item.ref || '').trim())
+      .slice(0, 40)
+      .map((item) => ({
+        ref: String(item.ref || '').trim(),
+        authorId: item.authorId ? String(item.authorId) : undefined,
+        cardId: item.cardId ? String(item.cardId) : undefined
+      }));
+    if (!list.length) return { ok: true, data: { urls: {}, refMap: {} } };
+    return publicPost('/api/v1/media/community/sign-batch', { items: list }, {
+      timeoutMs: opts?.timeoutMs || 5500
+    });
+  }
+
   async function signCommunityMediaRef(ref, opts) {
     if (!isConfigured()) {
       return { ok: false, code: 'API_NOT_CONFIGURED', message: '未配置 API 地址' };
@@ -716,6 +769,7 @@
     signMediaRef,
     signMediaRefsBatch,
     signCommunityMediaRef,
+    signCommunityMediaRefsBatch,
     getCommunityFeed,
     publishCommunityPost,
     unpublishCommunityPost,

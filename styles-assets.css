@@ -145,9 +145,9 @@
 }
 
 .asset-market-card--light {
-  width: 240px;
-  max-width: min(240px, 100%);
-  flex: 0 1 240px;
+  width: 258px;
+  max-width: min(258px, 100%);
+  flex: 0 1 258px;
 }
 
 /* 重卡包：约 2 张轻卡宽；封面全宽横幅 + 正文在下，避免右侧大块留白 */
@@ -203,8 +203,8 @@
 .asset-stack-cover--pack {
   cursor: pointer;
   width: 100%;
-  min-height: 96px;
-  aspect-ratio: 4 / 3;
+  min-height: 88px;
+  aspect-ratio: 5 / 3.6;
   display: block;
   position: relative;
   background: transparent;
@@ -371,11 +371,11 @@ body.efficiency-mode .asset-stack-cover--pack .asset-stack-pack-shimmer {
 }
 
 .asset-market-card-body {
-  padding: 8px 10px 8px;
+  padding: 7px 10px 6px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  flex: 0 0 auto;
+  gap: 2px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -429,10 +429,12 @@ body.efficiency-mode .asset-stack-cover--pack .asset-stack-pack-shimmer {
 .asset-market-card--light .asset-market-card-desc {
   font-size: var(--font-xs);
   line-height: 1.35;
+  -webkit-line-clamp: 1;
 }
 
 .asset-market-card--light .asset-market-card-foot {
-  margin-top: 2px;
+  margin-top: auto;
+  padding-top: 4px;
 }
 
 .asset-market-card--light .asset-market-price {
@@ -2015,9 +2017,9 @@ body.efficiency-mode .asset-stack-cover--heavy .asset-pack-sweep::after {
 }
 
 .my-home-package-grid .asset-market-card--light {
-  width: 240px;
-  max-width: min(240px, 100%);
-  flex: 0 1 240px;
+  width: 258px;
+  max-width: min(258px, 100%);
+  flex: 0 1 258px;
 }
 
 .my-home-package-grid .asset-market-card--heavy {

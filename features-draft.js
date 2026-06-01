@@ -122,6 +122,15 @@
     }
   }
 
+  function hydratePublicFeedFromCache() {
+    if (publicFeedAt > 0) return true;
+    const cached = loadPublicFeedCache();
+    if (!cached?.posts?.length) return false;
+    publicFeedPosts = cached.posts.map(normalizeFeedPost).filter(Boolean);
+    publicFeedAt = cached.cachedAt || Date.now();
+    return publicFeedPosts.length > 0;
+  }
+
   function savePublicFeedCache(posts) {
     try {
       const list = (posts || []).filter((p) => p && !p.isMock);
@@ -3026,6 +3035,40 @@
     });
   }
 
+  function snapshotLoadedFeedImages(container) {
+    const map = new Map();
+    if (!container) return map;
+    container.querySelectorAll('.card[data-post-id] img.card-img').forEach((img) => {
+      const postId = img.closest('.card')?.dataset?.postId;
+      const src = img.currentSrc || img.src || '';
+      if (!postId || !src || src.includes('data:image/svg')) return;
+      const ok =
+        (window.SupabaseSync?.isValidSignedDisplayUrl && window.SupabaseSync.isValidSignedDisplayUrl(src)) ||
+        /^https?:\/\//i.test(src);
+      if (ok) map.set(postId, src);
+    });
+    return map;
+  }
+
+  function restoreLoadedFeedImages(container, map) {
+    if (!container || !map?.size) return;
+    map.forEach((src, postId) => {
+      const card = container.querySelector(`.card[data-post-id="${CSS.escape(postId)}"]`);
+      const img = card?.querySelector('img.card-img');
+      if (!img) return;
+      const cur = img.currentSrc || img.src || '';
+      if (cur && !cur.includes('data:image/svg') && cur === src) return;
+      if (window.CardImageLoader?.applyUrlToImg) {
+        window.CardImageLoader.applyUrlToImg(img, src);
+      } else {
+        img.src = src;
+        const media = img.closest('.card-media');
+        media?.classList.remove('is-loading', 'card-media--await');
+        if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
+      }
+    });
+  }
+
   async function renderPostsIntoContainer(posts, containerId) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -3145,11 +3188,13 @@
       fragment.appendChild(div);
     });
 
+    const preservedImgs = isMobileFeedLayout() ? snapshotLoadedFeedImages(container) : new Map();
     container.innerHTML = '';
     delete container.dataset.feedFinalized;
     delete container.dataset.feedLayoutReady;
     setFeedLayoutPending(containerId, true);
     container.appendChild(fragment);
+    restoreLoadedFeedImages(container, preservedImgs);
     window.SupabaseSync?.patchImageSrcFromCache?.(container);
     container.classList.add('cards-grid-primed');
     if (useGrid) container.classList.add('community-mobile-feed');
@@ -3356,20 +3401,30 @@
       return;
     }
     const gen = ++communityFeedRenderGen;
-    if (!opts.skipFeedFetch && publicFeedAt === 0 && !publicFeedLoading) {
-      if (communityMasonry) { communityMasonry.destroy(); communityMasonry = null; }
-      container.innerHTML =
-        '<div class="feature-empty"><p>正在加载全站社区…</p><p class="panel-hint">从服务器拉取最新列表</p></div>';
-      void refreshPublicCommunityFeed({ force: true }).then((ok) => {
-        if (gen !== communityFeedRenderGen) return;
-        if (!ok) {
-          container.innerHTML =
-            '<div class="feature-empty"><p>社区加载失败</p><p class="panel-hint">请检查网络或稍后再试</p><button type="button" class="btn btn-primary" onclick="renderCommunity({ immediate: true, forceRepaint: true })">重试</button></div>';
-          return;
-        }
-        renderCommunityNow({ skipFeedFetch: true, forceRepaint: true });
-      });
-      return;
+    if (!opts.skipFeedFetch) {
+      hydratePublicFeedFromCache();
+      const feedStale = publicFeedAt === 0 || Date.now() - publicFeedAt >= PUBLIC_FEED_TTL_MS;
+      if (publicFeedAt === 0 && !publicFeedLoading) {
+        if (communityMasonry) { communityMasonry.destroy(); communityMasonry = null; }
+        container.innerHTML =
+          '<div class="feature-empty"><p>正在加载全站社区…</p><p class="panel-hint">从服务器拉取最新列表</p></div>';
+        void refreshPublicCommunityFeed({ force: true, timeoutMs: 12000 }).then(() => {
+          if (gen !== communityFeedRenderGen) return;
+          if (publicFeedAt === 0) {
+            container.innerHTML =
+              '<div class="feature-empty"><p>社区加载失败</p><p class="panel-hint">请检查网络或稍后再试</p><button type="button" class="btn btn-primary" onclick="renderCommunity({ immediate: true, forceRepaint: true })">重试</button></div>';
+            return;
+          }
+          renderCommunityNow({ skipFeedFetch: true, forceRepaint: true });
+        });
+        return;
+      }
+      if (feedStale && !publicFeedLoading) {
+        void refreshPublicCommunityFeed({ force: publicFeedAt === 0, timeoutMs: 12000 }).then((changed) => {
+          if (gen !== communityFeedRenderGen) return;
+          if (changed) renderCommunityNow({ skipFeedFetch: true, forceRepaint: true });
+        });
+      }
     }
     let list = filterAndSortPosts(getCommunityFeedForDisplay());
     const earlySig = feedListSignature(list, 'communityGrid');
@@ -3842,14 +3897,86 @@
     });
   }
 
+  function communityPostZoomUrlSync(post, sideRef, body) {
+    const postId = post?.id || '';
+    const assetId = post?.sourceCardId || postId;
+    const authorId = post?.authorId || '';
+    const fromSide = loadedCommunitySideImgSrc(body);
+    if (fromSide) return fromSide;
+    const cached = window.SupabaseSync?.getCachedDisplayUrl?.(sideRef, {
+      assetId,
+      authorId: authorId || undefined,
+      variant: 'grid'
+    }) || '';
+    if (cached && cached.startsWith('http') && !cached.includes('data:image/svg')) return cached;
+    const gridImg = document.querySelector(
+      `#communityGrid .community-post-card[data-post-id="${postId}"] img.card-img`
+    );
+    const gridSrc = gridImg?.currentSrc || gridImg?.src || '';
+    if (gridSrc.startsWith('http') && !gridSrc.includes('data:image/svg')) return gridSrc;
+    return '';
+  }
+
   function loadedCommunitySideImgSrc(body) {
     const imgEl = body?.querySelector?.('.community-side-img');
     const cur = imgEl?.currentSrc || imgEl?.src || '';
-    if (!imgEl || !cur || cur.includes('data:image/svg')) return '';
-    if (!cur.startsWith('http')) return '';
-    if (!imgEl.complete || imgEl.naturalWidth < 1) return '';
-    if (window.SupabaseSync?.isValidSignedDisplayUrl && !window.SupabaseSync.isValidSignedDisplayUrl(cur)) return '';
-    return cur;
+    if (!cur || cur.includes('data:image/svg') || !cur.startsWith('http')) return '';
+    if (window.SupabaseSync?.isResolvableDisplayUrl?.(cur)) return cur;
+    if (window.SupabaseSync?.isValidSignedDisplayUrl?.(cur)) return cur;
+    return '';
+  }
+
+  async function resolveCommunityZoomUrl(body, post, sideRef, postId, extra = {}) {
+    const sync = communityPostZoomUrlSync(post, sideRef, body);
+    if (sync) return sync;
+    const signOpts = communitySideZoomSignOpts(post, sideRef, postId);
+    const assetId = post?.sourceCardId || postId;
+    if (window.SupabaseSync?.resolveDisplayUrl && sideRef) {
+      try {
+        const grid = await window.SupabaseSync.resolveDisplayUrl(sideRef, {
+          assetId,
+          authorId: signOpts.authorId || undefined,
+          cardId: signOpts.cardId || undefined,
+          variant: 'grid',
+          communityFeed: signOpts.fromPublicFeed === true,
+          tryAllPaths: signOpts.fromPublicFeed === true
+        });
+        if (grid) return grid;
+      } catch (e) { /* ignore */ }
+      try {
+        const full = await window.SupabaseSync.resolveDisplayUrl(sideRef, {
+          assetId,
+          authorId: signOpts.authorId || undefined,
+          cardId: signOpts.cardId || undefined,
+          variant: 'full',
+          communityFeed: signOpts.fromPublicFeed === true,
+          tryAllPaths: signOpts.fromPublicFeed === true
+        });
+        if (full) return full;
+      } catch (e) { /* ignore */ }
+    }
+    return resolveImageDisplayUrl(sideRef, extra.jobId || null, assetId, signOpts);
+  }
+
+  function upgradeCommunityZoomToFull(post, sideRef, postId, currentUrl) {
+    if (!window.SupabaseSync?.resolveDisplayUrl || !sideRef) return;
+    const signOpts = communitySideZoomSignOpts(post, sideRef, postId);
+    const assetId = post?.sourceCardId || postId;
+    void window.SupabaseSync.resolveDisplayUrl(sideRef, {
+      assetId,
+      authorId: signOpts.authorId || undefined,
+      cardId: signOpts.cardId || undefined,
+      variant: 'full',
+      communityFeed: signOpts.fromPublicFeed === true,
+      tryAllPaths: signOpts.fromPublicFeed === true
+    }).then((full) => {
+      if (!full || full === currentUrl) return;
+      const lbImg = document.getElementById('lightboxImage');
+      const lb = document.getElementById('imageLightbox');
+      if (lb?.classList.contains('active') && lbImg?.src === currentUrl) {
+        window.setLightboxSrc?.(full);
+      }
+    });
   }
 
   function communitySideZoomSignOpts(post, sideRef, postId) {
@@ -3864,39 +3991,60 @@
     };
   }
 
+  function syncLightboxCommunityMode(isCommunity, postId) {
+    window.syncLightboxActions?.({ community: !!isCommunity, postId: postId || null });
+  }
+
+  function isPostFavorited(postId) {
+    return favIds.has(postId);
+  }
+
+  async function openCommunityPostImageZoom(post, sideRef, extra = {}) {
+    if (!post || !sideRef) return;
+    const postId = post.id;
+    if (communityAppreciateActive && typeof openCommunityAppreciateViewer === 'function') {
+      void openCommunityAppreciateViewer(post);
+      return;
+    }
+    syncLightboxCommunityMode(true, postId);
+    const syncUrl = communityPostZoomUrlSync(post, sideRef, null);
+    if (syncUrl && typeof window.openLightbox === 'function') {
+      window.openLightbox(syncUrl, { community: true, postId });
+      upgradeCommunityZoomToFull(post, sideRef, postId, syncUrl);
+      return;
+    }
+    if (typeof window.openLightbox === 'function') window.openLightbox('', { pending: true, community: true, postId });
+    const url = await resolveCommunityZoomUrl(null, post, sideRef, postId, extra);
+    if (url && typeof window.setLightboxSrc === 'function') {
+      window.setLightboxSrc(url);
+      upgradeCommunityZoomToFull(post, sideRef, postId, url);
+      return;
+    }
+    if (typeof window.closeLightbox === 'function') window.closeLightbox();
+    toast('图片加载中，请稍候再试');
+  }
+
   async function openCommunitySideImageZoom(body, post, sideRef, postId, extra = {}) {
     if (post && communityAppreciateActive && typeof openCommunityAppreciateViewer === 'function') {
       void openCommunityAppreciateViewer(post);
       return;
     }
-    const ready = loadedCommunitySideImgSrc(body);
-    if (ready && typeof window.openLightbox === 'function') {
-      window.openLightbox(ready);
+    syncLightboxCommunityMode(true, postId);
+    const syncUrl = communityPostZoomUrlSync(post, sideRef, body);
+    if (syncUrl && typeof window.openLightbox === 'function') {
+      window.openLightbox(syncUrl, { community: true, postId });
+      upgradeCommunityZoomToFull(post, sideRef, postId, syncUrl);
       return;
     }
-    const signOpts = communitySideZoomSignOpts(post, sideRef, postId);
-    let url = await resolveImageDisplayUrl(sideRef, extra.jobId || null, post?.sourceCardId || postId, signOpts);
-    if (!url && window.SupabaseSync?.resolveDisplayUrl && sideRef) {
-      try {
-        url = await window.SupabaseSync.resolveDisplayUrl(sideRef, {
-          assetId: post?.sourceCardId || postId,
-          authorId: signOpts.authorId || undefined,
-          cardId: signOpts.cardId || undefined,
-          variant: 'full',
-          communityFeed: signOpts.fromPublicFeed === true,
-          tryAllPaths: signOpts.fromPublicFeed === true
-        });
-      } catch (e) { /* ignore */ }
-    }
-    if (url && typeof window.openLightbox === 'function') {
-      window.openLightbox(url);
+    if (typeof window.openLightbox === 'function') window.openLightbox('', { pending: true, community: true, postId });
+    const url = await resolveCommunityZoomUrl(body, post, sideRef, postId, extra);
+    if (url && typeof window.setLightboxSrc === 'function') {
+      window.setLightboxSrc(url);
+      upgradeCommunityZoomToFull(post, sideRef, postId, url);
       return;
     }
-    if (post && typeof openCommunityAppreciateViewer === 'function') {
-      void openCommunityAppreciateViewer(post);
-      return;
-    }
-    toast('图片尚未加载完成，请稍候再试');
+    if (typeof window.closeLightbox === 'function') window.closeLightbox();
+    toast('图片加载中，请稍候再试');
   }
 
   function bindCommunitySideImageZoom(body, post, sideRef, postId, extra = {}) {
@@ -3958,7 +4106,10 @@
       });
       bindCommunitySideImageZoom(body, post, sideRef, id);
       highlightCreationsPost(id);
-      if (showSideImg) await hydrateFeedImages(body);
+      if (showSideImg) {
+        window.SupabaseSync?.patchImageSrcFromCache?.(body);
+        void hydrateFeedImages(body);
+      }
       return;
     }
     const faved = favIds.has(id);
@@ -3989,7 +4140,10 @@
     const authorBtn = body.querySelector('.community-detail-author-btn');
     if (authorBtn) bindAuthorLink(authorBtn, post.authorId, post.authorName);
     highlightCommunityCard(id);
-    if (showSideImg) await hydrateFeedImages(body);
+    if (showSideImg) {
+      window.SupabaseSync?.patchImageSrcFromCache?.(body);
+      void hydrateFeedImages(body);
+    }
     const timeEl = document.querySelector(`#communityGrid .card[data-post-id="${id}"] .card-time`);
     if (timeEl) {
       timeEl.textContent = `♥ ${post.likes || 0}`;
@@ -4133,7 +4287,10 @@
       caption.style.display = caption.textContent ? 'block' : 'none';
     }
     if (favBtn) {
-      favBtn.textContent = favIds.has(post.id) ? '已收藏' : '收藏到卡片库';
+      const label = favBtn.querySelector('span');
+      const text = favIds.has(post.id) ? '已收藏' : '收藏到卡片库';
+      if (label) label.textContent = text;
+      else favBtn.textContent = text;
       favBtn.disabled = favIds.has(post.id);
     }
     actions?.classList.remove('hidden');
@@ -4165,6 +4322,7 @@
       viewer.classList.add('active');
       document.body.classList.add('appreciate-viewing');
     };
+    reveal();
     if (imageRef && isDisplayableImage(imageRef)) {
       img.style.display = 'block';
       if (hint) hint.style.display = 'block';
@@ -4485,7 +4643,8 @@
       batchIndex: job.batchIndex || null,
       batchTotal: job.batchTotal || null,
       batchId: job.batchId || null,
-      silentToast: !!job.silentToast
+      silentToast: !!job.silentToast,
+      startedAt: job.startedAt || Date.now()
     };
   }
 
@@ -4523,7 +4682,7 @@
       if (imageGenPendingJobs.length || getSessionGenJobIds().length) {
         void resumePendingGenerationJobs();
       }
-    }, 18000);
+    }, 8000);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') scheduleGenJobsSync(300);
     });
@@ -4684,12 +4843,35 @@
 
         const existingCard = (window.__promptHubCards || []).find((c) => c.genJobId === recoverJob.id);
         if (existingCard && hasWarehouseCardForJob(recoverJob.id)) continue;
+        const recoverExtrasEarly = Array.isArray(recoverJob.extraImageUrls)
+          ? recoverJob.extraImageUrls.filter((u) => u && u !== recoverJob.imageUrl)
+          : [];
         if (
           !existingCard
           && creations.some(
             (c) => c.jobId === recoverJob.id || String(c.jobId || '').startsWith(`${recoverJob.id}#`)
           )
         ) {
+          if (!allGenCreationSlotsSaved(recoverJob.id, recoverExtrasEarly.length)) {
+            changed = true;
+            attachedJobIds.add(recoverJob.id);
+            imageGenPendingJobs = imageGenPendingJobs.filter((p) => p.jobId !== recoverJob.id);
+            await ensureGenJobCreationsFromPoll(
+              { data: { status: 'completed', imageUrl: recoverJob.imageUrl, extraImageUrls: recoverExtrasEarly } },
+              {
+                prompt: recoverJob.prompt || '',
+                model: recoverJob.model || 'quanneng2',
+                resolution: recoverJob.resolution || '1k',
+                quality: recoverJob.quality || 'standard',
+                size: recoverJob.size || '1:1',
+                cost: recoverJob.creditsCharged || 0,
+                jobId: recoverJob.id,
+                silentToast: true,
+                isRecovery: true
+              },
+              null
+            );
+          }
           continue;
         }
 
@@ -5595,56 +5777,113 @@
     persistPendingGenJobs();
   }
 
+  function getPollExtraImageUrls(poll, primaryUrl) {
+    const main = primaryUrl || poll?.data?.imageUrl;
+    if (!main) return [];
+    const raw = Array.isArray(poll?.data?.extraImageUrls) ? poll.data.extraImageUrls : [];
+    return raw.filter((u) => u && u !== main);
+  }
+
+  function isGenCreationSlotSaved(baseJobId, slotIndex) {
+    if (!baseJobId) return false;
+    const slotId = slotIndex <= 1 ? String(baseJobId) : `${baseJobId}#${slotIndex}`;
+    return creations.some((c) => c.jobId === slotId);
+  }
+
+  function allGenCreationSlotsSaved(baseJobId, extraCount) {
+    if (!baseJobId || !isGenCreationSlotSaved(baseJobId, 1)) return false;
+    for (let i = 0; i < extraCount; i += 1) {
+      if (!isGenCreationSlotSaved(baseJobId, i + 2)) return false;
+    }
+    return true;
+  }
+
+  /** 入库主图 + 同任务附赠图；已有主图时只补缺失的附赠槽位 */
+  async function ensureGenJobCreationsFromPoll(poll, ctx, pendingId) {
+    if (poll?.data?.status !== 'completed' || !poll.data.imageUrl) return false;
+    const baseJobId = ctx?.jobId || poll.data.jobId;
+    const imageUrl = poll.data.imageUrl;
+    const extras = getPollExtraImageUrls(poll, imageUrl);
+
+    if (baseJobId && allGenCreationSlotsSaved(baseJobId, extras.length)) {
+      if (pendingId) removePendingJob(pendingId);
+      renderImageGenFeed({ preserveScroll: true });
+      return true;
+    }
+
+    if (!baseJobId || !isGenCreationSlotSaved(baseJobId, 1)) {
+      await finishImageGenRun({
+        ...ctx,
+        image: imageUrl,
+        extraImages: extras,
+        cost: ctx.cost,
+        jobId: baseJobId,
+        silentToast: !!ctx.silentToast,
+        isRecovery: !!ctx.isRecovery,
+        pendingId
+      });
+      if (extras.length && !ctx.silentToast) {
+        toast(`本次上游共 ${extras.length + 1} 张图，已全部存入仓库（仅扣 1 次积分）`);
+      }
+      return true;
+    }
+
+    for (let i = 0; i < extras.length; i += 1) {
+      if (!isGenCreationSlotSaved(baseJobId, i + 2)) {
+        await finishImageGenRun({
+          ...ctx,
+          image: extras[i],
+          extraImages: [],
+          cost: ctx.cost,
+          jobId: baseJobId,
+          silentToast: true,
+          isRecovery: !!ctx.isRecovery,
+          pendingId: null,
+          imageIndex: i + 2
+        });
+      }
+    }
+    if (pendingId) removePendingJob(pendingId);
+    renderImageGenFeed({ preserveScroll: true });
+    if (extras.length && !ctx.silentToast) {
+      toast(`已补全同任务附赠图 ${extras.length} 张`);
+    }
+    return true;
+  }
+
+  /** 上游通常 1～4 分钟出图：先慢后快，按任务已等待时长调节间隔 */
+  function genJobPollDelayMs(ctx) {
+    const elapsed = Math.max(0, Date.now() - (ctx?.startedAt || Date.now()));
+    if (elapsed < 50_000) return 12_000;
+    if (elapsed < 90_000) return 8_000;
+    if (elapsed < 150_000) return 5_000;
+    if (elapsed < 210_000) return 3_000;
+    return 2_000;
+  }
+
   async function pollGenerationJobUntilDone(jobId, pendingId, ctx) {
     if (activePollJobIds.has(jobId)) return;
     activePollJobIds.add(jobId);
     try {
-    const maxAttempts = 80;
+    const maxAttempts = 90;
     const finishFromPoll = async (poll) => {
       if (poll.data.status === 'failed') {
         return false;
       }
       if (poll.data.status === 'completed') {
-        const imageUrl = poll.data.imageUrl;
-        if (!imageUrl) {
-          return false;
-        }
-        const baseJobId = ctx.jobId || jobId;
-        if (baseJobId && creations.some(c => c.jobId === baseJobId || String(c.jobId || '').startsWith(`${baseJobId}#`))) {
-          removePendingJob(pendingId);
-          renderImageGenFeed({ preserveScroll: true });
-          return true;
-        }
-        const extras = Array.isArray(poll.data.extraImageUrls)
-          ? poll.data.extraImageUrls.filter((u) => u && u !== imageUrl)
-          : [];
-        await finishImageGenRun({
-          ...ctx,
-          image: imageUrl,
-          extraImages: extras,
-          cost: ctx.cost,
-          jobId: baseJobId,
-          silentToast: !!ctx.silentToast,
-          isRecovery: !!ctx.isRecovery,
-          pendingId
-        });
-        if (extras.length && !ctx.silentToast) {
-          toast(`本次上游共 ${extras.length + 1} 张图，已全部存入仓库（仅扣 1 次积分）`);
-        }
-        return true;
+        return ensureGenJobCreationsFromPoll(poll, { ...ctx, jobId: ctx.jobId || jobId }, pendingId);
       }
       return false;
     };
 
     const failAfterGrace = async () => {
-      for (let g = 0; g < 4; g += 1) {
-        await new Promise((r) => setTimeout(r, g === 0 ? 4000 : 8000));
+      for (let g = 0; g < 8; g += 1) {
+        await new Promise((r) => setTimeout(r, g === 0 ? 2500 : g < 4 ? 4000 : 6000));
         const retry = await window.PromptHubApi.getGenerationJob(jobId);
-        if (retry.ok && retry.data.status === 'completed' && retry.data.imageUrl) {
-          if (await finishFromPoll(retry)) return true;
+        if (retry.ok && await finishFromPoll(retry)) return true;
+        if (retry.ok && (retry.data.status === 'processing' || (retry.data.status === 'completed' && !retry.data.imageUrl))) {
+          continue;
         }
-        if (retry.ok && retry.data.status === 'processing') continue;
-        if (retry.ok && retry.data.status === 'failed') break;
       }
       const last = await window.PromptHubApi.getGenerationJob(jobId);
       const errRaw = last.ok && last.data.status === 'failed'
@@ -5659,11 +5898,12 @@
     };
 
     for (let i = 0; i < maxAttempts; i++) {
-      await new Promise(r => setTimeout(r, i === 0 ? 1500 : 3000));
+      await new Promise((r) => setTimeout(r, genJobPollDelayMs(ctx)));
       const poll = await window.PromptHubApi.getGenerationJob(jobId);
       if (!poll.ok) {
-        if ((poll.code === 'NETWORK_ERROR' || poll.code === 'RATE_LIMITED') && i < maxAttempts - 1) {
-          await new Promise(r => setTimeout(r, poll.code === 'RATE_LIMITED' ? 5000 : 2000));
+        if (i < maxAttempts - 1) {
+          const backoff = poll.code === 'RATE_LIMITED' ? 4500 : poll.code === 'NETWORK_ERROR' ? 1800 : 2200;
+          await new Promise((r) => setTimeout(r, backoff));
           continue;
         }
         if (poll.code === 'RATE_LIMITED') {
@@ -5681,6 +5921,10 @@
       }
 
       if (poll.data.status === 'processing') {
+        continue;
+      }
+
+      if (poll.data.status === 'completed' && !poll.data.imageUrl) {
         continue;
       }
 
@@ -5765,7 +6009,21 @@
 
       const existingCard = (window.__promptHubCards || []).find((c) => c.genJobId === job.id);
       if (existingCard && hasWarehouseCardForJob(job.id)) continue;
-      if (!existingCard && creations.some((c) => c.jobId === job.id)) continue;
+      const recoverExtrasList = Array.isArray(job.extraImageUrls)
+        ? job.extraImageUrls.filter((u) => u && u !== job.imageUrl)
+        : [];
+      if (!existingCard && creations.some((c) => c.jobId === job.id)) {
+        if (!allGenCreationSlotsSaved(job.id, recoverExtrasList.length)) {
+          changed = true;
+          recovered += 1;
+          await ensureGenJobCreationsFromPoll(
+            { data: { status: 'completed', imageUrl: job.imageUrl, extraImageUrls: recoverExtrasList } },
+            { ...meta, silentToast: true, isRecovery: true },
+            null
+          );
+        }
+        continue;
+      }
 
       if (manual) {
         /* 用户确认后的孤儿恢复 */
@@ -5785,13 +6043,11 @@
       }
 
       recovered += 1;
-      await finishImageGenRun({
-        ...meta,
-        image: job.imageUrl,
-        cost: meta.cost,
-        silentToast: true,
-        isRecovery: true
-      });
+      await ensureGenJobCreationsFromPoll(
+        { data: { status: 'completed', imageUrl: job.imageUrl, extraImageUrls: recoverExtrasList } },
+        { ...meta, silentToast: true, isRecovery: true },
+        null
+      );
     }
 
     if (changed) renderImageGenFeed();
@@ -5995,6 +6251,7 @@
           size,
           cost,
           jobId,
+          startedAt: pendingJob.startedAt,
           fromInspirationDraw: !!batchOpts.fromInspirationDraw,
           silentToast: !!batchOpts.silentToast,
           batchIndex: batchOpts.batchIndex || null,
@@ -6061,6 +6318,7 @@
     }
 
     imageGenBatchRunning = true;
+    const batchId = `batch_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const btn = document.getElementById('imageGenSubmit');
     if (btn) btn.disabled = true;
     try {
@@ -6070,7 +6328,13 @@
         const curBalance = window.PointsSystem?.getCredits?.() ?? 0;
         if (curBalance < unit && i > 0) break;
         if (btn) btn.textContent = `提交中 ${i + 1}/${count}…`;
-        const res = await runImageGenWithPrompt(undefined, { silentToast: true, batch: true });
+        const res = await runImageGenWithPrompt(undefined, {
+          silentToast: true,
+          batch: true,
+          batchId,
+          batchIndex: i + 1,
+          batchTotal: count
+        });
         if (res?.ok) {
           ok += 1;
           charged += res.creditsCharged || unit;
@@ -6984,9 +7248,22 @@
       window.markQuickPreviewTask?.({ communityFavorited: true });
       const btn = document.getElementById('appreciateViewerFavBtn');
       if (btn && favIds.has(appreciateViewerPostId)) {
-        btn.textContent = '已收藏';
+        const label = btn.querySelector('span');
+        if (label) label.textContent = '已收藏';
+        else btn.textContent = '已收藏';
         btn.disabled = true;
       }
+    });
+    document.getElementById('lightboxCollectBtn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const postId = window.__lightboxCommunityPostId;
+      if (!postId) return;
+      const post = findPost(postId);
+      if (!post) return;
+      favoritePost(postId, post);
+      window.markQuickPreviewTask?.({ communityFavorited: true });
+      window.syncLightboxActions?.({ community: true, postId });
     });
     document.getElementById('imageGenWhGroup')?.addEventListener('change', e => {
       imageGenWhGroup = e.target.value || 'all';
@@ -7101,6 +7378,7 @@
 
   function init() {
     loadStores();
+    hydratePublicFeedFromCache();
     bindUI();
     bindPublishToggle();
     initMyHomeTabs();
@@ -7246,6 +7524,7 @@
     bumpAppreciateViewerGen,
     openCommunityAppreciateViewer,
     openCommunityAppreciateById,
+    isPostFavorited,
     pruneOrphanFeatureData,
     purgeGhostCommunityData,
     hydrateFeedImages,

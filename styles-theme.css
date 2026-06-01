@@ -34,6 +34,46 @@
   --card-strip-edge: rgba(255, 255, 255, 0.1);
 }
 
+/* 浅色主题：生图/卡片加载用光球；深色仍扫光 */
+[data-theme="light"] .card-media.is-loading::before,
+[data-theme="light"] .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(255, 255, 255, 0.98) 0%,
+    rgba(255, 255, 255, 0.72) 22%,
+    rgba(255, 255, 255, 0.28) 42%,
+    rgba(255, 255, 255, 0.06) 58%,
+    transparent 72%
+  );
+  box-shadow:
+    0 0 28px rgba(255, 255, 255, 0.55),
+    0 0 64px rgba(255, 255, 255, 0.22);
+  animation: card-orb-breathe 2.1s ease-in-out infinite;
+}
+
+[data-theme="light"] .card-media.is-loading::after,
+[data-theme="light"] .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::after {
+  display: none !important;
+}
+
+[data-theme="light"] .imagegen-gen-pending::before {
+  content: none;
+  display: none;
+}
+
+[data-theme="light"] .imagegen-gen-pending::after {
+  display: block;
+}
+
+[data-theme="light"] .imagegen-gen-pending {
+  background: linear-gradient(145deg, #ececef 0%, #f5f5f7 55%, #e8e8ec 100%);
+}
+
 [data-theme="light"] .app-page-feature,
 [data-theme="light"] .feature-shell,
 [data-theme="light"] .community-page-layout,

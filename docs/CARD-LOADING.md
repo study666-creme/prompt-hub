@@ -36,7 +36,7 @@ cd D:\prompt-hub
 打开 http://127.0.0.1:5500/ ，F12 → Network：
 
 - 应先看到 **卡片文字**，再陆续出现图片请求（`storage` 签名后的 `https://...`）
-- 控制台：`window.__APP_BUILD__` → `'20260606n'`
+- 控制台：`window.__APP_BUILD__` → `'20260606p'`
 
 ## 首屏 3 秒：难点与「流畅感」策略（2026-06）
 
@@ -55,11 +55,19 @@ cd D:\prompt-hub
 
 **下一步（真正接近 3 秒全清晰）**
 
-1. [ ] 服务端 **批量社区签名**（一条 API 签 20～40 张）
-2. [ ] 上传时写 **缩略图** `_grid`，列表只拉小图
-3. [ ] 签名 URL 写入 IndexedDB，刷新复用
+1. [x] 服务端 **批量社区签名** `POST /api/v1/media/community/sign-batch`（20260606o）
+2. [x] 上传时写 **缩略图** `_grid.jpg`，列表只拉小图（20260606p）
+3. [x] 签名 URL 写入 sessionStorage 会话缓存（已有 `ph_signed_urls_v1`）
 
 **产品目标**：用户 3 秒内应看到 **完整布局 + 占位动画 + 陆续变清晰**，而非白屏或长时间空白格。
+
+## 生图「生成中」与卡片「加载中」扫光（20260601j）
+
+- **加载完成**：`media-shine-reveal` + `@keyframes card-beam-trbl`（播一次）
+- **加载中 / 生成中**：同一光带样式，`animation: card-beam-loading`（`card-beam-trbl` 轨迹循环）
+- 选择器：`.card-media.is-loading::after`、`.imagegen-gen-pending::after`
+- 浅色主题卡片库仍用光球；生图占位与深色一致用光带
+- 勿再单独写 `background-position` 扫光或外置斜条（易错位、只亮一角）
 
 ## 后续可继续做（路线图）
 

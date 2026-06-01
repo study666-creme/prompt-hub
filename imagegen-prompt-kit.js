@@ -1469,12 +1469,30 @@
       '战斗方式：与使魔/傀儡协同', '战斗方式：以幻术误导再近身'
     ],
     ocFormat: [
-      '三视图设定：正面 / 侧面 / 背面同页，标注身高与配色',
-      '人物设定图：全身 + 表情差分 + 武器特写',
-      '故事感立绘：背景含关键道具与场景线索',
-      '角色介绍卡：左侧立绘右侧文字设定区留白',
-      'turnaround sheet，线稿清晰，配色标注',
-      'key visual 单人 + 小字设定注释区'
+      '主角 Key Visual：电影级半身/全身，背景含故事线索道具',
+      '故事感 hero shot：低角度或侧逆光，服饰武器一眼有来历',
+      '角色海报：单人占满画面，silhouette 极具设计感',
+      '叙事定格帧：刚做出改变一生的决定，像动画 OP 第一幕',
+      '杂志封面级主角肖像，非设定表、非三视图',
+      '电影开场 first frame：主角 introduction，环境服务人物',
+      'SSR 级单人插画的构图与光，一眼「这不是路人」',
+      '戏剧化 portrait：一个怪癖细节 + 一件有故事的装备同框'
+    ],
+    ocDesign: [
+      '造型逻辑：每处装备都有使用痕迹与来历，非全新出厂',
+      '武器不是摆设：握持方式与磨损暴露战斗习惯',
+      '服饰分层叙事：内衬/外套/配饰各讲一段过往',
+      '配色两主一辅，识别度高于花哨堆色',
+      '非普通人细节：旧伤、异瞳、改造痕、家族纹章择一强化',
+      '就算只看轮廓 silhouette 也认得出是谁',
+      '主角级比例与姿态：站定也有戏，不像 NPC',
+      '一件日常物被改成武器或信物，绑定角色记忆',
+      '材质对比：皮革旧了、金属亮了、布料有补丁，各有故事',
+      '专属 symbol 在披风/戒指/武器上重复出现',
+      '脸型与发型拒绝模板：一个 unforgettable 轮廓',
+      '环境道具暗示过往：地图、信、花、弹痕，至少落一处',
+      '像尚未播出的动画/游戏主角首曝 KV',
+      '设计完成度：服装结构、武器结构、配色统一成一套语言'
     ],
     ocMemorable: [
       '难忘点：第一眼记住发型轮廓', '难忘点：配色不超过三色却极识别',
@@ -2368,10 +2386,12 @@
     const family = ctx?.family || 'neutral';
     const format = pick(WORDS.ocFormat);
     const recipe = pick([1, 2, 3]);
+    const design = pick(WORDS.ocDesign);
     let parts;
     if (recipe === 1) {
       parts = [
         format,
+        design,
         pick(WORDS.ocIdentity),
         pick(WORDS.ocAnchor),
         pick(WORDS.ocHumanCore),
@@ -2385,7 +2405,7 @@
         pick(WORDS.ocPresence),
         pick(WORDS.ocLight),
         pickMaybe(lightPoolForCharacter(family), 0.35),
-        '全原创主角级角色设计，非任何现有 IP，非模板脸，强调人与设定',
+        '全原创主角级角色设计，非设定表非三视图，非任何现有 IP，强调设计感与故事感',
         ctx?.tail?.()
       ];
     } else if (recipe === 2) {
@@ -2393,6 +2413,7 @@
         pick(WORDS.ocHumanCore),
         pick(WORDS.ocIdentity),
         pick(WORDS.ocStoryBeat),
+        design,
         pick(WORDS.ocAnchor),
         pick(WORDS.ocWeapon),
         pick(WORDS.ocCostume),
@@ -2402,7 +2423,7 @@
         pick(WORDS.ocPalette),
         pick(WORDS.ocPresence),
         pick(WORDS.ocLight),
-        '主角级原创人设，自带故事感，与众不同，可公开发布',
+        '主角级原创人设：一眼非普通人，服饰武器皆有设计逻辑，可公开发布',
         ctx?.tail?.()
       ];
     } else {
@@ -2413,6 +2434,7 @@
         pick(WORDS.ocCombat),
         pick(WORDS.ocWeapon),
         pick(WORDS.ocCostume),
+        design,
         pick(WORDS.ocAnchor),
         pick(WORDS.ocHumanCore),
         pick(WORDS.ocStoryBeat),
@@ -2420,7 +2442,7 @@
         pick(WORDS.ocPresence),
         pick(WORDS.ocPalette),
         pick(WORDS.ocLight),
-        '原创主角：人物锚点 + 战斗方式 + 穿着 + 长相一体设计',
+        '原创主角：造型/武器/气质一体，让人想知道他的故事',
         ctx?.tail?.()
       ];
     }
@@ -2567,7 +2589,7 @@
     lifeAesthetic: { label: '生活美学', hint: '日常 / cozy / 治愈 ritual', build: buildLifeAesthetic },
     doujin: { label: '同人动漫', hint: '随机动漫角色 · 同人插画', build: buildDoujin },
     animeillust: { label: '动漫插画', hint: '角色 / 场景 / SSR 立绘', build: buildAnimeIllust },
-    originalchar: { label: '原创主角', hint: '人物锚点 · 三视图/设定图 · 故事感', build: buildOriginalCharacter },
+    originalchar: { label: '原创主角', hint: '主角感 · 设计感 · 故事感 · 非路人', build: buildOriginalCharacter },
     food: { label: '美食', hint: '食欲 / 静物 / 商业', build: buildFood },
     pet: { label: '萌宠', hint: '猫狗 / 治愈 / 动态', build: buildPet },
     mood: { label: '氛围叙事', hint: '情绪 / 空镜 / 电影感', build: buildMood },

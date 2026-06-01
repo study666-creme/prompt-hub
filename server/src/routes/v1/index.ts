@@ -7,7 +7,7 @@ import { generateRoutes } from './generate';
 import { communityFeedHandler, communityRoutes } from './community';
 import { membershipRoutes } from './membership';
 import { membershipTaskRoutes } from './membership-tasks';
-import { communityMediaSignHandler, mediaRoutes, privateCachedMediaHandler, publicCachedMediaHandler } from './media';
+import { communityMediaSignBatchHandler, communityMediaSignHandler, mediaRoutes, privateCachedMediaHandler, publicCachedMediaHandler } from './media';
 import { extensionRoutes } from './extension';
 import { chatRoutes } from './chat';
 import { promptToolsRoutes } from './prompt-tools';
@@ -22,6 +22,8 @@ v1.get('/media/c/:enc', rateLimit(1200, 60_000), publicCachedMediaHandler);
 v1.get('/media/i/:enc', rateLimit(1200, 60_000), privateCachedMediaHandler);
 /** 社区 sign：返回 CDN URL */
 v1.get('/media/community/sign', rateLimit(400, 60_000), communityMediaSignHandler);
+/** 社区 Feed 批量 sign（游客可用，首屏一次签多张） */
+v1.post('/media/community/sign-batch', rateLimit(120, 60_000), communityMediaSignBatchHandler);
 
 /** 全站社区 Feed：游客与所有用户可见 */
 v1.get('/community/feed', rateLimit(180, 60_000), communityFeedHandler);

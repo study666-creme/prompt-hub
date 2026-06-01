@@ -1,6 +1,6 @@
     /* ===== 提示词仓库 · 高级灰设计系统 ===== */
    :root {
-  --ui-scale: 0.82;
+  --ui-scale: 0.72;
   --card-columns: 4;
   --card-gap: 20px;
   --card-row-gap: 20px;
@@ -80,7 +80,7 @@ body {
 }
 
 /*
- * 界面整体 82% 视觉比例（与历史正常版一致）。
+ * 界面整体 72% 视觉比例（浏览器 100% 时侧栏留白与信息密度接近手动 80% 缩放）。
  * 先放大布局画布再 scale，铺满视口；与幽灵图/云同步无关。
  * 勿在下方再写第二条 .app-chrome，否则会冲掉 transform 导致忽大忽小。
  */
@@ -1712,27 +1712,40 @@ body {
       background: var(--card-skeleton-bg) !important;
       isolation: isolate;
     }
-    /* 加载中：深浅色统一黑底 + 中央光球（可见缓动） */
+    /* 加载中：夜间扫光 / 白天光球（光球见 styles-theme.css） */
     .card-media.is-loading::before,
     .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      z-index: 1;
-      pointer-events: none;
-      background: radial-gradient(
-        circle at 50% 50%,
-        var(--card-orb-core) 0%,
-        var(--card-orb-mid) 28%,
-        var(--card-orb-halo) 48%,
-        transparent 68%
-      );
-      will-change: transform, opacity;
-      animation: card-orb-breathe 2.1s ease-in-out infinite;
+      content: none;
     }
     .card-media.is-loading::after,
     .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::after {
-      display: none !important;
+      display: block !important;
+      content: '';
+      position: absolute;
+      z-index: 2;
+      pointer-events: none;
+      width: var(--card-beam-width);
+      height: 260%;
+      top: -85%;
+      left: 118%;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        var(--card-strip-haze) 18%,
+        var(--card-strip-edge) 28%,
+        var(--card-strip-mid) 38%,
+        var(--card-strip-core) 50%,
+        var(--card-strip-mid) 62%,
+        var(--card-strip-edge) 72%,
+        var(--card-strip-haze) 82%,
+        transparent 100%
+      );
+      transform: rotate(-45deg);
+      transform-origin: center center;
+      filter: blur(12px);
+      mix-blend-mode: soft-light;
+      will-change: top, left, opacity, filter;
+      animation: card-beam-loading 2.2s cubic-bezier(0.35, 0.05, 0.25, 1) infinite;
     }
     .card-media.is-loading .card-img,
     .imagegen-feed-media.is-loading:not(.imagegen-gen-pending) img {
@@ -1828,6 +1841,33 @@ body {
         filter: blur(16px);
       }
     }
+    /* 加载中：与加载完成同一光带（card-beam-trbl），循环播放 */
+    @keyframes card-beam-loading {
+      0% {
+        top: -85%;
+        left: 118%;
+        opacity: 0.35;
+        filter: blur(16px);
+      }
+      12% {
+        opacity: 0.55;
+        filter: blur(14px);
+      }
+      45% {
+        opacity: 0.72;
+        filter: blur(11px);
+      }
+      88% {
+        opacity: 0.5;
+        filter: blur(13px);
+      }
+      100% {
+        top: 72%;
+        left: -52%;
+        opacity: 0.35;
+        filter: blur(16px);
+      }
+    }
     .card-media.media-revealed .card-img {
       position: static;
       width: 100%;
@@ -1839,6 +1879,9 @@ body {
     @media (prefers-reduced-motion: reduce) {
       .card-media.is-loading::before,
       .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::before,
+      .card-media.is-loading::after,
+      .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::after,
+      .imagegen-gen-pending::after,
       .card-media.media-shine-reveal::after,
       .imagegen-feed-media.media-shine-reveal::after {
         animation: none !important;
@@ -2392,6 +2435,43 @@ body {
   background: transparent;
 }
 
+.image-drop-area.has-image.is-loading-preview {
+  width: 100%;
+  max-width: 100%;
+  min-height: min(36vh, 280px);
+  background: var(--card-skeleton-bg, var(--bg-hover));
+  position: relative;
+  isolation: isolate;
+}
+
+.image-drop-area.has-image.is-loading-preview::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 50% 50%,
+    var(--card-orb-core) 0%,
+    var(--card-orb-mid) 28%,
+    var(--card-orb-halo) 48%,
+    transparent 68%
+  );
+  animation: viewer-orb-pulse 2.1s ease-in-out infinite;
+}
+
+.image-drop-area.has-image.is-loading-preview img,
+.image-drop-area.has-image.is-loading-preview img#previewImage {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  opacity: 0;
+  visibility: hidden;
+}
+
 .panel-image-tools {
   display: flex;
   justify-content: flex-end;
@@ -2796,14 +2876,18 @@ body {
     }
     .viewer-image-frame {
       position: relative;
-      flex: 0 1 auto;
+      flex: 1 1 auto;
       min-height: 0;
-      max-height: calc(96vh - 120px);
+      max-height: calc(96vh - 200px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     .lightbox-actions {
       position: static;
       transform: none;
       z-index: 3;
+      flex: 0 0 auto;
       display: flex;
       flex-direction: column;
       align-items: stretch;
@@ -2812,7 +2896,8 @@ body {
       pointer-events: auto;
     }
     .lightbox-download-btn,
-    .lightbox-collect-btn {
+    .lightbox-collect-btn,
+    .lightbox-gen-btn {
       pointer-events: auto;
       display: inline-flex;
       align-items: center;
@@ -2834,17 +2919,30 @@ body {
       box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
       transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
     }
-    .lightbox-download-btn:hover:not(:disabled) {
+    .appreciate-viewer-actions .lightbox-collect-btn {
+      width: auto;
+      min-width: 148px;
+    }
+    .lightbox-download-btn:hover:not(:disabled),
+    .lightbox-collect-btn:hover:not(:disabled),
+    .lightbox-gen-btn:hover:not(:disabled) {
       background: rgba(22, 22, 28, 0.82);
       border-color: rgba(255, 255, 255, 0.38);
       transform: translateY(-1px);
     }
-    .lightbox-download-btn:active:not(:disabled) {
+    .lightbox-download-btn:active:not(:disabled),
+    .lightbox-collect-btn:active:not(:disabled),
+    .lightbox-gen-btn:active:not(:disabled) {
       transform: translateY(0);
     }
-    .lightbox-download-btn:disabled {
+    .lightbox-download-btn:disabled,
+    .lightbox-collect-btn:disabled,
+    .lightbox-gen-btn:disabled {
       opacity: 0.45;
       cursor: wait;
+    }
+    .lightbox-collect-btn:disabled {
+      cursor: default;
     }
     .lightbox-download-icon {
       flex-shrink: 0;
@@ -2855,7 +2953,7 @@ body {
       width: auto;
       height: auto;
       max-width: min(98vw, 1400px);
-      max-height: 96vh;
+      max-height: calc(96vh - 200px);
       object-fit: contain;
       border-radius: inherit;
     }
@@ -3467,13 +3565,13 @@ body {
         0 24px 64px rgba(0, 0, 0, 0.55);
     }
     .viewer-image-frame.is-loading {
-      min-width: min(48vw, 280px);
-      min-height: min(36vh, 220px);
+      min-width: min(72vw, 480px);
+      min-height: min(52vh, 420px);
     }
     .viewer-image-frame.is-loading .viewer-image-shine-wrap {
-      min-width: min(48vw, 280px);
-      min-height: min(36vh, 220px);
-      background: var(--bg-hover);
+      min-width: min(72vw, 480px);
+      min-height: min(52vh, 420px);
+      background: var(--card-skeleton-bg, var(--bg-hover));
     }
     .viewer-image-frame.is-loading .viewer-image-shine-wrap::before {
       content: '';
@@ -3489,7 +3587,11 @@ body {
         var(--card-orb-halo) 48%,
         transparent 68%
       );
-      animation: card-orb-breathe 2.1s ease-in-out infinite;
+      animation: viewer-orb-pulse 2.1s ease-in-out infinite;
+    }
+    @keyframes viewer-orb-pulse {
+      0%, 100% { opacity: 0.42; }
+      50% { opacity: 1; }
     }
     .viewer-image-frame.is-loading .viewer-image-shine-wrap img {
       opacity: 0;

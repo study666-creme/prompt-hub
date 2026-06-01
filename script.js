@@ -427,7 +427,7 @@
 
     function navigateViewerByWheel(delta) {
       if (!viewerNav.items.length || viewerNav.index < 0) return false;
-      const next = viewerNav.index + (delta > 0 ? -1 : 1);
+      const next = viewerNav.index + (delta > 0 ? 1 : -1);
       if (next < 0 || next >= viewerNav.items.length) return false;
       const item = viewerNav.items[next];
       viewerNav.index = next;
@@ -510,7 +510,7 @@
       if (!viewer?.classList.contains('active')) return;
       if (e) {
         const t = e.target;
-        if (t?.closest?.('.appreciate-viewer-actions button, .appreciate-viewer-gen-btn')) return;
+        if (t?.closest?.('.appreciate-viewer-actions button, .appreciate-viewer-gen-btn, .lightbox-actions')) return;
         if (t?.closest?.('#appreciateViewerImg, .viewer-image-shine-wrap, #lightboxImage')) return;
         if (t?.closest?.('button') && !t?.closest?.('.appreciate-viewer-close')) return;
       }
@@ -566,66 +566,94 @@
       const caption = document.getElementById('appreciateViewerCaption');
       const hint = document.querySelector('.appreciate-viewer-hint');
       if (!viewer || !img) return;
-      const alreadyOpen = viewer.classList.contains('active');
-      if (!alreadyOpen) {
-        viewer.classList.remove('active');
-        document.body.classList.remove('appreciate-viewing');
-      }
-      setAppreciateViewerLoading(true);
+      viewer.classList.add('active');
+      document.body.classList.add('appreciate-viewing');
       const title = (card.title || '').trim();
       const prompt = (card.prompt || '').trim();
       if (caption) {
         caption.textContent = title || (prompt ? prompt.slice(0, 120) + (prompt.length > 120 ? '…' : '') : '');
         caption.style.display = caption.textContent ? 'block' : 'none';
       }
-      const reveal = () => {
-        if (gen !== window.__appreciateViewerGen) return;
-        viewer.classList.add('active');
-        document.body.classList.add('appreciate-viewing');
+      const isPlaceholderSrc = (src) => !src || String(src).includes('data:image/svg');
+      let instantSrc = '';
+      if (card.image) {
+        const gridImg = document.querySelector(`.card[data-id="${CSS.escape(String(cardId))}"] .card-img`);
+        const gridSrc = gridImg?.currentSrc || gridImg?.src || '';
+        if (!isPlaceholderSrc(gridSrc)) instantSrc = gridSrc;
+        if (isPlaceholderSrc(instantSrc) && window.SupabaseSync?.getCachedDisplayUrl) {
+          instantSrc = window.SupabaseSync.getCachedDisplayUrl(card.image, {
+            assetId: cardId,
+            variant: window.SupabaseSync.VARIANT_GRID || 'grid'
+          }) || '';
+        }
+      }
+      const hasInstant = !isPlaceholderSrc(instantSrc);
+      setAppreciateViewerLoading(!hasInstant);
+      let revealed = false;
+      const onReady = () => {
+        if (gen !== window.__appreciateViewerGen || revealed) return;
+        revealed = true;
+        img.onload = null;
+        img.onerror = null;
+        img.style.width = '';
+        img.style.height = '';
+        img.style.maxWidth = '';
+        img.style.maxHeight = '';
+        img.style.objectFit = '';
+        resetImageZoom(img);
+        attachImageZoom(img);
+        finishAppreciateViewerReveal();
       };
       if (card.image) {
         img.style.display = 'block';
         if (hint) hint.style.display = 'block';
-        img.removeAttribute('src');
         img.onload = null;
         img.onerror = null;
-        const displaySrc = window.SupabaseSync?.resolveDisplayUrl
-          ? await window.SupabaseSync.resolveDisplayUrl(card.image)
-          : card.image;
-        if (gen !== window.__appreciateViewerGen) return;
-        let revealed = false;
-        const onReady = () => {
-          if (gen !== window.__appreciateViewerGen || revealed) return;
-          revealed = true;
-          img.onload = null;
-          img.onerror = null;
-          img.style.width = '';
-          img.style.height = '';
-          img.style.maxWidth = '';
-          img.style.maxHeight = '';
-          img.style.objectFit = '';
-        resetImageZoom(img);
-        attachImageZoom(img);
-        finishAppreciateViewerReveal();
-          reveal();
-        };
-        img.onload = onReady;
-        img.onerror = () => {
+        if (hasInstant) {
+          img.src = instantSrc;
+          if (img.complete && img.naturalWidth > 0) onReady();
+          else img.onload = onReady;
+        } else {
+          img.removeAttribute('src');
+          img.onload = onReady;
+        }
+        void (async () => {
+          let displaySrc = card.image;
+          try {
+            if (window.SupabaseSync?.resolveDisplayUrl) {
+              displaySrc = await window.SupabaseSync.resolveDisplayUrl(card.image, {
+                assetId: cardId,
+                variant: window.SupabaseSync.VARIANT_FULL || 'full'
+              });
+            }
+          } catch (e) { /* ignore */ }
           if (gen !== window.__appreciateViewerGen) return;
-          img.onload = null;
-          img.onerror = null;
-          img.style.display = 'none';
-          if (hint) hint.style.display = 'none';
-          reveal();
-        };
-        img.src = displaySrc;
-        if (img.complete && img.naturalWidth > 0) onReady();
+          if (isPlaceholderSrc(displaySrc)) {
+            if (!hasInstant) img.onerror?.();
+            return;
+          }
+          if (displaySrc === img.src) {
+            if (img.complete && img.naturalWidth > 0 && !revealed) onReady();
+            return;
+          }
+          if (hasInstant && revealed) {
+            img.onload = () => {
+              if (gen !== window.__appreciateViewerGen) return;
+              img.onload = null;
+              resetImageZoom(img);
+            };
+            img.src = displaySrc;
+            return;
+          }
+          img.src = displaySrc;
+          if (img.complete && img.naturalWidth > 0) onReady();
+        })();
       } else {
         img.src = '';
         img.style.display = 'none';
         if (hint) hint.style.display = 'none';
         imageZoom.img = null;
-        reveal();
+        setAppreciateViewerLoading(false);
       }
     }
     window.closeAppreciateViewer = closeAppreciateViewer;
@@ -1424,8 +1452,8 @@
       container.addEventListener('load', (e) => {
         if (!e.target?.classList?.contains('card-img')) return;
         if (isPlaceholderCardImg(e.target)) return;
-        if (isMobileViewport()) scheduleLayoutMasonry();
-        else scheduleWarehouseMasonryLayout();
+        if (isMobileViewport()) return;
+        scheduleWarehouseMasonryLayout();
       }, true);
     }
 
@@ -2611,20 +2639,47 @@
 
     async function openCardImageLightbox(card) {
       if (!card?.image) return;
+      const isPlaceholderSrc = (src) => !src || String(src).includes('data:image/svg');
       let url = '';
-      if (window.SupabaseSync?.resolveDisplayUrl) {
-        try {
+      const gridImg = document.querySelector(`.card[data-id="${CSS.escape(String(card.id))}"] .card-img`);
+      const gridSrc = gridImg?.currentSrc || gridImg?.src || '';
+      if (!isPlaceholderSrc(gridSrc)) url = gridSrc;
+      if (isPlaceholderSrc(url) && window.SupabaseSync?.getCachedDisplayUrl) {
+        url = window.SupabaseSync.getCachedDisplayUrl(card.image, {
+          assetId: card.id,
+          variant: window.SupabaseSync.VARIANT_GRID || 'grid'
+        }) || '';
+      }
+      syncLightboxActions({ cardId: card.id });
+      if (!isPlaceholderSrc(url) && typeof openLightbox === 'function') {
+        openLightbox(url, { cardId: card.id });
+        void (async () => {
+          let full = '';
+          try {
+            if (window.SupabaseSync?.resolveDisplayUrl) {
+              full = await window.SupabaseSync.resolveDisplayUrl(card.image, {
+                assetId: card.id,
+                variant: window.SupabaseSync.VARIANT_FULL || 'full'
+              });
+            }
+          } catch (e) { /* ignore */ }
+          if (full && full !== url && !isPlaceholderSrc(full)) window.setLightboxSrc?.(full);
+        })();
+        return;
+      }
+      if (typeof openLightbox === 'function') openLightbox('', { pending: true, cardId: card.id });
+      try {
+        if (window.SupabaseSync?.resolveDisplayUrl) {
           url = await window.SupabaseSync.resolveDisplayUrl(card.image, {
             assetId: card.id,
             variant: window.SupabaseSync.VARIANT_FULL || 'full'
           });
-        } catch (e) { /* ignore */ }
-      }
-      if (!url || String(url).includes('data:image/svg')) {
-        url = cardImgInitialSrc(card.image);
-      }
-      if (url && !String(url).includes('data:image/svg') && typeof openLightbox === 'function') {
-        openLightbox(url);
+        }
+      } catch (e) { /* ignore */ }
+      if (!isPlaceholderSrc(url)) window.setLightboxSrc?.(url);
+      else {
+        window.closeLightbox?.();
+        showToast('图片加载中，请稍候再试');
       }
     }
 
@@ -4984,7 +5039,8 @@
           page = Math.max(1, Math.ceil(allFilteredCards.length / PER_PAGE));
         }
       } else if (mobileGrid) {
-        warmCardImagesBackground(pageCards, 2500);
+        const warmList = isAppend ? pageCards.slice(0, 10) : pageCards.slice(0, 14);
+        if (warmList.length) warmCardImagesBackground(warmList, isAppend ? 1800 : 2600);
         enforceMobileCardGrid();
       }
       if (viewMode === 'list' && masonryInstance) {
@@ -5020,9 +5076,23 @@
       }
     });
 
+    let warehouseScrollLoading = false;
     document.querySelector('.cards-container')?.addEventListener('scroll', function() {
-      if (this.scrollTop + this.clientHeight >= this.scrollHeight - 150 && (page * PER_PAGE) < allFilteredCards.length) { page++; renderCards(); }
-    });
+      if (warehouseScrollLoading) return;
+      const mobile = isMobileViewport();
+      if (mobile) {
+        if (this.scrollTop < 100) return;
+        if (this.scrollTop + this.clientHeight < this.scrollHeight - 220) return;
+      } else if (this.scrollTop + this.clientHeight < this.scrollHeight - 150) {
+        return;
+      }
+      if ((page * PER_PAGE) >= allFilteredCards.length) return;
+      warehouseScrollLoading = true;
+      page += 1;
+      void Promise.resolve(renderCards()).finally(() => {
+        warehouseScrollLoading = false;
+      });
+    }, { passive: true });
 
     function enableGroupDrop() {
       document.querySelectorAll('.group-item').forEach(item => {
@@ -5508,21 +5578,45 @@
     async function updatePreview() {
       const img = document.getElementById('previewImage'), p = document.getElementById('dropPlaceholder');
       const removeBtn = document.getElementById('removeImageBtn'), dropArea = document.getElementById('dropArea');
+      const finishPreviewLoad = () => {
+        dropArea?.classList.remove('is-loading-preview');
+      };
       if (imageData) {
-        let src = cardImgInitialSrc(imageData);
-        if (src.startsWith('data:image/svg') && window.SupabaseSync?.safeImgSrc) {
-          const safe = window.SupabaseSync.safeImgSrc(imageData);
-          if (safe && !safe.startsWith('data:image/svg')) src = safe;
+        let src = '';
+        if (window.SupabaseSync?.getCachedDisplayUrl && window.SupabaseSync?.isStorageRef?.(imageData)) {
+          src = window.SupabaseSync.getCachedDisplayUrl(imageData, {
+            assetId: selectedCardId,
+            variant: window.SupabaseSync.VARIANT_FULL || 'full'
+          }) || '';
         }
-        img.src = src;
+        if ((!src || src.includes('data:image/svg')) && selectedCardId) {
+          const gridImg = document.querySelector(`.card[data-id="${CSS.escape(String(selectedCardId))}"] .card-img`);
+          const gridSrc = gridImg?.currentSrc || gridImg?.src || '';
+          if (gridSrc.startsWith('http') && !gridSrc.includes('data:image/svg')) src = gridSrc;
+        }
+        if (!src || src.includes('data:image/svg')) {
+          const initial = cardImgInitialSrc(imageData);
+          if (initial && !initial.includes('data:image/svg')) src = initial;
+        }
+        if ((!src || src.includes('data:image/svg')) && typeof imageData === 'string' && imageData.startsWith('data:image/')) {
+          src = imageData;
+        }
+        const waiting = !src || src.includes('data:image/svg');
+        dropArea?.classList.toggle('is-loading-preview', waiting);
+        if (src && !src.includes('data:image/svg')) {
+          img.src = src;
+          finishPreviewLoad();
+        } else {
+          img.removeAttribute('src');
+        }
         img.style.display = 'block';
         img.style.cursor = 'zoom-in';
         img.onclick = (e) => {
           e.stopPropagation();
           e.preventDefault();
-          const src = img.src || imageData;
-          if (src && !String(src).includes('data:image/svg') && typeof openLightbox === 'function') {
-            openLightbox(src);
+          const cur = img.src || imageData;
+          if (cur && !String(cur).includes('data:image/svg') && typeof openLightbox === 'function') {
+            openLightbox(cur, { cardId: selectedCardId || undefined });
           } else {
             void openCardImageLightbox({ id: selectedCardId, image: imageData });
           }
@@ -5531,13 +5625,26 @@
         removeBtn.style.display = 'flex';
         dropArea.classList.add('has-image');
         dropArea.classList.remove('no-image');
+        if (waiting && typeof window.getCardImageBackup === 'function' && selectedCardId) {
+          void getCardImageBackup(selectedCardId).then((backup) => {
+            if (backup && String(backup).startsWith('data:')) {
+              img.src = backup;
+              finishPreviewLoad();
+            }
+          });
+        }
         if (window.SupabaseSync?.resolveDisplayUrl && window.SupabaseSync?.isStorageRef?.(imageData)) {
-          const url = await window.SupabaseSync.resolveDisplayUrl(imageData, { assetId: selectedCardId });
+          const url = await window.SupabaseSync.resolveDisplayUrl(imageData, {
+            assetId: selectedCardId,
+            variant: window.SupabaseSync.VARIANT_FULL || 'full'
+          });
           if (url && !url.startsWith('data:image/svg')) {
             img.src = url;
+            finishPreviewLoad();
           }
         }
       } else {
+        dropArea?.classList.remove('is-loading-preview');
         img.style.display = 'none';
         p.style.display = 'block';
         removeBtn.style.display = 'none';
@@ -5920,25 +6027,51 @@
       }
     });
 
-    function openLightbox(src) {
-      if (!src || typeof src !== 'string') return;
-      if (!window.__lightboxFromAssetPack) {
-        window.__packLightboxCollect = null;
-        document.getElementById('lightboxCollectBtn')?.classList.add('hidden');
+    function syncLightboxActions(opts) {
+      opts = opts || {};
+      const isCommunity = !!opts.community;
+      window.__lightboxCommunityMode = isCommunity;
+      window.__lightboxCommunityPostId = opts.postId || null;
+      window.__lightboxWarehouseCardId = isCommunity ? null : (opts.cardId || null);
+      const showCollect = isCommunity && opts.postId;
+      const showGen = !isCommunity && !!opts.cardId;
+      const showDownload = !isCommunity;
+      document.getElementById('lightboxDownloadBtn')?.classList.toggle('hidden', !showDownload);
+      const collectBtn = document.getElementById('lightboxCollectBtn');
+      if (collectBtn) {
+        if (showCollect) {
+          collectBtn.classList.remove('hidden');
+          const faved = window.FeatureDraft?.isPostFavorited?.(opts.postId);
+          collectBtn.disabled = !!faved;
+          const label = collectBtn.querySelector('span');
+          const text = faved ? '已收藏' : '收藏到卡片库';
+          if (label) label.textContent = text;
+          else collectBtn.textContent = text;
+        } else {
+          collectBtn.classList.add('hidden');
+        }
       }
-      window.__lightboxFromAssetPack = false;
-      if (selectedCardId && imageData) {
-        const navItems = cards
-          .filter((c) => c.image && cardHasDisplayImage(c))
-          .map((c) => ({ type: 'card', id: c.id, key: `card:${c.id}` }));
-        setViewerNav(navItems, `card:${selectedCardId}`);
-      }
+      const genBtn = document.getElementById('lightboxGenBtn');
+      if (genBtn) genBtn.classList.toggle('hidden', !showGen);
+    }
+    window.syncLightboxActions = syncLightboxActions;
+
+    function loadLightboxImage(displaySrc, opts) {
+      opts = opts || {};
       const lightbox = document.getElementById('imageLightbox');
       const img = document.getElementById('lightboxImage');
       const frame = getLightboxFrame();
       const dlBtn = document.getElementById('lightboxDownloadBtn');
       if (!lightbox || !img) return;
+      if (opts.community || opts.cardId) {
+        syncLightboxActions({
+          community: !!opts.community,
+          postId: opts.postId || window.__lightboxCommunityPostId,
+          cardId: opts.cardId
+        });
+      }
       if (dlBtn) dlBtn.disabled = true;
+      lightbox.classList.add('active');
       setViewerFrameLoading(frame, true);
       let shown = false;
       const onReady = () => {
@@ -5954,17 +6087,33 @@
         resetImageZoom(img);
         attachImageZoom(img);
         finishViewerFrameReveal(frame);
-        lightbox.classList.add('active');
-        if (dlBtn) dlBtn.disabled = !(img.src && !img.src.includes('data:image/svg'));
+        if (dlBtn && !window.__lightboxCommunityMode) {
+          dlBtn.disabled = !(img.src && !img.src.includes('data:image/svg'));
+        }
       };
-      lightbox.classList.remove('active');
+      const onFail = () => {
+        img.onerror = null;
+        img.onload = null;
+        setViewerFrameLoading(frame, false);
+        lightbox.classList.remove('active');
+        if (!opts.silentFail) showToast('图片加载失败，请稍后重试');
+      };
+      if (!displaySrc || displaySrc.includes('data:image/svg')) {
+        if (opts.pending) {
+          img.onwheel = null;
+          img.onmousedown = null;
+          img.ondblclick = null;
+          img.removeAttribute('src');
+          return;
+        }
+        onFail();
+        return;
+      }
       frame?.classList.remove('viewer-glow-active');
       frame?.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal', 'viewer-shine-active');
       img.onwheel = null;
       img.onmousedown = null;
       img.ondblclick = null;
-      img.removeAttribute('src');
-      const displaySrc = src;
       let corsRetried = false;
       if (/^https?:\/\//i.test(displaySrc)) img.crossOrigin = 'anonymous';
       else img.removeAttribute('crossorigin');
@@ -5977,28 +6126,50 @@
           corsRetried = true;
           img.removeAttribute('crossorigin');
           img.onload = onReady;
-          img.onerror = () => {
-            img.onerror = null;
-            img.onload = null;
-            setViewerFrameLoading(frame, false);
-            lightbox.classList.remove('active');
-            showToast('图片加载失败，请稍后重试');
-          };
+          img.onerror = onFail;
           img.src = displaySrc;
           if (img.complete && img.naturalWidth > 0) onReady();
           return;
         }
-        img.onerror = null;
-        img.onload = null;
-        setViewerFrameLoading(frame, false);
-        lightbox.classList.remove('active');
-        showToast('图片加载失败，请稍后重试');
+        onFail();
       };
       img.onload = onReady;
       img.src = displaySrc;
       if (img.complete && img.naturalWidth > 0) onReady();
     }
+
+    function openLightbox(src, opts) {
+      opts = opts || {};
+      if (!opts.pending && (!src || typeof src !== 'string')) return;
+      if (!window.__lightboxFromAssetPack) {
+        window.__packLightboxCollect = null;
+      }
+      window.__lightboxFromAssetPack = false;
+      if (opts.community) {
+        syncLightboxActions({ community: true, postId: opts.postId || null });
+      } else {
+        syncLightboxActions({ cardId: opts.cardId || selectedCardId || null });
+      }
+      if (selectedCardId && imageData) {
+        const navItems = cards
+          .filter((c) => c.image && cardHasDisplayImage(c))
+          .map((c) => ({ type: 'card', id: c.id, key: `card:${c.id}` }));
+        setViewerNav(navItems, `card:${selectedCardId}`);
+      }
+      loadLightboxImage(src || '', opts);
+    }
+
+    function setLightboxSrc(src) {
+      if (!src || typeof src !== 'string') return;
+      const lightbox = document.getElementById('imageLightbox');
+      if (!lightbox?.classList.contains('active')) {
+        openLightbox(src);
+        return;
+      }
+      loadLightboxImage(src);
+    }
     window.openLightbox = openLightbox;
+    window.setLightboxSrc = setLightboxSrc;
 
     async function downloadLightboxImage() {
       const img = document.getElementById('lightboxImage');
@@ -6009,11 +6180,12 @@
         return;
       }
       const filename = `prompt-hub-${Date.now()}.png`;
-      const prevLabel = dlBtn?.querySelector('span')?.textContent;
+      const prevLabel = dlBtn?.querySelector('span')?.textContent || dlBtn?.textContent;
       if (dlBtn) {
         dlBtn.disabled = true;
         const label = dlBtn.querySelector('span');
         if (label) label.textContent = '下载中…';
+        else dlBtn.textContent = '下载中…';
       }
       try {
         await promptHubSaveImage(url, filename, img);
@@ -6026,6 +6198,7 @@
           dlBtn.disabled = !(img?.src && !String(img.src).includes('data:image/svg'));
           const label = dlBtn.querySelector('span');
           if (label && prevLabel) label.textContent = prevLabel;
+          else if (prevLabel) dlBtn.textContent = prevLabel;
         }
       }
     }
@@ -6034,6 +6207,16 @@
       e.stopPropagation();
       e.preventDefault();
       void downloadLightboxImage();
+    });
+    document.getElementById('lightboxGenBtn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const cardId = window.__lightboxWarehouseCardId || warehousePreviewCardId || selectedCardId;
+      const card = cards.find((c) => c.id === cardId);
+      if (!card) return;
+      markQuickPreviewTask({ warehouseGotoGen: true });
+      closeLightbox();
+      void window.FeatureDraft?.fillCardToImageGen?.(card);
     });
 
     window.addEventListener('mousemove', (e) => {
@@ -6058,6 +6241,7 @@
         else if (t !== lightbox && !t?.closest?.('.lightbox-container')) return;
       }
       lightbox?.classList.remove('active');
+      syncLightboxActions({});
       const frame = getLightboxFrame();
       frame?.classList.remove('is-loading', 'viewer-glow-active');
       frame?.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal', 'viewer-shine-active');
@@ -6079,6 +6263,7 @@
       if (imageZoom.img === document.getElementById('lightboxImage')) imageZoom.img = null;
       imageZoom.dragging = false;
     }
+    window.closeLightbox = closeLightbox;
 
     function cardsForActiveWarehouse(list) {
       if (window.FeatureAssets?.filterCardsByWarehouse) {

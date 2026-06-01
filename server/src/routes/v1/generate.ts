@@ -277,10 +277,12 @@ generateRoutes.get('/jobs', async c => {
   if (error) throw error;
 
   const jobs = [];
+  let listPollBudget = 3;
   for (const job of rows || []) {
     let status = job.status as string;
     let imageUrl = job.result_image_url as string | null;
-    if (job.status === 'processing') {
+    if (job.status === 'processing' && listPollBudget > 0) {
+      listPollBudget -= 1;
       const polled = await pollAndUpdateJob(
         admin,
         user.id,
@@ -292,11 +294,15 @@ generateRoutes.get('/jobs', async c => {
       imageUrl = polled.imageUrl;
     }
     const meta = (job.meta as Record<string, unknown>) || {};
+    const extraFromMeta = Array.isArray(meta.extraImageUrls)
+      ? (meta.extraImageUrls as string[]).filter((u) => typeof u === 'string' && u)
+      : undefined;
     jobs.push({
       id: job.id,
       prompt: job.prompt,
       status,
       imageUrl,
+      extraImageUrls: extraFromMeta?.length ? extraFromMeta : undefined,
       creditsCharged: job.credits_charged,
       resolution: job.resolution,
       quality: job.quality,

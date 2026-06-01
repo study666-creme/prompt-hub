@@ -9,3 +9,4 @@ alwaysApply: true
 - 用户是纯小白：用分步说明 + 可复制命令；Cloudflare 写清菜单路径。
 - 部署/API 问题见 `docs/FIX-API-522-BEGINNER.md`、`docs/CUSTOM-DOMAIN.md`。
 - 最小 diff；简体中文；不提交密钥；仅用户要求时再 git commit。
+- **只改任务相关文件**：勿顺带改无关布局/动效（如灯箱按钮、加载扫光 `card-beam-trbl`、大图样式）；生图加载中复用 `media-shine-reveal` 同一光带时用 `card-beam-loading` 循环，勿另写一套扫光。

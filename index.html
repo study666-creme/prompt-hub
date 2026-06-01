@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260606n';
+    window.__APP_BUILD__ = '20260601j';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -58,12 +58,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260603w">
-  <link rel="stylesheet" href="styles-theme.css?v=20260615z">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260603t">
-  <link rel="stylesheet" href="styles-settings.css?v=20260616n">
-  <link rel="stylesheet" href="styles-features.css?v=20260606n">
-  <link rel="stylesheet" href="styles-assets.css?v=20260606e">
+  <link rel="stylesheet" href="styles.css?v=20260601j">
+  <link rel="stylesheet" href="styles-theme.css?v=20260601j">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260601j">
+  <link rel="stylesheet" href="styles-settings.css?v=20260606u">
+  <link rel="stylesheet" href="styles-features.css?v=20260601j">
+  <link rel="stylesheet" href="styles-assets.css?v=20260606u">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
   <script src="theme.js?v=20260615z"></script>
@@ -396,12 +396,14 @@
       </div>
       <div class="appreciate-viewer-foot">
         <p class="appreciate-viewer-hint">图片上：滚轮缩放 · 拖拽移动 · 双击还原</p>
-        <p class="appreciate-viewer-hint-nav">图片外：滚轮切换上一张 / 下一张</p>
+        <p class="appreciate-viewer-hint-nav">图片外：滚轮向下下一张 · 向上上一张</p>
         <p class="appreciate-viewer-caption" id="appreciateViewerCaption"></p>
       </div>
     </div>
     <div class="appreciate-viewer-actions hidden" id="appreciateViewerActions">
-      <button type="button" class="btn btn-secondary btn-sm" id="appreciateViewerFavBtn">收藏到卡片库</button>
+      <button type="button" class="lightbox-collect-btn" id="appreciateViewerFavBtn" title="收藏到卡片库">
+        <span>收藏到卡片库</span>
+      </button>
     </div>
     <div class="appreciate-viewer-actions hidden" id="appreciateViewerWarehouseActions">
       <button type="button" class="appreciate-viewer-gen-btn" id="appreciateViewerGenBtn">去生图</button>
@@ -430,10 +432,11 @@
           <img id="lightboxImage" src="" alt="放大图片">
         </div>
       </div>
-      <div class="lightbox-actions">
+      <div class="lightbox-actions" id="lightboxActions">
         <button type="button" class="lightbox-collect-btn hidden" id="lightboxCollectBtn" title="收藏到卡片库">
           <span>收藏到卡片库</span>
         </button>
+        <button type="button" class="lightbox-gen-btn hidden" id="lightboxGenBtn" title="用此卡片去生图">去生图</button>
         <button type="button" class="lightbox-download-btn" id="lightboxDownloadBtn" title="保存到本地">
           <svg class="lightbox-download-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
             <path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v9.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42l2.3 2.3V4a1 1 0 0 1 1-1zm-7 14a1 1 0 0 1 1 1v2h12v-2a1 1 0 1 1 2 0v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z"/>
@@ -543,7 +546,7 @@
         <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260606n</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260601j</p>
     </div>
   </nav>
 
@@ -1346,21 +1349,21 @@
   <script src="supabase-config.js"></script>
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="api-client.js?v=20260604a"></script>
+  <script src="api-client.js?v=20260606o"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260606l"></script>
-  <script src="card-image-loader.js?v=20260606l"></script>
+  <script src="supabase-sync.js?v=20260606p"></script>
+  <script src="card-image-loader.js?v=20260531a"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
   <script src="subscription.js?v=20260622e"></script>
   <script src="trial-tasks.js?v=20260602r"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="script.js?v=20260606h"></script>
+  <script src="script.js?v=20260531a"></script>
   <script src="points-system.js?v=20260606m"></script>
-  <script src="imagegen-prompt-kit.js?v=20260606l"></script>
+  <script src="imagegen-prompt-kit.js?v=20260601b"></script>
   <script src="imagegen-prompt-tools.js?v=20260606l"></script>
-  <script src="features-draft.js?v=20260606m"></script>
-  <script src="community-gacha.js?v=20260604d"></script>
+  <script src="features-draft.js?v=20260601j"></script>
+  <script src="community-gacha.js?v=20260606v"></script>
   <script src="features-assets.js?v=20260606c"></script>
   <script src="hotfix-image-layout.js?v=20260603t"></script>
   <script src="mobile.js?v=20260606m"></script>

@@ -166,8 +166,8 @@ export async function pollAndUpdateJob(
 
   if (polled.status === 'failed') {
     const confirmed = await confirmApimartTaskOutcome(imageApiKey, imageApiBaseUrl, taskId, {
-      attempts: 4,
-      intervalMs: 8000
+      attempts: 8,
+      intervalMs: 5000
     });
     if (confirmed.status === 'completed' && confirmed.imageUrl) {
       return completeJobFromPoll(admin, userId, job, confirmed);

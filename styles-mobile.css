@@ -588,8 +588,11 @@
   }
 
   #communityGrid .card-media.is-loading,
-  #creationsGrid .card-media.is-loading {
-    min-height: 88px !important;
+  #creationsGrid .card-media.is-loading,
+  #communityGrid .card-media.card-media--await,
+  #creationsGrid .card-media.card-media--await {
+    aspect-ratio: 3 / 4 !important;
+    min-height: 0 !important;
   }
 
   .cards-container .grid-sizer {
@@ -599,19 +602,39 @@
 
   .cards-container .card .card-media {
     width: 100%;
-    aspect-ratio: auto;
+    aspect-ratio: 3 / 4;
     max-height: none;
+    min-height: 0;
     background: var(--bg-hover);
     line-height: 0;
+    overflow: hidden;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .cards-container .card .card-media.is-loading,
+  .cards-container .card .card-media.card-media--await {
+    aspect-ratio: 3 / 4;
+    min-height: 0 !important;
+    max-height: none !important;
   }
 
   .cards-container .card .card-img {
     width: 100%;
-    height: auto;
+    height: 100%;
     max-width: 100%;
-    object-fit: contain;
+    object-fit: cover;
     object-position: center center;
     display: block;
+    position: absolute;
+    inset: 0;
+  }
+
+  .cards-container .card .card-media:not(.is-loading):not(.card-media--await) .card-img {
+    position: static;
+    height: auto;
+    max-height: 100%;
+    object-fit: contain;
   }
 
   .cards-container .card .card-body {
@@ -1756,11 +1779,6 @@
     min-height: 0;
   }
 
-  .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::after {
-    display: none !important;
-  }
-
-  .imagegen-feed-media.is-loading img {
     opacity: 1 !important;
   }
 

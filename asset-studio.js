@@ -7,6 +7,144 @@
   const LS_FILTERS = 'promptrepo_studio_filters';
   const LS_PANEL_WIDTHS = 'promptrepo_studio_panel_widths';
   const LS_GUIDE = 'promptrepo_studio_hero_guide_seen';
+  const LS_PRESET_DISMISSED = 'promptrepo_studio_preset_dismissed_v1';
+  const PRESET_PROJECT_ID = 'proj_studio_preset';
+  const PRESET_DOC_ID = 'doc_studio_preset_story';
+  const PRESET_CONTENT_VERSION = 2;
+  const PRESET_CARD_IDS = ['preset_scene', 'preset_hero', 'preset_heroine', 'preset_villain'];
+  const PRESET_IMAGES = {
+    scene: 'assets/studio-preset/scene.png',
+    hero: 'assets/studio-preset/linche.png',
+    heroine: 'assets/studio-preset/shenmei.png',
+    villain: 'assets/studio-preset/peishen.png'
+  };
+
+  const PRESET_STORY_BODY =
+    '雾气从霜结圣所的拱门里涌出。沈湄跪在六角石台上合十祈祷，她在等凛澈——北境花艺师，也是她在这条地下拳线上唯一能信任的人。\n\n' +
+    '凛澈从柱影间走出，灯笼里的蓝花在寒气里微微发亮。「裴深已经封锁了墓园入口。」他压低声音。远处，裴深靠在路牌旁，笑意冷得像刃：「沈湄，别急着走。你遗忘灯笼里的那段记忆，换不换令妹的下落？」\n\n' +
+    '沈湄指节发白，却没有退。凛澈侧身挡在她前面，目光扫过整座霜结圣所——冲突，从这里开始。';
+
+  function buildStudioPresetProject() {
+    const docId = PRESET_DOC_ID;
+    const cards = [
+      {
+        id: 'preset_scene',
+        title: '霜结圣所',
+        group: '场景',
+        hue: 198,
+        image: PRESET_IMAGES.scene,
+        prompt: 'ancient stone arena, runic pillars, frost floor, golden banners, misty arch portal, cinematic fantasy',
+        background: '北境边陲的圆形竞技场，霜纹铺地，符文柱与悬旗环绕，适合对决与仪式开场。',
+        character: '六角石台、拱门天光、手持跟拍、冷雾氛围。',
+        relations: '关联文档《圣所前夜·试写》',
+        docs: [docId],
+        tags: ['演示']
+      },
+      {
+        id: 'preset_hero',
+        title: '凛澈',
+        group: '人设',
+        hue: 210,
+        image: PRESET_IMAGES.hero,
+        prompt: 'young man, dual tone hair, white coat blue flowers, lantern, ruined town night, anime illustration',
+        background: '北境雾港花艺师，掌风步法，以「遗忘灯笼」封存记忆碎片。',
+        character: '17岁，左颊旧疤，白蓝长衣，手提发光花灯笼。',
+        relations: '与沈湄并肩；被裴深以记忆与亲人下落要挟。',
+        docs: [docId],
+        tags: ['演示']
+      },
+      {
+        id: 'preset_heroine',
+        title: '沈湄',
+        group: '人设',
+        hue: 280,
+        image: PRESET_IMAGES.heroine,
+        prompt: 'young woman kneeling prayer, underground fight arena, wet floor, dark straps armor, cinematic',
+        background: '地下拳场情报线人，外表柔韧，实则意志极坚。',
+        character: '高束发，臂铠与短裙战装，肤上带水光与尘渍。',
+        relations: '信任凛澈；妹妹下落成谜，被裴深盯上。',
+        docs: [docId],
+        tags: ['演示']
+      },
+      {
+        id: 'preset_villain',
+        title: '裴深',
+        group: '人设',
+        hue: 12,
+        image: PRESET_IMAGES.villain,
+        prompt: 'antagonist man, steampunk alley, signpost, muscular, bandaged torso, cold smirk, cinematic',
+        background: '灰港地下财团执行官，擅长交易、恐吓与双面布局。',
+        character: '深色系风衣与金属护肩，路牌阴影下常带讥诮笑意。',
+        relations: '与凛澈有旧案；以沈湄妹妹与记忆为筹码。',
+        docs: [docId],
+        tags: ['演示']
+      }
+    ];
+    return {
+      id: PRESET_PROJECT_ID,
+      name: '功能演示',
+      presetVersion: PRESET_CONTENT_VERSION,
+      folders: [
+        { id: 'fld_preset_char', name: '人设', parentId: null, collapsed: false },
+        { id: 'fld_preset_scene', name: '场景', parentId: null, collapsed: false }
+      ],
+      docs: [
+        {
+          id: docId,
+          folderId: 'fld_preset_char',
+          title: '圣所前夜·试写',
+          heroCardIds: PRESET_CARD_IDS.slice(),
+          closedFloatIds: [],
+          body: PRESET_STORY_BODY,
+          bodyHtml: '',
+          floatPositions: {
+            preset_scene: { x: 380, y: 72 },
+            preset_hero: { x: 520, y: 120 },
+            preset_heroine: { x: 660, y: 88 },
+            preset_villain: { x: 800, y: 140 }
+          }
+        }
+      ],
+      activeDocId: docId,
+      cards,
+      cardGroups: ['人设', '场景'],
+      globalFields: [],
+      fieldLabels: { ...DEFAULT_FIELD_LABELS },
+      heroFieldLabel: DEFAULT_HERO_LABEL,
+      coreFieldOrder: CORE_FIELD_KEYS.slice()
+    };
+  }
+
+  function isLegacyPresetStory(body) {
+    const text = String(body || '');
+    return text.includes('霓虹雨巷') || text.includes('林岚') || text.includes('苏清') || text.includes('反派枭');
+  }
+
+  function upgradeStudioPresetIfNeeded(project) {
+    if (!project || project.id !== PRESET_PROJECT_ID) return false;
+    if ((project.presetVersion || 0) >= PRESET_CONTENT_VERSION) return false;
+    const fresh = buildStudioPresetProject();
+    project.presetVersion = PRESET_CONTENT_VERSION;
+    project.cards = fresh.cards.map((c) => ({ ...c }));
+    project.cardGroups = fresh.cardGroups.slice();
+    const doc = project.docs?.find((d) => d.id === PRESET_DOC_ID);
+    const freshDoc = fresh.docs[0];
+    if (doc && freshDoc) {
+      const plain = (doc.bodyHtml || doc.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      const freshPlain = (freshDoc.body || '').replace(/\s+/g, ' ').trim();
+      const keepUserEdits = plain && !isLegacyPresetStory(plain) && plain !== freshPlain;
+      if (!keepUserEdits) {
+        doc.title = freshDoc.title;
+        doc.body = freshDoc.body;
+        doc.bodyHtml = '';
+        doc.heroCardIds = freshDoc.heroCardIds.slice();
+        if (!doc.floatPositions || !Object.keys(doc.floatPositions).length) {
+          doc.floatPositions = { ...freshDoc.floatPositions };
+        }
+      }
+    }
+    return true;
+  }
 
   const PANEL_WIDTH_DEFAULTS = { assets: 240, docs: 220, ai: 320 };
   const PANEL_WIDTH_LIMITS = {
@@ -27,6 +165,42 @@
     '关联图：拖入与本篇相关的卡片（人设 / 场景 / 配角）';
 
   const CORE_FIELD_KEYS = ['title', 'prompt', 'background', 'character', 'relations'];
+
+  function isPresetDismissed() {
+    try {
+      return localStorage.getItem(LS_PRESET_DISMISSED) === '1';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function markPresetDismissed() {
+    try {
+      localStorage.setItem(LS_PRESET_DISMISSED, '1');
+    } catch (e) { /* ignore */ }
+  }
+
+  function maybeCompletePresetTour(doc) {
+    if (!doc || doc.id !== PRESET_DOC_ID || isPresetDismissed()) return;
+    const closed = new Set(doc.closedFloatIds || []);
+    if (PRESET_CARD_IDS.every((id) => closed.has(id))) markPresetDismissed();
+  }
+
+  function ensureStudioPresetProject(s, opts) {
+    if (isPresetDismissed()) return;
+    if (!Array.isArray(s.projects)) s.projects = [];
+    const existing = s.projects.find((p) => p.id === PRESET_PROJECT_ID);
+    if (existing) {
+      if (upgradeStudioPresetIfNeeded(existing)) {
+        try {
+          localStorage.setItem(LS_STATE, JSON.stringify(s));
+        } catch (e) { /* ignore */ }
+      }
+      return;
+    }
+    s.projects.unshift(buildStudioPresetProject());
+    if (opts?.selectPreset) s.projectId = PRESET_PROJECT_ID;
+  }
 
   let state = loadState();
   let dragCardId = null;
@@ -145,36 +319,150 @@
     if (main) main.classList.toggle('studio-readonly', isViewOnly());
   }
 
-  async function hydrateStudioCardImages(root) {
-    if (!root || !window.SupabaseSync?.resolveDisplayUrl) return;
-    const imgs = root.querySelectorAll('img[data-image-ref]');
-    await Promise.all(
-      [...imgs].map(async (img) => {
-        const ref = img.getAttribute('data-image-ref');
-        if (!ref || img.dataset.loaded === '1') return;
-        const cardId = img.closest('.studio-asset-card')?.dataset?.cardId || detailCardId;
-        if (/^https?:\/\//i.test(ref) || ref.startsWith('data:') || ref.startsWith('blob:')) {
-          img.src = ref;
-          img.dataset.loaded = '1';
-          img.closest('.studio-asset-card')?.classList.remove('no-thumb');
-          img.closest('.card-media')?.classList.add('has-img');
-          return;
-        }
-        try {
-          const url = await window.SupabaseSync.resolveDisplayUrl(ref, {
-            assetId: cardId,
-            cardId,
-            variant: 'grid'
-          });
-          if (url) {
-            img.src = url;
-            img.dataset.loaded = '1';
-            img.closest('.studio-asset-card')?.classList.remove('no-thumb');
-            img.closest('.card-media')?.classList.add('has-img');
-          }
-        } catch (e) { /* ignore */ }
-      })
+  function applyStudioImgLoaded(img, url) {
+    if (!img || !url) return;
+    img.src = url;
+    img.dataset.loaded = '1';
+    img.closest('.studio-asset-card')?.classList.remove('no-thumb');
+    img.closest('.card-media')?.classList.add('has-img');
+    img.closest('.studio-float-thumb')?.classList.add('has-img');
+  }
+
+  let studioThumbPrefetchDone = false;
+  let studioImgObserver = null;
+  const studioResolveQueue = [];
+  let studioResolveActive = 0;
+  const STUDIO_MAX_RESOLVE = 6;
+
+  function studioCardIdFromImg(img) {
+    return (
+      img.closest('.studio-asset-card')?.dataset?.cardId ||
+      img.closest('.studio-float-card')?.dataset?.cardId ||
+      detailCardId
     );
+  }
+
+  function runStudioResolveQueue() {
+    while (studioResolveActive < STUDIO_MAX_RESOLVE && studioResolveQueue.length) {
+      const job = studioResolveQueue.shift();
+      studioResolveActive += 1;
+      job().finally(() => {
+        studioResolveActive -= 1;
+        runStudioResolveQueue();
+      });
+    }
+  }
+
+  function enqueueStudioResolve(fn) {
+    return new Promise((resolve) => {
+      studioResolveQueue.push(() => fn().then(resolve, resolve));
+      runStudioResolveQueue();
+    });
+  }
+
+  function patchStudioImagesFromCache(root) {
+    if (!root || !window.SupabaseSync?.getCachedDisplayUrl) return;
+    root.querySelectorAll('img[data-image-ref]').forEach((img) => {
+      if (img.dataset.loaded === '1') return;
+      const ref = img.getAttribute('data-image-ref');
+      if (!ref) return;
+      if (/^https?:\/\//i.test(ref) || ref.startsWith('data:') || ref.startsWith('blob:')) {
+        applyStudioImgLoaded(img, ref);
+        return;
+      }
+      const cached = window.SupabaseSync.getCachedDisplayUrl(ref, {
+        assetId: studioCardIdFromImg(img),
+        variant: 'grid'
+      });
+      if (cached) applyStudioImgLoaded(img, cached);
+    });
+  }
+
+  async function loadOneStudioImg(img) {
+    if (!img || img.dataset.loaded === '1') return;
+    const ref = img.getAttribute('data-image-ref');
+    if (!ref) return;
+    const cardId = studioCardIdFromImg(img);
+    if (/^https?:\/\//i.test(ref) || ref.startsWith('data:') || ref.startsWith('blob:')) {
+      applyStudioImgLoaded(img, ref);
+      return;
+    }
+    const cached = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId: cardId, variant: 'grid' });
+    if (cached) {
+      applyStudioImgLoaded(img, cached);
+      return;
+    }
+    if (!window.SupabaseSync?.resolveDisplayUrl) return;
+    await enqueueStudioResolve(async () => {
+      if (img.dataset.loaded === '1') return;
+      try {
+        const url = await window.SupabaseSync.resolveDisplayUrl(ref, {
+          assetId: cardId,
+          cardId,
+          variant: 'grid'
+        });
+        if (url) applyStudioImgLoaded(img, url);
+      } catch (e) { /* ignore */ }
+    });
+  }
+
+  function ensureStudioImgObserver() {
+    if (studioImgObserver) return studioImgObserver;
+    studioImgObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          const img = entry.target;
+          studioImgObserver.unobserve(img);
+          void loadOneStudioImg(img);
+        });
+      },
+      { root: null, rootMargin: '100px', threshold: 0.02 }
+    );
+    return studioImgObserver;
+  }
+
+  function observeStudioCardImages(root, opts) {
+    if (!root) return;
+    patchStudioImagesFromCache(root);
+    const eager = opts?.eager === true;
+    root.querySelectorAll('img[data-image-ref]').forEach((img) => {
+      if (img.dataset.loaded === '1') return;
+      if (eager) {
+        void loadOneStudioImg(img);
+        return;
+      }
+      ensureStudioImgObserver().observe(img);
+    });
+  }
+
+  function hydrateStudioCardImages(root, opts) {
+    if (!root) return;
+    const pending = root.querySelectorAll('img[data-image-ref]:not([data-loaded="1"])').length;
+    observeStudioCardImages(root, { eager: pending <= 8 || opts?.eager });
+  }
+
+  function prefetchStudioProjectThumbs() {
+    if (studioThumbPrefetchDone || !window.SupabaseSync?.prefetchCardsImages) return;
+    if (!window.SupabaseSync?.isLoggedIn?.()) return;
+    const cards = getProjectCards().filter((c) => c.image && String(c.image).trim());
+    if (!cards.length) return;
+    studioThumbPrefetchDone = true;
+    const run = () => {
+      void window.SupabaseSync.prefetchCardsImages(cards.slice(0, 32), 2200).then(() => {
+        const root = document.getElementById('studioAssetFolders');
+        if (root) observeStudioCardImages(root);
+      });
+    };
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2500 });
+    else setTimeout(run, 800);
+  }
+
+  function withTimeout(promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise((resolve) => setTimeout(resolve, ms))
+    ]);
   }
 
   function setStatus(msg) {
@@ -189,39 +477,43 @@
         const s = JSON.parse(raw);
         normalizeAllProjects(s);
         migrateLegacyState(s);
+        ensureStudioPresetProject(s);
         return s;
       }
     } catch (e) { /* ignore */ }
     const s = {
-      projectId: 'proj_default',
-      projects: [
-        {
-          id: 'proj_default',
-          name: '我的项目',
-          folders: [{ id: 'fld_default', name: '默认', parentId: null, collapsed: false }],
-          docs: [
-            {
-              id: 'doc_welcome',
-              folderId: 'fld_default',
-              title: '新文档',
-              heroCardIds: [],
-              closedFloatIds: [],
-              body: '',
-              bodyHtml: '',
-              floatPositions: {}
-            }
-          ],
-          activeDocId: 'doc_welcome',
-          cards: [],
-          cardGroups: [],
-          globalFields: [],
-          fieldLabels: { ...DEFAULT_FIELD_LABELS },
-          heroFieldLabel: DEFAULT_HERO_LABEL,
-          coreFieldOrder: CORE_FIELD_KEYS.slice()
-        }
-      ],
+      projectId: PRESET_PROJECT_ID,
+      projects: [],
       assetTab: 'warehouse'
     };
+    ensureStudioPresetProject(s, { selectPreset: true });
+    if (!s.projects.length) {
+      s.projects.push({
+        id: 'proj_default',
+        name: '我的项目',
+        folders: [{ id: 'fld_default', name: '默认', parentId: null, collapsed: false }],
+        docs: [
+          {
+            id: 'doc_welcome',
+            folderId: 'fld_default',
+            title: '新文档',
+            heroCardIds: [],
+            closedFloatIds: [],
+            body: '',
+            bodyHtml: '',
+            floatPositions: {}
+          }
+        ],
+        activeDocId: 'doc_welcome',
+        cards: [],
+        cardGroups: [],
+        globalFields: [],
+        fieldLabels: { ...DEFAULT_FIELD_LABELS },
+        heroFieldLabel: DEFAULT_HERO_LABEL,
+        coreFieldOrder: CORE_FIELD_KEYS.slice()
+      });
+      s.projectId = 'proj_default';
+    }
     migrateLegacyState(s);
     return s;
   }
@@ -773,13 +1065,23 @@
     renderAll();
   }
 
+  function studioImageInitialSrc(image) {
+    const ref = String(image || '').trim();
+    if (!ref) return '';
+    if (/^assets\//i.test(ref) || /^https?:\/\//i.test(ref) || ref.startsWith('data:') || ref.startsWith('blob:')) {
+      return ref;
+    }
+    return '';
+  }
+
   function cardThumbHtml(card) {
     const hue = card.hue || 210;
     const hasImg = !!(card.image && String(card.image).trim());
+    const initialSrc = hasImg ? studioImageInitialSrc(card.image) : '';
     const imgPart = hasImg
-      ? `<img src="" alt="" data-image-ref="${esc(card.image)}" loading="lazy">`
+      ? `<img src="${initialSrc ? esc(initialSrc) : ''}" alt="" data-image-ref="${esc(card.image)}" loading="lazy"${initialSrc ? ' data-loaded="1"' : ''}>`
       : `<span class="studio-asset-card-fallback" aria-hidden="true">${esc((card.title || '?').slice(0, 1))}</span>`;
-    const noThumb = hasImg ? '' : ' no-thumb';
+    const noThumb = !hasImg || !initialSrc ? ' no-thumb' : '';
     const drag = isViewOnly() ? 'false' : 'true';
     const promptHint = (card.prompt || '').trim();
     const tip = promptHint
@@ -791,7 +1093,8 @@
   function cardDetailThumbHtml(c) {
     const hasImg = !!(c.image && String(c.image).trim());
     if (hasImg) {
-      return `<div class="studio-detail-thumb"><img src="" data-image-ref="${esc(c.image)}" alt=""></div>`;
+      const initialSrc = studioImageInitialSrc(c.image);
+      return `<div class="studio-detail-thumb${initialSrc ? ' has-img' : ''}"><img src="${initialSrc ? esc(initialSrc) : ''}" data-image-ref="${esc(c.image)}" alt=""${initialSrc ? ' data-loaded="1"' : ''}></div>`;
     }
     return `<div class="studio-detail-thumb studio-detail-thumb--fallback" style="--card-hue:${c.hue || 210}"><span>${esc((c.title || '?').slice(0, 1))}</span></div>`;
   }
@@ -1150,7 +1453,7 @@
       head.addEventListener('click', () => head.parentElement.classList.toggle('open'));
     });
     bindCardDrag(root.querySelectorAll('.studio-asset-card'));
-    void hydrateStudioCardImages(root);
+    observeStudioCardImages(root);
   }
 
   function hideTreeMenu() {
@@ -1674,8 +1977,9 @@
         .map((id) => {
           const c = getCard(id);
           if (!c) return '';
+          const initialSrc = c.image ? studioImageInitialSrc(c.image) : '';
           const inner = c.image
-            ? `<img src="" data-image-ref="${esc(c.image)}" alt="">`
+            ? `<img src="${initialSrc ? esc(initialSrc) : ''}" data-image-ref="${esc(c.image)}" alt=""${initialSrc ? ' data-loaded="1"' : ''}>`
             : `<div class="studio-hero-thumb-fallback" style="--card-hue:${c.hue || 210}"></div>`;
           return `<div class="studio-hero-thumb-wrap">
             <div class="studio-hero-thumb" data-card-id="${esc(id)}" title="${esc(c.title)} · 点击唤出卡片">${inner}</div>
@@ -1748,8 +2052,9 @@
     el.style.left = `${x}px`;
     el.style.top = `${y}px`;
     el.style.zIndex = String(++floatZ);
+    const floatSrc = card.image ? studioImageInitialSrc(card.image) : '';
     const thumb = card.image
-      ? `<img src="" data-image-ref="${esc(card.image)}" alt="">`
+      ? `<img src="${floatSrc ? esc(floatSrc) : ''}" data-image-ref="${esc(card.image)}" alt=""${floatSrc ? ' data-loaded="1"' : ''}>`
       : `<div class="studio-float-thumb-fallback" style="--card-hue:${card.hue || 210}"></div>`;
     el.innerHTML = `
       <div class="studio-float-head">
@@ -1768,6 +2073,7 @@
         if (!doc.closedFloatIds) doc.closedFloatIds = [];
         if (!doc.closedFloatIds.includes(card.id)) doc.closedFloatIds.push(card.id);
         saveState();
+        maybeCompletePresetTour(doc);
       }
     });
     el.addEventListener('mousedown', (e) => {
@@ -1880,13 +2186,7 @@
       character: c.character || '',
       relations: c.relations || ''
     };
-    const fieldsTip = readonly
-      ? ''
-      : `<div class="studio-card-fields-tip">
-        <span><strong>字段可自定义</strong>：名称、顺序与新增字段可在「字段设置」中配置，仅影响当前项目。</span>
-        <button type="button" class="btn btn-ghost btn-sm" data-action="open-field-settings">字段设置</button>
-      </div>`;
-    let html = fieldsTip;
+    let html = '';
     html += getCoreFieldOrder()
       .map((key) => {
         const meta = coreMeta[key];
@@ -3294,18 +3594,6 @@
     purgeLegacyStudioStorage();
     loadFilters();
     buildStudioFilterMenu();
-    if (window.SupabaseSync?.init) {
-      try {
-        await window.SupabaseSync.init();
-      } catch (e) { /* ignore */ }
-    }
-    if (window.PointsSystem?.refreshCreditsFromServer) {
-      try {
-        await window.PointsSystem.refreshCreditsFromServer();
-      } catch (e) { /* ignore */ }
-    }
-    updateStudioCreditsBadge();
-    applyViewOnlyMode();
     const p = getProject();
     if (p && !p.activeDocId && p.docs[0]) p.activeDocId = p.docs[0].id;
     bindPanelResizers();
@@ -3321,14 +3609,34 @@
     }
     const imgScroll = document.getElementById('studioImageScroll');
     imgScroll?.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+    applyViewOnlyMode();
+    updateStudioCreditsBadge();
+    maybeShowStudioGuide();
+    renderAll();
     if (/[?&]import=1(?:&|$)/.test(location.search || '')) {
       try {
         history.replaceState(null, '', location.pathname);
       } catch (e) { /* ignore */ }
       requestAnimationFrame(() => openImportPicker());
     }
-    maybeShowStudioGuide();
-    renderAll();
+    void (async () => {
+      try {
+        await withTimeout(
+          (async () => {
+            if (window.SupabaseSync?.init) await window.SupabaseSync.init();
+            if (window.PointsSystem?.refreshCreditsFromServer) {
+              await window.PointsSystem.refreshCreditsFromServer();
+            }
+          })(),
+          4000
+        );
+      } catch (e) { /* ignore */ }
+      applyViewOnlyMode();
+      updateStudioCreditsBadge();
+      const root = document.getElementById('studioAssetFolders');
+      if (root) observeStudioCardImages(root);
+      prefetchStudioProjectThumbs();
+    })();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { void init(); });

@@ -293,14 +293,12 @@ export async function listPublicCommunityFeed(
   offset: number,
   opts?: { repairAuthors?: boolean; runMaintenance?: boolean }
 ): Promise<CommunityPostDto[]> {
-  if (offset === 0) {
+  if (offset === 0 && opts?.runMaintenance) {
     try {
-      if (opts?.runMaintenance) {
-        if (opts.repairAuthors !== false) {
-          await repairMisattributedCommunityAuthors(admin);
-        }
-        await unpublishGhostCommunityPosts(admin);
+      if (opts.repairAuthors !== false) {
+        await repairMisattributedCommunityAuthors(admin);
       }
+      await unpublishGhostCommunityPosts(admin);
       await unpublishDuplicateCommunityPosts(admin);
     } catch (e) {
       console.warn('[community-feed] repair skipped', e);

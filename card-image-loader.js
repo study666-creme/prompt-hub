@@ -218,11 +218,12 @@
     if (observedRoot !== container) {
       disconnect();
       observedRoot = container;
-      const rootMargin = window.matchMedia('(max-width: 900px)').matches
-      ? '400px 0px'
-      : (container.id === 'communityGrid' || container.id === 'creationsGrid'
-        ? '240px 0px'
-        : (container.id === 'cardsContainer' ? '280px 0px' : '80px 0px'));
+      const isMobile = window.matchMedia('(max-width: 900px)').matches;
+      const rootMargin = isMobile
+        ? (container.id === 'cardsContainer' ? '120px 0px' : '80px 0px')
+        : (container.id === 'communityGrid' || container.id === 'creationsGrid'
+          ? '240px 0px'
+          : (container.id === 'cardsContainer' ? '280px 0px' : '80px 0px'));
       observer = new IntersectionObserver(onIntersect, {
         root: scrollRootFor(container) || null,
         rootMargin,
@@ -269,7 +270,16 @@
   }
 
   function warmCardsBackground(cardList, capMs) {
-    void warmCards(cardList, capMs ?? 14000);
+    const list = (cardList || []).slice();
+    const mobile = window.matchMedia('(max-width: 900px)').matches;
+    const capped = mobile ? list.slice(0, 16) : list.slice(0, 48);
+    const budget = capMs ?? (mobile ? 2800 : 14000);
+    const run = () => void warmCards(capped, budget);
+    if (mobile && typeof requestIdleCallback === 'function') {
+      requestIdleCallback(run, { timeout: 1800 });
+    } else {
+      run();
+    }
   }
 
   window.CardImageLoader = {

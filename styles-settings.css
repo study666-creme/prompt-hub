@@ -930,12 +930,14 @@ body.trial-tasks-open {
   color: var(--text-primary);
 }
 .trial-tasks-panel {
-  max-width: 520px;
+  max-width: 540px;
+  max-height: min(88vh, 680px);
 }
 .trial-tasks-body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 0 1 auto;
 }
 .trial-tasks-hub {
   display: flex;

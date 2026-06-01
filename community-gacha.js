@@ -1,5 +1,5 @@
 /**
- * 社区 · 随心一抽：从已加载作品池抽卡，SSR 光效 + 翻转 + 收藏入仓库
+ * 社区 · 随心一抽：R / SR / SSR 分级翻面、边框与收藏特效
  */
 (function () {
   const LS_PREFIX = 'ph_community_gacha_';
@@ -196,6 +196,38 @@
     return 'R';
   }
 
+  const TIER_REVEAL = {
+    r: { preDelay: 260, flipDelay: 720, status: '翻开命运之卡…' },
+    sr: { preDelay: 400, flipDelay: 1050, status: 'SR 闪耀！' },
+    ssr: { preDelay: 580, flipDelay: 1450, status: 'SSR 降临！' }
+  };
+
+  function applyTierVisual(tier) {
+    cardEl?.classList.remove('is-r', 'is-sr', 'is-ssr', 'is-flipping');
+    if (tier === 'ssr') cardEl?.classList.add('is-ssr');
+    else if (tier === 'sr') cardEl?.classList.add('is-sr');
+    else cardEl?.classList.add('is-r');
+    overlayEl?.querySelector('.community-gacha-card-scene')?.setAttribute('data-tier', tier || 'r');
+  }
+
+  function clearCollectFx() {
+    const scene = overlayEl?.querySelector('.community-gacha-card-scene');
+    scene?.classList.remove('collect-sparkle-r', 'collect-sparkle-sr', 'collect-sparkle-ssr');
+  }
+
+  function playCollectFx(tier) {
+    const scene = overlayEl?.querySelector('.community-gacha-card-scene');
+    if (!scene) return;
+    clearCollectFx();
+    const cls = tier === 'ssr' ? 'collect-sparkle-ssr' : tier === 'sr' ? 'collect-sparkle-sr' : 'collect-sparkle-r';
+    scene.classList.add(cls);
+    cardEl?.classList.add('is-collect-burst');
+    setTimeout(() => {
+      scene.classList.remove(cls);
+      cardEl?.classList.remove('is-collect-burst');
+    }, tier === 'ssr' ? 1100 : tier === 'sr' ? 900 : 750);
+  }
+
   function isPostCollected(post) {
     if (!post) return false;
     const tag = window.COMMUNITY_COLLECT_TAG || '社区收藏';
@@ -248,7 +280,8 @@
       '<p class="community-gacha-kicker">随心一抽</p>' +
       '<p class="community-gacha-status hidden" id="communityGachaStatus">正在揭示…</p>' +
       '<div class="community-gacha-card-scene">' +
-      '<div class="community-gacha-ssr-fx" aria-hidden="true"></div>' +
+      '<div class="community-gacha-tier-fx" aria-hidden="true"></div>' +
+      '<div class="community-gacha-flip-burst" aria-hidden="true"></div>' +
       '<div class="community-gacha-card">' +
       '<div class="community-gacha-face community-gacha-back">' +
       '<div class="community-gacha-back-foil" aria-hidden="true"></div>' +
@@ -267,6 +300,7 @@
       '</div>' +
       '<div class="community-gacha-face community-gacha-front">' +
       '<img alt="" class="community-gacha-front-img">' +
+      '<div class="community-gacha-front-border-fx" aria-hidden="true"></div>' +
       '<div class="community-gacha-shine" aria-hidden="true"></div>' +
       '<div class="community-gacha-front-loading hidden" aria-hidden="true"><span></span></div>' +
       '</div>' +
@@ -352,10 +386,15 @@
   }
 
   function resetCardVisual() {
-    cardEl?.classList.remove('is-flipped', 'is-ssr', 'is-sr', 'is-preloading', 'is-revealing');
+    cardEl?.classList.remove(
+      'is-flipped', 'is-r', 'is-sr', 'is-ssr',
+      'is-preloading', 'is-revealing', 'is-flipping', 'is-collect-burst'
+    );
     metaEl?.classList.add('hidden');
     statusEl?.classList.add('hidden');
     overlayEl?.querySelector('.community-gacha-front-loading')?.classList.add('hidden');
+    overlayEl?.querySelector('.community-gacha-card-scene')?.removeAttribute('data-tier');
+    clearCollectFx();
     collectBtn?.classList.remove('is-collected', 'is-bounce', 'is-loading');
     if (collectBtn) {
       collectBtn.disabled = false;
@@ -393,11 +432,13 @@
     promptEl.textContent = (draw.post.prompt || draw.post.title || '').slice(0, 160);
     refreshCollectButton(draw.post);
 
-    if (draw.tier === 'ssr') cardEl?.classList.add('is-ssr');
-    else if (draw.tier === 'sr') cardEl?.classList.add('is-sr');
+    applyTierVisual(draw.tier);
 
     statusEl?.classList.remove('hidden');
+    const revealCfg = TIER_REVEAL[draw.tier] || TIER_REVEAL.r;
     if (statusEl) statusEl.textContent = '正在揭示…';
+    statusEl?.classList.remove('is-tier-r', 'is-tier-sr', 'is-tier-ssr');
+    statusEl?.classList.add(`is-tier-${draw.tier}`);
 
     let imgUrl = cachedPostImageUrl(draw.post);
     if (!imgUrl) imgUrl = await resolvePostImage(draw.post);
@@ -421,14 +462,15 @@
     if (frontImg) frontImg.src = imgUrl;
     cardEl?.classList.remove('is-preloading');
     cardEl?.classList.add('is-revealing');
-    if (statusEl) statusEl.textContent = draw.tier === 'ssr' ? 'SSR 降临！' : '翻开命运之卡…';
+    if (statusEl) statusEl.textContent = revealCfg.status;
 
-    const flipDelay = draw.tier === 'ssr' ? 1500 : 950;
-    await sleep(draw.tier === 'ssr' ? 520 : 380);
+    await sleep(revealCfg.preDelay);
     if (revealCancelled(gen)) return;
+    cardEl?.classList.add('is-flipping');
     cardEl?.classList.add('is-flipped');
-    await sleep(flipDelay);
+    await sleep(revealCfg.flipDelay);
     if (revealCancelled(gen)) return;
+    cardEl?.classList.remove('is-flipping');
     statusEl?.classList.add('hidden');
     metaEl?.classList.remove('hidden');
     cardEl?.classList.remove('is-revealing');
@@ -465,11 +507,8 @@
       collectBtn.textContent = '已收藏 ✓';
     }
     toast('已收藏入卡片仓库');
-    overlayEl?.querySelector('.community-gacha-card-scene')?.classList.add('collect-sparkle');
-    setTimeout(() => {
-      collectBtn?.classList.remove('is-bounce');
-      overlayEl?.querySelector('.community-gacha-card-scene')?.classList.remove('collect-sparkle');
-    }, 700);
+    playCollectFx(currentDraw?.tier || 'r');
+    setTimeout(() => collectBtn?.classList.remove('is-bounce'), 700);
 
     const r = await window.addCardFromCommunity?.(post, { deferRender: true, skipBlobCopy: true });
     collectBtn?.classList.remove('is-loading');
