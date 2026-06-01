@@ -2357,7 +2357,7 @@
       layoutCommunityCooldown[containerId] = true;
       setTimeout(() => {
         layoutCommunityCooldown[containerId] = false;
-      }, 1200);
+      }, 2000);
     }, opts.immediate ? 0 : 60);
   }
 
@@ -3216,7 +3216,7 @@
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
       window.CardImageLoader?.observeContainer?.(container);
       const mobile = isMobileFeedLayout();
-      const prefetchCap = mobile ? 32 : 56;
+      const prefetchCap = mobile ? 24 : 36;
       const cardLike = posts.map((p) => ({
         id: p.sourceCardId || p.id,
         image: canonicalCommunityImageRef(p) || p.image,
@@ -4169,6 +4169,9 @@
   }
 
   function openPostSidePanel(id, ctx, opts = {}) {
+    window.closeAppreciateViewer?.();
+    if (communityAppreciateActive) exitCommunityAppreciate(true);
+    if (typeof window.setViewerNav === 'function') window.setViewerNav([], '');
     const post = opts.post || findPost(id, {
       sourceCardId: opts.sourceCardId
     });
@@ -4192,6 +4195,9 @@
     if (isMobileFeaturePanel()) {
       window.MobileUI?.closeDrawers?.();
     }
+    const gridId = isCreations ? 'creationsGrid' : 'communityGrid';
+    document.querySelectorAll(`#${gridId} .community-post-card.selected`).forEach((el) => el.classList.remove('selected'));
+    document.querySelector(`#${gridId} .community-post-card[data-post-id="${id}"]`)?.classList.add('selected');
     void renderCommunitySidePanel(id, {
       bodyId: isCreations ? 'creationsSideBody' : 'communitySideBody',
       titleId: isCreations ? 'creationsSideTitle' : 'communitySideTitle',
@@ -4207,15 +4213,16 @@
   }
 
   function openCommunityAppreciateById(postId) {
-    const post = findPost(postId);
-    if (post) return openCommunityAppreciateViewer(post);
+    if (postId) openCommunitySidePanel(String(postId));
   }
 
   function exitCommunityAppreciate(skipLayout) {
     communityAppreciateActive = false;
     appreciateViewerPostId = null;
+    window.closeAppreciateViewer?.();
+    if (typeof window.setViewerNav === 'function') window.setViewerNav([], '');
     document.getElementById('communityAppreciateBtn')?.classList.remove('active');
-    document.body.classList.remove('community-appreciate', 'global-view', 'global-view-entering', 'global-view-exiting');
+    document.body.classList.remove('community-appreciate', 'global-view', 'global-view-entering', 'global-view-exiting', 'appreciate-viewing');
     if (!skipLayout) scheduleCommunityLayout('communityGrid');
   }
 
@@ -7309,6 +7316,9 @@
       exitCommunityAppreciate(true);
     }
     if (app === 'community') {
+      window.closeAppreciateViewer?.();
+      if (communityAppreciateActive) exitCommunityAppreciate(true);
+      document.body.classList.remove('global-view', 'appreciate-viewing');
       if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
       ensureCommunityFromCards();
       renderCommunity({ immediate: true, skipFeedFetch: true, syncFromCards: true });

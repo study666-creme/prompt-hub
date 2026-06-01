@@ -435,8 +435,9 @@
         void openAppreciateViewer(item.id);
         return true;
       }
-      if (item.type === 'post' && window.FeatureDraft?.openCommunityAppreciateById) {
-        void window.FeatureDraft.openCommunityAppreciateById(item.id);
+      if (item.type === 'post' && window.FeatureDraft?.openCommunitySidePanel) {
+        window.closeAppreciateViewer?.();
+        window.FeatureDraft.openCommunitySidePanel(item.id);
         return true;
       }
       return false;

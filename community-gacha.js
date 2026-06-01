@@ -334,7 +334,7 @@
       const post = currentDraw?.post;
       if (!post) return;
       close();
-      window.FeatureDraft?.openCommunityAppreciateById?.(post.id);
+      window.FeatureDraft?.openCommunitySidePanel?.(post.id);
     });
     collectBtn?.addEventListener('click', () => void onCollect());
     redrawBtn?.addEventListener('click', () => void drawAgain());

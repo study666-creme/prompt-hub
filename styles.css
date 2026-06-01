@@ -1717,6 +1717,12 @@ body {
     .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::before {
       content: none;
     }
+    #communityGrid .card-media.is-loading::after,
+    #creationsGrid .card-media.is-loading::after,
+    #userProfileGrid .card-media.is-loading::after {
+      display: none !important;
+      animation: none !important;
+    }
     .card-media.is-loading::after,
     .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::after {
       display: block !important;
@@ -1742,7 +1748,7 @@ body {
       );
       transform: rotate(-45deg);
       transform-origin: center center;
-      filter: blur(12px);
+      filter: blur(8px);
       mix-blend-mode: soft-light;
       will-change: top, left, opacity, filter;
       animation: card-beam-loading 3.2s cubic-bezier(0.35, 0.05, 0.25, 1) infinite;
@@ -1809,7 +1815,7 @@ body {
       );
       transform: rotate(-45deg);
       transform-origin: center center;
-      filter: blur(12px);
+      filter: blur(8px);
       mix-blend-mode: soft-light;
       opacity: 0;
       will-change: top, left, opacity, filter;
@@ -3624,7 +3630,7 @@ body {
       );
       transform: rotate(-45deg);
       transform-origin: center center;
-      filter: blur(12px);
+      filter: blur(8px);
       mix-blend-mode: soft-light;
       opacity: 0;
       animation: card-beam-trbl var(--card-beam-duration) cubic-bezier(0.35, 0.05, 0.25, 1) forwards;
