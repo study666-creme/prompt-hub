@@ -21,7 +21,7 @@
   const USE_STORAGE_TRANSFORM = false;
   const GRID_SIGN_CONCURRENCY = 12;
   const WAREHOUSE_PREFETCH_CARD_CAP = 48;
-  const WAREHOUSE_FAST_FIRST = 12;
+  const WAREHOUSE_FAST_FIRST = 24;
   const SS_SIGN_CACHE = 'ph_signed_urls_v1';
   const signInflight = new Map();
 
@@ -32,7 +32,9 @@
       const data = JSON.parse(raw);
       const now = Date.now();
       for (const [key, entry] of Object.entries(data || {})) {
-        if (entry?.url && entry.expiresAt > now + 60000) signedUrlCache.set(key, entry);
+        if (entry?.url && entry.expiresAt > now + 60000 && !isInvalidMediaUrl(entry.url)) {
+          signedUrlCache.set(key, entry);
+        }
       }
     } catch (e) { /* ignore */ }
   }
@@ -97,9 +99,10 @@
 
   function isValidSignedDisplayUrl(url) {
     if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false;
+    if (isInvalidMediaUrl(url)) return false;
     if (isIncompleteSignedStorageUrl(url)) return false;
     const path = storagePathFromRef(url);
-    if (!path) return true;
+    if (!path) return isCdnMediaUrl(url) || isFreshSignedDisplayUrl(url, 60000);
     return isFreshSignedDisplayUrl(url, 60000);
   }
 
@@ -400,9 +403,9 @@
   }
 
   try {
-    if (localStorage.getItem('promptrepo_sign_v') !== '5') {
+    if (localStorage.getItem('promptrepo_sign_v') !== '6') {
       clearSignedUrlCache();
-      localStorage.setItem('promptrepo_sign_v', '5');
+      localStorage.setItem('promptrepo_sign_v', '6');
     }
   } catch (e) { /* ignore */ }
 
@@ -677,13 +680,19 @@
   }
 
   function cacheSignedPath(path, url, variant) {
-    if (!path || !url) return;
+    if (!path || !url || isInvalidMediaUrl(url)) return;
     const fileKey = String(path).replace(/^\//, '');
     const v = variant || VARIANT_GRID;
     signedUrlCache.set(signedCacheKey(fileKey, v), {
       url,
       expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
     });
+    if (isCdnMediaUrl(url) && v === VARIANT_GRID) {
+      signedUrlCache.set(signedCacheKey(fileKey, VARIANT_FULL), {
+        url,
+        expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
+      });
+    }
   }
 
   async function batchSignPaths(paths, variant) {
@@ -1066,11 +1075,21 @@
     if (cached?.url && cached.expiresAt > Date.now() + 120000 && !isIncompleteSignedStorageUrl(cached.url)) {
       return cached.url;
     }
+    if (variant === VARIANT_GRID) {
+      const fullCached = signedUrlCache.get(signedCacheKey(path.replace(/^\//, ''), VARIANT_FULL));
+      if (fullCached?.url && fullCached.expiresAt > Date.now() + 120000 && !isIncompleteSignedStorageUrl(fullCached.url)) {
+        return fullCached.url;
+      }
+      for (const p of pathsForVariant(image, assetId, opts?.authorId, VARIANT_FULL)) {
+        const hit = signedUrlCache.get(signedCacheKey(p.replace(/^\//, ''), VARIANT_FULL));
+        if (hit?.url && hit.expiresAt > Date.now() + 120000) return hit.url;
+      }
+    }
     if (/^https?:\/\//i.test(image) && isValidSignedDisplayUrl(image)) return image;
     return '';
   }
 
-  /** 按卡片 id 收集 canonical 路径，一次 batch 签完（避免列表每张图多次试探） */
+  /** 按卡片 id 收集 canonical 路径，一次 batch 签名（避免列表每张图多次试探） */
   async function prefetchCardsImages(cards, capMs) {
     if (!isLoggedIn()) return;
     const pathSet = new Set();
@@ -1079,9 +1098,9 @@
       if (!c?.image) continue;
       const p = primaryImagePath(c.image, c.id);
       if (!p || isPathKnownMissing(p)) continue;
+      if (!isPathKnownMissing(p)) pathSet.add(p);
       const grid = gridPathFromPrimary(p);
       if (grid && !isPathKnownMissing(grid)) pathSet.add(grid);
-      else pathSet.add(p);
     }
     if (!pathSet.size) return;
     const refs = [...pathSet].map((p) => toStorageRef(p));
@@ -1098,7 +1117,9 @@
     const first = list.slice(0, WAREHOUSE_FAST_FIRST);
     const rest = list.slice(WAREHOUSE_FAST_FIRST);
     await prefetchCardsImages(first, budget);
-    if (rest.length) void prefetchCardsImages(rest, 6000);
+    if (rest.length) {
+      setTimeout(() => void prefetchCardsImages(rest, 6000), 120);
+    }
   }
 
   function patchWarehouseImagesFromCache(container, opts) {
@@ -1121,7 +1142,9 @@
       typeof url === 'string' &&
       !url.startsWith(STORAGE_PREFIX) &&
       !isPlaceholderImgSrc(url) &&
-      !isIncompleteSignedStorageUrl(url)
+      !isInvalidMediaUrl(url) &&
+      !isIncompleteSignedStorageUrl(url) &&
+      (isCdnMediaUrl(url) || isValidSignedDisplayUrl(url))
     );
   }
 
@@ -1134,7 +1157,14 @@
     }
     media.classList.remove('is-loading');
     if (state === 'failed') {
-      if (media.closest('#communityGrid, #creationsGrid, #userProfileGrid')) {
+      if (media.closest('#communityGrid')) {
+        const card = media.closest('.community-post-card--visual');
+        if (card) {
+          card.remove();
+          return;
+        }
+      }
+      if (media.closest('#creationsGrid, #userProfileGrid')) {
         media.remove();
         return;
       }
@@ -1186,7 +1216,9 @@
         || img.closest('.card[data-id]')?.dataset?.id
         || img.closest('.card[data-post-id]')?.dataset?.postId
         || undefined;
-      const url = getCachedDisplayUrl(ref, { assetId, variant: VARIANT_GRID });
+      let url = getCachedDisplayUrl(ref, { assetId, variant: VARIANT_GRID });
+      if (!url) url = getCachedDisplayUrl(ref, { assetId, variant: VARIANT_FULL });
+      if (url && isInvalidMediaUrl(url)) url = '';
       if (url && /^https?:\/\//i.test(url) && isValidSignedDisplayUrl(url)) {
         const media = img.closest('.card-media, .imagegen-feed-media');
         media?.classList.remove('card-media--await');
@@ -1229,7 +1261,11 @@
       if (aVis !== bVis) return aVis ? -1 : 1;
       return ar.top - br.top;
     });
-    const concurrency = window.matchMedia('(max-width: 900px)').matches ? 5 : 8;
+    const concurrency = opts?.warehouseBoost
+      ? (window.matchMedia('(max-width: 900px)').matches ? 10 : 18)
+      : opts?.communityBoost
+        ? (window.matchMedia('(max-width: 900px)').matches ? 8 : 14)
+        : (window.matchMedia('(max-width: 900px)').matches ? 5 : 8);
     let idx = 0;
     async function hydrateOne(img) {
       const ref = img.getAttribute('data-storage-ref') || img.getAttribute('data-image-ref');
@@ -1241,7 +1277,9 @@
         media?.classList.remove('is-loading');
         return;
       }
-      const inFeed = !!img.closest('#communityGrid, #creationsGrid, #userProfileGrid');
+      const inWarehouse = !!img.closest('#cardsContainer');
+      const inCommunityFeed = !!img.closest('#communityGrid, #creationsGrid, #userProfileGrid');
+      const inFeed = inCommunityFeed;
       const authorId = img.dataset?.authorId
         || img.closest('.card')?.dataset?.authorId
         || '';
@@ -1261,9 +1299,9 @@
         assetId,
         authorId: authorId || undefined,
         cardId: assetId,
-        variant: VARIANT_GRID,
+        variant: (inWarehouse || inCommunityFeed) ? VARIANT_FULL : VARIANT_GRID,
         communityFeed,
-        tryAllPaths: communityFeed
+        tryAllPaths: inWarehouse || communityFeed
       };
       const cached = communityFeed ? '' : getCachedDisplayUrl(ref, { assetId, variant: VARIANT_GRID });
       if (cached && isResolvableDisplayUrl(cached)) {

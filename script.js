@@ -172,7 +172,6 @@
     let fileHandle = null, masonryInstance = null;
     let page = 1, allFilteredCards = [];
     const PER_PAGE = 24;
-    const WAREHOUSE_RENDER_ALL_CAP = 32;
     let sortMode = 'default';
     let floatingPromptActive = false;
     let currentCardCustomFields = {};
@@ -295,6 +294,52 @@
 
     function getLightboxFrame() {
       return document.getElementById('lightboxFrame');
+    }
+
+    /** 灯箱至少不比社区网格预览小（竖图按高度缩放时易缩成「小图」） */
+    function getLightboxMinDisplaySize() {
+      const grid = document.getElementById('communityGrid');
+      const selected = grid?.querySelector('.community-post-card.selected');
+      const media = selected?.querySelector('.card-media');
+      if (media) {
+        const r = media.getBoundingClientRect();
+        if (r.width > 8 && r.height > 8) return { minW: r.width, minH: r.height };
+      }
+      const colRaw = grid && getComputedStyle(grid).getPropertyValue('--feed-col-width').trim();
+      const colW = parseFloat(colRaw) || selected?.offsetWidth || 0;
+      if (colW > 8) return { minW: colW, minH: colW * 1.25 };
+      return { minW: 240, minH: 300 };
+    }
+
+    function fitLightboxDisplaySize(img) {
+      if (!img?.naturalWidth || !img?.naturalHeight) return;
+      const { minW, minH } = getLightboxMinDisplaySize();
+      const maxW = Math.min(window.innerWidth * 0.96, 960);
+      const maxH = window.innerHeight * 0.94 - 100;
+      const ar = img.naturalWidth / img.naturalHeight;
+      let w = maxW;
+      let h = w / ar;
+      if (h > maxH) {
+        h = maxH;
+        w = h * ar;
+      }
+      if (w < minW) {
+        w = Math.min(minW, maxW);
+        h = w / ar;
+      }
+      if (h < minH && h < maxH) {
+        h = Math.min(minH, maxH);
+        w = h * ar;
+        if (w > maxW) {
+          w = maxW;
+          h = w / ar;
+        }
+      }
+      img.style.width = `${Math.round(w)}px`;
+      img.style.height = `${Math.round(h)}px`;
+      img.style.maxWidth = 'none';
+      img.style.maxHeight = 'none';
+      img.style.objectFit = 'contain';
     }
 
     function setViewerFrameLoading(frame, loading) {
@@ -1454,15 +1499,22 @@
         if (!e.target?.classList?.contains('card-img')) return;
         if (isPlaceholderCardImg(e.target)) return;
         if (isMobileViewport()) return;
+        const media = e.target.closest('.card-media');
+        if (media && !cardMediaAffectsViewport(media)) return;
         scheduleWarehouseMasonryLayout();
       }, true);
     }
 
     let warehouseMasonryTimer = null;
+    let warehouseMasonryPending = 0;
     function scheduleWarehouseMasonryLayout() {
       if (isMobileViewport()) return;
+      warehouseMasonryPending += 1;
       clearTimeout(warehouseMasonryTimer);
-      warehouseMasonryTimer = setTimeout(() => layoutMasonryGrid(), 60);
+      warehouseMasonryTimer = setTimeout(() => {
+        warehouseMasonryPending = 0;
+        layoutMasonryGrid();
+      }, warehouseMasonryPending > 4 ? 140 : 80);
     }
 
     function resetCardLayoutStyles(container) {
@@ -1545,6 +1597,7 @@
         horizontalOrder: false,
         transitionDuration: 0
       };
+      container.style.removeProperty('height');
       const scrollTop = container.scrollTop;
       const runLayout = () => {
         if (masonryInstance) {
@@ -1829,8 +1882,17 @@
     function pauseRippleBackground() {
       window.__rippleGridBg?.setPaused?.(true);
     }
-    function resumeRippleBackground() {
+    function isRippleHeavyApp(app) {
+      return app === 'community' || app === 'creations' || app === 'imagegen';
+    }
+
+    function resumeRippleBackground(app) {
       if (settings.efficiencyMode) return;
+      const activeApp = app || document.querySelector('.app-nav-item.active')?.dataset?.app || 'warehouse';
+      if (isRippleHeavyApp(activeApp)) {
+        pauseRippleBackground();
+        return;
+      }
       const bg = document.getElementById('rippleGridBg');
       if (!bg) return;
       bg.style.display = '';
@@ -1905,7 +1967,7 @@
       }
       deferAfterPagePaint(() => {
         window.FeatureDraft?.onAppChange?.(app);
-        resumeRippleBackground();
+        resumeRippleBackground(app);
       }, 280);
       window.mobileOnAppPageChange?.(app);
     }
@@ -2436,6 +2498,16 @@
       return [...map.values()].filter(c => !isCardTombstoned(c));
     }
 
+    function cardMediaAffectsViewport(media) {
+      const card = media?.closest?.('.card');
+      if (!card) return true;
+      const container = card.closest('#cardsContainer');
+      if (!container) return true;
+      const cardR = card.getBoundingClientRect();
+      const cr = container.getBoundingClientRect();
+      return cardR.bottom > cr.top - 40 && cardR.top < cr.bottom + 80;
+    }
+
     function scheduleMasonryForMedia(media) {
       if (!media) return;
       if (isMobileViewport()) {
@@ -2445,12 +2517,10 @@
         }
         return;
       }
-      if (media.closest('#creationsGrid')) {
-        window.FeatureDraft?.scheduleCreationsLayout?.();
-      } else if (media.closest('#communityGrid')) {
-        window.FeatureDraft?.scheduleLayout?.('communityGrid');
+      if (media.closest('#creationsGrid') || media.closest('#communityGrid')) {
+        /* flex 多列瀑布流：图片加载后不再重排，避免卡片跳动 */
       } else if (media.closest('#userProfileGrid')) {
-        window.FeatureDraft?.scheduleLayout?.('userProfileGrid');
+        window.FeatureDraft?.scheduleCommunityLayout?.('userProfileGrid', { fromImage: true });
       } else if (media.closest('#imageGenFeed')) {
         window.FeatureDraft?.scheduleImageGenFeedLayout?.();
       } else if (typeof scheduleLayoutMasonry === 'function') {
@@ -2546,6 +2616,16 @@
         media.__shineWatch = null;
         if (!media.classList.contains('is-loading')) return;
         const im = media.querySelector('img');
+        const loaded = im && im.complete && im.naturalWidth > 0 && !isPlaceholderCardImg(im);
+        if (loaded) {
+          finishCardMediaShine(media);
+          return;
+        }
+        const visualCard = media.closest('#communityGrid .community-post-card--visual');
+        if (visualCard) {
+          visualCard.remove();
+          return;
+        }
         media.classList.remove('is-loading', 'media-shine-reveal');
         media.classList.add('media-revealed');
         if (im) {
@@ -2558,33 +2638,51 @@
     function finishCardMediaShine(media) {
       if (!media) return;
       const mobile = isMobileViewport();
-      const img = media.querySelector('img');
+      const sideBtn = media.classList?.contains('community-side-img-btn')
+        ? media
+        : media.closest?.('.community-side-img-btn');
+      const shineTarget = sideBtn || media;
+      const img = shineTarget.querySelector('img');
       const loaded = img && img.complete && img.naturalWidth > 0 && !isPlaceholderCardImg(img);
       if (!loaded) {
-        armMediaShineWatchdog(media);
+        armMediaShineWatchdog(shineTarget);
         return;
       }
-      clearMediaShineWatchdog(media);
+      clearMediaShineWatchdog(shineTarget);
       const cardEl = media.closest('.card[data-id], .card[data-post-id]');
-      media.classList.remove('is-loading');
-      media.classList.add('media-revealed');
-      media.classList.remove('media-shine-reveal');
-      void media.offsetWidth;
-      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        const cardId = cardEl?.dataset?.id || cardEl?.dataset?.postId || '';
-        let stagger = 0;
-        for (let i = 0; i < cardId.length; i++) stagger = (stagger + cardId.charCodeAt(i) * 13) % 200;
-        setTimeout(() => {
-          media.classList.add('media-shine-reveal');
-          setTimeout(() => media.classList.remove('media-shine-reveal'), 1250);
-        }, stagger);
+      shineTarget.classList.remove('is-loading', 'card-media--await');
+      if (sideBtn) {
+        if (img) {
+          img.style.removeProperty('opacity');
+          img.style.removeProperty('visibility');
+        }
+      } else {
+        media.classList.remove('is-loading', 'card-media--await');
+        media.classList.add('media-revealed');
+        media.classList.remove('media-shine-reveal');
+        void media.offsetWidth;
+        if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          const cardId = cardEl?.dataset?.id || cardEl?.dataset?.postId || '';
+          let stagger = 0;
+          for (let i = 0; i < cardId.length; i++) stagger = (stagger + cardId.charCodeAt(i) * 13) % 200;
+          setTimeout(() => {
+            media.classList.add('media-shine-reveal');
+            setTimeout(() => media.classList.remove('media-shine-reveal'), 1250);
+          }, stagger);
+        }
+        media.style.removeProperty('min-height');
       }
-      media.style.removeProperty('min-height');
       if (cardEl?.dataset?.id) {
         try { sessionStorage.setItem('ph_card_shine_' + cardEl.dataset.id, '1'); } catch (e) { /* ignore */ }
       }
       if (!mobile) {
-        if (media.closest('#cardsContainer')) scheduleWarehouseMasonryLayout();
+        if (sideBtn) { /* 侧栏不参与 Masonry */ }
+        else if (media.closest('#communityGrid, #creationsGrid')) {
+          /* 多列瀑布流无需每张图重排 Masonry */
+        }
+        else if (media.closest('#cardsContainer')) {
+          if (cardMediaAffectsViewport(media)) scheduleWarehouseMasonryLayout();
+        }
         else scheduleMasonryForMedia(media);
       } else if (media.closest('#imageGenFeed')) window.FeatureDraft?.resetMobileFeedGridStyles?.();
       else if (media.closest('#cardsContainer')) enforceMobileCardGrid();
@@ -2686,7 +2784,7 @@
 
     async function hydrateWarehouseBackupsFromIdb(container, list) {
       if (!container || typeof getCardImageBackup !== 'function') return;
-      for (const card of (list || []).slice(0, WAREHOUSE_RENDER_ALL_CAP)) {
+      for (const card of (list || []).slice(0, PER_PAGE)) {
         if (!card?.id || !card?.image) continue;
         const img = container.querySelector(`.card[data-id="${card.id}"] .card-img`);
         if (!img) continue;
@@ -3636,11 +3734,9 @@
         const visibleIds = box
           ? new Set([...box.querySelectorAll('.card[data-id]')].map((el) => el.dataset.id).filter(Boolean))
           : new Set();
-        const subset = cards.length <= WAREHOUSE_RENDER_ALL_CAP
-          ? cards
-          : (visibleIds.size
-            ? cards.filter((c) => visibleIds.has(c.id)).slice(0, 28)
-            : cards.slice(0, 28));
+        const subset = visibleIds.size
+          ? cards.filter((c) => visibleIds.has(c.id)).slice(0, PER_PAGE)
+          : cards.slice(0, PER_PAGE);
         await window.SupabaseSync?.prefetchCardsImages?.(subset, capMs || 12000);
         if (box) {
           window.SupabaseSync?.patchImageSrcFromCache?.(box);
@@ -3834,28 +3930,32 @@
 
     function warmVisibleCardsOnly(list, capMs) {
       const all = list || [];
-      const slice = all.length <= WAREHOUSE_RENDER_ALL_CAP ? all : all.slice(0, PER_PAGE);
+      const slice = all.slice(0, PER_PAGE);
       if (!slice.length) return;
       warmCardImagesBackground(slice, capMs || 8000);
     }
 
-    async function hydrateWarehouseImagesFast(container, pageCards) {
-      if (!container || !pageCards?.length) return;
-      container.dataset.fastHydrate = '1';
+    async function hydrateWarehouseGridImages(container, pageCards) {
+      if (!container) return;
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
-      try {
-        await hydrateWarehouseBackupsFromIdb(container, pageCards);
-        window.SupabaseSync?.patchImageSrcFromCache?.(container);
-      } catch (e) {
-        console.warn('[cards] warehouse fast hydrate', e);
-        delete container.dataset.fastHydrate;
-        window.CardImageLoader?.observeContainer?.(container);
-        return;
+      const list = pageCards || [];
+      if (list.length && window.SupabaseSync?.prefetchCardsImages) {
+        await Promise.race([
+          window.SupabaseSync.prefetchCardsImages(list, 5000),
+          new Promise((r) => setTimeout(r, 5000))
+        ]);
       }
-      delete container.dataset.fastHydrate;
-      window.CardImageLoader?.observeContainer?.(container);
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
+      if (window.SupabaseSync?.hydrateImageElements) {
+        await window.SupabaseSync.hydrateImageElements(container, { onlyMissing: true, warehouseBoost: true });
+      }
+      window.SupabaseSync?.patchImageSrcFromCache?.(container);
+      window.CardImageLoader?.observeContainer?.(container);
       if (!isMobileViewport()) scheduleWarehouseMasonryLayout();
+    }
+
+    async function hydrateWarehouseImagesFast(container, pageCards) {
+      return hydrateWarehouseGridImages(container, pageCards);
     }
 
     async function runCardImageIntegrityAudit() {
@@ -4860,11 +4960,8 @@
         if (activeFilters.size > 0) filtered = filtered.filter(cardMatchesFilters);
         allFilteredCards = sortCardsWithPins(filtered);
       }
-      const renderAllAtOnce = allFilteredCards.length <= WAREHOUSE_RENDER_ALL_CAP;
       const start = (page - 1) * PER_PAGE;
-      const pageCards = renderAllAtOnce && page === 1
-        ? allFilteredCards
-        : allFilteredCards.slice(start, start + PER_PAGE);
+      const pageCards = allFilteredCards.slice(start, start + PER_PAGE);
       if (page === 1 && pageCards.length === 0) {
         container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:60px;">📦 暂无卡片</div>';
         return;
@@ -4876,7 +4973,7 @@
       }
       const fragment = document.createDocumentFragment();
       const isAppend = !reset && page > 1;
-      const eagerImgCount = mobileGrid ? 6 : Math.min(12, pageCards.length);
+      const eagerImgCount = mobileGrid ? 8 : Math.min(24, pageCards.length);
       pageCards.forEach((card, idx) => {
         const div = document.createElement('div');
         div.className = `card card-enter ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
@@ -4892,10 +4989,16 @@
         }
         const checked = selectedCardIds.has(card.id);
         const showImage = cardHasDisplayImage(card);
-        const cachedUrl = showImage && window.SupabaseSync?.getCachedDisplayUrl?.(card.image, {
+        let cachedUrl = showImage && window.SupabaseSync?.getCachedDisplayUrl?.(card.image, {
           assetId: card.id,
           variant: window.SupabaseSync?.VARIANT_GRID || 'grid'
         });
+        if (showImage && !cachedUrl) {
+          cachedUrl = window.SupabaseSync?.getCachedDisplayUrl?.(card.image, {
+            assetId: card.id,
+            variant: window.SupabaseSync?.VARIANT_FULL || 'full'
+          });
+        }
         const imgSrc = showImage ? (cachedUrl || cardImgInitialSrc(card.image)) : '';
         const imgPending = showImage && (!cachedUrl || imgSrc.startsWith('data:image/svg'));
         const mediaLoadingCls = imgPending ? ' is-loading card-media--await' : '';
@@ -4905,7 +5008,7 @@
         const tagsHtml = buildCardTagsHtml(card.tags);
         const pinBadge = card.pinnedAt ? '<span class="card-pin-badge" title="置顶">置顶</span>' : '';
         const imgOnload = "if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.card-media'))";
-        const fetchPri = !isAppend && idx < 6 ? ' fetchpriority="high"' : '';
+        const fetchPri = !isAppend && idx < 12 ? ' fetchpriority="high"' : '';
         const mediaHtml = showImage
           ? `<div class="card-media${mediaLoadingCls}"${shineAt}><img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(card.image)} data-image-ref="${escapeHtml(card.image)}" loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async"${fetchPri} draggable="false" alt="" onload="${imgOnload}"></div>`
           : '';
@@ -5001,43 +5104,24 @@
         });
         fragment.appendChild(div);
       });
+      const appendedCards = [...fragment.querySelectorAll('.card')];
       container.appendChild(fragment);
       bindCardGridImageErrors(container);
       bindCardGridImageRelayout(container);
-      const patchWarehouseImages = () => {
-        window.SupabaseSync?.patchWarehouseImagesFromCache?.(container, { visibleFirst: true, max: 12 })
-          || window.SupabaseSync?.patchImageSrcFromCache?.(container, { visibleFirst: true, max: 12 });
-        window.CardImageLoader?.patchVisibleFromCache?.(container);
+      const runWarehouseImages = () => {
+        void hydrateWarehouseGridImages(container, pageCards);
       };
-      if (page === 1 && prefetchCards.length) {
-        await Promise.race([
-          prefetchP,
-          new Promise((r) => setTimeout(r, 2200))
-        ]);
-        patchWarehouseImages();
-        void prefetchP.then(() => {
-          window.SupabaseSync?.patchImageSrcFromCache?.(container);
-          window.CardImageLoader?.patchVisibleFromCache?.(container);
-        });
-        window.CardImageLoader?.observeContainer?.(container);
-      } else {
-        patchWarehouseImages();
-        if (!mobileGrid && pageCards.length > 0 && pageCards.length <= WAREHOUSE_RENDER_ALL_CAP) {
-          void hydrateWarehouseImagesFast(container, pageCards);
-        } else if (window.CardImageLoader) {
-          window.CardImageLoader.observeContainer(container);
-        } else {
-          void window.SupabaseSync?.hydrateImageElements?.(container, { onlyMissing: true });
-        }
-      }
+      runWarehouseImages();
       if (!mobileGrid && viewMode !== 'list') {
-        resetWarehouseGridLayout(container);
-        requestAnimationFrame(() => {
-          layoutMasonryGrid();
-          requestAnimationFrame(() => layoutMasonryGrid());
-        });
-        if (renderAllAtOnce && page === 1) {
-          page = Math.max(1, Math.ceil(allFilteredCards.length / PER_PAGE));
+        if (isAppend && masonryInstance && appendedCards.length) {
+          masonryInstance.appended(appendedCards);
+          masonryInstance.layout();
+        } else {
+          resetWarehouseGridLayout(container);
+          requestAnimationFrame(() => {
+            layoutMasonryGrid();
+            requestAnimationFrame(layoutMasonryGrid);
+          });
         }
       } else if (mobileGrid) {
         const warmList = isAppend ? pageCards.slice(0, 10) : pageCards.slice(0, 14);
@@ -5084,8 +5168,9 @@
       if (mobile) {
         if (this.scrollTop < 100) return;
         if (this.scrollTop + this.clientHeight < this.scrollHeight - 220) return;
-      } else if (this.scrollTop + this.clientHeight < this.scrollHeight - 150) {
-        return;
+      } else {
+        if (this.scrollTop < 48) return;
+        if (this.scrollTop + this.clientHeight < this.scrollHeight - 150) return;
       }
       if ((page * PER_PAGE) >= allFilteredCards.length) return;
       warehouseScrollLoading = true;
@@ -6085,9 +6170,11 @@
         img.style.maxWidth = '';
         img.style.maxHeight = '';
         img.style.objectFit = '';
+        if (window.__lightboxCommunityMode) fitLightboxDisplaySize(img);
         resetImageZoom(img);
         attachImageZoom(img);
         finishViewerFrameReveal(frame);
+        if (window.__lightboxCommunityMode) layoutViewerBorderSvg(frame);
         if (dlBtn && !window.__lightboxCommunityMode) {
           dlBtn.disabled = !(img.src && !img.src.includes('data:image/svg'));
         }

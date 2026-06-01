@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260601l';
+    window.__APP_BUILD__ = '20260602i';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -58,11 +58,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260601l">
-  <link rel="stylesheet" href="styles-theme.css?v=20260601l">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260601l">
+  <link rel="stylesheet" href="styles.css?v=20260602i">
+  <link rel="stylesheet" href="styles-theme.css?v=20260602i">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260602i">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260601l">
+  <link rel="stylesheet" href="styles-features.css?v=20260602i">
   <link rel="stylesheet" href="styles-assets.css?v=20260606u">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
@@ -546,7 +546,7 @@
         <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260601l</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260602i</p>
     </div>
   </nav>
 
@@ -864,12 +864,14 @@
           </div>
           <div class="community-notify-list" id="communityNotifyList"></div>
         </div>
-        <div class="community-page-layout">
-          <div class="community-page-main">
-            <div class="feature-body feature-body-cards">
-              <p class="community-inline-hint mobile-only">点击卡片查看详情；点头像进作者主页。</p>
-              <p class="community-inline-hint desktop-only">点击卡片在右侧查看详情，可随时切换。仅点击作者头像进入 TA 的主页。</p>
-              <div class="cards-container community-cards" id="communityGrid"></div>
+        <div class="community-workspace">
+          <div class="community-page-layout">
+            <div class="community-page-main">
+              <div class="feature-body feature-body-cards">
+                <p class="community-inline-hint mobile-only">点击卡片查看详情；点头像进作者主页。</p>
+                <p class="community-inline-hint desktop-only">点击卡片在右侧查看详情，可随时切换。仅点击作者头像进入 TA 的主页。</p>
+                <div class="cards-container community-cards" id="communityGrid"></div>
+              </div>
             </div>
           </div>
           <aside class="community-side-panel hidden" id="communitySidePanel" aria-label="提示词详情">
@@ -894,12 +896,14 @@
           <button type="button" class="my-home-tab" data-home-tab="owned-packages" role="tab">拥有的资产包</button>
           <button type="button" class="my-home-tab" data-home-tab="published-packages" role="tab">发布的资产包</button>
         </div>
-        <div class="community-page-layout my-home-pane active" data-home-pane="posts">
-          <div class="community-page-main">
-            <div class="feature-body feature-body-cards">
-              <div class="published-reward-rules" id="publishedRewardRules"></div>
-              <p class="community-inline-hint" id="creationsHint">你在卡片库公开到社区的作品 · 点击卡片查看详情与点赞数</p>
-              <div class="cards-container creations-cards" id="creationsGrid"><div class="grid-sizer"></div></div>
+        <div class="community-workspace my-home-pane active" data-home-pane="posts">
+          <div class="community-page-layout">
+            <div class="community-page-main">
+              <div class="feature-body feature-body-cards">
+                <div class="published-reward-rules" id="publishedRewardRules"></div>
+                <p class="community-inline-hint" id="creationsHint">你在卡片库公开到社区的作品 · 点击卡片查看详情与点赞数</p>
+                <div class="cards-container creations-cards" id="creationsGrid"><div class="grid-sizer"></div></div>
+              </div>
             </div>
           </div>
           <aside class="community-side-panel hidden" id="creationsSidePanel" aria-label="作品详情">
@@ -1352,17 +1356,17 @@
   <script src="api-client.js?v=20260606o"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
   <script src="supabase-sync.js?v=20260606p"></script>
-  <script src="card-image-loader.js?v=20260531a"></script>
+  <script src="card-image-loader.js?v=20260602i"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
   <script src="subscription.js?v=20260622e"></script>
   <script src="trial-tasks.js?v=20260602r"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="script.js?v=20260531a"></script>
+  <script src="script.js?v=20260602i"></script>
   <script src="points-system.js?v=20260606m"></script>
   <script src="imagegen-prompt-kit.js?v=20260601b"></script>
   <script src="imagegen-prompt-tools.js?v=20260606l"></script>
-  <script src="features-draft.js?v=20260601l"></script>
+  <script src="features-draft.js?v=20260602i"></script>
   <script src="community-gacha.js?v=20260606v"></script>
   <script src="features-assets.js?v=20260606c"></script>
   <script src="hotfix-image-layout.js?v=20260603t"></script>

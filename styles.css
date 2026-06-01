@@ -2954,12 +2954,31 @@ body {
       flex-shrink: 0;
       opacity: 0.92;
     }
+    .image-lightbox .lightbox-container {
+      width: auto;
+      max-width: min(98vw, 960px);
+      max-height: 94vh;
+    }
+    .image-lightbox .viewer-image-frame {
+      width: auto;
+      max-width: min(98vw, 960px);
+      max-height: calc(94vh - 80px);
+    }
+    .image-lightbox .viewer-image-shine-wrap {
+      width: auto;
+      max-width: min(98vw, 960px);
+      max-height: calc(94vh - 80px);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto;
+    }
     .image-lightbox img {
       display: block;
       width: auto;
       height: auto;
-      max-width: min(98vw, 1400px);
-      max-height: calc(96vh - 200px);
+      max-width: min(98vw, 960px);
+      max-height: calc(94vh - 80px);
       object-fit: contain;
       border-radius: inherit;
     }
@@ -3740,6 +3759,13 @@ body {
       position: relative;
       z-index: 2;
     }
+    .image-lightbox .viewer-image-shine-wrap img {
+      width: auto;
+      max-width: min(98vw, 960px);
+      max-height: calc(94vh - 80px);
+      height: auto;
+      object-fit: contain;
+    }
     .viewer-image-shine-wrap img {
       max-width: min(95vw, 1320px);
       max-height: min(calc(100dvh - 120px), calc(100vh - 120px));
@@ -4046,7 +4072,7 @@ body {
 }
 
 @media (min-width: 901px) {
-  /* 桌面卡片库：Masonry 瀑布流（与社区一致） */
+  /* 桌面卡片库 Masonry 瀑布流 */
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) {
     display: block !important;
     position: relative !important;
@@ -4070,28 +4096,11 @@ body {
     margin: 0;
     padding: 0;
   }
-  /* 仅卡片仓库使用 Masonry 瀑布流（社区/我发布的由 styles-features.css 单独处理） */
-  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) {
-    display: block !important;
-    position: relative !important;
-    height: auto !important;
-  }
-  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card {
-    display: block;
-    margin-bottom: var(--card-row-gap) !important;
-    box-sizing: border-box;
-  }
-  .cards-container:not(.list-view) .grid-sizer {
-    display: block;
-    visibility: hidden;
-    height: 0;
-  }
   #cardsContainer:not(.list-view) .card-media {
     min-height: 0;
     overflow: hidden;
     position: relative;
   }
-  /* 等签名：小占位，避免整屏灰块 */
   #cardsContainer:not(.list-view) .card-media.card-media--await {
     aspect-ratio: 4 / 3;
     max-height: 200px;
@@ -4128,6 +4137,115 @@ body {
   }
   #cardsContainer.cards-container:not(.list-view) {
     opacity: 1;
+  }
+
+  /* 社区 / 我的发布：复制卡片库 Masonry 规则（独立选择器） */
+  #communityGrid.cards-container:not(.list-view),
+  #creationsGrid.cards-container:not(.list-view) {
+    display: block !important;
+    position: relative !important;
+    width: 100% !important;
+    max-width: 100%;
+    height: auto !important;
+    min-height: 0;
+    flex: 1 1 0;
+    overflow-x: hidden;
+    overflow-y: auto !important;
+  }
+  #communityGrid.cards-container:not(.list-view) > .card,
+  #creationsGrid.cards-container:not(.list-view) > .card {
+    display: block;
+    box-sizing: border-box;
+    margin-bottom: var(--card-row-gap) !important;
+  }
+  #communityGrid.cards-container:not(.list-view) > .grid-sizer,
+  #creationsGrid.cards-container:not(.list-view) > .grid-sizer {
+    display: block;
+    visibility: hidden;
+    height: 0;
+    margin: 0;
+    padding: 0;
+  }
+  #communityGrid:not(.list-view) .card-media,
+  #creationsGrid:not(.list-view) .card-media {
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+    width: 100%;
+    line-height: 0;
+  }
+  #communityGrid:not(.list-view) .card-media.is-loading,
+  #creationsGrid:not(.list-view) .card-media.is-loading,
+  #communityGrid:not(.list-view) .card-media.card-media--load-failed,
+  #creationsGrid:not(.list-view) .card-media.card-media--load-failed {
+    min-height: 72px;
+    max-height: 200px;
+    background: var(--bg-hover);
+  }
+  #communityGrid:not(.list-view) .card-media.is-loading .card-img,
+  #creationsGrid:not(.list-view) .card-media.is-loading .card-img {
+    position: absolute !important;
+    inset: 0;
+    width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    visibility: hidden;
+    opacity: 0;
+  }
+  #communityGrid:not(.list-view) .card-img,
+  #creationsGrid:not(.list-view) .card-img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: 100%;
+    object-fit: contain;
+    object-position: center center;
+  }
+  #communityGrid:not(.list-view) .community-post-card--visual,
+  #creationsGrid:not(.list-view) .community-post-card--visual {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  /* 社区/创作：flex 多列瀑布流（最短列分配，无 absolute 叠卡） */
+  #communityGrid.cards-container.community-feed-grid.community-feed-columns:not(.list-view),
+  #creationsGrid.cards-container.community-feed-grid.community-feed-columns:not(.list-view) {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: flex-start !important;
+    align-content: flex-start !important;
+    gap: var(--feed-column-gap, var(--card-gap, 16px));
+    position: relative !important;
+    height: auto !important;
+  }
+  #communityGrid.community-feed-columns:not(.list-view) > .community-feed-col,
+  #creationsGrid.community-feed-columns:not(.list-view) > .community-feed-col {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--feed-row-gap, var(--card-row-gap, 16px));
+  }
+  #communityGrid.community-feed-columns .community-feed-col > .card,
+  #creationsGrid.community-feed-columns .community-feed-col > .card,
+  #communityGrid.community-feed-grid:not(.list-view) > .card,
+  #creationsGrid.community-feed-grid:not(.list-view) > .card {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
+    break-inside: avoid;
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    margin: 0 !important;
+  }
+  #communityGrid.community-feed-grid > .grid-sizer,
+  #creationsGrid.community-feed-grid > .grid-sizer {
+    display: none !important;
   }
 }
 

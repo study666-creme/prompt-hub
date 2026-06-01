@@ -103,9 +103,21 @@ Feed 首屏（offset=0）Worker 会尝试：
 
 - 桌面：`Masonry`（`layoutCommunityMasonry`），列数 `--card-columns`。
 - 移动：`useCssGridForCommunityFeed` → CSS Grid。
-- 侧栏详情：`communitySidePanel`；`openCommunitySidePanel(postId)`。
+- 侧栏详情：`communitySidePanel` + `#communitySideBody`；`openPostSidePanel` → `renderCommunitySidePanel`。
+- 结构参考卡片库：`#cardsContainer` | `#editPanel`（340px）→ 社区为 `#communityGrid` | `#communitySidePanel`（`.community-workspace`）。
 
 抖动：图片 `load` → `scheduleCommunityLayout` → `instance.layout()`。
+
+### 已知布局故障（2026-05-30 · 未解决）
+
+详见 **`docs/CURRENT-ISSUES.md` 问题 A/B**。摘要：
+
+| 问题 | 现象 |
+|------|------|
+| **A 侧栏空白** | 侧栏打开、标题有，`communitySideBody` 无可见内容（全黑） |
+| **B Masonry 空洞** | 滚动后网格中间大块空白、列距不齐 |
+
+关键文件：`features-draft.js`（`renderCommunitySidePanel`、`layoutCommunityMasonry`）、`styles-features.css`（`.community-side-*`）、`styles.css`（桌面 `#communityGrid` Masonry 规则）。
 
 ---
 
@@ -116,4 +128,6 @@ Feed 首屏（offset=0）Worker 会尝试：
 3. `communityPosts.length` vs `publicFeedPosts.length`。
 4. `__promptHubCards.length` 与 DB `source_card_id` 集合是否交集。
 5. `settings.deletedCardTombstones` 是否误伤。
-6. SW 与 `__APP_BUILD__` 是否最新。
+6. 侧栏：`#communitySideBody` 的 `innerHTML` 长度与 `.community-side-prompt` 是否存在（问题 A）。
+7. 空洞处 `.card` 的 inline `top/left/width` 与 Masonry 实例是否一致（问题 B）。
+8. SW 与 `__APP_BUILD__` 是否最新。

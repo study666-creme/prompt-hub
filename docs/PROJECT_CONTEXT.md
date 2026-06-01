@@ -1,7 +1,7 @@
 # Prompt Hub — 项目上下文（给 AI / 新对话用）
 
-> **新聊天**：先读 **`docs/CURRENT-ISSUES.md`**，再读 **`docs/AI-HANDOFF.md`**。  
-> 默认中文；最小 diff；勿提交密钥。用户是纯小白 → 分步 + 可复制命令。
+> **新聊天**：先读 **`docs/CURRENT-ISSUES.md`**（含 **P0 社区/卡片库布局**），再读 **`docs/AI-HANDOFF.md`**。  
+> 默认中文；**P0 拉满算力**见 `docs/AI-WORK-MODE.md`；勿提交密钥。用户是纯小白 → 分步 + 可复制命令。
 
 ---
 
@@ -22,26 +22,25 @@
 
 ---
 
-## 当前部署阶段（2026-06-01 · 构建 **20260601l**）
+## 当前部署阶段（2026-05-30）
 
 | 项 | 状态 |
 |----|------|
 | Worker | `prompt-hub-api` · API https://api.prompt-hub.cn |
 | Pages | https://prompt-hub.cn |
-| 构建号 | **20260601k**（主站） |
-| **社区** | 点卡片恢复右侧详情栏；快速预览不再抢点击 |
-| **加载动效** | 夜间光带 3.2s 循环；白天生图占位用光球 |
-| **卡片创作 / 社区** | 缩略图预取、批量签名等同前 |
+| 构建号 | **20260602i** · SW `prompt-hub-v370` |
+| **待验证** | 社区无灰色空卡片；下滑加载不跳顶 |
 
-### 已知问题 / 下一步
+### 已知问题
 
-- 强刷确认 `window.__APP_BUILD__ === '20260601k'`
-- 批量 5+ 张可能上游限流；失败项可「恢复丢失的生图」
-- AI 改功能时勿动无关 UI（见 `.cursor/rules/prompt-hub-context.mdc`）
+- Storage 404 仍可能导致部分帖无图（失败帖会从网格移除，不再留灰块）
+- 后台 Feed 刷新在用户已下滑时不再强制整页重绘
 
-### 测试账号
+### 下一步
 
-- 邮箱 `2705367723@qq.com`
+1. 强刷后 `window.__APP_BUILD__` 应为 **20260602i**
+2. 社区下滑加载多页：滚动位置应保持在原位置附近
+3. 不应再出现只有 ♥0 的深灰空卡片
 
 ### 部署
 
@@ -52,15 +51,14 @@ cd server
 npx wrangler deploy
 ```
 
+强刷：**Ctrl+Shift+R**；确认 `window.__APP_BUILD__` 与左下角一致。
+
+### 测试账号
+
+- 邮箱 `2705367723@qq.com`
+
 ---
 
-## 文档索引
+## 更多文档
 
-| 文档 | 何时读 |
-|------|--------|
-| **[CURRENT-ISSUES.md](./CURRENT-ISSUES.md)** | **必读** — P0、实测 |
-| **[CARD-LOADING.md](./CARD-LOADING.md)** | 卡片/社区图为何慢、已做优化 |
-| **[PERFORMANCE-OPTIMIZATION.md](./PERFORMANCE-OPTIMIZATION.md)** | 性能与「流畅感」目标 |
-| **[MEMBERSHIP-CREDITS.md](./MEMBERSHIP-CREDITS.md)** | 会员档位、激活码 |
-| **[PROJECT-SNAPSHOT.md](./PROJECT-SNAPSHOT.md)** | 详细规划 + 现状 |
-| [AI-HANDOFF.md](./AI-HANDOFF.md) | Grep 表、接手流程 |
+见 `docs/FILE-MAP.md`、`docs/DEPLOY-CHECKLIST.md`。

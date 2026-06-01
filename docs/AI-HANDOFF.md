@@ -26,7 +26,10 @@
 | **单卡发布开关 UI** | `setPublishCheckbox`, `readPublishCheckbox`, `cardPublishSessionOverride`, `syncCardPublishFromPrompt` |
 | **publishedToCommunity 持久化** | `mergePublishFlag`, `mergeCardPair`（`cloud-sync-safety.js`）, `getDataPayload`（`script.js`） |
 | 发布/下架 | `syncCardToCommunity`, `reconcileCommunityWithCards`, `ownPostAllowedInFeed` |
-| **性能 / 慢加载** | `unpublishGhostCommunityPosts`（`community-feed.ts`）, `prefetchCommunityDisplayUrls`, `hydrateWarehouseImagesFast` |
+| **社区侧栏空白** | `renderCommunitySidePanel`, `communitySideBody`, `openPostSidePanel` |
+| **社区 Masonry 空洞** | `layoutCommunityMasonry`, `scheduleCommunityLayout`, `getCommunityFeedGaps` |
+| **卡片库首屏顺序** | `renderCards`, `card-image-loader.js`, `prefetchWarehousePage`, `observeContainer` |
+| **性能 / 慢加载** | `prefetchCommunityDisplayUrls`, `hydrateWarehouseImagesFast` |
 | 社区通知 | `pushCommunityEvent`, `refreshRemoteNotifications`, `community-notify.ts` |
 | 任务中心 | `membership-tasks.ts`, `trial-tasks.js` |
 | 云上传超时 | `pushToCloud`, `scheduleCloudPush`（`script.js`） |
@@ -69,8 +72,12 @@ https://api.prompt-hub.cn/api/v1/community/feed?limit=80
 ## 省 Token 的改代码原则
 
 1. **最小 diff**：只改与 P0 相关的函数，不顺手重构。
-2. **P0 顺序（2026-05-29）**：① 单卡 `publishedToCommunity` 与开关 UI / 云端 ② Feed 与图片签名性能。
-3. **先证实根因再改**：20260615j～o 用户称多数未达预期；勿重复大块社区改动。
+2. **P0 顺序（2026-05-30 用户反馈）**：
+   - ① 社区侧栏空白（问题 A）
+   - ② 社区 Masonry 空洞（问题 B）
+   - ③ 卡片库首屏加载顺序（问题 C）
+   - 详见 **`docs/CURRENT-ISSUES.md`**；**用户要求暂不改代码时只更新文档**。
+3. **先证实根因再改**：20260601l～q 布局/CSS 多轮用户仍称未解决；下次须 DevTools 断点后再最小 diff。
 4. **不要**让用户只靠清 `localStorage` 当最终方案（云端 `user_data` 会拉回）。
 4. **不要**未验证就叠新功能；**不要**通读 `script.js`（5000+ 行）。
 5. 改静态资源：bump `index.html` 的 `__APP_BUILD__` + `sw.js` 的 `CACHE`。

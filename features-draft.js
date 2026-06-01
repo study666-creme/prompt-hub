@@ -94,6 +94,10 @@
   let imageGenPreviewKind = null;
   let layoutCommunityTimer = null;
   let communityFeedRenderGen = 0;
+  const FEED_PER_PAGE = 24;
+  const feedPagedStore = {};
+  const feedPagedScrollBound = {};
+  const feedScrollIntent = {};
   let imageGenLayoutTimer = null;
   const displayUrlCache = new Map();
   let publicFeedAt = 0;
@@ -268,13 +272,14 @@
   }
 
   function feedAssetIdFromImg(img) {
-    const card = img?.closest?.('.card');
-    if (!card) return undefined;
-    return card.dataset?.sourceCardId
-      || card.dataset?.id
-      || card.dataset?.postId
-      || card.dataset?.creationId
-      || card.closest('[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '')
+    if (!img) return undefined;
+    return img.dataset?.sourceCardId
+      || img.dataset?.postId
+      || img.closest?.('.card')?.dataset?.sourceCardId
+      || img.closest?.('.card')?.dataset?.id
+      || img.closest?.('.card')?.dataset?.postId
+      || img.closest?.('.card')?.dataset?.creationId
+      || img.closest('[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '')
       || undefined;
   }
 
@@ -1728,8 +1733,10 @@
     }
     let url = '';
     if (!publicFeed) {
-      const cached = window.SupabaseSync?.getCachedDisplayUrl?.(image, { assetId, variant: 'grid' });
-      if (cached && /^https?:\/\//i.test(cached) && !cached.includes('/object/public/')) url = cached;
+      let cached = window.SupabaseSync?.getCachedDisplayUrl?.(image, { assetId, variant: 'grid' });
+      if (!cached) cached = window.SupabaseSync?.getCachedDisplayUrl?.(image, { assetId, variant: 'full' });
+      if (cached && /^https?:\/\//i.test(cached) && !cached.includes('/object/public/')
+        && !window.SupabaseSync?.isInvalidMediaUrl?.(cached)) url = cached;
     }
     const isStorageLike = window.SupabaseSync?.isStorageRef?.(image) || String(image).startsWith('storage://');
     if (!url && window.SupabaseSync?.resolveDisplayUrl && isStorageLike) {
@@ -1739,7 +1746,7 @@
           assetId,
           authorId: authorId || undefined,
           cardId: cardId || undefined,
-          variant: 'grid',
+          variant: communityFeed ? 'full' : 'grid',
           communityFeed,
           tryAllPaths: communityFeed
         });
@@ -1766,7 +1773,7 @@
     }
     if (!url && typeof image === 'string' && /^https?:\/\//i.test(image)) {
       const isPrivateBucket = /\/storage\/v1\/object\/(public|sign|authenticated)\/card-images\//i.test(image);
-      if (!isPrivateBucket) url = image;
+      if (!isPrivateBucket && !window.SupabaseSync?.isInvalidMediaUrl?.(image)) url = image;
     }
     if (url && !url.startsWith('storage://') && !url.startsWith('data:image/svg')
       && (!window.SupabaseSync?.isValidSignedDisplayUrl || window.SupabaseSync.isValidSignedDisplayUrl(url))) {
@@ -1811,8 +1818,10 @@
       ? ''
       : (displayUrlCache.get(jobId ? `job:${jobId}` : (assetId ? `${assetId}:${ref}` : ref)) || '');
     if (!url && !fromPublicFeed) {
-      const cached = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId, variant: 'grid' });
-      if (cached && typeof cached === 'string' && !cached.startsWith('storage://') && !cached.startsWith('data:image/svg') && !cached.includes('/object/public/')) {
+      let cached = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId, variant: 'grid' });
+      if (!cached) cached = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId, variant: 'full' });
+      if (cached && typeof cached === 'string' && !cached.startsWith('storage://') && !cached.startsWith('data:image/svg')
+        && !cached.includes('/object/public/') && !window.SupabaseSync?.isInvalidMediaUrl?.(cached)) {
         url = cached;
       }
     }
@@ -1826,13 +1835,15 @@
       return false;
     }
     const endLoad = () => {
-      const media = img.closest('.imagegen-feed-media, .card-media');
+      const media = img.closest('.imagegen-feed-media, .card-media, .community-side-img-btn');
       if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
       else media?.classList.remove('is-loading');
     };
     const tryFullFallback = () => {
       if (img.dataset.imgFallback === '1' || !window.SupabaseSync?.resolveDisplayUrl) {
-        cardMedia?.classList.add('card-media--load-failed');
+        if (!(cardMedia && removeBrokenCommunityFeedCard(cardMedia))) {
+          cardMedia?.classList.add('card-media--load-failed');
+        }
         endLoad();
         return;
       }
@@ -1851,7 +1862,9 @@
           img.src = full;
           if (img.complete && img.naturalWidth > 0) endLoad();
         } else {
-          cardMedia?.classList.add('card-media--load-failed');
+          if (!(cardMedia && removeBrokenCommunityFeedCard(cardMedia))) {
+            cardMedia?.classList.add('card-media--load-failed');
+          }
           endLoad();
         }
       });
@@ -1876,6 +1889,73 @@
     return '';
   }
 
+  /** 社区纯图卡片：配图失败或超时后整卡移除，避免只剩灰色空壳 */
+  function removeBrokenCommunityFeedCard(node) {
+    const card = node?.closest?.('.community-post-card--visual');
+    if (!card || !card.closest('#communityGrid')) return false;
+    card.remove();
+    return true;
+  }
+
+  function pruneEmptyCommunityFeedCards(scope) {
+    const root = scope && scope.nodeType === 1 ? scope : document.getElementById(String(scope || '')) || document;
+    root.querySelectorAll('#communityGrid .community-post-card--visual').forEach((card) => {
+      const media = card.querySelector('.card-media');
+      if (!media) {
+        card.remove();
+        return;
+      }
+      const img = media.querySelector('img.card-img');
+      const src = img?.currentSrc || img?.src || '';
+      const loaded = img
+        && img.complete
+        && img.naturalWidth > 8
+        && /^https?:\/\//i.test(src)
+        && !src.includes('data:image/svg');
+      if (loaded) return;
+      const failed = media.classList.contains('card-media--load-failed');
+      const shineAt = Number(media.dataset.shineAt || 0);
+      const stale = media.classList.contains('is-loading') && shineAt > 0 && Date.now() - shineAt > 12000;
+      if (failed || stale) card.remove();
+    });
+  }
+
+  function captureFeedScrollAnchor(container) {
+    if (!container) return null;
+    const rect = container.getBoundingClientRect();
+    const cards = container.querySelectorAll('.community-feed-col .card, :scope > .card');
+    for (const card of cards) {
+      const r = card.getBoundingClientRect();
+      if (r.bottom > rect.top + 12 && r.top < rect.bottom - 12) {
+        return { postId: card.dataset.postId || '', offset: r.top - rect.top };
+      }
+    }
+    return { scrollTop: container.scrollTop };
+  }
+
+  function restoreFeedScrollAnchor(container, anchor) {
+    if (!container || !anchor) return;
+    if (anchor.postId) {
+      const card = container.querySelector(`.card[data-post-id="${CSS.escape(anchor.postId)}"]`);
+      if (card) {
+        const rect = container.getBoundingClientRect();
+        const r = card.getBoundingClientRect();
+        container.scrollTop += (r.top - rect.top) - anchor.offset;
+        return;
+      }
+    }
+    if (Number.isFinite(anchor.scrollTop)) container.scrollTop = anchor.scrollTop;
+  }
+
+  function preserveFeedScroll(container, fn) {
+    const anchor = captureFeedScrollAnchor(container);
+    fn();
+    requestAnimationFrame(() => {
+      restoreFeedScrollAnchor(container, anchor);
+      requestAnimationFrame(() => restoreFeedScrollAnchor(container, anchor));
+    });
+  }
+
   function stripFailedFeedMedia(scope) {
     scope.querySelectorAll('.imagegen-feed-media img.img-load-failed').forEach(img => {
       const media = img.closest('.imagegen-feed-media');
@@ -1886,18 +1966,30 @@
     scope.querySelectorAll(
       '#communityGrid .card-media--load-failed, #userProfileGrid .card-media--load-failed'
     ).forEach((media) => {
+      if (removeBrokenCommunityFeedCard(media)) return;
       media.remove();
     });
+    pruneEmptyCommunityFeedCards(scope);
   }
 
   async function hydrateFeedImages(root) {
     const scope = root || document;
+    const rootEl = scope.nodeType === 1 ? scope : document.getElementById(String(scope)) || scope;
+    const inCommunity = !!(rootEl?.id === 'communityGrid' || rootEl?.id === 'creationsGrid' || rootEl?.id === 'userProfileGrid'
+      || rootEl?.querySelector?.('.community-post-card, .creation-post-card'));
     if (window.SupabaseSync?.hydrateImageElements) {
       window.SupabaseSync.patchImageSrcFromCache?.(scope);
-      await window.SupabaseSync.hydrateImageElements(scope, { onlyMissing: true });
+      await window.SupabaseSync.hydrateImageElements(scope, {
+        onlyMissing: true,
+        communityBoost: inCommunity
+      });
       stripFailedFeedMedia(scope);
-      if (isMobileFeedViewport()) resetMobileFeedGridStyles();
-      else layoutImageGenFeedMasonry();
+      const isFeedGrid = rootEl?.id === 'communityGrid' || rootEl?.id === 'creationsGrid' || rootEl?.id === 'userProfileGrid';
+      const isSideOnly = rootEl?.id === 'communitySideBody' || rootEl?.id === 'creationsSideBody';
+      if (!isFeedGrid && !isSideOnly) {
+        if (isMobileFeedViewport()) resetMobileFeedGridStyles();
+        else layoutImageGenFeedMasonry();
+      }
       return;
     }
     const imgs = scope.querySelectorAll(
@@ -1927,8 +2019,8 @@
   async function hydrateFeedImageOne(img) {
     const ref = img.getAttribute('data-image-ref');
     const jobId = img.getAttribute('data-job-id') || '';
-    const media = img.closest('.imagegen-feed-media') || img.closest('.card-media');
     const sideBtn = img.closest('.community-side-img-btn');
+    const media = img.closest('.imagegen-feed-media') || img.closest('.card-media') || sideBtn;
     if (!ref || !isDisplayableImage(ref)) {
       media?.remove();
       img.closest('.imagegen-feed-card')?.classList.add('imagegen-feed-card--no-media');
@@ -1972,6 +2064,7 @@
     container.dataset.feedFinalized = '1';
     container.dataset.feedLayoutReady = '1';
     container.querySelectorAll('.card-media.is-loading').forEach((m) => releaseFeedMediaLoading(m));
+    pruneEmptyCommunityFeedCards(container);
     setFeedLayoutPending(containerId, false);
     if (useCssGridForCommunityFeed(containerId)) {
       layoutCommunityMasonry(containerId);
@@ -2063,9 +2156,25 @@
     return { showTitle, showPrompt };
   }
 
-  /** 首屏 HTML 只用占位图，避免缓存 URL 在 Masonry/网格就位前以原尺寸闪现 */
-  function feedImgInitialSrc(image, jobId) {
+  /** 首屏：有缓存 URL 直接用，否则小占位（避免 Masonry 就位前大图闪现） */
+  function feedImgInitialSrc(image, opts) {
     if (!image || !isDisplayableImage(image)) return '';
+    const o = opts && typeof opts === 'object' ? opts : {};
+    let cached = window.SupabaseSync?.getCachedDisplayUrl?.(image, {
+      assetId: o.assetId || o.sourceCardId,
+      authorId: o.authorId,
+      variant: 'grid'
+    });
+    if (!cached) {
+      cached = window.SupabaseSync?.getCachedDisplayUrl?.(image, {
+        assetId: o.assetId || o.sourceCardId,
+        authorId: o.authorId,
+        variant: 'full'
+      });
+    }
+    if (cached && cached.startsWith('http') && !cached.includes('data:image/svg')) {
+      if (!window.SupabaseSync?.isInvalidMediaUrl?.(cached)) return cached;
+    }
     return IMG_LOADING_PLACEHOLDER;
   }
 
@@ -2115,8 +2224,8 @@
     window.CardImageLoader?.observeContainer?.(container);
   }
 
-  function communityImgInitialSrc(image) {
-    return feedImgInitialSrc(image, null);
+  function communityImgInitialSrc(image, opts) {
+    return feedImgInitialSrc(image, opts);
   }
 
   function patchCommunityLikeUI(id) {
@@ -2270,8 +2379,8 @@
   }
 
   function layoutCommunityWhenImagesReady(containerId) {
-    if (useCssGridForCommunityFeed(containerId)) {
-      layoutCommunityMasonry(containerId);
+    if (useCommunityCssGrid(containerId) || useCssGridForCommunityFeed(containerId)) {
+      setFeedLayoutPending(containerId, false);
       return;
     }
     const container = document.getElementById(containerId);
@@ -2301,13 +2410,32 @@
     setTimeout(finish, 2800);
   }
 
+  /** 社区 Masonry 列数：按 .community-page-main 宽度算（勿用 grid 自身 clientWidth，侧栏打开时会误判成 1 列） */
+  function getCommunityFeedMeasureEl(container) {
+    return container?.closest?.('.community-page-main') || container;
+  }
+
+  function getCommunityFeedColumns(container) {
+    if (!container) return getCardColumns();
+    const measure = getCommunityFeedMeasureEl(container);
+    const style = getComputedStyle(measure);
+    const innerW = measure.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    if (innerW < 80) return getCardColumns();
+    const gap = getCommunityFeedGaps().colGap;
+    const userCols = getCardColumns();
+    const minCol = 156;
+    const fit = Math.floor((innerW + gap) / (minCol + gap));
+    return Math.min(userCols, Math.max(2, fit));
+  }
+
   function getCommunityFeedColumnWidth(container) {
     if (!container) return 0;
-    const style = getComputedStyle(container);
-    const innerW = container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const measure = getCommunityFeedMeasureEl(container);
+    const style = getComputedStyle(measure);
+    const innerW = measure.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     if (innerW < 80) return 0;
     const gap = getCommunityFeedGaps().colGap;
-    const cols = getCardColumns();
+    const cols = getCommunityFeedColumns(container);
     return Math.max(120, Math.floor((innerW - gap * (cols - 1)) / cols));
   }
 
@@ -2323,7 +2451,6 @@
     container.querySelectorAll('.card').forEach((card) => {
       card.style.width = colWidth + 'px';
       card.style.maxWidth = colWidth + 'px';
-      card.style.marginBottom = getCommunityFeedGaps().rowGap + 'px';
     });
     container.style.setProperty('--feed-col-width', `${colWidth}px`);
     return colWidth;
@@ -2345,40 +2472,73 @@
 
   let layoutCommunityDebounce = {};
   const layoutCommunityCooldown = {};
+  const layoutCommunityImageBatch = {};
   function scheduleCommunityLayout(containerId, opts = {}) {
+    if (useCommunityCssGrid(containerId)) {
+      if (opts.fromImage) return;
+      layoutCommunityMasonry(containerId, {
+        newCards: opts.newCards,
+        recalcCols: opts.recalcCols === true
+      });
+      return;
+    }
     if (useCssGridForCommunityFeed(containerId)) {
+      if (opts.fromImage) return;
       layoutCommunityMasonry(containerId);
+      return;
+    }
+    const run = () => {
+      layoutCommunityMasonry(containerId);
+      if (!opts.fromImage) {
+        layoutCommunityCooldown[containerId] = true;
+        setTimeout(() => {
+          layoutCommunityCooldown[containerId] = false;
+        }, 800);
+      }
+    };
+    if (opts.fromImage) {
+      clearTimeout(layoutCommunityImageBatch[containerId]);
+      layoutCommunityImageBatch[containerId] = setTimeout(run, opts.immediate ? 0 : 60);
       return;
     }
     if (!opts.force && layoutCommunityCooldown[containerId]) return;
     clearTimeout(layoutCommunityDebounce[containerId]);
-    layoutCommunityDebounce[containerId] = setTimeout(() => {
-      layoutCommunityMasonry(containerId);
-      layoutCommunityCooldown[containerId] = true;
-      setTimeout(() => {
-        layoutCommunityCooldown[containerId] = false;
-      }, 2000);
-    }, opts.immediate ? 0 : 60);
+    layoutCommunityDebounce[containerId] = setTimeout(run, opts.immediate ? 0 : 80);
   }
 
-  function bindCommunityGridImageRelayout(containerId) {
+  const communityResizeRelayoutBound = {};
+  /** 只监听父级宽度（侧栏开合），勿监听 #communityGrid 自身高度，否则与 Masonry 互相触发死循环 */
+  function bindCommunityFeedResizeRelayout(containerId) {
+    if (communityResizeRelayoutBound[containerId]) return;
     const container = document.getElementById(containerId);
-    if (!container) return;
-    container.querySelectorAll('img.card-img, .card-media img').forEach(img => {
-      if (img.dataset.masonryRelayoutBound) return;
-      img.dataset.masonryRelayoutBound = '1';
-      img.addEventListener('load', () => {
-        const src = img.currentSrc || img.src || '';
-        if (src.includes('data:image/svg') || !(img.complete && img.naturalWidth > 8)) return;
-        if (container.dataset.feedLayoutReady === '1') return;
-        scheduleCommunityLayout(containerId);
-      }, { once: true });
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    const watchEl = container.closest('.community-page-layout') || container.parentElement;
+    if (!watchEl) return;
+    communityResizeRelayoutBound[containerId] = true;
+    let timer = null;
+    let lastW = 0;
+    const obs = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width ?? watchEl.clientWidth;
+      if (w < 80 || Math.abs(w - lastW) < 4) return;
+      lastW = w;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        scheduleCommunityLayout(containerId, { recalcCols: true });
+      }, 120);
     });
+    obs.observe(watchEl);
+  }
+
+  function bindCommunityGridScrollRelayout() {
+    /* 滚动时全量 Masonry 重排会导致 400+ 卡片错位，已禁用 */
+  }
+
+  function bindCommunityGridImageRelayout() {
+    /* 由 finishCardMediaShine 批量触发 Masonry，避免每张图全量重排 */
   }
 
   function scheduleLayoutAfterImages(containerId) {
     scheduleCommunityLayout(containerId);
-    bindCommunityGridImageRelayout(containerId);
   }
 
   function isMobileFeedLayout() {
@@ -2388,9 +2548,16 @@
   function useCssGridForCommunityFeed(containerId) {
     if (containerId === 'userProfileGrid') return true;
     if (containerId !== 'communityGrid' && containerId !== 'creationsGrid') return false;
-    // 效率模式 / 手机端用 CSS Grid；桌面端仍走 Masonry，才能调列数
-    if (!isMobileFeedLayout()) return false;
-    return true;
+    return isMobileFeedLayout();
+  }
+
+  function useFeedPagedRender(containerId) {
+    return (containerId === 'communityGrid' || containerId === 'creationsGrid') && !isMobileFeedLayout();
+  }
+
+  /** 社区/创作：CSS 多列瀑布流（禁止 Masonry 绝对定位，避免卡片叠在一起） */
+  function useCommunityCssGrid(containerId) {
+    return containerId === 'communityGrid' || containerId === 'creationsGrid';
   }
 
   function relayoutCommunityFeeds() {
@@ -2436,18 +2603,30 @@
     return communityImageSignOpts(el).fromPublicFeed;
   }
 
-  function resetCommunityGridCardLayout(container, containerId) {
+  function destroyCommunityFeedMasonryFor(containerId) {
     if (containerId === 'creationsGrid' && creationsMasonry) {
       creationsMasonry.destroy();
       creationsMasonry = null;
+    } else if (containerId === 'communityGrid' && communityMasonry) {
+      communityMasonry.destroy();
+      communityMasonry = null;
+    }
+  }
+
+  function resetCommunityGridCardLayout(container, containerId) {
+    if (containerId === 'creationsGrid') {
+      destroyCommunityFeedMasonryFor('creationsGrid');
     } else if (containerId === 'userProfileGrid' && profileMasonry) {
       profileMasonry.destroy();
       profileMasonry = null;
+    } else if (containerId === 'communityGrid') {
+      destroyCommunityFeedMasonryFor('communityGrid');
     } else if (communityMasonry) {
       communityMasonry.destroy();
       communityMasonry = null;
     }
     container.style.removeProperty('height');
+    container.classList.remove('community-feed-grid');
     container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
     container.querySelectorAll('.card').forEach((card) => {
       card.classList.remove('is-masonry-positioned');
@@ -2475,9 +2654,123 @@
     setFeedLayoutPending(containerId, false);
   }
 
-  function layoutCommunityMasonry(containerId) {
+  /** 社区/创作：多列 flex 瀑布流（首轮 round-robin 固定列，图片加载后不再挪动） */
+  function ensureCommunityFeedColEls(container, cols) {
+    let colEls = [...container.querySelectorAll(':scope > .community-feed-col')];
+    while (colEls.length < cols) {
+      const col = document.createElement('div');
+      col.className = 'community-feed-col';
+      col.setAttribute('aria-hidden', 'true');
+      container.appendChild(col);
+      colEls.push(col);
+    }
+    while (colEls.length > cols) {
+      const extra = colEls.pop();
+      if (extra) {
+        while (extra.firstChild) colEls[0]?.appendChild(extra.firstChild);
+        extra.remove();
+      }
+    }
+    return colEls;
+  }
+
+  function distributeCommunityFeedColumns(container, cols, opts = {}) {
+    if (!container || cols < 1) return;
+    container.querySelectorAll(':scope > .grid-sizer').forEach((el) => el.remove());
+    const colEls = ensureCommunityFeedColEls(container, cols);
+    container.dataset.feedCols = String(cols);
+
+    const newCards = opts.newCards?.length ? [...opts.newCards] : null;
+    if (newCards?.length) {
+      const heights = colEls.map((col) => col.offsetHeight);
+      newCards.forEach((card, i) => {
+        let target = i % cols;
+        if (heights.some((h) => h > 40)) {
+          target = 0;
+          for (let j = 1; j < cols; j++) {
+            if (heights[j] < heights[target]) target = j;
+          }
+        }
+        colEls[target].appendChild(card);
+        card.dataset.feedCol = String(target);
+        heights[target] += card.offsetHeight > 20 ? card.offsetHeight : 200;
+      });
+      return;
+    }
+
+    const orphans = [...container.querySelectorAll(':scope > .card')];
+    if (orphans.length && container.dataset.feedDistributed === '1' && !opts.forceReflow) {
+      orphans.forEach((card, i) => {
+        const colIdx = Number(card.dataset.feedCol);
+        const target = Number.isFinite(colIdx) && colEls[colIdx] ? colIdx : (i % cols);
+        colEls[target].appendChild(card);
+        card.dataset.feedCol = String(target);
+      });
+      return;
+    }
+
+    if (container.dataset.feedDistributed === '1' && !opts.forceReflow) return;
+
+    const cards = [];
+    colEls.forEach((col) => col.querySelectorAll('.card').forEach((c) => cards.push(c)));
+    container.querySelectorAll(':scope > .card').forEach((c) => {
+      if (!cards.includes(c)) cards.push(c);
+    });
+    const scrollTop = container.scrollTop;
+    colEls.forEach((col) => { col.innerHTML = ''; });
+    cards.forEach((card, idx) => {
+      const target = idx % cols;
+      colEls[target].appendChild(card);
+      card.dataset.feedCol = String(target);
+    });
+    container.dataset.feedDistributed = '1';
+    container.dataset.feedDistributedCols = String(cols);
+    container.scrollTop = scrollTop;
+  }
+
+  /** 社区/创作：CSS 多列或手机两列；个人主页仍用 Masonry */
+  function layoutCommunityMasonry(containerId, opts = {}) {
     const container = document.getElementById(containerId);
     if (!container) return;
+    if (useCommunityCssGrid(containerId)) {
+      destroyCommunityFeedMasonryFor(containerId);
+      container.classList.remove('community-mobile-feed', 'masonry-ready');
+      container.classList.add('community-feed-grid', 'community-feed-columns');
+      container.style.removeProperty('height');
+      const measuredCols = getCommunityFeedColumns(container);
+      let cols = measuredCols;
+      if (container.dataset.feedLayoutCols && opts.recalcCols !== true) {
+        cols = Math.max(2, Number(container.dataset.feedLayoutCols) || measuredCols);
+      } else {
+        container.dataset.feedLayoutCols = String(measuredCols);
+        cols = measuredCols;
+      }
+      const colWidth = getCommunityFeedColumnWidth(container);
+      const { colGap: gap, rowGap } = getCommunityFeedGaps();
+      container.style.setProperty('--feed-columns', String(cols));
+      container.style.setProperty('--feed-column-gap', `${gap}px`);
+      container.style.setProperty('--feed-row-gap', `${rowGap}px`);
+      if (colWidth) container.style.setProperty('--feed-col-width', `${colWidth}px`);
+      container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
+      if (container.dataset.feedDistributed !== '1' || opts.newCards?.length) {
+        container.querySelectorAll('.card').forEach((card) => {
+          card.classList.remove('is-masonry-positioned');
+          if (!card.dataset.feedCol) {
+            card.style.cssText = '';
+            card.style.position = 'relative';
+          }
+        });
+      }
+      const colsChanged = Number(container.dataset.feedDistributedCols || 0) !== cols;
+      distributeCommunityFeedColumns(container, cols, {
+        forceReflow: container.dataset.feedDistributed !== '1' || (opts.recalcCols === true && colsChanged),
+        newCards: opts.newCards
+      });
+      setFeedLayoutPending(containerId, false);
+      if (window.CardImageLoader?.observeContainer) window.CardImageLoader.observeContainer(container);
+      return;
+    }
+    container.classList.remove('community-feed-grid', 'community-feed-columns');
     if (!useCssGridForCommunityFeed(containerId)) {
       container.classList.remove('community-mobile-feed');
     }
@@ -2493,84 +2786,77 @@
       }
       return;
     }
-    container?.classList.remove('community-mobile-feed');
+    container.classList.remove('community-mobile-feed');
     const runMasonryLayout = () => {
-    if (isMobileFeedLayout() && (containerId === 'communityGrid' || containerId === 'creationsGrid')) {
-      enforceMobileCommunityFeedGrid(containerId);
-      return;
-    }
-    if (typeof Masonry === 'undefined') return;
-    const cardEls = container.querySelectorAll('.card');
-    const isProfile = containerId === 'userProfileGrid';
-    const isCreations = containerId === 'creationsGrid';
-    let instance = isProfile ? profileMasonry : (isCreations ? creationsMasonry : communityMasonry);
-
-    if (!cardEls.length) {
-      if (instance) {
-        instance.destroy();
-        if (isProfile) profileMasonry = null;
-        else if (isCreations) creationsMasonry = null;
-        else communityMasonry = null;
+      if (isMobileFeedLayout() && (containerId === 'communityGrid' || containerId === 'creationsGrid')) {
+        enforceMobileCommunityFeedGrid(containerId);
+        return;
       }
-      setFeedLayoutPending(containerId, false);
-      return;
-    }
+      if (typeof Masonry === 'undefined') return;
+      const cardEls = [...container.querySelectorAll('.card')];
+      const isProfile = containerId === 'userProfileGrid';
+      const isCreations = containerId === 'creationsGrid';
+      let instance = isProfile ? profileMasonry : (isCreations ? creationsMasonry : communityMasonry);
 
-    const { colGap: gap, rowGap } = getCommunityFeedGaps();
-    const cols = getCardColumns();
-    const style = getComputedStyle(container);
-    const innerW = container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-    if (innerW < 80) {
-      scheduleCommunityLayout(containerId, { force: true });
-      return;
-    }
-    let colWidth = Math.max(120, Math.floor((innerW - gap * (cols - 1)) / cols));
-    container.style.removeProperty('max-width');
-    container.style.removeProperty('margin-left');
-    container.style.removeProperty('margin-right');
-    let sizer = container.querySelector('.grid-sizer');
-    if (!sizer) {
-      sizer = document.createElement('div');
-      sizer.className = 'grid-sizer';
-      container.insertBefore(sizer, container.firstChild);
-    }
-    sizer.style.width = colWidth + 'px';
-    cardEls.forEach(card => {
-      card.style.width = colWidth + 'px';
-      card.style.maxWidth = colWidth + 'px';
-      card.style.marginBottom = rowGap + 'px';
-    });
-    const opts = {
-      itemSelector: '.card',
-      columnWidth: '.grid-sizer',
-      gutter: gap,
-      percentPosition: false,
-      horizontalOrder: false,
-      transitionDuration: '0s'
-    };
-    const scrollTop = container.scrollTop;
-    if (instance) {
-      instance.option(opts);
-      instance.reloadItems();
-      instance.layout();
-    } else {
-      cardEls.forEach(card => {
-        card.style.left = '';
-        card.style.top = '';
-        card.style.position = '';
+      if (!cardEls.length) {
+        if (instance) {
+          instance.destroy();
+          if (isProfile) profileMasonry = null;
+          else if (isCreations) creationsMasonry = null;
+          else communityMasonry = null;
+        }
+        setFeedLayoutPending(containerId, false);
+        return;
+      }
+
+      const gap = getMasonryGap();
+      const style = getComputedStyle(container);
+      const innerW = container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      if (innerW < 200) {
+        scheduleCommunityLayout(containerId, { force: true });
+        return;
+      }
+      const cols = isProfile ? Math.min(4, getCardColumns()) : getCommunityFeedColumns(container);
+      const colWidth = Math.max(120, Math.floor((innerW - gap * (cols - 1)) / cols));
+      let sizer = container.querySelector('.grid-sizer');
+      if (!sizer) {
+        sizer = document.createElement('div');
+        sizer.className = 'grid-sizer';
+        container.insertBefore(sizer, container.firstChild);
+      }
+      sizer.style.width = colWidth + 'px';
+      cardEls.forEach((card) => {
+        card.style.width = colWidth + 'px';
       });
-      instance = new Masonry(container, opts);
-      if (isProfile) profileMasonry = instance;
-      else if (isCreations) creationsMasonry = instance;
-      else communityMasonry = instance;
-    }
-    requestAnimationFrame(() => {
-      instance?.layout();
+      container.style.removeProperty('height');
+      const opts = {
+        itemSelector: '.card',
+        columnWidth: '.grid-sizer',
+        gutter: gap,
+        percentPosition: false,
+        horizontalOrder: false,
+        transitionDuration: 0
+      };
+      const scrollTop = container.scrollTop;
+      if (instance) {
+        instance.option(opts);
+        instance.reloadItems();
+        instance.layout();
+      } else {
+        cardEls.forEach((card) => {
+          card.style.left = '';
+          card.style.top = '';
+          card.style.position = '';
+        });
+        instance = new Masonry(container, opts);
+        if (isProfile) profileMasonry = instance;
+        else if (isCreations) creationsMasonry = instance;
+        else communityMasonry = instance;
+      }
       container.scrollTop = scrollTop;
+      container.classList.add('masonry-ready', 'cards-grid-primed');
+      if (colWidth) container.style.setProperty('--feed-col-width', `${colWidth}px`);
       setFeedLayoutPending(containerId, false);
-    });
-    container.scrollTop = scrollTop;
-    bindCommunityGridImageRelayout(containerId);
     };
     if (typeof Masonry !== 'undefined') runMasonryLayout();
     else if (typeof window.ensureMasonryScript === 'function') {
@@ -3069,12 +3355,107 @@
     });
   }
 
-  async function renderPostsIntoContainer(posts, containerId) {
+  function createCommunityFeedCard(post, containerId, cardOpts = {}) {
+    const displayRef = communityPostDisplayImageRef(post);
+    const showImage = !!(displayRef && isDisplayableImage(displayRef));
+    const div = document.createElement('div');
+    const visualOnly = containerId === 'communityGrid';
+    div.className = visualOnly
+      ? 'card community-post-card community-post-card--visual'
+      : 'card community-post-card';
+    div.dataset.postId = post.id;
+    if (post.sourceCardId) div.dataset.sourceCardId = post.sourceCardId;
+    if (post.authorId) div.dataset.authorId = post.authorId;
+    const liked = likedIds.has(post.id);
+    const titleTrim = (post.title || '').trim();
+    const hasRealTitle = titleTrim && !isGenericPostTitle(titleTrim);
+    const storageAttr = feedImgStorageAttr(displayRef);
+    const authorAttrs = ` data-author-id="${esc(post.authorId || '')}" data-source-card-id="${esc(post.sourceCardId || '')}"`;
+    const imgSrc = showImage ? feedImgInitialSrc(displayRef, { assetId: post.sourceCardId || post.id, authorId: post.authorId, sourceCardId: post.sourceCardId }) : '';
+    const imgLoading = showImage && (imgSrc === IMG_LOADING_PLACEHOLDER || !imgSrc);
+    const eagerImg = cardOpts.eagerImage === true;
+    const imgLoadAttrs = eagerImg
+      ? ' loading="eager" fetchpriority="high" decoding="async"'
+      : ' loading="lazy" decoding="async"';
+    const mediaHtml = showImage
+      ? `<div class="card-media${imgLoading ? ' is-loading' : ''}"${imgLoading ? ` data-shine-at="${Date.now()}"` : ''}><img class="card-img" src="${esc(imgSrc || IMG_LOADING_PLACEHOLDER)}" data-image-ref="${esc(displayRef)}"${storageAttr}${authorAttrs}${imgLoadAttrs} draggable="false" alt="" onload="if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.card-media'))"></div>`
+      : '';
+    const timeLabel = `♥ ${post.likes || 0}`;
+    const promptTrim = (post.prompt || '').trim();
+    if (visualOnly) {
+      const overlay = showImage
+        ? `<div class="community-card-visual-meta"><span class="card-time ${liked ? 'liked' : ''}">${esc(timeLabel)}</span></div>`
+        : '';
+      div.innerHTML = showImage ? `${mediaHtml}${overlay}` : '<div class="community-card-no-media">无配图</div>';
+    } else {
+      const headHtml = hasRealTitle
+        ? `<div class="card-head"><div class="card-title">${esc(titleTrim)}</div><time class="card-time ${liked ? 'liked' : ''}">${esc(timeLabel)}</time></div>`
+        : '';
+      const descHtml = promptTrim ? `<div class="card-desc">${esc(promptTrim)}</div>` : '';
+      const likeInTags = !hasRealTitle
+        ? `<span class="card-time card-time-inline ${liked ? 'liked' : ''}">${esc(timeLabel)}</span>`
+        : '';
+      div.innerHTML = `
+        ${mediaHtml}
+        <div class="card-body">
+          ${headHtml}
+          ${descHtml}
+          <div class="card-tags">${likeInTags}
+            <button type="button" class="tag community-author-link" data-author-id="${esc(post.authorId)}" data-author-name="${esc(post.authorName)}">${esc(post.authorName)}</button>
+          </div>
+        </div>`;
+    }
+    div.addEventListener('click', () => {
+      if (containerId === 'userProfileGrid') closeUserProfile();
+      if (containerId === 'creationsGrid') {
+        openPostSidePanel(post.id, 'creations', { post });
+        return;
+      }
+      if (containerId === 'communityGrid') {
+        if (communityAppreciateActive) exitCommunityAppreciate(true);
+        openPostSidePanel(post.id, 'community', { post });
+        return;
+      }
+      openPostSidePanel(post.id, 'community', { post });
+    });
+    const authorBtn = div.querySelector('.community-author-link');
+    if (authorBtn) bindAuthorLink(authorBtn, post.authorId, post.authorName);
+    return div;
+  }
+
+  function bindFeedPagedScroll(containerId) {
+    if (!useFeedPagedRender(containerId) || feedPagedScrollBound[containerId]) return;
     const container = document.getElementById(containerId);
     if (!container) return;
+    feedPagedScrollBound[containerId] = true;
+    let loading = false;
+    container.addEventListener('scroll', () => {
+      if (container.scrollTop > 64) feedScrollIntent[containerId] = true;
+      if (loading) return;
+      if (!feedScrollIntent[containerId]) return;
+      if (container.scrollTop < 48) return;
+      if (container.scrollTop + container.clientHeight < container.scrollHeight - 150) return;
+      const store = feedPagedStore[containerId];
+      if (!store?.posts?.length) return;
+      if (store.page * FEED_PER_PAGE >= store.posts.length) return;
+      const anchor = captureFeedScrollAnchor(container);
+      loading = true;
+      store.page += 1;
+      void renderPostsIntoContainer(store.posts, containerId, { feedAppend: true, scrollAnchor: anchor }).finally(() => {
+        loading = false;
+      });
+    }, { passive: true });
+  }
+
+  async function renderPostsIntoContainer(posts, containerId, opts = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const feedAppend = !!opts.feedAppend;
+    const paginate = useFeedPagedRender(containerId);
     const sig = feedListSignature(posts, containerId);
     if (
-      container.dataset.feedSig === sig
+      !feedAppend
+      && container.dataset.feedSig === sig
       && container.querySelector('.community-post-card')
     ) {
       patchFeedLikeLabels(container, posts);
@@ -3086,115 +3467,135 @@
       }
       return;
     }
-    container.dataset.feedSig = sig;
+    if (!feedAppend) container.dataset.feedSig = sig;
     delete container.dataset.feedFinalized;
     const isProfile = containerId === 'userProfileGrid';
     const isCommunityFeed = containerId === 'communityGrid' || containerId === 'userProfileGrid';
     const renderPosts = isCommunityFeed ? posts.filter(isFeedRenderablePost) : posts;
-    if (containerId === 'communityGrid' && communitySidePostId) {
+    let postsToRender = renderPosts;
+    if (paginate) {
+      if (!feedAppend) {
+        feedPagedStore[containerId] = { sig, posts: renderPosts, page: 1 };
+        postsToRender = renderPosts.slice(0, FEED_PER_PAGE);
+      } else {
+        const store = feedPagedStore[containerId];
+        if (!store) return;
+        const start = (store.page - 1) * FEED_PER_PAGE;
+        postsToRender = store.posts.slice(start, start + FEED_PER_PAGE);
+        if (!postsToRender.length) return;
+      }
+    }
+    if (containerId === 'communityGrid' && communitySidePostId && !feedAppend) {
       const stillThere = renderPosts.some((p) => p.id === communitySidePostId);
       if (!stillThere) closeCommunitySidePanel();
     }
-    if (isProfile && profileMasonry) {
-      profileMasonry.destroy();
-      profileMasonry = null;
-    } else if (containerId === 'creationsGrid' && creationsMasonry) {
-      creationsMasonry.destroy();
-      creationsMasonry = null;
-    } else if (!isProfile && communityMasonry) {
-      communityMasonry.destroy();
-      communityMasonry = null;
+    if (!feedAppend) {
+      if (isProfile && profileMasonry) {
+        profileMasonry.destroy();
+        profileMasonry = null;
+      } else if (containerId === 'creationsGrid' && creationsMasonry) {
+        creationsMasonry.destroy();
+        creationsMasonry = null;
+      } else if (!isProfile && communityMasonry) {
+        communityMasonry.destroy();
+        communityMasonry = null;
+      }
     }
 
-    if (!renderPosts.length) {
-      container.innerHTML = '<div class="feature-empty" style="grid-column:1/-1;padding:40px"><p>暂无已发布作品</p></div>';
+    if (!postsToRender.length) {
+      if (!feedAppend) {
+        container.innerHTML = '<div class="feature-empty" style="grid-column:1/-1;padding:40px"><p>暂无已发布作品</p></div>';
+      }
       return;
     }
 
-    const imageRefs = renderPosts.map((p) => canonicalCommunityImageRef(p) || p.image).filter(Boolean);
+    const imageRefs = postsToRender.map((p) => canonicalCommunityImageRef(p) || p.image).filter(Boolean);
+
+    const inCommunityFeed =
+      containerId === 'communityGrid' || containerId === 'creationsGrid' || containerId === 'userProfileGrid';
+    if (inCommunityFeed && imageRefs.length && !feedAppend) {
+      const prefetchCap = Math.min(postsToRender.length, FEED_PER_PAGE);
+      const uid = window.SupabaseSync?.getUserId?.();
+      const loggedIn = window.SupabaseSync?.isLoggedIn?.();
+      const ownCards = [];
+      const publicPosts = [];
+      for (const p of postsToRender.slice(0, prefetchCap)) {
+        const ref = canonicalCommunityImageRef(p) || p.image;
+        const path = window.SupabaseSync?.storagePathFromRef?.(ref) || '';
+        const item = {
+          id: p.sourceCardId || p.id,
+          image: ref,
+          sourceCardId: p.sourceCardId,
+          authorId: p.authorId
+        };
+        if (loggedIn && uid && path && path.replace(/^\//, '').startsWith(`${uid}/`)) ownCards.push(item);
+        else publicPosts.push(item);
+      }
+      try {
+        await Promise.race([
+          Promise.all([
+            ownCards.length && window.SupabaseSync?.prefetchCardsImages
+              ? window.SupabaseSync.prefetchCardsImages(ownCards, 3500)
+              : Promise.resolve(),
+            publicPosts.length && window.SupabaseSync?.prefetchCommunityDisplayUrls
+              ? window.SupabaseSync.prefetchCommunityDisplayUrls(publicPosts, 3500)
+              : Promise.resolve()
+          ]),
+          new Promise((r) => setTimeout(r, 3600))
+        ]);
+      } catch (e) { /* ignore */ }
+    }
 
     const fragment = document.createDocumentFragment();
     const useGrid = useCssGridForCommunityFeed(containerId);
-    if (!useGrid) {
+    if (!useGrid && !feedAppend && !container.querySelector('.grid-sizer')) {
       const sizer = document.createElement('div');
       sizer.className = 'grid-sizer';
       fragment.appendChild(sizer);
     }
 
-    renderPosts.forEach((post, idx) => {
-      const displayRef = communityPostDisplayImageRef(post);
-      const showImage = !!(displayRef && isDisplayableImage(displayRef));
-      const div = document.createElement('div');
-      const visualOnly = containerId === 'communityGrid';
-      div.className = visualOnly
-        ? 'card community-post-card community-post-card--visual'
-        : 'card community-post-card';
-      div.dataset.postId = post.id;
-      if (post.sourceCardId) div.dataset.sourceCardId = post.sourceCardId;
-      if (post.authorId) div.dataset.authorId = post.authorId;
-      const liked = likedIds.has(post.id);
-      const titleTrim = (post.title || '').trim();
-      const hasRealTitle = titleTrim && !isGenericPostTitle(titleTrim);
-      const storageAttr = feedImgStorageAttr(displayRef);
-      const authorAttrs = ` data-author-id="${esc(post.authorId || '')}" data-source-card-id="${esc(post.sourceCardId || '')}"`;
-      const imgSrc = showImage ? feedImgInitialSrc(displayRef) : '';
-      const imgLoading = showImage;
-      const mediaHtml = showImage
-        ? `<div class="card-media${imgLoading ? ' is-loading' : ''}"${imgLoading ? ` data-shine-at="${Date.now()}"` : ''}><img class="card-img" src="${esc(imgSrc)}" data-image-ref="${esc(displayRef)}"${storageAttr}${authorAttrs} loading="lazy" decoding="async" draggable="false" alt="" onload="if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.card-media'))"></div>`
-        : '';
-      const timeLabel = `♥ ${post.likes || 0}`;
-      const promptTrim = (post.prompt || '').trim();
-      if (visualOnly) {
-        const overlay = showImage
-          ? `<div class="community-card-visual-meta"><span class="card-time ${liked ? 'liked' : ''}">${esc(timeLabel)}</span></div>`
-          : '';
-        div.innerHTML = showImage ? `${mediaHtml}${overlay}` : '<div class="community-card-no-media">无配图</div>';
-      } else {
-        const headHtml = hasRealTitle
-          ? `<div class="card-head"><div class="card-title">${esc(titleTrim)}</div><time class="card-time ${liked ? 'liked' : ''}">${esc(timeLabel)}</time></div>`
-          : '';
-        const descHtml = promptTrim ? `<div class="card-desc">${esc(promptTrim)}</div>` : '';
-        const likeInTags = !hasRealTitle
-          ? `<span class="card-time card-time-inline ${liked ? 'liked' : ''}">${esc(timeLabel)}</span>`
-          : '';
-        div.innerHTML = `
-        ${mediaHtml}
-        <div class="card-body">
-          ${headHtml}
-          ${descHtml}
-          <div class="card-tags">${likeInTags}
-            <button type="button" class="tag community-author-link" data-author-id="${esc(post.authorId)}" data-author-name="${esc(post.authorName)}">${esc(post.authorName)}</button>
-          </div>
-        </div>`;
-      }
-      div.addEventListener('click', (e) => {
-        if (containerId === 'userProfileGrid') closeUserProfile();
-        if (containerId === 'creationsGrid') {
-          openPostSidePanel(post.id, 'creations', { post });
-          return;
-        }
-        if (containerId === 'communityGrid') {
-          if (communityAppreciateActive) exitCommunityAppreciate(true);
-          openPostSidePanel(post.id, 'community', { post });
-          return;
-        }
-        openPostSidePanel(post.id, 'community', { post });
-      });
-      const authorBtn = div.querySelector('.community-author-link');
-      if (authorBtn) bindAuthorLink(authorBtn, post.authorId, post.authorName);
-      fragment.appendChild(div);
+    const eagerCap = feedAppend ? 0 : 18;
+    postsToRender.forEach((post, idx) => {
+      fragment.appendChild(createCommunityFeedCard(post, containerId, { eagerImage: idx < eagerCap }));
     });
 
-    const preservedImgs = isMobileFeedLayout() ? snapshotLoadedFeedImages(container) : new Map();
-    container.innerHTML = '';
-    delete container.dataset.feedFinalized;
-    delete container.dataset.feedLayoutReady;
-    setFeedLayoutPending(containerId, true);
+    const appendedCards = [...fragment.querySelectorAll('.card')];
+    const preservedImgs = !feedAppend && isMobileFeedLayout() ? snapshotLoadedFeedImages(container) : new Map();
+    if (!feedAppend) {
+      container.innerHTML = '';
+      delete container.dataset.feedFinalized;
+      delete container.dataset.feedLayoutReady;
+      delete container.dataset.feedDistributed;
+      delete container.dataset.feedDistributedCols;
+      delete container.dataset.feedLayoutCols;
+      feedScrollIntent[containerId] = false;
+      setFeedLayoutPending(containerId, true);
+    }
     container.appendChild(fragment);
+    bindFeedPagedScroll(containerId);
     restoreLoadedFeedImages(container, preservedImgs);
     window.SupabaseSync?.patchImageSrcFromCache?.(container);
+    window.CardImageLoader?.observeContainer?.(container);
+    container.querySelectorAll('.card-media img.card-img').forEach((img) => {
+      const src = img.currentSrc || img.src || '';
+      if (img.complete && img.naturalWidth > 8 && src.startsWith('http') && !src.includes('data:image/svg')) {
+        window.finishCardMediaShine?.(img.closest('.card-media'));
+      }
+    });
     container.classList.add('cards-grid-primed');
     if (useGrid) container.classList.add('community-mobile-feed');
+    if (feedAppend && paginate) {
+      const scrollAnchor = opts.scrollAnchor || captureFeedScrollAnchor(container);
+      preserveFeedScroll(container, () => {
+        layoutCommunityMasonry(containerId, { newCards: appendedCards });
+      });
+      void softHydrateFeedContainer(container).then(() => {
+        pruneEmptyCommunityFeedCards(container);
+        restoreFeedScrollAnchor(container, scrollAnchor);
+      });
+      window.CardImageLoader?.observeContainer?.(container);
+      return;
+    }
     runCommunityFeedLayoutPass(containerId);
     const renderGen = ++communityFeedRenderGen;
     const finishLayout = () => {
@@ -3216,7 +3617,7 @@
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
       window.CardImageLoader?.observeContainer?.(container);
       const mobile = isMobileFeedLayout();
-      const prefetchCap = mobile ? 24 : 36;
+      const prefetchCap = mobile ? 24 : 40;
       const cardLike = posts.map((p) => ({
         id: p.sourceCardId || p.id,
         image: canonicalCommunityImageRef(p) || p.image,
@@ -3419,7 +3820,14 @@
       if (feedStale && !publicFeedLoading) {
         void refreshPublicCommunityFeed({ force: publicFeedAt === 0, timeoutMs: 12000 }).then((changed) => {
           if (gen !== communityFeedRenderGen) return;
-          if (changed) renderCommunityNow({ skipFeedFetch: true, forceRepaint: true });
+          if (!changed) return;
+          const grid = document.getElementById('communityGrid');
+          const userScrolled = feedScrollIntent.communityGrid && grid && grid.scrollTop > 80;
+          if (userScrolled) {
+            patchFeedLikeLabels(grid, filterAndSortPosts(getCommunityFeedForDisplay()));
+            return;
+          }
+          renderCommunityNow({ skipFeedFetch: true, forceRepaint: true });
         });
       }
     }
@@ -4058,9 +4466,15 @@
     const sideRef = communityPostDisplayImageRef(post);
     const storageAttr = feedImgStorageAttr(sideRef);
     const showSideImg = sideRef && isDisplayableImage(sideRef);
-    const sideInitial = showSideImg ? communityImgInitialSrc(sideRef) : '';
+    const sideImgOpts = {
+      assetId: post.sourceCardId || post.id,
+      authorId: post.authorId,
+      sourceCardId: post.sourceCardId
+    };
+    const sideInitial = showSideImg ? communityImgInitialSrc(sideRef, sideImgOpts) : '';
+    const sideImgLoading = showSideImg && (!sideInitial || sideInitial.includes('data:image/svg'));
     const imgBlock = showSideImg
-      ? `<button type="button" class="community-side-img-btn" data-side-zoom data-author-id="${esc(post.authorId || '')}" data-post-id="${esc(post.id)}" data-source-card-id="${esc(post.sourceCardId || '')}" title="点击放大"><img class="community-side-img" src="${esc(sideInitial)}" data-image-ref="${esc(sideRef)}" data-author-id="${esc(post.authorId || '')}" data-post-id="${esc(post.id)}" data-source-card-id="${esc(post.sourceCardId || '')}"${storageAttr} alt=""></button>`
+      ? `<button type="button" class="community-side-img-btn${sideImgLoading ? ' is-loading' : ''}" data-side-zoom data-author-id="${esc(post.authorId || '')}" data-post-id="${esc(post.id)}" data-source-card-id="${esc(post.sourceCardId || '')}" title="点击放大"><img class="community-side-img" src="${esc(sideInitial)}" data-image-ref="${esc(sideRef)}" data-author-id="${esc(post.authorId || '')}" data-post-id="${esc(post.id)}" data-source-card-id="${esc(post.sourceCardId || '')}"${storageAttr} alt="" decoding="async" onload="if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.community-side-img-btn'))"></button>`
       : '';
     if (isCreationsMode) {
       const card = post.sourceCardId
@@ -4144,6 +4558,20 @@
     return window.MobileUI?.isMobile?.() || window.matchMedia('(max-width: 900px)').matches;
   }
 
+  function ensureFeatureSidePanelDocked(panelId) {
+    if (isMobileFeaturePanel()) return;
+    unmountFeatureSidePanel(panelId);
+  }
+
+  function syncCommunityPanelOpenClass() {
+    const mobileOpen = isMobileFeaturePanel()
+      && (
+        !document.getElementById('communitySidePanel')?.classList.contains('hidden')
+        || !document.getElementById('creationsSidePanel')?.classList.contains('hidden')
+      );
+    document.body.classList.toggle('community-panel-open', mobileOpen);
+  }
+
   function mountFeatureSidePanel(panelId) {
     const panel = document.getElementById(panelId);
     if (!panel || !isMobileFeaturePanel()) return;
@@ -4184,9 +4612,10 @@
     communitySidePostId = id;
     openPostId = id;
     const panelId = isCreations ? 'creationsSidePanel' : 'communitySidePanel';
+    ensureFeatureSidePanelDocked(panelId);
     mountFeatureSidePanel(panelId);
     document.getElementById(panelId)?.classList.remove('hidden');
-    document.body.classList.add('community-panel-open');
+    syncCommunityPanelOpenClass();
     const panel = document.getElementById(panelId);
     if (panel) {
       panel.classList.remove('community-side-panel--closing');
@@ -4202,9 +4631,6 @@
       bodyId: isCreations ? 'creationsSideBody' : 'communitySideBody',
       titleId: isCreations ? 'creationsSideTitle' : 'communitySideTitle',
       mode: isCreations ? 'creations' : 'community'
-    });
-    requestAnimationFrame(() => {
-      scheduleCommunityLayout(isCreations ? 'creationsGrid' : 'communityGrid', { force: true, immediate: true });
     });
   }
 
@@ -4401,14 +4827,10 @@
     document.getElementById('communitySidePanel')?.classList.add('hidden');
     unmountFeatureSidePanel('communitySidePanel');
     panel?.classList.remove('community-side-panel--closing');
-    const creationsOpen = !document.getElementById('creationsSidePanel')?.classList.contains('hidden');
-    if (!creationsOpen) document.body.classList.remove('community-panel-open');
+    syncCommunityPanelOpenClass();
     communitySidePostId = null;
     openPostId = null;
     document.querySelectorAll('#communityGrid .community-post-card.selected').forEach(el => el.classList.remove('selected'));
-    requestAnimationFrame(() => {
-      scheduleCommunityLayout('communityGrid', { force: true, immediate: true });
-    });
   }
 
   function openCommunityDetail(id) {
@@ -4987,18 +5409,18 @@
     const c = creations.find(x => x.id === id);
     if (!c) return;
     creationsSideId = id;
+    ensureFeatureSidePanelDocked('creationsSidePanel');
     mountFeatureSidePanel('creationsSidePanel');
     document.getElementById('creationsSidePanel')?.classList.remove('hidden');
-    document.body.classList.add('community-panel-open');
+    syncCommunityPanelOpenClass();
     if (isMobileFeaturePanel()) window.MobileUI?.closeDrawers?.();
     void renderCreationsSidePanel(id);
-    scheduleCommunityLayout('creationsGrid');
   }
 
   function closeCreationsSidePanel() {
     document.getElementById('creationsSidePanel')?.classList.add('hidden');
     unmountFeatureSidePanel('creationsSidePanel');
-    document.body.classList.remove('community-panel-open');
+    syncCommunityPanelOpenClass();
     creationsSideId = null;
     communitySidePostId = null;
     openPostId = null;
@@ -7279,6 +7701,9 @@
     document.getElementById('imageGenQuality')?.addEventListener('change', updateImageGenCostHint);
     document.getElementById('imageGenSize')?.addEventListener('change', updateImageGenCostHint);
     window.addEventListener('resize', () => {
+      ensureFeatureSidePanelDocked('communitySidePanel');
+      ensureFeatureSidePanelDocked('creationsSidePanel');
+      syncCommunityPanelOpenClass();
       if (document.getElementById('pageCommunity')?.classList.contains('active')) {
         scheduleCommunityLayout('communityGrid');
       }
@@ -7297,7 +7722,7 @@
       if (document.getElementById('userProfileOverlay')?.classList.contains('active')) closeUserProfile();
       else if (imageGenPreviewId) closeImageGenPreview();
       else if (communitySidePostId && document.getElementById('pageCreations')?.classList.contains('active')) closeCreationsSidePanel();
-      else if (document.body.classList.contains('community-panel-open')) closeCommunitySidePanel();
+      else if (!document.getElementById('communitySidePanel')?.classList.contains('hidden')) closeCommunitySidePanel();
     });
   }
 
@@ -7538,7 +7963,10 @@
     COMMUNITY_COLLECT_TAG,
     isDisplayableImage,
     scheduleImageGenFeedLayout: scheduleImageGenFeedLayout,
+    removeBrokenCommunityFeedCard,
+    pruneEmptyCommunityFeedCards,
     scheduleLayout: scheduleCommunityLayout,
+    scheduleCommunityLayout,
     layoutCommunityMasonry,
     relayoutCommunityFeeds,
     onCardDeletedForGen,

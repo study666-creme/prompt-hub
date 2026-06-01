@@ -140,7 +140,6 @@
   cursor: pointer;
 }
 
-/* 绀惧尯/鎴戝彂甯冪殑锛氬竷灞€涓庢媺鍥炬湡闂撮檺鍒堕厤鍥鹃珮搴︼紝閬垮厤澶у浘銆岀獊鑴搞€嶏紙鍚墜鏈?CSS Grid锛?*/
 #communityGrid.feed-layout-pending .card,
 #creationsGrid.feed-layout-pending .card,
 #communityGrid.feed-layout-ready .card,
@@ -148,31 +147,11 @@
   opacity: 1 !important;
   pointer-events: auto !important;
 }
-#communityGrid .card-media.is-loading,
-#creationsGrid .card-media.is-loading {
-  min-height: 88px;
-  max-height: min(42vh, 360px);
-  overflow: hidden;
-  background: var(--bg-hover);
-  border-radius: 10px;
-}
-#communityGrid.feed-layout-pending .card-media .card-img,
-#creationsGrid.feed-layout-pending .card-media .card-img {
-  max-height: min(42vh, 360px);
-  width: 100%;
-  object-fit: contain;
-}
-#communityGrid .card-media.is-loading .card-img,
-#creationsGrid .card-media.is-loading .card-img,
 #userProfileGrid .card-media.is-loading .card-img {
   opacity: 0 !important;
   visibility: hidden !important;
 }
-#communityGrid .card-media.media-revealed .card-img,
-#creationsGrid .card-media.media-revealed .card-img,
 #userProfileGrid .card-media.media-revealed .card-img,
-#communityGrid .card-media:not(.is-loading) .card-img,
-#creationsGrid .card-media:not(.is-loading) .card-img,
 #userProfileGrid .card-media:not(.is-loading) .card-img {
   opacity: 1;
   visibility: visible;
@@ -198,6 +177,10 @@
   object-position: center center;
 }
 
+.app-page-feature.active .community-workspace {
+  flex: 1;
+  min-height: 0;
+}
 .app-page-feature.active .community-page-layout {
   flex: 1;
   min-height: 0;
@@ -340,88 +323,6 @@
 }
 
 @media (min-width: 901px) {
-  /* 妗岄潰绔細鍗充娇璇姞 community-mobile-feed 涔熶繚鎸佸鍒?Masonry/Grid */
-  body.efficiency-mode #communityGrid.community-mobile-feed.cards-container:not(.list-view),
-  body.efficiency-mode #creationsGrid.community-mobile-feed.cards-container:not(.list-view) {
-    display: block !important;
-    position: relative !important;
-  }
-  body.efficiency-mode #communityGrid.community-mobile-feed:not(.list-view) .card,
-  body.efficiency-mode #creationsGrid.community-mobile-feed:not(.list-view) .card {
-    display: block;
-    width: auto !important;
-    max-width: none !important;
-  }
-
-  #communityGrid.cards-container:not(.list-view),
-  #creationsGrid.cards-container:not(.list-view) {
-    display: block !important;
-    position: relative !important;
-    height: auto !important;
-    flex: 1 1 0;
-    min-height: 0;
-    overflow-x: hidden;
-    overflow-y: auto !important;
-  }
-  #communityGrid:not(.list-view):not(.community-mobile-feed) .card,
-  #creationsGrid:not(.list-view):not(.community-mobile-feed) .card {
-    display: block;
-    margin-bottom: 14px !important;
-    box-sizing: border-box;
-  }
-  #communityGrid.community-mobile-feed:not(.list-view) .card,
-  #creationsGrid.community-mobile-feed:not(.list-view) .card {
-    display: block;
-    margin-bottom: 0 !important;
-    box-sizing: border-box;
-  }
-  #communityGrid:not(.list-view) .card-media,
-  #creationsGrid:not(.list-view) .card-media {
-    position: relative;
-    overflow: hidden;
-    min-height: 0;
-    line-height: 0;
-    width: 100%;
-  }
-  #communityGrid:not(.list-view) .card-media.is-loading,
-  #creationsGrid:not(.list-view) .card-media.is-loading {
-    min-height: 120px;
-    width: 100%;
-  }
-  #communityGrid:not(.list-view) .card-media.is-loading .card-img,
-  #creationsGrid:not(.list-view) .card-media.is-loading .card-img {
-    position: static;
-    width: 100%;
-    height: auto;
-    max-width: 100%;
-    object-fit: contain;
-    object-position: center center;
-  }
-  #communityGrid:not(.list-view) .card-media:not(.is-loading) .card-img,
-  #creationsGrid:not(.list-view) .card-media:not(.is-loading) .card-img {
-    display: block;
-    width: 100%;
-    height: auto;
-    max-width: 100%;
-    max-height: none;
-    object-fit: contain;
-    object-position: center center;
-  }
-  #communityGrid:not(.list-view) .community-post-card--visual .card-media,
-  #creationsGrid:not(.list-view) .community-post-card--visual .card-media {
-    width: 100%;
-    overflow: hidden;
-    line-height: 0;
-  }
-  #communityGrid .grid-sizer,
-  #creationsGrid .grid-sizer {
-    display: block;
-    visibility: hidden;
-    height: 0;
-    margin: 0;
-    padding: 0;
-  }
-
   #userProfileGrid.cards-container:not(.list-view) {
     display: grid !important;
     grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
@@ -3090,11 +2991,24 @@ body.user-profile-open {
   min-height: 0;
 }
 
+.community-workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .community-page-layout {
   flex: 1;
   display: flex;
+  flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 
 .community-page-main {
@@ -3114,9 +3028,15 @@ body.user-profile-open {
 
 .community-side-panel {
   width: 340px;
+  flex: 0 0 340px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  align-self: stretch;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  z-index: 10;
   background: var(--bg-elevated);
   border-left: 1px solid var(--border);
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.2);
@@ -3150,6 +3070,7 @@ body.user-profile-open {
 
 .community-side-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px;
 }
@@ -3232,13 +3153,24 @@ body.user-profile-open {
 #communityGrid .card,
 #creationsGrid .card,
 #userProfileGrid .card {
-  transition: opacity 0.25s ease, transform 0.25s ease;
+  transition: opacity 0.2s ease, box-shadow 0.2s ease;
 }
 
 #communityGrid .card.is-masonry-positioned,
 #creationsGrid .card.is-masonry-positioned,
 #userProfileGrid .card.is-masonry-positioned {
-  transition: top 0.22s ease, left 0.22s ease, opacity 0.25s ease;
+  transition: none;
+}
+
+#communityGrid .community-post-card:hover,
+#creationsGrid .community-post-card:hover {
+  transform: none;
+  box-shadow: var(--shadow-card);
+}
+
+#communityGrid .community-post-card.selected,
+#creationsGrid .community-post-card.selected {
+  box-shadow: var(--shadow-glow);
 }
 
 .community-post-card .card-body,
@@ -3321,9 +3253,9 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
 
 .community-side-img-btn {
   display: block;
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
-  margin: 0 auto 12px;
+  margin: 0 0 12px;
   height: auto;
   max-height: none;
   min-height: 0;
@@ -3332,16 +3264,17 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
   background: #06080c;
   cursor: zoom-in;
   position: relative;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   overflow: hidden;
   line-height: 0;
   pointer-events: auto;
+  flex-shrink: 0;
 }
 .community-side-img {
-  width: auto;
+  width: 100%;
   max-width: 100%;
   height: auto;
-  max-height: min(72vh, 560px);
+  max-height: min(85vh, 720px);
   min-height: 0;
   object-fit: contain;
   object-position: center center;
@@ -3352,9 +3285,15 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
   transition: opacity 0.3s ease;
   pointer-events: none;
 }
+.community-side-img-btn.is-loading {
+  width: 100%;
+  max-width: 100%;
+  min-height: min(36vh, 280px);
+  background: var(--card-skeleton-bg, var(--bg-hover));
+}
 .community-side-img-btn.is-loading .community-side-img {
-  opacity: 0;
-  visibility: hidden;
+  opacity: 0.2;
+  visibility: visible;
 }
 
 .community-side-panel.community-side-panel--open {
@@ -3455,10 +3394,38 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
   display: none !important;
 }
 
-@media (max-width: 900px) {
-  .community-page-layout {
-    flex-direction: column;
+@media (min-width: 901px) {
+  .community-workspace {
+    flex-direction: row;
   }
+
+  .community-side-panel:not(.hidden) {
+    position: relative;
+    inset: auto;
+    width: 340px;
+    min-width: 340px;
+    max-width: 340px;
+    flex: 0 0 340px;
+    height: auto;
+    max-height: none;
+    border-left: 1px solid var(--border);
+    border-radius: 0;
+  }
+
+  body.community-panel-open .community-page-main,
+  body.community-panel-open #pageCommunity .feature-header,
+  body.community-panel-open #pageCreations .feature-header {
+    visibility: visible;
+    pointer-events: auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .community-workspace {
+    flex-direction: column;
+    position: relative;
+  }
+
   .community-side-panel:not(.hidden) {
     position: fixed;
     inset: 0;
@@ -3541,10 +3508,6 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
 
 .community-layout-tools {
   flex-shrink: 0;
-}
-
-#communityAppreciateBtn {
-  display: none !important;
 }
 
 body.community-appreciate #communityGrid .community-post-card {
@@ -3630,10 +3593,6 @@ body.community-appreciate #communityGrid .community-post-card {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
-}
-
-.community-page-layout {
-  position: relative;
 }
 
 .community-notify-panel-head {

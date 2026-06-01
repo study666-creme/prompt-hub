@@ -91,6 +91,7 @@
 
 [data-theme="light"] .app-page-feature,
 [data-theme="light"] .feature-shell,
+[data-theme="light"] .community-workspace,
 [data-theme="light"] .community-page-layout,
 [data-theme="light"] .community-page-main,
 [data-theme="light"] .feature-body-cards,
@@ -103,6 +104,7 @@
 
 [data-theme="light"] body:not(.efficiency-mode) .app-page-feature,
 [data-theme="light"] body:not(.efficiency-mode) .feature-shell,
+[data-theme="light"] body:not(.efficiency-mode) .community-workspace,
 [data-theme="light"] body:not(.efficiency-mode) .community-page-layout,
 [data-theme="light"] body:not(.efficiency-mode) .community-page-main,
 [data-theme="light"] body:not(.efficiency-mode) .feature-body-cards,

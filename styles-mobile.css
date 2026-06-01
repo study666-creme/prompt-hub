@@ -1133,10 +1133,6 @@
     display: inline-flex;
   }
 
-  #pageCommunity #communityAppreciateBtn {
-    display: none !important;
-  }
-
   #pageCommunity .community-notify-panel {
     right: 12px;
     top: calc(max(10px, env(safe-area-inset-top)) + 44px);
@@ -1789,6 +1785,12 @@
   .imagegen-form-footer {
     box-shadow: none !important;
     background: var(--bg-secondary) !important;
+  }
+
+  .community-workspace {
+    position: relative;
+    flex: 1;
+    min-height: 0;
   }
 
   .community-page-layout {

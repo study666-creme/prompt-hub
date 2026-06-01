@@ -1,5 +1,5 @@
 /**
- * 卡片库图片加载：视口懒加载 + 后台批量签名（对齐「列表接口自带 URL」类产品体验）
+ * 卡片库 / 社区图片：视口优先加载 + IntersectionObserver 懒加载
  */
 (function () {
   let observer = null;
@@ -7,9 +7,8 @@
   const inflight = new WeakMap();
   const resolveQueue = [];
   let resolveActive = 0;
-  const MAX_RESOLVE = 12;
-  const WAREHOUSE_PREFETCH_CAP = 20;
-  const WAREHOUSE_IMMEDIATE_LOAD = 14;
+  const MAX_RESOLVE = 16;
+  const VISIBLE_LOAD_MARGIN = 240;
 
   function runResolveQueue() {
     while (resolveActive < MAX_RESOLVE && resolveQueue.length) {
@@ -30,17 +29,19 @@
   }
 
   function cardIdFromImg(img) {
-    return img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
+    return img.dataset?.sourceCardId
+      || img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
       || img.closest('.card[data-id]')?.dataset?.id
+      || img.closest('.card[data-post-id]')?.dataset?.sourceCardId
       || img.closest('.card[data-post-id]')?.dataset?.postId
       || img.closest('[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '')
       || undefined;
   }
 
   function communityResolveOpts(img) {
-    const inFeed = !!img.closest('#communityGrid, #creationsGrid, #userProfileGrid');
+    const inFeed = !!img.closest('#communityGrid, #creationsGrid, #userProfileGrid, #communitySideBody, #creationsSideBody, .community-side-img-btn');
     if (!inFeed) return {};
-    const authorId = img.closest('.card')?.dataset?.authorId || '';
+    const authorId = img.dataset?.authorId || img.closest('.card')?.dataset?.authorId || '';
     const ref = img.getAttribute('data-image-ref') || '';
     if (window.SupabaseSync?.isInvalidMediaUrl?.(ref)) return { skip: true };
     const path = window.SupabaseSync?.storagePathFromRef?.(ref) || '';
@@ -54,12 +55,19 @@
     };
   }
 
-  function cachedUrl(ref, cardId) {
-    return window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId: cardId, variant: 'grid' }) || '';
+  function cachedUrl(ref, cardId, img) {
+    const inWarehouse = !!img?.closest?.('#cardsContainer');
+    const variant = inWarehouse ? 'full' : 'grid';
+    let url = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId: cardId, variant }) || '';
+    if (!url && inWarehouse) {
+      url = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId: cardId, variant: 'grid' }) || '';
+    }
+    return url;
   }
 
   function isReadySrc(src) {
     if (!src || !src.startsWith('http') || src.includes('data:image/svg')) return false;
+    if (window.SupabaseSync?.isInvalidMediaUrl?.(src)) return false;
     if (window.SupabaseSync?.isValidSignedDisplayUrl) {
       return window.SupabaseSync.isValidSignedDisplayUrl(src);
     }
@@ -69,15 +77,17 @@
     return true;
   }
 
-  async function resolveUrl(ref, cardId, extraOpts) {
-    const hit = cachedUrl(ref, cardId);
+  async function resolveUrl(ref, cardId, extraOpts, img) {
+    const inWarehouse = !!img?.closest?.('#cardsContainer');
+    const hit = cachedUrl(ref, cardId, img);
     if (isReadySrc(hit)) return hit;
     if (extraOpts?.skip) return '';
     if (!window.SupabaseSync?.resolveDisplayUrl) return '';
     try {
       const url = await window.SupabaseSync.resolveDisplayUrl(ref, {
         assetId: cardId,
-        variant: 'grid',
+        variant: inWarehouse ? 'full' : 'grid',
+        tryAllPaths: inWarehouse || extraOpts?.tryAllPaths === true,
         ...(extraOpts || {})
       });
       return isReadySrc(url) ? url : '';
@@ -94,24 +104,28 @@
     media.classList.remove('card-media--await');
     if (!media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
     if (!media.classList.contains('is-loading')) media.classList.add('is-loading');
-    media.classList.remove('card-media--await');
     const finish = () => {
       if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
       else media.classList.remove('is-loading');
     };
     const fail = () => {
       media.classList.remove('is-loading', 'media-shine-reveal');
-      media.classList.add('card-media--load-failed');
       const ref = img.getAttribute('data-image-ref');
       const cardId = cardIdFromImg(img);
       if (ref && img.dataset.imgRetry !== '1') {
         img.dataset.imgRetry = '1';
         window.SupabaseSync?.invalidateSignedCacheForRef?.(ref, cardId);
         const extra = communityResolveOpts(img);
-        void resolveUrl(ref, cardId, { ...extra, tryAllPaths: true }).then((retryUrl) => {
+        void resolveUrl(ref, cardId, { ...extra, tryAllPaths: true }, img).then((retryUrl) => {
           if (retryUrl) applyUrlToImg(img, retryUrl);
+          else if (!window.FeatureDraft?.removeBrokenCommunityFeedCard?.(media)) {
+            media.classList.add('card-media--load-failed');
+          }
         });
+        return;
       }
+      if (window.FeatureDraft?.removeBrokenCommunityFeedCard?.(media)) return;
+      media.classList.add('card-media--load-failed');
     };
     if (img.src === url && img.complete && img.naturalWidth > 0 && !img.src.includes('data:image/svg')) {
       finish();
@@ -132,6 +146,7 @@
     }
     const media = img.closest('.card-media');
     media?.classList.remove('is-loading');
+    if (window.FeatureDraft?.removeBrokenCommunityFeedCard?.(media)) return;
     media?.classList.add('card-media--load-failed');
   }
 
@@ -140,8 +155,7 @@
     if (!ref) return;
     const extra = communityResolveOpts(img);
     if (extra.skip) {
-      const media = img.closest('.card-media');
-      media?.remove();
+      img.closest('.card-media')?.remove();
       return;
     }
     const cardId = cardIdFromImg(img);
@@ -152,29 +166,34 @@
     }
     const cur = img.currentSrc || img.src || '';
     if (isReadySrc(cur)) return;
-    const hit = cachedUrl(ref, cardId);
+    const hit = cachedUrl(ref, cardId, img);
     if (hit) {
       applyUrlToImg(img, hit);
       return;
     }
     if (inflight.has(img)) return;
-    const run = () => resolveUrl(ref, cardId, extra).then((url) => {
+    const run = () => resolveUrl(ref, cardId, extra, img).then((url) => {
       inflight.delete(img);
       if (url) applyUrlToImg(img, url);
     });
-    const p = img.closest('#cardsContainer') ? run() : enqueueResolve(() => resolveUrl(ref, cardId, extra)).then((url) => {
+    const p = img.closest('#cardsContainer') ? run() : enqueueResolve(() => resolveUrl(ref, cardId, extra, img)).then((url) => {
       inflight.delete(img);
       if (url) applyUrlToImg(img, url);
     });
     inflight.set(img, p);
   }
 
+  function isImgNearViewport(img, margin) {
+    const rect = img.getBoundingClientRect();
+    const m = margin || VISIBLE_LOAD_MARGIN;
+    return rect.bottom > -m && rect.top < window.innerHeight + m;
+  }
+
   function onIntersect(entries) {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
-      const img = entry.target;
-      loadImg(img);
-      observer?.unobserve(img);
+      loadImg(entry.target);
+      observer?.unobserve(entry.target);
     }
   }
 
@@ -190,11 +209,9 @@
 
   function prefetchRefsInContainer(container) {
     if (!container || !window.SupabaseSync?.prefetchDisplayUrls) return;
-    const warehouse = container.id === 'cardsContainer';
-    const communityFeed = container.id === 'communityGrid' || container.id === 'creationsGrid' || container.id === 'userProfileGrid';
-    const cap = warehouse ? WAREHOUSE_PREFETCH_CAP : (communityFeed ? 28 : 12);
+    const cap = container.id === 'cardsContainer' ? 24 : 32;
     const refs = [];
-    container.querySelectorAll('img.card-img[data-image-ref]').forEach((img) => {
+    [...container.querySelectorAll('img.card-img[data-image-ref]')].forEach((img) => {
       if (refs.length >= cap) return;
       const ref = img.getAttribute('data-image-ref');
       if (!ref || !ref.startsWith('storage://')) return;
@@ -207,46 +224,44 @@
 
   function observeContainer(container) {
     if (!container) return;
-    if (container.id === 'cardsContainer' && container.dataset.fastHydrate === '1') {
-      return;
-    }
+    const imgs = [...container.querySelectorAll('img.card-img[data-image-ref]')];
     prefetchRefsInContainer(container);
+    if (container.id === 'cardsContainer') {
+      imgs.forEach((img) => {
+        const cur = img.currentSrc || img.src || '';
+        if (isReadySrc(cur)) return;
+        loadImg(img);
+      });
+    }
     if (!('IntersectionObserver' in window)) {
       void window.SupabaseSync?.hydrateImageElements?.(container, { onlyMissing: true });
       return;
     }
     if (observedRoot !== container) {
-      disconnect();
+      observer?.disconnect();
       observedRoot = container;
-      const isMobile = window.matchMedia('(max-width: 900px)').matches;
-      const rootMargin = isMobile
-        ? (container.id === 'cardsContainer' ? '120px 0px' : '80px 0px')
-        : (container.id === 'communityGrid' || container.id === 'creationsGrid'
-          ? '240px 0px'
-          : (container.id === 'cardsContainer' ? '280px 0px' : '80px 0px'));
+      const rootMargin = container.id === 'cardsContainer' ? '320px 0px' : '160px 0px';
       observer = new IntersectionObserver(onIntersect, {
         root: scrollRootFor(container) || null,
         rootMargin,
         threshold: 0.01
       });
     }
-    const imgs = [...container.querySelectorAll('img.card-img[data-image-ref]')];
-    const warehouse = container.id === 'cardsContainer';
-    if (warehouse) {
-      imgs.slice(0, WAREHOUSE_IMMEDIATE_LOAD).forEach((img) => loadImg(img));
-    }
-    imgs.forEach((img, idx) => {
+    imgs.forEach((img) => {
       const cur = img.currentSrc || img.src || '';
       if (isReadySrc(cur)) return;
       const ref = img.getAttribute('data-image-ref');
       const cardId = cardIdFromImg(img);
-      const hit = cachedUrl(ref, cardId);
-      if (hit) {
-        applyUrlToImg(img, hit);
-        return;
-      }
-      if (warehouse && idx < WAREHOUSE_IMMEDIATE_LOAD) return;
-      observer.observe(img);
+    const hit = cachedUrl(ref, cardId, img);
+    if (hit) {
+      applyUrlToImg(img, hit);
+      return;
+    }
+    if (container.id === 'cardsContainer' || isImgNearViewport(img)) {
+      loadImg(img);
+      return;
+    }
+    observer.observe(img);
     });
   }
 
@@ -272,7 +287,7 @@
   function warmCardsBackground(cardList, capMs) {
     const list = (cardList || []).slice();
     const mobile = window.matchMedia('(max-width: 900px)').matches;
-    const capped = mobile ? list.slice(0, 16) : list.slice(0, 48);
+    const capped = list.slice(0, 24);
     const budget = capMs ?? (mobile ? 2800 : 14000);
     const run = () => void warmCards(capped, budget);
     if (mobile && typeof requestIdleCallback === 'function') {
@@ -281,6 +296,13 @@
       run();
     }
   }
+
+  function syncVisibilityPause() {
+    if (document.hidden) disconnect();
+    else if (observedRoot) observeContainer(observedRoot);
+  }
+
+  document.addEventListener('visibilitychange', syncVisibilityPause);
 
   window.CardImageLoader = {
     observeContainer,
