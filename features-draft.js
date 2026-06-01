@@ -3174,10 +3174,7 @@
           return;
         }
         if (containerId === 'communityGrid') {
-          if (communityAppreciateActive && showImage) {
-            void openCommunityAppreciateViewer(post);
-            return;
-          }
+          if (communityAppreciateActive) exitCommunityAppreciate(true);
           openPostSidePanel(post.id, 'community', { post });
           return;
         }
@@ -4002,10 +3999,6 @@
   async function openCommunityPostImageZoom(post, sideRef, extra = {}) {
     if (!post || !sideRef) return;
     const postId = post.id;
-    if (communityAppreciateActive && typeof openCommunityAppreciateViewer === 'function') {
-      void openCommunityAppreciateViewer(post);
-      return;
-    }
     syncLightboxCommunityMode(true, postId);
     const syncUrl = communityPostZoomUrlSync(post, sideRef, null);
     if (syncUrl && typeof window.openLightbox === 'function') {
@@ -4025,10 +4018,6 @@
   }
 
   async function openCommunitySideImageZoom(body, post, sideRef, postId, extra = {}) {
-    if (post && communityAppreciateActive && typeof openCommunityAppreciateViewer === 'function') {
-      void openCommunityAppreciateViewer(post);
-      return;
-    }
     syncLightboxCommunityMode(true, postId);
     const syncUrl = communityPostZoomUrlSync(post, sideRef, body);
     if (syncUrl && typeof window.openLightbox === 'function') {
