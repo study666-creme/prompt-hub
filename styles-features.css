@@ -23,7 +23,9 @@
   gap: 12px;
   padding: 14px 20px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .feature-header h2 {
@@ -2490,6 +2492,21 @@
 .imagegen-feed-card-tile .imagegen-feed-media {
   flex: none;
   width: 100%;
+  aspect-ratio: 1;
+  min-height: 0;
+}
+
+.imagegen-feed-card-tile .imagegen-feed-thumb-btn {
+  width: 100%;
+  height: 100%;
+}
+
+.imagegen-feed-card-tile .imagegen-feed-thumb-btn img {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: cover;
+  object-position: center top;
 }
 
 .imagegen-feed-card-tile .imagegen-feed-content {

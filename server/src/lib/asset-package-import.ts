@@ -108,18 +108,30 @@ export async function importAssetPackageToWarehouse(
   profile: Profile,
   packageId: string,
   warehouseId: string,
-  folders?: string[] | null
+  folders?: string[] | null,
+  cardIds?: string[] | null
 ): Promise<{ imported: number; cardIds: string[]; groups: string[] }> {
   const { cards, title } = await getPackageCardsPayload(admin, userId, packageId);
   const folderFilter =
     Array.isArray(folders) && folders.length
       ? new Set(folders.map((f) => String(f || '').trim()).filter(Boolean))
       : null;
-  const toImport = folderFilter
-    ? cards.filter((c) => folderFilter.has(String(c.group || '').trim() || '未分类'))
-    : cards;
+  const cardIdFilter =
+    Array.isArray(cardIds) && cardIds.length
+      ? new Set(cardIds.map((id) => String(id || '').trim()).filter(Boolean))
+      : null;
+  let toImport = cards;
+  if (cardIdFilter) {
+    toImport = cards.filter((c) => cardIdFilter.has(String(c.id)));
+  } else if (folderFilter) {
+    toImport = cards.filter((c) => folderFilter.has(String(c.group || '').trim() || '未分类'));
+  }
   if (!toImport.length) {
-    throw new ApiError(400, 'VALIDATION_ERROR', '所选文件夹中没有可导入的卡片');
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      cardIdFilter ? '所选卡片无法导入' : '所选文件夹中没有可导入的卡片'
+    );
   }
   const wid = String(warehouseId || 'default').slice(0, 64);
 
@@ -218,12 +230,11 @@ export async function getPackageFolderImages(
     .from('asset_packages')
     .select('*')
     .eq('id', packageId)
-    .eq('status', 'published')
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new ApiError(404, 'NOT_FOUND', '资产包不存在');
 
-  const row = data as { author_id: string; cards_payload: unknown; preview_card_ids: unknown };
+  const row = data as { author_id: string; status: string; cards_payload: unknown; preview_card_ids: unknown };
   const cards = normalizePackCards(row.cards_payload);
   const folder = String(folderName || '').trim() || '未分类';
   const inFolder = cards.filter((c) => (String(c.group || '').trim() || '未分类') === folder);
@@ -240,6 +251,9 @@ export async function getPackageFolderImages(
         .maybeSingle();
       fullAccess = !!ent;
     }
+  }
+  if (row.status !== 'published' && !fullAccess) {
+    throw new ApiError(404, 'NOT_FOUND', '资产包不存在');
   }
 
   const previewIds = new Set(
@@ -268,8 +282,8 @@ export async function signPreviewImagesForPackage(
 ): Promise<Array<{ cardId: string; label: string; imageUrl: string | null }>> {
   const cards = normalizePackCards(cardsPayload);
   const idSet = new Set(previewCardIds.map(String));
-  const picks = cards.filter((c) => idSet.has(c.id)).slice(0, 3);
-  const fallback = cards.slice(0, 3);
+  const picks = cards.filter((c) => idSet.has(c.id)).slice(0, 4);
+  const fallback = cards.slice(0, 4);
   const list = picks.length ? picks : fallback;
 
   return Promise.all(

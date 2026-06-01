@@ -15,6 +15,7 @@
   const GEN_RETENTION_MIN_MS = 1 * 24 * 60 * 60 * 1000;
   const GEN_RETENTION_MAX_MS = 3 * 24 * 60 * 60 * 1000;
   const MIN_COMMUNITY_PROMPT_LEN = 15;
+  const IMAGEGEN_WH_FEED_MAX = 48;
 
   function randomGenRetentionMs() {
     return GEN_RETENTION_MIN_MS + Math.floor(Math.random() * (GEN_RETENTION_MAX_MS - GEN_RETENTION_MIN_MS + 1));
@@ -5780,6 +5781,9 @@
         btn.textContent = '提交中…';
       }
 
+      // 先展示占位卡，API 请求放后台，避免阻塞界面
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
       function friendlyGenErrorMessage(msg) {
         const s = String(msg || '');
         if (/登录已过期|请先登录|UNAUTHORIZED/i.test(s)) {
@@ -6544,7 +6548,7 @@
       const pending = imageGenPendingJobs.slice(0, 16);
       const failed = imageGenFailedJobs.slice(0, 12);
       const list = typeof window.getWarehouseCardsForImageGen === 'function'
-        ? window.getWarehouseCardsForImageGen({ group: imageGenWhGroup, tag: imageGenWhTag }) : [];
+        ? window.getWarehouseCardsForImageGen({ group: imageGenWhGroup, tag: imageGenWhTag }).slice(0, IMAGEGEN_WH_FEED_MAX) : [];
       if (!pending.length && !failed.length && !list.length) {
         html = '<p class="imagegen-feed-empty">仓库暂无卡片<br><button type="button" class="btn btn-primary btn-sm" onclick="createNewCard({forceOpenPanel:true})">新建卡片</button></p>';
       } else {
@@ -6601,14 +6605,14 @@
       filterAndSortPosts(getCommunityFeedForDisplay()).slice(0, 40).forEach(p => { if (p.image) refsToPrefetch.push(p.image); });
     }
     const mobileFeed = isMobileFeedViewport();
-    const prefetchLimit = mobileFeed ? 24 : 40;
+    const prefetchLimit = imageGenBatchRunning ? 16 : mobileFeed ? 24 : 32;
     const refsSlice = refsToPrefetch.slice(0, prefetchLimit);
 
     resetImageGenFeedCardLayout();
-    setFeedLayoutPending(wrap, false);
+    setFeedLayoutPending(wrap, true);
     wrap.className = mobileFeed
-      ? 'imagegen-feed imagegen-feed--tiles mobile-feed-grid feed-layout-ready'
-      : 'imagegen-feed imagegen-feed--desktop-grid feed-layout-ready';
+      ? 'imagegen-feed imagegen-feed--tiles mobile-feed-grid feed-layout-pending'
+      : 'imagegen-feed imagegen-feed--masonry feed-layout-pending';
 
     wrap.innerHTML = html;
     resetMobileFeedGridStyles();
@@ -6617,6 +6621,8 @@
     if (mobileFeed) {
       enforceMobileImageGenFeed();
       setFeedLayoutPending(wrap, false);
+    } else {
+      layoutImageGenFeedMasonry();
     }
     wrap.scrollTop = scrollTop;
 
@@ -6638,7 +6644,7 @@
         enforceMobileImageGenFeed();
         setFeedLayoutPending(wrap, false);
       } else {
-        setFeedLayoutPending(wrap, false);
+        layoutImageGenFeedMasonry();
       }
       wrap.scrollTop = scrollTop;
       window.SupabaseSync?.patchImageSrcFromCache?.(wrap);

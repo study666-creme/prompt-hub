@@ -98,6 +98,8 @@ body {
   box-sizing: border-box;
   min-width: 0;
   min-height: 0;
+  background: transparent;
+  isolation: isolate;
 }
 
     .drag-layer-root {
@@ -135,6 +137,17 @@ body {
       display: block;
       width: 100%;
       height: 100%;
+    }
+    body:not(.efficiency-mode) .app-page,
+    body:not(.efficiency-mode) .feature-shell,
+    body:not(.efficiency-mode) .feature-body,
+    body:not(.efficiency-mode) .main-content {
+      background: transparent;
+    }
+    body:not(.efficiency-mode) .feature-header {
+      background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
     }
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -923,6 +936,9 @@ body {
       min-width: 0;
       min-height: 0;
       overflow: hidden;
+      background: transparent;
+      position: relative;
+      z-index: 2;
     }
     .app-page {
       display: none;
@@ -2773,31 +2789,41 @@ body {
       overflow: visible;
       box-shadow: none;
       position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
     }
     .viewer-image-frame {
       position: relative;
+      flex: 0 1 auto;
+      min-height: 0;
+      max-height: calc(96vh - 120px);
     }
     .lightbox-actions {
-      position: absolute;
-      left: 50%;
-      bottom: 14px;
-      transform: translateX(-50%);
+      position: static;
+      transform: none;
       z-index: 3;
       display: flex;
-      justify-content: center;
-      pointer-events: none;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      width: min(280px, 92vw);
+      pointer-events: auto;
     }
-    .lightbox-download-btn {
+    .lightbox-download-btn,
+    .lightbox-collect-btn {
       pointer-events: auto;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 7px;
+      width: 100%;
       min-width: 0;
-      padding: 9px 18px;
+      padding: 10px 18px;
       border: 1px solid rgba(255, 255, 255, 0.22);
-      border-radius: 999px;
-      background: rgba(12, 12, 16, 0.62);
+      border-radius: var(--radius-md, 10px);
+      background: rgba(12, 12, 16, 0.72);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
       color: #fff;
@@ -3501,6 +3527,61 @@ body {
       opacity: 0;
       animation: card-beam-trbl var(--card-beam-duration) cubic-bezier(0.35, 0.05, 0.25, 1) forwards;
     }
+    .viewer-image-shine-wrap.viewer-shine-active .viewer-shine-sweep::after {
+      display: block;
+      content: '';
+      position: absolute;
+      z-index: 4;
+      pointer-events: none;
+      width: var(--card-beam-width);
+      height: 260%;
+      top: -85%;
+      left: 118%;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.06) 18%,
+        rgba(255, 255, 255, 0.14) 34%,
+        rgba(255, 255, 255, 0.24) 50%,
+        rgba(255, 255, 255, 0.14) 66%,
+        rgba(255, 255, 255, 0.06) 82%,
+        transparent 100%
+      );
+      transform: rotate(-45deg);
+      transform-origin: center center;
+      filter: blur(10px);
+      mix-blend-mode: screen;
+      animation: viewer-shine-loop 5.8s ease-in-out infinite;
+    }
+    .viewer-shine-sweep {
+      position: absolute;
+      inset: 0;
+      z-index: 4;
+      pointer-events: none;
+      overflow: hidden;
+      border-radius: inherit;
+    }
+    @keyframes viewer-shine-loop {
+      0% {
+        top: -85%;
+        left: 118%;
+        opacity: 0;
+      }
+      12% {
+        opacity: 0.28;
+      }
+      46% {
+        opacity: 0.48;
+      }
+      88% {
+        opacity: 0.22;
+      }
+      100% {
+        top: 72%;
+        left: -38%;
+        opacity: 0;
+      }
+    }
     .appreciate-viewer .viewer-image-shine-wrap.media-shine-reveal::after,
     .image-lightbox .viewer-image-shine-wrap.media-shine-reveal::after {
       --card-strip-core: rgba(255, 255, 255, 0.52);
@@ -3828,7 +3909,8 @@ body {
         animation-duration: 0.01ms !important;
         transition-duration: 0.01ms !important;
       }
-      .viewer-image-shine-wrap.media-shine-reveal::after {
+      .viewer-image-shine-wrap.media-shine-reveal::after,
+      .viewer-image-shine-wrap.viewer-shine-active .viewer-shine-sweep::after {
         animation: none !important;
       }
     }

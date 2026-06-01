@@ -301,7 +301,7 @@
       if (!frame) return;
       frame.classList.toggle('is-loading', !!loading);
       frame.classList.remove('viewer-glow-active');
-      frame.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal');
+      frame.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal', 'viewer-shine-active');
     }
 
     function finishViewerFrameReveal(frame) {
@@ -314,6 +314,7 @@
       shineWrap.classList.remove('media-shine-reveal');
       void shineWrap.offsetWidth;
       shineWrap.classList.add('media-shine-reveal');
+      shineWrap.classList.add('viewer-shine-active');
     }
 
     function layoutViewerBorderSvg(frame) {
@@ -1715,8 +1716,16 @@
     }
     function resumeRippleBackground() {
       if (settings.efficiencyMode) return;
+      const bg = document.getElementById('rippleGridBg');
+      if (!bg) return;
+      bg.style.display = '';
+      if (!window.__rippleGridBg && !bg.classList.contains('ripple-fallback-active')) {
+        void initBackgroundEffect();
+        return;
+      }
       window.__rippleGridBg?.setPaused?.(false);
     }
+    window.resumeRippleBackground = resumeRippleBackground;
 
     function applyEfficiencyMode() {
       const on = settings.efficiencyMode === true;
@@ -1753,7 +1762,6 @@
         window.location.href = 'asset-studio.html';
         return;
       }
-      pauseRippleBackground();
       if (app !== 'warehouse' && activeFilters.size > 0) {
         clearWarehouseFilters({ toast: false });
       }
@@ -1925,7 +1933,8 @@
         return;
       }
       try {
-        const mod = await import('./ripple-grid.js?v=20260612d');
+        const build = window.__APP_BUILD__ || '1';
+        const mod = await import(`./ripple-grid.js?v=${encodeURIComponent(build)}`);
         window.__rippleGridBg = mod.initRippleGrid(bg, RIPPLE_BG_OPTS);
         document.addEventListener('visibilitychange', () => {
           if (document.hidden) pauseRippleBackground();
@@ -5744,6 +5753,11 @@
 
     function openLightbox(src) {
       if (!src || typeof src !== 'string') return;
+      if (!window.__lightboxFromAssetPack) {
+        window.__packLightboxCollect = null;
+        document.getElementById('lightboxCollectBtn')?.classList.add('hidden');
+      }
+      window.__lightboxFromAssetPack = false;
       if (selectedCardId && imageData) {
         const navItems = cards
           .filter((c) => c.image && cardHasDisplayImage(c))
@@ -5776,7 +5790,7 @@
       };
       lightbox.classList.remove('active');
       frame?.classList.remove('viewer-glow-active');
-      frame?.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal');
+      frame?.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal', 'viewer-shine-active');
       img.onwheel = null;
       img.onmousedown = null;
       img.ondblclick = null;
@@ -5854,7 +5868,7 @@
       lightbox?.classList.remove('active');
       const frame = getLightboxFrame();
       frame?.classList.remove('is-loading', 'viewer-glow-active');
-      frame?.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal');
+      frame?.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal', 'viewer-shine-active');
       const img = document.getElementById('lightboxImage');
       if (img) {
         img.onload = null;

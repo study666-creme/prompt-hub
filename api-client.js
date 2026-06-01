@@ -357,9 +357,10 @@
     return request('POST', '/api/v1/community/gacha/draw');
   }
 
-  async function importAssetPackage(id, warehouseId, folders) {
+  async function importAssetPackage(id, warehouseId, folders, cardIds) {
     const body = { warehouseId };
     if (Array.isArray(folders) && folders.length) body.folders = folders;
+    if (Array.isArray(cardIds) && cardIds.length) body.cardIds = cardIds;
     return request('POST', `/api/v1/asset-packages/${encodeURIComponent(id)}/import`, body);
   }
 

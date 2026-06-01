@@ -118,17 +118,49 @@ function normalizePreviewTree(
     }>;
 }
 
+function parsePreviewThumbs(raw: unknown): {
+  thumbs: Array<{ label: string; hue: number }>;
+  packUi: 'light' | 'heavy';
+} {
+  let packUi: 'light' | 'heavy' = 'light';
+  if (!Array.isArray(raw)) return { thumbs: [], packUi };
+  const thumbs: Array<{ label: string; hue: number }> = [];
+  raw.forEach((t, i) => {
+    if (!t || typeof t !== 'object') return;
+    const o = t as { label?: string; hue?: number; packUi?: string };
+    if (o.packUi === 'heavy' || o.packUi === 'light') {
+      packUi = o.packUi;
+      return;
+    }
+    const label = String(o.label || `预览 ${i + 1}`).trim();
+    if (!label || label === '__ui__') return;
+    const hue = Number.isFinite(Number(o.hue)) ? Number(o.hue) : (thumbs.length * 67) % 360;
+    thumbs.push({ label, hue });
+  });
+  return { thumbs, packUi };
+}
+
 function normalizePreviewThumbs(raw: unknown): Array<{ label: string; hue: number }> {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((t, i) => {
-      if (!t || typeof t !== 'object') return null;
-      const o = t as { label?: string; hue?: number };
-      const label = String(o.label || `预览 ${i + 1}`).trim();
-      const hue = Number.isFinite(Number(o.hue)) ? Number(o.hue) : (i * 67) % 360;
-      return { label, hue };
-    })
-    .filter(Boolean) as Array<{ label: string; hue: number }>;
+  return parsePreviewThumbs(raw).thumbs;
+}
+
+function encodePreviewThumbs(
+  thumbs: Array<{ label: string; hue: number }>,
+  packUi?: 'light' | 'heavy'
+): unknown[] {
+  const base = thumbs.filter((t) => t && t.label);
+  if (packUi === 'heavy') return [...base, { packUi: 'heavy', label: '__ui__', hue: 0 }];
+  return base;
+}
+
+function resolvePackUiFromRow(
+  row: AssetPackageRow,
+  parsed: ReturnType<typeof parsePreviewThumbs>
+): 'light' | 'heavy' {
+  if (parsed.packUi === 'heavy') return 'heavy';
+  const tag = String(row.tag || '');
+  if (tag.includes('精选体系')) return 'heavy';
+  return 'light';
 }
 
 export function mapAssetPackage(row: AssetPackageRow, opts: { owned?: boolean; isAuthor?: boolean } = {}) {
@@ -142,11 +174,13 @@ export function mapAssetPackage(row: AssetPackageRow, opts: { owned?: boolean; i
   if (previewTreeNeedsRebuild(previewTree)) {
     previewTree = buildFolderPreviewTree(cards, previewIds);
   }
+  const thumbMeta = parsePreviewThumbs(row.preview_thumbs);
   return {
     id: row.id,
     title: row.title,
     description: row.description,
     tag: row.tag,
+    packUi: resolvePackUiFromRow(row, thumbMeta),
     priceCents,
     priceLabel: formatPriceLabel(priceCents),
     saleType,
@@ -154,7 +188,7 @@ export function mapAssetPackage(row: AssetPackageRow, opts: { owned?: boolean; i
     countLabel: row.count_label || (cards.length ? `${cards.length} 张卡片` : ''),
     license: row.license_text || buildLicenseText(!!row.commercial_use_allowed, saleType),
     previewTree: previewTree,
-    previewThumbs: normalizePreviewThumbs(row.preview_thumbs),
+    previewThumbs: thumbMeta.thumbs,
     previewCardIds: previewIds,
     cardCount: cards.length,
     sourceWarehouseId: row.source_warehouse_id || null,
@@ -302,6 +336,11 @@ export async function listEntitlementsForUser(
   return ids
     .map((id) => byId.get(id))
     .filter(Boolean)
+    .filter((row) => {
+      const r = row as AssetPackageRow;
+      if (r.status !== 'archived') return true;
+      return String(r.author_id) !== String(userId);
+    })
     .map((row) => mapAssetPackage(row as AssetPackageRow, { owned: true }));
 }
 
@@ -323,6 +362,7 @@ export async function createAssetPackage(
     sourceWarehouseName?: string;
     previewCardIds?: string[];
     cards?: PackCard[];
+    packUi?: 'light' | 'heavy';
   }
 ) {
   const authorName = resolveDisplayName(profile);
@@ -356,7 +396,7 @@ export async function createAssetPackage(
     count_label: countLabel.slice(0, 120),
     license_text: buildLicenseText(commercialUseAllowed, saleType),
     preview_tree: previewTree,
-    preview_thumbs: normalizePreviewThumbs(input.previewThumbs),
+    preview_thumbs: encodePreviewThumbs(normalizePreviewThumbs(input.previewThumbs), input.packUi),
     source_warehouse_id: input.sourceWarehouseId ? String(input.sourceWarehouseId).slice(0, 64) : null,
     source_warehouse_name: input.sourceWarehouseName ? String(input.sourceWarehouseName).slice(0, 80) : null,
     preview_card_ids: previewCardIds,
@@ -402,6 +442,7 @@ export async function updateAssetPackage(
     previewCardIds?: string[];
     cards?: PackCard[];
     status?: 'published' | 'archived';
+    packUi?: 'light' | 'heavy';
   }
 ) {
   const { data: existing, error: loadErr } = await admin
@@ -442,6 +483,15 @@ export async function updateAssetPackage(
       : previewTreeNeedsRebuild(normalizePreviewTree(cur.preview_tree))
         ? buildFolderPreviewTree(cards, previewCardIds)
         : normalizePreviewTree(cur.preview_tree);
+  const curThumbMeta = parsePreviewThumbs(cur.preview_thumbs);
+  const nextPackUi =
+    patch.packUi === 'heavy' || patch.packUi === 'light'
+      ? patch.packUi
+      : patch.previewThumbs !== undefined
+        ? parsePreviewThumbs(patch.previewThumbs).packUi
+        : curThumbMeta.packUi;
+  const nextThumbs =
+    patch.previewThumbs !== undefined ? normalizePreviewThumbs(patch.previewThumbs) : curThumbMeta.thumbs;
 
   const next = {
     title: patch.title != null ? String(patch.title).slice(0, 120) : cur.title,
@@ -456,8 +506,7 @@ export async function updateAssetPackage(
         : cur.count_label || `${cards.length} 张卡片`,
     license_text: buildLicenseText(commercialUseAllowed, saleType),
     preview_tree: previewTree,
-    preview_thumbs:
-      patch.previewThumbs !== undefined ? normalizePreviewThumbs(patch.previewThumbs) : cur.preview_thumbs,
+    preview_thumbs: encodePreviewThumbs(nextThumbs, nextPackUi),
     preview_card_ids: previewCardIds,
     cards_payload: cards,
     status: patch.status === 'archived' ? 'archived' : patch.status === 'published' ? 'published' : cur.status,

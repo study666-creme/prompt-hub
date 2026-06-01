@@ -65,6 +65,7 @@ const publishSchema = z.object({
   sourceWarehouseId: z.string().max(120).optional(),
   sourceWarehouseName: z.string().max(120).optional(),
   previewCardIds: z.array(z.string().max(120)).max(60).optional(),
+  packUi: z.enum(['light', 'heavy']).optional(),
   cards: z.array(packCardSchema).min(1).max(PACK_CARD_MAX)
 });
 
@@ -211,7 +212,8 @@ assetPackagesRoutes.get('/:id/export', rateLimit(60, 60_000), async c => {
 
 const importBodySchema = z.object({
   warehouseId: z.string().min(1).max(120),
-  folders: z.array(z.string().min(1).max(80)).max(50).optional()
+  folders: z.array(z.string().min(1).max(80)).max(50).optional(),
+  cardIds: z.array(z.string().min(1).max(120)).max(500).optional()
 });
 
 assetPackagesRoutes.post('/:id/import', rateLimit(30, 60_000), async c => {
@@ -227,7 +229,8 @@ assetPackagesRoutes.post('/:id/import', rateLimit(30, 60_000), async c => {
     profile,
     id,
     parsed.data.warehouseId,
-    parsed.data.folders
+    parsed.data.folders,
+    parsed.data.cardIds
   );
   return c.json({ ok: true, data: result });
 });
