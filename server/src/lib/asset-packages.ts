@@ -341,7 +341,12 @@ export async function listEntitlementsForUser(
       if (r.status !== 'archived') return true;
       return String(r.author_id) !== String(userId);
     })
-    .map((row) => mapAssetPackage(row as AssetPackageRow, { owned: true }));
+    .map((row) =>
+      mapAssetPackage(row as AssetPackageRow, {
+        owned: true,
+        isAuthor: String((row as AssetPackageRow).author_id) === String(userId)
+      })
+    );
 }
 
 export async function createAssetPackage(

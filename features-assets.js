@@ -140,6 +140,42 @@
     }
   }
 
+  function syncPackFolderNamesFromDom(packEditor, root) {
+    if (!packEditor || !root) return;
+    root.querySelectorAll('.asset-publish-custom-folder').forEach((row) => {
+      const fid = row.dataset.folderId;
+      const input = row.querySelector('.asset-publish-folder-rename');
+      const f = packEditor.folders?.find((x) => x.id === fid);
+      if (f && input) {
+        const next = String(input.value || '').trim().slice(0, 40);
+        if (next) f.name = next;
+      }
+    });
+    root.querySelectorAll('.asset-publish-folder-rename-inline').forEach((input) => {
+      const val = String(input.value || '').trim().slice(0, 40);
+      const fid = input.dataset.folderId || '';
+      const key = input.dataset.folderKey || '';
+      if (packEditor.mode === 'custom' && fid && fid !== '_unassigned') {
+        const f = packEditor.folders?.find((x) => x.id === fid);
+        if (f && val) f.name = val;
+      } else if (key && val) {
+        packEditor.folderRenames = packEditor.folderRenames || {};
+        packEditor.folderRenames[key] = val;
+      }
+    });
+  }
+
+  function resolvePackCardGroup(c, packEditor) {
+    if (packEditor.mode === 'custom') {
+      const folder = packEditor.folders?.find((f) => f.cardIds.has(c.id));
+      return folder?.name || null;
+    }
+    const key = String(c.group || '').trim() || '未分类';
+    const renamed = packEditor.folderRenames?.[key];
+    if (renamed) return renamed === '未分类' ? null : renamed;
+    return c.group || null;
+  }
+
   function buildPreviewTreeForPack(cards, packFolders, mode, previewIds) {
     if (mode === 'custom' && packFolders?.length) {
       return packFolders
@@ -276,6 +312,17 @@
     </button>`;
   }
 
+  function renderHeavyDemoStackLayers(hue) {
+    const hues = [hue, hue + 18, hue + 36, hue + 54];
+    return `<div class="asset-stack-inner asset-stack-inner--heavy asset-stack-inner--demo-fan" aria-hidden="true">${hues
+      .slice(0, 4)
+      .map(
+        (h, i) =>
+          `<span class="asset-demo-fan-card asset-demo-fan-card--${i}" style="--card-hue:${h}"></span>`
+      )
+      .join('')}</div>`;
+  }
+
   function renderHeavyDemoMosaic(pkg) {
     const nodes = (pkg.previewTree || []).slice(0, 6);
     const hues = [28, 46, 200, 168, 312, 18, 36, 260];
@@ -307,10 +354,12 @@
     const demoFill = pkg.isDemo || (!imgs.length && (pkg.previewTree || []).length > 2);
     const mosaicHtml = demoFill ? renderHeavyDemoMosaic(pkg) : '';
     if (!imgs.length) {
+      const stackHtml = demoFill ? renderHeavyDemoStackLayers(hue) : '';
       return `<button type="button" class="asset-market-card-cover asset-stack-cover asset-stack-cover--empty asset-stack-cover--pack asset-stack-cover--heavy${demoFill ? ' asset-stack-cover--heavy-demo' : ''}" data-action="preview-cover" data-pkg-id="${esc(pkg.id)}" style="--asset-hue:${hue}" aria-label="预览结构">
         <div class="asset-pack-shell" aria-hidden="true"></div>
         <span class="asset-stack-pack-shimmer" aria-hidden="true"></span>
         <span class="asset-pack-sweep" aria-hidden="true"></span>
+        ${stackHtml}
         ${mosaicHtml}
         ${tagHtml}
       </button>`;
@@ -338,13 +387,15 @@
     const isFree = !pkg.priceCents;
     const buyLabel = pkg.isDemo
       ? '预览结构'
-      : owned
-        ? '管理'
-        : isFree
-          ? '免费领取'
-          : buyout
-            ? '买断'
-            : '购买';
+      : owned && pkg.isAuthor
+        ? '编辑分组'
+        : owned
+          ? '导入'
+          : isFree
+            ? '免费领取'
+            : buyout
+              ? '买断'
+              : '购买';
     const buyClass = pkg.isDemo
       ? 'btn btn-secondary btn-sm'
       : owned
@@ -366,7 +417,6 @@
             <p class="asset-market-card-meta">${esc(pkg.countLabel)}</p>
             <p class="asset-market-card-meta">${commercialBadge(pkg)}</p>
             <p class="asset-market-card-desc">${esc(pkg.desc)}</p>
-            <p class="asset-market-card-license">${esc(pkg.license)}</p>
             <div class="asset-market-card-foot">
               ${priceHtml}
               <div class="asset-market-card-actions">
@@ -543,6 +593,10 @@
     const packUi = resolvePackUi(norm);
     const uiClass = packUi === 'heavy' ? ' asset-market-card--heavy' : ' asset-market-card--light';
     const cover = packUi === 'heavy' ? renderHeavyCover(norm) : renderStackCover(norm);
+    const authorActions = norm.isAuthor
+      ? `<button type="button" class="btn btn-secondary btn-sm" data-action="edit">编辑分组</button>
+              <button type="button" class="btn btn-ghost btn-sm asset-pack-archive-btn" data-action="archive">下架</button>`
+      : '';
     return `<article class="asset-market-card my-home-package-card${uiClass}" data-pkg-id="${esc(norm.id)}" data-pack-ui="${packUi}">
         ${cover}
         <div class="asset-market-card-body">
@@ -554,9 +608,8 @@
             <span class="asset-market-price">${esc(norm.priceLabel)}</span>
             <div class="asset-market-card-actions">
               <button type="button" class="btn btn-secondary btn-sm" data-action="preview">查看</button>
-              ${kind === 'owned' ? '<button type="button" class="btn btn-primary btn-sm" data-action="import">导入卡片库</button>' : ''}
-              ${kind === 'published' ? '<button type="button" class="btn btn-ghost btn-sm" data-action="edit">编辑</button>' : ''}
-              ${kind === 'published' ? '<button type="button" class="btn btn-ghost btn-sm asset-pack-archive-btn" data-action="archive">下架删除</button>' : ''}
+              ${kind === 'owned' || norm.owned ? '<button type="button" class="btn btn-primary btn-sm" data-action="import">导入卡片库</button>' : ''}
+              ${authorActions}
             </div>
           </div>
         </div>
@@ -941,6 +994,7 @@
           return;
         }
         if (pkg && !pkg.owned) void claimPackage(pkg);
+        else if (pkg?.owned && pkg.isAuthor) void openEditPublishModal(pkg);
         else if (pkg?.owned) void openImportModal(pkg);
       });
     });
@@ -1173,14 +1227,22 @@
         <p class="panel-hint asset-import-selected-hint" id="assetImportSelectedHint">未选卡片时将导入全部</p>
       </div>`
       : '';
+    const normPkg = normalizePackage(pkg);
+    const authorEditHint = normPkg.isAuthor
+      ? `<div class="asset-import-author-bar">
+        <p class="panel-hint">你是发布者：要改文件夹名（如「官能生成」→「女性美学」），请点右侧按钮，保存后买家看到的目录会一起更新。</p>
+        <button type="button" class="btn btn-secondary btn-sm" id="assetImportEditPackBtn">编辑分组名称</button>
+      </div>`
+      : '';
     body.innerHTML = `
       <header class="asset-preview-head asset-import-head">
         <div>
-          <h3 id="assetImportTitle">保存「${esc(pkg.title)}」到卡片库</h3>
+          <h3 id="assetImportTitle">保存「${esc(normPkg.title)}」到卡片库</h3>
         </div>
         <button type="button" class="modal-close-btn modal-close-btn--icon" id="assetImportClose" aria-label="关闭"><span aria-hidden="true">×</span></button>
       </header>
       <div class="asset-import-body">
+        ${authorEditHint}
         ${folderTree}
         <label class="asset-import-wh-row">导入到卡片库
           <select class="settings-input" id="assetImportWarehouse">${whOptions}</select>
@@ -1204,6 +1266,10 @@
       overlay.onclick = null;
     };
     document.getElementById('assetImportClose')?.addEventListener('click', close);
+    document.getElementById('assetImportEditPackBtn')?.addEventListener('click', () => {
+      close();
+      void openEditPublishModal(normPkg);
+    });
     overlay.onclick = (e) => {
       if (e.target === overlay) close();
     };
@@ -1416,13 +1482,13 @@
         </div>`;
   }
 
-  function renderPublishCardPicker(warehouseId, selectedIds, previewIds, thumbMap, pickerState, packEditor) {
+  function renderPublishCardPicker(warehouseId, selectedIds, previewIds, thumbMap, pickerState, packEditor, cardsOverride) {
     const state = pickerState || {};
     const expandedFolders =
       state.expandedFolders instanceof Set ? state.expandedFolders : new Set(state.expandedFolders || []);
     const filterTags = state.filterTags instanceof Set ? state.filterTags : new Set(state.filterTags || []);
     const tagSearch = String(state.tagSearch || '').trim().toLowerCase();
-    const cards = getMainSiteCardsForWarehouse(warehouseId);
+    const cards = cardsOverride?.length ? cardsOverride : getMainSiteCardsForWarehouse(warehouseId);
     if (!cards.length) {
       return '<p class="panel-hint">该库暂无卡片，请先在卡片库添加或切换其他库。</p>';
     }
@@ -1485,10 +1551,14 @@
           isCustom && folderPreviewIds instanceof Set
             ? `<span class="asset-publish-folder-preview-hint">文件夹预览 ${Math.min(folderPreviewIds.size, PACK_FOLDER_PREVIEW_MAX)}/${PACK_FOLDER_PREVIEW_MAX}</span>`
             : '';
+        const folderNameCell =
+          id === '_unassigned'
+            ? `<span class="asset-publish-folder-name">${esc(name)}</span>`
+            : `<input type="text" class="settings-input asset-publish-folder-rename-inline" data-folder-key="${esc(name)}" data-folder-id="${esc(id || name)}" value="${esc(name)}" maxlength="40" aria-label="文件夹名">`;
         return `<section class="asset-publish-folder" data-folder="${esc(name)}"${id ? ` data-folder-id="${esc(id)}"` : ''}>
       <div class="asset-publish-folder-head">
         <button type="button" class="asset-publish-folder-toggle" data-action="toggle" aria-expanded="${expanded}">${chevron}</button>
-        <span class="asset-publish-folder-name">${esc(name)}</span>
+        ${folderNameCell}
         <span class="asset-publish-folder-count">${visible.length} 张</span>
         ${previewHint}
         <label class="asset-publish-folder-all"><input type="checkbox" data-action="select-folder"${folderCheck}${folderInd}> 全选本组</label>
@@ -1546,7 +1616,8 @@
     const previewIds = new Set();
     const packEditor = {
       mode: 'library',
-      folders: buildPackFoldersFromLibraryGroups(whId)
+      folders: buildPackFoldersFromLibraryGroups(whId),
+      folderRenames: {}
     };
     if (packCardsOverride?.length) {
       packEditor.mode = 'custom';
@@ -1572,7 +1643,7 @@
       <header class="asset-preview-head">
         <div>
           <h3 id="assetPublishTitle">${editPackageId ? '编辑资产包' : '发布资产包'}</h3>
-          <p class="panel-hint">勾选卡片打包；可「按卡片库分组」或「自定义文件夹」组织结构，每文件夹可选 0～5 张市场预览图。</p>
+          <p class="panel-hint">勾选卡片打包；可「按卡片库分组」或「自定义文件夹」组织结构。文件夹名可直接修改（编辑已发布包时保存即生效）。</p>
         </div>
         <button type="button" class="modal-close-btn modal-close-btn--icon" id="assetPublishClose" aria-label="关闭"><span aria-hidden="true">×</span></button>
       </header>
@@ -1589,8 +1660,8 @@
         </label>
         <fieldset class="asset-publish-ui-picker">
           <legend class="panel-hint">市场展示样式</legend>
-          <label class="asset-publish-ui-opt"><input type="radio" name="packUi" value="light"${init.packUi !== 'heavy' ? ' checked' : ''}> 轻卡包（竖版叠图，默认）</label>
-          <label class="asset-publish-ui-opt"><input type="radio" name="packUi" value="heavy"${init.packUi === 'heavy' ? ' checked' : ''}> 重卡包（横版大卡，适合体系/文档包）</label>
+          <label class="asset-publish-ui-opt"><input type="radio" name="packUi" value="light"${init.packUi !== 'heavy' ? ' checked' : ''}> 轻卡包（竖版紧凑 · 默认）</label>
+          <label class="asset-publish-ui-opt"><input type="radio" name="packUi" value="heavy"${init.packUi === 'heavy' ? ' checked' : ''}> 重卡包（加宽卡片 · 全宽横幅封面 · 适合体系/演示包）</label>
         </fieldset>
         <div class="asset-publish-cards-section">
           <div class="asset-publish-cards-head">
@@ -1628,7 +1699,7 @@
       const searchFocused = document.activeElement?.id === 'assetPublishTagSearch';
       const selStart = searchFocused ? document.activeElement.selectionStart : null;
       if (pickerEl) {
-        pickerEl.innerHTML = renderPublishCardPicker(wid, selectedIds, previewIds, thumbMap, pickerState, packEditor);
+        pickerEl.innerHTML = renderPublishCardPicker(wid, selectedIds, previewIds, thumbMap, pickerState, packEditor, cards);
         bindPickerEvents();
         if (searchFocused) {
           const el = pickerEl.querySelector('#assetPublishTagSearch');
@@ -1674,6 +1745,18 @@
           const fid = row?.dataset?.folderId;
           const f = packEditor.folders.find((x) => x.id === fid);
           if (f) f.name = String(t.value || f.name).trim().slice(0, 40) || f.name;
+        }
+        if (t?.matches?.('.asset-publish-folder-rename-inline')) {
+          const val = String(t.value || '').trim().slice(0, 40);
+          const fid = t.dataset.folderId || '';
+          const key = t.dataset.folderKey || '';
+          if (packEditor.mode === 'custom' && fid && fid !== '_unassigned') {
+            const f = packEditor.folders.find((x) => x.id === fid);
+            if (f && val) f.name = val;
+          } else if (key && val) {
+            packEditor.folderRenames = packEditor.folderRenames || {};
+            packEditor.folderRenames[key] = val;
+          }
         }
       });
       pickerEl?.addEventListener('click', (e) => {
@@ -1890,20 +1973,14 @@
       toast(`单包最多 ${PACK_CARD_MAX} 张，当前已选 ${selectedIds.size} 张，请减少勾选`);
       return;
     }
-    const packEditor = ctx?.packEditor || { mode: 'library', folders: [] };
+    const packEditor = ctx?.packEditor || { mode: 'library', folders: [], folderRenames: {} };
+    syncPackFolderNamesFromDom(packEditor, document.getElementById('assetPublishCardPicker'));
     const warehouseId = ctx?.warehouseId || getActiveWarehouseId();
     const warehouse = getWarehouseById(warehouseId);
     const allCards = getMainSiteCardsForWarehouse(warehouseId);
     const cards = allCards
       .filter((c) => selectedIds.has(c.id))
-      .map((c) => {
-        let group = c.group || null;
-        if (packEditor.mode === 'custom') {
-          const folder = packEditor.folders.find((f) => f.cardIds.has(c.id));
-          group = folder?.name || null;
-        }
-        return sanitizePackCardForPublish({ ...c, group });
-      });
+      .map((c) => sanitizePackCardForPublish({ ...c, group: resolvePackCardGroup(c, packEditor) }));
     const previewCardIds = collectPreviewCardIds(
       packEditor.folders,
       ctx?.previewIds || new Set(),
@@ -1955,19 +2032,13 @@
       toast('标题至少 2 个字');
       return;
     }
-    const packEditor = ctx?.packEditor || { mode: 'library', folders: [] };
+    const packEditor = ctx?.packEditor || { mode: 'library', folders: [], folderRenames: {} };
+    syncPackFolderNamesFromDom(packEditor, document.getElementById('assetPublishCardPicker'));
     const packCards = Array.isArray(ctx?.packCards) ? ctx.packCards : [];
     const selectedIds = ctx?.selectedIds || new Set();
     const cards = packCards
       .filter((c) => selectedIds.has(c.id))
-      .map((c) => {
-        let group = c.group || null;
-        if (packEditor.mode === 'custom') {
-          const folder = packEditor.folders.find((f) => f.cardIds.has(c.id));
-          group = folder?.name || null;
-        }
-        return sanitizePackCardForPublish({ ...c, group });
-      });
+      .map((c) => sanitizePackCardForPublish({ ...c, group: resolvePackCardGroup(c, packEditor) }));
     if (!cards.length) {
       toast('请至少保留一张卡片');
       return;
@@ -2267,7 +2338,7 @@
         <p>${esc(pkg.license || pkg.desc || '')}</p>
         <div class="asset-preview-foot-actions">
           ${owned ? '<button type="button" class="btn btn-secondary btn-sm" id="assetPreviewImportBtn">保存到卡片库</button>' : ''}
-          ${pkg.isAuthor ? '<button type="button" class="btn btn-ghost btn-sm" id="assetPreviewEditBtn">编辑卡片</button>' : ''}
+          ${pkg.isAuthor ? '<button type="button" class="btn btn-secondary btn-sm" id="assetPreviewEditBtn">编辑分组名称</button>' : ''}
           ${pkg.isAuthor ? '<button type="button" class="btn btn-ghost btn-sm" id="assetPreviewArchiveBtn">下架删除</button>' : ''}
           <button type="button" class="btn btn-primary btn-sm" id="assetPreviewBuyBtn"${owned && !pkg.isDemo ? ' disabled' : ''}>${buyLabel}</button>
         </div>

@@ -7,7 +7,7 @@ import { generateRoutes } from './generate';
 import { communityFeedHandler, communityRoutes } from './community';
 import { membershipRoutes } from './membership';
 import { membershipTaskRoutes } from './membership-tasks';
-import { communityMediaSignHandler, mediaRoutes } from './media';
+import { communityMediaSignHandler, mediaRoutes, privateCachedMediaHandler, publicCachedMediaHandler } from './media';
 import { extensionRoutes } from './extension';
 import { chatRoutes } from './chat';
 import { promptToolsRoutes } from './prompt-tools';
@@ -16,7 +16,11 @@ import { rateLimit } from '../../middleware/rate-limit';
 
 export const v1 = new Hono<{ Bindings: Env }>();
 
-/** 社区公开图：游客可浏览，无需登录 */
+/** 社区公开图：CDN 缓存代理（游客 img 直链，不走 supabase.co） */
+v1.get('/media/c/:enc', rateLimit(1200, 60_000), publicCachedMediaHandler);
+/** 私有图：带 token 的 CDN 缓存代理 */
+v1.get('/media/i/:enc', rateLimit(1200, 60_000), privateCachedMediaHandler);
+/** 社区 sign：返回 CDN URL */
 v1.get('/media/community/sign', rateLimit(400, 60_000), communityMediaSignHandler);
 
 /** 全站社区 Feed：游客与所有用户可见 */

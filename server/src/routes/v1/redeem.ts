@@ -36,6 +36,13 @@ function throwDbError(err: { message?: string; code?: string }, fallback: string
       '数据库迁移未完成，请执行 supabase/migrations/20260526000000_backend_core.sql'
     );
   }
+  if (msg.includes('membership_queued')) {
+    throw new ApiError(
+      503,
+      'MIGRATION_REQUIRED',
+      '请先在 Supabase SQL Editor 执行 supabase/migrations/20260531120000_membership_queued_tier.sql'
+    );
+  }
   throw new ApiError(500, 'DB_ERROR', fallback);
 }
 
@@ -92,6 +99,28 @@ redeemRoutes.post('/', async c => {
     throwDbError(e as { message?: string; code?: string }, '创建用户资料失败');
   }
 
+  const { error: redeemErr } = await admin
+    .from('code_redemptions')
+    .insert({ code, user_id: user.id });
+  if (redeemErr) {
+    if (redeemErr.code === '23505') {
+      throw new ApiError(400, 'ALREADY_REDEEMED', '您已使用过该激活码');
+    }
+    throwDbError(redeemErr, '写入兑换记录失败');
+  }
+
+  const { data: claimedRow, error: useErr } = await admin
+    .from('activation_codes')
+    .update({ used_count: row.used_count + 1 })
+    .eq('code', code)
+    .lt('used_count', row.max_uses)
+    .select('used_count')
+    .maybeSingle();
+  if (useErr) throwDbError(useErr, '更新激活码次数失败');
+  if (!claimedRow) {
+    throw new ApiError(400, 'CODE_EXHAUSTED', '该激活码已达使用上限');
+  }
+
   if (row.credits > 0) {
     const { error: creditErr } = await admin.rpc('apply_credit_delta', {
       p_user_id: user.id,
@@ -123,7 +152,26 @@ redeemRoutes.post('/', async c => {
       : parsed.data.creditGrantMode || profileBefore.credit_grant_mode || 'daily';
     if (tier === 'lite') mode = 'daily';
 
-    const profileAfter = await extendMembershipDays(admin, profileBefore, days, tier);
+    let profileAfter: import('../../lib/supabase').Profile;
+    try {
+      profileAfter = await extendMembershipDays(admin, profileBefore, days, tier);
+    } catch (e) {
+      const msg = String(e instanceof Error ? e.message : e);
+      if (msg.includes('membership_queued')) {
+        throw new ApiError(
+          503,
+          'MIGRATION_REQUIRED',
+          '会员排队字段未就绪，请执行 20260531120000_membership_queued_tier.sql；积分已入账'
+        );
+      }
+      throw new ApiError(
+        500,
+        'MEMBERSHIP_EXTEND_FAILED',
+        row.credits > 0
+          ? '积分已到账，但会员时长写入失败，请联系客服补全会员'
+          : '会员时长写入失败，请稍后重试或联系客服'
+      );
+    }
     membershipUntil = profileAfter.membership_until;
 
     const memberPatch: Record<string, unknown> = {
@@ -135,17 +183,6 @@ redeemRoutes.post('/', async c => {
 
     await admin.from('profiles').update(memberPatch).eq('user_id', user.id);
   }
-
-  const { error: redeemErr } = await admin
-    .from('code_redemptions')
-    .insert({ code, user_id: user.id });
-  if (redeemErr) throwDbError(redeemErr, '写入兑换记录失败');
-
-  const { error: useErr } = await admin
-    .from('activation_codes')
-    .update({ used_count: row.used_count + 1 })
-    .eq('code', code);
-  if (useErr) throwDbError(useErr, '更新激活码次数失败');
 
   const profile = await syncMembershipCredits(admin, user.id);
   const creditsInfo = membershipCreditsPayload(profile);

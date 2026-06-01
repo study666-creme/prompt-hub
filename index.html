@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260604a';
+    window.__APP_BUILD__ = '20260606n';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -62,8 +62,8 @@
   <link rel="stylesheet" href="styles-theme.css?v=20260615z">
   <link rel="stylesheet" href="styles-mobile.css?v=20260603t">
   <link rel="stylesheet" href="styles-settings.css?v=20260616n">
-  <link rel="stylesheet" href="styles-features.css?v=20260604a">
-  <link rel="stylesheet" href="styles-assets.css?v=20260603w">
+  <link rel="stylesheet" href="styles-features.css?v=20260606n">
+  <link rel="stylesheet" href="styles-assets.css?v=20260606e">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
   <script src="theme.js?v=20260615z"></script>
@@ -347,20 +347,19 @@
           <a class="btn btn-primary collect-download-btn" href="downloads/prompt-hub-extension.zip" download="prompt-hub-extension.zip">下载浏览器插件（zip）</a>
           <p class="settings-hint">Chrome / Edge 通用 · 约 200KB · 下载后解压到任意文件夹</p>
         </div>
-        <h4 class="collect-section-title">安装（2 分钟）</h4>
+        <h4 class="collect-section-title">安装</h4>
         <ol class="settings-help-list collect-steps-list">
-          <li>点击上方按钮下载 zip，解压到电脑（例如「下载/PromptHub扩展」）。</li>
-          <li>打开 Chrome 或 Edge → 地址栏输入 <strong>chrome://extensions</strong>（Edge 为 <strong>edge://extensions</strong>）。</li>
+          <li>点击上方按钮下载 zip，解压到电脑。</li>
+          <li>打开 Chrome 浏览器或 Edge 浏览器 → 地址栏输入 <strong>chrome://extensions</strong>（Edge 为 <strong>edge://extensions</strong>）。</li>
           <li>打开右上角<strong>开发者模式</strong> → 点<strong>加载已解压的扩展程序</strong> → 选中刚解压的文件夹。</li>
           <li>打开 <a href="https://prompt-hub.cn" target="_blank" rel="noopener">prompt-hub.cn</a> 并<strong>登录</strong>，扩展会自动同步账号。</li>
         </ol>
         <h4 class="collect-section-title">怎么用</h4>
         <ol class="settings-help-list collect-steps-list">
           <li>点击浏览器右上角 <strong>Prompt Hub 存卡</strong> 图标 → <strong>在当前页打开面板</strong>（首次需允许访问当前网站）。</li>
-          <li><strong>划选文字</strong> → 点「复制到提示词」；或<strong>鼠标悬停段落</strong> →「复制段落」。</li>
-          <li><strong>拖入 / 粘贴图片</strong>到面板（仅预览，点保存才提交）。</li>
-          <li>需要公开时，点<strong>公开到社区</strong>旁的开关（提示词 ≥15 字且须配图；可在面板 ⚙ 设置里关闭自动开启）。</li>
-          <li>点<strong>保存到仓库</strong>。若在设置里开启「自动保存」，提示词与图片都填入后会自动保存；关闭则需手动点保存。</li>
+          <li><strong>鼠标悬停段落</strong> → 点「复制到提示词」；或<strong>划选文字</strong> →「复制到提示词」。</li>
+          <li><strong>拖入 / 粘贴图片</strong>（无需选中图片框，截图完直接 Ctrl+V 即可）到面板。</li>
+          <li>填入图片和文字后卡片自动保存到仓库（可在面板 ⚙ 设置里关闭）。</li>
         </ol>
         <h4 class="collect-section-title">小提示</h4>
         <ul class="settings-help-list">
@@ -544,7 +543,7 @@
         <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260604a</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260606n</p>
     </div>
   </nav>
 
@@ -849,6 +848,7 @@
             </div>
             <div class="feature-tabs community-scope-tabs" role="group" aria-label="浏览范围">
               <button type="button" class="feature-tab active" data-community-scope="all">全部作品</button>
+              <button type="button" class="feature-tab" data-community-scope="curated">社区精选</button>
               <button type="button" class="feature-tab" data-community-scope="following">我的关注</button>
             </div>
             <input type="search" class="feature-search" id="communitySearch" placeholder="搜索提示词…" autocomplete="off">
@@ -1005,7 +1005,7 @@
                         <option value="jimeng">即梦爆款（竖屏封面）</option>
                         <option value="guofeng">国风仙侠</option>
                         <option value="realistic">写实摄影</option>
-                        <option value="glamour">官感美学（女性专属）</option>
+                        <option value="glamour">女性美学（女性专属）</option>
                         <option value="malePower">男性力量</option>
                         <option value="sd">写实 / SD 标签风</option>
                         <option value="anime">二次元插画</option>
@@ -1255,7 +1255,7 @@
       <header class="subscribe-panel-head">
         <div>
           <h3 id="trialTasksTitle">免费试用 · 任务中心</h3>
-          <p class="subscribe-panel-sub">完成任务领取会员天数与积分 · 防刷：社区作品需有效提示词与配图</p>
+          <p class="subscribe-panel-sub">完成任务领取会员天数与积分</p>
         </div>
         <button type="button" class="modal-close-btn modal-close-btn--icon" id="trialTasksCloseBtn" aria-label="关闭任务中心"><span aria-hidden="true">×</span></button>
       </header>
@@ -1348,20 +1348,20 @@
   <script src="api-config.js"></script>
   <script src="api-client.js?v=20260604a"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260602p"></script>
-  <script src="card-image-loader.js?v=20260530f"></script>
+  <script src="supabase-sync.js?v=20260606l"></script>
+  <script src="card-image-loader.js?v=20260606l"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
   <script src="subscription.js?v=20260622e"></script>
   <script src="trial-tasks.js?v=20260602r"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="script.js?v=20260604a"></script>
+  <script src="script.js?v=20260606h"></script>
   <script src="points-system.js?v=20260606m"></script>
-  <script src="imagegen-prompt-kit.js?v=20260603t"></script>
-  <script src="imagegen-prompt-tools.js?v=20260603t"></script>
-  <script src="features-draft.js?v=20260604a"></script>
-  <script src="community-gacha.js?v=20260604a"></script>
-  <script src="features-assets.js?v=20260603v"></script>
+  <script src="imagegen-prompt-kit.js?v=20260606l"></script>
+  <script src="imagegen-prompt-tools.js?v=20260606l"></script>
+  <script src="features-draft.js?v=20260606m"></script>
+  <script src="community-gacha.js?v=20260604d"></script>
+  <script src="features-assets.js?v=20260606c"></script>
   <script src="hotfix-image-layout.js?v=20260603t"></script>
   <script src="mobile.js?v=20260606m"></script>
   <script>

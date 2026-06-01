@@ -15,9 +15,10 @@ type SubmitParams = {
   refImageUrls?: string[];
 };
 
-type TaskPollResult = {
+export type TaskPollResult = {
   status: string;
   imageUrl: string | null;
+  imageUrls: string[];
   errorMessage: string | null;
 };
 
@@ -55,42 +56,56 @@ function pickUrl(value: unknown): string | null {
       pickUrl(o.image_url) ||
       pickUrl(o.imageUrl) ||
       pickUrl(o.uri) ||
-      pickUrl(o.href)
+      pickUrl(o.href) ||
+      pickUrl(o.output_url)
     );
   }
   return null;
 }
 
-function extractImageUrl(payload: unknown): string | null {
-  if (!payload || typeof payload !== 'object') return null;
+/** 收集任务结果中全部图片 URL（上游偶发 n>1 或 images 数组） */
+export function extractAllImageUrls(payload: unknown): string[] {
+  if (!payload || typeof payload !== 'object') return [];
   const p = payload as Record<string, unknown>;
   const data = p.data;
-  if (!data || typeof data !== 'object') return null;
+  if (!data || typeof data !== 'object') return [];
   const d = data as Record<string, unknown>;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (u: string | null) => {
+    if (!u || seen.has(u)) return;
+    seen.add(u);
+    out.push(u);
+  };
 
-  const direct =
-    pickUrl(d.output_url) ||
-    pickUrl(d.image_url) ||
-    pickUrl(d.imageUrl) ||
-    pickUrl(d.url) ||
-    pickUrl(d.output);
-  if (direct) return direct;
-
+  const buckets: unknown[] = [
+    d.output_url,
+    d.image_url,
+    d.imageUrl,
+    d.url,
+    d.output,
+    d.outputs,
+    d.images,
+    d.image
+  ];
   const result = d.result;
-  if (!result || typeof result !== 'object') return null;
-  const r = result as Record<string, unknown>;
-  const fromResult =
-    pickUrl(r.url) ||
-    pickUrl(r.image_url) ||
-    pickUrl(r.imageUrl) ||
-    pickUrl(r.output_url) ||
-    pickUrl(r.images) ||
-    pickUrl(r.image);
-  if (fromResult) return fromResult;
+  if (result && typeof result === 'object') {
+    const r = result as Record<string, unknown>;
+    buckets.push(r.url, r.image_url, r.imageUrl, r.output_url, r.images, r.image, r.outputs);
+  }
+  for (const b of buckets) {
+    if (Array.isArray(b)) {
+      for (const item of b) push(pickUrl(item));
+    } else {
+      push(pickUrl(b));
+    }
+  }
+  return out;
+}
 
-  const images = r.images;
-  if (!Array.isArray(images) || !images[0]) return null;
-  return pickUrl(images[0]);
+function extractImageUrl(payload: unknown): string | null {
+  const all = extractAllImageUrls(payload);
+  return all[0] || null;
 }
 
 function buildRequestBody(params: SubmitParams): Record<string, unknown> {
@@ -174,7 +189,7 @@ export async function fetchApimartTaskOnce(
   }
 
   if (!res.ok) {
-    return { status: 'pending', imageUrl: null, errorMessage: null };
+    return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
   }
 
   const data =
@@ -182,30 +197,46 @@ export async function fetchApimartTaskOnce(
       ? (json as { data: Record<string, unknown> }).data
       : null;
   if (!data) {
-    return { status: 'pending', imageUrl: null, errorMessage: null };
+    return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
   }
 
   const status = String(data.status || '');
-  if (status === 'completed') {
-    const imageUrl = extractImageUrl(json);
-    if (!imageUrl) {
+  const imageUrls = extractAllImageUrls(json);
+
+  if (status === 'completed' || (status !== 'failed' && imageUrls.length > 0)) {
+    if (!imageUrls.length) {
       return {
         status: 'failed',
         imageUrl: null,
+        imageUrls: [],
         errorMessage: 'upstream_no_image'
       };
     }
-    return { status, imageUrl, errorMessage: null };
+    return {
+      status: 'completed',
+      imageUrl: imageUrls[0],
+      imageUrls,
+      errorMessage: null
+    };
   }
   if (status === 'failed') {
+    if (imageUrls.length) {
+      return {
+        status: 'completed',
+        imageUrl: imageUrls[0],
+        imageUrls,
+        errorMessage: null
+      };
+    }
     return {
       status,
       imageUrl: null,
+      imageUrls: [],
       errorMessage: String(data.error_message || data.error || 'upstream_failed')
     };
   }
 
-  return { status: 'pending', imageUrl: null, errorMessage: null };
+  return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
 }
 
 export async function pollApimartTask(
@@ -225,5 +256,36 @@ export async function pollApimartTask(
     await new Promise(resolve => setTimeout(resolve, intervalMs));
   }
 
-  return { status: 'timeout', imageUrl: null, errorMessage: 'upstream_timeout' };
+  return { status: 'timeout', imageUrl: null, imageUrls: [], errorMessage: 'upstream_timeout' };
+}
+
+/** 标记失败/超时前多次确认，避免上游已成功却退款 */
+export async function confirmApimartTaskOutcome(
+  apiKey: string,
+  baseUrl: string | undefined,
+  taskId: string,
+  opts?: { attempts?: number; intervalMs?: number }
+): Promise<TaskPollResult> {
+  const attempts = Math.max(1, opts?.attempts ?? 6);
+  const intervalMs = Math.max(2000, opts?.intervalMs ?? 10000);
+  let last: TaskPollResult = {
+    status: 'pending',
+    imageUrl: null,
+    imageUrls: [],
+    errorMessage: null
+  };
+  for (let i = 0; i < attempts; i += 1) {
+    last = await fetchApimartTaskOnce(apiKey, baseUrl, taskId);
+    if (last.status === 'completed' && last.imageUrl) return last;
+    if (last.status === 'failed' && !last.imageUrls.length) {
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, intervalMs));
+      continue;
+    }
+    if (last.status === 'pending') {
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, intervalMs));
+      continue;
+    }
+    return last;
+  }
+  return last;
 }

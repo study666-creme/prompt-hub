@@ -5,6 +5,7 @@ import {
   storagePathFromRef,
   toStorageRef
 } from './image-archive';
+import { communityImagePathCandidates, findFirstExistingStoragePath, storageObjectExistsLight } from './media-cdn';
 
 const BUCKET = 'card-images';
 
@@ -18,16 +19,7 @@ async function storageObjectExists(
   admin: SupabaseClient,
   path: string
 ): Promise<boolean> {
-  const clean = path.replace(/^\//, '');
-  if (!clean) return false;
-  const { data, error } = await admin.storage.from(BUCKET).createSignedUrl(clean, 60);
-  if (error || !data?.signedUrl) return false;
-  try {
-    const res = await fetch(data.signedUrl, { method: 'HEAD' });
-    return res.ok;
-  } catch {
-    return false;
-  }
+  return storageObjectExistsLight(admin, path, BUCKET);
 }
 
 /** 同步到全站前：在桶里找到真实存在的路径（与 uploadCardImage 命名一致） */
@@ -182,7 +174,7 @@ export async function unpublishGhostCommunityPosts(
 ): Promise<number> {
   const { data, error } = await admin
     .from('community_posts')
-    .select('id, author_id, author_name, image')
+    .select('id, author_id, author_name, image, source_card_id')
     .eq('published', true);
   if (error) throw error;
   const now = new Date().toISOString();
@@ -192,6 +184,7 @@ export async function unpublishGhostCommunityPosts(
     author_id: string;
     author_name: string;
     image: string | null;
+    source_card_id: string | null;
   }[]) {
     const aid = String(row.author_id || '').trim();
     const name = String(row.author_name || '').trim();
@@ -202,8 +195,13 @@ export async function unpublishGhostCommunityPosts(
     if (!img) {
       missingFile = true;
     } else {
-      const path = storagePathFromRef(img);
-      if (path) missingFile = !(await storageObjectExists(admin, path));
+      const candidates = communityImagePathCandidates(
+        img,
+        aid,
+        String(row.source_card_id || '').trim() || undefined
+      );
+      const found = await findFirstExistingStoragePath(admin, candidates, BUCKET);
+      missingFile = !found;
     }
     if (!ghostAuthor && !missingFile) continue;
     const { error: upErr } = await admin

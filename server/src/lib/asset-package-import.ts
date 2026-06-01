@@ -1,10 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isStorageRef, storagePathFromRef, toStorageRef } from './image-archive';
 import { ApiError } from './errors';
+import { encodeStoragePath, isAllowedCommunityMediaPath } from './media-cdn';
 import type { Profile } from './supabase';
 import { isMembershipActive } from './supabase';
 
 const BUCKET = 'card-images';
+const MEDIA_CDN_ORIGIN = 'https://api.prompt-hub.cn';
 const FREE_CARD_LIMIT = 100;
 
 export type PackCard = {
@@ -204,13 +206,12 @@ export async function importAssetPackageToWarehouse(
 const PACK_FOLDER_PREVIEW_MAX = 5;
 
 async function signPackCardImage(
-  admin: SupabaseClient,
+  _admin: SupabaseClient,
   imageRef: string | null | undefined
 ): Promise<string | null> {
   const path = storagePathFromRef(String(imageRef || ''));
-  if (path) {
-    const { data } = await admin.storage.from(BUCKET).createSignedUrl(path, 3600);
-    return data?.signedUrl || null;
+  if (path && isAllowedCommunityMediaPath(path)) {
+    return `${MEDIA_CDN_ORIGIN}/api/v1/media/c/${encodeStoragePath(path)}`;
   }
   if (imageRef && /^https?:\/\//i.test(String(imageRef))) return String(imageRef);
   return null;
@@ -290,9 +291,8 @@ export async function signPreviewImagesForPackage(
     list.map(async (c) => {
       let imageUrl: string | null = null;
       const path = storagePathFromRef(String(c.image || ''));
-      if (path) {
-        const { data } = await admin.storage.from(BUCKET).createSignedUrl(path, 7200);
-        imageUrl = data?.signedUrl || null;
+      if (path && isAllowedCommunityMediaPath(path)) {
+        imageUrl = `${MEDIA_CDN_ORIGIN}/api/v1/media/c/${encodeStoragePath(path)}`;
       } else if (c.image && /^https?:\/\//i.test(c.image)) {
         imageUrl = c.image;
       }

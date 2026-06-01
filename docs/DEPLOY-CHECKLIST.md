@@ -50,7 +50,7 @@ Worker 名：**prompt-hub-api**
 1. 打开 https://prompt-hub.cn  
 2. F12 → **Application** → **Service Workers** → **Unregister**  
 3. **Ctrl+F5** 强刷  
-4. 左下角应显示当前构建号（如 `版本 20260614b`）
+4. 左下角应显示当前构建号（如 `版本 20260606n`）
 
 ---
 

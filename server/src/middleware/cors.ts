@@ -16,7 +16,7 @@ export function createCorsMiddleware(env: Env) {
       return null;
     },
     allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Authorization', 'Content-Type'],
+    allowHeaders: ['Authorization', 'Content-Type', 'X-Admin-Secret'],
     maxAge: 86400,
     credentials: true
   });

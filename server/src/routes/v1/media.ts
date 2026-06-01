@@ -4,24 +4,21 @@ import { z } from 'zod';
 import type { Env } from '../../env';
 import { ApiError } from '../../lib/errors';
 import { storagePathFromRef } from '../../lib/image-archive';
+import {
+  buildPublicMediaCdnUrl,
+  buildPrivateMediaCdnUrl,
+  communityImagePathCandidates,
+  decodeStoragePath,
+  findFirstExistingStoragePath,
+  isAllowedCommunityMediaPath,
+  MEDIA_CDN_TOKEN_TTL_SEC,
+  serveCachedStorageImage,
+  verifyMediaAccessToken
+} from '../../lib/media-cdn';
 import { createAdminClient } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
 
 const BUCKET = 'card-images';
-const SIGNED_SEC = 3600;
-/** 社区公开浏览：用户目录下任意层级图片（含 generated/） */
-function isAllowedCommunityPath(path: string): boolean {
-  const key = path.replace(/^\//, '');
-  if (!key || key.includes('..')) return false;
-  return /^[^/]+\/.+\.(jpe?g|png|webp)$/i.test(key);
-}
-
-const ALLOWED_FETCH_HOSTS = [
-  'apimart.ai',
-  'api.apimart.ai',
-  'filesystem.site',
-  'supabase.co'
-];
 
 function assertOwnPath(userId: string, path: string): void {
   const norm = path.replace(/^\//, '');
@@ -30,90 +27,54 @@ function assertOwnPath(userId: string, path: string): void {
   }
 }
 
-function isAllowedRemoteUrl(url: string): boolean {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== 'https:') return false;
-    return ALLOWED_FETCH_HOSTS.some(
-      h => u.hostname === h || u.hostname.endsWith('.' + h)
-    );
-  } catch {
-    return false;
-  }
-}
-
 export const mediaRoutes = new Hono<{ Bindings: Env }>();
 
 mediaRoutes.use('*', rateLimit(480, 60_000));
 
-/** 仅原图短时签名（不用 Storage transform，避免未开通图像处理时整站 500） */
-async function createSignedUrlSafe(
-  admin: ReturnType<typeof createAdminClient>,
-  path: string,
-  _thumbW?: number
-) {
-  const clean = path.replace(/^\//, '');
-  return admin.storage.from(BUCKET).createSignedUrl(clean, SIGNED_SEC);
-}
-
-function sanitizeCardFileBase(cardId: string): string {
-  return String(cardId).replace(/[^a-zA-Z0-9_-]/g, '_');
-}
-
-function communityPathCandidates(
-  ref: string,
-  authorId?: string,
-  cardId?: string
-): string[] {
-  const out: string[] = [];
-  const add = (p: string) => {
-    const key = p.replace(/^\//, '');
-    if (key && isAllowedCommunityPath(key) && !out.includes(key)) out.push(key);
-  };
-  const fromRef = storagePathFromRef(ref);
-  if (fromRef) add(fromRef);
-  const aid = (authorId || '').trim();
-  const cid = (cardId || '').trim();
-  if (aid && cid) {
-    const base = sanitizeCardFileBase(cid);
-    add(`${aid}/${base}.jpg`);
-    add(`${aid}/${cid}.jpg`);
-    add(`${aid}/${base}.webp`);
-    add(`${aid}/${base}.png`);
+/** Cloudflare 边缘缓存的公开社区图（同一张图只从 Supabase 拉一次） */
+export async function publicCachedMediaHandler(c: Context<{ Bindings: Env }>) {
+  const enc = c.req.param('enc') || '';
+  const path = decodeStoragePath(enc);
+  if (!path || !isAllowedCommunityMediaPath(path)) {
+    throw new ApiError(404, 'NOT_FOUND', '无效路径');
   }
-  return out;
+  return serveCachedStorageImage(c, path);
 }
 
-/** 游客/未登录：社区流图片短时签名（只读，限路径格式） */
+/** 带短时 token 的私有图（img 可直接用，重复访问走 CF 缓存） */
+export async function privateCachedMediaHandler(c: Context<{ Bindings: Env }>) {
+  const enc = c.req.param('enc') || '';
+  const path = decodeStoragePath(enc);
+  if (!path) throw new ApiError(404, 'NOT_FOUND', '无效路径');
+  const exp = Number(c.req.query('e') || 0);
+  const sig = String(c.req.query('s') || '');
+  const ok = await verifyMediaAccessToken(c.env, path, exp, sig);
+  if (!ok) throw new ApiError(401, 'UNAUTHORIZED', '图片链接无效或已过期');
+  return serveCachedStorageImage(c, path);
+}
+
+/** 游客/未登录：返回 CDN 代理 URL（不再返回 supabase.co 直链） */
 export async function communityMediaSignHandler(c: Context<{ Bindings: Env }>) {
   const ref = (c.req.query('ref') || '').trim();
   const authorId = (c.req.query('authorId') || '').trim();
   const cardId = (c.req.query('cardId') || '').trim();
-  const paths = communityPathCandidates(ref, authorId, cardId);
+  const paths = communityImagePathCandidates(ref, authorId, cardId);
   if (!paths.length) {
     throw new ApiError(400, 'VALIDATION_ERROR', '无效的图片引用');
   }
   const admin = createAdminClient(c.env);
-  const thumbW = Math.min(1200, Math.max(0, Number(c.req.query('w') || 640)));
-  let lastErr: unknown = null;
-  for (const path of paths) {
-    const { data, error } = await createSignedUrlSafe(admin, path, thumbW);
-    if (!error && data?.signedUrl) {
-      return c.json({
-        ok: true,
-        data: { url: data.signedUrl, expiresIn: SIGNED_SEC }
-      });
-    }
-    lastErr = error;
+  const found = await findFirstExistingStoragePath(admin, paths, BUCKET);
+  if (found) {
+    const url = await buildPublicMediaCdnUrl(c, found);
+    return c.json({
+      ok: true,
+      data: { url, expiresIn: MEDIA_CDN_TOKEN_TTL_SEC, cdn: true }
+    });
   }
-  const msg = String((lastErr as Error)?.message || '签名 URL 生成失败').slice(0, 120);
-  if (/not found|object not found|does not exist/i.test(msg)) {
-    throw new ApiError(404, 'NOT_FOUND', 'Object not found');
-  }
-  throw new ApiError(500, 'SIGN_FAILED', msg);
+  throw new ApiError(404, 'NOT_FOUND', 'Object not found');
 }
 
-/** 将 storage:// 转为短时签名 URL（img 可直接加载） */
+/** 将 storage:// 转为 CDN 代理 URL */
 mediaRoutes.get('/sign', async c => {
   const user = c.get('user');
   const ref = (c.req.query('ref') || '').trim();
@@ -123,16 +84,10 @@ mediaRoutes.get('/sign', async c => {
   }
   assertOwnPath(user.id, path);
 
-  const admin = createAdminClient(c.env);
-  const thumbW = Math.min(1200, Math.max(0, Number(c.req.query('w') || 0)));
-  const { data, error } = await createSignedUrlSafe(admin, path, thumbW);
-  if (error || !data?.signedUrl) {
-    throw new ApiError(500, 'SIGN_FAILED', '签名 URL 生成失败');
-  }
-
+  const url = await buildPrivateMediaCdnUrl(c, path);
   return c.json({
     ok: true,
-    data: { url: data.signedUrl, expiresIn: SIGNED_SEC }
+    data: { url, expiresIn: MEDIA_CDN_TOKEN_TTL_SEC, cdn: true }
   });
 });
 
@@ -140,14 +95,12 @@ const signBatchBodySchema = z.object({
   refs: z.array(z.string().max(500)).max(48)
 });
 
-/** 列表首屏：一次请求批量签名（避免浏览器对 Supabase 逐张 sign 超时） */
 mediaRoutes.post('/sign-batch', async c => {
   const user = c.get('user');
   const parsed = signBatchBodySchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
     throw new ApiError(400, 'VALIDATION_ERROR', '批量签名参数无效');
   }
-  const admin = createAdminClient(c.env);
   const pathSet = new Set<string>();
   for (const ref of parsed.data.refs) {
     const path = storagePathFromRef(ref);
@@ -160,25 +113,18 @@ mediaRoutes.post('/sign-batch', async c => {
     pathSet.add(path.replace(/^\//, ''));
   }
   const paths = [...pathSet];
-  if (!paths.length) {
-    return c.json({ ok: true, data: { urls: {}, expiresIn: SIGNED_SEC } });
-  }
   const urls: Record<string, string> = {};
-  const concurrency = 20;
-  let idx = 0;
-  async function worker() {
-    while (idx < paths.length) {
-      const i = idx++;
-      const key = paths[i];
-      const { data, error } = await createSignedUrlSafe(admin, key);
-      if (!error && data?.signedUrl) urls[key] = data.signedUrl;
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, paths.length) }, () => worker()));
-  return c.json({ ok: true, data: { urls, expiresIn: SIGNED_SEC } });
+  await Promise.all(
+    paths.map(async key => {
+      urls[key] = await buildPrivateMediaCdnUrl(c, key);
+    })
+  );
+  return c.json({
+    ok: true,
+    data: { urls, expiresIn: MEDIA_CDN_TOKEN_TTL_SEC, cdn: true }
+  });
 });
 
-/** 从已完成生图任务取可展示 URL（优先 storage 签名） */
 mediaRoutes.get('/generation/:jobId/url', async c => {
   const user = c.get('user');
   const jobId = c.req.param('jobId');
@@ -201,26 +147,32 @@ mediaRoutes.get('/generation/:jobId/url', async c => {
   const path = storagePathFromRef(raw);
   if (path) {
     assertOwnPath(user.id, path);
-    const { data, error: signErr } = await admin.storage
-      .from(BUCKET)
-      .createSignedUrl(path, SIGNED_SEC);
-    if (signErr || !data?.signedUrl) {
-      throw new ApiError(500, 'SIGN_FAILED', '签名失败');
-    }
-    return c.json({ ok: true, data: { url: data.signedUrl } });
+    const url = await buildPrivateMediaCdnUrl(c, path);
+    return c.json({ ok: true, data: { url, cdn: true } });
   }
 
-  if (typeof raw === 'string' && raw.startsWith('https://') && isAllowedRemoteUrl(raw)) {
+  if (typeof raw === 'string' && raw.startsWith('https://')) {
     return c.json({ ok: true, data: { url: raw } });
   }
 
   throw new ApiError(400, 'INVALID_IMAGE', '无法解析图片地址');
 });
 
-/** 代理上游图片（需登录；供 fetch 转 blob，或 img 加 ?access_token= 暂不使用） */
+const ALLOWED_FETCH_HOSTS = ['apimart.ai', 'api.apimart.ai', 'filesystem.site', 'supabase.co', 'api.prompt-hub.cn', 'prompt-hub.cn'];
+
+function isAllowedRemoteUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:') return false;
+    return ALLOWED_FETCH_HOSTS.some(
+      h => u.hostname === h || u.hostname.endsWith('.' + h)
+    );
+  } catch {
+    return false;
+  }
+}
+
 mediaRoutes.get('/fetch', async c => {
-  const user = c.get('user');
-  void user;
   const url = (c.req.query('url') || '').trim();
   if (!url || !isAllowedRemoteUrl(url)) {
     throw new ApiError(400, 'VALIDATION_ERROR', '不允许的图片地址');

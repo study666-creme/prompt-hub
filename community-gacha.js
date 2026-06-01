@@ -352,7 +352,7 @@
   }
 
   function resetCardVisual() {
-    cardEl?.classList.remove('is-flipped', 'is-ssr', 'is-preloading', 'is-revealing');
+    cardEl?.classList.remove('is-flipped', 'is-ssr', 'is-sr', 'is-preloading', 'is-revealing');
     metaEl?.classList.add('hidden');
     statusEl?.classList.add('hidden');
     overlayEl?.querySelector('.community-gacha-front-loading')?.classList.add('hidden');
@@ -394,6 +394,7 @@
     refreshCollectButton(draw.post);
 
     if (draw.tier === 'ssr') cardEl?.classList.add('is-ssr');
+    else if (draw.tier === 'sr') cardEl?.classList.add('is-sr');
 
     statusEl?.classList.remove('hidden');
     if (statusEl) statusEl.textContent = '正在揭示…';
@@ -458,42 +459,33 @@
       return;
     }
     const prevText = collectBtn?.textContent || '收藏入仓库';
+    collectBtn?.classList.add('is-collected', 'is-bounce', 'is-loading');
     if (collectBtn) {
       collectBtn.disabled = true;
-      collectBtn.textContent = '收藏中…';
-      collectBtn.classList.add('is-loading');
+      collectBtn.textContent = '已收藏 ✓';
     }
-    const r = await window.addCardFromCommunity?.(post);
+    toast('已收藏入卡片仓库');
+    overlayEl?.querySelector('.community-gacha-card-scene')?.classList.add('collect-sparkle');
+    setTimeout(() => {
+      collectBtn?.classList.remove('is-bounce');
+      overlayEl?.querySelector('.community-gacha-card-scene')?.classList.remove('collect-sparkle');
+    }, 700);
+
+    const r = await window.addCardFromCommunity?.(post, { deferRender: true, skipBlobCopy: true });
     collectBtn?.classList.remove('is-loading');
     if (r?.duplicate) {
       markGachaCollectTask();
-      collectBtn?.classList.add('is-collected', 'is-bounce');
-      if (collectBtn) {
-        collectBtn.textContent = '已在仓库';
-        collectBtn.disabled = true;
-      }
-      toast('已在仓库中');
-      setTimeout(() => collectBtn?.classList.remove('is-bounce'), 600);
+      if (collectBtn) collectBtn.textContent = '已在仓库 ✓';
       return;
     }
     if (r?.ok) {
       markGachaCollectTask();
-      collectBtn?.classList.add('is-collected', 'is-bounce');
-      if (collectBtn) {
-        collectBtn.textContent = '已收藏 ✓';
-        collectBtn.disabled = true;
-      }
-      toast('已收藏入卡片仓库');
-      overlayEl?.querySelector('.community-gacha-card-scene')?.classList.add('collect-sparkle');
-      setTimeout(() => {
-        collectBtn?.classList.remove('is-bounce');
-        overlayEl?.querySelector('.community-gacha-card-scene')?.classList.remove('collect-sparkle');
-      }, 700);
       return;
     }
     if (collectBtn) {
       collectBtn.disabled = false;
       collectBtn.textContent = prevText;
+      collectBtn.classList.remove('is-collected');
     }
     toast('收藏失败，请稍后再试');
   }

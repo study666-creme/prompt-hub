@@ -21,7 +21,7 @@ import { rateLimit } from '../../middleware/rate-limit';
 
 const optimizeSchema = z.object({
   prompt: z.string().min(2).max(4000),
-  target: z.enum(['general', 'sd', 'anime', 'jimeng', 'guofeng', 'realistic', 'glamour', 'malePower', 'bodyBeauty']).optional()
+  target: z.enum(['general', 'sd', 'anime', 'jimeng', 'guofeng', 'realistic', 'glamour', 'malePower']).optional()
 });
 
 const reverseSchema = z.object({
@@ -66,8 +66,6 @@ const OPTIMIZE_SYSTEM: Record<string, string> = {
     '你是国风 / 仙侠 / 汉服生图提示词专家。优化用户提示词：补充朝代感服饰、发饰、场景（园林/山水/宫殿）、丁达尔光/柔雾/飘带动态、水墨或工笔质感、仙气氛围与质量词。输出仅一段中文提示词，不要解释。',
   realistic:
     '你是写实摄影 / 写真提示词专家。优化用户提示词：补充镜头焦段感（如 85mm/35mm）、光线（伦勃朗/自然光/胶片）、肤质与材质真实感、景深、构图与 4K 画质描述。输出仅一段中文提示词，不要解释。',
-  bodyBeauty:
-    '你是艺术人体摄影 / fine art 提示词专家。优化用户提示词：强调人体线条、姿态、光影与古典/现代艺术构图，性感来自氛围与结构美（舞蹈、运动、雕塑感），禁止裸露私密部位与色情描写。人物须衣着完整（泳装/练功服/礼服/运动装等）。参考 Avedon、Lindbergh、Vogue 艺术人体专题。输出仅一段中文提示词，不要解释。',
   malePower:
     '你是男性力量 / 健身 / 运动员肖像提示词专家。优化用户提示词：强调宽肩窄腰倒三角、薄肌或运动员体格、人鱼线、背阔肌与力量姿态，雄性魅力来自体态与气场而非裸露。人物须男性、衣着完整（泳裤/运动装/西装/训练服等），禁止裸露私密部位与色情描写。风格参考 GQ、Men\'s Health、Sports Illustrated 男体专题。输出仅一段中文提示词，不要解释。',
   glamour:

@@ -728,7 +728,7 @@
     hoverCopyBtn = document.createElement('button');
     hoverCopyBtn.type = 'button';
     hoverCopyBtn.className = 'ph-ext-copy-btn hover-mode hidden';
-    hoverCopyBtn.textContent = '复制段落';
+    hoverCopyBtn.textContent = '复制到提示词';
     floatLayer.appendChild(hoverCopyBtn);
     hoverCopyBtn.addEventListener('mousedown', (e) => e.preventDefault());
     hoverCopyBtn.addEventListener('click', (e) => {

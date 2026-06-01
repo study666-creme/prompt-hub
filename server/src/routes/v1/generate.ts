@@ -44,6 +44,18 @@ function friendlyGenerationError(raw: string): string {
   if (/content.*policy|safety|moderation|blocked|违规|敏感/i.test(s)) {
     return '提示词可能触发内容审核，请调整描述后重试；您的积分已全额退回';
   }
+  if (/upstream_timeout/i.test(s)) {
+    return '生图排队超时（约 12 分钟），积分已全额退回';
+  }
+  if (/upstream_no_image/i.test(s)) {
+    return '上游未返回图片，积分已全额退回，请重试';
+  }
+  if (/missing_task_id/i.test(s)) {
+    return '任务提交异常，积分已全额退回，请重试';
+  }
+  if (/upstream_failed|upstream_submit/i.test(s)) {
+    return '上游生图失败，可缩短提示词后重试；积分已全额退回';
+  }
   return s || '上游生图失败，您的积分已全额退回';
 }
 
@@ -336,10 +348,15 @@ generateRoutes.get('/jobs/:jobId', async c => {
         errorMessage: polled.errorMessage,
         creditsRemaining: spendableCredits(profile),
         refunded: polled.refunded,
-        message: '生图失败，积分已全额退回'
+        message: friendlyGenerationError(String(polled.errorMessage || ''))
       }
     });
   }
+
+  const updatedMeta = (job.meta as Record<string, unknown>) || meta;
+  const extraImageUrls =
+    polled.extraImageUrls
+    || (Array.isArray(updatedMeta.extraImageUrls) ? (updatedMeta.extraImageUrls as string[]) : undefined);
 
   return c.json({
     ok: true,
@@ -347,6 +364,7 @@ generateRoutes.get('/jobs/:jobId', async c => {
       jobId: job.id,
       status: polled.status,
       imageUrl: polled.imageUrl,
+      extraImageUrls: extraImageUrls?.length ? extraImageUrls : undefined,
       creditsRemaining: spendableCredits(profile),
       model: meta.model,
       modelLabel: meta.modelLabel

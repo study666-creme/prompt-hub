@@ -21,6 +21,10 @@ export type Env = {
   PAYMENT_WEBHOOK_SECRET?: string;
   /** 运营批量造激活码：wrangler secret put ADMIN_API_SECRET */
   ADMIN_API_SECRET?: string;
+  /** Supabase 文件存储配额（MB），免费版约 1024；未设则默认 1024 */
+  SUPABASE_STORAGE_QUOTA_MB?: string;
+  /** Supabase 数据库配额（MB），免费版约 500；未设则默认 500 */
+  SUPABASE_DB_QUOTA_MB?: string;
 };
 
 export function parseCorsOrigins(raw: string): string[] {

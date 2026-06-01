@@ -2,7 +2,7 @@
   const PLACEHOLDER = /YOUR_/;
   const BUCKET = 'card-images';
   const STORAGE_PREFIX = `storage://${BUCKET}/`;
-  const SIGNED_TTL_SEC = 3600;
+  const SIGNED_TTL_SEC = 604800;
   const signedUrlCache = new Map();
   /** 云端不存在的路径，避免每张图重复签名 400（拖慢首屏 30s～2min） */
   const missingPathCache = new Map();
@@ -52,7 +52,23 @@
 
   loadSessionSignCache();
 
+  function isCdnMediaUrl(url) {
+    return typeof url === 'string' && /\/api\/v1\/media\/[ci]\//i.test(url);
+  }
+
+  function parseCdnUrlExpiry(url) {
+    if (!isCdnMediaUrl(url)) return 0;
+    try {
+      if (/\/api\/v1\/media\/c\//i.test(url)) return Date.now() + SIGNED_TTL_SEC * 1000;
+      const e = Number(new URL(url).searchParams.get('e') || 0);
+      return e ? e * 1000 : Date.now() + SIGNED_TTL_SEC * 1000;
+    } catch (e) {
+      return Date.now() + SIGNED_TTL_SEC * 1000;
+    }
+  }
+
   function parseSignedUrlExpiry(url) {
+    if (isCdnMediaUrl(url)) return parseCdnUrlExpiry(url);
     if (!url || typeof url !== 'string') return 0;
     try {
       const token = new URL(url).searchParams.get('token');
@@ -67,7 +83,7 @@
   }
 
   function isIncompleteSignedStorageUrl(url) {
-    if (!url || typeof url !== 'string') return false;
+    if (!url || typeof url !== 'string' || isCdnMediaUrl(url)) return false;
     if (!/\/storage\/v1\/object\/sign\//i.test(url)) return false;
     try {
       const token = new URL(url).searchParams.get('token');
@@ -87,6 +103,10 @@
 
   function isFreshSignedDisplayUrl(url, minRemainingMs = 120000) {
     if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false;
+    if (isCdnMediaUrl(url)) {
+      if (/\/api\/v1\/media\/c\//i.test(url)) return true;
+      return parseCdnUrlExpiry(url) > Date.now() + minRemainingMs;
+    }
     if (isIncompleteSignedStorageUrl(url)) return false;
     const path = storagePathFromRef(url);
     if (!path) return true;
@@ -464,6 +484,9 @@
   }
 
   async function getSignedUrlForPath(path, opts) {
+    if (window.PromptHubApi?.isConfigured?.() && !window.PromptHubApi?.isApiUnreachable?.()) {
+      return null;
+    }
     const variant = displayVariantFromOpts(opts);
     const fileKey = path.replace(/^\//, '');
     if (isPathKnownMissing(fileKey)) return null;
@@ -549,9 +572,10 @@
           cardId: signOpts.cardId
         });
         if (r.ok && r.data?.url && !isIncompleteSignedStorageUrl(r.data.url)) {
+          const ttlSec = Math.max(3600, Number(r.data.expiresIn) || SIGNED_TTL_SEC) - 120;
           signedUrlCache.set(signedCacheKey(fileKey, v), {
             url: r.data.url,
-            expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
+            expiresAt: Date.now() + ttlSec * 1000
           });
           return r.data.url;
         }
@@ -589,9 +613,10 @@
       try {
         const r = await window.PromptHubApi.signMediaRef(toStorageRef(path), { variant: v });
         if (r.ok && r.data?.url && !isIncompleteSignedStorageUrl(r.data.url)) {
+          const ttlSec = Math.max(3600, Number(r.data.expiresIn) || SIGNED_TTL_SEC) - 120;
           signedUrlCache.set(signedCacheKey(fileKey, v), {
             url: r.data.url,
-            expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
+            expiresAt: Date.now() + ttlSec * 1000
           });
           return r.data.url;
         }
@@ -853,12 +878,12 @@
 
   async function prefetchCommunityDisplayUrls(images, capMs) {
     if (!window.PromptHubApi?.signCommunityMediaRef) return;
-    const items = (images || []).slice(0, 24);
+    const items = (images || []).slice(0, 36);
     if (!items.length) return;
     const limit = Math.max(800, Number(capMs) || 4000);
     const started = Date.now();
     let i = 0;
-    const concurrency = 6;
+    const concurrency = 8;
     async function signItem(item) {
       const authorId = item && typeof item === 'object' ? item.authorId : '';
       const cardId = item && typeof item === 'object' ? (item.sourceCardId || item.id) : '';
@@ -1097,7 +1122,7 @@
       if (aVis !== bVis) return aVis ? -1 : 1;
       return ar.top - br.top;
     });
-    const concurrency = window.matchMedia('(max-width: 900px)').matches ? 4 : 5;
+    const concurrency = window.matchMedia('(max-width: 900px)').matches ? 5 : 8;
     let idx = 0;
     async function hydrateOne(img) {
       const ref = img.getAttribute('data-storage-ref') || img.getAttribute('data-image-ref');

@@ -623,7 +623,13 @@
     viralLook: [
       '竖屏 9:16，人物占 55～65%', '主体居中偏上，留顶留白', '强情绪但色调克制',
       '单主体 + 极简背景', '一个超现实元素点睛', '眼神直视镜头',
-      '低饱和环境 + 单一高饱和主体', '纪实抓拍感，非摆拍', '自然侧光，阴影有层次'
+      '低饱和环境 + 单一高饱和主体', '纪实抓拍感，非摆拍', '自然侧光，阴影有层次',
+      '封面级第一眼，3 秒内读懂故事', '主体占画面 60%，背景 service only',
+      '对角线动势，视线被引导到脸', '中心构图 + 轻微暗角', '近景情绪 + 远景 simplified',
+      '单一强对比色块，其余灰度', '留白 30% 以上，呼吸感', '低机位仰拍，主体 dominant',
+      '窗光侧脸，肤质真实', '霓虹仅作 edge，面部中性', '胶片颗粒均匀，非数码噪点',
+      '标题区留白在上方 20%', '一镜一情绪，无元素堆砌', '生活感抓拍，非棚拍摆姿',
+      '冷暖对撞但肤色自然', '单灯侧光，杂志内页感'
     ],
     epicScale: [
       '14mm 超广角大透视，地平线极低', '蚁视角仰望，人物仅占画面 5%', '鱼眼畸变强化空间压迫感',
@@ -1083,46 +1089,195 @@
       '逆光剪影 + 透视线', '霓虹在湿地面反射延伸', '顶光切割中庭层次',
       '黄金时刻，长影沿透视线拉伸', '单灯照亮透视线中心'
     ],
-    bodyBeautySubject: [
-      '芭蕾舞者，肢体延伸与肌肉线条', '古典雕塑感人体，博物馆灯光', '瑜伽修行者，柔韧与力量',
-      '游泳运动员，肩背与腰线', '现代舞演员，动态定格', '艺术摄影模特，fine art nude 但着泳装',
-      '希腊雕像式比例，倒三角或沙漏', '文艺复兴绘画人体参考，着 drapery', '时尚 editorial 人体',
-      '冲浪者，晒痕与健康肌理', '体操选手，线条与柔软', '剑舞者，背阔肌与腰线',
-      '温泉浴衣，肩颈与锁骨艺术', '晨跑后，汗光与呼吸', '钢琴家，手臂与背脊线条',
-      '男性舞者，V 型背与长腿', '女性舞者，颈项与腰臀比', '双人性体构图，距离感'
+    wideAngleLens: [
+      '14mm 超广角镜头，环境占画面 60%+', '16mm 广角，主体与场景同框叙事',
+      '24mm 环境人像，畸变可控', '鱼眼轻微桶形，边缘弧线强化空间',
+      '超广角低机位贴地，天空与地面对分', '广角镜头前景夸张近大远小',
+      '全景接片感广角，地平线稳定', '广角收纳整栋建筑与街道纵深',
+      '广角室内，天花板线条汇聚', '运动广角 freeze，背景 radial blur'
     ],
-    bodyBeautyPose: [
-      '四肢延伸，像 Bernini 雕塑动态', 'S 曲线或 contrapposto 站姿', '舞蹈 arabesque，脚背绷直',
-      '侧光勾勒肌肉起伏', '回眸，颈项线条完整', '坐地抱膝，肢体几何',
-      '伸展，指间到脚尖一条线', '低机位仰拍，腿线与人鱼线', '背对镜头，肩胛与脊柱沟',
-      '水中半身，波纹贴肤', 'mirror 对称构图', '剪影轮廓，边缘清晰'
+    wideAngleScene: [
+      '峡谷街道透视线', '体育场看台弧度', '海岸公路弯折',
+      '森林小径消失在雾中', '地铁站台纵深', '仓库高挑顶棚',
+      '夜市巷道霓虹延伸', '雪山垭口全景', '城市天台 360 视野',
+      '古桥与远山同框', '竞技场环形空间', '雨夜湿街反射拉长'
     ],
-    bodyBeautyLight: [
-      '博物馆顶光，明暗对照', '伦勃朗光，半脸阴影', '侧逆光勾轮廓', '柔光箱，肤质细腻',
-      '窗光漫射，阴影柔和', '黄金时刻，肤光通透', '黑白 fine art 高对比', '烛光暖调',
-      '泳池 caustics 在肌肤', 'rim light 分离肢体', '单灯雕塑感'
+    highTensionMood: [
+      '画面张力拉满，视线被强力牵引', '冲突感构图，静与动对撞',
+      '戏剧高潮前一帧，山雨欲来', '压迫感但不混乱，情绪顶满',
+      '对角线动势贯穿全画', '主次对峙，留白也是武器',
+      '能量在画面边缘即将溢出', '一瞬定格，前后故事都在张力里',
+      '视觉冲击力优先，拒绝温吞铺陈', '紧张感通过光影与姿态同时传达'
     ],
-    bodyBeautyMood: [
-      '人体之美，艺术而非色情', '性感来自氛围与线条', '古典美学，神性与人性',
-      '呼吸感，静止中的动势', '肌肤是光与影的画布', '力量与柔软的平衡',
-      '克制的高级性感', '舞蹈/运动的身体尊严', 'fine art photography 调性',
-      '博物馆画册级', '情绪在姿态不在裸露', '东方含蓄的性感氛围'
+    highTensionBeat: [
+      '对峙双方同框，中间负空间', '爆发瞬间前的蓄力', '坠落/冲刺/撞击前一秒',
+      '风暴眼中心的安静', '胜利与失败同框', '禁忌即将被打破的一瞬',
+      '权力关系在构图里倾斜', '命运转折的静默尖叫', '危险逼近但主体不退',
+      '群体与个体的张力对撞'
     ],
-    bodyBeautyArt: [
-      '参考 Michelangelo 人体结构但衣着完整', 'Caravaggio 明暗法', 'Rodin 雕塑感',
-      'Richard Avedon 人体摄影', 'Peter Lindbergh 黑白人体', 'Harper 艺术大片',
-      'Vogue 艺术人体专题', '国家地理人体专题（非猎奇）', '舞蹈摄影经典构图',
-      '希腊 vase painting 比例感', '文艺复兴 sfumato 肤感'
+    moviePosterGenre: [
+      '悬疑惊悚片主视觉', '都市爱情短剧封面', '古装权谋史诗海报', '科幻末日生存题材',
+      '青春校园成长故事', '黑帮犯罪 noir 海报', '奇幻冒险大片', '家庭伦理情感剧',
+      '谍战特工冷峻风', '武侠江湖恩怨', '恐怖灵异心理片', '励志体育传记',
+      '赛博朋克 noir', '民国谍影传奇', '宫廷斗争史诗', '公路逃亡片',
+      '医疗职场人性剧', '复仇爽剧 key visual', '末世废土求生', '神话改编巨制'
     ],
-    bodyBeautyDetail: [
-      '锁骨的 shadow', '脊柱沟 shadow', '膝窝与跟腱线条', '肩峰与三角肌轮廓',
-      '腹斜肌侧影', '前臂与腕骨', '颈侧线条', '踝骨与足弓', '肋廓呼吸感',
-      '汗珠沿颈线', '肌肉 soft 与 hard 对比', '关节转折高光'
+    moviePosterSubject: [
+      '主角半身占画面 65%，眼神穿透镜头', '双人剪影对峙，中间留白放标题',
+      '群像层叠，前景主角清晰背景虚化', '单人背影走向光门，史诗感',
+      '主角坐于王座/废墟，低机位仰拍', '雨夜持伞，霓虹映脸',
+      '持剑/持枪蓄力一瞬，动态定格', '拥抱或分离 mid-action，情绪满溢',
+      '面具半戴，身份 mystery', '血月/风暴背景下渺小主体',
+      '机甲/巨兽与人物尺度对撞', '法庭/谈判桌对峙构图',
+      '婚礼/葬礼极端情绪脸特写', '少年与老年同帧（时间线）',
+      '火焰/爆炸映红侧脸', '雪地里唯一有色主体',
+      '电梯/走廊纵深，主体在消失点', '破碎镜面多个自我',
+      '戴耳机闭眼的都市孤独者', '古风宽袖飘带，风定格'
     ],
-    bodyBeautyOutfit: [
-      '连体泳装完整', '芭蕾练功服', '运动背心与短裤', '和服浴衣', 'linen 衬衫 unbuttoned',
-      '深 V 礼服但不露点', '运动 compression 装', '男士 swim trunks', '舞蹈 wrap skirt',
-      '艺术 drapery 裹身', '健身 bodysuit', '丝绸 slip 睡裙'
+    moviePosterMood: [
+      '命运转折前的静默', '山雨欲来的压迫感', '禁忌之恋的克制张力',
+      '复仇决心，眼神如刀', 'hope against despair 同框', '神圣与危险并存',
+      '孤独英雄最后一战', '谎言被揭穿的一瞬', '久别重逢欲言又止',
+      '权力巅峰的空虚', '真相即将浮出水面', '少年意气与沧桑并存',
+      '冷峻 noir，道德灰色', '热血即将爆发的前帧', '温柔刀，笑着流泪',
+      '史诗感但不俗套', '短剧封面级强情绪', '一眼读懂关系与冲突'
+    ],
+    moviePosterComp: [
+      '竖屏 9:16，顶部 20% 标题安全区', '主体居中偏上，底部渐隐',
+      '三分法，人物贴左留右故事空间', '对称构图，仪式感',
+      '荷兰角 10～15 度，不安张力', '极低角度仰拍，英雄感',
+      '前景 blur 框景，主体在光中', '对角线分割，动势向上',
+      '中心留白，主体环绕', '宽银幕 2.39:1 裁切感',
+      '多层景深，前中后叙事', '剪影 + 高光细节脸',
+      '上下分割双世界', '环形构图锁视线'
+    ],
+    moviePosterLight: [
+      '轮廓光勾主体，背景沉入暗', '闪电/爆炸瞬间 flash 脸',
+      '霓虹红蓝对打，面部中性', '烛光暖调，其余冷蓝',
+      '顶光戏剧化，眼窝深影', '逆光金边，Silhouette 边缘',
+      '体积雾中一束 spotlight', '雨夜湿地面反射霓虹',
+      '火焰橙映照半脸', '冷月 + 暖窗 practical',
+      '频闪冻结雨滴/雪花', '单灯侧光，海报级 contrast'
+    ],
+    moviePosterFinish: [
+      '院线大片 key visual 完成度', '短剧竖屏封面级', '流媒体 top 10 缩略图吸睛',
+      '韩综/韩剧 poster 气质', 'Netflix 式极简强主体', '国产剧宣发主视觉',
+      '动画剧场版 KV 精度', '游戏 CG 过场海报感', '字体区留白 intentional',
+      '高对比 thumbnail 友好', '情绪优先于细节堆砌'
+    ],
+    travelPlace: [
+      '冰岛黑沙滩与玄武岩柱', '京都岚山竹林小径', '挪威罗弗敦渔村红屋',
+      '摩洛哥舍夫沙万蓝巷', '新西兰米尔福德峡湾', '土耳其卡帕多奇亚热气球',
+      '秘鲁马丘比丘云海上', '瑞士采尔马特马特洪峰', '日本白川乡合掌村雪夜',
+      '意大利阿马尔菲海岸悬崖公路', '埃及吉萨金字塔黄昏', '阿根廷莫雷诺冰川',
+      '越南下龙湾喀斯特峰林', '美国羚羊谷光束', '西藏纳木错圣湖经幡',
+      '格鲁吉亚卡兹别克教堂', '斯里兰卡海上小火车', '法国普罗旺斯薰衣草田',
+      '澳大利亚乌鲁鲁巨岩夕照', '约旦佩特拉峡谷一线天',
+      '云南梅里雪山日照金山', '新疆独库公路雪山段', '福建土楼环形聚落',
+      '甘南扎尕那石城晨雾', '内蒙古乌兰布统草原星野'
+    ],
+    travelMoment: [
+      '背包客站在 viewpoint 张开双臂', '情侣牵手看日落剪影', '独行者在公路中线行走',
+      '露营帐篷前煮咖啡，晨雾未散', '火车窗外掠过的田园', '渔船归港，桅杆林立',
+      '古镇石桥上行人与灯笼', '雪山脚下经幡飘动', '沙漠驼队拉长影子',
+      '海边长椅上的孤独旅人', '市集扫街，色彩爆炸', '雨后的石板路反光',
+      '热气球升空俯瞰大地', '冰川前渺小的人影', '栈桥尽头看潮起潮落'
+    ],
+    travelLight: [
+      '黄金时刻，长 shadow 有叙事', '蓝调时刻，天空渐变细腻',
+      '晨雾柔光，层次渐隐', '雨后清透，饱和度自然',
+      '逆光轮廓，travel editorial', '侧光勾出地形纹理',
+      '星野银河 + 地景暖光', '雪山反光，冷调准确',
+      '海面镜面反射日落', '云隙光柱（耶稣光）',
+      '胶片 warm cast，怀旧旅途', 'overcast 均匀，适合人文'
+    ],
+    travelMood: [
+      'wanderlust，远方召唤', '治愈系慢旅行', '冒险与未知兴奋',
+      '孤独但自由的公路感', '文化冲击的鲜活', '回归自然的呼吸感',
+      'National Geographic 叙事一帧', 'Ins 旅行博主 aesthetic',
+      '明信片级第一眼', '在地生活感，非游客照',
+      '史诗 landscape + 渺小人', '季节感准确（樱/枫/雪）'
+    ],
+    sportsSubject: [
+      '短跑选手 burst 出块瞬间', '篮球运动员扣篮滞空', '足球前锋凌空抽射',
+      '游泳选手触壁前一臂', '网球选手正手挥拍', '滑雪选手雪粉飞扬转弯',
+      '拳击手出拳 freeze', '体操选手空中翻腾', '攀岩者 dyno 跳跃',
+      '冲浪者管浪内', '滑板 kickflip mid-air', '自行车冲刺弯压',
+      '花样滑冰抛跳', '举重 clean 接杠', '棒球投手出手瞬间',
+      '排球扣球', '击剑 lunge', '马拉松最后百米',
+      'F1 赛车过弯 blur', '街舞 freeze 定格'
+    ],
+    sportsAction: [
+      '肌肉绷紧，汗水飞溅 freeze', 'motion blur 背景 + 清晰主体',
+      '尘埃/水花/雪粉粒子爆发', '动态对角线，动势拉满',
+      '低角度仰拍，力量感', '高速快门冻结，无 smear',
+      '连续动作选最张力一帧', '肢体延伸最大化',
+      '与对手/环境的对抗瞬间', '胜利庆祝，双臂展开',
+      '失败倒地仍眼神坚定', '团队配合传接一瞬'
+    ],
+    sportsScene: [
+      '体育场 floodlight 夜赛', '室内体育馆顶光', '户外自然光赛道',
+      '泳池水面反射与 lane 线', '健身房侧光器械 bokeh',
+      '街头球场涂鸦墙', '雪山极限赛道', '海滩排球日落',
+      '雨战泥泞球场', '奥运级场馆 scale',
+      '社区球场纪实感', '训练馆 chalk dust 可见'
+    ],
+    sportsMood: [
+      'Sports Illustrated 封面级', '肾上腺素飙升', '人类极限一瞬',
+      '胜利前的蓄力', '失败后仍站起', '团队荣耀',
+      '速度与力量美学', '专注到世界消失', 'underdog 逆袭叙事',
+      '纪录之夜的历史感', '青春竞技热血', '专业运动员 dignity'
+    ],
+    vintageEra: [
+      '70 年代 disco  glam', '80 年代 synthwave neon', '90 年代 grunge 胶片',
+      '50 年代好莱坞 golden age', '60 年代 mod 伦敦', '20 年代 art deco flapper',
+      '昭和末期 J-POP 杂志', '港风 90s 胶片街拍', '苏联 constructivism poster',
+      '美式 diner 1950s', 'Y2K 千禧辣妹', '民国上海滩摩登',
+      '西部片 60s Technicolor', '法国新浪潮 black and white'
+    ],
+    vintageSubject: [
+      '胶片女郎，波浪卷发红唇', '复古绅士，宽肩西装怀表',
+      '摇滚乐手，皮夹克与电吉他', '迪斯科球下舞女',
+      '老式打字机前记者', '加油站服务员，复古制服',
+      '滑板少年，80s 护膝', '唱片店 browsing 青年',
+      '复古 diner 女侍者', '旗袍与留声机',
+      '老式相机举在脸前', '复古摩托与皮手套',
+      '旱冰 rink 情侣', '旧电视荧光映脸'
+    ],
+    vintageFilm: [
+      'Kodak Portra 400 颗粒', 'Fuji Superia 绿调', '过期胶片 color shift',
+      'Cinestill 800T  halation', 'Ilford HP5 黑白', 'Polaroid 即时成像边框感',
+      'VHS 扫描线轻微', 'CRT 荧光 scan', '杂志印刷网点',
+      '漏光 light leak 一角', '日期 stamp  corner（无具体日期）',
+      'soft focus 梦幻', '高对比 flash 直打 snapshot'
+    ],
+    vintageMood: [
+      '怀旧但不廉价滤镜', 'memory lane 温柔', 'lost in time 疏离',
+      'golden age  glamour', '叛逆 youth  energy', '慢生活 analog  warmth',
+      'archive photo 发现感', 'family album 真实', 'retro futurism 矛盾美',
+      '胶片褪色美学', '旧物叙事，有故事'
+    ],
+    lifeAestheticScene: [
+      '清晨厨房，手冲咖啡蒸汽', '午后窗边阅读，猫在膝上',
+      '雨天咖啡馆，玻璃水珠', '周末市集，帆布袋与花',
+      '独居女生小公寓，暖灯与绿植', '书店角落，堆叠的书与咖啡',
+      '野餐垫上的水果与杂志', '浴室镜前 skincare routine 氛围',
+      '阳台晾衣，城市天际 background', '深夜 convenience store 荧光',
+      '复古自行车与面包袋', 'vinyl 唱片机旋转', '手写信与干花',
+      '露营晨炊，帐篷口看湖', '瑜伽垫上的晨光'
+    ],
+    lifeAestheticMood: [
+      '慢生活 cozy', 'Ins 生活美学', '治愈系 daily ritual',
+      '一人食的温柔', 'self-care 仪式感', 'urban loneliness 但不丧',
+      '小确幸瞬间', '北欧 hygge', '日系「間」留白',
+      '法式 effortless daily', '韩系 clean girl aesthetic',
+      '胶片生活感，非摆拍', '呼吸感，真实 lived-in'
+    ],
+    lifeAestheticDetail: [
+      '亚麻织物纹理', '陶瓷杯沿咖啡油脂', '阳光在书页上的 shadow',
+      '植物叶脉透光', '木桌年轮与杯印', '针织毛衣绒毛',
+      '面包 crust 气孔', '蜡烛火焰暖 flicker', '玻璃花瓶折射',
+      '手写 label 与贴纸', '帆布袋自然褶皱'
     ],
     glamourBodyFemale: [
       '丰腴饱满身材，腰臀曲线浑圆有肉感', '骨肉匀亭，胸型丰盈，整体 soft voluptuous',
@@ -1357,7 +1512,10 @@
       '和牛切面大理石纹', '抹茶千层切面', '爆浆芝士汉堡', '生腌海鲜拼盘', '法式可颂黄油层',
       '火锅红油翻滚', '寿司握饭特写', '草莓奶油蛋糕', '拉面溏心蛋', '珍珠奶茶冷凝珠',
       '马卡龙塔', '炭烤牛排切面', '小笼包蒸汽', '意面番茄酱汁', '冰糖葫芦晶莹',
-      '咖啡拉花天鹅', '广式早茶蒸笼', '刺身拼盘冰床', '巧克力熔岩', '彩虹沙拉碗'
+      '咖啡拉花天鹅', '广式早茶蒸笼', '刺身拼盘冰床', '巧克力熔岩', '彩虹沙拉碗',
+      '脏脏包可可粉飞', '舒芙蕾刚出炉膨胀', '蟹黄汤包薄皮透光', '法棍蜂窝气孔',
+      '韩式炸鸡琥珀酱', '泰式冬阴功汤', '北京烤鸭片皮', '上海生煎底金黄',
+      '港式蛋挞焦糖斑', '云南过桥米线', '意大利 gelato 螺旋', '日式便当 colorful 分格'
     ],
     foodScene: [
       '深色石板背景一束侧光', '木桌自然窗光', '餐厅 bokeh 暖调', '夜市霓虹反射',
@@ -1378,7 +1536,10 @@
       '雨后空街倒影', '黄昏列车窗', '雾中灯塔', '雪夜路灯',
       '废弃游乐园', '海边长椅', '图书馆空廊', '樱花隧道',
       '咖啡馆角落', '屋顶城市天际', '麦田风车', '竹林小径',
-      '地铁空厢', '旧公寓楼梯', '河面薄雾', '秋叶公路'
+      '地铁空厢', '旧公寓楼梯', '河面薄雾', '秋叶公路',
+      '凌晨便利店', '无人电影院', '老式电话亭', '跨江大桥晨雾',
+      '废弃泳池底', '老书店通道', '港口起重机剪影', '稻田晚风',
+      '教堂空椅', '隧道出口白光', '晾衣绳与天空', '旧火车站台'
     ],
     moodTone: [
       '孤独但温柔', '怀旧胶片', '宁静治愈', '淡淡忧伤',
@@ -1438,7 +1599,10 @@
       'Editorial hero，封面级第一眼', '奢侈品广告级主次', 'Vogue 内页大片感',
       '获奖 campaign key visual', '美术馆 catalog 完成度', '奈良美智式克制留白',
       '高定 lookbook 一页', '独立杂志封面气质', '品牌 manifesto 单帧',
-      '拍卖 catalog 级静物', '建筑杂志跨页感', '香水广告叙事一帧'
+      '拍卖 catalog 级静物', '建筑杂志跨页感', '香水广告叙事一帧',
+      'Bottega 式静奢张力', 'Loewe 艺术 campaign 感', 'Apple 产品 hero 级',
+      'Harper\'s Bazaar 跨页', 'W 杂志 avant portrait', 'Kinfolk 慢生活 premium',
+      'Monocle  editorial 完成度', 'Wallpaper 设计杂志级'
     ],
     premiumSubject: [
       '单一主体 + 大面积负空间', '雕塑感姿态，静止但有张力',
@@ -1661,6 +1825,70 @@
     ]);
   }
 
+  function buildMoviePoster(ctx) {
+    const family = ctx?.family || 'neutral';
+    return combineParts([
+      pick(WORDS.moviePosterGenre),
+      pick(WORDS.moviePosterSubject),
+      pick(WORDS.moviePosterMood),
+      pick(WORDS.moviePosterComp),
+      pick(WORDS.moviePosterLight),
+      pick(WORDS.moviePosterFinish),
+      family === 'anime' ? pick(WORDS.animeStyle) : pickMaybe(TWIST, 0.45),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildTravel(ctx) {
+    return combineParts([
+      pick(WORDS.travelPlace),
+      pick(WORDS.travelMoment),
+      pick(WORDS.travelLight),
+      pick(WORDS.travelMood),
+      pick(WORDS.sceneComp),
+      pickMaybe(TWIST, 0.55),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildSports(ctx) {
+    const family = ctx?.family || 'neutral';
+    return combineParts([
+      pick(WORDS.sportsSubject),
+      pick(WORDS.sportsAction),
+      pick(WORDS.sportsScene),
+      pick(WORDS.sportsMood),
+      family === 'photo' ? pick(WORDS.characterLight) : pick(lightPoolForCharacter(family)),
+      pickMaybe(TWIST, 0.4),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildVintage(ctx) {
+    const family = ctx?.family || 'neutral';
+    return combineParts([
+      pick(WORDS.vintageEra),
+      pick(WORDS.vintageSubject),
+      pick(WORDS.vintageFilm),
+      pick(WORDS.vintageMood),
+      pick(WORDS.sceneComp),
+      family === 'photo' ? pick(WORDS.characterLight) : pickMaybe(lightPoolForCharacter(family), 0.6),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildLifeAesthetic(ctx) {
+    return combineParts([
+      pick(WORDS.lifeAestheticScene),
+      pick(WORDS.lifeAestheticMood),
+      pick(WORDS.lifeAestheticDetail),
+      pick(WORDS.sceneColor),
+      pick(WORDS.travelLight),
+      pickMaybe(TWIST, 0.5),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
   function clipPromptLead(text, maxParts = 3) {
     return String(text || '')
       .split(/[；;]/)
@@ -1674,16 +1902,89 @@
       .join('，');
   }
 
-  function buildPromptForTypes(typeIds, ctx) {
+  /** 各内容词条对应词库键：多选融合时每个词条至少贡献一句，避免只随机取 2 个整段提示词 */
+  const TYPE_ESSENCE_KEYS = {
+    viral: ['viralHook', 'viralLook'],
+    premium: ['premiumHook', 'premiumSubject', 'premiumComp', 'premiumFinish'],
+    character: ['characterSubject', 'characterPose', 'characterFace'],
+    scene: ['scenePlace', 'sceneDrama', 'sceneColor'],
+    product: ['productItem', 'productDrama'],
+    epic: ['epicScale', 'epicArchitecture', 'epicSubject', 'epicTension'],
+    impact: ['impactHook', 'impactComp', 'impactPose', 'impactScene', 'impactStyle'],
+    stylized: ['stylizedMood', 'stylizedSubject', 'stylizedVisual', 'stylizedPalette'],
+    guofeng: ['guofengRole', 'guofengScene', 'guofengMood'],
+    cyber: ['cyberSubject', 'cyberScene', 'cyberFx'],
+    cover916: ['cover916Hook', 'cover916Layout'],
+    glamour: ['glamourMood', 'glamourAtmosphere', 'glamourPose'],
+    malePower: ['malePowerMood', 'malePowerPose', 'malePowerAtmosphere'],
+    avantFrame: ['avantFrameComp', 'avantFrameSubject', 'avantFrameMood'],
+    coolMecha: ['mechaSubject', 'mechaPose', 'mechaVfx', 'mechaScene'],
+    megaPerspective: ['megaPersComp', 'megaPersSubject', 'megaPersMood'],
+    wideAngle: ['wideAngleLens', 'wideAngleScene', 'megaPersComp'],
+    highTension: ['highTensionMood', 'highTensionBeat', 'impactHook', 'epicTension'],
+    moviePoster: ['moviePosterSubject', 'moviePosterMood', 'moviePosterComp'],
+    travel: ['travelPlace', 'travelMood', 'travelLight'],
+    sports: ['sportsSubject', 'sportsAction', 'sportsMood'],
+    vintage: ['vintageSubject', 'vintageMood', 'vintageFilm'],
+    lifeAesthetic: ['lifeAestheticScene', 'lifeAestheticMood', 'lifeAestheticDetail'],
+    doujin: ['doujinArchetype', 'animeRole'],
+    animeillust: ['animeRole', 'animeScene', 'animeMood'],
+    originalchar: ['characterSubject', 'characterOutfit'],
+    food: ['foodSubject', 'foodScene'],
+    pet: ['petSubject', 'petScene'],
+    mood: ['moodScene', 'moodTone'],
+    architecture: ['archSubject', 'archLight'],
+    fashion: ['fashionLook', 'fashionSet'],
+    horror: ['horrorMood', 'horrorStyle'],
+    romance: ['romanceBeat', 'romanceTone'],
+    macro: ['macroDetail'],
+    seasonal: ['seasonalCue']
+  };
+
+  const FUSION_GLUE = [
+    '下列元素须在同一关键瞬间同框共生、互相牵制，禁止只突出其中一种题材',
+    '构图上让各词条元素主次交错、彼此呼应，而非简单左右拼接或只画背景',
+    '以单一画面统合全部题材，每个词条至少有一处可见落点（主体/环境/光效/姿态）',
+    '视觉叙事上形成化学反应：赛博/机甲/人物/环境须互相定义，不可退化成单题材插画'
+  ];
+
+  function pickTypeEssence(typeId, ctx) {
+    const keys = TYPE_ESSENCE_KEYS[typeId];
+    if (keys?.length) {
+      const key = pick(keys);
+      const pool = WORDS[key];
+      if (pool?.length) return pick(pool);
+    }
+    const tpl = CONTENT_TEMPLATES[typeId];
+    if (!tpl?.build) return '';
+    return clipPromptLead(tpl.build(ctx), 2);
+  }
+
+  function buildPromptForTypes(typeIds, ctx, opts = {}) {
     const pool = typeIds.filter((t) => CONTENT_TEMPLATES[t]);
     if (!pool.length) return CONTENT_TEMPLATES.viral.build(ctx);
     if (pool.length === 1) return CONTENT_TEMPLATES[pool[0]].build(ctx);
-    const a = pick(pool);
-    const rest = pool.filter((t) => t !== a);
-    const b = pick(rest.length ? rest : pool);
-    const segA = clipPromptLead(CONTENT_TEMPLATES[a].build(ctx));
-    const segB = clipPromptLead(CONTENT_TEMPLATES[b].build(ctx));
-    return combineParts([segA, segB, pickMaybe(TWIST, 0.65), ctx?.tail?.()], { keepFirst: true });
+
+    const variant = Math.max(0, Number(opts.variantIndex) || 0);
+    const rotated = [...pool.slice(variant % pool.length), ...pool.slice(0, variant % pool.length)];
+    const labels = rotated.map((t) => CONTENT_TEMPLATES[t].label);
+    const fusionHead = `【${labels.join('×')} 多词条融合】须同时体现：${labels.join('、')}；`;
+
+    const essenceTagged = rotated.map((t) => {
+      const line = pickTypeEssence(t, ctx);
+      if (!line) return '';
+      const label = CONTENT_TEMPLATES[t].label;
+      return `〔${label}〕${line}`;
+    }).filter(Boolean);
+
+    const weave = shuffle(essenceTagged);
+    const anchorType = rotated[variant % rotated.length];
+    const anchor = clipPromptLead(CONTENT_TEMPLATES[anchorType].build(ctx), 3);
+
+    return combineParts(
+      [fusionHead, ...weave, pick(FUSION_GLUE), anchor, pickMaybe(TWIST, 0.55), ctx?.tail?.() ],
+      { mode: 'flat' }
+    );
   }
 
   function buildViral(ctx) {
@@ -1961,24 +2262,6 @@
     return combineParts(parts, { keepFirst: true });
   }
 
-  function buildBodyBeauty(ctx) {
-    const family = ctx?.family || 'neutral';
-    const isMale = Math.random() < 0.42;
-    const subject = pick(WORDS.bodyBeautySubject);
-    const pose = pick(WORDS.bodyBeautyPose);
-    const light = family === 'photo' ? pick(WORDS.bodyBeautyLight) : pick(lightPoolForCharacter(family));
-    const mood = pick(WORDS.bodyBeautyMood);
-    const art = pick(WORDS.bodyBeautyArt);
-    const detail = pickMaybe(WORDS.bodyBeautyDetail, 0.65);
-    const outfit = pick(WORDS.bodyBeautyOutfit);
-    const genderTag = isMale ? '男性人体' : '女性人体';
-    const safe = '衣着完整，艺术人体摄影，社区可发，性感来自氛围非裸露';
-    return combineParts(
-      [subject, pose, outfit, light, mood, art, detail, genderTag, safe, ctx?.tail?.()],
-      { keepFirst: true }
-    );
-  }
-
   function buildDoujin(ctx) {
     const family = ctx?.family || 'anime';
     const effectiveFamily = family === 'neutral' || family === 'photo' ? 'anime' : family;
@@ -2231,6 +2514,33 @@
     return combineParts(parts, { keepFirst: true });
   }
 
+  function buildWideAngle(ctx) {
+    const family = ctx?.family || 'neutral';
+    return combineParts([
+      pick(WORDS.wideAngleLens),
+      pick(WORDS.wideAngleScene),
+      pick(WORDS.megaPersComp),
+      pick(WORDS.sceneComp),
+      pick(lightPoolForCharacter(family)),
+      pickMaybe(TWIST, 0.45),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildHighTension(ctx) {
+    const family = ctx?.family || 'neutral';
+    return combineParts([
+      pick(WORDS.highTensionMood),
+      pick(WORDS.highTensionBeat),
+      pick(WORDS.impactHook),
+      pick(WORDS.impactComp),
+      pick(WORDS.epicTension),
+      pick(lightPoolForCharacter(family)),
+      pickMaybe(TWIST, 0.5),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
   const CONTENT_TEMPLATES = {
     character: { label: '人物', hint: '人像 / 半身 / 特写', build: buildCharacter },
     scene: { label: '场景', hint: '环境 / 氛围 / 建筑', build: buildScene },
@@ -2243,12 +2553,18 @@
     guofeng: { label: '国风仙侠', hint: '汉服 / 水墨 / 仙侠', build: buildGuofeng },
     cyber: { label: '赛博科幻', hint: '霓虹 / 机甲 / 未来城', build: buildCyber },
     cover916: { label: '竖屏封面', hint: '9:16 短剧 / 封面级', build: buildCover916 },
-    glamour: { label: '官感美学', hint: '女性专属 · 夸张比例 · 非常规时装', build: buildGlamour },
+    glamour: { label: '女性美学', hint: '女性专属 · 夸张比例 · 非常规时装', build: buildGlamour },
     malePower: { label: '男性力量', hint: '男性专属 · 倒三角 · 运动员体态', build: buildMalePower },
     avantFrame: { label: '非常规构图', hint: '失衡镜头 · 瞬时冲击 · 艺术感', build: buildAvantFrame },
     coolMecha: { label: '酷炫机甲', hint: '极致炫酷 · 机体 · 战损光效', build: buildCoolMecha },
     megaPerspective: { label: '大透视', hint: '消失点 · 纵深 · 空间吞噬', build: buildMegaPerspective },
-    bodyBeauty: { label: '人体美学', hint: '人体之美 · 艺术构图 · 氛围性感', build: buildBodyBeauty },
+    wideAngle: { label: '广角镜头', hint: '超广角 / 环境大场景', build: buildWideAngle },
+    highTension: { label: '张力十足', hint: '动势 / 冲突 / 戏剧高潮', build: buildHighTension },
+    moviePoster: { label: '影视海报', hint: '短剧 / 电影 KV · 强情绪', build: buildMoviePoster },
+    travel: { label: '旅途风光', hint: '地标 / 公路 / 人文旅行', build: buildTravel },
+    sports: { label: '运动瞬间', hint: '竞技 / 力量 / 动态 freeze', build: buildSports },
+    vintage: { label: '复古胶片', hint: '年代感 / 胶片 / 怀旧', build: buildVintage },
+    lifeAesthetic: { label: '生活美学', hint: '日常 / cozy / 治愈 ritual', build: buildLifeAesthetic },
     doujin: { label: '同人动漫', hint: '随机动漫角色 · 同人插画', build: buildDoujin },
     animeillust: { label: '动漫插画', hint: '角色 / 场景 / SSR 立绘', build: buildAnimeIllust },
     originalchar: { label: '原创主角', hint: '人物锚点 · 三视图/设定图 · 故事感', build: buildOriginalCharacter },
@@ -2327,7 +2643,10 @@
     while (prompts.length < n && guard < maxGuard) {
       guard += 1;
       const ctx = buildCtx(stylePick);
-      let p = applyArtStyle(buildPromptForTypes(typePool, ctx), ctx.styleId);
+      let p = applyArtStyle(
+        buildPromptForTypes(typePool, ctx, { variantIndex: prompts.length }),
+        ctx.styleId
+      );
       if (guard > n * 8) {
         p += `；${pick(TWIST)}`;
       }

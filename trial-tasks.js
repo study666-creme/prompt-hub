@@ -120,6 +120,18 @@
     return false;
   }
 
+  function countSelfCreatedCards(cardList) {
+    const collectTag = window.COMMUNITY_COLLECT_TAG || '社区收藏';
+    if (!Array.isArray(cardList)) return 0;
+    return cardList.filter((c) => {
+      if (!c || typeof c !== 'object') return false;
+      if (c.favoritedFromPostId || c.communitySourceId) return false;
+      if ((c.tags || []).includes(collectTag)) return false;
+      if (c.customFields?.assetPackageId) return false;
+      return true;
+    }).length;
+  }
+
   function collectSyncPayload() {
     const cards =
       window.__promptHubCards ||
@@ -144,7 +156,7 @@
       communityGachaCollectUsed = localStorage.getItem(LS_GACHA_COLLECT) === '1';
     } catch (e) { /* ignore */ }
     return {
-      cardsCount: Array.isArray(cards) ? cards.length : 0,
+      cardsCount: countSelfCreatedCards(cards),
       communityPosts,
       pwaInstalled: isHomescreenLaunch(),
       quickPreviewWarehouseUsed: !!qp.warehouseUsed,

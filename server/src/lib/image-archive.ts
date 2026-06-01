@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { storageObjectExistsLight } from './media-cdn';
 
 const BUCKET = 'card-images';
 const STORAGE_PREFIX = `storage://${BUCKET}/`;
@@ -45,17 +46,8 @@ async function verifyStoredObject(
   admin: SupabaseClient,
   path: string
 ): Promise<boolean> {
-  const clean = path.replace(/^\//, '');
-  const { data, error } = await admin.storage.from(BUCKET).createSignedUrl(clean, 60);
-  if (error || !data?.signedUrl) return false;
-  try {
-    const res = await fetch(data.signedUrl, { method: 'HEAD' });
-    if (!res.ok) return false;
-    const len = Number(res.headers.get('content-length') || 0);
-    return len > 0;
-  } catch {
-    return false;
-  }
+  if (!(await storageObjectExistsLight(admin, path, BUCKET))) return false;
+  return true;
 }
 
 /** 将上游临时 URL 拉取并写入用户私有桶，返回 storage:// 引用（含校验与重试） */

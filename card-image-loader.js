@@ -7,9 +7,9 @@
   const inflight = new WeakMap();
   const resolveQueue = [];
   let resolveActive = 0;
-  const MAX_RESOLVE = 10;
-  const WAREHOUSE_PREFETCH_CAP = 12;
-  const WAREHOUSE_IMMEDIATE_LOAD = 10;
+  const MAX_RESOLVE = 12;
+  const WAREHOUSE_PREFETCH_CAP = 20;
+  const WAREHOUSE_IMMEDIATE_LOAD = 14;
 
   function runResolveQueue() {
     while (resolveActive < MAX_RESOLVE && resolveQueue.length) {
@@ -192,7 +192,7 @@
     if (!container || !window.SupabaseSync?.prefetchDisplayUrls) return;
     const warehouse = container.id === 'cardsContainer';
     const communityFeed = container.id === 'communityGrid' || container.id === 'creationsGrid' || container.id === 'userProfileGrid';
-    const cap = warehouse ? WAREHOUSE_PREFETCH_CAP : (communityFeed ? 16 : 12);
+    const cap = warehouse ? WAREHOUSE_PREFETCH_CAP : (communityFeed ? 28 : 12);
     const refs = [];
     container.querySelectorAll('img.card-img[data-image-ref]').forEach((img) => {
       if (refs.length >= cap) return;

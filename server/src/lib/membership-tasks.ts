@@ -35,7 +35,8 @@ export type TaskKey =
   | 'asset_studio_link_card'
   | 'inspiration_draw'
   | 'community_gacha_collect'
-  | 'cards_count_25'
+  | 'cards_count_10'
+  | 'cards_count_30'
   | 'spend_1000'
   | 'spend_2000'
   | `spend_${number}`;
@@ -195,14 +196,14 @@ export function taskRewardForKey(
     asset_studio_chat: {
       days: 1,
       credits: 0,
-      title: '资产创作 AI 对话',
-      description: '在资产创作工作台向 AI 发起一次对话（消耗积分按实际 token 计费）'
+      title: '卡片式创作 AI 对话',
+      description: '在卡片式创作工作台向 AI 发起一次对话（消耗积分按实际 token 计费）'
     },
     asset_studio_link_card: {
       days: 2,
       credits: 0,
-      title: '资产创作关联卡片',
-      description: '在资产创作将卡片库卡片拖入文档「关联图」框，完成一次文档关联'
+      title: '卡片式创作关联卡片',
+      description: '在卡片式创作将卡片库卡片拖入文档「关联图」框，完成一次文档关联'
     },
     inspiration_draw: {
       days: 1,
@@ -216,11 +217,17 @@ export function taskRewardForKey(
       title: '随心一抽并收藏',
       description: '在社区点击「随心一抽」，将抽到的作品收藏入卡片仓库'
     },
-    cards_count_25: {
+    cards_count_10: {
       days: 1,
       credits: 0,
-      title: '卡片库达 25 张',
-      description: '卡片库首次达到 25 张（不含已删除）'
+      title: '自建卡片达 10 张',
+      description: '自己创建或浏览器插件保存的卡片达 10 张（不含社区收藏、资产包导入）'
+    },
+    cards_count_30: {
+      days: 1,
+      credits: 0,
+      title: '自建卡片达 30 张',
+      description: '自己创建或浏览器插件保存的卡片达 30 张（不含社区收藏、资产包导入）'
     },
     spend_1000: {
       days: 1,
@@ -336,8 +343,10 @@ export function isTaskProgressMet(
       return !!flags.inspiration_draw_used;
     case 'community_gacha_collect':
       return !!flags.community_gacha_collect_used;
-    case 'cards_count_25':
-      return (flags.cards_count_synced ?? 0) >= 25;
+    case 'cards_count_10':
+      return (flags.cards_count_synced ?? 0) >= 10;
+    case 'cards_count_30':
+      return (flags.cards_count_synced ?? 0) >= 30;
     case 'spend_1000':
       return spent >= 1000;
     case 'spend_2000':
@@ -807,7 +816,8 @@ export function buildTaskList(
     'asset_studio_link_card',
     'inspiration_draw',
     'community_gacha_collect',
-    'cards_count_25',
+    'cards_count_10',
+    'cards_count_30',
     spendKey
   ].filter((k): k is string => !!k);
 
@@ -838,8 +848,10 @@ export function buildTaskList(
       progress = `${Math.min(flags.community_qualified_count ?? 0, 5)}/5`;
     } else if (key === 'community_publish_15') {
       progress = `${Math.min(flags.community_qualified_count ?? 0, 15)}/15`;
-    } else if (key === 'cards_count_25') {
-      progress = `${Math.min(flags.cards_count_synced ?? 0, 25)}/25`;
+    } else if (key === 'cards_count_10') {
+      progress = `${Math.min(flags.cards_count_synced ?? 0, 10)}/10`;
+    } else if (key === 'cards_count_30') {
+      progress = `${Math.min(flags.cards_count_synced ?? 0, 30)}/30`;
     } else if (key.startsWith('spend_')) {
       const th = Number(key.replace('spend_', ''));
       progress = `${spent}/${th}`;

@@ -70,7 +70,10 @@ export async function communityFeedHandler(c: Context<{ Bindings: Env }>) {
   const offset = Math.max(0, Number(c.req.query('offset') || 0));
   const admin = createAdminClient(c.env);
   try {
-    const posts = await listPublicCommunityFeed(admin, limit, offset, { repairAuthors: false });
+    const posts = await listPublicCommunityFeed(admin, limit, offset, {
+      repairAuthors: false,
+      runMaintenance: offset === 0
+    });
     return c.json({ ok: true, data: { posts, limit, offset } });
   } catch (e) {
     if (isMissingCommunityTable(e)) {

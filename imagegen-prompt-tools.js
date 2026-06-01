@@ -10,8 +10,8 @@
   let currentImageGenMode = 'gen';
   let activeRefTool = '';
   /** 排队提交间隔：避免上游 Apimart 限流导致失败 */
-  const BATCH_SUBMIT_GAP_MS = 1000;
-  const BATCH_SUBMIT_JITTER_MS = 600;
+  const BATCH_SUBMIT_GAP_MS = 2200;
+  const BATCH_SUBMIT_JITTER_MS = 800;
 
   function getFirstRefImage() {
     const refs = window.FeatureDraft?.getImageGenRefImages?.() || [];
@@ -335,8 +335,11 @@
     }
   }
 
+  /** 外露三行 × 4 列 = 12；其余在「更多词条」 */
   const INSPIRE_PRIMARY_TYPES = [
-    'viral', 'premium', 'character', 'scene', 'product', 'guofeng', 'cyber', 'epic'
+    'viral', 'premium', 'character', 'scene',
+    'moviePoster', 'travel', 'guofeng', 'cyber',
+    'epic', 'impact', 'coolMecha', 'megaPerspective'
   ];
 
   function preserveFormScroll(fn) {

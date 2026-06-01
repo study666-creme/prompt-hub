@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { fetchApimartTaskOnce } from './apimart';
+import { confirmApimartTaskOutcome, fetchApimartTaskOnce } from './apimart';
 import { ApiError } from './errors';
 import { archiveRemoteImage, isStorageRef } from './image-archive';
 import { type DebitSplit, refundUserCredits } from './membership-credits';
@@ -83,7 +83,11 @@ export async function pollAndUpdateJob(
   imageUrl: string | null;
   errorMessage: string | null;
   refunded: boolean;
+  extraImageUrls?: string[];
 }> {
+  const meta = (job.meta as Record<string, unknown>) || {};
+  const taskId = typeof meta.apimartTaskId === 'string' ? meta.apimartTaskId : null;
+
   if (job.status === 'completed') {
     const archived = await ensureJobImageArchived(admin, userId, job);
     return {
@@ -94,6 +98,17 @@ export async function pollAndUpdateJob(
     };
   }
   if (job.status === 'failed') {
+    if (taskId && imageApiKey) {
+      const recovered = await tryRecoverJobFromUpstream(
+        admin,
+        userId,
+        job,
+        imageApiKey,
+        imageApiBaseUrl,
+        taskId
+      );
+      if (recovered) return recovered;
+    }
     return {
       status: 'failed',
       imageUrl: null,
@@ -102,10 +117,8 @@ export async function pollAndUpdateJob(
     };
   }
 
-  const meta = (job.meta as Record<string, unknown>) || {};
-  const taskId = typeof meta.apimartTaskId === 'string' ? meta.apimartTaskId : null;
   const createdMs = new Date(job.created_at).getTime();
-  const staleMs = 12 * 60 * 1000;
+  const staleMs = 18 * 60 * 1000;
 
   if (!imageApiKey) {
     await admin
@@ -129,6 +142,13 @@ export async function pollAndUpdateJob(
   }
 
   if (Date.now() - createdMs > staleMs) {
+    const late = await confirmApimartTaskOutcome(imageApiKey, imageApiBaseUrl, taskId, {
+      attempts: 5,
+      intervalMs: 8000
+    });
+    if (late.status === 'completed' && late.imageUrl) {
+      return completeJobFromPoll(admin, userId, job, late);
+    }
     await finalizeFailedJob(admin, userId, job, 'upstream_timeout');
     return {
       status: 'failed',
@@ -141,35 +161,96 @@ export async function pollAndUpdateJob(
   const polled = await fetchApimartTaskOnce(imageApiKey, imageApiBaseUrl, taskId);
 
   if (polled.status === 'completed' && polled.imageUrl) {
-    const storedUrl = await ensureJobImageArchived(admin, userId, {
-      ...job,
-      status: 'completed',
-      result_image_url: polled.imageUrl
-    });
-    await admin
-      .from('generation_requests')
-      .update({
-        status: 'completed',
-        result_image_url: storedUrl,
-        error_message: null,
-        completed_at: new Date().toISOString()
-      })
-      .eq('id', job.id);
-    return {
-      status: 'completed',
-      imageUrl: storedUrl,
-      errorMessage: null,
-      refunded: false
-    };
+    return completeJobFromPoll(admin, userId, job, polled);
   }
 
   if (polled.status === 'failed') {
-    const msg = polled.errorMessage || 'upstream_failed';
+    const confirmed = await confirmApimartTaskOutcome(imageApiKey, imageApiBaseUrl, taskId, {
+      attempts: 4,
+      intervalMs: 8000
+    });
+    if (confirmed.status === 'completed' && confirmed.imageUrl) {
+      return completeJobFromPoll(admin, userId, job, confirmed);
+    }
+    const msg = confirmed.errorMessage || polled.errorMessage || 'upstream_failed';
     await finalizeFailedJob(admin, userId, job, msg);
     return { status: 'failed', imageUrl: null, errorMessage: msg, refunded: true };
   }
 
   return { status: 'processing', imageUrl: null, errorMessage: null, refunded: false };
+}
+
+async function completeJobFromPoll(
+  admin: SupabaseClient,
+  userId: string,
+  job: JobRow,
+  polled: { imageUrl: string | null; imageUrls?: string[] }
+): Promise<{
+  status: 'completed';
+  imageUrl: string | null;
+  errorMessage: null;
+  refunded: boolean;
+  extraImageUrls?: string[];
+}> {
+  const primary = polled.imageUrl!;
+  const extras = (polled.imageUrls || []).filter((u) => u && u !== primary);
+  const storedUrl = await ensureJobImageArchived(admin, userId, {
+    ...job,
+    status: 'completed',
+    result_image_url: primary
+  });
+  const meta = (job.meta as Record<string, unknown>) || {};
+  await admin
+    .from('generation_requests')
+    .update({
+      status: 'completed',
+      result_image_url: storedUrl,
+      error_message: null,
+      completed_at: new Date().toISOString(),
+      meta: {
+        ...meta,
+        extraImageUrls: extras.length ? extras : meta.extraImageUrls || undefined,
+        recoveredFromUpstream: meta.recoveredFromUpstream || undefined
+      }
+    })
+    .eq('id', job.id);
+  return {
+    status: 'completed',
+    imageUrl: storedUrl,
+    errorMessage: null,
+    refunded: false,
+    extraImageUrls: extras.length ? extras : undefined
+  };
+}
+
+async function tryRecoverJobFromUpstream(
+  admin: SupabaseClient,
+  userId: string,
+  job: JobRow,
+  imageApiKey: string,
+  imageApiBaseUrl: string | undefined,
+  taskId: string
+): Promise<{
+  status: 'completed' | 'failed';
+  imageUrl: string | null;
+  errorMessage: string | null;
+  refunded: boolean;
+  extraImageUrls?: string[];
+} | null> {
+  const polled = await confirmApimartTaskOutcome(imageApiKey, imageApiBaseUrl, taskId, {
+    attempts: 3,
+    intervalMs: 6000
+  });
+  if (polled.status !== 'completed' || !polled.imageUrl) return null;
+  const meta = (job.meta as Record<string, unknown>) || {};
+  const result = await completeJobFromPoll(admin, userId, job, polled);
+  await admin
+    .from('generation_requests')
+    .update({
+      meta: { ...meta, recoveredFromUpstream: true, wasRefunded: !!meta.refunded }
+    })
+    .eq('id', job.id);
+  return result;
 }
 
 /** 已完成任务：远程 URL 必须归档到 Storage；已是 storage:// 则直接返回 */

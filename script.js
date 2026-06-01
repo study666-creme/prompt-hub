@@ -709,6 +709,67 @@
     }
     window.showToast = showToast;
 
+    async function promptHubSaveImage(url, filename, imgEl) {
+      const name = filename || `prompt-hub-${Date.now()}.png`;
+      const saveBlob = (blob) => {
+        const objUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objUrl;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
+      };
+      if (!url || String(url).includes('data:image/svg')) {
+        throw new Error('no_url');
+      }
+      if (String(url).startsWith('blob:')) {
+        saveBlob(await (await fetch(url)).blob());
+        return;
+      }
+      try {
+        const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+        if (!res.ok) throw new Error(String(res.status));
+        saveBlob(await res.blob());
+        return;
+      } catch (e) { /* try canvas / proxy */ }
+      const img = imgEl || document.getElementById('lightboxImage');
+      if (img?.complete && img.naturalWidth > 0 && !String(img.src).includes('data:image/svg')) {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          canvas.getContext('2d')?.drawImage(img, 0, 0);
+          const blob = await new Promise((resolve, reject) => {
+            canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob'))), 'image/png', 0.92);
+          });
+          saveBlob(blob);
+          return;
+        } catch (e) { /* fall through */ }
+      }
+      if (window.PromptHubApi?.fetchMediaAsBlobUrl && /^https?:\/\//i.test(url)) {
+        const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(url);
+        if (blobUrl) {
+          try {
+            saveBlob(await (await fetch(blobUrl)).blob());
+            URL.revokeObjectURL(blobUrl);
+            return;
+          } catch (e) {
+            URL.revokeObjectURL(blobUrl);
+          }
+        }
+      }
+      const dlUrl = `${url}${url.includes('?') ? '&' : '?'}dl=1`;
+      const a = document.createElement('a');
+      a.href = dlUrl;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+    window.promptHubSaveImage = promptHubSaveImage;
+
     function showAchievementToast(msg, durationMs) {
       const toast = document.getElementById('toast');
       toast.textContent = msg;
@@ -893,7 +954,8 @@
       window.FeatureDraft?.isCommunityCollectCard?.(card)
       || !!(card && (card.tags || []).includes(window.COMMUNITY_COLLECT_TAG));
 
-    window.addCardFromCommunity = async function (post) {
+    window.addCardFromCommunity = async function (post, opts) {
+      opts = opts || {};
       if (!post || !post.prompt) return { ok: false };
       const COLLECT_TAG = window.COMMUNITY_COLLECT_TAG;
       if (cards.some(c =>
@@ -917,6 +979,22 @@
         tryAllPaths: true,
         variant: 'full'
       };
+      function pickStorageRef(ref) {
+        if (!ref) return null;
+        const normalized = window.SupabaseSync?.normalizeImageRef?.(ref) || ref;
+        if (typeof normalized === 'string' && normalized.startsWith('storage://')) return normalized;
+        return null;
+      }
+      function altStorageRefs() {
+        if (!post.authorId || !post.sourceCardId) return [];
+        const uid = String(post.authorId);
+        const base = String(post.sourceCardId).replace(/[^a-zA-Z0-9_-]/g, '_');
+        return [
+          `storage://card-images/${uid}/${base}.jpg`,
+          `storage://card-images/${uid}/${post.sourceCardId}.jpg`,
+          `storage://card-images/${uid}/${base}.webp`
+        ];
+      }
       async function blobFromRef(ref) {
         if (!ref) return null;
         if (window.SupabaseSync?.isDataUrl?.(ref) || String(ref).startsWith('blob:')) {
@@ -948,21 +1026,18 @@
         return null;
       }
       if (imageRef && window.SupabaseSync?.isLoggedIn?.()) {
-        const normalizedRef = window.SupabaseSync?.normalizeImageRef?.(imageRef) || imageRef;
-        if (typeof normalizedRef === 'string' && normalizedRef.startsWith('storage://')) {
-          image = normalizedRef;
-        } else {
+        image = pickStorageRef(imageRef);
+        if (!image) {
+          for (const alt of altStorageRefs()) {
+            image = pickStorageRef(alt);
+            if (image) break;
+          }
+        }
+        if (!image && !opts.skipBlobCopy) {
         try {
           let source = await blobFromRef(imageRef);
           if (!source && post.authorId && post.sourceCardId) {
-            const uid = String(post.authorId);
-            const base = String(post.sourceCardId).replace(/[^a-zA-Z0-9_-]/g, '_');
-            const altRefs = [
-              `storage://card-images/${uid}/${base}.jpg`,
-              `storage://card-images/${uid}/${post.sourceCardId}.jpg`,
-              `storage://card-images/${uid}/${base}.webp`
-            ];
-            for (const alt of altRefs) {
+            for (const alt of altStorageRefs()) {
               source = await blobFromRef(alt);
               if (source) break;
             }
@@ -999,8 +1074,15 @@
       if (window.SupabaseSync?.isLoggedIn?.()) {
         scheduleCloudPush();
       }
-      renderGroups();
-      renderCards(true);
+      const refreshCards = () => {
+        renderGroups();
+        renderCards(true);
+      };
+      if (opts.deferRender) {
+        setTimeout(refreshCards, 0);
+      } else {
+        refreshCards();
+      }
       return { ok: true, imageCopied: !!image };
     };
 
@@ -4497,9 +4579,21 @@
         const item = document.createElement('div');
         item.className = `group-item custom-group ${currentGroup === group ? 'active' : ''}`;
         item.dataset.group = group;
+        item.title = '双击或右键重命名';
         item.innerHTML = `${group} <span class="count">${cnt}</span>`;
         item.addEventListener('click', () => switchGroup(group));
-        item.addEventListener('contextmenu', e => { e.preventDefault(); showContextMenu(e.clientX, e.clientY, [{label:'删除分组', action:()=>deleteGroup(group)}]); });
+        item.addEventListener('dblclick', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          inlineRenameGroup(group);
+        });
+        item.addEventListener('contextmenu', e => {
+          e.preventDefault();
+          showContextMenu(e.clientX, e.clientY, [
+            { label: '重命名', action: () => inlineRenameGroup(group) },
+            { label: '删除分组', action: () => deleteGroup(group) }
+          ]);
+        });
         customContainer.appendChild(item);
       });
       document.querySelectorAll('#defaultGroupList .group-item').forEach(item => {
@@ -4550,6 +4644,77 @@
       container.prepend(div);
       input.focus();
     }
+
+    function renameGroup(oldName, newName) {
+      const oldN = String(oldName || '').trim();
+      const newN = String(newName || '').trim();
+      if (!oldN || !newN || oldN === newN) return false;
+      if (!customGroups.includes(oldN)) return false;
+      if (customGroups.includes(newN)) {
+        showToast('分组已存在');
+        return false;
+      }
+      customGroups[customGroups.indexOf(oldN)] = newN;
+      cards.forEach((c) => {
+        if (c.group === oldN) c.group = newN;
+      });
+      if (currentGroup === oldN) {
+        currentGroup = newN;
+        window.currentGroup = newN;
+      }
+      window.__promptHubCards = cards;
+      persistWarehouseGroups();
+      saveAllData();
+      renderGroups();
+      renderCards(true);
+      showToast('分组已重命名');
+      return true;
+    }
+    window.renameGroup = renameGroup;
+
+    function inlineRenameGroup(groupName) {
+      const container = document.getElementById('customGroupList');
+      if (!container) return;
+      const item = [...container.querySelectorAll('.group-item.custom-group')].find(
+        (el) => el.dataset.group === groupName
+      );
+      if (!item || item.querySelector('.group-name-input')) return;
+      const oldName = groupName;
+      item.classList.add('inline-edit-group');
+      item.innerHTML = '<input type="text" class="group-name-input" maxlength="40">';
+      const input = item.querySelector('.group-name-input');
+      input.value = oldName;
+      let done = false;
+      const restore = () => {
+        item.classList.remove('inline-edit-group');
+        renderGroups();
+      };
+      const commit = () => {
+        if (done) return;
+        done = true;
+        const name = input.value.trim();
+        if (!name || name === oldName) {
+          restore();
+          return;
+        }
+        if (!renameGroup(oldName, name)) restore();
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          input.blur();
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          done = true;
+          restore();
+        }
+      });
+      input.addEventListener('blur', commit);
+      input.focus();
+      input.select();
+    }
+    window.inlineRenameGroup = inlineRenameGroup;
 
     function deleteGroup(g) {
       customConfirm(`确定删除分组"${g}"？卡片将变为未分类。`, () => {
@@ -5800,15 +5965,34 @@
       img.ondblclick = null;
       img.removeAttribute('src');
       const displaySrc = src;
+      let corsRetried = false;
+      if (/^https?:\/\//i.test(displaySrc)) img.crossOrigin = 'anonymous';
+      else img.removeAttribute('crossorigin');
       if (img.src === displaySrc && img.complete && img.naturalWidth > 0) {
         onReady();
         return;
       }
       img.onerror = () => {
+        if (!corsRetried && img.hasAttribute('crossorigin')) {
+          corsRetried = true;
+          img.removeAttribute('crossorigin');
+          img.onload = onReady;
+          img.onerror = () => {
+            img.onerror = null;
+            img.onload = null;
+            setViewerFrameLoading(frame, false);
+            lightbox.classList.remove('active');
+            showToast('图片加载失败，请稍后重试');
+          };
+          img.src = displaySrc;
+          if (img.complete && img.naturalWidth > 0) onReady();
+          return;
+        }
         img.onerror = null;
         img.onload = null;
         setViewerFrameLoading(frame, false);
         lightbox.classList.remove('active');
+        showToast('图片加载失败，请稍后重试');
       };
       img.onload = onReady;
       img.src = displaySrc;
@@ -5819,32 +6003,30 @@
     async function downloadLightboxImage() {
       const img = document.getElementById('lightboxImage');
       const url = img?.src;
+      const dlBtn = document.getElementById('lightboxDownloadBtn');
       if (!url || String(url).includes('data:image/svg')) {
-        if (typeof showToast === 'function') showToast('图片尚未加载完成');
+        showToast('图片尚未加载完成');
         return;
       }
       const filename = `prompt-hub-${Date.now()}.png`;
+      const prevLabel = dlBtn?.querySelector('span')?.textContent;
+      if (dlBtn) {
+        dlBtn.disabled = true;
+        const label = dlBtn.querySelector('span');
+        if (label) label.textContent = '下载中…';
+      }
       try {
-        const res = await fetch(url, { mode: 'cors' });
-        const blob = await res.blob();
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(a.href);
-        if (typeof showToast === 'function') showToast('图片已开始下载');
+        await promptHubSaveImage(url, filename, img);
+        showToast('图片已开始下载');
       } catch (e) {
-        const a = document.createElement('a');
-        a.href = url;
-        a.target = '_blank';
-        a.rel = 'noopener';
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        if (typeof showToast === 'function') showToast('若未自动下载，请在新标签页右键保存');
+        showToast('下载失败，请稍后重试');
+        console.warn('[download] lightbox image failed', e);
+      } finally {
+        if (dlBtn) {
+          dlBtn.disabled = !(img?.src && !String(img.src).includes('data:image/svg'));
+          const label = dlBtn.querySelector('span');
+          if (label && prevLabel) label.textContent = prevLabel;
+        }
       }
     }
     window.downloadLightboxImage = downloadLightboxImage;
