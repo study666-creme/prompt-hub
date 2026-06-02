@@ -1,7 +1,7 @@
 {
-  "name": "提示词仓库",
-  "short_name": "提示词仓库",
-  "description": "管理、同步与复用 AI 提示词卡片",
+  "name": "Prompt Hub 提示词仓库",
+  "short_name": "Prompt Hub",
+  "description": "管理、同步与复用 AI 提示词；社区浏览、灵感抽卡与生图",
   "start_url": "/?launch=homescreen",
   "scope": "/",
   "display": "standalone",

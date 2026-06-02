@@ -697,6 +697,20 @@ body.studio-resizing {
   pointer-events: none;
 }
 
+.studio-main.studio-demo-active .studio-hero-drop,
+.studio-main.studio-demo-active .studio-hero-drop.studio-demo-drop {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+.studio-main.studio-demo-active .studio-asset-card[draggable="true"] {
+  cursor: grab;
+}
+
+.studio-main.studio-demo-active .studio-asset-card--thumb[draggable="true"] {
+  cursor: grab;
+}
+
 .studio-asset-card {
   aspect-ratio: 1;
   border-radius: 6px;

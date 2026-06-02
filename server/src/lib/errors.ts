@@ -30,10 +30,15 @@ export function jsonError(c: Context, err: unknown) {
   }
   console.error(err);
   const msg = err instanceof Error ? err.message : String(err);
-  const configHint =
-    msg.includes('sb_secret_') || msg.includes('Publishable')
-      ? '请在 server 执行 npm run secret-service-role 并粘贴 sb_secret_ 密钥后 npm run deploy'
-      : undefined;
+  const configHint = msg.includes('SITE_SETTINGS_TABLE_MISSING')
+    ? '请先在 Supabase 执行 site_settings 建表 SQL（见 supabase/migrations/20260602160000_*.sql）'
+    : msg.includes('SITE_SETTINGS_PERMISSION')
+      ? '请执行 supabase/migrations/20260602200000_site_settings_grants.sql 授予 service_role 权限'
+      : msg.includes('SITE_SETTINGS_SAVE_VERIFY_FAILED')
+        ? '保存后读不到数据：请确认 Worker 的 SUPABASE_URL 与你在 SQL 编辑器里用的是同一个 Supabase 项目'
+        : msg.includes('sb_secret_') || msg.includes('Publishable')
+          ? '请在 server 执行 npm run secret-service-role 并粘贴 sb_secret_ 密钥后 npm run deploy'
+          : undefined;
   return c.json(
     {
       ok: false,

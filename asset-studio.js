@@ -215,12 +215,21 @@
     return window.SupabaseSync?.isLoggedIn?.() === true;
   }
 
+  function isPresetDemoProject() {
+    return getProject()?.id === PRESET_PROJECT_ID;
+  }
+
+  /** 演示项目允许未登录用户拖卡片体验完整流程（仅本地，不上传） */
+  function allowsStudioDemoInteract() {
+    return isPresetDemoProject();
+  }
+
   function isViewOnly() {
     return !canUseAssetStudio();
   }
 
   function guardEdit(msg) {
-    if (!isViewOnly()) return true;
+    if (canUseAssetStudio() || allowsStudioDemoInteract()) return true;
     setStatus(msg || '请先登录后使用资产创作（当前为只读预览）');
     return false;
   }
@@ -308,15 +317,23 @@
     const banner = document.getElementById('studioViewOnlyBanner');
     if (banner) banner.classList.toggle('hidden', canUseAssetStudio());
     const editor = document.getElementById('studioEditor');
-    if (editor) editor.contentEditable = canUseAssetStudio() ? 'true' : 'false';
+    const demoMode = allowsStudioDemoInteract();
+    if (editor) editor.contentEditable = canUseAssetStudio() ? 'true' : (demoMode ? 'true' : 'false');
     ['studioNewProjectBtn', 'studioDocAddBtn', 'studioCardSaveBtn', 'studioDeleteProjectBtn', 'studioFieldSettingsBtn', 'studioChatNewThread'].forEach((id) => {
       const el = document.getElementById(id);
-      if (el) el.disabled = isViewOnly();
+      if (el) el.disabled = isViewOnly() && !demoMode;
     });
     const hero = document.getElementById('studioHeroDrop');
-    if (hero) hero.classList.toggle('studio-readonly', isViewOnly());
+    const readonly = isViewOnly() && !demoMode;
+    if (hero) {
+      hero.classList.toggle('studio-readonly', readonly);
+      hero.classList.toggle('studio-demo-drop', demoMode);
+    }
     const main = document.getElementById('studioMain');
-    if (main) main.classList.toggle('studio-readonly', isViewOnly());
+    if (main) {
+      main.classList.toggle('studio-readonly', readonly);
+      main.classList.toggle('studio-demo-active', demoMode);
+    }
   }
 
   function applyStudioImgLoaded(img, url) {
@@ -1082,7 +1099,7 @@
       ? `<img src="${initialSrc ? esc(initialSrc) : ''}" alt="" data-image-ref="${esc(card.image)}" loading="lazy"${initialSrc ? ' data-loaded="1"' : ''}>`
       : `<span class="studio-asset-card-fallback" aria-hidden="true">${esc((card.title || '?').slice(0, 1))}</span>`;
     const noThumb = !hasImg || !initialSrc ? ' no-thumb' : '';
-    const drag = isViewOnly() ? 'false' : 'true';
+    const drag = (isViewOnly() && !allowsStudioDemoInteract()) ? 'false' : 'true';
     const promptHint = (card.prompt || '').trim();
     const tip = promptHint
       ? `${card.title || '未命名'} · 点击查看提示词`
@@ -1659,7 +1676,7 @@
   function renderDocRow(p, doc, depth) {
     const pad = 8 + depth * 14;
     const active = doc.id === p.activeDocId;
-    const drag = isViewOnly() ? 'false' : 'true';
+    const drag = (isViewOnly() && !allowsStudioDemoInteract()) ? 'false' : 'true';
     if (doc._inlineRename) {
       return `<div class="studio-doc-row${active ? ' active' : ''}" data-doc-id="${esc(doc.id)}" style="padding-left:${pad}px">
       <span class="studio-tree-toggle is-empty" aria-hidden="true"></span>
@@ -2301,7 +2318,7 @@
       });
       node.addEventListener('dragstart', (e) => {
         press = null;
-        if (isViewOnly()) {
+        if (isViewOnly() && !allowsStudioDemoInteract()) {
           e.preventDefault();
           return;
         }
@@ -3374,7 +3391,7 @@
       zone.addEventListener('drop', (e) => {
         e.preventDefault();
         hero?.classList.remove('drag-over');
-        if (isViewOnly()) {
+        if (isViewOnly() && !allowsStudioDemoInteract()) {
           guardEdit();
           return;
         }

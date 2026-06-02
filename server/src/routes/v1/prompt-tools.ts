@@ -15,13 +15,27 @@ import {
   syncMembershipCredits
 } from '../../lib/membership-credits';
 import { createAdminClient, getOrCreateProfile, isMembershipActive } from '../../lib/supabase';
-import { submitVisionChat } from '../../lib/vision-chat';
+import { submitVisionChat, resolveVisionApiBindings } from '../../lib/vision-chat';
 import { consumeInspirationDraw, INSPIRE_DRAW_DAILY_LIMIT } from '../../lib/inspiration-draw';
 import { rateLimit } from '../../middleware/rate-limit';
 
 const optimizeSchema = z.object({
   prompt: z.string().min(2).max(4000),
-  target: z.enum(['general', 'sd', 'anime', 'jimeng', 'guofeng', 'realistic', 'glamour', 'malePower']).optional()
+  target: z
+    .enum([
+      'general',
+      'ecommerce_cover',
+      'viral_cover',
+      'product_studio',
+      'sd',
+      'anime',
+      'jimeng',
+      'guofeng',
+      'realistic',
+      'glamour',
+      'malePower'
+    ])
+    .optional()
 });
 
 const reverseSchema = z.object({
@@ -56,6 +70,12 @@ const OPTIMIZE_PRICING_MODEL = 'deepseek-v4-flash';
 const OPTIMIZE_SYSTEM: Record<string, string> = {
   general:
     '你是 AI 绘图提示词专家。用户给出草稿提示词，请优化为更清晰、可出图的描述。保留用户意图，补充光线、构图、材质与风格词。输出仅一段优化后的中文提示词；除非原意或出图效果确实需要，否则不要写英文，不要解释。',
+  ecommerce_cover:
+    '你是电商主图 / 商品宣传海报提示词专家（适用于 Nano Banana、GPT Image 等通用生图模型）。用户给出商品或活动草稿，请扩写为「高点击、高转化」的封面级提示词：①主体商品/人物清晰突出，占画面约 50%～70%；②强对比配色与高光，一眼吸睛；③明确版式（竖屏 9:16 或方图 1:1 按原意）、留白可放标题区；④促销氛围（新品/爆款/限时/福利等，按用户原意）；⑤专业棚拍或场景质感、4K/超清、商业摄影光。禁止低俗裸露。输出仅一段中文提示词，不要解释。',
+  viral_cover:
+    '你是小红书 / 抖音 / 信息流爆款封面提示词专家。优化用户草稿：竖屏 9:16、主体居中或三分法、强情绪与好奇心（但不标题党低俗）、高饱和点缀色、柔光或电影感、人物/产品占画面主导、适合「一眼停滑」的构图。补充画质与镜头词。输出仅一段中文提示词，不要解释。',
+  product_studio:
+    '你是商业商品摄影提示词专家。优化用户草稿：白底/纯色底或简约场景、产品轮廓清晰、材质细节（金属/玻璃/织物/食品等）、柔光箱/轮廓光、微距或 45° 经典机位、无杂乱背景、电商详情页级清晰度。输出仅一段中文提示词，不要解释。',
   sd:
     '你是 Stable Diffusion / 全能绘图提示词专家。优化用户提示词：补充画质、镜头、光线、构图与细节描述。输出仅一段中文提示词；除非用户原文或特定 SD 效果确实需要英文 tag，否则不要堆砌 masterpiece/best quality 等英文，不要解释。',
   anime:
@@ -163,7 +183,8 @@ promptToolsRoutes.get('/info', async c => {
       },
       inspirationDraw: {
         limits: INSPIRE_DRAW_DAILY_LIMIT,
-        note: '普通用户 10 次/天 · 轻量会员 30 次/天 · 基础及以上无限（仅「随机抽卡」计次）'
+        creditsPerCall: 0,
+        note: '本地词库随机组合，不调用 AI、不扣积分；仅「随机抽卡」计每日次数'
       }
     }
   });
@@ -173,7 +194,7 @@ promptToolsRoutes.post('/inspiration-draw', rateLimit(120, 60_000), async c => {
   const user = c.get('user');
   const admin = createAdminClient(c.env);
   const { quota } = await consumeInspirationDraw(admin, user.id);
-  return c.json({ ok: true, data: { quota } });
+  return c.json({ ok: true, data: { quota, creditsCharged: 0 } });
 });
 
 promptToolsRoutes.post('/optimize', rateLimit(90, 60_000), async c => {
@@ -258,9 +279,9 @@ promptToolsRoutes.post('/reverse', rateLimit(60, 60_000), async c => {
     throw new ApiError(400, 'VALIDATION_ERROR', '请上传图片或提供图片地址');
   }
 
-  const apiKey = c.env.IMAGE_API_KEY;
-  if (!apiKey) {
-    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '反推服务暂未配置（需 IMAGE_API_KEY 视觉模型）');
+  const vision = resolveVisionApiBindings(c.env);
+  if (!vision.apiKey) {
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '反推服务暂未配置（需 APIMART_API_KEY 或 CHAT_API_KEY）');
   }
 
   const admin = createAdminClient(c.env);
@@ -292,7 +313,7 @@ promptToolsRoutes.post('/reverse', rateLimit(60, 60_000), async c => {
   let lastErr: unknown = null;
   for (const model of fallbacks) {
     try {
-      prompt = await submitVisionChat(apiKey, c.env.IMAGE_API_BASE_URL, { ...visionParams, model });
+      prompt = await submitVisionChat(vision.apiKey, vision.baseUrl, { ...visionParams, model });
       break;
     } catch (e) {
       lastErr = e;
@@ -323,7 +344,7 @@ promptToolsRoutes.post('/reverse', rateLimit(60, 60_000), async c => {
       creditsRemaining: spendableCredits(profile),
       model: reverseModel,
       modelLabel: 'Gemini 2.5 Flash Lite Vision',
-      upstream: 'IMAGE_API'
+      upstream: vision.provider.toUpperCase()
     }
   });
 });
@@ -335,10 +356,7 @@ promptToolsRoutes.post('/purify-describe', rateLimit(60, 60_000), async c => {
     throw new ApiError(400, 'VALIDATION_ERROR', '请上传图片或提供图片地址');
   }
 
-  const apiKey = c.env.IMAGE_API_KEY;
-  if (!apiKey) {
-    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '净化服务暂未配置（需 IMAGE_API_KEY 视觉模型）');
-  }
+  const vision = resolveVisionApiBindings(c.env);
 
   const admin = createAdminClient(c.env);
   let profile = await syncMembershipCredits(admin, user.id);
@@ -369,7 +387,7 @@ promptToolsRoutes.post('/purify-describe', rateLimit(60, 60_000), async c => {
   let lastErr: unknown = null;
   for (const model of fallbacks) {
     try {
-      contentDesc = await submitVisionChat(apiKey, c.env.IMAGE_API_BASE_URL, { ...visionParams, model });
+      contentDesc = await submitVisionChat(vision.apiKey, vision.baseUrl, { ...visionParams, model });
       break;
     } catch (e) {
       lastErr = e;
@@ -403,7 +421,7 @@ promptToolsRoutes.post('/purify-describe', rateLimit(60, 60_000), async c => {
       creditsRemaining: spendableCredits(profile),
       model: reverseModel,
       modelLabel: 'Gemini 2.5 Flash Lite Vision',
-      upstream: 'IMAGE_API'
+      upstream: vision.provider.toUpperCase()
     }
   });
 });
@@ -415,10 +433,10 @@ promptToolsRoutes.post('/fission', rateLimit(40, 60_000), async c => {
     throw new ApiError(400, 'VALIDATION_ERROR', '请上传图片或提供图片地址');
   }
 
-  const imageApiKey = c.env.IMAGE_API_KEY;
+  const vision = resolveVisionApiBindings(c.env);
   const chatApiKey = c.env.CHAT_API_KEY;
-  if (!imageApiKey || !chatApiKey) {
-    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '裂变服务暂未配置（需 IMAGE_API_KEY + CHAT_API_KEY）');
+  if (!chatApiKey) {
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '裂变服务暂未配置（需 CHAT_API_KEY + APIMART_API_KEY）');
   }
 
   const admin = createAdminClient(c.env);
@@ -467,7 +485,7 @@ promptToolsRoutes.post('/fission', rateLimit(40, 60_000), async c => {
   let lastErr: unknown = null;
   for (const model of visionFallbacks) {
     try {
-      dna = await submitVisionChat(imageApiKey, c.env.IMAGE_API_BASE_URL, {
+      dna = await submitVisionChat(vision.apiKey, vision.baseUrl, {
         system: FISSION_VISION_SYSTEM,
         userText: '请提取这张图的美学 DNA，如实识别其最主要的呈现形式与风格特征。',
         imageUrl,

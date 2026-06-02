@@ -66,8 +66,11 @@ export async function moderateCommunityContent(params: {
   admin: SupabaseClient;
   prompt: string;
   imageRef?: string | null;
-  imageApiKey?: string;
-  imageApiBaseUrl?: string;
+  /** Apimart/Chat 视觉密钥；勿传 GrsAI 生图 IMAGE_API_KEY */
+  visionApiKey?: string;
+  visionApiBaseUrl?: string;
+  /** 未配置 Apimart 时仅做文本审核，不调 Gemini（避免误扣 GrsAI 上游积分） */
+  skipVision?: boolean;
 }): Promise<{ safe: boolean; reason?: string }> {
   const promptResult = moderateCommunityPrompt(params.prompt);
   if (!promptResult.safe) return promptResult;
@@ -77,7 +80,11 @@ export async function moderateCommunityContent(params: {
     return { safe: false, reason: '发布到社区需要配图' };
   }
 
-  const apiKey = params.imageApiKey?.trim();
+  if (params.skipVision) {
+    return { safe: true };
+  }
+
+  const apiKey = params.visionApiKey?.trim();
   if (!apiKey) {
     return { safe: true };
   }
@@ -88,7 +95,7 @@ export async function moderateCommunityContent(params: {
   }
 
   try {
-    const raw = await submitVisionChat(apiKey, params.imageApiBaseUrl, {
+    const raw = await submitVisionChat(apiKey, params.visionApiBaseUrl, {
       system: MODERATION_SYSTEM,
       userText: '请审核这张即将发布到公开社区的作品配图。',
       imageUrl,

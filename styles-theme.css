@@ -152,6 +152,44 @@ body.efficiency-mode .ui-vignette {
   background-color: var(--bg-primary);
 }
 
+[data-theme="light"] .floating-prompt {
+  background: #ffffff;
+  border-color: #d1d1d6;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .floating-prompt textarea {
+  color: #1c1c1e;
+  -webkit-text-fill-color: #1c1c1e;
+  caret-color: #1c1c1e;
+  background: #ffffff;
+  border-color: #d1d1d6;
+}
+
+:root:not([data-theme="light"]) .floating-prompt textarea {
+  color: #ffffff;
+  -webkit-text-fill-color: #ffffff;
+  caret-color: #ffffff;
+  background: #1e1e1e;
+}
+
+[data-theme="light"] .filter-dropdown,
+[data-theme="light"] .toolbar-sort-dropdown {
+  background: #ffffff;
+  border-color: #d1d1d6;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .toolbar-sort-btn {
+  background: #ffffff;
+  border-color: #d1d1d6;
+}
+
+[data-theme="light"] .toolbar-sort-btn:hover,
+[data-theme="light"] .toolbar-sort-btn[aria-expanded="true"] {
+  background: #f2f2f7;
+}
+
 [data-theme="light"] .ripple-grid-bg {
   opacity: 0.35;
 }

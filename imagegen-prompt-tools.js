@@ -7,7 +7,7 @@
   let fissionPlanCreditsHint = 5;
   let batchCostSeq = 0;
   let toolboxBound = false;
-  let currentImageGenMode = 'gen';
+  let currentImageGenMode = 'inspire';
   let activeRefTool = '';
   /** 排队提交间隔：避免上游 Apimart 限流导致失败 */
   const BATCH_SUBMIT_GAP_MS = 2200;
@@ -171,11 +171,11 @@
 
   const COST_QUOTE_TIMEOUT_MS = 12000;
 
-  async function getUnitImageGenCost() {
+  async function getUnitImageGenCostQuote() {
     const model = $('imageGenModel')?.value || 'quanneng2';
     const resolution = $('imageGenResolution')?.value || '1k';
     const quality = $('imageGenQuality')?.value || 'standard';
-    let cost = window.PointsSystem?.getImageGenCost?.(model, resolution) ?? 10;
+    let detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution) || {};
     if (window.PointsSystem?.useApiForAccount?.()) {
       try {
         const quote = await Promise.race([
@@ -184,10 +184,41 @@
             setTimeout(() => reject(new Error('cost quote timeout')), COST_QUOTE_TIMEOUT_MS);
           })
         ]);
-        if (quote.ok && quote.data?.final != null) cost = quote.data.final;
+        if (quote.ok && quote.data?.final != null) {
+          detail = Object.assign({}, detail, {
+            final: quote.data.final,
+            listPrice: quote.data.listPrice ?? detail.listPrice,
+            promoPrice: quote.data.promoPrice ?? detail.promoPrice,
+            appliedDiscount: quote.data.appliedDiscount ?? detail.appliedDiscount,
+            modelDiscountLabel: quote.data.appliedDiscount === 'model'
+              ? (quote.data.modelDiscountLabel ?? detail.modelDiscountLabel)
+              : null,
+            label: quote.data.appliedDiscount === 'member'
+              ? (quote.data.discountLabel ?? detail.label)
+              : null
+          });
+        }
       } catch (e) { /* 本地估价 */ }
     }
-    return cost;
+    const final = detail.final ?? window.PointsSystem?.getImageGenCost?.(model, resolution) ?? 10;
+    const display = window.PointsSystem?.formatImageGenUnitPrice?.(detail, final)
+      || `${final} 积分`;
+    window.syncImageGenPromoNotice?.(detail, final);
+    return { final, display, detail };
+  }
+
+  async function getUnitImageGenCost() {
+    const q = await getUnitImageGenCostQuote();
+    return q.display;
+  }
+
+  function fmtCredits(n) {
+    return window.PointsSystem?.formatCredits?.(n) ?? String(Math.round(Number(n) * 10) / 10);
+  }
+
+  function creditsTotal(unit, count) {
+    const fmt = window.PointsSystem?.roundCredits || ((n) => Math.round(Number(n) * 10) / 10);
+    return fmt(Number(unit) * Number(count));
   }
 
   function resetBatchState() {
@@ -204,26 +235,28 @@
     const fissionBtn = $('imageGenFissionBatchBtn');
     if (batchRunning) return;
     const seq = ++batchCostSeq;
-    const unit = await getUnitImageGenCost();
+    const unitQuote = await getUnitImageGenCostQuote();
     if (seq !== batchCostSeq) return;
+    const unit = unitQuote.final;
+    const unitDisplay = unitQuote.display;
 
     if (inspireBtn) {
       const selected = getSelectedInspirationPrompts();
       const count = selected.length || Number($('imageGenInspireCount')?.value || 3);
       const n = selected.length || count;
-      const total = unit * n;
+      const total = creditsTotal(unit, n);
       inspireBtn.textContent = n > 0
-        ? `排队生图 ${n} 张 · 约 ${total} 积分（${unit} 积分/张）`
-        : `排队生图 · ${unit} 积分/张`;
+        ? `排队生图 ${n} 张 · 约 ${fmtCredits(total)} 积分（${unitDisplay}/张）`
+        : `排队生图 · ${unitDisplay}/张`;
     }
 
     if (fissionBtn) {
       const selected = getSelectedFissionPrompts();
       const n = selected.length;
-      const total = unit * n;
+      const total = creditsTotal(unit, n);
       fissionBtn.disabled = false;
       fissionBtn.textContent = n > 0
-        ? `排队裂变生图 ${n} 张 · 约 ${total} 积分（${unit} 积分/张）`
+        ? `排队裂变生图 ${n} 张 · 约 ${fmtCredits(total)} 积分（${unitDisplay}/张）`
         : '排队裂变生图 · 先分析并勾选变体';
     }
   }
@@ -282,7 +315,7 @@
     const hint = $('imageGenInspireQuotaHint');
     const drawBtn = $('imageGenInspireDrawBtn');
     if (!window.SupabaseSync?.isLoggedIn?.()) {
-      if (hint) hint.textContent = '登录后可用灵感抽卡（普通 10 次/天 · 轻量 30 次/天 · 基础及以上无限）';
+      if (hint) hint.textContent = '登录后可用灵感抽卡（本地词库，不扣积分 · 普通 10 次/天 · 轻量 30 次/天 · 基础及以上无限）';
       if (drawBtn) drawBtn.disabled = false;
       return;
     }
@@ -329,7 +362,7 @@
       const typeLabels = types.map((id) => window.ImageGenPromptKit?.CONTENT_TEMPLATES?.[id]?.label || id).join('、');
       const styleSel = $('imageGenInspireStyle');
       const styleLabel = styleSel?.selectedOptions?.[0]?.textContent?.split('（')[0] || '不指定';
-      toast(`已生成 ${prompts.length} 条（内容：${typeLabels || '爆款'}；画风：${styleLabel}）`);
+      toast(`已生成 ${prompts.length} 条（本地词库，不扣积分；内容：${typeLabels || '爆款'}；画风：${styleLabel}）`);
     } finally {
       updateInspireDrawQuotaUI();
     }
@@ -617,6 +650,27 @@
     return false;
   }
 
+  const OPTIMIZE_SCENE_HINTS = {
+    general: '适合任意草稿：补全主体、光线、构图与材质。',
+    ecommerce_cover: '适合商品主图/促销海报：强对比、主体突出、留白可放标题，爆款吸睛。',
+    viral_cover: '适合小红书/抖音竖屏封面：强情绪、高饱和、一眼停滑。',
+    product_studio: '适合白底/场景商品棚拍：材质清晰、商业布光。',
+    jimeng: '即梦风竖屏封面：强情绪、电影质感。',
+    guofeng: '国风仙侠汉服场景。',
+    realistic: '写实摄影/写真。',
+    anime: '二次元插画。',
+    sd: '偏写实细节与镜头描述。',
+    glamour: '女性时尚人像（衣着完整）。',
+    malePower: '男性力量感肖像。'
+  };
+
+  function syncOptimizeSceneHint() {
+    const sel = $('imageGenOptimizeTarget');
+    const hint = $('imageGenOptimizeSceneHint');
+    if (!sel || !hint) return;
+    hint.textContent = OPTIMIZE_SCENE_HINTS[sel.value] || OPTIMIZE_SCENE_HINTS.general;
+  }
+
   async function onOptimizePrompt() {
     if (!window.AuthGate?.requireAuth?.('imagegen')) return;
     if (!ensurePromptApi('promptToolsOptimize')) return;
@@ -645,6 +699,8 @@
       }
       const modelHint = r.data?.modelLabel || r.data?.model || 'DeepSeek Flash';
       toast(`已优化（${modelHint} · -${r.data?.creditsCharged ?? '?'} 积分）`);
+      $('imageGenOptimizePop')?.setAttribute('hidden', '');
+      $('imageGenOptimizeToggle')?.setAttribute('aria-expanded', 'false');
     } catch (e) {
       toast(e.message || '优化失败');
     } finally {
@@ -812,6 +868,17 @@
       void window.FeatureDraft?.runImageGenWithPrompt?.(prompt, { fromInspirationDraw: true, submitBtnId: 'imageGenInspireSubmit' });
     });
     $('imageGenOptimizeBtn')?.addEventListener('click', () => void onOptimizePrompt());
+    $('imageGenOptimizeTarget')?.addEventListener('change', syncOptimizeSceneHint);
+    syncOptimizeSceneHint();
+    $('imageGenInspirePromptPaste')?.addEventListener('click', async () => {
+      try {
+        const t = await navigator.clipboard.readText();
+        if (t) setPrompt(t.trim());
+      } catch (e) {
+        toast('无法读取剪贴板');
+      }
+    });
+    $('imageGenInspirePromptClear')?.addEventListener('click', () => setPrompt(''));
     $('imageGenReverseBtn')?.addEventListener('click', () => void onReversePrompt());
     $('imageGenFissionAnalyzeBtn')?.addEventListener('click', () => void onFissionAnalyze());
     $('imageGenFissionBatchBtn')?.addEventListener('click', () => void onQueueFissionBatch());
@@ -867,7 +934,7 @@
       fissionStyleSel.value = 'inherit';
     }
 
-    switchImageGenMode('gen');
+    switchImageGenMode('inspire');
     updateRefToolState();
   }
 

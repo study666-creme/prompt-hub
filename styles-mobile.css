@@ -380,6 +380,7 @@
   #globalViewBtn,
   #ocrBtn,
   .toolbar-select,
+  .sort-menu-wrap,
   .toolbar-row > .toolbar-cluster:last-child .btn-primary,
   .toolbar-row > .toolbar-cluster:last-child .btn-ghost {
     display: none !important;

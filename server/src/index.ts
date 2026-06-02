@@ -10,6 +10,7 @@ import type { Env } from './env';
 const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', async (c, next) => {
+  applyCorsHeaders(c);
   const corsMw = createCorsMiddleware(c.env);
   return corsMw(c, next);
 });
@@ -68,21 +69,21 @@ app.get('/api/v1/billing/plans', c =>
         {
           id: 'basic',
           name: '基础版',
-          genDiscount: '9折',
+          genDiscount: '95折',
           dailyCredits: 13,
           lumpCredits: 130
         },
         {
           id: 'standard',
           name: '标准版',
-          genDiscount: '8折',
+          genDiscount: '9折',
           dailyCredits: 32,
           lumpCredits: 320
         },
         {
           id: 'pro',
           name: '专业版',
-          genDiscount: '7折',
+          genDiscount: '85折',
           dailyCredits: 64,
           lumpCredits: 700
         }

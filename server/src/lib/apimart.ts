@@ -1,19 +1,18 @@
 import { ApiError } from './errors';
-import {
-  IMAGE_MODELS,
-  mapQualityForGptImage,
-  mapResolutionForSeedream,
-  type ImageModelId
-} from './pricing';
+import { mapQualityForGptImage, mapResolutionForSeedream } from './pricing';
 
 type SubmitParams = {
-  modelId: ImageModelId;
+  upstreamModel: string;
   prompt: string;
   resolution: string;
   quality: string;
   size?: string;
   refImageUrls?: string[];
 };
+
+function isJimengLikeUpstream(upstream: string): boolean {
+  return /nano-banana|jimeng|seedream|seedance|doubao-seedream/i.test(upstream);
+}
 
 export type TaskPollResult = {
   status: string;
@@ -63,7 +62,41 @@ function pickUrl(value: unknown): string | null {
   return null;
 }
 
-/** 收集任务结果中全部图片 URL（上游偶发 n>1 或 images 数组） */
+function pushHttpUrl(value: unknown, seen: Set<string>, out: string[]): void {
+  if (typeof value !== 'string') return;
+  const s = value.trim();
+  if (!/^https?:\/\//i.test(s) || seen.has(s)) return;
+  seen.add(s);
+  out.push(s);
+}
+
+/** 递归收集全部图片 URL（Apimart 常见：result.images[].url[] 内有多张） */
+function collectImageUrls(value: unknown, seen: Set<string>, out: string[]): void {
+  if (value == null) return;
+  if (typeof value === 'string') {
+    pushHttpUrl(value, seen, out);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectImageUrls(item, seen, out);
+    return;
+  }
+  if (typeof value === 'object') {
+    const o = value as Record<string, unknown>;
+    if (Array.isArray(o.images)) {
+      for (const img of o.images) {
+        if (img && typeof img === 'object') {
+          collectImageUrls((img as Record<string, unknown>).url, seen, out);
+        }
+      }
+    }
+    for (const key of ['url', 'image_url', 'imageUrl', 'output_url', 'uri', 'href', 'output', 'outputs', 'image']) {
+      if (key in o) collectImageUrls(o[key], seen, out);
+    }
+  }
+}
+
+/** 收集任务结果中全部图片 URL（上游偶发 n>1 或 images/url 数组） */
 export function extractAllImageUrls(payload: unknown): string[] {
   if (!payload || typeof payload !== 'object') return [];
   const p = payload as Record<string, unknown>;
@@ -72,33 +105,10 @@ export function extractAllImageUrls(payload: unknown): string[] {
   const d = data as Record<string, unknown>;
   const seen = new Set<string>();
   const out: string[] = [];
-  const push = (u: string | null) => {
-    if (!u || seen.has(u)) return;
-    seen.add(u);
-    out.push(u);
-  };
 
-  const buckets: unknown[] = [
-    d.output_url,
-    d.image_url,
-    d.imageUrl,
-    d.url,
-    d.output,
-    d.outputs,
-    d.images,
-    d.image
-  ];
-  const result = d.result;
-  if (result && typeof result === 'object') {
-    const r = result as Record<string, unknown>;
-    buckets.push(r.url, r.image_url, r.imageUrl, r.output_url, r.images, r.image, r.outputs);
-  }
-  for (const b of buckets) {
-    if (Array.isArray(b)) {
-      for (const item of b) push(pickUrl(item));
-    } else {
-      push(pickUrl(b));
-    }
+  if (d.result) collectImageUrls(d.result, seen, out);
+  for (const key of ['output_url', 'image_url', 'imageUrl', 'url', 'output', 'outputs', 'images', 'image']) {
+    if (key in d) collectImageUrls(d[key], seen, out);
   }
   return out;
 }
@@ -109,13 +119,13 @@ function extractImageUrl(payload: unknown): string | null {
 }
 
 function buildRequestBody(params: SubmitParams): Record<string, unknown> {
-  const model = IMAGE_MODELS[params.modelId];
+  const upstream = params.upstreamModel.trim().toLowerCase();
   const size = params.size || '1:1';
   const refs = params.refImageUrls?.length ? params.refImageUrls : undefined;
 
-  if (params.modelId === 'jimeng') {
+  if (isJimengLikeUpstream(upstream)) {
     return {
-      model: model.upstream,
+      model: upstream,
       prompt: params.prompt,
       size,
       resolution: mapResolutionForSeedream(params.resolution),
@@ -125,7 +135,7 @@ function buildRequestBody(params: SubmitParams): Record<string, unknown> {
   }
 
   return {
-    model: model.upstream,
+    model: upstream,
     prompt: params.prompt,
     size,
     resolution: params.resolution,

@@ -1,4 +1,4 @@
-const CACHE = 'prompt-hub-v374';
+const CACHE = 'prompt-hub-v20260603h';
 /** 仅缓存静态小资源；HTML/JS/CSS 始终走网络，避免误显示「暂时无法连接」 */
 const ASSETS = [
   './manifest.webmanifest',
@@ -33,6 +33,10 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== self.location.origin) return;
   if (e.request.method !== 'GET') return;
+  /** 后台页不走 SW，避免缓存旧 admin.js / 导航失败 */
+  if (url.pathname === '/admin' || url.pathname.startsWith('/admin/') || url.pathname === '/admin.html') {
+    return;
+  }
 
   const isHtml =
     e.request.mode === 'navigate' ||

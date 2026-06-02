@@ -13,6 +13,7 @@ import {
   type CommunityPostPayload
 } from '../../lib/community-feed';
 import { moderateCommunityContent } from '../../lib/community-moderation';
+import { resolveVisionApiBindings } from '../../lib/vision-chat';
 import { tryGrantLikeMilestone } from '../../lib/like-milestone';
 import {
   listCommunityNotifications,
@@ -95,15 +96,27 @@ async function assertCommunityPublishAllowed(
   c: Context<{ Bindings: Env }>,
   admin: ReturnType<typeof createAdminClient>,
   userId: string,
-  payload: CommunityPostPayload
+  payload: CommunityPostPayload,
+  opts?: { skipVision?: boolean }
 ) {
   const resolvedImage = await resolvePublicImageRef(admin, userId, payload);
+  let visionKey: string | undefined;
+  let visionBase: string | undefined;
+  let skipVision = false;
+  try {
+    const vision = resolveVisionApiBindings(c.env);
+    visionKey = vision.apiKey;
+    visionBase = vision.baseUrl;
+  } catch {
+    skipVision = true;
+  }
   const mod = await moderateCommunityContent({
     admin,
     prompt: payload.prompt,
     imageRef: resolvedImage || payload.image,
-    imageApiKey: c.env.IMAGE_API_KEY,
-    imageApiBaseUrl: c.env.IMAGE_API_BASE_URL
+    visionApiKey: visionKey,
+    visionApiBaseUrl: visionBase,
+    skipVision: opts?.skipVision === true || skipVision
   });
   if (!mod.safe) {
     throw new ApiError(400, 'CONTENT_REJECTED', mod.reason || '内容不符合社区规范');
@@ -163,7 +176,14 @@ communityRoutes.post('/posts/sync', async c => {
     const allowed: CommunityPostPayload[] = [];
     for (const p of parsed.data.posts as CommunityPostPayload[]) {
       try {
-        await assertCommunityPublishAllowed(c, admin, user.id, p);
+        const { data: existingRow } = await admin
+          .from('community_posts')
+          .select('id')
+          .eq('id', String(p.id || ''))
+          .maybeSingle();
+        await assertCommunityPublishAllowed(c, admin, user.id, p, {
+          skipVision: !!existingRow?.id
+        });
         allowed.push(p);
       } catch (e) {
         if (e instanceof ApiError && e.code === 'CONTENT_REJECTED') continue;

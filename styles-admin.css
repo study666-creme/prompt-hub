@@ -222,6 +222,11 @@ table.admin-table {
   color: #991b1b;
 }
 
+.admin-badge--warn {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
 .admin-msg {
   margin: 12px 0 0;
   padding: 10px 12px;
@@ -239,6 +244,12 @@ table.admin-table {
   background: #f0fdf4;
   color: #166534;
   border: 1px solid #bbf7d0;
+}
+
+.admin-msg--warn {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
 }
 
 .admin-panel[hidden] {
@@ -473,4 +484,35 @@ table.admin-table {
   color: var(--muted);
   text-align: center;
   padding: 24px !important;
+}
+
+.admin-table--models input[type="number"] {
+  width: 72px;
+  padding: 4px 6px;
+}
+
+.admin-table--models code {
+  font-size: 11px;
+}
+
+.admin-model-sort {
+  min-width: 88px;
+  vertical-align: middle;
+}
+
+.admin-model-sort__btns {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.admin-model-sort__btns .admin-btn {
+  min-width: 32px;
+  padding: 2px 8px;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.admin-model-sort input[data-field="sortOrder"] {
+  width: 56px;
 }

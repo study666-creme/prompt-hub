@@ -16,7 +16,8 @@ FISSION_CHAT_MODEL = "deepseek-v4-pro"
 # SUPABASE_URL
 # SUPABASE_SERVICE_ROLE_KEY
 # SUPABASE_JWT_SECRET（可选，用于本地 JWT 校验加速）
-# IMAGE_API_KEY（生图）
+# IMAGE_API_KEY（生图 · GrsAI 主上游）
+# APIMART_API_KEY（生图 · Apimart 备用，GrsAI 失败时自动切换）
 # CHAT_API_KEY（对话 · DeepSeek 官方 API Key）
 # ADMIN_API_SECRET（运营批量造激活码，见 scripts/generate-codes.ps1）
 

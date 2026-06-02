@@ -36,7 +36,6 @@
     document.querySelectorAll('.filter-sheet-overlay, .tag-sheet-overlay').forEach((el) => {
       if (!el.classList.contains('open')) {
         el.hidden = true;
-        el.style.display = 'none';
         el.style.pointerEvents = 'none';
       }
     });
@@ -85,7 +84,6 @@
     ).forEach((el) => {
       el.classList.remove('open', 'active');
       el.hidden = true;
-      el.style.display = 'none';
       el.style.pointerEvents = 'none';
     });
     if (typeof closeTagSheet === 'function') closeTagSheet();

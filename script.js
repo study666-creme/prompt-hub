@@ -173,6 +173,8 @@
     let page = 1, allFilteredCards = [];
     const PER_PAGE = 24;
     let sortMode = 'default';
+    let cardRandomSig = '';
+    let cardRandomOrder = new Map();
     let floatingPromptActive = false;
     let currentCardCustomFields = {};
     let globalViewActive = false;
@@ -230,10 +232,10 @@
         if (container) container.scrollTop = 0;
         if (typeof renderCards === 'function') renderCards(true);
         if (document.getElementById('pageCommunity')?.classList.contains('active')) {
-          window.FeatureDraft?.scheduleLayout?.('communityGrid', { force: true, immediate: true });
+          window.FeatureDraft?.scheduleLayout?.('communityGrid', { force: true, immediate: true, recalcCols: true });
         }
         if (document.getElementById('pageCreations')?.classList.contains('active')) {
-          window.FeatureDraft?.scheduleLayout?.('creationsGrid', { force: true, immediate: true });
+          window.FeatureDraft?.scheduleLayout?.('creationsGrid', { force: true, immediate: true, recalcCols: true });
         }
       });
     }
@@ -464,10 +466,16 @@
     window.finishViewerFrameReveal = finishViewerFrameReveal;
 
     let viewerNav = { items: [], index: -1 };
+    let viewerWheelNavAt = 0;
+    const VIEWER_WHEEL_NAV_GAP_MS = 420;
 
     function setViewerNav(items, currentKey) {
       viewerNav.items = Array.isArray(items) ? items : [];
       viewerNav.index = viewerNav.items.findIndex((it) => it.key === currentKey);
+    }
+
+    function lightboxWheelNavEnabled() {
+      return !!window.__lightboxImageGenNav || !!globalViewActive;
     }
 
     function navigateViewerByWheel(delta) {
@@ -477,6 +485,7 @@
       const item = viewerNav.items[next];
       viewerNav.index = next;
       if (item.type === 'card') {
+        if (!globalViewActive) return false;
         void openAppreciateViewer(item.id);
         return true;
       }
@@ -484,15 +493,36 @@
         void window.FeatureDraft.openCommunityAppreciateById(item.id);
         return true;
       }
+      if (item.type === 'imageGen' && window.FeatureDraft?.openImageGenLightboxAt) {
+        void window.FeatureDraft.openImageGenLightboxAt(item.kind, item.id, item.key);
+        return true;
+      }
       return false;
+    }
+
+    function navigateViewerByWheelThrottled(delta) {
+      const now = performance.now();
+      if (now - viewerWheelNavAt < VIEWER_WHEEL_NAV_GAP_MS) return false;
+      if (!navigateViewerByWheel(delta)) return false;
+      viewerWheelNavAt = now;
+      return true;
     }
 
     function onViewerShellWheel(e) {
       const t = e.target;
+      const onLightbox = !!t?.closest?.('#imageLightbox');
+      if (onLightbox && !lightboxWheelNavEnabled()) return;
+      if (t?.id === 'lightboxImage' && lightboxWheelNavEnabled()) {
+        if (!viewerNav.items.length) return;
+        e.preventDefault();
+        navigateViewerByWheelThrottled(e.deltaY);
+        return;
+      }
       if (t?.id === 'appreciateViewerImg' || t?.id === 'lightboxImage') return;
       if (!viewerNav.items.length) return;
+      if (onLightbox && !lightboxWheelNavEnabled()) return;
       e.preventDefault();
-      navigateViewerByWheel(e.deltaY);
+      navigateViewerByWheelThrottled(e.deltaY);
     }
 
     function bindViewerShellWheelNav() {
@@ -1023,6 +1053,16 @@
 
     window.COMMUNITY_COLLECT_TAG = '社区收藏';
     window.INSPIRE_DRAW_TAG = '灵感抽卡';
+    window.isCommunityCollectTagName = function (tag) {
+      const name = String(tag || '').replace(/^#+/, '').trim();
+      return name === window.COMMUNITY_COLLECT_TAG;
+    };
+    window.getSelectableCardTags = function (sourceCards) {
+      const src = sourceCards || cards;
+      return [...new Set(src.flatMap(c => c.tags || []))]
+        .filter(t => t && !window.isCommunityCollectTagName(t))
+        .sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    };
     window.isCommunityCollectCard = (card) =>
       window.FeatureDraft?.isCommunityCollectCard?.(card)
       || !!(card && (card.tags || []).includes(window.COMMUNITY_COLLECT_TAG));
@@ -1132,6 +1172,8 @@
         tags: [COLLECT_TAG],
         customFields: {},
         favoritedFromPostId: post.id,
+        communitySourceAuthorId: String(post.authorId || ''),
+        communitySourceCardId: post.sourceCardId ? String(post.sourceCardId) : '',
         publishedToCommunity: false,
         createdAt: Date.now(),
         updatedAt: Date.now()
@@ -1256,7 +1298,10 @@
         { value: 'image', label: '有图片' },
         { value: 'text', label: '纯文字' }
       ];
-      const tags = [...new Set(cards.flatMap(c => c.tags || []))].map(t => ({ value: 'tag:' + t, label: '#' + t }));
+      const tags = (window.getSelectableCardTags?.(cards) || []).map(t => ({
+        value: 'tag:' + String(t).replace(/^#+/, ''),
+        label: '#' + String(t).replace(/^#+/, '')
+      }));
       return base.concat(tags);
     }
 
@@ -1265,7 +1310,10 @@
       return [...activeFilters].some(f => {
         if (f === 'image') return !!card.image;
         if (f === 'text') return !card.image;
-        if (f.startsWith('tag:')) return (card.tags || []).includes(f.slice(4));
+        if (f.startsWith('tag:')) {
+          const needle = f.slice(4);
+          return (card.tags || []).some(t => String(t).replace(/^#+/, '') === needle);
+        }
         return false;
       });
     }
@@ -1300,11 +1348,45 @@
       const btn = document.getElementById('filterBtn');
       if (!dd || !btn) return;
       const r = btn.getBoundingClientRect();
+      const width = Math.max(220, Math.round(r.width));
+      let left = Math.round(r.left);
+      if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
       dd.style.position = 'fixed';
-      dd.style.top = `${Math.round(r.bottom + 8)}px`;
-      dd.style.right = `${Math.round(window.innerWidth - r.right)}px`;
-      dd.style.left = 'auto';
+      dd.style.top = `${Math.round(r.bottom + 6)}px`;
+      dd.style.left = `${left}px`;
+      dd.style.right = 'auto';
+      dd.style.width = `${width}px`;
+      dd.style.minWidth = `${width}px`;
       dd.style.zIndex = '12000';
+    }
+
+    function positionSortDropdown() {
+      const dd = document.getElementById('sortDropdown');
+      const btn = document.getElementById('sortMenuBtn');
+      if (!dd || !btn) return;
+      const r = btn.getBoundingClientRect();
+      const width = Math.max(132, Math.round(r.width));
+      let left = Math.round(r.left);
+      if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
+      dd.style.position = 'fixed';
+      dd.style.top = `${Math.round(r.bottom + 6)}px`;
+      dd.style.left = `${left}px`;
+      dd.style.right = 'auto';
+      dd.style.width = `${width}px`;
+      dd.style.minWidth = `${width}px`;
+      dd.style.zIndex = '12000';
+    }
+
+    function resetSortDropdownPosition() {
+      const dd = document.getElementById('sortDropdown');
+      if (!dd) return;
+      dd.style.position = '';
+      dd.style.top = '';
+      dd.style.left = '';
+      dd.style.right = '';
+      dd.style.width = '';
+      dd.style.minWidth = '';
+      dd.style.zIndex = '';
     }
 
     function resetFilterDropdownPosition() {
@@ -1314,6 +1396,8 @@
       dd.style.top = '';
       dd.style.right = '';
       dd.style.left = '';
+      dd.style.width = '';
+      dd.style.minWidth = '';
       dd.style.zIndex = '';
     }
 
@@ -1364,6 +1448,7 @@
       if (willOpen) {
         positionFilterDropdown();
         dd.classList.add('open');
+        closeSortMenu();
       } else {
         dd.classList.remove('open');
         resetFilterDropdownPosition();
@@ -1388,7 +1473,104 @@
           dd.classList.remove('open');
           resetFilterDropdownPosition();
         }
+        if (!e.target.closest('.sort-menu-wrap')) {
+          closeSortMenu();
+        }
       });
+      window.addEventListener('resize', () => {
+        if (dd.classList.contains('open')) positionFilterDropdown();
+        if (!document.getElementById('sortDropdown')?.hidden) positionSortDropdown();
+      });
+      window.addEventListener('scroll', () => {
+        if (dd.classList.contains('open')) positionFilterDropdown();
+        if (!document.getElementById('sortDropdown')?.hidden) positionSortDropdown();
+      }, true);
+    }
+
+    const SORT_OPTIONS = [
+      { value: 'default', label: '默认' },
+      { value: 'updated-desc', label: '最近' },
+      { value: 'updated-asc', label: '最远' },
+      { value: 'random', label: '随机' }
+    ];
+
+    function getSortLabel(value) {
+      return SORT_OPTIONS.find(o => o.value === value)?.label || '默认';
+    }
+
+    function setSortMode(value, opts = {}) {
+      const v = SORT_OPTIONS.some(o => o.value === value) ? value : 'default';
+      if (v === 'random') cardRandomSig = '';
+      sortMode = v;
+      const hidden = document.getElementById('sortSelect');
+      if (hidden) hidden.value = v;
+      const label = document.getElementById('sortMenuLabel');
+      if (label) label.textContent = getSortLabel(v);
+      document.querySelectorAll('#sortDropdown .sort-option').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.value === v);
+        btn.setAttribute('aria-selected', btn.dataset.value === v ? 'true' : 'false');
+      });
+      if (opts.render !== false) renderCards(true);
+    }
+
+    function buildSortMenu() {
+      const dd = document.getElementById('sortDropdown');
+      if (!dd) return;
+      dd.innerHTML = '';
+      SORT_OPTIONS.forEach(opt => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'sort-option' + (sortMode === opt.value ? ' active' : '');
+        btn.dataset.value = opt.value;
+        btn.setAttribute('role', 'option');
+        btn.setAttribute('aria-selected', sortMode === opt.value ? 'true' : 'false');
+        btn.textContent = opt.label;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setSortMode(opt.value);
+          closeSortMenu();
+        });
+        dd.appendChild(btn);
+      });
+    }
+
+    function closeSortMenu() {
+      const dd = document.getElementById('sortDropdown');
+      const btn = document.getElementById('sortMenuBtn');
+      if (dd) {
+        dd.hidden = true;
+        resetSortDropdownPosition();
+      }
+      btn?.setAttribute('aria-expanded', 'false');
+    }
+
+    function toggleSortMenu(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      const dd = document.getElementById('sortDropdown');
+      const btn = document.getElementById('sortMenuBtn');
+      if (!dd || !btn) return;
+      const willOpen = dd.hidden;
+      buildSortMenu();
+      if (willOpen) {
+        dd.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+        positionSortDropdown();
+        document.getElementById('filterDropdown')?.classList.remove('open');
+        resetFilterDropdownPosition();
+      } else {
+        closeSortMenu();
+      }
+    }
+
+    function initSortMenu() {
+      const btn = document.getElementById('sortMenuBtn');
+      const dd = document.getElementById('sortDropdown');
+      if (!btn || !dd) return;
+      const saved = document.getElementById('sortSelect')?.value || 'default';
+      setSortMode(saved, { render: false });
+      buildSortMenu();
+      btn.addEventListener('click', toggleSortMenu);
+      dd.addEventListener('click', (e) => e.stopPropagation());
     }
 
     function searchByTag(tag) {
@@ -1500,12 +1682,18 @@
         if (isMobileViewport()) return;
         const media = e.target.closest('.card-media');
         if (media && !cardMediaAffectsViewport(media)) return;
-        scheduleWarehouseMasonryLayout();
+        const cardEl = e.target.closest('.card[data-id]');
+        if (cardEl?.dataset?.communityCollect === '1') {
+          scheduleWarehouseMasonryForCard(cardEl.dataset.id);
+        } else {
+          scheduleWarehouseMasonryLayout();
+        }
       }, true);
     }
 
     let warehouseMasonryTimer = null;
     let warehouseMasonryPending = 0;
+    const warehouseMasonryCardCooldown = new Map();
     function scheduleWarehouseMasonryLayout() {
       if (isMobileViewport()) return;
       warehouseMasonryPending += 1;
@@ -1513,7 +1701,18 @@
       warehouseMasonryTimer = setTimeout(() => {
         warehouseMasonryPending = 0;
         layoutMasonryGrid();
-      }, warehouseMasonryPending > 4 ? 140 : 80);
+      }, warehouseMasonryPending > 4 ? 200 : 120);
+    }
+    function scheduleWarehouseMasonryForCard(cardId) {
+      if (!cardId) {
+        scheduleWarehouseMasonryLayout();
+        return;
+      }
+      const now = Date.now();
+      const last = warehouseMasonryCardCooldown.get(cardId) || 0;
+      if (now - last < 520) return;
+      warehouseMasonryCardCooldown.set(cardId, now);
+      scheduleWarehouseMasonryLayout();
     }
 
     function resetCardLayoutStyles(container) {
@@ -1736,24 +1935,54 @@
       cardDragVisual = null;
     }
 
+    function canShowFloatingPrompt() {
+      return document.getElementById('pageWarehouse')?.classList.contains('active') === true;
+    }
+
+    function floatingPromptOverlapsPanel() {
+      const fp = document.getElementById('floatingPrompt');
+      const panel = document.getElementById('editPanel');
+      if (!fp || fp.classList.contains('hidden') || !panel || panel.classList.contains('hidden')) return false;
+      const fpR = fp.getBoundingClientRect();
+      const panelR = panel.getBoundingClientRect();
+      return fpR.right > panelR.left + 8 && fpR.left < panelR.right - 8
+        && fpR.bottom > panelR.top + 8 && fpR.top < panelR.bottom - 8;
+    }
+
+    function floatingPromptOffScreen() {
+      const fp = document.getElementById('floatingPrompt');
+      if (!fp) return false;
+      const r = fp.getBoundingClientRect();
+      return r.right < 24 || r.bottom < 24
+        || r.left > window.innerWidth - 24 || r.top > window.innerHeight - 24;
+    }
+
     function applyFloatingState() {
       const floating = document.getElementById('floatingPrompt');
       const fpToggleBtn = document.getElementById('fpToggleBtn');
+      const show = floatingPromptActive && canShowFloatingPrompt();
+      document.body.classList.toggle('floating-prompt-active', show);
       const fpIconFloat = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>';
       const fpIconPin = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3.76z"/></svg>';
-      if (floatingPromptActive) {
+      if (show) {
         floating.classList.remove('hidden');
         requestAnimationFrame(() => applyFloatingPromptPosition());
-        fpToggleBtn.innerHTML = fpIconPin;
-        fpToggleBtn.classList.add('is-active');
-        fpToggleBtn.title = '固定到面板';
+        if (fpToggleBtn) {
+          fpToggleBtn.innerHTML = fpIconPin;
+          fpToggleBtn.classList.add('is-active');
+          fpToggleBtn.title = '固定到面板';
+        }
         document.getElementById('floatingPromptText').value = document.getElementById('cardPrompt').value;
       } else {
         floating.classList.add('hidden');
-        fpToggleBtn.innerHTML = fpIconFloat;
-        fpToggleBtn.classList.remove('is-active');
-        fpToggleBtn.title = '浮动提示词框';
-        document.getElementById('cardPrompt').value = document.getElementById('floatingPromptText').value;
+        if (fpToggleBtn) {
+          fpToggleBtn.innerHTML = fpIconFloat;
+          fpToggleBtn.classList.remove('is-active');
+          fpToggleBtn.title = '浮动提示词框';
+        }
+        if (floatingPromptActive) {
+          document.getElementById('cardPrompt').value = document.getElementById('floatingPromptText').value;
+        }
       }
     }
 
@@ -1763,6 +1992,11 @@
       settings.floatingPrompt = floatingPromptActive;
       localStorage.setItem('promptrepo_settings', JSON.stringify(settings));
     }
+    window.toggleFloatingPrompt = toggleFloatingPrompt;
+    Object.defineProperty(window, 'floatingPromptActive', {
+      get() { return floatingPromptActive; },
+      configurable: true
+    });
 
     function copyPromptFromFloating() {
       const text = document.getElementById('floatingPromptText').value;
@@ -1776,8 +2010,8 @@
 
     function clampFloatingPromptPosition(left, top, fp) {
       const el = fp || document.getElementById('floatingPrompt');
-      const w = el.offsetWidth || 340;
-      const h = el.offsetHeight || 180;
+      const w = el.offsetWidth || 380;
+      const h = el.offsetHeight || 340;
       const maxL = Math.max(8, window.innerWidth - w - 8);
       const maxT = Math.max(8, window.innerHeight - h - 8);
       return {
@@ -1788,14 +2022,18 @@
 
     function getDefaultFloatingPromptPosition() {
       const fp = document.getElementById('floatingPrompt');
-      const fpW = fp.offsetWidth || 340;
-      const fpH = fp.offsetHeight || 180;
+      const fpW = fp.offsetWidth || 380;
+      const fpH = fp.offsetHeight || 340;
       const panel = document.getElementById('editPanel');
       if (panel && !panel.classList.contains('hidden')) {
         const r = panel.getBoundingClientRect();
-        return clampFloatingPromptPosition(r.left - fpW - 20, r.top + 48, fp);
+        if (isMobileViewport()) {
+          return clampFloatingPromptPosition(12, Math.min(r.top + 56, window.innerHeight - fpH - 12), fp);
+        }
+        const left = Math.max(12, r.left - fpW - 16);
+        return clampFloatingPromptPosition(left, r.top + 48, fp);
       }
-      return clampFloatingPromptPosition(window.innerWidth - fpW - 400, window.innerHeight - fpH - 140, fp);
+      return clampFloatingPromptPosition(window.innerWidth - fpW - 380, Math.max(72, window.innerHeight - fpH - 120), fp);
     }
 
     function setFloatingPromptPosition(left, top) {
@@ -1814,13 +2052,25 @@
       return setFloatingPromptPosition(rect.left, rect.top);
     }
 
-    function applyFloatingPromptPosition() {
+    function applyFloatingPromptPosition(opts = {}) {
+      const fp = document.getElementById('floatingPrompt');
+      if (!fp) return;
       const pos = settings.floatingPromptPos;
-      if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
+      const forceDefault = opts.forceDefault === true;
+      if (!forceDefault && pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
         setFloatingPromptPosition(pos.left, pos.top);
-      } else {
-        const def = getDefaultFloatingPromptPosition();
-        setFloatingPromptPosition(def.left, def.top);
+        if (floatingPromptOverlapsPanel() || floatingPromptOffScreen()) {
+          const def = getDefaultFloatingPromptPosition();
+          settings.floatingPromptPos = setFloatingPromptPosition(def.left, def.top);
+          localStorage.setItem('promptrepo_settings', JSON.stringify(settings));
+        }
+        return;
+      }
+      const def = getDefaultFloatingPromptPosition();
+      const saved = setFloatingPromptPosition(def.left, def.top);
+      if (opts.save !== false) {
+        settings.floatingPromptPos = saved;
+        localStorage.setItem('promptrepo_settings', JSON.stringify(settings));
       }
     }
 
@@ -1866,6 +2116,21 @@
         document.removeEventListener('mouseup', onMouseUp);
         if (dragging) saveFloatingPromptPosition();
         dragging = false;
+      }
+
+      window.addEventListener('resize', () => {
+        if (!floatingPromptActive || !canShowFloatingPrompt()) return;
+        applyFloatingPromptPosition();
+      });
+
+      const panel = document.getElementById('editPanel');
+      if (panel && typeof ResizeObserver !== 'undefined') {
+        const panelObs = new ResizeObserver(() => {
+          if (!floatingPromptActive || !canShowFloatingPrompt()) return;
+          if (panel.classList.contains('hidden')) return;
+          applyFloatingPromptPosition({ forceDefault: floatingPromptOverlapsPanel() });
+        });
+        panelObs.observe(panel);
       }
     })();
 
@@ -1945,8 +2210,6 @@
         forceExitGlobalView(true);
         closeEditPanel();
         if (typeof closeTagSheet === 'function') closeTagSheet();
-        const fp = document.getElementById('floatingPrompt');
-        if (fp) fp.classList.add('hidden');
       }
       document.querySelectorAll('.app-nav-item').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.app === app);
@@ -1957,6 +2220,11 @@
       localStorage.setItem('promptrepo_app_page', app);
       window.MobileUI?.closeAllMobileOverlays?.();
       if (app === 'warehouse') {
+        if (floatingPromptActive) {
+          floatingPromptActive = false;
+          settings.floatingPrompt = false;
+          try { localStorage.setItem('promptrepo_settings', JSON.stringify(settings)); } catch (e) { /* ignore */ }
+        }
         applyFloatingState();
         deferAfterPagePaint(() => {
           if (!document.getElementById('pageWarehouse')?.classList.contains('active')) return;
@@ -2211,11 +2479,32 @@
       return cards.filter(c => c.pinnedAt && c.id !== excludeId).length;
     }
 
+    function shuffleCardRest(rest) {
+      if (!rest.length) return rest;
+      const sig = rest.map((c) => String(c.id)).sort().join('|');
+      if (cardRandomSig !== sig) {
+        cardRandomSig = sig;
+        const ids = rest.map((c) => c.id);
+        for (let i = ids.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [ids[i], ids[j]] = [ids[j], ids[i]];
+        }
+        cardRandomOrder = new Map(ids.map((id, idx) => [id, idx]));
+      }
+      return [...rest].sort((a, b) => {
+        const ai = cardRandomOrder.get(a.id) ?? 0;
+        const bi = cardRandomOrder.get(b.id) ?? 0;
+        return ai - bi;
+      });
+    }
+
     function sortCardsWithPins(list) {
       const pinned = list.filter(c => c.pinnedAt).sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
       const rest = list.filter(c => !c.pinnedAt);
       if (sortMode === 'updated-asc') {
         rest.sort((a, b) => (a.updatedAt || a.createdAt) - (b.updatedAt || b.createdAt));
+      } else if (sortMode === 'random') {
+        return [...pinned, ...shuffleCardRest(rest)];
       } else {
         rest.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
       }
@@ -2541,17 +2830,19 @@
           media.classList.add('card-media--load-failed');
           img.style.visibility = 'visible';
           img.style.opacity = '1';
-          scheduleWarehouseMasonryLayout();
+          scheduleWarehouseMasonryForCard(card?.dataset?.id);
           return;
         }
         img.dataset.warehouseFinalFail = '1';
         const cardId = card?.dataset?.id;
         const ref = img.getAttribute('data-image-ref');
+        const cardModel = cardId ? cards.find((c) => c.id === cardId) : null;
+        const collectOpts = cardModel ? getCommunityCollectImageResolveOpts(cardModel) : null;
         void (async () => {
           if (!ref || !window.SupabaseSync?.resolveDisplayUrl) return;
           try {
             window.SupabaseSync.invalidateSignedCacheForRef?.(ref, cardId);
-            const url = await window.SupabaseSync.resolveDisplayUrl(ref, {
+            const url = await window.SupabaseSync.resolveDisplayUrl(ref, collectOpts || {
               assetId: cardId,
               variant: window.SupabaseSync.VARIANT_FULL || 'full',
               tryAllPaths: true
@@ -2559,14 +2850,14 @@
             if (url && window.CardImageLoader?.applyUrlToImg?.(img, url)) {
               delete img.dataset.warehouseFinalFail;
               media.classList.remove('card-media--load-failed', 'card-media--await');
-              scheduleWarehouseMasonryLayout();
+              scheduleWarehouseMasonryForCard(cardId);
               return;
             }
           } catch (e) { /* ignore */ }
           media.classList.add('card-media--load-failed');
           img.style.visibility = 'visible';
           img.style.opacity = '1';
-          scheduleWarehouseMasonryLayout();
+          scheduleWarehouseMasonryForCard(cardId);
         })();
         return;
       }
@@ -2584,8 +2875,10 @@
       if (ref && img.dataset.resignTried !== '1') {
         img.dataset.resignTried = '1';
         window.SupabaseSync?.invalidateSignedCacheForRef?.(ref, cardId);
+        const cardModel = cards.find((c) => c.id === cardId);
+        const collectOpts = cardModel ? getCommunityCollectImageResolveOpts(cardModel) : null;
         try {
-          const url = await window.SupabaseSync?.resolveDisplayUrl?.(ref, {
+          const url = await window.SupabaseSync?.resolveDisplayUrl?.(ref, collectOpts || {
             assetId: cardId,
             variant: window.SupabaseSync.VARIANT_FULL || 'full',
             tryAllPaths: true
@@ -2721,7 +3014,11 @@
           /* 多列瀑布流无需每张图重排 Masonry */
         }
         else if (media.closest('#cardsContainer')) {
-          if (cardMediaAffectsViewport(media)) scheduleWarehouseMasonryLayout();
+          if (cardMediaAffectsViewport(media)) {
+            const cid = cardEl?.dataset?.id;
+            if (cardEl?.dataset?.communityCollect === '1') scheduleWarehouseMasonryForCard(cid);
+            else scheduleWarehouseMasonryLayout();
+          }
         }
         else scheduleMasonryForMedia(media);
       } else if (media.closest('#imageGenFeed')) window.FeatureDraft?.resetMobileFeedGridStyles?.();
@@ -2854,6 +3151,36 @@
       return placeholder;
     }
 
+    function getCommunityCollectImageResolveOpts(card) {
+      if (!card || !window.isCommunityCollectCard?.(card)) return null;
+      let authorId = String(card.communitySourceAuthorId || '');
+      let sourceCardId = String(card.communitySourceCardId || card.communitySourceId || '');
+      if ((!authorId || !sourceCardId) && card.favoritedFromPostId) {
+        const post = window.FeatureDraft?.findPost?.(card.favoritedFromPostId);
+        if (post) {
+          if (!authorId) authorId = String(post.authorId || '');
+          if (!sourceCardId) sourceCardId = String(post.sourceCardId || '');
+        }
+      }
+      const ref = card.image;
+      if (!authorId && ref && window.SupabaseSync?.storagePathFromRef) {
+        const path = window.SupabaseSync.storagePathFromRef(ref) || '';
+        const uid = window.SupabaseSync?.getUserId?.();
+        const owner = path.replace(/^\//, '').split('/')[0] || '';
+        if (owner && owner !== uid) authorId = owner;
+      }
+      if (!authorId) return null;
+      return {
+        communityFeed: true,
+        authorId,
+        assetId: sourceCardId || card.id,
+        cardId: sourceCardId || undefined,
+        tryAllPaths: true,
+        variant: window.SupabaseSync?.VARIANT_FULL || 'full'
+      };
+    }
+    window.getCommunityCollectImageResolveOpts = getCommunityCollectImageResolveOpts;
+
     function migrateCommunityCollectCards() {
       const tag = window.COMMUNITY_COLLECT_TAG || '社区收藏';
       let changed = false;
@@ -2862,6 +3189,10 @@
         if (c.communitySourceId) {
           if (!(c.tags || []).includes(tag)) {
             c.tags = [...(c.tags || []), tag];
+            changed = true;
+          }
+          if (!c.communitySourceCardId) {
+            c.communitySourceCardId = String(c.communitySourceId);
             changed = true;
           }
           delete c.communitySourceId;
@@ -2875,6 +3206,17 @@
           if (!c.tags.includes(tag)) {
             c.tags = [tag, ...(c.tags || []).filter(t => t !== tag)];
             changed = true;
+          }
+          if (!c.communitySourceAuthorId && c.favoritedFromPostId) {
+            const post = window.FeatureDraft?.findPost?.(c.favoritedFromPostId);
+            if (post?.authorId) {
+              c.communitySourceAuthorId = String(post.authorId);
+              changed = true;
+            }
+            if (!c.communitySourceCardId && post?.sourceCardId) {
+              c.communitySourceCardId = String(post.sourceCardId);
+              changed = true;
+            }
           }
         }
       });
@@ -2913,7 +3255,8 @@
       window.FeatureDraft?.applyCloudSlice?.(payload);
       loadWarehouseGroups(getActiveWarehouseId());
       normalizeCardPins();
-      floatingPromptActive = settings.floatingPrompt === true;
+      floatingPromptActive = false;
+      settings.floatingPrompt = false;
       document.getElementById('imageClickZoomToggle').checked = settings.imageClickZoom;
       applyEfficiencyMode();
       if (settings.autoDayNight !== false) {
@@ -2957,7 +3300,7 @@
     function refreshAppBuildLabel() {
       const build = window.__APP_BUILD__ || '未知';
       const el = document.getElementById('appBuildLabel');
-      if (el) el.textContent = build;
+      if (el) el.textContent = '版本 ' + build;
       updateCloudSyncStatusUI();
     }
     window.refreshAppBuildLabel = refreshAppBuildLabel;
@@ -3197,7 +3540,14 @@
     }
 
     function authErrorMessage(e) {
-      return window.SupabaseSync?.formatAuthError?.(e) || e?.message || '操作失败';
+      if (!e) return '操作失败，请稍后重试';
+      if (window.SupabaseSync?.formatAuthError) {
+        const msg = window.SupabaseSync.formatAuthError(e);
+        if (msg && msg !== '操作失败') return msg;
+      }
+      const m = String(e.message || e.error_description || '').trim();
+      if (m && m !== '{}' && m !== '[object Object]') return m;
+      return '登录失败，请检查网络后重试';
     }
 
     async function authSignIn() {
@@ -4626,7 +4976,8 @@
         const s = localStorage.getItem('promptrepo_settings');
         if (s) settings = Object.assign(settings, JSON.parse(s));
       } catch (e) { /* ignore */ }
-      floatingPromptActive = settings.floatingPrompt === true;
+      floatingPromptActive = false;
+      settings.floatingPrompt = false;
       applyEfficiencyMode();
       document.getElementById('imageClickZoomToggle').checked = settings.imageClickZoom;
       normalizeCardPins();
@@ -4652,6 +5003,8 @@
       updatePanelOcrBoxVisibility();
       applyEfficiencyMode();
       initFilterMenu();
+      initSortMenu();
+      bindWarehouseSearchInputs();
       bindPanelOcrDrop();
       initAppNav();
       initAppNavCollapse();
@@ -4980,6 +5333,44 @@
       return html;
     }
 
+    function syncWarehouseSearchFields(fromEl) {
+      const desktop = document.getElementById('searchInput');
+      const mobile = document.getElementById('searchInputMobile');
+      if (!desktop && !mobile) return;
+      const val = fromEl?.value ?? desktop?.value ?? mobile?.value ?? '';
+      if (desktop) desktop.value = val;
+      if (mobile) mobile.value = val;
+    }
+
+    function commitWarehouseSearch(fromEl) {
+      syncWarehouseSearchFields(fromEl);
+      renderCards(true);
+      window.closeMobileSearch?.();
+      if (fromEl?.blur) fromEl.blur();
+      else document.getElementById('searchInput')?.blur();
+    }
+    window.commitWarehouseSearch = commitWarehouseSearch;
+
+    function bindWarehouseSearchInputs() {
+      const bind = (el) => {
+        if (!el || el.dataset.searchBound) return;
+        el.dataset.searchBound = '1';
+        el.addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter' || e.isComposing) return;
+          e.preventDefault();
+          commitWarehouseSearch(el);
+        });
+        if (el.type === 'search') {
+          el.addEventListener('search', (e) => {
+            e.preventDefault();
+            commitWarehouseSearch(el);
+          });
+        }
+      };
+      bind(document.getElementById('searchInput'));
+      bind(document.getElementById('searchInputMobile'));
+    }
+
     async function renderCards(reset = false) {
       if (reset) {
         page = 1; allFilteredCards = [];
@@ -5037,6 +5428,12 @@
           div.classList.remove('card-enter');
         }
         div.dataset.id = card.id;
+        if (window.isCommunityCollectCard?.(card)) {
+          div.dataset.communityCollect = '1';
+          const collectMeta = getCommunityCollectImageResolveOpts(card);
+          if (collectMeta?.authorId) div.dataset.authorId = collectMeta.authorId;
+          if (collectMeta?.assetId) div.dataset.sourceCardId = collectMeta.assetId;
+        }
         div.draggable = !globalViewActive;
         if (!mobileGrid) {
           div.style.position = 'relative';
@@ -5054,8 +5451,12 @@
           });
         }
         const imgSrc = showImage ? (cachedUrl || cardImgInitialSrc(card.image)) : '';
+        const isCollectCard = window.isCommunityCollectCard?.(card);
+        const collectMeta = isCollectCard ? getCommunityCollectImageResolveOpts(card) : null;
         const imgPending = showImage && (!cachedUrl || imgSrc.startsWith('data:image/svg'));
-        const mediaLoadingCls = imgPending ? ' is-loading card-media--await' : '';
+        const mediaLoadingCls = imgPending
+          ? ' is-loading card-media--await'
+          : (isCollectCard && showImage ? ' card-media--await' : '');
         const shineAt = imgPending ? ` data-shine-at="${Date.now()}"` : '';
         const titleTrim = getCardDisplayTitle(card);
         const timeLabel = formatCardTime(card.updatedAt || card.createdAt);
@@ -5063,8 +5464,11 @@
         const pinBadge = card.pinnedAt ? '<span class="card-pin-badge" title="置顶">置顶</span>' : '';
         const imgOnload = "if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.card-media'))";
         const fetchPri = !isAppend && idx < 12 ? ' fetchpriority="high"' : '';
+        const collectImgAttrs = isCollectCard && collectMeta?.authorId
+          ? ` data-author-id="${escapeHtml(collectMeta.authorId)}" data-source-card-id="${escapeHtml(collectMeta.assetId || '')}"`
+          : '';
         const mediaHtml = showImage
-          ? `<div class="card-media${mediaLoadingCls}"${shineAt}><img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(card.image)} data-image-ref="${escapeHtml(card.image)}" loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async"${fetchPri} draggable="false" alt="" onload="${imgOnload}"></div>`
+          ? `<div class="card-media${mediaLoadingCls}"${shineAt}><img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(card.image)} data-image-ref="${escapeHtml(card.image)}"${collectImgAttrs} loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async"${fetchPri} draggable="false" alt="" onload="${imgOnload}"></div>`
           : '';
         const headHtml = titleTrim
           ? `<div class="card-head"><div class="card-title">${escapeHtml(titleTrim)}</div>${timeLabel ? `<time class="card-time">${escapeHtml(timeLabel)}</time>` : ''}</div>`
@@ -5315,7 +5719,111 @@
         }
       }, null, labels);
     }
-    function batchAddTag() { if(!selectedCardIds.size) return; const allTags = [...new Set(cards.flatMap(c=>c.tags||[]))]; customPrompt('输入标签名（不含#）', '', (tag) => { if(!tag) return; selectedCardIds.forEach(id=>{const c=cards.find(x=>x.id===id); if(c){ if(!c.tags) c.tags=[]; if(!c.tags.includes(tag)) c.tags.push(tag); }}); saveAllData(); cancelBatch(); renderCards(true); }, null, allTags); }
+    async function refreshCommunityAfterBatchPublish() {
+      window.FeatureDraft?.maybeReconcileCommunityWithCards?.(cards, { force: true });
+      if (document.getElementById('pageCommunity')?.classList.contains('active')) {
+        void window.FeatureDraft?.refreshPublicCommunityFeed?.({ force: true }).then(() => {
+          window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true, forceRepaint: true });
+        });
+      }
+      if (document.getElementById('pageCreations')?.classList.contains('active')) {
+        void window.FeatureDraft?.renderCreations?.();
+      }
+    }
+
+    async function batchPublishCommunity() {
+      if (!selectedCardIds.size) return;
+      if (!isUserLoggedIn()) {
+        requireAuth('publish');
+        return;
+      }
+      const ids = [...selectedCardIds];
+      let ok = 0;
+      let already = 0;
+      let skipCollect = 0;
+      let skipIneligible = 0;
+      for (const id of ids) {
+        const card = cards.find((c) => c.id === id);
+        if (!card) continue;
+        if (window.isCommunityCollectCard?.(card)) {
+          skipCollect += 1;
+          continue;
+        }
+        if (card.publishedToCommunity) {
+          already += 1;
+          continue;
+        }
+        if (!window.FeatureDraft?.isCommunityPublishEligible?.(card)) {
+          skipIneligible += 1;
+          continue;
+        }
+        await window.FeatureDraft?.applyCardPublishState?.(card, true);
+        if (card.publishedToCommunity) ok += 1;
+      }
+      window.__promptHubCards = cards;
+      if (ok > 0) {
+        await saveAllData({ skipCloud: true });
+        if (window.SupabaseSync?.isLoggedIn?.()) {
+          scheduleCloudPush();
+          void window.FeatureDraft?.syncMyPostsToPublicFeed?.();
+        }
+        await refreshCommunityAfterBatchPublish();
+      }
+      cancelBatch();
+      renderCards(true);
+      const parts = [];
+      if (ok) parts.push(`已公开 ${ok} 张`);
+      if (already) parts.push(`${already} 张已是公开`);
+      if (skipIneligible) parts.push(`${skipIneligible} 张不满足条件（提示词≥15字且需配图）`);
+      if (skipCollect) parts.push(`${skipCollect} 张为社区收藏不可公开`);
+      if (!parts.length) showToast('没有可公开的卡片');
+      else showToast(parts.join('；'));
+    }
+
+    async function batchUnpublishCommunity() {
+      if (!selectedCardIds.size) return;
+      const ids = [...selectedCardIds];
+      let n = 0;
+      for (const id of ids) {
+        const card = cards.find((c) => c.id === id);
+        if (!card?.publishedToCommunity) continue;
+        await window.FeatureDraft?.unpublishCommunityByCardId?.(id, { silent: true });
+        n += 1;
+      }
+      if (!n) {
+        showToast('所选卡片均未公开到社区');
+        return;
+      }
+      window.__promptHubCards = cards;
+      await saveAllData({ skipCloud: true });
+      if (window.SupabaseSync?.isLoggedIn?.()) scheduleCloudPush();
+      await refreshCommunityAfterBatchPublish();
+      cancelBatch();
+      renderCards(true);
+      showToast(`已关闭 ${n} 张卡片的社区公开`);
+    }
+
+    function batchAddTag() {
+      if (!selectedCardIds.size) return;
+      const allTags = window.getSelectableCardTags?.(cards) || [];
+      customPrompt('输入标签名（不含#）', '', (tag) => {
+        if (!tag) return;
+        if (window.isCommunityCollectTagName?.(tag)) {
+          showToast('「社区收藏」标签仅收藏时自动添加');
+          return;
+        }
+        selectedCardIds.forEach(id => {
+          const c = cards.find(x => x.id === id);
+          if (c) {
+            if (!c.tags) c.tags = [];
+            if (!c.tags.includes(tag)) c.tags.push(tag);
+          }
+        });
+        saveAllData();
+        cancelBatch();
+        renderCards(true);
+      }, null, allTags);
+    }
     function batchDelete() {
       if (!window.SupabaseSync?.isLoggedIn?.()) {
         showToast('请先登录后再删除卡片');
@@ -5494,14 +6002,15 @@
           : `#${escapeHtml(t)} <span class="remove-tag" onclick="removeTag('${escapeJsString(t)}')">×</span>`;
         wrap.appendChild(chip);
       });
+      const picker = document.getElementById('tagInlinePicker');
+      if (picker && !picker.hidden) renderTagInlineList();
     }
 
     function addTag() {
       const raw = document.getElementById('tagInput').value.trim();
       if (!raw) return;
       const t = raw.replace(/^#/, '');
-      const collectTag = window.COMMUNITY_COLLECT_TAG || '社区收藏';
-      if (t === collectTag) {
+      if (window.isCommunityCollectTagName?.(t)) {
         showToast('「社区收藏」标签仅收藏时自动添加');
         return;
       }
@@ -5509,8 +6018,7 @@
       document.getElementById('tagInput').value = '';
     }
     function removeTag(t) {
-      const collectTag = window.COMMUNITY_COLLECT_TAG || '社区收藏';
-      if (t === collectTag) {
+      if (window.isCommunityCollectTagName?.(t)) {
         showToast('「社区收藏」标签不可移除');
         return;
       }
@@ -5518,12 +6026,10 @@
       renderTags();
     }
     
-    let tagSheetMultiMode = false;
-    const tagSheetPending = new Set();
+    let tagInlineOutsideBound = false;
 
     function applyTagFromSheet(tag) {
-      const collectTag = window.COMMUNITY_COLLECT_TAG || '社区收藏';
-      if (tag === collectTag) {
+      if (window.isCommunityCollectTagName?.(tag)) {
         showToast('「社区收藏」标签仅收藏时自动添加');
         return;
       }
@@ -5533,93 +6039,85 @@
       }
     }
 
-    function setTagSheetRowChecked(row, checked) {
-      const check = row.querySelector('.tag-sheet-check');
-      if (check) check.classList.toggle('checked', checked);
-    }
-
-    function toggleTagSheetPending(tag, row) {
-      tagSheetMultiMode = true;
-      document.getElementById('tagSheetOverlay')?.classList.add('multi');
-      if (tagSheetPending.has(tag)) {
-        tagSheetPending.delete(tag);
-        setTagSheetRowChecked(row, false);
-      } else {
-        tagSheetPending.add(tag);
-        setTagSheetRowChecked(row, true);
-      }
-    }
-
-    function closeTagSheet() {
-      const overlay = document.getElementById('tagSheetOverlay');
-      if (!overlay) return;
-      overlay.classList.remove('multi');
-      overlay.classList.remove('open');
-      overlay.setAttribute('hidden', '');
-      tagSheetMultiMode = false;
-      tagSheetPending.clear();
-      document.getElementById('tagSheetList').innerHTML = '';
-    }
-
-    function confirmTagSheet() {
-      tagSheetPending.forEach(tag => applyTagFromSheet(tag));
-      if (tagSheetPending.size) showToast('已添加标签');
+    function tagInlineOutsideClose(e) {
+      if (e.target.closest('#tagContainer')) return;
       closeTagSheet();
     }
 
-    function showExistingTags() {
-      const all = [...new Set(cards.flatMap(c => c.tags || []))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
-      const overlay = document.getElementById('tagSheetOverlay');
-      const list = document.getElementById('tagSheetList');
-      if (!overlay || !list) return;
-      tagSheetMultiMode = false;
-      tagSheetPending.clear();
-      overlay.classList.remove('multi');
+    function tagInlineEscClose(e) {
+      if (e.key === 'Escape') closeTagSheet();
+    }
+
+    function bindTagInlineOutsideClose() {
+      if (tagInlineOutsideBound) return;
+      tagInlineOutsideBound = true;
+      document.addEventListener('pointerdown', tagInlineOutsideClose, true);
+      document.addEventListener('keydown', tagInlineEscClose);
+    }
+
+    function unbindTagInlineOutsideClose() {
+      if (!tagInlineOutsideBound) return;
+      tagInlineOutsideBound = false;
+      document.removeEventListener('pointerdown', tagInlineOutsideClose, true);
+      document.removeEventListener('keydown', tagInlineEscClose);
+    }
+
+    function closeTagSheet() {
+      const picker = document.getElementById('tagInlinePicker');
+      const btn = document.getElementById('tagPickBtn');
+      const list = document.getElementById('tagInlineList');
+      if (picker) picker.hidden = true;
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+      if (list) list.innerHTML = '';
+      unbindTagInlineOutsideClose();
+    }
+
+    function renderTagInlineList() {
+      const list = document.getElementById('tagInlineList');
+      if (!list) return;
+      const all = window.getSelectableCardTags?.(cards) || [];
       list.innerHTML = '';
       if (!all.length) {
-        list.innerHTML = '<div class="tag-sheet-empty">暂无任何标签</div>';
-      } else {
-        all.forEach(tag => {
-          const row = document.createElement('div');
-          row.className = 'tag-sheet-row';
-          row.dataset.tag = tag;
-          const nameBtn = document.createElement('button');
-          nameBtn.type = 'button';
-          nameBtn.className = 'tag-sheet-name';
-          nameBtn.textContent = tag;
-          nameBtn.addEventListener('click', e => {
-            e.stopPropagation();
-            if (tagSheetMultiMode) {
-              toggleTagSheetPending(tag, row);
-            } else {
-              applyTagFromSheet(tag);
-              showToast('已添加标签');
-              closeTagSheet();
-            }
-          });
-          const checkBtn = document.createElement('button');
-          checkBtn.type = 'button';
-          checkBtn.className = 'tag-sheet-check';
-          checkBtn.setAttribute('aria-label', '多选 ' + tag);
-          checkBtn.addEventListener('click', e => {
-            e.stopPropagation();
-            toggleTagSheetPending(tag, row);
-          });
-          row.appendChild(nameBtn);
-          row.appendChild(checkBtn);
-          list.appendChild(row);
-        });
+        list.innerHTML = '<div class="tag-inline-empty">暂无任何标签</div>';
+        return;
       }
-      overlay.removeAttribute('hidden');
-      overlay.classList.add('open');
-      const onKey = e => { if (e.key === 'Escape') { closeTagSheet(); document.removeEventListener('keydown', onKey); } };
-      document.addEventListener('keydown', onKey);
+      all.forEach(tag => {
+        const opt = document.createElement('button');
+        opt.type = 'button';
+        opt.className = 'tag-inline-option' + (currentTags.includes(tag) ? ' is-selected' : '');
+        opt.textContent = '#' + tag;
+        opt.disabled = currentTags.includes(tag);
+        opt.addEventListener('click', () => {
+          applyTagFromSheet(tag);
+          showToast('已添加标签');
+          opt.classList.add('is-selected');
+          opt.disabled = true;
+        });
+        list.appendChild(opt);
+      });
+    }
+
+    function showExistingTags() {
+      const picker = document.getElementById('tagInlinePicker');
+      const btn = document.getElementById('tagPickBtn');
+      if (!picker || !btn) return;
+      if (!picker.hidden) {
+        closeTagSheet();
+        return;
+      }
+      renderTagInlineList();
+      picker.hidden = false;
+      btn.setAttribute('aria-expanded', 'true');
+      bindTagInlineOutsideClose();
     }
     window.showExistingTags = showExistingTags;
     window.closeTagSheet = closeTagSheet;
-    window.confirmTagSheet = confirmTagSheet;
     
     document.getElementById('tagInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } });
+    document.getElementById('tagPickBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      showExistingTags();
+    });
 
     function renderCustomFields() {
       const container = document.getElementById('customFieldsContainer');
@@ -6147,6 +6645,9 @@
       document.getElementById('editPanel').classList.remove('hidden');
       document.getElementById('fabNewBtn').classList.remove('visible');
       document.body.classList.add('panel-open');
+      if (floatingPromptActive) {
+        requestAnimationFrame(() => applyFloatingPromptPosition());
+      }
       if (isMobileViewport() && !mobileEditPanelHistory) {
         try {
           history.pushState({ phEditPanel: 1 }, '', location.href);
@@ -6244,8 +6745,19 @@
         img.style.maxHeight = '';
         img.style.objectFit = '';
         if (window.__lightboxCommunityMode) fitLightboxDisplaySize(img);
-        resetImageZoom(img);
-        attachImageZoom(img);
+        if (window.__lightboxImageGenNav) {
+          img.onwheel = (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            navigateViewerByWheelThrottled(ev.deltaY);
+          };
+          img.onmousedown = null;
+          img.ondblclick = null;
+          imageZoom.img = null;
+        } else {
+          resetImageZoom(img);
+          attachImageZoom(img);
+        }
         finishViewerFrameReveal(frame);
         if (window.__lightboxCommunityMode) layoutViewerBorderSvg(frame);
         if (dlBtn && !window.__lightboxCommunityMode) {
@@ -6329,23 +6841,38 @@
           syncLightboxActions({ cardId: opts.cardId || selectedCardId || null });
         }
       }
-      if (selectedCardId && imageData) {
-        const navItems = cards
-          .filter((c) => c.image && cardHasDisplayImage(c))
-          .map((c) => ({ type: 'card', id: c.id, key: `card:${c.id}` }));
-        setViewerNav(navItems, `card:${selectedCardId}`);
+      if (opts.imageGen && opts.feedKey && window.FeatureDraft?.getImageGenFeedNavItems) {
+        const navItems = window.FeatureDraft.getImageGenFeedNavItems().map((it) => ({
+          type: 'imageGen',
+          kind: it.kind,
+          id: it.id,
+          key: it.key
+        }));
+        window.__lightboxImageGenNav = navItems.length > 1;
+        setViewerNav(navItems, opts.feedKey);
+      } else {
+        window.__lightboxImageGenNav = false;
+        const navCardId = opts.cardId || selectedCardId;
+        if (globalViewActive && navCardId) {
+          const navItems = cards
+            .filter((c) => c.image && cardHasDisplayImage(c))
+            .map((c) => ({ type: 'card', id: c.id, key: `card:${c.id}` }));
+          setViewerNav(navItems, `card:${navCardId}`);
+        } else {
+          setViewerNav([], '');
+        }
       }
       loadLightboxImage(src || '', opts);
     }
 
-    function setLightboxSrc(src) {
+    function setLightboxSrc(src, opts) {
       if (!src || typeof src !== 'string') return;
       const lightbox = document.getElementById('imageLightbox');
       if (!lightbox?.classList.contains('active')) {
-        openLightbox(src);
+        openLightbox(src, opts || (window.__lightboxImageGenNav ? { imageGen: true } : {}));
         return;
       }
-      loadLightboxImage(src);
+      loadLightboxImage(src, opts);
     }
     window.openLightbox = openLightbox;
     window.setLightboxSrc = setLightboxSrc;
@@ -6439,6 +6966,7 @@
         img.style.objectFit = '';
       }
       viewerNav = { items: [], index: -1 };
+      window.__lightboxImageGenNav = false;
       if (imageZoom.img === document.getElementById('lightboxImage')) imageZoom.img = null;
       imageZoom.dragging = false;
     }
@@ -6896,5 +7424,7 @@
     function escapeJsString(str) { return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, ''); }
     window.escapeHtml = escapeHtml;
     window.escapeJsString = escapeJsString;
+    window.batchPublishCommunity = batchPublishCommunity;
+    window.batchUnpublishCommunity = batchUnpublishCommunity;
     
 

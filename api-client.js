@@ -125,13 +125,15 @@
       const fileHint = isFileOrigin()
         ? '请用 https://prompt-hub.cn 打开，或运行 .\\serve-local.ps1'
         : '';
+      const decimalHint =
+        '若仍报积分相关错误，请确认 Supabase 已执行 migrations/20260602211000_credits_decimal_fixup.sql';
       return {
         ok: false,
         code: isFileOrigin() ? 'FILE_ORIGIN' : 'NETWORK_ERROR',
         message: fileHint
           || (aborted
             ? '连接 api.prompt-hub.cn 超时，请换网络或稍后再试'
-            : '无法连接 api.prompt-hub.cn，请检查网络或 VPN')
+            : `无法连接 api.prompt-hub.cn，请检查网络或 VPN。${decimalHint}`)
       };
     } finally {
       clearTimeout(timer);
@@ -157,6 +159,14 @@
             : res.status === 429
               ? '操作过于频繁，请稍后再试'
               : `请求失败 (${res.status})`;
+      const details =
+        typeof err.details === 'string' && err.details && err.details !== message
+          ? err.details
+          : '';
+      const fullMessage =
+        message === '服务器内部错误' && details
+          ? `${message}（${details.slice(0, 120)}）`
+          : message;
       if (res.status === 401 && attempt < 2) {
         const recovered = await recoverSessionForApi();
         if (recovered) return request(method, path, body, opts, attempt + 1);
@@ -172,7 +182,7 @@
         ok: false,
         status: res.status,
         code,
-        message,
+        message: fullMessage,
         details:
           typeof err.details === 'string'
             ? err.details
@@ -422,14 +432,28 @@
 
   const costCache = new Map();
   const costInflight = new Map();
+  let modelsCache = null;
+  let modelsCacheExp = 0;
+
+  async function getGenerationModels() {
+    if (modelsCache && modelsCacheExp > Date.now()) {
+      return { ok: true, data: modelsCache };
+    }
+    const res = await request('GET', '/api/v1/generate/models', null, { timeoutMs: API_FAST_TIMEOUT_MS });
+    if (res.ok && res.data) {
+      modelsCache = res.data;
+      modelsCacheExp = Date.now() + 120_000;
+    }
+    return res;
+  }
 
   async function getGenerationCost(resolution, quality, model) {
-    const key = `${model || 'quanneng2'}|${resolution || '1k'}|${quality || ''}`;
+    const key = `${model || 'gpt-image-2'}|${resolution || '1k'}|${quality || ''}`;
     const hit = costCache.get(key);
     if (hit && hit.exp > Date.now()) return hit.data;
     if (costInflight.has(key)) return costInflight.get(key);
     const r = encodeURIComponent(resolution || '1k');
-    const m = encodeURIComponent(model || 'quanneng2');
+    const m = encodeURIComponent(model || 'gpt-image-2');
     const p = request('GET', `/api/v1/generate/cost?resolution=${r}&model=${m}`)
       .then((res) => {
         if (res.ok) costCache.set(key, { data: res, exp: Date.now() + 90_000 });
@@ -752,6 +776,7 @@
     checkinMembershipTask,
     redeemInviteCode,
     setCreditGrantMode,
+    getGenerationModels,
     getGenerationCost,
     generateImage,
     getGenerationJob,

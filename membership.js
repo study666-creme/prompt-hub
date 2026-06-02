@@ -9,9 +9,9 @@
 
   /** 会员生图积分折扣（乘数） */
   const GEN_DISCOUNT_BY_TIER = {
-    basic: 0.9,
-    standard: 0.8,
-    pro: 0.7
+    basic: 0.95,
+    standard: 0.9,
+    pro: 0.85
   };
 
   function loadJson(key, fallback) {
@@ -89,7 +89,7 @@
   function getGenDiscountLabel() {
     const tier = getMemberTier();
     if (!tier || tier === 'lite') return '';
-    const map = { basic: '9折', standard: '8折', pro: '7折' };
+    const map = { basic: '95折', standard: '9折', pro: '85折' };
     return map[tier] || '';
   }
 

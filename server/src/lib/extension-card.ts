@@ -6,6 +6,11 @@ const BUCKET = 'card-images';
 const FREE_CARD_LIMIT = 100;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_PROMPT_LEN = 20000;
+const COMMUNITY_COLLECT_TAG = '社区收藏';
+
+function isCommunityCollectTagName(raw: string): boolean {
+  return String(raw || '').replace(/^#+/, '').trim() === COMMUNITY_COLLECT_TAG;
+}
 
 export type QuickCardInput = {
   prompt: string;
@@ -59,7 +64,7 @@ function normalizeTags(list?: string[]): string[] {
   const out = new Set<string>();
   for (const raw of list || []) {
     const t = normalizeTag(raw);
-    if (t) out.add(t);
+    if (t && !isCommunityCollectTagName(t)) out.add(t);
   }
   return [...out];
 }
@@ -71,7 +76,7 @@ export function collectUserTags(payload: UserDataPayload): string[] {
     if (!Array.isArray(tags)) continue;
     for (const raw of tags) {
       const t = normalizeTag(String(raw));
-      if (t) set.add(t);
+      if (t && !isCommunityCollectTagName(t)) set.add(t);
     }
   }
   return [...set].sort((a, b) => a.localeCompare(b, 'zh-CN'));

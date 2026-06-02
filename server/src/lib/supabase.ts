@@ -155,10 +155,20 @@ export function isMembershipActive(profile: Profile): boolean {
   return false;
 }
 
+export const MEMBERSHIP_GEN_DISCOUNT_BY_TIER = {
+  basic: { multiplier: 0.95, label: '95折' },
+  standard: { multiplier: 0.9, label: '9折' },
+  pro: { multiplier: 0.85, label: '85折' }
+} as const;
+
 export function membershipGenMultiplier(tier: Profile['membership_tier']): number {
   if (!tier || tier === 'lite') return 1;
-  const map = { basic: 0.9, standard: 0.8, pro: 0.7 } as const;
-  return map[tier] ?? 1;
+  return MEMBERSHIP_GEN_DISCOUNT_BY_TIER[tier]?.multiplier ?? 1;
+}
+
+export function membershipGenDiscountLabel(tier: Profile['membership_tier']): string | null {
+  if (!tier || tier === 'lite') return null;
+  return MEMBERSHIP_GEN_DISCOUNT_BY_TIER[tier]?.label ?? null;
 }
 
 export const POINTS_PER_YUAN = 100;

@@ -11,23 +11,61 @@
 
   /** 1 元人民币对应积分 */
   const POINTS_PER_YUAN = 100;
-  /** 单次扣费最低积分（1 积分 = ¥0.01） */
-  const MIN_CHARGE_POINTS = 1;
+  /** 单次扣费最低积分（0.1 = ¥0.001） */
+  const MIN_CHARGE_POINTS = 0.1;
 
-  const IMAGE_GEN_MODELS = {
-    quanneng2: {
-      id: 'quanneng2',
-      label: '全能模型2',
-      pricing: 'resolution',
-      memberDiscount: true
-    },
-    jimeng: {
-      id: 'jimeng',
-      label: '集梦 Seedream',
-      pricing: 'fixed',
-      fixedCredits: 40
-    }
+  function roundCredits(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return MIN_CHARGE_POINTS;
+    return Math.max(MIN_CHARGE_POINTS, Math.round(v * 10) / 10);
+  }
+
+  function formatCredits(n) {
+    const v = roundCredits(n);
+    if (v <= 0) return '0';
+    return Number.isInteger(v) ? String(v) : v.toFixed(1);
+  }
+
+  const LEGACY_MODEL_IDS = {
+    quanneng2: 'gpt-image-2',
+    jimeng: 'nano-banana-pro'
   };
+
+  const FALLBACK_MODEL = {
+    id: 'gpt-image-2',
+    label: 'GPT Image 2',
+    pricing: 'api'
+  };
+
+  function normalizeImageGenModelId(modelId) {
+    const id = String(modelId || '').trim() || 'gpt-image-2';
+    return LEGACY_MODEL_IDS[id] || id;
+  }
+
+  function catalogModelEntry(modelId) {
+    const id = normalizeImageGenModelId(modelId);
+    const list = window.__IMAGE_GEN_MODELS__;
+    if (Array.isArray(list)) {
+      const hit = list.find((m) => m && m.id === id);
+      if (hit) {
+        return {
+          id: hit.id,
+          label: hit.label || hit.id,
+          pricing: 'api',
+          creditsPerCall: hit.creditsPerCall,
+          creditsBase: hit.creditsBase,
+          creditsFinal: hit.creditsFinal,
+          listPrice: hit.listPrice,
+          promoPrice: hit.promoPrice,
+          appliedDiscount: hit.appliedDiscount,
+          modelDiscountLabel: hit.modelDiscountLabel,
+          modelDiscountPercent: hit.modelDiscountPercent,
+          discountLabel: hit.discountLabel
+        };
+      }
+    }
+    return { ...FALLBACK_MODEL, id };
+  }
 
   /** 登录后积分以 Supabase profiles 为准（/api/v1/me 同步） */
   let serverCreditsKnown = false;
@@ -57,14 +95,14 @@
   function getCredits() {
     if (useApiForAccount() && serverCreditsKnown) {
       const n = Number(loadJson(LS_CREDITS, 0));
-      return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+      return Number.isFinite(n) ? Math.max(0, roundCredits(n)) : 0;
     }
     const n = Number(loadJson(LS_CREDITS, 0));
-    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+    return Number.isFinite(n) ? Math.max(0, roundCredits(n)) : 0;
   }
 
   function setCredits(n) {
-    saveJson(LS_CREDITS, Math.max(0, Math.floor(n)));
+    saveJson(LS_CREDITS, Math.max(0, roundCredits(n)));
     updateCreditsUI();
   }
 
@@ -130,31 +168,121 @@
     } catch (e) { /* ignore */ }
   }
 
-  /** 会员折后积分（向下取整，至少 MIN_CHARGE_POINTS，与 server 一致） */
+  /** 会员折后积分（0.1 精度，与 server 一致） */
   function applyMemberDiscount(base, mult) {
-    if (mult >= 1) return base;
-    return Math.max(MIN_CHARGE_POINTS, Math.floor(base * mult));
+    if (mult >= 1) return roundCredits(base);
+    return roundCredits(Math.max(MIN_CHARGE_POINTS, base * mult));
+  }
+
+  /** 活动折 vs 会员折取更优（不叠加），与 server computeFromResolved 一致 */
+  function pickBestGenPrice(listPrice, promoPrice, memberMult, memberLabel) {
+    const list = roundCredits(listPrice);
+    const promo = roundCredits(promoPrice);
+    if (!memberMult || memberMult >= 1) {
+      return {
+        final: promo,
+        appliedDiscount: promo < list - 0.04 ? 'model' : 'none',
+        label: null
+      };
+    }
+    const memberPrice = applyMemberDiscount(list, memberMult);
+    if (promo <= memberPrice) {
+      return {
+        final: promo,
+        appliedDiscount: promo < list - 0.04 ? 'model' : 'none',
+        label: null
+      };
+    }
+    return {
+      final: memberPrice,
+      appliedDiscount: 'member',
+      label: memberLabel || null
+    };
+  }
+
+  function formatImageGenUnitPrice(detail, finalOverride) {
+    const finalNum = finalOverride != null ? finalOverride : detail?.final;
+    const listPrice = Number(detail?.listPrice);
+    const unitLabel = formatCredits(finalNum);
+    if (!Number.isFinite(listPrice) || listPrice <= Number(finalNum) + 0.04) {
+      return `${unitLabel} 积分`;
+    }
+    if (detail?.appliedDiscount === 'model' && detail?.modelDiscountLabel) {
+      return `${unitLabel} 积分（${detail.modelDiscountLabel} · 原价 ${formatCredits(listPrice)}）`;
+    }
+    if (detail?.appliedDiscount === 'member' && detail?.label) {
+      return `${unitLabel} 积分（会员${detail.label} · 原价 ${formatCredits(listPrice)}）`;
+    }
+    if (detail?.appliedDiscount === 'fixed') {
+      return `${unitLabel} 积分（固定价）`;
+    }
+    return `${unitLabel} 积分（原价 ${formatCredits(listPrice)}）`;
+  }
+
+  /** 活动价生效时的说明文案（不与会员折扣叠加） */
+  function formatImageGenPromoNotice(detail, finalOverride) {
+    if (!detail) return '';
+    const finalNum = finalOverride != null ? finalOverride : detail.final;
+    const listPrice = Number(detail.listPrice);
+    const isModelPromo =
+      detail.appliedDiscount === 'model'
+      || (
+        detail.appliedDiscount !== 'member'
+        && detail.modelDiscountLabel
+        && Number.isFinite(listPrice)
+        && listPrice > Number(finalNum) + 0.04
+      );
+    if (!isModelPromo) return '';
+    const modelLabel = String(detail.modelLabel || '该模型').trim() || '该模型';
+    const unit = formatCredits(finalNum);
+    let msg = `${modelLabel} 活动价 ${unit} 积分，不与会员折扣叠加`;
+    if (Number.isFinite(listPrice) && listPrice > Number(finalNum) + 0.04) {
+      msg += `（日常 ${formatCredits(listPrice)} 积分）`;
+    }
+    return msg;
   }
 
   function getImageGenModel(modelId) {
-    const id = modelId || 'quanneng2';
-    return IMAGE_GEN_MODELS[id] || IMAGE_GEN_MODELS.quanneng2;
+    return catalogModelEntry(modelId);
   }
 
   function getImageGenCost(modelId, resolution) {
     return getImageGenCostDetail(modelId, resolution).final;
   }
 
-  /** @returns {{ modelId, modelLabel, base, final, mult, label, saved, fixed }} */
+  /** @returns {{ modelId, modelLabel, base, final, listPrice, modelDiscountLabel, mult, label, saved, fixed }} */
   function getImageGenCostDetail(modelId, resolution) {
     const model = getImageGenModel(modelId);
     const res = normalizeResolution(resolution);
-
-    const base =
-      model.pricing === 'fixed' ? model.fixedCredits : getBaseResolutionCost(res);
     const mult = getMemberGenMultiplier();
-    const final = applyMemberDiscount(base, mult);
     const label = window.Membership?.getGenDiscountLabel?.() || '';
+
+    if (useApiForAccount() && Number.isFinite(model.creditsFinal)) {
+      const listPrice = Number(model.listPrice) || Number(model.creditsBase) || Number(model.creditsPerCall) || 10;
+      const final = Number(model.creditsFinal) || listPrice;
+      const appliedDiscount = model.appliedDiscount || 'none';
+      const memberLabel = appliedDiscount === 'member'
+        ? (model.discountLabel || label)
+        : null;
+      const saved = listPrice > final ? roundCredits(listPrice - final) : 0;
+      return {
+        modelId: model.id,
+        modelLabel: model.label,
+        base: listPrice,
+        final,
+        listPrice,
+        promoPrice: Number(model.promoPrice) || final,
+        appliedDiscount,
+        modelDiscountLabel: appliedDiscount === 'model' ? (model.modelDiscountLabel || null) : null,
+        mult,
+        label: memberLabel,
+        saved,
+        fixed: appliedDiscount === 'fixed'
+      };
+    }
+
+    const base = getBaseResolutionCost(res);
+    const final = applyMemberDiscount(base, mult);
     const saved = mult < 1 && final < base ? base - final : 0;
     return {
       modelId: model.id,
@@ -164,17 +292,17 @@
       mult,
       label,
       saved,
-      fixed: model.pricing === 'fixed'
+      fixed: false
     };
   }
 
   /** @deprecated 使用 getImageGenCostDetail */
   function getResolutionCostDetail(resolution) {
-    return getImageGenCostDetail('quanneng2', resolution);
+    return getImageGenCostDetail('gpt-image-2', resolution);
   }
 
   function getResolutionCost(resolution) {
-    return getImageGenCost('quanneng2', resolution);
+    return getImageGenCost('gpt-image-2', resolution);
   }
 
   function getRedeemedSet() {
@@ -309,7 +437,7 @@
   function updateCreditsUI() {
     const total = getCredits();
     document.querySelectorAll('[data-credits-display]').forEach(el => {
-      el.textContent = String(total);
+      el.textContent = formatCredits(total);
     });
     document.querySelectorAll('[data-credits-detail]').forEach(el => {
       if (creditsBreakdown.daily > 0) {
@@ -331,6 +459,10 @@
   async function refreshCreditsFromServer() {
     if (!useApiForAccount()) return;
     await window.PromptHubApi.syncMe({ silent: true });
+  }
+
+  function getImageGenModelsCatalog() {
+    return Array.isArray(window.__IMAGE_GEN_MODELS__) ? window.__IMAGE_GEN_MODELS__ : [];
   }
 
   function initCreditsUI() {
@@ -448,7 +580,10 @@
     getImageGenModel,
     getImageGenCost,
     getImageGenCostDetail,
-    IMAGE_GEN_MODELS,
+    get IMAGE_GEN_MODELS() {
+      return getImageGenModelsCatalog();
+    },
+    getImageGenModelsCatalog,
     getResolutionCost,
     getResolutionCostDetail,
     getBaseResolutionCost,
@@ -457,7 +592,10 @@
     onPostLikesUpdated,
     updateCreditsUI,
     initCreditsUI,
-    showRechargePlaceholder,
+    formatCredits,
+    formatImageGenUnitPrice,
+    formatImageGenPromoNotice,
+    roundCredits,
     POINTS_PER_YUAN,
     MIN_CHARGE_POINTS,
     RECHARGE_RATE: POINTS_PER_YUAN,

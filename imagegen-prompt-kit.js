@@ -2627,12 +2627,18 @@
     lineart: { label: '线稿厚涂', hint: '动画 key visual', tag: '【画风锁定】动画 key visual 线稿厚涂，非摄影' },
     cyber_render: { label: '赛博渲染', hint: 'Blade Runner 美术', tag: '【画风锁定】赛博朋克概念 art，非真人写真' },
     dark_aesthetic: { label: '暗黑美学', hint: '哥特 / 暗调 / 颓废华丽', tag: '【画风锁定】暗黑美学，低明度高对比，哥特/颓废/神秘氛围，非明亮卡通非真人摄影' },
-    weta: { label: 'Weta 写实 CG', hint: '电影级角色', tag: '【画风锁定】Weta 级写实 CG，非真人照片' }
+    weta: { label: 'Weta 写实 CG', hint: '电影级角色', tag: '【画风锁定】Weta 级写实 CG，非真人照片' },
+    guoman_25d: {
+      label: '2.5D国漫写实',
+      hint: '国漫比例 + 3D写实渲染',
+      tag: '【画风锁定】2.5D国漫融合3D写实建模，理想化大眼精致五官与国漫面部比例，次表面散射肤质、发丝级头发与PBR服装材质，电影级轮廓光与浅景深虚化，UE5/C4D高品质3D渲染，非真人摄影非平面插画'
+    }
   };
 
   const AUTO_STYLE_POOL = [
     'anime', 'dongman', 'semireal', 'lineart', 'cg_3d', 'makoto', 'ghibli', 'photo', 'photo_film', 'hyperreal',
-    'manhwa', 'arcane', 'oil', 'ink', 'pixel', 'cyber_render', 'dark_aesthetic', 'cg_3d_toon', 'unreal', 'anime_90s'
+    'manhwa', 'arcane', 'oil', 'ink', 'pixel', 'cyber_render', 'dark_aesthetic', 'cg_3d_toon', 'unreal', 'anime_90s',
+    'guoman_25d'
   ];
 
   function clipPrompt(text, maxLen) {

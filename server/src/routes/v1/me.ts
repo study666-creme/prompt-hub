@@ -9,7 +9,7 @@ import {
 import { normalizeDisplayName, resolveDisplayName } from '../../lib/display-name';
 import { buildCommunityGachaQuota } from '../../lib/community-gacha';
 import { buildInspirationDrawQuota } from '../../lib/inspiration-draw';
-import { createAdminClient, isMembershipActive } from '../../lib/supabase';
+import { createAdminClient, isMembershipActive, membershipGenDiscountLabel } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
 
 export const meRoutes = new Hono<{ Bindings: Env }>();
@@ -42,7 +42,7 @@ meRoutes.get('/', async c => {
         queuedUntil: profile.membership_queued_until || null,
         active: memberActive,
         genDiscount: memberActive && profile.membership_tier && profile.membership_tier !== 'lite'
-          ? { basic: '9折', standard: '8折', pro: '7折' }[profile.membership_tier!]
+          ? membershipGenDiscountLabel(profile.membership_tier)
           : null
       },
       firstSubOfferUsed: profile.first_sub_offer_used,
@@ -94,6 +94,11 @@ const REASON_LABELS: Record<string, string> = {
   activation_code: '激活码兑换',
   image_generation: '图片生成',
   image_generation_refund: '生图退款',
+  prompt_reverse: '参考图反推（Gemini）',
+  prompt_fission: '图片裂变分析',
+  prompt_optimize: '提示词优化',
+  prompt_purify_describe: '画质净化读图',
+  chat_generation: 'AI 对话',
   payment_topup: '充值',
   subscription_grant: '订阅开通',
   like_milestone: '点赞奖励',

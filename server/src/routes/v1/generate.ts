@@ -1,16 +1,31 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Env } from '../../env';
-import { submitApimartImageJob } from '../../lib/apimart';
+import { roundCredits } from '../../lib/credit-math';
 import { ApiError } from '../../lib/errors';
+import { extractErrorMessage } from '../../lib/cors-headers';
+import {
+  hasAnyImageUpstream,
+  isProviderConfigured,
+  submitImageJobForProvider,
+  upstreamBindingsFromEnv
+} from '../../lib/image-upstream';
+import { providerLabel } from '../../lib/image-models-catalog';
 import {
   assertJobOwner,
   finalizeFailedJob,
   pollAndUpdateJob
 } from '../../lib/generation-jobs';
-import { computeGenerationCost, type ImageModelId } from '../../lib/pricing';
+import {
+  computeImageGenerationCost,
+  resolveImageModelConfig,
+  loadImageModelSettings,
+  listResolvedImageModels,
+  normalizeImageModelId
+} from '../../lib/image-model-settings';
 import {
   deductUserCredits,
+  refundUserCredits,
   spendableCredits,
   syncMembershipCredits
 } from '../../lib/membership-credits';
@@ -20,10 +35,16 @@ import {
   isMembershipActive
 } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
+import { syncGrsaiUpstreamStatusesFromPublicPage } from '../../lib/grsai-upstream-status';
 
 const bodySchema = z.object({
   prompt: z.string().min(1).max(8000),
-  model: z.enum(['quanneng2', 'jimeng']).default('quanneng2'),
+  model: z
+    .string()
+    .min(1)
+    .max(64)
+    .transform((s) => s.trim().toLowerCase())
+    .default('gpt-image-2'),
   resolution: z.enum(['1k', '2k', '4k']).default('1k'),
   quality: z.enum(['standard', 'high', 'ultra']).default('standard'),
   size: z.string().max(32).optional(),
@@ -33,53 +54,193 @@ const bodySchema = z.object({
 
 export const generateRoutes = new Hono<{ Bindings: Env }>();
 
-function friendlyGenerationError(raw: string): string {
-  const s = String(raw || '');
-  if (/insufficient balance/i.test(s)) {
-    return '生图服务商账户余额不足，请联系站长充值；您的积分已全额退回';
+function isDecimalCreditsMigrationNeeded(err: unknown): boolean {
+  const msg = extractErrorMessage(err);
+  if (/could not choose the best candidate function.*apply_credit_delta|function apply_credit_delta\(uuid, integer/i.test(msg)) {
+    return true;
   }
-  if (/invalid.*api.*key|unauthorized|401/i.test(s)) {
-    return '生图接口密钥无效或已过期，请联系站长检查配置；您的积分已全额退回';
+  return /invalid input syntax for type integer|is of type integer but expression is of type numeric|column "credits" is of type integer/i.test(
+    msg
+  );
+}
+
+function decimalCreditsSetupMessage(): string {
+  return '积分小数迁移未完成或存在旧版扣费函数冲突。请在 Supabase 再执行 migrations/20260602211000_credits_decimal_fixup.sql（含删除旧 integer 版 apply_credit_delta）';
+}
+
+function wrapGenerateError(err: unknown, context: string): ApiError {
+  if (err instanceof ApiError) return err;
+  const msg = extractErrorMessage(err);
+  console.error(`[generate] ${context}:`, msg, err);
+  if (isDecimalCreditsMigrationNeeded(err)) {
+    return new ApiError(503, 'SERVER_CONFIG', decimalCreditsSetupMessage());
+  }
+  if (/insufficient_credits/i.test(msg)) {
+    return new ApiError(402, 'INSUFFICIENT_CREDITS', '积分不足');
+  }
+  return new ApiError(502, 'GENERATION_FAILED', `${context}：${msg.slice(0, 200) || '未知错误'}`);
+}
+
+function readTaskId(meta: Record<string, unknown>): string | null {
+  if (typeof meta.upstreamTaskId === 'string') return meta.upstreamTaskId;
+  if (typeof meta.apimartTaskId === 'string') return meta.apimartTaskId;
+  return null;
+}
+
+function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boolean; debited?: boolean }): string {
+  const debited = opts?.debited !== false;
+  const refundNote = debited ? '；您的积分已全额退回' : '';
+  const s = String(raw || '');
+  if (/upstream_content_violation|violation/i.test(s)) {
+    if (opts?.violationNoRefund) {
+      return '提示词触发内容审核，该模型违规不返还积分，请调整描述后重试';
+    }
+    return `提示词可能触发内容审核，请调整描述后重试${refundNote}`;
+  }
+  if (/insufficient balance|insufficient credits/i.test(s)) {
+    return `GrsAI 服务商账户积分不足（不是您的站内积分），站长需登录 grsai.com 充值${refundNote}`;
+  }
+  if (/apikey|api.key|invalid.*api.*key|unauthorized|401/i.test(s)) {
+    return `生图 API 密钥无效（apikey error）。站长请在 server 目录执行：npx wrangler secret put IMAGE_API_KEY，填入 GrsAI 控制台里的 Key${refundNote}`;
+  }
+  if (/不存在该模型|model.*not.*exist|unknown model|invalid model/i.test(s)) {
+    return `上游返回模型相关提示（任务可能已在 GrsAI 排队，请强刷页面查看进度）${refundNote}`;
   }
   if (/content.*policy|safety|moderation|blocked|违规|敏感/i.test(s)) {
-    return '提示词可能触发内容审核，请调整描述后重试；您的积分已全额退回';
+    if (opts?.violationNoRefund) {
+      return '提示词可能触发内容审核，该模型违规不返还积分';
+    }
+    return `提示词可能触发内容审核，请调整描述后重试${refundNote}`;
   }
   if (/upstream_timeout/i.test(s)) {
-    return '生图排队超时（约 12 分钟），积分已全额退回';
+    return `生图排队超时（香蕉/即梦约 40 分钟，其它约 22 分钟）${debited ? '，积分已全额退回' : ''}；若 GrsAI 后台仍显示进行中可刷新页面尝试恢复`;
   }
   if (/upstream_no_image/i.test(s)) {
-    return '上游未返回图片，积分已全额退回，请重试';
+    return `上游未返回图片${debited ? '，积分已全额退回' : ''}，请重试`;
   }
   if (/missing_task_id/i.test(s)) {
-    return '任务提交异常，积分已全额退回，请重试';
+    return `任务提交异常${debited ? '，积分已全额退回' : ''}，请重试`;
   }
   if (/upstream_failed|upstream_submit/i.test(s)) {
-    return '上游生图失败，可缩短提示词后重试；积分已全额退回';
+    return `上游生图失败，可缩短提示词后重试${refundNote}`;
   }
-  return s || '上游生图失败，您的积分已全额退回';
+  if (/please wait|too many requests|rate limit|busy/i.test(s)) {
+    return `生图服务繁忙，请稍等片刻后重试${refundNote}`;
+  }
+  if (/GrsAI 未返回任务 ID/i.test(s)) {
+    return `上游已接单但响应格式异常，请强刷页面查看是否已在生成${refundNote}`;
+  }
+  return s ? `${s}${refundNote}` : `上游生图失败${refundNote}`;
 }
+
+function publicModelPayload(
+  settings: Awaited<ReturnType<typeof loadImageModelSettings>>,
+  tier: import('../../lib/supabase').Profile['membership_tier'],
+  memberActive: boolean
+) {
+  return listResolvedImageModels(settings, { publicList: true }).map((m) => {
+    const cost = computeImageGenerationCost(
+      settings,
+      m.id,
+      m.resolutions[0] || '1k',
+      tier,
+      memberActive
+    );
+    return {
+      id: m.id,
+      label: m.displayLabel,
+      catalogLabel: m.label,
+      description: m.description,
+      group: m.group,
+      provider: m.provider,
+      providerLabel: providerLabel(m.provider),
+      upstream: m.upstream,
+      status: m.status,
+      selectable: m.enabled,
+      statusNotice: m.statusNotice,
+      refundOnViolation: m.refundOnViolation,
+      violationNotice: m.violationNotice,
+      resolutions: m.resolutions,
+      creditsPerCall: m.effectiveBaseCredits,
+      creditsBase: cost.listPrice,
+      creditsFinal: cost.final,
+      listPrice: cost.listPrice,
+      promoPrice: cost.promoPrice,
+      appliedDiscount: cost.appliedDiscount,
+      modelDiscountPercent: cost.modelDiscountPercent,
+      modelDiscountLabel: cost.modelDiscountLabel,
+      discountLabel: cost.discountLabel
+    };
+  });
+}
+
+function modelUnavailableMessage(resolved: NonNullable<
+  ReturnType<typeof resolveImageModelConfig>
+>): string {
+  if (resolved.status === 'maintenance') {
+    return resolved.statusNotice || '该模型维护中，请稍后再试';
+  }
+  return '所选模型已下架，请换用其他模型';
+}
+
+generateRoutes.get('/models', async c => {
+  const user = c.get('user');
+  const admin = createAdminClient(c.env);
+  void syncGrsaiUpstreamStatusesFromPublicPage().catch((e) => {
+    console.warn('[generate] grsai status sync', e);
+  });
+  const settings = await loadImageModelSettings(admin);
+  const profile = await getOrCreateProfile(admin, user.id);
+  const memberActive = isMembershipActive(profile);
+  return c.json({
+    ok: true,
+    data: {
+      providers: ['grsai', 'apimart'],
+      globalDiscountPercent: settings.globalDiscountPercent,
+      models: publicModelPayload(settings, profile.membership_tier, memberActive)
+    }
+  });
+});
 
 /** 报价接口：轻量、不限流（避免生图页拖动参数时卡 20s+） */
 generateRoutes.get('/cost', async c => {
   const resolution = c.req.query('resolution') || '1k';
-  const model = c.req.query('model') || 'quanneng2';
+  const model = normalizeImageModelId(c.req.query('model') || 'gpt-image-2');
   if (!['1k', '2k', '4k'].includes(resolution)) {
     throw new ApiError(400, 'VALIDATION_ERROR', '无效的分辨率');
   }
-  if (!['quanneng2', 'jimeng'].includes(model)) {
-    throw new ApiError(400, 'VALIDATION_ERROR', '无效的模型');
-  }
   const user = c.get('user');
   const admin = createAdminClient(c.env);
+  const settings = await loadImageModelSettings(admin);
   const profile = await getOrCreateProfile(admin, user.id);
   const memberActive = isMembershipActive(profile);
-  const cost = computeGenerationCost(
-    model as ImageModelId,
-    resolution as '1k' | '2k' | '4k',
+  const resolved = resolveImageModelConfig(model, settings);
+  if (!resolved || !resolved.enabled) {
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      resolved ? modelUnavailableMessage(resolved) : '模型不可用'
+    );
+  }
+  if (resolved.resolutions.length && !resolved.resolutions.includes(resolution as '1k')) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `该模型不支持 ${resolution.toUpperCase()} 输出`);
+  }
+  const cost = computeImageGenerationCost(
+    settings,
+    model,
+    resolution,
     profile.membership_tier,
     memberActive
   );
-  return c.json({ ok: true, data: cost });
+  return c.json({
+    ok: true,
+    data: {
+      ...cost,
+      refundOnViolation: resolved.refundOnViolation,
+      violationNotice: resolved.violationNotice,
+      resolutions: resolved.resolutions
+    }
+  });
 });
 
 generateRoutes.post('/', rateLimit(600, 60_000), async c => {
@@ -93,13 +254,36 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   const admin = createAdminClient(c.env);
   let profile = await syncMembershipCredits(admin, user.id);
   const memberActive = isMembershipActive(profile);
-  const modelId = parsed.data.model as ImageModelId;
-  const { final, base, discountLabel, modelLabel } = computeGenerationCost(
-    modelId,
-    parsed.data.resolution,
-    profile.membership_tier,
-    memberActive
-  );
+  const settings = await loadImageModelSettings(admin);
+  const modelId = normalizeImageModelId(parsed.data.model);
+  const resolved = resolveImageModelConfig(modelId, settings);
+  if (!resolved || !resolved.enabled) {
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      resolved ? modelUnavailableMessage(resolved) : '所选模型不可用'
+    );
+  }
+  if (
+    resolved.resolutions.length
+    && !resolved.resolutions.includes(parsed.data.resolution)
+  ) {
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      `该模型不支持 ${parsed.data.resolution.toUpperCase()}，请切换分辨率`
+    );
+  }
+
+  const { final: rawFinal, base, discountLabel, modelLabel, refundOnViolation, violationNotice } =
+    computeImageGenerationCost(
+      settings,
+      modelId,
+      parsed.data.resolution,
+      profile.membership_tier,
+      memberActive
+    );
+  const final = roundCredits(rawFinal);
 
   const balance = spendableCredits(profile);
   if (balance < final) {
@@ -117,6 +301,16 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
         ? [parsed.data.refImageUrl]
         : [];
 
+  const upstream = upstreamBindingsFromEnv(c.env);
+  const lineProvider = resolved.provider;
+  if (hasAnyImageUpstream(upstream) && !isProviderConfigured(upstream, lineProvider)) {
+    throw new ApiError(
+      503,
+      'SERVICE_UNAVAILABLE',
+      `${providerLabel(lineProvider)} 线路未开通，请换用其他线路或联系站长配置密钥`
+    );
+  }
+
   const { data: job, error: jobErr } = await admin
     .from('generation_requests')
     .insert({
@@ -129,21 +323,43 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       status: 'processing',
       meta: {
         model: modelId,
+        upstreamModel: resolved.upstream,
         modelLabel,
+        provider: lineProvider,
         refImageUrls: refUrls,
         base,
         discountLabel,
-        size: parsed.data.size ?? null
+        size: parsed.data.size ?? null,
+        refundOnViolation,
+        violationNotice
       }
     })
     .select('id')
     .single();
 
-  if (jobErr) throw jobErr;
+  if (jobErr) {
+    throw wrapGenerateError(jobErr, '创建生图任务失败');
+  }
 
+  let upstreamTaskId: string | null = null;
+  let debited = false;
   let debitSplit = { fromDaily: 0, fromPermanent: 0 };
+
+  const baseMeta = {
+    model: modelId,
+    upstreamModel: resolved.upstream,
+    modelLabel,
+    provider: lineProvider,
+    refImageUrls: refUrls,
+    base,
+    discountLabel,
+    size: parsed.data.size ?? null,
+    refundOnViolation,
+    violationNotice
+  };
+
   try {
-    const debited = await deductUserCredits(
+    const debitedResult = await deductUserCredits(
       admin,
       user.id,
       final,
@@ -151,91 +367,88 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       job.id,
       { model: modelId, resolution: parsed.data.resolution, base, discountLabel }
     );
-    profile = debited.profile;
-    debitSplit = debited.split;
-    await admin
-      .from('generation_requests')
-      .update({
-        meta: {
-          model: modelId,
-          modelLabel,
-          refImageUrls: refUrls,
-          base,
-          discountLabel,
-          size: parsed.data.size ?? null,
-          debitSplit
-        }
-      })
-      .eq('id', job.id);
+    profile = debitedResult.profile;
+    debitSplit = debitedResult.split;
+    debited = true;
   } catch (debitErr) {
     await admin
       .from('generation_requests')
-      .update({ status: 'failed', error_message: 'debit_failed' })
+      .update({
+        status: 'failed',
+        error_message: 'debit_failed',
+        completed_at: new Date().toISOString(),
+        meta: {
+          ...baseMeta,
+          failReason: 'debit_failed',
+          submitFailedBeforeDebit: true
+        }
+      })
       .eq('id', job.id);
     if (String((debitErr as Error).message).includes('insufficient')) {
       throw new ApiError(402, 'INSUFFICIENT_CREDITS', '积分不足');
     }
-    throw debitErr;
+    throw wrapGenerateError(debitErr, '扣减积分失败');
   }
 
-  const imageApiKey = c.env.IMAGE_API_KEY;
-  let apimartTaskId: string | null = null;
-
-  if (imageApiKey) {
+  if (hasAnyImageUpstream(upstream)) {
     try {
-      apimartTaskId = await submitApimartImageJob(
-        imageApiKey,
-        c.env.IMAGE_API_BASE_URL,
-        {
-          modelId,
-          prompt: promptText,
-          resolution: parsed.data.resolution,
-          quality: parsed.data.quality,
-          size: parsed.data.size,
-          refImageUrls: refUrls
-        }
-      );
-      const { data: curJob } = await admin
-        .from('generation_requests')
-        .select('meta')
-        .eq('id', job.id)
-        .maybeSingle();
-      const curMeta = (curJob?.meta as Record<string, unknown>) || {};
+      const submitted = await submitImageJobForProvider(upstream, lineProvider, {
+        upstreamModel: resolved.upstream,
+        prompt: promptText,
+        resolution: parsed.data.resolution,
+        quality: parsed.data.quality,
+        size: parsed.data.size,
+        refImageUrls: refUrls
+      });
+      upstreamTaskId = submitted.taskId;
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : 'upstream_submit_failed';
+      if (debited) {
+        await refundUserCredits(
+          admin,
+          user.id,
+          final,
+          'image_generation_refund',
+          job.id,
+          debitSplit,
+          { reason: msg, model: modelId }
+        );
+      }
       await admin
         .from('generation_requests')
         .update({
+          status: 'failed',
+          error_message: msg,
+          completed_at: new Date().toISOString(),
           meta: {
-            ...curMeta,
-            model: modelId,
-            modelLabel,
-            refImageUrls: refUrls,
-            base,
-            discountLabel,
-            size: parsed.data.size ?? null,
-            apimartTaskId,
-            debitSplit
+            ...baseMeta,
+            failReason: msg,
+            debitSplit,
+            refunded: debited,
+            submitFailedBeforeDebit: false
           }
         })
         .eq('id', job.id);
-    } catch (e) {
-      const msg = e instanceof ApiError ? e.message : 'upstream_submit_failed';
-      await finalizeFailedJob(admin, user.id, {
-        id: job.id,
-        user_id: user.id,
-        credits_charged: final,
-        status: 'processing',
-        result_image_url: null,
-        error_message: null,
-        meta: {},
-        created_at: new Date().toISOString()
-      }, msg);
       throw new ApiError(
         502,
         'GENERATION_FAILED',
-        `生图提交失败，积分已全额退回：${friendlyGenerationError(msg)}`
+        `生图提交失败：${friendlyGenerationError(msg, { debited })}`
       );
     }
-  } else {
+  }
+
+  if (hasAnyImageUpstream(upstream) && upstreamTaskId) {
+    await admin
+      .from('generation_requests')
+      .update({
+        meta: {
+          ...baseMeta,
+          upstreamTaskId,
+          debitSplit
+        }
+      })
+      .eq('id', job.id);
+  } else if (!hasAnyImageUpstream(upstream)) {
     await admin
       .from('generation_requests')
       .update({
@@ -251,14 +464,16 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     ok: true,
     data: {
       jobId: job.id,
-      status: imageApiKey ? 'processing' : 'completed',
+      status: hasAnyImageUpstream(upstream) ? 'processing' : 'completed',
       model: modelId,
       modelLabel,
       creditsCharged: final,
       creditsRemaining: spendableCredits(updated),
       cost: { base, final, discountLabel },
+      refundOnViolation,
+      violationNotice,
       imageUrl: null,
-      demo: !imageApiKey
+      demo: !hasAnyImageUpstream(upstream)
     }
   });
 });
@@ -276,27 +491,52 @@ generateRoutes.get('/jobs', async c => {
     .limit(48);
   if (error) throw error;
 
+  const sortedRows = [...(rows || [])].sort((a, b) => {
+    const rank = (s: string) => (s === 'processing' ? 0 : s === 'failed' ? 1 : 2);
+    const ra = rank(String(a.status || ''));
+    const rb = rank(String(b.status || ''));
+    if (ra !== rb) return ra - rb;
+    return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+  });
+
   const jobs = [];
-  let listPollBudget = 3;
-  for (const job of rows || []) {
+  let bonusPollBudget = 3;
+  let failedRecoverBudget = 12;
+  for (const job of sortedRows) {
+    const meta = (job.meta as Record<string, unknown>) || {};
+    const taskId = readTaskId(meta);
+    const needsBonusSync =
+      job.status === 'completed'
+      && !!taskId
+      && (!Array.isArray(meta.extraImageUrls) || meta.extraImageUrls.length === 0);
     let status = job.status as string;
     let imageUrl = job.result_image_url as string | null;
-    if (job.status === 'processing' && listPollBudget > 0) {
-      listPollBudget -= 1;
+    let extraFromMeta = Array.isArray(meta.extraImageUrls)
+      ? (meta.extraImageUrls as string[]).filter((u) => typeof u === 'string' && u)
+      : undefined;
+    const failedUpstreamRecoverable =
+      job.status === 'failed'
+      && !!taskId
+      && failedRecoverBudget > 0;
+    const shouldPoll =
+      job.status === 'processing'
+      || failedUpstreamRecoverable
+      || (needsBonusSync && bonusPollBudget > 0);
+    if (failedUpstreamRecoverable) failedRecoverBudget -= 1;
+    if (shouldPoll) {
+      if (needsBonusSync && job.status === 'completed') bonusPollBudget -= 1;
       const polled = await pollAndUpdateJob(
         admin,
         user.id,
         job,
-        c.env.IMAGE_API_KEY || '',
-        c.env.IMAGE_API_BASE_URL
+        upstreamBindingsFromEnv(c.env)
       );
       status = polled.status;
       imageUrl = polled.imageUrl;
+      if (polled.extraImageUrls?.length) {
+        extraFromMeta = polled.extraImageUrls;
+      }
     }
-    const meta = (job.meta as Record<string, unknown>) || {};
-    const extraFromMeta = Array.isArray(meta.extraImageUrls)
-      ? (meta.extraImageUrls as string[]).filter((u) => typeof u === 'string' && u)
-      : undefined;
     jobs.push({
       id: job.id,
       prompt: job.prompt,
@@ -337,12 +577,26 @@ generateRoutes.get('/jobs/:jobId', async c => {
     admin,
     user.id,
     job,
-    c.env.IMAGE_API_KEY || '',
-    c.env.IMAGE_API_BASE_URL
+    upstreamBindingsFromEnv(c.env)
   );
 
+  const { data: freshJob } = await admin
+    .from('generation_requests')
+    .select('*')
+    .eq('id', jobId)
+    .maybeSingle();
+  const liveJob = freshJob || job;
+  const liveMeta = (liveJob.meta as Record<string, unknown>) || {};
+  const liveImageUrl =
+    polled.imageUrl || (liveJob.result_image_url as string | null) || null;
+  const liveStatus =
+    polled.status === 'processing' && liveJob.status === 'completed'
+      ? 'completed'
+      : polled.status;
+
   const profile = await syncMembershipCredits(admin, user.id);
-  const meta = (job.meta as Record<string, unknown>) || {};
+  const meta = liveMeta;
+  const violationNoRefund = meta.refundOnViolation === false;
 
   if (polled.status === 'failed') {
     return c.json({
@@ -354,12 +608,14 @@ generateRoutes.get('/jobs/:jobId', async c => {
         errorMessage: polled.errorMessage,
         creditsRemaining: spendableCredits(profile),
         refunded: polled.refunded,
-        message: friendlyGenerationError(String(polled.errorMessage || ''))
+        message: friendlyGenerationError(String(polled.errorMessage || ''), {
+          violationNoRefund: violationNoRefund && polled.refunded === false
+        })
       }
     });
   }
 
-  const updatedMeta = (job.meta as Record<string, unknown>) || meta;
+  const updatedMeta = liveMeta;
   const extraImageUrls =
     polled.extraImageUrls
     || (Array.isArray(updatedMeta.extraImageUrls) ? (updatedMeta.extraImageUrls as string[]) : undefined);
@@ -368,8 +624,8 @@ generateRoutes.get('/jobs/:jobId', async c => {
     ok: true,
     data: {
       jobId: job.id,
-      status: polled.status,
-      imageUrl: polled.imageUrl,
+      status: liveStatus,
+      imageUrl: liveImageUrl,
       extraImageUrls: extraImageUrls?.length ? extraImageUrls : undefined,
       creditsRemaining: spendableCredits(profile),
       model: meta.model,
@@ -377,4 +633,3 @@ generateRoutes.get('/jobs/:jobId', async c => {
     }
   });
 });
-

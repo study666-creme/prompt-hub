@@ -14,7 +14,7 @@
 | **卡片库** | 提示词卡片、分组、Masonry；登录后同步 `user_data` |
 | **提示词社区** | 全站 Feed（`community_posts` + API） |
 | **我的主页** | 发布作品、关注/粉丝、拥有的/发布的资产包 |
-| **图片生成** | 扣积分；`POST /api/v1/generate`；上游 APImart |
+| **图片生成** | 扣积分；`POST /api/v1/generate`；上游 **GrsAI** |
 | **资产包** | 领取存入「拥有」、封面预览、选择性导入、大图下载 |
 | **资产创作** | `asset-studio.html` · 左图右文档悬浮详情 + 字段设置 |
 
@@ -22,38 +22,35 @@
 
 ---
 
-## 当前部署阶段（2026-06-02）
+## 当前部署阶段（2026-06-03）
 
 | 项 | 状态 |
 |----|------|
 | Worker | `prompt-hub-api` · API https://api.prompt-hub.cn |
-| Pages | https://prompt-hub-hub（自定义域 prompt-hub.cn） |
-| 构建号 | **20260602x** · SW `prompt-hub-v374` |
-| **已打通** | 社区 feed / 生图 / 兑换；资产包预览·选择性导入·大图下载；PWA 添主屏引导 |
-| **近期修复** | 卡片库缩略图误隐藏与加载失败删图区；资产包 UI 与编辑弹窗勾选样式；社区通知红点 |
+| Pages | https://prompt-hub.cn · 构建 `20260603g` |
+| **已打通** | 社区 feed / 兑换；资产包；PWA；GrsAI 生图；生图价展示含「92折·原价6」；生图画风「2.5D国漫写实」；卡片库排序「随机」 |
+| **生图 Key** | Worker `IMAGE_API_KEY` + `IMAGE_API_BASE_URL=https://grsai.dakka.com.cn` |
+| **视觉 Key** | `APIMART_API_KEY` + `APIMART_API_BASE_URL=https://api.apimart.ai`（反推/裂变/社区配图审核） |
 
 ### 已知问题
 
-- 管理「自己发布的包」→ **我的主页 → 发布的资产包**（他人包在「拥有的资产包」无编辑入口）
-- Storage 404 仍可能导致部分社区帖无图
-- 卡片库 400+ 张时首屏缩略图需数秒陆续加载，属正常
+- **Apimart 账单看不到 Gemini**：生图账单与 Chat/LLM 分开；单次配图审核约 <0.001 元；历史批量同步曾跳过视觉审核（新帖已改为走 Gemini）
+- **GrsAI 后台 gemini -1**：误打到 GrsAI 账户的老路径（反推/误配 base），不是用户站内积分
 
 ### 下一步
 
-1. 强刷后 `window.__APP_BUILD__` 应为 **20260602x**
-2. 卡片库：缩略图应陆续出现，不应长期只有文字
-3. 资产包：拥有的包 → 展开文件夹 → 点图下载；「选择性导入」勾选单张
+1. 强刷 `20260603g`：生图灵感/裂变画风选「2.5D国漫写实」；卡片库排序菜单选「随机」
+2. Cloudflare Worker 确认 `APIMART_API_BASE_URL=https://api.apimart.ai`（勿填 GrsAI）
+3. Apimart 控制台查 **Chat/LLM** 分类（非 Image）是否有 `gemini-2.5-flash-lite` 记录
 
 ### 部署
 
 ```powershell
-cd d:\prompt-hub
-.\deploy-pages.ps1
-cd server
+cd d:\prompt-hub\server
 npx wrangler deploy
+cd ..
+.\deploy-pages.ps1
 ```
-
-强刷：**Ctrl+Shift+R**；确认 `window.__APP_BUILD__` 与左下角一致。
 
 ### 测试账号
 

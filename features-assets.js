@@ -1400,10 +1400,11 @@
 
   function collectCardTags(cards) {
     const set = new Set();
+    const collectTag = window.COMMUNITY_COLLECT_TAG || '社区收藏';
     cards.forEach((c) => {
       (Array.isArray(c.tags) ? c.tags : []).forEach((t) => {
         const s = String(t || '').trim();
-        if (s) set.add(s);
+        if (s && s !== collectTag) set.add(s);
       });
     });
     return [...set].sort((a, b) => a.localeCompare(b, 'zh-CN'));

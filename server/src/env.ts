@@ -4,9 +4,12 @@ export type Env = {
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   SUPABASE_JWT_SECRET?: string;
-  /** 生图上游（APIMart 等） */
+  /** 生图上游（GrsAI 等，国内默认 grsai.dakka.com.cn） */
   IMAGE_API_KEY?: string;
   IMAGE_API_BASE_URL?: string;
+  /** 生图备用上游 Apimart（GrsAI 提交失败时自动切换） */
+  APIMART_API_KEY?: string;
+  APIMART_API_BASE_URL?: string;
   /** 对话上游（DeepSeek 官方等，与生图密钥分离） */
   CHAT_API_KEY?: string;
   CHAT_API_BASE_URL?: string;

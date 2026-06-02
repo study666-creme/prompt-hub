@@ -1,8 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { confirmApimartTaskOutcome, fetchApimartTaskOnce } from './apimart';
+import {
+  confirmUpstreamTaskOutcome,
+  fetchUpstreamTaskOnce,
+  readJobProvider,
+  type ImageUpstreamBindings
+} from './image-upstream';
 import { ApiError } from './errors';
 import { archiveRemoteImage, isStorageRef } from './image-archive';
-import { type DebitSplit, refundUserCredits } from './membership-credits';
+import { type DebitSplit, deductUserCredits, refundUserCredits } from './membership-credits';
 
 type JobRow = {
   id: string;
@@ -57,7 +62,8 @@ export async function finalizeFailedJob(
   admin: SupabaseClient,
   userId: string,
   job: JobRow,
-  errorMessage: string
+  errorMessage: string,
+  opts?: { skipRefund?: boolean }
 ): Promise<void> {
   await admin
     .from('generation_requests')
@@ -69,15 +75,16 @@ export async function finalizeFailedJob(
     })
     .eq('id', job.id);
 
-  await refundGenerationCredits(admin, userId, job.id, job.credits_charged);
+  if (!opts?.skipRefund) {
+    await refundGenerationCredits(admin, userId, job.id, job.credits_charged);
+  }
 }
 
 export async function pollAndUpdateJob(
   admin: SupabaseClient,
   userId: string,
   job: JobRow,
-  imageApiKey: string,
-  imageApiBaseUrl: string | undefined
+  upstream: ImageUpstreamBindings
 ): Promise<{
   status: 'processing' | 'completed' | 'failed';
   imageUrl: string | null;
@@ -85,27 +92,52 @@ export async function pollAndUpdateJob(
   refunded: boolean;
   extraImageUrls?: string[];
 }> {
+  job = (await tryRecoverDebitFailedJob(admin, userId, job)) || job;
   const meta = (job.meta as Record<string, unknown>) || {};
-  const taskId = typeof meta.apimartTaskId === 'string' ? meta.apimartTaskId : null;
+  const taskId =
+    typeof meta.upstreamTaskId === 'string'
+      ? meta.upstreamTaskId
+      : typeof meta.apimartTaskId === 'string'
+        ? meta.apimartTaskId
+        : null;
+  const refundOnViolation = meta.refundOnViolation !== false;
+  const provider = readJobProvider(meta);
 
   if (job.status === 'completed') {
     const archived = await ensureJobImageArchived(admin, userId, job);
+    let extraImageUrls: string[] | undefined;
+    if (taskId && provider === 'grsai' && upstream.grsaiKey) {
+      try {
+        extraImageUrls = await syncExtraImagesFromUpstream(
+          admin,
+          job,
+          upstream,
+          taskId
+        );
+      } catch (e) {
+        console.warn('[generation] sync extras failed', job.id, e);
+      }
+    }
+    if (!extraImageUrls?.length && Array.isArray(meta.extraImageUrls)) {
+      extraImageUrls = (meta.extraImageUrls as string[]).filter((u) => typeof u === 'string' && u);
+    }
     return {
       status: 'completed',
       imageUrl: archived,
       errorMessage: null,
-      refunded: !!(job.meta as Record<string, unknown>)?.refunded
+      refunded: !!meta.refunded,
+      extraImageUrls: extraImageUrls?.length ? extraImageUrls : undefined
     };
   }
   if (job.status === 'failed') {
-    if (taskId && imageApiKey) {
+    if (taskId && (upstream.grsaiKey || upstream.apimartKey)) {
       const recovered = await tryRecoverJobFromUpstream(
         admin,
         userId,
         job,
-        imageApiKey,
-        imageApiBaseUrl,
-        taskId
+        upstream,
+        taskId,
+        provider
       );
       if (recovered) return recovered;
     }
@@ -118,9 +150,12 @@ export async function pollAndUpdateJob(
   }
 
   const createdMs = new Date(job.created_at).getTime();
-  const staleMs = 18 * 60 * 1000;
+  const upstreamModel = String(meta.upstreamModel || meta.model || '').toLowerCase();
+  const slowUpstream =
+    upstreamModel.includes('nano-banana') || upstreamModel.includes('jimeng');
+  const staleMs = slowUpstream ? 40 * 60 * 1000 : 22 * 60 * 1000;
 
-  if (!imageApiKey) {
+  if (!upstream.grsaiKey && !upstream.apimartKey) {
     await admin
       .from('generation_requests')
       .update({
@@ -142,9 +177,9 @@ export async function pollAndUpdateJob(
   }
 
   if (Date.now() - createdMs > staleMs) {
-    const late = await confirmApimartTaskOutcome(imageApiKey, imageApiBaseUrl, taskId, {
-      attempts: 5,
-      intervalMs: 8000
+    const late = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
+      attempts: slowUpstream ? 8 : 5,
+      intervalMs: slowUpstream ? 12000 : 8000
     });
     if (late.status === 'completed' && late.imageUrl) {
       return completeJobFromPoll(admin, userId, job, late);
@@ -158,14 +193,25 @@ export async function pollAndUpdateJob(
     };
   }
 
-  const polled = await fetchApimartTaskOnce(imageApiKey, imageApiBaseUrl, taskId);
+  const polled = await fetchUpstreamTaskOnce(upstream, provider, taskId);
 
   if (polled.status === 'completed' && polled.imageUrl) {
     return completeJobFromPoll(admin, userId, job, polled);
   }
 
   if (polled.status === 'failed') {
-    const confirmed = await confirmApimartTaskOutcome(imageApiKey, imageApiBaseUrl, taskId, {
+    if (polled.isViolation) {
+      const msg = polled.errorMessage || 'upstream_content_violation';
+      const skipRefund = refundOnViolation === false;
+      await finalizeFailedJob(admin, userId, job, msg, { skipRefund });
+      return {
+        status: 'failed',
+        imageUrl: null,
+        errorMessage: msg,
+        refunded: !skipRefund
+      };
+    }
+    const confirmed = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
       attempts: 8,
       intervalMs: 5000
     });
@@ -173,11 +219,42 @@ export async function pollAndUpdateJob(
       return completeJobFromPoll(admin, userId, job, confirmed);
     }
     const msg = confirmed.errorMessage || polled.errorMessage || 'upstream_failed';
-    await finalizeFailedJob(admin, userId, job, msg);
-    return { status: 'failed', imageUrl: null, errorMessage: msg, refunded: true };
+    const skipRefund = confirmed.isViolation === true && refundOnViolation === false;
+    await finalizeFailedJob(admin, userId, job, msg, { skipRefund });
+    return {
+      status: 'failed',
+      imageUrl: null,
+      errorMessage: msg,
+      refunded: !skipRefund
+    };
   }
 
   return { status: 'processing', imageUrl: null, errorMessage: null, refunded: false };
+}
+
+async function syncExtraImagesFromUpstream(
+  admin: SupabaseClient,
+  job: JobRow,
+  upstream: ImageUpstreamBindings,
+  taskId: string
+): Promise<string[]> {
+  const meta = (job.meta as Record<string, unknown>) || {};
+  const existing = Array.isArray(meta.extraImageUrls)
+    ? (meta.extraImageUrls as string[]).filter((u) => typeof u === 'string' && u)
+    : [];
+  if (!upstream.grsaiKey) return existing;
+  const fresh = await fetchUpstreamTaskOnce(upstream, 'grsai', taskId);
+  const all = fresh.imageUrls.filter(Boolean);
+  if (all.length <= 1) return existing;
+  const extras = all.slice(1);
+  const changed =
+    extras.length !== existing.length || extras.some((u, i) => u !== existing[i]);
+  if (!changed) return existing;
+  await admin
+    .from('generation_requests')
+    .update({ meta: { ...meta, extraImageUrls: extras } })
+    .eq('id', job.id);
+  return extras;
 }
 
 async function completeJobFromPoll(
@@ -192,8 +269,13 @@ async function completeJobFromPoll(
   refunded: boolean;
   extraImageUrls?: string[];
 }> {
-  const primary = polled.imageUrl!;
-  const extras = (polled.imageUrls || []).filter((u) => u && u !== primary);
+  const allUrls = polled.imageUrls?.length
+    ? polled.imageUrls
+    : polled.imageUrl
+      ? [polled.imageUrl]
+      : [];
+  const primary = allUrls[0] || polled.imageUrl!;
+  const extras = allUrls.slice(1).filter(Boolean);
   const storedUrl = await ensureJobImageArchived(admin, userId, {
     ...job,
     status: 'completed',
@@ -223,13 +305,81 @@ async function completeJobFromPoll(
   };
 }
 
+function isDebitRecoveryCandidate(job: JobRow): boolean {
+  if (job.status !== 'failed') return false;
+  const meta = (job.meta as Record<string, unknown>) || {};
+  if (meta.debitSplit) return false;
+  if (job.error_message === 'debit_failed') return true;
+  return /积分小数|apply_credit_delta|扣费函数|SERVER_CONFIG|debit_failed/i.test(
+    String(job.error_message || '')
+  );
+}
+
+async function tryRecoverDebitFailedJob(
+  admin: SupabaseClient,
+  userId: string,
+  job: JobRow
+): Promise<JobRow | null> {
+  if (!isDebitRecoveryCandidate(job)) return null;
+  const meta = (job.meta as Record<string, unknown>) || {};
+  const attempts = Number(meta.debitRecoveryAttempts) || 0;
+  if (attempts >= 3) return null;
+  const taskId =
+    typeof meta.upstreamTaskId === 'string'
+      ? meta.upstreamTaskId
+      : typeof meta.apimartTaskId === 'string'
+        ? meta.apimartTaskId
+        : null;
+  if (!taskId && job.error_message !== 'debit_failed') return null;
+
+  try {
+    const amount = Number(job.credits_charged) || 0;
+    const debitedResult = await deductUserCredits(
+      admin,
+      userId,
+      amount,
+      'image_generation',
+      job.id,
+      { recovered: true, model: meta.model }
+    );
+    const nextMeta = {
+      ...meta,
+      debitSplit: debitedResult.split,
+      debitRecovered: true,
+      failReason: undefined
+    };
+    const { data, error } = await admin
+      .from('generation_requests')
+      .update({
+        status: 'processing',
+        error_message: null,
+        completed_at: null,
+        meta: nextMeta
+      })
+      .eq('id', job.id)
+      .select('*')
+      .single();
+    if (error || !data) return null;
+    return data as JobRow;
+  } catch (e) {
+    console.warn('[generation] debit_failed recovery skipped', job.id, e);
+    await admin
+      .from('generation_requests')
+      .update({
+        meta: { ...meta, debitRecoveryAttempts: attempts + 1 }
+      })
+      .eq('id', job.id);
+    return null;
+  }
+}
+
 async function tryRecoverJobFromUpstream(
   admin: SupabaseClient,
   userId: string,
   job: JobRow,
-  imageApiKey: string,
-  imageApiBaseUrl: string | undefined,
-  taskId: string
+  upstream: ImageUpstreamBindings,
+  taskId: string,
+  provider: ReturnType<typeof readJobProvider>
 ): Promise<{
   status: 'completed' | 'failed';
   imageUrl: string | null;
@@ -237,9 +387,9 @@ async function tryRecoverJobFromUpstream(
   refunded: boolean;
   extraImageUrls?: string[];
 } | null> {
-  const polled = await confirmApimartTaskOutcome(imageApiKey, imageApiBaseUrl, taskId, {
-    attempts: 3,
-    intervalMs: 6000
+  const polled = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
+    attempts: 10,
+    intervalMs: 8000
   });
   if (polled.status !== 'completed' || !polled.imageUrl) return null;
   const meta = (job.meta as Record<string, unknown>) || {};

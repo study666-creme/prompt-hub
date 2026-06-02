@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Profile } from './supabase';
 import { getOrCreateProfile, isMembershipActive } from './supabase';
+import { roundCredits } from './credit-math';
 
 export type CreditGrantMode = 'daily' | 'bundle';
 
@@ -43,8 +44,8 @@ export function chinaDateKey(d = new Date()): string {
 
 export function spendableCredits(profile: Profile): number {
   const daily =
-    profile.daily_credits_date === chinaDateKey() ? profile.daily_credits : 0;
-  return profile.credits + daily;
+    profile.daily_credits_date === chinaDateKey() ? Number(profile.daily_credits) || 0 : 0;
+  return Number(profile.credits) + daily;
 }
 
 /** 任务中心每日 5 积分：写入当日有效额度（可与会员日积分叠加取较大值） */
@@ -189,6 +190,7 @@ export async function deductUserCredits(
   refId: string,
   meta: Record<string, unknown> = {}
 ): Promise<{ profile: Profile; split: DebitSplit }> {
+  amount = roundCredits(amount);
   if (amount <= 0) {
     const profile = await syncMembershipCredits(admin, userId);
     return { profile, split: { fromDaily: 0, fromPermanent: 0 } };
@@ -202,8 +204,11 @@ export async function deductUserCredits(
 
   let left = amount;
   let fromDaily = 0;
+  const today = chinaDateKey();
+  const prevDaily = profile.daily_credits;
+  const prevDailyDate = profile.daily_credits_date;
 
-  if (profile.daily_credits_date === chinaDateKey() && profile.daily_credits > 0 && left > 0) {
+  if (profile.daily_credits_date === today && profile.daily_credits > 0 && left > 0) {
     fromDaily = Math.min(profile.daily_credits, left);
     left -= fromDaily;
     const { data, error } = await admin
@@ -224,7 +229,18 @@ export async function deductUserCredits(
       p_ref_id: refId,
       p_meta: { ...meta, fromDaily, fromPermanent: left }
     });
-    if (error) throw error;
+    if (error) {
+      if (fromDaily > 0) {
+        await admin
+          .from('profiles')
+          .update({
+            daily_credits: prevDaily,
+            daily_credits_date: prevDailyDate
+          })
+          .eq('user_id', userId);
+      }
+      throw error;
+    }
     profile = await getOrCreateProfile(admin, userId);
   }
 

@@ -1,5 +1,6 @@
 import type { Profile } from './supabase';
-import { MIN_GENERATION_CHARGE } from './pricing';
+import { applyMemberCreditDiscount, MIN_CREDIT_CHARGE } from './credit-math';
+import { membershipGenDiscountLabel, membershipGenMultiplier } from './supabase';
 
 export const CHAT_MODELS = {
   'deepseek-v4-flash': {
@@ -29,29 +30,21 @@ export function resolveChatModel(model?: string): (typeof CHAT_MODELS)[ChatModel
   return CHAT_MODELS['deepseek-v4-flash'];
 }
 
-/** 方案 A：9折全部 · 8折仅 Flash · 7折仅 Flash 思考模式 */
+/** 与生图一致：基础 95 折 · 标准 9 折 · 专业 85 折 */
 export function chatDiscountMultiplier(
   tier: Profile['membership_tier'],
   memberActive: boolean,
-  modelTier: 'flash' | 'pro',
-  thinking: boolean
+  _modelTier: 'flash' | 'pro',
+  _thinking: boolean
 ): { mult: number; discountLabel: string | null } {
   if (!memberActive || !tier || tier === 'lite') {
     return { mult: 1, discountLabel: null };
   }
-  if (tier === 'basic') {
-    return { mult: 0.9, discountLabel: '9折' };
-  }
-  if (tier === 'standard') {
-    if (modelTier === 'flash') return { mult: 0.8, discountLabel: '8折' };
-    return { mult: 1, discountLabel: null };
-  }
-  if (tier === 'pro') {
-    if (modelTier === 'flash' && thinking) return { mult: 0.7, discountLabel: '7折' };
-    if (modelTier === 'flash') return { mult: 0.8, discountLabel: '8折' };
-    return { mult: 1, discountLabel: null };
-  }
-  return { mult: 1, discountLabel: null };
+  const mult = membershipGenMultiplier(tier);
+  return {
+    mult,
+    discountLabel: mult < 1 ? membershipGenDiscountLabel(tier) : null
+  };
 }
 
 export function estimateTokensFromText(text: string): number {
@@ -85,15 +78,14 @@ export function computeChatCostFromTokens(
   const outputRate = thinking ? rates.outputThinking : rates.output;
   const baseRaw =
     (inputTokens / 1_000_000) * rates.input + (outputTokens / 1_000_000) * outputRate;
-  const base = Math.max(MIN_GENERATION_CHARGE, Math.ceil(baseRaw));
+  const base = Math.max(MIN_CREDIT_CHARGE, Math.ceil(baseRaw));
   const { mult, discountLabel } = chatDiscountMultiplier(
     tier,
     memberActive,
     model.tier,
     thinking
   );
-  const final =
-    mult < 1 ? Math.max(MIN_GENERATION_CHARGE, Math.floor(base * mult)) : base;
+  const final = applyMemberCreditDiscount(base, mult);
   return {
     base,
     final,

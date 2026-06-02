@@ -38,7 +38,31 @@
       || undefined;
   }
 
+  function warehouseCollectResolveOpts(img) {
+    const card = img.closest('.card[data-id]');
+    if (!card?.closest?.('#cardsContainer') || card.dataset.communityCollect !== '1') return null;
+    const cardId = card.dataset.id;
+    const fromCard = cardId && window.getCommunityCollectImageResolveOpts
+      ? window.getCommunityCollectImageResolveOpts(
+        (window.__promptHubCards || []).find((c) => c.id === cardId)
+      )
+      : null;
+    if (fromCard) return fromCard;
+    const authorId = card.dataset.authorId || img.dataset.authorId || '';
+    if (!authorId) return null;
+    return {
+      communityFeed: true,
+      authorId,
+      assetId: card.dataset.sourceCardId || img.dataset.sourceCardId || cardId,
+      cardId: card.dataset.sourceCardId || img.dataset.sourceCardId || undefined,
+      tryAllPaths: true,
+      variant: 'full'
+    };
+  }
+
   function communityResolveOpts(img) {
+    const collect = warehouseCollectResolveOpts(img);
+    if (collect) return collect;
     const inFeed = !!img.closest('#communityGrid, #creationsGrid, #userProfileGrid, #communitySideBody, #creationsSideBody, .community-side-img-btn');
     if (!inFeed) return {};
     const authorId = img.dataset?.authorId || img.closest('.card')?.dataset?.authorId || '';
@@ -97,6 +121,7 @@
   async function resolveUrl(ref, cardId, extraOpts, img) {
     const inWarehouse = !!img?.closest?.('#cardsContainer');
     const inCommunity = isCommunityImg(img);
+    const collect = inWarehouse ? warehouseCollectResolveOpts(img) : null;
     const hit = cachedUrl(ref, cardId, img);
     if (isReadySrc(hit, img)) return hit;
     if (extraOpts?.skip) return '';
@@ -106,6 +131,7 @@
         assetId: cardId,
         variant: inWarehouse || inCommunity ? 'full' : 'grid',
         tryAllPaths: inWarehouse || inCommunity || extraOpts?.tryAllPaths === true || extraOpts?.communityFeed === true,
+        ...(collect || {}),
         ...(extraOpts || {})
       });
       return isReadySrc(url, img) ? url : '';

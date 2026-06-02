@@ -670,6 +670,7 @@
   }
 
   async function signPathViaApi(path, variant, opts) {
+    if (!storagePathOwnedByCurrentUser(path)) return null;
     if (!apiSignAllowed(opts)) return null;
     const fileKey = String(path || '').replace(/^\//, '');
     const v = variant || VARIANT_GRID;
@@ -726,6 +727,7 @@
     const v = variant || VARIANT_GRID;
     const pending = [...new Set((paths || []).map((p) => String(p || '').replace(/^\//, '')).filter(Boolean))].filter((p) => {
       if (isPathKnownMissing(p)) return false;
+      if (!storagePathOwnedByCurrentUser(p)) return false;
       const cached = signedUrlCache.get(signedCacheKey(p, v));
       return !(cached?.url && cached.expiresAt > Date.now() + 120000);
     });
@@ -789,6 +791,8 @@
       }
     }
     if (isPathKnownMissing(fileKey)) return null;
+    if (communityFeed) return null;
+    if (!storagePathOwnedByCurrentUser(path)) return null;
     if (!apiSignAllowed(opts)) return null;
     return signPathViaApi(path, v, opts);
   }
@@ -1043,11 +1047,52 @@
     return prefetchCommunityDisplayUrlsLegacy(list, capMs);
   }
 
+  function collectPrefetchItemForRef(ref) {
+    if (!ref) return null;
+    const cards = window.__promptHubCards || [];
+    const norm = normalizeImageRef(ref);
+    const card = cards.find((c) => {
+      if (!c?.image) return false;
+      const ci = normalizeImageRef(c.image);
+      return ci === norm || c.image === ref;
+    });
+    const collect = card && typeof window.getCommunityCollectImageResolveOpts === 'function'
+      ? window.getCommunityCollectImageResolveOpts(card)
+      : null;
+    if (!collect?.authorId) return null;
+    return {
+      ref,
+      authorId: collect.authorId,
+      cardId: collect.cardId || collect.assetId || undefined
+    };
+  }
+
   async function prefetchDisplayUrls(images) {
     if (!isLoggedIn()) return;
-    const paths = [...new Set(
-      (images || []).map(storagePathFromRef).filter(Boolean).map(p => p.replace(/^\//, ''))
-    )];
+    const communityBatch = [];
+    const seenCommunity = new Set();
+    const ownedPaths = [];
+    for (const raw of images || []) {
+      const ref = typeof raw === 'string' ? raw : (raw?.image || raw?.ref || '');
+      if (!ref) continue;
+      const path = storagePathFromRef(ref);
+      if (!path) continue;
+      const key = path.replace(/^\//, '');
+      if (storagePathOwnedByCurrentUser(path)) {
+        ownedPaths.push(key);
+        continue;
+      }
+      const item = collectPrefetchItemForRef(ref);
+      if (!item) continue;
+      const ck = `${item.ref}|${item.authorId}|${item.cardId || ''}`;
+      if (seenCommunity.has(ck)) continue;
+      seenCommunity.add(ck);
+      communityBatch.push(item);
+    }
+    if (communityBatch.length) {
+      await prefetchCommunityDisplayUrls(communityBatch, 5000);
+    }
+    const paths = [...new Set(ownedPaths)];
     if (!paths.length) return;
     const pending = paths.filter(p => {
       if (isPathKnownMissing(p)) return false;
@@ -1066,6 +1111,7 @@
       const batch = still.slice(i, i + GRID_SIGN_CONCURRENCY);
       await Promise.all(
         batch.map(async (p) => {
+          if (!storagePathOwnedByCurrentUser(p)) return;
           if (apiSignAllowed({})) {
             const url = await signPathViaApi(p, VARIANT_GRID, {});
             if (url) return;
@@ -1119,19 +1165,40 @@
   /** 按卡片 id 收集 canonical 路径，一次 batch 签名（避免列表每张图多次试探） */
   async function prefetchCardsImages(cards, capMs) {
     if (!isLoggedIn()) return;
+    const limit = capMs != null ? Math.min(Math.max(800, capMs), 8000) : 2800;
     const pathSet = new Set();
+    const communityBatch = [];
+    const seenCommunity = new Set();
     const list = (cards || []).slice(0, WAREHOUSE_PREFETCH_CARD_CAP);
     for (const c of list) {
       if (!c?.image) continue;
+      const collectOpts = typeof window.getCommunityCollectImageResolveOpts === 'function'
+        ? window.getCommunityCollectImageResolveOpts(c)
+        : null;
+      if (collectOpts?.authorId) {
+        const ck = `${c.image}|${collectOpts.authorId}|${collectOpts.cardId || collectOpts.assetId || ''}`;
+        if (!seenCommunity.has(ck)) {
+          seenCommunity.add(ck);
+          communityBatch.push({
+            ref: c.image,
+            authorId: collectOpts.authorId,
+            cardId: collectOpts.cardId || collectOpts.assetId
+          });
+        }
+        continue;
+      }
       const p = primaryImagePath(c.image, c.id);
       if (!p || isPathKnownMissing(p)) continue;
-      if (!isPathKnownMissing(p)) pathSet.add(p);
+      if (!storagePathOwnedByCurrentUser(p)) continue;
+      pathSet.add(p.replace(/^\//, ''));
       const grid = gridPathFromPrimary(p);
-      if (grid && !isPathKnownMissing(grid)) pathSet.add(grid);
+      if (grid && !isPathKnownMissing(grid)) pathSet.add(grid.replace(/^\//, ''));
+    }
+    if (communityBatch.length) {
+      await prefetchCommunityDisplayUrls(communityBatch, limit);
     }
     if (!pathSet.size) return;
     const refs = [...pathSet].map((p) => toStorageRef(p));
-    const limit = capMs != null ? Math.min(Math.max(800, capMs), 8000) : 2800;
     await prefetchDisplayUrlsWithCap(refs, limit);
   }
 
@@ -1322,7 +1389,7 @@
         || img.closest('.card[data-creation-id]')?.dataset?.creationId
         || img.closest('[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '')
         || undefined;
-      const resolveOpts = {
+      let resolveOpts = {
         assetId,
         authorId: authorId || undefined,
         cardId: assetId,
@@ -1330,6 +1397,11 @@
         communityFeed,
         tryAllPaths: inWarehouse || communityFeed
       };
+      if (inWarehouse && assetId && typeof window.getCommunityCollectImageResolveOpts === 'function') {
+        const cardModel = (window.__promptHubCards || []).find((c) => c.id === assetId);
+        const collectOpts = window.getCommunityCollectImageResolveOpts(cardModel);
+        if (collectOpts) resolveOpts = { ...resolveOpts, ...collectOpts };
+      }
       const cached = communityFeed ? '' : getCachedDisplayUrl(ref, { assetId, variant: VARIANT_GRID });
       if (cached && isResolvableDisplayUrl(cached)) {
         const mediaWrapCached = media || img.closest('.community-side-img-btn');
@@ -1928,7 +2000,24 @@
 
   function formatAuthError(err) {
     if (!err) return '操作失败';
-    const msg = String(err.message || err.error_description || err.msg || '').toLowerCase();
+    if (typeof err === 'string') {
+      const s = err.trim();
+      return s && s !== '{}' ? s : '操作失败，请稍后重试';
+    }
+    const status = Number(err.status ?? err.statusCode ?? err.code);
+    if (status === 503 || status === 502 || status === 504) {
+      return '登录服务暂时繁忙（Supabase 认证），请 30～60 秒后再试；多人同时登录时较常见，不是网站被黑';
+    }
+    if (status === 429) {
+      return '登录尝试过于频繁，请 1 分钟后再试';
+    }
+    const rawMsg = String(
+      err.message || err.error_description || err.msg || err.error || ''
+    ).trim();
+    const msg = rawMsg.toLowerCase();
+    if (/503|502|504|service unavailable|temporarily unavailable|overloaded/.test(msg)) {
+      return '登录服务暂时不可用，请稍后再试（多为 Supabase 短时繁忙）';
+    }
     if (/invalid login|invalid credentials|invalid email or password/.test(msg)) {
       return '邮箱或密码错误，请检查后重试';
     }
@@ -1960,7 +2049,13 @@
       }
       if (/invalid phone/.test(msg)) return '手机号格式不正确';
     }
-    return err.message || '操作失败，请稍后重试';
+    if (rawMsg && rawMsg !== '{}' && rawMsg !== '[object Object]') {
+      return rawMsg;
+    }
+    if (Number.isFinite(status) && status >= 400) {
+      return `登录失败（服务返回 ${status}），请稍后重试`;
+    }
+    return '操作失败，请稍后重试';
   }
 
   function normalizePhone(raw) {

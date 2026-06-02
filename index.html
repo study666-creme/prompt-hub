@@ -4,29 +4,39 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260602x';
+    window.__APP_BUILD__ = '20260603h';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
       var prev = localStorage.getItem(key);
+      function purgeCachesAndSw() {
+        var tasks = [];
+        if ('caches' in window) {
+          tasks.push(caches.keys().then(function (keys) {
+            return Promise.all(keys.map(function (k) {
+              if (/prompt-hub-v/i.test(k)) return caches.delete(k);
+            }));
+          }));
+        }
+        if ('serviceWorker' in navigator) {
+          tasks.push(navigator.serviceWorker.getRegistrations().then(function (regs) {
+            return Promise.all(regs.map(function (r) { return r.unregister(); }));
+          }));
+        }
+        return Promise.all(tasks);
+      }
       if (prev && prev !== cur) {
         localStorage.setItem(key, cur);
         var onceKey = 'promptrepo_build_reload_once_' + cur;
         if (sessionStorage.getItem(onceKey)) return;
         sessionStorage.setItem(onceKey, '1');
-        if ('caches' in window) {
-          caches.keys().then(function (keys) {
-            keys.forEach(function (k) {
-              if (k.indexOf('prompt-hub-v') === 0 && k !== 'prompt-hub-v109') caches.delete(k);
-            });
-          });
-        }
-        location.reload();
+        purgeCachesAndSw().finally(function () { location.reload(); });
         return;
       }
       if (!prev) localStorage.setItem(key, cur);
     })();
   </script>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#121212">
   <link rel="preconnect" href="https://yibawjvhmqcysdovscss.supabase.co" crossorigin>
@@ -50,19 +60,33 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="提示词仓库">
-  <title>提示词仓库</title>
+  <meta name="apple-mobile-web-app-title" content="Prompt Hub">
+  <title>Prompt Hub 提示词仓库 — AI 提示词管理、社区与生图</title>
+  <meta name="description" content="Prompt Hub（prompt-hub.cn）：管理 AI 提示词卡片、浏览提示词社区、灵感抽卡与生图。支持浏览器扩展快捷存卡、登录云同步，适合 Midjourney / SD / 即梦等创作者。">
+  <meta name="keywords" content="AI提示词,提示词管理,Prompt Hub,提示词仓库,AI生图,灵感抽卡,Midjourney,Stable Diffusion">
+  <link rel="canonical" href="https://prompt-hub.cn/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Prompt Hub">
+  <meta property="og:title" content="Prompt Hub 提示词仓库 — AI 提示词管理、社区与生图">
+  <meta property="og:description" content="管理提示词卡片、逛社区、灵感抽卡与生图。浏览器扩展一键存卡，登录后云同步。">
+  <meta property="og:url" content="https://prompt-hub.cn/">
+  <meta property="og:image" content="https://prompt-hub.cn/assets/logo.png">
+  <meta property="og:locale" content="zh_CN">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Prompt Hub 提示词仓库">
+  <meta name="twitter:description" content="AI 提示词管理、社区与生图 — prompt-hub.cn">
+  <meta name="twitter:image" content="https://prompt-hub.cn/assets/logo.png">
   <link rel="icon" type="image/png" href="assets/logo.png">
   <link rel="apple-touch-icon" href="assets/logo.png">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260602u">
-  <link rel="stylesheet" href="styles-theme.css?v=20260602u">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260602u">
+  <link rel="stylesheet" href="styles.css?v=20260603h">
+  <link rel="stylesheet" href="styles-theme.css?v=20260603h">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260603h">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260602u">
+  <link rel="stylesheet" href="styles-features.css?v=20260603h">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
@@ -450,20 +474,6 @@
     </div>
   </div>
 
-  <!-- 浮动提示词框 -->
-  <div class="floating-prompt hidden" id="floatingPrompt">
-    <div class="floating-prompt-header" id="floatingPromptHeader">
-      <span>提示词</span>
-      <button class="fp-close-btn" onclick="toggleFloatingPrompt()" title="固定到面板">
-        <svg viewBox="0 0 24 24" width="14" height="14"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
-      </button>
-    </div>
-    <textarea id="floatingPromptText" oninput="document.getElementById('cardPrompt').value = this.value"></textarea>
-    <button class="fp-copy-btn" onclick="copyPromptFromFloating()" title="复制">
-      <svg viewBox="0 0 24 24" width="14" height="14"><path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1S9.6 1.84 9.18 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm6 16H6V5h2v3h8V5h2v14z"/></svg>
-    </button>
-  </div>
-
   <nav class="app-nav" id="appNav" aria-label="主导航">
     <div class="app-nav-head">
       <button type="button" class="app-brand" onclick="switchAppPage('warehouse')" title="提示词仓库">
@@ -549,7 +559,7 @@
         <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260602x</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260603h</p>
     </div>
   </nav>
 
@@ -671,6 +681,8 @@
       <h3 id="currentGroupTitle">全部提示词</h3>
       <div class="header-actions">
         <div id="batchBar" class="batch-bar">
+          <button class="btn btn-ghost btn-sm" onclick="batchPublishCommunity()" title="提示词≥15字且需配图">开启公开</button>
+          <button class="btn btn-ghost btn-sm" onclick="batchUnpublishCommunity()" title="从社区下架，卡片仍保留">关闭公开</button>
           <button class="btn btn-ghost btn-sm" onclick="batchMoveGroup()">移动</button>
           <button class="btn btn-ghost btn-sm" onclick="batchMoveWarehouse()">移库</button>
           <button class="btn btn-ghost btn-sm" onclick="batchAddTag()">标签</button>
@@ -693,11 +705,14 @@
             </button>
           </div>
           <div class="toolbar-cluster toolbar-cluster-grow">
-            <select class="toolbar-select desktop-only" id="sortSelect" onchange="renderCards(true)" title="排序">
-              <option value="default">默认</option>
-              <option value="updated-desc">最近</option>
-              <option value="updated-asc">最远</option>
-            </select>
+            <div class="sort-menu-wrap desktop-only" id="sortMenuWrap">
+              <button type="button" class="toolbar-sort-btn" id="sortMenuBtn" aria-expanded="false" aria-haspopup="listbox" title="排序">
+                <span class="toolbar-sort-label" id="sortMenuLabel">默认</span>
+                <svg class="toolbar-sort-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+              <div class="toolbar-sort-dropdown" id="sortDropdown" hidden role="listbox" aria-label="排序方式"></div>
+            </div>
+            <input type="hidden" id="sortSelect" value="default">
             <button type="button" class="icon-btn mobile-only" id="mobileSearchBtn" aria-label="搜索" aria-expanded="false" title="搜索">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/></svg>
             </button>
@@ -778,7 +793,12 @@
         <div class="tag-input-area" id="tagContainer">
           <div class="tag-chips-wrap" id="tagChipsWrap"></div>
           <input type="text" class="tag-input" id="tagInput" placeholder="输入后回车">
-          <button type="button" class="btn btn-secondary tag-pick-btn" onclick="showExistingTags()">选择标签</button>
+          <div class="tag-pick-wrap">
+            <button type="button" class="btn btn-secondary tag-pick-btn" id="tagPickBtn" aria-expanded="false" aria-controls="tagInlinePicker">选择标签</button>
+            <div class="tag-inline-picker" id="tagInlinePicker" hidden>
+              <div class="tag-inline-list" id="tagInlineList"></div>
+            </div>
+          </div>
         </div>
         <div id="customFieldsContainer"></div>
         <div class="panel-publish-row" id="panelCommunityPublish">
@@ -932,8 +952,8 @@
           </button>
           <h2 class="imagegen-header-title">图片生成</h2>
           <div class="imagegen-header-mode" role="tablist" aria-label="生图模式">
-            <button type="button" class="imagegen-mode-tab imagegen-mode-tab--gen active" data-imagegen-mode="gen" role="tab" aria-selected="true">图片生成</button>
-            <button type="button" class="imagegen-mode-tab imagegen-mode-tab--inspire" data-imagegen-mode="inspire" role="tab" aria-selected="false">灵感抽卡</button>
+            <button type="button" class="imagegen-mode-tab imagegen-mode-tab--inspire active" data-imagegen-mode="inspire" role="tab" aria-selected="true">灵感抽卡</button>
+            <button type="button" class="imagegen-mode-tab imagegen-mode-tab--gen" data-imagegen-mode="gen" role="tab" aria-selected="false">图片生成</button>
           </div>
           <div class="imagegen-header-credits mobile-only" id="imageGenHeaderCredits">
             <span class="imagegen-header-balance">积分 <strong data-credits-display>0</strong></span>
@@ -944,18 +964,18 @@
             <button type="button" class="imagegen-mobile-seg" data-imagegen-view="feed" role="tab" aria-selected="false">作品</button>
           </div>
         </header>
-        <div class="imagegen-layout" id="imageGenLayout">
-          <div class="imagegen-inspire-veil" id="imageGenInspireVeil" aria-hidden="true"></div>
-          <div class="imagegen-gen-veil" id="imageGenGenVeil" aria-hidden="false"></div>
+        <div class="imagegen-layout imagegen-layout--inspire-mode" id="imageGenLayout">
+          <div class="imagegen-inspire-veil" id="imageGenInspireVeil" aria-hidden="false"></div>
+          <div class="imagegen-gen-veil" id="imageGenGenVeil" aria-hidden="true"></div>
           <div class="imagegen-form">
             <div class="imagegen-form-scroll">
             <div class="imagegen-mode-banner">
-              <div class="imagegen-gen-hero imagegen-mode-hero" id="imageGenGenHero">
+              <div class="imagegen-gen-hero imagegen-mode-hero" id="imageGenGenHero" hidden>
                 <p class="imagegen-mode-hero-kicker">GENERATE · STUDIO</p>
                 <h3 class="imagegen-mode-hero-title">图片创作</h3>
                 <p class="panel-hint imagegen-mode-hero-desc">选择模型与参数，填写提示词即可出图</p>
               </div>
-              <div class="imagegen-inspire-hero imagegen-mode-hero" id="imageGenInspireHero" hidden>
+              <div class="imagegen-inspire-hero imagegen-mode-hero" id="imageGenInspireHero">
                 <p class="imagegen-mode-hero-kicker">INSPIRE · REALM</p>
                 <h3 class="imagegen-mode-hero-title">灵感视界</h3>
                 <p class="panel-hint imagegen-mode-hero-desc">随机组合高风格提示词，勾选后可排队生图（与普通生图同价）</p>
@@ -975,9 +995,9 @@
             <div class="imagegen-shared-params">
             <label for="imageGenModel">生图模型</label>
             <select id="imageGenModel" class="settings-input imagegen-field-compact">
-              <option value="quanneng2">全能模型2</option>
-              <option value="jimeng">集梦 Seedream</option>
+              <option value="gpt-image-2">GPT Image 2</option>
             </select>
+            <p class="panel-hint imagegen-model-hint" id="imageGenModelHint" hidden></p>
             <div class="imagegen-params-row">
               <div class="imagegen-param">
                 <label for="imageGenResolution">输出分辨率</label>
@@ -1002,28 +1022,34 @@
             </select>
             <p class="imagegen-quality-note">质量仅影响出图效果，不额外加价</p>
             </div>
-            <div class="imagegen-mode-panel imagegen-mode-panel--gen active" id="imageGenModeGen" data-imagegen-mode-panel="gen">
+            <div class="imagegen-optimize-shared">
+              <div class="imagegen-prompt-optimize-wrap">
+                <button type="button" class="imagegen-optimize-link" id="imageGenOptimizeToggle" aria-expanded="false" title="用 AI 扩写提示词，更易出爆款封面">优化提示词 · <span id="imageGenOptimizeCostHint">约 1～2 积分</span></button>
+                <div class="imagegen-prompt-optimize-pop imagegen-prompt-optimize-pop--head" id="imageGenOptimizePop" hidden>
+                  <label for="imageGenOptimizeTarget">优化场景</label>
+                  <select id="imageGenOptimizeTarget" class="settings-input">
+                    <option value="general">通用（补全光影构图）</option>
+                    <option value="ecommerce_cover">电商封面（商品宣传·吸睛爆款）</option>
+                    <option value="viral_cover">信息流爆款（小红书/抖音竖屏）</option>
+                    <option value="product_studio">商品棚拍（白底/场景质感）</option>
+                    <option value="jimeng">即梦封面风（强情绪竖屏）</option>
+                    <option value="guofeng">国风仙侠</option>
+                    <option value="realistic">写实摄影</option>
+                    <option value="anime">二次元插画</option>
+                    <option value="sd">写实 / SD 细节风</option>
+                    <option value="glamour">女性时尚人像</option>
+                    <option value="malePower">男性力量肖像</option>
+                  </select>
+                  <p class="panel-hint imagegen-optimize-scene-hint" id="imageGenOptimizeSceneHint">先写商品/主体草稿，选场景后点优化，再填入提示词框生图。</p>
+                  <button type="button" class="btn btn-secondary btn-sm" id="imageGenOptimizeBtn">优化并填入提示词 · <span class="imagegen-optimize-btn-cost">约 1～2 积分</span></button>
+                </div>
+              </div>
+            </div>
+            <div class="imagegen-mode-panel imagegen-mode-panel--gen" id="imageGenModeGen" data-imagegen-mode-panel="gen" hidden>
             <div class="imagegen-prompt-block">
               <div class="imagegen-prompt-head">
                 <label for="imageGenPrompt">提示词</label>
                 <div class="imagegen-prompt-tools">
-                  <div class="imagegen-prompt-optimize-wrap">
-                    <button type="button" class="imagegen-optimize-link" id="imageGenOptimizeToggle" aria-expanded="false" title="优化提示词">优化提示词 · <span id="imageGenOptimizeCostHint">约 1～2 积分</span></button>
-                    <div class="imagegen-prompt-optimize-pop imagegen-prompt-optimize-pop--head" id="imageGenOptimizePop" hidden>
-                      <label for="imageGenOptimizeTarget">优化风格</label>
-                      <select id="imageGenOptimizeTarget" class="settings-input">
-                        <option value="general">通用（中文为主）</option>
-                        <option value="jimeng">即梦爆款（竖屏封面）</option>
-                        <option value="guofeng">国风仙侠</option>
-                        <option value="realistic">写实摄影</option>
-                        <option value="glamour">女性美学（女性专属）</option>
-                        <option value="malePower">男性力量</option>
-                        <option value="sd">写实 / SD 标签风</option>
-                        <option value="anime">二次元插画</option>
-                      </select>
-                      <button type="button" class="btn btn-secondary btn-sm" id="imageGenOptimizeBtn">优化提示词 · <span class="imagegen-optimize-btn-cost">约 1～2 积分</span></button>
-                    </div>
-                  </div>
                   <button type="button" class="imagegen-prompt-tool-btn" id="imageGenPromptPaste" title="粘贴剪贴板" aria-label="粘贴">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 2h-4.18C14.4.84 13.3 0 12 0S9.6.84 9.18 2H5a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z"/></svg>
                   </button>
@@ -1035,7 +1061,7 @@
               <textarea id="imageGenPrompt" placeholder="描述你想生成的画面…"></textarea>
             </div>
             </div>
-            <div class="imagegen-mode-panel imagegen-mode-panel--inspire" id="imageGenModeInspire" data-imagegen-mode-panel="inspire" hidden>
+            <div class="imagegen-mode-panel imagegen-mode-panel--inspire active" id="imageGenModeInspire" data-imagegen-mode-panel="inspire">
               <div class="imagegen-inspire-controls">
                 <label class="imagegen-inspire-multi-label">内容（可多选）</label>
                 <div class="imagegen-inspire-chips-wrap">
@@ -1059,7 +1085,7 @@
                 </div>
                 <button type="button" class="btn btn-secondary btn-sm imagegen-inspire-draw-btn" id="imageGenInspireDrawBtn">随机抽卡</button>
               </div>
-              <p class="panel-hint imagegen-inspire-quota-hint" id="imageGenInspireQuotaHint">普通用户 10 次/天 · 轻量会员 30 次/天 · 基础及以上无限</p>
+              <p class="panel-hint imagegen-inspire-quota-hint" id="imageGenInspireQuotaHint">随机抽卡：本地词库组合，不调用 AI、不扣积分 · 普通 10 次/天 · 轻量 30 次/天 · 基础及以上无限</p>
               <div class="imagegen-inspire-list" id="imageGenInspireList"></div>
             </div>
             <div class="imagegen-ref-block">
@@ -1110,15 +1136,21 @@
             </div>
             <div class="imagegen-inspire-prompt-section" id="imageGenInspirePromptSection" hidden>
               <div class="imagegen-prompt-block imagegen-prompt-block--inspire">
-                <label for="imageGenInspirePrompt">当前提示词（可编辑）</label>
-                <textarea id="imageGenInspirePrompt" placeholder="抽卡后会填入此处，也可手动编辑…"></textarea>
+                <div class="imagegen-prompt-head">
+                  <label for="imageGenInspirePrompt">当前提示词（可编辑）</label>
+                  <div class="imagegen-prompt-tools">
+                    <button type="button" class="imagegen-prompt-tool-btn" id="imageGenInspirePromptPaste" title="粘贴" aria-label="粘贴">粘贴</button>
+                    <button type="button" class="imagegen-prompt-tool-btn imagegen-prompt-tool-btn--clear" id="imageGenInspirePromptClear" title="清空" aria-label="清空">清空</button>
+                  </div>
+                </div>
+                <textarea id="imageGenInspirePrompt" placeholder="抽卡后会填入此处；也可手写商品宣传草稿后点上方「优化提示词」…"></textarea>
               </div>
               <button type="button" class="btn btn-primary imagegen-inspire-single-btn" id="imageGenInspireSubmit">生成图片 · 10 积分</button>
             </div>
             <div class="panel-publish-row imagegen-publish-row" id="imageGenGenPublicRow">
               <div class="panel-publish-copy">
                 <span class="panel-publish-title">生成后公开到社区</span>
-                <p class="panel-hint">开启后保存到仓库并同步发布；关闭则仅入库，可在卡片库再公开</p>
+                <p class="panel-hint">开启后保存到仓库并同步发布（会调用 Apimart Gemini 做配图审核，约 &lt;0.001 元/次）；关闭则仅入库</p>
               </div>
               <button type="button" class="publish-circle-btn" id="imageGenGenPublicBtn" aria-pressed="false" aria-label="生成后公开到社区" title="切换生成后公开"></button>
             </div>
@@ -1128,7 +1160,7 @@
               <a href="privacy.html" class="link-inline">隐私政策</a>
             </div>
             </div>
-            <div class="imagegen-form-dock imagegen-form-dock--gen" id="imageGenDockGen">
+            <div class="imagegen-form-dock imagegen-form-dock--gen" id="imageGenDockGen" hidden>
               <div class="imagegen-dock-meta">
                 <div class="imagegen-footer-count">
                   <label for="imageGenCount">数量</label>
@@ -1141,11 +1173,13 @@
                   </select>
                 </div>
                 <p class="imagegen-price-hint" id="imageGenCostHint" aria-live="polite"></p>
+                <p class="imagegen-promo-notice hidden" id="imageGenPromoNotice" aria-live="polite"></p>
               </div>
               <button type="button" class="btn btn-primary imagegen-generate-btn" id="imageGenSubmit">生成图片 · 10 积分</button>
             </div>
-            <div class="imagegen-form-dock imagegen-form-dock--inspire" id="imageGenDockInspire" hidden>
+            <div class="imagegen-form-dock imagegen-form-dock--inspire" id="imageGenDockInspire">
               <p class="panel-hint imagegen-inspire-batch-hint" id="imageGenInspireBatchHint">勾选抽卡结果后批量生图，共用参考图（若有），排队不额外计抽卡次数。</p>
+              <p class="imagegen-promo-notice hidden" id="imageGenInspirePromoNotice" aria-live="polite"></p>
               <button type="button" class="btn btn-primary imagegen-generate-btn" id="imageGenInspireBatchBtn">排队生图 · — 积分/张</button>
             </div>
           </div>
@@ -1199,6 +1233,22 @@
   </div>
   </div><!-- /app-chrome -->
 
+  <!-- 浮动提示词框（须在 app-chrome 外：chrome 带 scale transform，内部 fixed 定位会错位） -->
+  <div class="floating-prompt hidden" id="floatingPrompt">
+    <div class="floating-prompt-header" id="floatingPromptHeader">
+      <span>提示词</span>
+      <button type="button" class="fp-close-btn" onclick="toggleFloatingPrompt()" title="固定到面板" aria-label="固定到面板">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+      </button>
+    </div>
+    <div class="floating-prompt-body">
+      <textarea id="floatingPromptText" placeholder="在此编辑提示词…" spellcheck="false" oninput="document.getElementById('cardPrompt').value = this.value"></textarea>
+      <button type="button" class="fp-copy-btn" onclick="copyPromptFromFloating()" title="复制" aria-label="复制提示词">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </button>
+    </div>
+  </div>
+
   <!-- Toast（须在 app-chrome 外，否则会被任务/会员弹层挡住） -->
   <div class="toast" id="toast"></div>
 
@@ -1244,18 +1294,6 @@
         </div>
         <div class="credit-ledger-panel hidden" id="creditLedgerPanelSheet" aria-live="polite"></div>
         <p class="imagegen-credits-note">会员订阅限时约五折；生图享积分折扣。充值与激活码兑换请点「充值」。<a href="terms.html" class="link-inline">用户协议</a> · <a href="privacy.html" class="link-inline">隐私政策</a></p>
-      </div>
-    </div>
-  </div>
-
-  <div class="tag-sheet-overlay" id="tagSheetOverlay" hidden onclick="if(event.target===this) closeTagSheet()">
-    <div class="tag-sheet" id="tagSheet" onclick="event.stopPropagation()">
-      <div class="tag-sheet-handle"></div>
-      <div class="tag-sheet-title">选择标签</div>
-      <div class="tag-sheet-list" id="tagSheetList"></div>
-      <div class="tag-sheet-footer" id="tagSheetFooter">
-        <button type="button" class="btn btn-secondary" onclick="closeTagSheet()">取消</button>
-        <button type="button" class="btn btn-primary" onclick="confirmTagSheet()">确认</button>
       </div>
     </div>
   </div>
@@ -1379,16 +1417,16 @@
   <script src="subscription.js?v=20260622e"></script>
   <script src="trial-tasks.js?v=20260602u"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="script.js?v=20260602x"></script>
-  <script src="points-system.js?v=20260606m"></script>
+  <script src="script.js?v=20260603h"></script>
+  <script src="points-system.js?v=20260606n"></script>
   <script src="imagegen-prompt-kit.js?v=20260601b"></script>
   <script src="imagegen-prompt-tools.js?v=20260606l"></script>
-  <script src="features-draft.js?v=20260602u"></script>
+  <script src="features-draft.js?v=20260603h"></script>
   <script src="community-gacha.js?v=20260606v"></script>
   <script src="features-assets.js?v=20260602w"></script>
   <script src="hotfix-image-layout.js?v=20260603t"></script>
   <script src="pwa-install.js?v=20260602u"></script>
-  <script src="mobile.js?v=20260602u"></script>
+  <script src="mobile.js?v=20260603h"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

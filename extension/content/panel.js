@@ -8,6 +8,31 @@
     'P', 'LI', 'TD', 'TH', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
     'BLOCKQUOTE', 'PRE', 'FIGCAPTION', 'ARTICLE', 'SECTION', 'DIV', 'SPAN'
   ]);
+  const PH_CAPTURE_EXCLUDE_SEL = [
+    '#editPanel',
+    '#floatingPrompt',
+    '#ph-ext-root',
+    '.app-nav',
+    '.app-chrome',
+    '.card-edit-footer',
+    '.panel-publish-row',
+    '.custom-fields-block',
+    '.imagegen-form-scroll'
+  ].join(', ');
+  const PH_PROMPT_FIELD_SEL = [
+    'textarea#cardPrompt',
+    'textarea#floatingPromptText',
+    'textarea#imageGenPrompt',
+    'textarea#imageGenInspirePrompt',
+    'textarea.imagegen-prompt'
+  ].join(', ');
+  const PH_READABLE_PROMPT_SEL = [
+    '.card-desc',
+    '.card-prompt',
+    '.community-post-card .card-body',
+    '.imagegen-feed-prompt',
+    '.imagegen-preview-prompt'
+  ].join(', ');
 
   let imageBase64 = null;
   let imageName = '';
@@ -15,11 +40,17 @@
   let copyBtn = null;
   let hoverCopyBtn = null;
   let hoverBlockText = '';
+  let cachedSelectionText = '';
   let panelHovered = false;
   let hoverTimer = null;
   let pageCaptureActive = false;
   let pasteCaptureActive = false;
   let allTags = [];
+  const COLLECT_TAG = '社区收藏';
+
+  function isCollectTag(raw) {
+    return String(raw || '').replace(/^#+/, '').trim() === COLLECT_TAG;
+  }
   const currentTags = new Set();
 
   let defaultPublishOn = true;
@@ -195,6 +226,76 @@
     return r === shadow || r === root;
   }
 
+  function nodeToElement(node) {
+    if (!node) return null;
+    if (node.nodeType === 1) return node;
+    return node.parentElement || null;
+  }
+
+  function getPromptFieldFromNode(node) {
+    const el = nodeToElement(node);
+    if (!el?.closest) return null;
+    return el.closest(PH_PROMPT_FIELD_SEL);
+  }
+
+  function isExcludedCaptureElement(el) {
+    if (!el?.closest) return true;
+    if (nodeInPanel(el)) return true;
+    return !!el.closest(PH_CAPTURE_EXCLUDE_SEL);
+  }
+
+  function looksLikePhFormChrome(text) {
+    const t = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!t) return false;
+    const markers = [
+      '标题', '提示词', '标签', '选择标签', '发布到提示词社区',
+      '字段名', '固定', '多行文本', '须先保存到卡片库'
+    ];
+    if (markers.filter((w) => t.includes(w)).length >= 3) return true;
+    if (/^标题\s*提示词/.test(t)) return true;
+    return false;
+  }
+
+  function isFormChromeBlock(el) {
+    if (!el || el.nodeType !== 1) return true;
+    if (isExcludedCaptureElement(el)) return true;
+    const interactive = el.querySelectorAll(
+      'label, button, select, input:not([type="hidden"]), textarea, .required-mark'
+    ).length;
+    if (interactive >= 2) return true;
+    return looksLikePhFormChrome((el.innerText || '').replace(/\s+/g, ' ').trim());
+  }
+
+  function getTextFieldSelection(field) {
+    if (!field || field.selectionStart == null || field.selectionEnd == null) return '';
+    const start = field.selectionStart;
+    const end = field.selectionEnd;
+    if (start === end) return '';
+    return (field.value || '').slice(start, end).trim();
+  }
+
+  function getSelectedTextFromPage() {
+    const active = document.activeElement;
+    if (active?.matches?.(PH_PROMPT_FIELD_SEL)) {
+      const fromActive = getTextFieldSelection(active);
+      if (fromActive) return fromActive;
+    }
+    const sel = window.getSelection();
+    const field = getPromptFieldFromNode(sel?.anchorNode) || getPromptFieldFromNode(sel?.focusNode);
+    if (field) {
+      const fromField = getTextFieldSelection(field);
+      if (fromField) return fromField;
+    }
+    if (!sel || sel.isCollapsed) return '';
+    const anchorEl = nodeToElement(sel.anchorNode);
+    if (anchorEl && isExcludedCaptureElement(anchorEl) && !getPromptFieldFromNode(sel.anchorNode)) {
+      return '';
+    }
+    const text = (sel.toString() || '').trim();
+    if (text && looksLikePhFormChrome(text)) return '';
+    return text;
+  }
+
   function pageHasEditablePasteTarget() {
     const el = document.activeElement;
     if (!el || nodeInPanel(el)) return false;
@@ -281,6 +382,7 @@
       return;
     }
     for (const tag of currentTags) {
+      if (isCollectTag(tag)) continue;
       const chip = document.createElement('span');
       chip.className = 'ph-ext-tag-chip';
       chip.innerHTML = `${tag}<button type="button" data-tag="${tag}" title="移除">×</button>`;
@@ -298,7 +400,9 @@
     const list = wrap.querySelector('#phExtTagList');
     if (!list) return;
     list.innerHTML = '';
-    const merged = [...new Set([...allTags, ...currentTags])].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    const merged = [...new Set([...allTags, ...currentTags])]
+      .filter(t => !isCollectTag(t))
+      .sort((a, b) => a.localeCompare(b, 'zh-CN'));
     if (!merged.length) {
       list.innerHTML = '<span class="ph-ext-tags-empty">仓库暂无标签，可在上方新建</span>';
       return;
@@ -309,6 +413,7 @@
       btn.className = 'ph-ext-tag-opt' + (currentTags.has(tag) ? ' selected' : '');
       btn.textContent = tag;
       btn.addEventListener('click', () => {
+        if (isCollectTag(tag)) return;
         if (currentTags.has(tag)) currentTags.delete(tag);
         else currentTags.add(tag);
         renderTagChips();
@@ -332,7 +437,7 @@
   function fetchAllTags() {
     chrome.runtime.sendMessage({ type: 'PH_GET_TAGS' }, (res) => {
       if (res?.ok && Array.isArray(res.data?.tags)) {
-        allTags = res.data.tags;
+        allTags = res.data.tags.filter(t => !isCollectTag(t));
         renderTagOptions();
       }
     });
@@ -520,7 +625,7 @@
     wrap.querySelector('#phExtTagAdd').addEventListener('click', () => {
       const input = wrap.querySelector('#phExtTagNew');
       const tag = normalizeTag(input?.value || '');
-      if (!tag) return;
+      if (!tag || isCollectTag(tag)) return;
       if (!allTags.includes(tag)) allTags.push(tag);
       currentTags.add(tag);
       if (input) input.value = '';
@@ -712,11 +817,13 @@
     copyBtn.addEventListener('mousedown', (e) => e.preventDefault());
     copyBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const sel = window.getSelection();
-      const text = (sel?.toString() || '').trim();
+      const text = cachedSelectionText || getSelectedTextFromPage();
       if (text) {
         appendPrompt(text);
-        sel?.removeAllRanges();
+        const active = document.activeElement;
+        if (!active?.matches?.(PH_PROMPT_FIELD_SEL)) {
+          window.getSelection()?.removeAllRanges();
+        }
       }
       hideCopyBtn();
     });
@@ -740,6 +847,7 @@
   }
 
   function hideCopyBtn() {
+    cachedSelectionText = '';
     if (copyBtn) copyBtn.classList.add('hidden');
   }
 
@@ -749,13 +857,37 @@
   }
 
   function findTextBlock(el) {
-    let node = el;
+    const startEl = nodeToElement(el);
+    if (!startEl || nodeInPanel(startEl)) return null;
+    if (isExcludedCaptureElement(startEl)) return null;
+
+    const readable = startEl.closest?.(PH_READABLE_PROMPT_SEL);
+    if (readable && !readable.closest('#editPanel, #floatingPrompt')) {
+      const readableText = (readable.innerText || '').replace(/\s+/g, ' ').trim();
+      if (
+        readableText.length >= 12
+        && readableText.length <= MAX_SELECTION
+        && !looksLikePhFormChrome(readableText)
+      ) {
+        return { text: readableText, rect: readable.getBoundingClientRect() };
+      }
+    }
+
+    let node = startEl;
     while (node && node !== document.body && node !== document.documentElement) {
       if (node.nodeType === 1 && !nodeInPanel(node)) {
+        if (isFormChromeBlock(node)) {
+          node = node.parentElement;
+          continue;
+        }
         const tag = node.tagName;
         if (BLOCK_TAGS.has(tag)) {
           const text = (node.innerText || '').replace(/\s+/g, ' ').trim();
-          if (text.length >= 12 && text.length <= MAX_SELECTION) {
+          if (
+            text.length >= 12
+            && text.length <= MAX_SELECTION
+            && !looksLikePhFormChrome(text)
+          ) {
             return { text, rect: node.getBoundingClientRect() };
           }
         }
@@ -766,23 +898,32 @@
   }
 
   function onSelectionMaybeShow() {
+    cachedSelectionText = '';
     const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+    if (nodeInPanel(sel?.anchorNode)) {
       hideCopyBtn();
       return;
     }
-    if (nodeInPanel(sel.anchorNode)) {
+    const field = getPromptFieldFromNode(document.activeElement)
+      || getPromptFieldFromNode(sel?.anchorNode)
+      || getPromptFieldFromNode(sel?.focusNode);
+    const text = getSelectedTextFromPage();
+    if (!text) {
       hideCopyBtn();
       return;
     }
-    const text = sel.toString().trim();
     if (text.length > MAX_SELECTION) {
       hideCopyBtn();
       return;
     }
-    const range = sel.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
-    if (!rect.width && !rect.height) {
+    cachedSelectionText = text;
+    let rect;
+    if (field && field.selectionStart !== field.selectionEnd) {
+      rect = field.getBoundingClientRect();
+    } else if (sel?.rangeCount) {
+      rect = sel.getRangeAt(0).getBoundingClientRect();
+    }
+    if (!rect || (!rect.width && !rect.height)) {
       hideCopyBtn();
       return;
     }

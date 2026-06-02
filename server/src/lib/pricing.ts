@@ -1,37 +1,45 @@
 import type { Profile } from './supabase';
 import { membershipGenMultiplier } from './supabase';
+import {
+  computeImageGenerationCost,
+  loadImageModelSettings,
+  listResolvedImageModels,
+  normalizeImageModelId,
+  type ImageModelPricingSettings
+} from './image-model-settings';
 
-export const MIN_GENERATION_CHARGE = 1;
+import { MIN_CREDIT_CHARGE } from './credit-math';
 
+export const MIN_GENERATION_CHARGE = MIN_CREDIT_CHARGE;
+
+/** @deprecated 旧前端兼容；新模型见 /api/v1/generate/models */
 export const IMAGE_MODELS = {
-  quanneng2: {
-    id: 'quanneng2',
-    label: '全能模型2',
-    upstream: 'gpt-image-2',
-    pricing: 'resolution' as const
-  },
-  jimeng: {
-    id: 'jimeng',
-    label: '集梦 Seedream',
-    upstream: 'doubao-seedream-5-0-lite',
-    pricing: 'fixed' as const,
-    fixedCredits: 40
-  }
+  quanneng2: { id: 'quanneng2', label: 'GPT Image 2', upstream: 'gpt-image-2', pricing: 'fixed' as const },
+  jimeng: { id: 'jimeng', label: 'Nano Banana Pro', upstream: 'nano-banana-pro', pricing: 'fixed' as const }
 } as const;
 
-export type ImageModelId = keyof typeof IMAGE_MODELS;
+export type ImageModelId = string;
 
-const RESOLUTION_COST: Record<string, number> = { '1k': 10, '2k': 20, '4k': 40 };
-
-export function resolveImageModel(model?: string): (typeof IMAGE_MODELS)[ImageModelId] {
-  if (model && model in IMAGE_MODELS) {
-    return IMAGE_MODELS[model as ImageModelId];
-  }
-  return IMAGE_MODELS.quanneng2;
+export function resolveImageModel(model?: string) {
+  return { id: normalizeImageModelId(model), label: normalizeImageModelId(model) };
 }
 
-export function baseResolutionCost(resolution: string): number {
-  return RESOLUTION_COST[resolution] ?? 10;
+export function baseResolutionCost(_resolution: string): number {
+  return 10;
+}
+
+export async function loadPricingState(admin: import('@supabase/supabase-js').SupabaseClient) {
+  return loadImageModelSettings(admin);
+}
+
+export function computeGenerationCostFromSettings(
+  settings: ImageModelPricingSettings,
+  modelId: string,
+  resolution: string,
+  tier: Profile['membership_tier'],
+  active: boolean
+) {
+  return computeImageGenerationCost(settings, modelId, resolution, tier, active);
 }
 
 export function computeGenerationCost(
@@ -39,20 +47,14 @@ export function computeGenerationCost(
   resolution: string,
   tier: Profile['membership_tier'],
   active: boolean
-): { base: number; final: number; discountLabel: string | null; modelLabel: string } {
-  const model = resolveImageModel(modelId);
-  const base =
-    model.pricing === 'fixed' ? model.fixedCredits : baseResolutionCost(resolution);
-  const mult = active && tier ? membershipGenMultiplier(tier) : 1;
-  const final =
-    mult < 1 ? Math.max(MIN_GENERATION_CHARGE, Math.floor(base * mult)) : base;
-  const discountLabels = { basic: '9折', standard: '8折', pro: '7折' } as const;
-  const discountLabel =
-    mult < 1 && tier && tier in discountLabels
-      ? discountLabels[tier as keyof typeof discountLabels]
-      : null;
-
-  return { base, final, discountLabel, modelLabel: model.label };
+) {
+  return computeImageGenerationCost(
+    { globalDiscountPercent: 100, models: {} },
+    modelId,
+    resolution,
+    tier,
+    active
+  );
 }
 
 export function mapQualityForGptImage(quality: string): string {
@@ -62,7 +64,8 @@ export function mapQualityForGptImage(quality: string): string {
 }
 
 export function mapResolutionForSeedream(resolution: string): string {
-  /** 上游 Seedream 仅稳定支持 2K/3K，1K 会失败 */
   const map: Record<string, string> = { '1k': '2K', '2k': '2K', '4k': '4K' };
   return map[resolution] ?? '2K';
 }
+
+export { listResolvedImageModels, normalizeImageModelId, membershipGenMultiplier };

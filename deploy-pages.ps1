@@ -27,6 +27,7 @@ if (Test-Path $localApiCfg) {
 }
 
 Write-Host "Pages project: $project"
+& (Join-Path $root "scripts\bump-build.ps1")
 Write-Host "Deploying from: $root"
 Push-Location $server
 try {
