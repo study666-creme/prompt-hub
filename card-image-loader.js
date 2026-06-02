@@ -47,27 +47,44 @@
     const path = window.SupabaseSync?.storagePathFromRef?.(ref) || '';
     const uid = window.SupabaseSync?.getUserId?.();
     const own = !!(path && uid && path.replace(/^\//, '').startsWith(`${uid}/`));
+    const inGrid = !!img.closest('#communityGrid, #creationsGrid, #userProfileGrid');
     return {
-      communityFeed: !window.SupabaseSync?.isLoggedIn?.() || !own,
+      communityFeed: !window.SupabaseSync?.isLoggedIn?.() || !own || inGrid,
       authorId: authorId || undefined,
       cardId: cardIdFromImg(img),
-      tryAllPaths: !own
+      tryAllPaths: true
     };
+  }
+
+  function isCommunityImg(img) {
+    return !!img?.closest?.('#communityGrid, #creationsGrid, #userProfileGrid, #imageGenFeed');
+  }
+
+  function isCommunityContainer(container) {
+    const id = container?.id;
+    return id === 'communityGrid' || id === 'creationsGrid' || id === 'userProfileGrid' || id === 'imageGenFeed';
   }
 
   function cachedUrl(ref, cardId, img) {
     const inWarehouse = !!img?.closest?.('#cardsContainer');
-    const variant = inWarehouse ? 'full' : 'grid';
+    const inCommunity = isCommunityImg(img);
+    const variant = inWarehouse || inCommunity ? 'full' : 'grid';
     let url = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId: cardId, variant }) || '';
     if (!url && inWarehouse) {
       url = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId: cardId, variant: 'grid' }) || '';
     }
+    if (!url && inCommunity) {
+      url = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId: cardId, variant: 'full', tryAllPaths: true }) || '';
+    }
     return url;
   }
 
-  function isReadySrc(src) {
+  function isReadySrc(src, img) {
     if (!src || !src.startsWith('http') || src.includes('data:image/svg')) return false;
     if (window.SupabaseSync?.isInvalidMediaUrl?.(src)) return false;
+    if (img && isCommunityImg(img) && window.SupabaseSync?.isResolvableDisplayUrl) {
+      return window.SupabaseSync.isResolvableDisplayUrl(src);
+    }
     if (window.SupabaseSync?.isValidSignedDisplayUrl) {
       return window.SupabaseSync.isValidSignedDisplayUrl(src);
     }
@@ -79,18 +96,19 @@
 
   async function resolveUrl(ref, cardId, extraOpts, img) {
     const inWarehouse = !!img?.closest?.('#cardsContainer');
+    const inCommunity = isCommunityImg(img);
     const hit = cachedUrl(ref, cardId, img);
-    if (isReadySrc(hit)) return hit;
+    if (isReadySrc(hit, img)) return hit;
     if (extraOpts?.skip) return '';
     if (!window.SupabaseSync?.resolveDisplayUrl) return '';
     try {
       const url = await window.SupabaseSync.resolveDisplayUrl(ref, {
         assetId: cardId,
-        variant: inWarehouse ? 'full' : 'grid',
-        tryAllPaths: inWarehouse || extraOpts?.tryAllPaths === true,
+        variant: inWarehouse || inCommunity ? 'full' : 'grid',
+        tryAllPaths: inWarehouse || inCommunity || extraOpts?.tryAllPaths === true || extraOpts?.communityFeed === true,
         ...(extraOpts || {})
       });
-      return isReadySrc(url) ? url : '';
+      return isReadySrc(url, img) ? url : '';
     } catch (e) {
       console.warn('[CardImageLoader] resolve failed', ref, e);
       return '';
@@ -98,7 +116,7 @@
   }
 
   function applyUrlToImg(img, url) {
-    if (!img || !isReadySrc(url)) return false;
+    if (!img || !isReadySrc(url, img)) return false;
     const media = img.closest('.card-media');
     if (!media) return false;
     media.classList.remove('card-media--await');
@@ -161,11 +179,15 @@
     const cardId = cardIdFromImg(img);
     const primary = window.SupabaseSync?.primaryImagePath?.(ref, cardId);
     if (primary && window.SupabaseSync?.isPathKnownMissing?.(primary)) {
-      void tryMissingPathFallback(img, cardId);
-      return;
+      if (img.closest('#cardsContainer')) {
+        window.SupabaseSync?.invalidateSignedCacheForRef?.(ref, cardId);
+      } else {
+        void tryMissingPathFallback(img, cardId);
+        return;
+      }
     }
     const cur = img.currentSrc || img.src || '';
-    if (isReadySrc(cur)) return;
+    if (isReadySrc(cur, img)) return;
     const hit = cachedUrl(ref, cardId, img);
     if (hit) {
       applyUrlToImg(img, hit);
@@ -176,7 +198,9 @@
       inflight.delete(img);
       if (url) applyUrlToImg(img, url);
     });
-    const p = img.closest('#cardsContainer') ? run() : enqueueResolve(() => resolveUrl(ref, cardId, extra, img)).then((url) => {
+    const p = (img.closest('#cardsContainer') || isCommunityImg(img))
+      ? run()
+      : enqueueResolve(() => resolveUrl(ref, cardId, extra, img)).then((url) => {
       inflight.delete(img);
       if (url) applyUrlToImg(img, url);
     });
@@ -216,7 +240,7 @@
       const ref = img.getAttribute('data-image-ref');
       if (!ref || !ref.startsWith('storage://')) return;
       const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur)) return;
+      if (isReadySrc(cur, img)) return;
       refs.push(ref);
     });
     if (refs.length) void window.SupabaseSync.prefetchDisplayUrls(refs);
@@ -226,21 +250,28 @@
     if (!container) return;
     const imgs = [...container.querySelectorAll('img.card-img[data-image-ref]')];
     prefetchRefsInContainer(container);
-    if (container.id === 'cardsContainer') {
+    if (container.id === 'cardsContainer' || isCommunityContainer(container)) {
       imgs.forEach((img) => {
         const cur = img.currentSrc || img.src || '';
-        if (isReadySrc(cur)) return;
-        loadImg(img);
+        if (isReadySrc(cur, img)) return;
+        if (isImgNearViewport(img, container.id === 'cardsContainer' ? 320 : 480)) loadImg(img);
       });
     }
     if (!('IntersectionObserver' in window)) {
-      void window.SupabaseSync?.hydrateImageElements?.(container, { onlyMissing: true });
+      void window.SupabaseSync?.hydrateImageElements?.(container, {
+        onlyMissing: true,
+        communityBoost: isCommunityContainer(container)
+      });
       return;
     }
     if (observedRoot !== container) {
       observer?.disconnect();
       observedRoot = container;
-      const rootMargin = container.id === 'cardsContainer' ? '320px 0px' : '160px 0px';
+      const rootMargin = container.id === 'cardsContainer'
+        ? '320px 0px'
+        : isCommunityContainer(container)
+          ? '480px 0px'
+          : '160px 0px';
       observer = new IntersectionObserver(onIntersect, {
         root: scrollRootFor(container) || null,
         rootMargin,
@@ -249,7 +280,7 @@
     }
     imgs.forEach((img) => {
       const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur)) return;
+      if (isReadySrc(cur, img)) return;
       const ref = img.getAttribute('data-image-ref');
       const cardId = cardIdFromImg(img);
     const hit = cachedUrl(ref, cardId, img);

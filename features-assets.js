@@ -223,8 +223,10 @@
     const mode = packEditor.mode || 'library';
     return `<div class="asset-publish-mode-bar">
       <span class="panel-hint">打包结构</span>
-      <label class="asset-publish-mode-opt"><input type="radio" name="packLayoutMode" value="library"${mode === 'library' ? ' checked' : ''}> 按卡片库分组</label>
-      <label class="asset-publish-mode-opt"><input type="radio" name="packLayoutMode" value="custom"${mode === 'custom' ? ' checked' : ''}> 自定义文件夹</label>
+      <div class="asset-publish-mode-segment" role="radiogroup" aria-label="打包结构">
+        <label class="asset-publish-mode-opt"><input type="radio" name="packLayoutMode" value="library"${mode === 'library' ? ' checked' : ''}><span>按卡片库分组</span></label>
+        <label class="asset-publish-mode-opt"><input type="radio" name="packLayoutMode" value="custom"${mode === 'custom' ? ' checked' : ''}><span>自定义文件夹</span></label>
+      </div>
       <span class="asset-publish-mode-actions${mode === 'custom' ? '' : ' hidden'}" id="assetPublishCustomActions">
         <button type="button" class="btn btn-ghost btn-sm" data-action="import-groups">导入卡片库分组</button>
         <button type="button" class="btn btn-ghost btn-sm" data-action="add-folder">新建文件夹</button>
@@ -591,26 +593,34 @@
   function renderMyHomePackageCard(pkg, kind) {
     const norm = normalizePackage(pkg);
     const packUi = resolvePackUi(norm);
+    const buyout = norm.saleType === 'buyout';
     const uiClass = packUi === 'heavy' ? ' asset-market-card--heavy' : ' asset-market-card--light';
+    const featuredClass = norm.featured ? ' asset-market-card--featured' : '';
     const cover = packUi === 'heavy' ? renderHeavyCover(norm) : renderStackCover(norm);
+    const priceHtml = norm.isDemo
+      ? '<span class="asset-market-price asset-market-price--demo">演示<em>非售卖 · 仅结构预览</em></span>'
+      : `<span class="asset-market-price">${esc(norm.priceLabel)}${buyout ? ' <em>买断</em>' : ''}</span>`;
+    const showImport = kind === 'owned' || norm.owned;
     const authorActions = norm.isAuthor
       ? `<button type="button" class="btn btn-secondary btn-sm" data-action="edit">编辑分组</button>
-              <button type="button" class="btn btn-ghost btn-sm asset-pack-archive-btn" data-action="archive">下架</button>`
+         <button type="button" class="btn btn-ghost btn-sm asset-pack-archive-btn" data-action="archive">下架</button>`
       : '';
-    return `<article class="asset-market-card my-home-package-card${uiClass}" data-pkg-id="${esc(norm.id)}" data-pack-ui="${packUi}">
+    const actionsHtml = `<div class="asset-market-card-actions my-home-package-actions">
+              <button type="button" class="btn btn-secondary btn-sm" data-action="preview">查看</button>
+              ${showImport ? '<button type="button" class="btn btn-secondary btn-sm" data-action="import">导入</button>' : ''}
+              ${authorActions}
+            </div>`;
+    return `<article class="asset-market-card my-home-package-card${uiClass}${featuredClass}" data-pkg-id="${esc(norm.id)}" data-pack-ui="${packUi}">
         ${cover}
         <div class="asset-market-card-body">
-          ${norm.authorName ? `<p class="asset-market-card-author">${esc(norm.authorName)}</p>` : ''}
+          <p class="asset-market-card-author">${esc(norm.authorName || '作者')}</p>
           <h3 class="asset-market-card-title">${esc(norm.title)}</h3>
-          <p class="asset-market-card-meta">${esc(norm.countLabel)} · ${esc(norm.priceLabel)}</p>
+          <p class="asset-market-card-meta">${esc(norm.countLabel)}</p>
           <p class="asset-market-card-meta">${commercialBadge(norm)}</p>
-          <div class="asset-market-card-foot">
-            <span class="asset-market-price">${esc(norm.priceLabel)}</span>
-            <div class="asset-market-card-actions">
-              <button type="button" class="btn btn-secondary btn-sm" data-action="preview">查看</button>
-              ${kind === 'owned' || norm.owned ? '<button type="button" class="btn btn-primary btn-sm" data-action="import">导入卡片库</button>' : ''}
-              ${authorActions}
-            </div>
+          <p class="asset-market-card-desc">${esc(norm.desc)}</p>
+          <div class="asset-market-card-foot my-home-package-foot">
+            ${priceHtml}
+            ${actionsHtml}
           </div>
         </div>
       </article>`;
@@ -627,7 +637,7 @@
           : '<div class="feature-empty"><p>暂无拥有的资产包</p><p class="panel-hint">在「卡片资产」领取免费包或购买后，会显示在这里。</p><button type="button" class="btn btn-secondary btn-sm" onclick="switchAppPage(\'assetmarket\')">去卡片资产</button></div>';
       return;
     }
-    container.innerHTML = `<div class="asset-market-grid my-home-package-grid">${list
+    container.innerHTML = `<div class="asset-market-grid">${list
       .map((pkg) => renderMyHomePackageCard(pkg, kind))
       .join('')}</div>`;
     void hydrateMarketCovers(list);
@@ -635,7 +645,7 @@
       btn.addEventListener('click', () => {
         const id = btn.closest('[data-pkg-id]')?.dataset?.pkgId;
         const pkg = list.find((p) => p.id === id);
-        if (pkg) void openPackagePreview(pkg);
+        if (pkg) void openPackagePreview({ ...normalizePackage(pkg), owned: kind === 'owned' || !!pkg.owned });
       });
     });
     container.querySelectorAll('[data-action="preview-cover"]').forEach((btn) => {
@@ -1654,14 +1664,29 @@
           <label>价格（元，0=免费） <input class="settings-input" name="priceYuan" type="number" min="0" step="0.01" value="${esc(init.priceYuan != null ? init.priceYuan : 0)}"></label>
           <label>标签 <input class="settings-input" name="tag" maxlength="40" placeholder="免费 / 套装" value="${esc(init.tag || '')}"></label>
         </div>
-        <label class="asset-publish-check">
+        <label class="custom-checkbox asset-publish-check">
           <input type="checkbox" name="commercialUseAllowed"${init.commercialUseAllowed !== false ? ' checked' : ''}>
+          <span class="checkmark"></span>
           <span>购买者可商用</span>
         </label>
         <fieldset class="asset-publish-ui-picker">
           <legend class="panel-hint">市场展示样式</legend>
-          <label class="asset-publish-ui-opt"><input type="radio" name="packUi" value="light"${init.packUi !== 'heavy' ? ' checked' : ''}> 轻卡包（竖版紧凑 · 默认）</label>
-          <label class="asset-publish-ui-opt"><input type="radio" name="packUi" value="heavy"${init.packUi === 'heavy' ? ' checked' : ''}> 重卡包（加宽卡片 · 全宽横幅封面 · 适合体系/演示包）</label>
+          <div class="asset-publish-ui-options">
+            <label class="asset-publish-ui-opt">
+              <input type="radio" name="packUi" value="light"${init.packUi !== 'heavy' ? ' checked' : ''}>
+              <span class="asset-publish-ui-opt-body">
+                <strong>轻卡包</strong>
+                <em>竖版紧凑 · 默认</em>
+              </span>
+            </label>
+            <label class="asset-publish-ui-opt">
+              <input type="radio" name="packUi" value="heavy"${init.packUi === 'heavy' ? ' checked' : ''}>
+              <span class="asset-publish-ui-opt-body">
+                <strong>重卡包</strong>
+                <em>加宽卡片 · 横幅封面 · 适合体系包</em>
+              </span>
+            </label>
+          </div>
         </fieldset>
         <div class="asset-publish-cards-section">
           <div class="asset-publish-cards-head">
@@ -2126,39 +2151,16 @@
     if (!src) return;
     const allowSave = !!opts?.allowSave;
     const allowCollect = !!opts?.allowCollect;
-    window.__packLightboxCollect = allowCollect && opts?.packageId && opts?.cardId
-      ? {
-          packageId: opts.packageId,
-          cardId: opts.cardId,
-          packageTitle: opts.packageTitle || ''
-        }
-      : null;
-    const dlBtn = document.getElementById('lightboxDownloadBtn');
-    const collectBtn = document.getElementById('lightboxCollectBtn');
-    const prevDlDisplay = dlBtn?.style.display;
-    const prevCollectDisplay = collectBtn?.style.display;
-    if (dlBtn) {
-      dlBtn.style.display = allowSave ? '' : 'none';
-      dlBtn.disabled = !allowSave;
-    }
-    if (collectBtn) {
-      collectBtn.classList.toggle('hidden', !allowCollect);
-      collectBtn.disabled = !allowCollect;
-    }
-    window.__lightboxFromAssetPack = allowCollect;
-    if (typeof window.openLightbox === 'function') window.openLightbox(src);
-    else window.open(src, '_blank');
-    if (!allowSave && dlBtn) {
-      setTimeout(() => {
-        dlBtn.style.display = prevDlDisplay || '';
-      }, 300);
-    }
-    if (!allowCollect && collectBtn) {
-      setTimeout(() => {
-        collectBtn.classList.toggle('hidden', true);
-        collectBtn.style.display = prevCollectDisplay || '';
-      }, 300);
-    }
+    const assetPack = {
+      allowSave,
+      allowCollect,
+      packageId: opts?.packageId,
+      cardId: opts?.cardId,
+      packageTitle: opts?.packageTitle || ''
+    };
+    if (typeof window.openLightbox === 'function') {
+      window.openLightbox(src, { assetPack });
+    } else window.open(src, '_blank');
   }
 
   async function collectLightboxPackCard() {
@@ -2331,13 +2333,14 @@
       <div class="asset-preview-layout asset-preview-layout--tree-only">
         <section class="asset-preview-section">
           <h4>${owned ? '包内目录（已拥有 · 展开文件夹浏览全部图片）' : '目录结构（展开查看公开预览，点击放大）'}</h4>
+          ${owned ? '<p class="panel-hint asset-preview-owned-hint">展开文件夹 → 点击图片可放大并下载；「选择性导入」可勾选单张或整组导入卡片库。</p>' : ''}
           <ul class="asset-preview-tree asset-preview-tree--folders">${renderPreviewFolderList(folders, owned)}</ul>
         </section>
       </div>
       <footer class="asset-preview-foot">
         <p>${esc(pkg.license || pkg.desc || '')}</p>
         <div class="asset-preview-foot-actions">
-          ${owned ? '<button type="button" class="btn btn-secondary btn-sm" id="assetPreviewImportBtn">保存到卡片库</button>' : ''}
+          ${owned ? '<button type="button" class="btn btn-secondary btn-sm" id="assetPreviewImportBtn">选择性导入</button>' : ''}
           ${pkg.isAuthor ? '<button type="button" class="btn btn-secondary btn-sm" id="assetPreviewEditBtn">编辑分组名称</button>' : ''}
           ${pkg.isAuthor ? '<button type="button" class="btn btn-ghost btn-sm" id="assetPreviewArchiveBtn">下架删除</button>' : ''}
           <button type="button" class="btn btn-primary btn-sm" id="assetPreviewBuyBtn"${owned && !pkg.isDemo ? ' disabled' : ''}>${buyLabel}</button>
@@ -2358,6 +2361,7 @@
       if (!owned) void claimPackage(pkg);
     });
     document.getElementById('assetPreviewImportBtn')?.addEventListener('click', () => {
+      closePackagePreview();
       void openImportModal(pkg);
     });
     document.getElementById('assetPreviewEditBtn')?.addEventListener('click', () => {

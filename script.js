@@ -480,9 +480,8 @@
         void openAppreciateViewer(item.id);
         return true;
       }
-      if (item.type === 'post' && window.FeatureDraft?.openCommunitySidePanel) {
-        window.closeAppreciateViewer?.();
-        window.FeatureDraft.openCommunitySidePanel(item.id);
+      if (item.type === 'post' && window.FeatureDraft?.openCommunityAppreciateById) {
+        void window.FeatureDraft.openCommunityAppreciateById(item.id);
         return true;
       }
       return false;
@@ -1208,7 +1207,7 @@
       renderGroups();
       renderCards(true);
       updateGuestLimitUI();
-      if (window.SupabaseSync?.isLoggedIn?.()) scheduleCloudPush();
+      if (window.SupabaseSync?.isLoggedIn?.()) scheduleCloudPush({ urgent: true });
       if (!payload.silentToast) {
         showToast(payload.publishToCommunity ? '已保存到仓库并公开到社区' : '已保存到卡片仓库');
       }
@@ -2533,9 +2532,47 @@
     function markCardImageLoadFailed(img) {
       const media = img?.closest('.card-media');
       if (!media) return;
+      const card = img.closest('.card[data-id]');
+      const inWarehouse = !!card?.closest('#cardsContainer');
+      if (inWarehouse) {
+        media.classList.remove('is-loading');
+        media.classList.add('card-media--await');
+        if (img.dataset.warehouseFinalFail === '1') {
+          media.classList.add('card-media--load-failed');
+          img.style.visibility = 'visible';
+          img.style.opacity = '1';
+          scheduleWarehouseMasonryLayout();
+          return;
+        }
+        img.dataset.warehouseFinalFail = '1';
+        const cardId = card?.dataset?.id;
+        const ref = img.getAttribute('data-image-ref');
+        void (async () => {
+          if (!ref || !window.SupabaseSync?.resolveDisplayUrl) return;
+          try {
+            window.SupabaseSync.invalidateSignedCacheForRef?.(ref, cardId);
+            const url = await window.SupabaseSync.resolveDisplayUrl(ref, {
+              assetId: cardId,
+              variant: window.SupabaseSync.VARIANT_FULL || 'full',
+              tryAllPaths: true
+            });
+            if (url && window.CardImageLoader?.applyUrlToImg?.(img, url)) {
+              delete img.dataset.warehouseFinalFail;
+              media.classList.remove('card-media--load-failed', 'card-media--await');
+              scheduleWarehouseMasonryLayout();
+              return;
+            }
+          } catch (e) { /* ignore */ }
+          media.classList.add('card-media--load-failed');
+          img.style.visibility = 'visible';
+          img.style.opacity = '1';
+          scheduleWarehouseMasonryLayout();
+        })();
+        return;
+      }
       media.classList.remove('is-loading');
       media.remove();
-      scheduleMasonryForMedia(img.closest('.card') || media);
+      scheduleMasonryForMedia(card || media);
     }
 
     async function handleCardImageError(img) {
@@ -2546,10 +2583,13 @@
       const ref = img.getAttribute('data-image-ref');
       if (ref && img.dataset.resignTried !== '1') {
         img.dataset.resignTried = '1';
-        const path = window.SupabaseSync?.storagePathFromRef?.(ref);
-        if (path) window.SupabaseSync?.invalidateSignedCache?.(path);
+        window.SupabaseSync?.invalidateSignedCacheForRef?.(ref, cardId);
         try {
-          const url = await window.SupabaseSync?.resolveDisplayUrl?.(ref, { assetId: cardId });
+          const url = await window.SupabaseSync?.resolveDisplayUrl?.(ref, {
+            assetId: cardId,
+            variant: window.SupabaseSync.VARIANT_FULL || 'full',
+            tryAllPaths: true
+          });
           if (url && window.CardImageLoader?.applyUrlToImg?.(img, url)) return;
         } catch (e) { /* ignore */ }
       }
@@ -3694,6 +3734,9 @@
           }
         }
       }
+      if (Array.isArray(finalPayload.cards) && window.CloudSyncSafety?.dedupeWarehouseCards) {
+        finalPayload.cards = window.CloudSyncSafety.dedupeWarehouseCards(finalPayload.cards);
+      }
       if (Array.isArray(finalPayload.creations)) {
         finalPayload.creations = filterTombstonedCreations(finalPayload.creations);
       }
@@ -3829,14 +3872,15 @@
       }
     }
 
-    function scheduleCloudPush() {
+    function scheduleCloudPush(opts = {}) {
       if (!window.SupabaseSync?.isLoggedIn?.()) return;
       clearTimeout(cloudPushTimer);
+      const delay = opts.urgent === true ? 2500 : 15000;
       cloudPushTimer = setTimeout(() => {
         pushToCloud({ silent: true }).catch((e) => {
           console.warn('[cloud] silent push failed', e);
         });
-      }, 15000);
+      }, delay);
     }
     window.scheduleCloudPush = scheduleCloudPush;
 
@@ -3935,14 +3979,21 @@
       warmCardImagesBackground(slice, capMs || 8000);
     }
 
+    function retryWarehousePendingImages(container) {
+      if (!container) return;
+      window.SupabaseSync?.patchImageSrcFromCache?.(container, { visibleFirst: true, max: 48 });
+      window.CardImageLoader?.observeContainer?.(container);
+      void window.SupabaseSync?.hydrateImageElements?.(container, { onlyMissing: true, warehouseBoost: true });
+    }
+
     async function hydrateWarehouseGridImages(container, pageCards) {
       if (!container) return;
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
       const list = pageCards || [];
       if (list.length && window.SupabaseSync?.prefetchCardsImages) {
         await Promise.race([
-          window.SupabaseSync.prefetchCardsImages(list, 5000),
-          new Promise((r) => setTimeout(r, 5000))
+          window.SupabaseSync.prefetchCardsImages(list, 8000),
+          new Promise((r) => setTimeout(r, 8000))
         ]);
       }
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
@@ -3952,6 +4003,8 @@
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
       window.CardImageLoader?.observeContainer?.(container);
       if (!isMobileViewport()) scheduleWarehouseMasonryLayout();
+      setTimeout(() => retryWarehousePendingImages(container), 2200);
+      setTimeout(() => retryWarehousePendingImages(container), 7000);
     }
 
     async function hydrateWarehouseImagesFast(container, pageCards) {
@@ -4907,8 +4960,6 @@
       const image = card?.image;
       if (!image || typeof image !== 'string') return false;
       if (window.FeatureDraft?.isDisplayableImage && !window.FeatureDraft.isDisplayableImage(image)) return false;
-      const path = window.SupabaseSync?.storagePathFromRef?.(image);
-      if (path && window.SupabaseSync?.isPathKnownMissing?.(path)) return false;
       return true;
     }
 
@@ -4969,7 +5020,10 @@
       const prefetchCards = pageCards.slice(0, PER_PAGE);
       let prefetchP = Promise.resolve();
       if (page === 1 && prefetchCards.length && window.SupabaseSync?.prefetchWarehousePage) {
-        prefetchP = window.SupabaseSync.prefetchWarehousePage(prefetchCards, 2200);
+        prefetchP = window.SupabaseSync.prefetchWarehousePage(prefetchCards, 3200);
+      }
+      if (page === 1 && allFilteredCards.length > pageCards.length) {
+        warmCardImagesBackground(allFilteredCards.slice(0, 96), 14000);
       }
       const fragment = document.createDocumentFragment();
       const isAppend = !reset && page > 1;
@@ -6115,24 +6169,41 @@
 
     function syncLightboxActions(opts) {
       opts = opts || {};
+      const ap = opts.assetPack;
       const isCommunity = !!opts.community;
+      const isAssetPack = !!ap;
       window.__lightboxCommunityMode = isCommunity;
+      window.__lightboxAssetPackMode = isAssetPack;
+      window.__lightboxAssetPackOpts = isAssetPack ? ap : null;
       window.__lightboxCommunityPostId = opts.postId || null;
-      window.__lightboxWarehouseCardId = isCommunity ? null : (opts.cardId || null);
-      const showCollect = isCommunity && opts.postId;
-      const showGen = !isCommunity && !!opts.cardId;
-      const showDownload = !isCommunity;
-      document.getElementById('lightboxDownloadBtn')?.classList.toggle('hidden', !showDownload);
+      window.__lightboxWarehouseCardId = isCommunity || isAssetPack ? null : (opts.cardId || null);
+      const showCollect = (isCommunity && opts.postId) || (isAssetPack && ap.allowCollect);
+      const showGen = !isCommunity && !isAssetPack && !!opts.cardId;
+      const showDownload = !isCommunity && (!isAssetPack || ap.allowSave);
+      const dlBtn = document.getElementById('lightboxDownloadBtn');
+      if (dlBtn) {
+        dlBtn.classList.toggle('hidden', !showDownload);
+        dlBtn.style.display = '';
+      }
       const collectBtn = document.getElementById('lightboxCollectBtn');
       if (collectBtn) {
         if (showCollect) {
           collectBtn.classList.remove('hidden');
-          const faved = window.FeatureDraft?.isPostFavorited?.(opts.postId);
-          collectBtn.disabled = !!faved;
-          const label = collectBtn.querySelector('span');
-          const text = faved ? '已收藏' : '收藏到卡片库';
-          if (label) label.textContent = text;
-          else collectBtn.textContent = text;
+          collectBtn.style.display = '';
+          if (isCommunity) {
+            const faved = window.FeatureDraft?.isPostFavorited?.(opts.postId);
+            collectBtn.disabled = !!faved;
+            const label = collectBtn.querySelector('span');
+            const text = faved ? '已收藏' : '收藏到卡片库';
+            if (label) label.textContent = text;
+            else collectBtn.textContent = text;
+          } else {
+            collectBtn.disabled = false;
+            const label = collectBtn.querySelector('span');
+            const text = '收藏到卡片库';
+            if (label) label.textContent = text;
+            else collectBtn.textContent = text;
+          }
         } else {
           collectBtn.classList.add('hidden');
         }
@@ -6149,7 +6220,9 @@
       const frame = getLightboxFrame();
       const dlBtn = document.getElementById('lightboxDownloadBtn');
       if (!lightbox || !img) return;
-      if (opts.community || opts.cardId) {
+      if (opts.assetPack) {
+        syncLightboxActions({ assetPack: opts.assetPack });
+      } else if (opts.community || opts.cardId) {
         syncLightboxActions({
           community: !!opts.community,
           postId: opts.postId || window.__lightboxCommunityPostId,
@@ -6176,7 +6249,9 @@
         finishViewerFrameReveal(frame);
         if (window.__lightboxCommunityMode) layoutViewerBorderSvg(frame);
         if (dlBtn && !window.__lightboxCommunityMode) {
-          dlBtn.disabled = !(img.src && !img.src.includes('data:image/svg'));
+          const ap = window.__lightboxAssetPackOpts;
+          const canSave = !ap || ap.allowSave;
+          dlBtn.disabled = !canSave || !(img.src && !img.src.includes('data:image/svg'));
         }
       };
       const onFail = () => {
@@ -6229,14 +6304,30 @@
     function openLightbox(src, opts) {
       opts = opts || {};
       if (!opts.pending && (!src || typeof src !== 'string')) return;
-      if (!window.__lightboxFromAssetPack) {
-        window.__packLightboxCollect = null;
-      }
-      window.__lightboxFromAssetPack = false;
-      if (opts.community) {
-        syncLightboxActions({ community: true, postId: opts.postId || null });
+      if (opts.assetPack) {
+        const ap = opts.assetPack;
+        window.__packLightboxCollect =
+          ap.allowCollect && ap.packageId && ap.cardId
+            ? {
+                packageId: ap.packageId,
+                cardId: ap.cardId,
+                packageTitle: ap.packageTitle || ''
+              }
+            : null;
+        window.__lightboxFromAssetPack = !!ap.allowCollect;
+        syncLightboxActions({ assetPack: ap });
       } else {
-        syncLightboxActions({ cardId: opts.cardId || selectedCardId || null });
+        if (!window.__lightboxFromAssetPack) {
+          window.__packLightboxCollect = null;
+        }
+        window.__lightboxFromAssetPack = false;
+        window.__lightboxAssetPackMode = null;
+        window.__lightboxAssetPackOpts = null;
+        if (opts.community) {
+          syncLightboxActions({ community: true, postId: opts.postId || null });
+        } else {
+          syncLightboxActions({ cardId: opts.cardId || selectedCardId || null });
+        }
       }
       if (selectedCardId && imageData) {
         const navItems = cards

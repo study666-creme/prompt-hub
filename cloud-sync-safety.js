@@ -161,8 +161,44 @@
     return [...map.values()];
   }
 
+  function cardWarehouseDedupeKey(card) {
+    const job = card?.genJobId;
+    if (job) return `job:${String(job)}`;
+    const src = card?.genSourceId;
+    if (src) return `src:${String(src)}`;
+    return '';
+  }
+
+  function pickBetterWarehouseCard(a, b) {
+    const score = (c) => {
+      let s = 0;
+      if (c?.image) s += 8;
+      if ((c.prompt || '').trim().length > 10) s += 2;
+      s += Math.min(4, (c.updatedAt || c.createdAt || 0) / 1e14);
+      return s;
+    };
+    return score(b) > score(a) ? b : a;
+  }
+
+  /** 同一生图任务 / 同一 creation 只保留一张卡片，避免双端刷新后重复入库 */
+  function dedupeWarehouseCards(cards) {
+    const list = Array.isArray(cards) ? cards.filter((c) => c && c.id != null) : [];
+    const byKey = new Map();
+    const plain = [];
+    for (const c of list) {
+      const key = cardWarehouseDedupeKey(c);
+      if (!key) {
+        plain.push(c);
+        continue;
+      }
+      const prev = byKey.get(key);
+      byKey.set(key, prev ? pickBetterWarehouseCard(prev, c) : c);
+    }
+    return [...plain, ...byKey.values()];
+  }
+
   function mergeCardsList(localList, cloudList, tombstones) {
-    return byIdMergeWithPair(localList, cloudList, mergeCardPair, tombstones);
+    return dedupeWarehouseCards(byIdMergeWithPair(localList, cloudList, mergeCardPair, tombstones));
   }
 
   function byIdMerge(localList, cloudList, prefer, tombstones) {
@@ -247,7 +283,7 @@
       notifications: byIdMergeWithPair(
         local.notifications || [],
         cloud.notifications || [],
-        (a, b) => ({ ...b, ...a, read: !!(a.read && b.read) })
+        (a, b) => ({ ...b, ...a, read: !!(a.read || b.read) })
       )
     };
     return merged;
@@ -441,6 +477,7 @@
     mergePayload,
     mergeCardPair,
     mergeCardsList,
+    dedupeWarehouseCards,
     mergeCommunityPostsList,
     mergeCreationsList,
     imagePresenceScore,

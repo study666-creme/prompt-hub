@@ -20,8 +20,8 @@
   const VARIANT_FULL = 'full';
   const USE_STORAGE_TRANSFORM = false;
   const GRID_SIGN_CONCURRENCY = 12;
-  const WAREHOUSE_PREFETCH_CARD_CAP = 48;
-  const WAREHOUSE_FAST_FIRST = 24;
+  const WAREHOUSE_PREFETCH_CARD_CAP = 96;
+  const WAREHOUSE_FAST_FIRST = 32;
   const SS_SIGN_CACHE = 'ph_signed_urls_v1';
   const signInflight = new Map();
 
@@ -131,9 +131,13 @@
   function invalidateSignedCacheForRef(ref, assetId) {
     for (const p of listImagePathCandidates(normalizeImageRef(ref), assetId)) {
       invalidateSignedCache(p);
+      missingPathCache.delete(normalizePathKey(p));
     }
     const fromUrl = storagePathFromRef(ref);
-    if (fromUrl) invalidateSignedCache(fromUrl);
+    if (fromUrl) {
+      invalidateSignedCache(fromUrl);
+      missingPathCache.delete(normalizePathKey(fromUrl));
+    }
   }
 
   function isUsableLoadedImgSrc(src) {
@@ -557,6 +561,19 @@
       return data.signedUrl;
     } catch (e) {
       if (isStorageNotFoundError(e)) {
+        if (variant === VARIANT_GRID) {
+          if (/_grid\.(jpe?g|webp|png)$/i.test(fileKey)) {
+            markPathMissing(fileKey);
+            const primary = fileKey.replace(/_grid\.(jpe?g|webp|png)$/i, '.jpg');
+            if (primary !== fileKey) {
+              const alt = await getSignedUrlForPath(`/${primary}`, { variant: VARIANT_FULL });
+              if (alt) return alt;
+            }
+            return null;
+          }
+          const fullUrl = await getSignedUrlForPath(path, { variant: VARIANT_FULL });
+          if (fullUrl) return fullUrl;
+        }
         markPathMissing(fileKey);
         return null;
       }
@@ -565,6 +582,16 @@
       }
       throw e;
     }
+  }
+
+  function cardImageStillResolvable(image, assetId) {
+    if (!image || typeof image !== 'string') return false;
+    if (isDataUrl(image) || image.startsWith('blob:')) return true;
+    if (/^https?:\/\//i.test(image) && !isInvalidMediaUrl(image)) return true;
+    if (!isStorageRef(image)) return true;
+    const candidates = listImagePathCandidates(normalizeImageRef(image), assetId);
+    if (!candidates.length) return true;
+    return candidates.some((p) => !isPathKnownMissing(p));
   }
 
   function cardImageStoragePath(cardId, ownerId) {
@@ -2144,6 +2171,7 @@
     storagePathFromRef,
     primaryImagePath,
     isPathKnownMissing,
+    cardImageStillResolvable,
     isInvalidMediaUrl,
     normalizeImageRef,
     resolveDisplayUrl,

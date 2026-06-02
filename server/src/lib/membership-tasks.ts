@@ -149,7 +149,7 @@ export function taskRewardForKey(
       days: 2,
       credits: 0,
       title: '添加到桌面',
-      description: '从手机桌面图标打开本站（添加到主屏幕后点开即可）'
+      description: '从手机桌面图标打开本站（请在手机版「设置」里点「添加到主屏幕」，不要用浏览器菜单里的添加）'
     },
     redeem_invite_code: {
       days: 1,

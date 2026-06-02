@@ -532,31 +532,134 @@
     contain: layout;
   }
 
-  /* 手机社区/创作：flex 两列（比 Grid 更稳，避免 overflow:hidden 卡片行高塌缩） */
+  /* 手机：侧栏隐藏卡片式创作（桌面保留） */
+  .app-nav-item.desktop-nav-assetstudio {
+    display: none !important;
+  }
+
+  /* 手机社区 / 我的主页：整页滚动，顶栏随内容翻走 */
+  #pageCommunity .feature-shell,
+  #pageCreations .feature-shell {
+    overflow-y: auto !important;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #pageCommunity .community-workspace,
+  #pageCommunity .community-page-layout,
+  #pageCommunity .community-page-main,
+  #pageCommunity .feature-body-cards,
+  #pageCreations .community-workspace,
+  #pageCreations .community-page-layout,
+  #pageCreations .community-page-main,
+  #pageCreations .feature-body-cards {
+    flex: none;
+    min-height: 0;
+    overflow: visible;
+  }
+
   #communityGrid.cards-container.community-cards:not(.list-view),
   #creationsGrid.cards-container:not(.list-view) {
+    overflow-y: visible !important;
+    overflow-x: hidden !important;
+    flex: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  body.efficiency-mode #communityGrid.cards-container,
+  body.efficiency-mode #creationsGrid.cards-container {
+    overflow-y: visible !important;
+    flex: none !important;
+    height: auto !important;
+  }
+
+  .pwa-install-banner {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(62px + env(safe-area-inset-bottom));
+    z-index: 9600;
+    pointer-events: auto;
+  }
+
+  .pwa-install-banner.hidden {
+    display: none !important;
+  }
+
+  .pwa-install-banner-inner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  }
+
+  .pwa-install-banner-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .pwa-install-banner-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .pwa-install-banner-desc {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.35;
+  }
+
+  .pwa-install-banner-actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 6px;
+  }
+
+  /* 手机社区/创作：扁平双列，列容器 display:contents 参与同一 flex 网格 */
+  #communityGrid.cards-container.community-cards:not(.list-view),
+  #creationsGrid.cards-container:not(.list-view),
+  #communityGrid.community-feed-columns:not(.list-view),
+  #creationsGrid.community-feed-columns:not(.list-view) {
     display: flex !important;
     flex-wrap: wrap !important;
     flex-direction: row !important;
     align-content: flex-start !important;
     align-items: flex-start !important;
-    gap: 12px 10px !important;
-    flex: 1 1 auto !important;
-    min-height: 120px !important;
+    gap: 12px !important;
+    row-gap: 12px !important;
+    column-gap: 12px !important;
+    flex: none !important;
+    min-height: 0 !important;
     max-height: none !important;
     position: relative !important;
     overflow-x: hidden !important;
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch;
+    overflow-y: visible !important;
     contain: none !important;
     padding: 12px 10px calc(88px + env(safe-area-inset-bottom)) !important;
   }
 
+  #communityGrid.community-feed-columns:not(.list-view) > .community-feed-col,
+  #creationsGrid.community-feed-columns:not(.list-view) > .community-feed-col {
+    display: contents;
+  }
+
   #communityGrid.cards-container:not(.list-view) > .card,
-  #creationsGrid.cards-container:not(.list-view) > .card {
-    flex: 0 0 calc((100% - 10px) / 2) !important;
-    width: calc((100% - 10px) / 2) !important;
-    max-width: calc((100% - 10px) / 2) !important;
+  #creationsGrid.cards-container:not(.list-view) > .card,
+  #communityGrid.community-feed-columns:not(.list-view) .card,
+  #creationsGrid.community-feed-columns:not(.list-view) .card {
+    flex: 0 0 calc((100% - 12px) / 2) !important;
+    width: calc((100% - 12px) / 2) !important;
+    max-width: calc((100% - 12px) / 2) !important;
     box-sizing: border-box !important;
     height: auto !important;
     min-height: 0 !important;
@@ -598,6 +701,29 @@
   .cards-container .grid-sizer {
     display: none !important;
     height: 0 !important;
+  }
+
+  #cardsContainer.cards-container .card .card-media.is-loading,
+  #cardsContainer.cards-container .card .card-media.card-media--await {
+    aspect-ratio: 3 / 4;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+
+  #cardsContainer.cards-container .card .card-media:not(.is-loading):not(.card-media--await) {
+    aspect-ratio: auto;
+    height: auto;
+    min-height: 0;
+    background: transparent;
+  }
+
+  #cardsContainer.cards-container .card .card-media:not(.is-loading):not(.card-media--await) .card-img {
+    position: static;
+    width: 100%;
+    height: auto;
+    max-height: none;
+    object-fit: contain;
+    object-position: center center;
   }
 
   .cards-container .card .card-media {
@@ -725,24 +851,29 @@
   }
 
   .edit-panel .image-drop-area.has-image {
-    width: fit-content;
-    max-width: calc(100% - 24px);
+    width: 100%;
+    max-width: 100%;
     height: auto;
     max-height: none;
     overflow: hidden;
-    border-radius: 12px;
-    margin: 8px auto 0;
+    border-radius: 0;
+    margin: 0;
     display: block;
-    background: #06080c;
+    background: var(--bg-elevated);
+    box-sizing: border-box;
+    line-height: 0;
+    position: relative;
   }
 
   .edit-panel .image-drop-area.has-image img#previewImage {
+    width: 100%;
+    max-width: 100%;
     height: auto;
     min-height: 0;
-    max-height: min(60vh, 420px);
-    width: auto;
-    max-width: 100%;
+    max-height: min(85vh, 720px);
     object-fit: contain;
+    object-position: center center;
+    display: block;
     background: transparent;
   }
 
@@ -860,7 +991,9 @@
     flex-wrap: wrap !important;
     align-content: flex-start !important;
     align-items: flex-start !important;
-    gap: 10px !important;
+    gap: 12px !important;
+    row-gap: 12px !important;
+    column-gap: 12px !important;
     height: auto !important;
     contain: layout;
   }
@@ -870,9 +1003,9 @@
   body.imagegen-mobile-view-feed .imagegen-feed > .imagegen-feed-card,
   .imagegen-feed.imagegen-feed--tiles > .imagegen-feed-card,
   .imagegen-feed.imagegen-feed--masonry > .imagegen-feed-card {
-    flex: 0 0 calc((100% - 10px) / 2) !important;
-    width: calc((100% - 10px) / 2) !important;
-    max-width: calc((100% - 10px) / 2) !important;
+    flex: 0 0 calc((100% - 12px) / 2) !important;
+    width: calc((100% - 12px) / 2) !important;
+    max-width: calc((100% - 12px) / 2) !important;
     box-sizing: border-box !important;
     position: relative !important;
     height: auto !important;
@@ -1402,13 +1535,26 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  body.imagegen-mobile-view-feed .imagegen-side {
-    flex: 1;
+  /* 手机生图 · 作品/社区：整页滚动，Tab/筛选随卡片上移 */
+  body.imagegen-mobile-view-feed #pageImageGen .feature-shell {
+    overflow-y: auto !important;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.imagegen-mobile-view-feed #pageImageGen .imagegen-layout,
+  body.imagegen-mobile-view-feed #pageImageGen .imagegen-side {
+    flex: none;
     min-height: 0;
+    overflow: visible;
     max-height: none !important;
+  }
+
+  body.imagegen-mobile-view-feed .imagegen-side {
+    flex: none;
     display: flex !important;
     flex-direction: column;
-    overflow: hidden;
+    overflow: visible;
   }
 
   body.imagegen-mobile-view-feed .imagegen-feed-tabs,
@@ -1417,11 +1563,70 @@
     flex-shrink: 0;
   }
 
-  body.imagegen-mobile-view-feed .imagegen-feed {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
+  body.imagegen-mobile-view-feed .imagegen-feed-tabs {
+    background: transparent;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 12px 0;
+  }
+
+  body.imagegen-mobile-view-feed .imagegen-community-filters {
+    padding: 8px 12px 4px;
+    background: transparent;
+  }
+
+  body.imagegen-mobile-view-feed .imagegen-community-filter-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  body.imagegen-mobile-view-feed .imagegen-community-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 6px;
+    padding: 0;
+    border: none;
+    background: transparent !important;
     -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  body.imagegen-mobile-view-feed .imagegen-community-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  body.imagegen-mobile-view-feed .imagegen-community-tabs .feature-tab {
+    flex: 0 0 auto;
+    padding: 5px 12px;
+    font-size: 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-muted);
+  }
+
+  body.imagegen-mobile-view-feed .imagegen-community-tabs .feature-tab.active {
+    background: color-mix(in srgb, var(--accent) 18%, var(--bg-card));
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    color: var(--text-primary);
+  }
+
+  body.imagegen-mobile-view-feed .imagegen-feed-hint {
+    background: transparent;
+    border-bottom: none;
+    padding: 4px 12px 8px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-muted);
+  }
+
+  body.imagegen-mobile-view-feed .imagegen-feed {
+    flex: none;
+    min-height: 0;
+    overflow-y: visible !important;
+    overflow-x: hidden;
+    height: auto !important;
     flex-direction: row !important;
     flex-wrap: wrap !important;
     align-content: flex-start !important;
@@ -1432,7 +1637,7 @@
     padding: 10px 12px;
     gap: 8px;
     border-bottom: 1px solid var(--border);
-    background: var(--bg-secondary);
+    background: transparent;
   }
 
   .imagegen-filter-pills {
@@ -1659,6 +1864,29 @@
     border-left: none;
     min-height: 0;
     flex: 1;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  body.imagegen-mobile-view-feed .imagegen-side,
+  body.imagegen-mobile-view-feed .imagegen-feed {
+    background: transparent !important;
+  }
+
+  body.imagegen-mobile-view-feed .imagegen-feed-tabs,
+  body.imagegen-mobile-view-feed .imagegen-warehouse-filters,
+  body.imagegen-mobile-view-feed .imagegen-community-filters,
+  body.imagegen-mobile-view-feed .imagegen-feed-hint {
+    background: transparent !important;
+  }
+
+  body.imagegen-mobile-view-feed .imagegen-warehouse-filters {
+    padding: 8px 12px 6px;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
   }
 
   .imagegen-preview-panel {
@@ -1775,9 +2003,6 @@
     min-height: 0;
   }
 
-    opacity: 1 !important;
-  }
-
   .imagegen-feed-card {
     overflow: hidden;
   }
@@ -1844,7 +2069,7 @@
     min-height: 0 !important;
     overflow: hidden !important;
     position: relative !important;
-    background: #121218 !important;
+    background: var(--bg-hover) !important;
     line-height: 0;
   }
 
@@ -1890,7 +2115,33 @@
 
   #communityGrid .card-media.is-loading,
   #creationsGrid .card-media.is-loading {
-    background: #121218 !important;
+    background: var(--bg-hover) !important;
+  }
+
+  .community-side-panel .community-side-body {
+    padding: 0 0 calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .community-side-panel .community-side-body > :not(.community-side-img-btn) {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .community-side-panel .community-side-img-btn {
+    width: 100%;
+    max-width: 100%;
+    margin: 0 0 12px;
+    border-radius: 0;
+    background: var(--bg-elevated);
+  }
+
+  .community-side-panel .community-side-img {
+    max-height: min(88vh, 900px);
+  }
+
+  .community-side-panel .community-side-img-btn.is-loading {
+    background: var(--bg-hover);
+    min-height: min(28vh, 200px);
   }
 
   .community-side-panel {

@@ -1066,6 +1066,20 @@ body {
       justify-content: center;
       gap: 8px;
       width: calc(100% - 28px);
+      position: relative;
+    }
+    .sidebar-collect-badge {
+      position: absolute;
+      top: 4px;
+      right: 6px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: var(--accent-bg-strong);
+      color: var(--accent);
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 1.35;
+      pointer-events: none;
     }
     .sidebar-collect-btn:hover {
       border-color: var(--accent);
@@ -2411,27 +2425,30 @@ body {
       background: rgba(0,0,0,0.2);
     }
 .image-drop-area.has-image {
-  width: fit-content;
-  max-width: calc(100% - 8px);
+  width: 100%;
+  max-width: 100%;
   height: auto;
   max-height: none;
   min-height: 0;
-  background: #06080c;
+  background: var(--bg-elevated);
   overflow: hidden;
   display: block;
-  margin: 0 auto;
+  margin: 0;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   padding: 0;
   flex-shrink: 0;
+  line-height: 0;
+  box-sizing: border-box;
+  position: relative;
 }
 
 .image-drop-area.has-image img,
 .image-drop-area.has-image img#previewImage {
-  width: auto;
-  max-width: min(100%, 520px);
+  width: 100%;
+  max-width: 100%;
   height: auto;
-  max-height: min(72vh, 560px);
+  max-height: min(85vh, 720px);
   min-height: 0;
   object-fit: contain;
   object-position: center center;

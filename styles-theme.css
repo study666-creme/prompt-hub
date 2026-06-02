@@ -161,6 +161,19 @@ body.efficiency-mode .ui-vignette {
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
 }
 
+[data-theme="light"] .search-box {
+  background: var(--bg-card);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .search-box:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg);
+}
+
 [data-theme="light"] .auth-overlay {
   background: rgba(0, 0, 0, 0.35);
 }
@@ -281,6 +294,24 @@ body.efficiency-mode .ui-vignette {
 [data-theme="light"] .feature-header-imagegen,
 [data-theme="light"] .imagegen-form {
   background: #ffffff;
+}
+
+[data-theme="light"] .imagegen-side,
+[data-theme="light"] .imagegen-feed-tabs,
+[data-theme="light"] .imagegen-warehouse-filters,
+[data-theme="light"] .imagegen-community-filters,
+[data-theme="light"] .imagegen-feed-hint,
+[data-theme="light"] body.imagegen-mobile-view-feed .imagegen-feed {
+  background: transparent;
+}
+
+:root:not([data-theme="light"]) .imagegen-side,
+:root:not([data-theme="light"]) body.imagegen-mobile-view-feed .imagegen-feed-tabs,
+:root:not([data-theme="light"]) body.imagegen-mobile-view-feed .imagegen-warehouse-filters,
+:root:not([data-theme="light"]) body.imagegen-mobile-view-feed .imagegen-community-filters,
+:root:not([data-theme="light"]) body.imagegen-mobile-view-feed .imagegen-feed-hint {
+  background: transparent;
+  border-color: var(--border);
 }
 
 [data-theme="light"] .imagegen-form-footer {

@@ -2529,11 +2529,11 @@
   width: 100%;
   height: auto;
   max-height: min(75vh, 640px);
-  object-fit: cover;
-  object-position: center top;
+  object-fit: contain;
+  object-position: center center;
   display: block;
   vertical-align: top;
-  background: var(--bg-hover);
+  background: transparent;
 }
 
 .imagegen-feed-media.is-loading:not(.imagegen-gen-pending),
@@ -3072,7 +3072,16 @@ body.user-profile-open {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 16px;
+  padding: 0 0 16px;
+}
+
+.community-side-body > :not(.community-side-img-btn) {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+.community-side-body > .community-side-img-btn + :not(.community-side-img-btn) {
+  padding-top: 12px;
 }
 
 .community-post-card--visual {
@@ -3261,14 +3270,15 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
   min-height: 0;
   padding: 0;
   border: none;
-  background: #06080c;
+  background: var(--bg-elevated);
   cursor: zoom-in;
   position: relative;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   overflow: hidden;
   line-height: 0;
   pointer-events: auto;
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 .community-side-img {
   width: 100%;
@@ -3395,6 +3405,65 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
 }
 
 @media (min-width: 901px) {
+  /* 电脑社区侧栏大图：铺满宽度、完整显示、不裁切 */
+  .community-side-body {
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .community-side-img-btn {
+    width: 100%;
+    max-width: 100%;
+    background: var(--bg-elevated);
+    border-radius: 0;
+    overflow: hidden;
+  }
+
+  .community-side-img {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    max-height: none;
+    object-fit: contain;
+    object-position: center center;
+    display: block;
+  }
+
+  #communityGrid:not(.list-view) .community-post-card--visual .card-media,
+  #creationsGrid:not(.list-view) .community-post-card--visual .card-media {
+    aspect-ratio: auto;
+    max-height: none;
+    min-height: 0;
+    background: var(--bg-hover);
+  }
+
+  #communityGrid:not(.list-view) .community-post-card--visual .card-media .card-img,
+  #creationsGrid:not(.list-view) .community-post-card--visual .card-media .card-img,
+  #communityGrid:not(.list-view) .community-post-card--visual .card-media:not(.is-loading) .card-img,
+  #creationsGrid:not(.list-view) .community-post-card--visual .card-media:not(.is-loading) .card-img {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    object-fit: contain !important;
+    object-position: center center !important;
+  }
+
+  #imageGenFeed .imagegen-feed-media {
+    background: var(--bg-hover);
+    line-height: 0;
+  }
+
+  #imageGenFeed .imagegen-feed-media > img {
+    width: 100%;
+    height: auto;
+    max-height: none;
+    object-fit: contain !important;
+    object-position: center center !important;
+    background: transparent;
+  }
+
   .community-workspace {
     flex-direction: row;
   }

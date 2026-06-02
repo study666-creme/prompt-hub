@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260602i';
+    window.__APP_BUILD__ = '20260602x';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -58,12 +58,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260602i">
-  <link rel="stylesheet" href="styles-theme.css?v=20260602i">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260602i">
+  <link rel="stylesheet" href="styles.css?v=20260602u">
+  <link rel="stylesheet" href="styles-theme.css?v=20260602u">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260602u">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260602i">
-  <link rel="stylesheet" href="styles-assets.css?v=20260606u">
+  <link rel="stylesheet" href="styles-features.css?v=20260602u">
+  <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
   <script src="theme.js?v=20260615z"></script>
@@ -144,6 +144,9 @@
             <span class="settings-check-box" aria-hidden="true"></span>
             <span class="settings-check-label">显示小铃铛未读红点</span>
           </label>
+        </section>
+        <section class="settings-section mobile-only settings-section-compact" id="pwaInstallSettingsSection">
+          <button type="button" class="btn btn-secondary" id="pwaInstallSettingsBtn">添加到主屏幕</button>
         </section>
       </div>
       <footer class="settings-footer">
@@ -494,7 +497,7 @@
         <span class="app-nav-label">卡片资产</span>
         <span class="app-nav-soon">草案</span>
       </button>
-      <button type="button" class="app-nav-item" data-app="assetstudio">
+      <button type="button" class="app-nav-item desktop-nav-assetstudio" data-app="assetstudio">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"/><path d="M3 12h18"/><path d="m19 5-2 2"/><path d="m5 19 2-2"/></svg>
         <span class="app-nav-label">卡片式创作</span>
         <span class="app-nav-tag">限免</span>
@@ -546,7 +549,7 @@
         <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260602i</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260602x</p>
     </div>
   </nav>
 
@@ -633,6 +636,7 @@
     <button type="button" class="sidebar-collect-btn" onclick="openExtensionCollectPanel()" title="下载插件，在任意网页保存图片和文字">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       提示词采集
+      <span class="sidebar-collect-badge">插件</span>
     </button>
     <p class="guest-limit-hint hidden" id="guestLimitHint"></p>
     <div class="sidebar-section sidebar-warehouses">
@@ -1330,6 +1334,19 @@
 
   <div class="mobile-drawer-overlay" id="mobileDrawerOverlay" hidden aria-hidden="true" style="display:none"></div>
 
+  <div class="pwa-install-banner mobile-only hidden" id="pwaInstallBanner" role="region" aria-label="添加到主屏幕">
+    <div class="pwa-install-banner-inner">
+      <div class="pwa-install-banner-text">
+        <p class="pwa-install-banner-title">添加到主屏幕</p>
+        <p class="pwa-install-banner-desc">像 App 一样全屏打开，浏览更流畅</p>
+      </div>
+      <div class="pwa-install-banner-actions">
+        <button type="button" class="btn btn-primary btn-sm" id="pwaInstallAcceptBtn">添加</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="pwaInstallDismissBtn">以后</button>
+      </div>
+    </div>
+  </div>
+
   <nav class="mobile-bottom-nav mobile-only" id="mobileBottomNav" aria-label="手机底部导航">
     <button type="button" class="mobile-tab active" data-mobile-tab="cards" onclick="mobileSwitchTab('cards')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
@@ -1355,22 +1372,23 @@
   <script src="api-config.js"></script>
   <script src="api-client.js?v=20260606o"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260606p"></script>
-  <script src="card-image-loader.js?v=20260602i"></script>
+  <script src="supabase-sync.js?v=20260602x"></script>
+  <script src="card-image-loader.js?v=20260602x"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
   <script src="subscription.js?v=20260622e"></script>
-  <script src="trial-tasks.js?v=20260602r"></script>
+  <script src="trial-tasks.js?v=20260602u"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="script.js?v=20260602i"></script>
+  <script src="script.js?v=20260602x"></script>
   <script src="points-system.js?v=20260606m"></script>
   <script src="imagegen-prompt-kit.js?v=20260601b"></script>
   <script src="imagegen-prompt-tools.js?v=20260606l"></script>
-  <script src="features-draft.js?v=20260602i"></script>
+  <script src="features-draft.js?v=20260602u"></script>
   <script src="community-gacha.js?v=20260606v"></script>
-  <script src="features-assets.js?v=20260606c"></script>
+  <script src="features-assets.js?v=20260602w"></script>
   <script src="hotfix-image-layout.js?v=20260603t"></script>
-  <script src="mobile.js?v=20260606m"></script>
+  <script src="pwa-install.js?v=20260602u"></script>
+  <script src="mobile.js?v=20260602u"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

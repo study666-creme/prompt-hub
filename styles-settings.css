@@ -1212,6 +1212,23 @@ body.trial-tasks-open {
   margin-bottom: 0;
 }
 
+.settings-section-compact {
+  padding: 0 !important;
+  margin-bottom: 8px !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.settings-section-compact:hover {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.settings-section-compact .btn {
+  width: 100%;
+}
+
 .settings-section:hover {
   border-color: var(--border-light) !important;
   box-shadow: var(--shadow-md);
