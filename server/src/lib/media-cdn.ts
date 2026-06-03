@@ -127,9 +127,10 @@ export function communityImagePathCandidates(
   ref: string,
   authorId?: string,
   cardId?: string,
-  opts?: { preferGrid?: boolean }
+  opts?: { preferGrid?: boolean; gridOnly?: boolean }
 ): string[] {
   const preferGrid = opts?.preferGrid !== false;
+  const gridOnly = opts?.gridOnly === true;
   const out: string[] = [];
   const add = (p: string) => {
     const key = p.replace(/^\//, '');
@@ -137,9 +138,15 @@ export function communityImagePathCandidates(
   };
   const fromRef = storagePathFromRef(ref);
   if (fromRef) {
+    const clean = fromRef.replace(/^\//, '');
     if (preferGrid) {
-      const grid = gridPathFromPrimary(fromRef.replace(/^\//, ''));
+      const grid = gridPathFromPrimary(clean);
       if (grid) add(grid);
+      if (/_grid\.(jpe?g|webp|png)$/i.test(clean)) {
+        add(clean.replace(/_grid\.(jpe?g|webp|png)$/i, '.jpg'));
+        add(clean.replace(/_grid\.(jpe?g|webp|png)$/i, '.webp'));
+        add(clean.replace(/_grid\.(jpe?g|webp|png)$/i, '.png'));
+      }
     }
     add(fromRef);
   }
@@ -162,6 +169,9 @@ export function communityImagePathCandidates(
     add(`${aid}/generated/${base}.jpg`);
     add(`${aid}/generated/${cid}.jpg`);
   }
+  if (gridOnly) {
+    return out.filter((p) => /_grid\.(jpe?g|webp|png)$/i.test(p));
+  }
   return out;
 }
 
@@ -171,6 +181,162 @@ function gridPathFromPrimary(path: string): string | null {
   const m = clean.match(/^(.+\/)([^/]+)\.(jpe?g|webp|png)$/i);
   if (!m) return null;
   return `${m[1]}${m[2]}_grid.jpg`;
+}
+
+export { gridPathFromPrimary };
+
+function primaryPathFromGridPath(gridPath: string): string | null {
+  const candidates = primaryCandidatesFromGridPath(gridPath);
+  return candidates[0] || null;
+}
+
+function primaryCandidatesFromGridPath(gridPath: string): string[] {
+  const clean = gridPath.replace(/^\//, '');
+  if (!/_grid\.(jpe?g|webp|png)$/i.test(clean)) return [];
+  const stem = clean.replace(/_grid\.(jpe?g|webp|png)$/i, '');
+  return [`${stem}.jpg`, `${stem}.jpeg`, `${stem}.webp`, `${stem}.png`];
+}
+
+const GRID_SERVE_MAX_SIDE = 640;
+const GRID_SERVE_JPEG_QUALITY = 0.78;
+const GRID_MIN_BYTES = 2048;
+
+/** Supabase Storage 变换：Worker 内无 Canvas 时用此 API 生成 grid */
+async function fetchSupabaseGridBytes(env: Env, primaryPath: string): Promise<Blob | null> {
+  const base = String(env.SUPABASE_URL || '').replace(/\/$/, '');
+  const key = String(env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  if (!base || !key) return null;
+  const objectPath = primaryPath.replace(/^\//, '');
+  const segments = objectPath.split('/').map((s) => encodeURIComponent(s)).join('/');
+  const url =
+    `${base}/storage/v1/render/image/authenticated/${CARD_IMAGES_BUCKET}/${segments}` +
+    `?width=${GRID_SERVE_MAX_SIDE}&quality=78&resize=contain`;
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${key}`, apikey: key }
+    });
+    if (!res.ok) return null;
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength < 1024) return null;
+    const ct = (res.headers.get('content-type') || 'image/jpeg').split(';')[0];
+    return new Blob([buf], { type: ct || 'image/jpeg' });
+  } catch {
+    return null;
+  }
+}
+
+async function buildGridBlobFromPrimary(
+  env: Env,
+  admin: ReturnType<typeof createAdminClient>,
+  primaryPath: string
+): Promise<Blob | null> {
+  const primaryClean = primaryPath.replace(/^\//, '');
+  const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).download(primaryClean);
+  if (!error && data) {
+    const resized = await resizeImageToGridJpeg(data);
+    if (resized && resized.size >= GRID_MIN_BYTES) return resized;
+  }
+  const transformed = await fetchSupabaseGridBytes(env, primaryClean);
+  if (transformed && transformed.size >= GRID_MIN_BYTES) return transformed;
+  return null;
+}
+
+export async function materializeCommunityGridIfMissing(
+  c: Context<{ Bindings: Env }>,
+  admin: ReturnType<typeof createAdminClient>,
+  gridPath: string,
+  ref: string,
+  authorId?: string,
+  cardId?: string
+): Promise<void> {
+  const gridClean = gridPath.replace(/^\//, '');
+  if (await storageObjectExistsLight(admin, gridClean)) return;
+
+  let primaryCandidates = [...primaryCandidatesFromGridPath(gridClean)];
+  if (!primaryCandidates.length) {
+    primaryCandidates = communityImagePathCandidates(ref, authorId, cardId, {
+      preferGrid: false,
+      gridOnly: false
+    }).filter((p) => !/_grid\.(jpe?g|webp|png)$/i.test(p));
+  }
+  const primary = await findFirstExistingStoragePath(admin, primaryCandidates);
+  if (!primary) return;
+
+  const gridBlob = await buildGridBlobFromPrimary(c.env, admin, primary);
+  if (!gridBlob) return;
+
+  await admin.storage.from(CARD_IMAGES_BUCKET).upload(gridClean, gridBlob, {
+    contentType: 'image/jpeg',
+    upsert: true
+  });
+}
+
+async function resizeImageToGridJpeg(source: Blob): Promise<Blob | null> {
+  try {
+    const g = globalThis as typeof globalThis & {
+      createImageBitmap?: (image: Blob) => Promise<{ width: number; height: number; close: () => void }>;
+      OffscreenCanvas?: new (w: number, h: number) => {
+        getContext: (type: '2d') => { drawImage: (...args: unknown[]) => void } | null;
+        convertToBlob: (opts?: { type?: string; quality?: number }) => Promise<Blob>;
+      };
+    };
+    if (!g.createImageBitmap || !g.OffscreenCanvas) return null;
+    const bitmap = await g.createImageBitmap(source);
+    let w = bitmap.width;
+    let h = bitmap.height;
+    if (!w || !h) {
+      bitmap.close();
+      return null;
+    }
+    const maxSide = GRID_SERVE_MAX_SIDE;
+    if (w > maxSide || h > maxSide) {
+      const scale = maxSide / Math.max(w, h);
+      w = Math.max(1, Math.round(w * scale));
+      h = Math.max(1, Math.round(h * scale));
+    }
+    const canvas = new g.OffscreenCanvas(w, h);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      bitmap.close();
+      return null;
+    }
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+    return await canvas.convertToBlob({ type: 'image/jpeg', quality: GRID_SERVE_JPEG_QUALITY });
+  } catch {
+    return null;
+  }
+}
+
+/** 社区列表：已有 grid 用 grid；否则原图存在则返回应对的 grid 路径（CDN 按需生成） */
+export async function resolveCommunityGridPath(
+  admin: ReturnType<typeof createAdminClient>,
+  ref: string,
+  authorId?: string,
+  cardId?: string,
+  bucket = CARD_IMAGES_BUCKET
+): Promise<string | null> {
+  const gridPaths = communityImagePathCandidates(ref, authorId, cardId, { gridOnly: true });
+  const existing = await findFirstExistingStoragePath(admin, gridPaths, bucket);
+  if (existing) return existing;
+
+  let primaryPaths = communityImagePathCandidates(ref, authorId, cardId, {
+    preferGrid: false,
+    gridOnly: false
+  }).filter(p => !/_grid\.(jpe?g|webp|png)$/i.test(p));
+
+  const fromRef = storagePathFromRef(ref)?.replace(/^\//, '') || '';
+  if (fromRef && /_grid\.(jpe?g|webp|png)$/i.test(fromRef)) {
+    for (const p of primaryCandidatesFromGridPath(fromRef)) {
+      if (!primaryPaths.includes(p)) primaryPaths.push(p);
+    }
+  } else if (fromRef && !primaryPaths.includes(fromRef)) {
+    primaryPaths.unshift(fromRef);
+  }
+
+  const primary = await findFirstExistingStoragePath(admin, primaryPaths, bucket);
+  if (!primary) return null;
+  return gridPathFromPrimary(primary);
 }
 
 function contentTypeForPath(path: string): string {
@@ -196,7 +362,7 @@ export async function storageObjectExistsLight(
     const { data, error } = await admin.storage.from(bucket).list(dir, { limit: page, offset });
     if (error) return false;
     if (!data?.length) return false;
-    if (data.some(item => item.name === name && item.id)) return true;
+    if (data.some(item => item.name === name)) return true;
     if (data.length < page) return false;
     offset += page;
   }
@@ -211,6 +377,12 @@ export async function findFirstExistingStoragePath(
   for (const path of paths) {
     const clean = path.replace(/^\//, '');
     if (!clean) continue;
+    try {
+      const { data, error } = await admin.storage.from(bucket).download(clean);
+      if (!error && data && (data.size || 0) > 0) return clean;
+    } catch {
+      /* try list fallback */
+    }
     if (await storageObjectExistsLight(admin, clean, bucket)) return clean;
   }
   return null;
@@ -229,14 +401,47 @@ export async function serveCachedStorageImage(
   if (cached) return cached;
 
   const admin = createAdminClient(c.env);
+  let body: Blob | null = null;
+  let contentType = contentTypeForPath(clean);
+  const isGrid = /_grid\.(jpe?g|webp|png)$/i.test(clean);
+
   const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).download(clean);
-  if (error || !data) {
+  if (!error && data) {
+    const bytes = data.size || 0;
+    const minBytes = isGrid ? GRID_MIN_BYTES : 512;
+    if (bytes >= minBytes) {
+      body = data;
+    } else if (isGrid) {
+      body = null;
+    } else {
+      throw new ApiError(404, 'NOT_FOUND', '图片文件无效或已损坏');
+    }
+  }
+
+  if (!body && isGrid) {
+    for (const primary of primaryCandidatesFromGridPath(clean)) {
+      const gridBlob = await buildGridBlobFromPrimary(c.env, admin, primary);
+      if (gridBlob && gridBlob.size >= GRID_MIN_BYTES) {
+        body = gridBlob;
+        contentType = 'image/jpeg';
+        c.executionCtx.waitUntil(
+          admin.storage
+            .from(CARD_IMAGES_BUCKET)
+            .upload(clean, gridBlob, { contentType: 'image/jpeg', upsert: true })
+            .catch(() => {})
+        );
+        break;
+      }
+    }
+  }
+
+  if (!body) {
     throw new ApiError(404, 'NOT_FOUND', '图片不存在');
   }
 
-  const response = new Response(data, {
+  const response = new Response(body, {
     headers: {
-      'Content-Type': contentTypeForPath(clean),
+      'Content-Type': contentType,
       'Cache-Control': `public, max-age=${CDN_CACHE_SEC}, s-maxage=${CDN_CACHE_SEC}, immutable`,
       'CDN-Cache-Control': `max-age=${CDN_CACHE_SEC}`,
       'Vary': 'Accept',

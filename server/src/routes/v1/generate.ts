@@ -481,14 +481,14 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
 generateRoutes.get('/jobs', async c => {
   const user = c.get('user');
   const admin = createAdminClient(c.env);
-  const since = new Date(Date.now() - 72 * 3600 * 1000).toISOString();
+  const since = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
   const { data: rows, error } = await admin
     .from('generation_requests')
     .select('*')
     .eq('user_id', user.id)
     .gte('created_at', since)
     .order('created_at', { ascending: false })
-    .limit(48);
+    .limit(24);
   if (error) throw error;
 
   const sortedRows = [...(rows || [])].sort((a, b) => {
@@ -508,7 +508,12 @@ generateRoutes.get('/jobs', async c => {
     const needsBonusSync =
       job.status === 'completed'
       && !!taskId
+      && !!job.result_image_url
       && (!Array.isArray(meta.extraImageUrls) || meta.extraImageUrls.length === 0);
+    const needsMissingImageRecover =
+      job.status === 'completed'
+      && !!taskId
+      && !job.result_image_url;
     let status = job.status as string;
     let imageUrl = job.result_image_url as string | null;
     let extraFromMeta = Array.isArray(meta.extraImageUrls)
@@ -521,6 +526,7 @@ generateRoutes.get('/jobs', async c => {
     const shouldPoll =
       job.status === 'processing'
       || failedUpstreamRecoverable
+      || needsMissingImageRecover
       || (needsBonusSync && bonusPollBudget > 0);
     if (failedUpstreamRecoverable) failedRecoverBudget -= 1;
     if (shouldPoll) {

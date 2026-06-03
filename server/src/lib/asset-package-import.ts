@@ -2,12 +2,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { isStorageRef, storagePathFromRef, toStorageRef } from './image-archive';
 import { ApiError } from './errors';
 import { encodeStoragePath, isAllowedCommunityMediaPath } from './media-cdn';
+import { assertStorageDelta } from './storage-quota';
 import type { Profile } from './supabase';
-import { isMembershipActive } from './supabase';
 
 const BUCKET = 'card-images';
 const MEDIA_CDN_ORIGIN = 'https://api.prompt-hub.cn';
-const FREE_CARD_LIMIT = 100;
+
+/** 导入时无法精确得知复制后体积，按每张有图卡片估算 */
+const IMPORT_IMAGE_BYTES_ESTIMATE = 2 * 1024 * 1024;
 
 export type PackCard = {
   id: string;
@@ -146,8 +148,12 @@ export async function importAssetPackageToWarehouse(
 
   const payload = (row?.data || {}) as { cards?: Array<Record<string, unknown>>; schemaVersion?: number };
   const existing = Array.isArray(payload.cards) ? [...payload.cards] : [];
-  if (!isMembershipActive(profile) && existing.length + toImport.length > FREE_CARD_LIMIT) {
-    throw new ApiError(402, 'CARD_LIMIT', `导入后将超过普通用户 ${FREE_CARD_LIMIT} 张上限，请开通会员或删除旧卡`);
+  const importBytesEst = toImport.filter((c) => c.image).length * IMPORT_IMAGE_BYTES_ESTIMATE;
+  try {
+    assertStorageDelta(profile, importBytesEst);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '云存储空间不足';
+    throw new ApiError(402, 'STORAGE_QUOTA', msg);
   }
 
   const now = Date.now();

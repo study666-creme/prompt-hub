@@ -46,6 +46,16 @@
       base.image = null;
       return base;
     }
+    const aStorage = typeof a === 'string' && a.startsWith('storage://');
+    const bStorage = typeof b === 'string' && b.startsWith('storage://');
+    if (aStorage && !bStorage) {
+      base.image = a;
+      return base;
+    }
+    if (bStorage && !aStorage) {
+      base.image = b;
+      return base;
+    }
     const sa = imagePresenceScore(a);
     const sb = imagePresenceScore(b);
     if (sa > sb) base.image = a;
@@ -350,11 +360,13 @@
    */
   function pullPreserveLocalWarehouse(local, merged) {
     if (!merged || typeof merged !== 'object') return null;
-    if (cardCount(local) === 0) return preferLocalCardsImages(local, merged);
-    return preferLocalCardsImages(local, {
-      ...merged,
-      cards: Array.isArray(local.cards) ? local.cards.map((c) => ({ ...c })) : []
-    });
+    const localIds = cardIdSet(local);
+    const localCards = Array.isArray(local.cards) ? local.cards.map((c) => ({ ...c })) : [];
+    const cloudExtras = (merged.cards || []).filter(
+      (c) => c?.id != null && !localIds.has(String(c.id))
+    );
+    const combined = dedupeWarehouseCards([...localCards, ...cloudExtras]);
+    return preferLocalCardsImages(local, { ...merged, cards: combined });
   }
 
   function countUnexplainedCardLoss(local, cloud, merged) {

@@ -1,6 +1,8 @@
 # 社区与卡片库布局问题调试指南
 
-> **重要**：本文档提供详细的调试步骤和根因分析，供下一轮代码修复时使用。当前版本 `20260601q`，问题仍未解决。
+> **当前构建**：`20260603j`（2026-06-03）  
+> **生图滚轮**：侧栏 / 灯箱 **图片上缩放、图片外换图** — 见下文「问题 D」。  
+> **Cloudflare 75% 提醒**：见下文「Cloudflare 请求额度」与 `docs/PROJECT_CONTEXT.md`。
 
 ---
 
@@ -8,9 +10,80 @@
 
 | 问题 | 严重程度 | 影响范围 | 状态 |
 |------|---------|---------|------|
-| A. 社区侧栏详情空白 | P0 | 社区页交互 | 未解决 |
-| B. 社区 Masonry 空洞 | P0 | 社区页布局 | 未解决 |
-| C. 卡片库加载顺序混乱 | P0 | 卡片库性能 | 未解决 |
+| A. 社区侧栏详情空白 | P0 | 社区页交互 | 部分已修（assetId null） |
+| B. 社区 Masonry 空洞 | P0 | 社区页布局 | 未完全解决（404 图仍会导致） |
+| C. 卡片库加载顺序混乱 | P0 | 卡片库性能 | 已加随机排序；首屏顺序见 CARD-LOADING |
+| D. 生图预览滚轮不能缩放 | P1 | 图片生成页 | **✅ 已修 20260603j** |
+
+---
+
+## 问题 D：生图预览滚轮（已修 20260603j）
+
+### 现象（修复前）
+
+- 鼠标放在生图侧栏大图或灯箱图片上，滚轮只会 **换图**，无法 **放大缩小**
+- 预期：与快速预览一致 — **图片上滚轮缩放**，**图片外滚轮换图**
+
+### 根因
+
+1. `script.js` → `loadLightboxImage`：当 `__lightboxImageGenNav` 为 true 时，把 `lightboxImage` 的 `onwheel` 绑成 `navigateViewerByWheelThrottled`（换图），未调用 `attachImageZoom`
+2. `script.js` → `onViewerShellWheel`：在 `lightboxImage` 上同样优先换图
+3. `features-draft.js` → `bindImageGenPreviewWheelScroll`：在 `.imagegen-preview-img-btn` 上滚轮一律换图，未给预览图挂 `attachImageZoom`
+
+### 修复
+
+| 文件 | 改动 |
+|------|------|
+| `script.js` | 灯箱统一 `resetImageZoom` + `attachImageZoom`；shell 滚轮在 `#lightboxImage` 上直接 return |
+| `features-draft.js` | 预览图加载后 `attachImageZoom`；panel 滚轮仅在 **非** `.imagegen-preview-img-btn` 区域换图 |
+
+### 验证步骤
+
+1. 强刷，确认 `window.__APP_BUILD__ === '20260603j'`
+2. 打开 **图片生成** → 点右侧 Feed 某张图打开侧栏预览
+3. 鼠标 **放在图片上** 滚轮 → 应缩放；放在提示词/空白区滚轮 → 应换图
+4. 点击图片进灯箱 → 同上
+
+```javascript
+// 控制台快速检查 attachImageZoom 是否挂上
+document.querySelector('.imagegen-preview-img-btn img')?.onwheel != null
+document.getElementById('lightboxImage')?.onwheel != null
+```
+
+---
+
+## Cloudflare 请求额度（Workers + Pages）
+
+### 邮件含义
+
+- 免费账户：**每天 100,000 次请求**（Workers 与 Pages 合计统计方式见 Cloudflare 控制台）
+- **75% 提醒** ≈ 当天已用 **75,000 次**
+- 重置：**UTC 0:00**（北京时间上午 8:00）
+
+### 一个人会不会刷到 75%？
+
+**会。** 单次「强刷整站」可能产生 **几十～上百次** 请求（HTML + 多份 JS/CSS + API）。若同时：
+
+- 开着生图页，有 **进行中的任务**（轮询 `getGenerationJob` 每 2.5～6 秒一次）
+- 频繁 **Ctrl+Shift+R** 或换构建号触发 SW 清缓存
+- 社区/卡片库大量 **签名 URL** 走 Worker
+- 多个浏览器标签页同时打开
+
+一天内个人测试也可能接近上限，**不一定是被攻击**。
+
+### 如何查看
+
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com)
+2. 左侧 **Workers 和 Pages**
+3. 点 **概述** 或 **分析** → 看 **Requests** 曲线
+4. 分别看 **prompt-hub-api**（Worker）与 **prompt-hub-hub**（Pages）哪边更高
+
+### 省额度建议
+
+- 生图完成后关掉生图标签或等任务结束（减少轮询）
+- 开发时用 **一个标签页**，避免反复强刷
+- 签名 404 会重复请求 — 修掉坏图引用（见问题 A/B）
+- 长期流量大再考虑 Workers 付费 $5/月
 
 ---
 

@@ -1376,38 +1376,153 @@
 
   body.imagegen-mobile-view-form .imagegen-mode-banner {
     order: 0;
+    display: none;
   }
 
   body.imagegen-mobile-view-form .imagegen-mode-credits {
-    order: 1;
+    display: none !important;
   }
 
   body.imagegen-mobile-view-form .imagegen-shared-params {
+    order: 1;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-prompt-block--shared {
     order: 2;
+    display: flex;
+    flex-direction: column;
   }
 
   body.imagegen-mobile-view-form .imagegen-ref-block {
-    order: 5;
-  }
-
-  body.imagegen-mobile-view-form .imagegen-prompt-block,
-  body.imagegen-mobile-view-form .imagegen-mode-panel--gen,
-  body.imagegen-mobile-view-form .imagegen-mode-panel--inspire {
     order: 3;
   }
 
-  body.imagegen-mobile-view-form .imagegen-publish-row {
+  body.imagegen-mobile-view-form .imagegen-mobile-result {
     order: 4;
   }
 
+  body.imagegen-mobile-view-form .imagegen-inspire-fold {
+    order: 5;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-mode-panel--inspire {
+    display: none !important;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-inspire-prompt-section {
+    display: none !important;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-publish-row {
+    order: 6;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-form-legal {
+    order: 7;
+  }
+
   body.imagegen-mobile-view-form .imagegen-prompt-head {
-    margin-top: 8px;
+    margin-top: 4px;
     margin-bottom: 4px;
+    align-items: center;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-prompt-tools {
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-optimize-link {
+    font-size: 12px;
+    padding: 4px 0;
+    max-width: none;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-prompt-head {
+    order: 1;
+    flex-wrap: wrap;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-prompt-tools .imagegen-optimize-link {
+    max-width: none;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-prompt-block--shared textarea {
+    order: 2;
+  }
+
+  .imagegen-mobile-result {
+    flex: 0 0 auto;
+    margin: 8px 0 4px;
+    padding: 8px 0 4px;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .imagegen-mobile-result-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .imagegen-mobile-result-track {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    scroll-snap-type: x mandatory;
+  }
+
+  .imagegen-mobile-result-item {
+    flex: 0 0 108px;
+    width: 108px;
+    scroll-snap-align: start;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+  }
+
+  .imagegen-mobile-result-item img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+  }
+
+  .imagegen-mobile-result-item.is-pending {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 6px;
+    min-height: 108px;
+  }
+
+  .imagegen-mobile-result-item.is-failed {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: var(--danger, #e55);
+    padding: 6px;
+    min-height: 108px;
   }
 
   body.imagegen-mobile-view-form #imageGenPrompt {
-    min-height: 120px;
-    max-height: 200px;
+    min-height: 96px;
+    max-height: 160px;
     resize: vertical;
   }
 
@@ -1422,13 +1537,7 @@
     font-size: 12px;
   }
 
-  body.imagegen-mobile-view-form .imagegen-mode-panel--inspire,
-  body.imagegen-mobile-view-form .imagegen-mode-panel--gen {
-    order: 2;
-  }
-
   body.imagegen-mobile-view-form .imagegen-form-legal {
-    order: 4;
     margin-top: 8px;
     padding-top: 8px;
   }

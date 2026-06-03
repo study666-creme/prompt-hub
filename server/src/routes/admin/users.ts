@@ -3,9 +3,9 @@ import { z } from 'zod';
 import type { Env } from '../../env';
 import { ApiError } from '../../lib/errors';
 import {
-  cardLimitForProfile,
   countCardsInUserData,
   formatBytes,
+  storageQuotaForProfile,
   tierLabel
 } from '../../lib/admin-helpers';
 import { deleteUserStorageFiles } from '../../lib/admin-storage';
@@ -42,7 +42,7 @@ async function enrichProfileRow(
     }
   }
 
-  const cardLimit = cardLimitForProfile(profile);
+  const storage = storageQuotaForProfile(profile);
   const memberActive = isMembershipActive(profile);
 
   return {
@@ -60,7 +60,8 @@ async function enrichProfileRow(
     membershipQueuedUntil: profile.membership_queued_until,
     storageBytes: profile.storage_bytes ?? 0,
     storageLabel: formatBytes(profile.storage_bytes ?? 0),
-    cardLimit: cardLimit == null ? null : cardLimit,
+    storageQuota: storage,
+    cardLimit: null,
     lifetimeCreditsSpent: profile.lifetime_credits_spent ?? 0
   };
 }
@@ -186,7 +187,7 @@ adminUserRoutes.get('/:userId', async c => {
     .maybeSingle();
 
   const cardCount = countCardsInUserData(ud?.data);
-  const cardLimit = cardLimitForProfile(p);
+  const storageQuota = storageQuotaForProfile(p);
 
   const { data: redemptions } = await admin
     .from('code_redemptions')
@@ -213,10 +214,10 @@ adminUserRoutes.get('/:userId', async c => {
       membershipQueuedUntil: p.membership_queued_until,
       storageBytes: p.storage_bytes ?? 0,
       storageLabel: formatBytes(p.storage_bytes ?? 0),
+      storageQuota,
       cardCount,
-      cardLimit,
-      cardsRemaining:
-        cardLimit == null ? null : Math.max(0, cardLimit - cardCount),
+      cardLimit: null,
+      cardsRemaining: null,
       cloudUpdatedAt: ud?.updated_at ?? null,
       lifetimeCreditsSpent: p.lifetime_credits_spent ?? 0,
       recentRedemptions: redemptions ?? []

@@ -1,7 +1,7 @@
-# 当前问题与进度（2026-05-30）
+# 当前问题与进度（2026-06-06）
 
-> **接手顺序**：本文 → `PROJECT_CONTEXT.md` → `COMMUNITY-ARCHITECTURE.md` → `CARD-LOADING.md` → `AI-HANDOFF.md`  
-> **重要**：用户控制台已证实——**布局/CSS 不是主因**，应先修 **JS 报错 + 图片签名 404**。
+> **接手顺序**：本文 → `PROJECT_CONTEXT.md` → `CARD-LOADING.md`（含生图仓库带宽）→ `AI-HANDOFF.md`  
+> **调试细节**：Network 截图对照 → 本文 **P0-带宽**；Cloudflare 额度 → `docs/DEBUG-GUIDE.md`
 
 ---
 
@@ -9,142 +9,140 @@
 
 | 项 | 值 |
 |----|-----|
-| 用户实测 | **`20260601r`**（修侧栏 JS 崩溃 + 去掉有害 hotfix） |
+| **当前 Pages（用户侧待强刷确认）** | **`20260603q`**（上一对话部署；若 `window.__APP_BUILD__` 不一致则再跑 `deploy-pages.ps1`） |
 | Pages | https://prompt-hub.cn |
 | API | https://api.prompt-hub.cn |
 | Worker | `prompt-hub-api` |
 
 ---
 
-## 根因结论（2026-05-30 · 用户 Console 截图）
+## P0-带宽：生图页「仓库」一进站就几十～上百 MB（**未解决 · 用户 2026-06-06**）
 
-之前多轮改 CSS / Masonry / 加载顺序（20260601l～q、`hotfix-community-layout.js`）**未解决**，因为页面在更底层就失败了：
+### 用户看到的现象（Network，**与是否打开 DevTools 无关**）
+
+| 阶段 | 表现 | 典型数据 |
+|------|------|----------|
+| **图一（开头）** | 大量 **404**（长 hash 的 jpeg/png URL）+ 反复 **`card-images`** 请求 **500**（Initiator: `supabase.min.js`） | 请求数持续增加（57 → 132 → 244+），已传输仍只有几百 KB |
+| **图二/三（随后）** | 404/500 减少或夹杂成功，开始拉 **单张 2～3.7 MB 的 jpeg**（URL 带 `?e=&s=` 私有链） | 已传输 **16 MB → 80 MB → 150 MB+**，资源总量可达 **80～217 MB**，且随滚动/重绘继续涨 |
+
+**页面路径**：顶部 **图片生成** → 子 Tab **仓库**（`#imageGenFeed`，不是主站左侧「卡片库」`#cardsContainer`）。
+
+**用户核心问题（产品层）**：
+
+- 是否每次打开都要先消耗 **几百 MB 流量**？
+- 能否 **只看哪张再拉**（视口内懒加载 + 列表只用小图，点开/灯箱才原图）？
+
+**结论（给下一位 AI，可直接写进方案）**：
+
+| 问题 | 答案 |
+|------|------|
+| 必须每次都拉几百 MB 吗？ | **不应该。** 列表设计上应只拉 `_grid.jpg` 或等价缩略图（几十 KB 级），原图仅在详情/灯箱/下载时拉。 |
+| 现在为什么像「全拉」？ | 生图 **仓库 Feed** 与卡片库管线不一致：`hydrateFeedImages` 对 `#imageGenFeed` 开 **`warehouseBoost`**（并发 10～18），对容器内 **所有** `img[data-image-ref]` 批量签名并 `img.src = url`；grid 不存在或签名失败后 **`applyFeedImageSrc` 会回退 `variant: 'full'`**，浏览器随即下载 2～3 MB/张。 |
+| 懒加载有没有？ | **卡片库**有 `card-image-loader.js`（IntersectionObserver）；**生图仓库 Feed 未接入同一套**，首屏+滚动插入的卡片会成批 hydrate。 |
+| DevTools 会不会导致多请求？ | **不会。** 只是让用户看见了本来就在发的请求。 |
+
+### 技术根因（按优先级）
+
+1. **列表用原图**：`features-draft.js` → `applyFeedImageSrc` / `resolveImageDisplayUrl`；`#imageGenFeed` 不在 `#communityGrid` 时，grid 缓存 miss 后走 **full**（见 `tryFullFallback`）。
+2. **批量 hydrate 无视口上限**：`hydrateFeedImages` → `SupabaseSync.hydrateImageElements(..., { warehouseBoost: true })`（`supabase-sync.js` 并发 10～18）。
+3. **404 风暴**：老卡无 `_grid.jpg` 时 `pathsForVariant` / `tryAllPaths` 多候选路径 → 每个 ref 多次 sign/GET 404；与 **500**（`card-images` bucket / Worker sign）叠加，请求数暴涨。
+4. **滚动加载更多**：`imageGenFeed` 无限滚动不断插入 DOM → 再次 `hydrateFeedImages` → 已加载过的图 + 新图继续拉 full。
+5. **卡片库侧（部分已缓解，未闭环）**：`20260603n～q` 已改列表优先 grid、减 prefetch；用户本次截图主要在 **生图仓库**，不能当作卡片库已全好。
+
+### 建议修复顺序（下一条聊天 **P0 拉满**）
+
+1. **生图仓库 Feed**：列表 **强制 grid only**（禁止列表 `tryFullFallback` full）；侧栏/灯箱/下载才 full。
+2. **接入懒加载**：`#imageGenFeed` 使用与 `#cardsContainer` 相同的 `observeContainer` / 仅视口 + rootMargin 内 `loadImg`；**禁止**对整页 `querySelectorAll` 一次 hydrate。
+3. **首屏上限**：可见区 + 预取 buffer（例如 ≤12 张）才签名；其余等 IO。
+4. **消灭无效请求**：grid 未 `isGridThumbReady` 时不要先把错误 grid 路径写进 `img.src`；404 路径 `markPathMissing` 持久化，避免每张图双 404。
+5. **查 500**：Network 里失败 `card-images` / `sign?ref=` → Worker 日志 + Supabase Storage 策略（`USE_STORAGE_TRANSFORM = false` 时依赖真实 `_grid.jpg` 文件）。
+6. **后台**：`backfillGridThumbsForCards` 批量补 `_grid.jpg`，减少回退 full。
+
+### 关键文件（定点改，勿通读 `script.js`）
+
+| 文件 | 函数/区域 |
+|------|-----------|
+| `features-draft.js` | `hydrateFeedImages`, `hydrateFeedImageOne`, `applyFeedImageSrc`, `renderImageGenFeed`, `getImageGenWarehouseFeedList`, `imageGenFeedSignOpts` |
+| `supabase-sync.js` | `hydrateImageElements`, `resolveDisplayUrl`, `prefetchCardsImages`, `pathsForVariant`, `backfillGridThumbsForCards` |
+| `card-image-loader.js` | `observeContainer`, `loadImg`, `listImageVariant` |
+| `script.js` | `hydrateWarehouseGridImages`, `renderCards`, `warmCardImagesBackground` |
+| `server/` | `media-cdn.ts`、社区/自有 sign 路由 |
+
+### 验收标准（用户 Network）
+
+- 打开 **图片生成 → 仓库**，首屏 10s 内：**已传输 < 5 MB**（弱网可放宽），请求数以 **可见卡片数 × 1～2** 为量级，无连续 404/500 刷屏。
+- 列表单张图片体积 **< 200 KB**（`_grid.jpg`）；点开作品详情/灯箱才出现 MB 级原图。
+- 向下滚动：仅新进入视口的卡片新增请求。
+
+### 控制台快速诊断
+
+```javascript
+window.__APP_BUILD__
+document.querySelectorAll('#imageGenFeed img[data-image-ref]').length
+[...document.querySelectorAll('#imageGenFeed img')].slice(0, 5).map(i => ({
+  ref: i.dataset.imageRef?.slice(0, 40),
+  src: i.src?.slice(0, 60),
+  mb: i.complete && i.naturalWidth ? '(loaded)' : 'pending'
+}))
+performance.getEntriesByType('resource').filter(e => e.transferSize > 500000).length  // 大于 500KB 的资源条数
+```
+
+---
+
+## 最近已修（2026-06-03～06，**不替代 P0-带宽**）
+
+| 项 | 构建/说明 |
+|----|-----------|
+| 卡片库列表优先 `_grid` | `20260603n～q`：`features-draft.js`、`card-image-loader.js`、`supabase-sync.js` |
+| 排序「最近生成」、仓库按 `createdAt` | `script.js` / features-draft |
+| 浅色主题对比度 | `styles-theme.css` |
+| 云存储入口移到左下导航；专业会员配额显示约 **31,020 MB** | `membership.js` |
+| 排序/筛选下拉被 `scale(0.72)` 裁切 | 下拉挂 `document.body` 定位（`script.js`） |
+| 生图滚轮缩放、2.5D 国漫画风等 | 见历史条目 `20260603j` |
+
+---
+
+## 历史 P0（社区 / 侧栏，部分已修）
+
+| 优先级 | 类型 | 状态 |
+|--------|------|------|
+| P0-1 | `communityImgInitialSrc` 传 `null` 崩侧栏 | **已修 20260601r** |
+| P0-2 | 签名 404 / Storage 文件不存在 | **未完全解决** |
+| P0-3 | `api.prompt-hub.cn` 偶发 `ERR_CONNECTION_CLOSED` | 间歇 |
+
+详见下文「根因结论（2026-05-30）」与 Console 诊断命令。
+
+---
+
+## Cloudflare 每日请求 75% 提醒
+
+- 上限 **100,000/天**；强刷 + 生图轮询 + **每张图多次 404/500 重试** 会快速吃额度。
+- 查看：Cloudflare 控制台 → **Workers 和 Pages** → **概述** / **分析**
+- 详见 `docs/DEBUG-GUIDE.md`
+
+---
+
+## 根因结论（2026-05-30 · 社区 Console）
 
 ```
 图片签名 404 / API 断连
         ↓
-图永远加载不出 → Masonry 算不出高度 → 中间空一大块
+图加载不出 → Masonry 高度错 → 社区中间空块
         ↓
-renderCommunitySidePanel 内 JS 抛错 → 侧栏 body 写不进去 → 侧栏全黑
+renderCommunitySidePanel 抛错 → 侧栏全黑
 ```
 
-| 优先级 | 类型 | 证据 | 影响 |
-|--------|------|------|------|
-| **P0-1** | **JS 运行时错误** | `TypeError: Cannot read properties of null (reading 'assetId')` | **✅ 已修 20260601r**（`communityImgInitialSrc` 不再传 `null`） |
-| **P0-2** | **图片签名 404** | Console 大量 sign 404 | **未完全解决** — 多为 Storage 文件不存在；已加强 `cardId`/`authorId` 传递 |
-| **P0-3** | **API 不稳定** | `GET api.prompt-hub.cn/api/v1/me` → `ERR_CONNECTION_CLOSED` | 登录态/同步异常，加重签名失败 |
-| ~~P2~~ | ~~纯 CSS / Masonry 调参~~ | 在 P0-1/2 未修前，改布局**治标不治本** | 用户反馈「搞了半天还是没修好」 |
-
-### P0-1 代码位置（已定位，一行级）
-
-`features-draft.js`：
-
-```javascript
-function communityImgInitialSrc(image) {
-  return feedImgInitialSrc(image, null);  // ← null 导致 opts.assetId 抛错
-}
-```
-
-`feedImgInitialSrc` 内访问 `opts.assetId`，**opts 为 null 时必崩**。  
-侧栏打开时会调 `communityImgInitialSrc` → **`renderCommunitySidePanel` 中断** → 只剩标题、body 空。
-
-**修复**：`communityImgInitialSrc(image, opts)` + 侧栏传入 `post.sourceCardId`（**20260601r**）
-
-### P0-2 图片 404（仍可能存在）
-
-1. **Storage 里文件已删**，DB/Feed 仍引用旧 `storage://` 路径（历史卡片 404，见下表 #2）
-2. **Worker 签名逻辑**找不到路径（`cardId` / `authorId` 与真实路径不一致）
-3. **Supabase bucket RLS** 或 Worker 用的 service key 权限不足
-4. 签名 URL **过期**且前端缓存了坏 URL（次要；404 更像路径不存在）
-
-### 用户界面现象 ↔ 根因对照
-
-| 用户看到的 | 实际原因 |
-|------------|----------|
-| 侧栏只有标题、下面全黑 | P0-1 JS 崩 + 侧栏图 404 |
-| 社区往下滚中间空一大块 | 图 404 → 卡片高度不对 → Masonry 错位 |
-| 卡片库后面先有图、第一页还黑 | 部分路径能签/有缓存，大量 404；不是单纯加载顺序 |
-| 用久了很卡 | 成百上千次 404 + 重试 + Masonry 重排 |
-
----
-
-## 已做但未见效的尝试（记录避坑）
-
-| 方向 | 构建/文件 | 为何无效 |
-|------|-----------|----------|
-| 社区侧栏 CSS、`community-workspace` | 20260601l～q | 侧栏 JS 已崩，CSS 救不了 |
-| Masonry horizontalOrder、批量重排 | features-draft.js | 图没高度，重排仍空 |
-| 首屏 24 张视觉序加载 | card-image-loader.js | 签名 404，顺序无意义 |
-| `hotfix-community-layout.js` | index.html 已引入 | 未修 `communityImgInitialSrc(null)`；404 仍在 |
-
-**教训**：Console 无红字、Network 签名 200 之前，**不要继续调 Masonry/CSS**。
-
----
-
-## 建议修复顺序（下次开任务）
-
-1. **修 P0-1**（1 行 + 侧栏传入 post 的 assetId）— 侧栏应立刻恢复文案/按钮  
-2. **Network 抽 1 条 404 的 sign 请求**：复制完整 URL、ref 参数、响应 JSON  
-3. **Worker 侧**查 `communityMediaSignHandler` / Storage 是否存在该 path  
-4. **批量清理**无文件的社区帖（或 `markPathMissing` 后隐藏占位）  
-5. P0-1/2 全绿后，再视情况微调 Masonry（若仍有缝）
-
----
-
-## 控制台诊断（用户可复制）
-
-```javascript
-// 1. 构建号
-window.__APP_BUILD__
-
-// 2. 侧栏是否写入 HTML（点一张卡后跑）
-document.getElementById('communitySideBody')?.innerHTML?.length
-document.querySelector('#communitySideBody .community-side-prompt')
-
-// 3. 复现 assetId 崩溃
-try {
-  window.FeatureDraft?.renderCommunitySidePanel?.(/* 需要 postId */)
-} catch (e) { console.error(e) }
-
-// 4. 看前 5 张社区图的 ref 与 src
-[...document.querySelectorAll('#communityGrid img[data-image-ref]')].slice(0, 5).map(img => ({
-  ref: img.dataset.imageRef,
-  src: img.src?.slice(0, 80),
-  ok: img.complete && img.naturalWidth > 8
-}))
-
-// 5. API 是否通
-fetch('https://api.prompt-hub.cn/health').then(r => console.log('health', r.status))
-fetch('https://api.prompt-hub.cn/api/v1/community/feed?limit=3').then(r => console.log('feed', r.status))
-
-// 6. 手动测一条签名（把 REF 换成 Network 里 404 那条的 ref）
-// await window.PromptHubApi.signCommunityMediaRef('storage://...', { authorId: '...', cardId: '...' })
-```
-
----
-
-## 其它已知问题
-
-| # | 现象 | 备注 |
-|---|------|------|
-| 1 | 历史卡片 Storage 404 | 与 P0-2 同源，文件已删需重传或下架 |
-| 2 | 首屏 3 秒内全清晰难 | 见 `CARD-LOADING.md`；前提是签名成功 |
-| 3 | 大资产包浏览慢 | 199 张逐张解析 |
-
----
-
-## 2026-06-06 其它已上线（独立）
-
-生图 grace 轮询、社区交互不自动点赞、sign-batch、`_grid` 缩略图等——**不替代**上述 P0 修复。
+**教训**：Network 里签名/404 未收敛前，不要继续只调 Masonry/CSS。
 
 ---
 
 ## 改代码前约定
 
-- 用户 2026-05-30 曾要求「只更新文档」；当前仍 **未闭环**。  
-- 下次改动：**先 P0-1 一行 + 验证 Console 无 assetId 报错**，再查 404。  
-- 勿再大块 CSS 重写。
+- **用户 2026-06-06 明确要求**：本轮只更新文档，**下一条聊天再写代码**。
+- 下一条：**P0-带宽（生图仓库懒加载 + 列表仅缩略图）** 优先于社区 CSS 微调。
+- 修复后默认 `.\deploy-pages.ps1`；用户纯小白 → 分步 + 可复制命令。
+- 勿提交密钥；仅用户要求时 `git commit`。
 
 ---
 
-*最后更新：2026-05-30 · 根据用户 Console 404 + TypeError 修正根因判断*
+*最后更新：2026-06-06 · 用户 Network 截图：生图仓库 404/500 → 原图几十～上百 MB*

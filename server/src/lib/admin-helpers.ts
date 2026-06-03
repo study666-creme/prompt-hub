@@ -1,5 +1,5 @@
 import type { Profile } from './supabase';
-import { isMembershipActive } from './supabase';
+import { storagePayloadForProfile, storageQuotaLabelForProfile } from './storage-quota';
 
 export function formatBytes(n: number): string {
   const v = Math.max(0, Number(n) || 0);
@@ -15,10 +15,17 @@ export function countCardsInUserData(data: unknown): number {
   return Array.isArray(cards) ? cards.length : 0;
 }
 
-/** 与前端 membership.js 一致：免费 100 张，会员不限张数；storage_bytes 为云端登记用量 */
-export function cardLimitForProfile(profile: Profile): number | null {
-  if (isMembershipActive(profile)) return null;
-  return 100;
+/** @deprecated 已改为按 storage_bytes 配额；保留 null 表示不按张数限制 */
+export function cardLimitForProfile(_profile: Profile): number | null {
+  return null;
+}
+
+export function storageQuotaForProfile(profile: Profile) {
+  return storagePayloadForProfile(profile);
+}
+
+export function storageQuotaSummaryForProfile(profile: Profile): string {
+  return storageQuotaLabelForProfile(profile);
 }
 
 export function tierLabel(tier: Profile['membership_tier']): string {

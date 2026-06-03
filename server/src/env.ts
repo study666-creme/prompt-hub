@@ -28,6 +28,10 @@ export type Env = {
   SUPABASE_STORAGE_QUOTA_MB?: string;
   /** Supabase 数据库配额（MB），免费版约 500；未设则默认 500 */
   SUPABASE_DB_QUOTA_MB?: string;
+  /** 可选：从 Supabase Usage 页手动同步的项目 File Storage 已用（MB） */
+  SUPABASE_STORAGE_USED_MB?: string;
+  /** 可选：从 Supabase Usage 页手动同步的 Database 已用（MB） */
+  SUPABASE_DB_USED_MB?: string;
 };
 
 export function parseCorsOrigins(raw: string): string[] {

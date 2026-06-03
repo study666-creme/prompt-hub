@@ -148,6 +148,13 @@
         document.getElementById('imageGenFeed')?.scrollTo?.(0, 0);
       });
     }
+    if (v === 'feed') {
+      void window.FeatureDraft?.resumePendingGenerationJobs?.().then(() => {
+        window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: !opts?.scrollToTop });
+      });
+    } else {
+      window.FeatureDraft?.renderImageGenMobileResult?.();
+    }
   }
 
   function initImageGenMobileView() {

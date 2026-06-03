@@ -14,6 +14,7 @@
 | 图片签名 URL | `supabase-sync.js` | `server/src/routes/v1/media.ts` |
 | 全站社区 API / DB | `server/src/lib/community-feed.ts` | `server/src/routes/v1/community.ts` |
 | 生图扣费 | `features-draft.js` + `api-client.js` | `server/src/routes/v1/generate.ts` |
+| **生图滚轮 / 灯箱** | `script.js`（`attachImageZoom`, `loadLightboxImage`） | `features-draft.js`（预览侧栏） |
 | 会员 / 积分 UI | `membership.js`, `subscription.js` | `server/src/routes/v1/me.ts` |
 | 部署 Pages | `deploy-pages.ps1` | `index.html`（`__APP_BUILD__`）, `sw.js` |
 | 部署 Worker | `server/package.json` scripts | `server/wrangler.toml` |
@@ -50,6 +51,10 @@
 | 同步 | `runSyncCardLibraryToCommunity`, `syncEligibleCardsToCommunity` | 卡片库 → 社区 |
 | 恢复 | `restoreCardsFromCommunityFeed` | 社区 → 卡片库（`20260614b`） |
 | 导出 | `window.FeatureDraft` | 外部调用入口 |
+| 生图预览 / 灯箱 | `renderImageGenPreview`, `bindImageGenPreviewWheelScroll`, `navigateImageGenPreviewByWheel` |
+| **生图滚轮缩放** | `attachImageZoom`, `loadLightboxImage`, `onViewerShellWheel`（`script.js`） |
+| 批量社区公开 | `batchPublishCommunity`, `batchUnpublishCommunity`（`script.js`） |
+| 生图 Feed / 轮询 | `renderImageGenFeed`, `pollGenerationJobUntilDone` | 进行中任务会周期性打 Worker |
 
 ---
 

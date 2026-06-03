@@ -5,7 +5,21 @@
   const LS_MEMBERSHIP = 'promptrepo_membership';
   const PIN_LIMIT_FREE = 2;
   const PIN_LIMIT_LITE = 3;
-  const FREE_CARD_LIMIT = 100;
+  /** 登录用户基础云存储 300MB（与 server storage-quota.ts 一致） */
+  const FREE_BASE_STORAGE_BYTES = 300 * 1024 * 1024;
+  const TIER_EXTRA_STORAGE_BYTES = {
+    lite: 2 * 1024 * 1024 * 1024,
+    basic: 5 * 1024 * 1024 * 1024,
+    standard: 10 * 1024 * 1024 * 1024,
+    pro: 30 * 1024 * 1024 * 1024
+  };
+  let storageState = {
+    usedBytes: 0,
+    quotaBytes: FREE_BASE_STORAGE_BYTES,
+    remainingBytes: FREE_BASE_STORAGE_BYTES,
+    summaryLabel: '',
+    percentUsed: 0
+  };
 
   /** 会员生图积分折扣（乘数） */
   const GEN_DISCOUNT_BY_TIER = {
@@ -105,8 +119,76 @@
     return tier === 'basic' || tier === 'standard' || tier === 'pro';
   }
 
-  function getFreeCardLimit() {
-    return isMember() ? Infinity : FREE_CARD_LIMIT;
+  function formatStorageShort(bytes) {
+    const v = Math.max(0, Number(bytes) || 0);
+    if (v < 1024 * 1024) return `${Math.round(v / 1024)} KB`;
+    if (v < 1024 * 1024 * 1024) return `${(v / (1024 * 1024)).toFixed(v >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+    return `${(v / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+
+  function formatStorageQuotaDisplay(bytes) {
+    const v = Math.max(0, Number(bytes) || 0);
+    if (v >= 50 * 1024 * 1024) {
+      return `${Math.round(v / (1024 * 1024)).toLocaleString('zh-CN')} MB`;
+    }
+    return formatStorageShort(v);
+  }
+
+  function refreshQuotaFromTier() {
+    const q = computeQuotaBytesLocal();
+    storageState.quotaBytes = q;
+    storageState.remainingBytes = Math.max(0, q - (storageState.usedBytes || 0));
+    storageState.summaryLabel = '';
+    storageState.percentUsed = q
+      ? Math.min(100, Math.round(((storageState.usedBytes || 0) / q) * 1000) / 10)
+      : 0;
+  }
+
+  function computeQuotaBytesLocal() {
+    let q = FREE_BASE_STORAGE_BYTES;
+    const tier = getMemberTier();
+    if (tier && TIER_EXTRA_STORAGE_BYTES[tier]) q += TIER_EXTRA_STORAGE_BYTES[tier];
+    return q;
+  }
+
+  function applyStorageState(storage) {
+    if (!storage || typeof storage !== 'object') return;
+    const tierQuota = computeQuotaBytesLocal();
+    storageState = {
+      usedBytes: Math.max(0, Number(storage.usedBytes) || 0),
+      quotaBytes: Math.max(tierQuota, FREE_BASE_STORAGE_BYTES, Number(storage.quotaBytes) || 0),
+      remainingBytes: Math.max(0, Number(storage.remainingBytes) || 0),
+      summaryLabel: '',
+      percentUsed: Number(storage.percentUsed) || 0
+    };
+    if (!storageState.remainingBytes && storageState.quotaBytes) {
+      storageState.remainingBytes = Math.max(0, storageState.quotaBytes - storageState.usedBytes);
+    }
+    if (typeof window.AuthGate?.updateGuestLimitUI === 'function') {
+      window.AuthGate.updateGuestLimitUI();
+    }
+  }
+
+  function getStorageUsedBytes() {
+    return storageState.usedBytes || 0;
+  }
+
+  function getStorageQuotaBytes() {
+    return storageState.quotaBytes || computeQuotaBytesLocal();
+  }
+
+  function getStorageRemainingBytes() {
+    return Math.max(0, getStorageQuotaBytes() - getStorageUsedBytes());
+  }
+
+  function canAddStorageBytes(delta) {
+    const add = Math.max(0, Number(delta) || 0);
+    if (!add) return true;
+    return getStorageUsedBytes() + add <= getStorageQuotaBytes();
+  }
+
+  function getStorageSummaryLabel() {
+    return `${formatStorageShort(getStorageUsedBytes())} / ${formatStorageQuotaDisplay(getStorageQuotaBytes())}`;
   }
 
   function activateByCode() {
@@ -142,7 +224,7 @@
       return {
         active: false,
         tierLabel: '普通用户',
-        untilLabel: '每日 5 积分 · 100 张卡片',
+        untilLabel: '每日 5 积分 · 云存储 300MB',
         summary: '免费 · 每日 5 积分'
       };
     }
@@ -187,6 +269,7 @@
         queuedTier: membership.queuedTier || null,
         queuedUntil: membership.queuedUntil ? new Date(membership.queuedUntil).getTime() : null
       });
+      refreshQuotaFromTier();
       if (typeof window.updateImageGenPricingUI === 'function') {
         window.updateImageGenPricingUI();
       }
@@ -198,6 +281,13 @@
       return;
     }
     writeRow({ active: false, until: null, tier: null, queuedTier: null, queuedUntil: null });
+    storageState = {
+      usedBytes: storageState.usedBytes,
+      quotaBytes: FREE_BASE_STORAGE_BYTES,
+      remainingBytes: Math.max(0, FREE_BASE_STORAGE_BYTES - (storageState.usedBytes || 0)),
+      summaryLabel: '',
+      percentUsed: 0
+    };
     if (typeof window.updateImageGenPricingUI === 'function') {
       window.updateImageGenPricingUI();
     }
@@ -223,7 +313,8 @@
   window.Membership = {
     PIN_LIMIT_FREE,
     PIN_LIMIT_LITE,
-    FREE_CARD_LIMIT,
+    FREE_BASE_STORAGE_BYTES,
+    TIER_EXTRA_STORAGE_BYTES,
     GEN_DISCOUNT_BY_TIER,
     isMember,
     getMemberTier,
@@ -231,7 +322,14 @@
     getGenDiscountLabel,
     getPinLimit,
     isUnlimitedPins,
-    getFreeCardLimit,
+    applyStorageState,
+    getStorageUsedBytes,
+    getStorageQuotaBytes,
+    getStorageRemainingBytes,
+    getStorageSummaryLabel,
+    canAddStorageBytes,
+    formatStorageShort,
+    formatStorageQuotaDisplay,
     activateByCode,
     isMemberCode,
     getAccountPayload,

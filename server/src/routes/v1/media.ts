@@ -12,6 +12,8 @@ import {
   findFirstExistingStoragePath,
   isAllowedCommunityMediaPath,
   MEDIA_CDN_TOKEN_TTL_SEC,
+  resolveCommunityGridPath,
+  materializeCommunityGridIfMissing,
   serveCachedStorageImage,
   verifyMediaAccessToken
 } from '../../lib/media-cdn';
@@ -58,20 +60,25 @@ export async function communityMediaSignHandler(c: Context<{ Bindings: Env }>) {
   const ref = (c.req.query('ref') || '').trim();
   const authorId = (c.req.query('authorId') || '').trim();
   const cardId = (c.req.query('cardId') || '').trim();
-  const paths = communityImagePathCandidates(ref, authorId, cardId);
-  if (!paths.length) {
-    throw new ApiError(400, 'VALIDATION_ERROR', '无效的图片引用');
-  }
+  const variantQ = (c.req.query('variant') || 'grid').trim().toLowerCase();
   const admin = createAdminClient(c.env);
-  const found = await findFirstExistingStoragePath(admin, paths, BUCKET);
-  if (found) {
+  if (variantQ === 'full') {
+    const paths = communityImagePathCandidates(ref, authorId, cardId, { gridOnly: false, preferGrid: false });
+    const found = await findFirstExistingStoragePath(admin, paths, BUCKET);
+    if (!found) throw new ApiError(404, 'NOT_FOUND', 'Object not found');
     const url = await buildPublicMediaCdnUrl(c, found);
-    return c.json({
-      ok: true,
-      data: { url, expiresIn: MEDIA_CDN_TOKEN_TTL_SEC, cdn: true }
-    });
+    return c.json({ ok: true, data: { url, expiresIn: MEDIA_CDN_TOKEN_TTL_SEC, cdn: true } });
   }
-  throw new ApiError(404, 'NOT_FOUND', 'Object not found');
+  const gridPath = await resolveCommunityGridPath(admin, ref, authorId, cardId, BUCKET);
+  if (!gridPath) {
+    throw new ApiError(404, 'NOT_FOUND', 'Object not found');
+  }
+  await materializeCommunityGridIfMissing(c, admin, gridPath, ref, authorId, cardId);
+  const url = await buildPublicMediaCdnUrl(c, gridPath);
+  return c.json({
+    ok: true,
+    data: { url, expiresIn: MEDIA_CDN_TOKEN_TTL_SEC, cdn: true }
+  });
 }
 
 const communitySignBatchBodySchema = z.object({
@@ -114,19 +121,30 @@ export async function communityMediaSignBatchHandler(c: Context<{ Bindings: Env 
       const item = items[idx];
       idx += 1;
       const ref = String(item.ref || '').trim();
-      const paths = communityImagePathCandidates(
+      const gridPath = await resolveCommunityGridPath(
+        admin,
         ref,
         item.authorId || undefined,
-        item.cardId || undefined
+        item.cardId || undefined,
+        BUCKET
       );
-      const found = await findFirstExistingStoragePath(admin, paths, BUCKET);
-      if (!found) continue;
-      if (urls[found]) {
-        refMap[ref] = urls[found];
+      if (!gridPath) continue;
+      c.executionCtx.waitUntil(
+        materializeCommunityGridIfMissing(
+          c,
+          admin,
+          gridPath,
+          ref,
+          item.authorId || undefined,
+          item.cardId || undefined
+        ).catch(() => {})
+      );
+      if (urls[gridPath]) {
+        refMap[ref] = urls[gridPath];
         continue;
       }
-      const url = await buildPublicMediaCdnUrl(c, found);
-      urls[found] = url;
+      const url = await buildPublicMediaCdnUrl(c, gridPath);
+      urls[gridPath] = url;
       refMap[ref] = url;
     }
   }

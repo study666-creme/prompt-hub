@@ -18,6 +18,11 @@
     return ios && /Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS/i.test(ua);
   }
 
+  function isEdgeAndroid() {
+    const ua = navigator.userAgent || '';
+    return /Android/i.test(ua) && /EdgA|Edg\//i.test(ua);
+  }
+
   function isMobile() {
     return window.matchMedia?.('(max-width: 900px)')?.matches;
   }
@@ -49,15 +54,45 @@
     document.getElementById('pwaInstallBanner')?.classList.remove('hidden');
   }
 
-  function showIosGuide() {
-    const msg = 'iPhone / iPad 请用 Safari 打开本站，点底部分享按钮，再选「添加到主屏幕」。添加后从桌面图标打开，就像独立 App。';
-    if (typeof window.showToast === 'function') {
-      window.showToast(msg, 12000);
-    } else if (typeof window.customConfirm === 'function') {
+  function showGuideMessage(msg, durationMs) {
+    const ms = durationMs || 14000;
+    if (typeof window.customConfirm === 'function') {
       window.customConfirm(msg, () => {});
-    } else {
-      alert(msg);
+      return;
     }
+    if (typeof window.showToast === 'function') {
+      window.showToast(msg, ms);
+      return;
+    }
+    alert(msg);
+  }
+
+  function showIosGuide() {
+    showGuideMessage(
+      'iPhone / iPad 请用 Safari 打开本站，点底部分享按钮，再选「添加到主屏幕」。添加后从桌面图标打开，就像独立 App。',
+      12000
+    );
+  }
+
+  function showEdgeAndroidGuide() {
+    showGuideMessage(
+      'Edge 安装说明（不是权限报错）：\n\n'
+      + '若点「添加」后跳到「网站权限」页且没有提示，请先点左上角 ← 返回本站。\n\n'
+      + '正确步骤：\n'
+      + '1. 点 Edge 右下角「…」菜单\n'
+      + '2. 选「添加到手机」或「安装应用」\n'
+      + '3. 按提示确认即可\n\n'
+      + '本站不需要摄像头、定位等权限；权限页是 Edge 误跳转，与安装无关。\n'
+      + '若菜单里没有安装项，可换 Chrome 打开 prompt-hub.cn 再试。',
+      18000
+    );
+  }
+
+  function showGenericAndroidGuide() {
+    showGuideMessage(
+      '请用 Chrome 或 Edge 打开本站；在浏览器菜单里选「安装应用」或「添加到主屏幕」。若曾点过「取消」，需从菜单手动安装。',
+      10000
+    );
   }
 
   async function promptInstall() {
@@ -76,19 +111,26 @@
           window.TrialTasksUI?.markPwaInstalled?.();
         } else {
           markDismissed();
+          if (isEdgeAndroid()) showEdgeAndroidGuide();
         }
         return { outcome };
       } catch (e) {
         console.warn('[pwa] prompt failed', e);
+        if (isEdgeAndroid()) {
+          showEdgeAndroidGuide();
+          return { outcome: 'edge_manual' };
+        }
       }
     }
     if (isIosSafari()) {
       showIosGuide();
       return { outcome: 'ios_manual' };
     }
-    if (typeof window.showToast === 'function') {
-      window.showToast('请用 Chrome / Edge 打开本站；若已拒绝过安装，请在浏览器菜单里选「安装应用」或「添加到主屏幕」', 10000);
+    if (isEdgeAndroid()) {
+      showEdgeAndroidGuide();
+      return { outcome: 'edge_manual' };
     }
+    showGenericAndroidGuide();
     return { outcome: 'unavailable' };
   }
 
@@ -129,6 +171,12 @@
     }
     if (isMobile() && isIosSafari() && !dismissedRecently()) {
       setTimeout(showBanner, 2500);
+    }
+    if (isMobile() && isEdgeAndroid() && !dismissedRecently() && !deferredPrompt) {
+      const desc = document.querySelector('#pwaInstallBanner .pwa-install-banner-desc');
+      if (desc) {
+        desc.textContent = '像 App 一样全屏打开；若误跳权限页，点返回后在 Edge 菜单选「添加到手机」';
+      }
     }
   }
 

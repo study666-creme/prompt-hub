@@ -284,11 +284,14 @@
     comic: 'illustration',
     flat: 'illustration',
     cyber_render: 'illustration',
-    dark_aesthetic: 'illustration'
+    dark_aesthetic: 'illustration',
+    guoman_25d: 'anime',
+    moe_chibi: 'anime'
   };
 
   function resolveStyleId(styleId) {
-    const id = styleId || 'none';
+    const raw = styleId || 'none';
+    const id = raw === 'feibi_jubi' || raw === 'chibi_moe' ? 'moe_chibi' : raw;
     if (id === 'auto') return pick(AUTO_STYLE_POOL);
     return ART_STYLES[id] ? id : 'none';
   }
@@ -1594,6 +1597,21 @@
       '低饱和冷绿', '单一底光面部半暗', '胶片颗粒脏污', '轻微畸变镜头',
       '雾气吞没远景', '高光仅眼睛', '剪影威胁感', '潮湿反光地面'
     ],
+    liminalPlace: [
+      '无限延伸的酒店走廊', '空无一人的地下停车场', '闭店后的商场中庭',
+      '凌晨便利店过道', '废弃泳池瓷砖区', '学校空荡晚自习教室',
+      '机场候机厅无人椅', '老式电梯厅镜面', '地下通道荧光灯顶',
+      '酒店泳池夜灯水面', '办公大楼空走廊', '超市闭店后货架通道',
+      '医院空荡候诊区', '地下铁换乘长通道', '旅馆楼梯间转角'
+    ],
+    liminalMood: [
+      '阈限空间感', '熟悉又陌生的空寂', '梦境式静止', '微妙不安的安静',
+      '怀旧荧光灯嗡鸣', '无人却刚离开的气息', '时间悬停的瞬间', '介于昼夜之间的灰调'
+    ],
+    liminalLight: [
+      '头顶荧光灯平铺冷白', '潮湿地面微反光', '远景渐隐在雾灰里',
+      '低对比灰绿调', '单一光源拉长走廊', '窗缝漏进暮色蓝'
+    ],
     romanceBeat: [
       '伞下两人距离', '牵手逆光剪影', '信件与干花', '窗边等待',
       '樱花落肩', '海边日落并肩', '咖啡杯对坐', '围巾缠绕',
@@ -1812,6 +1830,18 @@
     ]);
   }
 
+  function buildLiminal(ctx) {
+    return combineParts([
+      pick(WORDS.liminalPlace),
+      pick(WORDS.liminalMood),
+      pick(WORDS.liminalLight),
+      pick(WORDS.sceneComp),
+      pickMaybe(WORDS.moodTone, 0.55),
+      pickMaybe(TWIST, 0.35),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
   function buildRomance(ctx) {
     return combineParts([
       pick(WORDS.romanceBeat),
@@ -1954,6 +1984,7 @@
     architecture: ['archSubject', 'archLight'],
     fashion: ['fashionLook', 'fashionSet'],
     horror: ['horrorMood', 'horrorStyle'],
+    liminal: ['liminalPlace', 'liminalMood', 'liminalLight'],
     romance: ['romanceBeat', 'romanceTone'],
     macro: ['macroDetail'],
     seasonal: ['seasonalCue']
@@ -2596,6 +2627,7 @@
     architecture: { label: '建筑空间', hint: '地标 / 室内 / 光影', build: buildArchitecture },
     fashion: { label: '时尚穿搭', hint: '秀场 / 街拍 / editorial', build: buildFashion },
     horror: { label: '悬疑惊悚', hint: '暗调 / 心理压迫', build: buildHorror },
+    liminal: { label: '阈限空间', hint: '空廊 / 荧光灯 / 熟悉陌生感', build: buildLiminal },
     romance: { label: '浪漫叙事', hint: '情侣 / 柔光 / 情绪', build: buildRomance },
     macro: { label: '微距特写', hint: '材质 / 细节 / 质感', build: buildMacro },
     seasonal: { label: '节气时令', hint: '四季 / 节日 / 东方意境', build: buildSeasonal }
@@ -2632,13 +2664,18 @@
       label: '2.5D国漫写实',
       hint: '国漫比例 + 3D写实渲染',
       tag: '【画风锁定】2.5D国漫融合3D写实建模，理想化大眼精致五官与国漫面部比例，次表面散射肤质、发丝级头发与PBR服装材质，电影级轮廓光与浅景深虚化，UE5/C4D高品质3D渲染，非真人摄影非平面插画'
+    },
+    moe_chibi: {
+      label: '萌版画风',
+      hint: '2头身Q版 / 贴纸立牌 / 软萌',
+      tag: '【画风锁定】萌版Q版画风，粗黑完整外轮廓描边，2头身大头小身子，圆滚滚短四肢，超大玻璃珠大眼睛带高光，粉圆形腮红，平涂上色纯色块几乎无阴影，亚克力贴纸立牌/冰箱贴卡通，纯白背景，软萌幼崽，扁平化简笔卡通，非真人非3D'
     }
   };
 
   const AUTO_STYLE_POOL = [
     'anime', 'dongman', 'semireal', 'lineart', 'cg_3d', 'makoto', 'ghibli', 'photo', 'photo_film', 'hyperreal',
     'manhwa', 'arcane', 'oil', 'ink', 'pixel', 'cyber_render', 'dark_aesthetic', 'cg_3d_toon', 'unreal', 'anime_90s',
-    'guoman_25d'
+    'guoman_25d', 'moe_chibi'
   ];
 
   function clipPrompt(text, maxLen) {

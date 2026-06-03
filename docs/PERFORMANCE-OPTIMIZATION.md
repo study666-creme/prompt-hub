@@ -13,6 +13,31 @@
 
 ---
 
+## Cloudflare Workers / Pages 请求额度（2026-06）
+
+| 计划 | 每日请求（约） | 说明 |
+|------|----------------|------|
+| 免费 | **100,000** | Workers + Pages 合计；UTC 0 点重置 |
+| 付费 Workers | 1000 万/月 | $5/月起 |
+
+### 主要消耗来源（本项目）
+
+| 来源 | 频率 | 说明 |
+|------|------|------|
+| Pages 静态资源 | 每次打开/强刷 | JS/CSS/HTML；SW 更新后全量重拉 |
+| `GET /api/v1/me`、积分 | 登录/切页 | 每次会话多次 |
+| 社区 `feed`、签名 | 进社区/刷新 | 每图可能 1 次 sign API |
+| **生图任务轮询** | 每任务 2.5～6s | `pollGenerationJobUntilDone` → `getGenerationJob` |
+| 云同步 push/pull | 保存卡片时 | `user_data` 大包 |
+
+### 运维建议
+
+- 开发时少开标签、少强刷；生图完成后关页或等任务结束
+- Dashboard → Workers 和 Pages → 分析，对比 Worker vs Pages 占比
+- 详见 `docs/DEBUG-GUIDE.md` → Cloudflare 请求额度
+
+---
+
 ## 📊 优化概览
 
 ### 已实施的优化

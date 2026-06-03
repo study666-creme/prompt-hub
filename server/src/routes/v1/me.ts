@@ -9,7 +9,12 @@ import {
 import { normalizeDisplayName, resolveDisplayName } from '../../lib/display-name';
 import { buildCommunityGachaQuota } from '../../lib/community-gacha';
 import { buildInspirationDrawQuota } from '../../lib/inspiration-draw';
-import { createAdminClient, isMembershipActive, membershipGenDiscountLabel } from '../../lib/supabase';
+import {
+  assertStorageDelta,
+  storagePayloadForProfile,
+  storagePolicySummary
+} from '../../lib/storage-quota';
+import { createAdminClient, getOrCreateProfile, isMembershipActive, membershipGenDiscountLabel } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
 
 export const meRoutes = new Hono<{ Bindings: Env }>();
@@ -51,8 +56,38 @@ meRoutes.get('/', async c => {
       dailyCreditsByTier: DAILY_CREDITS_BY_TIER,
       lumpCreditsByTier: { lite: 0, basic: 130, standard: 320, pro: 700 },
       inspirationDraw: buildInspirationDrawQuota(profile),
-      communityGacha: buildCommunityGachaQuota(profile)
+      communityGacha: buildCommunityGachaQuota(profile),
+      storage: storagePayloadForProfile(profile),
+      storagePolicy: storagePolicySummary()
     }
+  });
+});
+
+const storageDeltaBody = z.object({
+  delta: z.number().int().min(0).max(60 * 1024 * 1024)
+});
+
+meRoutes.post('/storage/delta', async c => {
+  const user = c.get('user');
+  const body = storageDeltaBody.parse(await c.req.json().catch(() => ({})));
+  const admin = createAdminClient(c.env);
+  const profile = await getOrCreateProfile(admin, user.id);
+  try {
+    assertStorageDelta(profile, body.delta);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '云存储空间不足';
+    return c.json({ ok: false, code: 'STORAGE_QUOTA', message: msg }, 402);
+  }
+  const usedBytes = Math.max(0, Number(profile.storage_bytes) || 0) + body.delta;
+  const { error } = await admin
+    .from('profiles')
+    .update({ storage_bytes: usedBytes })
+    .eq('user_id', user.id);
+  if (error) throw error;
+  const next = { ...profile, storage_bytes: usedBytes };
+  return c.json({
+    ok: true,
+    data: storagePayloadForProfile(next)
   });
 });
 

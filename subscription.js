@@ -43,7 +43,7 @@
     id: 'lite',
     name: '轻量会员包',
     tag: '特惠',
-    summary: '在免费每日 5 积分基础上额外 +5（共 10 积分/天）· 2 GB · 置顶 3 张 · 仅每日领取'
+    summary: '在免费每日 5 积分基础上额外 +5（共 10 积分/天）· 300MB+2GB · 置顶 3 张 · 仅每日领取'
   };
 
   const PLANS = [
@@ -51,14 +51,14 @@
       id: 'basic',
       name: '基础版',
       tag: '入门',
-      storage: '5 GB',
+      storage: '300MB+5GB',
       genDiscount: '95折',
       features: [
         '生图优先队列 · 积分 95 折',
         `额外每日 ${DAILY_BY_TIER.basic} 积分或一次性 ${LUMP_BY_TIER.basic} 积分`,
         '无限置顶',
         '资产创作工作台',
-        '5 GB 云存储',
+        '300MB 基础 + 额外 5GB 云存储',
         '全站云同步'
       ]
     },
@@ -66,14 +66,14 @@
       id: 'standard',
       name: '标准版',
       tag: '推荐',
-      storage: '10 GB',
+      storage: '300MB+10GB',
       genDiscount: '9折',
       features: [
         '生图优先队列 · 积分 9 折',
         `额外每日 ${DAILY_BY_TIER.standard} 积分或一次性 ${LUMP_BY_TIER.standard} 积分`,
         '无限置顶',
         '资产创作工作台',
-        '10 GB 云存储',
+        '300MB 基础 + 额外 10GB 云存储',
         '优先生图队列',
         '可另建 1 个自命名卡片库'
       ]
@@ -82,14 +82,14 @@
       id: 'pro',
       name: '专业版',
       tag: '专业',
-      storage: '30 GB',
+      storage: '300MB+30GB',
       genDiscount: '85折',
       features: [
         '最高优先级 · 积分 85 折',
         `额外每日 ${DAILY_BY_TIER.pro} 积分或一次性 ${LUMP_BY_TIER.pro} 积分`,
         '无限置顶',
         '资产创作工作台',
-        '30 GB 云存储',
+        '300MB 基础 + 额外 30GB 云存储',
         '最高生图优先级',
         '可另建 2 个自命名卡片库'
       ]
@@ -186,7 +186,7 @@
       if (info.active) {
         panelEl.innerHTML = `<div class="subscribe-membership-status is-active"><span class="subscribe-membership-tier">${esc(info.tierLabel)}</span><span class="subscribe-membership-until">${esc(info.untilLabel)}</span></div>`;
       } else {
-        panelEl.innerHTML = `<div class="subscribe-membership-status"><span class="subscribe-membership-tier">普通用户</span><span class="subscribe-membership-until">免费 · 每日 5 积分 · 100 张卡片存储</span></div>`;
+        panelEl.innerHTML = `<div class="subscribe-membership-status"><span class="subscribe-membership-tier">普通用户</span><span class="subscribe-membership-until">免费 · 每日 5 积分 · 云存储 300MB</span></div>`;
       }
     }
   }

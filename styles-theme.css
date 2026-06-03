@@ -10,8 +10,8 @@
   --border: #d1d1d6;
   --border-light: #c7c7cc;
   --text-primary: #1c1c1e;
-  --text-secondary: #3a3a3c;
-  --text-muted: #8e8e93;
+  --text-secondary: #48484a;
+  --text-muted: #636366;
   --accent: #1c1c1e;
   --accent-hover: #000000;
   --accent-muted: #636366;
@@ -26,7 +26,7 @@
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.12);
   --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.06);
   --shadow-glow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.08);
-  --card-skeleton-bg: #121218;
+  --card-skeleton-bg: #e5e5ea;
   --card-orb-core: rgba(255, 255, 255, 0.26);
   --card-orb-mid: rgba(255, 255, 255, 0.1);
   --card-orb-halo: rgba(255, 255, 255, 0.03);
@@ -421,4 +421,53 @@ body.app-nav-collapsed .app-nav-theme-btn {
 .theme-toggle-btn.app-nav-theme-btn svg {
   width: 20px;
   height: 20px;
+}
+
+/* 浅色模式：提升正文/输入可读性，保持清爽 */
+[data-theme="light"] .prompt-field textarea,
+[data-theme="light"] #cardPrompt,
+[data-theme="light"] .imagegen-prompt-block textarea,
+[data-theme="light"] .panel-body textarea,
+[data-theme="light"] .custom-modal textarea {
+  color: #1c1c1e;
+  -webkit-text-fill-color: #1c1c1e;
+  caret-color: #1c1c1e;
+  background: #ffffff;
+  border-color: #c7c7cc;
+}
+
+[data-theme="light"] .prompt-field textarea::placeholder,
+[data-theme="light"] #cardPrompt::placeholder,
+[data-theme="light"] .imagegen-prompt-block textarea::placeholder {
+  color: #8e8e93;
+  opacity: 1;
+}
+
+[data-theme="light"] .card-desc,
+[data-theme="light"] .card-body,
+[data-theme="light"] .panel-hint,
+[data-theme="light"] .imagegen-feed-prompt,
+[data-theme="light"] .imagegen-prompt-head label,
+[data-theme="light"] .prompt-header label {
+  color: #48484a;
+}
+
+[data-theme="light"] .card-title,
+[data-theme="light"] .imagegen-prompt-head > label {
+  color: #1c1c1e;
+}
+
+[data-theme="light"] .imagegen-ref-label,
+[data-theme="light"] .imagegen-ref-tool-btn,
+[data-theme="light"] .imagegen-prompt-tool-btn {
+  color: #636366;
+}
+
+[data-theme="light"] .imagegen-ref-tool-btn.active,
+[data-theme="light"] .imagegen-prompt-tool-btn:hover {
+  color: #1c1c1e;
+}
+
+[data-theme="light"] .app-nav-storage-hint {
+  color: #636366;
 }

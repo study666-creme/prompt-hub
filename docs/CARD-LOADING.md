@@ -24,7 +24,7 @@
 
 - `card-image-loader.js` — 懒加载 + 应用 URL
 - `supabase-sync.js` — `prefetchCardsImages`、`getCachedDisplayUrl(image, cardId)`
-- `script.js` — `renderCards` 非阻塞、`warmCardImagesBackground`
+- `script.js` — `renderCards` → `hydrateWarehouseGridImages` → `CardImageLoader.bindWarehouse`
 
 ## 本地验证
 
@@ -82,9 +82,34 @@ cd D:\prompt-hub
 
 ---
 
+## 生图页「仓库」Feed（`#imageGenFeed`）— 用户实测 2026-06-06 · **P0 未解决**
+
+与主站 **卡片库**（`#cardsContainer` + `card-image-loader.js`）不是同一条管线。
+
+| | 卡片库（目标态） | 生图 → 仓库 Feed（当前） |
+|---|------------------|-------------------------|
+| 懒加载 | `observeContainer`，视口内才 `loadImg` | `hydrateFeedImages` 对容器内 **全部** `img` 批量处理 |
+| 缩略图 | 优先 `_grid.jpg` / `VARIANT_GRID` | grid miss 后 `applyFeedImageSrc` 可 **回退 full 原图** |
+| 并发 | prefetch cap、IO rootMargin | `warehouseBoost: true` → hydrate 并发 **10～18** |
+| 用户 Network | 修后应 < 几 MB 首屏 | 实测 **80～217 MB 资源**、**150+ MB 已传输**、244+ 请求 |
+
+**两阶段现象**（用户截图）：
+
+1. 先刷 **404** + **`card-images` 500**（签名/路径错误，请求数持续涨）。
+2. 签名成功后浏览器开始下 **2～3.7 MB/张** 的 jpeg（私有链 `?e=&s=`），流量陡增。
+
+**产品答案**：**不是**每次打开都必须几百 MB；应 **只看哪张再拉**（IntersectionObserver + 列表仅 grid + 详情才 full）。当前实现接近「Feed 里有多少张卡就签多少张、能下原图就下原图」。
+
+**下一条 AI 改哪里**：`features-draft.js`（`hydrateFeedImages`、`applyFeedImageSrc`）；让 `#imageGenFeed` 复用 `card-image-loader.js`；`supabase-sync.js` 禁止列表路径 `tryFullFallback` 除非侧栏/灯箱。
+
+验收见 **`docs/CURRENT-ISSUES.md` → P0-带宽**。
+
+---
+
 ## 后续可继续做（路线图）
 
-- [ ] 列表专用 **缩略图**（上传时写 `_thumb.jpg`，列表只拉小图）
+- [x] 列表缩略图 `_grid.jpg`（上传管线已有，**需 backfill 老卡 + 生图 Feed 强制使用**）
+- [ ] **生图仓库 Feed 懒加载 + 禁止列表 full**（P0，2026-06-06）
 - [ ] 签名 URL 写入 IndexedDB 会话缓存，刷新少打 Supabase
 - [ ] 首屏虚拟列表（>100 张时）
 - [ ] 公共读桶 + CDN（需安全评估）

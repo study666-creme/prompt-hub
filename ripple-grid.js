@@ -208,6 +208,8 @@ void main() {
   return {
     setPaused(value) {
       paused = !!value;
+      if (paused) cancelAnimationFrame(rafId);
+      else if (!destroyed) rafId = requestAnimationFrame(render);
     },
     destroy() {
       destroyed = true;

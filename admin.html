@@ -41,39 +41,68 @@
   </section>
 
   <div class="admin-app" id="adminApp" hidden>
-    <header class="admin-head">
-      <div>
-        <h1>运营后台</h1>
-        <p class="admin-hint">用户、激活码、存储用量一览</p>
-      </div>
-      <button type="button" class="admin-btn" id="logoutBtn">退出登录</button>
-    </header>
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <div class="admin-brand">
+          <h1>Prompt Hub</h1>
+          <p>运营控制台 · <code id="adminSidebarBuild">20260603h</code></p>
+        </div>
+        <nav class="admin-nav admin-tabs">
+          <button type="button" class="admin-tab is-active" data-tab="overview">概览</button>
+          <button type="button" class="admin-tab" data-tab="users">用户</button>
+          <button type="button" class="admin-tab" data-tab="codes">激活码</button>
+          <button type="button" class="admin-tab" data-tab="models">生图模型</button>
+        </nav>
+        <div class="admin-sidebar-foot">
+          <button type="button" class="admin-btn admin-btn--ghost-light" id="logoutBtn" style="width:100%">退出登录</button>
+        </div>
+      </aside>
 
-    <nav class="admin-tabs">
-      <button type="button" class="admin-tab is-active" data-tab="overview">概览</button>
-      <button type="button" class="admin-tab" data-tab="users">用户</button>
-      <button type="button" class="admin-tab" data-tab="codes">激活码</button>
-      <button type="button" class="admin-tab" data-tab="models">生图模型</button>
-    </nav>
+      <main class="admin-main">
+        <header class="admin-topbar" id="adminTopbar">
+          <div>
+            <h2 id="adminPageTitle">数据概览</h2>
+            <p class="admin-hint" id="adminPageSubtitle">用户、存储、运行环境一览</p>
+          </div>
+        </header>
 
     <section class="admin-panel" id="panel-overview">
       <div class="admin-stats" id="dashStats"></div>
+      <div id="dashAlerts" class="admin-alerts" hidden></div>
+      <div class="admin-card" id="dashInfra">
+        <h2>运行环境</h2>
+        <p class="admin-hint" id="dashInfraHint">加载 API / 数据库状态…</p>
+        <div id="dashInfraBody" hidden></div>
+      </div>
       <div class="admin-card admin-storage-card" id="dashStorage">
-        <h2>Supabase 存储</h2>
+        <div class="admin-card-head">
+          <h2>Supabase 用量</h2>
+          <button type="button" class="admin-btn admin-btn--sm" id="dashStorageReconcile" hidden title="按桶内文件重算 profiles.storage_bytes">回填登记存储</button>
+        </div>
         <p class="admin-hint" id="dashStorageHint">正在扫描 card-images 桶…</p>
         <div id="dashStorageBody" hidden></div>
+      </div>
+      <div class="admin-card" id="dashCommunity">
+        <h2>社区维护</h2>
+        <p class="admin-hint">下架 Storage 里已无图片、无效作者（888 等）、重复卡片的社区帖，解决 feed 签名 404 与灰块。</p>
+        <button type="button" class="admin-btn admin-btn--primary" id="dashCommunityPurgeBtn">清理无效社区帖</button>
+        <p class="admin-hint" id="dashCommunityPurgeResult" hidden></p>
       </div>
       <p class="admin-msg" id="dashMsg" hidden></p>
     </section>
 
     <section class="admin-panel" id="panel-users" hidden>
       <div class="admin-card">
-        <div class="admin-row" style="margin-bottom:12px">
-          <div class="admin-field" style="flex:1;min-width:200px;margin:0">
-            <label for="userSearch">搜索</label>
-            <input type="search" id="userSearch" placeholder="昵称，或邮箱关键词（含 @）">
+        <div class="admin-search-bar">
+          <div class="admin-field">
+            <label for="userSearch">搜索用户</label>
+            <input type="text" id="userSearch" name="admin-user-filter"
+              autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+              data-lpignore="true" data-1p-ignore="true"
+              placeholder="昵称，或邮箱关键词（含 @）">
           </div>
           <button type="button" class="admin-btn admin-btn--primary" id="userSearchBtn">搜索</button>
+          <button type="button" class="admin-btn" id="userSearchClear" title="清空搜索">清空</button>
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
@@ -84,14 +113,14 @@
                 <th>积分</th>
                 <th>会员</th>
                 <th>登记存储</th>
-                <th>卡片额度</th>
+                <th>云存储额度</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="userTableBody"></tbody>
           </table>
         </div>
-        <div class="admin-row" style="margin-top:12px">
+        <div class="admin-pagination">
           <button type="button" class="admin-btn" id="userPrev">上一页</button>
           <span id="userPageInfo" class="admin-hint"></span>
           <button type="button" class="admin-btn" id="userNext">下一页</button>
@@ -219,6 +248,8 @@
         <p class="admin-msg" id="modelsMsg" hidden></p>
       </div>
     </section>
+      </main>
+    </div>
   </div>
 
   <div class="admin-modal" id="userModal" hidden>

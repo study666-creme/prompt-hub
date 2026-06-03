@@ -10,20 +10,50 @@
   const MISSING_PATH_TTL_MS = 20 * 60 * 1000;
   const IMAGE_UPLOAD_SKIP_MS = 24 * 60 * 60 * 1000;
   const SIGN_REQUEST_TIMEOUT_MS = 4500;
-  const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+  /** 卡片库列表缩略图 */
   const MAX_SIDE = 1024;
   const GRID_MAX_SIDE = 640;
   const JPEG_QUALITY = 0.78;
   const GRID_JPEG_QUALITY = 0.72;
+  const MIN_VALID_IMAGE_BYTES = 512;
+  /** 列表 grid 小于此字节视为损坏空壳（真实 640px grid 通常 ≥15KB） */
+  const GRID_MIN_VALID_BYTES = 8192;
+  /** 卡片库主图（未开原图时）：兼顾清晰度与体积 */
+  const CARD_UPLOAD_MAX_SIDE = 2560;
+  const CARD_UPLOAD_JPEG_QUALITY = 0.88;
+  /** 设置里开启「保存原图」时的单张上限 */
+  const CARD_ORIGINAL_MAX_BYTES = 20 * 1024 * 1024;
+  /** 与 supabase/storage.sql 中 card-images.file_size_limit 一致（升级前多为 5MB） */
+  /** 与 Supabase 桶 card-images 上限一致（迁移 20260602120000 为 50MB） */
+  const STORAGE_BUCKET_LIMIT_BYTES = 52428800;
   /** 列表用 grid 缓存键；签名不再走 Storage transform（易 500） */
   const VARIANT_GRID = 'grid';
   const VARIANT_FULL = 'full';
   const USE_STORAGE_TRANSFORM = false;
   const GRID_SIGN_CONCURRENCY = 12;
-  const WAREHOUSE_PREFETCH_CARD_CAP = 96;
+  const WAREHOUSE_PREFETCH_CARD_CAP = 18;
+  const WAREHOUSE_VISIBLE_SIGN_CAP = 18;
   const WAREHOUSE_FAST_FIRST = 32;
   const SS_SIGN_CACHE = 'ph_signed_urls_v1';
+  const SS_GRID_DONE = 'ph_grid_done_v1';
+  const LS_GRID_DONE = 'ph_grid_done_v1';
+  const SS_GRID_SKIP = 'ph_grid_skip_v1';
   const signInflight = new Map();
+  const gridBackfillQueue = [];
+  let gridBackfillRunning = false;
+  let signBudgetUsed = 0;
+  let signBudgetResetAt = 0;
+  const SIGN_BUDGET_MAX = 64;
+  const SIGN_BUDGET_WINDOW_MS = 30000;
+  /** 视口触发 backfill：一次下载原图+上传 grid，会话内限量避免 Supabase 风暴 */
+  const AUTO_GRID_BACKFILL = true;
+  const GRID_BACKFILL_SESSION_CAP = 48;
+  let gridBackfillSessionCount = 0;
+  /** 列表签名只走 Worker API，避免 Supabase 超限 400 风暴 */
+  const USE_DIRECT_SUPABASE_SIGN = false;
+  /** 本会话 CDN 404 过的路径，不再签名（即使 localStorage 标了 grid done） */
+  const gridFetchFailedPaths = new Set();
 
   function loadSessionSignCache() {
     try {
@@ -54,7 +84,191 @@
     }, 120);
   }
 
+  function purgeStaleGridSignCache() {
+    const drop = [];
+    signedUrlCache.forEach((_entry, key) => {
+      const path = String(key).replace(/@g640$/, '');
+      if (!/_grid\.(jpe?g|webp|png)$/i.test(path)) return;
+      if (path.includes('/generated/') || isLegacyUploadCardPath(path.replace(/_grid\.(jpe?g|webp|png)$/i, '.jpg'))) {
+        drop.push(key);
+      }
+    });
+    drop.forEach((k) => signedUrlCache.delete(k));
+    if (drop.length) persistSessionSignCache();
+  }
+
+  function purgeFakeGridCacheEntries() {
+    let n = 0;
+    for (const [key, val] of signedUrlCache.entries()) {
+      if (!key.endsWith('@g640') || !val?.url) continue;
+      if (!isGridDisplayUrl(val.url)) {
+        signedUrlCache.delete(key);
+        n += 1;
+      }
+    }
+    if (n) persistSessionSignCache();
+  }
+
   loadSessionSignCache();
+  purgeStaleGridSignCache();
+  purgeFakeGridCacheEntries();
+
+  function clearGridMissingMarksForReadyCards() {
+    /* 不再清除 missing 标记：grid done 但文件 404 时会陷入 sign→404→clear→sign 死循环 */
+  }
+
+  function consumeSignBudget(n) {
+    const now = Date.now();
+    if (now > signBudgetResetAt) {
+      signBudgetUsed = 0;
+      signBudgetResetAt = now + SIGN_BUDGET_WINDOW_MS;
+    }
+    if (signBudgetUsed + (n || 1) > SIGN_BUDGET_MAX) return false;
+    signBudgetUsed += n || 1;
+    return true;
+  }
+
+  function signBudgetAvailable() {
+    const now = Date.now();
+    if (now > signBudgetResetAt) return true;
+    return signBudgetUsed < SIGN_BUDGET_MAX;
+  }
+
+  function markGridFetchFailed(path) {
+    const key = normalizePathKey(path);
+    if (!key) return;
+    gridFetchFailedPaths.add(key);
+    if (/_grid\.(jpe?g|webp|png)$/i.test(key)) {
+      invalidateSignedCache(key);
+    } else {
+      markPathMissing(key);
+      invalidateSignedCache(key);
+    }
+    persistSessionSignCache();
+    if (/_grid\.(jpe?g|webp|png)$/i.test(key)) {
+      const card = findCardForGridPath(key);
+      if (card?.id) unmarkGridThumbReady(card.id);
+    }
+  }
+
+  function unmarkGridThumbReady(cardId) {
+    if (!cardId) return;
+    const id = String(cardId);
+    try {
+      const rawLocal = localStorage.getItem(LS_GRID_DONE);
+      const mapLocal = rawLocal ? JSON.parse(rawLocal) : {};
+      if (mapLocal[id]) {
+        delete mapLocal[id];
+        localStorage.setItem(LS_GRID_DONE, JSON.stringify(mapLocal));
+      }
+    } catch (e) { /* ignore */ }
+    try {
+      const raw = sessionStorage.getItem(SS_GRID_DONE);
+      const map = raw ? JSON.parse(raw) : {};
+      if (map[id]) {
+        delete map[id];
+        sessionStorage.setItem(SS_GRID_DONE, JSON.stringify(map));
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function gridListNeedsPrimaryFallback(primary, cardId) {
+    if (!primary) return false;
+    const pk = String(primary).replace(/^\//, '');
+    /* 他人社区卡：不做自有 backfill 判定，列表仍尝试 grid 签名 */
+    if (!storagePathOwnedByCurrentUser(pk)) return false;
+    const grid = gridPathFromPrimary(pk);
+    if (!grid) return true;
+    const gk = grid.replace(/^\//, '');
+    if (isPathKnownMissing(gk) || gridFetchFailedPaths.has(gk)) return true;
+    if (cardId && isGridThumbReady(cardId)) {
+      const gk = grid ? grid.replace(/^\//, '') : '';
+      if (gk && !gridFetchFailedPaths.has(gk) && !isPathKnownMissing(gk)) return false;
+    }
+    if (pk.includes('/generated/') || isLegacyUploadCardPath(pk)) return true;
+    if (!shouldSignGridPath(gk, cardId)) return true;
+    return false;
+  }
+
+  /** 自有卡列表：优先签 grid；缺 grid 时暂签原图并排队 backfill */
+  function ownedListSignTargets(primary, cardId, opts) {
+    const gridOnly = opts?.gridOnly === true;
+    const pkey = String(primary || '').replace(/^\//, '');
+    if (!pkey || isPathKnownMissing(pkey)) {
+      return { grid: null, primary: null, needsBackfill: false };
+    }
+    const gridKey = (gridPathFromPrimary(pkey) || '').replace(/^\//, '');
+    if (gridKey && shouldSignGridPath(gridKey, cardId)) {
+      return { grid: gridKey, primary: null, needsBackfill: false };
+    }
+    if (gridListNeedsPrimaryFallback(primary, cardId)) {
+      return {
+        grid: null,
+        primary: gridOnly ? null : pkey,
+        needsBackfill: AUTO_GRID_BACKFILL && !!cardId
+      };
+    }
+    if (gridKey) return { grid: gridKey, primary: null, needsBackfill: false };
+    if (!gridOnly) return { grid: null, primary: pkey, needsBackfill: false };
+    return { grid: null, primary: null, needsBackfill: false };
+  }
+
+  async function resolveListPrimaryFallback(primary, assetId, opts) {
+    const key = String(primary || '').replace(/^\//, '');
+    if (!key || isPathKnownMissing(key)) return null;
+    const cached = signedUrlCache.get(signedCacheKey(key, VARIANT_FULL));
+    if (cached?.url && cached.expiresAt > Date.now() + 120000) return cached.url;
+    const apiUrl = await signPathViaApi(key, VARIANT_FULL, {
+      cardId: assetId,
+      authorId: opts?.authorId,
+      bypassSignBudget: true
+    });
+    if (apiUrl) return apiUrl;
+    return resolvePathToUrl(key, VARIANT_FULL, {
+      cardId: assetId,
+      authorId: opts?.authorId,
+      listOnly: false,
+      bypassSignBudget: true
+    });
+  }
+
+  function shouldSignGridPath(gridKey, cardId) {
+    const key = normalizePathKey(gridKey);
+    if (!key || isPathKnownMissing(key) || gridFetchFailedPaths.has(key)) return false;
+    if (!/_grid\.(jpe?g|webp|png)$/i.test(key)) return false;
+    let id = cardId;
+    if (!id) {
+      const card = findCardForGridPath(key);
+      id = card?.id;
+    }
+    const primaryGuess = key.replace(/_grid\.(jpe?g|webp|png)$/i, '.jpg');
+    const needsReadyFlag = key.includes('/generated/') || isLegacyUploadCardPath(primaryGuess);
+    if (needsReadyFlag) return !!(id && isGridThumbReady(id));
+    if (id && isGridThumbReady(id)) return true;
+    const gridHit = signedUrlCache.get(signedCacheKey(key, VARIANT_GRID));
+    return !!(gridHit?.url && gridHit.expiresAt > Date.now() + 120000);
+  }
+
+  function findCardForGridPath(gridKey) {
+    const norm = normalizePathKey(gridKey);
+    return (window.__promptHubCards || []).find((c) => {
+      if (!c?.id || !c?.image) return false;
+      const p = primaryImagePath(c.image, c.id);
+      const grid = p ? gridPathFromPrimary(p.replace(/^\//, '')) : null;
+      return grid && normalizePathKey(grid) === norm;
+    }) || null;
+  }
+
+  try {
+    const rawS = sessionStorage.getItem(SS_GRID_DONE);
+    const rawL = localStorage.getItem(LS_GRID_DONE);
+    const mapS = rawS ? JSON.parse(rawS) : {};
+    const mapL = rawL ? JSON.parse(rawL) : {};
+    const merged = { ...mapS, ...mapL };
+    if (Object.keys(merged).length) {
+      localStorage.setItem(LS_GRID_DONE, JSON.stringify(merged));
+    }
+  } catch (e) { /* ignore */ }
 
   function isCdnMediaUrl(url) {
     return typeof url === 'string' && /\/api\/v1\/media\/[ci]\//i.test(url);
@@ -131,13 +345,9 @@
   function invalidateSignedCacheForRef(ref, assetId) {
     for (const p of listImagePathCandidates(normalizeImageRef(ref), assetId)) {
       invalidateSignedCache(p);
-      missingPathCache.delete(normalizePathKey(p));
     }
     const fromUrl = storagePathFromRef(ref);
-    if (fromUrl) {
-      invalidateSignedCache(fromUrl);
-      missingPathCache.delete(normalizePathKey(fromUrl));
-    }
+    if (fromUrl) invalidateSignedCache(fromUrl);
   }
 
   function isUsableLoadedImgSrc(src) {
@@ -314,6 +524,9 @@
     if (/row-level security|violates.*policy|permission denied/i.test(msg)) {
       return msg + '（若已运行过 SQL，请再运行 supabase/fix-policies.sql 后退出并重新登录）';
     }
+    if (/maximum allowed size|entity too large|payload too large|413/.test(msg)) {
+      return '图片超过云存储单文件上限（当前桶约 50MB）。站点已尝试原尺寸高清 JPEG；若仍失败，请换较小文件或联系管理员检查 Supabase 桶 card-images 的 File size limit';
+    }
     if (msg) return msg;
     if (err.error && typeof err.error !== 'string') return formatError(err.error);
     try { return JSON.stringify(err); } catch (e) { return '同步失败'; }
@@ -400,6 +613,12 @@
     return value;
   }
 
+  function clearListImageMissMarks() {
+    missingPathCache.clear();
+    gridFetchFailedPaths.clear();
+    persistSessionSignCache();
+  }
+
   function clearSignedUrlCache() {
     signedUrlCache.clear();
     missingPathCache.clear();
@@ -407,9 +626,11 @@
   }
 
   try {
-    if (localStorage.getItem('promptrepo_sign_v') !== '6') {
+    if (localStorage.getItem('promptrepo_sign_v') !== '7') {
       clearSignedUrlCache();
-      localStorage.setItem('promptrepo_sign_v', '6');
+      missingPathCache.clear();
+      gridFetchFailedPaths.clear();
+      localStorage.setItem('promptrepo_sign_v', '7');
     }
   } catch (e) { /* ignore */ }
 
@@ -424,6 +645,10 @@
 
   function markImageUploadSkip(cardId) {
     if (cardId) imageUploadSkipUntil.set(String(cardId), Date.now() + IMAGE_UPLOAD_SKIP_MS);
+  }
+
+  function payloadNeedsImageUpload(cards) {
+    return (cards || []).some((c) => cardNeedsCloudImageUpload(c) || isDataUrl(c?.image));
   }
 
   function cardNeedsCloudImageUpload(card) {
@@ -496,8 +721,9 @@
 
   function pathsForVariant(image, assetId, ownerId, variant) {
     const all = listImagePathCandidates(image, assetId, ownerId);
+    const skipMissing = (paths) => paths.filter((p) => !isPathKnownMissing(String(p || '').replace(/^\//, '')));
     if (variant === VARIANT_FULL) {
-      return all.filter((p) => !/_grid\.(jpe?g|webp|png)$/i.test(p));
+      return skipMissing(all.filter((p) => !/_grid\.(jpe?g|webp|png)$/i.test(p)));
     }
     const gridFirst = [];
     const seen = new Set();
@@ -510,10 +736,398 @@
     };
     for (const p of all) {
       if (/_grid\.(jpe?g|webp|png)$/i.test(p)) add(p);
-      else add(gridPathFromPrimary(p));
     }
-    for (const p of all) add(p);
-    return gridFirst;
+    const primary = primaryImagePath(image, assetId);
+    if (primary) {
+      const grid = gridPathFromPrimary(primary.replace(/^\//, ''));
+      if (grid) add(grid);
+    }
+    return skipMissing(gridFirst);
+  }
+
+  function isGridThumbReady(cardId) {
+    if (!cardId) return false;
+    const id = String(cardId);
+    try {
+      const rawLocal = localStorage.getItem(LS_GRID_DONE);
+      const mapLocal = rawLocal ? JSON.parse(rawLocal) : {};
+      if (mapLocal[id]) return true;
+    } catch (e) { /* ignore */ }
+    try {
+      const raw = sessionStorage.getItem(SS_GRID_DONE);
+      const map = raw ? JSON.parse(raw) : {};
+      return !!map[id];
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function markGridThumbReady(cardId) {
+    if (!cardId) return;
+    const id = String(cardId);
+    const stamp = Date.now();
+    try {
+      const rawLocal = localStorage.getItem(LS_GRID_DONE);
+      const mapLocal = rawLocal ? JSON.parse(rawLocal) : {};
+      mapLocal[id] = stamp;
+      localStorage.setItem(LS_GRID_DONE, JSON.stringify(mapLocal));
+    } catch (e) { /* ignore */ }
+    try {
+      const raw = sessionStorage.getItem(SS_GRID_DONE);
+      const map = raw ? JSON.parse(raw) : {};
+      map[id] = stamp;
+      sessionStorage.setItem(SS_GRID_DONE, JSON.stringify(map));
+    } catch (e) { /* ignore */ }
+  }
+
+  function isGridBackfillSkipped(cardId) {
+    if (!cardId) return false;
+    try {
+      const raw = sessionStorage.getItem(SS_GRID_SKIP);
+      const map = raw ? JSON.parse(raw) : {};
+      return !!map[String(cardId)];
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function clearGridBackfillSkipped(cardId) {
+    if (!cardId) return;
+    try {
+      const raw = sessionStorage.getItem(SS_GRID_SKIP);
+      const map = raw ? JSON.parse(raw) : {};
+      if (map[String(cardId)]) {
+        delete map[String(cardId)];
+        sessionStorage.setItem(SS_GRID_SKIP, JSON.stringify(map));
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function markGridBackfillSkipped(cardId, reason) {
+    if (!cardId) return;
+    try {
+      const raw = sessionStorage.getItem(SS_GRID_SKIP);
+      const map = raw ? JSON.parse(raw) : {};
+      map[String(cardId)] = { at: Date.now(), reason: String(reason || 'no_source') };
+      sessionStorage.setItem(SS_GRID_SKIP, JSON.stringify(map));
+    } catch (e) { /* ignore */ }
+  }
+
+  async function downloadOriginalForBackfill(card) {
+    const cardId = card?.id;
+    const image = card?.image;
+    if (!cardId || !image) return null;
+    const dlOpts = { ignoreMissingCache: true, markMissing: false, cardId };
+    const primary = primaryImagePath(image, cardId);
+    if (primary) {
+      const blob = await downloadOwnedStorageBlob(primary.replace(/^\//, ''), dlOpts);
+      if (blob) return { blob, path: primary.replace(/^\//, '') };
+    }
+    const uid = getUserId();
+    if (uid) {
+      const cid = String(cardId).replace(/^wh_/, '');
+      const genPath = `${uid}/generated/${cid}.jpg`;
+      if (!primary || genPath !== primary.replace(/^\//, '')) {
+        const blob = await downloadOwnedStorageBlob(genPath, dlOpts);
+        if (blob) return { blob, path: genPath };
+      }
+    }
+    return null;
+  }
+
+  function refreshCardGridImages(cardId) {
+    const id = String(cardId || '');
+    if (!id) return;
+    const roots = [
+      document.getElementById('cardsContainer'),
+      document.getElementById('imageGenFeed')
+    ].filter(Boolean);
+    for (const root of roots) {
+      root.querySelectorAll('img[data-image-ref]').forEach((img) => {
+        const cid = img.dataset?.sourceCardId
+          || img.closest('.card[data-id]')?.dataset?.id
+          || img.closest('.imagegen-feed-card[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '');
+        if (cid !== id) return;
+        const ref = img.getAttribute('data-image-ref');
+        if (!ref) return;
+        const url = getCachedDisplayUrl(ref, { assetId: id, variant: VARIANT_GRID });
+        if (url && window.CardImageLoader?.applyUrlToImg) {
+          window.CardImageLoader.applyUrlToImg(img, url);
+          return;
+        }
+        void resolveDisplayUrl(ref, {
+          assetId: id,
+          variant: VARIANT_GRID,
+          listOnly: true,
+          allowFullFallback: false,
+          degradedListFull: false
+        }).then((u) => {
+          if (u && window.CardImageLoader?.applyUrlToImg) window.CardImageLoader.applyUrlToImg(img, u);
+        });
+      });
+    }
+  }
+
+  function queueGridBackfill(card, opts) {
+    if (!AUTO_GRID_BACKFILL) return;
+    if (!card?.id || !card?.image || !isLoggedIn()) return;
+    const force = opts?.force === true;
+    if (force && isGridBackfillSkipped(card.id)) clearGridBackfillSkipped(card.id);
+    if (!force && gridBackfillSessionCount >= GRID_BACKFILL_SESSION_CAP) return;
+    if (!force && isGridBackfillSkipped(card.id)) return;
+    if (!force && isGridThumbReady(card.id)) return;
+    const path = primaryImagePath(card.image, card.id);
+    if (!path || !storagePathOwnedByCurrentUser(path)) return;
+    const grid = gridPathFromPrimary(path);
+    if (!grid) return;
+    const key = String(card.id);
+    if (gridBackfillQueue.some((c) => String(c.id) === key)) return;
+    gridBackfillQueue.push(card);
+    void drainGridBackfillQueue();
+  }
+
+  function invalidateCorruptGrid(gridKey, cardId) {
+    const key = normalizePathKey(gridKey);
+    if (!key) return;
+    markGridFetchFailed(key);
+    markPathMissing(key);
+    if (cardId) unmarkGridThumbReady(cardId);
+  }
+
+  function isValidGridBlob(blob) {
+    return !!(blob && (blob.size || 0) >= GRID_MIN_VALID_BYTES);
+  }
+
+  function isValidImageBlob(blob, opts) {
+    const min = opts?.grid ? GRID_MIN_VALID_BYTES : MIN_VALID_IMAGE_BYTES;
+    return !!(blob && (blob.size || 0) >= min);
+  }
+
+  async function downloadBlobFromSignedPath(pathKey, opts = {}) {
+    const key = String(pathKey || '').replace(/^\//, '');
+    if (!key) return null;
+    let url = await signPathViaApi(key, VARIANT_FULL, {
+      bypassSignBudget: true,
+      cardId: opts.cardId
+    });
+    if (!url) {
+      url = await resolvePathToUrl(key, VARIANT_FULL, {
+        bypassSignBudget: true,
+        listOnly: false,
+        cardId: opts.cardId
+      });
+    }
+    if (!url) return null;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        if (res.status === 404) markPathMissing(key);
+        return null;
+      }
+      return await res.blob();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function downloadOwnedStorageBlob(path, opts = {}) {
+    const key = String(path || '').replace(/^\//, '');
+    if (!key || !storagePathOwnedByCurrentUser(key)) return null;
+    if (!opts.ignoreMissingCache && isPathKnownMissing(key)) return null;
+    await ensureSession();
+    const isGrid = /_grid\.(jpe?g|webp|png)$/i.test(key);
+    const blob = await downloadBlobFromSignedPath(key, opts);
+    if (!blob) return null;
+    if (!isValidImageBlob(blob, { grid: isGrid })) {
+      if (isGrid) {
+        const card = findCardForGridPath(key);
+        invalidateCorruptGrid(key, card?.id || opts.cardId);
+      }
+      return null;
+    }
+    return blob;
+  }
+
+  async function backfillOneGridThumb(card) {
+    const cardId = card?.id;
+    const path = primaryImagePath(card?.image, cardId);
+    const grid = gridPathFromPrimary(path);
+    if (!cardId || !path || !grid || !storagePathOwnedByCurrentUser(path)) {
+      if (cardId) markGridBackfillSkipped(cardId, 'invalid_path');
+      return { ok: false, skip: true, reason: 'invalid_path' };
+    }
+    const gridKey = grid.replace(/^\//, '');
+    const probeOpts = { ignoreMissingCache: true, markMissing: false };
+    if (isGridThumbReady(cardId)) {
+      try {
+        const existingGrid = await downloadOwnedStorageBlob(grid, probeOpts);
+        if (existingGrid && isValidGridBlob(existingGrid)) {
+          missingPathCache.delete(normalizePathKey(grid));
+          void batchSignPaths([gridKey], VARIANT_GRID).then(() => refreshCardGridImages(cardId));
+          return { ok: true, skip: true };
+        }
+        unmarkGridThumbReady(cardId);
+        invalidateCorruptGrid(gridKey, cardId);
+      } catch (e) {
+        unmarkGridThumbReady(cardId);
+        invalidateCorruptGrid(gridKey, cardId);
+      }
+    }
+    const cached = signedUrlCache.get(signedCacheKey(gridKey, VARIANT_GRID));
+    if (cached?.url && cached.expiresAt > Date.now() + 120000) {
+      try {
+        const probeCached = await downloadOwnedStorageBlob(grid, probeOpts);
+        if (probeCached && isValidGridBlob(probeCached)) {
+          markGridThumbReady(cardId);
+          return { ok: true, skip: true };
+        }
+        invalidateSignedCache(gridKey);
+        unmarkGridThumbReady(cardId);
+      } catch (e) {
+        invalidateSignedCache(gridKey);
+        unmarkGridThumbReady(cardId);
+      }
+    }
+    try {
+      const existingGrid = await downloadOwnedStorageBlob(grid, probeOpts);
+      if (existingGrid && isValidGridBlob(existingGrid)) {
+        markGridThumbReady(cardId);
+        missingPathCache.delete(normalizePathKey(grid));
+        void batchSignPaths([gridKey], VARIANT_GRID).then(() => refreshCardGridImages(cardId));
+        return { ok: true, skip: true };
+      }
+    } catch (e) { /* need backfill */ }
+    let source = null;
+    if (typeof window.getCardImageBackup === 'function') {
+      try {
+        const backup = await window.getCardImageBackup(cardId);
+        if (backup && (String(backup).startsWith('data:') || String(backup).startsWith('blob:'))) {
+          source = backup;
+        }
+      } catch (e) { /* ignore */ }
+    }
+    if (!source) {
+      try {
+        const found = await downloadOriginalForBackfill(card);
+        if (found?.blob) source = found.blob;
+      } catch (e) { /* ignore */ }
+    }
+    if (!source) {
+      markGridBackfillSkipped(cardId, 'no_original');
+      return { ok: false, skip: true, reason: 'no_original' };
+    }
+    try {
+      const gridBlob = await compressImageToGrid(source);
+      if (!isValidGridBlob(gridBlob)) {
+        markGridBackfillSkipped(cardId, 'grid_too_small');
+        return { ok: false, skip: true, reason: 'grid_too_small' };
+      }
+      await uploadStorageBlob(grid, gridBlob, { skipVerify: true });
+      clearSignedCacheForPaths([grid, path]);
+      missingPathCache.delete(normalizePathKey(grid));
+      markGridThumbReady(cardId);
+      gridBackfillSessionCount += 1;
+      void batchSignPaths([gridKey], VARIANT_GRID).then(() => {
+        refreshCardGridImages(cardId);
+      });
+      return { ok: true };
+    } catch (e) {
+      console.warn('[SupabaseSync] grid backfill failed', cardId, e);
+      return { ok: false };
+    }
+  }
+
+  async function drainGridBackfillQueue() {
+    if (gridBackfillRunning || !gridBackfillQueue.length) return;
+    gridBackfillRunning = true;
+    try {
+      while (gridBackfillQueue.length) {
+        const batch = gridBackfillQueue.splice(0, 1);
+        await Promise.all(batch.map((c) => backfillOneGridThumb(c)));
+        await new Promise((r) => setTimeout(r, 280));
+      }
+    } finally {
+      gridBackfillRunning = false;
+    }
+  }
+
+  async function diagnoseGridBackfillPending(cards, opts = {}) {
+    const max = Math.min(Math.max(1, Number(opts.max) || 24), 120);
+    const all = (cards || []).filter((c) => c?.id && c?.image && isStorageRef(c.image));
+    const pending = all.filter((c) => !isGridThumbReady(c.id) && !isGridBackfillSkipped(c.id));
+    const skipped = all.filter((c) => isGridBackfillSkipped(c.id));
+    const sample = [];
+    const probeOpts = { ignoreMissingCache: true, markMissing: false };
+    for (const c of pending.slice(0, max)) {
+      const path = primaryImagePath(c.image, c.id);
+      const grid = gridPathFromPrimary(path);
+      let gridOk = false;
+      let originalOk = false;
+      let backupOk = false;
+      try {
+        const g = grid ? await downloadOwnedStorageBlob(grid, probeOpts) : null;
+        gridOk = !!(g && isValidGridBlob(g));
+      } catch (e) { /* ignore */ }
+      try {
+        const o = await downloadOriginalForBackfill(c);
+        originalOk = !!o?.blob;
+      } catch (e) { /* ignore */ }
+      if (typeof window.getCardImageBackup === 'function') {
+        try {
+          const backup = await window.getCardImageBackup(c.id);
+          backupOk = !!(backup && (String(backup).startsWith('data:') || String(backup).startsWith('blob:')));
+        } catch (e) { /* ignore */ }
+      }
+      sample.push({
+        id: c.id,
+        path,
+        grid,
+        gridOk,
+        originalOk,
+        backupOk,
+        canBackfill: gridOk || originalOk || backupOk
+      });
+    }
+    return {
+      total: all.length,
+      done: all.filter((c) => isGridThumbReady(c.id)).length,
+      skipped: skipped.length,
+      pending: pending.length,
+      sampleCanBackfill: sample.filter((s) => s.canBackfill).length,
+      sampleGhost: sample.filter((s) => !s.canBackfill).length,
+      sample
+    };
+  }
+
+  async function backfillGridThumbsForCards(cards, opts = {}) {
+    if (!isLoggedIn()) return { done: 0, queued: 0, pending: 0, skipped: 0 };
+    if (opts.quiet !== false) window.CardImageLoader?.disconnect?.();
+    const force = opts.force === true;
+    const max = Math.min(Math.max(1, Number(opts.max) || 24), force ? 80 : 48);
+    const all = (cards || []).filter((c) => c?.id && c?.image && isStorageRef(c.image));
+    const pendingBefore = force
+      ? all.filter((c) => !isGridThumbReady(c.id))
+      : all.filter((c) => !isGridThumbReady(c.id) && !isGridBackfillSkipped(c.id));
+    const list = pendingBefore.slice(0, max);
+    for (const c of list) {
+      if (force && isGridBackfillSkipped(c.id)) clearGridBackfillSkipped(c.id);
+      queueGridBackfill(c, { force });
+    }
+    if (opts.awaitDrain) {
+      while (gridBackfillRunning || gridBackfillQueue.length) {
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    }
+    const pendingAfter = all.filter((c) => !isGridThumbReady(c.id) && !isGridBackfillSkipped(c.id));
+    const skipped = all.filter((c) => isGridBackfillSkipped(c.id)).length;
+    return {
+      done: all.filter((c) => isGridThumbReady(c.id)).length,
+      queued: list.length,
+      pending: pendingAfter.length,
+      skipped,
+      total: all.length,
+      finished: pendingAfter.length < pendingBefore.length || skipped > 0
+    };
   }
 
   function signedCacheKey(path, variant) {
@@ -527,11 +1141,12 @@
   }
 
   async function getSignedUrlForPath(path, opts) {
-    if (window.PromptHubApi?.isConfigured?.() && !window.PromptHubApi?.isApiUnreachable?.()) {
-      return null;
-    }
     const variant = displayVariantFromOpts(opts);
-    const fileKey = path.replace(/^\//, '');
+    let fileKey = path.replace(/^\//, '');
+    if (variant === VARIANT_GRID && !/_grid\.(jpe?g|webp|png)$/i.test(fileKey)) {
+      const grid = gridPathFromPrimary(fileKey);
+      if (grid && !isPathKnownMissing(grid.replace(/^\//, ''))) fileKey = grid.replace(/^\//, '');
+    }
     if (isPathKnownMissing(fileKey)) return null;
     const cacheKey = signedCacheKey(fileKey, variant);
     const cached = signedUrlCache.get(cacheKey);
@@ -564,21 +1179,17 @@
         if (variant === VARIANT_GRID) {
           if (/_grid\.(jpe?g|webp|png)$/i.test(fileKey)) {
             markPathMissing(fileKey);
-            const primary = fileKey.replace(/_grid\.(jpe?g|webp|png)$/i, '.jpg');
-            if (primary !== fileKey) {
-              const alt = await getSignedUrlForPath(`/${primary}`, { variant: VARIANT_FULL });
-              if (alt) return alt;
-            }
-            return null;
+          } else {
+            const expectedGrid = gridPathFromPrimary(fileKey);
+            if (expectedGrid) markPathMissing(expectedGrid);
           }
-          const fullUrl = await getSignedUrlForPath(path, { variant: VARIANT_FULL });
-          if (fullUrl) return fullUrl;
+          return null;
         }
         markPathMissing(fileKey);
         return null;
       }
       if (variant === VARIANT_GRID) {
-        return getSignedUrlForPath(path, { variant: VARIANT_FULL });
+        return null;
       }
       throw e;
     }
@@ -594,11 +1205,215 @@
     return candidates.some((p) => !isPathKnownMissing(p));
   }
 
-  function cardImageStoragePath(cardId, ownerId) {
+  function cardImageStoragePath(cardId, ownerId, ext) {
     const uid = ownerId || getUserId();
     if (!uid || !cardId) return null;
     const base = String(cardId).replace(/[^a-zA-Z0-9_-]/g, '_');
-    return `${uid}/${base}.jpg`;
+    const safeExt = String(ext || 'jpg').replace(/[^a-z0-9]/gi, '') || 'jpg';
+    return `${uid}/${base}.${safeExt}`;
+  }
+
+  /** 从 storage 路径提取 UUID（legacy card_* id 与 generated/uuid 不一致时用） */
+  function storageAssetIdFromPath(path, fallbackId) {
+    const key = String(path || '').replace(/^\//, '');
+    const m = key.match(/\/generated\/([0-9a-f-]{36})\./i)
+      || key.match(/\/([0-9a-f-]{36})(?:_grid)?\./i);
+    if (m) return m[1];
+    return fallbackId;
+  }
+
+  function signCardIdForPath(path, fallbackId) {
+    const fb = String(fallbackId || '');
+    if (/^card_\d/i.test(fb)) {
+      return storageAssetIdFromPath(path, fb) || fb;
+    }
+    return fb || storageAssetIdFromPath(path, fb);
+  }
+
+  function extFromImageMime(mime) {
+    const m = String(mime || '').toLowerCase();
+    if (m.includes('png')) return 'png';
+    if (m.includes('webp')) return 'webp';
+    if (m.includes('jpeg') || m.includes('jpg')) return 'jpg';
+    return 'jpg';
+  }
+
+  function preserveOriginalCardImageFromSettings() {
+    try {
+      const raw = localStorage.getItem('promptrepo_settings');
+      if (!raw) return false;
+      const s = JSON.parse(raw);
+      return s.preserveOriginalCardImage === true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function cardUploadOriginalEnabled() {
+    if (typeof window.__cardUploadOriginal === 'boolean') return window.__cardUploadOriginal;
+    return preserveOriginalCardImageFromSettings();
+  }
+
+  function preserveOriginalCardImageEnabled() {
+    return cardUploadOriginalEnabled();
+  }
+
+  async function sourceToBlob(source) {
+    if (source instanceof Blob) return source;
+    if (typeof source === 'string' && (isDataUrl(source) || source.startsWith('blob:'))) {
+      const res = await fetch(source);
+      if (!res.ok) throw new Error('无法读取图片');
+      return res.blob();
+    }
+    throw new Error('不支持的图片格式');
+  }
+
+  function isGridStoragePath(path) {
+    return /_grid\.(jpe?g|webp|png)$/i.test(String(path || '').replace(/^\//, ''));
+  }
+
+  function isGridDisplayUrl(url) {
+    const p = storagePathFromDisplayUrl(url);
+    return !!(p && isGridStoragePath(p));
+  }
+
+  function filterGridVariantUrl(url, variant) {
+    if (!url || variant !== VARIANT_GRID) return url || '';
+    if (!isValidSignedDisplayUrl(url) || isInvalidMediaUrl(url)) return '';
+    return isGridDisplayUrl(url) ? url : '';
+  }
+
+  /** 插件/旧版上传：card_{timestamp}_{rand}.jpg，常无对应 _grid */
+  function isLegacyUploadCardPath(pathKey) {
+    return /\/card_\d{10,}_[a-z0-9]+\.(jpe?g|webp|png)$/i.test(String(pathKey || '').replace(/^\//, ''));
+  }
+
+  function storagePathFromCdnUrl(url) {
+    if (!url || typeof url !== 'string') return null;
+    const m = url.match(/\/api\/v1\/media\/[ci]\/([^?]+)/i);
+    if (!m) return null;
+    try {
+      let b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new TextDecoder().decode(bytes).replace(/^\//, '');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function storagePathFromDisplayUrl(url) {
+    const cdn = storagePathFromCdnUrl(url);
+    if (cdn) return cdn;
+    try {
+      const u = new URL(url);
+      const m = (u.pathname || '').match(
+        /\/storage\/v1\/object\/(?:sign|public|authenticated)\/card-images\/(.+)$/i
+      );
+      if (m) return decodeURIComponent(m[1]).replace(/^\/+/, '');
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  /** 所有列表区（含社区网格）只显示 grid；full 仅预览/侧栏/灯箱 */
+  function isWarehouseBlockedFullUrl(url, img) {
+    const listRoot = img?.closest?.('#cardsContainer, #imageGenFeed, #communityGrid, #creationsGrid, #userProfileGrid');
+    if (!listRoot) return false;
+    const path = storagePathFromDisplayUrl(url);
+    if (!path || isGridStoragePath(path)) return false;
+    if (!/\.(jpe?g|webp|png|gif)$/i.test(path)) return false;
+    return true;
+  }
+
+  /** 社区列表 prefetch / DOM：优先 grid 路径 ref */
+  function communityListGridRef(image, assetId) {
+    if (!image) return null;
+    const primary = primaryImagePath(image, assetId);
+    if (!primary) return null;
+    const grid = gridPathFromPrimary(primary.replace(/^\//, ''));
+    return grid ? toStorageRef(grid) : null;
+  }
+
+  function clearSignedCacheForPaths(paths) {
+    for (const raw of paths || []) {
+      const key = String(raw || '').replace(/^\//, '');
+      if (!key) continue;
+      signedUrlCache.delete(signedCacheKey(key, VARIANT_GRID));
+      signedUrlCache.delete(signedCacheKey(key, VARIANT_FULL));
+    }
+  }
+
+  async function encodeFullResolutionJpeg(source, quality) {
+    const img = await loadImageFromSource(source);
+    if (typeof source !== 'string' && source instanceof Blob) {
+      try { URL.revokeObjectURL(img.src); } catch (e) { /* ignore */ }
+    }
+    const w = img.naturalWidth;
+    const h = img.naturalHeight;
+    if (!w || !h) throw new Error('图片尺寸无效');
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error('JPEG 编码失败'))),
+        'image/jpeg',
+        quality
+      );
+    });
+  }
+
+  function isStorageSizeError(err) {
+    const msg = String(err?.message || err?.error || err || '').toLowerCase();
+    return /maximum allowed size|entity too large|payload too large|413/.test(msg);
+  }
+
+  async function fitBlobToStorageLimit(source, blob) {
+    const limit = STORAGE_BUCKET_LIMIT_BYTES;
+    if (!blob || blob.size <= limit) {
+      return { blob, mode: 'raw' };
+    }
+    let quality = 0.95;
+    let jpeg = await encodeFullResolutionJpeg(source, quality);
+    while (jpeg.size > limit && quality > 0.72) {
+      quality -= 0.04;
+      jpeg = await encodeFullResolutionJpeg(source, quality);
+    }
+    if (jpeg.size <= limit) {
+      return { blob: jpeg, mode: 'full_res_jpeg', quality };
+    }
+    const mb = (blob.size / (1024 * 1024)).toFixed(1);
+    throw new Error(
+      `图片约 ${mb}MB，超过云存储单文件 50MB 上限；已尝试原尺寸 JPEG 仍超限，请换较小文件。`
+    );
+  }
+
+  async function prepareCardFullUploadBlob(source, opts = {}) {
+    const original = opts.original != null ? !!opts.original : cardUploadOriginalEnabled();
+    if (original) {
+      const blob = await sourceToBlob(source);
+      if (!blob.type || !blob.type.startsWith('image/')) {
+        throw new Error('请选择有效的图片文件');
+      }
+      if (blob.size > CARD_ORIGINAL_MAX_BYTES) {
+        const mb = (blob.size / (1024 * 1024)).toFixed(1);
+        const cap = Math.round(CARD_ORIGINAL_MAX_BYTES / (1024 * 1024));
+        throw new Error(`原图约 ${mb}MB，超过 ${cap}MB 上限。可关闭「保存原图」后自动压缩，或换较小文件`);
+      }
+      const fitted = await fitBlobToStorageLimit(source, blob);
+      fitted.blob.__uploadEncodeMode = fitted.mode;
+      if (fitted.mode === 'full_res_jpeg') {
+        fitted.blob.__uploadJpegQuality = fitted.quality;
+      }
+      return fitted.blob;
+    }
+    return compressImage(source, {
+      maxSide: CARD_UPLOAD_MAX_SIDE,
+      quality: CARD_UPLOAD_JPEG_QUALITY
+    });
   }
 
   function listImagePathCandidates(image, assetId, ownerId) {
@@ -617,8 +1432,13 @@
       add(`${uid}/${assetId}.jpg`);
       add(`${uid}/${base}.webp`);
       add(`${uid}/${base}.png`);
+      add(`${uid}/generated/${base}.jpg`);
+      add(`${uid}/generated/${assetId}.jpg`);
       const stripped = String(assetId).replace(/^wh_/, '');
-      if (stripped !== String(assetId)) add(`${uid}/${stripped}.jpg`);
+      if (stripped !== String(assetId)) {
+        add(`${uid}/${stripped}.jpg`);
+        add(`${uid}/generated/${stripped}.jpg`);
+      }
     }
     return paths;
   }
@@ -626,27 +1446,71 @@
   async function signPathViaCommunityApi(path, variant, signOpts = {}) {
     if (!window.PromptHubApi?.isConfigured?.() || !window.PromptHubApi.signCommunityMediaRef) return null;
     const fileKey = String(path || '').replace(/^\//, '');
-    if (isPathKnownMissing(fileKey)) return null;
+    const ownPath = storagePathOwnedByCurrentUser(fileKey);
+    if (!ownPath && isPathKnownMissing(fileKey)) {
+      /* 他人社区图：不因本地 missing 缓存放弃签名（CDN 可现场生成 grid） */
+    } else if (isPathKnownMissing(fileKey)) {
+      return null;
+    }
+    /* 自有路径不走 community/sign（card_* 与 generated/uuid 会 404） */
+    if (storagePathOwnedByCurrentUser(fileKey)) {
+      return signPathViaApi(path, variant, {
+        ...signOpts,
+        cardId: signCardIdForPath(fileKey, signOpts?.cardId || signOpts?.assetId),
+        bypassSignBudget: true
+      });
+    }
     const v = variant || VARIANT_GRID;
     const inflightKey = `community:${fileKey}:${v}:${signOpts.authorId || ''}:${signOpts.cardId || ''}`;
     if (signInflight.has(inflightKey)) return signInflight.get(inflightKey);
+    const apiPathKey = (() => {
+      if (/_grid\.(jpe?g|webp|png)$/i.test(fileKey)) {
+        return fileKey.replace(/_grid\.(jpe?g|webp|png)$/i, '.jpg');
+      }
+      return fileKey;
+    })();
     const task = (async () => {
       try {
-        const r = await window.PromptHubApi.signCommunityMediaRef(toStorageRef(path), {
-          variant: v,
+        const r = await window.PromptHubApi.signCommunityMediaRef(toStorageRef(apiPathKey), {
+          variant: v === VARIANT_FULL ? 'full' : 'grid',
           authorId: signOpts.authorId,
           cardId: signOpts.cardId
         });
         if (r.ok && r.data?.url && !isIncompleteSignedStorageUrl(r.data.url)) {
+          const url = r.data.url;
+          const cdnPath = storagePathFromDisplayUrl(url);
+          if (v === VARIANT_GRID && cdnPath && !isGridStoragePath(cdnPath)) {
+            return null;
+          }
+          if (v === VARIANT_GRID && !cdnPath && !isCdnMediaUrl(url)) {
+            return null;
+          }
           const ttlSec = Math.max(3600, Number(r.data.expiresIn) || SIGNED_TTL_SEC) - 120;
-          signedUrlCache.set(signedCacheKey(fileKey, v), {
-            url: r.data.url,
-            expiresAt: Date.now() + ttlSec * 1000
-          });
-          return r.data.url;
+          const cacheKeys = new Set([fileKey]);
+          if (/_grid\.(jpe?g|webp|png)$/i.test(fileKey)) {
+            const stem = fileKey.replace(/_grid\.(jpe?g|webp|png)$/i, '');
+            ['.jpg', '.jpeg', '.webp', '.png'].forEach((ext) => cacheKeys.add(`${stem}${ext}`));
+          } else {
+            const grid = gridPathFromPrimary(fileKey);
+            if (grid) cacheKeys.add(grid.replace(/^\//, ''));
+          }
+          for (const ck of cacheKeys) {
+            signedUrlCache.set(signedCacheKey(ck, v), {
+              url,
+              expiresAt: Date.now() + ttlSec * 1000
+            });
+          }
+          return url;
         }
         if (r?.status === 404 || r?.code === 'NOT_FOUND') {
-          markPathMissing(fileKey);
+          const missKey = apiPathKey.replace(/^\//, '');
+          if (storagePathOwnedByCurrentUser(fileKey)) {
+            invalidateSignedCache(fileKey);
+          } else if (missKey) {
+            markPathMissing(missKey);
+          } else if (/_grid\.(jpe?g|webp|png)$/i.test(fileKey) && storagePathOwnedByCurrentUser(fileKey)) {
+            markGridFetchFailed(fileKey);
+          }
         }
       } catch (e) {
         console.warn('[SupabaseSync] community api sign failed', path, e);
@@ -672,20 +1536,41 @@
   async function signPathViaApi(path, variant, opts) {
     if (!storagePathOwnedByCurrentUser(path)) return null;
     if (!apiSignAllowed(opts)) return null;
-    const fileKey = String(path || '').replace(/^\//, '');
+    const bypassBudget = opts?.bypassSignBudget === true;
+    if (!bypassBudget && !signBudgetAvailable()) return null;
     const v = variant || VARIANT_GRID;
+    let fileKey = String(path || '').replace(/^\//, '');
+    if (v === VARIANT_GRID && !/_grid\.(jpe?g|webp|png)$/i.test(fileKey)) {
+      const grid = gridPathFromPrimary(fileKey);
+      const gridKey = grid ? grid.replace(/^\//, '') : '';
+      if (gridKey && shouldSignGridPath(gridKey, opts?.cardId || opts?.assetId)) {
+        fileKey = gridKey;
+      } else if (v === VARIANT_GRID) {
+        return null;
+      }
+    }
+    if (v === VARIANT_GRID && !shouldSignGridPath(fileKey, opts?.cardId || opts?.assetId)) {
+      if (!(opts?.bypassSignBudget === true && storagePathOwnedByCurrentUser(fileKey))) {
+        return null;
+      }
+    }
     const inflightKey = `api:${fileKey}:${v}`;
     if (signInflight.has(inflightKey)) return signInflight.get(inflightKey);
     const task = (async () => {
       try {
-        const r = await window.PromptHubApi.signMediaRef(toStorageRef(path), { variant: v });
+        const r = await window.PromptHubApi.signMediaRef(toStorageRef(fileKey), { variant: v });
         if (r.ok && r.data?.url && !isIncompleteSignedStorageUrl(r.data.url)) {
+          consumeSignBudget(1);
           const ttlSec = Math.max(3600, Number(r.data.expiresIn) || SIGNED_TTL_SEC) - 120;
           signedUrlCache.set(signedCacheKey(fileKey, v), {
             url: r.data.url,
             expiresAt: Date.now() + ttlSec * 1000
           });
           return r.data.url;
+        }
+        if (r?.status === 404 || r?.code === 'NOT_FOUND') {
+          if (/_grid\.(jpe?g|webp|png)$/i.test(fileKey)) markGridFetchFailed(fileKey);
+          else invalidateSignedCache(fileKey);
         }
       } catch (e) {
         console.warn('[SupabaseSync] api sign failed', path, e);
@@ -715,23 +1600,19 @@
       url,
       expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
     });
-    if (isCdnMediaUrl(url) && v === VARIANT_GRID) {
-      signedUrlCache.set(signedCacheKey(fileKey, VARIANT_FULL), {
-        url,
-        expiresAt: Date.now() + (SIGNED_TTL_SEC - 120) * 1000
-      });
-    }
   }
 
   async function batchSignPaths(paths, variant) {
     const v = variant || VARIANT_GRID;
     const pending = [...new Set((paths || []).map((p) => String(p || '').replace(/^\//, '')).filter(Boolean))].filter((p) => {
       if (isPathKnownMissing(p)) return false;
+      if (v === VARIANT_GRID && !shouldSignGridPath(p)) return false;
       if (!storagePathOwnedByCurrentUser(p)) return false;
       const cached = signedUrlCache.get(signedCacheKey(p, v));
       return !(cached?.url && cached.expiresAt > Date.now() + 120000);
     });
     if (!pending.length) return 0;
+    if (!signBudgetAvailable()) return 0;
     if (!apiSignAllowed({}) || !window.PromptHubApi?.signMediaRefsBatch) return 0;
     await ensureSession();
     try {
@@ -744,7 +1625,10 @@
         cacheSignedPath(path, url, v);
         n += 1;
       }
-      if (n) persistSessionSignCache();
+      if (n) {
+        consumeSignBudget(n);
+        persistSessionSignCache();
+      }
       return n;
     } catch (e) {
       console.warn('[SupabaseSync] batch sign failed', e);
@@ -754,47 +1638,58 @@
 
   async function resolvePathToUrl(path, variant, opts) {
     const fileKey = String(path || '').replace(/^\//, '');
-    if (isPathKnownMissing(fileKey)) return null;
     const v = variant || VARIANT_GRID;
+    const listOnly = opts?.listOnly === true;
     const communityFeed = opts?.communityFeed === true;
+    const ownPath = storagePathOwnedByCurrentUser(fileKey);
+    if (isPathKnownMissing(fileKey) && !(communityFeed && !ownPath)) return null;
     const signMeta = {
       authorId: opts?.authorId,
       cardId: opts?.cardId
     };
-    if (communityFeed) {
+    if (communityFeed && !storagePathOwnedByCurrentUser(fileKey)) {
       const publicUrl = await signPathViaCommunityApi(path, v, signMeta);
       if (publicUrl) return publicUrl;
       if (!isLoggedIn()) return null;
-      if (!storagePathOwnedByCurrentUser(path)) return null;
     }
     if (isLoggedIn() && storagePathOwnedByCurrentUser(path)) {
-      if (apiSignAllowed(opts)) {
-        const apiUrl = await signPathViaApi(path, v, opts);
+      const signOpts = {
+        ...opts,
+        cardId: signCardIdForPath(fileKey, opts?.cardId || opts?.assetId)
+      };
+      if (apiSignAllowed(signOpts)) {
+        const apiUrl = await signPathViaApi(path, v, {
+          ...signOpts,
+          bypassSignBudget: listOnly || signOpts.bypassSignBudget === true
+        });
         if (apiUrl) return apiUrl;
       }
-      try {
-        const ownUrl = await getSignedUrlForPath(path, { variant: v });
-        if (ownUrl) return ownUrl;
-      } catch (e) {
-        if (!isStorageNotFoundError(e) && String(e?.message || e) !== 'sign_timeout') {
-          console.warn('[SupabaseSync] own signed url failed', path, e);
-        }
+      if (listOnly) {
+        const cachedOnly = signedUrlCache.get(signedCacheKey(fileKey, v));
+        if (cachedOnly?.url && cachedOnly.expiresAt > Date.now() + 120000) return cachedOnly.url;
+        return null;
       }
-    }
-    try {
-      const url = await getSignedUrlForPath(path, { variant: v });
-      if (url) return url;
-      if (isPathKnownMissing(fileKey)) return null;
-    } catch (e) {
-      if (!isStorageNotFoundError(e)) {
-        console.warn('[SupabaseSync] signed url failed', path, e);
+      if (!listOnly) {
+        if (USE_DIRECT_SUPABASE_SIGN) {
+          try {
+            const ownUrl = await getSignedUrlForPath(path, { variant: v });
+            if (ownUrl) return ownUrl;
+          } catch (e) {
+            if (!isStorageNotFoundError(e) && String(e?.message || e) !== 'sign_timeout') {
+              console.warn('[SupabaseSync] own signed url failed', path, e);
+            }
+          }
+        }
       }
     }
     if (isPathKnownMissing(fileKey)) return null;
     if (communityFeed) return null;
     if (!storagePathOwnedByCurrentUser(path)) return null;
     if (!apiSignAllowed(opts)) return null;
-    return signPathViaApi(path, v, opts);
+    return signPathViaApi(path, v, {
+      ...opts,
+      cardId: signCardIdForPath(fileKey, opts?.cardId || opts?.assetId)
+    });
   }
 
   async function verifyImageUrl(url) {
@@ -836,12 +1731,14 @@
     return null;
   }
 
-  async function repairCardImageIfMissing(cardId, currentRef) {
-    const found = await findCardImageInStorage(cardId);
-    if (found && found !== currentRef) return found;
-    if (currentRef) {
-      const url = await resolveDisplayUrl(currentRef, { assetId: cardId });
-      if (url && await verifyImageUrl(url)) return normalizeImageRef(currentRef);
+  async function repairCardImageIfMissing(cardId, currentRef, opts = {}) {
+    if (currentRef && isStorageRef(currentRef)) {
+      const ok = await verifyStorageRef(currentRef, cardId, { quick: true, noDownload: true });
+      if (ok) return normalizeImageRef(currentRef);
+    }
+    if (opts.allowStorageList === true) {
+      const found = await findCardImageInStorage(cardId);
+      if (found && found !== currentRef) return found;
     }
     return null;
   }
@@ -857,7 +1754,33 @@
     const assetId = o.assetId;
     const authorId = o.authorId;
     const variant = displayVariantFromOpts(opts);
-    const communityFeed = isCommunityFeedOpts(opts);
+    const normalizedEarly = normalizeImageRef(image);
+    const bucketPathEarly = storagePathFromRef(normalizedEarly);
+    let communityFeed = isCommunityFeedOpts(o);
+    if (
+      communityFeed
+      && bucketPathEarly
+      && isLoggedIn()
+      && storagePathOwnedByCurrentUser(bucketPathEarly)
+    ) {
+      communityFeed = false;
+    }
+    const assetIdEarly = o.assetId;
+    if (
+      variant === VARIANT_GRID
+      && assetIdEarly
+      && !isGridThumbReady(assetIdEarly)
+      && !communityFeed
+      && o.allowFullFallback !== false
+      && o.listOnly !== true
+      && o.preferFull === true
+    ) {
+      return resolveDisplayUrl(image, {
+        ...o,
+        variant: VARIANT_FULL,
+        allowFullFallback: false
+      });
+    }
     const normalized = normalizeImageRef(image);
     const bucketPath = storagePathFromRef(normalized);
     if (bucketPath && (isLoggedIn() || communityFeed)) {
@@ -868,10 +1791,16 @@
       );
       const variantPaths = pathsForVariant(normalized, assetId, authorId, variant);
       let candidates;
-      if (o.tryAllPaths === true) {
-        candidates = variantPaths.length ? variantPaths : all;
+      const listOnlyGrid = variant === VARIANT_GRID && (o.listOnly === true || o.allowFullFallback === false);
+      if (communityFeed && listOnlyGrid) {
+        const one = fromRef ? fromRef.replace(/^\//, '') : (primary ? primary.replace(/^\//, '') : '');
+        candidates = one ? [one] : [];
+      } else if (o.tryAllPaths === true) {
+        candidates = variantPaths.length ? variantPaths : (listOnlyGrid ? [] : all);
       } else if (fromRef) {
-        candidates = variantPaths.length ? variantPaths : (assetId && all.length ? all : [fromRef]);
+        candidates = variantPaths.length
+          ? variantPaths
+          : (listOnlyGrid ? [] : (assetId && all.length ? all : [fromRef]));
       } else if (primary) {
         candidates = variantPaths.length ? variantPaths.slice(0, variant === VARIANT_GRID ? 3 : 1) : [primary];
       } else if (communityFeed) {
@@ -879,17 +1808,70 @@
       } else {
         candidates = variantPaths.slice(0, 1);
       }
+      if (o.listOnly === true && candidates.length > 1) {
+        candidates = candidates.slice(0, 1);
+      }
       for (const path of candidates) {
-        const cached = signedUrlCache.get(signedCacheKey(path.replace(/^\//, ''), variant));
+        const pkey = path.replace(/^\//, '');
+        if (
+          listOnlyGrid
+          && primary
+          && gridListNeedsPrimaryFallback(primary, assetId)
+          && (isGridStoragePath(pkey) || /_grid\./i.test(pkey))
+        ) {
+          continue;
+        }
+        const cached = signedUrlCache.get(signedCacheKey(pkey, variant));
         if (cached?.url && cached.expiresAt > Date.now() + 120000) return cached.url;
       }
       for (const path of candidates) {
         const url = await resolvePathToUrl(path, variant, {
           communityFeed,
           authorId,
-          cardId: assetId
+          cardId: assetId,
+          listOnly: o.listOnly === true
         });
         if (url) return url;
+      }
+      if (
+        listOnlyGrid
+        && primary
+        && !communityFeed
+        && isLoggedIn()
+        && storagePathOwnedByCurrentUser(primary)
+        && o.degradedListFull === true
+        && gridListNeedsPrimaryFallback(primary, assetId)
+      ) {
+        const fallback = await resolveListPrimaryFallback(primary, assetId, o);
+        if (fallback) return fallback;
+      }
+      if (
+        listOnlyGrid
+        && primary
+        && !communityFeed
+        && isLoggedIn()
+        && storagePathOwnedByCurrentUser(primary)
+      ) {
+        const card = assetId && (window.__promptHubCards || []).find((c) => c.id === assetId);
+        if (card && AUTO_GRID_BACKFILL) queueGridBackfill(card);
+      }
+      if (
+        variant === VARIANT_GRID
+        && !communityFeed
+        && o.allowFullFallback !== false
+        && o.listOnly !== true
+        && o.preferFull === true
+        && assetId
+        && isLoggedIn()
+      ) {
+        const own = bucketPath && storagePathOwnedByCurrentUser(bucketPath);
+        if (own) {
+          return resolveDisplayUrl(image, {
+            ...o,
+            variant: VARIANT_FULL,
+            allowFullFallback: false
+          });
+        }
       }
       return null;
     }
@@ -929,7 +1911,14 @@
     for (const item of list) {
       if (typeof item === 'string') {
         const p = storagePathFromRef(item);
-        if (p) paths.add(p.replace(/^\//, ''));
+        if (p) {
+          const pk = p.replace(/^\//, '');
+          if (isGridStoragePath(pk)) paths.add(pk);
+          else {
+            const grid = gridPathFromPrimary(pk);
+            if (grid && !isPathKnownMissing(grid)) paths.add(grid.replace(/^\//, ''));
+          }
+        }
         continue;
       }
       if (!item || typeof item !== 'object') continue;
@@ -938,7 +1927,12 @@
         if (isInvalidMediaUrl(ref)) continue;
         const p = storagePathFromRef(ref);
         if (p) {
-          paths.add(p.replace(/^\//, ''));
+          const pk = p.replace(/^\//, '');
+          if (isGridStoragePath(pk)) paths.add(pk);
+          else {
+            const grid = gridPathFromPrimary(pk);
+            if (grid && !isPathKnownMissing(grid)) paths.add(grid.replace(/^\//, ''));
+          }
           continue;
         }
       }
@@ -946,40 +1940,29 @@
       const cardId = item.sourceCardId ? String(item.sourceCardId) : '';
       if (authorId && cardId) {
         const base = String(cardId).replace(/[^a-zA-Z0-9_-]/g, '_');
-        const primary = `${authorId}/${base}.jpg`;
         const grid = `${authorId}/${base}_grid.jpg`;
         if (!isPathKnownMissing(grid)) paths.add(grid);
-        if (!isPathKnownMissing(primary)) paths.add(primary);
       }
     }
     return [...paths];
   }
 
   async function prefetchCommunityDisplayUrlsLegacy(images, capMs) {
-    if (!window.PromptHubApi?.signCommunityMediaRef) return;
-    const items = (images || []).slice(0, 36);
+    if (!window.PromptHubApi?.signCommunityMediaRefsBatch) return;
+    const items = (images || []).slice(0, 24).map((raw) => {
+      if (typeof raw === 'string') return { ref: raw };
+      if (!raw || typeof raw !== 'object') return null;
+      return {
+        ref: raw.image || raw.ref || '',
+        authorId: raw.authorId,
+        cardId: raw.sourceCardId || raw.id
+      };
+    }).filter((x) => x?.ref);
     if (!items.length) return;
-    const limit = Math.max(800, Number(capMs) || 4000);
-    const started = Date.now();
-    let i = 0;
-    const concurrency = 8;
-    async function signItem(item) {
-      const authorId = item && typeof item === 'object' ? item.authorId : '';
-      const cardId = item && typeof item === 'object' ? (item.sourceCardId || item.id) : '';
-      const paths = communityPrefetchPaths(item).slice(0, 3);
-      for (const path of paths) {
-        if (Date.now() - started >= limit) return;
-        const key = path.replace(/^\//, '');
-        if (signedUrlCache.get(signedCacheKey(key, VARIANT_GRID))?.expiresAt > Date.now() + 120000) continue;
-        await signPathViaCommunityApi(path, VARIANT_GRID, { authorId, cardId });
-      }
-    }
-    async function worker() {
-      while (i < items.length && Date.now() - started < limit) {
-        await signItem(items[i++]);
-      }
-    }
-    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+    const r = await window.PromptHubApi.signCommunityMediaRefsBatch(items, {
+      timeoutMs: Math.max(2500, Number(capMs) || 4000)
+    });
+    if (r?.ok) applyCommunityBatchSignResult(r.data);
   }
 
   function applyCommunityBatchSignResult(data) {
@@ -987,17 +1970,31 @@
     let n = 0;
     const urls = data.urls && typeof data.urls === 'object' ? data.urls : {};
     const refMap = data.refMap && typeof data.refMap === 'object' ? data.refMap : {};
-    for (const [path, url] of Object.entries(urls)) {
-      if (!url || isIncompleteSignedStorageUrl(url)) continue;
-      cacheSignedPath(path, url, VARIANT_GRID);
-      n += 1;
-    }
-    for (const [ref, url] of Object.entries(refMap)) {
-      if (!url || isIncompleteSignedStorageUrl(url)) continue;
-      const p = storagePathFromRef(ref);
-      if (p) cacheSignedPath(p, url, VARIANT_GRID);
-      n += 1;
-    }
+    const cacheGridUrl = (pathOrRef, url) => {
+      if (!url || isIncompleteSignedStorageUrl(url)) return;
+      if (!isCdnMediaUrl(url)) return;
+      const cdnPath = storagePathFromDisplayUrl(url);
+      if (cdnPath && !isGridStoragePath(cdnPath)) return;
+      const fromRef = storagePathFromRef(
+        typeof pathOrRef === 'string' && pathOrRef.startsWith(STORAGE_PREFIX) ? pathOrRef : ''
+      );
+      const keys = new Set();
+      const raw = String(fromRef || pathOrRef || '').replace(/^\//, '');
+      if (raw) keys.add(raw);
+      if (raw && isGridStoragePath(raw)) {
+        const stem = raw.replace(/_grid\.(jpe?g|webp|png)$/i, '');
+        ['.jpg', '.jpeg', '.webp', '.png'].forEach((ext) => keys.add(`${stem}${ext}`));
+      } else if (raw) {
+        const grid = gridPathFromPrimary(raw);
+        if (grid) keys.add(grid.replace(/^\//, ''));
+      }
+      for (const key of keys) {
+        cacheSignedPath(key, url, VARIANT_GRID);
+        n += 1;
+      }
+    };
+    for (const [path, url] of Object.entries(urls)) cacheGridUrl(path, url);
+    for (const [ref, url] of Object.entries(refMap)) cacheGridUrl(ref, url);
     if (n) persistSessionSignCache();
     return n;
   }
@@ -1007,7 +2004,9 @@
     if (!list.length) return;
 
     const batchItems = [];
+    const ownBatch = [];
     const seen = new Set();
+    const uid = getUserId();
     for (const raw of list) {
       let ref = '';
       let authorId = '';
@@ -1015,21 +2014,38 @@
       if (typeof raw === 'string') {
         ref = raw;
       } else if (raw && typeof raw === 'object') {
-        ref = raw.image || '';
+        ref = raw.image || raw.ref || '';
         authorId = raw.authorId && String(raw.authorId) !== 'guest' ? String(raw.authorId) : '';
         cardId = raw.sourceCardId ? String(raw.sourceCardId) : (raw.id ? String(raw.id) : '');
       }
       if (!ref || isInvalidMediaUrl(ref)) continue;
+      const signRef = ref;
+      const path = storagePathFromRef(signRef);
+      if (path && uid && storagePathOwnedByCurrentUser(path)) {
+        ownBatch.push(typeof raw === 'object' ? raw : { image: ref, id: cardId || undefined });
+        continue;
+      }
       const key = `${ref}|${authorId}|${cardId}`;
       if (seen.has(key)) continue;
-      const path = storagePathFromRef(ref);
       if (path) {
         const fileKey = path.replace(/^\//, '');
         const cached = signedUrlCache.get(signedCacheKey(fileKey, VARIANT_GRID));
         if (cached?.expiresAt > Date.now() + 120000) continue;
       }
       seen.add(key);
-      batchItems.push({ ref, authorId: authorId || undefined, cardId: cardId || undefined });
+      batchItems.push({
+        ref: signRef,
+        authorId: authorId || undefined,
+        cardId: cardId || undefined
+      });
+    }
+
+    if (!batchItems.length && !ownBatch.length) return;
+
+    if (ownBatch.length) {
+      await prefetchCardsImages(ownBatch, Math.max(2500, Number(capMs) || 5000), {
+        maxCards: Math.min(ownBatch.length, 24)
+      });
     }
 
     if (!batchItems.length) return;
@@ -1067,11 +2083,24 @@
     };
   }
 
-  async function prefetchDisplayUrls(images) {
+  function findCardForStoragePath(pathKey) {
+    const key = String(pathKey || '').replace(/^\//, '');
+    if (!key) return null;
+    const cards = window.__promptHubCards || [];
+    return cards.find((c) => {
+      if (!c?.image) return false;
+      const p = primaryImagePath(c.image, c.id);
+      return p === key;
+    }) || null;
+  }
+
+  async function prefetchDisplayUrls(images, opts) {
     if (!isLoggedIn()) return;
+    const gridOnly = opts?.gridOnly === true;
     const communityBatch = [];
     const seenCommunity = new Set();
-    const ownedPaths = [];
+    const ownedGridPaths = [];
+    const ownedFullPaths = [];
     for (const raw of images || []) {
       const ref = typeof raw === 'string' ? raw : (raw?.image || raw?.ref || '');
       if (!ref) continue;
@@ -1079,7 +2108,10 @@
       if (!path) continue;
       const key = path.replace(/^\//, '');
       if (storagePathOwnedByCurrentUser(path)) {
-        ownedPaths.push(key);
+        const card = findCardForStoragePath(key);
+        const plan = ownedListSignTargets(key, card?.id, { gridOnly });
+        if (plan.grid) ownedGridPaths.push(plan.grid);
+        /* backfill 由视口触发，不在 prefetchDisplayUrls 批量排队 */
         continue;
       }
       const item = collectPrefetchItemForRef(ref);
@@ -1092,34 +2124,20 @@
     if (communityBatch.length) {
       await prefetchCommunityDisplayUrls(communityBatch, 5000);
     }
-    const paths = [...new Set(ownedPaths)];
-    if (!paths.length) return;
-    const pending = paths.filter(p => {
-      if (isPathKnownMissing(p)) return false;
-      const cached = signedUrlCache.get(signedCacheKey(p, VARIANT_GRID));
-      return !(cached && cached.expiresAt > Date.now() + 120000);
-    });
-    if (!pending.length) return;
-    await ensureSession();
-    await batchSignPaths(pending, VARIANT_GRID);
-    const still = pending.filter((p) => {
-      const cached = signedUrlCache.get(signedCacheKey(p, VARIANT_GRID));
-      return !(cached?.url && cached.expiresAt > Date.now() + 120000);
-    });
-    if (!still.length) return;
-    for (let i = 0; i < still.length; i += GRID_SIGN_CONCURRENCY) {
-      const batch = still.slice(i, i + GRID_SIGN_CONCURRENCY);
-      await Promise.all(
-        batch.map(async (p) => {
-          if (!storagePathOwnedByCurrentUser(p)) return;
-          if (apiSignAllowed({})) {
-            const url = await signPathViaApi(p, VARIANT_GRID, {});
-            if (url) return;
-          }
-          await getSignedUrlForPath(p, { variant: VARIANT_GRID }).catch(() => {});
-        })
-      );
+    async function signOwnedBatch(paths, variant) {
+      const list = [...new Set(paths)];
+      if (!list.length) return;
+      const pending = list.filter((p) => {
+        if (isPathKnownMissing(p)) return false;
+        const cached = signedUrlCache.get(signedCacheKey(p, variant));
+        return !(cached?.url && cached.expiresAt > Date.now() + 120000);
+      });
+      if (!pending.length) return;
+      await ensureSession();
+      await batchSignPaths(pending, variant);
     }
+    await signOwnedBatch(ownedGridPaths, VARIANT_GRID);
+    await signOwnedBatch(ownedFullPaths, VARIANT_FULL);
   }
 
   function getCachedDisplayUrl(image, assetIdOrOpts) {
@@ -1128,48 +2146,88 @@
     const opts = typeof assetIdOrOpts === 'object' ? assetIdOrOpts : { assetId: assetIdOrOpts };
     const assetId = opts?.assetId;
     const variant = displayVariantFromOpts(opts);
-    if (isLoggedIn() && (storagePathFromRef(image) || assetId)) {
-      const primary = primaryImagePath(image, assetId);
+    const primary = primaryImagePath(image, assetId);
+    const pathFromImage = storagePathFromRef(image);
+    const canLookup = !!(pathFromImage || assetId || primary);
+    if (canLookup) {
       if (primary) {
-        const hit = signedUrlCache.get(signedCacheKey(primary.replace(/^\//, ''), variant));
-        if (hit?.url && hit.expiresAt > Date.now() + 120000) return hit.url;
+        const pkey = primary.replace(/^\//, '');
+        if (variant === VARIANT_GRID && gridListNeedsPrimaryFallback(primary, assetId)) {
+          /* 列表 grid 缺失时不回退 full（侧栏/灯箱单独 resolve full） */
+        } else {
+          const hit = signedUrlCache.get(signedCacheKey(pkey, variant));
+          if (
+            hit?.url
+            && hit.expiresAt > Date.now() + 120000
+            && !(variant === VARIANT_GRID && gridListNeedsPrimaryFallback(primary, assetId))
+          ) {
+            const out = filterGridVariantUrl(hit.url, variant);
+            if (out) return out;
+          }
+        }
       }
       for (const path of pathsForVariant(image, assetId, opts?.authorId, variant)) {
-        const cached = signedUrlCache.get(signedCacheKey(path.replace(/^\//, ''), variant));
-        if (cached?.url && cached.expiresAt > Date.now() + 120000) return cached.url;
+        const key = path.replace(/^\//, '');
+        if (variant === VARIANT_FULL && isGridStoragePath(key)) continue;
+        if (variant === VARIANT_GRID && primary && gridListNeedsPrimaryFallback(primary, assetId)) continue;
+        const cached = signedUrlCache.get(signedCacheKey(key, variant));
+        if (cached?.url && cached.expiresAt > Date.now() + 120000) {
+          const cdnPath = storagePathFromDisplayUrl(cached.url);
+          if (
+            variant === VARIANT_GRID
+            && primary
+            && cdnPath
+            && isGridStoragePath(cdnPath)
+            && gridListNeedsPrimaryFallback(primary, assetId)
+          ) {
+            continue;
+          }
+          const out = filterGridVariantUrl(cached.url, variant);
+          if (out) return out;
+        }
       }
     }
-    const path = storagePathFromRef(image);
+    const path = pathFromImage || (primary ? primary.replace(/^\//, '') : null);
     if (!path) {
       if (/^https?:\/\//i.test(image) && isValidSignedDisplayUrl(image)) return image;
       return '';
     }
     const cached = signedUrlCache.get(signedCacheKey(path.replace(/^\//, ''), variant));
     if (cached?.url && cached.expiresAt > Date.now() + 120000 && !isIncompleteSignedStorageUrl(cached.url)) {
-      return cached.url;
+      return filterGridVariantUrl(cached.url, variant);
     }
     if (variant === VARIANT_GRID) {
-      const fullCached = signedUrlCache.get(signedCacheKey(path.replace(/^\//, ''), VARIANT_FULL));
-      if (fullCached?.url && fullCached.expiresAt > Date.now() + 120000 && !isIncompleteSignedStorageUrl(fullCached.url)) {
-        return fullCached.url;
-      }
-      for (const p of pathsForVariant(image, assetId, opts?.authorId, VARIANT_FULL)) {
-        const hit = signedUrlCache.get(signedCacheKey(p.replace(/^\//, ''), VARIANT_FULL));
-        if (hit?.url && hit.expiresAt > Date.now() + 120000) return hit.url;
-      }
+      return '';
     }
     if (/^https?:\/\//i.test(image) && isValidSignedDisplayUrl(image)) return image;
     return '';
   }
 
+  /** 列表 DOM 首屏 src：仅 grid；禁止把 full 原图写进列表（侧栏/灯箱才用 full） */
+  function getListDisplayImageSrc(image, assetId, extraOpts) {
+    if (!image || typeof image !== 'string') return '';
+    const o = extraOpts && typeof extraOpts === 'object' ? extraOpts : {};
+    const grid = getCachedDisplayUrl(image, {
+      assetId: o.assetId || assetId,
+      authorId: o.authorId,
+      variant: VARIANT_GRID
+    });
+    if (grid && isValidSignedDisplayUrl(grid) && !isInvalidMediaUrl(grid)) return grid;
+    return '';
+  }
+
   /** 按卡片 id 收集 canonical 路径，一次 batch 签名（避免列表每张图多次试探） */
-  async function prefetchCardsImages(cards, capMs) {
+  async function prefetchCardsImages(cards, capMs, opts) {
     if (!isLoggedIn()) return;
+    const maxCards = Math.min(
+      WAREHOUSE_PREFETCH_CARD_CAP,
+      Math.max(1, Number(opts?.maxCards) || WAREHOUSE_PREFETCH_CARD_CAP)
+    );
     const limit = capMs != null ? Math.min(Math.max(800, capMs), 8000) : 2800;
     const pathSet = new Set();
     const communityBatch = [];
     const seenCommunity = new Set();
-    const list = (cards || []).slice(0, WAREHOUSE_PREFETCH_CARD_CAP);
+    const list = (cards || []).slice(0, maxCards);
     for (const c of list) {
       if (!c?.image) continue;
       const collectOpts = typeof window.getCommunityCollectImageResolveOpts === 'function'
@@ -1190,34 +2248,29 @@
       const p = primaryImagePath(c.image, c.id);
       if (!p || isPathKnownMissing(p)) continue;
       if (!storagePathOwnedByCurrentUser(p)) continue;
-      pathSet.add(p.replace(/^\//, ''));
-      const grid = gridPathFromPrimary(p);
-      if (grid && !isPathKnownMissing(grid)) pathSet.add(grid.replace(/^\//, ''));
+      const plan = ownedListSignTargets(p, c.id);
+      if (plan.grid) pathSet.add(plan.grid);
+      /* backfill 仅由视口 prefetchOneCardImg 触发，避免刷新时批量拉原图 */
     }
     if (communityBatch.length) {
       await prefetchCommunityDisplayUrls(communityBatch, limit);
     }
-    if (!pathSet.size) return;
-    const refs = [...pathSet].map((p) => toStorageRef(p));
-    await prefetchDisplayUrlsWithCap(refs, limit);
-  }
-
-  /** 卡片库首屏：先签可见 12 张（≈2s），其余后台签 */
-  async function prefetchWarehousePage(cards, capMs) {
-    if (!isLoggedIn()) return;
-    const list = (cards || []).slice(0, 24);
-    if (!list.length) return;
-    const budget = capMs == null ? 2200 : Math.min(capMs, 2800);
-    const first = list.slice(0, WAREHOUSE_FAST_FIRST);
-    const rest = list.slice(WAREHOUSE_FAST_FIRST);
-    await prefetchCardsImages(first, budget);
-    if (rest.length) {
-      setTimeout(() => void prefetchCardsImages(rest, 6000), 120);
+    /* 列表 prefetch 只签 grid，不批量签 full（否则首屏 24 张 × 2MB ≈ 48MB） */
+    if (pathSet.size) {
+      await batchSignPaths([...pathSet], VARIANT_GRID);
     }
   }
 
-  function patchWarehouseImagesFromCache(container, opts) {
-    patchImageSrcFromCache(container, opts);
+  /** 卡片库首屏：仅签可见 6 张，滚动后由 CardImageLoader 逐批补签 */
+  async function prefetchWarehousePage(cards, capMs) {
+    if (!isLoggedIn()) return;
+    const maxCards = Math.min(
+      WAREHOUSE_VISIBLE_SIGN_CAP,
+      Math.max(1, (cards || []).length)
+    );
+    const list = (cards || []).slice(0, maxCards);
+    if (!list.length) return;
+    await prefetchCardsImages(list, capMs == null ? 1800 : Math.min(capMs, 3200), { maxCards });
   }
 
   function imgPlaceholderSrc() {
@@ -1251,15 +2304,8 @@
     }
     media.classList.remove('is-loading');
     if (state === 'failed') {
-      if (media.closest('#communityGrid')) {
-        const card = media.closest('.community-post-card--visual');
-        if (card) {
-          card.remove();
-          return;
-        }
-      }
-      if (media.closest('#creationsGrid, #userProfileGrid')) {
-        media.remove();
+      if (media.closest('#communityGrid, #creationsGrid, #userProfileGrid')) {
+        media.classList.add('card-media--load-failed');
         return;
       }
       media.classList.add('card-media--load-failed');
@@ -1273,14 +2319,17 @@
       if (isInvalidMediaUrl(image) || isIncompleteSignedStorageUrl(image)) return imgPlaceholderSrc();
       const path = storagePathFromRef(image);
       if (path) {
-        const cached = getCachedDisplayUrl(toStorageRef(path));
+        const cached = filterGridVariantUrl(
+          getCachedDisplayUrl(toStorageRef(path), { variant: VARIANT_GRID }),
+          VARIANT_GRID
+        );
         if (cached && !cached.startsWith(STORAGE_PREFIX)) return cached;
         return imgPlaceholderSrc();
       }
       return image;
     }
     if (isStorageRef(image)) {
-      const cached = getCachedDisplayUrl(image);
+      const cached = filterGridVariantUrl(getCachedDisplayUrl(image, { variant: VARIANT_GRID }), VARIANT_GRID);
       if (cached && !cached.startsWith(STORAGE_PREFIX)) return cached;
       return imgPlaceholderSrc();
     }
@@ -1306,13 +2355,25 @@
       if (!ref) return;
       const cur = img.currentSrc || img.src || '';
       if (isUsableLoadedImgSrc(cur)) return;
-      const assetId = img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
+      const assetId = img.dataset?.sourceCardId
+        || img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
         || img.closest('.card[data-id]')?.dataset?.id
         || img.closest('.card[data-post-id]')?.dataset?.postId
+        || img.closest('.imagegen-feed-card[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '')
         || undefined;
-      let url = getCachedDisplayUrl(ref, { assetId, variant: VARIANT_GRID });
-      if (!url) url = getCachedDisplayUrl(ref, { assetId, variant: VARIANT_FULL });
+      const inWarehouse = !!img.closest('#cardsContainer');
+      const inImageGenWh = !!img.closest('#imageGenFeed .imagegen-feed-card[data-feed-id^="wh_"]');
+      const inSide = !!img.closest('#communitySideBody, #creationsSideBody, .community-side-img-btn, #appreciateViewer, #imageLightbox');
+      let url = '';
+      const inCommunityGrid = !!img.closest('#communityGrid, #creationsGrid, #userProfileGrid');
+      if (inWarehouse || inSide || inImageGenWh || inCommunityGrid || !assetId) {
+        url = getListDisplayImageSrc(ref, assetId, {
+          assetId,
+          authorId: img.dataset?.authorId || img.closest('.card')?.dataset?.authorId
+        });
+      }
       if (url && isInvalidMediaUrl(url)) url = '';
+      if (url && isWarehouseBlockedFullUrl(url, img)) url = '';
       if (url && /^https?:\/\//i.test(url) && isValidSignedDisplayUrl(url)) {
         const media = img.closest('.card-media, .imagegen-feed-media');
         media?.classList.remove('card-media--await');
@@ -1328,17 +2389,45 @@
         if (img.complete && img.naturalWidth > 0 && img.src === url) done();
         else {
           img.addEventListener('load', done, { once: true });
-          img.addEventListener('error', done, { once: true });
+          img.addEventListener('error', () => {
+            const failedPath = storagePathFromDisplayUrl(img.src || '');
+            if (failedPath && /_grid\.(jpe?g|webp|png)$/i.test(failedPath)) {
+              markGridFetchFailed(failedPath);
+            }
+            if (img.dataset.patchRetry === '1') {
+              media?.classList.add('card-media--load-failed');
+              done();
+              return;
+            }
+            img.dataset.patchRetry = '1';
+            void resolveDisplayUrl(ref, {
+              assetId,
+              authorId: img.dataset?.authorId || img.closest('.card')?.dataset?.authorId,
+              communityFeed: inCommunityGrid,
+              variant: VARIANT_GRID,
+              listOnly: true,
+              allowFullFallback: false,
+              degradedListFull: false
+            }).then((retryUrl) => {
+              if (retryUrl && /^https?:\/\//i.test(retryUrl) && !isWarehouseBlockedFullUrl(retryUrl, img)) {
+                img.addEventListener('load', done, { once: true });
+                img.src = retryUrl;
+              } else {
+                media?.classList.add('card-media--load-failed');
+                done();
+              }
+            });
+          }, { once: true });
           img.src = url;
         }
       }
     });
   }
 
-  async function prefetchDisplayUrlsWithCap(images, capMs) {
+  async function prefetchDisplayUrlsWithCap(images, capMs, opts) {
     const limit = Math.max(800, Number(capMs) || 5000);
     await Promise.race([
-      prefetchDisplayUrls(images),
+      prefetchDisplayUrls(images, opts),
       new Promise((r) => setTimeout(r, limit))
     ]);
   }
@@ -1362,6 +2451,8 @@
         : (window.matchMedia('(max-width: 900px)').matches ? 5 : 8);
     let idx = 0;
     async function hydrateOne(img) {
+      if (img.closest('#cardsContainer')) return;
+      if (img.closest('#imageGenFeed')) return;
       const ref = img.getAttribute('data-storage-ref') || img.getAttribute('data-image-ref');
       if (!ref) return;
       const media = img.closest('.card-media, .imagegen-feed-media');
@@ -1382,6 +2473,7 @@
       const ownFeedPath = !!(refPath && uid && refPath.replace(/^\//, '').startsWith(`${uid}/`));
       const inSide = !!img.closest('#communitySideBody, #creationsSideBody, .community-side-img-btn');
       const communityFeed = (inFeed && (!isLoggedIn() || !ownFeedPath)) || inSide;
+      const listVariant = inSide ? VARIANT_FULL : ((inCommunityFeed || inWarehouse) ? VARIANT_GRID : VARIANT_GRID);
       const assetId = img.dataset?.sourceCardId
         || img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
         || img.closest('.card[data-id]')?.dataset?.id
@@ -1393,16 +2485,29 @@
         assetId,
         authorId: authorId || undefined,
         cardId: assetId,
-        variant: (inWarehouse || inCommunityFeed) ? VARIANT_FULL : VARIANT_GRID,
+        variant: listVariant,
         communityFeed,
-        tryAllPaths: inWarehouse || communityFeed
+        tryAllPaths: false,
+        allowFullFallback: inSide ? true : false,
+        listOnly: inWarehouse || (inCommunityFeed && !inSide) ? true : undefined
       };
       if (inWarehouse && assetId && typeof window.getCommunityCollectImageResolveOpts === 'function') {
         const cardModel = (window.__promptHubCards || []).find((c) => c.id === assetId);
         const collectOpts = window.getCommunityCollectImageResolveOpts(cardModel);
-        if (collectOpts) resolveOpts = { ...resolveOpts, ...collectOpts };
+        if (collectOpts) {
+          resolveOpts = {
+            ...resolveOpts,
+            authorId: collectOpts.authorId,
+            cardId: collectOpts.cardId || collectOpts.assetId,
+            communityFeed: true,
+            tryAllPaths: false,
+            variant: VARIANT_GRID,
+            listOnly: true,
+            allowFullFallback: false
+          };
+        }
       }
-      const cached = communityFeed ? '' : getCachedDisplayUrl(ref, { assetId, variant: VARIANT_GRID });
+      const cached = getCachedDisplayUrl(ref, { assetId, authorId: authorId || undefined, variant: listVariant });
       if (cached && isResolvableDisplayUrl(cached)) {
         const mediaWrapCached = media || img.closest('.community-side-img-btn');
         if (cur !== cached) {
@@ -1436,13 +2541,21 @@
         let url = await resolveDisplayUrl(ref, resolveOpts);
         if (!isResolvableDisplayUrl(url) && assetId && typeof window.getCardImageBackup === 'function') {
           const backup = await window.getCardImageBackup(assetId);
-          if (backup && (isDataUrl(backup) || backup.startsWith('blob:'))) url = backup;
+          if (backup && (isDataUrl(backup) || backup.startsWith('blob:') || /^https?:\/\//i.test(backup))) url = backup;
         }
         if (!isResolvableDisplayUrl(url) && communityFeed && assetId && typeof window.getCardImageBackup === 'function') {
           const backup = await window.getCardImageBackup(assetId);
-          if (backup && (isDataUrl(backup) || backup.startsWith('blob:'))) url = backup;
+          if (backup && (isDataUrl(backup) || backup.startsWith('blob:') || /^https?:\/\//i.test(backup))) url = backup;
         }
-        if (isResolvableDisplayUrl(url)) {
+        if (!isResolvableDisplayUrl(url) && inWarehouse && assetId) {
+          const cardModel = (window.__promptHubCards || []).find((c) => c.id === assetId);
+          if (cardModel && AUTO_GRID_BACKFILL) queueGridBackfill(cardModel);
+          if (typeof window.getCardImageBackup === 'function') {
+            const backup = await window.getCardImageBackup(assetId);
+            if (backup && (isDataUrl(backup) || backup.startsWith('data:') || backup.startsWith('blob:'))) url = backup;
+          }
+        }
+        if (isResolvableDisplayUrl(url) && !isWarehouseBlockedFullUrl(url, img)) {
           const onFail = () => {
             if (media?.classList.contains('is-loading')) return;
             img.src = imgPlaceholderSrc();
@@ -1482,8 +2595,14 @@
           img.dataset.retryHydrate = '1';
           invalidateSignedCacheForRef(ref, assetId);
           setCardMediaLoadState(media, 'loading');
-          void resolveDisplayUrl(ref, { ...resolveOpts, tryAllPaths: true }).then((url) => {
-            if (isResolvableDisplayUrl(url)) {
+          void resolveDisplayUrl(ref, {
+            ...resolveOpts,
+            tryAllPaths: inWarehouse ? false : true,
+            listOnly: inWarehouse ? true : resolveOpts.listOnly,
+            allowFullFallback: false,
+            degradedListFull: false
+          }).then((url) => {
+            if (isResolvableDisplayUrl(url) && !isWarehouseBlockedFullUrl(url, img)) {
               img.src = url;
               img.classList.remove('img-load-failed');
               media?.classList.remove('card-media--load-failed');
@@ -1506,6 +2625,15 @@
 
   async function verifyStorageRef(ref, assetId, opts = {}) {
     if (!ref || !isStorageRef(ref)) return false;
+    if (opts.quick && opts.noDownload === true) {
+      const primary = primaryImagePath(ref, assetId);
+      if (!primary || isPathKnownMissing(primary)) return false;
+      const pkey = primary.replace(/^\//, '');
+      const cached = signedUrlCache.get(signedCacheKey(pkey, VARIANT_FULL));
+      if (cached?.url && cached.expiresAt > Date.now() + 120000) return true;
+      const url = await resolvePathToUrl(pkey, VARIANT_FULL, { bypassSignBudget: true });
+      return !!url;
+    }
     const attempts = opts.quick ? 1 : 2;
     const all = listImagePathCandidates(normalizeImageRef(ref), assetId);
     const candidates = (opts.quick ? [primaryImagePath(ref, assetId)].filter(Boolean) : all)
@@ -1513,8 +2641,8 @@
     for (let round = 0; round < attempts; round++) {
       for (const path of candidates) {
         try {
-          const url = await resolvePathToUrl(path.replace(/^\//, ''));
-          if (url && await verifyImageUrl(url)) return true;
+          const url = await resolvePathToUrl(path.replace(/^\//, ''), VARIANT_FULL, { bypassSignBudget: true });
+          if (url && (opts.noDownload === true || await verifyImageUrl(url))) return true;
         } catch (e) {
           if (!isStorageNotFoundError(e)) {
             console.warn('[SupabaseSync] verifyStorageRef', path, e);
@@ -1528,7 +2656,55 @@
     return false;
   }
 
+  async function uploadStorageBlobXHR(path, blob, opts = {}) {
+    await ensureSession();
+    const sb = getClient();
+    const { data: { session } } = await sb.auth.getSession();
+    const token = session?.access_token;
+    if (!token) throw new Error('未登录');
+    const base = String(window.SUPABASE_URL || '').replace(/\/$/, '');
+    const cleanPath = String(path || '').replace(/^\//, '');
+    if (!cleanPath) throw new Error('图片路径无效');
+    const pathEnc = cleanPath.split('/').map(encodeURIComponent).join('/');
+    const uploadUrl = `${base}/storage/v1/object/${BUCKET}/${pathEnc}`;
+    const contentType = (blob.type && blob.type.startsWith('image/')) ? blob.type : 'image/jpeg';
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', uploadUrl);
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.setRequestHeader('apikey', window.SUPABASE_ANON_KEY);
+      xhr.setRequestHeader('x-upsert', 'true');
+      xhr.setRequestHeader('Content-Type', contentType);
+      xhr.setRequestHeader('cache-control', '3600');
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable && typeof opts.onProgress === 'function') {
+          opts.onProgress(ev.loaded / ev.total, ev.loaded, ev.total);
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(toStorageRef(cleanPath));
+          return;
+        }
+        let errMsg = xhr.responseText || `HTTP ${xhr.status}`;
+        try {
+          const parsed = JSON.parse(xhr.responseText);
+          errMsg = parsed.message || parsed.error || errMsg;
+        } catch (e) { /* ignore */ }
+        reject(new Error(errMsg));
+      };
+      xhr.onerror = () => reject(new Error('网络错误，图片上传失败'));
+      xhr.send(blob);
+    });
+  }
+
   async function uploadStorageBlob(path, blob, opts = {}) {
+    if (!blob || (blob.size || 0) < MIN_VALID_IMAGE_BYTES) {
+      throw new Error('图片数据无效（文件过小），请重新选择或重新生成');
+    }
+    if (typeof opts.onProgress === 'function') {
+      return uploadStorageBlobXHR(path, blob, opts);
+    }
     const maxAttempts = Math.max(1, opts.maxAttempts || 3);
     await ensureSession();
     const sb = getClient();
@@ -1538,7 +2714,7 @@
     let lastErr = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const { error } = await sb.storage.from(BUCKET).upload(cleanPath, blob, {
-        contentType: 'image/jpeg',
+        contentType: (blob.type && blob.type.startsWith('image/')) ? blob.type : 'image/jpeg',
         upsert: true,
         cacheControl: '3600'
       });
@@ -1550,19 +2726,19 @@
         }
         break;
       }
+      if (opts.skipVerify) {
+        missingPathCache.delete(normalizePathKey(cleanPath));
+        return toStorageRef(cleanPath);
+      }
       const url = await resolvePathToUrl(cleanPath);
       if (url) {
-        if (opts.skipVerify) return toStorageRef(cleanPath);
         if (await verifyImageUrl(url)) return toStorageRef(cleanPath);
       }
-      if (opts.skipVerify && url) return toStorageRef(cleanPath);
-      await new Promise((r) => setTimeout(r, opts.skipVerify ? 120 : 450));
+      await new Promise((r) => setTimeout(r, 450));
       const retryUrl = await resolvePathToUrl(cleanPath);
-      if (retryUrl) {
-        if (opts.skipVerify || (await verifyImageUrl(retryUrl))) return toStorageRef(cleanPath);
-      }
+      if (retryUrl && (await verifyImageUrl(retryUrl))) return toStorageRef(cleanPath);
       lastErr = new Error('上传后校验失败');
-      if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, opts.skipVerify ? 200 : 350 * attempt));
+      if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, 350 * attempt));
     }
     throw lastErr || new Error('图片上传失败，请检查网络后重试');
   }
@@ -1606,7 +2782,11 @@
     if (gridPath) {
       try {
         const gridBlob = await compressImageToGrid(source);
-        await uploadStorageBlob(gridPath, gridBlob, { skipVerify: true });
+        if ((gridBlob.size || 0) >= GRID_MIN_VALID_BYTES) {
+          await uploadStorageBlob(gridPath, gridBlob, { skipVerify: true });
+          markGridThumbReady(assetId);
+          clearSignedCacheForPaths([gridPath, path]);
+        }
       } catch (e) {
         console.warn('[SupabaseSync] generated grid thumb failed', assetId, e);
       }
@@ -1665,22 +2845,70 @@
     return uploadStorageBlob(path, blob, { skipVerify: true });
   }
 
-  async function uploadCardImage(cardId, source) {
+  async function uploadCardImage(cardId, source, opts = {}) {
     await ensureSession();
-    const path = cardImageStoragePath(cardId);
+    const original = opts.original != null ? !!opts.original : cardUploadOriginalEnabled();
+    const fullBlob = await prepareCardFullUploadBlob(source, { original });
+    const encodeMode = fullBlob.__uploadEncodeMode || 'raw';
+    const ext = original
+      ? (encodeMode === 'full_res_jpeg' ? 'jpg' : extFromImageMime(fullBlob.type))
+      : 'jpg';
+    const path = cardImageStoragePath(cardId, null, ext);
     if (!path) throw new Error('未登录或卡片无效');
-    const fullBlob = await compressImage(source);
     const gridPath = gridImageStoragePath(cardId);
-    await uploadStorageBlob(path, fullBlob, { skipVerify: true });
+    clearSignedCacheForPaths([path, gridPath, ...listImagePathCandidates(toStorageRef(path), cardId)]);
+    await uploadStorageBlob(path, fullBlob, { skipVerify: true, onProgress: opts.onProgress });
+    let gridBytes = 0;
     if (gridPath) {
       try {
         const gridBlob = await compressImageToGrid(source);
-        await uploadStorageBlob(gridPath, gridBlob, { skipVerify: true });
+        gridBytes = gridBlob.size || 0;
+        if (gridBytes >= GRID_MIN_VALID_BYTES) {
+          await uploadStorageBlob(gridPath, gridBlob, { skipVerify: true });
+          markGridThumbReady(cardId);
+        }
       } catch (e) {
         console.warn('[SupabaseSync] grid thumb upload failed', cardId, e);
       }
     }
+    const totalBytes = (fullBlob.size || 0) + gridBytes;
+    window.__lastCardUploadMeta = {
+      cardId: String(cardId),
+      bytes: fullBlob.size,
+      gridBytes,
+      totalBytes,
+      original,
+      encodeMode
+    };
+    if (totalBytes > 0 && window.PromptHubApi?.reportStorageDelta) {
+      void window.PromptHubApi.reportStorageDelta(totalBytes).then((r) => {
+        if (!r?.ok && r?.message && typeof showToast === 'function') {
+          showToast(r.message);
+        }
+      });
+    }
     return toStorageRef(path);
+  }
+
+  async function resolveCardDownloadUrl(image, opts = {}) {
+    if (!image || typeof image !== 'string') return image || null;
+    if (isDataUrl(image) || image.startsWith('blob:')) return image;
+    const assetId = opts?.assetId;
+    const normalized = normalizeImageRef(image);
+    const candidates = pathsForVariant(normalized, assetId, opts?.authorId, VARIANT_FULL)
+      .filter((p) => !isGridStoragePath(p));
+    for (const raw of candidates) {
+      const key = raw.replace(/^\//, '');
+      signedUrlCache.delete(signedCacheKey(key, VARIANT_FULL));
+      signedUrlCache.delete(signedCacheKey(key, VARIANT_GRID));
+      const url = await resolvePathToUrl(raw, VARIANT_FULL, {
+        cardId: assetId,
+        authorId: opts?.authorId,
+        communityFeed: opts?.communityFeed === true
+      });
+      if (url) return url;
+    }
+    return null;
   }
 
   async function deleteCardImageByUrl(url) {
@@ -1699,6 +2927,33 @@
     }
   }
 
+  function uploadOptsForCard(card) {
+    return {
+      original: card?.imageUploadOriginal === true || cardUploadOriginalEnabled()
+    };
+  }
+
+  async function downloadCardStorageBlob(image, assetId) {
+    if (!image || typeof image !== 'string' || !isLoggedIn()) return null;
+    await ensureSession();
+    const sb = getClient();
+    if (!sb) return null;
+    const normalized = normalizeImageRef(image);
+    const candidates = pathsForVariant(normalized, assetId, null, VARIANT_FULL)
+      .filter((p) => !isGridStoragePath(p));
+    for (const raw of candidates) {
+      const key = String(raw || '').replace(/^\//, '');
+      if (!key || isGridStoragePath(key)) continue;
+      try {
+        const { data, error } = await sb.storage.from(BUCKET).download(key);
+        if (!error && data && data.size > 0) return data;
+      } catch (e) {
+        console.warn('[SupabaseSync] storage download failed', key, e);
+      }
+    }
+    return null;
+  }
+
   /** 登录态：保证卡片图在 Storage（可上传则上传，已有则校验） */
   async function ensureCardImageOnCloud(card) {
     const cardId = card?.id;
@@ -1710,7 +2965,7 @@
 
     if (isDataUrl(image) || (typeof image === 'string' && image.startsWith('blob:'))) {
       try {
-        const url = await uploadCardImage(cardId, image);
+        const url = await uploadCardImage(cardId, image, uploadOptsForCard(card));
         if (typeof window.clearCardImageBackup === 'function') {
           await window.clearCardImageBackup(cardId);
         }
@@ -1737,7 +2992,7 @@
       return { ok: false, image: normalized, error: '云端无图且本机无备份，请重新添加图片' };
     }
     try {
-      const url = await uploadCardImage(cardId, fallback);
+      const url = await uploadCardImage(cardId, fallback, uploadOptsForCard(card));
       if (typeof window.clearCardImageBackup === 'function') {
         await window.clearCardImageBackup(cardId);
       }
@@ -1798,19 +3053,20 @@
     return { fixed, skipped, failed };
   }
 
-  async function resolveCardImageForSave(cardId, imageValue, previousUrl) {
+  async function resolveCardImageForSave(cardId, imageValue, previousUrl, opts = {}) {
     if (!imageValue) {
       if (previousUrl && isStorageRef(previousUrl)) await deleteCardImageByUrl(previousUrl);
       return null;
     }
     if (!isLoggedIn()) return imageValue;
+    const uploadOpts = { original: opts.original };
     if (isStorageRef(imageValue)) {
       const normalized = normalizeImageRef(imageValue);
       if (previousUrl && normalizeImageRef(previousUrl) === normalized) return normalized;
       if (await verifyStorageRef(normalized, cardId, { quick: true })) return normalized;
       const fallback = await resolveLocalImageFallback(cardId, imageValue);
       if (fallback) {
-        const url = await uploadCardImage(cardId, fallback);
+        const url = await uploadCardImage(cardId, fallback, uploadOpts);
         clearPathMissingForCard(cardId, url);
         if (previousUrl && previousUrl !== url && isStorageRef(previousUrl)) {
           await deleteCardImageByUrl(previousUrl);
@@ -1822,8 +3078,15 @@
       }
       throw new Error('图片在云端已丢失，请重新选择图片后再保存');
     }
-    if (isDataUrl(imageValue) || imageValue.startsWith('blob:')) {
-      const url = await uploadCardImage(cardId, imageValue);
+    if (imageValue instanceof Blob) {
+      const url = await uploadCardImage(cardId, imageValue, uploadOpts);
+      if (previousUrl && previousUrl !== url && isStorageRef(previousUrl)) {
+        await deleteCardImageByUrl(previousUrl);
+      }
+      return url;
+    }
+    if (isDataUrl(imageValue) || (typeof imageValue === 'string' && imageValue.startsWith('blob:'))) {
+      const url = await uploadCardImage(cardId, imageValue, uploadOpts);
       if (previousUrl && previousUrl !== url && isStorageRef(previousUrl)) {
         await deleteCardImageByUrl(previousUrl);
       }
@@ -1834,7 +3097,7 @@
         const res = await fetch(imageValue, { mode: 'cors' });
         if (res.ok) {
           const blob = await res.blob();
-          const url = await uploadCardImage(cardId, blob);
+          const url = await uploadCardImage(cardId, blob, uploadOpts);
           if (previousUrl && previousUrl !== url && isStorageRef(previousUrl)) {
             await deleteCardImageByUrl(previousUrl);
           }
@@ -1887,22 +3150,25 @@
     const strict = opts.strict === true;
     const warnings = [];
     const warnedOnce = new Set();
-    const out = [];
-    for (const card of cards || []) {
+    const list = Array.isArray(cards) ? cards : [];
+    const concurrency = Math.max(
+      1,
+      Number(opts.concurrency)
+        || (window.matchMedia?.('(max-width: 900px)')?.matches ? 2 : 4)
+    );
+    const out = new Array(list.length);
+
+    async function prepareOne(card, index) {
       const copy = { ...card };
       if (!copy?.id || !copy.image) {
-        out.push(copy);
-        continue;
+        out[index] = copy;
+        return;
       }
       const mustUpload = cardNeedsCloudImageUpload(copy)
         || (strict && isStorageRef(copy.image) && !shouldSkipImageUploadAttempt(copy.id));
-      if (!mustUpload) {
-        out.push(copy);
-        continue;
-      }
-      if (shouldSkipImageUploadAttempt(copy.id)) {
-        out.push(copy);
-        continue;
+      if (!mustUpload || shouldSkipImageUploadAttempt(copy.id)) {
+        out[index] = copy;
+        return;
       }
       const r = await ensureCardImageOnCloud(copy);
       if (r.image) copy.image = r.image;
@@ -1914,8 +3180,17 @@
           warnings.push(msg);
         }
       }
-      out.push(copy);
+      out[index] = copy;
     }
+
+    let cursor = 0;
+    async function worker() {
+      while (cursor < list.length) {
+        const i = cursor++;
+        await prepareOne(list[i], i);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, list.length || 1) }, () => worker()));
     return { cards: out, warnings: [...new Set(warnings)] };
   }
 
@@ -1931,14 +3206,14 @@
       if (!card?.image) continue;
       if (isDataUrl(card.image) || card.image.startsWith('blob:')) continue;
       if (!isStorageRef(card.image)) continue;
-      const ok = await verifyStorageRef(card.image, card.id, { quick: true });
+      const ok = await verifyStorageRef(card.image, card.id, { quick: true, noDownload: true });
       if (ok) continue;
       let fixed = skipStorageList ? null : await findCardImageInStorage(card.id);
       if (!fixed && typeof window.getCardImageBackup === 'function') {
         const backup = await window.getCardImageBackup(card.id);
         if (backup && isDataUrl(backup)) {
           try {
-            fixed = await uploadCardImage(card.id, backup);
+            fixed = await uploadCardImage(card.id, backup, uploadOptsForCard(card));
             if (typeof window.clearCardImageBackup === 'function') {
               await window.clearCardImageBackup(card.id);
             }
@@ -2228,9 +3503,16 @@
       id: c?.id,
       image: c?.image
     }));
-    const { cards: preparedCards, warnings } = await prepareCardsForCloud(payload.cards || [], {
-      strict: opts.strictImageCheck === true
-    });
+    let preparedCards = payload.cards || [];
+    let warnings = [];
+    if (opts.deferImageUpload !== true) {
+      const prep = await prepareCardsForCloud(payload.cards || [], {
+        strict: opts.strictImageCheck === true,
+        concurrency: opts.concurrency
+      });
+      preparedCards = prep.cards;
+      warnings = prep.warnings;
+    }
     const restoredCards = (preparedCards || []).map((c) => {
       const snap = imageSnapshot.find((s) => String(s.id) === String(c.id));
       if (snap?.image && !c.image) return { ...c, image: snap.image };
@@ -2265,7 +3547,16 @@
     isStorageRef,
     storagePathFromRef,
     primaryImagePath,
+    isGridStoragePath,
+    storagePathFromCdnUrl,
+    isWarehouseBlockedFullUrl,
+    communityListGridRef,
+    storagePathFromDisplayUrl,
     isPathKnownMissing,
+    markPathMissing,
+    clearPathMissingForCard,
+    markGridFetchFailed,
+    shouldSignGridPath,
     cardImageStillResolvable,
     isInvalidMediaUrl,
     normalizeImageRef,
@@ -2274,11 +3565,13 @@
     prefetchDisplayUrlsWithCap,
     prefetchCardsImages,
     prefetchWarehousePage,
-    patchWarehouseImagesFromCache,
     batchSignPaths,
     prefetchCommunityDisplayUrls,
     patchImageSrcFromCache,
     getCachedDisplayUrl,
+    getListDisplayImageSrc,
+    verifyStorageRef,
+    toStorageRef,
     invalidateSignedCache,
     invalidateSignedCacheForRef,
     isFreshSignedDisplayUrl,
@@ -2299,6 +3592,7 @@
     persistGenerationImage,
     uploadGeneratedImage,
     clearSignedUrlCache,
+    clearListImageMissMarks,
     init,
     signUp,
     signIn,
@@ -2319,8 +3613,22 @@
     uploadImageGenRef,
     deleteCardImageByUrl,
     resolveCardImageForSave,
+    resolveCardDownloadUrl,
+    downloadCardStorageBlob,
+    cardUploadOriginalEnabled,
+    preserveOriginalCardImageFromSettings,
+    prepareCardFullUploadBlob,
     ensureCardImageOnCloud,
+    cardNeedsCloudImageUpload,
+    payloadNeedsImageUpload,
     repairMissingCardImages,
+    clearGridMissingMarksForReadyCards,
+    backfillGridThumbsForCards,
+    diagnoseGridBackfillPending,
+    queueGridBackfill,
+    isGridThumbReady,
+    isGridBackfillSkipped,
+    clearGridBackfillSkipped,
     prepareCardsForCloud,
     formatError
   };

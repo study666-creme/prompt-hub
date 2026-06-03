@@ -6,7 +6,10 @@ import {
   type ImageUpstreamBindings
 } from './image-upstream';
 import { ApiError } from './errors';
-import { archiveRemoteImage, isStorageRef } from './image-archive';
+import { archiveRemoteImage, isStorageRef, toStorageRef } from './image-archive';
+import { storageObjectExistsLight } from './media-cdn';
+
+const GEN_IMAGE_BUCKET = 'card-images';
 import { type DebitSplit, deductUserCredits, refundUserCredits } from './membership-credits';
 
 type JobRow = {
@@ -104,6 +107,32 @@ export async function pollAndUpdateJob(
   const provider = readJobProvider(meta);
 
   if (job.status === 'completed') {
+    if (
+      !job.result_image_url
+      && taskId
+      && (upstream.grsaiKey || upstream.apimartKey)
+    ) {
+      const recovered = await tryRecoverJobFromUpstream(
+        admin,
+        userId,
+        job,
+        upstream,
+        taskId,
+        provider
+      );
+      if (recovered) return recovered;
+      const polled = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
+        attempts: 4,
+        intervalMs: 1500
+      });
+      if (polled.status === 'completed' && polled.imageUrl) {
+        return completeJobFromPoll(admin, userId, job, polled);
+      }
+      const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+      if (storedArchive) {
+        return finishJobFromStoredArchive(admin, userId, job, storedArchive);
+      }
+    }
     const archived = await ensureJobImageArchived(admin, userId, job);
     let extraImageUrls: string[] | undefined;
     if (taskId && provider === 'grsai' && upstream.grsaiKey) {
@@ -130,6 +159,10 @@ export async function pollAndUpdateJob(
     };
   }
   if (job.status === 'failed') {
+    const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+    if (storedArchive) {
+      return finishJobFromStoredArchive(admin, userId, job, storedArchive);
+    }
     if (taskId && (upstream.grsaiKey || upstream.apimartKey)) {
       const recovered = await tryRecoverJobFromUpstream(
         admin,
@@ -176,6 +209,30 @@ export async function pollAndUpdateJob(
     };
   }
 
+  const ageMs = Date.now() - createdMs;
+  if (job.status === 'processing' && ageMs > 45 * 1000 && ageMs < staleMs) {
+    const deep = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
+      attempts: 6,
+      intervalMs: 2000
+    });
+    if (deep.status === 'completed' && deep.imageUrl) {
+      return completeJobFromPoll(admin, userId, job, deep);
+    }
+    if (deep.status === 'failed') {
+      if (deep.isViolation) {
+        const msg = deep.errorMessage || 'upstream_content_violation';
+        const skipRefund = refundOnViolation === false;
+        await finalizeFailedJob(admin, userId, job, msg, { skipRefund });
+        return {
+          status: 'failed',
+          imageUrl: null,
+          errorMessage: msg,
+          refunded: !skipRefund
+        };
+      }
+    }
+  }
+
   if (Date.now() - createdMs > staleMs) {
     const late = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
       attempts: slowUpstream ? 8 : 5,
@@ -183,6 +240,10 @@ export async function pollAndUpdateJob(
     });
     if (late.status === 'completed' && late.imageUrl) {
       return completeJobFromPoll(admin, userId, job, late);
+    }
+    const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+    if (storedArchive) {
+      return finishJobFromStoredArchive(admin, userId, job, storedArchive);
     }
     await finalizeFailedJob(admin, userId, job, 'upstream_timeout');
     return {
@@ -197,6 +258,21 @@ export async function pollAndUpdateJob(
 
   if (polled.status === 'completed' && polled.imageUrl) {
     return completeJobFromPoll(admin, userId, job, polled);
+  }
+
+  if (polled.status === 'pending' && job.status === 'processing' && ageMs > 20 * 1000) {
+    const deep = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
+      attempts: 5,
+      intervalMs: 1800
+    });
+    if (deep.status === 'completed' && deep.imageUrl) {
+      return completeJobFromPoll(admin, userId, job, deep);
+    }
+  }
+
+  const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+  if (storedArchive) {
+    return finishJobFromStoredArchive(admin, userId, job, storedArchive);
   }
 
   if (polled.status === 'failed') {
@@ -391,7 +467,11 @@ async function tryRecoverJobFromUpstream(
     attempts: 10,
     intervalMs: 8000
   });
-  if (polled.status !== 'completed' || !polled.imageUrl) return null;
+  if (polled.status !== 'completed' || !polled.imageUrl) {
+    const stored = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+    if (stored) return finishJobFromStoredArchive(admin, userId, job, stored);
+    return null;
+  }
   const meta = (job.meta as Record<string, unknown>) || {};
   const result = await completeJobFromPoll(admin, userId, job, polled);
   await admin
@@ -401,6 +481,47 @@ async function tryRecoverJobFromUpstream(
     })
     .eq('id', job.id);
   return result;
+}
+
+async function tryRestoreJobImageFromStorage(
+  admin: SupabaseClient,
+  userId: string,
+  jobId: string
+): Promise<string | null> {
+  const path = `${userId}/generated/${jobId}.jpg`;
+  if (!(await storageObjectExistsLight(admin, path, GEN_IMAGE_BUCKET))) return null;
+  return toStorageRef(path);
+}
+
+async function finishJobFromStoredArchive(
+  admin: SupabaseClient,
+  userId: string,
+  job: JobRow,
+  storedRef: string
+): Promise<{
+  status: 'completed';
+  imageUrl: string;
+  errorMessage: null;
+  refunded: boolean;
+  extraImageUrls?: string[];
+}> {
+  const meta = (job.meta as Record<string, unknown>) || {};
+  await admin
+    .from('generation_requests')
+    .update({
+      status: 'completed',
+      result_image_url: storedRef,
+      error_message: null,
+      completed_at: job.completed_at || new Date().toISOString(),
+      meta: { ...meta, archived: true, archivePending: false, restoredFromStorage: true }
+    })
+    .eq('id', job.id);
+  return {
+    status: 'completed',
+    imageUrl: storedRef,
+    errorMessage: null,
+    refunded: false
+  };
 }
 
 /** 已完成任务：远程 URL 必须归档到 Storage；已是 storage:// 则直接返回 */
@@ -430,6 +551,17 @@ async function ensureJobImageArchived(
     return stored;
   } catch (e) {
     console.warn('[generation] archive pending', job.id, e);
+    const stored = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+    if (stored) {
+      await admin
+        .from('generation_requests')
+        .update({
+          result_image_url: stored,
+          meta: { ...meta, archived: true, archivePending: false, restoredFromStorage: true }
+        })
+        .eq('id', job.id);
+      return stored;
+    }
     if (!meta.archivePending) {
       await admin
         .from('generation_requests')

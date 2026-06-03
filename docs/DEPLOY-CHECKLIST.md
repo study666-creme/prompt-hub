@@ -50,7 +50,17 @@ Worker 名：**prompt-hub-api**
 1. 打开 https://prompt-hub.cn  
 2. F12 → **Application** → **Service Workers** → **Unregister**  
 3. **Ctrl+F5** 强刷  
-4. 左下角应显示当前构建号（如 `版本 20260606n`）
+4. 左下角应显示当前构建号（如 `版本 20260603j`）
+
+---
+
+## Cloudflare 用量（可选）
+
+收到「每日请求 75%」邮件时：
+
+1. [Cloudflare Dashboard](https://dash.cloudflare.com) → **Workers 和 Pages** → **概述**
+2. 看 **Requests** 是否接近 100,000/天
+3. 详见 `docs/DEBUG-GUIDE.md` → Cloudflare 请求额度
 
 ---
 
@@ -63,6 +73,7 @@ Worker 名：**prompt-hub-api**
 | 社区 Feed | `https://api.prompt-hub.cn/api/v1/community/feed?limit=10` → `ok:true` |
 | 登录 | 侧栏显示邮箱；非「登录/注册」 |
 | 社区加载 | 游客/登录均不应无限「正在加载…」 |
+| 生图滚轮 | 生图页侧栏：图片上滚轮缩放，图片外滚轮换图 |
 
 ---
 

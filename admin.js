@@ -165,18 +165,53 @@
     $('adminApp').hidden = !loggedIn;
   }
 
+  const PAGE_TITLES = {
+    overview: ['数据概览', '用户、存储、运行环境一览'],
+    users: ['用户管理', '搜索、查看云存储额度与会员状态'],
+    codes: ['激活码', '生成与查询兑换码'],
+    models: ['生图模型', '定价、折扣与线路配置']
+  };
+
+  function setPageTitle(tab) {
+    const meta = PAGE_TITLES[tab] || PAGE_TITLES.overview;
+    const t = $('adminPageTitle');
+    const s = $('adminPageSubtitle');
+    if (t) t.textContent = meta[0];
+    if (s) s.textContent = meta[1];
+  }
+
+  function renderQuotaCard(title, usedLabel, quotaLabel, percent, status, meta, badge) {
+    const cls = status === 'critical' ? 'is-critical' : status === 'warn' ? 'is-warn' : status === 'unknown' ? 'is-unknown' : '';
+    const barWarn = percent != null && percent >= 80 ? ' is-warn' : '';
+    const pct = percent != null ? percent : 0;
+    const bar = percent != null
+      ? `<div class="admin-progress" title="${pct}%"><div class="admin-progress__bar${barWarn}" style="width:${Math.min(100, pct)}%"></div></div>`
+      : '';
+    return `<div class="admin-quota-card ${cls}">
+      <div class="admin-quota-card__head">
+        <span class="admin-quota-card__title">${esc(title)}</span>
+        ${badge ? `<span class="admin-badge admin-badge--${badge.kind || 'ok'}">${esc(badge.text)}</span>` : ''}
+      </div>
+      <div><strong style="font-size:18px">${esc(usedLabel)}</strong> <span class="admin-hint">/ ${esc(quotaLabel || '—')}</span></div>
+      ${bar}
+      ${meta ? `<p class="admin-quota-card__meta">${meta}</p>` : ''}
+    </div>`;
+  }
+
   function bindTabs() {
     document.querySelectorAll('.admin-tab').forEach((btn) => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.admin-tab').forEach((b) => b.classList.remove('is-active'));
         document.querySelectorAll('.admin-panel').forEach((p) => (p.hidden = true));
         btn.classList.add('is-active');
-        const panel = $('panel-' + btn.dataset.tab);
+        const tab = btn.dataset.tab;
+        setPageTitle(tab);
+        const panel = $('panel-' + tab);
         if (panel) panel.hidden = false;
-        if (btn.dataset.tab === 'overview') void loadDashboard();
-        if (btn.dataset.tab === 'users') void loadUsers(true);
-        if (btn.dataset.tab === 'codes') void loadCodes(true);
-        if (btn.dataset.tab === 'models') void loadImageModels();
+        if (tab === 'overview') void loadDashboard();
+        if (tab === 'users') void loadUsers(true);
+        if (tab === 'codes') void loadCodes(true);
+        if (tab === 'models') void loadImageModels();
       });
     });
   }
@@ -185,7 +220,9 @@
     const el = $('dashStats');
     if (!el || !session) return;
     el.innerHTML = '<div class="admin-stat"><span>加载中</span><strong>…</strong></div>';
+    void loadDashboardInfra();
     void loadDashboardStorage();
+    bindDashboardCommunityPurge();
     try {
       const d = await adminFetch(session, '/api/admin/dashboard');
       const tier = d.membersByTier || {};
@@ -205,34 +242,191 @@
     }
   }
 
-  async function loadDashboardStorage() {
-    const hint = $('dashStorageHint');
-    const body = $('dashStorageBody');
+  async function loadDashboardInfra() {
+    const hint = $('dashInfraHint');
+    const body = $('dashInfraBody');
     if (!session || !hint || !body) return;
-    hint.textContent = '正在扫描 card-images 桶（文件较多时约需几秒）…';
+    hint.textContent = '正在读取 Worker 环境…';
     body.hidden = true;
     try {
-      const s = await adminFetch(session, '/api/admin/dashboard/storage');
-      hint.textContent = s.bucketScanTruncated
-        ? '已扫描前 ' + s.bucketFileCount + ' 个文件（数量过多，结果为估算下限）'
-        : 'card-images 桶共 ' + s.bucketFileCount + ' 个文件';
-      const pct = s.storageUsedPercent || 0;
-      const warn = pct >= 85 ? ' is-warn' : '';
+      const d = await adminFetch(session, '/api/admin/dashboard/infra');
+      const dbOk = d.supabaseDbPing === 'ok';
+      const keyOk = d.supabaseServiceKeyLooksValid;
+      hint.textContent = `API：${d.apiOrigin || '—'} · 环境 ${d.environment || '—'}`;
+      const policyRows = (d.userStoragePolicy || [])
+        .map((p) => `<li>${esc(p.tier)}：${esc(p.quotaLabel)}</li>`)
+        .join('');
       body.innerHTML = `
-        <div class="admin-progress" title="文件存储 ${pct}%"><div class="admin-progress__bar${warn}" style="width:${pct}%"></div></div>
         <div class="admin-kv">
-          <div><span>桶内已用</span><strong>${esc(s.bucketLabel)}</strong></div>
-          <div><span>配额（约）</span><strong>${esc(s.storageQuotaLabel)}</strong></div>
-          <div><span>剩余（约）</span><strong>${esc(s.storageRemainingLabel)}</strong></div>
-          <div><span>用户登记合计</span><strong>${esc(s.registeredLabel)}</strong></div>
-          <div><span>数据库配额</span><strong>${esc(s.dbQuotaLabel)}</strong></div>
+          <div><span>API 地址</span><strong>${esc(d.apiOrigin || '—')}</strong></div>
+          <div><span>站点</span><strong>${esc(d.pagesHint || '—')}</strong></div>
+          <div><span>Supabase 项目</span><strong>${esc(d.supabaseProjectHost || '未配置')}</strong></div>
+          <div><span>Service Key</span><strong>${keyOk ? '已配置（格式正常）' : '未配置或异常'}</strong></div>
+          <div><span>数据库连通</span><strong class="${dbOk ? '' : 'admin-warn'}">${esc(d.supabaseDbPing || '—')}</strong></div>
+          <div><span>生图 API</span><strong>${d.imageApiConfigured ? '已配置' : '未配置'}</strong></div>
+          <div><span>对话 API</span><strong>${d.chatApiConfigured ? '已配置' : '未配置'}</strong></div>
+          <div><span>桶配额参考</span><strong>${d.storageQuotaMbEnv || '—'} MB</strong></div>
+          <div><span>库配额参考</span><strong>${d.dbQuotaMbEnv || '—'} MB</strong></div>
+          <div><span>Usage 文件存储</span><strong>${d.storageUsedMbEnv != null ? d.storageUsedMbEnv + ' MB' : '未填'}</strong></div>
+          <div><span>Usage 数据库</span><strong>${d.dbUsedMbEnv != null ? d.dbUsedMbEnv + ' MB' : '未填'}</strong></div>
         </div>
-        <p class="admin-hint" style="margin-top:10px">${esc(s.dbNote)}。精确用量：Supabase 控制台 → Project Settings → Usage。</p>
+        ${policyRows ? `<p style="margin:12px 0 6px;font-size:13px"><strong>用户云存储策略</strong></p><ul class="admin-notes">${policyRows}</ul>` : ''}
+        <ul class="admin-notes" style="margin-top:10px">${(d.notes || []).map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
       `;
       body.hidden = false;
     } catch (e) {
+      hint.textContent = '环境信息加载失败：' + friendlyFetchError(e);
+    }
+  }
+
+  async function loadDashboardStorage() {
+    const hint = $('dashStorageHint');
+    const body = $('dashStorageBody');
+    const alertsEl = $('dashAlerts');
+    if (!session || !hint || !body) return;
+    hint.textContent = '正在扫描 card-images 桶（文件较多时约需几秒）…';
+    body.hidden = true;
+    if (alertsEl) alertsEl.hidden = true;
+    try {
+      const s = await adminFetch(session, '/api/admin/dashboard/storage');
+      const ps = s.projectStorage || {};
+      const db = s.database || {};
+      hint.textContent = s.bucketScanTruncated
+        ? `桶扫描：前 ${s.bucketFileCount} 个文件（不完整，仅供参考）`
+        : `桶扫描：${s.bucketFileCount} 个文件 · card-images`;
+
+      const fileBadge = ps.source === 'env'
+        ? { kind: 'ok', text: 'Usage 同步' }
+        : { kind: 'warn', text: '桶扫描估算' };
+      const dbBadge = db.configured
+        ? { kind: 'ok', text: 'Usage 同步' }
+        : { kind: 'warn', text: '未填实际用量' };
+
+      const fileUsedMain = ps.source === 'env'
+        ? (ps.usedLabel || s.bucketLabel)
+        : `未填 Usage · 扫描 ${esc(s.bucketLabel)}`;
+      const filePercent = ps.source === 'env'
+        ? (ps.percentUsed != null ? ps.percentUsed : s.storageUsedPercent)
+        : null;
+      const fileStatus = ps.source === 'env' ? (ps.status || 'unknown') : 'unknown';
+
+      const topUsers = Array.isArray(s.topUsersByBucket) ? s.topUsersByBucket : [];
+      const topUsersHtml = topUsers.length
+        ? `<div class="admin-bucket-users" style="margin-top:16px">
+            <h3 style="font-size:13px;margin:0 0 8px">桶内按用户（真实文件占用，非 SQL 登记）</h3>
+            <table class="admin-table admin-table--compact">
+              <thead><tr><th>用户 ID</th><th>文件数</th><th>桶内占用</th></tr></thead>
+              <tbody>${topUsers.map((u) => `
+                <tr>
+                  <td><code>${esc(u.userId)}</code></td>
+                  <td>${esc(String(u.fileCount))}</td>
+                  <td>${esc(u.label)}</td>
+                </tr>`).join('')}</tbody>
+            </table>
+            <p class="admin-hint" style="margin-top:8px">路径前缀即用户 UUID。登记存储列来自 profiles.storage_bytes，历史上传未上报时会远低于此表。</p>
+          </div>`
+        : '';
+
+      body.innerHTML = `
+        <div class="admin-quota-grid">
+          ${renderQuotaCard(
+            '项目 File Storage（Supabase 账单）',
+            fileUsedMain,
+            ps.quotaLabel || s.storageQuotaLabel,
+            filePercent,
+            fileStatus,
+            ps.source === 'env'
+              ? '来自 Worker 变量 <code>SUPABASE_STORAGE_USED_MB</code>（与 Usage 页 File Storage 一致）'
+              : `Supabase Usage 页 Storage Size 才是账单（你那边约 0.754 GB，未超限）。下方 ${esc(s.bucketLabel)} 是逐文件 metadata 累加，常因旧图未删而偏高。请填 Worker 变量 SUPABASE_STORAGE_USED_MB=754。`,
+            fileBadge
+          )}
+          ${renderQuotaCard(
+            'Database（Postgres 账单）',
+            db.usedLabel || '未同步',
+            db.quotaLabel || s.dbQuotaLabel,
+            db.percentUsed,
+            db.status || 'unknown',
+            db.configured
+              ? '来自 Worker 变量 <code>SUPABASE_DB_USED_MB</code>（与 Usage 页 Database 一致）'
+              : 'Database 与 File Storage 分开统计。请到 Supabase → Project Settings → Usage 查看 Database 已用，填入 Worker 变量 <code>SUPABASE_DB_USED_MB</code>。',
+            dbBadge
+          )}
+          ${renderQuotaCard(
+            '用户登记存储（业务层）',
+            s.registeredLabel,
+            '—',
+            null,
+            'unknown',
+            '所有用户 <code>profiles.storage_bytes</code> 合计，用于会员配额；<strong>不是</strong> Supabase 账单数字。',
+            { kind: 'ok', text: '业务数据' }
+          )}
+        </div>
+        ${topUsersHtml}
+        <p class="admin-hint" style="margin-top:12px">${esc(s.dbNote || '')}</p>
+      `;
+      body.hidden = false;
+
+      const reconcileBtn = $('dashStorageReconcile');
+      if (reconcileBtn) {
+        reconcileBtn.hidden = false;
+        reconcileBtn.onclick = async () => {
+          if (!confirm('按 card-images 桶内文件重算并写回 profiles.storage_bytes？\n\n仅修正「登记存储」账本，不影响 Supabase 账单。')) return;
+          reconcileBtn.disabled = true;
+          try {
+            const r = await adminFetch(session, '/api/admin/dashboard/storage/reconcile', { method: 'POST', timeoutMs: 120000 });
+            toast(`已回填 ${r.updated || 0} 个用户 · 桶合计 ${r.bucketLabel || ''}`, true);
+            await loadDashboardStorage();
+            if ($('panel-users') && !$('panel-users').hidden) await loadUsers(true);
+          } catch (e) {
+            toast('回填失败：' + friendlyFetchError(e), false);
+          } finally {
+            reconcileBtn.disabled = false;
+          }
+        };
+      }
+
+      if (alertsEl && Array.isArray(s.alerts) && s.alerts.length) {
+        alertsEl.innerHTML = s.alerts.map((a) => `
+          <div class="admin-alert admin-alert--${a.level === 'critical' ? 'critical' : 'warn'}">
+            <strong>${esc(a.title)}</strong>
+            ${esc(a.detail)}
+          </div>`).join('');
+        alertsEl.hidden = false;
+      }
+    } catch (e) {
       hint.textContent = '存储扫描失败：' + friendlyFetchError(e);
     }
+  }
+
+  function bindDashboardCommunityPurge() {
+    const btn = $('dashCommunityPurgeBtn');
+    const result = $('dashCommunityPurgeResult');
+    if (!btn || btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', async () => {
+      if (!session) return;
+      if (!confirm('将检查所有已发布社区帖：Storage 无图片、无效作者、重复卡片会被下架（published=false）。\n\n帖子记录仍保留，只是不再出现在社区 feed。继续？')) return;
+      btn.disabled = true;
+      if (result) {
+        result.hidden = false;
+        result.textContent = '正在扫描 Storage 与社区帖（帖多时约需 1～2 分钟）…';
+      }
+      try {
+        const r = await adminFetch(session, '/api/admin/community/purge-ghosts', {
+          method: 'POST',
+          timeoutMs: 180000
+        });
+        const msg = `已下架 ${r.unpublishedTotal || 0} 条（无图/无效作者 ${r.unpublishedMissing || 0}，重复 ${r.unpublishedDuplicates || 0}）· 修正作者 ${r.repairedAuthors || 0} · 仍在线 ${r.publishedRemaining ?? '—'} 条`;
+        if (result) result.textContent = msg;
+        toast(msg, true);
+      } catch (e) {
+        const err = friendlyFetchError(e);
+        if (result) result.textContent = '清理失败：' + err;
+        toast('清理失败：' + err, false);
+      } finally {
+        btn.disabled = false;
+      }
+    });
   }
 
   async function loadUsers(reset) {
@@ -254,15 +448,15 @@
       }
       tbody.innerHTML = data.items
         .map((u) => {
-          const cards =
-            u.cardLimit == null ? '会员不限' : `≤${u.cardLimit} 张`;
+          const sq = u.storageQuota || {};
+          const quotaCell = esc(sq.summaryLabel || `${sq.usedLabel || u.storageLabel} / ${sq.quotaLabel || '—'}`);
           return `<tr>
             <td>${esc(u.email || '—')}</td>
             <td>${esc(u.displayName || '—')}</td>
             <td>${u.creditsPermanent} + 日${u.dailyCredits}</td>
             <td>${u.membershipActive ? '<span class="admin-badge admin-badge--ok">' + esc(u.membershipTierLabel) + '</span>' : '<span class="admin-badge">免费</span>'}</td>
             <td>${esc(u.storageLabel)}</td>
-            <td>${cards}</td>
+            <td>${quotaCell}</td>
             <td><button type="button" class="admin-btn admin-btn--primary" data-user-id="${esc(u.userId)}">管理</button></td>
           </tr>`;
         })
@@ -285,10 +479,9 @@
     try {
       const u = await adminFetch(session, '/api/admin/users/' + encodeURIComponent(userId));
       $('userModalTitle').textContent = u.displayName || u.email || '用户管理';
-      const cards =
-        u.cardLimit == null
-          ? '会员不限张数'
-          : `${u.cardCount} / ${u.cardLimit} 张（剩余 ${u.cardsRemaining}）`;
+      const sq = u.storageQuota || {};
+      const storageQuotaText = sq.summaryLabel
+        || `${sq.usedLabel || u.storageLabel} / ${sq.quotaLabel || '—'}`;
       const reds = (u.recentRedemptions || [])
         .map((r) => `<li>${esc(r.code)} · ${esc(r.redeemed_at || '')}</li>`)
         .join('');
@@ -298,8 +491,9 @@
             <dt>邮箱</dt><dd>${esc(u.email || '—')}</dd>
             <dt>昵称</dt><dd>${esc(u.displayName || '—')}</dd>
             <dt>用户 ID</dt><dd><code>${esc(u.userId)}</code></dd>
-            <dt>云端卡片</dt><dd>${esc(cards)}</dd>
-            <dt>登记存储</dt><dd>${esc(u.storageLabel)}</dd>
+            <dt>云端卡片数</dt><dd>${u.cardCount ?? 0} 张（不按张数限）</dd>
+            <dt>云存储</dt><dd>${esc(storageQuotaText)}</dd>
+            <dt>登记字节</dt><dd>${esc(u.storageLabel)}</dd>
             <dt>累计消耗</dt><dd>${u.lifetimeCreditsSpent ?? 0} 积分</dd>
             <dt>云同步</dt><dd>${esc(u.cloudUpdatedAt || '—')}</dd>
           </dl>
@@ -834,6 +1028,11 @@
     });
 
     $('userSearchBtn')?.addEventListener('click', () => void loadUsers(true));
+    $('userSearchClear')?.addEventListener('click', () => {
+      const input = $('userSearch');
+      if (input) input.value = '';
+      void loadUsers(true);
+    });
     let searchTimer = 0;
     $('userSearch')?.addEventListener('input', () => {
       clearTimeout(searchTimer);
@@ -869,6 +1068,7 @@
     $('modelsGlobalDiscount')?.addEventListener('input', () => renderModelsTable());
 
     if (session?.secret) {
+      setPageTitle('overview');
       document.querySelector('.admin-tab[data-tab="overview"]')?.click();
     }
   }

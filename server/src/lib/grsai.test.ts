@@ -138,14 +138,15 @@ describe('GrsAI task id parsing', () => {
     expect(poll.imageUrl).toBe('https://cdn.example.com/banana.png');
   });
 
-  it('completes when failed status still carries image urls', () => {
+  it('parses user gpt-image succeeded with empty top-level url', () => {
     const body = {
-      status: 'failed',
-      error: 'late error',
-      results: [{ url: 'https://cdn.example.com/late.png' }]
+      id: '9-30783fe7-aef4-49e1-a78f-d7e506af6ede',
+      status: 'succeeded',
+      url: '',
+      results: [{ url: 'https://file5.aitohumanize.com/file/2fff962d497c4838b1d5295454858b21.png' }]
     };
     const poll = parseGrsaiTaskPoll(body);
     expect(poll.status).toBe('completed');
-    expect(poll.imageUrl).toBe('https://cdn.example.com/late.png');
+    expect(poll.imageUrl).toBe('https://file5.aitohumanize.com/file/2fff962d497c4838b1d5295454858b21.png');
   });
 });

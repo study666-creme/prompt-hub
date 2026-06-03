@@ -131,7 +131,10 @@
     }
 
     async function saveCardImageBackup(cardId, imageData) {
-      if (!cardId || !imageData || !window.SupabaseSync?.isDataUrl?.(imageData)) return;
+      if (!cardId || !imageData) return;
+      const ok = window.SupabaseSync?.isDataUrl?.(imageData)
+        || (typeof imageData === 'string' && /^https?:\/\//i.test(imageData));
+      if (!ok) return;
       if (!db) await openDB();
       return new Promise((resolve, reject) => {
         const tx = db.transaction(['card_image_backups'], 'readwrite');
@@ -162,10 +165,15 @@
       });
     }
     window.getCardImageBackup = getCardImageBackup;
+    window.saveCardImageBackup = saveCardImageBackup;
 
-    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, autoPromptOcr: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, defaultImageGenAutoSaveWarehouse: true, communityNotificationsEnabled: true, communityNotifyBadge: true, autoDayNight: true, themeManualOverride: false, showTrimBlackBorderTool: false };
+    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, autoPromptOcr: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, defaultImageGenAutoSaveWarehouse: true, communityNotificationsEnabled: true, communityNotifyBadge: true, autoDayNight: true, themeManualOverride: false, showTrimBlackBorderTool: false, preserveOriginalCardImage: false };
+    let pendingUploadFile = null;
+    let pendingUploadBytes = 0;
     let currentGroup = 'all', selectedCardId = null, isNewCardMode = false, imageData = null;
     let imageRemovalPending = false;
+    let editPanelStashedDraft = null;
+    let cardOriginalReuploadRequired = false;
     let mobileEditPanelHistory = false;
     let currentTags = [], tempCustomFields = [];
     let batchMode = false, selectedCardIds = new Set();
@@ -512,12 +520,6 @@
       const t = e.target;
       const onLightbox = !!t?.closest?.('#imageLightbox');
       if (onLightbox && !lightboxWheelNavEnabled()) return;
-      if (t?.id === 'lightboxImage' && lightboxWheelNavEnabled()) {
-        if (!viewerNav.items.length) return;
-        e.preventDefault();
-        navigateViewerByWheelThrottled(e.deltaY);
-        return;
-      }
       if (t?.id === 'appreciateViewerImg' || t?.id === 'lightboxImage') return;
       if (!viewerNav.items.length) return;
       if (onLightbox && !lightboxWheelNavEnabled()) return;
@@ -908,15 +910,7 @@
 
     function canGuestCreateCard() {
       if (isUserLoggedIn()) {
-        if (window.Membership?.isMember?.()) return { ok: true };
-        const limit = window.Membership?.FREE_CARD_LIMIT ?? 100;
-        if (cards.length >= limit) {
-          return {
-            ok: false,
-            msg: `普通用户最多创建 ${limit} 张卡片，开通会员后可扩展存储`
-          };
-        }
-        return { ok: true, remaining: limit - cards.length };
+        return { ok: true };
       }
       if (cards.length >= GUEST_CARD_LIMIT) {
         return {
@@ -944,19 +938,14 @@
       const el = document.getElementById('guestLimitHint');
       if (!el) return;
       if (isUserLoggedIn()) {
-        if (window.Membership?.isMember?.()) {
-          el.classList.add('hidden');
-          return;
-        }
-        const limit = window.Membership?.FREE_CARD_LIMIT ?? 100;
         el.classList.remove('hidden');
-        const left = Math.max(0, limit - cards.length);
-        el.textContent = `普通用户：还可新建 ${left} / ${limit} 张卡片（会员享更大存储）`;
+        const summary = window.Membership?.getStorageSummaryLabel?.() || '';
+        el.textContent = summary ? `云存储 ${summary}` : '云存储额度加载中…';
         return;
       }
       el.classList.remove('hidden');
       const left = Math.max(0, GUEST_CARD_LIMIT - cards.length);
-      el.textContent = `未登录：还可新建 ${left} / ${GUEST_CARD_LIMIT} 张卡片（登录后最多 100 张，会员扩展存储）`;
+      el.textContent = `未登录：还可新建 ${left} / ${GUEST_CARD_LIMIT} 张卡片`;
     }
 
     window.AuthGate = {
@@ -989,7 +978,13 @@
     window.getWarehouseCardsForImageGen = function (opts) {
       const group = opts?.group || 'all';
       const tag = opts?.tag || 'all';
-      let list = cards.filter((c) => (c.prompt || '').trim() && cardHasDisplayImage(c));
+      const base = cardsForActiveWarehouse(filterTombstonedCards(cards));
+      let list = base.filter((c) => {
+        if (!cardHasDisplayImage(c)) return false;
+        const prompt = (c.prompt || '').trim();
+        const title = (c.title || '').trim();
+        return !!(prompt || title);
+      });
       if (group === 'uncategorized') {
         list = list.filter(c => !c.group);
       } else if (group && group !== 'all') {
@@ -999,14 +994,15 @@
         list = list.filter(c => (c.tags || []).includes(tag));
       }
       return list
-        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
+        .sort((a, b) => (b.createdAt || b.updatedAt || 0) - (a.createdAt || a.updatedAt || 0))
         .map(c => ({
           id: c.id,
           title: (c.title || '').trim() || '',
-          prompt: c.prompt || '',
+          prompt: (c.prompt || '').trim() || (c.title || '').trim() || '',
           image: c.image || null,
           tags: c.tags || [],
-          group: c.group || null
+          group: c.group || null,
+          genJobId: c.genJobId || null
         }));
     };
 
@@ -1212,6 +1208,15 @@
       }
       if (jobId && cards.some(c => c.genJobId === jobId)) {
         const existing = cards.find(c => c.genJobId === jobId);
+        if (existing && image && !existing.image) {
+          existing.image = image;
+          existing.updatedAt = Date.now();
+          await saveAllData({ skipCloud: true });
+          renderGroups();
+          renderCards(true);
+          if (window.SupabaseSync?.isLoggedIn?.()) scheduleCloudPush({ urgent: true });
+          return { ok: true, cardId: existing.id, repaired: true };
+        }
         return { ok: false, duplicate: true, cardId: existing?.id };
       }
       if (sourceId && cards.some(c => c.genSourceId === sourceId)) {
@@ -1246,6 +1251,7 @@
         window.FeatureDraft.syncCardToCommunity(card, true);
       }
       await saveAllData({ skipCloud: true });
+      if (image) void saveCardImageBackup(card.id, image).catch(() => {});
       renderGroups();
       renderCards(true);
       updateGuestLimitUI();
@@ -1343,12 +1349,28 @@
       document.getElementById('warehouseFilterClearBtn')?.classList.toggle('hidden', n === 0);
     }
 
-    function positionFilterDropdown() {
-      const dd = document.getElementById('filterDropdown');
-      const btn = document.getElementById('filterBtn');
+    function portalDropdownToBody(dd, homeParent) {
+      if (!dd) return;
+      if (!dd.dataset.portalHomeId && homeParent?.id) {
+        dd.dataset.portalHomeId = homeParent.id;
+      }
+      if (dd.parentElement !== document.body) {
+        document.body.appendChild(dd);
+      }
+    }
+
+    function restoreDropdownPortal(dd) {
+      if (!dd?.dataset.portalHomeId) return;
+      const home = document.getElementById(dd.dataset.portalHomeId);
+      if (home && dd.parentElement === document.body) {
+        home.appendChild(dd);
+      }
+    }
+
+    function positionAnchoredDropdown(dd, btn, minWidth) {
       if (!dd || !btn) return;
       const r = btn.getBoundingClientRect();
-      const width = Math.max(220, Math.round(r.width));
+      const width = Math.max(minWidth || 132, Math.round(r.width));
       let left = Math.round(r.left);
       if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
       dd.style.position = 'fixed';
@@ -1357,24 +1379,23 @@
       dd.style.right = 'auto';
       dd.style.width = `${width}px`;
       dd.style.minWidth = `${width}px`;
-      dd.style.zIndex = '12000';
+      dd.style.zIndex = '13050';
+    }
+
+    function positionFilterDropdown() {
+      const dd = document.getElementById('filterDropdown');
+      const btn = document.getElementById('filterBtn');
+      if (!dd || !btn) return;
+      portalDropdownToBody(dd, document.querySelector('.filter-menu-wrap'));
+      positionAnchoredDropdown(dd, btn, 220);
     }
 
     function positionSortDropdown() {
       const dd = document.getElementById('sortDropdown');
       const btn = document.getElementById('sortMenuBtn');
       if (!dd || !btn) return;
-      const r = btn.getBoundingClientRect();
-      const width = Math.max(132, Math.round(r.width));
-      let left = Math.round(r.left);
-      if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
-      dd.style.position = 'fixed';
-      dd.style.top = `${Math.round(r.bottom + 6)}px`;
-      dd.style.left = `${left}px`;
-      dd.style.right = 'auto';
-      dd.style.width = `${width}px`;
-      dd.style.minWidth = `${width}px`;
-      dd.style.zIndex = '12000';
+      portalDropdownToBody(dd, document.getElementById('sortMenuWrap'));
+      positionAnchoredDropdown(dd, btn, 132);
     }
 
     function resetSortDropdownPosition() {
@@ -1387,6 +1408,7 @@
       dd.style.width = '';
       dd.style.minWidth = '';
       dd.style.zIndex = '';
+      restoreDropdownPortal(dd);
     }
 
     function resetFilterDropdownPosition() {
@@ -1399,6 +1421,7 @@
       dd.style.width = '';
       dd.style.minWidth = '';
       dd.style.zIndex = '';
+      restoreDropdownPortal(dd);
     }
 
     function buildFilterMenu() {
@@ -1489,7 +1512,8 @@
 
     const SORT_OPTIONS = [
       { value: 'default', label: '默认' },
-      { value: 'updated-desc', label: '最近' },
+      { value: 'created-desc', label: '最近生成' },
+      { value: 'updated-desc', label: '最近更新' },
       { value: 'updated-asc', label: '最远' },
       { value: 'random', label: '随机' }
     ];
@@ -1657,20 +1681,6 @@
       if (!isMobileViewport()) return;
       clearTimeout(layoutMasonryTimer);
       layoutMasonryTimer = setTimeout(() => enforceMobileCardGrid(), 80);
-    }
-
-    function warmCardImagesBackground(list, capMs) {
-      if (window.CardImageLoader?.warmCardsBackground) {
-        window.CardImageLoader.warmCardsBackground(list, capMs);
-        return;
-      }
-      const imgs = (list || []).map((c) => c?.image).filter(Boolean);
-      if (!imgs.length) return;
-      void (window.SupabaseSync?.prefetchWarehousePage
-        ? window.SupabaseSync.prefetchWarehousePage(list, capMs || 2800)
-        : window.SupabaseSync?.prefetchCardsImages
-          ? window.SupabaseSync.prefetchCardsImages(list, capMs || 2800)
-          : window.SupabaseSync?.prefetchDisplayUrlsWithCap?.(imgs, capMs));
     }
 
     function bindCardGridImageRelayout(container) {
@@ -2503,10 +2513,14 @@
       const rest = list.filter(c => !c.pinnedAt);
       if (sortMode === 'updated-asc') {
         rest.sort((a, b) => (a.updatedAt || a.createdAt) - (b.updatedAt || b.createdAt));
+      } else if (sortMode === 'created-desc') {
+        rest.sort((a, b) => (b.createdAt || b.updatedAt || 0) - (a.createdAt || a.updatedAt || 0));
       } else if (sortMode === 'random') {
         return [...pinned, ...shuffleCardRest(rest)];
+      } else if (sortMode === 'updated-desc') {
+        rest.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
       } else {
-        rest.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+        rest.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
       }
       return [...pinned, ...rest];
     }
@@ -2842,16 +2856,32 @@
           if (!ref || !window.SupabaseSync?.resolveDisplayUrl) return;
           try {
             window.SupabaseSync.invalidateSignedCacheForRef?.(ref, cardId);
-            const url = await window.SupabaseSync.resolveDisplayUrl(ref, collectOpts || {
-              assetId: cardId,
-              variant: window.SupabaseSync.VARIANT_FULL || 'full',
-              tryAllPaths: true
-            });
-            if (url && window.CardImageLoader?.applyUrlToImg?.(img, url)) {
-              delete img.dataset.warehouseFinalFail;
-              media.classList.remove('card-media--load-failed', 'card-media--await');
-              scheduleWarehouseMasonryForCard(cardId);
-              return;
+            if (collectOpts) {
+              const url = await window.SupabaseSync.resolveDisplayUrl(ref, {
+                ...collectOpts,
+                variant: window.SupabaseSync.VARIANT_GRID || 'grid',
+                tryAllPaths: true,
+                listOnly: true,
+                allowFullFallback: false,
+                degradedListFull: false
+              });
+              if (url && window.CardImageLoader?.applyUrlToImg?.(img, url)) {
+                delete img.dataset.warehouseFinalFail;
+                media.classList.remove('card-media--load-failed', 'card-media--await');
+                scheduleWarehouseMasonryForCard(cardId);
+                return;
+              }
+            } else if (cardModel) {
+              window.SupabaseSync?.queueGridBackfill?.(cardModel, { force: true });
+              await new Promise((r) => setTimeout(r, 1200));
+              const gridUrl = window.SupabaseSync?.getListDisplayImageSrc?.(ref, cardId)
+                || window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId: cardId, variant: 'grid' });
+              if (gridUrl && window.CardImageLoader?.applyUrlToImg?.(img, gridUrl)) {
+                delete img.dataset.warehouseFinalFail;
+                media.classList.remove('card-media--load-failed', 'card-media--await');
+                scheduleWarehouseMasonryForCard(cardId);
+                return;
+              }
             }
           } catch (e) { /* ignore */ }
           media.classList.add('card-media--load-failed');
@@ -2878,12 +2908,34 @@
         const cardModel = cards.find((c) => c.id === cardId);
         const collectOpts = cardModel ? getCommunityCollectImageResolveOpts(cardModel) : null;
         try {
-          const url = await window.SupabaseSync?.resolveDisplayUrl?.(ref, collectOpts || {
+          const url = await window.SupabaseSync?.resolveDisplayUrl?.(ref, collectOpts ? {
+            ...collectOpts,
+            variant: window.SupabaseSync.VARIANT_GRID || 'grid',
+            tryAllPaths: true,
+            listOnly: true,
+            allowFullFallback: false,
+            degradedListFull: false
+          } : {
             assetId: cardId,
-            variant: window.SupabaseSync.VARIANT_FULL || 'full',
-            tryAllPaths: true
+            variant: window.SupabaseSync.VARIANT_GRID || 'grid',
+            tryAllPaths: false,
+            listOnly: true,
+            allowFullFallback: false,
+            degradedListFull: false
           });
-          if (url && window.CardImageLoader?.applyUrlToImg?.(img, url)) return;
+          if (url && /^https?:\/\//i.test(url) && !String(url).includes('data:image/svg')) {
+            const media = img.closest('.card-media');
+            if (media) media.classList.remove('card-media--load-failed');
+            if (window.CardImageLoader?.applyUrlToImg?.(img, url)) return;
+            img.src = url;
+            img.style.visibility = 'visible';
+            img.style.opacity = '1';
+            return;
+          }
+          if (!collectOpts && cardModel) {
+            window.SupabaseSync?.queueGridBackfill?.(cardModel, { force: true });
+            return;
+          }
         } catch (e) { /* ignore */ }
       }
       if (img.dataset.repairTried === '1') {
@@ -3077,46 +3129,32 @@
       if (!card?.image) return;
       const isPlaceholderSrc = (src) => !src || String(src).includes('data:image/svg');
       let url = '';
-      const gridImg = document.querySelector(`.card[data-id="${CSS.escape(String(card.id))}"] .card-img`);
-      const gridSrc = gridImg?.currentSrc || gridImg?.src || '';
-      if (!isPlaceholderSrc(gridSrc)) url = gridSrc;
-      if (isPlaceholderSrc(url) && window.SupabaseSync?.getCachedDisplayUrl) {
-        url = window.SupabaseSync.getCachedDisplayUrl(card.image, {
-          assetId: card.id,
-          variant: window.SupabaseSync.VARIANT_GRID || 'grid'
-        }) || '';
-      }
       syncLightboxActions({ cardId: card.id });
-      if (!isPlaceholderSrc(url) && typeof openLightbox === 'function') {
-        openLightbox(url, { cardId: card.id });
-        void (async () => {
-          let full = '';
-          try {
-            if (window.SupabaseSync?.resolveDisplayUrl) {
-              full = await window.SupabaseSync.resolveDisplayUrl(card.image, {
-                assetId: card.id,
-                variant: window.SupabaseSync.VARIANT_FULL || 'full'
-              });
-            }
-          } catch (e) { /* ignore */ }
-          if (full && full !== url && !isPlaceholderSrc(full)) window.setLightboxSrc?.(full);
-        })();
-        return;
-      }
-      if (typeof openLightbox === 'function') openLightbox('', { pending: true, cardId: card.id });
       try {
-        if (window.SupabaseSync?.resolveDisplayUrl) {
+        if (window.SupabaseSync?.resolveCardDownloadUrl) {
+          url = await window.SupabaseSync.resolveCardDownloadUrl(card.image, {
+            assetId: card.id
+          });
+        } else if (window.SupabaseSync?.resolveDisplayUrl) {
           url = await window.SupabaseSync.resolveDisplayUrl(card.image, {
             assetId: card.id,
-            variant: window.SupabaseSync.VARIANT_FULL || 'full'
+            variant: window.SupabaseSync.VARIANT_FULL || 'full',
+            tryAllPaths: true
           });
         }
       } catch (e) { /* ignore */ }
-      if (!isPlaceholderSrc(url)) window.setLightboxSrc?.(url);
-      else {
-        window.closeLightbox?.();
-        showToast('图片加载中，请稍候再试');
+      if (isPlaceholderSrc(url) && window.SupabaseSync?.getCachedDisplayUrl) {
+        url = window.SupabaseSync.getCachedDisplayUrl(card.image, {
+          assetId: card.id,
+          variant: window.SupabaseSync.VARIANT_FULL || 'full'
+        }) || '';
       }
+      if (!isPlaceholderSrc(url) && typeof openLightbox === 'function') {
+        openLightbox(url, { cardId: card.id });
+        return;
+      }
+      if (typeof openLightbox === 'function') openLightbox('', { pending: true, cardId: card.id });
+      showToast('图片加载中，请稍候再试');
     }
 
     async function hydrateWarehouseBackupsFromIdb(container, list) {
@@ -3139,14 +3177,6 @@
     function cardImgInitialSrc(image) {
       const placeholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="%2318181c" width="4" height="3"/></svg>');
       if (!image || !cardHasDisplayImage({ image })) return placeholder;
-      const fromSync = window.SupabaseSync?.safeImgSrc?.(image);
-      if (fromSync && typeof fromSync === 'string' && !fromSync.startsWith('storage://') && !fromSync.startsWith('data:image/svg')) {
-        return fromSync;
-      }
-      if (typeof image === 'string' && /^https?:\/\//i.test(image)) {
-        if (window.SupabaseSync?.isFreshSignedDisplayUrl?.(image)) return image;
-        return placeholder;
-      }
       if (typeof image === 'string' && image.startsWith('data:image/')) return image;
       return placeholder;
     }
@@ -3163,11 +3193,14 @@
         }
       }
       const ref = card.image;
-      if (!authorId && ref && window.SupabaseSync?.storagePathFromRef) {
+      const uid = window.SupabaseSync?.getUserId?.();
+      if (ref && window.SupabaseSync?.storagePathFromRef && uid) {
         const path = window.SupabaseSync.storagePathFromRef(ref) || '';
-        const uid = window.SupabaseSync?.getUserId?.();
         const owner = path.replace(/^\//, '').split('/')[0] || '';
-        if (owner && owner !== uid) authorId = owner;
+        if (owner === uid) {
+          return null;
+        }
+        if (!authorId && owner) authorId = owner;
       }
       if (!authorId) return null;
       return {
@@ -3273,6 +3306,7 @@
       cloudSyncPhaseDetail = detail ? String(detail) : '';
       updateCloudSyncStatusUI();
     }
+    window.setCloudSyncPhase = setCloudSyncPhase;
 
     function updateCloudSyncStatusUI() {
       const el = document.getElementById('authCloudStatus');
@@ -3846,7 +3880,6 @@
         });
       }
       if (cards.length > 0) {
-        warmVisibleCardsOnly(cards, 2200);
         window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
       }
       window.FeatureDraft?.renderCommunity?.();
@@ -4041,6 +4074,7 @@
 
     async function pullFromCloud() {
       if (!window.SupabaseSync?.isLoggedIn?.()) return false;
+      if (cloudSyncing) await waitForCloudSyncIdle(120000);
       const localPayload = getDataPayload();
       await writeEmergencyBackup('pre_pull');
       const cloud = await window.SupabaseSync.pullCloudData();
@@ -4074,12 +4108,26 @@
         }
       }
 
-      if (Array.isArray(finalPayload.cards) && window.SupabaseSync?.findCardImageInStorage) {
+      if (Array.isArray(finalPayload.cards) && window.SupabaseSync?.getUserId) {
+        const uid = window.SupabaseSync.getUserId();
         for (const c of finalPayload.cards) {
-          if (!c?.image && c?.id) {
+          if (c?.image || !c?.id || !uid) continue;
+          const guesses = [
+            `${uid}/generated/${String(c.id).replace(/^wh_/, '')}.jpg`,
+            `${uid}/generated/${String(c.id).replace(/^wh_/, '')}.webp`
+          ];
+          for (const p of guesses) {
+            if (window.SupabaseSync?.isPathKnownMissing?.(p)) continue;
             try {
-              const found = await window.SupabaseSync.findCardImageInStorage(c.id);
-              if (found) c.image = found;
+              const ref = window.SupabaseSync?.toStorageRef?.(p) || `storage://card-images/${p}`;
+              const ok = await window.SupabaseSync.verifyStorageRef?.(ref, c.id, {
+                quick: true,
+                noDownload: true
+              });
+              if (ok) {
+                c.image = ref;
+                break;
+              }
             } catch (e) { /* ignore */ }
           }
         }
@@ -4101,6 +4149,11 @@
 
     async function runDeferredCloudPull(opts = {}) {
       const silent = opts.silent !== false;
+      const light = opts.light === true;
+      if (cloudSyncing) {
+        await waitForCloudSyncIdle(120000);
+      }
+      setCloudSyncPhase('syncing', light ? '后台同步…' : '正在拉取云端…');
       try {
         const pulled = await pullFromCloud();
         if (pulled) {
@@ -4108,35 +4161,21 @@
           if (uid) await snapshotLocalForUser(uid);
           refreshWarehouseUI();
           window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
-          warmVisibleCardsOnly(cards, 2200);
-          void prefetchVisibleCardImages(4000);
+          if (!light) {
+            void window.FeatureDraft?.resumePendingGenerationJobs?.().then((changed) => {
+              if (changed) window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+            });
+          }
         }
         setCloudSyncPhase(cards.length ? 'saved' : 'idle');
         lastBgCloudSyncAt = Date.now();
         return pulled;
       } catch (e) {
         if (!silent) showToast('拉取云端数据失败，已保留本地数据');
+        else setCloudSyncPhase('error', '拉取失败，将重试');
         setCloudSyncPhase('error', formatSyncError(e));
         return false;
       }
-    }
-
-    function prefetchVisibleCardImages(capMs) {
-      void (async () => {
-        const box = document.getElementById('cardsContainer');
-        const visibleIds = box
-          ? new Set([...box.querySelectorAll('.card[data-id]')].map((el) => el.dataset.id).filter(Boolean))
-          : new Set();
-        const subset = visibleIds.size
-          ? cards.filter((c) => visibleIds.has(c.id)).slice(0, PER_PAGE)
-          : cards.slice(0, PER_PAGE);
-        await window.SupabaseSync?.prefetchCardsImages?.(subset, capMs || 12000);
-        if (box) {
-          window.SupabaseSync?.patchImageSrcFromCache?.(box);
-          await window.SupabaseSync?.hydrateImageElements?.(box, { onlyMissing: true });
-        }
-        relayoutMasonryGrid();
-      })();
     }
 
     function formatSyncError(e) {
@@ -4156,30 +4195,80 @@
       if (!silent) setCloudSyncPhase('syncing', '正在保存到云端');
       const status = document.getElementById('statusMsg');
       const localImages = new Map(cards.map((c) => [String(c.id), c.image]));
-      const timeoutMs = silent ? 55000 : 90000;
+      const isMobileNet = window.matchMedia?.('(max-width: 900px)')?.matches;
+      const timeoutMs = silent
+        ? (isMobileNet ? 120000 : 70000)
+        : (isMobileNet ? 180000 : 90000);
       const work = async () => {
         const payload = getDataPayload();
         const hasBase64 = payload.cards?.some(c => window.SupabaseSync.isDataUrl(c.image));
+        const needsImagePass = hasBase64
+          || (window.SupabaseSync.payloadNeedsImageUpload?.(payload.cards) === true);
         if (hasBase64 && status) status.textContent = '正在上传图片到云端…';
-        const result = await window.SupabaseSync.pushCloudData(payload, {
+        const pushOpts = {
           skipSafety: opts.skipSafety === true,
           allowWithoutCloudCheck: opts.allowWithoutCloudCheck === true,
-          strictImageCheck: opts.strictImageCheck === true
-        });
+          strictImageCheck: opts.strictImageCheck === true,
+          concurrency: isMobileNet ? 2 : 4
+        };
+        let metaResult = null;
+        try {
+          metaResult = await window.SupabaseSync.pushCloudData(payload, {
+            ...pushOpts,
+            deferImageUpload: true
+          });
+        } catch (metaErr) {
+          console.warn('[cloud] metadata push failed', metaErr);
+        }
+        if (!stillCurrent()) return { ok: false, cancelled: true };
+        let result = metaResult || { warnings: [] };
+        if (silent && !needsImagePass) {
+          if (result?.data && window.FeatureDraft?.applyCloudSlice) {
+            window.FeatureDraft.applyCloudSlice(result.data);
+          }
+          if (Array.isArray(payload.cards)) {
+            const uploadedById = new Map(payload.cards.map((c) => [String(c.id), c]));
+            cards = cards.map((c) => {
+              const up = uploadedById.get(String(c.id));
+              if (!up) return c;
+              const prev = localImages.get(String(c.id)) || c.image;
+              if (window.CloudSyncSafety?.mergeCardPair) {
+                return window.CloudSyncSafety.mergeCardPair({ ...c, image: prev }, up);
+              }
+              if (prev && !up.image) return { ...c, image: prev };
+              return { ...c, ...up, image: up.image || prev || c.image };
+            });
+          }
+          await saveAllData({ skipCloud: true });
+          return result;
+        }
+        try {
+          result = await window.SupabaseSync.pushCloudData(payload, pushOpts);
+        } catch (imgErr) {
+          console.warn('[cloud] image upload pass failed', imgErr);
+          scheduleCloudPush({ urgent: true });
+          if (!metaResult) throw imgErr;
+          result = {
+            warnings: ['图片仍在后台上传，请保持联网；其他设备可先看到卡片信息'],
+            data: metaResult.data
+          };
+        }
         if (!stillCurrent()) return { ok: false, cancelled: true };
         if (result?.data && window.FeatureDraft?.applyCloudSlice) {
           window.FeatureDraft.applyCloudSlice(result.data);
         }
         if (!stillCurrent()) return { ok: false, cancelled: true };
         if (Array.isArray(payload.cards)) {
-          cards = payload.cards.map((c) => {
-            const prev = localImages.get(String(c.id));
-            if (!prev) return c;
+          const uploadedById = new Map(payload.cards.map((c) => [String(c.id), c]));
+          cards = cards.map((c) => {
+            const up = uploadedById.get(String(c.id));
+            if (!up) return c;
+            const prev = localImages.get(String(c.id)) || c.image;
             if (window.CloudSyncSafety?.mergeCardPair) {
-              return window.CloudSyncSafety.mergeCardPair({ ...c, image: prev }, c);
+              return window.CloudSyncSafety.mergeCardPair({ ...c, image: prev }, up);
             }
-            if (prev && !c.image) return { ...c, image: prev };
-            return c;
+            if (prev && !up.image) return { ...c, image: prev };
+            return { ...c, ...up, image: up.image || prev || c.image };
           });
         }
         await saveAllData({ skipCloud: true });
@@ -4199,7 +4288,9 @@
           if (silent) {
             setCloudSyncPhase('saved');
           } else {
-            const msg = '文字已同步；部分图片未上传：' + result.warnings[0];
+            const msg = result.warnings[0].includes('后台上传')
+              ? result.warnings[0]
+              : '文字已同步；部分图片未上传：' + result.warnings[0];
             setCloudSyncPhase('error', result.warnings[0]);
             showToast(msg, 8000);
           }
@@ -4209,12 +4300,21 @@
         return { ok: true };
       } catch (e) {
         cloudPushRunId++;
+        const msg = String(e?.message || '');
+        if (msg.includes('云端上传超时')) {
+          setCloudSyncPhase('pending', '图片后台上传中…');
+          scheduleCloudPush({ urgent: true });
+          if (!silent) {
+            showToast('卡片已在本机，图片正在后台上传', 6000);
+          }
+          return { ok: true, warnings: ['上传超时，后台重试中'] };
+        }
         if (silent) {
           setCloudSyncPhase('pending', '将在后台重试保存');
-          scheduleCloudPush();
-        } else {
-          setCloudSyncPhase('error', formatSyncError(e));
+          scheduleCloudPush({ urgent: true });
+          return { ok: false, error: e };
         }
+        setCloudSyncPhase('error', formatSyncError(e));
         throw e;
       } finally {
         cloudSyncing = false;
@@ -4225,14 +4325,37 @@
     function scheduleCloudPush(opts = {}) {
       if (!window.SupabaseSync?.isLoggedIn?.()) return;
       clearTimeout(cloudPushTimer);
-      const delay = opts.urgent === true ? 2500 : 15000;
+      const delay = opts.urgent === true ? 350 : 45000;
       cloudPushTimer = setTimeout(() => {
+        if (!opts.urgent && document.hidden) {
+          scheduleCloudPush(opts);
+          return;
+        }
         pushToCloud({ silent: true }).catch((e) => {
           console.warn('[cloud] silent push failed', e);
         });
       }, delay);
     }
     window.scheduleCloudPush = scheduleCloudPush;
+
+    function waitForCloudSyncIdle(maxMs = 90000) {
+      return new Promise((resolve) => {
+        if (!cloudSyncing) {
+          resolve(true);
+          return;
+        }
+        const start = Date.now();
+        const tick = () => {
+          if (!cloudSyncing || Date.now() - start > maxMs) {
+            resolve(!cloudSyncing);
+            return;
+          }
+          setTimeout(tick, 250);
+        };
+        tick();
+      });
+    }
+    window.waitForCloudSyncIdle = waitForCloudSyncIdle;
 
     async function hydrateWorkspaceFromLocal(uid) {
       const hadSnapshot = await loadLocalSnapshotForUser(uid);
@@ -4280,15 +4403,13 @@
           const toDrop = [];
           for (const c of [...cards]) {
             if (!c?.id || !c.image || !window.SupabaseSync?.isStorageRef?.(c.image)) continue;
-            if (window.SupabaseSync?.repairCardImageIfMissing) {
-              try {
-                const repaired = await window.SupabaseSync.repairCardImageIfMissing(c.id, c.image);
-                if (repaired) {
-                  c.image = repaired;
-                  continue;
-                }
-              } catch (e) { /* ignore */ }
-            }
+            try {
+              const ok = await window.SupabaseSync?.verifyStorageRef?.(c.image, c.id, {
+                quick: true,
+                noDownload: true
+              });
+              if (ok) continue;
+            } catch (e) { /* ignore */ }
             const primary = window.SupabaseSync?.primaryImagePath?.(c.image, c.id);
             if (!primary || !window.SupabaseSync?.isPathKnownMissing?.(primary)) continue;
             let hasBackup = false;
@@ -4322,43 +4443,10 @@
       }
     }
 
-    function warmVisibleCardsOnly(list, capMs) {
-      const all = list || [];
-      const slice = all.slice(0, PER_PAGE);
-      if (!slice.length) return;
-      warmCardImagesBackground(slice, capMs || 8000);
-    }
-
-    function retryWarehousePendingImages(container) {
+    function hydrateWarehouseGridImages(container, pageCards) {
       if (!container) return;
-      window.SupabaseSync?.patchImageSrcFromCache?.(container, { visibleFirst: true, max: 48 });
-      window.CardImageLoader?.observeContainer?.(container);
-      void window.SupabaseSync?.hydrateImageElements?.(container, { onlyMissing: true, warehouseBoost: true });
-    }
-
-    async function hydrateWarehouseGridImages(container, pageCards) {
-      if (!container) return;
-      window.SupabaseSync?.patchImageSrcFromCache?.(container);
-      const list = pageCards || [];
-      if (list.length && window.SupabaseSync?.prefetchCardsImages) {
-        await Promise.race([
-          window.SupabaseSync.prefetchCardsImages(list, 8000),
-          new Promise((r) => setTimeout(r, 8000))
-        ]);
-      }
-      window.SupabaseSync?.patchImageSrcFromCache?.(container);
-      if (window.SupabaseSync?.hydrateImageElements) {
-        await window.SupabaseSync.hydrateImageElements(container, { onlyMissing: true, warehouseBoost: true });
-      }
-      window.SupabaseSync?.patchImageSrcFromCache?.(container);
-      window.CardImageLoader?.observeContainer?.(container);
+      window.CardImageLoader?.bindWarehouse?.(container, pageCards);
       if (!isMobileViewport()) scheduleWarehouseMasonryLayout();
-      setTimeout(() => retryWarehousePendingImages(container), 2200);
-      setTimeout(() => retryWarehousePendingImages(container), 7000);
-    }
-
-    async function hydrateWarehouseImagesFast(container, pageCards) {
-      return hydrateWarehouseGridImages(container, pageCards);
     }
 
     async function runCardImageIntegrityAudit() {
@@ -4370,7 +4458,8 @@
           skipStorageList: true
         });
         if (repaired.length) {
-          await saveAllData();
+          await saveAllData({ skipCloud: true });
+          scheduleCloudPush({ urgent: true });
           showToast(`已自动修复 ${repaired.length} 张卡片图片`);
           refreshWarehouseUI({ softCards: true });
         }
@@ -4470,8 +4559,6 @@
       if (cards.length > 0) {
         refreshWarehouseUI();
         paintedFromLocal = true;
-        warmVisibleCardsOnly(cards, 2200);
-        prefetchVisibleCardImages(2500);
       }
 
       const shouldPull = cloudHydratedUid !== uid || accountSwitch || force || opts.migrateGuest;
@@ -4490,7 +4577,6 @@
         try {
           loaded = await pullFromCloud();
         } catch (e) {
-          if (!silent && !cards.length) showToast('拉取云端数据失败，已保留本地数据');
         }
       }
 
@@ -4530,8 +4616,6 @@
         await snapshotLocalForUser(uid, { allowEmpty: true });
         await saveCardsToDB(cards, { ownerUid: uid });
         refreshWarehouseUI();
-        warmVisibleCardsOnly(cards, 2200);
-        prefetchVisibleCardImages(4000);
         if (!silent && (!cloudHydratedUid || accountSwitch || force)) {
           showToast('已从云端加载本账号数据');
         }
@@ -4639,18 +4723,19 @@
       return n;
     }
 
-    async function syncCloudNow() {
+    async function syncCloudNow(opts = {}) {
+      const quiet = opts.quiet === true;
       if (!window.SupabaseSync?.isLoggedIn?.()) {
-        openAuthModal();
+        if (!quiet) openAuthModal();
         return;
       }
       if (cloudSyncing) {
-        showToast('保存进行中，请稍候…', 2500);
+        if (!quiet) showToast('保存进行中，请稍候…', 2500);
         return;
       }
       const status = document.getElementById('statusMsg');
-      setCloudSyncPhase('syncing', '正在与云端对齐');
-      showToast('正在与云端对齐…', 2000);
+      setCloudSyncPhase('syncing', quiet ? '正在同步云端…' : '正在与云端对齐');
+      if (!quiet) showToast('正在与云端对齐…', 2000);
       try {
         const uid = window.SupabaseSync?.getUserId?.();
         if (!cards.length && uid) {
@@ -4684,52 +4769,63 @@
           }
         }
         let pulled = false;
+        let pushResult = null;
+        try {
+          pushResult = await pushToCloud({ strictImageCheck: true });
+          if (pushResult?.busy) {
+            showToast('同步进行中，请稍后再试', 3500);
+            return;
+          }
+        } catch (e) {
+          console.warn('[sync] push before pull failed', e);
+        }
         try {
           pulled = await pullFromCloud();
           if (pulled) {
             renderGroups();
             renderCards(true);
             updateTagFilter();
+            window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
           }
         } catch (e) {
-          console.warn('[sync] pull before push failed', e);
+          console.warn('[sync] pull after push failed', e);
         }
-        if (!cards.length && uid) {
-          await restoreAccountPrivateData(uid);
-          window.__promptHubCards = cards;
-          if (cards.length) {
-            renderGroups();
-            renderCards(true);
+        if (pulled) {
+          try {
+            await pushToCloud({ silent: true, skipSafety: true });
+          } catch (e) {
+            console.warn('[sync] merge push after pull failed', e);
           }
         }
-        const result = await pushToCloud({ strictImageCheck: true });
-        if (result?.busy) {
-          showToast('同步进行中，请稍后再试', 3500);
-          return;
-        }
+        const result = pushResult || { ok: true };
         const repairWarn = result?.warnings?.length ? result.warnings.slice(0, 2).join('；') : '';
-        if (!cards.length) {
+        if (!quiet && !cards.length) {
           showToast(
             repairWarn
               ? '卡片库为空，无法同步；' + repairWarn
               : '卡片库为空。请先在电脑登录恢复，或设置里导入备份',
             9000
           );
-        } else if (repairWarn) {
+        } else if (!quiet && repairWarn) {
           showToast((pulled ? '已合并云端；' : '') + '部分图片未上传：' + repairWarn, 8000);
-        } else if (pulled) {
-          showToast(`已与云端对齐（${cards.length} 张卡片）`);
+        } else if (!quiet) {
+          if (pulled) {
+            showToast(`已与云端对齐（${cards.length} 张卡片）`);
+          } else {
+            showToast(`已上传到云端（${cards.length} 张卡片）`);
+          }
         } else {
-          showToast(`已上传到云端（${cards.length} 张卡片）`);
+          setCloudSyncPhase('saved');
         }
       } catch (e) {
         setCloudSyncPhase('error', formatSyncError(e));
-        showToast('对齐失败：' + formatSyncError(e), 8000);
+        if (!quiet) showToast('对齐失败：' + formatSyncError(e), 8000);
       } finally {
         if (status && !status.textContent.startsWith('❌')) status.textContent = '';
       }
     }
     window.syncCloudNow = syncCloudNow;
+    window.runDeferredCloudPull = runDeferredCloudPull;
 
     async function syncCloudNowFromSettings() {
       const st = document.getElementById('settingsStatus');
@@ -4817,15 +4913,13 @@
         const toDrop = [];
         for (const c of [...cards]) {
           if (!c?.id || !c.image || !window.SupabaseSync?.isStorageRef?.(c.image)) continue;
-          if (window.SupabaseSync?.repairCardImageIfMissing) {
-            try {
-              const repaired = await window.SupabaseSync.repairCardImageIfMissing(c.id, c.image);
-              if (repaired) {
-                c.image = repaired;
-                continue;
-              }
-            } catch (e) { /* ignore */ }
-          }
+          try {
+            const ok = await window.SupabaseSync?.verifyStorageRef?.(c.image, c.id, {
+              quick: true,
+              noDownload: true
+            });
+            if (ok) continue;
+          } catch (e) { /* ignore */ }
           const primary = window.SupabaseSync?.primaryImagePath?.(c.image, c.id);
           if (!primary || !window.SupabaseSync?.isPathKnownMissing?.(primary)) continue;
           let hasBackup = false;
@@ -5006,6 +5100,7 @@
       initSortMenu();
       bindWarehouseSearchInputs();
       bindPanelOcrDrop();
+      initCardUploadOriginalToggle();
       initAppNav();
       initAppNavCollapse();
       window.FeatureAssets?.init?.();
@@ -5408,17 +5503,25 @@
         container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:60px;">📦 暂无卡片</div>';
         return;
       }
-      const prefetchCards = pageCards.slice(0, PER_PAGE);
+      const prefetchCards = pageCards.slice(0, 18);
       let prefetchP = Promise.resolve();
       if (page === 1 && prefetchCards.length && window.SupabaseSync?.prefetchWarehousePage) {
-        prefetchP = window.SupabaseSync.prefetchWarehousePage(prefetchCards, 3200);
+        prefetchP = window.SupabaseSync.prefetchWarehousePage(prefetchCards, 2600);
       }
-      if (page === 1 && allFilteredCards.length > pageCards.length) {
-        warmCardImagesBackground(allFilteredCards.slice(0, 96), 14000);
+      if (page === 1 && pageCards.length && window.SupabaseSync?.backfillGridThumbsForCards) {
+        void window.SupabaseSync.backfillGridThumbsForCards(pageCards, {
+          max: pageCards.length,
+          force: true,
+          quiet: true,
+          awaitDrain: false
+        }).then(() => {
+          window.SupabaseSync?.patchImageSrcFromCache?.(container, { visibleFirst: true, max: 12 });
+          window.CardImageLoader?.observeContainer?.(container);
+        });
       }
       const fragment = document.createDocumentFragment();
       const isAppend = !reset && page > 1;
-      const eagerImgCount = mobileGrid ? 8 : Math.min(24, pageCards.length);
+      const eagerImgCount = mobileGrid ? 3 : Math.min(4, pageCards.length);
       pageCards.forEach((card, idx) => {
         const div = document.createElement('div');
         div.className = `card card-enter ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
@@ -5440,16 +5543,9 @@
         }
         const checked = selectedCardIds.has(card.id);
         const showImage = cardHasDisplayImage(card);
-        let cachedUrl = showImage && window.SupabaseSync?.getCachedDisplayUrl?.(card.image, {
-          assetId: card.id,
-          variant: window.SupabaseSync?.VARIANT_GRID || 'grid'
-        });
-        if (showImage && !cachedUrl) {
-          cachedUrl = window.SupabaseSync?.getCachedDisplayUrl?.(card.image, {
-            assetId: card.id,
-            variant: window.SupabaseSync?.VARIANT_FULL || 'full'
-          });
-        }
+        const cachedUrl = showImage && window.SupabaseSync?.getListDisplayImageSrc
+          ? window.SupabaseSync.getListDisplayImageSrc(card.image, card.id)
+          : '';
         const imgSrc = showImage ? (cachedUrl || cardImgInitialSrc(card.image)) : '';
         const isCollectCard = window.isCommunityCollectCard?.(card);
         const collectMeta = isCollectCard ? getCommunityCollectImageResolveOpts(card) : null;
@@ -5463,7 +5559,7 @@
         const tagsHtml = buildCardTagsHtml(card.tags);
         const pinBadge = card.pinnedAt ? '<span class="card-pin-badge" title="置顶">置顶</span>' : '';
         const imgOnload = "if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.card-media'))";
-        const fetchPri = !isAppend && idx < 12 ? ' fetchpriority="high"' : '';
+        const fetchPri = !isAppend && idx < 3 ? ' fetchpriority="high"' : '';
         const collectImgAttrs = isCollectCard && collectMeta?.authorId
           ? ` data-author-id="${escapeHtml(collectMeta.authorId)}" data-source-card-id="${escapeHtml(collectMeta.assetId || '')}"`
           : '';
@@ -5582,8 +5678,6 @@
           });
         }
       } else if (mobileGrid) {
-        const warmList = isAppend ? pageCards.slice(0, 10) : pageCards.slice(0, 14);
-        if (warmList.length) warmCardImagesBackground(warmList, isAppend ? 1800 : 2600);
         enforceMobileCardGrid();
       }
       if (viewMode === 'list' && masonryInstance) {
@@ -5890,6 +5984,49 @@
 
     let editCardFillSeq = 0;
 
+    function stashEditPanelDraft() {
+      const prompt = (document.getElementById('floatingPromptText')?.value
+        || document.getElementById('cardPrompt')?.value || '').trim();
+      const title = (document.getElementById('cardTitle')?.value || '').trim();
+      if (!imageData && !pendingUploadFile && !prompt && !title && !currentTags.length) {
+        return;
+      }
+      editPanelStashedDraft = {
+        cardId: selectedCardId,
+        isNewCardMode: !!isNewCardMode,
+        imageData,
+        pendingUploadBytes,
+        imageRemovalPending: !!imageRemovalPending,
+        prompt,
+        title,
+        tags: [...currentTags],
+        customFields: { ...currentCardCustomFields }
+      };
+    }
+
+    function tryRestoreEditPanelDraft(cardId, isNew) {
+      const d = editPanelStashedDraft;
+      if (!d) return false;
+      if (!!d.isNewCardMode !== !!isNew) return false;
+      if (!isNew && String(d.cardId) !== String(cardId)) return false;
+      document.getElementById('cardTitle').value = d.title || '';
+      document.getElementById('cardPrompt').value = d.prompt || '';
+      document.getElementById('floatingPromptText').value = d.prompt || '';
+      imageData = d.imageData || null;
+      imageRemovalPending = !!d.imageRemovalPending;
+      pendingUploadFile = null;
+      pendingUploadBytes = d.pendingUploadBytes || estimateDataUrlBytes(imageData);
+      currentTags = [...(d.tags || [])];
+      currentCardCustomFields = { ...(d.customFields || {}) };
+      cardOriginalReuploadRequired = false;
+      editPanelStashedDraft = null;
+      renderTags();
+      renderCustomFields();
+      void updatePreview();
+      updateCardImageSizeHint();
+      return true;
+    }
+
     function editCard(id) {
       const card = cards.find(c => c.id === id); if (!card) return;
       selectedCardId = id; isNewCardMode = false;
@@ -5900,11 +6037,20 @@
       const seq = ++editCardFillSeq;
       const fillForm = () => {
         if (seq !== editCardFillSeq) return;
+        if (tryRestoreEditPanelDraft(id, false)) {
+          window.FeatureDraft?.setPublishCheckbox?.(card);
+          updateDeleteClearButton();
+          updatePinToggleUI();
+          return;
+        }
         document.getElementById('cardTitle').value = card.title || '';
         document.getElementById('cardPrompt').value = card.prompt || '';
         document.getElementById('floatingPromptText').value = card.prompt || '';
         imageData = card.image || null;
         imageRemovalPending = false;
+        pendingUploadFile = null;
+        pendingUploadBytes = 0;
+        cardOriginalReuploadRequired = false;
         currentTags = [...(card.tags || [])]; tempCustomFields = [];
         currentCardCustomFields = card.customFields ? { ...card.customFields } : {};
         window.FeatureDraft?.setPublishCheckbox?.(card);
@@ -5918,30 +6064,54 @@
     }
     window.editCardById = editCard;
 
-    function createNewCard(opts) {
-      const check = canGuestCreateCard();
-      if (!check.ok) {
-        promptLogin(check.msg);
-        return;
-      }
-      selectedCardId = null; isNewCardMode = true;
-      highlightSelectedCard(null);
+    function resetNewCardForm() {
+      editPanelStashedDraft = null;
+      selectedCardId = null;
+      isNewCardMode = true;
       document.getElementById('panelTitle').textContent = '新建卡片';
       document.getElementById('cardTitle').value = '';
       document.getElementById('cardPrompt').value = '';
       document.getElementById('floatingPromptText').value = '';
       imageData = null;
       imageRemovalPending = false;
-      currentTags = []; tempCustomFields = [];
+      pendingUploadFile = null;
+      pendingUploadBytes = 0;
+      currentTags = [];
+      tempCustomFields = [];
       currentCardCustomFields = {};
       window.FeatureDraft?.clearPublishDraft?.();
       window.FeatureDraft?.setPublishCheckbox?.(null);
-      renderTags(); renderCustomFields(); updatePreview();
+      cardOriginalReuploadRequired = false;
+      const fileInput = document.getElementById('fileInput');
+      if (fileInput) fileInput.value = '';
+      const modalFileInput = document.getElementById('modalFileInput');
+      if (modalFileInput) modalFileInput.value = '';
+      renderTags();
+      renderCustomFields();
+      updatePreview();
       updateDeleteClearButton();
       updatePinToggleUI();
+      updatePanelTrimToolVisibility();
+    }
+
+    function createNewCard(opts) {
+      const check = canGuestCreateCard();
+      if (!check.ok) {
+        promptLogin(check.msg);
+        return;
+      }
+      resetNewCardForm();
+      highlightSelectedCard(null);
       const mobile = isMobileViewport();
       const shouldOpenPanel = !(mobile && opts?.silentMobile);
-      if (shouldOpenPanel) openEditPanel();
+      if (shouldOpenPanel) {
+        openEditPanel();
+        if (tryRestoreEditPanelDraft(null, true)) {
+          window.FeatureDraft?.setPublishCheckbox?.(null);
+          updateDeleteClearButton();
+          updatePinToggleUI();
+        }
+      }
     }
 
     const TRASH_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
@@ -6173,10 +6343,196 @@
 
     function removeTempField(idx) { tempCustomFields.splice(idx, 1); renderCustomFields(); }
 
+    function setPanelSaveProgress(opts = {}) {
+      const wrap = document.getElementById('panelSaveProgress');
+      const fill = document.getElementById('panelSaveProgressFill');
+      const label = document.getElementById('panelSaveProgressLabel');
+      if (!wrap) return;
+      if (opts.hidden) {
+        wrap.classList.add('hidden');
+        fill?.classList.remove('is-indeterminate');
+        if (fill) fill.style.width = '0%';
+        return;
+      }
+      wrap.classList.remove('hidden');
+      if (label && opts.text) label.textContent = opts.text;
+      if (!fill) return;
+      if (opts.indeterminate) {
+        fill.classList.add('is-indeterminate');
+        fill.style.width = '';
+        return;
+      }
+      fill.classList.remove('is-indeterminate');
+      fill.style.width = `${Math.max(0, Math.min(100, Number(opts.percent) || 0))}%`;
+    }
+    window.setPanelSaveProgress = setPanelSaveProgress;
+
+    function uploadEncodeModeLabel(opts = {}) {
+      if (!opts.uploadOriginal && !opts.original) return '已压缩保存';
+      if (opts.encodeMode === 'full_res_jpeg') return '原尺寸高清JPEG已存';
+      return '原图已存';
+    }
+
+    function formatFileSize(bytes) {
+      const n = Number(bytes) || 0;
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+      return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+    }
+
+    function estimateDataUrlBytes(dataUrl) {
+      if (!dataUrl || typeof dataUrl !== 'string') return 0;
+      const i = dataUrl.indexOf(',');
+      if (i < 0) return 0;
+      return Math.max(0, Math.floor(dataUrl.slice(i + 1).length * 0.75));
+    }
+
+    function syncCardUploadOriginalToggle() {
+      const btn = document.getElementById('cardUploadOriginalToggle');
+      if (!btn) return;
+      const active = window.__cardUploadOriginal === true;
+      btn.textContent = active ? '上传原图：开' : '上传原图：关';
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      btn.classList.toggle('is-on', active);
+    }
+
+    function updateCardImageSizeHint(opts = {}) {
+      const el = document.getElementById('cardImageSizeHint');
+      const dl = document.getElementById('cardDownloadImageBtn');
+      if (!el) return;
+      const bytes = opts.bytes != null
+        ? opts.bytes
+        : (pendingUploadBytes || estimateDataUrlBytes(imageData));
+      if (!imageData && !bytes) {
+        el.textContent = '未选择图片';
+        if (dl) dl.classList.add('hidden');
+        return;
+      }
+      if (!opts.saved && window.SupabaseSync?.isStorageRef?.(imageData) && !pendingUploadFile && !pendingUploadBytes) {
+        const card = selectedCardId ? cards.find((c) => c.id === selectedCardId) : null;
+        if (card?.imageStoredBytes > 0) {
+          const mode = card.imageUploadOriginal
+            ? (card.imageEncodeMode === 'full_res_jpeg' ? '原尺寸高清JPEG已存' : '原图已存')
+            : '已压缩保存';
+          el.textContent = `${mode} · ${formatFileSize(card.imageStoredBytes)}`;
+          if (dl) dl.classList.remove('hidden');
+          return;
+        }
+        el.textContent = window.__cardUploadOriginal === true
+          ? '云端已存 · 重新选择图片可上传原图'
+          : '云端已存 · 重新选择可更换图片';
+        if (dl) dl.classList.remove('hidden');
+        return;
+      }
+      if (opts.saved) {
+        const mode = uploadEncodeModeLabel(opts);
+        el.textContent = `${mode} · ${formatFileSize(bytes)}`;
+      } else {
+        const original = window.__cardUploadOriginal === true;
+        const overBucket = bytes > (50 * 1024 * 1024);
+        el.textContent = original
+          ? (overBucket
+            ? `将原图上传 · 本地 ${formatFileSize(bytes)}（超5MB自动转原尺寸JPEG）`
+            : `将原图上传 · 本地 ${formatFileSize(bytes)}`)
+          : `将压缩上传 · 本地 ${formatFileSize(bytes)}`;
+      }
+      if (dl) dl.classList.remove('hidden');
+    }
+
+    function saveBlobDownload(blob, filename) {
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = filename || `prompt-hub-${Date.now()}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
+    }
+
+    async function downloadCardImageFile(imageRef, cardId, filename) {
+      const name = filename || `prompt-hub-card-${cardId || Date.now()}.jpg`;
+      if (typeof imageRef === 'string' && imageRef.startsWith('data:image/')) {
+        await promptHubSaveImage(imageRef, name);
+        showToast('已开始下载');
+        return;
+      }
+      if (window.SupabaseSync?.downloadCardStorageBlob) {
+        const blob = await window.SupabaseSync.downloadCardStorageBlob(imageRef, cardId);
+        if (blob) {
+          saveBlobDownload(blob, name);
+          showToast(`已开始下载 · ${formatFileSize(blob.size)}`);
+          return;
+        }
+      }
+      if (window.SupabaseSync?.resolveCardDownloadUrl) {
+        const url = await window.SupabaseSync.resolveCardDownloadUrl(imageRef, { assetId: cardId });
+        if (url) {
+          await promptHubSaveImage(url, name);
+          showToast('已开始下载');
+          return;
+        }
+      }
+      showToast('大图加载失败，请稍后重试');
+    }
+    window.downloadCardImageFile = downloadCardImageFile;
+
+    async function downloadPanelCardImage() {
+      if (!imageData) {
+        showToast('请先选择图片');
+        return;
+      }
+      await downloadCardImageFile(imageData, selectedCardId);
+    }
+    window.downloadPanelCardImage = downloadPanelCardImage;
+
+    function initCardUploadOriginalToggle() {
+      const btn = document.getElementById('cardUploadOriginalToggle');
+      if (!btn || btn.dataset.bound === '1') return;
+      btn.dataset.bound = '1';
+      if (typeof window.__cardUploadOriginal !== 'boolean') {
+        window.__cardUploadOriginal = settings.preserveOriginalCardImage === true
+          || window.SupabaseSync?.preserveOriginalCardImageFromSettings?.() === true;
+      }
+      syncCardUploadOriginalToggle();
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const turningOn = !window.__cardUploadOriginal;
+        window.__cardUploadOriginal = turningOn;
+        settings.preserveOriginalCardImage = window.__cardUploadOriginal;
+        if (turningOn
+          && window.SupabaseSync?.isStorageRef?.(imageData)
+          && !pendingUploadFile) {
+          cardOriginalReuploadRequired = true;
+        } else if (!turningOn) {
+          cardOriginalReuploadRequired = false;
+        }
+        syncCardUploadOriginalToggle();
+        updateCardImageSizeHint();
+        try {
+          localStorage.setItem('promptrepo_settings', JSON.stringify(settings));
+          const uid = window.SupabaseSync?.getUserId?.() || activeAccountId;
+          if (uid) localStorage.setItem(userStorageKey('settings', uid), JSON.stringify(settings));
+        } catch (err) { /* ignore */ }
+      });
+      document.getElementById('cardDownloadImageBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void downloadPanelCardImage();
+      });
+    }
+
     function updatePanelTrimToolVisibility() {
       const el = document.getElementById('panelImageTools');
       if (!el) return;
-      el.classList.toggle('hidden', settings.showTrimBlackBorderTool !== true || !imageData);
+      el.classList.remove('hidden');
+      const trimBtn = document.getElementById('trimBlackBorderBtn');
+      if (trimBtn) {
+        trimBtn.classList.toggle('hidden', settings.showTrimBlackBorderTool !== true || !imageData);
+      }
+      syncCardUploadOriginalToggle();
+      updateCardImageSizeHint();
     }
     window.updatePanelTrimToolVisibility = updatePanelTrimToolVisibility;
 
@@ -6203,6 +6559,8 @@
         }
         imageData = result.dataUrl;
         imageRemovalPending = false;
+        pendingUploadFile = null;
+        pendingUploadBytes = estimateDataUrlBytes(imageData);
         await updatePreview();
         showToast('已裁除黑边');
       } catch (e) {
@@ -6228,9 +6586,7 @@
           }) || '';
         }
         if ((!src || src.includes('data:image/svg')) && selectedCardId) {
-          const gridImg = document.querySelector(`.card[data-id="${CSS.escape(String(selectedCardId))}"] .card-img`);
-          const gridSrc = gridImg?.currentSrc || gridImg?.src || '';
-          if (gridSrc.startsWith('http') && !gridSrc.includes('data:image/svg')) src = gridSrc;
+          /* 不用列表缩略图顶替编辑区预览，避免误显示压缩图 */
         }
         if (!src || src.includes('data:image/svg')) {
           const initial = cardImgInitialSrc(imageData);
@@ -6296,6 +6652,8 @@
       if (!imageData) return;
       imageData = null;
       imageRemovalPending = true;
+      pendingUploadFile = null;
+      pendingUploadBytes = 0;
       updatePreview();
       showToast('已从编辑区去掉图片；点「保存」后才会真正删除', 4000);
     }
@@ -6383,10 +6741,15 @@
     function handleSingleImage(file) {
       if (!file || !file.type.startsWith('image/')) return;
       if (!isEditPanelOpen()) return;
+      imageRemovalPending = false;
+      cardOriginalReuploadRequired = false;
+      pendingUploadFile = file;
+      pendingUploadBytes = file.size || 0;
       const r = new FileReader();
       r.onload = e => {
         imageData = e.target.result;
         updatePreview();
+        updateCardImageSizeHint({ bytes: pendingUploadBytes });
       };
       r.readAsDataURL(file);
     }
@@ -6437,8 +6800,9 @@
     });
 
     async function saveCard() {
-      const prompt = floatingPromptActive ? document.getElementById('floatingPromptText').value.trim() : document.getElementById('cardPrompt').value.trim();
       const statusEl = document.getElementById('statusMsg');
+      const saveBtn = document.querySelector('.btn-footer-save');
+      const prompt = floatingPromptActive ? document.getElementById('floatingPromptText').value.trim() : document.getElementById('cardPrompt').value.trim();
       if (!prompt) { statusEl.textContent = '❌ 提示词不能为空'; return; }
       if (isNewCardMode) {
         const check = canGuestCreateCard();
@@ -6447,6 +6811,14 @@
           promptLogin(check.msg);
           return;
         }
+      }
+      if (cardOriginalReuploadRequired
+        && window.__cardUploadOriginal === true
+        && window.SupabaseSync?.isStorageRef?.(imageData)
+        && !pendingUploadFile) {
+        statusEl.textContent = '❌ 请重新选择图片后再保存原图';
+        showToast('已开启原图：请重新选择一次图片再保存');
+        return;
       }
       const title = document.getElementById('cardTitle').value.trim();
       const customData = {};
@@ -6460,128 +6832,237 @@
           customData[name] = el.value;
         }
       });
-      let cardId = selectedCardId;
-      let previousImage = null;
-      if (!isNewCardMode && cardId) {
-        previousImage = cards.find(c => c.id === cardId)?.image || null;
-      } else {
-        cardId = generateId();
-      }
-      let finalImage = imageData;
-      try {
-        if (window.SupabaseSync?.isLoggedIn?.()) {
-          if (imageData && window.SupabaseSync.isDataUrl(imageData)) {
-            await saveCardImageBackup(cardId, imageData);
-          }
-          if (imageData && !window.SupabaseSync.isStorageRef(imageData)) {
-            statusEl.textContent = '上传图片中…';
-          }
-          finalImage = await window.SupabaseSync.resolveCardImageForSave(cardId, imageData, previousImage);
-          if (finalImage && window.SupabaseSync.isStorageRef(finalImage)) {
-            await clearCardImageBackup(cardId);
-          }
-        }
-      } catch (e) {
-        statusEl.textContent = '❌ ' + (e.message || '图片上传失败');
+      const snap = {
+        prompt,
+        title,
+        tags: [...currentTags],
+        customFields: customData,
+        isNewCard: isNewCardMode,
+        cardId: (!isNewCardMode && selectedCardId) ? selectedCardId : generateId(),
+        previousImage: (!isNewCardMode && selectedCardId)
+          ? (cards.find(c => c.id === selectedCardId)?.image || null)
+          : null,
+        imageValue: imageData,
+        uploadFile: pendingUploadFile,
+        uploadOriginal: window.__cardUploadOriginal === true,
+        wantPublish: window.FeatureDraft?.readPublishCheckbox?.() ?? false,
+        imageRemovalPending: imageRemovalPending
+      };
+      const editingCard = !snap.isNewCard
+        ? cards.find(c => c.id === snap.cardId)
+        : null;
+      if (window.isCommunityCollectCard?.(editingCard) && snap.wantPublish) {
+        statusEl.textContent = '❌ 社区收藏卡片不可发布到社区';
+        showToast('社区收藏卡片不可发布到社区');
         return;
       }
-      imageData = finalImage;
-      if (finalImage && window.SupabaseSync?.prefetchDisplayUrls) {
-        void window.SupabaseSync.prefetchDisplayUrls([finalImage]);
-      }
-      const wantPublish = window.FeatureDraft?.readPublishCheckbox?.() ?? false;
-      const editingCard = !isNewCardMode && selectedCardId
-        ? cards.find(c => c.id === selectedCardId)
-        : null;
-      if (window.isCommunityCollectCard?.(editingCard)) {
-        if (wantPublish) {
-          statusEl.textContent = '❌ 社区收藏卡片不可发布到社区';
-          showToast('社区收藏卡片不可发布到社区');
-          return;
-        }
-      }
-      if (wantPublish && !isUserLoggedIn()) {
+      if (snap.wantPublish && !isUserLoggedIn()) {
         statusEl.textContent = '❌ 发布到社区需先登录';
         requireAuth('publish');
         return;
       }
-      if (wantPublish && (prompt || '').trim().length < 15) {
+      if (snap.wantPublish && snap.prompt.length < 15) {
         statusEl.textContent = '❌ 发布到社区需要提示词至少 15 字';
         return;
       }
-      const wasNewCard = isNewCardMode;
-      let savedCard;
-      if (!isNewCardMode && selectedCardId) {
-        const card = cards.find(c => c.id === selectedCardId);
-        if (card) {
-          card.title = title;
-          card.prompt = prompt;
-          card.image = finalImage;
-          const userTags = currentTags.filter(t => t !== window.COMMUNITY_COLLECT_TAG);
-          card.tags = window.isCommunityCollectCard?.(card)
-            ? [window.COMMUNITY_COLLECT_TAG, ...userTags.filter(t => t !== window.COMMUNITY_COLLECT_TAG)]
-            : [...currentTags];
-          card.customFields = customData;
-          card.updatedAt = Date.now();
-          if (window.isCommunityCollectCard?.(card)) {
-            card.publishedToCommunity = false;
+      const uploadSource = snap.uploadFile || (
+        snap.imageValue && !window.SupabaseSync?.isStorageRef?.(snap.imageValue)
+          ? snap.imageValue
+          : null
+      );
+      const needsFreshUpload = !!uploadSource;
+      const pendingRemovalOnly = snap.imageRemovalPending && !uploadSource && !snap.imageValue;
+      const localUploadBytes = snap.uploadFile?.size || pendingUploadBytes || estimateDataUrlBytes(snap.imageValue);
+      if (saveBtn) saveBtn.disabled = true;
+      setPanelSaveProgress({ text: '准备保存…', percent: 8 });
+      let finalImage = pendingRemovalOnly ? null : snap.imageValue;
+      try {
+        if (window.SupabaseSync?.isLoggedIn?.()) {
+          if (snap.imageValue && window.SupabaseSync.isDataUrl(snap.imageValue)) {
+            setPanelSaveProgress({ text: '备份本地图片…', percent: 12, indeterminate: true });
+            await saveCardImageBackup(snap.cardId, snap.imageValue);
           }
-          savedCard = card;
+          if (pendingRemovalOnly) {
+            setPanelSaveProgress({ text: '删除云端图片…', percent: 40, indeterminate: true });
+            finalImage = await window.SupabaseSync.resolveCardImageForSave(
+              snap.cardId,
+              null,
+              snap.previousImage,
+              { original: snap.uploadOriginal }
+            );
+          } else if (needsFreshUpload) {
+            const estBytes = Math.max(localUploadBytes || 0, snap.uploadFile?.size || 0);
+            if (estBytes > 0 && window.Membership?.canAddStorageBytes && !window.Membership.canAddStorageBytes(estBytes)) {
+              const summary = window.Membership.getStorageSummaryLabel?.() || '';
+              statusEl.textContent = '❌ 云存储空间不足';
+              showToast(`云存储已满（${summary}）。请删除旧图或升级会员。`);
+              return;
+            }
+            const prepText = snap.uploadOriginal
+              ? (localUploadBytes > 50 * 1024 * 1024
+                ? `准备上传（原尺寸JPEG）· ${formatFileSize(localUploadBytes)}`
+                : `准备上传原图 · ${formatFileSize(localUploadBytes)}`)
+              : `准备上传 · ${formatFileSize(localUploadBytes)}`;
+            setPanelSaveProgress({ text: prepText, percent: 15 });
+            statusEl.textContent = prepText;
+            finalImage = await window.SupabaseSync.uploadCardImage(
+              snap.cardId,
+              uploadSource,
+              {
+                original: snap.uploadOriginal,
+                onProgress: (ratio, loaded, total) => {
+                  const pct = 15 + Math.round(Math.max(0, Math.min(1, ratio)) * 62);
+                  const loadedText = total ? formatFileSize(loaded) : '';
+                  const totalText = total ? formatFileSize(total) : formatFileSize(localUploadBytes);
+                  const text = `上传中 ${Math.round(ratio * 100)}% · ${loadedText || '…'}/${totalText}`;
+                  setPanelSaveProgress({ text, percent: pct });
+                  statusEl.textContent = text;
+                }
+              }
+            );
+            if (snap.previousImage
+              && snap.previousImage !== finalImage
+              && window.SupabaseSync.isStorageRef(snap.previousImage)) {
+              await window.SupabaseSync.deleteCardImageByUrl(snap.previousImage);
+            }
+            await clearCardImageBackup(snap.cardId);
+          } else {
+            setPanelSaveProgress({ text: '校验云端图片…', percent: 35, indeterminate: true });
+            finalImage = await window.SupabaseSync.resolveCardImageForSave(
+              snap.cardId,
+              snap.imageValue,
+              snap.previousImage,
+              { original: snap.uploadOriginal }
+            );
+            if (finalImage && window.SupabaseSync.isStorageRef(finalImage)) {
+              await clearCardImageBackup(snap.cardId);
+            }
+          }
         }
-      } else {
-        savedCard = {
-          id: cardId, title, prompt, image: finalImage,
-          group: (currentGroup !== 'all' && currentGroup !== 'uncategorized') ? currentGroup : null,
-          tags: [...currentTags], customFields: customData,
-          warehouseId: getActiveWarehouseId(),
-          createdAt: Date.now(), updatedAt: Date.now()
-        };
-        cards.push(savedCard);
-        selectedCardId = savedCard.id;
-        isNewCardMode = false;
-      }
-      if (savedCard) {
-        savedCard.publishedToCommunity = wantPublish === true;
-        window.FeatureDraft?.clearPublishDraft?.(savedCard.id);
-      }
-      window.__promptHubCards = cards;
-      if (savedCard && window.FeatureDraft?.applyCardPublishState) {
-        await window.FeatureDraft.applyCardPublishState(savedCard, wantPublish === true);
-      }
-      window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
-      await saveAllData({ skipCloud: true });
-      if (window.SupabaseSync?.isLoggedIn?.()) {
-        scheduleCloudPush();
-        if (savedCard && wantPublish) {
-          void window.FeatureDraft?.syncMyPostsToPublicFeed?.();
+        setPanelSaveProgress({ text: '写入卡片…', percent: 82 });
+        const stillEditingSavedCard = selectedCardId === snap.cardId
+          && isNewCardMode === snap.isNewCard;
+        if (stillEditingSavedCard) {
+          imageData = finalImage;
+          pendingUploadFile = null;
+          pendingUploadBytes = 0;
         }
-      }
-      if (!wantPublish && document.getElementById('pageCommunity')?.classList.contains('active')) {
-        void window.FeatureDraft?.refreshPublicCommunityFeed?.({ force: true }).then(() => {
-          window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true, forceRepaint: true });
-        });
-      }
-      updateTagFilter();
-      renderGroups();
-      renderCards(true);
-      updateGuestLimitUI();
-      statusEl.textContent = '';
-      imageRemovalPending = false;
-      showToast('保存成功！');
-      if (savedCard) {
-        window.FeatureDraft?.setPublishCheckbox?.(savedCard);
-        highlightSelectedCard(savedCard.id);
-      }
-      if (wasNewCard && savedCard) {
-        if (currentGroup !== 'all' && currentGroup !== 'uncategorized' && savedCard.group !== currentGroup) {
-          switchGroup('all');
+        if (finalImage && window.SupabaseSync?.prefetchDisplayUrls) {
+          void window.SupabaseSync.prefetchDisplayUrls([finalImage]);
         }
-        selectedCardId = savedCard.id;
-        isNewCardMode = false;
-        highlightSelectedCard(savedCard.id);
-      }
-      if (isMobileViewport()) {
-        closeEditPanel({ skipHistory: true });
+        const wasNewCard = snap.isNewCard;
+        let savedCard;
+        if (!snap.isNewCard) {
+          const card = cards.find(c => c.id === snap.cardId);
+          if (card) {
+            card.title = snap.title;
+            card.prompt = snap.prompt;
+            card.image = snap.imageRemovalPending ? null : finalImage;
+            const userTags = snap.tags.filter(t => t !== window.COMMUNITY_COLLECT_TAG);
+            card.tags = window.isCommunityCollectCard?.(card)
+              ? [window.COMMUNITY_COLLECT_TAG, ...userTags.filter(t => t !== window.COMMUNITY_COLLECT_TAG)]
+              : [...snap.tags];
+            card.customFields = snap.customFields;
+            card.updatedAt = Date.now();
+            if (window.isCommunityCollectCard?.(card)) {
+              card.publishedToCommunity = false;
+            }
+            savedCard = card;
+          }
+        } else {
+          savedCard = {
+            id: snap.cardId, title: snap.title, prompt: snap.prompt,
+            image: snap.imageRemovalPending ? null : finalImage,
+            group: (currentGroup !== 'all' && currentGroup !== 'uncategorized') ? currentGroup : null,
+            tags: [...snap.tags], customFields: snap.customFields,
+            warehouseId: getActiveWarehouseId(),
+            createdAt: Date.now(), updatedAt: Date.now()
+          };
+          cards.push(savedCard);
+          if (stillEditingSavedCard || (isNewCardMode && !selectedCardId)) {
+            selectedCardId = savedCard.id;
+            isNewCardMode = false;
+          }
+        }
+        if (savedCard) {
+          savedCard.publishedToCommunity = snap.wantPublish === true;
+          const uploadMetaEarly = window.__lastCardUploadMeta;
+          if (uploadMetaEarly && String(uploadMetaEarly.cardId) === String(savedCard.id)) {
+            savedCard.imageUploadOriginal = uploadMetaEarly.original === true;
+            savedCard.imageStoredBytes = uploadMetaEarly.bytes || 0;
+            savedCard.imageEncodeMode = uploadMetaEarly.encodeMode || 'raw';
+          }
+          window.FeatureDraft?.clearPublishDraft?.(savedCard.id);
+        }
+        window.__promptHubCards = cards;
+        setPanelSaveProgress({ text: '同步社区状态…', percent: 90, indeterminate: true });
+        if (savedCard && window.FeatureDraft?.applyCardPublishState) {
+          await window.FeatureDraft.applyCardPublishState(savedCard, snap.wantPublish === true);
+        }
+        window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
+        setPanelSaveProgress({ text: '保存到本地…', percent: 95, indeterminate: true });
+        await saveAllData({ skipCloud: true });
+        if (window.SupabaseSync?.isLoggedIn?.()) {
+          scheduleCloudPush();
+          if (savedCard && snap.wantPublish) {
+            void window.FeatureDraft?.syncMyPostsToPublicFeed?.();
+          }
+        }
+        if (!snap.wantPublish && document.getElementById('pageCommunity')?.classList.contains('active')) {
+          void window.FeatureDraft?.refreshPublicCommunityFeed?.({ force: true }).then(() => {
+            window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true, forceRepaint: true });
+          });
+        }
+        updateTagFilter();
+        renderGroups();
+        renderCards(true);
+        updateGuestLimitUI();
+        statusEl.textContent = '';
+        if (stillEditingSavedCard) {
+          imageRemovalPending = false;
+          cardOriginalReuploadRequired = false;
+        }
+        editPanelStashedDraft = null;
+        setPanelSaveProgress({ text: '保存完成', percent: 100 });
+        showToast('保存成功！');
+        const uploadMeta = window.__lastCardUploadMeta;
+        if (stillEditingSavedCard && uploadMeta && savedCard && String(uploadMeta.cardId) === String(savedCard.id)) {
+          updateCardImageSizeHint({
+            saved: true,
+            bytes: uploadMeta.bytes,
+            uploadOriginal: uploadMeta.original,
+            encodeMode: uploadMeta.encodeMode
+          });
+          if (uploadMeta.encodeMode === 'full_res_jpeg') {
+            showToast(`已按原尺寸转高清 JPEG 保存 · ${formatFileSize(uploadMeta.bytes)}`, 4500);
+          }
+        }
+        if (wasNewCard && savedCard) {
+          if (currentGroup !== 'all' && currentGroup !== 'uncategorized' && savedCard.group !== currentGroup) {
+            switchGroup('all');
+          }
+          if (stillEditingSavedCard) {
+            resetNewCardForm();
+          }
+          highlightSelectedCard(savedCard.id);
+        } else if (savedCard && stillEditingSavedCard) {
+          window.FeatureDraft?.setPublishCheckbox?.(savedCard);
+          highlightSelectedCard(savedCard.id);
+          void updatePreview();
+        } else if (savedCard) {
+          highlightSelectedCard(savedCard.id);
+        }
+        if (isMobileViewport() && stillEditingSavedCard) {
+          closeEditPanel({ skipHistory: true });
+        }
+      } catch (e) {
+        const msg = window.SupabaseSync?.formatError?.(e) || e.message || '保存失败';
+        statusEl.textContent = '❌ ' + msg;
+        showToast(msg, 6000);
+        return;
+      } finally {
+        if (saveBtn) saveBtn.disabled = false;
+        setTimeout(() => setPanelSaveProgress({ hidden: true }), 700);
       }
     }
 
@@ -6618,6 +7099,7 @@
         const card = cards.find((c) => c.id === selectedCardId);
         if (card) imageData = card.image || null;
       }
+      stashEditPanelDraft();
       imageRemovalPending = false;
       closeTagSheet();
       window.FeatureDraft?.closeImageGenFilterSheet?.();
@@ -6745,19 +7227,8 @@
         img.style.maxHeight = '';
         img.style.objectFit = '';
         if (window.__lightboxCommunityMode) fitLightboxDisplaySize(img);
-        if (window.__lightboxImageGenNav) {
-          img.onwheel = (ev) => {
-            ev.preventDefault();
-            ev.stopPropagation();
-            navigateViewerByWheelThrottled(ev.deltaY);
-          };
-          img.onmousedown = null;
-          img.ondblclick = null;
-          imageZoom.img = null;
-        } else {
-          resetImageZoom(img);
-          attachImageZoom(img);
-        }
+        resetImageZoom(img);
+        attachImageZoom(img);
         finishViewerFrameReveal(frame);
         if (window.__lightboxCommunityMode) layoutViewerBorderSvg(frame);
         if (dlBtn && !window.__lightboxCommunityMode) {
@@ -6879,8 +7350,33 @@
 
     async function downloadLightboxImage() {
       const img = document.getElementById('lightboxImage');
-      const url = img?.src;
       const dlBtn = document.getElementById('lightboxDownloadBtn');
+      const cardId = window.__lightboxWarehouseCardId || warehousePreviewCardId || selectedCardId;
+      const card = cardId ? cards.find((c) => c.id === cardId) : null;
+      if (card?.image) {
+        const prevLabel = dlBtn?.querySelector('span')?.textContent || dlBtn?.textContent;
+        if (dlBtn) {
+          dlBtn.disabled = true;
+          const label = dlBtn.querySelector('span');
+          if (label) label.textContent = '下载中…';
+          else dlBtn.textContent = '下载中…';
+        }
+        try {
+          await downloadCardImageFile(card.image, card.id, `prompt-hub-${card.id}.jpg`);
+        } catch (e) {
+          showToast('下载失败，请稍后重试');
+          console.warn('[download] lightbox image failed', e);
+        } finally {
+          if (dlBtn) {
+            dlBtn.disabled = !(img?.src && !String(img.src).includes('data:image/svg'));
+            const label = dlBtn.querySelector('span');
+            if (label && prevLabel) label.textContent = prevLabel;
+            else if (prevLabel) dlBtn.textContent = prevLabel;
+          }
+        }
+        return;
+      }
+      const url = img?.src || '';
       if (!url || String(url).includes('data:image/svg')) {
         showToast('图片尚未加载完成');
         return;
@@ -7195,6 +7691,8 @@
       if (pubToggle) pubToggle.checked = settings.defaultPublishCommunity !== false;
       const trimToggle = document.getElementById('showTrimBlackBorderToggle');
       if (trimToggle) trimToggle.checked = settings.showTrimBlackBorderTool === true;
+      const origToggle = document.getElementById('preserveOriginalCardImageToggle');
+      if (origToggle) origToggle.checked = settings.preserveOriginalCardImage === true;
       updatePanelTrimToolVisibility();
       window.PointsSystem?.updateCreditsUI?.();
       document.getElementById('settingsStatus').textContent = '';
@@ -7220,6 +7718,8 @@
       settings.defaultPublishCommunity = pubToggle ? pubToggle.checked : true;
       const trimToggle = document.getElementById('showTrimBlackBorderToggle');
       settings.showTrimBlackBorderTool = trimToggle ? trimToggle.checked : false;
+      const origToggle = document.getElementById('preserveOriginalCardImageToggle');
+      settings.preserveOriginalCardImage = origToggle ? origToggle.checked : false;
       updatePanelTrimToolVisibility();
       saveAllData();
       const status = document.getElementById('settingsStatus');

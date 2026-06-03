@@ -293,6 +293,9 @@
       if (d.communityGacha) {
         window.CommunityGacha?.applyQuota?.(d.communityGacha);
       }
+      if (d.storage && window.Membership?.applyStorageState) {
+        window.Membership.applyStorageState(d.storage);
+      }
       window.PointsSystem?.updateCreditsUI?.();
       window.SubscriptionUI?.refreshOfferUI?.();
     }
@@ -315,6 +318,16 @@
       return r;
     }
     applyMePayload(r.data);
+    return r;
+  }
+
+  async function reportStorageDelta(delta) {
+    const n = Math.max(0, Math.floor(Number(delta) || 0));
+    if (!n) return { ok: true };
+    const r = await request('POST', '/api/v1/me/storage/delta', { delta: n });
+    if (r.ok && r.data && window.Membership?.applyStorageState) {
+      window.Membership.applyStorageState(r.data);
+    }
     return r;
   }
 
@@ -717,8 +730,9 @@
     const q = encodeURIComponent(String(normalized || ''));
     const aid = opts?.authorId ? `&authorId=${encodeURIComponent(String(opts.authorId))}` : '';
     const cid = opts?.cardId ? `&cardId=${encodeURIComponent(String(opts.cardId))}` : '';
+    const variant = opts?.variant === 'full' ? 'full' : 'grid';
     try {
-      const res = await fetch(`${baseUrl()}/api/v1/media/community/sign?ref=${q}${aid}${cid}`);
+      const res = await fetch(`${baseUrl()}/api/v1/media/community/sign?ref=${q}${aid}${cid}&variant=${variant}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         return {
@@ -767,6 +781,7 @@
     prepareApiCall,
     isConfigured,
     syncMe,
+    reportStorageDelta,
     setDisplayName,
     redeem,
     claimFreeTrial,

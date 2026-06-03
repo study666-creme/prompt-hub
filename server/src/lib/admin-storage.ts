@@ -4,10 +4,17 @@ export const CARD_IMAGES_BUCKET = 'card-images';
 const LIST_PAGE = 1000;
 const MAX_SCAN_FILES = 20_000;
 
+export type BucketUsageByUser = {
+  userId: string;
+  bytes: number;
+  fileCount: number;
+};
+
 export type BucketUsageResult = {
   bytes: number;
   fileCount: number;
   truncated: boolean;
+  byUser?: BucketUsageByUser[];
 };
 
 export async function scanBucketUsage(
@@ -18,6 +25,7 @@ export async function scanBucketUsage(
   let bytes = 0;
   let fileCount = 0;
   let truncated = false;
+  const byUserMap = new Map<string, { bytes: number; fileCount: number }>();
 
   async function walk(prefix: string): Promise<void> {
     if (truncated) return;
@@ -34,8 +42,16 @@ export async function scanBucketUsage(
       for (const item of data) {
         const childPath = prefix ? `${prefix}/${item.name}` : item.name;
         if (item.id) {
+          const size = Number(item.metadata?.size) || 0;
           fileCount += 1;
-          bytes += Number(item.metadata?.size) || 0;
+          bytes += size;
+          const uid = childPath.split('/')[0];
+          if (uid) {
+            const row = byUserMap.get(uid) || { bytes: 0, fileCount: 0 };
+            row.bytes += size;
+            row.fileCount += 1;
+            byUserMap.set(uid, row);
+          }
           if (fileCount >= maxFiles) {
             truncated = true;
             return;
@@ -52,7 +68,10 @@ export async function scanBucketUsage(
   }
 
   await walk('');
-  return { bytes, fileCount, truncated };
+  const byUser = [...byUserMap.entries()]
+    .map(([userId, v]) => ({ userId, bytes: v.bytes, fileCount: v.fileCount }))
+    .sort((a, b) => b.bytes - a.bytes);
+  return { bytes, fileCount, truncated, byUser };
 }
 
 export async function deleteUserStorageFiles(

@@ -6,7 +6,7 @@ values (
   'card-images',
   'card-images',
   false,
-  5242880,
+  52428800,
   array['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 )
 on conflict (id) do update set

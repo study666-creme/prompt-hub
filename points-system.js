@@ -202,21 +202,14 @@
 
   function formatImageGenUnitPrice(detail, finalOverride) {
     const finalNum = finalOverride != null ? finalOverride : detail?.final;
-    const listPrice = Number(detail?.listPrice);
-    const unitLabel = formatCredits(finalNum);
-    if (!Number.isFinite(listPrice) || listPrice <= Number(finalNum) + 0.04) {
-      return `${unitLabel} 积分`;
-    }
+    const unit = `${formatCredits(finalNum)} 积分/张`;
     if (detail?.appliedDiscount === 'model' && detail?.modelDiscountLabel) {
-      return `${unitLabel} 积分（${detail.modelDiscountLabel} · 原价 ${formatCredits(listPrice)}）`;
+      return `${unit}（${detail.modelDiscountLabel}）`;
     }
     if (detail?.appliedDiscount === 'member' && detail?.label) {
-      return `${unitLabel} 积分（会员${detail.label} · 原价 ${formatCredits(listPrice)}）`;
+      return `${unit}（会员${detail.label}）`;
     }
-    if (detail?.appliedDiscount === 'fixed') {
-      return `${unitLabel} 积分（固定价）`;
-    }
-    return `${unitLabel} 积分（原价 ${formatCredits(listPrice)}）`;
+    return unit;
   }
 
   /** 活动价生效时的说明文案（不与会员折扣叠加） */
@@ -235,11 +228,7 @@
     if (!isModelPromo) return '';
     const modelLabel = String(detail.modelLabel || '该模型').trim() || '该模型';
     const unit = formatCredits(finalNum);
-    let msg = `${modelLabel} 活动价 ${unit} 积分，不与会员折扣叠加`;
-    if (Number.isFinite(listPrice) && listPrice > Number(finalNum) + 0.04) {
-      msg += `（日常 ${formatCredits(listPrice)} 积分）`;
-    }
-    return msg;
+    return `${modelLabel} 活动价 ${unit} 积分/张，不与会员折扣叠加`;
   }
 
   function getImageGenModel(modelId) {
@@ -470,11 +459,16 @@
     updateCreditsUI();
     void refreshCreditsFromServer();
     document.getElementById('imageGenCreditsOpenBtn')?.addEventListener('click', () => {
-      if (window.MobileUI?.isMobile?.()) openImageGenCreditsSheet();
-      else if (typeof window.openRechargePanel === 'function') window.openRechargePanel();
+      if (window.MobileUI?.isMobile?.()) {
+        if (typeof window.openRechargePanel === 'function') window.openRechargePanel();
+        else openImageGenCreditsSheet();
+      } else if (typeof window.openRechargePanel === 'function') window.openRechargePanel();
       else openImageGenCreditsSheet();
     });
     document.getElementById('imageGenLedgerToggleBtn')?.addEventListener('click', () => {
+      void showCreditLedger();
+    });
+    document.getElementById('imageGenHeaderLedgerBtn')?.addEventListener('click', () => {
       void showCreditLedger();
     });
   }
@@ -510,6 +504,10 @@
 
   async function showCreditLedger() {
     const sheet = document.getElementById('imageGenCreditsSheetOverlay');
+    const mobileHeader = window.matchMedia('(max-width: 900px)').matches;
+    if (mobileHeader && sheet && sheet.hidden) {
+      openImageGenCreditsSheet();
+    }
     const isMobileSheet = window.matchMedia('(max-width: 900px)').matches
       && sheet?.classList.contains('open');
     const panel = isMobileSheet

@@ -4,13 +4,14 @@
 
 ---
 
-## 第 0 步：只读这 3 个文件（按顺序）
+## 第 0 步：只读这 4 个文件（按顺序）
 
 | 顺序 | 文件 | 用途 |
 |------|------|------|
-| 1 | **`docs/CURRENT-ISSUES.md`** | **当前 P0 故障**、已试方向、控制台验证命令 |
-| 2 | **`docs/PROJECT_CONTEXT.md`** | 产品是什么、部署地址、构建号、约定 |
-| 3 | **`docs/FILE-MAP.md`** | 按任务找函数，**禁止**无目的全仓 `grep` |
+| 1 | **`docs/CURRENT-ISSUES.md`** | **P0-带宽**（生图仓库 几十～上百 MB）、404/500、验收标准 |
+| 2 | **`docs/CARD-LOADING.md`** | 卡片库 vs `#imageGenFeed` 管线差异 |
+| 3 | **`docs/PROJECT_CONTEXT.md`** | 产品、部署、构建号、**新对话提示词** |
+| 4 | **`docs/FILE-MAP.md`** | 按任务找函数，**禁止**无目的全仓 `grep` |
 
 社区 Bug → 再读 **`docs/COMMUNITY-ARCHITECTURE.md`** 一节即可，不要通读。
 
@@ -30,9 +31,11 @@
 | **社区 Masonry 空洞** | `layoutCommunityMasonry`, `scheduleCommunityLayout`, `getCommunityFeedGaps` |
 | **卡片库首屏顺序** | `renderCards`, `card-image-loader.js`, `prefetchWarehousePage`, `observeContainer` |
 | **性能 / 慢加载** | `prefetchCommunityDisplayUrls`, `hydrateWarehouseImagesFast` |
+| **生图仓库带宽 P0** | `hydrateFeedImages`, `applyFeedImageSrc`, `#imageGenFeed`, `warehouseBoost`（`supabase-sync.js`） |
 | 社区通知 | `pushCommunityEvent`, `refreshRemoteNotifications`, `community-notify.ts` |
 | 任务中心 | `membership-tasks.ts`, `trial-tasks.js` |
 | 云上传超时 | `pushToCloud`, `scheduleCloudPush`（`script.js`） |
+| **生图预览滚轮** | `attachImageZoom`, `bindImageGenPreviewWheelScroll`, `loadLightboxImage` |
 | 全站 API | `refreshPublicCommunityFeed`（前端）, `listPublicCommunityFeed`（`server/`） |
 
 一次任务：**最多精读 2～4 个函数**，改前先读函数体 ±30 行上下文。
@@ -43,7 +46,9 @@
 
 ```javascript
 // 登录后 F12 Console
-window.__APP_BUILD__                                    // 应与左下角一致，当前 20260606n
+window.__APP_BUILD__                                    // 应与左下角一致，当前约 20260603q
+document.querySelectorAll('#imageGenFeed img[data-image-ref]').length
+performance.getEntriesByType('resource').filter(e => e.transferSize > 500000).length
 await window.PromptHubApi.getCommunityFeed({ limit: 80 }) // posts.length、是否含他人 authorId
 window.__promptHubCards.filter(c => c.publishedToCommunity) // 应与卡片库开关一致（用户反馈目前不一致）
 console.time('feed'); await window.PromptHubApi.getCommunityFeed({ limit: 20 }); console.timeEnd('feed')
@@ -72,11 +77,12 @@ https://api.prompt-hub.cn/api/v1/community/feed?limit=80
 ## 省 Token 的改代码原则
 
 1. **最小 diff**：只改与 P0 相关的函数，不顺手重构。
-2. **P0 顺序（2026-05-30 用户反馈）**：
-   - ① 社区侧栏空白（问题 A）
-   - ② 社区 Masonry 空洞（问题 B）
-   - ③ 卡片库首屏加载顺序（问题 C）
-   - 详见 **`docs/CURRENT-ISSUES.md`**；**用户要求暂不改代码时只更新文档**。
+2. **P0 顺序（2026-06-06 更新）**：
+   - ① **生图页「仓库」带宽**：视口懒加载 + 列表仅 grid，禁止首屏批量 full（见 `CURRENT-ISSUES.md` P0-带宽）
+   - ② 404 / `card-images` 500 重试风暴
+   - ③ 社区侧栏 / Masonry（历史项，部分已修）
+   - ④ 卡片库首屏顺序（`20260603q` 已部分改 grid，需与生图 Feed 统一）
+   - 详见 **`docs/CURRENT-ISSUES.md`**。
 3. **先证实根因再改**：20260601l～q 布局/CSS 多轮用户仍称未解决；下次须 DevTools 断点后再最小 diff。
 4. **不要**让用户只靠清 `localStorage` 当最终方案（云端 `user_data` 会拉回）。
 4. **不要**未验证就叠新功能；**不要**通读 `script.js`（5000+ 行）。
@@ -109,4 +115,4 @@ npm run deploy
 
 ---
 
-*最后更新：2026-05-29*
+*最后更新：2026-06-06 · 用户要求只更新文档；下条聊天修 P0-带宽*

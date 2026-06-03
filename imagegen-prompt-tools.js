@@ -7,7 +7,7 @@
   let fissionPlanCreditsHint = 5;
   let batchCostSeq = 0;
   let toolboxBound = false;
-  let currentImageGenMode = 'inspire';
+  let currentImageGenMode = 'gen';
   let activeRefTool = '';
   /** 排队提交间隔：避免上游 Apimart 限流导致失败 */
   const BATCH_SUBMIT_GAP_MS = 2200;
@@ -245,9 +245,10 @@
       const count = selected.length || Number($('imageGenInspireCount')?.value || 3);
       const n = selected.length || count;
       const total = creditsTotal(unit, n);
+      const unitPerSheet = `${fmtCredits(unit)} 积分/张`;
       inspireBtn.textContent = n > 0
-        ? `排队生图 ${n} 张 · 约 ${fmtCredits(total)} 积分（${unitDisplay}/张）`
-        : `排队生图 · ${unitDisplay}/张`;
+        ? `排队生图 ${n} 张 · 约 ${fmtCredits(total)} 积分（${unitPerSheet}）`
+        : `排队生图 · ${unitPerSheet}`;
     }
 
     if (fissionBtn) {
@@ -256,7 +257,7 @@
       const total = creditsTotal(unit, n);
       fissionBtn.disabled = false;
       fissionBtn.textContent = n > 0
-        ? `排队裂变生图 ${n} 张 · 约 ${fmtCredits(total)} 积分（${unitDisplay}/张）`
+        ? `排队裂变生图 ${n} 张 · 约 ${fmtCredits(total)} 积分（${fmtCredits(unit)} 积分/张）`
         : '排队裂变生图 · 先分析并勾选变体';
     }
   }
@@ -358,6 +359,7 @@
       const count = Number($('imageGenInspireCount')?.value || 3);
       const prompts = window.ImageGenPromptKit?.generateInspirationPrompts?.(types, count, style) || [];
       renderInspirationList(prompts);
+      openInspireFold();
       if (prompts[0]) setPrompt(prompts[0]);
       const typeLabels = types.map((id) => window.ImageGenPromptKit?.CONTENT_TEMPLATES?.[id]?.label || id).join('、');
       const styleSel = $('imageGenInspireStyle');
@@ -370,9 +372,9 @@
 
   /** 外露三行 × 4 列 = 12；其余在「更多词条」 */
   const INSPIRE_PRIMARY_TYPES = [
-    'viral', 'premium', 'character', 'scene',
-    'moviePoster', 'travel', 'guofeng', 'cyber',
-    'epic', 'impact', 'coolMecha', 'megaPerspective'
+    'viral', 'premium', 'moviePoster', 'guofeng',
+    'cyber', 'epic', 'impact', 'stylized',
+    'highTension', 'avantFrame', 'coolMecha', 'megaPerspective'
   ];
 
   function preserveFormScroll(fn) {
@@ -581,10 +583,21 @@
     switchRefTool(tool);
   }
 
+  async function refImageForTools() {
+    let ref = getFirstRefImage();
+    if (!ref) return '';
+    if (/^data:image\//i.test(ref)) return ref;
+    if (window.FeatureDraft?.resolveRefDisplayUrl) {
+      const url = await window.FeatureDraft.resolveRefDisplayUrl(ref);
+      if (url) return url;
+    }
+    return ref;
+  }
+
   async function onFissionAnalyze() {
     if (!window.AuthGate?.requireAuth?.('imagegen')) return;
     if (!ensurePromptApi('promptToolsFission')) return;
-    const refImage = getFirstRefImage();
+    const refImage = await refImageForTools();
     if (!refImage) {
       toast('请先在上方参考图添加一张图片');
       return;
@@ -746,7 +759,7 @@
   async function onReversePrompt() {
     if (!window.AuthGate?.requireAuth?.('imagegen')) return;
     if (!ensurePromptApi('promptToolsReverse')) return;
-    const refImage = getFirstRefImage();
+    const refImage = await refImageForTools();
     if (!refImage) {
       toast('请先在上方参考图添加一张图片');
       return;
@@ -799,37 +812,24 @@
     /* 生成 / 批量按钮已移入各模式面板内 */
   }
 
+  function openInspireFold() {
+    const fold = $('imageGenInspireFold');
+    if (fold && !fold.open) fold.open = true;
+    fold?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+  }
+
   function switchImageGenMode(mode) {
-    const next = mode === 'inspire' ? 'inspire' : 'gen';
-    currentImageGenMode = next;
-    document.body.dataset.imagegenMode = next;
-    document.querySelectorAll('[data-imagegen-mode]').forEach((btn) => {
-      const on = btn.dataset.imagegenMode === next;
-      btn.classList.toggle('active', on);
-      btn.setAttribute('aria-selected', on ? 'true' : 'false');
-    });
-    document.querySelectorAll('[data-imagegen-mode-panel]').forEach((pane) => {
-      const on = pane.dataset.imagegenModePanel === next;
-      pane.classList.toggle('active', on);
-      pane.hidden = !on;
-    });
     const layout = $('imageGenLayout');
-    layout?.classList.toggle('imagegen-layout--inspire-mode', next === 'inspire');
-    layout?.classList.toggle('imagegen-layout--gen-mode', next === 'gen');
-    const genHero = $('imageGenGenHero');
-    const inspireHero = $('imageGenInspireHero');
-    if (genHero) genHero.hidden = next !== 'gen';
-    if (inspireHero) inspireHero.hidden = next !== 'inspire';
-    const veil = $('imageGenInspireVeil');
-    const genVeil = $('imageGenGenVeil');
-    if (veil) veil.setAttribute('aria-hidden', next === 'inspire' ? 'false' : 'true');
-    if (genVeil) genVeil.setAttribute('aria-hidden', next === 'gen' ? 'false' : 'true');
+    document.body.dataset.imagegenMode = 'gen';
+    layout?.classList.add('imagegen-layout--gen-mode');
+    layout?.classList.remove('imagegen-layout--inspire-mode');
+    $('imageGenDockGen')?.removeAttribute('hidden');
     const ledger = $('creditLedgerPanel');
     if (ledger) ledger.classList.add('hidden');
-    $('imageGenDockGen')?.toggleAttribute('hidden', next !== 'gen');
-    $('imageGenDockInspire')?.toggleAttribute('hidden', next !== 'inspire');
-    $('imageGenInspirePromptSection')?.toggleAttribute('hidden', next !== 'inspire');
-    updateImageGenModeFooter(next);
+    if (mode === 'inspire') {
+      openInspireFold();
+    }
+    updateImageGenModeFooter('gen');
     void updateBatchCostLabel();
   }
 
@@ -859,26 +859,9 @@
 
     $('imageGenInspireDrawBtn')?.addEventListener('click', onDrawInspiration);
     $('imageGenInspireBatchBtn')?.addEventListener('click', () => void onQueueBatch());
-    $('imageGenInspireSubmit')?.addEventListener('click', () => {
-      const prompt = $('imageGenInspirePrompt')?.value?.trim();
-      if (!prompt) {
-        toast('请先填写或抽卡获得提示词');
-        return;
-      }
-      void window.FeatureDraft?.runImageGenWithPrompt?.(prompt, { fromInspirationDraw: true, submitBtnId: 'imageGenInspireSubmit' });
-    });
     $('imageGenOptimizeBtn')?.addEventListener('click', () => void onOptimizePrompt());
     $('imageGenOptimizeTarget')?.addEventListener('change', syncOptimizeSceneHint);
     syncOptimizeSceneHint();
-    $('imageGenInspirePromptPaste')?.addEventListener('click', async () => {
-      try {
-        const t = await navigator.clipboard.readText();
-        if (t) setPrompt(t.trim());
-      } catch (e) {
-        toast('无法读取剪贴板');
-      }
-    });
-    $('imageGenInspirePromptClear')?.addEventListener('click', () => setPrompt(''));
     $('imageGenReverseBtn')?.addEventListener('click', () => void onReversePrompt());
     $('imageGenFissionAnalyzeBtn')?.addEventListener('click', () => void onFissionAnalyze());
     $('imageGenFissionBatchBtn')?.addEventListener('click', () => void onQueueFissionBatch());
@@ -934,7 +917,7 @@
       fissionStyleSel.value = 'inherit';
     }
 
-    switchImageGenMode('inspire');
+    switchImageGenMode('gen');
     updateRefToolState();
   }
 
@@ -951,6 +934,7 @@
   window.ImageGenPromptTools = {
     init: initImageGenPromptTools,
     switchMode: switchImageGenMode,
+    openInspireFold,
     updateBatchCostLabel,
     resetBatchState,
     applyQuota: applyInspireDrawQuota,

@@ -1,10 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { MIN_COMMUNITY_PROMPT_LEN, upsertCommunityPost } from './community-feed';
-import { isMembershipActive, type Profile } from './supabase';
+import { assertStorageDelta } from './storage-quota';
+import type { Profile } from './supabase';
 
 const BUCKET = 'card-images';
-const FREE_CARD_LIMIT = 100;
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_PROMPT_LEN = 20000;
 const COMMUNITY_COLLECT_TAG = '社区收藏';
 
@@ -155,15 +155,20 @@ export async function appendQuickCard(
   const payload = (row?.data || {}) as UserDataPayload;
   const cards = Array.isArray(payload.cards) ? [...payload.cards] : [];
 
-  if (!isMembershipActive(profile) && cards.length >= FREE_CARD_LIMIT) {
-    throw new Error(`普通用户最多 ${FREE_CARD_LIMIT} 张卡片，请开通会员或删除旧卡`);
-  }
-
   const now = Date.now();
   const cardId = generateCardId();
   let image: string | null = null;
   if (input.imageBase64) {
+    const bytes = decodeBase64Image(input.imageBase64);
+    assertStorageDelta(profile, bytes.length);
     image = await uploadCardImage(admin, userId, cardId, input.imageBase64);
+    const usedBytes = Math.max(0, Number(profile.storage_bytes) || 0) + bytes.length;
+    const { error: stErr } = await admin
+      .from('profiles')
+      .update({ storage_bytes: usedBytes })
+      .eq('user_id', userId);
+    if (stErr) throw stErr;
+    profile.storage_bytes = usedBytes;
   }
 
   const title =

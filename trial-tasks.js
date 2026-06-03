@@ -339,12 +339,21 @@
   }
 
   let trialPhoneOtpCooldownTimer = null;
+  const TRIAL_PHONE_UNAVAILABLE = '手机验证功能暂未开放，敬请期待';
+
+  function isTrialPhoneBindEnabled() {
+    return window.AUTH_PHONE_ENABLED === true;
+  }
 
   function taskKeyNeedsPhone(taskKey) {
     return String(taskKey || '') === 'redeem_invite_code';
   }
 
   function phoneRequiredTip() {
+    if (!isTrialPhoneBindEnabled()) {
+      if (typeof showToast === 'function') showToast(TRIAL_PHONE_UNAVAILABLE, 5000);
+      return;
+    }
     if (typeof showToast === 'function') {
       showToast('填写邀请码须先绑定手机号', 5000);
     }
@@ -360,6 +369,10 @@
   }
 
   function openTrialPhoneBindForm() {
+    if (!isTrialPhoneBindEnabled()) {
+      setTrialPhoneBindStatus(TRIAL_PHONE_UNAVAILABLE, 'error');
+      return;
+    }
     const form = document.getElementById('trialHubPhoneBindForm');
     if (form) {
       form.classList.remove('hidden');
@@ -392,8 +405,8 @@
       if (typeof openAuthModal === 'function') openAuthModal('login');
       return;
     }
-    if (!window.AUTH_PHONE_ENABLED) {
-      setTrialPhoneBindStatus('手机验证未开启，见 docs/SUPABASE-AUTH.md', 'error');
+    if (!isTrialPhoneBindEnabled()) {
+      setTrialPhoneBindStatus(TRIAL_PHONE_UNAVAILABLE, 'error');
       return;
     }
     const phone = document.getElementById('trialHubPhone')?.value?.trim();
@@ -422,6 +435,10 @@
   async function trialVerifyPhoneBind() {
     if (!isLoggedIn()) {
       if (typeof openAuthModal === 'function') openAuthModal('login');
+      return;
+    }
+    if (!isTrialPhoneBindEnabled()) {
+      setTrialPhoneBindStatus(TRIAL_PHONE_UNAVAILABLE, 'error');
       return;
     }
     const phone = document.getElementById('trialHubPhone')?.value?.trim();
@@ -476,9 +493,11 @@
       return;
     }
     const phoneOk = hub.phoneVerified === true;
+    const phoneBindEnabled = isTrialPhoneBindEnabled();
     const phoneNote = phoneOk
       ? ''
-      : `<div class="trial-hub-phone-block">
+      : phoneBindEnabled
+        ? `<div class="trial-hub-phone-block">
           <p class="trial-hub-note trial-hub-note-warn">填写邀请码须先绑定手机号</p>
           <button type="button" class="btn btn-primary btn-sm" id="trialHubPhoneBindOpen">绑定手机号</button>
           <div class="trial-hub-phone-form hidden" id="trialHubPhoneBindForm">
@@ -492,6 +511,9 @@
             </div>
             <p class="trial-hub-phone-status" id="trialHubPhoneBindStatus" aria-live="polite"></p>
           </div>
+        </div>`
+        : `<div class="trial-hub-phone-block">
+          <p class="trial-hub-note trial-hub-note-warn">${esc(TRIAL_PHONE_UNAVAILABLE)}</p>
         </div>`;
     const dailyBtn = hub.dailyBonus?.claimed
       ? '<span class="trial-task-done">今日已领</span>'
@@ -524,7 +546,7 @@
           <input type="text" class="trial-hub-invite-input" id="trialHubInviteInput" placeholder="填写好友邀请码" value="${esc(pendingInvite)}" maxlength="32" autocomplete="off">
           <button type="button" class="btn btn-primary btn-sm" id="trialHubInviteSubmit">兑换</button>
         </div>
-        ${phoneOk ? '' : '<p class="trial-hub-desc">兑换前须先绑定手机号（见上方）</p>'}`;
+        ${phoneOk ? '' : phoneBindEnabled ? '<p class="trial-hub-desc">兑换前须先绑定手机号（见上方）</p>' : '<p class="trial-hub-desc">邀请码兑换待手机验证开放后可用</p>'}`;
 
     el.innerHTML = `
       <section class="trial-hub-block">

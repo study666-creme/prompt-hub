@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260603h';
+    window.__APP_BUILD__ = '20260604w';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -82,11 +82,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260603h">
-  <link rel="stylesheet" href="styles-theme.css?v=20260603h">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260603h">
+  <link rel="stylesheet" href="styles.css?v=20260604w">
+  <link rel="stylesheet" href="styles-theme.css?v=20260604w">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260604w">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260603h">
+  <link rel="stylesheet" href="styles-features.css?v=20260604w">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
@@ -241,6 +241,12 @@
             <span class="settings-check-label">编辑卡片时显示「裁除黑边」</span>
           </label>
           <p class="settings-hint">默认关闭。开启后，编辑区图片下方会出现小链接，一键去掉截图四周的黑边（适合录屏/截图留白）。</p>
+          <label class="settings-check" style="margin-top:10px">
+            <input type="checkbox" id="preserveOriginalCardImageToggle">
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">卡片库保存原图（不压缩，单张最大 20MB）</span>
+          </label>
+          <p class="settings-hint">默认关闭：上传后会压缩为约 2560px 边长的高质量 JPEG，省流量、同步更快。开启后按原文件上传（PNG/JPEG 等），适合 4K 参考图；列表缩略图仍会生成小图。</p>
         </section>
 
         <section class="settings-section">
@@ -253,7 +259,7 @@
           <p class="settings-hint">发布社区：提示词至少 15 字，配图可选。点赞奖励：100 赞 +100 积分（每人最多 5 次）、1000 赞 +1000 积分（最多 2 次）</p>
           <div class="settings-btn-grid settings-btn-grid-data" style="margin-top:12px">
             <button type="button" class="btn btn-secondary" onclick="typeof restoreCardsFromCommunityFeed==='function'&&restoreCardsFromCommunityFeed()">从社区恢复卡片库</button>
-            <button type="button" class="btn btn-secondary" onclick="typeof syncCloudNow==='function'&&syncCloudNow()">从云端恢复卡片库</button>
+            <button type="button" class="btn btn-secondary" onclick="typeof syncCloudNow==='function'&&syncCloudNow()">与云端对齐</button>
           </div>
           <p class="settings-hint settings-hint-block">登录后使用。「从社区恢复」：只把<strong>社区帖 ID 在卡片库里找不到</strong>的作品新建进库；提示会写「13 张 → 18 张」这种前后数量。若显示「无需新建」说明 ID 已在库里。「同步到社区」：把卡片库推到全站 Feed。</p>
         </section>
@@ -284,7 +290,7 @@
             <button type="button" class="btn btn-secondary" onclick="saveToFile()">保存到本地文件</button>
             <button type="button" class="btn btn-secondary" onclick="loadFromFile()">从本地文件打开</button>
           </div>
-          <p class="settings-hint settings-hint-block">登录后会自动保存到云端并上传图片，一般无需手动操作。若换设备后卡片为空，可用「恢复备份」或 F12 → Application → Local Storage 查看本账号快照。</p>
+          <p class="settings-hint settings-hint-block">登录后会自动保存到云端并上传图片，一般无需手动点「与云端对齐」。只有换设备、多浏览器数据不一致时再手动同步。</p>
           <button type="button" class="btn btn-danger settings-danger-btn" onclick="clearAllData()">清除所有本地数据</button>
         </section>
       </div>
@@ -559,7 +565,8 @@
         <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260603h</p>
+      <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260604w</p>
     </div>
   </nav>
 
@@ -648,7 +655,6 @@
       提示词采集
       <span class="sidebar-collect-badge">插件</span>
     </button>
-    <p class="guest-limit-hint hidden" id="guestLimitHint"></p>
     <div class="sidebar-section sidebar-warehouses">
       <div class="sidebar-section-title sidebar-warehouses-head">
         <span>卡片库</span>
@@ -762,8 +768,11 @@
         <button type="button" class="remove-image-btn" id="removeImageBtn" onclick="event.stopPropagation(); removeImage()" title="从编辑区去掉图片（须保存后才真正删除）" aria-label="去掉图片"><span aria-hidden="true">×</span></button>
         <input type="file" id="fileInput" accept="image/*" style="display:none;">
       </div>
-      <div class="panel-image-tools hidden" id="panelImageTools">
-        <button type="button" class="panel-image-tool-btn" id="trimBlackBorderBtn" onclick="trimPanelImageBlackBorder()">裁除黑边</button>
+      <div class="panel-image-tools" id="panelImageTools">
+        <button type="button" class="panel-image-tool-btn panel-image-tool-toggle" id="cardUploadOriginalToggle" aria-pressed="false">上传原图：关</button>
+        <span class="panel-image-size-hint" id="cardImageSizeHint">未选择图片</span>
+        <button type="button" class="panel-image-tool-btn hidden" id="cardDownloadImageBtn">下载当前图</button>
+        <button type="button" class="panel-image-tool-btn hidden" id="trimBlackBorderBtn" onclick="trimPanelImageBlackBorder()">裁除黑边</button>
       </div>
       <div class="panel-ocr-drop hidden" id="panelOcrDrop" aria-label="文字识别专用图片框">
         <div class="panel-ocr-drop-inner" id="panelOcrDropInner">
@@ -811,6 +820,12 @@
       </div>
     </div>
     <div class="panel-footer">
+      <div class="panel-save-progress hidden" id="panelSaveProgress" aria-live="polite">
+        <div class="panel-save-progress-track">
+          <div class="panel-save-progress-fill" id="panelSaveProgressFill"></div>
+        </div>
+        <span class="panel-save-progress-label" id="panelSaveProgressLabel">保存中…</span>
+      </div>
       <button type="button" class="btn btn-primary btn-footer-save" onclick="saveCard()">保存</button>
       <button type="button" class="btn btn-ghost btn-footer-copy" onclick="copyPromptFromPanel()">复制</button>
       <button type="button" class="btn-icon-danger desktop-only" id="actionDeleteClearBtn" title="删除"></button>
@@ -951,25 +966,22 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
           </button>
           <h2 class="imagegen-header-title">图片生成</h2>
-          <div class="imagegen-header-mode" role="tablist" aria-label="生图模式">
-            <button type="button" class="imagegen-mode-tab imagegen-mode-tab--inspire active" data-imagegen-mode="inspire" role="tab" aria-selected="true">灵感抽卡</button>
-            <button type="button" class="imagegen-mode-tab imagegen-mode-tab--gen" data-imagegen-mode="gen" role="tab" aria-selected="false">图片生成</button>
-          </div>
           <div class="imagegen-header-credits mobile-only" id="imageGenHeaderCredits">
             <span class="imagegen-header-balance">积分 <strong data-credits-display>0</strong></span>
             <button type="button" class="btn btn-secondary btn-sm" id="imageGenCreditsOpenBtn">充值</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="imageGenHeaderLedgerBtn">明细</button>
           </div>
           <div class="imagegen-mobile-segments mobile-only" role="tablist" aria-label="生图视图">
             <button type="button" class="imagegen-mobile-seg active" data-imagegen-view="form" role="tab" aria-selected="true">生成</button>
             <button type="button" class="imagegen-mobile-seg" data-imagegen-view="feed" role="tab" aria-selected="false">作品</button>
           </div>
         </header>
-        <div class="imagegen-layout imagegen-layout--inspire-mode" id="imageGenLayout">
-          <div class="imagegen-inspire-veil" id="imageGenInspireVeil" aria-hidden="false"></div>
-          <div class="imagegen-gen-veil" id="imageGenGenVeil" aria-hidden="true"></div>
+        <div class="imagegen-layout imagegen-layout--gen-mode" id="imageGenLayout">
+          <div class="imagegen-inspire-veil" id="imageGenInspireVeil" aria-hidden="true" hidden></div>
+          <div class="imagegen-gen-veil" id="imageGenGenVeil" aria-hidden="true" hidden></div>
           <div class="imagegen-form">
             <div class="imagegen-form-scroll">
-            <div class="imagegen-mode-banner">
+            <div class="imagegen-mode-banner" hidden>
               <div class="imagegen-gen-hero imagegen-mode-hero" id="imageGenGenHero" hidden>
                 <p class="imagegen-mode-hero-kicker">GENERATE · STUDIO</p>
                 <h3 class="imagegen-mode-hero-title">图片创作</h3>
@@ -981,7 +993,7 @@
                 <p class="panel-hint imagegen-mode-hero-desc">随机组合高风格提示词，勾选后可排队生图（与普通生图同价）</p>
               </div>
             </div>
-            <div class="imagegen-mode-credits imagegen-credits-box imagegen-credits-box--form" id="imageGenModeCredits">
+            <div class="imagegen-mode-credits imagegen-credits-box imagegen-credits-box--form desktop-only" id="imageGenModeCredits">
               <div class="imagegen-credits-top">
                 <span class="imagegen-credits-label">当前积分 <strong data-credits-display>0</strong><span class="imagegen-credits-rate-inline">（1 元 = 100 积分）</span> <span class="imagegen-credits-detail hidden" data-credits-detail></span></span>
                 <span class="imagegen-credits-top-actions">
@@ -993,6 +1005,7 @@
               <p class="imagegen-credits-note">会员订阅限时约五折；生图享积分折扣。充值与激活码兑换请点「充值」。</p>
             </div>
             <div class="imagegen-shared-params">
+            <p class="imagegen-promo-notice imagegen-promo-notice--model hidden" id="imageGenPromoNotice" aria-live="polite"></p>
             <label for="imageGenModel">生图模型</label>
             <select id="imageGenModel" class="settings-input imagegen-field-compact">
               <option value="gpt-image-2">GPT Image 2</option>
@@ -1016,40 +1029,37 @@
             </div>
             <label for="imageGenQuality">质量</label>
             <select id="imageGenQuality" class="settings-input imagegen-field-compact">
-              <option value="standard">标准</option>
-              <option value="high">高清</option>
-              <option value="ultra">超清</option>
+              <option value="standard">低</option>
+              <option value="high">中</option>
+              <option value="ultra">高</option>
             </select>
             <p class="imagegen-quality-note">质量仅影响出图效果，不额外加价</p>
             </div>
-            <div class="imagegen-optimize-shared">
-              <div class="imagegen-prompt-optimize-wrap">
-                <button type="button" class="imagegen-optimize-link" id="imageGenOptimizeToggle" aria-expanded="false" title="用 AI 扩写提示词，更易出爆款封面">优化提示词 · <span id="imageGenOptimizeCostHint">约 1～2 积分</span></button>
-                <div class="imagegen-prompt-optimize-pop imagegen-prompt-optimize-pop--head" id="imageGenOptimizePop" hidden>
-                  <label for="imageGenOptimizeTarget">优化场景</label>
-                  <select id="imageGenOptimizeTarget" class="settings-input">
-                    <option value="general">通用（补全光影构图）</option>
-                    <option value="ecommerce_cover">电商封面（商品宣传·吸睛爆款）</option>
-                    <option value="viral_cover">信息流爆款（小红书/抖音竖屏）</option>
-                    <option value="product_studio">商品棚拍（白底/场景质感）</option>
-                    <option value="jimeng">即梦封面风（强情绪竖屏）</option>
-                    <option value="guofeng">国风仙侠</option>
-                    <option value="realistic">写实摄影</option>
-                    <option value="anime">二次元插画</option>
-                    <option value="sd">写实 / SD 细节风</option>
-                    <option value="glamour">女性时尚人像</option>
-                    <option value="malePower">男性力量肖像</option>
-                  </select>
-                  <p class="panel-hint imagegen-optimize-scene-hint" id="imageGenOptimizeSceneHint">先写商品/主体草稿，选场景后点优化，再填入提示词框生图。</p>
-                  <button type="button" class="btn btn-secondary btn-sm" id="imageGenOptimizeBtn">优化并填入提示词 · <span class="imagegen-optimize-btn-cost">约 1～2 积分</span></button>
-                </div>
-              </div>
-            </div>
-            <div class="imagegen-mode-panel imagegen-mode-panel--gen" id="imageGenModeGen" data-imagegen-mode-panel="gen" hidden>
-            <div class="imagegen-prompt-block">
+            <div class="imagegen-prompt-block imagegen-prompt-block--shared" id="imageGenPromptBlock">
               <div class="imagegen-prompt-head">
                 <label for="imageGenPrompt">提示词</label>
                 <div class="imagegen-prompt-tools">
+                  <div class="imagegen-prompt-optimize-wrap">
+                    <button type="button" class="imagegen-optimize-link" id="imageGenOptimizeToggle" aria-expanded="false" title="用 AI 扩写提示词">优化提示词 · <span id="imageGenOptimizeCostHint">1～2分</span></button>
+                    <div class="imagegen-prompt-optimize-pop imagegen-prompt-optimize-pop--head" id="imageGenOptimizePop" hidden>
+                      <label for="imageGenOptimizeTarget">优化场景</label>
+                      <select id="imageGenOptimizeTarget" class="settings-input">
+                        <option value="general">通用（补全光影构图）</option>
+                        <option value="ecommerce_cover">电商封面（商品宣传·吸睛爆款）</option>
+                        <option value="viral_cover">信息流爆款（小红书/抖音竖屏）</option>
+                        <option value="product_studio">商品棚拍（白底/场景质感）</option>
+                        <option value="jimeng">即梦封面风（强情绪竖屏）</option>
+                        <option value="guofeng">国风仙侠</option>
+                        <option value="realistic">写实摄影</option>
+                        <option value="anime">二次元插画</option>
+                        <option value="sd">写实 / SD 细节风</option>
+                        <option value="glamour">女性时尚人像</option>
+                        <option value="malePower">男性力量肖像</option>
+                      </select>
+                      <p class="panel-hint imagegen-optimize-scene-hint" id="imageGenOptimizeSceneHint">先写商品/主体草稿，选场景后点优化，再填入提示词框生图。</p>
+                      <button type="button" class="btn btn-secondary btn-sm" id="imageGenOptimizeBtn">优化并填入 · <span class="imagegen-optimize-btn-cost">约 1～2 积分</span></button>
+                    </div>
+                  </div>
                   <button type="button" class="imagegen-prompt-tool-btn" id="imageGenPromptPaste" title="粘贴剪贴板" aria-label="粘贴">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 2h-4.18C14.4.84 13.3 0 12 0S9.6.84 9.18 2H5a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z"/></svg>
                   </button>
@@ -1060,34 +1070,7 @@
               </div>
               <textarea id="imageGenPrompt" placeholder="描述你想生成的画面…"></textarea>
             </div>
-            </div>
-            <div class="imagegen-mode-panel imagegen-mode-panel--inspire active" id="imageGenModeInspire" data-imagegen-mode-panel="inspire">
-              <div class="imagegen-inspire-controls">
-                <label class="imagegen-inspire-multi-label">内容（可多选）</label>
-                <div class="imagegen-inspire-chips-wrap">
-                  <div class="imagegen-inspire-chips" id="imageGenInspireTypeChips"></div>
-                  <button type="button" class="imagegen-inspire-types-toggle" id="imageGenInspireTypesToggle" aria-expanded="false">更多词条</button>
-                  <div class="imagegen-inspire-chips imagegen-inspire-chips--extra" id="imageGenInspireTypeChipsExtra" hidden></div>
-                </div>
-                <div class="imagegen-inspire-select-row">
-                  <div class="imagegen-inspire-field">
-                    <label for="imageGenInspireStyle">画风</label>
-                    <select id="imageGenInspireStyle" class="settings-input imagegen-field-compact"></select>
-                  </div>
-                  <div class="imagegen-inspire-field">
-                    <label for="imageGenInspireCount">条数</label>
-                    <select id="imageGenInspireCount" class="settings-input imagegen-field-compact">
-                      <option value="3" selected>3 条</option>
-                      <option value="4">4 条</option>
-                      <option value="5">5 条</option>
-                    </select>
-                  </div>
-                </div>
-                <button type="button" class="btn btn-secondary btn-sm imagegen-inspire-draw-btn" id="imageGenInspireDrawBtn">随机抽卡</button>
-              </div>
-              <p class="panel-hint imagegen-inspire-quota-hint" id="imageGenInspireQuotaHint">随机抽卡：本地词库组合，不调用 AI、不扣积分 · 普通 10 次/天 · 轻量 30 次/天 · 基础及以上无限</p>
-              <div class="imagegen-inspire-list" id="imageGenInspireList"></div>
-            </div>
+            <textarea id="imageGenInspirePrompt" hidden aria-hidden="true" tabindex="-1"></textarea>
             <div class="imagegen-ref-block">
             <div class="imagegen-ref-head">
               <label class="imagegen-ref-label">参考图（可选）</label>
@@ -1134,19 +1117,45 @@
               <p class="panel-hint imagegen-inspire-batch-hint">分析后勾选变体；批量提交每张与普通生图同价，不绑源图参考。</p>
             </div>
             </div>
-            <div class="imagegen-inspire-prompt-section" id="imageGenInspirePromptSection" hidden>
-              <div class="imagegen-prompt-block imagegen-prompt-block--inspire">
-                <div class="imagegen-prompt-head">
-                  <label for="imageGenInspirePrompt">当前提示词（可编辑）</label>
-                  <div class="imagegen-prompt-tools">
-                    <button type="button" class="imagegen-prompt-tool-btn" id="imageGenInspirePromptPaste" title="粘贴" aria-label="粘贴">粘贴</button>
-                    <button type="button" class="imagegen-prompt-tool-btn imagegen-prompt-tool-btn--clear" id="imageGenInspirePromptClear" title="清空" aria-label="清空">清空</button>
+            <div class="imagegen-mobile-result mobile-only" id="imageGenMobileResult" aria-label="最近生成" hidden></div>
+            <details class="imagegen-inspire-fold" id="imageGenInspireFold">
+              <summary class="imagegen-inspire-fold-summary">
+                <span class="imagegen-inspire-fold-title">灵感抽卡</span>
+                <span class="imagegen-inspire-fold-badge">强烈推荐</span>
+              </summary>
+              <div class="imagegen-inspire-fold-body" id="imageGenModeInspire" data-imagegen-mode-panel="inspire">
+                <div class="imagegen-inspire-controls">
+                  <label class="imagegen-inspire-multi-label">内容（可多选）</label>
+                  <div class="imagegen-inspire-chips-wrap">
+                    <div class="imagegen-inspire-chips" id="imageGenInspireTypeChips"></div>
+                    <button type="button" class="imagegen-inspire-types-toggle" id="imageGenInspireTypesToggle" aria-expanded="false">更多词条</button>
+                    <div class="imagegen-inspire-chips imagegen-inspire-chips--extra" id="imageGenInspireTypeChipsExtra" hidden></div>
                   </div>
+                  <div class="imagegen-inspire-select-row">
+                    <div class="imagegen-inspire-field">
+                      <label for="imageGenInspireStyle">画风</label>
+                      <select id="imageGenInspireStyle" class="settings-input imagegen-field-compact"></select>
+                    </div>
+                    <div class="imagegen-inspire-field">
+                      <label for="imageGenInspireCount">条数</label>
+                      <select id="imageGenInspireCount" class="settings-input imagegen-field-compact">
+                        <option value="3" selected>3 条</option>
+                        <option value="4">4 条</option>
+                        <option value="5">5 条</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button type="button" class="btn btn-secondary btn-sm imagegen-inspire-draw-btn" id="imageGenInspireDrawBtn">随机抽卡</button>
                 </div>
-                <textarea id="imageGenInspirePrompt" placeholder="抽卡后会填入此处；也可手写商品宣传草稿后点上方「优化提示词」…"></textarea>
+                <p class="panel-hint imagegen-inspire-quota-hint" id="imageGenInspireQuotaHint">随机抽卡：本地词库组合，不调用 AI、不扣积分 · 普通 10 次/天 · 轻量 30 次/天 · 基础及以上无限</p>
+                <div class="imagegen-inspire-list" id="imageGenInspireList"></div>
+                <div class="imagegen-inspire-fold-actions">
+                  <p class="panel-hint imagegen-inspire-batch-hint" id="imageGenInspireBatchHint">勾选抽卡结果后批量生图，共用参考图（若有），排队不额外计抽卡次数。</p>
+                  <p class="imagegen-promo-notice hidden" id="imageGenInspirePromoNotice" aria-live="polite"></p>
+                  <button type="button" class="btn btn-primary imagegen-inspire-batch-btn" id="imageGenInspireBatchBtn">排队生图 · — 积分/张</button>
+                </div>
               </div>
-              <button type="button" class="btn btn-primary imagegen-inspire-single-btn" id="imageGenInspireSubmit">生成图片 · 10 积分</button>
-            </div>
+            </details>
             <div class="panel-publish-row imagegen-publish-row" id="imageGenGenPublicRow">
               <div class="panel-publish-copy">
                 <span class="panel-publish-title">生成后公开到社区</span>
@@ -1160,7 +1169,7 @@
               <a href="privacy.html" class="link-inline">隐私政策</a>
             </div>
             </div>
-            <div class="imagegen-form-dock imagegen-form-dock--gen" id="imageGenDockGen" hidden>
+            <div class="imagegen-form-dock imagegen-form-dock--gen" id="imageGenDockGen">
               <div class="imagegen-dock-meta">
                 <div class="imagegen-footer-count">
                   <label for="imageGenCount">数量</label>
@@ -1173,14 +1182,8 @@
                   </select>
                 </div>
                 <p class="imagegen-price-hint" id="imageGenCostHint" aria-live="polite"></p>
-                <p class="imagegen-promo-notice hidden" id="imageGenPromoNotice" aria-live="polite"></p>
               </div>
               <button type="button" class="btn btn-primary imagegen-generate-btn" id="imageGenSubmit">生成图片 · 10 积分</button>
-            </div>
-            <div class="imagegen-form-dock imagegen-form-dock--inspire" id="imageGenDockInspire">
-              <p class="panel-hint imagegen-inspire-batch-hint" id="imageGenInspireBatchHint">勾选抽卡结果后批量生图，共用参考图（若有），排队不额外计抽卡次数。</p>
-              <p class="imagegen-promo-notice hidden" id="imageGenInspirePromoNotice" aria-live="polite"></p>
-              <button type="button" class="btn btn-primary imagegen-generate-btn" id="imageGenInspireBatchBtn">排队生图 · — 积分/张</button>
             </div>
           </div>
           <aside class="imagegen-side">
@@ -1224,6 +1227,7 @@
                 <h4>作品详情</h4>
                 <button type="button" class="imagegen-preview-close" id="imageGenPreviewClose" aria-label="关闭">✕</button>
               </div>
+              <p class="panel-hint imagegen-preview-wheel-hint">点击左侧作品切换 · 点击图片全屏查看（全屏内滚轮可换图）</p>
               <div class="imagegen-preview-body" id="imageGenPreviewBody"></div>
             </aside>
           </aside>
@@ -1364,7 +1368,7 @@
         <div class="subscribe-mini-offer" id="subscribeMiniOffer"></div>
         <div class="subscribe-lite-plan-row" id="subscribeLitePlanRow"></div>
         <div class="subscribe-plans-grid" id="subscribePlansGrid"></div>
-        <p class="subscribe-legal">普通用户免费：每日 5 积分、100 张卡片。卡片式创作<strong>限免</strong>（登录可用，对话/生图按积分计费）。连续包月价见各档对比。免费会员请点侧栏「免费试用」完成任务领取。详见 <a href="terms.html" class="link-inline">用户协议</a>。</p>
+        <p class="subscribe-legal">普通用户免费：每日 5 积分、云存储 300MB。会员在 300MB 基础上额外扩容（轻量 +2GB 等）。卡片式创作<strong>限免</strong>（登录可用，对话/生图按积分计费）。连续包月价见各档对比。免费会员请点侧栏「免费试用」完成任务领取。详见 <a href="terms.html" class="link-inline">用户协议</a>。</p>
         </section>
       </div>
     </div>
@@ -1410,23 +1414,23 @@
   <script src="api-config.js"></script>
   <script src="api-client.js?v=20260606o"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260602x"></script>
-  <script src="card-image-loader.js?v=20260602x"></script>
+  <script src="supabase-sync.js?v=20260604w"></script>
+  <script src="card-image-loader.js?v=20260604w"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
   <script src="subscription.js?v=20260622e"></script>
-  <script src="trial-tasks.js?v=20260602u"></script>
+  <script src="trial-tasks.js?v=20260604w"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="script.js?v=20260603h"></script>
+  <script src="script.js?v=20260604w"></script>
   <script src="points-system.js?v=20260606n"></script>
-  <script src="imagegen-prompt-kit.js?v=20260601b"></script>
-  <script src="imagegen-prompt-tools.js?v=20260606l"></script>
-  <script src="features-draft.js?v=20260603h"></script>
+  <script src="imagegen-prompt-kit.js?v=20260604w"></script>
+  <script src="imagegen-prompt-tools.js?v=20260604w"></script>
+  <script src="features-draft.js?v=20260604w"></script>
   <script src="community-gacha.js?v=20260606v"></script>
   <script src="features-assets.js?v=20260602w"></script>
-  <script src="hotfix-image-layout.js?v=20260603t"></script>
-  <script src="pwa-install.js?v=20260602u"></script>
-  <script src="mobile.js?v=20260603h"></script>
+  <script src="hotfix-image-layout.js?v=20260604w"></script>
+  <script src="pwa-install.js?v=20260604w"></script>
+  <script src="mobile.js?v=20260604w"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

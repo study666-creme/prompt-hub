@@ -17,7 +17,12 @@ if ($d -eq $today) {
   $d = $today
   $c = [int][char]'a'
 }
-if ($c -gt [int][char]'z') { throw "Build letter exhausted for today (a-z)" }
+if ($c -gt [int][char]'z') {
+  $dt = [DateTime]::ParseExact($d, 'yyyyMMdd', $null).AddDays(1)
+  $d = $dt.ToString('yyyyMMdd')
+  $c = [int][char]'a'
+  Write-Host "Build letter rolled to next day: $d$([char]$c)" -ForegroundColor Yellow
+}
 $new = $d + [char]$c
 
 $files = @(
