@@ -35,7 +35,7 @@
   const USE_STORAGE_TRANSFORM = false;
   const GRID_SIGN_CONCURRENCY = 12;
   const WAREHOUSE_PREFETCH_CARD_CAP = 18;
-  const WAREHOUSE_VISIBLE_SIGN_CAP = 18;
+  const WAREHOUSE_VISIBLE_SIGN_CAP = 12;
   const WAREHOUSE_FAST_FIRST = 32;
   const SS_SIGN_CACHE = 'ph_signed_urls_v1';
   const SS_GRID_DONE = 'ph_grid_done_v1';

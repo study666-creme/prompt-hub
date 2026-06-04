@@ -16,7 +16,9 @@
 
 ---
 
-## P0-带宽：生图页「仓库」一进站就几十～上百 MB（**未解决 · 用户 2026-06-06**）
+## P0-带宽：生图页「仓库」一进站就几十～上百 MB（**部分改善 · 2026-06-06**）
+
+> **20260606a**：列表禁止 `tryFullFallback` full；首屏签名/加载 cap 12；`backfillGridThumbs` 仅可见卡、不再 `force` 全库；IO rootMargin 240px。部署后 Network 验收仍必做。
 
 ### 用户看到的现象（Network，**与是否打开 DevTools 无关**）
 

@@ -580,10 +580,16 @@
     if (!lazyOnly) prefetchRefsInContainer(container);
 
     if (container.id === 'imageGenFeed') {
+      let eager = 0;
+      const cap = 12;
       imgs.forEach((img) => {
+        if (eager >= cap) return;
         const cur = img.currentSrc || img.src || '';
         if (isReadySrc(cur, img)) return;
-        if (isImgNearViewport(img, 960)) loadImg(img);
+        if (isImgNearViewport(img, 720)) {
+          eager += 1;
+          loadImg(img);
+        }
       });
     } else if (!lazyOnly && (container.id === 'cardsContainer' || isCommunityContainer(container))) {
       let eager = 0;
@@ -616,7 +622,7 @@
       observedRoot = container;
       const rootMargin = lazyOnly
         ? (container.id === 'imageGenFeed'
-          ? '320px 0px'
+          ? '240px 0px'
           : container.id === 'cardsContainer' ? '100px 0px' : '140px 0px')
         : isCommunityContainer(container)
           ? '360px 0px'
@@ -657,7 +663,7 @@
   }
 
   function prefetchItemsForContainer(container, items) {
-    const cap = container?.id === 'imageGenFeed' ? 18 : 6;
+    const cap = container?.id === 'imageGenFeed' ? 12 : 6;
     const list = (items || []).slice(0, cap);
     if (!list.length) return Promise.resolve();
     const hasCardIds = list.every((x) => x && x.id && x.image);
