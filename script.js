@@ -3146,9 +3146,11 @@
       }
       if (!mobile) {
         if (sideBtn) { /* 侧栏不参与 Masonry */ }
-        else if (media.closest('#communityGrid, #creationsGrid')) {
-          const grid = media.closest('#communityGrid, #creationsGrid');
-          window.FeatureDraft?.scheduleFeedMasonryRelayout?.(grid?.id || 'communityGrid');
+        else if (media.closest('#creationsGrid')) {
+          window.FeatureDraft?.scheduleCommunityLayout?.('creationsGrid', { fromImage: true });
+        }
+        else if (media.closest('#communityGrid')) {
+          window.FeatureDraft?.scheduleFeedMasonryRelayout?.('communityGrid');
         }
         else if (media.closest('#cardsContainer')) {
           if (cardMediaAffectsViewport(media)) {

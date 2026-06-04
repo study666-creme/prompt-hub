@@ -889,7 +889,7 @@
     if (container.querySelectorAll('.community-post-card').length) {
       delete container.dataset.feedDistributed;
       delete container.dataset.feedDistributedCols;
-      layoutCommunityMasonry('creationsGrid', { forceReflow: true, recalcCols: true });
+      layoutFeedFlexColumns('creationsGrid', { force: true, forceReflow: true, recalcCols: true });
       return true;
     }
     return repairCommunityFeedLayout('creationsGrid');
@@ -3607,10 +3607,11 @@
         return;
       }
       const runFlex = () => {
-        layoutCommunityMasonry(containerId, {
+        layoutFeedFlexColumns(containerId, {
           newCards: opts.newCards,
           recalcCols: opts.recalcCols === true,
-          forceReflow: opts.recalcCols === true
+          force: opts.force === true,
+          forceReflow: opts.recalcCols === true || opts.force === true
         });
       };
       clearTimeout(layoutCommunityDebounce[containerId]);
@@ -3743,9 +3744,75 @@
     return (containerId === 'communityGrid' || containerId === 'creationsGrid') && !isMobileFeedLayout();
   }
 
-  /** 社区桌面 Masonry；我的主页桌面用 flex 多列（文档流增高，避免 Masonry height≈一条缝） */
+  /** Feed 排版模式：社区 Masonry；我的主页 flex 多列（勿与社区共用 Masonry 实例） */
+  const FEED_LAYOUT_MODE = {
+    communityGrid: 'masonry',
+    creationsGrid: 'flex-columns',
+    userProfileGrid: 'masonry'
+  };
+
+  function getFeedLayoutMode(containerId) {
+    if (containerId === 'creationsGrid' && isMobileFeedLayout()) return 'mobile-grid';
+    if (containerId === 'communityGrid' && isMobileFeedLayout()) return 'mobile-grid';
+    return FEED_LAYOUT_MODE[containerId] || 'masonry';
+  }
+
   function useCommunityCssGrid(containerId) {
-    return containerId === 'creationsGrid' && !isMobileFeedLayout();
+    return getFeedLayoutMode(containerId) === 'flex-columns';
+  }
+
+  /** 我的主页：flex 多列（文档流），与社区 Masonry 分离 */
+  function layoutFeedFlexColumns(containerId, opts = {}) {
+    const container = document.getElementById(containerId);
+    if (!container || getFeedLayoutMode(containerId) !== 'flex-columns') return;
+    const hasFeedCols = !!container.querySelector(':scope > .community-feed-col');
+    const feedStable = container.dataset.feedDistributed === '1';
+    const mustFlatten = opts.recalcCols === true || opts.forceReflow === true || opts.force === true || !feedStable;
+    if (hasFeedCols && feedStable && !mustFlatten && !opts.newCards?.length) {
+      scrubCommunityFeedFlexCards(container);
+      ensureFeedPageSentinel(container);
+      setFeedLayoutPending(containerId, false);
+      return;
+    }
+    if (hasFeedCols && mustFlatten) flattenCommunityFeedColumns(container);
+    if (creationsMasonry) {
+      creationsMasonry.destroy();
+      creationsMasonry = null;
+    }
+    scrubStaleCommunityFeedEmpty(container);
+    container.classList.remove('community-mobile-feed', 'masonry-ready', 'cards-grid-priming');
+    container.classList.add('community-feed-grid', 'community-feed-columns');
+    container.style.removeProperty('height');
+    container.style.removeProperty('max-height');
+    container.style.overflow = 'visible';
+    const measuredCols = getCommunityFeedColumns(container);
+    const prevCols = Number(container.dataset.feedDistributedCols || container.dataset.feedLayoutCols) || 0;
+    const measuredColsChanged = prevCols > 0 && prevCols !== measuredCols;
+    if (opts.recalcCols === true && measuredColsChanged) {
+      delete container.dataset.feedLayoutCols;
+      delete container.dataset.feedDistributed;
+      delete container.dataset.feedDistributedCols;
+    } else if (opts.recalcCols === true && container.dataset.feedDistributed === '1') {
+      applyCommunityFeedColumnCss(container, measuredCols);
+      ensureFeedPageSentinel(container);
+      setFeedLayoutPending(containerId, false);
+      return;
+    }
+    const cols = measuredCols;
+    applyCommunityFeedColumnCss(container, cols);
+    container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
+    collectCommunityFeedCards(container).forEach(clearCommunityFeedCardInline);
+    const colsChanged = Number(container.dataset.feedDistributedCols || 0) !== cols;
+    distributeCommunityFeedColumns(container, cols, {
+      forceReflow: opts.force === true || opts.forceReflow === true
+        || container.dataset.feedDistributed !== '1'
+        || (opts.recalcCols === true && colsChanged),
+      newCards: opts.newCards
+    });
+    ensureFeedPageSentinel(container);
+    revealCommunityFeedImages(container);
+    setFeedLayoutPending(containerId, false);
+    if (window.CardImageLoader?.observeContainer) window.CardImageLoader.observeContainer(container);
   }
 
   function purgeCommunityFeedGridNoise(container) {
@@ -3993,55 +4060,25 @@
     redistributeCommunityFeedByHeight(container, cols);
   }
 
-  /** 社区/创作：CSS 多列或手机两列；个人主页仍用 Masonry */
+  /** 社区/个人页 Feed 排版入口（按 getFeedLayoutMode 分流，勿让我的主页走 Masonry） */
   function layoutCommunityMasonry(containerId, opts = {}) {
     const container = document.getElementById(containerId);
     if (!container) return;
-    const hasFeedCols = !!container.querySelector(':scope > .community-feed-col');
-    const feedStable = container.dataset.feedDistributed === '1';
-    const mustFlatten = opts.recalcCols === true || opts.forceReflow === true || !feedStable;
-    if (useCommunityCssGrid(containerId) && hasFeedCols && feedStable && !mustFlatten && !opts.newCards?.length) {
-      scrubCommunityFeedFlexCards(container);
-      ensureFeedPageSentinel(container);
-      setFeedLayoutPending(containerId, false);
+    const mode = getFeedLayoutMode(containerId);
+    if (mode === 'flex-columns') {
+      layoutFeedFlexColumns(containerId, opts);
       return;
     }
-    if (hasFeedCols && (mustFlatten || !useCommunityCssGrid(containerId))) {
-      flattenCommunityFeedColumns(container);
-    }
-    if (useCommunityCssGrid(containerId)) {
-      scrubStaleCommunityFeedEmpty(container);
-      destroyCommunityFeedMasonryFor(containerId);
-      container.classList.remove('community-mobile-feed', 'masonry-ready');
-      container.classList.add('community-feed-grid', 'community-feed-columns');
-      container.style.removeProperty('height');
-      const measuredCols = getCommunityFeedColumns(container);
-      const prevCols = Number(container.dataset.feedDistributedCols || container.dataset.feedLayoutCols) || 0;
-      const measuredColsChanged = prevCols > 0 && prevCols !== measuredCols;
-      if (opts.recalcCols === true && measuredColsChanged) {
-        delete container.dataset.feedLayoutCols;
-        delete container.dataset.feedDistributed;
-        delete container.dataset.feedDistributedCols;
-      } else if (opts.recalcCols === true && container.dataset.feedDistributed === '1') {
-        applyCommunityFeedColumnCss(container, measuredCols);
-        ensureFeedPageSentinel(container);
-        setFeedLayoutPending(containerId, false);
-        return;
-      }
-      let cols = measuredCols;
-      applyCommunityFeedColumnCss(container, cols);
-      container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
-      collectCommunityFeedCards(container).forEach(clearCommunityFeedCardInline);
-      const colsChanged = Number(container.dataset.feedDistributedCols || 0) !== cols;
-      distributeCommunityFeedColumns(container, cols, {
-        forceReflow: container.dataset.feedDistributed !== '1' || (opts.recalcCols === true && colsChanged),
-        newCards: opts.newCards
-      });
-      ensureFeedPageSentinel(container);
-      revealCommunityFeedImages(container);
-      setFeedLayoutPending(containerId, false);
+    if (mode === 'mobile-grid') {
+      enforceMobileCommunityFeedGrid(containerId);
       if (window.CardImageLoader?.observeContainer) window.CardImageLoader.observeContainer(container);
       return;
+    }
+    const hasFeedCols = !!container.querySelector(':scope > .community-feed-col');
+    const feedStable = container.dataset.feedDistributed === '1';
+    const mustFlatten = opts.recalcCols === true || opts.forceReflow === true || opts.force === true || !feedStable;
+    if (hasFeedCols && (mustFlatten || containerId === 'communityGrid')) {
+      flattenCommunityFeedColumns(container);
     }
     container.classList.remove('community-feed-grid', 'community-feed-columns');
     if (!useCssGridForCommunityFeed(containerId)) {
@@ -4061,21 +4098,23 @@
     }
     container.classList.remove('community-mobile-feed');
     const runMasonryLayout = () => {
-      if (isMobileFeedLayout() && (containerId === 'communityGrid' || containerId === 'creationsGrid')) {
+      if (containerId === 'creationsGrid') {
+        layoutFeedFlexColumns('creationsGrid', { force: true, forceReflow: true });
+        return;
+      }
+      if (isMobileFeedLayout() && containerId === 'communityGrid') {
         enforceMobileCommunityFeedGrid(containerId);
         return;
       }
       if (typeof Masonry === 'undefined') return;
       const cardEls = [...container.querySelectorAll('.card')];
       const isProfile = containerId === 'userProfileGrid';
-      const isCreations = containerId === 'creationsGrid';
-      let instance = isProfile ? profileMasonry : (isCreations ? creationsMasonry : communityMasonry);
+      let instance = isProfile ? profileMasonry : communityMasonry;
 
       if (!cardEls.length) {
         if (instance) {
           instance.destroy();
           if (isProfile) profileMasonry = null;
-          else if (isCreations) creationsMasonry = null;
           else communityMasonry = null;
         }
         setFeedLayoutPending(containerId, false);
@@ -4083,7 +4122,7 @@
       }
 
       const feedGaps = getCommunityFeedGaps();
-      const useFeedGaps = containerId === 'communityGrid' || containerId === 'creationsGrid';
+      const useFeedGaps = containerId === 'communityGrid';
       const gap = useFeedGaps ? feedGaps.colGap : getMasonryGap();
       const style = getComputedStyle(container);
       const innerW = useFeedGaps
@@ -4133,18 +4172,14 @@
         });
         instance = new Masonry(container, opts);
         if (isProfile) profileMasonry = instance;
-        else if (isCreations) creationsMasonry = instance;
         else communityMasonry = instance;
       }
       container.scrollTop = scrollTop;
       container.classList.add('masonry-ready', 'cards-grid-primed');
-      if (containerId === 'creationsGrid') {
-        syncCreationsGridContainerHeight(container);
-      }
       if (colWidth) container.style.setProperty('--feed-col-width', `${colWidth}px`);
       setFeedLayoutPending(containerId, false);
       requestAnimationFrame(() => {
-        const m = isProfile ? profileMasonry : (isCreations ? creationsMasonry : communityMasonry);
+        const m = isProfile ? profileMasonry : communityMasonry;
         if (typeof m?.reloadItems === 'function') m.reloadItems();
         m?.layout?.();
         revealCommunityFeedImages(container);
@@ -7714,6 +7749,9 @@
     if (container.dataset.feedSig === sig && container.querySelector('.community-post-card')) {
       patchFeedLikeLabels(container, list);
       if (isCreationsFeedLayoutStale(container)) {
+        delete container.dataset.feedSig;
+        delete container.dataset.feedDistributed;
+        delete container.dataset.feedDistributedCols;
         repairCreationsFeedLayout(true);
       } else {
         requestAnimationFrame(() => syncCommunityFeedColumnCount('creationsGrid'));
@@ -7731,7 +7769,10 @@
       return;
     }
     void renderPostsIntoContainer(list, 'creationsGrid').then(() => {
-      requestAnimationFrame(() => syncCommunityFeedColumnCount('creationsGrid'));
+      requestAnimationFrame(() => {
+        layoutFeedFlexColumns('creationsGrid', { force: true, forceReflow: true, recalcCols: true });
+        syncCommunityFeedColumnCount('creationsGrid');
+      });
     });
   }
 
@@ -11209,6 +11250,8 @@
     scheduleCommunityMasonryRelayout,
     scheduleFeedMasonryRelayout,
     layoutCommunityMasonry,
+    layoutFeedFlexColumns,
+    getFeedLayoutMode,
     relayoutCommunityFeeds,
     onCardDeletedForGen,
     recoverRecentGenerationJobs,

@@ -30,11 +30,25 @@ $files = @(
   (Join-Path $root "admin.html"),
   (Join-Path $root "sw.js")
 )
+$syncCacheAssets = @(
+  'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css',
+  'theme.js', 'api-client.js', 'supabase-sync.js', 'card-image-loader.js',
+  'script.js', 'features-draft.js', 'hotfix-image-layout.js', 'mobile.js', 'pwa-install.js',
+  'imagegen-prompt-kit.js', 'imagegen-prompt-tools.js', 'trial-tasks.js', 'points-system.js'
+)
+
 foreach ($path in $files) {
   if (-not (Test-Path $path)) { continue }
   $t = Get-Content $path -Raw -Encoding UTF8
   $t = $t.Replace($old, $new)
   $t = [regex]::Replace($t, "const CACHE = 'prompt-hub-v[^']+';", "const CACHE = 'prompt-hub-v$new';")
+  if ($path -eq $indexPath) {
+    foreach ($asset in $syncCacheAssets) {
+      $esc = [regex]::Escape($asset)
+      $t = [regex]::Replace($t, "($esc\?v=)$old", "`${1}$new")
+      $t = [regex]::Replace($t, "($esc\?v=)\d{8}[a-z]", "`${1}$new")
+    }
+  }
   [System.IO.File]::WriteAllText($path, $t, [System.Text.UTF8Encoding]::new($false))
 }
 
