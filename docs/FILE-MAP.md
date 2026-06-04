@@ -11,7 +11,9 @@
 | 卡片库 CRUD、分组、Masonry | `script.js` | `styles.css`, `mobile.js` |
 | 登录 / 登出 / 云拉取 | `script.js` | `supabase-sync.js`, `cloud-sync-safety.js` |
 | **社区 Masonry / 我的主页 flex** | `feed-layout.js` | `features-draft.js`（`wireFeedLayout`） |
-| **社区 Feed、发布、我发布的** | `features-draft.js` | `feed-layout.js`, `api-client.js`, `styles-features.css` |
+| **Feed 图片 hydrate / 签名** | `feed-images.js` | `features-draft.js`（`wireFeedImages`） |
+| **生图仓库 Feed 排版/渲染** | `image-gen-feed.js` | `features-draft.js`（`wireImageGenFeed`） |
+| **社区 Feed、发布、我发布的** | `features-draft.js` | `feed-layout.js`, `feed-images.js`, `image-gen-feed.js` |
 | 图片签名 URL | `supabase-sync.js` | `server/src/routes/v1/media.ts` |
 | 全站社区 API / DB | `server/src/lib/community-feed.ts` | `server/src/routes/v1/community.ts` |
 | 生图扣费 | `features-draft.js` + `api-client.js` | `server/src/routes/v1/generate.ts` |
@@ -38,11 +40,13 @@
 
 ---
 
-## `features-draft.js`（社区 + 生图，约 10000+ 行）
+## `features-draft.js`（社区 + 生图，约 9500 行）
 
 | 区域 | 函数/变量 | 作用 |
 |------|-----------|------|
-| 排版入口 | `wireFeedLayout()` | 启动时注入 `FeedLayout.init(deps)`，绑定 `layoutCommunityMasonry` 等 |
+| 排版入口 | `wireFeedLayout()` | 启动时注入 `FeedLayout.init(deps)` |
+| 图片入口 | `wireFeedImages()` | 注入 `FeedImages.init(deps)` → `hydrateFeedImages` 等 |
+| 生图 Feed | `wireImageGenFeed()` | 注入 `ImageGenFeed.init(deps)` → `renderImageGenFeed` 等 |
 | 状态 | `communityPosts` | 账号私有社区帖（localStorage + 云 JSON） |
 | 状态 | `publicFeedPosts` | **全站 API Feed 缓存**（`20260614b` 新增） |
 | 拉 Feed | `refreshPublicCommunityFeed` | `PromptHubApi.getCommunityFeed` |
@@ -57,7 +61,27 @@
 | 生图预览 / 灯箱 | `renderImageGenPreview`, `bindImageGenPreviewWheelScroll`, `navigateImageGenPreviewByWheel` |
 | **生图滚轮缩放** | `attachImageZoom`, `loadLightboxImage`, `onViewerShellWheel`（`script.js`） |
 | 批量社区公开 | `batchPublishCommunity`, `batchUnpublishCommunity`（`script.js`） |
-| 生图 Feed / 轮询 | `renderImageGenFeed`, `pollGenerationJobUntilDone` | 进行中任务会周期性打 Worker |
+| 生图 Feed / 轮询 | `renderImageGenFeed`（`image-gen-feed.js`）, `pollGenerationJobUntilDone` | 进行中任务会周期性打 Worker |
+
+---
+
+## `feed-images.js`（Feed 图片，约 550 行）
+
+| 区域 | 函数 | 作用 |
+|------|------|------|
+| 签名 | `imageGenFeedSignOpts`, `communityImageSignOpts` | 列表图 resolve 选项 |
+| hydrate | `hydrateFeedImages`, `applyFeedImageSrc` | 社区/生图 Feed 出图 |
+| 清理 | `removeBrokenCommunityFeedCard`, `stripFailedFeedMedia` | 坏图卡片处理 |
+
+---
+
+## `image-gen-feed.js`（生图仓库 Feed，约 660 行）
+
+| 区域 | 函数 | 作用 |
+|------|------|------|
+| Masonry | `layoutImageGenFeedMasonry`, `scheduleImageGenFeedLayout` | 桌面瀑布流 |
+| 渲染 | `renderImageGenFeed`, `buildFeedCardHtml` | 仓库/社区 Tab 列表 |
+| 分页 | `bindImageGenFeedPagedScroll` | 滚动加载更多 |
 
 ---
 
@@ -121,10 +145,13 @@
 1. `supabase-config.js` / `api-config.js`
 2. `supabase-sync.js` · `cloud-sync-safety.js` · `api-client.js`
 3. `masonry.pkgd.min.js`
-4. `script.js`
-5. **`feed-layout.js`**（须在 `features-draft.js` 之前）
-6. `features-draft.js` · `community-gacha.js` · `features-assets.js`
-7. `pwa-install.js` · `mobile.js`
+4. **`mobile.js`**（`MobileUI.isMobileViewport` 唯一来源，须在 `script.js` 之前）
+5. `script.js`
+6. **`feed-layout.js`** → **`feed-images.js`** → **`image-gen-feed.js`**（均须在 `features-draft.js` 之前）
+7. `features-draft.js` · `community-gacha.js` · `features-assets.js`
+8. `pwa-install.js`
+
+> 手机断点 **900px** 仅定义在 `mobile.js`（`MobileUI.isMobile` / `isMobileViewport` 等价）。
 
 > `hotfix-image-layout.js` 已废弃（逻辑并入 `features-draft.js`）；`hotfix-community-layout.js` 已删除。
 

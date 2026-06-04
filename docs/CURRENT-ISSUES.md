@@ -9,16 +9,17 @@
 
 | 项 | 值 |
 |----|-----|
-| **当前 Pages（用户侧待强刷确认）** | **`20260603q`**（上一对话部署；若 `window.__APP_BUILD__` 不一致则再跑 `deploy-pages.ps1`） |
+| **当前 Pages** | **`20260605l`**（`window.__APP_BUILD__`） |
 | Pages | https://prompt-hub.cn |
 | API | https://api.prompt-hub.cn |
 | Worker | `prompt-hub-api` |
 
 ---
 
-## P0-带宽：生图页「仓库」一进站就几十～上百 MB（**部分改善 · 2026-06-06**）
+## P0-带宽：生图页「仓库」一进站就几十～上百 MB（**部分改善 · 2026-06-05 已验收**）
 
-> **20260606a**：列表禁止 `tryFullFallback` full；首屏签名/加载 cap 12；`backfillGridThumbs` 仅可见卡、不再 `force` 全库；IO rootMargin 240px。部署后 Network 验收仍必做。
+> **20260606a / 20260605g+**：列表禁止 `tryFullFallback` full；首屏签名/加载 cap 12；`backfillGridThumbs` 仅可见卡；IO rootMargin 240px。  
+> **用户验收**：487 请求、~4.8MB 传输、`big: 0`（无单资源 >500KB）。
 
 ### 用户看到的现象（Network，**与是否打开 DevTools 无关**）
 
@@ -91,16 +92,16 @@ performance.getEntriesByType('resource').filter(e => e.transferSize > 500000).le
 
 ---
 
-## 最近已修（2026-06-03～06，**不替代 P0-带宽**）
+## 最近已修（2026-06-05，**不替代 P0 数据 gap**）
 
 | 项 | 构建/说明 |
 |----|-----------|
-| 卡片库列表优先 `_grid` | `20260603n～q`：`features-draft.js`、`card-image-loader.js`、`supabase-sync.js` |
-| 排序「最近生成」、仓库按 `createdAt` | `script.js` / features-draft |
-| 浅色主题对比度 | `styles-theme.css` |
-| 云存储入口移到左下导航；专业会员配额显示约 **31,020 MB** | `membership.js` |
-| 排序/筛选下拉被 `scale(0.72)` 裁切 | 下拉挂 `document.body` 定位（`script.js`） |
-| 生图滚轮缩放、2.5D 国漫画风等 | 见历史条目 `20260603j` |
+| **Feed 模块拆分** | `feed-images.js` · `image-gen-feed.js` + `wireFeed*`；`features-draft.js` ~10k→~9.5k 行 |
+| **MobileUI 统一** | `mobile.js` 唯一 900px 断点；`script.js` / `features-draft.js` 走 `MobileUI.isMobileViewport` |
+| **侧栏即时重排** | 社区/生图预览侧栏打开 `recalcCols` + immediate layout；ResizeObserver |
+| **拆分回归** | `IMG_LOADING_PLACEHOLDER`、`feedImgStorageAttr` 接线（曾致卡片库/社区无图） |
+| 卡片库列表优先 `_grid` | `20260603n～q` |
+| P0 生图仓库带宽 cap | `20260606a` + 用户验收 `big:0` |
 
 ---
 

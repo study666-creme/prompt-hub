@@ -25,15 +25,15 @@
 
 ---
 
-## 1. 整站白屏（重复 const 声明）
+## 1. 整站白屏（重复 const 声明 / 拆模块未接线）
 
 | 项 | 内容 |
 |----|------|
 | **标签** | 🔴 致命 |
-| **现象** | 社区/主页/生图全空，背景动效也停；Console：`Identifier 'colsChanged' has already been declared` |
-| **根因** | 同一函数内两次 `const colsChanged` → **整份 `features-draft.js` 解析失败**，后面 `script.js` 等照常加载但 FeatureDraft 不存在 |
-| **修复** | 合并为 `measuredColsChanged` / `colsChanged` 等不同名 |
-| **勿再犯** | 改 `layoutCommunityMasonry` 等长函数后，保存即搜 `const colsChanged` 出现次数；本地打开站点看 Console **无 SyntaxError** 再部署 |
+| **现象** | 社区/主页/生图全空；Console：`Identifier 'colsChanged' has already been declared` 或 `IMG_LOADING_PLACEHOLDER is not defined` 或 `feedImgStorageAttr is not defined` |
+| **根因** | ① 同一函数内重复 `const` → 整份 `features-draft.js` 解析失败 ② 拆到 `feed-images.js` 后未在 `wireFeedImages` 导出/接线 ③ `wireImageGenFeed` 在 `IMG_LOADING_PLACEHOLDER` 未定义时执行 |
+| **修复** | 合并重复 const；`IMG_LOADING_PLACEHOLDER` 保留在 `features-draft` 顶部 const；`feedImgStorageAttr` 经 `FeedImages.init` 接线 |
+| **勿再犯** | 改 `wireFeed*` 或拆模块后：强刷 + Console 无 ReferenceError；`!!window.FeatureDraft?.hydrateFeedImages` 为 true |
 
 ---
 
@@ -55,7 +55,7 @@
 | **标签** | 🟠 高频 |
 | **现象** | 分页、hydrate、点侧栏时整墙抖 |
 | **根因** | `feedDistributed===1` 仍 `flatten`；`finishCommunityFeedLayoutAfterBatch` 总是 `force layout` |
-| **修复** | 已 distributed 时 early return，只维护哨兵；开侧栏**不** `scheduleCommunityLayout` |
+| **修复** | 已 distributed 时 early return，只维护哨兵；~~开侧栏不 scheduleCommunityLayout~~ → **20260605l** 侧栏打开须 **immediate recalcCols**（见 §2.8） |
 
 ### 2.3 图片 onload / drain 触发全墙 DOM 重分（社区晃眼）
 
@@ -114,11 +114,21 @@
 | **涉及文件** | `features-draft.js`（`openPostSidePanel`、`syncCreationsSidePanelMount`）、`styles-features.css` |
 | **验收** | 强刷 `window.__APP_BUILD__ === '20260605b'` → 我的主页点卡 → 右侧「作品详情」+ 正文；社区侧栏行为不变 |
 
+### 2.8 侧栏遮住最右列 / 生图预览迟滞重排（2026-06-05）
+
+| 项 | 内容 |
+|----|------|
+| **标签** | 🟠 高频 |
+| **现象** | 社区/生图点开侧栏后最右卡片被挡；生图预览侧栏要等 ~0.5s 才跳布局 |
+| **根因** | 侧栏占 340px 后主区变窄，但 Masonry 仍用旧列宽；`syncCommunityFeedColumnCount` 对 **communityGrid Masonry 无 op**；生图 `scheduleImageGenFeedLayout` debounce 160ms + 多次 setTimeout |
+| **修复（`20260605l`）** | `relayoutFeedGridAfterSidePanel`；`scheduleImageGenFeedLayout({ immediate: true })`；`FeedLayout.bindResizeRelayout` 宽度变化 >100px 即时；`.imagegen-side` ResizeObserver |
+| **勿再犯** | 拆模块后社区卡片仍依赖 `feedImgStorageAttr`（在 `feed-images.js`），须 `wireFeedImages` 接线 |
+
 ### 2.5 其它布局坑（简表）
 
 | 现象 | 根因要点 |
 |------|----------|
-| 侧栏开整墙重排 | 宽度变窄触发 `recalcCols` + flatten → 列数不变只改 CSS 变量 |
+| 侧栏开整墙重排 | ~~仅加 selected 不重排~~ → **20260605l** 须 `relayoutFeedGridAfterSidePanel` immediate；宽度变窄 `recalcCols` |
 | 切回社区一排白骨架 | `showCommunityFeedSkeleton` 盖住已有 Feed → 有真卡勿 `innerHTML` 骨架 |
 | 首屏 400+ 卡卡顿 | `drainUntilDone` 灌满 DOM → 首屏只 drain 约 5 页，其余靠哨兵 |
 | 用 grid 自身宽度算列数 | 侧栏开合误判 1 列 → 用 `.community-page-main` / `.community-workspace` 量宽 |
@@ -137,15 +147,16 @@
 
 ---
 
-## 4. 生图仓库带宽（P0，未完全解决）
+## 4. 生图仓库带宽（P0，**部分改善 · 20260605 验收**）
 
 | 项 | 内容 |
 |----|------|
 | **标签** | 🟠 高频 · 🟡 绕很久 |
-| **现象** | 图片生成 → 子 Tab「仓库」：Network 已传输 **几十～150+ MB**；大量 404/500 后才开始下 2～3 MB/张原图 |
-| **根因** | `#imageGenFeed` 未接视口懒加载；`hydrateFeedImages` + `warehouseBoost` 对**全部** img 签名；grid miss 回退 **full** |
-| **目标** | 列表仅 `_grid`；视口内才加载；灯箱/下载才 full |
-| **详见** | `docs/CURRENT-ISSUES.md` P0-带宽、`docs/CARD-LOADING.md` |
+| **现象** | 图片生成 → 子 Tab「仓库」：Network 已传输 **几十～150+ MB**（修复前） |
+| **根因** | `#imageGenFeed` 批量 hydrate + grid miss 回退 full |
+| **修复** | 列表 cap 12、禁止列表 full fallback、IO 240px；用户验收 ~4.8MB、`big:0` |
+| **剩余** | 404/500 风暴、老卡无 `_grid` 仍可能偶发 full |
+| **详见** | `docs/CURRENT-ISSUES.md` P0-带宽、`docs/FEED-MODULES.md` |
 
 ---
 

@@ -37,7 +37,7 @@
   }
 
   function isMobile() {
-    return global.MobileUI?.isMobile?.() || global.matchMedia('(max-width: 900px)').matches;
+    return global.MobileUI?.isMobileViewport?.() ?? global.matchMedia('(max-width: 900px)').matches;
   }
 
   function getMode(containerId) {
@@ -744,6 +744,7 @@
     const obs = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect?.width ?? watchEl.clientWidth;
       if (w < 80 || Math.abs(w - lastW) < 4) return;
+      const delta = Math.abs(w - lastW);
       lastW = w;
       clearTimeout(timer);
       timer = setTimeout(() => {
@@ -762,8 +763,8 @@
             return;
           }
         }
-        schedule(containerId, { recalcCols: true });
-      }, 120);
+        schedule(containerId, { recalcCols: true, force: true, immediate: delta > 100 });
+      }, delta > 100 ? 0 : 80);
     });
     obs.observe(watchEl);
   }

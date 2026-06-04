@@ -55,6 +55,10 @@
 
 详见 `docs/ERROR-LOG.md` §2.6。
 
+## 相关文档
+
+- 模块拆分与 `wireFeed*`：`docs/FEED-MODULES.md`
+
 ## 部署注意
 
 `index.html` 中 `feed-layout.js?v=`、`features-draft.js?v=` 须与 `window.__APP_BUILD__` 一致；`scripts/bump-build.ps1` 会同步脚本版本号。

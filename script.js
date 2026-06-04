@@ -1,3 +1,14 @@
+    /** mobile.js 未加载时的兜底（断点与 MobileUI 一致：900px） */
+    (function ensureMobileUI() {
+      if (typeof window.MobileUI?.isMobileViewport === 'function') return;
+      const mq = window.matchMedia('(max-width: 900px)');
+      window.MobileUI = Object.assign(window.MobileUI || {}, {
+        isMobile: () => mq.matches,
+        isMobileViewport: () => mq.matches,
+        MOBILE_MQ: mq
+      });
+    })();
+
     // ---------- 数据库 ----------
     const DB_NAME = 'PromptRepoDB', DB_VERSION = 3;
     const EMERGENCY_BACKUP_MAX = 12;
@@ -2446,7 +2457,7 @@
     async function initBackgroundEffect() {
       const bg = document.getElementById('rippleGridBg');
       if (!bg || settings.efficiencyMode || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-      if (window.matchMedia('(max-width: 900px)').matches) {
+      if (isMobileViewport()) {
         bg.style.display = 'none';
         return;
       }
@@ -3963,7 +3974,7 @@
       restoreDesktopCardColumns();
       const page = localStorage.getItem('promptrepo_app_page') || 'community';
       switchAppPage(page);
-      if (window.MobileUI?.isMobile?.()) {
+      if (window.MobileUI.isMobile()) {
         const mobileTab = page === 'community' ? 'community' : page === 'imagegen' ? 'imagegen' : 'cards';
         document.querySelectorAll('.mobile-tab').forEach((btn) => {
           btn.classList.toggle('active', btn.dataset.mobileTab === mobileTab);
@@ -5054,7 +5065,7 @@
       if (!silent) setCloudSyncPhase('syncing', '正在保存到云端');
       const status = document.getElementById('statusMsg');
       const localImages = new Map(cards.map((c) => [String(c.id), c.image]));
-      const isMobileNet = window.matchMedia?.('(max-width: 900px)')?.matches;
+      const isMobileNet = isMobileViewport();
       const timeoutMs = silent
         ? (isMobileNet ? 120000 : 70000)
         : (isMobileNet ? 180000 : 90000);
@@ -5450,7 +5461,7 @@
     }
 
     function isMobileViewport() {
-      return window.MobileUI?.isMobileViewport?.() || window.matchMedia('(max-width: 900px)').matches;
+      return window.MobileUI?.isMobileViewport?.() ?? window.matchMedia('(max-width: 900px)').matches;
     }
 
     function refreshWarehouseUI(opts = {}) {

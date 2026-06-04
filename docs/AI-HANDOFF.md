@@ -8,11 +8,11 @@
 
 | 顺序 | 文件 | 用途 |
 |------|------|------|
-| 0 | **`docs/AI-PITFALLS.md`** + **`docs/ERROR-LOG.md`** | **防炸站** + 历史高频坑；SEO 见 **`docs/SEO-SEARCH-ENGINES.md`** |
-| 1 | **`docs/CURRENT-ISSUES.md`** | **P0-带宽**（生图仓库 几十～上百 MB）、404/500、验收标准 |
-| 2 | **`docs/CARD-LOADING.md`** | 卡片库 vs `#imageGenFeed` 管线差异 |
-| 3 | **`docs/PROJECT_CONTEXT.md`** | 产品、部署、构建号、**新对话提示词** |
-| 4 | **`docs/FILE-MAP.md`** | 按任务找函数，**禁止**无目的全仓 `grep` |
+| 0 | **`docs/AI-PITFALLS.md`** + **`docs/ERROR-LOG.md`** | **防炸站** + 历史高频坑 |
+| 1 | **`docs/CURRENT-ISSUES.md`** | P0-带宽（**部分改善**）、数据 gap |
+| 2 | **`docs/FEED-MODULES.md`** + **`docs/FEED-LAYOUT.md`** | Feed 四模块 + 排版调试 |
+| 3 | **`docs/PROJECT_CONTEXT.md`** | 产品、部署、构建号 |
+| 4 | **`docs/FILE-MAP.md`** | 按任务找函数 |
 
 社区 Bug → **`docs/COMMUNITY-ARCHITECTURE.md`** + **`docs/AI-PITFALLS.md`** 社区章节。  
 日光可读性 → **`docs/LIGHT-THEME-UX.md`**。
@@ -30,7 +30,10 @@
 | **publishedToCommunity 持久化** | `mergePublishFlag`, `mergeCardPair`（`cloud-sync-safety.js`）, `getDataPayload`（`script.js`） |
 | 发布/下架 | `syncCardToCommunity`, `reconcileCommunityWithCards`, `ownPostAllowedInFeed` |
 | **社区侧栏空白** | `renderCommunitySidePanel`, `communitySideBody`, `openPostSidePanel` |
-| **社区 Masonry（桌面）/ 我的主页 flex** | `feed-layout.js`, `layoutCommunityMasonry`, `scheduleCommunityLayout` | `docs/FEED-LAYOUT.md` |
+| **社区 Masonry（桌面）/ 我的主页 flex** | `feed-layout.js`, `FeedLayout.*`, `wireFeedLayout` | `docs/FEED-LAYOUT.md` |
+| **Feed 出图 / 生图列表** | `feed-images.js`, `image-gen-feed.js`, `wireFeedImages`, `wireImageGenFeed` | `docs/FEED-MODULES.md` |
+| **侧栏打开重排** | `relayoutFeedGridAfterSidePanel`, `scheduleImageGenFeedLayout({ immediate })` |
+| **Mobile 断点** | `mobile.js` → `MobileUI.isMobileViewport`（须在 `script.js` 前） |
 | **我的主页巨图** | `repairCreationsFeedLayout`, `getCreationsFeedColumns`, `promptrepo_myhome_columns` — 见 **`docs/ERROR-LOG.md`** |
 | **社区 Masonry（手机）** | `enforceMobileCommunityFeedGrid`, `useCssGridForCommunityFeed` |
 | **卡片库首屏顺序** | `renderCards`, `card-image-loader.js`, `prefetchWarehousePage`, `observeContainer` |
@@ -50,12 +53,12 @@
 
 ```javascript
 // 登录后 F12 Console
-window.__APP_BUILD__                                    // 应与左下角一致，当前约 20260604k
+window.__APP_BUILD__                                    // 应与左下角一致，当前 20260605l
 document.querySelectorAll('#imageGenFeed img[data-image-ref]').length
-performance.getEntriesByType('resource').filter(e => e.transferSize > 500000).length
-await window.PromptHubApi.getCommunityFeed({ limit: 80 }) // posts.length、是否含他人 authorId
-window.__promptHubCards.filter(c => c.publishedToCommunity) // 应与卡片库开关一致（用户反馈目前不一致）
-console.time('feed'); await window.PromptHubApi.getCommunityFeed({ limit: 20 }); console.timeEnd('feed')
+performance.getEntriesByType('resource').filter(e => e.transferSize > 500000).length  // 期望 0
+!!window.FeatureDraft?.hydrateFeedImages
+!!window.FeedImages?.feedImgStorageAttr
+window.MobileUI?.isMobileViewport?.()
 ```
 
 **用户 2026-05-29 实测**：他人配图偶现后刷新像没图 → **先量 Feed/sign 耗时、等 30s 不刷新**，再判过滤 Bug。

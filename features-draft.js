@@ -22,6 +22,16 @@
   const IMAGEGEN_FEED_PENDING_CAP = 6;
   const IMAGEGEN_FEED_FAILED_CAP = 4;
 
+  /** @see MobileUI.isMobileViewport — 全站手机断点唯一入口 */
+  function isMobileViewport() {
+    return window.MobileUI?.isMobileViewport?.() ?? window.matchMedia('(max-width: 900px)').matches;
+  }
+
+  /** 列表图加载占位（与 feed-images.js 同值；须在 wire* 之前可用） */
+  const IMG_LOADING_PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect fill="%2318181c" width="16" height="16"/></svg>'
+  );
+
   function randomGenRetentionMs() {
     return GEN_RETENTION_MIN_MS + Math.floor(Math.random() * (GEN_RETENTION_MAX_MS - GEN_RETENTION_MIN_MS + 1));
   }
@@ -107,7 +117,6 @@
   let imageGenPreviewRenderSeq = 0;
   let imageGenFeedPagedStore = null;
   let imageGenFeedScrollLoading = false;
-  let imageGenFeedScrollIntent = false;
   let layoutCommunityTimer = null;
   let communityFeedRenderGen = 0;
   const FEED_PER_PAGE = 24;
@@ -314,17 +323,6 @@
     return raw;
   }
 
-  function feedAssetIdFromImg(img) {
-    if (!img) return undefined;
-    return img.dataset?.sourceCardId
-      || img.dataset?.postId
-      || img.closest?.('.card')?.dataset?.sourceCardId
-      || img.closest?.('.card')?.dataset?.id
-      || img.closest?.('.card')?.dataset?.postId
-      || img.closest?.('.card')?.dataset?.creationId
-      || img.closest('[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '')
-      || undefined;
-  }
 
   function postForPublicApi(post) {
     const card = post.sourceCardId
@@ -2360,354 +2358,6 @@
     return card?.image && isDisplayableImage(card.image) ? card.image : null;
   }
 
-  function mergeCollectResolveOpts(assetId, opts = {}) {
-    const rawId = String(assetId || '').replace(/^wh_/, '');
-    if (!rawId || opts.communityFeed || opts.fromPublicFeed) return opts;
-    const card = (window.getWarehouseCardsForImageGen?.() || window.__promptHubCards || [])
-      .find((c) => c.id === rawId);
-    const collect = card && window.getCommunityCollectImageResolveOpts?.(card);
-    if (!collect) return opts;
-    return { ...opts, ...collect, fromPublicFeed: true };
-  }
-
-  async function resolveImageDisplayUrl(image, jobId, assetId, opts = {}) {
-    if (!image) return '';
-    opts = mergeCollectResolveOpts(assetId, opts);
-    if (window.SupabaseSync?.normalizeImageRef) {
-      image = window.SupabaseSync.normalizeImageRef(image) || image;
-    }
-    const publicFeed = opts.fromPublicFeed === true || opts.communityFeed === true;
-    const inCommunityGrid = opts.inCommunityGrid === true;
-    const authorId = opts.authorId || '';
-    const cardId = opts.cardId || assetId || '';
-    const cacheKey = (publicFeed ? 'pub:' : '') + (jobId ? `job:${jobId}` : (assetId ? `${assetId}:${image}` : image));
-    if (!publicFeed) {
-      const hit = displayUrlCache.get(cacheKey);
-      if (hit) return hit;
-    }
-    let url = '';
-    if (!publicFeed) {
-      const listOnly = opts.listOnly === true || opts.allowFullFallback === false;
-      let cached = window.SupabaseSync?.getCachedDisplayUrl?.(image, { assetId, variant: 'grid' });
-      if (!cached && !listOnly) {
-        cached = window.SupabaseSync?.getCachedDisplayUrl?.(image, { assetId, variant: 'full' });
-      }
-      if (cached && /^https?:\/\//i.test(cached) && !cached.includes('/object/public/')
-        && !window.SupabaseSync?.isInvalidMediaUrl?.(cached)) url = cached;
-    }
-    const isStorageLike = window.SupabaseSync?.isStorageRef?.(image) || String(image).startsWith('storage://');
-    if (!url && window.SupabaseSync?.resolveDisplayUrl && isStorageLike) {
-      try {
-        const communityFeed = publicFeed || inCommunityGrid;
-        const listOnly = opts.listOnly === true || opts.allowFullFallback === false;
-        const ownPath = window.SupabaseSync?.storagePathFromRef?.(image)
-          && window.SupabaseSync?.storagePathOwnedByCurrentUser?.(window.SupabaseSync.storagePathFromRef(image));
-        const useFull = !listOnly && (opts.preferFull === true || (communityFeed && !inCommunityGrid));
-        url = await window.SupabaseSync.resolveDisplayUrl(image, {
-          assetId: opts.cardId || assetId,
-          authorId: authorId || undefined,
-          cardId: opts.cardId || cardId || undefined,
-          variant: useFull ? 'full' : 'grid',
-          communityFeed,
-          tryAllPaths: communityFeed || opts.tryAllPaths === true,
-          allowFullFallback: listOnly ? false : undefined,
-          listOnly: listOnly || undefined,
-          degradedListFull: false
-        });
-      } catch (e) {
-        console.warn('resolve image failed', e);
-      }
-    }
-    if (!url && jobId && window.PromptHubApi?.getGenerationImageUrl) {
-      const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
-      if (r.ok && r.data?.url) url = r.data.url;
-    }
-    if (!url && window.SupabaseSync?.resolveDisplayUrl) {
-      try {
-        const listOnly = opts.listOnly === true || opts.allowFullFallback === false;
-        const ownPath = window.SupabaseSync?.storagePathFromRef?.(image)
-          && window.SupabaseSync?.storagePathOwnedByCurrentUser?.(window.SupabaseSync.storagePathFromRef(image));
-        const useFull = !listOnly && (opts.preferFull === true || (publicFeed && !inCommunityGrid));
-        url = await window.SupabaseSync.resolveDisplayUrl(image, {
-          assetId,
-          authorId: authorId || undefined,
-          cardId: cardId || undefined,
-          variant: useFull ? 'full' : 'grid',
-          communityFeed: opts.fromPublicFeed === true || inCommunityGrid,
-          tryAllPaths: opts.fromPublicFeed === true || inCommunityGrid,
-          allowFullFallback: listOnly ? false : undefined,
-          listOnly: listOnly || undefined,
-          degradedListFull: false
-        });
-      } catch (e) {
-        console.warn('resolve image failed', e);
-      }
-    }
-    if (!url && typeof image === 'string' && /^https?:\/\//i.test(image)) {
-      const isPrivateBucket = /\/storage\/v1\/object\/(public|sign|authenticated)\/card-images\//i.test(image);
-      if (!isPrivateBucket && !window.SupabaseSync?.isInvalidMediaUrl?.(image)) url = image;
-    }
-    if (url && !url.startsWith('storage://') && !url.startsWith('data:image/svg')
-      && (!window.SupabaseSync?.isValidSignedDisplayUrl || window.SupabaseSync.isValidSignedDisplayUrl(url))) {
-      displayUrlCache.set(cacheKey, url);
-    }
-    return url || '';
-  }
-
-  const IMG_LOADING_PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect fill="%2318181c" width="16" height="16"/></svg>'
-  );
-
-  function imageGenFeedSignOpts(img) {
-    const cardEl = img?.closest?.('.imagegen-feed-card[data-feed-id]');
-    if (!cardEl || !img.closest('#imageGenFeed')) return null;
-    const feedId = cardEl.dataset.feedId || '';
-    if (!feedId.startsWith('wh_')) {
-      const authorId = cardEl.dataset.authorId || img.dataset.authorId || '';
-      const postId = feedId;
-      if (authorId || postId) {
-        return { fromPublicFeed: true, inCommunityGrid: true, authorId, cardId: cardEl.dataset.sourceCardId || postId };
-      }
-      return null;
-    }
-    const rawId = feedId.replace(/^wh_/, '');
-    const c = (window.getWarehouseCardsForImageGen?.() || window.__promptHubCards || [])
-      .find((x) => x.id === rawId);
-    const collect = c && window.getCommunityCollectImageResolveOpts?.(c);
-    if (!collect) return { fromPublicFeed: false, authorId: '', cardId: rawId };
-    return {
-      fromPublicFeed: true,
-      communityFeed: true,
-      authorId: collect.authorId,
-      cardId: collect.cardId || collect.assetId || '',
-      inCommunityGrid: false
-    };
-  }
-
-  function communityImageSignOpts(img) {
-    const ig = imageGenFeedSignOpts(img);
-    if (ig) return ig;
-    const inFeed = !!img?.closest?.(
-      '#communityGrid, #creationsGrid, #userProfileGrid, #communitySideBody, #creationsSideBody, .community-side-img-btn'
-    );
-    if (!inFeed) return { fromPublicFeed: false, authorId: '', cardId: '' };
-    const authorId = img.closest('.card')?.dataset?.authorId || '';
-    const ref = img.getAttribute('data-image-ref') || '';
-    const path = window.SupabaseSync?.storagePathFromRef?.(ref) || '';
-    const uid = window.SupabaseSync?.getUserId?.();
-    const own = !!(path && uid && path.replace(/^\//, '').startsWith(`${uid}/`));
-    const guest = !window.SupabaseSync?.isLoggedIn?.();
-    const sidePanel = !!img?.closest?.('#communitySideBody, #creationsSideBody, .community-side-img-btn');
-    const inCommunityGrid = !!img?.closest?.('#communityGrid, #creationsGrid, #userProfileGrid');
-    return {
-      fromPublicFeed: guest || sidePanel || (inCommunityGrid && !own),
-      inCommunityGrid,
-      authorId:
-        img.dataset?.authorId
-        || authorId
-        || img.closest('.card')?.dataset?.authorId
-        || img.closest('[data-author-id]')?.dataset?.authorId
-        || '',
-      cardId:
-        img.dataset?.sourceCardId
-        || img.closest('.card')?.dataset?.sourceCardId
-        || img.closest('.card')?.dataset?.postId
-        || img.dataset?.postId
-        || ''
-    };
-  }
-
-  function bindFeedImgErrorFallback(img) {
-    if (!img || img.dataset.feedImgErrBound) return;
-    img.dataset.feedImgErrBound = '1';
-    img.addEventListener('error', () => {
-      if (img.dataset.feedImgRetry === '1') return;
-      img.dataset.feedImgRetry = '1';
-      const ref = img.getAttribute('data-image-ref');
-      const jobId = img.getAttribute('data-job-id') || '';
-      if (!ref) return;
-      const inIgFeed = !!img.closest('#imageGenFeed');
-      const ownWhFeed = inIgFeed && !!img.closest('.imagegen-feed-card[data-feed-id^="wh_"]');
-      if (ownWhFeed) {
-        const cardId = feedAssetIdFromImg(img);
-        const card = cardId && (window.__promptHubCards || []).find((c) => c.id === cardId);
-        if (card) window.SupabaseSync?.queueGridBackfill?.(card, { force: true });
-        return;
-      }
-      const retryOpts = inIgFeed
-        ? { ...communityImageSignOpts(img), listOnly: true, allowFullFallback: false }
-        : communityImageSignOpts(img);
-      void resolveImageDisplayUrl(ref, jobId || null, feedAssetIdFromImg(img), retryOpts).then((url) => {
-        if (url && !url.startsWith('storage://')) {
-          img.src = url;
-          img.classList.remove('img-load-failed');
-          return;
-        }
-        img.src = IMG_LOADING_PLACEHOLDER;
-      });
-    });
-  }
-
-  async function applyFeedImageSrc(img, ref, jobId) {
-    const feedMedia = img.closest('.imagegen-feed-media');
-    const cardMedia = img.closest('.card-media');
-    if (!ref || !isDisplayableImage(ref)) return false;
-    bindFeedImgErrorFallback(img);
-    const assetId = feedAssetIdFromImg(img);
-    const signOpts = communityImageSignOpts(img);
-    const fromPublicFeed = signOpts.fromPublicFeed;
-    const inImageGenFeed = !!img.closest('#imageGenFeed, .imagegen-mobile-result-track');
-    const listOnly = inImageGenFeed || !!cardMedia?.closest('#communityGrid, #creationsGrid, #userProfileGrid');
-    let url = fromPublicFeed
-      ? ''
-      : (displayUrlCache.get(jobId ? `job:${jobId}` : (assetId ? `${assetId}:${ref}` : ref)) || '');
-    const inGrid = !!cardMedia?.closest('#communityGrid, #creationsGrid, #userProfileGrid');
-    if (!url && !fromPublicFeed) {
-      let cached = inGrid
-        ? window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId, authorId: signOpts.authorId, variant: 'grid', tryAllPaths: true })
-        : '';
-      if (!cached) cached = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId, variant: 'grid' });
-      if (!cached && !listOnly) cached = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId, variant: 'full' });
-      if (cached && typeof cached === 'string' && !cached.startsWith('storage://') && !cached.startsWith('data:image/svg')
-        && !cached.includes('/object/public/') && !window.SupabaseSync?.isInvalidMediaUrl?.(cached)) {
-        url = cached;
-      }
-    }
-    if (!url) url = await resolveImageDisplayUrl(ref, jobId || null, assetId, {
-      ...signOpts,
-      cardId: signOpts.cardId || assetId,
-      inCommunityGrid: inGrid,
-      communityFeed: signOpts.fromPublicFeed || signOpts.communityFeed === true || inGrid,
-      listOnly,
-      allowFullFallback: listOnly ? false : undefined
-    });
-    if (!url || url.startsWith('storage://') || url.startsWith('data:image/svg')) {
-      feedMedia?.classList.add('is-loading');
-      feedMedia?.classList.remove('card-media--missing', 'card-media--load-failed');
-      return false;
-    }
-    const endLoad = () => {
-      const media = img.closest('.imagegen-feed-media, .card-media, .community-side-img-btn');
-      if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
-      else media?.classList.remove('is-loading');
-    };
-    const tryFullFallback = () => {
-      if (listOnly || inImageGenFeed) {
-        const ownWhFeed = inImageGenFeed && !!img.closest('.imagegen-feed-card[data-feed-id^="wh_"]');
-        if (ownWhFeed) {
-          const card = assetId && (window.__promptHubCards || []).find((c) => c.id === assetId);
-          if (card) {
-            window.SupabaseSync?.queueGridBackfill?.(card, { force: true });
-            feedMedia?.classList.add('is-loading');
-            feedMedia?.classList.remove('card-media--load-failed');
-            return;
-          }
-        }
-        if (!(cardMedia && removeBrokenCommunityFeedCard(cardMedia))) {
-          feedMedia?.classList.add('card-media--load-failed');
-          cardMedia?.classList.add('card-media--load-failed');
-        }
-        endLoad();
-        return;
-      }
-      if (img.dataset.imgFallback === '1' || !window.SupabaseSync?.resolveDisplayUrl) {
-        if (!(cardMedia && removeBrokenCommunityFeedCard(cardMedia))) {
-          cardMedia?.classList.add('card-media--load-failed');
-        }
-        endLoad();
-        return;
-      }
-      img.dataset.imgFallback = '1';
-      const ownWhFeed = inImageGenFeed && !!img.closest('.imagegen-feed-card[data-feed-id^="wh_"]');
-      if (ownWhFeed) {
-        const card = assetId && (window.__promptHubCards || []).find((c) => c.id === assetId);
-        if (card) {
-          window.SupabaseSync?.queueGridBackfill?.(card, { force: true });
-          feedMedia?.classList.add('is-loading');
-          feedMedia?.classList.remove('card-media--load-failed');
-          return;
-        }
-      }
-      const signOpts2 = communityImageSignOpts(img);
-      void window.SupabaseSync.resolveDisplayUrl(ref, {
-        assetId,
-        authorId: signOpts2.authorId || undefined,
-        cardId: signOpts2.cardId || assetId || undefined,
-        variant: 'full',
-        communityFeed: signOpts2.fromPublicFeed || signOpts2.communityFeed === true,
-        tryAllPaths: true
-      }).then((full) => {
-        if (full && /^https?:\/\//i.test(full) && !full.startsWith('storage://')
-          && !window.SupabaseSync?.isWarehouseBlockedFullUrl?.(full, img)) {
-          img.addEventListener('load', endLoad, { once: true });
-          img.src = full;
-          if (img.complete && img.naturalWidth > 0) endLoad();
-        } else if (!(cardMedia && removeBrokenCommunityFeedCard(cardMedia))) {
-          cardMedia?.classList.add('card-media--load-failed');
-          endLoad();
-        }
-      });
-    };
-    if (img.complete && img.src === url && img.naturalWidth > 0) {
-      endLoad();
-      return true;
-    }
-    img.addEventListener('load', endLoad, { once: true });
-    img.addEventListener('error', tryFullFallback, { once: true });
-    img.src = url;
-    img.classList.remove('img-load-failed');
-    if (img.complete && img.naturalWidth > 0) endLoad();
-    return true;
-  }
-
-  function feedImgStorageAttr(image) {
-    if (!image || typeof image !== 'string') return '';
-    if (window.SupabaseSync?.isStorageRef?.(image)) {
-      return ` data-storage-ref="${esc(image)}"`;
-    }
-    return '';
-  }
-
-  /** 社区纯图卡片：仅移除已确认 load-failed 的空壳，勿在 lazy 签名阶段删掉未出图卡片 */
-  function removeBrokenCommunityFeedCard(node) {
-    if (communityFeedPageLoading || window.__PH_FEED_BULK_DRAIN__) return false;
-    const media = node?.classList?.contains('card-media') ? node : node?.closest?.('.card-media');
-    const card = media?.closest?.('.card.community-post-card') || node?.closest?.('.card.community-post-card');
-    if (!card?.closest?.('#communityGrid, #creationsGrid')) return false;
-    if (card.querySelector('.card-media img[src^="http"]')) return false;
-    const mediaEl = card.querySelector('.card-media');
-    if (!mediaEl?.classList.contains('card-media--load-failed')) return false;
-    const img = mediaEl.querySelector('img');
-    const pending = img?.dataset?.storageRef || img?.dataset?.imageRef
-      || mediaEl.classList.contains('is-loading') || mediaEl.classList.contains('card-media--await');
-    if (pending) return false;
-    card.remove();
-    return true;
-  }
-
-  function pruneEmptyCommunityFeedCards(scope) {
-    if (communityFeedPageLoading || window.__PH_FEED_BULK_DRAIN__) return;
-    const root = scope?.nodeType === 1 ? scope : document.getElementById(String(scope)) || scope;
-    if (!root?.querySelectorAll) return;
-    const loadingN = root.querySelectorAll(
-      '#communityGrid .card-media.is-loading, #creationsGrid .card-media.is-loading, #communityGrid .card-media--await, #creationsGrid .card-media--await'
-    ).length;
-    if (loadingN > 12) return;
-    root.querySelectorAll('#communityGrid .card, #creationsGrid .card').forEach((card) => {
-      const media = card.querySelector('.card-media');
-      if (!media) return;
-      if (!media.classList.contains('card-media--load-failed')) return;
-      if (card.offsetHeight >= 32) return;
-      const img = media.querySelector('img');
-      const src = img?.currentSrc || img?.src || '';
-      if (src.startsWith('http') && img?.complete && img.naturalWidth > 8) return;
-      if (img?.dataset?.storageRef || img?.dataset?.imageRef) return;
-      if (media.classList.contains('is-loading') || media.classList.contains('card-media--await')) return;
-      if (img?.dataset?.storageRef || img?.dataset?.imageRef) return;
-      card.remove();
-    });
-  }
-
   function finishCommunityFeedLayoutAfterBatch(containerId) {
     if (!containerId) return;
     const container = document.getElementById(containerId);
@@ -2724,11 +2374,11 @@
 
   function getFeedScrollRoot(container) {
     if (!container) return null;
-    if (!isMobileFeedLayout() && container.id === 'creationsGrid') {
+    if (!isMobileViewport() && container.id === 'creationsGrid') {
       return container.closest('.my-home-shell') || container.closest('.feature-shell') || container;
     }
     if (
-      !isMobileFeedLayout()
+      !isMobileViewport()
       && container.id === 'communityGrid'
       && container.classList?.contains('community-feed-columns')
     ) {
@@ -2743,27 +2393,12 @@
       }
       el = el.parentElement;
     }
-    if (window.MobileUI?.isMobile?.() && (container.id === 'communityGrid' || container.id === 'creationsGrid' || container.id === 'imageGenFeed')) {
+    if (isMobileViewport() && (container.id === 'communityGrid' || container.id === 'creationsGrid' || container.id === 'imageGenFeed')) {
       return container.closest('.feature-shell') || container;
     }
     return container;
   }
 
-  function revealCommunityFeedImages(container) {
-    if (!container) return;
-    container.querySelectorAll('.card-media .card-img, .card-media img').forEach((img) => {
-      if (!img.complete || img.naturalWidth < 8) return;
-      const src = img.currentSrc || img.src || '';
-      if (!src.startsWith('http') || src.includes('data:image/svg')) return;
-      const media = img.closest('.card-media, .community-side-img-btn');
-      if (!media) return;
-      if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
-      else media.classList.remove('is-loading', 'card-media--await');
-    });
-    if (container.id === 'communityGrid' || container.id === 'creationsGrid') {
-      scrubCommunityFeedCardMediaHeights(container);
-    }
-  }
 
   function ensureFeedPageSentinel(container) {
     if (!container) return null;
@@ -2823,149 +2458,6 @@
     });
   }
 
-  function stripFailedFeedMedia(scope) {
-    scope.querySelectorAll('.imagegen-feed-media img.img-load-failed').forEach((img) => {
-      const media = img.closest('.imagegen-feed-media');
-      const card = img.closest('.imagegen-feed-card');
-      if (media?.closest('#imageGenFeed')) {
-        media.classList.add('card-media--load-failed');
-        card?.classList.remove('imagegen-feed-card--no-media');
-        return;
-      }
-      media?.remove();
-      card?.classList.add('imagegen-feed-card--no-media');
-    });
-    scope.querySelectorAll(
-      '#communityGrid .card-media--load-failed, #userProfileGrid .card-media--load-failed'
-    ).forEach((media) => {
-      if (removeBrokenCommunityFeedCard(media)) return;
-      media.classList.add('card-media--load-failed');
-      media.classList.remove('is-loading', 'card-media--await');
-    });
-    pruneEmptyCommunityFeedCards(scope);
-  }
-
-  async function hydrateFeedImages(root) {
-    const scope = root || document;
-    const rootEl = scope.nodeType === 1 ? scope : document.getElementById(String(scope)) || scope;
-    const isImageGenWarehouseFeed = rootEl?.id === 'imageGenFeed';
-    const inCommunity = !!(rootEl?.id === 'communityGrid' || rootEl?.id === 'creationsGrid' || rootEl?.id === 'userProfileGrid'
-      || rootEl?.querySelector?.('.community-post-card, .creation-post-card'));
-    const inImageGenFeed = isImageGenWarehouseFeed
-      || !!rootEl?.closest?.('#pageImageGen');
-    if (isImageGenWarehouseFeed) {
-      stripFailedFeedMedia(scope);
-      window.SupabaseSync?.patchImageSrcFromCache?.(scope, { visibleFirst: true, max: 12 });
-      if (window.CardImageLoader?.observeContainer) {
-        window.CardImageLoader.observeContainer(scope);
-      } else {
-        const imgs = [...scope.querySelectorAll('#imageGenFeed img[data-image-ref]')].slice(0, 12);
-        void (async () => {
-          for (const img of imgs) await hydrateFeedImageOne(img);
-        })();
-      }
-      if (isMobileFeedViewport()) resetMobileFeedGridStyles();
-      else layoutImageGenFeedMasonry();
-      return;
-    }
-    if (inCommunity) {
-      stripFailedFeedMedia(scope);
-      window.SupabaseSync?.patchImageSrcFromCache?.(scope, { visibleFirst: true, max: 24 });
-      if (window.CardImageLoader?.observeContainer) {
-        window.CardImageLoader.observeContainer(scope);
-      }
-      revealCommunityFeedImages(scope.nodeType === 1 ? scope : document.getElementById(String(scope)) || scope);
-      if (isMobileFeedViewport()) resetMobileFeedGridStyles();
-      return;
-    }
-    if (window.SupabaseSync?.hydrateImageElements) {
-      window.SupabaseSync.patchImageSrcFromCache?.(scope);
-      await window.SupabaseSync.hydrateImageElements(scope, {
-        onlyMissing: true,
-        communityBoost: inCommunity,
-        warehouseBoost: inImageGenFeed && !isImageGenWarehouseFeed
-      });
-      stripFailedFeedMedia(scope);
-      const isFeedGrid = rootEl?.id === 'communityGrid' || rootEl?.id === 'creationsGrid' || rootEl?.id === 'userProfileGrid';
-      const isSideOnly = rootEl?.id === 'communitySideBody' || rootEl?.id === 'creationsSideBody';
-      if (!isFeedGrid && !isSideOnly) {
-        if (isMobileFeedViewport()) resetMobileFeedGridStyles();
-        else layoutImageGenFeedMasonry();
-      }
-      return;
-    }
-    const imgs = scope.querySelectorAll(
-      '.imagegen-feed img[data-image-ref], #imageGenFeed img[data-image-ref], #creationsSideBody img[data-image-ref], #communitySideBody img[data-image-ref], #creationsGrid img[data-image-ref], #communityGrid img[data-image-ref], #userProfileGrid img[data-image-ref]'
-    );
-    const list = [...imgs];
-    const igOnly = list.every((img) => img.closest('#imageGenFeed'));
-    const toHydrate = igOnly
-      ? list.filter((img) => {
-        const r = img.getBoundingClientRect();
-        return r.bottom > -480 && r.top < window.innerHeight + 480;
-      }).slice(0, 12)
-      : list;
-    const concurrency = window.matchMedia('(max-width: 900px)').matches ? 4 : 6;
-    let cursor = 0;
-    async function worker() {
-      while (cursor < toHydrate.length) {
-        const img = toHydrate[cursor++];
-        await hydrateFeedImageOne(img);
-      }
-    }
-    await Promise.all(Array.from({ length: Math.min(concurrency, toHydrate.length || 1) }, () => worker()));
-    stripFailedFeedMedia(scope);
-    if (isMobileFeedViewport()) resetMobileFeedGridStyles();
-    else layoutImageGenFeedMasonry();
-  }
-
-  function releaseFeedMediaLoading(media) {
-    if (!media) return;
-    if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
-    else media.classList.remove('is-loading', 'card-media--await', 'media-shine-reveal');
-  }
-
-  async function hydrateFeedImageOne(img) {
-    const ref = img.getAttribute('data-image-ref');
-    const jobId = img.getAttribute('data-job-id') || '';
-    const sideBtn = img.closest('.community-side-img-btn');
-    const media = img.closest('.imagegen-feed-media') || img.closest('.card-media') || sideBtn;
-    if (!ref || !isDisplayableImage(ref)) {
-      media?.remove();
-      img.closest('.imagegen-feed-card')?.classList.add('imagegen-feed-card--no-media');
-      return;
-    }
-    if (media?.classList.contains('imagegen-gen-pending')) return;
-    try {
-      const cur = img.currentSrc || img.src || '';
-      if (cur.startsWith('http') && !cur.includes('data:image/svg') && img.complete && img.naturalWidth > 0) {
-        releaseFeedMediaLoading(media);
-        return;
-      }
-      if (media) {
-        if (!media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
-        media.classList.add('is-loading');
-      }
-      if (!cur.startsWith('http') || cur.includes('data:image/svg')) {
-        img.src = IMG_LOADING_PLACEHOLDER;
-      }
-      img.classList.remove('img-load-failed');
-      const ok = await applyFeedImageSrc(img, ref, jobId || null);
-      if (!ok) {
-        const feedCard = img.closest('.imagegen-feed-card');
-        if (feedCard) {
-          media?.classList.add('card-media--load-failed');
-        } else if (media?.classList.contains('card-media')) {
-          media.classList.add('card-media--load-failed');
-        } else if (sideBtn) {
-          img.src = IMG_LOADING_PLACEHOLDER;
-          releaseFeedMediaLoading(media);
-        }
-      }
-    } catch (e) {
-      releaseFeedMediaLoading(media);
-    }
-  }
 
   function finalizeFeedContainer(container, containerId) {
     if (!container) return;
@@ -3062,16 +2554,6 @@
   }
 
   /** 标题行仅显示真实标题；勿把提示词首行当标题 */
-  function resolveFeedCardDisplay(title, prompt) {
-    const t = (title || '').trim();
-    const p = (prompt || '').trim();
-    let showTitle = '';
-    if (t && !isGenericFeedTitle(t) && t !== p) {
-      if (!(p && p.startsWith(t) && t.length >= 6)) showTitle = t;
-    }
-    const showPrompt = p || '';
-    return { showTitle, showPrompt };
-  }
 
   /** 首屏：有缓存 URL 直接用，否则小占位（避免 Masonry 就位前大图闪现） */
   function feedImgInitialSrc(image, opts) {
@@ -3193,117 +2675,6 @@
     if (favBtn) favBtn.textContent = faved ? '已收藏' : '收藏';
   }
 
-  function isMobileFeedViewport() {
-    return window.MobileUI?.isMobile?.() || window.matchMedia('(max-width: 900px)').matches;
-  }
-
-  function bindImageGenFeedImageRelayout() {
-    const wrap = document.getElementById('imageGenFeed');
-    if (!wrap) return;
-    wrap.querySelectorAll('.imagegen-feed-media img, .imagegen-feed-thumb-btn img').forEach(img => {
-      if (img.dataset.masonryRelayoutBound) return;
-      img.dataset.masonryRelayoutBound = '1';
-      const relayout = () => scheduleImageGenFeedLayout();
-      img.addEventListener('load', relayout, { once: true });
-      img.addEventListener('error', relayout, { once: true });
-    });
-  }
-
-  function scheduleImageGenFeedLayout() {
-    clearTimeout(imageGenLayoutTimer);
-    imageGenLayoutTimer = setTimeout(() => {
-      if (isMobileFeedViewport()) enforceMobileImageGenFeed();
-      else layoutImageGenFeedMasonry();
-    }, 160);
-  }
-
-  function resetImageGenFeedCardLayout() {
-    const wrap = document.getElementById('imageGenFeed');
-    if (!wrap) return;
-    if (imageGenMasonry) {
-      try { imageGenMasonry.destroy(); } catch (e) { /* ignore */ }
-      imageGenMasonry = null;
-    }
-    wrap.style.height = '';
-    wrap.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
-    wrap.querySelectorAll('.imagegen-feed-card').forEach((card) => {
-      card.removeAttribute('style');
-    });
-  }
-
-  function layoutImageGenFeedMasonry() {
-    if (isMobileFeedViewport()) {
-      enforceMobileImageGenFeed();
-      return;
-    }
-    const wrap = document.getElementById('imageGenFeed');
-    if (!wrap) return;
-    wrap.classList.remove('imagegen-feed--tiles', 'imagegen-feed--desktop-grid', 'mobile-feed-grid');
-    wrap.classList.add('imagegen-feed--masonry');
-
-    const runLayout = () => {
-      if (typeof Masonry === 'undefined') return;
-      const cards = wrap.querySelectorAll('.imagegen-feed-card');
-      if (!cards.length) {
-        resetImageGenFeedCardLayout();
-        setFeedLayoutPending(wrap, false);
-        return;
-      }
-      const gap = getMasonryGap();
-      const style = getComputedStyle(wrap);
-      const innerW = wrap.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-      if (innerW < 80) {
-        scheduleImageGenFeedLayout();
-        return;
-      }
-      const cols = getImageGenFeedColumns(innerW);
-      const colWidth = Math.max(140, Math.floor((innerW - gap * (cols - 1)) / cols));
-      let sizer = wrap.querySelector('.grid-sizer');
-      if (!sizer) {
-        sizer = document.createElement('div');
-        sizer.className = 'grid-sizer';
-        wrap.insertBefore(sizer, wrap.firstChild);
-      }
-      sizer.style.width = colWidth + 'px';
-      cards.forEach((card) => { card.style.width = colWidth + 'px'; });
-      const opts = {
-        itemSelector: '.imagegen-feed-card',
-        columnWidth: '.grid-sizer',
-        gutter: gap,
-        percentPosition: false,
-        horizontalOrder: false,
-        transitionDuration: 0
-      };
-      const scrollTop = wrap.scrollTop;
-      if (imageGenMasonry) {
-        imageGenMasonry.option(opts);
-        imageGenMasonry.reloadItems();
-        imageGenMasonry.layout();
-      } else {
-        cards.forEach((card) => {
-          card.style.left = '';
-          card.style.top = '';
-          card.style.position = '';
-        });
-        imageGenMasonry = new Masonry(wrap, opts);
-        imageGenMasonry.layout();
-      }
-      requestAnimationFrame(() => {
-        imageGenMasonry?.layout();
-        wrap.scrollTop = scrollTop;
-        setFeedLayoutPending(wrap, false);
-        window.CardImageLoader?.observeContainer?.(wrap);
-      });
-      wrap.scrollTop = scrollTop;
-      bindImageGenFeedImageRelayout();
-    };
-
-    if (typeof Masonry !== 'undefined') runLayout();
-    else if (typeof window.ensureMasonryScript === 'function') {
-      void window.ensureMasonryScript().then(runLayout);
-    } else runLayout();
-  }
-
   function feedImgStillPending(img) {
     const src = img?.currentSrc || img?.src || '';
     if (!src || src.includes('data:image/svg')) return true;
@@ -3343,16 +2714,13 @@
   }
 
   /* —— Feed 排版：feed-layout.js（见 docs/FEED-LAYOUT.md）—— */
-  function isMobileFeedLayout() {
-    return isMobileFeedViewport();
-  }
 
   function useCssGridForCommunityFeed(containerId) {
     return window.FeedLayout?.useMobileGrid?.(containerId) ?? false;
   }
 
   function useFeedPagedRender(containerId) {
-    return (containerId === 'communityGrid' || containerId === 'creationsGrid') && !isMobileFeedLayout();
+    return (containerId === 'communityGrid' || containerId === 'creationsGrid') && !isMobileViewport();
   }
 
   function useCommunityCssGrid(containerId) {
@@ -3372,8 +2740,145 @@
   let bindCommunityFeedResizeRelayout;
 
   function enforceMobileCommunityFeedGrid(containerId) {
-    if (!isMobileFeedLayout()) return;
+    if (!isMobileViewport()) return;
     window.FeedLayout?.layout?.(containerId);
+  }
+
+
+  /* —— Feed 图片：feed-images.js —— */
+  let feedAssetIdFromImg;
+  let feedImgStorageAttr;
+  let resolveImageDisplayUrl;
+  let imageGenFeedSignOpts;
+  let communityImageSignOpts;
+  let applyFeedImageSrc;
+  let hydrateFeedImages;
+  let hydrateFeedImageOne;
+  let releaseFeedMediaLoading;
+  let stripFailedFeedMedia;
+  let removeBrokenCommunityFeedCard;
+  let pruneEmptyCommunityFeedCards;
+  let revealCommunityFeedImages;
+
+  function wireFeedImages() {
+    if (window.__feedImagesWired) return;
+    const FI = window.FeedImages.init({
+      esc,
+      isDisplayableImage,
+      getCommunityFeedPageLoading: () => communityFeedPageLoading,
+      isMobileFeedViewport: isMobileViewport,
+      resetMobileFeedGridStyles: () => resetMobileFeedGridStyles(),
+      layoutImageGenFeedMasonry: () => layoutImageGenFeedMasonry(),
+      scrubCommunityFeedCardMediaHeights
+    });
+    feedAssetIdFromImg = FI.feedAssetIdFromImg;
+    feedImgStorageAttr = FI.feedImgStorageAttr;
+    resolveImageDisplayUrl = FI.resolveImageDisplayUrl;
+    imageGenFeedSignOpts = FI.imageGenFeedSignOpts;
+    communityImageSignOpts = FI.communityImageSignOpts;
+    applyFeedImageSrc = FI.applyFeedImageSrc;
+    hydrateFeedImages = FI.hydrateFeedImages;
+    hydrateFeedImageOne = FI.hydrateFeedImageOne;
+    releaseFeedMediaLoading = FI.releaseFeedMediaLoading;
+    stripFailedFeedMedia = FI.stripFailedFeedMedia;
+    removeBrokenCommunityFeedCard = FI.removeBrokenCommunityFeedCard;
+    pruneEmptyCommunityFeedCards = FI.pruneEmptyCommunityFeedCards;
+    revealCommunityFeedImages = FI.revealCommunityFeedImages;
+    window.__feedImagesWired = true;
+  }
+
+  /* —— 生图仓库 Feed：image-gen-feed.js —— */
+  let layoutImageGenFeedMasonry;
+  let scheduleImageGenFeedLayout;
+  let resetImageGenFeedCardLayout;
+  let bindImageGenFeedImageRelayout;
+  let enforceMobileImageGenFeed;
+  let buildFeedCardHtml;
+  let buildFeedPendingCardHtml;
+  let buildFeedFailedCardHtml;
+  let getImageGenWarehouseFeedList;
+  let getImageGenCommunityFeedList;
+  let imageGenFeedListSignature;
+  let warehouseCardToFeedHtml;
+  let communityPostToFeedHtml;
+  let getImageGenFeedNavItems;
+  let imageGenFeedHasMorePages;
+  let syncImageGenFeedLoadMoreBtn;
+  let bindImageGenFeedPagedScroll;
+  let bindImageGenFeedResizeRelayout;
+  let renderImageGenFeed;
+  let bindImageGenFeedCardEvents;
+
+  function wireImageGenFeed() {
+    if (window.__imageGenFeedWired) return;
+    const IG = window.ImageGenFeed.init({
+      esc,
+      isDisplayableImage,
+      isMobileFeedViewport: isMobileViewport,
+      getMasonryGap,
+      getImageGenFeedColumns,
+      setFeedLayoutPending,
+      IMG_LOADING_PLACEHOLDER,
+      hydrateFeedImageOne: (...a) => hydrateFeedImageOne(...a),
+      getImageGenFeedTab: () => imageGenFeedTab,
+      getImageGenWhGroup: () => imageGenWhGroup,
+      getImageGenWhTag: () => imageGenWhTag,
+      getImageGenPendingJobs: () => imageGenPendingJobs,
+      getImageGenFailedJobs: () => imageGenFailedJobs,
+      getCommunityScope: () => communityScope,
+      getCommunitySort: () => communitySort,
+      getLikedIds: () => likedIds,
+      getCommunityFeedForDisplay,
+      filterAndSortPosts,
+      isGenericPostTitle,
+      isGenericFeedTitle,
+      imageGenModelLabel,
+      formatTime,
+      failedJobModelLabel,
+      friendlyGenErrorMessage,
+      batchIndexLabel,
+      updateImageGenFeedHint,
+      syncImageGenWarehouseFiltersUI,
+      syncImageGenCommunityFiltersUI,
+      renderImageGenMobileResult,
+      openImageGenLightboxAt,
+      openImageGenPreview,
+      fillFeedPromptToActiveMode,
+      copyFeedPromptText,
+      getActiveImageGenMode,
+      likeCommunityPostOnly,
+      removeFailedGenJob,
+      removePendingJob,
+      clearSessionGenJob,
+      getActivePollJobIds: () => activePollJobIds,
+      IMAGEGEN_FEED_PENDING_CAP,
+      IMAGEGEN_FEED_FAILED_CAP
+    });
+    layoutImageGenFeedMasonry = IG.layoutImageGenFeedMasonry;
+    scheduleImageGenFeedLayout = IG.scheduleImageGenFeedLayout;
+    resetImageGenFeedCardLayout = IG.resetImageGenFeedCardLayout;
+    bindImageGenFeedImageRelayout = IG.bindImageGenFeedImageRelayout;
+    enforceMobileImageGenFeed = IG.enforceMobileImageGenFeed;
+    buildFeedCardHtml = IG.buildFeedCardHtml;
+    buildFeedPendingCardHtml = IG.buildFeedPendingCardHtml;
+    buildFeedFailedCardHtml = IG.buildFeedFailedCardHtml;
+    getImageGenWarehouseFeedList = IG.getImageGenWarehouseFeedList;
+    getImageGenCommunityFeedList = IG.getImageGenCommunityFeedList;
+    imageGenFeedListSignature = IG.imageGenFeedListSignature;
+    warehouseCardToFeedHtml = IG.warehouseCardToFeedHtml;
+    communityPostToFeedHtml = IG.communityPostToFeedHtml;
+    getImageGenFeedNavItems = IG.getImageGenFeedNavItems;
+    imageGenFeedHasMorePages = IG.imageGenFeedHasMorePages;
+    syncImageGenFeedLoadMoreBtn = IG.syncImageGenFeedLoadMoreBtn;
+    bindImageGenFeedPagedScroll = IG.bindImageGenFeedPagedScroll;
+    bindImageGenFeedResizeRelayout = IG.bindImageGenFeedResizeRelayout;
+    renderImageGenFeed = IG.renderImageGenFeed;
+    bindImageGenFeedCardEvents = IG.bindImageGenFeedCardEvents;
+    window.__imageGenFeedWired = true;
+  }
+
+  function resetMobileFeedGridStyles() {
+    enforceMobileImageGenFeed?.();
   }
 
   function wireFeedLayout() {
@@ -4156,13 +3661,13 @@
       fragment.appendChild(sizer);
     }
 
-    const eagerCap = feedAppend ? postsToRender.length : (isMobileFeedLayout() ? 24 : 18);
+    const eagerCap = feedAppend ? postsToRender.length : (isMobileViewport() ? 24 : 18);
     postsToRender.forEach((post, idx) => {
       fragment.appendChild(createCommunityFeedCard(post, containerId, { eagerImage: idx < eagerCap }));
     });
 
     const appendedCards = [...fragment.querySelectorAll('.card')];
-    const preservedImgs = !feedAppend && isMobileFeedLayout() ? snapshotLoadedFeedImages(container) : new Map();
+    const preservedImgs = !feedAppend && isMobileViewport() ? snapshotLoadedFeedImages(container) : new Map();
     if (!feedAppend) {
       container.innerHTML = '';
       delete container.dataset.feedFinalized;
@@ -4250,7 +3755,7 @@
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
       window.CardImageLoader?.observeContainer?.(container);
       window.CardImageLoader?.boostCommunityFeedImages?.(container, FEED_PER_PAGE);
-      const mobile = isMobileFeedLayout();
+      const mobile = isMobileViewport();
       const prefetchCap = mobile ? 24 : 40;
       const cardLike = posts.map((p) => ({
         id: p.sourceCardId || p.id,
@@ -5219,10 +4724,6 @@
     }
   }
 
-  function isMobileFeaturePanel() {
-    return window.MobileUI?.isMobile?.() || window.matchMedia('(max-width: 900px)').matches;
-  }
-
   function getFeatureSidePanelWorkspace(panelId) {
     if (panelId === 'creationsSidePanel') {
       return document.querySelector('#pageCreations .community-workspace');
@@ -5231,24 +4732,24 @@
   }
 
   function getFeatureSidePanelMountRoot() {
-    if (isMobileFeaturePanel()) return document.body;
+    if (isMobileViewport()) return document.body;
     return document.querySelector('.app-chrome') || document.body;
   }
 
   /** 桌面「我的主页」侧栏挂到 app-chrome，避免 my-home-shell 滚动链裁切 */
   function shouldMountCreationsPanelOnRoot() {
-    if (isMobileFeaturePanel()) return true;
+    if (isMobileViewport()) return true;
     return document.getElementById('pageCreations')?.classList.contains('active');
   }
 
   function shouldMountFeatureSidePanelOnRoot(panelId) {
     if (panelId === 'creationsSidePanel') return shouldMountCreationsPanelOnRoot();
-    return isMobileFeaturePanel();
+    return isMobileViewport();
   }
 
   function ensureFeatureSidePanelDocked(panelId) {
     if (shouldMountFeatureSidePanelOnRoot(panelId)) return;
-    if (isMobileFeaturePanel()) return;
+    if (isMobileViewport()) return;
     unmountFeatureSidePanel(panelId);
     const panel = document.getElementById(panelId);
     const home = getFeatureSidePanelWorkspace(panelId);
@@ -5267,7 +4768,7 @@
       || document.getElementById('pageCreations')?.classList.contains('active');
     document.body.classList.toggle(
       'community-panel-open',
-      panelOpen && (isMobileFeaturePanel() || onFeedPage)
+      panelOpen && (isMobileViewport() || onFeedPage)
     );
   }
 
@@ -5309,6 +4810,18 @@
     return communityAppreciateActive || document.body.classList.contains('community-appreciate');
   }
 
+  function relayoutFeedGridAfterSidePanel(containerId) {
+    if (isMobileViewport()) return;
+    if (containerId === 'communityGrid') {
+      scheduleCommunityLayout(containerId, { force: true, immediate: true, recalcCols: true });
+      return;
+    }
+    if (containerId === 'creationsGrid') {
+      syncCommunityFeedColumnCount(containerId);
+      scheduleCommunityLayout(containerId, { force: true, immediate: true, recalcCols: true });
+    }
+  }
+
   function openPostSidePanel(id, ctx, opts = {}) {
     if (ctx === 'community' && isCommunityQuickPreviewActive()) {
       const post = opts.post || findPost(id, { sourceCardId: opts.sourceCardId });
@@ -5341,7 +4854,7 @@
       panel.classList.remove('community-side-panel--closing');
       panel.classList.add('community-side-panel--open');
     }
-    if (isMobileFeaturePanel()) {
+    if (isMobileViewport()) {
       window.MobileUI?.closeDrawers?.();
     }
     const gridId = isCreations ? 'creationsGrid' : 'communityGrid';
@@ -5356,8 +4869,9 @@
       titleId: isCreations ? 'creationsSideTitle' : 'communitySideTitle',
       mode: isCreations ? 'creations' : 'community'
     });
-    if (!isMobileFeaturePanel()) {
-      requestAnimationFrame(() => syncCommunityFeedColumnCount(gridId));
+    if (!isMobileViewport()) {
+      relayoutFeedGridAfterSidePanel(gridId);
+      requestAnimationFrame(() => relayoutFeedGridAfterSidePanel(gridId));
     }
     if (scrollEl && savedScrollTop > 0) {
       requestAnimationFrame(() => {
@@ -5565,6 +5079,11 @@
     communitySidePostId = null;
     openPostId = null;
     document.querySelectorAll('#communityGrid .community-post-card.selected').forEach(el => el.classList.remove('selected'));
+    if (!isMobileViewport()) {
+      requestAnimationFrame(() => {
+        scheduleCommunityLayout('communityGrid', { force: true, immediate: true, recalcCols: true });
+      });
+    }
   }
 
   function openCommunityDetail(id) {
@@ -6058,7 +5577,7 @@
 
   function startGenJobsBackgroundSync() {
     if (genJobsSyncInterval) return;
-    const syncIntervalMs = isMobileFeedViewport() ? 45000 : 30000;
+    const syncIntervalMs = isMobileViewport() ? 45000 : 30000;
     genJobsSyncInterval = setInterval(() => {
       if (!window.PointsSystem?.useApiForAccount?.()) return;
       if (!shouldRunGenJobsBackgroundSync()) return;
@@ -6895,8 +6414,12 @@
     mountFeatureSidePanel('creationsSidePanel');
     document.getElementById('creationsSidePanel')?.classList.remove('hidden');
     syncCommunityPanelOpenClass();
-    if (isMobileFeaturePanel()) window.MobileUI?.closeDrawers?.();
+    if (isMobileViewport()) window.MobileUI?.closeDrawers?.();
     void renderCreationsSidePanel(id);
+    if (!isMobileViewport()) {
+      relayoutFeedGridAfterSidePanel('creationsGrid');
+      requestAnimationFrame(() => relayoutFeedGridAfterSidePanel('creationsGrid'));
+    }
   }
 
   function closeCreationsSidePanel() {
@@ -6908,7 +6431,7 @@
     communitySidePostId = null;
     openPostId = null;
     document.querySelectorAll('#creationsGrid .community-post-card.selected').forEach(el => el.classList.remove('selected'));
-    if (!isMobileFeaturePanel()) {
+    if (!isMobileViewport()) {
       requestAnimationFrame(() => {
         scheduleCommunityLayout('creationsGrid', { force: true, immediate: true });
       });
@@ -7061,7 +6584,7 @@
     syncImageGenGenPublicFromPrompt();
     renderImageGenFeed();
     window.PointsSystem?.updateCreditsUI?.();
-    const mobileInit = isMobileFeedViewport();
+    const mobileInit = isMobileViewport();
     if (window.SupabaseSync?.isLoggedIn?.()) {
       scheduleGenJobsSync(mobileInit ? 1200 : 300);
       setTimeout(() => void quietSyncImageGenFromCloud(), mobileInit ? 80 : 0);
@@ -7070,7 +6593,7 @@
 
   /** 静默拉云端 + 恢复生图任务，仅用侧栏 authCloudStatus，不弹 Toast */
   async function quietSyncImageGenFromCloud() {
-    const mobile = isMobileFeedViewport();
+    const mobile = isMobileViewport();
     const doPull = async () => {
       if (typeof window.waitForCloudSyncIdle === 'function') {
         await window.waitForCloudSyncIdle(120000);
@@ -8443,7 +7966,7 @@
       });
       updateImageGenFeedHint();
       renderImageGenFeed();
-      if (singleRun && window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
+      if (singleRun && isMobileViewport() && window.MobileUI?.setImageGenView) {
         window.MobileUI.setImageGenView('feed', { scrollToTop: true });
       }
 
@@ -8657,7 +8180,7 @@
       window.PointsSystem?.updateCreditsUI?.();
       if (ok > 0) {
         toast(`已提交 ${ok}/${count} 张生图，已扣约 ${fmt(charged)} 积分（${fmt(unit)} 积分/张）`);
-        if (window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
+        if (isMobileViewport() && window.MobileUI?.setImageGenView) {
           window.MobileUI.setImageGenView('feed', { scrollToTop: true });
         }
       }
@@ -8830,7 +8353,7 @@
   function updateImageGenFeedHint() {
     const el = document.getElementById('imageGenFeedHint');
     if (!el) return;
-    const mobile = window.MobileUI?.isMobile?.();
+    const mobile = isMobileViewport();
     const warehouse = imageGenFeedTab === 'warehouse';
     if (warehouse) {
       el.textContent = '';
@@ -8870,7 +8393,7 @@
     } else {
       toast('已填入提示词');
     }
-    if (window.MobileUI?.isMobile?.()) window.MobileUI?.setImageGenView?.('form');
+    if (isMobileViewport()) window.MobileUI?.setImageGenView?.('form');
   }
 
   function fillFeedPromptToImageGen(prompt) {
@@ -8892,36 +8415,11 @@
       }
       fillFormRefOnly(url, [url]);
     }
-    if (window.MobileUI?.isMobile?.()) window.MobileUI?.setImageGenView?.('form');
+    if (isMobileViewport()) window.MobileUI?.setImageGenView?.('form');
     toast('已填入生图（提示词与参考图）');
   }
 
 
-  function buildFeedPendingCardHtml(job) {
-    const badges = [job.modelLabel || '生图中', (job.resolution || '1k').toUpperCase()];
-    const batchTag = batchIndexLabel(job.batchIndex, job.batchTotal);
-    if (batchTag) badges.unshift(batchTag);
-    const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${esc(b)}</span>`).join('');
-    const recovering = job.recovering === true;
-    const pendingLabel = recovering ? '恢复中' : '生成中';
-    const meta = recovering
-      ? (job.recoverNote || '上游可能已出图，后台同步中…').slice(0, 48)
-      : '预计 1–3 分钟 · 可继续提交';
-    const dismissBtn = '<button type="button" class="btn btn-ghost btn-sm imagegen-feed-del" data-pending-dismiss title="关闭生成占位（不删已入库的图）">×</button>';
-    return `<article class="imagegen-feed-card imagegen-feed-card-tile imagegen-feed-card--pending${recovering ? ' imagegen-feed-card--recovering' : ''}" data-feed-id="${esc(job.id)}" data-pending="1"${job.jobId ? ` data-job-id="${esc(job.jobId)}"` : ''}>
-      <div class="imagegen-feed-media imagegen-gen-pending" aria-busy="true" aria-label="${esc(pendingLabel)}">
-        <span class="imagegen-gen-pending-label">${esc(pendingLabel)}</span>
-      </div>
-      <div class="imagegen-feed-content">
-        <p class="imagegen-feed-prompt">${esc((job.prompt || '').slice(0, 120))}</p>
-        <div class="imagegen-feed-tags">${badgeHtml}</div>
-        <div class="imagegen-feed-foot imagegen-feed-foot--pending">
-          <span class="imagegen-feed-meta">${esc(meta)}</span>
-          ${dismissBtn}
-        </div>
-      </div>
-    </article>`;
-  }
 
   function failedJobModelLabel(job) {
     if (job.model) return imageGenModelLabel(job.model);
@@ -8932,7 +8430,7 @@
 
   function renderImageGenMobileResult() {
     const box = document.getElementById('imageGenMobileResult');
-    if (!box || !isMobileFeedViewport()) return;
+    if (!box || !isMobileViewport()) return;
     const pending = imageGenPendingJobs.slice(0, 8);
     const failed = imageGenFailedJobs.slice(0, 3);
     const cards = getImageGenWarehouseFeedList().slice(0, 8);
@@ -8974,120 +8472,7 @@
     })();
   }
 
-  function resetMobileFeedGridStyles() {
-    enforceMobileImageGenFeed();
-  }
 
-  function buildFeedFailedCardHtml(job) {
-    const batchTag = batchIndexLabel(job.batchIndex, job.batchTotal);
-    const badges = [];
-    if (batchTag) badges.push(batchTag);
-    badges.push(failedJobModelLabel(job));
-    badges.push('失败');
-    const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge imagegen-feed-badge--fail">${esc(b)}</span>`).join('');
-    const err = friendlyGenErrorMessage(job.errorMessage || '生图失败').slice(0, 120);
-    const failLabel = batchTag ? `${batchTag} · 失败` : '生成失败';
-    return `<article class="imagegen-feed-card imagegen-feed-card-tile imagegen-feed-card--failed" data-feed-id="${esc(job.id)}" data-failed="1" data-feed-prompt="${esc(job.prompt || '')}"${job.fromInspirationDraw ? ' data-from-inspire="1"' : ''}${job.batchIndex ? ` data-batch-index="${job.batchIndex}"` : ''}${job.batchTotal ? ` data-batch-total="${job.batchTotal}"` : ''}>
-      <div class="imagegen-feed-media imagegen-gen-failed">
-        <span class="imagegen-gen-failed-label">${esc(failLabel)}</span>
-      </div>
-      <div class="imagegen-feed-content">
-        <p class="imagegen-feed-prompt">${esc((job.prompt || '').slice(0, 120))}</p>
-        <p class="imagegen-gen-failed-error" title="${esc(job.errorMessage || '')}">${esc(err)}</p>
-        <div class="imagegen-feed-tags">${badgeHtml}</div>
-        <div class="imagegen-feed-foot imagegen-feed-foot--failed">
-          <button type="button" class="btn btn-primary btn-sm" data-failed-retry>重试</button>
-          <button type="button" class="btn btn-ghost btn-sm" data-failed-copy>复制提示词</button>
-          <button type="button" class="btn btn-ghost btn-sm imagegen-feed-del" data-failed-dismiss title="关闭">×</button>
-        </div>
-      </div>
-    </article>`;
-  }
-
-  function enforceMobileImageGenFeed() {
-    if (!isMobileFeedViewport()) return;
-    if (imageGenMasonry) {
-      imageGenMasonry.destroy();
-      imageGenMasonry = null;
-    }
-    const wrap = document.getElementById('imageGenFeed');
-    if (!wrap) return;
-    wrap.classList.remove('imagegen-feed--masonry');
-    wrap.classList.add('imagegen-feed--tiles', 'mobile-feed-grid');
-    wrap.removeAttribute('style');
-    wrap.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
-    wrap.querySelectorAll('.imagegen-feed-card').forEach((el) => el.removeAttribute('style'));
-  }
-
-  function buildFeedCardHtml(opts) {
-    const {
-      id, prompt, image, jobId, title, badges = [], metaLine = '', meta = '', active = false,
-      showLike = false, liked = false, likeCount = 0, showSave = false, showDel = false,
-      sourceCardId = ''
-    } = opts;
-    const { showTitle, showPrompt } = resolveFeedCardDisplay(title, prompt);
-    const storageAttr = feedImgStorageAttr(image);
-    const jobAttr = jobId ? ` data-job-id="${esc(jobId)}"` : '';
-    const cardIdAttr = sourceCardId ? ` data-source-card-id="${esc(sourceCardId)}"` : '';
-    const listUrl = (sourceCardId && isDisplayableImage(image) && window.SupabaseSync?.getListDisplayImageSrc)
-      ? window.SupabaseSync.getListDisplayImageSrc(image, sourceCardId)
-      : '';
-    const imgSrc = listUrl || (isDisplayableImage(image) ? IMG_LOADING_PLACEHOLDER : '');
-    const imgPending = isDisplayableImage(image) && (!listUrl || imgSrc.includes('data:image/svg'));
-    const loadingCls = imgPending ? ' is-loading' : '';
-    const shineAt = imgPending ? ` data-shine-at="${Date.now()}"` : '';
-    const imgBlock = isDisplayableImage(image)
-      ? `<div class="imagegen-feed-media${loadingCls}"${shineAt}><button type="button" class="imagegen-feed-thumb-btn" title="放大预览"><img class="card-img" src="${esc(imgSrc || IMG_LOADING_PLACEHOLDER)}" data-image-ref="${esc(image)}"${storageAttr}${jobAttr}${cardIdAttr} alt="" decoding="async" loading="lazy" onload="if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.imagegen-feed-media'));else this.closest('.imagegen-feed-media')?.classList.remove('is-loading')"></button></div>`
-      : '';
-    const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${esc(b)}</span>`).join('');
-    const metaRowHtml = (metaLine || '').trim()
-      ? `<p class="imagegen-feed-meta-row">${esc(metaLine.trim())}</p>`
-      : (badgeHtml ? `<div class="imagegen-feed-tags">${badgeHtml}</div>` : '');
-    const metaTrim = (meta || '').trim();
-    const metaRedundant = !metaTrim || badges.some(b => b === metaTrim) || metaTrim === showTitle;
-    const metaHtml = metaTrim && !metaRedundant
-      ? `<span class="imagegen-feed-meta">${esc(metaTrim)}</span>`
-      : '';
-    const likeBtn = showLike
-      ? `<button type="button" class="imagegen-feed-like ${liked ? 'liked' : ''}" data-like-id="${esc(id)}" title="点赞">♥ ${likeCount}</button>`
-      : '';
-    const saveBtn = showSave
-      ? '<button type="button" class="btn btn-ghost btn-sm imagegen-feed-save-btn" data-save-feed="1">存仓库</button>'
-      : '';
-    const delBtn = showDel
-      ? '<button type="button" class="imagegen-feed-del" data-delete-feed="1" title="删除" aria-label="删除">×</button>'
-      : '';
-    const titleHtml = showTitle
-      ? `<p class="imagegen-feed-title">${esc(showTitle)}</p>`
-      : '';
-    const promptHtml = showPrompt
-      ? `<p class="imagegen-feed-prompt">${esc(showPrompt)}</p>`
-      : '<p class="imagegen-feed-prompt imagegen-feed-prompt--empty">暂无提示词</p>';
-    const noMedia = !imgBlock ? ' imagegen-feed-card--no-media' : '';
-    const mobileActs = window.MobileUI?.isMobile?.()
-      ? `<div class="imagegen-feed-mobile-actions mobile-only">
-          <button type="button" class="imagegen-feed-mobile-btn" data-feed-copy>复制</button>
-          <button type="button" class="imagegen-feed-mobile-btn" data-feed-fill-prompt>填入生图</button>
-        </div>`
-      : '';
-    const fillHint = window.MobileUI?.isMobile?.()
-      ? ''
-      : '<span class="imagegen-feed-fill-hint">点击查看详情 · 在侧栏填入或复制</span>';
-    return `<article class="imagegen-feed-card imagegen-feed-card-tile${noMedia}${active ? ' active' : ''}" data-feed-id="${esc(id)}" data-feed-prompt="${esc(prompt || '')}" tabindex="0">
-      ${imgBlock}
-      <div class="imagegen-feed-content">
-        ${titleHtml}
-        ${promptHtml}
-        ${metaRowHtml}
-        <div class="imagegen-feed-foot">
-          ${metaHtml}
-          <div class="imagegen-feed-actions">${likeBtn}${saveBtn}${delBtn}</div>
-        </div>
-        ${mobileActs}
-        ${fillHint}
-      </div>
-    </article>`;
-  }
 
   function closeImageGenPreview() {
     imageGenPreviewId = null;
@@ -9095,8 +8480,8 @@
     document.getElementById('imageGenPreviewPanel')?.classList.add('hidden');
     document.querySelector('.imagegen-side')?.classList.remove('imagegen-preview-open');
     document.querySelectorAll('.imagegen-feed-card.active-preview').forEach(el => el.classList.remove('active-preview'));
-    if (isMobileFeedViewport()) enforceMobileImageGenFeed();
-    else requestAnimationFrame(() => scheduleImageGenFeedLayout());
+    if (isMobileViewport()) enforceMobileImageGenFeed();
+    else scheduleImageGenFeedLayout({ immediate: true });
   }
 
   async function downloadImageFromUrl(url, filename) {
@@ -9373,10 +8758,8 @@
       el.classList.toggle('active-preview', kind === 'warehouse' ? fid === 'wh_' + id : fid === id);
     });
     void renderImageGenPreview();
-    if (!isMobileFeedViewport()) {
-      requestAnimationFrame(() => scheduleImageGenFeedLayout());
-      setTimeout(() => scheduleImageGenFeedLayout(), 120);
-      setTimeout(() => scheduleImageGenFeedLayout(), 400);
+    if (!isMobileViewport()) {
+      scheduleImageGenFeedLayout({ immediate: true });
     }
   }
 
@@ -9388,7 +8771,7 @@
   }
 
   function openImageGenFilterSheet(kind) {
-    if (!isMobileFeedViewport()) return;
+    if (!isMobileViewport()) return;
     const opts = window.getImageGenWarehouseFilterOptions?.() || { groups: [], tags: [] };
     const list = kind === 'group' ? opts.groups : opts.tags;
     const current = kind === 'group' ? imageGenWhGroup : imageGenWhTag;
@@ -9466,75 +8849,6 @@
     if (tLabelEl) tLabelEl.textContent = tLabel;
   }
 
-  function getImageGenWarehouseFeedList() {
-    return typeof window.getWarehouseCardsForImageGen === 'function'
-      ? window.getWarehouseCardsForImageGen({ group: imageGenWhGroup, tag: imageGenWhTag })
-      : [];
-  }
-
-  function getImageGenCommunityFeedList() {
-    return filterAndSortPosts(getCommunityFeedForDisplay());
-  }
-
-  function imageGenFeedListSignature() {
-    if (imageGenFeedTab === 'warehouse') {
-      return `wh:${imageGenWhGroup}:${imageGenWhTag}:p${imageGenPendingJobs.length}:f${imageGenFailedJobs.length}`;
-    }
-    const posts = getImageGenCommunityFeedList();
-    const ids = posts.map((p) => String(p.id)).join('|');
-    return `cm:${communityScope}:${communitySort}:${posts.length}:${ids}`;
-  }
-
-  function warehouseCardToFeedHtml(c) {
-    const groupLabel = c.group || '未分类';
-    const titleTrim = (c.title || '').trim();
-    const tagPart = (c.tags || []).slice(0, 2).join(' · ');
-    const whMeta = tagPart ? `${groupLabel} · ${tagPart}` : groupLabel;
-    return buildFeedCardHtml({
-      id: 'wh_' + c.id,
-      sourceCardId: c.id,
-      jobId: c.genJobId || null,
-      prompt: c.prompt,
-      image: c.image,
-      title: titleTrim,
-      metaLine: whMeta,
-      meta: ''
-    });
-  }
-
-  function communityPostToFeedHtml(p) {
-    const postTitle = (p.title || '').trim();
-    const useTitle = postTitle && !isGenericPostTitle(postTitle) ? postTitle : '';
-    const author = (p.authorName || '').trim() || '用户';
-    const model = (p.modelLabel || imageGenModelLabel(p.model)).trim();
-    return buildFeedCardHtml({
-      id: p.id,
-      prompt: p.prompt,
-      image: p.image,
-      title: useTitle,
-      metaLine: `${author} · ${model}`,
-      meta: `♥ ${p.likes || 0} · ${formatTime(p.createdAt)}`,
-      showLike: true,
-      liked: likedIds.has(p.id),
-      likeCount: p.likes || 0
-    });
-  }
-
-  function getImageGenFeedNavItems() {
-    const wrap = document.getElementById('imageGenFeed');
-    if (!wrap) return [];
-    return [...wrap.querySelectorAll('.imagegen-feed-card[data-feed-id]')]
-      .filter((card) => !card.dataset.pending && !card.dataset.failed)
-      .map((card) => {
-        const feedId = card.dataset.feedId;
-        const warehouse = feedId.startsWith('wh_');
-        return {
-          key: feedId,
-          kind: warehouse ? 'warehouse' : 'community',
-          id: warehouse ? feedId.replace(/^wh_/, '') : feedId
-        };
-      });
-  }
 
   let imageGenPreviewWheelAt = 0;
   const IMAGEGEN_PREVIEW_WHEEL_GAP_MS = 420;
@@ -9592,279 +8906,6 @@
     });
   }
 
-  function imageGenFeedHasMorePages() {
-    const store = imageGenFeedPagedStore;
-    if (!store) return false;
-    const total = imageGenFeedTab === 'warehouse' ? store.whCards.length : store.commPosts.length;
-    return store.page * IMAGEGEN_FEED_PER_PAGE < total;
-  }
-
-  function syncImageGenFeedLoadMoreBtn() {
-    updateImageGenFeedHint();
-    document.getElementById('imageGenFeed')?.querySelector('.imagegen-feed-load-more')?.remove();
-  }
-
-  function bindImageGenFeedPagedScroll() {
-    const scrollEl = imageGenFeedScrollEl();
-    if (!scrollEl || scrollEl.dataset.pagedScrollBound === '1') return;
-    scrollEl.dataset.pagedScrollBound = '1';
-    scrollEl.addEventListener('scroll', () => {
-      if (imageGenFeedScrollLoading || !imageGenFeedHasMorePages()) return;
-      if (scrollEl.scrollTop < 48) return;
-      if (scrollEl.scrollTop + scrollEl.clientHeight < scrollEl.scrollHeight - 150) return;
-      imageGenFeedScrollLoading = true;
-      const store = imageGenFeedPagedStore;
-      if (!store) {
-        imageGenFeedScrollLoading = false;
-        return;
-      }
-      store.page += 1;
-      const anchorTop = scrollEl.scrollTop;
-      void renderImageGenFeed({ preserveScroll: true, feedAppend: true, scrollTop: anchorTop }).finally(() => {
-        imageGenFeedScrollLoading = false;
-        syncImageGenFeedLoadMoreBtn();
-      });
-    }, { passive: true });
-  }
-
-  async function renderImageGenFeed(opts = {}) {
-    const preserveScroll = opts.preserveScroll !== false;
-    const feedAppend = !!opts.feedAppend;
-    const wrap = document.getElementById('imageGenFeed');
-    if (!wrap) return;
-    const scrollEl = imageGenFeedScrollEl();
-    const scrollTop = feedAppend
-      ? (opts.scrollTop ?? scrollEl?.scrollTop ?? 0)
-      : (preserveScroll ? (scrollEl?.scrollTop ?? 0) : 0);
-    syncImageGenWarehouseFiltersUI();
-    syncImageGenCommunityFiltersUI();
-
-    const sig = imageGenFeedListSignature();
-    if (!feedAppend) {
-      imageGenFeedScrollIntent = false;
-      imageGenFeedPagedStore = {
-        sig,
-        page: 1,
-        whCards: imageGenFeedTab === 'warehouse' ? getImageGenWarehouseFeedList() : [],
-        commPosts: imageGenFeedTab === 'community' ? getImageGenCommunityFeedList() : []
-      };
-    } else if (!imageGenFeedPagedStore || imageGenFeedPagedStore.sig !== sig) {
-      return;
-    }
-    const store = imageGenFeedPagedStore;
-
-    let html = '';
-    let appendHtml = '';
-    if (imageGenFeedTab === 'warehouse') {
-      if (!feedAppend) {
-        const pending = imageGenPendingJobs.slice(0, IMAGEGEN_FEED_PENDING_CAP);
-        const failed = imageGenFailedJobs.slice(0, IMAGEGEN_FEED_FAILED_CAP);
-        const list = store.whCards.slice(0, IMAGEGEN_FEED_PER_PAGE);
-        if (!pending.length && !failed.length && !list.length) {
-          html = '<p class="imagegen-feed-empty">仓库暂无卡片<br><button type="button" class="btn btn-primary btn-sm" onclick="createNewCard({forceOpenPanel:true})">新建卡片</button></p>';
-        } else {
-          html = pending.map((j) => buildFeedPendingCardHtml(j)).join('')
-            + failed.map((j) => buildFeedFailedCardHtml(j)).join('')
-            + list.map((c) => warehouseCardToFeedHtml(c)).join('');
-        }
-      } else {
-        const start = (store.page - 1) * IMAGEGEN_FEED_PER_PAGE;
-        const slice = store.whCards.slice(start, start + IMAGEGEN_FEED_PER_PAGE);
-        if (!slice.length) return;
-        appendHtml = slice.map((c) => warehouseCardToFeedHtml(c)).join('');
-      }
-    } else if (imageGenFeedTab === 'community') {
-      if (!feedAppend) {
-        const list = store.commPosts.slice(0, IMAGEGEN_FEED_PER_PAGE);
-        if (!list.length) {
-          const emptyMsg = communityScope === 'curated'
-            ? '社区精选正在开发中'
-            : communityScope === 'following'
-              ? '暂无关注作者的作品'
-              : '社区暂无内容';
-          html = `<p class="imagegen-feed-empty">${esc(emptyMsg)}</p>`;
-        } else {
-          html = list.map((p) => communityPostToFeedHtml(p)).join('');
-        }
-      } else {
-        const start = (store.page - 1) * IMAGEGEN_FEED_PER_PAGE;
-        const slice = store.commPosts.slice(start, start + IMAGEGEN_FEED_PER_PAGE);
-        if (!slice.length) return;
-        appendHtml = slice.map((p) => communityPostToFeedHtml(p)).join('');
-      }
-    }
-
-    const mobileFeed = isMobileFeedViewport();
-
-    if (feedAppend) {
-      const temp = document.createElement('div');
-      temp.innerHTML = appendHtml;
-      const newCards = [...temp.children];
-      if (!newCards.length) return;
-      newCards.forEach((el) => wrap.appendChild(el));
-      bindImageGenFeedCardEvents(wrap, newCards);
-      bindImageGenFeedImageRelayout();
-      if (mobileFeed) enforceMobileImageGenFeed();
-      else layoutImageGenFeedMasonry();
-      if (scrollEl) scrollEl.scrollTop = scrollTop;
-    } else {
-      resetImageGenFeedCardLayout();
-      setFeedLayoutPending(wrap, true);
-      wrap.className = mobileFeed
-        ? 'imagegen-feed imagegen-feed--tiles mobile-feed-grid feed-layout-pending'
-        : 'imagegen-feed imagegen-feed--masonry feed-layout-pending';
-      wrap.innerHTML = html;
-      bindImageGenFeedCardEvents(wrap);
-      bindImageGenFeedImageRelayout();
-      if (mobileFeed) {
-        enforceMobileImageGenFeed();
-        setFeedLayoutPending(wrap, false);
-      } else {
-        layoutImageGenFeedMasonry();
-      }
-      if (scrollEl) scrollEl.scrollTop = scrollTop;
-      renderImageGenMobileResult();
-    }
-
-    syncImageGenFeedLoadMoreBtn();
-
-    const pageStart = feedAppend ? (store.page - 1) * IMAGEGEN_FEED_PER_PAGE : 0;
-    const pageEnd = feedAppend ? store.page * IMAGEGEN_FEED_PER_PAGE : IMAGEGEN_FEED_PER_PAGE;
-    const feedItems = imageGenFeedTab === 'warehouse'
-      ? store.whCards.slice(pageStart, pageEnd)
-      : store.commPosts.slice(pageStart, pageEnd).map((p) => ({
-        id: p.id,
-        image: p.image,
-        authorId: p.authorId
-      }));
-    const feedPrefetchItems = feedItems.slice(0, Math.min(feedItems.length, 12));
-    const feedImageBindKey = feedItems.map((x) => `${x.id}:${x.image || ''}`).join('|');
-
-    void (async () => {
-      const skipImageBind = !feedAppend && wrap.dataset.feedImageBindKey === feedImageBindKey;
-      if (!skipImageBind) {
-        wrap.dataset.feedImageBindKey = feedImageBindKey;
-        if (imageGenFeedTab === 'warehouse' && feedPrefetchItems.length && window.SupabaseSync?.prefetchWarehousePage) {
-          await window.SupabaseSync.prefetchWarehousePage(feedPrefetchItems, 2200);
-        }
-        window.SupabaseSync?.patchImageSrcFromCache?.(wrap, { visibleFirst: true, max: 8 });
-        if (window.CardImageLoader?.bindFeed) {
-          await window.CardImageLoader.bindFeed(wrap, feedPrefetchItems);
-        } else {
-          window.CardImageLoader?.observeContainer?.(wrap);
-        }
-      }
-      bindImageGenFeedImageRelayout();
-      if (mobileFeed) {
-        enforceMobileImageGenFeed();
-        setFeedLayoutPending(wrap, false);
-      } else {
-        layoutImageGenFeedMasonry();
-      }
-      if (scrollEl) scrollEl.scrollTop = scrollTop;
-      syncImageGenFeedLoadMoreBtn();
-      if (imageGenFeedTab === 'warehouse' && store.whCards.length && window.SupabaseSync?.backfillGridThumbsForCards) {
-        const visibleIds = new Set(
-          [...wrap.querySelectorAll('.imagegen-feed-card[data-feed-id^="wh_"]')]
-            .slice(0, 14)
-            .map((el) => el.dataset.feedId?.replace(/^wh_/, ''))
-            .filter(Boolean)
-        );
-        const backfillCards = store.whCards.filter((c) => visibleIds.has(String(c.id)));
-        if (backfillCards.length) {
-          void window.SupabaseSync.backfillGridThumbsForCards(backfillCards, {
-            max: 12,
-            force: false,
-            quiet: true,
-            awaitDrain: false
-          }).then(() => {
-            window.SupabaseSync?.patchImageSrcFromCache?.(wrap, { visibleFirst: true, max: 12 });
-            window.CardImageLoader?.observeContainer?.(wrap);
-            updateImageGenFeedHint();
-          });
-        }
-      }
-    })();
-  }
-
-  function bindImageGenFeedCardEvents(wrap, cardsOnly) {
-    if (!wrap) return;
-    const cardList = cardsOnly?.length
-      ? cardsOnly
-      : [...wrap.querySelectorAll('.imagegen-feed-card')];
-    cardList.filter((card) => card.dataset.failed === '1').forEach((card) => {
-      const failId = card.dataset.feedId;
-      const prompt = card.dataset.feedPrompt || '';
-      card.querySelector('[data-failed-retry]')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        fillFeedPromptToActiveMode(prompt, {
-          inspire: card.dataset.fromInspire === '1' || getActiveImageGenMode() === 'inspire'
-        });
-      });
-      card.querySelector('[data-failed-copy]')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        copyFeedPromptText(prompt);
-      });
-      card.querySelector('[data-failed-dismiss]')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        removeFailedGenJob(failId);
-        renderImageGenFeed({ preserveScroll: true });
-      });
-    });
-    cardList.filter((card) => card.dataset.pending === '1').forEach((card) => {
-      card.querySelector('[data-pending-dismiss]')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const pendingId = card.dataset.feedId;
-        const pending = imageGenPendingJobs.find((j) => j.id === pendingId);
-        if (pending?.jobId) {
-          clearSessionGenJob(pending.jobId);
-          activePollJobIds.delete(pending.jobId);
-        }
-        removePendingJob(pendingId);
-        renderImageGenFeed({ preserveScroll: true });
-      });
-    });
-    cardList.filter((card) => !card.dataset.pending && !card.dataset.failed).forEach((card) => {
-      if (card.dataset.feedBound === '1') return;
-      card.dataset.feedBound = '1';
-      const feedId = card.dataset.feedId;
-      const feedKind = imageGenFeedTab === 'warehouse' ? 'warehouse' : 'community';
-      const feedItemId = feedKind === 'warehouse' ? feedId.replace(/^wh_/, '') : feedId;
-      card.querySelector('.imagegen-feed-thumb-btn')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        void openImageGenLightboxAt(feedKind, feedItemId, feedId);
-      });
-      card.querySelector('[data-feed-copy]')?.addEventListener('click', e => {
-        e.stopPropagation();
-        copyFeedPromptText(card.dataset.feedPrompt || '');
-      });
-      card.querySelector('[data-feed-fill-prompt]')?.addEventListener('click', e => {
-        e.stopPropagation();
-        fillFeedPromptToActiveMode(card.dataset.feedPrompt || '');
-      });
-      card.addEventListener('click', e => {
-        if (e.target.closest('.imagegen-feed-like')) return;
-        if (e.target.closest('.imagegen-feed-thumb-btn')) return;
-        if (e.target.closest('.imagegen-feed-save-btn')) return;
-        if (e.target.closest('[data-delete-feed]')) return;
-        if (e.target.closest('.imagegen-feed-mobile-actions')) return;
-        if (e.target.closest('.imagegen-feed-media')) {
-          void openImageGenLightboxAt(feedKind, feedItemId, feedId);
-          return;
-        }
-        if (window.MobileUI?.isMobile?.()) return;
-        if (imageGenFeedTab === 'warehouse') {
-          openImageGenPreview('warehouse', feedItemId);
-        } else if (imageGenFeedTab === 'community') {
-          openImageGenPreview('community', feedId);
-        }
-      });
-      card.querySelector('.imagegen-feed-like')?.addEventListener('click', e => {
-        e.stopPropagation();
-        likeCommunityPostOnly(feedId);
-      });
-    });
-  }
 
   function formatExpiryLabel(c) {
     if (c.permanent || c.visibility === 'published') return '永久保留';
@@ -10005,6 +9046,7 @@
     document.getElementById('imageGenPreviewClose')?.addEventListener('click', closeImageGenPreview);
     bindImageGenPreviewWheelScroll();
     bindImageGenFeedPagedScroll();
+    bindImageGenFeedResizeRelayout?.();
     document.getElementById('appreciateViewerFavBtn')?.addEventListener('click', () => {
       if (!appreciateViewerPostId) return;
       const post = findPost(appreciateViewerPostId);
@@ -10377,7 +9419,7 @@
       window.SupabaseSync?.patchImageSrcFromCache?.(el);
       if (id === 'imageGenFeed') scheduleImageGenFeedLayout();
       else if (id === 'communityGrid' || id === 'creationsGrid') {
-        if (isMobileFeedViewport()) enforceMobileCommunityFeedGrid(id);
+        if (isMobileViewport()) enforceMobileCommunityFeedGrid(id);
         else {
           scrubCommunityFeedFlexCards(el);
           repairCommunityFeedLayout(id);
@@ -10386,6 +9428,8 @@
     });
   }
 
+  wireFeedImages();
+  wireImageGenFeed();
   wireFeedLayout();
 
   window.FeatureDraft = {

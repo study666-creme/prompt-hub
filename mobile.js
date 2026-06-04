@@ -1,13 +1,20 @@
 (function () {
-  const MQ = window.matchMedia('(max-width: 900px)');
+  /** 全站手机断点（唯一来源；script / features-draft / feed-layout 均走 MobileUI） */
+  const MOBILE_MQ = window.matchMedia('(max-width: 900px)');
 
   function isMobile() {
-    return MQ.matches;
+    return MOBILE_MQ.matches;
   }
 
   function isMobileViewport() {
     return isMobile();
   }
+
+  /** 解析前即可用（mobile.js 在 script.js 之前加载） */
+  window.MobileUI = window.MobileUI || {};
+  window.MobileUI.isMobile = isMobile;
+  window.MobileUI.isMobileViewport = isMobileViewport;
+  window.MobileUI.MOBILE_MQ = MOBILE_MQ;
 
   function syncDrawerOverlayVisibility() {
     const ov = document.getElementById('mobileDrawerOverlay');
@@ -352,18 +359,16 @@
     }
   }
 
-  MQ.addEventListener('change', onViewportChange);
+  MOBILE_MQ.addEventListener('change', onViewportChange);
 
-  window.MobileUI = {
-    isMobile,
-    isMobileViewport,
+  Object.assign(window.MobileUI, {
     openNavDrawer,
     openGroupsDrawer,
     closeDrawers,
     closeAllMobileOverlays,
     setImageGenView,
     initImageGenMobileView
-  };
+  });
 
   function init() {
     bindMobileUI();
@@ -407,7 +412,7 @@
     init();
   }
 
-  MQ.addEventListener('change', () => {
+  MOBILE_MQ.addEventListener('change', () => {
     if (isMobile()) closeAllMobileOverlays();
     else {
       closeAllMobileOverlays();
