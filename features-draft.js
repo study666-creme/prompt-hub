@@ -716,6 +716,9 @@
       && !orphans
     ) {
       scrubCommunityFeedFlexCards(container);
+      if (containerId === 'creationsGrid' && isCreationsFeedLayoutStale(container)) {
+        repairCreationsFeedLayout(true);
+      }
       return;
     }
     if (container.dataset.feedDistributed === '1' && colEls.length) {
@@ -725,6 +728,7 @@
     }
     applyCommunityFeedColumnCss(container, desired);
     setFeedLayoutPending(containerId, false);
+    if (containerId === 'creationsGrid') repairCreationsFeedLayout(true);
   }
 
   function ensureCommunityFeedColumnLayout(containerId) {
@@ -815,6 +819,37 @@
     return max > fair + 2;
   }
 
+  /** 我的主页：flex 多列；勿把旧 Masonry（masonry-ready / 矮 height）当已排版 */
+  function isCreationsFeedLayoutStale(container) {
+    if (!container || container.id !== 'creationsGrid' || !useCommunityCssGrid('creationsGrid')) return false;
+    const n = container.querySelectorAll('.community-post-card').length;
+    if (!n) return false;
+    if (container.classList.contains('masonry-ready') || creationsMasonry) return true;
+    if (container.querySelectorAll(':scope > .card').length > 0) return true;
+    if (!container.classList.contains('community-feed-columns')) return true;
+    if (container.querySelectorAll(':scope > .community-feed-col').length < 2) return true;
+    const inlineH = parseFloat(container.style.height);
+    if (Number.isFinite(inlineH) && inlineH > 0 && inlineH < 160 && n > 2) return true;
+    const st = getComputedStyle(container);
+    if (
+      (st.overflowY === 'auto' || st.overflowY === 'scroll')
+      && container.clientHeight < 160
+      && container.scrollHeight > container.clientHeight + 48
+    ) return true;
+    return false;
+  }
+
+  function isCommunityFeedLayoutReady(container, containerId) {
+    if (!container?.querySelector?.('.community-post-card')) return false;
+    if (useCommunityCssGrid(containerId)) {
+      return !isCreationsFeedLayoutStale(container)
+        && container.classList.contains('community-feed-columns')
+        && !!container.querySelector(':scope > .community-feed-col');
+    }
+    return container.classList.contains('masonry-ready')
+      || !!container.querySelector(':scope > .community-feed-col');
+  }
+
   function repairCommunityFeedLayout(containerId) {
     const container = document.getElementById(containerId);
     if (!container || !useCommunityCssGrid(containerId)) return false;
@@ -839,7 +874,24 @@
     return false;
   }
 
-  function repairCreationsFeedLayout() {
+  function repairCreationsFeedLayout(force = false) {
+    const container = document.getElementById('creationsGrid');
+    if (!container) return false;
+    if (!force && !isCreationsFeedLayoutStale(container)) return false;
+    if (creationsMasonry) {
+      creationsMasonry.destroy();
+      creationsMasonry = null;
+    }
+    container.classList.remove('masonry-ready', 'community-mobile-feed', 'cards-grid-priming');
+    container.style.removeProperty('height');
+    container.style.removeProperty('max-height');
+    container.style.overflow = 'visible';
+    if (container.querySelectorAll('.community-post-card').length) {
+      delete container.dataset.feedDistributed;
+      delete container.dataset.feedDistributedCols;
+      layoutCommunityMasonry('creationsGrid', { forceReflow: true, recalcCols: true });
+      return true;
+    }
     return repairCommunityFeedLayout('creationsGrid');
   }
 
@@ -4766,8 +4818,7 @@
     ) {
       scrubStaleCommunityFeedEmpty(container);
       patchFeedLikeLabels(container, posts);
-      const layoutReady = container.classList.contains('masonry-ready')
-        || container.querySelector(':scope > .community-feed-col');
+      const layoutReady = isCommunityFeedLayoutReady(container, containerId);
       if (!layoutReady && container.querySelector('.community-post-card')) {
         scheduleCommunityLayout(containerId, { force: true, immediate: true });
         layoutCommunityWhenImagesReady(containerId);
@@ -5197,8 +5248,7 @@
     ) {
       scrubStaleCommunityFeedEmpty(container);
       patchFeedLikeLabels(container, list);
-      const layoutReady = container.classList.contains('masonry-ready')
-        || container.querySelector(':scope > .community-feed-col');
+      const layoutReady = isCommunityFeedLayoutReady(container, containerId);
       if (!layoutReady && container.querySelector('.community-post-card')) {
         scheduleCommunityLayout('communityGrid', { force: true, immediate: true });
       }
@@ -7663,7 +7713,11 @@
     const sig = feedListSignature(list, 'creationsGrid');
     if (container.dataset.feedSig === sig && container.querySelector('.community-post-card')) {
       patchFeedLikeLabels(container, list);
-      requestAnimationFrame(() => syncCommunityFeedColumnCount('creationsGrid'));
+      if (isCreationsFeedLayoutStale(container)) {
+        repairCreationsFeedLayout(true);
+      } else {
+        requestAnimationFrame(() => syncCommunityFeedColumnCount('creationsGrid'));
+      }
       return;
     }
     renderLikeRewardRules();
@@ -10851,7 +10905,10 @@
     }
     if (app === 'creations') {
       if (!document.getElementById('pageCreations')?.classList.contains('active')) return;
-      requestAnimationFrame(() => syncCommunityFeedColumnCount('creationsGrid'));
+      requestAnimationFrame(() => {
+        repairCreationsFeedLayout(true);
+        syncCommunityFeedColumnCount('creationsGrid');
+      });
       renderMyHomeProfile();
       const activeTab = document.querySelector('#myHomeTabs .my-home-tab.active')?.dataset?.homeTab || 'posts';
       if (activeTab === 'owned-packages') {

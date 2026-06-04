@@ -96,7 +96,8 @@
 |----|------|
 | **现象** | 「发布作品」Tab 下仅顶部窄条能看到图，条内滚动；下方大片空白网格底 |
 | **根因** | `#creationsGrid` 与社区共用规则：`flex: 1 1 0` + `overflow-y: auto`，在 `.feature-body-cards { min-height:0; overflow:hidden }` 链里被压成固定视口高；Masonry 绝对定位内容溢出后在**网格自身**里滚，外壳下方空 |
-| **修复尝试** | ① CSS：`flex:none` + shell 滚动 ② Masonry 后 `syncCreationsGridContainerHeight` ③ **桌面改回 flex 多列**（`useCommunityCssGrid('creationsGrid')`），不用 Masonry 绝对定位 |
+| **与社区联动** | 共用 `renderPostsIntoContainer` / `layoutCommunityMasonry`；社区改 Masonry 会波及我的主页。曾把 `masonry-ready` 当「已排版」→ **feedSig 未变时跳过修复**，一条缝被缓存 |
+| **修复尝试** | ① CSS flex:none ② 我的主页改 flex 多列 ③ `isCreationsFeedLayoutStale` + `repairCreationsFeedLayout` 进页/渲染时强制清 Masonry 残留 |
 | **涉及** | `styles.css`、`styles-features.css`、`features-draft.js`（layout 后清 `max-height`） |
 
 ### 2.7 我的主页侧栏空白（桌面端）
