@@ -1496,6 +1496,22 @@
     return Number.isFinite(n) ? n : 16;
   }
 
+  /** Masonry 后排版高度校正：我的主页容器勿收成一条可滚缝 */
+  function syncCreationsGridContainerHeight(container) {
+    if (!container || container.id !== 'creationsGrid') return;
+    container.style.removeProperty('max-height');
+    container.style.overflow = 'visible';
+    let maxBottom = 0;
+    container.querySelectorAll(':scope > .card').forEach((card) => {
+      const top = parseFloat(card.style.top) || 0;
+      const mb = parseFloat(getComputedStyle(card).marginBottom) || 0;
+      maxBottom = Math.max(maxBottom, top + card.offsetHeight + mb);
+    });
+    const h = Math.max(maxBottom, container.scrollHeight);
+    if (h > 96) container.style.height = `${Math.ceil(h)}px`;
+    else container.style.removeProperty('height');
+  }
+
   /** 社区/我的主页：列间距=gutter；上下间距=CSS margin-bottom（Masonry gutter 不含纵向） */
   function getCommunityFeedGaps() {
     return { colGap: 16, rowGap: 16 };
@@ -3675,9 +3691,9 @@
     return (containerId === 'communityGrid' || containerId === 'creationsGrid') && !isMobileFeedLayout();
   }
 
-  /** 桌面社区/我的主页均用 Masonry；flex 多列仅保留给历史兼容（不再启用） */
-  function useCommunityCssGrid(_containerId) {
-    return false;
+  /** 社区桌面 Masonry；我的主页桌面用 flex 多列（文档流增高，避免 Masonry height≈一条缝） */
+  function useCommunityCssGrid(containerId) {
+    return containerId === 'creationsGrid' && !isMobileFeedLayout();
   }
 
   function purgeCommunityFeedGridNoise(container) {
@@ -4071,8 +4087,7 @@
       container.scrollTop = scrollTop;
       container.classList.add('masonry-ready', 'cards-grid-primed');
       if (containerId === 'creationsGrid') {
-        container.style.removeProperty('max-height');
-        container.style.overflow = 'visible';
+        syncCreationsGridContainerHeight(container);
       }
       if (colWidth) container.style.setProperty('--feed-col-width', `${colWidth}px`);
       setFeedLayoutPending(containerId, false);

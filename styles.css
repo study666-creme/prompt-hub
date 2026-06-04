@@ -4662,8 +4662,7 @@ body {
   }
 
   /* 社区/创作：CSS Grid 多列（minmax(0,1fr) 防止 Masonry inline 宽撑爆列） */
-  #communityGrid.cards-container.community-feed-grid.community-feed-columns:not(.list-view),
-  #creationsGrid.cards-container.community-feed-grid.community-feed-columns:not(.list-view) {
+  #communityGrid.cards-container.community-feed-grid.community-feed-columns:not(.list-view) {
     display: grid !important;
     column-gap: var(--feed-column-gap, var(--card-gap, 12px));
     row-gap: 0;
@@ -4677,6 +4676,21 @@ body {
     min-height: 0 !important;
     min-width: 0 !important;
     overflow-y: auto !important;
+  }
+  #creationsGrid.cards-container.community-feed-grid.community-feed-columns:not(.list-view) {
+    display: grid !important;
+    column-gap: var(--feed-column-gap, var(--card-gap, 12px));
+    row-gap: 0;
+    align-items: start !important;
+    align-content: start !important;
+    position: relative !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    flex: none !important;
+    min-height: auto !important;
+    min-width: 0 !important;
+    overflow-y: visible !important;
     overflow-x: hidden !important;
     -webkit-overflow-scrolling: touch;
   }
