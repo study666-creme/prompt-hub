@@ -30,7 +30,7 @@
 | **publishedToCommunity 持久化** | `mergePublishFlag`, `mergeCardPair`（`cloud-sync-safety.js`）, `getDataPayload`（`script.js`） |
 | 发布/下架 | `syncCardToCommunity`, `reconcileCommunityWithCards`, `ownPostAllowedInFeed` |
 | **社区侧栏空白** | `renderCommunitySidePanel`, `communitySideBody`, `openPostSidePanel` |
-| **社区 flex 布局（桌面）** | `layoutCommunityMasonry`, `distributeCommunityFeedColumns`, `appendFeedCardsLayout`, `finishCommunityFeedLayoutAfterBatch`, `repairCreationsFeedLayout`, `ensureCommunityFeedColumnLayout` |
+| **社区 Masonry（桌面）/ 我的主页 flex** | `feed-layout.js`, `layoutCommunityMasonry`, `scheduleCommunityLayout` | `docs/FEED-LAYOUT.md` |
 | **我的主页巨图** | `repairCreationsFeedLayout`, `getCreationsFeedColumns`, `promptrepo_myhome_columns` — 见 **`docs/ERROR-LOG.md`** |
 | **社区 Masonry（手机）** | `enforceMobileCommunityFeedGrid`, `useCssGridForCommunityFeed` |
 | **卡片库首屏顺序** | `renderCards`, `card-image-loader.js`, `prefetchWarehousePage`, `observeContainer` |

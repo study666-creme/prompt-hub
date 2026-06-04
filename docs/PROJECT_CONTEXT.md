@@ -12,7 +12,7 @@
 | 模块 | 说明 |
 |------|------|
 | **卡片库** | 提示词卡片、分组、Masonry、批量操作（含批量开/关社区公开） |
-| **提示词社区** | 全站 Feed（`community_posts` + API）· 桌面 **flex 多列**瀑布流 |
+| **提示词社区** | 全站 Feed（`community_posts` + API）· 桌面 **Masonry** 瀑布流 |
 | **我的主页** | 发布作品、关注/粉丝、拥有的/发布的资产包 |
 | **图片生成** | 扣积分；`POST /api/v1/generate`；上游 **GrsAI**；含 **仓库/社区** Feed |
 | **资产包** | 领取存入「拥有」、封面预览、选择性导入、大图下载 |
@@ -28,7 +28,7 @@
 | Worker | `prompt-hub-api` · API https://api.prompt-hub.cn |
 | Pages | https://prompt-hub.cn · 构建号 `window.__APP_BUILD__` |
 | **已修** | 我的主页 `#creationsGrid` flex 多列 + 整页滚动（非条缝内滚） |
-| **架构** | Feed 排版拆至 `feed-layout.js`，见 `docs/FEED-LAYOUT.md`；`bump-build.ps1` 同步 `?v=` |
+| **架构** | Feed 排版在 `feed-layout.js`；`wireFeedLayout()` 于脚本解析时初始化；`forceRefreshAllImages` 已并入 `features-draft.js` |
 | **部分改善** | 社区 Masonry 同列间距大体稳定；加载阶段偶发不齐，等图或点卡开侧栏多能恢复（§2.6，暂不改） |
 | **已打通** | `/health`、兑换、生图、社区 Feed、我的主页侧栏 |
 

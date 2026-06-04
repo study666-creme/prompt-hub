@@ -4,11 +4,13 @@
 > 已知故障：`docs/CURRENT-ISSUES.md`  
 > **踩坑（必读）**：`docs/AI-PITFALLS.md` — 社区 flex 列、禁止全墙重排、SyntaxError 炸站
 
-### 桌面布局（2026-06-04）
+### 桌面布局（2026-06-05）
 
-- **非 Masonry**：`useCommunityCssGrid` → `#communityGrid` 为 `flex` + `.community-feed-col` 多列，新卡 append 到**最短列**。
-- **禁止**：`flattenCommunityFeedColumns` + 全量 round-robin（除非列结构损坏）；`hydrateFeedImages` / `fromImage` 触发全墙 `layoutCommunityMasonry`。
+- **社区 `#communityGrid`**：桌面 **Masonry**（`feed-layout.js`）；`gutter` 管列距，上下靠 `margin-bottom: --card-row-gap`。
+- **我的主页 `#creationsGrid`**：桌面 **flex 多列**（`.community-feed-col`），新卡 append 到最短列。
+- **禁止**：`flattenCommunityFeedColumns` + 全量 round-robin（除非列结构损坏）；`finishCardMediaShine` 触发全墙 flex 重分。
 - **分页**：首屏 `drainCommunityFeedPages(5)`；滚到底哨兵再 `loadNextCommunityFeedPage`。
+- **排版模块**：`feed-layout.js` + `features-draft.js` 内 `wireFeedLayout()`；详见 `docs/FEED-LAYOUT.md`。
 
 ---
 

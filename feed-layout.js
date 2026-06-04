@@ -773,10 +773,12 @@
     if (!el) return { error: 'container missing', containerId };
     const mode = getMode(containerId);
     const directCards = el.querySelectorAll(':scope > .card').length;
+    const gaps = getGaps();
     const out = {
       build: global.__APP_BUILD__,
       containerId,
       mode,
+      gaps,
       masonryReady: el.classList.contains('masonry-ready'),
       feedColumnsClass: el.classList.contains('community-feed-columns'),
       feedCols: el.querySelectorAll(':scope > .community-feed-col').length,

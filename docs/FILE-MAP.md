@@ -10,7 +10,8 @@
 |---------|--------|----------|
 | 卡片库 CRUD、分组、Masonry | `script.js` | `styles.css`, `mobile.js` |
 | 登录 / 登出 / 云拉取 | `script.js` | `supabase-sync.js`, `cloud-sync-safety.js` |
-| 社区 Feed、发布、我发布的 | `features-draft.js` | `api-client.js`, `styles-features.css` |
+| **社区 Masonry / 我的主页 flex** | `feed-layout.js` | `features-draft.js`（`wireFeedLayout`） |
+| **社区 Feed、发布、我发布的** | `features-draft.js` | `feed-layout.js`, `api-client.js`, `styles-features.css` |
 | 图片签名 URL | `supabase-sync.js` | `server/src/routes/v1/media.ts` |
 | 全站社区 API / DB | `server/src/lib/community-feed.ts` | `server/src/routes/v1/community.ts` |
 | 生图扣费 | `features-draft.js` + `api-client.js` | `server/src/routes/v1/generate.ts` |
@@ -37,24 +38,37 @@
 
 ---
 
-## `features-draft.js`（社区 + 生图，约 5000+ 行）
+## `features-draft.js`（社区 + 生图，约 10000+ 行）
 
 | 区域 | 函数/变量 | 作用 |
 |------|-----------|------|
+| 排版入口 | `wireFeedLayout()` | 启动时注入 `FeedLayout.init(deps)`，绑定 `layoutCommunityMasonry` 等 |
 | 状态 | `communityPosts` | 账号私有社区帖（localStorage + 云 JSON） |
 | 状态 | `publicFeedPosts` | **全站 API Feed 缓存**（`20260614b` 新增） |
 | 拉 Feed | `refreshPublicCommunityFeed` | `PromptHubApi.getCommunityFeed` |
 | 展示列表 | `getAllCommunityPosts` | 合并 public + local + `buildPostsFromPublishedCards` |
 | 对齐卡片库 | `reconcileCommunityWithCards`, `pruneOwnOrphanCommunityPosts` | **易误删「库中无卡」的社区帖** |
-| 渲染 | `renderCommunity`, `renderCommunityNow`, `renderPostsIntoContainer` | Masonry / 空态 / loading |
-| 布局 | `layoutCommunityMasonry`, `scheduleCommunityLayout` | 抖动相关 |
+| 渲染 | `renderCommunity`, `renderCommunityNow`, `renderPostsIntoContainer` | Masonry / flex / 空态 / loading |
+| 布局 | `layoutCommunityMasonry`, `scheduleCommunityLayout` | 委托 `FeedLayout.*` |
 | 同步 | `runSyncCardLibraryToCommunity`, `syncEligibleCardsToCommunity` | 卡片库 → 社区 |
 | 恢复 | `restoreCardsFromCommunityFeed` | 社区 → 卡片库（`20260614b`） |
 | 导出 | `window.FeatureDraft` | 外部调用入口 |
+| 调试 | `window.forceRefreshAllImages` | 手动刷新各 Feed 图片与排版 |
 | 生图预览 / 灯箱 | `renderImageGenPreview`, `bindImageGenPreviewWheelScroll`, `navigateImageGenPreviewByWheel` |
 | **生图滚轮缩放** | `attachImageZoom`, `loadLightboxImage`, `onViewerShellWheel`（`script.js`） |
 | 批量社区公开 | `batchPublishCommunity`, `batchUnpublishCommunity`（`script.js`） |
 | 生图 Feed / 轮询 | `renderImageGenFeed`, `pollGenerationJobUntilDone` | 进行中任务会周期性打 Worker |
+
+---
+
+## `feed-layout.js`（Feed 排版，约 850 行）
+
+| 区域 | 函数 | 作用 |
+|------|------|------|
+| 模式 | `getMode`, `useFlexColumns`, `useMobileGrid` | 社区 Masonry / 我的主页 flex / 手机 grid |
+| 排版 | `layout`, `layoutFlex`, `schedule` | Masonry 实例与 flex 分列 |
+| 修复 | `repairCreations`, `repairFlex`, `diagnose` | 条缝/孤儿卡检测与修复 |
+| 调试 | `FeedLayout.diagnose('communityGrid')` | 见 `docs/FEED-LAYOUT.md` |
 
 ---
 
@@ -105,11 +119,14 @@
 ## `index.html` 脚本加载顺序（节选）
 
 1. `supabase-config.js` / `api-config.js`
-2. `supabase-sync.js`
-3. `cloud-sync-safety.js`
-4. `api-client.js`
-5. `script.js`
-6. `features-draft.js`
+2. `supabase-sync.js` · `cloud-sync-safety.js` · `api-client.js`
+3. `masonry.pkgd.min.js`
+4. `script.js`
+5. **`feed-layout.js`**（须在 `features-draft.js` 之前）
+6. `features-draft.js` · `community-gacha.js` · `features-assets.js`
+7. `pwa-install.js` · `mobile.js`
+
+> `hotfix-image-layout.js` 已废弃（逻辑并入 `features-draft.js`）；`hotfix-community-layout.js` 已删除。
 
 ---
 

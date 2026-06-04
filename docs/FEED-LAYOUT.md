@@ -42,7 +42,7 @@
 ## 文件职责
 
 - **`feed-layout.js`**：列数、flex 分卡、Masonry 实例、resize/图片 debounce 重排、`diagnose`。
-- **`features-draft.js`**：帖子数据、渲染 HTML、`wireFeedLayout()` 注入依赖。
+- **`features-draft.js`**：帖子数据、渲染 HTML；**解析时** `wireFeedLayout()` 注入依赖；`window.forceRefreshAllImages` 调试刷新。
 
 ## 社区上下间距（2026-06-05 现状）
 

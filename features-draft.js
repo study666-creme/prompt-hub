@@ -1342,22 +1342,6 @@
     return Number.isFinite(n) ? n : 16;
   }
 
-  /** Masonry 后排版高度校正：我的主页容器勿收成一条可滚缝 */
-  function syncCreationsGridContainerHeight(container) {
-    if (!container || container.id !== 'creationsGrid') return;
-    container.style.removeProperty('max-height');
-    container.style.overflow = 'visible';
-    let maxBottom = 0;
-    container.querySelectorAll(':scope > .card').forEach((card) => {
-      const top = parseFloat(card.style.top) || 0;
-      const mb = parseFloat(getComputedStyle(card).marginBottom) || 0;
-      maxBottom = Math.max(maxBottom, top + card.offsetHeight + mb);
-    });
-    const h = Math.max(maxBottom, container.scrollHeight);
-    if (h > 96) container.style.height = `${Math.ceil(h)}px`;
-    else container.style.removeProperty('height');
-  }
-
   /** 社区/我的主页：列间距=gutter；上下间距=CSS margin-bottom（与 #cardsContainer 一致） */
   function getCommunityFeedGaps() {
     const gap = getMasonryGap();
@@ -1376,10 +1360,6 @@
     if (container.querySelector('.community-post-card, .creation-post-card')) {
       purgeCommunityFeedGridNoise(container);
     }
-  }
-
-  function getCommunityFeedLayoutWidth(container) {
-    return window.FeedLayout?.getLayoutWidth?.(container) ?? 0;
   }
 
   function scheduleFeedMasonryRelayout(containerId = 'communityGrid') {
@@ -3339,7 +3319,7 @@
 
   /* —— Feed 排版：feed-layout.js（见 docs/FEED-LAYOUT.md）—— */
   function isMobileFeedLayout() {
-    return window.MobileUI?.isMobile?.() || window.matchMedia('(max-width: 900px)').matches;
+    return isMobileFeedViewport();
   }
 
   function useCssGridForCommunityFeed(containerId) {
@@ -3365,12 +3345,6 @@
   let runCommunityFeedLayoutPass;
   let bindCommunityGridImageRelayout;
   let bindCommunityFeedResizeRelayout;
-
-  function bindCommunityGridScrollRelayout() { /* 滚动全墙重排已禁用 */ }
-
-  function scheduleLayoutAfterImages(containerId) {
-    scheduleCommunityLayout(containerId);
-  }
 
   function enforceMobileCommunityFeedGrid(containerId) {
     if (!isMobileFeedLayout()) return;
@@ -9005,10 +8979,6 @@
     </article>`;
   }
 
-  function resetMobileFeedGridStyles() {
-    enforceMobileImageGenFeed();
-  }
-
   function enforceMobileImageGenFeed() {
     if (!isMobileFeedViewport()) return;
     if (imageGenMasonry) {
@@ -9719,7 +9689,6 @@
         ? 'imagegen-feed imagegen-feed--tiles mobile-feed-grid feed-layout-pending'
         : 'imagegen-feed imagegen-feed--masonry feed-layout-pending';
       wrap.innerHTML = html;
-      resetMobileFeedGridStyles();
       bindImageGenFeedCardEvents(wrap);
       bindImageGenFeedImageRelayout();
       if (mobileFeed) {
@@ -10191,7 +10160,6 @@
   }
 
   function init() {
-    wireFeedLayout();
     loadStores();
     hydratePublicFeedFromCache();
     bindUI();
@@ -10366,6 +10334,28 @@
     };
   }
 
+  function forceRefreshAllImages() {
+    const box = document.getElementById('cardsContainer');
+    if (box && window.CardImageLoader) {
+      window.CardImageLoader.patchVisibleFromCache(box);
+    }
+    ['communityGrid', 'creationsGrid', 'userProfileGrid', 'imageGenFeed'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      window.SupabaseSync?.patchImageSrcFromCache?.(el);
+      if (id === 'imageGenFeed') scheduleImageGenFeedLayout();
+      else if (id === 'communityGrid' || id === 'creationsGrid') {
+        if (isMobileFeedViewport()) enforceMobileCommunityFeedGrid(id);
+        else {
+          scrubCommunityFeedFlexCards(el);
+          repairCommunityFeedLayout(id);
+        }
+      } else layoutCommunityMasonry(id);
+    });
+  }
+
+  wireFeedLayout();
+
   window.FeatureDraft = {
     init,
     onAppChange,
@@ -10480,6 +10470,7 @@
   };
 
   window.recoverLostGenerationsFromApi = recoverLostGenerationsFromApi;
+  window.forceRefreshAllImages = forceRefreshAllImages;
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
