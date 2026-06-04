@@ -663,12 +663,80 @@
     }
   }
 
+  /** 已出图的 Feed 卡：清 is-loading + 内联高度，避免 4/5 骨架盒残留造成列内「假大间距」 */
+  function scrubCommunityFeedCardMediaHeights(container) {
+    if (!container?.querySelectorAll) return;
+    container.querySelectorAll('.community-feed-col .card .card-media').forEach((media) => {
+      const img = media.querySelector('img.card-img');
+      if (!img) return;
+      const src = img.currentSrc || img.src || '';
+      const loaded = img.complete
+        && img.naturalWidth > 8
+        && /^https?:\/\//i.test(src)
+        && !src.includes('data:image/svg');
+      if (!loaded) return;
+      if (media.classList.contains('is-loading') || media.classList.contains('card-media--await')) {
+        releaseFeedMediaLoading(media);
+      }
+      media.style.removeProperty('min-height');
+      media.style.removeProperty('height');
+      media.style.removeProperty('max-height');
+      media.style.removeProperty('aspect-ratio');
+      img.style.removeProperty('position');
+      img.style.removeProperty('inset');
+      img.style.removeProperty('height');
+      img.style.removeProperty('max-height');
+      img.style.removeProperty('visibility');
+      img.style.removeProperty('opacity');
+    });
+  }
+
+  function scrubCommunityFeedFlexCards(container) {
+    if (!container) return;
+    container.style.removeProperty('height');
+    container.style.removeProperty('max-width');
+    container.querySelectorAll(':scope > .grid-sizer').forEach((el) => el.remove());
+    collectCommunityFeedCards(container).forEach(clearCommunityFeedCardInline);
+    scrubCommunityFeedCardMediaHeights(container);
+    const cols = getCommunityFeedColumns(container);
+    applyCommunityFeedColumnCss(container, cols);
+  }
+
+  function syncCommunityFeedColumnCount(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container || !useCommunityCssGrid(containerId)) return;
+    const desired = getCommunityFeedColumns(container);
+    const colEls = container.querySelectorAll(':scope > .community-feed-col');
+    const prev = Number(container.dataset.feedDistributedCols || container.dataset.feedLayoutCols) || 0;
+    const orphans = container.querySelectorAll(':scope > .card').length;
+    if (
+      container.dataset.feedDistributed === '1'
+      && colEls.length === desired
+      && prev === desired
+      && !orphans
+    ) {
+      scrubCommunityFeedFlexCards(container);
+      return;
+    }
+    if (container.dataset.feedDistributed === '1' && colEls.length) {
+      redistributeCommunityFeedByHeight(container, desired);
+    } else {
+      layoutCommunityMasonry(containerId, { forceReflow: true, recalcCols: true });
+    }
+    applyCommunityFeedColumnCss(container, desired);
+    setFeedLayoutPending(containerId, false);
+  }
+
   function ensureCommunityFeedColumnLayout(containerId) {
     const container = document.getElementById(containerId);
     if (!container || !useCommunityCssGrid(containerId)) return;
     const colEls = container.querySelectorAll(':scope > .community-feed-col');
     const orphanCards = [...container.querySelectorAll(':scope > .card')];
-    if (colEls.length && !orphanCards.length) return;
+    if (colEls.length && !orphanCards.length) {
+      syncCommunityFeedColumnCount(containerId);
+      return;
+    }
+    if (colEls.length) scrubCommunityFeedFlexCards(container);
     if (colEls.length && orphanCards.length) {
       const cols = Number(container.dataset.feedDistributedCols || container.dataset.feedLayoutCols)
         || getCommunityFeedColumns(container);
@@ -680,15 +748,103 @@
     layoutCommunityMasonry(containerId, { forceReflow: true });
   }
 
+  function clearCommunityFeedCardInline(card) {
+    if (!card) return;
+    card.classList.remove('is-masonry-positioned');
+    card.removeAttribute('style');
+    card.querySelectorAll('.card-media').forEach((media) => {
+      media.classList.remove('is-masonry-positioned');
+      media.removeAttribute('style');
+    });
+    card.querySelectorAll('.card-img, .card-media img').forEach((img) => {
+      img.removeAttribute('style');
+      img.removeAttribute('width');
+      img.removeAttribute('height');
+    });
+  }
+
+  function redistributeCommunityFeedByHeight(container, cols) {
+    if (!container || cols < 1) return;
+    container.classList.add('community-feed-rebalancing');
+    scrubStaleCommunityFeedEmpty(container);
+    container.querySelectorAll(':scope > .grid-sizer').forEach((el) => el.remove());
+    const colEls = ensureCommunityFeedColEls(container, cols);
+    const cards = collectCommunityFeedCards(container);
+    const scrollRoot = getFeedScrollRoot(container) || container;
+    const scrollTop = scrollRoot.scrollTop;
+    colEls.forEach((col) => { col.innerHTML = ''; });
+    cards.forEach((card) => {
+      clearCommunityFeedCardInline(card);
+      let target = 0;
+      let minH = Infinity;
+      colEls.forEach((col, i) => {
+        const h = col.offsetHeight;
+        if (h < minH) {
+          minH = h;
+          target = i;
+        }
+      });
+      colEls[target].appendChild(card);
+      card.dataset.feedCol = String(target);
+    });
+    container.dataset.feedDistributed = '1';
+    container.dataset.feedDistributedCols = String(cols);
+    container.dataset.feedCols = String(cols);
+    ensureFeedPageSentinel(container);
+    requestAnimationFrame(() => {
+      scrollRoot.scrollTop = scrollTop;
+      setTimeout(() => container.classList.remove('community-feed-rebalancing'), 320);
+    });
+  }
+
+  function feedColumnHeightSpread(container) {
+    const colEls = [...container.querySelectorAll(':scope > .community-feed-col')];
+    if (colEls.length < 2) return 0;
+    const heights = colEls.map((col) => col.offsetHeight);
+    return Math.max(...heights) - Math.min(...heights);
+  }
+
+  function feedColumnCardImbalance(container) {
+    const colEls = [...container.querySelectorAll(':scope > .community-feed-col')];
+    if (colEls.length < 2) return false;
+    const counts = colEls.map((col) => col.querySelectorAll(':scope > .card').length);
+    const total = counts.reduce((a, b) => a + b, 0);
+    if (total < 2) return false;
+    const max = Math.max(...counts);
+    const fair = Math.ceil(total / colEls.length);
+    return max > fair + 2;
+  }
+
+  function repairCommunityFeedLayout(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container || !useCommunityCssGrid(containerId)) return false;
+    const orphans = [...container.querySelectorAll(':scope > .card')];
+    if (orphans.length) {
+      const cols = Number(container.dataset.feedDistributedCols || container.dataset.feedLayoutCols)
+        || getCommunityFeedColumns(container);
+      orphans.forEach(clearCommunityFeedCardInline);
+      distributeCommunityFeedColumns(container, cols, { newCards: orphans });
+      container.classList.add('community-feed-grid', 'community-feed-columns');
+      setFeedLayoutPending(containerId, false);
+      return true;
+    }
+    const colEls = container.querySelectorAll(':scope > .community-feed-col');
+    if (!colEls.length) {
+      layoutCommunityMasonry(containerId, { forceReflow: true, recalcCols: true });
+      return true;
+    }
+    colEls.forEach((col) => {
+      col.querySelectorAll(':scope > .card').forEach(clearCommunityFeedCardInline);
+    });
+    return false;
+  }
+
   function repairCreationsFeedLayout() {
-    const container = document.getElementById('creationsGrid');
-    if (!container || !useCommunityCssGrid('creationsGrid')) return;
-    const orphans = container.querySelectorAll(':scope > .card');
-    const cols = container.querySelectorAll(':scope > .community-feed-col');
-    if (!orphans.length && cols.length >= 2) return;
-    delete container.dataset.feedDistributed;
-    delete container.dataset.feedDistributedCols;
-    layoutCommunityMasonry('creationsGrid', { forceReflow: true, recalcCols: true });
+    return repairCommunityFeedLayout('creationsGrid');
+  }
+
+  function scheduleCommunityFeedHeightBalance(_containerId) {
+    /* flex 多列：禁止按图片加载全墙 DOM 重分（社区晃眼）；间距靠 CSS aspect-ratio */
   }
 
   function appendFeedCardsLayout(containerId, appendedCards) {
@@ -776,6 +932,9 @@
       }
     }
     finishCommunityFeedLayoutAfterBatch(containerId);
+    if (containerId === 'creationsGrid' || containerId === 'communityGrid') {
+      requestAnimationFrame(() => ensureCommunityFeedColumnLayout(containerId));
+    }
   }
 
   async function growCommunityFeedAfterPublicRefresh(containerId = 'communityGrid') {
@@ -1337,12 +1496,47 @@
     return Number.isFinite(n) ? n : 16;
   }
 
-  /** 社区/我发布 Masonry：与卡片库同一套列宽与间距算法 */
+  /** 社区/我的主页：列间距=gutter；上下间距=CSS margin-bottom（Masonry gutter 不含纵向） */
   function getCommunityFeedGaps() {
-    const gap = getMasonryGap();
-    const rowRaw = getComputedStyle(document.documentElement).getPropertyValue('--card-row-gap').trim();
-    const rowGap = Number.parseFloat(rowRaw) || gap;
-    return { colGap: gap, rowGap };
+    return { colGap: 16, rowGap: 16 };
+  }
+
+  /** Masonry 列数/列宽：以 #communityGrid 实际宽度为准（勿与 page-main 量宽不一致） */
+  function getCommunityFeedLayoutWidth(container) {
+    if (!container) return 0;
+    const st = getComputedStyle(container);
+    const w = container.clientWidth - parseFloat(st.paddingLeft) - parseFloat(st.paddingRight);
+    if (w > 80) return w;
+    return getCommunityFeedMeasureInnerWidth(container);
+  }
+
+  let communityMasonryRelayoutTimer = null;
+  let communityMasonryRelayoutPending = 0;
+
+  /** 社区/我的主页桌面 Masonry：图长高后 debounce 重排（与卡片库同思路） */
+  function scheduleFeedMasonryRelayout(containerId = 'communityGrid') {
+    if (isMobileFeedLayout() || useCommunityCssGrid(containerId)) return;
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const inst = containerId === 'creationsGrid' ? creationsMasonry : communityMasonry;
+    communityMasonryRelayoutPending += 1;
+    clearTimeout(communityMasonryRelayoutTimer);
+    communityMasonryRelayoutTimer = setTimeout(() => {
+      communityMasonryRelayoutPending = 0;
+      if (inst && typeof inst.layout === 'function') {
+        const scrollRoot = getFeedScrollRoot(container) || container;
+        const scrollTop = scrollRoot.scrollTop;
+        if (typeof inst.reloadItems === 'function') inst.reloadItems();
+        inst.layout();
+        scrollRoot.scrollTop = scrollTop;
+      } else {
+        layoutCommunityMasonry(containerId, { force: true });
+      }
+    }, communityMasonryRelayoutPending > 4 ? 220 : 80);
+  }
+
+  function scheduleCommunityMasonryRelayout() {
+    scheduleFeedMasonryRelayout('communityGrid');
   }
 
   function filterCreationsForCloud(list) {
@@ -2633,9 +2827,12 @@
 
   function getFeedScrollRoot(container) {
     if (!container) return null;
+    if (!isMobileFeedLayout() && container.id === 'creationsGrid') {
+      return container.closest('.my-home-shell') || container.closest('.feature-shell') || container;
+    }
     if (
       !isMobileFeedLayout()
-      && (container.id === 'communityGrid' || container.id === 'creationsGrid')
+      && container.id === 'communityGrid'
       && container.classList?.contains('community-feed-columns')
     ) {
       return container;
@@ -2666,6 +2863,9 @@
       if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
       else media.classList.remove('is-loading', 'card-media--await');
     });
+    if (container.id === 'communityGrid' || container.id === 'creationsGrid') {
+      scrubCommunityFeedCardMediaHeights(container);
+    }
   }
 
   function ensureFeedPageSentinel(container) {
@@ -3241,37 +3441,40 @@
     setTimeout(finish, 2800);
   }
 
-  /** 社区 Masonry 列数：按 .community-page-main 宽度算（勿用 grid 自身 clientWidth，侧栏打开时会误判成 1 列） */
+  /** 社区/创作列宽：按 .community-page-main 量宽（勿用 .community-workspace / #creationsGrid，会被撑宽后反馈成巨列） */
   function getCommunityFeedMeasureEl(container) {
-    if (container?.id === 'creationsGrid') {
-      return container.closest('.community-workspace')
-        || container.closest('.community-page-main')
-        || container;
-    }
-    return container?.closest?.('.community-page-main') || container;
+    return container?.closest?.('.community-page-main')
+      || container?.closest?.('.feature-body-cards')
+      || container?.parentElement
+      || container;
   }
 
-  function getCreationsFeedColumns(container) {
+  function getCommunityFeedMeasureInnerWidth(container) {
+    const measure = getCommunityFeedMeasureEl(container);
+    if (!measure) return 0;
+    const style = getComputedStyle(measure);
+    let innerW = measure.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const shell = container?.closest?.('.feature-shell') || container?.closest?.('.app-page-feature');
+    if (shell) {
+      const ss = getComputedStyle(shell);
+      const shellW = shell.clientWidth - parseFloat(ss.paddingLeft) - parseFloat(ss.paddingRight);
+      if (shellW > 80 && innerW > shellW + 4) innerW = shellW;
+    }
+    const layoutMax = Math.max(280, window.innerWidth - 240);
+    if (innerW > layoutMax) innerW = layoutMax;
+    return Math.max(0, innerW);
+  }
+
+  function getCreationsFeedColumns(_container) {
     let userCols = Number(localStorage.getItem('promptrepo_myhome_columns'));
     if (!Number.isFinite(userCols) || userCols < 2) userCols = 3;
-    userCols = Math.min(5, Math.max(2, userCols));
-    if (!container) return userCols;
-    const measure = getCommunityFeedMeasureEl(container);
-    const style = getComputedStyle(measure);
-    const innerW = measure.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-    if (innerW < 80) return userCols;
-    const gap = getCommunityFeedGaps().colGap;
-    const minCol = 156;
-    const fit = Math.floor((innerW + gap) / (minCol + gap));
-    return Math.min(userCols, Math.max(2, fit));
+    return Math.min(5, Math.max(2, userCols));
   }
 
   function getCommunityFeedColumns(container) {
     if (!container) return getCommunityColumns();
     if (container.id === 'creationsGrid') return getCreationsFeedColumns(container);
-    const measure = getCommunityFeedMeasureEl(container);
-    const style = getComputedStyle(measure);
-    const innerW = measure.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const innerW = getCommunityFeedLayoutWidth(container);
     const gap = getCommunityFeedGaps().colGap;
     const userCols = getCommunityColumns();
     if (innerW < 80) return userCols;
@@ -3282,9 +3485,7 @@
 
   function getCommunityFeedColumnWidth(container) {
     if (!container) return 0;
-    const measure = getCommunityFeedMeasureEl(container);
-    const style = getComputedStyle(measure);
-    const innerW = measure.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const innerW = getCommunityFeedLayoutWidth(container);
     if (innerW < 80) return 0;
     const gap = getCommunityFeedGaps().colGap;
     const cols = getCommunityFeedColumns(container);
@@ -3332,6 +3533,7 @@
         && !opts.force
         && !opts.newCards?.length
       ) {
+        scrubCommunityFeedFlexCards(container);
         ensureFeedPageSentinel(container);
         setFeedLayoutPending(containerId, false);
         return;
@@ -3397,6 +3599,11 @@
         const prev = Number(grid.dataset.feedDistributedCols || grid.dataset.feedLayoutCols) || 0;
         if (grid.dataset.feedDistributed === '1' && prev === measured) {
           applyCommunityFeedColumnCss(grid, measured);
+          scrubCommunityFeedFlexCards(grid);
+          return;
+        }
+        if (grid.dataset.feedDistributed === '1' && prev !== measured) {
+          syncCommunityFeedColumnCount(containerId);
           return;
         }
         scheduleCommunityLayout(containerId, { recalcCols: true });
@@ -3407,21 +3614,47 @@
 
   function applyCommunityFeedColumnCss(container, cols) {
     if (!container || cols < 1) return;
-    const colWidth = getCommunityFeedColumnWidth(container);
     const { colGap: gap, rowGap } = getCommunityFeedGaps();
     container.dataset.feedLayoutCols = String(cols);
     container.style.setProperty('--feed-columns', String(cols));
     container.style.setProperty('--feed-column-gap', `${gap}px`);
     container.style.setProperty('--feed-row-gap', `${rowGap}px`);
-    if (colWidth) container.style.setProperty('--feed-col-width', `${colWidth}px`);
+    container.style.width = '100%';
+    container.style.maxWidth = '100%';
+    container.style.boxSizing = 'border-box';
+    container.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+    const gridW = container.clientWidth || getCommunityFeedMeasureInnerWidth(container);
+    if (gridW > 80 && cols > 0) {
+      const colPx = Math.max(120, Math.floor((gridW - gap * (cols - 1)) / cols));
+      container.style.setProperty('--feed-col-width', `${colPx}px`);
+    }
   }
 
   function bindCommunityGridScrollRelayout() {
     /* 滚动时全量 Masonry 重排会导致 400+ 卡片错位，已禁用 */
   }
 
+  const feedGridImageRelayoutBound = {};
+
+  function bindFeedGridImageRelayout(containerId) {
+    if (feedGridImageRelayoutBound[containerId]) return;
+    const container = document.getElementById(containerId);
+    if (!container || isMobileFeedLayout()) return;
+    feedGridImageRelayoutBound[containerId] = true;
+    container.addEventListener('load', (e) => {
+      if (!e.target?.classList?.contains('card-img')) return;
+      if (typeof window.isPlaceholderCardImg === 'function' && window.isPlaceholderCardImg(e.target)) return;
+      scheduleFeedMasonryRelayout(containerId);
+    }, true);
+    container.addEventListener('error', (e) => {
+      if (!e.target?.classList?.contains('card-img')) return;
+      scheduleFeedMasonryRelayout(containerId);
+    }, true);
+  }
+
   function bindCommunityGridImageRelayout() {
-    /* 由 finishCardMediaShine 批量触发 Masonry，避免每张图全量重排 */
+    bindFeedGridImageRelayout('communityGrid');
+    bindFeedGridImageRelayout('creationsGrid');
   }
 
   function scheduleLayoutAfterImages(containerId) {
@@ -3442,9 +3675,9 @@
     return (containerId === 'communityGrid' || containerId === 'creationsGrid') && !isMobileFeedLayout();
   }
 
-  /** 桌面社区/创作：flex 最短列分配（图片异步长高时 Masonry 易错位留白） */
-  function useCommunityCssGrid(containerId) {
-    return (containerId === 'communityGrid' || containerId === 'creationsGrid') && !isMobileFeedLayout();
+  /** 桌面社区/我的主页均用 Masonry；flex 多列仅保留给历史兼容（不再启用） */
+  function useCommunityCssGrid(_containerId) {
+    return false;
   }
 
   function purgeCommunityFeedGridNoise(container) {
@@ -3619,7 +3852,7 @@
     setFeedLayoutPending(containerId, false);
   }
 
-  /** 社区/创作：多列 flex 瀑布流（首轮 round-robin 固定列，图片加载后不再挪动） */
+  /** 社区/创作：多列 flex 瀑布流（最短列分配，无 absolute 叠卡） */
   function ensureCommunityFeedColEls(container, cols) {
     let colEls = [...container.querySelectorAll(':scope > .community-feed-col')];
     while (colEls.length < cols) {
@@ -3652,31 +3885,13 @@
       const newSet = new Set(newCards);
       const broken = orphanCards.some((c) => !newSet.has(c));
       if (broken) {
-        const cards = collectCommunityFeedCards(container);
-        colEls.forEach((col) => { col.innerHTML = ''; });
-        cards.forEach((card, idx) => {
-          let target = idx % cols;
-          if (opts.forceReflow && cards.length > cols) {
-            let minH = Infinity;
-            colEls.forEach((col, i) => {
-              const h = col.offsetHeight;
-              if (h < minH) {
-                minH = h;
-                target = i;
-              }
-            });
-          }
-          colEls[target].appendChild(card);
-          card.dataset.feedCol = String(target);
-        });
-        container.dataset.feedDistributed = '1';
-        container.dataset.feedDistributedCols = String(cols);
-        ensureFeedPageSentinel(container);
+        redistributeCommunityFeedByHeight(container, cols);
         return;
       }
     }
     if (newCards?.length) {
       newCards.forEach((card) => {
+        clearCommunityFeedCardInline(card);
         let target = 0;
         let minH = Infinity;
         colEls.forEach((col, i) => {
@@ -3696,6 +3911,7 @@
     const orphans = [...container.querySelectorAll(':scope > .card')];
     if (orphans.length && container.dataset.feedDistributed === '1' && !opts.forceReflow) {
       orphans.forEach((card, i) => {
+        clearCommunityFeedCardInline(card);
         const colIdx = Number(card.dataset.feedCol);
         const target = Number.isFinite(colIdx) && colEls[colIdx] ? colIdx : (i % cols);
         colEls[target].appendChild(card);
@@ -3706,27 +3922,7 @@
 
     if (container.dataset.feedDistributed === '1' && !opts.forceReflow) return;
 
-    const cards = collectCommunityFeedCards(container);
-    const scrollTop = container.scrollTop;
-    colEls.forEach((col) => { col.innerHTML = ''; });
-    cards.forEach((card, idx) => {
-      let target = idx % cols;
-      if (opts.forceReflow && cards.length > cols) {
-        let minH = Infinity;
-        colEls.forEach((col, i) => {
-          const h = col.offsetHeight;
-          if (h < minH) {
-            minH = h;
-            target = i;
-          }
-        });
-      }
-      colEls[target].appendChild(card);
-      card.dataset.feedCol = String(target);
-    });
-    container.dataset.feedDistributed = '1';
-    container.dataset.feedDistributedCols = String(cols);
-    container.scrollTop = scrollTop;
+    redistributeCommunityFeedByHeight(container, cols);
   }
 
   /** 社区/创作：CSS 多列或手机两列；个人主页仍用 Masonry */
@@ -3737,11 +3933,12 @@
     const feedStable = container.dataset.feedDistributed === '1';
     const mustFlatten = opts.recalcCols === true || opts.forceReflow === true || !feedStable;
     if (useCommunityCssGrid(containerId) && hasFeedCols && feedStable && !mustFlatten && !opts.newCards?.length) {
+      scrubCommunityFeedFlexCards(container);
       ensureFeedPageSentinel(container);
       setFeedLayoutPending(containerId, false);
       return;
     }
-    if (hasFeedCols && mustFlatten) {
+    if (hasFeedCols && (mustFlatten || !useCommunityCssGrid(containerId))) {
       flattenCommunityFeedColumns(container);
     }
     if (useCommunityCssGrid(containerId)) {
@@ -3764,22 +3961,9 @@
         return;
       }
       let cols = measuredCols;
-      if (container.dataset.feedLayoutCols && opts.recalcCols !== true) {
-        cols = Math.max(2, Number(container.dataset.feedLayoutCols) || measuredCols);
-      } else {
-        cols = measuredCols;
-      }
       applyCommunityFeedColumnCss(container, cols);
       container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
-      if (container.dataset.feedDistributed !== '1' || opts.newCards?.length) {
-        container.querySelectorAll('.card').forEach((card) => {
-          card.classList.remove('is-masonry-positioned');
-          if (!card.dataset.feedCol) {
-            card.style.cssText = '';
-            card.style.position = 'relative';
-          }
-        });
-      }
+      collectCommunityFeedCards(container).forEach(clearCommunityFeedCardInline);
       const colsChanged = Number(container.dataset.feedDistributedCols || 0) !== cols;
       distributeCommunityFeedColumns(container, cols, {
         forceReflow: container.dataset.feedDistributed !== '1' || (opts.recalcCols === true && colsChanged),
@@ -3830,14 +4014,24 @@
         return;
       }
 
-      const gap = getMasonryGap();
+      const feedGaps = getCommunityFeedGaps();
+      const useFeedGaps = containerId === 'communityGrid' || containerId === 'creationsGrid';
+      const gap = useFeedGaps ? feedGaps.colGap : getMasonryGap();
       const style = getComputedStyle(container);
-      const innerW = container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      const innerW = useFeedGaps
+        ? getCommunityFeedLayoutWidth(container)
+        : container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
       if (innerW < 200) {
         scheduleCommunityLayout(containerId, { force: true });
         return;
       }
-      const cols = isProfile ? Math.min(4, getCardColumns()) : Math.max(1, getCardColumns());
+      const cols = isProfile
+        ? Math.min(4, getCardColumns())
+        : containerId === 'communityGrid'
+          ? getCommunityFeedColumns(container)
+          : containerId === 'creationsGrid'
+            ? getCreationsFeedColumns(container)
+            : Math.max(1, getCardColumns());
       const colWidth = Math.max(120, Math.floor((innerW - gap * (cols - 1)) / cols));
       let sizer = container.querySelector('.grid-sizer');
       if (!sizer) {
@@ -3876,8 +4070,19 @@
       }
       container.scrollTop = scrollTop;
       container.classList.add('masonry-ready', 'cards-grid-primed');
+      if (containerId === 'creationsGrid') {
+        container.style.removeProperty('max-height');
+        container.style.overflow = 'visible';
+      }
       if (colWidth) container.style.setProperty('--feed-col-width', `${colWidth}px`);
       setFeedLayoutPending(containerId, false);
+      requestAnimationFrame(() => {
+        const m = isProfile ? profileMasonry : (isCreations ? creationsMasonry : communityMasonry);
+        if (typeof m?.reloadItems === 'function') m.reloadItems();
+        m?.layout?.();
+        revealCommunityFeedImages(container);
+        scheduleFeedMasonryRelayout(containerId);
+      });
     };
     if (typeof Masonry !== 'undefined') runMasonryLayout();
     else if (typeof window.ensureMasonryScript === 'function') {
@@ -4403,10 +4608,10 @@
     const displayRef = communityPostDisplayImageRef(post);
     const showImage = !!(displayRef && isDisplayableImage(displayRef));
     const div = document.createElement('div');
-    const visualOnly = containerId === 'communityGrid';
+    const visualOnly = containerId === 'communityGrid' || containerId === 'creationsGrid';
     div.className = visualOnly
-      ? 'card community-post-card community-post-card--visual'
-      : 'card community-post-card';
+      ? 'card community-post-card community-post-card--visual feed-card-enter'
+      : 'card community-post-card feed-card-enter';
     div.dataset.postId = post.id;
     if (post.sourceCardId) div.dataset.sourceCardId = post.sourceCardId;
     if (post.authorId) div.dataset.authorId = post.authorId;
@@ -4473,6 +4678,9 @@
     });
     const authorBtn = div.querySelector('.community-author-link');
     if (authorBtn) bindAuthorLink(authorBtn, post.authorId, post.authorName);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => div.classList.remove('feed-card-enter'));
+    });
     return div;
   }
 
@@ -5615,7 +5823,7 @@
   }
 
   async function renderCommunitySidePanel(id, opts = {}) {
-    const post = findPost(id);
+    const post = opts.post || findPost(id);
     const bodyId = opts.bodyId || 'communitySideBody';
     const titleId = opts.titleId || 'communitySideTitle';
     const isCreationsMode = opts.mode === 'creations';
@@ -5718,28 +5926,72 @@
     return window.MobileUI?.isMobile?.() || window.matchMedia('(max-width: 900px)').matches;
   }
 
+  function getFeatureSidePanelWorkspace(panelId) {
+    if (panelId === 'creationsSidePanel') {
+      return document.querySelector('#pageCreations .community-workspace');
+    }
+    return document.querySelector('#pageCommunity .community-workspace');
+  }
+
+  function getFeatureSidePanelMountRoot() {
+    if (isMobileFeaturePanel()) return document.body;
+    return document.querySelector('.app-chrome') || document.body;
+  }
+
+  /** 桌面「我的主页」侧栏挂到 app-chrome，避免 my-home-shell 滚动链裁切 */
+  function shouldMountCreationsPanelOnRoot() {
+    if (isMobileFeaturePanel()) return true;
+    return document.getElementById('pageCreations')?.classList.contains('active');
+  }
+
+  function shouldMountFeatureSidePanelOnRoot(panelId) {
+    if (panelId === 'creationsSidePanel') return shouldMountCreationsPanelOnRoot();
+    return isMobileFeaturePanel();
+  }
+
   function ensureFeatureSidePanelDocked(panelId) {
+    if (shouldMountFeatureSidePanelOnRoot(panelId)) return;
     if (isMobileFeaturePanel()) return;
     unmountFeatureSidePanel(panelId);
+    const panel = document.getElementById(panelId);
+    const home = getFeatureSidePanelWorkspace(panelId);
+    if (!panel || !home) return;
+    if (panel.parentElement !== home) {
+      home.appendChild(panel);
+    }
   }
 
   function syncCommunityPanelOpenClass() {
-    const mobileOpen = isMobileFeaturePanel()
-      && (
-        !document.getElementById('communitySidePanel')?.classList.contains('hidden')
-        || !document.getElementById('creationsSidePanel')?.classList.contains('hidden')
-      );
-    document.body.classList.toggle('community-panel-open', mobileOpen);
+    const panelOpen =
+      !document.getElementById('communitySidePanel')?.classList.contains('hidden')
+      || !document.getElementById('creationsSidePanel')?.classList.contains('hidden');
+    const onFeedPage =
+      document.getElementById('pageCommunity')?.classList.contains('active')
+      || document.getElementById('pageCreations')?.classList.contains('active');
+    document.body.classList.toggle(
+      'community-panel-open',
+      panelOpen && (isMobileFeaturePanel() || onFeedPage)
+    );
   }
 
   function mountFeatureSidePanel(panelId) {
     const panel = document.getElementById(panelId);
-    if (!panel || !isMobileFeaturePanel()) return;
+    if (!panel || !shouldMountFeatureSidePanelOnRoot(panelId)) return;
     if (panel.dataset.mountedOnBody === '1') return;
     panel._phOriginalParent = panel.parentElement;
     panel._phOriginalNext = panel.nextSibling;
-    document.body.appendChild(panel);
+    getFeatureSidePanelMountRoot().appendChild(panel);
     panel.dataset.mountedOnBody = '1';
+  }
+
+  function syncCreationsSidePanelMount() {
+    const panel = document.getElementById('creationsSidePanel');
+    if (!panel) return;
+    unmountFeatureSidePanel('creationsSidePanel');
+    ensureFeatureSidePanelDocked('creationsSidePanel');
+    if (!panel.classList.contains('hidden')) {
+      mountFeatureSidePanel('creationsSidePanel');
+    }
   }
 
   function unmountFeatureSidePanel(panelId) {
@@ -5802,10 +6054,14 @@
     document.querySelectorAll(`#${gridId} .community-post-card.selected`).forEach((el) => el.classList.remove('selected'));
     document.querySelector(`#${gridId} .community-post-card[data-post-id="${id}"]`)?.classList.add('selected');
     void renderCommunitySidePanel(id, {
+      post,
       bodyId: isCreations ? 'creationsSideBody' : 'communitySideBody',
       titleId: isCreations ? 'creationsSideTitle' : 'communitySideTitle',
       mode: isCreations ? 'creations' : 'community'
     });
+    if (!isMobileFeaturePanel()) {
+      requestAnimationFrame(() => syncCommunityFeedColumnCount(gridId));
+    }
     if (scrollEl && savedScrollTop > 0) {
       requestAnimationFrame(() => {
         scrollEl.scrollTop = savedScrollTop;
@@ -7349,6 +7605,7 @@
   function closeCreationsSidePanel() {
     document.getElementById('creationsSidePanel')?.classList.add('hidden');
     unmountFeatureSidePanel('creationsSidePanel');
+    ensureFeatureSidePanelDocked('creationsSidePanel');
     syncCommunityPanelOpenClass();
     creationsSideId = null;
     communitySidePostId = null;
@@ -7391,7 +7648,7 @@
     const sig = feedListSignature(list, 'creationsGrid');
     if (container.dataset.feedSig === sig && container.querySelector('.community-post-card')) {
       patchFeedLikeLabels(container, list);
-      requestAnimationFrame(() => repairCreationsFeedLayout());
+      requestAnimationFrame(() => syncCommunityFeedColumnCount('creationsGrid'));
       return;
     }
     renderLikeRewardRules();
@@ -7405,7 +7662,7 @@
       return;
     }
     void renderPostsIntoContainer(list, 'creationsGrid').then(() => {
-      requestAnimationFrame(() => repairCreationsFeedLayout());
+      requestAnimationFrame(() => syncCommunityFeedColumnCount('creationsGrid'));
     });
   }
 
@@ -7920,9 +8177,6 @@
       if (!quote.ok || quote.data?.final == null) return;
 
       const local = window.PointsSystem?.getImageGenCostDetail?.(model, resolution);
-      if (quote.data.listPrice != null && local?.listPrice != null && quote.data.listPrice !== local.listPrice) {
-        return;
-      }
 
       const detail = Object.assign({}, local || {}, {
         base: quote.data.listPrice ?? quote.data.base ?? local?.listPrice,
@@ -8393,22 +8647,32 @@
           }
           if (window.SupabaseSync?.isStorageRef?.(src) || String(src).startsWith('storage://')) {
             const norm = window.SupabaseSync?.normalizeImageRef?.(src) || src;
+            if (window.PromptHubApi?.signMediaRef) {
+              const signed = await window.PromptHubApi.signMediaRef(norm);
+              if (signed?.ok && signed.data?.url) return signed.data.url;
+            }
             return window.SupabaseSync.resolveDisplayUrl(norm, { variant: 'full', tryAllPaths: true });
           }
-          if (window.SupabaseSync?.isDataUrl?.(src)) {
+          if (window.SupabaseSync?.isDataUrl?.(src) || String(src).startsWith('blob:')) {
             if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.uploadImageGenRef) {
-              const stored = await window.SupabaseSync.uploadImageGenRef(genId('ref'), src);
-              return window.SupabaseSync.resolveDisplayUrl(stored);
+              try {
+                const stored = await window.SupabaseSync.uploadImageGenRef(genId('ref'), src);
+                if (window.PromptHubApi?.signMediaRef) {
+                  const signed = await window.PromptHubApi.signMediaRef(stored);
+                  if (signed?.ok && signed.data?.url) return signed.data.url;
+                }
+                const resolved = await window.SupabaseSync.resolveDisplayUrl(stored, { variant: 'full', tryAllPaths: true });
+                if (resolved && /^https?:\/\//i.test(resolved)) return resolved;
+              } catch (uploadErr) {
+                console.warn('参考图上传失败，改由服务端处理', uploadErr);
+              }
             }
-            return src;
-          }
-          if (String(src).startsWith('blob:')) {
-            if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.uploadImageGenRef) {
-              const stored = await window.SupabaseSync.uploadImageGenRef(genId('ref'), src);
-              return window.SupabaseSync.resolveDisplayUrl(stored);
+            if (window.SupabaseSync?.isDataUrl?.(src)) return src;
+            if (String(src).startsWith('blob:')) {
+              return compressRefImageFromSource(src, REF_MAX_SIDE);
             }
           }
-          return null;
+          return window.SupabaseSync?.isDataUrl?.(src) ? src : null;
         })();
         apiUrl = await Promise.race([
           resolveOne,
@@ -8416,10 +8680,12 @@
             setTimeout(() => reject(new Error('ref resolve timeout')), REF_URL_RESOLVE_TIMEOUT_MS);
           })
         ]);
-        if (apiUrl && /^https?:\/\//i.test(apiUrl)) urls.push(apiUrl);
-        else if (apiUrl && window.SupabaseSync?.isDataUrl?.(apiUrl)) urls.push(apiUrl);
+        if (apiUrl && (/^https?:\/\//i.test(apiUrl) || window.SupabaseSync?.isDataUrl?.(apiUrl))) {
+          urls.push(apiUrl);
+        }
       } catch (e) {
         console.warn('参考图解析失败', e);
+        if (window.SupabaseSync?.isDataUrl?.(src)) urls.push(src);
       }
     }
     return urls;
@@ -8894,12 +9160,6 @@
             ? batchOpts.refImages
             : imageGenRefImages;
         const refUrls = await resolveRefUrlsFromList(refSources);
-        if (refSources.length && !refUrls.length) {
-          failPendingJob(pendingId, '参考图无法用于生图');
-          renderImageGenFeed();
-          toast('参考图无法用于生图（须为网络图片），请去掉参考图或重新上传后再试');
-          return { ok: false, message: '参考图无法用于生图' };
-        }
         if (refSources.length && refUrls.length < refSources.length && !batchOpts.silentToast) {
           toast(`已使用 ${refUrls.length}/${refSources.length} 张参考图继续生成`);
         }
@@ -10489,7 +10749,12 @@
     document.getElementById('imageGenSize')?.addEventListener('change', updateImageGenCostHint);
     window.addEventListener('resize', () => {
       ensureFeatureSidePanelDocked('communitySidePanel');
-      ensureFeatureSidePanelDocked('creationsSidePanel');
+      if (!document.getElementById('creationsSidePanel')?.classList.contains('hidden')) {
+        syncCreationsSidePanelMount();
+      } else {
+        unmountFeatureSidePanel('creationsSidePanel');
+        ensureFeatureSidePanelDocked('creationsSidePanel');
+      }
       syncCommunityPanelOpenClass();
       if (document.getElementById('pageCommunity')?.classList.contains('active')) {
         scheduleCommunityLayout('communityGrid');
@@ -10571,7 +10836,7 @@
     }
     if (app === 'creations') {
       if (!document.getElementById('pageCreations')?.classList.contains('active')) return;
-      requestAnimationFrame(() => repairCreationsFeedLayout());
+      requestAnimationFrame(() => syncCommunityFeedColumnCount('creationsGrid'));
       renderMyHomeProfile();
       const activeTab = document.querySelector('#myHomeTabs .my-home-tab.active')?.dataset?.homeTab || 'posts';
       if (activeTab === 'owned-packages') {
@@ -10606,12 +10871,28 @@
     }
   }
 
+  function bindCommunityFeedMediaScrub() {
+    if (bindCommunityFeedMediaScrub._done) return;
+    bindCommunityFeedMediaScrub._done = true;
+    const orig = window.finishCardMediaShine;
+    if (typeof orig !== 'function') return;
+    window.finishCardMediaShine = function patchedFinishCardMediaShine(media) {
+      orig.call(this, media);
+      const feedGrid = media?.closest?.('#communityGrid, #creationsGrid');
+      if (feedGrid && !useCommunityCssGrid(feedGrid.id)) {
+        scheduleFeedMasonryRelayout(feedGrid.id);
+      }
+    };
+  }
+
   function init() {
     loadStores();
     hydratePublicFeedFromCache();
     bindUI();
     bindPublishToggle();
     initMyHomeTabs();
+    bindCommunityFeedMediaScrub();
+    bindCommunityGridImageRelayout();
     bindCommunityFeedResizeRelayout('communityGrid');
     bindCommunityFeedResizeRelayout('creationsGrid');
     startGenJobsBackgroundSync();
@@ -10849,6 +11130,12 @@
     scheduleLayout: scheduleCommunityLayout,
     scheduleCommunityLayout,
     repairCreationsFeedLayout,
+    repairCommunityFeedLayout,
+    syncCommunityFeedColumnCount,
+    scrubCommunityFeedFlexCards,
+    scheduleCommunityFeedHeightBalance,
+    scheduleCommunityMasonryRelayout,
+    scheduleFeedMasonryRelayout,
     layoutCommunityMasonry,
     relayoutCommunityFeeds,
     onCardDeletedForGen,

@@ -8,7 +8,7 @@
 
 | 顺序 | 文件 | 用途 |
 |------|------|------|
-| 0 | **`docs/AI-PITFALLS.md`** | **防炸站**：`colsChanged` 重复声明、社区 flatten 重分、401 签名、禁止全墙 layout |
+| 0 | **`docs/AI-PITFALLS.md`** + **`docs/ERROR-LOG.md`** | **防炸站** + 历史高频坑；SEO 见 **`docs/SEO-SEARCH-ENGINES.md`** |
 | 1 | **`docs/CURRENT-ISSUES.md`** | **P0-带宽**（生图仓库 几十～上百 MB）、404/500、验收标准 |
 | 2 | **`docs/CARD-LOADING.md`** | 卡片库 vs `#imageGenFeed` 管线差异 |
 | 3 | **`docs/PROJECT_CONTEXT.md`** | 产品、部署、构建号、**新对话提示词** |

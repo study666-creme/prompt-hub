@@ -3,8 +3,8 @@
   --ui-scale: 0.9;
   --card-columns: 3;
   --community-columns: 4;
-  --card-gap: 20px;
-  --card-row-gap: 20px;
+  --card-gap: 16px;
+  --card-row-gap: 16px;
   --card-skeleton-bg: #121218;
   --card-orb-core: rgba(255, 255, 255, 0.26);
   --card-orb-mid: rgba(255, 255, 255, 0.1);
@@ -4534,9 +4534,8 @@ body {
     opacity: 1;
   }
 
-  /* 社区 / 我的发布：复制卡片库 Masonry 规则（独立选择器） */
-  #communityGrid.cards-container:not(.list-view):not(.community-feed-columns),
-  #creationsGrid.cards-container:not(.list-view):not(.community-feed-columns) {
+  /* 社区 Feed：Masonry 容器占满主区并可滚动 */
+  #communityGrid.cards-container:not(.list-view):not(.community-feed-columns) {
     display: block !important;
     position: relative !important;
     width: 100% !important;
@@ -4547,10 +4546,27 @@ body {
     overflow-x: hidden;
     overflow-y: auto !important;
   }
+  /* 我的主页：列表随内容增高，由 .my-home-shell 整页滚动（勿 flex:1 + overflow:auto 收成一条缝） */
+  #creationsGrid.cards-container:not(.list-view):not(.community-feed-columns) {
+    display: block !important;
+    position: relative !important;
+    width: 100% !important;
+    max-width: 100%;
+    height: auto !important;
+    min-height: 0;
+    flex: none !important;
+    overflow-x: hidden;
+    overflow-y: visible !important;
+  }
   #communityGrid.cards-container:not(.list-view) > .card,
   #creationsGrid.cards-container:not(.list-view) > .card {
     display: block;
     box-sizing: border-box;
+    margin-bottom: var(--card-row-gap) !important;
+  }
+  /* Masonry gutter 仅管列间距；上下间隙靠 margin-bottom（与 #cardsContainer 一致） */
+  #communityGrid.masonry-ready.cards-container:not(.list-view) > .card,
+  #creationsGrid.masonry-ready.cards-container:not(.list-view) > .card {
     margin-bottom: var(--card-row-gap) !important;
   }
   #communityGrid.cards-container:not(.list-view) > .grid-sizer,
@@ -4587,13 +4603,56 @@ body {
     visibility: hidden;
     opacity: 0;
   }
+  /* Masonry：加载态必须在文档流里占高，否则 layout 按 0 高排版 → 贴死/盖住下一张 */
+  #communityGrid.masonry-ready:not(.list-view) .card-media.is-loading,
+  #communityGrid.masonry-ready:not(.list-view) .card-media.card-media--await,
+  #creationsGrid.masonry-ready:not(.list-view) .card-media.is-loading,
+  #creationsGrid.masonry-ready:not(.list-view) .card-media.card-media--await {
+    min-height: 72px;
+    height: 72px;
+    max-height: 72px;
+    overflow: hidden;
+  }
+  #communityGrid.masonry-ready:not(.list-view) .card-media.is-loading .card-img,
+  #communityGrid.masonry-ready:not(.list-view) .card-media.card-media--await .card-img,
+  #creationsGrid.masonry-ready:not(.list-view) .card-media.is-loading .card-img,
+  #creationsGrid.masonry-ready:not(.list-view) .card-media.card-media--await .card-img {
+    position: static !important;
+    inset: auto !important;
+    display: block !important;
+    width: 100% !important;
+    height: 72px !important;
+    min-height: 72px !important;
+    max-height: 72px !important;
+    visibility: hidden;
+    opacity: 0;
+    object-fit: cover;
+  }
+  #communityGrid.masonry-ready:not(.list-view) .card-media.media-revealed,
+  #communityGrid.masonry-ready:not(.list-view) .card-media:not(.is-loading):not(.card-media--await),
+  #creationsGrid.masonry-ready:not(.list-view) .card-media.media-revealed,
+  #creationsGrid.masonry-ready:not(.list-view) .card-media:not(.is-loading):not(.card-media--await) {
+    height: auto;
+    max-height: none;
+    min-height: 0;
+  }
+  #communityGrid.masonry-ready:not(.list-view) .card-media.media-revealed .card-img,
+  #communityGrid.masonry-ready:not(.list-view) .card-media:not(.is-loading):not(.card-media--await) .card-img,
+  #creationsGrid.masonry-ready:not(.list-view) .card-media.media-revealed .card-img,
+  #creationsGrid.masonry-ready:not(.list-view) .card-media:not(.is-loading):not(.card-media--await) .card-img {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    visibility: visible;
+    opacity: 1;
+  }
   #communityGrid:not(.list-view) .card-img,
   #creationsGrid:not(.list-view) .card-img {
     display: block;
     width: 100%;
     height: auto;
     max-width: 100%;
-    object-fit: contain;
+    object-fit: cover;
     object-position: center center;
   }
   #communityGrid:not(.list-view) .community-post-card--visual,
@@ -4602,36 +4661,96 @@ body {
     overflow: hidden;
   }
 
-  /* 社区/创作：flex 多列瀑布流（最短列分配，无 absolute 叠卡） */
+  /* 社区/创作：CSS Grid 多列（minmax(0,1fr) 防止 Masonry inline 宽撑爆列） */
   #communityGrid.cards-container.community-feed-grid.community-feed-columns:not(.list-view),
   #creationsGrid.cards-container.community-feed-grid.community-feed-columns:not(.list-view) {
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: flex-start !important;
-    align-content: flex-start !important;
-    gap: var(--feed-column-gap, var(--card-gap, 16px));
+    display: grid !important;
+    column-gap: var(--feed-column-gap, var(--card-gap, 12px));
+    row-gap: 0;
+    align-items: start !important;
+    align-content: start !important;
     position: relative !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
     flex: 1 1 0 !important;
     min-height: 0 !important;
+    min-width: 0 !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     -webkit-overflow-scrolling: touch;
   }
   #communityGrid.community-feed-columns:not(.list-view) {
-    --feed-row-gap: 10px;
+    --feed-row-gap: 12px;
+    --feed-column-gap: 12px;
   }
+  #creationsGrid.community-feed-columns:not(.list-view) {
+    --feed-row-gap: 12px;
+    --feed-column-gap: 12px;
+  }
+  /* 骨架：仅矮条占位，勿用 4/5 固定比（横图加载后盒仍高 → 列内假大间距） */
   #communityGrid.community-feed-columns .community-post-card--visual .card-media.is-loading,
-  #communityGrid.community-feed-columns .community-post-card--visual .card-media.card-media--await {
+  #communityGrid.community-feed-columns .community-post-card--visual .card-media.card-media--await,
+  #creationsGrid.community-feed-columns .community-post-card--visual .card-media.is-loading,
+  #creationsGrid.community-feed-columns .community-post-card--visual .card-media.card-media--await,
+  #communityGrid.community-feed-columns .community-feed-col > .card .card-media.is-loading,
+  #communityGrid.community-feed-columns .community-feed-col > .card .card-media.card-media--await,
+  #creationsGrid.community-feed-columns .community-feed-col > .card .card-media.is-loading,
+  #creationsGrid.community-feed-columns .community-feed-col > .card .card-media.card-media--await {
+    width: 100%;
     min-height: 52px;
-    max-height: 96px;
+    max-height: none;
+    height: auto;
+    aspect-ratio: auto;
+  }
+  #communityGrid.community-feed-columns .card-media.is-loading:not(:has(img.card-img[src^="http"])) .card-img,
+  #creationsGrid.community-feed-columns .card-media.is-loading:not(:has(img.card-img[src^="http"])) .card-img,
+  #communityGrid.community-feed-columns .card-media.card-media--await:not(:has(img.card-img[src^="http"])) .card-img,
+  #creationsGrid.community-feed-columns .card-media.card-media--await:not(:has(img.card-img[src^="http"])) .card-img {
+    position: absolute !important;
+    inset: 0;
+    width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    visibility: hidden;
+    opacity: 0;
+  }
+  /* 已签出 http 图但 is-loading 未清：强制收拢 media 盒贴图 */
+  #communityGrid.community-feed-columns .card-media:has(img.card-img[src^="http"]),
+  #creationsGrid.community-feed-columns .card-media:has(img.card-img[src^="http"]) {
+    aspect-ratio: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    height: auto !important;
+  }
+  #communityGrid.community-feed-columns .card-media:has(img.card-img[src^="http"]) .card-img,
+  #creationsGrid.community-feed-columns .card-media:has(img.card-img[src^="http"]) .card-img {
+    position: static !important;
+    inset: auto !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    object-fit: cover !important;
+    object-position: center center !important;
+  }
+  #communityGrid.community-feed-columns .community-post-card--visual .card-media.media-revealed,
+  #creationsGrid.community-feed-columns .community-post-card--visual .card-media.media-revealed {
+    min-height: 0;
+    aspect-ratio: auto;
+    height: auto;
   }
   #communityGrid.community-feed-columns:not(.list-view) > .community-feed-col,
   #creationsGrid.community-feed-columns:not(.list-view) > .community-feed-col {
-    flex: 1 1 0;
-    min-width: 0;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    width: auto !important;
     display: flex;
     flex-direction: column;
-    gap: var(--feed-row-gap, var(--card-row-gap, 16px));
+    align-items: stretch;
+    gap: var(--feed-row-gap, 12px);
+    overflow: hidden;
   }
   #communityGrid.community-feed-columns:not(.list-view) > .feed-page-sentinel,
   #creationsGrid.community-feed-columns:not(.list-view) > .feed-page-sentinel {
@@ -4660,16 +4779,16 @@ body {
     border: 0 !important;
   }
   /* 未进列的孤儿卡勿占满整行（否则会像「一张巨图」） */
-  #creationsGrid.community-feed-columns:not(.list-view) > .card {
+  #communityGrid.community-feed-grid.community-feed-columns:not(.list-view) > .card,
+  #creationsGrid.community-feed-grid.community-feed-columns:not(.list-view) > .card {
     display: none !important;
   }
-  #communityGrid.community-feed-columns .community-feed-col > .card,
-  #creationsGrid.community-feed-columns .community-feed-col > .card,
-  #communityGrid.community-feed-grid:not(.list-view) > .card,
-  #creationsGrid.community-feed-grid:not(.list-view) > .card {
+  #communityGrid.community-feed-columns.cards-container .community-feed-col > .card,
+  #creationsGrid.community-feed-columns.cards-container .community-feed-col > .card {
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
+    min-width: 0 !important;
     box-sizing: border-box;
     break-inside: avoid;
     position: relative !important;
@@ -4679,6 +4798,48 @@ body {
     bottom: auto !important;
     transform: none !important;
     margin: 0 !important;
+    padding: 0 !important;
+    float: none !important;
+    overflow: hidden;
+  }
+  #communityGrid.community-feed-columns .community-post-card--visual,
+  #creationsGrid.community-feed-columns .community-post-card--visual {
+    gap: 0;
+  }
+  #communityGrid.community-feed-columns .community-feed-col > .card.is-masonry-positioned,
+  #creationsGrid.community-feed-columns .community-feed-col > .card.is-masonry-positioned {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+  }
+  #communityGrid.community-feed-columns .community-feed-col > .card .card-media,
+  #creationsGrid.community-feed-columns .community-feed-col > .card .card-media {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    line-height: 0;
+    overflow: hidden;
+  }
+  #communityGrid.community-feed-columns .community-feed-col > .card .card-img,
+  #creationsGrid.community-feed-columns .community-feed-col > .card .card-img,
+  #communityGrid.community-feed-columns .community-feed-col > .card .card-media img,
+  #creationsGrid.community-feed-columns .community-feed-col > .card .card-media img {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    object-fit: cover;
+    object-position: center center;
+  }
+  #communityGrid.community-feed-columns .community-feed-col > .card .card-media.media-revealed,
+  #creationsGrid.community-feed-columns .community-feed-col > .card .card-media.media-revealed,
+  #communityGrid.community-feed-columns .community-feed-col > .card .card-media:not(.is-loading):not(.card-media--await),
+  #creationsGrid.community-feed-columns .community-feed-col > .card .card-media:not(.is-loading):not(.card-media--await) {
+    min-height: 0;
+    height: auto;
+    max-height: none;
+    aspect-ratio: unset;
   }
   #communityGrid.community-feed-grid > .grid-sizer,
   #creationsGrid.community-feed-grid > .grid-sizer {

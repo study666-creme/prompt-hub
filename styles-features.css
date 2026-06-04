@@ -377,8 +377,7 @@
 
 .community-post-card.selected,
 .creation-post-card.selected {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: none;
 }
 
 .community-post-card .card-time {
@@ -3368,7 +3367,22 @@ body.user-profile-open {
 
 #communityGrid .community-post-card.selected,
 #creationsGrid .community-post-card.selected {
+  outline: none;
   box-shadow: var(--shadow-glow);
+  transform: none;
+}
+
+/* Feed 卡片图：深色底 + cover，避免 contain 留白像白边（侧栏/灯箱仍 contain） */
+#communityGrid:not(.list-view) .community-post-card .card-media,
+#creationsGrid:not(.list-view) .community-post-card .card-media {
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+#communityGrid:not(.list-view) .community-post-card .card-media .card-img,
+#creationsGrid:not(.list-view) .community-post-card .card-media .card-img {
+  object-fit: cover;
+  object-position: center center;
 }
 
 .community-post-card .card-body,
@@ -3499,10 +3513,27 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
   animation: communitySidePanelIn 0.28s ease;
 }
 
+@media (min-width: 901px) {
+  .community-side-panel.community-side-panel--open {
+    animation: communitySidePanelInDesktop 0.26s ease;
+  }
+}
+
 @keyframes communitySidePanelIn {
   from {
     opacity: 0;
     transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes communitySidePanelInDesktop {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
   }
   to {
     opacity: 1;
@@ -3623,7 +3654,7 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
     aspect-ratio: auto;
     max-height: none;
     min-height: 0;
-    background: var(--bg-hover);
+    background: var(--bg-card);
   }
 
   #communityGrid:not(.list-view) .community-post-card--visual .card-media .card-img,
@@ -3635,7 +3666,7 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
     width: 100% !important;
     height: auto !important;
     max-height: none !important;
-    object-fit: contain !important;
+    object-fit: cover !important;
     object-position: center center !important;
   }
 
@@ -3674,6 +3705,37 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
   body.community-panel-open #pageCommunity .feature-header,
   body.community-panel-open #pageCreations .feature-header {
     visibility: visible;
+    pointer-events: auto;
+  }
+
+  body.community-panel-open #pageCreations .feature-shell.my-home-shell {
+    overflow-x: visible;
+  }
+
+  body.community-panel-open #pageCreations .my-home-shell .community-page-layout {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: calc(100% - 340px);
+  }
+
+  /* 我的主页：侧栏挂到 app-chrome 时用 fixed 右栏，避免 shell 滚动/overflow 裁切 */
+  #creationsSidePanel.community-side-panel[data-mounted-on-body="1"]:not(.hidden) {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 340px;
+    min-width: 340px;
+    max-width: 340px;
+    height: auto;
+    max-height: none;
+    min-height: 0;
+    flex: none;
+    align-self: auto;
+    z-index: 120;
+    display: flex !important;
+    visibility: visible;
+    opacity: 1;
     pointer-events: auto;
   }
 }
@@ -3973,42 +4035,135 @@ body.community-appreciate #communityGrid .community-post-card {
 }
 
 @media (min-width: 901px) {
-  #pageCreations .my-home-shell {
-    overflow-y: auto;
-    overflow-x: hidden;
+  #pageCreations.app-page-feature.active .community-workspace,
+  #pageCreations.app-page-feature.active .community-page-layout,
+  #pageCreations.app-page-feature.active .community-page-main,
+  #pageCreations.app-page-feature.active .feature-body-cards {
+    flex: none !important;
+    min-height: auto !important;
+    overflow: visible !important;
   }
 
-  #pageCreations .my-home-shell .community-workspace,
-  #pageCreations .my-home-shell .community-page-layout,
-  #pageCreations .my-home-shell .community-page-main,
-  #pageCreations .my-home-shell .feature-body-cards {
-    flex: none;
+  #pageCreations .feature-shell.my-home-shell {
+    flex: 1;
     min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  #pageCreations .my-home-shell {
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
+
+  #pageCreations .my-home-shell .my-home-pane.active {
+    flex: none;
+    display: block;
+    min-height: auto;
+    min-width: 0;
     overflow: visible;
   }
 
+  #pageCreations .my-home-shell .community-workspace {
+    flex: none;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    min-width: 0;
+    min-height: auto;
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  #pageCreations .my-home-shell .community-page-layout {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: auto;
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  #pageCreations .my-home-shell .community-page-main,
+  #pageCreations .my-home-shell .feature-body-cards {
+    flex: none;
+    min-width: 0;
+    min-height: auto;
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  #pageCreations .my-home-shell .feature-body-cards {
+    overflow: visible !important;
+    min-height: auto !important;
+  }
+
   #pageCreations #creationsGrid.cards-container:not(.list-view),
-  #pageCreations #creationsGrid.cards-container.community-feed-columns:not(.list-view) {
+  #pageCreations #creationsGrid.cards-container.community-feed-columns:not(.list-view),
+  #pageCreations #creationsGrid.cards-container.masonry-ready:not(.list-view) {
     overflow-y: visible !important;
     overflow-x: hidden !important;
     flex: none !important;
+    flex-grow: 0 !important;
+    max-height: none !important;
     height: auto !important;
     min-height: 0 !important;
   }
 
   #pageCreations #creationsGrid.community-feed-columns:not(.list-view) {
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: flex-start !important;
-    gap: var(--feed-column-gap, var(--card-gap, 16px));
+    display: grid !important;
+    align-items: start !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    column-gap: var(--feed-column-gap, 12px);
+    row-gap: 0;
   }
 
   #pageCreations #creationsGrid.community-feed-columns:not(.list-view) > .community-feed-col {
-    flex: 1 1 0;
-    min-width: 0;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    width: auto !important;
     display: flex;
     flex-direction: column;
-    gap: var(--feed-row-gap, 10px);
+    gap: var(--feed-row-gap, 12px);
+    overflow: hidden;
+  }
+
+  #communityGrid.community-feed-columns .community-feed-col > .card,
+  #creationsGrid.community-feed-columns .community-feed-col > .card {
+    transition: opacity 0.24s ease, transform 0.24s ease, box-shadow 0.2s ease;
+  }
+
+  #communityGrid.community-feed-columns .community-feed-col > .card.feed-card-enter,
+  #creationsGrid.community-feed-columns .community-feed-col > .card.feed-card-enter {
+    animation: communityFeedCardIn 0.34s ease both;
+  }
+
+  #communityGrid.community-feed-rebalancing .community-feed-col > .card,
+  #creationsGrid.community-feed-rebalancing .community-feed-col > .card {
+    transition: opacity 0.28s ease, transform 0.28s ease;
+  }
+
+  @keyframes communityFeedCardIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  #pageCreations #creationsGrid.community-feed-columns .community-feed-col > .card {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    transform: none !important;
+    overflow: hidden;
   }
 }
 

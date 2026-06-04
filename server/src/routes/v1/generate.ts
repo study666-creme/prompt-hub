@@ -41,6 +41,16 @@ import {
 } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
 import { syncGrsaiUpstreamStatusesFromPublicPage } from '../../lib/grsai-upstream-status';
+import {
+  isAcceptedRefImageInput,
+  resolveGenerationRefUrls
+} from '../../lib/generation-ref-images';
+
+const refImageInputSchema = z
+  .string()
+  .min(1)
+  .max(6_000_000)
+  .refine(isAcceptedRefImageInput, '参考图须为有效 URL、storage:// 或 data:image');
 
 const bodySchema = z.object({
   prompt: z.string().min(1).max(8000),
@@ -53,8 +63,8 @@ const bodySchema = z.object({
   resolution: z.enum(['1k', '2k', '4k']).default('1k'),
   quality: z.enum(['standard', 'high', 'ultra']).default('standard'),
   size: z.string().max(32).optional(),
-  refImageUrl: z.string().url().optional().nullable(),
-  refImageUrls: z.array(z.string().url()).max(16).optional()
+  refImageUrl: refImageInputSchema.optional().nullable(),
+  refImageUrls: z.array(refImageInputSchema).max(16).optional()
 });
 
 export const generateRoutes = new Hono<{ Bindings: Env }>();
@@ -144,13 +154,22 @@ function publicModelPayload(
   memberActive: boolean
 ) {
   return listResolvedImageModels(settings, { publicList: true }).map((m) => {
-    const cost = computeImageGenerationCost(
-      settings,
-      m.id,
-      m.resolutions[0] || '1k',
-      tier,
-      memberActive
-    );
+    const resolutions = m.resolutions?.length ? m.resolutions : (['1k'] as const);
+    const costByResolution: Record<
+      string,
+      ReturnType<typeof computeImageGenerationCost>
+    > = {};
+    for (const res of resolutions) {
+      costByResolution[res] = computeImageGenerationCost(
+        settings,
+        m.id,
+        res,
+        tier,
+        memberActive
+      );
+    }
+    const defaultRes = resolutions[0] || '1k';
+    const cost = costByResolution[defaultRes];
     return {
       id: m.id,
       label: m.displayLabel,
@@ -166,6 +185,9 @@ function publicModelPayload(
       refundOnViolation: m.refundOnViolation,
       violationNotice: m.violationNotice,
       resolutions: m.resolutions,
+      pricingByResolution: m.pricingByResolution,
+      creditsByResolution: m.pricingByResolution ? m.creditsByResolution : null,
+      costByResolution,
       creditsPerCall: m.effectiveBaseCredits,
       creditsBase: cost.listPrice,
       creditsFinal: cost.final,
@@ -299,12 +321,15 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     );
   }
 
-  const refUrls =
+  const rawRefInputs =
     parsed.data.refImageUrls?.length
       ? parsed.data.refImageUrls
       : parsed.data.refImageUrl
         ? [parsed.data.refImageUrl]
         : [];
+  const refUrls = rawRefInputs.length
+    ? await resolveGenerationRefUrls(c, admin, user.id, rawRefInputs)
+    : [];
 
   const upstream = upstreamBindingsFromEnv(c.env);
   const lineProvider = resolved.provider;

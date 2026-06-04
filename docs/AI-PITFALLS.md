@@ -23,8 +23,8 @@
 | **`finishCommunityFeedLayoutAfterBatch` 全墙重排** | 分页/ hydrate 时整墙抖 | 每次都 `scheduleCommunityLayout({ force, immediate })` | 已 distributed 时只 `ensureFeedPageSentinel` + `reconnectFeedPageObserver` |
 | **`hydrateFeedImages` 调 layout** | 后台补图时卡片跳 | `hydrateFeedImages` 末尾 `layoutCommunityMasonry` | 社区 Feed 的 hydrate **禁止**触发全墙 layout；用 `CardImageLoader.observeContainer` |
 | **`finishCardMediaShine` 触发 Masonry** | 每张图加载完都晃 | `scheduleCommunityLayout({ fromImage:true })` on flex 列 | **flex 多列模式**下 `fromImage` 必须 **no-op**（`scheduleCommunityLayout` 内 return） |
-| **`scheduleCommunityFeedImageBalance`** | 新图加载后整页卡片被「挤下去」、持续晃眼 | 图片 onload 后 `forceReflow` 全量重分所有列 | **禁止**对 flex 列做全墙重平衡；仅 append 时 `newCards → 最短列` |
-| **`ensureCommunityFeedColumnLayout` 早退** | **我的主页**一张巨图占满宽 | 已有 `.community-feed-col` 但卡片仍在 grid 直层（`> .card` 宽 100%） | 有列但有 **orphan** 卡时必须 `distributeCommunityFeedColumns({ newCards: orphans })`；CSS 可隐藏直层孤儿卡 |
+| **`scheduleCommunityFeedHeightBalance`** | 新图加载后整页卡片乱跳 | onload / drain → `redistributeCommunityFeedByHeight` 清空列重分 | **禁止**（`20260604d` 已 no-op）；间距靠 CSS `aspect-ratio` |
+| **`ensureCommunityFeedColumnLayout` 早退** | **我的主页**一张巨图占满宽 | 卡已在列内但 **Masonry 遗留 absolute/width** 叠成一张；或直层 orphan | 进列时 `clearCommunityFeedCardInline`；有 orphan 才 `distribute`；CSS 强制列内 `position:relative` |
 | **我的主页列数跟社区 storage** | 社区设 1 列时主页也塌成单列 | `creationsGrid` 误用 `promptrepo_community_columns` | 主页用 **`promptrepo_myhome_columns`**（默认 3），`getCreationsFeedColumns()` 独立计算 |
 | **首屏 `drainUntilDone`** | 卡顿、DOM 400+ | 首屏把 store 全部灌进 DOM | 首屏只 `drainCommunityFeedPages(5)`，其余靠哨兵滚动 |
 | **侧栏打开 `recalcCols`** | 点卡片整墙重排 | 宽度变窄触发 `recalcCols:true` + flatten | 列数不变时只 `applyCommunityFeedColumnCss`，**不动卡片 DOM** |
@@ -65,6 +65,8 @@
 
 ## 相关文档
 
+- **`docs/ERROR-LOG.md`** — 历史事故与高频坑（含 SEO「仅 Edge 能搜到」）  
+- `docs/SEO-SEARCH-ENGINES.md` — 收录、站标、Google/百度分工  
 - `docs/COMMUNITY-ARCHITECTURE.md` — Feed 数据流与分页  
 - `docs/CARD-LOADING.md` — 列表 grid / 签名管线  
 - `docs/LIGHT-THEME-UX.md` — 日光模式可读性优化方向  

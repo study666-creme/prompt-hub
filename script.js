@@ -3147,7 +3147,8 @@
       if (!mobile) {
         if (sideBtn) { /* 侧栏不参与 Masonry */ }
         else if (media.closest('#communityGrid, #creationsGrid')) {
-          /* flex 多列：图片加载后不再全墙重排，避免社区/主页晃眼 */
+          const grid = media.closest('#communityGrid, #creationsGrid');
+          window.FeatureDraft?.scheduleFeedMasonryRelayout?.(grid?.id || 'communityGrid');
         }
         else if (media.closest('#cardsContainer')) {
           if (cardMediaAffectsViewport(media)) {

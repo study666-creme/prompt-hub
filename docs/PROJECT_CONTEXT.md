@@ -25,24 +25,23 @@
 
 | 项 | 状态 |
 |----|------|
-| Worker | `prompt-hub-api` · API https://api.prompt-hub.cn |
-| Pages | https://prompt-hub.cn · 构建号 **`20260604a`**（以 `window.__APP_BUILD__` 为准；`deploy-pages.ps1` 自动 bump） |
-| **已修（20260604a）** | 我的主页 flex 多列（孤儿卡进列 + `repairCreationsFeedLayout`）；主页列数独立 `promptrepo_myhome_columns`；社区去掉图片加载全墙重平衡（防晃眼）；任务「累计 10 项 → 1 天专业版」 |
-| **已修（20260605b）** | 生图滚动条统一；Tab「获取」；卡片库侧栏图随滚；基础/标准会员去边框 |
-| **已修（社区）** | flex append 最短列；`fromImage` no-op；禁止 `forceReflow` 全墙重分 |
-| **已修（媒体）** | `media/sign` 401 → 会话刷新 + 暂停签名风暴 |
+| Worker | `prompt-hub-api` · API https://api.prompt-hub.cn · 已部署（分辨率定价 payload） |
+| Pages | https://prompt-hub.cn · 构建号以 `window.__APP_BUILD__` 为准 |
+| **已修** | 我的主页作品列表不再收成顶部「一条缝」（`#creationsGrid` 整页滚动）；侧栏 fixed（`20260605b` 起） |
+| **暂停** | 社区 Feed 同列上下间距与卡片库对齐（架构差异，见 `ERROR-LOG` §2.6） |
+| **已打通** | `/health`、兑换、生图扣费、社区 Feed、我的主页侧栏 |
 
 ### 已知问题（优先）
 
-1. **P0 数据**：卡片库公开数与社区帖 gap → `inspectCardLibraryPublishGap` / 分批 sync。
-2. **日光可读性**：待做「设置里界面大小」三档（`LIGHT-THEME-UX.md`）。
-3. **网络**：媒体 `ERR_CONNECTION_RESET`；Supabase 配额紧张。
+1. **社区 Masonry 间距**：同列松紧不一，暂不再改（§2.6）。
+2. **P0 数据**：卡片库公开数与社区帖 gap → `inspectCardLibraryPublishGap` / 分批 sync。
+3. **日光可读性**：待做「设置里界面大小」三档（`LIGHT-THEME-UX.md`）。
 
 ### 下一步
 
-1. 强刷验 **`20260604a`**：我的主页应多列小卡，非整宽巨图；社区滚到底加载时不应整页乱跳。
+1. 强刷验我的主页「发布作品」：列表应占满内容高度、整页滚动，非条缝内滚。
 2. 任务「累计 10 项」需 Worker 部署 `membership-tasks.ts` 后生效。
-3. tombstone 见 `scripts/audit-tombstone-storage.ps1`；勿自动幽灵 purge。
+3. tombstone 见 `scripts/audit-tombstone-storage.ps1`。
 
 ### 部署
 

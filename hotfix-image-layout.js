@@ -10,11 +10,14 @@
       if (!el) return;
       window.SupabaseSync?.patchImageSrcFromCache?.(el);
       if (id === 'imageGenFeed') window.FeatureDraft?.scheduleImageGenFeedLayout?.();
-      else if (
-        (id === 'communityGrid' || id === 'creationsGrid')
-        && window.matchMedia('(max-width: 900px)').matches
-      ) window.FeatureDraft?.enforceMobileCommunityFeedGrid?.(id);
-      else window.FeatureDraft?.layoutCommunityMasonry?.(id);
+      else if (id === 'communityGrid' || id === 'creationsGrid') {
+        if (window.matchMedia('(max-width: 900px)').matches) {
+          window.FeatureDraft?.enforceMobileCommunityFeedGrid?.(id);
+        } else {
+          window.FeatureDraft?.scrubCommunityFeedFlexCards?.(el);
+          window.FeatureDraft?.repairCommunityFeedLayout?.(id);
+        }
+      } else window.FeatureDraft?.layoutCommunityMasonry?.(id);
     });
   };
 })();

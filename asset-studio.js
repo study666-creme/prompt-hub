@@ -946,20 +946,35 @@
       try {
         let apiUrl = null;
         if (/^https?:\/\//i.test(src)) apiUrl = src;
-        else if (window.SupabaseSync?.isStorageRef?.(src)) {
-          apiUrl = await window.SupabaseSync.resolveDisplayUrl(src);
+        else if (window.SupabaseSync?.isStorageRef?.(src) || String(src).startsWith('storage://')) {
+          const norm = window.SupabaseSync?.normalizeImageRef?.(src) || src;
+          if (window.PromptHubApi?.signMediaRef) {
+            const signed = await window.PromptHubApi.signMediaRef(norm);
+            if (signed?.ok && signed.data?.url) apiUrl = signed.data.url;
+          }
+          if (!apiUrl) apiUrl = await window.SupabaseSync.resolveDisplayUrl(norm, { variant: 'full', tryAllPaths: true });
         } else if (window.SupabaseSync?.isDataUrl?.(src) || String(src).startsWith('blob:')) {
           if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.uploadImageGenRef) {
-            const stored = await window.SupabaseSync.uploadImageGenRef(`studio_ref_${Date.now()}`, src);
-            apiUrl = await window.SupabaseSync.resolveDisplayUrl(stored);
-          } else if (window.SupabaseSync?.isDataUrl?.(src)) {
-            apiUrl = src;
+            try {
+              const stored = await window.SupabaseSync.uploadImageGenRef(`studio_ref_${Date.now()}`, src);
+              if (window.PromptHubApi?.signMediaRef) {
+                const signed = await window.PromptHubApi.signMediaRef(stored);
+                if (signed?.ok && signed.data?.url) apiUrl = signed.data.url;
+              }
+              if (!apiUrl) apiUrl = await window.SupabaseSync.resolveDisplayUrl(stored, { variant: 'full', tryAllPaths: true });
+            } catch (uploadErr) {
+              console.warn('studio ref upload failed', uploadErr);
+            }
           }
+          if (!apiUrl && window.SupabaseSync?.isDataUrl?.(src)) apiUrl = src;
         }
         if (apiUrl && (/^https?:\/\//i.test(apiUrl) || window.SupabaseSync?.isDataUrl?.(apiUrl))) {
           urls.push(apiUrl);
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        console.warn('studio ref resolve failed', e);
+        if (window.SupabaseSync?.isDataUrl?.(src)) urls.push(src);
+      }
     }
     return urls;
   }
@@ -2930,9 +2945,6 @@
     }
     try {
       const refUrls = await resolveStudioRefUrlsForApi();
-      if (studioRefImages.length && !refUrls.length) {
-        throw new Error('参考图无法用于生图，请重新上传或去掉参考图');
-      }
       if (!useApi && !window.PointsSystem?.deductCredits?.(cost)) {
         throw new Error('积分扣除失败');
       }
