@@ -25,23 +25,24 @@
 
 | 项 | 状态 |
 |----|------|
-| Worker | `prompt-hub-api` · API https://api.prompt-hub.cn · 已部署（分辨率定价 payload） |
-| Pages | https://prompt-hub.cn · 构建号以 `window.__APP_BUILD__` 为准 |
-| **已修** | 我的主页作品列表不再收成顶部「一条缝」（`#creationsGrid` 整页滚动）；侧栏 fixed（`20260605b` 起） |
-| **暂停** | 社区 Feed 同列上下间距与卡片库对齐（架构差异，见 `ERROR-LOG` §2.6） |
-| **已打通** | `/health`、兑换、生图扣费、社区 Feed、我的主页侧栏 |
+| Worker | `prompt-hub-api` · API https://api.prompt-hub.cn |
+| Pages | https://prompt-hub.cn · 构建号 `window.__APP_BUILD__` |
+| **已修** | 我的主页 `#creationsGrid` flex 多列 + 整页滚动（非条缝内滚） |
+| **架构** | Feed 排版拆至 `feed-layout.js`，见 `docs/FEED-LAYOUT.md`；`bump-build.ps1` 同步 `?v=` |
+| **部分改善** | 社区 Masonry 同列间距大体稳定；加载阶段偶发不齐，等图或点卡开侧栏多能恢复（§2.6，暂不改） |
+| **已打通** | `/health`、兑换、生图、社区 Feed、我的主页侧栏 |
 
 ### 已知问题（优先）
 
-1. **社区 Masonry 间距**：同列松紧不一，暂不再改（§2.6）。
-2. **P0 数据**：卡片库公开数与社区帖 gap → `inspectCardLibraryPublishGap` / 分批 sync。
-3. **日光可读性**：待做「设置里界面大小」三档（`LIGHT-THEME-UX.md`）。
+1. **社区 Masonry 间距**：加载阶段偶发，可等待或点卡触发重排；架构层暂不再改（§2.6）。
+2. **P0 数据**：卡片库公开数与社区帖 gap。
+3. **日光可读性**：界面大小三档（`LIGHT-THEME-UX.md`）。
 
 ### 下一步
 
-1. 强刷验我的主页「发布作品」：列表应占满内容高度、整页滚动，非条缝内滚。
-2. 任务「累计 10 项」需 Worker 部署 `membership-tasks.ts` 后生效。
-3. tombstone 见 `scripts/audit-tombstone-storage.ps1`。
+1. 强刷后验收：`FeedLayout.diagnose('creationsGrid')`（flex）与社区 Masonry 视觉。
+2. Worker：`membership-tasks.ts`（累计 10 项任务）。
+3. tombstone：`scripts/audit-tombstone-storage.ps1`。
 
 ### 部署
 
@@ -64,7 +65,7 @@ cd d:\prompt-hub
 
 必读：docs/AI-PITFALLS.md、docs/CURRENT-ISSUES.md、docs/AI-HANDOFF.md、docs/COMMUNITY-ARCHITECTURE.md。
 
-社区 Feed 为桌面 flex 多列：禁止 flatten 后全量重分、禁止 finishCardMediaShine 触发全墙 layout。
+社区 Feed 桌面为 **Masonry**（`#communityGrid`）；我的主页为 **flex 多列**（`#creationsGrid`）。禁止 finishCardMediaShine 触发全墙 flex 重分。
 改 features-draft.js 后检查勿重复 const 声明（曾导致整站白屏）。
 
 P0 带宽：生图仓库视口懒加载、列表仅 grid。修完 deploy-pages.ps1。用户小白，简体中文分步。勿提交密钥。

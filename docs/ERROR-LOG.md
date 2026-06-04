@@ -79,16 +79,17 @@
 | **构建** | `20260604d`（仍可能复现 → 见 **2.6 待验收**） |
 | **验收（控制台）** | `document.querySelectorAll('#creationsGrid > .card').length` → **0**；`[...document.querySelectorAll('#creationsGrid .community-feed-col')].map(c=>({n:c.children.length, cards:[...c.querySelectorAll('.card')].slice(0,2).map(x=>getComputedStyle(x).position)}))` → 每列 `position` 应为 `relative` |
 
-### 2.6 社区同列上下间距不齐（架构差异 · 未解决 · 暂停改动）
+### 2.6 社区同列上下间距（部分改善 · 暂维持现状）
 
 | 项 | 内容 |
 |----|------|
-| **状态** | ⏳ **未解决**；2026-06-05 起**暂停继续改间距**（一有缝就容易出现同列松紧不一，怀疑底层架构问题） |
-| **现象** | 社区 Feed 同列有的贴死、有的空一大块；卡片库从未出现；多轮 Masonry / flex / gutter / margin 仍难与卡片库一致 |
-| **架构差异（卡片库 vs 社区）** | **卡片库**：`#cardsContainer` + Masonry；`gutter` **只管列间距**；**上下靠 `margin-bottom: --card-row-gap`**；图 `onload` → `scheduleWarehouseMasonryLayout()`。**社区/我的主页**：共用 `layoutCommunityMasonry`，曾把 `.masonry-ready` 的 `margin-bottom` 置 0「只靠 gutter」→ **上下会贴死**（vendor 里 `gutter` 不进 `colYs` 纵向累加）。另有 `getCommunityFeedMeasureInnerWidth` 的 `layoutMax` clamp、列宽按 12px 算而 gutter 16px → **只排出 3 列、右侧留白**。 |
-| **实验过程（关键点，勿当已修）** | ① flex 最短列 + 禁全墙重分 ② 改 Masonry + `scheduleFeedMasonryRelayout` + 加载态 72px 占位 ③ `colGap`/`gutter` 统一 16、`getCommunityFeedLayoutWidth` ④ 恢复 `margin-bottom` 后社区仍可能列内不齐 ⑤ 用户反馈：**有缝就会有上下间距差距** → 停止继续调 |
-| **涉及** | `features-draft.js`、`styles.css`、`script.js` |
-| **后续若再开** | 先对比 `outerHeight`/`margin-bottom`/`is-loading` 占位与卡片库单卡 DOM；勿只改 CSS 变量 |
+| **状态** | 🟡 **部分解决**（2026-06-05 用户验收 `build 20260605w`）：大体稳定，偶发略大间距明显减轻；**仍可能在图未加载完时出现**，等一会或点卡开侧栏后会自行排齐 → **暂不再改** |
+| **现象** | 社区 Feed 同列有时松紧不一；卡片库从未出现；加载阶段偶发「空一大块」，加载完或交互后多能恢复 |
+| **已做（20260605v～w）** | ① `feed-layout.js` 拆分，社区 Masonry / 我的主页 flex 分流 ② `getCommunityFeedGaps` 与 `--card-row-gap` / Masonry `gutter` 统一 ③ 排版后写入 `--feed-row-gap` ④ 恢复 `imageGenFeedSignOpts`（误删曾致全站无卡） |
+| **架构差异（卡片库 vs 社区）** | **卡片库**：`#cardsContainer` + Masonry；`gutter` 只管列间距；上下靠 `margin-bottom: --card-row-gap`。**社区**：桌面 Masonry 同理；`diagnose` 里 `orphanCards`/`directCards` 在 Masonry 下为直挂 `.card` 数量，**非 flex 孤儿**，勿误判 |
+| **临时规避（用户可用）** | 首屏/分页后稍等图片加载；或点任意卡片开侧栏 → 触发 debounce 重排后间距正常 |
+| **涉及** | `feed-layout.js`、`features-draft.js`、`styles.css`、`script.js` |
+| **后续若再开** | 对比加载态占位高度、`finishCardMediaShine` → `scheduleFeedMasonryRelayout` 时机；勿恢复全墙 flex 重分 |
 
 ### 2.8 我的主页作品区收成「一条缝」可滚动（桌面）
 

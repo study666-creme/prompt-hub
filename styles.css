@@ -4562,12 +4562,12 @@ body {
   #creationsGrid.cards-container:not(.list-view) > .card {
     display: block;
     box-sizing: border-box;
-    margin-bottom: var(--card-row-gap) !important;
+    margin-bottom: var(--feed-row-gap, var(--card-row-gap)) !important;
   }
   /* Masonry gutter 仅管列间距；上下间隙靠 margin-bottom（与 #cardsContainer 一致） */
   #communityGrid.masonry-ready.cards-container:not(.list-view) > .card,
   #creationsGrid.masonry-ready.cards-container:not(.list-view) > .card {
-    margin-bottom: var(--card-row-gap) !important;
+    margin-bottom: var(--feed-row-gap, var(--card-row-gap)) !important;
   }
   #communityGrid.cards-container:not(.list-view) > .grid-sizer,
   #creationsGrid.cards-container:not(.list-view) > .grid-sizer {

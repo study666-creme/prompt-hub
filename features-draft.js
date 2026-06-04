@@ -96,9 +96,7 @@
   let imageGenMasonry = null;
   let imageGenWhGroup = 'all';
   let imageGenWhTag = 'all';
-  let communityMasonry = null;
-  let profileMasonry = null;
-  let creationsMasonry = null;
+  /* Masonry 实例在 feed-layout.js */
   let communitySidePostId = null;
   let creationsSideId = null;
   let communityAppreciateActive = false;
@@ -548,14 +546,7 @@
   function resetCommunityFeedGrid(containerId = 'communityGrid') {
     const container = document.getElementById(containerId);
     if (!container) return;
-    if (containerId === 'communityGrid' && communityMasonry) {
-      communityMasonry.destroy();
-      communityMasonry = null;
-    }
-    if (containerId === 'creationsGrid' && creationsMasonry) {
-      creationsMasonry.destroy();
-      creationsMasonry = null;
-    }
+    window.FeedLayout?.destroyLayout?.(containerId);
     container.innerHTML = '';
     delete container.dataset.feedSig;
     delete container.dataset.feedFinalized;
@@ -692,242 +683,39 @@
   }
 
   function scrubCommunityFeedFlexCards(container) {
-    if (!container) return;
-    container.style.removeProperty('height');
-    container.style.removeProperty('max-width');
-    container.querySelectorAll(':scope > .grid-sizer').forEach((el) => el.remove());
-    collectCommunityFeedCards(container).forEach(clearCommunityFeedCardInline);
-    scrubCommunityFeedCardMediaHeights(container);
-    const cols = getCommunityFeedColumns(container);
-    applyCommunityFeedColumnCss(container, cols);
+    window.FeedLayout?.scrubFlexCards?.(container);
   }
 
   function syncCommunityFeedColumnCount(containerId) {
-    const container = document.getElementById(containerId);
-    if (!container || !useCommunityCssGrid(containerId)) return;
-    const desired = getCommunityFeedColumns(container);
-    const colEls = container.querySelectorAll(':scope > .community-feed-col');
-    const prev = Number(container.dataset.feedDistributedCols || container.dataset.feedLayoutCols) || 0;
-    const orphans = container.querySelectorAll(':scope > .card').length;
-    if (
-      container.dataset.feedDistributed === '1'
-      && colEls.length === desired
-      && prev === desired
-      && !orphans
-    ) {
-      scrubCommunityFeedFlexCards(container);
-      if (containerId === 'creationsGrid' && isCreationsFeedLayoutStale(container)) {
-        repairCreationsFeedLayout(true);
-      }
-      return;
-    }
-    if (container.dataset.feedDistributed === '1' && colEls.length) {
-      redistributeCommunityFeedByHeight(container, desired);
-    } else {
-      layoutCommunityMasonry(containerId, { forceReflow: true, recalcCols: true });
-    }
-    applyCommunityFeedColumnCss(container, desired);
-    setFeedLayoutPending(containerId, false);
-    if (containerId === 'creationsGrid') repairCreationsFeedLayout(true);
+    window.FeedLayout?.syncColumnCount?.(containerId);
   }
 
   function ensureCommunityFeedColumnLayout(containerId) {
-    const container = document.getElementById(containerId);
-    if (!container || !useCommunityCssGrid(containerId)) return;
-    const colEls = container.querySelectorAll(':scope > .community-feed-col');
-    const orphanCards = [...container.querySelectorAll(':scope > .card')];
-    if (colEls.length && !orphanCards.length) {
-      syncCommunityFeedColumnCount(containerId);
-      return;
-    }
-    if (colEls.length) scrubCommunityFeedFlexCards(container);
-    if (colEls.length && orphanCards.length) {
-      const cols = Number(container.dataset.feedDistributedCols || container.dataset.feedLayoutCols)
-        || getCommunityFeedColumns(container);
-      distributeCommunityFeedColumns(container, cols, { newCards: orphanCards });
-      container.classList.add('community-feed-grid', 'community-feed-columns');
-      setFeedLayoutPending(containerId, false);
-      return;
-    }
-    layoutCommunityMasonry(containerId, { forceReflow: true });
+    window.FeedLayout?.ensureColumnLayout?.(containerId);
   }
 
-  function clearCommunityFeedCardInline(card) {
-    if (!card) return;
-    card.classList.remove('is-masonry-positioned');
-    card.removeAttribute('style');
-    card.querySelectorAll('.card-media').forEach((media) => {
-      media.classList.remove('is-masonry-positioned');
-      media.removeAttribute('style');
-    });
-    card.querySelectorAll('.card-img, .card-media img').forEach((img) => {
-      img.removeAttribute('style');
-      img.removeAttribute('width');
-      img.removeAttribute('height');
-    });
-  }
-
-  function redistributeCommunityFeedByHeight(container, cols) {
-    if (!container || cols < 1) return;
-    container.classList.add('community-feed-rebalancing');
-    scrubStaleCommunityFeedEmpty(container);
-    container.querySelectorAll(':scope > .grid-sizer').forEach((el) => el.remove());
-    const colEls = ensureCommunityFeedColEls(container, cols);
-    const cards = collectCommunityFeedCards(container);
-    const scrollRoot = getFeedScrollRoot(container) || container;
-    const scrollTop = scrollRoot.scrollTop;
-    colEls.forEach((col) => { col.innerHTML = ''; });
-    cards.forEach((card) => {
-      clearCommunityFeedCardInline(card);
-      let target = 0;
-      let minH = Infinity;
-      colEls.forEach((col, i) => {
-        const h = col.offsetHeight;
-        if (h < minH) {
-          minH = h;
-          target = i;
-        }
-      });
-      colEls[target].appendChild(card);
-      card.dataset.feedCol = String(target);
-    });
-    container.dataset.feedDistributed = '1';
-    container.dataset.feedDistributedCols = String(cols);
-    container.dataset.feedCols = String(cols);
-    ensureFeedPageSentinel(container);
-    requestAnimationFrame(() => {
-      scrollRoot.scrollTop = scrollTop;
-      setTimeout(() => container.classList.remove('community-feed-rebalancing'), 320);
-    });
-  }
-
-  function feedColumnHeightSpread(container) {
-    const colEls = [...container.querySelectorAll(':scope > .community-feed-col')];
-    if (colEls.length < 2) return 0;
-    const heights = colEls.map((col) => col.offsetHeight);
-    return Math.max(...heights) - Math.min(...heights);
-  }
-
-  function feedColumnCardImbalance(container) {
-    const colEls = [...container.querySelectorAll(':scope > .community-feed-col')];
-    if (colEls.length < 2) return false;
-    const counts = colEls.map((col) => col.querySelectorAll(':scope > .card').length);
-    const total = counts.reduce((a, b) => a + b, 0);
-    if (total < 2) return false;
-    const max = Math.max(...counts);
-    const fair = Math.ceil(total / colEls.length);
-    return max > fair + 2;
-  }
-
-  /** 我的主页：flex 多列；勿把旧 Masonry（masonry-ready / 矮 height）当已排版 */
   function isCreationsFeedLayoutStale(container) {
-    if (!container || container.id !== 'creationsGrid' || !useCommunityCssGrid('creationsGrid')) return false;
-    const n = container.querySelectorAll('.community-post-card').length;
-    if (!n) return false;
-    if (container.classList.contains('masonry-ready') || creationsMasonry) return true;
-    if (container.querySelectorAll(':scope > .card').length > 0) return true;
-    if (!container.classList.contains('community-feed-columns')) return true;
-    if (container.querySelectorAll(':scope > .community-feed-col').length < 2) return true;
-    const inlineH = parseFloat(container.style.height);
-    if (Number.isFinite(inlineH) && inlineH > 0 && inlineH < 160 && n > 2) return true;
-    const st = getComputedStyle(container);
-    if (
-      (st.overflowY === 'auto' || st.overflowY === 'scroll')
-      && container.clientHeight < 160
-      && container.scrollHeight > container.clientHeight + 48
-    ) return true;
-    return false;
+    return window.FeedLayout?.isCreationsStale?.(container) ?? false;
   }
 
   function isCommunityFeedLayoutReady(container, containerId) {
-    if (!container?.querySelector?.('.community-post-card')) return false;
-    if (useCommunityCssGrid(containerId)) {
-      return !isCreationsFeedLayoutStale(container)
-        && container.classList.contains('community-feed-columns')
-        && !!container.querySelector(':scope > .community-feed-col');
-    }
-    return container.classList.contains('masonry-ready')
-      || !!container.querySelector(':scope > .community-feed-col');
+    return window.FeedLayout?.isLayoutReady?.(container, containerId) ?? false;
   }
 
   function repairCommunityFeedLayout(containerId) {
-    const container = document.getElementById(containerId);
-    if (!container || !useCommunityCssGrid(containerId)) return false;
-    const orphans = [...container.querySelectorAll(':scope > .card')];
-    if (orphans.length) {
-      const cols = Number(container.dataset.feedDistributedCols || container.dataset.feedLayoutCols)
-        || getCommunityFeedColumns(container);
-      orphans.forEach(clearCommunityFeedCardInline);
-      distributeCommunityFeedColumns(container, cols, { newCards: orphans });
-      container.classList.add('community-feed-grid', 'community-feed-columns');
-      setFeedLayoutPending(containerId, false);
-      return true;
-    }
-    const colEls = container.querySelectorAll(':scope > .community-feed-col');
-    if (!colEls.length) {
-      layoutCommunityMasonry(containerId, { forceReflow: true, recalcCols: true });
-      return true;
-    }
-    colEls.forEach((col) => {
-      col.querySelectorAll(':scope > .card').forEach(clearCommunityFeedCardInline);
-    });
-    return false;
+    return window.FeedLayout?.repairFlex?.(containerId) ?? false;
   }
 
   function repairCreationsFeedLayout(force = false) {
-    const container = document.getElementById('creationsGrid');
-    if (!container) return false;
-    if (!force && !isCreationsFeedLayoutStale(container)) return false;
-    if (creationsMasonry) {
-      creationsMasonry.destroy();
-      creationsMasonry = null;
-    }
-    container.classList.remove('masonry-ready', 'community-mobile-feed', 'cards-grid-priming');
-    container.style.removeProperty('height');
-    container.style.removeProperty('max-height');
-    container.style.overflow = 'visible';
-    if (container.querySelectorAll('.community-post-card').length) {
-      delete container.dataset.feedDistributed;
-      delete container.dataset.feedDistributedCols;
-      layoutFeedFlexColumns('creationsGrid', { force: true, forceReflow: true, recalcCols: true });
-      return true;
-    }
-    return repairCommunityFeedLayout('creationsGrid');
+    return window.FeedLayout?.repairCreations?.(force) ?? false;
   }
 
   function scheduleCommunityFeedHeightBalance(_containerId) {
-    /* flex 多列：禁止按图片加载全墙 DOM 重分（社区晃眼）；间距靠 CSS aspect-ratio */
+    /* flex 多列：禁止按图片加载全墙 DOM 重分；间距靠 CSS */
   }
 
   function appendFeedCardsLayout(containerId, appendedCards) {
-    const container = document.getElementById(containerId);
-    if (!container || !appendedCards?.length) return;
-    if (useCommunityCssGrid(containerId)) {
-      ensureCommunityFeedColumnLayout(containerId);
-      const minCols = containerId === 'creationsGrid' ? 2 : 2;
-      const cols = Math.max(
-        minCols,
-        Number(container.dataset.feedDistributedCols || container.dataset.feedLayoutCols)
-          || getCommunityFeedColumns(container)
-      );
-      distributeCommunityFeedColumns(container, cols, { newCards: appendedCards });
-      setFeedLayoutPending(containerId, false);
-      return;
-    }
-    if (container.querySelector(':scope > .community-feed-col')) {
-      const cols = Math.max(2, Number(container.dataset.feedLayoutCols) || getCommunityFeedColumns(container));
-      distributeCommunityFeedColumns(container, cols, { newCards: appendedCards });
-      return;
-    }
-    const isCreations = containerId === 'creationsGrid';
-    const isProfile = containerId === 'userProfileGrid';
-    const inst = isProfile ? profileMasonry : (isCreations ? creationsMasonry : communityMasonry);
-    if (inst && typeof inst.appended === 'function') {
-      inst.appended(appendedCards);
-      inst.layout();
-      return;
-    }
-    layoutCommunityMasonry(containerId);
+    window.FeedLayout?.appendCards?.(containerId, appendedCards);
   }
 
   async function loadNextCommunityFeedPage(containerId = 'communityGrid') {
@@ -1531,6 +1319,12 @@
     return Math.min(5, Math.max(1, Number(getComputedStyle(document.documentElement).getPropertyValue('--community-columns')) || 4));
   }
 
+  function getCreationsFeedColumns(_container) {
+    let userCols = Number(localStorage.getItem('promptrepo_myhome_columns'));
+    if (!Number.isFinite(userCols) || userCols < 2) userCols = 3;
+    return Math.min(5, Math.max(2, userCols));
+  }
+
   /** 生图作品流按可用宽度自适应列数，避免预览侧栏打开后右侧大块留白 */
   function getImageGenFeedColumns(innerW) {
     const gap = getMasonryGap();
@@ -1564,43 +1358,32 @@
     else container.style.removeProperty('height');
   }
 
-  /** 社区/我的主页：列间距=gutter；上下间距=CSS margin-bottom（Masonry gutter 不含纵向） */
+  /** 社区/我的主页：列间距=gutter；上下间距=CSS margin-bottom（与 #cardsContainer 一致） */
   function getCommunityFeedGaps() {
-    return { colGap: 16, rowGap: 16 };
+    const gap = getMasonryGap();
+    return { colGap: gap, rowGap: gap };
   }
 
-  /** Masonry 列数/列宽：以 #communityGrid 实际宽度为准（勿与 page-main 量宽不一致） */
-  function getCommunityFeedLayoutWidth(container) {
-    if (!container) return 0;
-    const st = getComputedStyle(container);
-    const w = container.clientWidth - parseFloat(st.paddingLeft) - parseFloat(st.paddingRight);
-    if (w > 80) return w;
-    return getCommunityFeedMeasureInnerWidth(container);
-  }
-
-  let communityMasonryRelayoutTimer = null;
-  let communityMasonryRelayoutPending = 0;
-
-  /** 社区/我的主页桌面 Masonry：图长高后 debounce 重排（与卡片库同思路） */
-  function scheduleFeedMasonryRelayout(containerId = 'communityGrid') {
-    if (isMobileFeedLayout() || useCommunityCssGrid(containerId)) return;
-    const container = document.getElementById(containerId);
+  function purgeCommunityFeedGridNoise(container) {
     if (!container) return;
-    const inst = containerId === 'creationsGrid' ? creationsMasonry : communityMasonry;
-    communityMasonryRelayoutPending += 1;
-    clearTimeout(communityMasonryRelayoutTimer);
-    communityMasonryRelayoutTimer = setTimeout(() => {
-      communityMasonryRelayoutPending = 0;
-      if (inst && typeof inst.layout === 'function') {
-        const scrollRoot = getFeedScrollRoot(container) || container;
-        const scrollTop = scrollRoot.scrollTop;
-        if (typeof inst.reloadItems === 'function') inst.reloadItems();
-        inst.layout();
-        scrollRoot.scrollTop = scrollTop;
-      } else {
-        layoutCommunityMasonry(containerId, { force: true });
-      }
-    }, communityMasonryRelayoutPending > 4 ? 220 : 80);
+    container.querySelectorAll(
+      ':scope > .feature-empty, :scope > .community-feed-skeleton, :scope > .community-curated-placeholder, :scope > .community-feed-empty'
+    ).forEach((el) => el.remove());
+  }
+
+  function scrubStaleCommunityFeedEmpty(container) {
+    if (!container) return;
+    if (container.querySelector('.community-post-card, .creation-post-card')) {
+      purgeCommunityFeedGridNoise(container);
+    }
+  }
+
+  function getCommunityFeedLayoutWidth(container) {
+    return window.FeedLayout?.getLayoutWidth?.(container) ?? 0;
+  }
+
+  function scheduleFeedMasonryRelayout(containerId = 'communityGrid') {
+    window.FeedLayout?.scheduleMasonryRelayout?.(containerId);
   }
 
   function scheduleCommunityMasonryRelayout() {
@@ -1691,18 +1474,7 @@
       delete el.dataset.feedSig;
       el.classList.remove('feed-layout-pending', 'feed-layout-ready', 'community-mobile-feed');
     });
-    if (communityMasonry) {
-      communityMasonry.destroy();
-      communityMasonry = null;
-    }
-    if (creationsMasonry) {
-      creationsMasonry.destroy();
-      creationsMasonry = null;
-    }
-    if (profileMasonry) {
-      profileMasonry.destroy();
-      profileMasonry = null;
-    }
+    window.FeedLayout?.destroyAllLayouts?.();
   }
 
   function clearAllLocalFeatureData() {
@@ -2706,6 +2478,65 @@
     '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect fill="%2318181c" width="16" height="16"/></svg>'
   );
 
+  function imageGenFeedSignOpts(img) {
+    const cardEl = img?.closest?.('.imagegen-feed-card[data-feed-id]');
+    if (!cardEl || !img.closest('#imageGenFeed')) return null;
+    const feedId = cardEl.dataset.feedId || '';
+    if (!feedId.startsWith('wh_')) {
+      const authorId = cardEl.dataset.authorId || img.dataset.authorId || '';
+      const postId = feedId;
+      if (authorId || postId) {
+        return { fromPublicFeed: true, inCommunityGrid: true, authorId, cardId: cardEl.dataset.sourceCardId || postId };
+      }
+      return null;
+    }
+    const rawId = feedId.replace(/^wh_/, '');
+    const c = (window.getWarehouseCardsForImageGen?.() || window.__promptHubCards || [])
+      .find((x) => x.id === rawId);
+    const collect = c && window.getCommunityCollectImageResolveOpts?.(c);
+    if (!collect) return { fromPublicFeed: false, authorId: '', cardId: rawId };
+    return {
+      fromPublicFeed: true,
+      communityFeed: true,
+      authorId: collect.authorId,
+      cardId: collect.cardId || collect.assetId || '',
+      inCommunityGrid: false
+    };
+  }
+
+  function communityImageSignOpts(img) {
+    const ig = imageGenFeedSignOpts(img);
+    if (ig) return ig;
+    const inFeed = !!img?.closest?.(
+      '#communityGrid, #creationsGrid, #userProfileGrid, #communitySideBody, #creationsSideBody, .community-side-img-btn'
+    );
+    if (!inFeed) return { fromPublicFeed: false, authorId: '', cardId: '' };
+    const authorId = img.closest('.card')?.dataset?.authorId || '';
+    const ref = img.getAttribute('data-image-ref') || '';
+    const path = window.SupabaseSync?.storagePathFromRef?.(ref) || '';
+    const uid = window.SupabaseSync?.getUserId?.();
+    const own = !!(path && uid && path.replace(/^\//, '').startsWith(`${uid}/`));
+    const guest = !window.SupabaseSync?.isLoggedIn?.();
+    const sidePanel = !!img?.closest?.('#communitySideBody, #creationsSideBody, .community-side-img-btn');
+    const inCommunityGrid = !!img?.closest?.('#communityGrid, #creationsGrid, #userProfileGrid');
+    return {
+      fromPublicFeed: guest || sidePanel || (inCommunityGrid && !own),
+      inCommunityGrid,
+      authorId:
+        img.dataset?.authorId
+        || authorId
+        || img.closest('.card')?.dataset?.authorId
+        || img.closest('[data-author-id]')?.dataset?.authorId
+        || '',
+      cardId:
+        img.dataset?.sourceCardId
+        || img.closest('.card')?.dataset?.sourceCardId
+        || img.closest('.card')?.dataset?.postId
+        || img.dataset?.postId
+        || ''
+    };
+  }
+
   function bindFeedImgErrorFallback(img) {
     if (!img || img.dataset.feedImgErrBound) return;
     img.dataset.feedImgErrBound = '1';
@@ -3268,10 +3099,7 @@
 
   function showCommunityFeedSkeleton(container, count) {
     if (!container) return;
-    if (communityMasonry) {
-      communityMasonry.destroy();
-      communityMasonry = null;
-    }
+    window.FeedLayout?.destroyLayout?.('communityGrid');
     container.classList.add('feed-layout-pending');
     container.classList.remove('feed-layout-ready');
     container.innerHTML = communityFeedSkeletonHtml(count);
@@ -3509,687 +3337,72 @@
     setTimeout(finish, 2800);
   }
 
-  /** 社区/创作列宽：按 .community-page-main 量宽（勿用 .community-workspace / #creationsGrid，会被撑宽后反馈成巨列） */
-  function getCommunityFeedMeasureEl(container) {
-    return container?.closest?.('.community-page-main')
-      || container?.closest?.('.feature-body-cards')
-      || container?.parentElement
-      || container;
-  }
-
-  function getCommunityFeedMeasureInnerWidth(container) {
-    const measure = getCommunityFeedMeasureEl(container);
-    if (!measure) return 0;
-    const style = getComputedStyle(measure);
-    let innerW = measure.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-    const shell = container?.closest?.('.feature-shell') || container?.closest?.('.app-page-feature');
-    if (shell) {
-      const ss = getComputedStyle(shell);
-      const shellW = shell.clientWidth - parseFloat(ss.paddingLeft) - parseFloat(ss.paddingRight);
-      if (shellW > 80 && innerW > shellW + 4) innerW = shellW;
-    }
-    const layoutMax = Math.max(280, window.innerWidth - 240);
-    if (innerW > layoutMax) innerW = layoutMax;
-    return Math.max(0, innerW);
-  }
-
-  function getCreationsFeedColumns(_container) {
-    let userCols = Number(localStorage.getItem('promptrepo_myhome_columns'));
-    if (!Number.isFinite(userCols) || userCols < 2) userCols = 3;
-    return Math.min(5, Math.max(2, userCols));
-  }
-
-  function getCommunityFeedColumns(container) {
-    if (!container) return getCommunityColumns();
-    if (container.id === 'creationsGrid') return getCreationsFeedColumns(container);
-    const innerW = getCommunityFeedLayoutWidth(container);
-    const gap = getCommunityFeedGaps().colGap;
-    const userCols = getCommunityColumns();
-    if (innerW < 80) return userCols;
-    const minCol = 156;
-    const fit = Math.floor((innerW + gap) / (minCol + gap));
-    return Math.min(userCols, Math.max(2, fit));
-  }
-
-  function getCommunityFeedColumnWidth(container) {
-    if (!container) return 0;
-    const innerW = getCommunityFeedLayoutWidth(container);
-    if (innerW < 80) return 0;
-    const gap = getCommunityFeedGaps().colGap;
-    const cols = getCommunityFeedColumns(container);
-    return Math.max(120, Math.floor((innerW - gap * (cols - 1)) / cols));
-  }
-
-  function primeCommunityFeedColumnWidths(container, containerId) {
-    if (!container || useCssGridForCommunityFeed(containerId)) return 0;
-    const colWidth = getCommunityFeedColumnWidth(container);
-    if (!colWidth) return 0;
-    container.style.removeProperty('max-width');
-    container.style.removeProperty('margin-left');
-    container.style.removeProperty('margin-right');
-    const sizer = container.querySelector('.grid-sizer');
-    if (sizer) sizer.style.width = colWidth + 'px';
-    container.querySelectorAll('.card').forEach((card) => {
-      card.style.width = colWidth + 'px';
-      card.style.maxWidth = colWidth + 'px';
-    });
-    container.style.setProperty('--feed-col-width', `${colWidth}px`);
-    return colWidth;
-  }
-
-  function runCommunityFeedLayoutPass(containerId, opts = {}) {
-    const container = document.getElementById(containerId);
-    if (!container) return false;
-    if (useCssGridForCommunityFeed(containerId) || useCommunityCssGrid(containerId)) {
-      layoutCommunityMasonry(containerId);
-      return true;
-    }
-    layoutCommunityMasonry(containerId);
-    return true;
-  }
-
-  let layoutCommunityDebounce = {};
-  const layoutCommunityCooldown = {};
-  const layoutCommunityImageBatch = {};
-  function scheduleCommunityLayout(containerId, opts = {}) {
-    if (useCommunityCssGrid(containerId)) {
-      if (opts.fromImage) return;
-      const container = document.getElementById(containerId);
-      if (
-        container?.dataset.feedDistributed === '1'
-        && !opts.recalcCols
-        && !opts.force
-        && !opts.newCards?.length
-      ) {
-        scrubCommunityFeedFlexCards(container);
-        ensureFeedPageSentinel(container);
-        setFeedLayoutPending(containerId, false);
-        return;
-      }
-      const runFlex = () => {
-        layoutFeedFlexColumns(containerId, {
-          newCards: opts.newCards,
-          recalcCols: opts.recalcCols === true,
-          force: opts.force === true,
-          forceReflow: opts.recalcCols === true || opts.force === true
-        });
-      };
-      clearTimeout(layoutCommunityDebounce[containerId]);
-      layoutCommunityDebounce[containerId] = setTimeout(runFlex, opts.immediate ? 0 : 80);
-      return;
-    }
-    if (useCssGridForCommunityFeed(containerId)) {
-      if (opts.fromImage) return;
-      layoutCommunityMasonry(containerId);
-      return;
-    }
-    const run = () => {
-      layoutCommunityMasonry(containerId);
-      if (!opts.fromImage) {
-        layoutCommunityCooldown[containerId] = true;
-        setTimeout(() => {
-          layoutCommunityCooldown[containerId] = false;
-        }, 800);
-      }
-    };
-    if (opts.fromImage) {
-      clearTimeout(layoutCommunityImageBatch[containerId]);
-      layoutCommunityImageBatch[containerId] = setTimeout(run, opts.immediate ? 0 : 60);
-      return;
-    }
-    if (!opts.force && layoutCommunityCooldown[containerId]) return;
-    clearTimeout(layoutCommunityDebounce[containerId]);
-    layoutCommunityDebounce[containerId] = setTimeout(run, opts.immediate ? 0 : 80);
-  }
-
-  const communityResizeRelayoutBound = {};
-  /** 只监听父级宽度（侧栏开合），勿监听 #communityGrid 自身高度，否则与 Masonry 互相触发死循环 */
-  function bindCommunityFeedResizeRelayout(containerId) {
-    if (communityResizeRelayoutBound[containerId]) return;
-    const container = document.getElementById(containerId);
-    if (!container || typeof ResizeObserver === 'undefined') return;
-    const watchEl = container.closest('.community-page-layout') || container.parentElement;
-    if (!watchEl) return;
-    communityResizeRelayoutBound[containerId] = true;
-    let timer = null;
-    let lastW = 0;
-    const obs = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect?.width ?? watchEl.clientWidth;
-      if (w < 80 || Math.abs(w - lastW) < 4) return;
-      lastW = w;
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        const grid = document.getElementById(containerId);
-        if (!grid || !useCommunityCssGrid(containerId)) {
-          scheduleCommunityLayout(containerId, { recalcCols: true });
-          return;
-        }
-        const measured = getCommunityFeedColumns(grid);
-        const prev = Number(grid.dataset.feedDistributedCols || grid.dataset.feedLayoutCols) || 0;
-        if (grid.dataset.feedDistributed === '1' && prev === measured) {
-          applyCommunityFeedColumnCss(grid, measured);
-          scrubCommunityFeedFlexCards(grid);
-          return;
-        }
-        if (grid.dataset.feedDistributed === '1' && prev !== measured) {
-          syncCommunityFeedColumnCount(containerId);
-          return;
-        }
-        scheduleCommunityLayout(containerId, { recalcCols: true });
-      }, 120);
-    });
-    obs.observe(watchEl);
-  }
-
-  function applyCommunityFeedColumnCss(container, cols) {
-    if (!container || cols < 1) return;
-    const { colGap: gap, rowGap } = getCommunityFeedGaps();
-    container.dataset.feedLayoutCols = String(cols);
-    container.style.setProperty('--feed-columns', String(cols));
-    container.style.setProperty('--feed-column-gap', `${gap}px`);
-    container.style.setProperty('--feed-row-gap', `${rowGap}px`);
-    container.style.width = '100%';
-    container.style.maxWidth = '100%';
-    container.style.boxSizing = 'border-box';
-    container.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
-    const gridW = container.clientWidth || getCommunityFeedMeasureInnerWidth(container);
-    if (gridW > 80 && cols > 0) {
-      const colPx = Math.max(120, Math.floor((gridW - gap * (cols - 1)) / cols));
-      container.style.setProperty('--feed-col-width', `${colPx}px`);
-    }
-  }
-
-  function bindCommunityGridScrollRelayout() {
-    /* 滚动时全量 Masonry 重排会导致 400+ 卡片错位，已禁用 */
-  }
-
-  const feedGridImageRelayoutBound = {};
-
-  function bindFeedGridImageRelayout(containerId) {
-    if (feedGridImageRelayoutBound[containerId]) return;
-    const container = document.getElementById(containerId);
-    if (!container || isMobileFeedLayout()) return;
-    feedGridImageRelayoutBound[containerId] = true;
-    container.addEventListener('load', (e) => {
-      if (!e.target?.classList?.contains('card-img')) return;
-      if (typeof window.isPlaceholderCardImg === 'function' && window.isPlaceholderCardImg(e.target)) return;
-      scheduleFeedMasonryRelayout(containerId);
-    }, true);
-    container.addEventListener('error', (e) => {
-      if (!e.target?.classList?.contains('card-img')) return;
-      scheduleFeedMasonryRelayout(containerId);
-    }, true);
-  }
-
-  function bindCommunityGridImageRelayout() {
-    bindFeedGridImageRelayout('communityGrid');
-    bindFeedGridImageRelayout('creationsGrid');
-  }
-
-  function scheduleLayoutAfterImages(containerId) {
-    scheduleCommunityLayout(containerId);
-  }
-
+  /* —— Feed 排版：feed-layout.js（见 docs/FEED-LAYOUT.md）—— */
   function isMobileFeedLayout() {
     return window.MobileUI?.isMobile?.() || window.matchMedia('(max-width: 900px)').matches;
   }
 
   function useCssGridForCommunityFeed(containerId) {
-    if (containerId === 'userProfileGrid') return true;
-    if (containerId !== 'communityGrid' && containerId !== 'creationsGrid') return false;
-    return isMobileFeedLayout();
+    return window.FeedLayout?.useMobileGrid?.(containerId) ?? false;
   }
 
   function useFeedPagedRender(containerId) {
     return (containerId === 'communityGrid' || containerId === 'creationsGrid') && !isMobileFeedLayout();
   }
 
-  /** Feed 排版模式：社区 Masonry；我的主页 flex 多列（勿与社区共用 Masonry 实例） */
-  const FEED_LAYOUT_MODE = {
-    communityGrid: 'masonry',
-    creationsGrid: 'flex-columns',
-    userProfileGrid: 'masonry'
-  };
+  function useCommunityCssGrid(containerId) {
+    return window.FeedLayout?.useFlexColumns?.(containerId) ?? false;
+  }
 
   function getFeedLayoutMode(containerId) {
-    if (containerId === 'creationsGrid' && isMobileFeedLayout()) return 'mobile-grid';
-    if (containerId === 'communityGrid' && isMobileFeedLayout()) return 'mobile-grid';
-    return FEED_LAYOUT_MODE[containerId] || 'masonry';
+    return window.FeedLayout?.getMode?.(containerId) ?? 'masonry';
   }
 
-  function useCommunityCssGrid(containerId) {
-    return getFeedLayoutMode(containerId) === 'flex-columns';
+  let layoutCommunityMasonry;
+  let layoutFeedFlexColumns;
+  let scheduleCommunityLayout;
+  let relayoutCommunityFeeds;
+  let runCommunityFeedLayoutPass;
+  let bindCommunityGridImageRelayout;
+  let bindCommunityFeedResizeRelayout;
+
+  function bindCommunityGridScrollRelayout() { /* 滚动全墙重排已禁用 */ }
+
+  function scheduleLayoutAfterImages(containerId) {
+    scheduleCommunityLayout(containerId);
   }
 
-  /** 我的主页：flex 多列（文档流），与社区 Masonry 分离 */
-  function layoutFeedFlexColumns(containerId, opts = {}) {
-    const container = document.getElementById(containerId);
-    if (!container || getFeedLayoutMode(containerId) !== 'flex-columns') return;
-    const hasFeedCols = !!container.querySelector(':scope > .community-feed-col');
-    const feedStable = container.dataset.feedDistributed === '1';
-    const mustFlatten = opts.recalcCols === true || opts.forceReflow === true || opts.force === true || !feedStable;
-    if (hasFeedCols && feedStable && !mustFlatten && !opts.newCards?.length) {
-      scrubCommunityFeedFlexCards(container);
-      ensureFeedPageSentinel(container);
-      setFeedLayoutPending(containerId, false);
-      return;
-    }
-    if (hasFeedCols && mustFlatten) flattenCommunityFeedColumns(container);
-    if (creationsMasonry) {
-      creationsMasonry.destroy();
-      creationsMasonry = null;
-    }
-    scrubStaleCommunityFeedEmpty(container);
-    container.classList.remove('community-mobile-feed', 'masonry-ready', 'cards-grid-priming');
-    container.classList.add('community-feed-grid', 'community-feed-columns');
-    container.style.removeProperty('height');
-    container.style.removeProperty('max-height');
-    container.style.overflow = 'visible';
-    const measuredCols = getCommunityFeedColumns(container);
-    const prevCols = Number(container.dataset.feedDistributedCols || container.dataset.feedLayoutCols) || 0;
-    const measuredColsChanged = prevCols > 0 && prevCols !== measuredCols;
-    if (opts.recalcCols === true && measuredColsChanged) {
-      delete container.dataset.feedLayoutCols;
-      delete container.dataset.feedDistributed;
-      delete container.dataset.feedDistributedCols;
-    } else if (opts.recalcCols === true && container.dataset.feedDistributed === '1') {
-      applyCommunityFeedColumnCss(container, measuredCols);
-      ensureFeedPageSentinel(container);
-      setFeedLayoutPending(containerId, false);
-      return;
-    }
-    const cols = measuredCols;
-    applyCommunityFeedColumnCss(container, cols);
-    container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
-    collectCommunityFeedCards(container).forEach(clearCommunityFeedCardInline);
-    const colsChanged = Number(container.dataset.feedDistributedCols || 0) !== cols;
-    distributeCommunityFeedColumns(container, cols, {
-      forceReflow: opts.force === true || opts.forceReflow === true
-        || container.dataset.feedDistributed !== '1'
-        || (opts.recalcCols === true && colsChanged),
-      newCards: opts.newCards
-    });
-    ensureFeedPageSentinel(container);
-    revealCommunityFeedImages(container);
-    setFeedLayoutPending(containerId, false);
-    if (window.CardImageLoader?.observeContainer) window.CardImageLoader.observeContainer(container);
-  }
-
-  function purgeCommunityFeedGridNoise(container) {
-    if (!container) return;
-    container.querySelectorAll(
-      ':scope > .feature-empty, :scope > .community-feed-skeleton, :scope > .community-curated-placeholder, :scope > .community-feed-empty'
-    ).forEach((el) => el.remove());
-  }
-
-  function scrubStaleCommunityFeedEmpty(container) {
-    if (!container) return;
-    if (container.querySelector('.community-post-card, .creation-post-card')) {
-      purgeCommunityFeedGridNoise(container);
-    }
-  }
-
-  function resetCommunityFeedGridClasses(container) {
-    if (!container) return;
-    container.classList.remove(
-      'community-feed-columns',
-      'community-feed-grid',
-      'community-mobile-feed',
-      'masonry-ready',
-      'feed-layout-pending'
-    );
-    delete container.dataset.feedDistributed;
-    delete container.dataset.feedDistributedCols;
-    delete container.dataset.feedLayoutCols;
-    delete container.dataset.feedCols;
-  }
-
-  function collectCommunityFeedCards(container) {
-    if (!container) return [];
-    const cards = [];
-    container.querySelectorAll('.community-feed-col .card').forEach((c) => cards.push(c));
-    container.querySelectorAll(':scope > .card').forEach((c) => {
-      if (!cards.includes(c)) cards.push(c);
-    });
-    return cards;
-  }
-
-  function flattenCommunityFeedColumns(container) {
-    if (!container) return;
-    const cards = collectCommunityFeedCards(container);
-    container.querySelectorAll(':scope > .community-feed-col').forEach((col) => col.remove());
-    cards.forEach((card) => container.appendChild(card));
-    resetCommunityFeedGridClasses(container);
-  }
-
-  function relayoutCommunityFeeds() {
-    if (isMobileFeedLayout()) {
-      enforceMobileCommunityFeedGrid('communityGrid');
-      enforceMobileCommunityFeedGrid('creationsGrid');
-    }
-    ['communityGrid', 'creationsGrid', 'userProfileGrid'].forEach((id) => {
-      layoutCommunityMasonry(id);
-    });
-  }
-
-  function imageGenFeedSignOpts(img) {
-    const cardEl = img?.closest?.('.imagegen-feed-card[data-feed-id]');
-    if (!cardEl || !img.closest('#imageGenFeed')) return null;
-    const feedId = cardEl.dataset.feedId || '';
-    if (!feedId.startsWith('wh_')) {
-      const authorId = cardEl.dataset.authorId || img.dataset.authorId || '';
-      const postId = feedId;
-      if (authorId || postId) {
-        return { fromPublicFeed: true, inCommunityGrid: true, authorId, cardId: cardEl.dataset.sourceCardId || postId };
-      }
-      return null;
-    }
-    const rawId = feedId.replace(/^wh_/, '');
-    const c = (window.getWarehouseCardsForImageGen?.() || window.__promptHubCards || [])
-      .find((x) => x.id === rawId);
-    const collect = c && window.getCommunityCollectImageResolveOpts?.(c);
-    if (!collect) return { fromPublicFeed: false, authorId: '', cardId: rawId };
-    return {
-      fromPublicFeed: true,
-      communityFeed: true,
-      authorId: collect.authorId,
-      cardId: collect.cardId || collect.assetId || '',
-      inCommunityGrid: false
-    };
-  }
-
-  function communityImageSignOpts(img) {
-    const ig = imageGenFeedSignOpts(img);
-    if (ig) return ig;
-    const inFeed = !!img?.closest?.(
-      '#communityGrid, #creationsGrid, #userProfileGrid, #communitySideBody, #creationsSideBody, .community-side-img-btn'
-    );
-    if (!inFeed) return { fromPublicFeed: false, authorId: '', cardId: '' };
-    const authorId = img.closest('.card')?.dataset?.authorId || '';
-    const ref = img.getAttribute('data-image-ref') || '';
-    const path = window.SupabaseSync?.storagePathFromRef?.(ref) || '';
-    const uid = window.SupabaseSync?.getUserId?.();
-    const own = !!(path && uid && path.replace(/^\//, '').startsWith(`${uid}/`));
-    const guest = !window.SupabaseSync?.isLoggedIn?.();
-    const sidePanel = !!img?.closest?.('#communitySideBody, #creationsSideBody, .community-side-img-btn');
-    const inCommunityGrid = !!img?.closest?.('#communityGrid, #creationsGrid, #userProfileGrid');
-    return {
-      fromPublicFeed: guest || sidePanel || (inCommunityGrid && !own),
-      inCommunityGrid,
-      authorId:
-        img.dataset?.authorId
-        || authorId
-        || img.closest('.card')?.dataset?.authorId
-        || img.closest('[data-author-id]')?.dataset?.authorId
-        || '',
-      cardId:
-        img.dataset?.sourceCardId
-        || img.closest('.card')?.dataset?.sourceCardId
-        || img.closest('.card')?.dataset?.postId
-        || img.dataset?.postId
-        || ''
-    };
-  }
-
-  function isPublicCommunityFeedContainer(el) {
-    return communityImageSignOpts(el).fromPublicFeed;
-  }
-
-  function destroyCommunityFeedMasonryFor(containerId) {
-    if (containerId === 'creationsGrid' && creationsMasonry) {
-      creationsMasonry.destroy();
-      creationsMasonry = null;
-    } else if (containerId === 'communityGrid' && communityMasonry) {
-      communityMasonry.destroy();
-      communityMasonry = null;
-    }
-  }
-
-  function resetCommunityGridCardLayout(container, containerId) {
-    if (containerId === 'creationsGrid') {
-      destroyCommunityFeedMasonryFor('creationsGrid');
-    } else if (containerId === 'userProfileGrid' && profileMasonry) {
-      profileMasonry.destroy();
-      profileMasonry = null;
-    } else if (containerId === 'communityGrid') {
-      destroyCommunityFeedMasonryFor('communityGrid');
-    } else if (communityMasonry) {
-      communityMasonry.destroy();
-      communityMasonry = null;
-    }
-    container.style.removeProperty('height');
-    container.classList.remove('community-feed-grid');
-    container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
-    container.querySelectorAll('.card').forEach((card) => {
-      card.classList.remove('is-masonry-positioned');
-      card.style.removeProperty('position');
-      card.style.removeProperty('left');
-      card.style.removeProperty('top');
-      card.style.removeProperty('right');
-      card.style.removeProperty('bottom');
-      card.style.removeProperty('width');
-      card.style.removeProperty('max-width');
-      card.style.removeProperty('margin-bottom');
-      card.style.removeProperty('transform');
-    });
-  }
-
-  /** 手机社区/创作：销毁 Masonry、清 inline 定位，强制 CSS Grid 两列 */
   function enforceMobileCommunityFeedGrid(containerId) {
     if (!isMobileFeedLayout()) return;
-    if (containerId !== 'communityGrid' && containerId !== 'creationsGrid') return;
-    const container = document.getElementById(containerId);
-    if (!container || !container.querySelector('.card')) return;
-    flattenCommunityFeedColumns(container);
-    resetCommunityGridCardLayout(container, containerId);
-    container.classList.add('community-mobile-feed');
-    container.classList.remove('masonry-ready');
-    setFeedLayoutPending(containerId, false);
+    window.FeedLayout?.layout?.(containerId);
   }
 
-  /** 社区/创作：多列 flex 瀑布流（最短列分配，无 absolute 叠卡） */
-  function ensureCommunityFeedColEls(container, cols) {
-    let colEls = [...container.querySelectorAll(':scope > .community-feed-col')];
-    while (colEls.length < cols) {
-      const col = document.createElement('div');
-      col.className = 'community-feed-col';
-      col.setAttribute('aria-hidden', 'true');
-      container.appendChild(col);
-      colEls.push(col);
-    }
-    while (colEls.length > cols) {
-      const extra = colEls.pop();
-      if (extra) {
-        while (extra.firstChild) colEls[0]?.appendChild(extra.firstChild);
-        extra.remove();
-      }
-    }
-    return colEls;
-  }
-
-  function distributeCommunityFeedColumns(container, cols, opts = {}) {
-    if (!container || cols < 1) return;
-    scrubStaleCommunityFeedEmpty(container);
-    container.querySelectorAll(':scope > .grid-sizer').forEach((el) => el.remove());
-    const colEls = ensureCommunityFeedColEls(container, cols);
-    container.dataset.feedCols = String(cols);
-
-    const newCards = opts.newCards?.length ? [...opts.newCards] : null;
-    const orphanCards = [...container.querySelectorAll(':scope > .card')];
-    if (newCards?.length && orphanCards.length > 0) {
-      const newSet = new Set(newCards);
-      const broken = orphanCards.some((c) => !newSet.has(c));
-      if (broken) {
-        redistributeCommunityFeedByHeight(container, cols);
-        return;
-      }
-    }
-    if (newCards?.length) {
-      newCards.forEach((card) => {
-        clearCommunityFeedCardInline(card);
-        let target = 0;
-        let minH = Infinity;
-        colEls.forEach((col, i) => {
-          const h = col.offsetHeight;
-          if (h < minH) {
-            minH = h;
-            target = i;
-          }
-        });
-        colEls[target].appendChild(card);
-        card.dataset.feedCol = String(target);
-      });
-      ensureFeedPageSentinel(container);
-      return;
-    }
-
-    const orphans = [...container.querySelectorAll(':scope > .card')];
-    if (orphans.length && container.dataset.feedDistributed === '1' && !opts.forceReflow) {
-      orphans.forEach((card, i) => {
-        clearCommunityFeedCardInline(card);
-        const colIdx = Number(card.dataset.feedCol);
-        const target = Number.isFinite(colIdx) && colEls[colIdx] ? colIdx : (i % cols);
-        colEls[target].appendChild(card);
-        card.dataset.feedCol = String(target);
-      });
-      return;
-    }
-
-    if (container.dataset.feedDistributed === '1' && !opts.forceReflow) return;
-
-    redistributeCommunityFeedByHeight(container, cols);
-  }
-
-  /** 社区/个人页 Feed 排版入口（按 getFeedLayoutMode 分流，勿让我的主页走 Masonry） */
-  function layoutCommunityMasonry(containerId, opts = {}) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    const mode = getFeedLayoutMode(containerId);
-    if (mode === 'flex-columns') {
-      layoutFeedFlexColumns(containerId, opts);
-      return;
-    }
-    if (mode === 'mobile-grid') {
-      enforceMobileCommunityFeedGrid(containerId);
-      if (window.CardImageLoader?.observeContainer) window.CardImageLoader.observeContainer(container);
-      return;
-    }
-    const hasFeedCols = !!container.querySelector(':scope > .community-feed-col');
-    const feedStable = container.dataset.feedDistributed === '1';
-    const mustFlatten = opts.recalcCols === true || opts.forceReflow === true || opts.force === true || !feedStable;
-    if (hasFeedCols && (mustFlatten || containerId === 'communityGrid')) {
-      flattenCommunityFeedColumns(container);
-    }
-    container.classList.remove('community-feed-grid', 'community-feed-columns');
-    if (!useCssGridForCommunityFeed(containerId)) {
-      container.classList.remove('community-mobile-feed');
-    }
-    if (useCssGridForCommunityFeed(containerId)) {
-      if (containerId === 'communityGrid' || containerId === 'creationsGrid') {
-        enforceMobileCommunityFeedGrid(containerId);
-        if (window.CardImageLoader?.observeContainer) window.CardImageLoader.observeContainer(container);
-      } else {
-        resetCommunityGridCardLayout(container, containerId);
-        container.classList.remove('community-mobile-feed');
-        requestAnimationFrame(() => setFeedLayoutPending(containerId, false));
-        if (window.CardImageLoader?.observeContainer) window.CardImageLoader.observeContainer(container);
-      }
-      return;
-    }
-    container.classList.remove('community-mobile-feed');
-    const runMasonryLayout = () => {
-      if (containerId === 'creationsGrid') {
-        layoutFeedFlexColumns('creationsGrid', { force: true, forceReflow: true });
-        return;
-      }
-      if (isMobileFeedLayout() && containerId === 'communityGrid') {
-        enforceMobileCommunityFeedGrid(containerId);
-        return;
-      }
-      if (typeof Masonry === 'undefined') return;
-      const cardEls = [...container.querySelectorAll('.card')];
-      const isProfile = containerId === 'userProfileGrid';
-      let instance = isProfile ? profileMasonry : communityMasonry;
-
-      if (!cardEls.length) {
-        if (instance) {
-          instance.destroy();
-          if (isProfile) profileMasonry = null;
-          else communityMasonry = null;
-        }
-        setFeedLayoutPending(containerId, false);
-        return;
-      }
-
-      const feedGaps = getCommunityFeedGaps();
-      const useFeedGaps = containerId === 'communityGrid';
-      const gap = useFeedGaps ? feedGaps.colGap : getMasonryGap();
-      const style = getComputedStyle(container);
-      const innerW = useFeedGaps
-        ? getCommunityFeedLayoutWidth(container)
-        : container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-      if (innerW < 200) {
-        scheduleCommunityLayout(containerId, { force: true });
-        return;
-      }
-      const cols = isProfile
-        ? Math.min(4, getCardColumns())
-        : containerId === 'communityGrid'
-          ? getCommunityFeedColumns(container)
-          : containerId === 'creationsGrid'
-            ? getCreationsFeedColumns(container)
-            : Math.max(1, getCardColumns());
-      const colWidth = Math.max(120, Math.floor((innerW - gap * (cols - 1)) / cols));
-      let sizer = container.querySelector('.grid-sizer');
-      if (!sizer) {
-        sizer = document.createElement('div');
-        sizer.className = 'grid-sizer';
-        container.insertBefore(sizer, container.firstChild);
-      }
-      sizer.style.width = colWidth + 'px';
-      cardEls.forEach((card) => {
-        card.style.width = colWidth + 'px';
-      });
-      container.style.removeProperty('height');
-      const opts = {
-        itemSelector: '.card',
-        columnWidth: '.grid-sizer',
-        gutter: gap,
-        percentPosition: false,
-        horizontalOrder: false,
-        transitionDuration: 0
-      };
-      const scrollTop = container.scrollTop;
-      if (instance) {
-        instance.option(opts);
-        instance.reloadItems();
-        instance.layout();
-      } else {
-        cardEls.forEach((card) => {
-          card.style.left = '';
-          card.style.top = '';
-          card.style.position = '';
-        });
-        instance = new Masonry(container, opts);
-        if (isProfile) profileMasonry = instance;
-        else communityMasonry = instance;
-      }
-      container.scrollTop = scrollTop;
-      container.classList.add('masonry-ready', 'cards-grid-primed');
-      if (colWidth) container.style.setProperty('--feed-col-width', `${colWidth}px`);
-      setFeedLayoutPending(containerId, false);
-      requestAnimationFrame(() => {
-        const m = isProfile ? profileMasonry : communityMasonry;
-        if (typeof m?.reloadItems === 'function') m.reloadItems();
-        m?.layout?.();
-        revealCommunityFeedImages(container);
-        scheduleFeedMasonryRelayout(containerId);
-      });
+  function wireFeedLayout() {
+    if (window.__feedLayoutWired) return;
+    const FL = window.FeedLayout.init({
+      getCommunityColumns,
+      getCreationsFeedColumns,
+      getCardColumns,
+      getMasonryGap,
+      getCommunityFeedGaps,
+      getFeedScrollRoot,
+      setFeedLayoutPending,
+      ensureFeedPageSentinel,
+      revealCommunityFeedImages,
+      scrubStaleCommunityFeedEmpty,
+      scrubCommunityFeedCardMediaHeights
+    });
+    layoutCommunityMasonry = (id, o) => FL.layout(id, o);
+    layoutFeedFlexColumns = (id, o) => FL.layoutFlex(id, o);
+    scheduleCommunityLayout = (id, o) => FL.schedule(id, o);
+    relayoutCommunityFeeds = () => FL.relayoutAll();
+    runCommunityFeedLayoutPass = (id) => { FL.layout(id); return true; };
+    bindCommunityGridImageRelayout = () => {
+      FL.bindImageRelayout('communityGrid');
+      FL.bindImageRelayout('creationsGrid');
     };
-    if (typeof Masonry !== 'undefined') runMasonryLayout();
-    else if (typeof window.ensureMasonryScript === 'function') {
-      void window.ensureMasonryScript().then(runMasonryLayout);
-    } else runMasonryLayout();
+    bindCommunityFeedResizeRelayout = (id) => FL.bindResizeRelayout(id);
+    window.__feedLayoutWired = true;
   }
 
   function renderLikeRewardRules() {
@@ -4896,16 +4109,7 @@
       if (!stillThere) closeCommunitySidePanel();
     }
     if (!feedAppend) {
-      if (isProfile && profileMasonry) {
-        profileMasonry.destroy();
-        profileMasonry = null;
-      } else if (containerId === 'creationsGrid' && creationsMasonry) {
-        creationsMasonry.destroy();
-        creationsMasonry = null;
-      } else if (!isProfile && communityMasonry) {
-        communityMasonry.destroy();
-        communityMasonry = null;
-      }
+      window.FeedLayout?.destroyLayout?.(containerId);
     }
 
     if (!postsToRender.length) {
@@ -5227,10 +4431,7 @@
     const container = document.getElementById('communityGrid');
     if (!container) return;
     if (communityScope === 'curated') {
-      if (communityMasonry) {
-        communityMasonry.destroy();
-        communityMasonry = null;
-      }
+      window.FeedLayout?.destroyLayout?.('communityGrid');
       closeCommunitySidePanel();
       if (communityAppreciateActive) exitCommunityAppreciate(true);
       container.innerHTML = `<div class="feature-empty community-curated-placeholder" style="grid-column:1/-1">
@@ -5306,8 +4507,8 @@
       return;
     }
     if (!list.length) {
-      if (communityMasonry) { communityMasonry.destroy(); communityMasonry = null; }
-      resetCommunityFeedGridClasses(container);
+      window.FeedLayout?.destroyLayout?.('communityGrid');
+      window.FeedLayout?.resetGridClasses?.(container);
       const cardN = (window.__promptHubCards || []).length;
       if (window.SupabaseSync?.isLoggedIn?.() && communityScope === 'all' && cardN > 0) {
         scheduleCommunityHydrateOnce();
@@ -5416,10 +4617,7 @@
     if (window.AppModalHub?.close) window.AppModalHub.close('userProfileOverlay');
     else document.getElementById('userProfileOverlay')?.classList.remove('active');
     openProfileAuthorId = null;
-    if (profileMasonry) {
-      profileMasonry.destroy();
-      profileMasonry = null;
-    }
+    window.FeedLayout?.destroyLayout?.('userProfileGrid');
   }
   window.closeUserProfile = closeUserProfile;
 
@@ -7736,10 +6934,7 @@
         : '你在卡片库公开到社区的作品 · 点击卡片查看详情与点赞数';
     }
     if (user.id === 'guest') {
-      if (creationsMasonry) {
-        creationsMasonry.destroy();
-        creationsMasonry = null;
-      }
+      window.FeedLayout?.destroyLayout?.('creationsGrid');
       closeCreationsSidePanel();
       container.innerHTML = '<div class="feature-empty"><p>请先登录后查看发布作品</p><button type="button" class="btn btn-primary" onclick="openAuthModal()">登录</button></div>';
       return;
@@ -7759,10 +6954,7 @@
       return;
     }
     renderLikeRewardRules();
-    if (creationsMasonry) {
-      creationsMasonry.destroy();
-      creationsMasonry = null;
-    }
+    window.FeedLayout?.destroyLayout?.('creationsGrid');
     if (!list.length) {
       closeCreationsSidePanel();
       container.innerHTML = '<div class="feature-empty"><p>暂无发布作品</p><p class="panel-hint">在卡片库保存作品并开启「发布到提示词社区」，或在生图页开启「生成后公开」</p><button type="button" class="btn btn-primary" onclick="switchAppPage(\'warehouse\')">去卡片库</button></div>';
@@ -10999,6 +10191,7 @@
   }
 
   function init() {
+    wireFeedLayout();
     loadStores();
     hydratePublicFeedFromCache();
     bindUI();
