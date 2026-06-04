@@ -200,6 +200,37 @@ function primaryCandidatesFromGridPath(gridPath: string): string[] {
 const GRID_SERVE_MAX_SIDE = 640;
 const GRID_SERVE_JPEG_QUALITY = 0.78;
 const GRID_MIN_BYTES = 2048;
+/** 列表 grid 单张上限（约 220KB）；超过视为误存原图，CDN 现场重缩 */
+const GRID_SERVE_MAX_BYTES = 220 * 1024;
+
+function isAcceptableGridBlob(blob: Blob | null | undefined): boolean {
+  const n = blob?.size || 0;
+  return n >= GRID_MIN_BYTES && n <= GRID_SERVE_MAX_BYTES;
+}
+
+async function downloadGridBlob(
+  admin: ReturnType<typeof createAdminClient>,
+  gridClean: string
+): Promise<Blob | null> {
+  const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).download(gridClean);
+  if (error || !data) return null;
+  return data;
+}
+
+async function rebuildGridAtPath(
+  env: Env,
+  admin: ReturnType<typeof createAdminClient>,
+  gridClean: string,
+  primaryPath: string
+): Promise<Blob | null> {
+  const gridBlob = await buildGridBlobFromPrimary(env, admin, primaryPath);
+  if (!isAcceptableGridBlob(gridBlob)) return null;
+  await admin.storage.from(CARD_IMAGES_BUCKET).upload(gridClean, gridBlob!, {
+    contentType: 'image/jpeg',
+    upsert: true
+  });
+  return gridBlob;
+}
 
 /** Supabase Storage 变换：Worker 内无 Canvas 时用此 API 生成 grid */
 async function fetchSupabaseGridBytes(env: Env, primaryPath: string): Promise<Blob | null> {
@@ -250,7 +281,8 @@ export async function materializeCommunityGridIfMissing(
   cardId?: string
 ): Promise<void> {
   const gridClean = gridPath.replace(/^\//, '');
-  if (await storageObjectExistsLight(admin, gridClean)) return;
+  const existing = await downloadGridBlob(admin, gridClean);
+  if (isAcceptableGridBlob(existing)) return;
 
   let primaryCandidates = [...primaryCandidatesFromGridPath(gridClean)];
   if (!primaryCandidates.length) {
@@ -262,13 +294,7 @@ export async function materializeCommunityGridIfMissing(
   const primary = await findFirstExistingStoragePath(admin, primaryCandidates);
   if (!primary) return;
 
-  const gridBlob = await buildGridBlobFromPrimary(c.env, admin, primary);
-  if (!gridBlob) return;
-
-  await admin.storage.from(CARD_IMAGES_BUCKET).upload(gridClean, gridBlob, {
-    contentType: 'image/jpeg',
-    upsert: true
-  });
+  await rebuildGridAtPath(c.env, admin, gridClean, primary);
 }
 
 async function resizeImageToGridJpeg(source: Blob): Promise<Blob | null> {
@@ -393,41 +419,45 @@ export async function serveCachedStorageImage(
   path: string
 ): Promise<Response> {
   const clean = path.replace(/^\//, '');
+  const isGrid = /_grid\.(jpe?g|webp|png)$/i.test(clean);
   const cacheUrl = new URL(c.req.url);
   cacheUrl.search = '';
   const cacheKey = new Request(cacheUrl.toString(), { method: 'GET' });
   const cache = caches.default;
   const cached = await cache.match(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    if (!isGrid) return cached;
+    const len = Number(cached.headers.get('content-length') || 0);
+    if (len > 0 && len <= GRID_SERVE_MAX_BYTES) return cached;
+    c.executionCtx.waitUntil(cache.delete(cacheKey));
+  }
 
   const admin = createAdminClient(c.env);
   let body: Blob | null = null;
   let contentType = contentTypeForPath(clean);
-  const isGrid = /_grid\.(jpe?g|webp|png)$/i.test(clean);
 
-  const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).download(clean);
-  if (!error && data) {
-    const bytes = data.size || 0;
-    const minBytes = isGrid ? GRID_MIN_BYTES : 512;
-    if (bytes >= minBytes) {
-      body = data;
-    } else if (isGrid) {
-      body = null;
-    } else {
-      throw new ApiError(404, 'NOT_FOUND', '图片文件无效或已损坏');
+  const stored = isGrid ? await downloadGridBlob(admin, clean) : null;
+  if (stored && isAcceptableGridBlob(stored)) {
+    body = stored;
+  } else if (!isGrid) {
+    const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).download(clean);
+    if (!error && data) {
+      const bytes = data.size || 0;
+      if (bytes >= 512) body = data;
+      else throw new ApiError(404, 'NOT_FOUND', '图片文件无效或已损坏');
     }
   }
 
   if (!body && isGrid) {
     for (const primary of primaryCandidatesFromGridPath(clean)) {
       const gridBlob = await buildGridBlobFromPrimary(c.env, admin, primary);
-      if (gridBlob && gridBlob.size >= GRID_MIN_BYTES) {
+      if (isAcceptableGridBlob(gridBlob)) {
         body = gridBlob;
         contentType = 'image/jpeg';
         c.executionCtx.waitUntil(
           admin.storage
             .from(CARD_IMAGES_BUCKET)
-            .upload(clean, gridBlob, { contentType: 'image/jpeg', upsert: true })
+            .upload(clean, gridBlob!, { contentType: 'image/jpeg', upsert: true })
             .catch(() => {})
         );
         break;

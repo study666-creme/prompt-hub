@@ -17,6 +17,11 @@ import {
   pollAndUpdateJob
 } from '../../lib/generation-jobs';
 import {
+  recoverGenerationJobsToWarehouse,
+  importExtraJobImagesToWarehouse,
+  repairWarehouseCardImagesFromJobs
+} from '../../lib/recover-generation-warehouse';
+import {
   computeImageGenerationCost,
   resolveImageModelConfig,
   loadImageModelSettings,
@@ -560,6 +565,82 @@ generateRoutes.get('/jobs', async c => {
   }
 
   return c.json({ ok: true, data: { jobs } });
+});
+
+/** 恢复用：拉取更久远的生图任务（只读，不扣积分） */
+generateRoutes.get('/jobs/history', async c => {
+  const user = c.get('user');
+  const admin = createAdminClient(c.env);
+  const daysRaw = Number(c.req.query('days'));
+  const limitRaw = Number(c.req.query('limit'));
+  const days = Number.isFinite(daysRaw) ? Math.min(365, Math.max(1, Math.floor(daysRaw))) : 90;
+  const limit = Number.isFinite(limitRaw) ? Math.min(500, Math.max(1, Math.floor(limitRaw))) : 200;
+  const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+  const { data: rows, error } = await admin
+    .from('generation_requests')
+    .select('id,prompt,status,result_image_url,meta,created_at,resolution,quality,size_label,credits_charged')
+    .eq('user_id', user.id)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  const jobs = (rows || []).map((job) => {
+    const meta = (job.meta as Record<string, unknown>) || {};
+    const extraImageUrls = Array.isArray(meta.extraImageUrls)
+      ? (meta.extraImageUrls as string[]).filter((u) => typeof u === 'string' && u)
+      : [];
+    return {
+      id: job.id,
+      prompt: job.prompt,
+      status: job.status,
+      imageUrl: job.result_image_url as string | null,
+      extraImageUrls: extraImageUrls.length ? extraImageUrls : undefined,
+      apimartTaskId: typeof meta.apimartTaskId === 'string' ? meta.apimartTaskId : null,
+      provider: typeof meta.provider === 'string' ? meta.provider : null,
+      model: meta.model,
+      modelLabel: meta.modelLabel,
+      createdAt: job.created_at
+    };
+  });
+  return c.json({ ok: true, data: { jobs, days, limit } });
+});
+
+const recoverWarehouseSchema = z.object({
+  max: z.number().int().min(1).max(80).optional(),
+  days: z.number().int().min(1).max(365).optional(),
+  mode: z.enum(['import', 'repair', 'extras']).optional()
+});
+
+/** 服务端一键恢复生图到卡片库（绕过浏览器 media/fetch 401） */
+generateRoutes.post('/recover-warehouse', async c => {
+  const user = c.get('user');
+  const admin = createAdminClient(c.env);
+  let body: z.infer<typeof recoverWarehouseSchema> = {};
+  try {
+    const raw = await c.req.json();
+    body = recoverWarehouseSchema.parse(raw ?? {});
+  } catch {
+    body = {};
+  }
+  try {
+    const mode = body.mode || 'import';
+    const common = { max: body.max, days: body.days };
+    const result =
+      mode === 'repair'
+        ? await repairWarehouseCardImagesFromJobs(admin, user.id, common)
+        : mode === 'extras'
+          ? await importExtraJobImagesToWarehouse(admin, user.id, common)
+          : await recoverGenerationJobsToWarehouse(admin, user.id, common);
+    return c.json({ ok: true, data: result });
+  } catch (e) {
+    console.error('[recover-warehouse]', user.id, e);
+    if (e instanceof ApiError) throw e;
+    throw new ApiError(
+      500,
+      'RECOVER_FAILED',
+      String((e as Error)?.message || e).slice(0, 200)
+    );
+  }
 });
 
 generateRoutes.get('/jobs/:jobId', async c => {

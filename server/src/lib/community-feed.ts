@@ -304,7 +304,10 @@ export async function listPublicCommunityFeed(
       console.warn('[community-feed] repair skipped', e);
     }
   }
-  const fetchLimit = Math.min(200, Math.max(limit + offset, limit * 2));
+  const safeLimit = Math.min(100, Math.max(1, limit));
+  const safeOffset = Math.max(0, offset);
+  // 去重后条数会缩水：按 offset+limit 多拉一段，且不再硬 cap 200 导致 offset≥200 永远为空
+  const windowEnd = Math.min(3000, safeOffset + safeLimit + Math.max(120, safeLimit * 4));
   const { data, error } = await admin
     .from('community_posts')
     .select(
@@ -312,13 +315,13 @@ export async function listPublicCommunityFeed(
     )
     .eq('published', true)
     .order('created_at', { ascending: false })
-    .range(0, fetchLimit - 1);
+    .range(0, windowEnd - 1);
 
   if (error) throw error;
   const deduped = dedupeCommunityFeedPosts((data as CommunityRow[]).map(mapRowToDto));
   return deduped
     .filter((p) => String(p.image || '').trim())
-    .slice(offset, offset + limit);
+    .slice(safeOffset, safeOffset + safeLimit);
 }
 
 export async function upsertCommunityPost(

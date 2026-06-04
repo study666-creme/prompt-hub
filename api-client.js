@@ -66,6 +66,27 @@
     );
   }
 
+  let authRefreshInflight = null;
+
+  function isMediaSignPath(path) {
+    return /\/api\/v1\/media\/sign/i.test(String(path || ''));
+  }
+
+  function isAuthSignPaused() {
+    return !!(window.__PH_AUTH_SIGN_PAUSE_UNTIL__ && Date.now() < window.__PH_AUTH_SIGN_PAUSE_UNTIL__);
+  }
+
+  function pauseAuthSign(ms) {
+    const until = Date.now() + Math.max(15000, Number(ms) || 90000);
+    window.__PH_AUTH_SIGN_PAUSE_UNTIL__ = Math.max(window.__PH_AUTH_SIGN_PAUSE_UNTIL__ || 0, until);
+  }
+
+  function notifyAuthSignFailure() {
+    if (window.__PH_AUTH_SIGN_TOAST_AT__ && Date.now() - window.__PH_AUTH_SIGN_TOAST_AT__ < 60000) return;
+    window.__PH_AUTH_SIGN_TOAST_AT__ = Date.now();
+    window.dispatchEvent(new CustomEvent('ph-api-unauthorized'));
+  }
+
   async function recoverSessionForApi() {
     if (window.SupabaseSync?.healSessionOnResume) {
       const healed = await window.SupabaseSync.healSessionOnResume();
@@ -76,6 +97,14 @@
       return !!token;
     }
     return false;
+  }
+
+  async function ensureApiAuthFresh() {
+    if (authRefreshInflight) return authRefreshInflight;
+    authRefreshInflight = recoverSessionForApi().finally(() => {
+      authRefreshInflight = null;
+    });
+    return authRefreshInflight;
   }
 
   async function request(method, path, body, opts = {}, attempt = 0) {
@@ -89,6 +118,12 @@
     }
     if (!isConfigured()) {
       return { ok: false, code: 'API_NOT_CONFIGURED', message: '未配置 API 地址' };
+    }
+    if (isMediaSignPath(path) && isAuthSignPaused()) {
+      return { ok: false, code: 'UNAUTHORIZED', message: '登录已过期，请重新登录' };
+    }
+    if (isMediaSignPath(path) && attempt === 0) {
+      await ensureApiAuthFresh();
     }
     const token = await getAccessToken();
     if (!token) {
@@ -168,8 +203,12 @@
           ? `${message}（${details.slice(0, 120)}）`
           : message;
       if (res.status === 401 && attempt < 2) {
-        const recovered = await recoverSessionForApi();
+        const recovered = await ensureApiAuthFresh();
         if (recovered) return request(method, path, body, opts, attempt + 1);
+        if (isMediaSignPath(path)) {
+          pauseAuthSign(120000);
+          notifyAuthSignFailure();
+        }
       }
       if (res.status === 429) {
         markApiRateLimited(90000 + attempt * 30000);
@@ -528,6 +567,17 @@
     return request('GET', '/api/v1/generate/jobs', null, { timeoutMs: API_TIMEOUT_MS });
   }
 
+  async function listGenerationJobsHistory(opts = {}) {
+    const days = Math.min(365, Math.max(1, Number(opts.days) || 90));
+    const limit = Math.min(500, Math.max(1, Number(opts.limit) || 200));
+    return request(
+      'GET',
+      `/api/v1/generate/jobs/history?days=${days}&limit=${limit}`,
+      null,
+      { timeoutMs: Math.max(API_TIMEOUT_MS, 45000) }
+    );
+  }
+
   async function getLedger(limit) {
     const n = Math.min(50, Math.max(1, Number(limit) || 20));
     return request('GET', `/api/v1/me/ledger?limit=${n}`);
@@ -576,8 +626,7 @@
     const normalized = window.SupabaseSync?.normalizeImageRef?.(ref) || ref;
     const q = encodeURIComponent(String(normalized || ''));
     return request('GET', `/api/v1/media/sign?ref=${q}`, null, {
-      timeoutMs: API_SIGN_TIMEOUT_MS,
-      noRetry: true
+      timeoutMs: API_SIGN_TIMEOUT_MS
     });
   }
 
@@ -588,8 +637,7 @@
     const list = (refs || []).filter(Boolean).slice(0, 48);
     if (!list.length) return { ok: true, data: { urls: {} } };
     return request('POST', '/api/v1/media/sign-batch', { refs: list }, {
-      timeoutMs: opts?.timeoutMs || 4500,
-      noRetry: true
+      timeoutMs: opts?.timeoutMs || 8000
     });
   }
 
@@ -621,10 +669,20 @@
           message: json.error?.message || (res.status === 429 ? '操作过于频繁，请稍后再试' : `HTTP ${res.status}`)
         };
       }
+      window.__PH_API_DOWN_UNTIL__ = 0;
       return json;
     } catch (e) {
-      if (isNetworkFetchError(e)) markApiUnreachable();
-      return { ok: false, code: 'NETWORK_ERROR', message: '无法连接社区服务' };
+      const network = isNetworkFetchError(e) || e?.name === 'AbortError';
+      if (network && attempt < 2 && !opts.noRetry) {
+        await new Promise((r) => setTimeout(r, 600 + attempt * 900));
+        return publicGet(path, { ...opts, noRetry: attempt >= 1 }, attempt + 1);
+      }
+      if (network && !opts.skipUnreachableMark) markApiUnreachable();
+      return {
+        ok: false,
+        code: 'NETWORK_ERROR',
+        message: e?.name === 'AbortError' ? '连接 api.prompt-hub.cn 超时，请换网络或稍后再试' : '无法连接社区服务'
+      };
     } finally {
       clearTimeout(timer);
     }
@@ -634,7 +692,9 @@
     const limit = Math.min(100, Math.max(1, Number(opts.limit) || 60));
     const offset = Math.max(0, Number(opts.offset) || 0);
     return publicGet(`/api/v1/community/feed?limit=${limit}&offset=${offset}`, {
-      timeoutMs: opts.timeoutMs || 12000
+      timeoutMs: opts.timeoutMs || 22000,
+      skipUnreachableMark: opts.skipUnreachableMark !== false,
+      noRetry: !!opts.noRetry
     });
   }
 
@@ -650,9 +710,11 @@
     if (isApiUnreachable() || isApiRateLimited()) {
       return { ok: false, code: 'API_UNREACHABLE', message: 'API 暂不可用' };
     }
+    const batchSize = Math.max(1, (posts || []).length);
+    const timeoutMs = Math.min(120000, Math.max(45000, 12000 + batchSize * 120));
     return request('POST', '/api/v1/community/posts/sync', { posts: posts || [] }, {
-      timeoutMs: API_FAST_TIMEOUT_MS,
-      noRetry: true
+      timeoutMs,
+      noRetry: false
     });
   }
 
@@ -754,19 +816,40 @@
 
   async function fetchMediaAsBlobUrl(remoteUrl) {
     if (!isConfigured() || !remoteUrl) return null;
-    const token = getAccessToken();
-    if (!token) return null;
-    const q = encodeURIComponent(remoteUrl);
     try {
-      const res = await fetch(`${baseUrl()}/api/v1/media/fetch?url=${q}`, {
+      let token = await getAccessToken();
+      if (!token) {
+        await recoverSessionForApi();
+        token = await getAccessToken();
+      }
+      if (!token) return null;
+      const q = encodeURIComponent(remoteUrl);
+      let res = await fetch(`${baseUrl()}/api/v1/media/fetch?url=${q}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      if (res.status === 401) {
+        await recoverSessionForApi();
+        token = await getAccessToken();
+        if (token) {
+          res = await fetch(`${baseUrl()}/api/v1/media/fetch?url=${q}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+        }
+      }
       if (!res.ok) return null;
       const blob = await res.blob();
       return URL.createObjectURL(blob);
     } catch (e) {
       return null;
     }
+  }
+
+  async function recoverWarehouseFromJobs(opts = {}) {
+    return requestWithPrepare('POST', '/api/v1/generate/recover-warehouse', {
+      max: opts.max,
+      days: opts.days,
+      mode: opts.mode || 'import'
+    }, { timeoutMs: Math.max(API_TIMEOUT_MS, 120000) });
   }
 
   if (isConfigured()) {
@@ -804,6 +887,8 @@
     promptToolsInfo,
     consumeInspirationDraw,
     listRecentGenerationJobs,
+    listGenerationJobsHistory,
+    recoverWarehouseFromJobs,
     getLedger,
     checkLikeMilestone,
     signMediaRef,

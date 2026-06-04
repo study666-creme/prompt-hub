@@ -1262,6 +1262,57 @@ body {
     }
     .batch-bar.active { display: flex; }
     .batch-count { font-size: var(--font-xs); color: var(--text-muted); margin-left: 4px; white-space: nowrap; }
+    .batch-progress-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 12000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(2px);
+    }
+    .batch-progress-overlay.hidden { display: none !important; }
+    .batch-progress-panel {
+      min-width: 280px;
+      max-width: 92vw;
+      padding: 20px 22px;
+      border-radius: 14px;
+      background: var(--bg-elevated, #1e1e1e);
+      border: 1px solid var(--border, rgba(255,255,255,0.12));
+      box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+    }
+    .batch-progress-title { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+    .batch-progress-track {
+      height: 8px;
+      border-radius: 999px;
+      background: var(--bg-hover, rgba(255,255,255,0.08));
+      overflow: hidden;
+    }
+    .batch-progress-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: inherit;
+      background: var(--accent, #6ea8fe);
+      transition: width 0.15s ease;
+    }
+    .batch-progress-meta { margin: 10px 0 0; font-size: 12px; color: var(--text-muted); }
+    .batch-select-rect {
+      position: fixed;
+      z-index: 11000;
+      border: 2px solid var(--accent, #6ea8fe);
+      background: rgba(110, 168, 254, 0.18);
+      border-radius: 4px;
+      pointer-events: none;
+    }
+    .batch-mode .card.batch-selected {
+      outline: 2px solid var(--accent, #6ea8fe);
+      outline-offset: 2px;
+    }
+    #cardsContainer.batch-marquee-active {
+      user-select: none;
+      cursor: crosshair;
+    }
     .filter-select-hidden {
       position: absolute;
       width: 1px;
@@ -4313,8 +4364,8 @@ body {
   }
 
   /* 社区 / 我的发布：复制卡片库 Masonry 规则（独立选择器） */
-  #communityGrid.cards-container:not(.list-view),
-  #creationsGrid.cards-container:not(.list-view) {
+  #communityGrid.cards-container:not(.list-view):not(.community-feed-columns),
+  #creationsGrid.cards-container:not(.list-view):not(.community-feed-columns) {
     display: block !important;
     position: relative !important;
     width: 100% !important;
@@ -4393,6 +4444,7 @@ body {
     min-height: 0 !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
   }
   #communityGrid.community-feed-columns:not(.list-view) > .community-feed-col,
   #creationsGrid.community-feed-columns:not(.list-view) > .community-feed-col {
@@ -4413,6 +4465,20 @@ body {
     overflow: hidden;
     visibility: hidden;
     pointer-events: none;
+  }
+  /* 占位/空态不得占 flex 列，否则与 .community-feed-col 并排出现左栏大空白 */
+  #communityGrid.community-feed-columns:not(.list-view) > .feature-empty,
+  #creationsGrid.community-feed-columns:not(.list-view) > .feature-empty,
+  #communityGrid.community-feed-columns:not(.list-view) > .community-feed-skeleton,
+  #creationsGrid.community-feed-columns:not(.list-view) > .community-feed-skeleton {
+    display: none !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    flex: 0 0 0 !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
   }
   #communityGrid.community-feed-columns .community-feed-col > .card,
   #creationsGrid.community-feed-columns .community-feed-col > .card,

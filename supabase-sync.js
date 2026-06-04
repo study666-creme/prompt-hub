@@ -19,6 +19,8 @@
   const MIN_VALID_IMAGE_BYTES = 512;
   /** 列表 grid 小于此字节视为损坏空壳（真实 640px grid 通常 ≥15KB） */
   const GRID_MIN_VALID_BYTES = 8192;
+  /** 列表 grid 大于此字节视为误存原图，触发 backfill / 重签 */
+  const GRID_MAX_VALID_BYTES = 220 * 1024;
   /** 卡片库主图（未开原图时）：兼顾清晰度与体积 */
   const CARD_UPLOAD_MAX_SIDE = 2560;
   const CARD_UPLOAD_JPEG_QUALITY = 0.88;
@@ -44,7 +46,7 @@
   let gridBackfillRunning = false;
   let signBudgetUsed = 0;
   let signBudgetResetAt = 0;
-  const SIGN_BUDGET_MAX = 64;
+  const SIGN_BUDGET_MAX = 120;
   const SIGN_BUDGET_WINDOW_MS = 30000;
   /** 视口触发 backfill：一次下载原图+上传 grid，会话内限量避免 Supabase 风暴 */
   const AUTO_GRID_BACKFILL = true;
@@ -895,7 +897,8 @@
   }
 
   function isValidGridBlob(blob) {
-    return !!(blob && (blob.size || 0) >= GRID_MIN_VALID_BYTES);
+    const n = blob?.size || 0;
+    return n >= GRID_MIN_VALID_BYTES && n <= GRID_MAX_VALID_BYTES;
   }
 
   function isValidImageBlob(blob, opts) {
@@ -943,6 +946,11 @@
         const card = findCardForGridPath(key);
         invalidateCorruptGrid(key, card?.id || opts.cardId);
       }
+      return null;
+    }
+    if (isGrid && (blob.size || 0) > GRID_MAX_VALID_BYTES) {
+      const card = findCardForGridPath(key);
+      invalidateCorruptGrid(key, card?.id || opts.cardId);
       return null;
     }
     return blob;
@@ -1018,7 +1026,7 @@
     }
     try {
       const gridBlob = await compressImageToGrid(source);
-      if (!isValidGridBlob(gridBlob)) {
+      if (!isValidGridBlob(gridBlob) || !(await blobLooksLikeUsableImage(gridBlob))) {
         markGridBackfillSkipped(cardId, 'grid_too_small');
         return { ok: false, skip: true, reason: 'grid_too_small' };
       }
@@ -1526,6 +1534,7 @@
   }
 
   function apiSignAllowed(opts) {
+    if (window.__PH_AUTH_SIGN_PAUSE_UNTIL__ && Date.now() < window.__PH_AUTH_SIGN_PAUSE_UNTIL__) return false;
     if (window.PromptHubApi?.isApiUnreachable?.()) return false;
     if (isLoggedIn() && !isCommunityFeedOpts(opts)) {
       return !!(window.PromptHubApi?.isConfigured?.() && window.PromptHubApi.signMediaRef);
@@ -1558,7 +1567,11 @@
     if (signInflight.has(inflightKey)) return signInflight.get(inflightKey);
     const task = (async () => {
       try {
-        const r = await window.PromptHubApi.signMediaRef(toStorageRef(fileKey), { variant: v });
+        let r = await window.PromptHubApi.signMediaRef(toStorageRef(fileKey), { variant: v });
+        if (!r?.ok && (r?.status === 401 || r?.code === 'UNAUTHORIZED')) {
+          await healSessionOnResume();
+          r = await window.PromptHubApi.signMediaRef(toStorageRef(fileKey), { variant: v });
+        }
         if (r.ok && r.data?.url && !isIncompleteSignedStorageUrl(r.data.url)) {
           consumeSignBudget(1);
           const ttlSec = Math.max(3600, Number(r.data.expiresIn) || SIGNED_TTL_SEC) - 120;
@@ -1617,7 +1630,11 @@
     await ensureSession();
     try {
       const refs = pending.map((p) => toStorageRef(p));
-      const r = await window.PromptHubApi.signMediaRefsBatch(refs, { timeoutMs: 4200 });
+      let r = await window.PromptHubApi.signMediaRefsBatch(refs, { timeoutMs: 8000 });
+      if (!r?.ok && (r?.status === 401 || r?.code === 'UNAUTHORIZED')) {
+        await healSessionOnResume();
+        r = await window.PromptHubApi.signMediaRefsBatch(refs, { timeoutMs: 8000 });
+      }
       if (!r?.ok || !r.data?.urls) return 0;
       let n = 0;
       for (const [path, url] of Object.entries(r.data.urls)) {
@@ -2000,7 +2017,7 @@
   }
 
   async function prefetchCommunityDisplayUrls(images, capMs) {
-    const list = (images || []).slice(0, 40);
+    const list = (images || []).slice(0, 100);
     if (!list.length) return;
 
     const batchItems = [];
@@ -2757,15 +2774,30 @@
       return uploadGeneratedImage(id, image);
     }
     if (/^https?:\/\//i.test(image)) {
-      try {
-        const res = await fetch(image, { mode: 'cors' });
-        if (res.ok) {
-          const blob = await res.blob();
-          return uploadGeneratedImage(id, blob);
+      let blob = null;
+      if (window.PromptHubApi?.fetchMediaAsBlobUrl) {
+        const tmp = await window.PromptHubApi.fetchMediaAsBlobUrl(image);
+        if (tmp) {
+          try {
+            const res = await fetch(tmp);
+            if (res.ok) blob = await res.blob();
+          } finally {
+            try { URL.revokeObjectURL(tmp); } catch (e) { /* ignore */ }
+          }
         }
-      } catch (e) {
-        console.warn('[SupabaseSync] 生成图 CORS 拉取失败，保留 Worker 链接', e);
       }
+      if (!blob) {
+        try {
+          const res = await fetch(image, { mode: 'cors' });
+          if (res.ok) blob = await res.blob();
+        } catch (e) {
+          console.warn('[SupabaseSync] 生成图 CORS 拉取失败', e);
+        }
+      }
+      if (blob && (await blobLooksLikeUsableImage(blob))) {
+        return uploadGeneratedImage(id, blob);
+      }
+      console.warn('[SupabaseSync] 生成图远程地址无效或已过期', id);
       return image;
     }
     return image;
@@ -2776,6 +2808,9 @@
     const uid = getUserId();
     if (!uid || !assetId) throw new Error('未登录');
     const blob = await compressImage(source);
+    if (!(await blobLooksLikeUsableImage(blob))) {
+      throw new Error('生成图无效（全黑或无法解码），已拒绝上传');
+    }
     const path = `${uid}/generated/${assetId}.jpg`;
     const gridPath = gridPathFromPrimary(path);
     const ref = await uploadStorageBlob(path, blob, { skipVerify: true });
@@ -2794,7 +2829,7 @@
     return ref;
   }
 
-  function loadImageFromSource(source) {
+  async function loadImageFromSource(source) {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => resolve(img);
@@ -2803,6 +2838,47 @@
       else if (source instanceof Blob) img.src = URL.createObjectURL(source);
       else reject(new Error('不支持的图片格式'));
     });
+  }
+
+  /** 拒绝全黑/无法解码的 blob，避免 upsert 覆盖 Storage 里仍有效的原图 */
+  async function blobLooksLikeUsableImage(blob) {
+    if (!blob || (blob.size || 0) < MIN_VALID_IMAGE_BYTES) return false;
+    let objectUrl = null;
+    try {
+      const img = await loadImageFromSource(blob);
+      if (typeof blob !== 'string' && blob instanceof Blob) {
+        objectUrl = img.src;
+      }
+      const w = img.naturalWidth || 0;
+      const h = img.naturalHeight || 0;
+      if (w < 16 || h < 16) return false;
+      const canvas = document.createElement('canvas');
+      const sw = Math.min(48, w);
+      const sh = Math.min(48, h);
+      canvas.width = sw;
+      canvas.height = sh;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, sw, sh);
+      const data = ctx.getImageData(0, 0, sw, sh).data;
+      let sum = 0;
+      let sumSq = 0;
+      const n = sw * sh;
+      for (let i = 0; i < data.length; i += 4) {
+        const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        sum += lum;
+        sumSq += lum * lum;
+      }
+      const mean = sum / n;
+      const variance = sumSq / n - mean * mean;
+      if (variance < 6 && mean < 14) return false;
+      return true;
+    } catch (e) {
+      return false;
+    } finally {
+      if (objectUrl) {
+        try { URL.revokeObjectURL(objectUrl); } catch (e) { /* ignore */ }
+      }
+    }
   }
 
   async function compressImage(source, opts) {
@@ -2849,6 +2925,9 @@
     await ensureSession();
     const original = opts.original != null ? !!opts.original : cardUploadOriginalEnabled();
     const fullBlob = await prepareCardFullUploadBlob(source, { original });
+    if (!(await blobLooksLikeUsableImage(fullBlob))) {
+      throw new Error('图片无效（全黑或无法解码），已拒绝上传以免覆盖云端原图');
+    }
     const encodeMode = fullBlob.__uploadEncodeMode || 'raw';
     const ext = original
       ? (encodeMode === 'full_res_jpeg' ? 'jpg' : extFromImageMime(fullBlob.type))
@@ -2863,7 +2942,7 @@
       try {
         const gridBlob = await compressImageToGrid(source);
         gridBytes = gridBlob.size || 0;
-        if (gridBytes >= GRID_MIN_VALID_BYTES) {
+        if (gridBytes >= GRID_MIN_VALID_BYTES && await blobLooksLikeUsableImage(gridBlob)) {
           await uploadStorageBlob(gridPath, gridBlob, { skipVerify: true });
           markGridThumbReady(cardId);
         }
@@ -2981,7 +3060,13 @@
     }
 
     const normalized = normalizeImageRef(image);
-    if (await verifyStorageRef(normalized, cardId, { quick: true })) {
+    clearPathMissingForCard(cardId, normalized);
+    if (await verifyStorageRef(normalized, cardId, { quick: false })) {
+      return { ok: true, image: normalized };
+    }
+    const existing = await downloadCardStorageBlob(normalized, cardId);
+    if (existing && isValidImageBlob(existing) && await blobLooksLikeUsableImage(existing)) {
+      clearPathMissingForCard(cardId, normalized);
       return { ok: true, image: normalized };
     }
 
@@ -2992,6 +3077,10 @@
       return { ok: false, image: normalized, error: '云端无图且本机无备份，请重新添加图片' };
     }
     try {
+      if (!(await blobLooksLikeUsableImage(fallback))) {
+        markImageUploadSkip(cardId);
+        return { ok: false, image: normalized, error: '本地备份无效（全黑或损坏），已拒绝覆盖云端' };
+      }
       const url = await uploadCardImage(cardId, fallback, uploadOptsForCard(card));
       if (typeof window.clearCardImageBackup === 'function') {
         await window.clearCardImageBackup(cardId);
@@ -3029,7 +3118,7 @@
 
       const needsUpload = cardNeedsCloudImageUpload(card)
         || (opts.fullCheck === true && isStorageRef(card.image)
-          && !(await verifyStorageRef(card.image, card.id, { quick: true })));
+          && !(await verifyStorageRef(card.image, card.id, { quick: false })));
 
       if (!needsUpload) {
         skipped += 1;
@@ -3570,6 +3659,12 @@
     patchImageSrcFromCache,
     getCachedDisplayUrl,
     getListDisplayImageSrc,
+    listImagePathCandidates,
+    cardImageStoragePath,
+    gridImageStoragePath,
+    gridPathFromPrimary,
+    blobLooksLikeUsableImage,
+    downloadOwnedStorageBlob,
     verifyStorageRef,
     toStorageRef,
     invalidateSignedCache,

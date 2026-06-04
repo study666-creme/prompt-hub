@@ -4,16 +4,18 @@
 
 ---
 
-## 第 0 步：只读这 4 个文件（按顺序）
+## 第 0 步：只读这 5 个文件（按顺序）
 
 | 顺序 | 文件 | 用途 |
 |------|------|------|
+| 0 | **`docs/AI-PITFALLS.md`** | **防炸站**：`colsChanged` 重复声明、社区 flatten 重分、401 签名、禁止全墙 layout |
 | 1 | **`docs/CURRENT-ISSUES.md`** | **P0-带宽**（生图仓库 几十～上百 MB）、404/500、验收标准 |
 | 2 | **`docs/CARD-LOADING.md`** | 卡片库 vs `#imageGenFeed` 管线差异 |
 | 3 | **`docs/PROJECT_CONTEXT.md`** | 产品、部署、构建号、**新对话提示词** |
 | 4 | **`docs/FILE-MAP.md`** | 按任务找函数，**禁止**无目的全仓 `grep` |
 
-社区 Bug → 再读 **`docs/COMMUNITY-ARCHITECTURE.md`** 一节即可，不要通读。
+社区 Bug → **`docs/COMMUNITY-ARCHITECTURE.md`** + **`docs/AI-PITFALLS.md`** 社区章节。  
+日光可读性 → **`docs/LIGHT-THEME-UX.md`**。
 
 云同步 / 登录 → 再读 **`docs/AUTH-AND-SYNC.md`** 相关小节。
 
@@ -28,7 +30,8 @@
 | **publishedToCommunity 持久化** | `mergePublishFlag`, `mergeCardPair`（`cloud-sync-safety.js`）, `getDataPayload`（`script.js`） |
 | 发布/下架 | `syncCardToCommunity`, `reconcileCommunityWithCards`, `ownPostAllowedInFeed` |
 | **社区侧栏空白** | `renderCommunitySidePanel`, `communitySideBody`, `openPostSidePanel` |
-| **社区 Masonry 空洞** | `layoutCommunityMasonry`, `scheduleCommunityLayout`, `getCommunityFeedGaps` |
+| **社区 flex 布局（桌面）** | `layoutCommunityMasonry`, `distributeCommunityFeedColumns`, `appendFeedCardsLayout`, `finishCommunityFeedLayoutAfterBatch` |
+| **社区 Masonry（手机）** | `enforceMobileCommunityFeedGrid`, `useCssGridForCommunityFeed` |
 | **卡片库首屏顺序** | `renderCards`, `card-image-loader.js`, `prefetchWarehousePage`, `observeContainer` |
 | **性能 / 慢加载** | `prefetchCommunityDisplayUrls`, `hydrateWarehouseImagesFast` |
 | **生图仓库带宽 P0** | `hydrateFeedImages`, `applyFeedImageSrc`, `#imageGenFeed`, `warehouseBoost`（`supabase-sync.js`） |
@@ -46,7 +49,7 @@
 
 ```javascript
 // 登录后 F12 Console
-window.__APP_BUILD__                                    // 应与左下角一致，当前约 20260603q
+window.__APP_BUILD__                                    // 应与左下角一致，当前约 20260604k
 document.querySelectorAll('#imageGenFeed img[data-image-ref]').length
 performance.getEntriesByType('resource').filter(e => e.transferSize > 500000).length
 await window.PromptHubApi.getCommunityFeed({ limit: 80 }) // posts.length、是否含他人 authorId
@@ -88,6 +91,7 @@ https://api.prompt-hub.cn/api/v1/community/feed?limit=80
 4. **不要**未验证就叠新功能；**不要**通读 `script.js`（5000+ 行）。
 5. 改静态资源：bump `index.html` 的 `__APP_BUILD__` + `sw.js` 的 `CACHE`。
 6. 仅用户明确要求时 `git commit`；**勿提交** `.env`、密钥。
+7. 改 `layoutCommunityMasonry` / `distributeCommunityFeedColumns` 前读 **`docs/AI-PITFALLS.md`**，改完搜 `const colsChanged` 是否重复。
 
 ---
 

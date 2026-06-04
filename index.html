@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260604w';
+    window.__APP_BUILD__ = '20260604l';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -82,11 +82,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260604w">
-  <link rel="stylesheet" href="styles-theme.css?v=20260604w">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260604w">
+  <link rel="stylesheet" href="styles.css?v=20260604l">
+  <link rel="stylesheet" href="styles-theme.css?v=20260604l">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260604l">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260604w">
+  <link rel="stylesheet" href="styles-features.css?v=20260604l">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
@@ -566,7 +566,7 @@
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
       <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260604w</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260604l</p>
     </div>
   </nav>
 
@@ -747,6 +747,13 @@
         <div class="mobile-search-bar mobile-only" id="mobileSearchBar" hidden>
           <input type="search" class="mobile-search-input" placeholder="搜索标题、提示词、标签…" oninput="renderCards(true)" id="searchInputMobile" enterkeyhint="search" autocomplete="off">
         </div>
+      </div>
+    </div>
+    <div id="batchProgressOverlay" class="batch-progress-overlay hidden" aria-live="polite" aria-busy="true">
+      <div class="batch-progress-panel">
+        <p class="batch-progress-title" id="batchProgressTitle">正在处理…</p>
+        <div class="batch-progress-track"><div class="batch-progress-fill" id="batchProgressFill"></div></div>
+        <p class="batch-progress-meta" id="batchProgressMeta"></p>
       </div>
     </div>
     <div class="cards-container" id="cardsContainer"></div>
@@ -1412,25 +1419,25 @@
   <script src="supabase-config.js"></script>
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="api-client.js?v=20260606o"></script>
+  <script src="api-client.js?v=20260604l"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260604w"></script>
-  <script src="card-image-loader.js?v=20260604w"></script>
+  <script src="supabase-sync.js?v=20260604l"></script>
+  <script src="card-image-loader.js?v=20260604l"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
   <script src="subscription.js?v=20260622e"></script>
-  <script src="trial-tasks.js?v=20260604w"></script>
+  <script src="trial-tasks.js?v=20260604l"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="script.js?v=20260604w"></script>
+  <script src="script.js?v=20260604l"></script>
   <script src="points-system.js?v=20260606n"></script>
-  <script src="imagegen-prompt-kit.js?v=20260604w"></script>
-  <script src="imagegen-prompt-tools.js?v=20260604w"></script>
-  <script src="features-draft.js?v=20260604w"></script>
+  <script src="imagegen-prompt-kit.js?v=20260604l"></script>
+  <script src="imagegen-prompt-tools.js?v=20260604l"></script>
+  <script src="features-draft.js?v=20260604l"></script>
   <script src="community-gacha.js?v=20260606v"></script>
   <script src="features-assets.js?v=20260602w"></script>
-  <script src="hotfix-image-layout.js?v=20260604w"></script>
-  <script src="pwa-install.js?v=20260604w"></script>
-  <script src="mobile.js?v=20260604w"></script>
+  <script src="hotfix-image-layout.js?v=20260604l"></script>
+  <script src="pwa-install.js?v=20260604l"></script>
+  <script src="mobile.js?v=20260604l"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

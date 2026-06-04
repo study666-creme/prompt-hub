@@ -1,6 +1,8 @@
 /* 日光模式（浅色全局 UI） */
 [data-theme="light"] {
   color-scheme: light;
+  /* 日光模式略放大整页（暗色仍为 0.72），缓解「布局太小」反馈 */
+  --ui-scale: 0.82;
   --bg-primary: #f2f2f7;
   --bg-secondary: #ffffff;
   --bg-elevated: #ffffff;
@@ -10,8 +12,8 @@
   --border: #d1d1d6;
   --border-light: #c7c7cc;
   --text-primary: #1c1c1e;
-  --text-secondary: #48484a;
-  --text-muted: #636366;
+  --text-secondary: #2c2c2e;
+  --text-muted: #3a3a3c;
   --accent: #1c1c1e;
   --accent-hover: #000000;
   --accent-muted: #636366;
@@ -470,4 +472,37 @@ body.app-nav-collapsed .app-nav-theme-btn {
 
 [data-theme="light"] .app-nav-storage-hint {
   color: #636366;
+}
+
+/* 日光模式：说明/次要文案可读性（反馈：字色与背景太近） */
+[data-theme="light"] .panel-hint,
+[data-theme="light"] .feature-empty .panel-hint,
+[data-theme="light"] .community-reward-hint,
+[data-theme="light"] .imagegen-feed-hint {
+  color: #2c2c2e;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+[data-theme="light"] .app-nav-item {
+  color: #2c2c2e;
+  font-size: 14px;
+}
+
+[data-theme="light"] #communityGrid .card-time,
+[data-theme="light"] #creationsGrid .card-time,
+[data-theme="light"] #userProfileGrid .card-time,
+[data-theme="light"] .community-author-link {
+  color: #2c2c2e;
+}
+
+[data-theme="light"] .community-author-link {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .feature-header .panel-hint {
+  background: color-mix(in srgb, var(--bg-secondary) 94%, transparent);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
 }

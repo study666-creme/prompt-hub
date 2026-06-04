@@ -1,6 +1,18 @@
 # 社区布局修复说明
 
-## 修复的问题
+> **2026-06-04 重要**：桌面社区已改为 **flex 多列**（非 Masonry）。后续 AI 请先读 **`docs/AI-PITFALLS.md`**，勿再「每张图加载全墙重排」或 append 时清空所有列。
+
+### 2026-06-04 flex 列稳定（`features-draft.js`）
+
+| 问题 | 修复 |
+|------|------|
+| 持续晃动 / 点卡片乱飞 | append 仅最短列插入；`fromImage` no-op；已 distributed 不 flatten |
+| 整站白屏 | 勿在同一函数重复 `const colsChanged` |
+| 点击侧栏整墙重排 | 开侧栏不 `scheduleCommunityLayout`；列数不变只改 CSS 变量 |
+
+---
+
+## 修复的问题（历史 Masonry）
 
 ### 1. 社区侧栏详情空白
 **现象**：点击社区卡片后，右侧 340px 侧栏能打开，标题显示正常，但 `#communitySideBody` 区域几乎全黑/空白，看不到提示词、作者、按钮。

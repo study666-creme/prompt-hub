@@ -813,6 +813,9 @@
       toast._timeout = setTimeout(() => toast.classList.remove('show'), ms);
     }
     window.showToast = showToast;
+    document.addEventListener('ph-api-unauthorized', () => {
+      showToast('登录已过期，请退出后重新登录，卡片库图片才能恢复显示', 9000);
+    });
 
     async function promptHubSaveImage(url, filename, imgEl) {
       const name = filename || `prompt-hub-${Date.now()}.png`;
@@ -1234,7 +1237,7 @@
       const tags = ['图片生成'];
       if (payload.fromInspirationDraw) tags.push(window.INSPIRE_DRAW_TAG || '灵感抽卡');
       const card = {
-        id: generateId(),
+        id: payload.cardId || generateId(),
         title: (title || '').trim(),
         prompt: promptText,
         image: image || null,
@@ -1255,7 +1258,9 @@
       renderGroups();
       renderCards(true);
       updateGuestLimitUI();
-      if (window.SupabaseSync?.isLoggedIn?.()) scheduleCloudPush({ urgent: true });
+      if (window.SupabaseSync?.isLoggedIn?.() && payload.deferCloudPush !== true) {
+        scheduleCloudPush({ urgent: true });
+      }
       if (!payload.silentToast) {
         showToast(payload.publishToCommunity ? '已保存到仓库并公开到社区' : '已保存到卡片仓库');
       }
@@ -3063,7 +3068,7 @@
       if (!mobile) {
         if (sideBtn) { /* 侧栏不参与 Masonry */ }
         else if (media.closest('#communityGrid, #creationsGrid')) {
-          /* 多列瀑布流无需每张图重排 Masonry */
+          /* flex 多列：卡片列位已固定，图片加载后不再触发全墙重排 */
         }
         else if (media.closest('#cardsContainer')) {
           if (cardMediaAffectsViewport(media)) {
@@ -3924,6 +3929,775 @@
       });
     }
 
+    function groupNamesFromCards(list) {
+      const names = new Set();
+      (list || []).forEach((c) => {
+        const g = String(c?.group || '').trim();
+        if (g && g !== '未分类') names.add(g);
+      });
+      return [...names];
+    }
+
+    function ensureGroupsFromCards() {
+      if (customGroups.length) return false;
+      const names = groupNamesFromCards(cardsForActiveWarehouse(filterTombstonedCards(cards)));
+      if (!names.length) return false;
+      return mergeWarehouseGroupsFromList(names);
+    }
+
+    async function readEmergencyBackupRows(uid) {
+      if (!db) await openDB();
+      if (!db?.objectStoreNames?.contains('data_backups')) return [];
+      return new Promise((resolve) => {
+        const tx = db.transaction(['data_backups'], 'readonly');
+        const req = tx.objectStore('data_backups').getAll();
+        req.onsuccess = () => {
+          const list = (req.result || [])
+            .filter((row) => {
+              if (!row?.payload?.cards?.length) return false;
+              if (!uid) return true;
+              const owner = row.ownerUid || row.payload?.ownerUid || '';
+              return !owner || owner === uid;
+            })
+            .sort((a, b) => (b.at || 0) - (a.at || 0))
+            .map((row) => ({
+              label: row.label,
+              at: row.at,
+              cards: row.payload.cards.length,
+              groups: Array.isArray(row.payload.customGroups) ? row.payload.customGroups.length : 0,
+              payload: row.payload
+            }));
+          resolve(list);
+        };
+        req.onerror = () => resolve([]);
+      });
+    }
+
+    async function inspectCardLibraryRecovery() {
+      const uid = window.SupabaseSync?.getUserId?.() || activeAccountId || localStorage.getItem('promptrepo_last_uid') || '';
+      let autosaveN = 0;
+      let snapshotN = 0;
+      let autosaveGroups = 0;
+      let snapshotGroups = 0;
+      try {
+        const auto = JSON.parse(localStorage.getItem(userStorageKey('autosave', uid)) || 'null');
+        autosaveN = auto?.cards?.length || 0;
+        autosaveGroups = auto?.customGroups?.length || 0;
+      } catch (e) { /* ignore */ }
+      try {
+        const snap = JSON.parse(localStorage.getItem(userStorageKey('snapshot', uid)) || 'null');
+        snapshotN = snap?.cards?.length || 0;
+        snapshotGroups = snap?.customGroups?.length || 0;
+      } catch (e) { /* ignore */ }
+      const idbAll = await loadCardsFromDB({ ignoreOwner: true });
+      const idbOwned = uid ? await loadCardsFromDB({ ownerUid: uid }) : idbAll;
+      const emergency = await readEmergencyBackupRows(uid);
+      let cloudN = 0;
+      let cloudGroups = 0;
+      if (window.SupabaseSync?.isLoggedIn?.()) {
+        try {
+          const cloud = await window.SupabaseSync.pullCloudData();
+          cloudN = cloud?.cards?.length || 0;
+          cloudGroups = cloud?.customGroups?.length || 0;
+        } catch (e) { /* ignore */ }
+      }
+      const tombN = Object.keys(settings.deletedCardTombstones || {}).length;
+      const groupsInCards = groupNamesFromCards(cards).length;
+      return {
+        build: window.__APP_BUILD__,
+        uid,
+        currentUi: cards.length,
+        idbOwned: idbOwned.length,
+        idbAll: idbAll.length,
+        autosave: autosaveN,
+        autosaveGroups,
+        snapshot: snapshotN,
+        snapshotGroups,
+        cloud: cloudN,
+        cloudGroups,
+        tombstones: tombN,
+        groupsInCards,
+        customGroupsNow: customGroups.length,
+        emergencyBackups: emergency.map((row) => ({
+          label: row.label,
+          at: new Date(row.at).toLocaleString(),
+          cards: row.cards,
+          groups: row.groups
+        }))
+      };
+    }
+
+    async function restoreBestCardLibraryBackup(opts = {}) {
+      const uid = window.SupabaseSync?.getUserId?.() || activeAccountId || localStorage.getItem('promptrepo_last_uid') || '';
+      const currentN = cards.length;
+      const candidates = [];
+      const pushCandidate = (source, payload) => {
+        if (!payload?.cards?.length) return;
+        candidates.push({
+          source,
+          cards: payload.cards.length,
+          groups: Array.isArray(payload.customGroups) ? payload.customGroups.length : 0,
+          payload
+        });
+      };
+      try {
+        pushCandidate('autosave', JSON.parse(localStorage.getItem(userStorageKey('autosave', uid)) || 'null'));
+      } catch (e) { /* ignore */ }
+      try {
+        pushCandidate('snapshot', JSON.parse(localStorage.getItem(userStorageKey('snapshot', uid)) || 'null'));
+      } catch (e) { /* ignore */ }
+      const idbAll = await loadCardsFromDB({ ignoreOwner: true });
+      if (idbAll.length) {
+        pushCandidate('indexeddb', { cards: idbAll, customGroups });
+      }
+      const emergency = await readEmergencyBackupRows(uid);
+      emergency.forEach((row) => pushCandidate(`emergency:${row.label}`, row.payload));
+      if (!candidates.length) {
+        return { ok: false, reason: 'no_backup_found', current: currentN };
+      }
+      candidates.sort((a, b) => b.cards - a.cards || b.groups - a.groups);
+      const best = candidates[0];
+      if (!opts.force && best.cards <= currentN) {
+        return {
+          ok: false,
+          reason: 'no_better_backup',
+          current: currentN,
+          best: { source: best.source, cards: best.cards, groups: best.groups },
+          candidates: candidates.slice(0, 6).map((c) => ({ source: c.source, cards: c.cards, groups: c.groups }))
+        };
+      }
+      await writeEmergencyBackup('pre_manual_restore');
+      applyDataPayload(best.payload);
+      ensureGroupsFromCards();
+      window.__promptHubCards = cards;
+      await saveAllData({ skipCloud: true });
+      renderGroups();
+      renderCards(true);
+      window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+      return {
+        ok: true,
+        restoredFrom: best.source,
+        cards: cards.length,
+        groups: customGroups.length,
+        previous: currentN
+      };
+    }
+
+    window.inspectCardLibraryRecovery = inspectCardLibraryRecovery;
+    window.restoreBestCardLibraryBackup = restoreBestCardLibraryBackup;
+
+    function cardMetaFromCommunityPosts(cardId) {
+      const posts = window.FeatureDraft?.getCommunityPosts?.()
+        || (() => {
+          try {
+            return JSON.parse(localStorage.getItem('promptrepo_community_posts') || '[]');
+          } catch (e) {
+            return [];
+          }
+        })();
+      const post = (posts || []).find((p) => String(p?.sourceCardId || p?.cardId || '') === String(cardId));
+      if (!post) return null;
+      return {
+        title: post.title || '',
+        prompt: post.prompt || post.content || '',
+        group: post.group || null,
+        tags: Array.isArray(post.tags) ? post.tags.slice() : [],
+        image: post.image || post.coverImage || null
+      };
+    }
+
+    function cardMetaFromCreations(cardId, jobId) {
+      let list = [];
+      try {
+        list = JSON.parse(localStorage.getItem('promptrepo_creations') || '[]');
+      } catch (e) { /* ignore */ }
+      const byCard = list.find((c) => String(c?.sourceCardId || c?.cardId || c?.id || '') === String(cardId));
+      if (byCard) {
+        return {
+          title: byCard.title || '',
+          prompt: byCard.prompt || '',
+          group: byCard.group || null,
+          tags: Array.isArray(byCard.tags) ? byCard.tags.slice() : [],
+          image: byCard.image || null,
+          jobId: byCard.jobId || jobId || null
+        };
+      }
+      if (jobId) {
+        const byJob = list.find((c) => String(c?.jobId || '') === String(jobId));
+        if (byJob) {
+          return {
+            title: byJob.title || '',
+            prompt: byJob.prompt || '',
+            group: byJob.group || null,
+            tags: Array.isArray(byJob.tags) ? byJob.tags.slice() : [],
+            image: byJob.image || null,
+            jobId: byJob.jobId || jobId
+          };
+        }
+      }
+      return null;
+    }
+
+    async function classifyStorageBlob(blob) {
+      if (!blob || (blob.size || 0) < 512) return 'missing';
+      const ok = await window.SupabaseSync?.blobLooksLikeUsableImage?.(blob);
+      return ok ? 'ok' : 'black';
+    }
+
+    async function probeCardStoragePaths(cardId, opts = {}) {
+      const uid = window.SupabaseSync?.getUserId?.() || activeAccountId || '';
+      const hintImage = opts.hintImage || null;
+      const paths = new Set();
+      if (hintImage && window.SupabaseSync?.isStorageRef?.(hintImage)) {
+        window.SupabaseSync.listImagePathCandidates(
+          window.SupabaseSync.normalizeImageRef(hintImage),
+          cardId,
+          uid
+        ).forEach((p) => paths.add(p.replace(/^\//, '')));
+      }
+      const primary = window.SupabaseSync?.cardImageStoragePath?.(cardId, uid);
+      const grid = window.SupabaseSync?.gridImageStoragePath?.(cardId, uid);
+      if (primary) paths.add(primary.replace(/^\//, ''));
+      if (grid) paths.add(grid.replace(/^\//, ''));
+      paths.add(`${uid}/generated/${String(cardId).replace(/^wh_/, '')}.jpg`);
+      paths.add(`${uid}/generated/${String(cardId).replace(/^wh_/, '')}_grid.jpg`);
+
+      let primaryState = 'missing';
+      let gridState = 'missing';
+      let primaryPath = null;
+      let gridPath = null;
+      let primaryBytes = 0;
+      let gridBytes = 0;
+
+      for (const p of paths) {
+        if (!p || !window.SupabaseSync?.storagePathOwnedByCurrentUser?.(p)) continue;
+        const isGrid = /_grid\.(jpe?g|webp|png)$/i.test(p);
+        const blob = await window.SupabaseSync?.downloadOwnedStorageBlob?.(p, {
+          ignoreMissingCache: true,
+          cardId
+        });
+        const state = await classifyStorageBlob(blob);
+        if (isGrid) {
+          if (state !== 'missing' && (gridState === 'missing' || state === 'ok')) {
+            gridState = state;
+            gridPath = p;
+            gridBytes = blob?.size || 0;
+          }
+        } else if (state !== 'missing' && (primaryState === 'missing' || state === 'ok')) {
+          primaryState = state;
+          primaryPath = p;
+          primaryBytes = blob?.size || 0;
+        }
+      }
+
+      if (primary && primaryState === 'missing') {
+        const pb = await window.SupabaseSync?.downloadOwnedStorageBlob?.(primary.replace(/^\//, ''), {
+          ignoreMissingCache: true,
+          cardId
+        });
+        primaryState = await classifyStorageBlob(pb);
+        if (primaryState !== 'missing') {
+          primaryPath = primary.replace(/^\//, '');
+          primaryBytes = pb?.size || 0;
+        }
+      }
+      if (grid && gridState === 'missing') {
+        const gb = await window.SupabaseSync?.downloadOwnedStorageBlob?.(grid.replace(/^\//, ''), {
+          ignoreMissingCache: true,
+          cardId
+        });
+        gridState = await classifyStorageBlob(gb);
+        if (gridState !== 'missing') {
+          gridPath = grid.replace(/^\//, '');
+          gridBytes = gb?.size || 0;
+        }
+      }
+
+      let verdict = 'missing';
+      if (primaryState === 'ok') verdict = 'recoverable_primary';
+      else if (gridState === 'ok') verdict = 'recoverable_grid_only';
+      else if (primaryState === 'black' || gridState === 'black') verdict = 'black';
+
+      const imageRef = primaryPath
+        ? window.SupabaseSync.toStorageRef(primaryPath)
+        : (gridPath ? window.SupabaseSync.toStorageRef(gridPath) : null);
+
+      return {
+        cardId: String(cardId),
+        verdict,
+        primaryState,
+        gridState,
+        primaryPath,
+        gridPath,
+        primaryBytes,
+        gridBytes,
+        imageRef
+      };
+    }
+
+    async function inspectTombstoneStorageRecovery(opts = {}) {
+      if (!window.SupabaseSync?.isLoggedIn?.()) {
+        return { ok: false, error: '请先登录' };
+      }
+      const max = Math.min(500, Math.max(1, Number(opts.max) || 60));
+      const delayMs = Math.max(0, Number(opts.delayMs) || 120);
+      const uid = window.SupabaseSync.getUserId();
+      const tombstones = { ...(settings.deletedCardTombstones || {}) };
+      const currentIds = new Set(cards.map((c) => String(c.id)));
+      const ids = Object.keys(tombstones).filter((id) => !currentIds.has(String(id)));
+      const report = {
+        build: window.__APP_BUILD__,
+        uid,
+        tombstones: ids.length,
+        scanned: 0,
+        recoverablePrimary: [],
+        recoverableGridOnly: [],
+        black: [],
+        missing: [],
+        samples: []
+      };
+      for (let i = 0; i < Math.min(max, ids.length); i += 1) {
+        const id = ids[i];
+        try {
+          const meta = cardMetaFromCommunityPosts(id) || cardMetaFromCreations(id);
+          window.SupabaseSync?.clearPathMissingForCard?.(id, meta?.image || null);
+          const probe = await probeCardStoragePaths(id, { hintImage: meta?.image });
+          report.scanned += 1;
+          const row = {
+            id,
+            title: (meta?.title || meta?.prompt || id).toString().slice(0, 48),
+            prompt: (meta?.prompt || '').toString().slice(0, 120),
+            tombAt: tombstones[id] ? new Date(tombstones[id]).toLocaleString() : '',
+            ...probe
+          };
+          if (probe.verdict === 'recoverable_primary') report.recoverablePrimary.push(row);
+          else if (probe.verdict === 'recoverable_grid_only') report.recoverableGridOnly.push(row);
+          else if (probe.verdict === 'black') report.black.push(row);
+          else report.missing.push(row);
+          if (i < 8) report.samples.push(row);
+          if ((i + 1) % 10 === 0) {
+            console.log('[Recovery] tombstone scan progress', i + 1, '/', Math.min(max, ids.length));
+          }
+        } catch (e) {
+          report.missing.push({ id, title: id, verdict: 'error', error: String(e?.message || e) });
+        }
+        if (delayMs && i < ids.length - 1) {
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+      }
+      report.summary = {
+        recoverablePrimary: report.recoverablePrimary.length,
+        recoverableGridOnly: report.recoverableGridOnly.length,
+        black: report.black.length,
+        missing: report.missing.length,
+        remaining: Math.max(0, ids.length - report.scanned)
+      };
+      window.__lastTombScan = report;
+      window.__lastTombstoneScan = report;
+      console.log('[Recovery] tombstone storage scan done', report.summary, '→ window.__lastTombScan');
+      return report;
+    }
+
+    async function planApimartRecovery(opts = {}) {
+      if (!window.SupabaseSync?.isLoggedIn?.()) {
+        return { ok: false, error: '请先登录' };
+      }
+      const days = Math.min(365, Math.max(1, Number(opts.days) || 90));
+      const limit = Math.min(500, Math.max(1, Number(opts.limit) || 200));
+      const currentIds = new Set(cards.map((c) => String(c.id)));
+      const jobIdsInCards = new Set(cards.filter((c) => c?.genJobId).map((c) => String(c.genJobId)));
+      const tombstones = settings.deletedCardTombstones || {};
+
+      let creations = [];
+      try {
+        creations = JSON.parse(localStorage.getItem('promptrepo_creations') || '[]');
+      } catch (e) { /* ignore */ }
+
+      let cloudCreations = [];
+      try {
+        const cloud = await window.SupabaseSync.pullCloudData();
+        if (Array.isArray(cloud?.creations)) cloudCreations = cloud.creations;
+      } catch (e) { /* ignore */ }
+
+      let apiJobs = [];
+      if (window.PromptHubApi?.listGenerationJobsHistory) {
+        try {
+          const res = await window.PromptHubApi.listGenerationJobsHistory({ days, limit });
+          if (res?.ok && Array.isArray(res.data?.jobs)) apiJobs = res.data.jobs;
+        } catch (e) {
+          console.warn('[Recovery] jobs history', e);
+        }
+      }
+
+      const urlRows = [];
+      const pushUrl = (row) => {
+        if (!row.url) return;
+        const key = `${row.jobId || ''}:${row.url}`;
+        if (urlRows.some((r) => `${r.jobId || ''}:${r.url}` === key)) return;
+        urlRows.push(row);
+      };
+
+      for (const job of apiJobs) {
+        if (job.status && job.status !== 'completed') continue;
+        const urls = [job.imageUrl, ...(job.extraImageUrls || [])].filter(Boolean);
+        urls.forEach((url, idx) => {
+          pushUrl({
+            source: 'api_job',
+            jobId: job.id,
+            apimartTaskId: job.apimartTaskId || null,
+            status: job.status,
+            provider: job.provider || null,
+            url,
+            prompt: (job.prompt || '').slice(0, 120),
+            createdAt: job.createdAt,
+            variant: idx
+          });
+        });
+      }
+
+      for (const c of [...creations, ...cloudCreations]) {
+        if (!c?.image) continue;
+        pushUrl({
+          source: 'creation',
+          jobId: c.jobId || null,
+          cardId: c.sourceCardId || c.cardId || c.id,
+          url: c.image,
+          prompt: (c.prompt || '').slice(0, 120),
+          createdAt: c.createdAt || c.updatedAt
+        });
+      }
+
+      const recoverableUrls = urlRows.filter((row) => {
+        const cid = row.cardId ? String(row.cardId) : '';
+        const inLib = cid && currentIds.has(cid);
+        const jobKnown = row.jobId && jobIdsInCards.has(String(row.jobId));
+        return !inLib && !jobKnown;
+      });
+
+      const apimartHosts = /apimart\.ai|upload\.apimart|filesystem\.site/i;
+      const apimartRows = recoverableUrls.filter((r) => apimartHosts.test(String(r.url)));
+
+      const tombstoneJobHints = apiJobs.filter((j) => {
+        const linked = creations.find((c) => String(c.jobId) === String(j.id));
+        const cardId = linked?.sourceCardId || linked?.cardId;
+        return cardId && tombstones[String(cardId)] && !currentIds.has(String(cardId));
+      });
+
+      const result = {
+        build: window.__APP_BUILD__,
+        days,
+        apiJobs: apiJobs.length,
+        urlCandidates: urlRows.length,
+        recoverableUrls: recoverableUrls.length,
+        apimartUrls: apimartRows.length,
+        tombstoneJobHints: tombstoneJobHints.length,
+        recoverableList: recoverableUrls,
+        apimartList: apimartRows,
+        apimartSample: apimartRows.slice(0, 12),
+        recoverableSample: recoverableUrls.slice(0, 12),
+        note: '结果已存 window.__lastApPlan；Storage 恢复用 restoreFromTombstoneStorageScan；Apimart 用 importApimartRecoveryFromPlan'
+      };
+      window.__lastApPlan = result;
+      window.__lastAppPlan = result;
+      console.log('[Recovery] apimart plan', {
+        recoverableUrls: result.recoverableUrls,
+        apimartUrls: result.apimartUrls
+      }, '→ window.__lastApPlan');
+      return result;
+    }
+
+    async function restoreCardsFromRecoveryPlan(entries, opts = {}) {
+      const list = Array.isArray(entries) ? entries : [];
+      if (!list.length) return { ok: false, reason: 'empty_plan' };
+      await writeEmergencyBackup('pre_tombstone_restore');
+      let restored = 0;
+      let skipped = 0;
+      const restoredIds = [];
+      for (const entry of list) {
+        const id = String(entry.id || entry.cardId || '');
+        if (!id) { skipped += 1; continue; }
+        if (cards.some((c) => String(c.id) === id)) { skipped += 1; continue; }
+        const image = entry.image || entry.imageRef;
+        if (!image) { skipped += 1; continue; }
+        if (opts.storageOnly !== false && !window.SupabaseSync?.isStorageRef?.(image)) {
+          skipped += 1;
+          continue;
+        }
+        clearCardDeletionTombstone(id);
+        window.SupabaseSync?.clearPathMissingForCard?.(id, image);
+        const meta = entry.meta || cardMetaFromCommunityPosts(id) || cardMetaFromCreations(id, entry.jobId) || {};
+        cards.push({
+          id,
+          title: entry.title || meta.title || (meta.prompt || '').slice(0, 40) || '',
+          prompt: entry.prompt || meta.prompt || '',
+          image: window.SupabaseSync?.isStorageRef?.(image)
+            ? window.SupabaseSync.normalizeImageRef(image)
+            : image,
+          group: entry.group ?? meta.group ?? null,
+          tags: Array.isArray(entry.tags) ? entry.tags : (meta.tags || []),
+          customFields: entry.customFields || meta.customFields || {},
+          genJobId: entry.jobId || meta.jobId || null,
+          createdAt: entry.createdAt || meta.createdAt || Date.now(),
+          updatedAt: Date.now()
+        });
+        restored += 1;
+        restoredIds.push(id);
+      }
+      window.__promptHubCards = cards;
+      ensureGroupsFromCards();
+      await saveAllData({ skipCloud: true });
+      renderGroups();
+      renderCards(true);
+      window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+      if (opts.pushCloud === true && window.SupabaseSync?.isLoggedIn?.()) {
+        await pushToCloud({ silent: true, skipSafety: false, deferImageUpload: true });
+      }
+      return { ok: true, restored, skipped, restoredIds, total: cards.length };
+    }
+
+    async function restoreFromTombstoneStorageScan(scanReport, opts = {}) {
+      const report = scanReport || await inspectTombstoneStorageRecovery(opts);
+      const pick = [
+        ...(report.recoverablePrimary || []),
+        ...(opts.includeGridOnly ? (report.recoverableGridOnly || []) : [])
+      ];
+      const entries = pick.map((row) => ({
+        id: row.id,
+        title: row.title,
+        prompt: row.prompt,
+        image: row.imageRef,
+        meta: cardMetaFromCommunityPosts(row.id) || cardMetaFromCreations(row.id)
+      })).filter((e) => e.image);
+      return restoreCardsFromRecoveryPlan(entries, opts);
+    }
+
+    async function runFullRecoveryDiagnosis(opts = {}) {
+      console.log('[Recovery] 开始完整诊断…（404 为探测缺失路径，属正常）');
+      const base = await inspectCardLibraryRecovery();
+      const tombScan = await inspectTombstoneStorageRecovery({
+        max: opts.tombMax || 60,
+        delayMs: opts.delayMs || 120
+      });
+      const apPlan = await planApimartRecovery({
+        days: opts.days || 90,
+        limit: opts.limit || 200
+      });
+      const out = { base, tombScan, apPlan };
+      window.__lastRecoveryDiagnosis = out;
+      console.table([
+        { 项: '当前卡片', 值: base.currentUi },
+        { 项: 'tombstones', 值: base.tombstones },
+        { 项: 'Storage可救(主图)', 值: tombScan.summary?.recoverablePrimary ?? 0 },
+        { 项: 'Storage仅grid', 值: tombScan.summary?.recoverableGridOnly ?? 0 },
+        { 项: 'Storage黑图', 值: tombScan.summary?.black ?? 0 },
+        { 项: 'Apimart可导入URL', 值: apPlan.recoverableUrls ?? 0 }
+      ]);
+      return out;
+    }
+
+    async function fetchRecoveryImageBlob(url, opts = {}) {
+      if (!url) return null;
+      const cardId = opts.cardId || opts.jobId || null;
+      if (window.SupabaseSync?.isStorageRef?.(url)) {
+        const blob = await window.SupabaseSync.downloadCardStorageBlob(
+          window.SupabaseSync.normalizeImageRef(url),
+          cardId
+        );
+        if (blob && await window.SupabaseSync.blobLooksLikeUsableImage(blob)) {
+          return { blob, resolvedUrl: url };
+        }
+        return null;
+      }
+      if (!/^https?:\/\//i.test(url)) return null;
+      let blob = null;
+      if (window.PromptHubApi?.fetchMediaAsBlobUrl) {
+        const tmp = await window.PromptHubApi.fetchMediaAsBlobUrl(url);
+        if (tmp) {
+          try {
+            const res = await fetch(tmp);
+            if (res.ok) blob = await res.blob();
+          } finally {
+            try { URL.revokeObjectURL(tmp); } catch (e) { /* ignore */ }
+          }
+        }
+      }
+      if (!blob) {
+        try {
+          const res = await fetch(url, { mode: 'cors' });
+          if (res.ok) blob = await res.blob();
+        } catch (e) { /* ignore */ }
+      }
+      if (!blob || !(await window.SupabaseSync?.blobLooksLikeUsableImage?.(blob))) return null;
+      return { blob, resolvedUrl: url };
+    }
+
+    async function resolveRecoveryRowUrl(row) {
+      if (!row) return null;
+      if (row.jobId && window.PromptHubApi?.getGenerationImageUrl) {
+        try {
+          const res = await window.PromptHubApi.getGenerationImageUrl(row.jobId);
+          if (res?.ok && res.data?.url) return res.data.url;
+        } catch (e) { /* ignore */ }
+      }
+      return row.url || null;
+    }
+
+    async function preflightApimartRecovery(plan, opts = {}) {
+      const src = plan || window.__lastApPlan || window.__lastRecoveryDiagnosis?.apPlan;
+      if (!src) return { ok: false, error: 'no_plan' };
+      const rows = (opts.apimartOnly === true
+        ? (src.apimartList || [])
+        : (src.recoverableList || []))
+        .filter((r) => !r.status || r.status === 'completed');
+      const max = Math.min(30, Math.max(1, Number(opts.max) || 10));
+      const batch = rows.slice(0, max);
+      const good = [];
+      const bad = [];
+      for (const row of batch) {
+        const resolved = await resolveRecoveryRowUrl(row);
+        const got = await fetchRecoveryImageBlob(resolved, { jobId: row.jobId, cardId: row.cardId });
+        if (got) good.push({ ...row, resolvedUrl: got.resolvedUrl });
+        else bad.push({ ...row, resolvedUrl: resolved, reason: '404_or_black' });
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      window.__lastApimartPreflight = { good, bad, at: Date.now() };
+      console.log('[Recovery] preflight', { good: good.length, bad: bad.length });
+      return { ok: true, good, bad };
+    }
+
+    async function importApimartRecoveryFromPlan(plan, opts = {}) {
+      const src = plan || window.__lastApPlan || window.__lastAppPlan || window.__lastRecoveryDiagnosis?.apPlan;
+      if (!src) return { ok: false, error: 'no_plan' };
+      let rows = (opts.apimartOnly === true
+        ? (src.apimartList || [])
+        : (src.recoverableList || src.recoverableSample || []))
+        .filter((r) => !r.status || r.status === 'completed');
+      if (opts.usePreflight === true && window.__lastApimartPreflight?.good?.length) {
+        rows = window.__lastApimartPreflight.good;
+      }
+      const max = Math.min(30, Math.max(1, Number(opts.max) || 5));
+      const batch = rows.slice(0, max);
+      if (!batch.length) return { ok: false, error: 'no_rows' };
+      const ok = window.confirm(
+        `将验证并导入最多 ${batch.length} 张（先拉取图片、跳过 404/黑图，新 ID 不覆盖旧 Storage）。\n继续？`
+      );
+      if (!ok) return { ok: false, cancelled: true };
+      await writeEmergencyBackup('pre_apimart_import');
+      let imported = 0;
+      let skipped = 0;
+      const ids = [];
+      const failures = [];
+      for (const row of batch) {
+        if (!row?.url && !row?.resolvedUrl) { skipped += 1; continue; }
+        if (row.jobId && cards.some((c) => String(c.genJobId) === String(row.jobId))) {
+          skipped += 1;
+          continue;
+        }
+        try {
+          const resolved = row.resolvedUrl || await resolveRecoveryRowUrl(row);
+          const got = await fetchRecoveryImageBlob(resolved, { jobId: row.jobId, cardId: row.cardId });
+          if (!got) {
+            skipped += 1;
+            failures.push({ jobId: row.jobId, url: resolved, reason: '404_or_black' });
+            continue;
+          }
+          let imageRef = got.resolvedUrl;
+          let presetCardId = null;
+          if (window.SupabaseSync?.isLoggedIn?.()) {
+            if (row.jobId && window.SupabaseSync.persistGenerationImage) {
+              imageRef = await window.SupabaseSync.persistGenerationImage(row.jobId, got.blob);
+            } else if (window.SupabaseSync.uploadCardImage) {
+              presetCardId = generateId();
+              imageRef = await window.SupabaseSync.uploadCardImage(presetCardId, got.blob, { original: false });
+            }
+          }
+          const r = await window.addCardFromGenerated?.({
+            cardId: presetCardId || undefined,
+            prompt: row.prompt || '',
+            image: imageRef,
+            jobId: row.jobId || null,
+            title: (row.prompt || '').slice(0, 40),
+            silentToast: true,
+            deferCloudPush: true
+          });
+          if (r?.ok) {
+            imported += 1;
+            if (r.cardId) ids.push(r.cardId);
+          } else {
+            skipped += 1;
+            failures.push({ jobId: row.jobId, reason: r?.duplicate ? 'duplicate' : 'add_failed' });
+          }
+        } catch (e) {
+          skipped += 1;
+          failures.push({ jobId: row.jobId, reason: String(e?.message || e) });
+        }
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      renderGroups();
+      renderCards(true);
+      if (imported > 0) showToast(`已导入 ${imported} 张（跳过 ${skipped} 张无效/重复）`, 6000);
+      return { ok: true, imported, skipped, ids, failures, total: cards.length };
+    }
+
+    window.runFullRecoveryDiagnosis = runFullRecoveryDiagnosis;
+    window.importApimartRecoveryFromPlan = importApimartRecoveryFromPlan;
+    window.preflightApimartRecovery = preflightApimartRecovery;
+
+    /** 服务端一键恢复（推荐）：不经过浏览器拉 Apimart，避免 401/404 */
+    async function runServerApimartImport(opts = {}) {
+      if (!window.PromptHubApi?.recoverWarehouseFromJobs) {
+        showToast('请先 Ctrl+Shift+R 强刷到最新版', 6000);
+        return { ok: false, error: 'api_missing' };
+      }
+      if (!window.SupabaseSync?.isLoggedIn?.()) {
+        openAuthModal();
+        return { ok: false, error: 'not_logged_in' };
+      }
+      const mode = opts.mode || 'import';
+      const max = Math.min(80, Math.max(1, Number(opts.max) || (mode === 'repair' ? 30 : 20)));
+      await writeEmergencyBackup('pre_server_recover');
+      const modeLabel =
+        mode === 'repair' ? '修复图片' : mode === 'extras' ? '导入多图' : '导入新卡';
+      setCloudSyncPhase('syncing', `服务端${modeLabel}中…`);
+      showToast(`正在服务端${modeLabel}（最多 ${max} 条）…`, 5000);
+      try {
+        const res = await window.PromptHubApi.recoverWarehouseFromJobs({
+          max,
+          days: opts.days || (mode === 'import' ? 90 : 365),
+          mode
+        });
+        if (!res?.ok) {
+          setCloudSyncPhase('error', res.message || res.code);
+          showToast('操作失败：' + (res.message || res.code || '未知错误'), 9000);
+          return res;
+        }
+        const d = res.data || {};
+        window.SupabaseSync?.clearSignedUrlCache?.();
+        await pullFromCloud();
+        window.__promptHubCards = cards;
+        renderGroups();
+        renderCards(true);
+        window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+        setCloudSyncPhase('saved');
+        const msg =
+          mode === 'repair'
+            ? `已修复 ${d.repaired || 0} 张图片，跳过 ${d.skipped || 0} 张`
+            : `已导入 ${d.imported || 0} 张，跳过 ${d.skipped || 0} 张`;
+        showToast(d.hint ? `${msg}。${d.hint}` : msg, 10000);
+        console.log('[Recovery] server', mode, d);
+        return { ok: true, ...d };
+      } catch (e) {
+        setCloudSyncPhase('error', formatSyncError(e));
+        showToast('导入失败：' + formatSyncError(e), 9000);
+        return { ok: false, error: formatSyncError(e) };
+      }
+    }
+    window.runServerApimartImport = runServerApimartImport;
+    window.inspectTombstoneStorageRecovery = inspectTombstoneStorageRecovery;
+    window.planApimartRecovery = planApimartRecovery;
+    window.restoreCardsFromRecoveryPlan = restoreCardsFromRecoveryPlan;
+    window.restoreFromTombstoneStorageScan = restoreFromTombstoneStorageScan;
+
     async function resetIdbForAccountSwitch(nextUid) {
       cards = [];
       customGroups = [];
@@ -4390,58 +5164,8 @@
       }
     }
 
-    async function scheduleQuietGhostPurge() {
-      if (!window.SupabaseSync?.isLoggedIn?.()) return;
-      const uid = window.SupabaseSync?.getUserId?.() || '';
-      if (!uid) return;
-      const key = 'ph_ghost_purge_' + uid;
-      if (sessionStorage.getItem(key)) return;
-      sessionStorage.setItem(key, '1');
-      const run = async () => {
-        let removedCards = 0;
-        try {
-          const toDrop = [];
-          for (const c of [...cards]) {
-            if (!c?.id || !c.image || !window.SupabaseSync?.isStorageRef?.(c.image)) continue;
-            try {
-              const ok = await window.SupabaseSync?.verifyStorageRef?.(c.image, c.id, {
-                quick: true,
-                noDownload: true
-              });
-              if (ok) continue;
-            } catch (e) { /* ignore */ }
-            const primary = window.SupabaseSync?.primaryImagePath?.(c.image, c.id);
-            if (!primary || !window.SupabaseSync?.isPathKnownMissing?.(primary)) continue;
-            let hasBackup = false;
-            if (typeof getCardImageBackup === 'function') {
-              const backup = await getCardImageBackup(c.id);
-              hasBackup = !!(backup && String(backup).startsWith('data:'));
-            }
-            if (!hasBackup) toDrop.push(c);
-          }
-          for (const c of toDrop) {
-            recordCardDeletion(c.id);
-            await window.FeatureDraft?.unpublishCommunityByCardId?.(c.id, { silent: true });
-            cards = cards.filter((x) => x.id !== c.id);
-            removedCards += 1;
-          }
-          const ghost = window.FeatureDraft?.purgeGhostCommunityData?.() || { removedPosts: 0 };
-          if (!removedCards && !(ghost.removedPosts || 0)) return;
-          window.__promptHubCards = cards;
-          window.FeatureDraft?.invalidateCommunityReconcileCache?.();
-          await saveAllData({ skipCloud: true });
-          refreshWarehouseUI({ softCards: true });
-          void pushToCloud({ silent: true }).catch(() => {});
-        } catch (e) {
-          console.warn('[sync] quiet ghost purge', e);
-        }
-      };
-      if (typeof requestIdleCallback === 'function') {
-        requestIdleCallback(() => { void run(); }, { timeout: 45000 });
-      } else {
-        setTimeout(() => { void run(); }, 8000);
-      }
-    }
+    /** 已禁用：登录后自动删卡曾误删大量卡片（首屏未加载即 markPathMissing → 误判幽灵） */
+    function scheduleQuietGhostPurge() { /* disabled — use purgeGhostDataFromSettings with confirm */ }
 
     function hydrateWarehouseGridImages(container, pageCards) {
       if (!container) return;
@@ -4906,30 +5630,57 @@
         return;
       }
       const st = document.getElementById('settingsStatus');
-      if (st) st.textContent = '正在清理幽灵数据…';
-      setCloudSyncPhase('syncing', '清理中');
-      let removedCards = 0;
+      if (st) st.textContent = '正在扫描…';
+      setCloudSyncPhase('syncing', '扫描中');
       try {
-        const toDrop = [];
+        const candidates = [];
         for (const c of [...cards]) {
           if (!c?.id || !c.image || !window.SupabaseSync?.isStorageRef?.(c.image)) continue;
+          window.SupabaseSync?.clearPathMissingForCard?.(c.id, c.image);
+          let ok = false;
           try {
-            const ok = await window.SupabaseSync?.verifyStorageRef?.(c.image, c.id, {
-              quick: true,
-              noDownload: true
-            });
-            if (ok) continue;
+            ok = await window.SupabaseSync?.verifyStorageRef?.(c.image, c.id, { quick: false });
           } catch (e) { /* ignore */ }
-          const primary = window.SupabaseSync?.primaryImagePath?.(c.image, c.id);
-          if (!primary || !window.SupabaseSync?.isPathKnownMissing?.(primary)) continue;
+          if (ok) continue;
+          const blob = await window.SupabaseSync?.downloadCardStorageBlob?.(c.image, c.id);
+          if (blob && (blob.size || 0) >= 512) continue;
           let hasBackup = false;
           if (typeof getCardImageBackup === 'function') {
             const backup = await getCardImageBackup(c.id);
             hasBackup = !!(backup && String(backup).startsWith('data:'));
           }
-          if (!hasBackup) toDrop.push(c);
+          if (!hasBackup) candidates.push(c);
         }
-        for (const c of toDrop) {
+        if (!candidates.length) {
+          const ghostOnly = window.FeatureDraft?.purgeGhostCommunityData?.() || { removedPosts: 0 };
+          if (ghostOnly.removedPosts) {
+            window.FeatureDraft?.invalidateCommunityReconcileCache?.();
+            await saveAllData({ skipCloud: true });
+            window.FeatureDraft?.renderCommunity?.();
+          }
+          setCloudSyncPhase('saved');
+          const msg = ghostOnly.removedPosts
+            ? `已清理 ${ghostOnly.removedPosts} 条社区残留（未删卡片）`
+            : '未发现可删的无效卡片';
+          showToast(msg, 6000);
+          if (st) st.textContent = msg;
+          return;
+        }
+        const sample = candidates.slice(0, 3).map((c) => c.title || c.id).join('、');
+        const extra = candidates.length > 3 ? ` 等 ${candidates.length} 张` : '';
+        const ok = window.confirm(
+          `将永久删除 ${candidates.length} 张卡片（Storage 已确认无图且无本地备份）。\n`
+          + `示例：${sample}${extra}\n\n`
+          + '此操作不可撤销，且不会自动同步云端。确定继续？'
+        );
+        if (!ok) {
+          setCloudSyncPhase('saved');
+          if (st) st.textContent = `已取消（扫描到 ${candidates.length} 张候选）`;
+          showToast(`已取消删除（${candidates.length} 张候选仍保留）`, 5000);
+          return;
+        }
+        let removedCards = 0;
+        for (const c of candidates) {
           recordCardDeletion(c.id);
           await window.FeatureDraft?.unpublishCommunityByCardId?.(c.id, { silent: true });
           cards = cards.filter((x) => x.id !== c.id);
@@ -4942,12 +5693,12 @@
         renderGroups();
         renderCards(true);
         window.FeatureDraft?.renderCommunity?.();
-        void pushToCloud({ silent: true }).catch(() => {});
         setCloudSyncPhase('saved');
-        const msg = `已清理 ${ghost.removedPosts || 0} 条社区残留`
-          + (removedCards ? `、${removedCards} 张无效卡片` : '');
-        showToast(msg || '未发现幽灵数据', 6000);
-        if (st) st.textContent = msg || '清理完成';
+        const msg = `已从本地删除 ${removedCards} 张无效卡片`
+          + (ghost.removedPosts ? `、${ghost.removedPosts} 条社区残留` : '')
+          + '（未自动上传云端，请确认后再点「与云端对齐」）';
+        showToast(msg, 9000);
+        if (st) st.textContent = msg;
       } catch (e) {
         setCloudSyncPhase('error', formatSyncError(e));
         showToast('清理失败：' + formatSyncError(e), 8000);
@@ -5099,6 +5850,7 @@
       initFilterMenu();
       initSortMenu();
       bindWarehouseSearchInputs();
+      initBatchMarqueeSelect();
       bindPanelOcrDrop();
       initCardUploadOriginalToggle();
       initAppNav();
@@ -5223,6 +5975,7 @@
     window.persistPromptHubCards = window.savePromptHubCardsNow;
 
     function renderGroups() {
+      ensureGroupsFromCards();
       const visible = cardsForActiveWarehouse(filterTombstonedCards(cards));
       document.getElementById('allCount').textContent = visible.length;
       document.getElementById('uncategorizedCount').textContent = visible.filter(c => !c.group).length;
@@ -5542,6 +6295,7 @@
           div.style.position = 'relative';
         }
         const checked = selectedCardIds.has(card.id);
+        if (checked) div.classList.add('batch-selected');
         const showImage = cardHasDisplayImage(card);
         const cachedUrl = showImage && window.SupabaseSync?.getListDisplayImageSrc
           ? window.SupabaseSync.getListDisplayImageSrc(card.image, card.id)
@@ -5771,10 +6525,208 @@
       });
     }
 
-    function updateBatchCountLabel() { document.getElementById('batchCountLabel').textContent = selectedCardIds.size ? `已选 ${selectedCardIds.size} 张` : ''; }
-    function toggleBatchMode() { batchMode = !batchMode; selectedCardIds.clear(); const btn = document.getElementById('batchToggleBtn'); btn.classList.toggle('active', batchMode); document.getElementById('batchBar').classList.toggle('active', batchMode); document.getElementById('normalBar').style.display = batchMode ? 'none' : 'flex'; renderCards(true); }
-    function cancelBatch() { batchMode = false; selectedCardIds.clear(); document.getElementById('batchToggleBtn').classList.remove('active'); document.getElementById('batchBar').classList.remove('active'); document.getElementById('normalBar').style.display = 'flex'; renderCards(true); }
-    function toggleSelectCard(id, el) { if (selectedCardIds.has(id)) { selectedCardIds.delete(id); if(el) el.classList.remove('checked'); } else { selectedCardIds.add(id); if(el) el.classList.add('checked'); } updateBatchCountLabel(); }
+    function updateBatchCountLabel() {
+      const el = document.getElementById('batchCountLabel');
+      if (el) el.textContent = selectedCardIds.size ? `已选 ${selectedCardIds.size} 张` : '';
+    }
+
+    function syncBatchCheckboxUi() {
+      const container = document.getElementById('cardsContainer');
+      if (!container) return;
+      container.querySelectorAll('.card[data-id]').forEach((card) => {
+        const id = card.dataset.id;
+        const on = selectedCardIds.has(id);
+        card.classList.toggle('batch-selected', on);
+        const cb = card.querySelector('.card-checkbox');
+        if (cb) cb.classList.toggle('checked', on);
+      });
+      updateBatchCountLabel();
+    }
+
+    function setBatchModeUi(on) {
+      const btn = document.getElementById('batchToggleBtn');
+      btn?.classList.toggle('active', on);
+      document.getElementById('batchBar')?.classList.toggle('active', on);
+      const normalBar = document.getElementById('normalBar');
+      if (normalBar) normalBar.style.display = on ? 'none' : 'flex';
+      const container = document.getElementById('cardsContainer');
+      if (container) container.classList.toggle('batch-mode', on);
+    }
+
+    function toggleBatchMode() {
+      batchMode = !batchMode;
+      selectedCardIds.clear();
+      setBatchModeUi(batchMode);
+      syncBatchCheckboxUi();
+    }
+
+    function cancelBatch() {
+      batchMode = false;
+      selectedCardIds.clear();
+      setBatchModeUi(false);
+      syncBatchCheckboxUi();
+    }
+
+    function toggleSelectCard(id, el) {
+      if (!id) return;
+      const cardEl = el?.closest?.('.card') || document.querySelector(`.card[data-id="${CSS.escape(id)}"]`);
+      if (selectedCardIds.has(id)) {
+        selectedCardIds.delete(id);
+        if (el) el.classList.remove('checked');
+        cardEl?.classList.remove('batch-selected');
+      } else {
+        selectedCardIds.add(id);
+        if (el) el.classList.add('checked');
+        cardEl?.classList.add('batch-selected');
+      }
+      updateBatchCountLabel();
+    }
+
+    let batchProgressOpen = 0;
+
+    function showBatchProgress(title, done, total) {
+      const ov = document.getElementById('batchProgressOverlay');
+      const titleEl = document.getElementById('batchProgressTitle');
+      const fill = document.getElementById('batchProgressFill');
+      const meta = document.getElementById('batchProgressMeta');
+      if (!ov) return;
+      batchProgressOpen += 1;
+      ov.classList.remove('hidden');
+      ov.setAttribute('aria-busy', 'true');
+      if (titleEl) titleEl.textContent = title || '正在处理…';
+      const t = Math.max(1, Number(total) || 1);
+      const d = Math.min(t, Math.max(0, Number(done) || 0));
+      const pct = Math.round((d / t) * 100);
+      if (fill) fill.style.width = `${pct}%`;
+      if (meta) meta.textContent = `${d} / ${t}（${pct}%）`;
+    }
+
+    function hideBatchProgress() {
+      batchProgressOpen = Math.max(0, batchProgressOpen - 1);
+      if (batchProgressOpen > 0) return;
+      const ov = document.getElementById('batchProgressOverlay');
+      ov?.classList.add('hidden');
+      ov?.setAttribute('aria-busy', 'false');
+    }
+
+    async function runBatchWithProgress(title, items, worker) {
+      const list = Array.isArray(items) ? items : [];
+      if (!list.length) return;
+      showBatchProgress(title, 0, list.length);
+      try {
+        for (let i = 0; i < list.length; i += 1) {
+          await worker(list[i], i);
+          showBatchProgress(title, i + 1, list.length);
+          if (i % 3 === 2) await new Promise((r) => setTimeout(r, 0));
+        }
+      } finally {
+        hideBatchProgress();
+      }
+    }
+
+    async function rerenderWarehouseCardsKeepingScroll() {
+      const container = document.getElementById('cardsContainer');
+      if (!container) return;
+      const st = container.scrollTop;
+      const targetPage = Math.max(1, page);
+      const sel = new Set(selectedCardIds);
+      const wasBatch = batchMode;
+      page = 1;
+      await Promise.resolve(renderCards(true));
+      for (let p = 2; p <= targetPage; p += 1) {
+        page = p;
+        await Promise.resolve(renderCards(false));
+      }
+      if (wasBatch) {
+        batchMode = true;
+        selectedCardIds = sel;
+        setBatchModeUi(true);
+        syncBatchCheckboxUi();
+      }
+      container.scrollTop = st;
+      requestAnimationFrame(() => {
+        container.scrollTop = st;
+        layoutMasonryGrid();
+      });
+    }
+
+    function initBatchMarqueeSelect() {
+      const container = document.getElementById('cardsContainer');
+      if (!container || container.dataset.batchMarqueeBound) return;
+      container.dataset.batchMarqueeBound = '1';
+      let pending = null;
+      let drag = null;
+      let rectEl = null;
+      const DRAG_THRESHOLD = 8;
+
+      const hitTest = (x1, y1, x2, y2) => {
+        const left = Math.min(x1, x2);
+        const right = Math.max(x1, x2);
+        const top = Math.min(y1, y2);
+        const bottom = Math.max(y1, y2);
+        const hits = [];
+        container.querySelectorAll('.card[data-id]').forEach((card) => {
+          const r = card.getBoundingClientRect();
+          if (r.right < left || r.left > right || r.bottom < top || r.top > bottom) return;
+          hits.push(card.dataset.id);
+        });
+        return hits;
+      };
+
+      const clearMarquee = () => {
+        rectEl?.remove();
+        rectEl = null;
+        drag = null;
+        pending = null;
+        container.classList.remove('batch-marquee-active');
+      };
+
+      const finishDrag = (e) => {
+        if (!drag) return;
+        const ids = hitTest(drag.x, drag.y, e.clientX, e.clientY);
+        const add = !e.altKey;
+        ids.forEach((id) => {
+          if (add) selectedCardIds.add(id);
+          else selectedCardIds.delete(id);
+        });
+        syncBatchCheckboxUi();
+        clearMarquee();
+      };
+
+      container.addEventListener('mousedown', (e) => {
+        if (!batchMode || e.button !== 0) return;
+        if (e.target.closest('.card-checkbox, .card-copy-btn, .card-mobile-actions, button, a, input, textarea, select')) return;
+        if (!e.target.closest('.cards-container')) return;
+        pending = { x: e.clientX, y: e.clientY };
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!pending && !drag) return;
+        if (pending && !drag) {
+          const dx = Math.abs(e.clientX - pending.x);
+          const dy = Math.abs(e.clientY - pending.y);
+          if (dx < DRAG_THRESHOLD && dy < DRAG_THRESHOLD) return;
+          drag = { x: pending.x, y: pending.y };
+          pending = null;
+          container.classList.add('batch-marquee-active');
+          rectEl = document.createElement('div');
+          rectEl.className = 'batch-select-rect';
+          document.body.appendChild(rectEl);
+        }
+        if (!drag || !rectEl) return;
+        const left = Math.min(drag.x, e.clientX);
+        const top = Math.min(drag.y, e.clientY);
+        rectEl.style.left = `${left}px`;
+        rectEl.style.top = `${top}px`;
+        rectEl.style.width = `${Math.abs(e.clientX - drag.x)}px`;
+        rectEl.style.height = `${Math.abs(e.clientY - drag.y)}px`;
+      });
+
+      window.addEventListener('mouseup', (e) => {
+        if (drag) finishDrag(e);
+        else pending = null;
+      });
+    }
     function batchMoveGroup() {
       if (!selectedCardIds.size) return;
       const groups = ['all', 'uncategorized', ...customGroups];
@@ -5789,10 +6741,12 @@
             c.updatedAt = now;
           }
         });
+        showBatchProgress('正在移动分组…', 0, selectedCardIds.size);
         saveAllData();
+        hideBatchProgress();
         cancelBatch();
         renderGroups();
-        preserveCardsContainerScroll(() => renderCards(true));
+        void rerenderWarehouseCardsKeepingScroll();
       }, null, groups);
     }
     function batchMoveWarehouse() {
@@ -5805,11 +6759,13 @@
         if (!target) return;
         const n = window.FeatureAssets?.moveCardsToWarehouse?.([...selectedCardIds], target.id);
         if (n) {
+          showBatchProgress('正在移库…', n, n);
           saveAllData({ skipCloud: true });
+          hideBatchProgress();
           showToast(`已将 ${n} 张卡片移到「${target.name}」`);
           cancelBatch();
           renderGroups();
-          renderCards(true);
+          void rerenderWarehouseCardsKeepingScroll();
         }
       }, null, labels);
     }
@@ -5836,35 +6792,43 @@
       let already = 0;
       let skipCollect = 0;
       let skipIneligible = 0;
-      for (const id of ids) {
+      await runBatchWithProgress('正在开启社区公开…', ids, async (id) => {
         const card = cards.find((c) => c.id === id);
-        if (!card) continue;
+        if (!card) return;
         if (window.isCommunityCollectCard?.(card)) {
           skipCollect += 1;
-          continue;
+          return;
         }
         if (card.publishedToCommunity) {
           already += 1;
-          continue;
+          return;
         }
         if (!window.FeatureDraft?.isCommunityPublishEligible?.(card)) {
           skipIneligible += 1;
-          continue;
+          return;
         }
-        await window.FeatureDraft?.applyCardPublishState?.(card, true);
+        await window.FeatureDraft?.syncCardToCommunity?.(card, true, {
+          silent: true,
+          skipRender: true,
+          skipPersist: true,
+          keepPublishFlag: true
+        });
         if (card.publishedToCommunity) ok += 1;
-      }
+      });
       window.__promptHubCards = cards;
       if (ok > 0) {
+        showBatchProgress('正在保存并同步社区…', 1, 2);
         await saveAllData({ skipCloud: true });
         if (window.SupabaseSync?.isLoggedIn?.()) {
           scheduleCloudPush();
           void window.FeatureDraft?.syncMyPostsToPublicFeed?.();
         }
+        showBatchProgress('正在刷新社区 Feed…', 2, 2);
         await refreshCommunityAfterBatchPublish();
+        hideBatchProgress();
       }
       cancelBatch();
-      renderCards(true);
+      syncBatchCheckboxUi();
       const parts = [];
       if (ok) parts.push(`已公开 ${ok} 张`);
       if (already) parts.push(`${already} 张已是公开`);
@@ -5878,22 +6842,24 @@
       if (!selectedCardIds.size) return;
       const ids = [...selectedCardIds];
       let n = 0;
-      for (const id of ids) {
+      await runBatchWithProgress('正在关闭社区公开…', ids, async (id) => {
         const card = cards.find((c) => c.id === id);
-        if (!card?.publishedToCommunity) continue;
+        if (!card?.publishedToCommunity) return;
         await window.FeatureDraft?.unpublishCommunityByCardId?.(id, { silent: true });
         n += 1;
-      }
+      });
       if (!n) {
         showToast('所选卡片均未公开到社区');
         return;
       }
       window.__promptHubCards = cards;
+      showBatchProgress('正在保存…', 1, 1);
       await saveAllData({ skipCloud: true });
       if (window.SupabaseSync?.isLoggedIn?.()) scheduleCloudPush();
       await refreshCommunityAfterBatchPublish();
+      hideBatchProgress();
       cancelBatch();
-      renderCards(true);
+      syncBatchCheckboxUi();
       showToast(`已关闭 ${n} 张卡片的社区公开`);
     }
 
@@ -5906,16 +6872,20 @@
           showToast('「社区收藏」标签仅收藏时自动添加');
           return;
         }
-        selectedCardIds.forEach(id => {
-          const c = cards.find(x => x.id === id);
+        const ids = [...selectedCardIds];
+        showBatchProgress('正在添加标签…', 0, ids.length);
+        ids.forEach((id, i) => {
+          const c = cards.find((x) => x.id === id);
           if (c) {
             if (!c.tags) c.tags = [];
             if (!c.tags.includes(tag)) c.tags.push(tag);
           }
+          showBatchProgress('正在添加标签…', i + 1, ids.length);
         });
         saveAllData();
+        hideBatchProgress();
         cancelBatch();
-        renderCards(true);
+        void rerenderWarehouseCardsKeepingScroll();
       }, null, allTags);
     }
     function batchDelete() {
@@ -5928,15 +6898,17 @@
       customConfirm(`确定永久删除 ${selectedCardIds.size} 张卡片？此操作不可恢复。`, () => {
         void (async () => {
           const ids = [...selectedCardIds];
-          for (const id of ids) await deleteCardPermanently(id, false);
+          await runBatchWithProgress('正在删除卡片…', ids, async (id) => {
+            await deleteCardPermanently(id, false, { skipRender: true, silent: true });
+          });
           cancelBatch();
           renderGroups();
-          renderCards(true);
+          await rerenderWarehouseCardsKeepingScroll();
           showToast('已删除所选卡片');
         })();
       });
     }
-    function deleteCardPermanently(id, confirm = true) {
+    function deleteCardPermanently(id, confirm = true, opts = {}) {
       const card = cards.find(c => c.id === id);
       if (card?.image && window.SupabaseSync?.isStorageRef?.(card.image) && !window.SupabaseSync?.isLoggedIn?.()) {
         showToast('请先登录后再操作云端卡片');
@@ -5954,12 +6926,14 @@
         window.__promptHubCards = cards;
         if (selectedCardId === id) {
           selectedCardId = null;
-          createNewCard({ silentMobile: true });
+          if (!opts.skipRender) createNewCard({ silentMobile: true });
         }
-        renderGroups();
-        renderCards(true);
-        window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true, forceRepaint: true });
-        showToast('已删除卡片');
+        if (!opts.skipRender) {
+          renderGroups();
+          renderCards(true);
+          window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true, forceRepaint: true });
+          showToast('已删除卡片');
+        }
         void (async () => {
           try {
             if (card?.image && window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync.isStorageRef(card.image)) {

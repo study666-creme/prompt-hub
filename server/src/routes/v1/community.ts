@@ -78,7 +78,11 @@ export async function communityFeedHandler(c: Context<{ Bindings: Env }>) {
     });
     c.header('Cache-Control', 'public, max-age=30, stale-while-revalidate=120');
     applyCorsHeaders(c);
-    return c.json({ ok: true, data: { posts, limit, offset } });
+    const hasMore = posts.length >= limit;
+    return c.json({
+      ok: true,
+      data: { posts, limit, offset, nextOffset: offset + posts.length, hasMore }
+    });
   } catch (e) {
     applyCorsHeaders(c);
     if (isMissingCommunityTable(e)) {

@@ -324,6 +324,10 @@
         fail();
         return;
       }
+      if (isGridSrc && isCommunityImg(img) && !isCommunitySideImg(img) && (w > 720 || h > 720)) {
+        fail();
+        return;
+      }
       img.dataset.feedLoadDone = '1';
       observer?.unobserve(img);
       if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
@@ -348,9 +352,12 @@
       const isCommOther = isCommunityImg(img) && !ownList && !isOwnCommunityGridImg(img);
       if (failedPath && window.SupabaseSync?.markGridFetchFailed) {
         if (isGridFail && !isCommOther) window.SupabaseSync.markGridFetchFailed(failedPath);
-        else if (!ownWh && !isCommOther) window.SupabaseSync?.markPathMissing?.(failedPath);
-      } else if (failedPath && !ownWh && !isCommOther) {
+        else if (!ownWh && !isCommOther && !ownList) window.SupabaseSync?.markPathMissing?.(failedPath);
+      } else if (failedPath && !ownWh && !isCommOther && !ownList) {
         window.SupabaseSync?.markPathMissing?.(failedPath);
+      }
+      if (ownList && failedPath && window.SupabaseSync?.invalidateSignedCache) {
+        window.SupabaseSync.invalidateSignedCache(String(failedPath).replace(/^\//, ''));
       }
       if (isGridFail && ref && !img.dataset.primaryRetried) {
         img.dataset.primaryRetried = '1';
@@ -494,6 +501,12 @@
   }
 
   function scrollRootFor(container) {
+    if (isCommunityContainer(container) && container.classList?.contains('community-feed-columns')) {
+      const st = getComputedStyle(container);
+      if (st.overflowY === 'auto' || st.overflowY === 'scroll' || st.overflowY === 'overlay') {
+        return container;
+      }
+    }
     let el = container;
     while (el && el !== document.body) {
       const st = getComputedStyle(el);
@@ -560,11 +573,12 @@
       });
     } else if (!lazyOnly && (container.id === 'cardsContainer' || isCommunityContainer(container))) {
       let eager = 0;
-      const firstScreenCap = 6;
+      const firstScreenCap = isCommunityContainer(container) ? 24 : 6;
+      const nearPx = isCommunityContainer(container) ? 960 : 480;
       imgs.forEach((img) => {
         const cur = img.currentSrc || img.src || '';
         if (isReadySrc(cur, img)) return;
-        if (eager < firstScreenCap && isImgNearViewport(img, 480)) {
+        if (eager < firstScreenCap && isImgNearViewport(img, nearPx)) {
           eager += 1;
           loadImg(img);
         }
@@ -675,6 +689,26 @@
     else if (observedRoot) observeContainer(observedRoot);
   }
 
+  function boostCommunityFeedImages(container, max = 24) {
+    if (!container || !isCommunityContainer(container)) return;
+    let n = 0;
+    feedImagesIn(container).forEach((img) => {
+      if (n >= max) return;
+      const cur = img.currentSrc || img.src || '';
+      if (isReadySrc(cur, img)) return;
+      const hit = cachedUrl(img.getAttribute('data-image-ref'), cardIdFromImg(img), img);
+      if (hit) {
+        applyUrlToImg(img, hit);
+        return;
+      }
+      if (isImgNearViewport(img, 1200)) {
+        n += 1;
+        loadImg(img);
+      }
+    });
+    observeContainer(container);
+  }
+
   document.addEventListener('visibilitychange', syncVisibilityPause);
 
   window.CardImageLoader = {
@@ -683,6 +717,7 @@
     bindWarehouse,
     bindFeed,
     applyUrlToImg,
+    boostCommunityFeedImages,
     patchVisibleFromCache(container) {
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
       observeContainer(container);

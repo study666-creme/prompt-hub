@@ -1,7 +1,14 @@
 # 社区模块架构与数据流
 
 > 对应文件：`features-draft.js`、`server/src/lib/community-feed.ts`、`api-client.js`  
-> 已知故障：`docs/CURRENT-ISSUES.md`
+> 已知故障：`docs/CURRENT-ISSUES.md`  
+> **踩坑（必读）**：`docs/AI-PITFALLS.md` — 社区 flex 列、禁止全墙重排、SyntaxError 炸站
+
+### 桌面布局（2026-06-04）
+
+- **非 Masonry**：`useCommunityCssGrid` → `#communityGrid` 为 `flex` + `.community-feed-col` 多列，新卡 append 到**最短列**。
+- **禁止**：`flattenCommunityFeedColumns` + 全量 round-robin（除非列结构损坏）；`hydrateFeedImages` / `fromImage` 触发全墙 `layoutCommunityMasonry`。
+- **分页**：首屏 `drainCommunityFeedPages(5)`；滚到底哨兵再 `loadNextCommunityFeedPage`。
 
 ---
 
