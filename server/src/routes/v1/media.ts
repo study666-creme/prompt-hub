@@ -115,7 +115,7 @@ export async function communityMediaSignBatchHandler(c: Context<{ Bindings: Env 
   });
 
   let idx = 0;
-  const concurrency = 10;
+  const concurrency = 6;
   async function worker() {
     while (idx < items.length) {
       const item = items[idx];

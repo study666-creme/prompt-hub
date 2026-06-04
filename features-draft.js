@@ -106,6 +106,7 @@
   let appreciateViewerGen = 0;
   let imageGenPreviewId = null;
   let imageGenPreviewKind = null;
+  let imageGenPreviewRenderSeq = 0;
   let imageGenFeedPagedStore = null;
   let imageGenFeedScrollLoading = false;
   let imageGenFeedScrollIntent = false;
@@ -665,8 +666,29 @@
   function ensureCommunityFeedColumnLayout(containerId) {
     const container = document.getElementById(containerId);
     if (!container || !useCommunityCssGrid(containerId)) return;
-    if (container.querySelector(':scope > .community-feed-col')) return;
+    const colEls = container.querySelectorAll(':scope > .community-feed-col');
+    const orphanCards = [...container.querySelectorAll(':scope > .card')];
+    if (colEls.length && !orphanCards.length) return;
+    if (colEls.length && orphanCards.length) {
+      const cols = Number(container.dataset.feedDistributedCols || container.dataset.feedLayoutCols)
+        || getCommunityFeedColumns(container);
+      distributeCommunityFeedColumns(container, cols, { newCards: orphanCards });
+      container.classList.add('community-feed-grid', 'community-feed-columns');
+      setFeedLayoutPending(containerId, false);
+      return;
+    }
     layoutCommunityMasonry(containerId, { forceReflow: true });
+  }
+
+  function repairCreationsFeedLayout() {
+    const container = document.getElementById('creationsGrid');
+    if (!container || !useCommunityCssGrid('creationsGrid')) return;
+    const orphans = container.querySelectorAll(':scope > .card');
+    const cols = container.querySelectorAll(':scope > .community-feed-col');
+    if (!orphans.length && cols.length >= 2) return;
+    delete container.dataset.feedDistributed;
+    delete container.dataset.feedDistributedCols;
+    layoutCommunityMasonry('creationsGrid', { forceReflow: true, recalcCols: true });
   }
 
   function appendFeedCardsLayout(containerId, appendedCards) {
@@ -674,7 +696,12 @@
     if (!container || !appendedCards?.length) return;
     if (useCommunityCssGrid(containerId)) {
       ensureCommunityFeedColumnLayout(containerId);
-      const cols = Math.max(2, Number(container.dataset.feedLayoutCols) || getCommunityFeedColumns(container));
+      const minCols = containerId === 'creationsGrid' ? 2 : 2;
+      const cols = Math.max(
+        minCols,
+        Number(container.dataset.feedDistributedCols || container.dataset.feedLayoutCols)
+          || getCommunityFeedColumns(container)
+      );
       distributeCommunityFeedColumns(container, cols, { newCards: appendedCards });
       setFeedLayoutPending(containerId, false);
       return;
@@ -1087,8 +1114,11 @@
   }
 
   function toast(msg, durationMs) {
-    if (typeof showToast === 'function') showToast(msg, durationMs);
-    else alert(msg);
+    if (typeof showToast === 'function') {
+      showToast(msg, durationMs);
+      return;
+    }
+    console.warn('[toast]', msg);
   }
   window.toast = toast;
 
@@ -1283,7 +1313,11 @@
   }
 
   function getCardColumns() {
-    return Math.min(5, Math.max(1, Number(getComputedStyle(document.documentElement).getPropertyValue('--card-columns')) || 4));
+    return Math.min(5, Math.max(1, Number(getComputedStyle(document.documentElement).getPropertyValue('--card-columns')) || 3));
+  }
+
+  function getCommunityColumns() {
+    return Math.min(5, Math.max(1, Number(getComputedStyle(document.documentElement).getPropertyValue('--community-columns')) || 4));
   }
 
   /** 生图作品流按可用宽度自适应列数，避免预览侧栏打开后右侧大块留白 */
@@ -3209,17 +3243,38 @@
 
   /** 社区 Masonry 列数：按 .community-page-main 宽度算（勿用 grid 自身 clientWidth，侧栏打开时会误判成 1 列） */
   function getCommunityFeedMeasureEl(container) {
+    if (container?.id === 'creationsGrid') {
+      return container.closest('.community-workspace')
+        || container.closest('.community-page-main')
+        || container;
+    }
     return container?.closest?.('.community-page-main') || container;
   }
 
-  function getCommunityFeedColumns(container) {
-    if (!container) return getCardColumns();
+  function getCreationsFeedColumns(container) {
+    let userCols = Number(localStorage.getItem('promptrepo_myhome_columns'));
+    if (!Number.isFinite(userCols) || userCols < 2) userCols = 3;
+    userCols = Math.min(5, Math.max(2, userCols));
+    if (!container) return userCols;
     const measure = getCommunityFeedMeasureEl(container);
     const style = getComputedStyle(measure);
     const innerW = measure.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-    if (innerW < 80) return getCardColumns();
+    if (innerW < 80) return userCols;
     const gap = getCommunityFeedGaps().colGap;
-    const userCols = getCardColumns();
+    const minCol = 156;
+    const fit = Math.floor((innerW + gap) / (minCol + gap));
+    return Math.min(userCols, Math.max(2, fit));
+  }
+
+  function getCommunityFeedColumns(container) {
+    if (!container) return getCommunityColumns();
+    if (container.id === 'creationsGrid') return getCreationsFeedColumns(container);
+    const measure = getCommunityFeedMeasureEl(container);
+    const style = getComputedStyle(measure);
+    const innerW = measure.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const gap = getCommunityFeedGaps().colGap;
+    const userCols = getCommunityColumns();
+    if (innerW < 80) return userCols;
     const minCol = 156;
     const fit = Math.floor((innerW + gap) / (minCol + gap));
     return Math.min(userCols, Math.max(2, fit));
@@ -4405,7 +4460,8 @@
         return;
       }
       if (containerId === 'communityGrid') {
-        if (communityAppreciateActive) {
+        if (isCommunityQuickPreviewActive()) {
+          e.preventDefault();
           e.stopPropagation();
           void openCommunityAppreciateViewer(post);
           return;
@@ -4757,6 +4813,12 @@
     const next = mode || 'random';
     if (next === 'random' && communitySort !== 'random') communityRandomSig = '';
     if (next === 'random' && communitySort === 'random') communityRandomSig = '';
+    if (next !== communitySort) {
+      delete feedPagedStore.communityGrid;
+      delete feedPagedStore.creationsGrid;
+      const grid = document.getElementById('communityGrid');
+      if (grid) delete grid.dataset.feedSig;
+    }
     communitySort = next;
     document.querySelectorAll('[data-community-sort]').forEach((b) => {
       b.classList.toggle('active', (b.dataset.communitySort || 'random') === communitySort);
@@ -4978,7 +5040,11 @@
       }
       return;
     }
-    if (shouldPreserveCommunityFeedDom('communityGrid') && container.querySelector('.community-post-card')) {
+    if (
+      !opts.forceRepaint
+      && shouldPreserveCommunityFeedDom('communityGrid')
+      && container.querySelector('.community-post-card')
+    ) {
       scrubStaleCommunityFeedEmpty(container);
       patchFeedLikeLabels(container, list);
       void growCommunityFeedAfterPublicRefresh('communityGrid');
@@ -5516,7 +5582,7 @@
       return;
     }
     if (typeof window.closeLightbox === 'function') window.closeLightbox();
-    toast('图片加载中，请稍候再试');
+    toast('图片加载中，请稍候再试', 2500);
   }
 
   async function openCommunitySideImageZoom(body, post, sideRef, postId, extra = {}) {
@@ -5535,7 +5601,7 @@
       return;
     }
     if (typeof window.closeLightbox === 'function') window.closeLightbox();
-    toast('图片加载中，请稍候再试');
+    toast('图片加载中，请稍候再试', 2500);
   }
 
   function bindCommunitySideImageZoom(body, post, sideRef, postId, extra = {}) {
@@ -5690,7 +5756,18 @@
     delete panel.dataset.mountedOnBody;
   }
 
+  function isCommunityQuickPreviewActive() {
+    return communityAppreciateActive || document.body.classList.contains('community-appreciate');
+  }
+
   function openPostSidePanel(id, ctx, opts = {}) {
+    if (ctx === 'community' && isCommunityQuickPreviewActive()) {
+      const post = opts.post || findPost(id, { sourceCardId: opts.sourceCardId });
+      if (post) {
+        void openCommunityAppreciateViewer(post);
+        return;
+      }
+    }
     window.closeAppreciateViewer?.();
     if (communityAppreciateActive) exitCommunityAppreciate(true);
     if (typeof window.setViewerNav === 'function') window.setViewerNav([], '');
@@ -7314,6 +7391,7 @@
     const sig = feedListSignature(list, 'creationsGrid');
     if (container.dataset.feedSig === sig && container.querySelector('.community-post-card')) {
       patchFeedLikeLabels(container, list);
+      requestAnimationFrame(() => repairCreationsFeedLayout());
       return;
     }
     renderLikeRewardRules();
@@ -7326,7 +7404,9 @@
       container.innerHTML = '<div class="feature-empty"><p>暂无发布作品</p><p class="panel-hint">在卡片库保存作品并开启「发布到提示词社区」，或在生图页开启「生成后公开」</p><button type="button" class="btn btn-primary" onclick="switchAppPage(\'warehouse\')">去卡片库</button></div>';
       return;
     }
-    void renderPostsIntoContainer(list, 'creationsGrid');
+    void renderPostsIntoContainer(list, 'creationsGrid').then(() => {
+      requestAnimationFrame(() => repairCreationsFeedLayout());
+    });
   }
 
   function publishCreation(id, opts) {
@@ -9192,24 +9272,15 @@
     const mobile = window.MobileUI?.isMobile?.();
     const warehouse = imageGenFeedTab === 'warehouse';
     if (warehouse) {
-      const pendingN = imageGenPendingJobs.length;
-      const failedN = imageGenFailedJobs.length;
-      const total = getImageGenWarehouseFeedList().length;
-      const shown = Math.min(
-        (imageGenFeedPagedStore?.page || 1) * IMAGEGEN_FEED_PER_PAGE,
-        total
-      );
-      const countPart = total
-        ? (shown >= total ? `共 ${total} 张` : `已加载 ${shown} / ${total} 张 · 继续向下滚动`)
-        : '暂无卡片';
-      const extra = failedN ? ` · 失败 ${failedN} 张可重试` : '';
+      el.textContent = '';
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    if (imageGenFeedTab === 'community') {
       el.textContent = mobile
-        ? `两列浏览 · ${countPart} · 进行中 ${pendingN} 张${extra}`
-        : `卡片仓库 · ${countPart} · 进行中 ${pendingN} 张显示在顶部${extra} · 失败项带序号与提示词`;
-    } else if (imageGenFeedTab === 'community') {
-      el.textContent = mobile
-        ? '社区作品 · 点图放大 · 按钮复制或填入生图'
-        : '社区作品 · 点击图片放大 · 点击卡片查看详情';
+        ? '获取 · 点图放大 · 按钮复制或填入生图'
+        : '获取 · 点击图片放大 · 点击卡片查看详情';
     }
   }
 
@@ -9517,6 +9588,15 @@
   async function renderImageGenPreview() {
     const body = document.getElementById('imageGenPreviewBody');
     if (!body || !imageGenPreviewId || !imageGenPreviewKind) return;
+    const seq = ++imageGenPreviewRenderSeq;
+    const previewId = imageGenPreviewId;
+    const previewKind = imageGenPreviewKind;
+    const previewStale = () =>
+      seq !== imageGenPreviewRenderSeq
+      || previewId !== imageGenPreviewId
+      || previewKind !== imageGenPreviewKind;
+    delete body.dataset.previewImageUrl;
+    delete body.dataset.previewImageReady;
     let prompt = '';
     let image = '';
     let jobId = '';
@@ -9552,6 +9632,8 @@
     body.dataset.previewRef = refImage || '';
     if (refImages?.length) body.dataset.previewRefs = JSON.stringify(refImages);
     else delete body.dataset.previewRefs;
+    const dlPending = body.querySelector('[data-preview-download]');
+    if (dlPending) dlPending.disabled = true;
     const zoomBtn = body.querySelector('[data-preview-zoom]');
     if (zoomBtn && isDisplayableImage(image)) {
       const previewAssetId = imageGenPreviewKind === 'warehouse'
@@ -9567,18 +9649,28 @@
         })() : {}
       );
       void resolveImageDisplayUrl(image, jobId, previewAssetId, { ...previewOpts, preferFull: true }).then(url => {
+        if (previewStale()) return;
         if (!url) {
           zoomBtn.remove();
           body.querySelector('[data-preview-download]')?.remove();
           return;
         }
         body.dataset.previewImageUrl = url;
+        body.dataset.previewImageReady = '1';
+        const dlReady = body.querySelector('[data-preview-download]');
+        if (dlReady) dlReady.disabled = false;
         const openPreviewLightbox = () => {
           if (typeof window.openLightbox !== 'function') return;
-          const feedKey = imageGenPreviewKind === 'warehouse'
-            ? 'wh_' + imageGenPreviewId
-            : imageGenPreviewId;
-          window.openLightbox(url, { imageGen: true, feedKey });
+          const feedKey = previewKind === 'warehouse'
+            ? 'wh_' + previewId
+            : previewId;
+          window.openLightbox(url, {
+            imageGen: true,
+            feedKey,
+            community: previewKind === 'community',
+            postId: previewKind === 'community' ? previewId : null,
+            cardId: previewKind === 'warehouse' ? previewAssetId : null
+          });
         };
         const img = document.createElement('img');
         img.src = url;
@@ -9586,6 +9678,7 @@
         img.draggable = false;
         img.style.cursor = 'zoom-in';
         img.onload = () => {
+          if (previewStale()) return;
           if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(zoomBtn);
           if (typeof window.resetImageZoom === 'function') window.resetImageZoom(img);
           if (typeof window.attachImageZoom === 'function') window.attachImageZoom(img);
@@ -9648,7 +9741,11 @@
       );
     });
     body.querySelector('[data-preview-download]')?.addEventListener('click', () => {
-      const url = body.dataset.previewImageUrl || zoomBtn?.querySelector('img')?.src || '';
+      if (previewStale() || body.dataset.previewImageReady !== '1') {
+        toast('图片加载中，请稍后再下载');
+        return;
+      }
+      const url = body.dataset.previewImageUrl || '';
       void downloadImageFromUrl(url, `prompt-hub-gen-${Date.now()}.png`);
     });
   }
@@ -9929,7 +10026,13 @@
       return;
     }
     if (typeof window.openLightbox !== 'function') return;
-    window.openLightbox(url, { imageGen: true, feedKey });
+    window.openLightbox(url, {
+      imageGen: true,
+      feedKey,
+      community: kind === 'community',
+      postId: kind === 'community' ? id : null,
+      cardId: kind === 'warehouse' ? assetId : null
+    });
   }
 
   function imageGenFeedHasMorePages() {
@@ -10238,7 +10341,24 @@
     });
     document.querySelectorAll('[data-community-scope]').forEach(btn => {
       btn.addEventListener('click', () => {
-        communityScope = btn.dataset.communityScope || 'all';
+        const nextScope = btn.dataset.communityScope || 'all';
+        if (nextScope === 'curated') {
+          communityScope = 'curated';
+          document.querySelectorAll('[data-community-scope]').forEach(b => {
+            b.classList.toggle('active', b === btn);
+          });
+          document.querySelectorAll('[data-imagegen-community-scope]').forEach(b => {
+            b.classList.toggle('active', (b.dataset.imagegenCommunityScope || 'all') === communityScope);
+          });
+          closeCommunitySidePanel();
+          renderCommunity({ skipFeedFetch: true, forceRepaint: true });
+          toast('社区精选正在开发中，敬请期待');
+          return;
+        }
+        communityScope = nextScope;
+        delete feedPagedStore.communityGrid;
+        const grid = document.getElementById('communityGrid');
+        if (grid) delete grid.dataset.feedSig;
         document.querySelectorAll('[data-community-scope]').forEach(b => {
           b.classList.toggle('active', b === btn);
         });
@@ -10246,7 +10366,10 @@
           b.classList.toggle('active', (b.dataset.imagegenCommunityScope || 'all') === communityScope);
         });
         closeCommunitySidePanel();
-        renderCommunity({ skipFeedFetch: true });
+        if (communityScope === 'following' && follows.size === 0) {
+          toast('暂无关注作者，点击作品上的作者名可关注');
+        }
+        renderCommunity({ skipFeedFetch: true, forceRepaint: true });
         if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed();
       });
     });
@@ -10448,6 +10571,7 @@
     }
     if (app === 'creations') {
       if (!document.getElementById('pageCreations')?.classList.contains('active')) return;
+      requestAnimationFrame(() => repairCreationsFeedLayout());
       renderMyHomeProfile();
       const activeTab = document.querySelector('#myHomeTabs .my-home-tab.active')?.dataset?.homeTab || 'posts';
       if (activeTab === 'owned-packages') {
@@ -10697,10 +10821,12 @@
     findPost,
     toggleCommunityAppreciate,
     exitCommunityAppreciate,
+    isCommunityQuickPreviewActive,
     onAppreciateViewerClose,
     bumpAppreciateViewerGen,
     openCommunityAppreciateViewer,
     openCommunityAppreciateById,
+    openCommunitySidePanel,
     isPostFavorited,
     pruneOrphanFeatureData,
     purgeGhostCommunityData,
@@ -10722,6 +10848,7 @@
     pruneEmptyCommunityFeedCards,
     scheduleLayout: scheduleCommunityLayout,
     scheduleCommunityLayout,
+    repairCreationsFeedLayout,
     layoutCommunityMasonry,
     relayoutCommunityFeeds,
     onCardDeletedForGen,

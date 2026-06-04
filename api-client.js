@@ -735,6 +735,10 @@
     if (!isConfigured()) {
       return { ok: false, code: 'API_NOT_CONFIGURED', message: '未配置 API 地址' };
     }
+    if (isApiRateLimited()) {
+      return { ok: false, code: 'RATE_LIMITED', message: '操作过于频繁，请稍后再试' };
+    }
+    const max429Retries = opts.max429Retries != null ? Number(opts.max429Retries) : 4;
     const timeoutMs = opts.timeoutMs || API_FAST_TIMEOUT_MS;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -749,9 +753,12 @@
       const json = await res.json().catch(() => ({}));
       if (!res.ok || json.ok === false) {
         const code = json.error?.code || (res.status === 429 ? 'RATE_LIMITED' : 'REQUEST_FAILED');
-        if (res.status === 429 && attempt < 4) {
+        if (res.status === 429 && attempt < max429Retries) {
           await new Promise((r) => setTimeout(r, 1000 + attempt * 900));
           return publicPost(path, body, opts, attempt + 1);
+        }
+        if (res.status === 429 || res.status === 503) {
+          markApiRateLimited(res.status === 503 ? 120000 : 90000);
         }
         return {
           ok: false,
@@ -780,7 +787,8 @@
       }));
     if (!list.length) return { ok: true, data: { urls: {}, refMap: {} } };
     return publicPost('/api/v1/media/community/sign-batch', { items: list }, {
-      timeoutMs: opts?.timeoutMs || 5500
+      timeoutMs: opts?.timeoutMs || 5500,
+      max429Retries: 1
     });
   }
 
@@ -859,6 +867,7 @@
   window.PromptHubApi = {
     isApiUnreachable,
     isApiRateLimited,
+    markApiRateLimited,
     markApiUnreachable,
     probeApiHealth,
     prepareApiCall,

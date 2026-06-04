@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260604m';
+    window.__APP_BUILD__ = '20260604a';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -46,8 +46,7 @@
       try {
         var t = localStorage.getItem('promptrepo_theme');
         if (t !== 'light' && t !== 'dark') {
-          var h = new Date().getHours();
-          t = h >= 8 && h < 20 ? 'light' : 'dark';
+          t = 'dark';
         }
         if (t === 'light') {
           document.documentElement.setAttribute('data-theme', 'light');
@@ -82,15 +81,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260604m">
-  <link rel="stylesheet" href="styles-theme.css?v=20260604m">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260604m">
+  <link rel="stylesheet" href="styles.css?v=20260604a">
+  <link rel="stylesheet" href="styles-theme.css?v=20260604a">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260604a">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260604m">
+  <link rel="stylesheet" href="styles-features.css?v=20260604a">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
-  <script src="theme.js?v=20260615z"></script>
+  <script src="theme.js?v=20260604a"></script>
 </head>
 <body>
   <div class="app-chrome">
@@ -133,10 +132,10 @@
       <div class="settings-body">
         <section class="settings-section">
           <h4 class="settings-section-title">外观</h4>
-          <p class="settings-hint settings-hint-block">点击下方主题按钮可立即切换日光 / 夜间；手动切换后会暂停自动昼夜。</p>
+          <p class="settings-hint settings-hint-block">默认夜间模式；点下方按钮可切换日光。自动昼夜默认关闭，需要时可勾选。</p>
           <button type="button" class="btn btn-secondary app-settings-theme-btn" onclick="toggleAppTheme()">切换日光 / 夜间模式</button>
           <label class="settings-check settings-check-spaced">
-            <input type="checkbox" id="autoDayNightToggle" checked>
+            <input type="checkbox" id="autoDayNightToggle">
             <span class="settings-check-box" aria-hidden="true"></span>
             <span class="settings-check-label">自动昼夜（早 8:00 日光 / 晚 20:00 夜间）</span>
           </label>
@@ -172,8 +171,28 @@
         <section class="settings-section mobile-only settings-section-compact" id="pwaInstallSettingsSection">
           <button type="button" class="btn btn-secondary" id="pwaInstallSettingsBtn">添加到主屏幕</button>
         </section>
+        <section class="settings-section settings-section-help hidden" id="appSettingsHelpSection" aria-label="帮助">
+          <h4 class="settings-section-title">帮助</h4>
+          <ul class="settings-help-list">
+            <li><strong>卡片库</strong>：管理提示词与参考图；右键可置顶（免费 2 张 / 轻量 3 张 / 基础及以上不限）。</li>
+            <li><strong>社区 / 创作</strong>：发布与浏览提示词作品；社区需登录后互动。</li>
+            <li><strong>图片生成</strong>：双模式 Tab；参考图支持反推 / 裂变；优化提示词在提示词栏左侧；生成后自动入库，右侧可浏览仓库与社区。</li>
+            <li><strong>卡片资产</strong>：免费领取或购买图包，拥有后在「我的主页」一键导入卡片库。</li>
+            <li><strong>会员</strong>：升级时高档先用、低档剩余天数顺延，不会整段都算成高档。</li>
+            <li><strong>外观</strong>：默认夜间；可在上方切换日光，或开启自动昼夜。</li>
+            <li><strong>备份</strong>：卡片库设置 → 数据管理 → 备份导出，防止浏览器清数据丢失。</li>
+          </ul>
+          <h4 class="settings-section-title settings-section-title-sub">联系我们</h4>
+          <p class="settings-hint">添加微信时请备注「提示词仓库」。</p>
+          <div class="contact-wechat-row">
+            <span class="contact-wechat-label">微信号</span>
+            <code class="contact-wechat-id" id="contactWechatId">bz4jx3jp2li1</code>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="copyWechatId()">复制微信号</button>
+          </div>
+        </section>
       </div>
       <footer class="settings-footer">
+        <button type="button" class="btn btn-ghost btn-sm settings-footer-help-btn" onclick="toggleAppSettingsHelp()" aria-expanded="false" aria-controls="appSettingsHelpSection">帮助</button>
         <span class="settings-status" id="appSettingsStatus"></span>
         <button type="button" class="btn btn-primary" onclick="saveAppSettings()">保存</button>
         <button type="button" class="btn btn-secondary" onclick="closeAppSettings()">完成</button>
@@ -193,19 +212,6 @@
       </header>
 
       <div class="settings-body">
-        <section class="settings-section settings-section-help" id="settingsHelpSection">
-          <h4 class="settings-section-title">帮助</h4>
-          <ul class="settings-help-list">
-            <li><strong>卡片库</strong>：管理提示词与参考图；右键可置顶（免费 2 张 / 轻量 3 张 / 基础及以上不限）。</li>
-            <li><strong>图片生成</strong>：双模式「图片生成 / 灵感抽卡」；参考图可反推 / 裂变；「优化提示词」在提示词栏左侧；生成后入库，右侧可看仓库与社区。</li>
-            <li><strong>卡片资产</strong>：领取或购买图包后，在「我的主页 → 拥有的资产包」导入卡片库。</li>
-            <li><strong>会员</strong>：升级高档会员时，低档剩余天数会在高档到期后继续生效（不会整段变成高档）。</li>
-            <li><strong>数据备份</strong>：在下方「数据管理」中导出 JSON，用于换设备或灾备。</li>
-            <li><strong>云同步</strong>：登录后卡片自动同步；未登录仅保存在本浏览器。</li>
-            <li><strong>外观</strong>：请在左侧导航「设置」中调整日光 / 夜间与自动昼夜。</li>
-          </ul>
-        </section>
-
         <section class="settings-section">
           <h4 class="settings-section-title">文字识别（OCR）</h4>
           <div class="settings-field">
@@ -310,7 +316,7 @@
         <button type="button" class="side-panel-close-btn" onclick="closeCommunityPanel()" aria-label="关闭"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
       </header>
       <div class="side-panel-body">
-        <p class="side-panel-desc">欢迎加入 Prompt Hub 用户 QQ 群，交流提示词与使用技巧。入群后联系管理员可领取 <strong>100 积分</strong>（进群后由站长引导领取）。</p>
+        <p class="side-panel-desc side-panel-desc-oneline">入群后联系管理员领取 100 积分。</p>
         <div class="contact-wechat-row">
           <span class="contact-wechat-label">QQ 群号</span>
           <code class="contact-wechat-id" id="communityQqId">222653426</code>
@@ -356,7 +362,7 @@
           <li><strong>图片生成</strong>：双模式 Tab；参考图支持反推 / 裂变；优化提示词在提示词栏左侧；生成后自动入库，右侧可浏览仓库与社区。</li>
           <li><strong>卡片资产</strong>：免费领取或购买图包，拥有后在「我的主页」一键导入卡片库。</li>
           <li><strong>会员</strong>：升级时高档先用、低档剩余天数顺延，不会整段都算成高档。</li>
-          <li><strong>自动昼夜</strong>：默认早 8 点日光、晚 8 点夜间；可在设置中关闭。</li>
+          <li><strong>自动昼夜</strong>：默认关闭；可在「设置 → 外观」中开启早 8 点日光 / 晚 8 点夜间。</li>
           <li><strong>备份</strong>：设置 → 数据管理 → 备份导出，防止浏览器清数据丢失。</li>
         </ul>
       </div>
@@ -431,15 +437,15 @@
         <p class="appreciate-viewer-hint">图片上：滚轮缩放 · 拖拽移动 · 双击还原</p>
         <p class="appreciate-viewer-hint-nav">图片外：滚轮向下下一张 · 向上上一张</p>
         <p class="appreciate-viewer-caption" id="appreciateViewerCaption"></p>
+        <div class="appreciate-viewer-actions hidden" id="appreciateViewerActions">
+          <button type="button" class="btn btn-secondary lightbox-collect-btn" id="appreciateViewerFavBtn" title="收藏到卡片库">
+            <span>收藏到卡片库</span>
+          </button>
+        </div>
+        <div class="appreciate-viewer-actions hidden" id="appreciateViewerWarehouseActions">
+          <button type="button" class="btn btn-primary appreciate-viewer-gen-btn" id="appreciateViewerGenBtn">去生图</button>
+        </div>
       </div>
-    </div>
-    <div class="appreciate-viewer-actions hidden" id="appreciateViewerActions">
-      <button type="button" class="lightbox-collect-btn" id="appreciateViewerFavBtn" title="收藏到卡片库">
-        <span>收藏到卡片库</span>
-      </button>
-    </div>
-    <div class="appreciate-viewer-actions hidden" id="appreciateViewerWarehouseActions">
-      <button type="button" class="appreciate-viewer-gen-btn" id="appreciateViewerGenBtn">去生图</button>
     </div>
   </div>
   <button type="button" class="global-view-exit" id="globalViewExitBtn" onclick="exitGlobalView()">退出快速预览（Esc）</button>
@@ -524,27 +530,6 @@
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
         <span class="app-nav-label">设置</span>
       </button>
-      <button type="button" class="app-nav-item app-nav-util" onclick="openHelpPanel()">
-        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
-        <span class="app-nav-label">帮助</span>
-      </button>
-      <button type="button" class="app-nav-item app-nav-util" onclick="openCommunityPanel()">
-        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        <span class="app-nav-label">加入社群</span>
-        <span class="app-nav-community-badge" title="入群后联系管理员领取">+100积分</span>
-      </button>
-      <button type="button" class="app-nav-item app-nav-util" onclick="openContactPanel()">
-        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-        <span class="app-nav-label">联系我们</span>
-      </button>
-      <button type="button" class="theme-toggle-btn app-nav-theme-btn" id="themeToggleBtn" aria-label="切换主题" title="切换主题">
-        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
-        </svg>
-        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-        </svg>
-      </button>
     </div>
     <div class="app-nav-auth" id="appNavAuth">
       <div class="app-nav-subscribe-wrap">
@@ -554,7 +539,7 @@
         </button>
         <button type="button" class="app-nav-subscribe-btn" onclick="openSubscribePanel()">
           <span class="app-nav-subscribe-badge" id="appNavSubscribeBadge">五折</span>
-          <span class="app-nav-subscribe-text">会员</span>
+          <span class="app-nav-subscribe-text" id="appNavSubscribeText">会员</span>
           <span class="app-nav-subscribe-shine" aria-hidden="true"></span>
         </button>
         <p class="app-nav-subscribe-meta" id="appNavSubscribeMeta">未开通 · 完成任务可免费领会员</p>
@@ -564,9 +549,9 @@
         <span class="auth-user-email" id="authUserEmail" title=""></span>
         <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
       </div>
-      <p class="auth-cloud-status hidden" id="authCloudStatus" role="status">登录后自动保存到云端</p>
+      <p class="auth-cloud-status hidden" id="authCloudStatus" role="status" aria-live="polite"></p>
       <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260604m</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260604a</p>
     </div>
   </nav>
 
@@ -687,7 +672,7 @@
       <h3 id="currentGroupTitle">全部提示词</h3>
       <div class="header-actions">
         <div id="batchBar" class="batch-bar">
-          <button class="btn btn-ghost btn-sm" onclick="batchPublishCommunity()" title="提示词≥15字且需配图">开启公开</button>
+          <button class="btn btn-ghost btn-sm" onclick="batchPublishCommunity()" title="提示词≥15字且需配图">公开</button>
           <button class="btn btn-ghost btn-sm" onclick="batchUnpublishCommunity()" title="从社区下架，卡片仍保留">关闭公开</button>
           <button class="btn btn-ghost btn-sm" onclick="batchMoveGroup()">移动</button>
           <button class="btn btn-ghost btn-sm" onclick="batchMoveWarehouse()">移库</button>
@@ -732,11 +717,7 @@
             </div>
             <input type="text" class="search-box desktop-only" placeholder="搜索…" oninput="renderCards(true)" id="searchInput">
           </div>
-          <div class="toolbar-cluster">
-            <button type="button" class="icon-btn icon-btn-labeled" id="ocrBtn" onclick="openOcrModal()" title="从图片提取文字到提示词">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg>
-              <span>文字提取</span>
-            </button>
+          <div class="toolbar-cluster toolbar-cluster-actions">
             <button type="button" class="icon-btn mobile-only mobile-header-btn" id="mobileNewCardBtn" aria-label="新建卡片" title="新建" onclick="createNewCard({forceOpenPanel:true})">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
             </button>
@@ -896,9 +877,9 @@
               <button type="button" class="feature-tab" data-community-sort="new">最新</button>
             </div>
             <div class="feature-tabs community-scope-tabs" role="group" aria-label="浏览范围">
-              <button type="button" class="feature-tab active" data-community-scope="all">全部作品</button>
-              <button type="button" class="feature-tab" data-community-scope="curated">社区精选</button>
-              <button type="button" class="feature-tab" data-community-scope="following">我的关注</button>
+              <button type="button" class="feature-tab active" data-community-scope="all">全部</button>
+              <button type="button" class="feature-tab" data-community-scope="curated">精选</button>
+              <button type="button" class="feature-tab" data-community-scope="following">关注</button>
             </div>
             <input type="search" class="feature-search" id="communitySearch" placeholder="搜索提示词…" autocomplete="off">
           </div>
@@ -914,8 +895,6 @@
           <div class="community-page-layout">
             <div class="community-page-main">
               <div class="feature-body feature-body-cards">
-                <p class="community-inline-hint mobile-only">点击卡片查看详情；点头像进作者主页。</p>
-                <p class="community-inline-hint desktop-only">点击卡片在右侧查看详情，可随时切换。仅点击作者头像进入 TA 的主页。</p>
                 <div class="cards-container community-cards" id="communityGrid"></div>
               </div>
             </div>
@@ -937,6 +916,7 @@
           <h2>我的主页</h2>
         </header>
         <div class="my-home-profile" id="myHomeProfile" aria-label="个人主页信息"></div>
+        <div class="published-reward-rules" id="publishedRewardRules"></div>
         <div class="my-home-tabs" id="myHomeTabs" role="tablist">
           <button type="button" class="my-home-tab active" data-home-tab="posts" role="tab">发布作品</button>
           <button type="button" class="my-home-tab" data-home-tab="owned-packages" role="tab">拥有的资产包</button>
@@ -946,9 +926,8 @@
           <div class="community-page-layout">
             <div class="community-page-main">
               <div class="feature-body feature-body-cards">
-                <div class="published-reward-rules" id="publishedRewardRules"></div>
                 <p class="community-inline-hint" id="creationsHint">你在卡片库公开到社区的作品 · 点击卡片查看详情与点赞数</p>
-                <div class="cards-container creations-cards" id="creationsGrid"><div class="grid-sizer"></div></div>
+                <div class="cards-container creations-cards community-feed-grid community-feed-columns" id="creationsGrid"></div>
               </div>
             </div>
           </div>
@@ -1166,7 +1145,7 @@
             <div class="panel-publish-row imagegen-publish-row" id="imageGenGenPublicRow">
               <div class="panel-publish-copy">
                 <span class="panel-publish-title">生成后公开到社区</span>
-                <p class="panel-hint">开启后保存到仓库并同步发布（会调用 Apimart Gemini 做配图审核，约 &lt;0.001 元/次）；关闭则仅入库</p>
+                <p class="panel-hint" id="imageGenGenPublicHint">提示词≥15字且需配图；开启后保存到仓库并同步发布，关闭则仅入库</p>
               </div>
               <button type="button" class="publish-circle-btn" id="imageGenGenPublicBtn" aria-pressed="false" aria-label="生成后公开到社区" title="切换生成后公开"></button>
             </div>
@@ -1196,7 +1175,7 @@
           <aside class="imagegen-side">
             <div class="imagegen-feed-tabs" role="tablist">
               <button type="button" class="imagegen-feed-tab active" data-feed-tab="warehouse" role="tab">仓库</button>
-              <button type="button" class="imagegen-feed-tab" data-feed-tab="community" role="tab">社区</button>
+              <button type="button" class="imagegen-feed-tab" data-feed-tab="community" role="tab">获取</button>
             </div>
             <div class="imagegen-community-filters hidden" id="imageGenCommunityFilters">
               <div class="imagegen-community-filter-row">
@@ -1227,7 +1206,7 @@
               <label class="imagegen-filter-label desktop-only" for="imageGenWhTag">标签</label>
               <select id="imageGenWhTag" class="imagegen-filter-select desktop-only"></select>
             </div>
-            <p class="imagegen-feed-hint" id="imageGenFeedHint">卡片仓库 · 生成中任务显示在顶部 · 刷新或关闭页面后会自动恢复</p>
+            <p class="imagegen-feed-hint" id="imageGenFeedHint" hidden></p>
             <div class="imagegen-feed" id="imageGenFeed"></div>
             <aside class="imagegen-preview-panel hidden" id="imageGenPreviewPanel" aria-label="作品详情">
               <div class="imagegen-preview-head">
@@ -1335,7 +1314,7 @@
       <header class="subscribe-panel-head">
         <div>
           <h3 id="subscribePanelTitle">会员与积分</h3>
-          <p class="subscribe-panel-sub" id="subscribePanelSub">积分充值 · 会员订阅 · 购买后在小店收货激活码兑换</p>
+          <p class="subscribe-panel-sub" id="subscribePanelSub">激活码兑换 · 也可添加微信 <code class="subscribe-wechat-inline">bz4jx3jp2li1</code> 人工充值</p>
         </div>
         <button type="button" class="modal-close-btn" id="subscribeCloseBtn" aria-label="关闭"><span aria-hidden="true">×</span></button>
       </header>
@@ -1359,6 +1338,12 @@
             <input type="text" id="activationCodeInputSubscribe" class="settings-input" placeholder="输入激活码" autocomplete="off">
             <button type="button" class="btn btn-primary btn-sm" onclick="redeemActivationCode()">兑换</button>
           </div>
+          <div class="subscribe-wechat-row">
+            <span class="subscribe-wechat-label">微信人工充值</span>
+            <code class="subscribe-wechat-id" id="subscribeWechatId">bz4jx3jp2li1</code>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="copyWechatId()">复制微信号</button>
+          </div>
+          <p class="subscribe-shop-hint subscribe-wechat-hint">备注「提示词仓库」；转账后站长发激活码，在上方兑换即可（可替代小店购买）。</p>
         </div>
         <section class="subscribe-shop-section hidden" id="subscribeCreditsSection" data-subscribe-section="credits">
           <p class="subscribe-shop-section-title">选择积分套餐</p>
@@ -1419,25 +1404,25 @@
   <script src="supabase-config.js"></script>
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="api-client.js?v=20260604m"></script>
+  <script src="api-client.js?v=20260604a"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260604m"></script>
-  <script src="card-image-loader.js?v=20260604m"></script>
+  <script src="supabase-sync.js?v=20260604a"></script>
+  <script src="card-image-loader.js?v=20260604a"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
   <script src="subscription.js?v=20260622e"></script>
-  <script src="trial-tasks.js?v=20260604m"></script>
+  <script src="trial-tasks.js?v=20260604a"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="script.js?v=20260604m"></script>
+  <script src="script.js?v=20260604a"></script>
   <script src="points-system.js?v=20260606n"></script>
-  <script src="imagegen-prompt-kit.js?v=20260604m"></script>
-  <script src="imagegen-prompt-tools.js?v=20260604m"></script>
-  <script src="features-draft.js?v=20260604m"></script>
+  <script src="imagegen-prompt-kit.js?v=20260604a"></script>
+  <script src="imagegen-prompt-tools.js?v=20260604a"></script>
+  <script src="features-draft.js?v=20260604a"></script>
   <script src="community-gacha.js?v=20260606v"></script>
   <script src="features-assets.js?v=20260602w"></script>
-  <script src="hotfix-image-layout.js?v=20260604m"></script>
-  <script src="pwa-install.js?v=20260604m"></script>
-  <script src="mobile.js?v=20260604m"></script>
+  <script src="hotfix-image-layout.js?v=20260604a"></script>
+  <script src="pwa-install.js?v=20260604a"></script>
+  <script src="mobile.js?v=20260604a"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

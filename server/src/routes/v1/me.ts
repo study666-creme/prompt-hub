@@ -138,7 +138,9 @@ const REASON_LABELS: Record<string, string> = {
   subscription_grant: '订阅开通',
   like_milestone: '点赞奖励',
   daily_grant: '每日会员积分',
-  membership_task: '会员任务奖励'
+  membership_task: '会员任务奖励',
+  checkin_streak_bonus: '连续签到奖励（每 7 天）',
+  daily_checkin: '每日签到'
 };
 
 meRoutes.get('/ledger', async c => {

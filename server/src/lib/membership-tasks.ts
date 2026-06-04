@@ -39,6 +39,7 @@ export type TaskKey =
   | 'cards_count_30'
   | 'spend_1000'
   | 'spend_2000'
+  | 'tasks_milestone_10'
   | `spend_${number}`;
 
 export type TaskFlags = {
@@ -112,7 +113,13 @@ export function memberDailyTaskKey(d = new Date()): string {
 
 export function taskRewardForKey(
   key: string
-): { days: number; credits: number; title: string; description: string } | null {
+): {
+  days: number;
+  credits: number;
+  title: string;
+  description: string;
+  tier?: NonNullable<Profile['membership_tier']>;
+} | null {
   if (isDailyBonusTaskKey(key)) {
     return {
       days: 0,
@@ -240,6 +247,13 @@ export function taskRewardForKey(
       credits: 0,
       title: '累计消耗 2000 积分',
       description: '生图等累计消耗达 2000 积分'
+    },
+    tasks_milestone_10: {
+      days: 1,
+      credits: 0,
+      tier: 'pro',
+      title: '累计完成 10 项任务',
+      description: '在任务中心累计领取完成 10 项成长任务（不含每日签到与本项）'
     }
   };
   if (staticTasks[key]) return staticTasks[key];
@@ -250,7 +264,7 @@ export function taskRewardForKey(
       return {
         days: 1,
         credits: 0,
-        title: n >= REPEATABLE_SPEND_START ? `每消耗 ${REPEATABLE_SPEND_STEP} 积分（已达 ${n}）` : `累计消耗 ${n} 积分`,
+        title: n >= REPEATABLE_SPEND_START ? `每消耗 ${REPEATABLE_SPEND_STEP} 积分` : `累计消耗 ${n} 积分`,
         description:
           n >= REPEATABLE_SPEND_START
             ? `生图等累计消耗每满 ${REPEATABLE_SPEND_STEP} 积分可领 1 天（当前档位 ${n}）`
@@ -297,11 +311,23 @@ export function countQualifyingPosts(
   return n;
 }
 
+export function countGrowthTasksClaimed(claimed: Set<string>): number {
+  let n = 0;
+  for (const key of claimed) {
+    if (key === 'tasks_milestone_10') continue;
+    if (isDailyBonusTaskKey(key) || isMemberDailyTaskKey(key) || isCheckinTaskKey(key)) continue;
+    if (key === 'mini_99_membership') continue;
+    if (taskRewardForKey(key)) n += 1;
+  }
+  return n;
+}
+
 export function isTaskProgressMet(
   key: string,
   flags: TaskFlags,
   profile: Profile,
-  phoneVerified: boolean
+  phoneVerified: boolean,
+  claimed?: Set<string>
 ): boolean {
   if (isDailyBonusTaskKey(key)) return true;
   if (isMemberDailyTaskKey(key)) {
@@ -351,6 +377,8 @@ export function isTaskProgressMet(
       return spent >= 1000;
     case 'spend_2000':
       return spent >= 2000;
+    case 'tasks_milestone_10':
+      return (claimed ? countGrowthTasksClaimed(claimed) : 0) >= 10;
     default: {
       const m = /^spend_(\d+)$/.exec(key);
       if (m) return spent >= Number(m[1]);
@@ -618,9 +646,11 @@ export async function claimMembershipTask(
   const claimed = await listClaimedKeys(admin, userId);
 
   if (claimed.has(taskKey)) throw new Error('already_claimed');
-  if (!isTaskProgressMet(taskKey, flags, profile, phoneVerified)) {
+  if (!isTaskProgressMet(taskKey, flags, profile, phoneVerified, claimed)) {
     throw new Error('not_ready');
   }
+
+  const rewardTier = reward.tier || 'basic';
 
   const { error: insErr } = await admin.from('membership_task_claims').insert({
     user_id: userId,
@@ -641,7 +671,7 @@ export async function claimMembershipTask(
   }
 
   if (reward.days > 0) {
-    profile = await extendMembershipDays(admin, profile, reward.days, 'basic', {
+    profile = await extendMembershipDays(admin, profile, reward.days, rewardTier, {
       creditGrantMode: 'daily'
     });
   }
@@ -677,7 +707,15 @@ export async function claimMembershipTask(
     profile = await getOrCreateProfile(admin, userId);
   }
   const parts: string[] = [];
-  if (reward.days) parts.push(`${reward.days} 天基础会员`);
+  if (reward.days) {
+    const tierLabel: Record<string, string> = {
+      lite: '轻量版',
+      basic: '基础版',
+      standard: '标准版',
+      pro: '专业版'
+    };
+    parts.push(`${reward.days} 天${tierLabel[rewardTier] || '基础版'}会员`);
+  }
   if (isMemberDailyTaskKey(taskKey)) {
     parts.push(`${dailyCreditsForTier(profile.membership_tier)} 积分（今日有效）`);
   } else if (isDailyBonusTaskKey(taskKey)) {
@@ -718,6 +756,7 @@ export type TaskListItem = {
   description: string;
   rewardDays: number;
   rewardCredits: number;
+  rewardTier?: NonNullable<Profile['membership_tier']>;
   claimed: boolean;
   ready: boolean;
   progress: string | null;
@@ -842,7 +881,7 @@ export function buildTaskList(
     const reward = taskRewardForKey(key);
     if (!reward) return [];
     const claimedAt = claimed.has(key);
-    const ready = !claimedAt && isTaskProgressMet(key, flags, profile, phoneVerified);
+    const ready = !claimedAt && isTaskProgressMet(key, flags, profile, phoneVerified, claimed);
     let progress: string | null = null;
     if (key === 'community_publish_5') {
       progress = `${Math.min(flags.community_qualified_count ?? 0, 5)}/5`;
@@ -862,6 +901,7 @@ export function buildTaskList(
       description: reward.description,
       rewardDays: reward.days,
       rewardCredits: reward.credits,
+      rewardTier: reward.tier,
       claimed: claimedAt,
       ready,
       progress,
@@ -869,11 +909,30 @@ export function buildTaskList(
     };
   }));
 
+  if (!claimed.has('tasks_milestone_10')) {
+    const milestoneReward = taskRewardForKey('tasks_milestone_10');
+    if (milestoneReward) {
+      const growthCount = countGrowthTasksClaimed(claimed);
+      items.push({
+        key: 'tasks_milestone_10',
+        title: milestoneReward.title,
+        description: milestoneReward.description,
+        rewardDays: milestoneReward.days,
+        rewardCredits: milestoneReward.credits,
+        rewardTier: milestoneReward.tier,
+        claimed: false,
+        ready: growthCount >= 10,
+        progress: `${Math.min(growthCount, 10)}/10`,
+        kind: 'claim'
+      });
+    }
+  }
+
   if (!opts?.mini99Redeemed) {
     items.push({
       key: 'mini_99_membership',
       title: '¥0.99 体验三天基础会员',
-      description: '淘宝购买后，在生图页「兑换」输入激活码（一人一码，支付后发货）',
+      description: '小店或微信购买后，在「兑换」输入激活码（一人一码）',
       rewardDays: 3,
       rewardCredits: 0,
       claimed: false,

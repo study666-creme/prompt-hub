@@ -48,6 +48,12 @@
   let signBudgetResetAt = 0;
   const SIGN_BUDGET_MAX = 120;
   const SIGN_BUDGET_WINDOW_MS = 30000;
+  /** 社区 sign-batch：串行 + 最小间隔，避免滚动/append 并发打满 Worker 429 */
+  const COMMUNITY_SIGN_BATCH_CHUNK = 40;
+  const COMMUNITY_SIGN_BATCH_MIN_GAP_MS = 700;
+  let communitySignBatchChain = Promise.resolve();
+  let communitySignBatchLastAt = 0;
+  let communitySignBatchCooldownUntil = 0;
   /** 视口触发 backfill：一次下载原图+上传 grid，会话内限量避免 Supabase 风暴 */
   const AUTO_GRID_BACKFILL = true;
   const GRID_BACKFILL_SESSION_CAP = 48;
@@ -1964,6 +1970,46 @@
     return [...paths];
   }
 
+  async function runCommunitySignBatchQueued(items, capMs) {
+    const list = (items || []).filter((item) => item && String(item.ref || '').trim());
+    if (!list.length) return { ok: true, data: { urls: {}, refMap: {} } };
+    if (Date.now() < communitySignBatchCooldownUntil) return null;
+    if (window.PromptHubApi?.isApiRateLimited?.()) return null;
+    if (!window.PromptHubApi?.signCommunityMediaRefsBatch) return null;
+
+    const chunks = [];
+    for (let i = 0; i < list.length; i += COMMUNITY_SIGN_BATCH_CHUNK) {
+      chunks.push(list.slice(i, i + COMMUNITY_SIGN_BATCH_CHUNK));
+    }
+
+    communitySignBatchChain = communitySignBatchChain.then(async () => {
+      let last = null;
+      for (const chunk of chunks) {
+        if (Date.now() < communitySignBatchCooldownUntil) break;
+        if (window.PromptHubApi?.isApiRateLimited?.()) break;
+        const gap = COMMUNITY_SIGN_BATCH_MIN_GAP_MS - (Date.now() - communitySignBatchLastAt);
+        if (gap > 0) await new Promise((r) => setTimeout(r, gap));
+        communitySignBatchLastAt = Date.now();
+        const r = await window.PromptHubApi.signCommunityMediaRefsBatch(chunk, {
+          timeoutMs: Math.max(2500, Number(capMs) || 5000)
+        });
+        last = r;
+        if (r?.ok) {
+          applyCommunityBatchSignResult(r.data);
+          continue;
+        }
+        if (r?.status === 429 || r?.status === 503 || r?.code === 'RATE_LIMITED') {
+          communitySignBatchCooldownUntil = Date.now() + (r?.status === 503 ? 120000 : 75000);
+          window.PromptHubApi?.markApiRateLimited?.(communitySignBatchCooldownUntil - Date.now());
+          break;
+        }
+      }
+      return last;
+    }).catch(() => null);
+
+    return communitySignBatchChain;
+  }
+
   async function prefetchCommunityDisplayUrlsLegacy(images, capMs) {
     if (!window.PromptHubApi?.signCommunityMediaRefsBatch) return;
     const items = (images || []).slice(0, 24).map((raw) => {
@@ -1976,10 +2022,7 @@
       };
     }).filter((x) => x?.ref);
     if (!items.length) return;
-    const r = await window.PromptHubApi.signCommunityMediaRefsBatch(items, {
-      timeoutMs: Math.max(2500, Number(capMs) || 4000)
-    });
-    if (r?.ok) applyCommunityBatchSignResult(r.data);
+    await runCommunitySignBatchQueued(items, capMs);
   }
 
   function applyCommunityBatchSignResult(data) {
@@ -2067,17 +2110,7 @@
 
     if (!batchItems.length) return;
 
-    if (window.PromptHubApi?.signCommunityMediaRefsBatch) {
-      const r = await window.PromptHubApi.signCommunityMediaRefsBatch(batchItems, {
-        timeoutMs: Math.max(2500, Number(capMs) || 5000)
-      });
-      if (r?.ok) {
-        applyCommunityBatchSignResult(r.data);
-        return;
-      }
-    }
-
-    return prefetchCommunityDisplayUrlsLegacy(list, capMs);
+    await runCommunitySignBatchQueued(batchItems.slice(0, COMMUNITY_SIGN_BATCH_CHUNK), capMs);
   }
 
   function collectPrefetchItemForRef(ref) {

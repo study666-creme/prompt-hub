@@ -561,6 +561,17 @@
           <div class="trial-hub-row-action">${dailyBtn}</div>
         </div>
         ${memberDailyRow}
+        <div class="trial-hub-row trial-hub-community-row">
+          <div class="trial-hub-row-main">
+            <strong>加入社群 · 领 100 积分</strong>
+            <p class="trial-hub-desc trial-hub-desc-oneline">入群后联系管理员领取 100 积分。</p>
+          </div>
+        </div>
+        <div class="trial-hub-link-row trial-hub-qq-row">
+          <span class="trial-hub-label">QQ 群号</span>
+          <code class="trial-hub-code">222653426</code>
+          <button type="button" class="btn btn-ghost btn-sm" id="trialHubCopyQq">复制群号</button>
+        </div>
       </section>
       <section class="trial-hub-block">
         <h4 class="trial-hub-title">邀请好友</h4>
@@ -592,6 +603,10 @@
     });
     document.getElementById('trialHubCopyCode')?.addEventListener('click', () => {
       void copyText(hub.inviteCode || '', '已复制邀请码');
+    });
+    document.getElementById('trialHubCopyQq')?.addEventListener('click', () => {
+      if (typeof copyCommunityQqId === 'function') copyCommunityQqId();
+      else void copyText('222653426', 'QQ 群号已复制');
     });
     document.getElementById('trialHubInviteSubmit')?.addEventListener('click', () => {
       if (!phoneOk) return phoneRequiredTip();
@@ -663,7 +678,8 @@
   function sortTaskItems(items) {
     return [...items].sort((a, b) => {
       const rank = (t) => {
-        if (t.claimed) return 2;
+        if (t.claimed) return 3;
+        if (t.kind === 'promo' || t.key === 'mini_99_membership') return 2;
         if (t.ready) return 0;
         return 1;
       };
@@ -715,8 +731,16 @@
     }
     list.innerHTML = items
       .map((task) => {
+        const tierLabel = {
+          lite: '轻量版',
+          basic: '基础版',
+          standard: '标准版',
+          pro: '专业版'
+        };
         const reward = [
-          task.rewardDays ? `${task.rewardDays} 天基础会员（直接到账）` : '',
+          task.rewardDays
+            ? `${task.rewardDays} 天${tierLabel[task.rewardTier] || '基础版'}会员（直接到账）`
+            : '',
           task.rewardCredits ? `${task.rewardCredits} 积分` : ''
         ]
           .filter(Boolean)

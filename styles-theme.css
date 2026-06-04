@@ -1,8 +1,6 @@
 /* 日光模式（浅色全局 UI） */
 [data-theme="light"] {
   color-scheme: light;
-  /* 日光模式略放大整页（暗色仍为 0.72），缓解「布局太小」反馈 */
-  --ui-scale: 0.82;
   --bg-primary: #f2f2f7;
   --bg-secondary: #ffffff;
   --bg-elevated: #ffffff;

@@ -21,27 +21,28 @@
 
 ---
 
-## 当前部署阶段（2026-06-04）
+## 当前部署阶段（2026-06-05）
 
 | 项 | 状态 |
 |----|------|
 | Worker | `prompt-hub-api` · API https://api.prompt-hub.cn |
-| Pages | https://prompt-hub.cn · 构建号 **`20260604l`**（以 `window.__APP_BUILD__` 为准） |
-| **已修（社区 20260604j～k）** | flex 列稳定：append 不清空重分；图片/侧栏不触发全墙 layout；修复 `colsChanged` 重复声明致整站白屏 |
-| **已修（媒体）** | `media/sign` 401 → 会话刷新 + 暂停签名风暴 + 提示重登；`posts/sync` 80 条分批 |
-| **已修（体验）** | 社区首屏 ~5 页；批量模式不跳顶；日光模式可读性见 `docs/LIGHT-THEME-UX.md` |
+| Pages | https://prompt-hub.cn · 构建号 **`20260604a`**（以 `window.__APP_BUILD__` 为准；`deploy-pages.ps1` 自动 bump） |
+| **已修（20260604a）** | 我的主页 flex 多列（孤儿卡进列 + `repairCreationsFeedLayout`）；主页列数独立 `promptrepo_myhome_columns`；社区去掉图片加载全墙重平衡（防晃眼）；任务「累计 10 项 → 1 天专业版」 |
+| **已修（20260605b）** | 生图滚动条统一；Tab「获取」；卡片库侧栏图随滚；基础/标准会员去边框 |
+| **已修（社区）** | flex append 最短列；`fromImage` no-op；禁止 `forceReflow` 全墙重分 |
+| **已修（媒体）** | `media/sign` 401 → 会话刷新 + 暂停签名风暴 |
 
 ### 已知问题（优先）
 
-1. **P0 数据**：卡片库总数 ≠ 已勾选公开数 → `inspectCardLibraryPublishGap` / `markAllEligibleCardsPublished` + 分批 sync。
-2. **日光可读性**：已 `--ui-scale:0.82` + 字色加深；待做「设置里界面大小」三档（见 `LIGHT-THEME-UX.md`）。
+1. **P0 数据**：卡片库公开数与社区帖 gap → `inspectCardLibraryPublishGap` / 分批 sync。
+2. **日光可读性**：待做「设置里界面大小」三档（`LIGHT-THEME-UX.md`）。
 3. **网络**：媒体 `ERR_CONNECTION_RESET`；Supabase 配额紧张。
 
 ### 下一步
 
-1. 强刷验构建号；社区点卡片侧栏：Feed 不应乱飞、不应白屏 SyntaxError。
-2. 日光模式让用户试读侧栏/奖励说明/卡片标题。
-3. tombstone 见 `scripts/audit-tombstone-storage.ps1`；**勿**自动幽灵 purge。
+1. 强刷验 **`20260604a`**：我的主页应多列小卡，非整宽巨图；社区滚到底加载时不应整页乱跳。
+2. 任务「累计 10 项」需 Worker 部署 `membership-tasks.ts` 后生效。
+3. tombstone 见 `scripts/audit-tombstone-storage.ps1`；勿自动幽灵 purge。
 
 ### 部署
 

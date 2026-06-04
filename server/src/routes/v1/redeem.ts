@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Env } from '../../env';
 import { ApiError } from '../../lib/errors';
 import {
+  grantBundleForActiveMembership,
   membershipCreditsPayload,
   syncMembershipCredits
 } from '../../lib/membership-credits';
@@ -147,14 +148,21 @@ redeemRoutes.post('/', async c => {
     const days = row.membership_days ?? 30;
     const shopRecharge = isShopRechargeCode(row.note);
     const profileBefore = await getOrCreateProfile(admin, user.id);
-    let mode = shopRecharge
+    const userPickedMode =
+      parsed.data.creditGrantMode === 'daily' || parsed.data.creditGrantMode === 'bundle'
+        ? parsed.data.creditGrantMode
+        : null;
+    let mode = tier === 'lite'
       ? 'daily'
-      : parsed.data.creditGrantMode || profileBefore.credit_grant_mode || 'daily';
-    if (tier === 'lite') mode = 'daily';
+      : shopRecharge
+        ? 'daily'
+        : userPickedMode || profileBefore.credit_grant_mode || 'daily';
 
     let profileAfter: import('../../lib/supabase').Profile;
     try {
-      profileAfter = await extendMembershipDays(admin, profileBefore, days, tier);
+      profileAfter = await extendMembershipDays(admin, profileBefore, days, tier, {
+        creditGrantMode: mode
+      });
     } catch (e) {
       const msg = String(e instanceof Error ? e.message : e);
       if (msg.includes('membership_queued')) {
@@ -184,7 +192,10 @@ redeemRoutes.post('/', async c => {
     await admin.from('profiles').update(memberPatch).eq('user_id', user.id);
   }
 
-  const profile = await syncMembershipCredits(admin, user.id);
+  let profile = await syncMembershipCredits(admin, user.id);
+  if (hasMembership && profile.credit_grant_mode === 'bundle') {
+    profile = await grantBundleForActiveMembership(admin, profile);
+  }
   const creditsInfo = membershipCreditsPayload(profile);
 
   const parts: string[] = [];
@@ -202,6 +213,11 @@ redeemRoutes.post('/', async c => {
       parts.push(`赠送 ${days} 天${tierLabel}会员（每日积分模式）`);
     } else {
       parts.push(`已开通 ${days} 天${tierLabel}会员`);
+    }
+    if (profile.credit_grant_mode === 'bundle') {
+      parts.push('积分已按一次性到账发放（永久有效）');
+    } else if (!shopRecharge) {
+      parts.push('会员每日积分请在任务中心领取');
     }
     if (profile.membership_queued_tier && profile.membership_queued_until) {
       const qLabel =

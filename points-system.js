@@ -334,6 +334,9 @@
           queuedUntil: api.data.membershipQueuedUntil || null
         });
       }
+      if (api.data.creditGrantMode && window.SubscriptionUI?.applyServerState) {
+        window.SubscriptionUI.applyServerState({ creditGrantMode: api.data.creditGrantMode });
+      }
       updateCreditsUI();
       return { ok: true, msg: api.data.message || '兑换成功' };
     }

@@ -21,7 +21,7 @@
 
   function isAutoDayNightEnabled() {
     const s = readSettings();
-    return s.autoDayNight !== false;
+    return s.autoDayNight === true;
   }
 
   function isThemeManualOverride() {
@@ -40,7 +40,7 @@
   function getPreferred() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === 'light' || saved === 'dark') return saved;
-    return getScheduledTheme();
+    return 'dark';
   }
 
   function persistThemeInSettings(theme) {
@@ -83,7 +83,7 @@
     if (isAutoDayNightEnabled()) {
       setThemeManualOverride(true);
       if (typeof showToast === 'function') {
-        showToast(next === 'light' ? '已切换日光模式（本次浏览有效，刷新后按 8–20 点自动）' : '已切换夜间模式（本次浏览有效，刷新后按 8–20 点自动）');
+        showToast(next === 'light' ? '已切换日光模式（已暂停自动昼夜，可在设置中重新开启）' : '已切换夜间模式');
       }
     } else if (typeof showToast === 'function') {
       showToast(next === 'light' ? '已切换日光模式' : '已切换夜间模式');

@@ -516,10 +516,24 @@
     return null;
   }
 
+  const prefetchContainerTimers = new Map();
+
   function prefetchRefsInContainer(container) {
     if (!container || !window.SupabaseSync?.prefetchCommunityDisplayUrls) return;
     if (isLazyOnlyContainer(container)) return;
     if (!isCommunityContainer(container)) return;
+    if (window.PromptHubApi?.isApiRateLimited?.()) return;
+    const key = container.id || 'feed';
+    clearTimeout(prefetchContainerTimers.get(key));
+    prefetchContainerTimers.set(key, setTimeout(() => {
+      prefetchContainerTimers.delete(key);
+      prefetchRefsInContainerNow(container);
+    }, 450));
+  }
+
+  function prefetchRefsInContainerNow(container) {
+    if (!container || !window.SupabaseSync?.prefetchCommunityDisplayUrls) return;
+    if (window.PromptHubApi?.isApiRateLimited?.()) return;
     const cap = 24;
     const items = [];
     const seen = new Set();

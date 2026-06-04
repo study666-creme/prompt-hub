@@ -1142,7 +1142,7 @@
 
 .imagegen-form-dock {
   flex: 0 0 auto;
-  padding: 10px 20px calc(12px + env(safe-area-inset-bottom));
+  padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-secondary) 94%, transparent);
   backdrop-filter: blur(10px);
@@ -1157,9 +1157,10 @@
 
 .imagegen-dock-meta {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  gap: 6px;
   margin-bottom: 10px;
 }
 
@@ -1188,9 +1189,14 @@
 
 .imagegen-dock-meta .imagegen-price-hint {
   margin: 0;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   font-size: 11px;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.45;
 }
 
 .imagegen-form-dock .imagegen-generate-btn {
@@ -1489,9 +1495,9 @@
   border-radius: 8px;
   border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
   background: var(--surface-secondary, rgba(0, 0, 0, 0.03));
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .imagegen-prompt-tools .imagegen-optimize-link:hover {
@@ -1520,10 +1526,11 @@
   background: transparent;
   color: var(--text-muted);
   font-size: 11px;
-  line-height: 1.2;
+  line-height: 1.35;
   padding: 4px 2px;
   cursor: pointer;
-  white-space: nowrap;
+  white-space: normal;
+  text-align: left;
 }
 
 .imagegen-optimize-link:hover,
@@ -2170,6 +2177,10 @@
   flex-shrink: 0;
   padding: 8px 14px 0;
   margin: 0;
+}
+
+.imagegen-feed-hint[hidden] {
+  display: none !important;
 }
 
 .imagegen-preview-panel {
@@ -3733,7 +3744,30 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
 .community-header {
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 12px;
+  gap: 8px 10px;
+}
+
+.community-header .feature-header-grow {
+  flex: 1 1 420px;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.community-scope-tabs .feature-tab {
+  padding: 6px 11px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.community-header .feature-tabs:not(.community-scope-tabs) .feature-tab {
+  padding: 6px 12px;
+}
+
+.community-header .feature-search {
+  flex: 1 1 160px;
+  min-width: 120px;
+  max-width: 240px;
 }
 
 .community-header h2 {
@@ -3909,27 +3943,73 @@ body.community-appreciate #communityGrid .community-post-card {
 }
 
 .published-reward-rules {
-  margin: 0 12px 8px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-card);
+  margin: 0;
+  padding: 0 16px 10px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
 .published-reward-rules h4 {
-  margin: 0 0 8px;
-  font-size: 14px;
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
 }
 
 .published-reward-rules ul {
   margin: 0;
   padding-left: 18px;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 .published-reward-rules .panel-hint {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+@media (min-width: 901px) {
+  #pageCreations .my-home-shell {
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  #pageCreations .my-home-shell .community-workspace,
+  #pageCreations .my-home-shell .community-page-layout,
+  #pageCreations .my-home-shell .community-page-main,
+  #pageCreations .my-home-shell .feature-body-cards {
+    flex: none;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  #pageCreations #creationsGrid.cards-container:not(.list-view),
+  #pageCreations #creationsGrid.cards-container.community-feed-columns:not(.list-view) {
+    overflow-y: visible !important;
+    overflow-x: hidden !important;
+    flex: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  #pageCreations #creationsGrid.community-feed-columns:not(.list-view) {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: flex-start !important;
+    gap: var(--feed-column-gap, var(--card-gap, 16px));
+  }
+
+  #pageCreations #creationsGrid.community-feed-columns:not(.list-view) > .community-feed-col {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--feed-row-gap, 10px);
+  }
 }
 
 #userProfileFollowBtn.active {

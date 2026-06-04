@@ -332,9 +332,17 @@
     overlayEl.querySelector('.community-gacha-backdrop')?.addEventListener('click', close);
     overlayEl.querySelector('.community-gacha-view')?.addEventListener('click', () => {
       const post = currentDraw?.post;
-      if (!post) return;
+      if (!post?.id) return;
       close();
-      window.FeatureDraft?.openCommunitySidePanel?.(post.id);
+      if (typeof switchAppPage === 'function') switchAppPage('community');
+      requestAnimationFrame(() => {
+        const open = window.FeatureDraft?.openCommunitySidePanel;
+        if (typeof open === 'function') {
+          open(post.id, { post });
+          return;
+        }
+        window.FeatureDraft?.openCommunityDetail?.(post.id);
+      });
     });
     collectBtn?.addEventListener('click', () => void onCollect());
     redrawBtn?.addEventListener('click', () => void drawAgain());

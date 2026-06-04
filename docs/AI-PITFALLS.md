@@ -1,7 +1,7 @@
 # AI 踩坑清单（必读，避免重复炸站）
 
 > **用途**：记录已踩过的致命/难查问题。改 `features-draft.js` / 社区 Feed / 媒体签名前**先扫本页**。  
-> 最后更新：**2026-06-04** · Pages 构建号 **`20260604k`**
+> 最后更新：**2026-06-04** · Pages 构建号 **`20260604a`**
 
 ---
 
@@ -23,6 +23,9 @@
 | **`finishCommunityFeedLayoutAfterBatch` 全墙重排** | 分页/ hydrate 时整墙抖 | 每次都 `scheduleCommunityLayout({ force, immediate })` | 已 distributed 时只 `ensureFeedPageSentinel` + `reconnectFeedPageObserver` |
 | **`hydrateFeedImages` 调 layout** | 后台补图时卡片跳 | `hydrateFeedImages` 末尾 `layoutCommunityMasonry` | 社区 Feed 的 hydrate **禁止**触发全墙 layout；用 `CardImageLoader.observeContainer` |
 | **`finishCardMediaShine` 触发 Masonry** | 每张图加载完都晃 | `scheduleCommunityLayout({ fromImage:true })` on flex 列 | **flex 多列模式**下 `fromImage` 必须 **no-op**（`scheduleCommunityLayout` 内 return） |
+| **`scheduleCommunityFeedImageBalance`** | 新图加载后整页卡片被「挤下去」、持续晃眼 | 图片 onload 后 `forceReflow` 全量重分所有列 | **禁止**对 flex 列做全墙重平衡；仅 append 时 `newCards → 最短列` |
+| **`ensureCommunityFeedColumnLayout` 早退** | **我的主页**一张巨图占满宽 | 已有 `.community-feed-col` 但卡片仍在 grid 直层（`> .card` 宽 100%） | 有列但有 **orphan** 卡时必须 `distributeCommunityFeedColumns({ newCards: orphans })`；CSS 可隐藏直层孤儿卡 |
+| **我的主页列数跟社区 storage** | 社区设 1 列时主页也塌成单列 | `creationsGrid` 误用 `promptrepo_community_columns` | 主页用 **`promptrepo_myhome_columns`**（默认 3），`getCreationsFeedColumns()` 独立计算 |
 | **首屏 `drainUntilDone`** | 卡顿、DOM 400+ | 首屏把 store 全部灌进 DOM | 首屏只 `drainCommunityFeedPages(5)`，其余靠哨兵滚动 |
 | **侧栏打开 `recalcCols`** | 点卡片整墙重排 | 宽度变窄触发 `recalcCols:true` + flatten | 列数不变时只 `applyCommunityFeedColumnCss`，**不动卡片 DOM** |
 | **点卡片 `scheduleCommunityLayout`** | 点击即乱 | `openPostSidePanel` 里 force layout | 开侧栏**只加 selected class**，保留 `scrollTop` |
@@ -37,6 +40,7 @@
 | **`media/sign` 401** | 卡片库全黑、Console 一片 401 | JWT 过期仍疯狂请求 sign | `api-client` 401 → `ensureApiAuthFresh` + 暂停签名 + `ph-api-unauthorized` 提示**重新登录** |
 | **`posts/sync` 一次 80+ 条** | 400 / 超时 | 服务端 `max(80)` | `COMMUNITY_SYNC_BATCH_MAX = 80` 分批 |
 | **签名预算过小** | 部分图永不加载 | `SIGN_BUDGET_MAX=64` + 212 张卡 | 已提到 120；勿在循环里每张单独 sign，优先 `sign-batch` |
+| **`community/sign-batch` 429/503** | 社区白卡、Network 上千条红 | 滚动/append/`observeContainer` 并发 batch；Worker 曾 **120/min**；429 还重试 4 次 | `runCommunitySignBatchQueued` 串行+700ms；429/503 冷却；prefetch debounce；Worker **300/min** |
 
 ---
 

@@ -24,6 +24,10 @@
   }
 
   function getCreditGrantMode() {
+    const picked = document.querySelector(
+      '#subscribeCreditMode input[name="creditGrantMode"]:checked'
+    );
+    if (picked?.value === 'daily' || picked?.value === 'bundle') return picked.value;
     try {
       const saved = localStorage.getItem(LS_CREDIT_MODE);
       if (saved === 'daily' || saved === 'bundle') return saved;
@@ -168,25 +172,58 @@
     }
   }
 
+  const NAV_MEMBER_BTN_LABELS = {
+    lite: '轻量版会员',
+    basic: '基础版会员',
+    standard: '标准版会员',
+    pro: '专业版会员'
+  };
+
   function renderMembershipStatus() {
     const info = window.Membership?.getMembershipDisplay?.();
     const metaEl = document.getElementById('appNavSubscribeMeta');
+    const textEl = document.getElementById('appNavSubscribeText');
+    const btnEl = document.querySelector('.app-nav-subscribe-btn');
+    const badgeEl = document.getElementById('appNavSubscribeBadge');
     const panelEl = document.getElementById('subscribeMembershipStatus');
+    const loggedIn = window.SupabaseSync?.isLoggedIn?.();
+    const storageSummary = loggedIn ? window.Membership?.getStorageSummaryLabel?.() : '';
+    const storageLine = loggedIn
+      ? (storageSummary ? `云存储 ${storageSummary}` : '云存储额度加载中…')
+      : '';
+    const storageHtml = storageLine
+      ? `<span class="subscribe-membership-storage">${esc(storageLine)}</span>`
+      : '';
     if (!info) return;
+    if (textEl) {
+      textEl.textContent = info.active && info.tier
+        ? (NAV_MEMBER_BTN_LABELS[info.tier] || '会员')
+        : '会员';
+    }
+    if (btnEl) {
+      btnEl.classList.toggle('is-member', !!info.active);
+      ['lite', 'basic', 'standard', 'pro'].forEach((t) => btnEl.classList.remove(`is-member-${t}`));
+      if (info.active && info.tier) btnEl.classList.add(`is-member-${info.tier}`);
+    }
+    if (badgeEl) badgeEl.hidden = !!info.active;
     if (metaEl) {
-      metaEl.textContent = info.active ? info.summary : info.summary;
-      metaEl.className = 'app-nav-subscribe-meta';
       if (info.active) {
-        metaEl.classList.add('is-member');
-        if (info.tier) metaEl.classList.add(`is-member-${info.tier}`);
+        metaEl.hidden = true;
+        metaEl.textContent = '';
+        metaEl.className = 'app-nav-subscribe-meta';
+      } else {
+        metaEl.hidden = false;
+        metaEl.textContent = info.summary;
+        metaEl.className = 'app-nav-subscribe-meta';
       }
     }
     if (panelEl) {
       panelEl.hidden = false;
       if (info.active) {
-        panelEl.innerHTML = `<div class="subscribe-membership-status is-active"><span class="subscribe-membership-tier">${esc(info.tierLabel)}</span><span class="subscribe-membership-until">${esc(info.untilLabel)}</span></div>`;
+        const tierCls = info.tier ? ` subscribe-tier-${info.tier}` : '';
+        panelEl.innerHTML = `<div class="subscribe-membership-status is-active${tierCls}"><span class="subscribe-membership-tier">${esc(info.tierLabel)}</span><span class="subscribe-membership-until">${esc(info.untilLabel)}</span>${storageHtml}</div>`;
       } else {
-        panelEl.innerHTML = `<div class="subscribe-membership-status"><span class="subscribe-membership-tier">普通用户</span><span class="subscribe-membership-until">免费 · 每日 5 积分 · 云存储 300MB</span></div>`;
+        panelEl.innerHTML = `<div class="subscribe-membership-status"><span class="subscribe-membership-tier">普通用户</span><span class="subscribe-membership-until">免费 · 每日 5 积分</span>${storageHtml || '<span class="subscribe-membership-storage">云存储 300MB 基础额度</span>'}</div>`;
       }
     }
   }

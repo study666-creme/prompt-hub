@@ -2,6 +2,14 @@
 
 > **2026-06-04 重要**：桌面社区已改为 **flex 多列**（非 Masonry）。后续 AI 请先读 **`docs/AI-PITFALLS.md`**，勿再「每张图加载全墙重排」或 append 时清空所有列。
 
+### 2026-06-04 我的主页巨图 + 社区加载晃眼（`20260604a`）
+
+| 问题 | 修复 |
+|------|------|
+| 我的主页一张巨图 | 卡片未进 `.community-feed-col` 时直层 `> .card` 宽 100%；`ensureCommunityFeedColumnLayout` 有列仍早退 | `repairCreationsFeedLayout()`；孤儿卡塞进列；`#creationsGrid.community-feed-columns > .card { display:none }` 兜底 |
+| 主页列数 | 与社区 1 列 storage 耦合 | `getCreationsFeedColumns` + `promptrepo_myhome_columns`（默认 3） |
+| 新图加载把旧图挤下去 | `scheduleCommunityFeedImageBalance` 全墙 `forceReflow` | 已移除；`fromImage` 保持 no-op |
+
 ### 2026-06-04 flex 列稳定（`features-draft.js`）
 
 | 问题 | 修复 |
@@ -120,6 +128,8 @@ window.fixCommunityLayout();
 
 ## 相关文档
 
+- [AI-PITFALLS.md](./AI-PITFALLS.md) - **AI 踩坑清单（必读）**
+- [LIGHT-THEME-UX.md](./LIGHT-THEME-UX.md) - 日光模式可读性
 - [CURRENT-ISSUES.md](./CURRENT-ISSUES.md) - 当前已知问题
 - [DEBUG-GUIDE.md](./DEBUG-GUIDE.md) - 调试指南
 - [COMMUNITY-ARCHITECTURE.md](./COMMUNITY-ARCHITECTURE.md) - 社区架构说明

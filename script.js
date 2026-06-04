@@ -167,7 +167,7 @@
     window.getCardImageBackup = getCardImageBackup;
     window.saveCardImageBackup = saveCardImageBackup;
 
-    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, autoPromptOcr: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, defaultImageGenAutoSaveWarehouse: true, communityNotificationsEnabled: true, communityNotifyBadge: true, autoDayNight: true, themeManualOverride: false, showTrimBlackBorderTool: false, preserveOriginalCardImage: false };
+    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, autoPromptOcr: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, defaultImageGenAutoSaveWarehouse: true, communityNotificationsEnabled: true, communityNotifyBadge: true, autoDayNight: false, themeManualOverride: false, showTrimBlackBorderTool: false, preserveOriginalCardImage: false };
     let pendingUploadFile = null;
     let pendingUploadBytes = 0;
     let currentGroup = 'all', selectedCardId = null, isNewCardMode = false, imageData = null;
@@ -193,20 +193,30 @@
     } catch (e) { activeFilters = new Set(); }
     const GUEST_CARD_LIMIT = 10;
 
-    if (localStorage.getItem('promptrepo_card_columns_v3') !== '1') {
-      localStorage.setItem('promptrepo_card_columns', '4');
-      localStorage.setItem('promptrepo_card_columns_v3', '1');
-    }
     let cardColumns = Number(localStorage.getItem('promptrepo_card_columns'));
-    if (!Number.isFinite(cardColumns) || cardColumns < 1) cardColumns = 4;
-    if (!window.matchMedia('(max-width: 900px)').matches && cardColumns < 4) {
-      cardColumns = 4;
-      localStorage.setItem('promptrepo_card_columns', '4');
-      localStorage.setItem('promptrepo_card_columns_v3', '1');
-    }
+    if (!Number.isFinite(cardColumns) || cardColumns < 1) cardColumns = 3;
     cardColumns = Math.min(5, Math.max(1, cardColumns));
+    try {
+      localStorage.setItem('promptrepo_card_columns', String(cardColumns));
+      localStorage.setItem('promptrepo_card_columns_v4', '1');
+    } catch (e) { /* ignore */ }
+
+    let communityColumns = Number(localStorage.getItem('promptrepo_community_columns'));
+    if (!Number.isFinite(communityColumns) || communityColumns < 1) communityColumns = 4;
+    communityColumns = Math.min(5, Math.max(1, communityColumns));
+    let myHomeColumns = Number(localStorage.getItem('promptrepo_myhome_columns'));
+    if (!Number.isFinite(myHomeColumns) || myHomeColumns < 2) myHomeColumns = 3;
+    myHomeColumns = Math.min(5, Math.max(2, myHomeColumns));
+    try {
+      localStorage.setItem('promptrepo_myhome_columns', String(myHomeColumns));
+    } catch (e) { /* ignore */ }
 
     document.documentElement.style.setProperty('--card-columns', String(cardColumns));
+    document.documentElement.style.setProperty('--community-columns', String(communityColumns));
+
+    function isCommunityPageActive() {
+      return document.getElementById('pageCommunity')?.classList.contains('active');
+    }
 
     function runCardsLayoutTransition(applyChange) {
       const container = document.getElementById('cardsContainer');
@@ -235,38 +245,65 @@
         cardColumns = Math.min(5, Math.max(1, cols));
         document.documentElement.style.setProperty('--card-columns', String(cardColumns));
         localStorage.setItem('promptrepo_card_columns', String(cardColumns));
-        localStorage.setItem('promptrepo_card_columns_v3', '1');
+        localStorage.setItem('promptrepo_card_columns_v4', '1');
         const container = document.getElementById('cardsContainer');
         if (container) container.scrollTop = 0;
         if (typeof renderCards === 'function') renderCards(true);
-        if (document.getElementById('pageCommunity')?.classList.contains('active')) {
-          window.FeatureDraft?.scheduleLayout?.('communityGrid', { force: true, immediate: true, recalcCols: true });
-        }
         if (document.getElementById('pageCreations')?.classList.contains('active')) {
           window.FeatureDraft?.scheduleLayout?.('creationsGrid', { force: true, immediate: true, recalcCols: true });
         }
       });
     }
+
+    function setCommunityColumns(cols) {
+      communityColumns = Math.min(5, Math.max(1, cols));
+      document.documentElement.style.setProperty('--community-columns', String(communityColumns));
+      localStorage.setItem('promptrepo_community_columns', String(communityColumns));
+      const grid = document.getElementById('communityGrid');
+      if (grid) grid.scrollTop = 0;
+      window.FeatureDraft?.scheduleLayout?.('communityGrid', { force: true, immediate: true, recalcCols: true });
+    }
+
     function toggleColumnUp() {
-      if (cardColumns < 5) setCardColumns(cardColumns + 1);
+      if (isCommunityPageActive()) {
+        if (communityColumns < 5) setCommunityColumns(communityColumns + 1);
+      } else if (cardColumns < 5) {
+        setCardColumns(cardColumns + 1);
+      }
     }
     function toggleColumnDown() {
-      if (cardColumns > 1) setCardColumns(cardColumns - 1);
+      if (isCommunityPageActive()) {
+        if (communityColumns > 1) setCommunityColumns(communityColumns - 1);
+      } else if (cardColumns > 1) {
+        setCardColumns(cardColumns - 1);
+      }
     }
     window.setCardColumns = setCardColumns;
+    window.setCommunityColumns = setCommunityColumns;
     window.toggleColumnUp = toggleColumnUp;
     window.toggleColumnDown = toggleColumnDown;
 
     function restoreDesktopCardColumns() {
       if (isMobileViewport()) return;
       let cols = Number(localStorage.getItem('promptrepo_card_columns'));
-      if (!Number.isFinite(cols) || cols < 4) cols = 4;
-      cols = Math.min(5, Math.max(4, cols));
+      if (!Number.isFinite(cols) || cols < 1) cols = 3;
+      cols = Math.min(5, Math.max(1, cols));
       cardColumns = cols;
       document.documentElement.style.setProperty('--card-columns', String(cols));
+      let commCols = Number(localStorage.getItem('promptrepo_community_columns'));
+      if (!Number.isFinite(commCols) || commCols < 1) commCols = 4;
+      commCols = Math.min(5, Math.max(1, commCols));
+      communityColumns = commCols;
+      document.documentElement.style.setProperty('--community-columns', String(commCols));
       const container = document.getElementById('cardsContainer');
       container?.classList.remove('mobile-grid');
       layoutMasonryGrid();
+      if (document.getElementById('pageCommunity')?.classList.contains('active')) {
+        window.FeatureDraft?.scheduleLayout?.('communityGrid', { force: true, immediate: true, recalcCols: true });
+      }
+      if (document.getElementById('pageCreations')?.classList.contains('active')) {
+        window.FeatureDraft?.scheduleLayout?.('creationsGrid', { force: true, immediate: true, recalcCols: true });
+      }
     }
     window.restoreDesktopCardColumns = restoreDesktopCardColumns;
 
@@ -746,9 +783,13 @@
     }
 
     function exitGlobalView() {
-      if (document.body.classList.contains('community-appreciate')) {
+      if (document.body.classList.contains('community-appreciate') || window.FeatureDraft?.isCommunityQuickPreviewActive?.()) {
         closeAppreciateViewer();
-        window.FeatureDraft?.toggleCommunityAppreciate?.();
+        if (typeof window.FeatureDraft?.exitCommunityAppreciate === 'function') {
+          window.FeatureDraft.exitCommunityAppreciate();
+        } else {
+          window.FeatureDraft?.toggleCommunityAppreciate?.();
+        }
         return;
       }
       if (!globalViewActive) return;
@@ -941,9 +982,9 @@
       const el = document.getElementById('guestLimitHint');
       if (!el) return;
       if (isUserLoggedIn()) {
-        el.classList.remove('hidden');
-        const summary = window.Membership?.getStorageSummaryLabel?.() || '';
-        el.textContent = summary ? `云存储 ${summary}` : '云存储额度加载中…';
+        el.classList.add('hidden');
+        el.textContent = '';
+        window.SubscriptionUI?.refreshOfferUI?.();
         return;
       }
       el.classList.remove('hidden');
@@ -997,7 +1038,11 @@
         list = list.filter(c => (c.tags || []).includes(tag));
       }
       return list
-        .sort((a, b) => (b.createdAt || b.updatedAt || 0) - (a.createdAt || a.updatedAt || 0))
+        .sort((a, b) => {
+          const ta = Math.max(Number(b.createdAt) || 0, Number(b.updatedAt) || 0);
+          const tb = Math.max(Number(a.createdAt) || 0, Number(a.updatedAt) || 0);
+          return ta - tb;
+        })
         .map(c => ({
           id: c.id,
           title: (c.title || '').trim() || '',
@@ -2226,6 +2271,20 @@
         closeEditPanel();
         if (typeof closeTagSheet === 'function') closeTagSheet();
       }
+      if (app === 'warehouse') {
+        const searchDesktop = document.getElementById('searchInput');
+        const searchMobile = document.getElementById('searchInputMobile');
+        const hadSearch = !!(searchDesktop?.value?.trim() || searchMobile?.value?.trim());
+        if (searchDesktop) searchDesktop.value = '';
+        if (searchMobile) searchMobile.value = '';
+        const mobileBar = document.getElementById('mobileSearchBar');
+        if (mobileBar) mobileBar.hidden = true;
+        if (hadSearch) {
+          deferAfterPagePaint(() => {
+            if (document.getElementById('pageWarehouse')?.classList.contains('active')) renderCards(true);
+          }, 200);
+        }
+      }
       document.querySelectorAll('.app-nav-item').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.app === app);
       });
@@ -2413,6 +2472,26 @@
     let cloudSyncPhase = 'idle';
     let cloudSyncPhaseAt = 0;
     let cloudSyncPhaseDetail = '';
+    let cloudSyncStatusHideTimer = null;
+
+    function clearCloudSyncStatusHideTimer() {
+      if (cloudSyncStatusHideTimer) {
+        clearTimeout(cloudSyncStatusHideTimer);
+        cloudSyncStatusHideTimer = null;
+      }
+    }
+
+    function scheduleCloudSyncStatusHide(delayMs) {
+      clearCloudSyncStatusHideTimer();
+      cloudSyncStatusHideTimer = setTimeout(() => {
+        cloudSyncStatusHideTimer = null;
+        if (cloudSyncPhase === 'saved' || cloudSyncPhase === 'error') {
+          cloudSyncPhase = 'idle';
+          cloudSyncPhaseDetail = '';
+        }
+        updateCloudSyncStatusUI();
+      }, delayMs);
+    }
     let bgCloudSyncTimer = null;
     let lastBgCloudSyncAt = 0;
 
@@ -3068,7 +3147,7 @@
       if (!mobile) {
         if (sideBtn) { /* 侧栏不参与 Masonry */ }
         else if (media.closest('#communityGrid, #creationsGrid')) {
-          /* flex 多列：卡片列位已固定，图片加载后不再触发全墙重排 */
+          /* flex 多列：图片加载后不再全墙重排，避免社区/主页晃眼 */
         }
         else if (media.closest('#cardsContainer')) {
           if (cardMediaAffectsViewport(media)) {
@@ -3271,7 +3350,7 @@
       if (Array.isArray(payload.customGroups)) customGroups = payload.customGroups;
       if (Array.isArray(payload.globalFields)) globalFields = payload.globalFields;
       if (payload.settings && typeof payload.settings === 'object') {
-        settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, autoDayNight: true, themeManualOverride: false }, payload.settings);
+        settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, autoDayNight: false, themeManualOverride: false }, payload.settings);
         settings.deletedCardTombstones = mergeDeletedCardTombstones(
           prevTombstones,
           payload.settings.deletedCardTombstones
@@ -3297,7 +3376,7 @@
       settings.floatingPrompt = false;
       document.getElementById('imageClickZoomToggle').checked = settings.imageClickZoom;
       applyEfficiencyMode();
-      if (settings.autoDayNight !== false) {
+      if (settings.autoDayNight === true) {
         settings.themeManualOverride = false;
         window.ThemeSchedule?.applyAutoThemeIfNeeded?.();
       } else if (settings.theme && typeof window.applyAppTheme === 'function') {
@@ -3317,14 +3396,14 @@
       const el = document.getElementById('authCloudStatus');
       const loggedIn = window.SupabaseSync?.isLoggedIn?.();
       if (!el) return;
-      if (!loggedIn) {
+      if (!loggedIn || cloudSyncPhase === 'idle') {
         el.classList.add('hidden');
         el.classList.remove('is-syncing', 'is-error');
         return;
       }
       el.classList.remove('hidden');
       el.classList.remove('is-syncing', 'is-error');
-      let text = '已登录 · 自动保存到云端';
+      let text = '正在保存到云端…';
       if (cloudSyncPhase === 'pending') text = cloudSyncPhaseDetail || '即将保存到云端…';
       else if (cloudSyncPhase === 'syncing') text = cloudSyncPhaseDetail || '正在保存到云端…';
       else if (cloudSyncPhase === 'saved') text = '已保存到云端';
@@ -3334,6 +3413,9 @@
       }
       if (cloudSyncPhase === 'syncing' || cloudSyncPhase === 'pending') el.classList.add('is-syncing');
       el.textContent = text;
+      if (cloudSyncPhase === 'saved') scheduleCloudSyncStatusHide(2500);
+      else if (cloudSyncPhase === 'error') scheduleCloudSyncStatusHide(6000);
+      else clearCloudSyncStatusHideTimer();
     }
 
     function refreshAppBuildLabel() {
@@ -3366,8 +3448,7 @@
           emailEl.textContent = label;
           emailEl.title = label;
         }
-        if (cloudSyncPhase === 'idle') setCloudSyncPhase('idle');
-        else updateCloudSyncStatusUI();
+        updateCloudSyncStatusUI();
       } else {
         openBtn.classList.remove('hidden');
         openBtn.textContent = '登录 / 注册';
@@ -3876,6 +3957,7 @@
     }
 
     function finishAppBootstrap() {
+      restoreDesktopCardColumns();
       const page = localStorage.getItem('promptrepo_app_page') || 'community';
       switchAppPage(page);
       if (window.MobileUI?.isMobile?.()) {
@@ -5940,10 +6022,7 @@
       settings.floatingPrompt = floatingPromptActive;
       if (typeof window.getAppTheme === 'function') settings.theme = window.getAppTheme();
       try {
-        const stored = JSON.parse(localStorage.getItem('promptrepo_settings') || '{}');
-        if ('themeManualOverride' in stored) settings.themeManualOverride = stored.themeManualOverride;
-        if ('autoDayNight' in stored) settings.autoDayNight = stored.autoDayNight;
-        /* deletedCardTombstones 以内存 settings 为准，勿 merge 回 localStorage 里已清除的项 */
+        localStorage.setItem('promptrepo_settings', JSON.stringify(settings));
       } catch (e) { /* ignore */ }
       const uid = window.SupabaseSync?.getUserId?.() || activeAccountId;
       if (uid && window.SupabaseSync?.isLoggedIn?.()) {
@@ -6173,7 +6252,7 @@
 
     function buildCardTagsHtml(tags) {
       const list = tags || [];
-      const max = 3;
+      const max = 2;
       const shown = list.slice(0, max);
       const extra = list.length - max;
       let html = shown.map(t => `<span class="tag" onclick="event.stopPropagation();searchByTag('${escapeJsString(t)}')">${escapeHtml(t)}</span>`).join('');
@@ -6582,7 +6661,7 @@
       updateBatchCountLabel();
     }
 
-    let batchProgressOpen = 0;
+    let batchProgressVisible = false;
 
     function showBatchProgress(title, done, total) {
       const ov = document.getElementById('batchProgressOverlay');
@@ -6590,7 +6669,7 @@
       const fill = document.getElementById('batchProgressFill');
       const meta = document.getElementById('batchProgressMeta');
       if (!ov) return;
-      batchProgressOpen += 1;
+      batchProgressVisible = true;
       ov.classList.remove('hidden');
       ov.setAttribute('aria-busy', 'true');
       if (titleEl) titleEl.textContent = title || '正在处理…';
@@ -6602,8 +6681,8 @@
     }
 
     function hideBatchProgress() {
-      batchProgressOpen = Math.max(0, batchProgressOpen - 1);
-      if (batchProgressOpen > 0) return;
+      if (!batchProgressVisible) return;
+      batchProgressVisible = false;
       const ov = document.getElementById('batchProgressOverlay');
       ov?.classList.add('hidden');
       ov?.setAttribute('aria-busy', 'false');
@@ -6957,6 +7036,19 @@
     }
 
     let editCardFillSeq = 0;
+    let panelPreviewSeq = 0;
+    let lightboxLoadSeq = 0;
+
+    function clearPanelPreviewImage() {
+      const img = document.getElementById('previewImage');
+      const dropArea = document.getElementById('dropArea');
+      if (img) {
+        img.onload = null;
+        img.onerror = null;
+        img.removeAttribute('src');
+      }
+      dropArea?.classList.add('is-loading-preview');
+    }
 
     function stashEditPanelDraft() {
       const prompt = (document.getElementById('floatingPromptText')?.value
@@ -7003,6 +7095,8 @@
 
     function editCard(id) {
       const card = cards.find(c => c.id === id); if (!card) return;
+      panelPreviewSeq += 1;
+      clearPanelPreviewImage();
       selectedCardId = id; isNewCardMode = false;
       highlightSelectedCard(id);
       openEditPanel();
@@ -7456,7 +7550,14 @@
         showToast('请先选择图片');
         return;
       }
-      await downloadCardImageFile(imageData, selectedCardId);
+      const dropArea = document.getElementById('dropArea');
+      if (dropArea?.classList.contains('is-loading-preview')) {
+        showToast('图片加载中，请稍后再下载');
+        return;
+      }
+      const cardId = selectedCardId;
+      const ref = imageData;
+      await downloadCardImageFile(ref, cardId);
     }
     window.downloadPanelCardImage = downloadPanelCardImage;
 
@@ -7546,11 +7647,20 @@
     window.trimPanelImageBlackBorder = trimPanelImageBlackBorder;
 
     async function updatePreview() {
+      const seq = ++panelPreviewSeq;
+      const cardIdAtStart = selectedCardId;
+      const imageAtStart = imageData;
       const img = document.getElementById('previewImage'), p = document.getElementById('dropPlaceholder');
       const removeBtn = document.getElementById('removeImageBtn'), dropArea = document.getElementById('dropArea');
+      const previewStale = () =>
+        seq !== panelPreviewSeq || cardIdAtStart !== selectedCardId || imageAtStart !== imageData;
       const finishPreviewLoad = () => {
+        if (previewStale()) return;
         dropArea?.classList.remove('is-loading-preview');
+        const dl = document.getElementById('cardDownloadImageBtn');
+        if (dl) dl.disabled = false;
       };
+      const dlBtn = document.getElementById('cardDownloadImageBtn');
       if (imageData) {
         let src = '';
         if (window.SupabaseSync?.getCachedDisplayUrl && window.SupabaseSync?.isStorageRef?.(imageData)) {
@@ -7571,6 +7681,8 @@
         }
         const waiting = !src || src.includes('data:image/svg');
         dropArea?.classList.toggle('is-loading-preview', waiting);
+        if (dlBtn) dlBtn.disabled = waiting;
+        if (previewStale()) return;
         if (src && !src.includes('data:image/svg')) {
           img.src = src;
           finishPreviewLoad();
@@ -7595,6 +7707,7 @@
         dropArea.classList.remove('no-image');
         if (waiting && typeof window.getCardImageBackup === 'function' && selectedCardId) {
           void getCardImageBackup(selectedCardId).then((backup) => {
+            if (previewStale()) return;
             if (backup && String(backup).startsWith('data:')) {
               img.src = backup;
               finishPreviewLoad();
@@ -7606,12 +7719,14 @@
             assetId: selectedCardId,
             variant: window.SupabaseSync.VARIANT_FULL || 'full'
           });
+          if (previewStale()) return;
           if (url && !url.startsWith('data:image/svg')) {
             img.src = url;
             finishPreviewLoad();
           }
         }
       } else {
+        if (dlBtn) dlBtn.disabled = true;
         dropArea?.classList.remove('is-loading-preview');
         img.style.display = 'none';
         p.style.display = 'block';
@@ -8172,11 +8287,13 @@
 
     function loadLightboxImage(displaySrc, opts) {
       opts = opts || {};
+      const seq = ++lightboxLoadSeq;
       const lightbox = document.getElementById('imageLightbox');
       const img = document.getElementById('lightboxImage');
       const frame = getLightboxFrame();
       const dlBtn = document.getElementById('lightboxDownloadBtn');
       if (!lightbox || !img) return;
+      const loadStale = () => seq !== lightboxLoadSeq;
       if (opts.assetPack) {
         syncLightboxActions({ assetPack: opts.assetPack });
       } else if (opts.community || opts.cardId) {
@@ -8191,7 +8308,7 @@
       setViewerFrameLoading(frame, true);
       let shown = false;
       const onReady = () => {
-        if (shown) return;
+        if (shown || loadStale()) return;
         shown = true;
         img.onload = null;
         img.onerror = null;
@@ -8212,12 +8329,14 @@
         }
       };
       const onFail = () => {
+        if (loadStale()) return;
         img.onerror = null;
         img.onload = null;
         setViewerFrameLoading(frame, false);
         lightbox.classList.remove('active');
         if (!opts.silentFail) showToast('图片加载失败，请稍后重试');
       };
+      img.removeAttribute('src');
       if (!displaySrc || displaySrc.includes('data:image/svg')) {
         if (opts.pending) {
           img.onwheel = null;
@@ -8282,6 +8401,12 @@
         window.__lightboxAssetPackOpts = null;
         if (opts.community) {
           syncLightboxActions({ community: true, postId: opts.postId || null });
+        } else if (opts.imageGen) {
+          syncLightboxActions({
+            community: !!opts.community,
+            postId: opts.postId || null,
+            cardId: opts.cardId || null
+          });
         } else {
           syncLightboxActions({ cardId: opts.cardId || selectedCardId || null });
         }
@@ -8325,7 +8450,16 @@
     async function downloadLightboxImage() {
       const img = document.getElementById('lightboxImage');
       const dlBtn = document.getElementById('lightboxDownloadBtn');
-      const cardId = window.__lightboxWarehouseCardId || warehousePreviewCardId || selectedCardId;
+      if (dlBtn?.disabled) {
+        showToast('图片加载中，请稍后再下载');
+        return;
+      }
+      let cardId = window.__lightboxWarehouseCardId || warehousePreviewCardId || null;
+      if (!cardId && !window.__lightboxCommunityMode && window.__lightboxImageGenNav && viewerNav.index >= 0) {
+        const item = viewerNav.items[viewerNav.index];
+        if (item?.type === 'imageGen' && item.kind === 'warehouse') cardId = item.id;
+      }
+      if (!cardId && !window.__lightboxCommunityMode) cardId = selectedCardId;
       const card = cardId ? cards.find((c) => c.id === cardId) : null;
       if (card?.image) {
         const prevLabel = dlBtn?.querySelector('span')?.textContent || dlBtn?.textContent;
@@ -8603,10 +8737,27 @@
     }
     window.onOcrEngineChange = onOcrEngineChange;
 
+    function toggleAppSettingsHelp(forceOpen) {
+      const section = document.getElementById('appSettingsHelpSection');
+      const btn = document.querySelector('.settings-footer-help-btn');
+      if (!section) return;
+      const open = forceOpen === true ? true : (forceOpen === false ? false : section.classList.contains('hidden'));
+      section.classList.toggle('hidden', !open);
+      if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) {
+        requestAnimationFrame(() => {
+          section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+      }
+    }
     function openAppSettings() {
       document.getElementById('appSettingsOverlay')?.classList.add('active');
+      const help = document.getElementById('appSettingsHelpSection');
+      if (help) help.classList.add('hidden');
+      const helpBtn = document.querySelector('.settings-footer-help-btn');
+      if (helpBtn) helpBtn.setAttribute('aria-expanded', 'false');
       const autoDay = document.getElementById('autoDayNightToggle');
-      if (autoDay) autoDay.checked = settings.autoDayNight !== false;
+      if (autoDay) autoDay.checked = settings.autoDayNight === true;
       const eff = document.getElementById('efficiencyModeToggle');
       if (eff) eff.checked = settings.efficiencyMode === true;
       const imgPub = document.getElementById('defaultImageGenAutoPublishToggle');
@@ -8621,9 +8772,9 @@
     function closeAppSettings() {
       document.getElementById('appSettingsOverlay')?.classList.remove('active');
     }
-    function saveAppSettings() {
+    async function saveAppSettings() {
       const autoEl = document.getElementById('autoDayNightToggle');
-      const autoOn = autoEl ? autoEl.checked : true;
+      const autoOn = autoEl ? autoEl.checked : false;
       const imgPubEl = document.getElementById('defaultImageGenAutoPublishToggle');
       settings.defaultImageGenAutoPublish = imgPubEl ? imgPubEl.checked : true;
       const notifyOnEl = document.getElementById('communityNotificationsToggle');
@@ -8633,7 +8784,7 @@
       const effEl = document.getElementById('efficiencyModeToggle');
       settings.efficiencyMode = effEl ? effEl.checked : false;
       applyEfficiencyMode();
-      const wasAuto = settings.autoDayNight !== false;
+      const wasAuto = settings.autoDayNight === true;
       settings.autoDayNight = autoOn;
       if (autoOn && !wasAuto) {
         settings.themeManualOverride = false;
@@ -8642,13 +8793,17 @@
         settings.themeManualOverride = false;
         window.ThemeSchedule?.applyAutoThemeIfNeeded?.();
       }
-      saveAllData();
+      await saveAllData();
+      if (autoOn !== wasAuto) {
+        window.ThemeSchedule?.onAutoDayNightSettingChanged?.(autoOn);
+      }
       const status = document.getElementById('appSettingsStatus');
       if (status) status.textContent = '已保存';
       showToast('全局设置已保存');
       window.FeatureDraft?.updateNotifyBadge?.();
       setTimeout(() => { if (status) status.textContent = ''; }, 2000);
     }
+    window.toggleAppSettingsHelp = toggleAppSettingsHelp;
     window.openAppSettings = openAppSettings;
     window.closeAppSettings = closeAppSettings;
     window.saveAppSettings = saveAppSettings;
@@ -8712,7 +8867,8 @@
       document.getElementById('extensionCollectOverlay')?.classList.remove('active');
     }
     function openHelpPanel() {
-      document.getElementById('helpOverlay')?.classList.add('active');
+      openAppSettings();
+      toggleAppSettingsHelp(true);
     }
     function closeHelpPanel() {
       document.getElementById('helpOverlay')?.classList.remove('active');
@@ -8724,7 +8880,9 @@
       document.getElementById('contactOverlay')?.classList.remove('active');
     }
     function copyWechatId() {
-      const id = document.getElementById('contactWechatId')?.textContent?.trim() || 'bz4jx3jp2li1';
+      const id = document.getElementById('contactWechatId')?.textContent?.trim()
+        || document.getElementById('subscribeWechatId')?.textContent?.trim()
+        || 'bz4jx3jp2li1';
       navigator.clipboard.writeText(id).then(() => showToast('微信号已复制')).catch(() => showToast('复制失败'));
     }
     function openCommunityPanel() {
