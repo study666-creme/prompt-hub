@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260608j';
+    window.__APP_BUILD__ = '20260608k';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -102,16 +102,17 @@
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260608j">
-  <link rel="stylesheet" href="styles-theme.css?v=20260608j">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260608j">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
+  <link rel="stylesheet" href="styles.css?v=20260608k">
+  <link rel="stylesheet" href="styles-theme.css?v=20260608k">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260608k">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260608j">
+  <link rel="stylesheet" href="styles-features.css?v=20260608k">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
-  <script src="theme.js?v=20260608j"></script>
+  <script src="theme.js?v=20260608k"></script>
 </head>
 <body>
   <div class="app-chrome">
@@ -612,7 +613,7 @@
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status" aria-live="polite"></p>
       <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260608j</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260608k</p>
     </div>
   </nav>
 
@@ -759,12 +760,12 @@
           <div class="toolbar-cluster toolbar-cluster-grow">
             <div class="sort-menu-wrap desktop-only" id="sortMenuWrap">
               <button type="button" class="toolbar-sort-btn" id="sortMenuBtn" aria-expanded="false" aria-haspopup="listbox" title="排序">
-                <span class="toolbar-sort-label" id="sortMenuLabel">默认</span>
+                <span class="toolbar-sort-label" id="sortMenuLabel">最近更新</span>
                 <svg class="toolbar-sort-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
               </button>
               <div class="toolbar-sort-dropdown" id="sortDropdown" hidden role="listbox" aria-label="排序方式"></div>
             </div>
-            <input type="hidden" id="sortSelect" value="default">
+            <input type="hidden" id="sortSelect" value="updated-desc">
             <button type="button" class="icon-btn mobile-only" id="mobileSearchBtn" aria-label="搜索" aria-expanded="false" title="搜索">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/></svg>
             </button>
@@ -1188,7 +1189,6 @@
               <p class="panel-hint imagegen-inspire-batch-hint">分析后勾选变体；批量提交每张与普通生图同价，不绑源图参考。</p>
             </div>
             </div>
-            <div class="imagegen-mobile-result mobile-only" id="imageGenMobileResult" aria-label="最近生成" hidden></div>
             <details class="imagegen-inspire-fold" id="imageGenInspireFold">
               <summary class="imagegen-inspire-fold-summary">
                 <span class="imagegen-inspire-fold-title">灵感抽卡</span>
@@ -1492,28 +1492,28 @@
   <script src="vendor/supabase.min.js?v=20260606m"></script>
   <script src="api-domain.config.js"></script>
   <script src="supabase-config.js"></script>
-  <script src="api-config.js?v=20260608j2b"></script>
-  <script src="api-client.js?v=20260608j"></script>
+  <script src="api-config.js?v=20260608k2b"></script>
+  <script src="api-client.js?v=20260608k"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260608j2show"></script>
-  <script src="card-image-loader.js?v=20260608j"></script>
+  <script src="supabase-sync.js?v=20260608k2show"></script>
+  <script src="card-image-loader.js?v=20260608k"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
-  <script src="subscription.js?v=20260608j"></script>
-  <script src="trial-tasks.js?v=20260608j"></script>
+  <script src="subscription.js?v=20260608k"></script>
+  <script src="trial-tasks.js?v=20260608k"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="mobile.js?v=20260608j"></script>
-  <script src="script.js?v=20260608jevlab"></script>
-  <script src="points-system.js?v=20260608j"></script>
-  <script src="imagegen-prompt-kit.js?v=20260608j"></script>
-  <script src="imagegen-prompt-tools.js?v=20260608j"></script>
-  <script src="feed-layout.js?v=20260608j"></script>
-  <script src="feed-images.js?v=20260608j"></script>
-  <script src="image-gen-feed.js?v=20260608j"></script>
-  <script src="features-draft.js?v=20260608j"></script>
+  <script src="mobile.js?v=20260608k"></script>
+  <script src="script.js?v=20260608kevlab"></script>
+  <script src="points-system.js?v=20260608k"></script>
+  <script src="imagegen-prompt-kit.js?v=20260608k"></script>
+  <script src="imagegen-prompt-tools.js?v=20260608k"></script>
+  <script src="feed-layout.js?v=20260608k"></script>
+  <script src="feed-images.js?v=20260608k"></script>
+  <script src="image-gen-feed.js?v=20260608k"></script>
+  <script src="features-draft.js?v=20260608k"></script>
   <script src="community-gacha.js?v=20260606v"></script>
-  <script src="features-assets.js?v=20260608jh"></script>
-  <script src="pwa-install.js?v=20260608j"></script>
+  <script src="features-assets.js?v=20260608kh"></script>
+  <script src="pwa-install.js?v=20260608k"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

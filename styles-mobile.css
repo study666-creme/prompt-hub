@@ -12,6 +12,7 @@
     height: 100dvh;
     padding-bottom: 0;
     overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   }
 
   .app-chrome {
@@ -1276,10 +1277,15 @@
   }
 
   #pageCommunity .feature-search {
+    flex: 0 0 auto;
     width: 100%;
     max-width: none;
-    min-height: 36px;
+    min-height: 0;
+    height: 36px;
+    padding: 0 12px;
     font-size: 14px;
+    line-height: 36px;
+    box-sizing: border-box;
     order: 0;
   }
 
@@ -1346,8 +1352,13 @@
   }
 
   #pageCommunity .feature-search {
+    flex: 0 0 auto;
     width: 100%;
     max-width: none;
+    height: 36px;
+    min-height: 0;
+    padding: 0 12px;
+    box-sizing: border-box;
   }
 
   .community-inline-hint {
@@ -1438,12 +1449,8 @@
     order: 3;
   }
 
-  body.imagegen-mobile-view-form .imagegen-mobile-result {
-    order: 4;
-  }
-
   body.imagegen-mobile-view-form .imagegen-inspire-fold {
-    order: 5;
+    order: 4;
   }
 
   body.imagegen-mobile-view-form .imagegen-mode-panel--inspire {
@@ -1455,11 +1462,11 @@
   }
 
   body.imagegen-mobile-view-form .imagegen-publish-row {
-    order: 6;
+    order: 5;
   }
 
   body.imagegen-mobile-view-form .imagegen-form-legal {
-    order: 7;
+    order: 6;
   }
 
   body.imagegen-mobile-view-form .imagegen-prompt-head {
@@ -1492,73 +1499,6 @@
 
   body.imagegen-mobile-view-form .imagegen-prompt-block--shared textarea {
     order: 2;
-  }
-
-  .imagegen-mobile-result {
-    flex: 0 0 auto;
-    margin: 8px 0 4px;
-    padding: 8px 0 4px;
-    border-top: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .imagegen-mobile-result-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 8px;
-    font-size: 12px;
-    color: var(--text-secondary);
-  }
-
-  .imagegen-mobile-result-track {
-    display: flex;
-    gap: 10px;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 4px;
-    scroll-snap-type: x mandatory;
-  }
-
-  .imagegen-mobile-result-item {
-    flex: 0 0 108px;
-    width: 108px;
-    scroll-snap-align: start;
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    background: var(--bg-hover);
-    border: 1px solid var(--border);
-  }
-
-  .imagegen-mobile-result-item img {
-    display: block;
-    width: 100%;
-    aspect-ratio: 1;
-    object-fit: cover;
-  }
-
-  .imagegen-mobile-result-item.is-pending {
-    aspect-ratio: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    color: var(--text-muted);
-    text-align: center;
-    padding: 6px;
-    min-height: 108px;
-  }
-
-  .imagegen-mobile-result-item.is-failed {
-    aspect-ratio: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    color: var(--danger, #e55);
-    padding: 6px;
-    min-height: 108px;
   }
 
   body.imagegen-mobile-view-form #imageGenPrompt {

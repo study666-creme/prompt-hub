@@ -2344,10 +2344,16 @@
   function refreshFeedsAfterCardsSync() {
     clearTimeout(refreshFeedsTimer);
     refreshFeedsTimer = setTimeout(() => {
+      const onCommunity = document.getElementById('pageCommunity')?.classList.contains('active');
+      const onImageGen = document.getElementById('pageImageGen')?.classList.contains('active');
+      const onCreations = document.getElementById('pageCreations')?.classList.contains('active');
+      if (isMobileViewport() && !onCommunity && !onImageGen && !onCreations) {
+        prunePendingJobsWithWarehouseCards();
+        return;
+      }
       if (window.__promptHubCards?.length) {
         ensureCommunityFromCards();
       }
-      const onCommunity = document.getElementById('pageCommunity')?.classList.contains('active');
       const afterFeed = () => {
         if (onCommunity && communityFeedNeedsRerender('communityGrid')) {
           renderCommunity({ skipFeedFetch: true });
@@ -9073,47 +9079,7 @@
   }
 
   function renderImageGenMobileResult() {
-    const box = document.getElementById('imageGenMobileResult');
-    if (!box || !isMobileViewport()) return;
-    const pending = imageGenPendingJobs.slice(0, 8);
-    const failed = imageGenFailedJobs.slice(0, 3);
-    const cards = getImageGenWarehouseFeedList().slice(0, 8);
-    if (!pending.length && !failed.length && !cards.length) {
-      box.hidden = true;
-      box.innerHTML = '';
-      return;
-    }
-    box.hidden = false;
-    const items = [];
-    pending.forEach((j) => {
-      const label = j.recovering ? '恢复中' : '生成中';
-      items.push(`<div class="imagegen-mobile-result-item is-pending" title="${esc((j.prompt || '').slice(0, 80))}">${esc(label)}</div>`);
-    });
-    failed.forEach((j) => {
-      items.push(`<div class="imagegen-mobile-result-item is-failed" title="${esc(j.errorMessage || '失败')}">失败</div>`);
-    });
-    cards.forEach((c) => {
-      if (!c.image || !isDisplayableImage(c.image)) return;
-      const id = esc(c.id);
-      const listUrl = window.SupabaseSync?.getListDisplayImageSrc?.(c.image, c.id) || '';
-      const src = listUrl || IMG_LOADING_PLACEHOLDER;
-      items.push(`<button type="button" class="imagegen-mobile-result-item" data-mobile-result-id="${id}" title="查看"><img src="${esc(src)}" data-image-ref="${esc(c.image)}" data-source-card-id="${id}" alt="" loading="lazy" decoding="async"></button>`);
-    });
-    box.innerHTML = `<div class="imagegen-mobile-result-head"><span>最近生成</span><button type="button" class="btn btn-ghost btn-sm" data-mobile-result-all>全部作品</button></div><div class="imagegen-mobile-result-track">${items.join('')}</div>`;
-    box.querySelector('[data-mobile-result-all]')?.addEventListener('click', () => {
-      window.MobileUI?.setImageGenView?.('feed', { scrollToTop: true });
-    });
-    box.querySelectorAll('[data-mobile-result-id]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        window.MobileUI?.setImageGenView?.('feed', { scrollToTop: true });
-        const card = cards.find((c) => c.id === btn.dataset.mobileResultId);
-        if (card) void openImageGenPreview('warehouse', card.id);
-      });
-    });
-    void (async () => {
-      const imgs = [...box.querySelectorAll('img[data-image-ref]')].slice(0, 8);
-      for (const img of imgs) await hydrateFeedImageOne(img);
-    })();
+    /* 手机「最近生成」横条已移除，作品在「作品」Tab 按最近生成排序展示 */
   }
 
 

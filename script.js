@@ -191,7 +191,14 @@
     let fileHandle = null, masonryInstance = null;
     let page = 1, allFilteredCards = [];
     const PER_PAGE = 24;
-    let sortMode = 'default';
+    const CARD_SORT_KEY = 'promptrepo_card_sort';
+    let sortMode = 'updated-desc';
+    try {
+      const savedSort = localStorage.getItem(CARD_SORT_KEY);
+      if (['default', 'created-desc', 'updated-desc', 'updated-asc', 'random'].includes(savedSort)) {
+        sortMode = savedSort;
+      }
+    } catch (e) { /* ignore */ }
     let cardRandomSig = '';
     let cardRandomOrder = new Map();
     let floatingPromptActive = false;
@@ -1054,11 +1061,7 @@
         list = list.filter(c => (c.tags || []).includes(tag));
       }
       return list
-        .sort((a, b) => {
-          const ta = Math.max(Number(b.createdAt) || 0, Number(b.updatedAt) || 0);
-          const tb = Math.max(Number(a.createdAt) || 0, Number(a.updatedAt) || 0);
-          return ta - tb;
-        })
+        .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))
         .map(c => ({
           id: c.id,
           title: (c.title || '').trim() || '',
@@ -1593,9 +1596,10 @@
     }
 
     function setSortMode(value, opts = {}) {
-      const v = SORT_OPTIONS.some(o => o.value === value) ? value : 'default';
+      const v = SORT_OPTIONS.some(o => o.value === value) ? value : 'updated-desc';
       if (v === 'random') cardRandomSig = '';
       sortMode = v;
+      try { localStorage.setItem(CARD_SORT_KEY, v); } catch (e) { /* ignore */ }
       const hidden = document.getElementById('sortSelect');
       if (hidden) hidden.value = v;
       const label = document.getElementById('sortMenuLabel');
@@ -1660,7 +1664,12 @@
       const btn = document.getElementById('sortMenuBtn');
       const dd = document.getElementById('sortDropdown');
       if (!btn || !dd) return;
-      const saved = document.getElementById('sortSelect')?.value || 'default';
+      let saved = sortMode;
+      try {
+        const ls = localStorage.getItem(CARD_SORT_KEY);
+        if (ls && SORT_OPTIONS.some((o) => o.value === ls)) saved = ls;
+      } catch (e) { /* ignore */ }
+      if (!saved || saved === 'default') saved = 'updated-desc';
       setSortMode(saved, { render: false });
       buildSortMenu();
       btn.addEventListener('click', toggleSortMenu);
@@ -4073,8 +4082,16 @@
       if (cards.length > 0) {
         window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
       }
-      window.FeatureDraft?.renderCommunity?.();
-      window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+      if (page === 'community') {
+        window.FeatureDraft?.renderCommunity?.();
+      }
+      const refreshFeeds = () => window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+      if (window.MobileUI?.isMobile?.() && page !== 'community') {
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(refreshFeeds, { timeout: 8000 });
+        else setTimeout(refreshFeeds, 2500);
+      } else {
+        refreshFeeds();
+      }
     }
     function bindQuickPreviewButtons() {
       document.getElementById('appreciateViewerGenBtn')?.addEventListener('click', () => {
@@ -6428,7 +6445,7 @@
       if (batchMode) container.classList.add('batch-mode');
       const searchEl = document.getElementById('searchInputMobile') || document.getElementById('searchInput');
       const search = (searchEl?.value || '').toLowerCase();
-      sortMode = document.getElementById('sortSelect').value;
+      sortMode = document.getElementById('sortSelect')?.value || sortMode || 'updated-desc';
       if (reset || allFilteredCards.length === 0) {
         let filtered = warehouseVisibleCards(cards);
         if (currentGroup === 'uncategorized') filtered = filtered.filter(c => !c.group);
@@ -6445,13 +6462,14 @@
       }
       const prefetchCards = pageCards.slice(0, 18);
       let prefetchP = Promise.resolve();
-      if (page === 1 && prefetchCards.length && window.SupabaseSync?.prefetchWarehousePage) {
-        prefetchP = window.SupabaseSync.prefetchWarehousePage(prefetchCards, 2600);
+      const warehouseActive = document.getElementById('pageWarehouse')?.classList.contains('active');
+      if (page === 1 && prefetchCards.length && window.SupabaseSync?.prefetchWarehousePage && (!mobileGrid || warehouseActive)) {
+        prefetchP = window.SupabaseSync.prefetchWarehousePage(prefetchCards, mobileGrid ? 1200 : 2600);
       }
       if (page === 1 && pageCards.length && window.SupabaseSync?.backfillGridThumbsForCards) {
         void window.SupabaseSync.backfillGridThumbsForCards(pageCards, {
-          max: pageCards.length,
-          force: true,
+          max: mobileGrid ? Math.min(8, pageCards.length) : pageCards.length,
+          force: !mobileGrid,
           quiet: true,
           awaitDrain: false
         }).then(() => {

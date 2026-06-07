@@ -4127,6 +4127,17 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
   max-width: 240px;
 }
 
+@media (max-width: 900px) {
+  .community-header .feature-search {
+    flex: 0 0 auto;
+    max-width: none;
+    height: 36px;
+    min-height: 0;
+    padding: 0 12px;
+    box-sizing: border-box;
+  }
+}
+
 .community-header h2 {
   margin: 0;
   font-size: 20px;
