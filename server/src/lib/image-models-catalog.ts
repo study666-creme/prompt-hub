@@ -191,12 +191,10 @@ export const ITHINK_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider
     upstream: 'gpt-image-2',
     label: 'GPT Image 2 · 慢速',
     group: 'classic',
-    description: 'ThinkAI 慢速线路 · 上游约 2 分/张',
+    description: 'ThinkAI 慢速线路 · 仅 1K · 上游约 2 分/张',
     upstreamPoints: 2,
     refundOnViolation: true,
-    resolutions: ['1k', '2k', '4k'],
-    pricingByResolution: true,
-    defaultCreditsByResolution: { '1k': 2, '2k': 3, '4k': 5 },
+    resolutions: ['1k'],
     defaultCredits: 2,
     sortOrder: 103
   }

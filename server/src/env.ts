@@ -19,6 +19,8 @@ export type Env = {
   /** 生图经济线路 ThinkAI（thinkai.tv 控制台 Token） */
   ITHINK_API_KEY?: string;
   ITHINK_API_BASE_URL?: string;
+  /** 可选：覆盖 ThinkAI 上游 model 字段（模型广场里的 ID，默认 gpt-image-2） */
+  ITHINK_UPSTREAM_MODEL?: string;
   /** 对话上游（DeepSeek 官方等，与生图密钥分离） */
   CHAT_API_KEY?: string;
   CHAT_API_BASE_URL?: string;

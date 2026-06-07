@@ -37,10 +37,11 @@ describe('image model catalog', () => {
     expect(providerLabel('ithink')).toBe('经济线路');
   });
 
-  it('exposes thinkai slow gpt-image-2 model', () => {
+  it('exposes thinkai slow gpt-image-2 model (1k only)', () => {
     const slow = getCatalogEntry('ithink-gpt-image-2-slow');
     expect(slow?.provider).toBe('ithink');
     expect(slow?.upstream).toBe('gpt-image-2');
+    expect(slow?.resolutions).toEqual(['1k']);
     expect(slow?.defaultCredits).toBe(2);
   });
 });

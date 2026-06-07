@@ -10,6 +10,7 @@ import {
   submitImageJobForProvider,
   upstreamBindingsFromEnv
 } from '../../lib/image-upstream';
+import { processIthinkPendingSubmit } from '../../lib/ithink-submit';
 import { providerLabel } from '../../lib/image-models-catalog';
 import {
   archivePendingJobImage,
@@ -304,11 +305,13 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     );
   }
 
+  const jobResolution = resolved.provider === 'ithink' ? '1k' : parsed.data.resolution;
+
   const { final: rawFinal, base, discountLabel, modelLabel, refundOnViolation, violationNotice } =
     computeImageGenerationCost(
       settings,
       modelId,
-      parsed.data.resolution,
+      jobResolution,
       profile.membership_tier,
       memberActive
     );
@@ -348,7 +351,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     .insert({
       user_id: user.id,
       prompt: promptText,
-      resolution: parsed.data.resolution,
+      resolution: jobResolution,
       quality: parsed.data.quality,
       size_label: parsed.data.size ?? null,
       credits_charged: final,
@@ -422,20 +425,17 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     throw wrapGenerateError(debitErr, '扣减积分失败');
   }
 
-  if (hasAnyImageUpstream(upstream)) {
+  if (hasAnyImageUpstream(upstream) && lineProvider !== 'ithink') {
     try {
       const submitted = await submitImageJobForProvider(upstream, lineProvider, {
         upstreamModel: resolved.upstream,
         prompt: promptText,
-        resolution: parsed.data.resolution,
+        resolution: jobResolution,
         quality: parsed.data.quality,
         size: parsed.data.size,
         refImageUrls: refUrls
       });
       upstreamTaskId = submitted.taskId;
-      if (submitted.immediateImageUrl) {
-        baseMeta.syncImageUrl = submitted.immediateImageUrl;
-      }
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : 'upstream_submit_failed';
       if (debited) {
@@ -472,18 +472,42 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     }
   }
 
-  if (hasAnyImageUpstream(upstream) && upstreamTaskId) {
-    const metaAfterSubmit: Record<string, unknown> = {
+  if (lineProvider === 'ithink' && isProviderConfigured(upstream, 'ithink')) {
+    const ithinkMeta: Record<string, unknown> = {
       ...baseMeta,
-      upstreamTaskId,
-      debitSplit
+      debitSplit,
+      ithinkSubmitState: 'queued'
     };
-    if (typeof baseMeta.syncImageUrl === 'string') {
-      metaAfterSubmit.syncImageUrl = baseMeta.syncImageUrl;
-    }
     await admin
       .from('generation_requests')
-      .update({ meta: metaAfterSubmit })
+      .update({ meta: ithinkMeta })
+      .eq('id', job.id);
+    const submitParams = {
+      upstreamModel: c.env.ITHINK_UPSTREAM_MODEL?.trim() || resolved.upstream,
+      prompt: promptText,
+      resolution: '1k',
+      quality: parsed.data.quality,
+      size: parsed.data.size
+    };
+    if (c.executionCtx) {
+      c.executionCtx.waitUntil(
+        processIthinkPendingSubmit(admin, user.id, job, upstream, c.env, submitParams).catch((e) => {
+          console.error('[generate] ithink waitUntil failed', job.id, e);
+        })
+      );
+    } else {
+      void processIthinkPendingSubmit(admin, user.id, job, upstream, c.env, submitParams);
+    }
+  } else if (hasAnyImageUpstream(upstream) && upstreamTaskId) {
+    await admin
+      .from('generation_requests')
+      .update({
+        meta: {
+          ...baseMeta,
+          upstreamTaskId,
+          debitSplit
+        }
+      })
       .eq('id', job.id);
   } else if (!hasAnyImageUpstream(upstream)) {
     await admin

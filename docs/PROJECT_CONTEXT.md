@@ -31,7 +31,7 @@
 | **主域名** | **https://prompt-hubs.com** · Pages `prompt-hub-hub` |
 | Worker | `prompt-hub-api` · **https://api.prompt-hubs.com** |
 | **Pages 构建号** | **`20260608l`** |
-| **ThinkAI** | 模型 `ithink-gpt-image-2-slow` · 默认 2 积分/张(1K) · 需 `ITHINK_API_KEY` |
+| **ThinkAI** | 慢速 `ithink-gpt-image-2-slow` · **仅 1K** · 后台提交防 502 · 默认 upstream `gpt-image-2` |
 | **手机** | 社区顶栏留白修复 · 4K 编辑预览先缩略图再拉 full |
 | **排序** | 卡片库「最近更新」记忆 · 生图作品按最近生成 |
 

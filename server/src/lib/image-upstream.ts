@@ -11,7 +11,6 @@ import {
   submitGrsaiImageJob,
   type TaskPollResult
 } from './grsai';
-import { submitIthinkImageJob } from './ithink';
 import { isGrsaiMaintenanceMessage, noteGrsaiSubmitOutcome } from './grsai-upstream-status';
 import { extractErrorMessage } from './cors-headers';
 import type { ImageModelProvider } from './image-models-catalog';
@@ -139,15 +138,11 @@ export async function submitImageJobForProvider(
     if (!bindings.ithinkKey) {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'ThinkAI 经济线路未配置，请联系站长');
     }
-    const { taskId, imageUrl } = await submitIthinkImageJob(
-      bindings.ithinkKey,
-      bindings.ithinkBase,
-      params
+    throw new ApiError(
+      500,
+      'SERVER_CONFIG',
+      'ThinkAI 应走后台提交，请勿同步调用 submitImageJobForProvider'
     );
-    if (!imageUrl) {
-      throw new ApiError(502, 'UPSTREAM_NO_IMAGE', 'ThinkAI 未返回图片');
-    }
-    return { provider: 'ithink', taskId, immediateImageUrl: imageUrl };
   }
   if (provider === 'apimart') {
     if (!bindings.apimartKey) {

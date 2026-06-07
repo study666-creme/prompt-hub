@@ -1,5 +1,4 @@
 import { ApiError } from './errors';
-import { mapQualityForGptImage } from './pricing';
 
 type SubmitParams = {
   upstreamModel: string;
@@ -10,59 +9,34 @@ type SubmitParams = {
   refImageUrls?: string[];
 };
 
-const SIZE_MAP: Record<string, Record<string, string>> = {
-  '1k': {
-    auto: '1024x1024',
-    '1:1': '1024x1024',
-    '16:9': '1536x1024',
-    '9:16': '1024x1536',
-    '4:3': '1152x864',
-    '3:4': '864x1152',
-    '3:2': '1536x1024',
-    '2:3': '1024x1536',
-    '5:4': '1120x896',
-    '4:5': '896x1120',
-    '21:9': '1456x624',
-    '9:21': '624x1456'
-  },
-  '2k': {
-    auto: '2048x2048',
-    '1:1': '2048x2048',
-    '16:9': '2048x1152',
-    '9:16': '1152x2048',
-    '4:3': '2304x1728',
-    '3:4': '1728x2304',
-    '3:2': '2048x1360',
-    '2:3': '1360x2048',
-    '5:4': '2240x1792',
-    '4:5': '1792x2240',
-    '21:9': '2912x1248',
-    '9:21': '1248x2912'
-  },
-  '4k': {
-    auto: '2048x2048',
-    '1:1': '2048x2048',
-    '16:9': '3840x2160',
-    '9:16': '2160x3840',
-    '4:3': '3264x2448',
-    '3:4': '2448x3264',
-    '3:2': '3504x2336',
-    '2:3': '2336x3504',
-    '5:4': '3200x2560',
-    '4:5': '2560x3200',
-    '21:9': '3840x1648',
-    '9:21': '1648x3840'
-  }
+/** ThinkAI 慢速线仅 1K；常用比例像素尺寸（官方文档） */
+const SIZE_MAP_1K: Record<string, string> = {
+  auto: '1024x1024',
+  '1:1': '1024x1024',
+  '16:9': '1536x1024',
+  '9:16': '1024x1536',
+  '4:3': '1152x864',
+  '3:4': '864x1152',
+  '3:2': '1536x1024',
+  '2:3': '1024x1536',
+  '5:4': '1120x896',
+  '4:5': '896x1120',
+  '21:9': '1456x624',
+  '9:21': '624x1456'
 };
 
 function apiBase(envBase?: string): string {
   return (envBase || 'https://token.ithinkai.cn').replace(/\/$/, '');
 }
 
-function mapIthinkPixelSize(resolution: string, sizeLabel?: string): string {
-  const res = ['1k', '2k', '4k'].includes(resolution) ? resolution : '1k';
+function mapIthinkPixelSize(sizeLabel?: string): string {
   const ratio = String(sizeLabel || '1:1').trim() || '1:1';
-  return SIZE_MAP[res]?.[ratio] || SIZE_MAP[res]?.['1:1'] || '1024x1024';
+  return SIZE_MAP_1K[ratio] || SIZE_MAP_1K['1:1'];
+}
+
+/** 经济慢速线强制 low，避免 high 需 3–5 分钟导致 Worker 子请求超时 */
+function mapIthinkQuality(_quality: string): string {
+  return 'low';
 }
 
 function pickImageUrl(payload: unknown): string | null {
@@ -84,6 +58,19 @@ function pickImageUrl(payload: unknown): string | null {
   return null;
 }
 
+function extractUpstreamError(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const p = payload as Record<string, unknown>;
+  const err = p.error;
+  if (err && typeof err === 'object') {
+    const msg = String((err as Record<string, unknown>).message || '').trim();
+    if (msg) return msg;
+    const code = String((err as Record<string, unknown>).code || '').trim();
+    if (code) return code;
+  }
+  return String(p.message || p.msg || fallback).slice(0, 400);
+}
+
 export type IthinkSubmitResult = {
   taskId: string;
   imageUrl: string | null;
@@ -95,19 +82,22 @@ export async function submitIthinkImageJob(
   baseUrl: string | undefined,
   params: SubmitParams
 ): Promise<IthinkSubmitResult> {
+  const model = params.upstreamModel.trim() || 'gpt-image-2';
   const body: Record<string, unknown> = {
-    model: params.upstreamModel.trim(),
+    model,
     prompt: params.prompt,
-    size: mapIthinkPixelSize(params.resolution, params.size),
-    quality: mapQualityForGptImage(params.quality),
-    response_format: 'url'
+    size: mapIthinkPixelSize(params.size),
+    quality: mapIthinkQuality(params.quality),
+    response_format: 'url',
+    n: 1
   };
   const refs = params.refImageUrls?.filter((u) => /^https?:\/\//i.test(u));
   if (refs?.length) {
     body.image = refs.slice(0, 8);
   }
 
-  const res = await fetch(`${apiBase(baseUrl)}/v1/images/generations`, {
+  const url = `${apiBase(baseUrl)}/v1/images/generations`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -125,13 +115,11 @@ export async function submitIthinkImageJob(
   }
 
   if (!res.ok) {
-    const errObj = json && typeof json === 'object' ? (json as Record<string, unknown>) : null;
-    const msg =
-      (errObj?.error && typeof errObj.error === 'object'
-        ? String((errObj.error as Record<string, unknown>).message || '')
-        : '') ||
-      String(errObj?.message || errObj?.msg || text || `HTTP ${res.status}`);
-    throw new ApiError(502, 'UPSTREAM_FAILED', msg.slice(0, 400) || 'ithink_upstream_failed');
+    const msg = extractUpstreamError(json, text || `HTTP ${res.status}`);
+    const hint = /model|不存在|not found|invalid/i.test(msg)
+      ? `（模型「${model}」可能不对，请在 ThinkAI 模型广场核对 ID，或设置 ITHINK_UPSTREAM_MODEL）`
+      : '';
+    throw new ApiError(502, 'UPSTREAM_FAILED', `${msg}${hint}`.slice(0, 480));
   }
 
   const imageUrl = pickImageUrl(json);

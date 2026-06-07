@@ -22,7 +22,7 @@ MEDIA_STORAGE_MODE = "r2-first"
 # IMAGE_API_KEY（生图 · GrsAI 主上游）
 # APIMART_API_KEY（生图 · Apimart 备用）
 # ITHINK_API_KEY（生图 · ThinkAI 经济慢速线路，thinkai.tv 控制台 Token）
-# ITHINK_API_BASE_URL（可选，默认 https://token.ithinkai.cn）
+# ITHINK_UPSTREAM_MODEL（可选，默认 gpt-image-2；模型广场 ID 不对时改）
 # CHAT_API_KEY（对话 · DeepSeek 官方 API Key）
 # ADMIN_API_SECRET（运营批量造激活码，见 scripts/generate-codes.ps1）
 

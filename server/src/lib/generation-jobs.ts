@@ -260,6 +260,39 @@ export async function pollAndUpdateJob(
     return completeJobFromPoll(admin, userId, job, { imageUrl: syncImageUrl }, env);
   }
 
+  if (job.status === 'processing' && provider === 'ithink') {
+    const submitState = String(meta.ithinkSubmitState || '');
+    if (submitState === 'running' || submitState === 'queued') {
+      if (submitState === 'queued' && !opts?.quick) {
+        const { processIthinkPendingSubmit } = await import('./ithink-submit');
+        await processIthinkPendingSubmit(admin, userId, job, upstream, env, {
+          upstreamModel: String(meta.upstreamModel || 'gpt-image-2'),
+          prompt: String(job.prompt || ''),
+          resolution: '1k',
+          quality: String(job.quality || 'standard'),
+          size: typeof meta.size === 'string' ? meta.size : undefined
+        });
+        const { data: refreshed } = await admin
+          .from('generation_requests')
+          .select('*')
+          .eq('id', job.id)
+          .maybeSingle();
+        if (refreshed) {
+          return pollAndUpdateJob(admin, userId, refreshed, upstream, env, opts);
+        }
+      }
+      return { status: 'processing', imageUrl: null, errorMessage: null, refunded: false };
+    }
+    if (submitState === 'failed' && meta.ithinkSubmitError) {
+      return {
+        status: 'failed',
+        imageUrl: null,
+        errorMessage: String(meta.ithinkSubmitError),
+        refunded: !!meta.refunded
+      };
+    }
+  }
+
   if (!taskId) {
     await finalizeFailedJob(admin, userId, job, 'missing_task_id');
     return {
