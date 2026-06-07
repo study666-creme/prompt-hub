@@ -160,6 +160,7 @@
       const fileHint = isFileOrigin()
         ? '请用 https://prompt-hub.cn 打开，或运行 .\\serve-local.ps1'
         : '';
+      const apiHost = baseUrl() || 'api.prompt-hub.cn';
       const decimalHint =
         '若仍报积分相关错误，请确认 Supabase 已执行 migrations/20260602211000_credits_decimal_fixup.sql';
       return {
@@ -167,8 +168,8 @@
         code: isFileOrigin() ? 'FILE_ORIGIN' : 'NETWORK_ERROR',
         message: fileHint
           || (aborted
-            ? '连接 api.prompt-hub.cn 超时，请换网络或稍后再试'
-            : `无法连接 api.prompt-hub.cn，请检查网络或 VPN。${decimalHint}`)
+            ? `连接 ${apiHost} 超时，请确认 Worker 在运行（本机 http://127.0.0.1:8787）`
+            : `无法连接 ${apiHost}，请确认 start-dev.ps1 两个窗口都在运行。${decimalHint}`)
       };
     } finally {
       clearTimeout(timer);
@@ -249,6 +250,7 @@
   }
 
   let apiHealthPromise = null;
+  let lastHealthOkAt = 0;
 
   async function probeApiHealth(opts) {
     if (!isConfigured()) return false;
@@ -262,6 +264,7 @@
         clearTimeout(t);
         if (r.ok) {
           window.__PH_API_DOWN_UNTIL__ = 0;
+          lastHealthOkAt = Date.now();
           return true;
         }
         if (!opts?.skipMark) markApiUnreachable();
@@ -280,14 +283,19 @@
     }
   }
 
-  async function prepareApiCall() {
+  async function prepareApiCall(opts) {
     window.__PH_API_DOWN_UNTIL__ = 0;
     await recoverSessionForApi();
-    return probeApiHealth({ force: true, skipMark: true });
+    if (opts?.light && Date.now() - lastHealthOkAt < 45000) return true;
+    const ok = await probeApiHealth({
+      force: !opts?.light,
+      skipMark: true
+    });
+    return ok;
   }
 
   async function requestWithPrepare(method, path, body, opts) {
-    await prepareApiCall();
+    await prepareApiCall({ light: opts?.lightPrepare });
     let r = await request(method, path, body, opts);
     if (!r.ok && (r.code === 'NETWORK_ERROR' || r.code === 'API_UNREACHABLE')) {
       await prepareApiCall();
@@ -517,12 +525,17 @@
   }
 
   async function generateImage(payload) {
-    return request('POST', '/api/v1/generate', payload, { timeoutMs: API_GENERATE_TIMEOUT_MS });
+    window.__PH_API_DOWN_UNTIL__ = 0;
+    return requestWithPrepare('POST', '/api/v1/generate', payload, {
+      timeoutMs: API_GENERATE_TIMEOUT_MS,
+      lightPrepare: true
+    });
   }
 
-  async function getGenerationJob(jobId) {
-    return request('GET', `/api/v1/generate/jobs/${encodeURIComponent(jobId)}`, null, {
-      timeoutMs: API_JOB_POLL_TIMEOUT_MS
+  async function getGenerationJob(jobId, opts) {
+    const settle = opts?.settle ? '?settle=1' : '';
+    return request('GET', `/api/v1/generate/jobs/${encodeURIComponent(jobId)}${settle}`, null, {
+      timeoutMs: opts?.settle ? Math.max(API_JOB_POLL_TIMEOUT_MS, 90000) : API_JOB_POLL_TIMEOUT_MS
     });
   }
 
@@ -856,8 +869,65 @@
     return requestWithPrepare('POST', '/api/v1/generate/recover-warehouse', {
       max: opts.max,
       days: opts.days,
-      mode: opts.mode || 'import'
-    }, { timeoutMs: Math.max(API_TIMEOUT_MS, 120000) });
+      mode: opts.mode || 'import',
+      jobIds: Array.isArray(opts.jobIds) ? opts.jobIds.filter(Boolean).slice(0, 10) : undefined
+    }, { timeoutMs: Math.max(API_TIMEOUT_MS, 120000), lightPrepare: true });
+  }
+
+  /** 卡片图上传 → Worker → R2（避免浏览器直连 Supabase/阿里云 Storage 流量费） */
+  function uploadStorageBlob(path, blob, opts = {}) {
+    return new Promise((resolve, reject) => {
+      (async () => {
+        if (!isConfigured()) {
+          reject(new Error('未配置 API 地址'));
+          return;
+        }
+        const cleanPath = String(path || '').replace(/^\//, '');
+        if (!cleanPath) {
+          reject(new Error('图片路径无效'));
+          return;
+        }
+        const token = await getAccessToken();
+        if (!token) {
+          reject(new Error('未登录'));
+          return;
+        }
+        const url = `${baseUrl()}/api/v1/media/upload?path=${encodeURIComponent(cleanPath)}`;
+        const contentType =
+          blob && blob.type && blob.type.startsWith('image/') ? blob.type : 'image/jpeg';
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url);
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.setRequestHeader('Content-Type', contentType);
+        xhr.upload.onprogress = (ev) => {
+          if (ev.lengthComputable && typeof opts.onProgress === 'function') {
+            opts.onProgress(ev.loaded / ev.total, ev.loaded, ev.total);
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const parsed = JSON.parse(xhr.responseText || '{}');
+              const ref = parsed?.data?.ref;
+              if (ref) {
+                resolve(ref);
+                return;
+              }
+            } catch (e) { /* ignore */ }
+            resolve(`storage://card-images/${cleanPath}`);
+            return;
+          }
+          let errMsg = xhr.responseText || `HTTP ${xhr.status}`;
+          try {
+            const parsed = JSON.parse(xhr.responseText);
+            errMsg = parsed?.error?.message || parsed?.message || errMsg;
+          } catch (e) { /* ignore */ }
+          reject(new Error(errMsg));
+        };
+        xhr.onerror = () => reject(new Error('网络错误，图片上传失败'));
+        xhr.send(blob);
+      })().catch(reject);
+    });
   }
 
   if (isConfigured()) {
@@ -900,6 +970,7 @@
     recoverWarehouseFromJobs,
     getLedger,
     checkLikeMilestone,
+    uploadStorageBlob,
     signMediaRef,
     signMediaRefsBatch,
     signCommunityMediaRef,

@@ -18,6 +18,7 @@ import {
   verifyMediaAccessToken
 } from '../../lib/media-cdn';
 import { createAdminClient } from '../../lib/supabase';
+import { uploadCardImage } from '../../lib/r2-storage';
 import { rateLimit } from '../../middleware/rate-limit';
 
 const BUCKET = 'card-images';
@@ -64,12 +65,12 @@ export async function communityMediaSignHandler(c: Context<{ Bindings: Env }>) {
   const admin = createAdminClient(c.env);
   if (variantQ === 'full') {
     const paths = communityImagePathCandidates(ref, authorId, cardId, { gridOnly: false, preferGrid: false });
-    const found = await findFirstExistingStoragePath(admin, paths, BUCKET);
+    const found = await findFirstExistingStoragePath(admin, paths, BUCKET, c.env);
     if (!found) throw new ApiError(404, 'NOT_FOUND', 'Object not found');
     const url = await buildPublicMediaCdnUrl(c, found);
     return c.json({ ok: true, data: { url, expiresIn: MEDIA_CDN_TOKEN_TTL_SEC, cdn: true } });
   }
-  const gridPath = await resolveCommunityGridPath(admin, ref, authorId, cardId, BUCKET);
+  const gridPath = await resolveCommunityGridPath(admin, ref, authorId, cardId, BUCKET, c.env);
   if (!gridPath) {
     throw new ApiError(404, 'NOT_FOUND', 'Object not found');
   }
@@ -126,7 +127,8 @@ export async function communityMediaSignBatchHandler(c: Context<{ Bindings: Env 
         ref,
         item.authorId || undefined,
         item.cardId || undefined,
-        BUCKET
+        BUCKET,
+        c.env
       );
       if (!gridPath) continue;
       c.executionCtx.waitUntil(
@@ -156,6 +158,38 @@ export async function communityMediaSignBatchHandler(c: Context<{ Bindings: Env 
     data: { urls, refMap, expiresIn: MEDIA_CDN_TOKEN_TTL_SEC, cdn: true }
   });
 }
+
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
+/** 卡片图上传 → R2（MEDIA_STORAGE_MODE=r2 时不写 Supabase/阿里云 Storage） */
+mediaRoutes.post('/upload', async c => {
+  const user = c.get('user');
+  const pathParam = String(c.req.query('path') || '').trim().replace(/^\//, '');
+  if (!pathParam) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '缺少 path 参数');
+  }
+  assertOwnPath(user.id, pathParam);
+
+  const body = await c.req.arrayBuffer();
+  if (!body.byteLength || body.byteLength < 512) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '图片数据无效或过小');
+  }
+  if (body.byteLength > MAX_UPLOAD_BYTES) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '图片过大（最大 8MB）');
+  }
+
+  const contentType = (c.req.header('content-type') || 'image/jpeg').split(';')[0].trim();
+  try {
+    await uploadCardImage(c.env, pathParam, body, contentType || 'image/jpeg');
+  } catch (e) {
+    throw new ApiError(500, 'UPLOAD_FAILED', String((e as Error).message || e).slice(0, 180));
+  }
+
+  return c.json({
+    ok: true,
+    data: { ref: `storage://${BUCKET}/${pathParam}` }
+  });
+});
 
 /** 将 storage:// 转为 CDN 代理 URL */
 mediaRoutes.get('/sign', async c => {
@@ -241,7 +275,16 @@ mediaRoutes.get('/generation/:jobId/url', async c => {
   throw new ApiError(400, 'INVALID_IMAGE', '无法解析图片地址');
 });
 
-const ALLOWED_FETCH_HOSTS = ['apimart.ai', 'api.apimart.ai', 'filesystem.site', 'supabase.co', 'api.prompt-hub.cn', 'prompt-hub.cn'];
+const ALLOWED_FETCH_HOSTS = [
+  'apimart.ai',
+  'api.apimart.ai',
+  'filesystem.site',
+  'supabase.co',
+  'memfiredb.com',
+  'baseaf.memfiredb.com',
+  'api.prompt-hub.cn',
+  'prompt-hub.cn'
+];
 
 function isAllowedRemoteUrl(url: string): boolean {
   try {

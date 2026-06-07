@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
 import { applyCorsHeaders } from './lib/cors-headers';
 import { jsonError } from './lib/errors';
+import { diagnoseSupabaseUpstream } from './lib/supabase-upstream';
 import { createCorsMiddleware } from './middleware/cors';
 import { adminRoutes } from './routes/admin';
+import { supabaseProxyHandler } from './routes/supabase-proxy';
 import { v1 } from './routes/v1';
 import { webhookRoutes } from './routes/webhooks/payment';
 import type { Env } from './env';
@@ -39,18 +41,20 @@ app.get('/health', async c => {
       db = 'error';
     }
   }
+  let hint: string | undefined;
+  if (db === 'misconfigured') {
+    hint =
+      'SUPABASE_SERVICE_ROLE_KEY 需为 service_role（Legacy eyJ），请 wrangler secret put 后重新 deploy';
+  } else if (db === 'error') {
+    hint = (await diagnoseSupabaseUpstream(c.env)) || '执行 scripts/apply-grants-once.sql';
+  }
   return c.json({
     ok: db === 'ok',
     service: 'prompt-hub-api',
     version: '0.1.0',
     environment: c.env.ENVIRONMENT,
     supabase: db,
-    hint:
-      db === 'misconfigured'
-        ? 'SUPABASE_SERVICE_ROLE_KEY 需为 sb_secret_，请 wrangler secret put 后重新 deploy'
-        : db === 'error'
-          ? '执行 scripts/apply-grants-once.sql'
-          : undefined
+    hint
   });
 });
 
@@ -92,6 +96,8 @@ app.get('/api/v1/billing/plans', c =>
     }
   })
 );
+
+app.all('/supabase/*', supabaseProxyHandler);
 
 app.route('/api/v1/webhooks', webhookRoutes);
 

@@ -8,7 +8,12 @@
   function loadSession() {
     try {
       const raw = sessionStorage.getItem(LS_KEY);
-      return raw ? JSON.parse(raw) : null;
+      const s = raw ? JSON.parse(raw) : null;
+      if (s?.secret) {
+        const expected = resolveApiBase();
+        if (s.apiBase !== expected) s.apiBase = expected;
+      }
+      return s;
     } catch {
       return null;
     }
@@ -24,15 +29,24 @@
 
   function resolveApiBase() {
     const host = (window.location.hostname || '').toLowerCase();
+    const custom = String(window.CUSTOM_API_HOST || '').trim();
+    if (custom) {
+      return 'https://' + custom.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+    }
     const prodByHost = {
+      'prompt-hubs.com': 'https://api.prompt-hubs.com',
+      'www.prompt-hubs.com': 'https://api.prompt-hubs.com',
       'prompt-hub.cn': 'https://api.prompt-hub.cn',
       'www.prompt-hub.cn': 'https://api.prompt-hub.cn',
-      'prompt-hub-hub.pages.dev': 'https://api.prompt-hub.cn',
-      'prompt-hub-web.pages.dev': 'https://api.prompt-hub.cn'
+      'prompt-hub-hub.pages.dev': 'https://api.prompt-hubs.com',
+      'prompt-hub-web.pages.dev': 'https://api.prompt-hubs.com'
     };
     if (prodByHost[host]) return prodByHost[host];
+    if (/\.prompt-hub-hub\.pages\.dev$/i.test(host) || /\.prompt-hub-web\.pages\.dev$/i.test(host)) {
+      return 'https://api.prompt-hubs.com';
+    }
     if (host === 'localhost' || host === '127.0.0.1') return 'http://127.0.0.1:8787';
-    return 'https://api.prompt-hub.cn';
+    return 'https://api.prompt-hubs.com';
   }
 
   function apiBase(session) {
@@ -55,7 +69,7 @@
       return '密钥与 Cloudflare 中保存的不一致。请重新执行 wrangler secret put 设置同一串后再登录。';
     }
     if (/failed to fetch|networkerror|load failed|cors/i.test(msg)) {
-      return '无法连接 API（多为网络或 Worker 未部署）。请确认已执行 server 目录下 npx wrangler deploy，并在 Supabase 跑过 site_settings 迁移后重试';
+      return '无法连接 API（多为网络或 Worker 未部署 / Supabase 未切境外库）。请确认 server 目录已 deploy，且 SUPABASE_URL 为 https://xxxxx.supabase.co（见 docs/OVERSEAS-FIRST.md）';
     }
     if (/site_settings|Could not find the table|PGRST205|SITE_SETTINGS|SAVE_VERIFY|PERMISSION/i.test(msg)) {
       return msg.includes('SAVE_VERIFY')
@@ -119,14 +133,81 @@
   }
 
   let toastTimer = 0;
-  function toast(text, ok) {
+  function toast(text, ok, holdMs) {
     const el = $('adminToast');
     if (!el) return;
     clearTimeout(toastTimer);
     el.hidden = !text;
     el.textContent = text || '';
     el.className = 'admin-toast ' + (ok ? 'is-ok' : 'is-err');
-    if (text) toastTimer = setTimeout(() => (el.hidden = true), 3200);
+    if (text) toastTimer = setTimeout(() => (el.hidden = true), holdMs || (ok ? 5200 : 6800));
+  }
+
+  function setCommunityTaskProgress(text, active) {
+    const box = $('communityTaskProgress');
+    const label = $('communityTaskProgressText');
+    if (!box || !label) return;
+    if (!active) {
+      box.hidden = true;
+      label.textContent = '';
+      return;
+    }
+    box.hidden = false;
+    label.textContent = text || '处理中…';
+  }
+
+  function setButtonBusy(btn, busy, busyLabel) {
+    if (!btn) return;
+    if (busy) {
+      if (!btn.dataset.idleLabel) btn.dataset.idleLabel = btn.textContent || '';
+      btn.textContent = busyLabel || '处理中…';
+      btn.classList.add('is-busy');
+      btn.disabled = true;
+      return;
+    }
+    btn.textContent = btn.dataset.idleLabel || btn.textContent;
+    btn.classList.remove('is-busy');
+    btn.disabled = false;
+  }
+
+  async function runCommunityAdminTask(opts) {
+    const {
+      btn,
+      confirmText,
+      progressText,
+      request,
+      onSuccess,
+      msgEl,
+      resultEl
+    } = opts;
+    if (!session) return;
+    if (confirmText && !confirm(confirmText)) return;
+    setButtonBusy(btn, true, '处理中…');
+    setCommunityTaskProgress(progressText || '正在处理，请稍候…', true);
+    if (resultEl) {
+      resultEl.hidden = false;
+      resultEl.textContent = progressText || '正在处理…';
+    }
+    if (msgEl) showMsg(msgEl, progressText || '正在处理…', true);
+    try {
+      const data = await request();
+      const text = onSuccess(data);
+      setCommunityTaskProgress(text, true);
+      if (resultEl) resultEl.textContent = text;
+      if (msgEl) showMsg(msgEl, text, true);
+      toast(text, true);
+      return data;
+    } catch (e) {
+      const err = '操作失败：' + friendlyFetchError(e);
+      setCommunityTaskProgress(err, true);
+      if (resultEl) resultEl.textContent = err;
+      if (msgEl) showMsg(msgEl, err, false);
+      toast(err, false);
+      throw e;
+    } finally {
+      setButtonBusy(btn, false);
+      setTimeout(() => setCommunityTaskProgress('', false), 8000);
+    }
   }
 
   function openModal() {
@@ -158,16 +239,22 @@
   let session = loadSession();
   let userOffset = 0;
   let codeOffset = 0;
+  let communityOffset = 0;
+  let communityView = 'published';
+  let communityBucketItems = [];
   const PAGE = 20;
 
   function showApp(loggedIn) {
+    document.body.classList.toggle('admin-gate', !loggedIn);
     $('adminLogin').hidden = loggedIn;
     $('adminApp').hidden = !loggedIn;
+    document.title = loggedIn ? 'Prompt Hub 运营控制台' : '管理登录';
   }
 
   const PAGE_TITLES = {
     overview: ['数据概览', '用户、存储、运行环境一览'],
     users: ['用户管理', '搜索、查看云存储额度与会员状态'],
+    community: ['社区图片', '查看在线帖数量、下架无效或已删卡的社区帖'],
     codes: ['激活码', '生成与查询兑换码'],
     models: ['生图模型', '定价、折扣与线路配置']
   };
@@ -210,6 +297,7 @@
         if (panel) panel.hidden = false;
         if (tab === 'overview') void loadDashboard();
         if (tab === 'users') void loadUsers(true);
+        if (tab === 'community') void loadCommunity(true);
         if (tab === 'codes') void loadCodes(true);
         if (tab === 'models') void loadImageModels();
       });
@@ -404,29 +492,273 @@
     if (!btn || btn.dataset.bound === '1') return;
     btn.dataset.bound = '1';
     btn.addEventListener('click', async () => {
-      if (!session) return;
-      if (!confirm('将检查所有已发布社区帖：Storage 无图片、无效作者、重复卡片会被下架（published=false）。\n\n帖子记录仍保留，只是不再出现在社区 feed。继续？')) return;
-      btn.disabled = true;
-      if (result) {
-        result.hidden = false;
-        result.textContent = '正在扫描 Storage 与社区帖（帖多时约需 1～2 分钟）…';
-      }
       try {
-        const r = await adminFetch(session, '/api/admin/community/purge-ghosts', {
+        await runCommunityAdminTask({
+          btn,
+          confirmText: '将检查所有已发布社区帖：\n· 作者卡片库已删\n· Storage 无图片\n· 无效作者\n· 重复卡片\n\n会被下架（published=false），记录仍保留。继续？',
+          progressText: '正在扫描 Storage 与社区帖（帖多时约需 1～2 分钟）…',
+          resultEl: result,
+          request: () => adminFetch(session, '/api/admin/community/purge-ghosts', {
+            method: 'POST',
+            timeoutMs: 180000
+          }),
+          onSuccess: (r) =>
+            `已下架 ${r.unpublishedTotal || 0} 条（删卡孤儿 ${r.unpublishedOrphans || 0}，无图/无效作者 ${r.unpublishedMissing || 0}，重复 ${r.unpublishedDuplicates || 0}）· 修正作者 ${r.repairedAuthors || 0} · 仍在线 ${r.publishedRemaining ?? '—'} 条（有图 ${r.publishedWithImage ?? '—'}）`
+        });
+      } catch (e) { /* toast handled */ }
+    });
+  }
+
+  async function runCommunityPurge(btn, resultEl, msgEl) {
+    try {
+      await runCommunityAdminTask({
+        btn,
+        confirmText: '将检查所有已发布社区帖：\n· 作者卡片库已删\n· Storage 无图片\n· 无效作者\n· 重复卡片\n\n会被下架（published=false）。继续？',
+        progressText: '正在扫描无效社区帖（帖多时约需 1～2 分钟）…',
+        resultEl,
+        msgEl,
+        request: () => adminFetch(session, '/api/admin/community/purge-ghosts', {
           method: 'POST',
           timeoutMs: 180000
-        });
-        const msg = `已下架 ${r.unpublishedTotal || 0} 条（无图/无效作者 ${r.unpublishedMissing || 0}，重复 ${r.unpublishedDuplicates || 0}）· 修正作者 ${r.repairedAuthors || 0} · 仍在线 ${r.publishedRemaining ?? '—'} 条`;
-        if (result) result.textContent = msg;
-        toast(msg, true);
-      } catch (e) {
-        const err = friendlyFetchError(e);
-        if (result) result.textContent = '清理失败：' + err;
-        toast('清理失败：' + err, false);
-      } finally {
-        btn.disabled = false;
-      }
+        }),
+        onSuccess: (r) => {
+          if ($('panel-community') && !$('panel-community').hidden) void loadCommunity(true);
+          return `已下架 ${r.unpublishedTotal || 0} 条（删卡孤儿 ${r.unpublishedOrphans || 0}，无图 ${r.unpublishedMissing || 0}，重复 ${r.unpublishedDuplicates || 0}）· 仍在线 ${r.publishedRemaining ?? '—'} 条（有图 ${r.publishedWithImage ?? '—'}）`;
+        }
+      });
+    } catch (e) { /* toast handled */ }
+  }
+
+  function communityImageCell(image) {
+    const ref = String(image || '').trim();
+    if (!ref) return '<span class="admin-hint">无</span>';
+    const short = ref.length > 36 ? ref.slice(0, 18) + '…' + ref.slice(-14) : ref;
+    return `<code title="${esc(ref)}">${esc(short)}</code>`;
+  }
+
+  function communityCardLibBadge(item) {
+    if (item.cardInLibrary === true) return '<span class="admin-badge admin-badge--ok">有</span>';
+    if (item.cardInLibrary === false) return '<span class="admin-badge admin-badge--warn">无</span>';
+    return '<span class="admin-hint">—</span>';
+  }
+
+  function communityThumbCell(p) {
+    if (!p?.thumbUrl) return '<span class="admin-hint">无</span>';
+    const fb = esc(p.thumbFallbackUrl || p.thumbUrl);
+    const src = esc(p.thumbUrl);
+    return `<img class="admin-thumb" src="${src}" data-fallback="${fb}" alt="" loading="lazy" onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback}else{this.classList.add('is-broken')}">`;
+  }
+
+  function setCommunityView(view) {
+    communityView = view || 'published';
+    document.querySelectorAll('[data-community-view]').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.getAttribute('data-community-view') === communityView);
     });
+    const postTools = $('communityPostTools');
+    const bucketTools = $('communityBucketTools');
+    const head = $('communityTableHead');
+    const hint = $('communityViewHint');
+    if (postTools) postTools.classList.toggle('hidden', communityView === 'bucket-orphans');
+    if (bucketTools) bucketTools.classList.toggle('hidden', communityView !== 'bucket-orphans');
+    if (head) {
+      head.innerHTML =
+        communityView === 'bucket-orphans'
+          ? '<tr><th>缩略图</th><th>Storage 路径</th><th>大小</th><th></th></tr>'
+          : '<tr><th>缩略图</th><th>作者</th><th>提示词</th><th>卡片库</th><th>赞</th><th>时间</th><th></th></tr>';
+    }
+    if (hint) {
+      const hints = {
+        published: '在线社区帖。可下架（仅隐藏）或删除（删记录 + 可选删 Storage 图）。',
+        unpublished: '已下架帖（published=false），可删除记录与图片。',
+        'library-missing': '作者卡片库已无对应卡，但社区仍在线。可恢复 / 下架 / 删除。',
+        'bucket-orphans': '桶内文件已无任何卡片库或社区帖引用，可安全删除以腾空间（Supabase + R2）。'
+      };
+      hint.textContent = hints[communityView] || hints.published;
+    }
+  }
+
+  function bindCommunityPostActions() {
+    const tbody = $('communityTableBody');
+    if (!tbody) return;
+    tbody.querySelectorAll('[data-restore-post]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-restore-post');
+        if (!id || !confirm('将该社区帖恢复到作者卡片库？')) return;
+        try {
+          await runCommunityAdminTask({
+            btn,
+            progressText: `正在恢复帖子 ${id.slice(0, 18)}…`,
+            msgEl: $('communityMsg'),
+            request: () => adminFetch(session, `/api/admin/community/posts/${encodeURIComponent(id)}/restore`, {
+              method: 'POST',
+              timeoutMs: 120000
+            }),
+            onSuccess: (r) => {
+              void loadCommunity(false);
+              return r.alreadyExists ? '卡片库已有该卡' : `已恢复 · ${r.cardId || id}`;
+            }
+          });
+        } catch (e) { /* toast handled */ }
+      });
+    });
+    tbody.querySelectorAll('[data-unpublish-post]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-unpublish-post');
+        if (!id || !confirm('下架该社区帖？（不删图片）')) return;
+        try {
+          await runCommunityAdminTask({
+            btn,
+            progressText: `正在下架帖子 ${id.slice(0, 18)}…`,
+            msgEl: $('communityMsg'),
+            request: () => adminFetch(session, `/api/admin/community/posts/${encodeURIComponent(id)}/unpublish`, {
+              method: 'POST',
+              timeoutMs: 120000
+            }),
+            onSuccess: () => {
+              void loadCommunity(false);
+              return '已下架';
+            }
+          });
+        } catch (e) { /* toast handled */ }
+      });
+    });
+    tbody.querySelectorAll('[data-delete-post]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-delete-post');
+        if (!id || !confirm('永久删除该社区帖，并删除 Storage/R2 中的配图？\n\n不可恢复。')) return;
+        try {
+          await runCommunityAdminTask({
+            btn,
+            progressText: `正在删除帖子 ${id.slice(0, 18)}…`,
+            msgEl: $('communityMsg'),
+            request: () => adminFetch(session, `/api/admin/community/posts/${encodeURIComponent(id)}/delete`, {
+              method: 'POST',
+              body: { deleteStorage: true },
+              timeoutMs: 180000
+            }),
+            onSuccess: (r) => {
+              void loadCommunity(false);
+              return `已删除 · 清图 ${r.storageRemoved || 0} 个`;
+            }
+          });
+        } catch (e) { /* toast handled */ }
+      });
+    });
+    tbody.querySelectorAll('[data-delete-orphan]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const path = btn.getAttribute('data-delete-orphan');
+        if (!path || !confirm(`删除桶内孤儿文件？\n\n${path}`)) return;
+        try {
+          await runCommunityAdminTask({
+            btn,
+            progressText: `正在删除文件 ${path.split('/').pop() || path}…`,
+            msgEl: $('communityMsg'),
+            request: () => adminFetch(session, '/api/admin/community/bucket-orphans/delete', {
+              method: 'POST',
+              body: { paths: [path] },
+              timeoutMs: 180000
+            }),
+            onSuccess: (r) => {
+              void loadCommunity(false);
+              return `已删 ${r.removed || 0} 个文件（R2 ${r.r2Removed || 0}）`;
+            }
+          });
+        } catch (e) { /* toast handled */ }
+      });
+    });
+  }
+
+  async function loadCommunity(reset) {
+    if (!session) return;
+    if (reset) communityOffset = 0;
+    setCommunityView(communityView);
+    const tbody = $('communityTableBody');
+    const statsEl = $('communityStats');
+    if (!tbody) return;
+    const colSpan = communityView === 'bucket-orphans' ? 4 : 7;
+    tbody.innerHTML = `<tr class="admin-loading"><td colspan="${colSpan}">加载中…</td></tr>`;
+    try {
+      if (statsEl) {
+        const st = await adminFetch(session, '/api/admin/community/stats');
+        statsEl.innerHTML = `
+          <div class="admin-stat"><span>在线帖</span><strong>${st.publishedCount ?? 0}</strong></div>
+          <div class="admin-stat"><span>卡片库无</span><strong>${st.orphanPublished ?? 0}</strong></div>
+          <div class="admin-stat"><span>已下架</span><strong>${st.unpublishedCount ?? 0}</strong></div>
+          <div class="admin-stat"><span>当前视图</span><strong>${esc(communityView)}</strong></div>`;
+      }
+
+      if (communityView === 'bucket-orphans') {
+        const data = await adminFetch(
+          session,
+          `/api/admin/community/bucket-orphans?limit=${PAGE}&offset=${communityOffset}`,
+          { timeoutMs: 180000 }
+        );
+        communityBucketItems = data.items || [];
+        $('communityPageInfo').textContent = `第 ${communityOffset + 1}–${communityOffset + communityBucketItems.length} 条，约 ${data.total ?? 0} 孤儿 · 已引用 ${data.referencedCount ?? '—'} 路径`;
+        const meta = $('communityBucketMeta');
+        if (meta) {
+          meta.textContent = data.truncated
+            ? `扫描上限 ${data.scannedCount ?? '—'}，请分批删除后刷新`
+            : `已扫描 ${data.scannedCount ?? '—'} 个桶内对象`;
+        }
+        if (!communityBucketItems.length) {
+          tbody.innerHTML = `<tr><td colspan="4" class="admin-hint">暂无桶内孤儿文件（或需 deploy Worker 后重试）</td></tr>`;
+          return;
+        }
+        tbody.innerHTML = communityBucketItems
+          .map(
+            (o) => `<tr>
+            <td>${communityThumbCell(o)}</td>
+            <td><code class="admin-path" title="${esc(o.path)}">${esc(o.path.length > 42 ? o.path.slice(0, 40) + '…' : o.path)}</code></td>
+            <td>${formatBytes(o.bytes || 0)}</td>
+            <td><button type="button" class="admin-btn admin-btn--sm admin-btn--danger" data-delete-orphan="${esc(o.path)}">删文件</button></td>
+          </tr>`
+          )
+          .join('');
+        bindCommunityPostActions();
+        return;
+      }
+
+      const q = ($('communitySearch')?.value || '').trim();
+      const viewParam = communityView === 'library-missing' ? '&view=library-missing' : communityView === 'unpublished' ? '&view=unpublished' : '&view=published';
+      const data = await adminFetch(
+        session,
+        `/api/admin/community/posts?limit=${PAGE}&offset=${communityOffset}${q ? '&q=' + encodeURIComponent(q) : ''}${viewParam}`
+      );
+      const items = data.items || [];
+      const viewLabel = data.view || communityView;
+      $('communityPageInfo').textContent = `视图 ${viewLabel} · 第 ${communityOffset + 1}–${communityOffset + items.length} 条，约 ${data.total ?? items.length} 帖`;
+      if (!items.length) {
+        const emptyMsg =
+          communityView === 'library-missing'
+            ? '没有「卡片库无」的在线帖（0 条）。若勾选后仍看到全部在线帖，请先 deploy Worker。'
+            : '暂无帖子';
+        tbody.innerHTML = `<tr><td colspan="7" class="admin-hint">${emptyMsg}</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = items
+        .map(
+          (p) => `<tr>
+          <td>${communityThumbCell(p)}</td>
+          <td>${esc(p.authorName || '用户')}<br><span class="admin-hint">${esc((p.authorId || '').slice(0, 8))}…</span></td>
+          <td title="${esc(p.promptPreview || '')}">${esc((p.promptPreview || '').slice(0, 48))}${(p.promptPreview || '').length > 48 ? '…' : ''}</td>
+          <td>${communityCardLibBadge(p)}${p.sourceCardId ? `<br><span class="admin-hint">${esc(String(p.sourceCardId).slice(0, 16))}…</span>` : ''}</td>
+          <td>${p.likes ?? 0}</td>
+          <td>${esc((p.createdAt || '').slice(0, 10))}</td>
+          <td class="admin-actions-cell">
+            ${p.cardInLibrary === false ? `<button type="button" class="admin-btn admin-btn--sm" data-restore-post="${esc(p.id)}">恢复</button> ` : ''}
+            ${p.published ? `<button type="button" class="admin-btn admin-btn--sm" data-unpublish-post="${esc(p.id)}">下架</button> ` : ''}
+            <button type="button" class="admin-btn admin-btn--sm admin-btn--danger" data-delete-post="${esc(p.id)}">删除</button>
+          </td>
+        </tr>`
+        )
+        .join('');
+      bindCommunityPostActions();
+      showMsg($('communityMsg'), '', true);
+    } catch (e) {
+      tbody.innerHTML = '';
+      showMsg($('communityMsg'), friendlyFetchError(e), false);
+    }
   }
 
   async function loadUsers(reset) {
@@ -1033,6 +1365,10 @@
       if (input) input.value = '';
       void loadUsers(true);
     });
+    $('userSearch')?.addEventListener('focus', () => {
+      const input = $('userSearch');
+      if (input?.value && /@/.test(input.value)) input.value = '';
+    });
     let searchTimer = 0;
     $('userSearch')?.addEventListener('input', () => {
       clearTimeout(searchTimer);
@@ -1066,6 +1402,78 @@
     $('createCodeBtn')?.addEventListener('click', () => void createCodes());
     $('modelsSaveBtn')?.addEventListener('click', () => void saveImageModels());
     $('modelsGlobalDiscount')?.addEventListener('input', () => renderModelsTable());
+
+    $('communitySearchBtn')?.addEventListener('click', () => void loadCommunity(true));
+    $('communitySearchClear')?.addEventListener('click', () => {
+      const input = $('communitySearch');
+      if (input) input.value = '';
+      void loadCommunity(true);
+    });
+    $('communitySearch')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') void loadCommunity(true);
+    });
+    $('communityPrev')?.addEventListener('click', () => {
+      communityOffset = Math.max(0, communityOffset - PAGE);
+      void loadCommunity(false);
+    });
+    $('communityNext')?.addEventListener('click', () => {
+      communityOffset += PAGE;
+      void loadCommunity(false);
+    });
+    $('communityPurgeBtn')?.addEventListener('click', () =>
+      void runCommunityPurge($('communityPurgeBtn'), null, $('communityMsg'))
+    );
+    document.querySelectorAll('[data-community-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        communityView = btn.getAttribute('data-community-view') || 'published';
+        void loadCommunity(true);
+      });
+    });
+    $('communityBucketDeletePageBtn')?.addEventListener('click', async () => {
+      if (!session || !communityBucketItems.length) return;
+      const btn = $('communityBucketDeletePageBtn');
+      try {
+        await runCommunityAdminTask({
+          btn,
+          confirmText: `删除本页 ${communityBucketItems.length} 个桶内孤儿文件？\n\n不可恢复。`,
+          progressText: `正在删除本页 ${communityBucketItems.length} 个孤儿文件…`,
+          msgEl: $('communityMsg'),
+          request: () => adminFetch(session, '/api/admin/community/bucket-orphans/delete', {
+            method: 'POST',
+            body: { paths: communityBucketItems.map((o) => o.path) },
+            timeoutMs: 180000
+          }),
+          onSuccess: (r) => {
+            void loadCommunity(true);
+            return `已删 ${r.removed || 0} 个（R2 ${r.r2Removed || 0}）`;
+          }
+        });
+      } catch (e) { /* toast handled */ }
+    });
+    $('communityRestoreOrphansBtn')?.addEventListener('click', async () => {
+      if (!session) return;
+      const msg =
+        communityView === 'library-missing'
+          ? '将恢复当前「卡片库无」视图中的帖到各作者卡片库（每次最多 50 条）。继续？'
+          : '将扫描全部在线帖，恢复作者卡片库中已缺失的帖（每次最多 50 条）。建议先切到「卡片库无」视图。继续？';
+      const btn = $('communityRestoreOrphansBtn');
+      try {
+        await runCommunityAdminTask({
+          btn,
+          confirmText: msg,
+          progressText: '正在批量恢复无卡帖（最多 50 条，请稍候）…',
+          msgEl: $('communityMsg'),
+          request: () => adminFetch(session, '/api/admin/community/restore-orphans?limit=50', {
+            method: 'POST',
+            timeoutMs: 180000
+          }),
+          onSuccess: (r) => {
+            void loadCommunity(true);
+            return `已恢复 ${r.restored || 0} 条，跳过 ${r.skipped || 0}，失败 ${r.failed || 0}`;
+          }
+        });
+      } catch (e) { /* toast handled */ }
+    });
 
     if (session?.secret) {
       setPageTitle('overview');

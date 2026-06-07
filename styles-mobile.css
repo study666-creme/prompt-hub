@@ -34,8 +34,12 @@
     display: none !important;
   }
 
-  .fab-new {
+  .fab-new:not(.visible) {
     display: none !important;
+  }
+
+  .fab-new.visible {
+    display: flex !important;
   }
 
   /* 解除桌面 z-index:2 层叠，否则侧栏会被 body 级遮罩盖住且无法点击 */
@@ -293,6 +297,33 @@
   }
 
   .app-page-warehouse.active .main-content {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+  }
+
+  .app-page-devlab.active {
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    width: 100%;
+  }
+
+  .app-page-devlab.active .devlab-sidebar {
+    display: none;
+  }
+
+  body.mobile-groups-open .app-page-devlab.active .devlab-sidebar {
+    display: flex !important;
+    flex-direction: column;
+  }
+
+  .devlab-mobile-tabs {
+    display: flex !important;
+  }
+
+  .devlab-main {
     flex: 1;
     min-width: 0;
     min-height: 0;
@@ -1042,10 +1073,20 @@
   .fab-new {
     bottom: calc(72px + env(safe-area-inset-bottom));
     right: 16px;
-    width: 52px;
-    height: 52px;
-    font-size: 26px;
+    width: 58px;
+    height: 58px;
     z-index: 370;
+    box-shadow:
+      0 14px 40px rgba(0, 0, 0, 0.62),
+      0 0 0 1px rgba(255, 255, 255, 0.32),
+      0 2px 0 rgba(255, 255, 255, 0.7) inset;
+  }
+  .fab-new__icon {
+    width: 26px;
+    height: 26px;
+  }
+  .fab-new__icon path {
+    stroke-width: 2.5;
   }
 
   .toast {

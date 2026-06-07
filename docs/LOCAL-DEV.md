@@ -1,84 +1,83 @@
-# 本地开发与预览
+# 本地开发与预览（过渡期 · 阿里云 / MemFire 前）
 
-## 不要用 file:// 打开
+> **线上 prompt-hub.cn** 在 ICP/MemFire 就绪前可能无法登录；**请用本机调试**。  
+> **卡片主备份**：设置 → 数据管理 → **备份导出 JSON**（强刷/换机可 **备份导入**）。
 
-**不要**在资源管理器里双击 `index.html`（地址栏会是 `file:///D:/...`）。
+---
 
-| 方式 | 结果 |
+## JSON 备份（推荐习惯）
+
+| 操作 | 路径 |
 |------|------|
-| `file://` 打开 | 浏览器拦截 API（CORS），积分/任务/生图接口失败；`localStorage` 与 **https://prompt-hub.cn 不是同一份数据**，卡片/社区可能显示为 0 |
-| `http://127.0.0.1:5500` | 可正常请求 API（若已配置 `api-config.js`） |
-| **https://prompt-hub.cn** | 正式环境，数据与线上一致 |
+| **导出** | 设置 → 数据管理 → **备份导出** → 下载 `prompt-hub-backup_YYYYMMDD.json` |
+| **导入** | 设置 → 数据管理 → **备份导入** → 选 JSON 文件 |
 
-页面会在 `file://` 下自动弹出全屏提示（`file-origin-guard.js`）。
+JSON 内含：`cards`、`customGroups`、`globalFields`、`settings`（不含 Storage 里的大图文件；图仍走 `storage://` 或本机新上传）。
+
+**建议**：每次大批量改卡或调试结束前 **导出一份** 到 `D:\prompt-hub\backups\` 文件夹。
 
 ---
 
-## 本机预览静态站（改前端后）
+## 一键启动（推荐）
 
-**第 1 步** 在项目根目录打开 PowerShell：
+**第 1 步** 编辑 `server\.dev.vars`（首次运行 `setup-local-dev.ps1` 会生成）：
+
+- `SUPABASE_SERVICE_ROLE_KEY` = 阿里云 **Legacy service_role**（不是 anon）
+- `IMAGE_API_KEY` = 生图 Key（要测生图时必填）
+
+**第 2 步** 项目根目录：
 
 ```powershell
 cd D:\prompt-hub
-.\serve-local.ps1
+.\start-dev.ps1
 ```
 
-**第 2 步** 浏览器打开：**http://127.0.0.1:5500**
+会打开两个窗口：
 
-（没有 Python 时会自动用 `npx http-server`。）
+- Worker API → http://127.0.0.1:8787  
+- 静态站 → http://127.0.0.1:5500  
+
+**第 3 步** 浏览器打开 **http://127.0.0.1:5500** → 登录 `2705367723@qq.com`
 
 ---
 
-## 对接本地 API（可选）
+## 配置说明
 
-**第 1 步** 另开终端：
+| 文件 | 作用 |
+|------|------|
+| `supabase-config.js` | 生产用 `https://api.prompt-hub.cn/supabase`；**localhost 自动改** `http://8.148.193.247:80` |
+| `supabase-config.local.js` | 可选覆盖（勿提交、deploy 会自动排除） |
+| `api-config.js` | localhost 自动指 `http://127.0.0.1:8787` |
+| `server/.dev.vars` | Worker 本地密钥（勿提交） |
+| `MEDIA_STORAGE_MODE=r2` | **新图只写 Cloudflare R2**，浏览器上传走 `/api/v1/media/upload`，不烧阿里云流量 |
+
+**R2 桶**：Cloudflare 控制台建 `prompt-hub-card-images` 后 `cd server && npm run deploy`。
+
+---
+
+## 旧 Supabase 无图卡
+
+～6/25 前，**拉不到图的 `storage://` 卡自动从列表隐藏**（不删库）。见 `docs/MEMFIRE-MIGRATION.md`。
+
+---
+
+## 不要用 file://
+
+双击 `index.html` 会导致 API 失败。必须用 `serve-local.ps1` 或 `start-dev.ps1`。
+
+---
+
+## 部署到线上（MemFire/备案就绪后）
 
 ```powershell
-cd D:\prompt-hub\server
-copy .dev.vars.example .dev.vars
-npm install
-npm run dev
-```
-
-**第 2 步** 根目录创建 `api-config.local.js`（已在 `.gitignore`）：
-
-```javascript
-window.API_BASE_URL = 'http://127.0.0.1:8787';
-```
-
-**第 3 步** 用 `serve-local.ps1` 打开前端，不要用 `file://`。
-
----
-
-## 出现「暂时无法连接」
-
-这是 **Service Worker** 在页面拉取失败时的离线提示（常见于：本地 5500 没开服务、或旧 SW 缓存异常）。
-
-**处理步骤：**
-
-1. 打开 http://127.0.0.1:5500/auto-fix.html（需先 `.\serve-local.ps1`）
-2. 点 **「清除缓存」**
-3. 再打开 http://127.0.0.1:5500/ 或 https://prompt-hub.cn ，`Ctrl+Shift+R` 强刷
-
-线上站：F12 → Application → Service Workers → **Unregister** → Clear site data。
-
-## 验证构建号
-
-浏览器控制台：
-
-```javascript
-window.__APP_BUILD__
-```
-
-部署到 Pages 后应为当前 `index.html` 里的版本（如 `20260606j`）。
-
----
-
-## 部署到线上
-
-```powershell
-cd D:\prompt-hub
 .\deploy-pages.ps1
 ```
 
-部署后：F12 → Application → Service Workers → **Unregister** → **Clear site data** → 硬刷新。
+**勿**把 `supabase-config.local.js` / `api-config.local.js` / `.dev.vars` 提交或 deploy。
+
+---
+
+## 验证
+
+控制台：`window.__APP_BUILD__`  
+健康检查（本机 Worker）：http://127.0.0.1:8787/health → `"supabase":"ok"`

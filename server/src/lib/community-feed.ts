@@ -1,4 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Env } from '../env';
+import { publicThumbUrls, deleteStoragePaths } from './admin-media-refs';
 import {
   inferOwnerIdFromImageRef,
   isStorageRef,
@@ -17,16 +19,18 @@ function sanitizeCardFileBase(cardId: string): string {
 
 async function storageObjectExists(
   admin: SupabaseClient,
-  path: string
+  path: string,
+  env?: Env
 ): Promise<boolean> {
-  return storageObjectExistsLight(admin, path, BUCKET);
+  return storageObjectExistsLight(admin, path, BUCKET, env);
 }
 
 /** 同步到全站前：在桶里找到真实存在的路径（与 uploadCardImage 命名一致） */
 export async function resolvePublicImageRef(
   admin: SupabaseClient,
   userId: string,
-  post: CommunityPostPayload
+  post: CommunityPostPayload,
+  env?: Env
 ): Promise<string | null> {
   const candidates: string[] = [];
   const add = (p: string) => {
@@ -45,7 +49,7 @@ export async function resolvePublicImageRef(
     add(`${userId}/${base}.png`);
   }
   for (const path of candidates) {
-    if (await storageObjectExists(admin, path)) {
+    if (await storageObjectExists(admin, path, env)) {
       return toStorageRef(path);
     }
   }
@@ -170,7 +174,8 @@ function isAuthorUuid(id: string): boolean {
 
 /** 下架无效作者（888 / guest / 非 UUID）及 Storage 中已无文件的帖 */
 export async function unpublishGhostCommunityPosts(
-  admin: SupabaseClient
+  admin: SupabaseClient,
+  env?: Env
 ): Promise<number> {
   const { data, error } = await admin
     .from('community_posts')
@@ -200,7 +205,7 @@ export async function unpublishGhostCommunityPosts(
         aid,
         String(row.source_card_id || '').trim() || undefined
       );
-      const found = await findFirstExistingStoragePath(admin, candidates, BUCKET);
+      const found = await findFirstExistingStoragePath(admin, candidates, BUCKET, env);
       missingFile = !found;
     }
     if (!ghostAuthor && !missingFile) continue;
@@ -298,6 +303,7 @@ export async function listPublicCommunityFeed(
       if (opts.repairAuthors !== false) {
         await repairMisattributedCommunityAuthors(admin);
       }
+      await unpublishOrphanSourceCardPosts(admin);
       await unpublishGhostCommunityPosts(admin);
       await unpublishDuplicateCommunityPosts(admin);
     } catch (e) {
@@ -327,7 +333,8 @@ export async function listPublicCommunityFeed(
 export async function upsertCommunityPost(
   admin: SupabaseClient,
   userId: string,
-  post: CommunityPostPayload
+  post: CommunityPostPayload,
+  env?: Env
 ): Promise<CommunityPostDto> {
   const err = validatePostPayload(post);
   if (err) throw new Error(err);
@@ -338,7 +345,7 @@ export async function upsertCommunityPost(
       ? new Date(post.createdAt).toISOString()
       : now;
 
-  const resolvedImage = await resolvePublicImageRef(admin, userId, post);
+  const resolvedImage = await resolvePublicImageRef(admin, userId, post, env);
   const ownerFromImage = inferOwnerIdFromImageRef(resolvedImage);
   if (ownerFromImage && ownerFromImage !== userId) {
     throw new Error('图片不属于当前账号，无法以当前账号发布到社区');
@@ -410,7 +417,8 @@ export async function syncAuthorCommunityPosts(
   admin: SupabaseClient,
   userId: string,
   authorName: string,
-  posts: CommunityPostPayload[]
+  posts: CommunityPostPayload[],
+  env?: Env
 ): Promise<{ synced: number; unpublished: number }> {
   const keepIds = new Set<string>();
   const keepCardIds = new Set<string>();
@@ -448,7 +456,7 @@ export async function syncAuthorCommunityPosts(
     const owner = inferOwnerIdFromImageRef(p.image);
     if (owner && owner !== userId) continue;
     try {
-      await upsertCommunityPost(admin, userId, { ...p, authorName });
+      await upsertCommunityPost(admin, userId, { ...p, authorName }, env);
       synced += 1;
     } catch {
       /* 跳过无权发布的串号帖 */
@@ -504,4 +512,533 @@ export async function likeCommunityPost(
     likes: Math.max(0, Number(updated?.likes) || nextLikes),
     alreadyLiked: false
   };
+}
+
+function cardIdsFromUserData(data: unknown): Set<string> {
+  const set = new Set<string>();
+  if (!data || typeof data !== 'object') return set;
+  const cards = (data as { cards?: unknown }).cards;
+  if (!Array.isArray(cards)) return set;
+  for (const c of cards) {
+    const id =
+      c && typeof c === 'object' ? String((c as { id?: string }).id || '').trim() : '';
+    if (id) set.add(id);
+  }
+  return set;
+}
+
+/** 作者卡片库已删但社区仍在线的帖：下架（解决「删卡后社区又出现」） */
+export async function unpublishOrphanSourceCardPosts(
+  admin: SupabaseClient
+): Promise<number> {
+  const { data, error } = await admin
+    .from('community_posts')
+    .select('id, author_id, source_card_id')
+    .eq('published', true)
+    .not('source_card_id', 'is', null);
+  if (error) throw error;
+
+  const byAuthor = new Map<string, { id: string; source_card_id: string }[]>();
+  for (const row of (data || []) as {
+    id: string;
+    author_id: string;
+    source_card_id: string;
+  }[]) {
+    const aid = String(row.author_id || '').trim();
+    const cid = String(row.source_card_id || '').trim();
+    if (!aid || !cid || !isAuthorUuid(aid)) continue;
+    const list = byAuthor.get(aid) || [];
+    list.push({ id: row.id, source_card_id: cid });
+    byAuthor.set(aid, list);
+  }
+
+  let removed = 0;
+  const now = new Date().toISOString();
+  for (const [authorId, posts] of byAuthor) {
+    const { data: ud } = await admin
+      .from('user_data')
+      .select('data')
+      .eq('user_id', authorId)
+      .maybeSingle();
+    const cardIds = cardIdsFromUserData(ud?.data);
+    for (const p of posts) {
+      if (cardIds.has(p.source_card_id)) continue;
+      const { error: upErr } = await admin
+        .from('community_posts')
+        .update({ published: false, updated_at: now })
+        .eq('id', p.id);
+      if (!upErr) removed += 1;
+    }
+  }
+  return removed;
+}
+
+export async function adminUnpublishCommunityPost(
+  admin: SupabaseClient,
+  postId: string
+): Promise<void> {
+  const id = String(postId || '').trim();
+  if (!id) throw new Error('缺少帖子 ID');
+  const { error } = await admin
+    .from('community_posts')
+    .update({ published: false, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+export async function getCommunityAdminStats(admin: SupabaseClient) {
+  const [publishedRes, unpublishedRes, withImageRes, orphanCount] = await Promise.all([
+    admin.from('community_posts').select('id', { count: 'exact', head: true }).eq('published', true),
+    admin.from('community_posts').select('id', { count: 'exact', head: true }).eq('published', false),
+    admin
+      .from('community_posts')
+      .select('id', { count: 'exact', head: true })
+      .eq('published', true)
+      .not('image', 'is', null)
+      .neq('image', ''),
+    countOrphanPublishedPosts(admin)
+  ]);
+  if (publishedRes.error) throw publishedRes.error;
+  if (unpublishedRes.error) throw unpublishedRes.error;
+  if (withImageRes.error) throw withImageRes.error;
+  return {
+    publishedCount: publishedRes.count ?? 0,
+    unpublishedCount: unpublishedRes.count ?? 0,
+    publishedWithImage: withImageRes.count ?? 0,
+    orphanPublished: orphanCount
+  };
+}
+
+async function countOrphanPublishedPosts(admin: SupabaseClient): Promise<number> {
+  const { data, error } = await admin
+    .from('community_posts')
+    .select('id, author_id, source_card_id')
+    .eq('published', true)
+    .limit(3000);
+  if (error) throw error;
+
+  const authorIds = [
+    ...new Set(
+      ((data || []) as { author_id: string }[])
+        .map((r) => String(r.author_id || '').trim())
+        .filter((id) => isAuthorUuid(id))
+    )
+  ];
+  const cardIdsByAuthor = new Map<string, Set<string>>();
+  for (let i = 0; i < authorIds.length; i += 100) {
+    const chunk = authorIds.slice(i, i + 100);
+    const { data: udRows } = await admin
+      .from('user_data')
+      .select('user_id, data')
+      .in('user_id', chunk);
+    for (const row of udRows || []) {
+      cardIdsByAuthor.set(
+        String((row as { user_id: string }).user_id),
+        cardIdsFromUserData((row as { data: unknown }).data)
+      );
+    }
+  }
+
+  let count = 0;
+  for (const row of (data || []) as {
+    author_id: string;
+    source_card_id: string | null;
+  }[]) {
+    if (isLibraryMissingPost(row, cardIdsByAuthor)) count += 1;
+  }
+  return count;
+}
+
+function postMatchesAdminQuery(
+  row: {
+    author_name: string;
+    prompt: string;
+    id: string;
+    source_card_id: string | null;
+  },
+  q: string
+): boolean {
+  const safe = String(q || '').trim();
+  if (!safe) return true;
+  const lower = safe.toLowerCase();
+  if (safe.includes('@')) {
+    return String(row.author_name || '').toLowerCase().includes(lower);
+  }
+  if (/^cp_/i.test(safe) || /^card_/i.test(safe)) {
+    return row.id === safe || String(row.source_card_id || '') === safe;
+  }
+  const prompt = String(row.prompt || '').toLowerCase();
+  const name = String(row.author_name || '').toLowerCase();
+  return prompt.includes(lower) || name.includes(lower);
+}
+
+type UserDataPayload = {
+  cards?: { id?: string }[];
+  schemaVersion?: number;
+  [key: string]: unknown;
+};
+
+export async function restoreCommunityPostToUserLibrary(
+  admin: SupabaseClient,
+  postId: string
+): Promise<{ cardId: string; userId: string; alreadyExists: boolean }> {
+  const id = String(postId || '').trim();
+  if (!id) throw new Error('缺少帖子 ID');
+
+  const { data: post, error: postErr } = await admin
+    .from('community_posts')
+    .select(
+      'id, author_id, author_name, title, prompt, image, source_card_id, published, created_at'
+    )
+    .eq('id', id)
+    .maybeSingle();
+  if (postErr) throw postErr;
+  if (!post) throw new Error('帖子不存在');
+
+  const userId = String(post.author_id || '').trim();
+  if (!isAuthorUuid(userId)) throw new Error('无效作者，无法恢复');
+
+  const sourceCardId = String(post.source_card_id || '').trim();
+  const cardId =
+    sourceCardId || `card_restored_${String(post.id).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+
+  const { data: ud, error: udErr } = await admin
+    .from('user_data')
+    .select('data')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (udErr) throw udErr;
+
+  const payload = ((ud?.data || {}) as UserDataPayload) || {};
+  const cards = Array.isArray(payload.cards) ? [...payload.cards] : [];
+  if (cards.some((c) => String(c?.id || '') === cardId)) {
+    return { cardId, userId, alreadyExists: true };
+  }
+
+  const now = Date.now();
+  const createdMs = post.created_at ? new Date(post.created_at).getTime() : now;
+  const card = {
+    id: cardId,
+    title: String(post.title || '').trim().slice(0, 200),
+    prompt: String(post.prompt || '').trim(),
+    image: post.image || null,
+    group: null,
+    tags: ['#社区恢复'],
+    customFields: { restoredFromCommunity: post.id },
+    createdAt: createdMs,
+    updatedAt: now,
+    publishedToCommunity: !!post.published,
+    communityPostId: post.id
+  };
+
+  cards.unshift(card);
+  const { error: upsertErr } = await admin.from('user_data').upsert(
+    {
+      user_id: userId,
+      data: { ...payload, cards, schemaVersion: payload.schemaVersion || 2 },
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: 'user_id' }
+  );
+  if (upsertErr) throw upsertErr;
+
+  return { cardId, userId, alreadyExists: false };
+}
+
+export async function restoreOrphanCommunityPosts(
+  admin: SupabaseClient,
+  opts?: { limit?: number; authorId?: string }
+): Promise<{ restored: number; skipped: number; failed: number }> {
+  const limit = Math.min(200, Math.max(1, opts?.limit ?? 50));
+  const { data, error } = await admin
+    .from('community_posts')
+    .select('id, author_id, source_card_id')
+    .eq('published', true)
+    .not('source_card_id', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(2000);
+  if (error) throw error;
+
+  const byAuthor = new Map<string, string[]>();
+  for (const row of (data || []) as {
+    id: string;
+    author_id: string;
+    source_card_id: string;
+  }[]) {
+    const aid = String(row.author_id || '').trim();
+    const cid = String(row.source_card_id || '').trim();
+    if (!aid || !cid || !isAuthorUuid(aid)) continue;
+    if (opts?.authorId && aid !== opts.authorId) continue;
+    const list = byAuthor.get(aid) || [];
+    list.push(row.id);
+    byAuthor.set(aid, list);
+  }
+
+  const orphanIds: string[] = [];
+  for (const [authorId, ids] of byAuthor) {
+    const { data: ud } = await admin
+      .from('user_data')
+      .select('data')
+      .eq('user_id', authorId)
+      .maybeSingle();
+    const cardIds = cardIdsFromUserData(ud?.data);
+    const postRows = (data || []).filter(
+      (r) => String((r as { author_id: string }).author_id) === authorId
+    ) as { id: string; source_card_id: string }[];
+    for (const p of postRows) {
+      if (!cardIds.has(String(p.source_card_id))) orphanIds.push(p.id);
+    }
+  }
+
+  let restored = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const pid of orphanIds.slice(0, limit)) {
+    try {
+      const r = await restoreCommunityPostToUserLibrary(admin, pid);
+      if (r.alreadyExists) skipped += 1;
+      else restored += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { restored, skipped, failed };
+}
+
+export type CommunityAdminListItem = {
+  id: string;
+  authorId: string;
+  authorName: string;
+  sourceCardId: string | null;
+  image: string | null;
+  thumbUrl: string | null;
+  thumbFallbackUrl: string | null;
+  promptPreview: string;
+  likes: number;
+  published: boolean;
+  cardInLibrary: boolean | null;
+  createdAt: string;
+};
+
+function mapAdminPostRow(
+  row: {
+    id: string;
+    author_id: string;
+    author_name: string;
+    source_card_id: string | null;
+    image: string | null;
+    prompt: string;
+    likes: number;
+    published: boolean;
+    created_at: string;
+  },
+  cardInLibrary: boolean | null,
+  apiOrigin: string
+): CommunityAdminListItem {
+  const thumbs = publicThumbUrls(apiOrigin, row.image);
+  return {
+    id: row.id,
+    authorId: row.author_id,
+    authorName: row.author_name || '用户',
+    sourceCardId: row.source_card_id ? String(row.source_card_id) : null,
+    image: row.image,
+    thumbUrl: thumbs.thumbUrl,
+    thumbFallbackUrl: thumbs.thumbFallbackUrl,
+    promptPreview: String(row.prompt || '').trim().slice(0, 120),
+    likes: row.likes ?? 0,
+    published: !!row.published,
+    cardInLibrary,
+    createdAt: row.created_at
+  };
+}
+
+function isLibraryMissingPost(
+  row: { author_id: string; source_card_id: string | null },
+  cardIdsByAuthor: Map<string, Set<string>>
+): boolean {
+  const cid = String(row.source_card_id || '').trim();
+  if (!cid) return true;
+  if (!isAuthorUuid(String(row.author_id || '').trim())) return false;
+  const ids = cardIdsByAuthor.get(String(row.author_id));
+  return !ids?.has(cid);
+}
+
+export async function listCommunityPostsForAdmin(
+  admin: SupabaseClient,
+  opts: {
+    limit: number;
+    offset: number;
+    publishedOnly?: boolean;
+    q?: string;
+    orphanOnly?: boolean;
+    view?: 'published' | 'unpublished' | 'library-missing';
+    apiOrigin?: string;
+  }
+): Promise<{ items: CommunityAdminListItem[]; total: number; view: string }> {
+  const limit = Math.min(100, Math.max(1, opts.limit));
+  const offset = Math.max(0, opts.offset);
+  const q = String(opts.q || '').trim();
+  const apiOrigin = String(opts.apiOrigin || '').trim();
+  const view =
+    opts.view
+    || (opts.orphanOnly ? 'library-missing' : opts.publishedOnly === false ? 'unpublished' : 'published');
+
+  async function loadCardIdsByAuthor(authorIds: string[]) {
+    const cardIdsByAuthor = new Map<string, Set<string>>();
+    if (!authorIds.length) return cardIdsByAuthor;
+    for (let i = 0; i < authorIds.length; i += 100) {
+      const chunk = authorIds.slice(i, i + 100);
+      const { data: udRows } = await admin
+        .from('user_data')
+        .select('user_id, data')
+        .in('user_id', chunk);
+      for (const row of udRows || []) {
+        cardIdsByAuthor.set(
+          String((row as { user_id: string }).user_id),
+          cardIdsFromUserData((row as { data: unknown }).data)
+        );
+      }
+    }
+    return cardIdsByAuthor;
+  }
+
+  if (view === 'library-missing') {
+    const { data, error } = await admin
+      .from('community_posts')
+      .select(
+        'id, author_id, author_name, source_card_id, image, prompt, likes, published, created_at'
+      )
+      .eq('published', true)
+      .order('created_at', { ascending: false })
+      .limit(3000);
+    if (error) throw error;
+
+    const authorIds = [
+      ...new Set(
+        ((data || []) as { author_id: string }[])
+          .map((r) => String(r.author_id || '').trim())
+          .filter((id) => isAuthorUuid(id))
+      )
+    ];
+    const cardIdsByAuthor = await loadCardIdsByAuthor(authorIds);
+
+    const orphans = ((data || []) as {
+      id: string;
+      author_id: string;
+      author_name: string;
+      source_card_id: string | null;
+      image: string | null;
+      prompt: string;
+      likes: number;
+      published: boolean;
+      created_at: string;
+    }[]).filter((row) => {
+      if (!postMatchesAdminQuery(row, q)) return false;
+      return isLibraryMissingPost(row, cardIdsByAuthor);
+    });
+
+    const slice = orphans.slice(offset, offset + limit);
+    return {
+      view,
+      total: orphans.length,
+      items: slice.map((row) => mapAdminPostRow(row, false, apiOrigin))
+    };
+  }
+
+  let query = admin
+    .from('community_posts')
+    .select(
+      'id, author_id, author_name, source_card_id, image, prompt, likes, published, created_at',
+      { count: 'exact' }
+    )
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (view === 'unpublished') {
+    query = query.eq('published', false);
+  } else {
+    query = query.eq('published', true);
+  }
+
+  if (q) {
+    const safe = q.replace(/[%_,]/g, ' ').slice(0, 80);
+    if (safe.includes('@')) {
+      query = query.ilike('author_name', `%${safe}%`);
+    } else if (/^cp_/i.test(safe) || /^card_/i.test(safe)) {
+      query = query.or(`id.eq.${safe},source_card_id.eq.${safe}`);
+    } else {
+      query = query.or(`author_name.ilike.%${safe}%,prompt.ilike.%${safe}%`);
+    }
+  }
+
+  const { data, error, count } = await query;
+  if (error) throw error;
+
+  const authorIds = [
+    ...new Set(
+      ((data || []) as { author_id: string }[])
+        .map((r) => String(r.author_id || '').trim())
+        .filter((id) => isAuthorUuid(id))
+    )
+  ];
+  const cardIdsByAuthor = await loadCardIdsByAuthor(authorIds);
+
+  const items = ((data || []) as {
+    id: string;
+    author_id: string;
+    author_name: string;
+    source_card_id: string | null;
+    image: string | null;
+    prompt: string;
+    likes: number;
+    published: boolean;
+    created_at: string;
+  }[]).map((row) => {
+    const sourceCardId = row.source_card_id ? String(row.source_card_id) : null;
+    let cardInLibrary: boolean | null = null;
+    if (!sourceCardId) cardInLibrary = false;
+    else if (isAuthorUuid(row.author_id)) {
+      const ids = cardIdsByAuthor.get(String(row.author_id));
+      cardInLibrary = ids ? ids.has(sourceCardId) : false;
+    }
+    return mapAdminPostRow(row, cardInLibrary, apiOrigin);
+  });
+
+  return { items, total: count ?? items.length, view };
+}
+
+export async function adminDeleteCommunityPost(
+  admin: SupabaseClient,
+  env: Env,
+  postId: string,
+  opts?: { deleteStorage?: boolean }
+): Promise<{ id: string; storageRemoved: number }> {
+  const id = String(postId || '').trim();
+  if (!id) throw new Error('缺少帖子 ID');
+
+  const { data: post, error } = await admin
+    .from('community_posts')
+    .select('id, image, source_card_id, author_id')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!post) throw new Error('帖子不存在');
+
+  const paths: string[] = [];
+  const base = storagePathFromRef(String(post.image || ''));
+  if (base) {
+    paths.push(base);
+    const grid = base.replace(/\.(jpe?g|png|webp)$/i, '_grid.jpg');
+    if (grid !== base) paths.push(grid);
+  }
+
+  await admin.from('community_posts').delete().eq('id', id);
+
+  let storageRemoved = 0;
+  if (opts?.deleteStorage && paths.length) {
+    const r = await deleteStoragePaths(admin, env, paths);
+    storageRemoved = r.removed;
+  }
+
+  return { id, storageRemoved };
 }

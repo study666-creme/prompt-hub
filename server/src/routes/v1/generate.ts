@@ -12,8 +12,10 @@ import {
 } from '../../lib/image-upstream';
 import { providerLabel } from '../../lib/image-models-catalog';
 import {
+  archivePendingJobImage,
   assertJobOwner,
   finalizeFailedJob,
+  jobPollNeedsBackgroundArchive,
   pollAndUpdateJob
 } from '../../lib/generation-jobs';
 import {
@@ -561,11 +563,17 @@ generateRoutes.get('/jobs', async c => {
     if (failedUpstreamRecoverable) failedRecoverBudget -= 1;
     if (shouldPoll) {
       if (needsBonusSync && job.status === 'completed') bonusPollBudget -= 1;
+      const useQuick =
+        job.status === 'processing'
+        && !failedUpstreamRecoverable
+        && !needsMissingImageRecover;
       const polled = await pollAndUpdateJob(
         admin,
         user.id,
         job,
-        upstreamBindingsFromEnv(c.env)
+        upstreamBindingsFromEnv(c.env),
+        c.env,
+        { quick: useQuick }
       );
       status = polled.status;
       imageUrl = polled.imageUrl;
@@ -633,7 +641,8 @@ generateRoutes.get('/jobs/history', async c => {
 const recoverWarehouseSchema = z.object({
   max: z.number().int().min(1).max(80).optional(),
   days: z.number().int().min(1).max(365).optional(),
-  mode: z.enum(['import', 'repair', 'extras']).optional()
+  mode: z.enum(['import', 'repair', 'extras', 'settle']).optional(),
+  jobIds: z.array(z.string().min(8).max(64)).max(10).optional()
 });
 
 /** 服务端一键恢复生图到卡片库（绕过浏览器 media/fetch 401） */
@@ -650,6 +659,70 @@ generateRoutes.post('/recover-warehouse', async c => {
   try {
     const mode = body.mode || 'import';
     const common = { max: body.max, days: body.days };
+    const upstream = upstreamBindingsFromEnv(c.env);
+
+    if (mode === 'settle') {
+      const ids = Array.isArray(body.jobIds) ? body.jobIds.filter(Boolean).slice(0, 10) : [];
+      let settled = 0;
+      const failures: Array<{ jobId: string; reason: string }> = [];
+
+      const loadJobs = async () => {
+        if (ids.length) {
+          const { data: rows, error } = await admin
+            .from('generation_requests')
+            .select('*')
+            .eq('user_id', user.id)
+            .in('id', ids);
+          if (error) throw error;
+          return rows || [];
+        }
+        const since = new Date(Date.now() - (common.days ?? 7) * 24 * 3600 * 1000).toISOString();
+        const { data: rows, error } = await admin
+          .from('generation_requests')
+          .select('*')
+          .eq('user_id', user.id)
+          .in('status', ['processing', 'failed'])
+          .gte('created_at', since)
+          .order('created_at', { ascending: false })
+          .limit(Math.min(10, common.max ?? 8));
+        if (error) throw error;
+        return rows || [];
+      };
+
+      for (const job of await loadJobs()) {
+        try {
+          const polled = await pollAndUpdateJob(admin, user.id, job, upstream, c.env);
+          if (polled.status === 'completed' && polled.imageUrl) {
+            settled += 1;
+          } else if (polled.status === 'failed') {
+            failures.push({ jobId: String(job.id), reason: String(polled.errorMessage || 'failed') });
+          }
+        } catch (e) {
+          failures.push({
+            jobId: String(job.id),
+            reason: String((e as Error)?.message || e).slice(0, 120)
+          });
+        }
+      }
+
+      const imported = await recoverGenerationJobsToWarehouse(admin, user.id, common);
+      const repaired = await repairWarehouseCardImagesFromJobs(admin, user.id, common);
+      return c.json({
+        ok: true,
+        data: {
+          settled,
+          imported: imported.imported,
+          repaired: repaired.repaired ?? 0,
+          skipped: imported.skipped + (repaired.skipped ?? 0),
+          failures: [...failures, ...imported.failures].slice(0, 30),
+          cardIds: [...imported.cardIds, ...(repaired.cardIds ?? [])],
+          hint: settled > 0 || imported.imported > 0 || (repaired.repaired ?? 0) > 0
+            ? undefined
+            : '上游仍无可用图片，请稍后再试或点占位上的重试'
+        }
+      });
+    }
+
     const result =
       mode === 'repair'
         ? await repairWarehouseCardImagesFromJobs(admin, user.id, common)
@@ -685,11 +758,14 @@ generateRoutes.get('/jobs/:jobId', async c => {
 
   assertJobOwner(job, user.id);
 
+  const settle = c.req.query('settle') === '1' || c.req.query('settle') === 'true';
   const polled = await pollAndUpdateJob(
     admin,
     user.id,
     job,
-    upstreamBindingsFromEnv(c.env)
+    upstreamBindingsFromEnv(c.env),
+    c.env,
+    { quick: !settle }
   );
 
   const { data: freshJob } = await admin
@@ -731,6 +807,14 @@ generateRoutes.get('/jobs/:jobId', async c => {
   const extraImageUrls =
     polled.extraImageUrls
     || (Array.isArray(updatedMeta.extraImageUrls) ? (updatedMeta.extraImageUrls as string[]) : undefined);
+
+  if (jobPollNeedsBackgroundArchive(liveImageUrl) && c.executionCtx) {
+    c.executionCtx.waitUntil(
+      archivePendingJobImage(admin, user.id, jobId, c.env).catch((e) => {
+        console.warn('[generate] waitUntil archive failed', jobId, e);
+      })
+    );
+  }
 
   return c.json({
     ok: true,

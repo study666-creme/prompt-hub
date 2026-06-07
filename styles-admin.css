@@ -30,7 +30,19 @@ body {
   line-height: 1.55;
 }
 
+.admin-login[hidden],
+.admin-app[hidden] {
+  display: none !important;
+}
+
+body.admin-gate {
+  overflow: hidden;
+}
+
 .admin-login {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -236,6 +248,73 @@ body {
   cursor: pointer;
   text-transform: none;
   letter-spacing: 0;
+}
+
+.admin-check--inline {
+  margin: 0;
+  align-self: flex-end;
+  padding-bottom: 8px;
+  white-space: nowrap;
+}
+
+.admin-actions-cell {
+  white-space: nowrap;
+}
+
+.admin-actions-cell .admin-btn + .admin-btn {
+  margin-left: 4px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.admin-view-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.admin-view-tab {
+  appearance: none;
+  border: 1px solid var(--admin-border);
+  background: #fff;
+  color: var(--admin-muted);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-view-tab.is-active {
+  background: var(--admin-accent-soft);
+  border-color: #93c5fd;
+  color: var(--admin-accent);
+}
+
+.admin-thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--admin-border);
+  background: #f1f5f9;
+  display: block;
+}
+
+.admin-thumb.is-broken {
+  opacity: 0.35;
+}
+
+.admin-path {
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.admin-table--community td {
+  vertical-align: top;
 }
 
 .admin-row {
@@ -494,6 +573,7 @@ table.admin-table {
   background: #e2e8f0;
   border-radius: 999px;
   overflow: hidden;
+  position: relative;
 }
 
 .admin-progress__bar {
@@ -505,6 +585,33 @@ table.admin-table {
 
 .admin-progress__bar.is-warn {
   background: linear-gradient(90deg, #f59e0b, #ef4444);
+}
+
+.admin-progress__bar.is-indeterminate {
+  width: 35% !important;
+  animation: admin-progress-indeterminate 1.1s ease-in-out infinite;
+}
+
+@keyframes admin-progress-indeterminate {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+
+.admin-task-progress {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  background: var(--admin-surface-muted);
+}
+
+.admin-task-progress .admin-hint {
+  margin: 8px 0 0;
+}
+
+.admin-btn.is-busy {
+  opacity: 0.72;
+  pointer-events: none;
 }
 
 .admin-kv {

@@ -51,6 +51,41 @@
       });
     }
   
+    function captureImageGenFeedCardPositions(wrap) {
+      if (!wrap) return null;
+      const map = new Map();
+      wrap.querySelectorAll('.imagegen-feed-card').forEach((card) => {
+        const rect = card.getBoundingClientRect();
+        map.set(card, { left: rect.left, top: rect.top });
+      });
+      return map.size ? map : null;
+    }
+
+    function applyImageGenFeedCardFlip(wrap, before) {
+      if (!wrap || !before?.size) return;
+      wrap.querySelectorAll('.imagegen-feed-card').forEach((card) => {
+        const prev = before.get(card);
+        if (!prev) return;
+        const rect = card.getBoundingClientRect();
+        const dx = prev.left - rect.left;
+        const dy = prev.top - rect.top;
+        if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return;
+        card.style.transition = 'none';
+        card.style.transform = `translate(${dx}px, ${dy}px)`;
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            card.style.transition = 'transform 0.42s var(--ease-spring, cubic-bezier(0.34, 1.4, 0.64, 1))';
+            card.style.transform = '';
+            const cleanup = () => {
+              card.style.transition = '';
+              card.removeEventListener('transitionend', cleanup);
+            };
+            card.addEventListener('transitionend', cleanup);
+          });
+        });
+      });
+    }
+
     function scheduleImageGenFeedLayout(opts) {
       const immediate = opts === true || opts?.immediate === true;
       clearTimeout(imageGenLayoutTimer);
@@ -107,7 +142,7 @@
       if (!wrap) return;
       wrap.classList.remove('imagegen-feed--tiles', 'imagegen-feed--desktop-grid', 'mobile-feed-grid');
       wrap.classList.add('imagegen-feed--masonry');
-  
+
       const runLayout = () => {
         if (typeof Masonry === 'undefined') return;
         const cards = wrap.querySelectorAll('.imagegen-feed-card');
@@ -160,11 +195,12 @@
           wrap.scrollTop = scrollTop;
           d().setFeedLayoutPending?.(wrap, false);
           window.CardImageLoader?.observeContainer?.(wrap);
+          d().scrubImageGenFeedCards?.(wrap);
         });
         wrap.scrollTop = scrollTop;
         bindImageGenFeedImageRelayout();
       };
-  
+
       if (typeof Masonry !== 'undefined') runLayout();
       else if (typeof window.ensureMasonryScript === 'function') {
         void window.ensureMasonryScript().then(runLayout);
@@ -256,7 +292,7 @@
       const loadingCls = imgPending ? ' is-loading' : '';
       const shineAt = imgPending ? ` data-shine-at="${Date.now()}"` : '';
       const imgBlock = d().isDisplayableImage?.(image)
-        ? `<div class="imagegen-feed-media${loadingCls}"${shineAt}><button type="button" class="imagegen-feed-thumb-btn" title="放大预览"><img class="card-img" src="${d().esc?.(imgSrc || d().IMG_LOADING_PLACEHOLDER)}" data-image-ref="${d().esc?.(image)}"${storageAttr}${jobAttr}${cardIdAttr} alt="" decoding="async" loading="lazy" onload="if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.imagegen-feed-media'));else this.closest('.imagegen-feed-media')?.classList.remove('is-loading')"></button></div>`
+        ? `<div class="imagegen-feed-media${loadingCls}"${shineAt}><button type="button" class="imagegen-feed-thumb-btn" title="放大预览"><img class="card-img" src="${d().esc?.(imgSrc || d().IMG_LOADING_PLACEHOLDER)}" data-image-ref="${d().esc?.(image)}"${storageAttr}${jobAttr}${cardIdAttr} alt="" decoding="async" loading="lazy" onload="if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.imagegen-feed-media'));else this.closest('.imagegen-feed-media')?.classList.remove('is-loading')"></button><button type="button" class="imagegen-feed-media-dl desktop-only" data-feed-download title="下载图片" aria-label="下载图片"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0l4-4m-4 4l-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span>下载</span></button></div>`
         : '';
       const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${d().esc?.(b)}</span>`).join('');
       const metaRowHtml = (metaLine || '').trim()
@@ -283,12 +319,11 @@
         ? `<p class="imagegen-feed-prompt">${d().esc?.(showPrompt)}</p>`
         : '<p class="imagegen-feed-prompt imagegen-feed-prompt--empty">暂无提示词</p>';
       const noMedia = !imgBlock ? ' imagegen-feed-card--no-media' : '';
-      const mobileActs = window.MobileUI?.isMobile?.()
-        ? `<div class="imagegen-feed-mobile-actions mobile-only">
+      const mobileActs = `<div class="imagegen-feed-mobile-actions mobile-only">
             <button type="button" class="imagegen-feed-mobile-btn" data-feed-copy>复制</button>
             <button type="button" class="imagegen-feed-mobile-btn" data-feed-fill-prompt>填入生图</button>
-          </div>`
-        : '';
+            ${imgBlock ? '<button type="button" class="imagegen-feed-mobile-btn" data-feed-download>下载</button>' : ''}
+          </div>`;
       const fillHint = window.MobileUI?.isMobile?.()
         ? ''
         : '<span class="imagegen-feed-fill-hint">点击查看详情 · 在侧栏填入或复制</span>';
@@ -425,6 +460,9 @@
       d().syncImageGenWarehouseFiltersUI?.();
       d().syncImageGenCommunityFiltersUI?.();
   
+      if (!feedAppend) {
+        d().prunePendingJobsWithWarehouseCards?.();
+      }
       const sig = imageGenFeedListSignature();
       if (!feedAppend) {
         imageGenFeedScrollIntent = false;
@@ -548,6 +586,7 @@
           layoutImageGenFeedMasonry();
         }
         if (scrollEl) scrollEl.scrollTop = scrollTop;
+        d().scrubImageGenFeedCards?.(wrap);
         syncImageGenFeedLoadMoreBtn();
         if (d().getImageGenFeedTab?.() === 'warehouse' && store.whCards.length && window.SupabaseSync?.backfillGridThumbsForCards) {
           const visibleIds = new Set(
@@ -628,11 +667,19 @@
           e.stopPropagation();
           d().fillFeedPromptToActiveMode?.(card.dataset.feedPrompt || '');
         });
+        card.querySelectorAll('[data-feed-download]').forEach((btn) => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const img = card.querySelector('.imagegen-feed-media img');
+            void d().downloadImageGenFeedItem?.(feedKind, feedItemId, img);
+          });
+        });
         card.addEventListener('click', e => {
           if (e.target.closest('.imagegen-feed-like')) return;
           if (e.target.closest('.imagegen-feed-thumb-btn')) return;
           if (e.target.closest('.imagegen-feed-save-btn')) return;
           if (e.target.closest('[data-delete-feed]')) return;
+          if (e.target.closest('[data-feed-download]')) return;
           if (e.target.closest('.imagegen-feed-mobile-actions')) return;
           if (e.target.closest('.imagegen-feed-media')) {
             void d().openImageGenLightboxAt?.(feedKind, feedItemId, feedId);
@@ -677,7 +724,8 @@
       bindImageGenFeedPagedScroll,
       renderImageGenFeed,
       bindImageGenFeedCardEvents,
-      bindImageGenFeedResizeRelayout
+      bindImageGenFeedResizeRelayout,
+      captureImageGenFeedCardPositions
     };
   }
 

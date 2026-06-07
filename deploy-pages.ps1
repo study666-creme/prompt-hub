@@ -18,12 +18,17 @@ if (-not (Test-Path (Join-Path $server "node_modules\wrangler"))) {
   Pop-Location
 }
 
-$localApiCfg = Join-Path $root "api-config.local.js"
-$localApiBak = $null
-if (Test-Path $localApiCfg) {
-  $localApiBak = Join-Path $env:TEMP ("ph-api-config-local-" + [guid]::NewGuid().ToString("n") + ".js")
-  Write-Host "Temporarily excluding api-config.local.js from deploy (local dev only)." -ForegroundColor Yellow
-  Move-Item -LiteralPath $localApiCfg -Destination $localApiBak
+$localDeployExclude = @(
+  @{ Path = Join-Path $root "api-config.local.js"; Label = "api-config.local.js" },
+  @{ Path = Join-Path $root "supabase-config.local.js"; Label = "supabase-config.local.js" }
+)
+$localDeployBak = @()
+foreach ($item in $localDeployExclude) {
+  if (-not (Test-Path $item.Path)) { continue }
+  $bak = Join-Path $env:TEMP ("ph-local-" + $item.Label + "-" + [guid]::NewGuid().ToString("n") + ".js")
+  Write-Host "Temporarily excluding $($item.Label) from deploy (local dev only)." -ForegroundColor Yellow
+  Move-Item -LiteralPath $item.Path -Destination $bak
+  $localDeployBak += @{ Path = $item.Path; Bak = $bak }
 }
 
 Write-Host "Pages project: $project"
@@ -35,8 +40,10 @@ try {
   $code = $LASTEXITCODE
 } finally {
   Pop-Location
-  if ($localApiBak -and (Test-Path $localApiBak)) {
-    Move-Item -LiteralPath $localApiBak -Destination $localApiCfg
+  foreach ($item in $localDeployBak) {
+    if ($item.Bak -and (Test-Path $item.Bak)) {
+      Move-Item -LiteralPath $item.Bak -Destination $item.Path
+    }
   }
 }
 if ($code -ne 0) {

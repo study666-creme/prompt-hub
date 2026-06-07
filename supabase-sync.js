@@ -8,6 +8,13 @@
   const missingPathCache = new Map();
   const imageUploadSkipUntil = new Map();
   const MISSING_PATH_TTL_MS = 20 * 60 * 1000;
+  /** 持久化 404 路径，刷新后少重复 sign（24h） */
+  const MISSING_PATH_PERSIST_TTL_MS = 24 * 60 * 60 * 1000;
+  const LS_MISSING_PATHS = 'ph_missing_paths_v1';
+  /** R2 同步已启动：结束过渡期隐藏，已上传 R2 的图由 Worker r2-first 出图 */
+  const LEGACY_IMAGE_RESTORE_UNTIL_MS = Date.parse('2026-06-06T00:00:00+08:00');
+  /** 此日期前创建的 storage:// 卡视为境外旧图，过渡期直接隐藏 */
+  const LEGACY_STORAGE_HIDE_BEFORE_MS = Date.parse('2026-06-07T00:00:00+08:00');
   const IMAGE_UPLOAD_SKIP_MS = 24 * 60 * 60 * 1000;
   const SIGN_REQUEST_TIMEOUT_MS = 4500;
   const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -63,6 +70,33 @@
   /** 本会话 CDN 404 过的路径，不再签名（即使 localStorage 标了 grid done） */
   const gridFetchFailedPaths = new Set();
 
+  let persistMissingPathTimer = null;
+  function loadMissingPathCache() {
+    try {
+      const raw = localStorage.getItem(LS_MISSING_PATHS);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      const now = Date.now();
+      for (const [key, exp] of Object.entries(data || {})) {
+        if (typeof exp === 'number' && exp > now) missingPathCache.set(key, exp);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function persistMissingPathCache() {
+    clearTimeout(persistMissingPathTimer);
+    persistMissingPathTimer = setTimeout(() => {
+      try {
+        const now = Date.now();
+        const data = {};
+        missingPathCache.forEach((exp, key) => {
+          if (exp > now) data[key] = exp;
+        });
+        localStorage.setItem(LS_MISSING_PATHS, JSON.stringify(data));
+      } catch (e) { /* ignore */ }
+    }, 200);
+  }
+
   function loadSessionSignCache() {
     try {
       const raw = sessionStorage.getItem(SS_SIGN_CACHE);
@@ -117,6 +151,7 @@
     if (n) persistSessionSignCache();
   }
 
+  loadMissingPathCache();
   loadSessionSignCache();
   purgeStaleGridSignCache();
   purgeFakeGridCacheEntries();
@@ -251,7 +286,8 @@
     }
     const primaryGuess = key.replace(/_grid\.(jpe?g|webp|png)$/i, '.jpg');
     const needsReadyFlag = key.includes('/generated/') || isLegacyUploadCardPath(primaryGuess);
-    if (needsReadyFlag) return !!(id && isGridThumbReady(id));
+    /* 生图/旧版上传常无独立 grid 文件；签 grid CDN 路径后边缘按需从原图生成 */
+    if (needsReadyFlag) return !!id;
     if (id && isGridThumbReady(id)) return true;
     const gridHit = signedUrlCache.get(signedCacheKey(key, VARIANT_GRID));
     return !!(gridHit?.url && gridHit.expiresAt > Date.now() + 120000);
@@ -634,11 +670,12 @@
   }
 
   try {
-    if (localStorage.getItem('promptrepo_sign_v') !== '7') {
+    if (localStorage.getItem('promptrepo_sign_v') !== '8') {
       clearSignedUrlCache();
       missingPathCache.clear();
       gridFetchFailedPaths.clear();
-      localStorage.setItem('promptrepo_sign_v', '7');
+      try { localStorage.removeItem(LS_MISSING_PATHS); } catch (e) { /* ignore */ }
+      localStorage.setItem('promptrepo_sign_v', '8');
     }
   } catch (e) { /* ignore */ }
 
@@ -685,7 +722,10 @@
 
   function markPathMissing(path) {
     const key = normalizePathKey(path);
-    if (key) missingPathCache.set(key, Date.now() + MISSING_PATH_TTL_MS);
+    if (!key) return;
+    const exp = Date.now() + MISSING_PATH_PERSIST_TTL_MS;
+    missingPathCache.set(key, exp);
+    persistMissingPathCache();
   }
 
   function isStorageNotFoundError(e) {
@@ -1209,14 +1249,76 @@
     }
   }
 
+  function isLegacyOffshoreStorageImage(image) {
+    if (!image || typeof image !== 'string') return false;
+    if (isStorageRef(image)) return true;
+    return /supabase\.co\/storage\/v1\/object/i.test(image);
+  }
+
   function cardImageStillResolvable(image, assetId) {
     if (!image || typeof image !== 'string') return false;
     if (isDataUrl(image) || image.startsWith('blob:')) return true;
-    if (/^https?:\/\//i.test(image) && !isInvalidMediaUrl(image)) return true;
+    if (/^https?:\/\//i.test(image)) {
+      if (/supabase\.co\/storage\/v1\/object/i.test(image)) {
+        const path = storagePathFromRef(image);
+        if (!path) return false;
+        const candidates = listImagePathCandidates(normalizeImageRef(toStorageRef(path)), assetId);
+        if (!candidates.length) return false;
+        return candidates.some((p) => !isPathKnownMissing(p));
+      }
+      return !isInvalidMediaUrl(image);
+    }
     if (!isStorageRef(image)) return true;
     const candidates = listImagePathCandidates(normalizeImageRef(image), assetId);
     if (!candidates.length) return true;
     return candidates.some((p) => !isPathKnownMissing(p));
+  }
+
+  function isLegacyImageRestorePhase() {
+    return Date.now() < LEGACY_IMAGE_RESTORE_UNTIL_MS;
+  }
+
+  function isLegacyStoredCardImage(card) {
+    if (!card || !isLegacyImageRestorePhase()) return false;
+    const image = card.image;
+    if (!image || typeof image !== 'string') return false;
+    if (/supabase\.co\/storage\/v1\/object/i.test(image)) return true;
+    if (!isStorageRef(image)) return false;
+    const created = Number(card.createdAt) || 0;
+    return created > 0 && created < LEGACY_STORAGE_HIDE_BEFORE_MS;
+  }
+
+  /** 卡片库是否展示（过渡期隐藏旧 Supabase storage 无图卡，不删库） */
+  function shouldShowCardInWarehouse(card) {
+    if (!card) return false;
+    if (isLegacyStoredCardImage(card)) return false;
+    const image = card.image;
+    if (!image || typeof image !== 'string') return true;
+    if (isDataUrl(image) || image.startsWith('blob:')) return true;
+    if (!isLegacyImageRestorePhase()) return true;
+    /** 境外 Supabase 直链：egress 已断，6/25 前直接不展示 */
+    if (/supabase\.co\/storage\/v1\/object/i.test(image)) return false;
+    if (!isLegacyOffshoreStorageImage(image)) return true;
+    return cardImageStillResolvable(image, card.id);
+  }
+
+  /** 社区 Feed 是否展示（与卡片库同一套旧图隐藏规则） */
+  function shouldShowPostInCommunityFeed(post) {
+    if (!post) return false;
+    if (post.sourceCardId) {
+      const cards = window.__promptHubCards;
+      if (Array.isArray(cards)) {
+        const card = cards.find((c) => String(c.id) === String(post.sourceCardId));
+        if (card && shouldShowCardInWarehouse(card) === false) return false;
+      }
+    }
+    const image = post.image;
+    if (!image || typeof image !== 'string') return true;
+    return shouldShowCardInWarehouse({
+      id: post.sourceCardId || post.id,
+      image: post.image,
+      createdAt: post.createdAt
+    }) !== false;
   }
 
   function cardImageStoragePath(cardId, ownerId, ext) {
@@ -1862,7 +1964,6 @@
         && !communityFeed
         && isLoggedIn()
         && storagePathOwnedByCurrentUser(primary)
-        && o.degradedListFull === true
         && gridListNeedsPrimaryFallback(primary, assetId)
       ) {
         const fallback = await resolveListPrimaryFallback(primary, assetId, o);
@@ -2706,7 +2807,20 @@
     return false;
   }
 
+  async function uploadStorageBlobViaApi(path, blob, opts = {}) {
+    if (!window.PromptHubApi?.isConfigured?.() || !window.PromptHubApi?.uploadStorageBlob) {
+      return null;
+    }
+    const ref = await window.PromptHubApi.uploadStorageBlob(path, blob, opts);
+    const cleanPath = String(path || '').replace(/^\//, '');
+    if (cleanPath) missingPathCache.delete(normalizePathKey(cleanPath));
+    return ref;
+  }
+
   async function uploadStorageBlobXHR(path, blob, opts = {}) {
+    if (window.PromptHubApi?.isConfigured?.() && window.PromptHubApi?.uploadStorageBlob) {
+      return uploadStorageBlobViaApi(path, blob, opts);
+    }
     await ensureSession();
     const sb = getClient();
     const { data: { session } } = await sb.auth.getSession();
@@ -2751,6 +2865,14 @@
   async function uploadStorageBlob(path, blob, opts = {}) {
     if (!blob || (blob.size || 0) < MIN_VALID_IMAGE_BYTES) {
       throw new Error('图片数据无效（文件过小），请重新选择或重新生成');
+    }
+    if (window.PromptHubApi?.isConfigured?.() && window.PromptHubApi?.uploadStorageBlob) {
+      try {
+        const ref = await uploadStorageBlobViaApi(path, blob, opts);
+        if (ref) return ref;
+      } catch (e) {
+        throw e;
+      }
     }
     if (typeof opts.onProgress === 'function') {
       return uploadStorageBlobXHR(path, blob, opts);
@@ -3327,7 +3449,7 @@
       if (Date.now() > deadline) break;
       if (!card?.image) continue;
       if (isDataUrl(card.image) || card.image.startsWith('blob:')) continue;
-      if (!isStorageRef(card.image)) continue;
+      if (!isStorageRef(card.image) && !/supabase\.co\/storage\/v1\/object/i.test(card.image)) continue;
       const ok = await verifyStorageRef(card.image, card.id, { quick: true, noDownload: true });
       if (ok) continue;
       let fixed = skipStorageList ? null : await findCardImageInStorage(card.id);
@@ -3353,6 +3475,10 @@
         });
         card.image = fixed;
       } else {
+        const path = primaryImagePath(card.image, card.id);
+        if (path) markPathMissing(path);
+        const grid = path ? gridPathFromPrimary(path.replace(/^\//, '')) : null;
+        if (grid) markPathMissing(grid);
         broken.push({
           id: card.id,
           title: (card.title || card.prompt || card.id || '').toString().slice(0, 40)
@@ -3680,6 +3806,9 @@
     markGridFetchFailed,
     shouldSignGridPath,
     cardImageStillResolvable,
+    isLegacyImageRestorePhase,
+    shouldShowCardInWarehouse,
+    shouldShowPostInCommunityFeed,
     isInvalidMediaUrl,
     normalizeImageRef,
     resolveDisplayUrl,

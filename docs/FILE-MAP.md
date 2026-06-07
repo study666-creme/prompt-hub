@@ -22,6 +22,10 @@
 | 部署 Pages | `deploy-pages.ps1` | `index.html`（`__APP_BUILD__`）, `sw.js` |
 | 部署 Worker | `server/package.json` scripts | `server/wrangler.toml` |
 | 数据库表 | `supabase/migrations/*.sql` | Supabase SQL Editor |
+| **备份 / R2** | `docs/SUPABASE-BACKUP-BEGINNER.md` · `docs/R2-MIGRATION.md` · `scripts/sync-supabase-to-r2.mjs` | Pro 恢复后 |
+| **迁 MemFire** | `docs/MEMFIRE-MIGRATION.md` · `scripts/memfire-upload-storage.mjs` · `scripts/memfire-preflight.mjs` | 迁前必先备份 |
+| R2 读写在 Worker | `server/src/lib/r2-storage.ts` · `MEDIA_STORAGE_MODE` | `wrangler.toml` 绑定 `CARD_IMAGES_R2` |
+| **资产创作 / 画布导出** | `asset-studio.js` · `asset-studio.html` | `docs/VIDEO-CANVAS-EXPORT.md`（zip 结构、LibTV 手动 `@`） |
 
 ---
 

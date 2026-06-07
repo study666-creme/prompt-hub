@@ -16,34 +16,34 @@
 | **我的主页** | 发布作品、关注/粉丝、拥有的/发布的资产包 |
 | **图片生成** | 扣积分；`POST /api/v1/generate`；上游 **GrsAI**；含 **仓库/社区** Feed |
 | **资产包** | 领取存入「拥有」、封面预览、选择性导入、大图下载 |
+| **资产创作** | **前期制作**：设定库 + **分镜/视频脚本** + **图词绑定**（关联图）；非画布替代品，详见 **`docs/VIDEO-CANVAS-EXPORT.md`** |
 
-部署：**Pages** https://prompt-hub.cn · **API** https://api.prompt-hub.cn · Worker 名 `prompt-hub-api`
+部署：**主域名迁移中** `prompt-hubs.com` · 旧站 https://prompt-hub.cn · API Worker 名 `prompt-hub-api` · 路线见 **`docs/OVERSEAS-FIRST.md`**
+
+**产品分工**：Prompt Hub = 前期（对表、找词、找图、脚本与参考图绑定）→ 画布平台（LibTV / TapNow / UpDream 等）= 正式制作（生视频）。Prompt Hub **不替代**画布，减轻进画布前的整理成本。
 
 ---
 
-## 当前部署阶段（2026-06-05）
+## 当前部署阶段（2026-06-08 · 生图 Feed 体验 + 会员价）
 
 | 项 | 状态 |
 |----|------|
-| Worker | `prompt-hub-api` · API https://api.prompt-hub.cn |
-| Pages | https://prompt-hub.cn · 构建号 **`20260605l`**（`window.__APP_BUILD__`） |
-| **架构** | Feed 四模块：`feed-layout.js` · `feed-images.js` · `image-gen-feed.js` + `features-draft.js`（`wireFeed*`）；见 **`docs/FEED-MODULES.md`** |
-| **MobileUI** | 手机断点 900px 唯一来源 `mobile.js`（须在 `script.js` 前加载） |
-| **已修** | 侧栏打开即时重排（社区 Masonry / 生图预览）；拆分后 `feedImgStorageAttr` / `IMG_LOADING_PLACEHOLDER` 接线 |
-| **部分改善** | 社区 Masonry 加载阶段偶发间距不齐；P0 生图仓库带宽（首屏 ~5MB、`big:0` 已验收） |
-| **已打通** | `/health`、兑换、生图、社区 Feed、我的主页侧栏 |
+| **主域名** | **https://prompt-hubs.com** · Pages `prompt-hub-hub` |
+| Worker | `prompt-hub-api` · **https://api.prompt-hubs.com** |
+| **Pages 构建号** | **`20260608j`** |
+| **已打通** | 生图 Feed 图上悬浮下载 · 侧栏秒开（缩略图先显）· 关侧栏清选中 · 仓库黑卡修复（自有签名+full 回退） |
+| **会员价** | 折后/原价展示 · 按钮「购买」复制微信 |
 
 ### 已知问题（优先）
 
-1. **社区 Masonry 间距**：加载阶段偶发，可等待或点卡触发重排；架构层暂不再 deep 改（§2.6）。
-2. **P0 数据**：卡片库公开数与社区帖 gap。
-3. **日光可读性**：界面大小三档（`LIGHT-THEME-UX.md`）。
+1. **R2 同步 FAIL fetch failed**：分批重跑 `sync-supabase-to-r2.mjs`。
+2. **慢模型丢图**：上游临时链约 2h；需 Worker quick 轮询已部署 + 点「恢复丢失任务」。
+3. P0 带宽见 `docs/CURRENT-ISSUES.md`。
 
 ### 下一步
 
-1. 继续瘦身 `features-draft.js`（社区 render / 生图轮询）。
-2. Worker：`membership-tasks.ts`（累计 10 项任务）。
-3. tombstone：`scripts/audit-tombstone-storage.ps1`。
+1. 验收生图仓库：黑卡出图、侧栏开关、下载仅保留图上按钮。
+2. 继续 R2 迁移与旧图 backfill。
 
 ### 部署
 

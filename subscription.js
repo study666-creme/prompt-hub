@@ -3,7 +3,27 @@
  */
 (function () {
   const LS_CREDIT_MODE = 'promptrepo_credit_grant_mode';
-  const SHOP_URL = 'https://pay.ldxp.cn/shop/1NLSZGJS';
+  const WECHAT_ID = 'bz4jx3jp2li1';
+  /** 备案审查期间 true：页内不展示 ¥ 标价；购买仍走微信 + 激活码兑换 */
+  const FILING_REVIEW_MODE = false;
+  /** 学习展示模式（已关闭：按钮为「购买」，点击复制微信联系站长） */
+  const STUDY_DISPLAY_MODE = false;
+  /** 会员计费方式（暂只开放单月购买） */
+  const MEMBERSHIP_BILLING_OPTIONS = ['single_month'];
+
+  function purchaseBtnLabel() {
+    return showPublicPrices() ? '购买' : '联系购买';
+  }
+
+  function promptWechatPurchase(productHint) {
+    const id = document.getElementById('subscribeWechatId')?.textContent?.trim() || WECHAT_ID;
+    if (typeof window.copyWechatId === 'function') window.copyWechatId();
+    else {
+      navigator.clipboard.writeText(id).catch(() => {});
+    }
+    const hint = productHint ? `（${productHint}）` : '';
+    window.showToast?.(`请加微信购买${hint}，微信号已复制。备注「提示词仓库」，站长发激活码后在上方兑换`, 6000);
+  }
 
   const CREDIT_PACKS = [
     { id: 'cr10k', label: '10000 积分', credits: 10000, price: 95, bonusDays: 40 },
@@ -63,7 +83,8 @@
         '无限置顶',
         '资产创作工作台',
         '300MB 基础 + 额外 5GB 云存储',
-        '全站云同步'
+        '全站云同步',
+        '可另建 2 个自命名卡片库'
       ]
     },
     {
@@ -79,7 +100,7 @@
         '资产创作工作台',
         '300MB 基础 + 额外 10GB 云存储',
         '优先生图队列',
-        '可另建 1 个自命名卡片库'
+        '可另建 3 个自命名卡片库'
       ]
     },
     {
@@ -95,7 +116,7 @@
         '资产创作工作台',
         '300MB 基础 + 额外 30GB 云存储',
         '最高生图优先级',
-        '可另建 2 个自命名卡片库'
+        '可另建 4 个自命名卡片库'
       ]
     }
   ];
@@ -103,25 +124,25 @@
   const PRICES = {
     lite: {
       auto_month: { price: 6, original: 9, unit: '月' },
-      single_month: { price: 9, original: null, unit: '月' },
+      single_month: { price: 6, original: 9, unit: '月' },
       auto_year: { price: 58, original: 108, unit: '年' },
       single_year: { price: 88, original: null, unit: '年' }
     },
     basic: {
       auto_month: { price: 12.9, original: 15.9, unit: '月' },
-      single_month: { price: 15.9, original: null, unit: '月' },
+      single_month: { price: 12.9, original: 15.9, unit: '月' },
       auto_year: { price: 129, original: 190, unit: '年' },
       single_year: { price: 169, original: null, unit: '年' }
     },
     standard: {
       auto_month: { price: 31.9, original: 39.9, unit: '月' },
-      single_month: { price: 39.9, original: null, unit: '月' },
+      single_month: { price: 31.9, original: 39.9, unit: '月' },
       auto_year: { price: 319, original: 479, unit: '年' },
       single_year: { price: 399, original: null, unit: '年' }
     },
     pro: {
       auto_month: { price: 63.9, original: 69.9, unit: '月' },
-      single_month: { price: 69.9, original: null, unit: '月' },
+      single_month: { price: 63.9, original: 69.9, unit: '月' },
       auto_year: { price: 639, original: 839, unit: '年' },
       single_year: { price: 699, original: null, unit: '年' }
     }
@@ -134,11 +155,42 @@
     single_year: '单年购买'
   };
 
-  let currentBilling = 'auto_month';
+  let currentBilling = 'single_month';
   let currentMainTab = 'membership';
 
-  function openShop() {
-    window.open(SHOP_URL, '_blank', 'noopener,noreferrer');
+  function showPublicPrices() {
+    return !FILING_REVIEW_MODE;
+  }
+
+  function formatPriceNum(n) {
+    const x = Number(n);
+    if (!Number.isFinite(x)) return String(n);
+    return Number.isInteger(x) ? String(x) : String(x);
+  }
+
+  function priceHtml(amount, unit) {
+    if (!showPublicPrices()) {
+      return '<span class="subscribe-plan-amount subscribe-plan-contact">联系咨询</span>';
+    }
+    const unitHtml = unit ? `<span class="subscribe-plan-unit">/${esc(unit)}</span>` : '';
+    return `<span class="subscribe-plan-amount">¥${formatPriceNum(amount)}</span>${unitHtml}`;
+  }
+
+  /** 会员价：原价 + 折后价 */
+  function priceDisplayBlock(price, original, unit) {
+    if (!showPublicPrices()) {
+      return '<span class="subscribe-plan-amount subscribe-plan-contact">联系咨询</span>';
+    }
+    const hasDiscount = original && Number(original) > Number(price);
+    const originHtml = hasDiscount
+      ? `<span class="subscribe-plan-price-origin"><span class="subscribe-plan-price-origin-label">原价</span> ¥${formatPriceNum(original)}</span>`
+      : '';
+    const saleLabel = hasDiscount
+      ? '<span class="subscribe-plan-sale-label">折后价</span>'
+      : '';
+    const unitHtml = unit ? `<span class="subscribe-plan-unit">/${esc(unit)}</span>` : '';
+    const mainLine = `<span class="subscribe-plan-price-main">${saleLabel}<span class="subscribe-plan-amount">¥${formatPriceNum(price)}</span>${unitHtml}</span>`;
+    return `${originHtml}${mainLine}`;
   }
 
   function esc(s) {
@@ -160,11 +212,31 @@
     refreshOfferUI();
   }
 
+  function refreshStudyDisplayUi() {
+    const banner = document.getElementById('subscribeStudyBanner');
+    if (banner) banner.hidden = !STUDY_DISPLAY_MODE;
+    document.body.classList.toggle('subscribe-study-mode', STUDY_DISPLAY_MODE);
+  }
+
+  function refreshFilingUi() {
+    const hide = !showPublicPrices();
+    document.querySelectorAll('.imagegen-credits-rate-inline, .imagegen-credits-rate').forEach((el) => {
+      el.classList.toggle('hidden', hide);
+    });
+    document.querySelectorAll('.imagegen-credits-note').forEach((el) => {
+      if (!hide) return;
+      el.textContent = '积分用于生图等功能；激活码兑换请点「充值」。';
+    });
+    document.body.classList.toggle('shop-filing-mode', hide);
+    refreshStudyDisplayUi();
+  }
+
   function refreshOfferUI() {
     renderMembershipStatus();
     updateSubscribeNavBadge();
     renderCreditModePicker();
     renderMiniOfferBar();
+    refreshFilingUi();
     const overlay = document.getElementById('subscribeOverlay');
     if (overlay?.classList.contains('active')) {
       if (currentMainTab === 'credits') renderCreditPacks();
@@ -307,10 +379,7 @@
       row.innerHTML = '';
       return;
     }
-    const originalHtml = p.original
-      ? `<span class="subscribe-plan-original">¥${p.original}</span>`
-      : '';
-    const saveText = saveLabel(p.original, p.price);
+    const saveText = showPublicPrices() ? saveLabel(p.original, p.price) : '';
     const saveBadge = saveText
       ? `<span class="subscribe-plan-save">${esc(saveText)}</span>`
       : '';
@@ -321,16 +390,16 @@
           <h4 class="subscribe-lite-title">${esc(LITE_PLAN.name)}</h4>
         </div>
         <div class="subscribe-lite-compact-price">
-          ${originalHtml}
           ${saveBadge}
-          <span class="subscribe-plan-amount">¥${p.price}</span>
-          <span class="subscribe-plan-unit">/${esc(p.unit)}</span>
+          ${priceDisplayBlock(p.price, p.original, p.unit)}
         </div>
       </div>
       <p class="subscribe-lite-meta">${esc(billingLabel)} · ${esc(LITE_PLAN.summary)}</p>
-      <button type="button" class="btn btn-primary btn-sm subscribe-plan-btn subscribe-lite-buy" data-plan="lite" data-billing="${currentBilling}">购买</button>
+      <button type="button" class="btn btn-primary btn-sm subscribe-plan-btn subscribe-lite-buy" data-plan="lite" data-billing="${currentBilling}">${purchaseBtnLabel()}</button>
     </article>`;
-    row.querySelector('.subscribe-plan-btn')?.addEventListener('click', () => openShop());
+    row.querySelector('.subscribe-plan-btn')?.addEventListener('click', () => {
+      promptWechatPurchase(`${LITE_PLAN.name} · ${billingLabel}`);
+    });
   }
 
   function setMainTab(tab) {
@@ -347,8 +416,12 @@
     if (title) title.textContent = currentMainTab === 'credits' ? '积分充值' : '会员订阅';
     if (sub) {
       sub.textContent = currentMainTab === 'credits'
-        ? '1 元 = 100 积分 · 购买后在小店复制激活码，在上方兑换'
-        : '轻量特惠 + 三档会员 · 连续包月更省';
+        ? (showPublicPrices()
+          ? '1 元 = 100 积分 · 点击「购买」复制微信联系站长，激活码在上方兑换'
+          : '添加微信咨询套餐 · 站长发激活码后在上方兑换')
+        : (showPublicPrices()
+          ? '轻量特惠 + 三档会员 · 折后价见各档 · 点击「购买」加微信购买'
+          : '会员服务 · 添加微信咨询 · 激活码兑换');
     }
     if (currentMainTab === 'credits') renderCreditPacks();
     else renderPlans();
@@ -361,18 +434,22 @@
       const bonus = p.bonusDays > 0
         ? ` · 赠送 ${p.bonusDays} 天基础会员（每日积分模式）`
         : '';
+      const priceLine = showPublicPrices()
+        ? `<span class="subscribe-shop-card-price">¥${p.price}</span>`
+        : '<span class="subscribe-shop-card-price subscribe-plan-contact">联系咨询</span>';
       return `
       <article class="subscribe-shop-card">
         <div class="subscribe-shop-card-head">
           <h4 class="subscribe-shop-card-title">${esc(p.label)}</h4>
-          <span class="subscribe-shop-card-price">¥${p.price}</span>
+          ${priceLine}
         </div>
         <p class="subscribe-shop-card-meta">到账 ${p.credits.toLocaleString('zh-CN')} 积分${bonus}</p>
-        <button type="button" class="btn btn-primary subscribe-shop-buy-btn" data-shop-buy="${esc(p.id)}">去小店购买</button>
+        <button type="button" class="btn btn-primary subscribe-shop-buy-btn" data-shop-buy="${esc(p.id)}">${purchaseBtnLabel()}</button>
       </article>`;
     }).join('');
     grid.querySelectorAll('[data-shop-buy]').forEach(btn => {
-      btn.addEventListener('click', () => openShop());
+      const pack = CREDIT_PACKS.find((x) => x.id === btn.dataset.shopBuy);
+      btn.addEventListener('click', () => promptWechatPurchase(pack?.label || '积分套餐'));
     });
   }
 
@@ -386,10 +463,7 @@
     grid.innerHTML = PLANS.map(plan => {
       const p = getDisplayPrice(plan.id, currentBilling);
       if (!p) return '';
-      const originalHtml = p.original
-        ? `<span class="subscribe-plan-original">¥${p.original}</span>`
-        : '';
-      const saveText = saveLabel(p.original, p.price);
+      const saveText = showPublicPrices() ? saveLabel(p.original, p.price) : '';
       const saveBadge = saveText
         ? `<span class="subscribe-plan-save">${esc(saveText)}</span>`
         : '';
@@ -403,27 +477,45 @@
           <p class="subscribe-plan-billing-type">${esc(billingLabel)} · ${esc(creditHint)}</p>
         </div>
         <div class="subscribe-plan-price">
-          ${originalHtml}
-          <span class="subscribe-plan-amount">¥${p.price}</span>
-          <span class="subscribe-plan-unit">/${esc(p.unit)}</span>
+          ${priceDisplayBlock(p.price, p.original, p.unit)}
         </div>
         <ul class="subscribe-plan-features">${featHtml}</ul>
-        <button type="button" class="btn btn-primary subscribe-plan-btn" data-plan="${plan.id}" data-billing="${currentBilling}">去小店购买</button>
+        <button type="button" class="btn btn-primary subscribe-plan-btn" data-plan="${plan.id}" data-billing="${currentBilling}">${purchaseBtnLabel()}</button>
       </article>`;
     }).join('');
 
     grid.querySelectorAll('.subscribe-plan-btn').forEach(btn => {
-      btn.addEventListener('click', () => openShop());
+      const planId = btn.dataset.plan;
+      const billing = btn.dataset.billing;
+      const plan = PLANS.find((p) => p.id === planId);
+      const billingLabel = BILLING_LABELS[billing] || '';
+      btn.addEventListener('click', () => promptWechatPurchase(`${plan?.name || planId} · ${billingLabel}`));
     });
   }
 
   function setBilling(mode) {
+    if (!MEMBERSHIP_BILLING_OPTIONS.includes(mode)) mode = MEMBERSHIP_BILLING_OPTIONS[0] || 'single_month';
     currentBilling = mode;
     document.querySelectorAll('[data-subscribe-billing]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.subscribeBilling === mode);
     });
     renderPlans();
     updateSubscribeNavBadge();
+  }
+
+  function initBillingTabs() {
+    const tabs = document.getElementById('subscribeBillingTabs');
+    if (!tabs) return;
+    tabs.querySelectorAll('[data-subscribe-billing]').forEach((btn) => {
+      const mode = btn.dataset.subscribeBilling || '';
+      const allowed = MEMBERSHIP_BILLING_OPTIONS.includes(mode);
+      btn.hidden = !allowed;
+      btn.classList.toggle('active', mode === currentBilling);
+    });
+    tabs.hidden = MEMBERSHIP_BILLING_OPTIONS.length <= 1;
+    if (!MEMBERSHIP_BILLING_OPTIONS.includes(currentBilling)) {
+      currentBilling = MEMBERSHIP_BILLING_OPTIONS[0] || 'single_month';
+    }
   }
 
   function ensureModalOverlaysOnBody() {
@@ -475,6 +567,7 @@
 
   function bind() {
     ensureModalOverlaysOnBody();
+    initBillingTabs();
     document.querySelectorAll('[data-subscribe-main]').forEach(btn => {
       btn.addEventListener('click', () => setMainTab(btn.dataset.subscribeMain));
     });
@@ -516,6 +609,8 @@
     applyServerState,
     updateSubscribeNavBadge,
     refreshOfferUI,
+    isFilingReviewMode: () => FILING_REVIEW_MODE,
+    isStudyDisplayMode: () => STUDY_DISPLAY_MODE,
     DAILY_BY_TIER,
     LUMP_BY_TIER
   };

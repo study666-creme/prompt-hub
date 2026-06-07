@@ -38,7 +38,9 @@ export function jsonError(c: Context, err: unknown) {
         ? '保存后读不到数据：请确认 Worker 的 SUPABASE_URL 与你在 SQL 编辑器里用的是同一个 Supabase 项目'
         : msg.includes('sb_secret_') || msg.includes('Publishable')
           ? '请在 server 执行 npm run secret-service-role 并粘贴 sb_secret_ 密钥后 npm run deploy'
-          : undefined;
+          : /ICP Filing|aliyun_icp|备案|cloudflare_ssrf_1003|Supabase admin credentials/i.test(msg)
+            ? 'Worker 的 SUPABASE_URL 仍指向阿里云 RDS 或裸 IP。prompt-hubs.com 请改为境外 https://xxxxx.supabase.co 后 redeploy（见 docs/OVERSEAS-FIRST.md）'
+            : undefined;
   return c.json(
     {
       ok: false,

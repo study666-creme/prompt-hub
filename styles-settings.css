@@ -311,6 +311,32 @@ body.trial-tasks-open {
   box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
+.subscribe-study-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  padding: 12px 16px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  background: var(--accent-bg-strong);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.subscribe-study-banner strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.subscribe-study-banner span {
+  color: var(--text-secondary);
+}
+
 .subscribe-panel-head {
   display: flex;
   align-items: flex-start;
@@ -714,12 +740,19 @@ body.trial-tasks-open {
 }
 .subscribe-lite-compact-price {
   display: flex;
+  flex-direction: column;
   flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: flex-end;
+  align-items: flex-end;
   gap: 2px 6px;
   flex-shrink: 0;
   text-align: right;
+}
+.subscribe-lite-compact-price .subscribe-plan-price-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px 6px;
 }
 .subscribe-lite-compact-price .subscribe-plan-amount {
   font-size: 20px;
@@ -942,14 +975,36 @@ body.trial-tasks-open {
 .subscribe-plan-price {
   margin-bottom: 12px;
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
+  align-items: flex-start;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px 6px;
 }
 .subscribe-plan-original {
   font-size: 13px;
   color: var(--text-muted);
   text-decoration: line-through;
+}
+.subscribe-plan-price-origin {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.subscribe-plan-price-origin-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+.subscribe-plan-sale-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #f472b6;
+  letter-spacing: 0.02em;
 }
 .subscribe-plan-amount {
   font-size: 28px;

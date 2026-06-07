@@ -140,26 +140,20 @@
       const cardEl = img?.closest?.('.imagegen-feed-card[data-feed-id]');
       if (!cardEl || !img.closest('#imageGenFeed')) return null;
       const feedId = cardEl.dataset.feedId || '';
-      if (!feedId.startsWith('wh_')) {
-        const authorId = cardEl.dataset.authorId || img.dataset.authorId || '';
-        const postId = feedId;
-        if (authorId || postId) {
-          return { fromPublicFeed: true, inCommunityGrid: true, authorId, cardId: cardEl.dataset.sourceCardId || postId };
-        }
-        return null;
+      if (feedId.startsWith('wh_')) {
+        const rawId = feedId.replace(/^wh_/, '');
+        return {
+          fromPublicFeed: false,
+          authorId: window.SupabaseSync?.getUserId?.() || '',
+          cardId: rawId
+        };
       }
-      const rawId = feedId.replace(/^wh_/, '');
-      const c = (window.getWarehouseCardsForImageGen?.() || window.__promptHubCards || [])
-        .find((x) => x.id === rawId);
-      const collect = c && window.getCommunityCollectImageResolveOpts?.(c);
-      if (!collect) return { fromPublicFeed: false, authorId: '', cardId: rawId };
-      return {
-        fromPublicFeed: true,
-        communityFeed: true,
-        authorId: collect.authorId,
-        cardId: collect.cardId || collect.assetId || '',
-        inCommunityGrid: false
-      };
+      const authorId = cardEl.dataset.authorId || img.dataset.authorId || '';
+      const postId = feedId;
+      if (authorId || postId) {
+        return { fromPublicFeed: true, inCommunityGrid: true, authorId, cardId: cardEl.dataset.sourceCardId || postId };
+      }
+      return null;
     }
   
     function communityImageSignOpts(img) {
@@ -242,7 +236,7 @@
       const inGrid = !!cardMedia?.closest('#communityGrid, #creationsGrid, #userProfileGrid');
       if (!url && !fromPublicFeed) {
         let cached = inGrid
-          ? window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId, authorId: signOpts.authorId, variant: 'grid', tryAllPaths: true })
+          ? window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId, authorId: signOpts.authorId, variant: 'grid', tryAllPaths: false, listOnly: true })
           : '';
         if (!cached) cached = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId, variant: 'grid' });
         if (!cached && !listOnly) cached = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId, variant: 'full' });
@@ -274,12 +268,26 @@
           const ownWhFeed = inImageGenFeed && !!img.closest('.imagegen-feed-card[data-feed-id^="wh_"]');
           if (ownWhFeed) {
             const card = assetId && (window.__promptHubCards || []).find((c) => c.id === assetId);
-            if (card) {
-              window.SupabaseSync?.queueGridBackfill?.(card, { force: true });
+            void resolveImageDisplayUrl(ref, jobId || null, assetId, {
+              listOnly: false,
+              preferFull: true,
+              allowFullFallback: true,
+              cardId: assetId
+            }).then((fullUrl) => {
+              if (fullUrl && /^https?:\/\//i.test(fullUrl) && !fullUrl.startsWith('storage://')) {
+                img.addEventListener('load', endLoad, { once: true });
+                img.addEventListener('error', () => {
+                  feedMedia?.classList.add('card-media--load-failed');
+                  endLoad();
+                }, { once: true });
+                img.src = fullUrl;
+                if (img.complete && img.naturalWidth > 0) endLoad();
+                return;
+              }
+              if (card) window.SupabaseSync?.queueGridBackfill?.(card, { force: true });
               feedMedia?.classList.add('is-loading');
-              feedMedia?.classList.remove('card-media--load-failed');
-              return;
-            }
+            });
+            return;
           }
           if (!(cardMedia && removeBrokenCommunityFeedCard(cardMedia))) {
             feedMedia?.classList.add('card-media--load-failed');
@@ -375,6 +383,30 @@
         if (media.classList.contains('is-loading') || media.classList.contains('card-media--await')) return;
         if (img?.dataset?.storageRef || img?.dataset?.imageRef) return;
         card.remove();
+      });
+    }
+
+    function scrubImageGenFeedCards(wrap) {
+      if (!wrap) return;
+      wrap.querySelectorAll('.imagegen-feed-card[data-feed-id^="wh_"] .imagegen-feed-media').forEach((media) => {
+        const img = media.querySelector('img');
+        if (!img) return;
+        const src = img.currentSrc || img.src || '';
+        const loaded = img.complete
+          && img.naturalWidth > 8
+          && /^https?:\/\//i.test(src)
+          && !src.includes('data:image/svg');
+        if (loaded) {
+          releaseFeedMediaLoading(media);
+          media.style.removeProperty('min-height');
+          media.style.removeProperty('height');
+          return;
+        }
+        const ref = img.getAttribute('data-image-ref');
+        if (ref && isDisplayableImage(ref) && !img.dataset.igenRetry) {
+          img.dataset.igenRetry = '1';
+          void hydrateFeedImageOne(img);
+        }
       });
     }
 
@@ -524,6 +556,21 @@
         const ok = await applyFeedImageSrc(img, ref, jobId || null);
         if (!ok) {
           const feedCard = img.closest('.imagegen-feed-card');
+          if (feedCard?.dataset.feedId?.startsWith('wh_')) {
+            const assetId = feedAssetIdFromImg(img);
+            const fullUrl = await resolveImageDisplayUrl(ref, jobId || null, assetId, {
+              listOnly: false,
+              preferFull: true,
+              allowFullFallback: true,
+              cardId: assetId
+            });
+            if (fullUrl && /^https?:\/\//i.test(fullUrl)) {
+              img.addEventListener('load', () => releaseFeedMediaLoading(media), { once: true });
+              img.src = fullUrl;
+              if (img.complete && img.naturalWidth > 0) releaseFeedMediaLoading(media);
+              return;
+            }
+          }
           if (feedCard) {
             media?.classList.add('card-media--load-failed');
           } else if (media?.classList.contains('card-media')) {
@@ -557,7 +604,8 @@
       stripFailedFeedMedia,
       removeBrokenCommunityFeedCard,
       pruneEmptyCommunityFeedCards,
-      revealCommunityFeedImages
+      revealCommunityFeedImages,
+      scrubImageGenFeedCards
     };
   }
 

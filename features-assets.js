@@ -7,10 +7,14 @@
   let marketPackages = [];
   let marketLoading = false;
 
+  /** 额外自命名库配额（不含默认库）：免费 1 · 轻量 1 · 基础 2 · 标准 3 · 专业 4 */
   const EXTRA_WAREHOUSE_BY_TIER = {
-    standard: 1,
-    pro: 2
+    lite: 1,
+    basic: 2,
+    standard: 3,
+    pro: 4
   };
+  const EXTRA_WAREHOUSE_FREE = 1;
 
   const MOCK_PACKAGES = [];
 
@@ -26,7 +30,7 @@
     saleType: 'bulk',
     countLabel: '216 张设定卡 + 5 万字文档',
     description:
-      '拥有完整剧本三万字加世界观文档两万字，重要人物设定卡14张，配角形象卡103张，怪物形象卡43张，场景卡56张，均已关联资产创作文档，导入即用，关系一目了然，设定剧情微调无障碍。提示词和图片均为自己创作，无任何版权风险，购买即拥有该图包卡片文档商用版权。如预览图无法下定决断，可联系本人商议更多信息。',
+      '拥有完整剧本三万字加世界观文档两万字，重要人物设定卡14张，配角形象卡103张，怪物形象卡43张，场景卡56张，均已关联卡片式创作文档，导入即用，关系一目了然，设定剧情微调无障碍。提示词和图片均为自己创作，无任何版权风险，购买即拥有该图包卡片文档商用版权。如预览图无法下定决断，可联系本人商议更多信息。',
     license:
       '本包为平台结构演示，非真实售卖；展开可预览文件夹与目录组织方式，正式内容以作者交付为准。',
     commercialUseAllowed: true,
@@ -542,7 +546,8 @@
 
   function getExtraWarehouseLimit() {
     const tier = window.Membership?.getMemberTier?.();
-    return EXTRA_WAREHOUSE_BY_TIER[tier] || 0;
+    if (tier && EXTRA_WAREHOUSE_BY_TIER[tier] != null) return EXTRA_WAREHOUSE_BY_TIER[tier];
+    return EXTRA_WAREHOUSE_FREE;
   }
 
   function countExtraWarehouses(store) {
@@ -633,8 +638,8 @@
     if (!list.length) {
       container.innerHTML =
         kind === 'published'
-          ? '<div class="feature-empty"><p>暂无发布的资产包</p><p class="panel-hint">在「卡片资产」页点击「发布资产包」上架你的免费或付费包。</p><button type="button" class="btn btn-secondary btn-sm" onclick="switchAppPage(\'assetmarket\')">去卡片资产</button></div>'
-          : '<div class="feature-empty"><p>暂无拥有的资产包</p><p class="panel-hint">在「卡片资产」领取免费包或购买后，会显示在这里。</p><button type="button" class="btn btn-secondary btn-sm" onclick="switchAppPage(\'assetmarket\')">去卡片资产</button></div>';
+          ? '<div class="feature-empty"><p>暂无发布的资产包</p><p class="panel-hint">在「开发中 → 卡片资产」点击「发布资产包」上架你的免费或付费包。</p><button type="button" class="btn btn-secondary btn-sm" onclick="switchAppPage(\'assetmarket\')">去卡片资产</button></div>'
+          : '<div class="feature-empty"><p>暂无拥有的资产包</p><p class="panel-hint">在「开发中 → 卡片资产」领取免费包或购买后，会显示在这里。</p><button type="button" class="btn btn-secondary btn-sm" onclick="switchAppPage(\'assetmarket\')">去卡片资产</button></div>';
       return;
     }
     container.innerHTML = `<div class="asset-market-grid">${list
@@ -847,21 +852,17 @@
   function tryCreateWarehouse() {
     const limit = getExtraWarehouseLimit();
     const tier = window.Membership?.getMemberTier?.();
-    if (!limit) {
-      const hint =
-        tier === 'lite' || tier === 'basic'
-          ? '当前会员档不含额外卡片库。标准版可创建 1 个，专业版可创建 2 个。'
-          : '创建额外卡片库需要标准版或专业版会员。';
-      toast(hint, 5500);
-      if (typeof window.openSubscribePanel === 'function') {
-        setTimeout(() => window.openSubscribePanel(), 600);
-      }
-      return;
-    }
     const store = loadWarehouseStore();
     const extra = countExtraWarehouses(store);
     if (extra >= limit) {
-      toast(`已达上限：专业版最多 2 个额外库，标准版 1 个。当前已创建 ${extra} 个。`, 5000);
+      let hint = `已达额外卡片库上限（${limit} 个，不含默认库）。`;
+      if (!tier) hint += ' 升级会员可创建更多。';
+      else if (tier === 'lite' || tier === 'basic') hint += ' 标准版再 +1，专业版再 +1。';
+      else if (tier === 'standard') hint += ' 升级专业版再 +1。';
+      toast(hint, 5500);
+      if (!tier && typeof window.openSubscribePanel === 'function') {
+        setTimeout(() => window.openSubscribePanel(), 600);
+      }
       return;
     }
     const promptFn = window.customPrompt;
@@ -2394,7 +2395,7 @@
             <button type="button" class="btn btn-secondary" id="assetStudioExportBtn">打开并同步卡片库</button>
           </div>
         </header>
-        <p class="community-inline-hint">全屏写作台：拖入卡片关联文档、悬浮查看设定、右侧可生图。与主站卡片库实时联动。</p>
+        <p class="community-inline-hint">基于卡片资产创作脚本，一键导入无限画布生成节点，点击生成视频。</p>
         <ul class="asset-studio-launch-list">
           <li>左侧卡片库按主站<strong>分组文件夹</strong>展示，支持筛选与详情编辑</li>
           <li>文档分类可自建文件夹，拖入首字段建立卡片 ↔ 文档关联</li>
@@ -2474,19 +2475,25 @@
     });
   }
 
-  function onAppChange(app) {
-    if (app === 'assetmarket') {
+  function onAppChange(app, devlabPanel) {
+    const panel =
+      devlabPanel
+      || (app === 'devlab' ? (localStorage.getItem('promptrepo_devlab_panel') || 'assetmarket') : app);
+    if (panel === 'assetmarket' || app === 'assetmarket') {
       window.resumeRippleBackground?.();
       void renderMarketplace();
+    }
+    if (panel === 'assetstudio' || app === 'assetstudio') {
+      renderStudio();
     }
     if (app === 'warehouse') renderWarehouseSidebar();
   }
 
   function init() {
     const saved = localStorage.getItem('promptrepo_app_page');
-    if (saved === 'assetstudio' && !/\/asset-studio\.html$/i.test(window.location.pathname || '')) {
-      window.location.href = 'asset-studio.html';
-      return;
+    if (saved === 'assetstudio' || saved === 'assetmarket') {
+      localStorage.setItem('promptrepo_app_page', 'devlab');
+      localStorage.setItem('promptrepo_devlab_panel', saved === 'assetstudio' ? 'assetstudio' : 'assetmarket');
     }
     bindUI();
     renderWarehouseSidebar();

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__ADMIN_BUILD__ = '20260603h';
+    window.__ADMIN_BUILD__ = '20260607c';
     (function () {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function (regs) {
@@ -23,13 +23,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>管理登录</title>
-  <link rel="stylesheet" href="styles-admin.css?v=20260603h">
+  <link rel="stylesheet" href="styles-admin.css?v=20260607c">
 </head>
-<body>
+<body class="admin-gate">
   <section class="admin-login" id="adminLogin">
     <div class="admin-card">
       <h1>管理登录</h1>
-      <p class="admin-hint">仅限授权人员使用。构建号 <code id="adminBuildTag">20260603h</code></p>
+      <p class="admin-hint">仅限授权人员使用。构建号 <code id="adminBuildTag">20260607c</code></p>
       <div class="admin-field">
         <label for="adminSecret">访问密钥</label>
         <input type="password" id="adminSecret" placeholder="请输入密钥" autocomplete="off" spellcheck="false" autocapitalize="off">
@@ -45,11 +45,12 @@
       <aside class="admin-sidebar">
         <div class="admin-brand">
           <h1>Prompt Hub</h1>
-          <p>运营控制台 · <code id="adminSidebarBuild">20260603h</code></p>
+          <p>运营控制台 · <code id="adminSidebarBuild">20260607c</code></p>
         </div>
         <nav class="admin-nav admin-tabs">
           <button type="button" class="admin-tab is-active" data-tab="overview">概览</button>
           <button type="button" class="admin-tab" data-tab="users">用户</button>
+          <button type="button" class="admin-tab" data-tab="community">社区</button>
           <button type="button" class="admin-tab" data-tab="codes">激活码</button>
           <button type="button" class="admin-tab" data-tab="models">生图模型</button>
         </nav>
@@ -84,7 +85,7 @@
       </div>
       <div class="admin-card" id="dashCommunity">
         <h2>社区维护</h2>
-        <p class="admin-hint">下架 Storage 里已无图片、无效作者（888 等）、重复卡片的社区帖，解决 feed 签名 404 与灰块。</p>
+        <p class="admin-hint">下架：Storage 无图、无效作者、重复卡片、<strong>作者卡片库已删</strong>的社区帖。详细列表请打开左侧「社区」页。</p>
         <button type="button" class="admin-btn admin-btn--primary" id="dashCommunityPurgeBtn">清理无效社区帖</button>
         <p class="admin-hint" id="dashCommunityPurgeResult" hidden></p>
       </div>
@@ -96,9 +97,9 @@
         <div class="admin-search-bar">
           <div class="admin-field">
             <label for="userSearch">搜索用户</label>
-            <input type="text" id="userSearch" name="admin-user-filter"
+            <input type="search" id="userSearch" name="ph-admin-user-q"
               autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-              data-lpignore="true" data-1p-ignore="true"
+              data-lpignore="true" data-1p-ignore="true" data-bwignore="true"
               placeholder="昵称，或邮箱关键词（含 @）">
           </div>
           <button type="button" class="admin-btn admin-btn--primary" id="userSearchBtn">搜索</button>
@@ -126,6 +127,62 @@
           <button type="button" class="admin-btn" id="userNext">下一页</button>
         </div>
         <p class="admin-msg" id="userMsg" hidden></p>
+      </div>
+    </section>
+
+    <section class="admin-panel" id="panel-community" hidden>
+      <div class="admin-stats" id="communityStats"></div>
+      <div class="admin-card" style="margin-bottom:12px">
+        <div class="admin-view-tabs" id="communityViewTabs">
+          <button type="button" class="admin-view-tab is-active" data-community-view="published">在线帖</button>
+          <button type="button" class="admin-view-tab" data-community-view="unpublished">已下架</button>
+          <button type="button" class="admin-view-tab" data-community-view="library-missing">卡片库无</button>
+          <button type="button" class="admin-view-tab" data-community-view="bucket-orphans">桶内孤儿</button>
+        </div>
+        <p class="admin-hint" id="communityViewHint">在线社区帖，可下架或删除（含 Storage 图片）。</p>
+        <div class="admin-search-bar" id="communityPostTools">
+          <div class="admin-field">
+            <label for="communitySearch">搜索帖子</label>
+            <input type="search" id="communitySearch" autocomplete="off" spellcheck="false"
+              placeholder="作者昵称、提示词、帖子 ID 或 card ID">
+          </div>
+          <button type="button" class="admin-btn admin-btn--primary" id="communitySearchBtn">搜索</button>
+          <button type="button" class="admin-btn" id="communitySearchClear">清空</button>
+          <button type="button" class="admin-btn admin-btn--primary" id="communityRestoreOrphansBtn">一键恢复无卡帖</button>
+          <button type="button" class="admin-btn admin-btn--primary" id="communityPurgeBtn">清理无效帖</button>
+        </div>
+        <div class="admin-task-progress" id="communityTaskProgress" hidden>
+          <div class="admin-progress" aria-hidden="true"><div class="admin-progress__bar is-indeterminate" id="communityTaskProgressBar"></div></div>
+          <p class="admin-hint" id="communityTaskProgressText"></p>
+        </div>
+        <div class="admin-search-bar hidden" id="communityBucketTools">
+          <button type="button" class="admin-btn admin-btn--danger" id="communityBucketDeletePageBtn">删除本页孤儿文件</button>
+          <span class="admin-hint" id="communityBucketMeta"></span>
+        </div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-table--community">
+            <thead id="communityTableHead">
+              <tr>
+                <th>缩略图</th>
+                <th>作者</th>
+                <th>提示词</th>
+                <th>卡片库</th>
+                <th>赞</th>
+                <th>时间</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="communityTableBody"></tbody>
+          </table>
+        </div>
+        <div class="admin-pagination">
+          <button type="button" class="admin-btn" id="communityPrev">上一页</button>
+          <span id="communityPageInfo" class="admin-hint"></span>
+          <button type="button" class="admin-btn" id="communityNext">下一页</button>
+        </div>
+        <p class="admin-msg" id="communityMsg" hidden></p>
       </div>
     </section>
 
@@ -265,6 +322,7 @@
 
   <div class="admin-toast" id="adminToast" hidden></div>
 
-  <script src="admin.js?v=20260603h"></script>
+  <script src="api-domain.config.js"></script>
+  <script src="admin.js?v=20260607c"></script>
 </body>
 </html>

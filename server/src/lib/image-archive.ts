@@ -1,4 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Env } from '../env';
+import { cardImageExists, hasR2, mediaStorageMode, uploadCardImage, uploadToR2 } from './r2-storage';
 import { storageObjectExistsLight } from './media-cdn';
 
 const BUCKET = 'card-images';
@@ -44,10 +46,11 @@ export function storagePathFromRef(ref: string): string | null {
 
 async function verifyStoredObject(
   admin: SupabaseClient,
-  path: string
+  path: string,
+  env?: Env
 ): Promise<boolean> {
-  if (!(await storageObjectExistsLight(admin, path, BUCKET))) return false;
-  return true;
+  if (env) return cardImageExists(env, path, admin);
+  return storageObjectExistsLight(admin, path, BUCKET);
 }
 
 /** 将上游临时 URL 拉取并写入用户私有桶，返回 storage:// 引用（含校验与重试） */
@@ -56,11 +59,12 @@ export async function archiveRemoteImage(
   userId: string,
   jobId: string,
   remoteUrl: string,
-  opts?: { maxAttempts?: number }
+  opts?: { maxAttempts?: number; env?: Env }
 ): Promise<string> {
+  const env = opts?.env;
   if (isStorageRef(remoteUrl)) {
     const path = storagePathFromRef(remoteUrl);
-    if (path && (await verifyStoredObject(admin, path))) return remoteUrl;
+    if (path && (await verifyStoredObject(admin, path, env))) return remoteUrl;
   }
 
   const maxAttempts = Math.max(1, opts?.maxAttempts ?? 3);
@@ -76,17 +80,35 @@ export async function archiveRemoteImage(
         throw new Error(`fetch_image_failed_${res.status}`);
       }
       const contentType = res.headers.get('content-type') || 'image/jpeg';
+      const mime = contentType.split(';')[0] || 'image/jpeg';
+
+      if (env && hasR2(env) && res.body) {
+        const mode = mediaStorageMode(env);
+        const streamed = await uploadToR2(env, path, res.body, mime);
+        if (!streamed) throw new Error('r2_stream_upload_failed');
+        if (mode === 'r2' || mode === 'r2-first') {
+          if (await verifyStoredObject(admin, path, env)) {
+            return toStorageRef(path);
+          }
+          throw new Error('archive_verify_failed');
+        }
+      }
+
       const buf = await res.arrayBuffer();
       if (!buf.byteLength) throw new Error('empty_image');
 
-      const { error } = await admin.storage.from(BUCKET).upload(path, buf, {
-        contentType: contentType.split(';')[0] || 'image/jpeg',
-        upsert: true,
-        cacheControl: '3600'
-      });
-      if (error) throw error;
+      if (env) {
+        await uploadCardImage(env, path, buf, mime);
+      } else {
+        const { error } = await admin.storage.from(BUCKET).upload(path, buf, {
+          contentType: mime,
+          upsert: true,
+          cacheControl: '3600'
+        });
+        if (error) throw error;
+      }
 
-      if (await verifyStoredObject(admin, path)) {
+      if (await verifyStoredObject(admin, path, env)) {
         return toStorageRef(path);
       }
       throw new Error('archive_verify_failed');

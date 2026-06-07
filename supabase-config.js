@@ -1,10 +1,43 @@
-// 填入 Supabase 项目 Settings → API 里的两项（anon public 密钥可放前端）
-window.SUPABASE_URL = 'https://yibawjvhmqcysdovscss.supabase.co';
-window.SUPABASE_ANON_KEY = 'sb_publishable_PGhXkT83iWKzx5244I9t4w_HSBITvgF';
+// Supabase 客户端配置（浏览器走 Worker /supabase 反代，勿直连裸 IP）
+// 境外主库（prompt-hubs.com）：与 extension/config.js 对齐
+// 旧站（prompt-hub.cn）：仍走 api.prompt-hub.cn + 阿里云 RDS anon
 
-// 手机号验证码：在 Supabase 开启 Phone + 短信服务后设为 true（见 docs/SUPABASE-AUTH.md）
 window.AUTH_PHONE_ENABLED = false;
-
-// 微信登录：配置 OAuth 入口 URL 后设为 true（见 docs/SUPABASE-AUTH.md）
 window.WECHAT_OAUTH_ENABLED = false;
 window.WECHAT_OAUTH_URL = '';
+
+(function () {
+  var h = (typeof location !== 'undefined' && location.hostname) || '';
+
+  if (h === 'localhost' || h === '127.0.0.1') {
+    window.SUPABASE_URL = 'http://8.148.193.247:80';
+    window.SUPABASE_ANON_KEY =
+      'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzgwNzkxMzM5LCJleHAiOjEzMjkxNDMxMzM5fQ.lAaU4MF46Cse5hFcX9QeW9Dp-cG1DRia2t42CYgwHlw';
+    try {
+      var s = document.createElement('script');
+      s.src = 'supabase-config.local.js';
+      s.async = false;
+      document.head.appendChild(s);
+    } catch (e) { /* optional override */ }
+    return;
+  }
+
+  var customApi = String(window.CUSTOM_API_HOST || '').trim();
+  var isOverseasSite =
+    /prompt-hubs\.com/i.test(customApi) ||
+    /^(www\.)?prompt-hubs\.com$/i.test(h) ||
+    /\.prompt-hub-hub\.pages\.dev$/i.test(h) ||
+    /\.prompt-hub-web\.pages\.dev$/i.test(h);
+
+  if (isOverseasSite) {
+    var apiHost = customApi || 'api.prompt-hubs.com';
+    window.SUPABASE_URL =
+      'https://' + apiHost.replace(/^https?:\/\//i, '').replace(/\/$/, '') + '/supabase';
+    window.SUPABASE_ANON_KEY = 'sb_publishable_PGhXkT83iWKzx5244I9t4w_HSBITvgF';
+    return;
+  }
+
+  window.SUPABASE_URL = 'https://api.prompt-hub.cn/supabase';
+  window.SUPABASE_ANON_KEY =
+    'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzgwNzkxMzM5LCJleHAiOjEzMjkxNDMxMzM5fQ.lAaU4MF46Cse5hFcX9QeW9Dp-cG1DRia2t42CYgwHlw';
+})();

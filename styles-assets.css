@@ -121,6 +121,21 @@
   background: transparent;
 }
 
+.app-main:has(#pageDevLab.active) {
+  background: transparent;
+}
+
+#pageDevLab .feature-shell,
+#pageDevLab .feature-body,
+#pageDevLab.active {
+  background: transparent !important;
+}
+
+#pageDevLab .feature-header {
+  background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
+  backdrop-filter: blur(10px);
+}
+
 .app-main:has(#pageAssetMarket.active) {
   background: transparent;
 }

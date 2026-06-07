@@ -11,6 +11,7 @@ export function isAllowedCorsOrigin(
   try {
     const u = new URL(origin);
     const host = u.hostname.toLowerCase();
+    if (host === 'prompt-hubs.com' || host === 'www.prompt-hubs.com') return true;
     if (host === 'prompt-hub.cn' || host === 'www.prompt-hub.cn') return true;
     if (host === 'localhost' || host === '127.0.0.1') {
       return u.protocol === 'http:' || u.protocol === 'https:';

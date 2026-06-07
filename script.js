@@ -1030,10 +1030,15 @@
       return settings.defaultImageGenAutoSaveWarehouse !== false;
     };
 
+    function warehouseVisibleCards(list) {
+      const base = cardsForActiveWarehouse(filterTombstonedCards(list || cards));
+      return base.filter((c) => window.SupabaseSync?.shouldShowCardInWarehouse?.(c) !== false);
+    }
+
     window.getWarehouseCardsForImageGen = function (opts) {
       const group = opts?.group || 'all';
       const tag = opts?.tag || 'all';
-      const base = cardsForActiveWarehouse(filterTombstonedCards(cards));
+      const base = warehouseVisibleCards(cards);
       let list = base.filter((c) => {
         if (!cardHasDisplayImage(c)) return false;
         const prompt = (c.prompt || '').trim();
@@ -1274,12 +1279,15 @@
           renderGroups();
           renderCards(true);
           if (window.SupabaseSync?.isLoggedIn?.()) scheduleCloudPush({ urgent: true });
+          window.FeatureDraft?.prunePendingGenJobsFromWarehouse?.();
           return { ok: true, cardId: existing.id, repaired: true };
         }
+        window.FeatureDraft?.prunePendingGenJobsFromWarehouse?.();
         return { ok: false, duplicate: true, cardId: existing?.id };
       }
       if (sourceId && cards.some(c => c.genSourceId === sourceId)) {
         const existing = cards.find(c => c.genSourceId === sourceId);
+        window.FeatureDraft?.prunePendingGenJobsFromWarehouse?.();
         return { ok: false, duplicate: true, cardId: existing?.id };
       }
       if (!isUserLoggedIn()) {
@@ -1320,6 +1328,7 @@
       if (!payload.silentToast) {
         showToast(payload.publishToCommunity ? '已保存到仓库并公开到社区' : '已保存到卡片仓库');
       }
+      window.FeatureDraft?.prunePendingGenJobsFromWarehouse?.();
       return { ok: true, cardId: card.id };
     };
 
@@ -1887,8 +1896,42 @@
     }
 
     function highlightSelectedCard(id) {
-      document.querySelectorAll('.card.selected').forEach(el => el.classList.remove('selected'));
-      if (id) document.querySelector(`.card[data-id="${id}"]`)?.classList.add('selected');
+      document.querySelectorAll('#cardsContainer .card.selected').forEach((el) => {
+        el.classList.remove('selected', 'card-selected-bloom');
+      });
+      if (!id) return;
+      const el = document.querySelector(`#cardsContainer .card[data-id="${CSS.escape(id)}"]`);
+      if (!el) return;
+      el.classList.add('selected');
+      pulseWarehouseCard(el, 'select');
+    }
+
+    function pulseWarehouseCard(cardEl, kind) {
+      if (!cardEl?.closest?.('#cardsContainer')) return;
+      if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return;
+      const cls = kind === 'select' ? 'card-selected-bloom' : 'card-press-pop';
+      cardEl.classList.remove('card-press-pop', 'card-selected-bloom');
+      void cardEl.offsetWidth;
+      cardEl.classList.add(cls);
+      cardEl.addEventListener('animationend', () => cardEl.classList.remove(cls), { once: true });
+    }
+
+    function rippleWarehouseCard(cardEl, clientX, clientY) {
+      if (!cardEl?.closest?.('#cardsContainer')) return;
+      const rect = cardEl.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+      cardEl.style.setProperty('--card-ripple-x', `${(x / rect.width) * 100}%`);
+      cardEl.style.setProperty('--card-ripple-y', `${(y / rect.height) * 100}%`);
+    }
+
+    function pulseFabButton() {
+      const fab = document.getElementById('fabNewBtn');
+      if (!fab || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return;
+      fab.classList.remove('fab-new--ripple');
+      void fab.offsetWidth;
+      fab.classList.add('fab-new--ripple');
+      fab.addEventListener('animationend', () => fab.classList.remove('fab-new--ripple'), { once: true });
     }
 
     const CARD_DRAG_BLANK_IMG = (() => {
@@ -2207,12 +2250,56 @@
 
     const APP_PAGE_IDS = {
       warehouse: 'pageWarehouse',
-      assetmarket: 'pageAssetMarket',
-      assetstudio: 'pageAssetStudio',
+      devlab: 'pageDevLab',
       community: 'pageCommunity',
       creations: 'pageCreations',
       imagegen: 'pageImageGen'
     };
+
+    const DEVLAB_PANEL_KEY = 'promptrepo_devlab_panel';
+
+    function getDevLabPanel() {
+      const p = localStorage.getItem(DEVLAB_PANEL_KEY);
+      return p === 'assetstudio' ? 'assetstudio' : 'assetmarket';
+    }
+
+    function switchDevLabPanel(panel) {
+      const key = panel === 'assetstudio' ? 'assetstudio' : 'assetmarket';
+      localStorage.setItem(DEVLAB_PANEL_KEY, key);
+      document.querySelectorAll('#devLabFolderList .group-item[data-devlab-panel]').forEach((el) => {
+        el.classList.toggle('active', el.dataset.devlabPanel === key);
+      });
+      document.querySelectorAll('.devlab-panel[data-devlab-panel]').forEach((el) => {
+        el.classList.toggle('active', el.dataset.devlabPanel === key);
+      });
+      document.querySelectorAll('.devlab-mobile-tab[data-devlab-panel]').forEach((el) => {
+        el.classList.toggle('active', el.dataset.devlabPanel === key);
+      });
+      if (key === 'assetmarket') void window.FeatureAssets?.renderMarketplace?.();
+      if (key === 'assetstudio') window.FeatureAssets?.renderStudio?.();
+      window.FeatureAssets?.onAppChange?.('devlab', key);
+    }
+    window.switchDevLabPanel = switchDevLabPanel;
+
+    function initDevLabNav() {
+      const activate = (panel) => {
+        if (document.getElementById('pageDevLab')?.classList.contains('active')) {
+          switchDevLabPanel(panel);
+        }
+      };
+      document.querySelectorAll('#devLabFolderList .group-item[data-devlab-panel]').forEach((el) => {
+        el.addEventListener('click', () => activate(el.dataset.devlabPanel));
+        el.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            activate(el.dataset.devlabPanel);
+          }
+        });
+      });
+      document.querySelectorAll('.devlab-mobile-tab[data-devlab-panel]').forEach((btn) => {
+        btn.addEventListener('click', () => activate(btn.dataset.devlabPanel));
+      });
+    }
 
     function pauseRippleBackground() {
       window.__rippleGridBg?.setPaused?.(true);
@@ -2269,11 +2356,11 @@
     }
 
     function switchAppPage(app) {
-      if (!APP_PAGE_IDS[app]) return;
-      if (app === 'assetstudio') {
-        window.location.href = 'asset-studio.html';
-        return;
+      if (app === 'assetmarket' || app === 'assetstudio') {
+        switchDevLabPanel(app);
+        app = 'devlab';
       }
+      if (!APP_PAGE_IDS[app]) return;
       if (app !== 'warehouse' && activeFilters.size > 0) {
         clearWarehouseFilters({ toast: false });
       }
@@ -2304,6 +2391,9 @@
       });
       localStorage.setItem('promptrepo_app_page', app);
       window.MobileUI?.closeAllMobileOverlays?.();
+      if (app === 'devlab') {
+        switchDevLabPanel(getDevLabPanel());
+      }
       if (app === 'warehouse') {
         if (floatingPromptActive) {
           floatingPromptActive = false;
@@ -5253,10 +5343,11 @@
       if (sessionStorage.getItem(key)) return;
       sessionStorage.setItem(key, '1');
       const run = () => void runCardImageIntegrityAudit();
+      const auditDelay = window.SupabaseSync?.isLegacyImageRestorePhase?.() ? 1500 : 60000;
       if (typeof requestIdleCallback === 'function') {
-        requestIdleCallback(run, { timeout: 120000 });
+        requestIdleCallback(run, { timeout: window.SupabaseSync?.isLegacyImageRestorePhase?.() ? 4000 : 120000 });
       } else {
-        setTimeout(run, 60000);
+        setTimeout(run, auditDelay);
       }
     }
 
@@ -5327,6 +5418,7 @@
       } else if (window.SupabaseSync?.isLoggedIn?.()) {
         window.SubscriptionUI?.refreshOfferUI?.();
       }
+      void window.FeatureDraft?.refreshImageGenModelCatalog?.();
 
       if (!force && !idbMismatch && cloudHydratedUid === uid && cards.length > 0) {
         activeAccountId = uid;
@@ -5950,6 +6042,7 @@
       bindPanelOcrDrop();
       initCardUploadOriginalToggle();
       initAppNav();
+      initDevLabNav();
       initAppNavCollapse();
       window.FeatureAssets?.init?.();
       initBackgroundEffect();
@@ -6069,7 +6162,7 @@
 
     function renderGroups() {
       ensureGroupsFromCards();
-      const visible = cardsForActiveWarehouse(filterTombstonedCards(cards));
+      const visible = warehouseVisibleCards(cards);
       document.getElementById('allCount').textContent = visible.length;
       document.getElementById('uncategorizedCount').textContent = visible.filter(c => !c.group).length;
       document.querySelectorAll('.group-item').forEach(el => el.classList.remove('active'));
@@ -6251,6 +6344,7 @@
     }
 
     function cardHasDisplayImage(card) {
+      if (window.SupabaseSync?.shouldShowCardInWarehouse?.(card) === false) return false;
       const image = card?.image;
       if (!image || typeof image !== 'string') return false;
       if (window.FeatureDraft?.isDisplayableImage && !window.FeatureDraft.isDisplayableImage(image)) return false;
@@ -6336,7 +6430,7 @@
       const search = (searchEl?.value || '').toLowerCase();
       sortMode = document.getElementById('sortSelect').value;
       if (reset || allFilteredCards.length === 0) {
-        let filtered = cardsForActiveWarehouse(filterTombstonedCards([...cards]));
+        let filtered = warehouseVisibleCards(cards);
         if (currentGroup === 'uncategorized') filtered = filtered.filter(c => !c.group);
         else if (currentGroup !== 'all') filtered = filtered.filter(c => c.group === currentGroup);
         if (search) filtered = filtered.filter(c => (c.title?.toLowerCase().includes(search)) || (c.prompt || '').toLowerCase().includes(search) || (c.tags?.some(t => t.toLowerCase().includes(search))));
@@ -6446,10 +6540,12 @@
             return;
           }
           if (e.target.closest('.card-checkbox')) return;
+          rippleWarehouseCard(div, e.clientX, e.clientY);
           if (batchMode) {
             const cb = div.querySelector('.card-checkbox');
             toggleSelectCard(card.id, cb);
           } else {
+            pulseWarehouseCard(div, 'press');
             editCard(card.id);
           }
         });
@@ -6671,6 +6767,7 @@
         selectedCardIds.add(id);
         if (el) el.classList.add('checked');
         cardEl?.classList.add('batch-selected');
+        pulseWarehouseCard(cardEl, 'press');
       }
       updateBatchCountLabel();
     }
@@ -7182,6 +7279,7 @@
         promptLogin(check.msg);
         return;
       }
+      pulseFabButton();
       resetNewCardForm();
       highlightSelectedCard(null);
       const mobile = isMobileViewport();

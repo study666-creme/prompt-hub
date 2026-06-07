@@ -3,6 +3,7 @@ import type { Env } from '../env';
 import { ApiError } from './errors';
 import { storagePathFromRef } from './image-archive';
 import { createAdminClient } from './supabase';
+import { downloadCardImage, uploadCardImage, cardImageExists } from './r2-storage';
 
 export const CARD_IMAGES_BUCKET = 'card-images';
 const CDN_CACHE_SEC = 60 * 60 * 24 * 30;
@@ -209,12 +210,10 @@ function isAcceptableGridBlob(blob: Blob | null | undefined): boolean {
 }
 
 async function downloadGridBlob(
-  admin: ReturnType<typeof createAdminClient>,
+  env: Env,
   gridClean: string
 ): Promise<Blob | null> {
-  const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).download(gridClean);
-  if (error || !data) return null;
-  return data;
+  return downloadCardImage(env, gridClean);
 }
 
 async function rebuildGridAtPath(
@@ -225,10 +224,7 @@ async function rebuildGridAtPath(
 ): Promise<Blob | null> {
   const gridBlob = await buildGridBlobFromPrimary(env, admin, primaryPath);
   if (!isAcceptableGridBlob(gridBlob)) return null;
-  await admin.storage.from(CARD_IMAGES_BUCKET).upload(gridClean, gridBlob!, {
-    contentType: 'image/jpeg',
-    upsert: true
-  });
+  await uploadCardImage(env, gridClean, gridBlob!, 'image/jpeg');
   return gridBlob;
 }
 
@@ -262,9 +258,9 @@ async function buildGridBlobFromPrimary(
   primaryPath: string
 ): Promise<Blob | null> {
   const primaryClean = primaryPath.replace(/^\//, '');
-  const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).download(primaryClean);
-  if (!error && data) {
-    const resized = await resizeImageToGridJpeg(data);
+  const primaryBlob = await downloadCardImage(env, primaryClean);
+  if (primaryBlob) {
+    const resized = await resizeImageToGridJpeg(primaryBlob);
     if (resized && resized.size >= GRID_MIN_BYTES) return resized;
   }
   const transformed = await fetchSupabaseGridBytes(env, primaryClean);
@@ -281,7 +277,7 @@ export async function materializeCommunityGridIfMissing(
   cardId?: string
 ): Promise<void> {
   const gridClean = gridPath.replace(/^\//, '');
-  const existing = await downloadGridBlob(admin, gridClean);
+  const existing = await downloadGridBlob(c.env, gridClean);
   if (isAcceptableGridBlob(existing)) return;
 
   let primaryCandidates = [...primaryCandidatesFromGridPath(gridClean)];
@@ -291,7 +287,7 @@ export async function materializeCommunityGridIfMissing(
       gridOnly: false
     }).filter((p) => !/_grid\.(jpe?g|webp|png)$/i.test(p));
   }
-  const primary = await findFirstExistingStoragePath(admin, primaryCandidates);
+  const primary = await findFirstExistingStoragePath(admin, primaryCandidates, CARD_IMAGES_BUCKET, c.env);
   if (!primary) return;
 
   await rebuildGridAtPath(c.env, admin, gridClean, primary);
@@ -340,10 +336,11 @@ export async function resolveCommunityGridPath(
   ref: string,
   authorId?: string,
   cardId?: string,
-  bucket = CARD_IMAGES_BUCKET
+  bucket = CARD_IMAGES_BUCKET,
+  env?: Env
 ): Promise<string | null> {
   const gridPaths = communityImagePathCandidates(ref, authorId, cardId, { gridOnly: true });
-  const existing = await findFirstExistingStoragePath(admin, gridPaths, bucket);
+  const existing = await findFirstExistingStoragePath(admin, gridPaths, bucket, env);
   if (existing) return existing;
 
   let primaryPaths = communityImagePathCandidates(ref, authorId, cardId, {
@@ -360,7 +357,7 @@ export async function resolveCommunityGridPath(
     primaryPaths.unshift(fromRef);
   }
 
-  const primary = await findFirstExistingStoragePath(admin, primaryPaths, bucket);
+  const primary = await findFirstExistingStoragePath(admin, primaryPaths, bucket, env);
   if (!primary) return null;
   return gridPathFromPrimary(primary);
 }
@@ -371,14 +368,16 @@ function contentTypeForPath(path: string): string {
   return 'image/jpeg';
 }
 
-/** 用 list 精确匹配文件名（不下载文件体） */
+/** 用 list 精确匹配文件名（不下载文件体）；传 env 时走 R2 / r2-first */
 export async function storageObjectExistsLight(
   admin: ReturnType<typeof createAdminClient>,
   path: string,
-  bucket = CARD_IMAGES_BUCKET
+  bucket = CARD_IMAGES_BUCKET,
+  env?: Env
 ): Promise<boolean> {
   const clean = path.replace(/^\//, '');
   if (!clean) return false;
+  if (env) return cardImageExists(env, clean, admin);
   const slash = clean.lastIndexOf('/');
   const dir = slash >= 0 ? clean.slice(0, slash) : '';
   const name = slash >= 0 ? clean.slice(slash + 1) : clean;
@@ -398,11 +397,16 @@ export async function storageObjectExistsLight(
 export async function findFirstExistingStoragePath(
   admin: ReturnType<typeof createAdminClient>,
   paths: string[],
-  bucket = CARD_IMAGES_BUCKET
+  bucket = CARD_IMAGES_BUCKET,
+  env?: Env
 ): Promise<string | null> {
   for (const path of paths) {
     const clean = path.replace(/^\//, '');
     if (!clean) continue;
+    if (env) {
+      if (await cardImageExists(env, clean, admin)) return clean;
+      continue;
+    }
     try {
       const { data, error } = await admin.storage.from(bucket).download(clean);
       if (!error && data && (data.size || 0) > 0) return clean;
@@ -436,14 +440,14 @@ export async function serveCachedStorageImage(
   let body: Blob | null = null;
   let contentType = contentTypeForPath(clean);
 
-  const stored = isGrid ? await downloadGridBlob(admin, clean) : null;
+  const stored = isGrid ? await downloadGridBlob(c.env, clean) : null;
   if (stored && isAcceptableGridBlob(stored)) {
     body = stored;
   } else if (!isGrid) {
-    const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).download(clean);
-    if (!error && data) {
-      const bytes = data.size || 0;
-      if (bytes >= 512) body = data;
+    const blob = await downloadCardImage(c.env, clean);
+    if (blob) {
+      const bytes = blob.size || 0;
+      if (bytes >= 512) body = blob;
       else throw new ApiError(404, 'NOT_FOUND', '图片文件无效或已损坏');
     }
   }
@@ -455,10 +459,7 @@ export async function serveCachedStorageImage(
         body = gridBlob;
         contentType = 'image/jpeg';
         c.executionCtx.waitUntil(
-          admin.storage
-            .from(CARD_IMAGES_BUCKET)
-            .upload(clean, gridBlob!, { contentType: 'image/jpeg', upsert: true })
-            .catch(() => {})
+          uploadCardImage(c.env, clean, gridBlob!, 'image/jpeg').catch(() => {})
         );
         break;
       }

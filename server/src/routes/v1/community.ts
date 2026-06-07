@@ -25,6 +25,7 @@ import {
 } from '../../lib/community-gacha';
 import { createAdminClient, getOrCreateProfile } from '../../lib/supabase';
 import { applyCorsHeaders } from '../../lib/cors-headers';
+import { diagnoseSupabaseUpstream } from '../../lib/supabase-upstream';
 import { rateLimit } from '../../middleware/rate-limit';
 
 const bodySchema = z.object({
@@ -85,6 +86,10 @@ export async function communityFeedHandler(c: Context<{ Bindings: Env }>) {
     });
   } catch (e) {
     applyCorsHeaders(c);
+    const upstreamHint = await diagnoseSupabaseUpstream(c.env);
+    if (upstreamHint) {
+      throw new ApiError(503, 'SUPABASE_UPSTREAM', upstreamHint);
+    }
     if (isMissingCommunityTable(e)) {
       throw new ApiError(
         503,
@@ -103,7 +108,7 @@ async function assertCommunityPublishAllowed(
   payload: CommunityPostPayload,
   opts?: { skipVision?: boolean }
 ) {
-  const resolvedImage = await resolvePublicImageRef(admin, userId, payload);
+  const resolvedImage = await resolvePublicImageRef(admin, userId, payload, c.env);
   let visionKey: string | undefined;
   let visionBase: string | undefined;
   let skipVision = false;
@@ -137,7 +142,7 @@ communityRoutes.post('/posts', async c => {
   const admin = createAdminClient(c.env);
   try {
     await assertCommunityPublishAllowed(c, admin, user.id, parsed.data as CommunityPostPayload);
-    const post = await upsertCommunityPost(admin, user.id, parsed.data as CommunityPostPayload);
+    const post = await upsertCommunityPost(admin, user.id, parsed.data as CommunityPostPayload, c.env);
     return c.json({ ok: true, data: { post } });
   } catch (e) {
     if (e instanceof ApiError) throw e;
@@ -198,7 +203,8 @@ communityRoutes.post('/posts/sync', async c => {
       admin,
       user.id,
       authorName,
-      allowed
+      allowed,
+      c.env
     );
     return c.json({ ok: true, data: result });
   } catch (e) {

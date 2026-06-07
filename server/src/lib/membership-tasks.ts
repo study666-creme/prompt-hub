@@ -932,7 +932,7 @@ export function buildTaskList(
     items.push({
       key: 'mini_99_membership',
       title: '¥0.99 体验三天基础会员',
-      description: '小店或微信购买后，在「兑换」输入激活码（一人一码）',
+      description: '微信购买后，在「兑换」输入激活码（一人一码）',
       rewardDays: 3,
       rewardCredits: 0,
       claimed: false,

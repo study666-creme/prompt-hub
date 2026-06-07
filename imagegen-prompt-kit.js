@@ -1631,6 +1631,59 @@
       '重阳菊', '冬至热汤蒸汽', '大雪封门', '小暑荷塘',
       '惊蛰桃花', '霜降红叶', '处暑稻浪', '大寒冰凌'
     ],
+    luxurySolidBgHook: [
+      '奢侈品广告级纯色底，主体是唯一叙事', 'Editorial 无缝 backdrop，高级克制',
+      '封面级 hero + 大面积留白纯色', '静奢张力：背景不抢戏但质感顶满',
+      '高定 lookbook 一页式纯色舞台', 'Apple 产品 hero 级无缝底',
+      '奈良美智式克制：纯色服务情绪', '拍卖 catalog 级静物舞台',
+      'Kinfolk premium 慢生活纯色底', '香水广告叙事一帧 + 纯色幕'
+    ],
+    luxurySolidBgColor: [
+      '雾面炭灰 seamless', '暖沙色 matte backdrop', '深海军蓝 velvet 感纯色',
+      '象牙白 seamless 无渐变', '冷灰绿 editorial 底色', '勃艮第酒红 matte',
+      '燕麦色 warm neutral', '纯黑 infinity cove', '雾霾蓝低饱和',
+      '陶土橙 matte 无纹理', '鼠尾草绿静奢底', '珍珠白微暖 seamless'
+    ],
+    luxurySolidBgSurface: [
+      '背景无接缝、无折痕、无脏点', '微磨砂质感纯色，非廉价喷绘',
+      '色彩 science 统一，无 banding', '背景虚焦过渡极柔，像光学而非 PS',
+      '纯色但保留空气感层次，非 flat 贴图', 'studio 无缝纸质感，高级商业完成度',
+      '背景亮度比主体低半档，主次清晰', '纯色底上有极 subtle 体积雾，不抢主体'
+    ],
+    luxurySolidBgLight: [
+      '单灯侧光 + 纯色深灰底', '轮廓光勾边，面部 soft fill，背景沉入纯色',
+      '顶光戏剧化，纯色底仍保留暗部细节', '冷环境 + 暖 rim，经典 editorial',
+      '窗光一条，其余纯色暗部有层次', '反射板补光极克制，纯色不泛白',
+      '主体投影落在纯色底上，接地真实', '渐变仅出现在主体边缘，背景保持纯色'
+    ],
+    oppressiveMaxHook: [
+      '压迫感拉满，观者像被画面压住', '心理重量顶满，空气像铅',
+      '巨物/权力/危险从四面挤压主体', '低机位仰拍，主体被环境吞噬',
+      '山雨欲来，静默比爆发更窒息', '命运碾压感，无处可逃的构图',
+      '威压场全开，视线被锁死无法移开', '末日前最后一帧的沉重',
+      '权威与渺小对撞，尺度即暴力', '暗潮涌动，画面边缘能量即将溢出'
+    ],
+    oppressiveMaxScale: [
+      '主体仅占画面 5%，其余被巨构吞没', '前景巨大遮挡框景，主体在狭缝',
+      '蚁视角仰望，天际线极低', '环形构图，视线被锁在中心无法逃离',
+      '垂直长构图，上下压迫感', '超广角边缘畸变强化空间挤压',
+      '巨手/巨影/巨兽轮廓压顶', '无限延伸的走廊消失点吞没人',
+      '风暴云墙占画面 80%', '悬崖边单人，深渊在脚下张开'
+    ],
+    oppressiveMaxLight: [
+      '单一底光，面部半暗', '顶光像审讯灯，眼窝深影',
+      '逆光剪影，威胁在亮部之外', '冷绿荧光灯，医院/地下感',
+      '血月/风暴光，环境比主体更凶', '高光仅眼睛，其余沉入暗',
+      '雾气吞没远景，近处清晰远处像深渊', '硬光无 fill，对比极端',
+      '闪电定格一瞬，四周全黑', '红色警示光染半边脸'
+    ],
+    oppressiveMaxComp: [
+      '对角线动势贯穿，像要倾倒向观者', '对称构图但失衡，不安藏在秩序里',
+      '主体贴底边缘，上方留白是威胁', '框中框，一层层收紧',
+      '破框构图，元素冲出画面边缘', '前景黑影占 40%，主体在后方',
+      '消失点正对观者，像被吸进去', '群体环绕个体，包围式构图',
+      '权力关系在构图里倾斜', '危险逼近但主体不退，张力顶满'
+    ],
     premiumHook: [
       'Editorial hero，封面级第一眼', '奢侈品广告级主次', 'Vogue 内页大片感',
       '获奖 campaign key visual', '美术馆 catalog 完成度', '奈良美智式克制留白',
@@ -1987,7 +2040,9 @@
     liminal: ['liminalPlace', 'liminalMood', 'liminalLight'],
     romance: ['romanceBeat', 'romanceTone'],
     macro: ['macroDetail'],
-    seasonal: ['seasonalCue']
+    seasonal: ['seasonalCue'],
+    luxurySolidBg: ['luxurySolidBgHook', 'luxurySolidBgColor', 'luxurySolidBgSurface', 'luxurySolidBgLight'],
+    oppressiveMax: ['oppressiveMaxHook', 'oppressiveMaxScale', 'oppressiveMaxComp', 'oppressiveMaxLight']
   };
 
   const FUSION_GLUE = [
@@ -2594,6 +2649,36 @@
     ], { keepFirst: true });
   }
 
+  function buildLuxurySolidBg(ctx) {
+    const family = ctx?.family || 'neutral';
+    const finishPool = family === 'anime' ? WORDS.animeStyle : WORDS.premiumFinish;
+    return combineParts([
+      pick(WORDS.luxurySolidBgHook),
+      pick(WORDS.luxurySolidBgColor),
+      pick(WORDS.luxurySolidBgSurface),
+      pick(WORDS.premiumSubject),
+      pick(WORDS.luxurySolidBgLight),
+      pick(finishPool),
+      pickMaybe(TWIST, 0.3),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
+  function buildOppressiveMax(ctx) {
+    const family = ctx?.family || 'neutral';
+    return combineParts([
+      pick(WORDS.oppressiveMaxHook),
+      pick(WORDS.oppressiveMaxScale),
+      pick(WORDS.oppressiveMaxComp),
+      pick(WORDS.oppressiveMaxLight),
+      pick(WORDS.epicTension),
+      pick(WORDS.highTensionBeat),
+      lightPoolForCharacter(family) && pick(lightPoolForCharacter(family)),
+      pickMaybe(TWIST, 0.45),
+      ctx?.tail?.()
+    ], { keepFirst: true });
+  }
+
   const CONTENT_TEMPLATES = {
     character: { label: '人物', hint: '人像 / 半身 / 特写', build: buildCharacter },
     scene: { label: '场景', hint: '环境 / 氛围 / 建筑', build: buildScene },
@@ -2630,7 +2715,9 @@
     liminal: { label: '阈限空间', hint: '空廊 / 荧光灯 / 熟悉陌生感', build: buildLiminal },
     romance: { label: '浪漫叙事', hint: '情侣 / 柔光 / 情绪', build: buildRomance },
     macro: { label: '微距特写', hint: '材质 / 细节 / 质感', build: buildMacro },
-    seasonal: { label: '节气时令', hint: '四季 / 节日 / 东方意境', build: buildSeasonal }
+    seasonal: { label: '节气时令', hint: '四季 / 节日 / 东方意境', build: buildSeasonal },
+    luxurySolidBg: { label: '纯色高级背景', hint: '极简 / 奢侈品广告 / 无缝底色', build: buildLuxurySolidBg },
+    oppressiveMax: { label: '压迫感拉满', hint: '低机位 / 巨物 / 心理压迫', build: buildOppressiveMax }
   };
 
   const ART_STYLES = {
