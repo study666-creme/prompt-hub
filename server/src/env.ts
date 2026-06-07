@@ -16,6 +16,9 @@ export type Env = {
   /** 生图备用上游 Apimart（GrsAI 提交失败时自动切换） */
   APIMART_API_KEY?: string;
   APIMART_API_BASE_URL?: string;
+  /** 生图经济线路 ThinkAI（thinkai.tv 控制台 Token） */
+  ITHINK_API_KEY?: string;
+  ITHINK_API_BASE_URL?: string;
   /** 对话上游（DeepSeek 官方等，与生图密钥分离） */
   CHAT_API_KEY?: string;
   CHAT_API_BASE_URL?: string;

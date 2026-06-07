@@ -41,7 +41,8 @@ adminImageModelRoutes.get('/', async c => {
         models: adminModelRows(settings),
         providers: [
           { id: 'grsai', label: '常规线路', doc: 'https://grsai.com/zh/dashboard/models' },
-          { id: 'apimart', label: '备用线路', doc: 'https://api.apimart.ai' }
+          { id: 'apimart', label: '备用线路', doc: 'https://api.apimart.ai' },
+          { id: 'ithink', label: '经济线路', doc: 'https://www.thinkai.tv/console/token' }
         ],
         settingsPersisted: persisted,
         settingsTableReady: tableReady,

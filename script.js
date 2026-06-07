@@ -7790,17 +7790,38 @@
         const dl = document.getElementById('cardDownloadImageBtn');
         if (dl) dl.disabled = false;
       };
+      const bindPreviewImgHandlers = () => {
+        if (!img) return;
+        img.onload = () => {
+          if (!previewStale()) finishPreviewLoad();
+        };
+        img.onerror = () => {
+          if (previewStale()) return;
+          const thumb = selectedCardId && window.SupabaseSync?.getListDisplayImageSrc
+            ? window.SupabaseSync.getListDisplayImageSrc(imageData, selectedCardId)
+            : '';
+          if (thumb && img.src !== thumb) {
+            img.src = thumb;
+            return;
+          }
+          dropArea?.classList.add('is-loading-preview');
+        };
+      };
       const dlBtn = document.getElementById('cardDownloadImageBtn');
       if (imageData) {
         let src = '';
+        let thumbSrc = '';
+        if (selectedCardId && window.SupabaseSync?.getListDisplayImageSrc) {
+          thumbSrc = window.SupabaseSync.getListDisplayImageSrc(imageData, selectedCardId) || '';
+        }
         if (window.SupabaseSync?.getCachedDisplayUrl && window.SupabaseSync?.isStorageRef?.(imageData)) {
           src = window.SupabaseSync.getCachedDisplayUrl(imageData, {
             assetId: selectedCardId,
             variant: window.SupabaseSync.VARIANT_FULL || 'full'
           }) || '';
         }
-        if ((!src || src.includes('data:image/svg')) && selectedCardId) {
-          /* 不用列表缩略图顶替编辑区预览，避免误显示压缩图 */
+        if ((!src || src.includes('data:image/svg')) && thumbSrc) {
+          src = thumbSrc;
         }
         if (!src || src.includes('data:image/svg')) {
           const initial = cardImgInitialSrc(imageData);
@@ -7813,9 +7834,9 @@
         dropArea?.classList.toggle('is-loading-preview', waiting);
         if (dlBtn) dlBtn.disabled = waiting;
         if (previewStale()) return;
+        bindPreviewImgHandlers();
         if (src && !src.includes('data:image/svg')) {
           img.src = src;
-          finishPreviewLoad();
         } else {
           img.removeAttribute('src');
         }
@@ -7847,13 +7868,20 @@
         if (window.SupabaseSync?.resolveDisplayUrl && window.SupabaseSync?.isStorageRef?.(imageData)) {
           const url = await window.SupabaseSync.resolveDisplayUrl(imageData, {
             assetId: selectedCardId,
-            variant: window.SupabaseSync.VARIANT_FULL || 'full'
+            variant: window.SupabaseSync.VARIANT_FULL || 'full',
+            tryAllPaths: true,
+            preferFull: true
           });
           if (previewStale()) return;
           if (url && !url.startsWith('data:image/svg')) {
-            img.src = url;
+            if (img.src !== url) img.src = url;
+            finishPreviewLoad();
+          } else if (thumbSrc && img.src !== thumbSrc) {
+            img.src = thumbSrc;
             finishPreviewLoad();
           }
+        } else if (src && !src.includes('data:image/svg')) {
+          finishPreviewLoad();
         }
       } else {
         if (dlBtn) dlBtn.disabled = true;

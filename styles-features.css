@@ -4128,6 +4128,13 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
 }
 
 @media (max-width: 900px) {
+  .community-header .feature-header-grow {
+    flex: 0 0 auto;
+    flex-basis: auto;
+    min-height: 0;
+    justify-content: flex-start;
+  }
+
   .community-header .feature-search {
     flex: 0 0 auto;
     max-width: none;
@@ -4135,6 +4142,7 @@ body.efficiency-mode #creationsGrid .community-feed-image-only .card-media .card
     min-height: 0;
     padding: 0 12px;
     box-sizing: border-box;
+    display: block;
   }
 }
 

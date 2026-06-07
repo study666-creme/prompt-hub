@@ -7,6 +7,8 @@ SUPABASE_SERVICE_ROLE_KEY=PLACEHOLDER_SERVICE_ROLE_KEY
 # 生图（GrsAI / Apimart，至少填一个才能调 /api/v1/generate）
 IMAGE_API_KEY=
 # APIMART_API_KEY=
+# ITHINK_API_KEY=   # ThinkAI 经济线路（https://www.thinkai.tv/console/token）
+# ITHINK_API_BASE_URL=https://token.ithinkai.cn
 
 # 新图只写 R2（须已建桶 prompt-hub-card-images 且 wrangler deploy 绑定）
 MEDIA_STORAGE_MODE=r2

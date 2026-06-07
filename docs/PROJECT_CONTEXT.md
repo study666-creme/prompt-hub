@@ -24,27 +24,27 @@
 
 ---
 
-## 当前部署阶段（2026-06-08 · 手机体验 + 排序）
+## 当前部署阶段（2026-06-08 · ThinkAI + 手机修复）
 
 | 项 | 状态 |
 |----|------|
 | **主域名** | **https://prompt-hubs.com** · Pages `prompt-hub-hub` |
 | Worker | `prompt-hub-api` · **https://api.prompt-hubs.com** |
-| **Pages 构建号** | **`20260608k`** |
-| **手机** | 去掉生图「最近生成」横条 · 社区搜索框高度修复 · 首屏延后社区 Feed/缩略图回填 |
-| **排序** | 卡片库默认「最近更新」且 localStorage 记忆 · 生图仓库/作品默认按最近生成 |
-| **已打通** | 生图 Feed 图上下载 · 侧栏秒开 · 会员价折后/原价 + 购买复制微信 |
+| **Pages 构建号** | **`20260608l`** |
+| **ThinkAI** | 模型 `ithink-gpt-image-2-slow` · 默认 2 积分/张(1K) · 需 `ITHINK_API_KEY` |
+| **手机** | 社区顶栏留白修复 · 4K 编辑预览先缩略图再拉 full |
+| **排序** | 卡片库「最近更新」记忆 · 生图作品按最近生成 |
 
 ### 已知问题（优先）
 
-1. **R2 同步 FAIL fetch failed**：分批重跑 `sync-supabase-to-r2.mjs`。
-2. **慢模型丢图**：上游临时链约 2h；Worker quick 轮询 +「恢复丢失任务」。
+1. **ThinkAI 密钥**：在 server 执行 `npx wrangler secret put ITHINK_API_KEY`（Token 见 thinkai.tv 控制台）。
+2. **R2 同步 FAIL**：分批重跑 `sync-supabase-to-r2.mjs`。
 3. P0 带宽见 `docs/CURRENT-ISSUES.md`。
 
 ### 下一步
 
-1. 手机验收：社区搜索框、生图「作品」排序、卡片库排序切换后记忆。
-2. 继续 R2 迁移与旧图 backfill。
+1. 配置 ThinkAI 后验收慢速 GPT Image 2 生图与扣费。
+2. 手机验收社区顶栏与 4K 卡片编辑预览。
 
 ### 部署
 

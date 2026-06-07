@@ -6992,7 +6992,8 @@
     sel.innerHTML = '';
     const groups = [
       { key: 'grsai', label: '常规线路' },
-      { key: 'apimart', label: '备用线路' }
+      { key: 'apimart', label: '备用线路' },
+      { key: 'ithink', label: '经济线路' }
     ];
     groups.forEach((g) => {
       const list = imageGenModelCatalog.filter((m) => (m.provider || 'grsai') === g.key);

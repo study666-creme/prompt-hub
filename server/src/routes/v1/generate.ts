@@ -224,7 +224,7 @@ generateRoutes.get('/models', async c => {
   return c.json({
     ok: true,
     data: {
-      providers: ['grsai', 'apimart'],
+      providers: ['grsai', 'apimart', 'ithink'],
       globalDiscountPercent: settings.globalDiscountPercent,
       models: publicModelPayload(settings, profile.membership_tier, memberActive)
     }
@@ -433,6 +433,9 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
         refImageUrls: refUrls
       });
       upstreamTaskId = submitted.taskId;
+      if (submitted.immediateImageUrl) {
+        baseMeta.syncImageUrl = submitted.immediateImageUrl;
+      }
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : 'upstream_submit_failed';
       if (debited) {
@@ -470,15 +473,17 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   }
 
   if (hasAnyImageUpstream(upstream) && upstreamTaskId) {
+    const metaAfterSubmit: Record<string, unknown> = {
+      ...baseMeta,
+      upstreamTaskId,
+      debitSplit
+    };
+    if (typeof baseMeta.syncImageUrl === 'string') {
+      metaAfterSubmit.syncImageUrl = baseMeta.syncImageUrl;
+    }
     await admin
       .from('generation_requests')
-      .update({
-        meta: {
-          ...baseMeta,
-          upstreamTaskId,
-          debitSplit
-        }
-      })
+      .update({ meta: metaAfterSubmit })
       .eq('id', job.id);
   } else if (!hasAnyImageUpstream(upstream)) {
     await admin

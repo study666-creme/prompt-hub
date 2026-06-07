@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   APIMART_IMAGE_MODEL_CATALOG,
   GRSAI_IMAGE_MODEL_CATALOG,
+  ITHINK_IMAGE_MODEL_CATALOG,
   IMAGE_MODEL_CATALOG,
   getCatalogEntry,
   normalizeImageModelId,
@@ -9,11 +10,14 @@ import {
 } from './image-models-catalog';
 
 describe('image model catalog', () => {
-  it('lists grsai and apimart models separately', () => {
+  it('lists grsai, apimart and ithink models separately', () => {
     expect(GRSAI_IMAGE_MODEL_CATALOG.every((m) => m.provider === 'grsai')).toBe(true);
     expect(APIMART_IMAGE_MODEL_CATALOG.every((m) => m.provider === 'apimart')).toBe(true);
+    expect(ITHINK_IMAGE_MODEL_CATALOG.every((m) => m.provider === 'ithink')).toBe(true);
     expect(IMAGE_MODEL_CATALOG.length).toBe(
-      GRSAI_IMAGE_MODEL_CATALOG.length + APIMART_IMAGE_MODEL_CATALOG.length
+      GRSAI_IMAGE_MODEL_CATALOG.length
+        + APIMART_IMAGE_MODEL_CATALOG.length
+        + ITHINK_IMAGE_MODEL_CATALOG.length
     );
   });
 
@@ -30,5 +34,13 @@ describe('image model catalog', () => {
   it('provider labels hide vendor names', () => {
     expect(providerLabel('grsai')).toBe('常规线路');
     expect(providerLabel('apimart')).toBe('备用线路');
+    expect(providerLabel('ithink')).toBe('经济线路');
+  });
+
+  it('exposes thinkai slow gpt-image-2 model', () => {
+    const slow = getCatalogEntry('ithink-gpt-image-2-slow');
+    expect(slow?.provider).toBe('ithink');
+    expect(slow?.upstream).toBe('gpt-image-2');
+    expect(slow?.defaultCredits).toBe(2);
   });
 });

@@ -113,7 +113,7 @@ export async function pollAndUpdateJob(
     if (
       !job.result_image_url
       && taskId
-      && (upstream.grsaiKey || upstream.apimartKey)
+      && (upstream.grsaiKey || upstream.apimartKey || upstream.ithinkKey)
     ) {
       const recovered = await tryRecoverJobFromUpstream(
         admin,
@@ -215,7 +215,7 @@ export async function pollAndUpdateJob(
         refunded: !!(job.meta as Record<string, unknown>)?.refunded
       };
     }
-    if (taskId && (upstream.grsaiKey || upstream.apimartKey)) {
+    if (taskId && (upstream.grsaiKey || upstream.apimartKey || upstream.ithinkKey)) {
       const recovered = await tryRecoverJobFromUpstream(
         admin,
         userId,
@@ -241,7 +241,7 @@ export async function pollAndUpdateJob(
     upstreamModel.includes('nano-banana') || upstreamModel.includes('jimeng');
   const staleMs = slowUpstream ? 40 * 60 * 1000 : 22 * 60 * 1000;
 
-  if (!upstream.grsaiKey && !upstream.apimartKey) {
+  if (!upstream.grsaiKey && !upstream.apimartKey && !upstream.ithinkKey) {
     await admin
       .from('generation_requests')
       .update({
@@ -250,6 +250,14 @@ export async function pollAndUpdateJob(
       })
       .eq('id', job.id);
     return { status: 'completed', imageUrl: null, errorMessage: null, refunded: false };
+  }
+
+  const syncImageUrl =
+    typeof meta.syncImageUrl === 'string' && /^https?:\/\//i.test(meta.syncImageUrl)
+      ? meta.syncImageUrl
+      : null;
+  if (syncImageUrl && job.status === 'processing') {
+    return completeJobFromPoll(admin, userId, job, { imageUrl: syncImageUrl }, env);
   }
 
   if (!taskId) {

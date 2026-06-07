@@ -1252,7 +1252,16 @@
   }
 
   #pageCommunity .feature-header-grow {
+    flex: 0 0 auto;
+    flex-basis: auto;
+    min-height: 0;
     gap: 6px;
+  }
+
+  #pageCommunity .community-header .feature-header-grow {
+    flex: 0 0 auto;
+    flex-basis: auto;
+    justify-content: flex-start;
   }
 
   #pageCommunity .feature-header-grow .feature-tabs {
@@ -1284,9 +1293,15 @@
     height: 36px;
     padding: 0 12px;
     font-size: 14px;
-    line-height: 36px;
+    line-height: normal;
     box-sizing: border-box;
-    order: 0;
+    display: block;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
   }
 
   #pageCommunity .community-inline-hint.mobile-only {

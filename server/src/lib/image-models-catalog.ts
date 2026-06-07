@@ -1,4 +1,4 @@
-export type ImageModelProvider = 'grsai' | 'apimart';
+export type ImageModelProvider = 'grsai' | 'apimart' | 'ithink';
 
 export type ImageModelCatalogEntry = {
   id: string;
@@ -184,6 +184,24 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
   }
 ]);
 
+/** ThinkAI（thinkai.tv / token.ithinkai.cn）慢速经济线路 */
+export const ITHINK_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider('ithink', [
+  {
+    id: 'ithink-gpt-image-2-slow',
+    upstream: 'gpt-image-2',
+    label: 'GPT Image 2 · 慢速',
+    group: 'classic',
+    description: 'ThinkAI 慢速线路 · 上游约 2 分/张',
+    upstreamPoints: 2,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k', '4k'],
+    pricingByResolution: true,
+    defaultCreditsByResolution: { '1k': 2, '2k': 3, '4k': 5 },
+    defaultCredits: 2,
+    sortOrder: 103
+  }
+]);
+
 /** Apimart 备用线路 */
 export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider('apimart', [
   {
@@ -219,11 +237,14 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
 /** 全站模型目录（GrsAI + Apimart 并列，后台可分别定价） */
 export const IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   ...GRSAI_IMAGE_MODEL_CATALOG,
-  ...APIMART_IMAGE_MODEL_CATALOG
+  ...APIMART_IMAGE_MODEL_CATALOG,
+  ...ITHINK_IMAGE_MODEL_CATALOG
 ];
 
 export function providerLabel(provider: ImageModelProvider): string {
-  return provider === 'apimart' ? '备用线路' : '常规线路';
+  if (provider === 'apimart') return '备用线路';
+  if (provider === 'ithink') return '经济线路';
+  return '常规线路';
 }
 
 const LEGACY_MODEL_MAP: Record<string, string> = {
@@ -236,7 +257,7 @@ export function normalizeImageModelId(raw?: string | null): string {
     .trim()
     .toLowerCase();
   if (!id) return 'gpt-image-2';
-  if (id.startsWith('apimart-')) return id;
+  if (id.startsWith('apimart-') || id.startsWith('ithink-')) return id;
   if (id in LEGACY_MODEL_MAP) return LEGACY_MODEL_MAP[id];
   return id;
 }
