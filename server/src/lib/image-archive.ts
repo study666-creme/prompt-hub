@@ -44,6 +44,27 @@ export function storagePathFromRef(ref: string): string | null {
   return null;
 }
 
+function parseDataImageUrl(dataUrl: string): { mime: string; bytes: ArrayBuffer } | null {
+  const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/i);
+  if (!m) return null;
+  const binary = atob(m[2]);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return { mime: m[1] || 'image/png', bytes: bytes.buffer };
+}
+
+export function extensionFromImageMime(mime: string): string {
+  const m = String(mime || '').toLowerCase();
+  if (m.includes('png')) return 'png';
+  if (m.includes('webp')) return 'webp';
+  if (m.includes('jpeg') || m.includes('jpg')) return 'jpg';
+  return 'jpg';
+}
+
+export function generatedArchivePath(userId: string, jobId: string, mime: string): string {
+  return `${userId}/generated/${jobId}.${extensionFromImageMime(mime)}`;
+}
+
 async function verifyStoredObject(
   admin: SupabaseClient,
   path: string,
@@ -53,7 +74,7 @@ async function verifyStoredObject(
   return storageObjectExistsLight(admin, path, BUCKET);
 }
 
-/** 将上游临时 URL 拉取并写入用户私有桶，返回 storage:// 引用（含校验与重试） */
+/** 将上游临时 URL 或 data URL 拉取并写入用户私有桶，返回 storage:// 引用（含校验与重试） */
 export async function archiveRemoteImage(
   admin: SupabaseClient,
   userId: string,
@@ -68,34 +89,45 @@ export async function archiveRemoteImage(
   }
 
   const maxAttempts = Math.max(1, opts?.maxAttempts ?? 3);
-  const path = `${userId}/generated/${jobId}.jpg`;
   let lastErr: unknown = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const res = await fetch(remoteUrl, {
-        headers: { Accept: 'image/*' }
-      });
-      if (!res.ok) {
-        throw new Error(`fetch_image_failed_${res.status}`);
-      }
-      const contentType = res.headers.get('content-type') || 'image/jpeg';
-      const mime = contentType.split(';')[0] || 'image/jpeg';
-
-      if (env && hasR2(env) && res.body) {
-        const mode = mediaStorageMode(env);
-        const streamed = await uploadToR2(env, path, res.body, mime);
-        if (!streamed) throw new Error('r2_stream_upload_failed');
-        if (mode === 'r2' || mode === 'r2-first') {
-          if (await verifyStoredObject(admin, path, env)) {
-            return toStorageRef(path);
-          }
-          throw new Error('archive_verify_failed');
+      let buf: ArrayBuffer;
+      let mime = 'image/jpeg';
+      if (/^data:image\//i.test(remoteUrl)) {
+        const parsed = parseDataImageUrl(remoteUrl);
+        if (!parsed) throw new Error('invalid_data_url');
+        buf = parsed.bytes;
+        mime = parsed.mime;
+      } else {
+        const res = await fetch(remoteUrl, {
+          headers: { Accept: 'image/*' }
+        });
+        if (!res.ok) {
+          throw new Error(`fetch_image_failed_${res.status}`);
         }
-      }
+        const contentType = res.headers.get('content-type') || 'image/jpeg';
+        mime = contentType.split(';')[0] || 'image/jpeg';
+        const path = generatedArchivePath(userId, jobId, mime);
 
-      const buf = await res.arrayBuffer();
+        if (env && hasR2(env) && res.body) {
+          const mode = mediaStorageMode(env);
+          const streamed = await uploadToR2(env, path, res.body, mime);
+          if (!streamed) throw new Error('r2_stream_upload_failed');
+          if (mode === 'r2' || mode === 'r2-first') {
+            if (await verifyStoredObject(admin, path, env)) {
+              return toStorageRef(path);
+            }
+            throw new Error('archive_verify_failed');
+          }
+        }
+
+        buf = await res.arrayBuffer();
+      }
       if (!buf.byteLength) throw new Error('empty_image');
+
+      const path = generatedArchivePath(userId, jobId, mime);
 
       if (env) {
         await uploadCardImage(env, path, buf, mime);

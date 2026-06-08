@@ -29,6 +29,12 @@ function apiBase(envBase?: string): string {
   return (envBase || 'https://token.ithinkai.cn').replace(/\/$/, '');
 }
 
+function normalizeIthinkApiKey(raw: string): string {
+  let key = String(raw || '').trim();
+  if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, '').trim();
+  return key;
+}
+
 function mapIthinkPixelSize(sizeLabel?: string): string {
   const ratio = String(sizeLabel || '1:1').trim() || '1:1';
   return SIZE_MAP_1K[ratio] || SIZE_MAP_1K['1:1'];
@@ -82,6 +88,10 @@ export async function submitIthinkImageJob(
   baseUrl: string | undefined,
   params: SubmitParams
 ): Promise<IthinkSubmitResult> {
+  const token = normalizeIthinkApiKey(apiKey);
+  if (!token) {
+    throw new ApiError(502, 'UPSTREAM_FAILED', 'ThinkAI 未配置有效令牌（ITHINK_API_KEY）');
+  }
   const model = params.upstreamModel.trim() || 'gpt-image-2';
   const body: Record<string, unknown> = {
     model,
@@ -97,14 +107,20 @@ export async function submitIthinkImageJob(
   }
 
   const url = `${apiBase(baseUrl)}/v1/images/generations`;
-  const res = await fetch(url, {
+  const doFetch = async () => fetch(url, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(body)
   });
+
+  let res = await doFetch();
+  if (!res.ok && (res.status === 502 || res.status === 503 || res.status === 504)) {
+    await new Promise((r) => setTimeout(r, 1200));
+    res = await doFetch();
+  }
 
   const text = await res.text();
   let json: unknown = null;
@@ -116,9 +132,12 @@ export async function submitIthinkImageJob(
 
   if (!res.ok) {
     const msg = extractUpstreamError(json, text || `HTTP ${res.status}`);
-    const hint = /model|不存在|not found|invalid/i.test(msg)
-      ? `（模型「${model}」可能不对，请在 ThinkAI 模型广场核对 ID，或设置 ITHINK_UPSTREAM_MODEL）`
-      : '';
+    let hint = '';
+    if (res.status === 401 || /无效.*令牌|invalid.*token|unauthorized/i.test(msg)) {
+      hint = '（请在 thinkai.tv 控制台复制 sk- 令牌，并勾选含 gpt-image-2 的分组后写入 Worker 密钥 ITHINK_API_KEY）';
+    } else if (/model|不存在|not found|invalid/i.test(msg)) {
+      hint = `（模型「${model}」可能不对，请在 ThinkAI 模型广场核对 ID，或设置 ITHINK_UPSTREAM_MODEL）`;
+    }
     throw new ApiError(502, 'UPSTREAM_FAILED', `${msg}${hint}`.slice(0, 480));
   }
 

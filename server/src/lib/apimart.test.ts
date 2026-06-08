@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { extractAllImageUrls } from './apimart';
+import { extractAllImageUrls, isApimartContentViolationMessage } from './apimart';
+
+describe('isApimartContentViolationMessage', () => {
+  it('detects Apimart prohibited content message', () => {
+    expect(
+      isApimartContentViolationMessage(
+        'Please try a new call. Your current call may be flagged as containing prohibited words or images.'
+      )
+    ).toBe(true);
+  });
+});
 
 describe('extractAllImageUrls', () => {
   it('collects every url in Apimart result.images[].url[]', () => {

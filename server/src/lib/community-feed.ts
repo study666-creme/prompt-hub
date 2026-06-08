@@ -320,7 +320,7 @@ export async function listPublicCommunityFeed(
       'id, author_id, author_name, title, prompt, image, likes, source_card_id, published, created_at, updated_at'
     )
     .eq('published', true)
-    .order('created_at', { ascending: false })
+    .order('updated_at', { ascending: false })
     .range(0, windowEnd - 1);
 
   if (error) throw error;

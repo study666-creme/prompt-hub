@@ -21,6 +21,11 @@ export type Env = {
   ITHINK_API_BASE_URL?: string;
   /** 可选：覆盖 ThinkAI 上游 model 字段（模型广场里的 ID，默认 gpt-image-2） */
   ITHINK_UPSTREAM_MODEL?: string;
+  /** 生图木瓜AI线路（api.mooko.ai 控制台 Token） */
+  MOOKO_API_KEY?: string;
+  MOOKO_API_BASE_URL?: string;
+  /** 木瓜慢速线同时 POST 上限（默认 8，最大 16） */
+  MOOKO_MAX_CONCURRENT_SUBMITS?: string;
   /** 对话上游（DeepSeek 官方等，与生图密钥分离） */
   CHAT_API_KEY?: string;
   CHAT_API_BASE_URL?: string;

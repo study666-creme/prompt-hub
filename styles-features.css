@@ -1055,6 +1055,32 @@
   margin-bottom: 4px;
 }
 
+.imagegen-model-family-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.imagegen-model-family-tab {
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-card) 82%, transparent);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s, box-shadow 0.2s, border-color 0.2s;
+}
+
+.imagegen-model-family-tab.active {
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border-color: color-mix(in srgb, #38bdf8 35%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, #38bdf8 18%, transparent);
+}
+
 .imagegen-field-compact,
 .imagegen-form .imagegen-field-compact {
   font-size: 12px;
@@ -2905,6 +2931,18 @@
 .imagegen-feed-media-dl:hover {
   background: rgba(0, 0, 0, 0.78);
   transform: translateY(-1px);
+}
+
+.imagegen-feed-media-dl.is-downloading,
+.imagegen-preview-dl-btn.is-downloading,
+.lightbox-download-btn.is-downloading {
+  opacity: 0.92;
+  cursor: wait;
+  pointer-events: auto;
+}
+
+.imagegen-feed-media-dl.is-downloading {
+  background: rgba(40, 90, 200, 0.75);
 }
 
 .imagegen-feed-title {

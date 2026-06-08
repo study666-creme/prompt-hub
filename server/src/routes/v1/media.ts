@@ -159,7 +159,8 @@ export async function communityMediaSignBatchHandler(c: Context<{ Bindings: Env 
   });
 }
 
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+/** 与 Supabase card-images 桶上限一致（50MB）；4K 原图经 Worker 写入 R2 */
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 /** 卡片图上传 → R2（MEDIA_STORAGE_MODE=r2 时不写 Supabase/阿里云 Storage） */
 mediaRoutes.post('/upload', async c => {
@@ -175,7 +176,7 @@ mediaRoutes.post('/upload', async c => {
     throw new ApiError(400, 'VALIDATION_ERROR', '图片数据无效或过小');
   }
   if (body.byteLength > MAX_UPLOAD_BYTES) {
-    throw new ApiError(400, 'VALIDATION_ERROR', '图片过大（最大 8MB）');
+    throw new ApiError(400, 'VALIDATION_ERROR', '图片过大（最大 50MB）');
   }
 
   const contentType = (c.req.header('content-type') || 'image/jpeg').split(';')[0].trim();
@@ -283,16 +284,31 @@ const ALLOWED_FETCH_HOSTS = [
   'memfiredb.com',
   'baseaf.memfiredb.com',
   'api.prompt-hub.cn',
-  'prompt-hub.cn'
+  'prompt-hub.cn',
+  'api.prompt-hubs.com',
+  'prompt-hubs.com',
+  'grsai.com',
+  'api.grsai.com',
+  'aitohumanize.com',
+  'oaiusercontent.com',
+  'openai.com',
+  'blob.core.windows.net'
 ];
 
 function isAllowedRemoteUrl(url: string): boolean {
   try {
     const u = new URL(url);
     if (u.protocol !== 'https:') return false;
-    return ALLOWED_FETCH_HOSTS.some(
+    if (ALLOWED_FETCH_HOSTS.some(
       h => u.hostname === h || u.hostname.endsWith('.' + h)
-    );
+    )) {
+      return true;
+    }
+    // Grs / 第三方生图 CDN 子域较多，仅放行常见图片后缀路径
+    if (/\.(aitohumanize|grsai|filesystem\.site|oaiusercontent)\./i.test(u.hostname)) {
+      return true;
+    }
+    return /\.(jpe?g|png|webp|gif)(\?|$)/i.test(u.pathname);
   } catch {
     return false;
   }

@@ -212,11 +212,16 @@
       const batchTag = d().batchIndexLabel?.(job.batchIndex, job.batchTotal);
       if (batchTag) badges.unshift(batchTag);
       const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${d().esc?.(b)}</span>`).join('');
-      const recovering = job.recovering === true;
+      const slow = d().isSlowGenProviderModel?.(job.model);
+      const recovering = job.recovering === true && !(slow && job.pendingNote);
       const pendingLabel = recovering ? '恢复中' : '生成中';
-      const meta = recovering
-        ? (job.recoverNote || '上游可能已出图，后台同步中…').slice(0, 48)
-        : '预计 1–3 分钟 · 可继续提交';
+      const meta = job.pendingNote
+        ? String(job.pendingNote).slice(0, 48)
+        : recovering
+          ? (job.recoverNote || '上游可能已出图，后台同步中…').slice(0, 48)
+          : slow
+            ? '慢速线 · 约 1–8 分钟 · 已提交'
+            : '预计 1–3 分钟 · 可继续提交';
       const dismissBtn = '<button type="button" class="btn btn-ghost btn-sm imagegen-feed-del" data-pending-dismiss title="关闭生成占位（不删已入库的图）">×</button>';
       return `<article class="imagegen-feed-card imagegen-feed-card-tile imagegen-feed-card--pending${recovering ? ' imagegen-feed-card--recovering' : ''}" data-feed-id="${d().esc?.(job.id)}" data-pending="1"${job.jobId ? ` data-job-id="${d().esc?.(job.jobId)}"` : ''}>
         <div class="imagegen-feed-media imagegen-gen-pending" aria-busy="true" aria-label="${d().esc?.(pendingLabel)}">
@@ -671,7 +676,7 @@
           btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const img = card.querySelector('.imagegen-feed-media img');
-            void d().downloadImageGenFeedItem?.(feedKind, feedItemId, img);
+            void d().downloadImageGenFeedItem?.(feedKind, feedItemId, img, btn);
           });
         });
         card.addEventListener('click', e => {

@@ -135,7 +135,7 @@
   let lastCommunityPostsSyncAt = 0;
   const COMMUNITY_POSTS_SYNC_GAP_MS = 120000;
   const PUBLIC_FEED_TTL_MS = 120_000;
-  const PUBLIC_FEED_CACHE_VERSION = 6;
+  const PUBLIC_FEED_CACHE_VERSION = 7;
   /** 首屏可渲染的最少帖数（一页）；其余后台拉完再增量追加 */
   const PUBLIC_FEED_MIN_READY = FEED_PER_PAGE;
   const LS_PUBLIC_FEED_CACHE = 'promptrepo_public_feed_cache';
@@ -302,10 +302,8 @@
   function isUsableCommunityImage(image, opts = {}) {
     if (!image || !isDisplayableImage(image)) return false;
     if (window.SupabaseSync?.isInvalidMediaUrl?.(image)) return false;
-    if (!opts.feedList) {
-      const path = window.SupabaseSync?.storagePathFromRef?.(image);
-      if (path && window.SupabaseSync?.isPathKnownMissing?.(path)) return false;
-    }
+    const path = window.SupabaseSync?.storagePathFromRef?.(image);
+    if (path && window.SupabaseSync?.isPathKnownMissing?.(path)) return false;
     return true;
   }
 
@@ -883,7 +881,7 @@
         const p = normalizeFeedPost(raw);
         if (p) merged.set(String(p.id), p);
       }
-      publicFeedPosts = [...merged.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      publicFeedPosts = sortPostsByActivity([...merged.values()]);
       const nextOff = Number(lastFeedRes?.data?.nextOffset);
       offset = Number.isFinite(nextOff) && nextOff > offset ? nextOff : offset + batch.length;
       publicFeedApiOffset = offset;
@@ -895,7 +893,7 @@
       if (!publicFeedRemoteHasMore || batch.length < pageSize) break;
     }
     if (merged.size) publicFeedRemoteHasMore = false;
-    return [...merged.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    return sortPostsByActivity([...merged.values()]);
   }
 
   async function refreshPublicCommunityFeed(opts = {}) {
@@ -911,7 +909,7 @@
       const fetched = await fetchAllPublicCommunityFeedPages(opts.timeoutMs || 20000);
       if (!fetched?.length) {
         const cached = loadPublicFeedCache();
-        if (cached?.posts?.length) {
+        if (cached?.posts?.length && publicFeedAt === 0) {
           const cachedSig = cached.posts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
           if (cachedSig !== prevPubSig) {
             publicFeedPosts = cached.posts.map(normalizeFeedPost).filter(Boolean);
@@ -945,10 +943,9 @@
       return nextPubSig !== prevPubSig;
     } catch (e) {
       console.warn('[community] public feed failed', e);
+      if (publicFeedAt > 0 && Date.now() - publicFeedAt < 5 * 60 * 1000) return false;
       const cached = loadPublicFeedCache();
-      if (cached?.posts?.length) {
-        const cachedSig = cached.posts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
-        if (cachedSig === prevPubSig) return false;
+      if (cached?.posts?.length && !publicFeedPosts.length) {
         publicFeedPosts = cached.posts.map(normalizeFeedPost).filter(Boolean);
         publicFeedAt = cached.cachedAt || Date.now();
         publicFeedApiOffset = Math.max(publicFeedApiOffset, publicFeedPosts.length);
@@ -1091,7 +1088,7 @@
             quick: true,
             noDownload: true
           });
-          if (!ok) p.image = '';
+          if (!ok) p._syncSkip = true;
         } catch (e) { /* ignore */ }
       }
       if (mine.length) {
@@ -1100,8 +1097,9 @@
       }
       try {
         const payload = mine
+          .filter((p) => !p._syncSkip)
           .map(postForPublicApi)
-          .filter((p) => p?.id && String(p.prompt || '').trim().length >= 1);
+          .filter((p) => p?.id && String(p.prompt || '').trim().length >= 1 && isDisplayableImage(p.image));
         let synced = 0;
         let lastFail = null;
         for (let i = 0; i < payload.length; i += COMMUNITY_SYNC_BATCH_MAX) {
@@ -1212,6 +1210,7 @@
     const draft = {
       prompt: String(meta.prompt || '').slice(0, 8000),
       model: meta.model,
+      modelFamily: imageGenModelFamily,
       refImages: compactRefsForDraft(meta.refImages),
       refImage: compactRefsForDraft([meta.refImage])[0] || null,
       resolution: meta.resolution,
@@ -1837,6 +1836,38 @@
     return reconcileCommunityWithCards(list, opts);
   }
 
+  function postActivityTs(p) {
+    return Math.max(p?.updatedAt || 0, p?.createdAt || 0);
+  }
+
+  function sortPostsByActivity(list) {
+    return [...(list || [])].sort((a, b) => postActivityTs(b) - postActivityTs(a));
+  }
+
+  function enrichPostsWithLocalTimestamps(posts) {
+    const localByCard = new Map();
+    for (const p of buildPostsFromPublishedCards()) {
+      if (p?.sourceCardId) localByCard.set(String(p.sourceCardId), p);
+    }
+    for (const p of communityPosts) {
+      if (!p?.sourceCardId) continue;
+      const key = String(p.sourceCardId);
+      const prev = localByCard.get(key);
+      const ts = postActivityTs(p);
+      if (!prev || ts >= postActivityTs(prev)) localByCard.set(key, p);
+    }
+    return (posts || []).map((p) => {
+      if (!p?.sourceCardId) return p;
+      const local = localByCard.get(String(p.sourceCardId));
+      if (!local) return p;
+      const next = {
+        ...p,
+        updatedAt: Math.max(p.updatedAt || 0, local.updatedAt || 0, local.createdAt || 0)
+      };
+      if (local.image && isUsableCommunityImage(local.image)) next.image = local.image;
+      return next;
+    });
+  }
   function enrichPostsWithPublicFeedImages(posts) {
     const pubById = new Map();
     const pubByCard = new Map();
@@ -1905,10 +1936,12 @@
       if (p.sourceCardId && pubCards.has(String(p.sourceCardId))) return false;
       return true;
     });
-    return enrichPostsWithPublicFeedImages(
-      filterCommunityPostsForDisplay(
-        mergePostsLists(pub, pending),
-        { skipCardTombstones: true, skipPostTombstones: true }
+    return enrichPostsWithLocalTimestamps(
+      enrichPostsWithPublicFeedImages(
+        filterCommunityPostsForDisplay(
+          mergePostsLists(pub, pending),
+          { skipCardTombstones: true, skipPostTombstones: true }
+        )
       )
     );
   }
@@ -2673,7 +2706,7 @@
   }
 
   function communityLikeCountText(count) {
-    return `赞 ${count || 0}`;
+    return `获赞 ${count || 0}`;
   }
 
   function patchFeedLikeLabels(container, posts) {
@@ -2895,6 +2928,7 @@
       isGenericPostTitle,
       isGenericFeedTitle,
       imageGenModelLabel,
+      isSlowGenProviderModel,
       formatTime,
       failedJobModelLabel,
       friendlyGenErrorMessage,
@@ -3936,7 +3970,7 @@
       filtered = filtered.filter(p => follows.has(String(p.authorId)));
     }
     if (communitySort === 'new') {
-      filtered.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      filtered.sort((a, b) => postActivityTs(b) - postActivityTs(a));
     } else if (communitySort === 'hot') {
       filtered.sort((a, b) => (b.likes || 0) - (a.likes || 0));
     } else {
@@ -4303,6 +4337,9 @@
       rebuildOwnPostFilterCache();
       invalidateCommunityReconcileCache();
       await pushPostToPublicFeed(post);
+      void syncMyPostsToPublicFeed().then(() =>
+        refreshPublicCommunityFeed({ force: true, timeoutMs: 15000 })
+      );
     }
     if (!silent && opts.skipRender !== true) {
       renderCommunity({ skipFeedFetch: true });
@@ -4781,11 +4818,23 @@
         <button type="button" class="btn btn-secondary" data-action="fav">${faved ? '已收藏' : '收藏'}</button>
         <button type="button" class="btn btn-primary" data-action="remix">制作同款</button>
       </div>
-      <p class="panel-hint">仅点「点赞」会记录赞；复制、收藏、制作同款不会自动点赞</p>`;
-    body.querySelector('[data-action="like"]')?.addEventListener('click', () => likeCommunityPostOnly(id));
-    body.querySelector('[data-action="copy"]')?.addEventListener('click', () => copyPostPrompt(post));
-    body.querySelector('[data-action="fav"]')?.addEventListener('click', () => favoritePost(id, post));
-    body.querySelector('[data-action="remix"]')?.addEventListener('click', () => remixToImageGen(post));
+      <p class="panel-hint">复制、收藏、制作同款会默认为作者点赞（每个作品仅计一次）</p>`;
+    body.querySelector('[data-action="like"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      likeCommunityPostOnly(id);
+    });
+    body.querySelector('[data-action="copy"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      copyPostPrompt(post);
+    });
+    body.querySelector('[data-action="fav"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      favoritePost(id, post);
+    });
+    body.querySelector('[data-action="remix"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      remixToImageGen(post);
+    });
     bindCommunitySideImageZoom(body, post, sideRef, id);
     const authorBtn = body.querySelector('.community-detail-author-btn');
     if (authorBtn) bindAuthorLink(authorBtn, post.authorId, post.authorName);
@@ -5183,11 +5232,19 @@
   }
 
   function copyPostPrompt(post) {
-    copyPostPromptOnly(post);
+    if (!post) return;
+    if (!window.AuthGate?.requireAuth?.('copy')) return;
+    const wasNew = ensureLike(post.id);
+    const text = post?.prompt || '';
+    if (!text) { toast('暂无提示词'); return; }
+    navigator.clipboard.writeText(text).then(() => {
+      toast(wasNew ? '已复制，已为作者点赞' : '已复制提示词');
+    });
   }
 
   function favoritePost(id, post) {
     if (!window.AuthGate?.requireAuth?.('community')) return;
+    ensureLike(id);
     if (favIds.has(id)) {
       toast('已在卡片库中');
       if (communitySidePostId === id) patchCommunitySidePanelUI(id);
@@ -5237,7 +5294,7 @@
       b.classList.toggle('active', b.dataset.feedTab === 'community');
     });
     updateImageGenFeedHint();
-    fillFromCommunityPost(post, false);
+    fillFromCommunityPost(post, true);
   }
 
   function saveGeneratedToWarehouse(opts) {
@@ -5251,6 +5308,10 @@
       sourceId: opts.sourceId,
       jobId: opts.jobId || null,
       title: opts.title,
+      resolution: opts.resolution || null,
+      model: opts.model || null,
+      quality: opts.quality || null,
+      size: opts.size || null,
       publishToCommunity: !!opts.publishToCommunity,
       fromInspirationDraw: !!opts.fromInspirationDraw,
       silentToast: !!opts.silentToast
@@ -5308,6 +5369,7 @@
         return age < 15 * 60 * 1000;
       });
       if (imageGenPendingJobs.length !== before) persistPendingGenJobs();
+      purgeExpiredGenPendingJobs();
       prunePendingJobsWithWarehouseCards();
     } catch (e) {
       imageGenPendingJobs = [];
@@ -5349,6 +5411,23 @@
   }
 
   /** 将上游/接口原始错误转为用户可读说明（批量失败卡片与 toast 共用） */
+  function stringifyGenErrorRaw(errRaw) {
+    if (errRaw == null) return '';
+    if (typeof errRaw === 'string') return errRaw.trim();
+    if (typeof errRaw === 'object') {
+      const o = errRaw;
+      if (typeof o.message === 'string') return o.message.trim();
+      if (o.message != null) return String(o.message).trim();
+      if (typeof o.error === 'string') return o.error.trim();
+      try {
+        return JSON.stringify(o);
+      } catch (e) {
+        return String(o);
+      }
+    }
+    return String(errRaw).trim();
+  }
+
   function isStaleConfigError(msg) {
     return /积分小数|apply_credit_delta|SQL 编辑器|扣费函数|SERVER_CONFIG|decimal/i.test(String(msg || ''));
   }
@@ -5360,31 +5439,81 @@
 
   /** 上游可能仍出图 / 服务端可恢复：此时不要立刻标红「生成失败」 */
   function isLikelyRecoverableGenFailure(errRaw, ctx) {
-    const s = String(errRaw || '');
+    const s = stringifyGenErrorRaw(errRaw);
     if (!s) return true;
+    const model = String(ctx?.model || '').toLowerCase();
+    if (model.includes('ithink') && /UPSTREAM_FAILED|upstream_failed|502|ThinkAI|无效.*令牌/i.test(s)) {
+      return false;
+    }
+    if (/upstream_content_violation|违规不返还|violation/i.test(s)) return false;
+    if (/prohibited words or images|prohibited|flagged as containing/i.test(s)) return false;
     if (isStaleConfigError(s)) return true;
-    if (/debit_failed|upstream_no_image|missing_task_id|upstream_submit|upstream_failed/i.test(s)) return true;
+    if (/error code:\s*524|\b524\b|请求失败 \(524\)/i.test(s)) return true;
+    if (/debit_failed|upstream_no_image|missing_task_id|upstream_submit/i.test(s)) return true;
+    if (/upstream_failed/i.test(s)) {
+      const id = normalizeImageGenModelId(ctx?.model);
+      if (id.startsWith('apimart-')) return false;
+      if (/timeout|524|upstream_timeout|排队/i.test(s)) return isLongRunningGenJob(ctx);
+      return isLongRunningGenJob(ctx);
+    }
     if (/不存在该模型|model.*not.*exist|GrsAI 未返回任务 ID/i.test(s)) return true;
-    if (/upstream_timeout/i.test(s) && isSlowUpstreamGenModel(ctx?.model)) return true;
-    if (/NETWORK_ERROR|API_UNREACHABLE|无法连接 api\.prompt-hub/i.test(s)) return true;
+    if (/upstream_timeout/i.test(s) && isLongRunningGenJob(ctx)) return true;
+    if (/NETWORK_ERROR|API_UNREACHABLE|无法连接 api\.prompt-hub|连接.*超时|Failed to fetch/i.test(s)) {
+      return true;
+    }
     return false;
+  }
+
+  function purgeExpiredGenPendingJobs() {
+    const now = Date.now();
+    const before = imageGenPendingJobs.length;
+    imageGenPendingJobs = imageGenPendingJobs.filter((p) => {
+      const age = now - (p.startedAt || 0);
+      if (!p.jobId) return age < 15 * 60 * 1000;
+      return age < RECENT_GEN_RECOVER_MS;
+    });
+    if (imageGenPendingJobs.length !== before) persistPendingGenJobs();
+  }
+
+  function abandonUnrecoverablePendingJob(pending, reason, opts = {}) {
+    if (!pending) return;
+    if (pending.jobId) {
+      window.recordGenerationJobDeletion?.(pending.jobId);
+      clearSessionGenJob(pending.jobId);
+    }
+    removePendingJob(pending.id);
+    persistPendingGenJobs();
+    if (opts.toast !== false && reason) toast(reason, 5000);
+    renderImageGenFeed({ preserveScroll: true });
   }
 
   function deferPendingJobRecovery(pendingId, ctx, note) {
     const job = imageGenPendingJobs.find((j) => j.id === pendingId);
-    if (job) {
+    if (!job) return;
+    const age = Date.now() - (job.startedAt || 0);
+    if (age >= RECENT_GEN_RECOVER_MS) {
+      abandonUnrecoverablePendingJob(
+        job,
+        '上游临时链接约 2 小时有效，该任务已过期，无法恢复（积分若已扣请查消费记录）'
+      );
+      return;
+    }
+    if (isSlowGenProviderModel(job.model)) {
+      job.recovering = false;
+      job.recoverNote = '';
+      job.pendingNote = note || '慢速线仍在后台等待（请勿重复提交）';
+    } else {
       job.recovering = true;
       job.recoverNote = note || '上游可能仍在出图，后台继续恢复…';
-      persistPendingGenJobs();
     }
-    toast(note || '仍在恢复生图结果，请稍候…', 4500);
+    persistPendingGenJobs();
     void resumePendingGenerationJobs();
     renderImageGenFeed({ preserveScroll: true });
   }
 
   function friendlyGenErrorMessage(msg) {
-    const s = String(msg || '').trim();
-    if (!s) return '生图失败，积分已全额退回';
+    const s = stringifyGenErrorRaw(msg);
+    if (!s || s === '[object Object]') return '生图失败，积分已全额退回';
     if (isStaleConfigError(s)) {
       return '扣费曾异常，正在从服务器恢复已完成任务；若仍未出图请点「重试」';
     }
@@ -5397,14 +5526,26 @@
     if (/apikey|api.key|invalid.*api.*key/i.test(s)) {
       return '生图接口密钥异常，请联系站长；您的积分已全额退回';
     }
+    if (/error code:\s*524|\b524\b/.test(s)) {
+      return '连接超时（524），任务可能已提交；请强刷页面查看是否在生成中';
+    }
     if (/upstream_timeout|timeout/i.test(s)) {
       return '生图排队超时（约 12 分钟），积分已全额退回，可点「重试」';
     }
     if (/upstream_no_image|no_image/i.test(s)) {
       return '上游未返回图片，积分已全额退回，可点「重试」';
     }
+    if (/upstream_submit_not_started/i.test(s)) {
+      return '慢速线未能连接上游（木瓜控制台无记录），积分已退回，请换 GrsAI 或重试';
+    }
+    if (/upstream_submit_stale/i.test(s)) {
+      return '慢速线上游长时间无响应（木瓜可能已扣费），站内积分已退回；建议换 GrsAI 线路';
+    }
     if (/missing_task_id/i.test(s)) {
       return '任务提交异常，积分已全额退回，请重试';
+    }
+    if (/upstream_content_violation|prohibited words or images|prohibited|flagged as containing/i.test(s)) {
+      return '提示词触发 Apimart 内容审核（含禁用词/图），请改描述后重试；积分已全额退回';
     }
     if (/upstream_content_violation/i.test(s)) {
       return '提示词触发内容审核，积分已全额退回，请调整描述后重试';
@@ -5482,7 +5623,8 @@
       const job = findBestApiJobForPrompt(r.data.jobs, prompt, model, {
         minCreatedAt: pendingJob.startedAt || Date.now(),
         usedJobIds,
-        preferProcessing: true
+        preferProcessing: true,
+        resolution: pendingJob.resolution
       });
       if (job?.id) {
         const t = Date.parse(job.createdAt);
@@ -5512,7 +5654,7 @@
         batchTotal: job.batchTotal,
         batchId: job.batchId,
         fromInspirationDraw: !!job.fromInspirationDraw,
-        errorMessage
+        errorMessage: stringifyGenErrorRaw(errorMessage)
       });
     }
     removePendingJob(pendingId);
@@ -5555,12 +5697,34 @@
     return needsApiImageRecovery(job.id, job.imageUrl);
   }
 
+  function warehouseCardImageNeedsRecovery(card, apiImageUrl) {
+    if (!apiImageUrl) return false;
+    if (!card?.image || !isDisplayableImage(card.image)) return true;
+    if (/^https?:\/\//i.test(card.image)) return true;
+    if (window.SupabaseSync?.isDataUrl?.(card.image)) return true;
+    if (window.SupabaseSync?.isStorageRef?.(card.image)) {
+      const path = window.SupabaseSync.storagePathFromRef?.(card.image);
+      if (path && window.SupabaseSync.isPathKnownMissing?.(path)) return true;
+    }
+    return false;
+  }
+
+  function findWarehouseCardForJob(jobId) {
+    if (!jobId) return null;
+    const key = String(jobId).replace(/#\d+$/, '');
+    return (window.__promptHubCards || []).find((c) => {
+      if (!c?.genJobId) return false;
+      const cardKey = String(c.genJobId).replace(/#\d+$/, '');
+      return c.genJobId === jobId || cardKey === key;
+    }) || null;
+  }
+
   function needsApiImageRecovery(jobId, apiImageUrl, force = false) {
     if (!jobId || !apiImageUrl) return false;
     if (isGenerationJobDeleted(jobId) && !force) return false;
-    if (!hasWarehouseCardForJob(jobId)) return true;
-    if (force && hasWarehouseCardRecordForJob(jobId)) return true;
-    return false;
+    const card = findWarehouseCardForJob(jobId);
+    if (!card) return true;
+    return warehouseCardImageNeedsRecovery(card, apiImageUrl);
   }
 
   function jobNeedsRecovery(job) {
@@ -5573,10 +5737,12 @@
     return false;
   }
 
-  async function refreshGenerationJobFromServer(job) {
+  async function refreshGenerationJobFromServer(job, opts = {}) {
     if (!job?.id || !window.PromptHubApi?.getGenerationJob) return job;
     try {
-      const retry = await window.PromptHubApi.getGenerationJob(job.id);
+      const retry = await window.PromptHubApi.getGenerationJob(job.id, {
+        settle: opts.settle === true
+      });
       if (!retry.ok) return job;
       return {
         ...job,
@@ -5659,7 +5825,9 @@
 
   function startGenJobsBackgroundSync() {
     if (genJobsSyncInterval) return;
-    const syncIntervalMs = isMobileViewport() ? 45000 : 30000;
+    const syncIntervalMs = imageGenPendingJobs.length > 0
+      ? (isMobileViewport() ? 18000 : 12000)
+      : (isMobileViewport() ? 45000 : 30000);
     genJobsSyncInterval = setInterval(() => {
       if (!window.PointsSystem?.useApiForAccount?.()) return;
       if (!shouldRunGenJobsBackgroundSync()) return;
@@ -5745,6 +5913,7 @@
       if (used?.has?.(j.id)) continue;
       if (String(j.prompt || '').trim() !== p) continue;
       if (normalizeImageGenModelId(j.model || 'gpt-image-2') !== m) continue;
+      if (opts.resolution && j.resolution && j.resolution !== opts.resolution) continue;
       const created = Date.parse(j.createdAt) || 0;
       if (minCreated && created < minCreated - 120000) continue;
       let score = created;
@@ -5822,6 +5991,7 @@
         const bySource = cards.find((c) => c.genSourceId === cre.id);
         if (bySource?.image && isDisplayableImage(bySource.image)) return bySource;
       }
+      return null;
     }
     const started = pending.startedAt || 0;
     if (!pending.prompt || !started) return null;
@@ -5829,7 +5999,19 @@
     const candidates = cards.filter((c) => {
       if (!c?.image || !isDisplayableImage(c.image)) return false;
       if (!isGeneratedWarehouseCard(c)) return false;
+      const tags = Array.isArray(c.tags) ? c.tags : [];
+      if (tags.includes('自动恢复') && c.genJobId && pending.jobId) {
+        const pj = String(pending.jobId).replace(/#\d+$/, '');
+        const cj = String(c.genJobId).replace(/#\d+$/, '');
+        if (pj !== cj) return false;
+      }
       if (!pendingPromptsMatch(c.prompt, pending.prompt)) return false;
+      if (pending.resolution) {
+        if (!c.resolution || c.resolution !== pending.resolution) return false;
+      }
+      if (pending.model && c.model && normalizeImageGenModelId(c.model) !== normalizeImageGenModelId(pending.model)) {
+        return false;
+      }
       const created = c.createdAt || c.updatedAt || 0;
       if (created && created < started - 120000) return false;
       if (created && created > started + windowMs) return false;
@@ -5925,12 +6107,19 @@
     ctx.silentToast = opts.silent !== false;
 
     if (apiJob.status === 'completed' && apiJob.imageUrl) {
-      if (hasWarehouseCardForJob(apiJob.id)) {
+      pending.recovering = false;
+      pending.recoverNote = '';
+      pending.pendingNote = '';
+      const existingCard = findWarehouseCardForJob(apiJob.id);
+      if (existingCard && hasWarehouseCardForJob(apiJob.id)) {
+        if (warehouseCardImageNeedsRecovery(existingCard, apiJob.imageUrl)) {
+          await repairWarehouseCardImageFromJob(existingCard, apiJob.imageUrl, apiJob.id);
+          renderImageGenFeed({ preserveScroll: true });
+        }
         removePendingJob(pending.id);
         clearSessionGenJob(apiJob.id);
         return true;
       }
-      const existingCard = (window.__promptHubCards || []).find((c) => c.genJobId === apiJob.id);
       if (existingCard && !existingCard.image) {
         await repairWarehouseCardImageFromJob(existingCard, apiJob.imageUrl, apiJob.id);
         removePendingJob(pending.id);
@@ -6042,7 +6231,9 @@
     let stored = imageUrl;
     if (window.SupabaseSync?.persistGenerationImage) {
       try {
-        stored = await window.SupabaseSync.persistGenerationImage(card.id, imageUrl);
+        stored = await window.SupabaseSync.persistGenerationImage(card.id, imageUrl, {
+          jobId: jobId || card.genJobId || null
+        });
       } catch (e) {
         console.warn('恢复生图：归档到 Storage 失败，使用任务链接', e);
       }
@@ -6198,8 +6389,9 @@
   async function resumePendingGenerationJobs(opts = {}) {
     if (!window.PromptHubApi?.listRecentGenerationJobs) return false;
     if (!window.PointsSystem?.useApiForAccount?.()) return false;
+    purgeExpiredGenPendingJobs();
     const now = Date.now();
-    if (!opts.force && now - lastGenJobsListAt < GEN_JOBS_LIST_MIN_MS) return false;
+    if (!opts.force && now - lastGenJobsListAt < (imageGenPendingJobs.length > 0 ? 4000 : GEN_JOBS_LIST_MIN_MS)) return false;
     if (resumeGenJobsInflight) return resumeGenJobsInflight;
 
     resumeGenJobsInflight = (async () => {
@@ -6213,6 +6405,46 @@
 
       for (const job of r.data.jobs) {
         if (job?.id) apiById.set(job.id, job);
+      }
+
+      /** 所有 pending 任务强制拉最新状态（不受 list 轮询预算限制） */
+      const pendingJobIds = [...new Set(
+        imageGenPendingJobs.map((p) => p.jobId).filter(Boolean)
+      )];
+      for (const jobId of pendingJobIds) {
+        const pending = imageGenPendingJobs.find((p) => p.jobId === jobId);
+        if (!pending) continue;
+        const pendingAge = Date.now() - (pending.startedAt || 0);
+        const ctx = pendingJobToPollCtx(pending);
+        try {
+          const retry = await window.PromptHubApi.getGenerationJob(jobId, {
+            settle: isLongRunningGenJob(ctx) && pendingAge > 60_000
+          });
+          if (!retry.ok) continue;
+          const aj = {
+            id: jobId,
+            status: retry.data.status,
+            imageUrl: retry.data.imageUrl,
+            extraImageUrls: retry.data.extraImageUrls,
+            errorMessage: retry.data.errorMessage || retry.data.message,
+            prompt: pending.prompt,
+            model: pending.model,
+            resolution: pending.resolution,
+            quality: pending.quality,
+            size: pending.size
+          };
+          apiById.set(jobId, aj);
+          if (aj.status === 'completed' && aj.imageUrl) {
+            pending.recovering = false;
+            pending.recoverNote = '';
+            if (await resolvePendingFromApiJob(pending, aj, { silent: true })) changed = true;
+          } else if (
+            aj.status === 'failed'
+            && !isLikelyRecoverableGenFailure(aj.errorMessage, ctx)
+          ) {
+            if (await resolvePendingFromApiJob(pending, aj, { silent: true })) changed = true;
+          }
+        } catch (e) { /* ignore */ }
       }
 
       const refreshTargets = r.data.jobs.filter((j) => {
@@ -6233,7 +6465,8 @@
         if (p.jobId && apiById.has(p.jobId)) return apiById.get(p.jobId);
         return findBestApiJobForPrompt(r.data.jobs, p.prompt, p.model, {
           minCreatedAt: p.startedAt || Date.now(),
-          preferProcessing: true
+          preferProcessing: true,
+          resolution: p.resolution
         });
       }
 
@@ -6254,16 +6487,19 @@
         }
         if (!pending.jobId) {
           if (Date.now() - (pending.startedAt || 0) > 20 * 60 * 1000) {
-            removePendingJob(pending.id);
+            failPendingJob(pending.id, '未找到对应任务，积分已全额退回');
             changed = true;
           }
           continue;
         }
         let aj = apiById.get(pending.jobId);
         const pendingAge = Date.now() - (pending.startedAt || 0);
-        if (pending.jobId && (!aj || aj.status === 'processing' || pendingAge > 45000)) {
+        const pollCtx = pendingJobToPollCtx(pending);
+        if (pending.jobId && (!aj || aj.status === 'processing' || pendingAge > 20_000)) {
           try {
-            const retry = await window.PromptHubApi.getGenerationJob(pending.jobId);
+            const retry = await window.PromptHubApi.getGenerationJob(pending.jobId, {
+              settle: isLongRunningGenJob(pollCtx) && pendingAge > 60_000
+            });
             if (retry.ok) {
               aj = {
                 id: pending.jobId,
@@ -6290,7 +6526,9 @@
           continue;
         }
         if (pending.recovering && pending.jobId && !activePollJobIds.has(pending.jobId)) {
-          const retry = await window.PromptHubApi.getGenerationJob(pending.jobId);
+          const retry = await window.PromptHubApi.getGenerationJob(pending.jobId, {
+            settle: isLongRunningGenJob(pendingJobToPollCtx(pending)) && pendingAge > 60_000
+          });
           if (retry.ok) {
             const snap = {
               id: pending.jobId,
@@ -6315,10 +6553,45 @@
 
       for (const job of imageGenPendingJobs.slice()) {
         if (!job.jobId || activePollJobIds.has(job.jobId)) continue;
+        if (Date.now() - (job.startedAt || 0) >= RECENT_GEN_RECOVER_MS) {
+          abandonUnrecoverablePendingJob(job, null, { toast: false });
+          if (job.jobId) window.recordGenerationJobDeletion?.(job.jobId);
+          changed = true;
+          continue;
+        }
         const aj = apiById.get(job.jobId);
         if (aj?.status === 'processing') {
           void pollGenerationJobUntilDone(job.jobId, job.id, pendingJobToPollCtx(job));
         }
+      }
+
+      for (const job of r.data.jobs) {
+        if (!job?.id || job.status !== 'failed') continue;
+        const pending = imageGenPendingJobs.find((p) => p.jobId === job.id);
+        if (!pending) continue;
+        if (await resolvePendingFromApiJob(pending, job, { silent: true })) changed = true;
+      }
+
+      for (const job of r.data.jobs) {
+        if (!job?.id || job.status !== 'failed') continue;
+        if (!isSessionGenJob(job.id)) continue;
+        if (imageGenPendingJobs.some((p) => p.jobId === job.id)) continue;
+        if (imageGenFailedJobs.some((f) => f.jobId === job.id)) continue;
+        if (hasWarehouseCardForJob(job.id)) continue;
+        const live = apiById.get(job.id) || job;
+        const failCtx = {
+          model: live.model || job.model,
+          resolution: live.resolution || job.resolution
+        };
+        if (isLikelyRecoverableGenFailure(live.errorMessage || job.errorMessage, failCtx)) continue;
+        addFailedGenJob({
+          jobId: job.id,
+          prompt: job.prompt || live.prompt,
+          model: job.model || live.model,
+          modelLabel: job.modelLabel || live.modelLabel,
+          errorMessage: live.errorMessage || job.errorMessage || '生图失败'
+        });
+        changed = true;
       }
 
       for (const job of r.data.jobs) {
@@ -6336,6 +6609,12 @@
             continue;
           }
           const jobAge = Date.now() - (Date.parse(job.createdAt) || 0);
+          if (jobAge >= RECENT_GEN_RECOVER_MS) {
+            if (job.status === 'processing' && !hasWarehouseCardForJob(job.id)) {
+              window.recordGenerationJobDeletion?.(job.id);
+            }
+            continue;
+          }
           if (jobAge > 12 * 60 * 1000) {
             const settled = await settleStuckGenerationJob(apiById.get(job.id) || job, { maxMs: 12000 });
             if (settled.status === 'completed' && settled.imageUrl) {
@@ -6373,6 +6652,12 @@
             imageGenPendingJobs.unshift(pending);
             trackSessionGenJob(job.id);
             changed = true;
+          }
+          if (Date.now() - (pending.startedAt || 0) >= RECENT_GEN_RECOVER_MS) {
+            abandonUnrecoverablePendingJob(pending, null, { toast: false });
+            window.recordGenerationJobDeletion?.(job.id);
+            changed = true;
+            continue;
           }
           attachedJobIds.add(job.id);
           clearFailedGenJobsForRecovery({
@@ -6550,7 +6835,8 @@
         const match = findBestApiJobForPrompt(processingOnApi, p.prompt, p.model, {
           minCreatedAt: p.startedAt || Date.now(),
           usedJobIds: attachedJobIds,
-          preferProcessing: true
+          preferProcessing: true,
+          resolution: p.resolution
         });
         if (!match || attachedJobIds.has(match.id)) continue;
         p.jobId = match.id;
@@ -6582,6 +6868,10 @@
         if (!aj) {
           return Date.now() - (p.startedAt || 0) < RECENT_GEN_RECOVER_MS;
         }
+        if (aj.status === 'failed') {
+          return p.recovering && Date.now() - (p.startedAt || 0) < RECENT_GEN_RECOVER_MS;
+        }
+        if (aj.status === 'completed') return false;
         return aj.status === 'processing';
       });
       if (imageGenPendingJobs.length !== before) {
@@ -6634,8 +6924,12 @@
           }
         } catch (e) { /* ignore */ }
         if (age >= RECENT_GEN_RECOVER_MS) {
-          removePendingJob(p.id);
-          if (p.jobId) clearSessionGenJob(p.jobId);
+          abandonUnrecoverablePendingJob(
+            p,
+            '上游临时链接约 2 小时有效，该任务已过期，无法恢复',
+            { toast: false }
+          );
+          if (p.jobId) window.recordGenerationJobDeletion?.(p.jobId);
           changed = true;
         }
       }
@@ -6842,6 +7136,8 @@
 
   function initImageGenForm() {
     resetImageGenSubmitState();
+    imageGenModelCatalogReady = false;
+    setImageGenModelSelectLoading(true);
     const draft = loadJson(LS_IMAGEGEN, null);
     if (draft) {
       const promptEl = document.getElementById('imageGenPrompt');
@@ -6853,8 +7149,9 @@
       if (resEl && draft.resolution) resEl.value = draft.resolution;
       const qEl = document.getElementById('imageGenQuality');
       if (qEl && draft.quality) qEl.value = draft.quality;
-      const modelEl = document.getElementById('imageGenModel');
-      if (modelEl && draft.model) modelEl.value = draft.model;
+      if (draft.model) {
+        imageGenModelFamily = resolveImageGenModelFamily(draft.modelFamily, draft.model);
+      }
       const szEl = document.getElementById('imageGenSize');
       if (szEl && draft.size) szEl.value = draft.size;
       const countEl = document.getElementById('imageGenCount');
@@ -6865,7 +7162,11 @@
     window.ImageGenPromptTools?.init?.();
     bindImageGenGenPublic();
     syncImageGenGenPublicUI();
-    void refreshImageGenModelCatalog().then(() => updateImageGenPricingUI());
+    void refreshImageGenModelCatalog().then(() => {
+      syncImageGenModelToResolution();
+      updateImageGenResolutionSelect();
+      updateImageGenPricingUI();
+    });
     applyImageGenPrefill();
     updateImageGenFeedHint();
     syncImageGenGenPublicFromPrompt();
@@ -6925,25 +7226,71 @@
   }
 
   function getImageGenModel() {
-    return normalizeImageGenModelId(document.getElementById('imageGenModel')?.value || 'gpt-image-2');
+    const raw = document.getElementById('imageGenModel')?.value || '';
+    if (!raw || !imageGenModelCatalogReady) {
+      const draft = loadJson(LS_IMAGEGEN, null);
+      if (draft?.model) return normalizeImageGenModelId(draft.model);
+    }
+    return normalizeImageGenModelId(raw || 'gpt-image-2');
   }
 
   let imageGenModelCatalog = [];
+  let imageGenModelCatalogReady = false;
+  let imageGenModelFamily = 'gim2';
+
+  function setImageGenModelSelectLoading(loading) {
+    const sel = document.getElementById('imageGenModel');
+    const resSel = document.getElementById('imageGenResolution');
+    const tabs = document.getElementById('imageGenModelFamilyTabs');
+    if (sel) {
+      sel.disabled = !!loading;
+      sel.setAttribute('aria-busy', loading ? 'true' : 'false');
+      if (loading) {
+        sel.innerHTML = '';
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '加载模型列表…';
+        sel.appendChild(opt);
+        sel.value = '';
+      }
+    }
+    if (resSel && loading) {
+      resSel.disabled = true;
+      resSel.innerHTML = '';
+      const ro = document.createElement('option');
+      ro.value = '';
+      ro.textContent = '—';
+      resSel.appendChild(ro);
+      resSel.value = '';
+    }
+    if (resSel && !loading) resSel.disabled = false;
+    if (tabs) tabs.hidden = !!loading;
+    if (!loading) imageGenModelCatalogReady = true;
+  }
+
+  const IMAGE_GEN_MODEL_FAMILIES = [
+    { key: 'gim2', label: 'G-im2' },
+    { key: 'banana', label: '香蕉' },
+    { key: 'jimeng', label: '即梦' }
+  ];
 
   const IMAGE_GEN_MODEL_FALLBACK = [
-    { id: 'gpt-image-2', label: 'GPT Image 2', provider: 'grsai', selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'gpt-image-2-vip', label: 'GPT Image 2 VIP', provider: 'grsai', selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'nano-banana-pro', label: 'Nano Banana Pro', provider: 'grsai', selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'nano-banana-2', label: 'Nano Banana 2', provider: 'grsai', selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'nano-banana-fast', label: 'Nano Banana Fast', provider: 'grsai', selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'apimart-gpt-image-2', label: 'GPT Image 2 · 备用', provider: 'apimart', selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'apimart-seedream-5-lite', label: 'Seedream 5 Lite · 备用', provider: 'apimart', selectable: true, status: 'active', refundOnViolation: true }
+    { id: 'gpt-image-2', label: 'GPT Image 2', provider: 'grsai', uiFamily: 'gim2', sortOrder: 2, selectable: true, status: 'active', refundOnViolation: true },
+    { id: 'gpt-image-2-vip', label: 'GPT Image 2 VIP', provider: 'grsai', uiFamily: 'gim2', sortOrder: 1, selectable: true, status: 'active', refundOnViolation: true },
+    { id: 'nano-banana-pro', label: 'Nano Banana Pro', provider: 'grsai', uiFamily: 'banana', sortOrder: 3, selectable: true, status: 'active', refundOnViolation: true },
+    { id: 'nano-banana-2', label: 'Nano Banana 2', provider: 'grsai', uiFamily: 'banana', sortOrder: 4, selectable: true, status: 'active', refundOnViolation: true },
+    { id: 'nano-banana-fast', label: 'Nano Banana Fast', provider: 'grsai', uiFamily: 'banana', sortOrder: 6, selectable: true, status: 'active', refundOnViolation: true },
+    { id: 'apimart-gpt-image-2', label: 'GPT Image 2 · 备用', provider: 'apimart', uiFamily: 'gim2', sortOrder: 103, selectable: true, status: 'active', refundOnViolation: true },
+    { id: 'apimart-seedream-5-lite', label: 'Seedream 5 Lite · 备用', provider: 'apimart', uiFamily: 'jimeng', sortOrder: 104, selectable: true, status: 'active', refundOnViolation: true },
+    { id: 'mooko-gpt-image-2', label: 'GPT Image 2 · 慢速', provider: 'mooko', uiFamily: 'gim2', sortOrder: 101, selectable: true, status: 'active', refundOnViolation: true },
+    { id: 'mooko-gpt-image-2-pro', label: 'GPT Image 2 Pro · 慢速', provider: 'mooko', uiFamily: 'gim2', sortOrder: 102, selectable: true, status: 'active', refundOnViolation: true }
   ];
 
   function applyImageGenModelCatalog(models) {
     if (!Array.isArray(models) || !models.length) return false;
     imageGenModelCatalog = models;
     window.__IMAGE_GEN_MODELS__ = imageGenModelCatalog;
+    setImageGenModelSelectLoading(false);
     renderImageGenModelSelect();
     syncImageGenModelHint();
     updateImageGenResolutionSelect();
@@ -6985,43 +7332,101 @@
     }
   }
 
-  function renderImageGenModelSelect() {
+  function imageGenModelUiFamily(m) {
+    if (m?.uiFamily === 'banana' || m?.uiFamily === 'gim2' || m?.uiFamily === 'jimeng') return m.uiFamily;
+    const id = String(m?.id || '').toLowerCase();
+    if (id.includes('seedream') || id === 'jimeng') return 'jimeng';
+    if (id.includes('nano-banana')) return 'banana';
+    return 'gim2';
+  }
+
+  function imageGenModelsInFamily(family) {
+    return [...imageGenModelCatalog]
+      .sort((a, b) => imageGenModelSortKey(a) - imageGenModelSortKey(b))
+      .filter((m) => imageGenModelUiFamily(m) === family);
+  }
+
+  function resolveImageGenModelFamily(preferredFamily, modelId) {
+    const families = IMAGE_GEN_MODEL_FAMILIES.filter((f) => imageGenModelsInFamily(f.key).length);
+    const keys = families.map((f) => f.key);
+    if (preferredFamily && keys.includes(preferredFamily)) return preferredFamily;
+    const fromModel = imageGenModelCatalog.find((m) => m.id === modelId);
+    if (fromModel) {
+      const fam = imageGenModelUiFamily(fromModel);
+      if (keys.includes(fam)) return fam;
+    }
+    return keys.includes('gim2') ? 'gim2' : keys[0] || 'gim2';
+  }
+
+  function renderImageGenModelFamilyTabs() {
+    const host = document.getElementById('imageGenModelFamilyTabs');
+    if (!host) return;
+    host.innerHTML = '';
+    const families = IMAGE_GEN_MODEL_FAMILIES.filter((f) => imageGenModelsInFamily(f.key).length);
+    if (!families.length) {
+      host.hidden = true;
+      return;
+    }
+    host.hidden = false;
+    imageGenModelFamily = resolveImageGenModelFamily(imageGenModelFamily);
+    families.forEach((f) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'imagegen-model-family-tab' + (imageGenModelFamily === f.key ? ' active' : '');
+      btn.dataset.family = f.key;
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('aria-selected', imageGenModelFamily === f.key ? 'true' : 'false');
+      btn.textContent = f.label;
+      btn.addEventListener('click', () => {
+        if (imageGenModelFamily === f.key) return;
+        imageGenModelFamily = f.key;
+        renderImageGenModelSelect({ keepModel: false, family: f.key });
+      });
+      host.appendChild(btn);
+    });
+  }
+
+  function imageGenModelSortKey(m) {
+    const n = Number(m?.sortOrder);
+    return Number.isFinite(n) ? n : 9999;
+  }
+
+  function renderImageGenModelSelect(opts = {}) {
     const sel = document.getElementById('imageGenModel');
     if (!sel || !imageGenModelCatalog.length) return;
-    const current = sel.value || loadJson(LS_IMAGEGEN, null)?.model || 'gpt-image-2';
-    sel.innerHTML = '';
-    const groups = [
-      { key: 'grsai', label: '常规线路' },
-      { key: 'apimart', label: '备用线路' },
-      { key: 'ithink', label: '经济线路' }
-    ];
-    groups.forEach((g) => {
-      const list = imageGenModelCatalog.filter((m) => (m.provider || 'grsai') === g.key);
-      if (!list.length) return;
-      const og = document.createElement('optgroup');
-      og.label = g.label;
-      list.forEach((m) => {
-        const opt = document.createElement('option');
-        opt.value = m.id;
-        const name = m.label || m.id;
-        let text = m.refundOnViolation ? name : `${name} · 违规不返还`;
-        if (m.status === 'maintenance' || m.selectable === false) {
-          opt.disabled = true;
-          text = `${name}（维护中）`;
-        }
-        opt.textContent = text;
-        og.appendChild(opt);
-      });
-      sel.appendChild(og);
-    });
-    const selectable = imageGenModelCatalog.filter(
-      (m) => m.selectable !== false && m.status !== 'maintenance'
+    sel.disabled = false;
+    sel.setAttribute('aria-busy', 'false');
+    const draft = loadJson(LS_IMAGEGEN, null);
+    const current = opts.modelId || sel.value || draft?.model || 'gpt-image-2';
+    imageGenModelFamily = resolveImageGenModelFamily(
+      opts.family ?? imageGenModelFamily ?? draft?.modelFamily,
+      current
     );
+    renderImageGenModelFamilyTabs();
+    const list = imageGenModelsInFamily(imageGenModelFamily);
+    sel.innerHTML = '';
+    list.forEach((m) => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      const name = m.label || m.catalogLabel || '模型';
+      let text = m.refundOnViolation ? name : `${name} · 违规不返还`;
+      if (m.status === 'maintenance' || m.selectable === false) {
+        opt.disabled = true;
+        text = `${name}（维护中）`;
+      }
+      opt.textContent = text;
+      sel.appendChild(opt);
+    });
+    const selectable = list.filter((m) => m.selectable !== false && m.status !== 'maintenance');
+    const keepModel = opts.keepModel !== false;
     const pick =
-      [...sel.options].some((o) => o.value === current && !o.disabled)
+      keepModel && [...sel.options].some((o) => o.value === current && !o.disabled)
         ? current
-        : selectable[0]?.id || imageGenModelCatalog[0]?.id || 'gpt-image-2';
+        : selectable[0]?.id || list[0]?.id || 'gpt-image-2';
     sel.value = pick;
+    syncImageGenModelHint();
+    updateImageGenResolutionSelect();
+    updateImageGenCostHint();
   }
 
   function syncImageGenModelHint() {
@@ -7044,6 +7449,41 @@
   function normalizeImageGenResolution(res) {
     const r = String(res || '1k').toLowerCase();
     return ['1k', '2k', '4k'].includes(r) ? r : '1k';
+  }
+
+  /** 木瓜等分档模型：切分辨率时自动换到支持该档的 model id */
+  function resolveImageGenModelForResolution(modelId, resolution) {
+    const res = normalizeImageGenResolution(resolution);
+    const id = normalizeImageGenModelId(modelId);
+    const entry = imageGenModelCatalog.find((m) => m.id === id);
+    if (!entry) return id;
+    const supported = entry.resolutions?.length ? entry.resolutions : ['1k', '2k', '4k'];
+    if (supported.includes(res)) return id;
+    if (id === 'mooko-gpt-image-2-pro' && res === '1k') return 'mooko-gpt-image-2';
+    if (id === 'mooko-gpt-image-2' && (res === '2k' || res === '4k')) return 'mooko-gpt-image-2-pro';
+    const family = imageGenModelUiFamily(entry);
+    const provider = entry.provider;
+    const hit = imageGenModelCatalog.find(
+      (m) =>
+        imageGenModelUiFamily(m) === family
+        && m.provider === provider
+        && (m.resolutions || []).includes(res)
+        && m.selectable !== false
+        && m.status !== 'maintenance'
+    );
+    return hit?.id || id;
+  }
+
+  function syncImageGenModelToResolution() {
+    const resSel = document.getElementById('imageGenResolution');
+    const modelSel = document.getElementById('imageGenModel');
+    if (!resSel || !modelSel) return;
+    const res = normalizeImageGenResolution(resSel.value);
+    const nextModel = resolveImageGenModelForResolution(modelSel.value, res);
+    if (nextModel && nextModel !== modelSel.value) {
+      modelSel.value = nextModel;
+      syncImageGenModelHint();
+    }
   }
 
   function getImageGenFormMeta() {
@@ -8190,21 +8630,15 @@
     const extras = getPollExtraImageUrls(poll, imageUrl);
 
     if (baseJobId && allGenCreationSlotsSaved(baseJobId, extras.length)) {
-      const card = (window.__promptHubCards || []).find((c) => c.genJobId === baseJobId);
-      if (!hasWarehouseCardForJob(baseJobId)) {
-        if (card) {
-          await repairWarehouseCardImageFromJob(card, imageUrl, baseJobId);
-        } else {
-          await finishImageGenRun({
-            ...ctx,
-            image: imageUrl,
-            extraImages: extras,
-            cost: ctx.cost,
-            jobId: baseJobId,
-            silentToast: !!ctx.silentToast,
-            isRecovery: true,
-            pendingId
-          });
+      const mainCard = findWarehouseCardForJob(baseJobId);
+      if (mainCard && warehouseCardImageNeedsRecovery(mainCard, imageUrl)) {
+        await repairWarehouseCardImageFromJob(mainCard, imageUrl, baseJobId);
+      }
+      for (let ei = 0; ei < extras.length; ei += 1) {
+        const slotId = `${baseJobId}#${ei + 2}`;
+        const slotCard = findWarehouseCardForJob(slotId);
+        if (slotCard && warehouseCardImageNeedsRecovery(slotCard, extras[ei])) {
+          await repairWarehouseCardImageFromJob(slotCard, extras[ei], slotId);
         }
       }
       if (pendingId) removePendingJob(pendingId);
@@ -8253,13 +8687,44 @@
     return true;
   }
 
-  /** 5 分钟内快轮询；超时后改后台恢复 */
+  function isSlowGenProviderModel(modelId) {
+    const id = normalizeImageGenModelId(modelId);
+    return id.startsWith('mooko-') || id.startsWith('ithink-');
+  }
+
+  /** 2K/4K/VIP/慢速线：上游常需 10 分钟级，勿按 5 分钟判死 */
+  function isLongRunningGenJob(ctx) {
+    if (isSlowGenProviderModel(ctx?.model)) return true;
+    const res = normalizeImageGenResolution(ctx?.resolution);
+    if (res === '2k' || res === '4k') return true;
+    const id = normalizeImageGenModelId(ctx?.model);
+    if (id.includes('vip') || id.includes('-pro')) return true;
+    return false;
+  }
+
+  function genActivePollMaxMs(ctx) {
+    return isLongRunningGenJob(ctx) ? 15 * 60 * 1000 : 5 * 60 * 1000;
+  }
+
+  function genRecoveringDeferGiveUpMs(ctx) {
+    return isLongRunningGenJob(ctx) ? 45 * 60 * 1000 : 22 * 60 * 1000;
+  }
+
+  function slowGenDeferNote(ctx) {
+    return isSlowGenProviderModel(ctx?.model)
+      ? '慢速线约 2–12 分钟，后台继续等待（请勿重复提交）'
+      : isLongRunningGenJob(ctx)
+        ? '2K/4K 约 5–15 分钟，后台继续等待（请勿重复提交）'
+        : 'GrsAI/Apimart 可能已出图，正在后台恢复（请勿重复提交）';
+  }
+
+  /** 快线路 5 分钟；木瓜/ThinkAI 慢速线 12 分钟 */
   const ACTIVE_POLL_MAX_MS = 5 * 60 * 1000;
 
   function isDefinitiveGenFailure(errRaw, pollData) {
     const s = String(errRaw || pollData?.message || pollData?.errorMessage || '');
-    if (/upstream_content_violation|违规不返还|violation/i.test(s)) return true;
-    if (/content.*policy|moderation|blocked|违规|敏感/i.test(s) && !/可能已在|排队/i.test(s)) return true;
+    if (/upstream_content_violation|prohibited words or images|prohibited|flagged as containing|违规不返还|violation/i.test(s)) return true;
+    if (/content.*policy|safety|moderation|blocked|违规|敏感/i.test(s)) return true;
     if (/insufficient balance|insufficient credits/i.test(s)) return true;
     if (/apikey|invalid.*api.*key|unauthorized/i.test(s)) return true;
     if (/This content may violate|content may violate/i.test(s)) return true;
@@ -8277,12 +8742,34 @@
   /** 5 分钟内快轮询；超时后交给后台恢复 */
   function genJobPollDelayMs(ctx, attemptIndex) {
     const elapsed = Math.max(0, Date.now() - (ctx?.startedAt || Date.now()));
-    if (elapsed >= ACTIVE_POLL_MAX_MS) return 7000;
+    const activeMax = genActivePollMaxMs(ctx);
+    if (elapsed >= activeMax) return isLongRunningGenJob(ctx) ? 9000 : 7000;
     if (attemptIndex <= 1) return 1500;
     if (attemptIndex <= 4) return 2200;
+    if (isLongRunningGenJob(ctx)) {
+      if (elapsed < 120_000) return 4000;
+      if (elapsed < 360_000) return 6000;
+      if (elapsed < 720_000) return 8000;
+      return 10000;
+    }
     if (elapsed < 60_000) return 3200;
     if (elapsed < 180_000) return 4500;
     return 5500;
+  }
+
+  function applyGenPollProgressNote(pendingId, pollData) {
+    const note = pollData?.progressNote;
+    if (!note || !pendingId) return;
+    const job = imageGenPendingJobs.find((j) => j.id === pendingId);
+    if (!job) return;
+    if (job.pendingNote === note) return;
+    job.pendingNote = note;
+    if (pollData?.status === 'processing' && isLongRunningGenJob({ model: job.model, resolution: job.resolution })) {
+      job.recovering = false;
+      job.recoverNote = '';
+    }
+    persistPendingGenJobs();
+    renderImageGenFeed({ preserveScroll: true });
   }
 
   async function pollGenerationJobUntilDone(jobId, pendingId, ctx) {
@@ -8322,12 +8809,8 @@
       const errRaw = last.ok && last.data.status === 'failed'
         ? (last.data.errorMessage || last.data.message)
         : '生图超时或上游无结果';
-      if (isLikelyRecoverableGenFailure(errRaw, ctx)) {
-        deferPendingJobRecovery(
-          pendingId,
-          ctx,
-          'GrsAI/Apimart 可能已出图，正在后台恢复（请勿重复提交）'
-        );
+        if (isLikelyRecoverableGenFailure(errRaw, ctx)) {
+        deferPendingJobRecovery(pendingId, ctx, slowGenDeferNote(ctx));
         return true;
       }
       const msg = friendlyGenErrorMessage(errRaw);
@@ -8340,28 +8823,46 @@
 
     for (let i = 0; i < maxAttempts; i++) {
       const elapsed = Date.now() - (ctx?.startedAt || Date.now());
-      if (elapsed >= ACTIVE_POLL_MAX_MS) {
+      const activeMax = genActivePollMaxMs(ctx);
+      if (elapsed >= activeMax) {
         deferPendingJobRecovery(
           pendingId,
           ctx,
-          '前台已等 5 分钟，仍在后台恢复（请勿重复提交）'
+          isSlowGenProviderModel(ctx?.model)
+            ? '前台已等 15 分钟，慢速线仍在后台等待（请勿重复提交）'
+            : isLongRunningGenJob(ctx)
+              ? '前台已等 15 分钟，2K/4K 仍在后台等待（请勿重复提交）'
+              : '前台已等 5 分钟，仍在后台恢复（请勿重复提交）'
         );
         void resumePendingGenerationJobs();
         return;
       }
       if (i > 0) await new Promise((r) => setTimeout(r, genJobPollDelayMs(ctx, i)));
-      const poll = await window.PromptHubApi.getGenerationJob(jobId);
+      const elapsedNow = Date.now() - (ctx?.startedAt || Date.now());
+      const useSettle = isLongRunningGenJob(ctx) && elapsedNow > 60_000;
+      const poll = await window.PromptHubApi.getGenerationJob(jobId, { settle: useSettle });
+      if (poll.ok) applyGenPollProgressNote(pendingId, poll.data);
       if (!poll.ok) {
+        const recoverableNet =
+          poll.code === 'NETWORK_ERROR'
+          || poll.code === 'API_UNREACHABLE'
+          || poll.status === 524
+          || /524|timeout|超时/i.test(String(poll.message || ''));
         if (i < maxAttempts - 1) {
-          const backoff = poll.code === 'RATE_LIMITED' ? 4500 : poll.code === 'NETWORK_ERROR' ? 1800 : 2200;
+          const backoff = poll.code === 'RATE_LIMITED'
+            ? 4500
+            : recoverableNet
+              ? 2800
+              : 2200;
           await new Promise((r) => setTimeout(r, backoff));
           continue;
         }
-        if (poll.code === 'RATE_LIMITED') {
-          toast('查询进度稍慢（服务器繁忙），正在后台恢复结果…');
-        } else {
-          toast(poll.message || '查询生图进度失败，正在尝试恢复…');
+        if (recoverableNet || poll.code === 'RATE_LIMITED') {
+          deferPendingJobRecovery(pendingId, ctx, slowGenDeferNote(ctx));
+          void resumePendingGenerationJobs();
+          return;
         }
+        toast(poll.message || '查询生图进度失败，正在尝试恢复…');
         void resumePendingGenerationJobs();
         return;
       }
@@ -8463,6 +8964,13 @@
       if (job.status !== 'completed' || !job.imageUrl) continue;
       if (!inSession) continue;
       if (!needsApiImageRecovery(job.id, job.imageUrl)) continue;
+      const matchesActivePending = imageGenPendingJobs.some(
+        (p) => p.jobId === job.id
+          || (pendingPromptsMatch(p.prompt, job.prompt)
+            && normalizeImageGenModelId(p.model) === normalizeImageGenModelId(job.model)
+            && (!p.resolution || !job.resolution || p.resolution === job.resolution))
+      );
+      if (imageGenPendingJobs.length && !matchesActivePending) continue;
 
       const recoverExtrasList = Array.isArray(job.extraImageUrls)
         ? job.extraImageUrls.filter((u) => u && u !== job.imageUrl)
@@ -8503,6 +9011,10 @@
     ).trim();
     if (!prompt) {
       toast('请先填写提示词');
+      return { ok: false };
+    }
+    if (!imageGenModelCatalogReady || !document.getElementById('imageGenModel')?.value) {
+      toast('模型列表加载中，请稍候再点生成');
       return { ok: false };
     }
 
@@ -8640,23 +9152,34 @@
           const networkLike =
             gen.code === 'NETWORK_ERROR'
             || gen.code === 'API_UNREACHABLE'
-            || /无法连接 api\.prompt-hub|连接.*超时|Failed to fetch/i.test(String(gen.message || ''));
+            || gen.status === 524
+            || /524|无法连接 api\.prompt-hub|连接.*超时|Failed to fetch|请求失败 \(524\)/i.test(String(gen.message || ''));
           if (networkLike) {
             const recovered = await tryRecoverOrphanGenJobAfterSubmitError(genPayload, pendingId, pendingJob);
             if (recovered) {
               renderImageGenFeed({ preserveScroll: true });
               return { ok: true, recovered: true, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
             }
-            const apiBase = String(window.API_BASE_URL || '127.0.0.1:8787').replace(/\/$/, '');
-            failPendingJob(
+            deferPendingJobRecovery(
               pendingId,
-              `无法连接后端 API（${apiBase}）。请确认 Worker 窗口在运行，且 server/.dev.vars 已填 IMAGE_API_KEY`
+              pendingJobToPollCtx(pendingJob),
+              gen.status === 524 || /524/.test(String(gen.message || ''))
+                ? '连接超时（524），任务可能已提交，后台继续等待…'
+                : slowGenDeferNote(pendingJobToPollCtx(pendingJob))
             );
-            renderImageGenFeed();
-            if (!batchOpts.silentToast) toast('生图未提交：请检查本机 Worker 是否在 8787 端口运行');
-            return { ok: false, message: gen.message, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
+            renderImageGenFeed({ preserveScroll: true });
+            return { ok: true, recovered: true, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
           }
           const errMsg = friendlyGenErrorMessage(gen.message);
+          if (/524|请求失败 \(524\)/i.test(errMsg) || /524/i.test(String(gen.message || ''))) {
+            deferPendingJobRecovery(
+              pendingId,
+              pendingJobToPollCtx(pendingJob),
+              '连接超时（524），任务可能已提交，后台继续等待…'
+            );
+            renderImageGenFeed({ preserveScroll: true });
+            return { ok: true, recovered: true, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
+          }
           failPendingJob(pendingId, errMsg);
           renderImageGenFeed();
           await window.PointsSystem?.refreshCreditsFromServer?.();
@@ -8696,9 +9219,17 @@
           return { ok: false, message: '未收到任务编号', batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
         }
         pendingJob.jobId = jobId;
+        pendingJob.slowProvider = isSlowGenProviderModel(model);
+        if (gen.data.progressNote) pendingJob.pendingNote = gen.data.progressNote;
         trackSessionGenJob(jobId);
         persistPendingGenJobs();
-        if (!batchOpts.silentToast) toast('已提交生图，下方可查看进度，可继续点击生成');
+        if (!batchOpts.silentToast) {
+          toast(
+            pendingJob.slowProvider
+              ? '已提交木瓜/慢速线，约 1–8 分钟出图，下方可看进度'
+              : '已提交生图，下方可查看进度，可继续点击生成'
+          );
+        }
         void pollGenerationJobUntilDone(jobId, pendingId, {
           prompt,
           model,
@@ -8856,7 +9387,12 @@
     const slotJobId = baseJobId ? (idx === 1 ? baseJobId : `${baseJobId}#${idx}`) : null;
     if (slotJobId) {
       if (isGenerationJobDeleted(baseJobId) && !isRecovery) return;
-      if (hasWarehouseCardForJob(slotJobId)) {
+      const existingCard = findWarehouseCardForJob(slotJobId);
+      if (existingCard && hasWarehouseCardForJob(slotJobId)) {
+        if (warehouseCardImageNeedsRecovery(existingCard, image)) {
+          await repairWarehouseCardImageFromJob(existingCard, image, slotJobId);
+          renderImageGenFeed({ preserveScroll: true });
+        }
         if (idx === 1) {
           clearSessionGenJob(baseJobId);
           if (pendingId) removePendingJob(pendingId);
@@ -8872,31 +9408,15 @@
       const existingCre = slotJobId ? creations.find((c) => c.jobId === slotJobId) : null;
       const creationId = existingCre?.id || genId('cr');
       let storedImage = image;
-      if (window.SupabaseSync?.persistGenerationImage) {
-        void Promise.race([
-          window.SupabaseSync.persistGenerationImage(creationId, image),
-          new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('persist timeout')), 3500);
-          })
-        ]).then((ref) => {
-          if (!ref || ref === storedImage) return;
-          const cre = creations.find((c) => c.id === creationId);
-          if (cre) {
-            cre.image = ref;
-            persistCreations();
-          }
-          const card = slotJobId
-            ? (window.__promptHubCards || []).find((c) => c.genJobId === slotJobId)
-            : null;
-          if (card) {
-            card.image = ref;
-            card.updatedAt = Date.now();
-            void window.persistPromptHubCards?.();
-            renderImageGenFeed({ preserveScroll: true });
-          }
-        }).catch((e) => {
-          console.warn('生成图后台归档跳过，先用任务链接展示', e);
-        });
+      if (window.SupabaseSync?.persistGenerationImage && slotJobId) {
+        try {
+          const ref = await window.SupabaseSync.persistGenerationImage(creationId, image, {
+            jobId: slotJobId
+          });
+          if (ref && ref !== image) storedImage = ref;
+        } catch (e) {
+          console.warn('生成图原图归档失败，将用任务链接入库后重试', e);
+        }
       }
       if (idx === 1) imageGenLastResult = storedImage;
       const primaryRef = getImageGenPrimaryRef();
@@ -8940,6 +9460,10 @@
         sourceId: creation.id,
         jobId: slotJobId,
         title: idx > 1 ? `附赠图 ${idx}` : '',
+        resolution,
+        model: modelId,
+        quality: quality || 'standard',
+        size: size || '1:1',
         publishToCommunity: publish,
         fromInspirationDraw: !!fromInspirationDraw,
         silentToast: !!silentToast
@@ -9165,19 +9689,21 @@
     else scheduleImageGenFeedLayout({ immediate: true });
   }
 
-  async function downloadImageGenPreviewImage(body, previewKind, previewAssetId) {
+  async function downloadImageGenPreviewImage(body, previewKind, previewAssetId, triggerBtn) {
     if (!body || body.dataset.previewImageReady !== '1') {
       toast('图片加载中，请稍后再下载');
       return;
     }
     const url = body.dataset.previewImageUrl || '';
     const img = body.querySelector('.imagegen-preview-img-btn img');
+    const dlBtn = triggerBtn || body.querySelector('[data-preview-download]');
     try {
       if (previewKind === 'warehouse' && previewAssetId && typeof window.downloadCardImageFile === 'function') {
         const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === previewAssetId);
         if (c?.image) {
-          await window.downloadCardImageFile(c.image, c.id, `prompt-hub-${c.id}.jpg`);
-          toast('图片已开始下载');
+          await window.downloadCardImageFile(c.image, c.id, `prompt-hub-${c.id}.jpg`, {
+            triggerBtn: dlBtn
+          });
           return;
         }
       }
@@ -9187,25 +9713,27 @@
         await downloadImageFromUrl(url, `prompt-hub-gen-${Date.now()}.png`);
         return;
       }
-      toast('图片已开始下载');
+      toast('下载完成');
     } catch (e) {
       toast('下载失败，请稍后重试');
       console.warn('[download] preview image failed', e);
     }
   }
 
-  async function downloadImageGenFeedItem(kind, itemId, imgEl) {
+  async function downloadImageGenFeedItem(kind, itemId, imgEl, triggerBtn) {
     try {
       if (kind === 'warehouse') {
         const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === itemId);
         if (c?.image && typeof window.downloadCardImageFile === 'function') {
-          await window.downloadCardImageFile(c.image, c.id, `prompt-hub-${c.id}.jpg`);
-          toast('图片已开始下载');
+          await window.downloadCardImageFile(c.image, c.id, `prompt-hub-${c.id}.jpg`, {
+            triggerBtn
+          });
           return;
         }
       } else if (kind === 'community') {
         const post = findPost(itemId);
         if (post?.image) {
+          toast('正在准备下载…', 2500);
           const url = await resolveImageDisplayUrl(
             post.image,
             post.jobId || '',
@@ -9214,7 +9742,7 @@
           );
           if (url) {
             await window.promptHubSaveImage?.(url, `prompt-hub-${itemId}.png`, imgEl);
-            toast('图片已开始下载');
+            toast('下载完成');
             return;
           }
         }
@@ -9299,8 +9827,26 @@
         <button type="button" class="btn btn-secondary btn-sm" data-preview-like>${liked ? '已赞' : '点赞'}</button>`;
     } else {
       const rawId = imageGenPreviewId.replace(/^wh_/, '');
-      const c = (window.getWarehouseCardsForImageGen?.() || []).find(x => x.id === rawId);
-      if (!c) { closeImageGenPreview(); return; }
+      let c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === rawId);
+      if (!c) {
+        const full = (window.__promptHubCards || []).find((x) => x.id === rawId);
+        if (full) {
+          c = {
+            id: full.id,
+            title: (full.title || '').trim(),
+            prompt: (full.prompt || '').trim() || (full.title || '').trim(),
+            image: full.image || null,
+            tags: full.tags || [],
+            group: full.group || null,
+            genJobId: full.genJobId || null
+          };
+        }
+      }
+      if (!c) {
+        toast('找不到该仓库卡片，请强刷页面');
+        closeImageGenPreview();
+        return;
+      }
       prompt = c.prompt || '';
       image = c.image || '';
       if (isDisplayableImage(c.image)) refImage = c.image;
@@ -9458,7 +10004,7 @@
       const assetId = previewKind === 'warehouse'
         ? previewId.replace(/^wh_/, '')
         : previewId;
-      void downloadImageGenPreviewImage(body, previewKind, assetId);
+      void downloadImageGenPreviewImage(body, previewKind, assetId, e.currentTarget);
     });
   }
 
@@ -9781,7 +10327,11 @@
         resetImageGenSubmitState();
       });
     });
-    document.getElementById('imageGenResolution')?.addEventListener('change', updateImageGenPricingUI);
+    document.getElementById('imageGenResolution')?.addEventListener('change', () => {
+      syncImageGenModelToResolution();
+      updateImageGenResolutionSelect();
+      updateImageGenPricingUI();
+    });
     document.querySelectorAll('[data-feed-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
         imageGenFeedTab = btn.dataset.feedTab;

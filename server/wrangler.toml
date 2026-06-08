@@ -39,5 +39,9 @@ custom_domain = true
 pattern = "api.prompt-hub.cn"
 custom_domain = true
 
+# 木瓜慢速线同步 POST 可达 8 分钟；HTTP waitUntil 仅 ~30s，改由 Cron 提交
+[triggers]
+crons = ["* * * * *"]
+
 [observability]
 enabled = true

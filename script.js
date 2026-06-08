@@ -927,13 +927,7 @@
           }
         }
       }
-      const dlUrl = `${url}${url.includes('?') ? '&' : '?'}dl=1`;
-      const a = document.createElement('a');
-      a.href = dlUrl;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      throw new Error('download_fetch_failed');
     }
     window.promptHubSaveImage = promptHubSaveImage;
 
@@ -1275,6 +1269,34 @@
       }
       if (jobId && cards.some(c => c.genJobId === jobId)) {
         const existing = cards.find(c => c.genJobId === jobId);
+        if (existing && image) {
+          const needsRepair = !existing.image
+            || /^https?:\/\//i.test(existing.image)
+            || (window.SupabaseSync?.isDataUrl?.(existing.image))
+            || (window.SupabaseSync?.isStorageRef?.(existing.image)
+              && window.SupabaseSync.storagePathFromRef?.(existing.image)
+              && window.SupabaseSync.isPathKnownMissing?.(window.SupabaseSync.storagePathFromRef(existing.image)));
+          if (needsRepair) {
+            let stored = image;
+            if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.archiveGeneratedCardImage) {
+              try {
+                stored = await window.SupabaseSync.archiveGeneratedCardImage(existing.id, image, {
+                  jobId: jobId || existing.genJobId || null
+                }) || image;
+              } catch (e) {
+                console.warn('[addCardFromGenerated] duplicate repair archive failed', e);
+              }
+            }
+            existing.image = stored;
+            existing.updatedAt = Date.now();
+            await saveAllData({ skipCloud: true });
+            renderGroups();
+            renderCards(true);
+            if (window.SupabaseSync?.isLoggedIn?.()) scheduleCloudPush({ urgent: true });
+            window.FeatureDraft?.prunePendingGenJobsFromWarehouse?.();
+            return { ok: true, cardId: existing.id, repaired: true };
+          }
+        }
         if (existing && image && !existing.image) {
           existing.image = image;
           existing.updatedAt = Date.now();
@@ -1313,15 +1335,36 @@
         customFields: {},
         genSourceId: sourceId || null,
         genJobId: jobId || null,
+        resolution: payload.resolution || null,
+        model: payload.model || null,
+        genQuality: payload.quality || null,
+        genSize: payload.size || null,
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
       cards.push(card);
+      if (image) void saveCardImageBackup(card.id, image).catch(() => {});
+      if (image && window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.archiveGeneratedCardImage) {
+        try {
+          const archived = await window.SupabaseSync.archiveGeneratedCardImage(card.id, image, {
+            jobId: jobId || null
+          });
+          if (archived && archived !== card.image) {
+            card.image = archived;
+            card.updatedAt = Date.now();
+          }
+        } catch (e) {
+          console.warn('[addCardFromGenerated] image archive failed', e);
+        }
+      }
       if (payload.publishToCommunity && window.FeatureDraft?.syncCardToCommunity) {
-        window.FeatureDraft.syncCardToCommunity(card, true);
+        if (window.FeatureDraft?.isCommunityPublishEligible?.(card)) {
+          await window.FeatureDraft.syncCardToCommunity(card, true);
+        } else if (!payload.silentToast) {
+          showToast('已保存到仓库；配图归档中，请稍后在卡片库手动公开到社区');
+        }
       }
       await saveAllData({ skipCloud: true });
-      if (image) void saveCardImageBackup(card.id, image).catch(() => {});
       renderGroups();
       renderCards(true);
       updateGuestLimitUI();
@@ -1334,6 +1377,54 @@
       window.FeatureDraft?.prunePendingGenJobsFromWarehouse?.();
       return { ok: true, cardId: card.id };
     };
+
+    let genCardImageRepairInflight = null;
+    async function repairGeneratedCardImagesQuiet() {
+      if (!window.SupabaseSync?.isLoggedIn?.() || !window.SupabaseSync?.archiveGeneratedCardImage) return;
+      if (genCardImageRepairInflight) return genCardImageRepairInflight;
+      const targets = cards.filter((c) => {
+        if (!c?.id || !c?.image) return false;
+        if (!c.genJobId && !(c.tags || []).includes('图片生成')) return false;
+        if (window.SupabaseSync.isDataUrl?.(c.image)) return true;
+        if (/^https?:\/\//i.test(c.image)) return true;
+        if (window.SupabaseSync.isStorageRef?.(c.image)) {
+          const path = window.SupabaseSync.storagePathFromRef?.(c.image);
+          return !!(path && window.SupabaseSync.isPathKnownMissing?.(path));
+        }
+        return false;
+      }).slice(0, 12);
+      if (!targets.length) return;
+      genCardImageRepairInflight = (async () => {
+        let changed = false;
+        for (const c of targets) {
+          try {
+            let src = c.image;
+            if (typeof getCardImageBackup === 'function') {
+              const backup = await getCardImageBackup(c.id);
+              if (backup && String(backup).startsWith('data:')) src = backup;
+            }
+            const ref = await window.SupabaseSync.archiveGeneratedCardImage(c.id, src);
+            if (ref && ref !== c.image) {
+              c.image = ref;
+              c.updatedAt = Date.now();
+              changed = true;
+            }
+          } catch (e) {
+            console.warn('[repairGeneratedCardImages] skipped', c.id, e);
+          }
+        }
+        if (changed) {
+          await saveAllData({ skipCloud: true });
+          if (document.getElementById('pageWarehouse')?.classList.contains('active')) renderCards(true);
+          if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+            window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: true });
+          }
+          scheduleCloudPush({ urgent: true });
+        }
+      })().finally(() => { genCardImageRepairInflight = null; });
+      return genCardImageRepairInflight;
+    }
+    window.repairGeneratedCardImagesQuiet = repairGeneratedCardImagesQuiet;
 
     function showCustomModal(title, content, onConfirm, onCancel, isPrompt = false, suggestions = [], opts = {}) {
       const overlay = document.getElementById('customModalOverlay');
@@ -3330,7 +3421,8 @@
       try {
         if (window.SupabaseSync?.resolveCardDownloadUrl) {
           url = await window.SupabaseSync.resolveCardDownloadUrl(card.image, {
-            assetId: card.id
+            assetId: card.id,
+            jobId: card.genJobId || null
           });
         } else if (window.SupabaseSync?.resolveDisplayUrl) {
           url = await window.SupabaseSync.resolveDisplayUrl(card.image, {
@@ -3375,6 +3467,9 @@
       const placeholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="%2318181c" width="4" height="3"/></svg>');
       if (!image || !cardHasDisplayImage({ image })) return placeholder;
       if (typeof image === 'string' && image.startsWith('data:image/')) return image;
+      if (typeof image === 'string' && /^https?:\/\//i.test(image) && !window.SupabaseSync?.isInvalidMediaUrl?.(image)) {
+        return image;
+      }
       return placeholder;
     }
 
@@ -4091,6 +4186,9 @@
         else setTimeout(refreshFeeds, 2500);
       } else {
         refreshFeeds();
+      }
+      if (window.SupabaseSync?.isLoggedIn?.()) {
+        void repairGeneratedCardImagesQuiet();
       }
     }
     function bindQuickPreviewButtons() {
@@ -7145,7 +7243,9 @@
         void (async () => {
           try {
             if (card?.image && window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync.isStorageRef(card.image)) {
-              try { await window.SupabaseSync.deleteCardImageByUrl(card.image); } catch (e) { /* ignore */ }
+              try {
+                await window.SupabaseSync.deleteCardImageByUrl(card.image, { allowGenerated: true });
+              } catch (e) { /* ignore */ }
             }
             await window.FeatureDraft?.unpublishCommunityByCardId?.(id, { silent: true });
             await saveAllData();
@@ -7648,32 +7748,103 @@
       setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
     }
 
-    async function downloadCardImageFile(imageRef, cardId, filename) {
+    const cardDownloadInflight = new Set();
+
+    function downloadPrepToast(card) {
+      const res = String(card?.resolution || '').toLowerCase();
+      if (res === '4k') {
+        showToast('正在拉取 4K 原图…（文件较大，约 10–40 秒，可继续浏览其他图）', 5000);
+      } else if (res === '2k') {
+        showToast('正在拉取 2K 原图…（约几秒，可继续浏览其他图）', 3500);
+      } else {
+        showToast('正在准备原图下载…', 2500);
+      }
+    }
+
+    function setDownloadTriggerBusy(btn, busy) {
+      if (!btn) return;
+      const label = btn.querySelector('span');
+      if (busy) {
+        if (!btn.dataset.prevLabel) {
+          btn.dataset.prevLabel = label?.textContent || btn.textContent || '下载';
+        }
+        btn.classList.add('is-downloading');
+        btn.setAttribute('aria-busy', 'true');
+        if (label) label.textContent = '下载中…';
+        else btn.textContent = '下载中…';
+      } else {
+        btn.classList.remove('is-downloading');
+        btn.removeAttribute('aria-busy');
+        const prev = btn.dataset.prevLabel || '下载';
+        if (label) label.textContent = prev;
+        else btn.textContent = prev;
+        delete btn.dataset.prevLabel;
+      }
+    }
+
+    async function downloadCardImageFile(imageRef, cardId, filename, opts = {}) {
       const name = filename || `prompt-hub-card-${cardId || Date.now()}.jpg`;
-      if (typeof imageRef === 'string' && imageRef.startsWith('data:image/')) {
-        await promptHubSaveImage(imageRef, name);
-        showToast('已开始下载');
+      const card = cardId ? cards.find((c) => c.id === cardId) : null;
+      const inflightKey = String(cardId || imageRef || 'anon');
+      const triggerBtn = opts.triggerBtn || null;
+
+      if (cardDownloadInflight.has(inflightKey)) {
+        showToast('该图正在下载中，请稍候…');
         return;
       }
-      if (window.SupabaseSync?.downloadCardStorageBlob) {
-        const blob = await window.SupabaseSync.downloadCardStorageBlob(imageRef, cardId);
-        if (blob) {
-          saveBlobDownload(blob, name);
-          showToast(`已开始下载 · ${formatFileSize(blob.size)}`);
+
+      cardDownloadInflight.add(inflightKey);
+      setDownloadTriggerBusy(triggerBtn, true);
+      downloadPrepToast(card);
+
+      try {
+        if (card && window.SupabaseSync?.downloadCardFullResBlob) {
+          const fullBlob = await window.SupabaseSync.downloadCardFullResBlob(card);
+          if (fullBlob) {
+            saveBlobDownload(fullBlob, name);
+            const minBytes = window.SupabaseSync.expectedMinFullImageBytes?.(card.resolution) || 0;
+            if (minBytes > 0 && fullBlob.size < minBytes) {
+              showToast(`已下载 · ${formatFileSize(fullBlob.size)}（体积偏小，请稍后再试或重新生成）`, 6000);
+            } else {
+              showToast(`下载完成 · ${formatFileSize(fullBlob.size)}`);
+            }
+            return;
+          }
+        }
+        if (typeof imageRef === 'string' && imageRef.startsWith('data:image/')) {
+          await promptHubSaveImage(imageRef, name);
+          showToast('下载完成');
           return;
         }
-      }
-      if (window.SupabaseSync?.resolveCardDownloadUrl) {
-        const url = await window.SupabaseSync.resolveCardDownloadUrl(imageRef, { assetId: cardId });
-        if (url) {
-          await promptHubSaveImage(url, name);
-          showToast('已开始下载');
-          return;
+        if (window.SupabaseSync?.downloadCardStorageBlob) {
+          const jobId = card?.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null;
+          const blob = await window.SupabaseSync.downloadCardStorageBlob(imageRef, cardId, { jobId });
+          if (blob) {
+            saveBlobDownload(blob, name);
+            showToast(`下载完成 · ${formatFileSize(blob.size)}`);
+            return;
+          }
         }
+        if (card?.genJobId && window.SupabaseSync?.rearchiveGeneratedCardFromJob) {
+          await window.SupabaseSync.rearchiveGeneratedCardFromJob(card);
+          const retry = await window.SupabaseSync.downloadCardFullResBlob(card, { skipRepair: true });
+          if (retry) {
+            saveBlobDownload(retry, name);
+            showToast(`下载完成 · ${formatFileSize(retry.size)}`);
+            return;
+          }
+        }
+        showToast('原图暂不可用，请稍后重试或重新生成');
+      } catch (e) {
+        showToast('下载失败，请稍后重试');
+        console.warn('[download] card image failed', e);
+      } finally {
+        cardDownloadInflight.delete(inflightKey);
+        setDownloadTriggerBusy(triggerBtn, false);
       }
-      showToast('大图加载失败，请稍后重试');
     }
     window.downloadCardImageFile = downloadCardImageFile;
+    window.isCardDownloadInflight = (id) => cardDownloadInflight.has(String(id || ''));
 
     async function downloadPanelCardImage() {
       if (!imageData) {
@@ -8608,7 +8779,7 @@
     async function downloadLightboxImage() {
       const img = document.getElementById('lightboxImage');
       const dlBtn = document.getElementById('lightboxDownloadBtn');
-      if (dlBtn?.disabled) {
+      if (dlBtn?.disabled && !dlBtn.classList.contains('is-downloading')) {
         showToast('图片加载中，请稍后再下载');
         return;
       }
@@ -8620,26 +8791,9 @@
       if (!cardId && !window.__lightboxCommunityMode) cardId = selectedCardId;
       const card = cardId ? cards.find((c) => c.id === cardId) : null;
       if (card?.image) {
-        const prevLabel = dlBtn?.querySelector('span')?.textContent || dlBtn?.textContent;
-        if (dlBtn) {
-          dlBtn.disabled = true;
-          const label = dlBtn.querySelector('span');
-          if (label) label.textContent = '下载中…';
-          else dlBtn.textContent = '下载中…';
-        }
-        try {
-          await downloadCardImageFile(card.image, card.id, `prompt-hub-${card.id}.jpg`);
-        } catch (e) {
-          showToast('下载失败，请稍后重试');
-          console.warn('[download] lightbox image failed', e);
-        } finally {
-          if (dlBtn) {
-            dlBtn.disabled = !(img?.src && !String(img.src).includes('data:image/svg'));
-            const label = dlBtn.querySelector('span');
-            if (label && prevLabel) label.textContent = prevLabel;
-            else if (prevLabel) dlBtn.textContent = prevLabel;
-          }
-        }
+        await downloadCardImageFile(card.image, card.id, `prompt-hub-${card.id}.jpg`, {
+          triggerBtn: dlBtn
+        });
         return;
       }
       const url = img?.src || '';
@@ -8648,26 +8802,16 @@
         return;
       }
       const filename = `prompt-hub-${Date.now()}.png`;
-      const prevLabel = dlBtn?.querySelector('span')?.textContent || dlBtn?.textContent;
-      if (dlBtn) {
-        dlBtn.disabled = true;
-        const label = dlBtn.querySelector('span');
-        if (label) label.textContent = '下载中…';
-        else dlBtn.textContent = '下载中…';
-      }
+      setDownloadTriggerBusy(dlBtn, true);
+      showToast('正在准备下载…', 2500);
       try {
         await promptHubSaveImage(url, filename, img);
-        showToast('图片已开始下载');
+        showToast('下载完成');
       } catch (e) {
         showToast('下载失败，请稍后重试');
         console.warn('[download] lightbox image failed', e);
       } finally {
-        if (dlBtn) {
-          dlBtn.disabled = !(img?.src && !String(img.src).includes('data:image/svg'));
-          const label = dlBtn.querySelector('span');
-          if (label && prevLabel) label.textContent = prevLabel;
-          else if (prevLabel) dlBtn.textContent = prevLabel;
-        }
+        setDownloadTriggerBusy(dlBtn, false);
       }
     }
     window.downloadLightboxImage = downloadLightboxImage;

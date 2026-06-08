@@ -10,6 +10,9 @@ IMAGE_API_KEY=
 # ITHINK_API_KEY=   # ThinkAI 经济线路（https://www.thinkai.tv/console/token）
 # ITHINK_API_BASE_URL=https://token.ithinkai.cn
 # ITHINK_UPSTREAM_MODEL=gpt-image-2   # 模型广场里的 ID，不对时改这个
+# MOOKO_API_KEY=   # 木瓜AI 线路（https://api.mooko.ai/pricing）
+# MOOKO_API_BASE_URL=https://api.mooko.ai
+# MOOKO_MAX_CONCURRENT_SUBMITS=8   # 慢速线并发 POST 上限（1–16，默认 8）
 
 # 新图只写 R2（须已建桶 prompt-hub-card-images 且 wrangler deploy 绑定）
 MEDIA_STORAGE_MODE=r2

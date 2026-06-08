@@ -5,6 +5,13 @@ import { archiveRemoteImage, isStorageRef, storagePathFromRef, toStorageRef } fr
 const BUCKET = 'card-images';
 const MIN_IMAGE_BYTES = 512;
 
+function expectedMinFullBytes(resolution?: string | null): number {
+  const r = String(resolution || '1k').toLowerCase();
+  if (r === '4k') return Math.floor(1.1 * 1024 * 1024);
+  if (r === '2k') return Math.floor(400 * 1024);
+  return Math.floor(80 * 1024);
+}
+
 type JobRow = {
   id: string;
   prompt?: string | null;
@@ -18,18 +25,28 @@ function generateCardId(): string {
   return `wh_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-async function storageBlobOk(
+async function storageBlobSize(
   admin: SupabaseClient,
   path: string
-): Promise<boolean> {
+): Promise<number> {
   const clean = path.replace(/^\//, '');
-  if (!clean) return false;
+  if (!clean) return 0;
   try {
     const { data, error } = await admin.storage.from(BUCKET).download(clean);
-    return !error && !!data && (data.size || 0) >= MIN_IMAGE_BYTES;
+    if (error || !data) return 0;
+    return data.size || 0;
   } catch {
-    return false;
+    return 0;
   }
+}
+
+async function storageBlobOk(
+  admin: SupabaseClient,
+  path: string,
+  minBytes = MIN_IMAGE_BYTES
+): Promise<boolean> {
+  const size = await storageBlobSize(admin, path);
+  return size >= Math.max(MIN_IMAGE_BYTES, minBytes);
 }
 
 async function resolveImageRefForJob(
@@ -39,27 +56,37 @@ async function resolveImageRefForJob(
   job: JobRow
 ): Promise<string | null> {
   const genPath = `${userId}/generated/${jobId}.jpg`;
-  const genGrid = `${userId}/generated/${jobId}_grid.jpg`;
+  const minBytes = expectedMinFullBytes(
+    (job as { resolution?: string | null }).resolution
+  );
 
-  if (await storageBlobOk(admin, genPath)) {
+  if (await storageBlobOk(admin, genPath, minBytes)) {
     return toStorageRef(genPath);
-  }
-  if (await storageBlobOk(admin, genGrid)) {
-    return toStorageRef(genGrid);
   }
 
   const raw = job.result_image_url as string | null;
-  if (raw && isStorageRef(raw)) {
-    const path = storagePathFromRef(raw);
-    if (path && (await storageBlobOk(admin, path))) {
-      return raw.startsWith('storage://') ? raw : toStorageRef(path);
+  const meta = (job.meta || {}) as Record<string, unknown>;
+  const upstream =
+    typeof meta.upstreamImageUrl === 'string' && /^https:\/\//i.test(meta.upstreamImageUrl)
+      ? meta.upstreamImageUrl
+      : null;
+  const rearchiveFrom = upstream || (raw && /^https:\/\//i.test(raw) ? raw : null);
+  if (rearchiveFrom) {
+    try {
+      return await archiveRemoteImage(admin, userId, jobId, rearchiveFrom, { maxAttempts: 3 });
+    } catch {
+      /* fall through */
     }
   }
-  if (raw && /^https:\/\//i.test(raw)) {
-    try {
-      return await archiveRemoteImage(admin, userId, jobId, raw, { maxAttempts: 2 });
-    } catch {
-      return null;
+
+  if (await storageBlobOk(admin, genPath, MIN_IMAGE_BYTES)) {
+    return toStorageRef(genPath);
+  }
+
+  if (raw && isStorageRef(raw)) {
+    const path = storagePathFromRef(raw);
+    if (path && (await storageBlobOk(admin, path, minBytes))) {
+      return raw.startsWith('storage://') ? raw : toStorageRef(path);
     }
   }
   return null;
@@ -244,10 +271,19 @@ export async function repairWarehouseCardImagesFromJobs(
     }
 
     const genPath = `${userId}/generated/${jobId}.jpg`;
+    const minBytes = expectedMinFullBytes(
+      String(job.resolution || card.resolution || '1k')
+    );
     const currentPath = storagePathFromRef(String(card.image || ''));
-    const currentOk = currentPath ? await storageBlobOk(admin, currentPath) : false;
-    const canonicalOk = await storageBlobOk(admin, genPath);
+    const currentSize = currentPath ? await storageBlobSize(admin, currentPath) : 0;
+    const canonicalSize = await storageBlobSize(admin, genPath);
+    const currentOk = currentSize >= minBytes;
+    const canonicalOk = canonicalSize >= minBytes;
     if (currentOk && canonicalOk && currentPath === genPath) {
+      skipped += 1;
+      continue;
+    }
+    if (currentOk && currentPath && currentPath !== genPath && canonicalSize < minBytes) {
       skipped += 1;
       continue;
     }

@@ -118,6 +118,13 @@ function extractImageUrl(payload: unknown): string | null {
   return all[0] || null;
 }
 
+export function isApimartContentViolationMessage(msg: string | null | undefined): boolean {
+  const s = String(msg || '').toLowerCase();
+  return /prohibited words or images|prohibited|flagged as containing|content.?policy|moderation|violation|违规|敏感|blocked|safety/i.test(
+    s
+  );
+}
+
 function buildRequestBody(params: SubmitParams): Record<string, unknown> {
   const upstream = params.upstreamModel.trim().toLowerCase();
   const size = params.size || '1:1';
@@ -238,11 +245,14 @@ export async function fetchApimartTaskOnce(
         errorMessage: null
       };
     }
+    const rawErr = String(data.error_message || data.error || 'upstream_failed');
     return {
       status,
       imageUrl: null,
       imageUrls: [],
-      errorMessage: String(data.error_message || data.error || 'upstream_failed')
+      errorMessage: isApimartContentViolationMessage(rawErr)
+        ? 'upstream_content_violation'
+        : rawErr
     };
   }
 

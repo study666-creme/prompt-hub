@@ -50,6 +50,7 @@ describe('GrsAI upstream status', () => {
       refundOnViolation: true,
       violationNotice: null,
       group: 'classic' as const,
+      uiFamily: 'gim2' as const,
       description: '',
       upstreamPoints: 1300,
       resolutions: ['1k', '2k', '4k'] as const,

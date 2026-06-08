@@ -8,6 +8,7 @@ import { supabaseProxyHandler } from './routes/supabase-proxy';
 import { v1 } from './routes/v1';
 import { webhookRoutes } from './routes/webhooks/payment';
 import type { Env } from './env';
+import { drainMookoPendingSubmits } from './lib/mooko-drain';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -115,4 +116,17 @@ app.notFound(c => {
   );
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext
+  ): Promise<void> {
+    try {
+      await drainMookoPendingSubmits(env, ctx);
+    } catch (e) {
+      console.error('[scheduled] mooko-drain failed', e);
+    }
+  }
+};

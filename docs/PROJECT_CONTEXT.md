@@ -24,33 +24,43 @@
 
 ---
 
-## 当前部署阶段（2026-06-08 · ThinkAI + 手机修复）
+## 当前部署阶段（2026-06-08 · 原图 + 524 + 木瓜慢速线）
 
 | 项 | 状态 |
 |----|------|
-| **主域名** | **https://prompt-hubs.com** · Pages `prompt-hub-hub` |
-| Worker | `prompt-hub-api` · **https://api.prompt-hubs.com** |
-| **Pages 构建号** | **`20260608l`** |
-| **ThinkAI** | 慢速 `ithink-gpt-image-2-slow` · **仅 1K** · 后台提交防 502 · 默认 upstream `gpt-image-2` |
-| **手机** | 社区顶栏留白修复 · 4K 编辑预览先缩略图再拉 full |
-| **排序** | 卡片库「最近更新」记忆 · 生图作品按最近生成 |
+| **主域名** | **https://prompt-hubs.com** · Pages `prompt-hub-hub` · build **`20260608l`** |
+| Worker | `prompt-hub-api` · **https://api.prompt-hubs.com** · Cron `* * * * *`（含 `mooko-drain`） |
+| **卡片上传** | Worker + 前端单张上限 **50MB**（与 `card-images` 桶一致）；8MB 旧限制已移除 |
+| **原图下载** | 多路径取**最大体积**；优先 `generated/{jobId}`；保存卡片时**不删**生图归档；4K 偏小自动 re-archive |
+| **生图提交** | GrsAI/Apimart **后台提交**（防 CF **524**）；木瓜排队后 **POST 即触发 drain** + 轮询补提交 |
+| **生图商品** | 入库原字节；列表仅 grid 缩略；`settle=1` 深查上游 |
 
-### 已知问题（优先）
+### 已打通 / 未打通
 
-1. **ThinkAI 密钥**：在 server 执行 `npx wrangler secret put ITHINK_API_KEY`（Token 见 thinkai.tv 控制台）。
-2. **R2 同步 FAIL**：分批重跑 `sync-supabase-to-r2.mjs`。
-3. P0 带宽见 `docs/CURRENT-ISSUES.md`。
+- ✅ `/health`、登录、兑换、生图扣费、R2 `r2-first` 读图
+- ✅ 4K 原图上传（≤50MB）、下载走 blob 不落 JSON 404 页
+- ⚠️ 木瓜慢速线 2–12 分钟；勿用后台「测试勿用」备用模型做日常出图
+- ⚠️ 编辑保存卡片时勿重复上传原图（会写入 `card_xxx` 副本）
+
+### 已知问题
+
+1. **Apimart**：多为内容审核，改提示词；积分已退。
+2. **旧图偏小**：上游链过期则 repair 无效，需重新生成。
+3. **524**：前台应转「后台等待」；强刷 build `20260608l` 后重试。
 
 ### 下一步
 
-1. 配置 ThinkAI 后验收慢速 GPT Image 2 生图与扣费。
-2. 手机验收社区顶栏与 4K 卡片编辑预览。
+1. 日常生图用 **GPT Image 2 VIP**（GrsAI），2K/4K 验收下载体积 ≥10MB。
+2. 木瓜线路仅慢速省钱场景；监控 `mooko-drain` 日志与木瓜控制台消费记录。
+3. 后台「测试勿用」模型改 `maintenance` 或下架，避免用户误选。
 
 ### 部署
 
 ```powershell
 cd d:\prompt-hub
 .\deploy-pages.ps1
+cd server
+npx wrangler deploy
 ```
 
 ### 测试账号

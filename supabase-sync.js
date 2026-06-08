@@ -31,11 +31,18 @@
   /** 卡片库主图（未开原图时）：兼顾清晰度与体积 */
   const CARD_UPLOAD_MAX_SIDE = 2560;
   const CARD_UPLOAD_JPEG_QUALITY = 0.88;
-  /** 设置里开启「保存原图」时的单张上限 */
-  const CARD_ORIGINAL_MAX_BYTES = 20 * 1024 * 1024;
-  /** 与 supabase/storage.sql 中 card-images.file_size_limit 一致（升级前多为 5MB） */
+  /** 生图入库：原字节入库，仅列表 grid 缩略；4K 等付费档位不得重编码降画质 */
+  function extensionFromMime(mime) {
+    const m = String(mime || '').toLowerCase();
+    if (m.includes('png')) return 'png';
+    if (m.includes('webp')) return 'webp';
+    if (m.includes('jpeg') || m.includes('jpg')) return 'jpg';
+    return 'jpg';
+  }
   /** 与 Supabase 桶 card-images 上限一致（迁移 20260602120000 为 50MB） */
   const STORAGE_BUCKET_LIMIT_BYTES = 52428800;
+  /** 设置里开启「保存原图」/ 生图入库时的单张上限（与桶 50MB 一致） */
+  const CARD_ORIGINAL_MAX_BYTES = STORAGE_BUCKET_LIMIT_BYTES;
   /** 列表用 grid 缓存键；签名不再走 Storage transform（易 500） */
   const VARIANT_GRID = 'grid';
   const VARIANT_FULL = 'full';
@@ -701,6 +708,9 @@
     if (isDataUrl(card.image) || (typeof card.image === 'string' && card.image.startsWith('blob:'))) {
       return true;
     }
+    if (typeof card.image === 'string' && /^https?:\/\//i.test(card.image)) {
+      return true;
+    }
     if (!isStorageRef(card.image)) return false;
     const primary = primaryImagePath(card.image, card.id);
     return !!(primary && isPathKnownMissing(primary));
@@ -767,8 +777,8 @@
     return primary ? gridPathFromPrimary(primary) : null;
   }
 
-  function pathsForVariant(image, assetId, ownerId, variant) {
-    const all = listImagePathCandidates(image, assetId, ownerId);
+  function pathsForVariant(image, assetId, ownerId, variant, jobId) {
+    const all = listImagePathCandidates(image, assetId, ownerId, jobId);
     const skipMissing = (paths) => paths.filter((p) => !isPathKnownMissing(String(p || '').replace(/^\//, '')));
     if (variant === VARIANT_FULL) {
       return skipMissing(all.filter((p) => !/_grid\.(jpe?g|webp|png)$/i.test(p)));
@@ -1376,12 +1386,47 @@
 
   async function sourceToBlob(source) {
     if (source instanceof Blob) return source;
-    if (typeof source === 'string' && (isDataUrl(source) || source.startsWith('blob:'))) {
-      const res = await fetch(source);
-      if (!res.ok) throw new Error('无法读取图片');
-      return res.blob();
+    if (typeof source === 'string') {
+      if (isDataUrl(source) || source.startsWith('blob:')) {
+        const res = await fetch(source);
+        if (!res.ok) throw new Error('无法读取图片');
+        return res.blob();
+      }
+      if (/^https?:\/\//i.test(source)) {
+        return fetchRemoteImageBlob(source);
+      }
     }
     throw new Error('不支持的图片格式');
+  }
+
+  /** 跨域生图 URL 经 Worker 代理拉 blob，避免 canvas 污染导致 toBlob 失败 */
+  async function fetchRemoteImageBlob(url) {
+    const raw = String(url || '').trim();
+    if (!raw) throw new Error('远程图片地址无效');
+    if (window.PromptHubApi?.fetchMediaAsBlobUrl) {
+      const tmp = await window.PromptHubApi.fetchMediaAsBlobUrl(raw);
+      if (tmp) {
+        try {
+          const res = await fetch(tmp);
+          if (res.ok) return await res.blob();
+        } finally {
+          try { URL.revokeObjectURL(tmp); } catch (e) { /* ignore */ }
+        }
+      }
+    }
+    try {
+      const res = await fetch(raw, { mode: 'cors', credentials: 'omit' });
+      if (res.ok) return await res.blob();
+    } catch (e) { /* fall through */ }
+    throw new Error('远程图片下载失败，请换一张本地图片重试');
+  }
+
+  async function coerceImageUploadSource(source) {
+    if (source instanceof Blob) return source;
+    if (typeof source === 'string' && /^https?:\/\//i.test(source)) {
+      return fetchRemoteImageBlob(source);
+    }
+    return source;
   }
 
   function isGridStoragePath(path) {
@@ -1462,7 +1507,8 @@
   }
 
   async function encodeFullResolutionJpeg(source, quality) {
-    const img = await loadImageFromSource(source);
+    const normalized = await coerceImageUploadSource(source);
+    const img = await loadImageFromSource(normalized);
     if (typeof source !== 'string' && source instanceof Blob) {
       try { URL.revokeObjectURL(img.src); } catch (e) { /* ignore */ }
     }
@@ -1532,16 +1578,41 @@
     });
   }
 
-  function listImagePathCandidates(image, assetId, ownerId) {
+  function isGeneratedWarehouseCard(card) {
+    if (!card) return false;
+    if (card.genJobId) return true;
+    return Array.isArray(card.tags) && card.tags.includes('图片生成');
+  }
+
+  function expectedMinFullImageBytes(resolution) {
+    const r = String(resolution || '1k').toLowerCase();
+    /** 4K JPEG 通常 10MB+；低于此多为 card_xxx 压缩副本，应继续找 generated 或触发修复 */
+    if (r === '4k') return Math.floor(10 * 1024 * 1024);
+    if (r === '2k') return Math.floor(1.2 * 1024 * 1024);
+    return Math.floor(80 * 1024);
+  }
+
+  function isGeneratedArchivePath(pathOrRef) {
+    const path = storagePathFromRef(pathOrRef) || String(pathOrRef || '').replace(/^\//, '');
+    return /\/generated\/[^/]+\.(jpe?g|png|webp)$/i.test(path);
+  }
+
+  function listImagePathCandidates(image, assetId, ownerId, jobId) {
     const paths = [];
     const add = (p) => {
       const key = (p || '').replace(/^\//, '');
       if (key && !paths.includes(key)) paths.push(key);
     };
+    const uid = ownerId || getUserId();
+    const genJobKey = jobId ? String(jobId).replace(/#\d+$/, '') : '';
+    if (uid && genJobKey) {
+      add(`${uid}/generated/${genJobKey}.jpg`);
+      add(`${uid}/generated/${genJobKey}.png`);
+      add(`${uid}/generated/${genJobKey}.webp`);
+    }
     add(storagePathFromRef(image));
     const canonical = cardImageStoragePath(assetId, ownerId);
     if (canonical) add(canonical);
-    const uid = ownerId || getUserId();
     if (uid && assetId) {
       const base = String(assetId).replace(/[^a-zA-Z0-9_-]/g, '_');
       add(`${uid}/${base}.jpg`);
@@ -2871,7 +2942,8 @@
         const ref = await uploadStorageBlobViaApi(path, blob, opts);
         if (ref) return ref;
       } catch (e) {
-        throw e;
+        if ((blob.size || 0) > STORAGE_BUCKET_LIMIT_BYTES) throw e;
+        console.warn('[SupabaseSync] Worker 上传失败，改走 Storage 直传', e);
       }
     }
     if (typeof opts.onProgress === 'function') {
@@ -2915,7 +2987,36 @@
     throw lastErr || new Error('图片上传失败，请检查网络后重试');
   }
 
-  async function persistGenerationImage(assetId, image) {
+  /** 生图入库：原字节写入 generated/{jobId}，列表另存 _grid 缩略 */
+  async function archiveGeneratedCardImage(cardId, image, opts = {}) {
+    if (!cardId || !image) return image || null;
+    if (isStorageRef(image)) {
+      const normalized = normalizeImageRef(image);
+      if (await verifyStorageRef(normalized, cardId, { quick: true })) return normalized;
+      return normalized;
+    }
+    if (!isLoggedIn()) return image;
+    const persistOpts = opts?.jobId ? { jobId: opts.jobId } : {};
+    let ref = image;
+    try {
+      ref = await persistGenerationImage(cardId, image, persistOpts);
+    } catch (e) {
+      console.warn('[SupabaseSync] persistGenerationImage failed', cardId, e);
+    }
+    if (ref && isStorageRef(ref) && await verifyStorageRef(ref, cardId, { quick: true })) {
+      return ref;
+    }
+    if (/^https?:\/\//i.test(image) || isDataUrl(image) || String(image).startsWith('blob:')) {
+      try {
+        return await persistGenerationImage(cardId, image, persistOpts);
+      } catch (e) {
+        console.warn('[SupabaseSync] archiveGeneratedCardImage fallback failed', cardId, e);
+      }
+    }
+    return ref || image;
+  }
+
+  async function persistGenerationImage(assetId, image, opts = {}) {
     if (!image || typeof image !== 'string') return image;
     if (!isLoggedIn()) return image;
     if (isStorageRef(image)) {
@@ -2924,9 +3025,11 @@
       return normalized;
     }
     await ensureSession();
-    const id = String(assetId || Date.now());
+    const storeId = opts?.jobId
+      ? String(opts.jobId).replace(/#\d+$/, '')
+      : String(assetId || Date.now());
     if (isDataUrl(image) || image.startsWith('blob:')) {
-      return uploadGeneratedImage(id, image);
+      return uploadGeneratedImage(storeId, image);
     }
     if (/^https?:\/\//i.test(image)) {
       let blob = null;
@@ -2950,9 +3053,9 @@
         }
       }
       if (blob && (await blobLooksLikeUsableImage(blob))) {
-        return uploadGeneratedImage(id, blob);
+        return uploadGeneratedImage(storeId, blob);
       }
-      console.warn('[SupabaseSync] 生成图远程地址无效或已过期', id);
+      console.warn('[SupabaseSync] 生成图远程地址无效或已过期', storeId);
       return image;
     }
     return image;
@@ -2962,13 +3065,21 @@
     await ensureSession();
     const uid = getUserId();
     if (!uid || !assetId) throw new Error('未登录');
-    const blob = await compressImage(source);
+    const blob = await sourceToBlob(source);
     if (!(await blobLooksLikeUsableImage(blob))) {
       throw new Error('生成图无效（全黑或无法解码），已拒绝上传');
     }
-    const path = `${uid}/generated/${assetId}.jpg`;
+    if ((blob.size || 0) > STORAGE_BUCKET_LIMIT_BYTES) {
+      const mb = ((blob.size || 0) / (1024 * 1024)).toFixed(1);
+      throw new Error(`生成图约 ${mb}MB，超过云存储单文件 50MB 上限`);
+    }
+    const ext = extensionFromMime(blob.type);
+    const path = `${uid}/generated/${assetId}.${ext}`;
     const gridPath = gridPathFromPrimary(path);
-    const ref = await uploadStorageBlob(path, blob, { skipVerify: true });
+    const ref = await uploadStorageBlob(path, blob, {
+      skipVerify: true,
+      contentType: blob.type || `image/${ext}`
+    });
     if (gridPath) {
       try {
         const gridBlob = await compressImageToGrid(source);
@@ -3039,7 +3150,8 @@
   async function compressImage(source, opts) {
     const maxSide = opts?.maxSide || MAX_SIDE;
     const quality = opts?.quality != null ? opts.quality : JPEG_QUALITY;
-    const img = await loadImageFromSource(source);
+    const normalized = await coerceImageUploadSource(source);
+    const img = await loadImageFromSource(normalized);
     if (typeof source !== 'string' && source instanceof Blob) {
       try { URL.revokeObjectURL(img.src); } catch (e) { /* ignore */ }
     }
@@ -3129,7 +3241,8 @@
     if (isDataUrl(image) || image.startsWith('blob:')) return image;
     const assetId = opts?.assetId;
     const normalized = normalizeImageRef(image);
-    const candidates = pathsForVariant(normalized, assetId, opts?.authorId, VARIANT_FULL)
+    const jobId = opts?.jobId ? String(opts.jobId).replace(/#\d+$/, '') : null;
+    const candidates = pathsForVariant(normalized, assetId, opts?.authorId, VARIANT_FULL, jobId)
       .filter((p) => !isGridStoragePath(p));
     for (const raw of candidates) {
       const key = raw.replace(/^\//, '');
@@ -3145,11 +3258,13 @@
     return null;
   }
 
-  async function deleteCardImageByUrl(url) {
+  async function deleteCardImageByUrl(url, opts = {}) {
     if (!url || !isStorageRef(url)) return;
-    const sb = getClient();
     const path = storagePathFromRef(url);
-    if (!sb || !path) return;
+    if (!path) return;
+    if (isGeneratedArchivePath(path) && opts.allowGenerated !== true) return;
+    const sb = getClient();
+    if (!sb) return;
     const grid = gridPathFromPrimary(path);
     const removeList = grid ? [path, grid] : [path];
     await sb.storage.from(BUCKET).remove(removeList);
@@ -3162,30 +3277,128 @@
   }
 
   function uploadOptsForCard(card) {
+    const forceOriginal = isGeneratedWarehouseCard(card);
     return {
-      original: card?.imageUploadOriginal === true || cardUploadOriginalEnabled()
+      original: forceOriginal || card?.imageUploadOriginal === true || cardUploadOriginalEnabled()
     };
   }
 
-  async function downloadCardStorageBlob(image, assetId) {
+  async function fetchBlobFromCdnPath(path, assetId) {
+    const key = String(path || '').replace(/^\//, '');
+    if (!key || isGridStoragePath(key)) return null;
+    try {
+      const url = await resolvePathToUrl(toStorageRef(key), VARIANT_FULL, {
+        cardId: assetId,
+        bypassSignBudget: true
+      });
+      if (!url) return null;
+      const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+      if (!res.ok) return null;
+      const ct = String(res.headers.get('content-type') || '').toLowerCase();
+      if (ct.includes('json')) return null;
+      const blob = await res.blob();
+      if ((blob.size || 0) < MIN_VALID_IMAGE_BYTES) return null;
+      if (blob.type && blob.type.includes('json')) return null;
+      return blob;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function downloadCardStorageBlob(image, assetId, opts = {}) {
     if (!image || typeof image !== 'string' || !isLoggedIn()) return null;
     await ensureSession();
     const sb = getClient();
     if (!sb) return null;
     const normalized = normalizeImageRef(image);
-    const candidates = pathsForVariant(normalized, assetId, null, VARIANT_FULL)
+    const minBytes = Math.max(0, Number(opts?.minBytes) || 0);
+    const jobId = opts?.jobId || null;
+    const preferLargest = opts.preferLargest !== false && !!jobId;
+    const candidates = pathsForVariant(normalized, assetId, null, VARIANT_FULL, jobId)
       .filter((p) => !isGridStoragePath(p));
+    let bestSmall = null;
+    let bestBlob = null;
+    let bestAboveMin = null;
     for (const raw of candidates) {
       const key = String(raw || '').replace(/^\//, '');
       if (!key || isGridStoragePath(key)) continue;
+      let blob = null;
       try {
         const { data, error } = await sb.storage.from(BUCKET).download(key);
-        if (!error && data && data.size > 0) return data;
+        if (!error && data && data.size > 0) blob = data;
       } catch (e) {
         console.warn('[SupabaseSync] storage download failed', key, e);
       }
+      if (!blob) {
+        blob = await fetchBlobFromCdnPath(key, assetId);
+      }
+      if (blob && blob.size > 0) {
+        if (preferLargest) {
+          if (!bestBlob || blob.size > bestBlob.size) bestBlob = blob;
+          if (minBytes > 0 && blob.size >= minBytes) {
+            if (!bestAboveMin || blob.size > bestAboveMin.size) bestAboveMin = blob;
+          }
+          continue;
+        }
+        if (minBytes > 0 && blob.size < minBytes) {
+          if (!bestSmall || blob.size > bestSmall.size) bestSmall = blob;
+          continue;
+        }
+        return blob;
+      }
     }
-    return null;
+    if (preferLargest) return bestAboveMin || bestBlob;
+    return bestSmall;
+  }
+
+  async function rearchiveGeneratedCardFromJob(card) {
+    if (!card?.genJobId || !window.PromptHubApi?.recoverWarehouseFromJobs) return false;
+    const jobId = String(card.genJobId).replace(/#\d+$/, '');
+    try {
+      const r = await window.PromptHubApi.recoverWarehouseFromJobs({
+        mode: 'repair',
+        jobIds: [jobId],
+        max: 1,
+        days: 7
+      });
+      if (r?.ok && (r.data?.repaired > 0 || (r.data?.cardIds || []).length)) return true;
+    } catch (e) {
+      console.warn('[SupabaseSync] server repair gen image failed', jobId, e);
+    }
+    if (!window.PromptHubApi?.getGenerationImageUrl) return false;
+    try {
+      const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
+      if (!r?.ok || !r.data?.url) return false;
+      const ref = await persistGenerationImage(card.id, r.data.url, { jobId });
+      if (ref && ref !== card.image) {
+        card.image = ref;
+        card.updatedAt = Date.now();
+        if (typeof window.persistPromptHubCards === 'function') await window.persistPromptHubCards();
+      }
+      return !!(ref && isStorageRef(ref));
+    } catch (e) {
+      console.warn('[SupabaseSync] rearchive from job url failed', jobId, e);
+      return false;
+    }
+  }
+
+  /** 生图下载：多路径取最大体积；体积不达标时从上游任务重新归档 */
+  async function downloadCardFullResBlob(card, opts = {}) {
+    if (!card?.image) return null;
+    const skipRepair = opts.skipRepair === true;
+    const minBytes = expectedMinFullImageBytes(card.resolution);
+    const jobId = card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null;
+    const dlOpts = { jobId, minBytes, preferLargest: !!jobId };
+    let blob = await downloadCardStorageBlob(card.image, card.id, dlOpts);
+    const tooSmall = minBytes > 0 && blob && blob.size < minBytes;
+    if (blob && !tooSmall) return blob;
+    if (skipRepair && !tooSmall) return blob;
+    if (isGeneratedWarehouseCard(card) && jobId) {
+      await rearchiveGeneratedCardFromJob(card);
+      blob = await downloadCardStorageBlob(card.image, card.id, dlOpts);
+      if (blob && (!minBytes || blob.size >= minBytes)) return blob;
+    }
+    return blob;
   }
 
   /** 登录态：保证卡片图在 Storage（可上传则上传，已有则校验） */
@@ -3210,6 +3423,19 @@
       }
     }
 
+    if (typeof image === 'string' && /^https?:\/\//i.test(image)) {
+      try {
+        const url = await resolveCardImageForSave(cardId, image, null, uploadOptsForCard(card));
+        if (typeof window.clearCardImageBackup === 'function') {
+          await window.clearCardImageBackup(cardId);
+        }
+        clearPathMissingForCard(cardId, url);
+        return { ok: true, image: url, uploaded: true };
+      } catch (e) {
+        return { ok: false, image, error: formatError(e) };
+      }
+    }
+
     if (!isStorageRef(image)) {
       return { ok: true, image };
     }
@@ -3223,6 +3449,22 @@
     if (existing && isValidImageBlob(existing) && await blobLooksLikeUsableImage(existing)) {
       clearPathMissingForCard(cardId, normalized);
       return { ok: true, image: normalized };
+    }
+
+    if (isGeneratedWarehouseCard(card) && card.genJobId) {
+      const repaired = await rearchiveGeneratedCardFromJob(card);
+      if (repaired) {
+        const fresh = card.image || normalized;
+        if (await verifyStorageRef(fresh, cardId, { quick: false })) {
+          return { ok: true, image: fresh, repaired: true };
+        }
+      }
+      markImageUploadSkip(cardId);
+      return {
+        ok: false,
+        image: normalized,
+        error: '生图原图归档中，请稍后在仓库点下载重试（勿用列表缩略图覆盖原图）'
+      };
     }
 
     const fallback = await resolveLocalImageFallback(cardId, image);
@@ -3299,7 +3541,9 @@
 
   async function resolveCardImageForSave(cardId, imageValue, previousUrl, opts = {}) {
     if (!imageValue) {
-      if (previousUrl && isStorageRef(previousUrl)) await deleteCardImageByUrl(previousUrl);
+      if (previousUrl && isStorageRef(previousUrl)) {
+        await deleteCardImageByUrl(previousUrl, { allowGenerated: true });
+      }
       return null;
     }
     if (!isLoggedIn()) return imageValue;
@@ -3338,19 +3582,16 @@
     }
     if (/^https?:\/\//i.test(imageValue)) {
       try {
-        const res = await fetch(imageValue, { mode: 'cors' });
-        if (res.ok) {
-          const blob = await res.blob();
-          const url = await uploadCardImage(cardId, blob, uploadOpts);
-          if (previousUrl && previousUrl !== url && isStorageRef(previousUrl)) {
-            await deleteCardImageByUrl(previousUrl);
-          }
-          return url;
+        const blob = await fetchRemoteImageBlob(imageValue);
+        const url = await uploadCardImage(cardId, blob, uploadOpts);
+        if (previousUrl && previousUrl !== url && isStorageRef(previousUrl)) {
+          await deleteCardImageByUrl(previousUrl);
         }
+        return url;
       } catch (e) {
         console.warn('[SupabaseSync] card image fetch failed', e);
+        throw new Error(String(e?.message || '远程图片下载失败，请换一张本地图片重试'));
       }
-      throw new Error('远程图片下载失败，请换一张本地图片重试');
     }
     return imageValue;
   }
@@ -3847,6 +4088,7 @@
     findCardImageInStorage,
     hydrateImageElements,
     persistGenerationImage,
+    archiveGeneratedCardImage,
     uploadGeneratedImage,
     clearSignedUrlCache,
     clearListImageMissMarks,
@@ -3872,6 +4114,10 @@
     resolveCardImageForSave,
     resolveCardDownloadUrl,
     downloadCardStorageBlob,
+    downloadCardFullResBlob,
+    isGeneratedWarehouseCard,
+    expectedMinFullImageBytes,
+    rearchiveGeneratedCardFromJob,
     cardUploadOriginalEnabled,
     preserveOriginalCardImageFromSettings,
     prepareCardFullUploadBlob,

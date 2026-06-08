@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Env } from '../env';
+import { isMookoPlaceholderTaskId } from './mooko';
 import {
   confirmUpstreamTaskOutcome,
   fetchUpstreamTaskOnce,
@@ -84,19 +85,93 @@ export async function finalizeFailedJob(
   }
 }
 
+export type PollJobOpts = {
+  quick?: boolean;
+  /** 将慢速上游提交挂到 waitUntil，避免轮询 HTTP 被 100s 掐断 */
+  kickSubmit?: (task: Promise<void>) => void;
+};
+
+function scheduleBackgroundSubmit(
+  opts: PollJobOpts | undefined,
+  task: Promise<void>,
+  label: string
+) {
+  const wrapped = task.catch((e) => {
+    console.warn(`[generation] ${label} background submit failed`, e);
+  });
+  if (opts?.kickSubmit) opts.kickSubmit(wrapped);
+  else void wrapped;
+}
+
+function isSlowSubmitProvider(provider: ReturnType<typeof readJobProvider>): boolean {
+  return provider === 'mooko' || provider === 'ithink';
+}
+
+function jobStaleMs(
+  provider: ReturnType<typeof readJobProvider>,
+  upstreamModel: string,
+  resolution?: string | null
+): number {
+  const res = String(resolution || '1k').toLowerCase();
+  if (provider === 'mooko') return 35 * 60 * 1000;
+  if (provider === 'ithink') return 25 * 60 * 1000;
+  if (res === '4k') return 55 * 60 * 1000;
+  if (res === '2k' || upstreamModel.includes('vip') || upstreamModel.includes('-pro')) {
+    return 45 * 60 * 1000;
+  }
+  const slowUpstream =
+    upstreamModel.includes('nano-banana') || upstreamModel.includes('jimeng');
+  return slowUpstream ? 45 * 60 * 1000 : 28 * 60 * 1000;
+}
+
+export function slowProviderProgressNote(
+  meta: Record<string, unknown>,
+  provider: ReturnType<typeof readJobProvider>
+): string | null {
+  if (provider === 'mooko') {
+    const st = String(meta.mookoSubmitState || '');
+    if (st === 'queued') return '已扣积分，排队连接慢速线（约 1 分钟内发出）…';
+    if (st === 'running') {
+      return '慢速线生图中（约 2–12 分钟，账单完成后才显示）';
+    }
+    if (st === 'done' && !meta.syncImageUrl && !meta.upstreamTaskId) {
+      return '慢速线已响应，正在入库…';
+    }
+    if (st === 'done') return '慢速线已完成，正在同步到仓库…';
+  }
+  if (provider === 'ithink') {
+    const st = String(meta.ithinkSubmitState || '');
+    if (st === 'queued') return '已扣积分，正在提交 ThinkAI 慢速线…';
+    if (st === 'running') return 'ThinkAI 慢速生图中（约 2–5 分钟）…';
+    if (st === 'done') return 'ThinkAI 已完成，正在入库…';
+  }
+  if (provider === 'grsai' || provider === 'apimart') {
+    const st = String(meta.fastSubmitState || '');
+    if (st === 'queued') {
+      return provider === 'apimart' ? '已扣积分，正在连接备用线路…' : '已扣积分，正在连接上游…';
+    }
+    if (st === 'running') {
+      return provider === 'apimart' ? '备用线路提交中，请稍候…' : '上游提交中，请稍候…';
+    }
+    if (st === 'done' && !meta.upstreamTaskId) return '上游已响应，正在同步…';
+  }
+  return null;
+}
+
 export async function pollAndUpdateJob(
   admin: SupabaseClient,
   userId: string,
   job: JobRow,
   upstream: ImageUpstreamBindings,
   env?: Env,
-  opts?: { quick?: boolean }
+  opts?: PollJobOpts
 ): Promise<{
   status: 'processing' | 'completed' | 'failed';
   imageUrl: string | null;
   errorMessage: string | null;
   refunded: boolean;
   extraImageUrls?: string[];
+  progressNote?: string | null;
 }> {
   job = (await tryRecoverDebitFailedJob(admin, userId, job)) || job;
   const meta = (job.meta as Record<string, unknown>) || {};
@@ -113,7 +188,7 @@ export async function pollAndUpdateJob(
     if (
       !job.result_image_url
       && taskId
-      && (upstream.grsaiKey || upstream.apimartKey || upstream.ithinkKey)
+      && (upstream.grsaiKey || upstream.apimartKey || upstream.ithinkKey || upstream.mookoKey)
     ) {
       const recovered = await tryRecoverJobFromUpstream(
         admin,
@@ -215,7 +290,7 @@ export async function pollAndUpdateJob(
         refunded: !!(job.meta as Record<string, unknown>)?.refunded
       };
     }
-    if (taskId && (upstream.grsaiKey || upstream.apimartKey || upstream.ithinkKey)) {
+    if (taskId && (upstream.grsaiKey || upstream.apimartKey || upstream.ithinkKey || upstream.mookoKey)) {
       const recovered = await tryRecoverJobFromUpstream(
         admin,
         userId,
@@ -237,11 +312,9 @@ export async function pollAndUpdateJob(
 
   const createdMs = new Date(job.created_at).getTime();
   const upstreamModel = String(meta.upstreamModel || meta.model || '').toLowerCase();
-  const slowUpstream =
-    upstreamModel.includes('nano-banana') || upstreamModel.includes('jimeng');
-  const staleMs = slowUpstream ? 40 * 60 * 1000 : 22 * 60 * 1000;
+  const staleMs = jobStaleMs(provider, upstreamModel, job.resolution);
 
-  if (!upstream.grsaiKey && !upstream.apimartKey && !upstream.ithinkKey) {
+  if (!upstream.grsaiKey && !upstream.apimartKey && !upstream.ithinkKey && !upstream.mookoKey) {
     await admin
       .from('generation_requests')
       .update({
@@ -252,37 +325,119 @@ export async function pollAndUpdateJob(
     return { status: 'completed', imageUrl: null, errorMessage: null, refunded: false };
   }
 
-  const syncImageUrl =
-    typeof meta.syncImageUrl === 'string' && /^https?:\/\//i.test(meta.syncImageUrl)
-      ? meta.syncImageUrl
-      : null;
+  const mookoStoredUrls = (() => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const push = (raw: unknown) => {
+      if (typeof raw !== 'string') return;
+      const url = raw.trim();
+      if (!url || seen.has(url)) return;
+      if (!/^https?:\/\//i.test(url) && !/^data:image\//i.test(url)) return;
+      seen.add(url);
+      out.push(url);
+    };
+    push(meta.syncImageUrl);
+    if (Array.isArray(meta.mookoSubmitImageUrls)) {
+      for (const u of meta.mookoSubmitImageUrls) push(u);
+    }
+    return out;
+  })();
+  const syncImageUrl = mookoStoredUrls[0] || null;
   if (syncImageUrl && job.status === 'processing') {
-    return completeJobFromPoll(admin, userId, job, { imageUrl: syncImageUrl }, env);
+    return completeJobFromPoll(
+      admin,
+      userId,
+      job,
+      { imageUrl: syncImageUrl, imageUrls: mookoStoredUrls },
+      env
+    );
+  }
+
+  if (job.status === 'processing' && provider === 'mooko') {
+    let submitState = String(meta.mookoSubmitState || '');
+    const queuedMs = Date.now() - createdMs;
+    if (submitState === 'failed' && meta.mookoSubmitError) {
+      return {
+        status: 'failed',
+        imageUrl: null,
+        errorMessage: String(meta.mookoSubmitError),
+        refunded: !!meta.refunded
+      };
+    }
+    if (
+      (submitState === 'queued' || submitState === 'running')
+      && queuedMs > staleMs
+      && !syncImageUrl
+      && !taskId
+    ) {
+      await finalizeFailedJob(admin, userId, job, 'upstream_timeout');
+      return {
+        status: 'failed',
+        imageUrl: null,
+        errorMessage: 'upstream_timeout',
+        refunded: true
+      };
+    }
+    if (submitState === 'queued') {
+      const attempts = Number(meta.mookoSubmitAttempts || 0);
+      if (queuedMs > 12 * 60 * 1000 && attempts < 1) {
+        await finalizeFailedJob(admin, userId, job, 'upstream_submit_not_started');
+        return {
+          status: 'failed',
+          imageUrl: null,
+          errorMessage: 'upstream_submit_not_started',
+          refunded: true
+        };
+      }
+      const { processMookoPendingSubmit } = await import('./mooko-submit');
+      scheduleBackgroundSubmit(
+        opts,
+        processMookoPendingSubmit(admin, userId, job, upstream, env, {
+          upstreamModel: String(meta.upstreamModel || 'gpt-image-2'),
+          prompt: String(job.prompt || ''),
+          resolution: String(job.resolution || '1k'),
+          quality: String(job.quality || 'standard'),
+          size: typeof meta.size === 'string' ? meta.size : undefined,
+          refImageUrls: Array.isArray(meta.refImageUrls)
+            ? (meta.refImageUrls as string[]).filter(Boolean)
+            : undefined
+        }),
+        'mooko'
+      );
+      return {
+        status: 'processing',
+        imageUrl: null,
+        errorMessage: null,
+        refunded: false,
+        progressNote: slowProviderProgressNote(meta, provider)
+      };
+    }
+    if (submitState === 'running') {
+      const startedAt = Date.parse(String(meta.mookoSubmitStartedAt || ''));
+      const runningMs = Number.isFinite(startedAt) ? Date.now() - startedAt : queuedMs;
+      if (runningMs > 28 * 60 * 1000 && !syncImageUrl && !taskId) {
+        await finalizeFailedJob(admin, userId, job, 'upstream_submit_stale');
+        return {
+          status: 'failed',
+          imageUrl: null,
+          errorMessage: 'upstream_submit_stale',
+          refunded: true
+        };
+      }
+      return {
+        status: 'processing',
+        imageUrl: null,
+        errorMessage: null,
+        refunded: false,
+        progressNote: slowProviderProgressNote(meta, provider)
+      };
+    }
+    // done：继续往下用 upstreamTaskId / 任务查询拉图
   }
 
   if (job.status === 'processing' && provider === 'ithink') {
-    const submitState = String(meta.ithinkSubmitState || '');
-    if (submitState === 'running' || submitState === 'queued') {
-      if (submitState === 'queued' && !opts?.quick) {
-        const { processIthinkPendingSubmit } = await import('./ithink-submit');
-        await processIthinkPendingSubmit(admin, userId, job, upstream, env, {
-          upstreamModel: String(meta.upstreamModel || 'gpt-image-2'),
-          prompt: String(job.prompt || ''),
-          resolution: '1k',
-          quality: String(job.quality || 'standard'),
-          size: typeof meta.size === 'string' ? meta.size : undefined
-        });
-        const { data: refreshed } = await admin
-          .from('generation_requests')
-          .select('*')
-          .eq('id', job.id)
-          .maybeSingle();
-        if (refreshed) {
-          return pollAndUpdateJob(admin, userId, refreshed, upstream, env, opts);
-        }
-      }
-      return { status: 'processing', imageUrl: null, errorMessage: null, refunded: false };
-    }
+    let submitState = String(meta.ithinkSubmitState || '');
+    const queuedMs = Date.now() - createdMs;
     if (submitState === 'failed' && meta.ithinkSubmitError) {
       return {
         status: 'failed',
@@ -291,9 +446,124 @@ export async function pollAndUpdateJob(
         refunded: !!meta.refunded
       };
     }
+    if (
+      submitState === 'running'
+      && !syncImageUrl
+      && queuedMs > 90 * 1000
+    ) {
+      await admin
+        .from('generation_requests')
+        .update({
+          meta: {
+            ...meta,
+            ithinkSubmitState: 'queued',
+            ithinkSubmitRetryAt: new Date().toISOString()
+          }
+        })
+        .eq('id', job.id);
+      submitState = 'queued';
+    }
+    if (
+      (submitState === 'queued' || submitState === 'running')
+      && queuedMs > staleMs
+      && !syncImageUrl
+    ) {
+      await finalizeFailedJob(admin, userId, job, 'upstream_timeout');
+      return {
+        status: 'failed',
+        imageUrl: null,
+        errorMessage: 'upstream_timeout',
+        refunded: true
+      };
+    }
+    if (submitState === 'queued') {
+      const { processIthinkPendingSubmit } = await import('./ithink-submit');
+      scheduleBackgroundSubmit(
+        opts,
+        processIthinkPendingSubmit(admin, userId, job, upstream, env, {
+          upstreamModel: String(meta.upstreamModel || 'gpt-image-2'),
+          prompt: String(job.prompt || ''),
+          resolution: '1k',
+          quality: String(job.quality || 'standard'),
+          size: typeof meta.size === 'string' ? meta.size : undefined
+        }),
+        'ithink'
+      );
+    }
+    return {
+      status: 'processing',
+      imageUrl: null,
+      errorMessage: null,
+      refunded: false,
+      progressNote: slowProviderProgressNote(meta, provider)
+    };
   }
 
-  if (!taskId) {
+  if (
+    (provider === 'grsai' || provider === 'apimart')
+    && !taskId
+    && job.status === 'processing'
+  ) {
+    const st = String(meta.fastSubmitState || '');
+    const queuedMs = Date.now() - createdMs;
+    if (st === 'failed' && meta.fastSubmitError) {
+      return {
+        status: 'failed',
+        imageUrl: null,
+        errorMessage: String(meta.fastSubmitError),
+        refunded: !!meta.refunded
+      };
+    }
+    if (st === 'queued' || st === 'running') {
+      if (queuedMs > 6 * 60 * 1000) {
+        await finalizeFailedJob(admin, userId, job, 'upstream_submit_stale');
+        return {
+          status: 'failed',
+          imageUrl: null,
+          errorMessage: 'upstream_submit_stale',
+          refunded: true
+        };
+      }
+      if (st === 'queued') {
+        const { processFastProviderPendingSubmit } = await import('./fast-provider-submit');
+        scheduleBackgroundSubmit(
+          opts,
+          processFastProviderPendingSubmit(admin, userId, job, upstream, provider, {
+            upstreamModel: String(meta.upstreamModel || 'gpt-image-2'),
+            prompt: String(job.prompt || ''),
+            resolution: String(job.resolution || '1k'),
+            quality: String(job.quality || 'standard'),
+            size: typeof meta.size === 'string' ? meta.size : undefined,
+            refImageUrls: Array.isArray(meta.refImageUrls)
+              ? (meta.refImageUrls as string[]).filter(Boolean)
+              : undefined
+          }),
+          provider
+        );
+      }
+      return {
+        status: 'processing',
+        imageUrl: null,
+        errorMessage: null,
+        refunded: false,
+        progressNote: slowProviderProgressNote(meta, provider)
+      };
+    }
+  }
+
+  if (!taskId || (provider === 'mooko' && isMookoPlaceholderTaskId(taskId) && !syncImageUrl)) {
+    if (provider === 'mooko') {
+      const st = String(meta.mookoSubmitState || '');
+      if (st === 'queued' || st === 'running' || st === 'done') {
+        return {
+          status: 'processing',
+          imageUrl: null,
+          errorMessage: null,
+          refunded: false,
+          progressNote: slowProviderProgressNote(meta, provider)
+        };
+      }
+    }
     await finalizeFailedJob(admin, userId, job, 'missing_task_id');
     return {
       status: 'failed',
@@ -310,24 +580,9 @@ export async function pollAndUpdateJob(
     if (polled.status === 'completed' && polled.imageUrl) {
       return completeJobFromPoll(admin, userId, job, polled, env);
     }
-    const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id);
-    if (storedArchive) {
-      return finishJobFromStoredArchive(admin, userId, job, storedArchive);
-    }
-    return { status: 'processing', imageUrl: null, errorMessage: null, refunded: false };
-  }
-
-  if (job.status === 'processing' && ageMs > 45 * 1000 && ageMs < staleMs) {
-    const deep = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
-      attempts: 6,
-      intervalMs: 2000
-    });
-    if (deep.status === 'completed' && deep.imageUrl) {
-      return completeJobFromPoll(admin, userId, job, deep, env);
-    }
-    if (deep.status === 'failed') {
-      if (deep.isViolation) {
-        const msg = deep.errorMessage || 'upstream_content_violation';
+    if (polled.status === 'failed') {
+      if (polled.isViolation) {
+        const msg = polled.errorMessage || 'upstream_content_violation';
         const skipRefund = refundOnViolation === false;
         await finalizeFailedJob(admin, userId, job, msg, { skipRefund });
         return {
@@ -337,13 +592,66 @@ export async function pollAndUpdateJob(
           refunded: !skipRefund
         };
       }
+      if (provider === 'apimart') {
+        const confirmed = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
+          attempts: 2,
+          intervalMs: 1200
+        });
+        if (confirmed.status === 'completed' && confirmed.imageUrl) {
+          return completeJobFromPoll(admin, userId, job, confirmed, env);
+        }
+        const msg = confirmed.errorMessage || polled.errorMessage || 'upstream_failed';
+        await finalizeFailedJob(admin, userId, job, msg);
+        return {
+          status: 'failed',
+          imageUrl: null,
+          errorMessage: msg,
+          refunded: true
+        };
+      }
+    }
+    const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+    if (storedArchive) {
+      return finishJobFromStoredArchive(admin, userId, job, storedArchive);
+    }
+    return {
+      status: 'processing',
+      imageUrl: null,
+      errorMessage: null,
+      refunded: false,
+      progressNote:
+        provider === 'mooko' && String(meta.mookoSubmitState) === 'done'
+          ? slowProviderProgressNote(meta, provider)
+          : null
+    };
+  }
+
+  if (job.status === 'processing' && ageMs > 45 * 1000 && ageMs < staleMs) {
+    const deep = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
+      attempts: provider === 'mooko' ? 24 : 6,
+      intervalMs: provider === 'mooko' ? 3000 : 2000
+    });
+    if (deep.status === 'completed' && deep.imageUrl) {
+      return completeJobFromPoll(admin, userId, job, deep, env);
+    }
+    if (deep.status === 'failed') {
+      const msg = deep.errorMessage || 'upstream_failed';
+      const skipRefund = deep.isViolation === true && refundOnViolation === false;
+      await finalizeFailedJob(admin, userId, job, msg, { skipRefund });
+      return {
+        status: 'failed',
+        imageUrl: null,
+        errorMessage: msg,
+        refunded: !skipRefund
+      };
     }
   }
 
   if (Date.now() - createdMs > staleMs) {
+    const slowPoll = staleMs > 22 * 60 * 1000;
     const late = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
-      attempts: slowUpstream ? 8 : 5,
-      intervalMs: slowUpstream ? 12000 : 8000
+      attempts: slowPoll ? 8 : 5,
+      intervalMs: slowPoll ? 12000 : 8000
     });
     if (late.status === 'completed' && late.imageUrl) {
       return completeJobFromPoll(admin, userId, job, late, env);
@@ -369,8 +677,8 @@ export async function pollAndUpdateJob(
 
   if (polled.status === 'pending' && job.status === 'processing' && ageMs > 20 * 1000) {
     const deep = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
-      attempts: 5,
-      intervalMs: 1800
+      attempts: provider === 'mooko' ? 20 : 5,
+      intervalMs: provider === 'mooko' ? 3000 : 1800
     });
     if (deep.status === 'completed' && deep.imageUrl) {
       return completeJobFromPoll(admin, userId, job, deep, env);

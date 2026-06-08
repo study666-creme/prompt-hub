@@ -1002,9 +1002,11 @@ body.trial-tasks-open {
 }
 .subscribe-plan-sale-label {
   font-size: 11px;
-  font-weight: 700;
-  color: #f472b6;
-  letter-spacing: 0.02em;
+  font-weight: 600;
+  color: var(--accent-muted);
+  letter-spacing: 0.06em;
+  text-transform: none;
+  text-decoration: none;
 }
 .subscribe-plan-amount {
   font-size: 28px;

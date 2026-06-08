@@ -17,6 +17,10 @@
 | 图片签名 URL | `supabase-sync.js` | `server/src/routes/v1/media.ts` |
 | 全站社区 API / DB | `server/src/lib/community-feed.ts` | `server/src/routes/v1/community.ts` |
 | 生图扣费 | `features-draft.js` + `api-client.js` | `server/src/routes/v1/generate.ts` |
+| **生图 524 / 后台提交** | `server/src/lib/fast-provider-submit.ts` | `server/src/routes/v1/generate.ts`（GrsAI/Apimart 异步） |
+| **木瓜慢速线** | `server/src/lib/mooko.ts` · `mooko-submit.ts` · `mooko-drain.ts` | Cron + `POST /generate` 触发 drain |
+| **4K 原图下载** | `supabase-sync.js`（`downloadCardFullResBlob`） | `script.js`（`downloadCardImageFile`） |
+| **卡片上传 50MB** | `server/src/routes/v1/media.ts` | `supabase-sync.js` · `index.html` 文案 |
 | **生图滚轮 / 灯箱** | `script.js`（`attachImageZoom`, `loadLightboxImage`） | `features-draft.js`（预览侧栏） |
 | 会员 / 积分 UI | `membership.js`, `subscription.js` | `server/src/routes/v1/me.ts` |
 | 部署 Pages | `deploy-pages.ps1` | `index.html`（`__APP_BUILD__`）, `sw.js` |

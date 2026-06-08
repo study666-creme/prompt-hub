@@ -1,9 +1,13 @@
-export type ImageModelProvider = 'grsai' | 'apimart' | 'ithink';
+export type ImageModelProvider = 'grsai' | 'apimart' | 'ithink' | 'mooko';
+
+export type ImageModelUiFamily = 'gim2' | 'banana' | 'jimeng';
 
 export type ImageModelCatalogEntry = {
   id: string;
   /** 生图线路：GrsAI 或 Apimart（前台为独立选项，可分别定价） */
   provider: ImageModelProvider;
+  /** 前台下拉分组：G-im2 / 香蕉 / 即梦（与 provider 无关） */
+  uiFamily: ImageModelUiFamily;
   /** 提交上游 API 的 model 字段 */
   upstream: string;
   label: string;
@@ -34,11 +38,23 @@ function withProvider(
   }));
 }
 
+function gim2(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>): Omit<ImageModelCatalogEntry, 'provider'> {
+  return { ...row, uiFamily: 'gim2' };
+}
+
+function banana(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>): Omit<ImageModelCatalogEntry, 'provider'> {
+  return { ...row, uiFamily: 'banana' };
+}
+
+function jimeng(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>): Omit<ImageModelCatalogEntry, 'provider'> {
+  return { ...row, uiFamily: 'jimeng' };
+}
+
 /**
  * GrsAI 图像模型（https://grsai.com/zh/dashboard/models）
  */
 export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider('grsai', [
-  {
+  gim2({
     id: 'gpt-image-2-vip',
     upstream: 'gpt-image-2-vip',
     label: 'GPT Image 2 VIP',
@@ -49,8 +65,8 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     resolutions: ['1k', '2k', '4k'],
     defaultCredits: 14,
     sortOrder: 1
-  },
-  {
+  }),
+  gim2({
     id: 'gpt-image-2',
     upstream: 'gpt-image-2',
     label: 'GPT Image 2',
@@ -61,8 +77,8 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     resolutions: ['1k'],
     defaultCredits: 10,
     sortOrder: 2
-  },
-  {
+  }),
+  banana({
     id: 'nano-banana-pro',
     upstream: 'nano-banana-pro',
     label: 'Nano Banana Pro',
@@ -73,8 +89,8 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     resolutions: ['1k', '2k', '4k'],
     defaultCredits: 18,
     sortOrder: 3
-  },
-  {
+  }),
+  banana({
     id: 'nano-banana-2',
     upstream: 'nano-banana-2',
     label: 'Nano Banana 2',
@@ -85,8 +101,8 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     resolutions: ['1k', '2k', '4k'],
     defaultCredits: 12,
     sortOrder: 4
-  },
-  {
+  }),
+  banana({
     id: 'nano-banana-pro-vt',
     upstream: 'nano-banana-pro-vt',
     label: 'Nano Banana Pro VT',
@@ -97,8 +113,8 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     resolutions: ['1k', '2k', '4k'],
     defaultCredits: 18,
     sortOrder: 5
-  },
-  {
+  }),
+  banana({
     id: 'nano-banana-fast',
     upstream: 'nano-banana-fast',
     label: 'Nano Banana Fast',
@@ -109,8 +125,8 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     resolutions: ['1k'],
     defaultCredits: 8,
     sortOrder: 6
-  },
-  {
+  }),
+  banana({
     id: 'nano-banana-2-cl',
     upstream: 'nano-banana-2-cl',
     label: 'Nano Banana 2 · 创意',
@@ -121,8 +137,8 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     resolutions: ['1k', '2k'],
     defaultCredits: 16,
     sortOrder: 7
-  },
-  {
+  }),
+  banana({
     id: 'nano-banana-pro-cl',
     upstream: 'nano-banana-pro-cl',
     label: 'Nano Banana Pro · 创意',
@@ -133,8 +149,8 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     resolutions: ['1k', '2k', '4k'],
     defaultCredits: 50,
     sortOrder: 8
-  },
-  {
+  }),
+  banana({
     id: 'nano-banana-pro-vip',
     upstream: 'nano-banana-pro-vip',
     label: 'Nano Banana Pro VIP',
@@ -145,8 +161,8 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     resolutions: ['1k', '2k'],
     defaultCredits: 80,
     sortOrder: 9
-  },
-  {
+  }),
+  banana({
     id: 'nano-banana-2-4k-cl',
     upstream: 'nano-banana-2-4k-cl',
     label: 'Nano Banana 2 · 4K 创意',
@@ -157,8 +173,8 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     resolutions: ['4k'],
     defaultCredits: 30,
     sortOrder: 10
-  },
-  {
+  }),
+  banana({
     id: 'nano-banana',
     upstream: 'nano-banana',
     label: 'Nano Banana',
@@ -169,8 +185,8 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     resolutions: ['1k', '2k', '4k'],
     defaultCredits: 14,
     sortOrder: 11
-  },
-  {
+  }),
+  banana({
     id: 'nano-banana-pro-4k-vip',
     upstream: 'nano-banana-pro-4k-vip',
     label: 'Nano Banana Pro · 4K VIP',
@@ -181,12 +197,12 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     resolutions: ['4k'],
     defaultCredits: 120,
     sortOrder: 12
-  }
+  })
 ]);
 
 /** ThinkAI（thinkai.tv / token.ithinkai.cn）慢速经济线路 */
 export const ITHINK_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider('ithink', [
-  {
+  gim2({
     id: 'ithink-gpt-image-2-slow',
     upstream: 'gpt-image-2',
     label: 'GPT Image 2 · 慢速',
@@ -197,12 +213,42 @@ export const ITHINK_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider
     resolutions: ['1k'],
     defaultCredits: 2,
     sortOrder: 103
-  }
+  })
+]);
+
+/** 木瓜AI（api.mooko.ai）OpenAI 兼容生图 */
+export const MOOKO_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider('mooko', [
+  gim2({
+    id: 'mooko-gpt-image-2',
+    upstream: 'gpt-image-2',
+    label: 'GPT Image 2 · 慢速',
+    group: 'new',
+    description: '慢速线路 · OpenAI Image 2 · 仅 1K（2K/4K 请选 Pro 慢速）',
+    upstreamPoints: 3,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    defaultCredits: 3,
+    sortOrder: 104
+  }),
+  gim2({
+    id: 'mooko-gpt-image-2-pro',
+    upstream: 'gpt-image-2-pro',
+    label: 'GPT Image 2 Pro · 慢速',
+    group: 'new',
+    description: '慢速线路 · Pro 档 · 仅 2K/4K（1K 请选「GPT Image 2 · 慢速」）',
+    upstreamPoints: 5,
+    refundOnViolation: true,
+    resolutions: ['2k', '4k'],
+    pricingByResolution: true,
+    defaultCreditsByResolution: { '2k': 5, '4k': 5 },
+    defaultCredits: 5,
+    sortOrder: 105
+  })
 ]);
 
 /** Apimart 备用线路 */
 export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider('apimart', [
-  {
+  gim2({
     id: 'apimart-gpt-image-2',
     upstream: 'gpt-image-2',
     label: 'GPT Image 2',
@@ -215,8 +261,8 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
     defaultCreditsByResolution: { '1k': 10, '2k': 20, '4k': 40 },
     defaultCredits: 10,
     sortOrder: 101
-  },
-  {
+  }),
+  jimeng({
     id: 'apimart-seedream-5-lite',
     upstream: 'doubao-seedream-5-0-lite',
     label: '即梦 5.0 Lite',
@@ -229,19 +275,30 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
     defaultCreditsByResolution: { '2k': 14, '4k': 28 },
     defaultCredits: 14,
     sortOrder: 102
-  }
+  })
 ]);
 
 /** 全站模型目录（GrsAI + Apimart 并列，后台可分别定价） */
 export const IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   ...GRSAI_IMAGE_MODEL_CATALOG,
   ...APIMART_IMAGE_MODEL_CATALOG,
-  ...ITHINK_IMAGE_MODEL_CATALOG
+  ...ITHINK_IMAGE_MODEL_CATALOG,
+  ...MOOKO_IMAGE_MODEL_CATALOG
 ];
+
+export function imageModelUiFamily(modelId: string): ImageModelUiFamily {
+  const entry = getCatalogEntry(modelId);
+  if (entry?.uiFamily) return entry.uiFamily;
+  const id = String(modelId || '').toLowerCase();
+  if (id.includes('seedream') || id === 'jimeng') return 'jimeng';
+  if (id.includes('nano-banana')) return 'banana';
+  return 'gim2';
+}
 
 export function providerLabel(provider: ImageModelProvider): string {
   if (provider === 'apimart') return '备用线路';
   if (provider === 'ithink') return '经济线路';
+  if (provider === 'mooko') return '慢速线路';
   return '常规线路';
 }
 
@@ -255,7 +312,7 @@ export function normalizeImageModelId(raw?: string | null): string {
     .trim()
     .toLowerCase();
   if (!id) return 'gpt-image-2';
-  if (id.startsWith('apimart-') || id.startsWith('ithink-')) return id;
+  if (id.startsWith('apimart-') || id.startsWith('ithink-') || id.startsWith('mooko-')) return id;
   if (id in LEGACY_MODEL_MAP) return LEGACY_MODEL_MAP[id];
   return id;
 }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260608k';
+    window.__APP_BUILD__ = '20260608l';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -104,15 +104,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260608k">
-  <link rel="stylesheet" href="styles-theme.css?v=20260608k">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260608k">
+  <link rel="stylesheet" href="styles.css?v=20260608l">
+  <link rel="stylesheet" href="styles-theme.css?v=20260608l">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260608l">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260608k">
+  <link rel="stylesheet" href="styles-features.css?v=20260608l">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
-  <script src="theme.js?v=20260608k"></script>
+  <script src="theme.js?v=20260608l"></script>
 </head>
 <body>
   <div class="app-chrome">
@@ -273,7 +273,7 @@
           <label class="settings-check" style="margin-top:10px">
             <input type="checkbox" id="preserveOriginalCardImageToggle">
             <span class="settings-check-box" aria-hidden="true"></span>
-            <span class="settings-check-label">卡片库保存原图（不压缩，单张最大 20MB）</span>
+            <span class="settings-check-label">卡片库保存原图（不压缩，单张最大 50MB）</span>
           </label>
           <p class="settings-hint">默认关闭：上传后会压缩为约 2560px 边长的高质量 JPEG，省流量、同步更快。开启后按原文件上传（PNG/JPEG 等），适合 4K 参考图；列表缩略图仍会生成小图。</p>
         </section>
@@ -613,7 +613,7 @@
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status" aria-live="polite"></p>
       <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260608k</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260608l</p>
     </div>
   </nav>
 
@@ -1076,11 +1076,9 @@
             <div class="imagegen-shared-params">
             <p class="imagegen-promo-notice imagegen-promo-notice--model hidden" id="imageGenPromoNotice" aria-live="polite"></p>
             <label for="imageGenModel">生图模型</label>
-            <select id="imageGenModel" class="settings-input imagegen-field-compact">
-              <option value="gpt-image-2">GPT Image 2</option>
-              <option value="nano-banana-pro">Nano Banana Pro</option>
-              <option value="nano-banana-2">Nano Banana 2</option>
-              <option value="nano-banana-fast">Nano Banana Fast</option>
+            <div class="imagegen-model-family-tabs" id="imageGenModelFamilyTabs" role="tablist" aria-label="生图模型分组"></div>
+            <select id="imageGenModel" class="settings-input imagegen-field-compact" disabled aria-busy="true">
+              <option value="">加载模型列表…</option>
             </select>
             <p class="panel-hint imagegen-model-hint" id="imageGenModelHint" hidden></p>
             <div class="imagegen-params-row">
@@ -1492,28 +1490,28 @@
   <script src="vendor/supabase.min.js?v=20260606m"></script>
   <script src="api-domain.config.js"></script>
   <script src="supabase-config.js"></script>
-  <script src="api-config.js?v=20260608k2b"></script>
-  <script src="api-client.js?v=20260608k"></script>
+  <script src="api-config.js?v=20260608l2b"></script>
+  <script src="api-client.js?v=20260608l"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260608k2show"></script>
-  <script src="card-image-loader.js?v=20260608k"></script>
+  <script src="supabase-sync.js?v=20260608l2show"></script>
+  <script src="card-image-loader.js?v=20260608l"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
-  <script src="subscription.js?v=20260608k"></script>
-  <script src="trial-tasks.js?v=20260608k"></script>
+  <script src="subscription.js?v=20260608l"></script>
+  <script src="trial-tasks.js?v=20260608l"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="mobile.js?v=20260608k"></script>
-  <script src="script.js?v=20260608kevlab"></script>
-  <script src="points-system.js?v=20260608k"></script>
-  <script src="imagegen-prompt-kit.js?v=20260608k"></script>
-  <script src="imagegen-prompt-tools.js?v=20260608k"></script>
-  <script src="feed-layout.js?v=20260608k"></script>
-  <script src="feed-images.js?v=20260608k"></script>
-  <script src="image-gen-feed.js?v=20260608k"></script>
-  <script src="features-draft.js?v=20260608k"></script>
+  <script src="mobile.js?v=20260608l"></script>
+  <script src="script.js?v=20260608levlab"></script>
+  <script src="points-system.js?v=20260608l"></script>
+  <script src="imagegen-prompt-kit.js?v=20260608l"></script>
+  <script src="imagegen-prompt-tools.js?v=20260608l"></script>
+  <script src="feed-layout.js?v=20260608l"></script>
+  <script src="feed-images.js?v=20260608l"></script>
+  <script src="image-gen-feed.js?v=20260608l"></script>
+  <script src="features-draft.js?v=20260608l"></script>
   <script src="community-gacha.js?v=20260606v"></script>
-  <script src="features-assets.js?v=20260608kh"></script>
-  <script src="pwa-install.js?v=20260608k"></script>
+  <script src="features-assets.js?v=20260608lh"></script>
+  <script src="pwa-install.js?v=20260608l"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

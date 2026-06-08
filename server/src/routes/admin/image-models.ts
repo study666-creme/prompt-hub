@@ -42,7 +42,8 @@ adminImageModelRoutes.get('/', async c => {
         providers: [
           { id: 'grsai', label: '常规线路', doc: 'https://grsai.com/zh/dashboard/models' },
           { id: 'apimart', label: '备用线路', doc: 'https://api.apimart.ai' },
-          { id: 'ithink', label: '经济线路', doc: 'https://www.thinkai.tv/console/token' }
+          { id: 'ithink', label: '经济线路', doc: 'https://www.thinkai.tv/console/token' },
+          { id: 'mooko', label: '木瓜线路', doc: 'https://api.mooko.ai/pricing' }
         ],
         settingsPersisted: persisted,
         settingsTableReady: tableReady,
