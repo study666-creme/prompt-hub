@@ -167,13 +167,21 @@
     try { return new URL(api).origin; } catch (e) { return ''; }
   }
 
+  function localDevMediaOrigins() {
+    const h = (typeof location !== 'undefined' && location.hostname) || '';
+    if (h !== 'localhost' && h !== '127.0.0.1') return [];
+    return ['https://api.prompt-hubs.com', 'https://api.prompt-hub.cn'];
+  }
+
   function mediaUrlMatchesCurrentApi(url) {
     if (!url || typeof url !== 'string') return false;
     const apiOrigin = currentApiOrigin();
-    if (!apiOrigin) return true;
     try {
       const u = new URL(url);
-      if (u.pathname.includes('/api/v1/media/')) return u.origin === apiOrigin;
+      if (u.pathname.includes('/api/v1/media/')) {
+        if (apiOrigin && u.origin === apiOrigin) return true;
+        return localDevMediaOrigins().includes(u.origin);
+      }
     } catch (e) { /* ignore */ }
     return true;
   }

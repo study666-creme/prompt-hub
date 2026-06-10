@@ -35,6 +35,24 @@ export const TIER_LUMP_CREDITS: Record<
   pro: 700
 };
 
+/** 标准月卡（30 天）一次性 bundle 总额；仅用于 ≥30 天。短于 30 天应走 daily（兑换侧已强制），此处不做 bundle 发放 */
+export function bundleCreditsForMembershipDays(
+  tier: Profile['membership_tier'],
+  membershipDays: number
+): number {
+  if (!tier) return 0;
+  const fullMonth = TIER_LUMP_CREDITS[tier] ?? 0;
+  if (fullMonth <= 0) return 0;
+  const days = Math.max(1, Math.min(Math.round(membershipDays), 365));
+  if (days < 30) return 0;
+  return fullMonth;
+}
+
+export type BundleGrantOptions = {
+  /** 本次兑换/续期的会员天数；缺省时按 30 天月卡处理（兼容旧调用） */
+  membershipDays?: number;
+};
+
 /** 中国时区自然日 YYYY-MM-DD */
 export function chinaDateKey(d = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(
@@ -105,7 +123,8 @@ export async function refreshDailyCredits(
 
 export async function grantBundleForActiveMembership(
   admin: SupabaseClient,
-  profile: Profile
+  profile: Profile,
+  opts?: BundleGrantOptions
 ): Promise<Profile> {
   if (
     !isMembershipActive(profile) ||
@@ -118,17 +137,22 @@ export async function grantBundleForActiveMembership(
   const periodKey = profile.membership_until || 'open';
   if (profile.bundle_granted_until === periodKey) return profile;
 
-  const amount = TIER_LUMP_CREDITS[profile.membership_tier] ?? 0;
-  if (amount > 0) {
-    const { error: creditErr } = await admin.rpc('apply_credit_delta', {
-      p_user_id: profile.user_id,
-      p_delta: amount,
-      p_reason: 'subscription_grant',
-      p_ref_id: `bundle:${periodKey}`,
-      p_meta: { tier: profile.membership_tier, mode: 'bundle' }
-    });
-    if (creditErr) throw creditErr;
-  }
+  const membershipDays = opts?.membershipDays ?? 30;
+  const amount = bundleCreditsForMembershipDays(profile.membership_tier, membershipDays);
+  if (amount <= 0) return profile;
+
+  const { error: creditErr } = await admin.rpc('apply_credit_delta', {
+    p_user_id: profile.user_id,
+    p_delta: amount,
+    p_reason: 'subscription_grant',
+    p_ref_id: `bundle:${periodKey}:${membershipDays}d`,
+    p_meta: {
+      tier: profile.membership_tier,
+      mode: 'bundle',
+      membershipDays
+    }
+  });
+  if (creditErr) throw creditErr;
 
   const { data, error } = await admin
     .from('profiles')

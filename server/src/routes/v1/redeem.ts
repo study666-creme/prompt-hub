@@ -141,11 +141,14 @@ redeemRoutes.post('/', async c => {
   let membershipUntil: string | null = null;
   const hasMembership =
     !!row.membership_tier || (row.membership_days != null && row.membership_days > 0);
+  const membershipDays = hasMembership ? (row.membership_days ?? 30) : 0;
+  let forcedDailyForShortTerm = false;
+
   if (hasMembership) {
     const tier = (row.membership_tier || 'basic') as NonNullable<
       import('../../lib/supabase').Profile['membership_tier']
     >;
-    const days = row.membership_days ?? 30;
+    const days = membershipDays;
     const shopRecharge = isShopRechargeCode(row.note);
     const profileBefore = await getOrCreateProfile(admin, user.id);
     const userPickedMode =
@@ -156,7 +159,10 @@ redeemRoutes.post('/', async c => {
       ? 'daily'
       : shopRecharge
         ? 'daily'
-        : userPickedMode || profileBefore.credit_grant_mode || 'daily';
+        : days < 30
+          ? 'daily'
+          : userPickedMode || profileBefore.credit_grant_mode || 'daily';
+    forcedDailyForShortTerm = days < 30 && tier !== 'lite' && userPickedMode === 'bundle';
 
     let profileAfter: import('../../lib/supabase').Profile;
     try {
@@ -194,7 +200,9 @@ redeemRoutes.post('/', async c => {
 
   let profile = await syncMembershipCredits(admin, user.id);
   if (hasMembership && profile.credit_grant_mode === 'bundle') {
-    profile = await grantBundleForActiveMembership(admin, profile);
+    profile = await grantBundleForActiveMembership(admin, profile, {
+      membershipDays: membershipDays
+    });
   }
   const creditsInfo = membershipCreditsPayload(profile);
 
@@ -202,9 +210,13 @@ redeemRoutes.post('/', async c => {
   if (row.credits > 0) parts.push(`+${row.credits} 积分`);
   if (hasMembership) {
     const tier = row.membership_tier || 'basic';
-    const days = row.membership_days ?? 30;
+    const days = membershipDays;
+    const shopRecharge = isShopRechargeCode(row.note);
     const tierLabel =
       tier === 'pro' ? '专业' : tier === 'standard' ? '标准' : tier === 'lite' ? '轻量' : '基础';
+    if (forcedDailyForShortTerm) {
+      parts.push('短期会员卡仅支持每日领取，已按每日模式开通');
+    }
     if (row.offer_kind === 'mini_3d') {
       parts.push('已开通 3 天基础会员（¥0.99 体验）');
     } else if (row.offer_kind === 'starter_14d') {

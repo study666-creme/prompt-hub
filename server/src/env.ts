@@ -40,6 +40,8 @@ export type Env = {
   PAYMENT_WEBHOOK_SECRET?: string;
   /** 运营批量造激活码：wrangler secret put ADMIN_API_SECRET */
   ADMIN_API_SECRET?: string;
+  /** 本地开发：图片走线上 R2/CDN（本地 Miniflare R2 为空时必填，默认 api.prompt-hubs.com） */
+  LOCAL_MEDIA_UPSTREAM?: string;
   /** Supabase 文件存储配额（MB），免费版约 1024；未设则默认 1024 */
   SUPABASE_STORAGE_QUOTA_MB?: string;
   /** Supabase 数据库配额（MB），免费版约 500；未设则默认 500 */

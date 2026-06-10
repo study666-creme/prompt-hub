@@ -14,8 +14,10 @@ IMAGE_API_KEY=
 # MOOKO_API_BASE_URL=https://api.mooko.ai
 # MOOKO_MAX_CONCURRENT_SUBMITS=8   # 慢速线并发 POST 上限（1–16，默认 8）
 
-# 新图只写 R2（须已建桶 prompt-hub-card-images 且 wrangler deploy 绑定）
+# 与线上一致：仅 R2（不写、不读 Supabase Storage，避免超额）
 MEDIA_STORAGE_MODE=r2
+# 本地 Miniflare R2 为空，签名 URL 走线上 CDN 出图（必填，默认即 api.prompt-hubs.com）
+LOCAL_MEDIA_UPSTREAM=https://api.prompt-hubs.com
 
 ENVIRONMENT=development
 CORS_ORIGINS=http://127.0.0.1:5500,http://localhost:5500,https://prompt-hubs.com,https://www.prompt-hubs.com

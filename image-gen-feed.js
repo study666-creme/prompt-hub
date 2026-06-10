@@ -216,11 +216,11 @@
       const recovering = job.recovering === true && !(slow && job.pendingNote);
       const pendingLabel = recovering ? '恢复中' : '生成中';
       const meta = job.pendingNote
-        ? String(job.pendingNote).slice(0, 48)
+        ? String(job.pendingNote).slice(0, 56)
         : recovering
-          ? (job.recoverNote || '上游可能已出图，后台同步中…').slice(0, 48)
+          ? (job.recoverNote || '上游可能已出图，后台同步中…').slice(0, 56)
           : slow
-            ? '慢速线 · 约 1–8 分钟 · 已提交'
+            ? '慢速线 · 约 1–12 分钟 · 已提交'
             : '预计 1–3 分钟 · 可继续提交';
       const dismissBtn = '<button type="button" class="btn btn-ghost btn-sm imagegen-feed-del" data-pending-dismiss title="关闭生成占位（不删已入库的图）">×</button>';
       return `<article class="imagegen-feed-card imagegen-feed-card-tile imagegen-feed-card--pending${recovering ? ' imagegen-feed-card--recovering' : ''}" data-feed-id="${d().esc?.(job.id)}" data-pending="1"${job.jobId ? ` data-job-id="${d().esc?.(job.jobId)}"` : ''}>
@@ -329,9 +329,7 @@
             <button type="button" class="imagegen-feed-mobile-btn" data-feed-fill-prompt>填入生图</button>
             ${imgBlock ? '<button type="button" class="imagegen-feed-mobile-btn" data-feed-download>下载</button>' : ''}
           </div>`;
-      const fillHint = window.MobileUI?.isMobile?.()
-        ? ''
-        : '<span class="imagegen-feed-fill-hint">点击查看详情 · 在侧栏填入或复制</span>';
+      const fillHint = '';
       return `<article class="imagegen-feed-card imagegen-feed-card-tile${noMedia}${active ? ' active' : ''}" data-feed-id="${d().esc?.(id)}" data-feed-prompt="${d().esc?.(prompt || '')}" tabindex="0">
         ${imgBlock}
         <div class="imagegen-feed-content">
@@ -666,6 +664,29 @@
           e.stopPropagation();
           void d().openImageGenLightboxAt?.(feedKind, feedItemId, feedId);
         });
+        const feedDragImg = card.querySelector('.imagegen-feed-media img[data-image-ref]');
+        if (feedDragImg && !window.MobileUI?.isMobile?.()) {
+          feedDragImg.draggable = true;
+          feedDragImg.addEventListener('dragstart', (e) => {
+            const imageRef = feedDragImg.getAttribute('data-image-ref') || '';
+            if (!imageRef || !d().isDisplayableImage?.(imageRef)) {
+              e.preventDefault();
+              return;
+            }
+            e.stopPropagation();
+            const payload = {
+              imageRef,
+              sourceCardId: feedDragImg.getAttribute('data-source-card-id') || ''
+            };
+            e.dataTransfer.setData('application/x-prompt-hub-image-ref', JSON.stringify(payload));
+            e.dataTransfer.setData('text/plain', imageRef.slice(0, 240));
+            e.dataTransfer.effectAllowed = 'copy';
+            card.classList.add('is-feed-drag-source');
+          });
+          feedDragImg.addEventListener('dragend', () => {
+            card.classList.remove('is-feed-drag-source');
+          });
+        }
         card.querySelector('[data-feed-copy]')?.addEventListener('click', e => {
           e.stopPropagation();
           d().copyFeedPromptText?.(card.dataset.feedPrompt || '');

@@ -24,36 +24,32 @@
 
 ---
 
-## 当前部署阶段（2026-06-10 · 社区孤儿误报 + 后台恢复/删除修复）
+## 当前部署阶段（2026-06-07 · 木瓜 API 对齐 + Apimart 特价模型）
 
 | 项 | 状态 |
 |----|------|
-| **主域名** | **https://prompt-hubs.com** · 旧 **https://prompt-hub.cn** · Pages `prompt-hub-hub` · build **`20260610e`** |
+| **主域名** | **https://prompt-hubs.com** · 旧 **https://prompt-hub.cn** · Pages `prompt-hub-hub` |
 | Worker | `prompt-hub-api` · **https://api.prompt-hubs.com** |
-| **数据库** | 境外 Supabase `yibawjvhmqcysdovscss`（Worker Secret）；`server/.dev.vars` 仍指向阿里云 RDS（仅本地） |
-| **Git** | `main`：`15dd0bb` 手机 catalog 未就绪不闪价；`52527d3` 本地 429 豁免 |
+| **数据库** | 境外 Supabase `yibawjvhmqcysdovscss`（Worker Secret） |
 
 ### 已打通 / 未打通
 
-- ✅ `/health`、登录、兑换、生图、Grs 2h / Apimart 7d 恢复、Feed full 预览 + PNG 下载
-- ✅ 本地：`127.0.0.1:8787` + `5500` 双窗口；`ENVIRONMENT=development` 跳过限流
-- ⚠️ 本地 `.dev.vars` 查不到生产用户；查账需 `scripts/admin.local.env` 或 Supabase SQL Editor
-- ⚠️ `prompt-hub.cn` → `prompt-hubs.com` 重定向需在 CF 用 Dynamic concat，勿把表达式写进 URL 栏
+- ✅ `/health`、登录、兑换、生图、Grs 2h / Apimart 7d 恢复
+- ✅ **木瓜 gpt-image-2-pro**：`size` 按 Apifox 文档像素、`moderation: low`、`output_format: jpeg`（无 1:1 正方形）
+- ✅ **Apimart 特价** `apimart-gpt-image-2-official-budget`（上游 `gpt-image-2-official` · 固定 low · 无 1:1）
+- ⚠️ 本地 `.dev.vars` 无 `MOOKO_API_KEY` / `APIMART_API_KEY` 时对应线路不可用
 
 ### 已知问题
 
 1. **b076702 勿合并**（第二张生图卡死）。
-2. 管理后台用户详情无 `credit_ledger` 明细，只有最近兑换码。
-3. 后台手动改「永久积分」**不会**写 ledger，对账以 SQL 为准。
-4. **deploy 前勿删「桶内孤儿」**：旧版只认 `card.image` 字符串，会把好卡误报；新版已按 `source_card_id` + CDN 路径补全引用。
-5. **管理后台恢复/删除**：`admin.js` 本地 API 指向已修（`api-config.js`）；R2 模式下删图不再因 Supabase Storage 失败而整请求挂掉。
+2. 新模型/木瓜改动需 **Worker + Pages** 双部署后前台才生效。
+3. 管理后台用户详情无 `credit_ledger` 明细。
 
 ### 下一步
 
-1. `cd server; npx wrangler deploy` + `.\deploy-pages.ps1`（admin 构建号 `20260610a`）。
-2. 后台社区操作失败见 `docs/LOCAL-DEV.md`「管理后台：恢复 / 删除」。
-3. 查账：`node scripts/query-user-ledger.mjs <uid> --env scripts/admin.local.env`
-4. cn 域名 301 到 com（排除 `api.prompt-hub.cn`）。
+1. `cd server; npx wrangler deploy` 部署 Worker。
+2. `.\deploy-pages.ps1` 部署前台（比例无 1:1、特价模型隐藏质量选项）。
+3. 后台可改特价模型显示名与 1K/2K/4K 积分（默认 3/4/9）。
 
 ### 部署
 

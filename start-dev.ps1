@@ -22,5 +22,6 @@ Start-Process powershell -ArgumentList @(
 Start-Sleep -Seconds 2
 
 Write-Host "Starting static site in this window (http://127.0.0.1:5500) ..." -ForegroundColor Cyan
+Write-Host "Keep BOTH windows open. If images fail: Ctrl+Shift+R on 5500 (clears prod sign cache)." -ForegroundColor DarkGray
 Write-Host "JSON backup: Settings -> Data -> Export backup" -ForegroundColor DarkGray
 & (Join-Path $root "serve-local.ps1")

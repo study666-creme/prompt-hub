@@ -1,4 +1,5 @@
 import { ApiError } from './errors';
+import { mapMookoProSize } from './image-size-options';
 
 const MOOKO_IMG_ORIGIN = 'https://gimg.mooko.ai';
 
@@ -42,59 +43,18 @@ function normalizeMookoImageUrl(raw: unknown): string | null {
   if (/^https?:\/\//i.test(url)) return url;
   if (url.startsWith('//')) return `https:${url}`;
   if (url.startsWith('/')) return `${MOOKO_IMG_ORIGIN}${url}`;
+  // Apifox：data[].url 可能是纯 base64 或 data URL
+  const dataUrl = mookoDataUrlFromBase64(url);
+  if (dataUrl) return dataUrl;
   return null;
 }
 
 function mookoDataUrlFromBase64(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
-  const b64 = raw.trim();
-  if (b64.length < 40) return null;
-  if (/^data:image\//i.test(b64)) return b64;
-  return `data:image/png;base64,${b64}`;
-}
-
-/** gpt-image-2（1K）文档合法 size */
-function mapGptImage2Size(sizeLabel?: string): string {
-  const ratio = String(sizeLabel || '1:1').trim() || '1:1';
-  const map: Record<string, string> = {
-    auto: 'auto',
-    '1:1': '1024x1024',
-    '16:9': '1792x1024',
-    '9:16': '1024x1792',
-    '4:3': '1792x1024',
-    '3:4': '1024x1792',
-    '3:2': '1792x1024',
-    '2:3': '1024x1792'
-  };
-  return map[ratio] || '1024x1024';
-}
-
-/** gpt-image-2-pro（2K/4K）文档合法 size */
-function mapGptImage2ProSize(sizeLabel?: string, resolution?: string): string {
-  const ratio = String(sizeLabel || '1:1').trim() || '1:1';
-  const is4k = String(resolution || '2k').toLowerCase() === '4k';
-  const map2k: Record<string, string> = {
-    auto: '1024x1024',
-    '1:1': '2048x2048',
-    '16:9': '2048x1152',
-    '9:16': '1024x1536',
-    '4:3': '2048x1152',
-    '3:4': '1024x1536',
-    '3:2': '2048x1152',
-    '2:3': '1024x1536'
-  };
-  const map4k: Record<string, string> = {
-    auto: '1024x1024',
-    '1:1': '2048x2048',
-    '16:9': '3840x2160',
-    '9:16': '2160x3840',
-    '4:3': '3840x2160',
-    '3:4': '2160x3840',
-    '3:2': '3840x2160',
-    '2:3': '2160x3840'
-  };
-  const table = is4k ? map4k : map2k;
-  return table[ratio] || table['1:1'];
+  const s = raw.trim();
+  if (!s || s.length < 40) return null;
+  if (/^data:image\//i.test(s)) return s;
+  return `data:image/jpeg;base64,${s}`;
 }
 
 function mapMookoQuality(quality: string): string {
@@ -104,53 +64,41 @@ function mapMookoQuality(quality: string): string {
   return 'auto';
 }
 
-/** 按木瓜 Apifox 文档组装请求（generations / edits） */
-export function buildMookoApiRequest(params: SubmitParams): MookoApiRequest {
-  const upstream = params.upstreamModel.trim().toLowerCase() || 'gpt-image-2';
-  const refs = params.refImageUrls?.filter(Boolean).slice(0, 8) || [];
-  const isPro = upstream === 'gpt-image-2-pro';
+function normalizeMookoResolution(resolution?: string): '2k' | '4k' {
+  return String(resolution || '2k').toLowerCase() === '4k' ? '4k' : '2k';
+}
 
-  if (isPro && refs.length) {
+/** 木瓜仅走 Images API + gpt-image-2-pro（2K/4K），与 gpt-img.mooko.ai 一致 */
+export function buildMookoApiRequest(params: SubmitParams): MookoApiRequest {
+  const refs = params.refImageUrls?.filter(Boolean).slice(0, 8) || [];
+  const resolution = normalizeMookoResolution(params.resolution);
+  const pixelSize = mapMookoProSize(resolution, params.size);
+  const sharedBody = {
+    model: 'gpt-image-2-pro',
+    prompt: params.prompt,
+    n: 1,
+    size: pixelSize,
+    quality: mapMookoQuality(params.quality),
+    response_format: 'url',
+    moderation: 'low',
+    output_format: 'jpeg',
+    output_compression: 85
+  };
+
+  if (refs.length) {
     return {
       path: '/v1/images/edits',
       body: {
-        model: 'gpt-image-2-pro',
-        prompt: params.prompt,
-        n: 1,
-        size: mapGptImage2ProSize(params.size, params.resolution),
-        quality: mapMookoQuality(params.quality),
-        response_format: 'url',
-        moderation: 'auto',
-        output_format: params.resolution === '4k' ? 'jpeg' : 'png',
+        ...sharedBody,
         image: refs
       }
     };
   }
 
-  if (isPro) {
-    return {
-      path: '/v1/images/generations',
-      body: {
-        model: 'gpt-image-2-pro',
-        prompt: params.prompt,
-        n: 1,
-        size: mapGptImage2ProSize(params.size, params.resolution),
-        quality: mapMookoQuality(params.quality),
-        response_format: 'url',
-        moderation: 'auto',
-        output_format: params.resolution === '4k' ? 'jpeg' : 'png'
-      }
-    };
-  }
-
-  const body: Record<string, unknown> = {
-    model: 'gpt-image-2',
-    prompt: params.prompt,
-    n: 1,
-    size: mapGptImage2Size(params.size)
+  return {
+    path: '/v1/images/generations',
+    body: sharedBody
   };
-  if (refs.length) body.reference_images = refs;
-  return { path: '/v1/images/generations', body };
 }
 
 function extractTaskId(payload: unknown): string | null {
@@ -303,6 +251,7 @@ function extractUpstreamError(payload: unknown, fallback: string): string {
 }
 
 function parsePollPayload(json: unknown): MookoPollResult {
+  const imageUrlsEarly = collectImageUrlsDeep(json);
   const data =
     json && typeof json === 'object' && 'data' in json
       ? (json as { data: Record<string, unknown> }).data
@@ -310,10 +259,18 @@ function parsePollPayload(json: unknown): MookoPollResult {
         ? (json as Record<string, unknown>)
         : null;
   if (!data) {
+    if (imageUrlsEarly.length) {
+      return {
+        status: 'completed',
+        imageUrl: imageUrlsEarly[0] || null,
+        imageUrls: imageUrlsEarly,
+        errorMessage: null
+      };
+    }
     return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
   }
   const status = String(data.status || '').toLowerCase();
-  const imageUrls = collectImageUrlsDeep(json);
+  const imageUrls = imageUrlsEarly.length ? imageUrlsEarly : collectImageUrlsDeep(json);
   const errMsg = String(data.error || data.error_message || data.message || '').trim() || null;
   const isViolation = /violation|违规|moderation|policy|审核/i.test(String(errMsg || ''));
 

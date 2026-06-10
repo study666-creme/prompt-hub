@@ -10,6 +10,7 @@ import {
 } from '../../lib/admin-helpers';
 import { deleteUserStorageFiles } from '../../lib/admin-storage';
 import { createAdminClient, isMembershipActive, type Profile } from '../../lib/supabase';
+import { roundCredits } from '../../lib/credit-math';
 import { requireAdminSecret } from '../../middleware/admin';
 import { rateLimit } from '../../middleware/rate-limit';
 
@@ -18,9 +19,15 @@ export const adminUserRoutes = new Hono<{ Bindings: Env }>();
 adminUserRoutes.use('*', requireAdminSecret);
 adminUserRoutes.use('*', rateLimit(40, 60_000));
 
+const creditAmountSchema = z
+  .number()
+  .min(0)
+  .max(100_000_000)
+  .transform(v => roundCredits(v));
+
 const patchUserSchema = z.object({
-  credits: z.number().int().min(0).max(100_000_000).optional(),
-  dailyCredits: z.number().int().min(0).max(1_000_000).optional(),
+  credits: creditAmountSchema.optional(),
+  dailyCredits: creditAmountSchema.optional(),
   membershipTier: z.enum(['lite', 'basic', 'standard', 'pro']).nullable().optional(),
   membershipUntil: z.string().datetime().nullable().optional(),
   clearMembership: z.boolean().optional(),

@@ -171,17 +171,31 @@
     if (text) toastTimer = setTimeout(() => (el.hidden = true), holdMs || (ok ? 5200 : 6800));
   }
 
-  function setCommunityTaskProgress(text, active) {
+  function setCommunityTaskProgress(text, active, opts = {}) {
     const box = $('communityTaskProgress');
     const label = $('communityTaskProgressText');
+    const bar = $('communityTaskProgressBar');
     if (!box || !label) return;
     if (!active) {
       box.hidden = true;
       label.textContent = '';
+      if (bar) {
+        bar.classList.add('is-indeterminate');
+        bar.style.width = '';
+      }
       return;
     }
     box.hidden = false;
     label.textContent = text || '处理中…';
+    if (!bar) return;
+    const fraction = Number(opts.fraction);
+    if (Number.isFinite(fraction) && fraction >= 0 && fraction <= 1) {
+      bar.classList.remove('is-indeterminate');
+      bar.style.width = `${Math.max(4, Math.round(fraction * 100))}%`;
+    } else {
+      bar.classList.add('is-indeterminate');
+      bar.style.width = '';
+    }
   }
 
   function setButtonBusy(btn, busy, busyLabel) {
@@ -211,8 +225,8 @@
       resultEl
     } = opts;
     if (!session) return;
-    if (communityBusy) {
-      toast('上一项社区操作尚未完成，请稍候', false);
+    if (communityRowBusy) {
+      toast('上一项单行操作尚未完成，请稍候', false);
       return;
     }
     if (confirmText) {
@@ -224,7 +238,7 @@
       });
       if (!ok) return;
     }
-    communityBusy = true;
+    communityRowBusy = true;
     setButtonBusy(btn, true, '处理中…');
     setCommunityTaskProgress(progressText || '正在处理，请稍候…', true);
     if (resultEl) {
@@ -248,7 +262,7 @@
       toast(err, false);
       throw e;
     } finally {
-      communityBusy = false;
+      communityRowBusy = false;
       setButtonBusy(btn, false);
       setTimeout(() => setCommunityTaskProgress('', false), 8000);
     }
@@ -261,7 +275,7 @@
     const isPostView = communityView !== 'bucket-orphans';
     if (bar) bar.classList.toggle('hidden', !isPostView);
     if (countEl) countEl.textContent = `已选 ${n} 条`;
-    const disabled = n === 0 || communityBusy;
+    const disabled = n === 0 || communityRowBusy || !!communityBatchTask?.running;
     ['communityBatchRestoreBtn', 'communityBatchUnpublishBtn', 'communityBatchDeleteBtn'].forEach((id) => {
       const el = $(id);
       if (el) el.disabled = disabled;
@@ -288,8 +302,91 @@
     updateCommunityBatchUi();
   }
 
+  function batchCommunityItemPath(action, id) {
+    const enc = encodeURIComponent(id);
+    if (action === 'restore') return `/api/admin/community/posts/${enc}/restore`;
+    if (action === 'unpublish') return `/api/admin/community/posts/${enc}/unpublish`;
+    if (action === 'delete') return `/api/admin/community/posts/${enc}/delete`;
+    return '';
+  }
+
+  function batchCommunityActionLabel(action) {
+    if (action === 'restore') return '恢复';
+    if (action === 'unpublish') return '下架';
+    return '删除';
+  }
+
+  async function runBatchCommunityChunked(action, ids) {
+    const label = batchCommunityActionLabel(action);
+    const total = ids.length;
+    let succeeded = 0;
+    let skipped = 0;
+    let failed = 0;
+    let storageRemoved = 0;
+    const errors = [];
+
+    communityBatchTask = { action, done: 0, total, running: true };
+    updateCommunityBatchUi();
+    setCommunityTaskProgress(`正在${label} 0/${total}…`, true, { fraction: 0 });
+
+    for (let i = 0; i < total; i += 1) {
+      const id = ids[i];
+      const path = batchCommunityItemPath(action, id);
+      if (!path) continue;
+      const step = i + 1;
+      setCommunityTaskProgress(`正在${label} ${step}/${total}…`, true, { fraction: step / total });
+      if ($('communityMsg')) showMsg($('communityMsg'), `正在${label} ${step}/${total}…`, true);
+      try {
+        const data = await adminFetch(session, path, {
+          method: 'POST',
+          body: action === 'delete' ? { deleteStorage: true } : undefined,
+          timeoutMs: 120000,
+          retries: 0
+        });
+        if (action === 'restore') {
+          if (data.alreadyExists) skipped += 1;
+          else succeeded += 1;
+        } else if (action === 'delete') {
+          succeeded += 1;
+          storageRemoved += Number(data.storageRemoved || 0);
+        } else {
+          succeeded += 1;
+        }
+      } catch (e) {
+        failed += 1;
+        errors.push({ id, message: friendlyFetchError(e) });
+        console.warn('[admin] batch item failed', id, e);
+      }
+      communityBatchTask = { action, done: step, total, running: true };
+    }
+
+    communityBatchTask = null;
+    updateCommunityBatchUi();
+    communitySelected.clear();
+    void loadCommunity(false);
+
+    const errHint = failed ? `，失败 ${failed}（见控制台）` : '';
+    if (errors.length) console.warn('[admin] batch errors', errors);
+    let summary;
+    if (action === 'restore') {
+      summary = `批量恢复完成：成功 ${succeeded}，跳过 ${skipped}${errHint}`;
+    } else if (action === 'delete') {
+      summary = `批量删除完成：成功 ${succeeded}，清图 ${storageRemoved}${errHint}`;
+    } else {
+      summary = `批量下架完成：成功 ${succeeded}${errHint}`;
+    }
+    setCommunityTaskProgress(summary, true, { fraction: 1 });
+    if ($('communityMsg')) showMsg($('communityMsg'), summary, failed === 0);
+    toast(summary, failed === 0);
+    setTimeout(() => setCommunityTaskProgress('', false), 12000);
+  }
+
   async function runBatchCommunityAction(action) {
-    if (!session || communityBusy) return;
+    if (!session) return;
+    if (communityBatchTask?.running) {
+      toast(`批量${batchCommunityActionLabel(action)}进行中 ${communityBatchTask.done}/${communityBatchTask.total}，可继续其他操作`, true);
+      return;
+    }
     const ids = [...communitySelected];
     if (!ids.length) {
       toast('请先勾选本页要处理的帖子', false);
@@ -306,42 +403,14 @@
     };
     const meta = labels[action];
     if (!meta) return;
-    const paths = {
-      restore: '/api/admin/community/posts/batch-restore',
-      unpublish: '/api/admin/community/posts/batch-unpublish',
-      delete: '/api/admin/community/posts/batch-delete'
-    };
-    const btn = $('communityBatch' + action.charAt(0).toUpperCase() + action.slice(1) + 'Btn');
-    try {
-      await runCommunityAdminTask({
-        btn,
-        confirmTitle: meta.title,
-        confirmText: meta.msg,
-        confirmDanger: meta.danger,
-        progressText: `正在批量${action === 'restore' ? '恢复' : action === 'unpublish' ? '下架' : '删除'} ${ids.length} 条…`,
-        msgEl: $('communityMsg'),
-        request: () =>
-          adminFetch(session, paths[action], {
-            method: 'POST',
-            body: action === 'delete' ? { ids, deleteStorage: true } : { ids },
-            timeoutMs: 300000,
-            retries: 1
-          }),
-        onSuccess: (r) => {
-          communitySelected.clear();
-          void loadCommunity(false);
-          const errHint = r.failed ? `，失败 ${r.failed}（见控制台）` : '';
-          if (r.failed && r.errors?.length) console.warn('[admin] batch errors', r.errors);
-          if (action === 'restore') {
-            return `批量恢复完成：成功 ${r.succeeded || 0}，跳过 ${r.skipped || 0}${errHint}`;
-          }
-          if (action === 'delete') {
-            return `批量删除完成：成功 ${r.succeeded || 0}，清图 ${r.storageRemoved || 0}${errHint}`;
-          }
-          return `批量下架完成：成功 ${r.succeeded || 0}${errHint}`;
-        }
-      });
-    } catch (e) { /* toast handled */ }
+    const ok = await adminConfirm({
+      title: meta.title,
+      message: meta.msg,
+      confirmLabel: meta.danger ? '确认删除' : '确定',
+      danger: !!meta.danger
+    });
+    if (!ok) return;
+    void runBatchCommunityChunked(action, ids);
   }
 
   function openModal() {
@@ -407,7 +476,9 @@
   let communityView = 'published';
   let communityBucketItems = [];
   let communityPageItems = [];
-  let communityBusy = false;
+  let communityRowBusy = false;
+  /** 批量任务在后台跑，不阻塞单行删除/下架 */
+  let communityBatchTask = null;
   const communitySelected = new Set();
   const PAGE = 20;
 
@@ -749,7 +820,7 @@
   }
 
   async function handleCommunityRowAction(action, id, btn, extra) {
-    if (!session || !id || communityBusy) return;
+    if (!session || !id || communityRowBusy) return;
     const copy = {
       restore: {
         title: '恢复到卡片库',
@@ -814,6 +885,29 @@
     } catch (e) { /* toast handled */ }
   }
 
+  function setupAdminConfirmModal() {
+    if (document.body.dataset.adminConfirmBound === '1') return;
+    document.body.dataset.adminConfirmBound = '1';
+    $('adminConfirmOkBtn')?.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeAdminConfirm(true);
+    });
+    $('adminConfirmCancelBtn')?.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeAdminConfirm(false);
+    });
+    document.querySelectorAll('[data-confirm-cancel]').forEach((el) => {
+      if (el.id === 'adminConfirmCancelBtn') return;
+      el.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closeAdminConfirm(false);
+      });
+    });
+  }
+
   function setupCommunityPanelActions() {
     const panel = $('panel-community');
     if (!panel || panel.dataset.actionsBound === '1') return;
@@ -824,11 +918,11 @@
         closeAdminConfirm(false);
         return;
       }
-      if (ev.target.id === 'adminConfirmOkBtn') {
+      if (ev.target.closest('#adminConfirmOkBtn')) {
         closeAdminConfirm(true);
         return;
       }
-      if (communityBusy) return;
+      if (communityRowBusy) return;
       const restoreBtn = ev.target.closest('[data-restore-post]');
       if (restoreBtn) {
         void handleCommunityRowAction('restore', restoreBtn.getAttribute('data-restore-post'), restoreBtn);
@@ -1537,6 +1631,7 @@
 
   function init() {
     bindTabs();
+    setupAdminConfirmModal();
     setupCommunityPanelActions();
     showApp(!!session?.secret);
 

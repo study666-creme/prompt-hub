@@ -24,10 +24,13 @@ describe('image model catalog', () => {
     );
   });
 
-  it('apimart only exposes gpt-image-2 and seedream 5 lite', () => {
-    expect(APIMART_IMAGE_MODEL_CATALOG).toHaveLength(2);
+  it('apimart exposes official budget, gpt-image-2 and seedream 5 lite', () => {
+    expect(APIMART_IMAGE_MODEL_CATALOG).toHaveLength(3);
+    const budget = getCatalogEntry('apimart-gpt-image-2-official-budget');
     const gpt = getCatalogEntry('apimart-gpt-image-2');
     const jimeng = getCatalogEntry('apimart-seedream-5-lite');
+    expect(budget?.upstream).toBe('gpt-image-2-official');
+    expect(budget?.fixedQualityLow).toBe(true);
     expect(gpt?.provider).toBe('apimart');
     expect(gpt?.pricingByResolution).toBe(true);
     expect(jimeng?.upstream).toBe('doubao-seedream-5-0-lite');
@@ -41,12 +44,9 @@ describe('image model catalog', () => {
     expect(providerLabel('mooko')).toBe('慢速线路');
   });
 
-  it('exposes mooko gpt-image-2 and pro models', () => {
-    const base = getCatalogEntry('mooko-gpt-image-2');
+  it('exposes mooko pro model only (2k/4k)', () => {
     const pro = getCatalogEntry('mooko-gpt-image-2-pro');
-    expect(base?.provider).toBe('mooko');
-    expect(base?.upstream).toBe('gpt-image-2');
-    expect(base?.resolutions).toEqual(['1k']);
+    expect(getCatalogEntry('mooko-gpt-image-2')).toBeFalsy();
     expect(pro?.provider).toBe('mooko');
     expect(pro?.upstream).toBe('gpt-image-2-pro');
     expect(pro?.resolutions).toEqual(['2k', '4k']);

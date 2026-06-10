@@ -23,6 +23,8 @@ export type ImageModelCatalogEntry = {
   defaultCreditsByResolution?: Partial<Record<'1k' | '2k' | '4k', number>>;
   /** GrsAI：自动跟随上游维护状态（模型页 + 提交反馈） */
   followUpstreamMaintenance?: boolean;
+  /** 固定 low 质量，前台隐藏质量选项（Apimart official 特价） */
+  fixedQualityLow?: boolean;
   sortOrder: number;
 };
 
@@ -216,44 +218,47 @@ export const ITHINK_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider
   })
 ]);
 
-/** 木瓜AI（api.mooko.ai）OpenAI 兼容生图 */
+/** 木瓜AI（api.mooko.ai /v1/images）仅 Pro · 2K/4K，对齐 gpt-img.mooko.ai */
 export const MOOKO_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider('mooko', [
-  gim2({
-    id: 'mooko-gpt-image-2',
-    upstream: 'gpt-image-2',
-    label: 'GPT Image 2 · 慢速',
-    group: 'new',
-    description: '慢速线路 · OpenAI Image 2 · 仅 1K（2K/4K 请选 Pro 慢速）',
-    upstreamPoints: 3,
-    refundOnViolation: true,
-    resolutions: ['1k'],
-    defaultCredits: 3,
-    sortOrder: 104
-  }),
   gim2({
     id: 'mooko-gpt-image-2-pro',
     upstream: 'gpt-image-2-pro',
     label: 'GPT Image 2 Pro · 慢速',
     group: 'new',
-    description: '慢速线路 · Pro 档 · 仅 2K/4K（1K 请选「GPT Image 2 · 慢速」）',
+    description: '慢速线路 · Images API · gpt-image-2-pro · 仅 2K/4K',
     upstreamPoints: 5,
     refundOnViolation: true,
     resolutions: ['2k', '4k'],
     pricingByResolution: true,
     defaultCreditsByResolution: { '2k': 5, '4k': 5 },
     defaultCredits: 5,
-    sortOrder: 105
+    sortOrder: 104
   })
 ]);
 
 /** Apimart 备用线路 */
 export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider('apimart', [
   gim2({
+    id: 'apimart-gpt-image-2-official-budget',
+    upstream: 'gpt-image-2-official',
+    label: 'GPT Image 2 · 特价',
+    group: 'new',
+    description: '备用线路 · official 低价档 · 固定低质量 · 无正方形比例',
+    upstreamPoints: 0,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k', '4k'],
+    pricingByResolution: true,
+    defaultCreditsByResolution: { '1k': 3, '2k': 4, '4k': 9 },
+    defaultCredits: 3,
+    fixedQualityLow: true,
+    sortOrder: 100
+  }),
+  gim2({
     id: 'apimart-gpt-image-2',
     upstream: 'gpt-image-2',
     label: 'GPT Image 2',
     group: 'classic',
-    description: '备用线路 · OpenAI Image 2（1K/2K/4K 分开定价）',
+    description: '备用线路 · gpt-image-2 四档价（非 official 181 档）；比例+分辨率决定出图尺寸',
     upstreamPoints: 0,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],

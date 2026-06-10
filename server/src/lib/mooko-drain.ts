@@ -19,7 +19,7 @@ function readMookoMeta(meta: Record<string, unknown>) {
     taskId: typeof meta.upstreamTaskId === 'string' ? meta.upstreamTaskId : '',
     syncUrl: typeof meta.syncImageUrl === 'string' ? meta.syncImageUrl : '',
     startedAt: Date.parse(String(meta.mookoSubmitStartedAt || '')),
-    upstreamModel: String(meta.upstreamModel || 'gpt-image-2'),
+    upstreamModel: String(meta.upstreamModel || 'gpt-image-2-pro'),
     size: typeof meta.size === 'string' ? meta.size : undefined,
     refImageUrls: Array.isArray(meta.refImageUrls)
       ? (meta.refImageUrls as string[]).filter(Boolean)

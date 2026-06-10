@@ -30,8 +30,8 @@
 | 值 | 行为 |
 |----|------|
 | `supabase`（默认） | 仅 Supabase，与现在一致 |
-| `r2-first` | **先 R2，没有再 Supabase**（迁移期推荐） |
-| `r2` | 仅 R2（全量同步并验证后） |
+| `r2-first` | **先 R2，没有再 Supabase**（仅迁移过渡期；会烧 Supabase egress） |
+| `r2` | **仅 R2**（`wrangler.toml` 当前默认；迁完或新图只写 R2 后用） |
 
 ---
 

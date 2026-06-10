@@ -13,6 +13,7 @@ import {
 import { processFastProviderPendingSubmit } from '../../lib/fast-provider-submit';
 import { processIthinkPendingSubmit } from '../../lib/ithink-submit';
 import { drainMookoPendingSubmits } from '../../lib/mooko-drain';
+import { aspectRatiosForModel } from '../../lib/image-size-options';
 import { providerLabel } from '../../lib/image-models-catalog';
 import {
   archivePendingJobImage,
@@ -51,6 +52,26 @@ import {
   isAcceptedRefImageInput,
   resolveGenerationRefUrls
 } from '../../lib/generation-ref-images';
+import { buildPrivateMediaCdnUrl, resolveStoragePath } from '../../lib/media-cdn';
+import type { Context } from 'hono';
+
+async function resolveJobImageUrlForClient(
+  c: Context<{ Bindings: Env }>,
+  imageUrl: string | null | undefined
+): Promise<string | null> {
+  const raw = String(imageUrl || '').trim();
+  if (!raw) return null;
+  const path = resolveStoragePath(raw);
+  if (path) {
+    try {
+      return await buildPrivateMediaCdnUrl(c, path);
+    } catch (e) {
+      console.warn('[generate] resolve job image url failed', path, e);
+      return raw;
+    }
+  }
+  return raw;
+}
 
 const refImageInputSchema = z
   .string()
@@ -221,6 +242,8 @@ function publicModelPayload(
       statusNotice: m.statusNotice,
       refundOnViolation: m.refundOnViolation,
       violationNotice: m.violationNotice,
+      fixedQualityLow: !!m.fixedQualityLow,
+      aspectRatios: [...aspectRatiosForModel(m.id)],
       resolutions: m.resolutions,
       pricingByResolution: m.pricingByResolution,
       creditsByResolution: m.pricingByResolution ? m.creditsByResolution : null,
@@ -942,13 +965,18 @@ generateRoutes.get('/jobs/:jobId', async c => {
     );
   }
 
+  responseImageUrl = await resolveJobImageUrlForClient(c, responseImageUrl);
+  const responseExtraUrls = extraImageUrls?.length
+    ? await Promise.all(extraImageUrls.map((u) => resolveJobImageUrlForClient(c, u)))
+    : undefined;
+
   return c.json({
     ok: true,
     data: {
       jobId: job.id,
       status: liveStatus,
       imageUrl: responseImageUrl,
-      extraImageUrls: extraImageUrls?.length ? extraImageUrls : undefined,
+      extraImageUrls: responseExtraUrls?.filter(Boolean).length ? responseExtraUrls.filter(Boolean) : undefined,
       creditsRemaining: spendableCredits(profile),
       model: meta.model,
       modelLabel: meta.modelLabel,

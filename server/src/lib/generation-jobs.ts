@@ -8,7 +8,13 @@ import {
   type ImageUpstreamBindings
 } from './image-upstream';
 import { ApiError } from './errors';
-import { archiveRemoteImage, isStorageRef, toStorageRef } from './image-archive';
+import {
+  archiveGenerationResultUrls,
+  archiveRemoteImage,
+  isDataImageUrl,
+  isStorageRef,
+  toStorageRef
+} from './image-archive';
 import { storageObjectExistsLight } from './media-cdn';
 
 const GEN_IMAGE_BUCKET = 'card-images';
@@ -342,13 +348,36 @@ export async function pollAndUpdateJob(
     }
     return out;
   })();
-  const syncImageUrl = mookoStoredUrls[0] || null;
+  let urlsToComplete = mookoStoredUrls;
+  if (urlsToComplete.some(isDataImageUrl)) {
+    try {
+      urlsToComplete = await archiveGenerationResultUrls(admin, userId, job.id, urlsToComplete, env);
+      const syncPatch: Record<string, unknown> = {
+        syncImageUrl: urlsToComplete[0]
+      };
+      if (urlsToComplete.length > 1) syncPatch.mookoSubmitImageUrls = urlsToComplete;
+      await admin
+        .from('generation_requests')
+        .update({ meta: { ...meta, ...syncPatch } })
+        .eq('id', job.id);
+    } catch (e) {
+      console.warn('[generation] archive syncImageUrl before complete failed', job.id, e);
+      return {
+        status: 'processing',
+        imageUrl: null,
+        errorMessage: null,
+        refunded: false,
+        progressNote: slowProviderProgressNote(meta, provider)
+      };
+    }
+  }
+  const syncImageUrl = urlsToComplete[0] || null;
   if (syncImageUrl && job.status === 'processing') {
     return completeJobFromPoll(
       admin,
       userId,
       job,
-      { imageUrl: syncImageUrl, imageUrls: mookoStoredUrls },
+      { imageUrl: syncImageUrl, imageUrls: urlsToComplete },
       env
     );
   }
@@ -393,7 +422,7 @@ export async function pollAndUpdateJob(
       scheduleBackgroundSubmit(
         opts,
         processMookoPendingSubmit(admin, userId, job, upstream, env, {
-          upstreamModel: String(meta.upstreamModel || 'gpt-image-2'),
+          upstreamModel: String(meta.upstreamModel || 'gpt-image-2-pro'),
           prompt: String(job.prompt || ''),
           resolution: String(job.resolution || '1k'),
           quality: String(job.quality || 'standard'),
@@ -481,7 +510,7 @@ export async function pollAndUpdateJob(
       scheduleBackgroundSubmit(
         opts,
         processIthinkPendingSubmit(admin, userId, job, upstream, env, {
-          upstreamModel: String(meta.upstreamModel || 'gpt-image-2'),
+          upstreamModel: String(meta.upstreamModel || 'gpt-image-2-pro'),
           prompt: String(job.prompt || ''),
           resolution: '1k',
           quality: String(job.quality || 'standard'),
@@ -529,7 +558,7 @@ export async function pollAndUpdateJob(
         scheduleBackgroundSubmit(
           opts,
           processFastProviderPendingSubmit(admin, userId, job, upstream, provider, {
-            upstreamModel: String(meta.upstreamModel || 'gpt-image-2'),
+            upstreamModel: String(meta.upstreamModel || 'gpt-image-2-pro'),
             prompt: String(job.prompt || ''),
             resolution: String(job.resolution || '1k'),
             quality: String(job.quality || 'standard'),

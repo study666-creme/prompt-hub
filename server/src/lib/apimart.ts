@@ -1,4 +1,8 @@
 import { ApiError } from './errors';
+import {
+  buildApimartOfficialBudgetRequestBody,
+  isApimartOfficialBudgetUpstream
+} from './apimart-official-budget';
 import { mapQualityForGptImage, mapResolutionForSeedream } from './pricing';
 
 type SubmitParams = {
@@ -139,6 +143,15 @@ function buildRequestBody(params: SubmitParams): Record<string, unknown> {
       n: 1,
       ...(refs ? { image_urls: refs } : {})
     };
+  }
+
+  if (isApimartOfficialBudgetUpstream(upstream)) {
+    return buildApimartOfficialBudgetRequestBody({
+      prompt: params.prompt,
+      resolution: params.resolution,
+      size: params.size,
+      refImageUrls: params.refImageUrls
+    });
   }
 
   return {

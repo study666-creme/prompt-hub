@@ -12,6 +12,8 @@ scripts/taobao-*.txt
 scripts/activation-codes-insert.sql
 *.log
 node_modules/
+.pages-deploy/
+prompt-hub-deploy.zip
 
 .vercel
 .env*

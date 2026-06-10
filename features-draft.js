@@ -2950,7 +2950,8 @@
       clearSessionGenJob,
       getActivePollJobIds: () => activePollJobIds,
       IMAGEGEN_FEED_PENDING_CAP,
-      IMAGEGEN_FEED_FAILED_CAP
+      IMAGEGEN_FEED_FAILED_CAP,
+      addImageGenRefFromFeed
     });
     layoutImageGenFeedMasonry = IG.layoutImageGenFeedMasonry;
     scheduleImageGenFeedLayout = IG.scheduleImageGenFeedLayout;
@@ -5313,6 +5314,8 @@
       model: opts.model || null,
       quality: opts.quality || null,
       size: opts.size || null,
+      targetGroup: opts.targetGroup || null,
+      targetTags: opts.targetTags || null,
       publishToCommunity: !!opts.publishToCommunity,
       fromInspirationDraw: !!opts.fromInspirationDraw,
       silentToast: !!opts.silentToast
@@ -5323,8 +5326,9 @@
   const RECENT_GEN_RECOVER_MS = 2 * 3600 * 1000;
   /** 后台恢复超过此时间仍无图 → 标失败并清占位 */
   const RECOVERY_GIVE_UP_MS = 25 * 60 * 1000;
-  /** 已进入「恢复中」占位后再等多久强制结案 */
+  /** 已进入「恢复中」占位后再等多久强制结案（慢速线用 genRecoveringDeferGiveUpMs） */
   const RECOVERING_DEFER_GIVE_UP_MS = 22 * 60 * 1000;
+  const SERVER_RECOVER_AFTER_MS = 8 * 60 * 1000;
   const activePollJobIds = new Set();
   let resumeGenJobsInflight = null;
   let genJobsSyncTimer = null;
@@ -5502,12 +5506,15 @@
     if (isSlowGenProviderModel(job.model)) {
       job.recovering = false;
       job.recoverNote = '';
-      job.pendingNote = note || '慢速线仍在后台等待（请勿重复提交）';
+      job.pendingNote = formatPendingRecoveryNote(job, note || '慢速线仍在后台等待（请勿重复提交）');
     } else {
       job.recovering = true;
-      job.recoverNote = note || '上游可能仍在出图，后台继续恢复…';
+      job.recoverNote = formatPendingRecoveryNote(job, note || '上游可能仍在出图，后台继续恢复…');
     }
     persistPendingGenJobs();
+    if (job.jobId && age >= SERVER_RECOVER_AFTER_MS) {
+      void tryRecoverPendingJobDirect(job);
+    }
     void resumePendingGenerationJobs();
     renderImageGenFeed({ preserveScroll: true });
   }
@@ -5676,6 +5683,8 @@
       size: job.size || '1:1',
       cost: job.cost || 0,
       jobId: job.jobId,
+      targetGroup: job.targetGroup || null,
+      targetTags: job.targetTags || null,
       fromInspirationDraw: !!job.fromInspirationDraw,
       batchIndex: job.batchIndex || null,
       batchTotal: job.batchTotal || null,
@@ -5826,9 +5835,14 @@
 
   function startGenJobsBackgroundSync() {
     if (genJobsSyncInterval) return;
-    const syncIntervalMs = imageGenPendingJobs.length > 0
-      ? (isMobileViewport() ? 18000 : 12000)
-      : (isMobileViewport() ? 45000 : 30000);
+    const hasActiveRecover = imageGenPendingJobs.some(
+      (p) => p.recovering || isSlowGenProviderModel(p.model)
+    );
+    const syncIntervalMs = hasActiveRecover
+      ? (isMobileViewport() ? 10000 : 7000)
+      : imageGenPendingJobs.length > 0
+        ? (isMobileViewport() ? 18000 : 12000)
+        : (isMobileViewport() ? 45000 : 30000);
     genJobsSyncInterval = setInterval(() => {
       if (!window.PointsSystem?.useApiForAccount?.()) return;
       if (!shouldRunGenJobsBackgroundSync()) return;
@@ -6153,10 +6167,13 @@
         || isLikelyRecoverableGenFailure(refreshed.errorMessage || apiJob.errorMessage, ctx)
       ) {
         if (await tryServerRecoverPending(pending)) return true;
-        if (age < RECOVERING_DEFER_GIVE_UP_MS) {
+        if (age < pendingRecoveryGiveUpMs(pending)) {
           pending.recovering = true;
-          pending.recoverNote = '上游可能仍在出图，后台继续恢复…';
+          pending.recoverNote = formatPendingRecoveryNote(pending, '上游可能仍在出图，后台继续恢复…');
           persistPendingGenJobs();
+          if (pending.jobId && age >= SERVER_RECOVER_AFTER_MS) {
+            void tryRecoverPendingJobDirect(pending);
+          }
           if (!activePollJobIds.has(pending.jobId)) {
             void pollGenerationJobUntilDone(pending.jobId, pending.id, ctx);
           }
@@ -6174,8 +6191,9 @@
 
     if (
       pending.recovering
-      && Date.now() - (pending.startedAt || 0) >= RECOVERING_DEFER_GIVE_UP_MS
+      && Date.now() - (pending.startedAt || 0) >= pendingRecoveryGiveUpMs(pending)
     ) {
+      if (await tryServerRecoverPending(pending)) return true;
       if (apiJob.status === 'processing') {
         if (!activePollJobIds.has(apiJob.id)) {
           void pollGenerationJobUntilDone(apiJob.id, pending.id, ctx);
@@ -6299,7 +6317,7 @@
         const pending = imageGenPendingJobs.find((p) => p.jobId === live.id);
         if (pending && (force || pending.recovering)) {
           if (await tryServerRecoverPending(pending)) return true;
-          if (!force && Date.now() - (pending.startedAt || 0) < RECOVERING_DEFER_GIVE_UP_MS) {
+          if (!force && Date.now() - (pending.startedAt || 0) < pendingRecoveryGiveUpMs(pending)) {
             pending.recovering = true;
             persistPendingGenJobs();
             return false;
@@ -6520,7 +6538,7 @@
           continue;
         }
         const deferAge = Date.now() - (pending.startedAt || 0);
-        if (pending.recovering && deferAge >= RECOVERING_DEFER_GIVE_UP_MS && aj?.status === 'processing') {
+        if (pending.recovering && deferAge >= pendingRecoveryGiveUpMs(pending) && aj?.status === 'processing') {
           if (!activePollJobIds.has(pending.jobId)) {
             void pollGenerationJobUntilDone(pending.jobId, pending.id, pendingJobToPollCtx(pending));
           }
@@ -6555,7 +6573,11 @@
       for (const job of imageGenPendingJobs.slice()) {
         if (!job.jobId || activePollJobIds.has(job.jobId)) continue;
         if (Date.now() - (job.startedAt || 0) >= RECENT_GEN_RECOVER_MS) {
-          abandonUnrecoverablePendingJob(job, null, { toast: false });
+          abandonUnrecoverablePendingJob(
+            job,
+            '该任务已超过 2 小时恢复窗口，已关闭占位（木瓜已成功的可到控制台用任务 ID 手动恢复）',
+            { toast: true }
+          );
           if (job.jobId) window.recordGenerationJobDeletion?.(job.jobId);
           changed = true;
           continue;
@@ -6887,9 +6909,27 @@
       }
 
       for (const p of imageGenPendingJobs.slice()) {
-        if (!p.recovering || !p.jobId) continue;
+        if (!p.jobId) continue;
         const age = Date.now() - (p.startedAt || 0);
-        if (age < RECOVERING_DEFER_GIVE_UP_MS) continue;
+        const slowPending = isSlowGenProviderModel(p.model);
+        const needsServerRecover = (p.recovering || slowPending) && age >= SERVER_RECOVER_AFTER_MS;
+        if (needsServerRecover) {
+          if (p.recovering) {
+            p.recoverNote = formatPendingRecoveryNote(p, p.recoverNote || '后台恢复中');
+          } else if (slowPending) {
+            p.pendingNote = formatPendingRecoveryNote(p, p.pendingNote || '慢速线后台等待中');
+          }
+          persistPendingGenJobs();
+          if (!p._serverRecoverAt || Date.now() - p._serverRecoverAt > 5 * 60 * 1000) {
+            p._serverRecoverAt = Date.now();
+            if (await tryRecoverPendingJobDirect(p)) {
+              changed = true;
+              continue;
+            }
+          }
+        }
+        if (!p.recovering && !slowPending) continue;
+        if (age < pendingRecoveryGiveUpMs(p)) continue;
         try {
           const retry = await window.PromptHubApi.getGenerationJob(p.jobId);
           if (retry.ok && retry.data.status === 'completed' && retry.data.imageUrl) {
@@ -6927,8 +6967,8 @@
         if (age >= RECENT_GEN_RECOVER_MS) {
           abandonUnrecoverablePendingJob(
             p,
-            '上游临时链接约 2 小时有效，该任务已过期，无法恢复',
-            { toast: false }
+            '上游临时链接约 2 小时有效，该任务已过期，无法恢复（可点 × 关闭占位）',
+            { toast: true }
           );
           if (p.jobId) window.recordGenerationJobDeletion?.(p.jobId);
           changed = true;
@@ -7162,6 +7202,8 @@
     bindImageGenPromptTools();
     window.ImageGenPromptTools?.init?.();
     bindImageGenGenPublic();
+    bindImageGenSaveTarget();
+    updateImageGenSaveTargetSelects();
     syncImageGenGenPublicUI();
     void refreshImageGenModelCatalog().then(() => {
       syncImageGenModelToResolution();
@@ -7277,15 +7319,15 @@
   ];
 
   const IMAGE_GEN_MODEL_FALLBACK = [
-    { id: 'gpt-image-2', label: 'GPT Image 2', provider: 'grsai', uiFamily: 'gim2', sortOrder: 2, selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'gpt-image-2-vip', label: 'GPT Image 2 VIP', provider: 'grsai', uiFamily: 'gim2', sortOrder: 1, selectable: true, status: 'active', refundOnViolation: true },
+    { id: 'gpt-image-2', label: 'GPT Image 2', provider: 'grsai', uiFamily: 'gim2', sortOrder: 2, selectable: true, status: 'active', refundOnViolation: true, aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
+    { id: 'gpt-image-2-vip', label: 'GPT Image 2 VIP', provider: 'grsai', uiFamily: 'gim2', sortOrder: 1, selectable: true, status: 'active', refundOnViolation: true, aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
     { id: 'nano-banana-pro', label: 'Nano Banana Pro', provider: 'grsai', uiFamily: 'banana', sortOrder: 3, selectable: true, status: 'active', refundOnViolation: true },
     { id: 'nano-banana-2', label: 'Nano Banana 2', provider: 'grsai', uiFamily: 'banana', sortOrder: 4, selectable: true, status: 'active', refundOnViolation: true },
     { id: 'nano-banana-fast', label: 'Nano Banana Fast', provider: 'grsai', uiFamily: 'banana', sortOrder: 6, selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'apimart-gpt-image-2', label: 'GPT Image 2 · 备用', provider: 'apimart', uiFamily: 'gim2', sortOrder: 103, selectable: true, status: 'active', refundOnViolation: true },
+    { id: 'apimart-gpt-image-2', label: 'GPT Image 2 · 备用', provider: 'apimart', uiFamily: 'gim2', sortOrder: 103, selectable: true, status: 'active', refundOnViolation: true, aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'], resolutions: ['1k', '2k', '4k'] },
+    { id: 'apimart-gpt-image-2-official-budget', label: 'GPT Image 2 · 特价', provider: 'apimart', uiFamily: 'gim2', sortOrder: 100, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, pricingByResolution: true, resolutions: ['1k', '2k', '4k'], aspectRatios: ['16:9', '9:16', '4:3', '3:4'] },
     { id: 'apimart-seedream-5-lite', label: 'Seedream 5 Lite · 备用', provider: 'apimart', uiFamily: 'jimeng', sortOrder: 104, selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'mooko-gpt-image-2', label: 'GPT Image 2 · 慢速', provider: 'mooko', uiFamily: 'gim2', sortOrder: 101, selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'mooko-gpt-image-2-pro', label: 'GPT Image 2 Pro · 慢速', provider: 'mooko', uiFamily: 'gim2', sortOrder: 102, selectable: true, status: 'active', refundOnViolation: true }
+    { id: 'mooko-gpt-image-2-pro', label: 'GPT Image 2 Pro · 慢速', provider: 'mooko', uiFamily: 'gim2', sortOrder: 101, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['2k', '4k'], aspectRatios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'] }
   ];
 
   function applyImageGenModelCatalog(models) {
@@ -7461,8 +7503,8 @@
     if (!entry) return id;
     const supported = entry.resolutions?.length ? entry.resolutions : ['1k', '2k', '4k'];
     if (supported.includes(res)) return id;
-    if (id === 'mooko-gpt-image-2-pro' && res === '1k') return 'mooko-gpt-image-2';
-    if (id === 'mooko-gpt-image-2' && (res === '2k' || res === '4k')) return 'mooko-gpt-image-2-pro';
+    if (id === 'mooko-gpt-image-2-pro' && res === '1k') return 'mooko-gpt-image-2-pro';
+    if (id === 'mooko-gpt-image-2') return 'mooko-gpt-image-2-pro';
     const family = imageGenModelUiFamily(entry);
     const provider = entry.provider;
     const hit = imageGenModelCatalog.find(
@@ -7502,6 +7544,284 @@
     return imageGenRefImages[0] || null;
   }
 
+  const IMAGE_GEN_SIZE_LABELS = {
+    auto: '自动',
+    '1:1': '正方形 1∶1',
+    '16:9': '横屏 16∶9',
+    '9:16': '竖屏 9∶16',
+    '4:3': '横屏 4∶3',
+    '3:4': '竖屏 3∶4',
+    '3:2': '横屏 3∶2',
+    '2:3': '竖屏 2∶3',
+    '5:4': '横屏 5∶4',
+    '4:5': '竖屏 4∶5',
+    '21:9': '超宽 21∶9',
+    '9:21': '超高 9∶21',
+    '2:1': '横屏 2∶1',
+    '1:2': '竖屏 1∶2',
+    '3:1': '超宽 3∶1',
+    '1:3': '超高 1∶3',
+    '1:4': '超高 1∶4',
+    '4:1': '超宽 4∶1',
+    '1:8': '超高 1∶8',
+    '8:1': '超宽 8∶1'
+  };
+  const IMAGE_GEN_SIZE_BASIC = ['1:1', '16:9', '9:16', '4:3', '3:4'];
+  const IMAGE_GEN_SIZE_BANANA = ['auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'];
+  const IMAGE_GEN_SIZE_BANANA2_EXTRA = ['1:4', '4:1', '1:8', '8:1'];
+  const IMAGE_GEN_SIZE_GIM2 = ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'];
+  /** 离线兜底：与 server aspectRatiosForModel 一致 */
+  const IMAGE_GEN_ASPECT_FALLBACK = {
+    'apimart-gpt-image-2-official-budget': ['16:9', '9:16', '4:3', '3:4'],
+    'mooko-gpt-image-2-pro': ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'],
+    'apimart-gpt-image-2': IMAGE_GEN_SIZE_BASIC,
+    'ithink-gpt-image-2-slow': IMAGE_GEN_SIZE_BASIC,
+    'gpt-image-2-vip': IMAGE_GEN_SIZE_GIM2,
+    'gpt-image-2': IMAGE_GEN_SIZE_GIM2,
+    'apimart-gpt-image-2': IMAGE_GEN_SIZE_GIM2
+  };
+  const BANANA2_EXTENDED_MODELS = new Set(['nano-banana-2', 'nano-banana-2-cl', 'nano-banana-2-4k-cl']);
+  const IMAGE_GEN_SAVE_TARGET_LS = 'promptHub.imageGenSaveTarget.v1';
+
+  function imageGenSizeOptionLabel(value) {
+    return IMAGE_GEN_SIZE_LABELS[value] || String(value || '1:1');
+  }
+
+  function imageGenModelHidesQuality(modelId) {
+    const id = normalizeImageGenModelId(modelId);
+    const entry = imageGenModelCatalog.find((m) => m.id === id);
+    return !!entry?.fixedQualityLow;
+  }
+
+  function syncImageGenQualityUI() {
+    const hide = imageGenModelHidesQuality(getImageGenModel());
+    const qEl = document.getElementById('imageGenQuality');
+    const label = document.querySelector('label[for="imageGenQuality"]');
+    const note = document.querySelector('.imagegen-quality-note');
+    for (const el of [label, qEl, note]) {
+      if (el) el.hidden = hide;
+    }
+  }
+
+  function imageGenSizeOptionsForModel(modelId) {
+    const id = normalizeImageGenModelId(modelId);
+    const entry = imageGenModelCatalog.find((m) => m.id === id);
+    if (Array.isArray(entry?.aspectRatios) && entry.aspectRatios.length) {
+      return [...entry.aspectRatios];
+    }
+    if (IMAGE_GEN_ASPECT_FALLBACK[id]) {
+      return [...IMAGE_GEN_ASPECT_FALLBACK[id]];
+    }
+    if (id === 'apimart-gpt-image-2-official-budget') {
+      return ['16:9', '9:16', '4:3', '3:4'];
+    }
+    if (entry?.uiFamily === 'banana' || id.includes('nano-banana')) {
+      const list = [...IMAGE_GEN_SIZE_BANANA];
+      if (BANANA2_EXTENDED_MODELS.has(id)) list.push(...IMAGE_GEN_SIZE_BANANA2_EXTRA);
+      return list;
+    }
+    if (id.startsWith('mooko-')) {
+      return IMAGE_GEN_ASPECT_FALLBACK['mooko-gpt-image-2-pro'];
+    }
+    if (
+      id === 'gpt-image-2-vip'
+      || id === 'gpt-image-2'
+      || id === 'apimart-gpt-image-2'
+      || entry?.provider === 'apimart'
+      || entry?.uiFamily === 'gim2'
+      || id.includes('gpt-image-2')
+    ) {
+      return IMAGE_GEN_SIZE_GIM2;
+    }
+    if (entry?.provider === 'ithink') return IMAGE_GEN_SIZE_BASIC;
+    return IMAGE_GEN_SIZE_BASIC;
+  }
+
+  function updateImageGenSizeSelect() {
+    const sel = document.getElementById('imageGenSize');
+    const modelSel = document.getElementById('imageGenModel');
+    if (!sel) return;
+    const current = sel.value || '1:1';
+    const options = imageGenSizeOptionsForModel(modelSel?.value || getImageGenModel());
+    sel.innerHTML = '';
+    options.forEach((value) => {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = imageGenSizeOptionLabel(value);
+      sel.appendChild(opt);
+    });
+    if (options.includes(current)) sel.value = current;
+    else sel.value = options.includes('16:9') ? '16:9' : options.includes('1:1') ? '1:1' : options[0];
+  }
+
+  function readImageGenSaveTargetPrefs() {
+    try {
+      const raw = localStorage.getItem(IMAGE_GEN_SAVE_TARGET_LS);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function writeImageGenSaveTargetPrefs(prefs) {
+    try {
+      localStorage.setItem(IMAGE_GEN_SAVE_TARGET_LS, JSON.stringify(prefs || {}));
+    } catch (e) { /* ignore */ }
+  }
+
+  let imageGenSelectedTargetTags = [];
+
+  function syncImageGenTagPickerValueLabel() {
+    const valEl = document.getElementById('imageGenTagPickerValue');
+    if (!valEl) return;
+    const tags = imageGenSelectedTargetTags.filter(Boolean);
+    if (!tags.length) {
+      valEl.textContent = '未选择';
+      valEl.classList.remove('has-tags');
+      return;
+    }
+    valEl.classList.add('has-tags');
+    valEl.textContent = tags.length <= 2 ? tags.join('、') : `${tags.slice(0, 2).join('、')} 等 ${tags.length} 个`;
+  }
+
+  function closeImageGenTagPickerPanel() {
+    const panel = document.getElementById('imageGenTagPickerPanel');
+    const trigger = document.getElementById('imageGenTagPickerTrigger');
+    if (!panel || panel.hidden) return;
+    panel.hidden = true;
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  }
+
+  function persistImageGenSaveTargetPrefs() {
+    const groupSel = document.getElementById('imageGenTargetGroup');
+    writeImageGenSaveTargetPrefs({
+      group: groupSel?.value || '',
+      tags: [...imageGenSelectedTargetTags]
+    });
+  }
+
+  function toggleImageGenTargetTag(tag) {
+    const name = window.normalizeCardTagName?.(tag) || String(tag || '').trim();
+    if (!name || window.isSystemCardTag?.(name)) return;
+    const i = imageGenSelectedTargetTags.findIndex((t) => (window.normalizeCardTagName?.(t) || t) === name);
+    if (i >= 0) imageGenSelectedTargetTags.splice(i, 1);
+    else imageGenSelectedTargetTags.push(name);
+    syncImageGenTagPickerValueLabel();
+    persistImageGenSaveTargetPrefs();
+    renderImageGenTagPickerOptions();
+  }
+
+  function renderImageGenTagPickerOptions() {
+    const panel = document.getElementById('imageGenTagPickerPanel');
+    if (!panel) return;
+    const tags = window.getUserCreatedCardTags?.() || [];
+    const selected = new Set(imageGenSelectedTargetTags.map((t) => window.normalizeCardTagName?.(t) || t));
+    panel.innerHTML = '';
+    if (!tags.length) {
+      panel.innerHTML = '<p class="imagegen-tag-picker-empty">暂无自定义标签</p>';
+      return;
+    }
+    tags.forEach((tag) => {
+      const name = window.normalizeCardTagName?.(tag) || tag;
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'imagegen-tag-picker-option';
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', selected.has(name) ? 'true' : 'false');
+      row.dataset.tag = name;
+      const check = document.createElement('span');
+      check.className = 'imagegen-tag-picker-check';
+      check.setAttribute('aria-hidden', 'true');
+      const label = document.createElement('span');
+      label.className = 'imagegen-tag-picker-label';
+      label.textContent = name;
+      row.append(check, label);
+      row.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleImageGenTargetTag(name);
+      });
+      panel.appendChild(row);
+    });
+  }
+
+  function updateImageGenSaveTargetSelects() {
+    const groupSel = document.getElementById('imageGenTargetGroup');
+    const prefs = readImageGenSaveTargetPrefs();
+    if (groupSel) {
+      const prev = groupSel.value || prefs.group || '';
+      const groups = window.getCustomGroupsList?.() || [];
+      groupSel.innerHTML = '<option value="">未分类（默认）</option>';
+      groups.forEach((g) => {
+        const opt = document.createElement('option');
+        opt.value = g;
+        opt.textContent = g;
+        groupSel.appendChild(opt);
+      });
+      if (prev && (prev === '' || groups.includes(prev))) groupSel.value = prev;
+      else groupSel.value = '';
+    }
+    const prefTags = Array.isArray(prefs.tags)
+      ? prefs.tags
+        .map((t) => window.normalizeCardTagName?.(t) || t)
+        .filter((t) => t && !window.isSystemCardTag?.(t))
+      : [];
+    const available = new Set(
+      (window.getUserCreatedCardTags?.() || []).map((t) => window.normalizeCardTagName?.(t) || t)
+    );
+    imageGenSelectedTargetTags = prefTags.filter((t) => available.has(t));
+    renderImageGenTagPickerOptions();
+    syncImageGenTagPickerValueLabel();
+  }
+
+  function getImageGenSaveTarget() {
+    const group = document.getElementById('imageGenTargetGroup')?.value?.trim() || '';
+    const tags = imageGenSelectedTargetTags.filter((t) => t && !window.isSystemCardTag?.(t));
+    return {
+      targetGroup: group || null,
+      targetTags: tags
+    };
+  }
+
+  function bindImageGenSaveTarget() {
+    const groupSel = document.getElementById('imageGenTargetGroup');
+    const picker = document.getElementById('imageGenTagPicker');
+    const trigger = document.getElementById('imageGenTagPickerTrigger');
+    const panel = document.getElementById('imageGenTagPickerPanel');
+    if (groupSel && !groupSel.dataset.bound) {
+      groupSel.dataset.bound = '1';
+      groupSel.addEventListener('change', persistImageGenSaveTargetPrefs);
+    }
+    if (!picker || !trigger || !panel || picker.dataset.bound) return;
+    picker.dataset.bound = '1';
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = panel.hidden;
+      if (open) {
+        renderImageGenTagPickerOptions();
+        panel.hidden = false;
+        trigger.setAttribute('aria-expanded', 'true');
+      } else {
+        closeImageGenTagPickerPanel();
+      }
+    });
+    panel.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        const row = e.target.closest('.imagegen-tag-picker-option');
+        if (row?.dataset?.tag) {
+          e.preventDefault();
+          toggleImageGenTargetTag(row.dataset.tag);
+        }
+      }
+    });
+    document.addEventListener('click', (e) => {
+      if (!picker.contains(e.target)) closeImageGenTagPickerPanel();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeImageGenTagPickerPanel();
+    });
+  }
+
   function updateImageGenResolutionSelect() {
     const sel = document.getElementById('imageGenResolution');
     const modelSel = document.getElementById('imageGenModel');
@@ -7518,6 +7838,7 @@
     });
     if (resolutions.includes(current)) sel.value = current;
     else sel.value = resolutions[0];
+    updateImageGenSizeSelect();
   }
 
   function getImageGenAutoPublishDefault() {
@@ -7806,6 +8127,7 @@
   function updateImageGenPricingUI() {
     if (!imageGenModelCatalogReady) return;
     updateImageGenResolutionSelect();
+    syncImageGenQualityUI();
     updateImageGenCostHint();
   }
 
@@ -8025,6 +8347,43 @@
       console.warn('参考图展示解析失败', e);
       return '';
     }
+  }
+
+  const IMAGEGEN_REF_DROP_MIME = 'application/x-prompt-hub-image-ref';
+
+  function parseImageGenRefDropPayload(dt) {
+    if (!dt) return null;
+    const raw = dt.getData(IMAGEGEN_REF_DROP_MIME);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && parsed.imageRef) return parsed;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  function addImageGenRefFromFeed(payload) {
+    const imageRef = String(payload?.imageRef || payload || '').trim();
+    if (!imageRef || !isDisplayableImage(imageRef)) {
+      toast('该缩略图无法作为参考图');
+      return false;
+    }
+    if (imageGenRefImages.length >= MAX_REF_IMAGES) {
+      toast(`最多 ${MAX_REF_IMAGES} 张参考图`);
+      return false;
+    }
+    if (imageGenRefImages.some((r) => r === imageRef)) {
+      toast('该图已在参考图列表中');
+      return false;
+    }
+    imageGenRefImages.push(imageRef);
+    const assetId = String(payload?.sourceCardId || '').trim();
+    if (assetId && imageGenRefImages.length === 1) {
+      imageGenRefResolveAssetId = assetId;
+    }
+    renderImageGenRefGallery();
+    toast('已加入参考图');
+    return true;
   }
 
   async function addImageGenRefFiles(fileList) {
@@ -8492,6 +8851,11 @@
         e.preventDefault();
         e.stopPropagation();
         box.classList.remove('drag-over');
+        const feedRef = parseImageGenRefDropPayload(e.dataTransfer);
+        if (feedRef) {
+          addImageGenRefFromFeed(feedRef);
+          return;
+        }
         if (e.dataTransfer?.files?.length) addImageGenRefFiles(e.dataTransfer.files);
       });
     };
@@ -8737,6 +9101,17 @@
 
   function genRecoveringDeferGiveUpMs(ctx) {
     return isLongRunningGenJob(ctx) ? 45 * 60 * 1000 : 22 * 60 * 1000;
+  }
+
+  function pendingRecoveryGiveUpMs(pending) {
+    return genRecoveringDeferGiveUpMs(pendingJobToPollCtx(pending || {}));
+  }
+
+  function formatPendingRecoveryNote(pending, fallback) {
+    const age = Date.now() - (pending?.startedAt || 0);
+    const mins = Math.max(1, Math.floor(age / 60000));
+    const base = fallback || pending?.recoverNote || '后台恢复中';
+    return `${base} · 已等 ${mins} 分钟`;
   }
 
   function slowGenDeferNote(ctx) {
@@ -9092,6 +9467,7 @@
 
       const modelLabel = window.PointsSystem?.getImageGenModel?.(model)?.label || model;
       pendingId = genId('pending');
+      const saveTarget = getImageGenSaveTarget();
       const pendingJob = {
         id: pendingId,
         prompt,
@@ -9101,6 +9477,8 @@
         quality,
         size,
         cost,
+        targetGroup: saveTarget.targetGroup,
+        targetTags: saveTarget.targetTags,
         fromInspirationDraw: !!batchOpts.fromInspirationDraw,
         batchIndex: batchOpts.batchIndex || null,
         batchTotal: batchOpts.batchTotal || null,
@@ -9233,6 +9611,8 @@
             image: gen.data.imageUrl,
             cost,
             jobId: gen.data.jobId,
+            targetGroup: pendingJob.targetGroup,
+            targetTags: pendingJob.targetTags,
             silentToast: batchOpts.silentToast,
             fromInspirationDraw: !!batchOpts.fromInspirationDraw,
             pendingId
@@ -9267,6 +9647,8 @@
           size,
           cost,
           jobId,
+          targetGroup: pendingJob.targetGroup,
+          targetTags: pendingJob.targetTags,
           startedAt: pendingJob.startedAt,
           fromInspirationDraw: !!batchOpts.fromInspirationDraw,
           silentToast: !!batchOpts.silentToast,
@@ -9405,7 +9787,9 @@
     isRecovery,
     fromInspirationDraw,
     pendingId,
-    imageIndex
+    imageIndex,
+    targetGroup,
+    targetTags
   }) {
     if (!image) {
       toast('图片地址无效，请重试');
@@ -9493,6 +9877,8 @@
         model: modelId,
         quality: quality || 'standard',
         size: size || '1:1',
+        targetGroup: targetGroup || null,
+        targetTags: targetTags || null,
         publishToCommunity: publish,
         fromInspirationDraw: !!fromInspirationDraw,
         silentToast: !!silentToast
@@ -9541,6 +9927,8 @@
           cost,
           btn,
           jobId: baseJobId,
+          targetGroup,
+          targetTags,
           silentToast: true,
           isRecovery,
           fromInspirationDraw,
@@ -10490,6 +10878,7 @@
     document.getElementById('imageGenCount')?.addEventListener('change', updateImageGenCostHint);
     document.getElementById('imageGenModel')?.addEventListener('change', () => {
       syncImageGenModelHint();
+      updateImageGenResolutionSelect();
       updateImageGenPricingUI();
     });
     document.getElementById('imageGenResolution')?.addEventListener('input', updateImageGenCostHint);
@@ -10943,6 +11332,7 @@
     runImageGenWithPrompt,
     recordImageGenFailure: addFailedGenJob,
     getImageGenRefImages: () => [...imageGenRefImages],
+    refreshImageGenSaveTargetSelects: updateImageGenSaveTargetSelects,
     resolveRefDisplayUrl,
     updateNotifyBadge,
     getCommunityPostsForTasks() {

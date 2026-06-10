@@ -33,11 +33,53 @@ foreach ($item in $localDeployExclude) {
 
 Write-Host "Pages project: $project"
 & (Join-Path $root "scripts\bump-build.ps1")
-Write-Host "Deploying from: $root"
+
+$staging = & (Join-Path $root "scripts\stage-pages.ps1")
+Write-Host "Deploying staged assets from: $staging"
+
+function Test-CloudflareReachable {
+  Push-Location $server
+  try {
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $out = & npm exec -- wrangler whoami 2>&1
+    $exit = $LASTEXITCODE
+    $ErrorActionPreference = $prevEap
+    if ($exit -eq 0) { return $true }
+    $text = ($out | Out-String)
+    if ($text -match 'fetch failed|ConnectTimeout|UND_ERR_CONNECT') {
+      Write-Host "Cannot reach Cloudflare API (VPN/proxy may be required)." -ForegroundColor Red
+      Write-Host $text
+      return $false
+    }
+    Write-Host $text
+    return $false
+  } finally {
+    Pop-Location
+  }
+}
+
+$code = 1
 Push-Location $server
 try {
-  npm exec -- wrangler pages deploy $root --project-name=$project
-  $code = $LASTEXITCODE
+  if (-not (Test-CloudflareReachable)) {
+    $code = 2
+  } else {
+    $retryWaits = @(0, 8, 20, 45)
+    foreach ($i in 0..($retryWaits.Length - 1)) {
+      if ($retryWaits[$i] -gt 0) {
+        Write-Host "Retry $($i + 1)/$($retryWaits.Length) after $($retryWaits[$i])s ..." -ForegroundColor Yellow
+        Start-Sleep -Seconds $retryWaits[$i]
+      }
+      Write-Host "wrangler pages deploy (attempt $($i + 1)) ..."
+      $prevEap = $ErrorActionPreference
+      $ErrorActionPreference = 'Continue'
+      & npm exec -- wrangler pages deploy $staging "--project-name=$project" --commit-dirty=true --no-bundle
+      $code = $LASTEXITCODE
+      $ErrorActionPreference = $prevEap
+      if ($code -eq 0) { break }
+    }
+  }
 } finally {
   Pop-Location
   foreach ($item in $localDeployBak) {
@@ -46,15 +88,21 @@ try {
     }
   }
 }
+
 if ($code -ne 0) {
   Write-Host ""
-  Write-Host "部署失败（常见原因：Cloudflare 登录过期，错误码 10000）" -ForegroundColor Red
-  Write-Host "请按下面步骤重新登录后再部署：" -ForegroundColor Yellow
-  Write-Host "  第 1 步  cd server"
-  Write-Host "  第 2 步  npm exec wrangler login"
-  Write-Host "  第 3 步  浏览器完成授权后，回到项目根目录再运行 deploy-pages.ps1"
+  Write-Host "CLI deploy failed; packing ZIP for manual upload ..." -ForegroundColor Yellow
+  & (Join-Path $root "pack-deploy.ps1") -FromStaging
+  Write-Host ""
+  Write-Host "Deploy failed (common fixes):" -ForegroundColor Red
+  Write-Host "  1. ConnectTimeoutError: enable VPN, rerun .\deploy-pages.ps1" -ForegroundColor Yellow
+  Write-Host "  2. Login expired: cd server; npm exec wrangler login" -ForegroundColor Yellow
+  Write-Host "  3. Manual upload (no CLI):" -ForegroundColor Yellow
+  Write-Host "     Cloudflare Dashboard -> Workers & Pages -> prompt-hub-hub -> Create deployment -> Upload assets" -ForegroundColor Yellow
+  Write-Host "     ZIP file: $root\prompt-hub-deploy.zip" -ForegroundColor Cyan
   Write-Host ""
   exit $code
 }
+
 Write-Host "OK. Open your site and hard refresh (Ctrl+Shift+R)."
 Write-Host "Check build: window.__APP_BUILD__ in browser console"

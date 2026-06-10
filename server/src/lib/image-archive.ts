@@ -14,6 +14,43 @@ export function isStorageRef(ref: string): boolean {
   return typeof ref === 'string' && ref.startsWith(STORAGE_PREFIX);
 }
 
+export function isDataImageUrl(url: string | null | undefined): boolean {
+  return typeof url === 'string' && /^data:image\//i.test(url);
+}
+
+/** 木瓜等同步返回的 data URL 不得写入 meta；先归档为 storage:// */
+export async function archiveGenerationResultUrls(
+  admin: SupabaseClient,
+  userId: string,
+  jobId: string,
+  urls: string[],
+  env?: Env
+): Promise<string[]> {
+  const out: string[] = [];
+  for (let i = 0; i < urls.length; i++) {
+    const raw = urls[i]?.trim();
+    if (!raw) continue;
+    if (isStorageRef(raw)) {
+      out.push(raw);
+      continue;
+    }
+    const archiveKey = i === 0 ? jobId : `${jobId}-extra-${i}`;
+    if (isDataImageUrl(raw)) {
+      out.push(await archiveRemoteImage(admin, userId, archiveKey, raw, { env, maxAttempts: 3 }));
+      continue;
+    }
+    if (/^https?:\/\//i.test(raw)) {
+      try {
+        out.push(await archiveRemoteImage(admin, userId, archiveKey, raw, { env, maxAttempts: 2 }));
+      } catch (e) {
+        console.warn('[archive] keep upstream http for pending', archiveKey, e);
+        out.push(raw);
+      }
+    }
+  }
+  return out;
+}
+
 /** 从 storage 路径首段解析 Supabase 用户 UUID（图片真实归属） */
 export function inferOwnerIdFromImageRef(image: string | null | undefined): string | null {
   const path = storagePathFromRef(image || '');

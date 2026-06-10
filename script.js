@@ -1,4 +1,4 @@
-    /** mobile.js 未加载时的兜底（断点与 MobileUI 一致：900px） */
+﻿    /** mobile.js 未加载时的兜底（断点与 MobileUI 一致：900px） */
     (function ensureMobileUI() {
       if (typeof window.MobileUI?.isMobileViewport === 'function') return;
       const mq = window.matchMedia('(max-width: 900px)');
@@ -1110,15 +1110,46 @@
 
     window.COMMUNITY_COLLECT_TAG = '社区收藏';
     window.INSPIRE_DRAW_TAG = '灵感抽卡';
+    window.GEN_AUTO_TAG = '图片生成';
+    window.GEN_RECOVER_TAG = '自动恢复';
+    window.GEN_MULTI_TAG = '多图';
+    window.EXTENSION_SAVE_TAG = '浏览器插件';
+    window.SYSTEM_CARD_TAGS = new Set([
+      window.GEN_AUTO_TAG,
+      window.INSPIRE_DRAW_TAG,
+      window.COMMUNITY_COLLECT_TAG,
+      window.GEN_RECOVER_TAG,
+      window.GEN_MULTI_TAG,
+      window.EXTENSION_SAVE_TAG,
+      '#浏览器插件'
+    ]);
+    window.normalizeCardTagName = function (tag) {
+      return String(tag || '').replace(/^#+/, '').trim();
+    };
     window.isCommunityCollectTagName = function (tag) {
-      const name = String(tag || '').replace(/^#+/, '').trim();
+      const name = window.normalizeCardTagName(tag);
       return name === window.COMMUNITY_COLLECT_TAG;
+    };
+    window.isSystemCardTag = function (tag) {
+      const name = window.normalizeCardTagName(tag);
+      if (!name) return true;
+      if (name === window.EXTENSION_SAVE_TAG) return true;
+      for (const t of window.SYSTEM_CARD_TAGS) {
+        if (window.normalizeCardTagName(t) === name) return true;
+      }
+      return false;
     };
     window.getSelectableCardTags = function (sourceCards) {
       const src = sourceCards || cards;
       return [...new Set(src.flatMap(c => c.tags || []))]
-        .filter(t => t && !window.isCommunityCollectTagName(t))
+        .filter(t => t && !window.isCommunityCollectTagName(t) && !window.isSystemCardTag(t))
         .sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    };
+    window.getUserCreatedCardTags = function (sourceCards) {
+      return window.getSelectableCardTags(sourceCards);
+    };
+    window.getCustomGroupsList = function () {
+      return Array.isArray(customGroups) ? [...customGroups] : [];
     };
     window.isCommunityCollectCard = (card) =>
       window.FeatureDraft?.isCommunityCollectCard?.(card)
@@ -1323,14 +1354,21 @@
         }
       }
       const promptText = (prompt || '').trim();
-      const tags = ['图片生成'];
+      const tags = [window.GEN_AUTO_TAG || '图片生成'];
       if (payload.fromInspirationDraw) tags.push(window.INSPIRE_DRAW_TAG || '灵感抽卡');
+      const extraTags = Array.isArray(payload.targetTags) ? payload.targetTags : [];
+      for (const raw of extraTags) {
+        const t = String(raw || '').replace(/^#+/, '').trim();
+        if (!t || window.isSystemCardTag?.(t) || tags.includes(t)) continue;
+        tags.push(t);
+      }
+      const targetGroup = typeof payload.targetGroup === 'string' ? payload.targetGroup.trim() : '';
       const card = {
         id: payload.cardId || generateId(),
         title: (title || '').trim(),
         prompt: promptText,
         image: image || null,
-        group: null,
+        group: targetGroup || null,
         tags,
         customFields: {},
         genSourceId: sourceId || null,
