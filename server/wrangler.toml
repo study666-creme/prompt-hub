@@ -5,14 +5,14 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 ENVIRONMENT = "production"
-CORS_ORIGINS = "https://prompt-hubs.com,https://www.prompt-hubs.com,https://prompt-hub-hub.pages.dev,https://prompt-hub-web.pages.dev"
+CORS_ORIGINS = "https://prompt-hubs.com,https://www.prompt-hubs.com,https://prompt-hub.cn,https://www.prompt-hub.cn,https://prompt-hub-hub.pages.dev,https://prompt-hub-web.pages.dev"
 CHAT_API_BASE_URL = "https://api.deepseek.com"
 CHAT_MODEL = "deepseek-chat"
 REVERSE_VISION_MODEL = "gemini-2.5-flash-lite"
 FISSION_VISION_MODEL = "gemini-2.5-flash"
 FISSION_CHAT_MODEL = "deepseek-v4-pro"
-# 读：先 R2 再 Supabase；写：R2（旧图 sync-supabase-to-r2.mjs 增量上传中）
-MEDIA_STORAGE_MODE = "r2-first"
+# 读/写仅 R2（勿再回退 Supabase Storage，避免 egress 超额）；未迁完的旧图用 scripts/sync-supabase-to-r2.mjs
+MEDIA_STORAGE_MODE = "r2"
 
 # 敏感项请用 wrangler secret put：
 # SUPABASE_URL（prompt-hubs.com 路线：填境外 https://xxxxx.supabase.co，见 docs/OVERSEAS-FIRST.md）

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__ADMIN_BUILD__ = '20260607c';
+    window.__ADMIN_BUILD__ = '20260610a';
     (function () {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function (regs) {
@@ -23,13 +23,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>管理登录</title>
-  <link rel="stylesheet" href="styles-admin.css?v=20260607c">
+  <link rel="stylesheet" href="styles-admin.css?v=20260610a">
 </head>
 <body class="admin-gate">
   <section class="admin-login" id="adminLogin">
     <div class="admin-card">
       <h1>管理登录</h1>
-      <p class="admin-hint">仅限授权人员使用。构建号 <code id="adminBuildTag">20260607c</code></p>
+      <p class="admin-hint">仅限授权人员使用。构建号 <code id="adminBuildTag">20260610a</code></p>
       <div class="admin-field">
         <label for="adminSecret">访问密钥</label>
         <input type="password" id="adminSecret" placeholder="请输入密钥" autocomplete="off" spellcheck="false" autocapitalize="off">
@@ -45,7 +45,7 @@
       <aside class="admin-sidebar">
         <div class="admin-brand">
           <h1>Prompt Hub</h1>
-          <p>运营控制台 · <code id="adminSidebarBuild">20260607c</code></p>
+          <p>运营控制台 · <code id="adminSidebarBuild">20260610a</code></p>
         </div>
         <nav class="admin-nav admin-tabs">
           <button type="button" class="admin-tab is-active" data-tab="overview">概览</button>
@@ -323,6 +323,7 @@
   <div class="admin-toast" id="adminToast" hidden></div>
 
   <script src="api-domain.config.js"></script>
-  <script src="admin.js?v=20260607c"></script>
+  <script src="api-config.js"></script>
+  <script src="admin.js?v=20260610a"></script>
 </body>
 </html>

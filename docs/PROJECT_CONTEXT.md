@@ -24,34 +24,36 @@
 
 ---
 
-## 当前部署阶段（2026-06-10 · 稳定基线 b51e129 + 恢复/预览修复）
+## 当前部署阶段（2026-06-10 · 社区孤儿误报 + 后台恢复/删除修复）
 
 | 项 | 状态 |
 |----|------|
-| **主域名** | **https://prompt-hubs.com** / **https://prompt-hub.cn** · Pages `prompt-hub-hub` · build **`20260610b`** |
+| **主域名** | **https://prompt-hubs.com** · 旧 **https://prompt-hub.cn** · Pages `prompt-hub-hub` · build **`20260610e`** |
 | Worker | `prompt-hub-api` · **https://api.prompt-hubs.com** |
-| **Git 基线** | `b51e129`（生图连点可用）；已撤销远端 `b076702`/`a5dffff`（第二张卡死回归） |
-| **恢复窗口** | GrsAI 等默认 **2 小时**（`providerScope: grs`）；Apimart **7 天**（`providerScope: apimart`） |
-| **侧栏预览** | 卡藏卡片优先 **full 原图**；`rec_` 新恢复卡 id；Feed `wh_` 前缀不再二次剥离 |
+| **数据库** | 境外 Supabase `yibawjvhmqcysdovscss`（Worker Secret）；`server/.dev.vars` 仍指向阿里云 RDS（仅本地） |
+| **Git** | `main`：`15dd0bb` 手机 catalog 未就绪不闪价；`52527d3` 本地 429 豁免 |
 
 ### 已打通 / 未打通
 
-- ✅ `/health`、登录、兑换、生图扣费、生图连点提交（`b51e129` 基线）
-- ✅ 服务端恢复入库、侧栏点卡藏卡片、大图预览走原图
-- ⚠️ GrsAI 上游图 **2h 后销毁**，勿用 7 天窗口扫 Grs 任务
-- ⚠️ Apimart 链接可保留约 7 天，需单独 `providerScope: apimart`
+- ✅ `/health`、登录、兑换、生图、Grs 2h / Apimart 7d 恢复、Feed full 预览 + PNG 下载
+- ✅ 本地：`127.0.0.1:8787` + `5500` 双窗口；`ENVIRONMENT=development` 跳过限流
+- ⚠️ 本地 `.dev.vars` 查不到生产用户；查账需 `scripts/admin.local.env` 或 Supabase SQL Editor
+- ⚠️ `prompt-hub.cn` → `prompt-hubs.com` 重定向需在 CF 用 Dynamic concat，勿把表达式写进 URL 栏
 
 ### 已知问题
 
-1. **b076702 逻辑勿合并**：全量 `renderImageGenFeed` 会导致第二张提交卡死。
-2. **Apimart**：多为内容审核；超 7 天上游链过期则 repair 无效。
-3. 强刷后验收：`window.__APP_BUILD__` 应为 `20260610b`。
+1. **b076702 勿合并**（第二张生图卡死）。
+2. 管理后台用户详情无 `credit_ledger` 明细，只有最近兑换码。
+3. 后台手动改「永久积分」**不会**写 ledger，对账以 SQL 为准。
+4. **deploy 前勿删「桶内孤儿」**：旧版只认 `card.image` 字符串，会把好卡误报；新版已按 `source_card_id` + CDN 路径补全引用。
+5. **管理后台恢复/删除**：`admin.js` 本地 API 指向已修（`api-config.js`）；R2 模式下删图不再因 Supabase Storage 失败而整请求挂掉。
 
 ### 下一步
 
-1. 部署 Pages + Worker（`20260610b`）。
-2. Grs 恢复：`runServerApimartImport({ mode:'import', max:80, hours:2, providerScope:'grs' })`。
-3. Apimart 恢复：`runServerApimartImport({ mode:'import', max:80, days:7, providerScope:'apimart' })`。
+1. `cd server; npx wrangler deploy` + `.\deploy-pages.ps1`（admin 构建号 `20260610a`）。
+2. 后台社区操作失败见 `docs/LOCAL-DEV.md`「管理后台：恢复 / 删除」。
+3. 查账：`node scripts/query-user-ledger.mjs <uid> --env scripts/admin.local.env`
+4. cn 域名 301 到 com（排除 `api.prompt-hub.cn`）。
 
 ### 部署
 

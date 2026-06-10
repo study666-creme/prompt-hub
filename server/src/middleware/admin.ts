@@ -27,6 +27,10 @@ export async function requireAdminSecret(
   c: Context<{ Bindings: Env }>,
   next: Next
 ) {
+  if (c.req.method === 'OPTIONS') {
+    await next();
+    return;
+  }
   const secret = c.env.ADMIN_API_SECRET?.trim();
   if (!secret) {
     throw new ApiError(

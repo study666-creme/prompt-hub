@@ -29,6 +29,9 @@
 
   function resolveApiBase() {
     const host = (window.location.hostname || '').toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return String(window.API_BASE_URL || 'http://127.0.0.1:8787').replace(/\/$/, '');
+    }
     const custom = String(window.CUSTOM_API_HOST || '').trim();
     if (custom) {
       return 'https://' + custom.replace(/^https?:\/\//i, '').replace(/\/$/, '');
@@ -45,8 +48,7 @@
     if (/\.prompt-hub-hub\.pages\.dev$/i.test(host) || /\.prompt-hub-web\.pages\.dev$/i.test(host)) {
       return 'https://api.prompt-hubs.com';
     }
-    if (host === 'localhost' || host === '127.0.0.1') return 'http://127.0.0.1:8787';
-    return 'https://api.prompt-hubs.com';
+    return String(window.API_BASE_URL || 'https://api.prompt-hubs.com').replace(/\/$/, '');
   }
 
   function apiBase(session) {
@@ -69,7 +71,12 @@
       return '密钥与 Cloudflare 中保存的不一致。请重新执行 wrangler secret put 设置同一串后再登录。';
     }
     if (/failed to fetch|networkerror|load failed|cors/i.test(msg)) {
-      return '无法连接 API（多为网络或 Worker 未部署 / Supabase 未切境外库）。请确认 server 目录已 deploy，且 SUPABASE_URL 为 https://xxxxx.supabase.co（见 docs/OVERSEAS-FIRST.md）';
+      const base = resolveApiBase();
+      const localHint =
+        (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+          ? '本地请先运行：cd server 后 npx wrangler dev（8787）。'
+          : '';
+      return `无法连接 API：${base}。${localHint}线上请确认 server 已 deploy、/health 返回 supabase:ok（见 docs/OVERSEAS-FIRST.md）`;
     }
     if (/site_settings|Could not find the table|PGRST205|SITE_SETTINGS|SAVE_VERIFY|PERMISSION/i.test(msg)) {
       return msg.includes('SAVE_VERIFY')
@@ -87,34 +94,55 @@
       'Content-Type': 'application/json',
       'X-Admin-Secret': encodeAdminSecret(session.secret)
     };
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timer = controller
-      ? setTimeout(() => controller.abort(), opts?.timeoutMs || 90000)
-      : null;
-    try {
-      const res = await fetch(url, {
-        method: opts?.method || 'GET',
-        headers,
-        body: opts?.body ? JSON.stringify(opts.body) : undefined,
-        mode: 'cors',
-        cache: 'no-store',
-        signal: controller?.signal
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json.ok) {
-        const msg = json?.error?.message || res.statusText || '请求失败';
-        const code = json?.error?.code || '';
-        throw new Error(code ? `${msg} (${code})` : msg);
+    const timeoutMs = opts?.timeoutMs || 90000;
+    const attempts = Math.max(1, Number(opts?.retries) || 1);
+
+    async function once() {
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+      try {
+        const res = await fetch(url, {
+          method: opts?.method || 'GET',
+          headers,
+          body: opts?.body ? JSON.stringify(opts.body) : undefined,
+          mode: 'cors',
+          cache: 'no-store',
+          signal: controller?.signal
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.ok) {
+          const msg = json?.error?.message || res.statusText || '请求失败';
+          const code = json?.error?.code || '';
+          throw new Error(code ? `${msg} (${code})` : msg);
+        }
+        return json.data;
+      } catch (e) {
+        if (e?.name === 'AbortError') {
+          throw new Error(`请求超时（${Math.round(timeoutMs / 1000)}s）：${url}`);
+        }
+        if (e instanceof TypeError) {
+          const err = new Error(e.message || 'Failed to fetch');
+          err.cause = url;
+          throw err;
+        }
+        throw e;
+      } finally {
+        if (timer) clearTimeout(timer);
       }
-      return json.data;
-    } catch (e) {
-      if (e?.name === 'AbortError') {
-        throw new Error('请求超时（90s），请稍后重试');
-      }
-      throw e;
-    } finally {
-      if (timer) clearTimeout(timer);
     }
+
+    let lastErr = null;
+    for (let i = 0; i < attempts; i += 1) {
+      try {
+        return await once();
+      } catch (e) {
+        lastErr = e;
+        const retryable = /failed to fetch|networkerror|load failed/i.test(String(e?.message || ''));
+        if (!retryable || i >= attempts - 1) throw e;
+        await new Promise((r) => setTimeout(r, 600));
+      }
+    }
+    throw lastErr;
   }
 
   function formatBytes(n) {
@@ -570,8 +598,8 @@
       const hints = {
         published: '在线社区帖。可下架（仅隐藏）或删除（删记录 + 可选删 Storage 图）。',
         unpublished: '已下架帖（published=false），可删除记录与图片。',
-        'library-missing': '作者卡片库已无对应卡，但社区仍在线。可恢复 / 下架 / 删除。',
-        'bucket-orphans': '桶内文件已无任何卡片库或社区帖引用，可安全删除以腾空间（Supabase + R2）。'
+        'library-missing': '作者云端卡片库未登记对应卡，但社区仍在线（含云同步滞后误报，deploy 新版 Worker 后刷新）。可恢复 / 下架 / 删除。',
+        'bucket-orphans': '桶内文件已无任何卡片库/社区帖/生图任务引用。deploy 新版 Worker 后再删；若缩略图是你卡片库里的图，多半是误报，勿删。'
       };
       hint.textContent = hints[communityView] || hints.published;
     }
@@ -579,19 +607,23 @@
 
   function bindCommunityPostActions() {
     const tbody = $('communityTableBody');
-    if (!tbody) return;
-    tbody.querySelectorAll('[data-restore-post]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const id = btn.getAttribute('data-restore-post');
+    if (!tbody || tbody.dataset.actionsBound === '1') return;
+    tbody.dataset.actionsBound = '1';
+    tbody.addEventListener('click', async (ev) => {
+      if (!session) return;
+      const restoreBtn = ev.target.closest('[data-restore-post]');
+      if (restoreBtn) {
+        const id = restoreBtn.getAttribute('data-restore-post');
         if (!id || !confirm('将该社区帖恢复到作者卡片库？')) return;
         try {
           await runCommunityAdminTask({
-            btn,
+            btn: restoreBtn,
             progressText: `正在恢复帖子 ${id.slice(0, 18)}…`,
             msgEl: $('communityMsg'),
             request: () => adminFetch(session, `/api/admin/community/posts/${encodeURIComponent(id)}/restore`, {
               method: 'POST',
-              timeoutMs: 120000
+              timeoutMs: 120000,
+              retries: 2
             }),
             onSuccess: (r) => {
               void loadCommunity(false);
@@ -599,20 +631,21 @@
             }
           });
         } catch (e) { /* toast handled */ }
-      });
-    });
-    tbody.querySelectorAll('[data-unpublish-post]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const id = btn.getAttribute('data-unpublish-post');
+        return;
+      }
+      const unpublishBtn = ev.target.closest('[data-unpublish-post]');
+      if (unpublishBtn) {
+        const id = unpublishBtn.getAttribute('data-unpublish-post');
         if (!id || !confirm('下架该社区帖？（不删图片）')) return;
         try {
           await runCommunityAdminTask({
-            btn,
+            btn: unpublishBtn,
             progressText: `正在下架帖子 ${id.slice(0, 18)}…`,
             msgEl: $('communityMsg'),
             request: () => adminFetch(session, `/api/admin/community/posts/${encodeURIComponent(id)}/unpublish`, {
               method: 'POST',
-              timeoutMs: 120000
+              timeoutMs: 120000,
+              retries: 2
             }),
             onSuccess: () => {
               void loadCommunity(false);
@@ -620,21 +653,22 @@
             }
           });
         } catch (e) { /* toast handled */ }
-      });
-    });
-    tbody.querySelectorAll('[data-delete-post]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const id = btn.getAttribute('data-delete-post');
+        return;
+      }
+      const deleteBtn = ev.target.closest('[data-delete-post]');
+      if (deleteBtn) {
+        const id = deleteBtn.getAttribute('data-delete-post');
         if (!id || !confirm('永久删除该社区帖，并删除 Storage/R2 中的配图？\n\n不可恢复。')) return;
         try {
           await runCommunityAdminTask({
-            btn,
+            btn: deleteBtn,
             progressText: `正在删除帖子 ${id.slice(0, 18)}…`,
             msgEl: $('communityMsg'),
             request: () => adminFetch(session, `/api/admin/community/posts/${encodeURIComponent(id)}/delete`, {
               method: 'POST',
               body: { deleteStorage: true },
-              timeoutMs: 180000
+              timeoutMs: 180000,
+              retries: 2
             }),
             onSuccess: (r) => {
               void loadCommunity(false);
@@ -642,21 +676,22 @@
             }
           });
         } catch (e) { /* toast handled */ }
-      });
-    });
-    tbody.querySelectorAll('[data-delete-orphan]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const path = btn.getAttribute('data-delete-orphan');
+        return;
+      }
+      const orphanBtn = ev.target.closest('[data-delete-orphan]');
+      if (orphanBtn) {
+        const path = orphanBtn.getAttribute('data-delete-orphan');
         if (!path || !confirm(`删除桶内孤儿文件？\n\n${path}`)) return;
         try {
           await runCommunityAdminTask({
-            btn,
+            btn: orphanBtn,
             progressText: `正在删除文件 ${path.split('/').pop() || path}…`,
             msgEl: $('communityMsg'),
             request: () => adminFetch(session, '/api/admin/community/bucket-orphans/delete', {
               method: 'POST',
               body: { paths: [path] },
-              timeoutMs: 180000
+              timeoutMs: 180000,
+              retries: 2
             }),
             onSuccess: (r) => {
               void loadCommunity(false);
@@ -664,7 +699,7 @@
             }
           });
         } catch (e) { /* toast handled */ }
-      });
+      }
     });
   }
 
@@ -673,6 +708,7 @@
     if (reset) communityOffset = 0;
     setCommunityView(communityView);
     const tbody = $('communityTableBody');
+    if (tbody) delete tbody.dataset.actionsBound;
     const statsEl = $('communityStats');
     if (!tbody) return;
     const colSpan = communityView === 'bucket-orphans' ? 4 : 7;
@@ -835,11 +871,11 @@
         <div class="admin-form-grid">
           <div class="admin-field" style="margin:0">
             <label for="editCredits">永久积分</label>
-            <input type="number" id="editCredits" min="0" value="${Number(u.creditsPermanent) || 0}">
+            <input type="number" id="editCredits" min="0" step="0.1" value="${Number(u.creditsPermanent) || 0}">
           </div>
           <div class="admin-field" style="margin:0">
             <label for="editDaily">当日积分</label>
-            <input type="number" id="editDaily" min="0" value="${Number(u.dailyCredits) || 0}">
+            <input type="number" id="editDaily" min="0" step="0.1" value="${Number(u.dailyCredits) || 0}">
           </div>
           <div class="admin-field" style="margin:0">
             <label for="editTier">会员档位</label>
@@ -1339,6 +1375,8 @@
       try {
         await adminFetch(session, '/api/admin/dashboard');
         saveSession(session);
+        const sub = $('adminPageSubtitle');
+        if (sub) sub.textContent = `API：${apiBase(session)} · 用户、存储、运行环境一览`;
         showApp(true);
         showMsg($('loginMsg'), '', true);
         document.querySelector('.admin-tab[data-tab="overview"]')?.click();
@@ -1476,6 +1514,8 @@
     });
 
     if (session?.secret) {
+      const sub = $('adminPageSubtitle');
+      if (sub) sub.textContent = `API：${apiBase(session)} · 用户、存储、运行环境一览`;
       setPageTitle('overview');
       document.querySelector('.admin-tab[data-tab="overview"]')?.click();
     }

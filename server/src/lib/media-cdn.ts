@@ -39,6 +39,26 @@ export function decodeStoragePath(encoded: string): string | null {
   }
 }
 
+/** storage://、Supabase URL、CDN 签名链、裸路径 → 桶内 key */
+export function resolveStoragePath(ref: string | null | undefined): string | null {
+  const raw = String(ref || '').trim();
+  if (!raw) return null;
+  const fromRef = storagePathFromRef(raw);
+  if (fromRef) return fromRef.replace(/^\//, '');
+  const cdnMarkers = ['/api/v1/media/c/', '/api/v1/media/i/'];
+  for (const marker of cdnMarkers) {
+    const i = raw.indexOf(marker);
+    if (i !== -1) {
+      const encoded = raw.slice(i + marker.length).split('?')[0];
+      const decoded = decodeStoragePath(encoded);
+      if (decoded) return decoded;
+    }
+  }
+  const bare = raw.replace(/^\//, '');
+  if (/^[^/]+\/.+\.(jpe?g|png|webp)$/i.test(bare) && !/^https?:/i.test(raw)) return bare;
+  return null;
+}
+
 function mediaSignSecret(env: Env): string {
   return (
     env.ADMIN_API_SECRET?.trim() ||
@@ -98,6 +118,18 @@ export function apiOriginFromRequest(c: Context): string {
   }
 }
 
+/** 本地 development：列表/仓库图走线上 CDN（本地 R2 桶为空） */
+export function mediaCdnOrigin(c: Context): string {
+  const env = c.env as Env;
+  if (env.ENVIRONMENT === 'development') {
+    const upstream = String(env.LOCAL_MEDIA_UPSTREAM || 'https://api.prompt-hubs.com')
+      .trim()
+      .replace(/\/$/, '');
+    if (upstream) return upstream;
+  }
+  return apiOriginFromRequest(c);
+}
+
 export async function buildPublicMediaCdnUrl(
   c: Context,
   path: string
@@ -106,7 +138,7 @@ export async function buildPublicMediaCdnUrl(
   if (!isAllowedCommunityMediaPath(clean)) {
     throw new ApiError(403, 'FORBIDDEN', '不允许公开代理该路径');
   }
-  const origin = apiOriginFromRequest(c);
+  const origin = mediaCdnOrigin(c);
   return `${origin}/api/v1/media/c/${encodeStoragePath(clean)}`;
 }
 
@@ -115,6 +147,11 @@ export async function buildPrivateMediaCdnUrl(
   path: string
 ): Promise<string> {
   const clean = path.replace(/^\//, '');
+  const env = c.env as Env;
+  if (env.ENVIRONMENT === 'development' && isAllowedCommunityMediaPath(clean)) {
+    const origin = mediaCdnOrigin(c);
+    return `${origin}/api/v1/media/c/${encodeStoragePath(clean)}`;
+  }
   const { exp, sig } = await createMediaAccessToken(c.env as Env, clean);
   const origin = apiOriginFromRequest(c);
   return `${origin}/api/v1/media/i/${encodeStoragePath(clean)}?e=${exp}&s=${sig}`;
@@ -414,6 +451,13 @@ export async function findFirstExistingStoragePath(
       /* try list fallback */
     }
     if (await storageObjectExistsLight(admin, clean, bucket)) return clean;
+  }
+  // 本地 development + MEDIA_STORAGE_MODE=r2：本地 R2 桶为空，交给线上 CDN 试拉
+  if (env?.ENVIRONMENT === 'development') {
+    const guess = paths
+      .map(p => p.replace(/^\//, ''))
+      .find(p => p && isAllowedCommunityMediaPath(p));
+    if (guess) return guess;
   }
   return null;
 }

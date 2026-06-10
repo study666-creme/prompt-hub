@@ -7,14 +7,86 @@ import {
   storagePathFromRef,
   toStorageRef
 } from './image-archive';
-import { communityImagePathCandidates, findFirstExistingStoragePath, storageObjectExistsLight } from './media-cdn';
+import {
+  communityImagePathCandidates,
+  findFirstExistingStoragePath,
+  resolveStoragePath,
+  sanitizeCardFileBase,
+  storageObjectExistsLight
+} from './media-cdn';
 
 const BUCKET = 'card-images';
 
 export const MIN_COMMUNITY_PROMPT_LEN = 15;
 
-function sanitizeCardFileBase(cardId: string): string {
-  return String(cardId).replace(/[^a-zA-Z0-9_-]/g, '_');
+type CardLibraryIndex = {
+  ids: Set<string>;
+  fileBases: Set<string>;
+};
+
+function fileBaseFromStoragePath(path: string): string | null {
+  const name = path.split('/').pop() || '';
+  const m = name.match(/^(.+?)(?:_grid)?\.(jpe?g|png|webp)$/i);
+  return m ? m[1] : null;
+}
+
+function cardLibraryIndexFromUserData(data: unknown): CardLibraryIndex {
+  const ids = new Set<string>();
+  const fileBases = new Set<string>();
+  if (!data || typeof data !== 'object') return { ids, fileBases };
+  const cards = (data as { cards?: unknown }).cards;
+  if (!Array.isArray(cards)) return { ids, fileBases };
+  for (const c of cards) {
+    if (!c || typeof c !== 'object') continue;
+    const card = c as { id?: string; image?: string; genJobId?: string };
+    const id = String(card.id || '').trim();
+    if (id) {
+      ids.add(id);
+      fileBases.add(sanitizeCardFileBase(id));
+    }
+    const path = resolveStoragePath(card.image);
+    if (path) {
+      const base = fileBaseFromStoragePath(path);
+      if (base) fileBases.add(base);
+    }
+    const jobId = String(card.genJobId || '').replace(/#\d+$/, '').trim();
+    if (jobId) fileBases.add(jobId);
+  }
+  return { ids, fileBases };
+}
+
+/** @deprecated 用 cardLibraryIndexFromUserData */
+function cardIdsFromUserData(data: unknown): Set<string> {
+  return cardLibraryIndexFromUserData(data).ids;
+}
+
+function isCardInAuthorLibrary(
+  row: { author_id: string; source_card_id: string | null; image?: string | null },
+  indexesByAuthor: Map<string, CardLibraryIndex>
+): boolean {
+  const cid = String(row.source_card_id || '').trim();
+  if (!cid) return false;
+  const aid = String(row.author_id || '').trim();
+  if (!isAuthorUuid(aid)) return true;
+
+  const idx = indexesByAuthor.get(aid);
+  if (idx) {
+    if (idx.ids.has(cid)) return true;
+    const base = sanitizeCardFileBase(cid);
+    if (idx.fileBases.has(base) || idx.fileBases.has(cid)) return true;
+  }
+
+  const postPath = resolveStoragePath(row.image);
+  if (postPath) {
+    const postBase = fileBaseFromStoragePath(postPath);
+    const base = sanitizeCardFileBase(cid);
+    if (postBase && (postBase === base || postBase === cid)) return true;
+    if (idx && postBase && idx.fileBases.has(postBase)) return true;
+    if (postPath.includes(`/${base}.`) || postPath.includes(`/${cid}.`)) return true;
+    if (postPath.includes(`/generated/${base}.`) || postPath.includes(`/generated/${cid}.`)) return true;
+  }
+
+  return false;
 }
 
 async function storageObjectExists(
@@ -514,19 +586,6 @@ export async function likeCommunityPost(
   };
 }
 
-function cardIdsFromUserData(data: unknown): Set<string> {
-  const set = new Set<string>();
-  if (!data || typeof data !== 'object') return set;
-  const cards = (data as { cards?: unknown }).cards;
-  if (!Array.isArray(cards)) return set;
-  for (const c of cards) {
-    const id =
-      c && typeof c === 'object' ? String((c as { id?: string }).id || '').trim() : '';
-    if (id) set.add(id);
-  }
-  return set;
-}
-
 /** 作者卡片库已删但社区仍在线的帖：下架（解决「删卡后社区又出现」） */
 export async function unpublishOrphanSourceCardPosts(
   admin: SupabaseClient
@@ -560,9 +619,12 @@ export async function unpublishOrphanSourceCardPosts(
       .select('data')
       .eq('user_id', authorId)
       .maybeSingle();
-    const cardIds = cardIdsFromUserData(ud?.data);
+    const lib = cardLibraryIndexFromUserData(ud?.data);
     for (const p of posts) {
-      if (cardIds.has(p.source_card_id)) continue;
+      if (isCardInAuthorLibrary(
+        { author_id: authorId, source_card_id: p.source_card_id, image: null },
+        new Map([[authorId, lib]])
+      )) continue;
       const { error: upErr } = await admin
         .from('community_posts')
         .update({ published: false, updated_at: now })
@@ -612,7 +674,7 @@ export async function getCommunityAdminStats(admin: SupabaseClient) {
 async function countOrphanPublishedPosts(admin: SupabaseClient): Promise<number> {
   const { data, error } = await admin
     .from('community_posts')
-    .select('id, author_id, source_card_id')
+    .select('id, author_id, source_card_id, image')
     .eq('published', true)
     .limit(3000);
   if (error) throw error;
@@ -624,27 +686,15 @@ async function countOrphanPublishedPosts(admin: SupabaseClient): Promise<number>
         .filter((id) => isAuthorUuid(id))
     )
   ];
-  const cardIdsByAuthor = new Map<string, Set<string>>();
-  for (let i = 0; i < authorIds.length; i += 100) {
-    const chunk = authorIds.slice(i, i + 100);
-    const { data: udRows } = await admin
-      .from('user_data')
-      .select('user_id, data')
-      .in('user_id', chunk);
-    for (const row of udRows || []) {
-      cardIdsByAuthor.set(
-        String((row as { user_id: string }).user_id),
-        cardIdsFromUserData((row as { data: unknown }).data)
-      );
-    }
-  }
+  const libraryByAuthor = await loadCardLibraryByAuthor(admin, authorIds);
 
   let count = 0;
   for (const row of (data || []) as {
     author_id: string;
     source_card_id: string | null;
+    image?: string | null;
   }[]) {
-    if (isLibraryMissingPost(row, cardIdsByAuthor)) count += 1;
+    if (isLibraryMissingPost(row, libraryByAuthor)) count += 1;
   }
   return count;
 }
@@ -752,7 +802,7 @@ export async function restoreOrphanCommunityPosts(
   const limit = Math.min(200, Math.max(1, opts?.limit ?? 50));
   const { data, error } = await admin
     .from('community_posts')
-    .select('id, author_id, source_card_id')
+    .select('id, author_id, source_card_id, image')
     .eq('published', true)
     .not('source_card_id', 'is', null)
     .order('created_at', { ascending: false })
@@ -764,6 +814,7 @@ export async function restoreOrphanCommunityPosts(
     id: string;
     author_id: string;
     source_card_id: string;
+    image?: string | null;
   }[]) {
     const aid = String(row.author_id || '').trim();
     const cid = String(row.source_card_id || '').trim();
@@ -781,12 +832,16 @@ export async function restoreOrphanCommunityPosts(
       .select('data')
       .eq('user_id', authorId)
       .maybeSingle();
-    const cardIds = cardIdsFromUserData(ud?.data);
+    const lib = cardLibraryIndexFromUserData(ud?.data);
     const postRows = (data || []).filter(
       (r) => String((r as { author_id: string }).author_id) === authorId
-    ) as { id: string; source_card_id: string }[];
+    ) as { id: string; source_card_id: string; image?: string | null }[];
+    const libMap = new Map([[authorId, lib]]);
     for (const p of postRows) {
-      if (!cardIds.has(String(p.source_card_id))) orphanIds.push(p.id);
+      if (!isCardInAuthorLibrary(
+        { author_id: authorId, source_card_id: p.source_card_id, image: p.image },
+        libMap
+      )) orphanIds.push(p.id);
     }
   }
 
@@ -853,14 +908,32 @@ function mapAdminPostRow(
 }
 
 function isLibraryMissingPost(
-  row: { author_id: string; source_card_id: string | null },
-  cardIdsByAuthor: Map<string, Set<string>>
+  row: { author_id: string; source_card_id: string | null; image?: string | null },
+  libraryByAuthor: Map<string, CardLibraryIndex>
 ): boolean {
   const cid = String(row.source_card_id || '').trim();
   if (!cid) return true;
   if (!isAuthorUuid(String(row.author_id || '').trim())) return false;
-  const ids = cardIdsByAuthor.get(String(row.author_id));
-  return !ids?.has(cid);
+  return !isCardInAuthorLibrary(row, libraryByAuthor);
+}
+
+async function loadCardLibraryByAuthor(admin: SupabaseClient, authorIds: string[]) {
+  const libraryByAuthor = new Map<string, CardLibraryIndex>();
+  if (!authorIds.length) return libraryByAuthor;
+  for (let i = 0; i < authorIds.length; i += 100) {
+    const chunk = authorIds.slice(i, i + 100);
+    const { data: udRows } = await admin
+      .from('user_data')
+      .select('user_id, data')
+      .in('user_id', chunk);
+    for (const row of udRows || []) {
+      libraryByAuthor.set(
+        String((row as { user_id: string }).user_id),
+        cardLibraryIndexFromUserData((row as { data: unknown }).data)
+      );
+    }
+  }
+  return libraryByAuthor;
 }
 
 export async function listCommunityPostsForAdmin(
@@ -884,22 +957,7 @@ export async function listCommunityPostsForAdmin(
     || (opts.orphanOnly ? 'library-missing' : opts.publishedOnly === false ? 'unpublished' : 'published');
 
   async function loadCardIdsByAuthor(authorIds: string[]) {
-    const cardIdsByAuthor = new Map<string, Set<string>>();
-    if (!authorIds.length) return cardIdsByAuthor;
-    for (let i = 0; i < authorIds.length; i += 100) {
-      const chunk = authorIds.slice(i, i + 100);
-      const { data: udRows } = await admin
-        .from('user_data')
-        .select('user_id, data')
-        .in('user_id', chunk);
-      for (const row of udRows || []) {
-        cardIdsByAuthor.set(
-          String((row as { user_id: string }).user_id),
-          cardIdsFromUserData((row as { data: unknown }).data)
-        );
-      }
-    }
-    return cardIdsByAuthor;
+    return loadCardLibraryByAuthor(admin, authorIds);
   }
 
   if (view === 'library-missing') {
@@ -920,7 +978,7 @@ export async function listCommunityPostsForAdmin(
           .filter((id) => isAuthorUuid(id))
       )
     ];
-    const cardIdsByAuthor = await loadCardIdsByAuthor(authorIds);
+    const libraryByAuthor = await loadCardIdsByAuthor(authorIds);
 
     const orphans = ((data || []) as {
       id: string;
@@ -934,7 +992,7 @@ export async function listCommunityPostsForAdmin(
       created_at: string;
     }[]).filter((row) => {
       if (!postMatchesAdminQuery(row, q)) return false;
-      return isLibraryMissingPost(row, cardIdsByAuthor);
+      return isLibraryMissingPost(row, libraryByAuthor);
     });
 
     const slice = orphans.slice(offset, offset + limit);
@@ -981,7 +1039,7 @@ export async function listCommunityPostsForAdmin(
         .filter((id) => isAuthorUuid(id))
     )
   ];
-  const cardIdsByAuthor = await loadCardIdsByAuthor(authorIds);
+  const libraryByAuthor = await loadCardIdsByAuthor(authorIds);
 
   const items = ((data || []) as {
     id: string;
@@ -998,8 +1056,7 @@ export async function listCommunityPostsForAdmin(
     let cardInLibrary: boolean | null = null;
     if (!sourceCardId) cardInLibrary = false;
     else if (isAuthorUuid(row.author_id)) {
-      const ids = cardIdsByAuthor.get(String(row.author_id));
-      cardInLibrary = ids ? ids.has(sourceCardId) : false;
+      cardInLibrary = isCardInAuthorLibrary(row, libraryByAuthor);
     }
     return mapAdminPostRow(row, cardInLibrary, apiOrigin);
   });

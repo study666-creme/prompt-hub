@@ -1,9 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Env } from '../env';
 import { CARD_IMAGES_BUCKET } from './admin-storage';
-import { storagePathFromRef } from './image-archive';
-import { encodeStoragePath } from './media-cdn';
-import { deleteFromR2 } from './r2-storage';
+import { encodeStoragePath, resolveStoragePath, sanitizeCardFileBase } from './media-cdn';
+import { deleteFromR2, mediaStorageMode } from './r2-storage';
 
 const LIST_PAGE = 1000;
 const MAX_BUCKET_SCAN = 15_000;
@@ -19,14 +18,31 @@ function gridSiblingPath(primary: string): string | null {
 }
 
 function addReferencedPath(refs: Set<string>, raw: string | null | undefined) {
-  const path = storagePathFromRef(String(raw || '')) || normalizePath(String(raw || ''));
+  const path = resolveStoragePath(raw) || normalizePath(String(raw || ''));
   if (!path || !path.includes('/')) return;
   refs.add(path);
   const grid = gridSiblingPath(path);
   if (grid) refs.add(grid);
 }
 
-/** 收集仍被卡片库 / 社区帖引用的 Storage 路径 */
+function addCardPathCandidates(refs: Set<string>, userId: string, cardId: string) {
+  const uid = String(userId || '').trim();
+  const cid = String(cardId || '').trim();
+  if (!uid || !cid) return;
+  const base = sanitizeCardFileBase(cid);
+  for (const ext of ['jpg', 'webp', 'png']) {
+    addReferencedPath(refs, `${uid}/${base}.${ext}`);
+    addReferencedPath(refs, `${uid}/${cid}.${ext}`);
+    addReferencedPath(refs, `${uid}/generated/${base}.${ext}`);
+    addReferencedPath(refs, `${uid}/generated/${cid}.${ext}`);
+    addReferencedPath(refs, `${uid}/${base}_grid.jpg`);
+    addReferencedPath(refs, `${uid}/${cid}_grid.jpg`);
+    addReferencedPath(refs, `${uid}/generated/${base}_grid.jpg`);
+    addReferencedPath(refs, `${uid}/generated/${cid}_grid.jpg`);
+  }
+}
+
+/** 收集仍被卡片库 / 社区帖 / 生图任务引用的 Storage 路径 */
 export async function collectReferencedStoragePaths(
   admin: SupabaseClient
 ): Promise<Set<string>> {
@@ -35,15 +51,26 @@ export async function collectReferencedStoragePaths(
   while (true) {
     const { data, error } = await admin
       .from('user_data')
-      .select('data')
+      .select('user_id, data')
       .range(offset, offset + 199);
     if (error) throw error;
     if (!data?.length) break;
     for (const row of data) {
-      const cards = (row as { data?: { cards?: { image?: string }[] } }).data?.cards;
+      const userId = String((row as { user_id?: string }).user_id || '').trim();
+      const cards = (row as { data?: { cards?: { id?: string; image?: string; genJobId?: string }[] } })
+        .data?.cards;
       if (!Array.isArray(cards)) continue;
       for (const card of cards) {
+        const cardId = card && typeof card === 'object' ? String(card.id || '').trim() : '';
         addReferencedPath(refs, card?.image);
+        if (userId && cardId) addCardPathCandidates(refs, userId, cardId);
+        const jobId = card && typeof card === 'object' ? String(card.genJobId || '').replace(/#\d+$/, '') : '';
+        if (userId && jobId) {
+          for (const ext of ['jpg', 'webp', 'png']) {
+            addReferencedPath(refs, `${userId}/generated/${jobId}.${ext}`);
+            addReferencedPath(refs, `${userId}/generated/${jobId}_grid.jpg`);
+          }
+        }
       }
     }
     offset += 200;
@@ -54,14 +81,44 @@ export async function collectReferencedStoragePaths(
   while (true) {
     const { data, error } = await admin
       .from('community_posts')
-      .select('image')
+      .select('author_id, source_card_id, image')
       .range(postOffset, postOffset + 499);
     if (error) throw error;
     if (!data?.length) break;
     for (const row of data) {
+      const authorId = String((row as { author_id?: string }).author_id || '').trim();
+      const sourceCardId = String((row as { source_card_id?: string }).source_card_id || '').trim();
       addReferencedPath(refs, (row as { image?: string }).image);
+      if (authorId && sourceCardId) addCardPathCandidates(refs, authorId, sourceCardId);
     }
     postOffset += 500;
+    if (data.length < 500) break;
+  }
+
+  let jobOffset = 0;
+  while (true) {
+    const { data, error } = await admin
+      .from('generation_requests')
+      .select('user_id, id, result_image_url')
+      .not('result_image_url', 'is', null)
+      .range(jobOffset, jobOffset + 499);
+    if (error) {
+      if (String(error.message || '').includes('generation_requests')) break;
+      throw error;
+    }
+    if (!data?.length) break;
+    for (const row of data) {
+      const userId = String((row as { user_id?: string }).user_id || '').trim();
+      const jobId = String((row as { id?: string }).id || '').trim();
+      addReferencedPath(refs, (row as { result_image_url?: string }).result_image_url);
+      if (userId && jobId) {
+        for (const ext of ['jpg', 'webp', 'png']) {
+          addReferencedPath(refs, `${userId}/generated/${jobId}.${ext}`);
+          addReferencedPath(refs, `${userId}/generated/${jobId}_grid.jpg`);
+        }
+      }
+    }
+    jobOffset += 500;
     if (data.length < 500) break;
   }
 
@@ -167,21 +224,29 @@ export async function deleteStoragePaths(
   const clean = [...new Set(paths.map(normalizePath).filter(Boolean))];
   if (!clean.length) return { removed: 0, r2Removed: 0 };
 
-  const { error } = await admin.storage.from(CARD_IMAGES_BUCKET).remove(clean);
-  if (error) throw error;
+  const mode = mediaStorageMode(env);
+  let supabaseRemoved = 0;
+  if (mode !== 'r2') {
+    const { error } = await admin.storage.from(CARD_IMAGES_BUCKET).remove(clean);
+    if (error) throw error;
+    supabaseRemoved = clean.length;
+  } else {
+    const { error } = await admin.storage.from(CARD_IMAGES_BUCKET).remove(clean);
+    if (!error) supabaseRemoved = clean.length;
+  }
 
   let r2Removed = 0;
   for (const p of clean) {
     if (await deleteFromR2(env, p)) r2Removed += 1;
   }
-  return { removed: clean.length, r2Removed };
+  return { removed: Math.max(supabaseRemoved, r2Removed), r2Removed };
 }
 
 export function publicThumbUrls(
   apiOrigin: string,
   imageRef: string | null | undefined
 ): { thumbUrl: string | null; thumbFallbackUrl: string | null } {
-  const base = storagePathFromRef(String(imageRef || ''));
+  const base = resolveStoragePath(imageRef);
   if (!base) return { thumbUrl: null, thumbFallbackUrl: null };
   const origin = apiOrigin.replace(/\/$/, '');
   const grid = gridSiblingPath(base);

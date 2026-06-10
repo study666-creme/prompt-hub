@@ -49,7 +49,8 @@ cd D:\prompt-hub
 | `supabase-config.local.js` | 可选覆盖（勿提交、deploy 会自动排除） |
 | `api-config.js` | localhost 自动指 `http://127.0.0.1:8787` |
 | `server/.dev.vars` | Worker 本地密钥（勿提交） |
-| `MEDIA_STORAGE_MODE=r2` | **新图只写 Cloudflare R2**，浏览器上传走 `/api/v1/media/upload`，不烧阿里云流量 |
+| `MEDIA_STORAGE_MODE=r2` | **与线上一致：只读写 R2**，不再回退 Supabase Storage（避免超额） |
+| `LOCAL_MEDIA_UPSTREAM` | 本地看图走 `https://api.prompt-hubs.com` CDN（本地 R2 桶为空） |
 
 **R2 桶**：Cloudflare 控制台建 `prompt-hub-card-images` 后 `cd server && npm run deploy`。
 
@@ -64,6 +65,36 @@ cd D:\prompt-hub
 ## 不要用 file://
 
 双击 `index.html` 会导致 API 失败。必须用 `serve-local.ps1` 或 `start-dev.ps1`。
+
+---
+
+## 管理后台：恢复 / 删除社区帖报「无法连接 API」
+
+**现象**：`admin.html` 能列出帖子，但点 **恢复 / 下架 / 删除** 失败，底部红字提示无法连接 API。
+
+**第 1 步 · 看 API 地址**  
+登录后概览页副标题会显示 `API：https://…`。  
+- 本地开发应是 **`http://127.0.0.1:8787`**（需 `start-dev.ps1` 或 `cd server; npx wrangler dev`）  
+- 线上应是 **`https://api.prompt-hubs.com`**
+
+**第 2 步 · 本地**  
+```powershell
+cd D:\prompt-hub
+.\start-dev.ps1
+```
+浏览器打开 **http://127.0.0.1:5500/admin.html**（不要 file://）。`admin.html` 已加载 `api-config.js`，本地优先走 8787。
+
+**第 3 步 · 线上**  
+```powershell
+cd D:\prompt-hub\server
+npx wrangler deploy
+cd D:\prompt-hub
+.\deploy-pages.ps1
+```
+打开 https://prompt-hubs.com/admin.html ，**Ctrl+Shift+R** 强刷（构建号 `20260610a` 及以上）。
+
+**第 4 步 · 自检**  
+浏览器访问 https://api.prompt-hubs.com/health → 应含 `"supabase":"ok"`。
 
 ---
 
@@ -82,6 +113,25 @@ cd D:\prompt-hub
 - http://127.0.0.1:8787/health → `ok`
 - 控制台：`window.API_BASE_URL` 应为 `http://127.0.0.1:8787`（**不是** `api.prompt-hubs.com`）
 - 图片仍 401/CORS：确认 **Worker 窗口在跑** → **Ctrl+Shift+R 强刷**（会清 `ph_signed_urls_v1` 生产签名缓存）
+
+---
+
+## 常见问题：本地图片全黑 / 404（仓库、生图列表）
+
+**原因**：`server/.dev.vars` 里 `MEDIA_STORAGE_MODE=r2` 时，本地 Miniflare **R2 桶是空的**；真实图片在 **线上 Cloudflare R2**。本地 Worker 签出来的 URL 指向 `127.0.0.1:8787`，读不到文件就全黑。
+
+**处理（按顺序）**：
+
+1. **重启 Worker**（改代码或 `.dev.vars` 后必须重启）：Worker 窗口 `Ctrl+C` → `cd server` → `npm run dev -- --ip 127.0.0.1 --port 8787`
+2. 编辑 `server\.dev.vars`（建议与 `.dev.vars.example` 对齐）：
+   - `MEDIA_STORAGE_MODE=r2`（**不要** `r2-first`，否则会继续读 Supabase Storage）
+   - `ENVIRONMENT=development`
+   - `LOCAL_MEDIA_UPSTREAM=https://api.prompt-hubs.com`
+3. 强刷 `http://127.0.0.1:5500`（Ctrl+Shift+R），清 Session **`ph_signed_urls_v1`**
+4. F12 → Network：图片 URL 应为 **`https://api.prompt-hubs.com/api/v1/media/c/...`**（本地开发正常情况）
+5. 强刷后若仍只有**部分**图：多为线上 R2 **没有对应 grid/原图**（卡片元数据在库、文件已删或未迁移），属正常；F12 里 404 的 `/media/c/` 即此类
+
+**sign-batch 一直「挂起」**：先重启 Worker；强刷并清 `ph_signed_urls_v1`。若 `supabase-sync.js` 已更新，线上 CDN 签名 URL 会被正确缓存（不再被 `mediaUrlMatchesCurrentApi` 误拒）。
 
 ---
 
