@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ApiError } from './errors';
 import { archiveRemoteImage, isStorageRef, storagePathFromRef, toStorageRef } from './image-archive';
+import { readJobProvider } from './image-upstream';
 
 const BUCKET = 'card-images';
 const MIN_IMAGE_BYTES = 512;
@@ -22,7 +23,7 @@ type JobRow = {
 };
 
 function generateCardId(): string {
-  return `wh_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  return `rec_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 async function storageBlobSize(
@@ -55,13 +56,14 @@ async function resolveImageRefForJob(
   jobId: string,
   job: JobRow
 ): Promise<string | null> {
-  const genPath = `${userId}/generated/${jobId}.jpg`;
   const minBytes = expectedMinFullBytes(
     (job as { resolution?: string | null }).resolution
   );
-
-  if (await storageBlobOk(admin, genPath, minBytes)) {
-    return toStorageRef(genPath);
+  const genPaths = [`${userId}/generated/${jobId}.png`, `${userId}/generated/${jobId}.jpg`];
+  for (const genPath of genPaths) {
+    if (await storageBlobOk(admin, genPath, minBytes)) {
+      return toStorageRef(genPath);
+    }
   }
 
   const raw = job.result_image_url as string | null;
@@ -79,8 +81,10 @@ async function resolveImageRefForJob(
     }
   }
 
-  if (await storageBlobOk(admin, genPath, MIN_IMAGE_BYTES)) {
-    return toStorageRef(genPath);
+  for (const genPath of genPaths) {
+    if (await storageBlobOk(admin, genPath, MIN_IMAGE_BYTES)) {
+      return toStorageRef(genPath);
+    }
   }
 
   if (raw && isStorageRef(raw)) {
@@ -142,13 +146,28 @@ async function saveUserCards(
   }
 }
 
+type RecoverWindowOpts = { days?: number; hours?: number };
+
+function resolveRecoverSinceIso(
+  opts: RecoverWindowOpts,
+  fallback: { days?: number; hours?: number }
+): string {
+  if (opts.hours != null) {
+    const h = Math.min(168, Math.max(1, opts.hours));
+    return new Date(Date.now() - h * 3600 * 1000).toISOString();
+  }
+  const days = Math.min(365, Math.max(1, opts.days ?? fallback.days ?? 1));
+  return new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+}
+
 async function loadCompletedJobs(
   admin: SupabaseClient,
   userId: string,
-  days: number,
-  limit: number
+  windowOpts: RecoverWindowOpts,
+  limit: number,
+  fallback: { days?: number; hours?: number }
 ): Promise<JobRow[]> {
-  const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+  const since = resolveRecoverSinceIso(windowOpts, fallback);
   const { data: jobs, error: jobsErr } = await admin
     .from('generation_requests')
     .select('id,prompt,status,result_image_url,meta,created_at')
@@ -163,15 +182,52 @@ async function loadCompletedJobs(
   return (jobs || []) as JobRow[];
 }
 
+export type RecoverWarehouseOpts = {
+  max?: number;
+  days?: number;
+  hours?: number;
+  providerScope?: 'grs' | 'apimart' | 'all';
+};
+
+function filterJobsByProvider(jobs: JobRow[], scope?: 'grs' | 'apimart' | 'all'): JobRow[] {
+  if (!scope || scope === 'all') return jobs;
+  return jobs.filter((job) => {
+    const p = readJobProvider((job.meta || {}) as Record<string, unknown>);
+    if (scope === 'apimart') return p === 'apimart';
+    return p !== 'apimart';
+  });
+}
+
+function resolveRecoverWindow(
+  opts: RecoverWarehouseOpts,
+  mode: 'import' | 'repair' | 'extras'
+): { windowOpts: RecoverWindowOpts; fallback: { days?: number; hours?: number } } {
+  const scope = opts.providerScope || 'all';
+  if (scope === 'apimart') {
+    const days = Math.min(365, Math.max(1, opts.days ?? (mode === 'import' ? 7 : 365)));
+    return { windowOpts: { days }, fallback: { days: 7 } };
+  }
+  if (scope === 'grs' || opts.hours != null) {
+    const hours = Math.min(168, Math.max(1, opts.hours ?? 2));
+    return { windowOpts: { hours }, fallback: { hours: 2 } };
+  }
+  const days = Math.min(
+    365,
+    Math.max(1, opts.days ?? (mode === 'import' ? 1 : mode === 'extras' ? 365 : 365))
+  );
+  return { windowOpts: { days }, fallback: { days } };
+}
+
 /** 新建卡片：仅导入尚未有 genJobId 的任务 */
 export async function recoverGenerationJobsToWarehouse(
   admin: SupabaseClient,
   userId: string,
-  opts: { max?: number; days?: number } = {}
+  opts: RecoverWarehouseOpts = {}
 ): Promise<RecoverWarehouseResult> {
   const max = Math.min(50, Math.max(1, opts.max ?? 20));
-  const days = Math.min(365, Math.max(1, opts.days ?? 90));
-  const jobs = await loadCompletedJobs(admin, userId, days, 120);
+  const { windowOpts, fallback } = resolveRecoverWindow(opts, 'import');
+  let jobs = await loadCompletedJobs(admin, userId, windowOpts, 120, fallback);
+  jobs = filterJobsByProvider(jobs, opts.providerScope);
   const { payload, cards: existing } = await loadUserPayload(admin, userId);
   const knownJobIds = new Set(
     existing.map((c) => String(c.genJobId || '')).filter(Boolean)
@@ -242,11 +298,12 @@ export async function recoverGenerationJobsToWarehouse(
 export async function repairWarehouseCardImagesFromJobs(
   admin: SupabaseClient,
   userId: string,
-  opts: { max?: number; days?: number } = {}
+  opts: RecoverWarehouseOpts = {}
 ): Promise<RecoverWarehouseResult> {
   const max = Math.min(80, Math.max(1, opts.max ?? 30));
-  const days = Math.min(365, Math.max(1, opts.days ?? 365));
-  const jobs = await loadCompletedJobs(admin, userId, days, 200);
+  const { windowOpts, fallback } = resolveRecoverWindow(opts, 'repair');
+  let jobs = await loadCompletedJobs(admin, userId, windowOpts, 200, fallback);
+  jobs = filterJobsByProvider(jobs, opts.providerScope);
   const jobMap = new Map(jobs.map((j) => [String(j.id), j]));
   const { payload, cards } = await loadUserPayload(admin, userId);
 
@@ -270,20 +327,25 @@ export async function repairWarehouseCardImagesFromJobs(
       continue;
     }
 
-    const genPath = `${userId}/generated/${jobId}.jpg`;
+    const genPaths = [`${userId}/generated/${jobId}.png`, `${userId}/generated/${jobId}.jpg`];
     const minBytes = expectedMinFullBytes(
       String(job.resolution || card.resolution || '1k')
     );
     const currentPath = storagePathFromRef(String(card.image || ''));
     const currentSize = currentPath ? await storageBlobSize(admin, currentPath) : 0;
-    const canonicalSize = await storageBlobSize(admin, genPath);
+    let canonicalSize = 0;
+    for (const gp of genPaths) {
+      const sz = await storageBlobSize(admin, gp);
+      if (sz > canonicalSize) canonicalSize = sz;
+    }
     const currentOk = currentSize >= minBytes;
     const canonicalOk = canonicalSize >= minBytes;
-    if (currentOk && canonicalOk && currentPath === genPath) {
+    const currentIsCanonical = genPaths.some((gp) => currentPath === gp);
+    if (currentOk && canonicalOk && currentIsCanonical) {
       skipped += 1;
       continue;
     }
-    if (currentOk && currentPath && currentPath !== genPath && canonicalSize < minBytes) {
+    if (currentOk && currentPath && !currentIsCanonical && canonicalSize < minBytes) {
       skipped += 1;
       continue;
     }
@@ -319,11 +381,12 @@ export async function repairWarehouseCardImagesFromJobs(
 export async function importExtraJobImagesToWarehouse(
   admin: SupabaseClient,
   userId: string,
-  opts: { max?: number; days?: number } = {}
+  opts: RecoverWarehouseOpts = {}
 ): Promise<RecoverWarehouseResult> {
   const max = Math.min(40, Math.max(1, opts.max ?? 15));
-  const days = Math.min(365, Math.max(1, opts.days ?? 365));
-  const jobs = await loadCompletedJobs(admin, userId, days, 150);
+  const { windowOpts, fallback } = resolveRecoverWindow(opts, 'extras');
+  let jobs = await loadCompletedJobs(admin, userId, windowOpts, 150, fallback);
+  jobs = filterJobsByProvider(jobs, opts.providerScope);
   const { payload, cards: existing } = await loadUserPayload(admin, userId);
   const knownSourceIds = new Set(
     existing.map((c) => String(c.genSourceId || '')).filter(Boolean)

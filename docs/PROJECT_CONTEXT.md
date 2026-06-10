@@ -24,35 +24,34 @@
 
 ---
 
-## 当前部署阶段（2026-06-08 · 原图 + 524 + 木瓜慢速线）
+## 当前部署阶段（2026-06-10 · 稳定基线 b51e129 + 恢复/预览修复）
 
 | 项 | 状态 |
 |----|------|
-| **主域名** | **https://prompt-hubs.com** · Pages `prompt-hub-hub` · build **`20260608l`** |
-| Worker | `prompt-hub-api` · **https://api.prompt-hubs.com** · Cron `* * * * *`（含 `mooko-drain`） |
-| **卡片上传** | Worker + 前端单张上限 **50MB**（与 `card-images` 桶一致）；8MB 旧限制已移除 |
-| **原图下载** | 多路径取**最大体积**；优先 `generated/{jobId}`；保存卡片时**不删**生图归档；4K 偏小自动 re-archive |
-| **生图提交** | GrsAI/Apimart **后台提交**（防 CF **524**）；木瓜排队后 **POST 即触发 drain** + 轮询补提交 |
-| **生图商品** | 入库原字节；列表仅 grid 缩略；`settle=1` 深查上游 |
+| **主域名** | **https://prompt-hubs.com** / **https://prompt-hub.cn** · Pages `prompt-hub-hub` · build **`20260610b`** |
+| Worker | `prompt-hub-api` · **https://api.prompt-hubs.com** |
+| **Git 基线** | `b51e129`（生图连点可用）；已撤销远端 `b076702`/`a5dffff`（第二张卡死回归） |
+| **恢复窗口** | GrsAI 等默认 **2 小时**（`providerScope: grs`）；Apimart **7 天**（`providerScope: apimart`） |
+| **侧栏预览** | 卡藏卡片优先 **full 原图**；`rec_` 新恢复卡 id；Feed `wh_` 前缀不再二次剥离 |
 
 ### 已打通 / 未打通
 
-- ✅ `/health`、登录、兑换、生图扣费、R2 `r2-first` 读图
-- ✅ 4K 原图上传（≤50MB）、下载走 blob 不落 JSON 404 页
-- ⚠️ 木瓜慢速线 2–12 分钟；勿用后台「测试勿用」备用模型做日常出图
-- ⚠️ 编辑保存卡片时勿重复上传原图（会写入 `card_xxx` 副本）
+- ✅ `/health`、登录、兑换、生图扣费、生图连点提交（`b51e129` 基线）
+- ✅ 服务端恢复入库、侧栏点卡藏卡片、大图预览走原图
+- ⚠️ GrsAI 上游图 **2h 后销毁**，勿用 7 天窗口扫 Grs 任务
+- ⚠️ Apimart 链接可保留约 7 天，需单独 `providerScope: apimart`
 
 ### 已知问题
 
-1. **Apimart**：多为内容审核，改提示词；积分已退。
-2. **旧图偏小**：上游链过期则 repair 无效，需重新生成。
-3. **524**：前台应转「后台等待」；强刷 build `20260608l` 后重试。
+1. **b076702 逻辑勿合并**：全量 `renderImageGenFeed` 会导致第二张提交卡死。
+2. **Apimart**：多为内容审核；超 7 天上游链过期则 repair 无效。
+3. 强刷后验收：`window.__APP_BUILD__` 应为 `20260610b`。
 
 ### 下一步
 
-1. 日常生图用 **GPT Image 2 VIP**（GrsAI），2K/4K 验收下载体积 ≥10MB。
-2. 木瓜线路仅慢速省钱场景；监控 `mooko-drain` 日志与木瓜控制台消费记录。
-3. 后台「测试勿用」模型改 `maintenance` 或下架，避免用户误选。
+1. 部署 Pages + Worker（`20260610b`）。
+2. Grs 恢复：`runServerApimartImport({ mode:'import', max:80, hours:2, providerScope:'grs' })`。
+3. Apimart 恢复：`runServerApimartImport({ mode:'import', max:80, days:7, providerScope:'apimart' })`。
 
 ### 部署
 

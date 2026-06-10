@@ -413,7 +413,7 @@
           return {
             key: feedId,
             kind: warehouse ? 'warehouse' : 'community',
-            id: warehouse ? feedId.replace(/^wh_/, '') : feedId
+            id: warehouse ? feedId.slice(3) : feedId
           };
         });
     }
@@ -490,7 +490,7 @@
           const failed = (d().getImageGenFailedJobs?.() ?? []).slice(0, d().IMAGEGEN_FEED_FAILED_CAP ?? 4);
           const list = store.whCards.slice(0, IMAGEGEN_FEED_PER_PAGE);
           if (!pending.length && !failed.length && !list.length) {
-            html = '<p class="imagegen-feed-empty">仓库暂无卡片<br><button type="button" class="btn btn-primary btn-sm" onclick="createNewCard({forceOpenPanel:true})">新建卡片</button></p>';
+            html = '<p class="imagegen-feed-empty">卡藏暂无卡片<br><button type="button" class="btn btn-primary btn-sm" onclick="createNewCard({forceOpenPanel:true})">新建卡片</button></p>';
           } else {
             html = pending.map((j) => buildFeedPendingCardHtml(j)).join('')
               + failed.map((j) => buildFeedFailedCardHtml(j)).join('')
@@ -659,7 +659,9 @@
         card.dataset.feedBound = '1';
         const feedId = card.dataset.feedId;
         const feedKind = d().getImageGenFeedTab?.() === 'warehouse' ? 'warehouse' : 'community';
-        const feedItemId = feedKind === 'warehouse' ? feedId.replace(/^wh_/, '') : feedId;
+        const feedItemId = feedKind === 'warehouse'
+          ? (feedId.startsWith('wh_') ? feedId.slice(3) : feedId)
+          : feedId;
         card.querySelector('.imagegen-feed-thumb-btn')?.addEventListener('click', (e) => {
           e.stopPropagation();
           void d().openImageGenLightboxAt?.(feedKind, feedItemId, feedId);

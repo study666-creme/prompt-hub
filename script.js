@@ -4962,11 +4962,18 @@
       setCloudSyncPhase('syncing', `服务端${modeLabel}中…`);
       showToast(`正在服务端${modeLabel}（最多 ${max} 条）…`, 5000);
       try {
-        const res = await window.PromptHubApi.recoverWarehouseFromJobs({
-          max,
-          days: opts.days || (mode === 'import' ? 90 : 365),
-          mode
-        });
+        const providerScope = opts.providerScope || (mode === 'import' ? 'grs' : 'all');
+        const recoverBody = { max, mode, providerScope };
+        if (providerScope === 'apimart') {
+          recoverBody.days = Math.min(365, Math.max(1, Number(opts.days) || 7));
+        } else if (providerScope === 'grs' || opts.hours != null) {
+          recoverBody.hours = Math.min(168, Math.max(1, Number(opts.hours) || 2));
+        } else if (opts.days != null) {
+          recoverBody.days = Math.min(365, Math.max(1, Number(opts.days)));
+        } else if (mode !== 'import') {
+          recoverBody.days = 365;
+        }
+        const res = await window.PromptHubApi.recoverWarehouseFromJobs(recoverBody);
         if (!res?.ok) {
           setCloudSyncPhase('error', res.message || res.code);
           showToast('操作失败：' + (res.message || res.code || '未知错误'), 9000);
@@ -4979,12 +4986,20 @@
         renderGroups();
         renderCards(true);
         window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+        if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+          window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: true });
+        }
         setCloudSyncPhase('saved');
         const msg =
           mode === 'repair'
             ? `已修复 ${d.repaired || 0} 张图片，跳过 ${d.skipped || 0} 张`
             : `已导入 ${d.imported || 0} 张，跳过 ${d.skipped || 0} 张`;
-        showToast(d.hint ? `${msg}。${d.hint}` : msg, 10000);
+        showToast(
+          d.hint
+            ? `${msg}。${d.hint}`
+            : `${msg}。若侧栏仍打不开，请再点一次该图或强刷`,
+          10000
+        );
         console.log('[Recovery] server', mode, d);
         return { ok: true, ...d };
       } catch (e) {
@@ -7737,11 +7752,62 @@
       if (dl) dl.classList.remove('hidden');
     }
 
+    function extensionFromBlob(blob) {
+      const t = String(blob?.type || '').toLowerCase();
+      if (t.includes('png')) return 'png';
+      if (t.includes('webp')) return 'webp';
+      if (t.includes('jpeg') || t.includes('jpg')) return 'jpg';
+      return 'png';
+    }
+
+    function downloadFilenameForCard(card, blob, filename) {
+      if (filename && /\.\w{3,4}$/i.test(filename)) {
+        const ext = extensionFromBlob(blob);
+        return filename.replace(/\.\w{3,4}$/i, `.${ext}`);
+      }
+      const id = card?.id || Date.now();
+      return `prompt-hub-${id}.${extensionFromBlob(blob)}`;
+    }
+
+    async function fetchBlobFromUrl(url) {
+      if (!url) return null;
+      try {
+        const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+        if (res.ok) return await res.blob();
+      } catch (e) { /* proxy */ }
+      if (window.PromptHubApi?.fetchMediaAsBlobUrl && /^https?:\/\//i.test(url)) {
+        const tmp = await window.PromptHubApi.fetchMediaAsBlobUrl(url);
+        if (tmp) {
+          try {
+            const blob = await (await fetch(tmp)).blob();
+            URL.revokeObjectURL(tmp);
+            return blob;
+          } catch (e) {
+            URL.revokeObjectURL(tmp);
+          }
+        }
+      }
+      return null;
+    }
+
+    async function tryFastGenJobDownloadBlob(card) {
+      const jobId = String(card?.genJobId || '').replace(/#\d+$/, '');
+      if (!jobId || !window.PromptHubApi?.getGenerationImageUrl) return null;
+      try {
+        const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
+        if (!r?.ok || !r.data?.url) return null;
+        return await fetchBlobFromUrl(r.data.url);
+      } catch (e) {
+        console.warn('[download] fast gen job url failed', jobId, e);
+        return null;
+      }
+    }
+
     function saveBlobDownload(blob, filename) {
       const objUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = objUrl;
-      a.download = filename || `prompt-hub-${Date.now()}.jpg`;
+      a.download = filename || `prompt-hub-${Date.now()}.${extensionFromBlob(blob)}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -7783,7 +7849,6 @@
     }
 
     async function downloadCardImageFile(imageRef, cardId, filename, opts = {}) {
-      const name = filename || `prompt-hub-card-${cardId || Date.now()}.jpg`;
       const card = cardId ? cards.find((c) => c.id === cardId) : null;
       const inflightKey = String(cardId || imageRef || 'anon');
       const triggerBtn = opts.triggerBtn || null;
@@ -7795,14 +7860,25 @@
 
       cardDownloadInflight.add(inflightKey);
       setDownloadTriggerBusy(triggerBtn, true);
-      downloadPrepToast(card);
 
       try {
+        const minBytes = card && window.SupabaseSync?.expectedMinFullImageBytes
+          ? window.SupabaseSync.expectedMinFullImageBytes(card.resolution)
+          : 0;
+        let blob = card ? await tryFastGenJobDownloadBlob(card) : null;
+        if (blob && minBytes > 0 && blob.size < minBytes) blob = null;
+        if (blob) {
+          const name = downloadFilenameForCard(card, blob, filename);
+          saveBlobDownload(blob, name);
+          showToast(`下载完成 · ${formatFileSize(blob.size)}`);
+          return;
+        }
         if (card && window.SupabaseSync?.downloadCardFullResBlob) {
+          downloadPrepToast(card);
           const fullBlob = await window.SupabaseSync.downloadCardFullResBlob(card);
           if (fullBlob) {
+            const name = downloadFilenameForCard(card, fullBlob, filename);
             saveBlobDownload(fullBlob, name);
-            const minBytes = window.SupabaseSync.expectedMinFullImageBytes?.(card.resolution) || 0;
             if (minBytes > 0 && fullBlob.size < minBytes) {
               showToast(`已下载 · ${formatFileSize(fullBlob.size)}（体积偏小，请稍后再试或重新生成）`, 6000);
             } else {
@@ -7812,23 +7888,29 @@
           }
         }
         if (typeof imageRef === 'string' && imageRef.startsWith('data:image/')) {
+          const dataBlob = await (await fetch(imageRef)).blob();
+          const name = downloadFilenameForCard(card, dataBlob, filename);
           await promptHubSaveImage(imageRef, name);
           showToast('下载完成');
           return;
         }
         if (window.SupabaseSync?.downloadCardStorageBlob) {
+          downloadPrepToast(card);
           const jobId = card?.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null;
-          const blob = await window.SupabaseSync.downloadCardStorageBlob(imageRef, cardId, { jobId });
-          if (blob) {
-            saveBlobDownload(blob, name);
-            showToast(`下载完成 · ${formatFileSize(blob.size)}`);
+          const storageBlob = await window.SupabaseSync.downloadCardStorageBlob(imageRef, cardId, { jobId });
+          if (storageBlob) {
+            const name = downloadFilenameForCard(card, storageBlob, filename);
+            saveBlobDownload(storageBlob, name);
+            showToast(`下载完成 · ${formatFileSize(storageBlob.size)}`);
             return;
           }
         }
         if (card?.genJobId && window.SupabaseSync?.rearchiveGeneratedCardFromJob) {
+          downloadPrepToast(card);
           await window.SupabaseSync.rearchiveGeneratedCardFromJob(card);
           const retry = await window.SupabaseSync.downloadCardFullResBlob(card, { skipRepair: true });
           if (retry) {
+            const name = downloadFilenameForCard(card, retry, filename);
             saveBlobDownload(retry, name);
             showToast(`下载完成 · ${formatFileSize(retry.size)}`);
             return;

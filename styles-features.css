@@ -2922,10 +2922,17 @@
   font-weight: 600;
   cursor: pointer;
   backdrop-filter: blur(6px);
+  opacity: 0;
+  transform: translateY(2px);
+  pointer-events: none;
+  transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.imagegen-feed-card:hover .imagegen-feed-media-dl,
+.imagegen-feed-media:hover .imagegen-feed-media-dl {
   opacity: 1;
   transform: none;
   pointer-events: auto;
-  transition: background 0.15s ease;
 }
 
 .imagegen-feed-media-dl:hover {

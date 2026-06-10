@@ -710,6 +710,8 @@ generateRoutes.get('/jobs/history', async c => {
 const recoverWarehouseSchema = z.object({
   max: z.number().int().min(1).max(80).optional(),
   days: z.number().int().min(1).max(365).optional(),
+  hours: z.number().int().min(1).max(168).optional(),
+  providerScope: z.enum(['grs', 'apimart', 'all']).optional(),
   mode: z.enum(['import', 'repair', 'extras', 'settle']).optional(),
   jobIds: z.array(z.string().min(8).max(64)).max(10).optional()
 });
@@ -727,7 +729,12 @@ generateRoutes.post('/recover-warehouse', async c => {
   }
   try {
     const mode = body.mode || 'import';
-    const common = { max: body.max, days: body.days };
+    const common = {
+      max: body.max,
+      days: body.days,
+      hours: body.hours,
+      providerScope: body.providerScope
+    };
     const upstream = upstreamBindingsFromEnv(c.env);
 
     if (mode === 'settle') {

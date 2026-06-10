@@ -9701,7 +9701,7 @@
       if (previewKind === 'warehouse' && previewAssetId && typeof window.downloadCardImageFile === 'function') {
         const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === previewAssetId);
         if (c?.image) {
-          await window.downloadCardImageFile(c.image, c.id, `prompt-hub-${c.id}.jpg`, {
+          await window.downloadCardImageFile(c.image, c.id, null, {
             triggerBtn: dlBtn
           });
           return;
@@ -9725,7 +9725,7 @@
       if (kind === 'warehouse') {
         const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === itemId);
         if (c?.image && typeof window.downloadCardImageFile === 'function') {
-          await window.downloadCardImageFile(c.image, c.id, `prompt-hub-${c.id}.jpg`, {
+          await window.downloadCardImageFile(c.image, c.id, null, {
             triggerBtn
           });
           return;
@@ -9796,6 +9796,30 @@
       ${extraActionsHtml ? `<div class="imagegen-preview-actions-secondary">${extraActionsHtml}</div>` : ''}`;
   }
 
+  /** Feed 卡 data-feed-id 为 wh_ + 卡片 id；恢复卡 id 本身也可能以 wh_ 开头，勿二次 strip */
+  function warehouseCardIdFromFeedKey(feedKey) {
+    const k = String(feedKey || '');
+    return k.startsWith('wh_') ? k.slice(3) : k;
+  }
+
+  function findWarehouseCardById(cardId) {
+    const id = String(cardId || '').trim();
+    if (!id) return null;
+    let c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === id);
+    if (c) return c;
+    const full = (window.__promptHubCards || []).find((x) => x.id === id);
+    if (!full) return null;
+    return {
+      id: full.id,
+      title: (full.title || '').trim(),
+      prompt: (full.prompt || '').trim() || (full.title || '').trim(),
+      image: full.image || null,
+      tags: full.tags || [],
+      group: full.group || null,
+      genJobId: full.genJobId || null
+    };
+  }
+
   async function renderImageGenPreview() {
     const body = document.getElementById('imageGenPreviewBody');
     if (!body || !imageGenPreviewId || !imageGenPreviewKind) return;
@@ -9826,29 +9850,15 @@
       extraActions = `
         <button type="button" class="btn btn-secondary btn-sm" data-preview-like>${liked ? '已赞' : '点赞'}</button>`;
     } else {
-      const rawId = imageGenPreviewId.replace(/^wh_/, '');
-      let c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === rawId);
+      const c = findWarehouseCardById(imageGenPreviewId);
       if (!c) {
-        const full = (window.__promptHubCards || []).find((x) => x.id === rawId);
-        if (full) {
-          c = {
-            id: full.id,
-            title: (full.title || '').trim(),
-            prompt: (full.prompt || '').trim() || (full.title || '').trim(),
-            image: full.image || null,
-            tags: full.tags || [],
-            group: full.group || null,
-            genJobId: full.genJobId || null
-          };
-        }
-      }
-      if (!c) {
-        toast('找不到该仓库卡片，请强刷页面');
+        toast('找不到该卡藏卡片，请强刷页面');
         closeImageGenPreview();
         return;
       }
       prompt = c.prompt || '';
       image = c.image || '';
+      jobId = String(c.genJobId || '');
       if (isDisplayableImage(c.image)) refImage = c.image;
     }
     const hasRef = !!(refImages?.length || (refImage && isDisplayableImage(refImage)));
@@ -9871,12 +9881,8 @@
     if (dlPending) dlPending.disabled = true;
     const zoomBtn = body.querySelector('[data-preview-zoom]');
     if (zoomBtn && isDisplayableImage(image)) {
-      const previewAssetId = imageGenPreviewKind === 'warehouse'
-        ? imageGenPreviewId.replace(/^wh_/, '')
-        : imageGenPreviewId;
-      const previewCard = imageGenPreviewKind === 'warehouse'
-        ? (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === previewAssetId)
-        : null;
+      const previewAssetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : imageGenPreviewId;
+      const previewCard = imageGenPreviewKind === 'warehouse' ? findWarehouseCardById(previewAssetId) : null;
       const previewOpts = previewCard ? (window.getCommunityCollectImageResolveOpts?.(previewCard) || {}) : (
         imageGenPreviewKind === 'community' ? (() => {
           const post = findPost(imageGenPreviewId);
@@ -9937,12 +9943,19 @@
         if (img.complete && img.naturalWidth > 0) img.onload?.();
       };
 
-      const quickUrl = previewCard && window.SupabaseSync?.getListDisplayImageSrc
-        ? window.SupabaseSync.getListDisplayImageSrc(image, previewAssetId)
-        : '';
+      const previewResolveOpts = {
+        ...previewOpts,
+        preferFull: true,
+        listOnly: false,
+        allowFullFallback: true
+      };
+      const quickUrl =
+        previewKind !== 'warehouse' && previewCard && window.SupabaseSync?.getListDisplayImageSrc
+          ? window.SupabaseSync.getListDisplayImageSrc(image, previewAssetId, previewOpts)
+          : '';
       if (quickUrl) mountPreviewImage(quickUrl, { isFull: false });
 
-      void resolveImageDisplayUrl(image, jobId, previewAssetId, { ...previewOpts, preferFull: true }).then((url) => {
+      void resolveImageDisplayUrl(image, jobId, previewAssetId, previewResolveOpts).then((url) => {
         if (previewStale()) return;
         if (!url) {
           if (!quickUrl) {
@@ -9965,9 +9978,7 @@
     };
     body.querySelector('[data-preview-fill-all]')?.addEventListener('click', () => {
       const { refImages: ri, refImage: r1 } = getPreviewRefs();
-      const assetId = imageGenPreviewKind === 'warehouse'
-        ? imageGenPreviewId.replace(/^wh_/, '')
-        : '';
+      const assetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : '';
       fillFormFromData({
         prompt: body.dataset.previewPrompt || '',
         refImages: ri.length ? ri : undefined,
@@ -9980,9 +9991,7 @@
     });
     body.querySelector('[data-preview-fill-ref]')?.addEventListener('click', () => {
       const { refImages: ri, refImage: r1 } = getPreviewRefs();
-      const assetId = imageGenPreviewKind === 'warehouse'
-        ? imageGenPreviewId.replace(/^wh_/, '')
-        : '';
+      const assetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : '';
       fillFormRefOnly(r1, ri, { assetId: assetId || undefined });
     });
     body.querySelector('[data-preview-like]')?.addEventListener('click', () => {
@@ -10001,9 +10010,7 @@
       e.preventDefault();
       e.stopPropagation();
       if (previewStale()) return;
-      const assetId = previewKind === 'warehouse'
-        ? previewId.replace(/^wh_/, '')
-        : previewId;
+      const assetId = previewKind === 'warehouse' ? previewId : previewId;
       void downloadImageGenPreviewImage(body, previewKind, assetId, e.currentTarget);
     });
   }
@@ -10193,11 +10200,11 @@
     const imgEl = card?.querySelector('.imagegen-feed-thumb-btn img');
     const rawRef = imgEl?.getAttribute('data-image-ref');
     const jobId = imgEl?.getAttribute('data-job-id') || '';
-    const assetId = feedKey.replace(/^wh_/, '');
+    const assetId = kind === 'warehouse' ? warehouseCardIdFromFeedKey(feedKey) : feedKey;
     let url = imgEl?.src && !imgEl.src.startsWith('data:image/svg') ? imgEl.src : '';
     const resolveOpts = kind === 'warehouse'
       ? (() => {
-        const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === assetId);
+        const c = findWarehouseCardById(assetId);
         return c && window.getCommunityCollectImageResolveOpts?.(c) ? window.getCommunityCollectImageResolveOpts(c) : {};
       })()
       : (() => {

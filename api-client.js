@@ -869,6 +869,8 @@
     return requestWithPrepare('POST', '/api/v1/generate/recover-warehouse', {
       max: opts.max,
       days: opts.days,
+      hours: opts.hours,
+      providerScope: opts.providerScope,
       mode: opts.mode || 'import',
       jobIds: Array.isArray(opts.jobIds) ? opts.jobIds.filter(Boolean).slice(0, 10) : undefined
     }, { timeoutMs: Math.max(API_TIMEOUT_MS, 120000), lightPrepare: true });

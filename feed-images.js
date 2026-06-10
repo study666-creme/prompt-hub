@@ -62,15 +62,23 @@
       const authorId = opts.authorId || '';
       const cardId = opts.cardId || assetId || '';
       const cacheKey = (publicFeed ? 'pub:' : '') + (jobId ? `job:${jobId}` : (assetId ? `${assetId}:${image}` : image));
+      const wantFull = !opts.listOnly && opts.preferFull === true;
       if (!publicFeed) {
-        const hit = displayUrlCache.get(cacheKey);
+        const hitKey = wantFull ? `${cacheKey}:f` : cacheKey;
+        const hit = displayUrlCache.get(hitKey);
         if (hit) return hit;
       }
       let url = '';
       if (!publicFeed) {
         const listOnly = opts.listOnly === true || opts.allowFullFallback === false;
-        let cached = window.SupabaseSync?.getCachedDisplayUrl?.(image, { assetId, variant: 'grid' });
-        if (!cached && !listOnly) {
+        let cached = null;
+        if (!listOnly && wantFull) {
+          cached = window.SupabaseSync?.getCachedDisplayUrl?.(image, { assetId, variant: 'full' });
+        }
+        if (!cached) {
+          cached = window.SupabaseSync?.getCachedDisplayUrl?.(image, { assetId, variant: 'grid' });
+        }
+        if (!cached && !listOnly && !wantFull) {
           cached = window.SupabaseSync?.getCachedDisplayUrl?.(image, { assetId, variant: 'full' });
         }
         if (cached && /^https?:\/\//i.test(cached) && !cached.includes('/object/public/')
@@ -130,7 +138,7 @@
       }
       if (url && !url.startsWith('storage://') && !url.startsWith('data:image/svg')
         && (!window.SupabaseSync?.isValidSignedDisplayUrl || window.SupabaseSync.isValidSignedDisplayUrl(url))) {
-        displayUrlCache.set(cacheKey, url);
+        displayUrlCache.set(wantFull ? `${cacheKey}:f` : cacheKey, url);
       }
       return url || '';
     }
@@ -141,7 +149,7 @@
       if (!cardEl || !img.closest('#imageGenFeed')) return null;
       const feedId = cardEl.dataset.feedId || '';
       if (feedId.startsWith('wh_')) {
-        const rawId = feedId.replace(/^wh_/, '');
+        const rawId = feedId.slice(3);
         return {
           fromPublicFeed: false,
           authorId: window.SupabaseSync?.getUserId?.() || '',
