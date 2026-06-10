@@ -93,8 +93,9 @@ cd D:\prompt-hub
 
 1. 必须 **两个窗口都开着**（`start-dev.ps1` 会开 Worker + 静态站）
 2. 强刷 `http://127.0.0.1:5500`（Ctrl+Shift+R）
-3. 仍不行：F12 → Application → Session Storage → 删 `ph_signed_urls_v1`
-4. 控制台确认：`window.API_BASE_URL === 'http://127.0.0.1:8787'`
+3. 仍不行：F12 → Application → Session Storage → 删 **`ph_signed_urls_v1`**（第 5 步，很重要）
+4. 控制台若大量 **429** 在 `/media/sign`：重启 Worker 窗口（`Ctrl+C` 后重新 `npm run dev`），再强刷
+5. 控制台确认：`window.API_BASE_URL === 'http://127.0.0.1:8787'`
 
 **不是**连 `.cn` 网站——本地 API 固定本机 Worker；只是签名缓存可能来自 `.com` 生产。
 

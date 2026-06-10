@@ -1747,6 +1747,7 @@
   function apiSignAllowed(opts) {
     if (window.__PH_AUTH_SIGN_PAUSE_UNTIL__ && Date.now() < window.__PH_AUTH_SIGN_PAUSE_UNTIL__) return false;
     if (window.PromptHubApi?.isApiUnreachable?.()) return false;
+    if (window.PromptHubApi?.isApiRateLimited?.()) return false;
     if (isLoggedIn() && !isCommunityFeedOpts(opts)) {
       return !!(window.PromptHubApi?.isConfigured?.() && window.PromptHubApi.signMediaRef);
     }
@@ -1796,6 +1797,8 @@
         if (r?.status === 404 || r?.code === 'NOT_FOUND') {
           if (/_grid\.(jpe?g|webp|png)$/i.test(fileKey)) markGridFetchFailed(fileKey);
           else invalidateSignedCache(fileKey);
+        } else if (r?.status === 429 || r?.code === 'RATE_LIMITED') {
+          window.PromptHubApi?.markApiRateLimited?.(90000);
         }
       } catch (e) {
         console.warn('[SupabaseSync] api sign failed', path, e);

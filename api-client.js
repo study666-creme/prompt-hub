@@ -636,10 +636,14 @@
     if (isApiUnreachable()) {
       return { ok: false, code: 'API_UNREACHABLE', message: 'API 暂不可用' };
     }
+    if (isApiRateLimited()) {
+      return { ok: false, code: 'RATE_LIMITED', message: '操作过于频繁，请稍后再试' };
+    }
     const normalized = window.SupabaseSync?.normalizeImageRef?.(ref) || ref;
     const q = encodeURIComponent(String(normalized || ''));
     return request('GET', `/api/v1/media/sign?ref=${q}`, null, {
-      timeoutMs: API_SIGN_TIMEOUT_MS
+      timeoutMs: API_SIGN_TIMEOUT_MS,
+      noRetry: true
     });
   }
 

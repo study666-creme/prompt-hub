@@ -1,5 +1,6 @@
 import { createMiddleware } from 'hono/factory';
 import { applyCorsHeaders } from '../lib/cors-headers';
+import type { Env } from '../env';
 
 type Bucket = { count: number; resetAt: number };
 
@@ -8,6 +9,16 @@ const buckets = new Map<string, Bucket>();
 /** 简易速率限制（单实例；生产建议 Cloudflare Rate Limiting / KV） */
 export function rateLimit(max: number, windowMs: number) {
   return createMiddleware(async (c, next) => {
+    const env = c.env as Env;
+    const host = (c.req.header('Host') || '').toLowerCase();
+    if (
+      env.ENVIRONMENT === 'development'
+      || /^127\.0\.0\.1:\d+$/.test(host)
+      || /^localhost:\d+$/.test(host)
+    ) {
+      await next();
+      return;
+    }
     const user = c.get('user') as { id: string } | undefined;
     const ip = c.req.header('cf-connecting-ip') || 'anon';
     const route = c.req.path || 'unknown';
