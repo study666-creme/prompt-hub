@@ -483,7 +483,7 @@
         el.classList.add('hidden');
       }
     });
-    if (typeof window.updateImageGenPricingUI === 'function') {
+    if (typeof window.updateImageGenPricingUI === 'function' && window.__IMAGE_GEN_CATALOG_READY__) {
       window.updateImageGenPricingUI();
     }
   }

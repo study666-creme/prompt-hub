@@ -7243,6 +7243,8 @@
     const sel = document.getElementById('imageGenModel');
     const resSel = document.getElementById('imageGenResolution');
     const tabs = document.getElementById('imageGenModelFamilyTabs');
+    imageGenModelCatalogReady = !loading;
+    window.__IMAGE_GEN_CATALOG_READY__ = imageGenModelCatalogReady;
     if (sel) {
       sel.disabled = !!loading;
       sel.setAttribute('aria-busy', loading ? 'true' : 'false');
@@ -7266,7 +7268,6 @@
     }
     if (resSel && !loading) resSel.disabled = false;
     if (tabs) tabs.hidden = !!loading;
-    if (!loading) imageGenModelCatalogReady = true;
   }
 
   const IMAGE_GEN_MODEL_FAMILIES = [
@@ -7674,7 +7675,10 @@
       : `生成图片 · ${unitPerSheet}`;
     if (btn && !btn.disabled && !imageGenBatchRunning) btn.textContent = submitLabel;
     if (!hint) return;
-    const modelLabel = detail?.modelLabel || imageGenModelLabel(detail?.model);
+    const modelLabel =
+      detail?.modelLabel
+      || imageGenModelCatalog.find((m) => m.id === getImageGenModel())?.label
+      || imageGenModelLabel(detail?.modelId || getImageGenModel());
     const sizeLabel =
       document.getElementById('imageGenSize')?.selectedOptions?.[0]?.textContent?.trim() || size;
     const qualLabel =
@@ -7692,12 +7696,35 @@
     syncImageGenPromoNotice(detail, final);
   }
 
+  function catalogHasPricingFor(modelId, resolution) {
+    const m = imageGenModelCatalog.find((x) => x.id === modelId);
+    if (!m) return false;
+    const res = normalizeImageGenResolution(resolution);
+    if (m.costByResolution?.[res] && Number.isFinite(Number(m.costByResolution[res].final))) return true;
+    if (m.pricingByResolution && m.creditsByResolution?.[res] != null) return true;
+    if (Number.isFinite(Number(m.creditsFinal))) return true;
+    return false;
+  }
+
   function updateImageGenCostHint() {
+    const btn = document.getElementById('imageGenSubmit');
+    const hint = document.getElementById('imageGenCostHint');
+    if (!imageGenModelCatalogReady) {
+      if (btn && !btn.disabled && !imageGenBatchRunning) btn.textContent = '生成图片 · 加载中…';
+      if (hint) hint.textContent = '模型与计价加载中…';
+      return;
+    }
     const { model, resolution, quality, size } = getImageGenFormMeta();
     const detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution);
-    const final = detail?.final ?? 10;
+    const final = detail?.final;
+    if (final == null || !Number.isFinite(Number(final))) {
+      if (btn && !btn.disabled && !imageGenBatchRunning) btn.textContent = '生成图片 · — 积分';
+      if (hint) hint.textContent = '计价加载中…';
+      return;
+    }
     applyImageGenCostDisplay(detail, final, quality, size);
     window.ImageGenPromptTools?.updateBatchCostLabel?.();
+    if (catalogHasPricingFor(model, resolution)) return;
     clearTimeout(imageGenCostDebounceTimer);
     imageGenCostDebounceTimer = setTimeout(() => {
       void refreshImageGenCostFromApi(model, resolution, quality, size);
@@ -7777,6 +7804,7 @@
   }
 
   function updateImageGenPricingUI() {
+    if (!imageGenModelCatalogReady) return;
     updateImageGenResolutionSelect();
     updateImageGenCostHint();
   }
