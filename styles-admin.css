@@ -732,6 +732,64 @@ table.admin-table {
   overflow: auto;
 }
 
+.admin-confirm-modal__panel {
+  width: min(440px, 100%);
+}
+
+.admin-confirm-text {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  line-height: 1.6;
+  color: var(--admin-text);
+}
+
+.admin-confirm-actions {
+  margin-top: 12px;
+  padding-top: 0;
+  border-top: none;
+  justify-content: flex-end;
+}
+
+.admin-batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  background: var(--admin-surface-muted);
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+}
+
+.admin-batch-select-all {
+  margin: 0;
+  font-weight: 500;
+}
+
+.admin-col-check {
+  width: 36px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.admin-col-check input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.admin-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
 .admin-form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

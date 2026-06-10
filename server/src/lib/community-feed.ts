@@ -22,6 +22,7 @@ export const MIN_COMMUNITY_PROMPT_LEN = 15;
 type CardLibraryIndex = {
   ids: Set<string>;
   fileBases: Set<string>;
+  postIds: Set<string>;
 };
 
 function fileBaseFromStoragePath(path: string): string | null {
@@ -33,17 +34,25 @@ function fileBaseFromStoragePath(path: string): string | null {
 function cardLibraryIndexFromUserData(data: unknown): CardLibraryIndex {
   const ids = new Set<string>();
   const fileBases = new Set<string>();
-  if (!data || typeof data !== 'object') return { ids, fileBases };
+  const postIds = new Set<string>();
+  if (!data || typeof data !== 'object') return { ids, fileBases, postIds };
   const cards = (data as { cards?: unknown }).cards;
-  if (!Array.isArray(cards)) return { ids, fileBases };
+  if (!Array.isArray(cards)) return { ids, fileBases, postIds };
   for (const c of cards) {
     if (!c || typeof c !== 'object') continue;
-    const card = c as { id?: string; image?: string; genJobId?: string };
+    const card = c as {
+      id?: string;
+      image?: string;
+      genJobId?: string;
+      communityPostId?: string;
+    };
     const id = String(card.id || '').trim();
     if (id) {
       ids.add(id);
       fileBases.add(sanitizeCardFileBase(id));
     }
+    const linkedPost = String(card.communityPostId || '').trim();
+    if (linkedPost) postIds.add(linkedPost);
     const path = resolveStoragePath(card.image);
     if (path) {
       const base = fileBaseFromStoragePath(path);
@@ -52,7 +61,7 @@ function cardLibraryIndexFromUserData(data: unknown): CardLibraryIndex {
     const jobId = String(card.genJobId || '').replace(/#\d+$/, '').trim();
     if (jobId) fileBases.add(jobId);
   }
-  return { ids, fileBases };
+  return { ids, fileBases, postIds };
 }
 
 /** @deprecated 用 cardLibraryIndexFromUserData */
@@ -61,19 +70,26 @@ function cardIdsFromUserData(data: unknown): Set<string> {
 }
 
 function isCardInAuthorLibrary(
-  row: { author_id: string; source_card_id: string | null; image?: string | null },
+  row: {
+    id?: string;
+    author_id: string;
+    source_card_id: string | null;
+    image?: string | null;
+  },
   indexesByAuthor: Map<string, CardLibraryIndex>
 ): boolean {
   const cid = String(row.source_card_id || '').trim();
-  if (!cid) return false;
+  const pid = String(row.id || '').trim();
+  if (!cid && !pid) return false;
   const aid = String(row.author_id || '').trim();
   if (!isAuthorUuid(aid)) return true;
 
   const idx = indexesByAuthor.get(aid);
   if (idx) {
-    if (idx.ids.has(cid)) return true;
+    if (pid && idx.postIds.has(pid)) return true;
+    if (cid && idx.ids.has(cid)) return true;
     const base = sanitizeCardFileBase(cid);
-    if (idx.fileBases.has(base) || idx.fileBases.has(cid)) return true;
+    if (cid && (idx.fileBases.has(base) || idx.fileBases.has(cid))) return true;
   }
 
   const postPath = resolveStoragePath(row.image);
@@ -622,7 +638,12 @@ export async function unpublishOrphanSourceCardPosts(
     const lib = cardLibraryIndexFromUserData(ud?.data);
     for (const p of posts) {
       if (isCardInAuthorLibrary(
-        { author_id: authorId, source_card_id: p.source_card_id, image: null },
+        {
+          id: p.id,
+          author_id: authorId,
+          source_card_id: p.source_card_id,
+          image: null
+        },
         new Map([[authorId, lib]])
       )) continue;
       const { error: upErr } = await admin
@@ -690,6 +711,7 @@ async function countOrphanPublishedPosts(admin: SupabaseClient): Promise<number>
 
   let count = 0;
   for (const row of (data || []) as {
+    id: string;
     author_id: string;
     source_card_id: string | null;
     image?: string | null;
@@ -839,7 +861,12 @@ export async function restoreOrphanCommunityPosts(
     const libMap = new Map([[authorId, lib]]);
     for (const p of postRows) {
       if (!isCardInAuthorLibrary(
-        { author_id: authorId, source_card_id: p.source_card_id, image: p.image },
+        {
+          id: p.id,
+          author_id: authorId,
+          source_card_id: p.source_card_id,
+          image: p.image
+        },
         libMap
       )) orphanIds.push(p.id);
     }
@@ -908,7 +935,12 @@ function mapAdminPostRow(
 }
 
 function isLibraryMissingPost(
-  row: { author_id: string; source_card_id: string | null; image?: string | null },
+  row: {
+    id?: string;
+    author_id: string;
+    source_card_id: string | null;
+    image?: string | null;
+  },
   libraryByAuthor: Map<string, CardLibraryIndex>
 ): boolean {
   const cid = String(row.source_card_id || '').trim();
@@ -1098,4 +1130,103 @@ export async function adminDeleteCommunityPost(
   }
 
   return { id, storageRemoved };
+}
+
+export type CommunityBatchResult = {
+  total: number;
+  succeeded: number;
+  skipped: number;
+  failed: number;
+  errors: { id: string; message: string }[];
+};
+
+function normalizeBatchIds(ids: unknown): string[] {
+  if (!Array.isArray(ids)) return [];
+  return [...new Set(ids.map((id) => String(id || '').trim()).filter(Boolean))].slice(0, 50);
+}
+
+export async function batchRestoreCommunityPosts(
+  admin: SupabaseClient,
+  ids: unknown
+): Promise<CommunityBatchResult> {
+  const list = normalizeBatchIds(ids);
+  const result: CommunityBatchResult = {
+    total: list.length,
+    succeeded: 0,
+    skipped: 0,
+    failed: 0,
+    errors: []
+  };
+  for (const id of list) {
+    try {
+      const r = await restoreCommunityPostToUserLibrary(admin, id);
+      if (r.alreadyExists) result.skipped += 1;
+      else result.succeeded += 1;
+    } catch (e) {
+      result.failed += 1;
+      result.errors.push({
+        id,
+        message: e instanceof Error ? e.message : String(e)
+      });
+    }
+  }
+  return result;
+}
+
+export async function batchUnpublishCommunityPosts(
+  admin: SupabaseClient,
+  ids: unknown
+): Promise<CommunityBatchResult> {
+  const list = normalizeBatchIds(ids);
+  const result: CommunityBatchResult = {
+    total: list.length,
+    succeeded: 0,
+    skipped: 0,
+    failed: 0,
+    errors: []
+  };
+  for (const id of list) {
+    try {
+      await adminUnpublishCommunityPost(admin, id);
+      result.succeeded += 1;
+    } catch (e) {
+      result.failed += 1;
+      result.errors.push({
+        id,
+        message: e instanceof Error ? e.message : String(e)
+      });
+    }
+  }
+  return result;
+}
+
+export async function batchDeleteCommunityPosts(
+  admin: SupabaseClient,
+  env: Env,
+  ids: unknown,
+  opts?: { deleteStorage?: boolean }
+): Promise<CommunityBatchResult & { storageRemoved: number }> {
+  const list = normalizeBatchIds(ids);
+  const result: CommunityBatchResult & { storageRemoved: number } = {
+    total: list.length,
+    succeeded: 0,
+    skipped: 0,
+    failed: 0,
+    errors: [],
+    storageRemoved: 0
+  };
+  for (const id of list) {
+    try {
+      const r = await adminDeleteCommunityPost(admin, env, id, opts);
+      result.succeeded += 1;
+      result.storageRemoved += r.storageRemoved || 0;
+    } catch (e) {
+      result.failed += 1;
+      result.errors.push({
+        id,
+        message: e instanceof Error ? e.message : String(e)
+      });
+    }
+  }
+  return result;
 }

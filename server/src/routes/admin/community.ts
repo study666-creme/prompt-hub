@@ -4,6 +4,9 @@ import { deleteStoragePaths, listBucketOrphanFiles } from '../../lib/admin-media
 import {
   adminDeleteCommunityPost,
   adminUnpublishCommunityPost,
+  batchDeleteCommunityPosts,
+  batchRestoreCommunityPosts,
+  batchUnpublishCommunityPosts,
   getCommunityAdminStats,
   listCommunityPostsForAdmin,
   repairMisattributedCommunityAuthors,
@@ -21,7 +24,7 @@ import { rateLimit } from '../../middleware/rate-limit';
 export const adminCommunityRoutes = new Hono<{ Bindings: Env }>();
 
 adminCommunityRoutes.use('*', requireAdminSecret);
-adminCommunityRoutes.use('*', rateLimit(30, 60_000));
+adminCommunityRoutes.use('*', rateLimit(120, 60_000));
 
 function apiOriginFromRequest(c: { req: { url: string } }): string {
   try {
@@ -76,6 +79,32 @@ adminCommunityRoutes.post('/bucket-orphans/delete', async (c) => {
   if (paths.length > 50) throw new ApiError(400, 'VALIDATION_ERROR', '单次最多删除 50 个文件');
   const admin = createAdminClient(c.env);
   const result = await deleteStoragePaths(admin, c.env, paths);
+  return c.json({ ok: true, data: result });
+});
+
+adminCommunityRoutes.post('/posts/batch-restore', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { ids?: string[] };
+  const admin = createAdminClient(c.env);
+  const result = await batchRestoreCommunityPosts(admin, body.ids);
+  return c.json({ ok: true, data: result });
+});
+
+adminCommunityRoutes.post('/posts/batch-unpublish', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { ids?: string[] };
+  const admin = createAdminClient(c.env);
+  const result = await batchUnpublishCommunityPosts(admin, body.ids);
+  return c.json({ ok: true, data: result });
+});
+
+adminCommunityRoutes.post('/posts/batch-delete', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    ids?: string[];
+    deleteStorage?: boolean;
+  };
+  const admin = createAdminClient(c.env);
+  const result = await batchDeleteCommunityPosts(admin, c.env, body.ids, {
+    deleteStorage: body.deleteStorage !== false
+  });
   return c.json({ ok: true, data: result });
 });
 

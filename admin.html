@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__ADMIN_BUILD__ = '20260610a';
+    window.__ADMIN_BUILD__ = '20260610b';
     (function () {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function (regs) {
@@ -23,13 +23,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>管理登录</title>
-  <link rel="stylesheet" href="styles-admin.css?v=20260610a">
+  <link rel="stylesheet" href="styles-admin.css?v=20260610b">
 </head>
 <body class="admin-gate">
   <section class="admin-login" id="adminLogin">
     <div class="admin-card">
       <h1>管理登录</h1>
-      <p class="admin-hint">仅限授权人员使用。构建号 <code id="adminBuildTag">20260610a</code></p>
+      <p class="admin-hint">仅限授权人员使用。构建号 <code id="adminBuildTag">20260610b</code></p>
       <div class="admin-field">
         <label for="adminSecret">访问密钥</label>
         <input type="password" id="adminSecret" placeholder="请输入密钥" autocomplete="off" spellcheck="false" autocapitalize="off">
@@ -45,7 +45,7 @@
       <aside class="admin-sidebar">
         <div class="admin-brand">
           <h1>Prompt Hub</h1>
-          <p>运营控制台 · <code id="adminSidebarBuild">20260610a</code></p>
+          <p>运营控制台 · <code id="adminSidebarBuild">20260610b</code></p>
         </div>
         <nav class="admin-nav admin-tabs">
           <button type="button" class="admin-tab is-active" data-tab="overview">概览</button>
@@ -150,6 +150,15 @@
           <button type="button" class="admin-btn" id="communitySearchClear">清空</button>
           <button type="button" class="admin-btn admin-btn--primary" id="communityRestoreOrphansBtn">一键恢复无卡帖</button>
           <button type="button" class="admin-btn admin-btn--primary" id="communityPurgeBtn">清理无效帖</button>
+        </div>
+        <div class="admin-batch-bar hidden" id="communityBatchBar">
+          <label class="admin-check admin-batch-select-all">
+            <input type="checkbox" id="communitySelectAll"> 全选本页
+          </label>
+          <span class="admin-hint" id="communitySelectedCount">已选 0 条</span>
+          <button type="button" class="admin-btn admin-btn--sm" id="communityBatchRestoreBtn" disabled>批量恢复</button>
+          <button type="button" class="admin-btn admin-btn--sm" id="communityBatchUnpublishBtn" disabled>批量下架</button>
+          <button type="button" class="admin-btn admin-btn--sm admin-btn--danger" id="communityBatchDeleteBtn" disabled>批量删除</button>
         </div>
         <div class="admin-task-progress" id="communityTaskProgress" hidden>
           <div class="admin-progress" aria-hidden="true"><div class="admin-progress__bar is-indeterminate" id="communityTaskProgressBar"></div></div>
@@ -309,6 +318,22 @@
     </div>
   </div>
 
+  <div class="admin-modal admin-confirm-modal" id="adminConfirmModal" hidden>
+    <div class="admin-modal__backdrop" data-confirm-cancel></div>
+    <div class="admin-modal__panel admin-confirm-modal__panel" role="dialog" aria-labelledby="adminConfirmTitle">
+      <header class="admin-modal__head">
+        <h2 id="adminConfirmTitle">请确认</h2>
+      </header>
+      <div class="admin-modal__body">
+        <p class="admin-confirm-text" id="adminConfirmMessage"></p>
+        <div class="admin-form-actions admin-confirm-actions">
+          <button type="button" class="admin-btn" id="adminConfirmCancelBtn" data-confirm-cancel>取消</button>
+          <button type="button" class="admin-btn admin-btn--primary" id="adminConfirmOkBtn">确定</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="admin-modal" id="userModal" hidden>
     <div class="admin-modal__backdrop" data-close-modal></div>
     <div class="admin-modal__panel" role="dialog" aria-labelledby="userModalTitle">
@@ -324,6 +349,6 @@
 
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="admin.js?v=20260610a"></script>
+  <script src="admin.js?v=20260610b"></script>
 </body>
 </html>
