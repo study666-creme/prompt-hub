@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildMookoApiRequest,
+  extractRequestIdFromText,
   isMookoPlaceholderTaskId,
   parseMookoImagePayload
 } from './mooko';
@@ -31,6 +32,11 @@ describe('mooko image payload', () => {
     };
     const parsed = parseMookoImagePayload(payload);
     expect(parsed.imageUrls[0]).toMatch(/^data:image\/jpeg;base64,/);
+  });
+
+  it('extracts request_id from partial json text', () => {
+    const partial = '{"created":1,"request_id":"202606101749341885854658268d9d6C2ONR9HI","data":[{"url":"data:image/jpeg;base64,';
+    expect(extractRequestIdFromText(partial)).toBe('202606101749341885854658268d9d6C2ONR9HI');
   });
 
   it('parses url responses and request_id', () => {

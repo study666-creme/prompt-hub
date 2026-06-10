@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260611i';
+    window.__APP_BUILD__ = '20260611n';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -104,15 +104,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260611i">
-  <link rel="stylesheet" href="styles-theme.css?v=20260611i">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260611i">
+  <link rel="stylesheet" href="styles.css?v=20260611n">
+  <link rel="stylesheet" href="styles-theme.css?v=20260611n">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260611n">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260611i">
+  <link rel="stylesheet" href="styles-features.css?v=20260611n">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
-  <script src="theme.js?v=20260611i"></script>
+  <script src="theme.js?v=20260611n"></script>
 </head>
 <body>
   <div class="app-chrome">
@@ -285,7 +285,7 @@
             <span class="settings-check-box" aria-hidden="true"></span>
             <span class="settings-check-label">新建卡片时默认发布到提示词社区</span>
           </label>
-          <p class="settings-hint">发布社区：提示词至少 15 字，配图可选。点赞奖励：100 赞 +100 积分（每人最多 5 次）、1000 赞 +1000 积分（最多 2 次）</p>
+          <p class="settings-hint">发布社区：提示词≥15字且需配图；未达标保存成功但不会公开。点赞奖励：100 赞 +100 积分（每人最多 5 次）、1000 赞 +1000 积分（最多 2 次）</p>
           <div class="settings-btn-grid settings-btn-grid-data" style="margin-top:12px">
             <button type="button" class="btn btn-secondary" onclick="typeof restoreCardsFromCommunityFeed==='function'&&restoreCardsFromCommunityFeed()">从社区恢复卡片库</button>
             <button type="button" class="btn btn-secondary" onclick="typeof syncCloudNow==='function'&&syncCloudNow()">与云端对齐</button>
@@ -613,7 +613,7 @@
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status" aria-live="polite"></p>
       <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260611i</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260611n</p>
     </div>
   </nav>
 
@@ -863,7 +863,7 @@
         <div class="panel-publish-row" id="panelCommunityPublish">
           <div class="panel-publish-copy">
             <span class="panel-publish-title">发布到提示词社区</span>
-            <p class="panel-hint">须先保存到卡片库；提示词至少 15 字即可公开（配图可选）。关闭开关或删除卡片将从社区下架</p>
+            <p class="panel-hint">须先保存到卡片库；提示词≥15字且需配图才会公开。未达标也可正常保存，只是不会发布。关闭开关或删除卡片将从社区下架</p>
           </div>
           <button type="button" class="publish-circle-btn" id="cardPublishToggle" aria-pressed="false" aria-label="发布到提示词社区" title="切换发布"></button>
         </div>
@@ -1240,7 +1240,7 @@
             <div class="panel-publish-row imagegen-publish-row" id="imageGenGenPublicRow">
               <div class="panel-publish-copy">
                 <span class="panel-publish-title">生成后公开到社区</span>
-                <p class="panel-hint" id="imageGenGenPublicHint">提示词≥15字且需配图；开启后会自动发布社区。可在设置中改默认关闭</p>
+                <p class="panel-hint" id="imageGenGenPublicHint">提示词≥15字且需配图才会自动公开；未达标仍正常入库。可在设置中改默认关闭</p>
               </div>
               <button type="button" class="publish-circle-btn" id="imageGenGenPublicBtn" aria-pressed="false" aria-label="生成后公开到社区" title="切换生成后公开"></button>
             </div>
@@ -1503,27 +1503,27 @@
   <script src="api-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260611i"></script>
+  <script src="api-client.js?v=20260611n"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260611i2show"></script>
-  <script src="card-image-loader.js?v=20260611i"></script>
+  <script src="supabase-sync.js?v=20260611n2show"></script>
+  <script src="card-image-loader.js?v=20260611n"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
   <script src="subscription.js?v=20260610a"></script>
-  <script src="trial-tasks.js?v=20260611i"></script>
+  <script src="trial-tasks.js?v=20260611n"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="mobile.js?v=20260611i"></script>
-  <script src="script.js?v=20260611ievlab"></script>
-  <script src="points-system.js?v=20260611i"></script>
-  <script src="imagegen-prompt-kit.js?v=20260611i"></script>
-  <script src="imagegen-prompt-tools.js?v=20260611i"></script>
-  <script src="feed-layout.js?v=20260611i"></script>
-  <script src="feed-images.js?v=20260611i"></script>
-  <script src="image-gen-feed.js?v=20260611i"></script>
-  <script src="features-draft.js?v=20260611i"></script>
+  <script src="mobile.js?v=20260611n"></script>
+  <script src="script.js?v=20260611n"></script>
+  <script src="points-system.js?v=20260611n"></script>
+  <script src="imagegen-prompt-kit.js?v=20260611n"></script>
+  <script src="imagegen-prompt-tools.js?v=20260611n"></script>
+  <script src="feed-layout.js?v=20260611n"></script>
+  <script src="feed-images.js?v=20260611n"></script>
+  <script src="image-gen-feed.js?v=20260611n"></script>
+  <script src="features-draft.js?v=20260611n"></script>
   <script src="community-gacha.js?v=20260606v"></script>
   <script src="features-assets.js?v=20260610ah"></script>
-  <script src="pwa-install.js?v=20260611i"></script>
+  <script src="pwa-install.js?v=20260611n"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

@@ -418,21 +418,7 @@ export async function pollAndUpdateJob(
           refunded: true
         };
       }
-      const { processMookoPendingSubmit } = await import('./mooko-submit');
-      scheduleBackgroundSubmit(
-        opts,
-        processMookoPendingSubmit(admin, userId, job, upstream, env, {
-          upstreamModel: String(meta.upstreamModel || 'gpt-image-2-pro'),
-          prompt: String(job.prompt || ''),
-          resolution: String(job.resolution || '1k'),
-          quality: String(job.quality || 'standard'),
-          size: typeof meta.size === 'string' ? meta.size : undefined,
-          refImageUrls: Array.isArray(meta.refImageUrls)
-            ? (meta.refImageUrls as string[]).filter(Boolean)
-            : undefined
-        }),
-        'mooko'
-      );
+      // 木瓜仅 Cron 提交（mooko-drain awaitSubmit）；轮询只读 DB，不在 waitUntil 里 POST
       return {
         status: 'processing',
         imageUrl: null,

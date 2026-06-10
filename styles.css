@@ -4749,6 +4749,26 @@ body {
     /* 辅助 */
     .no-image-placeholder { display: none; }
 
+    /* 纯文字卡片：不占图片位 */
+    #cardsContainer .card.card--text-only .card-body {
+      padding-top: 12px;
+    }
+    #cardsContainer .card.card--text-only .card-desc {
+      -webkit-line-clamp: 10;
+      line-clamp: 10;
+      font-size: var(--font-sm);
+      line-height: 1.45;
+      max-height: none;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    #editPanel.edit-panel--text-only #dropArea {
+      display: none;
+    }
+    #editPanel.edit-panel--text-only .image-upload-tools {
+      margin-top: 0;
+    }
+
 .hidden {
   display: none !important;
 }

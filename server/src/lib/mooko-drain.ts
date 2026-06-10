@@ -7,10 +7,14 @@ import { createAdminClient } from './supabase';
 
 /** 木瓜同步 POST 常需 400s+；90s 误判会导致木瓜已扣费、站内却退款 */
 const STUCK_RUNNING_MS = 30 * 60 * 1000;
+/** HTTP waitUntil 遗留的 running（无 taskId）：释放并发槽并退款 */
+const DEAD_RUNNING_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_CONCURRENT = 8;
 
 type DrainContext = {
   waitUntil?: (promise: Promise<unknown>) => void;
+  /** Cron 内必须 await 同步 POST（可达 8 分钟）；waitUntil 在 HTTP 场景仅 ~30s */
+  awaitSubmit?: boolean;
 };
 
 function readMookoMeta(meta: Record<string, unknown>) {
@@ -34,10 +38,22 @@ export function maxConcurrentMookoSubmits(env: Env): number {
   return Math.min(Math.max(n, 1), 16);
 }
 
+function isDeadMookoRunning(meta: Record<string, unknown>): boolean {
+  const m = readMookoMeta(meta);
+  if (m.submitState !== 'running') return false;
+  if (m.taskId || m.syncUrl) return false;
+  const runningMs = Number.isFinite(m.startedAt) ? Date.now() - m.startedAt : 0;
+  return runningMs >= DEAD_RUNNING_MS;
+}
+
 export function countRunningMookoSubmits(jobs: JobRow[]): number {
   return jobs.filter((j) => {
     const meta = (j.meta as Record<string, unknown>) || {};
-    return meta.provider === 'mooko' && readMookoMeta(meta).submitState === 'running';
+    if (meta.provider !== 'mooko') return false;
+    const m = readMookoMeta(meta);
+    if (m.submitState !== 'running') return false;
+    if (isDeadMookoRunning(meta)) return false;
+    return true;
   }).length;
 }
 
@@ -49,6 +65,23 @@ export function pickQueuedMookoJobs(jobs: JobRow[], limit: number): JobRow[] {
       return meta.provider === 'mooko' && readMookoMeta(meta).submitState === 'queued';
     })
     .slice(0, limit);
+}
+
+async function releaseDeadMookoRunningJobs(
+  admin: SupabaseClient,
+  rows: JobRow[]
+): Promise<number> {
+  let n = 0;
+  for (const row of rows) {
+    if (row.status !== 'processing') continue;
+    const meta = (row.meta as Record<string, unknown>) || {};
+    if (meta.provider !== 'mooko') continue;
+    if (!isDeadMookoRunning(meta)) continue;
+    await finalizeFailedJob(admin, row.user_id, row, 'upstream_submit_interrupted');
+    n += 1;
+    console.warn('[mooko-drain] dead running released (refunded)', row.id);
+  }
+  return n;
 }
 
 async function failStuckMookoJobs(
@@ -91,6 +124,7 @@ export async function drainMookoPendingSubmits(
   ctx?: DrainContext
 ): Promise<{
   submitted: number;
+  releasedDead: number;
   failedStuck: number;
   settled: number;
   running: number;
@@ -98,7 +132,7 @@ export async function drainMookoPendingSubmits(
 }> {
   const upstream = upstreamBindingsFromEnv(env);
   if (!upstream.mookoKey) {
-    return { submitted: 0, failedStuck: 0, settled: 0, running: 0, queued: 0 };
+    return { submitted: 0, releasedDead: 0, failedStuck: 0, settled: 0, running: 0, queued: 0 };
   }
 
   const admin = createAdminClient(env);
@@ -112,7 +146,7 @@ export async function drainMookoPendingSubmits(
     .limit(80);
   if (error) {
     console.error('[mooko-drain] list failed', error.message);
-    return { submitted: 0, failedStuck: 0, settled: 0, running: 0, queued: 0 };
+    return { submitted: 0, releasedDead: 0, failedStuck: 0, settled: 0, running: 0, queued: 0 };
   }
 
   const jobs = (rows || []) as JobRow[];
@@ -137,6 +171,26 @@ export async function drainMookoPendingSubmits(
     }
   }
 
+  for (const row of mookoJobs) {
+    if (row.result_image_url) continue;
+    const m = readMookoMeta((row.meta as Record<string, unknown>) || {});
+    if (m.submitState !== 'running' || !m.taskId) continue;
+    try {
+      await processMookoPendingSubmit(admin, row.user_id, row, upstream, env, {
+        upstreamModel: m.upstreamModel,
+        prompt: String(row.prompt || ''),
+        resolution: String(row.resolution || '1k'),
+        quality: String(row.quality || 'standard'),
+        size: m.size,
+        refImageUrls: m.refImageUrls
+      });
+      settled += 1;
+    } catch (e) {
+      console.error('[mooko-drain] resume running failed', row.id, e);
+    }
+  }
+
+  const releasedDead = await releaseDeadMookoRunningJobs(admin, mookoJobs);
   const failedStuck = await failStuckMookoJobs(admin, mookoJobs);
 
   const running = countRunningMookoSubmits(mookoJobs);
@@ -157,14 +211,20 @@ export async function drainMookoPendingSubmits(
     }).catch((e) => {
       console.error('[mooko-drain] submit failed', row.id, e);
     });
-    if (ctx?.waitUntil) ctx.waitUntil(work);
-    else void work;
+    if (ctx?.awaitSubmit) {
+      await work;
+    } else if (ctx?.waitUntil) {
+      ctx.waitUntil(work);
+    } else {
+      void work;
+    }
     submitted += 1;
   }
 
-  if (submitted || failedStuck || settled) {
+  if (submitted || failedStuck || settled || releasedDead) {
     console.log('[mooko-drain] tick', {
       submitted,
+      releasedDead,
       failedStuck,
       settled,
       running: running + submitted,
@@ -174,6 +234,7 @@ export async function drainMookoPendingSubmits(
   }
   return {
     submitted,
+    releasedDead,
     failedStuck,
     settled,
     running: running + submitted,

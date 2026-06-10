@@ -12,7 +12,8 @@ import {
 } from '../../lib/image-upstream';
 import { processFastProviderPendingSubmit } from '../../lib/fast-provider-submit';
 import { processIthinkPendingSubmit } from '../../lib/ithink-submit';
-import { drainMookoPendingSubmits } from '../../lib/mooko-drain';
+import { processMookoPendingSubmit } from '../../lib/mooko-submit';
+import type { JobRow } from '../../lib/generation-jobs';
 import { aspectRatiosForModel } from '../../lib/image-size-options';
 import { providerLabel } from '../../lib/image-models-catalog';
 import {
@@ -185,6 +186,9 @@ function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boole
   }
   if (/upstream_submit_not_started/i.test(s)) {
     return `慢速线未能连接上游（木瓜无消费记录），站内积分已退回；请强刷后重试或换 GrsAI 线路`;
+  }
+  if (/upstream_submit_interrupted/i.test(s)) {
+    return `慢速线提交被中断（木瓜可能已扣费），站内积分已退回；请等 1 分钟后重试，勿重复连点`;
   }
   if (/upstream_submit_stale/i.test(s)) {
     return `慢速线上游长时间无响应（木瓜可能已扣费），站内积分已退回；请换 GrsAI 线路或稍后再试`;
@@ -549,10 +553,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       .from('generation_requests')
       .update({ meta: mookoMeta })
       .eq('id', job.id);
-    kickBackgroundTask(
-      c,
-      drainMookoPendingSubmits(c.env, c.executionCtx ? { waitUntil: c.executionCtx.waitUntil.bind(c.executionCtx) } : undefined)
-    );
+    // 木瓜同步 POST 可达 8 分钟；HTTP waitUntil 仅 ~30s，仅 Cron 提交（每分钟 * * * * *）
   } else if (hasAnyImageUpstream(upstream) && upstreamTaskId) {
     await admin
       .from('generation_requests')
@@ -860,7 +861,47 @@ generateRoutes.get('/jobs/:jobId', async c => {
   assertJobOwner(job, user.id);
 
   const settle = c.req.query('settle') === '1' || c.req.query('settle') === 'true';
+  const upstream = upstreamBindingsFromEnv(c.env);
   const jobMeta = (job.meta as Record<string, unknown>) || {};
+  const mookoProvider = readJobProvider(jobMeta) === 'mooko';
+  if (
+    settle
+    && mookoProvider
+    && job.status === 'processing'
+    && upstream.mookoKey
+  ) {
+    const st = String(jobMeta.mookoSubmitState || '');
+    if (st === 'queued' || st === 'running') {
+      try {
+        await processMookoPendingSubmit(
+          admin,
+          user.id,
+          job as JobRow,
+          upstream,
+          c.env,
+          {
+            upstreamModel: String(jobMeta.upstreamModel || 'gpt-image-2-pro'),
+            prompt: String(job.prompt || ''),
+            resolution: String(job.resolution || '2k'),
+            quality: String(job.quality || 'standard'),
+            size: typeof jobMeta.size === 'string' ? jobMeta.size : undefined,
+            refImageUrls: Array.isArray(jobMeta.refImageUrls)
+              ? (jobMeta.refImageUrls as string[]).filter(Boolean)
+              : undefined
+          }
+        );
+        const { data: refreshed } = await admin
+          .from('generation_requests')
+          .select('*')
+          .eq('id', jobId)
+          .maybeSingle();
+        if (refreshed) Object.assign(job, refreshed);
+      } catch (e) {
+        console.warn('[generate] mooko settle submit failed', jobId, e);
+      }
+    }
+  }
+
   const mookoNeedSettle =
     readJobProvider(jobMeta) === 'mooko'
     && String(jobMeta.mookoSubmitState) === 'done'

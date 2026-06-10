@@ -63,6 +63,39 @@ async function claimMookoSubmit(
 }
 
 /** waitUntil 内直接标记完成，避免依赖后续轮询 HTTP 才入库 */
+async function resumeMookoSubmitFromTaskId(
+  admin: SupabaseClient,
+  userId: string,
+  job: JobRow,
+  upstream: ImageUpstreamBindings,
+  env: Env | undefined,
+  meta: Record<string, unknown>,
+  taskId: string
+): Promise<void> {
+  if (!upstream.mookoKey) return;
+  const polledHttp = await pollMookoHttpImage(upstream.mookoKey, upstream.mookoBase, taskId);
+  if (!polledHttp) return;
+
+  let primaryUrl = polledHttp;
+  let archivedUrls = [polledHttp];
+  try {
+    archivedUrls = await archiveGenerationResultUrls(admin, userId, job.id, [polledHttp], env);
+    primaryUrl = archivedUrls[0] || polledHttp;
+  } catch (e) {
+    console.warn('[mooko] resume archive deferred', job.id, e);
+  }
+
+  const nextMeta = await patchJobMeta(admin, job.id, {
+    upstreamTaskId: taskId,
+    syncImageUrl: primaryUrl,
+    mookoSubmitState: 'done',
+    mookoSubmitError: null,
+    mookoSubmitFinishedAt: new Date().toISOString()
+  });
+  await completeMookoJobWithImage(admin, job.id, nextMeta, primaryUrl, archivedUrls);
+}
+
+/** waitUntil 内直接标记完成，避免依赖后续轮询 HTTP 才入库 */
 async function completeMookoJobWithImage(
   admin: SupabaseClient,
   jobId: string,
@@ -95,8 +128,8 @@ async function pollMookoHttpImage(
   apiKey: string,
   baseUrl: string | undefined,
   taskId: string,
-  attempts = 12,
-  intervalMs = 5000
+  attempts = 45,
+  intervalMs = 4000
 ): Promise<string | null> {
   if (!taskId || isMookoPlaceholderTaskId(taskId)) return null;
   for (let i = 0; i < attempts; i += 1) {
@@ -110,7 +143,7 @@ async function pollMookoHttpImage(
   return null;
 }
 
-/** 木瓜AI：POST 同步阻塞可达 8 分钟，必须在 waitUntil 中跑，轮询请求只触发、不等待 */
+/** 木瓜AI：同步 POST 可达 8 分钟，仅 Cron（awaitSubmit）执行；轮询只读 DB */
 export async function processMookoPendingSubmit(
   admin: SupabaseClient,
   userId: string,
@@ -131,10 +164,27 @@ export async function processMookoPendingSubmit(
   const meta = (live.meta as Record<string, unknown>) || {};
   const submitState = String(meta.mookoSubmitState || '');
   if (submitState === 'done') return;
-  if (typeof meta.upstreamTaskId === 'string' && meta.upstreamTaskId) return;
   if (typeof meta.syncImageUrl === 'string' && meta.syncImageUrl) return;
-  // 同步 POST 可达 8 分钟：running 期间禁止再次提交（此前 90s 重试导致同一任务多次扣费）
-  if (submitState === 'running') return;
+  // 同步 POST 可达 8 分钟：running 期间禁止再次 POST
+  if (submitState === 'running') {
+    const existingTaskId =
+      typeof meta.upstreamTaskId === 'string' && meta.upstreamTaskId.trim()
+        ? meta.upstreamTaskId.trim()
+        : '';
+    if (existingTaskId && !isMookoPlaceholderTaskId(existingTaskId)) {
+      await resumeMookoSubmitFromTaskId(
+        admin,
+        userId,
+        job,
+        upstream,
+        env,
+        meta,
+        existingTaskId
+      );
+    }
+    return;
+  }
+  if (typeof meta.upstreamTaskId === 'string' && meta.upstreamTaskId) return;
   const attempts = Number(meta.mookoSubmitAttempts || 0);
   if (attempts >= 1 || submitState !== 'queued') return;
 
@@ -142,14 +192,23 @@ export async function processMookoPendingSubmit(
   if (!claimed) return;
 
   try {
-    const submitted = await submitMookoImageJob(upstream.mookoKey, upstream.mookoBase, {
-      upstreamModel: params.upstreamModel.trim() || String(meta.upstreamModel || 'gpt-image-2-pro'),
-      prompt: params.prompt,
-      resolution: params.resolution,
-      quality: params.quality,
-      size: params.size,
-      refImageUrls: params.refImageUrls
-    });
+    const submitted = await submitMookoImageJob(
+      upstream.mookoKey,
+      upstream.mookoBase,
+      {
+        upstreamModel: params.upstreamModel.trim() || String(meta.upstreamModel || 'gpt-image-2-pro'),
+        prompt: params.prompt,
+        resolution: params.resolution,
+        quality: params.quality,
+        size: params.size,
+        refImageUrls: params.refImageUrls
+      },
+      {
+        onRequestId: async (taskId) => {
+          await patchJobMeta(admin, job.id, { upstreamTaskId: taskId });
+        }
+      }
+    );
     const submitUrls = submitted.imageUrls?.filter(Boolean) || [];
     const rawUrls = submitUrls.length
       ? submitUrls

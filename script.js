@@ -1040,7 +1040,13 @@
       const group = opts?.group || 'all';
       const tag = opts?.tag || 'all';
       const base = warehouseVisibleCards(cards);
+      const isGenCard = (c) => {
+        if (window.FeatureDraft?.isGeneratedWarehouseCard?.(c)) return true;
+        const tags = Array.isArray(c.tags) ? c.tags : [];
+        return !!(c.genJobId || tags.includes(window.GEN_AUTO_TAG || '图片生成'));
+      };
       let list = base.filter((c) => {
+        if (!isGenCard(c)) return false;
         if (!cardHasDisplayImage(c)) return false;
         const prompt = (c.prompt || '').trim();
         const title = (c.title || '').trim();
@@ -1398,8 +1404,9 @@
       if (payload.publishToCommunity && window.FeatureDraft?.syncCardToCommunity) {
         if (window.FeatureDraft?.isCommunityPublishEligible?.(card)) {
           await window.FeatureDraft.syncCardToCommunity(card, true);
-        } else if (!payload.silentToast) {
-          showToast('已保存到仓库；配图归档中，请稍后在卡片库手动公开到社区');
+          card.publishedToCommunity = true;
+        } else {
+          card.publishedToCommunity = false;
         }
       }
       await saveAllData({ skipCloud: true });
@@ -1410,7 +1417,8 @@
         scheduleCloudPush({ urgent: true });
       }
       if (!payload.silentToast) {
-        showToast(payload.publishToCommunity ? '已保存到仓库并公开到社区' : '已保存到卡片仓库');
+        const published = payload.publishToCommunity && window.FeatureDraft?.isCommunityPublishEligible?.(card);
+        showToast(published ? '已保存到仓库并公开到社区' : '已保存到卡片仓库');
       }
       window.FeatureDraft?.prunePendingGenJobsFromWarehouse?.();
       return { ok: true, cardId: card.id };
@@ -5238,26 +5246,38 @@
 
       if (Array.isArray(finalPayload.cards) && window.SupabaseSync?.getUserId) {
         const uid = window.SupabaseSync.getUserId();
-        for (const c of finalPayload.cards) {
-          if (c?.image || !c?.id || !uid) continue;
-          const guesses = [
-            `${uid}/generated/${String(c.id).replace(/^wh_/, '')}.jpg`,
-            `${uid}/generated/${String(c.id).replace(/^wh_/, '')}.webp`
-          ];
-          for (const p of guesses) {
-            if (window.SupabaseSync?.isPathKnownMissing?.(p)) continue;
-            try {
-              const ref = window.SupabaseSync?.toStorageRef?.(p) || `storage://card-images/${p}`;
-              const ok = await window.SupabaseSync.verifyStorageRef?.(ref, c.id, {
-                quick: true,
-                noDownload: true
-              });
-              if (ok) {
-                c.image = ref;
-                break;
+        const needGuess = finalPayload.cards.filter((c) => c?.id && !c?.image).slice(0, 20);
+        if (needGuess.length) {
+          void (async () => {
+            let patched = 0;
+            for (const c of needGuess) {
+              const guesses = [
+                `${uid}/generated/${String(c.id).replace(/^wh_/, '')}.jpg`,
+                `${uid}/generated/${String(c.id).replace(/^wh_/, '')}.webp`
+              ];
+              for (const p of guesses) {
+                if (window.SupabaseSync?.isPathKnownMissing?.(p)) continue;
+                try {
+                  const ref = window.SupabaseSync?.toStorageRef?.(p) || `storage://card-images/${p}`;
+                  const ok = await window.SupabaseSync.verifyStorageRef?.(ref, c.id, {
+                    quick: true,
+                    noDownload: true
+                  });
+                  if (ok) {
+                    c.image = ref;
+                    patched += 1;
+                    break;
+                  }
+                } catch (e) { /* ignore */ }
               }
-            } catch (e) { /* ignore */ }
-          }
+            }
+            if (patched > 0) {
+              cards = finalPayload.cards;
+              window.__promptHubCards = cards;
+              await saveAllData({ skipCloud: true });
+              refreshWarehouseUI({ softCards: true });
+            }
+          })();
         }
       }
       if (Array.isArray(finalPayload.cards) && window.CloudSyncSafety?.dedupeWarehouseCards) {
@@ -6150,8 +6170,8 @@
           }
         };
 
-        // Supabase 建议在 onAuthStateChange 内 defer 异步 auth/DB 调用，避免死锁导致 UI 不刷新
-        if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+        // 异步 auth，避免 INITIAL_SESSION 拉云端阻塞首屏
+        if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') {
           setTimeout(() => { void runAuthSideEffects(); }, 0);
         } else {
           await runAuthSideEffects();
@@ -6214,13 +6234,23 @@
       initAppNavCollapse();
       window.FeatureAssets?.init?.();
       initBackgroundEffect();
+      const postLogout = localStorage.getItem('promptrepo_post_logout') === '1';
+      const lastUid = localStorage.getItem('promptrepo_last_uid');
+      if (!postLogout && lastUid) {
+        await hydrateWorkspaceFromLocal(lastUid);
+        activeAccountId = lastUid;
+        window.__promptHubCards = cards;
+      } else if (!postLogout && !hadLoggedInAccountLocally()) {
+        await loadGuestWorkspace();
+        window.__promptHubCards = cards;
+      }
+      finishAppBootstrap();
+      refreshAuthMethodUI();
+      refreshAppBuildLabel();
+      void initSupabaseAuth();
       if (window.location.hash.includes('type=recovery') && window.SupabaseSync?.isConfigured?.()) {
         setTimeout(() => openAuthModal('reset'), 400);
       }
-      await initSupabaseAuth();
-      refreshAuthMethodUI();
-      refreshAppBuildLabel();
-      finishAppBootstrap();
       if (/[?&]panel=recharge(?:&|$)/.test(location.search || '')) {
         setTimeout(() => window.openRechargePanel?.(), 600);
         try { history.replaceState(null, '', location.pathname); } catch (e) { /* ignore */ }
@@ -6519,10 +6549,12 @@
       return true;
     }
 
-    function getCardDisplayDesc(card) {
+    function getCardDisplayDesc(card, opts) {
       const prompt = (card.prompt || '').trim();
       if (!prompt) return '暂无提示词内容';
       if (looksLikeCodeSnippet(prompt)) return '点击编辑查看完整内容';
+      const textOnly = opts?.textOnly || !cardHasDisplayImage(card);
+      if (textOnly && prompt.length > 120) return prompt.slice(0, 280) + (prompt.length > 280 ? '…' : '');
       return prompt;
     }
 
@@ -6653,6 +6685,7 @@
         const checked = selectedCardIds.has(card.id);
         if (checked) div.classList.add('batch-selected');
         const showImage = cardHasDisplayImage(card);
+        if (!showImage) div.classList.add('card--text-only');
         const cachedUrl = showImage && window.SupabaseSync?.getListDisplayImageSrc
           ? window.SupabaseSync.getListDisplayImageSrc(card.image, card.id)
           : '';
@@ -6695,7 +6728,7 @@
           ${mediaHtml}
           <div class="card-body">
             ${headHtml}
-            <div class="card-desc">${escapeHtml(getCardDisplayDesc(card))}</div>
+            <div class="card-desc">${escapeHtml(getCardDisplayDesc(card, { textOnly: !showImage }))}</div>
             ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ''}
             ${mobileActions}
           </div>
@@ -8073,6 +8106,9 @@
       const imageAtStart = imageData;
       const img = document.getElementById('previewImage'), p = document.getElementById('dropPlaceholder');
       const removeBtn = document.getElementById('removeImageBtn'), dropArea = document.getElementById('dropArea');
+      const editPanel = document.getElementById('editPanel');
+      const textOnly = !imageData;
+      editPanel?.classList.toggle('edit-panel--text-only', textOnly);
       const previewStale = () =>
         seq !== panelPreviewSeq || cardIdAtStart !== selectedCardId || imageAtStart !== imageData;
       const finishPreviewLoad = () => {
@@ -8399,10 +8435,6 @@
         requireAuth('publish');
         return;
       }
-      if (snap.wantPublish && snap.prompt.length < 15) {
-        statusEl.textContent = '❌ 发布到社区需要提示词至少 15 字';
-        return;
-      }
       const uploadSource = snap.uploadFile || (
         snap.imageValue && !window.SupabaseSync?.isStorageRef?.(snap.imageValue)
           ? snap.imageValue
@@ -8490,6 +8522,7 @@
         }
         const wasNewCard = snap.isNewCard;
         let savedCard;
+        let didPublishToCommunity = false;
         if (!snap.isNewCard) {
           const card = cards.find(c => c.id === snap.cardId);
           if (card) {
@@ -8523,7 +8556,14 @@
           }
         }
         if (savedCard) {
-          savedCard.publishedToCommunity = snap.wantPublish === true;
+          const cardForPublish = {
+            ...savedCard,
+            image: snap.imageRemovalPending ? null : finalImage
+          };
+          const publishIntent = snap.wantPublish === true && !window.isCommunityCollectCard?.(cardForPublish);
+          const canPublish = publishIntent && window.FeatureDraft?.isCommunityPublishEligible?.(cardForPublish);
+          savedCard.publishedToCommunity = canPublish === true;
+          didPublishToCommunity = canPublish === true;
           const uploadMetaEarly = window.__lastCardUploadMeta;
           if (uploadMetaEarly && String(uploadMetaEarly.cardId) === String(savedCard.id)) {
             savedCard.imageUploadOriginal = uploadMetaEarly.original === true;
@@ -8535,14 +8575,14 @@
         window.__promptHubCards = cards;
         setPanelSaveProgress({ text: '同步社区状态…', percent: 90, indeterminate: true });
         if (savedCard && window.FeatureDraft?.applyCardPublishState) {
-          await window.FeatureDraft.applyCardPublishState(savedCard, snap.wantPublish === true);
+          await window.FeatureDraft.applyCardPublishState(savedCard, didPublishToCommunity);
         }
         window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
         setPanelSaveProgress({ text: '保存到本地…', percent: 95, indeterminate: true });
         await saveAllData({ skipCloud: true });
         if (window.SupabaseSync?.isLoggedIn?.()) {
           scheduleCloudPush();
-          if (savedCard && snap.wantPublish) {
+          if (savedCard && didPublishToCommunity) {
             void window.FeatureDraft?.syncMyPostsToPublicFeed?.();
           }
         }

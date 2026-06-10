@@ -124,7 +124,7 @@ export default {
     ctx: ExecutionContext
   ): Promise<void> {
     try {
-      await drainMookoPendingSubmits(env, ctx);
+      await drainMookoPendingSubmits(env, { awaitSubmit: true });
     } catch (e) {
       console.error('[scheduled] mooko-drain failed', e);
     }

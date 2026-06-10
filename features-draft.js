@@ -3063,7 +3063,7 @@
         seen.add(key);
         return true;
       })
-      .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }
 
   function isFollowing(authorId) {
@@ -7075,7 +7075,7 @@
     if (hintEl) {
       hintEl.textContent = user.id === 'guest'
         ? '登录后在此查看你发布到社区的作品'
-        : '你在卡片库公开到社区的作品 · 点击卡片查看详情与点赞数';
+        : '你在卡片库公开到社区的作品 · 按最新发布排序 · 点击卡片查看详情';
     }
     if (user.id === 'guest') {
       window.FeedLayout?.destroyLayout?.('creationsGrid');
@@ -9243,7 +9243,9 @@
       }
       if (i > 0) await new Promise((r) => setTimeout(r, genJobPollDelayMs(ctx, i)));
       const elapsedNow = Date.now() - (ctx?.startedAt || Date.now());
-      const useSettle = isLongRunningGenJob(ctx) && elapsedNow > 60_000;
+      const useSettle = isSlowGenProviderModel(ctx?.model)
+        ? elapsedNow > 20_000
+        : isLongRunningGenJob(ctx) && elapsedNow > 60_000;
       const poll = await window.PromptHubApi.getGenerationJob(jobId, { settle: useSettle });
       if (poll.ok) applyGenPollProgressNote(pendingId, poll.data);
       if (!poll.ok) {
@@ -9906,7 +9908,8 @@
         /* 恢复流程在 recoverRecentGenerationJobs 末尾统一提示 */
       } else if (!silentToast && idx === 1) {
         if (saved) {
-          toast(publish
+          const published = publish && whCard && isCommunityPublishEligible(whCard);
+          toast(published
             ? `已生成并保存到仓库（已公开到社区，-${cost} 积分）`
             : `已生成并保存到仓库（-${cost} 积分）`);
         } else {
@@ -11236,6 +11239,7 @@
     removeCommunityByCardId,
     unpublishCommunityByCardId,
     isCommunityPublishEligible,
+    isGeneratedWarehouseCard,
     readPublishCheckbox,
     setPublishCheckbox,
     syncCardPublishFromPrompt,

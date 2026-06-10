@@ -101,7 +101,52 @@ export function buildMookoApiRequest(params: SubmitParams): MookoApiRequest {
   };
 }
 
-function extractTaskId(payload: unknown): string | null {
+export function extractRequestIdFromText(text: string): string | null {
+  if (!text) return null;
+  for (const key of ['request_id', 'task_id']) {
+    const re = new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`);
+    const m = text.match(re);
+    if (m?.[1]?.trim()) return m[1].trim();
+  }
+  return null;
+}
+
+async function readMookoResponseBody(res: Response): Promise<{ text: string; requestId: string | null }> {
+  const reader = res.body?.getReader();
+  if (!reader) {
+    const text = await res.text();
+    return { text, requestId: extractRequestIdFromText(text) };
+  }
+  const decoder = new TextDecoder();
+  let text = '';
+  let requestId: string | null = null;
+  /** 超大 base64 同步体：拿到 request_id 后截断，改走 /v1/tasks 轮询 gimg URL */
+  const maxBufferBytes = 2_500_000;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      if (!requestId) requestId = extractRequestIdFromText(text);
+      if (requestId && text.length >= maxBufferBytes) {
+        await reader.cancel();
+        break;
+      }
+    }
+  } finally {
+    try {
+      text += decoder.decode();
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!requestId) requestId = extractRequestIdFromText(text);
+  return { text, requestId };
+}
+
+function extractTaskId(payload: unknown, textFallback?: string): string | null {
+  const fromText = textFallback ? extractRequestIdFromText(textFallback) : null;
+  if (fromText) return fromText;
   if (!payload || typeof payload !== 'object') return null;
   const p = payload as Record<string, unknown>;
   for (const key of ['task_id', 'request_id', 'id']) {
@@ -308,7 +353,8 @@ export function parseMookoImagePayload(payload: unknown): { taskId: string | nul
 export async function submitMookoImageJob(
   apiKey: string,
   baseUrl: string | undefined,
-  params: SubmitParams
+  params: SubmitParams,
+  hooks?: { onRequestId?: (taskId: string) => Promise<void> }
 ): Promise<MookoSubmitResult> {
   const token = String(apiKey || '').trim();
   if (!token) {
@@ -333,7 +379,15 @@ export async function submitMookoImageJob(
     res = await doFetch();
   }
 
-  const text = await res.text();
+  const { text, requestId: earlyRequestId } = await readMookoResponseBody(res);
+  if (earlyRequestId && hooks?.onRequestId) {
+    try {
+      await hooks.onRequestId(earlyRequestId);
+    } catch (e) {
+      console.warn('[mooko] early request_id patch failed', earlyRequestId, e);
+    }
+  }
+
   let json: unknown = null;
   try {
     json = text ? JSON.parse(text) : null;
@@ -346,9 +400,24 @@ export async function submitMookoImageJob(
     throw new ApiError(502, 'UPSTREAM_FAILED', msg.slice(0, 480));
   }
 
-  let imageUrls = collectImageUrlsDeep(json, text);
-  const taskId = extractTaskId(json);
-  if (!imageUrls.length && taskId) {
+  let imageUrls = json ? collectImageUrlsDeep(json, text) : scrapeImageUrlsFromRawText(text);
+  const taskId = extractTaskId(json, text) || earlyRequestId;
+  const needsPoll =
+    taskId
+    && !isMookoPlaceholderTaskId(taskId)
+    && (
+      !imageUrls.length
+      || imageUrls.every((u) => /^data:image\//i.test(u))
+      || text.length >= 2_400_000
+    );
+  if (needsPoll) {
+    const polled = await confirmMookoTaskOutcome(apiKey, baseUrl, taskId, {
+      attempts: 45,
+      intervalMs: 4000
+    });
+    if (polled.imageUrls.length) imageUrls = polled.imageUrls;
+    else if (polled.imageUrl) imageUrls = [polled.imageUrl];
+  } else if (!imageUrls.length && taskId) {
     const polled = await fetchMookoTaskOnce(apiKey, baseUrl, taskId);
     if (polled.imageUrls.length) imageUrls = polled.imageUrls;
     else if (polled.imageUrl) imageUrls = [polled.imageUrl];
