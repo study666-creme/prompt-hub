@@ -2938,6 +2938,7 @@
       syncImageGenCommunityFiltersUI,
       renderImageGenMobileResult,
       openImageGenLightboxAt,
+    resolveImageGenFullUrl,
       openImageGenPreview,
       downloadImageGenFeedItem,
       fillFeedPromptToActiveMode,
@@ -9820,6 +9821,54 @@
     };
   }
 
+  /** 生图 Feed / 灯箱 / 侧栏：统一拉 full 原图 URL（禁止落 grid 缩略） */
+  async function resolveImageGenFullUrl(kind, id, feedKey, imgEl) {
+    const fk = feedKey || (kind === 'warehouse' ? 'wh_' + id : id);
+    const assetId = kind === 'warehouse' ? warehouseCardIdFromFeedKey(fk) : id;
+    let rawRef = imgEl?.getAttribute?.('data-image-ref') || '';
+    let jobId = imgEl?.getAttribute?.('data-job-id') || '';
+    let resolveOpts = {};
+    if (kind === 'warehouse') {
+      const c = findWarehouseCardById(assetId);
+      if (c) {
+        rawRef = c.image || rawRef;
+        jobId = String(c.genJobId || jobId).replace(/#\d+$/, '');
+        resolveOpts = window.getCommunityCollectImageResolveOpts?.(c) || {};
+      }
+    } else {
+      const post = findPost(id);
+      if (post) {
+        rawRef = post.image || rawRef;
+        jobId = post.jobId || jobId;
+        resolveOpts = {
+          fromPublicFeed: true,
+          authorId: post.authorId,
+          cardId: post.sourceCardId || post.id
+        };
+      }
+    }
+    const fullOpts = {
+      ...resolveOpts,
+      preferFull: true,
+      listOnly: false,
+      allowFullFallback: true,
+      cardId: resolveOpts.cardId || assetId
+    };
+    let url = '';
+    if (rawRef && isDisplayableImage(rawRef)) {
+      url = await resolveImageDisplayUrl(rawRef, jobId, assetId, fullOpts);
+    }
+    if (!url && jobId && window.PromptHubApi?.getGenerationImageUrl) {
+      try {
+        const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
+        if (r?.ok && r.data?.url) url = r.data.url;
+      } catch (e) {
+        console.warn('[imagegen] generation image url failed', jobId, e);
+      }
+    }
+    return url;
+  }
+
   async function renderImageGenPreview() {
     const body = document.getElementById('imageGenPreviewBody');
     if (!body || !imageGenPreviewId || !imageGenPreviewKind) return;
@@ -9908,13 +9957,26 @@
         const openPreviewLightbox = () => {
           if (typeof window.openLightbox !== 'function') return;
           const feedKey = previewKind === 'warehouse' ? 'wh_' + previewId : previewId;
-          window.openLightbox(body.dataset.previewImageUrl || url, {
-            imageGen: true,
-            feedKey,
-            community: previewKind === 'community',
-            postId: previewKind === 'community' ? previewId : null,
-            cardId: previewKind === 'warehouse' ? previewAssetId : null
-          });
+          void (async () => {
+            const fullUrl = await resolveImageGenFullUrl(
+              previewKind,
+              previewId,
+              feedKey,
+              zoomBtn.querySelector('img')
+            );
+            const src = fullUrl || body.dataset.previewImageUrl || url;
+            if (!src || String(src).startsWith('data:image/svg')) {
+              toast('原图加载中，请稍后再试');
+              return;
+            }
+            window.openLightbox(src, {
+              imageGen: true,
+              feedKey,
+              community: previewKind === 'community',
+              postId: previewKind === 'community' ? previewId : null,
+              cardId: previewKind === 'warehouse' ? previewAssetId : null
+            });
+          })();
         };
         if (!zoomBtn.dataset.previewZoomBound) {
           zoomBtn.dataset.previewZoomBound = '1';
@@ -10198,24 +10260,10 @@
     const feedKey = key || (kind === 'warehouse' ? 'wh_' + id : id);
     const card = document.querySelector(`.imagegen-feed-card[data-feed-id="${CSS.escape(feedKey)}"]`);
     const imgEl = card?.querySelector('.imagegen-feed-thumb-btn img');
-    const rawRef = imgEl?.getAttribute('data-image-ref');
-    const jobId = imgEl?.getAttribute('data-job-id') || '';
     const assetId = kind === 'warehouse' ? warehouseCardIdFromFeedKey(feedKey) : feedKey;
-    let url = imgEl?.src && !imgEl.src.startsWith('data:image/svg') ? imgEl.src : '';
-    const resolveOpts = kind === 'warehouse'
-      ? (() => {
-        const c = findWarehouseCardById(assetId);
-        return c && window.getCommunityCollectImageResolveOpts?.(c) ? window.getCommunityCollectImageResolveOpts(c) : {};
-      })()
-      : (() => {
-        const post = findPost(id);
-        return post ? { fromPublicFeed: true, authorId: post.authorId, cardId: post.sourceCardId || post.id } : {};
-      })();
-    if (rawRef) {
-      url = await resolveImageDisplayUrl(rawRef, jobId, assetId, resolveOpts);
-    }
+    const url = await resolveImageGenFullUrl(kind, id, feedKey, imgEl);
     if (!url || String(url).startsWith('data:image/svg')) {
-      toast('图片尚未加载完成，请稍后再试');
+      toast('原图加载中，请稍后再试');
       return;
     }
     if (typeof window.openLightbox !== 'function') return;
@@ -10224,7 +10272,8 @@
       feedKey,
       community: kind === 'community',
       postId: kind === 'community' ? id : null,
-      cardId: kind === 'warehouse' ? assetId : null
+      cardId: kind === 'warehouse' ? assetId : null,
+      preferFull: true
     });
   }
 
@@ -10862,6 +10911,7 @@
     fillCardToImageGen,
     getImageGenFeedNavItems,
     openImageGenLightboxAt,
+    resolveImageGenFullUrl,
     runImageGenWithPrompt,
     recordImageGenFailure: addFailedGenJob,
     getImageGenRefImages: () => [...imageGenRefImages],

@@ -8717,6 +8717,28 @@
       if (dlBtn) dlBtn.disabled = true;
       lightbox.classList.add('active');
       setViewerFrameLoading(frame, true);
+      const upgradeImageGenFull = () => {
+        if (!opts.imageGen || !opts.feedKey || !window.FeatureDraft?.resolveImageGenFullUrl) return;
+        const navItem = viewerNav.items[viewerNav.index];
+        const kind = navItem?.kind || (opts.community ? 'community' : opts.cardId ? 'warehouse' : null);
+        const navId = navItem?.id || opts.postId || opts.cardId;
+        if (!kind || !navId) return;
+        const cardEl = document.querySelector(
+          `.imagegen-feed-card[data-feed-id="${CSS.escape(opts.feedKey)}"]`
+        );
+        const feedImg = cardEl?.querySelector('.imagegen-feed-thumb-btn img');
+        void window.FeatureDraft.resolveImageGenFullUrl(kind, navId, opts.feedKey, feedImg).then((full) => {
+          if (loadStale() || !full || full === displaySrc) return;
+          if (/data:image\/svg/i.test(full)) return;
+          const looksGrid = /_grid\.|width=\d+&quality=/i.test(displaySrc) || /_grid\.|width=\d+&quality=/i.test(img.src || '');
+          const small = img.naturalWidth > 0 && img.naturalWidth < 720;
+          if (!looksGrid && !small && img.src === full) return;
+          img.onload = onReady;
+          img.onerror = onFail;
+          if (/^https?:\/\//i.test(full)) img.crossOrigin = 'anonymous';
+          img.src = full;
+        });
+      };
       let shown = false;
       const onReady = () => {
         if (shown || loadStale()) return;
@@ -8769,6 +8791,7 @@
       else img.removeAttribute('crossorigin');
       if (img.src === displaySrc && img.complete && img.naturalWidth > 0) {
         onReady();
+        if (opts.imageGen || opts.preferFull) upgradeImageGenFull();
         return;
       }
       img.onerror = () => {
@@ -8783,9 +8806,15 @@
         }
         onFail();
       };
-      img.onload = onReady;
+      img.onload = () => {
+        onReady();
+        if (opts.imageGen || opts.preferFull) upgradeImageGenFull();
+      };
       img.src = displaySrc;
-      if (img.complete && img.naturalWidth > 0) onReady();
+      if (img.complete && img.naturalWidth > 0) {
+        onReady();
+        if (opts.imageGen || opts.preferFull) upgradeImageGenFull();
+      }
     }
 
     function openLightbox(src, opts) {
@@ -8873,7 +8902,7 @@
       if (!cardId && !window.__lightboxCommunityMode) cardId = selectedCardId;
       const card = cardId ? cards.find((c) => c.id === cardId) : null;
       if (card?.image) {
-        await downloadCardImageFile(card.image, card.id, `prompt-hub-${card.id}.jpg`, {
+        await downloadCardImageFile(card.image, card.id, null, {
           triggerBtn: dlBtn
         });
         return;

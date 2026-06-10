@@ -305,6 +305,19 @@ body {
       text-overflow: ellipsis;
       transition: opacity 0.2s, width 0.28s;
     }
+    .app-brand-kazang {
+      display: inline-block;
+      background: linear-gradient(118deg, #7dd3fc 0%, #c4b5fd 42%, #f8fafc 88%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      filter: drop-shadow(0 0 12px rgba(125, 211, 252, 0.22));
+      transition: filter 0.25s ease, transform 0.25s ease;
+    }
+    .app-brand:hover .app-brand-kazang {
+      filter: drop-shadow(0 0 16px rgba(167, 139, 250, 0.35));
+      transform: translateY(-0.5px);
+    }
     body.app-nav-collapsed .app-brand {
       flex: none;
       padding: 4px;
