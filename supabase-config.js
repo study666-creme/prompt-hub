@@ -10,7 +10,8 @@ window.WECHAT_OAUTH_URL = '';
   var h = (typeof location !== 'undefined' && location.hostname) || '';
 
   if (h === 'localhost' || h === '127.0.0.1') {
-    window.SUPABASE_URL = 'http://8.148.193.247:80';
+    // 登录走 Worker 反代（与 API 同域）；anon 需与 server/.dev.vars 里 Supabase 项目一致
+    window.SUPABASE_URL = 'http://127.0.0.1:8787/supabase';
     window.SUPABASE_ANON_KEY =
       'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzgwNzkxMzM5LCJleHAiOjEzMjkxNDMxMzM5fQ.lAaU4MF46Cse5hFcX9QeW9Dp-cG1DRia2t42CYgwHlw';
     try {

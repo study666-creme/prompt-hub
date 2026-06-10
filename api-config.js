@@ -26,6 +26,8 @@
 
     window.API_BASE_URL = 'http://127.0.0.1:8787';
 
+    try { sessionStorage.removeItem('ph_signed_urls_v1'); } catch (e) { /* 勿复用 com 签名 URL */ }
+
     return;
 
   }

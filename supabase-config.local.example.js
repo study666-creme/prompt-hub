@@ -2,8 +2,8 @@
 (function () {
   var h = (typeof location !== 'undefined' && location.hostname) || '';
   if (h !== 'localhost' && h !== '127.0.0.1') return;
-  // 本机直连阿里云（不经 Cloudflare 反代，避免备案/混合内容）
-  window.SUPABASE_URL = 'http://8.148.193.247:80';
-  // anon key 沿用 supabase-config.js；若要换项目只改下面一行：
-  // window.SUPABASE_ANON_KEY = 'eyJ...';
+  // 默认与 supabase-config.js 一致：走本地 Worker 反代
+  window.SUPABASE_URL = 'http://127.0.0.1:8787/supabase';
+  // 若 server/.dev.vars 用的是境外 Supabase，改下面一行：
+  // window.SUPABASE_ANON_KEY = 'sb_publishable_PGhXkT83iWKzx5244I9t4w_HSBITvgF';
 })();

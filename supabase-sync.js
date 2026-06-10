@@ -111,7 +111,8 @@
       const data = JSON.parse(raw);
       const now = Date.now();
       for (const [key, entry] of Object.entries(data || {})) {
-        if (entry?.url && entry.expiresAt > now + 60000 && !isInvalidMediaUrl(entry.url)) {
+        if (entry?.url && entry.expiresAt > now + 60000 && !isInvalidMediaUrl(entry.url)
+          && mediaUrlMatchesCurrentApi(entry.url)) {
           signedUrlCache.set(key, entry);
         }
       }
@@ -159,7 +160,38 @@
   }
 
   loadMissingPathCache();
+
+  function currentApiOrigin() {
+    const api = String(window.API_BASE_URL || '').trim().replace(/\/$/, '');
+    if (!api) return '';
+    try { return new URL(api).origin; } catch (e) { return ''; }
+  }
+
+  function mediaUrlMatchesCurrentApi(url) {
+    if (!url || typeof url !== 'string') return false;
+    const apiOrigin = currentApiOrigin();
+    if (!apiOrigin) return true;
+    try {
+      const u = new URL(url);
+      if (u.pathname.includes('/api/v1/media/')) return u.origin === apiOrigin;
+    } catch (e) { /* ignore */ }
+    return true;
+  }
+
+  function purgeForeignOriginSignCache() {
+    let n = 0;
+    for (const [key, entry] of signedUrlCache.entries()) {
+      if (entry?.url && !mediaUrlMatchesCurrentApi(entry.url)) {
+        signedUrlCache.delete(key);
+        n += 1;
+      }
+    }
+    if (n) persistSessionSignCache();
+    return n;
+  }
+
   loadSessionSignCache();
+  purgeForeignOriginSignCache();
   purgeStaleGridSignCache();
   purgeFakeGridCacheEntries();
 
@@ -1751,7 +1783,8 @@
           await healSessionOnResume();
           r = await window.PromptHubApi.signMediaRef(toStorageRef(fileKey), { variant: v });
         }
-        if (r.ok && r.data?.url && !isIncompleteSignedStorageUrl(r.data.url)) {
+        if (r.ok && r.data?.url && !isIncompleteSignedStorageUrl(r.data.url)
+          && mediaUrlMatchesCurrentApi(r.data.url)) {
           consumeSignBudget(1);
           const ttlSec = Math.max(3600, Number(r.data.expiresIn) || SIGNED_TTL_SEC) - 120;
           signedUrlCache.set(signedCacheKey(fileKey, v), {

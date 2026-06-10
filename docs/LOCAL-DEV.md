@@ -45,7 +45,7 @@ cd D:\prompt-hub
 
 | 文件 | 作用 |
 |------|------|
-| `supabase-config.js` | 生产用 `https://api.prompt-hub.cn/supabase`；**localhost 自动改** `http://8.148.193.247:80` |
+| `supabase-config.js` | 生产用 `https://api.prompt-hubs.com/supabase`（com）或 cn 反代；**localhost 自动改** `http://127.0.0.1:8787/supabase` |
 | `supabase-config.local.js` | 可选覆盖（勿提交、deploy 会自动排除） |
 | `api-config.js` | localhost 自动指 `http://127.0.0.1:8787` |
 | `server/.dev.vars` | Worker 本地密钥（勿提交） |
@@ -78,6 +78,37 @@ cd D:\prompt-hub
 ---
 
 ## 验证
+
+- http://127.0.0.1:8787/health → `ok`
+- 控制台：`window.API_BASE_URL` 应为 `http://127.0.0.1:8787`（**不是** `api.prompt-hubs.com`）
+- 图片仍 401/CORS：确认 **Worker 窗口在跑** → **Ctrl+Shift+R 强刷**（会清 `ph_signed_urls_v1` 生产签名缓存）
+
+---
+
+## 常见问题：本地图片全挂 / CORS 报 api.prompt-hubs.com
+
+**原因**：同一浏览器先开过 **prompt-hubs.com**，Session 里缓存了生产签名 URL；本地 `127.0.0.1:5500` 去拉会被 CORS 拦。
+
+**处理**：
+
+1. 必须 **两个窗口都开着**（`start-dev.ps1` 会开 Worker + 静态站）
+2. 强刷 `http://127.0.0.1:5500`（Ctrl+Shift+R）
+3. 仍不行：F12 → Application → Session Storage → 删 `ph_signed_urls_v1`
+4. 控制台确认：`window.API_BASE_URL === 'http://127.0.0.1:8787'`
+
+**不是**连 `.cn` 网站——本地 API 固定本机 Worker；只是签名缓存可能来自 `.com` 生产。
+
+---
+
+## prompt-hub.cn 与 prompt-hubs.com
+
+| 域名 | 建议 |
+|------|------|
+| **prompt-hubs.com** | 主站（当前主力） |
+| **prompt-hub.cn** | 可保留 DNS，在 Cloudflare **Rules → Redirect Rules** 做 301 到 `.com`（见 `docs/OVERSEAS-FIRST.md`） |
+| **api.prompt-hub.cn** | 旧 API；新功能以 **api.prompt-hubs.com** 为准，暂勿关直到老用户迁移完 |
+
+**Cloudflare 跳转（cn → com）**：Dashboard → 选 `prompt-hub.cn` → **Rules** → **Redirect Rules** → Create rule → When hostname equals `prompt-hub.cn` or `www.prompt-hub.cn` → Redirect to `https://prompt-hubs.com` 301。
 
 控制台：`window.__APP_BUILD__`  
 健康检查（本机 Worker）：http://127.0.0.1:8787/health → `"supabase":"ok"`
