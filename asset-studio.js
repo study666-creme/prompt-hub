@@ -249,11 +249,21 @@
     } catch (e) { /* ignore */ }
   }
 
+  function studioCardKind(card) {
+    if (window.FeatureDraft?.getWarehouseCardKind) {
+      return window.FeatureDraft.getWarehouseCardKind(card);
+    }
+    const img = card?.image;
+    if (!img || !String(img).trim()) return 'text';
+    return window.FeatureDraft?.isUsableWarehouseImage?.(card) ? 'visual' : 'text';
+  }
+
   function cardMatchesFilters(card) {
     if (activeFilters.size === 0) return true;
+    const kind = studioCardKind(card);
     return [...activeFilters].some((f) => {
-      if (f === 'image') return !!card.image;
-      if (f === 'text') return !card.image;
+      if (f === 'image') return kind === 'visual';
+      if (f === 'text') return kind === 'text';
       if (f.startsWith('tag:')) return (card.tags || []).includes(f.slice(4));
       return false;
     });

@@ -707,6 +707,32 @@
   line-height: 1.6;
 }
 
+/* 社区/卡片库空态：相对可视区垂直水平居中 */
+.cards-container.feed-grid-centered,
+#communityGrid.feed-grid-centered,
+#creationsGrid.feed-grid-centered,
+#cardsContainer.feed-grid-centered {
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: min(72vh, calc(100dvh - 220px));
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.cards-container.feed-grid-centered > .feature-empty,
+.cards-container.feed-grid-centered > .community-curated-placeholder,
+.cards-container.feed-grid-centered > .community-feed-empty,
+.cards-container.feed-grid-centered > .warehouse-grid-empty {
+  width: min(520px, 92vw);
+  max-width: 100%;
+  margin: 0;
+  padding: 32px 24px;
+  grid-column: unset !important;
+  flex: 0 0 auto;
+}
+
 /* 鍥剧墖鐢熸垚 */
 .imagegen-credits-box {
   padding: 12px 14px;

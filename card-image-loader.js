@@ -385,6 +385,22 @@
       }
       if (retryWarehouseList()) return;
       if (window.FeatureDraft?.removeBrokenCommunityFeedCard?.(media)) return;
+      const inWarehouseOwn = media.closest('#cardsContainer') && !media.closest('.card[data-community-collect="1"]');
+      if (inWarehouseOwn && isGridFail && ref && !img.dataset.listPrimaryRetried) {
+        const primary = window.SupabaseSync?.primaryImagePath?.(ref, cardId);
+        if (primary && window.SupabaseSync?.resolveListPrimaryFallback) {
+          img.dataset.listPrimaryRetried = '1';
+          void window.SupabaseSync.resolveListPrimaryFallback(primary, cardId, {}).then((url) => {
+            if (url && applyUrlToImg(img, url)) return;
+            media.classList.add('card-media--load-failed');
+          });
+          return;
+        }
+      }
+      if (inWarehouseOwn) {
+        media.classList.add('card-media--load-failed');
+        return;
+      }
       media.classList.add('card-media--load-failed');
     };
 
@@ -593,8 +609,9 @@
       });
     } else if (!lazyOnly && (container.id === 'cardsContainer' || isCommunityContainer(container))) {
       let eager = 0;
-      const firstScreenCap = isCommunityContainer(container) ? 24 : 6;
-      const nearPx = isCommunityContainer(container) ? 960 : 480;
+      const mobileWh = container.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.();
+      const firstScreenCap = isCommunityContainer(container) ? 24 : (mobileWh ? 14 : 16);
+      const nearPx = isCommunityContainer(container) ? 960 : (mobileWh ? 720 : 640);
       imgs.forEach((img) => {
         const cur = img.currentSrc || img.src || '';
         if (isReadySrc(cur, img)) return;
@@ -623,10 +640,12 @@
       const rootMargin = lazyOnly
         ? (container.id === 'imageGenFeed'
           ? '240px 0px'
-          : container.id === 'cardsContainer' ? '100px 0px' : '140px 0px')
+          : container.id === 'cardsContainer' ? '180px 0px' : '140px 0px')
         : isCommunityContainer(container)
           ? '360px 0px'
-          : '160px 0px';
+          : (container.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.()
+            ? '240px 0px'
+            : '160px 0px');
       observer = new IntersectionObserver(onIntersect, {
         root: scrollRootFor(container) || null,
         rootMargin,
@@ -695,9 +714,9 @@
 
   function bindSignedContainer(container, items) {
     if (!container) return Promise.resolve();
-    window.SupabaseSync?.patchImageSrcFromCache?.(container, { visibleFirst: true, max: 4 });
+    window.SupabaseSync?.patchImageSrcFromCache?.(container, { visibleFirst: true, max: 8 });
     const signP = prefetchItemsForContainer(container, items).then(() => {
-      window.SupabaseSync?.patchImageSrcFromCache?.(container, { visibleFirst: true, max: 6 });
+      window.SupabaseSync?.patchImageSrcFromCache?.(container, { visibleFirst: true, max: 14 });
     });
     setContainerSignReady(container, signP);
     observeContainer(container);
@@ -729,6 +748,26 @@
     observeContainer(container);
   }
 
+  function boostWarehouseImages(container, max = 20) {
+    if (!container || container.id !== 'cardsContainer') return;
+    let n = 0;
+    feedImagesIn(container).forEach((img) => {
+      if (n >= max) return;
+      const cur = img.currentSrc || img.src || '';
+      if (isReadySrc(cur, img) && img.complete && img.naturalWidth > 8) return;
+      const hit = cachedUrl(img.getAttribute('data-image-ref'), cardIdFromImg(img), img);
+      if (hit) {
+        applyUrlToImg(img, hit);
+        return;
+      }
+      if (isImgNearViewport(img, 900)) {
+        n += 1;
+        loadImg(img);
+      }
+    });
+    observeContainer(container);
+  }
+
   document.addEventListener('visibilitychange', syncVisibilityPause);
 
   window.CardImageLoader = {
@@ -738,6 +777,7 @@
     bindFeed,
     applyUrlToImg,
     boostCommunityFeedImages,
+    boostWarehouseImages,
     patchVisibleFromCache(container) {
       window.SupabaseSync?.patchImageSrcFromCache?.(container);
       observeContainer(container);

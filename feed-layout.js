@@ -29,6 +29,8 @@
   const layoutCooldown = {};
   const feedGridImageRelayoutBound = {};
   const resizeRelayoutBound = {};
+  const visibilityWaitTimers = {};
+  const widthRetryCounts = {};
   let masonryRelayoutTimer = null;
   let masonryRelayoutPending = 0;
 
@@ -70,7 +72,36 @@
       || container;
   }
 
+  function getFeedPageEl(container) {
+    return container?.closest?.('.app-page') || null;
+  }
+
+  function isFeedPageVisible(container) {
+    const page = getFeedPageEl(container);
+    return !page || page.classList.contains('active');
+  }
+
+  function deferLayoutUntilVisible(containerId, opts = {}, attempt = 0) {
+    clearTimeout(visibilityWaitTimers[containerId]);
+    if (attempt > 48) return;
+    visibilityWaitTimers[containerId] = setTimeout(() => {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      if (!isFeedPageVisible(container)) {
+        deferLayoutUntilVisible(containerId, opts, attempt + 1);
+        return;
+      }
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!document.getElementById(containerId)) return;
+          schedule(containerId, { ...opts, force: true, immediate: true, recalcCols: true });
+        });
+      });
+    }, attempt === 0 ? 0 : 90);
+  }
+
   function getMeasureInnerWidth(container) {
+    if (!isFeedPageVisible(container)) return 0;
     const measure = getMeasureEl(container);
     if (!measure) return 0;
     const style = getComputedStyle(measure);
@@ -88,10 +119,43 @@
 
   function getLayoutWidth(container) {
     if (!container) return 0;
+    if (!isFeedPageVisible(container)) return 0;
     const st = getComputedStyle(container);
     const w = container.clientWidth - parseFloat(st.paddingLeft) - parseFloat(st.paddingRight);
     if (w > 80) return w;
     return getMeasureInnerWidth(container);
+  }
+
+  function isCommunityMasonryStale(container) {
+    if (!container || container.id !== 'communityGrid') return false;
+    if (!container.classList.contains('masonry-ready')) return false;
+    const cards = [...container.querySelectorAll(':scope > .card')];
+    if (cards.length < 3) return false;
+    const cw = getLayoutWidth(container);
+    if (cw < 280) return false;
+    const cols = getColumnCount(container);
+    const gap = getGaps().colGap;
+    const expectedMinW = Math.max(100, Math.floor((cw - gap * (cols - 1)) / cols) - 8);
+    const sample = cards.slice(0, Math.min(12, cards.length));
+    let narrow = 0;
+    let sameLeft = 0;
+    const firstLeft = parseFloat(sample[0]?.style?.left) || 0;
+    for (const card of sample) {
+      const w = card.offsetWidth || parseFloat(card.style.width) || 0;
+      if (w > 0 && w < expectedMinW * 0.65) narrow += 1;
+      const left = parseFloat(card.style.left) || 0;
+      if (Math.abs(left - firstLeft) < 6) sameLeft += 1;
+    }
+    return narrow >= 3 || (sameLeft >= 4 && sample.length >= 4);
+  }
+
+  function repairCommunityMasonry(containerId = 'communityGrid') {
+    const container = document.getElementById(containerId);
+    if (!container || !isCommunityMasonryStale(container)) return false;
+    resetMasonryCardStyles(container, containerId);
+    container.classList.remove('masonry-ready', 'cards-grid-primed');
+    schedule(containerId, { force: true, immediate: true, recalcCols: true });
+    return true;
   }
 
   function getColumnCount(container) {
@@ -410,6 +474,14 @@
   function runMasonry(containerId, opts = {}) {
     const container = document.getElementById(containerId);
     if (!container) return;
+    if (!isFeedPageVisible(container)) {
+      deferLayoutUntilVisible(containerId, opts);
+      return;
+    }
+    if (containerId === 'communityGrid' && isCommunityMasonryStale(container)) {
+      resetMasonryCardStyles(container, containerId);
+      container.classList.remove('masonry-ready', 'cards-grid-primed');
+    }
     if (containerId === 'creationsGrid') {
       layoutFlex('creationsGrid', { force: true, forceReflow: true });
       return;
@@ -441,9 +513,13 @@
       ? getLayoutWidth(container)
       : container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     if (innerW < 200) {
-      schedule(containerId, { force: true });
+      const key = containerId + ':w';
+      widthRetryCounts[key] = (widthRetryCounts[key] || 0) + 1;
+      if (widthRetryCounts[key] > 28) return;
+      deferLayoutUntilVisible(containerId, opts);
       return;
     }
+    widthRetryCounts[containerId + ':w'] = 0;
     const cols = isProfile
       ? Math.min(4, d().getCardColumns?.() ?? 3)
       : getColumnCount(container);
@@ -524,6 +600,11 @@
   }
 
   function schedule(containerId, opts = {}) {
+    const container = document.getElementById(containerId);
+    if (container && !isFeedPageVisible(container)) {
+      deferLayoutUntilVisible(containerId, opts);
+      return;
+    }
     if (useFlexColumns(containerId)) {
       if (opts.fromImage) return;
       const container = document.getElementById(containerId);
@@ -742,6 +823,8 @@
     let timer = null;
     let lastW = 0;
     const obs = new ResizeObserver((entries) => {
+      const grid = document.getElementById(containerId);
+      if (!grid || !isFeedPageVisible(grid)) return;
       const w = entries[0]?.contentRect?.width ?? watchEl.clientWidth;
       if (w < 80 || Math.abs(w - lastW) < 4) return;
       const delta = Math.abs(w - lastW);
@@ -828,6 +911,9 @@
     scheduleMasonryRelayout,
     relayoutAll,
     repairCreations,
+    repairCommunityMasonry,
+    isCommunityMasonryStale,
+    isFeedPageVisible,
     repairFlex,
     syncColumnCount,
     ensureColumnLayout,

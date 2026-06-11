@@ -49,7 +49,7 @@
   const USE_STORAGE_TRANSFORM = false;
   const GRID_SIGN_CONCURRENCY = 12;
   const WAREHOUSE_PREFETCH_CARD_CAP = 18;
-  const WAREHOUSE_VISIBLE_SIGN_CAP = 12;
+  const WAREHOUSE_VISIBLE_SIGN_CAP = 18;
   const WAREHOUSE_FAST_FIRST = 32;
   const SS_SIGN_CACHE = 'ph_signed_urls_v1';
   const SS_GRID_DONE = 'ph_grid_done_v1';
@@ -3430,11 +3430,13 @@
   async function downloadCardFullResBlob(card, opts = {}) {
     if (!card?.image) return null;
     const skipRepair = opts.skipRepair === true;
-    const minBytes = expectedMinFullImageBytes(card.resolution);
+    const resKey = opts.resolution || card.resolution || '1k';
+    const minBytes = expectedMinFullImageBytes(resKey);
     const jobId = card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null;
     const dlOpts = { jobId, minBytes, preferLargest: !!jobId };
     let blob = await downloadCardStorageBlob(card.image, card.id, dlOpts);
-    const tooSmall = minBytes > 0 && blob && blob.size < minBytes;
+    const usableFloor = Math.min(minBytes || 0, 80 * 1024);
+    const tooSmall = minBytes > 0 && blob && blob.size < usableFloor;
     if (blob && !tooSmall) return blob;
     if (skipRepair && !tooSmall) return blob;
     if (isGeneratedWarehouseCard(card) && jobId) {
@@ -4090,6 +4092,7 @@
     clearPathMissingForCard,
     markGridFetchFailed,
     shouldSignGridPath,
+    resolveListPrimaryFallback,
     cardImageStillResolvable,
     isLegacyImageRestorePhase,
     shouldShowCardInWarehouse,

@@ -535,7 +535,7 @@
   async function getGenerationJob(jobId, opts) {
     const settle = opts?.settle ? '?settle=1' : '';
     return request('GET', `/api/v1/generate/jobs/${encodeURIComponent(jobId)}${settle}`, null, {
-      timeoutMs: opts?.settle ? Math.max(API_JOB_POLL_TIMEOUT_MS, 90000) : API_JOB_POLL_TIMEOUT_MS
+      timeoutMs: opts?.settle ? Math.max(API_JOB_POLL_TIMEOUT_MS, 120000) : API_JOB_POLL_TIMEOUT_MS
     });
   }
 

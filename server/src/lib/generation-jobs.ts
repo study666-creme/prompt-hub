@@ -8,14 +8,16 @@ import {
   type ImageUpstreamBindings
 } from './image-upstream';
 import { ApiError } from './errors';
+import { resolveMookoHttpImageFromTask } from './mooko-submit';
 import {
   archiveGenerationResultUrls,
+  isParseableDataImageUrl,
   archiveRemoteImage,
   isDataImageUrl,
   isStorageRef,
   toStorageRef
 } from './image-archive';
-import { storageObjectExistsLight } from './media-cdn';
+import { findFirstExistingStoragePath } from './media-cdn';
 
 const GEN_IMAGE_BUCKET = 'card-images';
 import { type DebitSplit, deductUserCredits, refundUserCredits } from './membership-credits';
@@ -136,30 +138,26 @@ export function slowProviderProgressNote(
 ): string | null {
   if (provider === 'mooko') {
     const st = String(meta.mookoSubmitState || '');
-    if (st === 'queued') return '已扣积分，排队连接慢速线（约 1 分钟内发出）…';
+    if (st === 'queued') return '已扣积分，排队生成中（约 1 分钟内发出）…';
     if (st === 'running') {
-      return '慢速线生图中（约 2–12 分钟，账单完成后才显示）';
+      return '正在生成中（约 2–12 分钟，请耐心等待）';
     }
     if (st === 'done' && !meta.syncImageUrl && !meta.upstreamTaskId) {
-      return '慢速线已响应，正在入库…';
+      return '生成完成，正在入库…';
     }
-    if (st === 'done') return '慢速线已完成，正在同步到仓库…';
+    if (st === 'done') return '生成完成，正在同步到仓库…';
   }
   if (provider === 'ithink') {
     const st = String(meta.ithinkSubmitState || '');
-    if (st === 'queued') return '已扣积分，正在提交 ThinkAI 慢速线…';
-    if (st === 'running') return 'ThinkAI 慢速生图中（约 2–5 分钟）…';
-    if (st === 'done') return 'ThinkAI 已完成，正在入库…';
+    if (st === 'queued') return '已扣积分，正在提交生成任务…';
+    if (st === 'running') return '正在生成中（约 2–5 分钟）…';
+    if (st === 'done') return '生成完成，正在入库…';
   }
   if (provider === 'grsai' || provider === 'apimart') {
     const st = String(meta.fastSubmitState || '');
-    if (st === 'queued') {
-      return provider === 'apimart' ? '已扣积分，正在连接备用线路…' : '已扣积分，正在连接上游…';
-    }
-    if (st === 'running') {
-      return provider === 'apimart' ? '备用线路提交中，请稍候…' : '上游提交中，请稍候…';
-    }
-    if (st === 'done' && !meta.upstreamTaskId) return '上游已响应，正在同步…';
+    if (st === 'queued') return '已扣积分，正在提交…';
+    if (st === 'running') return '提交中，请稍候…';
+    if (st === 'done' && !meta.upstreamTaskId) return '已响应，正在同步…';
   }
   return null;
 }
@@ -213,7 +211,7 @@ export async function pollAndUpdateJob(
       if (polled.status === 'completed' && polled.imageUrl) {
         return completeJobFromPoll(admin, userId, job, polled, env);
       }
-      const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+      const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id, env);
       if (storedArchive) {
         return finishJobFromStoredArchive(admin, userId, job, storedArchive);
       }
@@ -284,7 +282,7 @@ export async function pollAndUpdateJob(
     };
   }
   if (job.status === 'failed') {
-    const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+    const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id, env);
     if (storedArchive) {
       return finishJobFromStoredArchive(admin, userId, job, storedArchive);
     }
@@ -338,9 +336,15 @@ export async function pollAndUpdateJob(
       if (typeof raw !== 'string') return;
       const url = raw.trim();
       if (!url || seen.has(url)) return;
-      if (!/^https?:\/\//i.test(url) && !/^data:image\//i.test(url)) return;
-      seen.add(url);
-      out.push(url);
+      if (/^https?:\/\//i.test(url)) {
+        seen.add(url);
+        out.push(url);
+        return;
+      }
+      if (isParseableDataImageUrl(url)) {
+        seen.add(url);
+        out.push(url);
+      }
     };
     push(meta.syncImageUrl);
     if (Array.isArray(meta.mookoSubmitImageUrls)) {
@@ -349,17 +353,60 @@ export async function pollAndUpdateJob(
     return out;
   })();
   let urlsToComplete = mookoStoredUrls;
-  if (urlsToComplete.some(isDataImageUrl)) {
-    try {
-      urlsToComplete = await archiveGenerationResultUrls(admin, userId, job.id, urlsToComplete, env);
-      const syncPatch: Record<string, unknown> = {
-        syncImageUrl: urlsToComplete[0]
-      };
-      if (urlsToComplete.length > 1) syncPatch.mookoSubmitImageUrls = urlsToComplete;
+  if (
+    provider === 'mooko'
+    && taskId
+    && !isMookoPlaceholderTaskId(taskId)
+    && !urlsToComplete.length
+    && upstream.mookoKey
+  ) {
+    const pollAttempts = opts?.quick ? 6 : 40;
+    const recovered = await resolveMookoHttpImageFromTask(
+      upstream.mookoKey,
+      upstream.mookoBase,
+      taskId,
+      { attempts: pollAttempts, intervalMs: 3000 }
+    );
+    if (recovered) {
+      urlsToComplete = [recovered];
       await admin
         .from('generation_requests')
-        .update({ meta: { ...meta, ...syncPatch } })
+        .update({
+          meta: { ...meta, syncImageUrl: recovered, mookoAwaitPoll: false }
+        })
         .eq('id', job.id);
+    }
+  }
+  if (urlsToComplete.some(isDataImageUrl)) {
+    try {
+      if (provider === 'mooko') {
+        const { finalizeMookoArchivedImage } = await import('./mooko-submit');
+        const raw = urlsToComplete.find(isDataImageUrl) || urlsToComplete[0];
+        await finalizeMookoArchivedImage(admin, userId, job.id, meta, raw, env);
+        const { data: fresh } = await admin
+          .from('generation_requests')
+          .select('*')
+          .eq('id', job.id)
+          .maybeSingle();
+        if (fresh?.status === 'completed' && fresh.result_image_url) {
+          return {
+            status: 'completed',
+            imageUrl: fresh.result_image_url as string,
+            errorMessage: null,
+            refunded: false
+          };
+        }
+      } else {
+        urlsToComplete = await archiveGenerationResultUrls(admin, userId, job.id, urlsToComplete, env);
+        const syncPatch: Record<string, unknown> = {
+          syncImageUrl: urlsToComplete[0]
+        };
+        if (urlsToComplete.length > 1) syncPatch.mookoSubmitImageUrls = urlsToComplete;
+        await admin
+          .from('generation_requests')
+          .update({ meta: { ...meta, ...syncPatch } })
+          .eq('id', job.id);
+      }
     } catch (e) {
       console.warn('[generation] archive syncImageUrl before complete failed', job.id, e);
       return {
@@ -427,9 +474,51 @@ export async function pollAndUpdateJob(
         progressNote: slowProviderProgressNote(meta, provider)
       };
     }
+    if (
+      (submitState === 'done' || submitState === 'running')
+      && taskId
+      && !isMookoPlaceholderTaskId(taskId)
+      && upstream.mookoKey
+      && !syncImageUrl
+    ) {
+      const recovered = await resolveMookoHttpImageFromTask(
+        upstream.mookoKey,
+        upstream.mookoBase,
+        taskId,
+        { attempts: opts?.quick ? 8 : 35, intervalMs: 3000 }
+      );
+      if (recovered) {
+        return completeJobFromPoll(
+          admin,
+          userId,
+          job,
+          { imageUrl: recovered, imageUrls: [recovered] },
+          env
+        );
+      }
+    }
     if (submitState === 'running') {
       const startedAt = Date.parse(String(meta.mookoSubmitStartedAt || ''));
       const runningMs = Number.isFinite(startedAt) ? Date.now() - startedAt : queuedMs;
+      if (runningMs > 3 * 60 * 1000 && !syncImageUrl) {
+        const { tryCompleteMookoFromStoredArchive } = await import('./mooko-submit');
+        const recovered = await tryCompleteMookoFromStoredArchive(admin, userId, job.id, env);
+        if (recovered) {
+          const { data: fresh } = await admin
+            .from('generation_requests')
+            .select('*')
+            .eq('id', job.id)
+            .maybeSingle();
+          if (fresh?.status === 'completed' && fresh.result_image_url) {
+            return {
+              status: 'completed',
+              imageUrl: fresh.result_image_url as string,
+              errorMessage: null,
+              refunded: false
+            };
+          }
+        }
+      }
       if (runningMs > 28 * 60 * 1000 && !syncImageUrl && !taskId) {
         await finalizeFailedJob(admin, userId, job, 'upstream_submit_stale');
         return {
@@ -438,6 +527,47 @@ export async function pollAndUpdateJob(
           errorMessage: 'upstream_submit_stale',
           refunded: true
         };
+      }
+      if (runningMs > 12 * 60 * 1000 && !syncImageUrl && taskId) {
+        await finalizeFailedJob(admin, userId, job, 'upstream_image_archive_failed');
+        return {
+          status: 'failed',
+          imageUrl: null,
+          errorMessage: 'upstream_image_archive_failed',
+          refunded: true
+        };
+      }
+      const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id, env);
+      if (storedArchive) {
+        return finishJobFromStoredArchive(admin, userId, job, storedArchive);
+      }
+      if (typeof meta.syncImageUrl === 'string' && meta.syncImageUrl.trim()) {
+        try {
+          const { finalizeMookoArchivedImage } = await import('./mooko-submit');
+          await finalizeMookoArchivedImage(
+            admin,
+            userId,
+            job.id,
+            meta,
+            String(meta.syncImageUrl).trim(),
+            env
+          );
+          const { data: fresh } = await admin
+            .from('generation_requests')
+            .select('*')
+            .eq('id', job.id)
+            .maybeSingle();
+          if (fresh?.status === 'completed' && fresh.result_image_url) {
+            return {
+              status: 'completed',
+              imageUrl: fresh.result_image_url as string,
+              errorMessage: null,
+              refunded: false
+            };
+          }
+        } catch (e) {
+          console.warn('[generation] mooko running finalize failed', job.id, e);
+        }
       }
       return {
         status: 'processing',
@@ -462,23 +592,6 @@ export async function pollAndUpdateJob(
       };
     }
     if (
-      submitState === 'running'
-      && !syncImageUrl
-      && queuedMs > 90 * 1000
-    ) {
-      await admin
-        .from('generation_requests')
-        .update({
-          meta: {
-            ...meta,
-            ithinkSubmitState: 'queued',
-            ithinkSubmitRetryAt: new Date().toISOString()
-          }
-        })
-        .eq('id', job.id);
-      submitState = 'queued';
-    }
-    if (
       (submitState === 'queued' || submitState === 'running')
       && queuedMs > staleMs
       && !syncImageUrl
@@ -491,20 +604,7 @@ export async function pollAndUpdateJob(
         refunded: true
       };
     }
-    if (submitState === 'queued') {
-      const { processIthinkPendingSubmit } = await import('./ithink-submit');
-      scheduleBackgroundSubmit(
-        opts,
-        processIthinkPendingSubmit(admin, userId, job, upstream, env, {
-          upstreamModel: String(meta.upstreamModel || 'gpt-image-2-pro'),
-          prompt: String(job.prompt || ''),
-          resolution: '1k',
-          quality: String(job.quality || 'standard'),
-          size: typeof meta.size === 'string' ? meta.size : undefined
-        }),
-        'ithink'
-      );
-    }
+    /** Think 仅 Cron（ithink-drain awaitSubmit）与 settle=1 提交；轮询只读 DB */
     return {
       status: 'processing',
       imageUrl: null,
@@ -625,7 +725,7 @@ export async function pollAndUpdateJob(
         };
       }
     }
-    const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+    const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id, env);
     if (storedArchive) {
       return finishJobFromStoredArchive(admin, userId, job, storedArchive);
     }
@@ -671,7 +771,7 @@ export async function pollAndUpdateJob(
     if (late.status === 'completed' && late.imageUrl) {
       return completeJobFromPoll(admin, userId, job, late, env);
     }
-    const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+    const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id, env);
     if (storedArchive) {
       return finishJobFromStoredArchive(admin, userId, job, storedArchive);
     }
@@ -700,7 +800,7 @@ export async function pollAndUpdateJob(
     }
   }
 
-  const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+  const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id, env);
   if (storedArchive) {
     return finishJobFromStoredArchive(admin, userId, job, storedArchive);
   }
@@ -929,7 +1029,7 @@ async function tryRecoverJobFromUpstream(
     intervalMs: 8000
   });
   if (polled.status !== 'completed' || !polled.imageUrl) {
-    const stored = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+    const stored = await tryRestoreJobImageFromStorage(admin, userId, job.id, env);
     if (stored) return finishJobFromStoredArchive(admin, userId, job, stored);
     return null;
   }
@@ -947,11 +1047,12 @@ async function tryRecoverJobFromUpstream(
 async function tryRestoreJobImageFromStorage(
   admin: SupabaseClient,
   userId: string,
-  jobId: string
+  jobId: string,
+  env?: Env
 ): Promise<string | null> {
-  const path = `${userId}/generated/${jobId}.jpg`;
-  if (!(await storageObjectExistsLight(admin, path, GEN_IMAGE_BUCKET))) return null;
-  return toStorageRef(path);
+  const paths = ['jpg', 'png', 'webp'].map((ext) => `${userId}/generated/${jobId}.${ext}`);
+  const found = await findFirstExistingStoragePath(admin, paths, GEN_IMAGE_BUCKET, env);
+  return found ? toStorageRef(found) : null;
 }
 
 async function finishJobFromStoredArchive(
@@ -1014,7 +1115,7 @@ async function ensureJobImageArchived(
     return stored;
   } catch (e) {
     console.warn('[generation] archive pending', job.id, e);
-    const stored = await tryRestoreJobImageFromStorage(admin, userId, job.id);
+    const stored = await tryRestoreJobImageFromStorage(admin, userId, job.id, env);
     if (stored) {
       await admin
         .from('generation_requests')

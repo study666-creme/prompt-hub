@@ -11,8 +11,9 @@ import {
   upstreamBindingsFromEnv
 } from '../../lib/image-upstream';
 import { processFastProviderPendingSubmit } from '../../lib/fast-provider-submit';
+import { drainIthinkPendingSubmits } from '../../lib/ithink-drain';
 import { processIthinkPendingSubmit } from '../../lib/ithink-submit';
-import { processMookoPendingSubmit } from '../../lib/mooko-submit';
+import { tryCompleteMookoFromStoredArchive } from '../../lib/mooko-submit';
 import type { JobRow } from '../../lib/generation-jobs';
 import { aspectRatiosForModel } from '../../lib/image-size-options';
 import { providerLabel } from '../../lib/image-models-catalog';
@@ -164,13 +165,22 @@ function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boole
     return `提示词可能触发内容审核，请调整描述后重试${refundNote}`;
   }
   if (/insufficient balance|insufficient credits/i.test(s)) {
-    return `GrsAI 服务商账户积分不足（不是您的站内积分），站长需登录 grsai.com 充值${refundNote}`;
+    return `生图服务商账户余额不足（不是您的站内积分），请联系站长充值${refundNote}`;
   }
-  if (/apikey|api.key|invalid.*api.*key|unauthorized|401/i.test(s)) {
-    return `生图 API 密钥无效（apikey error）。站长请在 server 目录执行：npx wrangler secret put IMAGE_API_KEY，填入 GrsAI 控制台里的 Key${refundNote}`;
+  if (/upstream_auth_failed|无效.*令牌|invalid.*token/i.test(s)) {
+    return `生图令牌无效或已过期，请联系站长在 thinkai.tv 重新创建并勾选 OpenAI-image2 生图分组${refundNote}`;
+  }
+  if (/upstream_submit_not_configured/i.test(s)) {
+    return `生图服务未配置，请联系站长${refundNote}`;
+  }
+  if (/upstream_model_rejected/i.test(s)) {
+    return `当前模型暂不可用，请换其他模型或联系站长${refundNote}`;
+  }
+  if (/apikey|api.key|invalid.*api.*key|unauthorized|401|无效.*令牌|invalid.*token/i.test(s)) {
+    return `生图服务认证失败，请联系站长${refundNote}`;
   }
   if (/不存在该模型|model.*not.*exist|unknown model|invalid model/i.test(s)) {
-    return `上游返回模型相关提示（任务可能已在 GrsAI 排队，请强刷页面查看进度）${refundNote}`;
+    return `模型相关提示，任务可能仍在排队，请强刷页面查看进度${refundNote}`;
   }
   if (/content.*policy|safety|moderation|blocked|违规|敏感/i.test(s)) {
     if (opts?.violationNoRefund) {
@@ -179,19 +189,22 @@ function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boole
     return `提示词可能触发内容审核，请调整描述后重试${refundNote}`;
   }
   if (/upstream_timeout/i.test(s)) {
-    return `生图排队超时（香蕉/即梦约 40 分钟，其它约 22 分钟）${debited ? '，积分已全额退回' : ''}；若 GrsAI 后台仍显示进行中可刷新页面尝试恢复`;
+    return `生图排队超时${debited ? '，积分已全额退回' : ''}；若仍在生成中可刷新页面尝试恢复`;
   }
   if (/upstream_no_image/i.test(s)) {
     return `上游未返回图片${debited ? '，积分已全额退回' : ''}，请重试`;
   }
+  if (/upstream_image_archive_failed|invalid_data_url|invalid base64/i.test(s)) {
+    return `图片入库失败${debited ? '，积分已全额退回' : ''}，请重试`;
+  }
   if (/upstream_submit_not_started/i.test(s)) {
-    return `慢速线未能连接上游（木瓜无消费记录），站内积分已退回；请强刷后重试或换 GrsAI 线路`;
+    return `未能连接生图服务，积分已退回；请强刷后重试或换其他模型`;
   }
   if (/upstream_submit_interrupted/i.test(s)) {
-    return `慢速线提交被中断（木瓜可能已扣费），站内积分已退回；请等 1 分钟后重试，勿重复连点`;
+    return `提交被中断，积分已退回；请等 1 分钟后重试，勿重复连点`;
   }
   if (/upstream_submit_stale/i.test(s)) {
-    return `慢速线上游长时间无响应（木瓜可能已扣费），站内积分已退回；请换 GrsAI 线路或稍后再试`;
+    return `生图长时间无响应，积分已退回；请稍后再试或换其他模型`;
   }
   if (/missing_task_id/i.test(s)) {
     return `任务提交异常${debited ? '，积分已全额退回' : ''}，请重试`;
@@ -403,7 +416,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     throw new ApiError(
       503,
       'SERVICE_UNAVAILABLE',
-      `${providerLabel(lineProvider)} 线路未开通，请换用其他线路或联系站长配置密钥`
+      '该模型暂不可用，请换用其他模型或联系站长'
     );
   }
 
@@ -527,22 +540,13 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       .from('generation_requests')
       .update({ meta: ithinkMeta })
       .eq('id', job.id);
-    const submitParams = {
-      upstreamModel: c.env.ITHINK_UPSTREAM_MODEL?.trim() || resolved.upstream,
-      prompt: promptText,
-      resolution: '1k',
-      quality: parsed.data.quality,
-      size: parsed.data.size
-    };
-    if (c.executionCtx) {
-      c.executionCtx.waitUntil(
-        processIthinkPendingSubmit(admin, user.id, job, upstream, c.env, submitParams).catch((e) => {
-          console.error('[generate] ithink waitUntil failed', job.id, e);
-        })
-      );
-    } else {
-      void processIthinkPendingSubmit(admin, user.id, job, upstream, c.env, submitParams);
-    }
+    /** Think 同步 POST 约 50–90s；HTTP waitUntil 易掐断，仅 Cron await 提交 */
+    kickBackgroundTask(
+      c,
+      drainIthinkPendingSubmits(c.env, { awaitSubmit: false }).catch((e) => {
+        console.error('[generate] ithink drain kick failed', job.id, e);
+      })
+    );
   } else if (lineProvider === 'mooko' && isProviderConfigured(upstream, 'mooko')) {
     const mookoMeta: Record<string, unknown> = {
       ...baseMeta,
@@ -553,7 +557,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       .from('generation_requests')
       .update({ meta: mookoMeta })
       .eq('id', job.id);
-    // 木瓜同步 POST 可达 8 分钟；HTTP waitUntil 仅 ~30s，仅 Cron 提交（每分钟 * * * * *）
+    /** 木瓜仅 Cron await 提交；HTTP waitUntil ~30s 会假 running 堵死队列 */
   } else if (hasAnyImageUpstream(upstream) && upstreamTaskId) {
     await admin
       .from('generation_requests')
@@ -595,14 +599,12 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       provider: lineProvider,
       progressNote:
         lineProvider === 'mooko'
-          ? '已扣积分，慢速线生图中（约 2–12 分钟，账单稍后显示）'
+          ? '已扣积分，正在生成中（约 2–12 分钟）'
           : lineProvider === 'ithink'
-            ? '已扣积分，ThinkAI 慢速线提交中（约 2–5 分钟）'
-            : lineProvider === 'apimart'
-              ? '已扣积分，备用线路提交中（请勿重复点生成）'
-              : lineProvider === 'grsai'
-                ? '已扣积分，上游提交中（请勿重复点生成）'
-                : null
+            ? '已扣积分，正在生成中（约 2–5 分钟）'
+            : hasAnyImageUpstream(upstream)
+              ? '已扣积分，正在提交（请勿重复点生成）'
+              : null
     }
   });
 });
@@ -863,31 +865,31 @@ generateRoutes.get('/jobs/:jobId', async c => {
   const settle = c.req.query('settle') === '1' || c.req.query('settle') === 'true';
   const upstream = upstreamBindingsFromEnv(c.env);
   const jobMeta = (job.meta as Record<string, unknown>) || {};
-  const mookoProvider = readJobProvider(jobMeta) === 'mooko';
+  const jobProvider = readJobProvider(jobMeta);
+  const mookoProvider = jobProvider === 'mooko';
+  const ithinkProvider = jobProvider === 'ithink';
   if (
     settle
-    && mookoProvider
+    && ithinkProvider
     && job.status === 'processing'
-    && upstream.mookoKey
+    && upstream.ithinkKey
   ) {
-    const st = String(jobMeta.mookoSubmitState || '');
-    if (st === 'queued' || st === 'running') {
+    const st = String(jobMeta.ithinkSubmitState || '');
+    const attempts = Number(jobMeta.ithinkSubmitAttempts || 0);
+    if (st === 'queued' && attempts < 1) {
       try {
-        await processMookoPendingSubmit(
+        await processIthinkPendingSubmit(
           admin,
           user.id,
           job as JobRow,
           upstream,
           c.env,
           {
-            upstreamModel: String(jobMeta.upstreamModel || 'gpt-image-2-pro'),
+            upstreamModel: String(jobMeta.upstreamModel || 'gpt-image-2'),
             prompt: String(job.prompt || ''),
-            resolution: String(job.resolution || '2k'),
+            resolution: '1k',
             quality: String(job.quality || 'standard'),
-            size: typeof jobMeta.size === 'string' ? jobMeta.size : undefined,
-            refImageUrls: Array.isArray(jobMeta.refImageUrls)
-              ? (jobMeta.refImageUrls as string[]).filter(Boolean)
-              : undefined
+            size: typeof jobMeta.size === 'string' ? jobMeta.size : undefined
           }
         );
         const { data: refreshed } = await admin
@@ -897,7 +899,17 @@ generateRoutes.get('/jobs/:jobId', async c => {
           .maybeSingle();
         if (refreshed) Object.assign(job, refreshed);
       } catch (e) {
-        console.warn('[generate] mooko settle submit failed', jobId, e);
+        console.warn('[generate] ithink settle submit failed', jobId, e);
+      }
+    }
+  }
+  if (settle && mookoProvider && job.status === 'processing' && !job.result_image_url) {
+    const st = String(jobMeta.mookoSubmitState || '');
+    if (st === 'running') {
+      try {
+        await tryCompleteMookoFromStoredArchive(admin, user.id, jobId, c.env);
+      } catch (e) {
+        console.warn('[generate] mooko settle R2 recover failed', jobId, e);
       }
     }
   }
@@ -1022,6 +1034,7 @@ generateRoutes.get('/jobs/:jobId', async c => {
       model: meta.model,
       modelLabel: meta.modelLabel,
       provider: meta.provider,
+      resolution: liveJob.resolution || null,
       progressNote: polled.progressNote || slowProviderProgressNote(meta, readJobProvider(meta))
     }
   });

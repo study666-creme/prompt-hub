@@ -3,6 +3,7 @@ import {
   buildMookoApiRequest,
   extractRequestIdFromText,
   isMookoPlaceholderTaskId,
+  mookoImageFetchCandidates,
   parseMookoImagePayload
 } from './mooko';
 
@@ -58,6 +59,23 @@ describe('mooko image payload', () => {
     const parsed = parseMookoImagePayload(payload);
     expect(parsed.taskId).toBe('task_abc');
     expect(parsed.imageUrls[0]).toBe('https://gimg.mooko.ai/p/img/img_abc/0?exp=1&sig=2');
+  });
+
+  it('collects thumbnail_url from flat checkStatus payload', () => {
+    const payload = {
+      status: 'success',
+      image_url: 'https://gimg.mooko.ai/p/img/test/0?sig=1',
+      thumbnail_url: 'https://gimg.mooko.ai/p/img/test/thumb'
+    };
+    const parsed = parseMookoImagePayload(payload);
+    expect(parsed.imageUrls[0]).toBe('https://gimg.mooko.ai/p/img/test/0?sig=1');
+    expect(parsed.imageUrls).toContain('https://gimg.mooko.ai/p/img/test/thumb');
+  });
+
+  it('builds OSS fallback candidates for gimg urls', () => {
+    const list = mookoImageFetchCandidates('https://gimg.mooko.ai/p/x/0?sig=2');
+    expect(list[0]).toBe('https://gimg.mooko.ai/p/x/0?sig=2');
+    expect(list[1]).toBe('https://mooko-hk.oss-cn-hongkong.aliyuncs.com/p/x/0?sig=2');
   });
 
   it('detects placeholder task ids', () => {
@@ -122,7 +140,7 @@ describe('buildMookoApiRequest', () => {
       refImageUrls: ['https://example.com/a.jpg']
     });
     expect(req.path).toBe('/v1/images/edits');
-    expect(req.body.image).toEqual(['https://example.com/a.jpg']);
+    expect(req.body.images).toEqual([{ image_url: 'https://example.com/a.jpg' }]);
     expect(req.body.output_format).toBe('jpeg');
     expect(req.body).not.toHaveProperty('reference_images');
   });
@@ -138,7 +156,7 @@ describe('buildMookoApiRequest', () => {
     });
     expect(req.path).toBe('/v1/images/edits');
     expect(req.body.model).toBe('gpt-image-2-pro');
-    expect(req.body.image).toEqual(['data:image/jpeg;base64,abc']);
+    expect(req.body.images).toEqual([{ image_url: 'data:image/jpeg;base64,abc' }]);
     expect(req.body.size).toBe('1536x1024');
   });
 });

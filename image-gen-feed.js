@@ -220,7 +220,7 @@
         : recovering
           ? (job.recoverNote || '上游可能已出图，后台同步中…').slice(0, 56)
           : slow
-            ? '慢速线 · 约 1–12 分钟 · 已提交'
+            ? '约 1–12 分钟 · 已提交'
             : '预计 1–3 分钟 · 可继续提交';
       const dismissBtn = '<button type="button" class="btn btn-ghost btn-sm imagegen-feed-del" data-pending-dismiss title="关闭生成占位（不删已入库的图）">×</button>';
       return `<article class="imagegen-feed-card imagegen-feed-card-tile imagegen-feed-card--pending${recovering ? ' imagegen-feed-card--recovering' : ''}" data-feed-id="${d().esc?.(job.id)}" data-pending="1"${job.jobId ? ` data-job-id="${d().esc?.(job.jobId)}"` : ''}>

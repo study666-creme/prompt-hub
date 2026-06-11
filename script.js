@@ -205,9 +205,23 @@
     let currentCardCustomFields = {};
     let globalViewActive = false;
     let activeFilters = new Set();
+    const WAREHOUSE_FILTER_ALIASES = { '纯文字': 'text', '有图片': 'image' };
+    function normalizeWarehouseFilterValue(raw) {
+      const v = String(raw || '').trim();
+      if (!v) return '';
+      return WAREHOUSE_FILTER_ALIASES[v] || v;
+    }
+    function normalizeActiveFilters(set) {
+      const next = new Set();
+      for (const raw of set || []) {
+        const v = normalizeWarehouseFilterValue(raw);
+        if (v === 'image' || v === 'text' || v.startsWith('tag:')) next.add(v);
+      }
+      return next;
+    }
     try {
       const savedFilters = JSON.parse(localStorage.getItem('promptrepo_filters') || '[]');
-      if (Array.isArray(savedFilters)) activeFilters = new Set(savedFilters);
+      if (Array.isArray(savedFilters)) activeFilters = normalizeActiveFilters(new Set(savedFilters));
     } catch (e) { activeFilters = new Set(); }
     const GUEST_CARD_LIMIT = 10;
 
@@ -1521,13 +1535,22 @@
       return base.concat(tags);
     }
 
+    function resolveWarehouseCardKind(card) {
+      if (window.FeatureDraft?.getWarehouseCardKind) {
+        return window.FeatureDraft.getWarehouseCardKind(card);
+      }
+      return cardHasDisplayImage(card) ? 'visual' : 'text';
+    }
+
     function cardMatchesFilters(card) {
       if (activeFilters.size === 0) return true;
+      const kind = resolveWarehouseCardKind(card);
       return [...activeFilters].some(f => {
-        if (f === 'image') return !!card.image;
-        if (f === 'text') return !card.image;
-        if (f.startsWith('tag:')) {
-          const needle = f.slice(4);
+        const key = normalizeWarehouseFilterValue(f);
+        if (key === 'image') return kind === 'visual';
+        if (key === 'text') return kind === 'text';
+        if (key.startsWith('tag:')) {
+          const needle = key.slice(4);
           return (card.tags || []).some(t => String(t).replace(/^#+/, '') === needle);
         }
         return false;
@@ -1637,6 +1660,7 @@
     function buildFilterMenu() {
       const dd = document.getElementById('filterDropdown');
       if (!dd) return;
+      activeFilters = normalizeActiveFilters(activeFilters);
       const valid = new Set(getFilterOptions().map(o => o.value));
       activeFilters.forEach(f => { if (!valid.has(f)) activeFilters.delete(f); });
       dd.innerHTML = '';
@@ -1656,7 +1680,11 @@
         btn.onclick = (e) => {
           e.stopPropagation();
           if (activeFilters.has(opt.value)) activeFilters.delete(opt.value);
-          else activeFilters.add(opt.value);
+          else {
+            if (opt.value === 'text') activeFilters.delete('image');
+            if (opt.value === 'image') activeFilters.delete('text');
+            activeFilters.add(opt.value);
+          }
           saveActiveFilters();
           syncFilterBtnState();
           renderCards(true);
@@ -2226,7 +2254,18 @@
       const fpIconPin = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3.76z"/></svg>';
       if (show) {
         floating.classList.remove('hidden');
-        requestAnimationFrame(() => applyFloatingPromptPosition());
+        if (settings.floatingPromptMaximized) {
+          floating.classList.add('floating-prompt--maximized');
+          floating.style.left = '0';
+          floating.style.top = '0';
+          floating.style.width = '';
+          floating.style.height = '';
+        } else {
+          floating.classList.remove('floating-prompt--maximized');
+          applyFloatingPromptSize();
+          requestAnimationFrame(() => applyFloatingPromptPosition());
+        }
+        updateFloatingPromptMaximizeUI();
         if (fpToggleBtn) {
           fpToggleBtn.innerHTML = fpIconPin;
           fpToggleBtn.classList.add('is-active');
@@ -2343,6 +2382,127 @@
       localStorage.setItem('promptrepo_settings', JSON.stringify(settings));
     }
 
+    const FLOATING_PROMPT_MIN_W = 280;
+    const FLOATING_PROMPT_MIN_H = 280;
+
+    function isFloatingPromptMaximized() {
+      const fp = document.getElementById('floatingPrompt');
+      return !!(fp && fp.classList.contains('floating-prompt--maximized'));
+    }
+
+    function getFloatingPromptViewportLimits() {
+      return {
+        maxW: Math.max(FLOATING_PROMPT_MIN_W, window.innerWidth - 16),
+        maxH: Math.max(FLOATING_PROMPT_MIN_H, window.innerHeight - 16)
+      };
+    }
+
+    function clampFloatingPromptSize(w, h) {
+      const { maxW, maxH } = getFloatingPromptViewportLimits();
+      return {
+        width: Math.min(Math.max(FLOATING_PROMPT_MIN_W, Math.round(w)), maxW),
+        height: Math.min(Math.max(FLOATING_PROMPT_MIN_H, Math.round(h)), maxH)
+      };
+    }
+
+    function getDefaultFloatingPromptSize() {
+      const margin = 20;
+      const panel = document.getElementById('editPanel');
+      let w = Math.round(window.innerWidth * 0.52);
+      let h = Math.round(window.innerHeight * 0.88);
+      if (panel && !panel.classList.contains('hidden')) {
+        const pr = panel.getBoundingClientRect();
+        if (pr.width > 80 && pr.left < window.innerWidth - 40) {
+          w = Math.max(FLOATING_PROMPT_MIN_W, Math.floor(pr.left - margin * 2));
+        }
+      }
+      return clampFloatingPromptSize(
+        Math.min(w, window.innerWidth - margin * 2),
+        Math.min(h, window.innerHeight - margin * 2)
+      );
+    }
+
+    function effectiveFloatingPromptSize() {
+      const saved = settings.floatingPromptSize;
+      if (saved && Number.isFinite(saved.width) && Number.isFinite(saved.height)) {
+        if (saved.width === 380 && saved.height === 340) return getDefaultFloatingPromptSize();
+        return { width: saved.width, height: saved.height };
+      }
+      return getDefaultFloatingPromptSize();
+    }
+
+    function applyFloatingPromptSize() {
+      const fp = document.getElementById('floatingPrompt');
+      if (!fp || isFloatingPromptMaximized()) return;
+      const size = clampFloatingPromptSize(
+        effectiveFloatingPromptSize().width,
+        effectiveFloatingPromptSize().height
+      );
+      fp.style.width = size.width + 'px';
+      fp.style.height = size.height + 'px';
+      fp.style.maxWidth = 'none';
+      fp.style.maxHeight = 'none';
+    }
+
+    function saveFloatingPromptSize() {
+      if (isFloatingPromptMaximized()) return;
+      const fp = document.getElementById('floatingPrompt');
+      if (!fp) return;
+      settings.floatingPromptSize = clampFloatingPromptSize(fp.offsetWidth, fp.offsetHeight);
+      localStorage.setItem('promptrepo_settings', JSON.stringify(settings));
+    }
+
+    function updateFloatingPromptMaximizeUI() {
+      const fp = document.getElementById('floatingPrompt');
+      const btn = document.getElementById('floatingPromptMaxBtn');
+      if (!fp || !btn) return;
+      const maxed = isFloatingPromptMaximized();
+      const label = maxed ? '还原大小' : '拉满屏幕';
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
+      const maxIcon = btn.querySelector('.fp-maximize-icon');
+      const restoreIcon = btn.querySelector('.fp-restore-icon');
+      if (maxIcon) maxIcon.classList.toggle('hidden', maxed);
+      if (restoreIcon) restoreIcon.classList.toggle('hidden', !maxed);
+      const header = document.getElementById('floatingPromptHeader');
+      if (header) header.style.cursor = maxed ? 'default' : '';
+    }
+
+    function toggleFloatingPromptMaximize() {
+      const fp = document.getElementById('floatingPrompt');
+      if (!fp || fp.classList.contains('hidden')) return;
+
+      if (isFloatingPromptMaximized()) {
+        fp.classList.remove('floating-prompt--maximized');
+        settings.floatingPromptMaximized = false;
+        const restore = settings.floatingPromptRestore;
+        if (restore && restore.size) settings.floatingPromptSize = restore.size;
+        applyFloatingPromptSize();
+        if (restore && restore.pos) {
+          const pos = setFloatingPromptPosition(restore.pos.left, restore.pos.top);
+          settings.floatingPromptPos = pos;
+        } else {
+          applyFloatingPromptPosition();
+        }
+      } else {
+        const rect = fp.getBoundingClientRect();
+        settings.floatingPromptRestore = {
+          size: clampFloatingPromptSize(rect.width, rect.height),
+          pos: clampFloatingPromptPosition(rect.left, rect.top, fp)
+        };
+        fp.classList.add('floating-prompt--maximized');
+        settings.floatingPromptMaximized = true;
+        fp.style.left = '0';
+        fp.style.top = '0';
+        fp.style.width = '';
+        fp.style.height = '';
+      }
+
+      updateFloatingPromptMaximizeUI();
+      localStorage.setItem('promptrepo_settings', JSON.stringify(settings));
+    }
+    window.toggleFloatingPromptMaximize = toggleFloatingPromptMaximize;
+
     (function initFloatingPromptDrag() {
       const fp = document.getElementById('floatingPrompt');
       const header = document.getElementById('floatingPromptHeader');
@@ -2350,7 +2510,7 @@
       let offsetX = 0, offsetY = 0, startX = 0, startY = 0, dragging = false;
 
       header.addEventListener('mousedown', (e) => {
-        if (e.button !== 0 || e.target.closest('button')) return;
+        if (e.button !== 0 || e.target.closest('button') || isFloatingPromptMaximized()) return;
         const anchored = anchorFloatingPromptBox();
         offsetX = anchored.left;
         offsetY = anchored.top;
@@ -2380,8 +2540,77 @@
 
       window.addEventListener('resize', () => {
         if (!floatingPromptActive || !canShowFloatingPrompt()) return;
+        if (isFloatingPromptMaximized()) return;
+        applyFloatingPromptSize();
         applyFloatingPromptPosition();
       });
+
+      const resizeHandle = document.getElementById('floatingPromptResize');
+      if (resizeHandle) {
+        const RESIZE_THRESHOLD = 4;
+        let startX = 0, startY = 0, startW = 0, startH = 0, startLeft = 0, startTop = 0, resizing = false;
+
+        function beginResize(clientX, clientY) {
+          if (isFloatingPromptMaximized()) return;
+          const rect = fp.getBoundingClientRect();
+          startX = clientX;
+          startY = clientY;
+          startW = rect.width;
+          startH = rect.height;
+          startLeft = rect.left;
+          startTop = rect.top;
+          resizing = false;
+          fp.classList.add('floating-prompt--resizing');
+        }
+
+        function onResizeMove(e) {
+          const clientX = e.clientX ?? e.touches?.[0]?.clientX;
+          const clientY = e.clientY ?? e.touches?.[0]?.clientY;
+          if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+          const dx = clientX - startX;
+          const dy = clientY - startY;
+          if (!resizing && Math.abs(dx) < RESIZE_THRESHOLD && Math.abs(dy) < RESIZE_THRESHOLD) return;
+          resizing = true;
+          const size = clampFloatingPromptSize(startW + dx, startH + dy);
+          fp.style.width = size.width + 'px';
+          fp.style.height = size.height + 'px';
+          fp.style.maxWidth = 'none';
+          fp.style.maxHeight = 'none';
+          const left = Number.isFinite(parseFloat(fp.style.left)) ? parseFloat(fp.style.left) : startLeft;
+          const top = Number.isFinite(parseFloat(fp.style.top)) ? parseFloat(fp.style.top) : startTop;
+          setFloatingPromptPosition(left, top);
+        }
+
+        function onResizeUp() {
+          document.removeEventListener('mousemove', onResizeMove);
+          document.removeEventListener('mouseup', onResizeUp);
+          document.removeEventListener('touchmove', onResizeMove);
+          document.removeEventListener('touchend', onResizeUp);
+          fp.classList.remove('floating-prompt--resizing');
+          if (resizing) saveFloatingPromptSize();
+          resizing = false;
+        }
+
+        resizeHandle.addEventListener('mousedown', (e) => {
+          if (e.button !== 0 || isFloatingPromptMaximized()) return;
+          e.preventDefault();
+          e.stopPropagation();
+          beginResize(e.clientX, e.clientY);
+          document.addEventListener('mousemove', onResizeMove);
+          document.addEventListener('mouseup', onResizeUp);
+        });
+
+        resizeHandle.addEventListener('touchstart', (e) => {
+          if (isFloatingPromptMaximized()) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const t = e.touches?.[0];
+          if (!t) return;
+          beginResize(t.clientX, t.clientY);
+          document.addEventListener('touchmove', onResizeMove, { passive: false });
+          document.addEventListener('touchend', onResizeUp);
+        }, { passive: false });
+      }
 
       const panel = document.getElementById('editPanel');
       if (panel && typeof ResizeObserver !== 'undefined') {
@@ -2483,7 +2712,8 @@
       else resumeRippleBackground();
       window.FeatureDraft?.relayoutCommunityFeeds?.();
       if (document.getElementById('pageCommunity')?.classList.contains('active')) {
-        window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true, forceRepaint: true });
+        window.FeedLayout?.repairCommunityMasonry?.('communityGrid');
+        window.FeatureDraft?.scheduleCommunityLayout?.('communityGrid', { force: true, immediate: true, recalcCols: true });
       }
     }
     window.applyEfficiencyMode = applyEfficiencyMode;
@@ -2514,6 +2744,10 @@
         forceExitGlobalView(true);
         closeEditPanel();
         if (typeof closeTagSheet === 'function') closeTagSheet();
+      }
+      const leavingCommunity = document.getElementById('pageCommunity')?.classList.contains('active') && app !== 'community';
+      if (leavingCommunity) {
+        window.FeatureDraft?.cancelCommunityPageWork?.();
       }
       if (app === 'warehouse') {
         const searchDesktop = document.getElementById('searchInput');
@@ -4223,9 +4457,6 @@
       if (cards.length > 0) {
         window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
       }
-      if (page === 'community') {
-        window.FeatureDraft?.renderCommunity?.();
-      }
       const refreshFeeds = () => window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
       if (window.MobileUI?.isMobile?.() && page !== 'community') {
         if (typeof requestIdleCallback === 'function') requestIdleCallback(refreshFeeds, { timeout: 8000 });
@@ -5545,6 +5776,7 @@
     function hydrateWarehouseGridImages(container, pageCards) {
       if (!container) return;
       window.CardImageLoader?.bindWarehouse?.(container, pageCards);
+      window.CardImageLoader?.boostWarehouseImages?.(container, 20);
       if (!isMobileViewport()) scheduleWarehouseMasonryLayout();
     }
 
@@ -6542,11 +6774,19 @@
     }
 
     function cardHasDisplayImage(card) {
-      if (window.SupabaseSync?.shouldShowCardInWarehouse?.(card) === false) return false;
-      const image = card?.image;
-      if (!image || typeof image !== 'string') return false;
-      if (window.FeatureDraft?.isDisplayableImage && !window.FeatureDraft.isDisplayableImage(image)) return false;
-      return true;
+      return window.FeatureDraft?.isUsableWarehouseImage?.(card) ?? false;
+    }
+
+    function shouldLoadPanelImagePreview() {
+      if (!imageData) return false;
+      if (pendingUploadFile) return true;
+      if (typeof imageData === 'string' && imageData.startsWith('data:image/') && !imageData.includes('data:image/svg')) {
+        return true;
+      }
+      if (isNewCardMode) return true;
+      const card = selectedCardId ? cards.find((c) => c.id === selectedCardId) : null;
+      if (!card) return true;
+      return cardHasDisplayImage(card);
     }
 
     function getCardDisplayDesc(card, opts) {
@@ -6640,29 +6880,37 @@
       const start = (page - 1) * PER_PAGE;
       const pageCards = allFilteredCards.slice(start, start + PER_PAGE);
       if (page === 1 && pageCards.length === 0) {
-        container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:60px;">📦 暂无卡片</div>';
+        container.classList.add('feed-grid-centered');
+        container.innerHTML = '<div class="feature-empty warehouse-grid-empty"><p>📦 暂无卡片</p></div>';
         return;
       }
+      container.classList.remove('feed-grid-centered');
       const prefetchCards = pageCards.slice(0, 18);
       let prefetchP = Promise.resolve();
       const warehouseActive = document.getElementById('pageWarehouse')?.classList.contains('active');
-      if (page === 1 && prefetchCards.length && window.SupabaseSync?.prefetchWarehousePage && (!mobileGrid || warehouseActive)) {
-        prefetchP = window.SupabaseSync.prefetchWarehousePage(prefetchCards, mobileGrid ? 1200 : 2600);
+      if (page === 1 && prefetchCards.length && window.SupabaseSync?.prefetchWarehousePage) {
+        prefetchP = window.SupabaseSync.prefetchWarehousePage(
+          prefetchCards,
+          mobileGrid ? 2400 : 2600
+        );
       }
       if (page === 1 && pageCards.length && window.SupabaseSync?.backfillGridThumbsForCards) {
         void window.SupabaseSync.backfillGridThumbsForCards(pageCards, {
-          max: mobileGrid ? Math.min(8, pageCards.length) : pageCards.length,
+          max: mobileGrid ? Math.min(14, pageCards.length) : pageCards.length,
           force: !mobileGrid,
           quiet: true,
           awaitDrain: false
         }).then(() => {
-          window.SupabaseSync?.patchImageSrcFromCache?.(container, { visibleFirst: true, max: 12 });
+          window.SupabaseSync?.patchImageSrcFromCache?.(container, {
+            visibleFirst: true,
+            max: mobileGrid ? 16 : 12
+          });
           window.CardImageLoader?.observeContainer?.(container);
         });
       }
       const fragment = document.createDocumentFragment();
       const isAppend = !reset && page > 1;
-      const eagerImgCount = mobileGrid ? 3 : Math.min(4, pageCards.length);
+      const eagerImgCount = mobileGrid ? 6 : Math.min(4, pageCards.length);
       pageCards.forEach((card, idx) => {
         const div = document.createElement('div');
         div.className = `card card-enter ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
@@ -6685,7 +6933,8 @@
         const checked = selectedCardIds.has(card.id);
         if (checked) div.classList.add('batch-selected');
         const showImage = cardHasDisplayImage(card);
-        if (!showImage) div.classList.add('card--text-only');
+        if (showImage) div.classList.add('card--visual');
+        else div.classList.add('card--text-only');
         const cachedUrl = showImage && window.SupabaseSync?.getListDisplayImageSrc
           ? window.SupabaseSync.getListDisplayImageSrc(card.image, card.id)
           : '';
@@ -6700,7 +6949,9 @@
         const titleTrim = getCardDisplayTitle(card);
         const timeLabel = formatCardTime(card.updatedAt || card.createdAt);
         const tagsHtml = buildCardTagsHtml(card.tags);
-        const pinBadge = card.pinnedAt ? '<span class="card-pin-badge" title="置顶">置顶</span>' : '';
+        const pinBadge = card.pinnedAt
+          ? '<span class="card-pin-badge" title="置顶" aria-label="置顶"><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg></span>'
+          : '';
         const imgOnload = "if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.card-media'))";
         const fetchPri = !isAppend && idx < 3 ? ' fetchpriority="high"' : '';
         const collectImgAttrs = isCollectCard && collectMeta?.authorId
@@ -7300,6 +7551,32 @@
         })();
       });
     }
+    function removeWarehouseCardFromDom(id) {
+      const container = document.getElementById('cardsContainer');
+      if (!container) return;
+      const cardEl = container.querySelector(`.card[data-id="${CSS.escape(String(id))}"]`);
+      if (cardEl) {
+        if (masonryInstance && typeof masonryInstance.remove === 'function') {
+          masonryInstance.remove(cardEl);
+          masonryInstance.layout();
+        } else {
+          cardEl.remove();
+        }
+      }
+      allFilteredCards = allFilteredCards.filter((c) => c.id !== id);
+      selectedCardIds.delete(id);
+      if (allFilteredCards.length === 0 && page === 1) {
+        container.classList.add('feed-grid-centered');
+        container.innerHTML = '<div class="feature-empty warehouse-grid-empty"><p>📦 暂无卡片</p></div>';
+        if (masonryInstance) {
+          try { masonryInstance.destroy(); } catch (e) { /* ignore */ }
+          masonryInstance = null;
+        }
+        return;
+      }
+      requestAnimationFrame(() => scheduleWarehouseMasonryLayout());
+    }
+
     function deleteCardPermanently(id, confirm = true, opts = {}) {
       const card = cards.find(c => c.id === id);
       if (card?.image && window.SupabaseSync?.isStorageRef?.(card.image) && !window.SupabaseSync?.isLoggedIn?.()) {
@@ -7318,13 +7595,20 @@
         window.__promptHubCards = cards;
         if (selectedCardId === id) {
           selectedCardId = null;
-          if (!opts.skipRender) createNewCard({ silentMobile: true });
+          if (!opts.skipRender) {
+            resetNewCardForm();
+            highlightSelectedCard(null);
+          }
         }
         if (!opts.skipRender) {
+          removeWarehouseCardFromDom(id);
           renderGroups();
-          renderCards(true);
-          window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true, forceRepaint: true });
-          showToast('已删除卡片');
+          if (document.getElementById('pageCommunity')?.classList.contains('active')) {
+            requestAnimationFrame(() => {
+              window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true });
+            });
+          }
+          if (!opts.silent) showToast('已删除卡片');
         }
         void (async () => {
           try {
@@ -7361,8 +7645,10 @@
         img.onload = null;
         img.onerror = null;
         img.removeAttribute('src');
+        img.style.display = 'none';
       }
-      dropArea?.classList.add('is-loading-preview');
+      dropArea?.classList.remove('is-loading-preview', 'has-image');
+      dropArea?.classList.add('no-image');
     }
 
     function stashEditPanelDraft() {
@@ -7887,15 +8173,36 @@
 
     const cardDownloadInflight = new Set();
 
-    function downloadPrepToast(card) {
-      const res = String(card?.resolution || '').toLowerCase();
-      if (res === '4k') {
+    async function resolveCardDownloadResolution(card) {
+      const jobId = String(card?.genJobId || '').replace(/#\d+$/, '');
+      if (jobId && window.PromptHubApi?.getGenerationJob) {
+        try {
+          const r = await window.PromptHubApi.getGenerationJob(jobId);
+          if (r.ok && r.data?.resolution) {
+            return String(r.data.resolution).toLowerCase();
+          }
+        } catch (e) {
+          console.warn('[download] job resolution lookup failed', jobId, e);
+        }
+      }
+      return String(card?.resolution || '1k').toLowerCase();
+    }
+
+    function downloadPrepToastForResolution(res) {
+      const r = String(res || '1k').toLowerCase();
+      if (r === '4k') {
         showToast('正在拉取 4K 原图…（文件较大，约 10–40 秒，可继续浏览其他图）', 5000);
-      } else if (res === '2k') {
+      } else if (r === '2k') {
         showToast('正在拉取 2K 原图…（约几秒，可继续浏览其他图）', 3500);
       } else {
         showToast('正在准备原图下载…', 2500);
       }
+    }
+
+    async function downloadPrepToast(card) {
+      const res = await resolveCardDownloadResolution(card);
+      downloadPrepToastForResolution(res);
+      return res;
     }
 
     function setDownloadTriggerBusy(btn, busy) {
@@ -7933,11 +8240,13 @@
       setDownloadTriggerBusy(triggerBtn, true);
 
       try {
+        const dlRes = card ? await resolveCardDownloadResolution(card) : '1k';
         const minBytes = card && window.SupabaseSync?.expectedMinFullImageBytes
-          ? window.SupabaseSync.expectedMinFullImageBytes(card.resolution)
+          ? window.SupabaseSync.expectedMinFullImageBytes(dlRes)
           : 0;
         let blob = card ? await tryFastGenJobDownloadBlob(card) : null;
-        if (blob && minBytes > 0 && blob.size < minBytes) blob = null;
+        const fastOk = blob && blob.size >= Math.min(minBytes || 0, 80 * 1024);
+        if (blob && minBytes > 0 && blob.size < minBytes && !fastOk) blob = null;
         if (blob) {
           const name = downloadFilenameForCard(card, blob, filename);
           saveBlobDownload(blob, name);
@@ -7945,8 +8254,8 @@
           return;
         }
         if (card && window.SupabaseSync?.downloadCardFullResBlob) {
-          downloadPrepToast(card);
-          const fullBlob = await window.SupabaseSync.downloadCardFullResBlob(card);
+          await downloadPrepToast(card);
+          const fullBlob = await window.SupabaseSync.downloadCardFullResBlob(card, { resolution: dlRes });
           if (fullBlob) {
             const name = downloadFilenameForCard(card, fullBlob, filename);
             saveBlobDownload(fullBlob, name);
@@ -8107,8 +8416,8 @@
       const img = document.getElementById('previewImage'), p = document.getElementById('dropPlaceholder');
       const removeBtn = document.getElementById('removeImageBtn'), dropArea = document.getElementById('dropArea');
       const editPanel = document.getElementById('editPanel');
-      const textOnly = !imageData;
-      editPanel?.classList.toggle('edit-panel--text-only', textOnly);
+      const loadPreview = shouldLoadPanelImagePreview();
+      editPanel?.classList.toggle('edit-panel--no-image-preview', !loadPreview);
       const previewStale = () =>
         seq !== panelPreviewSeq || cardIdAtStart !== selectedCardId || imageAtStart !== imageData;
       const finishPreviewLoad = () => {
@@ -8135,7 +8444,7 @@
         };
       };
       const dlBtn = document.getElementById('cardDownloadImageBtn');
-      if (imageData) {
+      if (loadPreview) {
         let src = '';
         let thumbSrc = '';
         if (selectedCardId && window.SupabaseSync?.getListDisplayImageSrc) {
@@ -8214,7 +8523,10 @@
         if (dlBtn) dlBtn.disabled = true;
         dropArea?.classList.remove('is-loading-preview');
         img.style.display = 'none';
-        p.style.display = 'block';
+        if (p) {
+          p.style.display = 'block';
+          p.textContent = '点击、拖拽或 Ctrl+V 粘贴图片';
+        }
         removeBtn.style.display = 'none';
         dropArea.classList.add('no-image');
         dropArea.classList.remove('has-image');
@@ -8706,6 +9018,7 @@
       document.getElementById('fabNewBtn').classList.remove('visible');
       document.body.classList.add('panel-open');
       if (floatingPromptActive) {
+        applyFloatingPromptSize();
         requestAnimationFrame(() => applyFloatingPromptPosition());
       }
       if (isMobileViewport() && !mobileEditPanelHistory) {

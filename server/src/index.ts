@@ -8,6 +8,7 @@ import { supabaseProxyHandler } from './routes/supabase-proxy';
 import { v1 } from './routes/v1';
 import { webhookRoutes } from './routes/webhooks/payment';
 import type { Env } from './env';
+import { drainIthinkPendingSubmits } from './lib/ithink-drain';
 import { drainMookoPendingSubmits } from './lib/mooko-drain';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -49,12 +50,14 @@ app.get('/health', async c => {
   } else if (db === 'error') {
     hint = (await diagnoseSupabaseUpstream(c.env)) || '执行 scripts/apply-grants-once.sql';
   }
+  const mookoKey = c.env.MOOKO_API_KEY?.trim() || '';
   return c.json({
     ok: db === 'ok',
     service: 'prompt-hub-api',
     version: '0.1.0',
     environment: c.env.ENVIRONMENT,
     supabase: db,
+    mooko: mookoKey ? 'configured' : 'missing',
     hint
   });
 });
@@ -127,6 +130,11 @@ export default {
       await drainMookoPendingSubmits(env, { awaitSubmit: true });
     } catch (e) {
       console.error('[scheduled] mooko-drain failed', e);
+    }
+    try {
+      await drainIthinkPendingSubmits(env, { awaitSubmit: true });
+    } catch (e) {
+      console.error('[scheduled] ithink-drain failed', e);
     }
   }
 };

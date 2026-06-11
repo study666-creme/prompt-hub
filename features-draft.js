@@ -184,6 +184,7 @@
     clearTimeout(progressiveCommunityRenderTimer);
     progressiveCommunityRenderTimer = setTimeout(() => {
       if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
+      if (communityScope === 'curated') return;
       if (publicFeedPosts.length < PUBLIC_FEED_MIN_READY) return;
       const grid = document.getElementById('communityGrid');
       if (!grid) return;
@@ -305,6 +306,30 @@
     const path = window.SupabaseSync?.storagePathFromRef?.(image);
     if (path && window.SupabaseSync?.isPathKnownMissing?.(path)) return false;
     return true;
+  }
+
+  /** 卡片库是否应展示图片区（无有效图时不占位） */
+  function isUsableWarehouseImage(card) {
+    if (!card) return false;
+    if (window.SupabaseSync?.shouldShowCardInWarehouse?.(card) === false) return false;
+    const image = card.image;
+    if (!image || !isDisplayableImage(image)) return false;
+    if (window.SupabaseSync?.isInvalidMediaUrl?.(image)) return false;
+    if (/^https?:\/\//i.test(image)) return true;
+    if (window.SupabaseSync?.isDataUrl?.(image) && !/^data:image\/svg/i.test(image)) return true;
+    if (window.SupabaseSync?.isStorageRef?.(image)) {
+      const path = window.SupabaseSync.storagePathFromRef?.(image);
+      if (path && window.SupabaseSync?.isPathKnownMissing?.(path)) return false;
+      const primary = window.SupabaseSync?.primaryImagePath?.(image, card.id);
+      if (primary && window.SupabaseSync?.isPathKnownMissing?.(primary)) return false;
+      if (window.SupabaseSync?.cardImageStillResolvable?.(image, card.id) === false) return false;
+      return true;
+    }
+    return false;
+  }
+
+  function getWarehouseCardKind(card) {
+    return isUsableWarehouseImage(card) ? 'visual' : 'text';
   }
 
   /** 公开社区图：优先卡片库真实路径，忽略无效的 api 域名直链 */
@@ -722,6 +747,9 @@
   }
 
   function repairCommunityFeedLayout(containerId) {
+    if (containerId === 'communityGrid' && window.FeedLayout?.repairCommunityMasonry?.(containerId)) {
+      return true;
+    }
     return window.FeedLayout?.repairFlex?.(containerId) ?? false;
   }
 
@@ -797,6 +825,7 @@
   }
 
   async function growCommunityFeedAfterPublicRefresh(containerId = 'communityGrid') {
+    if (communityScope === 'curated') return;
     if (communityFeedDomHasDuplicates(containerId)) {
       resetCommunityFeedGrid(containerId);
     }
@@ -1382,6 +1411,37 @@
     container.querySelectorAll(
       ':scope > .feature-empty, :scope > .community-feed-skeleton, :scope > .community-curated-placeholder, :scope > .community-feed-empty'
     ).forEach((el) => el.remove());
+  }
+
+  function invalidateCommunityFeedRender() {
+    communityFeedRenderGen += 1;
+    delete feedPagedStore.communityGrid;
+    const grid = document.getElementById('communityGrid');
+    if (grid) {
+      delete grid.dataset.feedSig;
+      delete grid.dataset.feedDistributed;
+      delete grid.dataset.masonryLoadBound;
+    }
+  }
+
+  /** 社区/卡片库空态：销毁 Masonry 列布局并垂直水平居中 */
+  function setFeedGridEmpty(container, html) {
+    if (!container) return;
+    const id = container.id;
+    if (id === 'communityGrid' || id === 'creationsGrid' || id === 'userProfileGrid') {
+      window.FeedLayout?.destroyLayout?.(id);
+      window.FeedLayout?.resetGridClasses?.(container);
+    }
+    container.classList.add('feed-grid-centered');
+    container.classList.remove(
+      'cards-grid-primed',
+      'masonry-ready',
+      'feed-layout-pending',
+      'feed-layout-ready',
+      'community-feed-grid',
+      'community-feed-columns'
+    );
+    container.innerHTML = html;
   }
 
   function scrubStaleCommunityFeedEmpty(container) {
@@ -3670,6 +3730,7 @@
   async function renderPostsIntoContainer(posts, containerId, opts = {}) {
     const container = document.getElementById(containerId);
     if (!container) return;
+    container.classList.remove('feed-grid-centered');
     const feedAppend = !!opts.feedAppend;
     const paginate = useFeedPagedRender(containerId);
     const sig = feedListSignature(posts, containerId);
@@ -3959,6 +4020,7 @@
   }
 
   function filterAndSortPosts(list) {
+    if (communityScope === 'curated') return [];
     const q = (document.getElementById('communitySearch')?.value || '').toLowerCase();
     let filtered = [...list];
     if (q) {
@@ -4048,13 +4110,16 @@
     const container = document.getElementById('communityGrid');
     if (!container) return;
     if (communityScope === 'curated') {
-      window.FeedLayout?.destroyLayout?.('communityGrid');
+      invalidateCommunityFeedRender();
       closeCommunitySidePanel();
       if (communityAppreciateActive) exitCommunityAppreciate(true);
-      container.innerHTML = `<div class="feature-empty community-curated-placeholder" style="grid-column:1/-1">
+      setFeedGridEmpty(
+        container,
+        `<div class="feature-empty community-curated-placeholder">
         <p>社区精选</p>
         <p class="panel-hint">正在开发中。未来将按使用场景展示官方与精选创作者挑选的提示词与例图；轻量会员及以上可查看（现阶段计划限免开放）。</p>
-      </div>`;
+      </div>`
+      );
       return;
     }
     const gen = ++communityFeedRenderGen;
@@ -4065,9 +4130,12 @@
         showCommunityFeedSkeleton(container, 8);
         void refreshPublicCommunityFeed({ force: true, timeoutMs: 15000 }).then(async () => {
           if (gen !== communityFeedRenderGen) return;
+          if (communityScope === 'curated') return;
           if (publicFeedAt === 0) {
-            container.innerHTML =
-              '<div class="feature-empty community-feed-empty"><p>社区加载失败</p><button type="button" class="btn btn-ghost btn-sm" onclick="renderCommunity({ immediate: true, forceRepaint: true })">重试</button></div>';
+            setFeedGridEmpty(
+              container,
+              '<div class="feature-empty community-feed-empty"><p>社区加载失败</p><button type="button" class="btn btn-ghost btn-sm" onclick="renderCommunity({ immediate: true, forceRepaint: true })">重试</button></div>'
+            );
             return;
           }
           if (shouldPreserveCommunityFeedDom('communityGrid')) {
@@ -4081,6 +4149,7 @@
       if (feedStale && !publicFeedLoading) {
         void refreshPublicCommunityFeed({ force: true, timeoutMs: 15000 }).then(async (changed) => {
           if (gen !== communityFeedRenderGen) return;
+          if (communityScope === 'curated') return;
           if (!changed) return;
           const grid = document.getElementById('communityGrid');
           patchFeedLikeLabels(grid, filterAndSortPosts(getCommunityFeedForDisplay()));
@@ -4148,7 +4217,10 @@
       const cardHint = cardN === 0
         ? '<p class="panel-hint">若你之前发布过作品：请到「设置」→「恢复备份」，或点下方「从云端恢复卡片库」。</p>'
         : '<p class="panel-hint">发布到社区的作品会进入全站 Feed（提示词至少 15 字）。在卡片库打开「发布到社区」开关即可。</p>';
-      container.innerHTML = `<div class="feature-empty"><p>${emptyMsg}</p>${rateHint}${cardHint}<button type="button" class="btn btn-primary" onclick="switchAppPage('warehouse')">去卡片库</button>${restoreCardsBtn}</div>`;
+      setFeedGridEmpty(
+        container,
+        `<div class="feature-empty"><p>${emptyMsg}</p>${rateHint}${cardHint}<button type="button" class="btn btn-primary" onclick="switchAppPage('warehouse')">去卡片库</button>${restoreCardsBtn}</div>`
+      );
       return;
     }
     const sig = feedListSignature(list, 'communityGrid');
@@ -5506,7 +5578,7 @@
     if (isSlowGenProviderModel(job.model)) {
       job.recovering = false;
       job.recoverNote = '';
-      job.pendingNote = formatPendingRecoveryNote(job, note || '慢速线仍在后台等待（请勿重复提交）');
+      job.pendingNote = formatPendingRecoveryNote(job, note || '仍在后台生成中（请勿重复提交）');
     } else {
       job.recovering = true;
       job.recoverNote = formatPendingRecoveryNote(job, note || '上游可能仍在出图，后台继续恢复…');
@@ -5528,11 +5600,20 @@
     if (/登录已过期|请先登录|UNAUTHORIZED/i.test(s)) {
       return '登录状态已失效，请退出后重新登录';
     }
-    if (/insufficient balance|insufficient credits/i.test(s)) {
-      return 'GrsAI 服务商账户积分不足（不是您的站内积分），站长需登录 grsai.com 充值；您的积分已全额退回';
+    if (/upstream_auth_failed|无效.*令牌|invalid.*token/i.test(s)) {
+      return '生图令牌无效或已过期，请联系站长在 thinkai.tv 重新创建令牌；您的积分已全额退回';
     }
-    if (/apikey|api.key|invalid.*api.*key/i.test(s)) {
-      return '生图接口密钥异常，请联系站长；您的积分已全额退回';
+    if (/upstream_submit_not_configured/i.test(s)) {
+      return '生图服务未配置，请联系站长；您的积分已全额退回';
+    }
+    if (/upstream_model_rejected/i.test(s)) {
+      return '当前模型暂不可用，请换其他模型；您的积分已全额退回';
+    }
+    if (/insufficient balance|insufficient credits/i.test(s)) {
+      return '生图服务商账户余额不足（不是您的站内积分），请联系站长；您的积分已全额退回';
+    }
+    if (/apikey|api.key|invalid.*api.*key|无效.*令牌|invalid.*token|unauthorized/i.test(s)) {
+      return '生图服务认证失败，请联系站长；您的积分已全额退回';
     }
     if (/error code:\s*524|\b524\b/.test(s)) {
       return '连接超时（524），任务可能已提交；请强刷页面查看是否在生成中';
@@ -5540,20 +5621,29 @@
     if (/upstream_timeout|timeout/i.test(s)) {
       return '生图排队超时（约 12 分钟），积分已全额退回，可点「重试」';
     }
+    if (/images\[\]\.image_url is required/i.test(s)) {
+      return '参考图格式不兼容，请去掉参考图后重试；积分已全额退回';
+    }
+    if (/upstream_image_archive_failed|atob\(\)|invalid base64|invalid_data_url/i.test(s)) {
+      return '图片入库失败，积分已全额退回，请重试';
+    }
     if (/upstream_no_image|no_image/i.test(s)) {
       return '上游未返回图片，积分已全额退回，可点「重试」';
     }
     if (/upstream_submit_not_started/i.test(s)) {
-      return '慢速线未能连接上游（木瓜控制台无记录），积分已退回，请换 GrsAI 或重试';
+      return '未能连接生图服务，积分已退回，请重试或换其他模型';
+    }
+    if (/upstream_submit_interrupted/i.test(s)) {
+      return '提交被中断，积分已退回；请等 1 分钟后重试，勿重复连点';
     }
     if (/upstream_submit_stale/i.test(s)) {
-      return '慢速线上游长时间无响应（木瓜可能已扣费），站内积分已退回；建议换 GrsAI 线路';
+      return '生图长时间无响应，积分已退回；请稍后再试或换其他模型';
     }
     if (/missing_task_id/i.test(s)) {
       return '任务提交异常，积分已全额退回，请重试';
     }
     if (/upstream_content_violation|prohibited words or images|prohibited|flagged as containing/i.test(s)) {
-      return '提示词触发 Apimart 内容审核（含禁用词/图），请改描述后重试；积分已全额退回';
+      return '提示词触发内容审核（含禁用词/图），请改描述后重试；积分已全额退回';
     }
     if (/upstream_content_violation/i.test(s)) {
       return '提示词触发内容审核，积分已全额退回，请调整描述后重试';
@@ -5568,10 +5658,10 @@
       return '提交过快，请稍等几秒再批量生成；积分已全额退回';
     }
     if (/不存在该模型|model.*not.*exist|unknown model|invalid model/i.test(s)) {
-      return '上游返回模型相关提示，任务可能已在 GrsAI 排队；请强刷页面查看进度';
+      return '模型相关提示，任务可能仍在排队；请强刷页面查看进度';
     }
     if (/GrsAI 未返回任务 ID/i.test(s)) {
-      return '上游可能已接单但响应异常，请强刷页面查看是否在生成中';
+      return '可能已接单但响应异常，请强刷页面查看是否在生成中';
     }
     if (s.length > 120) return s.slice(0, 120) + '…';
     return s;
@@ -6575,7 +6665,7 @@
         if (Date.now() - (job.startedAt || 0) >= RECENT_GEN_RECOVER_MS) {
           abandonUnrecoverablePendingJob(
             job,
-            '该任务已超过 2 小时恢复窗口，已关闭占位（木瓜已成功的可到控制台用任务 ID 手动恢复）',
+            '该任务已超过 2 小时恢复窗口，已关闭占位',
             { toast: true }
           );
           if (job.jobId) window.recordGenerationJobDeletion?.(job.jobId);
@@ -6917,7 +7007,7 @@
           if (p.recovering) {
             p.recoverNote = formatPendingRecoveryNote(p, p.recoverNote || '后台恢复中');
           } else if (slowPending) {
-            p.pendingNote = formatPendingRecoveryNote(p, p.pendingNote || '慢速线后台等待中');
+            p.pendingNote = formatPendingRecoveryNote(p, p.pendingNote || '后台生成中');
           }
           persistPendingGenJobs();
           if (!p._serverRecoverAt || Date.now() - p._serverRecoverAt > 5 * 60 * 1000) {
@@ -7326,6 +7416,7 @@
     { id: 'nano-banana-fast', label: 'Nano Banana Fast', provider: 'grsai', uiFamily: 'banana', sortOrder: 6, selectable: true, status: 'active', refundOnViolation: true },
     { id: 'apimart-gpt-image-2', label: 'GPT Image 2 · 备用', provider: 'apimart', uiFamily: 'gim2', sortOrder: 103, selectable: true, status: 'active', refundOnViolation: true, aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'], resolutions: ['1k', '2k', '4k'] },
     { id: 'apimart-gpt-image-2-official-budget', label: 'GPT Image 2 · 特价', provider: 'apimart', uiFamily: 'gim2', sortOrder: 100, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, pricingByResolution: true, resolutions: ['1k', '2k', '4k'], aspectRatios: ['16:9', '9:16', '4:3', '3:4'] },
+    { id: 'ithink-gpt-image-2-slow', label: 'GPT Image 2 · 经济', provider: 'ithink', uiFamily: 'gim2', sortOrder: 102, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'] },
     { id: 'apimart-seedream-5-lite', label: 'Seedream 5 Lite · 备用', provider: 'apimart', uiFamily: 'jimeng', sortOrder: 104, selectable: true, status: 'active', refundOnViolation: true },
     { id: 'mooko-gpt-image-2-pro', label: 'GPT Image 2 Pro · 慢速', provider: 'mooko', uiFamily: 'gim2', sortOrder: 101, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['2k', '4k'], aspectRatios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'] }
   ];
@@ -9116,10 +9207,10 @@
 
   function slowGenDeferNote(ctx) {
     return isSlowGenProviderModel(ctx?.model)
-      ? '慢速线约 2–12 分钟，后台继续等待（请勿重复提交）'
+      ? '约 2–12 分钟，后台继续等待（请勿重复提交）'
       : isLongRunningGenJob(ctx)
         ? '2K/4K 约 5–15 分钟，后台继续等待（请勿重复提交）'
-        : 'GrsAI/Apimart 可能已出图，正在后台恢复（请勿重复提交）';
+        : '可能已出图，正在后台恢复（请勿重复提交）';
   }
 
   /** 快线路 5 分钟；木瓜/ThinkAI 慢速线 12 分钟 */
@@ -9233,7 +9324,7 @@
           pendingId,
           ctx,
           isSlowGenProviderModel(ctx?.model)
-            ? '前台已等 15 分钟，慢速线仍在后台等待（请勿重复提交）'
+            ? '前台已等 15 分钟，仍在后台生成（请勿重复提交）'
             : isLongRunningGenJob(ctx)
               ? '前台已等 15 分钟，2K/4K 仍在后台等待（请勿重复提交）'
               : '前台已等 5 分钟，仍在后台恢复（请勿重复提交）'
@@ -9637,7 +9728,7 @@
         if (!batchOpts.silentToast) {
           toast(
             pendingJob.slowProvider
-              ? '已提交木瓜/慢速线，约 1–8 分钟出图，下方可看进度'
+              ? '已提交，约 1–12 分钟出图，下方可看进度'
               : '已提交生图，下方可查看进度，可继续点击生成'
           );
         }
@@ -9678,9 +9769,8 @@
           hint = '浏览器存储已满，已跳过草稿保存；请清除站点数据或减少参考图后重试';
         } else if (/please wait|too many|rate limit|busy/i.test(msg)) {
           hint = '生图服务繁忙，请稍等 1～2 分钟再试';
-        } else if (/apikey|api.key|invalid.*api.*key|unauthorized|401/i.test(msg)) {
-          hint =
-            '生图 API 密钥无效。站长需在 server 目录执行 npx wrangler secret put IMAGE_API_KEY（填 GrsAI 的 Key）';
+        } else if (/apikey|api.key|invalid.*api.*key|unauthorized|401|upstream_auth/i.test(msg)) {
+          hint = '生图服务认证失败，请联系站长';
         }
         toast('生图提交失败：' + hint);
       }
@@ -10738,6 +10828,7 @@
         const nextScope = btn.dataset.communityScope || 'all';
         if (nextScope === 'curated') {
           communityScope = 'curated';
+          invalidateCommunityFeedRender();
           document.querySelectorAll('[data-community-scope]').forEach(b => {
             b.classList.toggle('active', b === btn);
           });
@@ -10745,12 +10836,12 @@
             b.classList.toggle('active', (b.dataset.imagegenCommunityScope || 'all') === communityScope);
           });
           closeCommunitySidePanel();
-          renderCommunity({ skipFeedFetch: true, forceRepaint: true });
+          renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
           toast('社区精选正在开发中，敬请期待');
           return;
         }
         communityScope = nextScope;
-        delete feedPagedStore.communityGrid;
+        invalidateCommunityFeedRender();
         const grid = document.getElementById('communityGrid');
         if (grid) delete grid.dataset.feedSig;
         document.querySelectorAll('[data-community-scope]').forEach(b => {
@@ -10828,13 +10919,31 @@
     });
     document.querySelectorAll('[data-imagegen-community-scope]').forEach(btn => {
       btn.addEventListener('click', () => {
-        communityScope = btn.dataset.imagegenCommunityScope || 'all';
+        const nextScope = btn.dataset.imagegenCommunityScope || 'all';
+        if (nextScope === 'curated') {
+          communityScope = 'curated';
+          invalidateCommunityFeedRender();
+          document.querySelectorAll('[data-imagegen-community-scope]').forEach(b => b.classList.toggle('active', b === btn));
+          document.querySelectorAll('[data-community-scope]').forEach(b => {
+            b.classList.toggle('active', (b.dataset.communityScope || 'all') === communityScope);
+          });
+          renderImageGenFeed();
+          if (document.getElementById('pageCommunity')?.classList.contains('active')) {
+            renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
+          }
+          toast('社区精选正在开发中，敬请期待');
+          return;
+        }
+        communityScope = nextScope;
+        invalidateCommunityFeedRender();
         document.querySelectorAll('[data-imagegen-community-scope]').forEach(b => b.classList.toggle('active', b === btn));
         document.querySelectorAll('[data-community-scope]').forEach(b => {
           b.classList.toggle('active', (b.dataset.communityScope || 'all') === communityScope);
         });
         renderImageGenFeed();
-        if (document.getElementById('pageCommunity')?.classList.contains('active')) renderCommunity();
+        if (document.getElementById('pageCommunity')?.classList.contains('active')) {
+          renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
+        }
       });
     });
     document.getElementById('imageGenPreviewClose')?.addEventListener('click', closeImageGenPreview);
@@ -10918,6 +11027,92 @@
     });
   }
 
+  let communityOnActivateTimer = null;
+  let communityOnActivateSeq = 0;
+
+  function cancelCommunityPageWork() {
+    communityFeedRenderGen += 1;
+    clearTimeout(renderCommunityTimer);
+    clearTimeout(communityOnActivateTimer);
+    communityOnActivateSeq += 1;
+  }
+
+  function deferCommunityIdle(fn, timeoutMs = 2500) {
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(fn, { timeout: timeoutMs });
+    } else {
+      setTimeout(fn, 400);
+    }
+  }
+
+  function activateCommunityPage() {
+    const seq = ++communityOnActivateSeq;
+    clearTimeout(communityOnActivateTimer);
+    communityOnActivateTimer = setTimeout(() => {
+      if (seq !== communityOnActivateSeq) return;
+      if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (seq !== communityOnActivateSeq) return;
+          if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
+          const grid = document.getElementById('communityGrid');
+          window.FeedLayout?.repairCommunityMasonry?.('communityGrid');
+          hydratePublicFeedFromCache();
+          const hasRealCards = grid?.querySelector('.community-post-card:not(.community-feed-skeleton)');
+          const feedFresh = !publicFeedNeedsFullRefresh() && publicFeedPosts.length > 0;
+          if (hasRealCards && grid?.dataset.feedSig && feedFresh) {
+            patchFeedLikeLabels(grid, filterAndSortPosts(getCommunityFeedForDisplay()));
+            scheduleCommunityLayout('communityGrid', { force: true, immediate: true, recalcCols: true });
+          } else {
+            renderCommunity({
+              immediate: true,
+              skipFeedFetch: feedFresh,
+              syncFromCards: false
+            });
+          }
+          deferCommunityIdle(() => {
+            if (seq !== communityOnActivateSeq) return;
+            if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
+            ensureCommunityFromCardsThrottled(false);
+            if (publicFeedNeedsFullRefresh() && !publicFeedLoading) {
+              if (grid && !hasRealCards) showCommunityFeedSkeleton(grid, 8);
+              void refreshPublicCommunityFeed({ force: true, timeoutMs: 20000 }).then(async () => {
+                if (seq !== communityOnActivateSeq) return;
+                if (shouldPreserveCommunityFeedDom('communityGrid') && grid?.querySelector('.community-post-card:not(.community-feed-skeleton)')) {
+                  await growCommunityFeedAfterPublicRefresh('communityGrid');
+                  return;
+                }
+                renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
+                await growCommunityFeedAfterPublicRefresh('communityGrid');
+              });
+            } else if (!publicFeedLoading) {
+              void refreshPublicCommunityFeed({ force: false }).then(async (changed) => {
+                if (seq !== communityOnActivateSeq) return;
+                if (!changed) return;
+                patchFeedLikeLabels(grid, filterAndSortPosts(getCommunityFeedForDisplay()));
+                await growCommunityFeedAfterPublicRefresh('communityGrid');
+              });
+            }
+            const warmPosts = filterAndSortPosts(getCommunityFeedForDisplay()).slice(0, 12);
+            const warmCards = warmPosts.map((p) => ({
+              id: p.sourceCardId || p.id,
+              image: canonicalCommunityImageRef(p) || p.image,
+              sourceCardId: p.sourceCardId,
+              authorId: p.authorId
+            })).filter((c) => c.image);
+            if (warmCards.length && window.SupabaseSync?.prefetchCommunityDisplayUrls) {
+              void window.SupabaseSync.prefetchCommunityDisplayUrls(warmCards, 3000);
+            } else if (warmCards.length && window.SupabaseSync?.prefetchCardsImages) {
+              void window.SupabaseSync.prefetchCardsImages(warmCards, 3000);
+            }
+            window.CommunityGacha?.init?.();
+            window.CommunityGacha?.refreshEntryButton?.();
+          });
+        });
+      });
+    }, 50);
+  }
+
   function feedHasRenderedContent(containerId, itemSelector) {
     const el = document.getElementById(containerId);
     if (!el) return false;
@@ -10928,51 +11123,19 @@
     const fab = document.getElementById('fabNewBtn');
     if (fab) fab.classList.toggle('hidden-by-app', app !== 'warehouse');
     window.FeatureAssets?.onAppChange?.(app);
-    if (app !== 'community' && communityAppreciateActive) {
-      window.closeAppreciateViewer?.();
-      exitCommunityAppreciate(true);
+    if (app !== 'community') {
+      cancelCommunityPageWork();
+      if (communityAppreciateActive) {
+        window.closeAppreciateViewer?.();
+        exitCommunityAppreciate(true);
+      }
     }
     if (app === 'community') {
       window.closeAppreciateViewer?.();
       if (communityAppreciateActive) exitCommunityAppreciate(true);
       document.body.classList.remove('global-view', 'appreciate-viewing');
       if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
-      ensureCommunityFromCards();
-      hydratePublicFeedFromCache();
-      const grid = document.getElementById('communityGrid');
-      if (publicFeedNeedsFullRefresh() && !publicFeedLoading) {
-        const hasRealCards = grid?.querySelector('.community-post-card:not(.community-feed-skeleton)');
-        if (grid && !hasRealCards) showCommunityFeedSkeleton(grid, 8);
-        void refreshPublicCommunityFeed({ force: true, timeoutMs: 20000 }).then(async () => {
-          if (shouldPreserveCommunityFeedDom('communityGrid') && grid?.querySelector('.community-post-card:not(.community-feed-skeleton)')) {
-            await growCommunityFeedAfterPublicRefresh('communityGrid');
-            return;
-          }
-          renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
-          await growCommunityFeedAfterPublicRefresh('communityGrid');
-        });
-      } else {
-        renderCommunity({ immediate: true, skipFeedFetch: true, syncFromCards: true });
-        void refreshPublicCommunityFeed({ force: false }).then(async (changed) => {
-          if (!changed) return;
-          patchFeedLikeLabels(grid, filterAndSortPosts(getCommunityFeedForDisplay()));
-          await growCommunityFeedAfterPublicRefresh('communityGrid');
-        });
-      }
-      const warmPosts = filterAndSortPosts(getCommunityFeedForDisplay()).slice(0, 24);
-      const warmCards = warmPosts.map((p) => ({
-        id: p.sourceCardId || p.id,
-        image: canonicalCommunityImageRef(p) || p.image,
-        sourceCardId: p.sourceCardId,
-        authorId: p.authorId
-      })).filter((c) => c.image);
-      if (warmCards.length && window.SupabaseSync?.prefetchCommunityDisplayUrls) {
-        void window.SupabaseSync.prefetchCommunityDisplayUrls(warmCards, 4000);
-      } else if (warmCards.length && window.SupabaseSync?.prefetchCardsImages) {
-        void window.SupabaseSync.prefetchCardsImages(warmCards, 4000);
-      }
-      window.CommunityGacha?.init?.();
-      window.CommunityGacha?.refreshEntryButton?.();
+      activateCommunityPage();
     }
     if (app === 'creations') {
       if (!document.getElementById('pageCreations')?.classList.contains('active')) return;
@@ -11217,6 +11380,7 @@
         if (isMobileViewport()) enforceMobileCommunityFeedGrid(id);
         else {
           scrubCommunityFeedFlexCards(el);
+          if (id === 'communityGrid') window.FeedLayout?.repairCommunityMasonry?.(id);
           repairCommunityFeedLayout(id);
         }
       } else layoutCommunityMasonry(id);
@@ -11230,6 +11394,8 @@
   window.FeatureDraft = {
     init,
     onAppChange,
+    cancelCommunityPageWork,
+    activateCommunityPage,
     clearSensitiveLocalStateOnSignOut,
     clearAllLocalFeatureData,
     reloadStores,
@@ -11299,7 +11465,8 @@
     isCommunityCollectCard,
     COMMUNITY_COLLECT_TAG,
     isDisplayableImage,
-    scheduleImageGenFeedLayout: scheduleImageGenFeedLayout,
+    isUsableWarehouseImage,
+    getWarehouseCardKind,
     removeBrokenCommunityFeedCard,
     pruneEmptyCommunityFeedCards,
     scheduleLayout: scheduleCommunityLayout,

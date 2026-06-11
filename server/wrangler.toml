@@ -13,6 +13,8 @@ FISSION_VISION_MODEL = "gemini-2.5-flash"
 FISSION_CHAT_MODEL = "deepseek-v4-pro"
 # 读/写仅 R2（勿再回退 Supabase Storage，避免 egress 超额）；未迁完的旧图用 scripts/sync-supabase-to-r2.mjs
 MEDIA_STORAGE_MODE = "r2"
+# ThinkAI 控制台 sk- 令牌走 www.thinkai.tv（勿用 token.ithinkai.cn，部分账号会 401）
+ITHINK_API_BASE_URL = "https://www.thinkai.tv"
 
 # 敏感项请用 wrangler secret put：
 # SUPABASE_URL（prompt-hubs.com 路线：填境外 https://xxxxx.supabase.co，见 docs/OVERSEAS-FIRST.md）
@@ -41,7 +43,7 @@ custom_domain = true
 
 # 木瓜慢速线同步 POST 可达 8 分钟；Cron 每 2 分钟排水（省 Workers 日请求额度）
 [triggers]
-crons = ["*/2 * * * *"]
+crons = ["* * * * *"]
 
 [observability]
 enabled = true

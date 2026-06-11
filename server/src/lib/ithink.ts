@@ -1,4 +1,5 @@
 import { ApiError } from './errors';
+import { mapGptImage2PixelSize } from './image-size-options';
 
 type SubmitParams = {
   upstreamModel: string;
@@ -9,35 +10,25 @@ type SubmitParams = {
   refImageUrls?: string[];
 };
 
-/** ThinkAI 慢速线仅 1K；常用比例像素尺寸（官方文档） */
-const SIZE_MAP_1K: Record<string, string> = {
-  auto: '1024x1024',
-  '1:1': '1024x1024',
-  '16:9': '1536x1024',
-  '9:16': '1024x1536',
-  '4:3': '1152x864',
-  '3:4': '864x1152',
-  '3:2': '1536x1024',
-  '2:3': '1024x1536',
-  '5:4': '1120x896',
-  '4:5': '896x1120',
-  '21:9': '1456x624',
-  '9:21': '624x1456'
-};
+/** ThinkAI 慢速线仅 1K；比例仅五档（与前台下拉一致） */
+function mapIthinkPixelSize(sizeLabel?: string): string {
+  const ratio = String(sizeLabel || '1:1').trim() || '1:1';
+  return mapGptImage2PixelSize('1k', ratio);
+}
 
 function apiBase(envBase?: string): string {
-  return (envBase || 'https://token.ithinkai.cn').replace(/\/$/, '');
+  /** 控制台 sk- 令牌多数走 www.thinkai.tv；token.ithinkai.cn 对部分账号会 401 */
+  const raw = (envBase || 'https://www.thinkai.tv').replace(/\/$/, '');
+  if (/apimart\.|grsai\.|mooko\.|dakka\.com/i.test(raw)) {
+    throw new ApiError(502, 'UPSTREAM_FAILED', 'upstream_submit_not_configured');
+  }
+  return raw;
 }
 
 function normalizeIthinkApiKey(raw: string): string {
   let key = String(raw || '').trim();
   if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, '').trim();
   return key;
-}
-
-function mapIthinkPixelSize(sizeLabel?: string): string {
-  const ratio = String(sizeLabel || '1:1').trim() || '1:1';
-  return SIZE_MAP_1K[ratio] || SIZE_MAP_1K['1:1'];
 }
 
 /** 经济慢速线强制 low，避免 high 需 3–5 分钟导致 Worker 子请求超时 */
@@ -90,7 +81,7 @@ export async function submitIthinkImageJob(
 ): Promise<IthinkSubmitResult> {
   const token = normalizeIthinkApiKey(apiKey);
   if (!token) {
-    throw new ApiError(502, 'UPSTREAM_FAILED', 'ThinkAI 未配置有效令牌（ITHINK_API_KEY）');
+    throw new ApiError(502, 'UPSTREAM_FAILED', 'upstream_submit_not_configured');
   }
   const model = params.upstreamModel.trim() || 'gpt-image-2';
   const body: Record<string, unknown> = {
@@ -132,13 +123,15 @@ export async function submitIthinkImageJob(
 
   if (!res.ok) {
     const msg = extractUpstreamError(json, text || `HTTP ${res.status}`);
-    let hint = '';
     if (res.status === 401 || /无效.*令牌|invalid.*token|unauthorized/i.test(msg)) {
-      hint = '（请在 thinkai.tv 控制台复制 sk- 令牌，并勾选含 gpt-image-2 的分组后写入 Worker 密钥 ITHINK_API_KEY）';
-    } else if (/model|不存在|not found|invalid/i.test(msg)) {
-      hint = `（模型「${model}」可能不对，请在 ThinkAI 模型广场核对 ID，或设置 ITHINK_UPSTREAM_MODEL）`;
+      console.warn('[ithink] auth failed', res.status, msg.slice(0, 120));
+      throw new ApiError(502, 'UPSTREAM_FAILED', 'upstream_auth_failed');
     }
-    throw new ApiError(502, 'UPSTREAM_FAILED', `${msg}${hint}`.slice(0, 480));
+    if (/model|不存在|not found|invalid/i.test(msg)) {
+      console.warn('[ithink] model rejected', model, msg.slice(0, 120));
+      throw new ApiError(502, 'UPSTREAM_FAILED', 'upstream_model_rejected');
+    }
+    throw new ApiError(502, 'UPSTREAM_FAILED', msg.slice(0, 480));
   }
 
   const imageUrl = pickImageUrl(json);

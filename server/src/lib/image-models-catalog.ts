@@ -207,14 +207,15 @@ export const ITHINK_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider
   gim2({
     id: 'ithink-gpt-image-2-slow',
     upstream: 'gpt-image-2',
-    label: 'GPT Image 2 · 慢速',
+    label: 'GPT Image 2 · 经济',
     group: 'classic',
-    description: 'ThinkAI 慢速线路 · 仅 1K · 上游约 2 分/张',
+    description: 'ThinkAI 经济线路 · 仅 1K · 五档比例 · 上游约 $0.019/张',
     upstreamPoints: 2,
     refundOnViolation: true,
     resolutions: ['1k'],
+    fixedQualityLow: true,
     defaultCredits: 2,
-    sortOrder: 103
+    sortOrder: 102
   })
 ]);
 

@@ -1,10 +1,40 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Env } from '../env';
 import { ApiError } from './errors';
-import { archiveGenerationResultUrls, isDataImageUrl, isStorageRef } from './image-archive';
+import {
+  archiveGenerationResultUrls,
+  archiveRemoteImage,
+  isDataImageUrl,
+  isLikelyDataImageUrl,
+  isParseableDataImageUrl,
+  isStorageRef
+} from './image-archive';
 import { finalizeFailedJob, type JobRow } from './generation-jobs';
 import type { ImageUpstreamBindings } from './image-upstream';
-import { fetchMookoTaskOnce, isMookoPlaceholderTaskId, submitMookoImageJob } from './mooko';
+import {
+  confirmMookoTaskOutcome,
+  fetchMookoTaskOnce,
+  isMookoPlaceholderTaskId,
+  submitMookoImageJob
+} from './mooko';
+
+/** 从木瓜 task_id 拉 gimg HTTP 链（勿用截断的 base64） */
+export async function resolveMookoHttpImageFromTask(
+  apiKey: string,
+  baseUrl: string | undefined,
+  taskId: string,
+  opts?: { attempts?: number; intervalMs?: number }
+): Promise<string | null> {
+  if (!taskId || isMookoPlaceholderTaskId(taskId)) return null;
+  const polled = await confirmMookoTaskOutcome(apiKey, baseUrl, taskId, {
+    attempts: opts?.attempts ?? 45,
+    intervalMs: opts?.intervalMs ?? 4000
+  });
+  const httpUrls = (polled.imageUrls || []).filter((u) => /^https?:\/\//i.test(u));
+  if (httpUrls.length) return httpUrls[0];
+  if (polled.imageUrl && /^https?:\/\//i.test(polled.imageUrl)) return polled.imageUrl;
+  return null;
+}
 
 type MookoSubmitParams = {
   upstreamModel: string;
@@ -36,7 +66,8 @@ async function patchJobMeta(
 async function claimMookoSubmit(
   admin: SupabaseClient,
   jobId: string,
-  meta: Record<string, unknown>
+  meta: Record<string, unknown>,
+  channel: 'cron' | 'http' = 'cron'
 ): Promise<Record<string, unknown> | null> {
   const attempts = Number(meta.mookoSubmitAttempts || 0);
   if (String(meta.mookoSubmitState || '') !== 'queued') return null;
@@ -46,7 +77,8 @@ async function claimMookoSubmit(
     ...meta,
     mookoSubmitState: 'running',
     mookoSubmitStartedAt: new Date().toISOString(),
-    mookoSubmitAttempts: attempts + 1
+    mookoSubmitAttempts: attempts + 1,
+    mookoSubmitChannel: channel
   };
 
   const { data, error } = await admin
@@ -62,48 +94,18 @@ async function claimMookoSubmit(
   return data.meta as Record<string, unknown>;
 }
 
-/** waitUntil 内直接标记完成，避免依赖后续轮询 HTTP 才入库 */
-async function resumeMookoSubmitFromTaskId(
-  admin: SupabaseClient,
-  userId: string,
-  job: JobRow,
-  upstream: ImageUpstreamBindings,
-  env: Env | undefined,
-  meta: Record<string, unknown>,
-  taskId: string
-): Promise<void> {
-  if (!upstream.mookoKey) return;
-  const polledHttp = await pollMookoHttpImage(upstream.mookoKey, upstream.mookoBase, taskId);
-  if (!polledHttp) return;
-
-  let primaryUrl = polledHttp;
-  let archivedUrls = [polledHttp];
-  try {
-    archivedUrls = await archiveGenerationResultUrls(admin, userId, job.id, [polledHttp], env);
-    primaryUrl = archivedUrls[0] || polledHttp;
-  } catch (e) {
-    console.warn('[mooko] resume archive deferred', job.id, e);
-  }
-
-  const nextMeta = await patchJobMeta(admin, job.id, {
-    upstreamTaskId: taskId,
-    syncImageUrl: primaryUrl,
-    mookoSubmitState: 'done',
-    mookoSubmitError: null,
-    mookoSubmitFinishedAt: new Date().toISOString()
-  });
-  await completeMookoJobWithImage(admin, job.id, nextMeta, primaryUrl, archivedUrls);
-}
-
-/** waitUntil 内直接标记完成，避免依赖后续轮询 HTTP 才入库 */
-async function completeMookoJobWithImage(
+/** 慢速线（木瓜/Think）上游已出图：直接写 completed，勿等轮询 */
+export async function completeMookoJobWithImage(
   admin: SupabaseClient,
   jobId: string,
   meta: Record<string, unknown>,
   imageUrl: string,
   extraUrls: string[]
 ): Promise<void> {
-  const extras = extraUrls.filter((u) => u && u !== imageUrl);
+  if (isDataImageUrl(imageUrl)) {
+    throw new ApiError(502, 'UPSTREAM_NO_IMAGE', 'upstream_image_not_archived');
+  }
+  const extras = extraUrls.filter((u) => u && u !== imageUrl && !isDataImageUrl(u));
   await admin
     .from('generation_requests')
     .update({
@@ -131,16 +133,55 @@ async function pollMookoHttpImage(
   attempts = 45,
   intervalMs = 4000
 ): Promise<string | null> {
-  if (!taskId || isMookoPlaceholderTaskId(taskId)) return null;
-  for (let i = 0; i < attempts; i += 1) {
-    if (i > 0) await new Promise((r) => setTimeout(r, intervalMs));
-    const polled = await fetchMookoTaskOnce(apiKey, baseUrl, taskId);
-    const httpUrls = (polled.imageUrls || []).filter((u) => /^https?:\/\//i.test(u));
-    if (httpUrls.length) return httpUrls[0];
-    if (polled.imageUrl && /^https?:\/\//i.test(polled.imageUrl)) return polled.imageUrl;
-    if (polled.status === 'failed') break;
+  return resolveMookoHttpImageFromTask(apiKey, baseUrl, taskId, { attempts, intervalMs });
+}
+
+/** 将 sync 图（含木瓜 base64）归档后写 completed；data URL 不得写入 result_image_url */
+export async function finalizeMookoArchivedImage(
+  admin: SupabaseClient,
+  userId: string,
+  jobId: string,
+  meta: Record<string, unknown>,
+  rawUrl: string,
+  env: Env | undefined
+): Promise<void> {
+  let stored = rawUrl;
+  if (isDataImageUrl(rawUrl) || /^https?:\/\//i.test(rawUrl)) {
+    stored = await archiveRemoteImage(admin, userId, jobId, rawUrl, { env, maxAttempts: 3 });
   }
-  return null;
+  if (isDataImageUrl(stored)) {
+    throw new ApiError(502, 'UPSTREAM_NO_IMAGE', 'upstream_image_archive_failed');
+  }
+  const nextMeta = {
+    ...meta,
+    syncImageUrl: stored,
+    mookoSubmitState: 'done',
+    mookoSubmitError: null,
+    mookoAwaitPoll: false,
+    mookoSubmitFinishedAt: new Date().toISOString()
+  };
+  await completeMookoJobWithImage(admin, jobId, nextMeta, stored, [stored]);
+}
+
+async function deferMookoAwaitPoll(
+  admin: SupabaseClient,
+  jobId: string,
+  taskId: string,
+  meta: Record<string, unknown>
+): Promise<void> {
+  const clean = { ...meta };
+  delete clean.syncImageUrl;
+  delete clean.mookoSubmitImageUrls;
+  delete clean.mookoSubmitError;
+  await patchJobMeta(admin, jobId, {
+    ...clean,
+    upstreamTaskId: taskId,
+    mookoSubmitState: 'done',
+    mookoAwaitPoll: true,
+    mookoSubmitError: null,
+    mookoSubmitFinishedAt: new Date().toISOString()
+  });
+  console.warn('[mooko] upstream ok, await task poll', jobId, taskId);
 }
 
 /** 木瓜AI：同步 POST 可达 8 分钟，仅 Cron（awaitSubmit）执行；轮询只读 DB */
@@ -150,9 +191,13 @@ export async function processMookoPendingSubmit(
   job: JobRow,
   upstream: ImageUpstreamBindings,
   env: Env | undefined,
-  params: MookoSubmitParams
+  params: MookoSubmitParams,
+  opts?: { channel?: 'cron' | 'http' }
 ): Promise<void> {
-  if (!upstream.mookoKey) return;
+  if (!upstream.mookoKey) {
+    console.error('[mooko] MOOKO_API_KEY missing, skip submit', job.id);
+    return;
+  }
 
   const { data: live } = await admin
     .from('generation_requests')
@@ -167,28 +212,16 @@ export async function processMookoPendingSubmit(
   if (typeof meta.syncImageUrl === 'string' && meta.syncImageUrl) return;
   // 同步 POST 可达 8 分钟：running 期间禁止再次 POST
   if (submitState === 'running') {
-    const existingTaskId =
-      typeof meta.upstreamTaskId === 'string' && meta.upstreamTaskId.trim()
-        ? meta.upstreamTaskId.trim()
-        : '';
-    if (existingTaskId && !isMookoPlaceholderTaskId(existingTaskId)) {
-      await resumeMookoSubmitFromTaskId(
-        admin,
-        userId,
-        job,
-        upstream,
-        env,
-        meta,
-        existingTaskId
-      );
+    const sync = typeof meta.syncImageUrl === 'string' ? meta.syncImageUrl.trim() : '';
+    if (sync) {
+      await finalizeMookoArchivedImage(admin, userId, job.id, meta, sync, env);
     }
     return;
   }
-  if (typeof meta.upstreamTaskId === 'string' && meta.upstreamTaskId) return;
   const attempts = Number(meta.mookoSubmitAttempts || 0);
   if (attempts >= 1 || submitState !== 'queued') return;
 
-  const claimed = await claimMookoSubmit(admin, job.id, meta);
+  const claimed = await claimMookoSubmit(admin, job.id, meta, opts?.channel || 'cron');
   if (!claimed) return;
 
   try {
@@ -210,96 +243,62 @@ export async function processMookoPendingSubmit(
       }
     );
     const submitUrls = submitted.imageUrls?.filter(Boolean) || [];
-    const rawUrls = submitUrls.length
+    const rawUrls = (submitUrls.length
       ? submitUrls
       : submitted.imageUrl
         ? [submitted.imageUrl]
-        : [];
+        : []
+    ).filter((u) => /^https?:\/\//i.test(u) || isParseableDataImageUrl(u));
 
-    await patchJobMeta(admin, job.id, {
-      upstreamTaskId: submitted.taskId,
-      mookoSubmitState: 'done',
-      mookoSubmitError: null,
-      mookoSubmitFinishedAt: new Date().toISOString()
-    });
+    const realTaskId =
+      submitted.taskId && !isMookoPlaceholderTaskId(submitted.taskId) ? submitted.taskId : '';
 
     let archivedUrls: string[] = [];
     let primaryUrl: string | null = null;
+
     if (rawUrls.length) {
-      try {
-        archivedUrls = await archiveGenerationResultUrls(admin, userId, job.id, rawUrls, env);
+      const httpOnly = rawUrls.filter((u) => /^https?:\/\//i.test(u));
+      const dataOnly = rawUrls.filter((u) => isLikelyDataImageUrl(u));
+      if (httpOnly.length) {
+        archivedUrls = await archiveGenerationResultUrls(admin, userId, job.id, httpOnly, env);
         primaryUrl = archivedUrls[0] || null;
-      } catch (archiveErr) {
-        console.warn('[mooko] archive failed, trying http poll fallback', job.id, archiveErr);
-        const httpOnly = rawUrls.filter((u) => /^https?:\/\//i.test(u));
-        if (httpOnly.length) {
-          primaryUrl = httpOnly[0];
-          archivedUrls = httpOnly;
-        } else {
-          const polledHttp = await pollMookoHttpImage(
-            upstream.mookoKey,
-            upstream.mookoBase,
-            submitted.taskId
-          );
-          if (polledHttp) {
-            primaryUrl = polledHttp;
-            archivedUrls = [polledHttp];
-          } else {
-            const dataUrls = rawUrls.filter(isDataImageUrl);
-            if (dataUrls.length) {
-              try {
-                archivedUrls = await archiveGenerationResultUrls(admin, userId, job.id, dataUrls, env);
-                primaryUrl = archivedUrls[0] || null;
-              } catch (retryErr) {
-                console.warn('[mooko] data url archive retry failed', job.id, retryErr);
-                throw archiveErr;
-              }
-            } else {
-              throw archiveErr;
-            }
-          }
-        }
+      } else if (dataOnly.length) {
+        primaryUrl = await archiveRemoteImage(admin, userId, job.id, dataOnly[0], {
+          env,
+          maxAttempts: 3
+        });
+        archivedUrls = primaryUrl ? [primaryUrl] : [];
       }
-      if (primaryUrl && /^https?:\/\//i.test(primaryUrl) && !isStorageRef(primaryUrl)) {
-        try {
-          archivedUrls = await archiveGenerationResultUrls(admin, userId, job.id, [primaryUrl], env);
-          primaryUrl = archivedUrls[0] || primaryUrl;
-        } catch (e) {
-          console.warn('[mooko] http archive deferred to poll', job.id, e);
-        }
+      if (!primaryUrl || isDataImageUrl(primaryUrl)) {
+        throw new ApiError(502, 'UPSTREAM_NO_IMAGE', 'upstream_image_archive_failed');
       }
-    } else if (submitted.taskId && !isMookoPlaceholderTaskId(submitted.taskId)) {
-      const polledHttp = await pollMookoHttpImage(
-        upstream.mookoKey,
-        upstream.mookoBase,
-        submitted.taskId
-      );
-      if (polledHttp) {
-        primaryUrl = polledHttp;
-        archivedUrls = [polledHttp];
-      }
-    }
-
-    const nextMeta = await patchJobMeta(admin, job.id, {
-      upstreamTaskId: submitted.taskId,
-      ...(primaryUrl ? { syncImageUrl: primaryUrl } : {}),
-      ...(archivedUrls.length > 1 ? { mookoSubmitImageUrls: archivedUrls } : {}),
-      mookoSubmitState: 'done',
-      mookoSubmitError: null,
-      mookoSubmitFinishedAt: new Date().toISOString()
-    });
-
-    if (primaryUrl) {
-      await completeMookoJobWithImage(admin, job.id, nextMeta, primaryUrl, archivedUrls);
-    } else if (submitted.taskId && !isMookoPlaceholderTaskId(submitted.taskId)) {
-      await patchJobMeta(admin, job.id, {
-        mookoAwaitPoll: true,
-        mookoSubmitState: 'done'
+      const nextMeta = await patchJobMeta(admin, job.id, {
+        upstreamTaskId: submitted.taskId,
+        syncImageUrl: primaryUrl,
+        ...(archivedUrls.length > 1 ? { mookoSubmitImageUrls: archivedUrls } : {}),
+        mookoSubmitState: 'done',
+        mookoSubmitError: null,
+        mookoAwaitPoll: false,
+        mookoSubmitFinishedAt: new Date().toISOString()
       });
-      console.warn('[mooko] submit ok but no image yet, await poll', job.id, submitted.taskId);
+      await completeMookoJobWithImage(admin, job.id, nextMeta, primaryUrl, archivedUrls);
+      return;
     }
+    if (realTaskId) {
+      console.error('[mooko] upstream charged but no sync image in body', job.id, realTaskId);
+      throw new ApiError(502, 'UPSTREAM_NO_IMAGE', 'upstream_no_image');
+    }
+    throw new ApiError(502, 'UPSTREAM_NO_IMAGE', 'upstream_no_image');
   } catch (e) {
-    const msg = e instanceof ApiError ? e.message : String((e as Error)?.message || e);
+    let msg = e instanceof ApiError ? e.message : String((e as Error)?.message || e);
+    if (/atob\(\)|invalid base64|invalid_data_url/i.test(msg)) {
+      msg = 'upstream_image_archive_failed';
+    }
+    const recovered = await tryCompleteMookoFromStoredArchive(admin, userId, job.id, env);
+    if (recovered) {
+      console.warn('[mooko] archive failed but R2 exists, completed', job.id, msg);
+      return;
+    }
     console.error('[mooko] background submit failed', job.id, msg);
     await patchJobMeta(admin, job.id, {
       mookoSubmitState: 'failed',
@@ -314,4 +313,26 @@ export async function processMookoPendingSubmit(
       await finalizeFailedJob(admin, userId, fresh, msg.slice(0, 400));
     }
   }
+}
+
+export async function tryCompleteMookoFromStoredArchive(
+  admin: SupabaseClient,
+  userId: string,
+  jobId: string,
+  env: Env | undefined
+): Promise<boolean> {
+  const { findFirstExistingStoragePath } = await import('./media-cdn');
+  const { toStorageRef } = await import('./image-archive');
+  const paths = ['jpg', 'png', 'webp'].map((ext) => `${userId}/generated/${jobId}.${ext}`);
+  const found = await findFirstExistingStoragePath(admin, paths, 'card-images', env);
+  if (!found) return false;
+  const stored = toStorageRef(found);
+  const { data } = await admin
+    .from('generation_requests')
+    .select('meta')
+    .eq('id', jobId)
+    .maybeSingle();
+  const meta = ((data?.meta as Record<string, unknown>) || {});
+  await completeMookoJobWithImage(admin, jobId, meta, stored, [stored]);
+  return true;
 }

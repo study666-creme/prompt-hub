@@ -17,3 +17,9 @@ prompt-hub-deploy.zip
 
 .vercel
 .env*
+# Wrangler 本地开发缓存（自动生成，勿提交）
+server/.wrangler/
+backups/
+dist/
+downloads/
+server/tmp-mooko-*

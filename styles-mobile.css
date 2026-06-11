@@ -738,9 +738,9 @@
 
   #cardsContainer.cards-container .card .card-media.is-loading,
   #cardsContainer.cards-container .card .card-media.card-media--await {
-    aspect-ratio: 3 / 4;
-    min-height: 0 !important;
-    max-height: none !important;
+    aspect-ratio: 4 / 3;
+    max-height: 148px;
+    min-height: 72px !important;
   }
 
   #cardsContainer.cards-container .card .card-media:not(.is-loading):not(.card-media--await) {
@@ -761,7 +761,7 @@
 
   .cards-container .card .card-media {
     width: 100%;
-    aspect-ratio: 3 / 4;
+    aspect-ratio: auto;
     max-height: none;
     min-height: 0;
     background: var(--bg-hover);
@@ -773,9 +773,21 @@
 
   .cards-container .card .card-media.is-loading,
   .cards-container .card .card-media.card-media--await {
-    aspect-ratio: 3 / 4;
-    min-height: 0 !important;
-    max-height: none !important;
+    aspect-ratio: 4 / 3;
+    max-height: 148px;
+    min-height: 72px !important;
+  }
+
+  .cards-container .card .card-media.media-revealed,
+  .cards-container .card .card-media:not(.is-loading):not(.card-media--await):not(.card-media--load-failed) {
+    aspect-ratio: auto;
+    max-height: none;
+    min-height: 0;
+  }
+
+  .cards-container .card.card--text-only .card-body,
+  .cards-container .card:not(:has(.card-media.media-revealed)):not(:has(.card-media:not(.is-loading):not(.card-media--await) .card-img[src^="http"])) .card-body {
+    flex: 0 0 auto;
   }
 
   .cards-container .card .card-img {

@@ -1,7 +1,10 @@
 import { ApiError } from './errors';
+import { isLikelyDataImageUrl, isParseableDataImageUrl } from './image-archive';
 import { mapMookoProSize } from './image-size-options';
 
 const MOOKO_IMG_ORIGIN = 'https://gimg.mooko.ai';
+/** 木瓜官网 gpt-img 在 gimg 失败时用香港 OSS 同路径拉取 */
+export const MOOKO_OSS_ORIGIN = 'https://mooko-hk.oss-cn-hongkong.aliyuncs.com';
 
 type SubmitParams = {
   upstreamModel: string;
@@ -49,6 +52,23 @@ function normalizeMookoImageUrl(raw: unknown): string | null {
   return null;
 }
 
+/** Worker 拉图：gimg 403/超时则试 OSS 同路径（对齐 gpt-img.mooko.ai） */
+export function mookoImageFetchCandidates(url: string): string[] {
+  const primary = normalizeMookoImageUrl(url);
+  if (!primary || !/^https?:\/\//i.test(primary)) return primary ? [primary] : [];
+  const out = [primary];
+  try {
+    const u = new URL(primary);
+    if (/gimg\.mooko\.ai/i.test(u.hostname) || /(^|\.)mooko\.ai$/i.test(u.hostname)) {
+      const oss = `${MOOKO_OSS_ORIGIN}${u.pathname}${u.search}`;
+      if (oss !== primary) out.push(oss);
+    }
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
+
 function mookoDataUrlFromBase64(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const s = raw.trim();
@@ -90,7 +110,8 @@ export function buildMookoApiRequest(params: SubmitParams): MookoApiRequest {
       path: '/v1/images/edits',
       body: {
         ...sharedBody,
-        image: refs
+        /** 木瓜 JSON 体要求 images[].image_url，勿用 OpenAI 旧字段 image[] */
+        images: refs.map((url) => ({ image_url: url }))
       }
     };
   }
@@ -99,6 +120,48 @@ export function buildMookoApiRequest(params: SubmitParams): MookoApiRequest {
     path: '/v1/images/generations',
     body: sharedBody
   };
+}
+
+/** 不 JSON.parse 整段响应，直接从文本抠 data URL（木瓜 2K 体可达数 MB） */
+export function extractMookoDataImageFromText(text: string): string | null {
+  if (!text) return null;
+  const needle = 'data:image/';
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const start = text.indexOf(needle, searchFrom);
+    if (start < 0) break;
+    const semi = text.indexOf(';base64,', start);
+    if (semi < 0) {
+      searchFrom = start + 1;
+      continue;
+    }
+    const b64Start = semi + ';base64,'.length;
+    let i = b64Start;
+    while (i < text.length) {
+      if (!/[A-Za-z0-9+/=]/.test(text[i])) break;
+      i += 1;
+    }
+    const b64Len = i - b64Start;
+    if (b64Len >= 80 && b64Len % 4 === 0) return text.slice(start, i);
+    searchFrom = start + 1;
+  }
+  for (const marker of ['"b64_json":"', '"b64_json": "']) {
+    const idx = text.indexOf(marker);
+    if (idx < 0) continue;
+    const b64Start = idx + marker.length;
+    let i = b64Start;
+    while (i < text.length) {
+      const c = text[i];
+      if (c === '"' || c === '\\') break;
+      if (!/[A-Za-z0-9+/=]/.test(c)) break;
+      i += 1;
+    }
+    const b64 = text.slice(b64Start, i);
+    if (b64.length >= 80 && b64.length % 4 === 0) {
+      return `data:image/jpeg;base64,${b64}`;
+    }
+  }
+  return null;
 }
 
 export function extractRequestIdFromText(text: string): string | null {
@@ -120,18 +183,13 @@ async function readMookoResponseBody(res: Response): Promise<{ text: string; req
   const decoder = new TextDecoder();
   let text = '';
   let requestId: string | null = null;
-  /** 超大 base64 同步体：拿到 request_id 后截断，改走 /v1/tasks 轮询 gimg URL */
-  const maxBufferBytes = 2_500_000;
+  /** 木瓜同步体常为 data URL base64；/v1/tasks 不可用，须读完整响应再归档 */
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       text += decoder.decode(value, { stream: true });
       if (!requestId) requestId = extractRequestIdFromText(text);
-      if (requestId && text.length >= maxBufferBytes) {
-        await reader.cancel();
-        break;
-      }
     }
   } finally {
     try {
@@ -184,6 +242,8 @@ function collectImageUrls(payload: unknown): string[] {
     push(row.url);
     push(row.image_url);
     push(row.imageUrl);
+    push(row.thumbnail_url);
+    push(row.thumbnailUrl);
     push(row.output_url);
     push(row.result_url);
     push(row.file_url);
@@ -196,6 +256,8 @@ function collectImageUrls(payload: unknown): string[] {
   const p = payload as Record<string, unknown>;
   push(p.url);
   push(p.image_url);
+  push(p.thumbnail_url);
+  push(p.thumbnailUrl);
   const data = p.data;
   if (Array.isArray(p.images)) {
     for (const img of p.images) {
@@ -297,6 +359,31 @@ function extractUpstreamError(payload: unknown, fallback: string): string {
 
 function parsePollPayload(json: unknown): MookoPollResult {
   const imageUrlsEarly = collectImageUrlsDeep(json);
+  if (json && typeof json === 'object') {
+    const root = json as Record<string, unknown>;
+    const flatStatus = String(root.status || '').toLowerCase();
+    if (flatStatus === 'success' || flatStatus === 'failed' || flatStatus === 'error') {
+      const urls = imageUrlsEarly.length ? imageUrlsEarly : collectImageUrlsDeep(root);
+      const errMsg = String(root.error_msg || root.error || root.message || '').trim() || null;
+      if (flatStatus === 'failed' || flatStatus === 'error') {
+        return {
+          status: 'failed',
+          imageUrl: null,
+          imageUrls: [],
+          errorMessage: errMsg || 'upstream_failed',
+          isViolation: /violation|违规|moderation|policy|审核/i.test(String(errMsg || ''))
+        };
+      }
+      if (urls.length) {
+        return {
+          status: 'completed',
+          imageUrl: urls[0] || null,
+          imageUrls: urls,
+          errorMessage: null
+        };
+      }
+    }
+  }
   const data =
     json && typeof json === 'object' && 'data' in json
       ? (json as { data: Record<string, unknown> }).data
@@ -388,11 +475,14 @@ export async function submitMookoImageJob(
     }
   }
 
+  const largeBody = text.length > 180_000;
   let json: unknown = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = null;
+  if (!largeBody) {
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = null;
+    }
   }
 
   if (!res.ok) {
@@ -400,27 +490,49 @@ export async function submitMookoImageJob(
     throw new ApiError(502, 'UPSTREAM_FAILED', msg.slice(0, 480));
   }
 
-  let imageUrls = json ? collectImageUrlsDeep(json, text) : scrapeImageUrlsFromRawText(text);
+  let imageUrls: string[] = [];
+  if (largeBody) {
+    const dataUrl = extractMookoDataImageFromText(text);
+    if (dataUrl) imageUrls.push(dataUrl);
+    imageUrls.push(...scrapeImageUrlsFromRawText(text));
+  } else {
+    imageUrls = json
+      ? collectImageUrlsDeep(json, text)
+      : scrapeImageUrlsFromRawText(text);
+    if (!imageUrls.length) {
+      const dataUrl = extractMookoDataImageFromText(text);
+      if (dataUrl) imageUrls.push(dataUrl);
+    }
+  }
+  imageUrls = imageUrls.filter(
+    (u) =>
+      /^https?:\/\//i.test(u)
+      || isLikelyDataImageUrl(u)
+  );
   const taskId = extractTaskId(json, text) || earlyRequestId;
+  const hasHttp = imageUrls.some((u) => /^https?:\/\//i.test(u));
+  const hasData = imageUrls.some((u) => isParseableDataImageUrl(u));
+  /** 木瓜无可用 /v1/tasks；仅有 request_id 且无图时才短试一次（多数情况同步体已含 base64） */
   const needsPoll =
     taskId
     && !isMookoPlaceholderTaskId(taskId)
-    && (
-      !imageUrls.length
-      || imageUrls.every((u) => /^data:image\//i.test(u))
-      || text.length >= 2_400_000
-    );
+    && !hasHttp
+    && !hasData;
   if (needsPoll) {
     const polled = await confirmMookoTaskOutcome(apiKey, baseUrl, taskId, {
-      attempts: 45,
-      intervalMs: 4000
+      attempts: 3,
+      intervalMs: 2000
     });
-    if (polled.imageUrls.length) imageUrls = polled.imageUrls;
-    else if (polled.imageUrl) imageUrls = [polled.imageUrl];
-  } else if (!imageUrls.length && taskId) {
-    const polled = await fetchMookoTaskOnce(apiKey, baseUrl, taskId);
-    if (polled.imageUrls.length) imageUrls = polled.imageUrls;
-    else if (polled.imageUrl) imageUrls = [polled.imageUrl];
+    if (polled.imageUrls.length) {
+      imageUrls = polled.imageUrls.filter(
+        (u) => /^https?:\/\//i.test(u) || isParseableDataImageUrl(u)
+      );
+    } else if (
+      polled.imageUrl
+      && (/^https?:\/\//i.test(polled.imageUrl) || isParseableDataImageUrl(polled.imageUrl))
+    ) {
+      imageUrls = [polled.imageUrl];
+    }
   }
   if (!taskId && !imageUrls.length) {
     throw new ApiError(502, 'UPSTREAM_ERROR', '木瓜AI 未返回 task_id 或图片');

@@ -24,45 +24,48 @@
 
 ---
 
-## 当前部署阶段（2026-06-11 · 木瓜 Cron + 首屏不卡 + 社区保存逻辑）
+## 当前部署阶段（2026-06-12 · 木瓜队列疏通 + 下载修复）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | `prompt-hub-hub` · 构建 **`20260611n`** · https://prompt-hubs.com |
-| **Worker** | `prompt-hub-api` · **https://api.prompt-hubs.com** · 版本 `9b08b9a7` |
+| **Pages** | `prompt-hub-hub` · **待部署**（`script.js` / `supabase-sync.js` 下载修复）· https://prompt-hubs.com |
+| **Worker** | `prompt-hub-api` · **https://api.prompt-hubs.com** · 版本 **`54ecc2e2`** |
 | **数据库** | 境外 Supabase `yibawjvhmqcysdovscss`（Worker Secret） |
-| **Cron** | `*/2 * * * *` → **`drainMookoPendingSubmits`**（仅木瓜慢速线，见下） |
+| **Cron** | `* * * * *` → **`drainMookoPendingSubmits`**（仅 Cron await POST，勿 HTTP waitUntil） |
+| **健康检查** | `GET /health` 含 `mooko: configured|missing` |
 
 ### 已打通 / 未打通
 
 - ✅ `/health`、登录、兑换、Grs/Apimart 生图与 2h/7d 恢复
-- ✅ **木瓜 gpt-image-2-pro**：Apifox 对齐（像素 size、jpeg、moderation: low）；Cron **await** 完整 POST；`settle=1` 轮询可同步提交
-- ✅ **Apimart 特价** `apimart-gpt-image-2-official-budget`（4 档比例、无 1:1）
-- ✅ 首屏本地 IndexedDB 先画 UI，云端拉取后台；社区「发布」未达标仍保存、不拦保存
-- ⚠️ **Workers 免费日请求 10 万**：Cron+轮询易触顶，木瓜/Cron 会失败 → 建议 **Workers Paid $5/月**
-- ⚠️ 木瓜慢速：单 POST 可达 **8 分钟**，勿在 HTTP `waitUntil` 里提交（仅 Cron + settle 深轮询）
+- ✅ **Apimart 特价** `gpt-image-2-official`（1K 约 $0.0093；后台默认定价 3 积分/张，可按成本调高）
+- ✅ **木瓜**：大图 base64 分块归档；僵尸 `running` 释槽/回队列；图生图 `images[].image_url` 格式
+- ✅ 生图下载：按任务真实 `resolution` 拉原图，1K 不再误报「2K 原图」、不再慢速重拉
+- ⚠️ **Workers 日请求额度**：Cron+轮询易触顶 → 建议 **Workers Paid $5/月**
+- ⚠️ 旧木瓜/假 `running` 任务占槽 → 用户需 **× 取消** 后重试；`$0.0093` 是 Apimart 特价非木瓜
 
 ### 木瓜 Cron 是干什么的？（≠ 其它模型自动恢复）
 
 | | **Grs / Apimart / 即梦** | **木瓜 Cron** |
 |--|--|--|
 | 提交方式 | 生图 POST 后 **秒级** 返回 taskId，前台/轮询跟进度 | 同步 POST **阻塞 2～8 分钟** 才回图 |
-| 「恢复」 | `resumePendingGenerationJobs`、2h/7d 补拉、repair 灰图 | **只服务木瓜**：排队 `queued` → Cron **await 提交**；`done` 无图 → 轮询 `/v1/tasks` 归档；死 `running` → 5min 退款释槽 |
-| 触发 | 用户打开生图页、GET `/jobs/:id` 轮询 | **每 2 分钟** + 用户 **`settle=1`** 深轮询（同请求内跑完 POST） |
+| 「恢复」 | `resumePendingGenerationJobs`、2h/7d 补拉、repair 灰图 | **只服务木瓜**：`queued` → Cron await POST；R2 补 completed；假 `running` 6min 回队列 |
+| 触发 | 用户打开生图页、GET `/jobs/:id` 轮询 | **每分钟 Cron**；`settle=1` 仅 R2 恢复，**不在 HTTP 里 POST 木瓜** |
 
 其它模型**不依赖**此 Cron；Cron **不是**全站生图自动恢复，只是木瓜专用「提交排水 + 拉图收尾」。
 
 ### 已知问题
 
-1. **b076702 勿合并**（第二张生图卡死）。
-2. 若 Cloudflare 日额度用尽，全站 API/Cron 失败直至 UTC 0 点重置。
-3. 管理后台用户详情无 `credit_ledger` 明细。
+1. **ThinkAI 经济线** `ithink-gpt-image-2-slow`：上游 401/无效令牌 → 前台「生图接口密钥异常」；Worker 曾误建错误名 Secret，需 `wrangler secret delete` 后重设 `ITHINK_API_KEY`。
+2. **Apimart Gemini 高频**：`gemini-2.5-flash-lite` 用于社区配图审核/反推/裂变（非生图）；批量 `posts/sync` 每张新帖审一次；同步失败会重复审图。
+3. **Apimart 任务详情**：`gpt-image-2-official` 控制台详情常只显示成图，无 size/quality；参数见本站 `generation_requests.meta` 或 API `GET /v1/tasks/{id}`。
+4. **b076702 勿合并**（第二张生图卡死）。
+5. 管理后台用户详情无 `credit_ledger` 明细。
 
 ### 下一步
 
-1. Cloudflare 升级 **Workers Paid**（或等 UTC 0 点额度重置）后再测木瓜。
-2. 强刷确认 `window.__APP_BUILD__ === '20260611n'`。
-3. 木瓜测试：生图页留屏等 2～12 分钟，Network 看 `jobs/xxx?settle=1`。
+1. `.\deploy-pages.ps1` 部署前端下载修复 → Ctrl+F5。
+2. 取消卡住的木瓜任务 → 只测 1 张 2K 纯文字（无参考图）→ 看木瓜控制台是否有新记录。
+3. 特价 1K 若亏本：管理后台把 `apimart-gpt-image-2-official-budget` 1K 调到 ≥7 积分。
 
 ### 部署
 
@@ -94,5 +97,5 @@ MobileUI.isMobileViewport 唯一来源 mobile.js（须在 script.js 前）。
 改 wireFeed* 后检查 IMG_LOADING_PLACEHOLDER、feedImgStorageAttr 已接线（曾致整站无图/社区空白）。
 
 P0 带宽：生图仓库视口 cap 12、列表仅 grid。用户小白，简体中文分步。勿提交密钥。
-木瓜：Cron */2 drainMookoPendingSubmits；勿 HTTP waitUntil 提交；settle 轮询可跑完整 POST。
+木瓜：Cron * * * * * drainMookoPendingSubmits；仅 Cron await POST；/health 看 mooko:configured。
 ```

@@ -2060,18 +2060,24 @@ body {
     }
     .card-pin-badge {
       position: absolute;
-      top: 8px;
-      left: 8px;
-      z-index: 3;
-      padding: 2px 7px;
-      font-size: 10px;
-      font-weight: 700;
-      line-height: 1.3;
+      top: 6px;
+      right: 6px;
+      z-index: 4;
+      width: 22px;
+      height: 22px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       color: #fff;
-      background: var(--accent);
-      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 50%;
       pointer-events: none;
-      letter-spacing: 0.02em;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    }
+    .card-pin-badge svg {
+      display: block;
+      flex-shrink: 0;
     }
     .card.card-dragging-source {
       opacity: 0.32;
@@ -2800,14 +2806,14 @@ body {
     .prompt-field textarea,
     #cardPrompt {
       width: 100%;
-      min-height: 88px;
-      max-height: 160px;
-      padding: 8px 10px;
+      min-height: 168px;
+      max-height: min(50vh, 480px);
+      padding: 10px 12px;
       margin: 0;
       resize: vertical;
       font-family: inherit;
       font-size: var(--font-sm);
-      line-height: 1.5;
+      line-height: 1.55;
     }
     .prompt-header-copy {
       flex-shrink: 0;
@@ -2891,7 +2897,14 @@ body {
       border-radius: 20px;
       padding: 24px;
       margin: 20px;
+      min-height: 120px;
       background: rgba(0,0,0,0.2);
+    }
+    .image-drop-area.no-image .placeholder-text {
+      color: var(--text-muted);
+      font-size: var(--font-sm);
+      text-align: center;
+      line-height: 1.5;
     }
 .image-drop-area.has-image {
   width: 100%;
@@ -3916,8 +3929,12 @@ body {
       position: fixed;
       left: 0;
       top: 0;
-      width: min(380px, calc(100vw - 32px));
-      min-height: 340px;
+      width: min(560px, calc(100vw - 32px));
+      height: min(88vh, calc(100dvh - 32px));
+      min-width: 280px;
+      min-height: 280px;
+      max-width: calc(100vw - 16px);
+      max-height: calc(100dvh - 16px);
       background: var(--bg-elevated);
       border: 1px solid var(--border-light);
       border-radius: 16px;
@@ -3927,6 +3944,17 @@ body {
       flex-direction: column;
       overflow: hidden;
       color: var(--text-primary);
+    }
+    .floating-prompt.floating-prompt--maximized {
+      width: 100vw !important;
+      height: 100dvh !important;
+      max-width: none !important;
+      max-height: none !important;
+      min-height: 0 !important;
+      left: 0 !important;
+      top: 0 !important;
+      border-radius: 0 !important;
+      z-index: 2600;
     }
     .floating-prompt.hidden {
       opacity: 0;
@@ -3951,6 +3979,12 @@ body {
       font-weight: 500;
       color: var(--text-secondary);
     }
+    .floating-prompt-header-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .fp-maximize-btn,
     .fp-close-btn {
       background: var(--bg-card);
       border: 1px solid var(--border);
@@ -3964,6 +3998,7 @@ body {
       cursor: pointer;
       transition: var(--transition);
     }
+    .fp-maximize-btn:hover,
     .fp-close-btn:hover {
       color: var(--text-primary);
       border-color: var(--accent);
@@ -3980,8 +4015,8 @@ body {
     .floating-prompt textarea {
       flex: 1;
       width: 100%;
-      min-height: 280px;
-      height: 280px;
+      min-height: 120px;
+      height: auto;
       background: var(--bg-card);
       border: 1px solid var(--border-light);
       border-radius: 16px;
@@ -3992,8 +4027,53 @@ body {
       font-family: inherit;
       font-size: var(--font-sm);
       line-height: 1.55;
-      resize: vertical;
+      resize: none;
       transition: var(--transition);
+    }
+    .floating-prompt--maximized textarea {
+      font-size: var(--font-base);
+      line-height: 1.6;
+    }
+    .floating-prompt-resize {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      width: 28px;
+      height: 28px;
+      cursor: nwse-resize;
+      z-index: 12;
+      touch-action: none;
+    }
+    .floating-prompt--resizing {
+      user-select: none;
+    }
+    .floating-prompt--resizing .floating-prompt-header {
+      cursor: default;
+    }
+    .floating-prompt-resize::after {
+      content: '';
+      position: absolute;
+      right: 5px;
+      bottom: 5px;
+      width: 10px;
+      height: 10px;
+      border-right: 2px solid var(--text-muted);
+      border-bottom: 2px solid var(--text-muted);
+      opacity: 0.55;
+      border-radius: 0 0 2px 0;
+    }
+    .floating-prompt--maximized .floating-prompt-header {
+      cursor: default;
+    }
+    .floating-prompt--maximized .floating-prompt-header:active {
+      cursor: default;
+    }
+    .fp-maximize-btn .fp-maximize-icon.hidden,
+    .fp-maximize-btn .fp-restore-icon.hidden {
+      display: none;
+    }
+    .floating-prompt--maximized .floating-prompt-resize {
+      display: none;
     }
     .floating-prompt textarea::placeholder {
       color: var(--text-muted);
@@ -4749,7 +4829,19 @@ body {
     /* 辅助 */
     .no-image-placeholder { display: none; }
 
-    /* 纯文字卡片：不占图片位 */
+    /* 纯文字卡片：不占图片位；图片卡加载失败仍保留占位 */
+    #cardsContainer .card.card--text-only .card-media {
+      display: none !important;
+    }
+    #cardsContainer .card.card--visual .card-media.card-media--load-failed {
+      display: block !important;
+      min-height: 72px;
+      max-height: 200px;
+      background: var(--bg-hover);
+    }
+    #cardsContainer .card.card--visual:has(.card-media.card-media--load-failed):not(:has(.card-media.media-revealed)) .card-body {
+      padding-top: 0;
+    }
     #cardsContainer .card.card--text-only .card-body {
       padding-top: 12px;
     }
@@ -4762,11 +4854,9 @@ body {
       white-space: pre-wrap;
       word-break: break-word;
     }
-    #editPanel.edit-panel--text-only #dropArea {
-      display: none;
-    }
-    #editPanel.edit-panel--text-only .image-upload-tools {
-      margin-top: 0;
+    #editPanel.edit-panel--no-image-preview #cardDownloadImageBtn,
+    #editPanel.edit-panel--no-image-preview #trimBlackBorderBtn {
+      display: none !important;
     }
 
 .hidden {
