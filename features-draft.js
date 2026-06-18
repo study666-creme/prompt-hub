@@ -6601,6 +6601,63 @@
     return { ok: true, recovered: 0 };
   }
 
+  let missingGenCardRepairInflight = null;
+
+  /** 卡片有 genJobId 但无有效图：从 API 任务链或本地备份恢复 */
+  async function repairMissingGenCardImagesQuiet() {
+    if (!window.PromptHubApi?.getGenerationJob || !window.SupabaseSync?.isLoggedIn?.()) return false;
+    if (missingGenCardRepairInflight) return missingGenCardRepairInflight;
+    const list = window.__promptHubCards || [];
+    const tomb = window.getDeletedGenerationJobTombstones?.() || {};
+    const targets = list.filter((c) => {
+      if (!c?.id || !c?.genJobId) return false;
+      const jobKey = String(c.genJobId);
+      const base = jobKey.replace(/#\d+$/, '');
+      if (tomb[jobKey] || (base && tomb[base])) return false;
+      if (!c.image) return true;
+      return !isUsableWarehouseImage(c);
+    }).slice(0, 8);
+    if (!targets.length) return false;
+    missingGenCardRepairInflight = (async () => {
+      let changed = false;
+      for (const card of targets) {
+        try {
+          let src = null;
+          const jobId = String(card.genJobId);
+          const baseJobId = jobId.replace(/#\d+$/, '');
+          const r = await window.PromptHubApi.getGenerationJob(baseJobId);
+          if (r?.ok && r.data?.imageUrl) src = r.data.imageUrl;
+          if (!src && typeof window.getCardImageBackup === 'function') {
+            const backup = await window.getCardImageBackup(card.id);
+            if (backup && isDisplayableImage(backup)) src = backup;
+          }
+          if (!src) continue;
+          const ok = await repairWarehouseCardImageFromJob(card, src, jobId);
+          if (ok) {
+            changed = true;
+            window.SupabaseSync?.clearPathMissingForCard?.(card.id, card.image);
+            if (typeof window.saveCardImageBackup === 'function') {
+              void window.saveCardImageBackup(card.id, src).catch(() => {});
+            }
+          }
+        } catch (e) {
+          console.warn('[repairMissingGenCardImages]', card.id, e);
+        }
+        await new Promise((res) => setTimeout(res, 160));
+      }
+      if (changed) {
+        if (typeof window.persistPromptHubCards === 'function') await window.persistPromptHubCards();
+        window.refreshWarehouseUI?.({ softCards: true });
+        if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+          renderImageGenFeed({ preserveScroll: true });
+        }
+        window.scheduleCloudPush?.({ urgent: true });
+      }
+      return changed;
+    })().finally(() => { missingGenCardRepairInflight = null; });
+    return missingGenCardRepairInflight;
+  }
+
   /** 刷新/登录后：恢复进行中的卡片、续轮询、静默补全已完成任务 */
   async function resumePendingGenerationJobs(opts = {}) {
     if (!window.PromptHubApi?.listRecentGenerationJobs) return false;
@@ -10833,6 +10890,9 @@
       const whCard = slotJobId
         ? (window.__promptHubCards || []).find((c) => c.genJobId === slotJobId)
         : null;
+      if (whCard && warehouseCardImageNeedsRecovery(whCard, image || storedImage)) {
+        await repairWarehouseCardImageFromJob(whCard, image || storedImage, slotJobId);
+      }
       const backupRef = image || storedImage;
       if (whCard?.id && backupRef && typeof window.saveCardImageBackup === 'function') {
         void window.getCardImageBackup?.(whCard.id).then((existing) => {
@@ -12460,6 +12520,7 @@
     onCardDeletedForGen,
     recoverRecentGenerationJobs,
     recoverLostGenerationsFromApi,
+    repairMissingGenCardImagesQuiet,
     resumePendingGenerationJobs,
     scheduleGenJobsSync,
     renderCreations,

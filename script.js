@@ -1464,48 +1464,50 @@
 
     let genCardImageRepairInflight = null;
     async function repairGeneratedCardImagesQuiet() {
-      if (!window.SupabaseSync?.isLoggedIn?.() || !window.SupabaseSync?.archiveGeneratedCardImage) return;
+      if (!window.SupabaseSync?.isLoggedIn?.()) return;
       if (genCardImageRepairInflight) return genCardImageRepairInflight;
-      const targets = cards.filter((c) => {
-        if (!c?.id || !c?.image) return false;
-        if (!c.genJobId && !(c.tags || []).includes('图片生成')) return false;
-        if (window.SupabaseSync.isDataUrl?.(c.image)) return true;
-        if (/^https?:\/\//i.test(c.image)) return true;
-        if (window.SupabaseSync.isStorageRef?.(c.image)) {
-          const path = window.SupabaseSync.storagePathFromRef?.(c.image);
-          return !!(path && window.SupabaseSync.isPathKnownMissing?.(path));
-        }
-        return false;
-      }).slice(0, 4);
-      if (!targets.length) return;
       genCardImageRepairInflight = (async () => {
-        let changed = false;
-        for (const c of targets) {
-          try {
-            let src = c.image;
-            if (typeof getCardImageBackup === 'function') {
-              const backup = await getCardImageBackup(c.id);
-              if (backup && String(backup).startsWith('data:')) src = backup;
+        if (window.SupabaseSync?.archiveGeneratedCardImage) {
+          const targets = cards.filter((c) => {
+            if (!c?.id || !c?.image) return false;
+            if (!c.genJobId && !(c.tags || []).includes('图片生成')) return false;
+            if (window.SupabaseSync.isDataUrl?.(c.image)) return true;
+            if (/^https?:\/\//i.test(c.image)) return true;
+            if (window.SupabaseSync.isStorageRef?.(c.image)) {
+              const path = window.SupabaseSync.storagePathFromRef?.(c.image);
+              return !!(path && window.SupabaseSync.isPathKnownMissing?.(path));
             }
-            const ref = await window.SupabaseSync.archiveGeneratedCardImage(c.id, src);
-            if (ref && ref !== c.image) {
-              c.image = ref;
-              c.updatedAt = Date.now();
-              changed = true;
+            return false;
+          }).slice(0, 4);
+          let changed = false;
+          for (const c of targets) {
+            try {
+              let src = c.image;
+              if (typeof getCardImageBackup === 'function') {
+                const backup = await getCardImageBackup(c.id);
+                if (backup && String(backup).startsWith('data:')) src = backup;
+              }
+              const ref = await window.SupabaseSync.archiveGeneratedCardImage(c.id, src);
+              if (ref && ref !== c.image) {
+                c.image = ref;
+                c.updatedAt = Date.now();
+                changed = true;
+              }
+            } catch (e) {
+              console.warn('[repairGeneratedCardImages] skipped', c.id, e);
             }
-          } catch (e) {
-            console.warn('[repairGeneratedCardImages] skipped', c.id, e);
+            await new Promise((r) => setTimeout(r, 120));
           }
-          await new Promise((r) => setTimeout(r, 120));
-        }
-        if (changed) {
-          await saveAllData({ skipCloud: true });
-          if (document.getElementById('pageWarehouse')?.classList.contains('active')) renderCards(true);
-          if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-            window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: true });
+          if (changed) {
+            await saveAllData({ skipCloud: true });
+            if (document.getElementById('pageWarehouse')?.classList.contains('active')) renderCards(true);
+            if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+              window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: true });
+            }
+            scheduleCloudPush({ urgent: true });
           }
-          scheduleCloudPush({ urgent: true });
         }
+        await window.FeatureDraft?.repairMissingGenCardImagesQuiet?.();
       })().finally(() => { genCardImageRepairInflight = null; });
       return genCardImageRepairInflight;
     }
@@ -1980,7 +1982,7 @@
       warehouseMasonryTimer = setTimeout(() => {
         warehouseMasonryPending = 0;
         layoutMasonryGrid();
-      }, warehouseMasonryPending > 4 ? 200 : 120);
+      }, warehouseMasonryPending > 4 ? 520 : 380);
     }
     function scheduleWarehouseMasonryForCard(cardId) {
       if (!cardId) {
@@ -1989,7 +1991,7 @@
       }
       const now = Date.now();
       const last = warehouseMasonryCardCooldown.get(cardId) || 0;
-      if (now - last < 520) return;
+      if (now - last < 900) return;
       warehouseMasonryCardCooldown.set(cardId, now);
       scheduleWarehouseMasonryLayout();
     }
@@ -2810,6 +2812,7 @@
           if (!document.getElementById('pageWarehouse')?.classList.contains('active')) return;
           if (isMobileViewport()) enforceMobileCardGrid();
           else scheduleWarehouseMasonryLayout();
+          void repairGeneratedCardImagesQuiet();
         }, 220);
       }
       deferAfterPagePaint(() => {
@@ -5869,7 +5872,9 @@
       window.CardImageLoader?.bindWarehouse?.(container, pageCards);
       const boost = isMobileViewport() ? 20 : 24;
       window.CardImageLoader?.boostWarehouseImages?.(container, boost);
-      if (!isMobileViewport()) scheduleWarehouseMasonryLayout();
+      if (!isMobileViewport() && !container.classList.contains('masonry-ready')) {
+        scheduleWarehouseMasonryLayout();
+      }
     }
 
     async function runCardImageIntegrityAudit() {
@@ -6992,11 +6997,10 @@
       const eagerImgCount = mobileGrid ? 6 : Math.min(4, pageCards.length);
       pageCards.forEach((card, idx) => {
         const div = document.createElement('div');
-        div.className = `card card-enter ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
-        if (!mobileGrid && pageCards.length <= 24) {
+        div.className = `card ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
+        if (!mobileGrid && pageCards.length <= 8 && reset) {
+          div.classList.add('card-enter');
           div.style.animationDelay = `${Math.min(idx * 0.045, 0.36)}s`;
-        } else if (!mobileGrid) {
-          div.classList.remove('card-enter');
         }
         div.dataset.id = card.id;
         if (window.isCommunityCollectCard?.(card)) {
@@ -7151,10 +7155,7 @@
           masonryInstance.layout();
         } else {
           resetWarehouseGridLayout(container);
-          requestAnimationFrame(() => {
-            layoutMasonryGrid();
-            requestAnimationFrame(layoutMasonryGrid);
-          });
+          requestAnimationFrame(layoutMasonryGrid);
         }
       } else if (mobileGrid) {
         enforceMobileCardGrid();

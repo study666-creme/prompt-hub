@@ -1344,6 +1344,20 @@
   display: inline-flex;
   gap: 6px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.imagegen-ref-quick-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.imagegen-ref-quick-actions .btn {
+  width: 100%;
+  justify-content: center;
 }
 
 .imagegen-ref-tool-btn {

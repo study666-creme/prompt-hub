@@ -12,27 +12,53 @@
   /** 排队提交间隔：避免上游 Apimart 限流导致失败 */
   const BATCH_SUBMIT_GAP_MS = 2200;
   const BATCH_SUBMIT_JITTER_MS = 800;
+  const STYLE_CONVERT_SUFFIX = '【画风转换】严格保留原图人物/物体身份、姿态与构图，仅转换画面艺术风格与渲染质感，细节完整，专业插画完成度，无文字无水印';
+  const CHAR_TURNAROUND_PROMPT = '【角色三视图】高级游戏/动画设定集品质：同一角色正面、左侧面、背面三视图并排展示，全身比例准确，服装结构与配饰清晰，高端纯色背景（淡灰白），uniform studio lighting，干净无阴影干扰，无文字无水印，concept art turnaround sheet';
 
   function getFirstRefImage() {
     const refs = window.FeatureDraft?.getImageGenRefImages?.() || [];
     return refs[0] || '';
   }
 
+  function getRefImagesForBatch() {
+    return (window.FeatureDraft?.getImageGenRefImages?.() || []).filter(Boolean);
+  }
+
+  function buildStyleConvertPrompt(styleId) {
+    const tag = (styleId && styleId !== 'none' && styleId !== 'inherit')
+      ? (window.ImageGenPromptKit?.getArtStyleTag?.(styleId) || '')
+      : '【画风锁定】高质量商业插画，细节丰富，统一光影';
+    return tag ? `${tag}，${STYLE_CONVERT_SUFFIX}` : STYLE_CONVERT_SUFFIX;
+  }
+
   function updateRefToolState() {
-    const ref = getFirstRefImage();
+    const refs = getRefImagesForBatch();
+    const ref = refs[0] || '';
     const reverseStatus = $('imageGenReverseRefStatus');
     const fissionStatus = $('imageGenFissionRefStatus');
+    const styleStatus = $('imageGenStyleConvertRefStatus');
+    const turnaroundStatus = $('imageGenTurnaroundRefStatus');
     const reverseBtn = $('imageGenReverseBtn');
     const fissionBtn = $('imageGenFissionAnalyzeBtn');
-    const label = ref ? '已就绪：将使用参考图第一张' : '请先在上方添加参考图';
-    if (reverseStatus) reverseStatus.textContent = label;
-    if (fissionStatus) fissionStatus.textContent = label;
+    const styleQuickBtn = $('imageGenStyleConvertQuickBtn');
+    const turnaroundQuickBtn = $('imageGenTurnaroundQuickBtn');
+    const refLabel = refs.length
+      ? `已就绪：${refs.length} 张参考图，将逐张提交`
+      : '请先在上方添加参考图';
+    const singleLabel = ref ? '已就绪：将使用参考图第一张' : '请先在上方添加参考图';
+    if (reverseStatus) reverseStatus.textContent = singleLabel;
+    if (fissionStatus) fissionStatus.textContent = singleLabel;
+    if (styleStatus) styleStatus.textContent = refLabel;
+    if (turnaroundStatus) turnaroundStatus.textContent = refLabel;
     if (reverseBtn && reverseBtn.textContent === '反推提示词') reverseBtn.disabled = !ref;
     if (fissionBtn && !fissionBtn.disabled && fissionBtn.textContent === fissionAnalyzeBtnLabel()) {
       fissionBtn.disabled = !ref;
     } else if (fissionBtn && fissionBtn.textContent === fissionAnalyzeBtnLabel()) {
       fissionBtn.disabled = !ref;
     }
+    if (styleQuickBtn) styleQuickBtn.disabled = !refs.length;
+    if (turnaroundQuickBtn) turnaroundQuickBtn.disabled = !refs.length;
+    void updateBatchCostLabel();
   }
 
   function makeBatchId() {
@@ -83,6 +109,135 @@
       await batchSubmitSleep();
     }
     return { results, charged, total, batchId };
+  }
+
+  async function runRefImageBatch({ refs, prompt, btn, btnPrefix, unitLabel }) {
+    const run = window.FeatureDraft?.runImageGenWithPrompt;
+    if (typeof run !== 'function') {
+      toast('生图模块未就绪，请刷新页面');
+      return null;
+    }
+    const list = Array.isArray(refs) ? refs.filter(Boolean) : [];
+    if (!list.length) {
+      toast('请先在上方添加参考图');
+      return null;
+    }
+    const unit = await getUnitImageGenCost();
+    const balance = window.PointsSystem?.getCredits?.() ?? 0;
+    if (balance < unit) {
+      toast(`积分不足（每张 ${unit}，当前 ${balance}）`);
+      return null;
+    }
+    const totalNeed = creditsTotal(unit, list.length);
+    if (balance < totalNeed) {
+      toast(`积分约够 ${Math.floor(balance / unit)} 张，将按顺序提交直到不足（${unit} 积分/张）`);
+    }
+    const batchId = makeBatchId();
+    const total = list.length;
+    const results = [];
+    let charged = 0;
+    for (let i = 0; i < list.length; i += 1) {
+      const batchIndex = i + 1;
+      if (btn) btn.textContent = `${btnPrefix} ${batchIndex}/${total}…`;
+      setPrompt(prompt);
+      const res = await run(prompt, {
+        silentToast: true,
+        batch: true,
+        batchId,
+        batchIndex,
+        batchTotal: total,
+        refImages: [list[i]]
+      });
+      results.push({
+        ok: !!res?.ok,
+        batchIndex,
+        message: res?.message || (res?.ok ? '' : '提交失败')
+      });
+      if (res?.ok) charged += res.creditsCharged || unit;
+      else if (res?.reason === 'credits') break;
+      await batchSubmitSleep();
+    }
+    return { results, charged, total, batchId, unitLabel, unit };
+  }
+
+  async function onQueueStyleConvertBatch() {
+    if (batchRunning) {
+      toast('批量任务进行中，请稍候');
+      return;
+    }
+    if (!window.AuthGate?.requireAuth?.('imagegen')) return;
+    const refs = getRefImagesForBatch();
+    if (!refs.length) {
+      toast('请先在上方添加参考图');
+      return;
+    }
+    const styleId = $('imageGenStyleConvertStyle')?.value || 'anime';
+    const prompt = buildStyleConvertPrompt(styleId);
+    batchRunning = true;
+    const btn = $('imageGenStyleConvertBatchBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const batch = await runRefImageBatch({
+        refs,
+        prompt,
+        btn,
+        btnPrefix: '风格转换',
+        unitLabel: '风格转换'
+      });
+      if (!batch) return;
+      await window.PointsSystem?.refreshCreditsFromServer?.();
+      window.PointsSystem?.updateCreditsUI?.();
+      toast(`${summarizeBatchResults(batch.results, batch.total, batch.unitLabel)}，约 ${batch.charged || batch.results.filter((r) => r.ok).length * (batch.unit || 0)} 积分`);
+      if (window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
+        window.MobileUI.setImageGenView('feed');
+      }
+    } catch (e) {
+      console.error('[imagegen] style convert batch failed', e);
+      toast('风格转换提交失败，请刷新页面后重试');
+    } finally {
+      batchRunning = false;
+      if (btn) btn.disabled = false;
+      void updateBatchCostLabel();
+    }
+  }
+
+  async function onQueueTurnaroundBatch() {
+    if (batchRunning) {
+      toast('批量任务进行中，请稍候');
+      return;
+    }
+    if (!window.AuthGate?.requireAuth?.('imagegen')) return;
+    const refs = getRefImagesForBatch();
+    if (!refs.length) {
+      toast('请先在上方添加参考图');
+      return;
+    }
+    batchRunning = true;
+    const btn = $('imageGenTurnaroundBatchBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const batch = await runRefImageBatch({
+        refs,
+        prompt: CHAR_TURNAROUND_PROMPT,
+        btn,
+        btnPrefix: '三视图',
+        unitLabel: '三视图'
+      });
+      if (!batch) return;
+      await window.PointsSystem?.refreshCreditsFromServer?.();
+      window.PointsSystem?.updateCreditsUI?.();
+      toast(`${summarizeBatchResults(batch.results, batch.total, batch.unitLabel)}，约 ${batch.charged || batch.results.filter((r) => r.ok).length * (batch.unit || 0)} 积分`);
+      if (window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
+        window.MobileUI.setImageGenView('feed');
+      }
+    } catch (e) {
+      console.error('[imagegen] turnaround batch failed', e);
+      toast('三视图提交失败，请刷新页面后重试');
+    } finally {
+      batchRunning = false;
+      if (btn) btn.disabled = false;
+      void updateBatchCostLabel();
+    }
   }
 
   function $(id) {
@@ -223,7 +378,7 @@
 
   function resetBatchState() {
     batchRunning = false;
-    ['imageGenInspireBatchBtn', 'imageGenFissionBatchBtn'].forEach((id) => {
+    ['imageGenInspireBatchBtn', 'imageGenFissionBatchBtn', 'imageGenStyleConvertBatchBtn', 'imageGenTurnaroundBatchBtn'].forEach((id) => {
       const b = $(id);
       if (b) b.disabled = false;
     });
@@ -259,6 +414,25 @@
       fissionBtn.textContent = n > 0
         ? `排队裂变生图 ${n} 张 · 约 ${fmtCredits(total)} 积分（${fmtCredits(unit)} 积分/张）`
         : '排队裂变生图 · 先分析并勾选变体';
+    }
+
+    const refCount = getRefImagesForBatch().length;
+    const styleBtn = $('imageGenStyleConvertBatchBtn');
+    const turnaroundBtn = $('imageGenTurnaroundBatchBtn');
+    const unitPerSheet = `${fmtCredits(unit)} 积分/张`;
+    if (styleBtn) {
+      const total = creditsTotal(unit, refCount || 1);
+      styleBtn.textContent = refCount > 0
+        ? `一键风格转换 ${refCount} 张 · 约 ${fmtCredits(total)} 积分（${unitPerSheet}）`
+        : `一键风格转换 · ${unitPerSheet}`;
+      styleBtn.disabled = !refCount;
+    }
+    if (turnaroundBtn) {
+      const total = creditsTotal(unit, refCount || 1);
+      turnaroundBtn.textContent = refCount > 0
+        ? `一键生成三视图 ${refCount} 张 · 约 ${fmtCredits(total)} 积分（${unitPerSheet}）`
+        : `一键生成三视图 · ${unitPerSheet}`;
+      turnaroundBtn.disabled = !refCount;
     }
   }
 
@@ -856,6 +1030,16 @@
 
     $('imageGenReverseToolBtn')?.addEventListener('click', () => switchRefTool('reverse'));
     $('imageGenFissionToolBtn')?.addEventListener('click', () => switchRefTool('fission'));
+    $('imageGenStyleConvertToolBtn')?.addEventListener('click', () => switchRefTool('styleConvert'));
+    $('imageGenTurnaroundToolBtn')?.addEventListener('click', () => switchRefTool('turnaround'));
+    $('imageGenStyleConvertQuickBtn')?.addEventListener('click', () => {
+      switchRefTool('styleConvert');
+      void onQueueStyleConvertBatch();
+    });
+    $('imageGenTurnaroundQuickBtn')?.addEventListener('click', () => {
+      switchRefTool('turnaround');
+      void onQueueTurnaroundBatch();
+    });
 
     $('imageGenInspireDrawBtn')?.addEventListener('click', onDrawInspiration);
     $('imageGenInspireBatchBtn')?.addEventListener('click', () => void onQueueBatch());
@@ -865,6 +1049,8 @@
     $('imageGenReverseBtn')?.addEventListener('click', () => void onReversePrompt());
     $('imageGenFissionAnalyzeBtn')?.addEventListener('click', () => void onFissionAnalyze());
     $('imageGenFissionBatchBtn')?.addEventListener('click', () => void onQueueFissionBatch());
+    $('imageGenStyleConvertBatchBtn')?.addEventListener('click', () => void onQueueStyleConvertBatch());
+    $('imageGenTurnaroundBatchBtn')?.addEventListener('click', () => void onQueueTurnaroundBatch());
     $('imageGenInspireCount')?.addEventListener('change', () => void updateBatchCostLabel());
     $('imageGenFissionCount')?.addEventListener('change', () => void updateBatchCostLabel());
     ['imageGenModel', 'imageGenResolution', 'imageGenQuality'].forEach((id) => {
@@ -915,6 +1101,20 @@
         fissionStyleSel.appendChild(opt);
       });
       fissionStyleSel.value = 'inherit';
+    }
+
+    const styleConvertSel = $('imageGenStyleConvertStyle');
+    if (styleConvertSel && window.ImageGenPromptKit?.listArtStyles && !styleConvertSel.dataset.filled) {
+      styleConvertSel.dataset.filled = '1';
+      styleConvertSel.innerHTML = '';
+      window.ImageGenPromptKit.listArtStyles().forEach((t) => {
+        if (t.id === 'auto' || t.id === 'none') return;
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = `${t.label}（${t.hint}）`;
+        styleConvertSel.appendChild(opt);
+      });
+      styleConvertSel.value = 'anime';
     }
 
     switchImageGenMode('gen');
