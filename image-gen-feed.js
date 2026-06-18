@@ -15,6 +15,86 @@
   let imageGenFeedPagedStore = null;
   let imageGenFeedScrollLoading = false;
   let imageGenFeedScrollIntent = false;
+  let imageGenFeedUserScrollingUntil = 0;
+  let imageGenFeedDeferredRenderTimer = null;
+  let imageGenFeedScrollGuardBound = false;
+
+  function markImageGenFeedUserScrolling() {
+    imageGenFeedUserScrollingUntil = Date.now() + 1400;
+    imageGenFeedScrollIntent = true;
+  }
+
+  function shouldDeferImageGenFeedRender() {
+    return Date.now() < imageGenFeedUserScrollingUntil;
+  }
+
+  function bindImageGenFeedScrollGuard(wrap, scrollEl) {
+    if (!wrap || !scrollEl || scrollEl.dataset.phIgScrollGuard === '1') return;
+    scrollEl.dataset.phIgScrollGuard = '1';
+    scrollEl.addEventListener('scroll', () => markImageGenFeedUserScrolling(), { passive: true });
+  }
+
+  function captureImageGenFeedScrollAnchor(wrap, scrollEl) {
+    if (!wrap || !scrollEl) return null;
+    const top = scrollEl.scrollTop;
+    if (top < 4) return { scrollTop: top, scrollEl };
+    const rootRect = scrollEl.getBoundingClientRect();
+    for (const card of wrap.querySelectorAll('.imagegen-feed-card[data-feed-id]')) {
+      const rect = card.getBoundingClientRect();
+      if (rect.bottom <= rootRect.top + 8) continue;
+      if (rect.top >= rootRect.bottom - 8) break;
+      return {
+        feedId: card.dataset.feedId || '',
+        offset: rect.top - rootRect.top,
+        scrollTop: top,
+        scrollEl
+      };
+    }
+    return { scrollTop: top, scrollEl };
+  }
+
+  function restoreImageGenFeedScrollAnchor(anchor) {
+    if (!anchor?.scrollEl) return;
+    const { scrollEl } = anchor;
+    if (anchor.feedId) {
+      const card = document.querySelector(`#imageGenFeed .imagegen-feed-card[data-feed-id="${CSS.escape(anchor.feedId)}"]`);
+      if (card) {
+        const rootRect = scrollEl.getBoundingClientRect();
+        const rect = card.getBoundingClientRect();
+        scrollEl.scrollTop = Math.max(0, anchor.scrollTop + (rect.top - rootRect.top) - anchor.offset);
+        return;
+      }
+    }
+    scrollEl.scrollTop = anchor.scrollTop;
+  }
+
+  function warehouseCardsListUnchanged(prev, next) {
+    if (!Array.isArray(prev) || !Array.isArray(next) || prev.length !== next.length) return false;
+    for (let i = 0; i < prev.length; i += 1) {
+      const a = prev[i];
+      const b = next[i];
+      if (!a || !b || String(a.id) !== String(b.id)) return false;
+      if (String(a.image || '') !== String(b.image || '')) return false;
+      if (String(a.updatedAt || '') !== String(b.updatedAt || '')) return false;
+    }
+    return true;
+  }
+
+  function patchImageGenFeedPendingSection(wrap, pending, failed) {
+    if (!wrap) return;
+    wrap.querySelectorAll('.imagegen-feed-card[data-pending="1"], .imagegen-feed-card[data-failed="1"]').forEach((el) => el.remove());
+    const html = pending.map((j) => buildFeedPendingCardHtml(j)).join('')
+      + failed.map((j) => buildFeedFailedCardHtml(j)).join('');
+    if (!html) return;
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    const newCards = [...temp.children];
+    const anchor = wrap.querySelector('.grid-sizer') || wrap.firstChild;
+    newCards.forEach((card) => {
+      wrap.insertBefore(card, anchor);
+    });
+    bindImageGenFeedCardEvents(wrap, newCards);
+  }
 
   function d() {
     return deps;
@@ -176,7 +256,7 @@
           horizontalOrder: false,
           transitionDuration: 0
         };
-        const scrollTop = wrap.scrollTop;
+        const scrollTop = (resolveImageGenFeedScrollRoot(wrap) || wrap).scrollTop;
         if (imageGenMasonry) {
           imageGenMasonry.option(opts);
           imageGenMasonry.reloadItems();
@@ -192,12 +272,14 @@
         }
         requestAnimationFrame(() => {
           imageGenMasonry?.layout();
-          wrap.scrollTop = scrollTop;
+          const scrollEl = resolveImageGenFeedScrollRoot(wrap) || wrap;
+          scrollEl.scrollTop = scrollTop;
           d().setFeedLayoutPending?.(wrap, false);
           window.CardImageLoader?.observeContainer?.(wrap);
           d().scrubImageGenFeedCards?.(wrap);
         });
-        wrap.scrollTop = scrollTop;
+        const scrollElSync = resolveImageGenFeedScrollRoot(wrap) || wrap;
+        scrollElSync.scrollTop = scrollTop;
         bindImageGenFeedImageRelayout();
       };
 
@@ -364,7 +446,13 @@
             tag: d().getImageGenWhTag?.()
           }).length
           : 0;
-        return `wh:${d().getImageGenWhGroup?.()}:${d().getImageGenWhTag?.()}:p${(d().getImageGenPendingJobs?.() ?? []).length}:f${(d().getImageGenFailedJobs?.() ?? []).length}:n${whCount}`;
+        const pendingSig = (d().getImageGenPendingJobs?.() ?? [])
+          .map((j) => `${j.id}:${j.recovering ? 1 : 0}:${j.jobId || ''}:${(j.pendingNote || '').slice(0, 12)}`)
+          .join(',');
+        const failedSig = (d().getImageGenFailedJobs?.() ?? [])
+          .map((j) => j.id)
+          .join(',');
+        return `wh:${d().getImageGenWhGroup?.()}:${d().getImageGenWhTag?.()}:p${pendingSig}:f${failedSig}:n${whCount}`;
       }
       const posts = getImageGenCommunityFeedList();
       const ids = posts.map((p) => String(p.id)).join('|');
@@ -530,7 +618,19 @@
       const feedAppend = !!opts.feedAppend;
       const wrap = document.getElementById('imageGenFeed');
       if (!wrap) return;
+      if (!feedAppend && !opts.force && shouldDeferImageGenFeedRender()) {
+        clearTimeout(imageGenFeedDeferredRenderTimer);
+        imageGenFeedDeferredRenderTimer = setTimeout(() => {
+          imageGenFeedDeferredRenderTimer = null;
+          void renderImageGenFeed({ ...opts, force: true });
+        }, Math.max(120, imageGenFeedUserScrollingUntil - Date.now()));
+        return;
+      }
       const scrollEl = resolveImageGenFeedScrollRoot(wrap) || wrap;
+      bindImageGenFeedScrollGuard(wrap, scrollEl);
+      const scrollAnchor = feedAppend
+        ? null
+        : captureImageGenFeedScrollAnchor(wrap, scrollEl);
       const scrollTopBefore = scrollEl?.scrollTop ?? 0;
       const preserveScroll = opts.scrollToTop === true
         ? false
@@ -540,18 +640,43 @@
         : (preserveScroll ? scrollTopBefore : 0);
       d().syncImageGenWarehouseFiltersUI?.();
       d().syncImageGenCommunityFiltersUI?.();
-  
+
       if (!feedAppend) {
         d().prunePendingJobsWithWarehouseCards?.();
       }
       const sig = imageGenFeedListSignature();
+      const prevStore = imageGenFeedPagedStore;
+      if (!feedAppend && prevStore?.sig === sig && !opts.force) {
+        return;
+      }
       if (!feedAppend) {
         imageGenFeedScrollIntent = false;
+        const whCards = d().getImageGenFeedTab?.() === 'warehouse' ? getImageGenWarehouseFeedList() : [];
+        const commPosts = d().getImageGenFeedTab?.() === 'community' ? getImageGenCommunityFeedList() : [];
+        const pending = (d().getImageGenPendingJobs?.() ?? []).slice(0, d().IMAGEGEN_FEED_PENDING_CAP ?? 6);
+        const failed = (d().getImageGenFailedJobs?.() ?? []).slice(0, d().IMAGEGEN_FEED_FAILED_CAP ?? 4);
+        if (
+          prevStore
+          && prevStore.sig !== sig
+          && d().getImageGenFeedTab?.() === 'warehouse'
+          && warehouseCardsListUnchanged(prevStore.whCards, whCards)
+        ) {
+          imageGenFeedPagedStore = { ...prevStore, sig, whCards, commPosts };
+          patchImageGenFeedPendingSection(wrap, pending, failed);
+          bindImageGenFeedImageRelayout();
+          if (d().isMobileFeedViewport?.()) enforceMobileImageGenFeed();
+          else scheduleImageGenFeedLayout();
+          if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);
+          else if (scrollEl && preserveScroll) scrollEl.scrollTop = scrollTop;
+          syncImageGenFeedLoadMoreBtn();
+          bindImageGenFeedPagedScroll();
+          return;
+        }
         imageGenFeedPagedStore = {
           sig,
           page: 1,
-          whCards: d().getImageGenFeedTab?.() === 'warehouse' ? getImageGenWarehouseFeedList() : [],
-          commPosts: d().getImageGenFeedTab?.() === 'community' ? getImageGenCommunityFeedList() : []
+          whCards,
+          commPosts
         };
       } else if (!imageGenFeedPagedStore || imageGenFeedPagedStore.sig !== sig) {
         return;
@@ -611,7 +736,10 @@
         bindImageGenFeedImageRelayout();
         if (mobileFeed) enforceMobileImageGenFeed();
         else layoutImageGenFeedMasonry();
-        if (scrollEl) scrollEl.scrollTop = scrollTop;
+        if (scrollEl) {
+          if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);
+          else scrollEl.scrollTop = scrollTop;
+        }
       } else {
         resetImageGenFeedCardLayout();
         d().setFeedLayoutPending?.(wrap, true);
@@ -627,7 +755,10 @@
         } else {
           layoutImageGenFeedMasonry();
         }
-        if (scrollEl) scrollEl.scrollTop = scrollTop;
+        if (scrollEl) {
+          if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);
+          else scrollEl.scrollTop = scrollTop;
+        }
         d().renderImageGenMobileResult?.();
       }
   
@@ -667,7 +798,8 @@
         } else {
           layoutImageGenFeedMasonry();
         }
-        if (scrollEl) scrollEl.scrollTop = scrollTop;
+        const anchorAfter = scrollAnchor || { scrollTop, scrollEl };
+        restoreImageGenFeedScrollAnchor(anchorAfter);
         d().scrubImageGenFeedCards?.(wrap);
         syncImageGenFeedLoadMoreBtn();
         if (d().getImageGenFeedTab?.() === 'warehouse' && store.whCards.length && window.SupabaseSync?.backfillGridThumbsForCards) {

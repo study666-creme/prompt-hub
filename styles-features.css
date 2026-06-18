@@ -1355,9 +1355,29 @@
   margin: 0 0 10px;
 }
 
+.imagegen-ref-quick-actions--quad {
+  grid-template-columns: 1fr 1fr;
+}
+
 .imagegen-ref-quick-actions .btn {
   width: 100%;
   justify-content: center;
+}
+
+.imagegen-ref-option-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.imagegen-ref-option-check input {
+  margin-top: 2px;
+  flex-shrink: 0;
 }
 
 .imagegen-ref-tool-btn {

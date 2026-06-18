@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260618e';
+    window.__APP_BUILD__ = '20260618f';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -104,15 +104,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260618e">
-  <link rel="stylesheet" href="styles-theme.css?v=20260618e">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260618e">
+  <link rel="stylesheet" href="styles.css?v=20260618f">
+  <link rel="stylesheet" href="styles-theme.css?v=20260618f">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260618f">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260618e">
+  <link rel="stylesheet" href="styles-features.css?v=20260618f">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
-  <script src="theme.js?v=20260618e"></script>
+  <script src="theme.js?v=20260618f"></script>
 </head>
 <body>
   <div class="app-chrome">
@@ -613,7 +613,7 @@
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status" aria-live="polite"></p>
       <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260618e</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260618f</p>
     </div>
   </nav>
 
@@ -1261,6 +1261,7 @@
               <div class="imagegen-ref-tools" role="group" aria-label="参考图工具">
                 <button type="button" class="imagegen-ref-tool-btn" id="imageGenStyleConvertToolBtn" data-ref-tool="styleConvert" aria-expanded="false">风格转换</button>
                 <button type="button" class="imagegen-ref-tool-btn" id="imageGenTurnaroundToolBtn" data-ref-tool="turnaround" aria-expanded="false">三视图</button>
+                <button type="button" class="imagegen-ref-tool-btn" id="imageGenProductAnglesToolBtn" data-ref-tool="productAngles" aria-expanded="false">物品多角度</button>
                 <button type="button" class="imagegen-ref-tool-btn" id="imageGenReverseToolBtn" data-ref-tool="reverse" aria-expanded="false">反推</button>
                 <button type="button" class="imagegen-ref-tool-btn" id="imageGenFissionToolBtn" data-ref-tool="fission" aria-expanded="false">裂变</button>
               </div>
@@ -1273,9 +1274,10 @@
               </div>
               <div class="imagegen-ref-gallery" id="imageGenRefGallery" hidden></div>
             </div>
-            <div class="imagegen-ref-quick-actions">
+            <div class="imagegen-ref-quick-actions imagegen-ref-quick-actions--quad">
               <button type="button" class="btn btn-secondary btn-sm" id="imageGenStyleConvertQuickBtn">一键风格转换</button>
               <button type="button" class="btn btn-secondary btn-sm" id="imageGenTurnaroundQuickBtn">一键三视图</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="imageGenProductAnglesQuickBtn">一键物品多角度</button>
             </div>
             <div class="imagegen-ref-tool-panel" id="imageGenStyleConvertPanel" data-ref-tool-panel="styleConvert" hidden>
               <p class="panel-hint">上方每张参考图各提交一次：同一套优质提示词 + 单张参考，批量排队生图。</p>
@@ -1289,7 +1291,16 @@
             <div class="imagegen-ref-tool-panel" id="imageGenTurnaroundPanel" data-ref-tool-panel="turnaround" hidden>
               <p class="panel-hint">高级纯色背景角色三视图：上方每张参考图各生成一套正面/侧面/背面设定图。</p>
               <p class="panel-hint imagegen-ref-tool-status" id="imageGenTurnaroundRefStatus">请先在上方添加参考图</p>
+              <label class="imagegen-ref-option-check">
+                <input type="checkbox" id="imageGenTurnaroundHeadshot">
+                <span>额外生成高清大头照（每张参考图再多 1 次生图）</span>
+              </label>
               <button type="button" class="btn btn-primary btn-sm imagegen-inspire-batch-btn" id="imageGenTurnaroundBatchBtn">一键生成三视图 · — 积分/张</button>
+            </div>
+            <div class="imagegen-ref-tool-panel" id="imageGenProductAnglesPanel" data-ref-tool-panel="productAngles" hidden>
+              <p class="panel-hint">高端纯色背景物品/道具多角度：上方每张参考图各生成正视、45°、侧视、俯视设定图。</p>
+              <p class="panel-hint imagegen-ref-tool-status" id="imageGenProductAnglesRefStatus">请先在上方添加参考图</p>
+              <button type="button" class="btn btn-primary btn-sm imagegen-inspire-batch-btn" id="imageGenProductAnglesBatchBtn">一键物品多角度 · — 积分/张</button>
             </div>
             <div class="imagegen-ref-tool-panel" id="imageGenReversePanel" data-ref-tool-panel="reverse" hidden>
               <p class="panel-hint">使用上方参考图第一张，反推提示词（Apimart · gemini-2.5-flash-lite · 2 积分/次）</p>
@@ -1632,23 +1643,23 @@
   <script src="api-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260618e"></script>
+  <script src="api-client.js?v=20260618f"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260618e"></script>
-  <script src="card-image-loader.js?v=20260618e"></script>
+  <script src="supabase-sync.js?v=20260618f"></script>
+  <script src="card-image-loader.js?v=20260618f"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
   <script src="subscription.js?v=20260610a"></script>
-  <script src="trial-tasks.js?v=20260618e"></script>
+  <script src="trial-tasks.js?v=20260618f"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="mobile.js?v=20260618e"></script>
-  <script src="script.js?v=20260618e"></script>
-  <script src="points-system.js?v=20260618e"></script>
-  <script src="imagegen-prompt-kit.js?v=20260618e"></script>
-  <script src="imagegen-prompt-tools.js?v=20260618e"></script>
-  <script src="feed-layout.js?v=20260618e"></script>
-  <script src="feed-images.js?v=20260618e"></script>
-  <script src="image-gen-feed.js?v=20260618e"></script>
+  <script src="mobile.js?v=20260618f"></script>
+  <script src="script.js?v=20260618f"></script>
+  <script src="points-system.js?v=20260618f"></script>
+  <script src="imagegen-prompt-kit.js?v=20260618f"></script>
+  <script src="imagegen-prompt-tools.js?v=20260618f"></script>
+  <script src="feed-layout.js?v=20260618f"></script>
+  <script src="feed-images.js?v=20260618f"></script>
+  <script src="image-gen-feed.js?v=20260618f"></script>
   <script>
     (function () {
       try {
@@ -1670,10 +1681,10 @@
       } catch (e) { /* ignore */ }
     })();
   </script>
-  <script src="features-draft.js?v=20260618e"></script>
+  <script src="features-draft.js?v=20260618f"></script>
   <script src="community-gacha.js?v=20260606v"></script>
   <script src="features-assets.js?v=20260610ah"></script>
-  <script src="pwa-install.js?v=20260618e"></script>
+  <script src="pwa-install.js?v=20260618f"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

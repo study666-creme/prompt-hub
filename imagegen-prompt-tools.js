@@ -14,6 +14,8 @@
   const BATCH_SUBMIT_JITTER_MS = 800;
   const STYLE_CONVERT_SUFFIX = '【画风转换】严格保留原图人物/物体身份、姿态与构图，仅转换画面艺术风格与渲染质感，细节完整，专业插画完成度，无文字无水印';
   const CHAR_TURNAROUND_PROMPT = '【角色三视图】高级游戏/动画设定集品质：同一角色正面、左侧面、背面三视图并排展示，全身比例准确，服装结构与配饰清晰，高端纯色背景（淡灰白），uniform studio lighting，干净无阴影干扰，无文字无水印，concept art turnaround sheet';
+  const CHAR_HEADSHOT_PROMPT = '【高清大头照】同一角色面部高清肖像特写，高端纯色背景（淡灰白），五官清晰锐利，发丝与肤质细节完整，专业设定集头像品质，肩部以上构图，无文字无水印，character portrait headshot';
+  const PRODUCT_ANGLES_PROMPT = '【物品多角度】高端产品/道具设定图：同一物体正视、45度、侧视、俯视多角度并排展示，结构细节清晰，高端纯色背景（淡灰白），专业工业/游戏道具设定品质，studio lighting，无文字无水印，product multi-view reference sheet';
 
   function getFirstRefImage() {
     const refs = window.FeatureDraft?.getImageGenRefImages?.() || [];
@@ -38,10 +40,12 @@
     const fissionStatus = $('imageGenFissionRefStatus');
     const styleStatus = $('imageGenStyleConvertRefStatus');
     const turnaroundStatus = $('imageGenTurnaroundRefStatus');
+    const productStatus = $('imageGenProductAnglesRefStatus');
     const reverseBtn = $('imageGenReverseBtn');
     const fissionBtn = $('imageGenFissionAnalyzeBtn');
     const styleQuickBtn = $('imageGenStyleConvertQuickBtn');
     const turnaroundQuickBtn = $('imageGenTurnaroundQuickBtn');
+    const productQuickBtn = $('imageGenProductAnglesQuickBtn');
     const refLabel = refs.length
       ? `已就绪：${refs.length} 张参考图，将逐张提交`
       : '请先在上方添加参考图';
@@ -50,6 +54,7 @@
     if (fissionStatus) fissionStatus.textContent = singleLabel;
     if (styleStatus) styleStatus.textContent = refLabel;
     if (turnaroundStatus) turnaroundStatus.textContent = refLabel;
+    if (productStatus) productStatus.textContent = refLabel;
     if (reverseBtn && reverseBtn.textContent === '反推提示词') reverseBtn.disabled = !ref;
     if (fissionBtn && !fissionBtn.disabled && fissionBtn.textContent === fissionAnalyzeBtnLabel()) {
       fissionBtn.disabled = !ref;
@@ -58,6 +63,7 @@
     }
     if (styleQuickBtn) styleQuickBtn.disabled = !refs.length;
     if (turnaroundQuickBtn) turnaroundQuickBtn.disabled = !refs.length;
+    if (productQuickBtn) productQuickBtn.disabled = !refs.length;
     void updateBatchCostLabel();
   }
 
@@ -111,53 +117,61 @@
     return { results, charged, total, batchId };
   }
 
-  async function runRefImageBatch({ refs, prompt, btn, btnPrefix, unitLabel }) {
+  async function runRefImageBatch({ refs, prompts, btn, btnPrefix, unitLabel }) {
     const run = window.FeatureDraft?.runImageGenWithPrompt;
     if (typeof run !== 'function') {
       toast('生图模块未就绪，请刷新页面');
       return null;
     }
     const list = Array.isArray(refs) ? refs.filter(Boolean) : [];
-    if (!list.length) {
+    const promptList = (Array.isArray(prompts) ? prompts : [prompts]).map((p) => String(p || '').trim()).filter(Boolean);
+    if (!list.length || !promptList.length) {
       toast('请先在上方添加参考图');
       return null;
     }
     const unit = await getUnitImageGenCost();
     const balance = window.PointsSystem?.getCredits?.() ?? 0;
+    const totalJobs = list.length * promptList.length;
     if (balance < unit) {
       toast(`积分不足（每张 ${unit}，当前 ${balance}）`);
       return null;
     }
-    const totalNeed = creditsTotal(unit, list.length);
-    if (balance < totalNeed) {
+    if (balance < unit * totalJobs) {
       toast(`积分约够 ${Math.floor(balance / unit)} 张，将按顺序提交直到不足（${unit} 积分/张）`);
     }
     const batchId = makeBatchId();
-    const total = list.length;
     const results = [];
     let charged = 0;
-    for (let i = 0; i < list.length; i += 1) {
-      const batchIndex = i + 1;
-      if (btn) btn.textContent = `${btnPrefix} ${batchIndex}/${total}…`;
-      setPrompt(prompt);
-      const res = await run(prompt, {
-        silentToast: true,
-        batch: true,
-        batchId,
-        batchIndex,
-        batchTotal: total,
-        refImages: [list[i]]
-      });
-      results.push({
-        ok: !!res?.ok,
-        batchIndex,
-        message: res?.message || (res?.ok ? '' : '提交失败')
-      });
-      if (res?.ok) charged += res.creditsCharged || unit;
-      else if (res?.reason === 'credits') break;
-      await batchSubmitSleep();
+    let step = 0;
+    for (let ri = 0; ri < list.length; ri += 1) {
+      for (let pi = 0; pi < promptList.length; pi += 1) {
+        step += 1;
+        const batchIndex = step;
+        const batchTotal = totalJobs;
+        if (btn) btn.textContent = `${btnPrefix} ${batchIndex}/${batchTotal}…`;
+        const prompt = promptList[pi];
+        setPrompt(prompt);
+        const res = await run(prompt, {
+          silentToast: true,
+          batch: true,
+          batchId,
+          batchIndex,
+          batchTotal,
+          refImages: [list[ri]]
+        });
+        results.push({
+          ok: !!res?.ok,
+          batchIndex,
+          message: res?.message || (res?.ok ? '' : '提交失败')
+        });
+        if (res?.ok) charged += res.creditsCharged || unit;
+        else if (res?.reason === 'credits') {
+          return { results, charged, total: totalJobs, batchId, unitLabel, unit };
+        }
+        await batchSubmitSleep();
+      }
     }
-    return { results, charged, total, batchId, unitLabel, unit };
+    return { results, charged, total: totalJobs, batchId, unitLabel, unit };
   }
 
   async function onQueueStyleConvertBatch() {
@@ -172,14 +186,13 @@
       return;
     }
     const styleId = $('imageGenStyleConvertStyle')?.value || 'anime';
-    const prompt = buildStyleConvertPrompt(styleId);
     batchRunning = true;
     const btn = $('imageGenStyleConvertBatchBtn');
     if (btn) btn.disabled = true;
     try {
       const batch = await runRefImageBatch({
         refs,
-        prompt,
+        prompts: buildStyleConvertPrompt(styleId),
         btn,
         btnPrefix: '风格转换',
         unitLabel: '风格转换'
@@ -201,6 +214,12 @@
     }
   }
 
+  function getTurnaroundPrompts() {
+    const prompts = [CHAR_TURNAROUND_PROMPT];
+    if ($('imageGenTurnaroundHeadshot')?.checked) prompts.push(CHAR_HEADSHOT_PROMPT);
+    return prompts;
+  }
+
   async function onQueueTurnaroundBatch() {
     if (batchRunning) {
       toast('批量任务进行中，请稍候');
@@ -218,7 +237,7 @@
     try {
       const batch = await runRefImageBatch({
         refs,
-        prompt: CHAR_TURNAROUND_PROMPT,
+        prompts: getTurnaroundPrompts(),
         btn,
         btnPrefix: '三视图',
         unitLabel: '三视图'
@@ -233,6 +252,45 @@
     } catch (e) {
       console.error('[imagegen] turnaround batch failed', e);
       toast('三视图提交失败，请刷新页面后重试');
+    } finally {
+      batchRunning = false;
+      if (btn) btn.disabled = false;
+      void updateBatchCostLabel();
+    }
+  }
+
+  async function onQueueProductAnglesBatch() {
+    if (batchRunning) {
+      toast('批量任务进行中，请稍候');
+      return;
+    }
+    if (!window.AuthGate?.requireAuth?.('imagegen')) return;
+    const refs = getRefImagesForBatch();
+    if (!refs.length) {
+      toast('请先在上方添加参考图');
+      return;
+    }
+    batchRunning = true;
+    const btn = $('imageGenProductAnglesBatchBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const batch = await runRefImageBatch({
+        refs,
+        prompts: PRODUCT_ANGLES_PROMPT,
+        btn,
+        btnPrefix: '物品多角度',
+        unitLabel: '物品多角度'
+      });
+      if (!batch) return;
+      await window.PointsSystem?.refreshCreditsFromServer?.();
+      window.PointsSystem?.updateCreditsUI?.();
+      toast(`${summarizeBatchResults(batch.results, batch.total, batch.unitLabel)}，约 ${batch.charged || batch.results.filter((r) => r.ok).length * (batch.unit || 0)} 积分`);
+      if (window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
+        window.MobileUI.setImageGenView('feed');
+      }
+    } catch (e) {
+      console.error('[imagegen] product angles batch failed', e);
+      toast('物品多角度提交失败，请刷新页面后重试');
     } finally {
       batchRunning = false;
       if (btn) btn.disabled = false;
@@ -378,7 +436,7 @@
 
   function resetBatchState() {
     batchRunning = false;
-    ['imageGenInspireBatchBtn', 'imageGenFissionBatchBtn', 'imageGenStyleConvertBatchBtn', 'imageGenTurnaroundBatchBtn'].forEach((id) => {
+    ['imageGenInspireBatchBtn', 'imageGenFissionBatchBtn', 'imageGenStyleConvertBatchBtn', 'imageGenTurnaroundBatchBtn', 'imageGenProductAnglesBatchBtn'].forEach((id) => {
       const b = $(id);
       if (b) b.disabled = false;
     });
@@ -419,6 +477,7 @@
     const refCount = getRefImagesForBatch().length;
     const styleBtn = $('imageGenStyleConvertBatchBtn');
     const turnaroundBtn = $('imageGenTurnaroundBatchBtn');
+    const productBtn = $('imageGenProductAnglesBatchBtn');
     const unitPerSheet = `${fmtCredits(unit)} 积分/张`;
     if (styleBtn) {
       const total = creditsTotal(unit, refCount || 1);
@@ -428,11 +487,21 @@
       styleBtn.disabled = !refCount;
     }
     if (turnaroundBtn) {
-      const total = creditsTotal(unit, refCount || 1);
+      const jobsPerRef = getTurnaroundPrompts().length;
+      const totalJobs = refCount * jobsPerRef;
+      const total = creditsTotal(unit, totalJobs || 1);
+      const headshotNote = $('imageGenTurnaroundHeadshot')?.checked ? '含大头照' : '';
       turnaroundBtn.textContent = refCount > 0
-        ? `一键生成三视图 ${refCount} 张 · 约 ${fmtCredits(total)} 积分（${unitPerSheet}）`
+        ? `一键生成三视图 ${refCount} 张${headshotNote ? `（${headshotNote}·${totalJobs}次）` : ''} · 约 ${fmtCredits(total)} 积分（${unitPerSheet}）`
         : `一键生成三视图 · ${unitPerSheet}`;
       turnaroundBtn.disabled = !refCount;
+    }
+    if (productBtn) {
+      const total = creditsTotal(unit, refCount || 1);
+      productBtn.textContent = refCount > 0
+        ? `一键物品多角度 ${refCount} 张 · 约 ${fmtCredits(total)} 积分（${unitPerSheet}）`
+        : `一键物品多角度 · ${unitPerSheet}`;
+      productBtn.disabled = !refCount;
     }
   }
 
@@ -1032,6 +1101,7 @@
     $('imageGenFissionToolBtn')?.addEventListener('click', () => switchRefTool('fission'));
     $('imageGenStyleConvertToolBtn')?.addEventListener('click', () => switchRefTool('styleConvert'));
     $('imageGenTurnaroundToolBtn')?.addEventListener('click', () => switchRefTool('turnaround'));
+    $('imageGenProductAnglesToolBtn')?.addEventListener('click', () => switchRefTool('productAngles'));
     $('imageGenStyleConvertQuickBtn')?.addEventListener('click', () => {
       switchRefTool('styleConvert');
       void onQueueStyleConvertBatch();
@@ -1039,6 +1109,10 @@
     $('imageGenTurnaroundQuickBtn')?.addEventListener('click', () => {
       switchRefTool('turnaround');
       void onQueueTurnaroundBatch();
+    });
+    $('imageGenProductAnglesQuickBtn')?.addEventListener('click', () => {
+      switchRefTool('productAngles');
+      void onQueueProductAnglesBatch();
     });
 
     $('imageGenInspireDrawBtn')?.addEventListener('click', onDrawInspiration);
@@ -1051,6 +1125,8 @@
     $('imageGenFissionBatchBtn')?.addEventListener('click', () => void onQueueFissionBatch());
     $('imageGenStyleConvertBatchBtn')?.addEventListener('click', () => void onQueueStyleConvertBatch());
     $('imageGenTurnaroundBatchBtn')?.addEventListener('click', () => void onQueueTurnaroundBatch());
+    $('imageGenProductAnglesBatchBtn')?.addEventListener('click', () => void onQueueProductAnglesBatch());
+    $('imageGenTurnaroundHeadshot')?.addEventListener('change', () => void updateBatchCostLabel());
     $('imageGenInspireCount')?.addEventListener('change', () => void updateBatchCostLabel());
     $('imageGenFissionCount')?.addEventListener('change', () => void updateBatchCostLabel());
     ['imageGenModel', 'imageGenResolution', 'imageGenQuality'].forEach((id) => {
