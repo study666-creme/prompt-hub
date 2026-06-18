@@ -527,14 +527,17 @@
     }
   
     async function renderImageGenFeed(opts = {}) {
-      const preserveScroll = opts.preserveScroll !== false;
       const feedAppend = !!opts.feedAppend;
       const wrap = document.getElementById('imageGenFeed');
       if (!wrap) return;
       const scrollEl = resolveImageGenFeedScrollRoot(wrap) || wrap;
+      const scrollTopBefore = scrollEl?.scrollTop ?? 0;
+      const preserveScroll = opts.scrollToTop === true
+        ? false
+        : (opts.preserveScroll !== false);
       const scrollTop = feedAppend
-        ? (opts.scrollTop ?? scrollEl?.scrollTop ?? 0)
-        : (preserveScroll ? (scrollEl?.scrollTop ?? 0) : 0);
+        ? (opts.scrollTop ?? scrollTopBefore)
+        : (preserveScroll ? scrollTopBefore : 0);
       d().syncImageGenWarehouseFiltersUI?.();
       d().syncImageGenCommunityFiltersUI?.();
   
@@ -630,13 +633,6 @@
   
       syncImageGenFeedLoadMoreBtn();
       bindImageGenFeedPagedScroll();
-      if (!feedAppend && d().isMobileFeedViewport?.() && imageGenFeedHasMorePages()) {
-        requestAnimationFrame(() => {
-          if (imageGenFeedHasMorePages() && (imageGenFeedPagedStore?.page || 1) === 1) {
-            loadNextImageGenFeedPage();
-          }
-        });
-      }
   
       const pageStart = feedAppend ? (store.page - 1) * IMAGEGEN_FEED_PER_PAGE : 0;
       const pageEnd = feedAppend ? store.page * IMAGEGEN_FEED_PER_PAGE : IMAGEGEN_FEED_PER_PAGE;

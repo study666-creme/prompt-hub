@@ -9649,22 +9649,13 @@
           }
           if (window.SupabaseSync?.isStorageRef?.(src) || String(src).startsWith('storage://')) {
             const norm = window.SupabaseSync?.normalizeImageRef?.(src) || src;
-            if (window.PromptHubApi?.signMediaRef) {
-              const signed = await window.PromptHubApi.signMediaRef(norm);
-              if (signed?.ok && signed.data?.url) return signed.data.url;
-            }
-            return window.SupabaseSync.resolveDisplayUrl(norm, { variant: 'full', tryAllPaths: true });
+            return norm;
           }
           if (window.SupabaseSync?.isDataUrl?.(src) || String(src).startsWith('blob:')) {
             if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.uploadImageGenRef) {
               try {
                 const stored = await window.SupabaseSync.uploadImageGenRef(genId('ref'), src);
-                if (window.PromptHubApi?.signMediaRef) {
-                  const signed = await window.PromptHubApi.signMediaRef(stored);
-                  if (signed?.ok && signed.data?.url) return signed.data.url;
-                }
-                const resolved = await window.SupabaseSync.resolveDisplayUrl(stored, { variant: 'full', tryAllPaths: true });
-                if (resolved && /^https?:\/\//i.test(resolved)) return resolved;
+                if (stored) return stored;
               } catch (uploadErr) {
                 console.warn('参考图上传失败，改由服务端处理', uploadErr);
               }
@@ -10377,7 +10368,7 @@
         b.classList.toggle('active', b.dataset.feedTab === 'warehouse');
       });
       updateImageGenFeedHint();
-      renderImageGenFeed();
+      renderImageGenFeed({ scrollToTop: true });
       if (singleRun && isMobileViewport() && window.MobileUI?.setImageGenView) {
         window.MobileUI.setImageGenView('feed', { scrollToTop: true });
       }
@@ -11695,7 +11686,35 @@
     const card = document.querySelector(`.imagegen-feed-card[data-feed-id="${CSS.escape(feedKey)}"]`);
     const imgEl = card?.querySelector('.imagegen-feed-thumb-btn img');
     const assetId = kind === 'warehouse' ? warehouseCardIdFromFeedKey(feedKey) : feedKey;
-    const url = await resolveImageGenFullUrl(kind, id, feedKey, imgEl);
+    let mjGalleryUrls = null;
+    if (kind === 'warehouse' && assetId) {
+      const full = (window.__promptHubCards || []).find((c) => c.id === assetId);
+      if (full?.isMidjourney && Array.isArray(full.mjGridUrls) && full.mjGridUrls.length > 1) {
+        mjGalleryUrls = full.mjGridUrls.filter(Boolean).slice(0, 4);
+      }
+      if (!mjGalleryUrls?.length && full?.genJobId && window.PromptHubApi?.getGenerationJob) {
+        try {
+          const poll = await window.PromptHubApi.getGenerationJob(normalizeMjParentJobId(full.genJobId));
+          if (poll?.ok) {
+            const parsed = resolveMjPollImages(poll);
+            if (parsed.tiles.length > 1) {
+              mjGalleryUrls = parsed.tiles;
+              await repairMjWarehouseCardFields(full, {
+                mjGridUrls: parsed.tiles,
+                mjCompositeUrl: parsed.composite,
+                mjButtons: poll.data.mjButtons
+              });
+            }
+          }
+        } catch (e) {
+          console.warn('[imagegen] mj lightbox grid fetch failed', e);
+        }
+      }
+    }
+    const startIdx = 0;
+    const url = mjGalleryUrls?.length
+      ? mjGalleryUrls[startIdx]
+      : await resolveImageGenFullUrl(kind, id, feedKey, imgEl);
     if (!url || String(url).startsWith('data:image/svg')) {
       toast('原图加载中，请稍后再试');
       return;
@@ -11707,7 +11726,9 @@
       community: kind === 'community',
       postId: kind === 'community' ? id : null,
       cardId: kind === 'warehouse' ? assetId : null,
-      preferFull: true
+      preferFull: true,
+      mjGalleryUrls: mjGalleryUrls || undefined,
+      mjGalleryIndex: startIdx
     });
   }
 
@@ -11829,7 +11850,7 @@
         document.querySelectorAll('[data-feed-tab]').forEach(b => b.classList.toggle('active', b === btn));
         closeImageGenPreview();
         updateImageGenFeedHint();
-        renderImageGenFeed();
+        renderImageGenFeed({ scrollToTop: true });
       });
     });
     document.querySelectorAll('[data-imagegen-community-sort]').forEach(btn => {

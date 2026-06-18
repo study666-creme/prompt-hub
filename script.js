@@ -574,6 +574,19 @@
         void window.FeatureDraft.openImageGenLightboxAt(item.kind, item.id, item.key);
         return true;
       }
+      if (item.type === 'imageGenMjTile' && window.__lightboxMjGallery?.urls?.length) {
+        const url = window.__lightboxMjGallery.urls[item.tileIndex ?? 0];
+        if (url && typeof setLightboxSrc === 'function') {
+          setLightboxSrc(url, {
+            imageGen: true,
+            feedKey: window.__lightboxMjGallery.feedKey,
+            cardId: window.__lightboxMjGallery.assetId,
+            mjGalleryUrls: window.__lightboxMjGallery.urls,
+            mjGalleryIndex: item.tileIndex ?? 0
+          });
+          return true;
+        }
+      }
       return false;
     }
 
@@ -9316,7 +9329,22 @@
           syncLightboxActions({ cardId: opts.cardId || selectedCardId || null });
         }
       }
-      if (opts.imageGen && opts.feedKey && window.FeatureDraft?.getImageGenFeedNavItems) {
+      if (opts.mjGalleryUrls?.length > 1 && opts.feedKey) {
+        const navItems = opts.mjGalleryUrls.map((_, i) => ({
+          type: 'imageGenMjTile',
+          kind: opts.cardId ? 'warehouse' : 'community',
+          id: opts.cardId || opts.postId || '',
+          key: `${opts.feedKey}#mj${i}`,
+          tileIndex: i
+        }));
+        window.__lightboxMjGallery = {
+          urls: opts.mjGalleryUrls,
+          feedKey: opts.feedKey,
+          assetId: opts.cardId || null
+        };
+        window.__lightboxImageGenNav = true;
+        setViewerNav(navItems, `${opts.feedKey}#mj${opts.mjGalleryIndex || 0}`);
+      } else if (opts.imageGen && opts.feedKey && window.FeatureDraft?.getImageGenFeedNavItems) {
         const navItems = window.FeatureDraft.getImageGenFeedNavItems().map((it) => ({
           type: 'imageGen',
           kind: it.kind,
@@ -9449,6 +9477,7 @@
       }
       viewerNav = { items: [], index: -1 };
       window.__lightboxImageGenNav = false;
+      window.__lightboxMjGallery = null;
       if (imageZoom.img === document.getElementById('lightboxImage')) imageZoom.img = null;
       imageZoom.dragging = false;
     }

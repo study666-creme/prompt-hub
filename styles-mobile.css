@@ -1485,9 +1485,12 @@
     grid-template-columns: 1fr;
   }
 
-  body.imagegen-mobile-view-form .imagegen-mj-toggles,
-  body.imagegen-mobile-view-form .imagegen-mj-toggles--dual {
+  body.imagegen-mobile-view-form .imagegen-mj-options-grid {
     grid-template-columns: 1fr;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-mj-option-card--full {
+    grid-column: 1;
   }
 
   body.imagegen-mobile-view-form .imagegen-mj-speed-group {

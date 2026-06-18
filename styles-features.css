@@ -2155,36 +2155,81 @@
   color: var(--text-muted);
 }
 
-.imagegen-mj-save-all {
-  display: flex;
-  align-items: flex-start;
+.imagegen-mj-options-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  margin-top: 12px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  background: color-mix(in srgb, var(--bg-card) 92%, transparent);
-  cursor: pointer;
+  width: 100%;
 }
 
-.imagegen-mj-save-all input[type="checkbox"] {
-  margin-top: 3px;
-  flex-shrink: 0;
-  accent-color: var(--accent);
-}
-
-.imagegen-mj-save-all-text {
+.imagegen-mj-option-card {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  font-size: 13px;
-  line-height: 1.35;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 84px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--bg-card) 94%, #fff 6%),
+    color-mix(in srgb, var(--bg-card) 98%, transparent)
+  );
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
 }
 
-.imagegen-mj-save-all-text small {
+.imagegen-mj-option-card--full {
+  grid-column: 1 / -1;
+  min-height: 72px;
+}
+
+.imagegen-mj-option-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+
+.imagegen-mj-option-card:has(input:checked) {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--accent-bg) 65%, var(--bg-card)),
+    color-mix(in srgb, var(--accent-bg) 35%, var(--bg-card))
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.imagegen-mj-option-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+}
+
+.imagegen-mj-option-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.imagegen-mj-option-desc {
   font-size: 11px;
+  line-height: 1.45;
   color: var(--text-muted);
-  font-weight: 400;
+  margin: 0;
+  padding: 0;
+}
+
+.imagegen-mj-option-card input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
 }
 
 .imagegen-mj-toggles {
