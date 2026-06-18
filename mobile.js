@@ -152,7 +152,9 @@
     } catch (e) { /* ignore */ }
     if (v === 'feed' && opts?.scrollToTop && !wasFeed) {
       requestAnimationFrame(() => {
-        document.getElementById('imageGenFeed')?.scrollTo?.(0, 0);
+        const feed = document.getElementById('imageGenFeed');
+        const scrollRoot = feed?.closest('.feature-shell') || feed;
+        scrollRoot?.scrollTo?.(0, 0);
       });
     }
     if (v === 'feed') {

@@ -1,6 +1,6 @@
 export type ImageModelProvider = 'grsai' | 'apimart' | 'ithink' | 'mooko';
 
-export type ImageModelUiFamily = 'gim2' | 'banana' | 'jimeng';
+export type ImageModelUiFamily = 'gim2' | 'banana' | 'jimeng' | 'midjourney';
 
 export type ImageModelCatalogEntry = {
   id: string;
@@ -50,6 +50,10 @@ function banana(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>): Omi
 
 function jimeng(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>): Omit<ImageModelCatalogEntry, 'provider'> {
   return { ...row, uiFamily: 'jimeng' };
+}
+
+function midjourney(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>): Omit<ImageModelCatalogEntry, 'provider'> {
+  return { ...row, uiFamily: 'midjourney' };
 }
 
 /**
@@ -281,6 +285,78 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
     defaultCreditsByResolution: { '2k': 14, '4k': 28 },
     defaultCredits: 14,
     sortOrder: 102
+  }),
+  midjourney({
+    id: 'apimart-mj-v61',
+    upstream: 'mj-v6.1',
+    label: 'imagine-v6.1',
+    group: 'classic',
+    description: 'Midjourney v6.1 · 写实与细节均衡',
+    upstreamPoints: 0,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    defaultCredits: 5,
+    sortOrder: 110
+  }),
+  midjourney({
+    id: 'apimart-mj-v81',
+    upstream: 'mj-v8.1',
+    label: 'imagine-v8.1',
+    group: 'new',
+    description: 'Midjourney v8.1 · 最新主版本',
+    upstreamPoints: 0,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    defaultCredits: 5,
+    sortOrder: 111
+  }),
+  midjourney({
+    id: 'apimart-mj-v7',
+    upstream: 'mj-v7',
+    label: 'imagine-v7',
+    group: 'classic',
+    description: 'Midjourney v7 · v6 与 v8 过渡版',
+    upstreamPoints: 0,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    defaultCredits: 5,
+    sortOrder: 112
+  }),
+  midjourney({
+    id: 'apimart-mj-niji7',
+    upstream: 'mj-niji7',
+    label: 'imagine-niji7',
+    group: 'new',
+    description: 'Midjourney Niji 7 · 二次元',
+    upstreamPoints: 0,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    defaultCredits: 5,
+    sortOrder: 113
+  }),
+  midjourney({
+    id: 'apimart-mj-niji6',
+    upstream: 'mj-niji6',
+    label: 'imagine-niji6',
+    group: 'classic',
+    description: 'Midjourney Niji 6 · 上一代动漫模型',
+    upstreamPoints: 0,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    defaultCredits: 5,
+    sortOrder: 114
+  }),
+  midjourney({
+    id: 'apimart-mj-v52',
+    upstream: 'mj-v5.2',
+    label: 'imagine-v5.2',
+    group: 'classic',
+    description: 'Midjourney v5.2 · 经典写实质感',
+    upstreamPoints: 0,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    defaultCredits: 5,
+    sortOrder: 115
   })
 ]);
 
@@ -296,6 +372,7 @@ export function imageModelUiFamily(modelId: string): ImageModelUiFamily {
   const entry = getCatalogEntry(modelId);
   if (entry?.uiFamily) return entry.uiFamily;
   const id = String(modelId || '').toLowerCase();
+  if (id.startsWith('apimart-mj-')) return 'midjourney';
   if (id.includes('seedream') || id === 'jimeng') return 'jimeng';
   if (id.includes('nano-banana')) return 'banana';
   return 'gim2';

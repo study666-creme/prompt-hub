@@ -18,6 +18,8 @@ import {
   toStorageRef
 } from './image-archive';
 import { findFirstExistingStoragePath } from './media-cdn';
+import { defaultGridMjButtons } from './apimart-midjourney';
+import { parseMjImagineUrls } from './midjourney-models';
 
 const GEN_IMAGE_BUCKET = 'card-images';
 import { type DebitSplit, deductUserCredits, refundUserCredits } from './membership-credits';
@@ -881,9 +883,15 @@ async function completeJobFromPoll(
     : polled.imageUrl
       ? [polled.imageUrl]
       : [];
-  const primary = allUrls[0] || polled.imageUrl!;
-  const extras = allUrls.slice(1).filter(Boolean);
   const meta = (job.meta as Record<string, unknown>) || {};
+  const isMj = meta.isMidjourney === true;
+  const mjParsed = isMj ? parseMjImagineUrls(allUrls) : null;
+  const primary = (isMj ? mjParsed?.primary : null) || allUrls[0] || polled.imageUrl!;
+  const extras = isMj ? [] : allUrls.slice(1).filter(Boolean);
+  let mjButtons = Array.isArray(meta.mjButtons) ? meta.mjButtons : undefined;
+  if (isMj && !mjButtons?.length) {
+    mjButtons = defaultGridMjButtons();
+  }
 
   /** 4K 等大图：先标记完成并返回上游临时链，R2 归档放后台（避免轮询 35s 超时） */
   if (isRemoteHttpImageUrl(primary)) {
@@ -896,9 +904,16 @@ async function completeJobFromPoll(
         completed_at: new Date().toISOString(),
         meta: {
           ...meta,
-          extraImageUrls: extras.length ? extras : meta.extraImageUrls || undefined,
+          extraImageUrls: isMj ? undefined : extras.length ? extras : meta.extraImageUrls || undefined,
+          ...(isMj && mjParsed
+            ? {
+                mjGridUrls: mjParsed.tiles.length ? mjParsed.tiles : undefined,
+                mjCompositeUrl: mjParsed.composite || undefined
+              }
+            : {}),
           archivePending: true,
-          upstreamImageUrl: primary
+          upstreamImageUrl: primary,
+          ...(mjButtons?.length ? { mjButtons } : {})
         }
       })
       .eq('id', job.id);
@@ -907,7 +922,7 @@ async function completeJobFromPoll(
       imageUrl: primary,
       errorMessage: null,
       refunded: false,
-      extraImageUrls: extras.length ? extras : undefined
+      extraImageUrls: isMj ? undefined : extras.length ? extras : undefined
     };
   }
 
@@ -925,10 +940,17 @@ async function completeJobFromPoll(
       completed_at: new Date().toISOString(),
       meta: {
         ...meta,
-        extraImageUrls: extras.length ? extras : meta.extraImageUrls || undefined,
+        extraImageUrls: isMj ? undefined : extras.length ? extras : meta.extraImageUrls || undefined,
         recoveredFromUpstream: meta.recoveredFromUpstream || undefined,
         archived: true,
-        archivePending: false
+        archivePending: false,
+        ...(isMj && mjParsed
+          ? {
+              mjGridUrls: mjParsed.tiles.length ? mjParsed.tiles : undefined,
+              mjCompositeUrl: mjParsed.composite || undefined
+            }
+          : {}),
+        ...(mjButtons?.length ? { mjButtons } : {})
       }
     })
     .eq('id', job.id);
@@ -937,7 +959,7 @@ async function completeJobFromPoll(
     imageUrl: storedUrl,
     errorMessage: null,
     refunded: false,
-    extraImageUrls: extras.length ? extras : undefined
+    extraImageUrls: isMj ? undefined : extras.length ? extras : undefined
   };
 }
 

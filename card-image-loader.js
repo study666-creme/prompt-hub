@@ -10,9 +10,9 @@
   const feedResolveQueue = [];
   let resolveActive = 0;
   let feedResolveActive = 0;
-  const MAX_RESOLVE = 4;
-  const FEED_MAX_RESOLVE = 2;
-  const MAX_DOWNLOAD = 1;
+  const MAX_RESOLVE = 6;
+  const FEED_MAX_RESOLVE = 4;
+  const MAX_DOWNLOAD = 3;
   const VISIBLE_LOAD_MARGIN = 160;
   const prefetchedImageRefs = new Set();
   const containerSignReady = new Map();
@@ -213,7 +213,8 @@
       || img?.closest('.card')?.dataset?.authorId
       || img?.closest('[data-author-id]')?.dataset?.authorId
       || undefined;
-    if (isOwnImageGenWarehouseImg(img) && window.SupabaseSync?.getListDisplayImageSrc) {
+    if ((isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))
+      && window.SupabaseSync?.getListDisplayImageSrc) {
       const url = window.SupabaseSync.getListDisplayImageSrc(ref, cardId, { authorId, assetId: cardId });
       if (url && isReadySrc(url, img)) return url;
       return '';
@@ -288,13 +289,15 @@
       const communityExtra = ownIgWh ? {} : communityResolveOpts(img);
       if (communityExtra.skip) return '';
       const ownListCard = ownWarehouseCard || ownIgWh;
+      const degradedList = ownListCard
+        && window.SupabaseSync?.needsDegradedListPreview?.(ref, cardId);
       const url = await window.SupabaseSync.resolveDisplayUrl(ref, {
         assetId: cardId,
         variant: (ownWarehouseCard || ownIgWh) ? 'grid' : listImageVariant(img),
         tryAllPaths: communityExtra.tryAllPaths === true,
         allowFullFallback: false,
         listOnly: listOnly ? true : undefined,
-        degradedListFull: false,
+        degradedListFull: degradedList === true,
         ...(ownWarehouseCard || ownIgWh ? {} : (collect || communityExtra)),
         ...(extraOpts || {})
       });
@@ -361,7 +364,19 @@
       }
       if (isGridFail && ref && !img.dataset.primaryRetried) {
         img.dataset.primaryRetried = '1';
-        if ((ownList || isOwnCommunityGridImg(img)) && queueGridBackfillForImg(img)) return;
+        if (ownList || isOwnCommunityGridImg(img)) {
+          const primary = window.SupabaseSync?.primaryImagePath?.(ref, cardId);
+          const tryPrimary = () => {
+            if (!primary || !window.SupabaseSync?.resolveListPrimaryFallback) return Promise.resolve('');
+            return window.SupabaseSync.resolveListPrimaryFallback(primary, cardId, {});
+          };
+          void tryPrimary().then((retryUrl) => {
+            if (retryUrl && applyUrlToImg(img, retryUrl)) return;
+            if (queueGridBackfillForImg(img)) return;
+            media.classList.add('card-media--load-failed');
+          });
+          return;
+        }
         if (isCommOther) {
           const failedKey = failedPath ? String(failedPath).replace(/^\//, '') : '';
           if (failedKey && window.SupabaseSync?.invalidateSignedCache) {

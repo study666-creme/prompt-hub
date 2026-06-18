@@ -38,6 +38,9 @@ export const BANANA2_EXTRA_RATIOS = ['1:4', '4:1', '1:8', '8:1'] as const;
 /** 常用五档（GrsAI 基础 / Apimart 备用 / ThinkAI 等） */
 export const BASIC_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4'] as const;
 
+/** Midjourney 常用宽高比 */
+export const MJ_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] as const;
+
 /** Apimart official 特价：Apimart 定价表有档位的比例，去掉 1:1（太贵） */
 export const APIMART_OFFICIAL_BUDGET_RATIOS = ['16:9', '9:16', '4:3', '3:4'] as const;
 
@@ -59,6 +62,7 @@ export function aspectRatiosForModel(modelId: string): readonly string[] {
   if (id.startsWith('mooko-')) return MOOKO_PRO_ASPECT_RATIOS;
   if (id === 'apimart-gpt-image-2') return IMAGE2_ASPECT_RATIOS;
   if (id === 'apimart-seedream-5-lite' || id.includes('seedream')) return BASIC_ASPECT_RATIOS;
+  if (id.startsWith('apimart-mj-') || id.startsWith('mj-')) return MJ_ASPECT_RATIOS;
   if (id.startsWith('ithink-')) return BASIC_ASPECT_RATIOS;
   if (id === 'gpt-image-2-vip' || id === 'gpt-image-2') return IMAGE2_ASPECT_RATIOS;
   if (BANANA2_EXTENDED_MODEL_IDS.has(id)) {

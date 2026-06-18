@@ -36,6 +36,8 @@ export type Env = {
   FISSION_VISION_MODEL?: string;
   /** 裂变变体策划对话模型（默 deepseek-v4-pro） */
   FISSION_CHAT_MODEL?: string;
+  /** 社区发帖 Gemini 配图审核：默认关；设 1/true 开启（Apimart 视觉，按次扣费） */
+  COMMUNITY_GEMINI_MODERATION?: string;
   /** 支付 webhook HMAC 密钥：wrangler secret put PAYMENT_WEBHOOK_SECRET */
   PAYMENT_WEBHOOK_SECRET?: string;
   /** 运营批量造激活码：wrangler secret put ADMIN_API_SECRET */

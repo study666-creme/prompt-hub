@@ -29,7 +29,7 @@ function apiBase(envBase?: string): string {
   return (envBase || 'https://api.apimart.ai').replace(/\/$/, '');
 }
 
-function extractTaskId(payload: unknown): string | null {
+export function extractTaskId(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null;
   const p = payload as Record<string, unknown>;
   if (Array.isArray(p.data) && p.data[0] && typeof p.data[0] === 'object') {

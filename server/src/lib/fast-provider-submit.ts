@@ -15,6 +15,7 @@ export type FastSubmitParams = {
   quality: string;
   size?: string;
   refImageUrls?: string[];
+  mjParams?: Record<string, unknown>;
 };
 
 async function claimFastSubmit(

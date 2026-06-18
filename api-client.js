@@ -499,7 +499,7 @@
     if (modelsCache && modelsCacheExp > Date.now()) {
       return { ok: true, data: modelsCache };
     }
-    const res = await request('GET', '/api/v1/generate/models', null, { timeoutMs: API_FAST_TIMEOUT_MS });
+    const res = await request('GET', '/api/v1/generate/models', null, { timeoutMs: 8000 });
     if (res.ok && res.data) {
       modelsCache = res.data;
       modelsCacheExp = Date.now() + 120_000;
@@ -536,6 +536,22 @@
     const settle = opts?.settle ? '?settle=1' : '';
     return request('GET', `/api/v1/generate/jobs/${encodeURIComponent(jobId)}${settle}`, null, {
       timeoutMs: opts?.settle ? Math.max(API_JOB_POLL_TIMEOUT_MS, 120000) : API_JOB_POLL_TIMEOUT_MS
+    });
+  }
+
+  async function mjAction(payload) {
+    window.__PH_API_DOWN_UNTIL__ = 0;
+    return requestWithPrepare('POST', '/api/v1/generate/mj-action', payload, {
+      timeoutMs: API_GENERATE_TIMEOUT_MS,
+      lightPrepare: true
+    });
+  }
+
+  async function mjBlend(payload) {
+    window.__PH_API_DOWN_UNTIL__ = 0;
+    return requestWithPrepare('POST', '/api/v1/generate/mj-blend', payload, {
+      timeoutMs: API_GENERATE_TIMEOUT_MS,
+      lightPrepare: true
     });
   }
 
@@ -962,6 +978,8 @@
     getGenerationModels,
     getGenerationCost,
     generateImage,
+    mjAction,
+    mjBlend,
     getGenerationJob,
     studioChat,
     studioChatQuote,

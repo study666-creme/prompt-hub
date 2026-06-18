@@ -16,7 +16,16 @@ import { processIthinkPendingSubmit } from '../../lib/ithink-submit';
 import { tryCompleteMookoFromStoredArchive } from '../../lib/mooko-submit';
 import type { JobRow } from '../../lib/generation-jobs';
 import { aspectRatiosForModel } from '../../lib/image-size-options';
-import { providerLabel } from '../../lib/image-models-catalog';
+import { providerLabel, imageModelUiFamily } from '../../lib/image-models-catalog';
+import { isMidjourneyUpstream } from '../../lib/midjourney-models';
+import {
+  submitMidjourneyAction,
+  submitMidjourneyBlend,
+  fetchMidjourneyTaskButtons,
+  defaultGridMjButtons,
+  type SubmitMjActionParams
+} from '../../lib/apimart-midjourney';
+import type { MjActionKind } from '../../lib/midjourney-models';
 import {
   archivePendingJobImage,
   assertJobOwner,
@@ -81,6 +90,27 @@ const refImageInputSchema = z
   .max(6_000_000)
   .refine(isAcceptedRefImageInput, '参考图须为有效 URL、storage:// 或 data:image');
 
+const mjParamsSchema = z
+  .object({
+    stylize: z.number().min(0).max(1000).optional(),
+    chaos: z.number().min(0).max(100).optional(),
+    weird: z.number().min(0).max(3000).optional(),
+    negativePrompt: z.string().max(500).optional(),
+    seed: z.number().optional(),
+    tile: z.boolean().optional(),
+    raw: z.boolean().optional(),
+    draft: z.boolean().optional(),
+    hd: z.boolean().optional(),
+    iw: z.number().min(0).max(3).optional(),
+    quality: z.enum(['0.25', '0.5', '1', '2']).optional(),
+    style: z.string().max(32).optional(),
+    cw: z.number().min(0).max(100).optional(),
+    sw: z.number().min(0).max(1000).optional(),
+    stop: z.number().min(10).max(100).optional(),
+    extra: z.string().max(200).optional()
+  })
+  .optional();
+
 const bodySchema = z.object({
   prompt: z.string().min(1).max(8000),
   model: z
@@ -93,7 +123,46 @@ const bodySchema = z.object({
   quality: z.enum(['standard', 'high', 'ultra']).default('standard'),
   size: z.string().max(32).optional(),
   refImageUrl: refImageInputSchema.optional().nullable(),
-  refImageUrls: z.array(refImageInputSchema).max(16).optional()
+  refImageUrls: z.array(refImageInputSchema).max(16).optional(),
+  mjParams: mjParamsSchema
+});
+
+const mjBlendSchema = z.object({
+  refImageUrls: z.array(refImageInputSchema).min(2).max(5),
+  model: z
+    .string()
+    .min(1)
+    .max(64)
+    .transform((s) => s.trim().toLowerCase())
+    .optional()
+});
+
+const mjActionSchema = z.object({
+  parentJobId: z.string().uuid(),
+  action: z.enum([
+    'upscale',
+    'variation',
+    'high_variation',
+    'low_variation',
+    'reroll',
+    'zoom',
+    'pan',
+    'inpaint',
+    'describe',
+    'blend',
+    'edits',
+    'remix_strong',
+    'remix_subtle',
+    'video',
+    'modal'
+  ]),
+  index: z.number().int().min(1).max(4).optional(),
+  customId: z.string().max(256).optional(),
+  prompt: z.string().max(8000).optional(),
+  zoom: z.number().optional(),
+  direction: z.enum(['left', 'right', 'up', 'down']).optional(),
+  refImageUrls: z.array(refImageInputSchema).max(8).optional(),
+  maskUrl: refImageInputSchema.optional()
 });
 
 export const generateRoutes = new Hono<{ Bindings: Env }>();
@@ -380,6 +449,8 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   }
 
   const jobResolution = resolved.provider === 'ithink' ? '1k' : parsed.data.resolution;
+  const isMidjourney = imageModelUiFamily(modelId) === 'midjourney' || isMidjourneyUpstream(resolved.upstream);
+  const mjParams = isMidjourney && parsed.data.mjParams ? parsed.data.mjParams : undefined;
 
   const { final: rawFinal, base, discountLabel, modelLabel, refundOnViolation, violationNotice } =
     computeImageGenerationCost(
@@ -440,7 +511,8 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
         discountLabel,
         size: parsed.data.size ?? null,
         refundOnViolation,
-        violationNotice
+        violationNotice,
+        ...(isMidjourney ? { isMidjourney: true, mjParams: mjParams || {} } : {})
       }
     })
     .select('id')
@@ -465,7 +537,8 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     discountLabel,
     size: parsed.data.size ?? null,
     refundOnViolation,
-    violationNotice
+    violationNotice,
+    ...(isMidjourney ? { isMidjourney: true, mjParams: mjParams || {} } : {})
   };
 
   try {
@@ -506,7 +579,8 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     resolution: jobResolution,
     quality: parsed.data.quality,
     size: parsed.data.size,
-    refImageUrls: refUrls
+    refImageUrls: refUrls,
+    ...(mjParams ? { mjParams } : {})
   };
 
   /** GrsAI / Apimart 同步提交易超 CF 100s → 524；改后台提交后立即返回 jobId */
@@ -845,6 +919,373 @@ generateRoutes.post('/recover-warehouse', async c => {
   }
 });
 
+/** Midjourney 二次操作（放大 / 变体 / 重新生成等） */
+generateRoutes.post('/mj-action', rateLimit(300, 60_000), async (c) => {
+  const user = c.get('user');
+  const parsed = mjActionSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '请填写有效的 Midjourney 操作参数');
+  }
+
+  const admin = createAdminClient(c.env);
+  let profile = await syncMembershipCredits(admin, user.id);
+  const memberActive = isMembershipActive(profile);
+  const settings = await loadImageModelSettings(admin);
+
+  const { data: parentJob, error: parentErr } = await admin
+    .from('generation_requests')
+    .select('*')
+    .eq('id', parsed.data.parentJobId)
+    .maybeSingle();
+  if (parentErr || !parentJob) {
+    throw new ApiError(404, 'NOT_FOUND', '父任务不存在');
+  }
+  assertJobOwner(parentJob, user.id);
+
+  const parentMeta = (parentJob.meta as Record<string, unknown>) || {};
+  if (!parentMeta.isMidjourney) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '该任务不是 Midjourney 作品，无法执行此操作');
+  }
+  const parentTaskId =
+    typeof parentMeta.upstreamTaskId === 'string'
+      ? parentMeta.upstreamTaskId
+      : typeof parentMeta.apimartTaskId === 'string'
+        ? parentMeta.apimartTaskId
+        : null;
+  if (!parentTaskId) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '父任务尚未完成提交，请稍后再试');
+  }
+
+  const modelId = normalizeImageModelId(String(parentMeta.model || 'apimart-mj-v61'));
+  const resolved = resolveImageModelConfig(modelId, settings);
+  if (!resolved || !resolved.enabled) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '模型不可用');
+  }
+
+  const jobResolution = '1k';
+  const { final: rawFinal, base, discountLabel, modelLabel, refundOnViolation, violationNotice } =
+    computeImageGenerationCost(settings, modelId, jobResolution, profile.membership_tier, memberActive);
+  const final = roundCredits(rawFinal);
+  const balance = spendableCredits(profile);
+  if (balance < final) {
+    throw new ApiError(402, 'INSUFFICIENT_CREDITS', `积分不足（需要 ${final}，当前 ${balance}）`);
+  }
+
+  const upstream = upstreamBindingsFromEnv(c.env);
+  if (!isProviderConfigured(upstream, 'apimart')) {
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Midjourney 线路未配置，请联系站长');
+  }
+
+  const promptText = String(parsed.data.prompt || parentJob.prompt || '').slice(0, 8000);
+  const rawRefInputs = parsed.data.refImageUrls?.length ? parsed.data.refImageUrls : [];
+  const refUrls = rawRefInputs.length
+    ? await resolveGenerationRefUrls(c, admin, user.id, rawRefInputs)
+    : [];
+
+  const { data: job, error: jobErr } = await admin
+    .from('generation_requests')
+    .insert({
+      user_id: user.id,
+      prompt: promptText || `[MJ ${parsed.data.action}]`,
+      resolution: jobResolution,
+      quality: 'standard',
+      size_label: typeof parentMeta.size === 'string' ? parentMeta.size : null,
+      credits_charged: final,
+      status: 'processing',
+      meta: {
+        model: modelId,
+        upstreamModel: resolved.upstream,
+        modelLabel,
+        provider: 'apimart',
+        base,
+        discountLabel,
+        refundOnViolation,
+        violationNotice,
+        isMidjourney: true,
+        mjAction: parsed.data.action,
+        mjParentJobId: parsed.data.parentJobId,
+        mjParentTaskId: parentTaskId,
+        size: typeof parentMeta.size === 'string' ? parentMeta.size : null
+      }
+    })
+    .select('id')
+    .single();
+  if (jobErr) {
+    throw wrapGenerateError(jobErr, '创建 Midjourney 操作任务失败');
+  }
+
+  let debited = false;
+  let debitSplit = { fromDaily: 0, fromPermanent: 0 };
+  try {
+    const debitedResult = await deductUserCredits(
+      admin,
+      user.id,
+      final,
+      'image_generation',
+      job.id,
+      { model: modelId, mjAction: parsed.data.action, base, discountLabel }
+    );
+    profile = debitedResult.profile;
+    debitSplit = debitedResult.split;
+    debited = true;
+  } catch (debitErr) {
+    await admin
+      .from('generation_requests')
+      .update({
+        status: 'failed',
+        error_message: 'debit_failed',
+        completed_at: new Date().toISOString()
+      })
+      .eq('id', job.id);
+    if (String((debitErr as Error).message).includes('insufficient')) {
+      throw new ApiError(402, 'INSUFFICIENT_CREDITS', '积分不足');
+    }
+    throw wrapGenerateError(debitErr, '扣减积分失败');
+  }
+
+  const actionParams: SubmitMjActionParams = {
+    action: parsed.data.action as MjActionKind,
+    parentTaskId,
+    index: parsed.data.index,
+    customId: parsed.data.customId,
+    prompt: promptText || undefined,
+    zoom: parsed.data.zoom,
+    direction: parsed.data.direction,
+    imageUrls: refUrls.length ? refUrls : undefined,
+    maskUrl: parsed.data.maskUrl || undefined
+  };
+
+  const fastMeta: Record<string, unknown> = {
+    model: modelId,
+    upstreamModel: resolved.upstream,
+    modelLabel,
+    provider: 'apimart',
+    base,
+    discountLabel,
+    refundOnViolation,
+    violationNotice,
+    isMidjourney: true,
+    mjAction: parsed.data.action,
+    mjParentJobId: parsed.data.parentJobId,
+    mjParentTaskId: parentTaskId,
+    debitSplit,
+    fastSubmitState: 'queued'
+  };
+
+  await admin.from('generation_requests').update({ meta: fastMeta }).eq('id', job.id);
+
+  kickBackgroundTask(
+    c,
+    (async () => {
+      try {
+        const taskId = await submitMidjourneyAction(
+          upstream.apimartKey!,
+          upstream.apimartBase,
+          actionParams
+        );
+        await admin
+          .from('generation_requests')
+          .update({
+            meta: {
+              ...fastMeta,
+              upstreamTaskId: taskId,
+              fastSubmitState: 'done',
+              fastSubmitFinishedAt: new Date().toISOString()
+            }
+          })
+          .eq('id', job.id);
+      } catch (e) {
+        const msg = e instanceof ApiError ? e.message : String((e as Error).message || e);
+        if (debited && final > 0) {
+          await refundUserCredits(
+            admin,
+            user.id,
+            final,
+            'image_generation_refund',
+            job.id,
+            debitSplit,
+            { reason: msg, mjAction: parsed.data.action }
+          );
+        }
+        await finalizeFailedJob(admin, user.id, job as JobRow, msg);
+      }
+    })()
+  );
+
+  return c.json({
+    ok: true,
+    data: {
+      jobId: job.id,
+      status: 'processing',
+      creditsCharged: final,
+      creditsRemaining: spendableCredits(profile)
+    }
+  });
+});
+
+/** Midjourney 独立混图（2～5 张垫图） */
+generateRoutes.post('/mj-blend', rateLimit(300, 60_000), async (c) => {
+  const user = c.get('user');
+  const parsed = mjBlendSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '混图需要 2～5 张有效参考图');
+  }
+
+  const admin = createAdminClient(c.env);
+  let profile = await syncMembershipCredits(admin, user.id);
+  const memberActive = isMembershipActive(profile);
+  const settings = await loadImageModelSettings(admin);
+
+  const modelId = normalizeImageModelId(parsed.data.model || 'apimart-mj-v81');
+  const resolved = resolveImageModelConfig(modelId, settings);
+  if (!resolved || !resolved.enabled || !isMidjourneyUpstream(resolved.upstream)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '请选择可用的 Midjourney 模型');
+  }
+
+  const jobResolution = '1k';
+  const { final: rawFinal, base, discountLabel, modelLabel, refundOnViolation, violationNotice } =
+    computeImageGenerationCost(settings, modelId, jobResolution, profile.membership_tier, memberActive);
+  const final = roundCredits(rawFinal);
+  const balance = spendableCredits(profile);
+  if (balance < final) {
+    throw new ApiError(402, 'INSUFFICIENT_CREDITS', `积分不足（需要 ${final}，当前 ${balance}）`);
+  }
+
+  const upstream = upstreamBindingsFromEnv(c.env);
+  if (!isProviderConfigured(upstream, 'apimart')) {
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Midjourney 线路未配置，请联系站长');
+  }
+
+  const refUrls = await resolveGenerationRefUrls(c, admin, user.id, parsed.data.refImageUrls);
+  if (refUrls.length < 2) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '混图需要至少 2 张可访问的参考图');
+  }
+
+  const { data: job, error: jobErr } = await admin
+    .from('generation_requests')
+    .insert({
+      user_id: user.id,
+      prompt: '[MJ 混图]',
+      resolution: jobResolution,
+      quality: 'standard',
+      size_label: null,
+      credits_charged: final,
+      status: 'processing',
+      meta: {
+        model: modelId,
+        upstreamModel: resolved.upstream,
+        modelLabel,
+        provider: 'apimart',
+        refImageUrls: refUrls,
+        base,
+        discountLabel,
+        refundOnViolation,
+        violationNotice,
+        isMidjourney: true,
+        mjAction: 'blend'
+      }
+    })
+    .select('id')
+    .single();
+  if (jobErr) {
+    throw wrapGenerateError(jobErr, '创建 Midjourney 混图任务失败');
+  }
+
+  let debited = false;
+  let debitSplit = { fromDaily: 0, fromPermanent: 0 };
+  try {
+    const debitedResult = await deductUserCredits(
+      admin,
+      user.id,
+      final,
+      'image_generation',
+      job.id,
+      { model: modelId, mjAction: 'blend', base, discountLabel }
+    );
+    profile = debitedResult.profile;
+    debitSplit = debitedResult.split;
+    debited = true;
+  } catch (debitErr) {
+    await admin
+      .from('generation_requests')
+      .update({
+        status: 'failed',
+        error_message: 'debit_failed',
+        completed_at: new Date().toISOString()
+      })
+      .eq('id', job.id);
+    if (String((debitErr as Error).message).includes('insufficient')) {
+      throw new ApiError(402, 'INSUFFICIENT_CREDITS', '积分不足');
+    }
+    throw wrapGenerateError(debitErr, '扣减积分失败');
+  }
+
+  const fastMeta: Record<string, unknown> = {
+    model: modelId,
+    upstreamModel: resolved.upstream,
+    modelLabel,
+    provider: 'apimart',
+    refImageUrls: refUrls,
+    base,
+    discountLabel,
+    refundOnViolation,
+    violationNotice,
+    isMidjourney: true,
+    mjAction: 'blend',
+    debitSplit,
+    fastSubmitState: 'queued'
+  };
+  await admin.from('generation_requests').update({ meta: fastMeta }).eq('id', job.id);
+
+  kickBackgroundTask(
+    c,
+    (async () => {
+      try {
+        const taskId = await submitMidjourneyBlend(
+          upstream.apimartKey!,
+          upstream.apimartBase,
+          refUrls.slice(0, 5)
+        );
+        await admin
+          .from('generation_requests')
+          .update({
+            meta: {
+              ...fastMeta,
+              upstreamTaskId: taskId,
+              fastSubmitState: 'done',
+              fastSubmitFinishedAt: new Date().toISOString()
+            }
+          })
+          .eq('id', job.id);
+      } catch (e) {
+        const msg = e instanceof ApiError ? e.message : String((e as Error).message || e);
+        if (debited && final > 0) {
+          await refundUserCredits(
+            admin,
+            user.id,
+            final,
+            'image_generation_refund',
+            job.id,
+            debitSplit,
+            { reason: msg, mjAction: 'blend' }
+          );
+        }
+        await finalizeFailedJob(admin, user.id, job as JobRow, msg);
+      }
+    })()
+  );
+
+  return c.json({
+    ok: true,
+    data: {
+      jobId: job.id,
+      status: 'processing',
+      creditsCharged: final,
+      creditsRemaining: spendableCredits(profile)
+    }
+  });
+});
+
 generateRoutes.get('/jobs/:jobId', async c => {
   const user = c.get('user');
   const jobId = c.req.param('jobId');
@@ -1023,6 +1464,39 @@ generateRoutes.get('/jobs/:jobId', async c => {
     ? await Promise.all(extraImageUrls.map((u) => resolveJobImageUrlForClient(c, u)))
     : undefined;
 
+  let mjButtonsOut = Array.isArray(meta.mjButtons) ? meta.mjButtons : undefined;
+  if (
+    meta.isMidjourney === true
+    && liveStatus === 'completed'
+    && !mjButtonsOut?.length
+    && upstream.apimartKey
+  ) {
+    const mjTaskId =
+      typeof meta.upstreamTaskId === 'string'
+        ? meta.upstreamTaskId
+        : typeof meta.apimartTaskId === 'string'
+          ? meta.apimartTaskId
+          : null;
+    if (mjTaskId) {
+      try {
+        const fetched = await fetchMidjourneyTaskButtons(
+          upstream.apimartKey,
+          upstream.apimartBase,
+          mjTaskId
+        );
+        mjButtonsOut = fetched.length ? fetched : defaultGridMjButtons();
+        if (mjButtonsOut.length) {
+          await admin
+            .from('generation_requests')
+            .update({ meta: { ...liveMeta, mjButtons: mjButtonsOut } })
+            .eq('id', jobId);
+        }
+      } catch {
+        mjButtonsOut = defaultGridMjButtons();
+      }
+    }
+  }
+
   return c.json({
     ok: true,
     data: {
@@ -1035,7 +1509,20 @@ generateRoutes.get('/jobs/:jobId', async c => {
       modelLabel: meta.modelLabel,
       provider: meta.provider,
       resolution: liveJob.resolution || null,
-      progressNote: polled.progressNote || slowProviderProgressNote(meta, readJobProvider(meta))
+      progressNote: polled.progressNote || slowProviderProgressNote(meta, readJobProvider(meta)),
+      isMidjourney: meta.isMidjourney === true,
+      mjTaskId:
+        typeof meta.upstreamTaskId === 'string'
+          ? meta.upstreamTaskId
+          : typeof meta.apimartTaskId === 'string'
+            ? meta.apimartTaskId
+            : undefined,
+      mjButtons: mjButtonsOut,
+      mjGridUrls: Array.isArray(updatedMeta.mjGridUrls) ? updatedMeta.mjGridUrls : undefined,
+      mjCompositeUrl:
+        typeof updatedMeta.mjCompositeUrl === 'string' ? updatedMeta.mjCompositeUrl : undefined,
+      mjAction: typeof meta.mjAction === 'string' ? meta.mjAction : undefined,
+      mjParentJobId: typeof meta.mjParentJobId === 'string' ? meta.mjParentJobId : undefined
     }
   });
 });

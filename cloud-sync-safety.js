@@ -230,6 +230,27 @@
     return { ...(b || {}), ...(a || {}) };
   }
 
+  function normalizeGroupName(g) {
+    const n = String(g || '').trim();
+    return n && n !== '未分类' ? n : '';
+  }
+
+  /** 合并多端分组名：云端顺序优先，再补本地与卡片上的分组 */
+  function mergeCustomGroupsList(localList, cloudList, cards) {
+    const seen = new Set();
+    const out = [];
+    const push = (g) => {
+      const n = normalizeGroupName(g);
+      if (!n || seen.has(n)) return;
+      seen.add(n);
+      out.push(n);
+    };
+    for (const g of cloudList || []) push(g);
+    for (const g of localList || []) push(g);
+    for (const c of cards || []) push(c?.group);
+    return out;
+  }
+
   function mergePayload(local, cloud) {
     if (!cloud || typeof cloud !== 'object') {
       return { ...local, schemaVersion: SCHEMA_VERSION };
@@ -250,13 +271,15 @@
       local.settings?.deletedCommunityPostTombstones,
       cloud.settings?.deletedCommunityPostTombstones
     );
+    const mergedCards = mergeCardsList(local.cards, cloud.cards, cardTombstones);
     const merged = {
       schemaVersion: SCHEMA_VERSION,
-      cards: mergeCardsList(local.cards, cloud.cards, cardTombstones),
-      customGroups:
-        Array.isArray(local.customGroups) && local.customGroups.length
-          ? local.customGroups
-          : cloud.customGroups || [],
+      cards: mergedCards,
+      customGroups: mergeCustomGroupsList(
+        local.customGroups,
+        cloud.customGroups,
+        mergedCards
+      ),
       globalFields:
         Array.isArray(local.globalFields) && local.globalFields.length
           ? local.globalFields
@@ -487,6 +510,7 @@
     validatePush,
     validatePull,
     mergePayload,
+    mergeCustomGroupsList,
     mergeCardPair,
     mergeCardsList,
     dedupeWarehouseCards,

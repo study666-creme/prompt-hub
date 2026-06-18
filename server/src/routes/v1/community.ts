@@ -12,7 +12,7 @@ import {
   upsertCommunityPost,
   type CommunityPostPayload
 } from '../../lib/community-feed';
-import { moderateCommunityContent } from '../../lib/community-moderation';
+import { moderateCommunityContent, isCommunityGeminiModerationEnabled } from '../../lib/community-moderation';
 import { resolveVisionApiBindings } from '../../lib/vision-chat';
 import { tryGrantLikeMilestone } from '../../lib/like-milestone';
 import {
@@ -109,15 +109,18 @@ async function assertCommunityPublishAllowed(
   opts?: { skipVision?: boolean }
 ) {
   const resolvedImage = await resolvePublicImageRef(admin, userId, payload, c.env);
+  const visionOn = isCommunityGeminiModerationEnabled(c.env.COMMUNITY_GEMINI_MODERATION);
   let visionKey: string | undefined;
   let visionBase: string | undefined;
-  let skipVision = false;
-  try {
-    const vision = resolveVisionApiBindings(c.env);
-    visionKey = vision.apiKey;
-    visionBase = vision.baseUrl;
-  } catch {
-    skipVision = true;
+  let skipVision = !visionOn;
+  if (visionOn) {
+    try {
+      const vision = resolveVisionApiBindings(c.env);
+      visionKey = vision.apiKey;
+      visionBase = vision.baseUrl;
+    } catch {
+      skipVision = true;
+    }
   }
   const mod = await moderateCommunityContent({
     admin,

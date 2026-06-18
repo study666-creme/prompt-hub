@@ -44,6 +44,12 @@ export function moderateCommunityPrompt(prompt: string): { safe: boolean; reason
   return { safe: true };
 }
 
+/** 默认关闭 Gemini 配图审核；Worker 环境变量 COMMUNITY_GEMINI_MODERATION=1 可重新开启 */
+export function isCommunityGeminiModerationEnabled(raw?: string): boolean {
+  const v = String(raw || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
 async function resolveImageUrlForModeration(
   admin: SupabaseClient,
   imageRef: string | null | undefined

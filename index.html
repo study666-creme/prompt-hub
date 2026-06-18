@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260611z';
+    window.__APP_BUILD__ = '20260618b';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -104,15 +104,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260611z">
-  <link rel="stylesheet" href="styles-theme.css?v=20260611z">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260611z">
+  <link rel="stylesheet" href="styles.css?v=20260618b">
+  <link rel="stylesheet" href="styles-theme.css?v=20260618b">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260618b">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260611z">
+  <link rel="stylesheet" href="styles-features.css?v=20260618b">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
-  <script src="theme.js?v=20260611z"></script>
+  <script src="theme.js?v=20260618b"></script>
 </head>
 <body>
   <div class="app-chrome">
@@ -613,7 +613,7 @@
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status" aria-live="polite"></p>
       <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260611z</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260618b</p>
     </div>
   </nav>
 
@@ -1073,7 +1073,7 @@
               <div class="credit-ledger-panel hidden" id="creditLedgerPanel" aria-live="polite"></div>
               <p class="imagegen-credits-note">会员订阅限时优惠（原价划线 · 折后价见充值页）；生图享积分折扣。购买请点「充值」。</p>
             </div>
-            <div class="imagegen-shared-params">
+            <div class="imagegen-shared-params" id="imageGenSharedParams">
             <p class="imagegen-promo-notice imagegen-promo-notice--model hidden" id="imageGenPromoNotice" aria-live="polite"></p>
             <label for="imageGenModel">生图模型</label>
             <div class="imagegen-model-family-tabs" id="imageGenModelFamilyTabs" role="tablist" aria-label="生图模型分组"></div>
@@ -1081,12 +1081,114 @@
               <option value="">加载模型列表…</option>
             </select>
             <p class="panel-hint imagegen-model-hint" id="imageGenModelHint" hidden></p>
-            <div class="imagegen-params-row">
-              <div class="imagegen-param">
+            <div class="imagegen-mj-params hidden" id="imageGenMjParams" aria-label="Midjourney 参数">
+              <div class="imagegen-mj-mode-tabs" role="tablist" aria-label="Midjourney 模式">
+                <button type="button" class="imagegen-mj-mode-tab active" data-mj-mode="imagine" role="tab" aria-selected="true">生图</button>
+                <button type="button" class="imagegen-mj-mode-tab" data-mj-mode="blend" role="tab" aria-selected="false">混图</button>
+              </div>
+              <p class="panel-hint imagegen-mj-blend-hint hidden" id="imageGenMjBlendHint">
+                混图：使用<strong>参考图框</strong>内 2～5 张图融合，提示词可选。生成后可在预览中逐张切换并放大/变体。
+              </p>
+              <div class="imagegen-mj-imagine-fields" id="imageGenMjImagineFields">
+              <p class="panel-hint imagegen-mj-help" id="imageGenMjHelp">
+                一次出 4 张图：默认入库<strong>首张 + 预览可切换四张</strong>；勾选「四张分别存入仓库」则各存一张卡片。上传参考图即为图生图。
+                风格化越高越艺术；混乱度越高构图越随机；垫图权重在垫图时生效。
+              </p>
+              <div class="imagegen-params-row">
+                <div class="imagegen-param">
+                  <label for="imageGenMjStylize">风格化 <span class="imagegen-mj-tip" title="数值越高越艺术化，默认 100">?</span></label>
+                  <input type="range" id="imageGenMjStylize" class="settings-input imagegen-field-compact" min="0" max="1000" step="10" value="100">
+                  <span class="imagegen-mj-range-val" id="imageGenMjStylizeVal">100</span>
+                </div>
+                <div class="imagegen-param">
+                  <label for="imageGenMjChaos">混乱度 <span class="imagegen-mj-tip" title="越高构图越不按常理，默认 0">?</span></label>
+                  <input type="range" id="imageGenMjChaos" class="settings-input imagegen-field-compact" min="0" max="100" step="1" value="0">
+                  <span class="imagegen-mj-range-val" id="imageGenMjChaosVal">0</span>
+                </div>
+              </div>
+              <div class="imagegen-params-row">
+                <div class="imagegen-param">
+                  <label for="imageGenMjWeird">怪异度 <span class="imagegen-mj-tip" title="越高越奇特，一般保持 0">?</span></label>
+                  <input type="range" id="imageGenMjWeird" class="settings-input imagegen-field-compact" min="0" max="3000" step="50" value="0">
+                  <span class="imagegen-mj-range-val" id="imageGenMjWeirdVal">0</span>
+                </div>
+                <div class="imagegen-param">
+                  <label for="imageGenMjIw">垫图权重 <span class="imagegen-mj-tip" title="有参考图时生效，越大越像原图">?</span></label>
+                  <input type="range" id="imageGenMjIw" class="settings-input imagegen-field-compact" min="0" max="3" step="0.1" value="1">
+                  <span class="imagegen-mj-range-val" id="imageGenMjIwVal">1</span>
+                </div>
+              </div>
+              <div class="imagegen-params-row">
+                <div class="imagegen-param">
+                  <label for="imageGenMjQuality">画质系数</label>
+                  <select id="imageGenMjQuality" class="settings-input imagegen-field-compact">
+                    <option value="">默认</option>
+                    <option value="0.25">0.25</option>
+                    <option value="0.5">0.5</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                  </select>
+                </div>
+                <div class="imagegen-param">
+                  <label for="imageGenMjStyle">风格模式</label>
+                  <select id="imageGenMjStyle" class="settings-input imagegen-field-compact">
+                    <option value="">默认</option>
+                    <option value="raw">raw</option>
+                  </select>
+                </div>
+              </div>
+              <label for="imageGenMjNegative">反向提示词</label>
+              <textarea id="imageGenMjNegative" class="settings-input imagegen-field-compact imagegen-mj-negative" maxlength="500" rows="3" placeholder="排除的内容，如 ugly, blurry、低质量"></textarea>
+              <p class="imagegen-mj-toggle-section-label">出图速度 <span class="imagegen-mj-tip" title="草图与高清互斥，只能选其一">?</span></p>
+              <div class="imagegen-mj-speed-group" role="radiogroup" aria-label="出图速度">
+                <label class="imagegen-mj-speed-option">
+                  <input type="radio" name="imageGenMjSpeed" value="" checked>
+                  <span class="imagegen-mj-speed-label">默认</span>
+                  <span class="imagegen-mj-speed-desc">平衡速度与质量</span>
+                </label>
+                <label class="imagegen-mj-speed-option">
+                  <input type="radio" name="imageGenMjSpeed" value="draft">
+                  <span class="imagegen-mj-speed-label">草图</span>
+                  <span class="imagegen-mj-speed-desc">更快、风格更粗略</span>
+                </label>
+                <label class="imagegen-mj-speed-option">
+                  <input type="radio" name="imageGenMjSpeed" value="hd">
+                  <span class="imagegen-mj-speed-label">高清</span>
+                  <span class="imagegen-mj-speed-desc">更慢、细节更多</span>
+                </label>
+              </div>
+              <p class="imagegen-mj-toggle-section-label">附加开关 <span class="imagegen-mj-toggle-hint">（以下两项可多选）</span></p>
+              <div class="imagegen-mj-toggles imagegen-mj-toggles--dual" role="group" aria-label="Midjourney 附加开关">
+                <label class="imagegen-mj-toggle-card">
+                  <span class="imagegen-mj-toggle-head">
+                    <input type="checkbox" id="imageGenMjTile">
+                    <span class="imagegen-mj-toggle-title">平铺模式</span>
+                  </span>
+                  <span class="imagegen-mj-toggle-desc">无缝重复图案，适合壁纸、包装、布料纹理</span>
+                </label>
+                <label class="imagegen-mj-toggle-card">
+                  <span class="imagegen-mj-toggle-head">
+                    <input type="checkbox" id="imageGenMjRaw">
+                    <span class="imagegen-mj-toggle-title">原始风格</span>
+                  </span>
+                  <span class="imagegen-mj-toggle-desc">减少默认美化，更贴近提示词字面意思</span>
+                </label>
+              </div>
+              <label class="imagegen-mj-save-all" for="imageGenMjSaveAllTiles">
+                <input type="checkbox" id="imageGenMjSaveAllTiles">
+                <span class="imagegen-mj-save-all-text">
+                  <strong>四张分别存入仓库</strong>
+                  <small>不勾选时仅入库首张（预览仍可切换四张）</small>
+                </span>
+              </label>
+              </div>
+            </div>
+            <div class="imagegen-params-row imagegen-params-row--size">
+              <div class="imagegen-param" data-param="resolution">
                 <label for="imageGenResolution">输出分辨率</label>
                 <select id="imageGenResolution" class="settings-input imagegen-field-compact"></select>
               </div>
-              <div class="imagegen-param">
+              <div class="imagegen-param" data-param="size">
                 <label for="imageGenSize">画面尺寸</label>
                 <select id="imageGenSize" class="settings-input imagegen-field-compact"></select>
               </div>
@@ -1510,27 +1612,48 @@
   <script src="api-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260611z"></script>
+  <script src="api-client.js?v=20260618b"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260611z2show"></script>
-  <script src="card-image-loader.js?v=20260611z"></script>
+  <script src="supabase-sync.js?v=20260618b2show"></script>
+  <script src="card-image-loader.js?v=20260618b"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
   <script src="subscription.js?v=20260610a"></script>
-  <script src="trial-tasks.js?v=20260611z"></script>
+  <script src="trial-tasks.js?v=20260618b"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="mobile.js?v=20260611z"></script>
-  <script src="script.js?v=20260611z"></script>
-  <script src="points-system.js?v=20260611z"></script>
-  <script src="imagegen-prompt-kit.js?v=20260611z"></script>
-  <script src="imagegen-prompt-tools.js?v=20260611z"></script>
-  <script src="feed-layout.js?v=20260611z"></script>
-  <script src="feed-images.js?v=20260611z"></script>
-  <script src="image-gen-feed.js?v=20260611z"></script>
-  <script src="features-draft.js?v=20260611z"></script>
+  <script src="mobile.js?v=20260618b"></script>
+  <script src="script.js?v=20260618b"></script>
+  <script src="points-system.js?v=20260618b"></script>
+  <script src="imagegen-prompt-kit.js?v=20260618b"></script>
+  <script src="imagegen-prompt-tools.js?v=20260618b"></script>
+  <script src="feed-layout.js?v=20260618b"></script>
+  <script src="feed-images.js?v=20260618b"></script>
+  <script src="image-gen-feed.js?v=20260618b"></script>
+  <script>
+    (function () {
+      try {
+        var cached = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v2') || 'null');
+        if (!cached || !cached.models || !cached.models.length) return;
+        document.addEventListener('DOMContentLoaded', function () {
+          var sel = document.getElementById('imageGenModel');
+          if (!sel) return;
+          sel.disabled = false;
+          sel.removeAttribute('aria-busy');
+          sel.innerHTML = '';
+          cached.models.forEach(function (m) {
+            var opt = document.createElement('option');
+            opt.value = m.id;
+            opt.textContent = m.label || m.catalogLabel || m.id;
+            sel.appendChild(opt);
+          });
+        });
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
+  <script src="features-draft.js?v=20260618b"></script>
   <script src="community-gacha.js?v=20260606v"></script>
   <script src="features-assets.js?v=20260610ah"></script>
-  <script src="pwa-install.js?v=20260611z"></script>
+  <script src="pwa-install.js?v=20260618b"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

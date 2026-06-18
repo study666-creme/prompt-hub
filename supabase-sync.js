@@ -48,8 +48,8 @@
   const VARIANT_FULL = 'full';
   const USE_STORAGE_TRANSFORM = false;
   const GRID_SIGN_CONCURRENCY = 12;
-  const WAREHOUSE_PREFETCH_CARD_CAP = 18;
-  const WAREHOUSE_VISIBLE_SIGN_CAP = 18;
+  const WAREHOUSE_PREFETCH_CARD_CAP = 28;
+  const WAREHOUSE_VISIBLE_SIGN_CAP = 24;
   const WAREHOUSE_FAST_FIRST = 32;
   const SS_SIGN_CACHE = 'ph_signed_urls_v1';
   const SS_GRID_DONE = 'ph_grid_done_v1';
@@ -60,7 +60,7 @@
   let gridBackfillRunning = false;
   let signBudgetUsed = 0;
   let signBudgetResetAt = 0;
-  const SIGN_BUDGET_MAX = 120;
+  const SIGN_BUDGET_MAX = (typeof window !== 'undefined' && window.matchMedia?.('(max-width: 900px)').matches) ? 180 : 120;
   const SIGN_BUDGET_WINDOW_MS = 30000;
   /** 社区 sign-batch：串行 + 最小间隔，避免滚动/append 并发打满 Worker 429 */
   const COMMUNITY_SIGN_BATCH_CHUNK = 40;
@@ -326,6 +326,11 @@
     const key = normalizePathKey(gridKey);
     if (!key || isPathKnownMissing(key) || gridFetchFailedPaths.has(key)) return false;
     if (!/_grid\.(jpe?g|webp|png)$/i.test(key)) return false;
+  /** 自有图：CDN 可按原图现场生成 grid，勿等本地 backfill 完成才签名 */
+    if (storagePathOwnedByCurrentUser(key)) {
+      const id = cardId || findCardForGridPath(key)?.id;
+      if (id) return true;
+    }
     let id = cardId;
     if (!id) {
       const card = findCardForGridPath(key);
@@ -333,7 +338,6 @@
     }
     const primaryGuess = key.replace(/_grid\.(jpe?g|webp|png)$/i, '.jpg');
     const needsReadyFlag = key.includes('/generated/') || isLegacyUploadCardPath(primaryGuess);
-    /* 生图/旧版上传常无独立 grid 文件；签 grid CDN 路径后边缘按需从原图生成 */
     if (needsReadyFlag) return !!id;
     if (id && isGridThumbReady(id)) return true;
     const gridHit = signedUrlCache.get(signedCacheKey(key, VARIANT_GRID));
@@ -717,12 +721,12 @@
   }
 
   try {
-    if (localStorage.getItem('promptrepo_sign_v') !== '8') {
+    if (localStorage.getItem('promptrepo_sign_v') !== '9') {
       clearSignedUrlCache();
       missingPathCache.clear();
       gridFetchFailedPaths.clear();
       try { localStorage.removeItem(LS_MISSING_PATHS); } catch (e) { /* ignore */ }
-      localStorage.setItem('promptrepo_sign_v', '8');
+      localStorage.setItem('promptrepo_sign_v', '9');
     }
   } catch (e) { /* ignore */ }
 
@@ -739,8 +743,20 @@
     if (cardId) imageUploadSkipUntil.set(String(cardId), Date.now() + IMAGE_UPLOAD_SKIP_MS);
   }
 
-  function payloadNeedsImageUpload(cards) {
-    return (cards || []).some((c) => cardNeedsCloudImageUpload(c) || isDataUrl(c?.image));
+  function payloadNeedsImageUpload(cards, opts = {}) {
+    const includeRemoteHttp = opts.includeRemoteHttp === true;
+    return (cards || []).some((c) => {
+      if (!c?.id || !c?.image) return false;
+      if (isDataUrl(c.image) || (typeof c.image === 'string' && c.image.startsWith('blob:'))) {
+        return true;
+      }
+      if (includeRemoteHttp && typeof c.image === 'string' && /^https?:\/\//i.test(c.image)) {
+        return true;
+      }
+      if (!isStorageRef(c.image)) return false;
+      const primary = primaryImagePath(c.image, c.id);
+      return !!(primary && isPathKnownMissing(primary));
+    });
   }
 
   function cardNeedsCloudImageUpload(card) {
@@ -1205,7 +1221,7 @@
 
   async function backfillGridThumbsForCards(cards, opts = {}) {
     if (!isLoggedIn()) return { done: 0, queued: 0, pending: 0, skipped: 0 };
-    if (opts.quiet !== false) window.CardImageLoader?.disconnect?.();
+    if (opts.quiet !== false && opts.awaitDrain) window.CardImageLoader?.disconnect?.();
     const force = opts.force === true;
     const max = Math.min(Math.max(1, Number(opts.max) || 24), force ? 80 : 48);
     const all = (cards || []).filter((c) => c?.id && c?.image && isStorageRef(c.image));
@@ -1518,14 +1534,30 @@
     return null;
   }
 
-  /** 所有列表区（含社区网格）只显示 grid；full 仅预览/侧栏/灯箱 */
+  /** 所有列表区（含社区网格）只显示 grid；缺 grid 时自有卡藏允许降级用 full 预览 */
   function isWarehouseBlockedFullUrl(url, img) {
     const listRoot = img?.closest?.('#cardsContainer, #imageGenFeed, #communityGrid, #creationsGrid, #userProfileGrid');
     if (!listRoot) return false;
     const path = storagePathFromDisplayUrl(url);
     if (!path || isGridStoragePath(path)) return false;
     if (!/\.(jpe?g|webp|png|gif)$/i.test(path)) return false;
+    if (img?.dataset?.listPrimaryRetried === '1') return false;
+    const cardId = img?.dataset?.sourceCardId
+      || img?.closest?.('.card[data-id]')?.dataset?.id
+      || img?.closest?.('.imagegen-feed-card[data-feed-id^="wh_"]')?.dataset?.feedId?.replace(/^wh_/, '')
+      || undefined;
+    const ref = img?.getAttribute?.('data-image-ref');
+    if (cardId && ref && (listRoot.id === 'cardsContainer' || listRoot.id === 'imageGenFeed')) {
+      const primary = primaryImagePath(ref, cardId);
+      if (primary && gridListNeedsPrimaryFallback(primary, cardId)) return false;
+      if (primary && !isGridThumbReady(cardId)) return false;
+    }
     return true;
+  }
+
+  function needsDegradedListPreview(image, cardId) {
+    const primary = primaryImagePath(image, cardId);
+    return !!(primary && gridListNeedsPrimaryFallback(primary, cardId));
   }
 
   /** 社区列表 prefetch / DOM：优先 grid 路径 ref */
@@ -2032,6 +2064,17 @@
       const variantPaths = pathsForVariant(normalized, assetId, authorId, variant);
       let candidates;
       const listOnlyGrid = variant === VARIANT_GRID && (o.listOnly === true || o.allowFullFallback === false);
+      if (
+        listOnlyGrid
+        && o.degradedListFull === true
+        && primary
+        && !communityFeed
+        && isLoggedIn()
+        && storagePathOwnedByCurrentUser(primary)
+      ) {
+        const degraded = await resolveListPrimaryFallback(primary, assetId, o);
+        if (degraded) return degraded;
+      }
       if (communityFeed && listOnlyGrid) {
         const one = fromRef ? fromRef.replace(/^\//, '') : (primary ? primary.replace(/^\//, '') : '');
         candidates = one ? [one] : [];
@@ -2469,16 +2512,25 @@
     return '';
   }
 
-  /** 列表 DOM 首屏 src：仅 grid；禁止把 full 原图写进列表（侧栏/灯箱才用 full） */
+  /** 列表 DOM 首屏 src：优先 grid；缺 grid 时自有卡藏降级用已签名的 full */
   function getListDisplayImageSrc(image, assetId, extraOpts) {
     if (!image || typeof image !== 'string') return '';
     const o = extraOpts && typeof extraOpts === 'object' ? extraOpts : {};
+    const id = o.assetId || assetId;
     const grid = getCachedDisplayUrl(image, {
-      assetId: o.assetId || assetId,
+      assetId: id,
       authorId: o.authorId,
       variant: VARIANT_GRID
     });
     if (grid && isValidSignedDisplayUrl(grid) && !isInvalidMediaUrl(grid)) return grid;
+    if (needsDegradedListPreview(image, id)) {
+      const full = getCachedDisplayUrl(image, {
+        assetId: id,
+        authorId: o.authorId,
+        variant: VARIANT_FULL
+      });
+      if (full && isValidSignedDisplayUrl(full) && !isInvalidMediaUrl(full)) return full;
+    }
     return '';
   }
 
@@ -2491,6 +2543,7 @@
     );
     const limit = capMs != null ? Math.min(Math.max(800, capMs), 8000) : 2800;
     const pathSet = new Set();
+    const fullPathSet = new Set();
     const communityBatch = [];
     const seenCommunity = new Set();
     const list = (cards || []).slice(0, maxCards);
@@ -2516,6 +2569,12 @@
       if (!storagePathOwnedByCurrentUser(p)) continue;
       const plan = ownedListSignTargets(p, c.id);
       if (plan.grid) pathSet.add(plan.grid);
+      else if (plan.primary && needsDegradedListPreview(c.image, c.id)) {
+        fullPathSet.add(String(plan.primary).replace(/^\//, ''));
+      } else if (!plan.primary) {
+        const gk = (gridPathFromPrimary(p) || '').replace(/^\//, '');
+        if (gk && !isPathKnownMissing(gk)) pathSet.add(gk);
+      }
       /* backfill 仅由视口 prefetchOneCardImg 触发，避免刷新时批量拉原图 */
     }
     if (communityBatch.length) {
@@ -2525,18 +2584,24 @@
     if (pathSet.size) {
       await batchSignPaths([...pathSet], VARIANT_GRID);
     }
+    if (fullPathSet.size) {
+      await batchSignPaths([...fullPathSet], VARIANT_FULL);
+    }
   }
 
   /** 卡片库首屏：仅签可见 6 张，滚动后由 CardImageLoader 逐批补签 */
   async function prefetchWarehousePage(cards, capMs) {
     if (!isLoggedIn()) return;
+    const mobile = typeof window !== 'undefined' && window.MobileUI?.isMobileViewport?.();
+    const signCap = mobile ? 18 : WAREHOUSE_VISIBLE_SIGN_CAP;
     const maxCards = Math.min(
-      WAREHOUSE_VISIBLE_SIGN_CAP,
+      signCap,
       Math.max(1, (cards || []).length)
     );
     const list = (cards || []).slice(0, maxCards);
     if (!list.length) return;
-    await prefetchCardsImages(list, capMs == null ? 1800 : Math.min(capMs, 3200), { maxCards });
+    const budget = capMs == null ? (mobile ? 4200 : 1800) : Math.min(capMs, mobile ? 4800 : 3200);
+    await prefetchCardsImages(list, budget, { maxCards });
   }
 
   function imgPlaceholderSrc() {
@@ -3316,8 +3381,33 @@
 
   function clearPathMissingForCard(cardId, image) {
     for (const p of listImagePathCandidates(image, cardId)) {
-      missingPathCache.delete(normalizePathKey(p));
+      const nk = normalizePathKey(p);
+      missingPathCache.delete(nk);
+      if (/_grid\.(jpe?g|webp|png)$/i.test(nk)) gridFetchFailedPaths.delete(nk);
+      else {
+        const grid = gridPathFromPrimary(p);
+        if (grid) gridFetchFailedPaths.delete(normalizePathKey(grid));
+      }
     }
+    persistMissingPathCache();
+  }
+
+  /** 清除误标的「无图」缓存（网速慢时 audit 曾误判，导致黑块） */
+  function resetMissingPathCache() {
+    missingPathCache.clear();
+    gridFetchFailedPaths.clear();
+    try { localStorage.removeItem(LS_MISSING_PATHS); } catch (e) { /* ignore */ }
+  }
+
+  function healMissingPathCacheForCards(cards) {
+    if (!Array.isArray(cards)) return 0;
+    let n = 0;
+    for (const c of cards) {
+      if (!c?.id || !c?.image) continue;
+      clearPathMissingForCard(c.id, c.image);
+      n += 1;
+    }
+    return n;
   }
 
   function uploadOptsForCard(card) {
@@ -3730,13 +3820,16 @@
     const capMs = Math.max(2000, Number(opts.capMs) || 6000);
     const deadline = Date.now() + capMs;
     const skipStorageList = opts.skipStorageList !== false;
+    const maxScan = Math.max(8, Math.min(24, Number(opts.maxScan) || 16));
     const broken = [];
     const repaired = [];
+    let scanned = 0;
     for (const card of cards) {
-      if (Date.now() > deadline) break;
+      if (Date.now() > deadline || scanned >= maxScan) break;
       if (!card?.image) continue;
       if (isDataUrl(card.image) || card.image.startsWith('blob:')) continue;
       if (!isStorageRef(card.image) && !/supabase\.co\/storage\/v1\/object/i.test(card.image)) continue;
+      scanned += 1;
       const ok = await verifyStorageRef(card.image, card.id, { quick: true, noDownload: true });
       if (ok) continue;
       let fixed = skipStorageList ? null : await findCardImageInStorage(card.id);
@@ -3761,14 +3854,13 @@
           to: fixed
         });
         card.image = fixed;
+        clearPathMissingForCard(card.id, fixed);
       } else {
-        const path = primaryImagePath(card.image, card.id);
-        if (path) markPathMissing(path);
-        const grid = path ? gridPathFromPrimary(path.replace(/^\//, '')) : null;
-        if (grid) markPathMissing(grid);
+        /** 仅记录；不在 audit 里 markPathMissing（网速慢/签超时会被误判，曾导致数百张黑块） */
         broken.push({
           id: card.id,
-          title: (card.title || card.prompt || card.id || '').toString().slice(0, 40)
+          title: (card.title || card.prompt || card.id || '').toString().slice(0, 40),
+          inconclusive: true
         });
       }
     }
@@ -4085,11 +4177,14 @@
     isGridStoragePath,
     storagePathFromCdnUrl,
     isWarehouseBlockedFullUrl,
+    needsDegradedListPreview,
     communityListGridRef,
     storagePathFromDisplayUrl,
     isPathKnownMissing,
     markPathMissing,
     clearPathMissingForCard,
+    resetMissingPathCache,
+    healMissingPathCacheForCards,
     markGridFetchFailed,
     shouldSignGridPath,
     resolveListPrimaryFallback,

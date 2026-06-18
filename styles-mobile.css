@@ -600,6 +600,17 @@
     min-height: 0 !important;
   }
 
+  #communityGrid > .feed-page-sentinel,
+  #creationsGrid > .feed-page-sentinel {
+    flex: 0 0 100% !important;
+    width: 100% !important;
+    height: 2px !important;
+    min-height: 2px !important;
+    order: 9999;
+    pointer-events: none;
+    visibility: hidden;
+  }
+
   body.efficiency-mode #communityGrid.cards-container,
   body.efficiency-mode #creationsGrid.cards-container {
     overflow-y: visible !important;
@@ -1460,6 +1471,41 @@
 
   body.imagegen-mobile-view-form .imagegen-mode-credits {
     display: none !important;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-mj-params {
+    display: block !important;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-mj-params.hidden {
+    display: none !important;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-mj-params .imagegen-params-row {
+    grid-template-columns: 1fr;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-mj-toggles,
+  body.imagegen-mobile-view-form .imagegen-mj-toggles--dual {
+    grid-template-columns: 1fr;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-mj-speed-group {
+    grid-template-columns: 1fr;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-shared-params.imagegen-params--mj .imagegen-params-row--mj-size {
+    grid-template-columns: 1fr;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-mj-filmstrip-stage {
+    gap: 4px;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-mj-filmstrip-nav {
+    width: 28px;
+    height: 28px;
+    font-size: 18px;
   }
 
   body.imagegen-mobile-view-form .imagegen-shared-params {

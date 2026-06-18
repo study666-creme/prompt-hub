@@ -1061,7 +1061,9 @@
       };
       let list = base.filter((c) => {
         if (!isGenCard(c)) return false;
-        if (!cardHasDisplayImage(c)) return false;
+        const hasImage = cardHasDisplayImage(c)
+          || (c.image && window.FeatureDraft?.isDisplayableImage?.(c.image));
+        if (!hasImage) return false;
         const prompt = (c.prompt || '').trim();
         const title = (c.title || '').trim();
         return !!(prompt || title);
@@ -1315,8 +1317,13 @@
         showToast('无内容可保存');
         return { ok: false };
       }
-      if (jobId && window.getDeletedGenerationJobTombstones?.()?.[String(jobId)]) {
-        return { ok: false, duplicate: true, skipped: true };
+      if (jobId) {
+        const jobTomb = window.getDeletedGenerationJobTombstones?.() || {};
+        const jobKey = String(jobId);
+        const jobBase = jobKey.replace(/#\d+$/, '');
+        if (jobTomb[jobKey] || (jobBase && jobTomb[jobBase])) {
+          return { ok: false, duplicate: true, skipped: true };
+        }
       }
       if (jobId && cards.some(c => c.genJobId === jobId)) {
         const existing = cards.find(c => c.genJobId === jobId);
@@ -1396,6 +1403,10 @@
         resolution: payload.resolution || null,
         model: payload.model || null,
         genQuality: payload.quality || null,
+        isMidjourney: !!payload.isMidjourney,
+        mjGridUrls: Array.isArray(payload.mjGridUrls) ? payload.mjGridUrls.filter(Boolean) : null,
+        mjCompositeUrl: payload.mjCompositeUrl || null,
+        mjButtons: Array.isArray(payload.mjButtons) ? payload.mjButtons : null,
         genSize: payload.size || null,
         createdAt: Date.now(),
         updatedAt: Date.now()
@@ -1452,7 +1463,7 @@
           return !!(path && window.SupabaseSync.isPathKnownMissing?.(path));
         }
         return false;
-      }).slice(0, 12);
+      }).slice(0, 4);
       if (!targets.length) return;
       genCardImageRepairInflight = (async () => {
         let changed = false;
@@ -1472,6 +1483,7 @@
           } catch (e) {
             console.warn('[repairGeneratedCardImages] skipped', c.id, e);
           }
+          await new Promise((r) => setTimeout(r, 120));
         }
         if (changed) {
           await saveAllData({ skipCloud: true });
@@ -3252,7 +3264,10 @@
       if (!settings.deletedGenerationJobTombstones || typeof settings.deletedGenerationJobTombstones !== 'object') {
         settings.deletedGenerationJobTombstones = {};
       }
-      settings.deletedGenerationJobTombstones[String(jobId)] = Date.now();
+      const key = String(jobId);
+      settings.deletedGenerationJobTombstones[key] = Date.now();
+      const base = key.replace(/#\d+$/, '');
+      if (base && base !== key) settings.deletedGenerationJobTombstones[base] = Date.now();
       try {
         localStorage.setItem('promptrepo_settings', JSON.stringify(settings));
         const uid = window.SupabaseSync?.getUserId?.() || activeAccountId;
@@ -3437,6 +3452,22 @@
                 return;
               }
             } else if (cardModel) {
+              const degraded = window.SupabaseSync?.needsDegradedListPreview?.(ref, cardId);
+              if (degraded) {
+                const fullUrl = await window.SupabaseSync.resolveDisplayUrl(ref, {
+                  assetId: cardId,
+                  variant: window.SupabaseSync.VARIANT_FULL || 'full',
+                  listOnly: true,
+                  degradedListFull: true,
+                  tryAllPaths: true
+                });
+                if (fullUrl && window.CardImageLoader?.applyUrlToImg?.(img, fullUrl)) {
+                  delete img.dataset.warehouseFinalFail;
+                  media.classList.remove('card-media--load-failed', 'card-media--await');
+                  scheduleWarehouseMasonryForCard(cardId);
+                  return;
+                }
+              }
               window.SupabaseSync?.queueGridBackfill?.(cardModel, { force: true });
               await new Promise((r) => setTimeout(r, 1200));
               const gridUrl = window.SupabaseSync?.getListDisplayImageSrc?.(ref, cardId)
@@ -3486,7 +3517,7 @@
             tryAllPaths: false,
             listOnly: true,
             allowFullFallback: false,
-            degradedListFull: false
+            degradedListFull: window.SupabaseSync?.needsDegradedListPreview?.(ref, cardId) === true
           });
           if (url && /^https?:\/\//i.test(url) && !String(url).includes('data:image/svg')) {
             const media = img.closest('.card-media');
@@ -3832,6 +3863,7 @@
       if (!payload || typeof payload !== 'object') return;
       const prevTombstones = { ...(settings.deletedCardTombstones || {}) };
       const prevCreTombstones = { ...(settings.deletedCreationTombstones || {}) };
+      const prevJobTombstones = { ...(settings.deletedGenerationJobTombstones || {}) };
       if (Array.isArray(payload.cards)) {
         cards = filterTombstonedCards(normalizeCardImages(payload.cards));
       }
@@ -3847,9 +3879,14 @@
           prevCreTombstones,
           payload.settings.deletedCreationTombstones
         );
+        settings.deletedGenerationJobTombstones = mergeDeletedGenerationJobTombstones(
+          prevJobTombstones,
+          payload.settings.deletedGenerationJobTombstones
+        );
       } else {
         if (Object.keys(prevTombstones).length) settings.deletedCardTombstones = prevTombstones;
         if (Object.keys(prevCreTombstones).length) settings.deletedCreationTombstones = prevCreTombstones;
+        if (Object.keys(prevJobTombstones).length) settings.deletedGenerationJobTombstones = prevJobTombstones;
       }
       if (Array.isArray(payload.creations)) {
         payload.creations = filterTombstonedCreations(payload.creations);
@@ -3858,7 +3895,16 @@
       migrateCommunityCollectCards();
       window.Membership?.syncFromPayload?.(payload.account);
       window.FeatureDraft?.applyCloudSlice?.(payload);
-      loadWarehouseGroups(getActiveWarehouseId());
+      const wid = getActiveWarehouseId();
+      if (Array.isArray(payload.customGroups)) {
+        customGroups = window.CloudSyncSafety?.mergeCustomGroupsList
+          ? window.CloudSyncSafety.mergeCustomGroupsList([], payload.customGroups, cards)
+          : payload.customGroups.slice();
+        persistWarehouseGroups(wid);
+      } else {
+        loadWarehouseGroups(wid);
+      }
+      reconcileCustomGroupsFromCards();
       normalizeCardPins();
       floatingPromptActive = false;
       settings.floatingPrompt = false;
@@ -4465,7 +4511,13 @@
         refreshFeeds();
       }
       if (window.SupabaseSync?.isLoggedIn?.()) {
-        void repairGeneratedCardImagesQuiet();
+        if (cards.length) window.SupabaseSync?.healMissingPathCacheForCards?.(cards);
+        const runRepair = () => void repairGeneratedCardImagesQuiet();
+        if (typeof requestIdleCallback === 'function') {
+          requestIdleCallback(runRepair, { timeout: 12000 });
+        } else {
+          setTimeout(runRepair, 4000);
+        }
       }
     }
     function bindQuickPreviewButtons() {
@@ -4516,8 +4568,21 @@
       return [...names];
     }
 
+    function reconcileCustomGroupsFromCards() {
+      const names = groupNamesFromCards(cardsForActiveWarehouse(filterTombstonedCards(cards)));
+      const merged = window.CloudSyncSafety?.mergeCustomGroupsList
+        ? window.CloudSyncSafety.mergeCustomGroupsList(customGroups, [], names)
+        : [...new Set([...(customGroups || []), ...names])];
+      const prev = customGroups || [];
+      const changed = merged.length !== prev.length || merged.some((g, i) => g !== prev[i]);
+      if (!changed) return false;
+      customGroups = merged;
+      persistWarehouseGroups(getActiveWarehouseId());
+      return true;
+    }
+
     function ensureGroupsFromCards() {
-      if (customGroups.length) return false;
+      if (customGroups.length) return reconcileCustomGroupsFromCards();
       const names = groupNamesFromCards(cardsForActiveWarehouse(filterTombstonedCards(cards)));
       if (!names.length) return false;
       return mergeWarehouseGroupsFromList(names);
@@ -5348,8 +5413,15 @@
 
       const metaPayload = autoPayload?.cards?.length ? autoPayload : snapshotPayload;
       if (metaPayload && typeof metaPayload === 'object') {
-        if (Array.isArray(metaPayload.customGroups) && metaPayload.customGroups.length) {
-          customGroups = metaPayload.customGroups;
+        if (Array.isArray(metaPayload.customGroups)) {
+          customGroups = window.CloudSyncSafety?.mergeCustomGroupsList
+            ? window.CloudSyncSafety.mergeCustomGroupsList([], metaPayload.customGroups, cards)
+            : metaPayload.customGroups.slice();
+          persistWarehouseGroups(getActiveWarehouseId());
+        } else {
+          try {
+            loadWarehouseGroups(getActiveWarehouseId());
+          } catch (e) { customGroups = []; }
         }
         if (Array.isArray(metaPayload.globalFields) && metaPayload.globalFields.length) {
           globalFields = metaPayload.globalFields;
@@ -5357,10 +5429,12 @@
         if (metaPayload.settings && typeof metaPayload.settings === 'object') {
           settings = Object.assign(settings, metaPayload.settings);
         }
+      } else {
+        try {
+          loadWarehouseGroups(getActiveWarehouseId());
+        } catch (e) { customGroups = []; }
       }
-      try {
-        loadWarehouseGroups(getActiveWarehouseId());
-      } catch (e) { customGroups = []; }
+      reconcileCustomGroupsFromCards();
       try {
         const f = localStorage.getItem(userStorageKey('fields', uid));
         if (f) globalFields = JSON.parse(f);
@@ -5581,8 +5655,11 @@
       const work = async () => {
         const payload = getDataPayload();
         const hasBase64 = payload.cards?.some(c => window.SupabaseSync.isDataUrl(c.image));
-        const needsImagePass = hasBase64
-          || (window.SupabaseSync.payloadNeedsImageUpload?.(payload.cards) === true);
+        const needsImagePass = window.SupabaseSync.payloadNeedsImageUpload?.(payload.cards, {
+          includeRemoteHttp: opts.strictImageCheck === true
+            || opts.uploadRemoteImages === true
+            || !silent
+        }) === true;
         if (hasBase64 && status) status.textContent = '正在上传图片到云端…';
         const pushOpts = {
           skipSafety: opts.skipSafety === true,
@@ -5704,13 +5781,13 @@
     function scheduleCloudPush(opts = {}) {
       if (!window.SupabaseSync?.isLoggedIn?.()) return;
       clearTimeout(cloudPushTimer);
-      const delay = opts.urgent === true ? 350 : 45000;
+      const delay = opts.urgent === true ? 350 : 90000;
       cloudPushTimer = setTimeout(() => {
         if (!opts.urgent && document.hidden) {
           scheduleCloudPush(opts);
           return;
         }
-        pushToCloud({ silent: true }).catch((e) => {
+        pushToCloud({ silent: true, skipSafety: true }).catch((e) => {
           console.warn('[cloud] silent push failed', e);
         });
       }, delay);
@@ -5757,14 +5834,15 @@
     }
 
     function scheduleDeferredImageAudit() {
+      if (window.MobileUI?.isMobileViewport?.()) return;
       const uid = window.SupabaseSync?.getUserId?.() || 'guest';
       const key = 'ph_img_audit_' + uid;
       if (sessionStorage.getItem(key)) return;
       sessionStorage.setItem(key, '1');
       const run = () => void runCardImageIntegrityAudit();
-      const auditDelay = window.SupabaseSync?.isLegacyImageRestorePhase?.() ? 1500 : 60000;
+      const auditDelay = 180000;
       if (typeof requestIdleCallback === 'function') {
-        requestIdleCallback(run, { timeout: window.SupabaseSync?.isLegacyImageRestorePhase?.() ? 4000 : 120000 });
+        requestIdleCallback(run, { timeout: auditDelay + 60000 });
       } else {
         setTimeout(run, auditDelay);
       }
@@ -5776,47 +5854,26 @@
     function hydrateWarehouseGridImages(container, pageCards) {
       if (!container) return;
       window.CardImageLoader?.bindWarehouse?.(container, pageCards);
-      window.CardImageLoader?.boostWarehouseImages?.(container, 20);
+      const boost = isMobileViewport() ? 20 : 24;
+      window.CardImageLoader?.boostWarehouseImages?.(container, boost);
       if (!isMobileViewport()) scheduleWarehouseMasonryLayout();
     }
 
     async function runCardImageIntegrityAudit() {
       if (!window.SupabaseSync?.auditBrokenCardImages || !window.SupabaseSync?.isLoggedIn?.()) return;
       if (!cards.length) return;
+      if (window.MobileUI?.isMobileViewport?.()) return;
       try {
-        const { broken, repaired } = await window.SupabaseSync.auditBrokenCardImages(cards, {
-          capMs: 5000,
-          skipStorageList: true
+        const { repaired } = await window.SupabaseSync.auditBrokenCardImages(cards, {
+          capMs: 8000,
+          skipStorageList: true,
+          maxScan: 12
         });
         if (repaired.length) {
           await saveAllData({ skipCloud: true });
           scheduleCloudPush({ urgent: true });
           showToast(`已自动修复 ${repaired.length} 张卡片图片`);
           refreshWarehouseUI({ softCards: true });
-        }
-        if (broken.length) {
-          for (const b of broken) {
-            const card = cards.find((c) => c.id === b.id);
-            if (card?.publishedToCommunity && window.FeatureDraft?.syncCardToCommunity) {
-              window.FeatureDraft.syncCardToCommunity(card, false);
-            }
-          }
-          renderGroups();
-          renderCards(true);
-          if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-            window.FeatureDraft?.renderImageGenFeed?.();
-          }
-          if (document.getElementById('pageCreations')?.classList.contains('active')) {
-            window.FeatureDraft?.renderCreations?.();
-          }
-          const key = 'ph_img_audit_warn_' + (window.SupabaseSync?.getUserId?.() || 'guest');
-          const last = Number(sessionStorage.getItem(key) || 0);
-          if (Date.now() - last > 600000) {
-            sessionStorage.setItem(key, String(Date.now()));
-            const sample = broken.slice(0, 2).map((b) => b.title || b.id).join('、');
-            const extra = broken.length > 2 ? ` 等 ${broken.length} 张` : '';
-            showToast(`已隐藏无图发布；卡片库中「${sample}」${extra}可手动删除`, 9000);
-          }
         }
       } catch (e) {
         console.warn('[cards] image audit failed', e);
@@ -5838,7 +5895,8 @@
       } else if (window.SupabaseSync?.isLoggedIn?.()) {
         window.SubscriptionUI?.refreshOfferUI?.();
       }
-      void window.FeatureDraft?.refreshImageGenModelCatalog?.();
+      void       window.FeatureDraft?.warmImageGenModelCatalog?.();
+      void window.FeatureDraft?.prefetchImageGenModelCatalog?.();
 
       if (!force && !idbMismatch && cloudHydratedUid === uid && cards.length > 0) {
         activeAccountId = uid;
@@ -5956,6 +6014,9 @@
       }
 
       cloudHydratedUid = uid;
+      if (cards.length && window.SupabaseSync?.healMissingPathCacheForCards) {
+        window.SupabaseSync.healMissingPathCacheForCards(cards);
+      }
       window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
       window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
       window.TrialTasksUI?.onAuthReady?.();
@@ -6885,25 +6946,30 @@
         return;
       }
       container.classList.remove('feed-grid-centered');
-      const prefetchCards = pageCards.slice(0, 18);
+      const prefetchCards = pageCards.slice(0, 24);
       let prefetchP = Promise.resolve();
       const warehouseActive = document.getElementById('pageWarehouse')?.classList.contains('active');
       if (page === 1 && prefetchCards.length && window.SupabaseSync?.prefetchWarehousePage) {
         prefetchP = window.SupabaseSync.prefetchWarehousePage(
           prefetchCards,
-          mobileGrid ? 2400 : 2600
+          mobileGrid ? 4800 : 3200
         );
+      }
+      if (page === 1 && pageCards.length) {
+        pageCards.forEach((c) => {
+          if (c?.id && c?.image) window.SupabaseSync?.clearPathMissingForCard?.(c.id, c.image);
+        });
       }
       if (page === 1 && pageCards.length && window.SupabaseSync?.backfillGridThumbsForCards) {
         void window.SupabaseSync.backfillGridThumbsForCards(pageCards, {
-          max: mobileGrid ? Math.min(14, pageCards.length) : pageCards.length,
-          force: !mobileGrid,
+          max: mobileGrid ? Math.min(8, pageCards.length) : Math.min(12, pageCards.length),
+          force: false,
           quiet: true,
           awaitDrain: false
         }).then(() => {
           window.SupabaseSync?.patchImageSrcFromCache?.(container, {
             visibleFirst: true,
-            max: mobileGrid ? 16 : 12
+            max: mobileGrid ? 20 : 16
           });
           window.CardImageLoader?.observeContainer?.(container);
         });
@@ -7061,7 +7127,11 @@
       const runWarehouseImages = () => {
         void hydrateWarehouseGridImages(container, pageCards);
       };
-      runWarehouseImages();
+      if (page === 1) {
+        void prefetchP.finally(runWarehouseImages);
+      } else {
+        runWarehouseImages();
+      }
       if (!mobileGrid && viewMode !== 'list') {
         if (isAppend && masonryInstance && appendedCards.length) {
           masonryInstance.appended(appendedCards);
@@ -7608,6 +7678,9 @@
               window.FeatureDraft?.renderCommunity?.({ skipFeedFetch: true });
             });
           }
+          if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+            window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: true });
+          }
           if (!opts.silent) showToast('已删除卡片');
         }
         void (async () => {
@@ -7633,6 +7706,7 @@
       }
       return doDelete();
     }
+    window.deleteCardPermanently = deleteCardPermanently;
 
     let editCardFillSeq = 0;
     let panelPreviewSeq = 0;
