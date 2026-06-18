@@ -2747,6 +2747,11 @@
     cyber_render: { label: '赛博渲染', hint: 'Blade Runner 美术', tag: '【画风锁定】赛博朋克概念 art，非真人写真' },
     dark_aesthetic: { label: '暗黑美学', hint: '哥特 / 暗调 / 颓废华丽', tag: '【画风锁定】暗黑美学，低明度高对比，哥特/颓废/神秘氛围，非明亮卡通非真人摄影' },
     weta: { label: 'Weta 写实 CG', hint: '电影级角色', tag: '【画风锁定】Weta 级写实 CG，非真人照片' },
+    hyperreal_3d_cgi: {
+      label: '超写实 3D CGI',
+      hint: '电影级数字人 / UE5',
+      tag: '【画风锁定】超写实3D CGI，电影级数字角色渲染，PBR次表面散射肤质，发丝级细节，UE5/Octane商业品质，非真人摄影非2D插画'
+    },
     guoman_25d: {
       label: '2.5D国漫写实',
       hint: '国漫比例 + 3D写实渲染',
@@ -2760,7 +2765,7 @@
   };
 
   const AUTO_STYLE_POOL = [
-    'anime', 'dongman', 'semireal', 'lineart', 'cg_3d', 'makoto', 'ghibli', 'photo', 'photo_film', 'hyperreal',
+    'anime', 'dongman', 'semireal', 'lineart', 'cg_3d', 'hyperreal_3d_cgi', 'makoto', 'ghibli', 'photo', 'photo_film', 'hyperreal',
     'manhwa', 'arcane', 'oil', 'ink', 'pixel', 'cyber_render', 'dark_aesthetic', 'cg_3d_toon', 'unreal', 'anime_90s',
     'guoman_25d', 'moe_chibi'
   ];
@@ -2813,6 +2818,13 @@
     return prompts;
   }
 
+  /** 风格转换下拉：常用高级画风（不含 auto/none） */
+  const STYLE_CONVERT_PRESETS = [
+    'hyperreal_3d_cgi', 'cg_3d', 'unreal', 'weta', 'guoman_25d', 'hyperreal',
+    'arcane', 'semireal', 'lineart', 'anime', 'dongman', 'photo', 'photo_film',
+    'makoto', 'ghibli', 'oil', 'cyber_render', 'dark_aesthetic', 'ink', 'flat', 'comic', 'watercolor'
+  ];
+
   global.ImageGenPromptKit = {
     CONTENT_TEMPLATES,
     ART_STYLES,
@@ -2830,6 +2842,12 @@
         label: t.label,
         hint: t.hint
       }));
+    },
+    listStyleConvertPresets() {
+      return STYLE_CONVERT_PRESETS.map((id) => {
+        const t = ART_STYLES[id];
+        return t ? { id, label: t.label, hint: t.hint } : null;
+      }).filter(Boolean);
     },
     getArtStyleTag(styleId) {
       const resolved = resolveStyleId(styleId);

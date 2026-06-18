@@ -1349,19 +1349,119 @@
 }
 
 .imagegen-ref-quick-actions {
+  display: none;
+}
+
+.imagegen-ref-batch-fold {
+  margin: 10px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  background: color-mix(in srgb, var(--bg-card) 72%, transparent);
+  overflow: hidden;
+}
+
+.imagegen-ref-batch-fold-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.imagegen-ref-batch-fold-summary::-webkit-details-marker {
+  display: none;
+}
+
+.imagegen-ref-batch-fold-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.imagegen-ref-batch-fold-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.imagegen-ref-batch-chips {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.imagegen-ref-batch-chip {
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.imagegen-ref-batch-chip:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.imagegen-ref-batch-chip.active {
+  color: var(--text-primary);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-card));
+}
+
+.imagegen-ref-batch-body {
+  padding: 0 10px 10px;
+}
+
+.imagegen-ref-batch-panel {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.imagegen-ref-batch-panel[hidden] {
+  display: none !important;
+}
+
+.imagegen-ref-batch-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin: 0 0 10px;
 }
 
-.imagegen-ref-quick-actions--quad {
-  grid-template-columns: 1fr 1fr;
+.imagegen-ref-batch-field label {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
-.imagegen-ref-quick-actions .btn {
+.imagegen-ref-batch-field .settings-input {
+  width: 100%;
+}
+
+.imagegen-ref-batch-submit {
   width: 100%;
   justify-content: center;
+}
+
+.imagegen-ref-batch-idle-hint {
+  margin: 0;
+  padding: 8px 2px 0;
+  font-size: 10px;
+  text-align: center;
+}
+
+.imagegen-ref-batch-idle-hint[hidden] {
+  display: none;
 }
 
 .imagegen-ref-option-check {

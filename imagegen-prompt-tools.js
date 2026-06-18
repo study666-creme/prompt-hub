@@ -13,9 +13,10 @@
   const BATCH_SUBMIT_GAP_MS = 2200;
   const BATCH_SUBMIT_JITTER_MS = 800;
   const STYLE_CONVERT_SUFFIX = '【画风转换】严格保留原图人物/物体身份、姿态与构图，仅转换画面艺术风格与渲染质感，细节完整，专业插画完成度，无文字无水印';
-  const CHAR_TURNAROUND_PROMPT = '【角色三视图】高级游戏/动画设定集品质：同一角色正面、左侧面、背面三视图并排展示，全身比例准确，服装结构与配饰清晰，高端纯色背景（淡灰白），uniform studio lighting，干净无阴影干扰，无文字无水印，concept art turnaround sheet';
-  const CHAR_HEADSHOT_PROMPT = '【高清大头照】同一角色面部高清肖像特写，高端纯色背景（淡灰白），五官清晰锐利，发丝与肤质细节完整，专业设定集头像品质，肩部以上构图，无文字无水印，character portrait headshot';
-  const PRODUCT_ANGLES_PROMPT = '【物品多角度】高端产品/道具设定图：同一物体正视、45度、侧视、俯视多角度并排展示，结构细节清晰，高端纯色背景（淡灰白），专业工业/游戏道具设定品质，studio lighting，无文字无水印，product multi-view reference sheet';
+  const CHAR_TURNAROUND_PROMPT = '【角色设定表】高级游戏/动画设定集品质：同一角色正面、左侧面、背面三视图并排展示，全身比例准确，服装结构与配饰清晰，高端纯色背景（淡灰白），uniform studio lighting，干净无阴影干扰，无文字无 watermark，concept art turnaround sheet';
+  const CHAR_TURNAROUND_HEADSHOT_EXTRA = '，并在同一张设定表画面内额外包含一格高清面部特写大头（肩部以上、五官锐利清晰、肤质细节完整），与三视图统一排版';
+  const PRODUCT_ANGLES_PROMPT = '【物品多角度】高端产品/道具设定图：同一物体正视、45度、侧视、俯视多角度并排展示，结构细节清晰，高端纯色背景（淡灰白），专业工业/游戏道具设定品质，studio lighting，无文字无 watermark，product multi-view reference sheet';
+  const CHAR_EXPRESSIONS_16_PROMPT = '【十六表情设定表】同一角色十六种截然不同、生动传神的表情特写（喜悦、愤怒、悲伤、大笑、惊讶、恐惧、轻蔑、沉思、困倦、傲慢、撒娇、绝望、狂喜、冷漠、害羞、呆滞），以4×4网格排列在同一张设定表内，每种表情眼神与嘴型明显不同，高端纯色背景（淡灰白），专业动画表情设定集品质，无文字无 watermark，expression sheet 16 panels';
 
   function getFirstRefImage() {
     const refs = window.FeatureDraft?.getImageGenRefImages?.() || [];
@@ -27,10 +28,25 @@
   }
 
   function buildStyleConvertPrompt(styleId) {
-    const tag = (styleId && styleId !== 'none' && styleId !== 'inherit')
-      ? (window.ImageGenPromptKit?.getArtStyleTag?.(styleId) || '')
-      : '【画风锁定】高质量商业插画，细节丰富，统一光影';
-    return tag ? `${tag}，${STYLE_CONVERT_SUFFIX}` : STYLE_CONVERT_SUFFIX;
+    const tag = window.ImageGenPromptKit?.getArtStyleTag?.(styleId) || '';
+    if (!tag) {
+      toast('请先选择目标画风');
+      return '';
+    }
+    return `${tag}，${STYLE_CONVERT_SUFFIX}`;
+  }
+
+  function getTurnaroundPrompt() {
+    const withHead = $('imageGenTurnaroundHeadshot')?.checked !== false;
+    return withHead
+      ? CHAR_TURNAROUND_PROMPT.replace('concept art turnaround sheet', `concept art turnaround sheet${CHAR_TURNAROUND_HEADSHOT_EXTRA}`)
+      : CHAR_TURNAROUND_PROMPT;
+  }
+
+  function syncRefBatchIdleHint() {
+    const hint = $('imageGenRefBatchIdleHint');
+    if (!hint) return;
+    hint.hidden = !!activeRefTool && ['styleConvert', 'turnaround', 'productAngles', 'expressions'].includes(activeRefTool);
   }
 
   function updateRefToolState() {
@@ -41,11 +57,9 @@
     const styleStatus = $('imageGenStyleConvertRefStatus');
     const turnaroundStatus = $('imageGenTurnaroundRefStatus');
     const productStatus = $('imageGenProductAnglesRefStatus');
+    const expressionsStatus = $('imageGenExpressionsRefStatus');
     const reverseBtn = $('imageGenReverseBtn');
     const fissionBtn = $('imageGenFissionAnalyzeBtn');
-    const styleQuickBtn = $('imageGenStyleConvertQuickBtn');
-    const turnaroundQuickBtn = $('imageGenTurnaroundQuickBtn');
-    const productQuickBtn = $('imageGenProductAnglesQuickBtn');
     const refLabel = refs.length
       ? `已就绪：${refs.length} 张参考图，将逐张提交`
       : '请先在上方添加参考图';
@@ -55,15 +69,14 @@
     if (styleStatus) styleStatus.textContent = refLabel;
     if (turnaroundStatus) turnaroundStatus.textContent = refLabel;
     if (productStatus) productStatus.textContent = refLabel;
+    if (expressionsStatus) expressionsStatus.textContent = refLabel;
     if (reverseBtn && reverseBtn.textContent === '反推提示词') reverseBtn.disabled = !ref;
     if (fissionBtn && !fissionBtn.disabled && fissionBtn.textContent === fissionAnalyzeBtnLabel()) {
       fissionBtn.disabled = !ref;
     } else if (fissionBtn && fissionBtn.textContent === fissionAnalyzeBtnLabel()) {
       fissionBtn.disabled = !ref;
     }
-    if (styleQuickBtn) styleQuickBtn.disabled = !refs.length;
-    if (turnaroundQuickBtn) turnaroundQuickBtn.disabled = !refs.length;
-    if (productQuickBtn) productQuickBtn.disabled = !refs.length;
+    syncRefBatchIdleHint();
     void updateBatchCostLabel();
   }
 
@@ -185,14 +198,16 @@
       toast('请先在上方添加参考图');
       return;
     }
-    const styleId = $('imageGenStyleConvertStyle')?.value || 'anime';
+    const styleId = $('imageGenStyleConvertStyle')?.value || 'hyperreal_3d_cgi';
+    const prompt = buildStyleConvertPrompt(styleId);
+    if (!prompt) return;
     batchRunning = true;
     const btn = $('imageGenStyleConvertBatchBtn');
     if (btn) btn.disabled = true;
     try {
       const batch = await runRefImageBatch({
         refs,
-        prompts: buildStyleConvertPrompt(styleId),
+        prompts: prompt,
         btn,
         btnPrefix: '风格转换',
         unitLabel: '风格转换'
@@ -214,12 +229,6 @@
     }
   }
 
-  function getTurnaroundPrompts() {
-    const prompts = [CHAR_TURNAROUND_PROMPT];
-    if ($('imageGenTurnaroundHeadshot')?.checked) prompts.push(CHAR_HEADSHOT_PROMPT);
-    return prompts;
-  }
-
   async function onQueueTurnaroundBatch() {
     if (batchRunning) {
       toast('批量任务进行中，请稍候');
@@ -237,7 +246,7 @@
     try {
       const batch = await runRefImageBatch({
         refs,
-        prompts: getTurnaroundPrompts(),
+        prompts: getTurnaroundPrompt(),
         btn,
         btnPrefix: '三视图',
         unitLabel: '三视图'
@@ -291,6 +300,45 @@
     } catch (e) {
       console.error('[imagegen] product angles batch failed', e);
       toast('物品多角度提交失败，请刷新页面后重试');
+    } finally {
+      batchRunning = false;
+      if (btn) btn.disabled = false;
+      void updateBatchCostLabel();
+    }
+  }
+
+  async function onQueueExpressionsBatch() {
+    if (batchRunning) {
+      toast('批量任务进行中，请稍候');
+      return;
+    }
+    if (!window.AuthGate?.requireAuth?.('imagegen')) return;
+    const refs = getRefImagesForBatch();
+    if (!refs.length) {
+      toast('请先在上方添加参考图');
+      return;
+    }
+    batchRunning = true;
+    const btn = $('imageGenExpressionsBatchBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const batch = await runRefImageBatch({
+        refs,
+        prompts: CHAR_EXPRESSIONS_16_PROMPT,
+        btn,
+        btnPrefix: '十六表情',
+        unitLabel: '十六表情'
+      });
+      if (!batch) return;
+      await window.PointsSystem?.refreshCreditsFromServer?.();
+      window.PointsSystem?.updateCreditsUI?.();
+      toast(`${summarizeBatchResults(batch.results, batch.total, batch.unitLabel)}，约 ${batch.charged || batch.results.filter((r) => r.ok).length * (batch.unit || 0)} 积分`);
+      if (window.MobileUI?.isMobile?.() && window.MobileUI?.setImageGenView) {
+        window.MobileUI.setImageGenView('feed');
+      }
+    } catch (e) {
+      console.error('[imagegen] expressions batch failed', e);
+      toast('十六表情提交失败，请刷新页面后重试');
     } finally {
       batchRunning = false;
       if (btn) btn.disabled = false;
@@ -436,7 +484,7 @@
 
   function resetBatchState() {
     batchRunning = false;
-    ['imageGenInspireBatchBtn', 'imageGenFissionBatchBtn', 'imageGenStyleConvertBatchBtn', 'imageGenTurnaroundBatchBtn', 'imageGenProductAnglesBatchBtn'].forEach((id) => {
+    ['imageGenInspireBatchBtn', 'imageGenFissionBatchBtn', 'imageGenStyleConvertBatchBtn', 'imageGenTurnaroundBatchBtn', 'imageGenProductAnglesBatchBtn', 'imageGenExpressionsBatchBtn'].forEach((id) => {
       const b = $(id);
       if (b) b.disabled = false;
     });
@@ -478,30 +526,36 @@
     const styleBtn = $('imageGenStyleConvertBatchBtn');
     const turnaroundBtn = $('imageGenTurnaroundBatchBtn');
     const productBtn = $('imageGenProductAnglesBatchBtn');
+    const expressionsBtn = $('imageGenExpressionsBatchBtn');
     const unitPerSheet = `${fmtCredits(unit)} 积分/张`;
     if (styleBtn) {
       const total = creditsTotal(unit, refCount || 1);
       styleBtn.textContent = refCount > 0
-        ? `一键风格转换 ${refCount} 张 · 约 ${fmtCredits(total)} 积分（${unitPerSheet}）`
-        : `一键风格转换 · ${unitPerSheet}`;
+        ? `提交风格转换 ${refCount} 张 · 约 ${fmtCredits(total)} 积分（${unitPerSheet}）`
+        : `提交风格转换 · ${unitPerSheet}`;
       styleBtn.disabled = !refCount;
     }
     if (turnaroundBtn) {
-      const jobsPerRef = getTurnaroundPrompts().length;
-      const totalJobs = refCount * jobsPerRef;
-      const total = creditsTotal(unit, totalJobs || 1);
-      const headshotNote = $('imageGenTurnaroundHeadshot')?.checked ? '含大头照' : '';
+      const total = creditsTotal(unit, refCount || 1);
+      const headNote = $('imageGenTurnaroundHeadshot')?.checked !== false ? '含设定表大头' : '';
       turnaroundBtn.textContent = refCount > 0
-        ? `一键生成三视图 ${refCount} 张${headshotNote ? `（${headshotNote}·${totalJobs}次）` : ''} · 约 ${fmtCredits(total)} 积分（${unitPerSheet}）`
-        : `一键生成三视图 · ${unitPerSheet}`;
+        ? `提交三视图 ${refCount} 张${headNote ? `（${headNote}）` : ''} · 约 ${fmtCredits(total)} 积分（${unitPerSheet}）`
+        : `提交三视图 · ${unitPerSheet}`;
       turnaroundBtn.disabled = !refCount;
     }
     if (productBtn) {
       const total = creditsTotal(unit, refCount || 1);
       productBtn.textContent = refCount > 0
-        ? `一键物品多角度 ${refCount} 张 · 约 ${fmtCredits(total)} 积分（${unitPerSheet}）`
-        : `一键物品多角度 · ${unitPerSheet}`;
+        ? `提交物品多角度 ${refCount} 张 · 约 ${fmtCredits(total)} 积分（${unitPerSheet}）`
+        : `提交物品多角度 · ${unitPerSheet}`;
       productBtn.disabled = !refCount;
+    }
+    if (expressionsBtn) {
+      const total = creditsTotal(unit, refCount || 1);
+      expressionsBtn.textContent = refCount > 0
+        ? `提交十六表情 ${refCount} 张 · 约 ${fmtCredits(total)} 积分（${unitPerSheet}）`
+        : `提交十六表情 · ${unitPerSheet}`;
+      expressionsBtn.disabled = !refCount;
     }
   }
 
@@ -1038,17 +1092,33 @@
     }
   }
 
+  function openRefBatchFold() {
+    const fold = $('imageGenRefBatchFold');
+    if (fold && !fold.open) fold.open = true;
+  }
+
   function switchRefTool(tool) {
+    const batchTools = ['styleConvert', 'turnaround', 'productAngles', 'expressions'];
+    const isBatch = batchTools.includes(tool);
     const next = activeRefTool === tool ? '' : (tool || '');
     activeRefTool = next;
-    document.querySelectorAll('[data-ref-tool]').forEach((btn) => {
+    if (isBatch && next) openRefBatchFold();
+    document.querySelectorAll('.imagegen-ref-tool-btn[data-ref-tool]').forEach((btn) => {
       const on = btn.dataset.refTool === next;
       btn.classList.toggle('active', on);
       btn.setAttribute('aria-expanded', on ? 'true' : 'false');
     });
-    document.querySelectorAll('[data-ref-tool-panel]').forEach((pane) => {
-      pane.hidden = pane.dataset.refToolPanel !== next;
+    document.querySelectorAll('.imagegen-ref-batch-chip[data-ref-tool]').forEach((btn) => {
+      const on = btn.dataset.refTool === next;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
     });
+    document.querySelectorAll('[data-ref-tool-panel]').forEach((pane) => {
+      const panelTool = pane.dataset.refToolPanel;
+      const show = panelTool === next;
+      pane.hidden = !show;
+    });
+    syncRefBatchIdleHint();
   }
 
   function updateImageGenModeFooter(_mode) {
@@ -1099,20 +1169,10 @@
 
     $('imageGenReverseToolBtn')?.addEventListener('click', () => switchRefTool('reverse'));
     $('imageGenFissionToolBtn')?.addEventListener('click', () => switchRefTool('fission'));
-    $('imageGenStyleConvertToolBtn')?.addEventListener('click', () => switchRefTool('styleConvert'));
-    $('imageGenTurnaroundToolBtn')?.addEventListener('click', () => switchRefTool('turnaround'));
-    $('imageGenProductAnglesToolBtn')?.addEventListener('click', () => switchRefTool('productAngles'));
-    $('imageGenStyleConvertQuickBtn')?.addEventListener('click', () => {
-      switchRefTool('styleConvert');
-      void onQueueStyleConvertBatch();
-    });
-    $('imageGenTurnaroundQuickBtn')?.addEventListener('click', () => {
-      switchRefTool('turnaround');
-      void onQueueTurnaroundBatch();
-    });
-    $('imageGenProductAnglesQuickBtn')?.addEventListener('click', () => {
-      switchRefTool('productAngles');
-      void onQueueProductAnglesBatch();
+    document.querySelectorAll('.imagegen-ref-batch-chip[data-ref-tool]').forEach((btn) => {
+      if (btn.dataset.bound) return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => switchRefTool(btn.dataset.refTool));
     });
 
     $('imageGenInspireDrawBtn')?.addEventListener('click', onDrawInspiration);
@@ -1126,7 +1186,9 @@
     $('imageGenStyleConvertBatchBtn')?.addEventListener('click', () => void onQueueStyleConvertBatch());
     $('imageGenTurnaroundBatchBtn')?.addEventListener('click', () => void onQueueTurnaroundBatch());
     $('imageGenProductAnglesBatchBtn')?.addEventListener('click', () => void onQueueProductAnglesBatch());
+    $('imageGenExpressionsBatchBtn')?.addEventListener('click', () => void onQueueExpressionsBatch());
     $('imageGenTurnaroundHeadshot')?.addEventListener('change', () => void updateBatchCostLabel());
+    $('imageGenStyleConvertStyle')?.addEventListener('change', () => void updateBatchCostLabel());
     $('imageGenInspireCount')?.addEventListener('change', () => void updateBatchCostLabel());
     $('imageGenFissionCount')?.addEventListener('change', () => void updateBatchCostLabel());
     ['imageGenModel', 'imageGenResolution', 'imageGenQuality'].forEach((id) => {
@@ -1180,17 +1242,19 @@
     }
 
     const styleConvertSel = $('imageGenStyleConvertStyle');
-    if (styleConvertSel && window.ImageGenPromptKit?.listArtStyles && !styleConvertSel.dataset.filled) {
+    if (styleConvertSel && !styleConvertSel.dataset.filled) {
       styleConvertSel.dataset.filled = '1';
       styleConvertSel.innerHTML = '';
-      window.ImageGenPromptKit.listArtStyles().forEach((t) => {
-        if (t.id === 'auto' || t.id === 'none') return;
+      const presets = window.ImageGenPromptKit?.listStyleConvertPresets?.()
+        || window.ImageGenPromptKit?.listArtStyles?.().filter((t) => t.id !== 'auto' && t.id !== 'none')
+        || [];
+      presets.forEach((t) => {
         const opt = document.createElement('option');
         opt.value = t.id;
         opt.textContent = `${t.label}（${t.hint}）`;
         styleConvertSel.appendChild(opt);
       });
-      styleConvertSel.value = 'anime';
+      styleConvertSel.value = presets.some((t) => t.id === 'hyperreal_3d_cgi') ? 'hyperreal_3d_cgi' : (presets[0]?.id || 'cg_3d');
     }
 
     switchImageGenMode('gen');
