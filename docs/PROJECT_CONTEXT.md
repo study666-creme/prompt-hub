@@ -24,19 +24,27 @@
 
 ---
 
-## 当前部署阶段（2026-06-18 · Apimart Midjourney）
+## 当前部署阶段（2026-06-07 · 图片管线 + Apimart MJ）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | `prompt-hub-hub` · build `20260618b` · https://prompt-hubs.com |
-| **Worker** | `prompt-hub-api` · `a323ac46` · https://api.prompt-hubs.com |
+| **Pages** | **待部署** `20260621m` · https://prompt-hubs.com |
+| **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 | **数据库** | 境外 Supabase `yibawjvhmqcysdovscss`（Worker Secret） |
 
 ### 已打通 / 未打通
 
 - ✅ `/health`、登录、兑换、GrsAI/Apimart GPT 生图与恢复
-- ✅ **Apimart MJ**：生图/混图 Tab、中文参数、胶片条预览、四张分别入库、混图 `/mj-blend`、放大/变体等二次操作
-- ✅ Pages + Worker 已部署（2026-06-18）
+- ✅ **Apimart MJ**：生图/混图 Tab、中文参数、胶片条预览、四张分别入库
+- ✅ `media-pipeline.js`：列表 grid / 预览·灯箱 full 统一出口；full 404 时 grid 回退
+- ✅ 静默云同步默认 `skipImageUpload`，登录后不再被大批量图片上传卡住
+- ⚠️ 需部署后强刷确认 `window.__APP_BUILD__ === '20260621m'`
+
+### 下一步
+
+1. `.\deploy-pages.ps1` → `cd server; npx wrangler deploy` → Ctrl+F5
+2. 卡片库点大图：Network 非 404，或 toast「原图暂不可用，已显示预览图」
+3. 强刷后试 MJ「生图」与「混图」
 
 ### 已知问题
 

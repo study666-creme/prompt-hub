@@ -4287,9 +4287,7 @@
       return;
     }
     void renderPostsIntoContainer(list, 'communityGrid').then(() => {
-      if (useFeedPagedRender('communityGrid')) {
-        void drainCommunityFeedPagesUntilDone('communityGrid', 20);
-      }
+      void drainCommunityFeedPagesUntilDone('communityGrid', isMobileViewport() ? 10 : 20);
     });
   }
 
@@ -4702,18 +4700,16 @@
     const assetId = post?.sourceCardId || postId;
     const authorId = post?.authorId || '';
     const fromSide = loadedCommunitySideImgSrc(body);
-    if (fromSide) return fromSide;
+    if (fromSide) {
+      const path = window.SupabaseSync?.storagePathFromDisplayUrl?.(fromSide) || '';
+      if (!path || !/_grid\.(jpe?g|webp|png)$/i.test(path)) return fromSide;
+    }
     const cached = window.SupabaseSync?.getCachedDisplayUrl?.(sideRef, {
       assetId,
       authorId: authorId || undefined,
-      variant: 'grid'
+      variant: 'full'
     }) || '';
     if (cached && cached.startsWith('http') && !cached.includes('data:image/svg')) return cached;
-    const gridImg = document.querySelector(
-      `#communityGrid .community-post-card[data-post-id="${postId}"] img.card-img`
-    );
-    const gridSrc = gridImg?.currentSrc || gridImg?.src || '';
-    if (gridSrc.startsWith('http') && !gridSrc.includes('data:image/svg')) return gridSrc;
     return '';
   }
 
@@ -4731,44 +4727,47 @@
     if (sync) return sync;
     const signOpts = communitySideZoomSignOpts(post, sideRef, postId);
     const assetId = post?.sourceCardId || postId;
-    if (window.SupabaseSync?.resolveDisplayUrl && sideRef) {
-      try {
-        const grid = await window.SupabaseSync.resolveDisplayUrl(sideRef, {
-          assetId,
-          authorId: signOpts.authorId || undefined,
-          cardId: signOpts.cardId || undefined,
-          variant: 'grid',
-          communityFeed: signOpts.fromPublicFeed === true,
-          tryAllPaths: signOpts.fromPublicFeed === true
-        });
-        if (grid) return grid;
-      } catch (e) { /* ignore */ }
-      try {
-        const full = await window.SupabaseSync.resolveDisplayUrl(sideRef, {
-          assetId,
-          authorId: signOpts.authorId || undefined,
-          cardId: signOpts.cardId || undefined,
-          variant: 'full',
-          communityFeed: signOpts.fromPublicFeed === true,
-          tryAllPaths: signOpts.fromPublicFeed === true
-        });
-        if (full) return full;
-      } catch (e) { /* ignore */ }
-    }
-    return resolveImageDisplayUrl(sideRef, extra.jobId || null, assetId, signOpts);
-  }
-
-  function upgradeCommunityZoomToFull(post, sideRef, postId, currentUrl) {
-    if (!window.SupabaseSync?.resolveDisplayUrl || !sideRef) return;
-    const signOpts = communitySideZoomSignOpts(post, sideRef, postId);
-    const assetId = post?.sourceCardId || postId;
-    void window.SupabaseSync.resolveDisplayUrl(sideRef, {
+    const gridFallbackUrl = window.MediaPipeline?.gridUrlFromImgEl?.(body?.querySelector?.('img'))
+      || window.MediaPipeline?.gridUrlFromImgEl?.(extra.imgEl) || '';
+    const previewOpts = {
       assetId,
       authorId: signOpts.authorId || undefined,
       cardId: signOpts.cardId || undefined,
-      variant: 'full',
       communityFeed: signOpts.fromPublicFeed === true,
-      tryAllPaths: signOpts.fromPublicFeed === true
+      jobId: extra.jobId || null,
+      gridFallbackUrl,
+      allowGridFallback: true
+    };
+    if (window.MediaPipeline?.resolvePreviewUrl && sideRef) {
+      try {
+        const full = await window.MediaPipeline.resolvePreviewUrl(sideRef, previewOpts);
+        if (full) return full;
+      } catch (e) { /* ignore */ }
+    }
+    if (window.SupabaseSync?.resolvePreviewFullUrl && sideRef) {
+      try {
+        const full = await window.SupabaseSync.resolvePreviewFullUrl(sideRef, previewOpts);
+        if (full) return full;
+      } catch (e) { /* ignore */ }
+    }
+    return resolveImageDisplayUrl(sideRef, extra.jobId || null, assetId, {
+      ...signOpts,
+      preferFull: true,
+      listOnly: false,
+      allowFullFallback: true,
+      bypassSignBudget: true
+    });
+  }
+
+  function upgradeCommunityZoomToFull(post, sideRef, postId, currentUrl) {
+    if (!window.SupabaseSync?.resolvePreviewFullUrl || !sideRef) return;
+    const signOpts = communitySideZoomSignOpts(post, sideRef, postId);
+    const assetId = post?.sourceCardId || postId;
+    void window.SupabaseSync.resolvePreviewFullUrl(sideRef, {
+      assetId,
+      authorId: signOpts.authorId || undefined,
+      cardId: signOpts.cardId || undefined,
+      communityFeed: signOpts.fromPublicFeed === true
     }).then((full) => {
       if (!full || full === currentUrl) return;
       const lbImg = document.getElementById('lightboxImage');
@@ -7359,6 +7358,9 @@
       return;
     }
     void renderPostsIntoContainer(list, 'creationsGrid').then(() => {
+      if (useFeedPagedRender('creationsGrid')) {
+        void drainCommunityFeedPages('creationsGrid', isMobileViewport() ? 8 : 6);
+      }
       requestAnimationFrame(() => {
         layoutFeedFlexColumns('creationsGrid', { force: true, forceReflow: true, recalcCols: true });
         syncCommunityFeedColumnCount('creationsGrid');
@@ -11046,7 +11048,9 @@
     if (feedImg) {
       image = feedImg.getAttribute('data-image-ref') || '';
       const src = feedImg.currentSrc || feedImg.src || '';
-      if (/^https?:\/\//i.test(src) && !src.includes('data:image/svg') && feedImg.naturalWidth > 8) {
+      const path = window.SupabaseSync?.storagePathFromDisplayUrl?.(src) || '';
+      const isGridThumb = path && /_grid\.(jpe?g|webp|png)$/i.test(path);
+      if (/^https?:\/\//i.test(src) && !src.includes('data:image/svg') && feedImg.naturalWidth > 8 && !isGridThumb) {
         instantSrc = src;
       }
     }
@@ -11055,12 +11059,6 @@
       if (c) {
         prompt = c.prompt || prompt;
         image = c.image || image;
-        if (!instantSrc && c.image && window.SupabaseSync?.getListDisplayImageSrc) {
-          const listUrl = window.SupabaseSync.getListDisplayImageSrc(c.image, c.id);
-          if (listUrl && /^https?:\/\//i.test(listUrl) && !listUrl.includes('data:image/svg')) {
-            instantSrc = listUrl;
-          }
-        }
       }
     } else if (kind === 'community') {
       const post = findPost(id);
@@ -11241,8 +11239,24 @@
     };
   }
 
+  function fullUrlFromImgEl(imgEl) {
+    if (!imgEl) return '';
+    const cached = String(imgEl.dataset?.previewFullUrl || imgEl.dataset?.fullUrl || '').trim();
+    if (cached && !cached.includes('data:image/svg')) return cached;
+    const src = String(imgEl.currentSrc || imgEl.src || '').trim();
+    if (!src || src.includes('data:image/svg') || !/^https?:\/\//i.test(src)) return '';
+    const path = window.SupabaseSync?.storagePathFromDisplayUrl?.(src) || '';
+    if (path && /_grid\.(jpe?g|webp|png)$/i.test(path)) return '';
+    if (window.SupabaseSync?.isInvalidMediaUrl?.(src)) return '';
+    if (window.SupabaseSync?.isValidSignedDisplayUrl?.(src)) return src;
+    if (window.SupabaseSync?.isFreshSignedDisplayUrl?.(src, 120000)) return src;
+    return '';
+  }
+
   /** 生图 Feed / 灯箱 / 侧栏：统一拉 full 原图 URL（禁止落 grid 缩略） */
   async function resolveImageGenFullUrl(kind, id, feedKey, imgEl) {
+    const instant = fullUrlFromImgEl(imgEl);
+    if (instant) return instant;
     const fk = feedKey || (kind === 'warehouse' ? 'wh_' + id : id);
     const assetId = kind === 'warehouse' ? warehouseCardIdFromFeedKey(fk) : id;
     let rawRef = imgEl?.getAttribute?.('data-image-ref') || '';
@@ -11267,26 +11281,38 @@
         };
       }
     }
-    const fullOpts = {
+    if (!rawRef || !isDisplayableImage(rawRef)) return '';
+    const gridFallbackUrl = window.MediaPipeline?.gridUrlFromImgEl?.(imgEl) || '';
+    if (window.MediaPipeline?.resolvePreviewUrl) {
+      return window.MediaPipeline.resolvePreviewUrl(rawRef, {
+        assetId,
+        cardId: resolveOpts.cardId || assetId,
+        authorId: resolveOpts.authorId,
+        communityFeed: resolveOpts.fromPublicFeed === true,
+        jobId: jobId || undefined,
+        gridFallbackUrl,
+        allowGridFallback: true
+      });
+    }
+    if (window.SupabaseSync?.resolvePreviewFullUrl) {
+      return window.SupabaseSync.resolvePreviewFullUrl(rawRef, {
+        assetId,
+        cardId: resolveOpts.cardId || assetId,
+        authorId: resolveOpts.authorId,
+        communityFeed: resolveOpts.fromPublicFeed === true,
+        jobId: jobId || undefined,
+        gridFallbackUrl,
+        allowGridFallback: true
+      });
+    }
+    return resolveImageDisplayUrl(rawRef, jobId, assetId, {
       ...resolveOpts,
       preferFull: true,
       listOnly: false,
       allowFullFallback: true,
+      bypassSignBudget: true,
       cardId: resolveOpts.cardId || assetId
-    };
-    let url = '';
-    if (rawRef && isDisplayableImage(rawRef)) {
-      url = await resolveImageDisplayUrl(rawRef, jobId, assetId, fullOpts);
-    }
-    if (!url && jobId && window.PromptHubApi?.getGenerationImageUrl) {
-      try {
-        const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
-        if (r?.ok && r.data?.url) url = r.data.url;
-      } catch (e) {
-        console.warn('[imagegen] generation image url failed', jobId, e);
-      }
-    }
-    return url;
+    });
   }
 
   async function renderImageGenPreview() {
@@ -11414,29 +11440,46 @@
           zoomBtn.replaceChildren(img);
         }
         if (img.src !== url) img.src = url;
+        if (isFull) img.dataset.previewFullUrl = url;
+        else delete img.dataset.previewFullUrl;
         const openPreviewLightbox = () => {
           if (typeof window.openLightbox !== 'function') return;
           const feedKey = previewKind === 'warehouse' ? 'wh_' + previewId : previewId;
-          void (async () => {
-            const fullUrl = await resolveImageGenFullUrl(
-              previewKind,
-              previewId,
-              feedKey,
-              zoomBtn.querySelector('img')
-            );
-            const src = fullUrl || body.dataset.previewImageUrl || url;
-            if (!src || String(src).startsWith('data:image/svg')) {
+          const lbOpts = {
+            imageGen: true,
+            feedKey,
+            community: previewKind === 'community',
+            postId: previewKind === 'community' ? previewId : null,
+            cardId: previewKind === 'warehouse' ? previewAssetId : null,
+            preferFull: true
+          };
+          const previewImg = zoomBtn.querySelector('img');
+          const instant = fullUrlFromImgEl(previewImg);
+          if (instant) {
+            window.openLightbox(instant, lbOpts);
+            return;
+          }
+          window.openLightbox('', { ...lbOpts, pending: true });
+          void resolveImageGenFullUrl(
+            previewKind,
+            previewId,
+            feedKey,
+            previewImg
+          ).then((fullUrl) => {
+            if (!fullUrl || String(fullUrl).startsWith('data:image/svg')) {
+              window.closeLightbox?.();
               toast('原图加载中，请稍后再试');
               return;
             }
-            window.openLightbox(src, {
+            window.setLightboxSrc?.(fullUrl, {
               imageGen: true,
               feedKey,
               community: previewKind === 'community',
               postId: previewKind === 'community' ? previewId : null,
-              cardId: previewKind === 'warehouse' ? previewAssetId : null
+              cardId: previewKind === 'warehouse' ? previewAssetId : null,
+              preferFull: true
             });
-          })();
+          });
         };
         if (!zoomBtn.dataset.previewZoomBound) {
           zoomBtn.dataset.previewZoomBound = '1';
@@ -11465,25 +11508,16 @@
         if (img.complete && img.naturalWidth > 0) img.onload?.();
       };
 
-      const previewResolveOpts = {
-        ...previewOpts,
-        preferFull: true,
-        listOnly: false,
-        allowFullFallback: true
-      };
-      const quickUrl =
-        previewKind !== 'warehouse' && previewCard && window.SupabaseSync?.getListDisplayImageSrc
-          ? window.SupabaseSync.getListDisplayImageSrc(image, previewAssetId, previewOpts)
-          : '';
-      if (quickUrl) mountPreviewImage(quickUrl, { isFull: false });
-
-      void resolveImageDisplayUrl(image, jobId, previewAssetId, previewResolveOpts).then((url) => {
+      void resolveImageGenFullUrl(
+        previewKind,
+        previewId,
+        previewKind === 'warehouse' ? 'wh_' + previewId : previewId,
+        null
+      ).then((url) => {
         if (previewStale()) return;
         if (!url) {
-          if (!quickUrl) {
-            zoomBtn.remove();
-            body.querySelector('[data-preview-download]')?.remove();
-          }
+          zoomBtn.remove();
+          body.querySelector('[data-preview-download]')?.remove();
           return;
         }
         mountPreviewImage(url, { isFull: true });
@@ -11772,15 +11806,7 @@
       }
     }
     const startIdx = 0;
-    const url = mjGalleryUrls?.length
-      ? mjGalleryUrls[startIdx]
-      : await resolveImageGenFullUrl(kind, id, feedKey, imgEl);
-    if (!url || String(url).startsWith('data:image/svg')) {
-      toast('原图加载中，请稍后再试');
-      return;
-    }
-    if (typeof window.openLightbox !== 'function') return;
-    window.openLightbox(url, {
+    const lbOpts = {
       imageGen: true,
       feedKey,
       community: kind === 'community',
@@ -11788,8 +11814,27 @@
       cardId: kind === 'warehouse' ? assetId : null,
       preferFull: true,
       mjGalleryUrls: mjGalleryUrls || undefined,
-      mjGalleryIndex: startIdx
-    });
+      mjGalleryIndex: startIdx,
+      fallbackSrc: window.MediaPipeline?.gridUrlFromImgEl?.(imgEl) || ''
+    };
+    if (typeof window.openLightbox !== 'function') return;
+    if (mjGalleryUrls?.length) {
+      window.openLightbox(mjGalleryUrls[startIdx], lbOpts);
+      return;
+    }
+    const instant = fullUrlFromImgEl(imgEl);
+    if (instant) {
+      window.openLightbox(instant, lbOpts);
+      return;
+    }
+    window.openLightbox('', { ...lbOpts, pending: true });
+    const url = await resolveImageGenFullUrl(kind, id, feedKey, imgEl);
+    if (url && !String(url).startsWith('data:image/svg')) {
+      window.setLightboxSrc?.(url, lbOpts);
+      return;
+    }
+    window.closeLightbox?.();
+    toast('原图加载中，请稍后再试');
   }
 
 

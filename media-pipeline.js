@@ -1,0 +1,137 @@
+/**
+ * 全站图片统一出口：列表 grid / 预览·灯箱·下载 full
+ * 卡片库、生图仓库、社区网格均经此层，避免各模块重复签图逻辑。
+ */
+(function () {
+  'use strict';
+
+  const VARIANT_LIST = 'grid';
+  const VARIANT_PREVIEW = 'full';
+
+  function resetOnLogin(opts) {
+    if (window.SupabaseSync?.resetMediaSignEnvironment) {
+      window.SupabaseSync.resetMediaSignEnvironment(opts || { clearMissing: true });
+    }
+  }
+
+  function getListCached(image, assetId, extraOpts) {
+    if (!window.SupabaseSync?.getListDisplayImageSrc) return '';
+    return window.SupabaseSync.getListDisplayImageSrc(image, assetId, extraOpts) || '';
+  }
+
+  function getPreviewCached(image, assetId, extraOpts) {
+    if (!window.SupabaseSync?.getCachedDisplayUrl) return '';
+    return window.SupabaseSync.getCachedDisplayUrl(image, {
+      assetId,
+      authorId: extraOpts?.authorId,
+      variant: VARIANT_PREVIEW
+    }) || '';
+  }
+
+  async function resolveListUrl(image, opts) {
+    if (!image || !window.SupabaseSync?.resolveDisplayUrl) return '';
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const url = await window.SupabaseSync.resolveDisplayUrl(image, {
+      assetId: o.assetId || o.cardId,
+      authorId: o.authorId,
+      cardId: o.cardId || o.assetId,
+      variant: VARIANT_LIST,
+      listOnly: true,
+      allowFullFallback: false,
+      tryAllPaths: o.tryAllPaths === true,
+      communityFeed: o.communityFeed === true,
+      bypassSignBudget: o.bypassSignBudget
+    });
+    return url && typeof url === 'string' ? url : '';
+  }
+
+  async function resolvePreviewUrl(image, opts) {
+    if (!image) return '';
+    const o = opts && typeof opts === 'object' ? opts : {};
+    if (window.SupabaseSync?.resolvePreviewFullUrl) {
+      const url = await window.SupabaseSync.resolvePreviewFullUrl(image, {
+        assetId: o.assetId || o.cardId,
+        cardId: o.cardId || o.assetId,
+        authorId: o.authorId,
+        communityFeed: o.communityFeed === true,
+        jobId: o.jobId,
+        gridFallbackUrl: o.gridFallbackUrl || o.fallbackGridUrl,
+        allowGridFallback: o.allowGridFallback !== false
+      });
+      if (url) return url;
+    }
+    if (!window.SupabaseSync?.resolveDisplayUrl) return '';
+    const url = await window.SupabaseSync.resolveDisplayUrl(image, {
+      assetId: o.assetId || o.cardId,
+      authorId: o.authorId,
+      cardId: o.cardId || o.assetId,
+      variant: VARIANT_PREVIEW,
+      listOnly: false,
+      preferFull: true,
+      allowFullFallback: true,
+      bypassSignBudget: true,
+      tryAllPaths: true,
+      communityFeed: o.communityFeed === true,
+      jobId: o.jobId
+    });
+    return url && typeof url === 'string' ? url : '';
+  }
+
+  function gridUrlFromImgEl(imgEl) {
+    if (!imgEl) return '';
+    const src = String(imgEl.currentSrc || imgEl.src || '').trim();
+    if (!src || src.includes('data:image/svg') || !/^https?:\/\//i.test(src)) return '';
+    if (window.SupabaseSync?.isInvalidMediaUrl?.(src)) return '';
+    return src;
+  }
+
+  async function resolveFeedUrl(image, opts) {
+    if (!image) return '';
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const listOnly = o.listOnly === true || o.allowFullFallback === false;
+    const wantFull = !listOnly && (o.preferFull === true || o.variant === VARIANT_PREVIEW);
+    const pipeOpts = {
+      assetId: o.assetId || o.cardId,
+      cardId: o.cardId || o.assetId,
+      authorId: o.authorId,
+      jobId: o.jobId,
+      tryAllPaths: o.tryAllPaths === true,
+      communityFeed: o.communityFeed === true,
+      bypassSignBudget: o.bypassSignBudget,
+      gridFallbackUrl: o.gridFallbackUrl || o.fallbackGridUrl || gridUrlFromImgEl(o.imgEl),
+      allowGridFallback: o.allowGridFallback !== false
+    };
+    if (wantFull) return resolvePreviewUrl(image, pipeOpts);
+    return resolveListUrl(image, pipeOpts);
+  }
+
+  async function prefetchList(cards, capMs, opts) {
+    if (!cards?.length) return;
+    if (window.SupabaseSync?.prefetchWarehousePage) {
+      await window.SupabaseSync.prefetchWarehousePage(cards, capMs);
+      return;
+    }
+    if (window.SupabaseSync?.prefetchCardsImages) {
+      await window.SupabaseSync.prefetchCardsImages(cards, capMs, opts);
+    }
+  }
+
+  async function patchContainerFromCache(container, opts) {
+    if (!container || !window.SupabaseSync?.patchImageSrcFromCache) return;
+    window.SupabaseSync.patchImageSrcFromCache(container, opts || { visibleFirst: true, max: 24 });
+  }
+
+  window.MediaPipeline = {
+    VARIANT_LIST,
+    VARIANT_PREVIEW,
+    resetOnLogin,
+    getListCached,
+    getPreviewCached,
+    gridUrlFromImgEl,
+    resolveListUrl,
+    resolvePreviewUrl,
+    resolveFeedUrl,
+    prefetchList,
+    patchContainerFromCache
+  };
+})();

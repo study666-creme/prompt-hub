@@ -62,15 +62,39 @@
       const authorId = opts.authorId || '';
       const cardId = opts.cardId || assetId || '';
       const cacheKey = (publicFeed ? 'pub:' : '') + (jobId ? `job:${jobId}` : (assetId ? `${assetId}:${image}` : image));
-      const wantFull = !opts.listOnly && opts.preferFull === true;
+      const listOnly = opts.listOnly === true || opts.allowFullFallback === false;
+      const wantFull = !listOnly && opts.preferFull === true;
       if (!publicFeed) {
         const hitKey = wantFull ? `${cacheKey}:f` : cacheKey;
         const hit = displayUrlCache.get(hitKey);
         if (hit) return hit;
       }
+      const isStorageLike = window.SupabaseSync?.isStorageRef?.(image) || String(image).startsWith('storage://');
+      if (isStorageLike && window.MediaPipeline?.resolveFeedUrl) {
+        try {
+          const piped = await window.MediaPipeline.resolveFeedUrl(image, {
+            assetId,
+            cardId: opts.cardId || cardId,
+            authorId: authorId || undefined,
+            jobId: jobId || undefined,
+            listOnly,
+            preferFull: wantFull,
+            tryAllPaths: opts.tryAllPaths === true || publicFeed || inCommunityGrid,
+            communityFeed: publicFeed || inCommunityGrid,
+            gridFallbackUrl: opts.gridFallbackUrl || opts.fallbackGridUrl,
+            allowGridFallback: opts.allowGridFallback !== false,
+            imgEl: opts.imgEl
+          });
+          if (piped && !piped.startsWith('storage://') && !piped.includes('data:image/svg')) {
+            displayUrlCache.set(wantFull ? `${cacheKey}:f` : cacheKey, piped);
+            return piped;
+          }
+        } catch (e) {
+          console.warn('[FeedImages] MediaPipeline resolve failed', e);
+        }
+      }
       let url = '';
       if (!publicFeed) {
-        const listOnly = opts.listOnly === true || opts.allowFullFallback === false;
         let cached = null;
         if (!listOnly && wantFull) {
           cached = window.SupabaseSync?.getCachedDisplayUrl?.(image, { assetId, variant: 'full' });
@@ -84,7 +108,6 @@
         if (cached && /^https?:\/\//i.test(cached) && !cached.includes('/object/public/')
           && !window.SupabaseSync?.isInvalidMediaUrl?.(cached)) url = cached;
       }
-      const isStorageLike = window.SupabaseSync?.isStorageRef?.(image) || String(image).startsWith('storage://');
       if (!url && window.SupabaseSync?.resolveDisplayUrl && isStorageLike) {
         try {
           const communityFeed = publicFeed || inCommunityGrid;
@@ -107,7 +130,8 @@
           console.warn('resolve image failed', e);
         }
       }
-      if (!url && jobId && window.PromptHubApi?.getGenerationImageUrl) {
+      const listOnlyResolve = opts.listOnly === true || opts.allowFullFallback === false;
+      if (!url && jobId && !listOnlyResolve && window.PromptHubApi?.getGenerationImageUrl) {
         const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
         if (r.ok && r.data?.url) url = r.data.url;
       }
@@ -237,6 +261,11 @@
       const signOpts = communityImageSignOpts(img);
       const fromPublicFeed = signOpts.fromPublicFeed;
       const inImageGenFeed = !!img.closest('#imageGenFeed, .imagegen-mobile-result-track');
+      const ownWhFeed = inImageGenFeed && !!img.closest('.imagegen-feed-card[data-feed-id^="wh_"]');
+      if (ownWhFeed && window.CardImageLoader?.loadImg) {
+        window.CardImageLoader.loadImg(img);
+        return true;
+      }
       const listOnly = inImageGenFeed || !!cardMedia?.closest('#communityGrid, #creationsGrid, #userProfileGrid');
       let url = fromPublicFeed
         ? ''
@@ -261,7 +290,12 @@
         listOnly,
         allowFullFallback: listOnly ? false : undefined
       });
-      if (!url || url.startsWith('storage://') || url.startsWith('data:image/svg')) {
+      if (!url || url.startsWith('storage://') || url.startsWith('data:image/svg')
+        || window.SupabaseSync?.isWarehouseBlockedFullUrl?.(url, img)) {
+        if (url && window.SupabaseSync?.isWarehouseBlockedFullUrl?.(url, img)) {
+          const card = assetId && (window.__promptHubCards || []).find((c) => c.id === assetId);
+          if (card) window.SupabaseSync?.queueGridBackfill?.(card, { force: true });
+        }
         feedMedia?.classList.add('is-loading');
         feedMedia?.classList.remove('card-media--missing', 'card-media--load-failed');
         return false;
@@ -276,25 +310,9 @@
           const ownWhFeed = inImageGenFeed && !!img.closest('.imagegen-feed-card[data-feed-id^="wh_"]');
           if (ownWhFeed) {
             const card = assetId && (window.__promptHubCards || []).find((c) => c.id === assetId);
-            void resolveImageDisplayUrl(ref, jobId || null, assetId, {
-              listOnly: false,
-              preferFull: true,
-              allowFullFallback: true,
-              cardId: assetId
-            }).then((fullUrl) => {
-              if (fullUrl && /^https?:\/\//i.test(fullUrl) && !fullUrl.startsWith('storage://')) {
-                img.addEventListener('load', endLoad, { once: true });
-                img.addEventListener('error', () => {
-                  feedMedia?.classList.add('card-media--load-failed');
-                  endLoad();
-                }, { once: true });
-                img.src = fullUrl;
-                if (img.complete && img.naturalWidth > 0) endLoad();
-                return;
-              }
-              if (card) window.SupabaseSync?.queueGridBackfill?.(card, { force: true });
-              feedMedia?.classList.add('is-loading');
-            });
+            if (card) window.SupabaseSync?.queueGridBackfill?.(card, { force: true });
+            feedMedia?.classList.add('is-loading');
+            feedMedia?.classList.remove('card-media--load-failed');
             return;
           }
           if (!(cardMedia && removeBrokenCommunityFeedCard(cardMedia))) {
@@ -413,7 +431,8 @@
         const ref = img.getAttribute('data-image-ref');
         if (ref && isDisplayableImage(ref) && !img.dataset.igenRetry) {
           img.dataset.igenRetry = '1';
-          void hydrateFeedImageOne(img);
+          if (window.CardImageLoader?.loadImg) window.CardImageLoader.loadImg(img);
+          else void hydrateFeedImageOne(img);
         }
       });
     }
@@ -466,7 +485,11 @@
         || !!rootEl?.closest?.('#pageImageGen');
       if (isImageGenWarehouseFeed) {
         stripFailedFeedMedia(scope);
-        window.SupabaseSync?.patchImageSrcFromCache?.(scope, { visibleFirst: true, max: 12 });
+        if (window.MediaPipeline?.patchContainerFromCache) {
+          window.MediaPipeline.patchContainerFromCache(scope, { visibleFirst: true, max: 28 });
+        } else {
+          window.SupabaseSync?.patchImageSrcFromCache?.(scope, { visibleFirst: true, max: 12 });
+        }
         if (window.CardImageLoader?.observeContainer) {
           window.CardImageLoader.observeContainer(scope);
         } else {
@@ -481,7 +504,11 @@
       }
       if (inCommunity) {
         stripFailedFeedMedia(scope);
-        window.SupabaseSync?.patchImageSrcFromCache?.(scope, { visibleFirst: true, max: 24 });
+        if (window.MediaPipeline?.patchContainerFromCache) {
+          window.MediaPipeline.patchContainerFromCache(scope, { visibleFirst: true, max: 24 });
+        } else {
+          window.SupabaseSync?.patchImageSrcFromCache?.(scope, { visibleFirst: true, max: 24 });
+        }
         if (window.CardImageLoader?.observeContainer) {
           window.CardImageLoader.observeContainer(scope);
         }
@@ -566,16 +593,11 @@
           const feedCard = img.closest('.imagegen-feed-card');
           if (feedCard?.dataset.feedId?.startsWith('wh_')) {
             const assetId = feedAssetIdFromImg(img);
-            const fullUrl = await resolveImageDisplayUrl(ref, jobId || null, assetId, {
-              listOnly: false,
-              preferFull: true,
-              allowFullFallback: true,
-              cardId: assetId
-            });
-            if (fullUrl && /^https?:\/\//i.test(fullUrl)) {
-              img.addEventListener('load', () => releaseFeedMediaLoading(media), { once: true });
-              img.src = fullUrl;
-              if (img.complete && img.naturalWidth > 0) releaseFeedMediaLoading(media);
+            const card = assetId && (window.__promptHubCards || []).find((c) => c.id === assetId);
+            if (card) {
+              window.SupabaseSync?.queueGridBackfill?.(card, { force: true });
+              media?.classList.add('is-loading');
+              media?.classList.remove('card-media--load-failed');
               return;
             }
           }

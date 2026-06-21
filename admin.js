@@ -1629,30 +1629,66 @@
       .replace(/"/g, '&quot;');
   }
 
+  async function submitAdminLogin() {
+    const btn = $('loginBtn');
+    const secret = $('adminSecret')?.value?.trim();
+    if (!secret) {
+      showMsg($('loginMsg'), '请填写访问密钥', false);
+      return;
+    }
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('is-busy');
+      btn.textContent = '验证中…';
+    }
+    session = { secret, apiBase: resolveApiBase() };
+    try {
+      await adminFetch(session, '/api/admin/dashboard/infra', { timeoutMs: 20000 });
+      saveSession(session);
+      const sub = $('adminPageSubtitle');
+      if (sub) sub.textContent = `API：${apiBase(session)} · 用户、存储、运行环境一览`;
+      showApp(true);
+      showMsg($('loginMsg'), '', true);
+      document.querySelector('.admin-tab[data-tab="overview"]')?.click();
+    } catch (e) {
+      session = null;
+      clearSession();
+      showApp(false);
+      showMsg($('loginMsg'), friendlyFetchError(e), false);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove('is-busy');
+        btn.textContent = '登录';
+      }
+    }
+  }
+
+  async function validateStoredSession() {
+    if (!session?.secret) return;
+    try {
+      await adminFetch(session, '/api/admin/dashboard/infra', { timeoutMs: 12000 });
+      showApp(true);
+    } catch (e) {
+      clearSession();
+      session = null;
+      showApp(false);
+      showMsg($('loginMsg'), '登录已过期，请重新输入密钥', false);
+    }
+  }
+
   function init() {
+    try {
     bindTabs();
     setupAdminConfirmModal();
     setupCommunityPanelActions();
     showApp(!!session?.secret);
 
-    $('loginBtn')?.addEventListener('click', async () => {
-      const secret = $('adminSecret')?.value?.trim();
-      if (!secret) {
-        showMsg($('loginMsg'), '请填写访问密钥', false);
-        return;
-      }
-      session = { secret, apiBase: resolveApiBase() };
-      try {
-        await adminFetch(session, '/api/admin/dashboard');
-        saveSession(session);
-        const sub = $('adminPageSubtitle');
-        if (sub) sub.textContent = `API：${apiBase(session)} · 用户、存储、运行环境一览`;
-        showApp(true);
-        showMsg($('loginMsg'), '', true);
-        document.querySelector('.admin-tab[data-tab="overview"]')?.click();
-      } catch (e) {
-        session = null;
-        showMsg($('loginMsg'), friendlyFetchError(e), false);
+    $('loginBtn')?.addEventListener('click', () => { void submitAdminLogin(); });
+    $('adminSecret')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        void submitAdminLogin();
       }
     });
 
@@ -1792,9 +1828,18 @@
 
     if (session?.secret) {
       const sub = $('adminPageSubtitle');
-      if (sub) sub.textContent = `API：${apiBase(session)} · 用户、存储、运行环境一览`;
+      if (sub) sub.textContent = `API：${apiBase(session)} · 正在验证登录…`;
       setPageTitle('overview');
-      document.querySelector('.admin-tab[data-tab="overview"]')?.click();
+      void validateStoredSession().then(() => {
+        if (session?.secret) {
+          document.querySelector('.admin-tab[data-tab="overview"]')?.click();
+        }
+      });
+    }
+    } catch (e) {
+      console.error('[admin] init failed', e);
+      showApp(false);
+      showMsg($('loginMsg'), '控制台脚本加载异常，请强刷页面（Ctrl+Shift+R）', false);
     }
   }
 

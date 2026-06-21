@@ -207,7 +207,7 @@
         const recovered = await ensureApiAuthFresh();
         if (recovered) return request(method, path, body, opts, attempt + 1);
         if (isMediaSignPath(path)) {
-          pauseAuthSign(120000);
+          pauseAuthSign(20000);
           notifyAuthSignFailure();
         }
       }
@@ -649,14 +649,14 @@
   }
 
   async function signMediaRef(ref, opts) {
-    if (isApiUnreachable()) {
-      return { ok: false, code: 'API_UNREACHABLE', message: 'API 暂不可用' };
-    }
     if (isApiRateLimited()) {
       return { ok: false, code: 'RATE_LIMITED', message: '操作过于频繁，请稍后再试' };
     }
     const normalized = window.SupabaseSync?.normalizeImageRef?.(ref) || ref;
     const q = encodeURIComponent(String(normalized || ''));
+    if (isApiUnreachable()) {
+      await probeApiHealth({ force: true, skipMark: true }).catch(() => false);
+    }
     return request('GET', `/api/v1/media/sign?ref=${q}`, null, {
       timeoutMs: API_SIGN_TIMEOUT_MS,
       noRetry: true
@@ -664,11 +664,11 @@
   }
 
   async function signMediaRefsBatch(refs, opts) {
-    if (isApiUnreachable()) {
-      return { ok: false, code: 'API_UNREACHABLE', message: 'API 暂不可用' };
-    }
     const list = (refs || []).filter(Boolean).slice(0, 48);
     if (!list.length) return { ok: true, data: { urls: {} } };
+    if (isApiUnreachable()) {
+      await probeApiHealth({ force: true, skipMark: true }).catch(() => false);
+    }
     return request('POST', '/api/v1/media/sign-batch', { refs: list }, {
       timeoutMs: opts?.timeoutMs || 8000
     });

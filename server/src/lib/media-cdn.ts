@@ -235,6 +235,27 @@ function primaryCandidatesFromGridPath(gridPath: string): string[] {
   return [`${stem}.jpg`, `${stem}.jpeg`, `${stem}.webp`, `${stem}.png`];
 }
 
+/** full 路径 404 时尝试同 stem 的其它扩展名 / generated 目录 */
+function fullPathServeCandidates(clean: string): string[] {
+  const out: string[] = [];
+  const add = (p: string) => {
+    const key = p.replace(/^\//, '');
+    if (key && !out.includes(key)) out.push(key);
+  };
+  add(clean);
+  const m = clean.match(/^(.+\/)([^/]+)\.(jpe?g|webp|png)$/i);
+  if (!m) return out;
+  const dir = m[1];
+  const stem = m[2];
+  for (const ext of ['jpg', 'jpeg', 'webp', 'png']) add(`${dir}${stem}.${ext}`);
+  if (!dir.includes('/generated/')) {
+    add(`${dir}generated/${stem}.jpg`);
+    add(`${dir}generated/${stem}.webp`);
+    add(`${dir}generated/${stem}.png`);
+  }
+  return out;
+}
+
 const GRID_SERVE_MAX_SIDE = 640;
 const GRID_SERVE_JPEG_QUALITY = 0.78;
 const GRID_MIN_BYTES = 2048;
@@ -488,11 +509,16 @@ export async function serveCachedStorageImage(
   if (stored && isAcceptableGridBlob(stored)) {
     body = stored;
   } else if (!isGrid) {
-    const blob = await downloadCardImage(c.env, clean);
-    if (blob) {
-      const bytes = blob.size || 0;
-      if (bytes >= 512) body = blob;
-      else throw new ApiError(404, 'NOT_FOUND', '图片文件无效或已损坏');
+    for (const candidate of fullPathServeCandidates(clean)) {
+      const blob = await downloadCardImage(c.env, candidate);
+      if (blob) {
+        const bytes = blob.size || 0;
+        if (bytes >= 512) {
+          body = blob;
+          contentType = contentTypeForPath(candidate);
+          break;
+        }
+      }
     }
   }
 
