@@ -388,7 +388,11 @@
   }
 
   function patchStudioImagesFromCache(root) {
-    if (!root || !window.SupabaseSync?.getCachedDisplayUrl) return;
+    if (!root) return;
+    if (window.MediaPipeline?.patchContainerFromCache) {
+      window.MediaPipeline.patchContainerFromCache(root, { visibleFirst: true, max: 24 });
+    }
+    if (!window.SupabaseSync?.getCachedDisplayUrl && !window.MediaPipeline?.getListCached) return;
     root.querySelectorAll('img[data-image-ref]').forEach((img) => {
       if (img.dataset.loaded === '1') return;
       const ref = img.getAttribute('data-image-ref');
@@ -397,10 +401,9 @@
         applyStudioImgLoaded(img, ref);
         return;
       }
-      const cached = window.SupabaseSync.getCachedDisplayUrl(ref, {
-        assetId: studioCardIdFromImg(img),
-        variant: 'grid'
-      });
+      const cardId = studioCardIdFromImg(img);
+      const cached = window.MediaPipeline?.getListCached?.(ref, cardId)
+        || window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId: cardId, variant: 'grid' });
       if (cached) applyStudioImgLoaded(img, cached);
     });
   }
@@ -414,20 +417,19 @@
       applyStudioImgLoaded(img, ref);
       return;
     }
-    const cached = window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId: cardId, variant: 'grid' });
+    const cached = window.MediaPipeline?.getListCached?.(ref, cardId)
+      || window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId: cardId, variant: 'grid' });
     if (cached) {
       applyStudioImgLoaded(img, cached);
       return;
     }
-    if (!window.SupabaseSync?.resolveDisplayUrl) return;
+    const resolveList = window.MediaPipeline?.resolveListUrl
+      || ((image, o) => window.SupabaseSync?.resolveDisplayUrl?.(image, { ...o, variant: 'grid', listOnly: true }));
+    if (!resolveList) return;
     await enqueueStudioResolve(async () => {
       if (img.dataset.loaded === '1') return;
       try {
-        const url = await window.SupabaseSync.resolveDisplayUrl(ref, {
-          assetId: cardId,
-          cardId,
-          variant: 'grid'
-        });
+        const url = await resolveList(ref, { assetId: cardId, cardId });
         if (url) applyStudioImgLoaded(img, url);
       } catch (e) { /* ignore */ }
     });
@@ -470,13 +472,17 @@
   }
 
   function prefetchStudioProjectThumbs() {
-    if (studioThumbPrefetchDone || !window.SupabaseSync?.prefetchCardsImages) return;
+    if (studioThumbPrefetchDone) return;
+    if (!window.MediaPipeline?.prefetchList && !window.SupabaseSync?.prefetchCardsImages) return;
     if (!window.SupabaseSync?.isLoggedIn?.()) return;
     const cards = getProjectCards().filter((c) => c.image && String(c.image).trim());
     if (!cards.length) return;
     studioThumbPrefetchDone = true;
     const run = () => {
-      void window.SupabaseSync.prefetchCardsImages(cards.slice(0, 32), 2200).then(() => {
+      const prefetch = window.MediaPipeline?.prefetchList
+        ? window.MediaPipeline.prefetchList(cards.slice(0, 32), 2200)
+        : window.SupabaseSync.prefetchCardsImages(cards.slice(0, 32), 2200);
+      void prefetch.then(() => {
         const root = document.getElementById('studioAssetFolders');
         if (root) observeStudioCardImages(root);
       });
@@ -949,6 +955,14 @@
     });
   }
 
+  function isUsableStudioRefUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    if (/^https?:\/\//i.test(url)) return true;
+    if (window.SupabaseSync?.isDataUrl?.(url)) return true;
+    if (window.SupabaseSync?.isStorageRef?.(url) || url.startsWith('storage://')) return true;
+    return false;
+  }
+
   async function resolveStudioRefUrlsForApi() {
     if (!studioRefImages.length) return [];
     const urls = [];
@@ -957,33 +971,25 @@
         let apiUrl = null;
         if (/^https?:\/\//i.test(src)) apiUrl = src;
         else if (window.SupabaseSync?.isStorageRef?.(src) || String(src).startsWith('storage://')) {
-          const norm = window.SupabaseSync?.normalizeImageRef?.(src) || src;
-          if (window.PromptHubApi?.signMediaRef) {
-            const signed = await window.PromptHubApi.signMediaRef(norm);
-            if (signed?.ok && signed.data?.url) apiUrl = signed.data.url;
-          }
-          if (!apiUrl) apiUrl = await window.SupabaseSync.resolveDisplayUrl(norm, { variant: 'full', tryAllPaths: true });
+          apiUrl = window.SupabaseSync?.normalizeImageRef?.(src) || src;
         } else if (window.SupabaseSync?.isDataUrl?.(src) || String(src).startsWith('blob:')) {
           if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.uploadImageGenRef) {
             try {
               const stored = await window.SupabaseSync.uploadImageGenRef(`studio_ref_${Date.now()}`, src);
-              if (window.PromptHubApi?.signMediaRef) {
-                const signed = await window.PromptHubApi.signMediaRef(stored);
-                if (signed?.ok && signed.data?.url) apiUrl = signed.data.url;
-              }
-              if (!apiUrl) apiUrl = await window.SupabaseSync.resolveDisplayUrl(stored, { variant: 'full', tryAllPaths: true });
+              if (stored) apiUrl = stored;
             } catch (uploadErr) {
               console.warn('studio ref upload failed', uploadErr);
             }
           }
           if (!apiUrl && window.SupabaseSync?.isDataUrl?.(src)) apiUrl = src;
         }
-        if (apiUrl && (/^https?:\/\//i.test(apiUrl) || window.SupabaseSync?.isDataUrl?.(apiUrl))) {
+        if (isUsableStudioRefUrl(apiUrl)) {
           urls.push(apiUrl);
         }
       } catch (e) {
         console.warn('studio ref resolve failed', e);
-        if (window.SupabaseSync?.isDataUrl?.(src)) urls.push(src);
+        if (isUsableStudioRefUrl(src)) urls.push(src);
+        else if (window.SupabaseSync?.isDataUrl?.(src)) urls.push(src);
       }
     }
     return urls;

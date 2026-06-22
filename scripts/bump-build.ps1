@@ -33,7 +33,8 @@ $files = @(
 $syncCacheAssets = @(
   'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css',
   'theme.js', 'api-client.js', 'supabase-sync.js', 'media-pipeline.js', 'sync-orchestrator.js', 'card-image-loader.js',
-  'script.js', 'feed-layout.js', 'feed-images.js', 'image-gen-feed.js', 'features-draft.js', 'mobile.js', 'pwa-install.js',
+  'script.js', 'feed-layout.js', 'feed-images.js', 'image-gen-feed.js', 'features-draft.js',
+  'features-assets.js', 'community-gacha.js', 'mobile.js', 'pwa-install.js',
   'imagegen-prompt-kit.js', 'imagegen-prompt-tools.js', 'trial-tasks.js', 'points-system.js'
 )
 

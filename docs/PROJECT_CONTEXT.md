@@ -24,46 +24,38 @@
 
 ---
 
-## 当前部署阶段（2026-06-22 · 图片管线 + 云同步编排）
+## 当前部署阶段（2026-06-22 · 管线收尾 + 部署前语法检查）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260622g` · https://prompt-hubs.com |
-| **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com（本轮未改 Worker） |
+| **Pages** | build `20260622i` · https://prompt-hubs.com |
+| **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
 
-- ✅ **MediaPipeline**：列表/预览/Feed 预取经 `media-pipeline.js`（含 `safeImgSrc`）
-- ✅ **SyncOrchestrator**：`sync-orchestrator.js` 统一静默 push 调度 + Feed 刷新去抖
-- ✅ 生图 Feed 出图保持滚动、批量导入、静默云同步默认跳过图片上传
+- ✅ 参考图 `storage://` 可提交；生图 Feed 滚动保持
+- ✅ MediaPipeline：卡片库/生图/资产包/社区抽卡
+- ✅ SyncOrchestrator + 部署前 `scripts/check-js-syntax.ps1`（防语法炸站）
+- ✅ 本地 http://127.0.0.1:5500 冒烟：页面可开、生图 Tab 可进、滚动保持测试通过
 
 ### 架构优化进度
 
 | 阶段 | 内容 | 进度 |
 |------|------|------|
-| 0 稳定态 | Pages 可部署 | ✅ |
-| 1 图片管线 | MediaPipeline 全站 Feed/卡片库/生图 | ~85% |
-| 2 云同步解耦 | SyncOrchestrator + skipImageUpload 默认 | ~70% |
-| 3 模块化 | esbuild 拆包 | 未开始 |
-
-### 已知问题
-
-1. MJ 默认站内积分 5 分/次，可在管理后台按模型单独调价
-2. 局部重绘（inpaint）需遮罩，当前仅支持上游按钮触发
+| 1 图片管线 | MediaPipeline 全站主要 Feed | ~92% |
+| 2 云同步解耦 | SyncOrchestrator | ~75% |
+| 3 模块化 esbuild | 未开始 | 0% |
 
 ### 下一步
 
-1. 强刷确认 `window.__APP_BUILD__ === '20260622g'`
-2. 阶段 1 收尾：`features-assets.js` / `asset-studio.js` 直连 Supabase 签图改走 Pipeline
-3. 阶段 3：esbuild 拆 `script.js` / `features-draft.js`
+1. 强刷确认最新 `window.__APP_BUILD__`
+2. 阶段 3：esbuild 拆 `script.js` / `features-draft.js`
 
 ### 部署
 
 ```powershell
 cd d:\prompt-hub
 .\deploy-pages.ps1
-cd server
-npx wrangler deploy
 ```
 
 ### 测试账号

@@ -1353,12 +1353,12 @@
 
   function cardPickerThumb(card) {
     const img = card?.image;
-    if (img && /^data:|^https?:\/\//i.test(img)) return img;
-    if (img && window.SupabaseSync?.getCachedDisplayUrl) {
-      const cached = window.SupabaseSync.getCachedDisplayUrl(img);
-      if (cached) return cached;
-    }
-    return '';
+    if (!img) return '';
+    if (/^data:|^https?:\/\//i.test(img)) return img;
+    const cached = window.MediaPipeline?.getListCached?.(img, card?.id)
+      || window.SupabaseSync?.getCachedDisplayUrl?.(img, { variant: 'grid' });
+    if (cached) return cached;
+    return window.MediaPipeline?.safeImgSrc?.(img) || '';
   }
 
   async function resolveCardThumbs(cards) {
@@ -1366,9 +1366,13 @@
     await Promise.all(
       cards.map(async (c) => {
         let url = cardPickerThumb(c);
-        if (!url && c.image && window.SupabaseSync?.resolveDisplayUrl) {
+        if (!url && c.image) {
           try {
-            url = await window.SupabaseSync.resolveDisplayUrl(c.image);
+            if (window.MediaPipeline?.resolveListUrl) {
+              url = await window.MediaPipeline.resolveListUrl(c.image, { assetId: c.id, cardId: c.id });
+            } else if (window.SupabaseSync?.resolveDisplayUrl) {
+              url = await window.SupabaseSync.resolveDisplayUrl(c.image, { variant: 'grid', listOnly: true });
+            }
           } catch (e) {
             url = '';
           }

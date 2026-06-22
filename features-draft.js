@@ -10481,14 +10481,14 @@
 
       if (balance < cost) {
         removePendingJob(pendingId);
-        renderImageGenFeed();
+        renderImageGenFeed({ preserveScroll: true });
         toast(`积分不足（需要 ${cost}，当前 ${balance}）。请使用激活码兑换`);
         return { ok: false, reason: 'credits' };
       }
 
       if (!useApi && !window.PointsSystem?.deductCredits?.(cost)) {
         removePendingJob(pendingId);
-        renderImageGenFeed();
+        renderImageGenFeed({ preserveScroll: true });
         toast('积分扣除失败');
         return { ok: false };
       }
@@ -10563,7 +10563,7 @@
             return { ok: true, recovered: true, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
           }
           failPendingJob(pendingId, errMsg);
-          renderImageGenFeed();
+          renderImageGenFeed({ preserveScroll: true });
           await window.PointsSystem?.refreshCreditsFromServer?.();
           if (!batchOpts.silentToast) toast(errMsg);
           return { ok: false, message: errMsg, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };

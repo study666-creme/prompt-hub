@@ -357,6 +357,16 @@
     if (!ref) return '';
     if (window.SupabaseSync?.isDataUrl?.(ref) || /^https?:\/\//i.test(ref)) return ref;
     try {
+      if (window.MediaPipeline?.resolveFeedUrl) {
+        return await window.MediaPipeline.resolveFeedUrl(ref, {
+          assetId: post.sourceCardId || post.id,
+          cardId: post.sourceCardId || undefined,
+          authorId: post.authorId || undefined,
+          communityFeed: true,
+          preferFull: true,
+          variant: 'full'
+        }) || '';
+      }
       return await window.SupabaseSync?.resolveDisplayUrl?.(ref, {
         assetId: post.sourceCardId || post.id,
         authorId: post.authorId || undefined,

@@ -32,6 +32,7 @@ foreach ($item in $localDeployExclude) {
 }
 
 Write-Host "Pages project: $project"
+& (Join-Path $root "scripts\check-js-syntax.ps1")
 & (Join-Path $root "scripts\bump-build.ps1")
 
 $staging = & (Join-Path $root "scripts\stage-pages.ps1")
