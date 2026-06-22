@@ -159,7 +159,8 @@
     }
     if (v === 'feed') {
       void window.FeatureDraft?.resumePendingGenerationJobs?.().then(() => {
-        window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: !opts?.scrollToTop });
+        const preserve = wasFeed || !opts?.scrollToTop;
+        window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: preserve });
       });
     } else {
       window.FeatureDraft?.renderImageGenMobileResult?.();

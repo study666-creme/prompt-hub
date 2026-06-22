@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260621m';
+    window.__APP_BUILD__ = '20260622h';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -104,15 +104,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260621m">
-  <link rel="stylesheet" href="styles-theme.css?v=20260621m">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260621m">
+  <link rel="stylesheet" href="styles.css?v=20260622h">
+  <link rel="stylesheet" href="styles-theme.css?v=20260622h">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260622h">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260621m">
+  <link rel="stylesheet" href="styles-features.css?v=20260622h">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="image-trim.js?v=20260616q"></script>
   <script src="file-origin-guard.js?v=20260606m"></script>
-  <script src="theme.js?v=20260621m"></script>
+  <script src="theme.js?v=20260622h"></script>
 </head>
 <body>
   <div class="app-chrome">
@@ -613,7 +613,7 @@
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status" aria-live="polite"></p>
       <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260621m</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260622h</p>
     </div>
   </nav>
 
@@ -697,6 +697,7 @@
     <div class="app-page app-page-warehouse" id="pageWarehouse">
   <div class="sidebar" id="sidebarArea">
     <button type="button" class="sidebar-new-btn" onclick="createNewCard()">+ 新建提示词</button>
+    <button type="button" class="sidebar-batch-btn" onclick="openBatchImportModal()">批量导入卡片</button>
     <button type="button" class="sidebar-collect-btn" onclick="openExtensionCollectPanel()" title="下载插件，在任意网页保存图片和文字">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       提示词采集
@@ -783,7 +784,11 @@
             <button type="button" class="icon-btn mobile-only mobile-header-btn" id="mobileNewCardBtn" aria-label="新建卡片" title="新建" onclick="createNewCard({forceOpenPanel:true})">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
             </button>
+            <button type="button" class="icon-btn mobile-only mobile-header-btn" aria-label="批量导入" title="批量导入" onclick="openBatchImportModal()">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            </button>
             <button class="btn btn-primary btn-sm desktop-only" onclick="createNewCard()">新建</button>
+            <button class="btn btn-ghost btn-sm desktop-only" onclick="openBatchImportModal()">批量导入</button>
             <button class="btn btn-ghost btn-sm desktop-only" id="batchToggleBtn" onclick="toggleBatchMode()">选择</button>
           </div>
         </div>
@@ -797,6 +802,33 @@
         <p class="batch-progress-title" id="batchProgressTitle">正在处理…</p>
         <div class="batch-progress-track"><div class="batch-progress-fill" id="batchProgressFill"></div></div>
         <p class="batch-progress-meta" id="batchProgressMeta"></p>
+      </div>
+    </div>
+    <div class="batch-import-overlay hidden" id="batchImportOverlay" role="dialog" aria-modal="true" aria-labelledby="batchImportTitle" onclick="if(event.target===this) closeBatchImportModal()">
+      <div class="batch-import-modal" onclick="event.stopPropagation()">
+        <div class="batch-import-header">
+          <h3 id="batchImportTitle">批量新建卡片</h3>
+          <button type="button" class="batch-import-close" onclick="closeBatchImportModal()" aria-label="关闭">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="batch-import-body">
+          <label class="batch-import-label" for="batchImportUnifiedPrompt">统一提示词</label>
+          <textarea id="batchImportUnifiedPrompt" class="batch-import-unified" rows="3" placeholder="填写后所有图片共用；与单独提示词不可同时填"></textarea>
+          <div class="batch-import-drop image-drop-area no-image" id="batchImportDrop">
+            <span class="placeholder-text">拖拽多张图片到此处，或点击选择（单次最多 40 张）</span>
+            <input type="file" id="batchImportFileInput" accept="image/*" multiple hidden>
+          </div>
+          <div class="batch-import-grid" id="batchImportGrid"></div>
+        </div>
+        <div class="batch-import-footer">
+          <p class="batch-import-status" id="batchImportStatus" role="status"></p>
+          <div class="batch-import-actions">
+            <button type="button" class="btn btn-ghost" id="batchImportClearBtn" onclick="clearBatchImportDraft()">清空</button>
+            <button type="button" class="btn btn-ghost" onclick="closeBatchImportModal()">取消</button>
+            <button type="button" class="btn btn-primary" id="batchImportSaveBtn" onclick="saveBatchImport()" disabled>创建卡片</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="cards-container" id="cardsContainer"></div>
@@ -1652,24 +1684,25 @@
   <script src="api-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260621m"></script>
+  <script src="api-client.js?v=20260622h"></script>
   <script src="cloud-sync-safety.js?v=20260606m"></script>
-  <script src="supabase-sync.js?v=20260621m"></script>
-  <script src="media-pipeline.js?v=20260621m"></script>
-  <script src="card-image-loader.js?v=20260621m"></script>
+  <script src="supabase-sync.js?v=20260622h"></script>
+  <script src="media-pipeline.js?v=20260622h"></script>
+  <script src="sync-orchestrator.js?v=20260622h"></script>
+  <script src="card-image-loader.js?v=20260622h"></script>
   <script src="membership.js?v=20260622e"></script>
   <script src="modal-hub.js?v=20260606m"></script>
   <script src="subscription.js?v=20260610a"></script>
-  <script src="trial-tasks.js?v=20260621m"></script>
+  <script src="trial-tasks.js?v=20260622h"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
-  <script src="mobile.js?v=20260621m"></script>
-  <script src="script.js?v=20260621m"></script>
-  <script src="points-system.js?v=20260621m"></script>
-  <script src="imagegen-prompt-kit.js?v=20260621m"></script>
-  <script src="imagegen-prompt-tools.js?v=20260621m"></script>
-  <script src="feed-layout.js?v=20260621m"></script>
-  <script src="feed-images.js?v=20260621m"></script>
-  <script src="image-gen-feed.js?v=20260621m"></script>
+  <script src="mobile.js?v=20260622h"></script>
+  <script src="script.js?v=20260622h"></script>
+  <script src="points-system.js?v=20260622h"></script>
+  <script src="imagegen-prompt-kit.js?v=20260622h"></script>
+  <script src="imagegen-prompt-tools.js?v=20260622h"></script>
+  <script src="feed-layout.js?v=20260622h"></script>
+  <script src="feed-images.js?v=20260622h"></script>
+  <script src="image-gen-feed.js?v=20260622h"></script>
   <script>
     (function () {
       try {
@@ -1691,10 +1724,10 @@
       } catch (e) { /* ignore */ }
     })();
   </script>
-  <script src="features-draft.js?v=20260621m"></script>
+  <script src="features-draft.js?v=20260622h"></script>
   <script src="community-gacha.js?v=20260606v"></script>
   <script src="features-assets.js?v=20260610ah"></script>
-  <script src="pwa-install.js?v=20260621m"></script>
+  <script src="pwa-install.js?v=20260622h"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

@@ -68,6 +68,64 @@
     scrollEl.scrollTop = anchor.scrollTop;
   }
 
+  function collectImageGenFeedScrollTargets(wrap) {
+    const targets = new Set();
+    const primary = resolveImageGenFeedScrollRoot(wrap) || wrap;
+    if (primary) targets.add(primary);
+    if (wrap) targets.add(wrap);
+    if (document.body.classList.contains('imagegen-mobile-view-feed')) {
+      const shell = wrap?.closest?.('.feature-shell');
+      if (shell) targets.add(shell);
+      if (document.scrollingElement) targets.add(document.scrollingElement);
+    }
+    return [...targets];
+  }
+
+  function captureImageGenFeedScrollState(wrap) {
+    const scrollEl = resolveImageGenFeedScrollRoot(wrap) || wrap;
+    const anchor = captureImageGenFeedScrollAnchor(wrap, scrollEl);
+    const tops = new Map();
+    collectImageGenFeedScrollTargets(wrap).forEach((el) => {
+      tops.set(el, el.scrollTop);
+    });
+    return { anchor, tops };
+  }
+
+  function restoreImageGenFeedScrollState(wrap, state) {
+    if (!state) return;
+    if (state.anchor) restoreImageGenFeedScrollAnchor(state.anchor);
+    state.tops?.forEach((top, el) => {
+      if (el?.isConnected) el.scrollTop = top;
+    });
+  }
+
+  function scheduleImageGenFeedScrollRestore(wrap, state) {
+    if (!state) return;
+    const run = () => restoreImageGenFeedScrollState(wrap, state);
+    run();
+    requestAnimationFrame(() => {
+      run();
+      requestAnimationFrame(run);
+    });
+  }
+
+  function imageGenFeedIsNearTop() {
+    const wrap = document.getElementById('imageGenFeed');
+    if (!wrap) return true;
+    const targets = collectImageGenFeedScrollTargets(wrap);
+    if (!targets.length) return true;
+    return !targets.some((el) => (el?.scrollTop ?? 0) >= 64);
+  }
+
+  function warehousePrependedOneCard(prev, next) {
+    if (!Array.isArray(prev) || !Array.isArray(next) || next.length !== prev.length + 1) return null;
+    if (prev.length && String(next[0].id) === String(prev[0].id)) return null;
+    for (let i = 0; i < prev.length; i += 1) {
+      if (String(prev[i].id) !== String(next[i + 1].id)) return null;
+    }
+    return next[0];
+  }
+
   function warehouseCardsListUnchanged(prev, next) {
     if (!Array.isArray(prev) || !Array.isArray(next) || prev.length !== next.length) return false;
     for (let i = 0; i < prev.length; i += 1) {
@@ -82,10 +140,14 @@
 
   function patchImageGenFeedPendingSection(wrap, pending, failed) {
     if (!wrap) return;
+    const scrollState = captureImageGenFeedScrollState(wrap);
     wrap.querySelectorAll('.imagegen-feed-card[data-pending="1"], .imagegen-feed-card[data-failed="1"]').forEach((el) => el.remove());
     const html = pending.map((j) => buildFeedPendingCardHtml(j)).join('')
       + failed.map((j) => buildFeedFailedCardHtml(j)).join('');
-    if (!html) return;
+    if (!html) {
+      scheduleImageGenFeedScrollRestore(wrap, scrollState);
+      return;
+    }
     const temp = document.createElement('div');
     temp.innerHTML = html;
     const newCards = [...temp.children];
@@ -94,10 +156,20 @@
       wrap.insertBefore(card, anchor);
     });
     bindImageGenFeedCardEvents(wrap, newCards);
+    scheduleImageGenFeedScrollRestore(wrap, scrollState);
   }
 
   function d() {
     return deps;
+  }
+
+  function resolveImageGenFeedScrollRoot(wrap) {
+    if (!wrap) return null;
+    if (deps.getFeedScrollRoot) return deps.getFeedScrollRoot(wrap) || wrap;
+    if (document.body.classList.contains('imagegen-mobile-view-feed')) {
+      return wrap.closest('.feature-shell') || wrap;
+    }
+    return wrap;
   }
 
     function feedImgStorageAttr(image) {
@@ -256,7 +328,7 @@
           horizontalOrder: false,
           transitionDuration: 0
         };
-        const scrollTop = (resolveImageGenFeedScrollRoot(wrap) || wrap).scrollTop;
+        const scrollState = wrap.__phIgPendingScrollState || captureImageGenFeedScrollState(wrap);
         if (imageGenMasonry) {
           imageGenMasonry.option(opts);
           imageGenMasonry.reloadItems();
@@ -272,8 +344,7 @@
         }
         requestAnimationFrame(() => {
           imageGenMasonry?.layout();
-          const scrollEl = resolveImageGenFeedScrollRoot(wrap) || wrap;
-          scrollEl.scrollTop = scrollTop;
+          restoreImageGenFeedScrollState(wrap, scrollState);
           d().setFeedLayoutPending?.(wrap, false);
           window.CardImageLoader?.observeContainer?.(wrap);
           d().scrubImageGenFeedCards?.(wrap);
@@ -519,13 +590,6 @@
       return store.page * IMAGEGEN_FEED_PER_PAGE < total;
     }
 
-    function resolveImageGenFeedScrollRoot(wrap) {
-      if (!wrap) return null;
-      if (d().getFeedScrollRoot) return d().getFeedScrollRoot(wrap) || wrap;
-      if (d().isMobileFeedViewport?.()) return wrap.closest('.feature-shell') || wrap;
-      return wrap;
-    }
-
     let imageGenFeedScrollEl = null;
     let imageGenFeedScrollHandler = null;
     let imageGenFeedPageIo = null;
@@ -628,13 +692,12 @@
       }
       const scrollEl = resolveImageGenFeedScrollRoot(wrap) || wrap;
       bindImageGenFeedScrollGuard(wrap, scrollEl);
-      const scrollAnchor = feedAppend
-        ? null
-        : captureImageGenFeedScrollAnchor(wrap, scrollEl);
-      const scrollTopBefore = scrollEl?.scrollTop ?? 0;
       const preserveScroll = opts.scrollToTop === true
         ? false
         : (opts.preserveScroll !== false);
+      const scrollState = (!feedAppend && preserveScroll) ? captureImageGenFeedScrollState(wrap) : null;
+      const scrollAnchor = feedAppend ? null : scrollState?.anchor ?? captureImageGenFeedScrollAnchor(wrap, scrollEl);
+      const scrollTopBefore = scrollEl?.scrollTop ?? 0;
       const scrollTop = feedAppend
         ? (opts.scrollTop ?? scrollTopBefore)
         : (preserveScroll ? scrollTopBefore : 0);
@@ -650,7 +713,7 @@
         return;
       }
       if (!feedAppend) {
-        imageGenFeedScrollIntent = false;
+        if (opts.scrollToTop === true) imageGenFeedScrollIntent = false;
         const whCards = d().getImageGenFeedTab?.() === 'warehouse' ? getImageGenWarehouseFeedList() : [];
         const commPosts = d().getImageGenFeedTab?.() === 'community' ? getImageGenCommunityFeedList() : [];
         const pending = (d().getImageGenPendingJobs?.() ?? []).slice(0, d().IMAGEGEN_FEED_PENDING_CAP ?? 6);
@@ -666,10 +729,42 @@
           bindImageGenFeedImageRelayout();
           if (d().isMobileFeedViewport?.()) enforceMobileImageGenFeed();
           else scheduleImageGenFeedLayout();
-          if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);
+          if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
+          else if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);
           else if (scrollEl && preserveScroll) scrollEl.scrollTop = scrollTop;
           syncImageGenFeedLoadMoreBtn();
           bindImageGenFeedPagedScroll();
+          return;
+        }
+        const prependedCard = warehousePrependedOneCard(prevStore?.whCards, whCards);
+        if (prevStore && prependedCard && d().getImageGenFeedTab?.() === 'warehouse' && !opts.force) {
+          imageGenFeedPagedStore = { ...prevStore, sig, whCards, commPosts };
+          patchImageGenFeedPendingSection(wrap, pending, failed);
+          const temp = document.createElement('div');
+          temp.innerHTML = warehouseCardToFeedHtml(prependedCard);
+          const newCard = temp.firstElementChild;
+          if (newCard) {
+            const firstWh = wrap.querySelector('.imagegen-feed-card[data-feed-id^="wh_"]');
+            wrap.insertBefore(newCard, firstWh || wrap.querySelector('.grid-sizer') || wrap.firstChild);
+            bindImageGenFeedCardEvents(wrap, [newCard]);
+          }
+          bindImageGenFeedImageRelayout();
+          if (scrollState) wrap.__phIgPendingScrollState = scrollState;
+          if (d().isMobileFeedViewport?.()) enforceMobileImageGenFeed();
+          else scheduleImageGenFeedLayout();
+          if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
+          syncImageGenFeedLoadMoreBtn();
+          bindImageGenFeedPagedScroll();
+          void (async () => {
+            window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 4 });
+            if (window.CardImageLoader?.bindFeed) {
+              await window.CardImageLoader.bindFeed(wrap, [{ id: prependedCard.id, image: prependedCard.image }]);
+            } else {
+              window.CardImageLoader?.observeContainer?.(wrap);
+            }
+            if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
+            delete wrap.__phIgPendingScrollState;
+          })();
           return;
         }
         imageGenFeedPagedStore = {
@@ -736,7 +831,10 @@
         bindImageGenFeedImageRelayout();
         if (mobileFeed) enforceMobileImageGenFeed();
         else layoutImageGenFeedMasonry();
-        if (scrollEl) {
+        if (scrollState) {
+          if (!feedAppend) wrap.__phIgPendingScrollState = scrollState;
+          scheduleImageGenFeedScrollRestore(wrap, scrollState);
+        } else if (scrollEl) {
           if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);
           else scrollEl.scrollTop = scrollTop;
         }
@@ -753,9 +851,11 @@
           enforceMobileImageGenFeed();
           d().setFeedLayoutPending?.(wrap, false);
         } else {
+          if (scrollState) wrap.__phIgPendingScrollState = scrollState;
           layoutImageGenFeedMasonry();
         }
-        if (scrollEl) {
+        if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
+        else if (scrollEl) {
           if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);
           else scrollEl.scrollTop = scrollTop;
         }
@@ -781,10 +881,10 @@
         const skipImageBind = !feedAppend && wrap.dataset.feedImageBindKey === feedImageBindKey;
         if (!skipImageBind) {
           wrap.dataset.feedImageBindKey = feedImageBindKey;
-          if (d().getImageGenFeedTab?.() === 'warehouse' && feedPrefetchItems.length && window.SupabaseSync?.prefetchWarehousePage) {
-            await window.SupabaseSync.prefetchWarehousePage(feedPrefetchItems, 2200);
+          if (d().getImageGenFeedTab?.() === 'warehouse' && feedPrefetchItems.length && window.MediaPipeline?.prefetchList) {
+            await window.MediaPipeline.prefetchList(feedPrefetchItems, 2200);
           }
-          window.SupabaseSync?.patchImageSrcFromCache?.(wrap, { visibleFirst: true, max: 8 });
+          window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 8 });
           if (window.CardImageLoader?.bindFeed) {
             await window.CardImageLoader.bindFeed(wrap, feedPrefetchItems);
           } else {
@@ -798,8 +898,12 @@
         } else {
           layoutImageGenFeedMasonry();
         }
-        const anchorAfter = scrollAnchor || { scrollTop, scrollEl };
-        restoreImageGenFeedScrollAnchor(anchorAfter);
+        if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
+        else {
+          const anchorAfter = scrollAnchor || { scrollTop, scrollEl };
+          restoreImageGenFeedScrollAnchor(anchorAfter);
+        }
+        delete wrap.__phIgPendingScrollState;
         d().scrubImageGenFeedCards?.(wrap);
         syncImageGenFeedLoadMoreBtn();
         if (d().getImageGenFeedTab?.() === 'warehouse' && store.whCards.length && window.SupabaseSync?.backfillGridThumbsForCards) {
@@ -817,7 +921,7 @@
               quiet: true,
               awaitDrain: false
             }).then(() => {
-              window.SupabaseSync?.patchImageSrcFromCache?.(wrap, { visibleFirst: true, max: 12 });
+              window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 12 });
               window.CardImageLoader?.observeContainer?.(wrap);
               d().updateImageGenFeedHint?.();
             });
@@ -971,7 +1075,8 @@
       renderImageGenFeed,
       bindImageGenFeedCardEvents,
       bindImageGenFeedResizeRelayout,
-      captureImageGenFeedCardPositions
+      captureImageGenFeedCardPositions,
+      imageGenFeedIsNearTop
     };
   }
 

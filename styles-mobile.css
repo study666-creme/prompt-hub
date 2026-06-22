@@ -2097,6 +2097,13 @@
     white-space: nowrap;
   }
 
+  .batch-import-modal {
+    max-height: 94vh;
+  }
+  .batch-import-grid {
+    grid-template-columns: 1fr;
+  }
+
   .edit-panel .panel-header-actions .panel-header-clear-btn {
     border: 1px solid var(--border);
     background: var(--bg-card);

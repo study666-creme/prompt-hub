@@ -2487,6 +2487,7 @@
 
   function featureImgSrc(image) {
     if (!image) return '';
+    if (window.MediaPipeline?.safeImgSrc) return window.MediaPipeline.safeImgSrc(image);
     if (window.SupabaseSync?.safeImgSrc) return window.SupabaseSync.safeImgSrc(image);
     if (window.SupabaseSync?.isStorageRef?.(image)) {
       const c = window.SupabaseSync.getCachedDisplayUrl?.(image, { variant: 'grid' });
@@ -2551,7 +2552,15 @@
       return container;
     }
     if (isMobileViewport() && (container.id === 'communityGrid' || container.id === 'creationsGrid' || container.id === 'imageGenFeed')) {
-      return container.closest('.feature-shell') || container;
+      if (container.id === 'imageGenFeed' && document.body.classList.contains('imagegen-mobile-view-feed')) {
+        return container.closest('.feature-shell') || container;
+      }
+      if (container.id !== 'imageGenFeed') {
+        return container.closest('.feature-shell') || container;
+      }
+    }
+    if (container.id === 'imageGenFeed') {
+      return container;
     }
     return container;
   }
@@ -2809,7 +2818,7 @@
 
   async function softHydrateFeedContainer(container) {
     if (!container) return;
-    window.SupabaseSync?.patchImageSrcFromCache?.(container, { visibleFirst: true, max: FEED_PER_PAGE });
+    window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: FEED_PER_PAGE });
     window.CardImageLoader?.observeContainer?.(container);
     window.CardImageLoader?.boostCommunityFeedImages?.(container, FEED_PER_PAGE);
   }
@@ -2986,6 +2995,7 @@
   let bindImageGenFeedPagedScroll;
   let bindImageGenFeedResizeRelayout;
   let renderImageGenFeed;
+  let imageGenFeedIsNearTop;
   let bindImageGenFeedCardEvents;
   let captureImageGenFeedCardPositions;
 
@@ -3060,6 +3070,7 @@
     bindImageGenFeedPagedScroll = IG.bindImageGenFeedPagedScroll;
     bindImageGenFeedResizeRelayout = IG.bindImageGenFeedResizeRelayout;
     renderImageGenFeed = IG.renderImageGenFeed;
+    imageGenFeedIsNearTop = IG.imageGenFeedIsNearTop;
     bindImageGenFeedCardEvents = IG.bindImageGenFeedCardEvents;
     captureImageGenFeedCardPositions = IG.captureImageGenFeedCardPositions;
     window.__imageGenFeedWired = true;
@@ -3858,7 +3869,7 @@
       } catch (e) { /* ignore */ }
       if (feedAppend) {
         void prefetchP.finally?.(() => {
-          window.SupabaseSync?.patchImageSrcFromCache?.(container, { visibleFirst: true, max: FEED_PER_PAGE });
+          window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: FEED_PER_PAGE });
           window.CardImageLoader?.boostCommunityFeedImages?.(container, FEED_PER_PAGE);
         });
       }
@@ -3903,7 +3914,7 @@
       bindFeedPagedScroll(containerId);
       ensureFeedPageSentinel(container);
       restoreLoadedFeedImages(container, preservedImgs);
-      window.SupabaseSync?.patchImageSrcFromCache?.(container);
+      window.MediaPipeline?.patchContainerFromCache?.(container);
       window.CardImageLoader?.observeContainer?.(container);
       window.CardImageLoader?.boostCommunityFeedImages?.(container, FEED_PER_PAGE);
       container.querySelectorAll('.card-media img.card-img').forEach((img) => {
@@ -3926,7 +3937,7 @@
     bindFeedPagedScroll(containerId);
     ensureFeedPageSentinel(container);
     restoreLoadedFeedImages(container, preservedImgs);
-    window.SupabaseSync?.patchImageSrcFromCache?.(container);
+    window.MediaPipeline?.patchContainerFromCache?.(container);
     window.CardImageLoader?.observeContainer?.(container);
     window.CardImageLoader?.boostCommunityFeedImages?.(container, FEED_PER_PAGE);
     container.querySelectorAll('.card-media img.card-img').forEach((img) => {
@@ -3963,7 +3974,7 @@
       }
       await new Promise((r) => requestAnimationFrame(r));
       if (renderGen !== communityFeedRenderGen) return;
-      window.SupabaseSync?.patchImageSrcFromCache?.(container);
+      window.MediaPipeline?.patchContainerFromCache?.(container);
       window.CardImageLoader?.observeContainer?.(container);
       window.CardImageLoader?.boostCommunityFeedImages?.(container, FEED_PER_PAGE);
       const mobile = isMobileViewport();
@@ -4004,14 +4015,14 @@
         new Promise((r) => setTimeout(r, mobile ? 3200 : 2600))
       ]);
       if (renderGen !== communityFeedRenderGen) return;
-      window.SupabaseSync?.patchImageSrcFromCache?.(container);
+      window.MediaPipeline?.patchContainerFromCache?.(container);
       window.CardImageLoader?.observeContainer?.(container);
       window.CardImageLoader?.boostCommunityFeedImages?.(container, FEED_PER_PAGE);
       finalizeFeedContainer(container, containerId);
       finishLayout();
       void hydrateP.then(() => {
         if (renderGen !== communityFeedRenderGen) return;
-        window.SupabaseSync?.patchImageSrcFromCache?.(container);
+        window.MediaPipeline?.patchContainerFromCache?.(container);
         window.CardImageLoader?.observeContainer?.(container);
       });
     })();
@@ -4904,7 +4915,7 @@
       bindCommunitySideImageZoom(body, post, sideRef, id);
       highlightCreationsPost(id);
       if (showSideImg) {
-        window.SupabaseSync?.patchImageSrcFromCache?.(body);
+        window.MediaPipeline?.patchContainerFromCache?.(body);
         void hydrateFeedImages(body);
       }
       return;
@@ -4950,7 +4961,7 @@
     if (authorBtn) bindAuthorLink(authorBtn, post.authorId, post.authorName);
     highlightCommunityCard(id);
     if (showSideImg) {
-      window.SupabaseSync?.patchImageSrcFromCache?.(body);
+      window.MediaPipeline?.patchContainerFromCache?.(body);
       void hydrateFeedImages(body);
     }
     const timeEl = document.querySelector(`#communityGrid .card[data-post-id="${id}"] .card-time`);
@@ -9688,6 +9699,14 @@
     }
   }
 
+  function isUsableGenRefUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    if (/^https?:\/\//i.test(url)) return true;
+    if (window.SupabaseSync?.isDataUrl?.(url)) return true;
+    if (window.SupabaseSync?.isStorageRef?.(url) || url.startsWith('storage://')) return true;
+    return false;
+  }
+
   async function resolveRefUrlsFromList(sources) {
     const list = Array.isArray(sources) ? sources.filter(Boolean) : [];
     if (!list.length) return [];
@@ -9701,14 +9720,18 @@
             if (window.SupabaseSync?.isInvalidMediaUrl?.(src) && window.SupabaseSync?.normalizeImageRef) {
               const fixed = window.SupabaseSync.normalizeImageRef(src);
               if (fixed && fixed !== src) {
-                return window.SupabaseSync.resolveDisplayUrl(fixed);
+                const signed = await window.SupabaseSync.resolveDisplayUrl(fixed, {
+                  variant: 'full',
+                  preferFull: true,
+                  bypassSignBudget: true
+                });
+                if (signed && /^https?:\/\//i.test(signed)) return signed;
               }
             }
             return src;
           }
           if (window.SupabaseSync?.isStorageRef?.(src) || String(src).startsWith('storage://')) {
-            const norm = window.SupabaseSync?.normalizeImageRef?.(src) || src;
-            return norm;
+            return window.SupabaseSync?.normalizeImageRef?.(src) || src;
           }
           if (window.SupabaseSync?.isDataUrl?.(src) || String(src).startsWith('blob:')) {
             if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.uploadImageGenRef) {
@@ -9732,12 +9755,13 @@
             setTimeout(() => reject(new Error('ref resolve timeout')), REF_URL_RESOLVE_TIMEOUT_MS);
           })
         ]);
-        if (apiUrl && (/^https?:\/\//i.test(apiUrl) || window.SupabaseSync?.isDataUrl?.(apiUrl))) {
+        if (isUsableGenRefUrl(apiUrl)) {
           urls.push(apiUrl);
         }
       } catch (e) {
         console.warn('参考图解析失败', e);
-        if (window.SupabaseSync?.isDataUrl?.(src)) urls.push(src);
+        if (isUsableGenRefUrl(src)) urls.push(src);
+        else if (window.SupabaseSync?.isDataUrl?.(src)) urls.push(src);
       }
     }
     return urls;
@@ -10096,6 +10120,14 @@
       job.recoverNote = '';
     }
     persistPendingGenJobs();
+    if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+      const card = document.querySelector(`#imageGenFeed .imagegen-feed-card[data-feed-id="${CSS.escape(pendingId)}"]`);
+      const noteEl = card?.querySelector('.imagegen-feed-foot--pending .imagegen-feed-meta');
+      if (noteEl) {
+        noteEl.textContent = String(note).slice(0, 56);
+        return;
+      }
+    }
     renderImageGenFeed({ preserveScroll: true });
   }
 
@@ -10329,7 +10361,7 @@
       );
     }
 
-    if (changed) renderImageGenFeed();
+    if (changed) renderImageGenFeed({ preserveScroll: true });
   }
 
   async function runImageGenWithPrompt(promptOverride, opts) {
@@ -10427,9 +10459,9 @@
         b.classList.toggle('active', b.dataset.feedTab === 'warehouse');
       });
       updateImageGenFeedHint();
-      renderImageGenFeed({ scrollToTop: true });
+      renderImageGenFeed({ preserveScroll: true });
       if (singleRun && isMobileViewport() && window.MobileUI?.setImageGenView) {
-        window.MobileUI.setImageGenView('feed', { scrollToTop: true });
+        window.MobileUI.setImageGenView('feed', { scrollToTop: false });
       }
       releaseSubmitUi();
 
@@ -10723,7 +10755,7 @@
       if (ok > 0) {
         toast(`已提交 ${ok}/${count} 张生图，已扣约 ${fmt(charged)} 积分（${fmt(unit)} 积分/张）`);
         if (isMobileViewport() && window.MobileUI?.setImageGenView) {
-          window.MobileUI.setImageGenView('feed', { scrollToTop: true });
+          window.MobileUI.setImageGenView('feed', { scrollToTop: false });
         }
       }
     } catch (e) {
@@ -12451,7 +12483,7 @@
     ['communityGrid', 'creationsGrid', 'userProfileGrid', 'imageGenFeed'].forEach((id) => {
       const el = document.getElementById(id);
       if (!el) return;
-      window.SupabaseSync?.patchImageSrcFromCache?.(el);
+      window.MediaPipeline?.patchContainerFromCache?.(el);
       if (id === 'imageGenFeed') scheduleImageGenFeedLayout();
       else if (id === 'communityGrid' || id === 'creationsGrid') {
         if (isMobileViewport()) enforceMobileCommunityFeedGrid(id);

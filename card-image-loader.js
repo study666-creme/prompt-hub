@@ -592,7 +592,7 @@
     });
     if (items.length) {
       void window.SupabaseSync.prefetchCommunityDisplayUrls(items, 3500).then(() => {
-        window.SupabaseSync?.patchImageSrcFromCache?.(container, { visibleFirst: true, max: 24 });
+        window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: 24 });
         feedImagesIn(container).forEach((img) => {
           const cur = img.currentSrc || img.src || '';
           if (isReadySrc(cur, img)) return;
@@ -731,7 +731,7 @@
   function bindFeed(container, items) {
     if (!container) return Promise.resolve();
     const signP = prefetchItemsForContainer(container, items).then(() => {
-      window.SupabaseSync?.patchImageSrcFromCache?.(container, {
+      window.MediaPipeline?.patchContainerFromCache?.(container, {
         visibleFirst: true,
         max: container.id === 'imageGenFeed' ? 28 : 6
       });
@@ -748,7 +748,7 @@
       if (window.MediaPipeline?.patchContainerFromCache) {
         window.MediaPipeline.patchContainerFromCache(container, o);
       } else {
-        window.SupabaseSync?.patchImageSrcFromCache?.(container, o);
+        window.MediaPipeline?.patchContainerFromCache?.(container, o);
       }
     };
     patchCache({ visibleFirst: true, max: mobileWh ? 16 : 8 });
@@ -839,7 +839,7 @@
     boostWarehouseImages,
     boostImageGenWarehouseImages,
     patchVisibleFromCache(container) {
-      window.SupabaseSync?.patchImageSrcFromCache?.(container);
+      window.MediaPipeline?.patchContainerFromCache?.(container);
       observeContainer(container);
     }
   };

@@ -121,12 +121,23 @@
     window.SupabaseSync.patchImageSrcFromCache(container, opts || { visibleFirst: true, max: 24 });
   }
 
+  function safeImgSrc(image) {
+    if (!image) return '';
+    if (window.SupabaseSync?.safeImgSrc) return window.SupabaseSync.safeImgSrc(image);
+    if (window.SupabaseSync?.isStorageRef?.(image)) {
+      const c = window.SupabaseSync.getCachedDisplayUrl?.(image, { variant: VARIANT_LIST });
+      return c && !c.startsWith('storage://') ? c : '';
+    }
+    return image;
+  }
+
   window.MediaPipeline = {
     VARIANT_LIST,
     VARIANT_PREVIEW,
     resetOnLogin,
     getListCached,
     getPreviewCached,
+    safeImgSrc,
     gridUrlFromImgEl,
     resolveListUrl,
     resolvePreviewUrl,
