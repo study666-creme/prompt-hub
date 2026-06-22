@@ -70,7 +70,8 @@
         if (hit) return hit;
       }
       const isStorageLike = window.SupabaseSync?.isStorageRef?.(image) || String(image).startsWith('storage://');
-      if (isStorageLike && window.MediaPipeline?.resolveFeedUrl) {
+      const skipPipeline = /^data:image\//i.test(image) || String(image).startsWith('blob:');
+      if (!skipPipeline && window.MediaPipeline?.resolveFeedUrl) {
         try {
           const piped = await window.MediaPipeline.resolveFeedUrl(image, {
             assetId,
@@ -107,6 +108,25 @@
         }
         if (cached && /^https?:\/\//i.test(cached) && !cached.includes('/object/public/')
           && !window.SupabaseSync?.isInvalidMediaUrl?.(cached)) url = cached;
+      }
+      if (!url && !skipPipeline && window.MediaPipeline?.resolveFeedUrl) {
+        try {
+          url = await window.MediaPipeline.resolveFeedUrl(image, {
+            assetId,
+            cardId: opts.cardId || cardId,
+            authorId: authorId || undefined,
+            jobId: jobId || undefined,
+            listOnly,
+            preferFull: wantFull,
+            tryAllPaths: opts.tryAllPaths === true || publicFeed || inCommunityGrid,
+            communityFeed: publicFeed || inCommunityGrid,
+            gridFallbackUrl: opts.gridFallbackUrl || opts.fallbackGridUrl,
+            allowGridFallback: opts.allowGridFallback !== false,
+            imgEl: opts.imgEl
+          }) || '';
+        } catch (e) {
+          console.warn('[FeedImages] MediaPipeline fallback resolve failed', e);
+        }
       }
       if (!url && window.SupabaseSync?.resolveDisplayUrl && isStorageLike) {
         try {
@@ -322,7 +342,7 @@
           endLoad();
           return;
         }
-        if (img.dataset.imgFallback === '1' || !window.SupabaseSync?.resolveDisplayUrl) {
+        if (img.dataset.imgFallback === '1' || (!window.MediaPipeline?.resolveFeedUrl && !window.SupabaseSync?.resolveDisplayUrl)) {
           if (!(cardMedia && removeBrokenCommunityFeedCard(cardMedia))) {
             cardMedia?.classList.add('card-media--load-failed');
           }

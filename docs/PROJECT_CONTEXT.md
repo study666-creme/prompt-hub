@@ -24,32 +24,31 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · 管线收尾 + 云同步编排接入）
+## 当前部署阶段（2026-06-07 · 管线收尾 + esbuild 冒烟）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260622j` · https://prompt-hubs.com |
+| **Pages** | build `20260622k` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
 
-- ✅ 参考图 `storage://` 可提交；生图 Feed 滚动保持
-- ✅ MediaPipeline：卡片库灯箱/社区欣赏/侧栏升级、feed hydrate 缓存补丁
-- ✅ SyncOrchestrator：`saveAllData` 改走 `notifyCardsChanged`
-- ✅ 部署前 `scripts/check-js-syntax.ps1`（防语法炸站）
+- ✅ MediaPipeline：参考图展示、填入生图、Feed 全类型 URL、卡片错误重试
+- ✅ SyncOrchestrator：`features-draft` 统一 `queueCloudPush` / `queueUrgentCardsSync`，去掉重复 `pushToCloud`
+- ✅ 部署前：`check-js-syntax.ps1` + `esbuild-bundle-smoke.mjs`（4 个核心模块可打包）
 
 ### 架构优化进度
 
 | 阶段 | 内容 | 进度 |
 |------|------|------|
-| 1 图片管线 | MediaPipeline 全站主要 Feed | ~96% |
-| 2 云同步解耦 | SyncOrchestrator | ~82% |
-| 3 模块化 esbuild | 未开始 | 0% |
+| 1 图片管线 | MediaPipeline 全站 | ~98% |
+| 2 云同步解耦 | SyncOrchestrator | ~88% |
+| 3 模块化 esbuild | 冒烟通过，未切换线上入口 | ~15% |
 
 ### 下一步
 
-1. 强刷确认最新 `window.__APP_BUILD__`
-2. 阶段 3：esbuild 拆 `script.js` / `features-draft.js`
+1. 强刷确认 `window.__APP_BUILD__`
+2. esbuild 正式拆 `script.js` / `features-draft.js` 首包
 
 ### 部署
 

@@ -741,7 +741,9 @@
         const gridImg = document.querySelector(`.card[data-id="${CSS.escape(String(cardId))}"] .card-img`);
         const gridSrc = gridImg?.currentSrc || gridImg?.src || '';
         if (!isPlaceholderSrc(gridSrc)) instantSrc = gridSrc;
-        if (isPlaceholderSrc(instantSrc) && window.SupabaseSync?.getCachedDisplayUrl) {
+        if (isPlaceholderSrc(instantSrc) && window.MediaPipeline?.getListCached) {
+          instantSrc = window.MediaPipeline.getListCached(card.image, cardId) || '';
+        } else if (isPlaceholderSrc(instantSrc) && window.SupabaseSync?.getCachedDisplayUrl) {
           instantSrc = window.SupabaseSync.getCachedDisplayUrl(card.image, {
             assetId: cardId,
             variant: window.SupabaseSync.VARIANT_GRID || 'grid'
@@ -781,7 +783,14 @@
         void (async () => {
           let displaySrc = card.image;
           try {
-            if (window.SupabaseSync?.resolveDisplayUrl) {
+            if (window.MediaPipeline?.resolvePreviewUrl) {
+              displaySrc = await window.MediaPipeline.resolvePreviewUrl(card.image, {
+                assetId: cardId,
+                cardId: cardId,
+                jobId: card.genJobId || null,
+                gridFallbackUrl: instantSrc || ''
+              });
+            } else if (window.SupabaseSync?.resolveDisplayUrl) {
               displaySrc = await window.SupabaseSync.resolveDisplayUrl(card.image, {
                 assetId: cardId,
                 variant: window.SupabaseSync.VARIANT_FULL || 'full'
@@ -1242,7 +1251,9 @@
           } catch (e) { /* ignore */ }
           return null;
         }
-        const url = await window.SupabaseSync?.resolveDisplayUrl?.(ref, signOpts);
+        const url = window.MediaPipeline?.resolvePreviewUrl
+          ? await window.MediaPipeline.resolvePreviewUrl(ref, signOpts)
+          : await window.SupabaseSync?.resolveDisplayUrl?.(ref, signOpts);
         if (!url) return null;
         try {
           const res = await fetch(url);
@@ -3531,21 +3542,33 @@
         const cardModel = cards.find((c) => c.id === cardId);
         const collectOpts = cardModel ? getCommunityCollectImageResolveOpts(cardModel) : null;
         try {
-          const url = await window.SupabaseSync?.resolveDisplayUrl?.(ref, collectOpts ? {
-            ...collectOpts,
-            variant: window.SupabaseSync.VARIANT_GRID || 'grid',
-            tryAllPaths: true,
-            listOnly: true,
-            allowFullFallback: false,
-            degradedListFull: false
-          } : {
-            assetId: cardId,
-            variant: window.SupabaseSync.VARIANT_GRID || 'grid',
-            tryAllPaths: false,
-            listOnly: true,
-            allowFullFallback: false,
-            degradedListFull: window.SupabaseSync?.needsDegradedListPreview?.(ref, cardId) === true
-          });
+          const url = window.MediaPipeline?.resolveListUrl
+            ? await window.MediaPipeline.resolveListUrl(ref, collectOpts ? {
+              assetId: cardId,
+              cardId,
+              authorId: collectOpts.authorId,
+              communityFeed: collectOpts.communityFeed === true,
+              tryAllPaths: true
+            } : {
+              assetId: cardId,
+              cardId,
+              tryAllPaths: false
+            })
+            : await window.SupabaseSync?.resolveDisplayUrl?.(ref, collectOpts ? {
+              ...collectOpts,
+              variant: window.SupabaseSync.VARIANT_GRID || 'grid',
+              tryAllPaths: true,
+              listOnly: true,
+              allowFullFallback: false,
+              degradedListFull: false
+            } : {
+              assetId: cardId,
+              variant: window.SupabaseSync.VARIANT_GRID || 'grid',
+              tryAllPaths: false,
+              listOnly: true,
+              allowFullFallback: false,
+              degradedListFull: window.SupabaseSync?.needsDegradedListPreview?.(ref, cardId) === true
+            });
           if (url && /^https?:\/\//i.test(url) && !String(url).includes('data:image/svg')) {
             const media = img.closest('.card-media');
             if (media) media.classList.remove('card-media--load-failed');

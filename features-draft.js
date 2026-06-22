@@ -28,6 +28,25 @@
     return window.MobileUI?.isMobileViewport?.() ?? window.matchMedia('(max-width: 900px)').matches;
   }
 
+  /** 云同步统一入口（优先 SyncOrchestrator） */
+  function queueCloudPush(opts = {}) {
+    if (!window.SupabaseSync?.isLoggedIn?.()) return;
+    if (window.SyncOrchestrator?.schedulePush) {
+      window.SyncOrchestrator.schedulePush(opts);
+      return;
+    }
+    window.scheduleCloudPush?.(opts);
+  }
+
+  function queueUrgentCardsSync() {
+    if (!window.SupabaseSync?.isLoggedIn?.()) return;
+    if (window.SyncOrchestrator?.notifyCardsChanged) {
+      window.SyncOrchestrator.notifyCardsChanged({ urgent: true });
+      return;
+    }
+    window.scheduleCloudPush?.({ urgent: true });
+  }
+
   /** 列表图加载占位（与 feed-images.js 同值；须在 wire* 之前可用） */
   const IMG_LOADING_PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect fill="%2318181c" width="16" height="16"/></svg>'
@@ -1848,14 +1867,14 @@
     dedupeCommunityPosts({ persist: false });
     saveJson(LS_COMMUNITY, communityPosts.filter(p => !p.isMock));
     if (window.SupabaseSync?.isLoggedIn?.()) {
-      window.scheduleCloudPush?.();
+      queueCloudPush();
     }
   }
 
   function persistCreations() {
     saveJson(LS_CREATIONS, creations);
     if (window.SupabaseSync?.isLoggedIn?.()) {
-      window.scheduleCloudPush?.();
+      queueCloudPush();
     }
   }
 
@@ -2084,7 +2103,7 @@
     communityPosts = [...keptOthers, ...ownByKey.values()];
     if (communityPosts.length !== before && persist) {
       saveJson(LS_COMMUNITY, communityPosts.filter((p) => !p.isMock));
-      if (window.SupabaseSync?.isLoggedIn?.()) window.scheduleCloudPush?.();
+      if (window.SupabaseSync?.isLoggedIn?.()) queueCloudPush();
     }
     return communityPosts;
   }
@@ -3378,7 +3397,7 @@
     try {
       localStorage.setItem('promptrepo_follows', JSON.stringify([...follows]));
     } catch (e) { /* ignore */ }
-    if (window.SupabaseSync?.isLoggedIn?.()) window.scheduleCloudPush?.();
+    if (window.SupabaseSync?.isLoggedIn?.()) queueCloudPush();
   }
 
   function loadFollows() {
@@ -3405,7 +3424,7 @@
     };
     communityEvents.push(payload);
     if (communityEvents.length > 200) communityEvents = communityEvents.slice(-200);
-    if (window.SupabaseSync?.isLoggedIn?.()) window.scheduleCloudPush?.();
+    if (window.SupabaseSync?.isLoggedIn?.()) queueCloudPush();
     if (window.PromptHubApi?.pushCommunityNotify) {
       void window.PromptHubApi.pushCommunityNotify({
         targetUserId: payload.targetUserId,
@@ -3500,7 +3519,7 @@
     try {
       localStorage.setItem('promptrepo_notifications', JSON.stringify(notifications));
     } catch (e) { /* ignore */ }
-    if (window.SupabaseSync?.isLoggedIn?.()) window.scheduleCloudPush?.();
+    if (window.SupabaseSync?.isLoggedIn?.()) queueCloudPush();
   }
 
   function loadNotifications() {
@@ -4694,7 +4713,7 @@
       await window.persistPromptHubCards({ skipCloud: true });
     }
     if (window.SupabaseSync?.isLoggedIn?.()) {
-      window.scheduleCloudPush?.();
+      queueUrgentCardsSync();
     }
     maybeReconcileCommunityWithCards(window.__promptHubCards || [], { force: true });
     toast(wantOn ? '已公开到社区' : '已从社区下架');
@@ -6679,7 +6698,7 @@
         if (document.getElementById('pageImageGen')?.classList.contains('active')) {
           renderImageGenFeed({ preserveScroll: true });
         }
-        window.scheduleCloudPush?.({ urgent: true });
+        queueUrgentCardsSync();
       }
       return changed;
     })().finally(() => { missingGenCardRepairInflight = null; });
@@ -7453,11 +7472,6 @@
     }
     creations = creations.filter(c => c.id !== id);
     persistCreations();
-    if (window.SupabaseSync?.isLoggedIn?.() && typeof window.pushToCloud === 'function') {
-      void window.pushToCloud({ skipSafety: true }).catch(() => {
-        if (typeof window.scheduleCloudPush === 'function') window.scheduleCloudPush();
-      });
-    }
     renderCreations();
     if (document.getElementById('pageImageGen')?.classList.contains('active')) {
       renderImageGenFeed();
@@ -9126,12 +9140,18 @@
     const normalized = window.SupabaseSync?.normalizeImageRef?.(ref) || ref;
     const isStorageLike = window.SupabaseSync?.isStorageRef?.(normalized)
       || (normalized.startsWith('storage://') && !/^https?:/i.test(normalized));
-    if (!isStorageLike || !window.SupabaseSync?.resolveDisplayUrl) return '';
+    if (!isStorageLike) return '';
     const assetId = opts?.assetId || imageGenRefResolveAssetId || undefined;
-    const cached = window.SupabaseSync.getCachedDisplayUrl?.(normalized, { assetId, variant: 'full' })
-      || window.SupabaseSync.getCachedDisplayUrl?.(normalized, { assetId, variant: 'grid' });
+    const cached = window.MediaPipeline?.getPreviewCached?.(normalized, assetId)
+      || window.MediaPipeline?.getListCached?.(normalized, assetId)
+      || window.SupabaseSync?.getCachedDisplayUrl?.(normalized, { assetId, variant: 'full' })
+      || window.SupabaseSync?.getCachedDisplayUrl?.(normalized, { assetId, variant: 'grid' });
     if (cached && /^https?:\/\//i.test(cached) && !cached.startsWith('storage://')) return cached;
     try {
+      if (window.MediaPipeline?.resolvePreviewUrl) {
+        const url = await window.MediaPipeline.resolvePreviewUrl(normalized, { assetId, tryAllPaths: true });
+        return url && /^https?:\/\//i.test(url) && !url.startsWith('storage://') ? url : '';
+      }
       const url = await window.SupabaseSync.resolveDisplayUrl(normalized, {
         assetId,
         variant: 'full',
@@ -10934,10 +10954,7 @@
       renderImageGenFeed({ preserveScroll: true });
       renderImageGenMobileResult();
       if (saved && window.SupabaseSync?.isLoggedIn?.() && !isMidjourney) {
-        window.scheduleCloudPush?.({ urgent: true });
-        void window.pushToCloud?.({ silent: true, skipSafety: true }).catch(() => {
-          window.scheduleCloudPush?.({ urgent: true });
-        });
+        queueUrgentCardsSync();
       }
       const whCard = slotJobId
         ? (window.__promptHubCards || []).find((c) => c.genJobId === slotJobId)
@@ -11051,12 +11068,19 @@
     const ref = card.image;
     if (ref && isDisplayableImage(ref)) {
       let url = ref;
-      if (window.SupabaseSync?.resolveDisplayUrl) {
-        try {
+      try {
+        if (window.MediaPipeline?.resolvePreviewUrl) {
+          const resolved = await window.MediaPipeline.resolvePreviewUrl(ref, {
+            assetId: card.id,
+            cardId: card.id,
+            jobId: card.genJobId || null
+          });
+          if (resolved && !String(resolved).includes('data:image/svg')) url = resolved;
+        } else if (window.SupabaseSync?.resolveDisplayUrl) {
           const resolved = await window.SupabaseSync.resolveDisplayUrl(ref, { assetId: card.id });
           if (resolved && !String(resolved).includes('data:image/svg')) url = resolved;
-        } catch (e) { /* ignore */ }
-      }
+        }
+      } catch (e) { /* ignore */ }
       fillFormRefOnly(url, [url]);
     }
     if (isMobileViewport()) window.MobileUI?.setImageGenView?.('form');

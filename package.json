@@ -2,5 +2,11 @@
   "name": "prompt-hub",
   "private": true,
   "version": "1.0.0",
-  "description": "提示词仓库"
+  "description": "提示词仓库",
+  "scripts": {
+    "check:esbuild": "node scripts/esbuild-bundle-smoke.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.5"
+  }
 }
