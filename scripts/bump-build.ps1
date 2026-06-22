@@ -35,7 +35,7 @@ $syncCacheAssets = @(
   'theme.js', 'api-client.js', 'supabase-sync.js', 'dist/core-pipeline.bundle.js',
   'script.js', 'dist/feed-modules.bundle.js', 'features-draft.js',
   'features-assets.js', 'community-gacha.js', 'mobile.js', 'pwa-install.js',
-  'imagegen-prompt-kit.js', 'imagegen-prompt-tools.js', 'trial-tasks.js', 'points-system.js'
+  'dist/imagegen-tools.bundle.js', 'trial-tasks.js', 'points-system.js'
 )
 
 foreach ($path in $files) {

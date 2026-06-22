@@ -36,4 +36,12 @@ Write-Host "feed-bundle-vm-smoke ..."
 & node (Join-Path $root "scripts\run-feed-bundle-vm-smoke.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+Write-Host "verify-imagegen-bundle ..."
+& node (Join-Path $root "scripts\verify-imagegen-bundle.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+Write-Host "imagegen-bundle-vm-smoke ..."
+& node (Join-Path $root "scripts\run-imagegen-bundle-vm-smoke.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 Write-Host "predeploy-smoke: all checks passed" -ForegroundColor Green

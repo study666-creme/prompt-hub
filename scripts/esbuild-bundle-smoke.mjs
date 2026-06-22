@@ -13,7 +13,10 @@ const targets = [
   'feed-images.js',
   'feed-layout.js',
   'image-gen-feed.js',
-  'card-image-loader.js'
+  'card-image-loader.js',
+  'imagegen-prompt-kit.js',
+  'imagegen-prompt-tools.js',
+  'points-system.js'
 ];
 
 let failed = 0;

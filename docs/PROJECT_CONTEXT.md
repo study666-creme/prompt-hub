@@ -24,18 +24,18 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · Feed 第二包 + 双 bundle 冒烟）
+## 当前部署阶段（2026-06-07 · 三 bundle + 生图工具包）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260622m` · https://prompt-hubs.com |
+| **Pages** | build `20260622n` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
 
-- ✅ `dist/feed-modules.bundle.js`：feed-layout + feed-images + image-gen-feed 三合一
-- ✅ 部署前双 bundle：语法 + esbuild + VM 执行 + HTTP 可达
-- ✅ index 由 6 个核心脚本减为 2 个 bundle（pipeline + feed）
+- ✅ 三合一 bundle：core-pipeline / feed-modules / **imagegen-tools**（kit + tools）
+- ✅ 部署前三包 VM 冒烟 + 语法 + esbuild 校验
+- ✅ index 核心脚本由 9 个减为 3 个 bundle + points-system
 
 ### 架构优化进度
 
@@ -43,12 +43,12 @@
 |------|------|------|
 | 1 图片管线 | MediaPipeline | ~99% |
 | 2 云同步解耦 | SyncOrchestrator | ~90% |
-| 3 模块化 esbuild | 核心 + Feed 两包已上线 | ~55% |
+| 3 模块化 esbuild | 三包已上线 | ~68% |
 
 ### 下一步
 
 1. 强刷确认 `window.__APP_BUILD__`
-2. 评估 script.js / features-draft.js 首段拆包
+2. 规划 script.js / features-draft.js 首段拆包（高风险，小步）
 
 ### 部署
 

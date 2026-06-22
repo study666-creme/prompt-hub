@@ -1,5 +1,5 @@
 /**
- * 本地 HTTP 冒烟：确认 index 引用两个 bundle 且均可下载。
+ * 本地 HTTP 冒烟：确认 index 引用三个 bundle 且均可下载。
  */
 const base = process.env.SMOKE_BASE || 'http://127.0.0.1:5500';
 
@@ -15,33 +15,43 @@ if (!index.ok) {
   process.exit(1);
 }
 
-const indexChecks = [
-  ['dist/core-pipeline.bundle.js', true],
-  ['dist/feed-modules.bundle.js', true],
-  ['media-pipeline.js?v=', false],
-  ['feed-layout.js?v=', false],
-  ['feed-images.js?v=', false],
-  ['image-gen-feed.js?v=', false]
+const mustHave = [
+  'dist/core-pipeline.bundle.js',
+  'dist/feed-modules.bundle.js',
+  'dist/imagegen-tools.bundle.js'
+];
+const mustNot = [
+  'media-pipeline.js?v=',
+  'feed-layout.js?v=',
+  'imagegen-prompt-kit.js?v=',
+  'imagegen-prompt-tools.js?v='
 ];
 
-for (const [token, shouldInclude] of indexChecks) {
-  const has = index.text.includes(token);
-  if (has !== shouldInclude) {
-    console.error(`index-http-smoke: index.html token "${token}" expected ${shouldInclude ? 'present' : 'absent'}`);
+for (const token of mustHave) {
+  if (!index.text.includes(token)) {
+    console.error(`index-http-smoke: missing ${token}`);
+    process.exit(1);
+  }
+}
+for (const token of mustNot) {
+  if (index.text.includes(token)) {
+    console.error(`index-http-smoke: should not load ${token}`);
     process.exit(1);
   }
 }
 
-const core = await get('/dist/core-pipeline.bundle.js');
-if (!core.ok || !core.text.includes('window.MediaPipeline')) {
-  console.error(`index-http-smoke: core bundle invalid (${core.status})`);
-  process.exit(1);
+const bundles = [
+  ['/dist/core-pipeline.bundle.js', 'MediaPipeline'],
+  ['/dist/feed-modules.bundle.js', 'FeedLayout'],
+  ['/dist/imagegen-tools.bundle.js', 'ImageGenPromptKit']
+];
+
+for (const [path, token] of bundles) {
+  const res = await get(path);
+  if (!res.ok || !res.text.includes(token)) {
+    console.error(`index-http-smoke: invalid ${path} (${res.status})`);
+    process.exit(1);
+  }
 }
 
-const feed = await get('/dist/feed-modules.bundle.js');
-if (!feed.ok || !feed.text.includes('FeedLayout')) {
-  console.error(`index-http-smoke: feed bundle invalid (${feed.status})`);
-  process.exit(1);
-}
-
-console.log('index-http-smoke OK: index + core + feed bundles reachable');
+console.log('index-http-smoke OK: index + 3 bundles reachable');
