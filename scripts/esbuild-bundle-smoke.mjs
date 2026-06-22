@@ -11,6 +11,8 @@ const targets = [
   'media-pipeline.js',
   'sync-orchestrator.js',
   'feed-images.js',
+  'feed-layout.js',
+  'image-gen-feed.js',
   'card-image-loader.js'
 ];
 

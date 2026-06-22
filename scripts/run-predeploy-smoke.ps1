@@ -16,16 +16,24 @@ Write-Host "esbuild-bundle-smoke ..."
 & node $esbuildSmoke
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
-Write-Host "build-core-bundle ..."
-& node (Join-Path $root "scripts\build-core-bundle.mjs")
+Write-Host "build-all-bundles ..."
+& node (Join-Path $root "scripts\build-all-bundles.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 Write-Host "verify-core-bundle ..."
 & node (Join-Path $root "scripts\verify-core-bundle.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+Write-Host "verify-feed-bundle ..."
+& node (Join-Path $root "scripts\verify-feed-bundle.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 Write-Host "bundle-vm-smoke ..."
 & node (Join-Path $root "scripts\run-bundle-vm-smoke.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+Write-Host "feed-bundle-vm-smoke ..."
+& node (Join-Path $root "scripts\run-feed-bundle-vm-smoke.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 Write-Host "predeploy-smoke: all checks passed" -ForegroundColor Green

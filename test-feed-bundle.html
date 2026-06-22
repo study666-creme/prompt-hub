@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Feed Modules Bundle Smoke</title>
+</head>
+<body>
+  <h1>Feed Modules Bundle Smoke</h1>
+  <pre id="log">running…</pre>
+  <script>
+    window.Masonry = class {
+      layout() {}
+      reloadItems() {}
+      destroy() {}
+    };
+    window.MobileUI = { isMobileViewport: function () { return false; } };
+    window.MediaPipeline = { resolveFeedUrl: async function () { return ''; }, patchContainerFromCache: function () {} };
+    window.SupabaseSync = {
+      isLoggedIn: function () { return false; },
+      getCachedDisplayUrl: function () { return ''; },
+      resolveDisplayUrl: async function () { return ''; },
+      isStorageRef: function (v) { return String(v || '').startsWith('storage://'); },
+      isInvalidMediaUrl: function () { return false; }
+    };
+  </script>
+  <script src="dist/feed-modules.bundle.js"></script>
+  <script>
+    (function () {
+      var log = document.getElementById('log');
+      var lines = [];
+      function ok(name, cond) {
+        lines.push((cond ? 'OK  ' : 'FAIL') + ' ' + name);
+        if (!cond) throw new Error(name);
+      }
+      try {
+        ok('FeedLayout', !!window.FeedLayout);
+        ok('FeedLayout.init', typeof window.FeedLayout.init === 'function');
+        ok('FeedImages', !!window.FeedImages);
+        ok('FeedImages.init', typeof window.FeedImages.init === 'function');
+        ok('ImageGenFeed', !!window.ImageGenFeed);
+        ok('ImageGenFeed.init', typeof window.ImageGenFeed.init === 'function');
+        var fl = window.FeedLayout.init({});
+        ok('FeedLayout.getMode', typeof fl.getMode === 'function');
+        lines.push('ALL PASSED');
+        log.textContent = lines.join('\n');
+        log.style.color = 'green';
+      } catch (e) {
+        lines.push('ERROR: ' + (e && e.message ? e.message : e));
+        log.textContent = lines.join('\n');
+        log.style.color = 'red';
+      }
+    })();
+  </script>
+</body>
+</html>

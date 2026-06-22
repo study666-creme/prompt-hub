@@ -5,6 +5,8 @@
   "description": "提示词仓库",
   "scripts": {
     "build:core": "node scripts/build-core-bundle.mjs",
+    "build:feed": "node scripts/build-feed-bundle.mjs",
+    "build:all": "node scripts/build-all-bundles.mjs",
     "check:esbuild": "node scripts/esbuild-bundle-smoke.mjs",
     "check:predeploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-predeploy-smoke.ps1"
   },

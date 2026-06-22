@@ -85,10 +85,10 @@ if (Test-Path (Join-Path $Root "scripts\build-core-bundle.mjs")) {
     npm install --no-audit --no-fund 2>$null
     Pop-Location
   }
-  Write-Host 'Building dist/core-pipeline.bundle.js ...' -ForegroundColor DarkGray
-  & node (Join-Path $Root "scripts\build-core-bundle.mjs")
+  Write-Host 'Building dist/*.bundle.js ...' -ForegroundColor DarkGray
+  & node (Join-Path $Root "scripts\build-all-bundles.mjs")
   if ($LASTEXITCODE -ne 0) {
-    Write-Host 'core bundle build failed — fix before local preview' -ForegroundColor Red
+    Write-Host 'bundle build failed — fix before local preview' -ForegroundColor Red
     exit 1
   }
 }
