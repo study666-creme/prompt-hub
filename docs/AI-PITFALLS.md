@@ -1,7 +1,7 @@
 # AI 踩坑清单（必读，避免重复炸站）
 
 > **用途**：记录已踩过的致命/难查问题。改 `features-draft.js` / 社区 Feed / 媒体签名前**先扫本页**。  
-> 最后更新：**2026-06-04** · Pages 构建号 **`20260604a`**
+> 最后更新：**2026-06-07** · Pages 构建号 **`20260622p`**
 
 ---
 
@@ -10,6 +10,7 @@
 | 坑 | 现象 | 根因 | 禁止 |
 |----|------|------|------|
 | **重复 `const` 声明** | 社区/主页/生图全空，背景动效也停；Console：`Identifier 'colsChanged' has already been declared` | 同一函数内两次 `const colsChanged` → **整份 `features-draft.js` 解析失败**，后续脚本全不执行 | 改 `layoutCommunityMasonry` 等长函数时，合并变量名或改名（如 `measuredColsChanged` / `colsChanged`） |
+| **bundle 放 `/dist/` 未 HTTP 验** | 卡片库只剩文字、全站无图；`MediaPipeline` 等为 false，Console 常无 SyntaxError | Cloudflare Pages SPA 把 `/dist/*.js` 回退成 `index.html`；VM 冒烟读本地文件发现不了 | bundle 输出到**根目录** `*.bundle.js`；部署后必须 `run-index-http-smoke.mjs` 验 Content-Type |
 | **未部署就让用户测** | 用户仍见旧 bug | 只改本地未 `deploy-pages.ps1` | 改静态资源后必须 bump `__APP_BUILD__` + 部署，让用户 `Ctrl+Shift+R` 看 `window.__APP_BUILD__` |
 
 ---

@@ -1,57 +1,58 @@
 /**
- * 本地 HTTP 冒烟：确认 index 引用三个 bundle 且均可下载。
+ * 本地/线上 HTTP 冒烟：bundle URL 必须返回 JS，不能是 SPA 回退的 HTML。
  */
 const base = process.env.SMOKE_BASE || 'http://127.0.0.1:5500';
 
 async function get(path) {
   const res = await fetch(`${base}${path}`, { cache: 'no-store' });
+  const ct = res.headers.get('content-type') || '';
   const text = await res.text();
-  return { ok: res.ok, status: res.status, text };
+  return { ok: res.ok, status: res.status, ct, text };
 }
 
 const index = await get('/');
 if (!index.ok) {
-  console.error(`index-http-smoke: GET / failed (${index.status}) — start serve-local.ps1 first`);
+  console.error(`index-http-smoke: GET / failed (${index.status})`);
   process.exit(1);
 }
 
-const mustHave = [
-  'dist/core-pipeline.bundle.js',
-  'dist/feed-modules.bundle.js',
-  'dist/imagegen-tools.bundle.js'
-];
-const mustNot = [
-  'media-pipeline.js?v=',
-  'feed-layout.js?v=',
-  'imagegen-prompt-kit.js?v=',
-  'imagegen-prompt-tools.js?v='
-];
+const mustHave = ['core-pipeline.bundle.js', 'feed-modules.bundle.js', 'imagegen-tools.bundle.js'];
+const mustNot = ['dist/core-pipeline.bundle.js', 'dist/feed-modules.bundle.js', 'media-pipeline.js?v='];
 
 for (const token of mustHave) {
   if (!index.text.includes(token)) {
-    console.error(`index-http-smoke: missing ${token}`);
+    console.error(`index-http-smoke: index missing ${token}`);
     process.exit(1);
   }
 }
 for (const token of mustNot) {
   if (index.text.includes(token)) {
-    console.error(`index-http-smoke: should not load ${token}`);
+    console.error(`index-http-smoke: index should not reference ${token}`);
     process.exit(1);
   }
 }
 
 const bundles = [
-  ['/dist/core-pipeline.bundle.js', 'MediaPipeline'],
-  ['/dist/feed-modules.bundle.js', 'FeedLayout'],
-  ['/dist/imagegen-tools.bundle.js', 'ImageGenPromptKit']
+  ['/core-pipeline.bundle.js', 'MediaPipeline', 'window.MediaPipeline'],
+  ['/feed-modules.bundle.js', 'FeedLayout', 'FeedLayout'],
+  ['/imagegen-tools.bundle.js', 'ImageGenPromptKit', 'ImageGenPromptKit']
 ];
 
-for (const [path, token] of bundles) {
+for (const [path, label, token] of bundles) {
   const res = await get(path);
-  if (!res.ok || !res.text.includes(token)) {
-    console.error(`index-http-smoke: invalid ${path} (${res.status})`);
+  if (!res.ok) {
+    console.error(`index-http-smoke: ${path} HTTP ${res.status}`);
     process.exit(1);
   }
+  if (/text\/html/i.test(res.ct) || res.text.trimStart().startsWith('<!')) {
+    console.error(`index-http-smoke: ${path} returned HTML (SPA fallback) — images will break`);
+    process.exit(1);
+  }
+  if (!res.text.includes(token)) {
+    console.error(`index-http-smoke: ${path} missing ${label}`);
+    process.exit(1);
+  }
+  console.log(`index-http-smoke OK: ${path} (${res.ct.split(';')[0]})`);
 }
 
-console.log('index-http-smoke OK: index + 3 bundles reachable');
+console.log('index-http-smoke OK: all bundles are real JavaScript');

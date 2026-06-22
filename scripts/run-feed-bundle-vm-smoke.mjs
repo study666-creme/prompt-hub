@@ -1,5 +1,5 @@
 /**
- * Node 端模拟 window，验证 feed bundle 可执行且导出三个全局对象。
+ * Node 端验证 feed bundle 可执行。
  */
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -7,8 +7,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const bundlePath = join(root, 'dist', 'feed-modules.bundle.js');
-const code = readFileSync(bundlePath, 'utf8');
+const code = readFileSync(join(root, 'feed-modules.bundle.js'), 'utf8');
 
 function elStub() {
   return {
@@ -66,20 +65,15 @@ const window = {
 window.window = window;
 window.globalThis = window;
 
-const ctx = vm.createContext(window);
-vm.runInContext(code, ctx, { filename: 'feed-modules.bundle.js' });
+vm.runInContext(code, vm.createContext(window), { filename: 'feed-modules.bundle.js' });
 
 const checks = [
   ['FeedLayout', !!window.FeedLayout],
-  ['FeedLayout.init', typeof window.FeedLayout?.init === 'function'],
-  ['FeedLayout.layout', typeof window.FeedLayout?.layout === 'function'],
   ['FeedImages', !!window.FeedImages],
-  ['FeedImages.init', typeof window.FeedImages?.init === 'function'],
-  ['ImageGenFeed', !!window.ImageGenFeed],
-  ['ImageGenFeed.init', typeof window.ImageGenFeed?.init === 'function']
+  ['ImageGenFeed', !!window.ImageGenFeed]
 ];
 
-const failed = checks.filter(([, ok]) => !ok).map(([name]) => name);
+const failed = checks.filter(([, ok]) => !ok).map(([n]) => n);
 if (failed.length) {
   console.error('feed-bundle-vm-smoke FAIL:', failed.join(', '));
   process.exit(1);

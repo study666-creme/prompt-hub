@@ -1,5 +1,6 @@
 /**
  * 将 media-pipeline + sync-orchestrator + card-image-loader 合并为单文件（加载顺序不变）。
+ * 输出到站点根目录，避免 Cloudflare Pages SPA 把 /dist/*.js 回退成 index.html。
  */
 import { join } from 'node:path';
 import { concatMinifyBundle, bundleRootFromMeta } from './lib/concat-minify-bundle.mjs';
@@ -14,7 +15,7 @@ const sources = [
 concatMinifyBundle({
   root,
   sources,
-  outFile: join(root, 'dist', 'core-pipeline.bundle.js'),
+  outFile: join(root, 'core-pipeline.bundle.js'),
   metaFile: join(root, 'dist', 'core-pipeline.bundle.meta.json'),
   label: 'build-core-bundle'
 });

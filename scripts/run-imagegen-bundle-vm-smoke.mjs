@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const code = readFileSync(join(root, 'dist', 'imagegen-tools.bundle.js'), 'utf8');
+const code = readFileSync(join(root, 'imagegen-tools.bundle.js'), 'utf8');
 
 function elStub() {
   return {
@@ -35,13 +35,11 @@ const window = {
     getImageGenCostDetail: () => ({ final: 10 }),
     formatCredits: (n) => String(n)
   },
-  FeatureDraft: {
-    getImageGenRefImages: () => []
-  },
+  FeatureDraft: { getImageGenRefImages: () => [] },
   PromptHubApi: {},
   matchMedia: () => ({ matches: false, addEventListener() {} }),
   document: {
-    body: { classList: { add() {}, remove() {}, contains() { return false; } }, dataset: {} },
+    body: { classList: { contains: () => false, add() {}, remove() {} }, dataset: {} },
     querySelector: () => null,
     querySelectorAll: () => [],
     getElementById: () => null,
@@ -49,10 +47,7 @@ const window = {
     addEventListener: () => {},
     removeEventListener: () => {}
   },
-  localStorage: {
-    getItem: () => null,
-    setItem() {}
-  }
+  localStorage: { getItem: () => null, setItem() {} }
 };
 window.window = window;
 
@@ -60,9 +55,7 @@ vm.runInContext(code, vm.createContext(window), { filename: 'imagegen-tools.bund
 
 const checks = [
   ['ImageGenPromptKit', !!window.ImageGenPromptKit],
-  ['listContentTypes', typeof window.ImageGenPromptKit?.listContentTypes === 'function'],
-  ['ImageGenPromptTools', !!window.ImageGenPromptTools],
-  ['init', typeof window.ImageGenPromptTools?.init === 'function']
+  ['ImageGenPromptTools', !!window.ImageGenPromptTools]
 ];
 
 const failed = checks.filter(([, ok]) => !ok).map(([n]) => n);

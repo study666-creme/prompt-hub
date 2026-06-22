@@ -12,6 +12,7 @@
 | 标签 | 主题 | 跳转到 |
 |------|------|--------|
 | 🔴 | 整站白屏 `features-draft.js` 语法 | [§1](#1-整站白屏重复-const-声明) |
+| 🔴 | esbuild bundle 全站无图（`/dist/*.js` SPA 回退） | [§1b](#1b-esbuild-bundle-全站无图pages-spa-回退) |
 | 🟠 | 社区 flex 布局晃、乱飞、巨图 | [§2](#2-社区--我的主页-feed-布局高频) |
 | 🟠 | 我的主页侧栏空白 | [§2.7](#27-我的主页侧栏空白桌面端) |
 | 🟠 | 卡片库/社区黑图、401、429 签名风暴 | [§3](#3-媒体签名与黑图高频) |
@@ -20,6 +21,7 @@
 | 🟡 | 批量删除遮罩不消失、旧图残留 | [§6](#6-前端交互与状态) |
 | 🟡 | 换号串号、公开数≠社区帖、误删卡 | [§7](#7-数据同步与账号) |
 | 🔵 | 未部署就测、构建号/SW 缓存 | [§8](#8-部署与缓存) |
+| 🔵 | bundle 部署后须 HTTP 验 Content-Type | [§8](#8-部署与缓存) · [§1b](#1b-esbuild-bundle-全站无图pages-spa-回退) |
 | 🔵 | 搜索只有 Edge 能搜到、无站标 | [§9](#9-seo--搜索引擎误解) |
 | 🔵 | Google 搜「提示词仓库」没有本站 | [§9](#93-google-泛词无排名--正常) · **`docs/GOOGLE-SEARCH-CONSOLE-BEGINNER.md`** |
 
@@ -34,6 +36,20 @@
 | **根因** | ① 同一函数内重复 `const` → 整份 `features-draft.js` 解析失败 ② 拆到 `feed-images.js` 后未在 `wireFeedImages` 导出/接线 ③ `wireImageGenFeed` 在 `IMG_LOADING_PLACEHOLDER` 未定义时执行 |
 | **修复** | 合并重复 const；`IMG_LOADING_PLACEHOLDER` 保留在 `features-draft` 顶部 const；`feedImgStorageAttr` 经 `FeedImages.init` 接线 |
 | **勿再犯** | 改 `wireFeed*` 或拆模块后：强刷 + Console 无 ReferenceError；`!!window.FeatureDraft?.hydrateFeedImages` 为 true |
+
+---
+
+## 1b. esbuild bundle 全站无图（Pages SPA 回退）
+
+| 项 | 内容 |
+|----|------|
+| **标签** | 🔴 致命 |
+| **现象** | 卡片库只剩文字、社区/生图/资产页全空；Console 无 SyntaxError，但 `window.MediaPipeline` / `FeedLayout` / `CardImageLoader` 均为 **false** |
+| **根因** | 三包引用 `/dist/*.bundle.js`；Cloudflare Pages **SPA 回退**对不存在的静态路径返回 `index.html`（`Content-Type: text/html`）。浏览器把 HTML 当 JS 执行 → 全局对象未定义 → 图片管线与 Feed 全失效 |
+| **为何 VM 冒烟没抓到** | `node --check` / VM 读本地磁盘文件正常；**未 HTTP fetch 线上 URL** 验证返回体 |
+| **修复** | ① bundle 输出到**站点根目录**（`core-pipeline.bundle.js` 等）② `index.html` / `sw.js` / `bump-build.ps1` 同步路径 ③ 新增 `verify-bundle-bytes.mjs` + `run-index-http-smoke.mjs`（部署后拉生产 URL，断言非 HTML）④ `deploy-pages.ps1` staging 与 post-deploy 双检 |
+| **构建** | `20260622p` |
+| **勿再犯** | 新增/移动 bundle 路径后：`SMOKE_BASE=https://prompt-hubs.com node scripts/run-index-http-smoke.mjs`；禁止把运行时 JS 只放在会被 SPA 吞掉的路径（如未在 staging 里的 `/dist/`） |
 
 ---
 
@@ -199,6 +215,7 @@
 | 现象 | 根因 | 做法 |
 |------|------|------|
 | 用户说修了但仍是旧 UI | 未 `deploy-pages.ps1` 或未强刷 | bump `__APP_BUILD__` → 部署 → 用户 **Ctrl+Shift+R** 看 `window.__APP_BUILD__` |
+| **esbuild bundle 后全站无图** | `/dist/*.js` 被 Pages SPA 回退成 HTML | bundle 放根目录 `*.bundle.js`；部署后跑 `run-index-http-smoke.mjs`（见 **§1b**） |
 | 构建号变了仍像旧版 | Service Worker / 浏览器缓存 | 首页脚本会 purge SW；仍不行则 DevTools 清站点数据 |
 | 只改了 Worker 未部署 | 任务/兑换/签名在后端 | `cd server` → `npm run deploy` |
 
@@ -250,7 +267,8 @@
 2. 社区改动：搜 `flattenCommunityFeedColumns`、`forceReflow`、`fromImage`。  
 3. 主页：`#creationsGrid > .card` 孤儿数为 0。  
 4. 部署后 `window.__APP_BUILD__` 与 `index.html` 一致。  
-5. `https://prompt-hub.cn/favicon.ico` 返回 200。
+5. 部署后 `node scripts/run-index-http-smoke.mjs`（或 `SMOKE_BASE=https://prompt-hubs.com`）三个 `*.bundle.js` 须为 JS 非 HTML。  
+6. `https://prompt-hub.cn/favicon.ico` 返回 200。
 
 ---
 

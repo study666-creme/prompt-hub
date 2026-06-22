@@ -39,6 +39,20 @@ if ($LASTEXITCODE -ne 0) { exit 1 }
 $staging = & (Join-Path $root "scripts\stage-pages.ps1")
 Write-Host "Deploying staged assets from: $staging"
 
+foreach ($bundle in @('core-pipeline.bundle.js', 'feed-modules.bundle.js', 'imagegen-tools.bundle.js')) {
+  $bp = Join-Path $staging $bundle
+  if (-not (Test-Path $bp)) {
+    Write-Host "Deploy blocked: staged bundle missing $bundle" -ForegroundColor Red
+    exit 1
+  }
+  $head = (Get-Content $bp -First 1).TrimStart()
+  if ($head.StartsWith('<')) {
+    Write-Host "Deploy blocked: $bundle looks like HTML (SPA fallback would break site)" -ForegroundColor Red
+    exit 1
+  }
+}
+Write-Host "Staged bundle sanity OK" -ForegroundColor DarkGray
+
 function Test-CloudflareReachable {
   Push-Location $server
   try {
@@ -104,6 +118,15 @@ if ($code -ne 0) {
   Write-Host "     ZIP file: $root\prompt-hub-deploy.zip" -ForegroundColor Cyan
   Write-Host ""
   exit $code
+}
+
+Write-Host "Post-deploy bundle smoke (production) ..." -ForegroundColor DarkGray
+$env:SMOKE_BASE = "https://prompt-hubs.com"
+& node (Join-Path $root "scripts\run-index-http-smoke.mjs")
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "WARNING: production bundle smoke failed — site may still show blank images until fixed" -ForegroundColor Red
+} else {
+  Write-Host "Production bundle smoke OK" -ForegroundColor Green
 }
 
 Write-Host "OK. Open your site and hard refresh (Ctrl+Shift+R)."

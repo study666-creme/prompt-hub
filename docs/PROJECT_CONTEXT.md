@@ -24,31 +24,27 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · 三 bundle + 生图工具包）
+## 当前部署阶段（2026-06-07 · bundle 热修）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260622n` · https://prompt-hubs.com |
+| **Pages** | build `20260622p` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
 
-- ✅ 三合一 bundle：core-pipeline / feed-modules / **imagegen-tools**（kit + tools）
-- ✅ 部署前三包 VM 冒烟 + 语法 + esbuild 校验
-- ✅ index 核心脚本由 9 个减为 3 个 bundle + points-system
+- ✅ 三包 bundle 改部署到**站点根目录**（`*.bundle.js`），避免 `/dist/*` 被 SPA 回退成 HTML
+- ✅ 部署后自动 HTTP 冒烟：bundle 须 `application/javascript` 且非 HTML
+- ✅ `MediaPipeline` / `FeedLayout` / `CardImageLoader` 等全局对象线上已恢复
 
-### 架构优化进度
+### 已知问题（已修）
 
-| 阶段 | 内容 | 进度 |
-|------|------|------|
-| 1 图片管线 | MediaPipeline | ~99% |
-| 2 云同步解耦 | SyncOrchestrator | ~90% |
-| 3 模块化 esbuild | 三包已上线 | ~68% |
+- ~~esbuild 三合一首包后全站无图~~：根因是 Cloudflare Pages 对 `/dist/*.js` 返回 `index.html`；VM 冒烟无法发现
 
 ### 下一步
 
-1. 强刷确认 `window.__APP_BUILD__`
-2. 规划 script.js / features-draft.js 首段拆包（高风险，小步）
+1. 用户 **Ctrl+Shift+R** 强刷；若仍空白 → Application 注销 Service Worker 再试
+2. 规划 script.js / features-draft.js 首段拆包（小步、含 HTTP 冒烟）
 
 ### 部署
 

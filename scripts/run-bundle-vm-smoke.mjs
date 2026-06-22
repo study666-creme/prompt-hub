@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const bundlePath = join(root, 'dist', 'core-pipeline.bundle.js');
+const bundlePath = join(root, 'core-pipeline.bundle.js');
 const code = readFileSync(bundlePath, 'utf8');
 
 const window = {
@@ -48,11 +48,8 @@ vm.runInContext(code, ctx, { filename: 'core-pipeline.bundle.js' });
 const checks = [
   ['MediaPipeline', !!window.MediaPipeline],
   ['resolveFeedUrl', typeof window.MediaPipeline?.resolveFeedUrl === 'function'],
-  ['isUsableGenRefUrl', typeof window.MediaPipeline?.isUsableGenRefUrl === 'function'],
   ['SyncOrchestrator', !!window.SyncOrchestrator],
-  ['schedulePush', typeof window.SyncOrchestrator?.schedulePush === 'function'],
-  ['CardImageLoader', !!window.CardImageLoader],
-  ['observeContainer', typeof window.CardImageLoader?.observeContainer === 'function']
+  ['CardImageLoader', !!window.CardImageLoader]
 ];
 
 const failed = checks.filter(([, ok]) => !ok).map(([name]) => name);

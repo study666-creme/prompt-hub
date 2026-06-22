@@ -13,7 +13,7 @@ const sources = [
 concatMinifyBundle({
   root,
   sources,
-  outFile: join(root, 'dist', 'imagegen-tools.bundle.js'),
+  outFile: join(root, 'imagegen-tools.bundle.js'),
   metaFile: join(root, 'dist', 'imagegen-tools.bundle.meta.json'),
   label: 'build-imagegen-bundle'
 });

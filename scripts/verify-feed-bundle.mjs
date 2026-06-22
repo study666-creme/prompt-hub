@@ -7,13 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const bundlePath = join(root, 'dist', 'feed-modules.bundle.js');
+const bundlePath = join(root, 'feed-modules.bundle.js');
 
 let code;
 try {
   code = readFileSync(bundlePath, 'utf8');
 } catch {
-  console.error('verify-feed-bundle: missing dist/feed-modules.bundle.js — run npm run build:feed');
+  console.error('verify-feed-bundle: missing feed-modules.bundle.js');
   process.exit(1);
 }
 

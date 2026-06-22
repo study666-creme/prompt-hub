@@ -7,13 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const bundlePath = join(root, 'dist', 'imagegen-tools.bundle.js');
+const bundlePath = join(root, 'imagegen-tools.bundle.js');
 
 let code;
 try {
   code = readFileSync(bundlePath, 'utf8');
 } catch {
-  console.error('verify-imagegen-bundle: missing dist/imagegen-tools.bundle.js');
+  console.error('verify-imagegen-bundle: missing imagegen-tools.bundle.js');
   process.exit(1);
 }
 

@@ -14,7 +14,7 @@ const sources = [
 concatMinifyBundle({
   root,
   sources,
-  outFile: join(root, 'dist', 'feed-modules.bundle.js'),
+  outFile: join(root, 'feed-modules.bundle.js'),
   metaFile: join(root, 'dist', 'feed-modules.bundle.meta.json'),
   label: 'build-feed-bundle'
 });

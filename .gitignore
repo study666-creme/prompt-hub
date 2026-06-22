@@ -21,5 +21,6 @@ prompt-hub-deploy.zip
 server/.wrangler/
 backups/
 dist/
+*.bundle.js
 downloads/
 server/tmp-mooko-*

@@ -20,6 +20,10 @@ Write-Host "build-all-bundles ..."
 & node (Join-Path $root "scripts\build-all-bundles.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+Write-Host "verify-bundle-bytes ..."
+& node (Join-Path $root "scripts\verify-bundle-bytes.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 Write-Host "verify-core-bundle ..."
 & node (Join-Path $root "scripts\verify-core-bundle.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }

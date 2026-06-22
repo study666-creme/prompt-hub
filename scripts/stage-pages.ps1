@@ -20,7 +20,7 @@ Get-ChildItem $root -File | Where-Object {
   Copy-Item $_.FullName (Join-Path $staging $_.Name)
 }
 
-foreach ($dir in @('assets', 'vendor', 'functions', 'downloads', 'extension', 'dist')) {
+foreach ($dir in @('assets', 'vendor', 'functions', 'downloads', 'extension')) {
   $src = Join-Path $root $dir
   if (Test-Path $src) {
     Copy-Item $src (Join-Path $staging $dir) -Recurse
