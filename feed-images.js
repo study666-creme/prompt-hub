@@ -516,8 +516,12 @@
         if (d().isMobileFeedViewport?.()) d().resetMobileFeedGridStyles?.();
         return;
       }
+      if (window.MediaPipeline?.patchContainerFromCache) {
+        window.MediaPipeline.patchContainerFromCache(scope, { visibleFirst: true, max: 20 });
+      } else {
+        window.SupabaseSync?.patchImageSrcFromCache?.(scope);
+      }
       if (window.SupabaseSync?.hydrateImageElements) {
-        window.SupabaseSync.patchImageSrcFromCache?.(scope);
         await window.SupabaseSync.hydrateImageElements(scope, {
           onlyMissing: true,
           communityBoost: inCommunity,

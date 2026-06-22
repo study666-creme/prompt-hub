@@ -24,26 +24,26 @@
 
 ---
 
-## 当前部署阶段（2026-06-22 · 管线收尾 + 部署前语法检查）
+## 当前部署阶段（2026-06-07 · 管线收尾 + 云同步编排接入）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260622i` · https://prompt-hubs.com |
+| **Pages** | build `20260622j` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
 
 - ✅ 参考图 `storage://` 可提交；生图 Feed 滚动保持
-- ✅ MediaPipeline：卡片库/生图/资产包/社区抽卡
-- ✅ SyncOrchestrator + 部署前 `scripts/check-js-syntax.ps1`（防语法炸站）
-- ✅ 本地 http://127.0.0.1:5500 冒烟：页面可开、生图 Tab 可进、滚动保持测试通过
+- ✅ MediaPipeline：卡片库灯箱/社区欣赏/侧栏升级、feed hydrate 缓存补丁
+- ✅ SyncOrchestrator：`saveAllData` 改走 `notifyCardsChanged`
+- ✅ 部署前 `scripts/check-js-syntax.ps1`（防语法炸站）
 
 ### 架构优化进度
 
 | 阶段 | 内容 | 进度 |
 |------|------|------|
-| 1 图片管线 | MediaPipeline 全站主要 Feed | ~92% |
-| 2 云同步解耦 | SyncOrchestrator | ~75% |
+| 1 图片管线 | MediaPipeline 全站主要 Feed | ~96% |
+| 2 云同步解耦 | SyncOrchestrator | ~82% |
 | 3 模块化 esbuild | 未开始 | 0% |
 
 ### 下一步

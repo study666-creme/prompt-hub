@@ -3452,18 +3452,26 @@
         const cardModel = cardId ? cards.find((c) => c.id === cardId) : null;
         const collectOpts = cardModel ? getCommunityCollectImageResolveOpts(cardModel) : null;
         void (async () => {
-          if (!ref || !window.SupabaseSync?.resolveDisplayUrl) return;
+          if (!ref || (!window.MediaPipeline?.resolveListUrl && !window.SupabaseSync?.resolveDisplayUrl)) return;
           try {
             window.SupabaseSync.invalidateSignedCacheForRef?.(ref, cardId);
             if (collectOpts) {
-              const url = await window.SupabaseSync.resolveDisplayUrl(ref, {
-                ...collectOpts,
-                variant: window.SupabaseSync.VARIANT_GRID || 'grid',
-                tryAllPaths: true,
-                listOnly: true,
-                allowFullFallback: false,
-                degradedListFull: false
-              });
+              const url = window.MediaPipeline?.resolveListUrl
+                ? await window.MediaPipeline.resolveListUrl(ref, {
+                  assetId: cardId,
+                  cardId,
+                  authorId: collectOpts.authorId,
+                  communityFeed: collectOpts.communityFeed === true,
+                  tryAllPaths: true
+                })
+                : await window.SupabaseSync.resolveDisplayUrl(ref, {
+                  ...collectOpts,
+                  variant: window.SupabaseSync.VARIANT_GRID || 'grid',
+                  tryAllPaths: true,
+                  listOnly: true,
+                  allowFullFallback: false,
+                  degradedListFull: false
+                });
               if (url && window.CardImageLoader?.applyUrlToImg?.(img, url)) {
                 delete img.dataset.warehouseFinalFail;
                 media.classList.remove('card-media--load-failed', 'card-media--await');
@@ -3789,7 +3797,16 @@
       let url = '';
       let usedGridFallback = false;
       try {
-        if (window.SupabaseSync?.resolvePreviewFullUrl) {
+        if (window.MediaPipeline?.resolvePreviewUrl) {
+          url = await window.MediaPipeline.resolvePreviewUrl(card.image, {
+            assetId: card.id,
+            cardId: card.id,
+            jobId: card.genJobId || null,
+            gridFallbackUrl: gridOk ? gridFallback : '',
+            allowGridFallback: true
+          });
+          usedGridFallback = !!(gridOk && url && url === gridFallback);
+        } else if (window.SupabaseSync?.resolvePreviewFullUrl) {
           url = await window.SupabaseSync.resolvePreviewFullUrl(card.image, {
             assetId: card.id,
             jobId: card.genJobId || null,
@@ -6758,7 +6775,13 @@
         scheduleLocalSnapshot(uid);
       }
       if (fileHandle) { try { const w = await fileHandle.createWritable(); await w.write(JSON.stringify({cards,customGroups,globalFields,settings})); await w.close(); } catch(e) {} }
-      if (!opts.skipCloud) scheduleCloudPush();
+      if (!opts.skipCloud) {
+        if (window.SyncOrchestrator?.notifyCardsChanged) {
+          window.SyncOrchestrator.notifyCardsChanged(opts.urgent ? { urgent: true } : {});
+        } else {
+          scheduleCloudPush();
+        }
+      }
       window.FeatureDraft?.invalidateCommunityReconcileCache?.();
     }
 

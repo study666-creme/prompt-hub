@@ -4771,15 +4771,25 @@
   }
 
   function upgradeCommunityZoomToFull(post, sideRef, postId, currentUrl) {
-    if (!window.SupabaseSync?.resolvePreviewFullUrl || !sideRef) return;
+    if (!sideRef) return;
     const signOpts = communitySideZoomSignOpts(post, sideRef, postId);
     const assetId = post?.sourceCardId || postId;
-    void window.SupabaseSync.resolvePreviewFullUrl(sideRef, {
+    const previewOpts = {
       assetId,
       authorId: signOpts.authorId || undefined,
       cardId: signOpts.cardId || undefined,
       communityFeed: signOpts.fromPublicFeed === true
-    }).then((full) => {
+    };
+    const resolveFull = async () => {
+      if (window.MediaPipeline?.resolvePreviewUrl) {
+        return window.MediaPipeline.resolvePreviewUrl(sideRef, previewOpts);
+      }
+      if (window.SupabaseSync?.resolvePreviewFullUrl) {
+        return window.SupabaseSync.resolvePreviewFullUrl(sideRef, previewOpts);
+      }
+      return '';
+    };
+    void resolveFull().then((full) => {
       if (!full || full === currentUrl) return;
       const lbImg = document.getElementById('lightboxImage');
       const lb = document.getElementById('imageLightbox');
@@ -5279,7 +5289,15 @@
       void (async () => {
         let displaySrc = imageRef;
         try {
-          if (window.SupabaseSync?.resolveDisplayUrl) {
+          if (window.MediaPipeline?.resolvePreviewUrl) {
+            displaySrc = await window.MediaPipeline.resolvePreviewUrl(imageRef, {
+              assetId: signOpts.assetId,
+              cardId: signOpts.cardId,
+              authorId: signOpts.authorId,
+              communityFeed: true,
+              gridFallbackUrl: instantSrc || ''
+            });
+          } else if (window.SupabaseSync?.resolveDisplayUrl) {
             displaySrc = await window.SupabaseSync.resolveDisplayUrl(imageRef, signOpts);
           }
         } catch (e) { /* ignore */ }
