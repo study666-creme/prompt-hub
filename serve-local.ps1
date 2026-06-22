@@ -78,6 +78,20 @@ function Start-PowerShellServer([int]$p) {
 
 Write-Host ''
 Write-Host '=== Prompt Hub local server ===' -ForegroundColor Cyan
+if (Test-Path (Join-Path $Root "scripts\build-core-bundle.mjs")) {
+  if (-not (Test-Path (Join-Path $Root "node_modules\esbuild"))) {
+    Write-Host 'Installing esbuild for core bundle ...' -ForegroundColor DarkGray
+    Push-Location $Root
+    npm install --no-audit --no-fund 2>$null
+    Pop-Location
+  }
+  Write-Host 'Building dist/core-pipeline.bundle.js ...' -ForegroundColor DarkGray
+  & node (Join-Path $Root "scripts\build-core-bundle.mjs")
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host 'core bundle build failed — fix before local preview' -ForegroundColor Red
+    exit 1
+  }
+}
 Write-Host "Open in browser: http://127.0.0.1:$Port" -ForegroundColor Green
 Write-Host 'Do NOT open index.html via file:// (API will be blocked).' -ForegroundColor Yellow
 Write-Host 'Keep this window open. Press Ctrl+C to stop.' -ForegroundColor DarkGray

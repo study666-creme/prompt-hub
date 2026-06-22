@@ -9738,6 +9738,7 @@
   }
 
   function isUsableGenRefUrl(url) {
+    if (window.MediaPipeline?.isUsableGenRefUrl) return window.MediaPipeline.isUsableGenRefUrl(url);
     if (!url || typeof url !== 'string') return false;
     if (/^https?:\/\//i.test(url)) return true;
     if (window.SupabaseSync?.isDataUrl?.(url)) return true;

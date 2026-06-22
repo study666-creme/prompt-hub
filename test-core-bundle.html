@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Core Pipeline Bundle Smoke</title>
+</head>
+<body>
+  <h1>Core Pipeline Bundle Smoke</h1>
+  <pre id="log">running…</pre>
+  <script>
+    window.SupabaseSync = {
+      isLoggedIn: function () { return false; },
+      getCachedDisplayUrl: function () { return ''; },
+      getListDisplayImageSrc: function () { return ''; },
+      resolveDisplayUrl: async function () { return ''; },
+      resolvePreviewFullUrl: async function () { return ''; },
+      patchImageSrcFromCache: function () {},
+      isStorageRef: function (v) { return String(v || '').startsWith('storage://'); },
+      safeImgSrc: function (v) { return v || ''; },
+      VARIANT_GRID: 'grid',
+      VARIANT_FULL: 'full'
+    };
+  </script>
+  <script src="dist/core-pipeline.bundle.js"></script>
+  <script>
+    (function () {
+      var log = document.getElementById('log');
+      var lines = [];
+      function ok(name, cond) {
+        lines.push((cond ? 'OK  ' : 'FAIL') + ' ' + name);
+        if (!cond) throw new Error(name);
+      }
+      try {
+        ok('MediaPipeline', !!window.MediaPipeline);
+        ok('resolveFeedUrl', typeof window.MediaPipeline.resolveFeedUrl === 'function');
+        ok('SyncOrchestrator', !!window.SyncOrchestrator);
+        ok('schedulePush', typeof window.SyncOrchestrator.schedulePush === 'function');
+        ok('CardImageLoader', !!window.CardImageLoader);
+        ok('observeContainer', typeof window.CardImageLoader.observeContainer === 'function');
+        lines.push('ALL PASSED');
+        log.textContent = lines.join('\n');
+        log.style.color = 'green';
+      } catch (e) {
+        lines.push('ERROR: ' + (e && e.message ? e.message : e));
+        log.textContent = lines.join('\n');
+        log.style.color = 'red';
+      }
+    })();
+  </script>
+</body>
+</html>

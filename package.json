@@ -4,7 +4,9 @@
   "version": "1.0.0",
   "description": "提示词仓库",
   "scripts": {
-    "check:esbuild": "node scripts/esbuild-bundle-smoke.mjs"
+    "build:core": "node scripts/build-core-bundle.mjs",
+    "check:esbuild": "node scripts/esbuild-bundle-smoke.mjs",
+    "check:predeploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-predeploy-smoke.ps1"
   },
   "devDependencies": {
     "esbuild": "^0.25.5"

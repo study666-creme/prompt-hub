@@ -131,6 +131,14 @@
     return image;
   }
 
+  function isUsableGenRefUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    if (/^https?:\/\//i.test(url)) return true;
+    if (window.SupabaseSync?.isDataUrl?.(url)) return true;
+    if (window.SupabaseSync?.isStorageRef?.(url) || url.startsWith('storage://')) return true;
+    return false;
+  }
+
   window.MediaPipeline = {
     VARIANT_LIST,
     VARIANT_PREVIEW,
@@ -143,6 +151,7 @@
     resolvePreviewUrl,
     resolveFeedUrl,
     prefetchList,
-    patchContainerFromCache
+    patchContainerFromCache,
+    isUsableGenRefUrl
   };
 })();

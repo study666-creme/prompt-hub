@@ -32,15 +32,8 @@ foreach ($item in $localDeployExclude) {
 }
 
 Write-Host "Pages project: $project"
-& (Join-Path $root "scripts\check-js-syntax.ps1")
-$esbuildSmoke = Join-Path $root "scripts\esbuild-bundle-smoke.mjs"
-if ((Test-Path $esbuildSmoke) -and (Test-Path (Join-Path $root "node_modules\esbuild"))) {
-  Write-Host "esbuild-bundle-smoke ..."
-  & node $esbuildSmoke
-  if ($LASTEXITCODE -ne 0) { exit 1 }
-} elseif (Test-Path $esbuildSmoke) {
-  Write-Host "Skip esbuild-smoke (run: npm install in repo root)" -ForegroundColor Yellow
-}
+& (Join-Path $root "scripts\run-predeploy-smoke.ps1")
+if ($LASTEXITCODE -ne 0) { exit 1 }
 & (Join-Path $root "scripts\bump-build.ps1")
 
 $staging = & (Join-Path $root "scripts\stage-pages.ps1")
