@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 
 for (const name of [
+  'build-prelude-pack.mjs',
   'build-core-bundle.mjs',
   'build-feed-bundle.mjs',
   'build-imagegen-bundle.mjs',

@@ -1,7 +1,7 @@
 # AI 踩坑清单（必读，避免重复炸站）
 
 > **用途**：记录已踩过的致命/难查问题。改 `features-draft.js` / 社区 Feed / 媒体签名前**先扫本页**。  
-> 最后更新：**2026-06-07** · Pages 构建号 **`20260623f`**
+> 最后更新：**2026-06-07** · Pages 构建号 **`20260623g`**
 
 ---
 
@@ -71,7 +71,8 @@
 
 1. 保存后本地搜：`const colsChanged` 是否在同一函数出现两次。  
 2. 社区改动：搜 `flattenCommunityFeedColumns`、`finishCommunityFeedLayoutAfterBatch`、`fromImage`。  
-3. 部署后：`window.__APP_BUILD__` 与 `index.html` 一致；`run-index-http-smoke.mjs` 三个 bundle 须为 JS。  
+3. 部署前：`node scripts/verify-pack-contract.mjs`（禁止 `.bundle.js` / `pack-*.js?v=`）  
+4. 部署后：`window.__APP_BUILD__` 与 `index.html` 一致；`run-index-http-smoke.mjs` 全部 pack 须为 JS（含 script 请求头）。  
 4. 生图改动：手机提交 → 切后台 → 回来占位应自动变图或标失败。  
 5. Console 无红色 SyntaxError 再让用户验收。
 

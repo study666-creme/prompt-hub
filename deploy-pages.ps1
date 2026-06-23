@@ -40,7 +40,7 @@ $staging = & (Join-Path $root "scripts\stage-pages.ps1")
 Write-Host "Deploying staged assets from: $staging"
 
 foreach ($bundle in @(
-  'pack-foundation.js', 'pack-core.js', 'pack-feed.js', 'pack-imagegen.js',
+  'pack-prelude.js', 'pack-foundation.js', 'pack-core.js', 'pack-feed.js', 'pack-imagegen.js',
   'pack-account.js', 'pack-extra.js'
 )) {
   $bp = Join-Path $staging $bundle

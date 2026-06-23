@@ -24,29 +24,28 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · esbuild 六 bundle）
+## 当前部署阶段（2026-06-07 · esbuild 七 pack）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260623f` · https://prompt-hubs.com |
+| **Pages** | build `20260623g` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
 
-- ✅ **六 pack**（`pack-foundation` … `pack-extra`）+ 部署后 HTTP 冒烟（含浏览器 script 请求头）
-- ✅ 手机切后台：`localStorage` 备份生图任务，回前台任意页强制恢复
-- ✅ 失败任务 12 分钟内标红；成功/失败自动刷新占位；生图 Feed 首开 hydrate
+- ✅ **七 pack**（`pack-prelude` … `pack-extra`）+ 部署前 `verify-pack-contract` + HTTP 冒烟（含 `Sec-Fetch-Dest: script`）
+- ✅ **禁止** `*.bundle.js` / `pack-*.js?v=`（Cloudflare Pages script 请求会 SPA 回退 HTML）
+- ✅ 手机切后台生图恢复 · 失败标红 · Feed 首开 hydrate
 
 ### 已知问题（已修）
 
-- ~~esbuild `/dist/*.js` SPA 回退全站无图~~（`20260622p`）
-- ~~手机切后台丢图~~（`20260623a`）
-- ~~生图占位不刷新 / 首开黑卡慢~~（`20260623b`）
+- ~~`/dist/*.js` SPA 回退~~（`20260622p`）
+- ~~`*.bundle.js` 文件名 script 加载得 HTML~~（`20260623f` → 改名为 `pack-*.js`）
 
 ### 下一步
 
-1. 强刷确认 `window.__APP_BUILD__ === '20260623f'`
-2. 继续 `script.js` / `features-draft.js` 首段拆包（小步、每步 HTTP 冒烟）
+1. 强刷确认 `window.__APP_BUILD__` 与 pack 脚本无 Console MIME 报错
+2. 继续 `script.js` / `features-draft.js` 首段拆包（小步、每步跑 `verify-pack-contract` + HTTP 冒烟）
 
 ### 部署
 

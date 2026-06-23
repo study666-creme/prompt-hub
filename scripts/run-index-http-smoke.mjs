@@ -25,6 +25,7 @@ if (!index.ok) {
 }
 
 const mustHave = [
+  'pack-prelude.js',
   'pack-foundation.js',
   'pack-core.js',
   'pack-feed.js',
@@ -44,7 +45,9 @@ const mustNot = [
   'pwa-install.js?v=',
   'cloud-sync-safety.js?v=',
   'modal-hub.js?v=',
-  'mobile.js?v='
+  'mobile.js?v=',
+  'image-trim.js?v=',
+  'file-origin-guard.js?v='
 ];
 
 for (const token of mustHave) {
@@ -61,6 +64,7 @@ for (const token of mustNot) {
 }
 
 const packs = [
+  ['/pack-prelude.js', 'file-origin', '__PH_FILE_ORIGIN__'],
   ['/pack-foundation.js', 'CloudSyncSafety', 'window.CloudSyncSafety'],
   ['/pack-core.js', 'MediaPipeline', 'window.MediaPipeline'],
   ['/pack-feed.js', 'FeedLayout', 'FeedLayout'],

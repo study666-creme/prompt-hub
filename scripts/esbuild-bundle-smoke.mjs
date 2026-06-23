@@ -24,7 +24,9 @@ const targets = [
   'pwa-install.js',
   'cloud-sync-safety.js',
   'modal-hub.js',
-  'mobile.js'
+  'mobile.js',
+  'file-origin-guard.js',
+  'image-trim.js'
 ];
 
 let failed = 0;

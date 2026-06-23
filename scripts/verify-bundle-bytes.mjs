@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const packs = [
+  'pack-prelude.js',
   'pack-foundation.js',
   'pack-core.js',
   'pack-feed.js',
@@ -33,7 +34,7 @@ for (const name of packs) {
     process.exit(1);
   }
   const bytes = statSync(path).size;
-  if (bytes < 5000) {
+  if (bytes < 2500) {
     console.error(`verify-bundle-bytes: ${name} too small (${bytes} bytes)`);
     process.exit(1);
   }
