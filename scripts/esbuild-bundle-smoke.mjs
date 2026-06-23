@@ -30,6 +30,7 @@ const targets = [
   'theme.js',
   'app-toast.js',
   'app-viewer-core.js',
+  'app-appreciate.js',
   'app-lightbox.js'
 ];
 

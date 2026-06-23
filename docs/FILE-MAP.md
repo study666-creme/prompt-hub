@@ -148,6 +148,17 @@
 
 ---
 
+## `app-appreciate.js`（欣赏器 + 全局欣赏，约 260 行）
+
+| 区域 | 函数 | 作用 |
+|------|------|------|
+| 入口 | `AppAppreciate.init(deps)` | 注入 `cards`、Masonry、批量模式等 |
+| 欣赏器 | `openAppreciateViewer`, `closeAppreciateViewer`, `syncAppreciateViewerActions` | 卡片库快速预览 |
+| 全局欣赏 | `toggleGlobalView`, `exitGlobalView`, `forceExitGlobalView` | 全屏浏览 + `__viewerGlobalViewActive` |
+| 打包 | `scripts/build-appreciate-pack.mjs` → **`pack-appreciate.js`** | 在 `pack-viewer` 与 `pack-lightbox` 之间 |
+
+---
+
 ## `app-lightbox.js`（灯箱业务，约 400 行）
 
 | 区域 | 函数 | 作用 |
@@ -176,8 +187,8 @@
 
 1. `pack-prelude.js` · `pack-foundation.js` · `supabase-sync.js` · `api-client.js`
 2. `pack-core.js` · `pack-account.js`
-3. `masonry.pkgd.min.js` · **`pack-viewer.js`** · **`pack-lightbox.js`**
-4. **`script.js`**（末尾 `AppLightbox.init(deps)`）
+3. `masonry.pkgd.min.js` · **`pack-viewer.js`** · **`pack-appreciate.js`** · **`pack-lightbox.js`**
+4. **`script.js`**（末尾 `AppAppreciate.init` + `AppLightbox.init`）
 5. `pack-imagegen.js` · `pack-feed.js` · `features-draft.js` · `pack-extra.js` · `features-assets.js`
 
 > 手机断点 **900px** 仅定义在 `pack-foundation.js` 内的 `MobileUI`（原 `mobile.js`）。

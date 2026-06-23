@@ -16,6 +16,7 @@ for (const name of [
   'build-app-extra-bundle.mjs',
   'build-foundation-bundle.mjs',
   'build-viewer-pack.mjs',
+  'build-appreciate-pack.mjs',
   'build-lightbox-pack.mjs'
 ]) {
   const path = join(scriptsDir, name);

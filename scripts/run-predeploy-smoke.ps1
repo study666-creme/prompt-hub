@@ -76,6 +76,10 @@ Write-Host "verify-viewer-pack ..."
 & node (Join-Path $root "scripts\verify-viewer-pack.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+Write-Host "verify-appreciate-pack ..."
+& node (Join-Path $root "scripts\verify-appreciate-pack.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 Write-Host "verify-lightbox-pack ..."
 & node (Join-Path $root "scripts\verify-lightbox-pack.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }

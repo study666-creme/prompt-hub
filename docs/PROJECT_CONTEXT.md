@@ -24,20 +24,20 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · esbuild 九 pack）
+## 当前部署阶段（2026-06-07 · esbuild 十 pack）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260623k` · https://prompt-hubs.com |
+| **Pages** | build `20260623l` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
 
-- ✅ **九 pack**（… `pack-viewer` · **`pack-lightbox`** … `pack-extra`）+ 部署前 `verify-pack-contract` + HTTP 冒烟（含 `Sec-Fetch-Dest: script`）
-- ✅ **灯箱业务** 已拆至 `app-lightbox.js` → `pack-lightbox.js`（`AppLightbox.init(deps)` 由 `script.js` 注入卡片/下载依赖）
-- ✅ **灯箱/欣赏器 DOM** 在 `app-viewer-core.js` → `pack-viewer.js`
-- ✅ **禁止** `*.bundle.js` / `pack-*.js?v=`（Cloudflare Pages script 请求会 SPA 回退 HTML）
-- ✅ 手机切后台生图恢复 · 失败标红 · Feed 首开 hydrate
+- ✅ **十 pack**（… `pack-viewer` · **`pack-appreciate`** · `pack-lightbox` … `pack-extra`）+ HTTP 冒烟（含 `Sec-Fetch-Dest: script`）
+- ✅ **欣赏器/全局欣赏** → `app-appreciate.js` · `pack-appreciate.js`（`AppAppreciate.init`）
+- ✅ **灯箱业务** → `app-lightbox.js` · `pack-lightbox.js`（`AppLightbox.init`）
+- ✅ **viewer DOM/缩放** → `pack-viewer.js`
+- ✅ **禁止** `*.bundle.js` / `pack-*.js?v=`
 
 ### 已知问题（已修）
 
@@ -46,8 +46,8 @@
 
 ### 下一步
 
-1. 强刷确认 `window.__APP_BUILD__` 与 **9 个 pack** 无 Console MIME 报错
-2. 阶段 4：欣赏器 + 全局欣赏 → `app-appreciate.js` / `pack-appreciate`
+1. 强刷确认 `window.__APP_BUILD__ === '20260623l'` 与 **10 个 pack** 无 MIME 报错
+2. 阶段 5：媒体下载 `promptHubSaveImage` / `downloadCardImageFile` 抽包
 
 ### 部署
 

@@ -14,6 +14,7 @@ const requiredPacks = [
   'pack-foundation.js',
   'pack-core.js',
   'pack-viewer.js',
+  'pack-appreciate.js',
   'pack-lightbox.js',
   'pack-feed.js',
   'pack-imagegen.js',
