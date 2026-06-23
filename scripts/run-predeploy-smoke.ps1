@@ -48,4 +48,20 @@ Write-Host "imagegen-bundle-vm-smoke ..."
 & node (Join-Path $root "scripts\run-imagegen-bundle-vm-smoke.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+Write-Host "verify-app-extra-bundle ..."
+& node (Join-Path $root "scripts\verify-app-extra-bundle.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+Write-Host "app-extra-bundle-vm-smoke ..."
+& node (Join-Path $root "scripts\run-app-extra-bundle-vm-smoke.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+Write-Host "verify-account-bundle ..."
+& node (Join-Path $root "scripts\verify-account-bundle.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+Write-Host "account-bundle-vm-smoke ..."
+& node (Join-Path $root "scripts\run-account-bundle-vm-smoke.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 Write-Host "predeploy-smoke: all checks passed" -ForegroundColor Green

@@ -24,30 +24,30 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · 生图恢复 + Feed 体验）
+## 当前部署阶段（2026-06-07 · esbuild 五 bundle）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260623b` · https://prompt-hubs.com |
+| **Pages** | build `20260623c` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
 
-- ✅ 三包 bundle 在站点根目录 + 部署后 HTTP 冒烟（bundle 须为 JS 非 HTML）
+- ✅ **五 bundle** 在站点根目录 + 部署后 HTTP 冒烟（须为 JS 非 HTML）
+  - `core-pipeline` · `feed-modules` · `imagegen-tools`（含 PointsSystem）· `account-modules` · `app-extra`
 - ✅ 手机切后台：`localStorage` 备份生图任务，回前台任意页强制恢复
-- ✅ 失败任务 12 分钟内标红（不再无限「恢复中」）；成功/失败自动刷新占位
-- ✅ 生图 Feed 首开立即 hydrate（减少全黑卡等待）
+- ✅ 失败任务 12 分钟内标红；成功/失败自动刷新占位；生图 Feed 首开 hydrate
 
 ### 已知问题（已修）
 
 - ~~esbuild `/dist/*.js` SPA 回退全站无图~~（`20260622p`）
-- ~~手机切后台丢图~~（`20260623a` localStorage + 强制 resume）
+- ~~手机切后台丢图~~（`20260623a`）
 - ~~生图占位不刷新 / 首开黑卡慢~~（`20260623b`）
 
 ### 下一步
 
-1. 强刷确认 `window.__APP_BUILD__ === '20260623b'`
-2. 规划 script.js / features-draft.js 首段拆包（小步、含 HTTP 冒烟）
+1. 强刷确认 `window.__APP_BUILD__ === '20260623c'`
+2. 继续 script.js / features-draft.js 首段拆包（小步、每步 HTTP 冒烟）
 
 ### 部署
 

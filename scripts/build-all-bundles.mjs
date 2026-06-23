@@ -7,7 +7,13 @@ import { fileURLToPath } from 'node:url';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 
-for (const name of ['build-core-bundle.mjs', 'build-feed-bundle.mjs', 'build-imagegen-bundle.mjs']) {
+for (const name of [
+  'build-core-bundle.mjs',
+  'build-feed-bundle.mjs',
+  'build-imagegen-bundle.mjs',
+  'build-account-bundle.mjs',
+  'build-app-extra-bundle.mjs'
+]) {
   const path = join(scriptsDir, name);
   const r = spawnSync(process.execPath, [path], { stdio: 'inherit' });
   if (r.status !== 0) process.exit(r.status || 1);

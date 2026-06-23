@@ -16,8 +16,24 @@ if (!index.ok) {
   process.exit(1);
 }
 
-const mustHave = ['core-pipeline.bundle.js', 'feed-modules.bundle.js', 'imagegen-tools.bundle.js'];
-const mustNot = ['dist/core-pipeline.bundle.js', 'dist/feed-modules.bundle.js', 'media-pipeline.js?v='];
+const mustHave = [
+  'core-pipeline.bundle.js',
+  'feed-modules.bundle.js',
+  'imagegen-tools.bundle.js',
+  'account-modules.bundle.js',
+  'app-extra.bundle.js'
+];
+const mustNot = [
+  'dist/core-pipeline.bundle.js',
+  'dist/feed-modules.bundle.js',
+  'media-pipeline.js?v=',
+  'membership.js?v=',
+  'subscription.js?v=',
+  'trial-tasks.js?v=',
+  'points-system.js?v=',
+  'community-gacha.js?v=',
+  'pwa-install.js?v='
+];
 
 for (const token of mustHave) {
   if (!index.text.includes(token)) {
@@ -35,7 +51,9 @@ for (const token of mustNot) {
 const bundles = [
   ['/core-pipeline.bundle.js', 'MediaPipeline', 'window.MediaPipeline'],
   ['/feed-modules.bundle.js', 'FeedLayout', 'FeedLayout'],
-  ['/imagegen-tools.bundle.js', 'ImageGenPromptKit', 'ImageGenPromptKit']
+  ['/imagegen-tools.bundle.js', 'PointsSystem', 'PointsSystem'],
+  ['/account-modules.bundle.js', 'Membership', 'window.Membership'],
+  ['/app-extra.bundle.js', 'CommunityGacha', 'CommunityGacha']
 ];
 
 for (const [path, label, token] of bundles) {

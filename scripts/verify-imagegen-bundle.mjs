@@ -20,6 +20,7 @@ try {
 execSync(`node --check "${bundlePath}"`, { stdio: 'inherit' });
 
 const required = [
+  'PointsSystem',
   'ImageGenPromptKit',
   'ImageGenPromptTools',
   'generateInspirationPrompts',
@@ -35,7 +36,7 @@ if (missing.length) {
 }
 
 const bytes = statSync(bundlePath).size;
-if (bytes < 10000 || bytes > 1200000) {
+if (bytes < 15000 || bytes > 1500000) {
   console.error(`verify-imagegen-bundle: suspicious size ${bytes} bytes`);
   process.exit(1);
 }

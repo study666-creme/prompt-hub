@@ -39,7 +39,10 @@ if ($LASTEXITCODE -ne 0) { exit 1 }
 $staging = & (Join-Path $root "scripts\stage-pages.ps1")
 Write-Host "Deploying staged assets from: $staging"
 
-foreach ($bundle in @('core-pipeline.bundle.js', 'feed-modules.bundle.js', 'imagegen-tools.bundle.js')) {
+foreach ($bundle in @(
+  'core-pipeline.bundle.js', 'feed-modules.bundle.js', 'imagegen-tools.bundle.js',
+  'account-modules.bundle.js', 'app-extra.bundle.js'
+)) {
   $bp = Join-Path $staging $bundle
   if (-not (Test-Path $bp)) {
     Write-Host "Deploy blocked: staged bundle missing $bundle" -ForegroundColor Red

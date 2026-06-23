@@ -16,7 +16,12 @@ const targets = [
   'card-image-loader.js',
   'imagegen-prompt-kit.js',
   'imagegen-prompt-tools.js',
-  'points-system.js'
+  'points-system.js',
+  'membership.js',
+  'subscription.js',
+  'trial-tasks.js',
+  'community-gacha.js',
+  'pwa-install.js'
 ];
 
 let failed = 0;

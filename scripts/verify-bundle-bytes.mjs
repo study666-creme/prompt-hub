@@ -9,7 +9,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const bundles = [
   'core-pipeline.bundle.js',
   'feed-modules.bundle.js',
-  'imagegen-tools.bundle.js'
+  'imagegen-tools.bundle.js',
+  'account-modules.bundle.js',
+  'app-extra.bundle.js'
 ];
 
 for (const name of bundles) {

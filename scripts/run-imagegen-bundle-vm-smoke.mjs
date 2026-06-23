@@ -54,6 +54,7 @@ window.window = window;
 vm.runInContext(code, vm.createContext(window), { filename: 'imagegen-tools.bundle.js' });
 
 const checks = [
+  ['PointsSystem', !!window.PointsSystem],
   ['ImageGenPromptKit', !!window.ImageGenPromptKit],
   ['ImageGenPromptTools', !!window.ImageGenPromptTools]
 ];

@@ -1,11 +1,12 @@
 /**
- * imagegen-prompt-kit + imagegen-prompt-tools 合并（加载顺序不变）。
+ * points-system + imagegen-prompt-kit + imagegen-prompt-tools 合并（加载顺序不变）。
  */
 import { join } from 'node:path';
 import { concatMinifyBundle, bundleRootFromMeta } from './lib/concat-minify-bundle.mjs';
 
 const root = bundleRootFromMeta(import.meta.url);
 const sources = [
+  'points-system.js',
   'imagegen-prompt-kit.js',
   'imagegen-prompt-tools.js'
 ];
