@@ -360,6 +360,16 @@
       } else runLayout();
     }
 
+    function primeImageGenFeedImages(wrap, feedItems) {
+      if (!wrap) return;
+      window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 28 });
+      window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 32);
+      window.CardImageLoader?.observeContainer?.(wrap);
+      if (feedItems?.length && window.CardImageLoader?.bindFeed) {
+        void window.CardImageLoader.bindFeed(wrap, feedItems.slice(0, Math.min(feedItems.length, 16)));
+      }
+    }
+
     function buildFeedPendingCardHtml(job) {
       const badges = [job.modelLabel || '生图中', (job.resolution || '1k').toUpperCase()];
       const batchTag = d().batchIndexLabel?.(job.batchIndex, job.batchTotal);
@@ -729,6 +739,8 @@
           bindImageGenFeedImageRelayout();
           if (d().isMobileFeedViewport?.()) enforceMobileImageGenFeed();
           else scheduleImageGenFeedLayout();
+          const pageItems = store.whCards.slice(0, IMAGEGEN_FEED_PER_PAGE);
+          primeImageGenFeedImages(wrap, pageItems);
           if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
           else if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);
           else if (scrollEl && preserveScroll) scrollEl.scrollTop = scrollTop;
@@ -861,10 +873,7 @@
         }
         d().renderImageGenMobileResult?.();
       }
-  
-      syncImageGenFeedLoadMoreBtn();
-      bindImageGenFeedPagedScroll();
-  
+
       const pageStart = feedAppend ? (store.page - 1) * IMAGEGEN_FEED_PER_PAGE : 0;
       const pageEnd = feedAppend ? store.page * IMAGEGEN_FEED_PER_PAGE : IMAGEGEN_FEED_PER_PAGE;
       const feedItems = d().getImageGenFeedTab?.() === 'warehouse'
@@ -874,21 +883,26 @@
           image: p.image,
           authorId: p.authorId
         }));
-      const feedPrefetchItems = feedItems.slice(0, Math.min(feedItems.length, 12));
+      const feedPrefetchItems = feedItems.slice(0, Math.min(feedItems.length, 16));
       const feedImageBindKey = feedItems.map((x) => `${x.id}:${x.image || ''}`).join('|');
-  
+
+      if (!feedAppend && d().getImageGenFeedTab?.() === 'warehouse' && feedPrefetchItems.length) {
+        primeImageGenFeedImages(wrap, feedPrefetchItems);
+      }
+
+      syncImageGenFeedLoadMoreBtn();
+      bindImageGenFeedPagedScroll();
+
       void (async () => {
         const skipImageBind = !feedAppend && wrap.dataset.feedImageBindKey === feedImageBindKey;
         if (!skipImageBind) {
           wrap.dataset.feedImageBindKey = feedImageBindKey;
-          if (d().getImageGenFeedTab?.() === 'warehouse' && feedPrefetchItems.length && window.MediaPipeline?.prefetchList) {
-            await window.MediaPipeline.prefetchList(feedPrefetchItems, 2200);
-          }
-          window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 8 });
+          const prefetchP = d().getImageGenFeedTab?.() === 'warehouse' && feedPrefetchItems.length && window.MediaPipeline?.prefetchList
+            ? window.MediaPipeline.prefetchList(feedPrefetchItems, 1800)
+            : Promise.resolve();
+          void prefetchP.catch(() => {});
           if (window.CardImageLoader?.bindFeed) {
-            await window.CardImageLoader.bindFeed(wrap, feedPrefetchItems);
-          } else {
-            window.CardImageLoader?.observeContainer?.(wrap);
+            void window.CardImageLoader.bindFeed(wrap, feedPrefetchItems);
           }
         }
         bindImageGenFeedImageRelayout();
@@ -898,6 +912,8 @@
         } else {
           layoutImageGenFeedMasonry();
         }
+        window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 28 });
+        window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 32);
         if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
         else {
           const anchorAfter = scrollAnchor || { scrollTop, scrollEl };
@@ -921,8 +937,8 @@
               quiet: true,
               awaitDrain: false
             }).then(() => {
-              window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 12 });
-              window.CardImageLoader?.observeContainer?.(wrap);
+              window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 28 });
+              window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 32);
               d().updateImageGenFeedHint?.();
             });
           }

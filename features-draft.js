@@ -11,6 +11,8 @@
   const LS_SESSION_GEN_JOBS = 'promptrepo_session_gen_jobs';
   const LS_PENDING_GEN_JOBS = 'promptrepo_pending_gen_jobs';
   const LS_FAILED_GEN_JOBS = 'promptrepo_failed_gen_jobs';
+  /** 手机切后台/重载后 sessionStorage 易丢，localStorage 备份 pending + session 任务 */
+  const LS_GEN_JOBS_STATE = 'promptrepo_gen_jobs_state_v1';
   const PREFILL_KEY = 'promptrepo_imagegen_prefill';
 
   const GEN_RETENTION_MIN_MS = 1 * 24 * 60 * 60 * 1000;
@@ -1597,6 +1599,7 @@
       sessionStorage.removeItem(LS_PENDING_GEN_JOBS);
       sessionStorage.removeItem(LS_FAILED_GEN_JOBS);
       sessionStorage.removeItem(LS_SESSION_GEN_JOBS);
+      localStorage.removeItem(LS_GEN_JOBS_STATE);
     } catch (e) { /* ignore */ }
     imageGenPendingJobs = [];
     imageGenFailedJobs = [];
@@ -5490,6 +5493,8 @@
   /** 已进入「恢复中」占位后再等多久强制结案（慢速线用 genRecoveringDeferGiveUpMs） */
   const RECOVERING_DEFER_GIVE_UP_MS = 22 * 60 * 1000;
   const SERVER_RECOVER_AFTER_MS = 8 * 60 * 1000;
+  /** API 已 failed 时，非明确可恢复错误最多再等 12 分钟 */
+  const FAILED_JOB_RECOVER_MAX_MS = 12 * 60 * 1000;
   const activePollJobIds = new Set();
   let resumeGenJobsInflight = null;
   let genJobsSyncTimer = null;
@@ -5513,30 +5518,125 @@
     }, delayMs == null ? 1800 : delayMs);
   }
 
+  function getGenJobStateUid() {
+    return window.SupabaseSync?.getUserId?.() || localStorage.getItem('promptrepo_last_uid') || 'guest';
+  }
+
+  function loadGenJobStateFromLocal() {
+    try {
+      const raw = localStorage.getItem(LS_GEN_JOBS_STATE);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      const uid = getGenJobStateUid();
+      if (data?.uid && data.uid !== uid && uid !== 'guest') return null;
+      return data;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function mergePendingGenJobLists(...lists) {
+    const byKey = new Map();
+    for (const list of lists) {
+      if (!Array.isArray(list)) continue;
+      for (const p of list) {
+        if (!p?.id) continue;
+        const key = p.jobId ? String(p.jobId) : String(p.id);
+        const prev = byKey.get(key);
+        if (!prev || (p.startedAt || 0) >= (prev.startedAt || 0)) byKey.set(key, p);
+      }
+    }
+    return [...byKey.values()].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+  }
+
+  function persistGenJobStateToLocal() {
+    try {
+      localStorage.setItem(LS_GEN_JOBS_STATE, JSON.stringify({
+        uid: getGenJobStateUid(),
+        updatedAt: Date.now(),
+        pending: imageGenPendingJobs.slice(0, 32),
+        session: getSessionGenJobIdsRaw()
+      }));
+    } catch (e) { /* ignore */ }
+  }
+
+  function filterPendingGenJobsByAge(list) {
+    const now = Date.now();
+    return (list || []).filter((p) => {
+      const age = now - (p.startedAt || 0);
+      if (p.recovering) {
+        return p.jobId ? age < RECENT_GEN_RECOVER_MS : age < 30 * 60 * 1000;
+      }
+      if (p.jobId) return age < RECENT_GEN_RECOVER_MS;
+      return age < 15 * 60 * 1000;
+    });
+  }
+
+  function getSessionGenJobIdsRaw() {
+    try {
+      const raw = sessionStorage.getItem(LS_SESSION_GEN_JOBS);
+      const list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list.map(String) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function writeSessionGenJobIds(list) {
+    const ids = [...new Set((list || []).map(String).filter(Boolean))];
+    while (ids.length > 40) ids.shift();
+    try {
+      sessionStorage.setItem(LS_SESSION_GEN_JOBS, JSON.stringify(ids));
+    } catch (e) { /* ignore */ }
+    persistGenJobStateToLocal();
+  }
+
+  function afterGenJobsResume(changed) {
+    if (!changed) return;
+    if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+      renderImageGenFeed({ preserveScroll: true, force: true });
+      renderImageGenMobileResult();
+    } else {
+      window.refreshWarehouseUI?.();
+    }
+  }
+
+  function scheduleImageGenPendingUiRefresh() {
+    if (!document.getElementById('pageImageGen')?.classList.contains('active')) return;
+    if (!imageGenPendingJobs.length && !imageGenFailedJobs.length) return;
+    clearTimeout(scheduleImageGenPendingUiRefresh._t);
+    scheduleImageGenPendingUiRefresh._t = setTimeout(() => {
+      renderImageGenFeed({ preserveScroll: true, force: true });
+    }, 400);
+  }
+
   function persistPendingGenJobs() {
     try {
       sessionStorage.setItem(LS_PENDING_GEN_JOBS, JSON.stringify(imageGenPendingJobs.slice(0, 32)));
     } catch (e) { /* ignore */ }
+    persistGenJobStateToLocal();
   }
 
   function loadPendingGenJobs() {
     try {
       const raw = sessionStorage.getItem(LS_PENDING_GEN_JOBS);
-      const list = raw ? JSON.parse(raw) : [];
-      imageGenPendingJobs = Array.isArray(list) ? list : [];
-      const now = Date.now();
+      const sessionList = raw ? JSON.parse(raw) : [];
+      const localPending = loadGenJobStateFromLocal()?.pending;
+      imageGenPendingJobs = mergePendingGenJobLists(
+        Array.isArray(sessionList) ? sessionList : [],
+        Array.isArray(localPending) ? localPending : [],
+        imageGenPendingJobs
+      );
       const before = imageGenPendingJobs.length;
-      imageGenPendingJobs = imageGenPendingJobs.filter((p) => {
-        const age = now - (p.startedAt || 0);
-        if (p.recovering) {
-          return p.jobId ? age < RECENT_GEN_RECOVER_MS : age < 30 * 60 * 1000;
-        }
-        if (p.jobId) return age < RECENT_GEN_RECOVER_MS;
-        return age < 15 * 60 * 1000;
-      });
+      imageGenPendingJobs = filterPendingGenJobsByAge(imageGenPendingJobs);
       if (imageGenPendingJobs.length !== before) persistPendingGenJobs();
       purgeExpiredGenPendingJobs();
       prunePendingJobsWithWarehouseCards();
+      const localSession = loadGenJobStateFromLocal()?.session;
+      if (Array.isArray(localSession) && localSession.length) {
+        const merged = [...new Set([...getSessionGenJobIdsRaw(), ...localSession.map(String)])];
+        writeSessionGenJobIds(merged);
+      }
     } catch (e) {
       imageGenPendingJobs = [];
     }
@@ -5604,9 +5704,9 @@
   }
 
   /** 上游可能仍出图 / 服务端可恢复：此时不要立刻标红「生成失败」 */
-  function isLikelyRecoverableGenFailure(errRaw, ctx) {
+  function isLikelyRecoverableGenFailure(errRaw, ctx, opts = {}) {
     const s = stringifyGenErrorRaw(errRaw);
-    if (!s) return true;
+    if (!s) return opts.confirmedFailed !== true;
     const model = String(ctx?.model || '').toLowerCase();
     if (model.includes('ithink') && /UPSTREAM_FAILED|upstream_failed|502|ThinkAI|无效.*令牌/i.test(s)) {
       return false;
@@ -5626,6 +5726,20 @@
     if (/upstream_timeout/i.test(s) && isLongRunningGenJob(ctx)) return true;
     if (/NETWORK_ERROR|API_UNREACHABLE|无法连接 api\.prompt-hub|连接.*超时|Failed to fetch/i.test(s)) {
       return true;
+    }
+    return false;
+  }
+
+  function shouldDeferFailedPendingRecovery(pending, apiJob, ctx) {
+    const age = Date.now() - (pending.startedAt || 0);
+    const errRaw = apiJob?.errorMessage || apiJob?.message || '';
+    if (isDefinitiveGenFailure(errRaw, apiJob)) return false;
+    if (age >= pendingRecoveryGiveUpMs(pending)) return false;
+    if (age >= FAILED_JOB_RECOVER_MAX_MS && !isLikelyRecoverableGenFailure(errRaw, ctx, { confirmedFailed: true })) {
+      return false;
+    }
+    if (pending.recovering || isLikelyRecoverableGenFailure(errRaw, ctx)) {
+      return age < pendingRecoveryGiveUpMs(pending);
     }
     return false;
   }
@@ -5650,7 +5764,7 @@
     removePendingJob(pending.id);
     persistPendingGenJobs();
     if (opts.toast !== false && reason) toast(reason, 5000);
-    renderImageGenFeed({ preserveScroll: true });
+    renderImageGenFeed({ preserveScroll: true, force: true });
   }
 
   function deferPendingJobRecovery(pendingId, ctx, note) {
@@ -5677,7 +5791,7 @@
       void tryRecoverPendingJobDirect(job);
     }
     void resumePendingGenerationJobs();
-    renderImageGenFeed({ preserveScroll: true });
+    scheduleImageGenPendingUiRefresh();
   }
 
   function friendlyGenErrorMessage(msg) {
@@ -5881,9 +5995,11 @@
   function shouldAutoRecoverCompletedJob(job) {
     if (isGenerationJobDeleted(job.id)) return false;
     if (!job?.imageUrl) return false;
-    if (!isSessionGenJob(job.id)) return false;
     if (!isRecentGenJob(job)) return false;
-    return needsApiImageRecovery(job.id, job.imageUrl);
+    if (!needsApiImageRecovery(job.id, job.imageUrl)) return false;
+    if (isSessionGenJob(job.id)) return true;
+    if (imageGenPendingJobs.some((p) => p.jobId === job.id)) return true;
+    return false;
   }
 
   function warehouseCardImageNeedsRecovery(card, apiImageUrl) {
@@ -6022,29 +6138,29 @@
       (p) => p.recovering || isSlowGenProviderModel(p.model)
     );
     const syncIntervalMs = hasActiveRecover
-      ? (isMobileViewport() ? 10000 : 7000)
+      ? (isMobileViewport() ? 8000 : 7000)
       : imageGenPendingJobs.length > 0
-        ? (isMobileViewport() ? 18000 : 12000)
+        ? (isMobileViewport() ? 12000 : 12000)
         : (isMobileViewport() ? 45000 : 30000);
     genJobsSyncInterval = setInterval(() => {
       if (!window.PointsSystem?.useApiForAccount?.()) return;
       if (!shouldRunGenJobsBackgroundSync()) return;
-      void resumePendingGenerationJobs().then((changed) => {
-        if (changed && document.getElementById('pageImageGen')?.classList.contains('active')) {
-          scheduleImageGenFeedRenderFromJobs(2000);
-        }
-      });
+      void resumePendingGenerationJobs().then(afterGenJobsResume);
+      if (document.getElementById('pageImageGen')?.classList.contains('active') && imageGenPendingJobs.length) {
+        scheduleImageGenPendingUiRefresh();
+      }
     }, syncIntervalMs);
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        scheduleGenJobsSync(300);
-        if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-          void resumePendingGenerationJobs().then(() => {
-            renderImageGenFeed({ preserveScroll: true });
-            renderImageGenMobileResult();
-          });
-        }
+      if (document.visibilityState === 'hidden') {
+        persistPendingGenJobs();
+        return;
       }
+      loadPendingGenJobs();
+      scheduleGenJobsSync(300);
+      void resumePendingGenerationJobs({ force: true }).then(afterGenJobsResume);
+    });
+    window.addEventListener('pagehide', () => {
+      persistPendingGenJobs();
     });
     window.addEventListener('pageshow', () => {
       loadPendingGenJobs();
@@ -6053,23 +6169,17 @@
         renderImageGenMobileResult();
       }
       scheduleGenJobsSync(200);
-      if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-        void resumePendingGenerationJobs().then(() => {
-          renderImageGenFeed({ preserveScroll: true });
-          renderImageGenMobileResult();
-        });
-      }
+      void resumePendingGenerationJobs({ force: true }).then(afterGenJobsResume);
     });
   }
 
   function getSessionGenJobIds() {
-    try {
-      const raw = sessionStorage.getItem(LS_SESSION_GEN_JOBS);
-      const list = raw ? JSON.parse(raw) : [];
-      return Array.isArray(list) ? list.map(String) : [];
-    } catch (e) {
-      return [];
+    const ids = new Set(getSessionGenJobIdsRaw());
+    const localSession = loadGenJobStateFromLocal()?.session;
+    if (Array.isArray(localSession)) {
+      localSession.forEach((x) => ids.add(String(x)));
     }
+    return [...ids];
   }
 
   function trackSessionGenJob(jobId) {
@@ -6077,19 +6187,13 @@
     const id = String(jobId);
     const list = getSessionGenJobIds().filter((x) => x !== id);
     list.push(id);
-    while (list.length > 40) list.shift();
-    try {
-      sessionStorage.setItem(LS_SESSION_GEN_JOBS, JSON.stringify(list));
-    } catch (e) { /* ignore */ }
+    writeSessionGenJobIds(list);
   }
 
   function clearSessionGenJob(jobId) {
     if (!jobId) return;
     const id = String(jobId);
-    const list = getSessionGenJobIds().filter((x) => x !== id);
-    try {
-      sessionStorage.setItem(LS_SESSION_GEN_JOBS, JSON.stringify(list));
-    } catch (e) { /* ignore */ }
+    writeSessionGenJobIds(getSessionGenJobIds().filter((x) => x !== id));
   }
 
   function isSessionGenJob(jobId) {
@@ -6243,6 +6347,7 @@
     if (!changed) return;
     imageGenPendingJobs = next;
     persistPendingGenJobs();
+    scheduleImageGenPendingUiRefresh();
   }
 
   function getImageGenPendingJobsForFeed() {
@@ -6349,24 +6454,19 @@
       if (refreshed.status === 'completed' && refreshed.imageUrl) {
         return resolvePendingFromApiJob(pending, refreshed, opts);
       }
-      const age = Date.now() - (pending.startedAt || 0);
-      if (
-        pending.recovering
-        || isLikelyRecoverableGenFailure(refreshed.errorMessage || apiJob.errorMessage, ctx)
-      ) {
+      if (shouldDeferFailedPendingRecovery(pending, refreshed, ctx)) {
         if (await tryServerRecoverPending(pending)) return true;
-        if (age < pendingRecoveryGiveUpMs(pending)) {
-          pending.recovering = true;
-          pending.recoverNote = formatPendingRecoveryNote(pending, '上游可能仍在出图，后台继续恢复…');
-          persistPendingGenJobs();
-          if (pending.jobId && age >= SERVER_RECOVER_AFTER_MS) {
-            void tryRecoverPendingJobDirect(pending);
-          }
-          if (!activePollJobIds.has(pending.jobId)) {
-            void pollGenerationJobUntilDone(pending.jobId, pending.id, ctx);
-          }
-          return false;
+        pending.recovering = true;
+        pending.recoverNote = formatPendingRecoveryNote(pending, '上游可能仍在出图，后台继续恢复…');
+        persistPendingGenJobs();
+        if (pending.jobId && Date.now() - (pending.startedAt || 0) >= SERVER_RECOVER_AFTER_MS) {
+          void tryRecoverPendingJobDirect(pending);
         }
+        if (!activePollJobIds.has(pending.jobId)) {
+          void pollGenerationJobUntilDone(pending.jobId, pending.id, ctx);
+        }
+        scheduleImageGenPendingUiRefresh();
+        return false;
       }
       await failPendingJobImmediately(
         pending.id,
@@ -6406,15 +6506,21 @@
         return false;
       }
       if (retry.ok && retry.data.status === 'failed') {
-        const stillRecoverable = isLikelyRecoverableGenFailure(retry.data.errorMessage, ctx);
-        if (stillRecoverable && Date.now() - (pending.startedAt || 0) < RECENT_GEN_RECOVER_MS) {
+        const failSnap = {
+          id: apiJob.id,
+          status: 'failed',
+          errorMessage: retry.data.errorMessage || retry.data.message,
+          prompt: pending.prompt,
+          model: pending.model
+        };
+        if (shouldDeferFailedPendingRecovery(pending, failSnap, ctx)) {
           if (await tryServerRecoverPending(pending)) return true;
           return false;
         }
         await failPendingJobImmediately(
           pending.id,
           ctx,
-          retry.data.errorMessage || retry.data.message || '生图失败'
+          failSnap.errorMessage || '生图失败'
         );
         clearSessionGenJob(apiJob.id);
         return true;
@@ -7193,7 +7299,7 @@
           return Date.now() - (p.startedAt || 0) < RECENT_GEN_RECOVER_MS;
         }
         if (aj.status === 'failed') {
-          return p.recovering && Date.now() - (p.startedAt || 0) < RECENT_GEN_RECOVER_MS;
+          return false;
         }
         if (aj.status === 'completed') return false;
         return aj.status === 'processing';
@@ -7206,7 +7312,7 @@
       }
 
       if (changed) {
-        renderImageGenFeed({ preserveScroll: true });
+        afterGenJobsResume(true);
       }
 
       for (const p of imageGenPendingJobs.slice()) {
@@ -7277,7 +7383,7 @@
       }
       if (changed) {
         persistPendingGenJobs();
-        renderImageGenFeed({ preserveScroll: true });
+        renderImageGenFeed({ preserveScroll: true, force: true });
       }
 
       return changed;
@@ -10125,7 +10231,7 @@
     const msg = friendlyGenErrorMessage(errRaw);
     failPendingJob(pendingId, msg);
     await window.PointsSystem?.refreshCreditsFromServer?.();
-    renderImageGenFeed({ preserveScroll: true });
+    renderImageGenFeed({ preserveScroll: true, force: true });
     if (!ctx?.silentToast) toastGenFailure(ctx, msg);
   }
 
@@ -10160,14 +10266,10 @@
     }
     persistPendingGenJobs();
     if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-      const card = document.querySelector(`#imageGenFeed .imagegen-feed-card[data-feed-id="${CSS.escape(pendingId)}"]`);
-      const noteEl = card?.querySelector('.imagegen-feed-foot--pending .imagegen-feed-meta');
-      if (noteEl) {
-        noteEl.textContent = String(note).slice(0, 56);
-        return;
-      }
+      scheduleImageGenPendingUiRefresh();
+      return;
     }
-    renderImageGenFeed({ preserveScroll: true });
+    renderImageGenFeed({ preserveScroll: true, force: true });
   }
 
   async function pollGenerationJobUntilDone(jobId, pendingId, ctx) {
@@ -10952,7 +11054,7 @@
       });
       if (pendingId && idx === 1) removePendingJob(pendingId);
       prunePendingJobsWithWarehouseCards();
-      renderImageGenFeed({ preserveScroll: true });
+      renderImageGenFeed({ preserveScroll: true, force: true });
       renderImageGenMobileResult();
       if (saved && window.SupabaseSync?.isLoggedIn?.() && !isMidjourney) {
         queueUrgentCardsSync();
@@ -12305,7 +12407,12 @@
     }
     if (app !== 'community') closeCommunitySidePanel();
     if (app !== 'creations') closeCreationsSidePanel();
-    if (app !== 'imagegen') closeImageGenPreview();
+    if (app !== 'imagegen') {
+      closeImageGenPreview();
+      if (imageGenPendingJobs.length > 0 || activePollJobIds.size > 0) {
+        scheduleGenJobsSync(400);
+      }
+    }
     if (app === 'imagegen') {
       void prefetchImageGenModelCatalog();
       if (!document.getElementById('pageImageGen')?.classList.contains('active')) return;
@@ -12315,14 +12422,10 @@
       pruneCreations();
       initImageGenForm();
       updateImageGenFeedHint();
-      setTimeout(() => void resumePendingGenerationJobs(), 2400);
-      scheduleGenJobsSync(3000);
-      if (!feedHasRenderedContent('imageGenFeed', '.imagegen-feed-card')) {
-        renderImageGenFeed();
-      } else {
-        scheduleImageGenFeedLayout();
-        renderImageGenMobileResult();
-      }
+      setTimeout(() => void resumePendingGenerationJobs({ force: true }), 400);
+      scheduleGenJobsSync(1500);
+      renderImageGenFeed({ preserveScroll: true, force: true });
+      renderImageGenMobileResult();
       void window.PointsSystem?.refreshCreditsFromServer?.();
       window.PointsSystem?.updateCreditsUI?.();
     }

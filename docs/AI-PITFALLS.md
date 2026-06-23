@@ -1,7 +1,7 @@
 # AI 踩坑清单（必读，避免重复炸站）
 
 > **用途**：记录已踩过的致命/难查问题。改 `features-draft.js` / 社区 Feed / 媒体签名前**先扫本页**。  
-> 最后更新：**2026-06-07** · Pages 构建号 **`20260622p`**
+> 最后更新：**2026-06-07** · Pages 构建号 **`20260623b`**
 
 ---
 
@@ -34,6 +34,17 @@
 
 ---
 
+## 生图任务 / 生图 Feed
+
+| 坑 | 现象 | 根因 | 正确做法 |
+|----|------|------|----------|
+| **仅 sessionStorage 存 pending** | 手机切后台/重载后丢图 | iOS 等会清 session；回前台只在生图页才 resume | `localStorage` 备份 + `pagehide` 持久化；`visibilitychange` 任意页 `resumePendingGenerationJobs({ force:true })` |
+| **failed 空错误当可恢复** | 一直「恢复中」不标失败 | `isLikelyRecoverableGenFailure('')` 曾为 true | API 已 `failed` 且非明确可恢复 → **12 分钟内** `failPendingJob` |
+| **生图 Feed 跳过整页刷新** | 成功仍显示「生成中」 | `warehouseCardsListUnchanged` 只 patch pending | 完成/失败/进生图页用 `renderImageGenFeed({ force:true })` |
+| **等 prefetch 再 hydrate** | 生图页首开全黑卡、比社区慢 | `await prefetchList` 挡住 `observeContainer` | `innerHTML` 后立刻 `patchContainerFromCache` + `boostImageGenWarehouseImages` |
+
+---
+
 ## 媒体签名 / 卡片库黑图
 
 | 坑 | 现象 | 根因 | 正确做法 |
@@ -59,8 +70,9 @@
 
 1. 保存后本地搜：`const colsChanged` 是否在同一函数出现两次。  
 2. 社区改动：搜 `flattenCommunityFeedColumns`、`finishCommunityFeedLayoutAfterBatch`、`fromImage`。  
-3. 部署后：`window.__APP_BUILD__` 与 `index.html` 一致。  
-4. Console 无红色 SyntaxError 再让用户验收。
+3. 部署后：`window.__APP_BUILD__` 与 `index.html` 一致；`run-index-http-smoke.mjs` 三个 bundle 须为 JS。  
+4. 生图改动：手机提交 → 切后台 → 回来占位应自动变图或标失败。  
+5. Console 无红色 SyntaxError 再让用户验收。
 
 ---
 

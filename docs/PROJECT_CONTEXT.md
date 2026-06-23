@@ -24,26 +24,29 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · bundle 热修）
+## 当前部署阶段（2026-06-07 · 生图恢复 + Feed 体验）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260622p` · https://prompt-hubs.com |
+| **Pages** | build `20260623b` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
 
-- ✅ 三包 bundle 改部署到**站点根目录**（`*.bundle.js`），避免 `/dist/*` 被 SPA 回退成 HTML
-- ✅ 部署后自动 HTTP 冒烟：bundle 须 `application/javascript` 且非 HTML
-- ✅ `MediaPipeline` / `FeedLayout` / `CardImageLoader` 等全局对象线上已恢复
+- ✅ 三包 bundle 在站点根目录 + 部署后 HTTP 冒烟（bundle 须为 JS 非 HTML）
+- ✅ 手机切后台：`localStorage` 备份生图任务，回前台任意页强制恢复
+- ✅ 失败任务 12 分钟内标红（不再无限「恢复中」）；成功/失败自动刷新占位
+- ✅ 生图 Feed 首开立即 hydrate（减少全黑卡等待）
 
 ### 已知问题（已修）
 
-- ~~esbuild 三合一首包后全站无图~~：根因是 Cloudflare Pages 对 `/dist/*.js` 返回 `index.html`；VM 冒烟无法发现
+- ~~esbuild `/dist/*.js` SPA 回退全站无图~~（`20260622p`）
+- ~~手机切后台丢图~~（`20260623a` localStorage + 强制 resume）
+- ~~生图占位不刷新 / 首开黑卡慢~~（`20260623b`）
 
 ### 下一步
 
-1. 用户 **Ctrl+Shift+R** 强刷；若仍空白 → Application 注销 Service Worker 再试
+1. 强刷确认 `window.__APP_BUILD__ === '20260623b'`
 2. 规划 script.js / features-draft.js 首段拆包（小步、含 HTTP 冒烟）
 
 ### 部署

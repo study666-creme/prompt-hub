@@ -15,6 +15,7 @@
 | 🔴 | esbuild bundle 全站无图（`/dist/*.js` SPA 回退） | [§1b](#1b-esbuild-bundle-全站无图pages-spa-回退) |
 | 🟠 | 社区 flex 布局晃、乱飞、巨图 | [§2](#2-社区--我的主页-feed-布局高频) |
 | 🟠 | 我的主页侧栏空白 | [§2.7](#27-我的主页侧栏空白桌面端) |
+| 🟠 | 手机切后台生图丢图（sessionStorage + 恢复过严） | [§3b](#3b-手机切后台生图丢图) |
 | 🟠 | 卡片库/社区黑图、401、429 签名风暴 | [§3](#3-媒体签名与黑图高频) |
 | 🟠 | 生图仓库一进页几十～上百 MB | [§4](#4-生图仓库带宽-p0-未完全解决) |
 | 🟡 | API 522、域名 DNS 冲突 | [§5](#5-api-522--自定义域名) |
@@ -148,6 +149,20 @@
 | 切回社区一排白骨架 | `showCommunityFeedSkeleton` 盖住已有 Feed → 有真卡勿 `innerHTML` 骨架 |
 | 首屏 400+ 卡卡顿 | `drainUntilDone` 灌满 DOM → 首屏只 drain 约 5 页，其余靠哨兵 |
 | 用 grid 自身宽度算列数 | 侧栏开合误判 1 列 → 用 `.community-page-main` / `.community-workspace` 量宽 |
+
+---
+
+## 3b. 手机切后台生图丢图
+
+| 项 | 内容 |
+|----|------|
+| **标签** | 🟠 高频 |
+| **现象** | 手机生图后切到别的 App / 别的页面 / 锁屏，回来图没了或一直「生成中」；电脑较少 |
+| **根因** | ① iOS/Android 后台 **挂起 JS**，轮询停 ② 任务状态只写 `sessionStorage`，部分浏览器重载后丢 ③ 回到前台只在「生图页 active」才恢复 ④ 已完成任务若 session 丢失则 `shouldAutoRecoverCompletedJob` 跳过 |
+| **修复** | `localStorage` 备份 pending + session 任务；切后台 `pagehide` 持久化；回到前台 **任意页面** 强制 `resumePendingGenerationJobs`；离开生图 Tab 也触发同步 |
+| **20260623a+** | 失败任务 12 分钟内标红（不再无限「恢复中」）；成功/失败自动刷新占位；生图页首开立即 hydrate（不再等 prefetch 才出图） |
+| **用户侧** | 生图后尽量等 1～2 分钟再切走；回来切到生图「作品」Tab 或卡片库查看；仍无图可强刷 |
+| **勿再犯** | 生图恢复逻辑改动后：手机提交 → 切微信 30s → 回来查卡片库是否有 `genJobId` 对应卡 |
 
 ---
 
