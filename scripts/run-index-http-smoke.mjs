@@ -27,6 +27,7 @@ const mustHave = [
 const mustNot = [
   'dist/core-pipeline.bundle.js',
   'dist/feed-modules.bundle.js',
+  '.bundle.js?v=',
   'media-pipeline.js?v=',
   'membership.js?v=',
   'subscription.js?v=',
@@ -76,6 +77,23 @@ for (const [path, label, token] of bundles) {
     process.exit(1);
   }
   console.log(`index-http-smoke OK: ${path} (${res.ct.split(';')[0]})`);
+}
+
+// 与浏览器 index.html 一致：解析 bundle script src 并请求（不得带 ?v=）
+const bundleSrcRe = /src="([^"]+\.bundle\.js[^"]*)"/g;
+let m;
+while ((m = bundleSrcRe.exec(index.text)) !== null) {
+  const src = m[1];
+  if (src.includes('?')) {
+    console.error(`index-http-smoke: bundle script must not use query string: ${src}`);
+    process.exit(1);
+  }
+  const res = await get(src.startsWith('/') ? src : `/${src}`);
+  if (/text\/html/i.test(res.ct) || res.text.trimStart().startsWith('<!')) {
+    console.error(`index-http-smoke: index references ${src} but got HTML`);
+    process.exit(1);
+  }
+  console.log(`index-http-smoke OK: index script ${src}`);
 }
 
 console.log('index-http-smoke OK: all bundles are real JavaScript');

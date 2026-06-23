@@ -52,6 +52,15 @@
 | **构建** | `20260622p` |
 | **勿再犯** | 新增/移动 bundle 路径后：`SMOKE_BASE=https://prompt-hubs.com node scripts/run-index-http-smoke.mjs`；禁止把运行时 JS 只放在会被 SPA 吞掉的路径（如未在 staging 里的 `/dist/`） |
 
+### 1c. `*.bundle.js?v=` 查询串（20260623d 复发）
+
+| 项 | 内容 |
+|----|------|
+| **现象** | Console：`MIME type text/html`；`FeedImages.init` undefined；生图/社区全空 |
+| **根因** | `index.html` 给 bundle 加了 `?v=构建号`；Cloudflare Pages 对 `*.bundle.js?query` 回退 HTML（`script.js?v=` 却正常） |
+| **修复** | 去掉 bundle 的 `?v=`；`_headers` 对 `/*.bundle.js` 设 no-cache；冒烟禁止 index 出现 `.bundle.js?v=` |
+| **构建** | `20260623e` |
+
 ---
 
 ## 2. 社区 / 我的主页 Feed 布局（高频）

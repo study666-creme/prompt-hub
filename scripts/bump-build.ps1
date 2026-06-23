@@ -24,30 +24,36 @@ if ($c -gt [int][char]'z') {
   Write-Host "Build letter rolled to next day: $d$([char]$c)" -ForegroundColor Yellow
 }
 $new = $d + [char]$c
+$oldEsc = [regex]::Escape($old)
 
 $files = @(
   (Join-Path $root "index.html"),
   (Join-Path $root "admin.html"),
   (Join-Path $root "sw.js")
 )
+# *.bundle.js 禁止 ?v=（Cloudflare Pages 对 .bundle.js?query 会 SPA 回退成 HTML）
 $syncCacheAssets = @(
   'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css',
-  'theme.js', 'api-client.js', 'foundation.bundle.js', 'supabase-sync.js', 'core-pipeline.bundle.js',
-  'account-modules.bundle.js', 'script.js', 'feed-modules.bundle.js', 'imagegen-tools.bundle.js',
-  'features-draft.js', 'features-assets.js', 'app-extra.bundle.js'
+  'theme.js', 'api-client.js', 'supabase-sync.js', 'script.js',
+  'features-draft.js', 'features-assets.js'
 )
 
 foreach ($path in $files) {
   if (-not (Test-Path $path)) { continue }
   $t = Get-Content $path -Raw -Encoding UTF8
-  $t = $t.Replace($old, $new)
-  $t = [regex]::Replace($t, "const CACHE = 'prompt-hub-v[^']+';", "const CACHE = 'prompt-hub-v$new';")
   if ($path -eq $indexPath) {
+    $t = [regex]::Replace($t, "__APP_BUILD__\s*=\s*'$oldEsc'", "__APP_BUILD__ = '$new'")
+    $t = [regex]::Replace($t, "版本 $oldEsc", "版本 $new")
     foreach ($asset in $syncCacheAssets) {
       $esc = [regex]::Escape($asset)
-      $t = [regex]::Replace($t, "($esc\?v=)$old", "`${1}$new")
+      $t = [regex]::Replace($t, "($esc\?v=)$oldEsc", "`${1}$new")
       $t = [regex]::Replace($t, "($esc\?v=)\d{8}[a-z]", "`${1}$new")
     }
+    $t = [regex]::Replace($t, '([\w.-]+\.bundle\.js)\?v=[^"]+', '$1')
+  } elseif ($path -like '*sw.js') {
+    $t = [regex]::Replace($t, "const CACHE = 'prompt-hub-v[^']+';", "const CACHE = 'prompt-hub-v$new';")
+  } else {
+    $t = $t.Replace($old, $new)
   }
   [System.IO.File]::WriteAllText($path, $t, [System.Text.UTF8Encoding]::new($false))
 }

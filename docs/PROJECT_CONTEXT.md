@@ -28,7 +28,7 @@
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260623d` · https://prompt-hubs.com |
+| **Pages** | build `20260623e` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
@@ -46,7 +46,7 @@
 
 ### 下一步
 
-1. 强刷确认 `window.__APP_BUILD__ === '20260623d'`
+1. 强刷确认 `window.__APP_BUILD__ === '20260623e'`
 2. 继续 `script.js` / `features-draft.js` 首段拆包（小步、每步 HTTP 冒烟）
 
 ### 部署
