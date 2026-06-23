@@ -28,7 +28,7 @@
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260623l` · https://prompt-hubs.com |
+| **Pages** | build `20260623m` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
