@@ -363,6 +363,34 @@
       window.__viewerGlobalViewActive = globalViewActive;
     }
 
+    /** pack-appreciate 未加载时（SW/缓存旧 index）兜底，避免导航报错 */
+    function safeForceExitGlobalView(skipRender = false) {
+      if (typeof window.forceExitGlobalView === 'function') {
+        window.forceExitGlobalView(skipRender);
+        return;
+      }
+      const wasActive = globalViewActive || document.body.classList.contains('global-view');
+      if (!wasActive) return;
+      window.closeAppreciateViewer?.();
+      setGlobalViewActive(false);
+      document.body.classList.remove('global-view', 'global-view-entering', 'global-view-exiting', 'appreciate-viewing');
+      document.getElementById('globalViewBtn')?.classList.remove('active');
+      if (!skipRender && typeof renderCards === 'function') renderCards(true);
+    }
+
+    function safeCloseAppreciateViewer(e) {
+      if (typeof window.closeAppreciateViewer === 'function') window.closeAppreciateViewer(e);
+    }
+
+    function safeExitGlobalView() {
+      if (typeof window.exitGlobalView === 'function') window.exitGlobalView();
+      else safeForceExitGlobalView(false);
+    }
+
+    if (typeof window.forceExitGlobalView !== 'function') {
+      console.warn('[PromptHub] pack-appreciate.js 未加载，请强刷（Ctrl+Shift+R）');
+    }
+
     function generateId() { return 'card_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9); }
 
     window.layoutMasonryGrid = layoutMasonryGrid;
@@ -2235,7 +2263,7 @@
         clearWarehouseFilters({ toast: false });
       }
       if (app !== 'warehouse') {
-        window.forceExitGlobalView(true);
+        safeForceExitGlobalView(true);
         closeEditPanel();
         if (typeof closeTagSheet === 'function') closeTagSheet();
       }
@@ -4084,8 +4112,8 @@
         const card = cards.find((c) => c.id === warehousePreviewCardId);
         if (!card) return;
         markQuickPreviewTask({ warehouseGotoGen: true });
-        window.closeAppreciateViewer();
-        window.forceExitGlobalView(true);
+        safeCloseAppreciateViewer();
+        safeForceExitGlobalView(true);
         void window.FeatureDraft?.fillCardToImageGen?.(card);
       });
     }
@@ -6673,7 +6701,7 @@
           if (e.target.closest('.card-mobile-actions')) return;
           if (globalViewActive) {
             e.preventDefault();
-            window.openAppreciateViewer(card.id);
+            window.openAppreciateViewer?.(card.id);
             return;
           }
           if (e.target.closest('.card-checkbox')) return;
@@ -6693,7 +6721,7 @@
           img.addEventListener('click', e => {
             e.stopPropagation();
             if (globalViewActive) {
-              window.openAppreciateViewer(card.id);
+              window.openAppreciateViewer?.(card.id);
               return;
             }
             if (batchMode) {
@@ -9135,7 +9163,7 @@
       closeEditPanel({ skipHistory: true });
     };
     function openEditPanel() {
-      if (globalViewActive) window.forceExitGlobalView(true);
+      if (globalViewActive) safeForceExitGlobalView(true);
       window.MobileUI?.closeDrawers?.();
       document.getElementById('editPanel').classList.remove('hidden');
       document.getElementById('fabNewBtn').classList.remove('visible');
@@ -9233,10 +9261,10 @@
       if (e.key !== 'Escape') return;
       const viewer = document.getElementById('appreciateViewer');
       if (viewer?.classList.contains('active')) {
-        window.closeAppreciateViewer();
+        safeCloseAppreciateViewer();
         return;
       }
-      if (globalViewActive || document.body.classList.contains('community-appreciate')) window.exitGlobalView();
+      if (globalViewActive || document.body.classList.contains('community-appreciate')) safeExitGlobalView();
     });
 
     let modalImageData = null;
