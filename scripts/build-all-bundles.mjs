@@ -14,7 +14,8 @@ for (const name of [
   'build-imagegen-bundle.mjs',
   'build-account-bundle.mjs',
   'build-app-extra-bundle.mjs',
-  'build-foundation-bundle.mjs'
+  'build-foundation-bundle.mjs',
+  'build-viewer-pack.mjs'
 ]) {
   const path = join(scriptsDir, name);
   const r = spawnSync(process.execPath, [path], { stdio: 'inherit' });

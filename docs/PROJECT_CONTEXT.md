@@ -24,16 +24,17 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · esbuild 七 pack）
+## 当前部署阶段（2026-06-07 · esbuild 八 pack）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260623h` · https://prompt-hubs.com |
+| **Pages** | build `20260623j` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
 
-- ✅ **七 pack**（`pack-prelude` … `pack-extra`）+ 部署前 `verify-pack-contract` + HTTP 冒烟（含 `Sec-Fetch-Dest: script`）
+- ✅ **八 pack**（`pack-prelude` … `pack-viewer` … `pack-extra`）+ 部署前 `verify-pack-contract` + HTTP 冒烟（含 `Sec-Fetch-Dest: script`）
+- ✅ **灯箱/欣赏器核心** 已拆至 `app-viewer-core.js` → `pack-viewer.js`（在 `script.js` 之前加载）
 - ✅ **禁止** `*.bundle.js` / `pack-*.js?v=`（Cloudflare Pages script 请求会 SPA 回退 HTML）
 - ✅ 手机切后台生图恢复 · 失败标红 · Feed 首开 hydrate
 
@@ -44,8 +45,8 @@
 
 ### 下一步
 
-1. 强刷确认 `window.__APP_BUILD__` 与 pack 脚本无 Console MIME 报错
-2. 继续从 `script.js` 拆出 viewer/灯箱模块 → `app-viewer.js`（小步）
+1. 强刷确认 `window.__APP_BUILD__ === '20260623j'` 与 8 个 pack 无 Console MIME 报错
+2. 继续从 `script.js` 拆 lightbox 业务层（`openLightbox` / `loadLightboxImage` 等）
 
 ### 部署
 

@@ -58,8 +58,8 @@
 |----|------|
 | **现象** | 浏览器 `<script src="foundation.bundle.js">` 得 HTML；`FeedImages`/`MediaPipeline` 全 false |
 | **根因** | Cloudflare Pages 对 **`.bundle.js` 扩展名** 的 script 请求 SPA 回退（普通 `.js` 正常） |
-| **修复** | 构建输出改名为 `pack-foundation.js` … `pack-extra.js`；HTTP 冒烟加 `Sec-Fetch-Dest: script` |
-| **构建** | `20260623f` |
+| **修复** | 构建输出改名为 `pack-prelude.js` … `pack-viewer.js` … `pack-extra.js`（**8 pack**）；HTTP 冒烟加 `Sec-Fetch-Dest: script` |
+| **构建** | `20260623f`（改名）→ `20260623j`（+ `pack-viewer`） |
 
 ---
 

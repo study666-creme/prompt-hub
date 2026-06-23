@@ -206,6 +206,7 @@
     let floatingPromptActive = false;
     let currentCardCustomFields = {};
     let globalViewActive = false;
+    window.__viewerGlobalViewActive = false;
     let activeFilters = new Set();
     const WAREHOUSE_FILTER_ALIASES = { '纯文字': 'text', '有图片': 'image' };
     function normalizeWarehouseFilterValue(raw) {
@@ -341,8 +342,6 @@
     }
     window.restoreDesktopCardColumns = restoreDesktopCardColumns;
 
-    let imageZoom = { scale: 1, tx: 0, ty: 0, dragging: false, startX: 0, startY: 0, img: null };
-
     window.__phQuickPreviewTask = window.__phQuickPreviewTask || {
       warehouseUsed: false,
       warehouseGotoGen: false,
@@ -368,304 +367,6 @@
       warehouseActs?.classList.toggle('hidden', isCommunity);
     }
 
-    function getAppreciateViewerFrame() {
-      return document.getElementById('appreciateViewerFrame')
-        || document.querySelector('#appreciateViewerMedia .viewer-image-frame');
-    }
-
-    function getLightboxFrame() {
-      return document.getElementById('lightboxFrame');
-    }
-
-    /** 灯箱至少不比社区网格预览小（竖图按高度缩放时易缩成「小图」） */
-    function getLightboxMinDisplaySize() {
-      const grid = document.getElementById('communityGrid');
-      const selected = grid?.querySelector('.community-post-card.selected');
-      const media = selected?.querySelector('.card-media');
-      if (media) {
-        const r = media.getBoundingClientRect();
-        if (r.width > 8 && r.height > 8) return { minW: r.width, minH: r.height };
-      }
-      const colRaw = grid && getComputedStyle(grid).getPropertyValue('--feed-col-width').trim();
-      const colW = parseFloat(colRaw) || selected?.offsetWidth || 0;
-      if (colW > 8) return { minW: colW, minH: colW * 1.25 };
-      return { minW: 240, minH: 300 };
-    }
-
-    function fitLightboxDisplaySize(img) {
-      if (!img?.naturalWidth || !img?.naturalHeight) return;
-      const { minW, minH } = getLightboxMinDisplaySize();
-      const maxW = Math.min(window.innerWidth * 0.96, 960);
-      const maxH = window.innerHeight * 0.94 - 100;
-      const ar = img.naturalWidth / img.naturalHeight;
-      let w = maxW;
-      let h = w / ar;
-      if (h > maxH) {
-        h = maxH;
-        w = h * ar;
-      }
-      if (w < minW) {
-        w = Math.min(minW, maxW);
-        h = w / ar;
-      }
-      if (h < minH && h < maxH) {
-        h = Math.min(minH, maxH);
-        w = h * ar;
-        if (w > maxW) {
-          w = maxW;
-          h = w / ar;
-        }
-      }
-      img.style.width = `${Math.round(w)}px`;
-      img.style.height = `${Math.round(h)}px`;
-      img.style.maxWidth = 'none';
-      img.style.maxHeight = 'none';
-      img.style.objectFit = 'contain';
-    }
-
-    function setViewerFrameLoading(frame, loading) {
-      if (!frame) return;
-      frame.classList.toggle('is-loading', !!loading);
-      frame.classList.remove('viewer-glow-active');
-      frame.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal', 'viewer-shine-active');
-    }
-
-    function finishViewerFrameReveal(frame) {
-      if (!frame) return;
-      frame.classList.remove('is-loading', 'viewer-glow-active');
-      const shineWrap = frame.querySelector('.viewer-image-shine-wrap');
-      if (!shineWrap) return;
-      shineWrap.classList.remove('viewer-glow-active');
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-      shineWrap.classList.remove('media-shine-reveal');
-      void shineWrap.offsetWidth;
-      shineWrap.classList.add('media-shine-reveal');
-      shineWrap.classList.add('viewer-shine-active');
-    }
-
-    function layoutViewerBorderSvg(frame) {
-      const border = frame?.querySelector('.viewer-frame-border');
-      const wrap = frame?.querySelector('.viewer-image-shine-wrap');
-      const svg = border?.querySelector('.viewer-border-svg');
-      if (!border || !wrap || !svg) return;
-      const w = wrap.offsetWidth;
-      const h = wrap.offsetHeight;
-      if (w < 8 || h < 8) return;
-      const pad = 1.5;
-      const r = 12;
-      const attrs = {
-        x: pad,
-        y: pad,
-        width: Math.max(0, w - pad * 2),
-        height: Math.max(0, h - pad * 2),
-        rx: r,
-        ry: r
-      };
-      svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-      svg.setAttribute('width', String(w));
-      svg.setAttribute('height', String(h));
-      ['track', 'sweep'].forEach((kind) => {
-        const rect = svg.querySelector(`.viewer-border-${kind}`);
-        if (!rect) return;
-        Object.entries(attrs).forEach(([key, val]) => rect.setAttribute(key, String(val)));
-      });
-      const sweep = svg.querySelector('.viewer-border-sweep');
-      if (!sweep) return;
-      const perimeter = 2 * (attrs.width + attrs.height - 4 * r) + 2 * Math.PI * r;
-      const dashLen = Math.max(40, Math.min(110, perimeter * 0.07));
-      sweep.style.strokeDasharray = `${dashLen} ${Math.max(perimeter, dashLen + 1)}`;
-      sweep.style.strokeDashoffset = '0';
-    }
-
-    function applyViewerAdaptiveGlow(frame, img) {
-      const border = frame?.querySelector('.viewer-frame-border');
-      if (!border || !img?.naturalWidth) return;
-      let r = 160;
-      let g = 195;
-      let b = 255;
-      try {
-        const size = 24;
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        if (!ctx) return;
-        ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, 0, 0, size, size);
-        const data = ctx.getImageData(0, 0, size, size).data;
-        let sr = 0;
-        let sg = 0;
-        let sb = 0;
-        let n = 0;
-        const pick = (x, y) => {
-          const i = (y * size + x) * 4;
-          const a = data[i + 3];
-          if (a < 24) return;
-          sr += data[i];
-          sg += data[i + 1];
-          sb += data[i + 2];
-          n += 1;
-        };
-        for (let x = 0; x < size; x += 1) {
-          pick(x, 0);
-          pick(x, size - 1);
-        }
-        for (let y = 1; y < size - 1; y += 1) {
-          pick(0, y);
-          pick(size - 1, y);
-        }
-        if (n > 0) {
-          r = Math.round(sr / n);
-          g = Math.round(sg / n);
-          b = Math.round(sb / n);
-        }
-      } catch (e) { /* CORS 或采样失败时用默认 */ }
-      const mix = (c) => Math.min(255, Math.round(c * 0.72 + 255 * 0.28));
-      border.style.setProperty('--viewer-edge-r', String(r));
-      border.style.setProperty('--viewer-edge-g', String(g));
-      border.style.setProperty('--viewer-edge-b', String(b));
-      border.style.setProperty('--viewer-edge-light-r', String(mix(r)));
-      border.style.setProperty('--viewer-edge-light-g', String(mix(g)));
-      border.style.setProperty('--viewer-edge-light-b', String(mix(b)));
-      frame.classList.add('viewer-edge-glow-ready');
-      layoutViewerBorderSvg(frame);
-    }
-    window.applyViewerAdaptiveGlow = applyViewerAdaptiveGlow;
-    window.layoutViewerBorderSvg = layoutViewerBorderSvg;
-
-    function setAppreciateViewerLoading(loading) {
-      setViewerFrameLoading(getAppreciateViewerFrame(), loading);
-      document.getElementById('appreciateViewerMedia')?.classList.remove('media-shine-reveal', 'viewer-glow-active');
-    }
-
-    function finishAppreciateViewerReveal() {
-      finishViewerFrameReveal(getAppreciateViewerFrame());
-    }
-    window.setAppreciateViewerLoading = setAppreciateViewerLoading;
-    window.finishAppreciateViewerReveal = finishAppreciateViewerReveal;
-    window.finishViewerFrameReveal = finishViewerFrameReveal;
-
-    let viewerNav = { items: [], index: -1 };
-    let viewerWheelNavAt = 0;
-    const VIEWER_WHEEL_NAV_GAP_MS = 420;
-
-    function setViewerNav(items, currentKey) {
-      viewerNav.items = Array.isArray(items) ? items : [];
-      viewerNav.index = viewerNav.items.findIndex((it) => it.key === currentKey);
-    }
-
-    function lightboxWheelNavEnabled() {
-      return !!window.__lightboxImageGenNav || !!globalViewActive;
-    }
-
-    function navigateViewerByWheel(delta) {
-      if (!viewerNav.items.length || viewerNav.index < 0) return false;
-      const next = viewerNav.index + (delta > 0 ? 1 : -1);
-      if (next < 0 || next >= viewerNav.items.length) return false;
-      const item = viewerNav.items[next];
-      viewerNav.index = next;
-      if (item.type === 'card') {
-        if (!globalViewActive) return false;
-        void openAppreciateViewer(item.id);
-        return true;
-      }
-      if (item.type === 'post' && window.FeatureDraft?.openCommunityAppreciateById) {
-        void window.FeatureDraft.openCommunityAppreciateById(item.id);
-        return true;
-      }
-      if (item.type === 'imageGen' && window.FeatureDraft?.openImageGenLightboxAt) {
-        void window.FeatureDraft.openImageGenLightboxAt(item.kind, item.id, item.key);
-        return true;
-      }
-      if (item.type === 'imageGenMjTile' && window.__lightboxMjGallery?.urls?.length) {
-        const url = window.__lightboxMjGallery.urls[item.tileIndex ?? 0];
-        if (url && typeof setLightboxSrc === 'function') {
-          setLightboxSrc(url, {
-            imageGen: true,
-            feedKey: window.__lightboxMjGallery.feedKey,
-            cardId: window.__lightboxMjGallery.assetId,
-            mjGalleryUrls: window.__lightboxMjGallery.urls,
-            mjGalleryIndex: item.tileIndex ?? 0
-          });
-          return true;
-        }
-      }
-      return false;
-    }
-
-    function navigateViewerByWheelThrottled(delta) {
-      const now = performance.now();
-      if (now - viewerWheelNavAt < VIEWER_WHEEL_NAV_GAP_MS) return false;
-      if (!navigateViewerByWheel(delta)) return false;
-      viewerWheelNavAt = now;
-      return true;
-    }
-
-    function onViewerShellWheel(e) {
-      const t = e.target;
-      const onLightbox = !!t?.closest?.('#imageLightbox');
-      if (onLightbox && !lightboxWheelNavEnabled()) return;
-      if (t?.id === 'appreciateViewerImg' || t?.id === 'lightboxImage') return;
-      if (!viewerNav.items.length) return;
-      if (onLightbox && !lightboxWheelNavEnabled()) return;
-      e.preventDefault();
-      navigateViewerByWheelThrottled(e.deltaY);
-    }
-
-    function bindViewerShellWheelNav() {
-      ['appreciateViewer', 'imageLightbox'].forEach((id) => {
-        const el = document.getElementById(id);
-        if (!el || el.dataset.viewerWheelBound) return;
-        el.dataset.viewerWheelBound = '1';
-        el.addEventListener('wheel', onViewerShellWheel, { passive: false });
-      });
-    }
-    bindViewerShellWheelNav();
-    window.setViewerNav = setViewerNav;
-
-    function applyImageZoom() {
-      const img = imageZoom.img;
-      if (!img) return;
-      img.style.transform = `scale(${imageZoom.scale}) translate(${imageZoom.tx}px, ${imageZoom.ty}px)`;
-      img.style.cursor = imageZoom.dragging ? 'grabbing' : 'grab';
-    }
-
-    function resetImageZoom(img) {
-      imageZoom.scale = 1;
-      imageZoom.tx = 0;
-      imageZoom.ty = 0;
-      imageZoom.dragging = false;
-      imageZoom.img = img || null;
-      applyImageZoom();
-    }
-
-    function attachImageZoom(img) {
-      if (!img) return;
-      img.style.transformOrigin = 'center center';
-      img.onwheel = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        imageZoom.scale = Math.min(Math.max(0.5, imageZoom.scale + (e.deltaY > 0 ? -0.1 : 0.1)), 4);
-        applyImageZoom();
-      };
-      img.onmousedown = (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        e.stopPropagation();
-        imageZoom.dragging = true;
-        imageZoom.startX = e.clientX - imageZoom.tx;
-        imageZoom.startY = e.clientY - imageZoom.ty;
-        applyImageZoom();
-      };
-      img.onclick = (e) => e.stopPropagation();
-      img.ondblclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        resetImageZoom(img);
-      };
-    }
-    window.attachImageZoom = attachImageZoom;
-    window.resetImageZoom = resetImageZoom;
-
     function closeAppreciateViewer(e) {
       const viewer = document.getElementById('appreciateViewer');
       if (!viewer?.classList.contains('active')) return;
@@ -689,7 +390,7 @@
       window.FeatureDraft?.onAppreciateViewerClose?.();
       const img = document.getElementById('appreciateViewerImg');
       const caption = document.getElementById('appreciateViewerCaption');
-      setAppreciateViewerLoading(false);
+      window.setAppreciateViewerLoading(false);
       if (caption) {
         caption.textContent = '';
         caption.style.display = 'none';
@@ -707,7 +408,7 @@
         img.style.maxHeight = '';
         img.style.objectFit = '';
       }
-      imageZoom.img = null;
+      window.resetImageZoom(null);
     }
 
     async function openAppreciateViewer(cardId) {
@@ -719,7 +420,7 @@
       const navItems = cards
         .filter((c) => c.image && cardHasDisplayImage(c))
         .map((c) => ({ type: 'card', id: c.id, key: `card:${c.id}` }));
-      setViewerNav(navItems, `card:${cardId}`);
+      window.setViewerNav(navItems, `card:${cardId}`);
       window.__appreciateViewerGen = (window.__appreciateViewerGen || 0) + 1;
       const gen = window.__appreciateViewerGen;
       const viewer = document.getElementById('appreciateViewer');
@@ -751,7 +452,7 @@
         }
       }
       const hasInstant = !isPlaceholderSrc(instantSrc);
-      setAppreciateViewerLoading(!hasInstant);
+      window.setAppreciateViewerLoading(!hasInstant);
       let revealed = false;
       const onReady = () => {
         if (gen !== window.__appreciateViewerGen || revealed) return;
@@ -763,9 +464,9 @@
         img.style.maxWidth = '';
         img.style.maxHeight = '';
         img.style.objectFit = '';
-        resetImageZoom(img);
-        attachImageZoom(img);
-        finishAppreciateViewerReveal();
+        window.resetImageZoom(img);
+        window.attachImageZoom(img);
+        window.finishAppreciateViewerReveal();
       };
       if (card.image) {
         img.style.display = 'block';
@@ -810,7 +511,7 @@
             img.onload = () => {
               if (gen !== window.__appreciateViewerGen) return;
               img.onload = null;
-              resetImageZoom(img);
+              window.resetImageZoom(img);
             };
             img.src = displaySrc;
             return;
@@ -822,8 +523,8 @@
         img.src = '';
         img.style.display = 'none';
         if (hint) hint.style.display = 'none';
-        imageZoom.img = null;
-        setAppreciateViewerLoading(false);
+        window.resetImageZoom(null);
+        window.setAppreciateViewerLoading(false);
       }
     }
     window.closeAppreciateViewer = closeAppreciateViewer;
@@ -833,6 +534,7 @@
       if (!wasActive) return;
       closeAppreciateViewer();
       globalViewActive = false;
+      window.__viewerGlobalViewActive = false;
       document.body.classList.remove('global-view', 'global-view-entering', 'global-view-exiting', 'appreciate-viewing');
       document.getElementById('globalViewBtn')?.classList.remove('active');
       if (!skipRender && typeof renderCards === 'function') renderCards(true);
@@ -851,6 +553,7 @@
       if (!globalViewActive) return;
       closeAppreciateViewer();
       globalViewActive = false;
+      window.__viewerGlobalViewActive = false;
       document.body.classList.remove('global-view', 'appreciate-viewing');
       document.getElementById('globalViewBtn')?.classList.remove('active');
       document.body.classList.add('global-view-exiting');
@@ -870,6 +573,7 @@
       closeEditPanel();
       if (batchMode) cancelBatch();
       globalViewActive = true;
+      window.__viewerGlobalViewActive = true;
       markQuickPreviewTask({ warehouseUsed: true });
       document.getElementById('globalViewBtn')?.classList.add('active');
       document.body.classList.add('global-view-entering');
@@ -9737,7 +9441,7 @@
       const seq = ++lightboxLoadSeq;
       const lightbox = document.getElementById('imageLightbox');
       const img = document.getElementById('lightboxImage');
-      const frame = getLightboxFrame();
+      const frame = window.getLightboxFrame();
       const dlBtn = document.getElementById('lightboxDownloadBtn');
       if (!lightbox || !img) return;
       const loadStale = () => seq !== lightboxLoadSeq;
@@ -9752,9 +9456,10 @@
       }
       if (dlBtn) dlBtn.disabled = true;
       lightbox.classList.add('active');
-      setViewerFrameLoading(frame, true);
+      window.setViewerFrameLoading(frame, true);
       const upgradeImageGenFull = () => {
         if (!opts.imageGen || !opts.feedKey || !window.FeatureDraft?.resolveImageGenFullUrl) return;
+        const viewerNav = window.getViewerNav();
         const navItem = viewerNav.items[viewerNav.index];
         const kind = navItem?.kind || (opts.community ? 'community' : opts.cardId ? 'warehouse' : null);
         const navId = navItem?.id || opts.postId || opts.cardId;
@@ -9786,11 +9491,11 @@
         img.style.maxWidth = '';
         img.style.maxHeight = '';
         img.style.objectFit = '';
-        if (window.__lightboxCommunityMode) fitLightboxDisplaySize(img);
-        resetImageZoom(img);
-        attachImageZoom(img);
-        finishViewerFrameReveal(frame);
-        if (window.__lightboxCommunityMode) layoutViewerBorderSvg(frame);
+        if (window.__lightboxCommunityMode) window.fitLightboxDisplaySize(img);
+        window.resetImageZoom(img);
+        window.attachImageZoom(img);
+        window.finishViewerFrameReveal(frame);
+        if (window.__lightboxCommunityMode) window.layoutViewerBorderSvg(frame);
         if (dlBtn && !window.__lightboxCommunityMode) {
           const ap = window.__lightboxAssetPackOpts;
           const canSave = !ap || ap.allowSave;
@@ -9813,7 +9518,7 @@
           showToast('原图暂不可用，已显示预览图', 4000);
           return;
         }
-        setViewerFrameLoading(frame, false);
+        window.setViewerFrameLoading(frame, false);
         lightbox.classList.remove('active');
         if (!opts.silentFail) showToast('图片加载失败，请稍后重试');
       };
@@ -9913,7 +9618,7 @@
           assetId: opts.cardId || null
         };
         window.__lightboxImageGenNav = true;
-        setViewerNav(navItems, `${opts.feedKey}#mj${opts.mjGalleryIndex || 0}`);
+        window.setViewerNav(navItems, `${opts.feedKey}#mj${opts.mjGalleryIndex || 0}`);
       } else if (opts.imageGen && opts.feedKey && window.FeatureDraft?.getImageGenFeedNavItems) {
         const navItems = window.FeatureDraft.getImageGenFeedNavItems().map((it) => ({
           type: 'imageGen',
@@ -9922,7 +9627,7 @@
           key: it.key
         }));
         window.__lightboxImageGenNav = navItems.length > 1;
-        setViewerNav(navItems, opts.feedKey);
+        window.setViewerNav(navItems, opts.feedKey);
       } else {
         window.__lightboxImageGenNav = false;
         const navCardId = opts.cardId || selectedCardId;
@@ -9930,9 +9635,9 @@
           const navItems = cards
             .filter((c) => c.image && cardHasDisplayImage(c))
             .map((c) => ({ type: 'card', id: c.id, key: `card:${c.id}` }));
-          setViewerNav(navItems, `card:${navCardId}`);
+          window.setViewerNav(navItems, `card:${navCardId}`);
         } else {
-          setViewerNav([], '');
+          window.setViewerNav([], '');
         }
       }
       loadLightboxImage(src || '', opts);
@@ -9950,6 +9655,36 @@
     window.openLightbox = openLightbox;
     window.setLightboxSrc = setLightboxSrc;
 
+    window.__viewerWheelNavigate = function (item) {
+      if (item.type === 'card') {
+        if (!globalViewActive) return false;
+        void openAppreciateViewer(item.id);
+        return true;
+      }
+      if (item.type === 'post' && window.FeatureDraft?.openCommunityAppreciateById) {
+        void window.FeatureDraft.openCommunityAppreciateById(item.id);
+        return true;
+      }
+      if (item.type === 'imageGen' && window.FeatureDraft?.openImageGenLightboxAt) {
+        void window.FeatureDraft.openImageGenLightboxAt(item.kind, item.id, item.key);
+        return true;
+      }
+      if (item.type === 'imageGenMjTile' && window.__lightboxMjGallery?.urls?.length) {
+        const url = window.__lightboxMjGallery.urls[item.tileIndex ?? 0];
+        if (url) {
+          setLightboxSrc(url, {
+            imageGen: true,
+            feedKey: window.__lightboxMjGallery.feedKey,
+            cardId: window.__lightboxMjGallery.assetId,
+            mjGalleryUrls: window.__lightboxMjGallery.urls,
+            mjGalleryIndex: item.tileIndex ?? 0
+          });
+          return true;
+        }
+      }
+      return false;
+    };
+
     async function downloadLightboxImage() {
       const img = document.getElementById('lightboxImage');
       const dlBtn = document.getElementById('lightboxDownloadBtn');
@@ -9958,9 +9693,12 @@
         return;
       }
       let cardId = window.__lightboxWarehouseCardId || warehousePreviewCardId || null;
-      if (!cardId && !window.__lightboxCommunityMode && window.__lightboxImageGenNav && viewerNav.index >= 0) {
-        const item = viewerNav.items[viewerNav.index];
-        if (item?.type === 'imageGen' && item.kind === 'warehouse') cardId = item.id;
+      if (!cardId && !window.__lightboxCommunityMode && window.__lightboxImageGenNav) {
+        const viewerNav = window.getViewerNav();
+        if (viewerNav.index >= 0) {
+          const item = viewerNav.items[viewerNav.index];
+          if (item?.type === 'imageGen' && item.kind === 'warehouse') cardId = item.id;
+        }
       }
       if (!cardId && !window.__lightboxCommunityMode) cardId = selectedCardId;
       const card = cardId ? cards.find((c) => c.id === cardId) : null;
@@ -10005,18 +9743,6 @@
       void window.FeatureDraft?.fillCardToImageGen?.(card);
     });
 
-    window.addEventListener('mousemove', (e) => {
-      if (!imageZoom.dragging) return;
-      imageZoom.tx = e.clientX - imageZoom.startX;
-      imageZoom.ty = e.clientY - imageZoom.startY;
-      applyImageZoom();
-    });
-    window.addEventListener('mouseup', () => {
-      if (imageZoom.dragging) {
-        imageZoom.dragging = false;
-        applyImageZoom();
-      }
-    });
     function closeLightbox(e) {
       const lightbox = document.getElementById('imageLightbox');
       if (!lightbox?.classList.contains('active')) return;
@@ -10028,7 +9754,7 @@
       }
       lightbox?.classList.remove('active');
       syncLightboxActions({});
-      const frame = getLightboxFrame();
+      const frame = window.getLightboxFrame();
       frame?.classList.remove('is-loading', 'viewer-glow-active');
       frame?.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal', 'viewer-shine-active');
       const img = document.getElementById('lightboxImage');
@@ -10045,11 +9771,10 @@
         img.style.maxHeight = '';
         img.style.objectFit = '';
       }
-      viewerNav = { items: [], index: -1 };
+      window.setViewerNav([], '');
       window.__lightboxImageGenNav = false;
       window.__lightboxMjGallery = null;
-      if (imageZoom.img === document.getElementById('lightboxImage')) imageZoom.img = null;
-      imageZoom.dragging = false;
+      window.resetImageZoom(null);
     }
     window.closeLightbox = closeLightbox;
 

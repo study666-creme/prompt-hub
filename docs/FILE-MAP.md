@@ -21,7 +21,7 @@
 | **木瓜慢速线** | `server/src/lib/mooko.ts` · `mooko-submit.ts` · `mooko-drain.ts` | Cron `*/2` **await 提交**（非全站恢复）；`GET /jobs/:id?settle=1` 亦可同步 POST；`index.ts` scheduled |
 | **4K 原图下载** | `supabase-sync.js`（`downloadCardFullResBlob`） | `script.js`（`downloadCardImageFile`） |
 | **卡片上传 50MB** | `server/src/routes/v1/media.ts` | `supabase-sync.js` · `index.html` 文案 |
-| **生图滚轮 / 灯箱** | `script.js`（`attachImageZoom`, `loadLightboxImage`） | `features-draft.js`（预览侧栏） |
+| **生图滚轮 / 灯箱** | `script.js`（`openLightbox`, `loadLightboxImage`, `__viewerWheelNavigate`） | `app-viewer-core.js` → `pack-viewer.js`（缩放/frame/滚轮框架）；`features-draft.js`（预览侧栏） |
 | 会员 / 积分 UI | `membership.js`, `subscription.js` | `server/src/routes/v1/me.ts` |
 | 部署 Pages | `deploy-pages.ps1` | `index.html`（`__APP_BUILD__`）, `sw.js` |
 | 部署 Worker | `server/package.json` scripts | `server/wrangler.toml` |
@@ -67,7 +67,7 @@
 | 导出 | `window.FeatureDraft` | 外部调用入口 |
 | 调试 | `window.forceRefreshAllImages` | 手动刷新各 Feed 图片与排版 |
 | 生图预览 / 灯箱 | `renderImageGenPreview`, `bindImageGenPreviewWheelScroll`, `navigateImageGenPreviewByWheel` |
-| **生图滚轮缩放** | `attachImageZoom`, `loadLightboxImage`, `onViewerShellWheel`（`script.js`） |
+| **生图滚轮缩放** | `attachImageZoom`, `setViewerNav`, `onViewerShellWheel`（`app-viewer-core.js` → `pack-viewer.js`） | `loadLightboxImage`, `__viewerWheelNavigate`（`script.js`） |
 | 批量社区公开 | `batchPublishCommunity`, `batchUnpublishCommunity`（`script.js`） |
 | 生图 Feed / 轮询 | `renderImageGenFeed`（`image-gen-feed.js`）, `pollGenerationJobUntilDone` | 进行中任务会周期性打 Worker |
 
@@ -148,18 +148,27 @@
 
 ---
 
+## `app-viewer-core.js`（灯箱/欣赏器 DOM + 缩放，约 300 行）
+
+| 区域 | 函数 | 作用 |
+|------|------|------|
+| Frame | `getLightboxFrame`, `getAppreciateViewerFrame` | 灯箱/欣赏器容器 |
+| 加载态 | `setViewerFrameLoading`, `finishViewerFrameReveal` | 扫光与 loading |
+| 缩放 | `attachImageZoom`, `resetImageZoom` | 滚轮缩放 + 拖拽 |
+| 导航 | `setViewerNav`, `getViewerNav`, `onViewerShellWheel` | 滚轮换图框架；业务回调 `window.__viewerWheelNavigate` 由 `script.js` 注册 |
+| 打包 | `scripts/build-viewer-pack.mjs` → **`pack-viewer.js`** | 须在 `script.js` 之前加载；禁止 `?v=` |
+
+---
+
 ## `index.html` 脚本加载顺序（节选）
 
-1. `supabase-config.js` / `api-config.js`
-2. `supabase-sync.js` · `cloud-sync-safety.js` · `api-client.js`
-3. `masonry.pkgd.min.js`
-4. **`mobile.js`**（`MobileUI.isMobileViewport` 唯一来源，须在 `script.js` 之前）
-5. `script.js`
-6. **`feed-layout.js`** → **`feed-images.js`** → **`image-gen-feed.js`**（均须在 `features-draft.js` 之前）
-7. `features-draft.js` · `community-gacha.js` · `features-assets.js`
-8. `pwa-install.js`
+1. `pack-prelude.js` · `pack-foundation.js` · `supabase-sync.js` · `api-client.js`
+2. `pack-core.js` · `pack-account.js`
+3. `masonry.pkgd.min.js` · **`pack-viewer.js`**
+4. **`script.js`**
+5. `pack-imagegen.js` · `pack-feed.js` · `features-draft.js` · `pack-extra.js` · `features-assets.js`
 
-> 手机断点 **900px** 仅定义在 `mobile.js`（`MobileUI.isMobile` / `isMobileViewport` 等价）。
+> 手机断点 **900px** 仅定义在 `pack-foundation.js` 内的 `MobileUI`（原 `mobile.js`）。
 
 > `hotfix-image-layout.js` 已废弃（逻辑并入 `features-draft.js`）；`hotfix-community-layout.js` 已删除。
 

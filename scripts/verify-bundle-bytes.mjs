@@ -10,6 +10,7 @@ const packs = [
   'pack-prelude.js',
   'pack-foundation.js',
   'pack-core.js',
+  'pack-viewer.js',
   'pack-feed.js',
   'pack-imagegen.js',
   'pack-account.js',

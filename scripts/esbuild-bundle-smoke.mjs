@@ -28,7 +28,8 @@ const targets = [
   'file-origin-guard.js',
   'image-trim.js',
   'theme.js',
-  'app-toast.js'
+  'app-toast.js',
+  'app-viewer-core.js'
 ];
 
 let failed = 0;

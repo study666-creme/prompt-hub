@@ -72,6 +72,10 @@ Write-Host "foundation-bundle-vm-smoke ..."
 & node (Join-Path $root "scripts\run-foundation-bundle-vm-smoke.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+Write-Host "verify-viewer-pack ..."
+& node (Join-Path $root "scripts\verify-viewer-pack.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 Write-Host "verify-pack-contract ..."
 & node (Join-Path $root "scripts\verify-pack-contract.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
