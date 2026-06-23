@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const code = readFileSync(join(root, 'imagegen-tools.bundle.js'), 'utf8');
+const code = readFileSync(join(root, 'pack-imagegen.js'), 'utf8');
 
 function elStub() {
   return {
@@ -51,7 +51,7 @@ const window = {
 };
 window.window = window;
 
-vm.runInContext(code, vm.createContext(window), { filename: 'imagegen-tools.bundle.js' });
+vm.runInContext(code, vm.createContext(window), { filename: 'pack-imagegen.js' });
 
 const checks = [
   ['PointsSystem', !!window.PointsSystem],

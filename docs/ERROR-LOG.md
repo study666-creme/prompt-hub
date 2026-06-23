@@ -52,14 +52,14 @@
 | **构建** | `20260622p` |
 | **勿再犯** | 新增/移动 bundle 路径后：`SMOKE_BASE=https://prompt-hubs.com node scripts/run-index-http-smoke.mjs`；禁止把运行时 JS 只放在会被 SPA 吞掉的路径（如未在 staging 里的 `/dist/`） |
 
-### 1c. `*.bundle.js?v=` 查询串（20260623d 复发）
+### 1d. `*.bundle.js` 文件名（20260623f 根治）
 
 | 项 | 内容 |
 |----|------|
-| **现象** | Console：`MIME type text/html`；`FeedImages.init` undefined；生图/社区全空 |
-| **根因** | `index.html` 给 bundle 加了 `?v=构建号`；Cloudflare Pages 对 `*.bundle.js?query` 回退 HTML（`script.js?v=` 却正常） |
-| **修复** | 去掉 bundle 的 `?v=`；`_headers` 对 `/*.bundle.js` 设 no-cache；冒烟禁止 index 出现 `.bundle.js?v=` |
-| **构建** | `20260623e` |
+| **现象** | 浏览器 `<script src="foundation.bundle.js">` 得 HTML；`FeedImages`/`MediaPipeline` 全 false |
+| **根因** | Cloudflare Pages 对 **`.bundle.js` 扩展名** 的 script 请求 SPA 回退（普通 `.js` 正常） |
+| **修复** | 构建输出改名为 `pack-foundation.js` … `pack-extra.js`；HTTP 冒烟加 `Sec-Fetch-Dest: script` |
+| **构建** | `20260623f` |
 
 ---
 

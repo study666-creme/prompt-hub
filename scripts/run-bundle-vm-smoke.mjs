@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const bundlePath = join(root, 'core-pipeline.bundle.js');
+const bundlePath = join(root, 'pack-core.js');
 const code = readFileSync(bundlePath, 'utf8');
 
 const window = {
@@ -43,7 +43,7 @@ window.window = window;
 window.self = window;
 
 const ctx = vm.createContext(window);
-vm.runInContext(code, ctx, { filename: 'core-pipeline.bundle.js' });
+vm.runInContext(code, ctx, { filename: 'pack-core.js' });
 
 const checks = [
   ['MediaPipeline', !!window.MediaPipeline],

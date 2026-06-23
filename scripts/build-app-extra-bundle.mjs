@@ -13,7 +13,7 @@ const sources = [
 concatMinifyBundle({
   root,
   sources,
-  outFile: join(root, 'app-extra.bundle.js'),
-  metaFile: join(root, 'dist', 'app-extra.bundle.meta.json'),
+  outFile: join(root, 'pack-extra.js'),
+  metaFile: join(root, 'dist', 'pack-extra.meta.json'),
   label: 'build-app-extra-bundle'
 });

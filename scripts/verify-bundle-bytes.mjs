@@ -1,21 +1,21 @@
 /**
- * 部署前：确认 bundle 文件是 JS 而非 SPA 回退的 index.html。
+ * 部署前：确认 pack 文件是 JS 而非 SPA 回退的 index.html。
  */
 import { readFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const bundles = [
-  'core-pipeline.bundle.js',
-  'feed-modules.bundle.js',
-  'imagegen-tools.bundle.js',
-  'account-modules.bundle.js',
-  'app-extra.bundle.js',
-  'foundation.bundle.js'
+const packs = [
+  'pack-foundation.js',
+  'pack-core.js',
+  'pack-feed.js',
+  'pack-imagegen.js',
+  'pack-account.js',
+  'pack-extra.js'
 ];
 
-for (const name of bundles) {
+for (const name of packs) {
   const path = join(root, name);
   let head;
   try {

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const code = readFileSync(join(root, 'app-extra.bundle.js'), 'utf8');
+const code = readFileSync(join(root, 'pack-extra.js'), 'utf8');
 
 const window = {
   SupabaseSync: { getUserId: () => 'guest', isLoggedIn: () => false },
@@ -34,7 +34,7 @@ const window = {
 };
 window.window = window;
 
-vm.runInContext(code, vm.createContext(window), { filename: 'app-extra.bundle.js' });
+vm.runInContext(code, vm.createContext(window), { filename: 'pack-extra.js' });
 
 const checks = [
   ['CommunityGacha', !!window.CommunityGacha]

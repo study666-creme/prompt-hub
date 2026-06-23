@@ -14,7 +14,7 @@ const sources = [
 concatMinifyBundle({
   root,
   sources,
-  outFile: join(root, 'foundation.bundle.js'),
-  metaFile: join(root, 'dist', 'foundation.bundle.meta.json'),
+  outFile: join(root, 'pack-foundation.js'),
+  metaFile: join(root, 'dist', 'pack-foundation.meta.json'),
   label: 'build-foundation-bundle'
 });

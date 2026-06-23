@@ -15,7 +15,7 @@ const sources = [
 concatMinifyBundle({
   root,
   sources,
-  outFile: join(root, 'core-pipeline.bundle.js'),
-  metaFile: join(root, 'dist', 'core-pipeline.bundle.meta.json'),
+  outFile: join(root, 'pack-core.js'),
+  metaFile: join(root, 'dist', 'pack-core.meta.json'),
   label: 'build-core-bundle'
 });

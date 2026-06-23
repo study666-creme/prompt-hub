@@ -7,13 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const bundlePath = join(root, 'app-extra.bundle.js');
+const bundlePath = join(root, 'pack-extra.js');
 
 let code;
 try {
   code = readFileSync(bundlePath, 'utf8');
 } catch {
-  console.error('verify-app-extra-bundle: missing app-extra.bundle.js');
+  console.error('verify-app-extra-bundle: missing pack-extra.js');
   process.exit(1);
 }
 

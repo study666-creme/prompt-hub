@@ -1,4 +1,4 @@
-const CACHE = 'prompt-hub-v20260623e';
+const CACHE = 'prompt-hub-v20260623f';
 /** 仅缓存静态小资源；HTML/JS/CSS 始终走网络，避免误显示「暂时无法连接」 */
 const ASSETS = [
   './manifest.webmanifest',
@@ -46,7 +46,24 @@ self.addEventListener('fetch', (e) => {
 
   e.respondWith(
     (async () => {
-      if (isHtml || isScriptOrStyle) {
+      if (isScriptOrStyle) {
+        try {
+          const res = await fetch(e.request, { cache: 'no-store' });
+          const ct = res.headers.get('content-type') || '';
+          if (/text\/html/i.test(ct)) {
+            return new Response('// script response was HTML (SPA fallback)', {
+              status: 502,
+              headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+            });
+          }
+          return res;
+        } catch (err) {
+          const cached = await caches.match(e.request);
+          if (cached) return cached;
+          throw err;
+        }
+      }
+      if (isHtml) {
         try {
           return await fetch(e.request, { cache: 'no-store' });
         } catch (err) {
@@ -55,8 +72,7 @@ self.addEventListener('fetch', (e) => {
             (await caches.match('/index.html')) ||
             (await caches.match('./index.html'));
           if (cached) return cached;
-          /** 仅真离线时显示离线页；在线但连不上（如本地服务未启动）交给浏览器报错，避免误报 */
-          if (!navigator.onLine && isHtml) {
+          if (!navigator.onLine) {
             return new Response(OFFLINE_HTML, {
               status: 503,
               headers: { 'Content-Type': 'text/html; charset=utf-8' }

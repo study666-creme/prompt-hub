@@ -2971,6 +2971,10 @@
 
   function wireFeedImages() {
     if (window.__feedImagesWired) return;
+    if (!window.FeedImages?.init) {
+      console.error('[FeatureDraft] pack-feed.js not loaded — FeedImages missing');
+      return;
+    }
     const FI = window.FeedImages.init({
       esc,
       isDisplayableImage,
@@ -3023,6 +3027,10 @@
 
   function wireImageGenFeed() {
     if (window.__imageGenFeedWired) return;
+    if (!window.ImageGenFeed?.init) {
+      console.error('[FeatureDraft] pack-feed.js not loaded — ImageGenFeed missing');
+      return;
+    }
     const IG = window.ImageGenFeed.init({
       esc,
       isDisplayableImage,
@@ -3104,6 +3112,10 @@
 
   function wireFeedLayout() {
     if (window.__feedLayoutWired) return;
+    if (!window.FeedLayout?.init) {
+      console.error('[FeatureDraft] pack-feed.js not loaded — FeedLayout missing');
+      return;
+    }
     const FL = window.FeedLayout.init({
       getCommunityColumns,
       getCreationsFeedColumns,
@@ -12642,9 +12654,28 @@
     });
   }
 
-  wireFeedImages();
-  wireImageGenFeed();
-  wireFeedLayout();
+  function wireAllFeedModules() {
+    wireFeedImages();
+    wireImageGenFeed();
+    wireFeedLayout();
+  }
+
+  if (!window.FeedImages?.init || !window.ImageGenFeed?.init || !window.FeedLayout?.init) {
+    let feedWireTries = 0;
+    (function retryFeedWire() {
+      if (window.FeedImages?.init && window.ImageGenFeed?.init && window.FeedLayout?.init) {
+        wireAllFeedModules();
+        return;
+      }
+      if (++feedWireTries > 120) {
+        console.error('[FeatureDraft] feed packs not ready after', feedWireTries, 'retries');
+        return;
+      }
+      setTimeout(retryFeedWire, 25);
+    })();
+  } else {
+    wireAllFeedModules();
+  }
 
   window.FeatureDraft = {
     init,

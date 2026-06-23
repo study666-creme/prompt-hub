@@ -28,13 +28,12 @@
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260623e` · https://prompt-hubs.com |
+| **Pages** | build `20260623f` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
 
-- ✅ **六 bundle** 在站点根目录 + 部署后 HTTP 冒烟（须为 JS 非 HTML）
-  - `foundation`（CloudSyncSafety + AppModalHub + MobileUI）· `core-pipeline` · `feed-modules` · `imagegen-tools` · `account-modules` · `app-extra`
+- ✅ **六 pack**（`pack-foundation` … `pack-extra`）+ 部署后 HTTP 冒烟（含浏览器 script 请求头）
 - ✅ 手机切后台：`localStorage` 备份生图任务，回前台任意页强制恢复
 - ✅ 失败任务 12 分钟内标红；成功/失败自动刷新占位；生图 Feed 首开 hydrate
 
@@ -46,7 +45,7 @@
 
 ### 下一步
 
-1. 强刷确认 `window.__APP_BUILD__ === '20260623e'`
+1. 强刷确认 `window.__APP_BUILD__ === '20260623f'`
 2. 继续 `script.js` / `features-draft.js` 首段拆包（小步、每步 HTTP 冒烟）
 
 ### 部署

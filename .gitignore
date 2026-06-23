@@ -22,5 +22,6 @@ server/.wrangler/
 backups/
 dist/
 *.bundle.js
+pack-*.js
 downloads/
 server/tmp-mooko-*

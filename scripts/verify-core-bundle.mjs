@@ -7,13 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const bundlePath = join(root, 'core-pipeline.bundle.js');
+const bundlePath = join(root, 'pack-core.js');
 
 let code;
 try {
   code = readFileSync(bundlePath, 'utf8');
 } catch {
-  console.error('verify-core-bundle: missing core-pipeline.bundle.js — run npm run build:all');
+  console.error('verify-core-bundle: missing pack-core.js — run npm run build:all');
   process.exit(1);
 }
 

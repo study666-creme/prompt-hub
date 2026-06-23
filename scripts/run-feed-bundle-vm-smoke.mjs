@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const code = readFileSync(join(root, 'feed-modules.bundle.js'), 'utf8');
+const code = readFileSync(join(root, 'pack-feed.js'), 'utf8');
 
 function elStub() {
   return {
@@ -65,7 +65,7 @@ const window = {
 window.window = window;
 window.globalThis = window;
 
-vm.runInContext(code, vm.createContext(window), { filename: 'feed-modules.bundle.js' });
+vm.runInContext(code, vm.createContext(window), { filename: 'pack-feed.js' });
 
 const checks = [
   ['FeedLayout', !!window.FeedLayout],

@@ -7,13 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const bundlePath = join(root, 'account-modules.bundle.js');
+const bundlePath = join(root, 'pack-account.js');
 
 let code;
 try {
   code = readFileSync(bundlePath, 'utf8');
 } catch {
-  console.error('verify-account-bundle: missing account-modules.bundle.js');
+  console.error('verify-account-bundle: missing pack-account.js');
   process.exit(1);
 }
 

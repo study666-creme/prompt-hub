@@ -14,7 +14,7 @@ const sources = [
 concatMinifyBundle({
   root,
   sources,
-  outFile: join(root, 'account-modules.bundle.js'),
-  metaFile: join(root, 'dist', 'account-modules.bundle.meta.json'),
+  outFile: join(root, 'pack-account.js'),
+  metaFile: join(root, 'dist', 'pack-account.meta.json'),
   label: 'build-account-bundle'
 });

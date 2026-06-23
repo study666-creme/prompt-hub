@@ -1,10 +1,18 @@
 /**
- * 本地/线上 HTTP 冒烟：bundle URL 必须返回 JS，不能是 SPA 回退的 HTML。
+ * 本地/线上 HTTP 冒烟：pack URL 必须返回 JS（含浏览器 script 请求头），不能是 SPA 回退 HTML。
  */
 const base = process.env.SMOKE_BASE || 'http://127.0.0.1:5500';
+const scriptHdr = {
+  'Sec-Fetch-Dest': 'script',
+  'Sec-Fetch-Mode': 'no-cors',
+  Referer: `${base.replace(/\/$/, '')}/`
+};
 
-async function get(path) {
-  const res = await fetch(`${base}${path}`, { cache: 'no-store' });
+async function get(path, asScript = false) {
+  const res = await fetch(`${base}${path}`, {
+    cache: 'no-store',
+    headers: asScript ? scriptHdr : undefined
+  });
   const ct = res.headers.get('content-type') || '';
   const text = await res.text();
   return { ok: res.ok, status: res.status, ct, text };
@@ -17,17 +25,16 @@ if (!index.ok) {
 }
 
 const mustHave = [
-  'core-pipeline.bundle.js',
-  'feed-modules.bundle.js',
-  'imagegen-tools.bundle.js',
-  'account-modules.bundle.js',
-  'app-extra.bundle.js',
-  'foundation.bundle.js'
+  'pack-foundation.js',
+  'pack-core.js',
+  'pack-feed.js',
+  'pack-imagegen.js',
+  'pack-account.js',
+  'pack-extra.js'
 ];
 const mustNot = [
-  'dist/core-pipeline.bundle.js',
-  'dist/feed-modules.bundle.js',
-  '.bundle.js?v=',
+  '.bundle.js',
+  'dist/pack-',
   'media-pipeline.js?v=',
   'membership.js?v=',
   'subscription.js?v=',
@@ -53,47 +60,44 @@ for (const token of mustNot) {
   }
 }
 
-const bundles = [
-  ['/core-pipeline.bundle.js', 'MediaPipeline', 'window.MediaPipeline'],
-  ['/feed-modules.bundle.js', 'FeedLayout', 'FeedLayout'],
-  ['/imagegen-tools.bundle.js', 'PointsSystem', 'PointsSystem'],
-  ['/account-modules.bundle.js', 'Membership', 'window.Membership'],
-  ['/app-extra.bundle.js', 'CommunityGacha', 'CommunityGacha'],
-  ['/foundation.bundle.js', 'CloudSyncSafety', 'window.CloudSyncSafety']
+const packs = [
+  ['/pack-foundation.js', 'CloudSyncSafety', 'window.CloudSyncSafety'],
+  ['/pack-core.js', 'MediaPipeline', 'window.MediaPipeline'],
+  ['/pack-feed.js', 'FeedLayout', 'FeedLayout'],
+  ['/pack-imagegen.js', 'PointsSystem', 'PointsSystem'],
+  ['/pack-account.js', 'Membership', 'window.Membership'],
+  ['/pack-extra.js', 'CommunityGacha', 'CommunityGacha']
 ];
 
-for (const [path, label, token] of bundles) {
-  const res = await get(path);
-  if (!res.ok) {
-    console.error(`index-http-smoke: ${path} HTTP ${res.status}`);
-    process.exit(1);
+for (const [path, label, token] of packs) {
+  for (const asScript of [false, true]) {
+    const tag = asScript ? 'script' : 'plain';
+    const res = await get(path, asScript);
+    if (!res.ok) {
+      console.error(`index-http-smoke: ${path} (${tag}) HTTP ${res.status}`);
+      process.exit(1);
+    }
+    if (/text\/html/i.test(res.ct) || res.text.trimStart().startsWith('<!')) {
+      console.error(`index-http-smoke: ${path} (${tag}) returned HTML — images will break`);
+      process.exit(1);
+    }
+    if (!res.text.includes(token)) {
+      console.error(`index-http-smoke: ${path} (${tag}) missing ${label}`);
+      process.exit(1);
+    }
   }
-  if (/text\/html/i.test(res.ct) || res.text.trimStart().startsWith('<!')) {
-    console.error(`index-http-smoke: ${path} returned HTML (SPA fallback) — images will break`);
-    process.exit(1);
-  }
-  if (!res.text.includes(token)) {
-    console.error(`index-http-smoke: ${path} missing ${label}`);
-    process.exit(1);
-  }
-  console.log(`index-http-smoke OK: ${path} (${res.ct.split(';')[0]})`);
+  console.log(`index-http-smoke OK: ${path} (plain + script)`);
 }
 
-// 与浏览器 index.html 一致：解析 bundle script src 并请求（不得带 ?v=）
-const bundleSrcRe = /src="([^"]+\.bundle\.js[^"]*)"/g;
+const packSrcRe = /src="([^"]+\.js)"/g;
 let m;
-while ((m = bundleSrcRe.exec(index.text)) !== null) {
+while ((m = packSrcRe.exec(index.text)) !== null) {
   const src = m[1];
+  if (!src.startsWith('pack-')) continue;
   if (src.includes('?')) {
-    console.error(`index-http-smoke: bundle script must not use query string: ${src}`);
+    console.error(`index-http-smoke: pack script must not use query string: ${src}`);
     process.exit(1);
   }
-  const res = await get(src.startsWith('/') ? src : `/${src}`);
-  if (/text\/html/i.test(res.ct) || res.text.trimStart().startsWith('<!')) {
-    console.error(`index-http-smoke: index references ${src} but got HTML`);
-    process.exit(1);
-  }
-  console.log(`index-http-smoke OK: index script ${src}`);
 }
 
-console.log('index-http-smoke OK: all bundles are real JavaScript');
+console.log('index-http-smoke OK: all packs are real JavaScript');

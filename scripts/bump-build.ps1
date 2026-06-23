@@ -31,7 +31,6 @@ $files = @(
   (Join-Path $root "admin.html"),
   (Join-Path $root "sw.js")
 )
-# *.bundle.js 禁止 ?v=（Cloudflare Pages 对 .bundle.js?query 会 SPA 回退成 HTML）
 $syncCacheAssets = @(
   'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css',
   'theme.js', 'api-client.js', 'supabase-sync.js', 'script.js',
@@ -49,7 +48,7 @@ foreach ($path in $files) {
       $t = [regex]::Replace($t, "($esc\?v=)$oldEsc", "`${1}$new")
       $t = [regex]::Replace($t, "($esc\?v=)\d{8}[a-z]", "`${1}$new")
     }
-    $t = [regex]::Replace($t, '([\w.-]+\.bundle\.js)\?v=[^"]+', '$1')
+    $t = [regex]::Replace($t, '(src="pack-[^"]+)\?v=[^"]+', '$1')
   } elseif ($path -like '*sw.js') {
     $t = [regex]::Replace($t, "const CACHE = 'prompt-hub-v[^']+';", "const CACHE = 'prompt-hub-v$new';")
   } else {
