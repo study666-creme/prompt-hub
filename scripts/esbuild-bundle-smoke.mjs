@@ -29,7 +29,8 @@ const targets = [
   'image-trim.js',
   'theme.js',
   'app-toast.js',
-  'app-viewer-core.js'
+  'app-viewer-core.js',
+  'app-lightbox.js'
 ];
 
 let failed = 0;

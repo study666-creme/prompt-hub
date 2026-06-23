@@ -7,7 +7,7 @@ $files = @(
   'sync-orchestrator.js', 'card-image-loader.js', 'feed-images.js', 'feed-layout.js',
   'mobile.js', 'features-assets.js', 'asset-studio.js', 'supabase-sync.js',
   'api-client.js', 'community-gacha.js', 'admin.js', 'imagegen-prompt-tools.js',
-  'imagegen-prompt-kit.js', 'points-system.js', 'cloud-sync-safety.js', 'app-toast.js', 'app-viewer-core.js'
+  'imagegen-prompt-kit.js', 'points-system.js', 'cloud-sync-safety.js', 'app-toast.js', 'app-viewer-core.js', 'app-lightbox.js'
 )
 
 $failed = @()

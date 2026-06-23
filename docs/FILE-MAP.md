@@ -21,7 +21,7 @@
 | **木瓜慢速线** | `server/src/lib/mooko.ts` · `mooko-submit.ts` · `mooko-drain.ts` | Cron `*/2` **await 提交**（非全站恢复）；`GET /jobs/:id?settle=1` 亦可同步 POST；`index.ts` scheduled |
 | **4K 原图下载** | `supabase-sync.js`（`downloadCardFullResBlob`） | `script.js`（`downloadCardImageFile`） |
 | **卡片上传 50MB** | `server/src/routes/v1/media.ts` | `supabase-sync.js` · `index.html` 文案 |
-| **生图滚轮 / 灯箱** | `script.js`（`openLightbox`, `loadLightboxImage`, `__viewerWheelNavigate`） | `app-viewer-core.js` → `pack-viewer.js`（缩放/frame/滚轮框架）；`features-draft.js`（预览侧栏） |
+| **生图滚轮 / 灯箱** | `app-lightbox.js` → `pack-lightbox.js`（`openLightbox`, `loadLightboxImage`, `__viewerWheelNavigate`） | `app-viewer-core.js` → `pack-viewer.js`（缩放/frame）；`features-draft.js`（预览侧栏） |
 | 会员 / 积分 UI | `membership.js`, `subscription.js` | `server/src/routes/v1/me.ts` |
 | 部署 Pages | `deploy-pages.ps1` | `index.html`（`__APP_BUILD__`）, `sw.js` |
 | 部署 Worker | `server/package.json` scripts | `server/wrangler.toml` |
@@ -67,7 +67,7 @@
 | 导出 | `window.FeatureDraft` | 外部调用入口 |
 | 调试 | `window.forceRefreshAllImages` | 手动刷新各 Feed 图片与排版 |
 | 生图预览 / 灯箱 | `renderImageGenPreview`, `bindImageGenPreviewWheelScroll`, `navigateImageGenPreviewByWheel` |
-| **生图滚轮缩放** | `attachImageZoom`, `setViewerNav`, `onViewerShellWheel`（`app-viewer-core.js` → `pack-viewer.js`） | `loadLightboxImage`, `__viewerWheelNavigate`（`script.js`） |
+| **生图滚轮缩放** | `attachImageZoom`, `setViewerNav`（`pack-viewer.js`） | `openLightbox`, `loadLightboxImage`（`pack-lightbox.js`） |
 | 批量社区公开 | `batchPublishCommunity`, `batchUnpublishCommunity`（`script.js`） |
 | 生图 Feed / 轮询 | `renderImageGenFeed`（`image-gen-feed.js`）, `pollGenerationJobUntilDone` | 进行中任务会周期性打 Worker |
 
@@ -148,6 +148,18 @@
 
 ---
 
+## `app-lightbox.js`（灯箱业务，约 400 行）
+
+| 区域 | 函数 | 作用 |
+|------|------|------|
+| 入口 | `AppLightbox.init(deps)` | `script.js` 注入 `cards`、下载、`openAppreciateViewer` 等 |
+| 打开/换图 | `openLightbox`, `setLightboxSrc`, `loadLightboxImage` | 卡片库/社区/生图/MJ 四宫格 |
+| 按钮 | `syncLightboxActions`, `downloadLightboxImage` | 下载/收藏/去生图按钮态 |
+| 滚轮业务 | `registerViewerWheelNavigate` → `window.__viewerWheelNavigate` | 换图目标（卡片/社区/生图） |
+| 打包 | `scripts/build-lightbox-pack.mjs` → **`pack-lightbox.js`** | 在 `pack-viewer.js` 之后、`script.js` 之前 |
+
+---
+
 ## `app-viewer-core.js`（灯箱/欣赏器 DOM + 缩放，约 300 行）
 
 | 区域 | 函数 | 作用 |
@@ -164,8 +176,8 @@
 
 1. `pack-prelude.js` · `pack-foundation.js` · `supabase-sync.js` · `api-client.js`
 2. `pack-core.js` · `pack-account.js`
-3. `masonry.pkgd.min.js` · **`pack-viewer.js`**
-4. **`script.js`**
+3. `masonry.pkgd.min.js` · **`pack-viewer.js`** · **`pack-lightbox.js`**
+4. **`script.js`**（末尾 `AppLightbox.init(deps)`）
 5. `pack-imagegen.js` · `pack-feed.js` · `features-draft.js` · `pack-extra.js` · `features-assets.js`
 
 > 手机断点 **900px** 仅定义在 `pack-foundation.js` 内的 `MobileUI`（原 `mobile.js`）。
