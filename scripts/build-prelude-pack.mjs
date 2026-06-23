@@ -7,7 +7,7 @@ import { concatMinifyBundle, bundleRootFromMeta } from './lib/concat-minify-bund
 const root = bundleRootFromMeta(import.meta.url);
 concatMinifyBundle({
   root,
-  sources: ['file-origin-guard.js', 'image-trim.js'],
+  sources: ['file-origin-guard.js', 'image-trim.js', 'theme.js'],
   outFile: join(root, 'pack-prelude.js'),
   metaFile: join(root, 'dist', 'pack-prelude.meta.json'),
   label: 'build-prelude-pack'

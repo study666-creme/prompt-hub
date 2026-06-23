@@ -887,33 +887,6 @@
 
     function generateId() { return 'card_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9); }
 
-    function syncToastStacking() {
-      const toast = document.getElementById('toast');
-      if (!toast) return;
-      const overSheet =
-        document.body.classList.contains('trial-tasks-open') ||
-        document.body.classList.contains('subscribe-open') ||
-        document.getElementById('trialTasksOverlay')?.classList.contains('active') ||
-        document.getElementById('subscribeOverlay')?.classList.contains('active');
-      toast.classList.toggle('toast--stack-top', overSheet);
-    }
-    window.syncToastStacking = syncToastStacking;
-
-    function showToast(msg, durationMs) {
-      const toast = document.getElementById('toast');
-      toast.textContent = msg;
-      toast.classList.remove('toast--achievement');
-      syncToastStacking();
-      toast.classList.add('show');
-      clearTimeout(toast._timeout);
-      const ms = Number(durationMs) > 0 ? Number(durationMs) : 2000;
-      toast._timeout = setTimeout(() => toast.classList.remove('show'), ms);
-    }
-    window.showToast = showToast;
-    document.addEventListener('ph-api-unauthorized', () => {
-      showToast('登录已过期，请退出后重新登录，卡片库图片才能恢复显示', 9000);
-    });
-
     async function promptHubSaveImage(url, filename, imgEl) {
       const name = filename || `prompt-hub-${Date.now()}.png`;
       const saveBlob = (blob) => {

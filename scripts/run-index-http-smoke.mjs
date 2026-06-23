@@ -47,7 +47,8 @@ const mustNot = [
   'modal-hub.js?v=',
   'mobile.js?v=',
   'image-trim.js?v=',
-  'file-origin-guard.js?v='
+  'file-origin-guard.js?v=',
+  'theme.js?v='
 ];
 
 for (const token of mustHave) {
@@ -64,7 +65,7 @@ for (const token of mustNot) {
 }
 
 const packs = [
-  ['/pack-prelude.js', 'file-origin', '__PH_FILE_ORIGIN__'],
+  ['/pack-prelude.js', 'ThemeSchedule', 'ThemeSchedule'],
   ['/pack-foundation.js', 'CloudSyncSafety', 'window.CloudSyncSafety'],
   ['/pack-core.js', 'MediaPipeline', 'window.MediaPipeline'],
   ['/pack-feed.js', 'FeedLayout', 'FeedLayout'],

@@ -26,7 +26,9 @@ const targets = [
   'modal-hub.js',
   'mobile.js',
   'file-origin-guard.js',
-  'image-trim.js'
+  'image-trim.js',
+  'theme.js',
+  'app-toast.js'
 ];
 
 let failed = 0;

@@ -25,7 +25,8 @@ const required = [
   'window.MobileUI',
   'mergeCardsList',
   'isMobileViewport',
-  'unlockPageInteraction'
+  'unlockPageInteraction',
+  'window.showToast'
 ];
 
 const missing = required.filter((token) => !code.includes(token));

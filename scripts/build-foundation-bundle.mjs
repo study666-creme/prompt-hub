@@ -8,7 +8,8 @@ const root = bundleRootFromMeta(import.meta.url);
 const sources = [
   'cloud-sync-safety.js',
   'modal-hub.js',
-  'mobile.js'
+  'mobile.js',
+  'app-toast.js'
 ];
 
 concatMinifyBundle({

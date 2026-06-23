@@ -28,7 +28,7 @@
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260623g` · https://prompt-hubs.com |
+| **Pages** | build `20260623h` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
@@ -45,7 +45,7 @@
 ### 下一步
 
 1. 强刷确认 `window.__APP_BUILD__` 与 pack 脚本无 Console MIME 报错
-2. 继续 `script.js` / `features-draft.js` 首段拆包（小步、每步跑 `verify-pack-contract` + HTTP 冒烟）
+2. 继续从 `script.js` 拆出 viewer/灯箱模块 → `app-viewer.js`（小步）
 
 ### 部署
 
