@@ -21,7 +21,8 @@ const mustHave = [
   'feed-modules.bundle.js',
   'imagegen-tools.bundle.js',
   'account-modules.bundle.js',
-  'app-extra.bundle.js'
+  'app-extra.bundle.js',
+  'foundation.bundle.js'
 ];
 const mustNot = [
   'dist/core-pipeline.bundle.js',
@@ -32,7 +33,10 @@ const mustNot = [
   'trial-tasks.js?v=',
   'points-system.js?v=',
   'community-gacha.js?v=',
-  'pwa-install.js?v='
+  'pwa-install.js?v=',
+  'cloud-sync-safety.js?v=',
+  'modal-hub.js?v=',
+  'mobile.js?v='
 ];
 
 for (const token of mustHave) {
@@ -53,7 +57,8 @@ const bundles = [
   ['/feed-modules.bundle.js', 'FeedLayout', 'FeedLayout'],
   ['/imagegen-tools.bundle.js', 'PointsSystem', 'PointsSystem'],
   ['/account-modules.bundle.js', 'Membership', 'window.Membership'],
-  ['/app-extra.bundle.js', 'CommunityGacha', 'CommunityGacha']
+  ['/app-extra.bundle.js', 'CommunityGacha', 'CommunityGacha'],
+  ['/foundation.bundle.js', 'CloudSyncSafety', 'window.CloudSyncSafety']
 ];
 
 for (const [path, label, token] of bundles) {

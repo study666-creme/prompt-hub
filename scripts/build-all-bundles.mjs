@@ -12,7 +12,8 @@ for (const name of [
   'build-feed-bundle.mjs',
   'build-imagegen-bundle.mjs',
   'build-account-bundle.mjs',
-  'build-app-extra-bundle.mjs'
+  'build-app-extra-bundle.mjs',
+  'build-foundation-bundle.mjs'
 ]) {
   const path = join(scriptsDir, name);
   const r = spawnSync(process.execPath, [path], { stdio: 'inherit' });

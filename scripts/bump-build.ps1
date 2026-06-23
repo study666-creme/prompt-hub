@@ -32,9 +32,9 @@ $files = @(
 )
 $syncCacheAssets = @(
   'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css',
-  'theme.js', 'api-client.js', 'supabase-sync.js', 'core-pipeline.bundle.js',
+  'theme.js', 'api-client.js', 'foundation.bundle.js', 'supabase-sync.js', 'core-pipeline.bundle.js',
   'account-modules.bundle.js', 'script.js', 'feed-modules.bundle.js', 'imagegen-tools.bundle.js',
-  'features-draft.js', 'features-assets.js', 'app-extra.bundle.js', 'mobile.js'
+  'features-draft.js', 'features-assets.js', 'app-extra.bundle.js'
 )
 
 foreach ($path in $files) {

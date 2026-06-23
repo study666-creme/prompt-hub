@@ -64,4 +64,12 @@ Write-Host "account-bundle-vm-smoke ..."
 & node (Join-Path $root "scripts\run-account-bundle-vm-smoke.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+Write-Host "verify-foundation-bundle ..."
+& node (Join-Path $root "scripts\verify-foundation-bundle.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+Write-Host "foundation-bundle-vm-smoke ..."
+& node (Join-Path $root "scripts\run-foundation-bundle-vm-smoke.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 Write-Host "predeploy-smoke: all checks passed" -ForegroundColor Green

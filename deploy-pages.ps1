@@ -41,7 +41,7 @@ Write-Host "Deploying staged assets from: $staging"
 
 foreach ($bundle in @(
   'core-pipeline.bundle.js', 'feed-modules.bundle.js', 'imagegen-tools.bundle.js',
-  'account-modules.bundle.js', 'app-extra.bundle.js'
+  'account-modules.bundle.js', 'app-extra.bundle.js', 'foundation.bundle.js'
 )) {
   $bp = Join-Path $staging $bundle
   if (-not (Test-Path $bp)) {

@@ -11,7 +11,8 @@ const bundles = [
   'feed-modules.bundle.js',
   'imagegen-tools.bundle.js',
   'account-modules.bundle.js',
-  'app-extra.bundle.js'
+  'app-extra.bundle.js',
+  'foundation.bundle.js'
 ];
 
 for (const name of bundles) {

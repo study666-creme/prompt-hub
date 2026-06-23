@@ -21,7 +21,10 @@ const targets = [
   'subscription.js',
   'trial-tasks.js',
   'community-gacha.js',
-  'pwa-install.js'
+  'pwa-install.js',
+  'cloud-sync-safety.js',
+  'modal-hub.js',
+  'mobile.js'
 ];
 
 let failed = 0;
