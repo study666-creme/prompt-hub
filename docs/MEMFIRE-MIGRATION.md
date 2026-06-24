@@ -10,6 +10,17 @@
 
 > **选定 2026-06-06**：因 Supabase Pro 恢复后 **egress 仍受限**（约至 **6 月 25 日**），图片暂无法批量拉出；**数据库先迁 MemFire**，图片 **6 月 25 日后** 再 `sync-supabase-to-r2.mjs --download-only` 上 R2。
 
+### 基线备份（2026-06-24 · 已就绪）
+
+| 项 | 路径 / 说明 |
+|----|-------------|
+| **pg_dump** | `backups/prompt-hub-baseline-20260624.dump`（约 **24.5 MB**） |
+| **连接** | Pooler Session `aws-0-ap-southeast-1.pooler.supabase.com:5432` · 用户 `postgres.yibawjvhmqcysdovscss` |
+| **restore** | `pg_restore … backups\prompt-hub-baseline-20260624.dump`（MemFire 空库） |
+| **搬家前** | 再导 `prompt-hub-final-YYYYMMDD.dump`，**用 final 那份** restore |
+| **旧图** | `backups/card-images/`（**1904 张 · failed 0** · 2026-06-24 完成） |
+| **检查清单** | 本机 `backups/MIGRATION-CHECKPOINT.txt`（勿提交 git） |
+
 | 阶段 | 做什么 | 不做什么 |
 |------|--------|----------|
 | **现在（Phase 1）** | `pg_restore` → MemFire；改前端 + Worker 指向 MemFire | **不**跑 `memfire-upload-storage.mjs`；**不**指望 MemFire Storage 有旧图 |

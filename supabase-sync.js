@@ -4328,14 +4328,19 @@
     let cloudPayload = null;
     if (!opts.skipSafety && window.CloudSyncSafety?.validatePush) {
       try {
-        const { data, error: pullErr } = await sb
-          .from('user_data')
-          .select('data')
-          .eq('user_id', uid)
-          .maybeSingle();
-        if (pullErr) throw pullErr;
-        cloudPayload = data?.data || null;
-        const check = window.CloudSyncSafety.validatePush(payload, cloudPayload);
+        const remoteUpdated = await pullCloudMeta();
+        const localUpdated = getLocalCloudUpdatedAt(uid);
+        const canSkipFullCloud = !!(remoteUpdated && localUpdated && remoteUpdated === localUpdated);
+        if (!canSkipFullCloud) {
+          const { data, error: pullErr } = await sb
+            .from('user_data')
+            .select('data')
+            .eq('user_id', uid)
+            .maybeSingle();
+          if (pullErr) throw pullErr;
+          cloudPayload = data?.data || null;
+        }
+        const check = window.CloudSyncSafety.validatePush(payload, cloudPayload || {});
         if (!check.allow) {
           throw new Error(check.reason || '为保护云端数据，已取消同步');
         }

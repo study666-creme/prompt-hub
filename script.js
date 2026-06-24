@@ -5124,6 +5124,12 @@
       }
       if (cloud == null || typeof cloud !== 'object') return false;
 
+      const cloudBytes = (() => {
+        try { return JSON.stringify(cloud).length; } catch (e) { return 0; }
+      })();
+      const shouldReslimCloud = cloudBytes > 3_500_000
+        && !sessionStorage.getItem('ph_cloud_reslim_done');
+
       const merged = window.CloudSyncSafety?.mergePayload
         ? window.CloudSyncSafety.mergePayload(localPayload, cloud)
         : cloud;
@@ -5200,6 +5206,13 @@
       window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
       window.FeatureDraft?.syncPublishToggleForOpenCard?.();
       await saveAllData({ skipCloud: true });
+      if (shouldReslimCloud && typeof pushToCloud === 'function') {
+        try { sessionStorage.setItem('ph_cloud_reslim_done', '1'); } catch (e) { /* ignore */ }
+        void pushToCloud({ silent: true, skipImageUpload: true, skipSafety: true }).catch((e) => {
+          console.warn('[sync] cloud reslim push failed', e);
+          try { sessionStorage.removeItem('ph_cloud_reslim_done'); } catch (e2) { /* ignore */ }
+        });
+      }
       return true;
     }
 

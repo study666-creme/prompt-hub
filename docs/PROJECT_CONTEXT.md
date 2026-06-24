@@ -24,17 +24,17 @@
 
 ---
 
-## 当前部署阶段（2026-06-24 · P0 带宽修复 i · 已部署）
+## 当前部署阶段（2026-06-24 · P0 带宽 j · 已部署）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260624i` · https://prompt-hubs.com |
+| **Pages** | build `20260624j` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
 ### 已打通
 
-- ✅ **P0 生图仓库带宽**：禁卡片库后台 prefetch · 首屏 12 张 grid · 缓存 v2（`20260624i`）
+- ✅ **P0 带宽**：grid 缩略图 + `user_data` 增量同步（`updated_at` 49B vs 全量 13MB · `20260624j`）
 - ✅ **基线 pg_dump**：`backups/prompt-hub-baseline-20260624.dump`（**24.5 MB** · Pooler Session）
 - ✅ 新图走 **R2**（`MEDIA_STORAGE_MODE=r2`）
 
@@ -47,7 +47,7 @@
 
 ### 下一步
 
-1. 你本地强刷验收：图片生成 → 仓库 · Network 首屏 **< 5 MB**
+1. 强刷后验收：Network 无重复 14MB `user_data`；仅 `select=updated_at` 或首次 1 次全量
 2. MemFire 迁移（7 月初 final dump）
 3. 阶段 5：媒体下载抽包
 
