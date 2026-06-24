@@ -739,7 +739,7 @@
           bindImageGenFeedImageRelayout();
           if (d().isMobileFeedViewport?.()) enforceMobileImageGenFeed();
           else scheduleImageGenFeedLayout();
-          const pageItems = store.whCards.slice(0, IMAGEGEN_FEED_PER_PAGE);
+          const pageItems = imageGenFeedPagedStore.whCards.slice(0, IMAGEGEN_FEED_PER_PAGE);
           primeImageGenFeedImages(wrap, pageItems);
           if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
           else if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);

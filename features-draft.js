@@ -3025,6 +3025,15 @@
   let bindImageGenFeedCardEvents;
   let captureImageGenFeedCardPositions;
 
+  function safeRenderImageGenFeed(opts) {
+    if (typeof renderImageGenFeed !== 'function') return;
+    try {
+      void renderImageGenFeed(opts);
+    } catch (e) {
+      console.warn('[imagegen] renderImageGenFeed failed', e);
+    }
+  }
+
   function wireImageGenFeed() {
     if (window.__imageGenFeedWired) return;
     if (!window.ImageGenFeed?.init) {
@@ -10819,7 +10828,7 @@
       console.error('[imagegen] runImageGenWithPrompt failed', e);
       if (typeof pendingId === 'string' && pendingId) {
         failPendingJob(pendingId, String(e?.message || '生图提交失败'));
-        renderImageGenFeed();
+        safeRenderImageGenFeed({ preserveScroll: true });
       }
       if (!batchOpts.silentToast) {
         const msg = String(e?.message || '');
@@ -12129,7 +12138,11 @@
     document.getElementById('imageGenSubmit')?.addEventListener('click', () => {
       void runImageGenDemo().catch((e) => {
         console.error('[imagegen] submit click failed', e);
-        toast('生图提交异常，请刷新页面后重试');
+        const msg = String(e?.message || '');
+        const hint = /store is not defined/i.test(msg)
+          ? '页面脚本版本不一致，请强刷（Ctrl+Shift+R）'
+          : '生图提交异常，请刷新页面后重试';
+        toast(hint);
         resetImageGenSubmitState();
       });
     });
