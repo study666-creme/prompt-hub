@@ -654,10 +654,11 @@
     }
     const normalized = window.SupabaseSync?.normalizeImageRef?.(ref) || ref;
     const q = encodeURIComponent(String(normalized || ''));
+    const variant = opts?.variant === 'full' ? 'full' : 'grid';
     if (isApiUnreachable()) {
       await probeApiHealth({ force: true, skipMark: true }).catch(() => false);
     }
-    return request('GET', `/api/v1/media/sign?ref=${q}`, null, {
+    return request('GET', `/api/v1/media/sign?ref=${q}&variant=${variant}`, null, {
       timeoutMs: API_SIGN_TIMEOUT_MS,
       noRetry: true
     });

@@ -25,3 +25,6 @@ dist/
 pack-*.js
 downloads/
 server/tmp-mooko-*
+
+# SillyTavern / 酒馆本地资料（与 Prompt Hub 无关，勿提交、勿部署）
+themes/

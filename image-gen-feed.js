@@ -4,7 +4,7 @@
 (function (global) {
   'use strict';
 
-  const IMAGEGEN_FEED_PER_PAGE = 24;
+  const IMAGEGEN_FEED_PER_PAGE = 12;
 
   /** @type {Record<string, any>} */
   let deps = {};
@@ -362,11 +362,14 @@
 
     function primeImageGenFeedImages(wrap, feedItems) {
       if (!wrap) return;
-      window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 28 });
-      window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 32);
+      const patchMax = 10;
+      const boostMax = 10;
+      const prefetchMax = 6;
+      window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: patchMax });
+      window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, boostMax);
       window.CardImageLoader?.observeContainer?.(wrap);
       if (feedItems?.length && window.CardImageLoader?.bindFeed) {
-        void window.CardImageLoader.bindFeed(wrap, feedItems.slice(0, Math.min(feedItems.length, 16)));
+        void window.CardImageLoader.bindFeed(wrap, feedItems.slice(0, Math.min(feedItems.length, prefetchMax)));
       }
     }
 
@@ -883,10 +886,11 @@
           image: p.image,
           authorId: p.authorId
         }));
-      const feedPrefetchItems = feedItems.slice(0, Math.min(feedItems.length, 16));
+      const feedPrefetchItems = feedItems.slice(0, Math.min(feedItems.length, 6));
       const feedImageBindKey = feedItems.map((x) => `${x.id}:${x.image || ''}`).join('|');
+      const didPrimeWarehouse = !feedAppend && d().getImageGenFeedTab?.() === 'warehouse' && feedPrefetchItems.length;
 
-      if (!feedAppend && d().getImageGenFeedTab?.() === 'warehouse' && feedPrefetchItems.length) {
+      if (didPrimeWarehouse) {
         primeImageGenFeedImages(wrap, feedPrefetchItems);
       }
 
@@ -897,12 +901,16 @@
         const skipImageBind = !feedAppend && wrap.dataset.feedImageBindKey === feedImageBindKey;
         if (!skipImageBind) {
           wrap.dataset.feedImageBindKey = feedImageBindKey;
-          const prefetchP = d().getImageGenFeedTab?.() === 'warehouse' && feedPrefetchItems.length && window.MediaPipeline?.prefetchList
-            ? window.MediaPipeline.prefetchList(feedPrefetchItems, 1800)
-            : Promise.resolve();
-          void prefetchP.catch(() => {});
-          if (window.CardImageLoader?.bindFeed) {
-            void window.CardImageLoader.bindFeed(wrap, feedPrefetchItems);
+          if (!didPrimeWarehouse) {
+            const prefetchP = d().getImageGenFeedTab?.() === 'warehouse' && feedPrefetchItems.length && window.MediaPipeline?.prefetchList
+              ? window.MediaPipeline.prefetchList(feedPrefetchItems, 1800)
+              : Promise.resolve();
+            void prefetchP.catch(() => {});
+            if (window.CardImageLoader?.bindFeed) {
+              void window.CardImageLoader.bindFeed(wrap, feedPrefetchItems);
+            } else if (window.FeatureDraft?.hydrateFeedImages) {
+              void window.FeatureDraft.hydrateFeedImages(wrap);
+            }
           }
         }
         bindImageGenFeedImageRelayout();
@@ -912,8 +920,12 @@
         } else {
           layoutImageGenFeedMasonry();
         }
-        window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 28 });
-        window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 32);
+        if (!didPrimeWarehouse) {
+          window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 12 });
+          if (d().getImageGenFeedTab?.() === 'warehouse') {
+            window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 10);
+          }
+        }
         if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
         else {
           const anchorAfter = scrollAnchor || { scrollTop, scrollEl };
@@ -922,27 +934,7 @@
         delete wrap.__phIgPendingScrollState;
         d().scrubImageGenFeedCards?.(wrap);
         syncImageGenFeedLoadMoreBtn();
-        if (d().getImageGenFeedTab?.() === 'warehouse' && store.whCards.length && window.SupabaseSync?.backfillGridThumbsForCards) {
-          const visibleIds = new Set(
-            [...wrap.querySelectorAll('.imagegen-feed-card[data-feed-id^="wh_"]')]
-              .slice(0, 14)
-              .map((el) => el.dataset.feedId?.replace(/^wh_/, ''))
-              .filter(Boolean)
-          );
-          const backfillCards = store.whCards.filter((c) => visibleIds.has(String(c.id)));
-          if (backfillCards.length) {
-            void window.SupabaseSync.backfillGridThumbsForCards(backfillCards, {
-              max: 12,
-              force: false,
-              quiet: true,
-              awaitDrain: false
-            }).then(() => {
-              window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 28 });
-              window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 32);
-              d().updateImageGenFeedHint?.();
-            });
-          }
-        }
+        /* 生图 /generated/ 由 CDN 现场缩略，勿 backfillGridThumbs（会批量拉原图 2MB+） */
       })();
     }
   

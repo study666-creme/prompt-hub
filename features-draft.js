@@ -7705,28 +7705,18 @@
 
   /** 静默拉云端 + 恢复生图任务，仅用侧栏 authCloudStatus，不弹 Toast */
   async function quietSyncImageGenFromCloud() {
-    const doPull = async () => {
+    try {
+      await resumePendingGenerationJobs();
+      renderImageGenFeed({ preserveScroll: true });
+      renderImageGenMobileResult();
+      const last = window.__phLastBgCloudSyncAt || 0;
+      if (Date.now() - last < 120000) return;
       if (typeof window.runDeferredCloudPull === 'function') {
         await window.runDeferredCloudPull({ silent: true, light: true });
       }
       await resumePendingGenerationJobs();
       renderImageGenFeed({ preserveScroll: true });
       renderImageGenMobileResult();
-    };
-    try {
-      await resumePendingGenerationJobs();
-      renderImageGenFeed({ preserveScroll: true });
-      renderImageGenMobileResult();
-      void (async () => {
-        try {
-          if (typeof window.waitForCloudSyncIdle === 'function') {
-            await window.waitForCloudSyncIdle(8000);
-          }
-          await doPull();
-        } catch (e) {
-          console.warn('[imagegen] quiet cloud sync', e);
-        }
-      })();
     } catch (e) {
       console.warn('[imagegen] quiet cloud sync', e);
     }

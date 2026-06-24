@@ -506,7 +506,7 @@
       if (isImageGenWarehouseFeed) {
         stripFailedFeedMedia(scope);
         if (window.MediaPipeline?.patchContainerFromCache) {
-          window.MediaPipeline.patchContainerFromCache(scope, { visibleFirst: true, max: 28 });
+          window.MediaPipeline.patchContainerFromCache(scope, { visibleFirst: true, max: 12 });
         } else {
           window.SupabaseSync?.patchImageSrcFromCache?.(scope, { visibleFirst: true, max: 12 });
         }

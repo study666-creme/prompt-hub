@@ -27,6 +27,8 @@ foreach ($dir in @('assets', 'vendor', 'functions', 'downloads', 'extension')) {
   }
 }
 
+# 明确不部署：themes/（SillyTavern 本地资料）、server、docs、backups 等
+
 if (Test-Path (Join-Path $root "_headers")) {
   Copy-Item (Join-Path $root "_headers") $staging
 }

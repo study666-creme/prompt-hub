@@ -207,6 +207,21 @@
     return container?.id === 'cardsContainer' || container?.id === 'imageGenFeed';
   }
 
+  const IMAGEGEN_FEED_PATCH_MAX = 10;
+  const IMAGEGEN_FEED_BOOST_MAX = 10;
+  const IMAGEGEN_FEED_PREFETCH_MAX = 6;
+
+  function sortImgsByViewport(imgs) {
+    return [...imgs].sort((a, b) => {
+      const ar = a.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+      const aVis = ar.bottom > -40 && ar.top < window.innerHeight + 40;
+      const bVis = br.bottom > -40 && br.top < window.innerHeight + 40;
+      if (aVis !== bVis) return aVis ? -1 : 1;
+      return ar.top - br.top;
+    });
+  }
+
   function cachedUrl(ref, cardId, img) {
     const authorId =
       img?.dataset?.authorId
@@ -230,6 +245,7 @@
   function isReadySrc(src, img) {
     if (!src || !src.startsWith('http') || src.includes('data:image/svg')) return false;
     if (window.SupabaseSync?.isInvalidMediaUrl?.(src)) return false;
+    if (img && window.SupabaseSync?.isWarehouseBlockedFullUrl?.(src, img)) return false;
     if (img && isCommunityImg(img) && !isOwnImageGenWarehouseImg(img) && window.SupabaseSync?.isResolvableDisplayUrl) {
       return window.SupabaseSync.isResolvableDisplayUrl(src);
     }
@@ -258,6 +274,9 @@
   function queueGridBackfillForImg(img) {
     const cardId = cardIdFromImg(img);
     if (!cardId || !window.SupabaseSync?.queueGridBackfill) return false;
+    const ref = img.getAttribute('data-image-ref') || '';
+    const refPath = window.SupabaseSync?.storagePathFromRef?.(ref) || '';
+    if (refPath.replace(/^\//, '').includes('/generated/')) return false;
     let card = (window.__promptHubCards || []).find((c) => c.id === cardId);
     if (!card && isOwnCommunityGridImg(img)) {
       const refPath = window.SupabaseSync?.storagePathFromRef?.(img.getAttribute('data-image-ref'));
@@ -343,7 +362,8 @@
         fail();
         return;
       }
-      if (isGridSrc && isCommunityImg(img) && !isCommunitySideImg(img) && (w > 720 || h > 720)) {
+      const isWhList = isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img);
+      if (isGridSrc && isCommunityImg(img) && !isCommunitySideImg(img) && !isWhList && (w > 720 || h > 720)) {
         fail();
         return;
       }
@@ -382,15 +402,23 @@
         img.dataset.primaryRetried = '1';
         if (ownList || isOwnCommunityGridImg(img)) {
           const primary = window.SupabaseSync?.primaryImagePath?.(ref, cardId);
-          const tryPrimary = () => {
-            if (!primary || !window.SupabaseSync?.resolveListPrimaryFallback) return Promise.resolve('');
-            return window.SupabaseSync.resolveListPrimaryFallback(primary, cardId, {});
-          };
-          void tryPrimary().then((retryUrl) => {
-            if (retryUrl && applyUrlToImg(img, retryUrl)) return;
-            if (queueGridBackfillForImg(img)) return;
-            media.classList.add('card-media--load-failed');
-          });
+          const mayUsePrimaryFallback = primary
+            && window.SupabaseSync?.gridListNeedsPrimaryFallback?.(primary, cardId) === true;
+          if (mayUsePrimaryFallback) {
+            const tryPrimary = () => {
+              if (!window.SupabaseSync?.resolveListPrimaryFallback) return Promise.resolve('');
+              return window.SupabaseSync.resolveListPrimaryFallback(primary, cardId, {});
+            };
+            void tryPrimary().then((retryUrl) => {
+              if (retryUrl && applyUrlToImg(img, retryUrl)) return;
+              if (queueGridBackfillForImg(img)) return;
+              media.classList.add('card-media--load-failed');
+            });
+            return;
+          }
+          if (ownWh && retryWarehouseList()) return;
+          if (queueGridBackfillForImg(img)) return;
+          media.classList.add('card-media--load-failed');
           return;
         }
         if (isCommOther) {
@@ -621,12 +649,12 @@
 
     if (container.id === 'imageGenFeed') {
       let eager = 0;
-      const cap = 28;
-      imgs.forEach((img) => {
+      const cap = IMAGEGEN_FEED_PATCH_MAX;
+      sortImgsByViewport(imgs).forEach((img) => {
         if (eager >= cap) return;
         const cur = img.currentSrc || img.src || '';
         if (isReadySrc(cur, img)) return;
-        if (isImgNearViewport(img, 720)) {
+        if (isImgNearViewport(img, 480)) {
           eager += 1;
           loadImg(img);
         }
@@ -663,7 +691,7 @@
       observedRoot = container;
       const rootMargin = lazyOnly
         ? (container.id === 'imageGenFeed'
-          ? '480px 0px'
+          ? '320px 0px'
           : container.id === 'cardsContainer' ? '320px 0px' : '140px 0px')
         : isCommunityContainer(container)
           ? '360px 0px'
@@ -707,7 +735,7 @@
 
   function prefetchItemsForContainer(container, items) {
     const mobileWh = container?.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.();
-    const cap = container?.id === 'imageGenFeed' ? 28 : (mobileWh ? 14 : 8);
+    const cap = container?.id === 'imageGenFeed' ? IMAGEGEN_FEED_PREFETCH_MAX : (mobileWh ? 14 : 8);
     const list = (items || []).slice(0, cap);
     if (!list.length) return Promise.resolve();
     const hasCardIds = list.every((x) => x && x.id && x.image);
@@ -733,7 +761,7 @@
     const signP = prefetchItemsForContainer(container, items).then(() => {
       window.MediaPipeline?.patchContainerFromCache?.(container, {
         visibleFirst: true,
-        max: container.id === 'imageGenFeed' ? 28 : 6
+        max: container.id === 'imageGenFeed' ? IMAGEGEN_FEED_PATCH_MAX : 6
       });
     });
     setContainerSignReady(container, signP);
@@ -785,10 +813,10 @@
     observeContainer(container);
   }
 
-  function boostImageGenWarehouseImages(container, max = 32) {
+  function boostImageGenWarehouseImages(container, max = IMAGEGEN_FEED_BOOST_MAX) {
     if (!container || container.id !== 'imageGenFeed') return;
     let n = 0;
-    feedImagesIn(container).forEach((img) => {
+    sortImgsByViewport(feedImagesIn(container)).forEach((img) => {
       if (!isOwnImageGenWarehouseImg(img)) return;
       if (n >= max) return;
       const cur = img.currentSrc || img.src || '';
@@ -798,7 +826,7 @@
         applyUrlToImg(img, hit);
         return;
       }
-      if (isImgNearViewport(img, 960)) {
+      if (isImgNearViewport(img, 480)) {
         n += 1;
         loadImg(img);
       }

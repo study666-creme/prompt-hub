@@ -2305,6 +2305,17 @@
         applyFloatingState();
         deferAfterPagePaint(() => {
           if (!document.getElementById('pageWarehouse')?.classList.contains('active')) return;
+          const container = document.getElementById('cardsContainer');
+          const hasDom = container?.querySelector('.card[data-id]');
+          if (!hasDom) {
+            renderCards(true);
+          } else {
+            const start = (page - 1) * PER_PAGE;
+            const list = allFilteredCards.length
+              ? allFilteredCards.slice(start, start + PER_PAGE)
+              : warehouseVisibleCards(cards).slice(start, start + PER_PAGE);
+            if (list.length) hydrateWarehouseGridImages(container, list);
+          }
           if (isMobileViewport()) enforceMobileCardGrid();
           else scheduleWarehouseMasonryLayout();
           void repairGeneratedCardImagesQuiet();
@@ -4224,9 +4235,10 @@
       let cloudGroups = 0;
       if (window.SupabaseSync?.isLoggedIn?.()) {
         try {
-          const cloud = await window.SupabaseSync.pullCloudData();
-          cloudN = cloud?.cards?.length || 0;
-          cloudGroups = cloud?.customGroups?.length || 0;
+          const meta = await window.SupabaseSync.pullCloudMeta?.();
+          const localUpdated = window.SupabaseSync.getLocalCloudUpdatedAt?.(uid);
+          cloudN = meta && localUpdated && meta === localUpdated ? cards.length : -1;
+          cloudGroups = customGroups.length;
         } catch (e) { /* ignore */ }
       }
       const tombN = Object.keys(settings.deletedCardTombstones || {}).length;
@@ -5098,12 +5110,18 @@
       }
     });
 
-    async function pullFromCloud() {
+    async function pullFromCloud(opts = {}) {
       if (!window.SupabaseSync?.isLoggedIn?.()) return false;
       if (cloudSyncing) await waitForCloudSyncIdle(120000);
       const localPayload = getDataPayload();
       await writeEmergencyBackup('pre_pull');
-      const cloud = await window.SupabaseSync.pullCloudData();
+      const cloud = await window.SupabaseSync.pullCloudData({
+        force: opts?.force === true,
+        ifStale: opts?.force !== true
+      });
+      if (window.SupabaseSync?.wasLastCloudPullSkipped?.()) {
+        return 'skipped';
+      }
       if (cloud == null || typeof cloud !== 'object') return false;
 
       const merged = window.CloudSyncSafety?.mergePayload
@@ -5193,7 +5211,7 @@
       }
       setCloudSyncPhase('syncing', light ? '后台同步…' : '正在拉取云端…');
       try {
-        const pullWork = pullFromCloud();
+        const pullWork = pullFromCloud({ force: opts?.force === true });
         const timeoutMs = light ? 45000 : 90000;
         const pulled = await Promise.race([
           pullWork,
@@ -5204,7 +5222,13 @@
           setCloudSyncPhase('pending', '云端同步较慢，图片仍可从本机加载');
           return false;
         }
-        if (pulled) {
+        if (pulled === 'skipped') {
+          setCloudSyncPhase(cards.length ? 'saved' : 'idle');
+          lastBgCloudSyncAt = Date.now();
+          window.__phLastBgCloudSyncAt = lastBgCloudSyncAt;
+          return true;
+        }
+        if (pulled === true) {
           const uid = window.SupabaseSync?.getUserId?.();
           if (uid) await snapshotLocalForUser(uid);
           refreshWarehouseUI();
@@ -5217,7 +5241,8 @@
         }
         setCloudSyncPhase(cards.length ? 'saved' : 'idle');
         lastBgCloudSyncAt = Date.now();
-        return pulled;
+        window.__phLastBgCloudSyncAt = lastBgCloudSyncAt;
+        return pulled === true;
       } catch (e) {
         if (!silent) showToast('拉取云端数据失败，已保留本地数据');
         else setCloudSyncPhase('error', '拉取失败，将重试');
@@ -5682,6 +5707,8 @@
           if (isMobileViewport()) enforceMobileCardGrid();
           else layoutMasonryGrid();
         });
+      } else if (!document.getElementById('pageWarehouse')?.classList.contains('active')) {
+        /* 在生图/社区等页：只更新分组标签，勿 prefetch 卡片库 24 张图 */
       } else {
         renderCards(true);
       }
@@ -5851,6 +5878,7 @@
     }
     window.syncCloudNow = syncCloudNow;
     window.runDeferredCloudPull = runDeferredCloudPull;
+    window.__phLastBgCloudSyncAt = lastBgCloudSyncAt;
     window.SyncOrchestrator?.init?.({
       pushToCloud,
       pullFromCloud: runDeferredCloudPull,
@@ -6596,7 +6624,7 @@
       const prefetchCards = pageCards.slice(0, 24);
       let prefetchP = Promise.resolve();
       const warehouseActive = document.getElementById('pageWarehouse')?.classList.contains('active');
-      if (page === 1 && prefetchCards.length && window.MediaPipeline?.prefetchList) {
+      if (page === 1 && prefetchCards.length && warehouseActive && window.MediaPipeline?.prefetchList) {
         prefetchP = window.MediaPipeline.prefetchList(
           prefetchCards,
           mobileGrid ? 4800 : 3200
@@ -6607,7 +6635,7 @@
           if (c?.id && c?.image) window.SupabaseSync?.clearPathMissingForCard?.(c.id, c.image);
         });
       }
-      if (page === 1 && pageCards.length && window.SupabaseSync?.backfillGridThumbsForCards) {
+      if (page === 1 && pageCards.length && warehouseActive && window.SupabaseSync?.backfillGridThumbsForCards) {
         void window.SupabaseSync.backfillGridThumbsForCards(pageCards, {
           max: mobileGrid ? Math.min(8, pageCards.length) : Math.min(12, pageCards.length),
           force: false,
@@ -6771,7 +6799,7 @@
       bindCardGridImageErrors(container);
       bindCardGridImageRelayout(container);
       const runWarehouseImages = () => {
-        void hydrateWarehouseGridImages(container, pageCards);
+        if (warehouseActive) void hydrateWarehouseGridImages(container, pageCards);
       };
       if (page === 1) {
         void prefetchP.finally(runWarehouseImages);

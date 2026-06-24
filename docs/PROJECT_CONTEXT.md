@@ -24,30 +24,32 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · esbuild 十 pack）
+## 当前部署阶段（2026-06-24 · P0 带宽修复 i · 已部署）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260624a` · https://prompt-hubs.com |
+| **Pages** | build `20260624i` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
+| **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
 ### 已打通
 
-- ✅ **十 pack**（… `pack-viewer` · **`pack-appreciate`** · `pack-lightbox` … `pack-extra`）+ HTTP 冒烟（含 `Sec-Fetch-Dest: script`）
-- ✅ **欣赏器/全局欣赏** → `app-appreciate.js` · `pack-appreciate.js`（`AppAppreciate.init`）
-- ✅ **灯箱业务** → `app-lightbox.js` · `pack-lightbox.js`（`AppLightbox.init`）
-- ✅ **viewer DOM/缩放** → `pack-viewer.js`
-- ✅ **禁止** `*.bundle.js` / `pack-*.js?v=`
+- ✅ **P0 生图仓库带宽**：禁卡片库后台 prefetch · 首屏 12 张 grid · 缓存 v2（`20260624i`）
+- ✅ **基线 pg_dump**：`backups/prompt-hub-baseline-20260624.dump`（**24.5 MB** · Pooler Session）
+- ✅ 新图走 **R2**（`MEDIA_STORAGE_MODE=r2`）
 
-### 已知问题（已修）
+### 迁移备份（进行中）
 
-- ~~`/dist/*.js` SPA 回退~~（`20260622p`）
-- ~~`*.bundle.js` 文件名 script 加载得 HTML~~（`20260623f` → 改名为 `pack-*.js`）
+- ✅ 数据库基线 dump（见 `docs/MEMFIRE-MIGRATION.md` · 本机 `backups/MIGRATION-CHECKPOINT.txt`）
+- ✅ `backups/card-images/` 旧图（1904 张）
+- ⏳ 站内 JSON 导出 · `restore-notes.txt`
+- 📅 **7 月初** `prompt-hub-final-*.dump` 再导一次后 `pg_restore` → MemFire
 
 ### 下一步
 
-1. 强刷确认 `window.__APP_BUILD__ === '20260623l'` 与 **10 个 pack** 无 MIME 报错
-2. 阶段 5：媒体下载 `promptHubSaveImage` / `downloadCardImageFile` 抽包
+1. 你本地强刷验收：图片生成 → 仓库 · Network 首屏 **< 5 MB**
+2. MemFire 迁移（7 月初 final dump）
+3. 阶段 5：媒体下载抽包
 
 ### 部署
 

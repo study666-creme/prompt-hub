@@ -5,6 +5,7 @@
  * 用法：
  *   node scripts/sync-supabase-to-r2.mjs
  *   node scripts/sync-supabase-to-r2.mjs --download-only --out backups/card-images
+ *   node scripts/sync-supabase-to-r2.mjs --download-only --out backups/card-images --skip-existing
  *
  * 配置：scripts/admin.local.env（勿提交 git）
  */
@@ -47,6 +48,7 @@ const R2_BUCKET = String(env.R2_BUCKET || 'prompt-hub-card-images').trim();
 
 const args = process.argv.slice(2);
 const downloadOnly = args.includes('--download-only');
+const skipExisting = args.includes('--skip-existing');
 const outIdx = args.indexOf('--out');
 const outDir = outIdx >= 0 ? path.resolve(root, args[outIdx + 1] || 'backups/card-images') : null;
 
@@ -220,9 +222,13 @@ async function main() {
 
     try {
       if (downloadOnly || outDir) {
+        const dest = outDir ? path.join(outDir, key) : null;
+        if (dest && skipExisting && fs.existsSync(dest) && fs.statSync(dest).size >= 512) {
+          skipped += 1;
+          if (downloadOnly) continue;
+        }
         const buf = await downloadObject(key);
-        if (outDir) {
-          const dest = path.join(outDir, key);
+        if (dest) {
           fs.mkdirSync(path.dirname(dest), { recursive: true });
           fs.writeFileSync(dest, buf);
         }
@@ -249,7 +255,7 @@ async function main() {
   }
 
   console.log('\n完成');
-  console.log({ total: keys.length, downloaded, uploaded, skipped, failed, downloadOnly, outDir });
+  console.log({ total: keys.length, downloaded, uploaded, skipped, failed, downloadOnly, skipExisting, outDir });
 }
 
 main().catch((e) => {

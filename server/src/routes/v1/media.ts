@@ -15,7 +15,8 @@ import {
   resolveCommunityGridPath,
   materializeCommunityGridIfMissing,
   serveCachedStorageImage,
-  verifyMediaAccessToken
+  verifyMediaAccessToken,
+  gridPathFromPrimary
 } from '../../lib/media-cdn';
 import { createAdminClient } from '../../lib/supabase';
 import { uploadCardImage } from '../../lib/r2-storage';
@@ -28,6 +29,15 @@ function assertOwnPath(userId: string, path: string): void {
   if (!norm.startsWith(`${userId}/`)) {
     throw new ApiError(403, 'FORBIDDEN', '无权访问该图片');
   }
+}
+
+/** 列表签名默认走 _grid；仅 variant=full 时签原图 */
+function signingPathForVariant(path: string, variant: string): string {
+  const clean = path.replace(/^\//, '');
+  if (variant === 'full') return clean;
+  if (/_grid\.(jpe?g|webp|png)$/i.test(clean)) return clean;
+  const grid = gridPathFromPrimary(clean);
+  return grid ? grid.replace(/^\//, '') : clean;
 }
 
 export const mediaRoutes = new Hono<{ Bindings: Env }>();
@@ -202,7 +212,9 @@ mediaRoutes.get('/sign', async c => {
   }
   assertOwnPath(user.id, path);
 
-  const url = await buildPrivateMediaCdnUrl(c, path);
+  const variant = (c.req.query('variant') || 'grid').trim().toLowerCase();
+  const signPath = signingPathForVariant(path, variant);
+  const url = await buildPrivateMediaCdnUrl(c, signPath);
   return c.json({
     ok: true,
     data: { url, expiresIn: MEDIA_CDN_TOKEN_TTL_SEC, cdn: true }
@@ -234,7 +246,8 @@ mediaRoutes.post('/sign-batch', async c => {
   const urls: Record<string, string> = {};
   await Promise.all(
     paths.map(async key => {
-      urls[key] = await buildPrivateMediaCdnUrl(c, key);
+      const signPath = signingPathForVariant(key, 'grid');
+      urls[key] = await buildPrivateMediaCdnUrl(c, signPath);
     })
   );
   return c.json({
