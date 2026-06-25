@@ -177,6 +177,25 @@
     return !!img?.closest?.('#imageGenFeed .imagegen-feed-card[data-feed-id^="wh_"]');
   }
 
+  /** 浏览器已解码出像素 — 勿因签名过期重复拉 media */
+  function isImgVisuallyLoaded(img) {
+    if (!img) return false;
+    if (img.dataset.feedLoadDone === '1') return true;
+    const src = img.currentSrc || img.src || '';
+    if (!/^https?:\/\//i.test(src) || src.includes('data:image/svg')) return false;
+    return img.complete && img.naturalWidth > 8;
+  }
+
+  function isImgSameDisplayResource(img, url) {
+    if (!img || !url) return false;
+    const cur = img.currentSrc || img.src || '';
+    if (!cur || cur === url) return cur === url;
+    const pathA = window.SupabaseSync?.storagePathFromDisplayUrl?.(cur);
+    const pathB = window.SupabaseSync?.storagePathFromDisplayUrl?.(url);
+    if (pathA && pathB) return String(pathA).replace(/^\//, '') === String(pathB).replace(/^\//, '');
+    return false;
+  }
+
   function isCommunityImg(img) {
     return !!img?.closest?.('#communityGrid, #creationsGrid, #userProfileGrid, #imageGenFeed');
   }
@@ -245,6 +264,9 @@
   function isReadySrc(src, img) {
     if (!src || !src.startsWith('http') || src.includes('data:image/svg')) return false;
     if (window.SupabaseSync?.isInvalidMediaUrl?.(src)) return false;
+    if (img && isImgVisuallyLoaded(img) && (isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))) {
+      return true;
+    }
     if (img && window.SupabaseSync?.isWarehouseBlockedFullUrl?.(src, img)) return false;
     if (img && isCommunityImg(img) && !isOwnImageGenWarehouseImg(img) && window.SupabaseSync?.isResolvableDisplayUrl) {
       return window.SupabaseSync.isResolvableDisplayUrl(src);
@@ -299,7 +321,9 @@
       if (media.__whBackfillFailTimer) clearTimeout(media.__whBackfillFailTimer);
       media.__whBackfillFailTimer = setTimeout(() => {
         media.__whBackfillFailTimer = null;
-        if (media.classList.contains('is-loading') && !media.classList.contains('media-revealed')) {
+        const pending = (media.classList.contains('is-loading') || media.classList.contains('card-media--await'))
+          && !media.classList.contains('media-revealed');
+        if (pending) {
           window.finalizeWarehouseCardMediaFailure?.(media, img);
         }
       }, 6000);
@@ -358,9 +382,15 @@
     if (window.SupabaseSync?.isWarehouseBlockedFullUrl?.(url, img)) return false;
     const media = feedMediaFromImg(img);
     if (!media) return false;
-    media.classList.remove('card-media--await');
-    if (!media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
-    if (!media.classList.contains('is-loading')) media.classList.add('is-loading');
+    const quietWhList = isOwnWarehouseListImg(img);
+    if (quietWhList) {
+      if (!media.classList.contains('card-media--await')) media.classList.add('card-media--await');
+      media.classList.remove('is-loading');
+    } else {
+      media.classList.remove('card-media--await');
+      if (!media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
+      if (!media.classList.contains('is-loading')) media.classList.add('is-loading');
+    }
 
     const finish = () => {
       const w = img.naturalWidth || 0;
@@ -476,6 +506,10 @@
       finish();
       return true;
     }
+    if (isImgVisuallyLoaded(img) || (isImgSameDisplayResource(img, url) && img.complete && img.naturalWidth > 8)) {
+      finish();
+      return true;
+    }
 
     void enqueueDownload(() => new Promise((resolve) => {
       img.decoding = 'async';
@@ -519,7 +553,7 @@
       return;
     }
     const cur = img.currentSrc || img.src || '';
-    if (isReadySrc(cur, img)) return;
+    if (isImgVisuallyLoaded(img) || isReadySrc(cur, img)) return;
     const hit = cachedUrl(ref, cardId, img);
     if (hit) {
       applyUrlToImg(img, hit);
@@ -583,7 +617,7 @@
       if (!entry.isIntersecting) continue;
       const img = entry.target;
       const cur = img.currentSrc || img.src || '';
-      if (img.dataset.feedLoadDone === '1' || (isReadySrc(cur, img) && img.complete && img.naturalWidth > 8)) {
+      if (isImgVisuallyLoaded(img) || img.dataset.feedLoadDone === '1' || (isReadySrc(cur, img) && img.complete && img.naturalWidth > 8)) {
         observer?.unobserve(img);
         continue;
       }
@@ -675,6 +709,7 @@
       let eager = 0;
       const cap = IMAGEGEN_FEED_PATCH_MAX;
       sortImgsByViewport(imgs).forEach((img) => {
+        if (isImgVisuallyLoaded(img)) return;
         if (eager >= cap) return;
         const cur = img.currentSrc || img.src || '';
         if (isReadySrc(cur, img)) return;
@@ -730,6 +765,7 @@
     }
 
     imgs.forEach((img) => {
+      if (isImgVisuallyLoaded(img)) return;
       const cur = img.currentSrc || img.src || '';
       if (isReadySrc(cur, img)) return;
       const ref = img.getAttribute('data-image-ref');
@@ -740,14 +776,20 @@
         return;
       }
       if (lazyOnly) {
-        observer.observe(img);
+        if (!img.dataset.feedObserverBound) {
+          img.dataset.feedObserverBound = '1';
+          observer.observe(img);
+        }
         return;
       }
       if (isImgNearViewport(img)) {
         loadImg(img);
         return;
       }
-      observer.observe(img);
+      if (!img.dataset.feedObserverBound) {
+        img.dataset.feedObserverBound = '1';
+        observer.observe(img);
+      }
     });
   }
 
@@ -843,8 +885,9 @@
     sortImgsByViewport(feedImagesIn(container)).forEach((img) => {
       if (!isOwnImageGenWarehouseImg(img)) return;
       if (n >= max) return;
+      if (isImgVisuallyLoaded(img)) return;
       const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img) && img.complete && img.naturalWidth > 8) return;
+      if (isReadySrc(cur, img)) return;
       const hit = cachedUrl(img.getAttribute('data-image-ref'), cardIdFromImg(img), img);
       if (hit) {
         applyUrlToImg(img, hit);
@@ -855,7 +898,6 @@
         loadImg(img);
       }
     });
-    observeContainer(container);
   }
 
   function boostWarehouseImages(container, max = 8) {

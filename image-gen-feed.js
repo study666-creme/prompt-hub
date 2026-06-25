@@ -20,8 +20,22 @@
   let imageGenFeedScrollGuardBound = false;
 
   function markImageGenFeedUserScrolling() {
-    imageGenFeedUserScrollingUntil = Date.now() + 1400;
+    imageGenFeedUserScrollingUntil = Date.now() + 3500;
     imageGenFeedScrollIntent = true;
+    const wrap = document.getElementById('imageGenFeed');
+    if (wrap) delete wrap.__phIgPendingScrollState;
+  }
+
+  function shouldSkipImageGenFeedScrollRestore(wrap, state) {
+    if (!state) return true;
+    if (shouldDeferImageGenFeedRender()) return true;
+    const scrollEl = resolveImageGenFeedScrollRoot(wrap) || wrap;
+    const current = scrollEl?.scrollTop ?? 0;
+    /* 用户已离开顶部：禁止用旧 snapshot（常为 0）拉回 */
+    if (current > 24) return true;
+    const captured = Number(state.anchor?.scrollTop);
+    if (Number.isFinite(captured) && current > captured + 16) return true;
+    return false;
   }
 
   function shouldDeferImageGenFeedRender() {
@@ -32,6 +46,8 @@
     if (!wrap || !scrollEl || scrollEl.dataset.phIgScrollGuard === '1') return;
     scrollEl.dataset.phIgScrollGuard = '1';
     scrollEl.addEventListener('scroll', () => markImageGenFeedUserScrolling(), { passive: true });
+    scrollEl.addEventListener('wheel', () => markImageGenFeedUserScrolling(), { passive: true });
+    scrollEl.addEventListener('touchmove', () => markImageGenFeedUserScrolling(), { passive: true });
   }
 
   function captureImageGenFeedScrollAnchor(wrap, scrollEl) {
@@ -53,19 +69,33 @@
     return { scrollTop: top, scrollEl };
   }
 
+  function applyImageGenFeedScrollTop(scrollEl, top, opts) {
+    if (!scrollEl) return;
+    const want = Math.max(0, Number(top) || 0);
+    if (opts?.force) {
+      scrollEl.scrollTop = want;
+      return;
+    }
+    const cur = scrollEl.scrollTop;
+    if (cur > 24 && want < cur - 16) return;
+    scrollEl.scrollTop = want;
+  }
+
   function restoreImageGenFeedScrollAnchor(anchor) {
     if (!anchor?.scrollEl) return;
+    const wrap = document.getElementById('imageGenFeed');
+    if (wrap && shouldSkipImageGenFeedScrollRestore(wrap, { anchor })) return;
     const { scrollEl } = anchor;
     if (anchor.feedId) {
       const card = document.querySelector(`#imageGenFeed .imagegen-feed-card[data-feed-id="${CSS.escape(anchor.feedId)}"]`);
       if (card) {
         const rootRect = scrollEl.getBoundingClientRect();
         const rect = card.getBoundingClientRect();
-        scrollEl.scrollTop = Math.max(0, anchor.scrollTop + (rect.top - rootRect.top) - anchor.offset);
+        applyImageGenFeedScrollTop(scrollEl, anchor.scrollTop + (rect.top - rootRect.top) - anchor.offset);
         return;
       }
     }
-    scrollEl.scrollTop = anchor.scrollTop;
+    applyImageGenFeedScrollTop(scrollEl, anchor.scrollTop);
   }
 
   function collectImageGenFeedScrollTargets(wrap) {
@@ -92,21 +122,19 @@
   }
 
   function restoreImageGenFeedScrollState(wrap, state) {
-    if (!state) return;
+    if (!state || shouldSkipImageGenFeedScrollRestore(wrap, state)) return;
     if (state.anchor) restoreImageGenFeedScrollAnchor(state.anchor);
     state.tops?.forEach((top, el) => {
-      if (el?.isConnected) el.scrollTop = top;
+      if (!el?.isConnected) return;
+      const cur = el.scrollTop;
+      if (cur > 24 && top < cur - 16) return;
+      el.scrollTop = top;
     });
   }
 
   function scheduleImageGenFeedScrollRestore(wrap, state) {
-    if (!state) return;
-    const run = () => restoreImageGenFeedScrollState(wrap, state);
-    run();
-    requestAnimationFrame(() => {
-      run();
-      requestAnimationFrame(run);
-    });
+    if (shouldSkipImageGenFeedScrollRestore(wrap, state)) return;
+    restoreImageGenFeedScrollState(wrap, state);
   }
 
   function imageGenFeedIsNearTop() {
@@ -133,9 +161,16 @@
       const b = next[i];
       if (!a || !b || String(a.id) !== String(b.id)) return false;
       if (String(a.image || '') !== String(b.image || '')) return false;
-      if (String(a.updatedAt || '') !== String(b.updatedAt || '')) return false;
     }
     return true;
+  }
+
+  function imageGenFeedRenderedCount(store) {
+    if (!store) return IMAGEGEN_FEED_PER_PAGE;
+    const total = d().getImageGenFeedTab?.() === 'warehouse'
+      ? (store.whCards?.length || 0)
+      : (store.commPosts?.length || 0);
+    return Math.min(total, Math.max(1, store.page || 1) * IMAGEGEN_FEED_PER_PAGE);
   }
 
   function patchImageGenFeedPendingSection(wrap, pending, failed) {
@@ -191,13 +226,21 @@
       return { showTitle, showPrompt };
     }
 
+    let imageGenFeedRelayoutTimer = null;
     function bindImageGenFeedImageRelayout() {
       const wrap = document.getElementById('imageGenFeed');
       if (!wrap) return;
+      const relayout = () => {
+        if (shouldDeferImageGenFeedRender()) return;
+        clearTimeout(imageGenFeedRelayoutTimer);
+        imageGenFeedRelayoutTimer = setTimeout(() => {
+          if (shouldDeferImageGenFeedRender()) return;
+          scheduleImageGenFeedLayout();
+        }, 720);
+      };
       wrap.querySelectorAll('.imagegen-feed-media img, .imagegen-feed-thumb-btn img').forEach(img => {
         if (img.dataset.masonryRelayoutBound) return;
         img.dataset.masonryRelayoutBound = '1';
-        const relayout = () => scheduleImageGenFeedLayout();
         img.addEventListener('load', relayout, { once: true });
         img.addEventListener('error', relayout, { once: true });
       });
@@ -240,6 +283,14 @@
 
     function scheduleImageGenFeedLayout(opts) {
       const immediate = opts === true || opts?.immediate === true;
+      if (!immediate && shouldDeferImageGenFeedRender()) {
+        clearTimeout(imageGenLayoutTimer);
+        imageGenLayoutTimer = setTimeout(
+          () => scheduleImageGenFeedLayout({ immediate: opts?.immediate, force: true }),
+          Math.max(160, imageGenFeedUserScrollingUntil - Date.now())
+        );
+        return;
+      }
       clearTimeout(imageGenLayoutTimer);
       const run = () => {
         if (d().isMobileFeedViewport?.()) enforceMobileImageGenFeed();
@@ -250,7 +301,7 @@
         requestAnimationFrame(run);
         return;
       }
-      imageGenLayoutTimer = setTimeout(run, 160);
+      imageGenLayoutTimer = setTimeout(run, 320);
     }
 
     function bindImageGenFeedResizeRelayout() {
@@ -266,7 +317,10 @@
         const delta = Math.abs(w - lastW);
         lastW = w;
         clearTimeout(timer);
-        timer = setTimeout(() => scheduleImageGenFeedLayout({ immediate: true }), delta > 100 ? 0 : 60);
+        timer = setTimeout(() => {
+          if (shouldDeferImageGenFeedRender()) return;
+          scheduleImageGenFeedLayout({ immediate: true });
+        }, delta > 100 ? 120 : 280);
       });
       obs.observe(watch);
     }
@@ -296,7 +350,11 @@
       wrap.classList.add('imagegen-feed--masonry');
 
       const runLayout = () => {
-        if (typeof Masonry === 'undefined') return;
+        if (typeof Masonry === 'undefined') {
+          d().setFeedLayoutPending?.(wrap, false);
+          wrap.classList.add('imagegen-feed--desktop-grid');
+          return;
+        }
         const cards = wrap.querySelectorAll('.imagegen-feed-card');
         if (!cards.length) {
           resetImageGenFeedCardLayout();
@@ -328,7 +386,14 @@
           horizontalOrder: false,
           transitionDuration: 0
         };
-        const scrollState = wrap.__phIgPendingScrollState || captureImageGenFeedScrollState(wrap);
+        const scrollState = (() => {
+          if (shouldDeferImageGenFeedRender()) return null;
+          const pending = wrap.__phIgPendingScrollState;
+          if (pending && !shouldSkipImageGenFeedScrollRestore(wrap, pending)) return pending;
+          const live = captureImageGenFeedScrollState(wrap);
+          if (shouldSkipImageGenFeedScrollRestore(wrap, live)) return null;
+          return live;
+        })();
         if (imageGenMasonry) {
           imageGenMasonry.option(opts);
           imageGenMasonry.reloadItems();
@@ -342,15 +407,16 @@
           imageGenMasonry = new Masonry(wrap, opts);
           imageGenMasonry.layout();
         }
+        wrap.classList.remove('imagegen-feed--desktop-grid');
         requestAnimationFrame(() => {
           imageGenMasonry?.layout();
-          restoreImageGenFeedScrollState(wrap, scrollState);
+          if (scrollState && !shouldSkipImageGenFeedScrollRestore(wrap, scrollState)) {
+            restoreImageGenFeedScrollState(wrap, scrollState);
+          }
           d().setFeedLayoutPending?.(wrap, false);
-          window.CardImageLoader?.observeContainer?.(wrap);
+          wrap.dataset.masonryLaidOut = '1';
           d().scrubImageGenFeedCards?.(wrap);
         });
-        const scrollElSync = resolveImageGenFeedScrollRoot(wrap) || wrap;
-        scrollElSync.scrollTop = scrollTop;
         bindImageGenFeedImageRelayout();
       };
 
@@ -363,13 +429,12 @@
     function primeImageGenFeedImages(wrap, feedItems) {
       if (!wrap) return;
       const patchMax = 10;
-      const boostMax = 10;
-      const prefetchMax = 6;
+      const boostMax = 8;
       window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: patchMax });
       window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, boostMax);
-      window.CardImageLoader?.observeContainer?.(wrap);
-      if (feedItems?.length && window.CardImageLoader?.bindFeed) {
-        void window.CardImageLoader.bindFeed(wrap, feedItems.slice(0, Math.min(feedItems.length, prefetchMax)));
+      if (wrap.dataset.feedObserverPrimed !== '1') {
+        wrap.dataset.feedObserverPrimed = '1';
+        window.CardImageLoader?.observeContainer?.(wrap);
       }
     }
 
@@ -531,7 +596,7 @@
           }).length
           : 0;
         const pendingSig = (d().getImageGenPendingJobs?.() ?? [])
-          .map((j) => `${j.id}:${j.recovering ? 1 : 0}:${j.jobId || ''}:${(j.pendingNote || '').slice(0, 12)}`)
+          .map((j) => `${j.id}:${j.recovering ? 1 : 0}:${j.jobId || ''}`)
           .join(',');
         const failedSig = (d().getImageGenFailedJobs?.() ?? [])
           .map((j) => j.id)
@@ -699,8 +764,8 @@
         clearTimeout(imageGenFeedDeferredRenderTimer);
         imageGenFeedDeferredRenderTimer = setTimeout(() => {
           imageGenFeedDeferredRenderTimer = null;
-          void renderImageGenFeed({ ...opts, force: true });
-        }, Math.max(120, imageGenFeedUserScrollingUntil - Date.now()));
+          void renderImageGenFeed({ ...opts });
+        }, Math.max(160, imageGenFeedUserScrollingUntil - Date.now()));
         return;
       }
       const scrollEl = resolveImageGenFeedScrollRoot(wrap) || wrap;
@@ -739,14 +804,11 @@
         ) {
           imageGenFeedPagedStore = { ...prevStore, sig, whCards, commPosts };
           patchImageGenFeedPendingSection(wrap, pending, failed);
-          bindImageGenFeedImageRelayout();
           if (d().isMobileFeedViewport?.()) enforceMobileImageGenFeed();
           else scheduleImageGenFeedLayout();
-          const pageItems = imageGenFeedPagedStore.whCards.slice(0, IMAGEGEN_FEED_PER_PAGE);
-          primeImageGenFeedImages(wrap, pageItems);
           if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
           else if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);
-          else if (scrollEl && preserveScroll) scrollEl.scrollTop = scrollTop;
+          else if (scrollEl && preserveScroll) applyImageGenFeedScrollTop(scrollEl, scrollTop);
           syncImageGenFeedLoadMoreBtn();
           bindImageGenFeedPagedScroll();
           return;
@@ -782,9 +844,10 @@
           })();
           return;
         }
+        const keepPage = preserveScroll && opts.scrollToTop !== true && (prevStore?.page || 1) > 1;
         imageGenFeedPagedStore = {
           sig,
-          page: 1,
+          page: keepPage ? prevStore.page : 1,
           whCards,
           commPosts
         };
@@ -799,7 +862,7 @@
         if (!feedAppend) {
           const pending = (d().getImageGenPendingJobs?.() ?? []).slice(0, d().IMAGEGEN_FEED_PENDING_CAP ?? 6);
           const failed = (d().getImageGenFailedJobs?.() ?? []).slice(0, d().IMAGEGEN_FEED_FAILED_CAP ?? 4);
-          const list = store.whCards.slice(0, IMAGEGEN_FEED_PER_PAGE);
+          const list = store.whCards.slice(0, imageGenFeedRenderedCount(store));
           if (!pending.length && !failed.length && !list.length) {
             html = '<p class="imagegen-feed-empty">卡藏暂无卡片<br><button type="button" class="btn btn-primary btn-sm" onclick="createNewCard({forceOpenPanel:true})">新建卡片</button></p>';
           } else {
@@ -815,7 +878,7 @@
         }
       } else if (d().getImageGenFeedTab?.() === 'community') {
         if (!feedAppend) {
-          const list = store.commPosts.slice(0, IMAGEGEN_FEED_PER_PAGE);
+          const list = store.commPosts.slice(0, imageGenFeedRenderedCount(store));
           if (!list.length) {
             const emptyMsg = d().getCommunityScope?.() === 'curated'
               ? '社区精选正在开发中'
@@ -851,11 +914,14 @@
           scheduleImageGenFeedScrollRestore(wrap, scrollState);
         } else if (scrollEl) {
           if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);
-          else scrollEl.scrollTop = scrollTop;
+          else applyImageGenFeedScrollTop(scrollEl, scrollTop);
         }
       } else {
         resetImageGenFeedCardLayout();
         d().setFeedLayoutPending?.(wrap, true);
+        window.CardImageLoader?.disconnect?.();
+        delete wrap.dataset.feedObserverPrimed;
+        delete wrap.dataset.masonryLaidOut;
         wrap.className = mobileFeed
           ? 'imagegen-feed imagegen-feed--tiles mobile-feed-grid feed-layout-pending'
           : 'imagegen-feed imagegen-feed--masonry feed-layout-pending';
@@ -869,16 +935,20 @@
           if (scrollState) wrap.__phIgPendingScrollState = scrollState;
           layoutImageGenFeedMasonry();
         }
-        if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
-        else if (scrollEl) {
+        if (mobileFeed && scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
+        else if (!mobileFeed && scrollEl && preserveScroll && !scrollState) {
+          applyImageGenFeedScrollTop(scrollEl, scrollTop);
+        } else if (mobileFeed && scrollEl) {
           if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);
-          else scrollEl.scrollTop = scrollTop;
+          else applyImageGenFeedScrollTop(scrollEl, scrollTop);
         }
         d().renderImageGenMobileResult?.();
       }
 
       const pageStart = feedAppend ? (store.page - 1) * IMAGEGEN_FEED_PER_PAGE : 0;
-      const pageEnd = feedAppend ? store.page * IMAGEGEN_FEED_PER_PAGE : IMAGEGEN_FEED_PER_PAGE;
+      const pageEnd = feedAppend
+        ? store.page * IMAGEGEN_FEED_PER_PAGE
+        : imageGenFeedRenderedCount(store);
       const feedItems = d().getImageGenFeedTab?.() === 'warehouse'
         ? store.whCards.slice(pageStart, pageEnd)
         : store.commPosts.slice(pageStart, pageEnd).map((p) => ({
@@ -917,19 +987,13 @@
         if (mobileFeed) {
           enforceMobileImageGenFeed();
           d().setFeedLayoutPending?.(wrap, false);
-        } else {
-          layoutImageGenFeedMasonry();
+          if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
         }
         if (!didPrimeWarehouse) {
           window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 12 });
           if (d().getImageGenFeedTab?.() === 'warehouse') {
-            window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 10);
+            window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 8);
           }
-        }
-        if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
-        else {
-          const anchorAfter = scrollAnchor || { scrollTop, scrollEl };
-          restoreImageGenFeedScrollAnchor(anchorAfter);
         }
         delete wrap.__phIgPendingScrollState;
         d().scrubImageGenFeedCards?.(wrap);
@@ -1056,6 +1120,34 @@
       });
     }
 
+    /** 仅更新 pending/failed 占位，避免 force 全量重绘导致卡顿与滚动回顶 */
+    function patchImageGenFeedPendingOnly() {
+      const wrap = document.getElementById('imageGenFeed');
+      if (!wrap || !imageGenFeedPagedStore) return false;
+      const sig = imageGenFeedListSignature();
+      if (imageGenFeedPagedStore.sig === sig) return true;
+      const pending = (d().getImageGenPendingJobs?.() ?? []).slice(0, d().IMAGEGEN_FEED_PENDING_CAP ?? 6);
+      const failed = (d().getImageGenFailedJobs?.() ?? []).slice(0, d().IMAGEGEN_FEED_FAILED_CAP ?? 4);
+      if (d().getImageGenFeedTab?.() === 'warehouse') {
+        const whCards = getImageGenWarehouseFeedList();
+        const commPosts = imageGenFeedPagedStore.commPosts || [];
+        imageGenFeedPagedStore = { ...imageGenFeedPagedStore, sig, whCards, commPosts };
+        patchImageGenFeedPendingSection(wrap, pending, failed);
+        if (!d().isMobileFeedViewport?.()) scheduleImageGenFeedLayout();
+        else enforceMobileImageGenFeed();
+        return true;
+      }
+      if (d().getImageGenFeedTab?.() === 'community') {
+        imageGenFeedPagedStore = {
+          ...imageGenFeedPagedStore,
+          sig,
+          commPosts: getImageGenCommunityFeedList()
+        };
+        return false;
+      }
+      return false;
+    }
+
   function init(injected) {
     deps = injected || {};
     return {
@@ -1084,6 +1176,7 @@
       bindImageGenFeedCardEvents,
       bindImageGenFeedResizeRelayout,
       captureImageGenFeedCardPositions,
+      patchImageGenFeedPendingOnly,
       imageGenFeedIsNearTop
     };
   }

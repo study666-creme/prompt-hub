@@ -446,10 +446,12 @@
           releaseFeedMediaLoading(media);
           media.style.removeProperty('min-height');
           media.style.removeProperty('height');
+          img.dataset.feedLoadDone = '1';
           return;
         }
+        if (img.dataset.feedLoadDone === '1' || img.dataset.igenRetry === '1') return;
         const ref = img.getAttribute('data-image-ref');
-        if (ref && isDisplayableImage(ref) && !img.dataset.igenRetry) {
+        if (ref && isDisplayableImage(ref)) {
           img.dataset.igenRetry = '1';
           if (window.CardImageLoader?.loadImg) window.CardImageLoader.loadImg(img);
           else void hydrateFeedImageOne(img);

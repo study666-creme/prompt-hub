@@ -517,8 +517,10 @@
     if (fromUrl) invalidateSignedCache(fromUrl);
   }
 
-  function isUsableLoadedImgSrc(src) {
-    return !!(src && src.startsWith('http') && !src.includes('data:image/svg') && isValidSignedDisplayUrl(src));
+  function isUsableLoadedImgSrc(src, img) {
+    if (!src || !src.startsWith('http') || src.includes('data:image/svg')) return false;
+    if (img?.complete && img.naturalWidth > 8) return true;
+    return isValidSignedDisplayUrl(src);
   }
 
   function configured() {
@@ -2678,6 +2680,7 @@
     const list = (cards || []).slice(0, maxCards);
     for (const c of list) {
       if (!c?.image) continue;
+      if (isGridBackfillSkipped(c.id)) continue;
       const collectOpts = typeof window.getCommunityCollectImageResolveOpts === 'function'
         ? window.getCommunityCollectImageResolveOpts(c)
         : null;
@@ -2809,7 +2812,7 @@
       const ref = img.getAttribute('data-image-ref') || img.getAttribute('data-storage-ref');
       if (!ref) return;
       const cur = img.currentSrc || img.src || '';
-      if (isUsableLoadedImgSrc(cur)) return;
+      if (isUsableLoadedImgSrc(cur, img)) return;
       const assetId = img.dataset?.sourceCardId
         || img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
         || img.closest('.card[data-id]')?.dataset?.id
@@ -2831,17 +2834,22 @@
       if (url && isWarehouseBlockedFullUrl(url, img)) url = '';
       if (url && /^https?:\/\//i.test(url) && isValidSignedDisplayUrl(url)) {
         const media = img.closest('.card-media, .imagegen-feed-media');
-        media?.classList.remove('card-media--await');
-        const alreadyVisible = img.complete && img.naturalWidth > 8 && isUsableLoadedImgSrc(cur);
-        if (media && !alreadyVisible) {
-          if (!media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
-          if (!media.classList.contains('is-loading')) media.classList.add('is-loading');
+        const whOwnList = inWarehouse && !img.closest('.card[data-community-collect="1"]');
+        const alreadyVisible = img.complete && img.naturalWidth > 8 && isUsableLoadedImgSrc(cur, img);
+        if (whOwnList) {
+          if (media && !alreadyVisible) media.classList.add('card-media--await');
+        } else {
+          media?.classList.remove('card-media--await');
+          if (media && !alreadyVisible) {
+            if (!media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
+            if (!media.classList.contains('is-loading')) media.classList.add('is-loading');
+          }
         }
         const done = () => {
           if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
           else media?.classList.remove('is-loading');
         };
-        if (img.complete && img.naturalWidth > 0 && img.src === url) done();
+        if (img.complete && img.naturalWidth > 0 && (img.src === url || isUsableLoadedImgSrc(cur, img))) done();
         else {
           img.addEventListener('load', done, { once: true });
           img.addEventListener('error', () => {
@@ -2918,7 +2926,7 @@
       const media = img.closest('.card-media, .imagegen-feed-media');
       if (media?.classList.contains('imagegen-gen-pending')) return;
       const cur = img.currentSrc || img.src || '';
-      if (onlyMissing && isUsableLoadedImgSrc(cur)) {
+      if (onlyMissing && isUsableLoadedImgSrc(cur, img)) {
         media?.classList.remove('is-loading');
         return;
       }

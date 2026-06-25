@@ -3092,7 +3092,10 @@
       const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : 14000;
       media.__shineWatch = setTimeout(() => {
         media.__shineWatch = null;
-        if (!media.classList.contains('is-loading')) return;
+        const inWhList = !!media.closest('#cardsContainer:not(.list-view) .card.card--visual');
+        const awaiting = media.classList.contains('is-loading')
+          || (inWhList && media.classList.contains('card-media--await') && !media.classList.contains('media-revealed'));
+        if (!awaiting) return;
         const im = media.querySelector('img');
         const loaded = im && im.complete && im.naturalWidth > 0 && !isPlaceholderCardImg(im);
         if (loaded) {
@@ -6497,6 +6500,17 @@
       return window.FeatureDraft?.isUsableWarehouseImage?.(card) ?? false;
     }
 
+    /** 卡片库是否渲染图片区：有图且非已确认幽灵（缺图/跳过 backfill） */
+    function warehouseCardShouldRenderMediaSlot(card) {
+      if (!cardHasDisplayImage(card)) return false;
+      if (window.SupabaseSync?.isGridBackfillSkipped?.(card.id)) return false;
+      const image = card.image;
+      if (window.SupabaseSync?.cardImageStillResolvable?.(image, card.id) === false) return false;
+      const primary = window.SupabaseSync?.primaryImagePath?.(image, card.id);
+      if (primary && window.SupabaseSync?.isPathKnownMissing?.(primary)) return false;
+      return true;
+    }
+
     function shouldLoadPanelImagePreview() {
       if (!imageData) return false;
       if (pendingUploadFile) return true;
@@ -6646,7 +6660,7 @@
         }
         const checked = selectedCardIds.has(card.id);
         if (checked) div.classList.add('batch-selected');
-        const showImage = cardHasDisplayImage(card);
+        const showImage = warehouseCardShouldRenderMediaSlot(card);
         if (showImage) div.classList.add('card--visual');
         else div.classList.add('card--text-only');
         const cachedUrl = showImage && window.SupabaseSync?.getListDisplayImageSrc
@@ -6655,9 +6669,9 @@
         const imgSrc = showImage ? (cachedUrl || cardImgInitialSrc(card.image)) : '';
         const isCollectCard = window.isCommunityCollectCard?.(card);
         const collectMeta = isCollectCard ? getCommunityCollectImageResolveOpts(card) : null;
-        const hasReadyListSrc = !!(showImage && cachedUrl && !String(cachedUrl).startsWith('data:image/svg'));
-        const mediaLoadingCls = hasReadyListSrc ? ' is-loading' : (showImage ? ' card-media--await' : '');
-        const shineAt = hasReadyListSrc ? ` data-shine-at="${Date.now()}"` : '';
+        /* 卡片库列表：仅用 await 占位，禁止 is-loading 扫光（纯文字幽灵卡与有图卡共用） */
+        const mediaLoadingCls = showImage ? ' card-media--await' : '';
+        const shineAt = '';
         const titleTrim = getCardDisplayTitle(card);
         const timeLabel = formatCardTime(card.updatedAt || card.createdAt);
         const tagsHtml = buildCardTagsHtml(card.tags);

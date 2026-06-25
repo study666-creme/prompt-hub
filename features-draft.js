@@ -5616,7 +5616,7 @@
   function afterGenJobsResume(changed) {
     if (!changed) return;
     if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-      renderImageGenFeed({ preserveScroll: true, force: true });
+      renderImageGenFeed({ preserveScroll: true });
       renderImageGenMobileResult();
     } else {
       window.refreshWarehouseUI?.();
@@ -5628,8 +5628,9 @@
     if (!imageGenPendingJobs.length && !imageGenFailedJobs.length) return;
     clearTimeout(scheduleImageGenPendingUiRefresh._t);
     scheduleImageGenPendingUiRefresh._t = setTimeout(() => {
-      renderImageGenFeed({ preserveScroll: true, force: true });
-    }, 400);
+      if (window.ImageGenFeed?.patchImageGenFeedPendingOnly?.()) return;
+      renderImageGenFeed({ preserveScroll: true });
+    }, 900);
   }
 
   function persistPendingGenJobs() {
@@ -9049,7 +9050,7 @@
     updateImageGenPricingUI();
     if (sourceType === 'personal' && sourceId) imageGenActiveHistoryId = sourceId;
     syncImageGenGenPublicFromPrompt();
-    renderImageGenFeed();
+    renderImageGenFeed({ preserveScroll: true });
     toast('已填入生图框');
   }
 
@@ -11225,6 +11226,72 @@
     });
   }
 
+  function bindImageGenPreviewActions() {
+    const body = document.getElementById('imageGenPreviewBody');
+    if (!body || body.dataset.previewActionsBound === '1') return;
+    body.dataset.previewActionsBound = '1';
+    const getPreviewRefs = () => {
+      let refs = [];
+      try {
+        if (body.dataset.previewRefs) refs = JSON.parse(body.dataset.previewRefs) || [];
+      } catch (e) { /* ignore */ }
+      return { refImages: refs, refImage: body.dataset.previewRef || '' };
+    };
+    body.addEventListener('click', (e) => {
+      if (!imageGenPreviewId || !imageGenPreviewKind) return;
+      const copyBtn = e.target.closest('[data-preview-copy-prompt]');
+      if (copyBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const text = body.dataset.previewPrompt || '';
+        if (!text) return;
+        navigator.clipboard?.writeText(text).then(
+          () => toast('提示词已复制'),
+          () => toast('复制失败')
+        );
+        return;
+      }
+      const fillAll = e.target.closest('[data-preview-fill-all]');
+      if (fillAll) {
+        e.preventDefault();
+        e.stopPropagation();
+        const { refImages: ri, refImage: r1 } = getPreviewRefs();
+        const assetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : '';
+        fillFormFromData({
+          prompt: body.dataset.previewPrompt || '',
+          refImages: ri.length ? ri : undefined,
+          refImage: ri.length ? undefined : r1,
+          refAssetId: assetId || undefined
+        });
+        return;
+      }
+      const fillPrompt = e.target.closest('[data-preview-fill-prompt]');
+      if (fillPrompt) {
+        e.preventDefault();
+        e.stopPropagation();
+        fillFormPromptOnly(body.dataset.previewPrompt || '');
+        return;
+      }
+      const fillRef = e.target.closest('[data-preview-fill-ref]');
+      if (fillRef) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (fillRef.disabled) return;
+        const { refImages: ri, refImage: r1 } = getPreviewRefs();
+        const assetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : '';
+        fillFormRefOnly(r1, ri, { assetId: assetId || undefined });
+        return;
+      }
+      const likeBtn = e.target.closest('[data-preview-like]');
+      if (likeBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        likeCommunityPostOnly(imageGenPreviewId);
+        renderImageGenPreview();
+      }
+    });
+  }
+
   function primeImageGenPreviewShell(kind, id) {
     const body = document.getElementById('imageGenPreviewBody');
     if (!body) return;
@@ -11273,6 +11340,9 @@
       : '';
     body.innerHTML = `${imgHtml}<div class="imagegen-preview-prompt">${esc(prompt)}</div>${fillHtml}`;
     body.dataset.previewPrompt = prompt;
+    if (hasRef && image) body.dataset.previewRef = image;
+    else delete body.dataset.previewRef;
+    delete body.dataset.previewRefs;
     if (instantSrc) {
       body.dataset.previewImageUrl = instantSrc;
       body.dataset.previewImageReady = '1';
@@ -11714,43 +11784,6 @@
     } else {
       body.querySelector('[data-preview-download]')?.remove();
     }
-    const getPreviewRefs = () => {
-      let refs = [];
-      try {
-        if (body.dataset.previewRefs) refs = JSON.parse(body.dataset.previewRefs) || [];
-      } catch (e) { /* ignore */ }
-      return { refImages: refs, refImage: body.dataset.previewRef || '' };
-    };
-    body.querySelector('[data-preview-fill-all]')?.addEventListener('click', () => {
-      const { refImages: ri, refImage: r1 } = getPreviewRefs();
-      const assetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : '';
-      fillFormFromData({
-        prompt: body.dataset.previewPrompt || '',
-        refImages: ri.length ? ri : undefined,
-        refImage: ri.length ? undefined : r1,
-        refAssetId: assetId || undefined
-      });
-    });
-    body.querySelector('[data-preview-fill-prompt]')?.addEventListener('click', () => {
-      fillFormPromptOnly(body.dataset.previewPrompt || '');
-    });
-    body.querySelector('[data-preview-fill-ref]')?.addEventListener('click', () => {
-      const { refImages: ri, refImage: r1 } = getPreviewRefs();
-      const assetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : '';
-      fillFormRefOnly(r1, ri, { assetId: assetId || undefined });
-    });
-    body.querySelector('[data-preview-like]')?.addEventListener('click', () => {
-      likeCommunityPostOnly(imageGenPreviewId);
-      renderImageGenPreview();
-    });
-    body.querySelector('[data-preview-copy-prompt]')?.addEventListener('click', () => {
-      const text = body.dataset.previewPrompt || '';
-      if (!text) return;
-      navigator.clipboard?.writeText(text).then(
-        () => { if (typeof showToast === 'function') showToast('提示词已复制'); },
-        () => { if (typeof showToast === 'function') showToast('复制失败'); }
-      );
-    });
     body.querySelector('[data-preview-download]')?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -12191,6 +12224,7 @@
       });
     });
     document.getElementById('imageGenPreviewClose')?.addEventListener('click', closeImageGenPreview);
+    bindImageGenPreviewActions();
     bindImageGenPreviewWheelScroll();
     bindImageGenFeedPagedScroll();
     bindImageGenFeedResizeRelayout?.();

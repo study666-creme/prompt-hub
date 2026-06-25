@@ -24,32 +24,34 @@
 
 ---
 
-## 当前部署阶段（2026-06-25 · P0 带宽 a · 已部署）
+## 当前部署阶段（2026-06-25 · 生图仓库 Masonry + 请求风暴修复）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260625d` · https://prompt-hubs.com |
+| **Pages** | build `20260625n` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
 ### 已打通
 
-- ✅ **P0 带宽 + 云同步**：grid 缩略图 · `user_data` 增量 · 轻量后台 sync · `20260625c`
-- ✅ **基线 pg_dump**：`backups/prompt-hub-baseline-20260624.dump`（**24.5 MB** · Pooler Session）
+- ✅ **P0 卡片库图片**：有图卡静默 await；纯文字无扫光；幽灵卡直接纯文字
+- ✅ **生图仓库 Feed**：Masonry 多列恢复；滚动不弹顶；预览筛选按钮可用；签名 URL 去重防请求风暴
+- ✅ **MediaPipeline + SyncOrchestrator**：列表 grid / 静默云同步编排
 - ✅ 新图走 **R2**（`MEDIA_STORAGE_MODE=r2`）
 
-### 迁移备份（进行中）
+### 架构优化进度
 
-- ✅ 数据库基线 dump（见 `docs/MEMFIRE-MIGRATION.md` · 本机 `backups/MIGRATION-CHECKPOINT.txt`）
-- ✅ `backups/card-images/` 旧图（1904 张）
-- ⏳ 站内 JSON 导出 · `restore-notes.txt`
-- 📅 **7 月初** `prompt-hub-final-*.dump` 再导一次后 `pg_restore` → MemFire
+| 阶段 | 内容 | 进度 |
+|------|------|------|
+| 1 图片管线 | MediaPipeline 全站 Feed/卡片库/生图 | ~90% |
+| 2 云同步解耦 | SyncOrchestrator + skipImageUpload | ~80% |
+| 3 模块化 | esbuild 拆包（pack-*.js 已上线） | 进行中 |
 
-### 下一步
+### 已知问题 / 下一步
 
-1. 强刷验收：Network 无重复 14MB `user_data`；生图仓库首屏 < 5MB
+1. 阶段 1 收尾：`features-assets.js` 资产包封面签图改走 Pipeline
 2. MemFire 迁移（7 月初 final dump）
-3. 阶段 5：`media-download.js` 含 URL/Blob/卡片原图下载（`pack-lightbox`）
+3. R2 历史图同步
 
 ### 部署
 
