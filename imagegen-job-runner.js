@@ -546,6 +546,20 @@
         return false;
       }
       if (poll.data.status === 'completed') {
+        if (poll.data.isMidjourney || d().isImageGenMidjourneyModel?.(ctx?.model)) {
+          const parsed = d().resolveMjPollImages?.(poll);
+          if ((parsed?.gallery?.length || 0) < 4) {
+            const settled = await window.PromptHubApi.getGenerationJob(jobId, { settle: true });
+            if (settled?.ok && settled.data?.status === 'completed') {
+              return d().ensureGenJobCreationsFromPoll(
+                settled,
+                { ...ctx, jobId: ctx.jobId || jobId },
+                pendingId
+              );
+            }
+            return false;
+          }
+        }
         return d().ensureGenJobCreationsFromPoll(poll, { ...ctx, jobId: ctx.jobId || jobId }, pendingId);
       }
       return false;
@@ -598,10 +612,11 @@
       }
       if (i > 0) await new Promise((r) => setTimeout(r, ge('genJobPollDelayMs', ctx, i)));
       const elapsedNow = Date.now() - (ctx?.startedAt || Date.now());
-      const useSettle = ge('isSlowGenProviderModel', ctx?.model)
-        ? elapsedNow > 20_000
-        : isLongRunningGenJob(ctx) && elapsedNow > 60_000;
-      const poll = await window.PromptHubApi.getGenerationJob(jobId, { settle: useSettle });
+      const isMj = d().isImageGenMidjourneyModel?.(ctx?.model);
+      const useSettle = isMj
+        || ge('isSlowGenProviderModel', ctx?.model)
+        || (isLongRunningGenJob(ctx) && elapsedNow > 60_000);
+      let poll = await window.PromptHubApi.getGenerationJob(jobId, { settle: useSettle && elapsedNow > (isMj ? 8000 : 20000) });
       if (poll.ok) applyGenPollProgressNote(pendingId, poll.data);
       if (!poll.ok) {
         const recoverableNet =

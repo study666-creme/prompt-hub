@@ -63,7 +63,10 @@
           discountLabel: hit.discountLabel,
           pricingByResolution: hit.pricingByResolution === true,
           creditsByResolution: hit.creditsByResolution || null,
-          costByResolution: hit.costByResolution || null
+          costByResolution: hit.costByResolution || null,
+          pricingBySpeed: hit.pricingBySpeed === true,
+          creditsBySpeed: hit.creditsBySpeed || null,
+          costBySpeed: hit.costBySpeed || null
         };
       }
     }
@@ -268,13 +271,46 @@
   }
 
   /** @returns {{ modelId, modelLabel, base, final, listPrice, modelDiscountLabel, mult, label, saved, fixed }} */
-  function getImageGenCostDetail(modelId, resolution) {
+  function getImageGenCostDetail(modelId, resolution, mjSpeed) {
     const model = getImageGenModel(modelId);
     const res = normalizeResolution(resolution);
     const mult = getMemberGenMultiplier();
     const label = window.Membership?.getGenDiscountLabel?.() || '';
 
     if (useApiForAccount()) {
+      if (model.pricingBySpeed) {
+        const speed = mjSpeed === 'fast' || mjSpeed === 'turbo' ? mjSpeed : 'relax';
+        const perSpeed = model.costBySpeed?.[speed];
+        if (perSpeed && Number.isFinite(Number(perSpeed.final))) {
+          return costDetailFromApiQuote(model, perSpeed, mult, label);
+        }
+        if (model.creditsBySpeed?.[speed] != null) {
+          const listPrice = Number(model.creditsBySpeed[speed]);
+          const promoPrice = Number(model.promoPrice);
+          const hasPromo = Number.isFinite(promoPrice) && promoPrice > 0 && promoPrice < listPrice;
+          const picked = pickBestGenPrice(
+            listPrice,
+            hasPromo ? promoPrice : listPrice,
+            mult,
+            label
+          );
+          const final = picked.final;
+          return {
+            modelId: model.id,
+            modelLabel: model.label,
+            base: listPrice,
+            final,
+            listPrice,
+            promoPrice: hasPromo ? promoPrice : final,
+            appliedDiscount: picked.appliedDiscount,
+            modelDiscountLabel: picked.appliedDiscount === 'model' ? (model.modelDiscountLabel || null) : null,
+            mult,
+            label: picked.label,
+            saved: listPrice > final ? roundCredits(listPrice - final) : 0,
+            fixed: model.appliedDiscount === 'fixed'
+          };
+        }
+      }
       const perRes = model.costByResolution?.[res];
       if (perRes && Number.isFinite(Number(perRes.final))) {
         return costDetailFromApiQuote(model, perRes, mult, label);

@@ -1,12 +1,14 @@
 export type ImageModelProvider = 'grsai' | 'apimart' | 'ithink' | 'mooko';
 
-export type ImageModelUiFamily = 'gim2' | 'banana' | 'jimeng' | 'midjourney';
+export type ImageModelUiFamily = 'gim2' | 'banana' | 'jimeng' | 'midjourney' | 'wan' | 'flux';
+
+export type MjSpeedKey = 'relax' | 'fast' | 'turbo';
 
 export type ImageModelCatalogEntry = {
   id: string;
   /** 生图线路：GrsAI 或 Apimart（前台为独立选项，可分别定价） */
   provider: ImageModelProvider;
-  /** 前台下拉分组：G-im2 / 香蕉 / 即梦（与 provider 无关） */
+  /** 前台下拉分组：全能2 / 香蕉 / 即梦（与 provider 无关） */
   uiFamily: ImageModelUiFamily;
   /** 提交上游 API 的 model 字段 */
   upstream: string;
@@ -21,6 +23,9 @@ export type ImageModelCatalogEntry = {
   /** 按分辨率分别定价（Apimart GPT Image 2） */
   pricingByResolution?: boolean;
   defaultCreditsByResolution?: Partial<Record<'1k' | '2k' | '4k', number>>;
+  /** MJ：按 relax / fast / turbo 分档定价 */
+  pricingBySpeed?: boolean;
+  defaultCreditsBySpeed?: Partial<Record<MjSpeedKey, number>>;
   /** GrsAI：自动跟随上游维护状态（模型页 + 提交反馈） */
   followUpstreamMaintenance?: boolean;
   /** 固定 low 质量，前台隐藏质量选项（Apimart official 特价） */
@@ -36,7 +41,7 @@ function withProvider(
     ...row,
     provider,
     followUpstreamMaintenance:
-      provider === 'grsai' ? row.followUpstreamMaintenance ?? true : undefined
+      provider === 'grsai' ? row.followUpstreamMaintenance ?? false : undefined
   }));
 }
 
@@ -56,6 +61,14 @@ function midjourney(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>):
   return { ...row, uiFamily: 'midjourney' };
 }
 
+function wan(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>): Omit<ImageModelCatalogEntry, 'provider'> {
+  return { ...row, uiFamily: 'wan' };
+}
+
+function flux(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>): Omit<ImageModelCatalogEntry, 'provider'> {
+  return { ...row, uiFamily: 'flux' };
+}
+
 /**
  * GrsAI 图像模型（https://grsai.com/zh/dashboard/models）
  */
@@ -68,7 +81,7 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     description: 'OpenAI VIP 优化版',
     upstreamPoints: 1300,
     refundOnViolation: true,
-    resolutions: ['1k', '2k', '4k'],
+    resolutions: ['2k', '4k'],
     defaultCredits: 14,
     sortOrder: 1
   }),
@@ -174,7 +187,7 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     label: 'Nano Banana 2 · 4K 创意',
     group: 'new',
     description: '原生 4K 创意版',
-    upstreamPoints: 3000,
+    upstreamPoints: 6000,
     refundOnViolation: true,
     resolutions: ['4k'],
     defaultCredits: 30,
@@ -286,77 +299,229 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
     defaultCredits: 14,
     sortOrder: 102
   }),
-  midjourney({
-    id: 'apimart-mj-v61',
-    upstream: 'mj-v6.1',
-    label: 'imagine-v6.1',
+  banana({
+    id: 'apimart-gemini-2-5-flash-preview',
+    upstream: 'gemini-2.5-flash-image-preview',
+    label: 'Nano Banana Fast · 备用',
     group: 'classic',
-    description: 'Midjourney v6.1 · 写实与细节均衡',
-    upstreamPoints: 0,
+    description: 'Gemini 2.5 Flash · 快速草稿',
+    upstreamPoints: 0.088,
     refundOnViolation: true,
     resolutions: ['1k'],
+    fixedQualityLow: true,
+    defaultCredits: 2,
+    sortOrder: 103
+  }),
+  banana({
+    id: 'apimart-gemini-3-1-flash-preview',
+    upstream: 'gemini-3.1-flash-image-preview',
+    label: 'Nano Banana 2 · 备用',
+    group: 'classic',
+    description: 'Gemini 3.1 Flash · 均衡',
+    upstreamPoints: 0.21,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k', '4k'],
+    pricingByResolution: true,
+    defaultCreditsByResolution: { '1k': 4, '2k': 5, '4k': 7 },
+    fixedQualityLow: true,
+    defaultCredits: 4,
+    sortOrder: 104
+  }),
+  banana({
+    id: 'apimart-gemini-3-pro-preview',
+    upstream: 'gemini-3-pro-image-preview',
+    label: 'Nano Banana Pro · 备用',
+    group: 'classic',
+    description: 'Gemini 3 Pro（Nano Banana Pro）',
+    upstreamPoints: 0.28,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k', '4k'],
+    pricingByResolution: true,
+    defaultCreditsByResolution: { '1k': 5, '2k': 5, '4k': 6 },
+    fixedQualityLow: true,
     defaultCredits: 5,
+    sortOrder: 105
+  }),
+  banana({
+    id: 'apimart-gemini-2-5-flash-official',
+    upstream: 'gemini-2.5-flash-image-preview-official',
+    label: 'Nano Banana Fast · 官方',
+    group: 'new',
+    description: 'Gemini 2.5 Flash 官方渠道',
+    upstreamPoints: 0.218,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    fixedQualityLow: true,
+    defaultCredits: 4,
+    sortOrder: 106
+  }),
+  banana({
+    id: 'apimart-gemini-3-1-flash-official',
+    upstream: 'gemini-3.1-flash-image-preview-official',
+    label: 'Nano Banana 2 · 官方',
+    group: 'new',
+    description: 'Gemini 3.1 Flash 官方渠道 · 按分辨率分档',
+    upstreamPoints: 0.375,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k', '4k'],
+    pricingByResolution: true,
+    defaultCreditsByResolution: { '1k': 6, '2k': 8, '4k': 11 },
+    fixedQualityLow: true,
+    defaultCredits: 6,
+    sortOrder: 107
+  }),
+  banana({
+    id: 'apimart-gemini-3-pro-official',
+    upstream: 'gemini-3-pro-image-preview-official',
+    label: 'Nano Banana Pro · 官方',
+    group: 'new',
+    description: 'Gemini 3 Pro 官方渠道',
+    upstreamPoints: 0.75,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k', '4k'],
+    pricingByResolution: true,
+    defaultCreditsByResolution: { '1k': 10, '2k': 10, '4k': 14 },
+    fixedQualityLow: true,
+    defaultCredits: 10,
+    sortOrder: 108
+  }),
+  wan({
+    id: 'apimart-wan2-7-image',
+    upstream: 'wan2.7-image',
+    label: '万相 2.7',
+    group: 'new',
+    description: '万相 2.7 标准版 · 最高 2K · 文生图/编辑',
+    upstreamPoints: 0.15,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k'],
+    fixedQualityLow: true,
+    defaultCredits: 3,
+    sortOrder: 109
+  }),
+  wan({
+    id: 'apimart-wan2-7-image-pro',
+    upstream: 'wan2.7-image-pro',
+    label: '万相 2.7 Pro',
+    group: 'new',
+    description: '万相 2.7 专业版 · 文生图最高 4K',
+    upstreamPoints: 0.35,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k', '4k'],
+    fixedQualityLow: true,
+    defaultCredits: 6,
     sortOrder: 110
+  }),
+  flux({
+    id: 'apimart-flux-kontext-pro',
+    upstream: 'flux-kontext-pro',
+    label: 'Flux Kontext Pro',
+    group: 'new',
+    description: '文生图/单图编辑 · 固定价',
+    upstreamPoints: 0.14,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    fixedQualityLow: true,
+    defaultCredits: 4,
+    sortOrder: 120
+  }),
+  flux({
+    id: 'apimart-flux-kontext-max',
+    upstream: 'flux-kontext-max',
+    label: 'Flux Kontext Max',
+    group: 'new',
+    description: 'Kontext 高质量版',
+    upstreamPoints: 0.28,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    fixedQualityLow: true,
+    defaultCredits: 6,
+    sortOrder: 121
+  }),
+  flux({
+    id: 'apimart-flux-2-pro',
+    upstream: 'flux-2-pro',
+    label: 'Flux 2 Pro',
+    group: 'new',
+    description: 'Flux 2.0 Pro · 按 1K/2K 分档',
+    upstreamPoints: 0.175,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k'],
+    pricingByResolution: true,
+    defaultCreditsByResolution: { '1k': 5, '2k': 7 },
+    fixedQualityLow: true,
+    defaultCredits: 5,
+    sortOrder: 122
+  }),
+  flux({
+    id: 'apimart-flux-2-flex',
+    upstream: 'flux-2-flex',
+    label: 'Flux 2 Flex',
+    group: 'new',
+    description: 'Flux 2.0 Flex · 快速迭代 · 按 1K/2K 分档',
+    upstreamPoints: 0.49,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k'],
+    pricingByResolution: true,
+    defaultCreditsByResolution: { '1k': 7, '2k': 10 },
+    fixedQualityLow: true,
+    defaultCredits: 7,
+    sortOrder: 123
   }),
   midjourney({
     id: 'apimart-mj-v81',
     upstream: 'mj-v8.1',
-    label: 'imagine-v8.1',
+    label: 'MJ v8.1',
     group: 'new',
-    description: 'Midjourney v8.1 · 最新主版本',
-    upstreamPoints: 0,
+    description: '最新主版本 · 写实/概念通用 · 细节与光影最佳',
+    upstreamPoints: 0.1,
     refundOnViolation: true,
     resolutions: ['1k'],
-    defaultCredits: 5,
-    sortOrder: 111
+    pricingBySpeed: true,
+    defaultCreditsBySpeed: { relax: 8, fast: 10, turbo: 12 },
+    defaultCredits: 8,
+    sortOrder: 110
   }),
   midjourney({
     id: 'apimart-mj-v7',
     upstream: 'mj-v7',
-    label: 'imagine-v7',
+    label: 'MJ v7',
     group: 'classic',
-    description: 'Midjourney v7 · v6 与 v8 过渡版',
-    upstreamPoints: 0,
+    description: '上一代主力 · 复杂构图稳定 · 风格均衡',
+    upstreamPoints: 0.1,
     refundOnViolation: true,
     resolutions: ['1k'],
-    defaultCredits: 5,
+    pricingBySpeed: true,
+    defaultCreditsBySpeed: { relax: 8, fast: 10, turbo: 12 },
+    defaultCredits: 8,
+    sortOrder: 111
+  }),
+  midjourney({
+    id: 'apimart-mj-v61',
+    upstream: 'mj-v6.1',
+    label: 'MJ v6.1',
+    group: 'classic',
+    description: '经典 v6 · 风格稳定 · 适合批量出图',
+    upstreamPoints: 0.1,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    pricingBySpeed: true,
+    defaultCreditsBySpeed: { relax: 8, fast: 10, turbo: 12 },
+    defaultCredits: 8,
     sortOrder: 112
   }),
   midjourney({
     id: 'apimart-mj-niji7',
     upstream: 'mj-niji7',
-    label: 'imagine-niji7',
+    label: 'MJ Niji 7',
     group: 'new',
-    description: 'Midjourney Niji 7 · 二次元',
-    upstreamPoints: 0,
+    description: '动漫/二次元专版 · 角色与插画表现力强',
+    upstreamPoints: 0.1,
     refundOnViolation: true,
     resolutions: ['1k'],
-    defaultCredits: 5,
+    pricingBySpeed: true,
+    defaultCreditsBySpeed: { relax: 8, fast: 10, turbo: 12 },
+    defaultCredits: 8,
     sortOrder: 113
-  }),
-  midjourney({
-    id: 'apimart-mj-niji6',
-    upstream: 'mj-niji6',
-    label: 'imagine-niji6',
-    group: 'classic',
-    description: 'Midjourney Niji 6 · 上一代动漫模型',
-    upstreamPoints: 0,
-    refundOnViolation: true,
-    resolutions: ['1k'],
-    defaultCredits: 5,
-    sortOrder: 114
-  }),
-  midjourney({
-    id: 'apimart-mj-v52',
-    upstream: 'mj-v5.2',
-    label: 'imagine-v5.2',
-    group: 'classic',
-    description: 'Midjourney v5.2 · 经典写实质感',
-    upstreamPoints: 0,
-    refundOnViolation: true,
-    resolutions: ['1k'],
-    defaultCredits: 5,
-    sortOrder: 115
   })
 ]);
 
@@ -373,6 +538,8 @@ export function imageModelUiFamily(modelId: string): ImageModelUiFamily {
   if (entry?.uiFamily) return entry.uiFamily;
   const id = String(modelId || '').toLowerCase();
   if (id.startsWith('apimart-mj-')) return 'midjourney';
+  if (id.startsWith('apimart-wan') || id.includes('wan2.7')) return 'wan';
+  if (id.startsWith('apimart-flux') || id.startsWith('flux-')) return 'flux';
   if (id.includes('seedream') || id === 'jimeng') return 'jimeng';
   if (id.includes('nano-banana')) return 'banana';
   return 'gim2';
@@ -383,6 +550,16 @@ export function providerLabel(provider: ImageModelProvider): string {
   if (provider === 'ithink') return '经济线路';
   if (provider === 'mooko') return '慢速线路';
   return '常规线路';
+}
+
+/** 前台模型说明：去掉上游品牌名与 MJ 速度冗余文案 */
+export function sanitizePublicModelDescription(description: string | null | undefined): string {
+  if (!description) return '';
+  let s = String(description).trim();
+  s = s.replace(/^(Apimart|GrsAI|ThinkAI|Mooko|木瓜)\s*[·•]\s*/gi, '');
+  s = s.replace(/\bApimart\s*[·•]\s*/gi, '');
+  s = s.replace(/\s*[·•]\s*出图速度可选\s*relax\s*\/\s*fast\s*\/\s*turbo/gi, '');
+  return s.replace(/\s*[·•]\s*$/g, '').trim();
 }
 
 const LEGACY_MODEL_MAP: Record<string, string> = {

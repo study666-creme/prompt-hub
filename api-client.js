@@ -354,6 +354,7 @@
         const retry = await request('GET', '/api/v1/me', null, { timeoutMs: API_FAST_TIMEOUT_MS, noRetry: true });
         if (retry.ok) {
           applyMePayload(retry.data);
+          prefetchGenerationModels();
           return retry;
         }
       }
@@ -365,6 +366,7 @@
       return r;
     }
     applyMePayload(r.data);
+    prefetchGenerationModels();
     return r;
   }
 
@@ -499,22 +501,46 @@
     if (modelsCache && modelsCacheExp > Date.now()) {
       return { ok: true, data: modelsCache };
     }
+    try {
+      const raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v3') || 'null');
+      if (raw?.models?.length && Number(raw.version) >= 6 && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
+        modelsCache = { models: raw.models, globalDiscountPercent: 100, providers: ['grsai', 'apimart', 'ithink', 'mooko'] };
+        modelsCacheExp = Date.now() + 45_000;
+      }
+    } catch (e) { /* ignore */ }
     const res = await request('GET', '/api/v1/generate/models', null, { timeoutMs: 8000 });
     if (res.ok && res.data) {
       modelsCache = res.data;
       modelsCacheExp = Date.now() + 120_000;
+      if (Array.isArray(res.data.models) && res.data.models.length) {
+        try {
+          localStorage.setItem(
+            'promptrepo_imagegen_models_cache_v3',
+            JSON.stringify({ ts: Date.now(), version: 6, models: res.data.models })
+          );
+        } catch (e) { /* ignore */ }
+      }
+      return res;
     }
+    if (modelsCache) return { ok: true, data: modelsCache };
     return res;
   }
 
-  async function getGenerationCost(resolution, quality, model) {
-    const key = `${model || 'gpt-image-2'}|${resolution || '1k'}|${quality || ''}`;
+  function prefetchGenerationModels() {
+    if (!isConfigured() || isApiUnreachable()) return;
+    void getGenerationModels().catch(() => {});
+  }
+
+  async function getGenerationCost(resolution, quality, model, opts) {
+    const speed = opts?.speed ? String(opts.speed) : '';
+    const key = `${model || 'gpt-image-2'}|${resolution || '1k'}|${quality || ''}|${speed}`;
     const hit = costCache.get(key);
     if (hit && hit.exp > Date.now()) return hit.data;
     if (costInflight.has(key)) return costInflight.get(key);
     const r = encodeURIComponent(resolution || '1k');
     const m = encodeURIComponent(model || 'gpt-image-2');
-    const p = request('GET', `/api/v1/generate/cost?resolution=${r}&model=${m}`)
+    const speedQ = speed ? `&speed=${encodeURIComponent(speed)}` : '';
+    const p = request('GET', `/api/v1/generate/cost?resolution=${r}&model=${m}${speedQ}`)
       .then((res) => {
         if (res.ok) costCache.set(key, { data: res, exp: Date.now() + 90_000 });
         return res;
@@ -953,6 +979,19 @@
     });
   }
 
+  /** 删卡/换图：force 时卡片库已确认，直接删 R2 */
+  async function deleteOwnedCardImage(imageRef, opts = {}) {
+    const ref = window.SupabaseSync?.normalizeImageRef?.(imageRef) || imageRef;
+    if (!ref && !opts.force) return { ok: false, code: 'VALIDATION_ERROR', message: '无效图片引用' };
+    return requestWithPrepare('POST', '/api/v1/media/delete-owned', {
+      imageRef: ref || '',
+      excludeCardId: opts.excludeCardId,
+      allowGenerated: opts.allowGenerated === true,
+      force: opts.force === true,
+      genJobId: opts.genJobId
+    }, { timeoutMs: opts.timeoutMs || 15000, lightPrepare: true });
+  }
+
   if (isConfigured()) {
     void probeApiHealth();
   }
@@ -996,6 +1035,7 @@
     getLedger,
     checkLikeMilestone,
     uploadStorageBlob,
+    deleteOwnedCardImage,
     signMediaRef,
     signMediaRefsBatch,
     signCommunityMediaRef,

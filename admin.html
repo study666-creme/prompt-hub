@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__ADMIN_BUILD__ = '20260625p';
+    window.__ADMIN_BUILD__ = '20260626n';
     (function () {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function (regs) {
@@ -23,13 +23,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>管理登录</title>
-  <link rel="stylesheet" href="styles-admin.css?v=20260625p">
+  <link rel="stylesheet" href="styles-admin.css?v=20260625x">
 </head>
 <body class="admin-gate">
   <section class="admin-login" id="adminLogin">
     <div class="admin-card">
       <h1>管理登录</h1>
-      <p class="admin-hint">仅限授权人员使用 · 构建号 <code id="adminBuildTag">20260625p</code></p>
+      <p class="admin-hint">仅限授权人员使用 · 构建号 <code id="adminBuildTag">20260625x</code></p>
       <div class="admin-field">
         <label for="adminSecret">访问密钥</label>
         <input type="password" id="adminSecret" placeholder="请输入密钥" autocomplete="off" spellcheck="false" autocapitalize="off">
@@ -45,7 +45,7 @@
       <aside class="admin-sidebar">
         <div class="admin-brand">
           <h1>Prompt Hub</h1>
-          <p>运营控制台 · <code id="adminSidebarBuild">20260625p</code></p>
+          <p>运营控制台 · <code id="adminSidebarBuild">20260625x</code></p>
         </div>
         <nav class="admin-nav admin-tabs" aria-label="管理导航">
           <button type="button" class="admin-tab is-active" data-tab="overview"><span class="admin-tab-icon" aria-hidden="true">📊</span>概览</button>
@@ -145,18 +145,15 @@
       <div class="admin-card" style="margin-bottom:12px">
         <div class="admin-view-tabs" id="communityViewTabs">
           <button type="button" class="admin-view-tab is-active" data-community-view="published">在线帖</button>
-          <button type="button" class="admin-view-tab" data-community-view="unpublished">已下架</button>
-          <button type="button" class="admin-view-tab" data-community-view="library-missing">卡片库无</button>
           <button type="button" class="admin-view-tab" data-community-view="bucket-orphans">桶内孤儿</button>
         </div>
-        <p class="admin-hint" id="communityViewHint">在线社区帖，可下架或删除（含 Storage 图片）。</p>
+        <p class="admin-hint" id="communityViewHint">在线社区帖，可下架或删除（含 Storage/R2 配图）。</p>
         <div class="admin-action-guide" id="communityActionGuide">
           <strong>操作说明</strong>
           <ul>
-            <li><strong>卡片库无</strong>：勾选帖子 →「批量写回」恢复作者卡片库（不是删图）。</li>
-            <li><strong>仅从社区隐藏</strong>：社区不再展示，图片与卡片库记录保留。</li>
+            <li><strong>仅从社区隐藏</strong>：社区不再展示，图片与卡片库记录保留（不是改用户卡片库「是否公开」）。</li>
             <li><strong>永久删除</strong>：删社区记录，并尝试删 Storage/R2 配图（不可恢复）。</li>
-            <li><strong>清理无效帖</strong>：批量「仅从社区隐藏」无图、无效作者、重复、删卡孤儿；<strong>不会</strong>写回卡片库。</li>
+            <li><strong>清理无效帖</strong>：批量隐藏无图、无效作者、重复帖等；不会动用户卡片库开关。</li>
           </ul>
         </div>
         <div class="admin-search-bar" id="communityPostTools">
@@ -167,7 +164,6 @@
           </div>
           <button type="button" class="admin-btn admin-btn--primary" id="communitySearchBtn">搜索</button>
           <button type="button" class="admin-btn" id="communitySearchClear">清空</button>
-          <button type="button" class="admin-btn admin-btn--primary" id="communityRestoreOrphansBtn" title="把社区帖重新写入作者云端卡片库">写回卡片库（批量）</button>
           <button type="button" class="admin-btn" id="communityPurgePreviewBtn" title="扫描将下架多少帖，不修改数据">预览清理</button>
           <button type="button" class="admin-btn admin-btn--primary" id="communityPurgeBtn" title="下架无图/无效/重复/删卡孤儿帖">清理无效帖</button>
         </div>
@@ -176,7 +172,6 @@
             <input type="checkbox" id="communitySelectAll"> 全选本页
           </label>
           <span class="admin-hint" id="communitySelectedCount">已选 0 条</span>
-          <button type="button" class="admin-btn admin-btn--sm" id="communityBatchRestoreBtn" disabled title="写回作者卡片库">批量写回</button>
           <button type="button" class="admin-btn admin-btn--sm" id="communityBatchUnpublishBtn" disabled title="仅从社区隐藏">批量隐藏</button>
           <button type="button" class="admin-btn admin-btn--sm admin-btn--danger" id="communityBatchDeleteBtn" disabled>批量删除</button>
         </div>
@@ -184,8 +179,19 @@
           <div class="admin-progress" aria-hidden="true"><div class="admin-progress__bar is-indeterminate" id="communityTaskProgressBar"></div></div>
           <p class="admin-hint" id="communityTaskProgressText"></p>
         </div>
-        <div class="admin-search-bar hidden" id="communityBucketTools">
-          <button type="button" class="admin-btn admin-btn--danger" id="communityBucketDeletePageBtn">删除本页孤儿文件</button>
+        <div class="admin-batch-bar hidden" id="communityBucketBatchBar">
+          <div class="admin-view-tabs admin-view-tabs--inline" id="communityBucketRiskTabs">
+            <button type="button" class="admin-view-tab is-active" data-bucket-risk="all">全部</button>
+            <button type="button" class="admin-view-tab" data-bucket-risk="safe">仅普通路径</button>
+            <button type="button" class="admin-view-tab" data-bucket-risk="recoverable">可写回</button>
+            <button type="button" class="admin-view-tab" data-bucket-risk="relink">需核对/可关联</button>
+          </div>
+          <label class="admin-check admin-batch-select-all">
+            <input type="checkbox" id="communityBucketSelectAll"> 全选本页
+          </label>
+          <span class="admin-hint" id="communityBucketSelectedCount">已选 0 组</span>
+          <button type="button" class="admin-btn admin-btn--sm admin-btn--danger" id="communityBucketDeleteSelectedBtn" disabled title="批量删除已暂停（曾误删卡片库在用的图）。请逐条删并核对缩略图。">删除选中（已暂停）</button>
+          <button type="button" class="admin-btn admin-btn--sm" id="communityBucketRescanBtn" title="重新扫描 R2（约 1～3 分钟）">重新扫描</button>
           <span class="admin-hint" id="communityBucketMeta"></span>
         </div>
       </div>
@@ -206,9 +212,25 @@
             <tbody id="communityTableBody"></tbody>
           </table>
         </div>
-        <div class="admin-pagination">
+        <div class="admin-pagination" id="communityPagination">
           <button type="button" class="admin-btn" id="communityPrev">上一页</button>
           <span id="communityPageInfo" class="admin-hint"></span>
+          <div class="admin-pagination-extra hidden" id="communityBucketPageTools">
+            <label class="admin-pagination-jump" for="communityBucketPageInput">
+              第
+              <input type="number" id="communityBucketPageInput" min="1" step="1" inputmode="numeric" aria-label="页码">
+              / <span id="communityBucketPageTotal">1</span> 页
+            </label>
+            <button type="button" class="admin-btn admin-btn--sm" id="communityBucketPageGoBtn">跳转</button>
+            <label class="admin-pagination-size" for="communityBucketPageSize">
+              每页
+              <select id="communityBucketPageSize">
+                <option value="20">20</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
+          </div>
           <button type="button" class="admin-btn" id="communityNext">下一页</button>
         </div>
         <p class="admin-msg" id="communityMsg" hidden></p>
@@ -259,6 +281,12 @@
         <p class="admin-msg" id="codeMsg" hidden></p>
       </div>
       <div class="admin-card">
+        <div class="admin-view-tabs admin-view-tabs--inline" id="codeCategoryTabs" style="margin-bottom:12px">
+          <button type="button" class="admin-view-tab is-active" data-code-category="all">全部</button>
+          <button type="button" class="admin-view-tab" data-code-category="credits">纯积分</button>
+          <button type="button" class="admin-view-tab" data-code-category="membership">会员天数</button>
+          <button type="button" class="admin-view-tab" data-code-category="offer">体验套餐</button>
+        </div>
         <div class="admin-row" style="margin-bottom:12px">
           <div class="admin-field" style="flex:1;min-width:160px;margin:0">
             <label for="codeSearch">搜索码</label>
@@ -299,9 +327,80 @@
 
     <section class="admin-panel" id="panel-models" hidden>
       <div class="admin-card">
-        <h2 style="margin:0 0 8px;font-size:16px">生图模型定价（常规 / 备用线路）</h2>
-        <p class="admin-hint">常规线路见 <a href="https://grsai.com/zh/dashboard/models" target="_blank" rel="noopener">GrsAI 模型大全</a>。备用线路仅 <strong>GPT Image 2</strong> 与 <strong>即梦 5.0 Lite</strong>，按分辨率分别填价。勾选「返还」= 违规退积分；取消 = 违规不退。</p>
+        <h2 style="margin:0 0 8px;font-size:16px">生图模型定价</h2>
+        <p class="admin-hint">GrsAI 成本按充值套餐 <strong>¥49 = 75 万积分</strong> 换算（见 <a href="https://grsai.com/zh/dashboard/models" target="_blank" rel="noopener">模型大全</a>）。Apimart 成本来自 <a href="https://apimart.ai/zh/pricing" target="_blank" rel="noopener">定价中心</a>（USD×7≈人民币元）。MJ 按 Relax / Fast / Turbo 三档填售价。</p>
         <p class="admin-msg admin-msg--err" id="modelsPersistWarn" hidden></p>
+        <details class="admin-details" id="grsaiCostDetails" open style="margin:12px 0">
+          <summary style="cursor:pointer;font-weight:600">GrsAI 成本对照表（¥49 ÷ 75 万积分）</summary>
+          <div class="admin-view-tabs admin-view-tabs--inline" id="grsaiCostFamilyTabs" style="margin-top:8px">
+            <button type="button" class="admin-view-tab is-active" data-grsai-cost-family="all">全部</button>
+            <button type="button" class="admin-view-tab" data-grsai-cost-family="gim2">全能2</button>
+            <button type="button" class="admin-view-tab" data-grsai-cost-family="banana">香蕉</button>
+          </div>
+          <div class="admin-table-wrap" style="margin-top:8px;max-height:280px;overflow:auto">
+            <table class="admin-table admin-table--compact" id="grsaiCostTable">
+              <thead>
+                <tr>
+                  <th>分类</th>
+                  <th>模型</th>
+                  <th>功能</th>
+                  <th>档位</th>
+                  <th>上游积分</th>
+                  <th>成本</th>
+                </tr>
+              </thead>
+              <tbody id="grsaiCostTableBody"></tbody>
+            </table>
+          </div>
+        </details>
+        <details class="admin-details" id="apimartCostDetails" open style="margin:12px 0">
+          <summary style="cursor:pointer;font-weight:600">Apimart 成本对照表（人民币 ≈ USD×7）</summary>
+          <div class="admin-view-tabs admin-view-tabs--inline" id="apimartCostFamilyTabs" style="margin-top:8px">
+            <button type="button" class="admin-view-tab is-active" data-apimart-cost-family="all">全部</button>
+            <button type="button" class="admin-view-tab" data-apimart-cost-family="gim2">全能2</button>
+            <button type="button" class="admin-view-tab" data-apimart-cost-family="banana">香蕉</button>
+            <button type="button" class="admin-view-tab" data-apimart-cost-family="jimeng">即梦</button>
+            <button type="button" class="admin-view-tab" data-apimart-cost-family="midjourney">MJ</button>
+            <button type="button" class="admin-view-tab" data-apimart-cost-family="wan">万相</button>
+            <button type="button" class="admin-view-tab" data-apimart-cost-family="flux">Flux</button>
+          </div>
+          <div class="admin-table-wrap" style="margin-top:8px;max-height:320px;overflow:auto">
+            <table class="admin-table admin-table--compact" id="apimartCostTable">
+              <thead>
+                <tr>
+                  <th>分类</th>
+                  <th>模型</th>
+                  <th>功能</th>
+                  <th>档位</th>
+                  <th>成本</th>
+                </tr>
+              </thead>
+              <tbody id="apimartCostTableBody"></tbody>
+            </table>
+          </div>
+        </details>
+        <div class="admin-view-tabs admin-view-tabs--inline" id="modelFamilyTabs" style="margin-bottom:12px">
+          <button type="button" class="admin-view-tab is-active" data-model-family="all">全部</button>
+          <button type="button" class="admin-view-tab" data-model-family="gim2">全能2</button>
+          <button type="button" class="admin-view-tab" data-model-family="banana">香蕉</button>
+          <button type="button" class="admin-view-tab" data-model-family="jimeng">即梦</button>
+          <button type="button" class="admin-view-tab" data-model-family="midjourney">MJ</button>
+          <button type="button" class="admin-view-tab" data-model-family="wan">万相</button>
+          <button type="button" class="admin-view-tab" data-model-family="flux">Flux</button>
+        </div>
+        <div class="admin-view-tabs admin-view-tabs--inline" id="modelProviderTabs" style="margin-bottom:12px">
+          <button type="button" class="admin-view-tab is-active" data-model-provider="all">全部线路</button>
+          <button type="button" class="admin-view-tab" data-model-provider="grsai">常规</button>
+          <button type="button" class="admin-view-tab" data-model-provider="apimart">备用</button>
+          <button type="button" class="admin-view-tab" data-model-provider="ithink">经济</button>
+          <button type="button" class="admin-view-tab" data-model-provider="mooko">慢速</button>
+        </div>
+        <div class="admin-view-tabs admin-view-tabs--inline" id="modelStatusTabs" style="margin-bottom:12px">
+          <button type="button" class="admin-view-tab is-active" data-model-status="all">全部状态</button>
+          <button type="button" class="admin-view-tab" data-model-status="active">上架</button>
+          <button type="button" class="admin-view-tab" data-model-status="maintenance">维护中</button>
+          <button type="button" class="admin-view-tab" data-model-status="offline">下架</button>
+        </div>
         <div class="admin-row" style="margin:12px 0">
           <div class="admin-field" style="width:160px;margin:0">
             <label for="modelsGlobalDiscount">全站生图折扣 %</label>
@@ -314,16 +413,17 @@
             <thead>
               <tr>
                 <th>排序</th>
+                <th>分类</th>
                 <th>线路</th>
                 <th>模型 ID</th>
                 <th>显示名称</th>
                 <th>状态</th>
-                <th>上游积分</th>
+                <th title="Apimart USD×7≈人民币元">上游成本</th>
                 <th>违规返还</th>
                 <th>分辨率</th>
                 <th>售价积分</th>
                 <th>模型折扣%</th>
-                <th title="售价 × 模型折扣% × 全场折扣后的积分，非用户最终扣费（会员还可能再折）">折后售价</th>
+                <th title="售价 × 模型折扣% × 全场折扣后的积分">折后售价</th>
                 <th>固定价</th>
                 <th>会员最低%</th>
               </tr>
@@ -369,6 +469,6 @@
 
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="admin.js?v=20260625p" onerror="document.getElementById('loginMsg')&&(document.getElementById('loginMsg').hidden=false,document.getElementById('loginMsg').textContent='admin.js 加载失败，请强刷页面')"></script>
+  <script src="admin.js?v=20260626n"></script>
 </body>
 </html>

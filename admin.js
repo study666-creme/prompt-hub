@@ -276,11 +276,11 @@
     const bar = $('communityBatchBar');
     const countEl = $('communitySelectedCount');
     const n = communitySelected.size;
-    const isPostView = communityView !== 'bucket-orphans';
+    const isPostView = communityView === 'published';
     if (bar) bar.classList.toggle('hidden', !isPostView);
     if (countEl) countEl.textContent = `已选 ${n} 条`;
     const disabled = n === 0 || communityRowBusy || !!communityBatchTask?.running;
-    ['communityBatchRestoreBtn', 'communityBatchUnpublishBtn', 'communityBatchDeleteBtn'].forEach((id) => {
+    ['communityBatchUnpublishBtn', 'communityBatchDeleteBtn'].forEach((id) => {
       const el = $(id);
       if (el) el.disabled = disabled;
     });
@@ -291,6 +291,42 @@
       allBox.indeterminate =
         pageIds.some((id) => communitySelected.has(id)) && !allBox.checked;
     }
+  }
+
+  function updateBucketOrphanBatchUi() {
+    const bar = $('communityBucketBatchBar');
+    const countEl = $('communityBucketSelectedCount');
+    const btn = $('communityBucketDeleteSelectedBtn');
+    const n = communityBucketSelected.size;
+    if (bar) bar.classList.toggle('hidden', communityView !== 'bucket-orphans');
+    if (countEl) countEl.textContent = `已选 ${n} 组`;
+    if (btn) btn.disabled = true;
+    const allBox = $('communityBucketSelectAll');
+    if (allBox) {
+      const pageIds = communityBucketItems.map((g) => g.id).filter(Boolean);
+      allBox.checked = pageIds.length > 0 && pageIds.every((id) => communityBucketSelected.has(id));
+      allBox.indeterminate =
+        pageIds.some((id) => communityBucketSelected.has(id)) && !allBox.checked;
+    }
+  }
+
+  function bucketOrphanRiskBadge(o) {
+    const risk = o.risk || 'safe';
+    const cls =
+      risk === 'recoverable' ? 'admin-badge--info' : risk === 'relink' ? 'admin-badge--warn' : 'admin-badge--ok';
+    const label = esc(o.riskLabel || (risk === 'safe' ? '高置信孤儿' : risk));
+    const hint = o.recoverHint ? `<br><span class="admin-hint">${esc(o.recoverHint)}</span>` : '';
+    return `<span class="admin-badge ${cls}">${label}</span>${hint}`;
+  }
+
+  function bucketOrphanActionCell(o) {
+    const id = esc(o.id);
+    const canRestore = o.risk === 'recoverable' || o.risk === 'relink';
+    const restoreBtn = canRestore
+      ? `<button type="button" class="admin-btn admin-btn--sm" data-restore-orphan="${id}" title="${esc(o.recoverHint || '写回或修复关联')}">恢复</button> `
+      : '';
+    const delLabel = o.fileCount > 1 ? `删 ${o.fileCount} 个` : '删除';
+    return `${restoreBtn}<button type="button" class="admin-btn admin-btn--sm admin-btn--danger" data-delete-orphan="${id}">${delLabel}</button>`;
   }
 
   function communityPostTableHead() {
@@ -488,12 +524,21 @@
   let codeOffset = 0;
   let communityOffset = 0;
   let communityView = 'published';
+  let communityBucketRisk = 'all';
+  let communityBucketScanMeta = null;
+  let communityBucketForceRefresh = false;
+  let communityBucketPollTimer = null;
+  let communityBucketPollStarted = 0;
+  let communityBucketPageSize = 50;
+  let communityBucketTotal = 0;
   let communityBucketItems = [];
+  let codeCategory = 'all';
   let communityPageItems = [];
   let communityRowBusy = false;
   /** 批量任务在后台跑，不阻塞单行删除/下架 */
   let communityBatchTask = null;
   const communitySelected = new Set();
+  const communityBucketSelected = new Set();
   const PAGE = 20;
   let activeTab = 'overview';
 
@@ -861,32 +906,212 @@
       btn.classList.toggle('is-active', btn.getAttribute('data-community-view') === communityView);
     });
     const postTools = $('communityPostTools');
-    const bucketTools = $('communityBucketTools');
+    const bucketBatch = $('communityBucketBatchBar');
     const guide = $('communityActionGuide');
     const head = $('communityTableHead');
     const hint = $('communityViewHint');
     if (postTools) postTools.classList.toggle('hidden', communityView === 'bucket-orphans');
-    if (bucketTools) bucketTools.classList.toggle('hidden', communityView !== 'bucket-orphans');
+    if (bucketBatch) bucketBatch.classList.toggle('hidden', communityView !== 'bucket-orphans');
     if (guide) guide.classList.toggle('hidden', communityView === 'bucket-orphans');
     if (head) {
       head.innerHTML =
         communityView === 'bucket-orphans'
-          ? '<tr><th>缩略图</th><th>路径 / 说明</th><th>大小</th><th></th></tr>'
+          ? '<tr><th class="admin-col-check"><span class="admin-sr-only">选择</span></th><th>缩略图</th><th>路径 / 说明</th><th>大小</th><th></th></tr>'
           : communityPostTableHead();
     }
     const batchBar = $('communityBatchBar');
     if (batchBar) {
-      batchBar.classList.toggle('hidden', communityView === 'bucket-orphans');
+      batchBar.classList.toggle('hidden', communityView !== 'published');
     }
     if (hint) {
       const hints = {
-        published: '在线社区帖。「从社区隐藏」仅下架展示；「永久删除」会删记录并尝试删桶内配图。',
-        unpublished: '已隐藏帖（published=false）。可永久删除记录与配图。',
-        'library-missing': '勾选帖子 →「批量写回」把社区帖写回作者卡片库。不要在这里删图，除非确认垃圾帖。',
+        published: '在线社区帖。「从社区隐藏」仅下架展示；「永久删除」会删记录并尝试删桶内配图。与用户卡片库「是否公开」无关。',
         'bucket-orphans':
-          '这是 Storage/R2 里的物理文件，不是卡片。同一图常有原图 + _grid + generated 多份，已合并为一组。看起来像你的卡时别删（多为误报）。恢复卡片请用「卡片库无」视图 + 写回。'
+          '直接扫描 R2，与云端卡片库/社区/生图任务引用对比。generated/、imagegen/ 目录不再标为「高置信」——请勿批量删。删前务必逐条对缩略图；批量删除已暂停。点「重新扫描」刷新列表。'
       };
       hint.textContent = hints[communityView] || hints.published;
+    }
+    if (communityView === 'bucket-orphans') setBucketRiskFilter(communityBucketRisk);
+    const bucketPageTools = $('communityBucketPageTools');
+    if (bucketPageTools) bucketPageTools.classList.toggle('hidden', communityView !== 'bucket-orphans');
+    updateBucketOrphanBatchUi();
+    updateBucketPaginationUi();
+  }
+
+  function setBucketRiskFilter(risk) {
+    communityBucketRisk = risk || 'all';
+    document.querySelectorAll('[data-bucket-risk]').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.getAttribute('data-bucket-risk') === communityBucketRisk);
+    });
+  }
+
+  function setCodeCategoryFilter(category) {
+    codeCategory = category || 'all';
+    document.querySelectorAll('[data-code-category]').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.getAttribute('data-code-category') === codeCategory);
+    });
+  }
+
+  function stopBucketOrphanPoll() {
+    if (communityBucketPollTimer) {
+      clearTimeout(communityBucketPollTimer);
+      communityBucketPollTimer = null;
+    }
+  }
+
+  function normalizeBucketOrphanItem(o) {
+    return {
+      ...o,
+      paths: Array.isArray(o.paths) && o.paths.length ? o.paths : [o.path]
+    };
+  }
+
+  function updateBucketOrphanMeta(data) {
+    const meta = $('communityBucketMeta');
+    if (!meta || !data) return;
+    const src = data.scanSource === 'r2' ? 'R2' : 'Storage';
+    const counts = `高置信 ${data.safeCount ?? '—'} · 可写回 ${data.recoverableCount ?? '—'} · 可关联 ${data.relinkCount ?? '—'}`;
+    const cacheHint = data.fromCache ? ' · 缓存' : '';
+    meta.textContent = data.truncated
+      ? `${src} 扫描上限 ${data.scannedCount ?? '—'}，请分批处理 · ${counts}${cacheHint}`
+      : `${src} 已扫 ${data.scannedCount ?? '—'} 对象 · 引用 ${data.referencedCount ?? '—'} 路径 · ${counts}${cacheHint}`;
+  }
+
+  function bucketOrphanPageSize() {
+    const n = Number(communityBucketPageSize) || 50;
+    return Math.min(100, Math.max(20, n));
+  }
+
+  function bucketOrphanTotalPages() {
+    const total = Math.max(0, Number(communityBucketTotal) || 0);
+    const size = bucketOrphanPageSize();
+    return Math.max(1, Math.ceil(total / size) || 1);
+  }
+
+  function updateBucketPaginationUi() {
+    const tools = $('communityBucketPageTools');
+    const prev = $('communityPrev');
+    const next = $('communityNext');
+    const pageInput = $('communityBucketPageInput');
+    const pageTotalEl = $('communityBucketPageTotal');
+    const sizeSelect = $('communityBucketPageSize');
+    const isBucket = communityView === 'bucket-orphans';
+    if (tools) tools.classList.toggle('hidden', !isBucket);
+    if (!isBucket) {
+      if (prev) prev.disabled = false;
+      if (next) next.disabled = false;
+      return;
+    }
+    const totalPages = bucketOrphanTotalPages();
+    const currentPage = Math.floor(communityOffset / bucketOrphanPageSize()) + 1;
+    if (pageTotalEl) pageTotalEl.textContent = String(totalPages);
+    if (pageInput) {
+      pageInput.max = String(totalPages);
+      pageInput.value = String(Math.min(totalPages, Math.max(1, currentPage)));
+    }
+    if (sizeSelect && String(sizeSelect.value) !== String(bucketOrphanPageSize())) {
+      sizeSelect.value = String(bucketOrphanPageSize());
+    }
+    if (prev) prev.disabled = communityOffset <= 0;
+    if (next) {
+      next.disabled =
+        communityBucketTotal > 0
+          ? communityOffset + communityBucketItems.length >= communityBucketTotal
+          : communityBucketItems.length < bucketOrphanPageSize();
+    }
+  }
+
+  function jumpBucketOrphanPage(pageNum) {
+    const totalPages = bucketOrphanTotalPages();
+    const page = Math.min(totalPages, Math.max(1, Number(pageNum) || 1));
+    communityOffset = (page - 1) * bucketOrphanPageSize();
+    void loadBucketOrphansPage({ reset: false, forceRefresh: false });
+  }
+
+  function renderBucketOrphanPage(data) {
+    communityBucketScanMeta = data;
+    communityBucketItems = (data.items || []).map(normalizeBucketOrphanItem);
+    communityBucketTotal = Number(data.total) || 0;
+    const rawFiles = data.rawOrphanFiles ?? 0;
+    const total = communityBucketTotal || communityBucketItems.length;
+    const currentPage = Math.floor(communityOffset / bucketOrphanPageSize()) + 1;
+    const totalPages = bucketOrphanTotalPages();
+    $('communityPageInfo').textContent = `桶内孤儿 · 第 ${communityOffset + 1}–${communityOffset + communityBucketItems.length} 组 / 共 ${total} 组（${rawFiles} 个物理文件）· ${currentPage}/${totalPages} 页`;
+    updateBucketOrphanMeta(data);
+    setBucketRiskFilter(communityBucketRisk);
+    renderBucketOrphansTable();
+    updateCommunityBatchUi();
+    updateBucketPaginationUi();
+    showMsg($('communityMsg'), '', true);
+  }
+
+  async function loadBucketOrphansPage(opts) {
+    if (!session) return;
+    const forceRefresh = !!(opts && opts.forceRefresh);
+    const reset = !opts || opts.reset !== false;
+    if (reset) communityOffset = 0;
+    setCommunityView(communityView);
+    setBucketRiskFilter(communityBucketRisk);
+
+    const tbody = $('communityTableBody');
+    if (!tbody) return;
+    if (forceRefresh || !communityBucketScanMeta) {
+      tbody.innerHTML =
+        '<tr class="admin-loading"><td colspan="5">正在扫描 R2（约 1～3 分钟，请保持本页打开）…</td></tr>';
+      if (forceRefresh) communityBucketPollStarted = Date.now();
+      else if (!communityBucketPollStarted) communityBucketPollStarted = Date.now();
+    }
+
+    const riskQ =
+      communityBucketRisk && communityBucketRisk !== 'all'
+        ? `&risk=${encodeURIComponent(communityBucketRisk)}`
+        : '';
+    const refreshQ = forceRefresh ? '&refresh=1' : '';
+    const timeoutMs = communityBucketScanMeta && !forceRefresh ? 45000 : 180000;
+
+    try {
+      const data = await adminFetch(
+        session,
+        `/api/admin/community/bucket-orphans?limit=${bucketOrphanPageSize()}&offset=${communityOffset}${riskQ}${refreshQ}`,
+        { timeoutMs }
+      );
+
+      if (data.scanStatus === 'scanning') {
+        const waited = Math.max(0, Math.round((Date.now() - communityBucketPollStarted) / 1000));
+        tbody.innerHTML = `<tr class="admin-loading"><td colspan="5">正在扫描 R2… 已等待 ${waited}s（完成后自动刷新）</td></tr>`;
+        $('communityPageInfo').textContent = '桶内孤儿 · 扫描进行中…';
+        stopBucketOrphanPoll();
+        communityBucketPollTimer = setTimeout(
+          () => void loadBucketOrphansPage({ reset: false, forceRefresh: false }),
+          3000
+        );
+        return;
+      }
+
+      stopBucketOrphanPoll();
+      communityBucketForceRefresh = false;
+      communityBucketPollStarted = 0;
+
+      if (data.scanStatus === 'error') {
+        tbody.innerHTML = '';
+        $('communityPageInfo').textContent = '桶内孤儿 · 扫描失败';
+        showMsg($('communityMsg'), data.scanError || 'R2 孤儿扫描失败，请点「重新扫描」重试', false);
+        return;
+      }
+
+      renderBucketOrphanPage(data);
+    } catch (e) {
+      stopBucketOrphanPoll();
+      tbody.innerHTML = '';
+      $('communityPageInfo').textContent = '桶内孤儿 · 加载失败';
+      const msg = String(e?.message || '');
+      showMsg(
+        $('communityMsg'),
+        /请求超时/i.test(msg)
+          ? `${msg}。扫描较慢，请点「重新扫描」或稍后再试。`
+          : friendlyFetchError(e),
+        false
+      );
     }
   }
 
@@ -895,42 +1120,39 @@
     if (!tbody) return;
     if (!communityBucketItems.length) {
       tbody.innerHTML =
-        '<tr><td colspan="4" class="admin-hint">暂无桶内孤儿（首次加载需扫描全桶，约 1～3 分钟）</td></tr>';
+        '<tr><td colspan="5" class="admin-hint">暂无桶内孤儿（首次加载需扫描全桶，约 1～3 分钟）</td></tr>';
+      updateBucketOrphanBatchUi();
       return;
     }
     tbody.innerHTML = communityBucketItems
       .map(
         (o) => `<tr>
+            <td class="admin-col-check"><input type="checkbox" data-bucket-orphan-select="${esc(o.id)}"${communityBucketSelected.has(o.id) ? ' checked' : ''} aria-label="选择文件组"></td>
             <td>${communityThumbCell(o)}</td>
-            <td><code class="admin-path" title="${esc(o.path)}">${esc(o.path.length > 42 ? o.path.slice(0, 40) + '…' : o.path)}</code>${o.variantHint ? `<br><span class="admin-hint">${esc(o.variantHint)}</span>` : ''}</td>
+            <td><code class="admin-path" title="${esc(o.path)}">${esc(o.path.length > 42 ? o.path.slice(0, 40) + '…' : o.path)}</code>${o.variantHint ? `<br><span class="admin-hint">${esc(o.variantHint)}</span>` : ''}<br>${bucketOrphanRiskBadge(o)}</td>
             <td>${formatBytes(o.bytes || 0)}</td>
-            <td><button type="button" class="admin-btn admin-btn--sm admin-btn--danger" data-delete-orphan="${esc(o.id)}">删${o.fileCount > 1 ? ' ' + o.fileCount + ' 个' : '除'}</button></td>
+            <td class="admin-actions-cell">${bucketOrphanActionCell(o)}</td>
           </tr>`
       )
       .join('');
+    updateBucketOrphanBatchUi();
   }
 
   function removeBucketOrphanGroups(deletedPaths) {
+    communityBucketScanMeta = null;
     const gone = new Set(deletedPaths);
-    communityBucketItems = communityBucketItems
-      .map((g) => {
-        const paths = (g.paths || [g.path]).filter((p) => !gone.has(p));
-        if (!paths.length) return null;
-        return {
-          ...g,
-          paths,
-          path: paths.find((p) => !/_grid\./i.test(p)) || paths[0],
-          fileCount: paths.length,
-          variantHint: paths.length > 1 ? `${paths.length} 个副本` : '单文件'
-        };
-      })
-      .filter(Boolean);
-    renderBucketOrphansTable();
+    communityBucketSelected.forEach((id) => {
+      const g = communityBucketItems.find((x) => x.id === id);
+      if (g && (g.paths || [g.path]).some((p) => gone.has(p))) communityBucketSelected.delete(id);
+    });
+    void loadBucketOrphansPage({ reset: false, forceRefresh: false });
   }
 
   async function handleCommunityRowAction(action, id, btn, extra) {
     if (!session || !id || communityRowBusy) return;
-    const orphanGroup = action === 'orphan' ? communityBucketItems.find((g) => g.id === id) : null;
+    const orphanGroup = action === 'orphan' || action === 'restore-orphan'
+      ? communityBucketItems.find((g) => g.id === id)
+      : null;
     const orphanPaths = orphanGroup?.paths || (extra ? [extra] : [id]);
     const copy = {
       restore: {
@@ -962,13 +1184,35 @@
       },
       orphan: {
         title: '删除孤儿文件',
-        message: `删除 ${orphanPaths.length} 个桶内孤儿文件？\n\n${orphanPaths.slice(0, 3).join('\n')}${orphanPaths.length > 3 ? '\n…' : ''}\n\n不可恢复。`,
+        message: `删除 ${orphanPaths.length} 个 R2 文件？\n\n${orphanPaths.slice(0, 3).join('\n')}${orphanPaths.length > 3 ? '\n…' : ''}\n\n若缩略图像卡片库里的卡，请勿删。服务端会再次校验引用；仍被引用会拒绝。\n\n不可恢复。`,
         progress: `正在删除 ${orphanPaths.length} 个文件…`,
         path: '/api/admin/community/bucket-orphans/delete',
         body: { paths: orphanPaths },
         paths: orphanPaths,
         danger: true,
         done: (r) => `已删 ${r.removed || 0} 个文件（R2 ${r.r2Removed || 0}）`
+      },
+      'restore-orphan': {
+        title: orphanGroup?.risk === 'relink' ? '修复图片关联' : '写回卡片库',
+        message:
+          orphanGroup?.recoverHint ||
+          '将 R2 文件写回作者卡片库或修复 image 字段（不删图）',
+        progress: '正在恢复…',
+        path: '/api/admin/community/bucket-orphans/restore-card',
+        body: {
+          primaryPath: orphanGroup?.path,
+          risk: orphanGroup?.risk,
+          recoverPostId: orphanGroup?.recoverPostId,
+          recoverCardId: orphanGroup?.recoverCardId,
+          recoverUserId: orphanGroup?.recoverUserId
+        },
+        danger: false,
+        done: (r) =>
+          r.alreadyExists
+            ? '卡片库已有该卡，已尝试修复图片指向'
+            : r.action === 'relink'
+              ? `已修复关联 · ${r.cardId || ''}`
+              : `已写回卡片库 · ${r.cardId || ''}`
       }
     };
     const spec = copy[action];
@@ -992,6 +1236,12 @@
           communitySelected.delete(id);
           if (action === 'orphan') {
             removeBucketOrphanGroups(spec.paths || orphanPaths);
+            communityBucketSelected.delete(id);
+            updateBucketOrphanBatchUi();
+          } else if (action === 'restore-orphan') {
+            communityBucketScanMeta = null;
+            communityBucketSelected.delete(id);
+            void loadBucketOrphansPage({ reset: false, forceRefresh: false });
           } else {
             void loadCommunity(false);
           }
@@ -1061,6 +1311,12 @@
       if (orphanBtn) {
         const groupId = orphanBtn.getAttribute('data-delete-orphan');
         if (groupId) void handleCommunityRowAction('orphan', groupId, orphanBtn);
+        return;
+      }
+      const restoreOrphanBtn = ev.target.closest('[data-restore-orphan]');
+      if (restoreOrphanBtn) {
+        const groupId = restoreOrphanBtn.getAttribute('data-restore-orphan');
+        if (groupId) void handleCommunityRowAction('restore-orphan', groupId, restoreOrphanBtn);
       }
     });
 
@@ -1075,6 +1331,25 @@
           if (id && pageIds.includes(id)) el.checked = target.checked;
         });
         updateCommunityBatchUi();
+        return;
+      }
+      if (target.id === 'communityBucketSelectAll') {
+        const pageIds = communityBucketItems.map((g) => g.id).filter(Boolean);
+        if (target.checked) pageIds.forEach((id) => communityBucketSelected.add(id));
+        else pageIds.forEach((id) => communityBucketSelected.delete(id));
+        document.querySelectorAll('[data-bucket-orphan-select]').forEach((el) => {
+          const id = el.getAttribute('data-bucket-orphan-select');
+          if (id && pageIds.includes(id)) el.checked = target.checked;
+        });
+        updateBucketOrphanBatchUi();
+        return;
+      }
+      if (target.matches('[data-bucket-orphan-select]')) {
+        const id = target.getAttribute('data-bucket-orphan-select');
+        if (!id) return;
+        if (target.checked) communityBucketSelected.add(id);
+        else communityBucketSelected.delete(id);
+        updateBucketOrphanBatchUi();
         return;
       }
       if (target.matches('[data-community-select]')) {
@@ -1094,58 +1369,35 @@
     const tbody = $('communityTableBody');
     const statsEl = $('communityStats');
     if (!tbody) return;
-    const colSpan = communityView === 'bucket-orphans' ? 4 : 9;
+    const colSpan = communityView === 'bucket-orphans' ? 5 : 9;
     tbody.innerHTML = `<tr class="admin-loading"><td colspan="${colSpan}">${communityView === 'bucket-orphans' ? '正在扫描全桶（约 1～3 分钟，请稍候）…' : '加载中…'}</td></tr>`;
     try {
       if (statsEl) {
         const st = await adminFetch(session, '/api/admin/community/stats');
         statsEl.innerHTML = `
-          <div class="admin-stat"><span>在线帖</span><strong>${st.publishedCount ?? 0}</strong></div>
-          <div class="admin-stat"><span>卡片库无</span><strong>${st.orphanPublished ?? 0}</strong></div>
-          <div class="admin-stat"><span>已下架</span><strong>${st.unpublishedCount ?? 0}</strong></div>
-          <div class="admin-stat"><span>当前视图</span><strong>${esc(communityView)}</strong></div>`;
+          <div class="admin-stat admin-stat--blue"><span>在线帖</span><strong>${st.publishedCount ?? 0}</strong></div>
+          <div class="admin-stat admin-stat--slate"><span>已隐藏（库内）</span><strong>${st.unpublishedCount ?? 0}</strong></div>
+          <div class="admin-stat admin-stat--amber"><span>当前视图</span><strong>${communityView === 'bucket-orphans' ? '桶内孤儿' : '在线帖'}</strong></div>`;
       }
 
       if (communityView === 'bucket-orphans') {
-        const data = await adminFetch(
-          session,
-          `/api/admin/community/bucket-orphans?limit=${PAGE}&offset=${communityOffset}`,
-          { timeoutMs: 180000 }
-        );
-        communityBucketItems = (data.items || []).map((o) => ({
-          ...o,
-          paths: Array.isArray(o.paths) && o.paths.length ? o.paths : [o.path]
-        }));
-        const rawFiles = data.rawOrphanFiles ?? data.total ?? 0;
-        $('communityPageInfo').textContent = `第 ${communityOffset + 1}–${communityOffset + communityBucketItems.length} 组，约 ${data.total ?? 0} 组（${rawFiles} 个物理文件）`;
-        const meta = $('communityBucketMeta');
-        if (meta) {
-          meta.textContent = data.truncated
-            ? `扫描上限 ${data.scannedCount ?? '—'}，请分批删除后刷新`
-            : `已扫描 ${data.scannedCount ?? '—'} 个对象 · 引用 ${data.referencedCount ?? '—'} 路径`;
-        }
         communityPageItems = [];
-        renderBucketOrphansTable();
-        updateCommunityBatchUi();
+        if (reset) communityBucketSelected.clear();
+        await loadBucketOrphansPage({ reset, forceRefresh: communityBucketForceRefresh });
         return;
       }
 
       const q = ($('communitySearch')?.value || '').trim();
-      const viewParam = communityView === 'library-missing' ? '&view=library-missing' : communityView === 'unpublished' ? '&view=unpublished' : '&view=published';
       const data = await adminFetch(
         session,
-        `/api/admin/community/posts?limit=${PAGE}&offset=${communityOffset}${q ? '&q=' + encodeURIComponent(q) : ''}${viewParam}`
+        `/api/admin/community/posts?limit=${PAGE}&offset=${communityOffset}${q ? '&q=' + encodeURIComponent(q) : ''}&view=published`
       );
       const items = data.items || [];
       communityPageItems = items;
       const viewLabel = data.view || communityView;
       $('communityPageInfo').textContent = `视图 ${viewLabel} · 第 ${communityOffset + 1}–${communityOffset + items.length} 条，约 ${data.total ?? items.length} 帖`;
       if (!items.length) {
-        const emptyMsg =
-          communityView === 'library-missing'
-            ? '没有「卡片库无」的在线帖（0 条）。若勾选后仍看到全部在线帖，请先 deploy Worker。'
-            : '暂无帖子';
-        tbody.innerHTML = `<tr><td colspan="9" class="admin-hint">${emptyMsg}</td></tr>`;
+        tbody.innerHTML = '<tr><td colspan="9" class="admin-hint">暂无在线社区帖</td></tr>';
         updateCommunityBatchUi();
         return;
       }
@@ -1172,6 +1424,9 @@
       showMsg($('communityMsg'), '', true);
     } catch (e) {
       tbody.innerHTML = '';
+      if (communityView === 'bucket-orphans') {
+        $('communityPageInfo').textContent = '桶内孤儿 · 加载失败';
+      }
       showMsg($('communityMsg'), friendlyFetchError(e), false);
     }
   }
@@ -1363,6 +1618,7 @@
   async function loadCodes(reset) {
     if (!session) return;
     if (reset) codeOffset = 0;
+    setCodeCategoryFilter(codeCategory);
     const q = ($('codeSearch')?.value || '').trim().toUpperCase();
     const active = $('codeFilterActive')?.value || '';
     const tbody = $('codeTableBody');
@@ -1372,6 +1628,7 @@
       let path = `/api/admin/codes?limit=${PAGE}&offset=${codeOffset}`;
       if (q) path += '&q=' + encodeURIComponent(q);
       if (active) path += '&active=' + active;
+      if (codeCategory && codeCategory !== 'all') path += '&category=' + encodeURIComponent(codeCategory);
       const data = await adminFetch(session, path);
       $('codePageInfo').textContent = `第 ${codeOffset + 1}–${codeOffset + data.items.length} 条，约 ${data.total} 个码`;
       if (!data.items.length) {
@@ -1380,13 +1637,32 @@
       }
       tbody.innerHTML = data.items
         .map((row) => {
+          const tierLabel =
+            row.membership_tier === 'lite'
+              ? '轻量'
+              : row.membership_tier === 'basic'
+                ? '基础'
+                : row.membership_tier === 'standard'
+                  ? '标准'
+                  : row.membership_tier === 'pro'
+                    ? '专业'
+                    : row.membership_tier || '';
+          const offerLabel =
+            row.offer_kind === 'mini_3d'
+              ? '¥0.99/3天'
+              : row.offer_kind === 'starter_14d'
+                ? '¥1.9/14天'
+                : '';
           const extra =
             row.membership_tier && row.membership_days
-              ? ` + ${row.membership_days}天${row.membership_tier}`
-              : '';
+              ? ` + ${row.membership_days}天${tierLabel}`
+              : row.membership_days
+                ? ` + ${row.membership_days}天会员`
+                : '';
+          const offerExtra = offerLabel ? ` · ${offerLabel}` : '';
           return `<tr>
             <td><code>${esc(row.code)}</code></td>
-            <td>${row.credits}${extra}</td>
+            <td>${row.credits}${extra}${offerExtra}</td>
             <td>${row.used_count}/${row.max_uses}</td>
             <td>${row.active ? '<span class="admin-badge admin-badge--ok">启用</span>' : '<span class="admin-badge admin-badge--off">停用</span>'}</td>
             <td>${esc(row.note || '—')}</td>
@@ -1446,13 +1722,124 @@
 
   let imageModelSettings = null;
   let imageModelRows = [];
+  let apimartCostReference = [];
+  let apimartCostFamilyFilter = 'all';
+  let grsaiCostReference = [];
+  let grsaiCostFamilyFilter = 'all';
+  let modelFamilyFilter = 'all';
+  let modelProviderFilter = 'all';
+  let modelStatusFilter = 'all';
 
-  function effectiveModelCredits(row, resolution) {
-    const credits = Number(row.creditsPerCall) || 0;
+  const MODEL_UI_FAMILY_LABEL = {
+    gim2: '全能2',
+    banana: '香蕉',
+    jimeng: '即梦',
+    midjourney: 'MJ',
+    wan: '万相',
+    flux: 'Flux'
+  };
+
+  const MODEL_PROVIDER_BADGE = {
+    grsai: '<span class="admin-badge admin-badge--ok">常规</span>',
+    apimart: '<span class="admin-badge admin-badge--warn">备用</span>',
+    ithink: '<span class="admin-badge">经济</span>',
+    mooko: '<span class="admin-badge">慢速</span>'
+  };
+
+  function formatAdminRmbYuan(rmb) {
+    const v = Number(rmb);
+    if (!Number.isFinite(v) || v <= 0) return '¥0';
+    if (v >= 1) return `¥${v.toFixed(2)}`;
+    if (v >= 0.1) return `¥${v.toFixed(2)}`;
+    return `¥${v.toFixed(3)}`;
+  }
+
+  function buildCostReferenceFromModelRows(rows) {
+    return rows
+      .filter((r) => r.provider === 'apimart' && Array.isArray(r.upstreamCostLines) && r.upstreamCostLines.length)
+      .map((r) => ({
+        id: r.id,
+        label: r.label,
+        uiFamily: MODEL_UI_FAMILY_LABEL[r.uiFamily] || r.uiFamily || '—',
+        uiFamilyKey: r.uiFamily || 'other',
+        functionLabel: r.pricingBySpeed ? '文生图/图生图' : '文生图',
+        lines: r.upstreamCostLines
+      }));
+  }
+
+  function filteredApimartCostReference() {
+    if (apimartCostFamilyFilter === 'all') return apimartCostReference;
+    return apimartCostReference.filter((row) => row.uiFamilyKey === apimartCostFamilyFilter);
+  }
+
+  function filteredGrsaiCostReference() {
+    if (grsaiCostFamilyFilter === 'all') return grsaiCostReference;
+    return grsaiCostReference.filter((row) => row.uiFamilyKey === grsaiCostFamilyFilter);
+  }
+
+  function renderGrsaiCostReference() {
+    const tbody = $('grsaiCostTableBody');
+    if (!tbody) return;
+    const rows = filteredGrsaiCostReference();
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6">当前筛选无成本数据</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows
+      .flatMap((row) =>
+        (row.lines || []).map((line) =>
+          `<tr>
+            <td>${esc(row.uiFamily)}</td>
+            <td><code>${esc(row.id)}</code><br>${esc(row.label)}</td>
+            <td>${esc(row.functionLabel)}</td>
+            <td>${esc(line.label)}</td>
+            <td>${esc(String(line.points))}</td>
+            <td><strong>${esc(formatAdminRmbYuan(line.rmb))}</strong></td>
+          </tr>`
+        )
+      )
+      .join('');
+  }
+
+  function renderApimartCostReference() {
+    const tbody = $('apimartCostTableBody');
+    if (!tbody) return;
+    const rows = filteredApimartCostReference();
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5">当前筛选无成本数据</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows
+      .flatMap((row) =>
+        (row.lines || []).map((line) =>
+          `<tr>
+            <td>${esc(row.uiFamily)}</td>
+            <td><code>${esc(row.id)}</code><br>${esc(row.label)}</td>
+            <td>${esc(row.functionLabel)}</td>
+            <td>${esc(line.label)}</td>
+            <td><strong>${esc(formatAdminRmbYuan(line.rmb ?? line.creditsCost))}</strong></td>
+          </tr>`
+        )
+      )
+      .join('');
+  }
+
+  function filteredModelRows() {
+    return imageModelRows.filter((row) => {
+      if (modelFamilyFilter !== 'all' && row.uiFamily !== modelFamilyFilter) return false;
+      if (modelProviderFilter !== 'all' && row.provider !== modelProviderFilter) return false;
+      if (modelStatusFilter !== 'all' && row.status !== modelStatusFilter) return false;
+      return true;
+    });
+  }
+
+  function effectiveModelCredits(row, resolution, speed) {
     const disc = Number(row.discountPercent) || 100;
     const globalDisc = Number($('modelsGlobalDiscount')?.value) || 100;
-    let base = credits;
-    if (row.pricingByResolution && resolution && row.creditsByResolution?.[resolution] != null) {
+    let base = Number(row.creditsPerCall) || 0;
+    if (row.pricingBySpeed && speed && row.creditsBySpeed?.[speed] != null) {
+      base = Number(row.creditsBySpeed[speed]) || 0;
+    } else if (row.pricingByResolution && resolution && row.creditsByResolution?.[resolution] != null) {
       base = Number(row.creditsByResolution[resolution]) || 0;
     }
     const raw = (base * disc * globalDisc) / 10000;
@@ -1465,7 +1852,78 @@
     return Number.isInteger(v) ? String(v) : v.toFixed(1);
   }
 
+  function isMjPricingRow(row) {
+    return row.pricingBySpeed === true || String(row.id || '').startsWith('apimart-mj-');
+  }
+
+  function ensureMjCreditsBySpeed(row) {
+    if (!isMjPricingRow(row)) return row;
+    row.pricingBySpeed = true;
+    if (!row.creditsBySpeed || typeof row.creditsBySpeed !== 'object') {
+      row.creditsBySpeed = {};
+    }
+    const flat = Number(row.creditsPerCall);
+    for (const speed of ['relax', 'fast', 'turbo']) {
+      if (row.creditsBySpeed[speed] == null || row.creditsBySpeed[speed] === '') {
+        if (Number.isFinite(flat) && flat > 0) row.creditsBySpeed[speed] = flat;
+      }
+    }
+    return row;
+  }
+
+  function syncModelRowsFromDom() {
+    const tbody = $('modelsTableBody');
+    if (!tbody) return;
+    tbody.querySelectorAll('tr[data-model-id]').forEach((tr) => {
+      const row = imageModelRows.find((r) => r.id === tr.dataset.modelId);
+      if (!row) return;
+      tr.querySelectorAll('input, select').forEach((inp) => {
+        const field = inp.dataset.field;
+        if (!field) return;
+        if (field === 'displayName') row.displayName = inp.value;
+        if (field === 'status') row.status = inp.value;
+        if (field === 'fixedPrice') row.fixedPrice = inp.checked;
+        if (field === 'refundOnViolation') row.refundOnViolation = inp.checked;
+        if (field === 'memberCap') {
+          const v = inp.value.trim();
+          row.memberDiscountCapPercent = v === '' ? null : Number(v) || null;
+        }
+        if (field === 'sortOrder') row.sortOrder = Number(inp.value) || row.sortOrder;
+        if (field === 'discount') row.discountPercent = Number(inp.value) || 100;
+        if (field === 'credits') row.creditsPerCall = Number(inp.value) || row.creditsPerCall;
+        if (field.startsWith('credits-speed-')) {
+          const speed = field.slice('credits-speed-'.length);
+          if (!row.creditsBySpeed) row.creditsBySpeed = {};
+          const n = Number(inp.value);
+          if (Number.isFinite(n) && n > 0) row.creditsBySpeed[speed] = n;
+        }
+        if (field.startsWith('credits-') && !field.startsWith('credits-speed-')) {
+          const res = field.slice('credits-'.length);
+          if (!row.creditsByResolution) row.creditsByResolution = {};
+          const n = Number(inp.value);
+          if (Number.isFinite(n) && n > 0) row.creditsByResolution[res] = n;
+        }
+      });
+      ensureMjCreditsBySpeed(row);
+    });
+  }
+
   function renderModelCreditsInputs(row) {
+    ensureMjCreditsBySpeed(row);
+    if (isMjPricingRow(row)) {
+      const speeds = [
+        { key: 'relax', label: 'Relax' },
+        { key: 'fast', label: 'Fast' },
+        { key: 'turbo', label: 'Turbo' }
+      ];
+      if (!row.creditsBySpeed) row.creditsBySpeed = {};
+      return speeds
+        .map(
+          (s) =>
+            `<label class="admin-res-price"><span>${s.label}</span><input type="number" class="admin-input-sm" data-field="credits-speed-${s.key}" min="0.1" max="99999" step="0.1" value="${row.creditsBySpeed[s.key] ?? ''}"></label>`
+        )
+        .join('');
+    }
     if (row.pricingByResolution) {
       const resList = (row.resolutions || ['1k', '2k', '4k']).filter((r) =>
         ['1k', '2k', '4k'].includes(r)
@@ -1482,6 +1940,12 @@
   }
 
   function renderModelEffectiveCell(row) {
+    ensureMjCreditsBySpeed(row);
+    if (isMjPricingRow(row)) {
+      return ['relax', 'fast', 'turbo']
+        .map((s) => `${s} ${formatAdminCredits(effectiveModelCredits(row, '1k', s))}`)
+        .join('<br>');
+    }
     if (row.pricingByResolution) {
       const resList = (row.resolutions || ['1k', '2k', '4k']).filter((r) =>
         ['1k', '2k', '4k'].includes(r)
@@ -1513,7 +1977,10 @@
       sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : (index + 1) * 10,
       creditsPerCall: row.creditsPerCall,
       creditsByResolution: row.creditsByResolution || null,
+      creditsBySpeed: row.creditsBySpeed || null,
       pricingByResolution: row.pricingByResolution === true,
+      pricingBySpeed: isMjPricingRow(row),
+      uiFamily: row.uiFamily || 'gim2',
       discountPercent: row.discountPercent ?? 100,
       fixedPrice: row.fixedPrice === true,
       memberDiscountCapPercent:
@@ -1543,15 +2010,31 @@
     renderModelsTable();
   }
 
+  function renderUpstreamCostCell(row) {
+    if (row.upstreamCostText) {
+      return String(row.upstreamCostText)
+        .split('\n')
+        .map((line) => esc(line))
+        .join('<br>');
+    }
+    if (row.provider === 'grsai' && row.upstreamPoints) {
+      return esc(String(row.upstreamPoints));
+    }
+    return '—';
+  }
+
   function renderModelsTable() {
     const tbody = $('modelsTableBody');
     if (!tbody) return;
-    tbody.innerHTML = imageModelRows
+    const rows = filteredModelRows();
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="14">当前筛选无模型</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows
       .map((row) => {
-        const providerBadge =
-          row.provider === 'apimart'
-            ? '<span class="admin-badge admin-badge--warn">备用</span>'
-            : '<span class="admin-badge admin-badge--ok">常规</span>';
+        const providerBadge = MODEL_PROVIDER_BADGE[row.provider] || MODEL_PROVIDER_BADGE.grsai;
+        const familyLabel = MODEL_UI_FAMILY_LABEL[row.uiFamily] || row.uiFamily || '—';
         const statusOpts = MODEL_STATUS_OPTS.map(
           (o) =>
             `<option value="${o.value}"${row.status === o.value ? ' selected' : ''}>${o.label}</option>`
@@ -1565,18 +2048,19 @@
             </div>
             <input type="number" class="admin-input-sm" data-field="sortOrder" min="0" max="9999" value="${row.sortOrder}" title="数字越小越靠前">
           </td>
+          <td>${esc(familyLabel)}</td>
           <td>${providerBadge}</td>
           <td><code>${esc(row.id)}</code><br><span class="admin-hint">${esc(row.label)} · ${esc(row.description || '')}</span></td>
           <td><input type="text" class="admin-input-sm" data-field="displayName" maxlength="48" value="${esc(row.displayName)}" placeholder="${esc(row.label)}"></td>
           <td><select class="admin-input-sm" data-field="status">${statusOpts}</select></td>
-          <td>${row.upstreamPoints}</td>
+          <td class="admin-upstream-cost">${renderUpstreamCostCell(row)}</td>
           <td>${refundCell}</td>
           <td>${esc((row.resolutions || []).join(' / ') || '—')}</td>
           <td>${renderModelCreditsInputs(row)}</td>
           <td><input type="number" class="admin-input-sm" data-field="discount" min="1" max="100" value="${row.discountPercent ?? 100}"></td>
           <td class="model-effective">${renderModelEffectiveCell(row)}</td>
           <td><label class="admin-check"><input type="checkbox" data-field="fixedPrice" ${row.fixedPrice ? 'checked' : ''}> 固定</label></td>
-          <td><input type="number" class="admin-input-sm" data-field="memberCap" min="1" max="100" placeholder="不限" value="${row.memberDiscountCapPercent != null ? row.memberDiscountCapPercent : ''}" title="会员至少付售价的百分之几，如 90=会员至多九折"></td>
+          <td><input type="number" class="admin-input-sm" data-field="memberCap" min="1" max="100" placeholder="不限" value="${row.memberDiscountCapPercent != null ? row.memberDiscountCapPercent : ''}" title="会员至少付售价的百分之几"></td>
         </tr>`;
       })
       .join('');
@@ -1606,8 +2090,14 @@
             return;
           }
           if (inp.dataset.field === 'credits') row.creditsPerCall = Number(inp.value) || row.creditsPerCall;
+          if (inp.dataset.field?.startsWith('credits-speed-')) {
+            const speed = inp.dataset.field.slice('credits-speed-'.length);
+            if (!row.creditsBySpeed) row.creditsBySpeed = {};
+            row.creditsBySpeed[speed] = Number(inp.value) || row.creditsBySpeed[speed];
+          }
           if (inp.dataset.field?.startsWith('credits-')) {
             const res = inp.dataset.field.slice('credits-'.length);
+            if (res === 'speed-relax' || res === 'speed-fast' || res === 'speed-turbo') return;
             if (!row.creditsByResolution) row.creditsByResolution = {};
             row.creditsByResolution[res] = Number(inp.value) || row.creditsByResolution[res];
           }
@@ -1624,12 +2114,17 @@
   async function loadImageModels() {
     if (!session) return;
     const tbody = $('modelsTableBody');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="12">加载中…</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="14">加载中…</td></tr>';
     try {
       const data = await adminFetch(session, '/api/admin/image-models');
       imageModelSettings = data.settings || { globalDiscountPercent: 100, models: {} };
-      imageModelRows = (data.models || []).map((row, i) => normalizeModelRow(row, i));
+      imageModelRows = (data.models || []).map((row, i) => ensureMjCreditsBySpeed(normalizeModelRow(row, i)));
       sortModelRowsInPlace();
+      apimartCostReference =
+        (data.apimartCostReference && data.apimartCostReference.length
+          ? data.apimartCostReference
+          : null) || buildCostReferenceFromModelRows(imageModelRows);
+      grsaiCostReference = data.grsaiCostReference || [];
       const warn = $('modelsPersistWarn');
       if (warn) {
         const hint = data.settingsHint || '';
@@ -1647,6 +2142,8 @@
       if ($('modelsGlobalDiscount')) {
         $('modelsGlobalDiscount').value = String(imageModelSettings.globalDiscountPercent || 100);
       }
+      renderGrsaiCostReference();
+      renderApimartCostReference();
       renderModelsTable();
       showMsg(
         $('modelsMsg'),
@@ -1662,9 +2159,11 @@
   async function saveImageModels() {
     if (!session) return;
     const btn = $('modelsSaveBtn');
+    syncModelRowsFromDom();
     sortModelRowsInPlace();
     const models = {};
     imageModelRows.forEach((row, index) => {
+      ensureMjCreditsBySpeed(row);
       const displayName = String(row.displayName || '').trim();
       const patch = {
         status: row.status || 'active',
@@ -1676,6 +2175,15 @@
         patch.creditsByResolution = {};
         for (const [res, val] of Object.entries(row.creditsByResolution)) {
           if (val != null && val !== '') patch.creditsByResolution[res] = Number(val) || 0;
+        }
+      } else if (isMjPricingRow(row)) {
+        patch.creditsBySpeed = {};
+        const speeds = ['relax', 'fast', 'turbo'];
+        const fallback = Number(row.creditsPerCall) || 8;
+        for (const speed of speeds) {
+          const raw = row.creditsBySpeed?.[speed];
+          const n = Number(raw);
+          patch.creditsBySpeed[speed] = Number.isFinite(n) && n > 0 ? n : fallback;
         }
       } else {
         patch.creditsPerCall = Number(row.creditsPerCall) || 10;
@@ -1706,7 +2214,9 @@
         data = await adminFetch(session, '/api/admin/image-models/save', { method: 'POST', body });
       }
       imageModelSettings = data.settings;
-      imageModelRows = (data.models || imageModelRows).map((row, i) => normalizeModelRow(row, i));
+      imageModelRows = (data.models || imageModelRows).map((row, i) =>
+        ensureMjCreditsBySpeed(normalizeModelRow(row, i))
+      );
       sortModelRowsInPlace();
       const warn = $('modelsPersistWarn');
       if (warn) {
@@ -1885,6 +2395,52 @@
     $('createCodeBtn')?.addEventListener('click', () => void createCodes());
     $('modelsSaveBtn')?.addEventListener('click', () => void saveImageModels());
     $('modelsGlobalDiscount')?.addEventListener('input', () => renderModelsTable());
+    document.getElementById('panel-models')?.addEventListener('click', (e) => {
+      const grsaiFamBtn = e.target.closest('[data-grsai-cost-family]');
+      if (grsaiFamBtn) {
+        grsaiCostFamilyFilter = grsaiFamBtn.getAttribute('data-grsai-cost-family') || 'all';
+        $('grsaiCostFamilyTabs')?.querySelectorAll('[data-grsai-cost-family]').forEach((b) => {
+          b.classList.toggle('is-active', b === grsaiFamBtn);
+        });
+        renderGrsaiCostReference();
+        return;
+      }
+      const costFamBtn = e.target.closest('[data-apimart-cost-family]');
+      if (costFamBtn) {
+        apimartCostFamilyFilter = costFamBtn.getAttribute('data-apimart-cost-family') || 'all';
+        $('apimartCostFamilyTabs')?.querySelectorAll('[data-apimart-cost-family]').forEach((b) => {
+          b.classList.toggle('is-active', b === costFamBtn);
+        });
+        renderApimartCostReference();
+        return;
+      }
+      const famBtn = e.target.closest('[data-model-family]');
+      if (famBtn) {
+        modelFamilyFilter = famBtn.getAttribute('data-model-family') || 'all';
+        $('modelFamilyTabs')?.querySelectorAll('[data-model-family]').forEach((b) => {
+          b.classList.toggle('is-active', b === famBtn);
+        });
+        renderModelsTable();
+        return;
+      }
+      const provBtn = e.target.closest('[data-model-provider]');
+      if (provBtn) {
+        modelProviderFilter = provBtn.getAttribute('data-model-provider') || 'all';
+        $('modelProviderTabs')?.querySelectorAll('[data-model-provider]').forEach((b) => {
+          b.classList.toggle('is-active', b === provBtn);
+        });
+        renderModelsTable();
+        return;
+      }
+      const statusBtn = e.target.closest('[data-model-status]');
+      if (statusBtn) {
+        modelStatusFilter = statusBtn.getAttribute('data-model-status') || 'all';
+        $('modelStatusTabs')?.querySelectorAll('[data-model-status]').forEach((b) => {
+          b.classList.toggle('is-active', b === statusBtn);
+        });
+        renderModelsTable();
+      }
+    });
 
     $('communitySearchBtn')?.addEventListener('click', () => void loadCommunity(true));
     $('communitySearchClear')?.addEventListener('click', () => {
@@ -1896,12 +2452,34 @@
       if (e.key === 'Enter') void loadCommunity(true);
     });
     $('communityPrev')?.addEventListener('click', () => {
-      communityOffset = Math.max(0, communityOffset - PAGE);
-      void loadCommunity(false);
+      if (communityView === 'bucket-orphans') {
+        communityOffset = Math.max(0, communityOffset - bucketOrphanPageSize());
+        void loadBucketOrphansPage({ reset: false, forceRefresh: false });
+      } else {
+        communityOffset = Math.max(0, communityOffset - PAGE);
+        void loadCommunity(false);
+      }
     });
     $('communityNext')?.addEventListener('click', () => {
-      communityOffset += PAGE;
-      void loadCommunity(false);
+      if (communityView === 'bucket-orphans') {
+        communityOffset += bucketOrphanPageSize();
+        void loadBucketOrphansPage({ reset: false, forceRefresh: false });
+      } else {
+        communityOffset += PAGE;
+        void loadCommunity(false);
+      }
+    });
+    $('communityBucketPageGoBtn')?.addEventListener('click', () => {
+      jumpBucketOrphanPage($('communityBucketPageInput')?.value);
+    });
+    $('communityBucketPageInput')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') jumpBucketOrphanPage(e.target.value);
+    });
+    $('communityBucketPageSize')?.addEventListener('change', (e) => {
+      communityBucketPageSize = Number(e.target.value) || 50;
+      communityOffset = 0;
+      communityBucketSelected.clear();
+      if (communityView === 'bucket-orphans') void loadBucketOrphansPage({ reset: false, forceRefresh: false });
     });
     $('communityPurgeBtn')?.addEventListener('click', () =>
       void runCommunityPurge($('communityPurgeBtn'), null, $('communityMsg'))
@@ -1923,64 +2501,76 @@
         });
       } catch (e) { /* toast handled */ }
     });
-    $('communityBatchRestoreBtn')?.addEventListener('click', () => void runBatchCommunityAction('restore'));
     $('communityBatchUnpublishBtn')?.addEventListener('click', () => void runBatchCommunityAction('unpublish'));
     $('communityBatchDeleteBtn')?.addEventListener('click', () => void runBatchCommunityAction('delete'));
     document.querySelectorAll('[data-community-view]').forEach((btn) => {
       btn.addEventListener('click', () => {
         communityView = btn.getAttribute('data-community-view') || 'published';
         communitySelected.clear();
+        communityBucketSelected.clear();
+        stopBucketOrphanPoll();
+        if (communityView !== 'bucket-orphans') {
+          communityBucketScanMeta = null;
+          communityBucketPollStarted = 0;
+        }
         void loadCommunity(true);
       });
     });
-    $('communityBucketDeletePageBtn')?.addEventListener('click', async () => {
-      if (!session || !communityBucketItems.length) return;
-      const btn = $('communityBucketDeletePageBtn');
+    document.querySelectorAll('[data-bucket-risk]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setBucketRiskFilter(btn.getAttribute('data-bucket-risk') || 'all');
+        communityOffset = 0;
+        communityBucketSelected.clear();
+        void loadBucketOrphansPage({ reset: false, forceRefresh: false });
+      });
+    });
+    $('communityBucketRescanBtn')?.addEventListener('click', () => {
+      communityBucketScanMeta = null;
+      communityBucketForceRefresh = true;
+      communityBucketPollStarted = Date.now();
+      communityBucketSelected.clear();
+      void loadBucketOrphansPage({ reset: true, forceRefresh: true });
+    });
+    document.querySelectorAll('[data-code-category]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setCodeCategoryFilter(btn.getAttribute('data-code-category') || 'all');
+        void loadCodes(true);
+      });
+    });
+    $('communityBucketDeleteSelectedBtn')?.addEventListener('click', async () => {
+      toast('批量删除已暂停：此前扫描有误删风险。请逐条核对后再删，或联系维护人员。', false);
+      return;
+      if (!session || !communityBucketSelected.size) return;
+      const groups = communityBucketItems.filter((g) => communityBucketSelected.has(g.id));
+      const risky = groups.filter((g) => g.risk && g.risk !== 'safe');
+      if (risky.length) {
+        toast(`已选 ${risky.length} 组非「高置信」条目，建议先点恢复再删`, false);
+        return;
+      }
+      const paths = groups.flatMap((g) => g.paths || [g.path]);
+      if (paths.length > 50) {
+        toast('单次最多删除 50 个物理文件，请减少勾选数量', false);
+        return;
+      }
+      const btn = $('communityBucketDeleteSelectedBtn');
       try {
         await runCommunityAdminTask({
           btn,
-          confirmTitle: '删除本页孤儿文件',
-          confirmText: `删除本页 ${communityBucketItems.length} 个桶内孤儿文件？\n\n不可恢复。`,
+          confirmTitle: '删除选中的孤儿文件',
+          confirmText: `删除已勾选的 ${groups.length} 组（共 ${paths.length} 个物理文件）？\n\n请确认预览图不是仍在使用的卡片。\n\n不可恢复。`,
           confirmDanger: true,
-          progressText: `正在删除本页 ${communityBucketItems.length} 个孤儿文件…`,
+          progressText: `正在删除 ${paths.length} 个文件…`,
           msgEl: $('communityMsg'),
           request: () => adminFetch(session, '/api/admin/community/bucket-orphans/delete', {
             method: 'POST',
-            body: {
-              paths: communityBucketItems.flatMap((o) => o.paths || [o.path])
-            },
+            body: { paths },
             timeoutMs: 120000
           }),
           onSuccess: (r) => {
-            communityBucketItems = [];
-            renderBucketOrphansTable();
-            void loadCommunity(true);
+            removeBucketOrphanGroups(paths);
+            groups.forEach((g) => communityBucketSelected.delete(g.id));
+            updateBucketOrphanBatchUi();
             return `已删 ${r.removed || 0} 个（R2 ${r.r2Removed || 0}）`;
-          }
-        });
-      } catch (e) { /* toast handled */ }
-    });
-    $('communityRestoreOrphansBtn')?.addEventListener('click', async () => {
-      if (!session) return;
-      const msg =
-        communityView === 'library-missing'
-          ? '将写回当前「卡片库无」视图中的帖到各作者卡片库（每次最多 50 条）。继续？'
-          : '将扫描全部在线帖，写回作者卡片库中已缺失的帖（每次最多 50 条）。建议先切到「卡片库无」视图。继续？';
-      const btn = $('communityRestoreOrphansBtn');
-      try {
-        await runCommunityAdminTask({
-          btn,
-          confirmTitle: '批量写回卡片库',
-          confirmText: msg,
-          progressText: '正在批量恢复无卡帖（最多 50 条，请稍候）…',
-          msgEl: $('communityMsg'),
-          request: () => adminFetch(session, '/api/admin/community/restore-orphans?limit=50', {
-            method: 'POST',
-            timeoutMs: 180000
-          }),
-          onSuccess: (r) => {
-            void loadCommunity(true);
-            return `已恢复 ${r.restored || 0} 条，跳过 ${r.skipped || 0}，失败 ${r.failed || 0}`;
           }
         });
       } catch (e) { /* toast handled */ }

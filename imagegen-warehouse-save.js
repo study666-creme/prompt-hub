@@ -30,6 +30,7 @@
       fromInspirationDraw: !!opts.fromInspirationDraw,
       silentToast: !!opts.silentToast,
       isMidjourney: !!opts.isMidjourney,
+      cardImages: Array.isArray(opts.cardImages) ? opts.cardImages.filter(Boolean).slice(0, 5) : null,
       mjGridUrls: Array.isArray(opts.mjGridUrls) ? opts.mjGridUrls : null,
       mjCompositeUrl: opts.mjCompositeUrl || null,
       mjButtons: Array.isArray(opts.mjButtons) ? opts.mjButtons : null,

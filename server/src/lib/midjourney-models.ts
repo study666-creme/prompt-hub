@@ -13,6 +13,7 @@ export type MjImagineBody = {
   size?: string;
   version?: string;
   niji?: boolean;
+  speed?: 'relax' | 'fast' | 'turbo';
   image_urls?: string[];
   stylize?: number;
   chaos?: number;
@@ -173,24 +174,91 @@ export function parseMjActionFromCustomId(customId: string): MjActionKind | 'cus
   return 'custom';
 }
 
-export function parseMjImagineUrls(raw: string[]): {
+function isLikelyMjTileUrl(url: string): boolean {
+  return /_[0-3]\.(jpe?g|webp|png)(?:\?|$)/i.test(String(url || ''));
+}
+
+function isLikelyMjCompositeUrl(url: string): boolean {
+  const u = String(url || '').toLowerCase();
+  if (isLikelyMjTileUrl(u)) return false;
+  return /grid|composite|四宫|_0_0|\/0_0[./]|\/split\//i.test(u);
+}
+
+export function parseMjImagineUrls(
+  raw: string[],
+  primaryHint?: string | null
+): {
   composite: string | null;
   tiles: string[];
   primary: string | null;
+  gallery: string[];
 } {
-  const urls = [...new Set(raw.filter((u) => typeof u === 'string' && /^https?:\/\//i.test(u.trim())).map((u) => u.trim()))];
+  const hint = primaryHint && /^https?:\/\//i.test(primaryHint.trim()) ? primaryHint.trim() : null;
+  let urls = [...new Set(raw.filter((u) => typeof u === 'string' && /^https?:\/\//i.test(u.trim())).map((u) => u.trim()))];
+  if (hint && !urls.includes(hint)) urls = [hint, ...urls];
   if (!urls.length) {
-    return { composite: null, tiles: [], primary: null };
+    return { composite: null, tiles: [], primary: null, gallery: [] };
   }
   if (urls.length >= 5) {
     const composite = urls[0];
     const tiles = urls.slice(1, 5);
-    return { composite, tiles, primary: tiles[0] || composite };
+    const gallery = buildMjGalleryUrls(composite, tiles, composite || tiles[0]);
+    return { composite, tiles, primary: composite || tiles[0], gallery };
   }
   if (urls.length === 4) {
-    return { composite: null, tiles: urls, primary: urls[0] };
+    const gridIdx = urls.findIndex(isLikelyMjCompositeUrl);
+    if (gridIdx >= 0) {
+      const composite = urls[gridIdx];
+      const tiles = urls.filter((_, i) => i !== gridIdx).slice(0, 4);
+      const gallery = buildMjGalleryUrls(composite, tiles, composite);
+      return { composite, tiles, primary: composite || tiles[0], gallery };
+    }
+    if (hint && !urls.includes(hint)) {
+      const gallery = buildMjGalleryUrls(hint, urls, hint);
+      return { composite: hint, tiles: urls.slice(0, 4), primary: hint, gallery };
+    }
+    if (hint && urls.includes(hint)) {
+      const tiles = urls.filter((u) => u !== hint).slice(0, 4);
+      const gallery = buildMjGalleryUrls(hint, tiles, hint);
+      return { composite: hint, tiles, primary: hint, gallery };
+    }
+    const gallery = buildMjGalleryUrls(null, urls, urls[0]);
+    return { composite: null, tiles: urls, primary: urls[0], gallery };
   }
-  return { composite: urls[0], tiles: urls, primary: urls[0] };
+  const gallery = buildMjGalleryUrls(urls[0], urls.slice(1), urls[0]);
+  return { composite: urls[0], tiles: urls.slice(1), primary: urls[0], gallery };
+}
+
+/** 四宫格合成图 + 最多 4 张单图（与前端 buildMjCardImages 一致） */
+export function buildMjGalleryUrls(
+  composite: string | null | undefined,
+  tiles: string[],
+  fallback?: string | null
+): string[] {
+  const t = (tiles || []).filter(Boolean).slice(0, 4);
+  const comp = composite && String(composite).trim();
+  if (comp) {
+    const rest = t.filter((u) => u !== comp);
+    return [comp, ...rest].slice(0, 5);
+  }
+  if (t.length) return t.slice(0, 5);
+  const fb = fallback && String(fallback).trim();
+  return fb ? [fb] : [];
+}
+
+export function mjGalleryUrlCount(meta: Record<string, unknown>): number {
+  const gallery = Array.isArray(meta.mjGalleryUrls)
+    ? (meta.mjGalleryUrls as string[]).filter(Boolean)
+    : buildMjGalleryUrls(
+        typeof meta.mjCompositeUrl === 'string' ? meta.mjCompositeUrl : null,
+        Array.isArray(meta.mjGridUrls) ? (meta.mjGridUrls as string[]) : []
+      );
+  return gallery.length;
+}
+
+export function mjPollHasFullGallery(urls: string[]): boolean {
+  const parsed = parseMjImagineUrls(urls);
+  return parsed.tiles.length >= 4;
 }
 
 export function buildImagineBody(
@@ -257,6 +325,9 @@ export function buildImagineBody(
   if (bool('raw')) body.raw = true;
   if (bool('draft')) body.draft = true;
   if (bool('hd')) body.hd = true;
+
+  const speed = str('speed');
+  if (speed === 'fast' || speed === 'turbo' || speed === 'relax') body.speed = speed;
 
   return body;
 }

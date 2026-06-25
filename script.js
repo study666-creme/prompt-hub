@@ -1,4 +1,4 @@
-﻿    /** mobile.js 未加载时的兜底（断点与 MobileUI 一致：900px） */
+    /** mobile.js 未加载时的兜底（断点与 MobileUI 一致：900px） */
     (function ensureMobileUI() {
       if (typeof window.MobileUI?.isMobileViewport === 'function') return;
       const mq = window.matchMedia('(max-width: 900px)');
@@ -541,10 +541,18 @@
           id: c.id,
           title: (c.title || '').trim() || '',
           prompt: (c.prompt || '').trim() || (c.title || '').trim() || '',
-          image: c.image || null,
+          image: window.PromptHubCardGallery?.getCardCoverImage?.(c) || c.image || null,
+          cardImages: window.PromptHubCardGallery?.normalizeCardGallery?.(c) || null,
           tags: c.tags || [],
           group: c.group || null,
-          genJobId: c.genJobId || null
+          genJobId: c.genJobId || null,
+          isMidjourney: !!c.isMidjourney,
+          mjGridUrls: Array.isArray(c.mjGridUrls) ? c.mjGridUrls : null,
+          mjButtons: Array.isArray(c.mjButtons) ? c.mjButtons : null,
+          model: c.model || null,
+          size: c.genSize || null,
+          resolution: c.resolution || null,
+          quality: c.genQuality || null
         }));
     };
 
@@ -774,7 +782,12 @@
 
     window.addCardFromGenerated = async function (payload) {
       const { prompt, image, title, sourceId, jobId } = payload || {};
-      if (!image && !(prompt || '').trim()) {
+      const CG = window.PromptHubCardGallery;
+      const galleryInput = Array.isArray(payload?.cardImages)
+        ? payload.cardImages.filter(Boolean).slice(0, CG?.MAX || 5)
+        : null;
+      const primaryImage = galleryInput?.length ? galleryInput[0] : image;
+      if (!primaryImage && !(prompt || '').trim()) {
         showToast('无内容可保存');
         return { ok: false };
       }
@@ -788,7 +801,34 @@
       }
       if (jobId && cards.some(c => c.genJobId === jobId)) {
         const existing = cards.find(c => c.genJobId === jobId);
-        if (existing && image) {
+        if (existing && galleryInput?.length && CG) {
+          const merged = CG.mergeCardGalleryImages(CG.normalizeCardGallery(existing), galleryInput);
+          existing.cardImages = merged;
+          CG.syncCardGalleryFields(existing);
+          if (Array.isArray(payload.mjButtons) && payload.mjButtons.length) existing.mjButtons = payload.mjButtons;
+          if (payload.mjCompositeUrl) existing.mjCompositeUrl = payload.mjCompositeUrl;
+          for (let i = 0; i < merged.length; i += 1) {
+            const src = galleryInput[i] || merged[i];
+            if (!src || merged[i] !== src) continue;
+            if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.archiveGeneratedCardImage) {
+              try {
+                const slotJob = i === 0 ? jobId : `${String(jobId).replace(/#\d+$/, '')}#${i + 1}`;
+                const archived = await window.SupabaseSync.archiveGeneratedCardImage(existing.id, src, { jobId: slotJob });
+                if (archived && archived !== src) merged[i] = archived;
+              } catch (e) { /* ignore */ }
+            }
+          }
+          existing.cardImages = merged;
+          CG.syncCardGalleryFields(existing);
+          existing.updatedAt = Date.now();
+          await saveAllData({ skipCloud: true });
+          renderGroups();
+          renderCards(true);
+          if (window.SupabaseSync?.isLoggedIn?.()) scheduleCloudPush({ urgent: true });
+          window.FeatureDraft?.prunePendingGenJobsFromWarehouse?.();
+          return { ok: true, cardId: existing.id, merged: true };
+        }
+        if (existing && primaryImage) {
           const needsRepair = !existing.image
             || /^https?:\/\//i.test(existing.image)
             || (window.SupabaseSync?.isDataUrl?.(existing.image))
@@ -796,12 +836,12 @@
               && window.SupabaseSync.storagePathFromRef?.(existing.image)
               && window.SupabaseSync.isPathKnownMissing?.(window.SupabaseSync.storagePathFromRef(existing.image)));
           if (needsRepair) {
-            let stored = image;
+            let stored = primaryImage;
             if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.archiveGeneratedCardImage) {
               try {
-                stored = await window.SupabaseSync.archiveGeneratedCardImage(existing.id, image, {
+                stored = await window.SupabaseSync.archiveGeneratedCardImage(existing.id, primaryImage, {
                   jobId: jobId || existing.genJobId || null
-                }) || image;
+                }) || primaryImage;
               } catch (e) {
                 console.warn('[addCardFromGenerated] duplicate repair archive failed', e);
               }
@@ -816,8 +856,8 @@
             return { ok: true, cardId: existing.id, repaired: true };
           }
         }
-        if (existing && image && !existing.image) {
-          existing.image = image;
+        if (existing && primaryImage && !existing.image) {
+          existing.image = primaryImage;
           existing.updatedAt = Date.now();
           await saveAllData({ skipCloud: true });
           renderGroups();
@@ -855,7 +895,7 @@
         id: payload.cardId || generateId(),
         title: (title || '').trim(),
         prompt: promptText,
-        image: image || null,
+        image: primaryImage || null,
         group: targetGroup || null,
         tags,
         customFields: {},
@@ -865,6 +905,7 @@
         model: payload.model || null,
         genQuality: payload.quality || null,
         isMidjourney: !!payload.isMidjourney,
+        cardImages: galleryInput?.length ? galleryInput : null,
         mjGridUrls: Array.isArray(payload.mjGridUrls) ? payload.mjGridUrls.filter(Boolean) : null,
         mjCompositeUrl: payload.mjCompositeUrl || null,
         mjButtons: Array.isArray(payload.mjButtons) ? payload.mjButtons : null,
@@ -872,21 +913,30 @@
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
+      if (CG?.syncCardGalleryFields) CG.syncCardGalleryFields(card);
       cards.push(card);
-      if (image) void saveCardImageBackup(card.id, image).catch(() => {});
-      if (image && window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.archiveGeneratedCardImage) {
-        try {
-          const archived = await window.SupabaseSync.archiveGeneratedCardImage(card.id, image, {
-            jobId: jobId || null
-          });
-          if (archived && archived !== card.image) {
-            card.image = archived;
-            card.updatedAt = Date.now();
+      const imagesToArchive = CG?.normalizeCardGallery(card) || (primaryImage ? [primaryImage] : []);
+      for (let i = 0; i < imagesToArchive.length; i += 1) {
+        const src = imagesToArchive[i];
+        if (!src) continue;
+        if (i === 0) void saveCardImageBackup(card.id, src).catch(() => {});
+        if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.archiveGeneratedCardImage) {
+          try {
+            const slotJob = jobId ? (i === 0 ? jobId : `${String(jobId).replace(/#\d+$/, '')}#${i + 1}`) : null;
+            const archived = await window.SupabaseSync.archiveGeneratedCardImage(card.id, src, {
+              jobId: slotJob
+            });
+            if (archived && archived !== src) {
+              if (Array.isArray(card.cardImages) && card.cardImages[i]) card.cardImages[i] = archived;
+              if (i === 0) card.image = archived;
+              card.updatedAt = Date.now();
+            }
+          } catch (e) {
+            console.warn('[addCardFromGenerated] gallery archive failed', i, e);
           }
-        } catch (e) {
-          console.warn('[addCardFromGenerated] image archive failed', e);
         }
       }
+      if (CG?.syncCardGalleryFields) CG.syncCardGalleryFields(card);
       if (payload.publishToCommunity && window.FeatureDraft?.syncCardToCommunity) {
         if (window.FeatureDraft?.isCommunityPublishEligible?.(card)) {
           await window.FeatureDraft.syncCardToCommunity(card, true);
@@ -3273,47 +3323,73 @@
     }
 
     async function openCardImageLightbox(card) {
-      if (!card?.image) return;
-      window.syncLightboxActions?.({ cardId: card.id });
+      const full = cards.find((c) => c.id === card?.id) || card;
+      if (!full?.image && !getEditPanelCardGallery(full).length) return;
+      window.syncLightboxActions?.({ cardId: full.id });
+      const gallery = getEditPanelCardGallery(full);
+      if (gallery.length > 1 && typeof window.openLightbox === 'function') {
+        const idx = selectedCardId === full.id ? panelGalleryIndex : 0;
+        const ref = gallery[idx] || full.image;
+        const resolve = window.PromptHubCardGallery?.resolveMediaUrl;
+        const openWith = (src) => {
+          window.openLightbox(src || ref, {
+            cardId: full.id,
+            preferFull: true,
+            mjGalleryUrls: gallery,
+            mjGalleryIndex: idx,
+            mjJobId: full.genJobId ? String(full.genJobId).replace(/#\d+$/, '') : null,
+            feedKey: `card:${full.id}`
+          });
+        };
+        if (resolve) {
+          void resolve(ref, { cardId: full.id, jobId: full.genJobId, galleryIndex: idx, preferFull: true }).then(openWith);
+        } else {
+          openWith(ref);
+        }
+        return;
+      }
+      if (!full.image) return;
       const previewImg = document.getElementById('previewImage');
-      const gridFallback = listGridUrlForCard(card)
-        || (previewImg && selectedCardId === card.id ? (previewImg.currentSrc || previewImg.src || '') : '');
+      const gridFallback = listGridUrlForCard(full)
+        || (previewImg && selectedCardId === full.id ? (previewImg.currentSrc || previewImg.src || '') : '');
       const gridOk = gridFallback && !gridFallback.includes('data:image/svg') && /^https?:\/\//i.test(gridFallback);
-      const reuse = previewImg && selectedCardId === card.id ? previewFullUrlFromImg(previewImg) : '';
+      const reuse = previewImg && selectedCardId === full.id ? previewFullUrlFromImg(previewImg) : '';
       if (reuse && typeof window.openLightbox === 'function') {
         window.openLightbox(reuse, {
-          cardId: card.id,
+          cardId: full.id,
           preferFull: true,
           fallbackSrc: gridOk && gridFallback !== reuse ? gridFallback : ''
         });
         return;
       }
       if (typeof window.openLightbox === 'function') {
-        window.openLightbox('', { pending: true, cardId: card.id, preferFull: true, fallbackSrc: gridOk ? gridFallback : '' });
+        window.openLightbox('', { pending: true, cardId: full.id, preferFull: true, fallbackSrc: gridOk ? gridFallback : '' });
       }
       let url = '';
       let usedGridFallback = false;
       try {
         if (window.MediaPipeline?.resolvePreviewUrl) {
-          url = await window.MediaPipeline.resolvePreviewUrl(card.image, {
-            assetId: card.id,
-            cardId: card.id,
-            jobId: card.genJobId || null,
+          url = await window.MediaPipeline.resolvePreviewUrl(full.image, {
+            assetId: full.id,
+            cardId: full.id,
+            jobId: full.genJobId || null,
+            useJobImageApi: true,
             gridFallbackUrl: gridOk ? gridFallback : '',
             allowGridFallback: true
           });
           usedGridFallback = !!(gridOk && url && url === gridFallback);
         } else if (window.SupabaseSync?.resolvePreviewFullUrl) {
-          url = await window.SupabaseSync.resolvePreviewFullUrl(card.image, {
-            assetId: card.id,
-            jobId: card.genJobId || null,
+          url = await window.SupabaseSync.resolvePreviewFullUrl(full.image, {
+            assetId: full.id,
+            jobId: full.genJobId || null,
+            useJobImageApi: true,
             gridFallbackUrl: gridOk ? gridFallback : ''
           });
           usedGridFallback = !!(gridOk && url && url === gridFallback);
         } else if (window.SupabaseSync?.resolveCardDownloadUrl) {
-          url = await window.SupabaseSync.resolveCardDownloadUrl(card.image, {
-            assetId: card.id,
-            jobId: card.genJobId || null
+          url = await window.SupabaseSync.resolveCardDownloadUrl(full.image, {
+            assetId: full.id,
+            jobId: full.genJobId || null
           });
         }
       } catch (e) { /* ignore */ }
@@ -3323,7 +3399,7 @@
       }
       if (url && typeof window.setLightboxSrc === 'function') {
         window.setLightboxSrc(url, {
-          cardId: card.id,
+          cardId: full.id,
           preferFull: !usedGridFallback,
           fallbackSrc: gridOk && !usedGridFallback ? gridFallback : ''
         });
@@ -5496,8 +5572,42 @@
         if (s) settings = Object.assign(settings, JSON.parse(s));
       } catch (e) { /* ignore */ }
       normalizeCardPins();
+      if (window.PromptHubCardGallery?.migrateMjSplitCardsQuiet?.(cards)) {
+        void saveAllData({ skipCloud: true });
+      }
       return hadSnapshot || cards.length > 0;
     }
+
+    window.persistCardGalleryUpdate = async function persistCardGalleryUpdate(cardId, gallery) {
+      const card = cards.find((c) => c.id === cardId);
+      if (!card || !window.PromptHubCardGallery) return false;
+      card.cardImages = (gallery || []).filter(Boolean).slice(0, window.PromptHubCardGallery.MAX);
+      window.PromptHubCardGallery.syncCardGalleryFields(card);
+      const baseJobId = card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null;
+      if (baseJobId && window.SupabaseSync?.archiveGeneratedCardImage) {
+        for (let i = 0; i < card.cardImages.length; i += 1) {
+          const src = card.cardImages[i];
+          if (!src) continue;
+          if (window.SupabaseSync.isStorageRef?.(src)) continue;
+          try {
+            const slotJob = window.PromptHubCardGallery.gallerySlotJobId(baseJobId, i);
+            const archived = await window.SupabaseSync.archiveGeneratedCardImage(card.id, src, {
+              jobId: slotJob
+            });
+            if (archived && archived !== src) card.cardImages[i] = archived;
+          } catch (e) {
+            console.warn('[persistCardGalleryUpdate] archive slot failed', i, e);
+          }
+        }
+        window.PromptHubCardGallery.syncCardGalleryFields(card);
+      }
+      card.updatedAt = Date.now();
+      await saveAllData({ skipCloud: true });
+      renderGroups();
+      renderCards(true);
+      if (window.SupabaseSync?.isLoggedIn?.()) scheduleCloudPush({ urgent: true });
+      return true;
+    };
 
     function scheduleDeferredImageAudit() {
       if (window.MobileUI?.isMobileViewport?.()) return;
@@ -6546,14 +6656,16 @@
     }
 
     function cardHasDisplayImage(card) {
-      return window.FeatureDraft?.isUsableWarehouseImage?.(card) ?? false;
+      const cover = window.PromptHubCardGallery?.getCardCoverImage?.(card) || card?.image;
+      if (!cover) return window.FeatureDraft?.isUsableWarehouseImage?.(card) ?? false;
+      return window.FeatureDraft?.isDisplayableImage?.(cover) ?? !!cover;
     }
 
     /** 卡片库是否渲染图片区：有图且非已确认幽灵（缺图/跳过 backfill） */
     function warehouseCardShouldRenderMediaSlot(card) {
       if (!cardHasDisplayImage(card)) return false;
       if (window.SupabaseSync?.isGridBackfillSkipped?.(card.id)) return false;
-      const image = card.image;
+      const image = window.PromptHubCardGallery?.getCardCoverImage?.(card) || card.image;
       if (window.SupabaseSync?.cardImageStillResolvable?.(image, card.id) === false) return false;
       const primary = window.SupabaseSync?.primaryImagePath?.(image, card.id);
       if (primary && window.SupabaseSync?.isPathKnownMissing?.(primary)) return false;
@@ -6712,10 +6824,11 @@
         const showImage = warehouseCardShouldRenderMediaSlot(card);
         if (showImage) div.classList.add('card--visual');
         else div.classList.add('card--text-only');
+        const coverImage = window.PromptHubCardGallery?.getCardCoverImage?.(card) || card.image;
         const cachedUrl = showImage && window.SupabaseSync?.getListDisplayImageSrc
-          ? window.SupabaseSync.getListDisplayImageSrc(card.image, card.id)
+          ? window.SupabaseSync.getListDisplayImageSrc(coverImage, card.id)
           : '';
-        const imgSrc = showImage ? (cachedUrl || cardImgInitialSrc(card.image)) : '';
+        const imgSrc = showImage ? (cachedUrl || cardImgInitialSrc(coverImage)) : '';
         const isCollectCard = window.isCommunityCollectCard?.(card);
         const collectMeta = isCollectCard ? getCommunityCollectImageResolveOpts(card) : null;
         /* 卡片库列表：仅用 await 占位，禁止 is-loading 扫光（纯文字幽灵卡与有图卡共用） */
@@ -6732,8 +6845,12 @@
         const collectImgAttrs = isCollectCard && collectMeta?.authorId
           ? ` data-author-id="${escapeHtml(collectMeta.authorId)}" data-source-card-id="${escapeHtml(collectMeta.assetId || '')}"`
           : '';
+        const galleryCount = window.PromptHubCardGallery?.normalizeCardGallery?.(card)?.length || 0;
+        const galleryBadge = galleryCount > 1
+          ? `<span class="card-gallery-count" title="本卡 ${galleryCount} 张图">${galleryCount}</span>`
+          : '';
         const mediaHtml = showImage
-          ? `<div class="card-media${mediaLoadingCls}"${shineAt}><img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(card.image)} data-image-ref="${escapeHtml(card.image)}"${collectImgAttrs} loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async"${fetchPri} draggable="false" alt="" onload="${imgOnload}"></div>`
+          ? `<div class="card-media${mediaLoadingCls}"${shineAt}>${galleryBadge}<img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(coverImage)} data-image-ref="${escapeHtml(coverImage)}"${collectImgAttrs} loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async"${fetchPri} draggable="false" alt="" onload="${imgOnload}"></div>`
           : '';
         const headHtml = titleTrim
           ? `<div class="card-head"><div class="card-title">${escapeHtml(titleTrim)}</div>${timeLabel ? `<time class="card-time">${escapeHtml(timeLabel)}</time>` : ''}</div>`
@@ -7393,7 +7510,12 @@
           try {
             if (card?.image && window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync.isStorageRef(card.image)) {
               try {
-                await window.SupabaseSync.deleteCardImageByUrl(card.image, { allowGenerated: true });
+                await window.SupabaseSync.deleteCardImageByUrl(card.image, {
+                  allowGenerated: true,
+                  excludeCardId: id,
+                  force: true,
+                  genJobId: card.genJobId
+                });
               } catch (e) { /* ignore */ }
             }
             await window.FeatureDraft?.unpublishCommunityByCardId?.(id, { silent: true });
@@ -7416,6 +7538,43 @@
 
     let editCardFillSeq = 0;
     let panelPreviewSeq = 0;
+    let panelGalleryIndex = 0;
+
+    function getEditPanelCardGallery(card) {
+      if (!card) return [];
+      return window.PromptHubCardGallery?.normalizeCardGallery?.(card)
+        || (card.image ? [card.image] : []);
+    }
+
+    function syncPanelGalleryNav(card) {
+      const nav = document.getElementById('panelGalleryNav');
+      const counter = document.getElementById('panelGalleryCounter');
+      const prevBtn = document.getElementById('panelGalleryPrev');
+      const nextBtn = document.getElementById('panelGalleryNext');
+      if (!nav || !counter) return;
+      const gallery = getEditPanelCardGallery(card);
+      if (!card || gallery.length <= 1) {
+        nav.classList.add('hidden');
+        panelGalleryIndex = 0;
+        return;
+      }
+      panelGalleryIndex = Math.max(0, Math.min(panelGalleryIndex, gallery.length - 1));
+      nav.classList.remove('hidden');
+      counter.textContent = `${panelGalleryIndex + 1} / ${gallery.length}`;
+      if (prevBtn) prevBtn.disabled = panelGalleryIndex <= 0;
+      if (nextBtn) nextBtn.disabled = panelGalleryIndex >= gallery.length - 1;
+    }
+
+    function stepPanelGallery(delta) {
+      if (!selectedCardId || isNewCardMode) return;
+      const card = cards.find((c) => c.id === selectedCardId);
+      const gallery = getEditPanelCardGallery(card);
+      if (gallery.length <= 1) return;
+      panelGalleryIndex = Math.max(0, Math.min(panelGalleryIndex + delta, gallery.length - 1));
+      imageData = gallery[panelGalleryIndex] || card?.image || null;
+      syncPanelGalleryNav(card);
+      void updatePreview();
+    }
 
     function clearPanelPreviewImage() {
       const img = document.getElementById('previewImage');
@@ -7476,6 +7635,7 @@
     function editCard(id) {
       const card = cards.find(c => c.id === id); if (!card) return;
       panelPreviewSeq += 1;
+      panelGalleryIndex = 0;
       clearPanelPreviewImage();
       selectedCardId = id; isNewCardMode = false;
       highlightSelectedCard(id);
@@ -7494,7 +7654,8 @@
         document.getElementById('cardTitle').value = card.title || '';
         document.getElementById('cardPrompt').value = card.prompt || '';
         document.getElementById('floatingPromptText').value = card.prompt || '';
-        imageData = card.image || null;
+        const gallery = getEditPanelCardGallery(card);
+        imageData = gallery[panelGalleryIndex] || card.image || null;
         imageRemovalPending = false;
         pendingUploadFile = null;
         pendingUploadBytes = 0;
@@ -7505,6 +7666,7 @@
         renderTags(); renderCustomFields();
         updateDeleteClearButton();
         updatePinToggleUI();
+        syncPanelGalleryNav(card);
         void updatePreview();
       };
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fillForm);
@@ -7532,6 +7694,8 @@
       window.FeatureDraft?.clearPublishDraft?.();
       window.FeatureDraft?.setPublishCheckbox?.(null);
       cardOriginalReuploadRequired = false;
+      document.getElementById('panelGalleryNav')?.classList.add('hidden');
+      panelGalleryIndex = 0;
       const fileInput = document.getElementById('fileInput');
       if (fileInput) fileInput.value = '';
       const modalFileInput = document.getElementById('modalFileInput');
@@ -7920,7 +8084,11 @@
           if (snap.previousImage
             && snap.previousImage !== finalImage
             && window.SupabaseSync.isStorageRef(snap.previousImage)) {
-            await window.SupabaseSync.deleteCardImageByUrl(snap.previousImage);
+            await window.SupabaseSync.deleteCardImageByUrl(snap.previousImage, {
+              allowGenerated: true,
+              excludeCardId: snap.cardId,
+              force: true
+            });
           }
           await clearCardImageBackup(snap.cardId);
         } else if (snap.imageValue) {
@@ -8378,11 +8546,14 @@
       }
       if (!opts.saved && window.SupabaseSync?.isStorageRef?.(imageData) && !pendingUploadFile && !pendingUploadBytes) {
         const card = selectedCardId ? cards.find((c) => c.id === selectedCardId) : null;
+        const galleryN = card ? (window.PromptHubCardGallery?.normalizeCardGallery?.(card)?.length || 0) : 0;
         if (card?.imageStoredBytes > 0) {
           const mode = card.imageUploadOriginal
             ? (card.imageEncodeMode === 'full_res_jpeg' ? '原尺寸高清JPEG已存' : '原图已存')
             : '已压缩保存';
-          el.textContent = `${mode} · ${formatFileSize(card.imageStoredBytes)}`;
+          el.textContent = galleryN > 1
+            ? `${mode} · ${formatFileSize(card.imageStoredBytes)} · 共 ${galleryN} 张`
+            : `${mode} · ${formatFileSize(card.imageStoredBytes)}`;
           if (dl) dl.classList.remove('hidden');
           return;
         }
@@ -8458,6 +8629,24 @@
         e.stopPropagation();
         void downloadPanelCardImage();
       });
+      const panelGalPrev = document.getElementById('panelGalleryPrev');
+      const panelGalNext = document.getElementById('panelGalleryNext');
+      if (panelGalPrev && panelGalPrev.dataset.bound !== '1') {
+        panelGalPrev.dataset.bound = '1';
+        panelGalPrev.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          stepPanelGallery(-1);
+        });
+      }
+      if (panelGalNext && panelGalNext.dataset.bound !== '1') {
+        panelGalNext.dataset.bound = '1';
+        panelGalNext.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          stepPanelGallery(1);
+        });
+      }
     }
 
     function updatePanelTrimToolVisibility() {
@@ -8545,9 +8734,14 @@
             const retry = await resolveFull(imageData, {
               assetId: selectedCardId,
               cardId: selectedCardId,
-              jobId: cards.find((c) => c.id === selectedCardId)?.genJobId || null,
+              jobId: window.PromptHubCardGallery?.gallerySlotJobId?.(
+                cards.find((c) => c.id === selectedCardId)?.genJobId,
+                panelGalleryIndex
+              ) || cards.find((c) => c.id === selectedCardId)?.genJobId || null,
+              galleryIndex: panelGalleryIndex,
+              useJobImageApi: panelGalleryIndex <= 0,
               gridFallbackUrl,
-              allowGridFallback: true
+              allowGridFallback: panelGalleryIndex <= 0
             });
             if (previewStale() || !retry || retry.includes('data:image/svg')) {
               dropArea?.classList.add('is-loading-preview');
@@ -8603,7 +8797,10 @@
         const pipePreviewOpts = {
           assetId: selectedCardId,
           cardId: selectedCardId,
-          jobId: cardJobId
+          jobId: window.PromptHubCardGallery?.gallerySlotJobId?.(cardJobId, panelGalleryIndex) || cardJobId,
+          galleryIndex: panelGalleryIndex,
+          useJobImageApi: panelGalleryIndex <= 0,
+          allowGridFallback: panelGalleryIndex <= 0
         };
         if (waiting && window.SupabaseSync?.isStorageRef?.(imageData) && selectedCardId) {
           const gridCached = window.MediaPipeline?.getListCached?.(imageData, selectedCardId)

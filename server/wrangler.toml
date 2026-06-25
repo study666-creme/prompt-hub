@@ -32,6 +32,7 @@ ITHINK_API_BASE_URL = "https://www.thinkai.tv"
 [[r2_buckets]]
 binding = "CARD_IMAGES_R2"
 bucket_name = "prompt-hub-card-images"
+preview_bucket_name = "prompt-hub-card-images-dev"
 
 [[routes]]
 pattern = "api.prompt-hubs.com"

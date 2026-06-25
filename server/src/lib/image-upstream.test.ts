@@ -24,17 +24,23 @@ describe('image model catalog', () => {
     );
   });
 
-  it('apimart exposes official budget, gpt-image-2 and seedream 5 lite', () => {
-    expect(APIMART_IMAGE_MODEL_CATALOG).toHaveLength(3);
+  it('apimart exposes core models plus wan and flux', () => {
+    expect(APIMART_IMAGE_MODEL_CATALOG.length).toBeGreaterThanOrEqual(9);
     const budget = getCatalogEntry('apimart-gpt-image-2-official-budget');
     const gpt = getCatalogEntry('apimart-gpt-image-2');
     const jimeng = getCatalogEntry('apimart-seedream-5-lite');
+    const wan = getCatalogEntry('apimart-wan2-7-image');
+    const fluxPro = getCatalogEntry('apimart-flux-kontext-pro');
     expect(budget?.upstream).toBe('gpt-image-2-official');
     expect(budget?.fixedQualityLow).toBe(true);
     expect(gpt?.provider).toBe('apimart');
     expect(gpt?.pricingByResolution).toBe(true);
     expect(jimeng?.upstream).toBe('doubao-seedream-5-0-lite');
     expect(jimeng?.resolutions).toEqual(['2k', '4k']);
+    expect(wan?.upstream).toBe('wan2.7-image');
+    expect(wan?.upstreamPoints).toBeCloseTo(0.15, 2);
+    expect(fluxPro?.upstream).toBe('flux-kontext-pro');
+    expect(fluxPro?.upstreamPoints).toBeCloseTo(0.14, 2);
   });
 
   it('provider labels hide vendor names', () => {

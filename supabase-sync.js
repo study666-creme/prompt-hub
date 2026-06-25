@@ -1805,6 +1805,23 @@
     return /\/generated\/[^/]+\.(jpe?g|png|webp)$/i.test(path);
   }
 
+  /** 生图多图槽位：jobId#2 → uuid-2，避免各槽位覆盖同一路径 */
+  function generationStorageAssetId(jobId, fallbackAssetId) {
+    if (jobId) return String(jobId).replace(/#/g, '-');
+    return String(fallbackAssetId || Date.now());
+  }
+
+  /** 列表/预览签名：opts 或卡片 genJobId → 生图 storage 路径 */
+  function resolveJobIdForAsset(opts, assetId) {
+    const raw = opts?.jobId || opts?.genJobId || null;
+    if (raw) return String(raw).replace(/#\d+$/, '');
+    const id = assetId || opts?.cardId;
+    if (!id) return null;
+    const card = (window.__promptHubCards || []).find((c) => c.id === id);
+    if (card?.genJobId) return String(card.genJobId).replace(/#\d+$/, '');
+    return null;
+  }
+
   function listImagePathCandidates(image, assetId, ownerId, jobId) {
     const paths = [];
     const add = (p) => {
@@ -1812,7 +1829,7 @@
       if (key && !paths.includes(key)) paths.push(key);
     };
     const uid = ownerId || getUserId();
-    const genJobKey = jobId ? String(jobId).replace(/#\d+$/, '') : '';
+    const genJobKey = jobId ? generationStorageAssetId(jobId, '') : '';
     if (uid && genJobKey) {
       add(`${uid}/generated/${genJobKey}.jpg`);
       add(`${uid}/generated/${genJobKey}.png`);
@@ -2180,6 +2197,7 @@
     const o = opts && typeof opts === 'object' ? opts : {};
     const assetId = o.assetId;
     const authorId = o.authorId;
+    const jobId = resolveJobIdForAsset(o, assetId);
     const variant = displayVariantFromOpts(opts);
     const normalizedEarly = normalizeImageRef(image);
     const bucketPathEarly = storagePathFromRef(normalizedEarly);
@@ -2213,10 +2231,10 @@
     if (bucketPath && (isLoggedIn() || communityFeed)) {
       const primary = primaryImagePath(normalized, assetId);
       const fromRef = bucketPath.replace(/^\//, '');
-      const all = listImagePathCandidates(normalized, assetId, authorId).filter(
+      const all = listImagePathCandidates(normalized, assetId, authorId, jobId).filter(
         (p) => !isPathKnownMissing(p)
       );
-      const variantPaths = pathsForVariant(normalized, assetId, authorId, variant);
+      const variantPaths = pathsForVariant(normalized, assetId, authorId, variant, jobId);
       let candidates;
       const listOnlyGrid = variant === VARIANT_GRID && (o.listOnly === true || o.allowFullFallback === false);
       if (
@@ -2594,6 +2612,7 @@
     if (isDataUrl(image) || image.startsWith('blob:')) return image;
     const opts = typeof assetIdOrOpts === 'object' ? assetIdOrOpts : { assetId: assetIdOrOpts };
     const assetId = opts?.assetId;
+    const jobId = resolveJobIdForAsset(opts, assetId);
     const variant = displayVariantFromOpts(opts);
     const primary = primaryImagePath(image, assetId);
     const pathFromImage = storagePathFromRef(image);
@@ -2615,7 +2634,7 @@
           }
         }
       }
-      for (const path of pathsForVariant(image, assetId, opts?.authorId, variant)) {
+      for (const path of pathsForVariant(image, assetId, opts?.authorId, variant, jobId)) {
         const key = path.replace(/^\//, '');
         if (variant === VARIANT_FULL && isGridStoragePath(key)) continue;
         if (variant === VARIANT_GRID && primary && gridListNeedsPrimaryFallback(primary, assetId)) continue;
@@ -2657,9 +2676,11 @@
     if (!image || typeof image !== 'string') return '';
     const o = extraOpts && typeof extraOpts === 'object' ? extraOpts : {};
     const id = o.assetId || assetId;
+    const jobId = resolveJobIdForAsset(o, id);
     const grid = getCachedDisplayUrl(image, {
       assetId: id,
       authorId: o.authorId,
+      jobId,
       variant: VARIANT_GRID
     });
     if (grid && isValidSignedDisplayUrl(grid) && !isInvalidMediaUrl(grid)) return grid;
@@ -3271,9 +3292,7 @@
       return normalized;
     }
     await ensureSession();
-    const storeId = opts?.jobId
-      ? String(opts.jobId).replace(/#\d+$/, '')
-      : String(assetId || Date.now());
+    const storeId = generationStorageAssetId(opts?.jobId, assetId);
     if (isDataUrl(image) || image.startsWith('blob:')) {
       return uploadGeneratedImage(storeId, image);
     }
@@ -3487,8 +3506,8 @@
     if (isDataUrl(image) || image.startsWith('blob:')) return image;
     const assetId = opts?.assetId;
     const normalized = normalizeImageRef(image);
-    const jobId = opts?.jobId ? String(opts.jobId).replace(/#\d+$/, '') : '';
-    const candidates = pathsForVariant(normalized, assetId, opts?.authorId, VARIANT_FULL, jobId)
+    const jobId = opts?.jobId ? generationStorageAssetId(opts.jobId, '') : '';
+    const candidates = pathsForVariant(normalized, assetId, opts?.authorId, VARIANT_FULL, opts?.jobId || jobId)
       .filter((p) => !isGridStoragePath(p));
     for (const raw of candidates) {
       const key = raw.replace(/^\//, '');
@@ -3518,7 +3537,9 @@
       if (await verifyMediaUrlReachable(image)) return image;
     }
     const assetId = opts.assetId || opts.cardId;
-    const jobId = opts.jobId ? String(opts.jobId).replace(/#\d+$/, '') : '';
+    const slotJobId = opts?.jobId ? String(opts.jobId) : '';
+    const storageJobKey = slotJobId ? generationStorageAssetId(slotJobId, '') : '';
+    const galleryIndex = Number.isFinite(opts.galleryIndex) ? opts.galleryIndex : null;
     const cached = getCachedDisplayUrl(image, {
       assetId,
       authorId: opts.authorId,
@@ -3526,9 +3547,12 @@
     });
     if (cached && isValidSignedDisplayUrl(cached) && !isInvalidMediaUrl(cached)
       && await verifyMediaUrlReachable(cached)) return cached;
-    if (jobId && window.PromptHubApi?.getGenerationImageUrl) {
+    const useJobApi = opts.useJobImageApi === true
+      && (galleryIndex == null || galleryIndex <= 0);
+    const baseJobId = slotJobId.replace(/#\d+$/, '');
+    if (useJobApi && baseJobId && window.PromptHubApi?.getGenerationImageUrl) {
       try {
-        const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
+        const r = await window.PromptHubApi.getGenerationImageUrl(baseJobId);
         if (r?.ok && r.data?.url && await verifyMediaUrlReachable(r.data.url)) return r.data.url;
       } catch (e) { /* ignore */ }
     }
@@ -3536,13 +3560,14 @@
       assetId,
       authorId: opts.authorId,
       communityFeed: opts.communityFeed === true,
-      jobId
+      jobId: slotJobId || storageJobKey
     });
     if (dl) return dl;
     const resolved = await resolveDisplayUrl(image, {
       assetId,
       authorId: opts.authorId,
       cardId: opts.cardId || assetId,
+      jobId: slotJobId || storageJobKey || undefined,
       variant: VARIANT_FULL,
       tryAllPaths: true,
       preferFull: true,
@@ -3573,6 +3598,22 @@
     const path = storagePathFromRef(url);
     if (!path) return;
     if (isGeneratedArchivePath(path) && opts.allowGenerated !== true) return;
+
+    if (window.PromptHubApi?.isConfigured?.() && window.PromptHubApi.deleteOwnedCardImage) {
+      try {
+        const r = await window.PromptHubApi.deleteOwnedCardImage(url, {
+          excludeCardId: opts.excludeCardId,
+          allowGenerated: opts.allowGenerated === true,
+          force: opts.force === true,
+          genJobId: opts.genJobId
+        });
+        if (r?.ok) return;
+        throw new Error(r?.message || 'delete-owned failed');
+      } catch (e) {
+        console.warn('[SupabaseSync] delete-owned API failed, fallback storage.remove', e);
+      }
+    }
+
     const sb = getClient();
     if (!sb) return;
     const grid = gridPathFromPrimary(path);
@@ -3886,7 +3927,7 @@
   async function resolveCardImageForSave(cardId, imageValue, previousUrl, opts = {}) {
     if (!imageValue) {
       if (previousUrl && isStorageRef(previousUrl)) {
-        await deleteCardImageByUrl(previousUrl, { allowGenerated: true });
+        await deleteCardImageByUrl(previousUrl, { allowGenerated: true, excludeCardId: cardId, force: true });
       }
       return null;
     }
@@ -3901,7 +3942,7 @@
         const url = await uploadCardImage(cardId, fallback, uploadOpts);
         clearPathMissingForCard(cardId, url);
         if (previousUrl && previousUrl !== url && isStorageRef(previousUrl)) {
-          await deleteCardImageByUrl(previousUrl);
+          await deleteCardImageByUrl(previousUrl, { excludeCardId: cardId, force: true });
         }
         if (typeof window.clearCardImageBackup === 'function') {
           await window.clearCardImageBackup(cardId);
@@ -3913,14 +3954,14 @@
     if (imageValue instanceof Blob) {
       const url = await uploadCardImage(cardId, imageValue, uploadOpts);
       if (previousUrl && previousUrl !== url && isStorageRef(previousUrl)) {
-        await deleteCardImageByUrl(previousUrl);
+        await deleteCardImageByUrl(previousUrl, { excludeCardId: cardId, force: true });
       }
       return url;
     }
     if (isDataUrl(imageValue) || (typeof imageValue === 'string' && imageValue.startsWith('blob:'))) {
       const url = await uploadCardImage(cardId, imageValue, uploadOpts);
       if (previousUrl && previousUrl !== url && isStorageRef(previousUrl)) {
-        await deleteCardImageByUrl(previousUrl);
+        await deleteCardImageByUrl(previousUrl, { excludeCardId: cardId, force: true });
       }
       return url;
     }
@@ -3929,7 +3970,7 @@
         const blob = await fetchRemoteImageBlob(imageValue);
         const url = await uploadCardImage(cardId, blob, uploadOpts);
         if (previousUrl && previousUrl !== url && isStorageRef(previousUrl)) {
-          await deleteCardImageByUrl(previousUrl);
+          await deleteCardImageByUrl(previousUrl, { excludeCardId: cardId, force: true });
         }
         return url;
       } catch (e) {

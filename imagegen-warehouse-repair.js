@@ -21,16 +21,99 @@
     return false;
   }
 
+  function mjGalleryNeedsRearchive(card) {
+    const CG = window.PromptHubCardGallery;
+    if (!card?.isMidjourney || !CG) return false;
+    const gallery = CG.normalizeCardGallery(card);
+    if (gallery.length <= 1) return false;
+    const uniq = new Set(gallery.map((u) => String(u || '').trim()).filter(Boolean));
+    if (uniq.size < gallery.length) return true;
+    if (gallery.some((u) => /^https?:\/\//i.test(String(u)))) return true;
+    const paths = gallery.map((ref) => {
+      if (global.SupabaseSync?.storagePathFromRef?.(ref)) {
+        return global.SupabaseSync.storagePathFromRef(ref);
+      }
+      return String(ref || '');
+    }).filter(Boolean);
+    return new Set(paths).size < gallery.length;
+  }
+
+  async function rearchiveMjGallerySlots(card, sourceUrls) {
+    const CG = window.PromptHubCardGallery;
+    if (!card?.id || !CG || !Array.isArray(sourceUrls) || !sourceUrls.length) return false;
+    const baseJobId = card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null;
+    if (!baseJobId || !global.SupabaseSync?.archiveGeneratedCardImage) return false;
+    const urls = sourceUrls.filter(Boolean).slice(0, CG.MAX || 5);
+    const archived = [];
+    let changed = false;
+    for (let i = 0; i < urls.length; i += 1) {
+      const src = urls[i];
+      const slotJob = CG.gallerySlotJobId(baseJobId, i);
+      let ref = src;
+      try {
+        ref = await global.SupabaseSync.archiveGeneratedCardImage(card.id, src, { jobId: slotJob }) || src;
+      } catch (e) {
+        console.warn('[repairMjGallery] archive slot failed', i, e);
+      }
+      archived.push(ref);
+      if (ref !== src) changed = true;
+    }
+    const prev = JSON.stringify(CG.normalizeCardGallery(card));
+    card.cardImages = archived;
+    CG.syncCardGalleryFields(card);
+    if (JSON.stringify(CG.normalizeCardGallery(card)) !== prev) changed = true;
+    if (!changed) return false;
+    card.updatedAt = Date.now();
+    await d().persistPromptHubCards();
+    return true;
+  }
+
+  async function repairMjGalleryFromJob(card) {
+    if (!card?.genJobId || !global.PromptHubApi?.getGenerationJob) return false;
+    if (!mjGalleryNeedsRearchive(card)) return false;
+    const baseJobId = String(card.genJobId).replace(/#\d+$/, '');
+    try {
+      const poll = await global.PromptHubApi.getGenerationJob(baseJobId);
+      if (!poll?.ok) return false;
+      const parsed = d().resolveMjPollImages?.(poll);
+      const CG = window.PromptHubCardGallery;
+      const sources = parsed?.gallery?.length
+        ? parsed.gallery
+        : (parsed?.composite && CG
+          ? CG.buildMjCardImages(parsed.composite, parsed.tiles, parsed.primary)
+          : parsed?.tiles);
+      if (!sources?.length) return false;
+      if (parsed?.composite && !card.mjCompositeUrl) card.mjCompositeUrl = parsed.composite;
+      return await rearchiveMjGallerySlots(card, sources);
+    } catch (e) {
+      console.warn('[repairMjGalleryFromJob]', card.id, e);
+      return false;
+    }
+  }
+
   async function repairMjWarehouseCardFields(card, fields) {
     if (!card?.id) return false;
     let changed = false;
     const gridUrls = Array.isArray(fields.mjGridUrls) ? fields.mjGridUrls.filter(Boolean) : [];
-    if (gridUrls.length && (!Array.isArray(card.mjGridUrls) || card.mjGridUrls.length < gridUrls.length)) {
+    const composite = fields.mjCompositeUrl || card.mjCompositeUrl || null;
+    const CG = window.PromptHubCardGallery;
+    if (CG && (gridUrls.length || composite)) {
+      if (composite && !card.mjCompositeUrl) {
+        card.mjCompositeUrl = composite;
+        changed = true;
+      }
+      const next = CG.buildMjCardImages(
+        composite || card.mjCompositeUrl,
+        gridUrls.length ? gridUrls : card.mjGridUrls,
+        CG.normalizeCardGallery(card)[0] || card.image
+      );
+      if (JSON.stringify(CG.normalizeCardGallery(card)) !== JSON.stringify(next)) {
+        card.cardImages = next;
+        CG.syncCardGalleryFields(card);
+        changed = true;
+      }
+    } else if (gridUrls.length && (!Array.isArray(card.mjGridUrls) || card.mjGridUrls.length < gridUrls.length)) {
       card.mjGridUrls = gridUrls;
-      changed = true;
-    }
-    if (fields.mjCompositeUrl && !card.mjCompositeUrl) {
-      card.mjCompositeUrl = fields.mjCompositeUrl;
       changed = true;
     }
     if (Array.isArray(fields.mjButtons) && fields.mjButtons.length
@@ -56,6 +139,17 @@
       d().persistCreations();
     }
     await d().persistPromptHubCards();
+    if (mjGalleryNeedsRearchive(card) && (gridUrls.length || composite)) {
+      const CG2 = window.PromptHubCardGallery;
+      const sources = CG2?.buildMjCardImages(
+        composite || card.mjCompositeUrl,
+        gridUrls.length ? gridUrls : card.mjGridUrls,
+        CG2.normalizeCardGallery(card)[0] || card.image
+      );
+      if (sources?.length > 1) {
+        await rearchiveMjGallerySlots(card, sources);
+      }
+    }
     return true;
   }
 
@@ -146,6 +240,7 @@
     return {
       warehouseCardImageNeedsRecovery,
       repairMjWarehouseCardFields,
+      repairMjGalleryFromJob,
       repairWarehouseCardImageFromJob,
       repairMissingGenCardImagesQuiet
     };

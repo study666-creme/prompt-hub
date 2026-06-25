@@ -26,20 +26,20 @@ describe('generation cost', () => {
     expect(r.final).toBe(10);
   });
 
-  it('basic member 95% on 10 credits', () => {
+  it('basic member no longer gets generation discount', () => {
     const r = computeImageGenerationCost(settings, 'gpt-image-2', '1k', 'basic', true);
     expect(r.listPrice).toBe(10);
-    expect(r.final).toBe(9.5);
-    expect(r.appliedDiscount).toBe('member');
-    expect(r.discountLabel).toBe('95折');
+    expect(r.final).toBe(10);
+    expect(r.appliedDiscount).toBe('none');
+    expect(r.discountLabel).toBeNull();
   });
 
-  it('standard member 90% on nano-banana-pro 2k', () => {
+  it('standard member no longer gets generation discount', () => {
     const r = computeImageGenerationCost(settings, 'nano-banana-pro', '2k', 'standard', true);
     expect(r.listPrice).toBe(18);
-    expect(r.final).toBe(16.2);
-    expect(r.appliedDiscount).toBe('member');
-    expect(r.discountLabel).toBe('9折');
+    expect(r.final).toBe(18);
+    expect(r.appliedDiscount).toBe('none');
+    expect(r.discountLabel).toBeNull();
   });
 
   it('global discount applies as promo (not stacked with member)', () => {
@@ -100,7 +100,7 @@ describe('generation cost', () => {
     expect(r.discountLabel).toBe('固定价');
   });
 
-  it('memberDiscountCapPercent limits pro discount', () => {
+  it('memberDiscountCapPercent no longer applies member discount', () => {
     const r = computeImageGenerationCost(
       {
         globalDiscountPercent: 100,
@@ -114,9 +114,9 @@ describe('generation cost', () => {
       true
     );
     expect(r.listPrice).toBe(100);
-    expect(r.final).toBe(90);
-    expect(r.appliedDiscount).toBe('member');
-    expect(r.discountLabel).toBe('会员≥90%');
+    expect(r.final).toBe(100);
+    expect(r.appliedDiscount).toBe('none');
+    expect(r.discountLabel).toBeNull();
   });
 
   it('apimart gpt-image-2 prices by resolution', () => {

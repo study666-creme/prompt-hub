@@ -2236,17 +2236,24 @@
 .imagegen-mj-speed-group {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
   gap: 8px;
+  align-items: stretch;
+  width: 100%;
 }
 
 .imagegen-mj-speed-option {
   position: relative;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 10px 12px;
-  min-height: 72px;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  margin: 0;
+  padding: 8px 6px;
+  min-height: 56px;
+  height: 56px;
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   background: linear-gradient(
@@ -2255,17 +2262,22 @@
     color-mix(in srgb, var(--bg-card) 98%, transparent)
   );
   cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
   box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
+  text-align: center;
 }
 
+.imagegen-mj-speed-option.is-checked,
 .imagegen-mj-speed-option:has(input:checked) {
   border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
   background: linear-gradient(
     160deg,
-    color-mix(in srgb, var(--accent-bg) 65%, var(--bg-card)),
-    color-mix(in srgb, var(--accent-bg) 35%, var(--bg-card))
+    color-mix(in srgb, var(--bg-card) 94%, #fff 6%),
+    color-mix(in srgb, var(--bg-card) 98%, transparent)
   );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
 }
 
 .imagegen-mj-speed-option input[type="radio"] {
@@ -2277,31 +2289,53 @@
 }
 
 .imagegen-mj-speed-label {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
-  line-height: 1.3;
+  line-height: 1.15;
 }
 
 .imagegen-mj-speed-desc {
-  font-size: 11px;
-  line-height: 1.4;
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.15;
   color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.imagegen-mj-options-grid--dual {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.imagegen-mj-gallery-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.imagegen-mj-gallery-note strong {
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .imagegen-mj-options-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
   gap: 10px;
   width: 100%;
+  align-items: stretch;
 }
 
 .imagegen-mj-option-card {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  align-content: start;
   gap: 8px;
-  min-height: 84px;
+  min-height: 76px;
+  height: 100%;
   padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
@@ -2324,6 +2358,7 @@
   border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
 }
 
+.imagegen-mj-option-card.is-checked,
 .imagegen-mj-option-card:has(input:checked) {
   border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
   background: linear-gradient(
@@ -2356,6 +2391,7 @@
   color: var(--text-muted);
   margin: 0;
   padding: 0;
+  min-height: 2.6em;
 }
 
 .imagegen-mj-option-card input[type="checkbox"] {
@@ -2453,6 +2489,18 @@
   cursor: pointer;
 }
 
+.imagegen-mj-actions-note {
+  margin: 10px 0 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.imagegen-mj-actions-note strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
 .imagegen-mj-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2545,6 +2593,14 @@
   justify-content: space-between;
   gap: 8px;
   margin-top: 8px;
+}
+
+.imagegen-mj-filmstrip-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .imagegen-mj-filmstrip-counter {

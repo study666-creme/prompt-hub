@@ -18,6 +18,29 @@ function isJimengLikeUpstream(upstream: string): boolean {
   return /nano-banana|jimeng|seedream|seedance|doubao-seedream/i.test(upstream);
 }
 
+function isWan27Upstream(upstream: string): boolean {
+  return /^wan2\.7-image/i.test(upstream);
+}
+
+function isFluxKontextUpstream(upstream: string): boolean {
+  return /^flux-kontext-/i.test(upstream);
+}
+
+function isFlux2Upstream(upstream: string): boolean {
+  return /^flux-2-/i.test(upstream);
+}
+
+function isGeminiImageUpstream(upstream: string): boolean {
+  return /^gemini-/i.test(upstream);
+}
+
+function mapApimartResolutionTier(resolution: string): string {
+  const r = String(resolution || '2k').trim().toLowerCase();
+  if (r === '4k') return '4K';
+  if (r === '1k') return '1K';
+  return '2K';
+}
+
 export type TaskPollResult = {
   status: string;
   imageUrl: string | null;
@@ -110,10 +133,28 @@ export function extractAllImageUrls(payload: unknown): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
 
-  if (d.result) collectImageUrls(d.result, seen, out);
-  for (const key of ['output_url', 'image_url', 'imageUrl', 'url', 'output', 'outputs', 'images', 'image']) {
+  /** grid_image_url（MJ 专用）> image_url（四宫格）> image_urls（4 单图）> result.images */
+  for (const key of [
+    'grid_image_url',
+    'gridImageUrl',
+    'output_url',
+    'image_url',
+    'imageUrl',
+    'url',
+    'grid_url',
+    'gridUrl',
+    'composite_url',
+    'compositeUrl',
+    'image_urls',
+    'imageUrls',
+    'output',
+    'outputs',
+    'images',
+    'image'
+  ]) {
     if (key in d) collectImageUrls(d[key], seen, out);
   }
+  if (d.result) collectImageUrls(d.result, seen, out);
   return out;
 }
 
@@ -129,10 +170,56 @@ export function isApimartContentViolationMessage(msg: string | null | undefined)
   );
 }
 
-function buildRequestBody(params: SubmitParams): Record<string, unknown> {
+/** @internal exported for unit tests */
+export function buildApimartRequestBody(params: SubmitParams): Record<string, unknown> {
   const upstream = params.upstreamModel.trim().toLowerCase();
   const size = params.size || '1:1';
   const refs = params.refImageUrls?.length ? params.refImageUrls : undefined;
+
+  if (isWan27Upstream(upstream)) {
+    const body: Record<string, unknown> = {
+      model: upstream,
+      prompt: params.prompt,
+      size,
+      resolution: mapApimartResolutionTier(params.resolution),
+      n: 1
+    };
+    if (refs?.length) body.image_urls = refs;
+    else body.thinking_mode = true;
+    return body;
+  }
+
+  if (isFluxKontextUpstream(upstream)) {
+    return {
+      model: upstream,
+      prompt: params.prompt,
+      size,
+      n: 1,
+      ...(refs?.length ? { image_urls: refs.slice(0, 1) } : {})
+    };
+  }
+
+  if (isFlux2Upstream(upstream)) {
+    return {
+      model: upstream,
+      prompt: params.prompt,
+      size,
+      resolution: mapApimartResolutionTier(params.resolution),
+      n: 1,
+      ...(refs?.length ? { image_urls: refs.slice(0, 14) } : {})
+    };
+  }
+
+  if (isGeminiImageUpstream(upstream)) {
+    return {
+      model: upstream,
+      prompt: params.prompt,
+      size,
+      resolution: mapApimartResolutionTier(params.resolution),
+      n: 1,
+      ...(refs?.length ? { image_urls: refs.slice(0, 14) } : {})
+    };
+  }
 
   if (isJimengLikeUpstream(upstream)) {
     return {
@@ -176,7 +263,7 @@ export async function submitApimartImageJob(
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(buildRequestBody(params))
+    body: JSON.stringify(buildApimartRequestBody(params))
   });
 
   let json: unknown = {};

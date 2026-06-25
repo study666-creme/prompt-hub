@@ -18,6 +18,26 @@ export type FastSubmitParams = {
   mjParams?: Record<string, unknown>;
 };
 
+/** 从 job.meta 还原 GrsAI/Apimart 后台提交参数（含 MJ speed 等） */
+export function fastSubmitParamsFromJob(job: JobRow): FastSubmitParams {
+  const meta = (job.meta as Record<string, unknown>) || {};
+  const mjParams =
+    meta.mjParams && typeof meta.mjParams === 'object' && !Array.isArray(meta.mjParams)
+      ? (meta.mjParams as Record<string, unknown>)
+      : undefined;
+  return {
+    upstreamModel: String(meta.upstreamModel || 'gpt-image-2-pro'),
+    prompt: String(job.prompt || ''),
+    resolution: String(job.resolution || '1k'),
+    quality: String(job.quality || 'standard'),
+    size: typeof meta.size === 'string' ? meta.size : undefined,
+    refImageUrls: Array.isArray(meta.refImageUrls)
+      ? (meta.refImageUrls as string[]).filter(Boolean)
+      : undefined,
+    ...(mjParams ? { mjParams } : {})
+  };
+}
+
 async function claimFastSubmit(
   admin: SupabaseClient,
   jobId: string,

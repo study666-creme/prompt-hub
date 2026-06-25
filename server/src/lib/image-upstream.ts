@@ -16,7 +16,6 @@ import {
   fetchMookoTaskOnce,
   submitMookoImageJob
 } from './mooko';
-import { isGrsaiMaintenanceMessage, noteGrsaiSubmitOutcome } from './grsai-upstream-status';
 import { extractErrorMessage } from './cors-headers';
 import {
   submitMidjourneyImagine,
@@ -233,22 +232,14 @@ export async function submitImageJobForProvider(
   if (!bindings.grsaiKey) {
     throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'GrsAI 线路未配置，请联系站长');
   }
-  try {
-    const taskId = await submitGrsaiImageJob(bindings.grsaiKey, bindings.grsaiBase, {
-      upstreamModel: params.upstreamModel,
-      prompt: params.prompt,
-      resolution: params.resolution,
-      size: params.size,
-      refImageUrls: params.refImageUrls
-    });
-    noteGrsaiSubmitOutcome(params.upstreamModel, 'success');
-    return { provider: 'grsai', taskId };
-  } catch (e) {
-    if (isGrsaiMaintenanceMessage(extractErrorMessage(e))) {
-      noteGrsaiSubmitOutcome(params.upstreamModel, 'maintenance');
-    }
-    throw e;
-  }
+  const taskId = await submitGrsaiImageJob(bindings.grsaiKey, bindings.grsaiBase, {
+    upstreamModel: params.upstreamModel,
+    prompt: params.prompt,
+    resolution: params.resolution,
+    size: params.size,
+    refImageUrls: params.refImageUrls
+  });
+  return { provider: 'grsai', taskId };
 }
 
 export function hasAnyImageUpstream(bindings: ImageUpstreamBindings): boolean {

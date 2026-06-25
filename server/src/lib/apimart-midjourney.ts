@@ -11,6 +11,13 @@ import {
   mjVersionFromUpstream,
   parseMjActionFromCustomId
 } from './midjourney-models';
+import { normalizeMjSpeed, type MjSpeedKey } from './apimart-upstream-cost';
+
+function blendPathForSpeed(speed: MjSpeedKey): string {
+  if (speed === 'fast') return 'blend-fast';
+  if (speed === 'turbo') return 'blend-turbo';
+  return MJ_ACTION_PATH.blend;
+}
 
 function apiBase(envBase?: string): string {
   return (envBase || 'https://api.apimart.ai').replace(/\/$/, '');
@@ -74,13 +81,15 @@ export type SubmitMidjourneyParams = {
 export async function submitMidjourneyBlend(
   apiKey: string,
   baseUrl: string | undefined,
-  imageUrls: string[]
+  imageUrls: string[],
+  speed?: string | null
 ): Promise<string> {
   const urls = imageUrls.filter(Boolean);
   if (urls.length < 2 || urls.length > 5) {
     throw new ApiError(400, 'VALIDATION_ERROR', '混图需要 2～5 张参考图');
   }
-  return postMj(apiKey, baseUrl, MJ_ACTION_PATH.blend, { image_urls: urls });
+  const path = blendPathForSpeed(normalizeMjSpeed(speed));
+  return postMj(apiKey, baseUrl, path, { image_urls: urls });
 }
 
 export async function submitMidjourneyImagine(
@@ -167,6 +176,64 @@ function normalizeButtons(raw: unknown): MjButtonPublic[] {
   return out;
 }
 
+function readMjTaskPayload(json: unknown): Record<string, unknown> | null {
+  if (!json || typeof json !== 'object') return null;
+  const root = json as Record<string, unknown>;
+  const data = root.data;
+  if (data && typeof data === 'object') return data as Record<string, unknown>;
+  return root;
+}
+
+function pickHttpUrl(value: unknown): string | null {
+  if (typeof value === 'string' && /^https?:\/\//i.test(value.trim())) return value.trim();
+  return null;
+}
+
+/** MJ 风格查询：grid_image_url（四宫格）+ image_urls（4 单图） */
+export async function fetchMidjourneyTaskGallery(
+  apiKey: string,
+  baseUrl: string | undefined,
+  taskId: string
+): Promise<{
+  composite: string | null;
+  tiles: string[];
+  buttons: MjButtonPublic[];
+} | null> {
+  const res = await fetch(`${apiBase(baseUrl)}/v1/midjourney/${encodeURIComponent(taskId)}`, {
+    headers: { Authorization: `Bearer ${apiKey}` }
+  });
+  if (!res.ok) return null;
+  let json: unknown = {};
+  try {
+    json = await res.json();
+  } catch {
+    return null;
+  }
+  const d = readMjTaskPayload(json);
+  if (!d) return null;
+  const composite =
+    pickHttpUrl(d.grid_image_url)
+    || pickHttpUrl(d.gridImageUrl)
+    || pickHttpUrl(d.image_url)
+    || null;
+  const rawTiles = Array.isArray(d.image_urls)
+    ? d.image_urls
+    : Array.isArray(d.imageUrls)
+      ? d.imageUrls
+      : [];
+  const tiles = rawTiles
+    .map((u) => pickHttpUrl(u))
+    .filter((u): u is string => !!u)
+    .slice(0, 4);
+  const buttons = Array.isArray(d.buttons)
+    ? normalizeButtons(d.buttons)
+    : d.result && typeof d.result === 'object' && Array.isArray((d.result as Record<string, unknown>).buttons)
+      ? normalizeButtons((d.result as Record<string, unknown>).buttons)
+      : [];
+  if (!composite && !tiles.length) return null;
+  return { composite, tiles, buttons };
+}
+
 /** 查询 MJ 任务详情（含可操作按钮） */
 export async function fetchMidjourneyTaskButtons(
   apiKey: string,
@@ -196,17 +263,26 @@ export async function fetchMidjourneyTaskButtons(
   return [];
 }
 
-/** imagine 四宫格默认操作（上游按钮未返回时的兜底） */
+/** 客户端不展示放大（四宫格已自动入库，截取放大与下载同图且仍计费） */
+export function filterMjButtonsForClient(buttons: MjButtonPublic[]): MjButtonPublic[] {
+  return (buttons || []).filter((b) => {
+    if (b.action === 'upscale') return false;
+    const custom = String(b.customId || '');
+    if (/upsample|upscale/i.test(custom)) return false;
+    const label = String(b.label || '');
+    if (/^放大\s*[1-4]?/.test(label)) return false;
+    return true;
+  });
+}
+
+/** imagine 四宫格默认操作（上游按钮未返回时的兜底；不含放大） */
 export function defaultGridMjButtons(): MjButtonPublic[] {
   const out: MjButtonPublic[] = [];
-  for (let i = 1; i <= 4; i += 1) {
-    out.push({ action: 'upscale', label: `放大 ${i}`, index: i });
-  }
   for (let i = 1; i <= 4; i += 1) {
     out.push({ action: 'variation', label: `变体 ${i}`, index: i });
   }
   out.push({ action: 'reroll', label: '重新生成' });
-  return out;
+  return filterMjButtonsForClient(out);
 }
 
 export function isMjUpstreamModel(upstream: string): boolean {

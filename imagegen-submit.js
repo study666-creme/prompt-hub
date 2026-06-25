@@ -164,7 +164,8 @@
         if (mjBlendMode) {
           gen = await global.PromptHubApi.mjBlend({
             refImageUrls: refUrls.slice(0, 5),
-            model
+            model,
+            speed: meta.mjParams?.speed || d().getImageGenMjSpeed?.() || 'relax'
           });
         } else {
           gen = await global.PromptHubApi.generateImage(genPayload);
@@ -225,10 +226,32 @@
 
         if (gen.data.status === 'completed' && gen.data.imageUrl) {
           if (gen.data.jobId) d().trackSessionGenJob(gen.data.jobId);
-          const mjParsed = gen.data.isMidjourney || mjBlendMode
-            ? d().resolveMjPollImages({ data: gen.data })
-            : null;
           if (gen.data.isMidjourney || mjBlendMode) {
+            let pollPayload = gen.data;
+            const mjParsed0 = d().resolveMjPollImages({ data: pollPayload });
+            if ((mjParsed0?.gallery?.length || 0) < 4 && gen.data.jobId) {
+              try {
+                const settled = await window.PromptHubApi.getGenerationJob(gen.data.jobId, { settle: true });
+                if (settled?.ok && settled.data?.status === 'completed') pollPayload = settled.data;
+              } catch (e) { /* ignore */ }
+            }
+            const mjParsed = d().resolveMjPollImages({ data: pollPayload });
+            if ((mjParsed?.gallery?.length || 0) < 4) {
+              void d().pollGenerationJobUntilDone(gen.data.jobId, pendingId, {
+                prompt,
+                model,
+                resolution,
+                quality,
+                size,
+                cost,
+                jobId: gen.data.jobId,
+                targetGroup: pendingJob.targetGroup,
+                targetTags: pendingJob.targetTags,
+                silentToast: batchOpts.silentToast,
+                fromInspirationDraw: !!batchOpts.fromInspirationDraw
+              });
+              return { ok: true, creditsCharged: cost };
+            }
             await d().saveMjToWarehouse({
               prompt: prompt || '[MJ 混图]',
               model,
@@ -242,10 +265,11 @@
               silentToast: batchOpts.silentToast,
               fromInspirationDraw: !!batchOpts.fromInspirationDraw,
               pendingId,
-              primary: mjParsed?.primary || gen.data.imageUrl,
-              gridUrls: mjParsed?.tiles?.length ? mjParsed.tiles : [gen.data.imageUrl],
-              composite: mjParsed?.composite,
-              buttons: gen.data.mjButtons
+              primary: mjParsed.primary || pollPayload.imageUrl,
+              gridUrls: mjParsed.tiles,
+              composite: mjParsed.composite,
+              gallery: mjParsed.gallery,
+              buttons: pollPayload.mjButtons
             });
           } else {
             await d().finishImageGenRun({

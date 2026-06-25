@@ -95,16 +95,11 @@
   }
 
   function getGenDiscountMultiplier() {
-    const tier = getMemberTier();
-    if (!tier || tier === 'lite') return 1;
-    return GEN_DISCOUNT_BY_TIER[tier] ?? 1;
+    return 1;
   }
 
   function getGenDiscountLabel() {
-    const tier = getMemberTier();
-    if (!tier || tier === 'lite') return '';
-    const map = { basic: '95折', standard: '9折', pro: '85折' };
-    return map[tier] || '';
+    return '';
   }
 
   function getPinLimit() {

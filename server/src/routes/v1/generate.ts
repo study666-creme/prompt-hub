@@ -16,13 +16,14 @@ import { processIthinkPendingSubmit } from '../../lib/ithink-submit';
 import { tryCompleteMookoFromStoredArchive } from '../../lib/mooko-submit';
 import type { JobRow } from '../../lib/generation-jobs';
 import { aspectRatiosForModel } from '../../lib/image-size-options';
-import { providerLabel, imageModelUiFamily } from '../../lib/image-models-catalog';
+import { providerLabel, imageModelUiFamily, sanitizePublicModelDescription } from '../../lib/image-models-catalog';
 import { isMidjourneyUpstream } from '../../lib/midjourney-models';
 import {
   submitMidjourneyAction,
   submitMidjourneyBlend,
   fetchMidjourneyTaskButtons,
   defaultGridMjButtons,
+  filterMjButtonsForClient,
   type SubmitMjActionParams
 } from '../../lib/apimart-midjourney';
 import type { MjActionKind } from '../../lib/midjourney-models';
@@ -32,8 +33,10 @@ import {
   finalizeFailedJob,
   jobPollNeedsBackgroundArchive,
   pollAndUpdateJob,
-  slowProviderProgressNote
+  slowProviderProgressNote,
+  syncMjImagesFromUpstream
 } from '../../lib/generation-jobs';
+import { buildMjGalleryUrls, mjGalleryUrlCount } from '../../lib/midjourney-models';
 import {
   recoverGenerationJobsToWarehouse,
   importExtraJobImagesToWarehouse,
@@ -58,7 +61,6 @@ import {
   isMembershipActive
 } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
-import { syncGrsaiUpstreamStatusesFromPublicPage } from '../../lib/grsai-upstream-status';
 import {
   isAcceptedRefImageInput,
   resolveGenerationRefUrls
@@ -101,6 +103,7 @@ const mjParamsSchema = z
     raw: z.boolean().optional(),
     draft: z.boolean().optional(),
     hd: z.boolean().optional(),
+    speed: z.enum(['relax', 'fast', 'turbo']).optional(),
     iw: z.number().min(0).max(3).optional(),
     quality: z.enum(['0.25', '0.5', '1', '2']).optional(),
     style: z.string().max(32).optional(),
@@ -134,7 +137,8 @@ const mjBlendSchema = z.object({
     .min(1)
     .max(64)
     .transform((s) => s.trim().toLowerCase())
-    .optional()
+    .optional(),
+  speed: z.enum(['relax', 'fast', 'turbo']).optional()
 });
 
 const mjActionSchema = z.object({
@@ -297,26 +301,31 @@ function publicModelPayload(
 ) {
   return listResolvedImageModels(settings, { publicList: true }).map((m) => {
     const resolutions = m.resolutions?.length ? m.resolutions : (['1k'] as const);
-    const costByResolution: Record<
-      string,
-      ReturnType<typeof computeImageGenerationCost>
-    > = {};
-    for (const res of resolutions) {
-      costByResolution[res] = computeImageGenerationCost(
-        settings,
-        m.id,
-        res,
-        tier,
-        memberActive
-      );
-    }
     const defaultRes = resolutions[0] || '1k';
-    const cost = costByResolution[defaultRes];
+    const costBySpeed = m.pricingBySpeed
+      ? (['relax', 'fast', 'turbo'] as const).reduce(
+          (acc, speed) => {
+            acc[speed] = computeImageGenerationCost(
+              settings,
+              m.id,
+              defaultRes,
+              tier,
+              memberActive,
+              { mjSpeed: speed }
+            );
+            return acc;
+          },
+          {} as Record<'relax' | 'fast' | 'turbo', ReturnType<typeof computeImageGenerationCost>>
+        )
+      : null;
+    const cost =
+      costBySpeed?.relax
+      ?? computeImageGenerationCost(settings, m.id, defaultRes, tier, memberActive);
     return {
       id: m.id,
       label: m.displayLabel,
       catalogLabel: m.label,
-      description: m.description,
+      description: sanitizePublicModelDescription(m.description),
       group: m.group,
       provider: m.provider,
       providerLabel: providerLabel(m.provider),
@@ -333,7 +342,9 @@ function publicModelPayload(
       resolutions: m.resolutions,
       pricingByResolution: m.pricingByResolution,
       creditsByResolution: m.pricingByResolution ? m.creditsByResolution : null,
-      costByResolution,
+      pricingBySpeed: m.pricingBySpeed,
+      creditsBySpeed: m.pricingBySpeed ? m.creditsBySpeed : null,
+      costBySpeed,
       creditsPerCall: m.effectiveBaseCredits,
       creditsBase: cost.listPrice,
       creditsFinal: cost.final,
@@ -359,9 +370,6 @@ function modelUnavailableMessage(resolved: NonNullable<
 generateRoutes.get('/models', async c => {
   const user = c.get('user');
   const admin = createAdminClient(c.env);
-  void syncGrsaiUpstreamStatusesFromPublicPage().catch((e) => {
-    console.warn('[generate] grsai status sync', e);
-  });
   const settings = await loadImageModelSettings(admin);
   const profile = await getOrCreateProfile(admin, user.id);
   const memberActive = isMembershipActive(profile);
@@ -398,12 +406,14 @@ generateRoutes.get('/cost', async c => {
   if (resolved.resolutions.length && !resolved.resolutions.includes(resolution as '1k')) {
     throw new ApiError(400, 'VALIDATION_ERROR', `该模型不支持 ${resolution.toUpperCase()} 输出`);
   }
+  const speed = c.req.query('speed') || '';
   const cost = computeImageGenerationCost(
     settings,
     model,
     resolution,
     profile.membership_tier,
-    memberActive
+    memberActive,
+    { mjSpeed: speed || null }
   );
   return c.json({
     ok: true,
@@ -458,7 +468,8 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       modelId,
       jobResolution,
       profile.membership_tier,
-      memberActive
+      memberActive,
+      { mjSpeed: mjParams?.speed || null }
     );
   const final = roundCredits(rawFinal);
 
@@ -926,6 +937,21 @@ generateRoutes.post('/mj-action', rateLimit(300, 60_000), async (c) => {
   if (!parsed.success) {
     throw new ApiError(400, 'VALIDATION_ERROR', '请填写有效的 Midjourney 操作参数');
   }
+  if (parsed.data.action === 'upscale') {
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      '放大功能已关闭：四宫格 4 张已自动保存，请直接切换或下载，无需付费截取同一张图'
+    );
+  }
+  const customId = parsed.data.customId || '';
+  if (/upsample|upscale/i.test(customId)) {
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      '放大功能已关闭：普通放大只是从四宫格截取，与已保存图相同，且仍会扣积分'
+    );
+  }
 
   const admin = createAdminClient(c.env);
   let profile = await syncMembershipCredits(admin, user.id);
@@ -963,8 +989,24 @@ generateRoutes.post('/mj-action', rateLimit(300, 60_000), async (c) => {
   }
 
   const jobResolution = '1k';
+  const parentMjSpeed =
+    typeof parentMeta.mjSpeed === 'string'
+      ? parentMeta.mjSpeed
+      : parentMeta.mjParams &&
+          typeof parentMeta.mjParams === 'object' &&
+          parentMeta.mjParams !== null &&
+          'speed' in parentMeta.mjParams
+        ? String((parentMeta.mjParams as { speed?: string }).speed || '')
+        : null;
   const { final: rawFinal, base, discountLabel, modelLabel, refundOnViolation, violationNotice } =
-    computeImageGenerationCost(settings, modelId, jobResolution, profile.membership_tier, memberActive);
+    computeImageGenerationCost(
+      settings,
+      modelId,
+      jobResolution,
+      profile.membership_tier,
+      memberActive,
+      { mjSpeed: parentMjSpeed }
+    );
   const final = roundCredits(rawFinal);
   const balance = spendableCredits(profile);
   if (balance < final) {
@@ -1005,6 +1047,7 @@ generateRoutes.post('/mj-action', rateLimit(300, 60_000), async (c) => {
         mjAction: parsed.data.action,
         mjParentJobId: parsed.data.parentJobId,
         mjParentTaskId: parentTaskId,
+        mjSpeed: parentMjSpeed || 'relax',
         size: typeof parentMeta.size === 'string' ? parentMeta.size : null
       }
     })
@@ -1023,7 +1066,7 @@ generateRoutes.post('/mj-action', rateLimit(300, 60_000), async (c) => {
       final,
       'image_generation',
       job.id,
-      { model: modelId, mjAction: parsed.data.action, base, discountLabel }
+      { model: modelId, mjAction: parsed.data.action, mjSpeed: parentMjSpeed, base, discountLabel }
     );
     profile = debitedResult.profile;
     debitSplit = debitedResult.split;
@@ -1068,6 +1111,7 @@ generateRoutes.post('/mj-action', rateLimit(300, 60_000), async (c) => {
     mjAction: parsed.data.action,
     mjParentJobId: parsed.data.parentJobId,
     mjParentTaskId: parentTaskId,
+    mjSpeed: parentMjSpeed || 'relax',
     debitSplit,
     fastSubmitState: 'queued'
   };
@@ -1143,8 +1187,16 @@ generateRoutes.post('/mj-blend', rateLimit(300, 60_000), async (c) => {
   }
 
   const jobResolution = '1k';
+  const blendSpeed = parsed.data.speed || null;
   const { final: rawFinal, base, discountLabel, modelLabel, refundOnViolation, violationNotice } =
-    computeImageGenerationCost(settings, modelId, jobResolution, profile.membership_tier, memberActive);
+    computeImageGenerationCost(
+      settings,
+      modelId,
+      jobResolution,
+      profile.membership_tier,
+      memberActive,
+      { mjSpeed: blendSpeed }
+    );
   const final = roundCredits(rawFinal);
   const balance = spendableCredits(profile);
   if (balance < final) {
@@ -1182,7 +1234,8 @@ generateRoutes.post('/mj-blend', rateLimit(300, 60_000), async (c) => {
         refundOnViolation,
         violationNotice,
         isMidjourney: true,
-        mjAction: 'blend'
+        mjAction: 'blend',
+        mjSpeed: blendSpeed || 'relax'
       }
     })
     .select('id')
@@ -1200,7 +1253,7 @@ generateRoutes.post('/mj-blend', rateLimit(300, 60_000), async (c) => {
       final,
       'image_generation',
       job.id,
-      { model: modelId, mjAction: 'blend', base, discountLabel }
+      { model: modelId, mjAction: 'blend', mjSpeed: blendSpeed, base, discountLabel }
     );
     profile = debitedResult.profile;
     debitSplit = debitedResult.split;
@@ -1232,6 +1285,7 @@ generateRoutes.post('/mj-blend', rateLimit(300, 60_000), async (c) => {
     violationNotice,
     isMidjourney: true,
     mjAction: 'blend',
+    mjSpeed: blendSpeed || 'relax',
     debitSplit,
     fastSubmitState: 'queued'
   };
@@ -1244,7 +1298,8 @@ generateRoutes.post('/mj-blend', rateLimit(300, 60_000), async (c) => {
         const taskId = await submitMidjourneyBlend(
           upstream.apimartKey!,
           upstream.apimartBase,
-          refUrls.slice(0, 5)
+          refUrls.slice(0, 5),
+          blendSpeed
         );
         await admin
           .from('generation_requests')
@@ -1464,6 +1519,62 @@ generateRoutes.get('/jobs/:jobId', async c => {
     ? await Promise.all(extraImageUrls.map((u) => resolveJobImageUrlForClient(c, u)))
     : undefined;
 
+  let responseMeta: Record<string, unknown> = { ...updatedMeta };
+  if (meta.isMidjourney === true && liveStatus === 'completed') {
+    const mjTaskId =
+      typeof meta.upstreamTaskId === 'string'
+        ? meta.upstreamTaskId
+        : typeof meta.apimartTaskId === 'string'
+          ? meta.apimartTaskId
+          : null;
+    const curGalleryCount = mjGalleryUrlCount(responseMeta);
+    const hasMjComposite =
+      typeof responseMeta.mjCompositeUrl === 'string' && !!responseMeta.mjCompositeUrl.trim();
+    const needsMjGallerySync = !hasMjComposite || curGalleryCount < 5;
+    if (mjTaskId && upstream.apimartKey && (settle || needsMjGallerySync)) {
+      try {
+        await syncMjImagesFromUpstream(
+          admin,
+          liveJob as JobRow,
+          upstream,
+          mjTaskId,
+          { settle: !!settle || needsMjGallerySync }
+        );
+        const { data: mjFresh } = await admin
+          .from('generation_requests')
+          .select('meta, result_image_url')
+          .eq('id', jobId)
+          .maybeSingle();
+        if (mjFresh?.meta && typeof mjFresh.meta === 'object') {
+          responseMeta = mjFresh.meta as Record<string, unknown>;
+        }
+        if (mjFresh?.result_image_url) {
+          responseImageUrl = await resolveJobImageUrlForClient(
+            c,
+            mjFresh.result_image_url as string
+          );
+        }
+      } catch (e) {
+        console.warn('[generate] mj gallery sync failed', jobId, e);
+      }
+    }
+  }
+
+  let mjGalleryUrlsOut: string[] | undefined;
+  if (meta.isMidjourney === true) {
+    const rawGallery = Array.isArray(responseMeta.mjGalleryUrls)
+      ? (responseMeta.mjGalleryUrls as string[]).filter(Boolean)
+      : buildMjGalleryUrls(
+          typeof responseMeta.mjCompositeUrl === 'string' ? responseMeta.mjCompositeUrl : null,
+          Array.isArray(responseMeta.mjGridUrls) ? (responseMeta.mjGridUrls as string[]) : []
+        );
+    if (rawGallery.length) {
+      mjGalleryUrlsOut = await Promise.all(
+        rawGallery.map((u) => resolveJobImageUrlForClient(c, u))
+      );
+    }
+  }
+
   let mjButtonsOut = Array.isArray(meta.mjButtons) ? meta.mjButtons : undefined;
   if (
     meta.isMidjourney === true
@@ -1484,7 +1595,7 @@ generateRoutes.get('/jobs/:jobId', async c => {
           upstream.apimartBase,
           mjTaskId
         );
-        mjButtonsOut = fetched.length ? fetched : defaultGridMjButtons();
+        mjButtonsOut = filterMjButtonsForClient(fetched.length ? fetched : defaultGridMjButtons());
         if (mjButtonsOut.length) {
           await admin
             .from('generation_requests')
@@ -1492,9 +1603,13 @@ generateRoutes.get('/jobs/:jobId', async c => {
             .eq('id', jobId);
         }
       } catch {
-        mjButtonsOut = defaultGridMjButtons();
+        mjButtonsOut = filterMjButtonsForClient(defaultGridMjButtons());
       }
     }
+  }
+
+  if (mjButtonsOut?.length) {
+    mjButtonsOut = filterMjButtonsForClient(mjButtonsOut);
   }
 
   return c.json({
@@ -1518,9 +1633,10 @@ generateRoutes.get('/jobs/:jobId', async c => {
             ? meta.apimartTaskId
             : undefined,
       mjButtons: mjButtonsOut,
-      mjGridUrls: Array.isArray(updatedMeta.mjGridUrls) ? updatedMeta.mjGridUrls : undefined,
+      mjGridUrls: Array.isArray(responseMeta.mjGridUrls) ? responseMeta.mjGridUrls : undefined,
       mjCompositeUrl:
-        typeof updatedMeta.mjCompositeUrl === 'string' ? updatedMeta.mjCompositeUrl : undefined,
+        typeof responseMeta.mjCompositeUrl === 'string' ? responseMeta.mjCompositeUrl : undefined,
+      mjGalleryUrls: mjGalleryUrlsOut?.length ? mjGalleryUrlsOut : undefined,
       mjAction: typeof meta.mjAction === 'string' ? meta.mjAction : undefined,
       mjParentJobId: typeof meta.mjParentJobId === 'string' ? meta.mjParentJobId : undefined
     }

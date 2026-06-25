@@ -5,9 +5,18 @@ import {
   getCatalogEntry,
   normalizeImageModelId,
   providerLabel,
-  type ImageModelCatalogEntry
+  type ImageModelCatalogEntry,
+  type MjSpeedKey
 } from './image-models-catalog';
-import { overlayGrsaiUpstreamStatus } from './grsai-upstream-status';
+import {
+  buildUpstreamCostLines,
+  formatUpstreamCostCell,
+  normalizeMjSpeed
+} from './apimart-upstream-cost';
+import {
+  buildGrsaiUpstreamCostLines,
+  formatGrsaiUpstreamCostCell
+} from './grsai-upstream-cost';
 import type { Profile } from './supabase';
 import { applyMemberCreditDiscount, clampCreditsValue, roundCredits } from './credit-math';
 import { membershipGenDiscountLabel, membershipGenMultiplier } from './supabase';
@@ -28,6 +37,8 @@ export type ImageModelOverride = {
   creditsPerCall?: number;
   /** Apimart GPT Image 2：按分辨率定价 */
   creditsByResolution?: Partial<Record<ImageResolutionKey, number>>;
+  /** MJ Imagine：按 relax / fast / turbo 定价 */
+  creditsBySpeed?: Partial<Record<MjSpeedKey, number>>;
   /** 100 = 原价；80 = 该模型 8 折 */
   discountPercent?: number;
   sortOrder?: number;
@@ -60,6 +71,9 @@ export type ResolvedImageModel = ImageModelCatalogEntry & {
   creditsByResolution: Partial<Record<ImageResolutionKey, number>> | null;
   effectiveCreditsByResolution: Partial<Record<ImageResolutionKey, number>> | null;
   pricingByResolution: boolean;
+  creditsBySpeed: Partial<Record<MjSpeedKey, number>> | null;
+  effectiveCreditsBySpeed: Partial<Record<MjSpeedKey, number>> | null;
+  pricingBySpeed: boolean;
   discountPercent: number;
   effectiveBaseCredits: number;
   fixedPrice: boolean;
@@ -125,6 +139,22 @@ function clampCredits(n: unknown, fallback: number): number {
   return clampCreditsValue(v);
 }
 
+function sanitizeCreditsBySpeed(
+  raw: unknown,
+  catalog: ImageModelCatalogEntry
+): Partial<Record<MjSpeedKey, number>> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const src = raw as Record<string, unknown>;
+  const speeds: MjSpeedKey[] = ['relax', 'fast', 'turbo'];
+  const out: Partial<Record<MjSpeedKey, number>> = {};
+  for (const speed of speeds) {
+    if (src[speed] == null) continue;
+    const def = catalog.defaultCreditsBySpeed?.[speed] ?? catalog.defaultCredits;
+    out[speed] = clampCredits(src[speed], def);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 function sanitizeCreditsByResolution(
   raw: unknown,
   catalog: ImageModelCatalogEntry
@@ -181,6 +211,11 @@ export function mergeImageModelSettings(
         const catalog = getCatalogEntry(id);
         if (!catalog || !patch.creditsByResolution) return undefined;
         return sanitizeCreditsByResolution(patch.creditsByResolution, catalog);
+      })(),
+      creditsBySpeed: (() => {
+        const catalog = getCatalogEntry(id);
+        if (!catalog || !patch.creditsBySpeed) return undefined;
+        return sanitizeCreditsBySpeed(patch.creditsBySpeed, catalog);
       })(),
       discountPercent:
         patch.discountPercent != null ? clampPercent(patch.discountPercent, 100) : undefined,
@@ -321,13 +356,16 @@ export function resolveImageModelConfig(
   const catalog = getCatalogEntry(modelId);
   if (!catalog) return null;
   const override = settings.models[catalog.id] || {};
-  const status = resolveModelStatus(override);
+  let status = resolveModelStatus(override);
   const displayLabel = sanitizeDisplayName(override.displayName) || catalog.label;
   const enabled = status === 'active';
   const visible = status !== 'offline';
   const statusNotice =
-    status === 'maintenance' ? '该模型维护中，请稍后再试或换用其他模型' : null;
+    status === 'maintenance'
+      ? '该模型维护中，请稍后再试或换用其他模型'
+      : null;
   const pricingByResolution = catalog.pricingByResolution === true;
+  const pricingBySpeed = catalog.pricingBySpeed === true;
   let creditsByResolution: Partial<Record<ImageResolutionKey, number>> | null = null;
   if (pricingByResolution) {
     creditsByResolution = {};
@@ -336,9 +374,29 @@ export function resolveImageModelConfig(
       creditsByResolution[res] = clampCredits(override.creditsByResolution?.[res], def);
     }
   }
-  const creditsPerCall = pricingByResolution
-    ? creditsByResolution!['1k'] ?? catalog.defaultCredits
-    : clampCredits(override.creditsPerCall, catalog.defaultCredits);
+  let creditsBySpeed: Partial<Record<MjSpeedKey, number>> | null = null;
+  if (pricingBySpeed) {
+    creditsBySpeed = {};
+    const hasSpeedOverride =
+      override.creditsBySpeed && Object.keys(override.creditsBySpeed).length > 0;
+    const legacyFlat =
+      !hasSpeedOverride && override.creditsPerCall != null ? override.creditsPerCall : null;
+    for (const speed of ['relax', 'fast', 'turbo'] as MjSpeedKey[]) {
+      const def = catalog.defaultCreditsBySpeed?.[speed] ?? catalog.defaultCredits;
+      if (override.creditsBySpeed?.[speed] != null) {
+        creditsBySpeed[speed] = clampCredits(override.creditsBySpeed[speed], def);
+      } else if (legacyFlat != null) {
+        creditsBySpeed[speed] = clampCredits(legacyFlat, def);
+      } else {
+        creditsBySpeed[speed] = clampCredits(undefined, def);
+      }
+    }
+  }
+  const creditsPerCall = pricingBySpeed
+    ? creditsBySpeed!.relax ?? catalog.defaultCredits
+    : pricingByResolution
+      ? creditsByResolution!['1k'] ?? catalog.defaultCredits
+      : clampCredits(override.creditsPerCall, catalog.defaultCredits);
   const discountPercent = clampPercent(override.discountPercent, 100);
   const fixedPrice = override.fixedPrice === true;
   const memberDiscountCapPercent =
@@ -363,16 +421,27 @@ export function resolveImageModelConfig(
         : roundCredits(raw * modelMult * globalMult);
     }
   }
-  const listBase = pricingByResolution
-    ? effectiveCreditsByResolution!['1k'] ?? catalog.defaultCredits
-    : creditsPerCall;
+  let effectiveCreditsBySpeed: Partial<Record<MjSpeedKey, number>> | null = null;
+  if (pricingBySpeed && creditsBySpeed) {
+    effectiveCreditsBySpeed = {};
+    for (const speed of ['relax', 'fast', 'turbo'] as MjSpeedKey[]) {
+      const raw = creditsBySpeed[speed] ?? catalog.defaultCredits;
+      effectiveCreditsBySpeed[speed] = fixedPrice
+        ? raw
+        : roundCredits(raw * modelMult * globalMult);
+    }
+  }
+  const listBase = pricingBySpeed
+    ? effectiveCreditsBySpeed!.relax ?? catalog.defaultCredits
+    : pricingByResolution
+      ? effectiveCreditsByResolution!['1k'] ?? catalog.defaultCredits
+      : creditsPerCall;
   const effectiveBaseCredits = fixedPrice
     ? listBase
-    : pricingByResolution
+    : pricingBySpeed || pricingByResolution
       ? listBase
       : roundCredits(creditsPerCall * modelMult * globalMult);
-  return overlayGrsaiUpstreamStatus(
-    {
+  return {
       ...catalog,
       displayLabel,
       status,
@@ -383,6 +452,9 @@ export function resolveImageModelConfig(
       creditsByResolution,
       effectiveCreditsByResolution,
       pricingByResolution,
+      creditsBySpeed,
+      effectiveCreditsBySpeed,
+      pricingBySpeed,
       discountPercent,
       effectiveBaseCredits,
       fixedPrice,
@@ -391,9 +463,7 @@ export function resolveImageModelConfig(
       violationNotice: refundOnViolation
         ? null
         : '该模型触发内容审核（违规）时不返还积分，请谨慎选择'
-    },
-    settings
-  );
+  };
 }
 
 export function listResolvedImageModels(
@@ -420,7 +490,8 @@ export function computeImageGenerationCost(
   modelId: string,
   resolution: string,
   tier: Profile['membership_tier'],
-  memberActive: boolean
+  memberActive: boolean,
+  opts?: { mjSpeed?: string | null }
 ): {
   base: number;
   final: number;
@@ -444,7 +515,8 @@ export function computeImageGenerationCost(
       tier,
       memberActive,
       resolution,
-      settings.globalDiscountPercent
+      settings.globalDiscountPercent,
+      opts?.mjSpeed
     );
   }
   return computeFromResolved(
@@ -452,11 +524,23 @@ export function computeImageGenerationCost(
     tier,
     memberActive,
     resolution,
-    settings.globalDiscountPercent
+    settings.globalDiscountPercent,
+    opts?.mjSpeed
   );
 }
 
-function resolveModelBaseCredits(model: ResolvedImageModel, resolution: string): number {
+function resolveModelBaseCredits(
+  model: ResolvedImageModel,
+  resolution: string,
+  mjSpeed?: string | null
+): number {
+  if (model.pricingBySpeed) {
+    const speed = normalizeMjSpeed(mjSpeed);
+    if (model.effectiveCreditsBySpeed?.[speed] != null) {
+      return model.effectiveCreditsBySpeed[speed]!;
+    }
+    return model.effectiveBaseCredits;
+  }
   const res = (['1k', '2k', '4k'].includes(resolution) ? resolution : '1k') as ImageResolutionKey;
   if (model.pricingByResolution && model.effectiveCreditsByResolution?.[res] != null) {
     return model.effectiveCreditsByResolution[res]!;
@@ -465,7 +549,16 @@ function resolveModelBaseCredits(model: ResolvedImageModel, resolution: string):
 }
 
 /** 管理后台「售价积分」原价（未乘模型/全场折扣） */
-function resolveModelListPriceCredits(model: ResolvedImageModel, resolution: string): number {
+function resolveModelListPriceCredits(
+  model: ResolvedImageModel,
+  resolution: string,
+  mjSpeed?: string | null
+): number {
+  if (model.pricingBySpeed) {
+    const speed = normalizeMjSpeed(mjSpeed);
+    if (model.creditsBySpeed?.[speed] != null) return model.creditsBySpeed[speed]!;
+    return model.creditsPerCall;
+  }
   const res = (['1k', '2k', '4k'].includes(resolution) ? resolution : '1k') as ImageResolutionKey;
   if (model.pricingByResolution && model.creditsByResolution?.[res] != null) {
     return model.creditsByResolution[res]!;
@@ -495,25 +588,11 @@ function computePromoCredits(
 function computeMemberCreditsFromList(
   listPrice: number,
   model: ResolvedImageModel,
-  tier: Profile['membership_tier'],
-  memberActive: boolean
+  _tier: Profile['membership_tier'],
+  _memberActive: boolean
 ): { price: number; mult: number; label: string | null } {
-  if (!memberActive || !tier || model.fixedPrice) {
-    return { price: listPrice, mult: 1, label: null };
-  }
-  let mult = membershipGenMultiplier(tier);
-  if (model.memberDiscountCapPercent != null && mult < 1) {
-    const floor = model.memberDiscountCapPercent / 100;
-    mult = Math.max(mult, floor);
-  }
-  if (mult >= 1) {
-    return { price: listPrice, mult: 1, label: null };
-  }
-  return {
-    price: applyMemberCreditDiscount(listPrice, mult),
-    mult,
-    label: membershipGenDiscountLabel(tier)
-  };
+  void model;
+  return { price: listPrice, mult: 1, label: null };
 }
 
 function computeFromResolved(
@@ -521,9 +600,10 @@ function computeFromResolved(
   tier: Profile['membership_tier'],
   memberActive: boolean,
   resolution = '1k',
-  globalDiscountPercent = 100
+  globalDiscountPercent = 100,
+  mjSpeed?: string | null
 ) {
-  const listPrice = resolveModelListPriceCredits(model, resolution);
+  const listPrice = resolveModelListPriceCredits(model, resolution, mjSpeed);
   const promoPrice = computePromoCredits(listPrice, model, globalDiscountPercent);
   const member = computeMemberCreditsFromList(listPrice, model, tier, memberActive);
 
@@ -584,10 +664,12 @@ export function adminModelRows(settings: ImageModelPricingSettings) {
   return IMAGE_MODEL_CATALOG.map((catalog) => {
     const resolved = resolveImageModelConfig(catalog.id, settings)!;
     const override = settings.models[catalog.id] || {};
+    const costLines = buildUpstreamCostLines(catalog);
     return {
       id: catalog.id,
       provider: catalog.provider,
       providerLabel: providerLabel(catalog.provider),
+      uiFamily: catalog.uiFamily,
       upstream: catalog.upstream,
       label: catalog.label,
       displayName: resolved.displayLabel,
@@ -597,6 +679,11 @@ export function adminModelRows(settings: ImageModelPricingSettings) {
       group: catalog.group,
       description: catalog.description,
       upstreamPoints: catalog.upstreamPoints,
+      upstreamCostText:
+        catalog.provider === 'grsai'
+          ? formatGrsaiUpstreamCostCell(buildGrsaiUpstreamCostLines(catalog))
+          : formatUpstreamCostCell(catalog.provider, costLines),
+      upstreamCostLines: costLines,
       refundOnViolation: resolved.refundOnViolation,
       resolutions: catalog.resolutions,
       enabled: resolved.enabled,
@@ -605,6 +692,9 @@ export function adminModelRows(settings: ImageModelPricingSettings) {
       creditsByResolution: resolved.creditsByResolution,
       effectiveCreditsByResolution: resolved.effectiveCreditsByResolution,
       pricingByResolution: resolved.pricingByResolution,
+      creditsBySpeed: resolved.creditsBySpeed,
+      effectiveCreditsBySpeed: resolved.effectiveCreditsBySpeed,
+      pricingBySpeed: resolved.pricingBySpeed,
       discountPercent: resolved.discountPercent,
       effectiveBaseCredits: resolved.effectiveBaseCredits,
       fixedPrice: resolved.fixedPrice,

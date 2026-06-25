@@ -49,6 +49,9 @@ foreach ($path in $files) {
       $t = [regex]::Replace($t, "($esc\?v=)\d{8}[a-z]", "`${1}$new")
     }
     # pack-*.js 不带 ?v=（verify-pack-contract）；缓存靠 __APP_BUILD__ + sw.js
+  } elseif ($path -like '*admin.html') {
+    $t = [regex]::Replace($t, "__ADMIN_BUILD__\s*=\s*'[^']+'", "__ADMIN_BUILD__ = '$new'")
+    $t = [regex]::Replace($t, 'admin\.js\?v=[^"\s>]+', "admin.js?v=$new")
   } elseif ($path -like '*sw.js') {
     $t = [regex]::Replace($t, "const CACHE = 'prompt-hub-v[^']+';", "const CACHE = 'prompt-hub-v$new';")
   } else {

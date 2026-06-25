@@ -24,42 +24,33 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · Feed 滚动 + 生图 Tab）
+## 当前部署阶段（2026-06-07 · MJ 全量 gallery 一次性入库）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260625p` · https://prompt-hubs.com |
-| **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
+| **Pages** | build `20260626k` · https://prompt-hubs.com |
+| **Worker** | `prompt-hub-api` · `a0570e5e` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
 ### 已打通
 
-- ✅ **首屏带宽**：卡片库 ~889 kB、社区 ~865 kB（2026-06 用户 Network 验收）
-- ✅ **P0 全站图片/Feed**：模块化 ReferenceError 热修
-- ✅ **生图仓库 / Feed**：grid-only + sign-batch；Tab 切换强制重绘
-- ✅ **MediaPipeline + SyncOrchestrator**（pull/Feed 刷新已收编至编排器）
-- ✅ 新图走 **R2**（`MEDIA_STORAGE_MODE=r2`）
-- ✅ **社区分页 / 生图 Tab 错乱 / 侧栏点图后滚动对抗**（`20260625p`）
-
-### 架构优化进度
-
-| 阶段 | 内容 | 进度 |
-|------|------|------|
-| 1 图片管线 | MediaPipeline 全站 Feed/卡片库/生图/资产 | 完成 |
-| 2 云同步解耦 | SyncOrchestrator + skipImageUpload | 完成 |
-| 3 模块化 | 12 个 imagegen 子模块 + features-draft ~9.3k 行 | 完成 |
+- ✅ **Apimart MJ**（4 模型 · relax/fast/turbo · 单卡最多 5 张：四宫格 + 4 单图）
+- ✅ **MJ 全量入库**：API 返回 `mjGalleryUrls`（最多 5 张）；满 4 张单图才标记完成/入库
+- ✅ **旧卡修复**：打开预览或 gallery 重复/缺图时自动从任务 API 重新归档
+- ✅ 多图槽位独立 storage；翻页按索引解析，不再一律回退封面
 
 ### 已知问题 / 下一步
 
-1. MemFire 迁移（7 月初 final dump）
-2. 部分旧第三方外链 404、偶发 502
-3. 运营后台 UI 持续优化（侧栏导航、概览统计色条、刷新按钮）
-4. R2 历史图本机 `backups/card-images` → 同步脚本
+1. 用户需 **Ctrl+Shift+R** 强刷（build `20260626k`）
+2. 旧 MJ 卡：点开「作品详情」触发自动补图；上游链接过期则无法补四宫格
+3. MemFire 迁移（7 月初 final dump）
 
 ### 部署
 
 ```powershell
-cd d:\prompt-hub
+cd d:\prompt-hub\server
+.\deploy.ps1
+cd ..
 .\deploy-pages.ps1
 ```
 
@@ -67,6 +58,7 @@ cd d:\prompt-hub
 
 - 邮箱 `2705367723@qq.com`
 - `author_id`：`ab5c77dc-570e-4af7-ac38-2d311be96244`
+- 万相/Flux 自测：`server/scripts/test-generate-wan-production.mjs`（单次提交 + 慢速轮询）
 
 ---
 

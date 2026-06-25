@@ -18,6 +18,7 @@ import {
   verifyMediaAccessToken,
   gridPathFromPrimary
 } from '../../lib/media-cdn';
+import { deleteOwnedCardImageIfUnreferenced } from '../../lib/admin-media-refs';
 import { createAdminClient } from '../../lib/supabase';
 import { uploadCardImage } from '../../lib/r2-storage';
 import { rateLimit } from '../../middleware/rate-limit';
@@ -347,4 +348,41 @@ mediaRoutes.get('/fetch', async c => {
       'Access-Control-Allow-Origin': '*'
     }
   });
+});
+
+const deleteOwnedBodySchema = z.object({
+  imageRef: z.string().max(800),
+  excludeCardId: z.string().max(128).optional(),
+  allowGenerated: z.boolean().optional(),
+  force: z.boolean().optional(),
+  genJobId: z.string().max(128).optional()
+});
+
+/** 删卡/换图：force=true 时直接删 R2（卡片库已确认）；否则仅无其它引用时删 */
+mediaRoutes.post('/delete-owned', async c => {
+  const user = c.get('user');
+  const parsed = deleteOwnedBodySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '请求参数无效');
+  }
+  const admin = createAdminClient(c.env);
+  try {
+    const data = await deleteOwnedCardImageIfUnreferenced(
+      admin,
+      c.env,
+      user.id,
+      parsed.data.imageRef,
+      {
+        excludeCardId: parsed.data.excludeCardId,
+        allowGenerated: parsed.data.allowGenerated,
+        force: parsed.data.force,
+        genJobId: parsed.data.genJobId
+      }
+    );
+    return c.json({ ok: true, data });
+  } catch (e) {
+    const msg = String((e as Error)?.message || e);
+    if (/无权/.test(msg)) throw new ApiError(403, 'FORBIDDEN', msg);
+    throw e;
+  }
 });

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../env';
-import { deleteStoragePaths, listBucketOrphanFiles } from '../../lib/admin-media-refs';
+import { deleteStoragePaths, invalidateOrphanScanCache, listBucketOrphanFiles, restoreCardFromOrphanGroup } from '../../lib/admin-media-refs';
 import {
   adminDeleteCommunityPost,
   adminUnpublishCommunityPost,
@@ -68,9 +68,47 @@ adminCommunityRoutes.get('/posts', async (c) => {
 adminCommunityRoutes.get('/bucket-orphans', async (c) => {
   const limit = Number(c.req.query('limit') || 40);
   const offset = Number(c.req.query('offset') || 0);
+  const riskQ = String(c.req.query('risk') || '').trim();
+  const refresh = c.req.query('refresh') === '1';
+  let risk: 'safe' | 'recoverable' | 'relink' | 'all' | undefined;
+  if (riskQ === 'safe' || riskQ === 'recoverable' || riskQ === 'relink' || riskQ === 'all') {
+    risk = riskQ;
+  }
   const admin = createAdminClient(c.env);
-  const data = await listBucketOrphanFiles(admin, apiOriginFromRequest(c), { limit, offset });
+  const data = await listBucketOrphanFiles(admin, c.env, apiOriginFromRequest(c), {
+    limit,
+    offset,
+    risk,
+    refresh,
+    executionCtx: c.executionCtx
+  });
   return c.json({ ok: true, data });
+});
+
+adminCommunityRoutes.post('/bucket-orphans/restore-card', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    primaryPath?: string;
+    risk?: string;
+    recoverPostId?: string | null;
+    recoverCardId?: string | null;
+    recoverUserId?: string | null;
+  };
+  const primaryPath = String(body.primaryPath || '').trim();
+  const risk = String(body.risk || '').trim();
+  if (!primaryPath) throw new ApiError(400, 'VALIDATION_ERROR', '请提供 primaryPath');
+  if (risk !== 'recoverable' && risk !== 'relink') {
+    throw new ApiError(400, 'VALIDATION_ERROR', '仅支持 recoverable 或 relink');
+  }
+  const admin = createAdminClient(c.env);
+  const result = await restoreCardFromOrphanGroup(admin, {
+    primaryPath,
+    risk,
+    recoverPostId: body.recoverPostId,
+    recoverCardId: body.recoverCardId,
+    recoverUserId: body.recoverUserId
+  });
+  await invalidateOrphanScanCache();
+  return c.json({ ok: true, data: result });
 });
 
 adminCommunityRoutes.post('/bucket-orphans/delete', async (c) => {

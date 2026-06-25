@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260625p';
+    window.__APP_BUILD__ = '20260626n';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -104,11 +104,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260625p">
-  <link rel="stylesheet" href="styles-theme.css?v=20260625p">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260625p">
+  <link rel="stylesheet" href="styles.css?v=20260626n">
+  <link rel="stylesheet" href="styles-theme.css?v=20260626n">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260626n">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260625p">
+  <link rel="stylesheet" href="styles-features.css?v=20260626n">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="pack-prelude.js"></script>
 </head>
@@ -612,7 +612,7 @@
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status" aria-live="polite"></p>
       <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260625j</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260625a</p>
     </div>
   </nav>
 
@@ -848,6 +848,11 @@
         <img id="previewImage" style="display:none;" onclick="if(imageData) openLightbox(imageData)">
         <button type="button" class="remove-image-btn" id="removeImageBtn" onclick="event.stopPropagation(); removeImage()" title="从编辑区去掉图片（须保存后才真正删除）" aria-label="去掉图片"><span aria-hidden="true">×</span></button>
         <input type="file" id="fileInput" accept="image/*" style="display:none;">
+      </div>
+      <div class="panel-gallery-nav hidden" id="panelGalleryNav" aria-label="卡片多图切换">
+        <button type="button" class="panel-gallery-nav-btn" id="panelGalleryPrev" aria-label="上一张">‹</button>
+        <span class="panel-gallery-nav-counter" id="panelGalleryCounter">1 / 1</span>
+        <button type="button" class="panel-gallery-nav-btn" id="panelGalleryNext" aria-label="下一张">›</button>
       </div>
       <div class="panel-image-tools" id="panelImageTools">
         <button type="button" class="panel-image-tool-btn panel-image-tool-toggle" id="cardUploadOriginalToggle" aria-pressed="false">上传原图：关</button>
@@ -1105,7 +1110,7 @@
                 </span>
               </div>
               <div class="credit-ledger-panel hidden" id="creditLedgerPanel" aria-live="polite"></div>
-              <p class="imagegen-credits-note">会员订阅限时优惠（原价划线 · 折后价见充值页）；生图享积分折扣。购买请点「充值」。</p>
+              <p class="imagegen-credits-note">会员订阅限时优惠（原价划线 · 折后价见充值页）。购买请点「充值」。</p>
             </div>
             <div class="imagegen-shared-params" id="imageGenSharedParams">
             <p class="imagegen-promo-notice imagegen-promo-notice--model hidden" id="imageGenPromoNotice" aria-live="polite"></p>
@@ -1121,11 +1126,29 @@
                 <button type="button" class="imagegen-mj-mode-tab" data-mj-mode="blend" role="tab" aria-selected="false">混图</button>
               </div>
               <p class="panel-hint imagegen-mj-blend-hint hidden" id="imageGenMjBlendHint">
-                混图：使用<strong>参考图框</strong>内 2～5 张图融合，提示词可选。生成后可在预览中逐张切换并放大/变体。
+                混图：使用<strong>参考图框</strong>内 2～5 张图融合，提示词可选。生成后可在预览中逐张切换查看。
               </p>
+              <p class="imagegen-mj-toggle-section-label">出图速度 <span class="imagegen-mj-tip" title="Relax 排队最慢但积分最低；Fast/Turbo 优先出图">?</span></p>
+              <div class="imagegen-mj-speed-group" role="radiogroup" aria-label="出图速度">
+                <label class="imagegen-mj-speed-option">
+                  <input type="radio" name="imageGenMjSpeed" value="" checked>
+                  <span class="imagegen-mj-speed-label">Relax</span>
+                  <span class="imagegen-mj-speed-desc">常规</span>
+                </label>
+                <label class="imagegen-mj-speed-option">
+                  <input type="radio" name="imageGenMjSpeed" value="fast">
+                  <span class="imagegen-mj-speed-label">Fast</span>
+                  <span class="imagegen-mj-speed-desc">快速</span>
+                </label>
+                <label class="imagegen-mj-speed-option">
+                  <input type="radio" name="imageGenMjSpeed" value="turbo">
+                  <span class="imagegen-mj-speed-label">Turbo</span>
+                  <span class="imagegen-mj-speed-desc">极速</span>
+                </label>
+              </div>
               <div class="imagegen-mj-imagine-fields" id="imageGenMjImagineFields">
               <p class="panel-hint imagegen-mj-help" id="imageGenMjHelp">
-                一次出 4 张图：默认入库<strong>首张 + 预览可切换四张</strong>；勾选「四张分别存入仓库」则各存一张卡片。上传参考图即为图生图。
+                一次出 4 张图，四宫格自动存入同一张卡片（最多 5 张），预览里可切换查看。上传参考图即为图生图。
                 风格化越高越艺术；混乱度越高构图越随机；垫图权重在垫图时生效。
               </p>
               <div class="imagegen-params-row">
@@ -1173,48 +1196,24 @@
               </div>
               <label for="imageGenMjNegative">反向提示词</label>
               <textarea id="imageGenMjNegative" class="settings-input imagegen-field-compact imagegen-mj-negative" maxlength="500" rows="3" placeholder="排除的内容，如 ugly, blurry、低质量"></textarea>
-              <p class="imagegen-mj-toggle-section-label">出图速度 <span class="imagegen-mj-tip" title="草图与高清互斥，只能选其一">?</span></p>
-              <div class="imagegen-mj-speed-group" role="radiogroup" aria-label="出图速度">
-                <label class="imagegen-mj-speed-option">
-                  <input type="radio" name="imageGenMjSpeed" value="" checked>
-                  <span class="imagegen-mj-speed-label">默认</span>
-                  <span class="imagegen-mj-speed-desc">平衡速度与质量</span>
-                </label>
-                <label class="imagegen-mj-speed-option">
-                  <input type="radio" name="imageGenMjSpeed" value="draft">
-                  <span class="imagegen-mj-speed-label">草图</span>
-                  <span class="imagegen-mj-speed-desc">更快、风格更粗略</span>
-                </label>
-                <label class="imagegen-mj-speed-option">
-                  <input type="radio" name="imageGenMjSpeed" value="hd">
-                  <span class="imagegen-mj-speed-label">高清</span>
-                  <span class="imagegen-mj-speed-desc">更慢、细节更多</span>
-                </label>
-              </div>
-              <p class="imagegen-mj-toggle-section-label">附加开关 <span class="imagegen-mj-toggle-hint">（平铺/原始可多选；入库选项独立）</span></p>
-              <div class="imagegen-mj-options-grid" role="group" aria-label="Midjourney 附加选项">
+              <p class="imagegen-mj-toggle-section-label">附加开关 <span class="imagegen-mj-toggle-hint">（平铺/原始可多选）</span></p>
+              <div class="imagegen-mj-options-grid imagegen-mj-options-grid--dual" role="group" aria-label="Midjourney 附加选项">
                 <label class="imagegen-mj-option-card">
                   <span class="imagegen-mj-option-head">
                     <input type="checkbox" id="imageGenMjTile">
                     <span class="imagegen-mj-option-title">平铺模式</span>
                   </span>
-                  <span class="imagegen-mj-option-desc">无缝重复图案，适合壁纸、包装、布料纹理</span>
+                  <span class="imagegen-mj-option-desc">无缝重复图案（壁纸/包装）</span>
                 </label>
                 <label class="imagegen-mj-option-card">
                   <span class="imagegen-mj-option-head">
                     <input type="checkbox" id="imageGenMjRaw">
                     <span class="imagegen-mj-option-title">原始风格</span>
                   </span>
-                  <span class="imagegen-mj-option-desc">减少默认美化，更贴近提示词字面意思</span>
-                </label>
-                <label class="imagegen-mj-option-card imagegen-mj-option-card--full" for="imageGenMjSaveAllTiles">
-                  <span class="imagegen-mj-option-head">
-                    <input type="checkbox" id="imageGenMjSaveAllTiles">
-                    <span class="imagegen-mj-option-title">四张分别存入仓库</span>
-                  </span>
-                  <span class="imagegen-mj-option-desc">不勾选时仅入库首张（预览仍可切换四张）</span>
+                  <span class="imagegen-mj-option-desc">减少美化，更贴近提示词</span>
                 </label>
               </div>
+              <p class="imagegen-mj-gallery-note">Midjourney 四宫格<strong>自动存入同一张卡片</strong>（最多 5 张），预览里切换即可，无需付费放大。变体按一次生图同价扣积分。</p>
               </div>
             </div>
             <div class="imagegen-params-row imagegen-params-row--size">
@@ -1346,7 +1345,7 @@
               </div>
             </details>
             <div class="imagegen-ref-tool-panel" id="imageGenReversePanel" data-ref-tool-panel="reverse" hidden>
-              <p class="panel-hint">使用上方参考图第一张，反推提示词（Apimart · gemini-2.5-flash-lite · 2 积分/次）</p>
+              <p class="panel-hint">使用上方参考图第一张，反推提示词（2 积分/次）</p>
               <p class="panel-hint imagegen-ref-tool-status" id="imageGenReverseRefStatus">请先在上方添加参考图</p>
               <div class="imagegen-reverse-actions">
                 <button type="button" class="btn btn-secondary btn-sm" id="imageGenReverseBtn">反推提示词</button>
@@ -1561,7 +1560,7 @@
           </div>
         </div>
         <div class="credit-ledger-panel hidden" id="creditLedgerPanelSheet" aria-live="polite"></div>
-        <p class="imagegen-credits-note">会员订阅限时约五折；生图享积分折扣。充值与激活码兑换请点「充值」。<a href="terms.html" class="link-inline">用户协议</a> · <a href="privacy.html" class="link-inline">隐私政策</a></p>
+        <p class="imagegen-credits-note">会员订阅限时约五折。充值与激活码兑换请点「充值」。<a href="terms.html" class="link-inline">用户协议</a> · <a href="privacy.html" class="link-inline">隐私政策</a></p>
       </div>
     </div>
   </div>
@@ -1686,43 +1685,73 @@
   <script src="api-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260625p"></script>
+  <script src="api-client.js?v=20260626n"></script>
+  <script>
+    (function () {
+      var FALLBACK = [
+        { id: 'gpt-image-2-vip', label: 'GPT Image 2 VIP' },
+        { id: 'gpt-image-2', label: 'GPT Image 2' },
+        { id: 'apimart-gpt-image-2-official-budget', label: 'GPT Image 2 · 特价' },
+        { id: 'apimart-gpt-image-2', label: 'GPT Image 2 · 备用' },
+        { id: 'ithink-gpt-image-2-slow', label: 'GPT Image 2 · 经济' },
+        { id: 'mooko-gpt-image-2-pro', label: 'GPT Image 2 Pro · 慢速' },
+        { id: 'nano-banana-pro', label: 'Nano Banana Pro' },
+        { id: 'apimart-seedream-5-lite', label: 'Seedream 5 Lite · 备用' },
+        { id: 'apimart-gemini-2-5-flash-preview', label: 'Nano Banana Fast · 备用' },
+        { id: 'apimart-gemini-3-1-flash-preview', label: 'Nano Banana 2 · 备用' },
+        { id: 'apimart-gemini-3-pro-preview', label: 'Nano Banana Pro · 备用' },
+        { id: 'apimart-wan2-7-image', label: '万相 2.7' },
+        { id: 'apimart-wan2-7-image-pro', label: '万相 2.7 Pro' },
+        { id: 'apimart-flux-kontext-pro', label: 'Flux Kontext Pro' },
+        { id: 'apimart-flux-kontext-max', label: 'Flux Kontext Max' },
+        { id: 'apimart-flux-2-pro', label: 'Flux 2 Pro' },
+        { id: 'apimart-flux-2-flex', label: 'Flux 2 Flex' }
+      ];
+      function paint(sel, models) {
+        if (!sel || !models || !models.length) return;
+        sel.disabled = false;
+        sel.removeAttribute('aria-busy');
+        sel.innerHTML = '';
+        models.forEach(function (m) {
+          var opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = m.label || m.catalogLabel || m.id;
+          sel.appendChild(opt);
+        });
+      }
+      function readCache() {
+        try {
+          var raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v3') || 'null');
+          if (!raw || !raw.models || !raw.models.length) return null;
+          if (raw.ts < Date.now() - 86400000) return null;
+          if (Number(raw.version) < 5) return null;
+          return raw.models;
+        } catch (e) { return null; }
+      }
+      document.addEventListener('DOMContentLoaded', function () {
+        var sel = document.getElementById('imageGenModel');
+        if (!sel) return;
+        var models = readCache() || FALLBACK;
+        paint(sel, models);
+      });
+    })();
+  </script>
   <script src="pack-foundation.js"></script>
-  <script src="supabase-sync.js?v=20260625p"></script>
+  <script src="supabase-sync.js?v=20260626n"></script>
   <script src="pack-core.js"></script>
   <script src="pack-account.js"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
   <script src="pack-viewer.js"></script>
   <script src="pack-appreciate.js"></script>
   <script src="pack-lightbox.js"></script>
-  <script src="script.js?v=20260625p"></script>
+  <script src="card-gallery.js?v=20260626c"></script>
+  <script src="script.js?v=20260626n"></script>
   <script src="pack-imagegen.js"></script>
   <script src="pack-feed.js"></script>
-  <script src="community-public-feed.js?v=20260625p"></script>
-  <script>
-    (function () {
-      try {
-        var cached = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v2') || 'null');
-        if (!cached || !cached.models || !cached.models.length) return;
-        document.addEventListener('DOMContentLoaded', function () {
-          var sel = document.getElementById('imageGenModel');
-          if (!sel) return;
-          sel.disabled = false;
-          sel.removeAttribute('aria-busy');
-          sel.innerHTML = '';
-          cached.models.forEach(function (m) {
-            var opt = document.createElement('option');
-            opt.value = m.id;
-            opt.textContent = m.label || m.catalogLabel || m.id;
-            sel.appendChild(opt);
-          });
-        });
-      } catch (e) { /* ignore */ }
-    })();
-  </script>
-  <script src="features-draft.js?v=20260625p"></script>
+  <script src="community-public-feed.js?v=20260626n"></script>
+  <script src="features-draft.js?v=20260626n"></script>
   <script src="pack-extra.js"></script>
-  <script src="features-assets.js?v=20260625p"></script>
+  <script src="features-assets.js?v=20260626n"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

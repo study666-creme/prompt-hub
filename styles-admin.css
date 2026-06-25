@@ -650,6 +650,11 @@ table.admin-table {
   color: #9a3412;
 }
 
+.admin-badge--info {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
 .admin-msg {
   margin: 12px 0 0;
   padding: 10px 12px;
@@ -778,11 +783,35 @@ table.admin-table {
 
 .admin-pagination {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--admin-border);
+}
+
+.admin-pagination-extra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-pagination-jump input,
+.admin-pagination-size select {
+  width: 4.5em;
+  padding: 4px 6px;
+  border: 1px solid var(--admin-border);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--admin-surface);
+  color: inherit;
+}
+
+.admin-pagination-size select {
+  width: auto;
+  min-width: 4.5em;
 }
 
 .admin-modal {

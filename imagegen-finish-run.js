@@ -33,7 +33,8 @@
     mjGridUrls,
     mjCompositeUrl,
     mjButtons,
-    mjSplitSave
+    mjSplitSave,
+    cardImages
   }) {
     if (!image) {
       d().toast('图片地址无效，请重试');
@@ -95,9 +96,13 @@
           ? `${prompt}（MJ 图 ${idx}）`
           : `${prompt}（同任务附赠图 ${idx}）`)
         : prompt;
-      const cardMjGridUrls = isMidjourney && Array.isArray(mjGridUrls) && idx === 1 && !mjSplitSave
-        ? mjGridUrls
-        : (isMidjourney && mjSplitSave ? null : (isMidjourney && Array.isArray(mjGridUrls) ? mjGridUrls : null));
+      const cardMjGridUrls = isMidjourney && Array.isArray(mjGridUrls) && mjGridUrls.length
+        ? mjGridUrls.slice(0, 4)
+        : isMidjourney && Array.isArray(cardImages) && cardImages.length > 1 && mjCompositeUrl
+          ? cardImages.slice(1, 5)
+          : isMidjourney && Array.isArray(mjGridUrls) && idx === 1 && !mjSplitSave
+            ? mjGridUrls
+            : (isMidjourney && mjSplitSave ? null : (isMidjourney && Array.isArray(mjGridUrls) ? mjGridUrls : null));
       const creation = {
         id: creationId,
         jobId: slotJobId,
@@ -151,6 +156,7 @@
         mjGridUrls: cardMjGridUrls,
         mjCompositeUrl: isMidjourney && mjCompositeUrl && idx === 1 ? mjCompositeUrl : null,
         mjButtons: isMidjourney && Array.isArray(mjButtons) && idx === 1 ? mjButtons : null,
+        cardImages: isMidjourney && Array.isArray(cardImages) && cardImages.length ? cardImages : null,
         deferCloudPush: !!isMidjourney
       });
       if (pendingId && idx === 1) d().removePendingJob(pendingId);

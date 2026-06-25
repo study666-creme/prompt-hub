@@ -246,7 +246,8 @@
       window.__lightboxMjGallery = {
         urls: opts.mjGalleryUrls,
         feedKey: opts.feedKey,
-        assetId: opts.cardId || null
+        assetId: opts.cardId || null,
+        jobId: opts.mjJobId || null
       };
       window.__lightboxImageGenNav = true;
       window.setViewerNav?.(navItems, `${opts.feedKey}#mj${opts.mjGalleryIndex || 0}`);
@@ -396,13 +397,26 @@
       if (item.type === 'imageGenMjTile' && window.__lightboxMjGallery?.urls?.length) {
         const url = window.__lightboxMjGallery.urls[item.tileIndex ?? 0];
         if (url) {
-          setLightboxSrc(url, {
-            imageGen: true,
-            feedKey: window.__lightboxMjGallery.feedKey,
-            cardId: window.__lightboxMjGallery.assetId,
-            mjGalleryUrls: window.__lightboxMjGallery.urls,
-            mjGalleryIndex: item.tileIndex ?? 0
-          });
+          const resolve = window.PromptHubCardGallery?.resolveMediaUrl;
+          const apply = (src) => {
+            setLightboxSrc(src || url, {
+              imageGen: true,
+              feedKey: window.__lightboxMjGallery.feedKey,
+              cardId: window.__lightboxMjGallery.assetId,
+              mjGalleryUrls: window.__lightboxMjGallery.urls,
+              mjGalleryIndex: item.tileIndex ?? 0
+            });
+          };
+          if (resolve) {
+            void resolve(url, {
+              cardId: window.__lightboxMjGallery.assetId,
+              jobId: window.__lightboxMjGallery.jobId || null,
+              galleryIndex: item.tileIndex ?? 0,
+              preferFull: true
+            }).then(apply);
+          } else {
+            apply(url);
+          }
           return true;
         }
       }

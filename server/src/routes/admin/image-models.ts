@@ -12,6 +12,8 @@ import {
 } from '../../lib/image-model-settings';
 import { requireAdminSecret } from '../../middleware/admin';
 import { rateLimit } from '../../middleware/rate-limit';
+import { apimartCostReferenceRows } from '../../lib/apimart-upstream-cost';
+import { grsaiCostReferenceRows } from '../../lib/grsai-upstream-cost';
 import { createAdminClient } from '../../lib/supabase';
 
 export const adminImageModelRoutes = new Hono<{ Bindings: Env }>();
@@ -47,7 +49,9 @@ adminImageModelRoutes.get('/', async c => {
         ],
         settingsPersisted: persisted,
         settingsTableReady: tableReady,
-        settingsHint
+        settingsHint,
+        apimartCostReference: apimartCostReferenceRows(),
+        grsaiCostReference: grsaiCostReferenceRows()
       }
     });
   } catch (err) {
@@ -121,6 +125,9 @@ adminImageModelRoutes.patch('/:modelId', async c => {
           : {}),
         ...(patch.creditsByResolution && typeof patch.creditsByResolution === 'object'
           ? { creditsByResolution: patch.creditsByResolution as ImageModelOverride['creditsByResolution'] }
+          : {}),
+        ...(patch.creditsBySpeed && typeof patch.creditsBySpeed === 'object'
+          ? { creditsBySpeed: patch.creditsBySpeed as ImageModelOverride['creditsBySpeed'] }
           : {}),
         ...(patch.discountPercent != null
           ? { discountPercent: Number(patch.discountPercent) }

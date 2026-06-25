@@ -7,7 +7,8 @@
   const LS_LIKES = 'promptrepo_community_likes';
   const LS_FAVS = 'promptrepo_community_favorites';
   const LS_IMAGEGEN = 'promptrepo_imagegen_draft';
-  const LS_IMAGEGEN_MODELS = 'promptrepo_imagegen_models_cache_v2';
+  const LS_IMAGEGEN_MODELS = 'promptrepo_imagegen_models_cache_v3';
+  const IMAGE_GEN_CATALOG_CACHE_VERSION = 8;
   const LS_SESSION_GEN_JOBS = 'promptrepo_session_gen_jobs';
   const LS_PENDING_GEN_JOBS = 'promptrepo_pending_gen_jobs';
   const LS_FAILED_GEN_JOBS = 'promptrepo_failed_gen_jobs';
@@ -225,7 +226,7 @@
   function isUsableWarehouseImage(card) {
     if (!card) return false;
     if (window.SupabaseSync?.shouldShowCardInWarehouse?.(card) === false) return false;
-    const image = card.image;
+    const image = window.PromptHubCardGallery?.getCardCoverImage?.(card) || card.image;
     if (!image || !isDisplayableImage(image)) return false;
     if (window.SupabaseSync?.isInvalidMediaUrl?.(image)) return false;
     if (/^https?:\/\//i.test(image)) return true;
@@ -1038,7 +1039,8 @@
       size: meta.size,
       count: meta.count,
       mjMode: meta.mjMode,
-      mjSaveAllTiles: meta.mjSaveAllTiles
+      mjSaveAllTiles: meta.mjSaveAllTiles,
+      mjSpeed: meta.mjSpeed
     };
     if (!saveJson(LS_IMAGEGEN, draft)) {
       saveJson(LS_IMAGEGEN, {
@@ -5843,6 +5845,10 @@
     return wr('repairMjWarehouseCardFields', card, fields);
   }
 
+  async function repairMjGalleryFromJob(card) {
+    return wr('repairMjGalleryFromJob', card);
+  }
+
   async function repairWarehouseCardImageFromJob(card, imageUrl, jobId) {
     return wr('repairWarehouseCardImageFromJob', card, imageUrl, jobId);
   }
@@ -6369,7 +6375,8 @@
       id: full.id,
       title: (full.title || '').trim(),
       prompt: (full.prompt || '').trim() || (full.title || '').trim(),
-      image: full.image || null,
+      image: window.PromptHubCardGallery?.getCardCoverImage?.(full) || full.image || null,
+      cardImages: window.PromptHubCardGallery?.normalizeCardGallery?.(full) || null,
       tags: full.tags || [],
       group: full.group || null,
       genJobId: full.genJobId || null,
@@ -6500,17 +6507,19 @@
     const previewCard = imageGenPreviewKind === 'warehouse'
       ? ((window.__promptHubCards || []).find((x) => x.id === imageGenPreviewId) || findWarehouseCardById(imageGenPreviewId))
       : null;
-    let mjGridUrls = Array.isArray(previewCard?.mjGridUrls) && previewCard.mjGridUrls.length
-      ? previewCard.mjGridUrls.filter(Boolean)
-      : null;
+    let mjGridUrls = window.PromptHubCardGallery?.normalizeCardGallery?.(previewCard)?.length
+      ? window.PromptHubCardGallery.normalizeCardGallery(previewCard)
+      : (Array.isArray(previewCard?.mjGridUrls) && previewCard.mjGridUrls.length
+        ? previewCard.mjGridUrls.filter(Boolean)
+        : null);
     const mjParentJobId = normalizeMjParentJobId(jobId || previewCard?.genJobId || '');
     if (!mjGridUrls?.length && mjParentJobId && previewCard?.isMidjourney && window.PromptHubApi?.getGenerationJob) {
       try {
         const poll = await window.PromptHubApi.getGenerationJob(mjParentJobId);
         if (!previewStale() && poll?.ok) {
           const parsed = resolveMjPollImages(poll);
-          if (parsed.tiles.length) {
-            mjGridUrls = parsed.tiles;
+          if (parsed.gallery?.length || parsed.tiles.length) {
+            mjGridUrls = parsed.gallery?.length ? parsed.gallery : parsed.tiles;
             if (previewCard) {
               await repairMjWarehouseCardFields(previewCard, {
                 mjGridUrls: parsed.tiles,
@@ -6525,11 +6534,16 @@
       }
     }
     if (previewStale()) return;
+    if (previewCard?.isMidjourney && mjParentJobId) {
+      await repairMjGalleryFromJob(previewCard);
+      const refreshed = window.PromptHubCardGallery?.normalizeCardGallery?.(previewCard);
+      if (refreshed?.length) mjGridUrls = refreshed;
+    }
     const cachedMjButtons = Array.isArray(previewCard?.mjButtons) ? previewCard.mjButtons : null;
     const hasRef = !!(refImages?.length || (refImage && isDisplayableImage(refImage)));
     const fillHtml = buildPreviewFillActions(hasRef, extraActions);
     const mjActionsHtml = cachedMjButtons?.length
-      ? buildMjActionsHtml(cachedMjButtons, mjParentJobId)
+      ? buildMjActionsBlock(cachedMjButtons, mjParentJobId, previewCard)
       : (mjParentJobId ? '<div class="imagegen-mj-actions-host" data-mj-actions-host></div>' : '');
     let imgHtml = '';
     if (mjGridUrls?.length) {
@@ -6555,7 +6569,11 @@
     if (mjGridUrls?.length) {
       bindMjFilmstripPreview(body, mjGridUrls, {
         feedKey: 'wh_' + previewId,
-        cardId: previewId
+        cardId: previewId,
+        parentJobId: mjParentJobId,
+        model: previewCard?.model,
+        size: previewCard?.size,
+        resolution: previewCard?.resolution || '1k'
       });
     } else if (zoomBtn && isDisplayableImage(image)) {
       const previewAssetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : imageGenPreviewId;
@@ -6685,7 +6703,7 @@
         if (previewStale() || !r.ok || !Array.isArray(r.data?.mjButtons) || !r.data.mjButtons.length) return;
         const host = body.querySelector('[data-mj-actions-host]');
         if (!host) return;
-        host.outerHTML = buildMjActionsHtml(r.data.mjButtons, mjParentJobId);
+        host.outerHTML = buildMjActionsBlock(r.data.mjButtons, mjParentJobId, previewCard);
         if (previewCard) {
           previewCard.mjButtons = r.data.mjButtons;
         }
@@ -6887,16 +6905,20 @@
     let mjGalleryUrls = null;
     if (kind === 'warehouse' && assetId) {
       const full = (window.__promptHubCards || []).find((c) => c.id === assetId);
-      if (full?.isMidjourney && Array.isArray(full.mjGridUrls) && full.mjGridUrls.length > 1) {
-        mjGalleryUrls = full.mjGridUrls.filter(Boolean).slice(0, 4);
+      if (full?.isMidjourney) {
+        const gallery = window.PromptHubCardGallery?.normalizeCardGallery?.(full) || [];
+        if (gallery.length > 1) mjGalleryUrls = gallery;
+      }
+      if (!mjGalleryUrls?.length && full?.isMidjourney && Array.isArray(full.mjGridUrls) && full.mjGridUrls.length > 1) {
+        mjGalleryUrls = full.mjGridUrls.filter(Boolean).slice(0, 5);
       }
       if (!mjGalleryUrls?.length && full?.genJobId && window.PromptHubApi?.getGenerationJob) {
         try {
           const poll = await window.PromptHubApi.getGenerationJob(normalizeMjParentJobId(full.genJobId));
           if (poll?.ok) {
             const parsed = resolveMjPollImages(poll);
-            if (parsed.tiles.length > 1) {
-              mjGalleryUrls = parsed.tiles;
+            if (parsed.gallery?.length > 1 || parsed.tiles.length > 1) {
+              mjGalleryUrls = parsed.gallery?.length ? parsed.gallery : parsed.tiles;
               await repairMjWarehouseCardFields(full, {
                 mjGridUrls: parsed.tiles,
                 mjCompositeUrl: parsed.composite,
@@ -7151,13 +7173,7 @@
     bindImageGenPromptTools();
     document.getElementById('imageGenRecoverBtn')?.remove();
     document.getElementById('imageGenCount')?.addEventListener('change', updateImageGenCostHint);
-    document.getElementById('imageGenModel')?.addEventListener('change', () => {
-      syncImageGenModelParamsUI();
-      syncImageGenModelHint();
-      updateImageGenResolutionSelect();
-      updateImageGenSizeSelect();
-      updateImageGenPricingUI();
-    });
+    document.getElementById('imageGenModel')?.addEventListener('change', scheduleImageGenModelUiRefresh);
     document.querySelectorAll('[data-mj-mode]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const mode = btn.dataset.mjMode;
@@ -7165,11 +7181,21 @@
         setImageGenMjMode(mode);
       });
     });
-    document.getElementById('imageGenMjSaveAllTiles')?.addEventListener('change', persistImageGenMjPrefs);
+    bindImageGenModelFamilyTabs();
     document.querySelectorAll('input[name="imageGenMjSpeed"]').forEach((input) => {
-      input.addEventListener('change', persistImageGenMjPrefs);
+      input.addEventListener('change', () => {
+        syncImageGenMjToggleCheckedClasses();
+        persistImageGenMjPrefs();
+        updateImageGenCostHint();
+      });
     });
-    document.getElementById('imageGenResolution')?.addEventListener('input', updateImageGenCostHint);
+    document.getElementById('imageGenMjTile')?.addEventListener('change', syncImageGenMjToggleCheckedClasses);
+    document.getElementById('imageGenMjRaw')?.addEventListener('change', syncImageGenMjToggleCheckedClasses);
+    document.getElementById('imageGenMjSaveAllTiles')?.addEventListener('change', () => {
+      syncImageGenMjToggleCheckedClasses();
+      persistImageGenMjPrefs();
+    });
+    document.getElementById('imageGenResolution')?.addEventListener('change', updateImageGenCostHint);
     document.getElementById('imageGenQuality')?.addEventListener('change', updateImageGenCostHint);
     document.getElementById('imageGenSize')?.addEventListener('change', updateImageGenCostHint);
     bindImageGenMjRange('imageGenMjStylize', 'imageGenMjStylizeVal');
@@ -7359,7 +7385,7 @@
       updateImageGenFeedHint();
       setTimeout(() => void resumePendingGenerationJobs({ force: true }), 400);
       scheduleGenJobsSync(1500);
-      renderImageGenFeed({ preserveScroll: true, force: true });
+      renderImageGenFeed({ preserveScroll: true });
       renderImageGenMobileResult();
       void window.PointsSystem?.refreshCreditsFromServer?.();
       window.PointsSystem?.updateCreditsUI?.();
@@ -7405,11 +7431,10 @@
   function initImageGenForm() {
     resetImageGenSubmitState();
     if (imageGenFormActivated) {
-      syncImageGenModelParamsUI();
+      scheduleImageGenModelUiRefresh();
       updateImageGenSaveTargetSelects();
       syncImageGenGenPublicUI();
       updateImageGenFeedHint();
-      updateImageGenCostHint();
       if (!feedHasRenderedContent('imageGenFeed', '.imagegen-feed-card')) {
         renderImageGenFeed();
       } else {
@@ -7419,17 +7444,23 @@
       return;
     }
     imageGenFormActivated = true;
-    const cached = loadCachedImageGenModels();
-    if (cached?.length) {
-      applyImageGenModelCatalog(cached, { forceRender: true, source: 'cache' });
+    bindImageGenModelFamilyTabs();
+    if (!imageGenModelCatalog.length) {
+      const cached = loadCachedImageGenModels();
+      if (cached?.length) {
+        applyImageGenModelCatalog(cached, { forceRender: true, source: 'cache' });
+      } else {
+        applyImageGenModelCatalog(IMAGE_GEN_MODEL_FALLBACK, { forceRender: true, source: 'fallback' });
+      }
     } else {
-      warmImageGenModelCatalog();
-      applyImageGenModelCatalog(IMAGE_GEN_MODEL_FALLBACK, { forceRender: true, source: 'fallback' });
+      setImageGenModelSelectLoading(false);
+      rebuildImageGenModelFamilyTabs();
+      renderImageGenModelSelect({ skipUiRefresh: true });
+      flushImageGenModelUiRefresh();
     }
     void prefetchImageGenModelCatalog().then(() => {
       syncImageGenModelToResolution();
-      updateImageGenResolutionSelect();
-      updateImageGenPricingUI();
+      scheduleImageGenModelUiRefresh();
     });
     const draft = loadJson(LS_IMAGEGEN, null);
     if (draft) {
@@ -7455,7 +7486,7 @@
       const saveAllEl = document.getElementById('imageGenMjSaveAllTiles');
       if (saveAllEl && draft.mjSaveAllTiles) saveAllEl.checked = true;
       const speedVal = draft.mjSpeed;
-      if (speedVal === 'draft' || speedVal === 'hd' || speedVal === '') {
+      if (speedVal === 'fast' || speedVal === 'turbo' || speedVal === '') {
         const speedInput = document.querySelector(`input[name="imageGenMjSpeed"][value="${speedVal}"]`);
         if (speedInput) speedInput.checked = true;
       }
@@ -7521,6 +7552,29 @@
 
   let imageGenModelCatalog = [];
   let imageGenModelCatalogReady = false;
+  let imageGenModelsByFamilyCache = null;
+  let imageGenFamilyTabsBound = false;
+  let imageGenModelUiRefreshRaf = 0;
+
+  function invalidateImageGenFamilyCache() {
+    imageGenModelsByFamilyCache = null;
+  }
+
+  function flushImageGenModelUiRefresh() {
+    syncImageGenModelParamsUI();
+    syncImageGenModelHint();
+    updateImageGenResolutionSelect();
+    syncImageGenQualityUI();
+    updateImageGenCostHint();
+  }
+
+  function scheduleImageGenModelUiRefresh() {
+    if (imageGenModelUiRefreshRaf) return;
+    imageGenModelUiRefreshRaf = requestAnimationFrame(() => {
+      imageGenModelUiRefreshRaf = 0;
+      flushImageGenModelUiRefresh();
+    });
+  }
   let imageGenModelFamily = 'gim2';
   let imageGenMjMode = 'imagine';
 
@@ -7556,10 +7610,12 @@
   }
 
   const IMAGE_GEN_MODEL_FAMILIES = [
-    { key: 'gim2', label: 'G-im2' },
+    { key: 'gim2', label: '全能2' },
     { key: 'banana', label: '香蕉' },
     { key: 'jimeng', label: '即梦' },
-    { key: 'midjourney', label: 'MJ' }
+    { key: 'midjourney', label: 'MJ' },
+    { key: 'wan', label: '万相' },
+    { key: 'flux', label: 'Flux' }
   ];
 
   const IMAGE_GEN_MODEL_FALLBACK = [
@@ -7572,34 +7628,67 @@
     { id: 'apimart-gpt-image-2-official-budget', label: 'GPT Image 2 · 特价', provider: 'apimart', uiFamily: 'gim2', sortOrder: 100, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, pricingByResolution: true, resolutions: ['1k', '2k', '4k'], aspectRatios: ['16:9', '9:16', '4:3', '3:4'] },
     { id: 'ithink-gpt-image-2-slow', label: 'GPT Image 2 · 经济', provider: 'ithink', uiFamily: 'gim2', sortOrder: 102, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'] },
     { id: 'apimart-seedream-5-lite', label: 'Seedream 5 Lite · 备用', provider: 'apimart', uiFamily: 'jimeng', sortOrder: 104, selectable: true, status: 'active', refundOnViolation: true },
+    { id: 'apimart-gemini-2-5-flash-preview', label: 'Nano Banana Fast · 备用', provider: 'apimart', uiFamily: 'banana', sortOrder: 103, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'] },
+    { id: 'apimart-gemini-3-1-flash-preview', label: 'Nano Banana 2 · 备用', provider: 'apimart', uiFamily: 'banana', sortOrder: 104, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
+    { id: 'apimart-gemini-3-pro-preview', label: 'Nano Banana Pro · 备用', provider: 'apimart', uiFamily: 'banana', sortOrder: 105, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
     { id: 'mooko-gpt-image-2-pro', label: 'GPT Image 2 Pro · 慢速', provider: 'mooko', uiFamily: 'gim2', sortOrder: 101, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['2k', '4k'], aspectRatios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'] },
-    { id: 'apimart-mj-v61', label: 'imagine-v6.1', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 110, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
-    { id: 'apimart-mj-v81', label: 'imagine-v8.1', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 111, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
-    { id: 'apimart-mj-v7', label: 'imagine-v7', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 112, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
-    { id: 'apimart-mj-niji7', label: 'imagine-niji7', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 113, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
-    { id: 'apimart-mj-niji6', label: 'imagine-niji6', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 114, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
-    { id: 'apimart-mj-v52', label: 'imagine-v5.2', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 115, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] }
+    { id: 'apimart-wan2-7-image', label: '万相 2.7', provider: 'apimart', uiFamily: 'wan', sortOrder: 105, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k', '2k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
+    { id: 'apimart-wan2-7-image-pro', label: '万相 2.7 Pro', provider: 'apimart', uiFamily: 'wan', sortOrder: 106, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k', '2k', '4k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
+    { id: 'apimart-flux-kontext-pro', label: 'Flux Kontext Pro', provider: 'apimart', uiFamily: 'flux', sortOrder: 120, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '9:21'] },
+    { id: 'apimart-flux-kontext-max', label: 'Flux Kontext Max', provider: 'apimart', uiFamily: 'flux', sortOrder: 121, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '9:21'] },
+    { id: 'apimart-flux-2-pro', label: 'Flux 2 Pro', provider: 'apimart', uiFamily: 'flux', sortOrder: 122, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, pricingByResolution: true, resolutions: ['1k', '2k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'] },
+    { id: 'apimart-flux-2-flex', label: 'Flux 2 Flex', provider: 'apimart', uiFamily: 'flux', sortOrder: 123, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, pricingByResolution: true, resolutions: ['1k', '2k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'] },
+    { id: 'apimart-mj-v81', label: 'MJ v8.1', description: '最新主版本 · 写实/概念通用 · 细节与光影最佳', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 110, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'] },
+    { id: 'apimart-mj-v7', label: 'MJ v7', description: '上一代主力 · 复杂构图稳定 · 风格均衡', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 111, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'] },
+    { id: 'apimart-mj-v61', label: 'MJ v6.1', description: '经典 v6 · 风格稳定 · 适合批量出图', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 112, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'] },
+    { id: 'apimart-mj-niji7', label: 'MJ Niji 7', description: '动漫/二次元专版 · 角色与插画表现力强', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 113, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'] }
   ];
+
+  const IMAGE_GEN_MJ_MODEL_DESCRIPTIONS = {
+    'apimart-mj-v81': '最新主版本 · 写实/概念通用 · 细节与光影最佳',
+    'apimart-mj-v7': '上一代主力 · 复杂构图稳定 · 风格均衡',
+    'apimart-mj-v61': '经典 v6 · 风格稳定 · 适合批量出图',
+    'apimart-mj-niji7': '动漫/二次元专版 · 角色与插画表现力强'
+  };
 
   function loadCachedImageGenModels() {
     try {
       const raw = JSON.parse(localStorage.getItem(LS_IMAGEGEN_MODELS) || 'null');
-      if (raw?.models?.length && raw.ts > Date.now() - 24 * 3600 * 1000) return raw.models;
+      if (!raw?.models?.length) return null;
+      if (Number(raw.version) < IMAGE_GEN_CATALOG_CACHE_VERSION) return null;
+      if (raw.ts < Date.now() - 7 * 24 * 3600 * 1000) return null;
+      return raw.models;
     } catch (e) { /* ignore */ }
     return null;
   }
 
   function persistCachedImageGenModels(models) {
     try {
-      localStorage.setItem(LS_IMAGEGEN_MODELS, JSON.stringify({ ts: Date.now(), models }));
+      localStorage.setItem(
+        LS_IMAGEGEN_MODELS,
+        JSON.stringify({ ts: Date.now(), version: IMAGE_GEN_CATALOG_CACHE_VERSION, models })
+      );
     } catch (e) { /* ignore */ }
+  }
+
+  function sanitizeImageGenModelDescription(description) {
+    if (!description) return null;
+    let s = String(description).trim();
+    s = s.replace(/^(Apimart|GrsAI|ThinkAI|Mooko|木瓜)\s*[·•]\s*/gi, '');
+    s = s.replace(/\bApimart\s*[·•]\s*/gi, '');
+    s = s.replace(/\s*[·•]\s*出图速度可选\s*relax\s*\/\s*fast\s*\/\s*turbo/gi, '');
+    s = s.replace(/\s*[·•]\s*$/g, '').trim();
+    return s || null;
   }
 
   function normalizeImageGenModelEntry(m) {
     if (!m?.id) return null;
     const catalogLabel = m.catalogLabel || m.label || m.id;
     const label = String(m.displayLabel || m.label || catalogLabel).trim() || catalogLabel;
-    return { ...m, label, catalogLabel };
+    const mjDesc = IMAGE_GEN_MJ_MODEL_DESCRIPTIONS[m.id];
+    const rawDesc = m.description || mjDesc || null;
+    const description = sanitizeImageGenModelDescription(rawDesc);
+    return { ...m, label, catalogLabel, description };
   }
 
   function imageGenModelDisplayName(m) {
@@ -7614,7 +7703,11 @@
   function applyImageGenModelCatalog(models, opts = {}) {
     if (!Array.isArray(models) || !models.length) return false;
     const source = opts.source || 'api';
-    imageGenModelCatalog = models.map(normalizeImageGenModelEntry).filter(Boolean);
+    invalidateImageGenFamilyCache();
+    imageGenModelCatalog = models
+      .map(normalizeImageGenModelEntry)
+      .filter(Boolean)
+      .filter((m) => m.status !== 'offline');
     window.__IMAGE_GEN_MODELS__ = imageGenModelCatalog;
     if (source === 'api' || source === 'cache') {
       persistCachedImageGenModels(imageGenModelCatalog);
@@ -7624,10 +7717,9 @@
     const shouldRender = opts.renderUi !== false && (opts.forceRender || isImageGenPageVisible());
     if (shouldRender) {
       setImageGenModelSelectLoading(false);
-      renderImageGenModelSelect();
-      syncImageGenModelHint();
-      updateImageGenResolutionSelect();
-      updateImageGenCostHint();
+      rebuildImageGenModelFamilyTabs();
+      renderImageGenModelSelect({ skipUiRefresh: true });
+      flushImageGenModelUiRefresh();
     }
     return true;
   }
@@ -7706,9 +7798,12 @@
   }
 
   function imageGenModelUiFamily(m) {
-    if (m?.uiFamily === 'banana' || m?.uiFamily === 'gim2' || m?.uiFamily === 'jimeng' || m?.uiFamily === 'midjourney') return m.uiFamily;
+    if (m?.uiFamily === 'banana' || m?.uiFamily === 'gim2' || m?.uiFamily === 'jimeng' || m?.uiFamily === 'midjourney' || m?.uiFamily === 'wan' || m?.uiFamily === 'flux') return m.uiFamily;
     const id = String(m?.id || '').toLowerCase();
     if (id.startsWith('apimart-mj-')) return 'midjourney';
+    if (id.startsWith('apimart-gemini') || id.includes('gemini-')) return 'banana';
+    if (id.startsWith('apimart-wan') || id.includes('wan2.7')) return 'wan';
+    if (id.startsWith('apimart-flux') || id.includes('flux-kontext') || id.includes('flux-2-')) return 'flux';
     if (id.includes('seedream') || id === 'jimeng') return 'jimeng';
     if (id.includes('nano-banana')) return 'banana';
     return 'gim2';
@@ -7727,9 +7822,16 @@
     const all = [...new Set([imageUrl, ...(extras || [])].filter((u) => u && /^https?:\/\//i.test(String(u))))];
     if (!all.length) return { composite: null, tiles: [], primary: null };
     if (all.length >= 5) {
-      return { composite: all[0], tiles: all.slice(1, 5), primary: all[1] || all[0] };
+      return { composite: all[0], tiles: all.slice(1, 5), primary: all[0] || all[1] };
     }
     if (all.length === 4) {
+      const gridIdx = all.findIndex((u) => /grid|composite|四宫|_0_0|\/0_0[./]|\/split\//i.test(String(u))
+        && !/_[0-3]\.(jpe?g|webp|png)(?:\?|$)/i.test(String(u)));
+      if (gridIdx >= 0) {
+        const composite = all[gridIdx];
+        const tiles = all.filter((_, i) => i !== gridIdx).slice(0, 4);
+        return { composite, tiles, primary: composite || tiles[0] };
+      }
       return { composite: null, tiles: all, primary: all[0] };
     }
     return { composite: all[0], tiles: all, primary: all[0] };
@@ -7738,18 +7840,40 @@
   function resolveMjPollImages(poll) {
     const imageUrl = poll?.data?.imageUrl || '';
     const extras = getPollExtraImageUrls(poll, imageUrl);
-    if (Array.isArray(poll?.data?.mjGridUrls) && poll.data.mjGridUrls.length) {
+    const CG = window.PromptHubCardGallery;
+    if (Array.isArray(poll?.data?.mjGalleryUrls) && poll.data.mjGalleryUrls.length) {
+      const gallery = poll.data.mjGalleryUrls.filter(Boolean).slice(0, CG?.MAX || 5);
+      const composite = poll.data.mjCompositeUrl || null;
+      const tiles = Array.isArray(poll.data.mjGridUrls) && poll.data.mjGridUrls.length
+        ? poll.data.mjGridUrls.filter(Boolean).slice(0, 4)
+        : (composite && gallery[0] === composite ? gallery.slice(1, 5) : gallery.slice(0, 4));
       return {
-        composite: poll.data.mjCompositeUrl || null,
-        tiles: poll.data.mjGridUrls.filter(Boolean),
-        primary: poll.data.mjGridUrls[0] || imageUrl
+        composite,
+        tiles,
+        primary: gallery[0] || imageUrl,
+        gallery
       };
     }
-    return parseMjImagineUrls(imageUrl, extras);
+    if (Array.isArray(poll?.data?.mjGridUrls) && poll.data.mjGridUrls.length) {
+      const tiles = poll.data.mjGridUrls.filter(Boolean);
+      const composite = poll.data.mjCompositeUrl || null;
+      const gallery = CG?.buildMjCardImages?.(composite, tiles, imageUrl || tiles[0])
+        || (composite ? [composite, ...tiles] : tiles);
+      return {
+        composite,
+        tiles,
+        primary: gallery[0] || imageUrl,
+        gallery
+      };
+    }
+    const parsed = parseMjImagineUrls(imageUrl, extras);
+    const gallery = CG?.buildMjCardImages?.(parsed.composite, parsed.tiles, parsed.primary)
+      || (parsed.tiles.length ? parsed.tiles : parsed.primary ? [parsed.primary] : []);
+    return { ...parsed, gallery };
   }
 
   function buildMjFilmstripHtml(urls, activeIdx = 0) {
-    const list = (urls || []).filter((u) => u).slice(0, 4);
+    const list = (urls || []).filter((u) => u).slice(0, window.PromptHubCardGallery?.MAX || 5);
     if (!list.length) return '';
     const idx = Math.max(0, Math.min(Number(activeIdx) || 0, list.length - 1));
     const main = esc(list[idx]);
@@ -7773,23 +7897,30 @@
       </div>
       <div class="imagegen-mj-filmstrip-meta">
         <span class="imagegen-mj-filmstrip-counter">${idx + 1} / ${list.length}</span>
-        <button type="button" class="btn btn-secondary btn-sm" data-mj-strip-dl>下载当前</button>
+        <div class="imagegen-mj-filmstrip-actions">
+          <button type="button" class="btn btn-secondary btn-sm" data-mj-strip-dl>下载当前</button>
+        </div>
       </div>
       <div class="imagegen-mj-filmstrip-thumbs" role="tablist" aria-label="切换单图">${thumbs}</div>
     </div>`;
   }
 
   function bindMjFilmstripPreview(body, urls, previewCtx) {
-    const list = (urls || []).filter(Boolean).slice(0, 4);
+    const list = (urls || []).filter(Boolean).slice(0, window.PromptHubCardGallery?.MAX || 5);
     if (!body || !list.length) return;
     const strip = body.querySelector('.imagegen-mj-filmstrip');
     if (!strip) return;
+    const resolveRef = (ref, galleryIndex) =>
+      window.PromptHubCardGallery?.resolveMediaUrl?.(ref, {
+        cardId: previewCtx?.cardId,
+        jobId: previewCtx?.parentJobId,
+        galleryIndex
+      }) || Promise.resolve(ref);
 
     const renderAt = (nextIdx) => {
       const idx = Math.max(0, Math.min(nextIdx, list.length - 1));
       strip.dataset.mjStripActive = String(idx);
       const mainImg = strip.querySelector('.imagegen-mj-filmstrip-main img');
-      if (mainImg) mainImg.src = list[idx];
       const counter = strip.querySelector('.imagegen-mj-filmstrip-counter');
       if (counter) counter.textContent = `${idx + 1} / ${list.length}`;
       strip.querySelectorAll('.imagegen-mj-strip-thumb').forEach((btn, i) => {
@@ -7799,8 +7930,18 @@
       const next = strip.querySelector('.imagegen-mj-filmstrip-next');
       if (prev) prev.disabled = idx <= 0;
       if (next) next.disabled = idx >= list.length - 1;
-      body.dataset.previewImageUrl = list[idx];
-      body.dataset.previewImageReady = '1';
+      const ref = list[idx];
+      body.dataset.previewImageUrl = ref;
+      void resolveRef(ref, idx).then((src) => {
+        if (strip.dataset.mjStripActive !== String(idx)) return;
+        if (mainImg && src) mainImg.src = src;
+        body.dataset.previewImageReady = '1';
+      });
+      strip.querySelectorAll('.imagegen-mj-strip-thumb img').forEach((thumb, i) => {
+        void resolveRef(list[i], i).then((src) => {
+          if (src && thumb) thumb.src = src;
+        });
+      });
     };
 
     strip.querySelectorAll('[data-mj-strip-nav]').forEach((btn) => {
@@ -7823,26 +7964,33 @@
       e.preventDefault();
       e.stopPropagation();
       const idx = Number(strip.dataset.mjStripActive) || 0;
-      const src = list[idx];
-      if (!src || typeof window.openLightbox !== 'function') return;
-      window.openLightbox(src, {
-        imageGen: true,
-        feedKey: previewCtx?.feedKey || '',
-        cardId: previewCtx?.cardId || ''
+      const ref = list[idx];
+      if (!ref || typeof window.openLightbox !== 'function') return;
+      void resolveRef(ref, idx).then((src) => {
+        window.openLightbox(src || ref, {
+          imageGen: true,
+          feedKey: previewCtx?.feedKey || '',
+          cardId: previewCtx?.cardId || '',
+          mjGalleryUrls: list,
+          mjGalleryIndex: idx,
+          mjJobId: previewCtx?.parentJobId || ''
+        });
       });
     });
     strip.querySelector('[data-mj-strip-dl]')?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
       const idx = Number(strip.dataset.mjStripActive) || 0;
-      const src = list[idx];
-      if (!src) return;
-      const a = document.createElement('a');
-      a.href = src;
-      a.download = `mj-${idx + 1}.png`;
-      a.rel = 'noopener';
-      a.target = '_blank';
-      a.click();
+      const ref = list[idx];
+      if (!ref) return;
+      void resolveRef(ref, idx).then((src) => {
+        const a = document.createElement('a');
+        a.href = src || ref;
+        a.download = `mj-${idx + 1}.png`;
+        a.rel = 'noopener';
+        a.target = '_blank';
+        a.click();
+      });
     });
     renderAt(Number(strip.dataset.mjStripActive) || 0);
   }
@@ -7853,9 +8001,15 @@
   }
 
   function imageGenModelsInFamily(family) {
-    return [...imageGenModelCatalog]
-      .sort((a, b) => imageGenModelSortKey(a) - imageGenModelSortKey(b))
-      .filter((m) => imageGenModelUiFamily(m) === family);
+    if (!imageGenModelsByFamilyCache) {
+      imageGenModelsByFamilyCache = {};
+      for (const f of IMAGE_GEN_MODEL_FAMILIES) {
+        imageGenModelsByFamilyCache[f.key] = [...imageGenModelCatalog]
+          .filter((m) => imageGenModelUiFamily(m) === f.key && m.status !== 'offline')
+          .sort((a, b) => imageGenModelSortKey(a) - imageGenModelSortKey(b));
+      }
+    }
+    return imageGenModelsByFamilyCache[family] || [];
   }
 
   function resolveImageGenModelFamily(preferredFamily, modelId) {
@@ -7870,33 +8024,49 @@
     return keys.includes('gim2') ? 'gim2' : keys[0] || 'gim2';
   }
 
-  function renderImageGenModelFamilyTabs() {
+  function bindImageGenModelFamilyTabs() {
+    if (imageGenFamilyTabsBound) return;
     const host = document.getElementById('imageGenModelFamilyTabs');
     if (!host) return;
-    host.innerHTML = '';
+    imageGenFamilyTabsBound = true;
+    host.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-family]');
+      if (!btn || btn.classList.contains('active')) return;
+      imageGenModelFamily = btn.dataset.family || 'gim2';
+      updateImageGenModelFamilyTabsActive();
+      renderImageGenModelSelect({ keepModel: false, family: imageGenModelFamily });
+    });
+  }
+
+  function updateImageGenModelFamilyTabsActive() {
+    document.querySelectorAll('#imageGenModelFamilyTabs [data-family]').forEach((btn) => {
+      const active = btn.dataset.family === imageGenModelFamily;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
+  function rebuildImageGenModelFamilyTabs() {
+    const host = document.getElementById('imageGenModelFamilyTabs');
+    if (!host) return;
     const families = IMAGE_GEN_MODEL_FAMILIES.filter((f) => imageGenModelsInFamily(f.key).length);
     if (!families.length) {
       host.hidden = true;
+      host.innerHTML = '';
       return;
     }
     host.hidden = false;
     imageGenModelFamily = resolveImageGenModelFamily(imageGenModelFamily);
-    families.forEach((f) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'imagegen-model-family-tab' + (imageGenModelFamily === f.key ? ' active' : '');
-      btn.dataset.family = f.key;
-      btn.setAttribute('role', 'tab');
-      btn.setAttribute('aria-selected', imageGenModelFamily === f.key ? 'true' : 'false');
-      btn.textContent = f.label;
-      btn.addEventListener('click', () => {
-        if (imageGenModelFamily === f.key) return;
-        imageGenModelFamily = f.key;
-        syncImageGenModelParamsUI({ family: f.key });
-        renderImageGenModelSelect({ keepModel: false, family: f.key });
-      });
-      host.appendChild(btn);
-    });
+    host.innerHTML = families
+      .map(
+        (f) =>
+          `<button type="button" class="imagegen-model-family-tab${imageGenModelFamily === f.key ? ' active' : ''}" data-family="${f.key}" role="tab" aria-selected="${imageGenModelFamily === f.key ? 'true' : 'false'}">${f.label}</button>`
+      )
+      .join('');
+  }
+
+  function renderImageGenModelFamilyTabs() {
+    rebuildImageGenModelFamilyTabs();
   }
 
   function imageGenModelSortKey(m) {
@@ -7915,32 +8085,31 @@
       opts.family ?? imageGenModelFamily ?? draft?.modelFamily,
       current
     );
-    renderImageGenModelFamilyTabs();
+    updateImageGenModelFamilyTabsActive();
     const list = imageGenModelsInFamily(imageGenModelFamily);
-    sel.innerHTML = '';
-    list.forEach((m) => {
-      const opt = document.createElement('option');
-      opt.value = m.id;
-      const name = imageGenModelDisplayName(m);
-      let text = m.refundOnViolation ? name : `${name} · 违规不返还`;
-      if (m.status === 'maintenance' || m.selectable === false) {
-        opt.disabled = true;
-        text = `${name}（维护中）`;
-      }
-      opt.textContent = text;
-      sel.appendChild(opt);
-    });
+    const nextHtml = list
+      .map((m) => {
+        const name = imageGenModelDisplayName(m);
+        let text = m.refundOnViolation ? name : `${name} · 违规不返还`;
+        if (m.status === 'maintenance' || m.selectable === false) {
+          text = `${name}（维护中）`;
+        }
+        const disabled = m.status === 'maintenance' || m.selectable === false ? ' disabled' : '';
+        return `<option value="${esc(m.id)}"${disabled}>${esc(text)}</option>`;
+      })
+      .join('');
+    if (sel.dataset.optionsHtml !== nextHtml) {
+      sel.innerHTML = nextHtml;
+      sel.dataset.optionsHtml = nextHtml;
+    }
     const selectable = list.filter((m) => m.selectable !== false && m.status !== 'maintenance');
     const keepModel = opts.keepModel !== false;
     const pick =
       keepModel && [...sel.options].some((o) => o.value === current && !o.disabled)
         ? current
         : selectable[0]?.id || list[0]?.id || 'gpt-image-2';
-    sel.value = pick;
-    syncImageGenModelParamsUI();
-    syncImageGenModelHint();
-    updateImageGenResolutionSelect();
-    updateImageGenCostHint();
+    if (sel.value !== pick) sel.value = pick;
+    if (!opts.skipUiRefresh) scheduleImageGenModelUiRefresh();
   }
 
   function syncImageGenModelHint() {
@@ -7948,6 +8117,11 @@
     const sel = document.getElementById('imageGenModel');
     if (!hint || !sel) return;
     const m = imageGenModelCatalog.find((x) => x.id === sel.value);
+    if (m?.description) {
+      hint.textContent = m.description;
+      hint.hidden = false;
+      return;
+    }
     if (m?.status === 'maintenance' || m?.selectable === false) {
       hint.textContent = m.statusNotice || '该模型维护中，请换用其他模型';
       hint.hidden = false;
@@ -8040,6 +8214,9 @@
   const IMAGE_GEN_SIZE_GIM2 = ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'];
   /** 离线兜底：与 server aspectRatiosForModel 一致 */
   const IMAGE_GEN_SIZE_MJ = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'];
+  const IMAGE_GEN_SIZE_WAN = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'];
+  const IMAGE_GEN_SIZE_FLUX_KONTEXT = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '9:21'];
+  const IMAGE_GEN_SIZE_FLUX2 = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'];
   const IMAGE_GEN_ASPECT_FALLBACK = {
     'apimart-gpt-image-2-official-budget': ['16:9', '9:16', '4:3', '3:4'],
     'mooko-gpt-image-2-pro': ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'],
@@ -8052,8 +8229,15 @@
     'apimart-mj-v81': IMAGE_GEN_SIZE_MJ,
     'apimart-mj-v7': IMAGE_GEN_SIZE_MJ,
     'apimart-mj-niji7': IMAGE_GEN_SIZE_MJ,
-    'apimart-mj-niji6': IMAGE_GEN_SIZE_MJ,
-    'apimart-mj-v52': IMAGE_GEN_SIZE_MJ
+    'apimart-wan2-7-image': IMAGE_GEN_SIZE_WAN,
+    'apimart-wan2-7-image-pro': IMAGE_GEN_SIZE_WAN,
+    'apimart-flux-kontext-pro': IMAGE_GEN_SIZE_FLUX_KONTEXT,
+    'apimart-flux-kontext-max': IMAGE_GEN_SIZE_FLUX_KONTEXT,
+    'apimart-flux-2-pro': IMAGE_GEN_SIZE_FLUX2,
+    'apimart-flux-2-flex': IMAGE_GEN_SIZE_FLUX2,
+    'apimart-gemini-2-5-flash-preview': IMAGE_GEN_SIZE_BANANA,
+    'apimart-gemini-3-1-flash-preview': IMAGE_GEN_SIZE_BANANA,
+    'apimart-gemini-3-pro-preview': IMAGE_GEN_SIZE_BANANA
   };
   const BANANA2_EXTENDED_MODELS = new Set(['nano-banana-2', 'nano-banana-2-cl', 'nano-banana-2-4k-cl']);
   const IMAGE_GEN_SAVE_TARGET_LS = 'promptHub.imageGenSaveTarget.v1';
@@ -8069,13 +8253,28 @@
     return !!entry?.fixedQualityLow;
   }
 
+  function imageGenModelHidesResolution(modelId) {
+    const id = normalizeImageGenModelId(modelId);
+    return id.startsWith('apimart-flux-kontext');
+  }
+
   function isImageGenMjSaveAllTiles() {
-    return !!document.getElementById('imageGenMjSaveAllTiles')?.checked;
+    return false;
   }
 
   function getImageGenMjSpeed() {
     const v = document.querySelector('input[name="imageGenMjSpeed"]:checked')?.value;
-    return v === 'draft' || v === 'hd' ? v : '';
+    if (v === 'fast' || v === 'turbo') return v;
+    return '';
+  }
+
+  function syncImageGenMjToggleCheckedClasses() {
+    document.querySelectorAll('.imagegen-mj-speed-option').forEach((el) => {
+      el.classList.toggle('is-checked', !!el.querySelector('input:checked'));
+    });
+    document.querySelectorAll('.imagegen-mj-option-card').forEach((el) => {
+      el.classList.toggle('is-checked', !!el.querySelector('input:checked'));
+    });
   }
 
   function persistImageGenMjPrefs() {
@@ -8109,10 +8308,9 @@
     const imagineFields = document.getElementById('imageGenMjImagineFields');
     if (blendHint) blendHint.classList.toggle('hidden', !blend);
     if (imagineFields) imagineFields.classList.toggle('hidden', blend);
-    const submitBtn = document.getElementById('imageGenSubmit');
-    if (submitBtn && !imageGenBatchRunning) {
-      submitBtn.textContent = blend ? '开始混图' : (submitBtn.dataset.defaultLabel || '开始生成');
-    }
+    const countWrap = document.querySelector('.imagegen-footer-count');
+    if (countWrap) countWrap.classList.toggle('hidden', blend);
+    updateImageGenCostHint();
   }
 
   function syncImageGenModelParamsUI(opts = {}) {
@@ -8136,8 +8334,9 @@
     }
     const resParam = document.querySelector('.imagegen-param[data-param="resolution"]');
     const resLabel = document.querySelector('label[for="imageGenResolution"]');
+    const hideResolution = isMj || imageGenModelHidesResolution(modelId);
     for (const el of [resParam, resLabel]) {
-      if (el) el.hidden = isMj;
+      if (el) el.hidden = hideResolution;
     }
     const sizeRow = document.querySelector('.imagegen-params-row--size');
     if (sizeRow) sizeRow.classList.toggle('imagegen-params-row--mj-size', isMj);
@@ -8153,6 +8352,7 @@
     if (isMj) {
       updateImageGenSizeSelect();
       syncImageGenMjModeUI();
+      syncImageGenMjToggleCheckedClasses();
     }
   }
 
@@ -8191,24 +8391,68 @@
     if (document.getElementById('imageGenMjTile')?.checked) out.tile = true;
     if (document.getElementById('imageGenMjRaw')?.checked) out.raw = true;
     const speed = getImageGenMjSpeed();
-    if (speed === 'draft') out.draft = true;
-    if (speed === 'hd') out.hd = true;
-    return Object.keys(out).length ? out : undefined;
+    out.speed = speed === 'fast' || speed === 'turbo' ? speed : 'relax';
+    return out;
   }
 
-  function buildMjActionsHtml(buttons, parentJobId) {
+  function filterMjPreviewButtons(buttons) {
+    return (buttons || []).filter((b) => {
+      const action = String(b?.action || '').toLowerCase();
+      if (action === 'upscale') return false;
+      const custom = String(b?.customId || '');
+      if (/upsample|upscale/i.test(custom)) return false;
+      const label = String(b?.label || '');
+      if (/^放大\s*[1-4]?/.test(label)) return false;
+      return true;
+    });
+  }
+
+  function isMjBillableAction(action) {
+    const a = String(action || '').toLowerCase();
+    return a === 'variation' || a === 'high_variation' || a === 'low_variation' || a === 'reroll';
+  }
+
+  function getMjActionUnitCost(previewCard) {
+    const model = previewCard?.model || getImageGenModel();
+    const speed = getImageGenMjSpeed();
+    const detail = window.PointsSystem?.getImageGenCostDetail?.(model, '1k', speed);
+    if (detail?.final != null) return detail.final;
+    return window.PointsSystem?.getImageGenCost?.(model, '1k') ?? null;
+  }
+
+  function formatMjActionCredits(n) {
+    if (n == null || !Number.isFinite(Number(n))) return '';
+    const fmt = window.PointsSystem?.formatCreditsDisplay;
+    return fmt ? fmt(n) : String(n);
+  }
+
+  function buildMjActionsHtml(buttons, parentJobId, unitCost) {
     const parent = normalizeMjParentJobId(parentJobId);
-    if (!Array.isArray(buttons) || !buttons.length || !parent) return '';
-    const items = buttons
+    const list = filterMjPreviewButtons(buttons);
+    if (!list.length || !parent) return '';
+    const items = list
       .map((b, i) => {
         const action = esc(String(b.action || 'custom'));
-        const label = esc(String(b.label || '操作'));
+        const baseLabel = String(b.label || '操作');
+        const priceTag = isMjBillableAction(action) && unitCost != null
+          ? ` · ${formatMjActionCredits(unitCost)}积分`
+          : '';
+        const label = esc(`${baseLabel}${priceTag}`);
         const index = b.index != null ? Number(b.index) : '';
         const customId = b.customId ? esc(String(b.customId)) : '';
         return `<button type="button" class="btn btn-secondary btn-sm imagegen-mj-action-btn" data-mj-action="${action}" data-mj-parent="${esc(parent)}" data-mj-index="${index}" data-mj-custom="${customId}" data-mj-idx="${i}">${label}</button>`;
       })
       .join('');
     return `<div class="imagegen-mj-actions" role="group" aria-label="Midjourney 操作">${items}</div>`;
+  }
+
+  function buildMjActionsBlock(buttons, parentJobId, previewCard) {
+    const list = filterMjPreviewButtons(buttons);
+    if (!list.length || !normalizeMjParentJobId(parentJobId)) return '';
+    const unit = getMjActionUnitCost(previewCard);
+    const unitText = unit != null ? formatMjActionCredits(unit) : '—';
+    const note = `<p class="imagegen-mj-actions-note">四宫格已自动保存，直接切换/下载即可，<strong>无需放大</strong>。变体与重Roll 每次约 <strong>${unitText} 积分</strong>（等同一次生图）。</p>`;
+    return note + buildMjActionsHtml(list, parentJobId, unit);
   }
 
   async function runImageGenMjAction(btn) {
@@ -8220,16 +8464,34 @@
       toast('该操作暂不支持，请换其他按钮');
       return;
     }
+    if (action === 'upscale' || /upsample|upscale/i.test(btn.dataset.mjCustom || '')) {
+      toast('放大已关闭：四宫格已自动保存，请直接切换或下载');
+      return;
+    }
     const payload = {
       parentJobId,
       action,
       index: btn.dataset.mjIndex ? Number(btn.dataset.mjIndex) : undefined,
       customId: btn.dataset.mjCustom || undefined
     };
-    if (!payload.index && !payload.customId && (action === 'upscale' || action === 'variation')) {
+    if (!payload.index && !payload.customId && action === 'variation') {
       toast('请选择具体序号');
       return;
     }
+    const previewBody = document.getElementById('imageGenPreviewBody');
+    const previewCard = imageGenPreviewKind === 'warehouse' && imageGenPreviewId
+      ? findWarehouseCardById(imageGenPreviewId)
+      : null;
+    const unitCost = getMjActionUnitCost(previewCard);
+    if (isMjBillableAction(action) && unitCost != null) {
+      const balance = window.PointsSystem?.getCredits?.() ?? 0;
+      if (balance < unitCost) {
+        toast(`积分不足（需要 ${formatMjActionCredits(unitCost)} 积分）`);
+        return;
+      }
+    }
+    const model = previewCard?.model || getImageGenModel();
+    const modelLabel = window.PointsSystem?.getImageGenModel?.(model)?.label || model;
     const prevText = btn.textContent;
     btn.disabled = true;
     btn.textContent = '提交中…';
@@ -8243,9 +8505,51 @@
         window.PointsSystem?.setCreditsFromServer?.(res.data.creditsRemaining);
         window.PointsSystem?.updateCreditsUI?.();
       }
-      toast('已提交，请在作品中查看进度');
+      const jobId = res.data?.jobId;
+      const cost = res.data?.creditsCharged ?? 0;
+      if (jobId) {
+        const pendingId = genId('pending');
+        const saveTarget = getImageGenSaveTarget();
+        const pendingJob = {
+          id: pendingId,
+          prompt: previewBody?.dataset?.previewPrompt || `[MJ ${action}]`,
+          model,
+          modelLabel,
+          resolution: previewCard?.resolution || '1k',
+          quality: previewCard?.quality || 'standard',
+          size: previewCard?.size || getImageGenSize?.() || '1:1',
+          cost,
+          jobId,
+          targetGroup: saveTarget.targetGroup,
+          targetTags: saveTarget.targetTags,
+          startedAt: Date.now(),
+          silentToast: true,
+          mjAction: action
+        };
+        imageGenPendingJobs.unshift(pendingJob);
+        trackSessionGenJob(jobId);
+        persistPendingGenJobs();
+        void pollGenerationJobUntilDone(jobId, pendingId, {
+          prompt: pendingJob.prompt,
+          model,
+          resolution: pendingJob.resolution,
+          quality: pendingJob.quality,
+          size: pendingJob.size,
+          cost,
+          jobId,
+          targetGroup: saveTarget.targetGroup,
+          targetTags: saveTarget.targetTags,
+          silentToast: true
+        });
+      }
+      toast(
+        cost > 0
+          ? `已提交变体（-${formatMjActionCredits(cost)} 积分），完成后追加到原卡片`
+          : '已提交，完成后会自动存入原卡片'
+      );
       scheduleGenJobsSync(400);
       void resumePendingGenerationJobs();
+      renderImageGenFeed({ preserveScroll: true });
     } catch (e) {
       toast('操作失败，请稍后重试');
       console.warn('[mj-action]', e);
@@ -8282,16 +8586,25 @@
     if (id.startsWith('apimart-mj-') || entry?.uiFamily === 'midjourney') {
       return IMAGE_GEN_SIZE_MJ;
     }
+    if (id.startsWith('apimart-wan') || entry?.uiFamily === 'wan') {
+      return IMAGE_GEN_SIZE_WAN;
+    }
+    if (id.startsWith('apimart-flux-kontext') || (entry?.uiFamily === 'flux' && id.includes('kontext'))) {
+      return IMAGE_GEN_SIZE_FLUX_KONTEXT;
+    }
+    if (id.startsWith('apimart-flux-2') || (entry?.uiFamily === 'flux' && id.includes('flux-2'))) {
+      return IMAGE_GEN_SIZE_FLUX2;
+    }
     if (
       id === 'gpt-image-2-vip'
       || id === 'gpt-image-2'
       || id === 'apimart-gpt-image-2'
-      || entry?.provider === 'apimart'
       || entry?.uiFamily === 'gim2'
       || id.includes('gpt-image-2')
     ) {
       return IMAGE_GEN_SIZE_GIM2;
     }
+    if (entry?.provider === 'apimart') return IMAGE_GEN_SIZE_BASIC;
     if (entry?.provider === 'ithink') return IMAGE_GEN_SIZE_BASIC;
     return IMAGE_GEN_SIZE_BASIC;
   }
@@ -8302,13 +8615,12 @@
     if (!sel) return;
     const current = sel.value || '1:1';
     const options = imageGenSizeOptionsForModel(modelSel?.value || getImageGenModel());
-    sel.innerHTML = '';
-    options.forEach((value) => {
-      const opt = document.createElement('option');
-      opt.value = value;
-      opt.textContent = imageGenSizeOptionLabel(value);
-      sel.appendChild(opt);
-    });
+    const key = options.join('|');
+    if (sel.dataset.sizeOptions === key) return;
+    sel.dataset.sizeOptions = key;
+    sel.innerHTML = options
+      .map((value) => `<option value="${esc(value)}">${esc(imageGenSizeOptionLabel(value))}</option>`)
+      .join('');
     if (options.includes(current)) sel.value = current;
     else sel.value = options.includes('16:9') ? '16:9' : options.includes('1:1') ? '1:1' : options[0];
   }
@@ -8488,13 +8800,13 @@
     const current = sel.value || '1k';
     const model = imageGenModelCatalog.find((x) => x.id === modelSel?.value);
     const resolutions = model?.resolutions?.length ? model.resolutions : ['1k', '2k', '4k'];
-    sel.innerHTML = '';
-    resolutions.forEach((res) => {
-      const opt = document.createElement('option');
-      opt.value = res;
-      opt.textContent = res.toUpperCase();
-      sel.appendChild(opt);
-    });
+    const key = resolutions.join('|');
+    if (sel.dataset.resOptions !== key) {
+      sel.dataset.resOptions = key;
+      sel.innerHTML = resolutions
+        .map((res) => `<option value="${esc(res)}">${esc(res.toUpperCase())}</option>`)
+        .join('');
+    }
     if (resolutions.includes(current)) sel.value = current;
     else sel.value = resolutions[0];
     updateImageGenSizeSelect();
@@ -8645,14 +8957,17 @@
   function applyImageGenCostDisplay(detail, final, quality, size) {
     const hint = document.getElementById('imageGenCostHint');
     const btn = document.getElementById('imageGenSubmit');
-    const count = getImageGenBatchCount();
+    const isBlend = getImageGenMjMode() === 'blend' && isImageGenMidjourneyModel(getImageGenModel());
+    const count = isBlend ? 1 : getImageGenBatchCount();
     const fmt = window.PointsSystem?.formatCredits || ((n) => String(n));
     const unitPerSheet = `${fmt(final)} 积分/张`;
     const total = roundCreditsSafe(final * count);
     const totalLabel = fmt(total);
-    const submitLabel = count > 1
-      ? `生成 ${count} 张 · ${totalLabel} 积分`
-      : `生成图片 · ${unitPerSheet}`;
+    const submitLabel = isBlend
+      ? `开始混图 · ${unitPerSheet}`
+      : count > 1
+        ? `生成 ${count} 张 · ${totalLabel} 积分`
+        : `生成图片 · ${unitPerSheet}`;
     if (btn && !btn.disabled && !imageGenBatchRunning) btn.textContent = submitLabel;
     if (!hint) return;
     const modelLabel =
@@ -8664,7 +8979,9 @@
     const qualLabel =
       { standard: '低', high: '中', ultra: '高' }[quality] || quality;
     const parts = [modelLabel, qualLabel, sizeLabel];
-    if (count > 1) {
+    if (isBlend) {
+      parts.push(`混图 · ${unitPerSheet}`);
+    } else if (count > 1) {
       parts.push(`${count} 张 · 共 ${totalLabel} 积分（${unitPerSheet}）`);
     } else {
       parts.push(unitPerSheet);
@@ -8677,9 +8994,14 @@
     syncImageGenPromoNotice(detail, final);
   }
 
-  function catalogHasPricingFor(modelId, resolution) {
+  function catalogHasPricingFor(modelId, resolution, mjSpeed) {
     const m = imageGenModelCatalog.find((x) => x.id === modelId);
     if (!m) return false;
+    if (m.pricingBySpeed) {
+      const speed = mjSpeed === 'fast' || mjSpeed === 'turbo' ? mjSpeed : 'relax';
+      if (m.costBySpeed?.[speed] && Number.isFinite(Number(m.costBySpeed[speed].final))) return true;
+      if (m.creditsBySpeed?.[speed] != null) return true;
+    }
     const res = normalizeImageGenResolution(resolution);
     if (m.costByResolution?.[res] && Number.isFinite(Number(m.costByResolution[res].final))) return true;
     if (m.pricingByResolution && m.creditsByResolution?.[res] != null) return true;
@@ -8687,7 +9009,7 @@
     return false;
   }
 
-  function updateImageGenCostHint() {
+  function updateImageGenCostHintNow() {
     const btn = document.getElementById('imageGenSubmit');
     const hint = document.getElementById('imageGenCostHint');
     if (!imageGenModelCatalogReady) {
@@ -8696,7 +9018,8 @@
       return;
     }
     const { model, resolution, quality, size } = getImageGenFormMeta();
-    const detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution);
+    const mjSpeed = isImageGenMidjourneyModel(model) ? getImageGenMjSpeed() : null;
+    const detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution, mjSpeed);
     const final = detail?.final;
     if (final == null || !Number.isFinite(Number(final))) {
       if (btn && !btn.disabled && !imageGenBatchRunning) btn.textContent = '生成图片 · — 积分';
@@ -8705,11 +9028,21 @@
     }
     applyImageGenCostDisplay(detail, final, quality, size);
     window.ImageGenPromptTools?.updateBatchCostLabel?.();
-    if (catalogHasPricingFor(model, resolution)) return;
+    if (catalogHasPricingFor(model, resolution, mjSpeed)) return;
     clearTimeout(imageGenCostDebounceTimer);
     imageGenCostDebounceTimer = setTimeout(() => {
-      void refreshImageGenCostFromApi(model, resolution, quality, size);
-    }, 800);
+      const speed = isImageGenMidjourneyModel(model) ? getImageGenMjSpeed() : null;
+      void refreshImageGenCostFromApi(model, resolution, quality, size, speed);
+    }, 1200);
+  }
+
+  let imageGenCostHintRaf = 0;
+  function updateImageGenCostHint() {
+    if (imageGenCostHintRaf) cancelAnimationFrame(imageGenCostHintRaf);
+    imageGenCostHintRaf = requestAnimationFrame(() => {
+      imageGenCostHintRaf = 0;
+      updateImageGenCostHintNow();
+    });
   }
 
   const GEN_COST_QUOTE_TIMEOUT_MS = window.matchMedia?.('(max-width: 900px)')?.matches ? 1200 : 1800;
@@ -8722,7 +9055,7 @@
     }
     try {
       const quote = await Promise.race([
-        window.PromptHubApi.getGenerationCost(resolution, quality, model),
+        window.PromptHubApi.getGenerationCost(resolution, quality, model, localFallback?.speed ? { speed: localFallback.speed } : undefined),
         new Promise((_, reject) => {
           setTimeout(() => reject(new Error('cost quote timeout')), GEN_COST_QUOTE_TIMEOUT_MS);
         })
@@ -8746,12 +9079,13 @@
     }
   }
 
-  async function refreshImageGenCostFromApi(model, resolution, quality, size) {
+  async function refreshImageGenCostFromApi(model, resolution, quality, size, mjSpeed) {
     if (!window.PointsSystem?.useApiForAccount?.()) return;
     const seq = ++imageGenCostHintSeq;
+    const speedOpt = mjSpeed ? { speed: mjSpeed } : undefined;
     try {
       const quote = await Promise.race([
-        window.PromptHubApi.getGenerationCost(resolution, quality, model),
+        window.PromptHubApi.getGenerationCost(resolution, quality, model, speedOpt),
         new Promise((_, reject) => {
           setTimeout(() => reject(new Error('cost quote timeout')), GEN_COST_QUOTE_TIMEOUT_MS);
         })
@@ -8786,9 +9120,7 @@
 
   function updateImageGenPricingUI() {
     if (!imageGenModelCatalogReady) return;
-    updateImageGenResolutionSelect();
-    syncImageGenQualityUI();
-    updateImageGenCostHint();
+    scheduleImageGenModelUiRefresh();
   }
 
   window.updateImageGenPricingUI = updateImageGenPricingUI;
@@ -9317,6 +9649,7 @@
       findWarehouseCardForJob: (...a) => jr('findWarehouseCardForJob', ...a),
       hasWarehouseCardForJob: (...a) => jr('hasWarehouseCardForJob', ...a),
       repairMjWarehouseCardFields: (...a) => wr('repairMjWarehouseCardFields', ...a),
+      repairMjGalleryFromJob: (...a) => wr('repairMjGalleryFromJob', ...a),
       warehouseCardImageNeedsRecovery: (...a) => wr('warehouseCardImageNeedsRecovery', ...a),
       repairWarehouseCardImageFromJob: (...a) => wr('repairWarehouseCardImageFromJob', ...a),
       clearSessionGenJob: (...a) => jr('clearSessionGenJob', ...a),
@@ -9356,6 +9689,9 @@
       isImageGenMjSaveAllTiles,
       resolveMjPollImages,
       repairMjWarehouseCardFields,
+      repairMjGalleryFromJob,
+      persistPromptHubCards: () => persistPromptHubCards(),
+      queueUrgentCardsSync: () => queueUrgentCardsSync(),
       finishImageGenRun: (opts) => fr('finishImageGenRun', opts),
       removePendingJob: (...a) => jr('removePendingJob', ...a),
       clearSessionGenJob: (...a) => jr('clearSessionGenJob', ...a),

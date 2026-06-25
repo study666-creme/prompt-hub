@@ -35,6 +35,34 @@ export const BANANA_ASPECT_RATIOS = [
 
 export const BANANA2_EXTRA_RATIOS = ['1:4', '4:1', '1:8', '8:1'] as const;
 
+/** Flux 2.0 支持的 7 种宽高比 */
+export const FLUX2_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'] as const;
+
+/** Flux Kontext 宽高比 */
+export const FLUX_KONTEXT_ASPECT_RATIOS = [
+  '1:1',
+  '16:9',
+  '9:16',
+  '4:3',
+  '3:4',
+  '3:2',
+  '2:3',
+  '21:9',
+  '9:21'
+] as const;
+
+/** 万相 2.7 常用比例 */
+export const WAN27_ASPECT_RATIOS = [
+  '1:1',
+  '16:9',
+  '9:16',
+  '4:3',
+  '3:4',
+  '3:2',
+  '2:3',
+  '21:9'
+] as const;
+
 /** 常用五档（GrsAI 基础 / Apimart 备用 / ThinkAI 等） */
 export const BASIC_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4'] as const;
 
@@ -62,6 +90,10 @@ export function aspectRatiosForModel(modelId: string): readonly string[] {
   if (id.startsWith('mooko-')) return MOOKO_PRO_ASPECT_RATIOS;
   if (id === 'apimart-gpt-image-2') return IMAGE2_ASPECT_RATIOS;
   if (id === 'apimart-seedream-5-lite' || id.includes('seedream')) return BASIC_ASPECT_RATIOS;
+  if (id.startsWith('apimart-gemini') || id.includes('gemini-')) return BANANA_ASPECT_RATIOS;
+  if (id.startsWith('apimart-wan') || id.includes('wan2.7')) return WAN27_ASPECT_RATIOS;
+  if (id.startsWith('apimart-flux-kontext') || id.includes('flux-kontext')) return FLUX_KONTEXT_ASPECT_RATIOS;
+  if (id.startsWith('apimart-flux-2') || id.includes('flux-2-')) return FLUX2_ASPECT_RATIOS;
   if (id.startsWith('apimart-mj-') || id.startsWith('mj-')) return MJ_ASPECT_RATIOS;
   if (id.startsWith('ithink-')) return BASIC_ASPECT_RATIOS;
   if (id === 'gpt-image-2-vip' || id === 'gpt-image-2') return IMAGE2_ASPECT_RATIOS;

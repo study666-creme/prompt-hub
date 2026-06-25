@@ -5,6 +5,7 @@ import {
   confirmUpstreamTaskOutcome,
   fetchUpstreamTaskOnce,
   readJobProvider,
+  upstreamBindingsFromEnv,
   type ImageUpstreamBindings
 } from './image-upstream';
 import { ApiError } from './errors';
@@ -18,8 +19,10 @@ import {
   toStorageRef
 } from './image-archive';
 import { findFirstExistingStoragePath } from './media-cdn';
-import { defaultGridMjButtons } from './apimart-midjourney';
-import { parseMjImagineUrls } from './midjourney-models';
+import type { MjButtonPublic } from './midjourney-models';
+import { defaultGridMjButtons, filterMjButtonsForClient, fetchMidjourneyTaskGallery } from './apimart-midjourney';
+import { parseMjImagineUrls, buildMjGalleryUrls, mjPollHasFullGallery } from './midjourney-models';
+import { confirmApimartTaskOutcome } from './apimart';
 
 const GEN_IMAGE_BUCKET = 'card-images';
 import { type DebitSplit, deductUserCredits, refundUserCredits } from './membership-credits';
@@ -99,6 +102,8 @@ export type PollJobOpts = {
   quick?: boolean;
   /** 将慢速上游提交挂到 waitUntil，避免轮询 HTTP 被 100s 掐断 */
   kickSubmit?: (task: Promise<void>) => void;
+  /** MJ 超时兜底：仍只有 1～3 张时也标记完成 */
+  forceMjComplete?: boolean;
 };
 
 function scheduleBackgroundSubmit(
@@ -211,7 +216,7 @@ export async function pollAndUpdateJob(
         intervalMs: 1500
       });
       if (polled.status === 'completed' && polled.imageUrl) {
-        return completeJobFromPoll(admin, userId, job, polled, env);
+        return finishPollAsCompleted(admin, userId, job, polled, env, { quick: false });
       }
       const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id, env);
       if (storedArchive) {
@@ -642,19 +647,19 @@ export async function pollAndUpdateJob(
         };
       }
       if (st === 'queued') {
-        const { processFastProviderPendingSubmit } = await import('./fast-provider-submit');
+        const { processFastProviderPendingSubmit, fastSubmitParamsFromJob } = await import(
+          './fast-provider-submit'
+        );
         scheduleBackgroundSubmit(
           opts,
-          processFastProviderPendingSubmit(admin, userId, job, upstream, provider, {
-            upstreamModel: String(meta.upstreamModel || 'gpt-image-2-pro'),
-            prompt: String(job.prompt || ''),
-            resolution: String(job.resolution || '1k'),
-            quality: String(job.quality || 'standard'),
-            size: typeof meta.size === 'string' ? meta.size : undefined,
-            refImageUrls: Array.isArray(meta.refImageUrls)
-              ? (meta.refImageUrls as string[]).filter(Boolean)
-              : undefined
-          }),
+          processFastProviderPendingSubmit(
+            admin,
+            userId,
+            job,
+            upstream,
+            provider,
+            fastSubmitParamsFromJob(job)
+          ),
           provider
         );
       }
@@ -695,7 +700,7 @@ export async function pollAndUpdateJob(
   if (opts?.quick) {
     const polled = await fetchUpstreamTaskOnce(upstream, provider, taskId);
     if (polled.status === 'completed' && polled.imageUrl) {
-      return completeJobFromPoll(admin, userId, job, polled, env);
+      return finishPollAsCompleted(admin, userId, job, polled, env, { quick: true });
     }
     if (polled.status === 'failed') {
       if (polled.isViolation) {
@@ -715,7 +720,7 @@ export async function pollAndUpdateJob(
           intervalMs: 1200
         });
         if (confirmed.status === 'completed' && confirmed.imageUrl) {
-          return completeJobFromPoll(admin, userId, job, confirmed, env);
+          return finishPollAsCompleted(admin, userId, job, confirmed, env, { quick: true });
         }
         const msg = confirmed.errorMessage || polled.errorMessage || 'upstream_failed';
         await finalizeFailedJob(admin, userId, job, msg);
@@ -749,7 +754,7 @@ export async function pollAndUpdateJob(
       intervalMs: provider === 'mooko' ? 3000 : 2000
     });
     if (deep.status === 'completed' && deep.imageUrl) {
-      return completeJobFromPoll(admin, userId, job, deep, env);
+      return finishPollAsCompleted(admin, userId, job, deep, env, { quick: false });
     }
     if (deep.status === 'failed') {
       const msg = deep.errorMessage || 'upstream_failed';
@@ -771,7 +776,7 @@ export async function pollAndUpdateJob(
       intervalMs: slowPoll ? 12000 : 8000
     });
     if (late.status === 'completed' && late.imageUrl) {
-      return completeJobFromPoll(admin, userId, job, late, env);
+      return finishPollAsCompleted(admin, userId, job, late, env, { force: true });
     }
     const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id, env);
     if (storedArchive) {
@@ -789,7 +794,7 @@ export async function pollAndUpdateJob(
   const polled = await fetchUpstreamTaskOnce(upstream, provider, taskId);
 
   if (polled.status === 'completed' && polled.imageUrl) {
-    return completeJobFromPoll(admin, userId, job, polled, env);
+    return finishPollAsCompleted(admin, userId, job, polled, env, { quick: false });
   }
 
   if (polled.status === 'pending' && job.status === 'processing' && ageMs > 20 * 1000) {
@@ -798,7 +803,7 @@ export async function pollAndUpdateJob(
       intervalMs: provider === 'mooko' ? 3000 : 1800
     });
     if (deep.status === 'completed' && deep.imageUrl) {
-      return completeJobFromPoll(admin, userId, job, deep, env);
+      return finishPollAsCompleted(admin, userId, job, deep, env, { quick: false });
     }
   }
 
@@ -824,7 +829,7 @@ export async function pollAndUpdateJob(
       intervalMs: 5000
     });
     if (confirmed.status === 'completed' && confirmed.imageUrl) {
-      return completeJobFromPoll(admin, userId, job, confirmed, env);
+      return finishPollAsCompleted(admin, userId, job, confirmed, env, { force: true });
     }
     const msg = confirmed.errorMessage || polled.errorMessage || 'upstream_failed';
     const skipRefund = confirmed.isViolation === true && refundOnViolation === false;
@@ -865,6 +870,144 @@ async function syncExtraImagesFromUpstream(
   return extras;
 }
 
+/** MJ：从 Apimart 拉全量 URL 写入 meta（四宫格 + 单图） */
+export async function syncMjImagesFromUpstream(
+  admin: SupabaseClient,
+  job: JobRow,
+  upstream: ImageUpstreamBindings,
+  taskId: string,
+  opts?: { settle?: boolean }
+): Promise<{
+  composite: string | null;
+  tiles: string[];
+  gallery: string[];
+  allUrls: string[];
+} | null> {
+  if (!upstream.apimartKey || !taskId) return null;
+  const meta = (job.meta as Record<string, unknown>) || {};
+  if (meta.isMidjourney !== true) return null;
+  const fetched = opts?.settle
+    ? await confirmApimartTaskOutcome(upstream.apimartKey, upstream.apimartBase, taskId, {
+        attempts: 8,
+        intervalMs: 2500
+      })
+    : await fetchUpstreamTaskOnce(upstream, 'apimart', taskId);
+  const mjDetail = await fetchMidjourneyTaskGallery(
+    upstream.apimartKey,
+    upstream.apimartBase,
+    taskId
+  );
+  let allUrls = (fetched.imageUrls || []).filter(Boolean);
+  if (!allUrls.length && fetched.imageUrl) allUrls.push(fetched.imageUrl);
+  if (mjDetail) {
+    const merged = [
+      ...(mjDetail.composite ? [mjDetail.composite] : []),
+      ...mjDetail.tiles.filter((u) => u !== mjDetail.composite)
+    ];
+    if (merged.length) allUrls = merged;
+  }
+  if (!allUrls.length) return null;
+  const parsed = parseMjImagineUrls(allUrls, job.result_image_url as string | null);
+  const gallery = parsed.gallery?.length ? parsed.gallery : buildMjGalleryUrls(parsed.composite, parsed.tiles, parsed.primary);
+  const mjButtons = mjDetail?.buttons?.length ? mjDetail.buttons : undefined;
+  const nextMeta = {
+    ...meta,
+    mjGridUrls: parsed.tiles.length ? parsed.tiles : undefined,
+    mjCompositeUrl: parsed.composite || undefined,
+    mjAllUrls: allUrls,
+    mjGalleryUrls: gallery.length ? gallery : undefined,
+    ...(mjButtons?.length ? { mjButtons: filterMjButtonsForClient(mjButtons) } : {})
+  };
+  await admin
+    .from('generation_requests')
+    .update({
+      result_image_url: parsed.primary || job.result_image_url,
+      meta: nextMeta
+    })
+    .eq('id', job.id);
+  return { composite: parsed.composite, tiles: parsed.tiles, gallery, allUrls };
+}
+
+function shouldDeferMjCompletion(
+  job: JobRow,
+  polled: { imageUrl: string | null; imageUrls?: string[] },
+  gate?: { quick?: boolean; force?: boolean }
+): boolean {
+  const meta = (job.meta as Record<string, unknown>) || {};
+  if (meta.isMidjourney !== true) return false;
+  if (gate?.force) return false;
+  const urls = polled.imageUrls?.length
+    ? polled.imageUrls.filter(Boolean)
+    : polled.imageUrl
+      ? [polled.imageUrl]
+      : [];
+  return !mjPollHasFullGallery(urls);
+}
+
+async function enrichMjPollUrls(
+  env: Env | undefined,
+  meta: Record<string, unknown>,
+  polled: { imageUrl: string | null; imageUrls?: string[] }
+): Promise<{ urls: string[]; mjButtons?: MjButtonPublic[] }> {
+  let urls = polled.imageUrls?.length
+    ? polled.imageUrls.filter(Boolean)
+    : polled.imageUrl
+      ? [polled.imageUrl]
+      : [];
+  if (meta.isMidjourney !== true || !env) return { urls };
+  const taskId =
+    typeof meta.upstreamTaskId === 'string'
+      ? meta.upstreamTaskId
+      : typeof meta.apimartTaskId === 'string'
+        ? meta.apimartTaskId
+        : null;
+  if (!taskId) return { urls };
+  const upstream = upstreamBindingsFromEnv(env);
+  if (!upstream.apimartKey) return { urls };
+  const mjDetail = await fetchMidjourneyTaskGallery(
+    upstream.apimartKey,
+    upstream.apimartBase,
+    taskId
+  );
+  if (!mjDetail) return { urls };
+  const merged = [
+    ...(mjDetail.composite ? [mjDetail.composite] : []),
+    ...mjDetail.tiles.filter((u) => u !== mjDetail.composite)
+  ];
+  return {
+    urls: merged.length ? merged : urls,
+    mjButtons: mjDetail.buttons?.length ? mjDetail.buttons : undefined
+  };
+}
+
+async function finishPollAsCompleted(
+  admin: SupabaseClient,
+  userId: string,
+  job: JobRow,
+  polled: { imageUrl: string | null; imageUrls?: string[] },
+  env: Env | undefined,
+  gate?: { quick?: boolean; force?: boolean }
+): Promise<{
+  status: 'processing' | 'completed';
+  imageUrl: string | null;
+  errorMessage: string | null;
+  refunded: boolean;
+  extraImageUrls?: string[];
+  progressNote?: string | null;
+}> {
+  if (shouldDeferMjCompletion(job, polled, gate)) {
+    const meta = (job.meta as Record<string, unknown>) || {};
+    return {
+      status: 'processing',
+      imageUrl: null,
+      errorMessage: null,
+      refunded: false,
+      progressNote: slowProviderProgressNote(meta, readJobProvider(meta))
+    };
+  }
+  return completeJobFromPoll(admin, userId, job, polled, env);
+}
+
 async function completeJobFromPoll(
   admin: SupabaseClient,
   userId: string,
@@ -878,19 +1021,37 @@ async function completeJobFromPoll(
   refunded: boolean;
   extraImageUrls?: string[];
 }> {
-  const allUrls = polled.imageUrls?.length
-    ? polled.imageUrls
-    : polled.imageUrl
-      ? [polled.imageUrl]
-      : [];
   const meta = (job.meta as Record<string, unknown>) || {};
   const isMj = meta.isMidjourney === true;
-  const mjParsed = isMj ? parseMjImagineUrls(allUrls) : null;
-  const primary = (isMj ? mjParsed?.primary : null) || allUrls[0] || polled.imageUrl!;
+  const enriched = isMj ? await enrichMjPollUrls(env, meta, polled) : { urls: [] as string[] };
+  const allUrls = isMj && enriched.urls.length
+    ? enriched.urls
+    : polled.imageUrls?.length
+      ? polled.imageUrls
+      : polled.imageUrl
+        ? [polled.imageUrl]
+        : [];
+  const mjParsed = isMj ? parseMjImagineUrls(allUrls, job.result_image_url as string | null) : null;
+  const mjGallery = isMj && mjParsed
+    ? (mjParsed.gallery?.length
+      ? mjParsed.gallery
+      : buildMjGalleryUrls(mjParsed.composite, mjParsed.tiles, mjParsed.primary))
+    : [];
+  const primary =
+    (isMj && mjParsed?.composite)
+    || (isMj ? mjParsed?.primary : null)
+    || allUrls[0]
+    || polled.imageUrl!;
   const extras = isMj ? [] : allUrls.slice(1).filter(Boolean);
   let mjButtons = Array.isArray(meta.mjButtons) ? meta.mjButtons : undefined;
+  if (isMj && enriched.mjButtons?.length) {
+    mjButtons = filterMjButtonsForClient(enriched.mjButtons);
+  }
   if (isMj && !mjButtons?.length) {
     mjButtons = defaultGridMjButtons();
+  }
+  if (mjButtons?.length) {
+    mjButtons = filterMjButtonsForClient(mjButtons as MjButtonPublic[]);
   }
 
   /** 4K 等大图：先标记完成并返回上游临时链，R2 归档放后台（避免轮询 35s 超时） */
@@ -908,7 +1069,9 @@ async function completeJobFromPoll(
           ...(isMj && mjParsed
             ? {
                 mjGridUrls: mjParsed.tiles.length ? mjParsed.tiles : undefined,
-                mjCompositeUrl: mjParsed.composite || undefined
+                mjCompositeUrl: mjParsed.composite || undefined,
+                mjGalleryUrls: mjGallery.length ? mjGallery : undefined,
+                mjAllUrls: allUrls.length ? allUrls : undefined
               }
             : {}),
           archivePending: true,
@@ -947,7 +1110,9 @@ async function completeJobFromPoll(
         ...(isMj && mjParsed
           ? {
               mjGridUrls: mjParsed.tiles.length ? mjParsed.tiles : undefined,
-              mjCompositeUrl: mjParsed.composite || undefined
+              mjCompositeUrl: mjParsed.composite || undefined,
+              mjGalleryUrls: mjGallery.length ? mjGallery : undefined,
+              mjAllUrls: allUrls.length ? allUrls : undefined
             }
           : {}),
         ...(mjButtons?.length ? { mjButtons } : {})

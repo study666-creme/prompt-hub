@@ -131,29 +131,12 @@ export async function syncGrsaiUpstreamStatusesFromPublicPage(): Promise<void> {
 const UPSTREAM_MAINTENANCE_NOTICE =
   'GrsAI 上游维护中（已自动同步），请稍后再试或换用备用线路';
 
-/** 在后台手动维护/下架之外，叠加 GrsAI 上游状态 */
+/** 已停用：GrsAI 上游维护由站长在后台手动设置 */
 export function overlayGrsaiUpstreamStatus(
   resolved: ResolvedImageModel,
-  settings: ImageModelPricingSettings
+  _settings: ImageModelPricingSettings
 ): ResolvedImageModel {
-  if (resolved.provider !== 'grsai') return resolved;
-  const catalog = getCatalogEntry(resolved.id);
-  if (catalog?.followUpstreamMaintenance === false) return resolved;
-
-  const override = settings.models[resolved.id] || {};
-  if (override.status === 'offline' || override.status === 'maintenance') {
-    return resolved;
-  }
-
-  const upstream = getGrsaiUpstreamStatus(resolved.upstream);
-  if (upstream !== 'maintenance') return resolved;
-
-  return {
-    ...resolved,
-    status: 'maintenance',
-    enabled: false,
-    statusNotice: UPSTREAM_MAINTENANCE_NOTICE
-  };
+  return resolved;
 }
 
 export function upstreamMaintenanceNotice(): string {

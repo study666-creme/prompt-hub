@@ -87,6 +87,59 @@ export async function deleteFromR2(env: Env, path: string): Promise<boolean> {
   }
 }
 
+export type R2ListedObject = { key: string; size: number };
+
+/** 分页列出 R2 桶内对象（Workers binding） */
+export async function listR2ObjectsPage(
+  env: Env,
+  opts: { prefix?: string; cursor?: string; limit?: number }
+): Promise<{ objects: R2ListedObject[]; cursor?: string; truncated: boolean }> {
+  const bucket = r2Bucket(env);
+  if (!bucket) return { objects: [], truncated: false };
+  const limit = Math.min(1000, Math.max(1, opts.limit ?? 1000));
+  try {
+    const listed = await bucket.list({
+      prefix: opts.prefix ? cleanPath(opts.prefix) : undefined,
+      cursor: opts.cursor || undefined,
+      limit
+    });
+    const objects = (listed.objects || [])
+      .map((o) => ({ key: cleanPath(o.key), size: Number(o.size) || 0 }))
+      .filter((o) => o.key && o.size >= 512);
+    return {
+      objects,
+      cursor: listed.truncated ? listed.cursor : undefined,
+      truncated: !!listed.truncated
+    };
+  } catch {
+    return { objects: [], truncated: false };
+  }
+}
+
+/** 全桶扫描（带上限，避免 Worker 超时） */
+export async function scanAllR2Objects(
+  env: Env,
+  maxObjects = 15_000
+): Promise<{ objects: R2ListedObject[]; truncated: boolean }> {
+  const out: R2ListedObject[] = [];
+  let cursor: string | undefined;
+  let truncated = false;
+  while (out.length < maxObjects) {
+    const page = await listR2ObjectsPage(env, {
+      cursor,
+      limit: Math.min(1000, maxObjects - out.length)
+    });
+    out.push(...page.objects);
+    if (!page.truncated || !page.cursor) break;
+    cursor = page.cursor;
+    if (out.length >= maxObjects) {
+      truncated = true;
+      break;
+    }
+  }
+  return { objects: out, truncated };
+}
+
 async function downloadFromSupabase(env: Env, path: string): Promise<Blob | null> {
   const admin = createAdminClient(env);
   const key = cleanPath(path);

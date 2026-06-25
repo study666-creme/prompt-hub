@@ -51,12 +51,13 @@ adminCodeRoutes.get('/', async c => {
   const offset = Math.max(0, Number(c.req.query('offset')) || 0);
   const active = c.req.query('active');
   const search = (c.req.query('q') || '').trim().toUpperCase();
+  const category = String(c.req.query('category') || 'all').trim().toLowerCase();
 
   const admin = createAdminClient(c.env);
   let query = admin
     .from('activation_codes')
     .select(
-      'code, credits, membership_tier, membership_days, max_uses, used_count, active, note, expires_at, created_at',
+      'code, credits, membership_tier, membership_days, max_uses, used_count, active, note, offer_kind, expires_at, created_at',
       { count: 'exact' }
     )
     .order('created_at', { ascending: false })
@@ -65,6 +66,13 @@ adminCodeRoutes.get('/', async c => {
   if (active === 'true') query = query.eq('active', true);
   if (active === 'false') query = query.eq('active', false);
   if (search) query = query.ilike('code', `%${search}%`);
+  if (category === 'credits') {
+    query = query.gt('credits', 0).is('membership_tier', null).is('offer_kind', null);
+  } else if (category === 'membership') {
+    query = query.is('offer_kind', null).or('membership_tier.not.is.null,membership_days.gt.0');
+  } else if (category === 'offer') {
+    query = query.not('offer_kind', 'is', null);
+  }
 
   const { data, error, count } = await query;
   if (error) throw error;
@@ -75,7 +83,8 @@ adminCodeRoutes.get('/', async c => {
       items: data ?? [],
       total: count ?? 0,
       limit,
-      offset
+      offset,
+      category: category === 'all' ? 'all' : category
     }
   });
 });

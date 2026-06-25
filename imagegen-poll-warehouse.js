@@ -8,6 +8,7 @@
   let deps = {};
 
   function d() { return deps; }
+  function CG() { return global.PromptHubCardGallery; }
 
   function findWarehouseCardForJob(jobId) {
     if (!jobId) return null;
@@ -22,8 +23,9 @@
   function hasWarehouseCardForJob(jobId) {
     if (!jobId) return false;
     const card = findWarehouseCardForJob(jobId);
-    if (!card?.image) return false;
-    if (!d().isDisplayableImage(card.image)) return false;
+    if (!card) return false;
+    const cover = CG()?.getCardCoverImage?.(card) || card.image;
+    if (!cover || !d().isDisplayableImage(cover)) return false;
     return true;
   }
 
@@ -48,7 +50,101 @@
     return true;
   }
 
-  /** Midjourney 入库：可选四张各存一张卡片 */
+  /** MJ 放大/变体：追加到父卡片的 cardImages（最多 5 张） */
+  async function appendMjActionToParentCard(poll, ctx, pendingId) {
+    const parentJobId = String(poll?.data?.mjParentJobId || '').replace(/#\d+$/, '');
+    const actionImage = poll?.data?.imageUrl;
+    const action = poll?.data?.mjAction;
+    if (!parentJobId || !actionImage || !action) return false;
+    const card = findWarehouseCardForJob(parentJobId);
+    if (!card?.id) return false;
+    const galleryApi = CG();
+    if (!galleryApi) return false;
+
+    let stored = actionImage;
+    const slot = galleryApi.normalizeCardGallery(card).length + 1;
+    if (global.SupabaseSync?.archiveGeneratedCardImage) {
+      try {
+        stored = await global.SupabaseSync.archiveGeneratedCardImage(card.id, actionImage, {
+          jobId: `${parentJobId}#a${slot}`
+        }) || actionImage;
+      } catch (e) {
+        console.warn('[mj-action] gallery archive failed', e);
+      }
+    }
+    const merged = galleryApi.mergeCardGalleryImages(galleryApi.normalizeCardGallery(card), [stored]);
+    if (typeof global.persistCardGalleryUpdate === 'function') {
+      await global.persistCardGalleryUpdate(card.id, merged);
+    } else {
+      card.cardImages = merged;
+      galleryApi.syncCardGalleryFields(card);
+      card.updatedAt = Date.now();
+    }
+    if (pendingId) d().removePendingJob(pendingId);
+    if (poll?.data?.jobId) d().clearSessionGenJob(poll.data.jobId);
+    d().renderImageGenFeed({ preserveScroll: true });
+    if (!ctx?.silentToast) {
+      d().toast(action === 'upscale' ? '放大图已存入原卡片' : '变体已追加到原卡片');
+    }
+    return true;
+  }
+
+  function mjCardGalleryComplete(card) {
+    const gallery = CG()?.normalizeCardGallery?.(card) || [];
+    return gallery.length >= 4;
+  }
+
+  async function upsertMjGalleryToWarehouse(card, parsed, poll, ctx, pendingId, baseJobId) {
+    const gallery = parsed.gallery?.length
+      ? parsed.gallery.slice(0, CG()?.MAX || 5)
+      : CG()?.buildMjCardImages?.(parsed.composite, parsed.tiles, parsed.primary) || [];
+    if (gallery.length < 4) return false;
+
+    if (card?.id) {
+      card.cardImages = gallery;
+      if (parsed.composite) card.mjCompositeUrl = parsed.composite;
+      card.mjGridUrls = parsed.tiles?.length ? parsed.tiles.slice(0, 4) : gallery.slice(1, 5);
+      card.isMidjourney = true;
+      CG()?.syncCardGalleryFields?.(card);
+      card.updatedAt = Date.now();
+      if (typeof global.persistCardGalleryUpdate === 'function') {
+        await global.persistCardGalleryUpdate(card.id, gallery);
+      } else {
+        await d().persistPromptHubCards?.();
+      }
+      if (d().repairMjGalleryFromJob) {
+        await d().repairMjGalleryFromJob(card);
+      }
+      if (Array.isArray(poll?.data?.mjButtons) && poll.data.mjButtons.length) {
+        await d().repairMjWarehouseCardFields(card, {
+          mjGridUrls: parsed.tiles,
+          mjCompositeUrl: parsed.composite,
+          mjButtons: poll.data.mjButtons
+        });
+      }
+      if (pendingId) d().removePendingJob(pendingId);
+      d().clearSessionGenJob(baseJobId);
+      d().renderImageGenFeed({ preserveScroll: true, force: true });
+      d().queueUrgentCardsSync?.();
+      return true;
+    }
+
+    await saveMjToWarehouse({
+      ...ctx,
+      primary: gallery[0],
+      gridUrls: parsed.tiles?.length ? parsed.tiles : gallery.slice(parsed.composite ? 1 : 0, 5),
+      composite: parsed.composite,
+      buttons: poll?.data?.mjButtons,
+      gallery,
+      jobId: baseJobId,
+      silentToast: !!ctx.silentToast,
+      isRecovery: !!ctx.isRecovery,
+      pendingId
+    });
+    return true;
+  }
+
+  /** Midjourney 入库：单卡 cardImages（四宫格首图 + 单图 + 变体槽位） */
   async function saveMjToWarehouse({
     prompt,
     model,
@@ -66,13 +162,18 @@
     primary,
     gridUrls,
     composite,
-    buttons
+    buttons,
+    gallery: galleryInput
   }) {
     const tiles = (gridUrls || []).filter(Boolean).slice(0, 4);
-    const mainImage = primary || tiles[0];
+    const cardImages = Array.isArray(galleryInput) && galleryInput.length
+      ? galleryInput.filter(Boolean).slice(0, CG()?.MAX || 5)
+      : CG()?.buildMjCardImages?.(composite, tiles, primary || tiles[0])
+        || (tiles.length ? tiles : primary ? [primary] : []);
+    const mainImage = cardImages[0];
     if (!mainImage) return false;
-    const saveAll = d().isImageGenMjSaveAllTiles?.() && tiles.length > 1;
-    const base = {
+
+    await d().finishImageGenRun({
       prompt,
       model,
       resolution,
@@ -85,44 +186,22 @@
       pendingId,
       targetGroup,
       targetTags,
-      isMidjourney: true
-    };
-
-    if (saveAll) {
-      for (let i = 0; i < tiles.length; i += 1) {
-        await d().finishImageGenRun({
-          ...base,
-          image: tiles[i],
-          imageIndex: i + 1,
-          silentToast: true,
-          mjGridUrls: i === 0 ? tiles : null,
-          mjCompositeUrl: i === 0 ? composite : null,
-          mjButtons: i === 0 ? buttons : null,
-          mjSplitSave: true
-        });
-      }
-      if (!silentToast) {
-        d().toast(`Midjourney ${tiles.length} 张已分别存入仓库，点预览可对首张放大/变体`);
-      }
-      return true;
-    }
-
-    await d().finishImageGenRun({
-      ...base,
+      isMidjourney: true,
       image: mainImage,
       imageIndex: 1,
       silentToast: true,
       extraImages: [],
-      mjGridUrls: tiles.length ? tiles : [mainImage],
+      cardImages,
+      mjGridUrls: tiles,
       mjCompositeUrl: composite,
       mjButtons: buttons
     });
     if (!silentToast) {
-      const n = tiles.length;
+      const n = cardImages.length;
       d().toast(
         n >= 4
-          ? 'Midjourney 已入库（预览可切换四张），勾选「四张分别存入」可各存一张'
-          : `Midjourney 已入库 ${n} 张图，点预览继续操作`
+          ? `Midjourney 已入库（${n} 张在同一卡片，放大后自动追加）`
+          : `Midjourney 已入库 ${n} 张图`
       );
     }
     return true;
@@ -131,6 +210,12 @@
   /** 入库主图 + 同任务附赠图；已有主图时只补缺失的附赠槽位 */
   async function ensureGenJobCreationsFromPoll(poll, ctx, pendingId) {
     if (poll?.data?.status !== 'completed' || !poll.data.imageUrl) return false;
+
+    if (poll.data.mjParentJobId && poll.data.mjAction) {
+      const appended = await appendMjActionToParentCard(poll, ctx, pendingId);
+      if (appended) return true;
+    }
+
     const baseJobId = ctx?.jobId || poll.data.jobId;
     const imageUrl = poll.data.imageUrl;
     const extras = getPollExtraImageUrls(poll, imageUrl);
@@ -138,57 +223,9 @@
 
     if (isMj) {
       const parsed = d().resolveMjPollImages(poll);
-      const gridUrls = parsed.tiles.length ? parsed.tiles : parsed.primary ? [parsed.primary] : [];
-      const primary = parsed.primary || imageUrl;
-      if (!primary) return false;
-      if (baseJobId && hasWarehouseCardForJob(baseJobId)) {
-        const card = findWarehouseCardForJob(baseJobId);
-        if (card && gridUrls.length > 1
-          && (!Array.isArray(card.mjGridUrls) || card.mjGridUrls.length < gridUrls.length)) {
-          await d().repairMjWarehouseCardFields(card, {
-            mjGridUrls: gridUrls,
-            mjCompositeUrl: parsed.composite,
-            mjButtons: poll.data.mjButtons
-          });
-        }
-        if (d().isImageGenMjSaveAllTiles?.() && gridUrls.length > 1) {
-          for (let i = 2; i <= gridUrls.length; i += 1) {
-            const slotId = `${baseJobId}#${i}`;
-            if (!hasWarehouseCardForJob(slotId)) {
-              await d().finishImageGenRun({
-                ...ctx,
-                image: gridUrls[i - 1],
-                imageIndex: i,
-                cost: ctx.cost,
-                jobId: baseJobId,
-                silentToast: true,
-                isRecovery: !!ctx.isRecovery,
-                isMidjourney: true,
-                mjSplitSave: true
-              });
-            }
-          }
-        }
-        if (pendingId) d().removePendingJob(pendingId);
-        d().clearSessionGenJob(baseJobId);
-        d().renderImageGenFeed({ preserveScroll: true });
-        return true;
-      }
-      if (baseJobId && findWarehouseCardForJob(baseJobId) && !hasWarehouseCardForJob(baseJobId)) {
-        await d().repairWarehouseCardImageFromJob(findWarehouseCardForJob(baseJobId), primary, baseJobId);
-      }
-      await saveMjToWarehouse({
-        ...ctx,
-        primary,
-        gridUrls,
-        composite: parsed.composite,
-        buttons: poll.data.mjButtons,
-        jobId: baseJobId,
-        silentToast: !!ctx.silentToast,
-        isRecovery: !!ctx.isRecovery,
-        pendingId
-      });
-      return true;
+      if ((parsed.gallery?.length || 0) < 4) return false;
+      const card = baseJobId ? findWarehouseCardForJob(baseJobId) : null;
+      return upsertMjGalleryToWarehouse(card, parsed, poll, ctx, pendingId, baseJobId);
     }
 
     if (baseJobId && allGenCreationSlotsSaved(baseJobId, extras.length)) {
@@ -256,6 +293,7 @@
       isGenCreationSlotSaved,
       allGenCreationSlotsSaved,
       saveMjToWarehouse,
+      appendMjActionToParentCard,
       ensureGenJobCreationsFromPoll
     };
   }

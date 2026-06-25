@@ -526,8 +526,9 @@
       const storageAttr = feedImgStorageAttr(image);
       const jobAttr = jobId ? ` data-job-id="${d().esc?.(jobId)}"` : '';
       const cardIdAttr = sourceCardId ? ` data-source-card-id="${d().esc?.(sourceCardId)}"` : '';
+      const listJobId = jobId ? String(jobId).replace(/#\d+$/, '') : '';
       const listUrl = (sourceCardId && d().isDisplayableImage?.(image) && window.SupabaseSync?.getListDisplayImageSrc)
-        ? window.SupabaseSync.getListDisplayImageSrc(image, sourceCardId)
+        ? window.SupabaseSync.getListDisplayImageSrc(image, sourceCardId, listJobId ? { jobId: listJobId } : undefined)
         : '';
       const imgSrc = listUrl || (d().isDisplayableImage?.(image) ? d().IMG_LOADING_PLACEHOLDER : '');
       const imgPending = d().isDisplayableImage?.(image) && (!listUrl || imgSrc.includes('data:image/svg'));
@@ -618,14 +619,15 @@
       const groupLabel = c.group || '未分类';
       const titleTrim = (c.title || '').trim();
       const tagPart = (c.tags || []).slice(0, 2).join(' · ');
-      const mjBadge = c.isMidjourney && Array.isArray(c.mjGridUrls) && c.mjGridUrls.length > 1 ? 'MJ·4' : '';
+      const galleryN = window.PromptHubCardGallery?.normalizeCardGallery?.(c)?.length || 0;
+      const mjBadge = c.isMidjourney && galleryN > 1 ? `MJ·${galleryN}` : '';
       const whMeta = [groupLabel, tagPart, mjBadge].filter(Boolean).join(' · ');
       return buildFeedCardHtml({
         id: 'wh_' + c.id,
         sourceCardId: c.id,
         jobId: c.genJobId ? String(c.genJobId).replace(/#\d+$/, '') : null,
         prompt: c.prompt,
-        image: c.image,
+        image: window.PromptHubCardGallery?.getCardCoverImage?.(c) || c.image,
         title: titleTrim,
         metaLine: whMeta,
         meta: '',

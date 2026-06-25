@@ -35,6 +35,7 @@
       assetId: o.assetId || o.cardId,
       authorId: o.authorId,
       cardId: o.cardId || o.assetId,
+      jobId: o.jobId,
       variant: VARIANT_LIST,
       listOnly: true,
       allowFullFallback: false,
@@ -55,6 +56,8 @@
         authorId: o.authorId,
         communityFeed: o.communityFeed === true,
         jobId: o.jobId,
+        galleryIndex: o.galleryIndex,
+        useJobImageApi: o.useJobImageApi,
         gridFallbackUrl: o.gridFallbackUrl || o.fallbackGridUrl,
         allowGridFallback: o.allowGridFallback !== false
       });

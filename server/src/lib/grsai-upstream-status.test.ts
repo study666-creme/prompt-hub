@@ -26,7 +26,7 @@ describe('GrsAI upstream status', () => {
     expect(statuses['gpt-image-2']).toBe('active');
   });
 
-  it('overlays maintenance when upstream is down and admin is active', () => {
+  it('overlay is disabled — returns model unchanged', () => {
     noteGrsaiSubmitOutcome('gpt-image-2-vip', 'maintenance');
     const base = {
       id: 'gpt-image-2-vip',
@@ -38,11 +38,13 @@ describe('GrsAI upstream status', () => {
       statusNotice: null,
       enabled: true,
       visible: true,
-      followUpstreamMaintenance: true,
       creditsPerCall: 14,
       creditsByResolution: null,
       effectiveCreditsByResolution: null,
       pricingByResolution: false,
+      creditsBySpeed: null,
+      effectiveCreditsBySpeed: null,
+      pricingBySpeed: false,
       discountPercent: 100,
       effectiveBaseCredits: 14,
       fixedPrice: false,
@@ -53,13 +55,13 @@ describe('GrsAI upstream status', () => {
       uiFamily: 'gim2' as const,
       description: '',
       upstreamPoints: 1300,
-      resolutions: ['1k', '2k', '4k'] as const,
+      resolutions: ['2k', '4k'] as ('2k' | '4k')[],
       defaultCredits: 14,
       sortOrder: 1
     } satisfies ResolvedImageModel;
     const settings: ImageModelPricingSettings = { globalDiscountPercent: 100, models: {} };
     const out = overlayGrsaiUpstreamStatus(base, settings);
-    expect(out.status).toBe('maintenance');
-    expect(out.enabled).toBe(false);
+    expect(out.status).toBe('active');
+    expect(out.enabled).toBe(true);
   });
 });
