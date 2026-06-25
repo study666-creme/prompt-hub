@@ -8,7 +8,8 @@ const root = bundleRootFromMeta(import.meta.url);
 const sources = [
   'feed-layout.js',
   'feed-images.js',
-  'image-gen-feed.js'
+  'image-gen-feed.js',
+  'community-public-feed.js'
 ];
 
 concatMinifyBundle({

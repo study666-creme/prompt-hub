@@ -28,7 +28,7 @@
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260625o` · https://prompt-hubs.com |
+| **Pages** | build `20260625p` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
@@ -45,7 +45,7 @@
 |------|------|------|
 | 1 图片管线 | MediaPipeline 全站 Feed/卡片库/生图/资产 | ~95% |
 | 2 云同步解耦 | SyncOrchestrator + skipImageUpload | ~80% |
-| 3 模块化 | esbuild 拆包（pack-*.js 已上线） | 进行中 |
+| 3 模块化 | esbuild 拆包：`pack-assets.js` + `community-public-feed.js` | ~40% |
 
 ### 已知问题 / 下一步
 

@@ -5,7 +5,7 @@
 ## 脚本顺序（`index.html`）
 
 ```
-mobile.js → script.js → feed-layout.js → feed-images.js → image-gen-feed.js → features-draft.js
+mobile.js → script.js → feed-layout.js → feed-images.js → image-gen-feed.js → community-public-feed.js → features-draft.js
 ```
 
 - `mobile.js` 须在 `script.js` 之前（`MobileUI.isMobileViewport` 唯一来源）
@@ -18,6 +18,7 @@ mobile.js → script.js → feed-layout.js → feed-images.js → image-gen-feed
 | `feed-layout.js` | `FeedLayout.*` | 社区 Masonry / 我的主页 flex / 手机 grid |
 | `feed-images.js` | `FeedImages.*` | URL 解析、hydrate、`imageGenFeedSignOpts`、`feedImgStorageAttr` |
 | `image-gen-feed.js` | `ImageGenFeed.*` | 生图仓库 Masonry、渲染、分页 |
+| `community-public-feed.js` | `CommunityPublicFeed.*` | 全站社区 Feed API、缓存、分页拉取 |
 | `features-draft.js` | `FeatureDraft.*` | `wireFeedLayout` / `wireFeedImages` / `wireImageGenFeed` |
 
 ## 接线（解析时执行）

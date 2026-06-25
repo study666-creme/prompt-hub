@@ -23,6 +23,7 @@ const required = [
   'FeedLayout',
   'FeedImages',
   'ImageGenFeed',
+  'CommunityPublicFeed',
   'FEED_LAYOUT_MODE',
   'resolveImageDisplayUrl',
   'renderImageGenFeed'

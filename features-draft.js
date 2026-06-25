@@ -94,7 +94,10 @@
 
   let communityPosts = [];
   /** 全站 API Feed，不被 reconcile 裁剪（解决「库里有帖、登录却看不到」） */
-  let publicFeedPosts = [];
+  const publicFeedState = window.CommunityPublicFeed?.createState?.() || {
+    posts: [], at: 0, apiOffset: 0, nextApiOffset: 0,
+    remoteHasMore: true, loading: false, refreshPromise: null, moreInflight: false
+  };
   let creations = [];
   let likedIds = new Set();
   let favIds = new Set();
@@ -155,59 +158,12 @@
   const feedScrollIntent = {};
   let imageGenLayoutTimer = null;
   const displayUrlCache = new Map();
-  let publicFeedAt = 0;
-  let publicFeedApiOffset = 0;
-  /** 下次向 API 請求的 offset（與 publicFeedPosts.length 脫鉤，避免去重後偏移錯位） */
-  let publicFeedNextApiOffset = 0;
-  let publicFeedRemoteHasMore = true;
-  let publicFeedLoading = false;
   let communityPostsSyncInflight = null;
   let lastCommunityPostsSyncAt = 0;
   const COMMUNITY_POSTS_SYNC_GAP_MS = 120000;
-  const PUBLIC_FEED_TTL_MS = 120_000;
-  const PUBLIC_FEED_CACHE_VERSION = 7;
   /** 首屏可渲染的最少帖数（一页）；其余后台拉完再增量追加 */
   const PUBLIC_FEED_MIN_READY = FEED_PER_PAGE;
-  const LS_PUBLIC_FEED_CACHE = 'promptrepo_public_feed_cache';
   let publicFeedRefreshPromise = null;
-
-  function loadPublicFeedCache() {
-    try {
-      const raw = localStorage.getItem(LS_PUBLIC_FEED_CACHE);
-      if (!raw) return null;
-      const data = JSON.parse(raw);
-      if (!data || !Array.isArray(data.posts)) return null;
-      if (data.v !== PUBLIC_FEED_CACHE_VERSION) {
-        localStorage.removeItem(LS_PUBLIC_FEED_CACHE);
-        return null;
-      }
-      return data;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function hydratePublicFeedFromCache() {
-    if (publicFeedAt > 0) return true;
-    const cached = loadPublicFeedCache();
-    if (!cached?.posts?.length) return false;
-    if (cached.posts.length < PUBLIC_FEED_MIN_READY) {
-      localStorage.removeItem(LS_PUBLIC_FEED_CACHE);
-      return false;
-    }
-    publicFeedPosts = cached.posts.map(normalizeFeedPost).filter(Boolean);
-    publicFeedAt = cached.cachedAt || Date.now();
-    publicFeedApiOffset = publicFeedPosts.length;
-    publicFeedNextApiOffset = publicFeedPosts.length;
-    publicFeedRemoteHasMore = true;
-    return publicFeedPosts.length > 0;
-  }
-
-  function publicFeedNeedsFullRefresh() {
-    return publicFeedAt === 0
-      || publicFeedPosts.length < PUBLIC_FEED_MIN_READY
-      || Date.now() - publicFeedAt >= PUBLIC_FEED_TTL_MS;
-  }
 
   let progressiveCommunityRenderTimer = null;
   function scheduleProgressiveCommunityRender(forceRepaint = false) {
@@ -215,7 +171,7 @@
     progressiveCommunityRenderTimer = setTimeout(() => {
       if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
       if (communityScope === 'curated') return;
-      if (publicFeedPosts.length < PUBLIC_FEED_MIN_READY) return;
+      if (publicFeedState.posts.length < PUBLIC_FEED_MIN_READY) return;
       const grid = document.getElementById('communityGrid');
       if (!grid) return;
       const hasReal = grid.querySelector('.community-post-card:not(.community-feed-skeleton)');
@@ -225,72 +181,6 @@
       }
       renderCommunityNow({ skipFeedFetch: true, forceRepaint: forceRepaint || !hasReal });
     }, 48);
-  }
-
-  function savePublicFeedCache(posts) {
-    try {
-      const list = (posts || []).filter((p) => p && !p.isMock);
-      if (!list.length) {
-        localStorage.removeItem(LS_PUBLIC_FEED_CACHE);
-        return;
-      }
-      localStorage.setItem(
-        LS_PUBLIC_FEED_CACHE,
-        JSON.stringify({ v: PUBLIC_FEED_CACHE_VERSION, posts: list, cachedAt: Date.now() })
-      );
-    } catch (e) { /* ignore */ }
-  }
-
-  function normalizeFeedPost(p) {
-    if (!p || p.isMock) return null;
-    return {
-      id: String(p.id || ''),
-      sourceCardId: p.sourceCardId ?? p.source_card_id ?? null,
-      authorId: String(p.authorId ?? p.author_id ?? ''),
-      authorName: String(p.authorName ?? p.author_name ?? '用户'),
-      title: String(p.title || ''),
-      prompt: String(p.prompt || ''),
-      image: p.image ?? null,
-      likes: Math.max(0, Number(p.likes) || 0),
-      createdAt: Number(p.createdAt ?? p.created_at) || Date.now(),
-      updatedAt: Number(p.updatedAt ?? p.updated_at) || Date.now()
-    };
-  }
-
-  function authorIdFromPostImage(post) {
-    const image = post?.image;
-    if (!image || !window.SupabaseSync?.storagePathFromRef) return '';
-    const path = window.SupabaseSync.storagePathFromRef(image) || '';
-    const head = path.replace(/^\//, '').split('/')[0] || '';
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(head)) {
-      return head;
-    }
-    return '';
-  }
-
-  function communityPostDisplayKey(p) {
-    if (!p) return '';
-    if (p.sourceCardId) return `card:${p.sourceCardId}`;
-    const owner = authorIdFromPostImage(p) || String(p.authorId || '');
-    const prompt = String(p.prompt || '').trim().slice(0, 160).toLowerCase();
-    if (prompt && owner) return `prompt:${owner}:${prompt}`;
-    return p.id ? `id:${p.id}` : '';
-  }
-
-  function mergePostsLists(...lists) {
-    const map = new Map();
-    for (const list of lists) {
-      for (const p of list || []) {
-        if (!p || p.isMock) continue;
-        const key = communityPostDisplayKey(p);
-        if (!key) continue;
-        const prev = map.get(key);
-        const ts = p.updatedAt || p.createdAt || 0;
-        const prevTs = prev ? (prev.updatedAt || prev.createdAt || 0) : -1;
-        if (!prev || ts >= prevTs) map.set(key, p);
-      }
-    }
-    return [...map.values()];
   }
 
   /** 卡片库已勾选「发布到社区」但尚未写入 communityPosts 的条目 */
@@ -432,7 +322,7 @@
         } else {
           console.warn('[community] publish public failed', r);
         }
-      } else publicFeedAt = 0;
+      } else publicFeedState.at = 0;
     } catch (e) {
       console.warn('[community] publish public error', e);
     }
@@ -463,11 +353,11 @@
   /** 仅从全站 Feed 恢复「库中无卡」的发布标记（仅手动「从社区恢复」时调用） */
   function restorePublishedFlagsFromFeed() {
     const uid = window.SupabaseSync?.getUserId?.();
-    if (!uid || !publicFeedPosts.length) return false;
+    if (!uid || !publicFeedState.posts.length) return false;
     const cards = window.__promptHubCards || [];
     if (!cards.length) return false;
     let dirty = false;
-    for (const p of publicFeedPosts) {
+    for (const p of publicFeedState.posts) {
       if (!p?.sourceCardId) continue;
       const owner = authorIdFromPostImage(p) || String(p.authorId || '');
       if (owner !== String(uid)) continue;
@@ -566,7 +456,7 @@
   async function removePostFromPublicFeed(postId, opts = {}) {
     if (!postId) return;
     const sourceCardId = opts.sourceCardId ? String(opts.sourceCardId) : '';
-    publicFeedPosts = publicFeedPosts.filter((p) => {
+    publicFeedState.posts = publicFeedState.posts.filter((p) => {
       if (p.id === postId) return false;
       if (sourceCardId && String(p.sourceCardId) === sourceCardId) return false;
       return true;
@@ -576,8 +466,8 @@
       if (sourceCardId && String(p.sourceCardId) === sourceCardId) return false;
       return true;
     });
-    publicFeedAt = 0;
-    savePublicFeedCache(publicFeedPosts);
+    publicFeedState.at = 0;
+    savePublicFeedCache(publicFeedState.posts);
     if (!window.PromptHubApi?.unpublishCommunityPost) return;
     if (!window.SupabaseSync?.isLoggedIn?.()) return;
     try {
@@ -681,9 +571,9 @@
       domUnique,
       localEnd,
       remoteExhausted: store?.remoteExhausted,
-      publicFeedRemoteHasMore,
-      apiNextOffset: publicFeedNextApiOffset,
-      publicPosts: publicFeedPosts.length,
+      publicFeedRemoteHasMore: publicFeedState.remoteHasMore,
+      apiNextOffset: publicFeedState.nextApiOffset,
+      publicPosts: publicFeedState.posts.length,
       nearBottom: scrollEl
         ? scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - 140
         : null,
@@ -707,7 +597,7 @@
     const domUnique = countFeedDomUnique(containerId);
     if (domUnique >= store.posts.length) return true;
     if (getPendingFeedPosts(store, containerId, 1).length) return false;
-    if (!store.remoteExhausted && publicFeedRemoteHasMore) return false;
+    if (!store.remoteExhausted && publicFeedState.remoteHasMore) return false;
     return true;
   }
 
@@ -894,186 +784,6 @@
     void drainCommunityFeedPages(containerId, 6);
   }
 
-  function mergePublicFeedHead(incoming) {
-    const next = (incoming || []).map(normalizeFeedPost).filter(Boolean);
-    if (!next.length) return false;
-    if (!publicFeedPosts.length || publicFeedPosts.length <= next.length) {
-      publicFeedPosts = next;
-      publicFeedApiOffset = Math.max(publicFeedApiOffset, next.length);
-      return true;
-    }
-    const upd = new Map(next.map((p) => [String(p.id), p]));
-    publicFeedPosts = publicFeedPosts.map((p) => upd.get(String(p.id)) || p);
-    const seen = new Set(publicFeedPosts.map((p) => String(p.id)));
-    const fresh = next.filter((p) => !seen.has(String(p.id)));
-    if (fresh.length) publicFeedPosts = [...fresh, ...publicFeedPosts];
-    return true;
-  }
-
-  async function fetchAllPublicCommunityFeedPages(timeoutMs = 22000) {
-    if (!window.PromptHubApi?.getCommunityFeed) return null;
-    if (window.PromptHubApi?.prepareApiCall) await window.PromptHubApi.prepareApiCall();
-    else window.__PH_API_DOWN_UNTIL__ = 0;
-    const merged = new Map();
-    let offset = 0;
-    const pageSize = 100;
-    let lastFeedRes = null;
-    for (let round = 0; round < 60; round += 1) {
-      let batch = null;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const r = await window.PromptHubApi.getCommunityFeed({
-          limit: pageSize,
-          offset,
-          timeoutMs,
-          skipUnreachableMark: true
-        });
-        if (r?.ok && Array.isArray(r.data?.posts)) {
-          batch = r.data.posts;
-          lastFeedRes = r;
-          break;
-        }
-        if (attempt < 2) await new Promise((res) => setTimeout(res, 700 + attempt * 900));
-      }
-      if (!batch) return merged.size ? [...merged.values()] : null;
-      if (!batch.length) break;
-      for (const raw of batch) {
-        const p = normalizeFeedPost(raw);
-        if (p) merged.set(String(p.id), p);
-      }
-      publicFeedPosts = sortPostsByActivity([...merged.values()]);
-      const nextOff = Number(lastFeedRes?.data?.nextOffset);
-      offset = Number.isFinite(nextOff) && nextOff > offset ? nextOff : offset + batch.length;
-      publicFeedApiOffset = offset;
-      publicFeedNextApiOffset = offset;
-      publicFeedRemoteHasMore = lastFeedRes?.data?.hasMore === true
-        || (lastFeedRes?.data?.hasMore !== false && batch.length >= pageSize);
-      savePublicFeedCache(publicFeedPosts);
-      if (merged.size >= PUBLIC_FEED_MIN_READY) scheduleProgressiveCommunityRender();
-      if (!publicFeedRemoteHasMore || batch.length < pageSize) break;
-    }
-    if (merged.size) publicFeedRemoteHasMore = false;
-    return sortPostsByActivity([...merged.values()]);
-  }
-
-  async function refreshPublicCommunityFeed(opts = {}) {
-    if (!window.PromptHubApi?.getCommunityFeed) return false;
-    if (publicFeedLoading) return false;
-    const loggedIn = window.SupabaseSync?.isLoggedIn?.();
-    if (!opts.force && !publicFeedNeedsFullRefresh() && publicFeedPosts.length > 0) {
-      return false;
-    }
-    publicFeedLoading = true;
-    const prevPubSig = publicFeedPosts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
-    try {
-      const fetched = await fetchAllPublicCommunityFeedPages(opts.timeoutMs || 20000);
-      if (!fetched?.length) {
-        const cached = loadPublicFeedCache();
-        if (cached?.posts?.length && publicFeedAt === 0) {
-          const cachedSig = cached.posts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
-          if (cachedSig !== prevPubSig) {
-            publicFeedPosts = cached.posts.map(normalizeFeedPost).filter(Boolean);
-            publicFeedAt = cached.cachedAt || Date.now();
-            publicFeedApiOffset = Math.max(publicFeedApiOffset, publicFeedPosts.length);
-            return true;
-          }
-          return false;
-        }
-        return false;
-      }
-      publicFeedPosts = fetched;
-      publicFeedAt = Date.now();
-      publicFeedApiOffset = publicFeedNextApiOffset;
-      publicFeedRemoteHasMore = false;
-      savePublicFeedCache(publicFeedPosts);
-      if (loggedIn) {
-        if (window.CloudSyncSafety?.mergeCommunityPostsList) {
-          const pubForLocal = filterFeedPostsForPublishFlags(publicFeedPosts);
-          communityPosts = mergePostsLists(
-            window.CloudSyncSafety.mergeCommunityPostsList(communityPosts, pubForLocal),
-            buildPostsFromPublishedCards()
-          );
-          saveJson(LS_COMMUNITY, communityPosts.filter((p) => !p.isMock));
-        }
-      }
-      rebuildOwnPostFilterCache();
-      invalidateCommunityReconcileCache();
-      pruneLocalCommunityNotOnServer();
-      const nextPubSig = publicFeedPosts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
-      return nextPubSig !== prevPubSig;
-    } catch (e) {
-      console.warn('[community] public feed failed', e);
-      if (publicFeedAt > 0 && Date.now() - publicFeedAt < 5 * 60 * 1000) return false;
-      const cached = loadPublicFeedCache();
-      if (cached?.posts?.length && !publicFeedPosts.length) {
-        publicFeedPosts = cached.posts.map(normalizeFeedPost).filter(Boolean);
-        publicFeedAt = cached.cachedAt || Date.now();
-        publicFeedApiOffset = Math.max(publicFeedApiOffset, publicFeedPosts.length);
-        return true;
-      }
-      return false;
-    } finally {
-      publicFeedLoading = false;
-    }
-  }
-
-  let communityFeedMoreInflight = false;
-
-  /** 滚动分页见底后，按 offset 向 API 拉下一批。返回 null=网络失败（勿标记耗尽），[]=已无更多。 */
-  async function fetchMorePublicCommunityFeed() {
-    if (!window.PromptHubApi?.getCommunityFeed || communityFeedMoreInflight || publicFeedLoading) return null;
-    if (!publicFeedRemoteHasMore) return [];
-    communityFeedMoreInflight = true;
-    try {
-      const offset = publicFeedNextApiOffset;
-      const limit = 100;
-      const r = await window.PromptHubApi.getCommunityFeed({ limit, offset, timeoutMs: 20000 });
-      if (!r?.ok || !Array.isArray(r.data?.posts)) {
-        logFeedPageDebug('communityGrid', 'api_fetch_fail', { offset, code: r?.code });
-        return null;
-      }
-      const batch = r.data.posts;
-      const nextOff = Number(r.data?.nextOffset);
-      const hasMore = r.data?.hasMore === true
-        || (r.data?.hasMore !== false && batch.length >= limit);
-      publicFeedNextApiOffset = Number.isFinite(nextOff) && nextOff > offset
-        ? nextOff
-        : offset + batch.length;
-      publicFeedApiOffset = publicFeedNextApiOffset;
-      publicFeedRemoteHasMore = hasMore && batch.length > 0;
-      if (!batch.length) {
-        publicFeedRemoteHasMore = false;
-        logFeedPageDebug('communityGrid', 'api_exhausted', { offset });
-        return [];
-      }
-      const seen = new Set(publicFeedPosts.map((p) => String(p.id)));
-      const added = [];
-      for (const raw of batch) {
-        const p = normalizeFeedPost(raw);
-        if (!p || seen.has(String(p.id))) continue;
-        seen.add(String(p.id));
-        publicFeedPosts.push(p);
-        added.push(p);
-      }
-      if (added.length) {
-        publicFeedAt = Date.now();
-        savePublicFeedCache(publicFeedPosts);
-      }
-      logFeedPageDebug('communityGrid', 'api_batch', {
-        offset,
-        batch: batch.length,
-        added: added.length,
-        nextOffset: publicFeedNextApiOffset,
-        hasMore: publicFeedRemoteHasMore
-      });
-      return added.length ? added : batch.map(normalizeFeedPost).filter(Boolean);
-    } catch (e) {
-      console.warn('[community] fetch more feed failed', e);
-      return null;
-    } finally {
-      communityFeedMoreInflight = false;
-    }
-  }
-
   function appendRenderableToFeedStore(containerId, rawPosts) {
     const store = feedPagedStore[containerId];
     if (!store || !rawPosts?.length) return 0;
@@ -1095,14 +805,14 @@
     const store = feedPagedStore[containerId];
     if (!store) return false;
     if (store.page * FEED_PER_PAGE < store.posts.length) return true;
-    if (store.remoteExhausted && !publicFeedRemoteHasMore) {
+    if (store.remoteExhausted && !publicFeedState.remoteHasMore) {
       logFeedPageDebug(containerId, 'remote_exhausted_local_end');
       return false;
     }
     let attempts = 0;
     while (attempts < 12) {
       attempts += 1;
-      if (!publicFeedRemoteHasMore) {
+      if (!publicFeedState.remoteHasMore) {
         store.remoteExhausted = true;
         logFeedPageDebug(containerId, 'no_more_api', { attempts });
         return false;
@@ -1114,16 +824,16 @@
       }
       if (!batch.length) {
         store.remoteExhausted = true;
-        publicFeedRemoteHasMore = false;
+        publicFeedState.remoteHasMore = false;
         logFeedPageDebug(containerId, 'api_empty_done', { attempts });
         return false;
       }
       const added = appendRenderableToFeedStore(containerId, batch);
       if (added > 0) {
-        store.remoteExhausted = !publicFeedRemoteHasMore;
+        store.remoteExhausted = !publicFeedState.remoteHasMore;
         return true;
       }
-      if (!publicFeedRemoteHasMore) {
+      if (!publicFeedState.remoteHasMore) {
         store.remoteExhausted = true;
         logFeedPageDebug(containerId, 'api_dupes_done', { attempts });
         return false;
@@ -1340,9 +1050,9 @@
   function pruneOwnStaleCommunityPostsFromCloud() {
     const user = getActiveUser();
     if (user.id === 'guest') return false;
-    const pubIds = new Set(publicFeedPosts.map((p) => String(p.id)));
+    const pubIds = new Set(publicFeedState.posts.map((p) => String(p.id)));
     const pubCards = new Set(
-      publicFeedPosts.map((p) => String(p.sourceCardId)).filter(Boolean)
+      publicFeedState.posts.map((p) => String(p.sourceCardId)).filter(Boolean)
     );
     const publishCardIds = new Set(
       (window.__promptHubCards || [])
@@ -1368,10 +1078,10 @@
   /** 全站 Feed 已下架的帖，从本地 communityPosts / 卡片关联里清掉 */
   function pruneLocalCommunityNotOnServer() {
     const user = getActiveUser();
-    if (user.id === 'guest' || !publicFeedAt) return false;
-    const pubIds = new Set(publicFeedPosts.map((p) => String(p.id)));
+    if (user.id === 'guest' || !publicFeedState.at) return false;
+    const pubIds = new Set(publicFeedState.posts.map((p) => String(p.id)));
     const pubCards = new Set(
-      publicFeedPosts.map((p) => String(p.sourceCardId)).filter(Boolean)
+      publicFeedState.posts.map((p) => String(p.sourceCardId)).filter(Boolean)
     );
     let dirty = false;
     const before = communityPosts.length;
@@ -1580,13 +1290,13 @@
 
   function clearAllLocalFeatureData() {
     communityPosts = [];
-    publicFeedPosts = [];
+    publicFeedState.posts = [];
     creations = [];
     likedIds = new Set();
     favIds = new Set();
     communityEvents = [];
     notifications = [];
-    publicFeedAt = 0;
+    publicFeedState.at = 0;
     publicFeedRefreshPromise = null;
     try {
       localStorage.removeItem(LS_COMMUNITY);
@@ -1627,8 +1337,8 @@
     communityPosts = filterCommunityPostsForDisplay(loadJson(LS_COMMUNITY, []));
     if (!loggedInBoot) {
       communityPosts = [];
-      publicFeedPosts = [];
-      publicFeedAt = 0;
+      publicFeedState.posts = [];
+      publicFeedState.at = 0;
     }
     creations = dedupeCreationsByJobId(filterCreationsForCloud(loadJson(LS_CREATIONS, [])));
     likedIds = new Set(loadJson(LS_LIKES, []));
@@ -1696,7 +1406,7 @@
       persistCommunity();
       rebuildOwnPostFilterCache();
       invalidateCommunityReconcileCache();
-      publicFeedAt = 0;
+      publicFeedState.at = 0;
       scheduleSyncMyPostsToPublicFeed(2500);
     }
     return changed;
@@ -1964,7 +1674,7 @@
   function enrichPostsWithPublicFeedImages(posts) {
     const pubById = new Map();
     const pubByCard = new Map();
-    for (const p of publicFeedPosts) {
+    for (const p of publicFeedState.posts) {
       if (p?.id) pubById.set(String(p.id), p);
       if (p?.sourceCardId) pubByCard.set(String(p.sourceCardId), p);
     }
@@ -1986,12 +1696,12 @@
 
   function getAllCommunityPosts() {
     const user = getActiveUser();
-    const pub = filterCommunityPostsForDisplay(publicFeedPosts, {
+    const pub = filterCommunityPostsForDisplay(publicFeedState.posts, {
       skipCardTombstones: true,
       skipPostTombstones: true
     });
     if (user.id === 'guest') {
-      return publicFeedAt > 0 ? pub : [];
+      return publicFeedState.at > 0 ? pub : [];
     }
     const local = filterCommunityPostsForDisplay(communityPosts);
     return enrichPostsWithPublicFeedImages(
@@ -2013,14 +1723,14 @@
   /** 社区 Grid：全站 API 帖为准（服务器已发布即展示）；本地 pending 仅补尚未入库的自己的帖 */
   function getCommunityFeedForDisplay() {
     const user = getActiveUser();
-    const pub = filterCommunityPostsForDisplay(publicFeedPosts, {
+    const pub = filterCommunityPostsForDisplay(publicFeedState.posts, {
       skipCardTombstones: true,
       skipPostTombstones: true
     }).filter(isFeedRenderablePost);
     if (user.id === 'guest') {
-      return publicFeedAt > 0 ? pub : [];
+      return publicFeedState.at > 0 ? pub : [];
     }
-    if (!publicFeedPosts.length && !publicFeedAt) return [];
+    if (!publicFeedState.posts.length && !publicFeedState.at) return [];
     const pubIds = new Set(pub.map((p) => String(p.id)));
     const pubCards = new Set(pub.map((p) => String(p.sourceCardId)).filter(Boolean));
     const pending = buildPostsFromPublishedCards().filter((p) => {
@@ -2046,8 +1756,8 @@
     if (!list.length) return false;
     const cardIds = new Set(list.map((c) => c.id));
     const linkedIds = new Set(list.map((c) => c.communityPostId).filter(Boolean));
-    const publicCardIds = new Set(publicFeedPosts.map((p) => p.sourceCardId).filter(Boolean));
-    const publicPostIds = new Set(publicFeedPosts.map((p) => p.id));
+    const publicCardIds = new Set(publicFeedState.posts.map((p) => p.sourceCardId).filter(Boolean));
+    const publicPostIds = new Set(publicFeedState.posts.map((p) => p.id));
     const before = communityPosts.length;
     communityPosts = communityPosts.filter((p) => {
       if (!p || p.isMock) return false;
@@ -2413,7 +2123,7 @@
     const existing = new Set(list.map((c) => c.id));
     const tomb = window.getDeletedCardTombstones?.() || {};
     let added = 0;
-    const mine = publicFeedPosts.filter((p) => {
+    const mine = publicFeedState.posts.filter((p) => {
       if (!p?.sourceCardId) return false;
       const owner = authorIdFromPostImage(p) || String(p.authorId || '');
       return owner === String(uid);
@@ -2498,7 +2208,7 @@
         }
       };
       void syncMyPostsToPublicFeed().finally(() => {
-        void refreshPublicCommunityFeed({ force: publicFeedAt === 0 }).then(afterFeed);
+        void refreshPublicCommunityFeed({ force: publicFeedState.at === 0 }).then(afterFeed);
       });
       prunePendingJobsWithWarehouseCards();
       if (document.getElementById('pageImageGen')?.classList.contains('active')) {
@@ -2920,6 +2630,65 @@
       img.addEventListener('error', tick, { once: true });
     });
     setTimeout(finish, 2800);
+  }
+
+  /* —— 全站社区 Feed API：community-public-feed.js —— */
+  let normalizeFeedPost;
+  let authorIdFromPostImage;
+  let communityPostDisplayKey;
+  let mergePostsLists;
+  let loadPublicFeedCache;
+  let savePublicFeedCache;
+  let hydratePublicFeedFromCache;
+  let publicFeedNeedsFullRefresh;
+  let mergePublicFeedHead;
+  let fetchAllPublicCommunityFeedPages;
+  let refreshPublicCommunityFeed;
+  let fetchMorePublicCommunityFeed;
+  let PUBLIC_FEED_TTL_MS = 120_000;
+  let LS_PUBLIC_FEED_CACHE = 'promptrepo_public_feed_cache';
+
+  function wireCommunityPublicFeed() {
+    if (window.__communityPublicFeedWired) return;
+    if (!window.CommunityPublicFeed?.init) {
+      console.error('[FeatureDraft] pack-feed.js not loaded — CommunityPublicFeed missing');
+      return;
+    }
+    const CPF = window.CommunityPublicFeed.init({
+      state: publicFeedState,
+      getFeedPerPage: () => FEED_PER_PAGE,
+      sortPostsByActivity,
+      scheduleProgressiveCommunityRender,
+      logFeedPageDebug,
+      rebuildOwnPostFilterCache,
+      invalidateCommunityReconcileCache,
+      pruneLocalCommunityNotOnServer,
+      onLoggedInFeedRefreshed: (posts) => {
+        if (window.CloudSyncSafety?.mergeCommunityPostsList) {
+          const pubForLocal = filterFeedPostsForPublishFlags(posts);
+          communityPosts = CPF.mergePostsLists(
+            window.CloudSyncSafety.mergeCommunityPostsList(communityPosts, pubForLocal),
+            buildPostsFromPublishedCards()
+          );
+          saveJson(LS_COMMUNITY, communityPosts.filter((p) => !p.isMock));
+        }
+      }
+    });
+    normalizeFeedPost = CPF.normalizeFeedPost;
+    authorIdFromPostImage = CPF.authorIdFromPostImage;
+    communityPostDisplayKey = CPF.communityPostDisplayKey;
+    mergePostsLists = CPF.mergePostsLists;
+    loadPublicFeedCache = CPF.loadPublicFeedCache;
+    savePublicFeedCache = CPF.savePublicFeedCache;
+    hydratePublicFeedFromCache = CPF.hydratePublicFeedFromCache;
+    publicFeedNeedsFullRefresh = CPF.publicFeedNeedsFullRefresh;
+    mergePublicFeedHead = CPF.mergePublicFeedHead;
+    fetchAllPublicCommunityFeedPages = CPF.fetchAllPublicCommunityFeedPages;
+    refreshPublicCommunityFeed = CPF.refreshPublicCommunityFeed;
+    fetchMorePublicCommunityFeed = CPF.fetchMorePublicCommunityFeed;
+    PUBLIC_FEED_TTL_MS = CPF.PUBLIC_FEED_TTL_MS;
+    LS_PUBLIC_FEED_CACHE = CPF.LS_PUBLIC_FEED_CACHE;
+    window.__communityPublicFeedWired = true;
   }
 
   /* —— Feed 排版：feed-layout.js（见 docs/FEED-LAYOUT.md）—— */
@@ -4137,7 +3906,7 @@
 
   let renderCommunityTimer = null;
   function renderCommunity(opts = {}) {
-    if (opts.skipFeedFetch === undefined && publicFeedAt > 0 && Date.now() - publicFeedAt < PUBLIC_FEED_TTL_MS) {
+    if (opts.skipFeedFetch === undefined && publicFeedState.at > 0 && Date.now() - publicFeedState.at < PUBLIC_FEED_TTL_MS) {
       opts = { ...opts, skipFeedFetch: true };
     }
     if (opts.immediate) {
@@ -4218,12 +3987,12 @@
     if (!opts.skipFeedFetch) {
       hydratePublicFeedFromCache();
       const feedStale = publicFeedNeedsFullRefresh();
-      if ((publicFeedAt === 0 || publicFeedPosts.length < PUBLIC_FEED_MIN_READY) && !publicFeedLoading) {
+      if ((publicFeedState.at === 0 || publicFeedState.posts.length < PUBLIC_FEED_MIN_READY) && !publicFeedState.loading) {
         showCommunityFeedSkeleton(container, 8);
         void refreshPublicCommunityFeed({ force: true, timeoutMs: 15000 }).then(async () => {
           if (gen !== communityFeedRenderGen) return;
           if (communityScope === 'curated') return;
-          if (publicFeedAt === 0) {
+          if (publicFeedState.at === 0) {
             setFeedGridEmpty(
               container,
               '<div class="feature-empty community-feed-empty"><p>社区加载失败</p><button type="button" class="btn btn-ghost btn-sm" onclick="renderCommunity({ immediate: true, forceRepaint: true })">重试</button></div>'
@@ -4238,7 +4007,7 @@
         });
         return;
       }
-      if (feedStale && !publicFeedLoading) {
+      if (feedStale && !publicFeedState.loading) {
         void refreshPublicCommunityFeed({ force: true, timeoutMs: 15000 }).then(async (changed) => {
           if (gen !== communityFeedRenderGen) return;
           if (communityScope === 'curated') return;
@@ -4280,7 +4049,7 @@
     }
     const guestUser = getActiveUser().id === 'guest';
     const loggedInUser = window.SupabaseSync?.isLoggedIn?.();
-    if (!list.length && (guestUser || loggedInUser) && (publicFeedLoading || !publicFeedAt)) {
+    if (!list.length && (guestUser || loggedInUser) && (publicFeedState.loading || !publicFeedState.at)) {
       showCommunityFeedSkeleton(container, 6);
       return;
     }
@@ -4301,7 +4070,7 @@
       const restoreCardsBtn = window.SupabaseSync?.isLoggedIn?.() && cardN === 0
         ? '<button type="button" class="btn btn-secondary" onclick="syncCloudNow()">从云端恢复卡片库</button>'
         : '';
-      const rateHint = publicFeedLoading
+      const rateHint = publicFeedState.loading
         ? '<p class="panel-hint">正在加载全站社区内容…</p>'
         : (loadPublicFeedCache()?.posts?.length
           ? '<p class="panel-hint">社区列表加载受限，已显示缓存；请稍后再刷新</p>'
@@ -4419,7 +4188,7 @@
       const postIds = new Set();
       if (idx >= 0) postIds.add(String(communityPosts[idx].id));
       if (card.communityPostId) postIds.add(String(card.communityPostId));
-      for (const p of publicFeedPosts) {
+      for (const p of publicFeedState.posts) {
         if (p && String(p.sourceCardId) === String(card.id)) postIds.add(String(p.id));
       }
       for (const p of communityPosts) {
@@ -4427,8 +4196,8 @@
       }
       if (idx >= 0) communityPosts.splice(idx, 1);
       else communityPosts = communityPosts.filter((p) => String(p.sourceCardId) !== String(card.id));
-      publicFeedPosts = publicFeedPosts.filter((p) => String(p.sourceCardId) !== String(card.id));
-      savePublicFeedCache(publicFeedPosts);
+      publicFeedState.posts = publicFeedState.posts.filter((p) => String(p.sourceCardId) !== String(card.id));
+      savePublicFeedCache(publicFeedState.posts);
       card.publishedToCommunity = false;
       card.communityPostId = null;
       persistCommunity();
@@ -4518,7 +4287,7 @@
     const card = (window.__promptHubCards || []).find((c) => String(c.id) === cid);
     const postIds = new Set();
     if (card?.communityPostId) postIds.add(String(card.communityPostId));
-    for (const p of [...communityPosts, ...publicFeedPosts, ...getAllCommunityPosts()]) {
+    for (const p of [...communityPosts, ...publicFeedState.posts, ...getAllCommunityPosts()]) {
       if (p && String(p.sourceCardId) === cid) postIds.add(String(p.id));
     }
     for (const postId of postIds) {
@@ -4528,8 +4297,8 @@
       await removePostFromPublicFeed(postId, { sourceCardId: cid });
     }
     communityPosts = communityPosts.filter((p) => String(p.sourceCardId) !== cid);
-    publicFeedPosts = publicFeedPosts.filter((p) => String(p.sourceCardId) !== cid);
-    savePublicFeedCache(publicFeedPosts);
+    publicFeedState.posts = publicFeedState.posts.filter((p) => String(p.sourceCardId) !== cid);
+    savePublicFeedCache(publicFeedState.posts);
     if (card) {
       card.publishedToCommunity = false;
       card.communityPostId = null;
@@ -4637,11 +4406,11 @@
 
   function setPostLikes(id, likes) {
     const n = Math.max(0, Math.floor(Number(likes) || 0));
-    for (const list of [publicFeedPosts, communityPosts]) {
+    for (const list of [publicFeedState.posts, communityPosts]) {
       const p = list.find((x) => x.id === id);
       if (p) p.likes = n;
     }
-    savePublicFeedCache(publicFeedPosts);
+    savePublicFeedCache(publicFeedState.posts);
   }
 
   function bumpPostLikes(id, delta = 1) {
@@ -12354,7 +12123,7 @@
           window.FeedLayout?.repairCommunityMasonry?.('communityGrid');
           hydratePublicFeedFromCache();
           const hasRealCards = grid?.querySelector('.community-post-card:not(.community-feed-skeleton)');
-          const feedFresh = !publicFeedNeedsFullRefresh() && publicFeedPosts.length > 0;
+          const feedFresh = !publicFeedNeedsFullRefresh() && publicFeedState.posts.length > 0;
           if (hasRealCards && grid?.dataset.feedSig && feedFresh) {
             patchFeedLikeLabels(grid, filterAndSortPosts(getCommunityFeedForDisplay()));
             scheduleCommunityLayout('communityGrid', { force: true, immediate: true, recalcCols: true });
@@ -12376,7 +12145,7 @@
             if (seq !== communityOnActivateSeq) return;
             if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
             ensureCommunityFromCardsThrottled(false);
-            if (publicFeedNeedsFullRefresh() && !publicFeedLoading) {
+            if (publicFeedNeedsFullRefresh() && !publicFeedState.loading) {
               if (grid && !hasRealCards) showCommunityFeedSkeleton(grid, 8);
               void refreshPublicCommunityFeed({ force: true, timeoutMs: 20000 }).then(async () => {
                 if (seq !== communityOnActivateSeq) return;
@@ -12387,7 +12156,7 @@
                 renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
                 await growCommunityFeedAfterPublicRefresh('communityGrid');
               });
-            } else if (!publicFeedLoading) {
+            } else if (!publicFeedState.loading) {
               void refreshPublicCommunityFeed({ force: false }).then(async (changed) => {
                 if (seq !== communityOnActivateSeq) return;
                 if (!changed) return;
@@ -12612,21 +12381,21 @@
     try { localStorage.removeItem(LS_PUBLIC_FEED_CACHE); } catch (e) { /* ignore */ }
     if (window.PromptHubApi?.prepareApiCall) await window.PromptHubApi.prepareApiCall();
     else window.__PH_API_DOWN_UNTIL__ = 0;
-    publicFeedAt = 0;
-    publicFeedPosts = [];
-    publicFeedApiOffset = 0;
-    publicFeedNextApiOffset = 0;
-    publicFeedRemoteHasMore = true;
+    publicFeedState.at = 0;
+    publicFeedState.posts = [];
+    publicFeedState.apiOffset = 0;
+    publicFeedState.nextApiOffset = 0;
+    publicFeedState.remoteHasMore = true;
     resetCommunityFeedGrid('communityGrid');
     const fetched = await fetchAllPublicCommunityFeedPages(28000);
     if (!fetched?.length) {
       return { ok: false, reason: 'feed_fetch_empty', ...getCommunityFeedPagedDebug('communityGrid') };
     }
-    publicFeedPosts = fetched;
-    publicFeedAt = Date.now();
-    publicFeedApiOffset = publicFeedNextApiOffset;
-    publicFeedRemoteHasMore = false;
-    savePublicFeedCache(publicFeedPosts);
+    publicFeedState.posts = fetched;
+    publicFeedState.at = Date.now();
+    publicFeedState.apiOffset = publicFeedState.nextApiOffset;
+    publicFeedState.remoteHasMore = false;
+    savePublicFeedCache(publicFeedState.posts);
     const list = filterAndSortPosts(getCommunityFeedForDisplay()).filter(isFeedRenderablePost);
     await renderPostsIntoContainer(list, 'communityGrid');
     await drainCommunityFeedPagesUntilDone('communityGrid');
@@ -12656,10 +12425,10 @@
       zeroCards: g ? [...g.querySelectorAll('.card')].filter((c) => c.offsetHeight < 8).length : 0,
       storeTotal: store?.posts?.length || 0,
       page: store?.page || 0,
-      apiOffset: publicFeedApiOffset,
-      apiNextOffset: publicFeedNextApiOffset,
-      publicRemoteHasMore: publicFeedRemoteHasMore,
-      publicPosts: publicFeedPosts.length,
+      apiOffset: publicFeedState.apiOffset,
+      apiNextOffset: publicFeedState.nextApiOffset,
+      publicRemoteHasMore: publicFeedState.remoteHasMore,
+      publicPosts: publicFeedState.posts.length,
       renderableTotal: filterAndSortPosts(getCommunityFeedForDisplay()).filter(isFeedRenderablePost).length,
       remoteExhausted: !!store?.remoteExhausted,
       canLoadMoreLocal: store ? getPendingFeedPosts(store, containerId, 1).length > 0 : false,
@@ -12693,15 +12462,16 @@
   }
 
   function wireAllFeedModules() {
+    wireCommunityPublicFeed();
     wireFeedImages();
     wireImageGenFeed();
     wireFeedLayout();
   }
 
-  if (!window.FeedImages?.init || !window.ImageGenFeed?.init || !window.FeedLayout?.init) {
+  if (!window.CommunityPublicFeed?.init || !window.FeedImages?.init || !window.ImageGenFeed?.init || !window.FeedLayout?.init) {
     let feedWireTries = 0;
     (function retryFeedWire() {
-      if (window.FeedImages?.init && window.ImageGenFeed?.init && window.FeedLayout?.init) {
+      if (window.CommunityPublicFeed?.init && window.FeedImages?.init && window.ImageGenFeed?.init && window.FeedLayout?.init) {
         wireAllFeedModules();
         return;
       }
