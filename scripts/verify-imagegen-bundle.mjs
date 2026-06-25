@@ -23,10 +23,24 @@ const required = [
   'PointsSystem',
   'ImageGenPromptKit',
   'ImageGenPromptTools',
+  'ImageGenGenErrors',
+  'ImageGenWarehouseRepair',
+  'ImageGenRefCompress',
+  'ImageGenRefResolve',
+  'ImageGenWarehouseSave',
+  'ImageGenFinishRun',
+  'ImageGenPollWarehouse',
+  'ImageGenSubmit',
   'generateInspirationPrompts',
   'updateRefToolState',
   'listContentTypes',
-  'CONTENT_TEMPLATES'
+  'CONTENT_TEMPLATES',
+  'friendlyGenErrorMessage',
+  'genJobPollDelayMs',
+  'ImageGenJobRunner',
+  'pollGenerationJobUntilDone',
+  'resumePendingGenerationJobs',
+  'resolvePendingFromApiJob'
 ];
 
 const missing = required.filter((token) => !code.includes(token));

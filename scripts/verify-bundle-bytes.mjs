@@ -16,8 +16,7 @@ const packs = [
   'pack-feed.js',
   'pack-imagegen.js',
   'pack-account.js',
-  'pack-extra.js',
-  'pack-assets.js'
+  'pack-extra.js'
 ];
 
 for (const name of packs) {

@@ -5,11 +5,13 @@
 ## 脚本顺序（`index.html`）
 
 ```
-mobile.js → script.js → feed-layout.js → feed-images.js → image-gen-feed.js → community-public-feed.js → features-draft.js
+mobile.js → script.js → pack-feed.js → community-public-feed.js → features-draft.js
+pack-imagegen.js（含 imagegen-gen-errors.js）在 pack-feed 之前加载
 ```
 
 - `mobile.js` 须在 `script.js` 之前（`MobileUI.isMobileViewport` 唯一来源）
-- 三个 feed 模块须在 `features-draft.js` 之前
+- `pack-feed.js` + `community-public-feed.js` 须在 `features-draft.js` 之前
+- `community-public-feed.js` 独立带 `?v=`，**不在** `pack-feed.js` 内（防旧 bundle 缓存）
 
 ## 模块职责
 
@@ -19,7 +21,9 @@ mobile.js → script.js → feed-layout.js → feed-images.js → image-gen-feed
 | `feed-images.js` | `FeedImages.*` | URL 解析、hydrate、`imageGenFeedSignOpts`、`feedImgStorageAttr` |
 | `image-gen-feed.js` | `ImageGenFeed.*` | 生图仓库 Masonry、渲染、分页 |
 | `community-public-feed.js` | `CommunityPublicFeed.*` | 全站社区 Feed API、缓存、分页拉取 |
-| `features-draft.js` | `FeatureDraft.*` | `wireFeedLayout` / `wireFeedImages` / `wireImageGenFeed` |
+| `imagegen-gen-errors.js` | `ImageGenGenErrors.*` | 生图错误文案、可恢复判定、轮询间隔 |
+| `imagegen-job-runner.js` | `ImageGenJobRunner.*` | pending 持久化、轮询、resume 恢复、API 任务匹配 |
+| `features-draft.js` | `FeatureDraft.*` | `wireFeedLayout` / `wireFeedImages` / `wireImageGenFeed` / `wireCommunityPublicFeed` |
 
 ## 接线（解析时执行）
 

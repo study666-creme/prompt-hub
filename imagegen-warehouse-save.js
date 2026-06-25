@@ -1,0 +1,46 @@
+/**
+ * 生图结果写入卡片库（仓库）
+ */
+(function (global) {
+  'use strict';
+
+  /** @type {Record<string, any>} */
+  let deps = {};
+
+  function d() { return deps; }
+
+  function saveGeneratedToWarehouse(opts) {
+    if (!opts?.image && !(opts?.prompt || '').trim()) {
+      d().toast('暂无内容可保存');
+      return Promise.resolve(false);
+    }
+    return Promise.resolve(global.addCardFromGenerated?.({
+      prompt: opts.prompt,
+      image: opts.image,
+      sourceId: opts.sourceId,
+      jobId: opts.jobId || null,
+      title: opts.title,
+      resolution: opts.resolution || null,
+      model: opts.model || null,
+      quality: opts.quality || null,
+      size: opts.size || null,
+      targetGroup: opts.targetGroup || null,
+      targetTags: opts.targetTags || null,
+      publishToCommunity: !!opts.publishToCommunity,
+      fromInspirationDraw: !!opts.fromInspirationDraw,
+      silentToast: !!opts.silentToast,
+      isMidjourney: !!opts.isMidjourney,
+      mjGridUrls: Array.isArray(opts.mjGridUrls) ? opts.mjGridUrls : null,
+      mjCompositeUrl: opts.mjCompositeUrl || null,
+      mjButtons: Array.isArray(opts.mjButtons) ? opts.mjButtons : null,
+      deferCloudPush: !!opts.deferCloudPush
+    })).then((r) => r?.ok ?? false);
+  }
+
+  function init(injected) {
+    deps = injected || {};
+    return { saveGeneratedToWarehouse };
+  }
+
+  global.ImageGenWarehouseSave = { init };
+})(typeof window !== 'undefined' ? window : globalThis);

@@ -8,7 +8,16 @@ const root = bundleRootFromMeta(import.meta.url);
 const sources = [
   'points-system.js',
   'imagegen-prompt-kit.js',
-  'imagegen-prompt-tools.js'
+  'imagegen-prompt-tools.js',
+  'imagegen-gen-errors.js',
+  'imagegen-warehouse-repair.js',
+  'imagegen-ref-compress.js',
+  'imagegen-ref-resolve.js',
+  'imagegen-warehouse-save.js',
+  'imagegen-finish-run.js',
+  'imagegen-poll-warehouse.js',
+  'imagegen-job-runner.js',
+  'imagegen-submit.js'
 ];
 
 concatMinifyBundle({

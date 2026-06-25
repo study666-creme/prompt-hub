@@ -24,19 +24,20 @@
 
 ---
 
-## 当前部署阶段（2026-06-25 · 生图仓库 Masonry + 请求风暴修复）
+## 当前部署阶段（2026-06-07 · P0 热修 findBestApiJobForPrompt）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260625p` · https://prompt-hubs.com |
+| **Pages** | build `20260625c` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
 ### 已打通
 
-- ✅ **P0 卡片库图片**：有图卡静默 await；纯文字无扫光；幽灵卡直接纯文字
-- ✅ **生图仓库 Feed**：Masonry 多列恢复；滚动不弹顶；预览筛选按钮可用；签名 URL 去重防请求风暴
-- ✅ **MediaPipeline + SyncOrchestrator**：列表 grid / 静默云同步编排
+- ✅ **P0 全站图片/Feed**：修复 `findBestApiJobForPrompt`、`isGeneratedWarehouseCard`、`renderCreations` 等模块化误删导致的 ReferenceError
+- ✅ **生图仓库 / Feed**：`listRecoverableOrphanJobs` 等 job-runner 导出已接线
+- ✅ **全站 Feed**：`community-public-feed.js` 独立加载
+- ✅ **MediaPipeline + SyncOrchestrator**
 - ✅ 新图走 **R2**（`MEDIA_STORAGE_MODE=r2`）
 
 ### 架构优化进度
@@ -45,13 +46,14 @@
 |------|------|------|
 | 1 图片管线 | MediaPipeline 全站 Feed/卡片库/生图/资产 | ~95% |
 | 2 云同步解耦 | SyncOrchestrator + skipImageUpload | ~80% |
-| 3 模块化 | esbuild 拆包：`pack-assets.js` + `community-public-feed.js` | ~40% |
+| 3 模块化 | 11 个 imagegen 子模块 + features-draft ~9900 行 | ~95%（wire 遗漏已热修） |
 
 ### 已知问题 / 下一步
 
-1. 阶段 3：继续 esbuild 拆 `features-draft.js` 大块逻辑
-2. MemFire 迁移（7 月初 final dump）
-3. R2 历史图同步
+1. 部分历史图 URL 404 / Supabase 签名过期（需 R2 同步或重签）
+2. 偶发 `api.prompt-hubs.com` 502（Worker/上游）
+3. MemFire 迁移（7 月初 final dump）
+4. R2 历史图批量同步
 
 ### 部署
 

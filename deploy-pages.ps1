@@ -41,7 +41,7 @@ Write-Host "Deploying staged assets from: $staging"
 
 foreach ($bundle in @(
   'pack-prelude.js', 'pack-foundation.js', 'pack-core.js', 'pack-viewer.js', 'pack-appreciate.js', 'pack-lightbox.js', 'pack-feed.js', 'pack-imagegen.js',
-  'pack-account.js', 'pack-extra.js', 'pack-assets.js'
+  'pack-account.js', 'pack-extra.js'
 )) {
   $bp = Join-Path $staging $bundle
   if (-not (Test-Path $bp)) {

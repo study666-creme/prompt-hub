@@ -34,8 +34,7 @@ const mustHave = [
   'pack-feed.js',
   'pack-imagegen.js',
   'pack-account.js',
-  'pack-extra.js',
-  'pack-assets.js'
+  'pack-extra.js'
 ];
 const mustNot = [
   '.bundle.js',
@@ -78,8 +77,7 @@ const packs = [
   ['/pack-feed.js', 'FeedLayout', 'FeedLayout'],
   ['/pack-imagegen.js', 'PointsSystem', 'PointsSystem'],
   ['/pack-account.js', 'Membership', 'window.Membership'],
-  ['/pack-extra.js', 'CommunityGacha', 'CommunityGacha'],
-  ['/pack-assets.js', 'FeatureAssets', 'window.FeatureAssets']
+  ['/pack-extra.js', 'CommunityGacha', 'CommunityGacha']
 ];
 
 for (const [path, label, token] of packs) {

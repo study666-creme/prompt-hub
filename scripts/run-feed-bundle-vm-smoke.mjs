@@ -70,8 +70,7 @@ vm.runInContext(code, vm.createContext(window), { filename: 'pack-feed.js' });
 const checks = [
   ['FeedLayout', !!window.FeedLayout],
   ['FeedImages', !!window.FeedImages],
-  ['ImageGenFeed', !!window.ImageGenFeed],
-  ['CommunityPublicFeed', !!window.CommunityPublicFeed]
+  ['ImageGenFeed', !!window.ImageGenFeed]
 ];
 
 const failed = checks.filter(([, ok]) => !ok).map(([n]) => n);

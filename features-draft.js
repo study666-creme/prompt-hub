@@ -58,8 +58,6 @@
     return GEN_RETENTION_MIN_MS + Math.floor(Math.random() * (GEN_RETENTION_MAX_MS - GEN_RETENTION_MIN_MS + 1));
   }
 
-  const finishingJobIds = new Set();
-
   function normalizeGenJobBaseId(jobId) {
     if (!jobId) return '';
     return String(jobId).replace(/#\d+$/, '');
@@ -250,6 +248,15 @@
 
   function getWarehouseCardKind(card) {
     return isUsableWarehouseImage(card) ? 'visual' : 'text';
+  }
+
+  function isGeneratedWarehouseCard(card) {
+    if (!card) return false;
+    const tags = Array.isArray(card.tags) ? card.tags : [];
+    if (tags.includes('图片生成')) return true;
+    const inspireTag = window.INSPIRE_DRAW_TAG || '灵感抽卡';
+    if (tags.includes(inspireTag)) return true;
+    return !!(card.genJobId || card.genSourceId);
   }
 
   /** 公开社区图：优先卡片库真实路径，忽略无效的 api 域名直链 */
@@ -1313,7 +1320,7 @@
     } catch (e) { /* ignore */ }
     imageGenPendingJobs = [];
     imageGenFailedJobs = [];
-    activePollJobIds.clear();
+    getActivePollJobIds().clear();
     resetFeatureFeedDom();
     updateNotifyBadge();
     closeCommunitySidePanel();
@@ -2901,7 +2908,7 @@
       removeFailedGenJob,
       removePendingJob,
       clearSessionGenJob,
-      getActivePollJobIds: () => activePollJobIds,
+      getActivePollJobIds,
       IMAGEGEN_FEED_PENDING_CAP,
       IMAGEGEN_FEED_FAILED_CAP,
       addImageGenRefFromFeed
@@ -3198,6 +3205,209 @@
     } finally {
       if (btn) btn.disabled = false;
     }
+  }
+
+  function recordCreationDeletion(id, jobId) {
+    if (id == null) return;
+    try {
+      const key = 'promptrepo_deleted_creations';
+      const raw = localStorage.getItem(key);
+      const map = raw ? JSON.parse(raw) : {};
+      map[String(id)] = Date.now();
+      localStorage.setItem(key, JSON.stringify(map));
+    } catch (e) { /* ignore */ }
+    if (typeof window.recordCreationDeletionGlobal === 'function') {
+      window.recordCreationDeletionGlobal(id, jobId);
+    }
+  }
+
+  function highlightCreationCard(id) {
+    document.querySelectorAll('#creationsGrid .creation-post-card').forEach(el => {
+      el.classList.toggle('selected', el.dataset.creationId === id);
+    });
+  }
+
+  function openCreationsSidePanel(id) {
+    const c = creations.find(x => x.id === id);
+    if (!c) return;
+    creationsSideId = id;
+    ensureFeatureSidePanelDocked('creationsSidePanel');
+    mountFeatureSidePanel('creationsSidePanel');
+    document.getElementById('creationsSidePanel')?.classList.remove('hidden');
+    syncCommunityPanelOpenClass();
+    if (isMobileViewport()) window.MobileUI?.closeDrawers?.();
+    void renderCreationsSidePanel(id);
+    if (!isMobileViewport()) {
+      relayoutFeedGridAfterSidePanel('creationsGrid');
+      requestAnimationFrame(() => relayoutFeedGridAfterSidePanel('creationsGrid'));
+    }
+  }
+
+  async function renderCreationsSidePanel(id) {
+    const body = document.getElementById('creationsSideBody');
+    const c = creations.find(x => x.id === id);
+    if (!body || !c) return;
+    const badge = c.visibility === 'published' ? '已发布' : '私密';
+    const storageAttr = feedImgStorageAttr(c.image);
+    const jobAttr = c.jobId ? ` data-job-id="${esc(c.jobId)}"` : '';
+    const showImg = c.image && isDisplayableImage(c.image);
+    const imgHtml = showImg
+      ? `<button type="button" class="community-side-img-btn" data-side-zoom title="点击放大"><img class="community-side-img" src="${IMG_LOADING_PLACEHOLDER}" data-image-ref="${esc(c.image)}"${storageAttr}${jobAttr} alt=""></button>`
+      : '';
+    body.innerHTML = `
+      ${imgHtml}
+      <p class="community-side-author">${esc(badge)} · ${esc((c.resolution || '1k').toUpperCase())} · ${esc(formatExpiryLabel(c))}</p>
+      <div class="community-side-prompt">${esc(c.prompt || '')}</div>
+      <div class="community-side-actions">
+        <button type="button" class="btn btn-secondary" data-action="remix">再生成</button>
+        <button type="button" class="btn btn-secondary" data-action="del">删除记录</button>
+      </div>
+      <p class="panel-hint">生成记录保留 1～3 天。发布到社区请打开卡片库对应卡片并开启「发布到提示词社区」</p>`;
+    bindCommunitySideImageZoom(body, null, c.image, id, { jobId: c.jobId || null });
+    body.querySelector('[data-action="remix"]')?.addEventListener('click', () => remixCreation(id));
+    body.querySelector('[data-action="del"]')?.addEventListener('click', () => {
+      const doDel = () => {
+        deleteCreation(id);
+        closeCreationsSidePanel();
+      };
+      if (typeof window.customConfirm === 'function') {
+        window.customConfirm('确定删除该创作？无回收站，删除后不可恢复。', doDel);
+      } else if (confirm('确定删除该创作？')) doDel();
+    });
+    highlightCreationCard(id);
+    if (showImg) await hydrateFeedImages(body);
+  }
+
+  function closeCreationsSidePanel() {
+    document.getElementById('creationsSidePanel')?.classList.add('hidden');
+    unmountFeatureSidePanel('creationsSidePanel');
+    ensureFeatureSidePanelDocked('creationsSidePanel');
+    syncCommunityPanelOpenClass();
+    creationsSideId = null;
+    communitySidePostId = null;
+    openPostId = null;
+    document.querySelectorAll('#creationsGrid .community-post-card.selected').forEach(el => el.classList.remove('selected'));
+    if (!isMobileViewport()) {
+      requestAnimationFrame(() => {
+        scheduleCommunityLayout('creationsGrid', { force: true, immediate: true });
+      });
+    }
+  }
+
+  async function renderCreations() {
+    renderMyHomeProfile();
+    const container = document.getElementById('creationsGrid');
+    const hintEl = document.getElementById('creationsHint');
+    if (!container) return;
+    const user = getActiveUser();
+    if (window.__promptHubCards?.length) {
+      ensureCommunityFromCardsThrottled(false);
+    } else {
+      dedupeCommunityPosts();
+      migrateCommunityAuthorIds();
+    }
+    if (hintEl) {
+      hintEl.textContent = user.id === 'guest'
+        ? '登录后在此查看你发布到社区的作品'
+        : '你在卡片库公开到社区的作品 · 按最新发布排序 · 点击卡片查看详情';
+    }
+    if (user.id === 'guest') {
+      window.FeedLayout?.destroyLayout?.('creationsGrid');
+      closeCreationsSidePanel();
+      container.innerHTML = '<div class="feature-empty"><p>请先登录后查看发布作品</p><button type="button" class="btn btn-primary" onclick="openAuthModal()">登录</button></div>';
+      return;
+    }
+    const list = getMyPublishedPosts();
+    const sig = feedListSignature(list, 'creationsGrid');
+    if (container.dataset.feedSig === sig && container.querySelector('.community-post-card')) {
+      patchFeedLikeLabels(container, list);
+      if (isCreationsFeedLayoutStale(container)) {
+        delete container.dataset.feedSig;
+        delete container.dataset.feedDistributed;
+        delete container.dataset.feedDistributedCols;
+        repairCreationsFeedLayout(true);
+      } else {
+        requestAnimationFrame(() => syncCommunityFeedColumnCount('creationsGrid'));
+      }
+      return;
+    }
+    renderLikeRewardRules();
+    window.FeedLayout?.destroyLayout?.('creationsGrid');
+    if (!list.length) {
+      closeCreationsSidePanel();
+      container.innerHTML = '<div class="feature-empty"><p>暂无发布作品</p><p class="panel-hint">在卡片库保存作品并开启「发布到提示词社区」，或在生图页开启「生成后公开」</p><button type="button" class="btn btn-primary" onclick="switchAppPage(\'warehouse\')">去卡片库</button></div>';
+      return;
+    }
+    void renderPostsIntoContainer(list, 'creationsGrid').then(() => {
+      if (useFeedPagedRender('creationsGrid')) {
+        void drainCommunityFeedPages('creationsGrid', isMobileViewport() ? 8 : 6);
+      }
+      requestAnimationFrame(() => {
+        layoutFeedFlexColumns('creationsGrid', { force: true, forceReflow: true, recalcCols: true });
+        syncCommunityFeedColumnCount('creationsGrid');
+      });
+    });
+  }
+
+  function publishCreation(id, opts) {
+    toast('发布到社区请先在卡片库保存该作品，并开启「发布到提示词社区」');
+  }
+
+  function confirmDeleteCreation(id) {
+    const msg = '确定删除该生成记录？无回收站，删除后不可恢复。';
+    const doDel = () => deleteCreation(id);
+    if (typeof window.customConfirm === 'function') {
+      window.customConfirm(msg, doDel, null, { danger: true, confirmLabel: '删除' });
+    } else if (confirm(msg)) doDel();
+  }
+
+  function deleteCreation(id) {
+    if (creationsSideId === id) closeCreationsSidePanel();
+    if (imageGenPreviewId === id) closeImageGenPreview();
+    const removed = creations.find(c => c.id === id);
+    if (removed?.communityPostId) {
+      const post = findPost(removed.communityPostId);
+      if (post?.sourceCreationId === id && !post?.sourceCardId) {
+        performCommunityPostRemoval(removed.communityPostId, { silent: true });
+      }
+    }
+    recordCreationDeletion(id, removed?.jobId);
+    const baseJobId = normalizeGenJobBaseId(removed?.jobId);
+    if (baseJobId) {
+      window.recordGenerationJobDeletion?.(baseJobId);
+      if (removed?.jobId && String(removed.jobId) !== baseJobId) {
+        window.recordGenerationJobDeletion?.(removed.jobId);
+      }
+      const whCards = (window.__promptHubCards || []).filter((c) => {
+        if (!c?.genJobId) return false;
+        const cBase = normalizeGenJobBaseId(c.genJobId);
+        return c.genJobId === removed.jobId || cBase === baseJobId;
+      });
+      for (const wh of whCards) {
+        if (typeof window.deleteCardPermanently === 'function') {
+          void window.deleteCardPermanently(wh.id, false, { skipRender: true, silent: true });
+        }
+      }
+    }
+    creations = creations.filter(c => c.id !== id);
+    persistCreations();
+    renderCreations();
+    if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+      renderImageGenFeed();
+    }
+    toast('已删除');
+  }
+
+  function remixCreation(id) {
+    const c = creations.find(x => x.id === id);
+    if (!c) return;
+    if (typeof switchAppPage === 'function') switchAppPage('imagegen');
+    imageGenFeedTab = 'warehouse';
+    document.querySelectorAll('[data-feed-tab]').forEach(b => {
+      b.classList.toggle('active', b.dataset.feedTab === 'warehouse');
+    });
+    updateImageGenFeedHint();
+    applyHistoryToForm(c);
   }
 
   function onDisplayNameChanged() {
@@ -5296,31 +5506,7 @@
   }
 
   function saveGeneratedToWarehouse(opts) {
-    if (!opts?.image && !(opts?.prompt || '').trim()) {
-      toast('暂无内容可保存');
-      return Promise.resolve(false);
-    }
-    return Promise.resolve(window.addCardFromGenerated?.({
-      prompt: opts.prompt,
-      image: opts.image,
-      sourceId: opts.sourceId,
-      jobId: opts.jobId || null,
-      title: opts.title,
-      resolution: opts.resolution || null,
-      model: opts.model || null,
-      quality: opts.quality || null,
-      size: opts.size || null,
-      targetGroup: opts.targetGroup || null,
-      targetTags: opts.targetTags || null,
-      publishToCommunity: !!opts.publishToCommunity,
-      fromInspirationDraw: !!opts.fromInspirationDraw,
-      silentToast: !!opts.silentToast,
-      isMidjourney: !!opts.isMidjourney,
-      mjGridUrls: Array.isArray(opts.mjGridUrls) ? opts.mjGridUrls : null,
-      mjCompositeUrl: opts.mjCompositeUrl || null,
-      mjButtons: Array.isArray(opts.mjButtons) ? opts.mjButtons : null,
-      deferCloudPush: !!opts.deferCloudPush
-    })).then((r) => r?.ok ?? false);
+    return ws('saveGeneratedToWarehouse', opts);
   }
 
   /** GrsAI 临时链约 2 小时失效，恢复窗口与之对齐 */
@@ -5332,14 +5518,10 @@
   const SERVER_RECOVER_AFTER_MS = 8 * 60 * 1000;
   /** API 已 failed 时，非明确可恢复错误最多再等 12 分钟 */
   const FAILED_JOB_RECOVER_MAX_MS = 12 * 60 * 1000;
-  const activePollJobIds = new Set();
-  let resumeGenJobsInflight = null;
   let genJobsSyncTimer = null;
   let genJobsSyncInterval = null;
   let genJobsSyncRetry = 0;
   let imageGenFeedRenderTimer = null;
-  let lastGenJobsListAt = 0;
-  const GEN_JOBS_LIST_MIN_MS = 8000;
 
   function imageGenFeedScrollEl() {
     return document.getElementById('imageGenFeed');
@@ -5428,376 +5610,38 @@
     persistGenJobStateToLocal();
   }
 
-  function afterGenJobsResume(changed) {
-    if (!changed) return;
-    if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-      renderImageGenFeed({ preserveScroll: true });
-      renderImageGenMobileResult();
-    } else {
-      window.refreshWarehouseUI?.();
-    }
-  }
+  function afterGenJobsResume(changed) { return jr('afterGenJobsResume', changed); }
 
-  function scheduleImageGenPendingUiRefresh() {
-    if (!document.getElementById('pageImageGen')?.classList.contains('active')) return;
-    if (!imageGenPendingJobs.length && !imageGenFailedJobs.length) return;
-    clearTimeout(scheduleImageGenPendingUiRefresh._t);
-    scheduleImageGenPendingUiRefresh._t = setTimeout(() => {
-      if (window.ImageGenFeed?.patchImageGenFeedPendingOnly?.()) return;
-      renderImageGenFeed({ preserveScroll: true });
-    }, 900);
-  }
+  function scheduleImageGenPendingUiRefresh() { return jr('scheduleImageGenPendingUiRefresh'); }
 
-  function persistPendingGenJobs() {
-    try {
-      sessionStorage.setItem(LS_PENDING_GEN_JOBS, JSON.stringify(imageGenPendingJobs.slice(0, 32)));
-    } catch (e) { /* ignore */ }
-    persistGenJobStateToLocal();
-  }
+  function persistPendingGenJobs() { return jr('persistPendingGenJobs'); }
 
-  function loadPendingGenJobs() {
-    try {
-      const raw = sessionStorage.getItem(LS_PENDING_GEN_JOBS);
-      const sessionList = raw ? JSON.parse(raw) : [];
-      const localPending = loadGenJobStateFromLocal()?.pending;
-      imageGenPendingJobs = mergePendingGenJobLists(
-        Array.isArray(sessionList) ? sessionList : [],
-        Array.isArray(localPending) ? localPending : [],
-        imageGenPendingJobs
-      );
-      const before = imageGenPendingJobs.length;
-      imageGenPendingJobs = filterPendingGenJobsByAge(imageGenPendingJobs);
-      if (imageGenPendingJobs.length !== before) persistPendingGenJobs();
-      purgeExpiredGenPendingJobs();
-      prunePendingJobsWithWarehouseCards();
-      const localSession = loadGenJobStateFromLocal()?.session;
-      if (Array.isArray(localSession) && localSession.length) {
-        const merged = [...new Set([...getSessionGenJobIdsRaw(), ...localSession.map(String)])];
-        writeSessionGenJobIds(merged);
-      }
-    } catch (e) {
-      imageGenPendingJobs = [];
-    }
-  }
+  function loadPendingGenJobs() { return jr('loadPendingGenJobs'); }
 
-  function persistFailedGenJobs() {
-    try {
-      sessionStorage.setItem(LS_FAILED_GEN_JOBS, JSON.stringify(imageGenFailedJobs.slice(0, 24)));
-    } catch (e) { /* ignore */ }
-  }
+  function persistFailedGenJobs() { return jr('persistFailedGenJobs'); }
 
-  function loadFailedGenJobs() {
-    try {
-      const raw = sessionStorage.getItem(LS_FAILED_GEN_JOBS);
-      const list = raw ? JSON.parse(raw) : [];
-      imageGenFailedJobs = Array.isArray(list) ? list : [];
-      let stale = false;
-      imageGenFailedJobs = imageGenFailedJobs.map((f) => {
-        if (isStaleConfigError(f?.errorMessage)) {
-          stale = true;
-          return {
-            ...f,
-            needsRecovery: true,
-            errorMessage: friendlyGenErrorMessage(f.errorMessage)
-          };
-        }
-        return f;
-      });
-      if (stale) persistFailedGenJobs();
-    } catch (e) {
-      imageGenFailedJobs = [];
-    }
-  }
+  function loadFailedGenJobs() { return jr('loadFailedGenJobs'); }
 
   function batchIndexLabel(index, total) {
     if (index && total && total > 1) return `第 ${index}/${total} 张`;
     return '';
   }
 
-  /** 将上游/接口原始错误转为用户可读说明（批量失败卡片与 toast 共用） */
-  function stringifyGenErrorRaw(errRaw) {
-    if (errRaw == null) return '';
-    if (typeof errRaw === 'string') return errRaw.trim();
-    if (typeof errRaw === 'object') {
-      const o = errRaw;
-      if (typeof o.message === 'string') return o.message.trim();
-      if (o.message != null) return String(o.message).trim();
-      if (typeof o.error === 'string') return o.error.trim();
-      try {
-        return JSON.stringify(o);
-      } catch (e) {
-        return String(o);
-      }
-    }
-    return String(errRaw).trim();
-  }
+  function stringifyGenErrorRaw(errRaw) { return ge('stringifyGenErrorRaw', errRaw) ?? ''; }
+  function isStaleConfigError(msg) { return !!ge('isStaleConfigError', msg); }
+  function isLikelyRecoverableGenFailure(errRaw, ctx, opts) { return !!ge('isLikelyRecoverableGenFailure', errRaw, ctx, opts); }
+  function friendlyGenErrorMessage(msg) { return ge('friendlyGenErrorMessage', msg) ?? '生图失败，积分已全额退回'; }
 
-  function isStaleConfigError(msg) {
-    return /积分小数|apply_credit_delta|SQL 编辑器|扣费函数|SERVER_CONFIG|decimal/i.test(String(msg || ''));
-  }
+  function addFailedGenJob(job) { return jr('addFailedGenJob', job); }
 
-  function isSlowUpstreamGenModel(modelId) {
-    const m = String(modelId || '').toLowerCase();
-    return m.includes('nano-banana') || m.includes('banana') || m.includes('gpt-image') || m.includes('jimeng');
-  }
+  function removeFailedGenJob(failId) { return jr('removeFailedGenJob', failId); }
 
-  /** 上游可能仍出图 / 服务端可恢复：此时不要立刻标红「生成失败」 */
-  function isLikelyRecoverableGenFailure(errRaw, ctx, opts = {}) {
-    const s = stringifyGenErrorRaw(errRaw);
-    if (!s) return opts.confirmedFailed !== true;
-    const model = String(ctx?.model || '').toLowerCase();
-    if (model.includes('ithink') && /UPSTREAM_FAILED|upstream_failed|502|ThinkAI|无效.*令牌/i.test(s)) {
-      return false;
-    }
-    if (/upstream_content_violation|违规不返还|violation/i.test(s)) return false;
-    if (/prohibited words or images|prohibited|flagged as containing/i.test(s)) return false;
-    if (isStaleConfigError(s)) return true;
-    if (/error code:\s*524|\b524\b|请求失败 \(524\)/i.test(s)) return true;
-    if (/debit_failed|upstream_no_image|missing_task_id|upstream_submit/i.test(s)) return true;
-    if (/upstream_failed/i.test(s)) {
-      const id = normalizeImageGenModelId(ctx?.model);
-      if (id.startsWith('apimart-')) return false;
-      if (/timeout|524|upstream_timeout|排队/i.test(s)) return isLongRunningGenJob(ctx);
-      return isLongRunningGenJob(ctx);
-    }
-    if (/不存在该模型|model.*not.*exist|GrsAI 未返回任务 ID/i.test(s)) return true;
-    if (/upstream_timeout/i.test(s) && isLongRunningGenJob(ctx)) return true;
-    if (/NETWORK_ERROR|API_UNREACHABLE|无法连接 api\.prompt-hub|连接.*超时|Failed to fetch/i.test(s)) {
-      return true;
-    }
-    return false;
-  }
-
-  function shouldDeferFailedPendingRecovery(pending, apiJob, ctx) {
-    const age = Date.now() - (pending.startedAt || 0);
-    const errRaw = apiJob?.errorMessage || apiJob?.message || '';
-    if (isDefinitiveGenFailure(errRaw, apiJob)) return false;
-    if (age >= pendingRecoveryGiveUpMs(pending)) return false;
-    if (age >= FAILED_JOB_RECOVER_MAX_MS && !isLikelyRecoverableGenFailure(errRaw, ctx, { confirmedFailed: true })) {
-      return false;
-    }
-    if (pending.recovering || isLikelyRecoverableGenFailure(errRaw, ctx)) {
-      return age < pendingRecoveryGiveUpMs(pending);
-    }
-    return false;
-  }
-
-  function purgeExpiredGenPendingJobs() {
-    const now = Date.now();
-    const before = imageGenPendingJobs.length;
-    imageGenPendingJobs = imageGenPendingJobs.filter((p) => {
-      const age = now - (p.startedAt || 0);
-      if (!p.jobId) return age < 15 * 60 * 1000;
-      return age < RECENT_GEN_RECOVER_MS;
-    });
-    if (imageGenPendingJobs.length !== before) persistPendingGenJobs();
-  }
-
-  function abandonUnrecoverablePendingJob(pending, reason, opts = {}) {
-    if (!pending) return;
-    if (pending.jobId) {
-      window.recordGenerationJobDeletion?.(pending.jobId);
-      clearSessionGenJob(pending.jobId);
-    }
-    removePendingJob(pending.id);
-    persistPendingGenJobs();
-    if (opts.toast !== false && reason) toast(reason, 5000);
-    renderImageGenFeed({ preserveScroll: true, force: true });
-  }
-
-  function deferPendingJobRecovery(pendingId, ctx, note) {
-    const job = imageGenPendingJobs.find((j) => j.id === pendingId);
-    if (!job) return;
-    const age = Date.now() - (job.startedAt || 0);
-    if (age >= RECENT_GEN_RECOVER_MS) {
-      abandonUnrecoverablePendingJob(
-        job,
-        '上游临时链接约 2 小时有效，该任务已过期，无法恢复（积分若已扣请查消费记录）'
-      );
-      return;
-    }
-    if (isSlowGenProviderModel(job.model)) {
-      job.recovering = false;
-      job.recoverNote = '';
-      job.pendingNote = formatPendingRecoveryNote(job, note || '仍在后台生成中（请勿重复提交）');
-    } else {
-      job.recovering = true;
-      job.recoverNote = formatPendingRecoveryNote(job, note || '上游可能仍在出图，后台继续恢复…');
-    }
-    persistPendingGenJobs();
-    if (job.jobId && age >= SERVER_RECOVER_AFTER_MS) {
-      void tryRecoverPendingJobDirect(job);
-    }
-    void resumePendingGenerationJobs();
-    scheduleImageGenPendingUiRefresh();
-  }
-
-  function friendlyGenErrorMessage(msg) {
-    const s = stringifyGenErrorRaw(msg);
-    if (!s || s === '[object Object]') return '生图失败，积分已全额退回';
-    if (isStaleConfigError(s)) {
-      return '扣费曾异常，正在从服务器恢复已完成任务；若仍未出图请点「重试」';
-    }
-    if (/登录已过期|请先登录|UNAUTHORIZED/i.test(s)) {
-      return '登录状态已失效，请退出后重新登录';
-    }
-    if (/upstream_auth_failed|无效.*令牌|invalid.*token/i.test(s)) {
-      return '生图令牌无效或已过期，请联系站长在 thinkai.tv 重新创建令牌；您的积分已全额退回';
-    }
-    if (/upstream_submit_not_configured/i.test(s)) {
-      return '生图服务未配置，请联系站长；您的积分已全额退回';
-    }
-    if (/upstream_model_rejected/i.test(s)) {
-      return '当前模型暂不可用，请换其他模型；您的积分已全额退回';
-    }
-    if (/insufficient balance|insufficient credits/i.test(s)) {
-      return '生图服务商账户余额不足（不是您的站内积分），请联系站长；您的积分已全额退回';
-    }
-    if (/apikey|api.key|invalid.*api.*key|无效.*令牌|invalid.*token|unauthorized/i.test(s)) {
-      return '生图服务认证失败，请联系站长；您的积分已全额退回';
-    }
-    if (/error code:\s*524|\b524\b/.test(s)) {
-      return '连接超时（524），任务可能已提交；请强刷页面查看是否在生成中';
-    }
-    if (/upstream_timeout|timeout/i.test(s)) {
-      return '生图排队超时（约 12 分钟），积分已全额退回，可点「重试」';
-    }
-    if (/images\[\]\.image_url is required/i.test(s)) {
-      return '参考图格式不兼容，请去掉参考图后重试；积分已全额退回';
-    }
-    if (/upstream_image_archive_failed|atob\(\)|invalid base64|invalid_data_url/i.test(s)) {
-      return '图片入库失败，积分已全额退回，请重试';
-    }
-    if (/upstream_no_image|no_image/i.test(s)) {
-      return '上游未返回图片，积分已全额退回，可点「重试」';
-    }
-    if (/upstream_submit_not_started/i.test(s)) {
-      return '未能连接生图服务，积分已退回，请重试或换其他模型';
-    }
-    if (/upstream_submit_interrupted/i.test(s)) {
-      return '提交被中断，积分已退回；请等 1 分钟后重试，勿重复连点';
-    }
-    if (/upstream_submit_stale/i.test(s)) {
-      return '生图长时间无响应，积分已退回；请稍后再试或换其他模型';
-    }
-    if (/missing_task_id/i.test(s)) {
-      return '任务提交异常，积分已全额退回，请重试';
-    }
-    if (/upstream_content_violation|prohibited words or images|prohibited|flagged as containing/i.test(s)) {
-      return '提示词触发内容审核（含禁用词/图），请改描述后重试；积分已全额退回';
-    }
-    if (/upstream_content_violation/i.test(s)) {
-      return '提示词触发内容审核，积分已全额退回，请调整描述后重试';
-    }
-    if (/违规不返还|violation.*no.*refund/i.test(s)) {
-      return s.includes('违规不返还') ? s : '提示词触发内容审核，该模型违规不返还积分，请调整描述后重试';
-    }
-    if (/content.*policy|safety|moderation|blocked|违规|敏感/i.test(s)) {
-      return '提示词可能触发内容审核，请改描述后重试；积分已全额退回';
-    }
-    if (/RATE_LIMITED|过于频繁|rate limit|429/i.test(s)) {
-      return '提交过快，请稍等几秒再批量生成；积分已全额退回';
-    }
-    if (/不存在该模型|model.*not.*exist|unknown model|invalid model/i.test(s)) {
-      return '模型相关提示，任务可能仍在排队；请强刷页面查看进度';
-    }
-    if (/GrsAI 未返回任务 ID/i.test(s)) {
-      return '可能已接单但响应异常，请强刷页面查看是否在生成中';
-    }
-    if (s.length > 120) return s.slice(0, 120) + '…';
-    return s;
-  }
-
-  function addFailedGenJob(job) {
-    const entry = {
-      id: job.id || genId('fail'),
-      jobId: job.jobId || null,
-      prompt: String(job.prompt || '').trim(),
-      errorMessage: friendlyGenErrorMessage(job.errorMessage || '生图失败'),
-      failedAt: job.failedAt || Date.now(),
-      model: job.model ? normalizeImageGenModelId(job.model) : '',
-      modelLabel: job.modelLabel || (job.model ? imageGenModelLabel(job.model) : ''),
-      batchIndex: job.batchIndex || null,
-      batchTotal: job.batchTotal || null,
-      batchId: job.batchId || null,
-      fromInspirationDraw: !!job.fromInspirationDraw,
-      needsRecovery: !!job.needsRecovery || isStaleConfigError(job.errorMessage)
-    };
-    if (!entry.prompt) return;
-    imageGenFailedJobs = [entry, ...imageGenFailedJobs.filter((f) => f.id !== entry.id)].slice(0, 24);
-    persistFailedGenJobs();
-  }
-
-  function removeFailedGenJob(failId) {
-    imageGenFailedJobs = imageGenFailedJobs.filter((f) => f.id !== failId);
-    persistFailedGenJobs();
-  }
-
-  function clearFailedGenJobsForRecovery({ prompt, model, jobId } = {}) {
-    const p = String(prompt || '').trim();
-    const m = model ? normalizeImageGenModelId(model) : '';
-    const before = imageGenFailedJobs.length;
-    imageGenFailedJobs = imageGenFailedJobs.filter((f) => {
-      if (jobId && f.jobId === jobId) return false;
-      if (!p || !m) return true;
-      if (String(f.prompt || '').trim() !== p) return true;
-      if (f.model && normalizeImageGenModelId(f.model) !== m) return true;
-      return false;
-    });
-    if (imageGenFailedJobs.length !== before) persistFailedGenJobs();
-  }
+  function clearFailedGenJobsForRecovery(opts) { return jr('clearFailedGenJobsForRecovery', opts); }
 
   /** 提交请求网络中断时，从 API 找回刚创建的 processing 任务 */
-  async function tryRecoverOrphanGenJobAfterSubmitError(payload, pendingId, pendingJob) {
-    if (!window.PromptHubApi?.listRecentGenerationJobs) return false;
-    const usedJobIds = new Set(
-      imageGenPendingJobs.map((p) => p.jobId).filter(Boolean)
-    );
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 + attempt * 1200));
-      const r = await window.PromptHubApi.listRecentGenerationJobs();
-      if (!r?.ok || !Array.isArray(r.data?.jobs)) continue;
-      const prompt = String(payload.prompt || '').trim();
-      const model = normalizeImageGenModelId(payload.model || 'gpt-image-2');
-      const job = findBestApiJobForPrompt(r.data.jobs, prompt, model, {
-        minCreatedAt: pendingJob.startedAt || Date.now(),
-        usedJobIds,
-        preferProcessing: true,
-        resolution: pendingJob.resolution
-      });
-      if (job?.id) {
-        const t = Date.parse(job.createdAt);
-        const now = Date.now();
-        if (Number.isFinite(t) && now - t <= 300_000) {
-          pendingJob.jobId = job.id;
-          trackSessionGenJob(job.id);
-          persistPendingGenJobs();
-          clearFailedGenJobsForRecovery({ prompt, model, jobId: job.id });
-          toast('网络波动，已找回刚提交的任务，正在恢复进度…');
-          void pollGenerationJobUntilDone(job.id, pendingId, pendingJobToPollCtx(pendingJob));
-          return true;
-        }
-      }
-    }
-    return false;
-  }
+  async function tryRecoverOrphanGenJobAfterSubmitError(payload, pendingId, pendingJob) { return jr('tryRecoverOrphanGenJobAfterSubmitError', payload, pendingId, pendingJob); }
 
-  function failPendingJob(pendingId, errorMessage) {
-    const job = imageGenPendingJobs.find((j) => j.id === pendingId);
-    if (job) {
-      addFailedGenJob({
-        prompt: job.prompt,
-        model: job.model,
-        modelLabel: job.modelLabel || imageGenModelLabel(job.model),
-        batchIndex: job.batchIndex,
-        batchTotal: job.batchTotal,
-        batchId: job.batchId,
-        fromInspirationDraw: !!job.fromInspirationDraw,
-        errorMessage: stringifyGenErrorRaw(errorMessage)
-      });
-    }
-    removePendingJob(pendingId);
-  }
+  function failPendingJob(pendingId, errorMessage) { return jr('failPendingJob', pendingId, errorMessage); }
 
   function toastGenFailure(ctx, message) {
     const label = batchIndexLabel(ctx?.batchIndex, ctx?.batchTotal);
@@ -5805,633 +5649,22 @@
     toast(label ? `${label} ${msg}` : msg);
   }
 
-  function pendingJobToPollCtx(job) {
-    return {
-      prompt: job.prompt || '',
-      model: job.model || 'gpt-image-2',
-      resolution: job.resolution || '1k',
-      quality: job.quality || 'standard',
-      size: job.size || '1:1',
-      cost: job.cost || 0,
-      jobId: job.jobId,
-      targetGroup: job.targetGroup || null,
-      targetTags: job.targetTags || null,
-      fromInspirationDraw: !!job.fromInspirationDraw,
-      batchIndex: job.batchIndex || null,
-      batchTotal: job.batchTotal || null,
-      batchId: job.batchId || null,
-      silentToast: !!job.silentToast,
-      startedAt: job.startedAt || Date.now()
-    };
-  }
+  function pendingJobToPollCtx(job) { return jr('pendingJobToPollCtx', job) || {}; }
 
-  function isRecentGenJob(job) {
-    const t = Date.parse(job?.createdAt || '');
-    return Number.isFinite(t) && Date.now() - t < RECENT_GEN_RECOVER_MS;
-  }
+  function isRecentGenJob(job) { return !!jr('isRecentGenJob', job); }
 
-  function shouldAutoRecoverCompletedJob(job) {
-    if (isGenerationJobDeleted(job.id)) return false;
-    if (!job?.imageUrl) return false;
-    if (!isRecentGenJob(job)) return false;
-    if (!needsApiImageRecovery(job.id, job.imageUrl)) return false;
-    if (isSessionGenJob(job.id)) return true;
-    if (imageGenPendingJobs.some((p) => p.jobId === job.id)) return true;
-    return false;
-  }
+  function shouldAutoRecoverCompletedJob(job) { return !!jr('shouldAutoRecoverCompletedJob', job); }
 
   function warehouseCardImageNeedsRecovery(card, apiImageUrl) {
-    if (!apiImageUrl) return false;
-    if (!card?.image || !isDisplayableImage(card.image)) return true;
-    if (/^https?:\/\//i.test(card.image)) return true;
-    if (window.SupabaseSync?.isDataUrl?.(card.image)) return true;
-    if (window.SupabaseSync?.isStorageRef?.(card.image)) {
-      const path = window.SupabaseSync.storagePathFromRef?.(card.image);
-      if (path && window.SupabaseSync.isPathKnownMissing?.(path)) return true;
-    }
-    return false;
-  }
-
-  function findWarehouseCardForJob(jobId) {
-    if (!jobId) return null;
-    const key = String(jobId).replace(/#\d+$/, '');
-    return (window.__promptHubCards || []).find((c) => {
-      if (!c?.genJobId) return false;
-      const cardKey = String(c.genJobId).replace(/#\d+$/, '');
-      return c.genJobId === jobId || cardKey === key;
-    }) || null;
-  }
-
-  function needsApiImageRecovery(jobId, apiImageUrl, force = false) {
-    if (!jobId || !apiImageUrl) return false;
-    if (isGenerationJobDeleted(jobId) && !force) return false;
-    const card = findWarehouseCardForJob(jobId);
-    if (!card) return true;
-    return warehouseCardImageNeedsRecovery(card, apiImageUrl);
-  }
-
-  function jobNeedsRecovery(job) {
-    if (!job?.id || isGenerationJobDeleted(job.id)) return false;
-    if (job.status === 'processing' || job.status === 'failed') return true;
-    if (job.status === 'completed' && job.imageUrl) {
-      return needsApiImageRecovery(job.id, job.imageUrl);
-    }
-    if (job.status === 'completed' && !job.imageUrl) return true;
-    return false;
-  }
-
-  async function refreshGenerationJobFromServer(job, opts = {}) {
-    if (!job?.id || !window.PromptHubApi?.getGenerationJob) return job;
-    try {
-      const retry = await window.PromptHubApi.getGenerationJob(job.id, {
-        settle: opts.settle === true
-      });
-      if (!retry.ok) return job;
-      return {
-        ...job,
-        status: retry.data.status || job.status,
-        imageUrl: retry.data.imageUrl || job.imageUrl || null,
-        extraImageUrls: retry.data.extraImageUrls || job.extraImageUrls,
-        isMidjourney: retry.data.isMidjourney || job.isMidjourney,
-        mjGridUrls: retry.data.mjGridUrls || job.mjGridUrls,
-        mjCompositeUrl: retry.data.mjCompositeUrl || job.mjCompositeUrl,
-        mjButtons: retry.data.mjButtons || job.mjButtons,
-        errorMessage: retry.data.errorMessage || retry.data.message || job.errorMessage,
-        prompt: job.prompt,
-        model: job.model,
-        resolution: job.resolution,
-        quality: job.quality,
-        size: job.size,
-        creditsCharged: job.creditsCharged,
-        createdAt: job.createdAt
-      };
-    } catch (e) {
-      return job;
-    }
-  }
-
-  function recoveryJobPriority(job) {
-    const t = Date.parse(job?.createdAt || '') || 0;
-    const hasCard = hasWarehouseCardForJob(job?.id);
-    if (job?.status === 'completed' && job?.imageUrl && !hasCard) return 1e15 + t;
-    if (job?.status === 'completed' && !job?.imageUrl) return 5e14 + t;
-    if (job?.status === 'processing') return 1e14 + t;
-    if (job?.status === 'failed') return 1e13 + t;
-    return t;
-  }
-
-  async function collectJobsNeedingRecovery(opts = {}) {
-    if (!window.PromptHubApi?.listRecentGenerationJobs) return [];
-    const r = await window.PromptHubApi.listRecentGenerationJobs();
-    if (!r?.ok || !Array.isArray(r.data?.jobs)) return [];
-    const maxCount = Math.max(1, opts.maxCount ?? 12);
-    const ignoreTombstones = opts.ignoreTombstones === true;
-    const candidates = [];
-    for (const job of r.data.jobs) {
-      if (!job?.id) continue;
-      if (!ignoreTombstones && isGenerationJobDeleted(job.id)) continue;
-      const mightNeed = job.status === 'processing'
-        || job.status === 'failed'
-        || (job.status === 'completed' && (!job.imageUrl || needsApiImageRecovery(job.id, job.imageUrl, opts.force === true)));
-      if (!mightNeed) continue;
-      candidates.push(job);
-    }
-    candidates.sort((a, b) => recoveryJobPriority(b) - recoveryJobPriority(a));
-    const out = [];
-    for (const job of candidates.slice(0, maxCount)) {
-      const needRefresh = job.status === 'processing'
-        || job.status === 'failed'
-        || !job.imageUrl;
-      const live = needRefresh ? await refreshGenerationJobFromServer(job) : job;
-      if (jobNeedsRecovery(live)) out.push(live);
-    }
-    return out;
-  }
-
-  /** 延迟/重试同步：登录尚未就绪时也会再次拉取 */
-  function scheduleGenJobsSync(delayMs) {
-    clearTimeout(genJobsSyncTimer);
-    genJobsSyncTimer = setTimeout(() => {
-      void resumePendingGenerationJobs().then((ok) => {
-        if (!ok && genJobsSyncRetry < 6) {
-          genJobsSyncRetry += 1;
-          scheduleGenJobsSync(Math.min(12000, 3000 + genJobsSyncRetry * 1500));
-        } else if (ok) {
-          genJobsSyncRetry = 0;
-        }
-      });
-    }, delayMs == null ? 400 : delayMs);
-  }
-
-  function shouldRunGenJobsBackgroundSync() {
-    if (imageGenPendingJobs.length > 0 || activePollJobIds.size > 0) return true;
-    const onImageGen = document.getElementById('pageImageGen')?.classList.contains('active');
-    if (!onImageGen) return false;
-    return getSessionGenJobIds().length > 0;
-  }
-
-  function startGenJobsBackgroundSync() {
-    if (genJobsSyncInterval) return;
-    const hasActiveRecover = imageGenPendingJobs.some(
-      (p) => p.recovering || isSlowGenProviderModel(p.model)
-    );
-    const syncIntervalMs = hasActiveRecover
-      ? (isMobileViewport() ? 8000 : 7000)
-      : imageGenPendingJobs.length > 0
-        ? (isMobileViewport() ? 12000 : 12000)
-        : (isMobileViewport() ? 45000 : 30000);
-    genJobsSyncInterval = setInterval(() => {
-      if (!window.PointsSystem?.useApiForAccount?.()) return;
-      if (!shouldRunGenJobsBackgroundSync()) return;
-      void resumePendingGenerationJobs().then(afterGenJobsResume);
-      if (document.getElementById('pageImageGen')?.classList.contains('active') && imageGenPendingJobs.length) {
-        scheduleImageGenPendingUiRefresh();
-      }
-    }, syncIntervalMs);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') {
-        persistPendingGenJobs();
-        return;
-      }
-      loadPendingGenJobs();
-      scheduleGenJobsSync(300);
-      void resumePendingGenerationJobs({ force: true }).then(afterGenJobsResume);
-    });
-    window.addEventListener('pagehide', () => {
-      persistPendingGenJobs();
-    });
-    window.addEventListener('pageshow', () => {
-      loadPendingGenJobs();
-      if (imageGenPendingJobs.length > 0) {
-        renderImageGenFeed({ preserveScroll: true });
-        renderImageGenMobileResult();
-      }
-      scheduleGenJobsSync(200);
-      void resumePendingGenerationJobs({ force: true }).then(afterGenJobsResume);
-    });
-  }
-
-  function getSessionGenJobIds() {
-    const ids = new Set(getSessionGenJobIdsRaw());
-    const localSession = loadGenJobStateFromLocal()?.session;
-    if (Array.isArray(localSession)) {
-      localSession.forEach((x) => ids.add(String(x)));
-    }
-    return [...ids];
-  }
-
-  function trackSessionGenJob(jobId) {
-    if (!jobId) return;
-    const id = String(jobId);
-    const list = getSessionGenJobIds().filter((x) => x !== id);
-    list.push(id);
-    writeSessionGenJobIds(list);
-  }
-
-  function clearSessionGenJob(jobId) {
-    if (!jobId) return;
-    const id = String(jobId);
-    writeSessionGenJobIds(getSessionGenJobIds().filter((x) => x !== id));
-  }
-
-  function isSessionGenJob(jobId) {
-    return jobId && getSessionGenJobIds().includes(String(jobId));
-  }
-
-  /** 同提示词多任务时选最新/进行中，避免误绑旧 job 覆盖已有卡片图 */
-  function findBestApiJobForPrompt(jobs, prompt, model, opts = {}) {
-    const p = String(prompt || '').trim();
-    const m = normalizeImageGenModelId(model || 'gpt-image-2');
-    if (!p || !Array.isArray(jobs)) return null;
-    const minCreated = Number(opts.minCreatedAt) || 0;
-    const used = opts.usedJobIds;
-    const preferProcessing = opts.preferProcessing === true;
-    let best = null;
-    let bestScore = -Infinity;
-    for (const j of jobs) {
-      if (!j?.id || isGenerationJobDeleted(j.id)) continue;
-      if (used?.has?.(j.id)) continue;
-      if (String(j.prompt || '').trim() !== p) continue;
-      if (normalizeImageGenModelId(j.model || 'gpt-image-2') !== m) continue;
-      if (opts.resolution && j.resolution && j.resolution !== opts.resolution) continue;
-      const created = Date.parse(j.createdAt) || 0;
-      if (minCreated && created < minCreated - 120000) continue;
-      let score = created;
-      if (j.status === 'processing') score += 2e15;
-      else if (preferProcessing) score -= 1e15;
-      else if (j.status === 'completed') score += 1e12;
-      if (score > bestScore) {
-        bestScore = score;
-        best = j;
-      }
-    }
-    return best;
-  }
-
-  function hasWarehouseCardForJob(jobId) {
-    if (!jobId) return false;
-    const key = String(jobId).replace(/#\d+$/, '');
-    const card = (window.__promptHubCards || []).find((c) => {
-      if (!c?.genJobId) return false;
-      const cardKey = String(c.genJobId).replace(/#\d+$/, '');
-      return c.genJobId === jobId || cardKey === key;
-    });
-    if (!card?.image) return false;
-    if (!isDisplayableImage(card.image)) return false;
-    return true;
-  }
-
-  function normalizePendingPromptKey(prompt) {
-    return String(prompt || '')
-      .replace(/（同任务附赠图\s*\d+）/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 240);
-  }
-
-  function pendingPromptsMatch(a, b) {
-    const ka = normalizePendingPromptKey(a);
-    const kb = normalizePendingPromptKey(b);
-    if (!ka || !kb) return false;
-    if (ka === kb) return true;
-    const head = Math.min(ka.length, kb.length, 56);
-    if (head >= 28 && ka.slice(0, head) === kb.slice(0, head)) return true;
-    return ka.includes(kb.slice(0, 48)) || kb.includes(ka.slice(0, 48));
-  }
-
-  function isGeneratedWarehouseCard(card) {
-    if (!card) return false;
-    const tags = Array.isArray(card.tags) ? card.tags : [];
-    if (tags.includes('图片生成')) return true;
-    const inspireTag = window.INSPIRE_DRAW_TAG || '灵感抽卡';
-    if (tags.includes(inspireTag)) return true;
-    return !!(card.genJobId || card.genSourceId);
-  }
-
-  function findWarehouseCardForPending(pending) {
-    if (!pending) return null;
-    const cards = window.__promptHubCards || [];
-    if (pending.jobId) {
-      const key = String(pending.jobId).replace(/#\d+$/, '');
-      const byJob = cards.find((c) => {
-        if (!c?.genJobId) return false;
-        const cardKey = String(c.genJobId).replace(/#\d+$/, '');
-        return c.genJobId === pending.jobId || cardKey === key;
-      });
-      if (byJob?.image && isDisplayableImage(byJob.image)) return byJob;
-    }
-    if (pending.jobId) {
-      const cre = creations.find((c) => {
-        if (!c?.jobId) return false;
-        const cj = String(c.jobId).replace(/#\d+$/, '');
-        const pj = String(pending.jobId).replace(/#\d+$/, '');
-        return cj === pj;
-      });
-      if (cre?.id) {
-        const bySource = cards.find((c) => c.genSourceId === cre.id);
-        if (bySource?.image && isDisplayableImage(bySource.image)) return bySource;
-      }
-      return null;
-    }
-    const started = pending.startedAt || 0;
-    if (!pending.prompt || !started) return null;
-    const windowMs = 45 * 60 * 1000;
-    const candidates = cards.filter((c) => {
-      if (!c?.image || !isDisplayableImage(c.image)) return false;
-      if (!isGeneratedWarehouseCard(c)) return false;
-      const tags = Array.isArray(c.tags) ? c.tags : [];
-      if (tags.includes('自动恢复') && c.genJobId && pending.jobId) {
-        const pj = String(pending.jobId).replace(/#\d+$/, '');
-        const cj = String(c.genJobId).replace(/#\d+$/, '');
-        if (pj !== cj) return false;
-      }
-      if (!pendingPromptsMatch(c.prompt, pending.prompt)) return false;
-      if (pending.resolution) {
-        if (!c.resolution || c.resolution !== pending.resolution) return false;
-      }
-      if (pending.model && c.model && normalizeImageGenModelId(c.model) !== normalizeImageGenModelId(pending.model)) {
-        return false;
-      }
-      const created = c.createdAt || c.updatedAt || 0;
-      if (created && created < started - 120000) return false;
-      if (created && created > started + windowMs) return false;
-      return true;
-    });
-    if (!candidates.length) return null;
-    candidates.sort((a, b) => {
-      const da = Math.abs((a.createdAt || a.updatedAt || 0) - started);
-      const db = Math.abs((b.createdAt || b.updatedAt || 0) - started);
-      return da - db;
-    });
-    return candidates[0];
-  }
-
-  function pendingHasWarehouseCard(pending) {
-    return !!findWarehouseCardForPending(pending);
-  }
-
-  /** 卡片库已有对应生图卡片时，清掉生图区「生成中/恢复中」占位 */
-  function prunePendingJobsWithWarehouseCards() {
-    let changed = false;
-    const next = [];
-    for (const p of imageGenPendingJobs) {
-      if (!pendingHasWarehouseCard(p)) {
-        next.push(p);
-        continue;
-      }
-      if (p?.jobId) clearSessionGenJob(p.jobId);
-      changed = true;
-    }
-    if (!changed) return;
-    imageGenPendingJobs = next;
-    persistPendingGenJobs();
-    scheduleImageGenPendingUiRefresh();
-  }
-
-  function getImageGenPendingJobsForFeed() {
-    prunePendingJobsWithWarehouseCards();
-    return imageGenPendingJobs;
-  }
-
-  function hasWarehouseCardRecordForJob(jobId) {
-    if (!jobId) return false;
-    return !!(window.__promptHubCards || []).find((c) => c.genJobId === jobId);
-  }
-
-  async function tryRecoverPendingJobDirect(pending) {
-    if (!pending?.jobId || !window.PromptHubApi?.getGenerationJob) return false;
-    const jobId = pending.jobId;
-    try {
-      if (window.PromptHubApi.recoverWarehouseFromJobs) {
-        await window.PromptHubApi.recoverWarehouseFromJobs({
-          mode: 'settle',
-          jobIds: [jobId],
-          max: 1,
-          days: 7
-        });
-      }
-    } catch (e) {
-      console.warn('[imagegen] server settle recover failed', jobId, e);
-    }
-    if (hasWarehouseCardForJob(jobId)) {
-      removePendingJob(pending.id);
-      clearSessionGenJob(jobId);
-      renderImageGenFeed({ preserveScroll: true });
-      return true;
-    }
-    try {
-      const poll = await window.PromptHubApi.getGenerationJob(jobId, { settle: true });
-      if (poll.ok && poll.data?.status === 'completed' && poll.data.imageUrl) {
-        await resolvePendingFromApiJob(pending, {
-          id: jobId,
-          status: 'completed',
-          imageUrl: poll.data.imageUrl,
-          extraImageUrls: poll.data.extraImageUrls,
-          prompt: pending.prompt,
-          model: pending.model
-        }, { silent: true });
-        return hasWarehouseCardForJob(jobId) || !imageGenPendingJobs.some((p) => p.id === pending.id);
-      }
-    } catch (e) {
-      console.warn('[imagegen] direct job settle failed', jobId, e);
-    }
-    return hasWarehouseCardForJob(jobId);
-  }
-
-  async function tryServerRecoverPending(pending) {
-    return tryRecoverPendingJobDirect(pending);
-  }
-
-  async function resolvePendingFromApiJob(pending, apiJob, opts = {}) {
-    if (!pending || !apiJob?.id) return false;
-    if (isGenerationJobDeleted(apiJob.id)) {
-      removePendingJob(pending.id);
-      clearSessionGenJob(apiJob.id);
-      return true;
-    }
-    const ctx = pendingJobToPollCtx(pending);
-    ctx.silentToast = opts.silent !== false;
-
-    if (apiJob.status === 'completed' && apiJob.imageUrl) {
-      pending.recovering = false;
-      pending.recoverNote = '';
-      pending.pendingNote = '';
-      const existingCard = findWarehouseCardForJob(apiJob.id);
-      if (existingCard && hasWarehouseCardForJob(apiJob.id)) {
-        if (warehouseCardImageNeedsRecovery(existingCard, apiJob.imageUrl)) {
-          await repairWarehouseCardImageFromJob(existingCard, apiJob.imageUrl, apiJob.id);
-          renderImageGenFeed({ preserveScroll: true });
-        }
-        removePendingJob(pending.id);
-        clearSessionGenJob(apiJob.id);
-        return true;
-      }
-      if (existingCard && !existingCard.image) {
-        await repairWarehouseCardImageFromJob(existingCard, apiJob.imageUrl, apiJob.id);
-        removePendingJob(pending.id);
-        clearSessionGenJob(apiJob.id);
-        return true;
-      }
-      await ensureGenJobCreationsFromPoll(
-        {
-          data: {
-            status: 'completed',
-            imageUrl: apiJob.imageUrl,
-            extraImageUrls: apiJob.extraImageUrls
-          }
-        },
-        { ...ctx, jobId: apiJob.id, isRecovery: true },
-        pending.id
-      );
-      clearSessionGenJob(apiJob.id);
-      return true;
-    }
-
-    if (apiJob.status === 'failed') {
-      const refreshed = await refreshGenerationJobFromServer(apiJob);
-      if (refreshed.status === 'completed' && refreshed.imageUrl) {
-        return resolvePendingFromApiJob(pending, refreshed, opts);
-      }
-      if (shouldDeferFailedPendingRecovery(pending, refreshed, ctx)) {
-        if (await tryServerRecoverPending(pending)) return true;
-        pending.recovering = true;
-        pending.recoverNote = formatPendingRecoveryNote(pending, '上游可能仍在出图，后台继续恢复…');
-        persistPendingGenJobs();
-        if (pending.jobId && Date.now() - (pending.startedAt || 0) >= SERVER_RECOVER_AFTER_MS) {
-          void tryRecoverPendingJobDirect(pending);
-        }
-        if (!activePollJobIds.has(pending.jobId)) {
-          void pollGenerationJobUntilDone(pending.jobId, pending.id, ctx);
-        }
-        scheduleImageGenPendingUiRefresh();
-        return false;
-      }
-      await failPendingJobImmediately(
-        pending.id,
-        ctx,
-        refreshed.errorMessage || apiJob.errorMessage || apiJob.message || '生图失败'
-      );
-      clearSessionGenJob(apiJob.id);
-      return true;
-    }
-
-    if (
-      pending.recovering
-      && Date.now() - (pending.startedAt || 0) >= pendingRecoveryGiveUpMs(pending)
-    ) {
-      if (await tryServerRecoverPending(pending)) return true;
-      if (apiJob.status === 'processing') {
-        if (!activePollJobIds.has(apiJob.id)) {
-          void pollGenerationJobUntilDone(apiJob.id, pending.id, ctx);
-        }
-        return false;
-      }
-      const retry = await window.PromptHubApi.getGenerationJob(apiJob.id);
-      if (retry.ok && retry.data.status === 'completed' && retry.data.imageUrl) {
-        return resolvePendingFromApiJob(pending, {
-          id: apiJob.id,
-          status: 'completed',
-          imageUrl: retry.data.imageUrl,
-          extraImageUrls: retry.data.extraImageUrls,
-          prompt: pending.prompt,
-          model: pending.model
-        }, opts);
-      }
-      if (retry.ok && retry.data.status === 'processing') {
-        if (!activePollJobIds.has(apiJob.id)) {
-          void pollGenerationJobUntilDone(apiJob.id, pending.id, ctx);
-        }
-        return false;
-      }
-      if (retry.ok && retry.data.status === 'failed') {
-        const failSnap = {
-          id: apiJob.id,
-          status: 'failed',
-          errorMessage: retry.data.errorMessage || retry.data.message,
-          prompt: pending.prompt,
-          model: pending.model
-        };
-        if (shouldDeferFailedPendingRecovery(pending, failSnap, ctx)) {
-          if (await tryServerRecoverPending(pending)) return true;
-          return false;
-        }
-        await failPendingJobImmediately(
-          pending.id,
-          ctx,
-          failSnap.errorMessage || '生图失败'
-        );
-        clearSessionGenJob(apiJob.id);
-        return true;
-      }
-      if (await tryServerRecoverPending(pending)) return true;
-      if (Date.now() - (pending.startedAt || 0) < RECENT_GEN_RECOVER_MS) return false;
-      await failPendingJobImmediately(pending.id, ctx, '生图超时或上游无结果，积分已全额退回');
-      clearSessionGenJob(apiJob.id);
-      return true;
-    }
-
-    return false;
+    return wr('warehouseCardImageNeedsRecovery', card, apiImageUrl);
   }
 
   async function repairMjWarehouseCardFields(card, fields) {
-    if (!card?.id) return false;
-    let changed = false;
-    const gridUrls = Array.isArray(fields.mjGridUrls) ? fields.mjGridUrls.filter(Boolean) : [];
-    if (gridUrls.length && (!Array.isArray(card.mjGridUrls) || card.mjGridUrls.length < gridUrls.length)) {
-      card.mjGridUrls = gridUrls;
-      changed = true;
-    }
-    if (fields.mjCompositeUrl && !card.mjCompositeUrl) {
-      card.mjCompositeUrl = fields.mjCompositeUrl;
-      changed = true;
-    }
-    if (Array.isArray(fields.mjButtons) && fields.mjButtons.length
-      && (!Array.isArray(card.mjButtons) || !card.mjButtons.length)) {
-      card.mjButtons = fields.mjButtons;
-      changed = true;
-    }
-    if (!card.isMidjourney && gridUrls.length) {
-      card.isMidjourney = true;
-      changed = true;
-    }
-    if (!changed) return false;
-    card.updatedAt = Date.now();
-    const cre = creations.find(
-      (c) => c.jobId === card.genJobId || c.id === card.genSourceId
-    );
-    if (cre) {
-      if (gridUrls.length) cre.mjGridUrls = gridUrls;
-      if (fields.mjCompositeUrl) cre.mjCompositeUrl = fields.mjCompositeUrl;
-      if (fields.mjButtons?.length) cre.mjButtons = fields.mjButtons;
-      cre.isMidjourney = true;
-      persistCreations();
-    }
-    if (typeof window.persistPromptHubCards === 'function') await window.persistPromptHubCards();
-    return true;
+    return wr('repairMjWarehouseCardFields', card, fields);
   }
 
   async function repairWarehouseCardImageFromJob(card, imageUrl, jobId) {
-    if (!card?.id || !imageUrl) return false;
-    const tombKey = jobId || card.genJobId;
-    if (tombKey && isGenerationJobDeleted(tombKey)) return false;
-    if (jobId && card.genJobId && String(card.genJobId) !== String(jobId)) {
-      console.warn('[imagegen] 跳过修复：卡片 genJobId 与任务不一致', card.id, card.genJobId, jobId);
-      return false;
-    }
-    let stored = imageUrl;
-    if (window.SupabaseSync?.persistGenerationImage) {
-      try {
-        stored = await window.SupabaseSync.persistGenerationImage(card.id, imageUrl, {
-          jobId: jobId || card.genJobId || null
-        });
-      } catch (e) {
-        console.warn('恢复生图：归档到 Storage 失败，使用任务链接', e);
-      }
-    }
-    card.image = stored || imageUrl;
-    card.updatedAt = Date.now();
-    if (typeof window.persistPromptHubCards === 'function') await window.persistPromptHubCards();
-    return true;
+    return wr('repairWarehouseCardImageFromJob', card, imageUrl, jobId);
   }
 
   /** 用户删卡片时：标记 job 已删，避免 API 恢复把它拉回来 */
@@ -6462,978 +5695,1527 @@
     }
   }
 
-  async function listRecoverableOrphanJobs(opts = {}) {
-    return collectJobsNeedingRecovery(opts);
-  }
+  async function listRecoverableOrphanJobs(opts) { return jr('listRecoverableOrphanJobs', opts) || []; }
 
-  async function settleStuckGenerationJob(job, opts = {}) {
-    const maxMs = Math.max(8000, opts.maxMs ?? 18000);
-    const stepMs = opts.stepMs ?? 2200;
-    let live = { ...job };
-    const start = Date.now();
-    while (Date.now() - start < maxMs) {
-      live = await refreshGenerationJobFromServer(live);
-      if (live.status === 'completed' && live.imageUrl) return live;
-      if (live.status === 'failed') return live;
-      if (live.status !== 'processing') break;
-      await new Promise((r) => setTimeout(r, stepMs));
-    }
-    return live;
-  }
+  async function settleStuckGenerationJob(job, opts) { return jr('settleStuckGenerationJob', job, opts); }
 
-  async function recoverSingleJobFromApi(job, opts = {}) {
-    if (!job?.id) return false;
-    if (isGenerationJobDeleted(job.id)) return false;
-    const force = opts.force === true;
-    const awaitSettle = opts.awaitSettle === true;
-    let live = await refreshGenerationJobFromServer(job);
-
-    if (awaitSettle && (live.status === 'processing' || !live.imageUrl)) {
-      live = await settleStuckGenerationJob(live, {
-        maxMs: opts.settleMaxMs ?? (awaitSettle ? 16000 : 18000),
-        stepMs: 2200
-      });
-    } else if (live.status === 'processing' || live.status === 'failed' || !live.imageUrl) {
-      live = await refreshGenerationJobFromServer(live);
-    }
-
-    if (live.status === 'failed') {
-      const settled = await refreshGenerationJobFromServer(live);
-      if (settled.status === 'completed' && settled.imageUrl) {
-        live = settled;
-      } else {
-        const pending = imageGenPendingJobs.find((p) => p.jobId === live.id);
-        if (pending && (force || pending.recovering)) {
-          if (await tryServerRecoverPending(pending)) return true;
-          if (!force && Date.now() - (pending.startedAt || 0) < pendingRecoveryGiveUpMs(pending)) {
-            pending.recovering = true;
-            persistPendingGenJobs();
-            return false;
-          }
-        }
-        if (pending) {
-          await resolvePendingFromApiJob(pending, {
-            id: live.id,
-            status: 'failed',
-            errorMessage: live.errorMessage || live.message || '生图失败',
-            prompt: live.prompt,
-            model: live.model
-          }, opts);
-        }
-        return false;
-      }
-    }
-
-    if (live.status !== 'completed' || !live.imageUrl) {
-      if (awaitSettle) return false;
-      const existing = imageGenPendingJobs.find((p) => p.jobId === live.id);
-      const pendingId = existing?.id || genId('pending');
-      if (!existing) {
-        imageGenPendingJobs.unshift({
-          id: pendingId,
-          jobId: live.id,
-          prompt: live.prompt || '',
-          model: live.model || 'gpt-image-2',
-          modelLabel: live.modelLabel || imageGenModelLabel(live.model),
-          resolution: live.resolution || '1k',
-          quality: live.quality || 'standard',
-          size: live.size || '1:1',
-          cost: live.creditsCharged || 0,
-          startedAt: Date.parse(live.createdAt) || Date.now()
-        });
-        persistPendingGenJobs();
-      }
-      if (!activePollJobIds.has(live.id)) {
-        void pollGenerationJobUntilDone(live.id, pendingId, {
-          prompt: live.prompt || '',
-          model: live.model || 'gpt-image-2',
-          resolution: live.resolution || '1k',
-          quality: live.quality || 'standard',
-          size: live.size || '1:1',
-          cost: live.creditsCharged || 0,
-          jobId: live.id,
-          silentToast: opts.silentToast !== false,
-          startedAt: Date.parse(live.createdAt) || Date.now()
-        });
-      }
-      return false;
-    }
-    if (live.status !== 'completed' || !live.imageUrl) return false;
-    if (!needsApiImageRecovery(live.id, live.imageUrl, force)) return false;
-    const existingCard = (window.__promptHubCards || []).find((c) => c.genJobId === live.id);
-    if (existingCard) {
-      await repairWarehouseCardImageFromJob(existingCard, live.imageUrl, live.id);
-      imageGenPendingJobs = imageGenPendingJobs.filter((p) => p.jobId !== live.id);
-      clearSessionGenJob(live.id);
-      return true;
-    }
-    const extras = Array.isArray(live.extraImageUrls)
-      ? live.extraImageUrls.filter((u) => u && u !== live.imageUrl)
-      : [];
-    await ensureGenJobCreationsFromPoll(
-      { data: { status: 'completed', imageUrl: live.imageUrl, extraImageUrls: extras } },
-      {
-        prompt: live.prompt || '',
-        model: live.model || 'gpt-image-2',
-        resolution: live.resolution || '1k',
-        quality: live.quality || 'standard',
-        size: live.size || '1:1',
-        cost: live.creditsCharged || 0,
-        jobId: live.id,
-        silentToast: opts.silentToast !== false,
-        isRecovery: true
-      },
-      imageGenPendingJobs.find((p) => p.jobId === live.id)?.id || null
-    );
-    return true;
-  }
+  async function recoverSingleJobFromApi(job, opts) { return jr('recoverSingleJobFromApi', job, opts); }
 
   async function recoverLostGenerationsFromApi() {
     return { ok: true, recovered: 0 };
   }
 
-  let missingGenCardRepairInflight = null;
-
-  /** 卡片有 genJobId 但无有效图：从 API 任务链或本地备份恢复 */
   async function repairMissingGenCardImagesQuiet() {
-    if (!window.PromptHubApi?.getGenerationJob || !window.SupabaseSync?.isLoggedIn?.()) return false;
-    if (missingGenCardRepairInflight) return missingGenCardRepairInflight;
-    const list = window.__promptHubCards || [];
-    const tomb = window.getDeletedGenerationJobTombstones?.() || {};
-    const targets = list.filter((c) => {
-      if (!c?.id || !c?.genJobId) return false;
-      const jobKey = String(c.genJobId);
-      const base = jobKey.replace(/#\d+$/, '');
-      if (tomb[jobKey] || (base && tomb[base])) return false;
-      if (!c.image) return true;
-      return !isUsableWarehouseImage(c);
-    }).slice(0, 8);
-    if (!targets.length) return false;
-    missingGenCardRepairInflight = (async () => {
-      let changed = false;
-      for (const card of targets) {
-        try {
-          let src = null;
-          const jobId = String(card.genJobId);
-          const baseJobId = jobId.replace(/#\d+$/, '');
-          const r = await window.PromptHubApi.getGenerationJob(baseJobId);
-          if (r?.ok && r.data?.imageUrl) src = r.data.imageUrl;
-          if (!src && typeof window.getCardImageBackup === 'function') {
-            const backup = await window.getCardImageBackup(card.id);
-            if (backup && isDisplayableImage(backup)) src = backup;
+    return wr('repairMissingGenCardImagesQuiet');
+  }
+
+  async function recoverRecentGenerationJobs(opts) { return jr('recoverRecentGenerationJobs', opts); }
+
+  function getSessionGenJobIds() { return jr('getSessionGenJobIds') || []; }
+  function trackSessionGenJob(jobId) { return jr('trackSessionGenJob', jobId); }
+  function clearSessionGenJob(jobId) { return jr('clearSessionGenJob', jobId); }
+  function isSessionGenJob(jobId) { return !!jr('isSessionGenJob', jobId); }
+  function deferPendingJobRecovery(pendingId, ctx, note) { return jr('deferPendingJobRecovery', pendingId, ctx, note); }
+  function scheduleGenJobsSync(delayMs) { return jr('scheduleGenJobsSync', delayMs); }
+  function startGenJobsBackgroundSync() { return jr('startGenJobsBackgroundSync'); }
+  function purgeExpiredGenPendingJobs() { return jr('purgeExpiredGenPendingJobs'); }
+  function shouldDeferFailedPendingRecovery(pending, apiJob, ctx) { return !!jr('shouldDeferFailedPendingRecovery', pending, apiJob, ctx); }
+  function abandonUnrecoverablePendingJob(pending, reason, opts) { return jr('abandonUnrecoverablePendingJob', pending, reason, opts); }
+  async function resumePendingGenerationJobs(opts) { return jr('resumePendingGenerationJobs', opts); }
+  async function resolvePendingFromApiJob(pending, apiJob, opts) { return jr('resolvePendingFromApiJob', pending, apiJob, opts); }
+  async function tryRecoverPendingJobDirect(pending) { return jr('tryRecoverPendingJobDirect', pending); }
+  async function tryServerRecoverPending(pending) { return jr('tryServerRecoverPending', pending); }
+  async function refreshGenerationJobFromServer(job, opts) { return jr('refreshGenerationJobFromServer', job, opts); }
+  async function collectJobsNeedingRecovery(opts) { return jr('collectJobsNeedingRecovery', opts) || []; }
+  function needsApiImageRecovery(jobId, apiImageUrl, force) { return !!jr('needsApiImageRecovery', jobId, apiImageUrl, force); }
+  function findWarehouseCardForJob(jobId) { return jr('findWarehouseCardForJob', jobId); }
+  function hasWarehouseCardForJob(jobId) { return !!jr('hasWarehouseCardForJob', jobId); }
+  function pendingHasWarehouseCard(pending) { return !!jr('pendingHasWarehouseCard', pending); }
+  function findWarehouseCardForPending(pending) { return jr('findWarehouseCardForPending', pending); }
+  function prunePendingJobsWithWarehouseCards() { return jr('prunePendingJobsWithWarehouseCards'); }
+  function findBestApiJobForPrompt(jobs, prompt, model, opts) { return jr('findBestApiJobForPrompt', jobs, prompt, model, opts); }
+  function pendingPromptsMatch(a, b) { return !!jr('pendingPromptsMatch', a, b); }
+  function getImageGenPendingJobsForFeed() { return jr('getImageGenPendingJobsForFeed') || imageGenPendingJobs; }
+
+  async function runImageGenWithPrompt(promptOverride, opts) {
+    return ig('runImageGenWithPrompt', promptOverride, opts);
+  }
+
+  async function runImageGenDemo() {
+    if (imageGenBatchRunning) {
+      toast('生图任务提交中，请稍候');
+      return;
+    }
+    const count = getImageGenBatchCount();
+    if (count <= 1) {
+      await runImageGenWithPrompt();
+      return;
+    }
+
+    const prompt = String(document.getElementById('imageGenPrompt')?.value || '').trim();
+    if (!prompt) {
+      toast('请先填写提示词');
+      return;
+    }
+    if (!window.AuthGate?.requireAuth?.('imagegen')) return;
+
+    const meta = getImageGenFormMeta();
+    let unit = window.PointsSystem?.getImageGenCost?.(meta.model, meta.resolution) ?? 10;
+    if (window.PointsSystem?.useApiForAccount?.()) {
+      const quoted = await quoteGenerationCost(meta.resolution, meta.quality, meta.model, unit);
+      unit = quoted.cost;
+    }
+    unit = window.PointsSystem?.roundCredits?.(unit) ?? unit;
+    const fmt = window.PointsSystem?.formatCredits || ((n) => String(n));
+    const balance = window.PointsSystem?.getCredits?.() ?? 0;
+    const totalNeed = window.PointsSystem?.roundCredits?.(unit * count) ?? unit * count;
+    if (balance < unit) {
+      toast(`积分不足（每张 ${fmt(unit)}，当前 ${fmt(balance)}）`);
+      return;
+    }
+    if (balance < totalNeed) {
+      toast(`积分约够 ${Math.floor(balance / unit)} 张，将按顺序提交直到不足（${fmt(unit)} 积分/张）`);
+    }
+
+    imageGenBatchRunning = true;
+    const batchId = `batch_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const btn = document.getElementById('imageGenSubmit');
+    if (btn) btn.disabled = true;
+    try {
+      let ok = 0;
+      let charged = 0;
+      for (let i = 0; i < count; i += 1) {
+        const curBalance = window.PointsSystem?.getCredits?.() ?? 0;
+        if (curBalance < unit && i > 0) break;
+        if (btn) btn.textContent = `提交中 ${i + 1}/${count}…`;
+        const res = await runImageGenWithPrompt(undefined, {
+          silentToast: true,
+          batch: true,
+          batchId,
+          batchIndex: i + 1,
+          batchTotal: count
+        });
+        if (res?.ok) {
+          ok += 1;
+          charged += res.creditsCharged || unit;
+        } else if (res?.reason === 'credits') {
+          break;
+        } else if (i === 0) {
+          break;
+        }
+        if (i < count - 1) await new Promise((r) => setTimeout(r, 2200 + Math.floor(Math.random() * 800)));
+      }
+      await window.PointsSystem?.refreshCreditsFromServer?.();
+      window.PointsSystem?.updateCreditsUI?.();
+      if (ok > 0) {
+        toast(`已提交 ${ok}/${count} 张生图，已扣约 ${fmt(charged)} 积分（${fmt(unit)} 积分/张）`);
+        if (isMobileViewport() && window.MobileUI?.setImageGenView) {
+          window.MobileUI.setImageGenView('feed', { scrollToTop: false });
+        }
+      }
+    } catch (e) {
+      console.error('[imagegen] batch submit failed', e);
+      toast('批量生图提交失败，请刷新页面后重试');
+    } finally {
+      imageGenBatchRunning = false;
+      if (btn) {
+        btn.disabled = false;
+        restoreImageGenSubmitLabel();
+      }
+    }
+  }
+
+  async function finishImageGenRun(opts) {
+    return fr('finishImageGenRun', opts);
+  }
+
+  function updateImageGenFeedHint() {
+    const el = document.getElementById('imageGenFeedHint');
+    if (!el) return;
+    const mobile = isMobileViewport();
+    const warehouse = imageGenFeedTab === 'warehouse';
+    if (warehouse) {
+      el.textContent = '';
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    if (imageGenFeedTab === 'community') {
+      el.textContent = mobile
+        ? '获取 · 点图放大 · 按钮复制或填入生图'
+        : '获取 · 点击图片放大 · 点击卡片查看详情';
+    }
+  }
+
+  function copyFeedPromptText(prompt) {
+    const text = (prompt || '').trim();
+    if (!text) {
+      toast('暂无提示词');
+      return;
+    }
+    navigator.clipboard.writeText(text).then(() => toast('已复制提示词'));
+  }
+
+  function getActiveImageGenMode() {
+    const fold = document.getElementById('imageGenInspireFold');
+    if (fold?.open) return 'inspire';
+    return document.body?.dataset?.imagegenMode === 'inspire' ? 'inspire' : 'gen';
+  }
+
+  function fillFeedPromptToActiveMode(prompt, opts = {}) {
+    const text = String(prompt || '');
+    const openInspire = opts.inspire === true;
+    fillFormPromptOnly(text);
+    if (openInspire) {
+      window.ImageGenPromptTools?.openInspireFold?.();
+      toast('已填入提示词；已展开灵感抽卡');
+    } else {
+      toast('已填入提示词');
+    }
+    if (isMobileViewport()) window.MobileUI?.setImageGenView?.('form');
+  }
+
+  function fillFeedPromptToImageGen(prompt) {
+    fillFeedPromptToActiveMode(prompt);
+  }
+
+  async function fillCardToImageGen(card) {
+    if (!card) return;
+    if (typeof switchAppPage === 'function') switchAppPage('imagegen');
+    fillFormPromptOnly(card.prompt || '');
+    const ref = card.image;
+    if (ref && isDisplayableImage(ref)) {
+      let url = ref;
+      try {
+        if (window.MediaPipeline?.resolvePreviewUrl) {
+          const resolved = await window.MediaPipeline.resolvePreviewUrl(ref, {
+            assetId: card.id,
+            cardId: card.id,
+            jobId: card.genJobId || null
+          });
+          if (resolved && !String(resolved).includes('data:image/svg')) url = resolved;
+        } else if (window.SupabaseSync?.resolveDisplayUrl) {
+          const resolved = await window.SupabaseSync.resolveDisplayUrl(ref, { assetId: card.id });
+          if (resolved && !String(resolved).includes('data:image/svg')) url = resolved;
+        }
+      } catch (e) { /* ignore */ }
+      fillFormRefOnly(url, [url]);
+    }
+    if (isMobileViewport()) window.MobileUI?.setImageGenView?.('form');
+    toast('已填入生图（提示词与参考图）');
+  }
+
+
+
+  function failedJobModelLabel(job) {
+    if (job.model) return imageGenModelLabel(job.model);
+    const lbl = String(job.modelLabel || '').trim();
+    if (lbl === '全能模型2' || lbl === 'quanneng2') return 'GPT Image 2';
+    return lbl || 'GPT Image 2';
+  }
+
+  function renderImageGenMobileResult() {
+    /* 手机「最近生成」横条已移除，作品在「作品」Tab 按最近生成排序展示 */
+  }
+
+
+
+  function clearImageGenFeedSelection() {
+    document.querySelectorAll('#imageGenFeed .imagegen-feed-card').forEach((el) => {
+      el.classList.remove('active-preview', 'card-selected-bloom', 'card-press-pop');
+      el.style.removeProperty('transform');
+      el.style.removeProperty('transition');
+    });
+  }
+
+  function bindImageGenPreviewActions() {
+    const body = document.getElementById('imageGenPreviewBody');
+    if (!body || body.dataset.previewActionsBound === '1') return;
+    body.dataset.previewActionsBound = '1';
+    const getPreviewRefs = () => {
+      let refs = [];
+      try {
+        if (body.dataset.previewRefs) refs = JSON.parse(body.dataset.previewRefs) || [];
+      } catch (e) { /* ignore */ }
+      return { refImages: refs, refImage: body.dataset.previewRef || '' };
+    };
+    body.addEventListener('click', (e) => {
+      if (!imageGenPreviewId || !imageGenPreviewKind) return;
+      const copyBtn = e.target.closest('[data-preview-copy-prompt]');
+      if (copyBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const text = body.dataset.previewPrompt || '';
+        if (!text) return;
+        navigator.clipboard?.writeText(text).then(
+          () => toast('提示词已复制'),
+          () => toast('复制失败')
+        );
+        return;
+      }
+      const fillAll = e.target.closest('[data-preview-fill-all]');
+      if (fillAll) {
+        e.preventDefault();
+        e.stopPropagation();
+        const { refImages: ri, refImage: r1 } = getPreviewRefs();
+        const assetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : '';
+        fillFormFromData({
+          prompt: body.dataset.previewPrompt || '',
+          refImages: ri.length ? ri : undefined,
+          refImage: ri.length ? undefined : r1,
+          refAssetId: assetId || undefined
+        });
+        return;
+      }
+      const fillPrompt = e.target.closest('[data-preview-fill-prompt]');
+      if (fillPrompt) {
+        e.preventDefault();
+        e.stopPropagation();
+        fillFormPromptOnly(body.dataset.previewPrompt || '');
+        return;
+      }
+      const fillRef = e.target.closest('[data-preview-fill-ref]');
+      if (fillRef) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (fillRef.disabled) return;
+        const { refImages: ri, refImage: r1 } = getPreviewRefs();
+        const assetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : '';
+        fillFormRefOnly(r1, ri, { assetId: assetId || undefined });
+        return;
+      }
+      const likeBtn = e.target.closest('[data-preview-like]');
+      if (likeBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        likeCommunityPostOnly(imageGenPreviewId);
+        renderImageGenPreview();
+      }
+    });
+  }
+
+  function primeImageGenPreviewShell(kind, id) {
+    const body = document.getElementById('imageGenPreviewBody');
+    if (!body) return;
+    const feedKey = kind === 'warehouse' ? 'wh_' + id : id;
+    const cardEl = document.querySelector(`#imageGenFeed .imagegen-feed-card[data-feed-id="${feedKey}"]`);
+    let prompt = cardEl?.dataset.feedPrompt || '';
+    let image = '';
+    let instantSrc = '';
+    const feedImg = cardEl?.querySelector('.imagegen-feed-media img');
+    if (feedImg) {
+      image = feedImg.getAttribute('data-image-ref') || '';
+      const src = feedImg.currentSrc || feedImg.src || '';
+      const path = window.SupabaseSync?.storagePathFromDisplayUrl?.(src) || '';
+      const isGridThumb = path && /_grid\.(jpe?g|webp|png)$/i.test(path);
+      if (/^https?:\/\//i.test(src) && !src.includes('data:image/svg') && feedImg.naturalWidth > 8 && !isGridThumb) {
+        instantSrc = src;
+      }
+    }
+    if (kind === 'warehouse') {
+      const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === id);
+      if (c) {
+        prompt = c.prompt || prompt;
+        image = c.image || image;
+      }
+    } else if (kind === 'community') {
+      const post = findPost(id);
+      if (post) {
+        prompt = post.prompt || prompt;
+        image = post.image || image;
+      }
+    }
+    const hasRef = !!(image && isDisplayableImage(image));
+    const fillHtml = buildPreviewFillActions(hasRef, '');
+    const imgHtml = isDisplayableImage(image)
+      ? `<div class="imagegen-preview-img-wrap">
+          <button type="button" class="imagegen-preview-img-btn" data-preview-zoom title="点击全屏查看大图">
+            ${instantSrc
+              ? `<img src="${esc(instantSrc)}" alt="" draggable="false" style="cursor:zoom-in">`
+              : '<span class="media-skeleton"></span>'}
+          </button>
+          <button type="button" class="imagegen-preview-dl-btn" data-preview-download title="下载到电脑"${instantSrc ? '' : ' disabled'} aria-label="下载图片">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0l4-4m-4 4l-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+            <span>下载</span>
+          </button>
+        </div>`
+      : '';
+    body.innerHTML = `${imgHtml}<div class="imagegen-preview-prompt">${esc(prompt)}</div>${fillHtml}`;
+    body.dataset.previewPrompt = prompt;
+    if (hasRef && image) body.dataset.previewRef = image;
+    else delete body.dataset.previewRef;
+    delete body.dataset.previewRefs;
+    if (instantSrc) {
+      body.dataset.previewImageUrl = instantSrc;
+      body.dataset.previewImageReady = '1';
+    } else {
+      delete body.dataset.previewImageUrl;
+      delete body.dataset.previewImageReady;
+    }
+  }
+
+  function closeImageGenPreview() {
+    imageGenPreviewRenderSeq += 1;
+    imageGenPreviewId = null;
+    imageGenPreviewKind = null;
+    document.getElementById('imageGenPreviewPanel')?.classList.add('hidden');
+    document.querySelector('.imagegen-side')?.classList.remove('imagegen-preview-open');
+    clearImageGenFeedSelection();
+    if (isMobileViewport()) enforceMobileImageGenFeed();
+    else scheduleImageGenFeedLayout({ immediate: true });
+  }
+
+  async function downloadImageGenPreviewImage(body, previewKind, previewAssetId, triggerBtn) {
+    if (!body || body.dataset.previewImageReady !== '1') {
+      toast('图片加载中，请稍后再下载');
+      return;
+    }
+    const url = body.dataset.previewImageUrl || '';
+    const img = body.querySelector('.imagegen-preview-img-btn img');
+    const dlBtn = triggerBtn || body.querySelector('[data-preview-download]');
+    try {
+      if (previewKind === 'warehouse' && previewAssetId && typeof window.downloadCardImageFile === 'function') {
+        const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === previewAssetId);
+        if (c?.image) {
+          await window.downloadCardImageFile(c.image, c.id, null, {
+            triggerBtn: dlBtn
+          });
+          return;
+        }
+      }
+      if (typeof window.promptHubSaveImage === 'function') {
+        await window.promptHubSaveImage(url, `prompt-hub-gen-${Date.now()}.png`, img);
+      } else {
+        await downloadImageFromUrl(url, `prompt-hub-gen-${Date.now()}.png`);
+        return;
+      }
+      toast('下载完成');
+    } catch (e) {
+      toast('下载失败，请稍后重试');
+      console.warn('[download] preview image failed', e);
+    }
+  }
+
+  async function downloadImageGenFeedItem(kind, itemId, imgEl, triggerBtn) {
+    try {
+      if (kind === 'warehouse') {
+        const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === itemId);
+        if (c?.image && typeof window.downloadCardImageFile === 'function') {
+          await window.downloadCardImageFile(c.image, c.id, null, {
+            triggerBtn
+          });
+          return;
+        }
+      } else if (kind === 'community') {
+        const post = findPost(itemId);
+        if (post?.image) {
+          toast('正在准备下载…', 2500);
+          const url = await resolveImageDisplayUrl(
+            post.image,
+            post.jobId || '',
+            post.sourceCardId || post.id,
+            { fromPublicFeed: true, authorId: post.authorId, preferFull: true }
+          );
+          if (url) {
+            await window.promptHubSaveImage?.(url, `prompt-hub-${itemId}.png`, imgEl);
+            toast('下载完成');
+            return;
           }
-          if (!src) continue;
-          const ok = await repairWarehouseCardImageFromJob(card, src, jobId);
-          if (ok) {
-            changed = true;
-            window.SupabaseSync?.clearPathMissingForCard?.(card.id, card.image);
-            if (typeof window.saveCardImageBackup === 'function') {
-              void window.saveCardImageBackup(card.id, src).catch(() => {});
+        }
+      }
+      toast('暂无可下载的图片');
+    } catch (e) {
+      toast('下载失败，请稍后重试');
+      console.warn('[download] feed item failed', e);
+    }
+  }
+
+  async function downloadImageFromUrl(url, filename) {
+    if (!url) {
+      toast('图片尚未加载完成');
+      return;
+    }
+    try {
+      if (typeof window.promptHubSaveImage === 'function') {
+        await window.promptHubSaveImage(url, filename);
+      } else {
+        const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename || `prompt-hub-${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      toast('图片已开始下载');
+    } catch (e) {
+      toast('下载失败，请稍后重试');
+      console.warn('[download] preview image failed', e);
+    }
+  }
+
+  function buildPreviewFillActions(hasRef, extraActionsHtml) {
+    const refDisabled = hasRef ? '' : ' disabled title="暂无参考图"';
+    return `
+      <div class="imagegen-preview-copy-row">
+        <button type="button" class="btn btn-secondary btn-sm" data-preview-copy-prompt>复制提示词</button>
+      </div>
+      <div class="imagegen-preview-fill">
+        <span class="imagegen-preview-fill-label">填入生图框</span>
+        <div class="imagegen-preview-fill-btns">
+          <button type="button" class="btn btn-primary btn-sm" data-preview-fill-all>全部</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-preview-fill-prompt>仅提示词</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-preview-fill-ref${refDisabled}>仅参考图</button>
+        </div>
+      </div>
+      ${extraActionsHtml ? `<div class="imagegen-preview-actions-secondary">${extraActionsHtml}</div>` : ''}`;
+  }
+
+  /** Feed 卡 data-feed-id 为 wh_ + 卡片 id；恢复卡 id 本身也可能以 wh_ 开头，勿二次 strip */
+  function warehouseCardIdFromFeedKey(feedKey) {
+    const k = String(feedKey || '');
+    return k.startsWith('wh_') ? k.slice(3) : k;
+  }
+
+  function findWarehouseCardById(cardId) {
+    const id = String(cardId || '').trim();
+    if (!id) return null;
+    let c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === id);
+    if (c) return c;
+    const full = (window.__promptHubCards || []).find((x) => x.id === id);
+    if (!full) return null;
+    return {
+      id: full.id,
+      title: (full.title || '').trim(),
+      prompt: (full.prompt || '').trim() || (full.title || '').trim(),
+      image: full.image || null,
+      tags: full.tags || [],
+      group: full.group || null,
+      genJobId: full.genJobId || null,
+      isMidjourney: !!full.isMidjourney,
+      mjGridUrls: Array.isArray(full.mjGridUrls) ? full.mjGridUrls : null,
+      mjCompositeUrl: full.mjCompositeUrl || null,
+      mjButtons: Array.isArray(full.mjButtons) ? full.mjButtons : null
+    };
+  }
+
+  function fullUrlFromImgEl(imgEl) {
+    if (!imgEl) return '';
+    const cached = String(imgEl.dataset?.previewFullUrl || imgEl.dataset?.fullUrl || '').trim();
+    if (cached && !cached.includes('data:image/svg')) return cached;
+    const src = String(imgEl.currentSrc || imgEl.src || '').trim();
+    if (!src || src.includes('data:image/svg') || !/^https?:\/\//i.test(src)) return '';
+    const path = window.SupabaseSync?.storagePathFromDisplayUrl?.(src) || '';
+    if (path && /_grid\.(jpe?g|webp|png)$/i.test(path)) return '';
+    if (window.SupabaseSync?.isInvalidMediaUrl?.(src)) return '';
+    if (window.SupabaseSync?.isValidSignedDisplayUrl?.(src)) return src;
+    if (window.SupabaseSync?.isFreshSignedDisplayUrl?.(src, 120000)) return src;
+    return '';
+  }
+
+  /** 生图 Feed / 灯箱 / 侧栏：统一拉 full 原图 URL（禁止落 grid 缩略） */
+  async function resolveImageGenFullUrl(kind, id, feedKey, imgEl) {
+    const instant = fullUrlFromImgEl(imgEl);
+    if (instant) return instant;
+    const fk = feedKey || (kind === 'warehouse' ? 'wh_' + id : id);
+    const assetId = kind === 'warehouse' ? warehouseCardIdFromFeedKey(fk) : id;
+    let rawRef = imgEl?.getAttribute?.('data-image-ref') || '';
+    let jobId = imgEl?.getAttribute?.('data-job-id') || '';
+    let resolveOpts = {};
+    if (kind === 'warehouse') {
+      const c = findWarehouseCardById(assetId);
+      if (c) {
+        rawRef = c.image || rawRef;
+        jobId = String(c.genJobId || jobId).replace(/#\d+$/, '');
+        resolveOpts = window.getCommunityCollectImageResolveOpts?.(c) || {};
+      }
+    } else {
+      const post = findPost(id);
+      if (post) {
+        rawRef = post.image || rawRef;
+        jobId = post.jobId || jobId;
+        resolveOpts = {
+          fromPublicFeed: true,
+          authorId: post.authorId,
+          cardId: post.sourceCardId || post.id
+        };
+      }
+    }
+    if (!rawRef || !isDisplayableImage(rawRef)) return '';
+    const gridFallbackUrl = window.MediaPipeline?.gridUrlFromImgEl?.(imgEl) || '';
+    if (window.MediaPipeline?.resolvePreviewUrl) {
+      return window.MediaPipeline.resolvePreviewUrl(rawRef, {
+        assetId,
+        cardId: resolveOpts.cardId || assetId,
+        authorId: resolveOpts.authorId,
+        communityFeed: resolveOpts.fromPublicFeed === true,
+        jobId: jobId || undefined,
+        gridFallbackUrl,
+        allowGridFallback: true
+      });
+    }
+    if (window.SupabaseSync?.resolvePreviewFullUrl) {
+      return window.SupabaseSync.resolvePreviewFullUrl(rawRef, {
+        assetId,
+        cardId: resolveOpts.cardId || assetId,
+        authorId: resolveOpts.authorId,
+        communityFeed: resolveOpts.fromPublicFeed === true,
+        jobId: jobId || undefined,
+        gridFallbackUrl,
+        allowGridFallback: true
+      });
+    }
+    return resolveImageDisplayUrl(rawRef, jobId, assetId, {
+      ...resolveOpts,
+      preferFull: true,
+      listOnly: false,
+      allowFullFallback: true,
+      bypassSignBudget: true,
+      cardId: resolveOpts.cardId || assetId
+    });
+  }
+
+  async function renderImageGenPreview() {
+    const body = document.getElementById('imageGenPreviewBody');
+    if (!body || !imageGenPreviewId || !imageGenPreviewKind) return;
+    const seq = ++imageGenPreviewRenderSeq;
+    const previewId = imageGenPreviewId;
+    const previewKind = imageGenPreviewKind;
+    const previewStale = () =>
+      seq !== imageGenPreviewRenderSeq
+      || previewId !== imageGenPreviewId
+      || previewKind !== imageGenPreviewKind;
+    delete body.dataset.previewImageUrl;
+    delete body.dataset.previewImageReady;
+    let prompt = '';
+    let image = '';
+    let jobId = '';
+    let refImages = null;
+    let refImage = null;
+    let extraActions = '';
+    if (imageGenPreviewKind === 'personal') {
+      closeImageGenPreview();
+      return;
+    } else if (imageGenPreviewKind === 'community') {
+      const post = findPost(imageGenPreviewId);
+      if (!post) { closeImageGenPreview(); return; }
+      prompt = post.prompt || '';
+      image = post.image || '';
+      const liked = likedIds.has(post.id);
+      extraActions = `
+        <button type="button" class="btn btn-secondary btn-sm" data-preview-like>${liked ? '已赞' : '点赞'}</button>`;
+    } else {
+      const c = findWarehouseCardById(imageGenPreviewId);
+      if (!c) {
+        toast('找不到该卡藏卡片，请强刷页面');
+        closeImageGenPreview();
+        return;
+      }
+      prompt = c.prompt || '';
+      image = c.image || '';
+      jobId = normalizeMjParentJobId(c.genJobId || '');
+      if (isDisplayableImage(c.image)) refImage = c.image;
+    }
+    const previewCard = imageGenPreviewKind === 'warehouse'
+      ? ((window.__promptHubCards || []).find((x) => x.id === imageGenPreviewId) || findWarehouseCardById(imageGenPreviewId))
+      : null;
+    let mjGridUrls = Array.isArray(previewCard?.mjGridUrls) && previewCard.mjGridUrls.length
+      ? previewCard.mjGridUrls.filter(Boolean)
+      : null;
+    const mjParentJobId = normalizeMjParentJobId(jobId || previewCard?.genJobId || '');
+    if (!mjGridUrls?.length && mjParentJobId && previewCard?.isMidjourney && window.PromptHubApi?.getGenerationJob) {
+      try {
+        const poll = await window.PromptHubApi.getGenerationJob(mjParentJobId);
+        if (!previewStale() && poll?.ok) {
+          const parsed = resolveMjPollImages(poll);
+          if (parsed.tiles.length) {
+            mjGridUrls = parsed.tiles;
+            if (previewCard) {
+              await repairMjWarehouseCardFields(previewCard, {
+                mjGridUrls: parsed.tiles,
+                mjCompositeUrl: parsed.composite,
+                mjButtons: poll.data.mjButtons
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[imagegen] mj grid fetch failed', mjParentJobId, e);
+      }
+    }
+    if (previewStale()) return;
+    const cachedMjButtons = Array.isArray(previewCard?.mjButtons) ? previewCard.mjButtons : null;
+    const hasRef = !!(refImages?.length || (refImage && isDisplayableImage(refImage)));
+    const fillHtml = buildPreviewFillActions(hasRef, extraActions);
+    const mjActionsHtml = cachedMjButtons?.length
+      ? buildMjActionsHtml(cachedMjButtons, mjParentJobId)
+      : (mjParentJobId ? '<div class="imagegen-mj-actions-host" data-mj-actions-host></div>' : '');
+    let imgHtml = '';
+    if (mjGridUrls?.length) {
+      imgHtml = buildMjGridPreviewHtml(mjGridUrls);
+    } else if (isDisplayableImage(image)) {
+      imgHtml = `<div class="imagegen-preview-img-wrap">
+          <button type="button" class="imagegen-preview-img-btn" data-preview-zoom title="点击全屏查看大图"><span class="media-skeleton"></span></button>
+          <button type="button" class="imagegen-preview-dl-btn" data-preview-download title="下载到电脑" disabled aria-label="下载图片">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0l4-4m-4 4l-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+            <span>下载</span>
+          </button>
+        </div>`;
+    }
+    body.innerHTML = `${imgHtml}<div class="imagegen-preview-prompt">${esc(prompt)}</div>${mjActionsHtml}${fillHtml}`;
+    body.dataset.previewPrompt = prompt;
+    body.dataset.previewJobId = mjParentJobId || '';
+    body.dataset.previewRef = refImage || '';
+    if (refImages?.length) body.dataset.previewRefs = JSON.stringify(refImages);
+    else delete body.dataset.previewRefs;
+    const dlPending = body.querySelector('[data-preview-download]');
+    if (dlPending) dlPending.disabled = true;
+    const zoomBtn = body.querySelector('[data-preview-zoom]');
+    if (mjGridUrls?.length) {
+      bindMjFilmstripPreview(body, mjGridUrls, {
+        feedKey: 'wh_' + previewId,
+        cardId: previewId
+      });
+    } else if (zoomBtn && isDisplayableImage(image)) {
+      const previewAssetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : imageGenPreviewId;
+      const previewOpts = previewCard ? (window.getCommunityCollectImageResolveOpts?.(previewCard) || {}) : (
+        imageGenPreviewKind === 'community' ? (() => {
+          const post = findPost(imageGenPreviewId);
+          return post ? { fromPublicFeed: true, authorId: post.authorId, cardId: post.sourceCardId || post.id } : {};
+        })() : {}
+      );
+
+      const mountPreviewImage = (url, { isFull } = {}) => {
+        if (previewStale() || !url) return;
+        body.dataset.previewImageUrl = url;
+        body.dataset.previewImageReady = '1';
+        const dlReady = body.querySelector('[data-preview-download]');
+        if (dlReady) dlReady.disabled = false;
+        let img = zoomBtn.querySelector('img');
+        if (!img) {
+          img = document.createElement('img');
+          img.alt = '';
+          img.draggable = false;
+          img.style.cursor = 'zoom-in';
+          zoomBtn.replaceChildren(img);
+        }
+        if (img.src !== url) img.src = url;
+        if (isFull) img.dataset.previewFullUrl = url;
+        else delete img.dataset.previewFullUrl;
+        const openPreviewLightbox = () => {
+          if (typeof window.openLightbox !== 'function') return;
+          const feedKey = previewKind === 'warehouse' ? 'wh_' + previewId : previewId;
+          const lbOpts = {
+            imageGen: true,
+            feedKey,
+            community: previewKind === 'community',
+            postId: previewKind === 'community' ? previewId : null,
+            cardId: previewKind === 'warehouse' ? previewAssetId : null,
+            preferFull: true
+          };
+          const previewImg = zoomBtn.querySelector('img');
+          const instant = fullUrlFromImgEl(previewImg);
+          if (instant) {
+            window.openLightbox(instant, lbOpts);
+            return;
+          }
+          window.openLightbox('', { ...lbOpts, pending: true });
+          void resolveImageGenFullUrl(
+            previewKind,
+            previewId,
+            feedKey,
+            previewImg
+          ).then((fullUrl) => {
+            if (!fullUrl || String(fullUrl).startsWith('data:image/svg')) {
+              window.closeLightbox?.();
+              toast('原图加载中，请稍后再试');
+              return;
+            }
+            window.setLightboxSrc?.(fullUrl, {
+              imageGen: true,
+              feedKey,
+              community: previewKind === 'community',
+              postId: previewKind === 'community' ? previewId : null,
+              cardId: previewKind === 'warehouse' ? previewAssetId : null,
+              preferFull: true
+            });
+          });
+        };
+        if (!zoomBtn.dataset.previewZoomBound) {
+          zoomBtn.dataset.previewZoomBound = '1';
+          zoomBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openPreviewLightbox();
+          });
+        }
+        if (!img.dataset.previewZoomBound) {
+          img.dataset.previewZoomBound = '1';
+          img.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openPreviewLightbox();
+          });
+        }
+        img.onload = () => {
+          if (previewStale()) return;
+          if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(zoomBtn);
+          if (isFull) {
+            if (typeof window.resetImageZoom === 'function') window.resetImageZoom(img);
+            if (typeof window.attachImageZoom === 'function') window.attachImageZoom(img);
+          }
+        };
+        if (img.complete && img.naturalWidth > 0) img.onload?.();
+      };
+
+      void resolveImageGenFullUrl(
+        previewKind,
+        previewId,
+        previewKind === 'warehouse' ? 'wh_' + previewId : previewId,
+        null
+      ).then((url) => {
+        if (previewStale()) return;
+        if (!url) {
+          zoomBtn.remove();
+          body.querySelector('[data-preview-download]')?.remove();
+          return;
+        }
+        mountPreviewImage(url, { isFull: true });
+      });
+    } else {
+      body.querySelector('[data-preview-download]')?.remove();
+    }
+    body.querySelector('[data-preview-download]')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (previewStale()) return;
+      const assetId = previewKind === 'warehouse' ? previewId : previewId;
+      void downloadImageGenPreviewImage(body, previewKind, assetId, e.currentTarget);
+    });
+    body.querySelectorAll('[data-mj-action]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void runImageGenMjAction(btn);
+      });
+    });
+    if (mjParentJobId && !cachedMjButtons?.length) {
+      void window.PromptHubApi.getGenerationJob(mjParentJobId).then((r) => {
+        if (previewStale() || !r.ok || !Array.isArray(r.data?.mjButtons) || !r.data.mjButtons.length) return;
+        const host = body.querySelector('[data-mj-actions-host]');
+        if (!host) return;
+        host.outerHTML = buildMjActionsHtml(r.data.mjButtons, mjParentJobId);
+        if (previewCard) {
+          previewCard.mjButtons = r.data.mjButtons;
+        }
+        body.querySelectorAll('[data-mj-action]').forEach((btn) => {
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void runImageGenMjAction(btn);
+          });
+        });
+      });
+    }
+  }
+
+  function isImageGenFormWheelContext(e) {
+    const t = e.target;
+    if (t?.closest?.('.imagegen-form, .imagegen-form-scroll, #imageGenPromptBlock, #imageGenInspireFold')) return true;
+    const tag = t?.tagName;
+    if (tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'INPUT') return true;
+    const ae = document.activeElement;
+    if (ae?.closest?.('.imagegen-form, .imagegen-form-scroll')) return true;
+    return false;
+  }
+
+  function isScrollableAtWheel(el, deltaY) {
+    if (!el || el.nodeType !== 1) return false;
+    const oy = window.getComputedStyle(el).overflowY;
+    if (oy !== 'auto' && oy !== 'scroll' && oy !== 'overlay') return false;
+    if (el.scrollHeight <= el.clientHeight + 1) return false;
+    if (deltaY < 0 && el.scrollTop > 0) return true;
+    if (deltaY > 0 && el.scrollTop + el.clientHeight < el.scrollHeight - 1) return true;
+    return false;
+  }
+
+  /** 滚轮应留给表单/可滚动区，勿触发侧栏换图或抢滚动 */
+  function shouldBlockImageGenWheelNav(e) {
+    if (isImageGenFormWheelContext(e)) return true;
+    let node = e.target;
+    while (node && node !== document.body) {
+      if (isScrollableAtWheel(node, e.deltaY)) return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  function bindImageGenPreviewWheelScroll() {
+    const formScroll = document.querySelector('.imagegen-form-scroll');
+    if (formScroll && formScroll.dataset.wheelBound !== '1') {
+      formScroll.dataset.wheelBound = '1';
+      formScroll.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+    }
+
+    const side = document.querySelector('.imagegen-side');
+    if (!side || side.dataset.previewWheelBound === '1') return;
+    side.dataset.previewWheelBound = '1';
+    side.addEventListener('wheel', (e) => {
+      if (!side.classList.contains('imagegen-preview-open')) return;
+      if (shouldBlockImageGenWheelNav(e)) return;
+      if (!e.target.closest('#imageGenFeed')) return;
+      const feed = document.getElementById('imageGenFeed');
+      if (!feed) return;
+      const maxScroll = feed.scrollHeight - feed.clientHeight;
+      if (maxScroll <= 2) return;
+      const next = feed.scrollTop + e.deltaY;
+      if (next < 0 || next > maxScroll) return;
+      feed.scrollTop = next;
+      e.preventDefault();
+    }, { passive: false });
+  }
+
+  function openImageGenPreview(kind, id) {
+    imageGenPreviewKind = kind;
+    imageGenPreviewId = id;
+    document.getElementById('imageGenPreviewPanel')?.classList.remove('hidden');
+    document.querySelector('.imagegen-side')?.classList.add('imagegen-preview-open');
+    clearImageGenFeedSelection();
+    const feedKey = kind === 'warehouse' ? 'wh_' + id : id;
+    document.querySelector(`#imageGenFeed .imagegen-feed-card[data-feed-id="${feedKey}"]`)
+      ?.classList.add('active-preview');
+    primeImageGenPreviewShell(kind, id);
+    if (!isMobileViewport()) scheduleImageGenFeedLayout({ immediate: true });
+    void renderImageGenPreview();
+  }
+
+  function closeImageGenFilterSheet() {
+    const overlay = document.getElementById('imageGenFilterSheetOverlay');
+    if (!overlay) return;
+    overlay.classList.remove('open');
+    overlay.hidden = true;
+  }
+
+  function openImageGenFilterSheet(kind) {
+    if (!isMobileViewport()) return;
+    const opts = window.getImageGenWarehouseFilterOptions?.() || { groups: [], tags: [] };
+    const list = kind === 'group' ? opts.groups : opts.tags;
+    const current = kind === 'group' ? imageGenWhGroup : imageGenWhTag;
+    const titleEl = document.getElementById('imageGenFilterSheetTitle');
+    const listEl = document.getElementById('imageGenFilterSheetList');
+    const overlay = document.getElementById('imageGenFilterSheetOverlay');
+    if (!titleEl || !listEl || !overlay) return;
+    titleEl.textContent = kind === 'group' ? '选择分组' : '选择标签';
+    listEl.innerHTML = list.map((o) =>
+      `<button type="button" class="filter-sheet-row${o.value === current ? ' selected' : ''}" data-value="${esc(o.value)}">
+        <span class="filter-sheet-name">${esc(o.label)}</span>
+        <span class="filter-sheet-check" aria-hidden="true"></span>
+      </button>`
+    ).join('');
+    listEl.querySelectorAll('.filter-sheet-row').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-value') || 'all';
+        if (kind === 'group') imageGenWhGroup = v;
+        else imageGenWhTag = v;
+        closeImageGenFilterSheet();
+        syncImageGenWarehouseFiltersUI();
+        renderImageGenFeed();
+      });
+    });
+    overlay.hidden = false;
+    overlay.style.removeProperty('display');
+    overlay.style.pointerEvents = '';
+    overlay.classList.add('open');
+  }
+
+  function bindImageGenWarehouseFilterMobileUI() {
+    document.getElementById('imageGenWhGroupBtn')?.addEventListener('click', () => openImageGenFilterSheet('group'));
+    document.getElementById('imageGenWhTagBtn')?.addEventListener('click', () => openImageGenFilterSheet('tag'));
+  }
+
+  function syncImageGenCommunityFiltersUI() {
+    const bar = document.getElementById('imageGenCommunityFilters');
+    if (!bar) return;
+    const show = imageGenFeedTab === 'community';
+    bar.classList.toggle('hidden', !show);
+    if (!show) return;
+    document.querySelectorAll('[data-imagegen-community-sort]').forEach(btn => {
+      btn.classList.toggle('active', (btn.dataset.imagegenCommunitySort || 'random') === communitySort);
+    });
+    document.querySelectorAll('[data-imagegen-community-scope]').forEach(btn => {
+      btn.classList.toggle('active', (btn.dataset.imagegenCommunityScope || 'all') === communityScope);
+    });
+  }
+
+  function syncImageGenWarehouseFiltersUI() {
+    const bar = document.getElementById('imageGenWarehouseFilters');
+    const commBar = document.getElementById('imageGenCommunityFilters');
+    if (commBar) commBar.classList.toggle('hidden', imageGenFeedTab !== 'community');
+    const groupEl = document.getElementById('imageGenWhGroup');
+    const tagEl = document.getElementById('imageGenWhTag');
+    if (!bar || !groupEl || !tagEl) return;
+    const show = imageGenFeedTab === 'warehouse';
+    bar.classList.toggle('hidden', !show);
+    if (!show) return;
+    const opts = window.getImageGenWarehouseFilterOptions?.() || { groups: [], tags: [] };
+    const mkOpts = (list, current) => list.map(o =>
+      `<option value="${esc(o.value)}"${o.value === current ? ' selected' : ''}>${esc(o.label)}</option>`
+    ).join('');
+    groupEl.innerHTML = mkOpts(opts.groups, imageGenWhGroup);
+    tagEl.innerHTML = mkOpts(opts.tags, imageGenWhTag);
+    if (!opts.groups.some(o => o.value === imageGenWhGroup)) imageGenWhGroup = 'all';
+    if (!opts.tags.some(o => o.value === imageGenWhTag)) imageGenWhTag = 'all';
+    groupEl.value = imageGenWhGroup;
+    tagEl.value = imageGenWhTag;
+    const gLabel = opts.groups.find((o) => o.value === imageGenWhGroup)?.label || '全部分组';
+    const tLabel = opts.tags.find((o) => o.value === imageGenWhTag)?.label || '全部标签';
+    const gLabelEl = document.getElementById('imageGenWhGroupLabel');
+    const tLabelEl = document.getElementById('imageGenWhTagLabel');
+    if (gLabelEl) gLabelEl.textContent = gLabel;
+    if (tLabelEl) tLabelEl.textContent = tLabel;
+  }
+
+
+  let imageGenPreviewWheelAt = 0;
+  const IMAGEGEN_PREVIEW_WHEEL_GAP_MS = 420;
+
+  function navigateImageGenPreviewByWheel(deltaY) {
+    if (!imageGenPreviewId || !imageGenPreviewKind) return false;
+    const now = performance.now();
+    if (now - imageGenPreviewWheelAt < IMAGEGEN_PREVIEW_WHEEL_GAP_MS) return false;
+    const items = getImageGenFeedNavItems();
+    if (items.length < 2) return false;
+    const currentKey = imageGenPreviewKind === 'warehouse'
+      ? 'wh_' + imageGenPreviewId
+      : imageGenPreviewId;
+    const idx = items.findIndex((it) => it.key === currentKey);
+    if (idx < 0) return false;
+    const nextIdx = idx + (deltaY > 0 ? 1 : -1);
+    if (nextIdx < 0 || nextIdx >= items.length) return false;
+    const item = items[nextIdx];
+    openImageGenPreview(item.kind, item.id);
+    imageGenPreviewWheelAt = now;
+    return true;
+  }
+
+  async function openImageGenLightboxAt(kind, id, key) {
+    const feedKey = key || (kind === 'warehouse' ? 'wh_' + id : id);
+    const card = document.querySelector(`.imagegen-feed-card[data-feed-id="${CSS.escape(feedKey)}"]`);
+    const imgEl = card?.querySelector('.imagegen-feed-thumb-btn img');
+    const assetId = kind === 'warehouse' ? warehouseCardIdFromFeedKey(feedKey) : feedKey;
+    let mjGalleryUrls = null;
+    if (kind === 'warehouse' && assetId) {
+      const full = (window.__promptHubCards || []).find((c) => c.id === assetId);
+      if (full?.isMidjourney && Array.isArray(full.mjGridUrls) && full.mjGridUrls.length > 1) {
+        mjGalleryUrls = full.mjGridUrls.filter(Boolean).slice(0, 4);
+      }
+      if (!mjGalleryUrls?.length && full?.genJobId && window.PromptHubApi?.getGenerationJob) {
+        try {
+          const poll = await window.PromptHubApi.getGenerationJob(normalizeMjParentJobId(full.genJobId));
+          if (poll?.ok) {
+            const parsed = resolveMjPollImages(poll);
+            if (parsed.tiles.length > 1) {
+              mjGalleryUrls = parsed.tiles;
+              await repairMjWarehouseCardFields(full, {
+                mjGridUrls: parsed.tiles,
+                mjCompositeUrl: parsed.composite,
+                mjButtons: poll.data.mjButtons
+              });
             }
           }
         } catch (e) {
-          console.warn('[repairMissingGenCardImages]', card.id, e);
+          console.warn('[imagegen] mj lightbox grid fetch failed', e);
         }
-        await new Promise((res) => setTimeout(res, 160));
       }
-      if (changed) {
-        if (typeof window.persistPromptHubCards === 'function') await window.persistPromptHubCards();
-        window.refreshWarehouseUI?.({ softCards: true });
-        if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-          renderImageGenFeed({ preserveScroll: true });
-        }
-        queueUrgentCardsSync();
-      }
-      return changed;
-    })().finally(() => { missingGenCardRepairInflight = null; });
-    return missingGenCardRepairInflight;
+    }
+    const startIdx = 0;
+    const lbOpts = {
+      imageGen: true,
+      feedKey,
+      community: kind === 'community',
+      postId: kind === 'community' ? id : null,
+      cardId: kind === 'warehouse' ? assetId : null,
+      preferFull: true,
+      mjGalleryUrls: mjGalleryUrls || undefined,
+      mjGalleryIndex: startIdx,
+      fallbackSrc: window.MediaPipeline?.gridUrlFromImgEl?.(imgEl) || ''
+    };
+    if (typeof window.openLightbox !== 'function') return;
+    if (mjGalleryUrls?.length) {
+      window.openLightbox(mjGalleryUrls[startIdx], lbOpts);
+      return;
+    }
+    const instant = fullUrlFromImgEl(imgEl);
+    if (instant) {
+      window.openLightbox(instant, lbOpts);
+      return;
+    }
+    window.openLightbox('', { ...lbOpts, pending: true });
+    const url = await resolveImageGenFullUrl(kind, id, feedKey, imgEl);
+    if (url && !String(url).startsWith('data:image/svg')) {
+      window.setLightboxSrc?.(url, lbOpts);
+      return;
+    }
+    window.closeLightbox?.();
+    toast('原图加载中，请稍后再试');
   }
 
-  /** 刷新/登录后：恢复进行中的卡片、续轮询、静默补全已完成任务 */
-  async function resumePendingGenerationJobs(opts = {}) {
-    if (!window.PromptHubApi?.listRecentGenerationJobs) return false;
-    if (!window.PointsSystem?.useApiForAccount?.()) return false;
-    purgeExpiredGenPendingJobs();
-    const now = Date.now();
-    if (!opts.force && now - lastGenJobsListAt < (imageGenPendingJobs.length > 0 ? 4000 : GEN_JOBS_LIST_MIN_MS)) return false;
-    if (resumeGenJobsInflight) return resumeGenJobsInflight;
 
-    resumeGenJobsInflight = (async () => {
-      lastGenJobsListAt = Date.now();
-      const r = await window.PromptHubApi.listRecentGenerationJobs();
-      if (!r?.ok || !Array.isArray(r.data?.jobs)) return false;
-
-      let changed = false;
-      const apiById = new Map();
-      const attachedJobIds = new Set();
-
-      for (const job of r.data.jobs) {
-        if (job?.id) apiById.set(job.id, job);
-      }
-
-      /** 所有 pending 任务强制拉最新状态（不受 list 轮询预算限制） */
-      const pendingJobIds = [...new Set(
-        imageGenPendingJobs.map((p) => p.jobId).filter(Boolean)
-      )];
-      for (const jobId of pendingJobIds) {
-        const pending = imageGenPendingJobs.find((p) => p.jobId === jobId);
-        if (!pending) continue;
-        const pendingAge = Date.now() - (pending.startedAt || 0);
-        const ctx = pendingJobToPollCtx(pending);
-        try {
-          const retry = await window.PromptHubApi.getGenerationJob(jobId, {
-            settle: isLongRunningGenJob(ctx) && pendingAge > 60_000
-          });
-          if (!retry.ok) continue;
-          const aj = {
-            id: jobId,
-            status: retry.data.status,
-            imageUrl: retry.data.imageUrl,
-            extraImageUrls: retry.data.extraImageUrls,
-            errorMessage: retry.data.errorMessage || retry.data.message,
-            prompt: pending.prompt,
-            model: pending.model,
-            resolution: pending.resolution,
-            quality: pending.quality,
-            size: pending.size
-          };
-          apiById.set(jobId, aj);
-          if (aj.status === 'completed' && aj.imageUrl) {
-            pending.recovering = false;
-            pending.recoverNote = '';
-            if (await resolvePendingFromApiJob(pending, aj, { silent: true })) changed = true;
-          } else if (
-            aj.status === 'failed'
-            && !isLikelyRecoverableGenFailure(aj.errorMessage, ctx)
-          ) {
-            if (await resolvePendingFromApiJob(pending, aj, { silent: true })) changed = true;
-          }
-        } catch (e) { /* ignore */ }
-      }
-
-      const refreshTargets = r.data.jobs.filter((j) => {
-        if (!j?.id || isGenerationJobDeleted(j.id)) return false;
-        if (j.status !== 'processing' && !(j.status === 'completed' && !j.imageUrl)) return false;
-        const age = Date.now() - (Date.parse(j.createdAt) || 0);
-        return imageGenPendingJobs.some((p) => p.jobId === j.id)
-          || isSessionGenJob(j.id)
-          || age > 4 * 60 * 1000;
-      }).slice(0, 6);
-      for (const job of refreshTargets) {
-        const live = await refreshGenerationJobFromServer(job);
-        apiById.set(job.id, live);
-      }
-
-      /** 按提示词+模型匹配 API 任务（无 jobId 的旧占位；取最新/进行中） */
-      function matchApiJobForPending(p) {
-        if (p.jobId && apiById.has(p.jobId)) return apiById.get(p.jobId);
-        return findBestApiJobForPrompt(r.data.jobs, p.prompt, p.model, {
-          minCreatedAt: p.startedAt || Date.now(),
-          preferProcessing: true,
-          resolution: p.resolution
-        });
-      }
-
-      for (const pending of imageGenPendingJobs.slice()) {
-        if (pendingHasWarehouseCard(pending)) {
-          removePendingJob(pending.id);
-          if (pending.jobId) clearSessionGenJob(pending.jobId);
-          changed = true;
-          continue;
-        }
-        if (!pending.jobId) {
-          const matched = matchApiJobForPending(pending);
-          if (matched?.id) {
-            pending.jobId = matched.id;
-            trackSessionGenJob(matched.id);
-            persistPendingGenJobs();
-          }
-        }
-        if (!pending.jobId) {
-          if (Date.now() - (pending.startedAt || 0) > 20 * 60 * 1000) {
-            failPendingJob(pending.id, '未找到对应任务，积分已全额退回');
-            changed = true;
-          }
-          continue;
-        }
-        let aj = apiById.get(pending.jobId);
-        const pendingAge = Date.now() - (pending.startedAt || 0);
-        const pollCtx = pendingJobToPollCtx(pending);
-        if (pending.jobId && (!aj || aj.status === 'processing' || pendingAge > 20_000)) {
-          try {
-            const retry = await window.PromptHubApi.getGenerationJob(pending.jobId, {
-              settle: isLongRunningGenJob(pollCtx) && pendingAge > 60_000
-            });
-            if (retry.ok) {
-              aj = {
-                id: pending.jobId,
-                status: retry.data.status,
-                imageUrl: retry.data.imageUrl,
-                extraImageUrls: retry.data.extraImageUrls,
-                errorMessage: retry.data.errorMessage || retry.data.message,
-                prompt: pending.prompt,
-                model: pending.model
-              };
-              apiById.set(pending.jobId, aj);
-            }
-          } catch (e) { /* ignore */ }
-        }
-        if (aj && aj.status !== 'processing') {
-          if (await resolvePendingFromApiJob(pending, aj)) changed = true;
-          continue;
-        }
-        const deferAge = Date.now() - (pending.startedAt || 0);
-        if (pending.recovering && deferAge >= pendingRecoveryGiveUpMs(pending) && aj?.status === 'processing') {
-          if (!activePollJobIds.has(pending.jobId)) {
-            void pollGenerationJobUntilDone(pending.jobId, pending.id, pendingJobToPollCtx(pending));
-          }
-          continue;
-        }
-        if (pending.recovering && pending.jobId && !activePollJobIds.has(pending.jobId)) {
-          const retry = await window.PromptHubApi.getGenerationJob(pending.jobId, {
-            settle: isLongRunningGenJob(pendingJobToPollCtx(pending)) && pendingAge > 60_000
-          });
-          if (retry.ok) {
-            const snap = {
-              id: pending.jobId,
-              status: retry.data.status,
-              imageUrl: retry.data.imageUrl,
-              extraImageUrls: retry.data.extraImageUrls,
-              errorMessage: retry.data.errorMessage || retry.data.message,
-              prompt: pending.prompt,
-              model: pending.model
-            };
-            apiById.set(pending.jobId, snap);
-            if (await resolvePendingFromApiJob(pending, snap)) {
-              changed = true;
-              continue;
-            }
-            if (retry.data.status === 'processing' && !activePollJobIds.has(pending.jobId)) {
-              void pollGenerationJobUntilDone(pending.jobId, pending.id, pendingJobToPollCtx(pending));
-            }
-          }
-        }
-      }
-
-      for (const job of imageGenPendingJobs.slice()) {
-        if (!job.jobId || activePollJobIds.has(job.jobId)) continue;
-        if (Date.now() - (job.startedAt || 0) >= RECENT_GEN_RECOVER_MS) {
-          abandonUnrecoverablePendingJob(
-            job,
-            '该任务已超过 2 小时恢复窗口，已关闭占位',
-            { toast: true }
-          );
-          if (job.jobId) window.recordGenerationJobDeletion?.(job.jobId);
-          changed = true;
-          continue;
-        }
-        const aj = apiById.get(job.jobId);
-        if (aj?.status === 'processing') {
-          void pollGenerationJobUntilDone(job.jobId, job.id, pendingJobToPollCtx(job));
-        }
-      }
-
-      for (const job of r.data.jobs) {
-        if (!job?.id || job.status !== 'failed') continue;
-        const pending = imageGenPendingJobs.find((p) => p.jobId === job.id);
-        if (!pending) continue;
-        if (await resolvePendingFromApiJob(pending, job, { silent: true })) changed = true;
-      }
-
-      for (const job of r.data.jobs) {
-        if (!job?.id || job.status !== 'failed') continue;
-        if (!isSessionGenJob(job.id)) continue;
-        if (imageGenPendingJobs.some((p) => p.jobId === job.id)) continue;
-        if (imageGenFailedJobs.some((f) => f.jobId === job.id)) continue;
-        if (hasWarehouseCardForJob(job.id)) continue;
-        const live = apiById.get(job.id) || job;
-        const failCtx = {
-          model: live.model || job.model,
-          resolution: live.resolution || job.resolution
-        };
-        if (isLikelyRecoverableGenFailure(live.errorMessage || job.errorMessage, failCtx)) continue;
-        addFailedGenJob({
-          jobId: job.id,
-          prompt: job.prompt || live.prompt,
-          model: job.model || live.model,
-          modelLabel: job.modelLabel || live.modelLabel,
-          errorMessage: live.errorMessage || job.errorMessage || '生图失败'
-        });
-        changed = true;
-      }
-
-      for (const job of r.data.jobs) {
-        if (!job?.id) continue;
-        if (isGenerationJobDeleted(job.id)) continue;
-
-        if (job.status === 'processing') {
-          if (hasWarehouseCardForJob(job.id)) {
-            const stale = imageGenPendingJobs.find((j) => j.jobId === job.id);
-            if (stale) {
-              removePendingJob(stale.id);
-              clearSessionGenJob(job.id);
-              changed = true;
-            }
-            continue;
-          }
-          const jobAge = Date.now() - (Date.parse(job.createdAt) || 0);
-          if (jobAge >= RECENT_GEN_RECOVER_MS) {
-            if (job.status === 'processing' && !hasWarehouseCardForJob(job.id)) {
-              window.recordGenerationJobDeletion?.(job.id);
-            }
-            continue;
-          }
-          if (jobAge > 12 * 60 * 1000) {
-            const settled = await settleStuckGenerationJob(apiById.get(job.id) || job, { maxMs: 12000 });
-            if (settled.status === 'completed' && settled.imageUrl) {
-              if (await recoverSingleJobFromApi(settled, { silentToast: true, force: true })) {
-                changed = true;
-                continue;
-              }
-            }
-          }
-          const existingCard = (window.__promptHubCards || []).find((c) => c.genJobId === job.id);
-          if (existingCard && !existingCard.image && job.imageUrl) {
-            await repairWarehouseCardImageFromJob(existingCard, job.imageUrl, job.id);
-            imageGenPendingJobs = imageGenPendingJobs.filter((p) => p.jobId !== job.id);
-            clearSessionGenJob(job.id);
-            changed = true;
-            continue;
-          }
-          const hasCreation = creations.some((c) => c.jobId === job.id);
-          if (hasCreation) continue;
-          let pending = imageGenPendingJobs.find((j) => j.jobId === job.id);
-          if (!pending) {
-            const pendingId = genId('pending');
-            pending = {
-              id: pendingId,
-              jobId: job.id,
-              prompt: job.prompt || '',
-              model: job.model || 'gpt-image-2',
-              modelLabel: job.modelLabel || imageGenModelLabel(job.model),
-              resolution: job.resolution || '1k',
-              quality: job.quality || 'standard',
-              size: job.size || '1:1',
-              cost: job.creditsCharged || 0,
-              startedAt: Date.parse(job.createdAt) || Date.now()
-            };
-            imageGenPendingJobs.unshift(pending);
-            trackSessionGenJob(job.id);
-            changed = true;
-          }
-          if (Date.now() - (pending.startedAt || 0) >= RECENT_GEN_RECOVER_MS) {
-            abandonUnrecoverablePendingJob(pending, null, { toast: false });
-            window.recordGenerationJobDeletion?.(job.id);
-            changed = true;
-            continue;
-          }
-          attachedJobIds.add(job.id);
-          clearFailedGenJobsForRecovery({
-            prompt: job.prompt,
-            model: job.model,
-            jobId: job.id
-          });
-          if (!activePollJobIds.has(job.id)) {
-            void pollGenerationJobUntilDone(job.id, pending.id, pendingJobToPollCtx(pending));
-          }
-          continue;
-        }
-
-        let recoverJob = job;
-        if (job.status === 'failed') {
-          const pending = imageGenPendingJobs.find((j) => j.jobId === job.id);
-          const retry = await window.PromptHubApi.getGenerationJob(job.id);
-          if (retry.ok && retry.data.status === 'processing') {
-            if (!pending) {
-              const pendingId = genId('pending');
-              const newPending = {
-                id: pendingId,
-                jobId: job.id,
-                prompt: job.prompt || '',
-                model: job.model || 'gpt-image-2',
-                modelLabel: job.modelLabel || imageGenModelLabel(job.model),
-                resolution: job.resolution || '1k',
-                quality: job.quality || 'standard',
-                size: job.size || '1:1',
-                cost: job.creditsCharged || 0,
-                startedAt: Date.parse(job.createdAt) || Date.now()
-              };
-              imageGenPendingJobs.unshift(newPending);
-              trackSessionGenJob(job.id);
-              pending = newPending;
-              changed = true;
-            }
-            attachedJobIds.add(job.id);
-            clearFailedGenJobsForRecovery({
-              prompt: job.prompt,
-              model: job.model,
-              jobId: job.id
-            });
-            if (!activePollJobIds.has(job.id)) {
-              void pollGenerationJobUntilDone(job.id, pending.id, pendingJobToPollCtx(pending));
-            }
-            continue;
-          }
-          if (retry.ok && retry.data.status === 'completed' && retry.data.imageUrl) {
-            recoverJob = {
-              ...job,
-              status: 'completed',
-              imageUrl: retry.data.imageUrl,
-              extraImageUrls: retry.data.extraImageUrls
-            };
-          } else if (pending) {
-            if (await resolvePendingFromApiJob(pending, {
-              id: job.id,
-              status: 'failed',
-              errorMessage: retry.ok
-                ? (retry.data.errorMessage || retry.data.message)
-                : (job.errorMessage || '生图失败'),
-              prompt: job.prompt,
-              model: job.model
-            })) {
-              changed = true;
-            }
-            continue;
-          } else {
-            continue;
-          }
-        }
-        if (recoverJob.status !== 'completed' || !recoverJob.imageUrl) continue;
-
-        const recoverCtx = {
-          prompt: recoverJob.prompt || '',
-          model: recoverJob.model || 'gpt-image-2',
-          resolution: recoverJob.resolution || '1k',
-          quality: recoverJob.quality || 'standard',
-          size: recoverJob.size || '1:1',
-          cost: recoverJob.creditsCharged || 0
-        };
-        if (await syncMissingBonusImagesForJob(recoverJob, recoverCtx, { silentToast: false })) {
-          changed = true;
-          attachedJobIds.add(recoverJob.id);
-          continue;
-        }
-
-        if (!shouldAutoRecoverCompletedJob(recoverJob)) continue;
-
-        const existingCard = (window.__promptHubCards || []).find((c) => c.genJobId === recoverJob.id);
-        if (existingCard && hasWarehouseCardForJob(recoverJob.id)) continue;
-        const recoverExtrasEarly = Array.isArray(recoverJob.extraImageUrls)
-          ? recoverJob.extraImageUrls.filter((u) => u && u !== recoverJob.imageUrl)
-          : [];
-        if (
-          !existingCard
-          && creations.some(
-            (c) => c.jobId === recoverJob.id || String(c.jobId || '').startsWith(`${recoverJob.id}#`)
-          )
-        ) {
-          if (!hasWarehouseCardForJob(recoverJob.id)) {
-            changed = true;
-            attachedJobIds.add(recoverJob.id);
-            imageGenPendingJobs = imageGenPendingJobs.filter((p) => p.jobId !== recoverJob.id);
-            await ensureGenJobCreationsFromPoll(
-              { data: { status: 'completed', imageUrl: recoverJob.imageUrl, extraImageUrls: recoverExtrasEarly } },
-              {
-                prompt: recoverJob.prompt || '',
-                model: recoverJob.model || 'gpt-image-2',
-                resolution: recoverJob.resolution || '1k',
-                quality: recoverJob.quality || 'standard',
-                size: recoverJob.size || '1:1',
-                cost: recoverJob.creditsCharged || 0,
-                jobId: recoverJob.id,
-                silentToast: true,
-                isRecovery: true
-              },
-              null
-            );
-          } else if (!allGenCreationSlotsSaved(recoverJob.id, recoverExtrasEarly.length)) {
-            changed = true;
-            attachedJobIds.add(recoverJob.id);
-            imageGenPendingJobs = imageGenPendingJobs.filter((p) => p.jobId !== recoverJob.id);
-            await ensureGenJobCreationsFromPoll(
-              { data: { status: 'completed', imageUrl: recoverJob.imageUrl, extraImageUrls: recoverExtrasEarly } },
-              {
-                prompt: recoverJob.prompt || '',
-                model: recoverJob.model || 'gpt-image-2',
-                resolution: recoverJob.resolution || '1k',
-                quality: recoverJob.quality || 'standard',
-                size: recoverJob.size || '1:1',
-                cost: recoverJob.creditsCharged || 0,
-                jobId: recoverJob.id,
-                silentToast: true,
-                isRecovery: true
-              },
-              null
-            );
-          }
-          continue;
-        }
-
-        changed = true;
-        attachedJobIds.add(recoverJob.id);
-        imageGenPendingJobs = imageGenPendingJobs.filter((p) => p.jobId !== recoverJob.id);
-        if (existingCard && !existingCard.image) {
-          await repairWarehouseCardImageFromJob(existingCard, recoverJob.imageUrl, recoverJob.id);
-          continue;
-        }
-        const recoverExtras = Array.isArray(recoverJob.extraImageUrls)
-          ? recoverJob.extraImageUrls.filter((u) => u && u !== recoverJob.imageUrl)
-          : [];
-        await finishImageGenRun({
-          prompt: recoverJob.prompt || '',
-          model: recoverJob.model || 'gpt-image-2',
-          resolution: recoverJob.resolution || '1k',
-          quality: recoverJob.quality || 'standard',
-          size: recoverJob.size || '1:1',
-          cost: recoverJob.creditsCharged || 0,
-          jobId: recoverJob.id,
-          image: recoverJob.imageUrl,
-          extraImages: recoverExtras,
-          silentToast: true,
-          isRecovery: true
-        });
-      }
-
-      // 无 jobId 的占位（提交中）：尝试按提示词匹配 API 进行中任务
-      const processingOnApi = r.data.jobs.filter(
-        (j) => j?.id && j.status === 'processing' && !attachedJobIds.has(j.id) && !isGenerationJobDeleted(j.id)
-      );
-      for (const p of imageGenPendingJobs.filter((x) => !x.jobId)) {
-        if (Date.now() - (p.startedAt || 0) > 15 * 60 * 1000) continue;
-        const match = findBestApiJobForPrompt(processingOnApi, p.prompt, p.model, {
-          minCreatedAt: p.startedAt || Date.now(),
-          usedJobIds: attachedJobIds,
-          preferProcessing: true,
-          resolution: p.resolution
-        });
-        if (!match || attachedJobIds.has(match.id)) continue;
-        p.jobId = match.id;
-        trackSessionGenJob(match.id);
-        attachedJobIds.add(match.id);
-        changed = true;
-        if (!activePollJobIds.has(match.id)) {
-          void pollGenerationJobUntilDone(match.id, p.id, pendingJobToPollCtx(p));
-        }
-      }
-
-      const before = imageGenPendingJobs.length;
-      for (const p of imageGenPendingJobs.slice()) {
-        if (!p.jobId) continue;
-        const aj = apiById.get(p.jobId);
-        if (aj && aj.status !== 'processing') {
-          await resolvePendingFromApiJob(p, aj);
-        }
-      }
-      imageGenPendingJobs = imageGenPendingJobs.filter((p) => {
-        if (p.recovering) {
-          if (p.jobId) return Date.now() - (p.startedAt || 0) < RECENT_GEN_RECOVER_MS;
-          return Date.now() - (p.startedAt || 0) < 30 * 60 * 1000;
-        }
-        if (!p.jobId) {
-          return Date.now() - (p.startedAt || 0) < 15 * 60 * 1000;
-        }
-        const aj = apiById.get(p.jobId);
-        if (!aj) {
-          return Date.now() - (p.startedAt || 0) < RECENT_GEN_RECOVER_MS;
-        }
-        if (aj.status === 'failed') {
-          return false;
-        }
-        if (aj.status === 'completed') return false;
-        return aj.status === 'processing';
-      });
-      if (imageGenPendingJobs.length !== before) {
-        persistPendingGenJobs();
-        changed = true;
-      } else if (changed) {
-        persistPendingGenJobs();
-      }
-
-      if (changed) {
-        afterGenJobsResume(true);
-      }
-
-      for (const p of imageGenPendingJobs.slice()) {
-        if (!p.jobId) continue;
-        const age = Date.now() - (p.startedAt || 0);
-        const slowPending = isSlowGenProviderModel(p.model);
-        const needsServerRecover = (p.recovering || slowPending) && age >= SERVER_RECOVER_AFTER_MS;
-        if (needsServerRecover) {
-          if (p.recovering) {
-            p.recoverNote = formatPendingRecoveryNote(p, p.recoverNote || '后台恢复中');
-          } else if (slowPending) {
-            p.pendingNote = formatPendingRecoveryNote(p, p.pendingNote || '后台生成中');
-          }
-          persistPendingGenJobs();
-          if (!p._serverRecoverAt || Date.now() - p._serverRecoverAt > 5 * 60 * 1000) {
-            p._serverRecoverAt = Date.now();
-            if (await tryRecoverPendingJobDirect(p)) {
-              changed = true;
-              continue;
-            }
-          }
-        }
-        if (!p.recovering && !slowPending) continue;
-        if (age < pendingRecoveryGiveUpMs(p)) continue;
-        try {
-          const retry = await window.PromptHubApi.getGenerationJob(p.jobId);
-          if (retry.ok && retry.data.status === 'completed' && retry.data.imageUrl) {
-            if (await resolvePendingFromApiJob(p, {
-              id: p.jobId,
-              status: 'completed',
-              imageUrl: retry.data.imageUrl,
-              extraImageUrls: retry.data.extraImageUrls,
-              prompt: p.prompt,
-              model: p.model
-            }, { silent: true })) {
-              changed = true;
-              continue;
-            }
-            if (await tryServerRecoverPending(p)) {
-              changed = true;
-              continue;
-            }
-          }
-          if (retry.ok && retry.data.status === 'processing') {
-            if (!activePollJobIds.has(p.jobId)) {
-              void pollGenerationJobUntilDone(p.jobId, p.id, pendingJobToPollCtx(p));
-            }
-            continue;
-          }
-          if (await recoverSingleJobFromApi({ id: p.jobId, prompt: p.prompt, model: p.model }, { silentToast: true, force: true })) {
-            changed = true;
-            continue;
-          }
-          if (await tryServerRecoverPending(p)) {
-            changed = true;
-            continue;
-          }
-        } catch (e) { /* ignore */ }
-        if (age >= RECENT_GEN_RECOVER_MS) {
-          abandonUnrecoverablePendingJob(
-            p,
-            '上游临时链接约 2 小时有效，该任务已过期，无法恢复（可点 × 关闭占位）',
-            { toast: true }
-          );
-          if (p.jobId) window.recordGenerationJobDeletion?.(p.jobId);
-          changed = true;
-        }
-      }
-      if (changed) {
-        persistPendingGenJobs();
-        renderImageGenFeed({ preserveScroll: true, force: true });
-      }
-
-      return changed;
-    })().finally(() => {
-      resumeGenJobsInflight = null;
-    });
-
-    return resumeGenJobsInflight;
+  function formatExpiryLabel(c) {
+    if (c.permanent || c.visibility === 'published') return '永久保留';
+    if (!c.expiresAt) return '';
+    const left = c.expiresAt - Date.now();
+    if (left <= 0) return '已过期';
+    const h = Math.ceil(left / 3600000);
+    if (h < 24) return `约 ${h} 小时后清理`;
+    return `约 ${Math.ceil(h / 24)} 天后清理`;
   }
 
-  function highlightCreationCard(id) {
-    document.querySelectorAll('#creationsGrid .creation-post-card').forEach(el => {
-      el.classList.toggle('selected', el.dataset.creationId === id);
-    });
-  }
-
-  async function renderCreationsSidePanel(id) {
-    const body = document.getElementById('creationsSideBody');
-    const c = creations.find(x => x.id === id);
-    if (!body || !c) return;
-    const badge = c.visibility === 'published' ? '已发布' : '私密';
-    const storageAttr = feedImgStorageAttr(c.image);
-    const jobAttr = c.jobId ? ` data-job-id="${esc(c.jobId)}"` : '';
-    const showImg = c.image && isDisplayableImage(c.image);
-    const imgHtml = showImg
-      ? `<button type="button" class="community-side-img-btn" data-side-zoom title="点击放大"><img class="community-side-img" src="${IMG_LOADING_PLACEHOLDER}" data-image-ref="${esc(c.image)}"${storageAttr}${jobAttr} alt=""></button>`
-      : '';
-    body.innerHTML = `
-      ${imgHtml}
-      <p class="community-side-author">${esc(badge)} · ${esc((c.resolution || '1k').toUpperCase())} · ${esc(formatExpiryLabel(c))}</p>
-      <div class="community-side-prompt">${esc(c.prompt || '')}</div>
-      <div class="community-side-actions">
-        <button type="button" class="btn btn-secondary" data-action="remix">再生成</button>
-        <button type="button" class="btn btn-secondary" data-action="del">删除记录</button>
-      </div>
-      <p class="panel-hint">生成记录保留 1～3 天。发布到社区请打开卡片库对应卡片并开启「发布到提示词社区」</p>`;
-    bindCommunitySideImageZoom(body, null, c.image, id, { jobId: c.jobId || null });
-    body.querySelector('[data-action="remix"]')?.addEventListener('click', () => remixCreation(id));
-    body.querySelector('[data-action="del"]')?.addEventListener('click', () => {
-      const doDel = () => {
-        deleteCreation(id);
-        closeCreationsSidePanel();
+  function bindUI() {
+    document.getElementById('communitySearch')?.addEventListener('input', () => renderCommunity());
+    const communitySearch = document.getElementById('communitySearch');
+    if (communitySearch && !communitySearch.dataset.searchBound) {
+      communitySearch.dataset.searchBound = '1';
+      const commitCommunitySearch = () => {
+        renderCommunity({ skipFeedFetch: true, forceRepaint: true });
+        communitySearch.blur();
       };
-      if (typeof window.customConfirm === 'function') {
-        window.customConfirm('确定删除该创作？无回收站，删除后不可恢复。', doDel);
-      } else if (confirm('确定删除该创作？')) doDel();
-    });
-    highlightCreationCard(id);
-    if (showImg) await hydrateFeedImages(body);
-  }
-
-  function openCreationsSidePanel(id) {
-    const c = creations.find(x => x.id === id);
-    if (!c) return;
-    creationsSideId = id;
-    ensureFeatureSidePanelDocked('creationsSidePanel');
-    mountFeatureSidePanel('creationsSidePanel');
-    document.getElementById('creationsSidePanel')?.classList.remove('hidden');
-    syncCommunityPanelOpenClass();
-    if (isMobileViewport()) window.MobileUI?.closeDrawers?.();
-    void renderCreationsSidePanel(id);
-    if (!isMobileViewport()) {
-      relayoutFeedGridAfterSidePanel('creationsGrid');
-      requestAnimationFrame(() => relayoutFeedGridAfterSidePanel('creationsGrid'));
-    }
-  }
-
-  function closeCreationsSidePanel() {
-    document.getElementById('creationsSidePanel')?.classList.add('hidden');
-    unmountFeatureSidePanel('creationsSidePanel');
-    ensureFeatureSidePanelDocked('creationsSidePanel');
-    syncCommunityPanelOpenClass();
-    creationsSideId = null;
-    communitySidePostId = null;
-    openPostId = null;
-    document.querySelectorAll('#creationsGrid .community-post-card.selected').forEach(el => el.classList.remove('selected'));
-    if (!isMobileViewport()) {
-      requestAnimationFrame(() => {
-        scheduleCommunityLayout('creationsGrid', { force: true, immediate: true });
+      communitySearch.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' || e.isComposing) return;
+        e.preventDefault();
+        commitCommunitySearch();
+      });
+      communitySearch.addEventListener('search', (e) => {
+        e.preventDefault();
+        commitCommunitySearch();
       });
     }
+    document.querySelectorAll('[data-community-sort]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        applyCommunitySort(btn.dataset.communitySort);
+        renderCommunity({ skipFeedFetch: true, forceRepaint: true });
+        if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed();
+      });
+    });
+    document.querySelectorAll('[data-community-scope]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const nextScope = btn.dataset.communityScope || 'all';
+        if (nextScope === 'curated') {
+          communityScope = 'curated';
+          invalidateCommunityFeedRender();
+          document.querySelectorAll('[data-community-scope]').forEach(b => {
+            b.classList.toggle('active', b === btn);
+          });
+          document.querySelectorAll('[data-imagegen-community-scope]').forEach(b => {
+            b.classList.toggle('active', (b.dataset.imagegenCommunityScope || 'all') === communityScope);
+          });
+          closeCommunitySidePanel();
+          renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
+          toast('社区精选正在开发中，敬请期待');
+          return;
+        }
+        communityScope = nextScope;
+        invalidateCommunityFeedRender();
+        const grid = document.getElementById('communityGrid');
+        if (grid) delete grid.dataset.feedSig;
+        document.querySelectorAll('[data-community-scope]').forEach(b => {
+          b.classList.toggle('active', b === btn);
+        });
+        document.querySelectorAll('[data-imagegen-community-scope]').forEach(b => {
+          b.classList.toggle('active', (b.dataset.imagegenCommunityScope || 'all') === communityScope);
+        });
+        closeCommunitySidePanel();
+        if (communityScope === 'following' && follows.size === 0) {
+          toast('暂无关注作者，点击作品上的作者名可关注');
+        }
+        renderCommunity({ skipFeedFetch: true, forceRepaint: true });
+        if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed();
+      });
+    });
+    document.getElementById('communityNotifyBtn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleNotifyPanel();
+    });
+    document.getElementById('communityNotifyMarkRead')?.addEventListener('click', markAllNotificationsRead);
+    document.addEventListener('click', (e) => {
+      const panel = document.getElementById('communityNotifyPanel');
+      if (!panel || panel.classList.contains('hidden')) return;
+      if (e.target.closest('#communityNotifyPanel, #communityNotifyBtn')) return;
+      closeNotifyPanel();
+    });
+    document.getElementById('communitySideClose')?.addEventListener('click', closeCommunitySidePanel);
+    document.getElementById('creationsSideClose')?.addEventListener('click', closeCreationsSidePanel);
+    bindPublishToggle();
+    const onCardPromptInput = () => syncCardPublishFromPrompt(getCardFormPromptText());
+    document.getElementById('cardPrompt')?.addEventListener('input', onCardPromptInput);
+    document.getElementById('floatingPromptText')?.addEventListener('input', onCardPromptInput);
+    document.getElementById('imageGenPrompt')?.addEventListener('input', syncImageGenGenPublicFromPrompt);
+    document.getElementById('userProfileClose')?.addEventListener('click', closeUserProfile);
+    document.getElementById('userProfileBack')?.addEventListener('click', closeUserProfile);
+    document.getElementById('userProfileOverlay')?.addEventListener('click', e => {
+      if (e.target.id === 'userProfileOverlay') closeUserProfile();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && document.getElementById('userProfileOverlay')?.classList.contains('active')) {
+        closeUserProfile();
+      }
+    });
+    document.getElementById('imageGenSubmit')?.addEventListener('click', () => {
+      void runImageGenDemo().catch((e) => {
+        console.error('[imagegen] submit click failed', e);
+        const msg = String(e?.message || '');
+        const hint = /store is not defined/i.test(msg)
+          ? '页面脚本版本不一致，请强刷（Ctrl+Shift+R）'
+          : '生图提交异常，请刷新页面后重试';
+        toast(hint);
+        resetImageGenSubmitState();
+      });
+    });
+    document.getElementById('imageGenResolution')?.addEventListener('change', () => {
+      syncImageGenModelToResolution();
+      updateImageGenResolutionSelect();
+      updateImageGenPricingUI();
+    });
+    document.querySelectorAll('[data-feed-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        imageGenFeedTab = btn.dataset.feedTab;
+        document.querySelectorAll('[data-feed-tab]').forEach(b => b.classList.toggle('active', b === btn));
+        closeImageGenPreview();
+        updateImageGenFeedHint();
+        renderImageGenFeed({ scrollToTop: true });
+      });
+    });
+    document.querySelectorAll('[data-imagegen-community-sort]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        applyCommunitySort(btn.dataset.imagegenCommunitySort);
+        document.querySelectorAll('[data-imagegen-community-sort]').forEach(b => b.classList.toggle('active', b === btn));
+        renderImageGenFeed();
+        if (document.getElementById('pageCommunity')?.classList.contains('active')) {
+          renderCommunity({ skipFeedFetch: true, forceRepaint: true });
+        }
+      });
+    });
+    document.querySelectorAll('[data-imagegen-community-scope]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const nextScope = btn.dataset.imagegenCommunityScope || 'all';
+        if (nextScope === 'curated') {
+          communityScope = 'curated';
+          invalidateCommunityFeedRender();
+          document.querySelectorAll('[data-imagegen-community-scope]').forEach(b => b.classList.toggle('active', b === btn));
+          document.querySelectorAll('[data-community-scope]').forEach(b => {
+            b.classList.toggle('active', (b.dataset.communityScope || 'all') === communityScope);
+          });
+          renderImageGenFeed();
+          if (document.getElementById('pageCommunity')?.classList.contains('active')) {
+            renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
+          }
+          toast('社区精选正在开发中，敬请期待');
+          return;
+        }
+        communityScope = nextScope;
+        invalidateCommunityFeedRender();
+        document.querySelectorAll('[data-imagegen-community-scope]').forEach(b => b.classList.toggle('active', b === btn));
+        document.querySelectorAll('[data-community-scope]').forEach(b => {
+          b.classList.toggle('active', (b.dataset.communityScope || 'all') === communityScope);
+        });
+        renderImageGenFeed();
+        if (document.getElementById('pageCommunity')?.classList.contains('active')) {
+          renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
+        }
+      });
+    });
+    document.getElementById('imageGenPreviewClose')?.addEventListener('click', closeImageGenPreview);
+    bindImageGenPreviewActions();
+    bindImageGenPreviewWheelScroll();
+    bindImageGenFeedPagedScroll();
+    bindImageGenFeedResizeRelayout?.();
+    document.getElementById('appreciateViewerFavBtn')?.addEventListener('click', () => {
+      if (!appreciateViewerPostId) return;
+      const post = findPost(appreciateViewerPostId);
+      if (!post) return;
+      favoritePost(appreciateViewerPostId, post);
+      window.markQuickPreviewTask?.({ communityFavorited: true });
+      const btn = document.getElementById('appreciateViewerFavBtn');
+      if (btn && favIds.has(appreciateViewerPostId)) {
+        const label = btn.querySelector('span');
+        if (label) label.textContent = '已收藏';
+        else btn.textContent = '已收藏';
+        btn.disabled = true;
+      }
+    });
+    document.getElementById('lightboxCollectBtn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const postId = window.__lightboxCommunityPostId;
+      if (!postId) return;
+      const post = findPost(postId);
+      if (!post) return;
+      favoritePost(postId, post);
+      window.markQuickPreviewTask?.({ communityFavorited: true });
+      window.syncLightboxActions?.({ community: true, postId });
+    });
+    document.getElementById('imageGenWhGroup')?.addEventListener('change', e => {
+      imageGenWhGroup = e.target.value || 'all';
+      renderImageGenFeed();
+    });
+    document.getElementById('imageGenWhTag')?.addEventListener('change', e => {
+      imageGenWhTag = e.target.value || 'all';
+      renderImageGenFeed();
+    });
+    bindImageGenWarehouseFilterMobileUI();
+    bindImageGenUpload();
+    bindImageGenPromptTools();
+    document.getElementById('imageGenRecoverBtn')?.remove();
+    document.getElementById('imageGenCount')?.addEventListener('change', updateImageGenCostHint);
+    document.getElementById('imageGenModel')?.addEventListener('change', () => {
+      syncImageGenModelParamsUI();
+      syncImageGenModelHint();
+      updateImageGenResolutionSelect();
+      updateImageGenSizeSelect();
+      updateImageGenPricingUI();
+    });
+    document.querySelectorAll('[data-mj-mode]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const mode = btn.dataset.mjMode;
+        if (!mode) return;
+        setImageGenMjMode(mode);
+      });
+    });
+    document.getElementById('imageGenMjSaveAllTiles')?.addEventListener('change', persistImageGenMjPrefs);
+    document.querySelectorAll('input[name="imageGenMjSpeed"]').forEach((input) => {
+      input.addEventListener('change', persistImageGenMjPrefs);
+    });
+    document.getElementById('imageGenResolution')?.addEventListener('input', updateImageGenCostHint);
+    document.getElementById('imageGenQuality')?.addEventListener('change', updateImageGenCostHint);
+    document.getElementById('imageGenSize')?.addEventListener('change', updateImageGenCostHint);
+    bindImageGenMjRange('imageGenMjStylize', 'imageGenMjStylizeVal');
+    bindImageGenMjRange('imageGenMjChaos', 'imageGenMjChaosVal');
+    bindImageGenMjRange('imageGenMjWeird', 'imageGenMjWeirdVal');
+    bindImageGenMjRange('imageGenMjIw', 'imageGenMjIwVal');
+    window.addEventListener('resize', () => {
+      ensureFeatureSidePanelDocked('communitySidePanel');
+      if (!document.getElementById('creationsSidePanel')?.classList.contains('hidden')) {
+        syncCreationsSidePanelMount();
+      } else {
+        unmountFeatureSidePanel('creationsSidePanel');
+        ensureFeatureSidePanelDocked('creationsSidePanel');
+      }
+      syncCommunityPanelOpenClass();
+      if (document.getElementById('pageCommunity')?.classList.contains('active')) {
+        scheduleCommunityLayout('communityGrid');
+      }
+      if (document.getElementById('pageCreations')?.classList.contains('active')) {
+        scheduleCommunityLayout('creationsGrid');
+      }
+      if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+        scheduleImageGenFeedLayout();
+      }
+      if (document.getElementById('userProfileOverlay')?.classList.contains('active')) {
+        scheduleCommunityLayout('userProfileGrid');
+      }
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape') return;
+      if (document.getElementById('userProfileOverlay')?.classList.contains('active')) closeUserProfile();
+      else if (imageGenPreviewId) closeImageGenPreview();
+      else if (communitySidePostId && document.getElementById('pageCreations')?.classList.contains('active')) closeCreationsSidePanel();
+      else if (!document.getElementById('communitySidePanel')?.classList.contains('hidden')) closeCommunitySidePanel();
+    });
   }
 
-  async function renderCreations() {
-    renderMyHomeProfile();
-    const container = document.getElementById('creationsGrid');
-    const hintEl = document.getElementById('creationsHint');
-    if (!container) return;
-    const user = getActiveUser();
-    if (window.__promptHubCards?.length) {
-      ensureCommunityFromCardsThrottled(false);
+  let communityOnActivateTimer = null;
+  let communityOnActivateSeq = 0;
+
+  function cancelCommunityPageWork() {
+    communityFeedRenderGen += 1;
+    clearTimeout(renderCommunityTimer);
+    clearTimeout(communityOnActivateTimer);
+    communityOnActivateSeq += 1;
+  }
+
+  function deferCommunityIdle(fn, timeoutMs = 2500) {
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(fn, { timeout: timeoutMs });
     } else {
-      dedupeCommunityPosts();
-      migrateCommunityAuthorIds();
+      setTimeout(fn, 400);
     }
-    if (hintEl) {
-      hintEl.textContent = user.id === 'guest'
-        ? '登录后在此查看你发布到社区的作品'
-        : '你在卡片库公开到社区的作品 · 按最新发布排序 · 点击卡片查看详情';
-    }
-    if (user.id === 'guest') {
-      window.FeedLayout?.destroyLayout?.('creationsGrid');
-      closeCreationsSidePanel();
-      container.innerHTML = '<div class="feature-empty"><p>请先登录后查看发布作品</p><button type="button" class="btn btn-primary" onclick="openAuthModal()">登录</button></div>';
-      return;
-    }
-    const list = getMyPublishedPosts();
-    const sig = feedListSignature(list, 'creationsGrid');
-    if (container.dataset.feedSig === sig && container.querySelector('.community-post-card')) {
-      patchFeedLikeLabels(container, list);
-      if (isCreationsFeedLayoutStale(container)) {
-        delete container.dataset.feedSig;
-        delete container.dataset.feedDistributed;
-        delete container.dataset.feedDistributedCols;
-        repairCreationsFeedLayout(true);
-      } else {
-        requestAnimationFrame(() => syncCommunityFeedColumnCount('creationsGrid'));
-      }
-      return;
-    }
-    renderLikeRewardRules();
-    window.FeedLayout?.destroyLayout?.('creationsGrid');
-    if (!list.length) {
-      closeCreationsSidePanel();
-      container.innerHTML = '<div class="feature-empty"><p>暂无发布作品</p><p class="panel-hint">在卡片库保存作品并开启「发布到提示词社区」，或在生图页开启「生成后公开」</p><button type="button" class="btn btn-primary" onclick="switchAppPage(\'warehouse\')">去卡片库</button></div>';
-      return;
-    }
-    void renderPostsIntoContainer(list, 'creationsGrid').then(() => {
-      if (useFeedPagedRender('creationsGrid')) {
-        void drainCommunityFeedPages('creationsGrid', isMobileViewport() ? 8 : 6);
-      }
+  }
+
+  function activateCommunityPage() {
+    const seq = ++communityOnActivateSeq;
+    clearTimeout(communityOnActivateTimer);
+    communityOnActivateTimer = setTimeout(() => {
+      if (seq !== communityOnActivateSeq) return;
+      if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
       requestAnimationFrame(() => {
-        layoutFeedFlexColumns('creationsGrid', { force: true, forceReflow: true, recalcCols: true });
+        requestAnimationFrame(() => {
+          if (seq !== communityOnActivateSeq) return;
+          if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
+          const grid = document.getElementById('communityGrid');
+          window.FeedLayout?.repairCommunityMasonry?.('communityGrid');
+          hydratePublicFeedFromCache();
+          const hasRealCards = grid?.querySelector('.community-post-card:not(.community-feed-skeleton)');
+          const feedFresh = !publicFeedNeedsFullRefresh() && publicFeedState.posts.length > 0;
+          if (hasRealCards && grid?.dataset.feedSig && feedFresh) {
+            patchFeedLikeLabels(grid, filterAndSortPosts(getCommunityFeedForDisplay()));
+            scheduleCommunityLayout('communityGrid', { force: true, immediate: true, recalcCols: true });
+          } else {
+            renderCommunity({
+              immediate: true,
+              skipFeedFetch: feedFresh,
+              syncFromCards: false
+            });
+          }
+          if (isMobileViewport()) {
+            requestAnimationFrame(() => {
+              if (seq !== communityOnActivateSeq) return;
+              bindFeedPagedScroll('communityGrid');
+              reconnectFeedPageObserver('communityGrid');
+            });
+          }
+          deferCommunityIdle(() => {
+            if (seq !== communityOnActivateSeq) return;
+            if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
+            ensureCommunityFromCardsThrottled(false);
+            if (publicFeedNeedsFullRefresh() && !publicFeedState.loading) {
+              if (grid && !hasRealCards) showCommunityFeedSkeleton(grid, 8);
+              void refreshPublicCommunityFeed({ force: true, timeoutMs: 20000 }).then(async () => {
+                if (seq !== communityOnActivateSeq) return;
+                if (shouldPreserveCommunityFeedDom('communityGrid') && grid?.querySelector('.community-post-card:not(.community-feed-skeleton)')) {
+                  await growCommunityFeedAfterPublicRefresh('communityGrid');
+                  return;
+                }
+                renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
+                await growCommunityFeedAfterPublicRefresh('communityGrid');
+              });
+            } else if (!publicFeedState.loading) {
+              void refreshPublicCommunityFeed({ force: false }).then(async (changed) => {
+                if (seq !== communityOnActivateSeq) return;
+                if (!changed) return;
+                patchFeedLikeLabels(grid, filterAndSortPosts(getCommunityFeedForDisplay()));
+                await growCommunityFeedAfterPublicRefresh('communityGrid');
+              });
+            }
+            const warmPosts = filterAndSortPosts(getCommunityFeedForDisplay()).slice(0, 12);
+            const warmCards = warmPosts.map((p) => ({
+              id: p.sourceCardId || p.id,
+              image: canonicalCommunityImageRef(p) || p.image,
+              sourceCardId: p.sourceCardId,
+              authorId: p.authorId
+            })).filter((c) => c.image);
+            if (warmCards.length && window.SupabaseSync?.prefetchCommunityDisplayUrls) {
+              void window.SupabaseSync.prefetchCommunityDisplayUrls(warmCards, 3000);
+            } else if (warmCards.length && window.SupabaseSync?.prefetchCardsImages) {
+              void window.SupabaseSync.prefetchCardsImages(warmCards, 3000);
+            }
+            window.CommunityGacha?.init?.();
+            window.CommunityGacha?.refreshEntryButton?.();
+          });
+        });
+      });
+    }, 50);
+  }
+
+  function feedHasRenderedContent(containerId, itemSelector) {
+    const el = document.getElementById(containerId);
+    if (!el) return false;
+    return !!(el.querySelector(itemSelector) || el.querySelector('.feature-empty'));
+  }
+
+  function onAppChange(app) {
+    const fab = document.getElementById('fabNewBtn');
+    if (fab) fab.classList.toggle('hidden-by-app', app !== 'warehouse');
+    window.FeatureAssets?.onAppChange?.(app);
+    if (app !== 'community') {
+      cancelCommunityPageWork();
+      if (communityAppreciateActive) {
+        window.closeAppreciateViewer?.();
+        exitCommunityAppreciate(true);
+      }
+    }
+    if (app === 'community') {
+      window.closeAppreciateViewer?.();
+      if (communityAppreciateActive) exitCommunityAppreciate(true);
+      document.body.classList.remove('global-view', 'appreciate-viewing');
+      if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
+      activateCommunityPage();
+    }
+    if (app === 'creations') {
+      if (!document.getElementById('pageCreations')?.classList.contains('active')) return;
+      requestAnimationFrame(() => {
+        repairCreationsFeedLayout(true);
         syncCommunityFeedColumnCount('creationsGrid');
       });
-    });
-  }
-
-  function publishCreation(id, opts) {
-    toast('发布到社区请先在卡片库保存该作品，并开启「发布到提示词社区」');
-  }
-
-  function confirmDeleteCreation(id) {
-    const msg = '确定删除该生成记录？无回收站，删除后不可恢复。';
-    const doDel = () => deleteCreation(id);
-    if (typeof window.customConfirm === 'function') {
-      window.customConfirm(msg, doDel, null, { danger: true, confirmLabel: '删除' });
-    } else if (confirm(msg)) doDel();
-  }
-
-  function recordCreationDeletion(id, jobId) {
-    if (id == null) return;
-    try {
-      const key = 'promptrepo_deleted_creations';
-      const raw = localStorage.getItem(key);
-      const map = raw ? JSON.parse(raw) : {};
-      map[String(id)] = Date.now();
-      localStorage.setItem(key, JSON.stringify(map));
-    } catch (e) { /* ignore */ }
-    if (typeof window.recordCreationDeletionGlobal === 'function') {
-      window.recordCreationDeletionGlobal(id, jobId);
-    }
-  }
-
-  function deleteCreation(id) {
-    if (creationsSideId === id) closeCreationsSidePanel();
-    if (imageGenPreviewId === id) closeImageGenPreview();
-    const removed = creations.find(c => c.id === id);
-    if (removed?.communityPostId) {
-      const post = findPost(removed.communityPostId);
-      if (post?.sourceCreationId === id && !post?.sourceCardId) {
-        performCommunityPostRemoval(removed.communityPostId, { silent: true });
+      renderMyHomeProfile();
+      const activeTab = document.querySelector('#myHomeTabs .my-home-tab.active')?.dataset?.homeTab || 'posts';
+      if (activeTab === 'owned-packages') {
+        window.FeatureAssets?.renderMyHomePackages?.(document.getElementById('myHomeOwnedPackages'), 'owned');
+      } else if (activeTab === 'published-packages') {
+        window.FeatureAssets?.renderMyHomePackages?.(document.getElementById('myHomePublishedPackages'), 'published');
+      } else {
+        void renderCreations();
       }
     }
-    recordCreationDeletion(id, removed?.jobId);
-    const baseJobId = normalizeGenJobBaseId(removed?.jobId);
-    if (baseJobId) {
-      window.recordGenerationJobDeletion?.(baseJobId);
-      if (removed?.jobId && String(removed.jobId) !== baseJobId) {
-        window.recordGenerationJobDeletion?.(removed.jobId);
-      }
-      const whCards = (window.__promptHubCards || []).filter((c) => {
-        if (!c?.genJobId) return false;
-        const cBase = normalizeGenJobBaseId(c.genJobId);
-        return c.genJobId === removed.jobId || cBase === baseJobId;
-      });
-      for (const wh of whCards) {
-        if (typeof window.deleteCardPermanently === 'function') {
-          void window.deleteCardPermanently(wh.id, false, { skipRender: true, silent: true });
-        }
+    if (app !== 'community') closeCommunitySidePanel();
+    if (app !== 'creations') closeCreationsSidePanel();
+    if (app !== 'imagegen') {
+      closeImageGenPreview();
+      if (imageGenPendingJobs.length > 0 || getActivePollJobIds().size > 0) {
+        scheduleGenJobsSync(400);
       }
     }
-    creations = creations.filter(c => c.id !== id);
-    persistCreations();
-    renderCreations();
-    if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-      renderImageGenFeed();
+    if (app === 'imagegen') {
+      void prefetchImageGenModelCatalog();
+      if (!document.getElementById('pageImageGen')?.classList.contains('active')) return;
+      imageGenGenPublicSession = null;
+      syncImageGenGenPublicUI();
+      window.MobileUI?.initImageGenMobileView?.();
+      pruneCreations();
+      initImageGenForm();
+      updateImageGenFeedHint();
+      setTimeout(() => void resumePendingGenerationJobs({ force: true }), 400);
+      scheduleGenJobsSync(1500);
+      renderImageGenFeed({ preserveScroll: true, force: true });
+      renderImageGenMobileResult();
+      void window.PointsSystem?.refreshCreditsFromServer?.();
+      window.PointsSystem?.updateCreditsUI?.();
     }
-    toast('已删除');
   }
 
-  function remixCreation(id) {
-    const c = creations.find(x => x.id === id);
-    if (!c) return;
-    if (typeof switchAppPage === 'function') switchAppPage('imagegen');
-    imageGenFeedTab = 'warehouse';
-    document.querySelectorAll('[data-feed-tab]').forEach(b => {
-      b.classList.toggle('active', b.dataset.feedTab === 'warehouse');
-    });
-    updateImageGenFeedHint();
-    applyHistoryToForm(c);
+  function bindCommunityFeedMediaScrub() {
+    if (bindCommunityFeedMediaScrub._done) return;
+    bindCommunityFeedMediaScrub._done = true;
+    const orig = window.finishCardMediaShine;
+    if (typeof orig !== 'function') return;
+    window.finishCardMediaShine = function patchedFinishCardMediaShine(media) {
+      orig.call(this, media);
+      const feedGrid = media?.closest?.('#communityGrid, #creationsGrid');
+      if (feedGrid && !useCommunityCssGrid(feedGrid.id)) {
+        scheduleFeedMasonryRelayout(feedGrid.id);
+      }
+    };
   }
+
+  function init() {
+    loadStores();
+    warmImageGenModelCatalog();
+    hydratePublicFeedFromCache();
+    bindUI();
+    bindPublishToggle();
+    initMyHomeTabs();
+    bindCommunityFeedMediaScrub();
+    bindCommunityGridImageRelayout();
+    bindCommunityFeedResizeRelayout('communityGrid');
+    bindCommunityFeedResizeRelayout('creationsGrid');
+    startGenJobsBackgroundSync();
+    onAppChange(localStorage.getItem('promptrepo_app_page') || 'community');
+  }
+
+  function refreshImageGenCost() {
+    updateImageGenCostHint();
+  }
+
 
   let imageGenFormActivated = false;
 
@@ -9019,30 +8801,7 @@
   }
 
   async function compressRefImageFromSource(source, maxSide) {
-    const img = await loadRefImageElement(source);
-    let w = img.naturalWidth || img.width;
-    let h = img.naturalHeight || img.height;
-    if (!w || !h) throw new Error('图片尺寸无效');
-    const side = maxSide || REF_MAX_SIDE;
-    const scale = Math.min(1, side / Math.max(w, h));
-    w = Math.round(w * scale);
-    h = Math.round(h * scale);
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('无法处理图片');
-    ctx.drawImage(img, 0, 0, w, h);
-    let quality = 0.88;
-    let dataUrl = await canvasToJpegDataUrl(canvas, quality);
-    while (refDataUrlByteSize(dataUrl) > REF_TARGET_MAX_BYTES && quality > 0.52) {
-      quality -= 0.08;
-      dataUrl = await canvasToJpegDataUrl(canvas, quality);
-    }
-    if (refDataUrlByteSize(dataUrl) > REF_TARGET_MAX_BYTES) {
-      throw new Error('图片压缩后仍过大，请换一张较小的图');
-    }
-    return dataUrl;
+    return rc('compressRefImageFromSource', source, maxSide);
   }
 
   async function prepareRefImageFromFile(file) {
@@ -9681,80 +9440,16 @@
   }
 
   async function resolveRefUrlsFromList(sources) {
-    const list = Array.isArray(sources) ? sources.filter(Boolean) : [];
-    if (!list.length) return [];
-    const urls = [];
-    for (let i = 0; i < list.length; i++) {
-      const src = list[i];
-      try {
-        let apiUrl = null;
-        const resolveOne = (async () => {
-          if (/^https?:\/\//i.test(src)) {
-            if (window.SupabaseSync?.isInvalidMediaUrl?.(src) && window.SupabaseSync?.normalizeImageRef) {
-              const fixed = window.SupabaseSync.normalizeImageRef(src);
-              if (fixed && fixed !== src) {
-                const signed = await window.SupabaseSync.resolveDisplayUrl(fixed, {
-                  variant: 'full',
-                  preferFull: true,
-                  bypassSignBudget: true
-                });
-                if (signed && /^https?:\/\//i.test(signed)) return signed;
-              }
-            }
-            return src;
-          }
-          if (window.SupabaseSync?.isStorageRef?.(src) || String(src).startsWith('storage://')) {
-            return window.SupabaseSync?.normalizeImageRef?.(src) || src;
-          }
-          if (window.SupabaseSync?.isDataUrl?.(src) || String(src).startsWith('blob:')) {
-            if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.uploadImageGenRef) {
-              try {
-                const stored = await window.SupabaseSync.uploadImageGenRef(genId('ref'), src);
-                if (stored) return stored;
-              } catch (uploadErr) {
-                console.warn('参考图上传失败，改由服务端处理', uploadErr);
-              }
-            }
-            if (window.SupabaseSync?.isDataUrl?.(src)) return src;
-            if (String(src).startsWith('blob:')) {
-              return compressRefImageFromSource(src, REF_MAX_SIDE);
-            }
-          }
-          return window.SupabaseSync?.isDataUrl?.(src) ? src : null;
-        })();
-        apiUrl = await Promise.race([
-          resolveOne,
-          new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('ref resolve timeout')), REF_URL_RESOLVE_TIMEOUT_MS);
-          })
-        ]);
-        if (isUsableGenRefUrl(apiUrl)) {
-          urls.push(apiUrl);
-        }
-      } catch (e) {
-        console.warn('参考图解析失败', e);
-        if (isUsableGenRefUrl(src)) urls.push(src);
-        else if (window.SupabaseSync?.isDataUrl?.(src)) urls.push(src);
-      }
-    }
-    return urls;
+    return rr('resolveRefUrlsFromList', sources);
   }
 
   async function resolveRefUrlsForApi() {
     return resolveRefUrlsFromList(imageGenRefImages);
   }
 
-  function removePendingJob(pendingId) {
-    imageGenPendingJobs = imageGenPendingJobs.filter(j => j.id !== pendingId);
-    persistPendingGenJobs();
-  }
+  function removePendingJob(pendingId) { return jr('removePendingJob', pendingId); }
 
-  function getPollExtraImageUrls(poll, primaryUrl) {
-    const main = primaryUrl || poll?.data?.imageUrl;
-    if (!main) return [];
-    const raw = Array.isArray(poll?.data?.extraImageUrls) ? poll.data.extraImageUrls : [];
-    return raw.filter((u) => u && u !== main);
-  }
+  function getPollExtraImageUrls(poll, primaryUrl) { return pw('getPollExtraImageUrls', poll, primaryUrl); }
 
   async function syncMissingBonusImagesForJob(recoverJob, ctx = {}, opts = {}) {
     if (!recoverJob?.id || !recoverJob.imageUrl) return false;
@@ -9785,276 +9480,32 @@
     return true;
   }
 
-  function isGenCreationSlotSaved(baseJobId, slotIndex) {
-    if (!baseJobId) return false;
-    const slotId = slotIndex <= 1 ? String(baseJobId) : `${baseJobId}#${slotIndex}`;
-    return hasWarehouseCardForJob(slotId);
-  }
+  function isGenCreationSlotSaved(baseJobId, slotIndex) { return pw('isGenCreationSlotSaved', baseJobId, slotIndex); }
 
-  function allGenCreationSlotsSaved(baseJobId, extraCount) {
-    if (!baseJobId || !isGenCreationSlotSaved(baseJobId, 1)) return false;
-    for (let i = 0; i < extraCount; i += 1) {
-      if (!isGenCreationSlotSaved(baseJobId, i + 2)) return false;
-    }
-    return true;
-  }
+  function allGenCreationSlotsSaved(baseJobId, extraCount) { return pw('allGenCreationSlotsSaved', baseJobId, extraCount); }
 
-  /** Midjourney 入库：可选四张各存一张卡片 */
-  async function saveMjToWarehouse({
-    prompt,
-    model,
-    resolution,
-    quality,
-    size,
-    cost,
-    jobId,
-    silentToast,
-    isRecovery,
-    fromInspirationDraw,
-    pendingId,
-    targetGroup,
-    targetTags,
-    primary,
-    gridUrls,
-    composite,
-    buttons
-  }) {
-    const tiles = (gridUrls || []).filter(Boolean).slice(0, 4);
-    const mainImage = primary || tiles[0];
-    if (!mainImage) return false;
-    const saveAll = isImageGenMjSaveAllTiles() && tiles.length > 1;
-    const base = {
-      prompt,
-      model,
-      resolution,
-      quality,
-      size,
-      cost,
-      jobId,
-      isRecovery,
-      fromInspirationDraw,
-      pendingId,
-      targetGroup,
-      targetTags,
-      isMidjourney: true
-    };
+  async function saveMjToWarehouse(opts) { return pw('saveMjToWarehouse', opts); }
 
-    if (saveAll) {
-      for (let i = 0; i < tiles.length; i += 1) {
-        await finishImageGenRun({
-          ...base,
-          image: tiles[i],
-          imageIndex: i + 1,
-          silentToast: true,
-          mjGridUrls: i === 0 ? tiles : null,
-          mjCompositeUrl: i === 0 ? composite : null,
-          mjButtons: i === 0 ? buttons : null,
-          mjSplitSave: true
-        });
-      }
-      if (!silentToast) {
-        toast(`Midjourney ${tiles.length} 张已分别存入仓库，点预览可对首张放大/变体`);
-      }
-      return true;
-    }
-
-    await finishImageGenRun({
-      ...base,
-      image: mainImage,
-      imageIndex: 1,
-      silentToast: true,
-      extraImages: [],
-      mjGridUrls: tiles.length ? tiles : [mainImage],
-      mjCompositeUrl: composite,
-      mjButtons: buttons
-    });
-    if (!silentToast) {
-      const n = tiles.length;
-      toast(
-        n >= 4
-          ? 'Midjourney 已入库（预览可切换四张），勾选「四张分别存入」可各存一张'
-          : `Midjourney 已入库 ${n} 张图，点预览继续操作`
-      );
-    }
-    return true;
-  }
-
-  /** 入库主图 + 同任务附赠图；已有主图时只补缺失的附赠槽位 */
   async function ensureGenJobCreationsFromPoll(poll, ctx, pendingId) {
-    if (poll?.data?.status !== 'completed' || !poll.data.imageUrl) return false;
-    const baseJobId = ctx?.jobId || poll.data.jobId;
-    const imageUrl = poll.data.imageUrl;
-    const extras = getPollExtraImageUrls(poll, imageUrl);
-    const isMj = poll.data.isMidjourney || isImageGenMidjourneyModel(ctx?.model);
-
-    if (isMj) {
-      const parsed = resolveMjPollImages(poll);
-      const gridUrls = parsed.tiles.length ? parsed.tiles : parsed.primary ? [parsed.primary] : [];
-      const primary = parsed.primary || imageUrl;
-      if (!primary) return false;
-      if (baseJobId && hasWarehouseCardForJob(baseJobId)) {
-        const card = findWarehouseCardForJob(baseJobId);
-        if (card && gridUrls.length > 1
-          && (!Array.isArray(card.mjGridUrls) || card.mjGridUrls.length < gridUrls.length)) {
-          await repairMjWarehouseCardFields(card, {
-            mjGridUrls: gridUrls,
-            mjCompositeUrl: parsed.composite,
-            mjButtons: poll.data.mjButtons
-          });
-        }
-        if (isImageGenMjSaveAllTiles() && gridUrls.length > 1) {
-          for (let i = 2; i <= gridUrls.length; i += 1) {
-            const slotId = `${baseJobId}#${i}`;
-            if (!hasWarehouseCardForJob(slotId)) {
-              await finishImageGenRun({
-                ...ctx,
-                image: gridUrls[i - 1],
-                imageIndex: i,
-                cost: ctx.cost,
-                jobId: baseJobId,
-                silentToast: true,
-                isRecovery: !!ctx.isRecovery,
-                isMidjourney: true,
-                mjSplitSave: true
-              });
-            }
-          }
-        }
-        if (pendingId) removePendingJob(pendingId);
-        clearSessionGenJob(baseJobId);
-        renderImageGenFeed({ preserveScroll: true });
-        return true;
-      }
-      if (baseJobId && findWarehouseCardForJob(baseJobId) && !hasWarehouseCardForJob(baseJobId)) {
-        await repairWarehouseCardImageFromJob(findWarehouseCardForJob(baseJobId), primary, baseJobId);
-      }
-      await saveMjToWarehouse({
-        ...ctx,
-        primary,
-        gridUrls,
-        composite: parsed.composite,
-        buttons: poll.data.mjButtons,
-        jobId: baseJobId,
-        silentToast: !!ctx.silentToast,
-        isRecovery: !!ctx.isRecovery,
-        pendingId
-      });
-      return true;
-    }
-
-    if (baseJobId && allGenCreationSlotsSaved(baseJobId, extras.length)) {
-      const mainCard = findWarehouseCardForJob(baseJobId);
-      if (mainCard && warehouseCardImageNeedsRecovery(mainCard, imageUrl)) {
-        await repairWarehouseCardImageFromJob(mainCard, imageUrl, baseJobId);
-      }
-      for (let ei = 0; ei < extras.length; ei += 1) {
-        const slotId = `${baseJobId}#${ei + 2}`;
-        const slotCard = findWarehouseCardForJob(slotId);
-        if (slotCard && warehouseCardImageNeedsRecovery(slotCard, extras[ei])) {
-          await repairWarehouseCardImageFromJob(slotCard, extras[ei], slotId);
-        }
-      }
-      if (pendingId) removePendingJob(pendingId);
-      clearSessionGenJob(baseJobId);
-      renderImageGenFeed({ preserveScroll: true });
-      return true;
-    }
-
-    if (!baseJobId || !isGenCreationSlotSaved(baseJobId, 1)) {
-      await finishImageGenRun({
-        ...ctx,
-        image: imageUrl,
-        extraImages: extras,
-        cost: ctx.cost,
-        jobId: baseJobId,
-        silentToast: !!ctx.silentToast,
-        isRecovery: !!ctx.isRecovery,
-        pendingId
-      });
-      if (extras.length && !ctx.silentToast) {
-        toast(`本次上游共 ${extras.length + 1} 张图，已全部存入仓库（仅扣 1 次积分）`);
-      }
-      return true;
-    }
-
-    for (let i = 0; i < extras.length; i += 1) {
-      if (!isGenCreationSlotSaved(baseJobId, i + 2)) {
-        await finishImageGenRun({
-          ...ctx,
-          image: extras[i],
-          extraImages: [],
-          cost: ctx.cost,
-          jobId: baseJobId,
-          silentToast: true,
-          isRecovery: !!ctx.isRecovery,
-          pendingId: null,
-          imageIndex: i + 2
-        });
-      }
-    }
-    if (pendingId) removePendingJob(pendingId);
-    renderImageGenFeed({ preserveScroll: true });
-    if (extras.length && !ctx.silentToast) {
-      toast(`已补全同任务附赠图 ${extras.length} 张`);
-    }
-    return true;
+    return pw('ensureGenJobCreationsFromPoll', poll, ctx, pendingId);
   }
 
-  function isSlowGenProviderModel(modelId) {
-    const id = normalizeImageGenModelId(modelId);
-    return id.startsWith('mooko-') || id.startsWith('ithink-');
-  }
-
-  /** 2K/4K/VIP/慢速线：上游常需 10 分钟级，勿按 5 分钟判死 */
-  function isLongRunningGenJob(ctx) {
-    if (isSlowGenProviderModel(ctx?.model)) return true;
-    const res = normalizeImageGenResolution(ctx?.resolution);
-    if (res === '2k' || res === '4k') return true;
-    const id = normalizeImageGenModelId(ctx?.model);
-    if (id.includes('vip') || id.includes('-pro')) return true;
-    return false;
-  }
-
-  function genActivePollMaxMs(ctx) {
-    return isLongRunningGenJob(ctx) ? 15 * 60 * 1000 : 5 * 60 * 1000;
-  }
-
-  function genRecoveringDeferGiveUpMs(ctx) {
-    return isLongRunningGenJob(ctx) ? 45 * 60 * 1000 : 22 * 60 * 1000;
-  }
-
+  function isSlowGenProviderModel(modelId) { return !!ge('isSlowGenProviderModel', modelId); }
+  function isLongRunningGenJob(ctx) { return !!ge('isLongRunningGenJob', ctx); }
+  function genActivePollMaxMs(ctx) { return ge('genActivePollMaxMs', ctx) ?? 5 * 60 * 1000; }
+  function genRecoveringDeferGiveUpMs(ctx) { return ge('genRecoveringDeferGiveUpMs', ctx) ?? 22 * 60 * 1000; }
   function pendingRecoveryGiveUpMs(pending) {
     return genRecoveringDeferGiveUpMs(pendingJobToPollCtx(pending || {}));
   }
-
   function formatPendingRecoveryNote(pending, fallback) {
     const age = Date.now() - (pending?.startedAt || 0);
     const mins = Math.max(1, Math.floor(age / 60000));
     const base = fallback || pending?.recoverNote || '后台恢复中';
     return `${base} · 已等 ${mins} 分钟`;
   }
-
-  function slowGenDeferNote(ctx) {
-    return isSlowGenProviderModel(ctx?.model)
-      ? '约 2–12 分钟，后台继续等待（请勿重复提交）'
-      : isLongRunningGenJob(ctx)
-        ? '2K/4K 约 5–15 分钟，后台继续等待（请勿重复提交）'
-        : '可能已出图，正在后台恢复（请勿重复提交）';
-  }
-
-  /** 快线路 5 分钟；木瓜/ThinkAI 慢速线 12 分钟 */
-  const ACTIVE_POLL_MAX_MS = 5 * 60 * 1000;
-
-  function isDefinitiveGenFailure(errRaw, pollData) {
-    const s = String(errRaw || pollData?.message || pollData?.errorMessage || '');
-    if (/upstream_content_violation|prohibited words or images|prohibited|flagged as containing|违规不返还|violation/i.test(s)) return true;
-    if (/content.*policy|safety|moderation|blocked|违规|敏感/i.test(s)) return true;
-    if (/insufficient balance|insufficient credits/i.test(s)) return true;
-    if (/apikey|invalid.*api.*key|unauthorized/i.test(s)) return true;
-    if (/This content may violate|content may violate/i.test(s)) return true;
-    return false;
-  }
-
+  function slowGenDeferNote(ctx) { return ge('slowGenDeferNote', ctx) ?? '可能已出图，正在后台恢复（请勿重复提交）'; }
+  const ACTIVE_POLL_MAX_MS = window.ImageGenGenErrors?.ACTIVE_POLL_MAX_MS ?? 5 * 60 * 1000;
+  function isDefinitiveGenFailure(errRaw, pollData) { return !!ge('isDefinitiveGenFailure', errRaw, pollData); }
   async function failPendingJobImmediately(pendingId, ctx, errRaw) {
     const msg = friendlyGenErrorMessage(errRaw);
     failPendingJob(pendingId, msg);
@@ -10062,2272 +9513,10 @@
     renderImageGenFeed({ preserveScroll: true, force: true });
     if (!ctx?.silentToast) toastGenFailure(ctx, msg);
   }
+  function genJobPollDelayMs(ctx, attemptIndex) { return ge('genJobPollDelayMs', ctx, attemptIndex) ?? 5500; }
 
-  /** 5 分钟内快轮询；超时后交给后台恢复 */
-  function genJobPollDelayMs(ctx, attemptIndex) {
-    const elapsed = Math.max(0, Date.now() - (ctx?.startedAt || Date.now()));
-    const activeMax = genActivePollMaxMs(ctx);
-    if (elapsed >= activeMax) return isLongRunningGenJob(ctx) ? 9000 : 7000;
-    if (attemptIndex <= 1) return 1500;
-    if (attemptIndex <= 4) return 2200;
-    if (isLongRunningGenJob(ctx)) {
-      if (elapsed < 120_000) return 4000;
-      if (elapsed < 360_000) return 6000;
-      if (elapsed < 720_000) return 8000;
-      return 10000;
-    }
-    if (elapsed < 60_000) return 3200;
-    if (elapsed < 180_000) return 4500;
-    return 5500;
-  }
-
-  function applyGenPollProgressNote(pendingId, pollData) {
-    const note = pollData?.progressNote;
-    if (!note || !pendingId) return;
-    const job = imageGenPendingJobs.find((j) => j.id === pendingId);
-    if (!job) return;
-    if (job.pendingNote === note) return;
-    job.pendingNote = note;
-    if (pollData?.status === 'processing' && isLongRunningGenJob({ model: job.model, resolution: job.resolution })) {
-      job.recovering = false;
-      job.recoverNote = '';
-    }
-    persistPendingGenJobs();
-    if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-      scheduleImageGenPendingUiRefresh();
-      return;
-    }
-    renderImageGenFeed({ preserveScroll: true, force: true });
-  }
-
-  async function pollGenerationJobUntilDone(jobId, pendingId, ctx) {
-    if (activePollJobIds.has(jobId)) return;
-    activePollJobIds.add(jobId);
-    try {
-    const maxAttempts = 90;
-    const finishFromPoll = async (poll) => {
-      if (poll.data.status === 'failed') {
-        const errRaw = poll.data.errorMessage || poll.data.message || '';
-        if (isDefinitiveGenFailure(errRaw, poll.data)) {
-          await failPendingJobImmediately(pendingId, ctx, errRaw);
-          return true;
-        }
-        return false;
-      }
-      if (poll.data.status === 'completed') {
-        return ensureGenJobCreationsFromPoll(poll, { ...ctx, jobId: ctx.jobId || jobId }, pendingId);
-      }
-      return false;
-    };
-
-    const failAfterGrace = async () => {
-      for (let g = 0; g < 12; g += 1) {
-        await new Promise((r) => setTimeout(r, g === 0 ? 2500 : g < 4 ? 4000 : 6000));
-        const retry = await window.PromptHubApi.getGenerationJob(jobId);
-        if (retry.ok && await finishFromPoll(retry)) return true;
-        if (retry.ok && (retry.data.status === 'processing' || (retry.data.status === 'completed' && !retry.data.imageUrl))) {
-          continue;
-        }
-        if (retry.ok && retry.data.status === 'failed' && isLikelyRecoverableGenFailure(retry.data.errorMessage, ctx)) {
-          continue;
-        }
-      }
-      const last = await window.PromptHubApi.getGenerationJob(jobId);
-      if (last.ok && await finishFromPoll(last)) return true;
-      const errRaw = last.ok && last.data.status === 'failed'
-        ? (last.data.errorMessage || last.data.message)
-        : '生图超时或上游无结果';
-        if (isLikelyRecoverableGenFailure(errRaw, ctx)) {
-        deferPendingJobRecovery(pendingId, ctx, slowGenDeferNote(ctx));
-        return true;
-      }
-      const msg = friendlyGenErrorMessage(errRaw);
-      failPendingJob(pendingId, msg);
-      await window.PointsSystem?.refreshCreditsFromServer?.();
-      renderImageGenFeed({ preserveScroll: true });
-      toastGenFailure(ctx, msg);
-      return true;
-    };
-
-    for (let i = 0; i < maxAttempts; i++) {
-      const elapsed = Date.now() - (ctx?.startedAt || Date.now());
-      const activeMax = genActivePollMaxMs(ctx);
-      if (elapsed >= activeMax) {
-        deferPendingJobRecovery(
-          pendingId,
-          ctx,
-          isSlowGenProviderModel(ctx?.model)
-            ? '前台已等 15 分钟，仍在后台生成（请勿重复提交）'
-            : isLongRunningGenJob(ctx)
-              ? '前台已等 15 分钟，2K/4K 仍在后台等待（请勿重复提交）'
-              : '前台已等 5 分钟，仍在后台恢复（请勿重复提交）'
-        );
-        void resumePendingGenerationJobs();
-        return;
-      }
-      if (i > 0) await new Promise((r) => setTimeout(r, genJobPollDelayMs(ctx, i)));
-      const elapsedNow = Date.now() - (ctx?.startedAt || Date.now());
-      const useSettle = isSlowGenProviderModel(ctx?.model)
-        ? elapsedNow > 20_000
-        : isLongRunningGenJob(ctx) && elapsedNow > 60_000;
-      const poll = await window.PromptHubApi.getGenerationJob(jobId, { settle: useSettle });
-      if (poll.ok) applyGenPollProgressNote(pendingId, poll.data);
-      if (!poll.ok) {
-        const recoverableNet =
-          poll.code === 'NETWORK_ERROR'
-          || poll.code === 'API_UNREACHABLE'
-          || poll.status === 524
-          || /524|timeout|超时/i.test(String(poll.message || ''));
-        if (i < maxAttempts - 1) {
-          const backoff = poll.code === 'RATE_LIMITED'
-            ? 4500
-            : recoverableNet
-              ? 2800
-              : 2200;
-          await new Promise((r) => setTimeout(r, backoff));
-          continue;
-        }
-        if (recoverableNet || poll.code === 'RATE_LIMITED') {
-          deferPendingJobRecovery(pendingId, ctx, slowGenDeferNote(ctx));
-          void resumePendingGenerationJobs();
-          return;
-        }
-        toast(poll.message || '查询生图进度失败，正在尝试恢复…');
-        void resumePendingGenerationJobs();
-        return;
-      }
-
-      if (typeof poll.data.creditsRemaining === 'number') {
-        window.PointsSystem?.setCreditsFromServer?.(poll.data.creditsRemaining);
-        window.PointsSystem?.updateCreditsUI?.();
-      }
-
-      if (poll.data.status === 'processing') {
-        continue;
-      }
-
-      if (poll.data.status === 'completed' && !poll.data.imageUrl) {
-        continue;
-      }
-
-      if (poll.data.status === 'failed') {
-        const errRaw = poll.data.errorMessage || poll.data.message || '';
-        if (isDefinitiveGenFailure(errRaw, poll.data)) {
-          await failPendingJobImmediately(pendingId, ctx, errRaw);
-          return;
-        }
-        if (isLikelyRecoverableGenFailure(errRaw, ctx) && elapsed < ACTIVE_POLL_MAX_MS) {
-          continue;
-        }
-        if (await failAfterGrace()) return;
-        continue;
-      }
-
-      if (await finishFromPoll(poll)) return;
-    }
-
-    const last = await window.PromptHubApi.getGenerationJob(jobId);
-    if (last.ok && await finishFromPoll(last)) return;
-    if (await failAfterGrace()) return;
-
-    toast('生图时间较长，正在恢复本次任务…');
-    void resumePendingGenerationJobs();
-    renderImageGenFeed({ preserveScroll: true });
-    } finally {
-      activePollJobIds.delete(jobId);
-    }
-  }
-
-  /**
-   * 从 API 恢复生图结果。
-   * - sessionOnly：仅恢复「本会话提交」的任务（轮询失败时用）
-   * - manual：用户点「恢复丢失的生图」并确认后
-   * 永不自动恢复：用户已删除（job 墓碑）或已有仓库卡片
-   */
-  async function recoverRecentGenerationJobs(opts = {}) {
-    if (opts.manual === true) return { ok: true, recovered: 0 };
-    if (!opts.sessionOnly) return;
-
-    const r = await window.PromptHubApi.listRecentGenerationJobs();
-    if (!r?.ok || !Array.isArray(r.data?.jobs)) return;
-
-    let changed = false;
-    let recovered = 0;
-    for (const job of r.data.jobs) {
-      if (!job?.id) continue;
-      if (isGenerationJobDeleted(job.id)) continue;
-
-      const meta = {
-        prompt: job.prompt || '',
-        model: job.model || 'gpt-image-2',
-        resolution: job.resolution || '1k',
-        quality: job.quality || 'standard',
-        size: job.size || '1:1',
-        cost: job.creditsCharged || 0,
-        jobId: job.id
-      };
-      const inSession = isSessionGenJob(job.id);
-
-      if (job.status === 'processing') {
-        if (!inSession) continue;
-        const alreadyPending = imageGenPendingJobs.some((j) => j.jobId === job.id);
-        if (!alreadyPending) {
-          const pendingId = genId('pending');
-          imageGenPendingJobs.unshift({
-            id: pendingId,
-            jobId: job.id,
-            prompt: meta.prompt,
-            model: meta.model,
-            modelLabel: job.modelLabel || imageGenModelLabel(job.model),
-            resolution: meta.resolution,
-            quality: meta.quality,
-            size: meta.size,
-            cost: meta.cost,
-            startedAt: Date.parse(job.createdAt) || Date.now()
-          });
-          changed = true;
-          void pollGenerationJobUntilDone(job.id, pendingId, meta);
-        }
-        continue;
-      }
-
-      if (job.status !== 'completed' || !job.imageUrl) continue;
-      if (!inSession) continue;
-      if (!needsApiImageRecovery(job.id, job.imageUrl)) continue;
-      const matchesActivePending = imageGenPendingJobs.some(
-        (p) => p.jobId === job.id
-          || (pendingPromptsMatch(p.prompt, job.prompt)
-            && normalizeImageGenModelId(p.model) === normalizeImageGenModelId(job.model)
-            && (!p.resolution || !job.resolution || p.resolution === job.resolution))
-      );
-      if (imageGenPendingJobs.length && !matchesActivePending) continue;
-
-      const recoverExtrasList = Array.isArray(job.extraImageUrls)
-        ? job.extraImageUrls.filter((u) => u && u !== job.imageUrl)
-        : [];
-      if (await syncMissingBonusImagesForJob(job, meta, { silentToast: true })) {
-        changed = true;
-        recovered += 1;
-        continue;
-      }
-
-      const existingCard = (window.__promptHubCards || []).find((c) => c.genJobId === job.id);
-
-      changed = true;
-      if (existingCard && !existingCard.image) {
-        const ok = await repairWarehouseCardImageFromJob(existingCard, job.imageUrl, job.id);
-        if (ok) {
-          recovered += 1;
-          continue;
-        }
-      }
-
-      recovered += 1;
-      await ensureGenJobCreationsFromPoll(
-        { data: { status: 'completed', imageUrl: job.imageUrl, extraImageUrls: recoverExtrasList } },
-        { ...meta, silentToast: true, isRecovery: true },
-        null
-      );
-    }
-
-    if (changed) renderImageGenFeed({ preserveScroll: true });
-  }
-
-  async function runImageGenWithPrompt(promptOverride, opts) {
-    const batchOpts = opts && typeof opts === 'object' ? opts : {};
-    if (!window.AuthGate?.requireAuth?.('imagegen')) return { ok: false };
-    const metaEarly = getImageGenFormMeta();
-    const mjBlendMode = isImageGenMidjourneyModel(metaEarly.model) && getImageGenMjMode() === 'blend';
-    const prompt = String(
-      promptOverride ?? document.getElementById('imageGenPrompt')?.value ?? ''
-    ).trim();
-    if (!prompt && !mjBlendMode) {
-      toast('请先填写提示词');
-      return { ok: false };
-    }
-    if (mjBlendMode && !batchOpts.batch) {
-      const refCount = imageGenRefImages.filter(Boolean).length;
-      if (refCount < 2) {
-        toast('混图需要参考图框内 2～5 张图');
-        return { ok: false };
-      }
-    }
-    if (!imageGenModelCatalogReady || !document.getElementById('imageGenModel')?.value) {
-      toast('模型列表加载中，请稍候再点生成');
-      return { ok: false };
-    }
-
-    const btn = document.getElementById(batchOpts.submitBtnId || 'imageGenSubmit');
-    const singleRun = !batchOpts.batch;
-    if (singleRun && btn?.disabled && !imageGenBatchRunning) {
-      btn.disabled = false;
-    }
-    if (singleRun && btn) {
-      btn.disabled = true;
-      btn.textContent = '准备中…';
-    }
-
-    let pendingId = null;
-    let submitUiReleased = false;
-    const releaseSubmitUi = () => {
-      if (!singleRun || submitUiReleased) return;
-      submitUiReleased = true;
-      if (btn) {
-        btn.disabled = false;
-        restoreImageGenSubmitLabel();
-      }
-    };
-    try {
-      const meta = getImageGenFormMeta();
-      const { model, resolution, quality, size } = meta;
-      let cost = window.PointsSystem?.getImageGenCost?.(model, resolution) ?? 10;
-      let balance = window.PointsSystem?.getCredits?.() ?? 0;
-      const useApi = window.PointsSystem?.useApiForAccount?.();
-
-      if (balance < cost) {
-        toast(`积分不足（需要 ${cost}，当前 ${balance}）。请使用激活码兑换`);
-        return { ok: false, reason: 'credits' };
-      }
-
-      saveImageGenDraft({
-        prompt,
-        model,
-        refImages: imageGenRefImages,
-        refImage: getImageGenPrimaryRef(),
-        resolution,
-        quality,
-        size,
-        count: getImageGenBatchCount()
-      });
-
-      const modelLabel = window.PointsSystem?.getImageGenModel?.(model)?.label || model;
-      pendingId = genId('pending');
-      const saveTarget = getImageGenSaveTarget();
-      const pendingJob = {
-        id: pendingId,
-        prompt,
-        model,
-        modelLabel,
-        resolution,
-        quality,
-        size,
-        cost,
-        targetGroup: saveTarget.targetGroup,
-        targetTags: saveTarget.targetTags,
-        fromInspirationDraw: !!batchOpts.fromInspirationDraw,
-        batchIndex: batchOpts.batchIndex || null,
-        batchTotal: batchOpts.batchTotal || null,
-        batchId: batchOpts.batchId || null,
-        silentToast: !!batchOpts.silentToast,
-        startedAt: Date.now()
-      };
-      imageGenPendingJobs.unshift(pendingJob);
-      persistPendingGenJobs();
-      imageGenFeedTab = 'warehouse';
-      document.querySelectorAll('[data-feed-tab]').forEach(b => {
-        b.classList.toggle('active', b.dataset.feedTab === 'warehouse');
-      });
-      updateImageGenFeedHint();
-      renderImageGenFeed({ preserveScroll: true });
-      if (singleRun && isMobileViewport() && window.MobileUI?.setImageGenView) {
-        window.MobileUI.setImageGenView('feed', { scrollToTop: false });
-      }
-      releaseSubmitUi();
-
-      if (useApi) {
-        const localCost = cost;
-        const quoted = await Promise.race([
-          quoteGenerationCost(resolution, quality, model, cost),
-          new Promise((resolve) => {
-            setTimeout(() => resolve({ cost: localCost, fromApi: false }), GEN_COST_QUOTE_TIMEOUT_MS);
-          })
-        ]);
-        cost = quoted.cost;
-        pendingJob.cost = cost;
-        persistPendingGenJobs();
-        balance = window.PointsSystem?.getCredits?.() ?? 0;
-      }
-
-      if (balance < cost) {
-        removePendingJob(pendingId);
-        renderImageGenFeed({ preserveScroll: true });
-        toast(`积分不足（需要 ${cost}，当前 ${balance}）。请使用激活码兑换`);
-        return { ok: false, reason: 'credits' };
-      }
-
-      if (!useApi && !window.PointsSystem?.deductCredits?.(cost)) {
-        removePendingJob(pendingId);
-        renderImageGenFeed({ preserveScroll: true });
-        toast('积分扣除失败');
-        return { ok: false };
-      }
-
-      if (useApi) {
-        const refSources = batchOpts.skipRefImages
-          ? []
-          : Array.isArray(batchOpts.refImages) && batchOpts.refImages.length
-            ? batchOpts.refImages
-            : imageGenRefImages;
-        const refUrls = await resolveRefUrlsFromList(refSources);
-        if (refSources.length && refUrls.length < refSources.length && !batchOpts.silentToast) {
-          toast(`已使用 ${refUrls.length}/${refSources.length} 张参考图继续生成`);
-        }
-        const genPayload = {
-          prompt: prompt || '[MJ 混图]',
-          model,
-          resolution,
-          quality,
-          size,
-          refImageUrls: refUrls.length ? refUrls : undefined,
-          ...(meta.mjParams ? { mjParams: meta.mjParams } : {})
-        };
-        let gen;
-        if (mjBlendMode) {
-          gen = await window.PromptHubApi.mjBlend({
-            refImageUrls: refUrls.slice(0, 5),
-            model
-          });
-        } else {
-          gen = await window.PromptHubApi.generateImage(genPayload);
-        }
-        if (!gen.ok && batchOpts.batch && !mjBlendMode) {
-          const retryable = gen.code === 'RATE_LIMITED'
-            || gen.status === 429
-            || /过于频繁|upstream|502|503|429|rate limit/i.test(String(gen.message || ''));
-          for (let attempt = 0; attempt < 2 && !gen.ok && retryable; attempt += 1) {
-            await new Promise((r) => setTimeout(r, 2000 + attempt * 2500));
-            gen = await window.PromptHubApi.generateImage(genPayload);
-          }
-        }
-        if (!gen.ok) {
-          const networkLike =
-            gen.code === 'NETWORK_ERROR'
-            || gen.code === 'API_UNREACHABLE'
-            || gen.status === 524
-            || /524|无法连接 api\.prompt-hub|连接.*超时|Failed to fetch|请求失败 \(524\)/i.test(String(gen.message || ''));
-          if (networkLike) {
-            const recovered = await tryRecoverOrphanGenJobAfterSubmitError(genPayload, pendingId, pendingJob);
-            if (recovered) {
-              renderImageGenFeed({ preserveScroll: true });
-              return { ok: true, recovered: true, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
-            }
-            deferPendingJobRecovery(
-              pendingId,
-              pendingJobToPollCtx(pendingJob),
-              gen.status === 524 || /524/.test(String(gen.message || ''))
-                ? '连接超时（524），任务可能已提交，后台继续等待…'
-                : slowGenDeferNote(pendingJobToPollCtx(pendingJob))
-            );
-            renderImageGenFeed({ preserveScroll: true });
-            return { ok: true, recovered: true, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
-          }
-          const errMsg = friendlyGenErrorMessage(gen.message);
-          if (/524|请求失败 \(524\)/i.test(errMsg) || /524/i.test(String(gen.message || ''))) {
-            deferPendingJobRecovery(
-              pendingId,
-              pendingJobToPollCtx(pendingJob),
-              '连接超时（524），任务可能已提交，后台继续等待…'
-            );
-            renderImageGenFeed({ preserveScroll: true });
-            return { ok: true, recovered: true, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
-          }
-          failPendingJob(pendingId, errMsg);
-          renderImageGenFeed({ preserveScroll: true });
-          await window.PointsSystem?.refreshCreditsFromServer?.();
-          if (!batchOpts.silentToast) toast(errMsg);
-          return { ok: false, message: errMsg, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
-        }
-        if (typeof gen.data.creditsRemaining === 'number') {
-          window.PointsSystem?.setCreditsFromServer?.(gen.data.creditsRemaining);
-          window.PointsSystem?.updateCreditsUI?.();
-        }
-        cost = gen.data.creditsCharged ?? cost;
-        pendingJob.cost = cost;
-
-        if (gen.data.status === 'completed' && gen.data.imageUrl) {
-          if (gen.data.jobId) trackSessionGenJob(gen.data.jobId);
-          const mjParsed = gen.data.isMidjourney || mjBlendMode
-            ? resolveMjPollImages({ data: gen.data })
-            : null;
-          if (gen.data.isMidjourney || mjBlendMode) {
-            await saveMjToWarehouse({
-              prompt: prompt || '[MJ 混图]',
-              model,
-              resolution,
-              quality,
-              size,
-              cost,
-              jobId: gen.data.jobId,
-              targetGroup: pendingJob.targetGroup,
-              targetTags: pendingJob.targetTags,
-              silentToast: batchOpts.silentToast,
-              fromInspirationDraw: !!batchOpts.fromInspirationDraw,
-              pendingId,
-              primary: mjParsed?.primary || gen.data.imageUrl,
-              gridUrls: mjParsed?.tiles?.length ? mjParsed.tiles : [gen.data.imageUrl],
-              composite: mjParsed?.composite,
-              buttons: gen.data.mjButtons
-            });
-          } else {
-            await finishImageGenRun({
-              prompt,
-              model,
-              resolution,
-              quality,
-              size,
-              image: gen.data.imageUrl,
-              cost,
-              jobId: gen.data.jobId,
-              targetGroup: pendingJob.targetGroup,
-              targetTags: pendingJob.targetTags,
-              silentToast: batchOpts.silentToast,
-              fromInspirationDraw: !!batchOpts.fromInspirationDraw,
-              pendingId
-            });
-          }
-          return { ok: true, creditsCharged: cost };
-        }
-
-        const jobId = gen.data.jobId;
-        if (!jobId) {
-          failPendingJob(pendingId, '未收到任务编号');
-          renderImageGenFeed();
-          if (!batchOpts.silentToast) toast('未收到任务编号，请重试');
-          return { ok: false, message: '未收到任务编号', batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
-        }
-        pendingJob.jobId = jobId;
-        pendingJob.slowProvider = isSlowGenProviderModel(model);
-        if (gen.data.progressNote) pendingJob.pendingNote = gen.data.progressNote;
-        trackSessionGenJob(jobId);
-        persistPendingGenJobs();
-        if (!batchOpts.silentToast) {
-          toast(
-            pendingJob.slowProvider
-              ? '已提交，约 1–12 分钟出图，下方可看进度'
-              : '已提交生图，下方可查看进度，可继续点击生成'
-          );
-        }
-        void pollGenerationJobUntilDone(jobId, pendingId, {
-          prompt,
-          model,
-          resolution,
-          quality,
-          size,
-          cost,
-          jobId,
-          targetGroup: pendingJob.targetGroup,
-          targetTags: pendingJob.targetTags,
-          startedAt: pendingJob.startedAt,
-          fromInspirationDraw: !!batchOpts.fromInspirationDraw,
-          silentToast: !!batchOpts.silentToast,
-          batchIndex: batchOpts.batchIndex || null,
-          batchTotal: batchOpts.batchTotal || null,
-          batchId: batchOpts.batchId || null
-        });
-        return { ok: true, creditsCharged: cost };
-      }
-
-      removePendingJob(pendingId);
-      renderImageGenFeed();
-      if (!batchOpts.silentToast) toast('请登录并连接后端 API 后使用真实生图（演示占位已关闭）');
-      return { ok: false };
-    } catch (e) {
-      console.error('[imagegen] runImageGenWithPrompt failed', e);
-      if (typeof pendingId === 'string' && pendingId) {
-        failPendingJob(pendingId, String(e?.message || '生图提交失败'));
-        safeRenderImageGenFeed({ preserveScroll: true });
-      }
-      if (!batchOpts.silentToast) {
-        const msg = String(e?.message || '');
-        let hint = msg || '请刷新页面后重试';
-        if (/quota|exceeded/i.test(msg)) {
-          hint = '浏览器存储已满，已跳过草稿保存；请清除站点数据或减少参考图后重试';
-        } else if (/please wait|too many|rate limit|busy/i.test(msg)) {
-          hint = '生图服务繁忙，请稍等 1～2 分钟再试';
-        } else if (/apikey|api.key|invalid.*api.*key|unauthorized|401|upstream_auth/i.test(msg)) {
-          hint = '生图服务认证失败，请联系站长';
-        }
-        toast('生图提交失败：' + hint);
-      }
-      return { ok: false, message: e?.message || 'submit failed' };
-    } finally {
-      releaseSubmitUi();
-    }
-  }
-
-  async function runImageGenDemo() {
-    if (imageGenBatchRunning) {
-      toast('生图任务提交中，请稍候');
-      return;
-    }
-    const count = getImageGenBatchCount();
-    if (count <= 1) {
-      await runImageGenWithPrompt();
-      return;
-    }
-
-    const prompt = String(document.getElementById('imageGenPrompt')?.value || '').trim();
-    if (!prompt) {
-      toast('请先填写提示词');
-      return;
-    }
-    if (!window.AuthGate?.requireAuth?.('imagegen')) return;
-
-    const meta = getImageGenFormMeta();
-    let unit = window.PointsSystem?.getImageGenCost?.(meta.model, meta.resolution) ?? 10;
-    if (window.PointsSystem?.useApiForAccount?.()) {
-      const quoted = await quoteGenerationCost(meta.resolution, meta.quality, meta.model, unit);
-      unit = quoted.cost;
-    }
-    unit = window.PointsSystem?.roundCredits?.(unit) ?? unit;
-    const fmt = window.PointsSystem?.formatCredits || ((n) => String(n));
-    const balance = window.PointsSystem?.getCredits?.() ?? 0;
-    const totalNeed = window.PointsSystem?.roundCredits?.(unit * count) ?? unit * count;
-    if (balance < unit) {
-      toast(`积分不足（每张 ${fmt(unit)}，当前 ${fmt(balance)}）`);
-      return;
-    }
-    if (balance < totalNeed) {
-      toast(`积分约够 ${Math.floor(balance / unit)} 张，将按顺序提交直到不足（${fmt(unit)} 积分/张）`);
-    }
-
-    imageGenBatchRunning = true;
-    const batchId = `batch_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const btn = document.getElementById('imageGenSubmit');
-    if (btn) btn.disabled = true;
-    try {
-      let ok = 0;
-      let charged = 0;
-      for (let i = 0; i < count; i += 1) {
-        const curBalance = window.PointsSystem?.getCredits?.() ?? 0;
-        if (curBalance < unit && i > 0) break;
-        if (btn) btn.textContent = `提交中 ${i + 1}/${count}…`;
-        const res = await runImageGenWithPrompt(undefined, {
-          silentToast: true,
-          batch: true,
-          batchId,
-          batchIndex: i + 1,
-          batchTotal: count
-        });
-        if (res?.ok) {
-          ok += 1;
-          charged += res.creditsCharged || unit;
-        } else if (res?.reason === 'credits') {
-          break;
-        } else if (i === 0) {
-          break;
-        }
-        if (i < count - 1) await new Promise((r) => setTimeout(r, 2200 + Math.floor(Math.random() * 800)));
-      }
-      await window.PointsSystem?.refreshCreditsFromServer?.();
-      window.PointsSystem?.updateCreditsUI?.();
-      if (ok > 0) {
-        toast(`已提交 ${ok}/${count} 张生图，已扣约 ${fmt(charged)} 积分（${fmt(unit)} 积分/张）`);
-        if (isMobileViewport() && window.MobileUI?.setImageGenView) {
-          window.MobileUI.setImageGenView('feed', { scrollToTop: false });
-        }
-      }
-    } catch (e) {
-      console.error('[imagegen] batch submit failed', e);
-      toast('批量生图提交失败，请刷新页面后重试');
-    } finally {
-      imageGenBatchRunning = false;
-      if (btn) {
-        btn.disabled = false;
-        restoreImageGenSubmitLabel();
-      }
-    }
-  }
-
-  async function finishImageGenRun({
-    prompt,
-    model,
-    resolution,
-    quality,
-    size,
-    image,
-    extraImages,
-    cost,
-    btn,
-    jobId,
-    silentToast,
-    isRecovery,
-    fromInspirationDraw,
-    pendingId,
-    imageIndex,
-    targetGroup,
-    targetTags,
-    isMidjourney,
-    mjGridUrls,
-    mjCompositeUrl,
-    mjButtons,
-    mjSplitSave
-  }) {
-    if (!image) {
-      toast('图片地址无效，请重试');
-      return;
-    }
-    const baseJobId = jobId ? String(jobId).replace(/#\d+$/, '') : null;
-    const idx = Math.max(1, Number(imageIndex) || 1);
-    const slotJobId = baseJobId ? (idx === 1 ? baseJobId : `${baseJobId}#${idx}`) : null;
-    if (slotJobId) {
-      if (isGenerationJobDeleted(slotJobId) || isGenerationJobDeleted(baseJobId)) return;
-      const existingCard = findWarehouseCardForJob(slotJobId);
-      if (existingCard && hasWarehouseCardForJob(slotJobId)) {
-        if (isMidjourney && Array.isArray(mjGridUrls) && mjGridUrls.length > 1
-          && (!Array.isArray(existingCard.mjGridUrls) || existingCard.mjGridUrls.length < mjGridUrls.length)) {
-          await repairMjWarehouseCardFields(existingCard, {
-            mjGridUrls,
-            mjCompositeUrl,
-            mjButtons
-          });
-          renderImageGenFeed({ preserveScroll: true });
-        }
-        if (warehouseCardImageNeedsRecovery(existingCard, image)) {
-          await repairWarehouseCardImageFromJob(existingCard, image, slotJobId);
-          renderImageGenFeed({ preserveScroll: true });
-        }
-        if (idx === 1) {
-          clearSessionGenJob(baseJobId);
-          if (pendingId) removePendingJob(pendingId);
-          prunePendingJobsWithWarehouseCards();
-          renderImageGenFeed({ preserveScroll: true });
-        }
-        return;
-      }
-      if (finishingJobIds.has(slotJobId)) return;
-      finishingJobIds.add(slotJobId);
-    }
-    try {
-      const existingCre = slotJobId ? creations.find((c) => c.jobId === slotJobId) : null;
-      const creationId = existingCre?.id || genId('cr');
-      let storedImage = image;
-      if (window.SupabaseSync?.persistGenerationImage && slotJobId) {
-        try {
-          const ref = await window.SupabaseSync.persistGenerationImage(creationId, image, {
-            jobId: slotJobId
-          });
-          if (ref && ref !== image) storedImage = ref;
-        } catch (e) {
-          console.warn('生成图原图归档失败，将用任务链接入库后重试', e);
-        }
-      }
-      if (idx === 1) imageGenLastResult = storedImage;
-      const primaryRef = getImageGenPrimaryRef();
-      const modelId = model || 'gpt-image-2';
-      const modelLabel = window.PointsSystem?.getImageGenModel?.(modelId)?.label || modelId;
-      const promptNote = idx > 1
-        ? (isMidjourney && (mjSplitSave || isImageGenMjSaveAllTiles()) ? `${prompt}（MJ 图 ${idx}）` : `${prompt}（同任务附赠图 ${idx}）`)
-        : prompt;
-      const cardMjGridUrls = isMidjourney && Array.isArray(mjGridUrls) && idx === 1 && !mjSplitSave
-        ? mjGridUrls
-        : (isMidjourney && mjSplitSave ? null : (isMidjourney && Array.isArray(mjGridUrls) ? mjGridUrls : null));
-      const creation = {
-        id: creationId,
-        jobId: slotJobId,
-        prompt: promptNote,
-        image: storedImage,
-        refImage: primaryRef,
-        refImages: imageGenRefImages.length ? [...imageGenRefImages] : null,
-        model: modelId,
-        modelLabel,
-        resolution,
-        quality: quality || 'standard',
-        size: size || '1:1',
-        hasRefImage: imageGenRefImages.length > 0,
-        visibility: 'private',
-        createdAt: Date.now() + idx,
-        expiresAt: Date.now() + randomGenRetentionMs(),
-        isMidjourney: !!isMidjourney,
-        mjGridUrls: cardMjGridUrls,
-        mjCompositeUrl: isMidjourney && mjCompositeUrl && idx === 1 ? mjCompositeUrl : null,
-        mjButtons: isMidjourney && Array.isArray(mjButtons) && idx === 1 ? mjButtons : null
-      };
-      creations = dedupeCreationsByJobId([creation, ...creations]);
-      if (idx === 1) imageGenActiveHistoryId = creation.id;
-      persistCreations();
-      imageGenFeedTab = 'warehouse';
-      document.querySelectorAll('[data-feed-tab]').forEach((b) => {
-        b.classList.toggle('active', b.dataset.feedTab === 'warehouse');
-      });
-      updateImageGenFeedHint();
-      window.PointsSystem?.updateCreditsUI?.();
-      if (btn) {
-        btn.disabled = false;
-        restoreImageGenSubmitLabel();
-      }
-      const publish = idx === 1 && isImageGenGenPublicChecked();
-      const saved = await saveGeneratedToWarehouse({
-        prompt: creation.prompt,
-        image: storedImage || image,
-        sourceId: creation.id,
-        jobId: slotJobId,
-        title: idx > 1
-          ? (isMidjourney && (mjSplitSave || isImageGenMjSaveAllTiles()) ? `MJ 图 ${idx}` : `附赠图 ${idx}`)
-          : (isMidjourney ? (mjSplitSave || isImageGenMjSaveAllTiles() ? 'MJ 图 1' : 'MJ 四宫格') : ''),
-        resolution,
-        model: modelId,
-        quality: quality || 'standard',
-        size: size || '1:1',
-        targetGroup: targetGroup || null,
-        targetTags: targetTags || null,
-        publishToCommunity: publish,
-        fromInspirationDraw: !!fromInspirationDraw,
-        silentToast: !!silentToast,
-        isMidjourney: !!isMidjourney,
-        mjGridUrls: cardMjGridUrls,
-        mjCompositeUrl: isMidjourney && mjCompositeUrl && idx === 1 ? mjCompositeUrl : null,
-        mjButtons: isMidjourney && Array.isArray(mjButtons) && idx === 1 ? mjButtons : null,
-        deferCloudPush: !!isMidjourney
-      });
-      if (pendingId && idx === 1) removePendingJob(pendingId);
-      prunePendingJobsWithWarehouseCards();
-      renderImageGenFeed({ preserveScroll: true, force: true });
-      renderImageGenMobileResult();
-      if (saved && window.SupabaseSync?.isLoggedIn?.() && !isMidjourney) {
-        queueUrgentCardsSync();
-      }
-      const whCard = slotJobId
-        ? (window.__promptHubCards || []).find((c) => c.genJobId === slotJobId)
-        : null;
-      if (whCard && warehouseCardImageNeedsRecovery(whCard, image || storedImage)) {
-        await repairWarehouseCardImageFromJob(whCard, image || storedImage, slotJobId);
-      }
-      const backupRef = image || storedImage;
-      if (whCard?.id && backupRef && typeof window.saveCardImageBackup === 'function') {
-        void window.getCardImageBackup?.(whCard.id).then((existing) => {
-          if (!existing) void window.saveCardImageBackup(whCard.id, backupRef);
-        });
-      }
-      if (isRecovery) {
-        /* 恢复流程在 recoverRecentGenerationJobs 末尾统一提示 */
-      } else if (!silentToast && idx === 1) {
-        if (saved) {
-          const published = publish && whCard && isCommunityPublishEligible(whCard);
-          toast(published
-            ? `已生成并保存到仓库（已公开到社区，-${cost} 积分）`
-            : `已生成并保存到仓库（-${cost} 积分）`);
-        } else {
-          toast(`已生成（-${cost} 积分）`);
-        }
-      }
-      const extras = Array.isArray(extraImages)
-        ? extraImages.filter((u) => u && u !== image)
-        : [];
-      if (!isMidjourney) {
-        for (let i = 0; i < extras.length; i += 1) {
-          await finishImageGenRun({
-            prompt,
-            model,
-            resolution,
-            quality,
-            size,
-            image: extras[i],
-            cost,
-            btn,
-            jobId: baseJobId,
-            targetGroup,
-            targetTags,
-            silentToast: true,
-            isRecovery,
-            fromInspirationDraw,
-            pendingId: null,
-            imageIndex: i + 2
-          });
-        }
-      }
-      if (baseJobId && idx === 1) clearSessionGenJob(baseJobId);
-    } finally {
-      if (slotJobId) finishingJobIds.delete(slotJobId);
-    }
-  }
-
-  function updateImageGenFeedHint() {
-    const el = document.getElementById('imageGenFeedHint');
-    if (!el) return;
-    const mobile = isMobileViewport();
-    const warehouse = imageGenFeedTab === 'warehouse';
-    if (warehouse) {
-      el.textContent = '';
-      el.hidden = true;
-      return;
-    }
-    el.hidden = false;
-    if (imageGenFeedTab === 'community') {
-      el.textContent = mobile
-        ? '获取 · 点图放大 · 按钮复制或填入生图'
-        : '获取 · 点击图片放大 · 点击卡片查看详情';
-    }
-  }
-
-  function copyFeedPromptText(prompt) {
-    const text = (prompt || '').trim();
-    if (!text) {
-      toast('暂无提示词');
-      return;
-    }
-    navigator.clipboard.writeText(text).then(() => toast('已复制提示词'));
-  }
-
-  function getActiveImageGenMode() {
-    const fold = document.getElementById('imageGenInspireFold');
-    if (fold?.open) return 'inspire';
-    return document.body?.dataset?.imagegenMode === 'inspire' ? 'inspire' : 'gen';
-  }
-
-  function fillFeedPromptToActiveMode(prompt, opts = {}) {
-    const text = String(prompt || '');
-    const openInspire = opts.inspire === true;
-    fillFormPromptOnly(text);
-    if (openInspire) {
-      window.ImageGenPromptTools?.openInspireFold?.();
-      toast('已填入提示词；已展开灵感抽卡');
-    } else {
-      toast('已填入提示词');
-    }
-    if (isMobileViewport()) window.MobileUI?.setImageGenView?.('form');
-  }
-
-  function fillFeedPromptToImageGen(prompt) {
-    fillFeedPromptToActiveMode(prompt);
-  }
-
-  async function fillCardToImageGen(card) {
-    if (!card) return;
-    if (typeof switchAppPage === 'function') switchAppPage('imagegen');
-    fillFormPromptOnly(card.prompt || '');
-    const ref = card.image;
-    if (ref && isDisplayableImage(ref)) {
-      let url = ref;
-      try {
-        if (window.MediaPipeline?.resolvePreviewUrl) {
-          const resolved = await window.MediaPipeline.resolvePreviewUrl(ref, {
-            assetId: card.id,
-            cardId: card.id,
-            jobId: card.genJobId || null
-          });
-          if (resolved && !String(resolved).includes('data:image/svg')) url = resolved;
-        } else if (window.SupabaseSync?.resolveDisplayUrl) {
-          const resolved = await window.SupabaseSync.resolveDisplayUrl(ref, { assetId: card.id });
-          if (resolved && !String(resolved).includes('data:image/svg')) url = resolved;
-        }
-      } catch (e) { /* ignore */ }
-      fillFormRefOnly(url, [url]);
-    }
-    if (isMobileViewport()) window.MobileUI?.setImageGenView?.('form');
-    toast('已填入生图（提示词与参考图）');
-  }
-
-
-
-  function failedJobModelLabel(job) {
-    if (job.model) return imageGenModelLabel(job.model);
-    const lbl = String(job.modelLabel || '').trim();
-    if (lbl === '全能模型2' || lbl === 'quanneng2') return 'GPT Image 2';
-    return lbl || 'GPT Image 2';
-  }
-
-  function renderImageGenMobileResult() {
-    /* 手机「最近生成」横条已移除，作品在「作品」Tab 按最近生成排序展示 */
-  }
-
-
-
-  function clearImageGenFeedSelection() {
-    document.querySelectorAll('#imageGenFeed .imagegen-feed-card').forEach((el) => {
-      el.classList.remove('active-preview', 'card-selected-bloom', 'card-press-pop');
-      el.style.removeProperty('transform');
-      el.style.removeProperty('transition');
-    });
-  }
-
-  function bindImageGenPreviewActions() {
-    const body = document.getElementById('imageGenPreviewBody');
-    if (!body || body.dataset.previewActionsBound === '1') return;
-    body.dataset.previewActionsBound = '1';
-    const getPreviewRefs = () => {
-      let refs = [];
-      try {
-        if (body.dataset.previewRefs) refs = JSON.parse(body.dataset.previewRefs) || [];
-      } catch (e) { /* ignore */ }
-      return { refImages: refs, refImage: body.dataset.previewRef || '' };
-    };
-    body.addEventListener('click', (e) => {
-      if (!imageGenPreviewId || !imageGenPreviewKind) return;
-      const copyBtn = e.target.closest('[data-preview-copy-prompt]');
-      if (copyBtn) {
-        e.preventDefault();
-        e.stopPropagation();
-        const text = body.dataset.previewPrompt || '';
-        if (!text) return;
-        navigator.clipboard?.writeText(text).then(
-          () => toast('提示词已复制'),
-          () => toast('复制失败')
-        );
-        return;
-      }
-      const fillAll = e.target.closest('[data-preview-fill-all]');
-      if (fillAll) {
-        e.preventDefault();
-        e.stopPropagation();
-        const { refImages: ri, refImage: r1 } = getPreviewRefs();
-        const assetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : '';
-        fillFormFromData({
-          prompt: body.dataset.previewPrompt || '',
-          refImages: ri.length ? ri : undefined,
-          refImage: ri.length ? undefined : r1,
-          refAssetId: assetId || undefined
-        });
-        return;
-      }
-      const fillPrompt = e.target.closest('[data-preview-fill-prompt]');
-      if (fillPrompt) {
-        e.preventDefault();
-        e.stopPropagation();
-        fillFormPromptOnly(body.dataset.previewPrompt || '');
-        return;
-      }
-      const fillRef = e.target.closest('[data-preview-fill-ref]');
-      if (fillRef) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (fillRef.disabled) return;
-        const { refImages: ri, refImage: r1 } = getPreviewRefs();
-        const assetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : '';
-        fillFormRefOnly(r1, ri, { assetId: assetId || undefined });
-        return;
-      }
-      const likeBtn = e.target.closest('[data-preview-like]');
-      if (likeBtn) {
-        e.preventDefault();
-        e.stopPropagation();
-        likeCommunityPostOnly(imageGenPreviewId);
-        renderImageGenPreview();
-      }
-    });
-  }
-
-  function primeImageGenPreviewShell(kind, id) {
-    const body = document.getElementById('imageGenPreviewBody');
-    if (!body) return;
-    const feedKey = kind === 'warehouse' ? 'wh_' + id : id;
-    const cardEl = document.querySelector(`#imageGenFeed .imagegen-feed-card[data-feed-id="${feedKey}"]`);
-    let prompt = cardEl?.dataset.feedPrompt || '';
-    let image = '';
-    let instantSrc = '';
-    const feedImg = cardEl?.querySelector('.imagegen-feed-media img');
-    if (feedImg) {
-      image = feedImg.getAttribute('data-image-ref') || '';
-      const src = feedImg.currentSrc || feedImg.src || '';
-      const path = window.SupabaseSync?.storagePathFromDisplayUrl?.(src) || '';
-      const isGridThumb = path && /_grid\.(jpe?g|webp|png)$/i.test(path);
-      if (/^https?:\/\//i.test(src) && !src.includes('data:image/svg') && feedImg.naturalWidth > 8 && !isGridThumb) {
-        instantSrc = src;
-      }
-    }
-    if (kind === 'warehouse') {
-      const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === id);
-      if (c) {
-        prompt = c.prompt || prompt;
-        image = c.image || image;
-      }
-    } else if (kind === 'community') {
-      const post = findPost(id);
-      if (post) {
-        prompt = post.prompt || prompt;
-        image = post.image || image;
-      }
-    }
-    const hasRef = !!(image && isDisplayableImage(image));
-    const fillHtml = buildPreviewFillActions(hasRef, '');
-    const imgHtml = isDisplayableImage(image)
-      ? `<div class="imagegen-preview-img-wrap">
-          <button type="button" class="imagegen-preview-img-btn" data-preview-zoom title="点击全屏查看大图">
-            ${instantSrc
-              ? `<img src="${esc(instantSrc)}" alt="" draggable="false" style="cursor:zoom-in">`
-              : '<span class="media-skeleton"></span>'}
-          </button>
-          <button type="button" class="imagegen-preview-dl-btn" data-preview-download title="下载到电脑"${instantSrc ? '' : ' disabled'} aria-label="下载图片">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0l4-4m-4 4l-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-            <span>下载</span>
-          </button>
-        </div>`
-      : '';
-    body.innerHTML = `${imgHtml}<div class="imagegen-preview-prompt">${esc(prompt)}</div>${fillHtml}`;
-    body.dataset.previewPrompt = prompt;
-    if (hasRef && image) body.dataset.previewRef = image;
-    else delete body.dataset.previewRef;
-    delete body.dataset.previewRefs;
-    if (instantSrc) {
-      body.dataset.previewImageUrl = instantSrc;
-      body.dataset.previewImageReady = '1';
-    } else {
-      delete body.dataset.previewImageUrl;
-      delete body.dataset.previewImageReady;
-    }
-  }
-
-  function closeImageGenPreview() {
-    imageGenPreviewRenderSeq += 1;
-    imageGenPreviewId = null;
-    imageGenPreviewKind = null;
-    document.getElementById('imageGenPreviewPanel')?.classList.add('hidden');
-    document.querySelector('.imagegen-side')?.classList.remove('imagegen-preview-open');
-    clearImageGenFeedSelection();
-    if (isMobileViewport()) enforceMobileImageGenFeed();
-    else scheduleImageGenFeedLayout({ immediate: true });
-  }
-
-  async function downloadImageGenPreviewImage(body, previewKind, previewAssetId, triggerBtn) {
-    if (!body || body.dataset.previewImageReady !== '1') {
-      toast('图片加载中，请稍后再下载');
-      return;
-    }
-    const url = body.dataset.previewImageUrl || '';
-    const img = body.querySelector('.imagegen-preview-img-btn img');
-    const dlBtn = triggerBtn || body.querySelector('[data-preview-download]');
-    try {
-      if (previewKind === 'warehouse' && previewAssetId && typeof window.downloadCardImageFile === 'function') {
-        const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === previewAssetId);
-        if (c?.image) {
-          await window.downloadCardImageFile(c.image, c.id, null, {
-            triggerBtn: dlBtn
-          });
-          return;
-        }
-      }
-      if (typeof window.promptHubSaveImage === 'function') {
-        await window.promptHubSaveImage(url, `prompt-hub-gen-${Date.now()}.png`, img);
-      } else {
-        await downloadImageFromUrl(url, `prompt-hub-gen-${Date.now()}.png`);
-        return;
-      }
-      toast('下载完成');
-    } catch (e) {
-      toast('下载失败，请稍后重试');
-      console.warn('[download] preview image failed', e);
-    }
-  }
-
-  async function downloadImageGenFeedItem(kind, itemId, imgEl, triggerBtn) {
-    try {
-      if (kind === 'warehouse') {
-        const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === itemId);
-        if (c?.image && typeof window.downloadCardImageFile === 'function') {
-          await window.downloadCardImageFile(c.image, c.id, null, {
-            triggerBtn
-          });
-          return;
-        }
-      } else if (kind === 'community') {
-        const post = findPost(itemId);
-        if (post?.image) {
-          toast('正在准备下载…', 2500);
-          const url = await resolveImageDisplayUrl(
-            post.image,
-            post.jobId || '',
-            post.sourceCardId || post.id,
-            { fromPublicFeed: true, authorId: post.authorId, preferFull: true }
-          );
-          if (url) {
-            await window.promptHubSaveImage?.(url, `prompt-hub-${itemId}.png`, imgEl);
-            toast('下载完成');
-            return;
-          }
-        }
-      }
-      toast('暂无可下载的图片');
-    } catch (e) {
-      toast('下载失败，请稍后重试');
-      console.warn('[download] feed item failed', e);
-    }
-  }
-
-  async function downloadImageFromUrl(url, filename) {
-    if (!url) {
-      toast('图片尚未加载完成');
-      return;
-    }
-    try {
-      if (typeof window.promptHubSaveImage === 'function') {
-        await window.promptHubSaveImage(url, filename);
-      } else {
-        const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
-        const blob = await res.blob();
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = filename || `prompt-hub-${Date.now()}.png`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }
-      toast('图片已开始下载');
-    } catch (e) {
-      toast('下载失败，请稍后重试');
-      console.warn('[download] preview image failed', e);
-    }
-  }
-
-  function buildPreviewFillActions(hasRef, extraActionsHtml) {
-    const refDisabled = hasRef ? '' : ' disabled title="暂无参考图"';
-    return `
-      <div class="imagegen-preview-copy-row">
-        <button type="button" class="btn btn-secondary btn-sm" data-preview-copy-prompt>复制提示词</button>
-      </div>
-      <div class="imagegen-preview-fill">
-        <span class="imagegen-preview-fill-label">填入生图框</span>
-        <div class="imagegen-preview-fill-btns">
-          <button type="button" class="btn btn-primary btn-sm" data-preview-fill-all>全部</button>
-          <button type="button" class="btn btn-secondary btn-sm" data-preview-fill-prompt>仅提示词</button>
-          <button type="button" class="btn btn-secondary btn-sm" data-preview-fill-ref${refDisabled}>仅参考图</button>
-        </div>
-      </div>
-      ${extraActionsHtml ? `<div class="imagegen-preview-actions-secondary">${extraActionsHtml}</div>` : ''}`;
-  }
-
-  /** Feed 卡 data-feed-id 为 wh_ + 卡片 id；恢复卡 id 本身也可能以 wh_ 开头，勿二次 strip */
-  function warehouseCardIdFromFeedKey(feedKey) {
-    const k = String(feedKey || '');
-    return k.startsWith('wh_') ? k.slice(3) : k;
-  }
-
-  function findWarehouseCardById(cardId) {
-    const id = String(cardId || '').trim();
-    if (!id) return null;
-    let c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === id);
-    if (c) return c;
-    const full = (window.__promptHubCards || []).find((x) => x.id === id);
-    if (!full) return null;
-    return {
-      id: full.id,
-      title: (full.title || '').trim(),
-      prompt: (full.prompt || '').trim() || (full.title || '').trim(),
-      image: full.image || null,
-      tags: full.tags || [],
-      group: full.group || null,
-      genJobId: full.genJobId || null,
-      isMidjourney: !!full.isMidjourney,
-      mjGridUrls: Array.isArray(full.mjGridUrls) ? full.mjGridUrls : null,
-      mjCompositeUrl: full.mjCompositeUrl || null,
-      mjButtons: Array.isArray(full.mjButtons) ? full.mjButtons : null
-    };
-  }
-
-  function fullUrlFromImgEl(imgEl) {
-    if (!imgEl) return '';
-    const cached = String(imgEl.dataset?.previewFullUrl || imgEl.dataset?.fullUrl || '').trim();
-    if (cached && !cached.includes('data:image/svg')) return cached;
-    const src = String(imgEl.currentSrc || imgEl.src || '').trim();
-    if (!src || src.includes('data:image/svg') || !/^https?:\/\//i.test(src)) return '';
-    const path = window.SupabaseSync?.storagePathFromDisplayUrl?.(src) || '';
-    if (path && /_grid\.(jpe?g|webp|png)$/i.test(path)) return '';
-    if (window.SupabaseSync?.isInvalidMediaUrl?.(src)) return '';
-    if (window.SupabaseSync?.isValidSignedDisplayUrl?.(src)) return src;
-    if (window.SupabaseSync?.isFreshSignedDisplayUrl?.(src, 120000)) return src;
-    return '';
-  }
-
-  /** 生图 Feed / 灯箱 / 侧栏：统一拉 full 原图 URL（禁止落 grid 缩略） */
-  async function resolveImageGenFullUrl(kind, id, feedKey, imgEl) {
-    const instant = fullUrlFromImgEl(imgEl);
-    if (instant) return instant;
-    const fk = feedKey || (kind === 'warehouse' ? 'wh_' + id : id);
-    const assetId = kind === 'warehouse' ? warehouseCardIdFromFeedKey(fk) : id;
-    let rawRef = imgEl?.getAttribute?.('data-image-ref') || '';
-    let jobId = imgEl?.getAttribute?.('data-job-id') || '';
-    let resolveOpts = {};
-    if (kind === 'warehouse') {
-      const c = findWarehouseCardById(assetId);
-      if (c) {
-        rawRef = c.image || rawRef;
-        jobId = String(c.genJobId || jobId).replace(/#\d+$/, '');
-        resolveOpts = window.getCommunityCollectImageResolveOpts?.(c) || {};
-      }
-    } else {
-      const post = findPost(id);
-      if (post) {
-        rawRef = post.image || rawRef;
-        jobId = post.jobId || jobId;
-        resolveOpts = {
-          fromPublicFeed: true,
-          authorId: post.authorId,
-          cardId: post.sourceCardId || post.id
-        };
-      }
-    }
-    if (!rawRef || !isDisplayableImage(rawRef)) return '';
-    const gridFallbackUrl = window.MediaPipeline?.gridUrlFromImgEl?.(imgEl) || '';
-    if (window.MediaPipeline?.resolvePreviewUrl) {
-      return window.MediaPipeline.resolvePreviewUrl(rawRef, {
-        assetId,
-        cardId: resolveOpts.cardId || assetId,
-        authorId: resolveOpts.authorId,
-        communityFeed: resolveOpts.fromPublicFeed === true,
-        jobId: jobId || undefined,
-        gridFallbackUrl,
-        allowGridFallback: true
-      });
-    }
-    if (window.SupabaseSync?.resolvePreviewFullUrl) {
-      return window.SupabaseSync.resolvePreviewFullUrl(rawRef, {
-        assetId,
-        cardId: resolveOpts.cardId || assetId,
-        authorId: resolveOpts.authorId,
-        communityFeed: resolveOpts.fromPublicFeed === true,
-        jobId: jobId || undefined,
-        gridFallbackUrl,
-        allowGridFallback: true
-      });
-    }
-    return resolveImageDisplayUrl(rawRef, jobId, assetId, {
-      ...resolveOpts,
-      preferFull: true,
-      listOnly: false,
-      allowFullFallback: true,
-      bypassSignBudget: true,
-      cardId: resolveOpts.cardId || assetId
-    });
-  }
-
-  async function renderImageGenPreview() {
-    const body = document.getElementById('imageGenPreviewBody');
-    if (!body || !imageGenPreviewId || !imageGenPreviewKind) return;
-    const seq = ++imageGenPreviewRenderSeq;
-    const previewId = imageGenPreviewId;
-    const previewKind = imageGenPreviewKind;
-    const previewStale = () =>
-      seq !== imageGenPreviewRenderSeq
-      || previewId !== imageGenPreviewId
-      || previewKind !== imageGenPreviewKind;
-    delete body.dataset.previewImageUrl;
-    delete body.dataset.previewImageReady;
-    let prompt = '';
-    let image = '';
-    let jobId = '';
-    let refImages = null;
-    let refImage = null;
-    let extraActions = '';
-    if (imageGenPreviewKind === 'personal') {
-      closeImageGenPreview();
-      return;
-    } else if (imageGenPreviewKind === 'community') {
-      const post = findPost(imageGenPreviewId);
-      if (!post) { closeImageGenPreview(); return; }
-      prompt = post.prompt || '';
-      image = post.image || '';
-      const liked = likedIds.has(post.id);
-      extraActions = `
-        <button type="button" class="btn btn-secondary btn-sm" data-preview-like>${liked ? '已赞' : '点赞'}</button>`;
-    } else {
-      const c = findWarehouseCardById(imageGenPreviewId);
-      if (!c) {
-        toast('找不到该卡藏卡片，请强刷页面');
-        closeImageGenPreview();
-        return;
-      }
-      prompt = c.prompt || '';
-      image = c.image || '';
-      jobId = normalizeMjParentJobId(c.genJobId || '');
-      if (isDisplayableImage(c.image)) refImage = c.image;
-    }
-    const previewCard = imageGenPreviewKind === 'warehouse'
-      ? ((window.__promptHubCards || []).find((x) => x.id === imageGenPreviewId) || findWarehouseCardById(imageGenPreviewId))
-      : null;
-    let mjGridUrls = Array.isArray(previewCard?.mjGridUrls) && previewCard.mjGridUrls.length
-      ? previewCard.mjGridUrls.filter(Boolean)
-      : null;
-    const mjParentJobId = normalizeMjParentJobId(jobId || previewCard?.genJobId || '');
-    if (!mjGridUrls?.length && mjParentJobId && previewCard?.isMidjourney && window.PromptHubApi?.getGenerationJob) {
-      try {
-        const poll = await window.PromptHubApi.getGenerationJob(mjParentJobId);
-        if (!previewStale() && poll?.ok) {
-          const parsed = resolveMjPollImages(poll);
-          if (parsed.tiles.length) {
-            mjGridUrls = parsed.tiles;
-            if (previewCard) {
-              await repairMjWarehouseCardFields(previewCard, {
-                mjGridUrls: parsed.tiles,
-                mjCompositeUrl: parsed.composite,
-                mjButtons: poll.data.mjButtons
-              });
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('[imagegen] mj grid fetch failed', mjParentJobId, e);
-      }
-    }
-    if (previewStale()) return;
-    const cachedMjButtons = Array.isArray(previewCard?.mjButtons) ? previewCard.mjButtons : null;
-    const hasRef = !!(refImages?.length || (refImage && isDisplayableImage(refImage)));
-    const fillHtml = buildPreviewFillActions(hasRef, extraActions);
-    const mjActionsHtml = cachedMjButtons?.length
-      ? buildMjActionsHtml(cachedMjButtons, mjParentJobId)
-      : (mjParentJobId ? '<div class="imagegen-mj-actions-host" data-mj-actions-host></div>' : '');
-    let imgHtml = '';
-    if (mjGridUrls?.length) {
-      imgHtml = buildMjGridPreviewHtml(mjGridUrls);
-    } else if (isDisplayableImage(image)) {
-      imgHtml = `<div class="imagegen-preview-img-wrap">
-          <button type="button" class="imagegen-preview-img-btn" data-preview-zoom title="点击全屏查看大图"><span class="media-skeleton"></span></button>
-          <button type="button" class="imagegen-preview-dl-btn" data-preview-download title="下载到电脑" disabled aria-label="下载图片">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0l4-4m-4 4l-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-            <span>下载</span>
-          </button>
-        </div>`;
-    }
-    body.innerHTML = `${imgHtml}<div class="imagegen-preview-prompt">${esc(prompt)}</div>${mjActionsHtml}${fillHtml}`;
-    body.dataset.previewPrompt = prompt;
-    body.dataset.previewJobId = mjParentJobId || '';
-    body.dataset.previewRef = refImage || '';
-    if (refImages?.length) body.dataset.previewRefs = JSON.stringify(refImages);
-    else delete body.dataset.previewRefs;
-    const dlPending = body.querySelector('[data-preview-download]');
-    if (dlPending) dlPending.disabled = true;
-    const zoomBtn = body.querySelector('[data-preview-zoom]');
-    if (mjGridUrls?.length) {
-      bindMjFilmstripPreview(body, mjGridUrls, {
-        feedKey: 'wh_' + previewId,
-        cardId: previewId
-      });
-    } else if (zoomBtn && isDisplayableImage(image)) {
-      const previewAssetId = imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : imageGenPreviewId;
-      const previewOpts = previewCard ? (window.getCommunityCollectImageResolveOpts?.(previewCard) || {}) : (
-        imageGenPreviewKind === 'community' ? (() => {
-          const post = findPost(imageGenPreviewId);
-          return post ? { fromPublicFeed: true, authorId: post.authorId, cardId: post.sourceCardId || post.id } : {};
-        })() : {}
-      );
-
-      const mountPreviewImage = (url, { isFull } = {}) => {
-        if (previewStale() || !url) return;
-        body.dataset.previewImageUrl = url;
-        body.dataset.previewImageReady = '1';
-        const dlReady = body.querySelector('[data-preview-download]');
-        if (dlReady) dlReady.disabled = false;
-        let img = zoomBtn.querySelector('img');
-        if (!img) {
-          img = document.createElement('img');
-          img.alt = '';
-          img.draggable = false;
-          img.style.cursor = 'zoom-in';
-          zoomBtn.replaceChildren(img);
-        }
-        if (img.src !== url) img.src = url;
-        if (isFull) img.dataset.previewFullUrl = url;
-        else delete img.dataset.previewFullUrl;
-        const openPreviewLightbox = () => {
-          if (typeof window.openLightbox !== 'function') return;
-          const feedKey = previewKind === 'warehouse' ? 'wh_' + previewId : previewId;
-          const lbOpts = {
-            imageGen: true,
-            feedKey,
-            community: previewKind === 'community',
-            postId: previewKind === 'community' ? previewId : null,
-            cardId: previewKind === 'warehouse' ? previewAssetId : null,
-            preferFull: true
-          };
-          const previewImg = zoomBtn.querySelector('img');
-          const instant = fullUrlFromImgEl(previewImg);
-          if (instant) {
-            window.openLightbox(instant, lbOpts);
-            return;
-          }
-          window.openLightbox('', { ...lbOpts, pending: true });
-          void resolveImageGenFullUrl(
-            previewKind,
-            previewId,
-            feedKey,
-            previewImg
-          ).then((fullUrl) => {
-            if (!fullUrl || String(fullUrl).startsWith('data:image/svg')) {
-              window.closeLightbox?.();
-              toast('原图加载中，请稍后再试');
-              return;
-            }
-            window.setLightboxSrc?.(fullUrl, {
-              imageGen: true,
-              feedKey,
-              community: previewKind === 'community',
-              postId: previewKind === 'community' ? previewId : null,
-              cardId: previewKind === 'warehouse' ? previewAssetId : null,
-              preferFull: true
-            });
-          });
-        };
-        if (!zoomBtn.dataset.previewZoomBound) {
-          zoomBtn.dataset.previewZoomBound = '1';
-          zoomBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            openPreviewLightbox();
-          });
-        }
-        if (!img.dataset.previewZoomBound) {
-          img.dataset.previewZoomBound = '1';
-          img.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            openPreviewLightbox();
-          });
-        }
-        img.onload = () => {
-          if (previewStale()) return;
-          if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(zoomBtn);
-          if (isFull) {
-            if (typeof window.resetImageZoom === 'function') window.resetImageZoom(img);
-            if (typeof window.attachImageZoom === 'function') window.attachImageZoom(img);
-          }
-        };
-        if (img.complete && img.naturalWidth > 0) img.onload?.();
-      };
-
-      void resolveImageGenFullUrl(
-        previewKind,
-        previewId,
-        previewKind === 'warehouse' ? 'wh_' + previewId : previewId,
-        null
-      ).then((url) => {
-        if (previewStale()) return;
-        if (!url) {
-          zoomBtn.remove();
-          body.querySelector('[data-preview-download]')?.remove();
-          return;
-        }
-        mountPreviewImage(url, { isFull: true });
-      });
-    } else {
-      body.querySelector('[data-preview-download]')?.remove();
-    }
-    body.querySelector('[data-preview-download]')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (previewStale()) return;
-      const assetId = previewKind === 'warehouse' ? previewId : previewId;
-      void downloadImageGenPreviewImage(body, previewKind, assetId, e.currentTarget);
-    });
-    body.querySelectorAll('[data-mj-action]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        void runImageGenMjAction(btn);
-      });
-    });
-    if (mjParentJobId && !cachedMjButtons?.length) {
-      void window.PromptHubApi.getGenerationJob(mjParentJobId).then((r) => {
-        if (previewStale() || !r.ok || !Array.isArray(r.data?.mjButtons) || !r.data.mjButtons.length) return;
-        const host = body.querySelector('[data-mj-actions-host]');
-        if (!host) return;
-        host.outerHTML = buildMjActionsHtml(r.data.mjButtons, mjParentJobId);
-        if (previewCard) {
-          previewCard.mjButtons = r.data.mjButtons;
-        }
-        body.querySelectorAll('[data-mj-action]').forEach((btn) => {
-          btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            void runImageGenMjAction(btn);
-          });
-        });
-      });
-    }
-  }
-
-  function isImageGenFormWheelContext(e) {
-    const t = e.target;
-    if (t?.closest?.('.imagegen-form, .imagegen-form-scroll, #imageGenPromptBlock, #imageGenInspireFold')) return true;
-    const tag = t?.tagName;
-    if (tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'INPUT') return true;
-    const ae = document.activeElement;
-    if (ae?.closest?.('.imagegen-form, .imagegen-form-scroll')) return true;
-    return false;
-  }
-
-  function isScrollableAtWheel(el, deltaY) {
-    if (!el || el.nodeType !== 1) return false;
-    const oy = window.getComputedStyle(el).overflowY;
-    if (oy !== 'auto' && oy !== 'scroll' && oy !== 'overlay') return false;
-    if (el.scrollHeight <= el.clientHeight + 1) return false;
-    if (deltaY < 0 && el.scrollTop > 0) return true;
-    if (deltaY > 0 && el.scrollTop + el.clientHeight < el.scrollHeight - 1) return true;
-    return false;
-  }
-
-  /** 滚轮应留给表单/可滚动区，勿触发侧栏换图或抢滚动 */
-  function shouldBlockImageGenWheelNav(e) {
-    if (isImageGenFormWheelContext(e)) return true;
-    let node = e.target;
-    while (node && node !== document.body) {
-      if (isScrollableAtWheel(node, e.deltaY)) return true;
-      node = node.parentElement;
-    }
-    return false;
-  }
-
-  function bindImageGenPreviewWheelScroll() {
-    const formScroll = document.querySelector('.imagegen-form-scroll');
-    if (formScroll && formScroll.dataset.wheelBound !== '1') {
-      formScroll.dataset.wheelBound = '1';
-      formScroll.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
-    }
-
-    const side = document.querySelector('.imagegen-side');
-    if (!side || side.dataset.previewWheelBound === '1') return;
-    side.dataset.previewWheelBound = '1';
-    side.addEventListener('wheel', (e) => {
-      if (!side.classList.contains('imagegen-preview-open')) return;
-      if (shouldBlockImageGenWheelNav(e)) return;
-      if (!e.target.closest('#imageGenFeed')) return;
-      const feed = document.getElementById('imageGenFeed');
-      if (!feed) return;
-      const maxScroll = feed.scrollHeight - feed.clientHeight;
-      if (maxScroll <= 2) return;
-      const next = feed.scrollTop + e.deltaY;
-      if (next < 0 || next > maxScroll) return;
-      feed.scrollTop = next;
-      e.preventDefault();
-    }, { passive: false });
-  }
-
-  function openImageGenPreview(kind, id) {
-    imageGenPreviewKind = kind;
-    imageGenPreviewId = id;
-    document.getElementById('imageGenPreviewPanel')?.classList.remove('hidden');
-    document.querySelector('.imagegen-side')?.classList.add('imagegen-preview-open');
-    clearImageGenFeedSelection();
-    const feedKey = kind === 'warehouse' ? 'wh_' + id : id;
-    document.querySelector(`#imageGenFeed .imagegen-feed-card[data-feed-id="${feedKey}"]`)
-      ?.classList.add('active-preview');
-    primeImageGenPreviewShell(kind, id);
-    if (!isMobileViewport()) scheduleImageGenFeedLayout({ immediate: true });
-    void renderImageGenPreview();
-  }
-
-  function closeImageGenFilterSheet() {
-    const overlay = document.getElementById('imageGenFilterSheetOverlay');
-    if (!overlay) return;
-    overlay.classList.remove('open');
-    overlay.hidden = true;
-  }
-
-  function openImageGenFilterSheet(kind) {
-    if (!isMobileViewport()) return;
-    const opts = window.getImageGenWarehouseFilterOptions?.() || { groups: [], tags: [] };
-    const list = kind === 'group' ? opts.groups : opts.tags;
-    const current = kind === 'group' ? imageGenWhGroup : imageGenWhTag;
-    const titleEl = document.getElementById('imageGenFilterSheetTitle');
-    const listEl = document.getElementById('imageGenFilterSheetList');
-    const overlay = document.getElementById('imageGenFilterSheetOverlay');
-    if (!titleEl || !listEl || !overlay) return;
-    titleEl.textContent = kind === 'group' ? '选择分组' : '选择标签';
-    listEl.innerHTML = list.map((o) =>
-      `<button type="button" class="filter-sheet-row${o.value === current ? ' selected' : ''}" data-value="${esc(o.value)}">
-        <span class="filter-sheet-name">${esc(o.label)}</span>
-        <span class="filter-sheet-check" aria-hidden="true"></span>
-      </button>`
-    ).join('');
-    listEl.querySelectorAll('.filter-sheet-row').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const v = btn.getAttribute('data-value') || 'all';
-        if (kind === 'group') imageGenWhGroup = v;
-        else imageGenWhTag = v;
-        closeImageGenFilterSheet();
-        syncImageGenWarehouseFiltersUI();
-        renderImageGenFeed();
-      });
-    });
-    overlay.hidden = false;
-    overlay.style.removeProperty('display');
-    overlay.style.pointerEvents = '';
-    overlay.classList.add('open');
-  }
-
-  function bindImageGenWarehouseFilterMobileUI() {
-    document.getElementById('imageGenWhGroupBtn')?.addEventListener('click', () => openImageGenFilterSheet('group'));
-    document.getElementById('imageGenWhTagBtn')?.addEventListener('click', () => openImageGenFilterSheet('tag'));
-  }
-
-  function syncImageGenCommunityFiltersUI() {
-    const bar = document.getElementById('imageGenCommunityFilters');
-    if (!bar) return;
-    const show = imageGenFeedTab === 'community';
-    bar.classList.toggle('hidden', !show);
-    if (!show) return;
-    document.querySelectorAll('[data-imagegen-community-sort]').forEach(btn => {
-      btn.classList.toggle('active', (btn.dataset.imagegenCommunitySort || 'random') === communitySort);
-    });
-    document.querySelectorAll('[data-imagegen-community-scope]').forEach(btn => {
-      btn.classList.toggle('active', (btn.dataset.imagegenCommunityScope || 'all') === communityScope);
-    });
-  }
-
-  function syncImageGenWarehouseFiltersUI() {
-    const bar = document.getElementById('imageGenWarehouseFilters');
-    const commBar = document.getElementById('imageGenCommunityFilters');
-    if (commBar) commBar.classList.toggle('hidden', imageGenFeedTab !== 'community');
-    const groupEl = document.getElementById('imageGenWhGroup');
-    const tagEl = document.getElementById('imageGenWhTag');
-    if (!bar || !groupEl || !tagEl) return;
-    const show = imageGenFeedTab === 'warehouse';
-    bar.classList.toggle('hidden', !show);
-    if (!show) return;
-    const opts = window.getImageGenWarehouseFilterOptions?.() || { groups: [], tags: [] };
-    const mkOpts = (list, current) => list.map(o =>
-      `<option value="${esc(o.value)}"${o.value === current ? ' selected' : ''}>${esc(o.label)}</option>`
-    ).join('');
-    groupEl.innerHTML = mkOpts(opts.groups, imageGenWhGroup);
-    tagEl.innerHTML = mkOpts(opts.tags, imageGenWhTag);
-    if (!opts.groups.some(o => o.value === imageGenWhGroup)) imageGenWhGroup = 'all';
-    if (!opts.tags.some(o => o.value === imageGenWhTag)) imageGenWhTag = 'all';
-    groupEl.value = imageGenWhGroup;
-    tagEl.value = imageGenWhTag;
-    const gLabel = opts.groups.find((o) => o.value === imageGenWhGroup)?.label || '全部分组';
-    const tLabel = opts.tags.find((o) => o.value === imageGenWhTag)?.label || '全部标签';
-    const gLabelEl = document.getElementById('imageGenWhGroupLabel');
-    const tLabelEl = document.getElementById('imageGenWhTagLabel');
-    if (gLabelEl) gLabelEl.textContent = gLabel;
-    if (tLabelEl) tLabelEl.textContent = tLabel;
-  }
-
-
-  let imageGenPreviewWheelAt = 0;
-  const IMAGEGEN_PREVIEW_WHEEL_GAP_MS = 420;
-
-  function navigateImageGenPreviewByWheel(deltaY) {
-    if (!imageGenPreviewId || !imageGenPreviewKind) return false;
-    const now = performance.now();
-    if (now - imageGenPreviewWheelAt < IMAGEGEN_PREVIEW_WHEEL_GAP_MS) return false;
-    const items = getImageGenFeedNavItems();
-    if (items.length < 2) return false;
-    const currentKey = imageGenPreviewKind === 'warehouse'
-      ? 'wh_' + imageGenPreviewId
-      : imageGenPreviewId;
-    const idx = items.findIndex((it) => it.key === currentKey);
-    if (idx < 0) return false;
-    const nextIdx = idx + (deltaY > 0 ? 1 : -1);
-    if (nextIdx < 0 || nextIdx >= items.length) return false;
-    const item = items[nextIdx];
-    openImageGenPreview(item.kind, item.id);
-    imageGenPreviewWheelAt = now;
-    return true;
-  }
-
-  async function openImageGenLightboxAt(kind, id, key) {
-    const feedKey = key || (kind === 'warehouse' ? 'wh_' + id : id);
-    const card = document.querySelector(`.imagegen-feed-card[data-feed-id="${CSS.escape(feedKey)}"]`);
-    const imgEl = card?.querySelector('.imagegen-feed-thumb-btn img');
-    const assetId = kind === 'warehouse' ? warehouseCardIdFromFeedKey(feedKey) : feedKey;
-    let mjGalleryUrls = null;
-    if (kind === 'warehouse' && assetId) {
-      const full = (window.__promptHubCards || []).find((c) => c.id === assetId);
-      if (full?.isMidjourney && Array.isArray(full.mjGridUrls) && full.mjGridUrls.length > 1) {
-        mjGalleryUrls = full.mjGridUrls.filter(Boolean).slice(0, 4);
-      }
-      if (!mjGalleryUrls?.length && full?.genJobId && window.PromptHubApi?.getGenerationJob) {
-        try {
-          const poll = await window.PromptHubApi.getGenerationJob(normalizeMjParentJobId(full.genJobId));
-          if (poll?.ok) {
-            const parsed = resolveMjPollImages(poll);
-            if (parsed.tiles.length > 1) {
-              mjGalleryUrls = parsed.tiles;
-              await repairMjWarehouseCardFields(full, {
-                mjGridUrls: parsed.tiles,
-                mjCompositeUrl: parsed.composite,
-                mjButtons: poll.data.mjButtons
-              });
-            }
-          }
-        } catch (e) {
-          console.warn('[imagegen] mj lightbox grid fetch failed', e);
-        }
-      }
-    }
-    const startIdx = 0;
-    const lbOpts = {
-      imageGen: true,
-      feedKey,
-      community: kind === 'community',
-      postId: kind === 'community' ? id : null,
-      cardId: kind === 'warehouse' ? assetId : null,
-      preferFull: true,
-      mjGalleryUrls: mjGalleryUrls || undefined,
-      mjGalleryIndex: startIdx,
-      fallbackSrc: window.MediaPipeline?.gridUrlFromImgEl?.(imgEl) || ''
-    };
-    if (typeof window.openLightbox !== 'function') return;
-    if (mjGalleryUrls?.length) {
-      window.openLightbox(mjGalleryUrls[startIdx], lbOpts);
-      return;
-    }
-    const instant = fullUrlFromImgEl(imgEl);
-    if (instant) {
-      window.openLightbox(instant, lbOpts);
-      return;
-    }
-    window.openLightbox('', { ...lbOpts, pending: true });
-    const url = await resolveImageGenFullUrl(kind, id, feedKey, imgEl);
-    if (url && !String(url).startsWith('data:image/svg')) {
-      window.setLightboxSrc?.(url, lbOpts);
-      return;
-    }
-    window.closeLightbox?.();
-    toast('原图加载中，请稍后再试');
-  }
-
-
-  function formatExpiryLabel(c) {
-    if (c.permanent || c.visibility === 'published') return '永久保留';
-    if (!c.expiresAt) return '';
-    const left = c.expiresAt - Date.now();
-    if (left <= 0) return '已过期';
-    const h = Math.ceil(left / 3600000);
-    if (h < 24) return `约 ${h} 小时后清理`;
-    return `约 ${Math.ceil(h / 24)} 天后清理`;
-  }
-
-  function bindUI() {
-    document.getElementById('communitySearch')?.addEventListener('input', () => renderCommunity());
-    const communitySearch = document.getElementById('communitySearch');
-    if (communitySearch && !communitySearch.dataset.searchBound) {
-      communitySearch.dataset.searchBound = '1';
-      const commitCommunitySearch = () => {
-        renderCommunity({ skipFeedFetch: true, forceRepaint: true });
-        communitySearch.blur();
-      };
-      communitySearch.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' || e.isComposing) return;
-        e.preventDefault();
-        commitCommunitySearch();
-      });
-      communitySearch.addEventListener('search', (e) => {
-        e.preventDefault();
-        commitCommunitySearch();
-      });
-    }
-    document.querySelectorAll('[data-community-sort]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        applyCommunitySort(btn.dataset.communitySort);
-        renderCommunity({ skipFeedFetch: true, forceRepaint: true });
-        if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed();
-      });
-    });
-    document.querySelectorAll('[data-community-scope]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const nextScope = btn.dataset.communityScope || 'all';
-        if (nextScope === 'curated') {
-          communityScope = 'curated';
-          invalidateCommunityFeedRender();
-          document.querySelectorAll('[data-community-scope]').forEach(b => {
-            b.classList.toggle('active', b === btn);
-          });
-          document.querySelectorAll('[data-imagegen-community-scope]').forEach(b => {
-            b.classList.toggle('active', (b.dataset.imagegenCommunityScope || 'all') === communityScope);
-          });
-          closeCommunitySidePanel();
-          renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
-          toast('社区精选正在开发中，敬请期待');
-          return;
-        }
-        communityScope = nextScope;
-        invalidateCommunityFeedRender();
-        const grid = document.getElementById('communityGrid');
-        if (grid) delete grid.dataset.feedSig;
-        document.querySelectorAll('[data-community-scope]').forEach(b => {
-          b.classList.toggle('active', b === btn);
-        });
-        document.querySelectorAll('[data-imagegen-community-scope]').forEach(b => {
-          b.classList.toggle('active', (b.dataset.imagegenCommunityScope || 'all') === communityScope);
-        });
-        closeCommunitySidePanel();
-        if (communityScope === 'following' && follows.size === 0) {
-          toast('暂无关注作者，点击作品上的作者名可关注');
-        }
-        renderCommunity({ skipFeedFetch: true, forceRepaint: true });
-        if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed();
-      });
-    });
-    document.getElementById('communityNotifyBtn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleNotifyPanel();
-    });
-    document.getElementById('communityNotifyMarkRead')?.addEventListener('click', markAllNotificationsRead);
-    document.addEventListener('click', (e) => {
-      const panel = document.getElementById('communityNotifyPanel');
-      if (!panel || panel.classList.contains('hidden')) return;
-      if (e.target.closest('#communityNotifyPanel, #communityNotifyBtn')) return;
-      closeNotifyPanel();
-    });
-    document.getElementById('communitySideClose')?.addEventListener('click', closeCommunitySidePanel);
-    document.getElementById('creationsSideClose')?.addEventListener('click', closeCreationsSidePanel);
-    bindPublishToggle();
-    const onCardPromptInput = () => syncCardPublishFromPrompt(getCardFormPromptText());
-    document.getElementById('cardPrompt')?.addEventListener('input', onCardPromptInput);
-    document.getElementById('floatingPromptText')?.addEventListener('input', onCardPromptInput);
-    document.getElementById('imageGenPrompt')?.addEventListener('input', syncImageGenGenPublicFromPrompt);
-    document.getElementById('userProfileClose')?.addEventListener('click', closeUserProfile);
-    document.getElementById('userProfileBack')?.addEventListener('click', closeUserProfile);
-    document.getElementById('userProfileOverlay')?.addEventListener('click', e => {
-      if (e.target.id === 'userProfileOverlay') closeUserProfile();
-    });
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && document.getElementById('userProfileOverlay')?.classList.contains('active')) {
-        closeUserProfile();
-      }
-    });
-    document.getElementById('imageGenSubmit')?.addEventListener('click', () => {
-      void runImageGenDemo().catch((e) => {
-        console.error('[imagegen] submit click failed', e);
-        const msg = String(e?.message || '');
-        const hint = /store is not defined/i.test(msg)
-          ? '页面脚本版本不一致，请强刷（Ctrl+Shift+R）'
-          : '生图提交异常，请刷新页面后重试';
-        toast(hint);
-        resetImageGenSubmitState();
-      });
-    });
-    document.getElementById('imageGenResolution')?.addEventListener('change', () => {
-      syncImageGenModelToResolution();
-      updateImageGenResolutionSelect();
-      updateImageGenPricingUI();
-    });
-    document.querySelectorAll('[data-feed-tab]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        imageGenFeedTab = btn.dataset.feedTab;
-        document.querySelectorAll('[data-feed-tab]').forEach(b => b.classList.toggle('active', b === btn));
-        closeImageGenPreview();
-        updateImageGenFeedHint();
-        renderImageGenFeed({ scrollToTop: true });
-      });
-    });
-    document.querySelectorAll('[data-imagegen-community-sort]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        applyCommunitySort(btn.dataset.imagegenCommunitySort);
-        document.querySelectorAll('[data-imagegen-community-sort]').forEach(b => b.classList.toggle('active', b === btn));
-        renderImageGenFeed();
-        if (document.getElementById('pageCommunity')?.classList.contains('active')) {
-          renderCommunity({ skipFeedFetch: true, forceRepaint: true });
-        }
-      });
-    });
-    document.querySelectorAll('[data-imagegen-community-scope]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const nextScope = btn.dataset.imagegenCommunityScope || 'all';
-        if (nextScope === 'curated') {
-          communityScope = 'curated';
-          invalidateCommunityFeedRender();
-          document.querySelectorAll('[data-imagegen-community-scope]').forEach(b => b.classList.toggle('active', b === btn));
-          document.querySelectorAll('[data-community-scope]').forEach(b => {
-            b.classList.toggle('active', (b.dataset.communityScope || 'all') === communityScope);
-          });
-          renderImageGenFeed();
-          if (document.getElementById('pageCommunity')?.classList.contains('active')) {
-            renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
-          }
-          toast('社区精选正在开发中，敬请期待');
-          return;
-        }
-        communityScope = nextScope;
-        invalidateCommunityFeedRender();
-        document.querySelectorAll('[data-imagegen-community-scope]').forEach(b => b.classList.toggle('active', b === btn));
-        document.querySelectorAll('[data-community-scope]').forEach(b => {
-          b.classList.toggle('active', (b.dataset.communityScope || 'all') === communityScope);
-        });
-        renderImageGenFeed();
-        if (document.getElementById('pageCommunity')?.classList.contains('active')) {
-          renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
-        }
-      });
-    });
-    document.getElementById('imageGenPreviewClose')?.addEventListener('click', closeImageGenPreview);
-    bindImageGenPreviewActions();
-    bindImageGenPreviewWheelScroll();
-    bindImageGenFeedPagedScroll();
-    bindImageGenFeedResizeRelayout?.();
-    document.getElementById('appreciateViewerFavBtn')?.addEventListener('click', () => {
-      if (!appreciateViewerPostId) return;
-      const post = findPost(appreciateViewerPostId);
-      if (!post) return;
-      favoritePost(appreciateViewerPostId, post);
-      window.markQuickPreviewTask?.({ communityFavorited: true });
-      const btn = document.getElementById('appreciateViewerFavBtn');
-      if (btn && favIds.has(appreciateViewerPostId)) {
-        const label = btn.querySelector('span');
-        if (label) label.textContent = '已收藏';
-        else btn.textContent = '已收藏';
-        btn.disabled = true;
-      }
-    });
-    document.getElementById('lightboxCollectBtn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      const postId = window.__lightboxCommunityPostId;
-      if (!postId) return;
-      const post = findPost(postId);
-      if (!post) return;
-      favoritePost(postId, post);
-      window.markQuickPreviewTask?.({ communityFavorited: true });
-      window.syncLightboxActions?.({ community: true, postId });
-    });
-    document.getElementById('imageGenWhGroup')?.addEventListener('change', e => {
-      imageGenWhGroup = e.target.value || 'all';
-      renderImageGenFeed();
-    });
-    document.getElementById('imageGenWhTag')?.addEventListener('change', e => {
-      imageGenWhTag = e.target.value || 'all';
-      renderImageGenFeed();
-    });
-    bindImageGenWarehouseFilterMobileUI();
-    bindImageGenUpload();
-    bindImageGenPromptTools();
-    document.getElementById('imageGenRecoverBtn')?.remove();
-    document.getElementById('imageGenCount')?.addEventListener('change', updateImageGenCostHint);
-    document.getElementById('imageGenModel')?.addEventListener('change', () => {
-      syncImageGenModelParamsUI();
-      syncImageGenModelHint();
-      updateImageGenResolutionSelect();
-      updateImageGenSizeSelect();
-      updateImageGenPricingUI();
-    });
-    document.querySelectorAll('[data-mj-mode]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const mode = btn.dataset.mjMode;
-        if (!mode) return;
-        setImageGenMjMode(mode);
-      });
-    });
-    document.getElementById('imageGenMjSaveAllTiles')?.addEventListener('change', persistImageGenMjPrefs);
-    document.querySelectorAll('input[name="imageGenMjSpeed"]').forEach((input) => {
-      input.addEventListener('change', persistImageGenMjPrefs);
-    });
-    document.getElementById('imageGenResolution')?.addEventListener('input', updateImageGenCostHint);
-    document.getElementById('imageGenQuality')?.addEventListener('change', updateImageGenCostHint);
-    document.getElementById('imageGenSize')?.addEventListener('change', updateImageGenCostHint);
-    bindImageGenMjRange('imageGenMjStylize', 'imageGenMjStylizeVal');
-    bindImageGenMjRange('imageGenMjChaos', 'imageGenMjChaosVal');
-    bindImageGenMjRange('imageGenMjWeird', 'imageGenMjWeirdVal');
-    bindImageGenMjRange('imageGenMjIw', 'imageGenMjIwVal');
-    window.addEventListener('resize', () => {
-      ensureFeatureSidePanelDocked('communitySidePanel');
-      if (!document.getElementById('creationsSidePanel')?.classList.contains('hidden')) {
-        syncCreationsSidePanelMount();
-      } else {
-        unmountFeatureSidePanel('creationsSidePanel');
-        ensureFeatureSidePanelDocked('creationsSidePanel');
-      }
-      syncCommunityPanelOpenClass();
-      if (document.getElementById('pageCommunity')?.classList.contains('active')) {
-        scheduleCommunityLayout('communityGrid');
-      }
-      if (document.getElementById('pageCreations')?.classList.contains('active')) {
-        scheduleCommunityLayout('creationsGrid');
-      }
-      if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-        scheduleImageGenFeedLayout();
-      }
-      if (document.getElementById('userProfileOverlay')?.classList.contains('active')) {
-        scheduleCommunityLayout('userProfileGrid');
-      }
-    });
-    document.addEventListener('keydown', e => {
-      if (e.key !== 'Escape') return;
-      if (document.getElementById('userProfileOverlay')?.classList.contains('active')) closeUserProfile();
-      else if (imageGenPreviewId) closeImageGenPreview();
-      else if (communitySidePostId && document.getElementById('pageCreations')?.classList.contains('active')) closeCreationsSidePanel();
-      else if (!document.getElementById('communitySidePanel')?.classList.contains('hidden')) closeCommunitySidePanel();
-    });
-  }
-
-  let communityOnActivateTimer = null;
-  let communityOnActivateSeq = 0;
-
-  function cancelCommunityPageWork() {
-    communityFeedRenderGen += 1;
-    clearTimeout(renderCommunityTimer);
-    clearTimeout(communityOnActivateTimer);
-    communityOnActivateSeq += 1;
-  }
-
-  function deferCommunityIdle(fn, timeoutMs = 2500) {
-    if (typeof requestIdleCallback === 'function') {
-      requestIdleCallback(fn, { timeout: timeoutMs });
-    } else {
-      setTimeout(fn, 400);
-    }
-  }
-
-  function activateCommunityPage() {
-    const seq = ++communityOnActivateSeq;
-    clearTimeout(communityOnActivateTimer);
-    communityOnActivateTimer = setTimeout(() => {
-      if (seq !== communityOnActivateSeq) return;
-      if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (seq !== communityOnActivateSeq) return;
-          if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
-          const grid = document.getElementById('communityGrid');
-          window.FeedLayout?.repairCommunityMasonry?.('communityGrid');
-          hydratePublicFeedFromCache();
-          const hasRealCards = grid?.querySelector('.community-post-card:not(.community-feed-skeleton)');
-          const feedFresh = !publicFeedNeedsFullRefresh() && publicFeedState.posts.length > 0;
-          if (hasRealCards && grid?.dataset.feedSig && feedFresh) {
-            patchFeedLikeLabels(grid, filterAndSortPosts(getCommunityFeedForDisplay()));
-            scheduleCommunityLayout('communityGrid', { force: true, immediate: true, recalcCols: true });
-          } else {
-            renderCommunity({
-              immediate: true,
-              skipFeedFetch: feedFresh,
-              syncFromCards: false
-            });
-          }
-          if (isMobileViewport()) {
-            requestAnimationFrame(() => {
-              if (seq !== communityOnActivateSeq) return;
-              bindFeedPagedScroll('communityGrid');
-              reconnectFeedPageObserver('communityGrid');
-            });
-          }
-          deferCommunityIdle(() => {
-            if (seq !== communityOnActivateSeq) return;
-            if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
-            ensureCommunityFromCardsThrottled(false);
-            if (publicFeedNeedsFullRefresh() && !publicFeedState.loading) {
-              if (grid && !hasRealCards) showCommunityFeedSkeleton(grid, 8);
-              void refreshPublicCommunityFeed({ force: true, timeoutMs: 20000 }).then(async () => {
-                if (seq !== communityOnActivateSeq) return;
-                if (shouldPreserveCommunityFeedDom('communityGrid') && grid?.querySelector('.community-post-card:not(.community-feed-skeleton)')) {
-                  await growCommunityFeedAfterPublicRefresh('communityGrid');
-                  return;
-                }
-                renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
-                await growCommunityFeedAfterPublicRefresh('communityGrid');
-              });
-            } else if (!publicFeedState.loading) {
-              void refreshPublicCommunityFeed({ force: false }).then(async (changed) => {
-                if (seq !== communityOnActivateSeq) return;
-                if (!changed) return;
-                patchFeedLikeLabels(grid, filterAndSortPosts(getCommunityFeedForDisplay()));
-                await growCommunityFeedAfterPublicRefresh('communityGrid');
-              });
-            }
-            const warmPosts = filterAndSortPosts(getCommunityFeedForDisplay()).slice(0, 12);
-            const warmCards = warmPosts.map((p) => ({
-              id: p.sourceCardId || p.id,
-              image: canonicalCommunityImageRef(p) || p.image,
-              sourceCardId: p.sourceCardId,
-              authorId: p.authorId
-            })).filter((c) => c.image);
-            if (warmCards.length && window.SupabaseSync?.prefetchCommunityDisplayUrls) {
-              void window.SupabaseSync.prefetchCommunityDisplayUrls(warmCards, 3000);
-            } else if (warmCards.length && window.SupabaseSync?.prefetchCardsImages) {
-              void window.SupabaseSync.prefetchCardsImages(warmCards, 3000);
-            }
-            window.CommunityGacha?.init?.();
-            window.CommunityGacha?.refreshEntryButton?.();
-          });
-        });
-      });
-    }, 50);
-  }
-
-  function feedHasRenderedContent(containerId, itemSelector) {
-    const el = document.getElementById(containerId);
-    if (!el) return false;
-    return !!(el.querySelector(itemSelector) || el.querySelector('.feature-empty'));
-  }
-
-  function onAppChange(app) {
-    const fab = document.getElementById('fabNewBtn');
-    if (fab) fab.classList.toggle('hidden-by-app', app !== 'warehouse');
-    window.FeatureAssets?.onAppChange?.(app);
-    if (app !== 'community') {
-      cancelCommunityPageWork();
-      if (communityAppreciateActive) {
-        window.closeAppreciateViewer?.();
-        exitCommunityAppreciate(true);
-      }
-    }
-    if (app === 'community') {
-      window.closeAppreciateViewer?.();
-      if (communityAppreciateActive) exitCommunityAppreciate(true);
-      document.body.classList.remove('global-view', 'appreciate-viewing');
-      if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
-      activateCommunityPage();
-    }
-    if (app === 'creations') {
-      if (!document.getElementById('pageCreations')?.classList.contains('active')) return;
-      requestAnimationFrame(() => {
-        repairCreationsFeedLayout(true);
-        syncCommunityFeedColumnCount('creationsGrid');
-      });
-      renderMyHomeProfile();
-      const activeTab = document.querySelector('#myHomeTabs .my-home-tab.active')?.dataset?.homeTab || 'posts';
-      if (activeTab === 'owned-packages') {
-        window.FeatureAssets?.renderMyHomePackages?.(document.getElementById('myHomeOwnedPackages'), 'owned');
-      } else if (activeTab === 'published-packages') {
-        window.FeatureAssets?.renderMyHomePackages?.(document.getElementById('myHomePublishedPackages'), 'published');
-      } else {
-        void renderCreations();
-      }
-    }
-    if (app !== 'community') closeCommunitySidePanel();
-    if (app !== 'creations') closeCreationsSidePanel();
-    if (app !== 'imagegen') {
-      closeImageGenPreview();
-      if (imageGenPendingJobs.length > 0 || activePollJobIds.size > 0) {
-        scheduleGenJobsSync(400);
-      }
-    }
-    if (app === 'imagegen') {
-      void prefetchImageGenModelCatalog();
-      if (!document.getElementById('pageImageGen')?.classList.contains('active')) return;
-      imageGenGenPublicSession = null;
-      syncImageGenGenPublicUI();
-      window.MobileUI?.initImageGenMobileView?.();
-      pruneCreations();
-      initImageGenForm();
-      updateImageGenFeedHint();
-      setTimeout(() => void resumePendingGenerationJobs({ force: true }), 400);
-      scheduleGenJobsSync(1500);
-      renderImageGenFeed({ preserveScroll: true, force: true });
-      renderImageGenMobileResult();
-      void window.PointsSystem?.refreshCreditsFromServer?.();
-      window.PointsSystem?.updateCreditsUI?.();
-    }
-  }
-
-  function bindCommunityFeedMediaScrub() {
-    if (bindCommunityFeedMediaScrub._done) return;
-    bindCommunityFeedMediaScrub._done = true;
-    const orig = window.finishCardMediaShine;
-    if (typeof orig !== 'function') return;
-    window.finishCardMediaShine = function patchedFinishCardMediaShine(media) {
-      orig.call(this, media);
-      const feedGrid = media?.closest?.('#communityGrid, #creationsGrid');
-      if (feedGrid && !useCommunityCssGrid(feedGrid.id)) {
-        scheduleFeedMasonryRelayout(feedGrid.id);
-      }
-    };
-  }
-
-  function init() {
-    loadStores();
-    warmImageGenModelCatalog();
-    hydratePublicFeedFromCache();
-    bindUI();
-    bindPublishToggle();
-    initMyHomeTabs();
-    bindCommunityFeedMediaScrub();
-    bindCommunityGridImageRelayout();
-    bindCommunityFeedResizeRelayout('communityGrid');
-    bindCommunityFeedResizeRelayout('creationsGrid');
-    startGenJobsBackgroundSync();
-    onAppChange(localStorage.getItem('promptrepo_app_page') || 'community');
-  }
-
-  function refreshImageGenCost() {
-    updateImageGenCostHint();
-  }
+  function applyGenPollProgressNote(pendingId, pollData) { return jr('applyGenPollProgressNote', pendingId, pollData); }
+  async function pollGenerationJobUntilDone(jobId, pendingId, ctx) { return jr('pollGenerationJobUntilDone', jobId, pendingId, ctx); }
 
   function getCloudSlice() {
     return {
@@ -12507,8 +9696,285 @@
     });
   }
 
+  let _jobRunner;
+  let _pollWarehouse;
+  let _imageGenSubmit;
+  let _refResolve;
+  let _finishRun;
+  let _refCompress;
+  let _warehouseSave;
+  let _warehouseRepair;
+
+  function pw(name, ...args) {
+    const fn = _pollWarehouse?.[name];
+    return typeof fn === 'function' ? fn(...args) : undefined;
+  }
+
+  function ig(name, ...args) {
+    const fn = _imageGenSubmit?.[name];
+    return typeof fn === 'function' ? fn(...args) : undefined;
+  }
+
+  function rr(name, ...args) {
+    const fn = _refResolve?.[name];
+    return typeof fn === 'function' ? fn(...args) : undefined;
+  }
+
+  function fr(name, ...args) {
+    const fn = _finishRun?.[name];
+    return typeof fn === 'function' ? fn(...args) : undefined;
+  }
+
+  function ge(name, ...args) {
+    const fn = window.ImageGenGenErrors?.[name];
+    return typeof fn === 'function' ? fn(...args) : undefined;
+  }
+
+  function wr(name, ...args) {
+    const fn = _warehouseRepair?.[name];
+    return typeof fn === 'function' ? fn(...args) : undefined;
+  }
+
+  function rc(name, ...args) {
+    const fn = _refCompress?.[name];
+    return typeof fn === 'function' ? fn(...args) : undefined;
+  }
+
+  function ws(name, ...args) {
+    const fn = _warehouseSave?.[name];
+    return typeof fn === 'function' ? fn(...args) : undefined;
+  }
+
+  function switchImageGenFeedToWarehouse() {
+    imageGenFeedTab = 'warehouse';
+    document.querySelectorAll('[data-feed-tab]').forEach((b) => {
+      b.classList.toggle('active', b.dataset.feedTab === 'warehouse');
+    });
+  }
+
+  function wireImageGenWarehouseRepair() {
+    if (window.__imageGenWarehouseRepairWired) return;
+    if (!window.ImageGenWarehouseRepair?.init) {
+      console.error('[FeatureDraft] pack-imagegen.js not loaded — ImageGenWarehouseRepair missing');
+      return;
+    }
+    _warehouseRepair = window.ImageGenWarehouseRepair.init({
+      isGenerationJobDeleted,
+      isDisplayableImage,
+      isUsableWarehouseImage,
+      getCreations: () => creations,
+      persistCreations,
+      getCards: () => window.__promptHubCards || [],
+      persistPromptHubCards: async () => {
+        if (typeof window.persistPromptHubCards === 'function') await window.persistPromptHubCards();
+      },
+      renderImageGenFeed: (...a) => renderImageGenFeed(...a),
+      queueUrgentCardsSync,
+      refreshWarehouseUI: () => window.refreshWarehouseUI?.({ softCards: true }),
+      isPageImageGenActive: () => document.getElementById('pageImageGen')?.classList.contains('active')
+    });
+    window.__imageGenWarehouseRepairWired = true;
+  }
+
+  function wireImageGenRefCompress() {
+    if (window.__imageGenRefCompressWired) return;
+    if (!window.ImageGenRefCompress?.init) {
+      console.error('[FeatureDraft] pack-imagegen.js not loaded — ImageGenRefCompress missing');
+      return;
+    }
+    _refCompress = window.ImageGenRefCompress.init({
+      getRefMaxSide: () => REF_MAX_SIDE,
+      getRefTargetMaxBytes: () => REF_TARGET_MAX_BYTES
+    });
+    window.__imageGenRefCompressWired = true;
+  }
+
+  function wireImageGenWarehouseSave() {
+    if (window.__imageGenWarehouseSaveWired) return;
+    if (!window.ImageGenWarehouseSave?.init) {
+      console.error('[FeatureDraft] pack-imagegen.js not loaded — ImageGenWarehouseSave missing');
+      return;
+    }
+    _warehouseSave = window.ImageGenWarehouseSave.init({ toast });
+    window.__imageGenWarehouseSaveWired = true;
+  }
+
+  function wireImageGenRefResolve() {
+    if (window.__imageGenRefResolveWired) return;
+    if (!window.ImageGenRefResolve?.init) {
+      console.error('[FeatureDraft] pack-imagegen.js not loaded — ImageGenRefResolve missing');
+      return;
+    }
+    _refResolve = window.ImageGenRefResolve.init({
+      genId,
+      compressRefImageFromSource: (...a) => rc('compressRefImageFromSource', ...a),
+      getRefMaxSide: () => REF_MAX_SIDE,
+      getRefResolveTimeoutMs: () => REF_URL_RESOLVE_TIMEOUT_MS
+    });
+    window.__imageGenRefResolveWired = true;
+  }
+
+  function wireImageGenFinishRun() {
+    if (window.__imageGenFinishRunWired) return;
+    if (!window.ImageGenFinishRun?.init) {
+      console.error('[FeatureDraft] pack-imagegen.js not loaded — ImageGenFinishRun missing');
+      return;
+    }
+    _finishRun = window.ImageGenFinishRun.init({
+      toast,
+      genId,
+      isGenerationJobDeleted,
+      findWarehouseCardForJob: (...a) => jr('findWarehouseCardForJob', ...a),
+      hasWarehouseCardForJob: (...a) => jr('hasWarehouseCardForJob', ...a),
+      repairMjWarehouseCardFields: (...a) => wr('repairMjWarehouseCardFields', ...a),
+      warehouseCardImageNeedsRecovery: (...a) => wr('warehouseCardImageNeedsRecovery', ...a),
+      repairWarehouseCardImageFromJob: (...a) => wr('repairWarehouseCardImageFromJob', ...a),
+      clearSessionGenJob: (...a) => jr('clearSessionGenJob', ...a),
+      removePendingJob: (...a) => jr('removePendingJob', ...a),
+      prunePendingJobsWithWarehouseCards: (...a) => jr('prunePendingJobsWithWarehouseCards', ...a),
+      getCreations: () => creations,
+      setCreations: (v) => { creations = v; },
+      persistCreations,
+      getImageGenRefImages: () => imageGenRefImages,
+      getImageGenPrimaryRef,
+      isImageGenMjSaveAllTiles,
+      randomGenRetentionMs,
+      dedupeCreationsByJobId,
+      setImageGenLastResult: (v) => { imageGenLastResult = v; },
+      setImageGenActiveHistoryId: (v) => { imageGenActiveHistoryId = v; },
+      switchImageGenFeedToWarehouse,
+      updateImageGenFeedHint,
+      restoreImageGenSubmitLabel,
+      isImageGenGenPublicChecked,
+      saveGeneratedToWarehouse: (opts) => ws('saveGeneratedToWarehouse', opts),
+      renderImageGenFeed: (...a) => renderImageGenFeed(...a),
+      renderImageGenMobileResult,
+      queueUrgentCardsSync,
+      isCommunityPublishEligible
+    });
+    window.__imageGenFinishRunWired = true;
+  }
+
+  function wireImageGenPollWarehouse() {
+    if (window.__imageGenPollWarehouseWired) return;
+    if (!window.ImageGenPollWarehouse?.init) {
+      console.error('[FeatureDraft] pack-imagegen.js not loaded — ImageGenPollWarehouse missing');
+      return;
+    }
+    _pollWarehouse = window.ImageGenPollWarehouse.init({
+      isImageGenMidjourneyModel,
+      isImageGenMjSaveAllTiles,
+      resolveMjPollImages,
+      repairMjWarehouseCardFields,
+      finishImageGenRun: (opts) => fr('finishImageGenRun', opts),
+      removePendingJob: (...a) => jr('removePendingJob', ...a),
+      clearSessionGenJob: (...a) => jr('clearSessionGenJob', ...a),
+      renderImageGenFeed: (...a) => renderImageGenFeed(...a),
+      repairWarehouseCardImageFromJob,
+      warehouseCardImageNeedsRecovery,
+      toast,
+      isDisplayableImage: (url) => window.MediaPipeline?.isDisplayableImage?.(url) ?? !!url
+    });
+    window.__imageGenPollWarehouseWired = true;
+  }
+
+  function wireImageGenSubmit() {
+    if (window.__imageGenSubmitWired) return;
+    if (!window.ImageGenSubmit?.init) {
+      console.error('[FeatureDraft] pack-imagegen.js not loaded — ImageGenSubmit missing');
+      return;
+    }
+    _imageGenSubmit = window.ImageGenSubmit.init({
+      getImageGenFormMeta,
+      isImageGenMidjourneyModel,
+      getImageGenMjMode,
+      getImageGenRefImages: () => imageGenRefImages,
+      getImageGenPrimaryRef,
+      getImageGenBatchCount,
+      getImageGenModelCatalogReady: () => imageGenModelCatalogReady,
+      getImageGenBatchRunning: () => imageGenBatchRunning,
+      genId,
+      toast,
+      restoreImageGenSubmitLabel,
+      saveImageGenDraft,
+      getImageGenSaveTarget,
+      unshiftPendingJob: (job) => { imageGenPendingJobs.unshift(job); },
+      persistPendingGenJobs: () => jr('persistPendingGenJobs'),
+      switchImageGenFeedToWarehouse,
+      updateImageGenFeedHint,
+      renderImageGenFeed: (...a) => renderImageGenFeed(...a),
+      safeRenderImageGenFeed,
+      isMobileViewport,
+      quoteGenerationCost,
+      getGenCostQuoteTimeoutMs: () => GEN_COST_QUOTE_TIMEOUT_MS,
+      resolveRefUrlsFromList: (sources) => rr('resolveRefUrlsFromList', sources),
+      removePendingJob: (...a) => jr('removePendingJob', ...a),
+      failPendingJob: (...a) => jr('failPendingJob', ...a),
+      tryRecoverOrphanGenJobAfterSubmitError: (...a) => jr('tryRecoverOrphanGenJobAfterSubmitError', ...a),
+      deferPendingJobRecovery: (...a) => jr('deferPendingJobRecovery', ...a),
+      pendingJobToPollCtx: (...a) => jr('pendingJobToPollCtx', ...a) || {},
+      trackSessionGenJob: (...a) => jr('trackSessionGenJob', ...a),
+      resolveMjPollImages,
+      saveMjToWarehouse: (opts) => pw('saveMjToWarehouse', opts),
+      finishImageGenRun: (opts) => fr('finishImageGenRun', opts),
+      pollGenerationJobUntilDone: (...a) => jr('pollGenerationJobUntilDone', ...a)
+    });
+    window.__imageGenSubmitWired = true;
+  }
+
+  function wireImageGenJobRunner() {
+    if (window.__imageGenJobRunnerWired) return;
+    if (!window.ImageGenJobRunner?.init) {
+      console.error('[FeatureDraft] pack-imagegen.js not loaded — ImageGenJobRunner missing');
+      return;
+    }
+    _jobRunner = window.ImageGenJobRunner.init({
+      getPendingJobs: () => imageGenPendingJobs,
+      setPendingJobs: (v) => { imageGenPendingJobs = v; },
+      getFailedJobs: () => imageGenFailedJobs,
+      setFailedJobs: (v) => { imageGenFailedJobs = v; },
+      genId,
+      toast,
+      batchIndexLabel,
+      normalizeImageGenModelId,
+      imageGenModelLabel,
+      renderImageGenFeed: (...a) => renderImageGenFeed(...a),
+      renderImageGenMobileResult,
+      resumePendingGenerationJobs: (...a) => jr('resumePendingGenerationJobs', ...a),
+      ensureGenJobCreationsFromPoll: (...a) => pw('ensureGenJobCreationsFromPoll', ...a),
+      allGenCreationSlotsSaved: (...a) => pw('allGenCreationSlotsSaved', ...a),
+      findBestApiJobForPrompt: (...a) => jr('findBestApiJobForPrompt', ...a),
+      isGenerationJobDeleted,
+      isDisplayableImage,
+      isMobileViewport,
+      prunePendingJobsWithWarehouseCards: (...a) => jr('prunePendingJobsWithWarehouseCards', ...a),
+      tryRecoverPendingJobDirect: (...a) => jr('tryRecoverPendingJobDirect', ...a),
+      needsApiImageRecovery: (...a) => jr('needsApiImageRecovery', ...a),
+      pendingPromptsMatch: (...a) => jr('pendingPromptsMatch', ...a),
+      syncMissingBonusImagesForJob,
+      repairWarehouseCardImageFromJob: (...a) => wr('repairWarehouseCardImageFromJob', ...a),
+      finishImageGenRun: (opts) => fr('finishImageGenRun', opts)
+    });
+    window.__imageGenJobRunnerWired = true;
+  }
+
+  function jr(name, ...args) {
+    const fn = _jobRunner?.[name];
+    return typeof fn === 'function' ? fn(...args) : undefined;
+  }
+
+  function getActivePollJobIds() { return jr('getActivePollJobIds') || new Set(); }
+
   function wireAllFeedModules() {
     wireCommunityPublicFeed();
+    wireImageGenJobRunner();
+    wireImageGenWarehouseRepair();
+    wireImageGenRefCompress();
+    wireImageGenWarehouseSave();
+    wireImageGenRefResolve();
+    wireImageGenFinishRun();
+    wireImageGenPollWarehouse();
+    wireImageGenSubmit();
     wireFeedImages();
     wireImageGenFeed();
     wireFeedLayout();
