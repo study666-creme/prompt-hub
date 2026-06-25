@@ -90,6 +90,9 @@
         if (typeof card.image === 'string' && card.image.startsWith('data:image/')) {
           card.image = null;
         }
+        if (card.customFields && typeof card.customFields === 'object' && !Object.keys(card.customFields).length) {
+          delete card.customFields;
+        }
         return card;
       });
     }
@@ -109,6 +112,12 @@
         const { image, ...rest } = c;
         return rest;
       });
+    }
+    if (Array.isArray(out.notifications) && out.notifications.length > 40) {
+      out.notifications = out.notifications.slice(-40);
+    }
+    if (Array.isArray(out.communityEvents) && out.communityEvents.length > 30) {
+      out.communityEvents = out.communityEvents.slice(-30);
     }
     return out;
   }

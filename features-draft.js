@@ -21,7 +21,7 @@
   /** 与 server syncBodySchema.posts.max(80) 一致 */
   const COMMUNITY_SYNC_BATCH_MAX = 80;
   /** 首屏 DOM 卡片数（列数×行数） */
-  const IMAGEGEN_FEED_PER_PAGE = 24;
+  const IMAGEGEN_FEED_PER_PAGE = 12;
   const IMAGEGEN_FEED_PENDING_CAP = 6;
   const IMAGEGEN_FEED_FAILED_CAP = 4;
 

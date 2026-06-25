@@ -28,13 +28,13 @@
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260625a` · https://prompt-hubs.com |
+| **Pages** | build `20260625b` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
 ### 已打通
 
-- ✅ **P0 带宽 + 云同步**：grid 缩略图 · `user_data` 增量（`updated_at` 49B vs 全量 13MB · `20260625a`）
+- ✅ **P0 带宽 + 云同步**：grid 缩略图 · `user_data` 增量 · 轻量后台 sync · `20260625b`
 - ✅ **基线 pg_dump**：`backups/prompt-hub-baseline-20260624.dump`（**24.5 MB** · Pooler Session）
 - ✅ 新图走 **R2**（`MEDIA_STORAGE_MODE=r2`）
 
@@ -47,9 +47,9 @@
 
 ### 下一步
 
-1. 强刷后验收：Network 无重复 14MB `user_data`；仅 `select=updated_at` 或首次 1 次全量
+1. 强刷验收：Network 无重复 14MB `user_data`；生图仓库首屏 < 5MB
 2. MemFire 迁移（7 月初 final dump）
-3. 阶段 5：媒体下载抽包
+3. 阶段 5：`media-download.js` 已进 `pack-lightbox`；后续可抽 `downloadCardImageFile`
 
 ### 部署
 

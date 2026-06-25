@@ -7,7 +7,7 @@ import { concatMinifyBundle, bundleRootFromMeta } from './lib/concat-minify-bund
 const root = bundleRootFromMeta(import.meta.url);
 concatMinifyBundle({
   root,
-  sources: ['app-lightbox.js'],
+  sources: ['media-download.js', 'app-lightbox.js'],
   outFile: join(root, 'pack-lightbox.js'),
   metaFile: join(root, 'dist', 'pack-lightbox.meta.json'),
   label: 'build-lightbox-pack'

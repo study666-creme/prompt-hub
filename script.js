@@ -397,59 +397,12 @@
     window.scheduleLayoutMasonry = scheduleLayoutMasonry;
 
     async function promptHubSaveImage(url, filename, imgEl) {
-      const name = filename || `prompt-hub-${Date.now()}.png`;
-      const saveBlob = (blob) => {
-        const objUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = objUrl;
-        a.download = name;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
-      };
-      if (!url || String(url).includes('data:image/svg')) {
-        throw new Error('no_url');
+      if (window.MediaDownload?.saveImageUrl) {
+        return window.MediaDownload.saveImageUrl(url, filename, imgEl);
       }
-      if (String(url).startsWith('blob:')) {
-        saveBlob(await (await fetch(url)).blob());
-        return;
-      }
-      try {
-        const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
-        if (!res.ok) throw new Error(String(res.status));
-        saveBlob(await res.blob());
-        return;
-      } catch (e) { /* try canvas / proxy */ }
-      const img = imgEl || document.getElementById('lightboxImage');
-      if (img?.complete && img.naturalWidth > 0 && !String(img.src).includes('data:image/svg')) {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-          canvas.getContext('2d')?.drawImage(img, 0, 0);
-          const blob = await new Promise((resolve, reject) => {
-            canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob'))), 'image/png', 0.92);
-          });
-          saveBlob(blob);
-          return;
-        } catch (e) { /* fall through */ }
-      }
-      if (window.PromptHubApi?.fetchMediaAsBlobUrl && /^https?:\/\//i.test(url)) {
-        const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(url);
-        if (blobUrl) {
-          try {
-            saveBlob(await (await fetch(blobUrl)).blob());
-            URL.revokeObjectURL(blobUrl);
-            return;
-          } catch (e) {
-            URL.revokeObjectURL(blobUrl);
-          }
-        }
-      }
-      throw new Error('download_fetch_failed');
+      throw new Error('MediaDownload unavailable');
     }
-    window.promptHubSaveImage = promptHubSaveImage;
+    if (!window.promptHubSaveImage) window.promptHubSaveImage = promptHubSaveImage;
 
     function showAchievementToast(msg, durationMs) {
       const toast = document.getElementById('toast');
@@ -5110,8 +5063,6 @@
     async function pullFromCloud(opts = {}) {
       if (!window.SupabaseSync?.isLoggedIn?.()) return false;
       if (cloudSyncing) await waitForCloudSyncIdle(120000);
-      const localPayload = getDataPayload();
-      await writeEmergencyBackup('pre_pull');
       const cloud = await window.SupabaseSync.pullCloudData({
         force: opts?.force === true,
         ifStale: opts?.force !== true
@@ -5120,6 +5071,8 @@
         return 'skipped';
       }
       if (cloud == null || typeof cloud !== 'object') return false;
+      const localPayload = getDataPayload();
+      await writeEmergencyBackup('pre_pull');
 
       const cloudBytes = (() => {
         try { return JSON.stringify(cloud).length; } catch (e) { return 0; }
@@ -5218,6 +5171,19 @@
       const light = opts.light === true;
       if (cloudSyncing) {
         await waitForCloudSyncIdle(120000);
+      }
+      if (light && opts?.force !== true && window.SupabaseSync?.pullCloudMeta) {
+        try {
+          const uid = window.SupabaseSync.getUserId?.();
+          const remoteUpdated = uid ? await window.SupabaseSync.pullCloudMeta() : null;
+          const localUpdated = uid ? window.SupabaseSync.getLocalCloudUpdatedAt?.(uid) : null;
+          if (remoteUpdated && localUpdated && remoteUpdated === localUpdated) {
+            lastBgCloudSyncAt = Date.now();
+            window.__phLastBgCloudSyncAt = lastBgCloudSyncAt;
+            if (!silent) setCloudSyncPhase(cards.length ? 'saved' : 'idle');
+            return true;
+          }
+        } catch (e) { /* fall through to full pull */ }
       }
       setCloudSyncPhase('syncing', light ? '后台同步…' : '正在拉取云端…');
       try {
@@ -8434,10 +8400,15 @@
     }
 
     function saveBlobDownload(blob, filename) {
+      const name = filename || `prompt-hub-${Date.now()}.${extensionFromBlob(blob)}`;
+      if (window.MediaDownload?.saveBlob) {
+        window.MediaDownload.saveBlob(blob, name);
+        return;
+      }
       const objUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = objUrl;
-      a.download = filename || `prompt-hub-${Date.now()}.${extensionFromBlob(blob)}`;
+      a.download = name;
       document.body.appendChild(a);
       a.click();
       a.remove();
