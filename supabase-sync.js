@@ -2714,18 +2714,17 @@
     /* 列表 prefetch 禁止 batch 签 full（legacy 缺 grid 时等 CDN/侧栏，勿首屏拉原图） */
   }
 
-  /** 卡片库首屏：仅签可见 6 张，滚动后由 CardImageLoader 逐批补签 */
-  async function prefetchWarehousePage(cards, capMs) {
+  /** 卡片库首屏：签当前页可见卡（默认最多 24 张） */
+  async function prefetchWarehousePage(cards, capMs, opts) {
     if (!isLoggedIn()) return;
     const mobile = typeof window !== 'undefined' && window.MobileUI?.isMobileViewport?.();
-    const signCap = mobile ? 10 : WAREHOUSE_VISIBLE_SIGN_CAP;
-    const maxCards = Math.min(
-      signCap,
-      Math.max(1, (cards || []).length)
-    );
+    const cap = Number(opts?.maxCards) > 0
+      ? Number(opts.maxCards)
+      : (mobile ? 12 : 24);
+    const maxCards = Math.min(cap, Math.max(1, (cards || []).length));
     const list = (cards || []).slice(0, maxCards);
     if (!list.length) return;
-    const budget = capMs == null ? (mobile ? 4200 : 1800) : Math.min(capMs, mobile ? 4800 : 3200);
+    const budget = capMs == null ? (mobile ? 4200 : 2800) : Math.min(capMs, mobile ? 4800 : 4000);
     await prefetchCardsImages(list, budget, { maxCards });
   }
 

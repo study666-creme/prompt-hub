@@ -108,7 +108,7 @@
   async function prefetchList(cards, capMs, opts) {
     if (!cards?.length) return;
     if (window.SupabaseSync?.prefetchWarehousePage) {
-      await window.SupabaseSync.prefetchWarehousePage(cards, capMs);
+      await window.SupabaseSync.prefetchWarehousePage(cards, capMs, opts);
       return;
     }
     if (window.SupabaseSync?.prefetchCardsImages) {

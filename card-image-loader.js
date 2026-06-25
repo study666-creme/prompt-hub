@@ -295,7 +295,6 @@
     window.SupabaseSync.queueGridBackfill(card, { force: true });
     const media = feedMediaFromImg(img);
     if (media) {
-      media.classList.add('is-loading', 'card-media--await');
       media.classList.remove('card-media--load-failed');
       if (media.__whBackfillFailTimer) clearTimeout(media.__whBackfillFailTimer);
       media.__whBackfillFailTimer = setTimeout(() => {

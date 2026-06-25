@@ -5476,15 +5476,13 @@
     function hydrateWarehouseGridImages(container, pageCards) {
       if (!container) return;
       const mobile = isMobileViewport();
-      const bindP = window.CardImageLoader?.bindWarehouse?.(container, pageCards);
-      void (bindP || Promise.resolve()).then(() => {
-        upgradeWarehouseCardsWithCachedImages(container, pageCards);
-        const boost = mobile ? 10 : 8;
-        window.CardImageLoader?.boostWarehouseImages?.(container, boost);
-        if (!mobile && !container.classList.contains('masonry-ready')) {
-          scheduleWarehouseMasonryLayout();
-        }
-      });
+      const patchMax = mobile ? 20 : Math.min(24, pageCards?.length || 24);
+      window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: patchMax });
+      window.CardImageLoader?.observeContainer?.(container);
+      window.CardImageLoader?.boostWarehouseImages?.(container, mobile ? 6 : 8);
+      if (!mobile && !container.classList.contains('masonry-ready')) {
+        scheduleWarehouseMasonryLayout();
+      }
     }
 
     async function runCardImageIntegrityAudit() {
@@ -6499,67 +6497,6 @@
       return window.FeatureDraft?.isUsableWarehouseImage?.(card) ?? false;
     }
 
-    /** 列表首屏：仅当已有可画出的 URL 时才渲染图片区（避免黑块 + 扫光） */
-    function warehouseCardShowsMediaSlot(card) {
-      if (!cardHasDisplayImage(card)) return false;
-      const image = card.image;
-      const cached = window.SupabaseSync?.getListDisplayImageSrc?.(image, card.id);
-      if (cached && !String(cached).startsWith('data:image/svg')) return true;
-      if (typeof image === 'string' && image.startsWith('data:image/') && !image.includes('data:image/svg')) return true;
-      if (/^https?:\/\//i.test(image) && !window.SupabaseSync?.isInvalidMediaUrl?.(image)) return true;
-      return false;
-    }
-
-    function upgradeWarehouseCardsWithCachedImages(container, pageCards) {
-      if (!container || !pageCards?.length) return;
-      for (const card of pageCards) {
-        if (!card?.id || !cardHasDisplayImage(card)) continue;
-        const div = container.querySelector(`.card[data-id="${CSS.escape(String(card.id))}"]`);
-        if (!div || div.classList.contains('card--visual')) continue;
-        const url = window.SupabaseSync?.getListDisplayImageSrc?.(card.image, card.id);
-        if (!url || String(url).startsWith('data:image/svg')) continue;
-        div.classList.remove('card--text-only');
-        div.classList.add('card--visual');
-        const body = div.querySelector('.card-body');
-        if (!body || div.querySelector('.card-media')) continue;
-        const isCollectCard = window.isCommunityCollectCard?.(card);
-        const collectMeta = isCollectCard ? getCommunityCollectImageResolveOpts(card) : null;
-        const collectImgAttrs = isCollectCard && collectMeta?.authorId
-          ? ` data-author-id="${escapeHtml(collectMeta.authorId)}" data-source-card-id="${escapeHtml(collectMeta.assetId || '')}"`
-          : '';
-        const media = document.createElement('div');
-        media.className = 'card-media';
-        media.dataset.shineAt = String(Date.now());
-        const img = document.createElement('img');
-        img.className = 'card-img';
-        img.alt = '';
-        img.decoding = 'async';
-        img.loading = 'lazy';
-        img.draggable = false;
-        img.setAttribute('data-image-ref', card.image);
-        if (window.SupabaseSync?.isStorageRef?.(card.image)) {
-          img.setAttribute('data-storage-ref', card.image);
-        }
-        if (collectImgAttrs) {
-          const authorMatch = collectImgAttrs.match(/data-author-id="([^"]*)"/);
-          const sourceMatch = collectImgAttrs.match(/data-source-card-id="([^"]*)"/);
-          if (authorMatch) img.dataset.authorId = authorMatch[1];
-          if (sourceMatch) img.dataset.sourceCardId = sourceMatch[1];
-        }
-        img.addEventListener('load', () => {
-          if (typeof finishCardMediaShine === 'function') finishCardMediaShine(media);
-        });
-        media.appendChild(img);
-        div.insertBefore(media, body);
-        if (window.CardImageLoader?.applyUrlToImg?.(img, url)) {
-          /* applyUrlToImg sets src */
-        } else {
-          img.src = url;
-        }
-      }
-      bindCardGridImageErrors(container);
-    }
-
     function shouldLoadPanelImagePreview() {
       if (!imageData) return false;
       if (pendingUploadFile) return true;
@@ -6674,21 +6611,16 @@
       if (page === 1 && prefetchCards.length && warehouseActive && window.MediaPipeline?.prefetchList) {
         prefetchP = window.MediaPipeline.prefetchList(
           prefetchCards,
-          mobileGrid ? 4800 : 3200
+          mobileGrid ? 4800 : 4000,
+          { maxCards: prefetchCards.length }
         );
       }
       if (page === 1 && pageCards.length && warehouseActive && window.SupabaseSync?.backfillGridThumbsForCards) {
         void window.SupabaseSync.backfillGridThumbsForCards(pageCards, {
-          max: mobileGrid ? Math.min(8, pageCards.length) : Math.min(12, pageCards.length),
+          max: mobileGrid ? Math.min(6, pageCards.length) : Math.min(8, pageCards.length),
           force: false,
           quiet: true,
           awaitDrain: false
-        }).then(() => {
-          window.MediaPipeline?.patchContainerFromCache?.(container, {
-            visibleFirst: true,
-            max: mobileGrid ? 20 : 16
-          });
-          window.CardImageLoader?.observeContainer?.(container);
         });
       }
       const fragment = document.createDocumentFragment();
@@ -6714,7 +6646,7 @@
         }
         const checked = selectedCardIds.has(card.id);
         if (checked) div.classList.add('batch-selected');
-        const showImage = warehouseCardShowsMediaSlot(card);
+        const showImage = cardHasDisplayImage(card);
         if (showImage) div.classList.add('card--visual');
         else div.classList.add('card--text-only');
         const cachedUrl = showImage && window.SupabaseSync?.getListDisplayImageSrc
@@ -6724,7 +6656,7 @@
         const isCollectCard = window.isCommunityCollectCard?.(card);
         const collectMeta = isCollectCard ? getCommunityCollectImageResolveOpts(card) : null;
         const hasReadyListSrc = !!(showImage && cachedUrl && !String(cachedUrl).startsWith('data:image/svg'));
-        const mediaLoadingCls = hasReadyListSrc ? ' is-loading' : '';
+        const mediaLoadingCls = hasReadyListSrc ? ' is-loading' : (showImage ? ' card-media--await' : '');
         const shineAt = hasReadyListSrc ? ` data-shine-at="${Date.now()}"` : '';
         const titleTrim = getCardDisplayTitle(card);
         const timeLabel = formatCardTime(card.updatedAt || card.createdAt);
