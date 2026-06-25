@@ -22,6 +22,7 @@ execSync(`node --check "${bundlePath}"`, { stdio: 'inherit' });
 const required = [
   'window.MediaDownload',
   'window.promptHubSaveImage',
+  'window.downloadCardImageFile',
   'window.AppLightbox',
   'window.openLightbox',
   'window.setLightboxSrc',
@@ -37,7 +38,7 @@ if (missing.length) {
 }
 
 const bytes = statSync(bundlePath).size;
-if (bytes < 4000 || bytes > 250000) {
+if (bytes < 8000 || bytes > 350000) {
   console.error(`verify-lightbox-pack: suspicious size ${bytes} bytes`);
   process.exit(1);
 }
