@@ -26,6 +26,7 @@ const required = [
   'ImageGenGenErrors',
   'ImageGenWarehouseRepair',
   'ImageGenRefCompress',
+  'ImageGenRefUI',
   'ImageGenRefResolve',
   'ImageGenWarehouseSave',
   'ImageGenFinishRun',

@@ -60,6 +60,7 @@ const checks = [
   ['ImageGenGenErrors', !!window.ImageGenGenErrors?.friendlyGenErrorMessage],
   ['ImageGenWarehouseRepair', !!window.ImageGenWarehouseRepair?.init],
   ['ImageGenRefCompress', !!window.ImageGenRefCompress?.init],
+  ['ImageGenRefUI', !!window.ImageGenRefUI?.init],
   ['ImageGenRefResolve', !!window.ImageGenRefResolve?.init],
   ['ImageGenWarehouseSave', !!window.ImageGenWarehouseSave?.init],
   ['ImageGenFinishRun', !!window.ImageGenFinishRun?.init],
@@ -127,6 +128,17 @@ const compressApi = window.ImageGenRefCompress.init({
 });
 if (typeof compressApi.compressRefImageFromSource !== 'function') {
   console.error('imagegen-bundle-vm-smoke FAIL: compressRefImageFromSource missing');
+  process.exit(1);
+}
+
+const refUiApi = window.ImageGenRefUI.init({
+  toast: () => {},
+  isDisplayableImage: () => true,
+  updateImageGenCostHint: () => {},
+  compressRefImageFromSource: async () => 'data:image/jpeg;base64,'
+});
+if (typeof refUiApi.getImageGenRefImages !== 'function' || typeof refUiApi.setImageGenRefs !== 'function') {
+  console.error('imagegen-bundle-vm-smoke FAIL: ImageGenRefUI exports missing');
   process.exit(1);
 }
 

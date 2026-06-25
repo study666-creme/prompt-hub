@@ -12,6 +12,7 @@ const sources = [
   'imagegen-gen-errors.js',
   'imagegen-warehouse-repair.js',
   'imagegen-ref-compress.js',
+  'imagegen-ref-ui.js',
   'imagegen-ref-resolve.js',
   'imagegen-warehouse-save.js',
   'imagegen-finish-run.js',

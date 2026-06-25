@@ -28,7 +28,7 @@
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260625c` · https://prompt-hubs.com |
+| **Pages** | build `20260625d` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
@@ -46,14 +46,13 @@
 |------|------|------|
 | 1 图片管线 | MediaPipeline 全站 Feed/卡片库/生图/资产 | ~95% |
 | 2 云同步解耦 | SyncOrchestrator + skipImageUpload | ~80% |
-| 3 模块化 | 11 个 imagegen 子模块 + features-draft ~10k 行；export/wire 部署前审计 | 完成 |
+| 3 模块化 | 12 个 imagegen 子模块 + features-draft ~9.3k 行；export/wire 部署前审计 | 完成 |
 
 ### 已知问题 / 下一步
 
-1. 可选：拆 `imagegen-ref-ui.js`（参考图上传/标注 UI，**不**回迁 job-runner 逻辑）
-2. 部分历史图 URL 404 / 签名过期 → R2 批量同步
-3. MemFire 迁移（7 月初 final dump）
-4. 偶发 `api.prompt-hubs.com` 502
+1. 部分历史图 URL 404 / 签名过期 → R2 批量同步
+2. MemFire 迁移（7 月初 final dump）
+3. 偶发 `api.prompt-hubs.com` 502
 
 ### 部署
 

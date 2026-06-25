@@ -33,24 +33,24 @@ mobile.js → script.js → pack-imagegen.js → pack-feed.js → community-publ
 | `imagegen-finish-run.js` | `ImageGenFinishRun` | `finishImageGenRun` 收尾 |
 | `imagegen-ref-resolve.js` | `ImageGenRefResolve` | `resolveRefUrlsFromList` |
 | `imagegen-ref-compress.js` | `ImageGenRefCompress` | 参考图压缩 |
+| `imagegen-ref-ui.js` | `ImageGenRefUI` | 参考图上传/画廊/标注、`resolveRefDisplayUrl` |
 | `imagegen-warehouse-save.js` | `ImageGenWarehouseSave` | `saveGeneratedToWarehouse` |
 | `imagegen-warehouse-repair.js` | `ImageGenWarehouseRepair` | 仓库卡片图修复 |
 
-`features-draft.js` 通过薄代理调用：`jr()` job-runner、`pw()` poll-warehouse、`fr()` finish-run、`ig()` submit、`rr()` ref-resolve、`wr()` repair 等。
+`features-draft.js` 通过薄代理调用：`jr()` job-runner、`pw()` poll-warehouse、`fr()` finish-run、`ig()` submit、`rr()` ref-resolve、`ru()` ref-ui、`wr()` repair 等。
 
 ## 仍留在 `features-draft.js`（有意不迁）
 
 | 区域 | 说明 |
 |------|------|
-| 参考图 UI | `bindImageGenUpload`、`renderImageGenRefGallery`、标注器 — 下一步可选 `imagegen-ref-ui.js` |
+| 生图表单 / 模型选择 | `initImageGenForm`、`applyImageGenModelCatalog` |
 | 社区 / 我的主页 | `renderCreations`、`renderCommunity`、发布开关 |
-| 表单 / 模型选择 | `initImageGenForm`、`applyImageGenModelCatalog` |
 | 状态变量 | `imageGenPendingJobs`、`creations`、`communityPosts` |
 
 ## 接线（`bootstrapFeatureDraft`）
 
 ```javascript
-wireAllFeedModules();  // 顺序：JobRunner → Repair → RefCompress → WarehouseSave → RefResolve → FinishRun → Poll → Submit → Feed*
+wireAllFeedModules();  // 顺序：JobRunner → Repair → RefCompress → RefUI → WarehouseSave → RefResolve → FinishRun → Poll → Submit → Feed*
 window.FeatureDraft = buildFeatureDraftExports();
 ```
 
