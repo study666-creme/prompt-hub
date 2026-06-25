@@ -507,6 +507,10 @@
     const commOther = isCommunityImg(img) && !isOwnCommunityGridImg(img) && !isOwnWarehouseListImg(img);
     if (primary && window.SupabaseSync?.isPathKnownMissing?.(primary) && !commOther) {
       if (isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img)) {
+        if (window.SupabaseSync?.cardImageStillResolvable?.(ref, cardId) === false) {
+          window.finalizeWarehouseCardMediaFailure?.(feedMediaFromImg(img), img);
+          return;
+        }
         window.SupabaseSync?.clearPathMissingForCard?.(cardId, ref);
       } else {
         void tryMissingPathFallback(img, cardId);

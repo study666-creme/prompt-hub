@@ -4097,7 +4097,6 @@
         refreshFeeds();
       }
       if (window.SupabaseSync?.isLoggedIn?.()) {
-        if (cards.length) window.SupabaseSync?.healMissingPathCacheForCards?.(cards);
         const runRepair = () => void repairGeneratedCardImagesQuiet();
         if (typeof requestIdleCallback === 'function') {
           requestIdleCallback(runRepair, { timeout: 12000 });
@@ -5682,9 +5681,6 @@
       }
 
       cloudHydratedUid = uid;
-      if (cards.length && window.SupabaseSync?.healMissingPathCacheForCards) {
-        window.SupabaseSync.healMissingPathCacheForCards(cards);
-      }
       window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
       window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
       window.TrialTasksUI?.onAuthReady?.();
@@ -6678,7 +6674,8 @@
         }
         const checked = selectedCardIds.has(card.id);
         if (checked) div.classList.add('batch-selected');
-        const showImage = cardHasDisplayImage(card);
+        const showImage = cardHasDisplayImage(card)
+          && window.SupabaseSync?.cardImageStillResolvable?.(card.image, card.id) !== false;
         if (showImage) div.classList.add('card--visual');
         else div.classList.add('card--text-only');
         const cachedUrl = showImage && window.SupabaseSync?.getListDisplayImageSrc
@@ -6687,11 +6684,10 @@
         const imgSrc = showImage ? (cachedUrl || cardImgInitialSrc(card.image)) : '';
         const isCollectCard = window.isCommunityCollectCard?.(card);
         const collectMeta = isCollectCard ? getCommunityCollectImageResolveOpts(card) : null;
-        const imgPending = showImage && (!cachedUrl || imgSrc.startsWith('data:image/svg'));
-        const mediaLoadingCls = imgPending
-          ? ' is-loading card-media--await'
-          : (isCollectCard && showImage ? ' card-media--await' : '');
-        const shineAt = imgPending ? ` data-shine-at="${Date.now()}"` : '';
+        const hasReadyListSrc = !!(showImage && cachedUrl && !String(cachedUrl).startsWith('data:image/svg'));
+        const imgAwait = showImage && !hasReadyListSrc;
+        const mediaLoadingCls = imgAwait ? ' card-media--await' : '';
+        const shineAt = imgAwait ? ` data-shine-at="${Date.now()}"` : '';
         const titleTrim = getCardDisplayTitle(card);
         const timeLabel = formatCardTime(card.updatedAt || card.createdAt);
         const tagsHtml = buildCardTagsHtml(card.tags);
