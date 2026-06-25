@@ -2850,6 +2850,11 @@
             if (failedPath && /_grid\.(jpe?g|webp|png)$/i.test(failedPath)) {
               markGridFetchFailed(failedPath);
             }
+            if (inWarehouse && !img.closest('.card[data-community-collect="1"]')) {
+              window.finalizeWarehouseCardMediaFailure?.(media, img);
+              done();
+              return;
+            }
             if (img.dataset.patchRetry === '1') {
               media?.classList.add('card-media--load-failed');
               done();
