@@ -8,6 +8,10 @@ Write-Host "audit-features-draft-exports ..."
 & node (Join-Path $root "scripts\audit-features-draft-exports.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+Write-Host "audit-features-draft-wire ..."
+& node (Join-Path $root "scripts\audit-features-draft-wire.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 $esbuildSmoke = Join-Path $root "scripts\esbuild-bundle-smoke.mjs"
 if (-not (Test-Path (Join-Path $root "node_modules\esbuild"))) {
   Write-Host "Installing root npm deps (esbuild) ..." -ForegroundColor Yellow

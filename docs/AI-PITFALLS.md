@@ -13,6 +13,7 @@
 | **bundle 放 `/dist/` 未 HTTP 验** | 卡片库只剩文字、全站无图；`MediaPipeline` 等为 false，Console 常无 SyntaxError | Cloudflare Pages SPA 把 `/dist/*.js` 回退成 `index.html`；VM 冒烟读本地文件发现不了 | bundle 输出到**根目录** `*.bundle.js`；部署后必须 `run-index-http-smoke.mjs` 验 Content-Type |
 | **`*.bundle.js` 文件名** | MIME `text/html`；`FeedImages` 等全 false | Cloudflare Pages 对 `.bundle.js` 的 `<script>` 请求 SPA 回退 HTML | 输出改名为 **`pack-*.js`**；禁止 `.bundle.js`；冒烟加 `Sec-Fetch-Dest: script` |
 | **未部署就让用户测** | 用户仍见旧 bug | 只改本地未 `deploy-pages.ps1` | 改静态资源后必须 bump `__APP_BUILD__` + 部署，让用户 `Ctrl+Shift+R` 看 `window.__APP_BUILD__` |
+| **模块化后从 git HEAD 整块恢复** | `findBestApiJobForPrompt` / `isGeneratedWarehouseCard` 等 ReferenceError；或删掉的逻辑又回来 | 阶段 3 把实现迁入 `imagegen-*.js`，`features-draft` 只留 **jr/pw/fr 薄代理** + UI 层；误用 `git show HEAD:features-draft.js` 恢复会**重复实现**或**漏导出** | 只补 **export/调用链仍引用的 UI 函数**；job-runner 逻辑用 `jr('name')`；部署前跑 `audit-features-draft-exports.mjs` + `audit-features-draft-wire.mjs` |
 
 ---
 
