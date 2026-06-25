@@ -2633,18 +2633,55 @@
   }
 
   /* —— 全站社区 Feed API：community-public-feed.js —— */
-  let normalizeFeedPost;
   let authorIdFromPostImage;
   let communityPostDisplayKey;
-  let mergePostsLists;
   let loadPublicFeedCache;
-  let savePublicFeedCache;
-  let hydratePublicFeedFromCache;
-  let publicFeedNeedsFullRefresh;
-  let mergePublicFeedHead;
-  let fetchAllPublicCommunityFeedPages;
-  let refreshPublicCommunityFeed;
-  let fetchMorePublicCommunityFeed;
+  let _hydratePublicFeedFromCache;
+  function hydratePublicFeedFromCache() {
+    if (typeof _hydratePublicFeedFromCache === 'function') return _hydratePublicFeedFromCache();
+    return false;
+  }
+  let _publicFeedNeedsFullRefresh;
+  function publicFeedNeedsFullRefresh() {
+    if (typeof _publicFeedNeedsFullRefresh === 'function') return _publicFeedNeedsFullRefresh();
+    return true;
+  }
+  let _refreshPublicCommunityFeed;
+  async function refreshPublicCommunityFeed(opts) {
+    if (typeof _refreshPublicCommunityFeed === 'function') return _refreshPublicCommunityFeed(opts);
+    return false;
+  }
+  let _fetchMorePublicCommunityFeed;
+  async function fetchMorePublicCommunityFeed() {
+    if (typeof _fetchMorePublicCommunityFeed === 'function') return _fetchMorePublicCommunityFeed();
+    return null;
+  }
+  let _savePublicFeedCache;
+  function savePublicFeedCache(posts) {
+    if (typeof _savePublicFeedCache === 'function') return _savePublicFeedCache(posts);
+  }
+  let _normalizeFeedPost;
+  function normalizeFeedPost(p) {
+    if (typeof _normalizeFeedPost === 'function') return _normalizeFeedPost(p);
+    return null;
+  }
+  let _mergePostsLists;
+  function mergePostsLists(...lists) {
+    if (typeof _mergePostsLists === 'function') return _mergePostsLists(...lists);
+    return [];
+  }
+  let _mergePublicFeedHead;
+  function mergePublicFeedHead(incoming) {
+    if (typeof _mergePublicFeedHead === 'function') return _mergePublicFeedHead(incoming);
+    return false;
+  }
+  let _fetchAllPublicCommunityFeedPages;
+  async function fetchAllPublicCommunityFeedPages(timeoutMs) {
+    if (typeof _fetchAllPublicCommunityFeedPages === 'function') {
+      return _fetchAllPublicCommunityFeedPages(timeoutMs);
+    }
+    return null;
+  }
   let PUBLIC_FEED_TTL_MS = 120_000;
   let LS_PUBLIC_FEED_CACHE = 'promptrepo_public_feed_cache';
 
@@ -2674,18 +2711,18 @@
         }
       }
     });
-    normalizeFeedPost = CPF.normalizeFeedPost;
+    _normalizeFeedPost = CPF.normalizeFeedPost;
     authorIdFromPostImage = CPF.authorIdFromPostImage;
     communityPostDisplayKey = CPF.communityPostDisplayKey;
-    mergePostsLists = CPF.mergePostsLists;
+    _mergePostsLists = CPF.mergePostsLists;
     loadPublicFeedCache = CPF.loadPublicFeedCache;
-    savePublicFeedCache = CPF.savePublicFeedCache;
-    hydratePublicFeedFromCache = CPF.hydratePublicFeedFromCache;
-    publicFeedNeedsFullRefresh = CPF.publicFeedNeedsFullRefresh;
-    mergePublicFeedHead = CPF.mergePublicFeedHead;
-    fetchAllPublicCommunityFeedPages = CPF.fetchAllPublicCommunityFeedPages;
-    refreshPublicCommunityFeed = CPF.refreshPublicCommunityFeed;
-    fetchMorePublicCommunityFeed = CPF.fetchMorePublicCommunityFeed;
+    _savePublicFeedCache = CPF.savePublicFeedCache;
+    _hydratePublicFeedFromCache = CPF.hydratePublicFeedFromCache;
+    _publicFeedNeedsFullRefresh = CPF.publicFeedNeedsFullRefresh;
+    _mergePublicFeedHead = CPF.mergePublicFeedHead;
+    _fetchAllPublicCommunityFeedPages = CPF.fetchAllPublicCommunityFeedPages;
+    _refreshPublicCommunityFeed = CPF.refreshPublicCommunityFeed;
+    _fetchMorePublicCommunityFeed = CPF.fetchMorePublicCommunityFeed;
     PUBLIC_FEED_TTL_MS = CPF.PUBLIC_FEED_TTL_MS;
     LS_PUBLIC_FEED_CACHE = CPF.LS_PUBLIC_FEED_CACHE;
     window.__communityPublicFeedWired = true;
@@ -2711,7 +2748,10 @@
 
   let layoutCommunityMasonry;
   let layoutFeedFlexColumns;
-  let scheduleCommunityLayout;
+  let _scheduleCommunityLayout;
+  function scheduleCommunityLayout(id, o) {
+    return _scheduleCommunityLayout?.(id, o);
+  }
   let relayoutCommunityFeeds;
   let runCommunityFeedLayoutPass;
   let bindCommunityGridImageRelayout;
@@ -2773,7 +2813,10 @@
 
   /* —— 生图仓库 Feed：image-gen-feed.js —— */
   let layoutImageGenFeedMasonry;
-  let scheduleImageGenFeedLayout;
+  let _scheduleImageGenFeedLayout;
+  function scheduleImageGenFeedLayout(opts) {
+    return _scheduleImageGenFeedLayout?.(opts);
+  }
   let resetImageGenFeedCardLayout;
   let bindImageGenFeedImageRelayout;
   let enforceMobileImageGenFeed;
@@ -2790,7 +2833,10 @@
   let syncImageGenFeedLoadMoreBtn;
   let bindImageGenFeedPagedScroll;
   let bindImageGenFeedResizeRelayout;
-  let renderImageGenFeed;
+  let _renderImageGenFeed;
+  function renderImageGenFeed(opts) {
+    return _renderImageGenFeed?.(opts);
+  }
   let imageGenFeedIsNearTop;
   let bindImageGenFeedCardEvents;
   let captureImageGenFeedCardPositions;
@@ -2861,7 +2907,7 @@
       addImageGenRefFromFeed
     });
     layoutImageGenFeedMasonry = IG.layoutImageGenFeedMasonry;
-    scheduleImageGenFeedLayout = IG.scheduleImageGenFeedLayout;
+    _scheduleImageGenFeedLayout = IG.scheduleImageGenFeedLayout;
     resetImageGenFeedCardLayout = IG.resetImageGenFeedCardLayout;
     bindImageGenFeedImageRelayout = IG.bindImageGenFeedImageRelayout;
     enforceMobileImageGenFeed = IG.enforceMobileImageGenFeed;
@@ -2878,7 +2924,7 @@
     syncImageGenFeedLoadMoreBtn = IG.syncImageGenFeedLoadMoreBtn;
     bindImageGenFeedPagedScroll = IG.bindImageGenFeedPagedScroll;
     bindImageGenFeedResizeRelayout = IG.bindImageGenFeedResizeRelayout;
-    renderImageGenFeed = IG.renderImageGenFeed;
+    _renderImageGenFeed = IG.renderImageGenFeed;
     imageGenFeedIsNearTop = IG.imageGenFeedIsNearTop;
     bindImageGenFeedCardEvents = IG.bindImageGenFeedCardEvents;
     captureImageGenFeedCardPositions = IG.captureImageGenFeedCardPositions;
@@ -2910,7 +2956,7 @@
     });
     layoutCommunityMasonry = (id, o) => FL.layout(id, o);
     layoutFeedFlexColumns = (id, o) => FL.layoutFlex(id, o);
-    scheduleCommunityLayout = (id, o) => FL.schedule(id, o);
+    _scheduleCommunityLayout = (id, o) => FL.schedule(id, o);
     relayoutCommunityFeeds = () => FL.relayoutAll();
     runCommunityFeedLayoutPass = (id) => { FL.layout(id); return true; };
     bindCommunityGridImageRelayout = () => {
@@ -12468,24 +12514,8 @@
     wireFeedLayout();
   }
 
-  if (!window.CommunityPublicFeed?.init || !window.FeedImages?.init || !window.ImageGenFeed?.init || !window.FeedLayout?.init) {
-    let feedWireTries = 0;
-    (function retryFeedWire() {
-      if (window.CommunityPublicFeed?.init && window.FeedImages?.init && window.ImageGenFeed?.init && window.FeedLayout?.init) {
-        wireAllFeedModules();
-        return;
-      }
-      if (++feedWireTries > 120) {
-        console.error('[FeatureDraft] feed packs not ready after', feedWireTries, 'retries');
-        return;
-      }
-      setTimeout(retryFeedWire, 25);
-    })();
-  } else {
-    wireAllFeedModules();
-  }
-
-  window.FeatureDraft = {
+  function buildFeatureDraftExports() {
+    return {
     init,
     onAppChange,
     cancelCommunityPageWork,
@@ -12566,8 +12596,9 @@
     getWarehouseCardKind,
     removeBrokenCommunityFeedCard,
     pruneEmptyCommunityFeedCards,
-    scheduleLayout: scheduleCommunityLayout,
-    scheduleCommunityLayout,
+    scheduleLayout: (...args) => scheduleCommunityLayout?.(...args),
+    scheduleCommunityLayout: (...args) => scheduleCommunityLayout?.(...args),
+    scheduleImageGenFeedLayout: (...args) => scheduleImageGenFeedLayout?.(...args),
     repairCreationsFeedLayout,
     repairCommunityFeedLayout,
     syncCommunityFeedColumnCount,
@@ -12588,7 +12619,7 @@
     renderCreations,
     renderMyHomeProfile,
     onDisplayNameChanged,
-    scheduleCreationsLayout: () => scheduleCommunityLayout('creationsGrid'),
+    scheduleCreationsLayout: () => scheduleCommunityLayout?.('creationsGrid'),
     fillFormPromptOnly,
     copyFeedPromptText,
     fillFeedPromptToImageGen,
@@ -12613,14 +12644,48 @@
           image: p.image || null
         }));
     }
-  };
+    };
+  }
 
-  window.recoverLostGenerationsFromApi = recoverLostGenerationsFromApi;
-  window.forceRefreshAllImages = forceRefreshAllImages;
+  function startFeatureDraftInit() {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init, { once: true });
+    } else {
+      init();
+    }
+  }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+  function bootstrapFeatureDraft() {
+    wireAllFeedModules();
+    if (!_hydratePublicFeedFromCache || !_scheduleCommunityLayout || !_renderImageGenFeed) {
+      console.error('[FeatureDraft] feed modules not wired — check pack-feed.js / pack-assets.js loaded');
+    }
+    window.FeatureDraft = buildFeatureDraftExports();
+    window.recoverLostGenerationsFromApi = recoverLostGenerationsFromApi;
+    window.forceRefreshAllImages = forceRefreshAllImages;
+    startFeatureDraftInit();
+  }
+
+  function feedPacksReady() {
+    return !!(window.CommunityPublicFeed?.init && window.FeedImages?.init
+      && window.ImageGenFeed?.init && window.FeedLayout?.init);
+  }
+
+  if (!feedPacksReady()) {
+    let feedWireTries = 0;
+    (function retryFeedWire() {
+      if (feedPacksReady()) {
+        bootstrapFeatureDraft();
+        return;
+      }
+      if (++feedWireTries > 120) {
+        console.error('[FeatureDraft] feed packs not ready after', feedWireTries, 'retries');
+        bootstrapFeatureDraft();
+        return;
+      }
+      setTimeout(retryFeedWire, 25);
+    })();
   } else {
-    init();
+    bootstrapFeatureDraft();
   }
 })();
