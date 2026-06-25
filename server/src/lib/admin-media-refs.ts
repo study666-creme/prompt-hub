@@ -126,7 +126,11 @@ export async function collectReferencedStoragePaths(
 }
 
 export type BucketOrphanItem = {
+  id: string;
   path: string;
+  paths: string[];
+  fileCount: number;
+  variantHint: string;
   bytes: number;
   thumbUrl: string;
   thumbFallbackUrl: string;
@@ -135,10 +139,55 @@ export type BucketOrphanItem = {
 export type BucketOrphanListResult = {
   items: BucketOrphanItem[];
   total: number;
+  rawOrphanFiles: number;
   referencedCount: number;
   scannedCount: number;
   truncated: boolean;
 };
+
+function orphanStemKey(path: string): string {
+  const p = normalizePath(path);
+  const parts = p.split('/');
+  const file = parts.pop() || p;
+  const uid = parts[0] || '';
+  const stem = file
+    .replace(/_grid\.jpe?g$/i, '')
+    .replace(/\.(jpe?g|png|webp)$/i, '');
+  return `${uid}:${stem}`;
+}
+
+function orphanVariantHint(paths: string[]): string {
+  if (paths.length <= 1) return '单文件';
+  const hints: string[] = [`${paths.length} 个副本`];
+  if (paths.some((p) => /_grid\./i.test(p))) hints.push('含 _grid 缩略图');
+  if (paths.some((p) => /\/generated\//i.test(p))) hints.push('含 generated/');
+  if (paths.some((p) => /\/imagegen\//i.test(p))) hints.push('含 imagegen/');
+  return hints.join(' · ');
+}
+
+function groupOrphanFiles(orphans: { path: string; bytes: number }[]) {
+  const byKey = new Map<string, { path: string; bytes: number }[]>();
+  for (const o of orphans) {
+    const key = orphanStemKey(o.path);
+    const list = byKey.get(key) || [];
+    list.push(o);
+    byKey.set(key, list);
+  }
+  const groups: { id: string; paths: string[]; bytes: number; primaryPath: string }[] = [];
+  for (const [id, list] of byKey) {
+    list.sort((a, b) => b.bytes - a.bytes);
+    const paths = list.map((x) => x.path);
+    const bytes = list.reduce((s, x) => s + x.bytes, 0);
+    const primaryPath =
+      list.find((x) => !/_grid\./i.test(x.path))?.path ||
+      list[0]?.path ||
+      paths[0] ||
+      id;
+    groups.push({ id, paths, bytes, primaryPath });
+  }
+  groups.sort((a, b) => b.bytes - a.bytes);
+  return groups;
+}
 
 export async function listBucketOrphanFiles(
   admin: SupabaseClient,
@@ -189,27 +238,32 @@ export async function listBucketOrphanFiles(
   }
 
   await walk('');
-  orphans.sort((a, b) => b.bytes - a.bytes);
+  const grouped = groupOrphanFiles(orphans);
 
   const limit = Math.min(100, Math.max(1, opts.limit));
   const offset = Math.max(0, opts.offset);
-  const slice = orphans.slice(offset, offset + limit);
+  const slice = grouped.slice(offset, offset + limit);
   const origin = apiOrigin.replace(/\/$/, '');
 
-  const items: BucketOrphanItem[] = slice.map((o) => {
-    const grid = gridSiblingPath(o.path);
-    const thumbPath = grid || o.path;
+  const items: BucketOrphanItem[] = slice.map((g) => {
+    const grid = gridSiblingPath(g.primaryPath);
+    const thumbPath = grid || g.primaryPath;
     return {
-      path: o.path,
-      bytes: o.bytes,
+      id: g.id,
+      path: g.primaryPath,
+      paths: g.paths,
+      fileCount: g.paths.length,
+      variantHint: orphanVariantHint(g.paths),
+      bytes: g.bytes,
       thumbUrl: `${origin}/api/v1/media/c/${encodeStoragePath(thumbPath)}`,
-      thumbFallbackUrl: `${origin}/api/v1/media/c/${encodeStoragePath(o.path)}`
+      thumbFallbackUrl: `${origin}/api/v1/media/c/${encodeStoragePath(g.primaryPath)}`
     };
   });
 
   return {
     items,
-    total: orphans.length,
+    total: grouped.length,
+    rawOrphanFiles: orphans.length,
     referencedCount: referenced.size,
     scannedCount: scanned,
     truncated

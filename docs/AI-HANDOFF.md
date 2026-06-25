@@ -9,7 +9,7 @@
 | 顺序 | 文件 | 用途 |
 |------|------|------|
 | 0 | **`docs/AI-PITFALLS.md`** + **`docs/ERROR-LOG.md`** | **防炸站** + 历史高频坑 |
-| 1 | **`docs/CURRENT-ISSUES.md`** | P0-带宽（**部分改善**）、数据 gap |
+| 1 | **`docs/CURRENT-ISSUES.md`** | R2 同步、MemFire、活跃项（**首屏带宽已关闭**） |
 | 2 | **`docs/FEED-MODULES.md`** + **`docs/FEED-LAYOUT.md`** | Feed 四模块 + 排版调试 |
 | 3 | **`docs/PROJECT_CONTEXT.md`** | 产品、部署、构建号 |
 | 4 | **`docs/FILE-MAP.md`** | 按任务找函数 |
@@ -38,7 +38,8 @@
 | **社区 Masonry（手机）** | `enforceMobileCommunityFeedGrid`, `useCssGridForCommunityFeed` |
 | **卡片库首屏顺序** | `renderCards`, `card-image-loader.js`, `prefetchWarehousePage`, `observeContainer` |
 | **性能 / 慢加载** | `prefetchCommunityDisplayUrls`, `hydrateWarehouseImagesFast` |
-| **生图仓库带宽 P0** | `hydrateFeedImages`, `applyFeedImageSrc`, `#imageGenFeed`, `warehouseBoost`（`supabase-sync.js`） |
+| **生图仓库带宽** | 已验收；复现才查 `hydrateFeedImages`, `#imageGenFeed` |
+| 云同步编排 | `sync-orchestrator.js`, `scheduleDeferredCloudPull`, `requestFeedRefresh`（`script.js`） |
 | 社区通知 | `pushCommunityEvent`, `refreshRemoteNotifications`, `community-notify.ts` |
 | 任务中心 | `membership-tasks.ts`, `trial-tasks.js` |
 | 云上传超时 | `pushToCloud`, `scheduleCloudPush`（`script.js`） |
@@ -53,7 +54,7 @@
 
 ```javascript
 // 登录后 F12 Console
-window.__APP_BUILD__                                    // 应与左下角一致，当前 20260605l
+window.__APP_BUILD__                                    // 应与左下角一致，当前 20260625e
 document.querySelectorAll('#imageGenFeed img[data-image-ref]').length
 performance.getEntriesByType('resource').filter(e => e.transferSize > 500000).length  // 期望 0
 !!window.FeatureDraft?.hydrateFeedImages
@@ -84,11 +85,11 @@ https://api.prompt-hub.cn/api/v1/community/feed?limit=80
 ## 省 Token 的改代码原则
 
 1. **最小 diff**：只改与 P0 相关的函数，不顺手重构。
-2. **P0 顺序（2026-06-06 更新）**：
-   - ① **生图页「仓库」带宽**：视口懒加载 + 列表仅 grid，禁止首屏批量 full（见 `CURRENT-ISSUES.md` P0-带宽）
-   - ② 404 / `card-images` 500 重试风暴
-   - ③ 社区侧栏 / Masonry（历史项，部分已修）
-   - ④ 卡片库首屏顺序（`20260603q` 已部分改 grid，需与生图 Feed 统一）
+2. **P0 顺序（2026-06-07 更新）**：
+   - ① **R2 历史图 / 裂图**（502、Storage 无文件）
+   - ② MemFire 迁移（7 月初）
+   - ③ 偶发 API 502 / 旧第三方外链 404
+   - **首屏带宽 / 生图仓库几百 MB**：**已关闭**（见 `CURRENT-ISSUES.md` 验收表）
    - 详见 **`docs/CURRENT-ISSUES.md`**。
 3. **先证实根因再改**：20260601l～q 布局/CSS 多轮用户仍称未解决；下次须 DevTools 断点后再最小 diff。
 4. **不要**让用户只靠清 `localStorage` 当最终方案（云端 `user_data` 会拉回）。
@@ -123,4 +124,4 @@ npm run deploy
 
 ---
 
-*最后更新：2026-06-06 · 用户要求只更新文档；下条聊天修 P0-带宽*
+*最后更新：2026-06-07 · 首屏带宽 P0 关闭；SyncOrchestrator 收尾*

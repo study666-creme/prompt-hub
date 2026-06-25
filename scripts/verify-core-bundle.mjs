@@ -25,6 +25,8 @@ const required = [
   'window.CardImageLoader',
   'resolveFeedUrl',
   'schedulePush',
+  'schedulePull',
+  'requestFeedRefresh',
   'notifyCardsChanged'
 ];
 

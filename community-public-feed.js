@@ -202,7 +202,6 @@
       if (merged.size >= minReady()) d().scheduleProgressiveCommunityRender?.();
       if (!s.remoteHasMore || batch.length < pageSize) break;
     }
-    if (merged.size) s.remoteHasMore = false;
     return typeof sortPosts === 'function' ? sortPosts([...merged.values()]) : [...merged.values()];
   }
 
@@ -235,7 +234,6 @@
       s.posts = fetched;
       s.at = Date.now();
       s.apiOffset = s.nextApiOffset;
-      s.remoteHasMore = false;
       savePublicFeedCache(s.posts);
       if (loggedIn) d().onLoggedInFeedRefreshed?.(s.posts);
       d().rebuildOwnPostFilterCache?.();

@@ -38,6 +38,13 @@
     return deps;
   }
 
+  function applyScrollAfterLayout(scrollRoot, capturedTop) {
+    if (!scrollRoot || !Number.isFinite(capturedTop)) return;
+    const safe = d().safeApplyFeedScrollTop;
+    if (typeof safe === 'function') safe(scrollRoot, capturedTop);
+    else scrollRoot.scrollTop = capturedTop;
+  }
+
   function isMobile() {
     return global.MobileUI?.isMobileViewport?.() ?? global.matchMedia('(max-width: 900px)').matches;
   }
@@ -276,7 +283,7 @@
     container.dataset.feedCols = String(cols);
     d().ensureFeedPageSentinel?.(container);
     requestAnimationFrame(() => {
-      scrollRoot.scrollTop = scrollTop;
+      applyScrollAfterLayout(scrollRoot, scrollTop);
       setTimeout(() => container.classList.remove('community-feed-rebalancing'), 320);
     });
   }
@@ -299,6 +306,8 @@
       }
     }
     if (newCards?.length) {
+      const scrollRoot = d().getFeedScrollRoot?.(container) || container;
+      const scrollTop = scrollRoot.scrollTop;
       newCards.forEach((card) => {
         clearCardInline(card);
         let target = 0;
@@ -314,6 +323,9 @@
         card.dataset.feedCol = String(target);
       });
       d().ensureFeedPageSentinel?.(container);
+      requestAnimationFrame(() => {
+        applyScrollAfterLayout(scrollRoot, scrollTop);
+      });
       return;
     }
 
@@ -449,8 +461,13 @@
       delete container.dataset.feedDistributed;
       delete container.dataset.feedDistributedCols;
     } else if (opts.recalcCols === true && container.dataset.feedDistributed === '1') {
+      const scrollRoot = d().getFeedScrollRoot?.(container) || container;
+      const scrollTop = scrollRoot.scrollTop;
       applyColumnCss(container, measuredCols);
       d().ensureFeedPageSentinel?.(container);
+      requestAnimationFrame(() => {
+        applyScrollAfterLayout(scrollRoot, scrollTop);
+      });
       d().setFeedLayoutPending?.(containerId, false);
       return;
     }
@@ -543,7 +560,8 @@
       horizontalOrder: false,
       transitionDuration: 0
     };
-    const scrollTop = container.scrollTop;
+    const scrollRoot = d().getFeedScrollRoot?.(container) || container;
+    const scrollTop = scrollRoot.scrollTop;
     if (instance) {
       instance.option(mOpts);
       instance.reloadItems();
@@ -558,7 +576,7 @@
       if (isProfile) profileMasonry = instance;
       else communityMasonry = instance;
     }
-    container.scrollTop = scrollTop;
+    applyScrollAfterLayout(scrollRoot, scrollTop);
     container.classList.add('masonry-ready', 'cards-grid-primed');
     const { rowGap } = getGaps();
     if (rowGap) container.style.setProperty('--feed-row-gap', `${rowGap}px`);
@@ -669,7 +687,7 @@
         const scrollTop = scrollRoot.scrollTop;
         if (typeof inst.reloadItems === 'function') inst.reloadItems();
         inst.layout();
-        scrollRoot.scrollTop = scrollTop;
+        applyScrollAfterLayout(scrollRoot, scrollTop);
       } else {
         layout(containerId, { force: true });
       }
@@ -745,7 +763,7 @@
     }
     applyColumnCss(container, desired);
     d().setFeedLayoutPending?.(containerId, false);
-    if (containerId === 'creationsGrid') repairCreations(true);
+    if (containerId === 'creationsGrid' && isCreationsStale(container)) repairCreations(true);
   }
 
   function ensureColumnLayout(containerId) {

@@ -32,7 +32,10 @@
     const scrollEl = resolveImageGenFeedScrollRoot(wrap) || wrap;
     const current = scrollEl?.scrollTop ?? 0;
     /* 用户已离开顶部：禁止用旧 snapshot（常为 0）拉回 */
-    if (current > 24) return true;
+    if (current > 24) {
+      const captured = Number(state.anchor?.scrollTop);
+      if (Number.isFinite(captured) && current > captured + 8) return true;
+    }
     const captured = Number(state.anchor?.scrollTop);
     if (Number.isFinite(captured) && current > captured + 16) return true;
     return false;
@@ -77,6 +80,7 @@
       return;
     }
     const cur = scrollEl.scrollTop;
+    if (cur > want + 8) return;
     if (cur > 24 && want < cur - 16) return;
     scrollEl.scrollTop = want;
   }
@@ -91,7 +95,9 @@
       if (card) {
         const rootRect = scrollEl.getBoundingClientRect();
         const rect = card.getBoundingClientRect();
-        applyImageGenFeedScrollTop(scrollEl, anchor.scrollTop + (rect.top - rootRect.top) - anchor.offset);
+        const want = anchor.scrollTop + (rect.top - rootRect.top) - anchor.offset;
+        if (scrollEl.scrollTop > want + 8) return;
+        applyImageGenFeedScrollTop(scrollEl, want);
         return;
       }
     }
@@ -760,7 +766,8 @@
       const feedAppend = !!opts.feedAppend;
       const wrap = document.getElementById('imageGenFeed');
       if (!wrap) return;
-      if (!feedAppend && !opts.force && shouldDeferImageGenFeedRender()) {
+      const tabSwitch = opts.scrollToTop === true || opts.force === true;
+      if (!feedAppend && !tabSwitch && shouldDeferImageGenFeedRender()) {
         clearTimeout(imageGenFeedDeferredRenderTimer);
         imageGenFeedDeferredRenderTimer = setTimeout(() => {
           imageGenFeedDeferredRenderTimer = null;
@@ -799,6 +806,8 @@
         if (
           prevStore
           && prevStore.sig !== sig
+          && !tabSwitch
+          && String(prevStore.sig).startsWith('wh:')
           && d().getImageGenFeedTab?.() === 'warehouse'
           && warehouseCardsListUnchanged(prevStore.whCards, whCards)
         ) {
@@ -814,7 +823,7 @@
           return;
         }
         const prependedCard = warehousePrependedOneCard(prevStore?.whCards, whCards);
-        if (prevStore && prependedCard && d().getImageGenFeedTab?.() === 'warehouse' && !opts.force) {
+        if (prevStore && prependedCard && !tabSwitch && String(prevStore.sig).startsWith('wh:') && d().getImageGenFeedTab?.() === 'warehouse' && !opts.force) {
           imageGenFeedPagedStore = { ...prevStore, sig, whCards, commPosts };
           patchImageGenFeedPendingSection(wrap, pending, failed);
           const temp = document.createElement('div');
@@ -941,6 +950,8 @@
         } else if (mobileFeed && scrollEl) {
           if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);
           else applyImageGenFeedScrollTop(scrollEl, scrollTop);
+        } else if (!preserveScroll && scrollEl) {
+          applyImageGenFeedScrollTop(scrollEl, 0, { force: true });
         }
         d().renderImageGenMobileResult?.();
       }

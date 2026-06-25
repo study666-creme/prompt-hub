@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__ADMIN_BUILD__ = '20260610c';
+    window.__ADMIN_BUILD__ = '20260625p';
     (function () {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function (regs) {
@@ -23,13 +23,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>管理登录</title>
-  <link rel="stylesheet" href="styles-admin.css?v=20260610b">
+  <link rel="stylesheet" href="styles-admin.css?v=20260625p">
 </head>
 <body class="admin-gate">
   <section class="admin-login" id="adminLogin">
     <div class="admin-card">
       <h1>管理登录</h1>
-      <p class="admin-hint">仅限授权人员使用。构建号 <code id="adminBuildTag">20260610b</code></p>
+      <p class="admin-hint">仅限授权人员使用 · 构建号 <code id="adminBuildTag">20260625p</code></p>
       <div class="admin-field">
         <label for="adminSecret">访问密钥</label>
         <input type="password" id="adminSecret" placeholder="请输入密钥" autocomplete="off" spellcheck="false" autocapitalize="off">
@@ -45,14 +45,14 @@
       <aside class="admin-sidebar">
         <div class="admin-brand">
           <h1>Prompt Hub</h1>
-          <p>运营控制台 · <code id="adminSidebarBuild">20260610b</code></p>
+          <p>运营控制台 · <code id="adminSidebarBuild">20260625p</code></p>
         </div>
-        <nav class="admin-nav admin-tabs">
-          <button type="button" class="admin-tab is-active" data-tab="overview">概览</button>
-          <button type="button" class="admin-tab" data-tab="users">用户</button>
-          <button type="button" class="admin-tab" data-tab="community">社区</button>
-          <button type="button" class="admin-tab" data-tab="codes">激活码</button>
-          <button type="button" class="admin-tab" data-tab="models">生图模型</button>
+        <nav class="admin-nav admin-tabs" aria-label="管理导航">
+          <button type="button" class="admin-tab is-active" data-tab="overview"><span class="admin-tab-icon" aria-hidden="true">📊</span>概览</button>
+          <button type="button" class="admin-tab" data-tab="users"><span class="admin-tab-icon" aria-hidden="true">👤</span>用户</button>
+          <button type="button" class="admin-tab" data-tab="community"><span class="admin-tab-icon" aria-hidden="true">🖼</span>社区</button>
+          <button type="button" class="admin-tab" data-tab="codes"><span class="admin-tab-icon" aria-hidden="true">🎫</span>激活码</button>
+          <button type="button" class="admin-tab" data-tab="models"><span class="admin-tab-icon" aria-hidden="true">⚙</span>生图模型</button>
         </nav>
         <div class="admin-sidebar-foot">
           <button type="button" class="admin-btn admin-btn--ghost-light" id="logoutBtn" style="width:100%">退出登录</button>
@@ -61,9 +61,13 @@
 
       <main class="admin-main">
         <header class="admin-topbar" id="adminTopbar">
-          <div>
+          <div class="admin-topbar-main">
             <h2 id="adminPageTitle">数据概览</h2>
             <p class="admin-hint" id="adminPageSubtitle">用户、存储、运行环境一览</p>
+          </div>
+          <div class="admin-topbar-actions">
+            <span class="admin-api-chip" id="adminApiChip" title="当前 API 地址">API …</span>
+            <button type="button" class="admin-btn admin-btn--sm" id="adminRefreshBtn" title="刷新当前页数据">↻ 刷新</button>
           </div>
         </header>
 
@@ -83,9 +87,15 @@
         <p class="admin-hint" id="dashStorageHint">正在扫描 card-images 桶…</p>
         <div id="dashStorageBody" hidden></div>
       </div>
+      <div class="admin-card" id="dashMedia">
+        <h2>图片存储（R2）</h2>
+        <p class="admin-hint">卡片库「裂图 / 502 / 404」多为 R2 未同步或旧第三方外链失效。本机已有 <code>backups/card-images</code> 时，在项目根目录 PowerShell 执行：</p>
+        <pre class="admin-code" id="dashMediaCmd">node scripts/sync-supabase-to-r2.mjs --from-local --out backups/card-images --skip-existing</pre>
+        <p class="admin-hint">需先在 <code>scripts/admin.local.env</code> 填 R2 密钥。仍可从 Supabase 拉取并上传：<code>node scripts/sync-supabase-to-r2.mjs --out backups/card-images --skip-existing</code></p>
+      </div>
       <div class="admin-card" id="dashCommunity">
         <h2>社区维护</h2>
-        <p class="admin-hint">下架：Storage 无图、无效作者、重复卡片、<strong>作者卡片库已删</strong>的社区帖。详细列表请打开左侧「社区」页。</p>
+        <p class="admin-hint"><strong>写回卡片库</strong>：作者云端缺卡但社区仍在线时用（见社区页「卡片库无」）。<strong>清理无效帖</strong>：下架 Storage 无图、无效作者、重复、删卡孤儿——不删图片。</p>
         <button type="button" class="admin-btn admin-btn--primary" id="dashCommunityPurgeBtn">清理无效社区帖</button>
         <p class="admin-hint" id="dashCommunityPurgeResult" hidden></p>
       </div>
@@ -140,6 +150,15 @@
           <button type="button" class="admin-view-tab" data-community-view="bucket-orphans">桶内孤儿</button>
         </div>
         <p class="admin-hint" id="communityViewHint">在线社区帖，可下架或删除（含 Storage 图片）。</p>
+        <div class="admin-action-guide" id="communityActionGuide">
+          <strong>操作说明</strong>
+          <ul>
+            <li><strong>卡片库无</strong>：勾选帖子 →「批量写回」恢复作者卡片库（不是删图）。</li>
+            <li><strong>仅从社区隐藏</strong>：社区不再展示，图片与卡片库记录保留。</li>
+            <li><strong>永久删除</strong>：删社区记录，并尝试删 Storage/R2 配图（不可恢复）。</li>
+            <li><strong>清理无效帖</strong>：批量「仅从社区隐藏」无图、无效作者、重复、删卡孤儿；<strong>不会</strong>写回卡片库。</li>
+          </ul>
+        </div>
         <div class="admin-search-bar" id="communityPostTools">
           <div class="admin-field">
             <label for="communitySearch">搜索帖子</label>
@@ -148,16 +167,17 @@
           </div>
           <button type="button" class="admin-btn admin-btn--primary" id="communitySearchBtn">搜索</button>
           <button type="button" class="admin-btn" id="communitySearchClear">清空</button>
-          <button type="button" class="admin-btn admin-btn--primary" id="communityRestoreOrphansBtn">一键恢复无卡帖</button>
-          <button type="button" class="admin-btn admin-btn--primary" id="communityPurgeBtn">清理无效帖</button>
+          <button type="button" class="admin-btn admin-btn--primary" id="communityRestoreOrphansBtn" title="把社区帖重新写入作者云端卡片库">写回卡片库（批量）</button>
+          <button type="button" class="admin-btn" id="communityPurgePreviewBtn" title="扫描将下架多少帖，不修改数据">预览清理</button>
+          <button type="button" class="admin-btn admin-btn--primary" id="communityPurgeBtn" title="下架无图/无效/重复/删卡孤儿帖">清理无效帖</button>
         </div>
         <div class="admin-batch-bar hidden" id="communityBatchBar">
           <label class="admin-check admin-batch-select-all">
             <input type="checkbox" id="communitySelectAll"> 全选本页
           </label>
           <span class="admin-hint" id="communitySelectedCount">已选 0 条</span>
-          <button type="button" class="admin-btn admin-btn--sm" id="communityBatchRestoreBtn" disabled>批量恢复</button>
-          <button type="button" class="admin-btn admin-btn--sm" id="communityBatchUnpublishBtn" disabled>批量下架</button>
+          <button type="button" class="admin-btn admin-btn--sm" id="communityBatchRestoreBtn" disabled title="写回作者卡片库">批量写回</button>
+          <button type="button" class="admin-btn admin-btn--sm" id="communityBatchUnpublishBtn" disabled title="仅从社区隐藏">批量隐藏</button>
           <button type="button" class="admin-btn admin-btn--sm admin-btn--danger" id="communityBatchDeleteBtn" disabled>批量删除</button>
         </div>
         <div class="admin-task-progress" id="communityTaskProgress" hidden>
@@ -349,6 +369,6 @@
 
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="admin.js?v=20260610c" onerror="document.getElementById('loginMsg')&&(document.getElementById('loginMsg').hidden=false,document.getElementById('loginMsg').textContent='admin.js 加载失败，请强刷页面')"></script>
+  <script src="admin.js?v=20260625p" onerror="document.getElementById('loginMsg')&&(document.getElementById('loginMsg').hidden=false,document.getElementById('loginMsg').textContent='admin.js 加载失败，请强刷页面')"></script>
 </body>
 </html>

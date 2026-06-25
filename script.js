@@ -1782,6 +1782,20 @@
       if (text) { navigator.clipboard.writeText(text); showToast('提示词已复制'); }
     }
 
+    function fillPromptToImageGenFromPanel() {
+      const prompt = (document.getElementById('cardPrompt')?.value || '').trim();
+      if (!prompt) {
+        showToast('请先填写提示词');
+        return;
+      }
+      const card = selectedCardId ? cards.find((c) => c.id === selectedCardId) : null;
+      const payload = card
+        ? { ...card, prompt }
+        : { id: selectedCardId || '', prompt, image: imageData || null };
+      void window.FeatureDraft?.fillCardToImageGen?.(payload);
+    }
+    window.fillPromptToImageGenFromPanel = fillPromptToImageGenFromPanel;
+
     function clampFloatingPromptPosition(left, top, fp) {
       const el = fp || document.getElementById('floatingPrompt');
       const w = el.offsetWidth || 380;
@@ -3975,7 +3989,7 @@
     }
 
     async function clearWorkspace() {
-      clearTimeout(cloudPushTimer);
+      cancelCloudSyncSchedulers();
       if (cards.length > 0 || customGroups.length > 0) {
         await writeEmergencyBackup('pre_clear_workspace');
         const uid = window.SupabaseSync?.getUserId?.() || activeAccountId;
@@ -4068,7 +4082,7 @@
       if (cards.length > 0) {
         window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
       }
-      const refreshFeeds = () => window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+      const refreshFeeds = () => requestFeedRefresh();
       if (window.MobileUI?.isMobile?.() && page !== 'community') {
         if (typeof requestIdleCallback === 'function') requestIdleCallback(refreshFeeds, { timeout: 8000 });
         else setTimeout(refreshFeeds, 2500);
@@ -4279,7 +4293,7 @@
       await saveAllData({ skipCloud: true });
       renderGroups();
       renderCards(true);
-      window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+      requestFeedRefresh();
       return {
         ok: true,
         restoredFrom: best.source,
@@ -4651,7 +4665,7 @@
       await saveAllData({ skipCloud: true });
       renderGroups();
       renderCards(true);
-      window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+      requestFeedRefresh();
       if (opts.pushCloud === true && window.SupabaseSync?.isLoggedIn?.()) {
         await pushToCloud({ silent: true, skipSafety: false, deferImageUpload: true });
       }
@@ -4887,7 +4901,7 @@
         window.__promptHubCards = cards;
         renderGroups();
         renderCards(true);
-        window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+        requestFeedRefresh();
         if (document.getElementById('pageImageGen')?.classList.contains('active')) {
           window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: true });
         }
@@ -5038,7 +5052,7 @@
       try {
         const uid = window.SupabaseSync?.getUserId?.();
         if (uid) await snapshotLocalForUser(uid);
-        clearTimeout(cloudPushTimer);
+        cancelCloudSyncSchedulers();
         clearTimeout(bgCloudSyncTimer);
         localStorage.setItem('promptrepo_post_logout', '1');
         activeAccountId = null;
@@ -5072,6 +5086,35 @@
         authSubmit();
       }
     });
+
+    function requestFeedRefresh() {
+      if (window.SyncOrchestrator?.requestFeedRefresh) {
+        window.SyncOrchestrator.requestFeedRefresh();
+        return;
+      }
+      window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+    }
+
+    function cancelCloudSyncSchedulers() {
+      window.SyncOrchestrator?.cancelPending?.();
+      clearTimeout(cloudPushTimer);
+      cloudPushTimer = null;
+    }
+
+    /** 后台 pull：走编排器防抖；需 await 完成时用 runDeferredCloudPull */
+    function scheduleDeferredCloudPull(opts = {}) {
+      if (window.SyncOrchestrator?.schedulePull) {
+        window.SyncOrchestrator.schedulePull({
+          immediate: opts.immediate === true,
+          light: opts.light === true,
+          silent: opts.silent !== false,
+          force: opts.force === true
+        });
+        return;
+      }
+      void runDeferredCloudPull(opts);
+    }
+    window.scheduleDeferredCloudPull = scheduleDeferredCloudPull;
 
     async function pullFromCloud(opts = {}) {
       if (!window.SupabaseSync?.isLoggedIn?.()) return false;
@@ -5166,7 +5209,7 @@
       applyDataPayload(finalPayload);
       cards = window.FeatureDraft?.reconcileCommunityWithCards?.(cards) || cards;
       window.__promptHubCards = cards;
-      window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+      requestFeedRefresh();
       window.FeatureDraft?.syncPublishToggleForOpenCard?.();
       await saveAllData({ skipCloud: true });
       if (shouldReslimCloud && typeof pushToCloud === 'function') {
@@ -5221,10 +5264,10 @@
           const uid = window.SupabaseSync?.getUserId?.();
           if (uid) await snapshotLocalForUser(uid);
           refreshWarehouseUI();
-          window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+          requestFeedRefresh();
           if (!light) {
             void window.FeatureDraft?.resumePendingGenerationJobs?.().then((changed) => {
-              if (changed) window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+              if (changed) requestFeedRefresh();
             });
           }
         }
@@ -5532,7 +5575,7 @@
         void syncPromise.catch(() => {});
         refreshWarehouseUI({ softCards: true });
         if (Date.now() - lastBgCloudSyncAt > 45000) {
-          void runDeferredCloudPull({ silent: true, light: true });
+          void scheduleDeferredCloudPull({ silent: true, light: true });
         }
         return;
       }
@@ -5550,7 +5593,7 @@
       localStorage.setItem('promptrepo_last_uid', uid);
       localStorage.removeItem('promptrepo_post_logout');
       window.Membership?.onAccountSwitch?.();
-      clearTimeout(cloudPushTimer);
+      cancelCloudSyncSchedulers();
 
       if (accountSwitch) {
         cards = [];
@@ -5589,8 +5632,8 @@
         if (paintedFromLocal && cards.length > 0 && !force) {
           cloudHydratedUid = uid;
           window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
-          window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
-          void runDeferredCloudPull({ silent: true });
+          requestFeedRefresh();
+          void scheduleDeferredCloudPull({ silent: true });
           void syncPromise.catch(() => {});
           scheduleDeferredImageAudit();
           scheduleQuietGhostPurge();
@@ -5608,7 +5651,7 @@
             void pullFromCloud().then((ok) => {
               if (ok) {
                 refreshWarehouseUI();
-                window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+                requestFeedRefresh();
                 setCloudSyncPhase('saved');
               }
             }).catch(() => {});
@@ -5662,7 +5705,7 @@
 
       cloudHydratedUid = uid;
       window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
-      window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+      requestFeedRefresh();
       window.TrialTasksUI?.onAuthReady?.();
       void syncPromise.catch(() => {});
       scheduleDeferredImageAudit();
@@ -5824,7 +5867,7 @@
             renderGroups();
             renderCards(true);
             updateTagFilter();
-            window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+            requestFeedRefresh();
           }
         } catch (e) {
           console.warn('[sync] pull after push failed', e);
@@ -6040,7 +6083,7 @@
         await pullFromCloud();
         window.__promptHubCards = cards;
         window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
-        window.FeatureDraft?.refreshFeedsAfterCardsSync?.();
+        requestFeedRefresh();
         renderGroups();
         renderCards(true);
         setCloudSyncPhase('saved');
@@ -6067,7 +6110,7 @@
             const uid = window.SupabaseSync?.getUserId?.();
             if (uid) await restoreAccountPrivateData(uid);
           }
-          await runDeferredCloudPull({ silent: true });
+          scheduleDeferredCloudPull({ silent: true });
         } catch (e) {
           console.warn('[sync] background sync failed', e);
         }
@@ -6292,7 +6335,13 @@
         localStorage.setItem(userStorageKey('settings', uid), JSON.stringify(settings));
         scheduleLocalSnapshot(uid);
       }
-      if (fileHandle) { try { const w = await fileHandle.createWritable(); await w.write(JSON.stringify({cards,customGroups,globalFields,settings})); await w.close(); } catch(e) {} }
+      if (fileHandle) {
+        try {
+          const w = await fileHandle.createWritable();
+          await w.write(JSON.stringify(buildBackupPayload(), null, 2));
+          await w.close();
+        } catch (e) { /* ignore */ }
+      }
       if (!opts.skipCloud) {
         if (window.SyncOrchestrator?.notifyCardsChanged) {
           window.SyncOrchestrator.notifyCardsChanged(opts.urgent ? { urgent: true } : {});
@@ -9277,6 +9326,19 @@
     window.closeAppSettings = closeAppSettings;
     window.saveAppSettings = saveAppSettings;
 
+    function updateLocalFileBindingHint() {
+      const el = document.getElementById('localFileBindingHint');
+      if (!el) return;
+      if (!fileHandle) {
+        el.hidden = true;
+        el.textContent = '';
+        return;
+      }
+      const name = String(fileHandle.name || '未命名.json').trim();
+      el.hidden = false;
+      el.textContent = `已绑定本地文件：${name}（改卡片会自动写入；刷新页面后需重新「打开本地 JSON」）`;
+    }
+
     function openWarehouseSettings() {
       document.getElementById('settingsOverlay')?.classList.add('active');
       document.getElementById('ocrEngineSelect').value = settings.engine || 'tesseract';
@@ -9294,6 +9356,7 @@
       updatePanelTrimToolVisibility();
       window.PointsSystem?.updateCreditsUI?.();
       document.getElementById('settingsStatus').textContent = '';
+      updateLocalFileBindingHint();
       onOcrEngineChange();
       renderFieldList();
     }
@@ -9476,7 +9539,8 @@
         const w = await h.createWritable();
         await w.write(JSON.stringify(buildBackupPayload(), null, 2));
         await w.close();
-        document.getElementById('settingsStatus').textContent = '✅ 备份已保存到本地文件';
+        updateLocalFileBindingHint();
+        document.getElementById('settingsStatus').textContent = '✅ 已绑定本地 JSON 文件';
       } catch (e) {
         if (e.name !== 'AbortError') alert('保存失败');
       }
@@ -9499,7 +9563,8 @@
         renderGroups();
         renderCards(true);
         createNewCard();
-        document.getElementById('settingsStatus').textContent = '✅ 已从本地文件恢复';
+        updateLocalFileBindingHint();
+        document.getElementById('settingsStatus').textContent = '✅ 已从本地 JSON 恢复';
       } catch (e) {
         if (e.name !== 'AbortError') alert('打开文件失败');
       }

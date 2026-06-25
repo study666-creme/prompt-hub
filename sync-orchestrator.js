@@ -22,6 +22,10 @@
     }, 800);
   }
 
+  function requestFeedRefresh() {
+    scheduleFeedRefresh();
+  }
+
   function schedulePush(opts = {}) {
     if (!window.SupabaseSync?.isLoggedIn?.()) return;
     if (opts.urgent === true) pushUrgent = true;
@@ -55,7 +59,11 @@
     pullTimer = setTimeout(() => {
       const pull = api?.pullFromCloud || window.runDeferredCloudPull;
       if (typeof pull !== 'function') return;
-      void pull({ silent: opts.silent !== false, light: opts.light === true }).then((ok) => {
+      void pull({
+        silent: opts.silent !== false,
+        light: opts.light === true,
+        force: opts.force === true
+      }).then((ok) => {
         if (ok) scheduleFeedRefresh();
       }).catch((e) => {
         console.warn('[SyncOrchestrator] pull failed', e);
@@ -74,12 +82,25 @@
     pushUrgent = false;
   }
 
+  function cancelPendingPull() {
+    clearTimeout(pullTimer);
+  }
+
+  function cancelPending() {
+    cancelPendingPush();
+    cancelPendingPull();
+    clearTimeout(refreshTimer);
+  }
+
   window.SyncOrchestrator = {
     init,
     schedulePush,
     schedulePull,
     notifyCardsChanged,
     scheduleFeedRefresh,
-    cancelPendingPush
+    requestFeedRefresh,
+    cancelPendingPush,
+    cancelPendingPull,
+    cancelPending
   };
 })();

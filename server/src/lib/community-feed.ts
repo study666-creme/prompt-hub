@@ -306,6 +306,47 @@ export async function unpublishGhostCommunityPosts(
   return removed;
 }
 
+/** 仅统计（不下架）无图 / 无效作者帖 */
+export async function countGhostCommunityPosts(
+  admin: SupabaseClient,
+  env?: Env
+): Promise<number> {
+  const { data, error } = await admin
+    .from('community_posts')
+    .select('id, author_id, author_name, image, source_card_id')
+    .eq('published', true);
+  if (error) throw error;
+  let count = 0;
+  for (const row of (data || []) as {
+    id: string;
+    author_id: string;
+    author_name: string;
+    image: string | null;
+    source_card_id: string | null;
+  }[]) {
+    const aid = String(row.author_id || '').trim();
+    const name = String(row.author_name || '').trim();
+    const ghostAuthor =
+      !isAuthorUuid(aid) || aid === '888' || name === '888' || /^local_/i.test(aid);
+    let missingFile = false;
+    const img = String(row.image || '').trim();
+    if (!img) {
+      missingFile = true;
+    } else {
+      const candidates = communityImagePathCandidates(
+        img,
+        aid,
+        String(row.source_card_id || '').trim() || undefined
+      );
+      const found = await findFirstExistingStoragePath(admin, candidates, BUCKET, env);
+      missingFile = !found;
+    }
+    if (!ghostAuthor && !missingFile) continue;
+    count += 1;
+  }
+  return count;
+}
+
 /** 将 author_id 纠正为图片路径中的真实 UUID（修复旧版换号未清卡导致的 888 等串号） */
 export async function repairMisattributedCommunityAuthors(
   admin: SupabaseClient
@@ -378,6 +419,37 @@ export async function unpublishDuplicateCommunityPosts(
     }
   }
   return removed;
+}
+
+/** 仅统计（不下架）重复 source_card_id 帖 */
+export async function countDuplicateCommunityPosts(admin: SupabaseClient): Promise<number> {
+  const { data, error } = await admin
+    .from('community_posts')
+    .select('id, source_card_id, updated_at, created_at')
+    .eq('published', true)
+    .not('source_card_id', 'is', null);
+  if (error) throw error;
+  const byCard = new Map<string, { id: string; ts: number }[]>();
+  for (const row of (data || []) as {
+    id: string;
+    source_card_id: string;
+    updated_at: string;
+    created_at: string;
+  }[]) {
+    const cid = String(row.source_card_id || '').trim();
+    if (!cid) continue;
+    const ts = Date.parse(row.updated_at || row.created_at || '') || 0;
+    const list = byCard.get(cid) || [];
+    list.push({ id: row.id, ts });
+    byCard.set(cid, list);
+  }
+  let count = 0;
+  for (const list of byCard.values()) {
+    if (list.length < 2) continue;
+    list.sort((a, b) => b.ts - a.ts);
+    count += list.length - 1;
+  }
+  return count;
 }
 
 export async function listPublicCommunityFeed(
@@ -656,6 +728,57 @@ export async function unpublishOrphanSourceCardPosts(
   return removed;
 }
 
+/** 仅统计（不下架）删卡孤儿帖数量 */
+export async function countOrphanSourceCardPosts(admin: SupabaseClient): Promise<number> {
+  const { data, error } = await admin
+    .from('community_posts')
+    .select('id, author_id, source_card_id')
+    .eq('published', true)
+    .not('source_card_id', 'is', null);
+  if (error) throw error;
+
+  const byAuthor = new Map<string, { id: string; source_card_id: string }[]>();
+  for (const row of (data || []) as {
+    id: string;
+    author_id: string;
+    source_card_id: string;
+  }[]) {
+    const aid = String(row.author_id || '').trim();
+    const cid = String(row.source_card_id || '').trim();
+    if (!aid || !cid || !isAuthorUuid(aid)) continue;
+    const list = byAuthor.get(aid) || [];
+    list.push({ id: row.id, source_card_id: cid });
+    byAuthor.set(aid, list);
+  }
+
+  let count = 0;
+  for (const [authorId, posts] of byAuthor) {
+    const { data: ud } = await admin
+      .from('user_data')
+      .select('data')
+      .eq('user_id', authorId)
+      .maybeSingle();
+    const lib = cardLibraryIndexFromUserData(ud?.data);
+    for (const p of posts) {
+      if (
+        isCardInAuthorLibrary(
+          {
+            id: p.id,
+            author_id: authorId,
+            source_card_id: p.source_card_id,
+            image: null
+          },
+          new Map([[authorId, lib]])
+        )
+      ) {
+        continue;
+      }
+      count += 1;
+    }
+  }
+  return count;
+}
+
 export async function adminUnpublishCommunityPost(
   admin: SupabaseClient,
   postId: string
@@ -689,6 +812,24 @@ export async function getCommunityAdminStats(admin: SupabaseClient) {
     unpublishedCount: unpublishedRes.count ?? 0,
     publishedWithImage: withImageRes.count ?? 0,
     orphanPublished: orphanCount
+  };
+}
+
+/** 清理前预览：统计将被下架的帖（不修改数据） */
+export async function previewPurgeGhosts(admin: SupabaseClient, env?: Env) {
+  const [orphans, missing, duplicates, stats] = await Promise.all([
+    countOrphanSourceCardPosts(admin),
+    countGhostCommunityPosts(admin, env),
+    countDuplicateCommunityPosts(admin),
+    getCommunityAdminStats(admin)
+  ]);
+  return {
+    orphans,
+    missing,
+    duplicates,
+    total: orphans + missing + duplicates,
+    libraryMissing: stats.orphanPublished,
+    publishedRemaining: stats.publishedCount
   };
 }
 

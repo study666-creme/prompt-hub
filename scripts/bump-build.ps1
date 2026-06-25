@@ -48,7 +48,7 @@ foreach ($path in $files) {
       $t = [regex]::Replace($t, "($esc\?v=)$oldEsc", "`${1}$new")
       $t = [regex]::Replace($t, "($esc\?v=)\d{8}[a-z]", "`${1}$new")
     }
-    $t = [regex]::Replace($t, '(src="pack-[^"]+)\?v=[^"]+', '$1')
+    # pack-*.js 不带 ?v=（verify-pack-contract）；缓存靠 __APP_BUILD__ + sw.js
   } elseif ($path -like '*sw.js') {
     $t = [regex]::Replace($t, "const CACHE = 'prompt-hub-v[^']+';", "const CACHE = 'prompt-hub-v$new';")
   } else {

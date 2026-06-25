@@ -10,6 +10,7 @@ import {
   getCommunityAdminStats,
   listCommunityPostsForAdmin,
   repairMisattributedCommunityAuthors,
+  previewPurgeGhosts,
   restoreCommunityPostToUserLibrary,
   restoreOrphanCommunityPosts,
   unpublishDuplicateCommunityPosts,
@@ -144,6 +145,12 @@ adminCommunityRoutes.post('/posts/:id/delete', async (c) => {
 });
 
 /** 下架 Storage 无文件、无效作者、重复 source_card_id、卡片库已删的社区帖 */
+adminCommunityRoutes.get('/purge-ghosts/preview', async (c) => {
+  const admin = createAdminClient(c.env);
+  const data = await previewPurgeGhosts(admin, c.env);
+  return c.json({ ok: true, data });
+});
+
 adminCommunityRoutes.post('/purge-ghosts', async (c) => {
   const repairAuthors = c.req.query('repairAuthors') !== '0';
   const admin = createAdminClient(c.env);

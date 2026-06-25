@@ -6,6 +6,7 @@
  *   node scripts/sync-supabase-to-r2.mjs
  *   node scripts/sync-supabase-to-r2.mjs --download-only --out backups/card-images
  *   node scripts/sync-supabase-to-r2.mjs --download-only --out backups/card-images --skip-existing
+ *   node scripts/sync-supabase-to-r2.mjs --from-local --out backups/card-images --skip-existing
  *
  * 配置：scripts/admin.local.env（勿提交 git）
  */
@@ -48,16 +49,18 @@ const R2_BUCKET = String(env.R2_BUCKET || 'prompt-hub-card-images').trim();
 
 const args = process.argv.slice(2);
 const downloadOnly = args.includes('--download-only');
+const fromLocalOnly = args.includes('--from-local');
 const skipExisting = args.includes('--skip-existing');
 const outIdx = args.indexOf('--out');
 const outDir = outIdx >= 0 ? path.resolve(root, args[outIdx + 1] || 'backups/card-images') : null;
 
-if (!SUPABASE_URL || !SERVICE_KEY) {
+if (!fromLocalOnly && (!SUPABASE_URL || !SERVICE_KEY)) {
   console.error('缺少 SUPABASE_URL 或 SUPABASE_SERVICE_ROLE_KEY，请写入 scripts/admin.local.env');
+  console.error('仅从本机推 R2：node scripts/sync-supabase-to-r2.mjs --from-local --out backups/card-images');
   process.exit(1);
 }
 
-if (!downloadOnly && (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY)) {
+if ((fromLocalOnly || !downloadOnly) && (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY)) {
   console.error('上传 R2 需要 R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY');
   console.error('仅下载：node scripts/sync-supabase-to-r2.mjs --download-only --out backups/card-images');
   process.exit(1);
@@ -182,6 +185,21 @@ async function walkStorage(prefix = '', keys = []) {
   return keys;
 }
 
+function walkLocalKeys(dir, prefix = '') {
+  const keys = [];
+  if (!fs.existsSync(dir)) return keys;
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${ent.name}` : ent.name;
+    const full = path.join(dir, ent.name);
+    if (ent.isDirectory()) {
+      keys.push(...walkLocalKeys(full, rel));
+    } else if (/\.(jpe?g|png|webp)$/i.test(ent.name)) {
+      keys.push(rel.replace(/\\/g, '/'));
+    }
+  }
+  return keys;
+}
+
 async function downloadObject(key, tries = 3) {
   const enc = key.split('/').map(encodeURIComponent).join('/');
   let lastErr;
@@ -207,9 +225,20 @@ function contentTypeFor(key) {
 }
 
 async function main() {
-  console.log('扫描 Supabase Storage', BUCKET, '...');
-  const keys = [...new Set((await walkStorage('', [])).map((k) => k.replace(/^\//, '')).filter(Boolean))];
-  console.log('发现对象:', keys.length);
+  const localRoot = outDir || path.join(root, 'backups/card-images');
+  let keys;
+  if (fromLocalOnly) {
+    if (!fs.existsSync(localRoot)) {
+      console.error('本机目录不存在:', localRoot);
+      process.exit(1);
+    }
+    keys = [...new Set(walkLocalKeys(localRoot))];
+    console.log('本机备份 → R2，目录:', localRoot, '· 文件数:', keys.length);
+  } else {
+    console.log('扫描 Supabase Storage', BUCKET, '...');
+    keys = [...new Set((await walkStorage('', [])).map((k) => k.replace(/^\//, '')).filter(Boolean))];
+    console.log('发现对象:', keys.length);
+  }
 
   let uploaded = 0;
   let skipped = 0;
@@ -221,6 +250,25 @@ async function main() {
     if ((i + 1) % 10 === 0 || i === 0) console.log(`[${i + 1}/${keys.length}] ${key}`);
 
     try {
+      if (fromLocalOnly) {
+        const localPath = path.join(localRoot, key);
+        if (!fs.existsSync(localPath) || fs.statSync(localPath).size < 64) {
+          skipped += 1;
+          continue;
+        }
+        if (skipExisting) {
+          const exists = await r2HeadObject(key).catch(() => false);
+          if (exists) {
+            skipped += 1;
+            continue;
+          }
+        }
+        const buf = fs.readFileSync(localPath);
+        await r2PutObject(key, buf, contentTypeFor(key));
+        uploaded += 1;
+        continue;
+      }
+
       if (downloadOnly || outDir) {
         const dest = outDir ? path.join(outDir, key) : null;
         if (dest && skipExisting && fs.existsSync(dest) && fs.statSync(dest).size >= 512) {
@@ -255,7 +303,7 @@ async function main() {
   }
 
   console.log('\n完成');
-  console.log({ total: keys.length, downloaded, uploaded, skipped, failed, downloadOnly, skipExisting, outDir });
+  console.log({ total: keys.length, downloaded, uploaded, skipped, failed, downloadOnly, fromLocalOnly, skipExisting, outDir: outDir || localRoot });
 }
 
 main().catch((e) => {

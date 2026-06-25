@@ -78,6 +78,20 @@ authSignIn()
 
 ---
 
+## SyncOrchestrator（`sync-orchestrator.js` · 打包在 `pack-core.js`）
+
+| API | 用途 |
+|-----|------|
+| `schedulePush` | 静默 push（默认 90s；urgent 350ms；非 urgent 跳过图片上传） |
+| `schedulePull` | 后台 pull 防抖（登录/切页/定时同步） |
+| `notifyCardsChanged` | `saveAllData` 后排队元数据 push |
+| `requestFeedRefresh` | 防抖 800ms 刷新社区/生图 Feed（替代散落 `refreshFeedsAfterCardsSync`） |
+| `cancelPending` | 退出/切账号时取消排队 push/pull |
+
+`script.js`：`scheduleCloudPush` → 编排器；`scheduleDeferredCloudPull` → 编排器；需 **await pull 完成** 的路径仍直接 `runDeferredCloudPull`（如生图静默同步）。
+
+---
+
 ## 相关文档
 
 - 数据分层：`docs/DATA-MODEL.md`

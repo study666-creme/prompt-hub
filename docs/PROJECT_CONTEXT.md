@@ -1,6 +1,6 @@
 # Prompt Hub — 项目上下文（给 AI / 新对话用）
 
-> **新聊天**：先读 **`docs/AI-PITFALLS.md`**（防炸站）→ **`docs/CURRENT-ISSUES.md`（P0-带宽）** → **`docs/AI-HANDOFF.md`**。  
+> **新聊天**：先读 **`docs/AI-PITFALLS.md`**（防炸站）→ **`docs/CURRENT-ISSUES.md`** → **`docs/AI-HANDOFF.md`**。  
 > 默认中文；**P0 拉满算力**见 `docs/AI-WORK-MODE.md`；勿提交密钥。用户是纯小白 → 分步 + 可复制命令。
 
 ---
@@ -24,35 +24,37 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · P0 热修 findBestApiJobForPrompt）
+## 当前部署阶段（2026-06-07 · Feed 滚动 + 生图 Tab）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260625d` · https://prompt-hubs.com |
+| **Pages** | build `20260625p` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
 ### 已打通
 
-- ✅ **P0 全站图片/Feed**：修复 `findBestApiJobForPrompt`、`isGeneratedWarehouseCard`、`renderCreations` 等模块化误删导致的 ReferenceError
-- ✅ **生图仓库 / Feed**：`listRecoverableOrphanJobs` 等 job-runner 导出已接线
-- ✅ **全站 Feed**：`community-public-feed.js` 独立加载
-- ✅ **MediaPipeline + SyncOrchestrator**
+- ✅ **首屏带宽**：卡片库 ~889 kB、社区 ~865 kB（2026-06 用户 Network 验收）
+- ✅ **P0 全站图片/Feed**：模块化 ReferenceError 热修
+- ✅ **生图仓库 / Feed**：grid-only + sign-batch；Tab 切换强制重绘
+- ✅ **MediaPipeline + SyncOrchestrator**（pull/Feed 刷新已收编至编排器）
 - ✅ 新图走 **R2**（`MEDIA_STORAGE_MODE=r2`）
+- ✅ **社区分页 / 生图 Tab 错乱 / 侧栏点图后滚动对抗**（`20260625p`）
 
 ### 架构优化进度
 
 | 阶段 | 内容 | 进度 |
 |------|------|------|
-| 1 图片管线 | MediaPipeline 全站 Feed/卡片库/生图/资产 | ~95% |
-| 2 云同步解耦 | SyncOrchestrator + skipImageUpload | ~80% |
-| 3 模块化 | 12 个 imagegen 子模块 + features-draft ~9.3k 行；export/wire 部署前审计 | 完成 |
+| 1 图片管线 | MediaPipeline 全站 Feed/卡片库/生图/资产 | 完成 |
+| 2 云同步解耦 | SyncOrchestrator + skipImageUpload | 完成 |
+| 3 模块化 | 12 个 imagegen 子模块 + features-draft ~9.3k 行 | 完成 |
 
 ### 已知问题 / 下一步
 
-1. 部分历史图 URL 404 / 签名过期 → R2 批量同步
-2. MemFire 迁移（7 月初 final dump）
-3. 偶发 `api.prompt-hubs.com` 502
+1. MemFire 迁移（7 月初 final dump）
+2. 部分旧第三方外链 404、偶发 502
+3. 运营后台 UI 持续优化（侧栏导航、概览统计色条、刷新按钮）
+4. R2 历史图本机 `backups/card-images` → 同步脚本
 
 ### 部署
 

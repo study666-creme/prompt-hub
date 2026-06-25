@@ -145,6 +145,10 @@
   const feedPagedStore = {};
   const feedPagedScrollBound = {};
   const feedScrollIntent = {};
+  let feedScrollLockUntil = 0;
+  let feedScrollLockAnchor = null;
+  let feedScrollLockClearTimer = null;
+  let feedUserScrollUntil = 0;
   let imageGenLayoutTimer = null;
   const displayUrlCache = new Map();
   let communityPostsSyncInflight = null;
@@ -518,11 +522,21 @@
     delete container.dataset.feedLayoutCols;
     delete feedPagedStore[containerId];
     feedScrollIntent[containerId] = false;
+    delete container.dataset.feedPageDone;
     container.scrollTop = 0;
   }
 
   function syncFeedPagedStoreFromDisplay(containerId = 'communityGrid') {
-    const next = filterAndSortPosts(getCommunityFeedForDisplay()).filter(isFeedRenderablePost);
+    let next = filterAndSortPosts(getCommunityFeedForDisplay()).filter(isFeedRenderablePost);
+    if (containerId === 'communityGrid') {
+      const seen = new Set();
+      next = next.filter((p) => {
+        const key = p.sourceCardId ? `c:${p.sourceCardId}` : `p:${p.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
     const sig = feedListSignature(next, containerId);
     const store = feedPagedStore[containerId];
     if (!store) {
@@ -539,7 +553,11 @@
     store.sig = sig;
     const domPage = inferFeedStorePageFromDom(containerId);
     if (domPage > store.page) store.page = domPage;
-    if (next.length > prevLen) store.remoteExhausted = false;
+    if (next.length > prevLen) {
+      store.remoteExhausted = false;
+      const grid = document.getElementById(containerId);
+      if (grid) delete grid.dataset.feedPageDone;
+    }
     return Math.max(0, next.length - prevLen);
   }
 
@@ -587,6 +605,19 @@
 
   function countFeedDomUnique(containerId = 'communityGrid') {
     return getCommunityFeedRenderedPostIds(containerId).size;
+  }
+
+  function canLoadMoreFeedPages(containerId = 'communityGrid') {
+    return !feedDrainComplete(containerId);
+  }
+
+  function markFeedPageScrollDone(containerId) {
+    const container = document.getElementById(containerId);
+    if (container?.__feedPageIo) {
+      container.__feedPageIo.disconnect();
+      container.__feedPageIo = null;
+    }
+    container && (container.dataset.feedPageDone = '1');
   }
 
   function feedDrainComplete(containerId = 'communityGrid') {
@@ -693,6 +724,7 @@
     communityFeedPageLoading = true;
     feedScrollIntent[containerId] = true;
     try {
+      const beforeDom = countFeedDomUnique(containerId);
       let batch = getPendingFeedPosts(store, containerId);
       if (!batch.length) {
         const hasMore = await ensureFeedStoreHasMore(containerId);
@@ -703,14 +735,20 @@
       }
       store.page = Math.max(
         store.page || 1,
-        Math.ceil((countFeedDomUnique(containerId) + batch.length) / FEED_PER_PAGE)
+        Math.ceil((beforeDom + batch.length) / FEED_PER_PAGE)
       );
       await renderPostsIntoContainer(store.posts, containerId, {
         feedAppend: true,
         feedAppendPosts: batch
       });
-      logFeedPageDebug(containerId, 'appended', { batch: batch.length, pendingAfter: getPendingFeedPosts(store, containerId, 1).length });
-      return true;
+      const afterDom = countFeedDomUnique(containerId);
+      logFeedPageDebug(containerId, 'appended', {
+        batch: batch.length,
+        beforeDom,
+        afterDom,
+        pendingAfter: getPendingFeedPosts(store, containerId, 1).length
+      });
+      return afterDom > beforeDom;
     } finally {
       communityFeedPageLoading = false;
       const container = document.getElementById(containerId);
@@ -718,14 +756,20 @@
         ensureFeedPageSentinel(container);
         reconnectFeedPageObserver(containerId);
         finishCommunityFeedLayoutAfterBatch(containerId);
+        requestAnimationFrame(() => maybeChainFeedPageLoad(containerId, container));
       }
     }
   }
 
   async function drainCommunityFeedPages(containerId = 'communityGrid', maxPages = 12) {
+    if (feedDrainComplete(containerId)) {
+      markFeedPageScrollDone(containerId);
+      return;
+    }
     for (let i = 0; i < maxPages; i += 1) {
       if (feedDrainComplete(containerId)) {
         logFeedPageDebug(containerId, 'drain_complete', { round: i });
+        markFeedPageScrollDone(containerId);
         break;
       }
       const beforeDom = countFeedDomUnique(containerId);
@@ -733,8 +777,12 @@
       const afterDom = countFeedDomUnique(containerId);
       if (!loaded && afterDom === beforeDom) {
         logFeedPageDebug(containerId, 'drain_stuck', { round: i, beforeDom, afterDom });
+        markFeedPageScrollDone(containerId);
         break;
       }
+    }
+    if (feedDrainComplete(containerId)) {
+      markFeedPageScrollDone(containerId);
     }
     finishCommunityFeedLayoutAfterBatch(containerId);
     if (containerId === 'creationsGrid' || containerId === 'communityGrid') {
@@ -758,7 +806,7 @@
       await renderPostsIntoContainer(store.posts, containerId);
     }
     if (added > 0 || rendered < target) {
-      await drainCommunityFeedPages(containerId, 3);
+      await drainCommunityFeedPages(containerId, 8);
     }
   }
 
@@ -802,6 +850,11 @@
   async function ensureFeedStoreHasMore(containerId) {
     const store = feedPagedStore[containerId];
     if (!store) return false;
+    if (containerId === 'communityGrid') {
+      syncFeedPagedStoreFromDisplay(containerId);
+    }
+    if (getPendingFeedPosts(store, containerId, 1).length) return true;
+    if (countFeedDomUnique(containerId) < store.posts.length) return true;
     if (store.page * FEED_PER_PAGE < store.posts.length) return true;
     if (store.remoteExhausted && !publicFeedState.remoteHasMore) {
       logFeedPageDebug(containerId, 'remote_exhausted_local_end');
@@ -2256,7 +2309,7 @@
     }
     scheduleCommunityLayout(containerId, { force: true, immediate: true });
     layoutCommunityWhenImagesReady(containerId);
-    if (isMobileViewport() && (containerId === 'communityGrid' || containerId === 'creationsGrid')) {
+    if (containerId === 'communityGrid' || containerId === 'creationsGrid') {
       requestAnimationFrame(() => reconnectFeedPageObserver(containerId));
     }
   }
@@ -2273,7 +2326,10 @@
       el = el.parentElement;
     }
     if (!isMobileViewport() && container.id === 'creationsGrid') {
-      return container.closest('.my-home-shell') || container.closest('.feature-shell') || container;
+      const shell = container.closest('.feature-shell.my-home-shell')
+        || container.closest('.my-home-shell')
+        || container.closest('.feature-shell');
+      if (shell) return shell;
     }
     if (
       !isMobileViewport()
@@ -2298,8 +2354,27 @@
 
   function collectFeedScrollTargets(containerId, container) {
     const targets = new Set();
+    const addIfScrollable = (el) => {
+      if (!el) return;
+      const st = getComputedStyle(el);
+      const oy = st.overflowY;
+      if (
+        (oy === 'auto' || oy === 'scroll' || oy === 'overlay')
+        && el.scrollHeight > el.clientHeight + 8
+      ) {
+        targets.add(el);
+      }
+    };
     const primary = getFeedScrollRoot(container) || container;
     if (primary) targets.add(primary);
+    if (!isMobileViewport() && (containerId === 'communityGrid' || containerId === 'creationsGrid')) {
+      addIfScrollable(container);
+      addIfScrollable(container?.closest?.('.feature-body'));
+      if (containerId === 'creationsGrid') {
+        addIfScrollable(container?.closest?.('.my-home-shell'));
+        addIfScrollable(container?.closest?.('.feature-shell'));
+      }
+    }
     if (isMobileViewport() && (containerId === 'communityGrid' || containerId === 'creationsGrid')) {
       const shell = container?.closest?.('.feature-shell');
       if (shell) targets.add(shell);
@@ -2330,6 +2405,28 @@
     return sentinel;
   }
 
+  function markFeedUserScrolling() {
+    feedUserScrollUntil = Date.now() + 900;
+  }
+
+  function shouldSkipFeedScrollRestore(scrollEl, capturedTop) {
+    if (!scrollEl || !Number.isFinite(capturedTop)) return true;
+    if (Date.now() < feedUserScrollUntil) return true;
+    return scrollEl.scrollTop > capturedTop + 20;
+  }
+
+  function safeApplyFeedScrollTop(scrollEl, capturedTop, opts = {}) {
+    if (!scrollEl || !Number.isFinite(capturedTop)) return;
+    const force = opts.force === true;
+    const cur = scrollEl.scrollTop;
+    if (!force) {
+      if (shouldSkipFeedScrollRestore(scrollEl, capturedTop)) return;
+      /* 布局/排版后禁止把用户已滑过的位置往回拉 */
+      if (cur > capturedTop + 8) return;
+    }
+    scrollEl.scrollTop = capturedTop;
+  }
+
   function captureFeedScrollAnchor(container) {
     if (!container) return null;
     const scrollEl = getFeedScrollRoot(container) || container;
@@ -2344,28 +2441,114 @@
     return { scrollTop: scrollEl.scrollTop, scrollEl };
   }
 
-  function restoreFeedScrollAnchor(container, anchor) {
+  function restoreFeedScrollAnchor(container, anchor, opts = {}) {
     if (!container || !anchor) return;
     const scrollEl = anchor.scrollEl || getFeedScrollRoot(container) || container;
+    const force = opts.force === true;
+    if (!force && shouldSkipFeedScrollRestore(scrollEl, anchor.scrollTop)) return;
     if (anchor.postId) {
       const card = container.querySelector(`.card[data-post-id="${CSS.escape(anchor.postId)}"]`);
       if (card) {
         const rect = scrollEl.getBoundingClientRect();
         const r = card.getBoundingClientRect();
-        scrollEl.scrollTop += (r.top - rect.top) - anchor.offset;
+        const nextTop = scrollEl.scrollTop + (r.top - rect.top) - anchor.offset;
+        if (!force && nextTop < scrollEl.scrollTop - 8) return;
+        scrollEl.scrollTop = nextTop;
         return;
       }
     }
-    if (Number.isFinite(anchor.scrollTop)) scrollEl.scrollTop = anchor.scrollTop;
+    if (Number.isFinite(anchor.scrollTop)) {
+      safeApplyFeedScrollTop(scrollEl, anchor.scrollTop, { force });
+    }
   }
 
   function preserveFeedScroll(container, fn) {
     const anchor = captureFeedScrollAnchor(container);
     fn();
-    requestAnimationFrame(() => {
-      restoreFeedScrollAnchor(container, anchor);
-      requestAnimationFrame(() => restoreFeedScrollAnchor(container, anchor));
+    scheduleFeedScrollRestores(container, anchor, [0, 16, 32, 120, 280]);
+  }
+
+  function releaseFeedScrollLock() {
+    feedScrollLockUntil = 0;
+    feedScrollLockAnchor = null;
+    clearTimeout(feedScrollLockClearTimer);
+    feedScrollLockClearTimer = null;
+  }
+
+  function lockFeedScroll(container, ms = 520) {
+    if (!container) return null;
+    const anchor = captureFeedScrollAnchor(container);
+    feedScrollLockAnchor = anchor;
+    feedScrollLockUntil = Date.now() + ms;
+    clearTimeout(feedScrollLockClearTimer);
+    feedScrollLockClearTimer = setTimeout(() => {
+      releaseFeedScrollLock();
+    }, ms + 48);
+    return anchor;
+  }
+
+  function isFeedScrollLocked() {
+    return Date.now() < feedScrollLockUntil;
+  }
+
+  function restoreLockedFeedScroll(container) {
+    releaseFeedScrollLock();
+  }
+
+  function bindFeedScrollLock(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container || container.__feedScrollLockBound) return;
+    container.__feedScrollLockBound = true;
+    const onUserScrollIntent = () => {
+      markFeedUserScrolling();
+      releaseFeedScrollLock();
+    };
+    const refresh = () => {
+      collectFeedScrollTargets(containerId, container).forEach((el) => {
+        if (!el || el.__feedScrollLockListener) return;
+        el.__feedScrollLockListener = onUserScrollIntent;
+        el.addEventListener('scroll', onUserScrollIntent, { passive: true });
+        el.addEventListener('wheel', onUserScrollIntent, { passive: true });
+      });
+    };
+    container.__feedScrollLockRefresh = refresh;
+    refresh();
+  }
+
+  function scheduleFeedScrollRestores(container, anchor, delays = [0, 16, 80, 180, 360, 560]) {
+    if (!container || !anchor) return;
+    const scrollEl = anchor.scrollEl || getFeedScrollRoot(container) || container;
+    const capturedTop = anchor.scrollTop;
+    delays.forEach((ms) => {
+      setTimeout(() => {
+        if (Date.now() < feedUserScrollUntil) return;
+        if (shouldSkipFeedScrollRestore(scrollEl, capturedTop)) return;
+        restoreFeedScrollAnchor(container, anchor);
+      }, ms);
     });
+  }
+
+  function resolveFeedPageIoRoot(containerId, container, scrollTargets) {
+    const candidates = scrollTargets?.length
+      ? scrollTargets
+      : collectFeedScrollTargets(containerId, container);
+    for (const el of candidates) {
+      if (!el || el === document.documentElement) continue;
+      if (el.scrollHeight > el.clientHeight + 8) return el;
+    }
+    return null;
+  }
+
+  function isFeedNearBottom(target, margin = 320) {
+    if (!target) return false;
+    return target.scrollTop + target.clientHeight >= target.scrollHeight - margin;
+  }
+
+  function maybeChainFeedPageLoad(containerId, container) {
+    if (!container || communityFeedPageLoading || !canLoadMoreFeedPages(containerId)) return;
+    const targets = collectFeedScrollTargets(containerId, container);
+    if (!targets.some((t) => isFeedNearBottom(t))) return;
+    void drainCommunityFeedPages(containerId, 3);
   }
 
 
@@ -2946,6 +3129,7 @@
       getMasonryGap,
       getCommunityFeedGaps,
       getFeedScrollRoot,
+      safeApplyFeedScrollTop,
       setFeedLayoutPending,
       ensureFeedPageSentinel,
       revealCommunityFeedImages,
@@ -3228,10 +3412,6 @@
     syncCommunityPanelOpenClass();
     if (isMobileViewport()) window.MobileUI?.closeDrawers?.();
     void renderCreationsSidePanel(id);
-    if (!isMobileViewport()) {
-      relayoutFeedGridAfterSidePanel('creationsGrid');
-      requestAnimationFrame(() => relayoutFeedGridAfterSidePanel('creationsGrid'));
-    }
   }
 
   async function renderCreationsSidePanel(id) {
@@ -3783,19 +3963,24 @@
     if (!useFeedPagedRender(containerId)) return;
     const container = document.getElementById(containerId);
     if (!container) return;
+    bindFeedScrollLock(containerId);
+    container.__feedScrollLockRefresh?.();
     const scrollTargets = collectFeedScrollTargets(containerId, container);
-    const scrollEl = scrollTargets[0] || container;
+    const scrollEl = resolveFeedPageIoRoot(containerId, container, scrollTargets) || scrollTargets[0] || container;
 
     async function drainFeedPages(maxPages = 8) {
+      if (!canLoadMoreFeedPages(containerId)) return;
       logFeedPageDebug(containerId, 'drain_start', { maxPages });
       await drainCommunityFeedPages(containerId, maxPages);
       logFeedPageDebug(containerId, 'drain_end');
     }
 
     function onFeedScroll(target) {
+      markFeedUserScrolling();
+      releaseFeedScrollLock();
       if (target.scrollTop > 32) feedScrollIntent[containerId] = true;
-      if (communityFeedPageLoading) return;
-      const nearBottom = target.scrollTop + target.clientHeight >= target.scrollHeight - 240;
+      if (communityFeedPageLoading || !canLoadMoreFeedPages(containerId)) return;
+      const nearBottom = isFeedNearBottom(target);
       if (!nearBottom) return;
       const now = Date.now();
       if (now - feedPageScrollThrottle < 180) return;
@@ -3803,15 +3988,14 @@
       void drainFeedPages(6);
     }
 
-    if (!feedPagedScrollBound[containerId]) {
-      feedPagedScrollBound[containerId] = true;
-      container.__feedScrollTargets = container.__feedScrollTargets || new Set();
-      scrollTargets.forEach((target) => {
-        if (!target || container.__feedScrollTargets.has(target)) return;
-        container.__feedScrollTargets.add(target);
-        target.addEventListener('scroll', () => onFeedScroll(target), { passive: true });
-      });
-    }
+    container.__feedScrollTargets = container.__feedScrollTargets || new Set();
+    scrollTargets.forEach((target) => {
+      if (!target || container.__feedScrollTargets.has(target)) return;
+      container.__feedScrollTargets.add(target);
+      target.addEventListener('scroll', () => onFeedScroll(target), { passive: true });
+      target.addEventListener('wheel', () => markFeedUserScrolling(), { passive: true });
+    });
+    feedPagedScrollBound[containerId] = true;
 
     ensureFeedPageSentinel(container);
     const sentinel = container.querySelector(':scope > .feed-page-sentinel');
@@ -3820,19 +4004,26 @@
       container.__feedPageIo.disconnect();
       container.__feedPageIo = null;
     }
-    const ioRoot = scrollEl && scrollEl !== document.documentElement && scrollEl.scrollHeight > scrollEl.clientHeight + 8
-      ? scrollEl
-      : null;
+    const ioRoot = resolveFeedPageIoRoot(containerId, container, scrollTargets);
     const io = new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting)) return;
+      if (isFeedScrollLocked() || !canLoadMoreFeedPages(containerId)) return;
       const now = Date.now();
       if (now - feedPageScrollThrottle < 180) return;
       feedPageScrollThrottle = now;
       void drainFeedPages(4);
-    }, { root: ioRoot, rootMargin: '720px 0px', threshold: 0 });
+    }, { root: ioRoot, rootMargin: '960px 0px', threshold: 0 });
     io.observe(sentinel);
     container.__feedPageIo = io;
     container.__feedPageIoRoot = ioRoot;
+    if (!container.dataset.feedPageDone && canLoadMoreFeedPages(containerId)) {
+      requestAnimationFrame(() => {
+        if (!canLoadMoreFeedPages(containerId)) return;
+        if (isFeedNearBottom(scrollEl) || isFeedNearBottom(container)) {
+          void drainFeedPages(2);
+        }
+      });
+    }
   }
 
   async function renderPostsIntoContainer(posts, containerId, opts = {}) {
@@ -3864,7 +4055,10 @@
       }
       return;
     }
-    if (!feedAppend) container.dataset.feedSig = sig;
+    if (!feedAppend) {
+      container.dataset.feedSig = sig;
+      delete container.dataset.feedPageDone;
+    }
     delete container.dataset.feedFinalized;
     const isProfile = containerId === 'userProfileGrid';
     const isCommunityFeed = containerId === 'communityGrid' || containerId === 'userProfileGrid';
@@ -3968,7 +4162,7 @@
       container.appendChild(fragment);
       appendFeedCardsLayout(containerId, appendedCards);
       requestAnimationFrame(() => {
-        scrollEl.scrollTop = prevScrollTop;
+        safeApplyFeedScrollTop(scrollEl, prevScrollTop);
         finishCommunityFeedLayoutAfterBatch(containerId);
       });
       bindFeedPagedScroll(containerId);
@@ -4091,16 +4285,22 @@
   function shuffleCommunityPosts(posts) {
     const list = Array.isArray(posts) ? posts : [];
     if (!list.length) return list;
-    const sig = list.map((p) => String(p.id)).sort().join('|');
-    if (communityRandomSig !== sig) {
-      communityRandomSig = sig;
-      const ids = list.map((p) => p.id);
-      for (let i = ids.length - 1; i > 0; i -= 1) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [ids[i], ids[j]] = [ids[j], ids[i]];
-      }
-      communityRandomOrder = new Map(ids.map((id, idx) => [id, idx]));
+    if (!communityRandomOrder) communityRandomOrder = new Map();
+    const idSet = new Set(list.map((p) => String(p.id)));
+    for (const id of [...communityRandomOrder.keys()]) {
+      if (!idSet.has(String(id))) communityRandomOrder.delete(id);
     }
+    const missing = list.filter((p) => !communityRandomOrder.has(p.id));
+    if (missing.length) {
+      let nextIdx = communityRandomOrder.size
+        ? Math.max(...communityRandomOrder.values()) + 1
+        : 0;
+      missing.forEach((p) => {
+        communityRandomOrder.set(p.id, nextIdx + Math.random());
+        nextIdx += 1;
+      });
+    }
+    communityRandomSig = [...idSet].sort().join('|');
     return [...list].sort((a, b) => {
       const ai = communityRandomOrder.get(a.id) ?? 0;
       const bi = communityRandomOrder.get(b.id) ?? 0;
@@ -5134,7 +5334,6 @@
       return;
     }
     if (containerId === 'creationsGrid') {
-      syncCommunityFeedColumnCount(containerId);
       scheduleCommunityLayout(containerId, { force: true, immediate: true, recalcCols: true });
     }
   }
@@ -5161,6 +5360,9 @@
     const isCreations = ctx === 'creations';
     communitySidePostId = id;
     openPostId = id;
+    const gridId = isCreations ? 'creationsGrid' : 'communityGrid';
+    const grid = document.getElementById(gridId);
+    releaseFeedScrollLock();
     const panelId = isCreations ? 'creationsSidePanel' : 'communitySidePanel';
     ensureFeatureSidePanelDocked(panelId);
     mountFeatureSidePanel(panelId);
@@ -5174,10 +5376,6 @@
     if (isMobileViewport()) {
       window.MobileUI?.closeDrawers?.();
     }
-    const gridId = isCreations ? 'creationsGrid' : 'communityGrid';
-    const grid = document.getElementById(gridId);
-    const scrollEl = grid ? (getFeedScrollRoot(grid) || grid) : null;
-    const savedScrollTop = scrollEl ? scrollEl.scrollTop : 0;
     document.querySelectorAll(`#${gridId} .community-post-card.selected`).forEach((el) => el.classList.remove('selected'));
     document.querySelector(`#${gridId} .community-post-card[data-post-id="${id}"]`)?.classList.add('selected');
     void renderCommunitySidePanel(id, {
@@ -5186,15 +5384,6 @@
       titleId: isCreations ? 'creationsSideTitle' : 'communitySideTitle',
       mode: isCreations ? 'creations' : 'community'
     });
-    if (!isMobileViewport()) {
-      relayoutFeedGridAfterSidePanel(gridId);
-      requestAnimationFrame(() => relayoutFeedGridAfterSidePanel(gridId));
-    }
-    if (scrollEl && savedScrollTop > 0) {
-      requestAnimationFrame(() => {
-        scrollEl.scrollTop = savedScrollTop;
-      });
-    }
   }
 
   function openCommunitySidePanel(id, opts = {}) {
@@ -6874,7 +7063,10 @@
         document.querySelectorAll('[data-feed-tab]').forEach(b => b.classList.toggle('active', b === btn));
         closeImageGenPreview();
         updateImageGenFeedHint();
-        renderImageGenFeed({ scrollToTop: true });
+        syncImageGenWarehouseFiltersUI();
+        syncImageGenCommunityFiltersUI();
+        imageGenFeedPagedStore = null;
+        renderImageGenFeed({ scrollToTop: true, force: true });
       });
     });
     document.querySelectorAll('[data-imagegen-community-sort]').forEach(btn => {
@@ -7303,6 +7495,8 @@
       if (Date.now() - last < 120000) return;
       if (typeof window.runDeferredCloudPull === 'function') {
         await window.runDeferredCloudPull({ silent: true, light: true });
+      } else {
+        window.scheduleDeferredCloudPull?.({ silent: true, light: true });
       }
       await resumePendingGenerationJobs();
       renderImageGenFeed({ preserveScroll: true });
