@@ -28,7 +28,7 @@
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260625c` · https://prompt-hubs.com |
+| **Pages** | build `20260625d` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 

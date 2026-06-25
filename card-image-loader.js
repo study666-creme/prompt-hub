@@ -293,6 +293,13 @@
     if (media) {
       media.classList.add('is-loading', 'card-media--await');
       media.classList.remove('card-media--load-failed');
+      if (media.__whBackfillFailTimer) clearTimeout(media.__whBackfillFailTimer);
+      media.__whBackfillFailTimer = setTimeout(() => {
+        media.__whBackfillFailTimer = null;
+        if (media.classList.contains('is-loading') && !media.classList.contains('media-revealed')) {
+          window.finalizeWarehouseCardMediaFailure?.(media, img);
+        }
+      }, 22000);
     }
     return true;
   }
@@ -358,6 +365,10 @@
       const srcNow = img.currentSrc || img.src || '';
       const pathNow = window.SupabaseSync?.storagePathFromDisplayUrl?.(srcNow);
       const isGridSrc = pathNow && /_grid\.(jpe?g|webp|png)$/i.test(pathNow);
+      if (media.__whBackfillFailTimer) {
+        clearTimeout(media.__whBackfillFailTimer);
+        media.__whBackfillFailTimer = null;
+      }
       if (isGridSrc && (w < 32 || h < 32)) {
         fail();
         return;
@@ -450,7 +461,7 @@
         if (queueGridBackfillForImg(img)) return;
       }
       if (inWarehouseOwn) {
-        media.classList.add('card-media--load-failed');
+        window.finalizeWarehouseCardMediaFailure?.(media, img);
         return;
       }
       media.classList.add('card-media--load-failed');
@@ -518,7 +529,11 @@
         applyUrlToImg(img, url);
         return;
       }
-      if (isOwnWarehouseListImg(img)) queueGridBackfillForImg(img);
+      if (isOwnWarehouseListImg(img)) {
+        if (!queueGridBackfillForImg(img)) {
+          window.finalizeWarehouseCardMediaFailure?.(feedMediaFromImg(img), img);
+        }
+      }
     };
     const job = () => resolveUrl(ref, cardId, extra, img).then(finishResolve);
     const startLoad = () => {

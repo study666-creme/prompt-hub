@@ -2525,6 +2525,7 @@
 
   function isDisplayableImage(image) {
     if (!image || typeof image !== 'string') return false;
+    if (!String(image).trim()) return false;
     if (isDemoPlaceholderImage(image)) return false;
     return true;
   }
