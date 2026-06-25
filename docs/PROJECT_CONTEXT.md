@@ -28,13 +28,13 @@
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260624j` · https://prompt-hubs.com |
+| **Pages** | build `20260624k` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
 ### 已打通
 
-- ✅ **P0 带宽**：grid 缩略图 + `user_data` 增量同步（`updated_at` 49B vs 全量 13MB · `20260624j`）
+- ✅ **P0 带宽 + 云同步**：grid 缩略图 · `user_data` 增量（`updated_at` 49B vs 全量 13MB · `20260624k`）
 - ✅ **基线 pg_dump**：`backups/prompt-hub-baseline-20260624.dump`（**24.5 MB** · Pooler Session）
 - ✅ 新图走 **R2**（`MEDIA_STORAGE_MODE=r2`）
 

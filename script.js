@@ -4554,10 +4554,7 @@
       } catch (e) { /* ignore */ }
 
       let cloudCreations = [];
-      try {
-        const cloud = await window.SupabaseSync.pullCloudData();
-        if (Array.isArray(cloud?.creations)) cloudCreations = cloud.creations;
-      } catch (e) { /* ignore */ }
+      /* 恢复扫描勿拉 14MB user_data；本地 creations + API 任务史已够用 */
 
       let apiJobs = [];
       if (window.PromptHubApi?.listGenerationJobsHistory) {
