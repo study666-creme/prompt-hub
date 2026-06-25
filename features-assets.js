@@ -1343,7 +1343,7 @@
     if (status) status.textContent = `已导入 ${n} 张卡片${groups.length ? `，已创建 ${groups.length} 个文件夹` : ''}`;
     toast(`已导入 ${n} 张卡片到所选库`);
     if (window.SupabaseSync?.pullCloudData) {
-      await window.SupabaseSync.pullCloudData();
+      await window.SupabaseSync.pullCloudData({ ifStale: true });
     }
     if (typeof window.refreshWarehouseUI === 'function') {
       window.refreshWarehouseUI({ softCards: false });
