@@ -1368,11 +1368,9 @@
         let url = cardPickerThumb(c);
         if (!url && c.image) {
           try {
-            if (window.MediaPipeline?.resolveListUrl) {
-              url = await window.MediaPipeline.resolveListUrl(c.image, { assetId: c.id, cardId: c.id });
-            } else if (window.SupabaseSync?.resolveDisplayUrl) {
-              url = await window.SupabaseSync.resolveDisplayUrl(c.image, { variant: 'grid', listOnly: true });
-            }
+            url = window.MediaPipeline?.resolveListUrl
+              ? await window.MediaPipeline.resolveListUrl(c.image, { assetId: c.id, cardId: c.id })
+              : await window.SupabaseSync.resolveDisplayUrl(c.image, { variant: 'grid', listOnly: true, allowFullFallback: false });
           } catch (e) {
             url = '';
           }

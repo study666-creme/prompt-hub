@@ -28,7 +28,7 @@
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260625n` · https://prompt-hubs.com |
+| **Pages** | build `20260625o` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
@@ -43,13 +43,13 @@
 
 | 阶段 | 内容 | 进度 |
 |------|------|------|
-| 1 图片管线 | MediaPipeline 全站 Feed/卡片库/生图 | ~90% |
+| 1 图片管线 | MediaPipeline 全站 Feed/卡片库/生图/资产 | ~95% |
 | 2 云同步解耦 | SyncOrchestrator + skipImageUpload | ~80% |
 | 3 模块化 | esbuild 拆包（pack-*.js 已上线） | 进行中 |
 
 ### 已知问题 / 下一步
 
-1. 阶段 1 收尾：`features-assets.js` 资产包封面签图改走 Pipeline
+1. 阶段 3：继续 esbuild 拆 `features-draft.js` 大块逻辑
 2. MemFire 迁移（7 月初 final dump）
 3. R2 历史图同步
 

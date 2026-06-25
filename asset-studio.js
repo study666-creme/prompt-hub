@@ -1301,27 +1301,39 @@
     }
   }
 
-  function resolveCardDisplayUrl(imageRef) {
+  function resolveCardDisplayUrl(imageRef, cardId) {
     if (!imageRef || typeof imageRef !== 'string') return '';
-    const cached = window.SupabaseSync?.getCachedDisplayUrl?.(imageRef, { variant: 'grid' });
+    const cached = window.MediaPipeline?.getListCached?.(imageRef, cardId)
+      || window.SupabaseSync?.getCachedDisplayUrl?.(imageRef, { assetId: cardId, variant: 'grid' });
     if (cached && !cached.startsWith('data:image/svg')) return cached;
+    const safe = window.MediaPipeline?.safeImgSrc?.(imageRef);
+    if (safe && !safe.startsWith('data:image/svg')) return safe;
     if (/^https?:\/\//i.test(imageRef) || imageRef.startsWith('data:')) return imageRef;
     return '';
   }
 
   async function pickCoverImageUrl(cards, communityPosts) {
     const withImg = (cards || []).filter((c) => c?.image);
-    if (withImg.length && window.SupabaseSync?.prefetchCardsImages) {
+    if (withImg.length && window.MediaPipeline?.prefetchList) {
+      await window.MediaPipeline.prefetchList(withImg.slice(0, 8), 6000);
+    } else if (withImg.length && window.SupabaseSync?.prefetchCardsImages) {
       await window.SupabaseSync.prefetchCardsImages(withImg.slice(0, 8), 6000);
     }
     for (const c of withImg.slice(0, 16)) {
-      const hit = resolveCardDisplayUrl(c.image);
+      const hit = resolveCardDisplayUrl(c.image, c.id);
       if (hit && !hit.includes('data:image/svg')) return hit;
-      if (window.SupabaseSync?.resolveDisplayUrl) {
+      if (window.MediaPipeline?.resolveListUrl) {
+        try {
+          const signed = await window.MediaPipeline.resolveListUrl(c.image, { assetId: c.id, cardId: c.id });
+          if (signed && !String(signed).includes('data:image/svg')) return signed;
+        } catch (e) { /* ignore */ }
+      } else if (window.SupabaseSync?.resolveDisplayUrl) {
         try {
           const signed = await window.SupabaseSync.resolveDisplayUrl(c.image, {
             assetId: c.id,
-            variant: 'grid'
+            variant: 'grid',
+            listOnly: true,
+            allowFullFallback: false
           });
           if (signed && !String(signed).includes('data:image/svg')) return signed;
         } catch (e) { /* ignore */ }

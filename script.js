@@ -8434,7 +8434,9 @@
       try {
         let src = imageData;
         if (window.SupabaseSync?.isStorageRef?.(imageData)) {
-          src = await window.SupabaseSync.resolveDisplayUrl(imageData, { assetId: selectedCardId });
+          src = window.MediaPipeline?.resolvePreviewUrl
+            ? await window.MediaPipeline.resolvePreviewUrl(imageData, { assetId: selectedCardId, cardId: selectedCardId })
+            : await window.SupabaseSync.resolveDisplayUrl(imageData, { assetId: selectedCardId, preferFull: true, variant: 'full' });
         }
         if (!src || String(src).includes('data:image/svg')) {
           showToast('请先加载图片');
