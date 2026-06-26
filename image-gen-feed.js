@@ -171,6 +171,71 @@
     return true;
   }
 
+  function warehouseRemovedOneCard(prev, next) {
+    if (!Array.isArray(prev) || !Array.isArray(next) || prev.length !== next.length + 1) return null;
+    const nextIds = new Set(next.map((c) => String(c.id)));
+    const removed = prev.filter((c) => !nextIds.has(String(c.id)));
+    return removed.length === 1 ? removed[0].id : null;
+  }
+
+  function warehouseSingleCoverChange(prev, next) {
+    if (!Array.isArray(prev) || !Array.isArray(next) || prev.length !== next.length) return null;
+    let changed = null;
+    for (let i = 0; i < prev.length; i += 1) {
+      if (String(prev[i].id) !== String(next[i].id)) return null;
+      if (String(prev[i].image || '') === String(next[i].image || '')) continue;
+      if (changed) return null;
+      changed = next[i];
+    }
+    return changed;
+  }
+
+  function removeWarehouseFeedCardFromDom(wrap, cardId) {
+    if (!wrap || cardId == null) return false;
+    const el = wrap.querySelector(
+      `.imagegen-feed-card[data-feed-id="wh_${CSS.escape(String(cardId))}"]`
+    );
+    if (!el) return false;
+    el.remove();
+    bindImageGenFeedImageRelayout();
+    if (d().isMobileFeedViewport?.()) enforceMobileImageGenFeed();
+    else scheduleImageGenFeedLayout();
+    return true;
+  }
+
+  function patchWarehouseFeedCardCover(wrap, card) {
+    if (!wrap || !card?.id || !card.image) return false;
+    const el = wrap.querySelector(
+      `.imagegen-feed-card[data-feed-id="wh_${CSS.escape(String(card.id))}"]`
+    );
+    if (!el) return false;
+    const media = el.querySelector('.imagegen-feed-media');
+    const img = media?.querySelector('img');
+    if (!img) return false;
+    const jobId = card.feedCoverJobId || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');
+    img.setAttribute('data-image-ref', card.image);
+    if (jobId) img.setAttribute('data-job-id', jobId);
+    else img.removeAttribute('data-job-id');
+    delete img.dataset.feedLoadDone;
+    delete img.dataset.igenRetry;
+    img.classList.remove('img-load-failed');
+    media?.classList.add('is-loading');
+    media?.classList.remove('card-media--load-failed');
+    el.classList.remove('imagegen-feed-card--no-media');
+    void d().hydrateFeedImageOne?.(img);
+    bindImageGenFeedImageRelayout();
+    if (!d().isMobileFeedViewport?.()) scheduleImageGenFeedLayout();
+    return true;
+  }
+
+  function finishWarehouseFeedIncrementalPatch(wrap, scrollState, scrollAnchor, scrollEl, scrollTop, preserveScroll) {
+    if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
+    else if (scrollAnchor) restoreImageGenFeedScrollAnchor(scrollAnchor);
+    else if (scrollEl && preserveScroll) applyImageGenFeedScrollTop(scrollEl, scrollTop);
+    syncImageGenFeedLoadMoreBtn();
+    bindImageGenFeedPagedScroll();
+  }
+
   function imageGenFeedRenderedCount(store) {
     if (!store) return IMAGEGEN_FEED_PER_PAGE;
     const total = d().getImageGenFeedTab?.() === 'warehouse'
@@ -614,8 +679,9 @@
         return `wh:${d().getImageGenWhGroup?.()}:${d().getImageGenWhTag?.()}:p${pendingSig}:f${failedSig}:n${whCount}`;
       }
       const posts = getImageGenCommunityFeedList();
-      const ids = posts.map((p) => String(p.id)).join('|');
-      return `cm:${d().getCommunityScope?.()}:${d().getCommunitySort?.()}:${posts.length}:${ids}`;
+      const head = posts.slice(0, 12).map((p) => String(p.id)).join(',');
+      const tailId = posts.length > 12 ? String(posts[posts.length - 1]?.id || '') : '';
+      return `cm:${d().getCommunityScope?.()}:${d().getCommunitySort?.()}:${posts.length}:${head}:${tailId}`;
     }
   
     function warehouseCardToFeedHtml(c) {
@@ -834,6 +900,36 @@
           else if (scrollEl && preserveScroll) applyImageGenFeedScrollTop(scrollEl, scrollTop);
           syncImageGenFeedLoadMoreBtn();
           bindImageGenFeedPagedScroll();
+          return;
+        }
+        const removedCardId = warehouseRemovedOneCard(prevStore?.whCards, whCards);
+        if (
+          prevStore
+          && removedCardId
+          && !tabSwitch
+          && !opts.force
+          && String(prevStore.sig).startsWith('wh:')
+          && d().getImageGenFeedTab?.() === 'warehouse'
+        ) {
+          imageGenFeedPagedStore = { ...prevStore, sig, whCards, commPosts };
+          patchImageGenFeedPendingSection(wrap, pending, failed);
+          removeWarehouseFeedCardFromDom(wrap, removedCardId);
+          finishWarehouseFeedIncrementalPatch(wrap, scrollState, scrollAnchor, scrollEl, scrollTop, preserveScroll);
+          return;
+        }
+        const coverPatchCard = warehouseSingleCoverChange(prevStore?.whCards, whCards);
+        if (
+          prevStore
+          && coverPatchCard
+          && !tabSwitch
+          && !opts.force
+          && String(prevStore.sig).startsWith('wh:')
+          && d().getImageGenFeedTab?.() === 'warehouse'
+        ) {
+          imageGenFeedPagedStore = { ...prevStore, sig, whCards, commPosts };
+          patchImageGenFeedPendingSection(wrap, pending, failed);
+          patchWarehouseFeedCardCover(wrap, coverPatchCard);
+          finishWarehouseFeedIncrementalPatch(wrap, scrollState, scrollAnchor, scrollEl, scrollTop, preserveScroll);
           return;
         }
         const prependedCard = warehousePrependedOneCard(prevStore?.whCards, whCards);

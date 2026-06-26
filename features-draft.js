@@ -3017,8 +3017,31 @@
   let bindImageGenFeedPagedScroll;
   let bindImageGenFeedResizeRelayout;
   let _renderImageGenFeed;
-  function renderImageGenFeed(opts) {
+  let imageGenFeedRenderCoalesceTimer = null;
+  /** @type {Record<string, any>|null} */
+  let imageGenFeedRenderCoalesceOpts = null;
+
+  function renderImageGenFeedImmediate(opts) {
     return _renderImageGenFeed?.(opts);
+  }
+
+  function renderImageGenFeed(opts) {
+    const o = opts && typeof opts === 'object' ? opts : {};
+    const coalesce = !!o.preserveScroll && !o.scrollToTop && !o.feedAppend && !o.force;
+    if (!coalesce) {
+      clearTimeout(imageGenFeedRenderCoalesceTimer);
+      imageGenFeedRenderCoalesceTimer = null;
+      imageGenFeedRenderCoalesceOpts = null;
+      return renderImageGenFeedImmediate(o);
+    }
+    imageGenFeedRenderCoalesceOpts = { ...imageGenFeedRenderCoalesceOpts, ...o, preserveScroll: true };
+    clearTimeout(imageGenFeedRenderCoalesceTimer);
+    imageGenFeedRenderCoalesceTimer = setTimeout(() => {
+      imageGenFeedRenderCoalesceTimer = null;
+      const merged = imageGenFeedRenderCoalesceOpts;
+      imageGenFeedRenderCoalesceOpts = null;
+      void renderImageGenFeedImmediate(merged);
+    }, 100);
   }
   let imageGenFeedIsNearTop;
   let bindImageGenFeedCardEvents;

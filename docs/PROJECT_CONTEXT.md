@@ -28,8 +28,8 @@
 
 | 项 | 状态 |
 |----|------|
-| **Git** | `main` · 待 push（P0：warehouse 列表缓存 + preserveScroll） |
-| **Pages** | build `20260626x` · https://prompt-hubs.com |
+| **Git** | `main` · `00042f4`（P0 缓存/preserveScroll）+ P1 待 push |
+| **Pages** | build `20260626z` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · `071b133` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
@@ -44,10 +44,10 @@
 
 ### 已知问题 / 下一步
 
-1. 用户需 **Ctrl+Shift+R** 强刷（build `20260626x`）
+1. 用户需 **Ctrl+Shift+R** 强刷（build `20260626z`）
 2. 极慢网下 MJ 翻页仍有 loading 等待（已有预取/缓存）
 3. 上游 MJ 链接过期则无法自动补四宫格
-4. 生图页 P1 进行中：render 合并、单卡 DOM patch、社区 sig 轻量化
+4. ✅ 生图页 P1：render 100ms 合并、单卡删/封面 patch、社区 sig 轻量化
 5. MemFire 迁移（7 月初 final dump）
 
 ### 部署
