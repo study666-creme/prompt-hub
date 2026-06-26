@@ -1378,7 +1378,7 @@
     clearAllLocalFeatureData();
     renderCommunity({ immediate: true, skipFeedFetch: true });
     void renderCreations();
-    if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed();
+    if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed({ preserveScroll: true });
   }
 
   function reloadStores() {
@@ -3566,7 +3566,7 @@
     persistCreations();
     renderCreations();
     if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-      renderImageGenFeed();
+      renderImageGenFeed({ preserveScroll: true });
     }
     toast('已删除');
   }
@@ -4806,7 +4806,7 @@
     if (communitySidePostId === id) closeCommunitySidePanel();
     renderCommunity();
     if (openProfileAuthorId === authorId) renderUserProfileGrid();
-    if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed();
+    if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed({ preserveScroll: true });
     if (!opts.silent) toast('已从社区删除');
   }
 
@@ -6833,7 +6833,7 @@
         else imageGenWhTag = v;
         closeImageGenFilterSheet();
         syncImageGenWarehouseFiltersUI();
-        renderImageGenFeed();
+        renderImageGenFeed({ scrollToTop: true, force: true });
       });
     });
     overlay.hidden = false;
@@ -7010,7 +7010,7 @@
       btn.addEventListener('click', () => {
         applyCommunitySort(btn.dataset.communitySort);
         renderCommunity({ skipFeedFetch: true, forceRepaint: true });
-        if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed();
+        if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed({ preserveScroll: true });
       });
     });
     document.querySelectorAll('[data-community-scope]').forEach(btn => {
@@ -7045,7 +7045,7 @@
           toast('暂无关注作者，点击作品上的作者名可关注');
         }
         renderCommunity({ skipFeedFetch: true, forceRepaint: true });
-        if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed();
+        if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed({ preserveScroll: true });
       });
     });
     document.getElementById('communityNotifyBtn')?.addEventListener('click', (e) => {
@@ -7108,7 +7108,7 @@
       btn.addEventListener('click', () => {
         applyCommunitySort(btn.dataset.imagegenCommunitySort);
         document.querySelectorAll('[data-imagegen-community-sort]').forEach(b => b.classList.toggle('active', b === btn));
-        renderImageGenFeed();
+        renderImageGenFeed({ scrollToTop: true, force: true });
         if (document.getElementById('pageCommunity')?.classList.contains('active')) {
           renderCommunity({ skipFeedFetch: true, forceRepaint: true });
         }
@@ -7124,7 +7124,7 @@
           document.querySelectorAll('[data-community-scope]').forEach(b => {
             b.classList.toggle('active', (b.dataset.communityScope || 'all') === communityScope);
           });
-          renderImageGenFeed();
+          renderImageGenFeed({ scrollToTop: true, force: true });
           if (document.getElementById('pageCommunity')?.classList.contains('active')) {
             renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
           }
@@ -7137,7 +7137,7 @@
         document.querySelectorAll('[data-community-scope]').forEach(b => {
           b.classList.toggle('active', (b.dataset.communityScope || 'all') === communityScope);
         });
-        renderImageGenFeed();
+        renderImageGenFeed({ scrollToTop: true, force: true });
         if (document.getElementById('pageCommunity')?.classList.contains('active')) {
           renderCommunity({ immediate: true, skipFeedFetch: true, forceRepaint: true });
         }
@@ -7175,11 +7175,11 @@
     });
     document.getElementById('imageGenWhGroup')?.addEventListener('change', e => {
       imageGenWhGroup = e.target.value || 'all';
-      renderImageGenFeed();
+      renderImageGenFeed({ scrollToTop: true, force: true });
     });
     document.getElementById('imageGenWhTag')?.addEventListener('change', e => {
       imageGenWhTag = e.target.value || 'all';
-      renderImageGenFeed();
+      renderImageGenFeed({ scrollToTop: true, force: true });
     });
     bindImageGenWarehouseFilterMobileUI();
     bindImageGenUpload();

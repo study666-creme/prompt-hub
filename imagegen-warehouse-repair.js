@@ -126,6 +126,7 @@
       changed = true;
     }
     if (!changed) return false;
+    global.invalidateWarehouseCardsForImageGenCache?.();
     card.updatedAt = Date.now();
     const creations = d().getCreations() || [];
     const cre = creations.find(

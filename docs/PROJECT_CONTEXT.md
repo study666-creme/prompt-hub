@@ -24,11 +24,12 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · 生图仓库封面与下载修复）
+## 当前部署阶段（2026-06-07 · 生图页 P0 效率优化）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260626w` · https://prompt-hubs.com |
+| **Git** | `main` · 待 push（P0：warehouse 列表缓存 + preserveScroll） |
+| **Pages** | build `20260626x` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · `071b133` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
@@ -43,10 +44,10 @@
 
 ### 已知问题 / 下一步
 
-1. 用户需 **Ctrl+Shift+R** 强刷（build `20260626w`）
+1. 用户需 **Ctrl+Shift+R** 强刷（build `20260626x`）
 2. 极慢网下 MJ 翻页仍有 loading 等待（已有预取/缓存）
 3. 上游 MJ 链接过期则无法自动补四宫格
-4. 生图页：仓库卡片多时首屏仍可能 masonry 重排，可继续优化增量渲染
+4. 生图页 P1 进行中：render 合并、单卡 DOM patch、社区 sig 轻量化
 5. MemFire 迁移（7 月初 final dump）
 
 ### 部署

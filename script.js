@@ -509,9 +509,15 @@
       return base.filter((c) => window.SupabaseSync?.shouldShowCardInWarehouse?.(c) !== false);
     }
 
-    window.getWarehouseCardsForImageGen = function (opts) {
-      const group = opts?.group || 'all';
-      const tag = opts?.tag || 'all';
+    /** @type {{ key: string, list: any[] }|null} */
+    let imageGenWarehouseListCache = null;
+
+    window.invalidateWarehouseCardsForImageGenCache = function () {
+      imageGenWarehouseListCache = null;
+      window.__imageGenWhCardsRev = (window.__imageGenWhCardsRev || 0) + 1;
+    };
+
+    function buildWarehouseCardsForImageGen(group, tag) {
       const base = warehouseVisibleCards(cards);
       const isGenCard = (c) => {
         if (window.FeatureDraft?.isGeneratedWarehouseCard?.(c)) return true;
@@ -560,6 +566,19 @@
           quality: c.genQuality || null
         };
         });
+    }
+
+    window.getWarehouseCardsForImageGen = function (opts) {
+      const group = opts?.group || 'all';
+      const tag = opts?.tag || 'all';
+      const rev = window.__imageGenWhCardsRev || 0;
+      const key = `${group}\0${tag}\0${cards.length}\0${rev}\0${cards}`;
+      if (imageGenWarehouseListCache && imageGenWarehouseListCache.key === key) {
+        return imageGenWarehouseListCache.list;
+      }
+      const list = buildWarehouseCardsForImageGen(group, tag);
+      imageGenWarehouseListCache = { key, list };
+      return list;
     };
 
     window.getImageGenWarehouseFilterOptions = function () {
@@ -6474,6 +6493,7 @@
       if (!Array.isArray(list)) return;
       cards = list;
       window.__promptHubCards = cards;
+      window.invalidateWarehouseCardsForImageGenCache?.();
     };
 
     function scheduleLocalSnapshot(uid) {
@@ -6490,6 +6510,7 @@
       }
       window.__promptHubCards = cards;
       cards = filterTombstonedCards(cards);
+      window.invalidateWarehouseCardsForImageGenCache?.();
       await saveCardsToDB(cards, { ownerUid: currentIdbOwnerUid() });
       const now = Date.now();
       if (cards.length > 0 && now - lastEmergencyBackupAt > 45000) {
@@ -7570,6 +7591,7 @@
         if (cardPostId) recordCommunityPostDeletion(cardPostId);
         cards = cards.filter(c => c.id !== id);
         window.__promptHubCards = cards;
+        window.invalidateWarehouseCardsForImageGenCache?.();
         if (selectedCardId === id) {
           selectedCardId = null;
           if (!opts.skipRender) {

@@ -622,18 +622,24 @@
       const groupLabel = c.group || '未分类';
       const titleTrim = (c.title || '').trim();
       const tagPart = (c.tags || []).slice(0, 2).join(' · ');
-      const galleryN = window.PromptHubCardGallery?.normalizeCardGallery?.(c)?.length || 0;
+      const galleryN = Array.isArray(c.cardImages) ? c.cardImages.length
+        : (window.PromptHubCardGallery?.normalizeCardGallery?.(c)?.length || 0);
       const mjBadge = c.isMidjourney && galleryN > 1 ? `MJ·${galleryN}` : '';
       const whMeta = [groupLabel, tagPart, mjBadge].filter(Boolean).join(' · ');
-      const full = (window.__promptHubCards || []).find((x) => x.id === c.id) || c;
-      const cover = window.PromptHubCardGallery?.getCardFeedCoverMeta?.(full)
-        || { ref: c.image, slotJobId: c.feedCoverJobId || (c.genJobId ? String(c.genJobId).replace(/#\d+$/, '') : null) };
+      let coverRef = c.image || null;
+      let coverJobId = c.feedCoverJobId || (c.genJobId ? String(c.genJobId).replace(/#\d+$/, '') : null);
+      if (!coverRef || !d().isDisplayableImage?.(coverRef)) {
+        const full = (window.__promptHubCards || []).find((x) => x.id === c.id) || c;
+        const cover = window.PromptHubCardGallery?.getCardFeedCoverMeta?.(full);
+        if (cover?.ref) coverRef = cover.ref;
+        if (cover?.slotJobId) coverJobId = cover.slotJobId;
+      }
       return buildFeedCardHtml({
         id: 'wh_' + c.id,
         sourceCardId: c.id,
-        jobId: cover.slotJobId || c.feedCoverJobId || (c.genJobId ? String(c.genJobId).replace(/#\d+$/, '') : null),
+        jobId: coverJobId,
         prompt: c.prompt,
-        image: cover.ref || c.image,
+        image: coverRef,
         title: titleTrim,
         metaLine: whMeta,
         meta: '',
