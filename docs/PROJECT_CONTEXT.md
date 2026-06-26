@@ -24,32 +24,34 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · 生图页 P0 效率优化）
+## 当前部署阶段（2026-06-07 · 生图页 P0–P2 效率优化）
 
 | 项 | 状态 |
 |----|------|
-| **Git** | `main` · `c295f69` + P2 待 push |
-| **Pages** | build `20260626a` · https://prompt-hubs.com |
+| **Git** | `main` · `b17879b`+（P0–P2 代码已 push；build 文档见下条 commit） |
+| **Pages** | build **`20260626b`**（本地）· https://prompt-hubs.com · 部署后强刷 |
 | **Worker** | `prompt-hub-api` · `071b133` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
 ### 已打通
 
 - ✅ **Apimart MJ**（relax/fast/turbo · 单卡最多 5 张 · 参数双下拉 UI）
-- ✅ **生图仓库 MJ 封面**：优先第一张可解析单图，不再硬绑四宫格 grid（与卡片库一致可见）
-- ✅ **多图下载**：灯箱/编辑面板按当前 gallery 索引下载，blob 直存不跳页
-- ✅ **MJ 跨端同步**：入库后 urgent push + 登录/切前台 recover
-- ✅ **分组删除**：tombstone 防云同步复活；编辑面板图片工具一行三按钮
+- ✅ **生图仓库 MJ 封面**：优先第一张可解析单图，不再硬绑四宫格 grid
+- ✅ **多图下载**：灯箱/编辑面板按 gallery 索引 blob 直存
+- ✅ **MJ 跨端同步**：入库 urgent push + 登录/切前台 recover
+- ✅ **分组删除 tombstone** · 编辑面板图片工具一行三按钮
 - ✅ 控制台修复：`window.repairMjWarehousePreviewsQuiet()`
+- ✅ **生图 feed 效率 P0**：`getWarehouseCardsForImageGen` 单帧缓存；`preserveScroll` 统一
+- ✅ **P1**：render 100ms 合并；单卡删/封面 DOM patch；社区 sig 轻量化
+- ✅ **P2**：预览 MJ `requestIdleCallback` 补全；Masonry 延后到绑图后
 
 ### 已知问题 / 下一步
 
-1. 用户需 **Ctrl+Shift+R** 强刷（build 见 `window.__APP_BUILD__`）
-2. 极慢网下 MJ 翻页仍有 loading 等待（已有预取/缓存）
+1. 线上需 **`.\deploy-pages.ps1`** 后 **Ctrl+Shift+R**（build `20260626b`）
+2. 极慢网下 MJ 翻页仍有 loading（已有预取/缓存）
 3. 上游 MJ 链接过期则无法自动补四宫格
-4. ✅ 生图页 P1：render 合并、单卡 patch、社区 sig 轻量化
-5. ✅ 生图页 P2：预览 MJ idle 补全、Masonry 延后到绑图后、build 标签对齐
-6. MemFire 迁移（7 月初 final dump）
+4. **P3 可选**：feed 虚拟滚动/回收；`repairGeneratedCardImagesQuiet` 改 idle+可见区；桌面 feed 试 CSS grid 替 Masonry；`card-gallery.js?v=` 与 `__APP_BUILD__` 对齐
+5. MemFire 迁移（7 月初 final dump）
 
 ### 部署
 
