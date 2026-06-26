@@ -2559,6 +2559,7 @@
   aspect-ratio: 1;
   max-height: min(52vh, 420px);
   width: 100%;
+  position: relative;
 }
 
 .imagegen-mj-filmstrip-main img {
@@ -2567,6 +2568,29 @@
   object-fit: contain;
   display: block;
   background: #0a0a0a;
+  transition: opacity 0.18s ease;
+}
+
+.imagegen-mj-filmstrip-main.is-switching img,
+.imagegen-mj-filmstrip-main img.is-switching {
+  opacity: 0.28;
+  filter: blur(2px);
+}
+
+.imagegen-mj-filmstrip-main.is-switching::after,
+.imagegen-mj-filmstrip-main:not(:has(img[src^="http"]))::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    color-mix(in srgb, var(--text-muted) 18%, transparent) 50%,
+    transparent 60%
+  );
+  background-size: 200% 100%;
+  animation: card-beam-loading 1.2s ease-in-out infinite;
+  pointer-events: none;
 }
 
 .imagegen-mj-filmstrip-nav {

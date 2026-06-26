@@ -7573,6 +7573,38 @@
       panelGalleryIndex = Math.max(0, Math.min(panelGalleryIndex + delta, gallery.length - 1));
       imageData = gallery[panelGalleryIndex] || card?.image || null;
       syncPanelGalleryNav(card);
+      const dropArea = document.getElementById('dropArea');
+      const img = document.getElementById('previewImage');
+      dropArea?.classList.add('is-loading-preview');
+      if (img) {
+        img.removeAttribute('src');
+        delete img.dataset.previewFullUrl;
+      }
+      const cardJobId = card?.genJobId || null;
+      const slotJobId = window.PromptHubCardGallery?.gallerySlotJobId?.(cardJobId, panelGalleryIndex) || cardJobId;
+      const prefetchOpts = {
+        assetId: selectedCardId,
+        cardId: selectedCardId,
+        jobId: slotJobId || undefined,
+        galleryIndex: panelGalleryIndex
+      };
+      if (panelGalleryIndex > 0) {
+        const nextIdx = panelGalleryIndex + 1;
+        if (nextIdx < gallery.length && window.MediaPipeline?.resolvePreviewUrl) {
+          void window.MediaPipeline.resolvePreviewUrl(gallery[nextIdx], {
+            ...prefetchOpts,
+            jobId: window.PromptHubCardGallery?.gallerySlotJobId?.(cardJobId, nextIdx) || cardJobId,
+            galleryIndex: nextIdx
+          });
+        }
+      }
+      if (panelGalleryIndex > 0 && window.MediaPipeline?.resolvePreviewUrl) {
+        void window.MediaPipeline.resolvePreviewUrl(gallery[panelGalleryIndex - 1], {
+          ...prefetchOpts,
+          jobId: window.PromptHubCardGallery?.gallerySlotJobId?.(cardJobId, panelGalleryIndex - 1) || cardJobId,
+          galleryIndex: panelGalleryIndex - 1
+        });
+      }
       void updatePreview();
     }
 
@@ -8803,8 +8835,12 @@
           allowGridFallback: panelGalleryIndex <= 0
         };
         if (waiting && window.SupabaseSync?.isStorageRef?.(imageData) && selectedCardId) {
-          const gridCached = window.MediaPipeline?.getListCached?.(imageData, selectedCardId)
-            || window.SupabaseSync.getListDisplayImageSrc?.(imageData, selectedCardId);
+          const gridCached = window.MediaPipeline?.getListCached?.(imageData, selectedCardId, {
+            jobId: pipePreviewOpts.jobId
+          })
+            || window.SupabaseSync.getListDisplayImageSrc?.(imageData, selectedCardId, {
+              jobId: pipePreviewOpts.jobId
+            });
           if (gridCached && !gridCached.includes('data:image/svg')) {
             img.src = gridCached;
             previewGridShown = true;

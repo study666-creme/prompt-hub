@@ -24,26 +24,28 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · MJ 全量 gallery 一次性入库）
+## 当前部署阶段（2026-06-07 · 预览加载与 MJ 翻页体验）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260626k` · https://prompt-hubs.com |
-| **Worker** | `prompt-hub-api` · `a0570e5e` · https://api.prompt-hubs.com |
+| **Pages** | build `20260626p` · https://prompt-hubs.com |
+| **Worker** | `prompt-hub-api` · `071b133` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
 ### 已打通
 
 - ✅ **Apimart MJ**（4 模型 · relax/fast/turbo · 单卡最多 5 张：四宫格 + 4 单图）
-- ✅ **MJ 全量入库**：API 返回 `mjGalleryUrls`（最多 5 张）；满 4 张单图才标记完成/入库
-- ✅ **旧卡修复**：打开预览或 gallery 重复/缺图时自动从任务 API 重新归档
-- ✅ 多图槽位独立 storage；翻页按索引解析，不再一律回退封面
+- ✅ **MJ 全量入库**：API 返回 `mjGalleryUrls`；满 4 张单图才标记完成/入库
+- ✅ **生图仓库预览**：列表签 CDN 带 `jobId`；失败自动重试 + 静默 repair；boost 24 张
+- ✅ **MJ 翻页**：切换时 loading 态、URL 缓存、相邻预取，慢网不再像「五张都是第一张」
+- ✅ 旧卡修复：打开预览或 gallery 重复/缺图时自动从任务 API 重新归档
 
 ### 已知问题 / 下一步
 
-1. 用户需 **Ctrl+Shift+R** 强刷（build `20260626k`）
-2. 旧 MJ 卡：点开「作品详情」触发自动补图；上游链接过期则无法补四宫格
-3. MemFire 迁移（7 月初 final dump）
+1. 用户需 **Ctrl+Shift+R** 强刷（build `20260626p`）
+2. 极慢网络下翻页仍有等待，但会显示 loading 扫光而非旧图滞留
+3. 旧 MJ 卡：进入生图仓库 tab 或点开详情触发补图；上游链接过期则无法补四宫格
+4. MemFire 迁移（7 月初 final dump）
 
 ### 部署
 

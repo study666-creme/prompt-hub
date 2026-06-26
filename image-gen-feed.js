@@ -434,13 +434,16 @@
 
     function primeImageGenFeedImages(wrap, feedItems) {
       if (!wrap) return;
-      const patchMax = 10;
-      const boostMax = 8;
+      const patchMax = 16;
+      const boostMax = 24;
       window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: patchMax });
       window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, boostMax);
       if (wrap.dataset.feedObserverPrimed !== '1') {
         wrap.dataset.feedObserverPrimed = '1';
         window.CardImageLoader?.observeContainer?.(wrap);
+      }
+      if (d().getImageGenFeedTab?.() === 'warehouse') {
+        void window.repairGeneratedCardImagesQuiet?.();
       }
     }
 
@@ -1005,7 +1008,8 @@
         if (!didPrimeWarehouse) {
           window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 12 });
           if (d().getImageGenFeedTab?.() === 'warehouse') {
-            window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 8);
+            window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 24);
+            void window.repairGeneratedCardImagesQuiet?.();
           }
         }
         delete wrap.__phIgPendingScrollState;

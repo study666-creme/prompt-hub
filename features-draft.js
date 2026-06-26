@@ -7910,15 +7910,60 @@
     if (!body || !list.length) return;
     const strip = body.querySelector('.imagegen-mj-filmstrip');
     if (!strip) return;
-    const resolveRef = (ref, galleryIndex) =>
-      window.PromptHubCardGallery?.resolveMediaUrl?.(ref, {
+    const urlCache = new Map();
+    let loadGen = 0;
+
+    const resolveRef = (ref, galleryIndex) => {
+      if (urlCache.has(galleryIndex)) return Promise.resolve(urlCache.get(galleryIndex));
+      const p = window.PromptHubCardGallery?.resolveMediaUrl?.(ref, {
         cardId: previewCtx?.cardId,
         jobId: previewCtx?.parentJobId,
         galleryIndex
       }) || Promise.resolve(ref);
+      return Promise.resolve(p).then((src) => {
+        const u = src && typeof src === 'string' ? src : '';
+        if (u && !/data:image\/svg/i.test(u)) urlCache.set(galleryIndex, u);
+        return u;
+      });
+    };
+
+    const prefetchAround = (idx) => {
+      for (const i of [idx - 1, idx + 1, idx + 2]) {
+        if (i < 0 || i >= list.length || urlCache.has(i)) continue;
+        void resolveRef(list[i], i);
+      }
+    };
+
+    const applyMainSrc = (mainImg, src, idx) => {
+      if (!mainImg || !src || strip.dataset.mjStripActive !== String(idx)) return;
+      const stage = strip.querySelector('.imagegen-mj-filmstrip-main');
+      const done = () => {
+        if (strip.dataset.mjStripActive !== String(idx)) return;
+        stage?.classList.remove('is-switching');
+        mainImg.classList.remove('is-switching');
+        body.dataset.previewImageReady = '1';
+      };
+      if (mainImg.src === src && mainImg.complete && mainImg.naturalWidth > 8) {
+        done();
+        return;
+      }
+      stage?.classList.add('is-switching');
+      mainImg.classList.add('is-switching');
+      mainImg.onload = () => { mainImg.onload = null; mainImg.onerror = null; done(); };
+      mainImg.onerror = () => {
+        mainImg.onload = null;
+        mainImg.onerror = null;
+        if (strip.dataset.mjStripActive !== String(idx)) return;
+        stage?.classList.remove('is-switching');
+        mainImg.classList.remove('is-switching');
+      };
+      mainImg.src = src;
+    };
 
     const renderAt = (nextIdx) => {
       const idx = Math.max(0, Math.min(nextIdx, list.length - 1));
+      loadGen += 1;
+      const myGen = loadGen;
       strip.dataset.mjStripActive = String(idx);
       const mainImg = strip.querySelector('.imagegen-mj-filmstrip-main img');
       const counter = strip.querySelector('.imagegen-mj-filmstrip-counter');
@@ -7932,12 +7977,21 @@
       if (next) next.disabled = idx >= list.length - 1;
       const ref = list[idx];
       body.dataset.previewImageUrl = ref;
+      delete body.dataset.previewImageReady;
+      const cached = urlCache.get(idx);
+      if (cached && mainImg) applyMainSrc(mainImg, cached, idx);
+      else if (mainImg) mainImg.classList.add('is-switching');
       void resolveRef(ref, idx).then((src) => {
-        if (strip.dataset.mjStripActive !== String(idx)) return;
-        if (mainImg && src) mainImg.src = src;
-        body.dataset.previewImageReady = '1';
+        if (myGen !== loadGen || strip.dataset.mjStripActive !== String(idx)) return;
+        if (mainImg && src) applyMainSrc(mainImg, src, idx);
+        prefetchAround(idx);
       });
       strip.querySelectorAll('.imagegen-mj-strip-thumb img').forEach((thumb, i) => {
+        const hit = urlCache.get(i);
+        if (hit && thumb) {
+          thumb.src = hit;
+          return;
+        }
         void resolveRef(list[i], i).then((src) => {
           if (src && thumb) thumb.src = src;
         });
@@ -7993,6 +8047,7 @@
       });
     });
     renderAt(Number(strip.dataset.mjStripActive) || 0);
+    list.forEach((ref, i) => { void resolveRef(ref, i); });
   }
 
   /** @deprecated 保留供旧预览路径；新预览用 buildMjFilmstripHtml */
