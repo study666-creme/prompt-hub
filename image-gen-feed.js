@@ -1052,7 +1052,7 @@
           d().setFeedLayoutPending?.(wrap, false);
         } else {
           if (scrollState) wrap.__phIgPendingScrollState = scrollState;
-          layoutImageGenFeedMasonry();
+          wrap.dataset.phIgDeferMasonry = '1';
         }
         if (mobileFeed && scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
         else if (!mobileFeed && scrollEl && preserveScroll && !scrollState) {
@@ -1120,6 +1120,10 @@
         delete wrap.__phIgPendingScrollState;
         d().scrubImageGenFeedCards?.(wrap);
         syncImageGenFeedLoadMoreBtn();
+        if (!mobileFeed && !feedAppend && wrap.dataset.phIgDeferMasonry === '1') {
+          delete wrap.dataset.phIgDeferMasonry;
+          scheduleImageGenFeedLayout();
+        }
         /* 生图 /generated/ 由 CDN 现场缩略，勿 backfillGridThumbs（会批量拉原图 2MB+） */
       })();
     }

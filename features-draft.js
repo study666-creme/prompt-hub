@@ -6501,6 +6501,83 @@
     });
   }
 
+  function scheduleMjPreviewEnrichment(ctx) {
+    const run = () => { void enrichImageGenPreviewMj(ctx); };
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(run, { timeout: 2800 });
+    } else {
+      setTimeout(run, 160);
+    }
+  }
+
+  function applyImageGenPreviewMjGrid(body, mjGridUrls, previewCtx) {
+    if (!body || !mjGridUrls?.length) return;
+    const promptEl = body.querySelector('.imagegen-preview-prompt');
+    if (body.querySelector('.imagegen-mj-filmstrip')) {
+      bindMjFilmstripPreview(body, mjGridUrls, previewCtx);
+      return;
+    }
+    body.querySelector('.imagegen-preview-img-wrap')?.remove();
+    const html = buildMjGridPreviewHtml(mjGridUrls);
+    if (promptEl) promptEl.insertAdjacentHTML('beforebegin', html);
+    else body.insertAdjacentHTML('afterbegin', html);
+    bindMjFilmstripPreview(body, mjGridUrls, previewCtx);
+  }
+
+  async function enrichImageGenPreviewMj(ctx) {
+    const {
+      previewStale, previewCard, mjParentJobId, body, previewId, previewKind
+    } = ctx;
+    if (previewStale() || !previewCard?.isMidjourney || !mjParentJobId || !body) return;
+    let mjGridUrls = window.PromptHubCardGallery?.normalizeCardGallery?.(previewCard)?.filter(Boolean);
+    const cachedCount = mjGridUrls?.length || 0;
+    if (cachedCount < 2 && window.PromptHubApi?.getGenerationJob) {
+      try {
+        const poll = await window.PromptHubApi.getGenerationJob(mjParentJobId);
+        if (previewStale()) return;
+        if (poll?.ok) {
+          const parsed = resolveMjPollImages(poll);
+          if (parsed.gallery?.length || parsed.tiles.length) {
+            mjGridUrls = parsed.gallery?.length ? parsed.gallery : parsed.tiles;
+            await repairMjWarehouseCardFields(previewCard, {
+              mjGridUrls: parsed.tiles,
+              mjCompositeUrl: parsed.composite,
+              mjButtons: poll.data.mjButtons
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('[imagegen] mj grid fetch failed', mjParentJobId, e);
+      }
+    }
+    if (previewStale()) return;
+    if (cachedCount < 2) {
+      await repairMjGalleryFromJob(previewCard);
+      if (previewStale()) return;
+      mjGridUrls = window.PromptHubCardGallery?.normalizeCardGallery?.(previewCard)?.filter(Boolean);
+    }
+    if (!mjGridUrls?.length || mjGridUrls.length < 2) return;
+    if (body.querySelector('.imagegen-mj-filmstrip')) {
+      bindMjFilmstripPreview(body, mjGridUrls, {
+        feedKey: 'wh_' + previewId,
+        cardId: previewId,
+        parentJobId: mjParentJobId,
+        model: previewCard?.model,
+        size: previewCard?.size,
+        resolution: previewCard?.resolution || '1k'
+      });
+      return;
+    }
+    applyImageGenPreviewMjGrid(body, mjGridUrls, {
+      feedKey: 'wh_' + previewId,
+      cardId: previewId,
+      parentJobId: mjParentJobId,
+      model: previewCard?.model,
+      size: previewCard?.size,
+      resolution: previewCard?.resolution || '1k'
+    });
+  }
+
   async function renderImageGenPreview() {
     const body = document.getElementById('imageGenPreviewBody');
     if (!body || !imageGenPreviewId || !imageGenPreviewKind) return;
@@ -6551,32 +6628,6 @@
         ? previewCard.mjGridUrls.filter(Boolean)
         : null);
     const mjParentJobId = normalizeMjParentJobId(jobId || previewCard?.genJobId || '');
-    if (!mjGridUrls?.length && mjParentJobId && previewCard?.isMidjourney && window.PromptHubApi?.getGenerationJob) {
-      try {
-        const poll = await window.PromptHubApi.getGenerationJob(mjParentJobId);
-        if (!previewStale() && poll?.ok) {
-          const parsed = resolveMjPollImages(poll);
-          if (parsed.gallery?.length || parsed.tiles.length) {
-            mjGridUrls = parsed.gallery?.length ? parsed.gallery : parsed.tiles;
-            if (previewCard) {
-              await repairMjWarehouseCardFields(previewCard, {
-                mjGridUrls: parsed.tiles,
-                mjCompositeUrl: parsed.composite,
-                mjButtons: poll.data.mjButtons
-              });
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('[imagegen] mj grid fetch failed', mjParentJobId, e);
-      }
-    }
-    if (previewStale()) return;
-    if (previewCard?.isMidjourney && mjParentJobId) {
-      await repairMjGalleryFromJob(previewCard);
-      const refreshed = window.PromptHubCardGallery?.normalizeCardGallery?.(previewCard);
-      if (refreshed?.length) mjGridUrls = refreshed;
-    }
     const cachedMjButtons = Array.isArray(previewCard?.mjButtons) ? previewCard.mjButtons : null;
     const hasRef = !!(refImages?.length || (refImage && isDisplayableImage(refImage)));
     const fillHtml = buildPreviewFillActions(hasRef, extraActions);
@@ -6737,22 +6788,42 @@
       });
     });
     if (mjParentJobId && !cachedMjButtons?.length) {
-      void window.PromptHubApi.getGenerationJob(mjParentJobId).then((r) => {
-        if (previewStale() || !r.ok || !Array.isArray(r.data?.mjButtons) || !r.data.mjButtons.length) return;
-        const host = body.querySelector('[data-mj-actions-host]');
-        if (!host) return;
-        host.outerHTML = buildMjActionsBlock(r.data.mjButtons, mjParentJobId, previewCard);
-        if (previewCard) {
-          previewCard.mjButtons = r.data.mjButtons;
-        }
-        body.querySelectorAll('[data-mj-action]').forEach((btn) => {
-          btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            void runImageGenMjAction(btn);
+      const loadMjButtons = () => {
+        void window.PromptHubApi.getGenerationJob(mjParentJobId).then((r) => {
+          if (previewStale() || !r.ok || !Array.isArray(r.data?.mjButtons) || !r.data.mjButtons.length) return;
+          const host = body.querySelector('[data-mj-actions-host]');
+          if (!host) return;
+          host.outerHTML = buildMjActionsBlock(r.data.mjButtons, mjParentJobId, previewCard);
+          if (previewCard) {
+            previewCard.mjButtons = r.data.mjButtons;
+          }
+          body.querySelectorAll('[data-mj-action]').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              void runImageGenMjAction(btn);
+            });
           });
         });
-      });
+      };
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(loadMjButtons, { timeout: 3200 });
+      } else {
+        setTimeout(loadMjButtons, 200);
+      }
+    }
+    if (previewKind === 'warehouse' && previewCard?.isMidjourney && mjParentJobId) {
+      const galleryN = mjGridUrls?.length || 0;
+      if (galleryN < 2 || !cachedMjButtons?.length) {
+        scheduleMjPreviewEnrichment({
+          previewStale,
+          previewCard,
+          mjParentJobId,
+          body,
+          previewId,
+          previewKind
+        });
+      }
     }
   }
 
