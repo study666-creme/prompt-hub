@@ -183,7 +183,9 @@
   }
 
   function lightboxWheelNavEnabled() {
-    return !!window.__lightboxImageGenNav || !!window.__viewerGlobalViewActive;
+    return !!window.__lightboxImageGenNav
+      || !!window.__viewerGlobalViewActive
+      || !!window.__appreciateCardGallery?.urls?.length;
   }
 
   function navigateViewerByWheel(delta) {
@@ -209,12 +211,19 @@
   function onViewerShellWheel(e) {
     const t = e.target;
     const onLightbox = !!t?.closest?.('#imageLightbox');
+    const onAppreciate = !!t?.closest?.('#appreciateViewer');
     if (onLightbox && !lightboxWheelNavEnabled()) return;
+    if (onAppreciate && !window.__appreciateCardGallery?.urls?.length && !isGlobalViewActive()) return;
     if (t?.id === 'appreciateViewerImg' || t?.id === 'lightboxImage') return;
     if (!viewerNav.items.length) return;
     if (onLightbox && !lightboxWheelNavEnabled()) return;
     e.preventDefault();
     navigateViewerByWheelThrottled(e.deltaY);
+  }
+
+  function isGlobalViewActive() {
+    return !!window.__viewerGlobalViewActive
+      || document.body.classList.contains('global-view');
   }
 
   function bindViewerShellWheelNav() {

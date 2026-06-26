@@ -33,6 +33,59 @@
     return imgs.slice(0, MAX);
   }
 
+  function isResolvableCoverRef(ref, cardId) {
+    if (!ref || typeof ref !== 'string') return false;
+    if (global.SupabaseSync?.isInvalidMediaUrl?.(ref)) return false;
+    if (global.SupabaseSync?.isStorageRef?.(ref)) {
+      const path = global.SupabaseSync.storagePathFromRef?.(ref);
+      if (path && global.SupabaseSync.isPathKnownMissing?.(path)) return false;
+      const primary = global.SupabaseSync.primaryImagePath?.(ref, cardId);
+      if (primary && global.SupabaseSync.isPathKnownMissing?.(primary)) return false;
+      if (global.SupabaseSync?.cardImageStillResolvable?.(ref, cardId) === false) return false;
+      return true;
+    }
+    if (/^https?:\/\//i.test(ref)) return true;
+    if (global.SupabaseSync?.isDataUrl?.(ref) && !/^data:image\/svg/i.test(ref)) return true;
+    return false;
+  }
+
+  function isMjCompositeCoverRef(ref, card) {
+    if (!ref || !card?.isMidjourney) return false;
+    const comp = card.mjCompositeUrl && String(card.mjCompositeUrl).trim();
+    if (comp && String(ref) === comp) return true;
+    const path = global.SupabaseSync?.storagePathFromRef?.(ref);
+    return !!(path && /_grid\.(jpe?g|webp|png)$/i.test(path));
+  }
+
+  /** 列表/生图仓库封面：MJ 优先用第一张可解析的单图，避免四宫格 grid 加载失败整卡发灰 */
+  function getCardFeedCoverImage(card) {
+    if (!card) return null;
+    const gallery = normalizeCardGallery(card);
+    const cardId = card.id;
+    const pick = (list) => {
+      for (const u of list) {
+        if (isResolvableCoverRef(u, cardId)) return u;
+      }
+      return null;
+    };
+    if (card.isMidjourney && gallery.length > 1) {
+      const singles = gallery.filter((u) => u && !isMjCompositeCoverRef(u, card));
+      const fromSingles = pick(singles);
+      if (fromSingles) return fromSingles;
+    }
+    return pick(gallery) || getCardCoverImage(card);
+  }
+
+  function getCardFeedCoverMeta(card) {
+    const gallery = normalizeCardGallery(card);
+    const ref = getCardFeedCoverImage(card);
+    let galleryIndex = ref ? gallery.findIndex((u) => String(u || '') === String(ref)) : 0;
+    if (galleryIndex < 0) galleryIndex = 0;
+    const baseJob = card?.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null;
+    const slotJobId = baseJob ? gallerySlotJobId(baseJob, galleryIndex) : null;
+    return { ref, galleryIndex, slotJobId, gallery };
+  }
+
   function getCardCoverImage(card) {
     const gallery = normalizeCardGallery(card);
     for (const u of gallery) {
@@ -91,7 +144,9 @@
     if (!ref) return '';
     const cardId = opts.cardId || opts.assetId || null;
     const galleryIndex = Number.isFinite(opts.galleryIndex) ? opts.galleryIndex : null;
-    const baseJobId = opts.jobId ? String(opts.jobId).replace(/#\d+$/, '') : null;
+    const baseJobId = opts.jobId
+      ? String(opts.jobId).replace(/#\d+$/, '')
+      : (cardId && galleryIndex != null && galleryIndex > 0 ? String(cardId) : null);
     const slotJobId = galleryIndex != null
       ? gallerySlotJobId(baseJobId || opts.jobId, galleryIndex)
       : (opts.jobId ? String(opts.jobId) : null);
@@ -173,6 +228,10 @@
     buildMjCardImages,
     normalizeCardGallery,
     getCardCoverImage,
+    getCardFeedCoverImage,
+    getCardFeedCoverMeta,
+    isResolvableCoverRef,
+    isMjCompositeCoverRef,
     mergeCardGalleryImages,
     syncCardGalleryFields,
     gallerySlotJobId,

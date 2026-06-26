@@ -32,12 +32,136 @@
     warehouseActs?.classList.toggle('hidden', isCommunity);
   }
 
+  function syncAppreciateGalleryUi(index) {
+    const gallery = window.__appreciateCardGallery;
+    const urls = gallery?.urls || [];
+    const show = urls.length > 1;
+    const idx = Math.max(0, Math.min(Number(index) || 0, Math.max(urls.length - 1, 0)));
+    ['appreciateGalleryPrev', 'appreciateGalleryNext', 'appreciateGalleryCounter'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.toggle('hidden', !show);
+    });
+    ['appreciateHitPrev', 'appreciateHitNext'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.toggle('hidden', !show);
+    });
+    const counter = document.getElementById('appreciateGalleryCounter');
+    if (counter && show) counter.textContent = `${idx + 1} / ${urls.length}`;
+    const prev = document.getElementById('appreciateGalleryPrev');
+    const next = document.getElementById('appreciateGalleryNext');
+    if (prev) prev.disabled = idx <= 0;
+    if (next) next.disabled = idx >= urls.length - 1;
+  }
+
+  function setupAppreciateCardGallery(card, startIdx = 0) {
+    const urls = window.PromptHubCardGallery?.normalizeCardGallery?.(card) || (card?.image ? [card.image] : []);
+    if (!urls || urls.length <= 1) {
+      window.__appreciateCardGallery = null;
+      syncAppreciateGalleryUi(0);
+      return false;
+    }
+    const idx = Math.max(0, Math.min(startIdx, urls.length - 1));
+    window.__appreciateCardGallery = {
+      urls,
+      cardId: card.id,
+      jobId: card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : card.id
+    };
+    const navItems = urls.map((_, i) => ({
+      type: 'appreciateGalleryTile',
+      id: card.id,
+      key: `card:${card.id}#g${i}`,
+      tileIndex: i
+    }));
+    window.setViewerNav?.(navItems, `card:${card.id}#g${idx}`);
+    syncAppreciateGalleryUi(idx);
+    return true;
+  }
+
+  async function renderAppreciateGalleryIndex(card, index, gen) {
+    const gallery = window.__appreciateCardGallery;
+    if (!gallery?.urls?.length || !card) return;
+    const idx = Math.max(0, Math.min(index, gallery.urls.length - 1));
+    const ref = gallery.urls[idx];
+    const img = document.getElementById('appreciateViewerImg');
+    if (!img || !ref) return;
+    syncAppreciateGalleryUi(idx);
+    window.setAppreciateViewerLoading?.(true);
+    let displaySrc = ref;
+    try {
+      if (window.PromptHubCardGallery?.resolveMediaUrl) {
+        displaySrc = await window.PromptHubCardGallery.resolveMediaUrl(ref, {
+          cardId: card.id,
+          jobId: gallery.jobId,
+          galleryIndex: idx,
+          preferFull: true
+        }) || ref;
+      } else if (window.MediaPipeline?.resolvePreviewUrl) {
+        displaySrc = await window.MediaPipeline.resolvePreviewUrl(ref, {
+          assetId: card.id,
+          cardId: card.id,
+          jobId: window.PromptHubCardGallery?.gallerySlotJobId?.(gallery.jobId, idx) || gallery.jobId,
+          galleryIndex: idx
+        }) || ref;
+      }
+    } catch (e) { /* ignore */ }
+    if (gen !== window.__appreciateViewerGen) return;
+    img.onload = () => {
+      if (gen !== window.__appreciateViewerGen) return;
+      img.onload = null;
+      img.onerror = null;
+      window.resetImageZoom?.(img);
+      window.attachImageZoom?.(img);
+      window.finishAppreciateViewerReveal?.();
+    };
+    img.onerror = () => {
+      if (gen !== window.__appreciateViewerGen) return;
+      window.setAppreciateViewerLoading?.(false);
+    };
+    if (displaySrc === img.src && img.complete && img.naturalWidth > 0) img.onload?.();
+    else img.src = displaySrc || ref;
+  }
+
+  function navigateAppreciateGallery(delta) {
+    const gallery = window.__appreciateCardGallery;
+    if (!gallery?.urls?.length) return false;
+    const viewerNav = window.getViewerNav?.() || { items: [], index: -1 };
+    const nextIdx = viewerNav.index + (delta > 0 ? 1 : -1);
+    if (nextIdx < 0 || nextIdx >= viewerNav.items.length) return false;
+    const item = viewerNav.items[nextIdx];
+    if (item?.type !== 'appreciateGalleryTile') return false;
+    viewerNav.index = nextIdx;
+    const card = getCards().find((c) => c.id === gallery.cardId);
+    if (!card) return false;
+    void renderAppreciateGalleryIndex(card, item.tileIndex ?? nextIdx, window.__appreciateViewerGen);
+    return true;
+  }
+
+  function bindAppreciateGalleryUi() {
+    const bindBtn = (id, delta) => {
+      const btn = document.getElementById(id);
+      if (!btn || btn.dataset.bound === '1') return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        navigateAppreciateGallery(delta);
+      });
+    };
+    bindBtn('appreciateGalleryPrev', -1);
+    bindBtn('appreciateGalleryNext', 1);
+    bindBtn('appreciateHitPrev', -1);
+    bindBtn('appreciateHitNext', 1);
+  }
+
   function closeAppreciateViewer(e) {
     const viewer = document.getElementById('appreciateViewer');
     if (!viewer?.classList.contains('active')) return;
     if (e) {
       const t = e.target;
       if (t?.closest?.('.appreciate-viewer-actions button, .appreciate-viewer-gen-btn, .lightbox-actions')) return;
+      if (t?.closest?.('.lightbox-gallery-nav, .lightbox-gallery-hit')) return;
       if (t?.closest?.('#appreciateViewerImg, .viewer-image-shine-wrap, #lightboxImage')) return;
       if (t?.closest?.('button') && !t?.closest?.('.appreciate-viewer-close')) return;
     }
@@ -52,6 +176,8 @@
     document.getElementById('appreciateViewerWarehouseActions')?.classList.add('hidden');
     setWarehousePreviewCardId(null);
     window.__appreciateViewerMode = null;
+    window.__appreciateCardGallery = null;
+    syncAppreciateGalleryUi(0);
     window.FeatureDraft?.onAppreciateViewerClose?.();
     const img = document.getElementById('appreciateViewerImg');
     const caption = document.getElementById('appreciateViewerCaption');
@@ -82,10 +208,13 @@
     setWarehousePreviewCardId(cardId);
     deps.markQuickPreviewTask?.({ warehouseUsed: true });
     syncAppreciateViewerActions('warehouse');
-    const navItems = getCards()
-      .filter((c) => c.image && hasDisplayImage(c))
-      .map((c) => ({ type: 'card', id: c.id, key: `card:${c.id}` }));
-    window.setViewerNav?.(navItems, `card:${cardId}`);
+    const hasGallery = setupAppreciateCardGallery(card, 0);
+    if (!hasGallery) {
+      const navItems = getCards()
+        .filter((c) => c.image && hasDisplayImage(c))
+        .map((c) => ({ type: 'card', id: c.id, key: `card:${c.id}` }));
+      window.setViewerNav?.(navItems, `card:${cardId}`);
+    }
     window.__appreciateViewerGen = (window.__appreciateViewerGen || 0) + 1;
     const gen = window.__appreciateViewerGen;
     const viewer = document.getElementById('appreciateViewer');
@@ -100,6 +229,12 @@
     if (caption) {
       caption.textContent = title || (prompt ? prompt.slice(0, 120) + (prompt.length > 120 ? '…' : '') : '');
       caption.style.display = caption.textContent ? 'block' : 'none';
+    }
+    if (hasGallery) {
+      img.style.display = 'block';
+      if (hint) hint.style.display = 'block';
+      await renderAppreciateGalleryIndex(card, 0, gen);
+      return;
     }
     const isPlaceholderSrc = (src) => !src || String(src).includes('data:image/svg');
     let instantSrc = '';
@@ -246,8 +381,28 @@
     }, 620);
   }
 
+  function registerAppreciateGalleryWheel() {
+    const prevNavigate = window.__viewerWheelNavigate;
+    window.__viewerWheelNavigate = function (item) {
+      if (item?.type === 'appreciateGalleryTile') {
+        const gallery = window.__appreciateCardGallery;
+        if (!gallery) return false;
+        const viewerNav = window.getViewerNav?.() || { items: [], index: -1 };
+        viewerNav.index = viewerNav.items.findIndex((it) => it.key === item.key);
+        const card = getCards().find((c) => c.id === gallery.cardId);
+        if (!card) return false;
+        void renderAppreciateGalleryIndex(card, item.tileIndex ?? 0, window.__appreciateViewerGen);
+        return true;
+      }
+      if (typeof prevNavigate === 'function') return prevNavigate(item) === true;
+      return false;
+    };
+  }
+
   function init(nextDeps) {
     deps = nextDeps || {};
+    bindAppreciateGalleryUi();
+    registerAppreciateGalleryWheel();
   }
 
   window.AppAppreciate = { init };

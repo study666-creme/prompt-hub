@@ -5895,6 +5895,10 @@
     return wr('repairMissingGenCardImagesQuiet');
   }
 
+  async function repairMjWarehousePreviewsQuiet() {
+    return wr('repairMjWarehousePreviewsQuiet');
+  }
+
   async function recoverRecentGenerationJobs(opts) { return jr('recoverRecentGenerationJobs', opts); }
 
   function getSessionGenJobIds() { return jr('getSessionGenJobIds') || []; }
@@ -6371,11 +6375,15 @@
     if (c) return c;
     const full = (window.__promptHubCards || []).find((x) => x.id === id);
     if (!full) return null;
+    const cover = window.PromptHubCardGallery?.getCardFeedCoverMeta?.(full)
+      || { ref: window.PromptHubCardGallery?.getCardFeedCoverImage?.(full) || full.image };
     return {
       id: full.id,
       title: (full.title || '').trim(),
       prompt: (full.prompt || '').trim() || (full.title || '').trim(),
-      image: window.PromptHubCardGallery?.getCardCoverImage?.(full) || full.image || null,
+      image: cover.ref || full.image || null,
+      feedCoverIndex: cover.galleryIndex ?? 0,
+      feedCoverJobId: cover.slotJobId || (full.genJobId ? String(full.genJobId).replace(/#\d+$/, '') : null),
       cardImages: window.PromptHubCardGallery?.normalizeCardGallery?.(full) || null,
       tags: full.tags || [],
       group: full.group || null,
@@ -6414,7 +6422,7 @@
       const c = findWarehouseCardById(assetId);
       if (c) {
         rawRef = c.image || rawRef;
-        jobId = String(c.genJobId || jobId).replace(/#\d+$/, '');
+        jobId = String(c.feedCoverJobId || c.genJobId || jobId).replace(/#\d+$/, '');
         resolveOpts = window.getCommunityCollectImageResolveOpts?.(c) || {};
       }
     } else {
@@ -6430,6 +6438,9 @@
       }
     }
     if (!rawRef || !isDisplayableImage(rawRef)) return '';
+    const galleryIndex = kind === 'warehouse'
+      ? (findWarehouseCardById(assetId)?.feedCoverIndex ?? 0)
+      : null;
     const gridFallbackUrl = window.MediaPipeline?.gridUrlFromImgEl?.(imgEl) || '';
     if (window.MediaPipeline?.resolvePreviewUrl) {
       return window.MediaPipeline.resolvePreviewUrl(rawRef, {
@@ -6438,8 +6449,10 @@
         authorId: resolveOpts.authorId,
         communityFeed: resolveOpts.fromPublicFeed === true,
         jobId: jobId || undefined,
+        galleryIndex: galleryIndex != null ? galleryIndex : undefined,
+        useJobImageApi: galleryIndex == null || galleryIndex <= 0,
         gridFallbackUrl,
-        allowGridFallback: true
+        allowGridFallback: galleryIndex == null || galleryIndex <= 0
       });
     }
     if (window.SupabaseSync?.resolvePreviewFullUrl) {
@@ -6449,8 +6462,10 @@
         authorId: resolveOpts.authorId,
         communityFeed: resolveOpts.fromPublicFeed === true,
         jobId: jobId || undefined,
+        galleryIndex: galleryIndex != null ? galleryIndex : undefined,
+        useJobImageApi: galleryIndex == null || galleryIndex <= 0,
         gridFallbackUrl,
-        allowGridFallback: true
+        allowGridFallback: galleryIndex == null || galleryIndex <= 0
       });
     }
     return resolveImageDisplayUrl(rawRef, jobId, assetId, {
@@ -6501,7 +6516,7 @@
       }
       prompt = c.prompt || '';
       image = c.image || '';
-      jobId = normalizeMjParentJobId(c.genJobId || '');
+      jobId = c.feedCoverJobId || normalizeMjParentJobId(c.genJobId || '');
       if (isDisplayableImage(c.image)) refImage = c.image;
     }
     const previewCard = imageGenPreviewKind === 'warehouse'
@@ -6905,10 +6920,8 @@
     let mjGalleryUrls = null;
     if (kind === 'warehouse' && assetId) {
       const full = (window.__promptHubCards || []).find((c) => c.id === assetId);
-      if (full?.isMidjourney) {
-        const gallery = window.PromptHubCardGallery?.normalizeCardGallery?.(full) || [];
-        if (gallery.length > 1) mjGalleryUrls = gallery;
-      }
+      const gallery = window.PromptHubCardGallery?.normalizeCardGallery?.(full) || [];
+      if (gallery.length > 1) mjGalleryUrls = gallery;
       if (!mjGalleryUrls?.length && full?.isMidjourney && Array.isArray(full.mjGridUrls) && full.mjGridUrls.length > 1) {
         mjGalleryUrls = full.mjGridUrls.filter(Boolean).slice(0, 5);
       }
@@ -7182,15 +7195,11 @@
       });
     });
     bindImageGenModelFamilyTabs();
-    document.querySelectorAll('input[name="imageGenMjSpeed"]').forEach((input) => {
-      input.addEventListener('change', () => {
-        syncImageGenMjToggleCheckedClasses();
-        persistImageGenMjPrefs();
-        updateImageGenCostHint();
-      });
+    document.getElementById('imageGenMjSpeedSelect')?.addEventListener('change', () => {
+      persistImageGenMjPrefs();
+      updateImageGenCostHint();
     });
-    document.getElementById('imageGenMjTile')?.addEventListener('change', syncImageGenMjToggleCheckedClasses);
-    document.getElementById('imageGenMjRaw')?.addEventListener('change', syncImageGenMjToggleCheckedClasses);
+    document.getElementById('imageGenMjExtrasSelect')?.addEventListener('change', persistImageGenMjPrefs);
     document.getElementById('imageGenMjSaveAllTiles')?.addEventListener('change', () => {
       syncImageGenMjToggleCheckedClasses();
       persistImageGenMjPrefs();
@@ -7485,10 +7494,16 @@
       }
       const saveAllEl = document.getElementById('imageGenMjSaveAllTiles');
       if (saveAllEl && draft.mjSaveAllTiles) saveAllEl.checked = true;
-      const speedVal = draft.mjSpeed;
-      if (speedVal === 'fast' || speedVal === 'turbo' || speedVal === '') {
-        const speedInput = document.querySelector(`input[name="imageGenMjSpeed"][value="${speedVal}"]`);
-        if (speedInput) speedInput.checked = true;
+      const speedSelect = document.getElementById('imageGenMjSpeedSelect');
+      if (speedSelect) {
+        const speedVal = draft.mjSpeed;
+        if (speedVal === 'fast' || speedVal === 'turbo') speedSelect.value = speedVal;
+        else speedSelect.value = 'relax';
+      }
+      const extrasSelect = document.getElementById('imageGenMjExtrasSelect');
+      if (extrasSelect && typeof draft.mjExtras === 'string') {
+        const allowed = ['', 'tile', 'raw', 'tile+raw'];
+        if (allowed.includes(draft.mjExtras)) extrasSelect.value = draft.mjExtras;
       }
     }
     bindImageGenUpload();
@@ -8037,13 +8052,35 @@
       const idx = Number(strip.dataset.mjStripActive) || 0;
       const ref = list[idx];
       if (!ref) return;
-      void resolveRef(ref, idx).then((src) => {
-        const a = document.createElement('a');
-        a.href = src || ref;
-        a.download = `mj-${idx + 1}.png`;
-        a.rel = 'noopener';
-        a.target = '_blank';
-        a.click();
+      const mainImg = strip.querySelector('.imagegen-mj-filmstrip-main img');
+      const dlBtn = strip.querySelector('[data-mj-strip-dl]');
+      const baseJob = previewCtx?.parentJobId ? String(previewCtx.parentJobId).replace(/#\d+$/, '') : null;
+      const slotJobId = baseJob && window.PromptHubCardGallery?.gallerySlotJobId
+        ? window.PromptHubCardGallery.gallerySlotJobId(baseJob, idx)
+        : previewCtx?.parentJobId || null;
+      if (previewCtx?.cardId && typeof window.downloadCardImageFile === 'function') {
+        void window.downloadCardImageFile(ref, previewCtx.cardId, `mj-${idx + 1}.png`, {
+          triggerBtn: dlBtn,
+          galleryIndex: idx,
+          jobId: slotJobId,
+          previewImg: mainImg
+        });
+        return;
+      }
+      void resolveRef(ref, idx).then(async (src) => {
+        const url = src || ref;
+        if (!url) return;
+        try {
+          if (typeof window.promptHubSaveImage === 'function') {
+            await window.promptHubSaveImage(url, `mj-${idx + 1}.png`, mainImg);
+          } else {
+            await downloadImageFromUrl(url, `mj-${idx + 1}.png`);
+            return;
+          }
+          toast('下载完成');
+        } catch (err) {
+          toast('下载失败，请稍后重试');
+        }
       });
     });
     renderAt(Number(strip.dataset.mjStripActive) || 0);
@@ -8318,18 +8355,25 @@
   }
 
   function getImageGenMjSpeed() {
-    const v = document.querySelector('input[name="imageGenMjSpeed"]:checked')?.value;
+    const v = document.getElementById('imageGenMjSpeedSelect')?.value;
     if (v === 'fast' || v === 'turbo') return v;
     return '';
   }
 
+  function getImageGenMjExtrasValue() {
+    return document.getElementById('imageGenMjExtrasSelect')?.value || '';
+  }
+
+  function getImageGenMjExtrasFlags() {
+    const v = getImageGenMjExtrasValue();
+    return {
+      tile: v === 'tile' || v === 'tile+raw',
+      raw: v === 'raw' || v === 'tile+raw'
+    };
+  }
+
   function syncImageGenMjToggleCheckedClasses() {
-    document.querySelectorAll('.imagegen-mj-speed-option').forEach((el) => {
-      el.classList.toggle('is-checked', !!el.querySelector('input:checked'));
-    });
-    document.querySelectorAll('.imagegen-mj-option-card').forEach((el) => {
-      el.classList.toggle('is-checked', !!el.querySelector('input:checked'));
-    });
+    /* 旧版卡片式开关已改为下拉框 */
   }
 
   function persistImageGenMjPrefs() {
@@ -8338,7 +8382,8 @@
       ...draft,
       mjMode: imageGenMjMode,
       mjSaveAllTiles: isImageGenMjSaveAllTiles(),
-      mjSpeed: getImageGenMjSpeed()
+      mjSpeed: getImageGenMjSpeed(),
+      mjExtras: getImageGenMjExtrasValue()
     });
   }
 
@@ -8443,8 +8488,9 @@
     if (quality) out.quality = quality;
     if (style) out.style = style;
     if (negativePrompt) out.negativePrompt = negativePrompt;
-    if (document.getElementById('imageGenMjTile')?.checked) out.tile = true;
-    if (document.getElementById('imageGenMjRaw')?.checked) out.raw = true;
+    const mjExtras = getImageGenMjExtrasFlags();
+    if (mjExtras.tile) out.tile = true;
+    if (mjExtras.raw) out.raw = true;
     const speed = getImageGenMjSpeed();
     out.speed = speed === 'fast' || speed === 'turbo' ? speed : 'relax';
     return out;
@@ -9631,6 +9677,7 @@
         if (typeof window.persistPromptHubCards === 'function') await window.persistPromptHubCards();
       },
       renderImageGenFeed: (...a) => renderImageGenFeed(...a),
+      resolveMjPollImages,
       queueUrgentCardsSync,
       refreshWarehouseUI: () => window.refreshWarehouseUI?.({ softCards: true }),
       isPageImageGenActive: () => document.getElementById('pageImageGen')?.classList.contains('active')
@@ -9962,6 +10009,7 @@
     recoverRecentGenerationJobs,
     recoverLostGenerationsFromApi,
     repairMissingGenCardImagesQuiet,
+    repairMjWarehousePreviewsQuiet,
     resumePendingGenerationJobs,
     scheduleGenJobsSync,
     renderCreations,

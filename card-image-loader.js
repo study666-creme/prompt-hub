@@ -97,7 +97,7 @@
 
   function jobIdFromImg(img) {
     const fromAttr = img?.getAttribute?.('data-job-id');
-    if (fromAttr) return String(fromAttr).replace(/#\d+$/, '');
+    if (fromAttr) return String(fromAttr);
     const cardId = cardIdFromImg(img);
     if (!cardId) return null;
     const card = (window.__promptHubCards || []).find((c) => c.id === cardId);
@@ -311,6 +311,37 @@
     const ref = img.getAttribute('data-image-ref');
     const path = window.SupabaseSync?.storagePathFromRef?.(ref);
     return !!(path && window.SupabaseSync?.storagePathOwnedByCurrentUser?.(path));
+  }
+
+  function tryAlternateFeedCover(img) {
+    if (!isOwnImageGenWarehouseImg(img)) return false;
+    const cardId = cardIdFromImg(img);
+    const card = cardId && (window.__promptHubCards || []).find((c) => c.id === cardId);
+    if (!card || !window.PromptHubCardGallery?.normalizeCardGallery) return false;
+    const currentRef = img.getAttribute('data-image-ref') || '';
+    const gallery = window.PromptHubCardGallery.normalizeCardGallery(card);
+    const tried = new Set(String(img.dataset.igAltTried || '').split('|').filter(Boolean));
+    if (currentRef) tried.add(currentRef);
+    for (let i = 0; i < gallery.length; i += 1) {
+      const ref = gallery[i];
+      if (!ref || tried.has(ref)) continue;
+      if (window.PromptHubCardGallery.isResolvableCoverRef?.(ref, cardId) === false) continue;
+      tried.add(ref);
+      img.dataset.igAltTried = [...tried].join('|');
+      img.setAttribute('data-image-ref', ref);
+      const slotJob = window.PromptHubCardGallery.gallerySlotJobId?.(
+        card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null,
+        i
+      );
+      if (slotJob) img.setAttribute('data-job-id', slotJob);
+      img.classList.remove('img-load-failed');
+      feedMediaFromImg(img)?.classList.remove('card-media--load-failed');
+      delete img.dataset.igWhResolveRetry;
+      delete img.dataset.feedImgRetry;
+      loadImg(img);
+      return true;
+    }
+    return false;
   }
 
   function queueGridBackfillForImg(img) {
@@ -626,13 +657,17 @@
             }, img).then((retryUrl) => {
               if (retryUrl) applyUrlToImg(img, retryUrl);
               else {
-                scheduleImageGenWarehouseRepair();
-                window.finalizeWarehouseCardMediaFailure?.(feedMediaFromImg(img), img);
+                if (!tryAlternateFeedCover(img)) {
+                  scheduleImageGenWarehouseRepair();
+                  window.finalizeWarehouseCardMediaFailure?.(feedMediaFromImg(img), img);
+                }
               }
             });
             return;
           }
-          if (isOwnImageGenWarehouseImg(img)) scheduleImageGenWarehouseRepair();
+          if (isOwnImageGenWarehouseImg(img)) {
+            if (!tryAlternateFeedCover(img)) scheduleImageGenWarehouseRepair();
+          }
           window.finalizeWarehouseCardMediaFailure?.(feedMediaFromImg(img), img);
         }
         return;

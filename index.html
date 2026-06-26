@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260626p';
+    window.__APP_BUILD__ = '20260626w';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -104,11 +104,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260626p">
-  <link rel="stylesheet" href="styles-theme.css?v=20260626p">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260626p">
+  <link rel="stylesheet" href="styles.css?v=20260626w">
+  <link rel="stylesheet" href="styles-theme.css?v=20260626w">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260626w">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260626p">
+  <link rel="stylesheet" href="styles-features.css?v=20260626w">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="pack-prelude.js"></script>
 </head>
@@ -447,7 +447,12 @@
     <div class="appreciate-viewer-inner" onclick="closeAppreciateViewer(event)">
       <div class="appreciate-viewer-stage" id="appreciateViewerStage">
         <div class="appreciate-viewer-media" id="appreciateViewerMedia">
+          <button type="button" class="lightbox-gallery-nav lightbox-gallery-prev hidden" id="appreciateGalleryPrev" aria-label="上一张">‹</button>
+          <button type="button" class="lightbox-gallery-nav lightbox-gallery-next hidden" id="appreciateGalleryNext" aria-label="下一张">›</button>
+          <span class="lightbox-gallery-counter hidden" id="appreciateGalleryCounter" aria-live="polite">1 / 1</span>
           <div class="viewer-image-frame" id="appreciateViewerFrame">
+            <button type="button" class="lightbox-gallery-hit lightbox-gallery-hit-prev hidden" id="appreciateHitPrev" tabindex="-1" aria-label="上一张"></button>
+            <button type="button" class="lightbox-gallery-hit lightbox-gallery-hit-next hidden" id="appreciateHitNext" tabindex="-1" aria-label="下一张"></button>
             <div class="viewer-image-shine-wrap">
               <span class="viewer-shine-sweep" aria-hidden="true"></span>
               <img id="appreciateViewerImg" src="" alt="" draggable="false">
@@ -488,7 +493,12 @@
   <div class="image-lightbox" id="imageLightbox" onclick="closeLightbox(event)">
     <div class="lightbox-container">
       <button class="close-lightbox" onclick="closeLightbox(event)">✕</button>
+      <button type="button" class="lightbox-gallery-nav lightbox-gallery-prev hidden" id="lightboxGalleryPrev" aria-label="上一张">‹</button>
+      <button type="button" class="lightbox-gallery-nav lightbox-gallery-next hidden" id="lightboxGalleryNext" aria-label="下一张">›</button>
+      <span class="lightbox-gallery-counter hidden" id="lightboxGalleryCounter" aria-live="polite">1 / 1</span>
       <div class="viewer-image-frame" id="lightboxFrame">
+        <button type="button" class="lightbox-gallery-hit lightbox-gallery-hit-prev hidden" id="lightboxHitPrev" tabindex="-1" aria-label="上一张"></button>
+        <button type="button" class="lightbox-gallery-hit lightbox-gallery-hit-next hidden" id="lightboxHitNext" tabindex="-1" aria-label="下一张"></button>
         <div class="viewer-image-shine-wrap">
           <span class="viewer-shine-sweep" aria-hidden="true"></span>
           <img id="lightboxImage" src="" alt="放大图片">
@@ -844,10 +854,10 @@
     </div>
     <div class="panel-body" id="panelBody">
       <div class="image-drop-area no-image" id="dropArea">
-        <span class="placeholder-text" id="dropPlaceholder">点击、拖拽或 Ctrl+V 粘贴图片</span>
-        <img id="previewImage" style="display:none;" onclick="if(imageData) openLightbox(imageData)">
+        <span class="placeholder-text" id="dropPlaceholder">点击、拖拽或 Ctrl+V 粘贴图片（可多选，最多 5 张同卡）</span>
+        <img id="previewImage" style="display:none;">
         <button type="button" class="remove-image-btn" id="removeImageBtn" onclick="event.stopPropagation(); removeImage()" title="从编辑区去掉图片（须保存后才真正删除）" aria-label="去掉图片"><span aria-hidden="true">×</span></button>
-        <input type="file" id="fileInput" accept="image/*" style="display:none;">
+        <input type="file" id="fileInput" accept="image/*" multiple style="display:none;">
       </div>
       <div class="panel-gallery-nav hidden" id="panelGalleryNav" aria-label="卡片多图切换">
         <button type="button" class="panel-gallery-nav-btn" id="panelGalleryPrev" aria-label="上一张">‹</button>
@@ -856,7 +866,7 @@
       </div>
       <div class="panel-image-tools" id="panelImageTools">
         <button type="button" class="panel-image-tool-btn panel-image-tool-toggle" id="cardUploadOriginalToggle" aria-pressed="false">上传原图：关</button>
-        <span class="panel-image-size-hint" id="cardImageSizeHint">未选择图片</span>
+        <button type="button" class="panel-image-tool-btn" id="panelAddImageBtn" title="同一张卡片最多 5 张图">添加图片</button>
         <button type="button" class="panel-image-tool-btn hidden" id="cardDownloadImageBtn">下载当前图</button>
         <button type="button" class="panel-image-tool-btn hidden" id="trimBlackBorderBtn" onclick="trimPanelImageBlackBorder()">裁除黑边</button>
       </div>
@@ -1128,23 +1138,24 @@
               <p class="panel-hint imagegen-mj-blend-hint hidden" id="imageGenMjBlendHint">
                 混图：使用<strong>参考图框</strong>内 2～5 张图融合，提示词可选。生成后可在预览中逐张切换查看。
               </p>
-              <p class="imagegen-mj-toggle-section-label">出图速度 <span class="imagegen-mj-tip" title="Relax 排队最慢但积分最低；Fast/Turbo 优先出图">?</span></p>
-              <div class="imagegen-mj-speed-group" role="radiogroup" aria-label="出图速度">
-                <label class="imagegen-mj-speed-option">
-                  <input type="radio" name="imageGenMjSpeed" value="" checked>
-                  <span class="imagegen-mj-speed-label">Relax</span>
-                  <span class="imagegen-mj-speed-desc">常规</span>
-                </label>
-                <label class="imagegen-mj-speed-option">
-                  <input type="radio" name="imageGenMjSpeed" value="fast">
-                  <span class="imagegen-mj-speed-label">Fast</span>
-                  <span class="imagegen-mj-speed-desc">快速</span>
-                </label>
-                <label class="imagegen-mj-speed-option">
-                  <input type="radio" name="imageGenMjSpeed" value="turbo">
-                  <span class="imagegen-mj-speed-label">Turbo</span>
-                  <span class="imagegen-mj-speed-desc">极速</span>
-                </label>
+              <div class="imagegen-params-row imagegen-mj-select-row">
+                <div class="imagegen-param">
+                  <label for="imageGenMjSpeedSelect">出图速度 <span class="imagegen-mj-tip" title="Relax 排队最慢但积分最低；Fast/Turbo 优先出图">?</span></label>
+                  <select id="imageGenMjSpeedSelect" class="settings-input imagegen-field-compact" aria-label="出图速度">
+                    <option value="relax" selected>Relax · 常规</option>
+                    <option value="fast">Fast · 快速</option>
+                    <option value="turbo">Turbo · 极速</option>
+                  </select>
+                </div>
+                <div class="imagegen-param">
+                  <label for="imageGenMjExtrasSelect">附加开关</label>
+                  <select id="imageGenMjExtrasSelect" class="settings-input imagegen-field-compact" aria-label="附加开关">
+                    <option value="" selected>无</option>
+                    <option value="tile">平铺模式</option>
+                    <option value="raw">原始风格</option>
+                    <option value="tile+raw">平铺 + 原始</option>
+                  </select>
+                </div>
               </div>
               <div class="imagegen-mj-imagine-fields" id="imageGenMjImagineFields">
               <p class="panel-hint imagegen-mj-help" id="imageGenMjHelp">
@@ -1196,23 +1207,6 @@
               </div>
               <label for="imageGenMjNegative">反向提示词</label>
               <textarea id="imageGenMjNegative" class="settings-input imagegen-field-compact imagegen-mj-negative" maxlength="500" rows="3" placeholder="排除的内容，如 ugly, blurry、低质量"></textarea>
-              <p class="imagegen-mj-toggle-section-label">附加开关 <span class="imagegen-mj-toggle-hint">（平铺/原始可多选）</span></p>
-              <div class="imagegen-mj-options-grid imagegen-mj-options-grid--dual" role="group" aria-label="Midjourney 附加选项">
-                <label class="imagegen-mj-option-card">
-                  <span class="imagegen-mj-option-head">
-                    <input type="checkbox" id="imageGenMjTile">
-                    <span class="imagegen-mj-option-title">平铺模式</span>
-                  </span>
-                  <span class="imagegen-mj-option-desc">无缝重复图案（壁纸/包装）</span>
-                </label>
-                <label class="imagegen-mj-option-card">
-                  <span class="imagegen-mj-option-head">
-                    <input type="checkbox" id="imageGenMjRaw">
-                    <span class="imagegen-mj-option-title">原始风格</span>
-                  </span>
-                  <span class="imagegen-mj-option-desc">减少美化，更贴近提示词</span>
-                </label>
-              </div>
               <p class="imagegen-mj-gallery-note">Midjourney 四宫格<strong>自动存入同一张卡片</strong>（最多 5 张），预览里切换即可，无需付费放大。变体按一次生图同价扣积分。</p>
               </div>
             </div>
@@ -1685,7 +1679,7 @@
   <script src="api-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260626p"></script>
+  <script src="api-client.js?v=20260626w"></script>
   <script>
     (function () {
       var FALLBACK = [
@@ -1737,21 +1731,21 @@
     })();
   </script>
   <script src="pack-foundation.js"></script>
-  <script src="supabase-sync.js?v=20260626p"></script>
+  <script src="supabase-sync.js?v=20260626w"></script>
   <script src="pack-core.js"></script>
   <script src="pack-account.js"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
   <script src="pack-viewer.js"></script>
   <script src="pack-appreciate.js"></script>
   <script src="pack-lightbox.js"></script>
-  <script src="card-gallery.js?v=20260626c"></script>
-  <script src="script.js?v=20260626p"></script>
+  <script src="card-gallery.js?v=20260626w"></script>
+  <script src="script.js?v=20260626w"></script>
   <script src="pack-imagegen.js"></script>
   <script src="pack-feed.js"></script>
-  <script src="community-public-feed.js?v=20260626p"></script>
-  <script src="features-draft.js?v=20260626p"></script>
+  <script src="community-public-feed.js?v=20260626w"></script>
+  <script src="features-draft.js?v=20260626w"></script>
   <script src="pack-extra.js"></script>
-  <script src="features-assets.js?v=20260626p"></script>
+  <script src="features-assets.js?v=20260626w"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

@@ -2233,6 +2233,14 @@
   opacity: 0.85;
 }
 
+.imagegen-mj-select-row {
+  margin: 8px 0 10px;
+}
+
+.imagegen-mj-select-row .imagegen-param label {
+  margin-bottom: 4px;
+}
+
 .imagegen-mj-speed-group {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

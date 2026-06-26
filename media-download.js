@@ -95,13 +95,53 @@
     return 'png';
   }
 
-  function downloadFilenameForCard(card, blob, filename) {
+  function downloadFilenameForCard(card, blob, filename, galleryIndex) {
     if (filename && /\.\w{3,4}$/i.test(filename)) {
       const ext = extensionFromBlob(blob);
       return filename.replace(/\.\w{3,4}$/i, `.${ext}`);
     }
     const id = card?.id || Date.now();
-    return `prompt-hub-${id}.${extensionFromBlob(blob)}`;
+    const slot = Number.isFinite(galleryIndex) && galleryIndex > 0 ? `-${galleryIndex + 1}` : '';
+    return `prompt-hub-${id}${slot}.${extensionFromBlob(blob)}`;
+  }
+
+  function isCoverImageDownload(card, imageRef, galleryIndex) {
+    if (Number.isFinite(galleryIndex)) return galleryIndex <= 0;
+    if (!imageRef || !card?.image) return true;
+    return String(imageRef) === String(card.image);
+  }
+
+  function resolveDownloadJobId(card, galleryIndex, imageRef) {
+    const base = card?.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null;
+    if (!base) return null;
+    const CG = window.PromptHubCardGallery;
+    if (Number.isFinite(galleryIndex) && galleryIndex > 0 && CG?.gallerySlotJobId) {
+      return CG.gallerySlotJobId(base, galleryIndex);
+    }
+    if (imageRef && card?.image && String(imageRef) !== String(card.image) && CG?.normalizeCardGallery) {
+      const gallery = CG.normalizeCardGallery(card);
+      const idx = gallery.findIndex((u) => String(u || '') === String(imageRef));
+      if (idx > 0 && CG.gallerySlotJobId) return CG.gallerySlotJobId(base, idx);
+    }
+    return base;
+  }
+
+  async function tryDownloadViaPreviewUrl(card, filename, opts = {}) {
+    const previewImg = opts.previewImg || null;
+    const previewUrl = previewImg?.dataset?.previewFullUrl
+      || previewImg?.currentSrc
+      || previewImg?.src
+      || '';
+    if (!previewUrl || previewUrl.includes('data:image/svg')) return false;
+    const name = filename || downloadFilenameForCard(
+      card,
+      { type: 'image/png' },
+      null,
+      opts.galleryIndex
+    );
+    await saveImageUrl(previewUrl, name, previewImg);
+    showToast('下载完成');
+    return true;
   }
 
   async function fetchBlobFromUrl(url) {
@@ -193,8 +233,12 @@
 
   async function downloadCardImageFile(imageRef, cardId, filename, opts = {}) {
     const card = cardId ? getCard(cardId) : null;
-    const inflightKey = String(cardId || imageRef || 'anon');
+    const galleryIndex = Number.isFinite(opts.galleryIndex) ? opts.galleryIndex : null;
+    const imageRefStr = imageRef != null ? String(imageRef) : '';
+    const inflightKey = `${cardId || imageRefStr || 'anon'}:${galleryIndex ?? 'cover'}`;
     const triggerBtn = opts.triggerBtn || null;
+    const coverDownload = isCoverImageDownload(card, imageRef, galleryIndex);
+    const slotJobId = opts.jobId || resolveDownloadJobId(card, galleryIndex, imageRef);
 
     if (cardDownloadInflight.has(inflightKey)) {
       showToast('该图正在下载中，请稍候…');
@@ -209,60 +253,83 @@
       const minBytes = card && window.SupabaseSync?.expectedMinFullImageBytes
         ? window.SupabaseSync.expectedMinFullImageBytes(dlRes)
         : 0;
-      let blob = card ? await tryFastGenJobDownloadBlob(card) : null;
-      const fastOk = blob && blob.size >= Math.min(minBytes || 0, 80 * 1024);
-      if (blob && minBytes > 0 && blob.size < minBytes && !fastOk) blob = null;
-      if (blob) {
-        const name = downloadFilenameForCard(card, blob, filename);
-        saveBlob(blob, name);
-        showToast(`下载完成 · ${formatFileSize(blob.size)}`);
-        return;
-      }
-      if (card && window.SupabaseSync?.downloadCardFullResBlob) {
-        await downloadPrepToast(card);
-        const fullBlob = await window.SupabaseSync.downloadCardFullResBlob(card, { resolution: dlRes });
-        if (fullBlob) {
-          const name = downloadFilenameForCard(card, fullBlob, filename);
-          saveBlob(fullBlob, name);
-          if (minBytes > 0 && fullBlob.size < minBytes) {
-            showToast(`已下载 · ${formatFileSize(fullBlob.size)}（体积偏小，请稍后再试或重新生成）`, 6000);
-          } else {
-            showToast(`下载完成 · ${formatFileSize(fullBlob.size)}`);
-          }
+
+      if (coverDownload && card) {
+        let blob = await tryFastGenJobDownloadBlob(card);
+        const fastOk = blob && blob.size >= Math.min(minBytes || 0, 80 * 1024);
+        if (blob && minBytes > 0 && blob.size < minBytes && !fastOk) blob = null;
+        if (blob) {
+          const name = downloadFilenameForCard(card, blob, filename, galleryIndex);
+          saveBlob(blob, name);
+          showToast(`下载完成 · ${formatFileSize(blob.size)}`);
           return;
         }
+        if (window.SupabaseSync?.downloadCardFullResBlob) {
+          await downloadPrepToast(card);
+          const fullBlob = await window.SupabaseSync.downloadCardFullResBlob(card, { resolution: dlRes });
+          if (fullBlob) {
+            const name = downloadFilenameForCard(card, fullBlob, filename, galleryIndex);
+            saveBlob(fullBlob, name);
+            if (minBytes > 0 && fullBlob.size < minBytes) {
+              showToast(`已下载 · ${formatFileSize(fullBlob.size)}（体积偏小，请稍后再试或重新生成）`, 6000);
+            } else {
+              showToast(`下载完成 · ${formatFileSize(fullBlob.size)}`);
+            }
+            return;
+          }
+        }
       }
+
       if (typeof imageRef === 'string' && imageRef.startsWith('data:image/')) {
         const dataBlob = await (await fetch(imageRef)).blob();
-        const name = downloadFilenameForCard(card, dataBlob, filename);
-        await saveImageUrl(imageRef, name);
+        const name = downloadFilenameForCard(card, dataBlob, filename, galleryIndex);
+        saveBlob(dataBlob, name);
         showToast('下载完成');
         return;
       }
-      if (window.SupabaseSync?.downloadCardStorageBlob) {
-        downloadPrepToast(card);
-        const jobId = card?.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null;
-        const storageBlob = await window.SupabaseSync.downloadCardStorageBlob(imageRef, cardId, { jobId });
+
+      if (window.SupabaseSync?.downloadCardStorageBlob && imageRef) {
+        if (card) downloadPrepToast(card);
+        const storageBlob = await window.SupabaseSync.downloadCardStorageBlob(imageRef, cardId, {
+          jobId: slotJobId
+        });
         if (storageBlob) {
-          const name = downloadFilenameForCard(card, storageBlob, filename);
+          const name = downloadFilenameForCard(card, storageBlob, filename, galleryIndex);
           saveBlob(storageBlob, name);
           showToast(`下载完成 · ${formatFileSize(storageBlob.size)}`);
           return;
         }
       }
-      if (card?.genJobId && window.SupabaseSync?.rearchiveGeneratedCardFromJob) {
+
+      if (typeof imageRef === 'string' && /^https?:\/\//i.test(imageRef)) {
+        const blob = await fetchBlobFromUrl(imageRef);
+        if (blob) {
+          const name = downloadFilenameForCard(card, blob, filename, galleryIndex);
+          saveBlob(blob, name);
+          showToast(`下载完成 · ${formatFileSize(blob.size)}`);
+          return;
+        }
+      }
+
+      if (coverDownload && card?.genJobId && window.SupabaseSync?.rearchiveGeneratedCardFromJob) {
         downloadPrepToast(card);
         await window.SupabaseSync.rearchiveGeneratedCardFromJob(card);
         const retry = await window.SupabaseSync.downloadCardFullResBlob(card, { skipRepair: true });
         if (retry) {
-          const name = downloadFilenameForCard(card, retry, filename);
+          const name = downloadFilenameForCard(card, retry, filename, galleryIndex);
           saveBlob(retry, name);
           showToast(`下载完成 · ${formatFileSize(retry.size)}`);
           return;
         }
       }
+
+      if (await tryDownloadViaPreviewUrl(card, filename, { ...opts, galleryIndex })) return;
+
       showToast('原图暂不可用，请稍后重试或重新生成');
     } catch (e) {
+      try {
+        if (await tryDownloadViaPreviewUrl(card, filename, { ...opts, galleryIndex })) return;
+      } catch (e2) { /* fall through */ }
       showToast('下载失败，请稍后重试');
       console.warn('[download] card image failed', e);
     } finally {

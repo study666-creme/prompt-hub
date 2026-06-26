@@ -24,28 +24,30 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · 预览加载与 MJ 翻页体验）
+## 当前部署阶段（2026-06-07 · 生图仓库封面与下载修复）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | build `20260626p` · https://prompt-hubs.com |
+| **Pages** | build `20260626w` · https://prompt-hubs.com |
 | **Worker** | `prompt-hub-api` · `071b133` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
 ### 已打通
 
-- ✅ **Apimart MJ**（4 模型 · relax/fast/turbo · 单卡最多 5 张：四宫格 + 4 单图）
-- ✅ **MJ 全量入库**：API 返回 `mjGalleryUrls`；满 4 张单图才标记完成/入库
-- ✅ **生图仓库预览**：列表签 CDN 带 `jobId`；失败自动重试 + 静默 repair；boost 24 张
-- ✅ **MJ 翻页**：切换时 loading 态、URL 缓存、相邻预取，慢网不再像「五张都是第一张」
-- ✅ 旧卡修复：打开预览或 gallery 重复/缺图时自动从任务 API 重新归档
+- ✅ **Apimart MJ**（relax/fast/turbo · 单卡最多 5 张 · 参数双下拉 UI）
+- ✅ **生图仓库 MJ 封面**：优先第一张可解析单图，不再硬绑四宫格 grid（与卡片库一致可见）
+- ✅ **多图下载**：灯箱/编辑面板按当前 gallery 索引下载，blob 直存不跳页
+- ✅ **MJ 跨端同步**：入库后 urgent push + 登录/切前台 recover
+- ✅ **分组删除**：tombstone 防云同步复活；编辑面板图片工具一行三按钮
+- ✅ 控制台修复：`window.repairMjWarehousePreviewsQuiet()`
 
 ### 已知问题 / 下一步
 
-1. 用户需 **Ctrl+Shift+R** 强刷（build `20260626p`）
-2. 极慢网络下翻页仍有等待，但会显示 loading 扫光而非旧图滞留
-3. 旧 MJ 卡：进入生图仓库 tab 或点开详情触发补图；上游链接过期则无法补四宫格
-4. MemFire 迁移（7 月初 final dump）
+1. 用户需 **Ctrl+Shift+R** 强刷（build `20260626w`）
+2. 极慢网下 MJ 翻页仍有 loading 等待（已有预取/缓存）
+3. 上游 MJ 链接过期则无法自动补四宫格
+4. 生图页：仓库卡片多时首屏仍可能 masonry 重排，可继续优化增量渲染
+5. MemFire 迁移（7 月初 final dump）
 
 ### 部署
 

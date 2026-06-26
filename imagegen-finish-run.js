@@ -163,7 +163,7 @@
       d().prunePendingJobsWithWarehouseCards();
       d().renderImageGenFeed({ preserveScroll: true, force: true });
       d().renderImageGenMobileResult();
-      if (saved && global.SupabaseSync?.isLoggedIn?.() && !isMidjourney) {
+      if (saved && global.SupabaseSync?.isLoggedIn?.()) {
         d().queueUrgentCardsSync();
       }
       const whCard = slotJobId

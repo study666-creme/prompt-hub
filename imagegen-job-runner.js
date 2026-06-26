@@ -687,18 +687,80 @@
   /**
    * 从 API 恢复生图结果。
    * - sessionOnly：仅恢复「本会话提交」的任务（轮询失败时用）
+   * - crossDevice：登录/切回前台时，从 API 补全本机缺失的近期已完成任务（跨手机/电脑）
    * - manual：用户点「恢复丢失的生图」并确认后
-   * 永不自动恢复：用户已删除（job 墓碑）或已有仓库卡片
    */
   async function recoverRecentGenerationJobs(opts = {}) {
     if (opts.manual === true) return { ok: true, recovered: 0 };
-    if (!opts.sessionOnly) return;
+    const crossDevice = opts.crossDevice === true;
+    if (!opts.sessionOnly && !crossDevice) return;
 
     const r = await window.PromptHubApi.listRecentGenerationJobs();
-    if (!r?.ok || !Array.isArray(r.data?.jobs)) return;
+    if (!r?.ok || !Array.isArray(r.data?.jobs)) return { ok: false, recovered: 0 };
 
     let changed = false;
     let recovered = 0;
+
+    if (crossDevice) {
+      for (const job of r.data.jobs) {
+        if (!job?.id || d().isGenerationJobDeleted(job.id)) continue;
+        if (job.status !== 'completed' || !job.imageUrl) continue;
+        if (!isRecentGenJob(job)) continue;
+        const existing = findWarehouseCardForJob(job.id);
+        if (existing) {
+          const gallery = global.PromptHubCardGallery?.normalizeCardGallery?.(existing) || [];
+          const isMj = job.isMidjourney || d().isImageGenMidjourneyModel?.(job.model);
+          const mjNeedsGallery = isMj && gallery.length < 4;
+          if (!warehouseCardImageNeedsRecovery(existing, job.imageUrl) && !mjNeedsGallery) continue;
+        }
+        const meta = {
+          prompt: job.prompt || '',
+          model: job.model || 'gpt-image-2',
+          resolution: job.resolution || '1k',
+          quality: job.quality || 'standard',
+          size: job.size || '1:1',
+          cost: job.creditsCharged || 0,
+          jobId: job.id
+        };
+        try {
+          let pollData = {
+            status: 'completed',
+            imageUrl: job.imageUrl,
+            extraImageUrls: job.extraImageUrls,
+            jobId: job.id,
+            isMidjourney: job.isMidjourney,
+            model: job.model
+          };
+          const isMj = job.isMidjourney || d().isImageGenMidjourneyModel?.(job.model);
+          if (isMj && window.PromptHubApi?.getGenerationJob) {
+            const full = await window.PromptHubApi.getGenerationJob(job.id);
+            if (full?.ok && full.data) pollData = { ...full.data, status: full.data.status || 'completed' };
+          }
+          const ok = await d().ensureGenJobCreationsFromPoll(
+            { data: pollData },
+            { ...meta, silentToast: true, isRecovery: true },
+            null
+          );
+          if (ok !== false) {
+            changed = true;
+            recovered += 1;
+          }
+        } catch (e) {
+          console.warn('[recover] crossDevice job failed', job.id, e);
+        }
+      }
+      if (recovered > 0) {
+        changed = true;
+        d().queueUrgentCardsSync?.();
+        if (typeof window.persistPromptHubCards === 'function') {
+          await window.persistPromptHubCards({ skipCloud: true });
+        }
+        window.refreshWarehouseUI?.();
+      }
+      if (changed) d().renderImageGenFeed({ preserveScroll: true, force: true });
+      return { ok: true, recovered };
+    }
+
     for (const job of r.data.jobs) {
       if (!job?.id) continue;
       if (d().isGenerationJobDeleted(job.id)) continue;

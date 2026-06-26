@@ -195,12 +195,13 @@
       if (feedId.startsWith('wh_')) {
         const rawId = feedId.slice(3);
         const card = (window.__promptHubCards || []).find((c) => c.id === rawId);
-        const jobId = img?.dataset?.jobId || card?.genJobId;
+        const slim = (window.getWarehouseCardsForImageGen?.() || []).find((c) => c.id === rawId);
+        const jobId = img?.dataset?.jobId || slim?.feedCoverJobId || card?.genJobId;
         return {
           fromPublicFeed: false,
           authorId: window.SupabaseSync?.getUserId?.() || '',
           cardId: rawId,
-          jobId: jobId ? String(jobId).replace(/#\d+$/, '') : undefined
+          jobId: jobId ? String(jobId) : undefined
         };
       }
       const authorId = cardEl.dataset.authorId || img.dataset.authorId || '';

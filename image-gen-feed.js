@@ -625,12 +625,15 @@
       const galleryN = window.PromptHubCardGallery?.normalizeCardGallery?.(c)?.length || 0;
       const mjBadge = c.isMidjourney && galleryN > 1 ? `MJ·${galleryN}` : '';
       const whMeta = [groupLabel, tagPart, mjBadge].filter(Boolean).join(' · ');
+      const full = (window.__promptHubCards || []).find((x) => x.id === c.id) || c;
+      const cover = window.PromptHubCardGallery?.getCardFeedCoverMeta?.(full)
+        || { ref: c.image, slotJobId: c.feedCoverJobId || (c.genJobId ? String(c.genJobId).replace(/#\d+$/, '') : null) };
       return buildFeedCardHtml({
         id: 'wh_' + c.id,
         sourceCardId: c.id,
-        jobId: c.genJobId ? String(c.genJobId).replace(/#\d+$/, '') : null,
+        jobId: cover.slotJobId || c.feedCoverJobId || (c.genJobId ? String(c.genJobId).replace(/#\d+$/, '') : null),
         prompt: c.prompt,
-        image: window.PromptHubCardGallery?.getCardCoverImage?.(c) || c.image,
+        image: cover.ref || c.image,
         title: titleTrim,
         metaLine: whMeta,
         meta: '',

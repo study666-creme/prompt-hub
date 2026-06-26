@@ -235,13 +235,16 @@
     return n && n !== '未分类' ? n : '';
   }
 
-  /** 合并多端分组名：云端顺序优先，再补本地与卡片上的分组 */
-  function mergeCustomGroupsList(localList, cloudList, cards) {
+  /** 合并多端分组名：云端顺序优先，再补本地与卡片上的分组（已删除分组 tombstone 不再恢复） */
+  function mergeCustomGroupsList(localList, cloudList, cards, deletedGroupTombstones) {
+    const tomb = deletedGroupTombstones && typeof deletedGroupTombstones === 'object'
+      ? deletedGroupTombstones
+      : {};
     const seen = new Set();
     const out = [];
     const push = (g) => {
       const n = normalizeGroupName(g);
-      if (!n || seen.has(n)) return;
+      if (!n || seen.has(n) || tomb[n]) return;
       seen.add(n);
       out.push(n);
     };
@@ -249,6 +252,22 @@
     for (const g of localList || []) push(g);
     for (const c of cards || []) push(c?.group);
     return out;
+  }
+
+  function sanitizeCardGroupsAgainstTombstones(cards, deletedGroupTombstones) {
+    const tomb = deletedGroupTombstones && typeof deletedGroupTombstones === 'object'
+      ? deletedGroupTombstones
+      : {};
+    if (!Array.isArray(cards) || !Object.keys(tomb).length) return cards;
+    let changed = false;
+    const out = cards.map((c) => {
+      if (!c?.group) return c;
+      const g = normalizeGroupName(c.group);
+      if (!g || !tomb[g]) return c;
+      changed = true;
+      return { ...c, group: null };
+    });
+    return changed ? out : cards;
   }
 
   function mergePayload(local, cloud) {
@@ -271,14 +290,22 @@
       local.settings?.deletedCommunityPostTombstones,
       cloud.settings?.deletedCommunityPostTombstones
     );
-    const mergedCards = mergeCardsList(local.cards, cloud.cards, cardTombstones);
+    const groupTombstones = mergeTombstoneMaps(
+      local.settings?.deletedCustomGroupTombstones,
+      cloud.settings?.deletedCustomGroupTombstones
+    );
+    const mergedCards = sanitizeCardGroupsAgainstTombstones(
+      mergeCardsList(local.cards, cloud.cards, cardTombstones),
+      groupTombstones
+    );
     const merged = {
       schemaVersion: SCHEMA_VERSION,
       cards: mergedCards,
       customGroups: mergeCustomGroupsList(
         local.customGroups,
         cloud.customGroups,
-        mergedCards
+        mergedCards,
+        groupTombstones
       ),
       globalFields:
         Array.isArray(local.globalFields) && local.globalFields.length
@@ -290,7 +317,8 @@
         deletedCardTombstones: cardTombstones,
         deletedCreationTombstones: creationTombstones,
         deletedGenerationJobTombstones: jobTombstones,
-        deletedCommunityPostTombstones: postTombstones
+        deletedCommunityPostTombstones: postTombstones,
+        deletedCustomGroupTombstones: groupTombstones
       },
       account: local.account || cloud.account || null,
       communityPosts: mergeCommunityPostsList(
@@ -511,6 +539,8 @@
     validatePull,
     mergePayload,
     mergeCustomGroupsList,
+    sanitizeCardGroupsAgainstTombstones,
+    normalizeGroupName,
     mergeCardPair,
     mergeCardsList,
     dedupeWarehouseCards,
