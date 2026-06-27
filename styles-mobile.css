@@ -1482,23 +1482,27 @@
   }
 
   body.imagegen-mobile-view-form .imagegen-mj-params .imagegen-params-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
   }
 
   body.imagegen-mobile-view-form .imagegen-mj-options-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
   }
 
   body.imagegen-mobile-view-form .imagegen-mj-option-card--full {
-    grid-column: 1;
+    grid-column: 1 / -1;
   }
 
   body.imagegen-mobile-view-form .imagegen-mj-speed-group {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
   }
 
   body.imagegen-mobile-view-form .imagegen-shared-params.imagegen-params--mj .imagegen-params-row--mj-size {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
   }
 
   body.imagegen-mobile-view-form .imagegen-mj-filmstrip-stage {

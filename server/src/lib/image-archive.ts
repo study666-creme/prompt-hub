@@ -204,8 +204,13 @@ export function extensionFromImageMime(mime: string): string {
   return 'jpg';
 }
 
+export function generationStorageAssetId(jobId: string): string {
+  return String(jobId || '').replace(/#/g, '-');
+}
+
 export function generatedArchivePath(userId: string, jobId: string, mime: string): string {
-  return `${userId}/generated/${jobId}.${extensionFromImageMime(mime)}`;
+  const key = generationStorageAssetId(jobId);
+  return `${userId}/generated/${key}.${extensionFromImageMime(mime)}`;
 }
 
 async function verifyStoredObject(

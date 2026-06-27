@@ -2200,11 +2200,14 @@ body {
       align-self: stretch;
     }
     .card-media.is-loading,
-    .imagegen-feed-media.is-loading:not(.imagegen-gen-pending) {
-      min-height: 120px;
+    .imagegen-feed-card-tile .imagegen-feed-media.is-loading:not(.imagegen-gen-pending) {
+      min-height: 0;
       width: 100%;
       background: var(--card-skeleton-bg) !important;
       isolation: isolate;
+    }
+    .card-media.is-loading {
+      min-height: 120px;
     }
     /* 加载中：夜间扫光 / 白天光球（光球见 styles-theme.css） */
     .card-media.is-loading::before,

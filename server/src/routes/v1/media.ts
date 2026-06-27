@@ -16,12 +16,13 @@ import {
   materializeCommunityGridIfMissing,
   serveCachedStorageImage,
   verifyMediaAccessToken,
-  gridPathFromPrimary
+  signingPathForVariant
 } from '../../lib/media-cdn';
 import { deleteOwnedCardImageIfUnreferenced } from '../../lib/admin-media-refs';
 import { createAdminClient } from '../../lib/supabase';
 import { uploadCardImage } from '../../lib/r2-storage';
 import { rateLimit } from '../../middleware/rate-limit';
+import { ensureWarehouseJobThumb, warehouseThumbCacheKey } from '../../lib/warehouse-thumb';
 
 const BUCKET = 'card-images';
 
@@ -30,15 +31,6 @@ function assertOwnPath(userId: string, path: string): void {
   if (!norm.startsWith(`${userId}/`)) {
     throw new ApiError(403, 'FORBIDDEN', '无权访问该图片');
   }
-}
-
-/** 列表签名默认走 _grid；仅 variant=full 时签原图 */
-function signingPathForVariant(path: string, variant: string): string {
-  const clean = path.replace(/^\//, '');
-  if (variant === 'full') return clean;
-  if (/_grid\.(jpe?g|webp|png)$/i.test(clean)) return clean;
-  const grid = gridPathFromPrimary(clean);
-  return grid ? grid.replace(/^\//, '') : clean;
 }
 
 export const mediaRoutes = new Hono<{ Bindings: Env }>();
@@ -257,6 +249,52 @@ mediaRoutes.post('/sign-batch', async c => {
   });
 });
 
+const warehouseThumbsBodySchema = z.object({
+  jobs: z
+    .array(
+      z.object({
+        jobId: z.string().max(128),
+        slot: z.number().int().min(0).max(8).optional()
+      })
+    )
+    .max(32)
+});
+
+/** 生图卡列表缩略图：服务端归档 + 生成 _grid，只返回 grid CDN URL */
+mediaRoutes.post('/warehouse-thumbs', async c => {
+  const user = c.get('user');
+  const parsed = warehouseThumbsBodySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'warehouse-thumbs 参数无效');
+  }
+  const thumbs: Record<string, string> = {};
+  let idx = 0;
+  const jobs = parsed.data.jobs.filter(j => String(j.jobId || '').trim());
+  const concurrency = 4;
+  async function worker() {
+    while (idx < jobs.length) {
+      const item = jobs[idx];
+      idx += 1;
+      const jobId = String(item.jobId).trim();
+      const slot = item.slot ?? 0;
+      const cacheKey = warehouseThumbCacheKey(jobId, slot);
+      const slotJobId =
+        slot > 0 ? `${jobId.replace(/#\d+$/, '')}#${slot + 1}` : jobId.replace(/#\d+$/, '');
+      try {
+        const out = await ensureWarehouseJobThumb(c, user.id, slotJobId);
+        if (out?.url) thumbs[cacheKey] = out.url;
+      } catch {
+        /* 单张失败不影响批量 */
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length || 1) }, () => worker()));
+  return c.json({
+    ok: true,
+    data: { thumbs, expiresIn: MEDIA_CDN_TOKEN_TTL_SEC, cdn: true }
+  });
+});
+
 mediaRoutes.get('/generation/:jobId/url', async c => {
   const user = c.get('user');
   const jobId = c.req.param('jobId');
@@ -279,8 +317,10 @@ mediaRoutes.get('/generation/:jobId/url', async c => {
   const path = storagePathFromRef(raw);
   if (path) {
     assertOwnPath(user.id, path);
-    const url = await buildPrivateMediaCdnUrl(c, path);
-    return c.json({ ok: true, data: { url, cdn: true } });
+    const variant = (c.req.query('variant') || 'full').trim().toLowerCase();
+    const signPath = signingPathForVariant(path, variant);
+    const url = await buildPrivateMediaCdnUrl(c, signPath);
+    return c.json({ ok: true, data: { url, cdn: true, variant } });
   }
 
   if (typeof raw === 'string' && raw.startsWith('https://')) {

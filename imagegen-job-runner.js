@@ -373,6 +373,8 @@
       batchIndex: job.batchIndex || null,
       batchTotal: job.batchTotal || null,
       batchId: job.batchId || null,
+      batchMergeCards: !!job.batchMergeCards,
+      cardTitle: job.cardTitle || '',
       silentToast: !!job.silentToast,
       startedAt: job.startedAt || Date.now()
     };
@@ -1042,6 +1044,12 @@
   function findWarehouseCardForPending(pending) {
     if (!pending) return null;
     const cards = window.__promptHubCards || [];
+    if (pending.batchMergeCards && pending.batchId && pending.jobId) {
+      const byBatch = cards.find((c) => c.genBatchId === pending.batchId);
+      if (byBatch && Array.isArray(byBatch.genBatchJobIds) && byBatch.genBatchJobIds.includes(pending.jobId)) {
+        return byBatch;
+      }
+    }
     if (pending.jobId) {
       const key = String(pending.jobId).replace(/#\d+$/, '');
       const byJob = cards.find((c) => {

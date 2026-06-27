@@ -106,13 +106,17 @@
   }
 
   let igWhRepairTimer = null;
+  let igWhRepairLastAt = 0;
   function scheduleImageGenWarehouseRepair() {
     if (igWhRepairTimer) return;
+    const now = Date.now();
+    if (now - igWhRepairLastAt < 90000) return;
+    igWhRepairLastAt = now;
     igWhRepairTimer = setTimeout(() => {
       igWhRepairTimer = null;
-      void window.FeatureDraft?.repairMissingGenCardImagesQuiet?.();
-      void window.repairGeneratedCardImagesQuiet?.();
-    }, 800);
+      void window.ImageGenWarehouseRepair?.recoverWarehouseImagesViaServer?.({ max: 4, hours: 72 })
+        .catch(() => {});
+    }, 1200);
   }
 
   function warehouseCollectResolveOpts(img) {
@@ -246,9 +250,9 @@
     return container?.id === 'cardsContainer' || container?.id === 'imageGenFeed';
   }
 
-  const IMAGEGEN_FEED_PATCH_MAX = 10;
-  const IMAGEGEN_FEED_BOOST_MAX = 24;
-  const IMAGEGEN_FEED_PREFETCH_MAX = 6;
+  const IMAGEGEN_FEED_PATCH_MAX = 6;
+  const IMAGEGEN_FEED_BOOST_MAX = 10;
+  const IMAGEGEN_FEED_PREFETCH_MAX = 4;
 
   function sortImgsByViewport(imgs) {
     return [...imgs].sort((a, b) => {
@@ -273,7 +277,7 @@
     }
     if ((isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))
       && window.SupabaseSync?.getListDisplayImageSrc) {
-      const url = window.SupabaseSync.getListDisplayImageSrc(ref, cardId, { authorId, assetId: cardId });
+      const url = window.SupabaseSync.getListDisplayImageSrc(ref, cardId, { authorId, assetId: cardId, allowFullFallback: false });
       if (url && isReadySrc(url, img)) return url;
       return '';
     }
@@ -284,6 +288,11 @@
   function isReadySrc(src, img) {
     if (!src || !src.startsWith('http') || src.includes('data:image/svg')) return false;
     if (window.SupabaseSync?.isInvalidMediaUrl?.(src)) return false;
+    if (img && (isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))) {
+      if (src.startsWith('blob:')) return false;
+      if (window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(src)) return false;
+      if (!window.SupabaseSync?.isGridDisplayUrl?.(src)) return false;
+    }
     if (img && isImgVisuallyLoaded(img) && (isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))) {
       return true;
     }
@@ -338,6 +347,10 @@
       feedMediaFromImg(img)?.classList.remove('card-media--load-failed');
       delete img.dataset.igWhResolveRetry;
       delete img.dataset.feedImgRetry;
+      if (card && ref && card.image !== ref) {
+        window.PromptHubCardGallery?.ensureFeedCoverFromGallery?.(card, { persist: true, backfill: true });
+        global.invalidateWarehouseCardsForImageGenCache?.();
+      }
       loadImg(img);
       return true;
     }
@@ -408,6 +421,22 @@
       const communityExtra = ownIgWh ? {} : communityResolveOpts(img);
       if (communityExtra.skip) return '';
       const ownListCard = ownWarehouseCard || ownIgWh;
+      const jobId = jobIdFromImg(img) || extraOpts?.jobId || undefined;
+      if ((ownWarehouseCard || ownIgWh) && jobId && window.WarehouseThumb?.resolveForCard) {
+        const wh = await window.WarehouseThumb.resolveForCard(ref, {
+          jobId,
+          assetId: cardId,
+          cardId,
+          galleryIndex: extraOpts?.galleryIndex || 0
+        });
+        if (isReadySrc(wh, img)) return wh;
+      } else if (ownListCard && cardId && window.WarehouseThumb?.resolveForCardModel) {
+        const card = (window.__promptHubCards || []).find((c) => c.id === cardId);
+        if (card?.genJobId) {
+          const wh = await window.WarehouseThumb.resolveForCardModel(card);
+          if (isReadySrc(wh, img)) return wh;
+        }
+      }
       const degradedList = ownListCard
         && window.SupabaseSync?.needsDegradedListPreview?.(ref, cardId);
       const resolveOpts = {
@@ -443,6 +472,7 @@
   function applyUrlToImg(img, url) {
     if (!img || !isReadySrc(url, img)) return false;
     if (window.SupabaseSync?.isWarehouseBlockedFullUrl?.(url, img)) return false;
+    if (img.dataset.feedLoadDone === '1' && isImgVisuallyLoaded(img)) return true;
     const media = feedMediaFromImg(img);
     if (!media) return false;
     const quietWhList = isOwnWarehouseListImg(img);
@@ -476,6 +506,10 @@
       }
       img.dataset.feedLoadDone = '1';
       observer?.unobserve(img);
+      const cardIdDone = cardIdFromImg(img);
+      if (isGridSrc && cardIdDone && (isOwnWarehouseListImg(img) || isOwnImageGenWarehouseImg(img))) {
+        window.SupabaseSync?.markGridThumbReady?.(cardIdDone);
+      }
       if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
       else media.classList.remove('is-loading');
     };
@@ -507,6 +541,21 @@
       }
       if (isGridFail && ref && !img.dataset.primaryRetried) {
         img.dataset.primaryRetried = '1';
+        const failedKey = failedPath ? String(failedPath).replace(/^\//, '') : '';
+        if (failedKey && failedKey.includes('/generated/')) {
+          window.SupabaseSync?.invalidateCorruptGrid?.(failedKey, cardId);
+          const card = (window.__promptHubCards || []).find((c) => c.id === cardId);
+          if (card) {
+            void window.SupabaseSync?.warmGeneratedGridThumb?.(card).then(() => {
+              void resolveUrl(ref, cardId, { bypassSignBudget: true }, img).then((retryUrl) => {
+                if (retryUrl && applyUrlToImg(img, retryUrl)) return;
+                if (ownList) window.finalizeWarehouseCardMediaFailure?.(media, img);
+                else media.classList.add('card-media--load-failed');
+              });
+            });
+            return;
+          }
+        }
         if (ownList || isOwnCommunityGridImg(img)) {
           const primary = window.SupabaseSync?.primaryImagePath?.(ref, cardId);
           const mayUsePrimaryFallback = primary

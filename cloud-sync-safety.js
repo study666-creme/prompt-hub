@@ -376,6 +376,43 @@
     return n;
   }
 
+  /** 合并卡片多图 / MJ 四宫格：取图更多的那一侧，避免手机同步后只剩封面 */
+  function preferRicherCardGallery(localCard, mergedCard) {
+    if (!localCard || !mergedCard) return mergedCard;
+    const CG = typeof window !== 'undefined' ? window.PromptHubCardGallery : null;
+    if (!CG?.normalizeCardGallery) return mergedCard;
+    const localG = CG.normalizeCardGallery(localCard);
+    const mergedG = CG.normalizeCardGallery(mergedCard);
+    const pickLocal = localG.length > mergedG.length;
+    const pickMerged = mergedG.length > localG.length;
+    if (!pickLocal && !pickMerged) {
+      const localHasStorage = localG.some((u) => window.SupabaseSync?.isStorageRef?.(u) || window.SupabaseSync?.isCdnMediaUrl?.(u));
+      const mergedHasHttp = mergedG.some((u) => /^https?:\/\//i.test(String(u || '')) && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(u));
+      if (localHasStorage && mergedHasHttp && localG.length >= mergedG.length) {
+        return {
+          ...mergedCard,
+          cardImages: localCard.cardImages,
+          mjGridUrls: localCard.mjGridUrls ?? mergedCard.mjGridUrls,
+          mjCompositeUrl: localCard.mjCompositeUrl ?? mergedCard.mjCompositeUrl,
+          mjButtons: localCard.mjButtons ?? mergedCard.mjButtons,
+          isMidjourney: !!(localCard.isMidjourney || mergedCard.isMidjourney)
+        };
+      }
+      return mergedCard;
+    }
+    const src = pickLocal ? localCard : mergedCard;
+    const out = {
+      ...mergedCard,
+      cardImages: src.cardImages,
+      mjGridUrls: src.mjGridUrls ?? mergedCard.mjGridUrls,
+      mjCompositeUrl: src.mjCompositeUrl ?? mergedCard.mjCompositeUrl,
+      mjButtons: src.mjButtons ?? mergedCard.mjButtons,
+      isMidjourney: !!(src.isMidjourney || mergedCard.isMidjourney)
+    };
+    CG.syncCardGalleryFields?.(out);
+    return out;
+  }
+
   /** 合并结果中卡片 id 与本地一致时，避免云端空图覆盖本地有效图 */
   function preferLocalCardsImages(local, payload) {
     if (!payload || typeof payload !== 'object') return payload;
@@ -397,6 +434,7 @@
           if (sl > sc) out = { ...out, image: localCard.image };
         }
       }
+      out = preferRicherCardGallery(localCard, out);
       const lg = cardGroupValue(localCard);
       const cg = cardGroupValue(out);
       if (lg && !cg) out = { ...out, group: lg };

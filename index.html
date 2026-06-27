@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260627a';
+    window.__APP_BUILD__ = '20260628c';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -104,11 +104,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260627a">
-  <link rel="stylesheet" href="styles-theme.css?v=20260627a">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260627a">
+  <link rel="stylesheet" href="styles.css?v=20260628c">
+  <link rel="stylesheet" href="styles-theme.css?v=20260628c">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260628c">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260627a">
+  <link rel="stylesheet" href="styles-features.css?v=20260628c">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="pack-prelude.js"></script>
 </head>
@@ -622,7 +622,7 @@
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status" aria-live="polite"></p>
       <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260627a</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260627m</p>
     </div>
   </nav>
 
@@ -1147,14 +1147,38 @@
                     <option value="turbo">Turbo · 极速</option>
                   </select>
                 </div>
-                <div class="imagegen-param">
-                  <label for="imageGenMjExtrasSelect">附加开关</label>
-                  <select id="imageGenMjExtrasSelect" class="settings-input imagegen-field-compact" aria-label="附加开关">
-                    <option value="" selected>无</option>
-                    <option value="tile">平铺模式</option>
-                    <option value="raw">原始风格</option>
-                    <option value="tile+raw">平铺 + 原始</option>
-                  </select>
+                <div class="imagegen-param imagegen-param--mj-flags">
+                  <span class="imagegen-mj-toggle-section-label">附加开关</span>
+                  <div class="imagegen-mj-options-grid imagegen-mj-options-grid--quad" id="imageGenMjFlagGrid" role="group" aria-label="附加开关">
+                    <label class="imagegen-mj-option-card">
+                      <div class="imagegen-mj-option-head">
+                        <input type="checkbox" id="imageGenMjFlagTile" data-mj-flag="tile" aria-label="平铺模式">
+                        <span class="imagegen-mj-option-title">平铺</span>
+                      </div>
+                      <p class="imagegen-mj-option-desc">无缝重复图案，适合壁纸与纹理</p>
+                    </label>
+                    <label class="imagegen-mj-option-card">
+                      <div class="imagegen-mj-option-head">
+                        <input type="checkbox" id="imageGenMjFlagRaw" data-mj-flag="raw" aria-label="原始风格">
+                        <span class="imagegen-mj-option-title">原始</span>
+                      </div>
+                      <p class="imagegen-mj-option-desc">更少默认美化，更贴近提示词</p>
+                    </label>
+                    <label class="imagegen-mj-option-card">
+                      <div class="imagegen-mj-option-head">
+                        <input type="checkbox" id="imageGenMjFlagDraft" data-mj-flag="draft" aria-label="草稿模式">
+                        <span class="imagegen-mj-option-title">草稿</span>
+                      </div>
+                      <p class="imagegen-mj-option-desc">更快出预览，适合试构图</p>
+                    </label>
+                    <label class="imagegen-mj-option-card">
+                      <div class="imagegen-mj-option-head">
+                        <input type="checkbox" id="imageGenMjFlagHd" data-mj-flag="hd" aria-label="高清模式">
+                        <span class="imagegen-mj-option-title">高清</span>
+                      </div>
+                      <p class="imagegen-mj-option-desc">更高细节与清晰度（HD）</p>
+                    </label>
+                  </div>
                 </div>
               </div>
               <div class="imagegen-mj-imagine-fields" id="imageGenMjImagineFields">
@@ -1227,6 +1251,9 @@
               <option value="ultra">高</option>
             </select>
             <p class="imagegen-quality-note">质量仅影响出图效果，不额外加价</p>
+            <label for="imageGenCardTitle">卡片标题</label>
+            <input type="text" id="imageGenCardTitle" class="settings-input imagegen-field-compact" maxlength="80" placeholder="可选：入库时用作卡片名，不填则自动生成" autocomplete="off">
+            <p class="panel-hint imagegen-card-title-hint">批量生图时，每张卡可用同一标题；附赠图仍按序号命名。</p>
             <div class="imagegen-params-row imagegen-save-target-row">
               <div class="imagegen-param">
                 <label for="imageGenTargetGroup">入库文件夹</label>
@@ -1679,7 +1706,7 @@
   <script src="api-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260627a"></script>
+  <script src="api-client.js?v=20260628c"></script>
   <script>
     (function () {
       var FALLBACK = [
@@ -1731,21 +1758,36 @@
     })();
   </script>
   <script src="pack-foundation.js"></script>
-  <script src="supabase-sync.js?v=20260627a"></script>
+  <script src="supabase-sync.js?v=20260628c"></script>
   <script src="pack-core.js"></script>
   <script src="pack-account.js"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
   <script src="pack-viewer.js"></script>
   <script src="pack-appreciate.js"></script>
   <script src="pack-lightbox.js"></script>
-  <script src="card-gallery.js?v=20260627a"></script>
-  <script src="script.js?v=20260627a"></script>
+  <script src="card-gallery.js?v=20260628c"></script>
+  <script src="script.js?v=20260628c"></script>
   <script src="pack-imagegen.js"></script>
   <script src="pack-feed.js"></script>
-  <script src="community-public-feed.js?v=20260627a"></script>
-  <script src="features-draft.js?v=20260627a"></script>
+  <script>
+    (function () {
+      var need = 'grid-guard-v5';
+      if (window.__PH_FEED_PACK_REV__ === need) {
+        try { sessionStorage.removeItem('ph-feed-pack-reload'); } catch (e) { /* ignore */ }
+        return;
+      }
+      try {
+        if (!sessionStorage.getItem('ph-feed-pack-reload')) {
+          sessionStorage.setItem('ph-feed-pack-reload', '1');
+          location.reload();
+        }
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
+  <script src="community-public-feed.js?v=20260628c"></script>
+  <script src="features-draft.js?v=20260628c"></script>
   <script src="pack-extra.js"></script>
-  <script src="features-assets.js?v=20260627a"></script>
+  <script src="features-assets.js?v=20260628c"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

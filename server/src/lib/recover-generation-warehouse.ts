@@ -1,7 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Env } from '../env';
 import { ApiError } from './errors';
-import { archiveRemoteImage, isStorageRef, storagePathFromRef, toStorageRef } from './image-archive';
+import { archiveRemoteImage, generationStorageAssetId, isStorageRef, storagePathFromRef, toStorageRef } from './image-archive';
 import { readJobProvider } from './image-upstream';
+import { cardImageExists, downloadFromR2 } from './r2-storage';
 
 const BUCKET = 'card-images';
 const MIN_IMAGE_BYTES = 512;
@@ -28,68 +30,118 @@ function generateCardId(): string {
 
 async function storageBlobSize(
   admin: SupabaseClient,
-  path: string
+  path: string,
+  env?: Env
 ): Promise<number> {
   const clean = path.replace(/^\//, '');
   if (!clean) return 0;
+  if (env) {
+    const blob = await downloadFromR2(env, clean);
+    if (blob?.size) return blob.size;
+  }
   try {
     const { data, error } = await admin.storage.from(BUCKET).download(clean);
-    if (error || !data) return 0;
-    return data.size || 0;
-  } catch {
-    return 0;
+    if (!error && data?.size) return data.size;
+  } catch { /* ignore */ }
+  if (env && (await cardImageExists(env, clean, admin))) {
+    const blob = await downloadFromR2(env, clean);
+    return blob?.size || MIN_IMAGE_BYTES;
   }
+  return 0;
 }
 
 async function storageBlobOk(
   admin: SupabaseClient,
   path: string,
-  minBytes = MIN_IMAGE_BYTES
+  minBytes = MIN_IMAGE_BYTES,
+  env?: Env
 ): Promise<boolean> {
-  const size = await storageBlobSize(admin, path);
+  const size = await storageBlobSize(admin, path, env);
   return size >= Math.max(MIN_IMAGE_BYTES, minBytes);
 }
 
-async function resolveImageRefForJob(
+function slotIndexFromJobId(jobId: string): number {
+  const m = String(jobId || '').match(/#(\d+)$/);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 1 ? n - 1 : 0;
+}
+
+function pickJobImageUrlForSlot(job: JobRow, slotIndex: number): string | null {
+  const meta = (job.meta || {}) as Record<string, unknown>;
+  const urls: string[] = [];
+  if (Array.isArray(meta.mjGalleryUrls)) {
+    for (const u of meta.mjGalleryUrls as unknown[]) {
+      if (typeof u === 'string' && u.trim()) urls.push(u.trim());
+    }
+  }
+  if (!urls.length) {
+    const composite =
+      typeof meta.mjCompositeUrl === 'string' && /^https:\/\//i.test(meta.mjCompositeUrl)
+        ? meta.mjCompositeUrl.trim()
+        : '';
+    const tiles = Array.isArray(meta.mjGridUrls)
+      ? (meta.mjGridUrls as string[]).filter((u) => typeof u === 'string' && u.trim())
+      : [];
+    if (composite) urls.push(composite, ...tiles);
+    else urls.push(...tiles);
+  }
+  const pick = urls[slotIndex] || urls[0];
+  if (pick && /^https:\/\//i.test(pick)) return pick;
+  const raw = job.result_image_url;
+  if (typeof raw === 'string' && /^https:\/\//i.test(raw)) return raw;
+  const upstream =
+    typeof meta.upstreamImageUrl === 'string' && /^https:\/\//i.test(meta.upstreamImageUrl)
+      ? meta.upstreamImageUrl
+      : null;
+  return upstream;
+}
+
+export async function resolveImageRefForJob(
   admin: SupabaseClient,
   userId: string,
   jobId: string,
-  job: JobRow
+  job: JobRow,
+  env?: Env
 ): Promise<string | null> {
+  const assetKey = String(jobId).replace(/#/g, '-');
   const minBytes = expectedMinFullBytes(
     (job as { resolution?: string | null }).resolution
   );
-  const genPaths = [`${userId}/generated/${jobId}.png`, `${userId}/generated/${jobId}.jpg`];
+  const genPaths = [
+    `${userId}/generated/${assetKey}.png`,
+    `${userId}/generated/${assetKey}.jpg`,
+    `${userId}/generated/${assetKey}.webp`
+  ];
   for (const genPath of genPaths) {
-    if (await storageBlobOk(admin, genPath, minBytes)) {
+    if (await storageBlobOk(admin, genPath, minBytes, env)) {
       return toStorageRef(genPath);
     }
   }
 
   const raw = job.result_image_url as string | null;
-  const meta = (job.meta || {}) as Record<string, unknown>;
-  const upstream =
-    typeof meta.upstreamImageUrl === 'string' && /^https:\/\//i.test(meta.upstreamImageUrl)
-      ? meta.upstreamImageUrl
-      : null;
-  const rearchiveFrom = upstream || (raw && /^https:\/\//i.test(raw) ? raw : null);
+  const slotIndex = slotIndexFromJobId(jobId);
+  const rearchiveFrom = pickJobImageUrlForSlot(job, slotIndex);
   if (rearchiveFrom) {
     try {
-      return await archiveRemoteImage(admin, userId, jobId, rearchiveFrom, { maxAttempts: 3 });
+      return await archiveRemoteImage(admin, userId, assetKey, rearchiveFrom, {
+        maxAttempts: 3,
+        env
+      });
     } catch {
       /* fall through */
     }
   }
 
   for (const genPath of genPaths) {
-    if (await storageBlobOk(admin, genPath, MIN_IMAGE_BYTES)) {
+    if (await storageBlobOk(admin, genPath, MIN_IMAGE_BYTES, env)) {
       return toStorageRef(genPath);
     }
   }
 
   if (raw && isStorageRef(raw)) {
     const path = storagePathFromRef(raw);
-    if (path && (await storageBlobOk(admin, path, minBytes))) {
+    if (path && (await storageBlobOk(admin, path, minBytes, env))) {
       return raw.startsWith('storage://') ? raw : toStorageRef(path);
     }
   }
@@ -187,6 +239,7 @@ export type RecoverWarehouseOpts = {
   days?: number;
   hours?: number;
   providerScope?: 'grs' | 'apimart' | 'all';
+  env?: Env;
 };
 
 function filterJobsByProvider(jobs: JobRow[], scope?: 'grs' | 'apimart' | 'all'): JobRow[] {
@@ -249,7 +302,7 @@ export async function recoverGenerationJobsToWarehouse(
       continue;
     }
 
-    const imageRef = await resolveImageRefForJob(admin, userId, jobId, job);
+    const imageRef = await resolveImageRefForJob(admin, userId, jobId, job, opts.env);
     if (!imageRef) {
       failures.push({ jobId, reason: 'no_image' });
       skipped += 1;
@@ -327,15 +380,18 @@ export async function repairWarehouseCardImagesFromJobs(
       continue;
     }
 
-    const genPaths = [`${userId}/generated/${jobId}.png`, `${userId}/generated/${jobId}.jpg`];
+    const genPaths = [
+      `${userId}/generated/${generationStorageAssetId(jobId)}.png`,
+      `${userId}/generated/${generationStorageAssetId(jobId)}.jpg`
+    ];
     const minBytes = expectedMinFullBytes(
       String(job.resolution || card.resolution || '1k')
     );
     const currentPath = storagePathFromRef(String(card.image || ''));
-    const currentSize = currentPath ? await storageBlobSize(admin, currentPath) : 0;
+    const currentSize = currentPath ? await storageBlobSize(admin, currentPath, opts.env) : 0;
     let canonicalSize = 0;
     for (const gp of genPaths) {
-      const sz = await storageBlobSize(admin, gp);
+      const sz = await storageBlobSize(admin, gp, opts.env);
       if (sz > canonicalSize) canonicalSize = sz;
     }
     const currentOk = currentSize >= minBytes;
@@ -350,7 +406,7 @@ export async function repairWarehouseCardImagesFromJobs(
       continue;
     }
 
-    const imageRef = await resolveImageRefForJob(admin, userId, jobId, job);
+    const imageRef = await resolveImageRefForJob(admin, userId, jobId, job, opts.env);
     if (!imageRef) {
       failures.push({ jobId, cardId: String(card.id), reason: 'no_source' });
       skipped += 1;

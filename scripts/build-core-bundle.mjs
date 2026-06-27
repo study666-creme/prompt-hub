@@ -7,6 +7,7 @@ import { concatMinifyBundle, bundleRootFromMeta } from './lib/concat-minify-bund
 
 const root = bundleRootFromMeta(import.meta.url);
 const sources = [
+  'warehouse-thumb.js',
   'media-pipeline.js',
   'sync-orchestrator.js',
   'card-image-loader.js'

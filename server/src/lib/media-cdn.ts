@@ -3,7 +3,7 @@ import type { Env } from '../env';
 import { ApiError } from './errors';
 import { storagePathFromRef } from './image-archive';
 import { createAdminClient } from './supabase';
-import { downloadCardImage, uploadCardImage, cardImageExists } from './r2-storage';
+import { deleteFromR2, downloadCardImage, uploadCardImage, cardImageExists } from './r2-storage';
 
 export const CARD_IMAGES_BUCKET = 'card-images';
 const CDN_CACHE_SEC = 60 * 60 * 24 * 30;
@@ -223,6 +223,15 @@ function gridPathFromPrimary(path: string): string | null {
 
 export { gridPathFromPrimary };
 
+/** 列表签名默认走 _grid；仅 variant=full 时签原图 */
+export function signingPathForVariant(path: string, variant: string): string {
+  const clean = path.replace(/^\//, '');
+  if (variant === 'full') return clean;
+  if (/_grid\.(jpe?g|webp|png)$/i.test(clean)) return clean;
+  const grid = gridPathFromPrimary(clean);
+  return grid ? grid.replace(/^\//, '') : clean;
+}
+
 function primaryPathFromGridPath(gridPath: string): string | null {
   const candidates = primaryCandidatesFromGridPath(gridPath);
   return candidates[0] || null;
@@ -262,9 +271,28 @@ const GRID_MIN_BYTES = 2048;
 /** 列表 grid 单张上限（约 220KB）；超过视为误存原图，CDN 现场重缩 */
 const GRID_SERVE_MAX_BYTES = 220 * 1024;
 
-function isAcceptableGridBlob(blob: Blob | null | undefined): boolean {
+function sniffImageMime(head: Uint8Array): string | null {
+  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'image/jpeg';
+  if (head.length >= 8 && head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) {
+    return 'image/png';
+  }
+  if (head.length >= 12 && head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46
+    && head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50) {
+    return 'image/webp';
+  }
+  return null;
+}
+
+async function blobHasValidImageMagic(blob: Blob): Promise<string | null> {
+  if (!blob || (blob.size || 0) < 512) return null;
+  const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+  return sniffImageMime(head);
+}
+
+async function isAcceptableGridBlob(blob: Blob | null | undefined): Promise<boolean> {
   const n = blob?.size || 0;
-  return n >= GRID_MIN_BYTES && n <= GRID_SERVE_MAX_BYTES;
+  if (n < GRID_MIN_BYTES || n > GRID_SERVE_MAX_BYTES) return false;
+  return !!(await blobHasValidImageMagic(blob!));
 }
 
 async function downloadGridBlob(
@@ -281,9 +309,29 @@ async function rebuildGridAtPath(
   primaryPath: string
 ): Promise<Blob | null> {
   const gridBlob = await buildGridBlobFromPrimary(env, admin, primaryPath);
-  if (!isAcceptableGridBlob(gridBlob)) return null;
+  if (!(await isAcceptableGridBlob(gridBlob))) return null;
   await uploadCardImage(env, gridClean, gridBlob!, 'image/jpeg');
   return gridBlob;
+}
+
+/** 确保 primary 对应 _grid 已写入 R2；返回 grid 路径（不含 leading /） */
+export async function materializeGridForPrimaryPath(
+  env: Env,
+  admin: ReturnType<typeof createAdminClient>,
+  primaryPath: string
+): Promise<string | null> {
+  const primaryClean = primaryPath.replace(/^\//, '');
+  const gridPath = gridPathFromPrimary(primaryClean);
+  if (!gridPath) return null;
+  const gridClean = gridPath.replace(/^\//, '');
+  const existing = await downloadGridBlob(env, gridClean);
+  if (await isAcceptableGridBlob(existing)) return gridClean;
+  if (existing) {
+    await deleteFromR2(env, gridClean).catch(() => {});
+  }
+  const rebuilt = await rebuildGridAtPath(env, admin, gridClean, primaryClean);
+  if (!rebuilt) return null;
+  return gridClean;
 }
 
 /** Supabase Storage 变换：Worker 内无 Canvas 时用此 API 生成 grid */
@@ -336,7 +384,10 @@ export async function materializeCommunityGridIfMissing(
 ): Promise<void> {
   const gridClean = gridPath.replace(/^\//, '');
   const existing = await downloadGridBlob(c.env, gridClean);
-  if (isAcceptableGridBlob(existing)) return;
+  if (await isAcceptableGridBlob(existing)) return;
+  if (existing) {
+    c.executionCtx.waitUntil(deleteFromR2(c.env, gridClean).catch(() => {}));
+  }
 
   let primaryCandidates = [...primaryCandidatesFromGridPath(gridClean)];
   if (!primaryCandidates.length) {
@@ -496,8 +547,10 @@ export async function serveCachedStorageImage(
   const cached = await cache.match(cacheKey);
   if (cached) {
     if (!isGrid) return cached;
-    const len = Number(cached.headers.get('content-length') || 0);
-    if (len > 0 && len <= GRID_SERVE_MAX_BYTES) return cached;
+    if (cached.headers.get('X-PH-Grid-Ok') === '1') {
+      const len = Number(cached.headers.get('content-length') || 0);
+      if (len >= GRID_MIN_BYTES && len <= GRID_SERVE_MAX_BYTES) return cached;
+    }
     c.executionCtx.waitUntil(cache.delete(cacheKey));
   }
 
@@ -506,8 +559,12 @@ export async function serveCachedStorageImage(
   let contentType = contentTypeForPath(clean);
 
   const stored = isGrid ? await downloadGridBlob(c.env, clean) : null;
-  if (stored && isAcceptableGridBlob(stored)) {
+  if (stored && (await isAcceptableGridBlob(stored))) {
     body = stored;
+    const sniffed = await blobHasValidImageMagic(stored);
+    if (sniffed) contentType = sniffed;
+  } else if (stored && isGrid) {
+    c.executionCtx.waitUntil(deleteFromR2(c.env, clean).catch(() => {}));
   } else if (!isGrid) {
     for (const candidate of fullPathServeCandidates(clean)) {
       const blob = await downloadCardImage(c.env, candidate);
@@ -525,7 +582,7 @@ export async function serveCachedStorageImage(
   if (!body && isGrid) {
     for (const primary of primaryCandidatesFromGridPath(clean)) {
       const gridBlob = await buildGridBlobFromPrimary(c.env, admin, primary);
-      if (isAcceptableGridBlob(gridBlob)) {
+      if (await isAcceptableGridBlob(gridBlob)) {
         body = gridBlob;
         contentType = 'image/jpeg';
         c.executionCtx.waitUntil(
@@ -543,6 +600,7 @@ export async function serveCachedStorageImage(
   const response = new Response(body, {
     headers: {
       'Content-Type': contentType,
+      ...(isGrid ? { 'X-PH-Grid-Ok': '1' } : {}),
       'Cache-Control': `public, max-age=${CDN_CACHE_SEC}, s-maxage=${CDN_CACHE_SEC}, immutable`,
       'CDN-Cache-Control': `max-age=${CDN_CACHE_SEC}`,
       'Vary': 'Accept',

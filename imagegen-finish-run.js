@@ -29,6 +29,8 @@
     imageIndex,
     targetGroup,
     targetTags,
+    cardTitle,
+    genBatchId,
     isMidjourney,
     mjGridUrls,
     mjCompositeUrl,
@@ -76,15 +78,17 @@
       const existingCre = slotJobId ? creations.find((c) => c.jobId === slotJobId) : null;
       const creationId = existingCre?.id || d().genId('cr');
       let storedImage = image;
-      if (global.SupabaseSync?.persistGenerationImage && slotJobId) {
-        try {
-          const ref = await global.SupabaseSync.persistGenerationImage(creationId, image, {
-            jobId: slotJobId
-          });
-          if (ref && ref !== image) storedImage = ref;
-        } catch (e) {
-          console.warn('生成图原图归档失败，将用任务链接入库后重试', e);
-        }
+      if (slotJobId) {
+        void global.ImageGenWarehouseRepair?.recoverWarehouseImagesViaServer?.({
+          jobIds: [String(slotJobId).replace(/#\d+$/, '')],
+          max: 1,
+          hours: 24
+        });
+        void global.WarehouseThumb?.resolveForCard?.(image, {
+          jobId: slotJobId,
+          assetId: creationId,
+          cardId: creationId
+        });
       }
       if (idx === 1) d().setImageGenLastResult(storedImage);
       const primaryRef = d().getImageGenPrimaryRef();
@@ -135,14 +139,18 @@
         d().restoreImageGenSubmitLabel();
       }
       const publish = idx === 1 && d().isImageGenGenPublicChecked();
+      const userTitle = cardTitle && String(cardTitle).trim() ? String(cardTitle).trim() : '';
+      const whTitle = idx > 1
+        ? (isMidjourney && (mjSplitSave || d().isImageGenMjSaveAllTiles?.()) ? `MJ 图 ${idx}` : `附赠图 ${idx}`)
+        : userTitle
+          ? userTitle
+          : (isMidjourney ? (mjSplitSave || d().isImageGenMjSaveAllTiles?.() ? 'MJ 图 1' : 'MJ 四宫格') : '');
       const saved = await d().saveGeneratedToWarehouse({
         prompt: creation.prompt,
         image: storedImage || image,
         sourceId: creation.id,
         jobId: slotJobId,
-        title: idx > 1
-          ? (isMidjourney && (mjSplitSave || d().isImageGenMjSaveAllTiles?.()) ? `MJ 图 ${idx}` : `附赠图 ${idx}`)
-          : (isMidjourney ? (mjSplitSave || d().isImageGenMjSaveAllTiles?.() ? 'MJ 图 1' : 'MJ 四宫格') : ''),
+        title: whTitle,
         resolution,
         model: modelId,
         quality: quality || 'standard',
@@ -157,6 +165,8 @@
         mjCompositeUrl: isMidjourney && mjCompositeUrl && idx === 1 ? mjCompositeUrl : null,
         mjButtons: isMidjourney && Array.isArray(mjButtons) && idx === 1 ? mjButtons : null,
         cardImages: isMidjourney && Array.isArray(cardImages) && cardImages.length ? cardImages : null,
+        genBatchId: genBatchId && idx === 1 ? genBatchId : null,
+        genBatchJobIds: genBatchId && slotJobId ? [slotJobId] : null,
         deferCloudPush: !!isMidjourney
       });
       if (pendingId && idx === 1) d().removePendingJob(pendingId);

@@ -1038,9 +1038,12 @@
       quality: meta.quality,
       size: meta.size,
       count: meta.count,
+      cardTitle: meta.cardTitle,
+      batchSplit: meta.batchSplit,
       mjMode: meta.mjMode,
       mjSaveAllTiles: meta.mjSaveAllTiles,
-      mjSpeed: meta.mjSpeed
+      mjSpeed: meta.mjSpeed,
+      mjExtras: meta.mjExtras
     };
     if (!saveJson(LS_IMAGEGEN, draft)) {
       saveJson(LS_IMAGEGEN, {
@@ -3116,6 +3119,8 @@
     });
     layoutImageGenFeedMasonry = IG.layoutImageGenFeedMasonry;
     _scheduleImageGenFeedLayout = IG.scheduleImageGenFeedLayout;
+    window.repairImageGenFeedLayout = () => IG.repairImageGenFeedLayoutImmediate?.();
+    window.diagnoseImageGenFeedLayout = () => IG.diagnoseImageGenFeedLayout?.();
     resetImageGenFeedCardLayout = IG.resetImageGenFeedCardLayout;
     bindImageGenFeedImageRelayout = IG.bindImageGenFeedImageRelayout;
     enforceMobileImageGenFeed = IG.enforceMobileImageGenFeed;
@@ -6008,7 +6013,9 @@
           batch: true,
           batchId,
           batchIndex: i + 1,
-          batchTotal: count
+          batchTotal: count,
+          batchMergeCards: shouldImageGenBatchMergeCards(),
+          cardTitle: getImageGenCardTitle()
         });
         if (res?.ok) {
           ok += 1;
@@ -6023,7 +6030,15 @@
       await window.PointsSystem?.refreshCreditsFromServer?.();
       window.PointsSystem?.updateCreditsUI?.();
       if (ok > 0) {
-        toast(`已提交 ${ok}/${count} 张生图，已扣约 ${fmt(charged)} 积分（${fmt(unit)} 积分/张）`);
+        const split = isImageGenBatchSplitCards();
+        const isMj = isImageGenMidjourneyModel(getImageGenModel());
+        toast(
+          isMj
+            ? `已提交 ${ok}/${count} 个 MJ 任务，每张完成后单独建卡（约 ${fmt(charged)} 积分）`
+            : split
+              ? `已提交 ${ok}/${count} 张生图，已扣约 ${fmt(charged)} 积分（${fmt(unit)} 积分/张）`
+              : `已提交 ${ok}/${count} 张，完成后合并存入同一卡片（最多 5 张，约 ${fmt(charged)} 积分）`
+        );
         if (isMobileViewport() && window.MobileUI?.setImageGenView) {
           window.MobileUI.setImageGenView('feed', { scrollToTop: false });
         }
@@ -6412,7 +6427,7 @@
       cardImages: window.PromptHubCardGallery?.normalizeCardGallery?.(full) || null,
       tags: full.tags || [],
       group: full.group || null,
-      genJobId: full.genJobId || null,
+      genJobId: full.genJobId || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(full) || null,
       isMidjourney: !!full.isMidjourney,
       mjGridUrls: Array.isArray(full.mjGridUrls) ? full.mjGridUrls : null,
       mjCompositeUrl: full.mjCompositeUrl || null,
@@ -6618,7 +6633,8 @@
       }
       prompt = c.prompt || '';
       image = c.image || '';
-      jobId = c.feedCoverJobId || normalizeMjParentJobId(c.genJobId || '');
+      jobId = c.feedCoverJobId || normalizeMjParentJobId(c.genJobId || '')
+        || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(previewCard) || '';
       if (isDisplayableImage(c.image)) refImage = c.image;
     }
     const previewCard = imageGenPreviewKind === 'warehouse'
@@ -6758,12 +6774,22 @@
         if (img.complete && img.naturalWidth > 0) img.onload?.();
       };
 
-      void resolveImageGenFullUrl(
-        previewKind,
-        previewId,
-        previewKind === 'warehouse' ? 'wh_' + previewId : previewId,
-        null
-      ).then((url) => {
+      void (async () => {
+        let previewUrl = '';
+        if (previewCard && window.MediaPipeline?.resolveCardListThumb) {
+          previewUrl = await window.MediaPipeline.resolveCardListThumb(previewCard);
+        }
+        if (previewStale()) return;
+        if (previewUrl) {
+          mountPreviewImage(previewUrl, { isFull: false });
+          return;
+        }
+        const url = await resolveImageGenFullUrl(
+          previewKind,
+          previewId,
+          previewKind === 'warehouse' ? 'wh_' + previewId : previewId,
+          null
+        );
         if (previewStale()) return;
         if (!url) {
           zoomBtn.remove();
@@ -6771,7 +6797,7 @@
           return;
         }
         mountPreviewImage(url, { isFull: true });
-      });
+      })();
     } else {
       body.querySelector('[data-preview-download]')?.remove();
     }
@@ -7281,7 +7307,8 @@
     bindImageGenUpload();
     bindImageGenPromptTools();
     document.getElementById('imageGenRecoverBtn')?.remove();
-    document.getElementById('imageGenCount')?.addEventListener('change', updateImageGenCostHint);
+    bindImageGenCountPicker();
+    document.getElementById('imageGenBatchSplit')?.addEventListener('change', updateImageGenCostHint);
     document.getElementById('imageGenModel')?.addEventListener('change', scheduleImageGenModelUiRefresh);
     document.querySelectorAll('[data-mj-mode]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -7295,7 +7322,9 @@
       persistImageGenMjPrefs();
       updateImageGenCostHint();
     });
-    document.getElementById('imageGenMjExtrasSelect')?.addEventListener('change', persistImageGenMjPrefs);
+    document.getElementById('imageGenMjSpeedSelect')?.addEventListener('change', persistImageGenMjPrefs);
+    bindImageGenMjExtras();
+    bindImageGenCardTitle();
     document.getElementById('imageGenMjSaveAllTiles')?.addEventListener('change', () => {
       syncImageGenMjToggleCheckedClasses();
       persistImageGenMjPrefs();
@@ -7584,7 +7613,14 @@
       const szEl = document.getElementById('imageGenSize');
       if (szEl && draft.size) szEl.value = draft.size;
       const countEl = document.getElementById('imageGenCount');
-      if (countEl) countEl.value = '1';
+      if (countEl && draft.count) {
+        const c = Math.min(5, Math.max(1, Math.floor(Number(draft.count)) || 1));
+        setImageGenBatchCount(c);
+      }
+      const titleEl = document.getElementById('imageGenCardTitle');
+      if (titleEl && typeof draft.cardTitle === 'string') titleEl.value = draft.cardTitle.slice(0, 80);
+      const splitEl = document.getElementById('imageGenBatchSplit');
+      if (splitEl) splitEl.checked = !!draft.batchSplit;
       if (draft.mjMode === 'blend' || draft.mjMode === 'imagine') {
         imageGenMjMode = draft.mjMode;
       }
@@ -7596,11 +7632,7 @@
         if (speedVal === 'fast' || speedVal === 'turbo') speedSelect.value = speedVal;
         else speedSelect.value = 'relax';
       }
-      const extrasSelect = document.getElementById('imageGenMjExtrasSelect');
-      if (extrasSelect && typeof draft.mjExtras === 'string') {
-        const allowed = ['', 'tile', 'raw', 'tile+raw'];
-        if (allowed.includes(draft.mjExtras)) extrasSelect.value = draft.mjExtras;
-      }
+      if (typeof draft.mjExtras === 'string') setImageGenMjExtrasValue(draft.mjExtras);
     }
     bindImageGenUpload();
     bindImageGenPromptTools();
@@ -7614,6 +7646,7 @@
     syncImageGenGenPublicFromPrompt();
     syncImageGenModelParamsUI();
     setImageGenMjMode(imageGenMjMode);
+    syncImageGenBatchSplitUi();
     if (!feedHasRenderedContent('imageGenFeed', '.imagegen-feed-card')) {
       renderImageGenFeed();
     } else {
@@ -7987,12 +8020,12 @@
     const list = (urls || []).filter((u) => u).slice(0, window.PromptHubCardGallery?.MAX || 5);
     if (!list.length) return '';
     const idx = Math.max(0, Math.min(Number(activeIdx) || 0, list.length - 1));
-    const main = esc(list[idx]);
+    const ph = (window.IMG_LOADING_PLACEHOLDER || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="1" height="1"%3E%3C/svg%3E');
     const thumbs = list
       .map(
         (u, i) =>
           `<button type="button" class="imagegen-mj-strip-thumb${i === idx ? ' active' : ''}" data-mj-strip-idx="${i}" aria-label="第 ${i + 1} 张">
-            <img src="${esc(u)}" alt="" loading="lazy" decoding="async">
+            <img src="${esc(ph)}" data-mj-ref="${esc(u)}" alt="" loading="lazy" decoding="async">
           </button>`
       )
       .join('');
@@ -8002,7 +8035,7 @@
       <div class="imagegen-mj-filmstrip-stage">
         <button type="button" class="imagegen-mj-filmstrip-nav imagegen-mj-filmstrip-prev" data-mj-strip-nav="-1"${prevDisabled} aria-label="上一张">‹</button>
         <button type="button" class="imagegen-mj-filmstrip-main" data-mj-strip-main title="点击全屏查看">
-          <img src="${main}" alt="" decoding="async">
+          <img src="${esc(ph)}" data-mj-ref="${esc(list[idx])}" alt="" decoding="async">
         </button>
         <button type="button" class="imagegen-mj-filmstrip-nav imagegen-mj-filmstrip-next" data-mj-strip-nav="1"${nextDisabled} aria-label="下一张">›</button>
       </div>
@@ -8021,27 +8054,42 @@
     if (!body || !list.length) return;
     const strip = body.querySelector('.imagegen-mj-filmstrip');
     if (!strip) return;
+    if (strip.dataset.mjFilmstripBound === '1') {
+      strip.__mjUrlList = list;
+      strip.__mjRenderAt?.(Number(strip.dataset.mjStripActive) || 0);
+      return;
+    }
+    strip.dataset.mjFilmstripBound = '1';
+    strip.__mjUrlList = list;
     const urlCache = new Map();
     let loadGen = 0;
 
     const resolveRef = (ref, galleryIndex) => {
-      if (urlCache.has(galleryIndex)) return Promise.resolve(urlCache.get(galleryIndex));
+      const cacheKey = `${galleryIndex}:${String(ref || '')}`;
+      if (urlCache.has(cacheKey)) return Promise.resolve(urlCache.get(cacheKey));
+      const isCover = galleryIndex <= 0;
       const p = window.PromptHubCardGallery?.resolveMediaUrl?.(ref, {
         cardId: previewCtx?.cardId,
         jobId: previewCtx?.parentJobId,
-        galleryIndex
+        galleryIndex,
+        useJobImageApi: isCover,
+        allowGridFallback: isCover,
+        preferFull: false
       }) || Promise.resolve(ref);
       return Promise.resolve(p).then((src) => {
         const u = src && typeof src === 'string' ? src : '';
-        if (u && !/data:image\/svg/i.test(u)) urlCache.set(galleryIndex, u);
+        if (u && !/data:image\/svg/i.test(u)) urlCache.set(cacheKey, u);
         return u;
       });
     };
 
     const prefetchAround = (idx) => {
+      const refs = strip.__mjUrlList || list;
       for (const i of [idx - 1, idx + 1, idx + 2]) {
-        if (i < 0 || i >= list.length || urlCache.has(i)) continue;
-        void resolveRef(list[i], i);
+        if (i < 0 || i >= refs.length) continue;
+        const key = `${i}:${String(refs[i] || '')}`;
+        if (urlCache.has(key)) continue;
+        void resolveRef(refs[i], i);
       }
     };
 
@@ -8053,14 +8101,23 @@
         stage?.classList.remove('is-switching');
         mainImg.classList.remove('is-switching');
         body.dataset.previewImageReady = '1';
+        body.dataset.previewImageUrl = src;
       };
-      if (mainImg.src === src && mainImg.complete && mainImg.naturalWidth > 8) {
+      if (mainImg.dataset.mjLoadedSrc === src && mainImg.complete && mainImg.naturalWidth > 8) {
         done();
         return;
       }
       stage?.classList.add('is-switching');
       mainImg.classList.add('is-switching');
-      mainImg.onload = () => { mainImg.onload = null; mainImg.onerror = null; done(); };
+      mainImg.onload = null;
+      mainImg.onerror = null;
+      mainImg.onload = () => {
+        if (strip.dataset.mjStripActive !== String(idx)) return;
+        mainImg.onload = null;
+        mainImg.onerror = null;
+        mainImg.dataset.mjLoadedSrc = src;
+        done();
+      };
       mainImg.onerror = () => {
         mainImg.onload = null;
         mainImg.onerror = null;
@@ -8071,25 +8128,27 @@
       mainImg.src = src;
     };
 
-    const renderAt = (nextIdx) => {
-      const idx = Math.max(0, Math.min(nextIdx, list.length - 1));
+    function renderAt(nextIdx) {
+      const refs = strip.__mjUrlList || list;
+      const idx = Math.max(0, Math.min(nextIdx, refs.length - 1));
       loadGen += 1;
       const myGen = loadGen;
       strip.dataset.mjStripActive = String(idx);
       const mainImg = strip.querySelector('.imagegen-mj-filmstrip-main img');
       const counter = strip.querySelector('.imagegen-mj-filmstrip-counter');
-      if (counter) counter.textContent = `${idx + 1} / ${list.length}`;
+      if (counter) counter.textContent = `${idx + 1} / ${refs.length}`;
       strip.querySelectorAll('.imagegen-mj-strip-thumb').forEach((btn, i) => {
         btn.classList.toggle('active', i === idx);
       });
       const prev = strip.querySelector('.imagegen-mj-filmstrip-prev');
       const next = strip.querySelector('.imagegen-mj-filmstrip-next');
       if (prev) prev.disabled = idx <= 0;
-      if (next) next.disabled = idx >= list.length - 1;
-      const ref = list[idx];
+      if (next) next.disabled = idx >= refs.length - 1;
+      const ref = refs[idx];
       body.dataset.previewImageUrl = ref;
       delete body.dataset.previewImageReady;
-      const cached = urlCache.get(idx);
+      const cacheKey = `${idx}:${String(ref || '')}`;
+      const cached = urlCache.get(cacheKey);
       if (cached && mainImg) applyMainSrc(mainImg, cached, idx);
       else if (mainImg) mainImg.classList.add('is-switching');
       void resolveRef(ref, idx).then((src) => {
@@ -8098,16 +8157,21 @@
         prefetchAround(idx);
       });
       strip.querySelectorAll('.imagegen-mj-strip-thumb img').forEach((thumb, i) => {
-        const hit = urlCache.get(i);
+        const thumbRef = refs[i];
+        const tKey = `${i}:${String(thumbRef || '')}`;
+        const hit = urlCache.get(tKey);
         if (hit && thumb) {
           thumb.src = hit;
+          thumb.dataset.mjLoadedSrc = hit;
           return;
         }
-        void resolveRef(list[i], i).then((src) => {
-          if (src && thumb) thumb.src = src;
+        void resolveRef(thumbRef, i).then((src) => {
+          if (!src || !thumb || strip.dataset.mjStripActive === undefined) return;
+          thumb.src = src;
+          thumb.dataset.mjLoadedSrc = src;
         });
       });
-    };
+    }
 
     strip.querySelectorAll('[data-mj-strip-nav]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -8179,8 +8243,8 @@
         }
       });
     });
+    strip.__mjRenderAt = renderAt;
     renderAt(Number(strip.dataset.mjStripActive) || 0);
-    list.forEach((ref, i) => { void resolveRef(ref, i); });
   }
 
   /** @deprecated 保留供旧预览路径；新预览用 buildMjFilmstripHtml */
@@ -8456,16 +8520,82 @@
     return '';
   }
 
+  const MJ_EXTRA_FLAG_KEYS = ['tile', 'raw', 'draft', 'hd'];
+
+  function collectImageGenDraftMeta() {
+    return {
+      prompt: document.getElementById('imageGenPrompt')?.value || '',
+      model: getImageGenModel(),
+      refImages: getImageGenRefImages(),
+      refImage: getImageGenPrimaryRef(),
+      resolution: normalizeImageGenResolution(document.getElementById('imageGenResolution')?.value || '1k'),
+      quality: getImageGenQuality(),
+      size: document.getElementById('imageGenSize')?.value || '',
+      count: getImageGenBatchCount(),
+      cardTitle: getImageGenCardTitle(),
+      batchSplit: isImageGenBatchSplitCards(),
+      mjMode: getImageGenMjMode(),
+      mjSaveAllTiles: isImageGenMjSaveAllTiles(),
+      mjSpeed: getImageGenMjSpeed(),
+      mjExtras: getImageGenMjExtrasValue()
+    };
+  }
+
+  function persistImageGenFormDraft() {
+    saveImageGenDraft(collectImageGenDraftMeta());
+  }
+
   function getImageGenMjExtrasValue() {
-    return document.getElementById('imageGenMjExtrasSelect')?.value || '';
+    const flags = getImageGenMjExtrasFlags();
+    return MJ_EXTRA_FLAG_KEYS.filter((k) => flags[k]).join('+');
+  }
+
+  function setImageGenMjExtrasValue(v) {
+    const parts = new Set(String(v || '').split('+').filter(Boolean));
+    document.querySelectorAll('#imageGenMjFlagGrid [data-mj-flag]').forEach((el) => {
+      el.checked = parts.has(el.dataset.mjFlag);
+    });
+    syncImageGenMjToggleCheckedClasses();
   }
 
   function getImageGenMjExtrasFlags() {
-    const v = getImageGenMjExtrasValue();
-    return {
-      tile: v === 'tile' || v === 'tile+raw',
-      raw: v === 'raw' || v === 'tile+raw'
-    };
+    const flags = { tile: false, raw: false, draft: false, hd: false };
+    document.querySelectorAll('#imageGenMjFlagGrid [data-mj-flag]').forEach((el) => {
+      const k = el.dataset.mjFlag;
+      if (k && flags[k] !== undefined) flags[k] = !!el.checked;
+    });
+    return flags;
+  }
+
+  function getImageGenMaxRefImages() {
+    if (isImageGenMidjourneyModel(getImageGenModel())) {
+      return getImageGenMjMode() === 'blend' ? 5 : 4;
+    }
+    return 16;
+  }
+
+  function syncImageGenRefLimitHint() {
+    const hint = document.getElementById('imageGenRefLimitHint');
+    if (!hint) return;
+    const max = getImageGenMaxRefImages();
+    const isMj = isImageGenMidjourneyModel(getImageGenModel());
+    if (!isMj) {
+      hint.hidden = true;
+      hint.textContent = '';
+      return;
+    }
+    hint.hidden = false;
+    hint.textContent = getImageGenMjMode() === 'blend'
+      ? '混图模式：参考图 2～5 张'
+      : 'MJ 图生图：参考图最多 4 张（与 APIMart 一致）';
+  }
+
+  function trimImageGenRefsToLimit() {
+    const max = getImageGenMaxRefImages();
+    const refs = getImageGenRefImages();
+    if (refs.length <= max) return;
+    setImageGenRefs(refs.slice(0, max));
+    toast(`Midjourney 参考图最多 ${max} 张，已保留前 ${max} 张`);
   }
 
   function syncImageGenMjToggleCheckedClasses() {
@@ -8473,14 +8603,7 @@
   }
 
   function persistImageGenMjPrefs() {
-    const draft = loadJson(LS_IMAGEGEN, null) || {};
-    saveImageGenDraft({
-      ...draft,
-      mjMode: imageGenMjMode,
-      mjSaveAllTiles: isImageGenMjSaveAllTiles(),
-      mjSpeed: getImageGenMjSpeed(),
-      mjExtras: getImageGenMjExtrasValue()
-    });
+    persistImageGenFormDraft();
   }
 
   function getImageGenMjMode() {
@@ -8506,6 +8629,9 @@
     if (imagineFields) imagineFields.classList.toggle('hidden', blend);
     const countWrap = document.querySelector('.imagegen-footer-count');
     if (countWrap) countWrap.classList.toggle('hidden', blend);
+    syncImageGenBatchSplitUi();
+    syncImageGenRefLimitHint();
+    trimImageGenRefsToLimit();
     updateImageGenCostHint();
   }
 
@@ -8549,11 +8675,31 @@
       updateImageGenSizeSelect();
       syncImageGenMjModeUI();
       syncImageGenMjToggleCheckedClasses();
+      syncImageGenRefLimitHint();
+      trimImageGenRefsToLimit();
+    } else {
+      syncImageGenRefLimitHint();
     }
   }
 
   function syncImageGenMjParamsUI() {
     syncImageGenModelParamsUI();
+  }
+
+  function bindImageGenMjExtras() {
+    const grid = document.getElementById('imageGenMjFlagGrid');
+    if (!grid || grid.dataset.bound) return;
+    grid.dataset.bound = '1';
+    grid.querySelectorAll('[data-mj-flag]').forEach((el) => {
+      el.addEventListener('change', persistImageGenMjPrefs);
+    });
+  }
+
+  function bindImageGenCardTitle() {
+    const el = document.getElementById('imageGenCardTitle');
+    if (!el || el.dataset.bound) return;
+    el.dataset.bound = '1';
+    el.addEventListener('input', () => persistImageGenFormDraft());
   }
 
   function bindImageGenMjRange(id, valId) {
@@ -8587,6 +8733,8 @@
     const mjExtras = getImageGenMjExtrasFlags();
     if (mjExtras.tile) out.tile = true;
     if (mjExtras.raw) out.raw = true;
+    if (mjExtras.draft) out.draft = true;
+    if (mjExtras.hd) out.hd = true;
     const speed = getImageGenMjSpeed();
     out.speed = speed === 'fast' || speed === 'turbo' ? speed : 'relax';
     return out;
@@ -8606,7 +8754,29 @@
 
   function isMjBillableAction(action) {
     const a = String(action || '').toLowerCase();
-    return a === 'variation' || a === 'high_variation' || a === 'low_variation' || a === 'reroll';
+    if (!a || a === 'custom' || a === 'upscale' || a === 'describe') return false;
+    return true;
+  }
+
+  function getMjActionHint(action) {
+    const a = String(action || '').toLowerCase();
+    const hints = {
+      variation: '基于当前图生成新的四宫格变体，完成后追加到原卡片',
+      high_variation: '较大改动的新变体（四宫格）',
+      low_variation: '轻微改动的新变体（四宫格）',
+      reroll: '用相同提示词重新生成一批四宫格',
+      pan: '向指定方向平移扩展画面，保留主体内容',
+      zoom: '缩小视角向外扩展画幅（Zoom Out）',
+      inpaint:
+        '局部重绘：只改选定区域。本页点击后会直接提交任务（暂不支持在此画选区），扣积分等同一次生图',
+      remix_strong: '强重塑：在现有构图上做较大改动',
+      remix_subtle: '弱重塑：在现有构图上做较小改动',
+      video: '基于当前图生成短视频',
+      modal: '提交遮罩，完成局部重绘的第二步',
+      edits: '对图片进行编辑',
+      blend: '混图融合'
+    };
+    return hints[a] || 'Midjourney 二次操作，扣积分等同一次生图';
   }
 
   function getMjActionUnitCost(previewCard) {
@@ -8629,15 +8799,18 @@
     if (!list.length || !parent) return '';
     const items = list
       .map((b, i) => {
-        const action = esc(String(b.action || 'custom'));
+        const rawAction = String(b.action || 'custom');
+        const action = esc(rawAction);
         const baseLabel = String(b.label || '操作');
-        const priceTag = isMjBillableAction(action) && unitCost != null
-          ? ` · ${formatMjActionCredits(unitCost)}积分`
-          : '';
+        const priceTag =
+          isMjBillableAction(rawAction) && unitCost != null
+            ? ` · ${formatMjActionCredits(unitCost)}积分`
+            : '';
         const label = esc(`${baseLabel}${priceTag}`);
+        const hint = esc(getMjActionHint(rawAction));
         const index = b.index != null ? Number(b.index) : '';
         const customId = b.customId ? esc(String(b.customId)) : '';
-        return `<button type="button" class="btn btn-secondary btn-sm imagegen-mj-action-btn" data-mj-action="${action}" data-mj-parent="${esc(parent)}" data-mj-index="${index}" data-mj-custom="${customId}" data-mj-idx="${i}">${label}</button>`;
+        return `<button type="button" class="btn btn-secondary btn-sm imagegen-mj-action-btn" data-mj-action="${action}" data-mj-parent="${esc(parent)}" data-mj-index="${index}" data-mj-custom="${customId}" data-mj-idx="${i}" title="${hint}" aria-label="${label}：${hint}">${label}</button>`;
       })
       .join('');
     return `<div class="imagegen-mj-actions" role="group" aria-label="Midjourney 操作">${items}</div>`;
@@ -8647,9 +8820,7 @@
     const list = filterMjPreviewButtons(buttons);
     if (!list.length || !normalizeMjParentJobId(parentJobId)) return '';
     const unit = getMjActionUnitCost(previewCard);
-    const unitText = unit != null ? formatMjActionCredits(unit) : '—';
-    const note = `<p class="imagegen-mj-actions-note">四宫格已自动保存，直接切换/下载即可，<strong>无需放大</strong>。变体与重Roll 每次约 <strong>${unitText} 积分</strong>（等同一次生图）。</p>`;
-    return note + buildMjActionsHtml(list, parentJobId, unit);
+    return buildMjActionsHtml(list, parentJobId, unit);
   }
 
   async function runImageGenMjAction(btn) {
@@ -8686,6 +8857,12 @@
         toast(`积分不足（需要 ${formatMjActionCredits(unitCost)} 积分）`);
         return;
       }
+    }
+    if (action === 'inpaint') {
+      const ok = confirm(
+        '局部重绘：只修改选定区域并保留其余部分。\n\n当前版本点击后会直接提交任务（扣积分等同一次生图），暂不支持在预览里画选区。\n\n确定继续？'
+      );
+      if (!ok) return;
     }
     const model = previewCard?.model || getImageGenModel();
     const modelLabel = window.PointsSystem?.getImageGenModel?.(model)?.label || model;
@@ -8739,9 +8916,10 @@
           silentToast: true
         });
       }
+      const actionName = String(prevText || '').split('·')[0].trim() || action;
       toast(
         cost > 0
-          ? `已提交变体（-${formatMjActionCredits(cost)} 积分），完成后追加到原卡片`
+          ? `已提交${actionName}（-${formatMjActionCredits(cost)} 积分），完成后追加到原卡片`
           : '已提交，完成后会自动存入原卡片'
       );
       scheduleGenJobsSync(400);
@@ -9122,6 +9300,92 @@
     return Math.min(5, Math.max(1, Math.floor(n) || 1));
   }
 
+  function setImageGenBatchCount(n) {
+    const v = Math.min(5, Math.max(1, Math.floor(Number(n)) || 1));
+    const input = document.getElementById('imageGenCount');
+    if (input) input.value = String(v);
+    const label = document.getElementById('imageGenCountLabel');
+    if (label) label.textContent = `${v} 张`;
+    document.querySelectorAll('#imageGenCountMenu [data-count]').forEach((btn) => {
+      const on = Number(btn.dataset.count) === v;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    syncImageGenBatchSplitUi();
+    updateImageGenCostHint();
+  }
+
+  function closeImageGenCountMenu() {
+    const menu = document.getElementById('imageGenCountMenu');
+    const trigger = document.getElementById('imageGenCountTrigger');
+    if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  }
+
+  function openImageGenCountMenu() {
+    const menu = document.getElementById('imageGenCountMenu');
+    const trigger = document.getElementById('imageGenCountTrigger');
+    if (!menu || !trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    menu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    menu.style.position = 'fixed';
+    menu.style.left = `${Math.max(8, rect.left)}px`;
+    menu.style.minWidth = `${Math.max(rect.width, 72)}px`;
+    menu.style.bottom = `${window.innerHeight - rect.top + 6}px`;
+    menu.style.top = 'auto';
+    menu.style.zIndex = '200';
+  }
+
+  function bindImageGenCountPicker() {
+    const trigger = document.getElementById('imageGenCountTrigger');
+    const menu = document.getElementById('imageGenCountMenu');
+    if (!trigger || !menu || trigger.dataset.bound === '1') return;
+    trigger.dataset.bound = '1';
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (menu.hidden) openImageGenCountMenu();
+      else closeImageGenCountMenu();
+    });
+    menu.querySelectorAll('[data-count]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setImageGenBatchCount(btn.dataset.count);
+        closeImageGenCountMenu();
+      });
+    });
+    document.addEventListener('click', closeImageGenCountMenu);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeImageGenCountMenu();
+    });
+    window.addEventListener('resize', closeImageGenCountMenu);
+    window.addEventListener('scroll', closeImageGenCountMenu, true);
+  }
+
+  function shouldImageGenBatchMergeCards() {
+    if (isImageGenMidjourneyModel(getImageGenModel())) return false;
+    return !isImageGenBatchSplitCards();
+  }
+
+  function getImageGenCardTitle() {
+    return String(document.getElementById('imageGenCardTitle')?.value || '').trim().slice(0, 80);
+  }
+
+  function isImageGenBatchSplitCards() {
+    return !!document.getElementById('imageGenBatchSplit')?.checked;
+  }
+
+  function syncImageGenBatchSplitUi() {
+    const wrap = document.getElementById('imageGenBatchSplitWrap');
+    const count = getImageGenBatchCount();
+    const isBlend = getImageGenMjMode() === 'blend' && isImageGenMidjourneyModel(getImageGenModel());
+    const isMj = isImageGenMidjourneyModel(getImageGenModel());
+    if (wrap) {
+      wrap.classList.toggle('is-hidden', count <= 1 || isBlend || isMj);
+    }
+  }
+
   function roundCreditsSafe(n) {
     const v = Number(n);
     if (!Number.isFinite(v)) return 0;
@@ -9179,7 +9443,12 @@
     if (isBlend) {
       parts.push(`混图 · ${unitPerSheet}`);
     } else if (count > 1) {
-      parts.push(`${count} 张 · 共 ${totalLabel} 积分（${unitPerSheet}）`);
+      const isMj = isImageGenMidjourneyModel(getImageGenModel());
+      parts.push(
+        isMj || isImageGenBatchSplitCards()
+          ? `${count} 张 · 共 ${totalLabel} 积分（${unitPerSheet}）`
+          : `${count} 张 · 同卡入库 · 共 ${totalLabel} 积分`
+      );
     } else {
       parts.push(unitPerSheet);
     }
@@ -9791,6 +10060,7 @@
       toast,
       isDisplayableImage,
       updateImageGenCostHint,
+      getMaxRefImages: () => getImageGenMaxRefImages(),
       compressRefImageFromSource: (...a) => rc('compressRefImageFromSource', ...a)
     });
     window.__imageGenRefUiWired = true;
@@ -9912,9 +10182,14 @@
       getImageGenFormMeta,
       isImageGenMidjourneyModel,
       getImageGenMjMode,
+      getImageGenMjSpeed,
+      getImageGenMjExtrasValue,
+      isImageGenMjSaveAllTiles,
       getImageGenRefImages,
       getImageGenPrimaryRef,
       getImageGenBatchCount,
+      getImageGenCardTitle,
+      isImageGenBatchSplitCards,
       getImageGenModelCatalogReady: () => imageGenModelCatalogReady,
       getImageGenBatchRunning: () => imageGenBatchRunning,
       genId,
@@ -9940,6 +10215,7 @@
       trackSessionGenJob: (...a) => jr('trackSessionGenJob', ...a),
       resolveMjPollImages,
       saveMjToWarehouse: (opts) => pw('saveMjToWarehouse', opts),
+      saveBatchMergedFromPoll: (...a) => pw('saveBatchMergedFromPoll', ...a),
       finishImageGenRun: (opts) => fr('finishImageGenRun', opts),
       pollGenerationJobUntilDone: (...a) => jr('pollGenerationJobUntilDone', ...a)
     });

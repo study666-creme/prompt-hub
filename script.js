@@ -544,8 +544,12 @@
       return list
         .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))
         .map(c => {
-          const cover = window.PromptHubCardGallery?.getCardFeedCoverMeta?.(c)
-            || { ref: window.PromptHubCardGallery?.getCardFeedCoverImage?.(c) || window.PromptHubCardGallery?.getCardCoverImage?.(c) || c.image };
+          window.PromptHubCardGallery?.ensureFeedCoverFromGallery?.(c, { persist: false, backfill: false });
+          const CG = window.PromptHubCardGallery;
+          const cover = CG?.pickWarehouseListThumb?.(c)
+            || CG?.pickWarehouseFeedCover?.(c)
+            || CG?.getCardFeedCoverMeta?.(c)
+            || { ref: CG?.getCardFeedCoverImage?.(c) || CG?.getCardCoverImage?.(c) || c.image };
           return {
           id: c.id,
           title: (c.title || '').trim() || '',
@@ -926,6 +930,8 @@
         customFields: {},
         genSourceId: sourceId || null,
         genJobId: jobId || null,
+        genBatchId: payload.genBatchId || null,
+        genBatchJobIds: Array.isArray(payload.genBatchJobIds) ? payload.genBatchJobIds.filter(Boolean) : null,
         resolution: payload.resolution || null,
         model: payload.model || null,
         genQuality: payload.quality || null,
@@ -986,51 +992,19 @@
     };
 
     let genCardImageRepairInflight = null;
+    let genCardImageRepairLastAt = 0;
     async function repairGeneratedCardImagesQuiet() {
       if (!window.SupabaseSync?.isLoggedIn?.()) return;
       if (genCardImageRepairInflight) return genCardImageRepairInflight;
+      const now = Date.now();
+      if (now - genCardImageRepairLastAt < 120000) return;
+      genCardImageRepairLastAt = now;
       genCardImageRepairInflight = (async () => {
-        if (window.SupabaseSync?.archiveGeneratedCardImage) {
-          const targets = cards.filter((c) => {
-            if (!c?.id || !c?.image) return false;
-            if (!c.genJobId && !(c.tags || []).includes('图片生成')) return false;
-            if (window.SupabaseSync.isDataUrl?.(c.image)) return true;
-            if (/^https?:\/\//i.test(c.image)) return true;
-            if (window.SupabaseSync.isStorageRef?.(c.image)) {
-              const path = window.SupabaseSync.storagePathFromRef?.(c.image);
-              return !!(path && window.SupabaseSync.isPathKnownMissing?.(path));
-            }
-            return false;
-          }).slice(0, 4);
-          let changed = false;
-          for (const c of targets) {
-            try {
-              let src = c.image;
-              if (typeof getCardImageBackup === 'function') {
-                const backup = await getCardImageBackup(c.id);
-                if (backup && String(backup).startsWith('data:')) src = backup;
-              }
-              const ref = await window.SupabaseSync.archiveGeneratedCardImage(c.id, src);
-              if (ref && ref !== c.image) {
-                c.image = ref;
-                c.updatedAt = Date.now();
-                changed = true;
-              }
-            } catch (e) {
-              console.warn('[repairGeneratedCardImages] skipped', c.id, e);
-            }
-            await new Promise((r) => setTimeout(r, 120));
-          }
-          if (changed) {
-            await saveAllData({ skipCloud: true });
-            if (document.getElementById('pageWarehouse')?.classList.contains('active')) renderCards(true);
-            if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-              window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: true });
-            }
-            scheduleCloudPush({ urgent: true });
-          }
+        await window.ImageGenWarehouseRepair?.recoverWarehouseImagesViaServer?.({ max: 6, hours: 168 });
+        const visible = warehouseVisibleCards(cards).slice(0, 12);
+        if (window.WarehouseThumb?.prefetchForCards) {
+          await window.WarehouseThumb.prefetchForCards(visible, { max: 8 });
         }
-        await window.FeatureDraft?.repairMissingGenCardImagesQuiet?.();
       })().finally(() => { genCardImageRepairInflight = null; });
       return genCardImageRepairInflight;
     }
@@ -2984,6 +2958,7 @@
 
     function finalizeWarehouseCardMediaFailure(media, img, opts = {}) {
       if (!media) return;
+      if (img?.dataset?.feedLoadDone === '1' && img.complete && img.naturalWidth > 0) return;
       clearMediaShineWatchdog(media);
       if (media.__whBackfillFailTimer) {
         clearTimeout(media.__whBackfillFailTimer);
@@ -2995,8 +2970,13 @@
       if (card && opts.collapseToText !== false) {
         card.classList.remove('card--visual');
         card.classList.add('card--text-only');
-      }
-      if (img) {
+        media.remove();
+        const desc = card.querySelector('.card-desc');
+        const cardModel = card.dataset?.id ? cards.find((c) => c.id === card.dataset.id) : null;
+        if (desc && cardModel) {
+          desc.textContent = getCardDisplayDesc(cardModel, { textOnly: true });
+        }
+      } else if (img) {
         img.style.visibility = 'hidden';
         img.style.opacity = '0';
       }
@@ -3012,9 +2992,63 @@
     }
     window.finalizeWarehouseCardMediaFailure = finalizeWarehouseCardMediaFailure;
 
+    async function tryWarehouseGalleryListCover(img, card, media) {
+      if (!img || !card || !window.PromptHubCardGallery?.normalizeCardGallery) return false;
+      const gallery = window.PromptHubCardGallery.normalizeCardGallery(card);
+      if (!gallery.length) return false;
+      const tried = new Set(String(img.dataset.whAltTried || '').split('|').filter(Boolean));
+      const cur = img.getAttribute('data-image-ref');
+      if (cur) tried.add(cur);
+      const baseJob = card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '';
+      for (let i = 0; i < gallery.length; i += 1) {
+        const ref = gallery[i];
+        if (!ref || tried.has(ref)) continue;
+        tried.add(ref);
+        img.dataset.whAltTried = [...tried].join('|');
+        img.setAttribute('data-image-ref', ref);
+        const slotJob = window.PromptHubCardGallery.gallerySlotJobId?.(baseJob, i);
+        if (slotJob) img.setAttribute('data-job-id', slotJob);
+        else img.removeAttribute('data-job-id');
+        window.SupabaseSync?.clearPathMissingForCard?.(card.id, ref);
+        delete img.dataset.warehouseFinalFail;
+        img.classList.remove('img-load-failed');
+        media?.classList.remove('card-media--load-failed');
+        let url = '';
+        try {
+          if (window.MediaPipeline?.resolveListUrl) {
+            url = await window.MediaPipeline.resolveListUrl(ref, {
+              assetId: card.id,
+              cardId: card.id,
+              jobId: slotJob || baseJob || undefined,
+              tryAllPaths: true
+            });
+          }
+          if (!url && window.SupabaseSync?.resolveDisplayUrl) {
+            url = await window.SupabaseSync.resolveDisplayUrl(ref, {
+              assetId: card.id,
+              jobId: slotJob || baseJob || undefined,
+              variant: window.SupabaseSync.VARIANT_GRID,
+              bypassSignBudget: true,
+              allowFullFallback: false,
+              listOnly: true,
+              tryAllPaths: true
+            });
+          }
+        } catch (e) { /* ignore */ }
+        if (url && window.CardImageLoader?.applyUrlToImg?.(img, url)) {
+          media?.classList.remove('card-media--load-failed', 'card-media--await');
+          card.image = ref;
+          window.PromptHubCardGallery?.syncCardGalleryFields?.(card);
+          return true;
+        }
+      }
+      return false;
+    }
+
     function markCardImageLoadFailed(img) {
       const media = img?.closest('.card-media');
       if (!media) return;
+      if (img?.dataset?.feedLoadDone === '1' && img.complete && img.naturalWidth > 0) return;
       const card = img.closest('.card[data-id]');
       const inWarehouse = !!card?.closest('#cardsContainer');
       if (inWarehouse) {
@@ -3022,6 +3056,12 @@
         const cardModel = cardId ? cards.find((c) => c.id === cardId) : null;
         const collectOpts = cardModel ? getCommunityCollectImageResolveOpts(cardModel) : null;
         if (!collectOpts) {
+          if (cardModel) {
+            void tryWarehouseGalleryListCover(img, cardModel, media).then((ok) => {
+              if (!ok) finalizeWarehouseCardMediaFailure(media, img);
+            });
+            return;
+          }
           finalizeWarehouseCardMediaFailure(media, img);
           return;
         }
@@ -3110,13 +3150,20 @@
               degradedListFull: window.SupabaseSync?.needsDegradedListPreview?.(ref, cardId) === true
             });
           if (url && /^https?:\/\//i.test(url) && !String(url).includes('data:image/svg')) {
+            const safeUrl = window.SupabaseSync?.safeListImgUrl?.(url, img) || '';
             const media = img.closest('.card-media');
             if (media) media.classList.remove('card-media--load-failed');
-            if (window.CardImageLoader?.applyUrlToImg?.(img, url)) return;
-            img.src = url;
-            img.style.visibility = 'visible';
-            img.style.opacity = '1';
-            return;
+            if (safeUrl && window.CardImageLoader?.applyUrlToImg?.(img, safeUrl)) return;
+            if (safeUrl && img.closest('#cardsContainer')) {
+              markCardImageLoadFailed(img);
+              return;
+            }
+            if (!safeUrl && img.closest('#cardsContainer, #imageGenFeed')) {
+              const cardModel = cards.find((c) => c.id === cardId);
+              if (cardModel) void window.SupabaseSync?.warmGeneratedGridThumb?.(cardModel);
+              markCardImageLoadFailed(img);
+              return;
+            }
           }
           if (!collectOpts && cardModel && img.closest('#cardsContainer')) {
             markCardImageLoadFailed(img);
@@ -3147,11 +3194,15 @@
             card.image = fixed;
             await saveAllData({ skipCloud: true });
             scheduleCloudPush();
-            const url = await window.SupabaseSync.resolveDisplayUrl?.(fixed, { assetId: cardId });
-            if (url && !String(url).includes('data:image/svg')) {
-              img.onerror = () => markCardImageLoadFailed(img);
-              img.src = url;
-              return;
+            const url = await window.SupabaseSync.resolveDisplayUrl?.(fixed, {
+              assetId: cardId,
+              variant: window.SupabaseSync.VARIANT_GRID || 'grid',
+              listOnly: true,
+              allowFullFallback: false
+            });
+            const safeUrl = window.SupabaseSync?.safeListImgUrl?.(url, img) || '';
+            if (safeUrl && !String(safeUrl).includes('data:image/svg')) {
+              if (window.CardImageLoader?.applyUrlToImg?.(img, safeUrl)) return;
             }
           }
         }
@@ -3192,7 +3243,7 @@
         if (!awaiting) return;
         const im = media.querySelector('img');
         const loaded = im && im.complete && im.naturalWidth > 0 && !isPlaceholderCardImg(im);
-        if (loaded) {
+        if (loaded || im?.dataset?.feedLoadDone === '1') {
           finishCardMediaShine(media);
           return;
         }
@@ -3217,6 +3268,25 @@
 
     function finishCardMediaShine(media) {
       if (!media) return;
+      const igMedia = media.classList?.contains('imagegen-feed-media')
+        ? media
+        : media.closest?.('.imagegen-feed-media');
+      if (igMedia?.closest('#imageGenFeed')) {
+        clearMediaShineWatchdog(igMedia);
+        igMedia.classList.remove('is-loading', 'card-media--await', 'media-shine-reveal');
+        const igImg = igMedia.querySelector('img');
+        if (igImg) {
+          igImg.style.removeProperty('opacity');
+          igImg.style.removeProperty('visibility');
+        }
+        if (!isMobileViewport()) {
+          window.repairImageGenFeedLayout?.()
+            || window.FeatureDraft?.scheduleImageGenFeedLayout?.({ immediate: true });
+        } else {
+          window.FeatureDraft?.resetMobileFeedGridStyles?.();
+        }
+        return;
+      }
       const mobile = isMobileViewport();
       const sideBtn = media.classList?.contains('community-side-img-btn')
         ? media
@@ -3469,7 +3539,16 @@
       if (!image || !cardHasDisplayImage({ image })) return placeholder;
       if (typeof image === 'string' && image.startsWith('data:image/')) return image;
       if (typeof image === 'string' && /^https?:\/\//i.test(image) && !window.SupabaseSync?.isInvalidMediaUrl?.(image)) {
-        return image;
+        if (window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(image)) return placeholder;
+        if (window.SupabaseSync?.isCdnMediaUrl?.(image)) {
+          if (window.SupabaseSync?.isGridDisplayUrl?.(image)) return image;
+          return placeholder;
+        }
+        if (window.SupabaseSync?.isValidSignedDisplayUrl?.(image)) {
+          if (window.SupabaseSync?.isGridDisplayUrl?.(image)) return image;
+          return placeholder;
+        }
+        return placeholder;
       }
       return placeholder;
     }
@@ -5655,7 +5734,15 @@
         if (s) settings = Object.assign(settings, JSON.parse(s));
       } catch (e) { /* ignore */ }
       normalizeCardPins();
+      let galleryMigrated = false;
       if (window.PromptHubCardGallery?.migrateMjSplitCardsQuiet?.(cards)) {
+        galleryMigrated = true;
+      }
+      if (window.PromptHubCardGallery?.repairAllFeedCoversQuiet?.(cards)) {
+        galleryMigrated = true;
+      }
+      if (galleryMigrated) {
+        window.invalidateWarehouseCardsForImageGenCache?.();
         void saveAllData({ skipCloud: true });
       }
       return hadSnapshot || cards.length > 0;
@@ -5715,12 +5802,50 @@
     function hydrateWarehouseGridImages(container, pageCards) {
       if (!container) return;
       const mobile = isMobileViewport();
-      const patchMax = mobile ? 20 : Math.min(24, pageCards?.length || 24);
+      const patchMax = mobile ? 12 : Math.min(12, pageCards?.length || 12);
       window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: patchMax });
+      void boostWarehouseListThumbs(container, pageCards, patchMax);
       window.CardImageLoader?.observeContainer?.(container);
-      window.CardImageLoader?.boostWarehouseImages?.(container, mobile ? 14 : 8);
+      window.CardImageLoader?.boostWarehouseImages?.(container, mobile ? 8 : 6);
+      if (pageCards?.length && window.WarehouseThumb?.prefetchForCards) {
+        void window.WarehouseThumb.prefetchForCards(pageCards, { max: mobile ? 6 : 12 });
+      }
       if (!mobile && !container.classList.contains('masonry-ready')) {
         scheduleWarehouseMasonryLayout();
+      }
+    }
+
+    async function boostWarehouseListThumbs(container, pageCards, cap) {
+      if (!container || !pageCards?.length) return;
+      const limit = Math.min(cap || 8, pageCards.length);
+      const imgs = [...container.querySelectorAll('#cardsContainer .card-img[data-image-ref]')]
+        .filter((img) => {
+          if (img.dataset.feedLoadDone === '1') return false;
+          const cur = img.currentSrc || img.src || '';
+          if (cur.startsWith('http') && !cur.includes('data:image/svg') && img.complete && img.naturalWidth > 8) {
+            return false;
+          }
+          return !cur.startsWith('http') || cur.includes('data:image/svg');
+        })
+        .slice(0, limit);
+      for (const img of imgs) {
+        const cardId = img.closest('.card[data-id]')?.dataset?.id;
+        const card = cardId ? cards.find((c) => c.id === cardId) : null;
+        if (!card) continue;
+        const thumb = getWarehouseCardListThumb(card);
+        if (!thumb.show || thumb.immediate) continue;
+        let url = '';
+        try {
+          if (window.MediaPipeline?.resolveCardListThumb) {
+            url = await window.MediaPipeline.resolveCardListThumb(card);
+          }
+        } catch (e) { /* ignore */ }
+        if (url && window.CardImageLoader?.applyUrlToImg?.(img, url)) {
+          const ref = thumb.coverImage || card.image;
+          if (ref) img.setAttribute('data-image-ref', ref);
+          const slotJob = thumb.coverJobId;
+          if (slotJob) img.setAttribute('data-job-id', slotJob);
+        }
       }
     }
 
@@ -6761,20 +6886,31 @@
     }
 
     function cardHasDisplayImage(card) {
-      const cover = window.PromptHubCardGallery?.getCardCoverImage?.(card) || card?.image;
+      const cover = window.PromptHubCardGallery?.getCardFeedCoverImage?.(card)
+        || window.PromptHubCardGallery?.getCardCoverImage?.(card)
+        || card?.image;
       if (!cover) return window.FeatureDraft?.isUsableWarehouseImage?.(card) ?? false;
       return window.FeatureDraft?.isDisplayableImage?.(cover) ?? !!cover;
     }
 
-    /** 卡片库是否渲染图片区：有图且非已确认幽灵（缺图/跳过 backfill） */
+    /** 仓库列表缩略：gallery 第一张单图 + 已缓存/可签 URL */
+    function getWarehouseCardListThumb(card) {
+      const meta = window.PromptHubCardGallery?.getWarehouseListThumbMeta?.(card);
+      if (!meta) return { show: false };
+      if (!meta.hasImage) return { show: false };
+      return {
+        show: true,
+        src: meta.cachedUrl || '',
+        coverImage: meta.ref,
+        coverJobId: meta.jobId,
+        thumbMeta: meta.thumbMeta,
+        immediate: !!meta.cachedUrl
+      };
+    }
+
+    /** 卡片库是否渲染图片区：有可加载缩略图时才显示 */
     function warehouseCardShouldRenderMediaSlot(card) {
-      if (!cardHasDisplayImage(card)) return false;
-      if (window.SupabaseSync?.isGridBackfillSkipped?.(card.id)) return false;
-      const image = window.PromptHubCardGallery?.getCardCoverImage?.(card) || card.image;
-      if (window.SupabaseSync?.cardImageStillResolvable?.(image, card.id) === false) return false;
-      const primary = window.SupabaseSync?.primaryImagePath?.(image, card.id);
-      if (primary && window.SupabaseSync?.isPathKnownMissing?.(primary)) return false;
-      return true;
+      return getWarehouseCardListThumb(card).show;
     }
 
     function shouldLoadPanelImagePreview() {
@@ -6885,28 +7021,36 @@
         return;
       }
       container.classList.remove('feed-grid-centered');
-      const prefetchCards = pageCards.slice(0, 24);
+      const prefetchCards = pageCards.slice(0, 12);
       let prefetchP = Promise.resolve();
       const warehouseActive = document.getElementById('pageWarehouse')?.classList.contains('active');
       if (page === 1 && prefetchCards.length && warehouseActive && window.MediaPipeline?.prefetchList) {
         prefetchP = window.MediaPipeline.prefetchList(
           prefetchCards,
-          mobileGrid ? 4800 : 4000,
-          { maxCards: prefetchCards.length }
+          mobileGrid ? 2800 : 2400,
+          { maxCards: Math.min(12, prefetchCards.length) }
         );
       }
       if (page === 1 && pageCards.length && warehouseActive && window.SupabaseSync?.backfillGridThumbsForCards) {
         void window.SupabaseSync.backfillGridThumbsForCards(pageCards, {
-          max: mobileGrid ? Math.min(6, pageCards.length) : Math.min(8, pageCards.length),
+          max: mobileGrid ? Math.min(2, pageCards.length) : Math.min(3, pageCards.length),
           force: false,
           quiet: true,
           awaitDrain: false
         });
       }
+      if (page === 1 && pageCards.length && warehouseActive && window.PromptHubCardGallery?.ensureFeedCoversForCards) {
+        window.PromptHubCardGallery.ensureFeedCoversForCards(pageCards, { persist: false, backfill: false });
+      }
       const fragment = document.createDocumentFragment();
       const isAppend = !reset && page > 1;
       const eagerImgCount = mobileGrid ? 6 : Math.min(4, pageCards.length);
       pageCards.forEach((card, idx) => {
+        const listThumb = getWarehouseCardListThumb(card);
+        const coverMeta = listThumb.thumbMeta
+          || window.PromptHubCardGallery?.pickWarehouseListThumb?.(card)
+          || window.PromptHubCardGallery?.pickWarehouseFeedCover?.(card)
+          || window.PromptHubCardGallery?.getCardFeedCoverMeta?.(card);
         const div = document.createElement('div');
         div.className = `card ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
         if (!mobileGrid && pageCards.length <= 8 && reset) {
@@ -6926,18 +7070,23 @@
         }
         const checked = selectedCardIds.has(card.id);
         if (checked) div.classList.add('batch-selected');
-        const showImage = warehouseCardShouldRenderMediaSlot(card);
+        const showImage = listThumb.show;
         if (showImage) div.classList.add('card--visual');
         else div.classList.add('card--text-only');
-        const coverImage = window.PromptHubCardGallery?.getCardCoverImage?.(card) || card.image;
-        const cachedUrl = showImage && window.SupabaseSync?.getListDisplayImageSrc
-          ? window.SupabaseSync.getListDisplayImageSrc(coverImage, card.id)
-          : '';
-        const imgSrc = showImage ? (cachedUrl || cardImgInitialSrc(coverImage)) : '';
+        const coverImage = listThumb.coverImage
+          || coverMeta?.ref
+          || window.PromptHubCardGallery?.getCardFeedCoverImage?.(card)
+          || window.PromptHubCardGallery?.getCardCoverImage?.(card)
+          || card.image;
+        const coverJobId = listThumb.coverJobId
+          || coverMeta?.slotJobId
+          || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');
+        const coverJobAttr = coverJobId ? ` data-job-id="${escapeHtml(coverJobId)}"` : '';
+        const imgSrc = showImage ? (listThumb.src || cardImgInitialSrc(coverImage)) : '';
         const isCollectCard = window.isCommunityCollectCard?.(card);
         const collectMeta = isCollectCard ? getCommunityCollectImageResolveOpts(card) : null;
-        /* 卡片库列表：仅用 await 占位，禁止 is-loading 扫光（纯文字幽灵卡与有图卡共用） */
-        const mediaLoadingCls = showImage ? ' card-media--await' : '';
+        const needsAsyncThumb = showImage && !listThumb.immediate && !listThumb.src;
+        const mediaLoadingCls = needsAsyncThumb ? ' is-loading' : '';
         const shineAt = '';
         const titleTrim = getCardDisplayTitle(card);
         const timeLabel = formatCardTime(card.updatedAt || card.createdAt);
@@ -6955,7 +7104,7 @@
           ? `<span class="card-gallery-count" title="本卡 ${galleryCount} 张图">${galleryCount}</span>`
           : '';
         const mediaHtml = showImage
-          ? `<div class="card-media${mediaLoadingCls}"${shineAt}>${galleryBadge}<img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(coverImage)} data-image-ref="${escapeHtml(coverImage)}"${collectImgAttrs} loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async"${fetchPri} draggable="false" alt="" onload="${imgOnload}"></div>`
+          ? `<div class="card-media${mediaLoadingCls}"${shineAt}>${galleryBadge}<img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(coverImage)} data-image-ref="${escapeHtml(coverImage)}"${coverJobAttr}${collectImgAttrs} loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async"${fetchPri} draggable="false" alt="" onload="${imgOnload}"></div>`
           : '';
         const headHtml = titleTrim
           ? `<div class="card-head"><div class="card-title">${escapeHtml(titleTrim)}</div>${timeLabel ? `<time class="card-time">${escapeHtml(timeLabel)}</time>` : ''}</div>`
@@ -7799,16 +7948,16 @@
       };
       if (panelGalleryIndex > 0) {
         const nextIdx = panelGalleryIndex + 1;
-        if (nextIdx < gallery.length && window.MediaPipeline?.resolvePreviewUrl) {
-          void window.MediaPipeline.resolvePreviewUrl(gallery[nextIdx], {
+        if (nextIdx < gallery.length && window.MediaPipeline?.resolveListUrl) {
+          void window.MediaPipeline.resolveListUrl(gallery[nextIdx], {
             ...prefetchOpts,
             jobId: window.PromptHubCardGallery?.gallerySlotJobId?.(cardJobId, nextIdx) || cardJobId,
             galleryIndex: nextIdx
           });
         }
       }
-      if (panelGalleryIndex > 0 && window.MediaPipeline?.resolvePreviewUrl) {
-        void window.MediaPipeline.resolvePreviewUrl(gallery[panelGalleryIndex - 1], {
+      if (panelGalleryIndex > 0 && window.MediaPipeline?.resolveListUrl) {
+        void window.MediaPipeline.resolveListUrl(gallery[panelGalleryIndex - 1], {
           ...prefetchOpts,
           jobId: window.PromptHubCardGallery?.gallerySlotJobId?.(cardJobId, panelGalleryIndex - 1) || cardJobId,
           galleryIndex: panelGalleryIndex - 1
@@ -8990,31 +9139,24 @@
         img.onerror = () => {
           if (previewStale()) return;
           void (async () => {
-            const resolveFull = window.MediaPipeline?.resolvePreviewUrl
-              || ((ref, o) => window.SupabaseSync?.resolvePreviewFullUrl?.(ref, o));
-            if (!resolveFull || !window.SupabaseSync?.isStorageRef?.(imageData)) {
-              dropArea?.classList.add('is-loading-preview');
-              return;
+            const cardJobId = cards.find((c) => c.id === selectedCardId)?.genJobId || null;
+            const slotJob = window.PromptHubCardGallery?.gallerySlotJobId?.(
+              cardJobId ? String(cardJobId).replace(/#\d+$/, '') : null,
+              panelGalleryIndex
+            ) || cardJobId;
+            if (slotJob && window.WarehouseThumb?.resolveForCard) {
+              const gridRetry = await window.WarehouseThumb.resolveForCard(imageData, {
+                assetId: selectedCardId,
+                cardId: selectedCardId,
+                jobId: slotJob,
+                galleryIndex: panelGalleryIndex
+              });
+              if (!previewStale() && gridRetry && !gridRetry.includes('data:image/svg')) {
+                img.src = gridRetry;
+                return;
+              }
             }
-            const gridFallbackUrl = window.MediaPipeline?.gridUrlFromImgEl?.(img) || '';
-            const retry = await resolveFull(imageData, {
-              assetId: selectedCardId,
-              cardId: selectedCardId,
-              jobId: window.PromptHubCardGallery?.gallerySlotJobId?.(
-                cards.find((c) => c.id === selectedCardId)?.genJobId,
-                panelGalleryIndex
-              ) || cards.find((c) => c.id === selectedCardId)?.genJobId || null,
-              galleryIndex: panelGalleryIndex,
-              useJobImageApi: panelGalleryIndex <= 0,
-              gridFallbackUrl,
-              allowGridFallback: panelGalleryIndex <= 0
-            });
-            if (previewStale() || !retry || retry.includes('data:image/svg')) {
-              dropArea?.classList.add('is-loading-preview');
-              return;
-            }
-            img.dataset.previewFullUrl = retry;
-            img.src = retry;
+            dropArea?.classList.add('is-loading-preview');
           })();
         };
       };
@@ -9024,7 +9166,13 @@
         if (typeof imageData === 'string' && imageData.startsWith('data:image/')) {
           src = imageData;
         } else if (typeof imageData === 'string' && /^https?:\/\//i.test(imageData) && !window.SupabaseSync?.isInvalidMediaUrl?.(imageData)) {
-          src = imageData;
+          if (window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(imageData)) {
+            src = '';
+          } else if (window.SupabaseSync?.isCdnMediaUrl?.(imageData) || window.SupabaseSync?.isValidSignedDisplayUrl?.(imageData)) {
+            src = window.SupabaseSync?.isGridDisplayUrl?.(imageData) ? imageData : '';
+          } else {
+            src = imageData;
+          }
         }
         const waiting = !src || src.includes('data:image/svg');
         dropArea?.classList.toggle('is-loading-preview', waiting);
@@ -9053,16 +9201,6 @@
         dropArea.classList.add('has-image');
         dropArea.classList.remove('no-image');
         delete img.dataset.previewFullUrl;
-        if (waiting && typeof window.getCardImageBackup === 'function' && selectedCardId) {
-          void getCardImageBackup(selectedCardId).then((backup) => {
-            if (previewStale()) return;
-            if (backup && String(backup).startsWith('data:')) {
-              img.src = backup;
-              img.dataset.previewFullUrl = backup;
-              finishPreviewLoad();
-            }
-          });
-        }
         let previewGridShown = false;
         const cardJobId = cards.find((c) => c.id === selectedCardId)?.genJobId || null;
         const pipePreviewOpts = {
@@ -9073,7 +9211,21 @@
           useJobImageApi: panelGalleryIndex <= 0,
           allowGridFallback: panelGalleryIndex <= 0
         };
-        if (waiting && window.SupabaseSync?.isStorageRef?.(imageData) && selectedCardId) {
+        if (waiting && selectedCardId) {
+          const cardModel = cards.find((c) => c.id === selectedCardId);
+          let gridUrl = '';
+          if (cardModel && window.MediaPipeline?.resolveCardListThumb) {
+            gridUrl = await window.MediaPipeline.resolveCardListThumb(cardModel);
+          } else if (cardJobId && window.WarehouseThumb?.resolveForCard) {
+            gridUrl = await window.WarehouseThumb.resolveForCard(imageData, pipePreviewOpts);
+          }
+          if (!previewStale() && gridUrl && !gridUrl.includes('data:image/svg')) {
+            img.src = gridUrl;
+            previewGridShown = true;
+            finishPreviewLoad();
+          }
+        }
+        if (waiting && window.SupabaseSync?.isStorageRef?.(imageData) && selectedCardId && !previewGridShown) {
           const gridCached = window.MediaPipeline?.getListCached?.(imageData, selectedCardId, {
             jobId: pipePreviewOpts.jobId
           })
@@ -9098,22 +9250,6 @@
               img.src = gridUrl;
               finishPreviewLoad();
             });
-          }
-        }
-        const resolveFull = window.MediaPipeline?.resolvePreviewUrl
-          || ((ref, o) => window.SupabaseSync.resolvePreviewFullUrl(ref, o));
-        if (resolveFull && window.SupabaseSync?.isStorageRef?.(imageData)) {
-          const gridFallbackUrl = previewGridShown ? (img.src || '') : '';
-          const url = await resolveFull(imageData, {
-            ...pipePreviewOpts,
-            gridFallbackUrl,
-            allowGridFallback: true
-          });
-          if (previewStale()) return;
-          if (url && !url.startsWith('data:image/svg')) {
-            img.dataset.previewFullUrl = url;
-            if (img.src !== url) img.src = url;
-            finishPreviewLoad();
           }
         } else if (src && !src.includes('data:image/svg')) {
           if (!window.SupabaseSync?.isStorageRef?.(imageData)) img.dataset.previewFullUrl = src;

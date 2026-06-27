@@ -42,30 +42,18 @@
     const CG = window.PromptHubCardGallery;
     if (!card?.id || !CG || !Array.isArray(sourceUrls) || !sourceUrls.length) return false;
     const baseJobId = card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null;
-    if (!baseJobId || !global.SupabaseSync?.archiveGeneratedCardImage) return false;
-    const urls = sourceUrls.filter(Boolean).slice(0, CG.MAX || 5);
-    const archived = [];
-    let changed = false;
-    for (let i = 0; i < urls.length; i += 1) {
-      const src = urls[i];
-      const slotJob = CG.gallerySlotJobId(baseJobId, i);
-      let ref = src;
-      try {
-        ref = await global.SupabaseSync.archiveGeneratedCardImage(card.id, src, { jobId: slotJob }) || src;
-      } catch (e) {
-        console.warn('[repairMjGallery] archive slot failed', i, e);
-      }
-      archived.push(ref);
-      if (ref !== src) changed = true;
+    if (!baseJobId) return false;
+    if (global.ImageGenWarehouseRepair?.recoverWarehouseImagesViaServer) {
+      await global.ImageGenWarehouseRepair.recoverWarehouseImagesViaServer({
+        jobIds: [baseJobId],
+        max: 1,
+        hours: 168
+      });
     }
-    const prev = JSON.stringify(CG.normalizeCardGallery(card));
-    card.cardImages = archived;
-    CG.syncCardGalleryFields(card);
-    if (JSON.stringify(CG.normalizeCardGallery(card)) !== prev) changed = true;
-    if (!changed) return false;
-    card.updatedAt = Date.now();
-    await d().persistPromptHubCards();
-    return true;
+    if (global.WarehouseThumb?.prefetchForCards) {
+      await global.WarehouseThumb.prefetchForCards([card], { max: 1 });
+    }
+    return false;
   }
 
   async function repairMjGalleryFromJob(card) {
@@ -162,25 +150,68 @@
       console.warn('[imagegen] 跳过修复：卡片 genJobId 与任务不一致', card.id, card.genJobId, jobId);
       return false;
     }
-    let stored = imageUrl;
-    if (global.SupabaseSync?.persistGenerationImage) {
-      try {
-        stored = await global.SupabaseSync.persistGenerationImage(card.id, imageUrl, {
-          jobId: jobId || card.genJobId || null
-        });
-      } catch (e) {
-        console.warn('恢复生图：归档到 Storage 失败，使用任务链接', e);
-      }
+    const baseJob = String(jobId || card.genJobId || '').replace(/#\d+$/, '');
+    if (baseJob && global.ImageGenWarehouseRepair?.recoverWarehouseImagesViaServer) {
+      await global.ImageGenWarehouseRepair.recoverWarehouseImagesViaServer({
+        jobIds: [baseJob],
+        max: 1,
+        hours: 168
+      });
     }
-    card.image = stored || imageUrl;
-    card.updatedAt = Date.now();
+    if (global.WarehouseThumb?.resolveForCard) {
+      await global.WarehouseThumb.resolveForCard(imageUrl, {
+        jobId: baseJob,
+        assetId: card.id,
+        cardId: card.id
+      });
+    }
     global.invalidateWarehouseCardsForImageGenCache?.();
-    await d().persistPromptHubCards();
     return true;
   }
 
   let missingGenCardRepairInflight = null;
   let mjPreviewRepairInflight = null;
+  let serverRecoverInflight = null;
+
+  async function recoverWarehouseImagesViaServer(opts = {}) {
+    if (!global.PromptHubApi?.recoverWarehouseFromJobs || !global.SupabaseSync?.isLoggedIn?.()) {
+      return { ok: false, reason: 'no_api' };
+    }
+    if (serverRecoverInflight) return serverRecoverInflight;
+    serverRecoverInflight = (async () => {
+      try {
+        const r = await global.PromptHubApi.recoverWarehouseFromJobs({
+          mode: 'repair',
+          hours: opts.hours ?? 72,
+          max: opts.max ?? 24,
+          providerScope: opts.providerScope || 'all',
+          jobIds: Array.isArray(opts.jobIds) ? opts.jobIds.filter(Boolean).slice(0, 10) : undefined
+        });
+        if (r?.ok && r.data?.repaired > 0) {
+          global.SupabaseSync?.clearSignedUrlCache?.();
+          global.SupabaseSync?.clearListImageMissMarks?.();
+          if (typeof global.runDeferredCloudPull === 'function') {
+            await global.runDeferredCloudPull({ force: true, silent: true });
+          }
+          global.invalidateWarehouseCardsForImageGenCache?.();
+          d().refreshWarehouseUI?.();
+          if (d().isPageImageGenActive?.()) {
+            d().renderImageGenFeed({ preserveScroll: true, force: true });
+          }
+          if (global.FeedImages?.hydrateFeedImages) {
+            void global.FeedImages.hydrateFeedImages(document.getElementById('imageGenFeed'));
+          }
+        }
+        return r;
+      } catch (e) {
+        console.warn('[recoverWarehouseImagesViaServer]', e);
+        return { ok: false, error: e };
+      }
+    })().finally(() => {
+      serverRecoverInflight = null;
+    });
+    return serverRecoverInflight;
+  }
 
   function isMidjourneyWarehouseCard(card) {
     if (!card) return false;
@@ -197,7 +228,9 @@
     if (!card?.id || !card?.genJobId || !isMidjourneyWarehouseCard(card)) return false;
     if (!d().isUsableWarehouseImage(card)) return true;
     if (mjGalleryNeedsRearchive(card)) return true;
-    const cover = global.PromptHubCardGallery?.getCardCoverImage?.(card) || card.image;
+    const cover = global.PromptHubCardGallery?.getCardFeedCoverImage?.(card)
+      || global.PromptHubCardGallery?.getCardCoverImage?.(card)
+      || card.image;
     if (!cover || !d().isDisplayableImage(cover)) return true;
     if (global.SupabaseSync?.isStorageRef?.(cover)) {
       const path = global.SupabaseSync.storagePathFromRef(cover);
@@ -270,6 +303,46 @@
     return changed;
   }
 
+  let archiveVisibleMjInflight = null;
+
+  /** 卡片库当前页：服务端归档 + grid（禁止浏览器批量拉 getapib 原图） */
+  async function archiveVisibleMjCardsQuiet(cards, opts = {}) {
+    if (!global.SupabaseSync?.isLoggedIn?.()) {
+      return { ok: false, repaired: 0, total: 0 };
+    }
+    const max = Math.min(Math.max(1, Number(opts.max) || 6), 8);
+    const list = Array.isArray(cards) ? cards : [];
+    const targets = [];
+    const seen = new Set();
+    for (const card of list) {
+      if (!card?.id || !card?.genJobId || seen.has(card.id)) continue;
+      if (!isMidjourneyWarehouseCard(card)) continue;
+      if (!mjCardNeedsPreviewRepair(card)) continue;
+      seen.add(card.id);
+      targets.push(card);
+      if (targets.length >= max) break;
+    }
+    if (!targets.length) return { ok: true, repaired: 0, total: 0 };
+    if (archiveVisibleMjInflight) return archiveVisibleMjInflight;
+    archiveVisibleMjInflight = (async () => {
+      const jobIds = targets.map((c) => String(c.genJobId).replace(/#\d+$/, '')).filter(Boolean);
+      if (jobIds.length && global.ImageGenWarehouseRepair?.recoverWarehouseImagesViaServer) {
+        await global.ImageGenWarehouseRepair.recoverWarehouseImagesViaServer({
+          jobIds: jobIds.slice(0, 6),
+          max: Math.min(jobIds.length, 6),
+          hours: 168
+        });
+      }
+      if (global.WarehouseThumb?.prefetchForCards) {
+        await global.WarehouseThumb.prefetchForCards(targets, { max });
+      }
+      return { ok: true, repaired: targets.length, total: targets.length };
+    })().finally(() => {
+      archiveVisibleMjInflight = null;
+    });
+    return archiveVisibleMjInflight;
+  }
+
   async function repairMjWarehousePreviewsQuiet() {
     if (!global.PromptHubApi?.getGenerationJob || !global.SupabaseSync?.isLoggedIn?.()) {
       console.warn('[repairMjWarehousePreviews] 请先登录');
@@ -309,18 +382,22 @@
   async function repairMissingGenCardImagesQuiet() {
     if (!global.PromptHubApi?.getGenerationJob || !global.SupabaseSync?.isLoggedIn?.()) return false;
     if (missingGenCardRepairInflight) return missingGenCardRepairInflight;
-    const list = d().getCards() || [];
-    const tomb = global.getDeletedGenerationJobTombstones?.() || {};
-    const targets = list.filter((c) => {
-      if (!c?.id || !c?.genJobId) return false;
-      const jobKey = String(c.genJobId);
-      const base = jobKey.replace(/#\d+$/, '');
-      if (tomb[jobKey] || (base && tomb[base])) return false;
-      if (!c.image) return true;
-      return !d().isUsableWarehouseImage(c);
-    }).slice(0, 8);
-    if (!targets.length) return false;
     missingGenCardRepairInflight = (async () => {
+      const serverRes = await recoverWarehouseImagesViaServer({ max: 20, hours: 72 });
+      if (serverRes?.ok && serverRes.data?.repaired > 0) return true;
+
+      const list = d().getCards() || [];
+      const tomb = global.getDeletedGenerationJobTombstones?.() || {};
+      const targets = list.filter((c) => {
+        if (!c?.id || !c?.genJobId) return false;
+        const jobKey = String(c.genJobId);
+        const base = jobKey.replace(/#\d+$/, '');
+        if (tomb[jobKey] || (base && tomb[base])) return false;
+        if (!c.image) return true;
+        return !d().isUsableWarehouseImage(c);
+      }).slice(0, 12);
+      if (!targets.length) return false;
+
       let changed = false;
       for (const card of targets) {
         try {
@@ -376,14 +453,18 @@
 
   function init(injected) {
     deps = injected || {};
-    return {
+    const api = {
       warehouseCardImageNeedsRecovery,
       repairMjWarehouseCardFields,
       repairMjGalleryFromJob,
       repairWarehouseCardImageFromJob,
       repairMissingGenCardImagesQuiet,
-      repairMjWarehousePreviewsQuiet
+      repairMjWarehousePreviewsQuiet,
+      archiveVisibleMjCardsQuiet,
+      recoverWarehouseImagesViaServer
     };
+    Object.assign(global.ImageGenWarehouseRepair, api);
+    return api;
   }
 
   global.ImageGenWarehouseRepair = { init };

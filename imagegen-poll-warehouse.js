@@ -159,6 +159,8 @@
     pendingId,
     targetGroup,
     targetTags,
+    cardTitle,
+    genBatchId,
     primary,
     gridUrls,
     composite,
@@ -186,6 +188,8 @@
       pendingId,
       targetGroup,
       targetTags,
+      cardTitle,
+      genBatchId,
       isMidjourney: true,
       image: mainImage,
       imageIndex: 1,
@@ -207,6 +211,91 @@
     return true;
   }
 
+  /** 同提示词批量：合并入库到同一卡片（genBatchId） */
+  async function appendImagesToBatchCard(ctx, images, pendingId) {
+    const batchId = ctx?.batchId;
+    const urls = (images || []).filter(Boolean);
+    if (!batchId || !urls.length) return false;
+    const galleryApi = CG();
+    if (!galleryApi) return false;
+    const cards = global.__promptHubCards || [];
+    const card = cards.find((c) => c.genBatchId === batchId);
+    if (!card?.id) return false;
+
+    const beforeLen = galleryApi.normalizeCardGallery(card).length;
+    let merged = galleryApi.normalizeCardGallery(card);
+    for (const imageUrl of urls) {
+      let stored = imageUrl;
+      const slot = merged.length + 1;
+      if (global.SupabaseSync?.archiveGeneratedCardImage) {
+        try {
+          stored = await global.SupabaseSync.archiveGeneratedCardImage(card.id, imageUrl, {
+            jobId: ctx.jobId ? `${String(ctx.jobId).replace(/#\d+$/, '')}#b${slot}` : null
+          }) || imageUrl;
+        } catch (e) {
+          console.warn('[batch-merge] gallery archive failed', e);
+        }
+      }
+      merged = galleryApi.mergeCardGalleryImages(merged, [stored]);
+    }
+    if (merged.length === beforeLen) {
+      if (!ctx?.silentToast) d().toast('该卡片已满 5 张，无法继续追加');
+      if (pendingId) d().removePendingJob(pendingId);
+      if (ctx?.jobId) d().clearSessionGenJob(ctx.jobId);
+      return true;
+    }
+    if (typeof global.persistCardGalleryUpdate === 'function') {
+      await global.persistCardGalleryUpdate(card.id, merged);
+    } else {
+      card.cardImages = merged;
+      galleryApi.syncCardGalleryFields(card);
+      card.updatedAt = Date.now();
+    }
+    if (ctx?.jobId) {
+      const ids = Array.isArray(card.genBatchJobIds) ? card.genBatchJobIds.slice() : [];
+      if (!ids.includes(ctx.jobId)) ids.push(ctx.jobId);
+      card.genBatchJobIds = ids;
+    }
+    if (pendingId) d().removePendingJob(pendingId);
+    if (ctx?.jobId) d().clearSessionGenJob(ctx.jobId);
+    d().renderImageGenFeed({ preserveScroll: true, force: true });
+    d().queueUrgentCardsSync?.();
+    if (!ctx?.silentToast && ctx.batchIndex === ctx.batchTotal) {
+      d().toast(`已合并 ${merged.length} 张到同一卡片`);
+    }
+    return true;
+  }
+
+  async function saveBatchMergedFromPoll(poll, ctx, pendingId) {
+    if (!ctx?.batchMergeCards || !ctx?.batchId || !poll?.data?.imageUrl) return false;
+    if (poll.data.isMidjourney || d().isImageGenMidjourneyModel?.(ctx?.model)) return false;
+    const cards = global.__promptHubCards || [];
+    const existing = cards.find((c) => c.genBatchId === ctx.batchId);
+
+    if (existing) {
+      return appendImagesToBatchCard(ctx, [poll.data.imageUrl], pendingId);
+    }
+
+    await d().finishImageGenRun({
+      ...ctx,
+      image: poll.data.imageUrl,
+      extraImages: [],
+      cost: ctx.cost,
+      jobId: ctx.jobId,
+      silentToast: true,
+      isRecovery: !!ctx.isRecovery,
+      pendingId,
+      cardTitle: ctx.cardTitle,
+      genBatchId: ctx.batchId
+    });
+    if (!ctx.silentToast && ctx.batchIndex === ctx.batchTotal) {
+      const card = (global.__promptHubCards || []).find((c) => c.genBatchId === ctx.batchId);
+      const n = CG()?.normalizeCardGallery?.(card)?.length || 1;
+      d().toast(`已合并 ${n} 张到同一卡片`);
+    }
+    return true;
+  }
+
   /** 入库主图 + 同任务附赠图；已有主图时只补缺失的附赠槽位 */
   async function ensureGenJobCreationsFromPoll(poll, ctx, pendingId) {
     if (poll?.data?.status !== 'completed' || !poll.data.imageUrl) return false;
@@ -214,6 +303,10 @@
     if (poll.data.mjParentJobId && poll.data.mjAction) {
       const appended = await appendMjActionToParentCard(poll, ctx, pendingId);
       if (appended) return true;
+    }
+
+    if (ctx?.batchMergeCards && ctx?.batchId && ctx.batchTotal > 1) {
+      return saveBatchMergedFromPoll(poll, ctx, pendingId);
     }
 
     const baseJobId = ctx?.jobId || poll.data.jobId;
@@ -292,6 +385,8 @@
       getPollExtraImageUrls,
       isGenCreationSlotSaved,
       allGenCreationSlotsSaved,
+      appendImagesToBatchCard,
+      saveBatchMergedFromPoll,
       saveMjToWarehouse,
       appendMjActionToParentCard,
       ensureGenJobCreationsFromPoll

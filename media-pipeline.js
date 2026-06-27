@@ -29,8 +29,19 @@
   }
 
   async function resolveListUrl(image, opts) {
-    if (!image || !window.SupabaseSync?.resolveDisplayUrl) return '';
+    if (!image && !opts?.jobId) return '';
     const o = opts && typeof opts === 'object' ? opts : {};
+    if (o.jobId && window.WarehouseThumb?.resolveForCard) {
+      const wh = await window.WarehouseThumb.resolveForCard(image || '', {
+        jobId: o.jobId,
+        assetId: o.assetId || o.cardId,
+        cardId: o.cardId || o.assetId,
+        galleryIndex: o.galleryIndex || 0
+      });
+      if (wh) return wh;
+    }
+    if (!image) return '';
+    if (!window.SupabaseSync?.resolveDisplayUrl) return '';
     const url = await window.SupabaseSync.resolveDisplayUrl(image, {
       assetId: o.assetId || o.cardId,
       authorId: o.authorId,
@@ -121,7 +132,7 @@
 
   async function patchContainerFromCache(container, opts) {
     if (!container || !window.SupabaseSync?.patchImageSrcFromCache) return;
-    window.SupabaseSync.patchImageSrcFromCache(container, opts || { visibleFirst: true, max: 24 });
+    window.SupabaseSync.patchImageSrcFromCache(container, opts || { visibleFirst: true, max: 12 });
   }
 
   function safeImgSrc(image) {
@@ -142,6 +153,22 @@
     return false;
   }
 
+  async function resolveCardListThumb(card) {
+    if (!card?.id) return '';
+    if (window.WarehouseThumb?.resolveForCardModel) {
+      return window.WarehouseThumb.resolveForCardModel(card);
+    }
+    const meta = window.PromptHubCardGallery?.getWarehouseListThumbMeta?.(card);
+    if (!meta?.hasImage) return '';
+    return resolveListUrl(meta.ref || card.image, {
+      assetId: card.id,
+      cardId: card.id,
+      jobId: meta.jobId,
+      galleryIndex: meta.galleryIndex || 0,
+      tryAllPaths: true
+    });
+  }
+
   window.MediaPipeline = {
     VARIANT_LIST,
     VARIANT_PREVIEW,
@@ -151,6 +178,7 @@
     safeImgSrc,
     gridUrlFromImgEl,
     resolveListUrl,
+    resolveCardListThumb,
     resolvePreviewUrl,
     resolveFeedUrl,
     prefetchList,

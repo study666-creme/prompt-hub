@@ -9,6 +9,11 @@
   function d() { return deps; }
 
   const MAX_REF_IMAGES = 16;
+
+  function maxRefImages() {
+    const n = Number(d().getMaxRefImages?.());
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : MAX_REF_IMAGES;
+  }
   const REF_INPUT_MAX_BYTES = 50 * 1024 * 1024;
   const REF_AUTO_COMPRESS_BYTES = 12 * 1024 * 1024;
   const REF_MAX_SIDE = 2560;
@@ -182,8 +187,8 @@ function addImageGenRefFromFeed(payload) {
       d().toast('该缩略图无法作为参考图');
       return false;
     }
-    if (imageGenRefImages.length >= MAX_REF_IMAGES) {
-      d().toast(`最多 ${MAX_REF_IMAGES} 张参考图`);
+    if (imageGenRefImages.length >= maxRefImages()) {
+      d().toast(`最多 ${maxRefImages()} 张参考图`);
       return false;
     }
     if (imageGenRefImages.some((r) => r === imageRef)) {
@@ -206,8 +211,8 @@ async function addImageGenRefFiles(fileList) {
     let added = 0;
     let compressedCount = 0;
     for (const f of files) {
-      if (imageGenRefImages.length >= MAX_REF_IMAGES) {
-        d().toast(`最多 ${MAX_REF_IMAGES} 张参考图`);
+      if (imageGenRefImages.length >= maxRefImages()) {
+        d().toast(`最多 ${maxRefImages()} 张参考图`);
         break;
       }
       try {
@@ -613,7 +618,7 @@ function renderImageGenRefGallery() {
     if (typeof urls === 'string' && urls) {
       imageGenRefImages = [urls];
     } else {
-      imageGenRefImages = Array.isArray(urls) ? urls.filter(Boolean).slice(0, MAX_REF_IMAGES) : [];
+      imageGenRefImages = Array.isArray(urls) ? urls.filter(Boolean).slice(0, maxRefImages()) : [];
     }
     renderImageGenRefGallery();
   }

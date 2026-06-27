@@ -79,7 +79,13 @@
         resolution,
         quality,
         size,
-        count: d().getImageGenBatchCount?.()
+        count: d().getImageGenBatchCount?.(),
+        cardTitle: d().getImageGenCardTitle?.(),
+        batchSplit: d().isImageGenBatchSplitCards?.(),
+        mjMode: d().getImageGenMjMode?.(),
+        mjSaveAllTiles: d().isImageGenMjSaveAllTiles?.(),
+        mjSpeed: d().getImageGenMjSpeed?.(),
+        mjExtras: d().getImageGenMjExtrasValue?.()
       });
 
       const modelLabel = global.PointsSystem?.getImageGenModel?.(model)?.label || model;
@@ -96,6 +102,13 @@
         cost,
         targetGroup: saveTarget.targetGroup,
         targetTags: saveTarget.targetTags,
+        cardTitle: batchOpts.cardTitle ?? d().getImageGenCardTitle?.() ?? '',
+        batchMergeCards: !!(
+          batchOpts.batch
+          && batchOpts.batchTotal > 1
+          && batchOpts.batchMergeCards !== false
+          && !d().isImageGenMidjourneyModel?.(model)
+        ),
         fromInspirationDraw: !!batchOpts.fromInspirationDraw,
         batchIndex: batchOpts.batchIndex || null,
         batchTotal: batchOpts.batchTotal || null,
@@ -238,6 +251,7 @@
             const mjParsed = d().resolveMjPollImages({ data: pollPayload });
             if ((mjParsed?.gallery?.length || 0) < 4) {
               void d().pollGenerationJobUntilDone(gen.data.jobId, pendingId, {
+                ...d().pendingJobToPollCtx(pendingJob),
                 prompt,
                 model,
                 resolution,
@@ -245,8 +259,6 @@
                 size,
                 cost,
                 jobId: gen.data.jobId,
-                targetGroup: pendingJob.targetGroup,
-                targetTags: pendingJob.targetTags,
                 silentToast: batchOpts.silentToast,
                 fromInspirationDraw: !!batchOpts.fromInspirationDraw
               });
@@ -262,6 +274,9 @@
               jobId: gen.data.jobId,
               targetGroup: pendingJob.targetGroup,
               targetTags: pendingJob.targetTags,
+              cardTitle: pendingJob.cardTitle,
+              genBatchId: pendingJob.batchMergeCards ? pendingJob.batchId : null,
+              batchMergeCards: pendingJob.batchMergeCards,
               silentToast: batchOpts.silentToast,
               fromInspirationDraw: !!batchOpts.fromInspirationDraw,
               pendingId,
@@ -271,6 +286,12 @@
               gallery: mjParsed.gallery,
               buttons: pollPayload.mjButtons
             });
+          } else if (pendingJob.batchMergeCards && pendingJob.batchId) {
+            await d().saveBatchMergedFromPoll?.(
+              { data: { status: 'completed', imageUrl: gen.data.imageUrl, extraImageUrls: gen.data.extraImageUrls } },
+              { ...d().pendingJobToPollCtx(pendingJob), jobId: gen.data.jobId },
+              pendingId
+            );
           } else {
             await d().finishImageGenRun({
               prompt,
@@ -283,6 +304,7 @@
               jobId: gen.data.jobId,
               targetGroup: pendingJob.targetGroup,
               targetTags: pendingJob.targetTags,
+              cardTitle: pendingJob.cardTitle,
               silentToast: batchOpts.silentToast,
               fromInspirationDraw: !!batchOpts.fromInspirationDraw,
               pendingId

@@ -923,6 +923,15 @@
     }, { timeoutMs: Math.max(API_TIMEOUT_MS, 120000), lightPrepare: true });
   }
 
+  async function postWarehouseThumbs(jobs) {
+    const list = Array.isArray(jobs) ? jobs.filter((j) => j && j.jobId).slice(0, 32) : [];
+    if (!list.length) return { ok: true, data: { thumbs: {} } };
+    return requestWithPrepare('POST', '/api/v1/media/warehouse-thumbs', { jobs: list }, {
+      timeoutMs: Math.max(API_TIMEOUT_MS, 90000),
+      lightPrepare: true
+    });
+  }
+
   /** 卡片图上传 → Worker → R2（避免浏览器直连 Supabase/阿里云 Storage 流量费） */
   function uploadStorageBlob(path, blob, opts = {}) {
     return new Promise((resolve, reject) => {
@@ -1032,6 +1041,7 @@
     listRecentGenerationJobs,
     listGenerationJobsHistory,
     recoverWarehouseFromJobs,
+    postWarehouseThumbs,
     getLedger,
     checkLikeMilestone,
     uploadStorageBlob,

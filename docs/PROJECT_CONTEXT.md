@@ -24,41 +24,35 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · 手机生图/卡片库加载修复）
+## 当前部署阶段（2026-06-07 · warehouse-thumbs 统一缩略图）
 
 | 项 | 状态 |
 |----|------|
-| **Git** | `main` · `56da86b`（手机 feed/卡片加载修复）已 push |
-| **Pages** | build **`20260627a`** · https://prompt-hubs.com · 部署后强刷 |
-| **Worker** | `prompt-hub-api` · `071b133` · https://api.prompt-hubs.com |
+| **Git** | `main` · 已提交待 push |
+| **Pages** | build **`20260628c`** · `warehouse-thumb.js` + `MediaPipeline.resolveCardListThumb` · **Ctrl+Shift+R** 强刷 |
+| **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com · Version `64e24d2a` |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
 ### 已打通
 
-- ✅ **Apimart MJ**（relax/fast/turbo · 单卡最多 5 张 · 参数双下拉 UI）
-- ✅ **生图仓库 MJ 封面**：优先第一张可解析单图，不再硬绑四宫格 grid
-- ✅ **多图下载**：灯箱/编辑面板按 gallery 索引 blob 直存
-- ✅ **MJ 跨端同步**：入库 urgent push + 登录/切前台 recover
-- ✅ **分组删除 tombstone** · 编辑面板图片工具一行三按钮
-- ✅ 控制台修复：`window.repairMjWarehousePreviewsQuiet()`
-- ✅ **生图 feed 效率 P0**：`getWarehouseCardsForImageGen` 单帧缓存；`preserveScroll` 统一
-- ✅ **P1**：render 100ms 合并；单卡删/封面 DOM patch；社区 sig 轻量化
-- ✅ **P2**：预览 MJ idle 补全；Masonry 延后绑图
-- ✅ **手机修复**：卡片库 mobile 首屏 eager 签图；生图完成 `force` 刷新；恢复后 invalidate 封面缓存；切回前台重载图片
+- ✅ **`POST /api/v1/media/warehouse-thumbs`**：服务端归档原图 → 生成 `_grid` → 只返回 CDN 缩略图 URL
+- ✅ **全站列表唯一入口**：`WarehouseThumb` / `MediaPipeline.resolveCardListThumb(card)`（卡片库、生图 feed、编辑预览共用）
+- ✅ **禁止客户端批量拉原图**：`persistGenerationImage` / 后台 repair 不再 `fetchMediaAsBlobUrl` 扫库（避免 800MB+ 流量）
+- ✅ **MJ 多 slot**：Worker 按 `meta.mjGalleryUrls[slot]` 归档；`resolveGenJobIdFromCard` 识别 tags 里的 UUID jobId
+- ✅ Worker CDN：`_grid.jpg` magic byte 校验；坏文件删 R2 后重建
 
 ### 已知问题 / 下一步
 
-1. **`.\deploy-pages.ps1`** 后 **Ctrl+Shift+R**（build `20260627a`）
-2. 极慢网下 MJ 翻页仍有 loading
-3. 上游 MJ 链接过期则无法自动补四宫格
-4. **P3**：feed 虚拟滚动；`repairGeneratedCardImagesQuiet` idle；`card-gallery.js?v=` 纳入 bump-build
-5. MemFire 迁移（7 月初 final dump）
+1. 强刷后 `window.__APP_BUILD__` 应为 **`20260628c`**
+2. **仍裂图/文字卡**：多为上游临时链已过期 → 登录后 `recover-warehouse` + warehouse-thumbs 批量修复；Console 可跑 `WarehouseThumb.resolveForCardModel(card)`
+3. Network 列表区应见 `warehouse-thumbs` + `/api/v1/media/i/..._grid.jpg`（<300KB），不应大量 `media/fetch?url=getapib`
+4. MemFire 迁移（7 月初 final dump）
 
 ### 部署
 
 ```powershell
 cd d:\prompt-hub\server
-.\deploy.ps1
+npx wrangler deploy
 cd ..
 .\deploy-pages.ps1
 ```

@@ -844,7 +844,8 @@ generateRoutes.post('/recover-warehouse', async c => {
       max: body.max,
       days: body.days,
       hours: body.hours,
-      providerScope: body.providerScope
+      providerScope: body.providerScope,
+      env: c.env
     };
     const upstream = upstreamBindingsFromEnv(c.env);
 
