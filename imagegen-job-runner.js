@@ -112,7 +112,7 @@
   function afterGenJobsResume(changed) {
     if (!changed) return;
     if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-      d().renderImageGenFeed({ preserveScroll: true });
+      d().renderImageGenFeed({ preserveScroll: true, force: true });
       d().renderImageGenMobileResult();
     } else {
       window.refreshWarehouseUI?.();
@@ -125,8 +125,8 @@
     clearTimeout(scheduleImageGenPendingUiRefresh._t);
     scheduleImageGenPendingUiRefresh._t = setTimeout(() => {
       if (window.ImageGenFeed?.patchImageGenFeedPendingOnly?.()) return;
-      d().renderImageGenFeed({ preserveScroll: true });
-    }, 900);
+      d().renderImageGenFeed({ preserveScroll: true, force: true });
+    }, 480);
   }
 
   function persistPendingGenJobs() {
@@ -432,7 +432,7 @@
     window.addEventListener('pageshow', () => {
       loadPendingGenJobs();
       if (pendingList().length > 0) {
-        d().renderImageGenFeed({ preserveScroll: true });
+        d().renderImageGenFeed({ preserveScroll: true, force: true });
         d().renderImageGenMobileResult();
       }
       scheduleGenJobsSync(200);
@@ -589,7 +589,7 @@
       const msg = ge('friendlyGenErrorMessage', errRaw);
       failPendingJob(pendingId, msg);
       await window.PointsSystem?.refreshCreditsFromServer?.();
-      d().renderImageGenFeed({ preserveScroll: true });
+      d().renderImageGenFeed({ preserveScroll: true, force: true });
       toastGenFailure(ctx, msg);
       return true;
     };
@@ -678,7 +678,7 @@
 
     d().toast('生图时间较长，正在恢复本次任务…');
     void resumePendingGenerationJobs();
-    d().renderImageGenFeed({ preserveScroll: true });
+    d().renderImageGenFeed({ preserveScroll: true, force: true });
     } finally {
       activePollJobIds.delete(jobId);
     }
@@ -838,7 +838,7 @@
       );
     }
 
-    if (changed) d().renderImageGenFeed({ preserveScroll: true });
+    if (changed) d().renderImageGenFeed({ preserveScroll: true, force: true });
   }
 
   /** —— 任务恢复 / resume（自 features-draft 拆出）—— */
@@ -1137,7 +1137,7 @@
     if (hasWarehouseCardForJob(jobId)) {
       removePendingJob(pending.id);
       clearSessionGenJob(jobId);
-      d().renderImageGenFeed({ preserveScroll: true });
+      d().renderImageGenFeed({ preserveScroll: true, force: true });
       return true;
     }
     try {
@@ -1181,7 +1181,7 @@
       if (existingCard && hasWarehouseCardForJob(apiJob.id)) {
         if (warehouseCardImageNeedsRecovery(existingCard, apiJob.imageUrl)) {
           await d().repairWarehouseCardImageFromJob(existingCard, apiJob.imageUrl, apiJob.id);
-          d().renderImageGenFeed({ preserveScroll: true });
+          d().renderImageGenFeed({ preserveScroll: true, force: true });
         }
         removePendingJob(pending.id);
         clearSessionGenJob(apiJob.id);

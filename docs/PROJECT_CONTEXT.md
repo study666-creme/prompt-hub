@@ -24,12 +24,12 @@
 
 ---
 
-## 当前部署阶段（2026-06-07 · 生图页 P0–P2 效率优化）
+## 当前部署阶段（2026-06-07 · 手机生图/卡片库加载修复）
 
 | 项 | 状态 |
 |----|------|
-| **Git** | `main` · `b17879b`+（P0–P2 代码已 push；build 文档见下条 commit） |
-| **Pages** | build **`20260626b`**（本地）· https://prompt-hubs.com · 部署后强刷 |
+| **Git** | `main` · 待 push（手机 feed 即时刷新 + 卡片 eager 加载） |
+| **Pages** | build **`20260627a`** · https://prompt-hubs.com · 部署后强刷 |
 | **Worker** | `prompt-hub-api` · `071b133` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
 
@@ -43,14 +43,15 @@
 - ✅ 控制台修复：`window.repairMjWarehousePreviewsQuiet()`
 - ✅ **生图 feed 效率 P0**：`getWarehouseCardsForImageGen` 单帧缓存；`preserveScroll` 统一
 - ✅ **P1**：render 100ms 合并；单卡删/封面 DOM patch；社区 sig 轻量化
-- ✅ **P2**：预览 MJ `requestIdleCallback` 补全；Masonry 延后到绑图后
+- ✅ **P2**：预览 MJ idle 补全；Masonry 延后绑图
+- ✅ **手机修复**：卡片库 mobile 首屏 eager 签图；生图完成 `force` 刷新；恢复后 invalidate 封面缓存；切回前台重载图片
 
 ### 已知问题 / 下一步
 
-1. 线上需 **`.\deploy-pages.ps1`** 后 **Ctrl+Shift+R**（build `20260626b`）
-2. 极慢网下 MJ 翻页仍有 loading（已有预取/缓存）
+1. **`.\deploy-pages.ps1`** 后 **Ctrl+Shift+R**（build `20260627a`）
+2. 极慢网下 MJ 翻页仍有 loading
 3. 上游 MJ 链接过期则无法自动补四宫格
-4. **P3 可选**：feed 虚拟滚动/回收；`repairGeneratedCardImagesQuiet` 改 idle+可见区；桌面 feed 试 CSS grid 替 Masonry；`card-gallery.js?v=` 与 `__APP_BUILD__` 对齐
+4. **P3**：feed 虚拟滚动；`repairGeneratedCardImagesQuiet` idle；`card-gallery.js?v=` 纳入 bump-build
 5. MemFire 迁移（7 月初 final dump）
 
 ### 部署

@@ -174,6 +174,7 @@
     }
     card.image = stored || imageUrl;
     card.updatedAt = Date.now();
+    global.invalidateWarehouseCardsForImageGenCache?.();
     await d().persistPromptHubCards();
     return true;
   }

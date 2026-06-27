@@ -622,7 +622,14 @@
         return;
       }
       if (isOwnWarehouseListImg(img)) {
-        window.finalizeWarehouseCardMediaFailure?.(feedMediaFromImg(img), img);
+        window.SupabaseSync?.clearPathMissingForCard?.(cardId, ref);
+        void resolveUrl(ref, cardId, { bypassSignBudget: true }, img).then((url) => {
+          if (url) {
+            applyUrlToImg(img, url);
+            return;
+          }
+          window.finalizeWarehouseCardMediaFailure?.(feedMediaFromImg(img), img);
+        });
         return;
       }
       void tryMissingPathFallback(img, cardId);
@@ -827,6 +834,25 @@
           loadImg(img);
         }
       });
+    } else if (lazyOnly && container.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.()) {
+      let eager = 0;
+      sortImgsByViewport(imgs).forEach((img) => {
+        if (isImgVisuallyLoaded(img)) return;
+        if (eager >= 16) return;
+        const cur = img.currentSrc || img.src || '';
+        if (isReadySrc(cur, img)) return;
+        const ref = img.getAttribute('data-image-ref');
+        const cardId = cardIdFromImg(img);
+        const hit = cachedUrl(ref, cardId, img);
+        if (hit) {
+          applyUrlToImg(img, hit);
+          return;
+        }
+        if (isImgNearViewport(img, 960)) {
+          eager += 1;
+          loadImg(img);
+        }
+      });
     } else if (!lazyOnly && (container.id === 'cardsContainer' || isCommunityContainer(container))) {
       let eager = 0;
       const mobileWh = container.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.();
@@ -860,7 +886,9 @@
       const rootMargin = lazyOnly
         ? (container.id === 'imageGenFeed'
           ? '320px 0px'
-          : container.id === 'cardsContainer' ? '320px 0px' : '140px 0px')
+          : container.id === 'cardsContainer'
+            ? (window.MobileUI?.isMobileViewport?.() ? '520px 0px' : '320px 0px')
+            : '140px 0px')
         : isCommunityContainer(container)
           ? '360px 0px'
           : (container.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.()
@@ -964,8 +992,19 @@
   }
 
   function syncVisibilityPause() {
-    if (document.hidden) disconnect();
-    else if (observedRoot) observeContainer(observedRoot);
+    if (document.hidden) {
+      disconnect();
+      return;
+    }
+    if (observedRoot) observeContainer(observedRoot);
+    const wh = document.getElementById('cardsContainer');
+    const ig = document.getElementById('imageGenFeed');
+    if (wh && document.getElementById('pageWarehouse')?.classList.contains('active')) {
+      boostWarehouseImages(wh, window.MobileUI?.isMobileViewport?.() ? 16 : 10);
+    }
+    if (ig && document.getElementById('pageImageGen')?.classList.contains('active')) {
+      boostImageGenWarehouseImages(ig, 12);
+    }
   }
 
   function boostCommunityFeedImages(container, max = 24) {

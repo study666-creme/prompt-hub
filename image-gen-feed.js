@@ -960,6 +960,8 @@
             }
             if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
             delete wrap.__phIgPendingScrollState;
+            window.invalidateWarehouseCardsForImageGenCache?.();
+            window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 8);
           })();
           return;
         }
@@ -1109,6 +1111,9 @@
           enforceMobileImageGenFeed();
           d().setFeedLayoutPending?.(wrap, false);
           if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
+          if (d().getImageGenFeedTab?.() === 'warehouse') {
+            window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 18);
+          }
         }
         if (!didPrimeWarehouse) {
           window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 12 });

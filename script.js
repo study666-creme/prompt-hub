@@ -5718,7 +5718,7 @@
       const patchMax = mobile ? 20 : Math.min(24, pageCards?.length || 24);
       window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: patchMax });
       window.CardImageLoader?.observeContainer?.(container);
-      window.CardImageLoader?.boostWarehouseImages?.(container, mobile ? 6 : 8);
+      window.CardImageLoader?.boostWarehouseImages?.(container, mobile ? 14 : 8);
       if (!mobile && !container.classList.contains('masonry-ready')) {
         scheduleWarehouseMasonryLayout();
       }

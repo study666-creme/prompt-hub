@@ -3027,7 +3027,9 @@
 
   function renderImageGenFeed(opts) {
     const o = opts && typeof opts === 'object' ? opts : {};
-    const coalesce = !!o.preserveScroll && !o.scrollToTop && !o.feedAppend && !o.force;
+    const mobileIg = !!document.getElementById('pageImageGen')?.classList.contains('active')
+      && window.MobileUI?.isMobileViewport?.();
+    const coalesce = !!o.preserveScroll && !o.scrollToTop && !o.feedAppend && !o.force && !mobileIg;
     if (!coalesce) {
       clearTimeout(imageGenFeedRenderCoalesceTimer);
       imageGenFeedRenderCoalesceTimer = null;
