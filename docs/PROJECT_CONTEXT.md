@@ -28,7 +28,7 @@
 
 | 项 | 状态 |
 |----|------|
-| **Git** | `main` · 待 push（手机 feed 即时刷新 + 卡片 eager 加载） |
+| **Git** | `main` · `56da86b`（手机 feed/卡片加载修复）已 push |
 | **Pages** | build **`20260627a`** · https://prompt-hubs.com · 部署后强刷 |
 | **Worker** | `prompt-hub-api` · `071b133` · https://api.prompt-hubs.com |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
