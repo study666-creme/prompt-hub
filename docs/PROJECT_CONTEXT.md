@@ -28,7 +28,7 @@
 
 | 项 | 状态 |
 |----|------|
-| **Git** | `main` · 已提交待 push |
+| **Git** | `main` · `46fcf29` · 已 push |
 | **Pages** | build **`20260628c`** · `warehouse-thumb.js` + `MediaPipeline.resolveCardListThumb` · **Ctrl+Shift+R** 强刷 |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com · Version `64e24d2a` |
 | **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
