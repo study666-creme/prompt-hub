@@ -849,7 +849,7 @@
           }
           existing.cardImages = merged;
           CG.syncCardGalleryFields(existing);
-          existing.updatedAt = Date.now();
+          if (!payload.isRecovery) existing.updatedAt = Date.now();
           await saveAllData({ skipCloud: true });
           renderGroups();
           renderCards(true);
@@ -876,7 +876,7 @@
               }
             }
             existing.image = stored;
-            existing.updatedAt = Date.now();
+            if (!payload.isRecovery) existing.updatedAt = Date.now();
             await saveAllData({ skipCloud: true });
             renderGroups();
             renderCards(true);
@@ -887,7 +887,7 @@
         }
         if (existing && primaryImage && !existing.image) {
           existing.image = primaryImage;
-          existing.updatedAt = Date.now();
+          if (!payload.isRecovery) existing.updatedAt = Date.now();
           await saveAllData({ skipCloud: true });
           renderGroups();
           renderCards(true);
@@ -2334,8 +2334,14 @@
             const list = allFilteredCards.length
               ? allFilteredCards.slice(start, start + PER_PAGE)
               : warehouseVisibleCards(cards).slice(start, start + PER_PAGE);
-            softHydrateWarehouseContainer(container, list);
-            warmWarehouseFirstPageQuietly(list);
+            if (warehousePageDomNeedsFullRender(container, list)) {
+              delete container.dataset.whSig;
+              renderCards(true);
+            } else {
+              softHydrateWarehouseContainer(container, list);
+              void hydrateWarehouseGridImages(container, list, { skipPrefetch: true });
+              warmWarehouseFirstPageQuietly(list);
+            }
           }
           if (isMobileViewport()) enforceMobileCardGrid();
           else scheduleWarehouseMasonryLayout();
@@ -2986,12 +2992,13 @@
       media.classList.remove('is-loading', 'card-media--await', 'media-shine-reveal');
       media.classList.add('card-media--load-failed');
       const card = media.closest('#cardsContainer .card[data-id]');
-      if (card && opts.collapseToText !== false) {
+      const cardModel = card?.dataset?.id ? cards.find((c) => c.id === card.dataset.id) : null;
+      const deferTextCollapse = !!(cardModel?.genJobId && warehouseCardShouldRenderMediaSlot(cardModel));
+      if (card && opts.collapseToText !== false && !deferTextCollapse) {
         card.classList.remove('card--visual');
         card.classList.add('card--text-only');
         media.remove();
         const desc = card.querySelector('.card-desc');
-        const cardModel = card.dataset?.id ? cards.find((c) => c.id === card.dataset.id) : null;
         if (desc && cardModel) {
           desc.textContent = getCardDisplayDesc(cardModel, { textOnly: true });
         }
@@ -7089,12 +7096,26 @@
       });
     }
 
+    function warehousePageDomNeedsFullRender(container, pageCards) {
+      if (!container || !pageCards?.length) return false;
+      const domCards = container.querySelectorAll('.card[data-id]');
+      if (!domCards.length) return false;
+      let broken = 0;
+      domCards.forEach((el) => {
+        const card = cards.find((c) => c.id === el.dataset.id);
+        if (!card || !warehouseCardShouldRenderMediaSlot(card)) return;
+        if (el.classList.contains('card--text-only') || !el.querySelector('.card-img')) broken += 1;
+      });
+      return broken > 0;
+    }
+
     function softHydrateWarehouseContainer(container, pageCards, opts = {}) {
       if (!container) return;
       const mobile = isMobileViewport();
       const cap = mobile ? 24 : 12;
       const list = Array.isArray(pageCards) ? pageCards : [];
       window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: cap });
+      void boostWarehouseListThumbs(container, list, cap);
       window.CardImageLoader?.observeContainer?.(container);
       window.CardImageLoader?.boostWarehouseImages?.(container, cap);
       if (!opts.skipBackgroundPrefetch && list.length && window.MediaPipeline?.prefetchList) {
@@ -7171,6 +7192,7 @@
         filters: [...activeFilters]
       });
 
+      const pageOneCards = allFilteredCards.slice(0, PER_PAGE);
       if (
         reset
         && page === 1
@@ -7178,10 +7200,15 @@
         && container.querySelector('.card[data-id]')
         && document.getElementById('pageWarehouse')?.classList.contains('active')
       ) {
-        softHydrateWarehouseContainer(container, allFilteredCards.slice(0, PER_PAGE), { skipBackgroundPrefetch: true });
-        if (mobileGrid) window.MobileUI?.boostActivePageImages?.();
-        updateBatchCountLabel();
-        return;
+        if (warehousePageDomNeedsFullRender(container, pageOneCards)) {
+          delete container.dataset.whSig;
+        } else {
+          softHydrateWarehouseContainer(container, pageOneCards, { skipBackgroundPrefetch: true });
+          void hydrateWarehouseGridImages(container, pageOneCards, { skipPrefetch: true });
+          if (mobileGrid) window.MobileUI?.boostActivePageImages?.();
+          updateBatchCountLabel();
+          return;
+        }
       }
 
       const preservedWarehouseImgs = reset && mobileGrid && page === 1
@@ -7272,7 +7299,15 @@
         const showImage = listThumb.show || !!(meta?.hasImage);
         if (showImage) div.classList.add('card--visual');
         else div.classList.add('card--text-only');
-        const coverImage = listThumb.coverImage || coverMeta?.ref || card.image || '';
+        let coverImage = listThumb.coverImage || coverMeta?.ref || card.image || '';
+        if (showImage && !coverImage && card.genJobId && window.PromptHubCardGallery?.ensureFeedCoverFromGallery) {
+          window.PromptHubCardGallery.ensureFeedCoverFromGallery(card, { persist: false, backfill: false });
+          coverImage = card.image
+            || window.PromptHubCardGallery.getCardFeedCoverImage?.(card)
+            || listThumb.coverImage
+            || coverMeta?.ref
+            || '';
+        }
         const coverJobId = listThumb.coverJobId
           || coverMeta?.slotJobId
           || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');

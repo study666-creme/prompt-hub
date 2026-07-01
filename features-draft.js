@@ -4379,9 +4379,14 @@
 
   function applyCommunitySort(mode) {
     const next = mode || 'random';
-    if (next === 'random' && communitySort !== 'random') communityRandomSig = '';
-    if (next === 'random' && communitySort === 'random') communityRandomSig = '';
-    if (next !== communitySort) {
+    if (next === 'random') {
+      communityRandomOrder = new Map();
+      communityRandomSig = '';
+      delete feedPagedStore.communityGrid;
+      delete feedPagedStore.creationsGrid;
+      const grid = document.getElementById('communityGrid');
+      if (grid) delete grid.dataset.feedSig;
+    } else if (next !== communitySort) {
       delete feedPagedStore.communityGrid;
       delete feedPagedStore.creationsGrid;
       const grid = document.getElementById('communityGrid');

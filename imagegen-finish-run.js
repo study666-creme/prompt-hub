@@ -167,7 +167,8 @@
         cardImages: isMidjourney && Array.isArray(cardImages) && cardImages.length ? cardImages : null,
         genBatchId: genBatchId && idx === 1 ? genBatchId : null,
         genBatchJobIds: genBatchId && slotJobId ? [slotJobId] : null,
-        deferCloudPush: !!isMidjourney
+        deferCloudPush: !!isMidjourney,
+        isRecovery: !!isRecovery
       });
       if (pendingId && idx === 1) d().removePendingJob(pendingId);
       d().prunePendingJobsWithWarehouseCards();
