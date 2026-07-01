@@ -4,22 +4,21 @@
 
 ---
 
-## 当前部署阶段（2026-07-02 · 卡片库 hotfix）
+## 当前部署阶段（2026-07-02 · 卡片库交互 + 加载修复）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | https://prompt-hubs.com · **`20260701e`** |
+| **Pages** | https://prompt-hubs.com · **`20260701h`** |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通
 
-- ✅ 卡片库 text-only 修复：whSig 短路检测 + hydrate 补图 + 生图卡不降级文字
-- ✅ 社区「随机」每次点击重洗顺序
-- ✅ 自动恢复合并时不 bump updatedAt（减少「刚刚」刷屏）
+- ✅ 画布 API：`GET /extension/cards` 含纯提示词卡（`hasImage: false`）；Worker 已部署
+- ✅ 画布前端：纯文字卡插入为「提示词节点」（需 Vercel 重部署 infinite-canvas-jay）
 
 ### 已知限制
 
-- 生图卡仍多一跳 Worker `warehouse-thumbs`
+- 尚无 storage 的生图卡仍走 `warehouse-thumbs` Worker
 
 ### 部署
 

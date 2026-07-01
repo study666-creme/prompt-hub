@@ -1437,11 +1437,14 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         };
         card.querySelector('.imagegen-feed-thumb-btn')?.addEventListener('click', (e) => {
           e.stopPropagation();
-          if (window.MobileUI?.isMobile?.()) {
-            void d().openImageGenLightboxAt?.(feedKind, feedItemId, feedId);
-          } else {
-            openFeedPreview();
-          }
+          void d().openImageGenLightboxAt?.(feedKind, feedItemId, feedId);
+        });
+        card.querySelector('.imagegen-feed-media')?.addEventListener('click', (e) => {
+          if (e.target.closest('.imagegen-feed-thumb-btn')) return;
+          if (e.target.closest('.imagegen-feed-save-btn')) return;
+          if (e.target.closest('[data-feed-download]')) return;
+          e.stopPropagation();
+          void d().openImageGenLightboxAt?.(feedKind, feedItemId, feedId);
         });
         const feedDragImg = card.querySelector('.imagegen-feed-media img[data-image-ref]');
         if (feedDragImg && !window.MobileUI?.isMobile?.()) {
@@ -1494,14 +1497,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           if (e.target.closest('[data-delete-feed]')) return;
           if (e.target.closest('[data-feed-download]')) return;
           if (e.target.closest('.imagegen-feed-mobile-actions')) return;
-          if (e.target.closest('.imagegen-feed-media')) {
-            if (window.MobileUI?.isMobile?.()) {
-              void d().openImageGenLightboxAt?.(feedKind, feedItemId, feedId);
-            } else {
-              openFeedPreview();
-            }
-            return;
-          }
+          if (e.target.closest('.imagegen-feed-media')) return;
           if (window.MobileUI?.isMobile?.()) return;
           openFeedPreview();
         });

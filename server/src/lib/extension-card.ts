@@ -82,6 +82,136 @@ export function collectUserTags(payload: UserDataPayload): string[] {
   return [...set].sort((a, b) => a.localeCompare(b, 'zh-CN'));
 }
 
+export type ExtensionCardListItem = {
+  id: string;
+  title: string;
+  prompt: string;
+  /** storage ref；纯文字卡为空字符串 */
+  imageRef: string;
+  hasImage: boolean;
+  tags: string[];
+  group: string | null;
+  genJobId: string | null;
+  isMidjourney: boolean;
+  updatedAt: number;
+};
+
+const GEN_JOB_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function resolveGenJobIdFromCard(card: Record<string, unknown>): string | null {
+  if (card.genJobId) return String(card.genJobId).replace(/#\d+$/, '');
+  if (card.feedCoverJobId) return String(card.feedCoverJobId).replace(/#\d+$/, '');
+  const tags = Array.isArray(card.tags) ? card.tags : [];
+  for (const raw of tags) {
+    const s = String(raw || '').trim();
+    if (GEN_JOB_UUID_RE.test(s)) return s;
+  }
+  return null;
+}
+
+function isUsableListRef(ref: unknown): ref is string {
+  if (!ref || typeof ref !== 'string') return false;
+  const s = ref.trim();
+  if (!s || s.startsWith('data:')) return false;
+  return true;
+}
+
+/** 与前端 pickWarehouseListThumb 对齐：MJ 优先四宫格合成图 */
+function cardListImageRef(card: Record<string, unknown>): string | null {
+  const isMj = card.isMidjourney === true
+    || !!(card.mjCompositeUrl && String(card.mjCompositeUrl).trim());
+  const gallery = Array.isArray(card.cardImages)
+    ? card.cardImages.filter((u) => isUsableListRef(u)) as string[]
+    : [];
+  const comp = card.mjCompositeUrl && String(card.mjCompositeUrl).trim();
+  if (isMj) {
+    if (isUsableListRef(comp)) return comp;
+    if (gallery.length) return gallery[0];
+  }
+  if (gallery.length) {
+    for (const u of gallery) {
+      if (isUsableListRef(u) && (u.startsWith('storage:') || !/^https?:\/\//i.test(u))) return u;
+    }
+    if (isUsableListRef(gallery[0])) return gallery[0];
+  }
+  const image = card.image;
+  if (!isUsableListRef(image)) return null;
+  return image.trim();
+}
+
+export function collectUserGroups(payload: UserDataPayload): string[] {
+  const set = new Set<string>();
+  for (const g of payload.customGroups || []) {
+    const name = String(g || '').trim();
+    if (name) set.add(name);
+  }
+  for (const c of payload.cards || []) {
+    const g = String((c as { group?: string }).group || '').trim();
+    if (g) set.add(g);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+}
+
+export async function listUserCardsForExtension(
+  admin: SupabaseClient,
+  userId: string,
+  opts: { page?: number; limit?: number; q?: string; group?: string; tag?: string } = {}
+): Promise<{ cards: ExtensionCardListItem[]; total: number; page: number; limit: number }> {
+  const { data: row, error } = await admin
+    .from('user_data')
+    .select('data')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  const payload = (row?.data || {}) as UserDataPayload;
+  const q = String(opts.q || '').trim().toLowerCase();
+  const groupFilter = String(opts.group || '').trim();
+  const tagFilter = normalizeTag(String(opts.tag || '').trim());
+  const filtered = (payload.cards || [])
+    .map((raw) => {
+      const c = raw as Record<string, unknown>;
+      if (!c.id) return null;
+      const imageRef = cardListImageRef(c) || '';
+      const title = String(c.title || '').trim();
+      const prompt = String(c.prompt || title || '').trim();
+      if (!imageRef && !prompt) return null;
+      const group = String(c.group || '').trim() || null;
+      const tags = Array.isArray(c.tags) ? c.tags.map((t) => String(t)) : [];
+      if (q) {
+        const hay = `${title}\n${prompt}\n${tags.join(' ')}`.toLowerCase();
+        if (!hay.includes(q)) return null;
+      }
+      if (groupFilter) {
+        if (groupFilter === 'uncategorized') {
+          if (group) return null;
+        } else if (group !== groupFilter) return null;
+      }
+      if (tagFilter) {
+        const normTags = tags.map((t) => normalizeTag(t));
+        if (!normTags.includes(tagFilter)) return null;
+      }
+      return {
+        id: String(c.id),
+        title,
+        prompt,
+        imageRef,
+        hasImage: !!imageRef,
+        tags,
+        group,
+        genJobId: resolveGenJobIdFromCard(c),
+        isMidjourney: c.isMidjourney === true || !!(c.mjCompositeUrl && String(c.mjCompositeUrl).trim()),
+        updatedAt: Number(c.updatedAt) || Number(c.createdAt) || 0
+      } satisfies ExtensionCardListItem;
+    })
+    .filter((c): c is ExtensionCardListItem => !!c);
+  filtered.sort((a, b) => b.updatedAt - a.updatedAt);
+  const page = Math.max(1, Number(opts.page) || 1);
+  const limit = Math.min(48, Math.max(1, Number(opts.limit) || 24));
+  const total = filtered.length;
+  const cards = filtered.slice((page - 1) * limit, page * limit);
+  return { cards, total, page, limit };
+}
+
 export async function listUserTags(
   admin: SupabaseClient,
   userId: string

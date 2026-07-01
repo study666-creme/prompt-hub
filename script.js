@@ -1583,7 +1583,7 @@
         columnWidth: '.grid-sizer',
         gutter: gap,
         percentPosition: false,
-        horizontalOrder: false,
+        horizontalOrder: true,
         transitionDuration: 0
       };
       container.style.removeProperty('height');
@@ -2348,7 +2348,6 @@
               renderCards(true);
             } else {
               softHydrateWarehouseContainer(container, list);
-              void hydrateWarehouseGridImages(container, list, { skipPrefetch: true });
             }
           }
           if (isMobileViewport()) enforceMobileCardGrid();
@@ -3000,8 +2999,24 @@
       media.classList.remove('is-loading', 'card-media--await', 'media-shine-reveal');
       media.classList.add('card-media--load-failed');
       const card = media.closest('#cardsContainer .card[data-id]');
+      const inWarehouseList = !!(card && !card.closest('.card[data-community-collect="1"]'));
       const cardModel = card?.dataset?.id ? cards.find((c) => c.id === card.dataset.id) : null;
       const deferTextCollapse = !!(cardModel?.genJobId && warehouseCardShouldRenderMediaSlot(cardModel));
+      if (inWarehouseList) {
+        clearMediaShineWatchdog(media);
+        if (media.__whBackfillFailTimer) {
+          clearTimeout(media.__whBackfillFailTimer);
+          media.__whBackfillFailTimer = null;
+        }
+        media.classList.remove('is-loading', 'card-media--await', 'media-shine-reveal');
+        media.classList.add('card-media--load-failed');
+        if (img) {
+          img.style.visibility = 'hidden';
+          img.style.opacity = '0';
+        }
+        scheduleWarehouseMasonryForCard(card?.dataset?.id);
+        return;
+      }
       if (card && opts.collapseToText !== false && !deferTextCollapse) {
         card.classList.remove('card--visual');
         card.classList.add('card--text-only');
@@ -3604,8 +3619,16 @@
       }
     }
 
-    function cardImgInitialSrc(image) {
+    function cardImgInitialSrc(image, cardId) {
       const placeholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="%2318181c" width="4" height="3"/></svg>');
+      if (image && cardId && window.SupabaseSync?.getListDisplayImageSrc) {
+        const cached = window.SupabaseSync.getListDisplayImageSrc(image, cardId, { allowFullFallback: false });
+        if (cached && cached.startsWith('http') && !cached.includes('data:image/svg')
+          && !window.SupabaseSync?.isInvalidMediaUrl?.(cached)
+          && window.SupabaseSync?.isGridDisplayUrl?.(cached)) {
+          return cached;
+        }
+      }
       if (!image || !cardHasDisplayImage({ image })) return placeholder;
       if (typeof image === 'string' && image.startsWith('data:image/')) return image;
       if (typeof image === 'string' && /^https?:\/\//i.test(image) && !window.SupabaseSync?.isInvalidMediaUrl?.(image)) {
@@ -5872,16 +5895,10 @@
     function hydrateWarehouseGridImages(container, pageCards, opts = {}) {
       if (!container) return;
       const mobile = isMobileViewport();
-      const patchMax = mobile ? 24 : Math.min(12, pageCards?.length || 12);
+      const patchMax = mobile ? Math.min(8, pageCards?.length || 8) : Math.min(12, pageCards?.length || 12);
       window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: patchMax });
-      if (!opts.skipBoostList) {
-        void boostWarehouseListThumbs(container, pageCards, patchMax);
-      }
       window.CardImageLoader?.observeContainer?.(container);
-      window.CardImageLoader?.boostWarehouseImages?.(container, mobile ? 24 : 6);
-      if (!opts.skipPrefetch && pageCards?.length && window.WarehouseThumb?.prefetchForCards) {
-        void window.WarehouseThumb.prefetchForCards(pageCards, { max: mobile ? 24 : 12 });
-      }
+      window.CardImageLoader?.boostWarehouseImages?.(container, patchMax);
       if (!mobile && !container.classList.contains('masonry-ready')) {
         scheduleWarehouseMasonryLayout();
       }
@@ -7125,10 +7142,7 @@
       const mobile = isMobileViewport();
       const cap = mobile ? 24 : 12;
       const list = Array.isArray(pageCards) ? pageCards : [];
-      window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: cap });
-      void boostWarehouseListThumbs(container, list, cap);
-      window.CardImageLoader?.observeContainer?.(container);
-      window.CardImageLoader?.boostWarehouseImages?.(container, cap);
+      hydrateWarehouseGridImages(container, list);
       if (!opts.skipBackgroundPrefetch && list.length && window.MediaPipeline?.prefetchList) {
         void window.MediaPipeline.prefetchList(
           list.slice(0, cap),
@@ -7204,23 +7218,6 @@
       });
 
       const pageOneCards = allFilteredCards.slice(0, PER_PAGE);
-      if (
-        reset
-        && page === 1
-        && container.dataset.whSig === whSig
-        && container.querySelector('.card[data-id]')
-        && document.getElementById('pageWarehouse')?.classList.contains('active')
-      ) {
-        if (warehousePageDomNeedsFullRender(container, pageOneCards)) {
-          delete container.dataset.whSig;
-        } else {
-          softHydrateWarehouseContainer(container, pageOneCards, { skipBackgroundPrefetch: true });
-          void hydrateWarehouseGridImages(container, pageOneCards, { skipPrefetch: true });
-          if (mobileGrid) window.MobileUI?.boostActivePageImages?.();
-          updateBatchCountLabel();
-          return;
-        }
-      }
 
       const preservedWarehouseImgs = reset && mobileGrid && page === 1
         ? snapshotLoadedWarehouseImages(container)
@@ -7253,24 +7250,22 @@
       const warehouseActive = document.getElementById('pageWarehouse')?.classList.contains('active');
       const prefetchCap = mobileGrid ? 24 : 12;
       const prefetchCards = pageCards.slice(0, prefetchCap);
-      if (page === 1 && prefetchCards.length && warehouseActive && window.MediaPipeline?.prefetchList) {
-        void window.MediaPipeline.prefetchList(
+      let warehousePrefetchP = null;
+      if (page === 1 && prefetchCards.length && warehouseActive && window.SupabaseSync?.prefetchWarehousePage) {
+        warehousePrefetchP = window.SupabaseSync.prefetchWarehousePage(
           prefetchCards,
-          mobileGrid ? 4000 : 2400,
+          mobileGrid ? 3200 : 2400,
           { maxCards: prefetchCap }
-        ).finally?.(() => {
-          window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: prefetchCap });
-          void boostWarehouseListThumbs(container, pageCards, mobileGrid ? 12 : 8);
-        });
+        );
       }
       const preparedRows = warehouseActive && window.PromptHubCardGallery?.prepareWarehousePageThumbs
         ? window.PromptHubCardGallery.prepareWarehousePageThumbs(pageCards, {
           ensure: page === 1 && !isAppend,
-          ensureMax: mobileGrid ? 12 : 8
+          ensureMax: prefetchCap
         })
         : pageCards.map((card) => ({ card, meta: null }));
-      if (page === 1 && warehouseActive && window.SupabaseSync?.backfillGridThumbsForCards) {
-        const backfillMax = mobileGrid ? Math.min(24, pageCards.length) : Math.min(3, pageCards.length);
+      if (page === 1 && warehouseActive && !mobileGrid && window.SupabaseSync?.backfillGridThumbsForCards) {
+        const backfillMax = Math.min(3, pageCards.length);
         const runBackfill = () => {
           void window.SupabaseSync.backfillGridThumbsForCards(pageCards, {
             max: backfillMax,
@@ -7322,7 +7317,7 @@
           || coverMeta?.slotJobId
           || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');
         const coverJobAttr = coverJobId ? ` data-job-id="${escapeHtml(coverJobId)}"` : '';
-        const imgSrc = showImage ? (listThumb.src || cardImgInitialSrc(coverImage)) : '';
+        const imgSrc = showImage ? (listThumb.src || cardImgInitialSrc(coverImage, card.id)) : '';
         const isCollectCard = window.isCommunityCollectCard?.(card);
         const collectMeta = isCollectCard ? getCommunityCollectImageResolveOpts(card) : null;
         const needsAsyncThumb = showImage && !listThumb.immediate && !listThumb.src;
@@ -7389,7 +7384,9 @@
           if (mobileGrid) {
             if (e.target.closest('.card-img') && settings.imageClickZoom && cardHasDisplayImage(card)) {
               void openCardImageLightbox(card);
+              return;
             }
+            editCard(card.id);
             return;
           }
           editCard(card.id);
@@ -7453,10 +7450,13 @@
       bindCardGridImageErrors(container);
       bindCardGridImageRelayout(container);
       if (warehouseActive) {
-        void hydrateWarehouseGridImages(container, pageCards, {
-          skipPrefetch: true,
-          skipBoostList: preservedWarehouseImgs.size > 0
-        });
+        hydrateWarehouseGridImages(container, pageCards);
+        if (warehousePrefetchP) {
+          void warehousePrefetchP.finally?.(() => {
+            window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: prefetchCap });
+            window.CardImageLoader?.boostWarehouseImages?.(container, prefetchCap);
+          });
+        }
       }
       if (!mobileGrid && viewMode !== 'list') {
         if (isAppend && masonryInstance && appendedCards.length) {

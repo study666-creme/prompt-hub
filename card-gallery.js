@@ -114,7 +114,7 @@
     }
     const hasResolvable = ref && isResolvableCoverRef(ref, card.id);
     const hasGalleryResolvable = gallery.some((u) => isResolvableCoverRef(u, card.id));
-    const hasGenJobThumb = !!(baseJob && (gallery.length || ref));
+    const hasGenJobThumb = !!baseJob;
     const hasGalleryAny = gallery.some((u) => u && String(u).trim());
     return {
       hasImage: !!(cachedUrl || hasResolvable || hasGalleryResolvable || hasGenJobThumb || (hasGalleryAny && baseJob)),

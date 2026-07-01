@@ -318,6 +318,11 @@
     }
   }
 
+  function isGridFetchFailed(path) {
+    const key = normalizePathKey(path);
+    return !!(key && gridFetchFailedPaths.has(key));
+  }
+
   function unmarkGridThumbReady(cardId) {
     if (!cardId) return;
     const id = String(cardId);
@@ -423,9 +428,31 @@
     return !!(gridHit?.url && gridHit.expiresAt > Date.now() + 120000);
   }
 
+  let gridPathCardIdCache = null;
+  let gridPathCardIdCacheLen = 0;
+
+  function rebuildGridPathCardIdCache() {
+    const map = new Map();
+    const list = window.__promptHubCards || [];
+    for (const c of list) {
+      if (!c?.id || !c?.image) continue;
+      const p = primaryImagePath(c.image, c.id);
+      const grid = p ? gridPathFromPrimary(p.replace(/^\//, '')) : null;
+      if (grid) map.set(normalizePathKey(grid), c.id);
+    }
+    gridPathCardIdCache = map;
+    gridPathCardIdCacheLen = list.length;
+  }
+
   function findCardForGridPath(gridKey) {
     const norm = normalizePathKey(gridKey);
-    return (window.__promptHubCards || []).find((c) => {
+    const list = window.__promptHubCards || [];
+    if (!gridPathCardIdCache || gridPathCardIdCacheLen !== list.length) {
+      rebuildGridPathCardIdCache();
+    }
+    const id = gridPathCardIdCache.get(norm);
+    if (id) return list.find((c) => c.id === id) || null;
+    return list.find((c) => {
       if (!c?.id || !c?.image) return false;
       const p = primaryImagePath(c.image, c.id);
       const grid = p ? gridPathFromPrimary(p.replace(/^\//, '')) : null;
@@ -915,9 +942,18 @@
     return false;
   }
 
+  function stripGridSuffixFromPath(path) {
+    let p = String(path || '').replace(/^\//, '');
+    if (!/_grid\./i.test(p)) return p;
+    if (/_grid\.webp$/i.test(p)) return p.replace(/_grid\.webp$/i, '.webp');
+    if (/_grid\.png$/i.test(p)) return p.replace(/_grid\.png$/i, '.png');
+    return p.replace(/_grid\.jpe?g$/i, '.jpg');
+  }
+
   function primaryImagePath(image, assetId) {
+    if (image != null && typeof image !== 'string') return null;
     const fromRef = storagePathFromRef(image);
-    if (fromRef) return fromRef.replace(/^\//, '').replace(/_grid\.(jpe?g|webp|png)$/i, (_, ext) => `.${ext === 'jpeg' ? 'jpg' : ext}`);
+    if (fromRef) return stripGridSuffixFromPath(fromRef);
     const canonical = cardImageStoragePath(assetId);
     return canonical ? canonical.replace(/^\//, '') : null;
   }
@@ -2777,6 +2813,11 @@
     const o = extraOpts && typeof extraOpts === 'object' ? extraOpts : {};
     const id = o.assetId || assetId;
     const jobId = resolveJobIdForAsset(o, id);
+    const primary = id ? primaryImagePath(normalizeImageRef(image), id) : null;
+    const pkey = primary ? primary.replace(/^\//, '') : '';
+    if (pkey && isPathKnownMissing(pkey)) return '';
+    const gridKey = pkey ? (gridPathFromPrimary(pkey) || '').replace(/^\//, '') : '';
+    if (gridKey && (isPathKnownMissing(gridKey) || gridFetchFailedPaths.has(gridKey))) return '';
     const grid = getCachedDisplayUrl(image, {
       assetId: id,
       authorId: o.authorId,
@@ -2821,7 +2862,17 @@
       const jobId = c.genJobId
         || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(c);
       if (jobId) {
-        genCards.push(c);
+        const gp = primaryImagePath(c.image, c.id);
+        if (gp && !isPathKnownMissing(gp) && storagePathOwnedByCurrentUser(gp)) {
+          const plan = ownedListSignTargets(gp, c.id);
+          if (plan.grid) pathSet.add(plan.grid);
+          else if (!plan.primary) {
+            const gk = (gridPathFromPrimary(gp) || '').replace(/^\//, '');
+            if (gk && !isPathKnownMissing(gk)) pathSet.add(gk);
+          }
+        } else {
+          genCards.push(c);
+        }
         continue;
       }
       if (isGridBackfillSkipped(c.id)) continue;
@@ -4620,6 +4671,7 @@
     resetMissingPathCache,
     healMissingPathCacheForCards,
     markGridFetchFailed,
+    isGridFetchFailed,
     shouldSignGridPath,
     resolveListPrimaryFallback,
     cardImageStillResolvable,

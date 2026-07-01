@@ -587,6 +587,11 @@
     contain: layout;
   }
 
+  .cards-container.mobile-grid:not(#communityGrid):not(#creationsGrid) > .card.is-pinned,
+  .cards-container:not(#communityGrid):not(#creationsGrid) > .card.is-pinned {
+    order: -1000;
+  }
+
   .cards-container.mobile-grid:not(#communityGrid):not(#creationsGrid) > .card,
   .cards-container:not(#communityGrid):not(#creationsGrid) > .card {
     flex: 0 0 calc((100% - 10px) / 2) !important;

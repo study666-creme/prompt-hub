@@ -513,6 +513,10 @@
   function applyUrlToImg(img, url) {
     if (!img || !isReadySrc(url, img)) return false;
     if (window.SupabaseSync?.isWarehouseBlockedFullUrl?.(url, img)) return false;
+    const urlPath = window.SupabaseSync?.storagePathFromDisplayUrl?.(url);
+    const urlKey = urlPath ? String(urlPath).replace(/^\//, '') : '';
+    if (urlKey && window.SupabaseSync?.isPathKnownMissing?.(urlKey)) return false;
+    if (urlKey && window.SupabaseSync?.isGridFetchFailed?.(urlKey)) return false;
     if (img.dataset.feedLoadDone === '1' && isImgVisuallyLoaded(img)) return true;
     const media = feedMediaFromImg(img);
     if (!media) return false;
@@ -688,16 +692,16 @@
 
   function loadImg(img) {
     if (window.MobileUI?.isUserInteracting?.() && !isImgNearViewport(img, 120)) return;
-    const ref = img.getAttribute('data-image-ref');
-    if (!ref) return;
+    const ref = img.getAttribute('data-image-ref') || '';
+    const cardId = cardIdFromImg(img);
+    const jobId = jobIdFromImg(img);
+    if (!ref && !jobId) return;
     const extra = isOwnImageGenWarehouseImg(img) ? {} : communityResolveOpts(img);
     if (extra.skip) {
       img.closest('.card-media, .imagegen-feed-media')?.remove();
       return;
     }
-    const cardId = cardIdFromImg(img);
-    const jobId = jobIdFromImg(img);
-    const primary = window.SupabaseSync?.primaryImagePath?.(ref, cardId);
+    const primary = ref ? window.SupabaseSync?.primaryImagePath?.(ref, cardId) : '';
     const commOther = isCommunityImg(img) && !isOwnCommunityGridImg(img) && !isOwnWarehouseListImg(img);
     if (primary && window.SupabaseSync?.isPathKnownMissing?.(primary) && !commOther) {
       if (isOwnImageGenWarehouseImg(img)) {
