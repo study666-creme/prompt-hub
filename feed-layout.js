@@ -41,8 +41,13 @@
   function applyScrollAfterLayout(scrollRoot, capturedTop) {
     if (!scrollRoot || !Number.isFinite(capturedTop)) return;
     const safe = d().safeApplyFeedScrollTop;
-    if (typeof safe === 'function') safe(scrollRoot, capturedTop);
-    else scrollRoot.scrollTop = capturedTop;
+    if (typeof safe === 'function') {
+      safe(scrollRoot, capturedTop);
+      return;
+    }
+    const cur = scrollRoot.scrollTop;
+    if (cur > capturedTop + 8) return;
+    scrollRoot.scrollTop = capturedTop;
   }
 
   function isMobile() {

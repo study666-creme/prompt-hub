@@ -4,32 +4,22 @@
 
 ---
 
-## 当前部署阶段（2026-07-02 · 卡片库对齐社区 Feed）
+## 当前部署阶段（2026-07-02 · 卡片库 hotfix）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | https://prompt-hubs.com · deploy 后见 `window.__APP_BUILD__` |
+| **Pages** | https://prompt-hubs.com · **`20260701e`** |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
-### 已打通（卡片库架构）
+### 已打通
 
-- ✅ `whSig` 跳过重复整页渲染（同社区 feedSig）
-- ✅ `softHydrateWarehouseContainer` + 切 Tab 快照保留已加载图
-- ✅ prefetch 单链路 24 张；warehouse-thumbs session 缓存
-- ✅ 生图「作品」feed 手机滚动兜底
+- ✅ 卡片库 text-only 修复：whSig 短路检测 + hydrate 补图 + 生图卡不降级文字
+- ✅ 社区「随机」每次点击重洗顺序
+- ✅ 自动恢复合并时不 bump updatedAt（减少「刚刚」刷屏）
 
 ### 已知限制
 
-- 生图卡仍多一跳 Worker `warehouse-thumbs`（数据模型差异，非 CSS）
-
-### 部署
-
-```powershell
-cd d:\prompt-hub
-node scripts/build-foundation-bundle.mjs
-node scripts/build-core-bundle.mjs
-.\deploy-pages.ps1
-```
+- 生图卡仍多一跳 Worker `warehouse-thumbs`
 
 ### 部署
 

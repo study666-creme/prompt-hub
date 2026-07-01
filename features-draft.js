@@ -307,6 +307,17 @@
     return image;
   }
 
+  function communityFeedCardImageRef(post) {
+    const fromDisplay = communityPostDisplayImageRef(post, { feedList: true });
+    if (fromDisplay) return fromDisplay;
+    const cardImg = cardImageForPost(post);
+    if (cardImg && isDisplayableImage(cardImg)) return cardImg;
+    const raw = post?.image;
+    if (!raw || !isDisplayableImage(raw)) return null;
+    if (window.SupabaseSync?.isInvalidMediaUrl?.(raw)) return null;
+    return window.SupabaseSync?.normalizeImageRef?.(raw) || raw;
+  }
+
   /** 社区展示用图：与 isFeedRenderablePost / 渲染卡片保持一致，避免「有图却显示无配图」 */
   function communityPostDisplayImageRef(post, opts = {}) {
     const feedList = !!opts.feedList;
@@ -2348,6 +2359,12 @@
     if (!containerId) return;
     const container = document.getElementById(containerId);
     if (!container) return;
+    if (window.__PH_FEED_BULK_DRAIN__ && (containerId === 'communityGrid' || containerId === 'creationsGrid')) {
+      ensureFeedPageSentinel(container);
+      reconnectFeedPageObserver(containerId);
+      setFeedLayoutPending(containerId, false);
+      return;
+    }
     if (useCommunityCssGrid(containerId) && container.dataset.feedDistributed === '1') {
       ensureFeedPageSentinel(container);
       reconnectFeedPageObserver(containerId);
@@ -2382,6 +2399,7 @@
       !isMobileViewport()
       && container.id === 'communityGrid'
       && container.classList?.contains('community-feed-columns')
+      && container.scrollHeight > container.clientHeight + 8
     ) {
       return container;
     }
@@ -3932,7 +3950,7 @@
   }
 
   function createCommunityFeedCard(post, containerId, cardOpts = {}) {
-    const displayRef = communityPostDisplayImageRef(post);
+    const displayRef = communityFeedCardImageRef(post);
     const showImage = !!(displayRef && isDisplayableImage(displayRef));
     const div = document.createElement('div');
     const visualOnly = containerId === 'communityGrid' || containerId === 'creationsGrid';
@@ -4632,7 +4650,7 @@
       return;
     }
     void renderPostsIntoContainer(list, 'communityGrid').then(() => {
-      void drainCommunityFeedPagesUntilDone('communityGrid', isMobileViewport() ? 10 : 20);
+      void drainCommunityFeedPages('communityGrid', isMobileViewport() ? 2 : 3);
     });
   }
 

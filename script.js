@@ -1476,14 +1476,23 @@
     let warehouseMasonryTimer = null;
     let warehouseMasonryPending = 0;
     const warehouseMasonryCardCooldown = new Map();
-    function scheduleWarehouseMasonryLayout() {
+    function scheduleWarehouseMasonryLayout(immediate = false) {
       if (isMobileViewport()) return;
+      if (immediate) {
+        clearTimeout(warehouseMasonryTimer);
+        warehouseMasonryPending = 0;
+        layoutMasonryGrid();
+        return;
+      }
       warehouseMasonryPending += 1;
+      const delay = document.body.classList.contains('panel-open')
+        ? 48
+        : (warehouseMasonryPending > 4 ? 520 : 380);
       clearTimeout(warehouseMasonryTimer);
       warehouseMasonryTimer = setTimeout(() => {
         warehouseMasonryPending = 0;
         layoutMasonryGrid();
-      }, warehouseMasonryPending > 4 ? 520 : 380);
+      }, delay);
     }
     function scheduleWarehouseMasonryForCard(cardId) {
       if (!cardId) {
@@ -6676,10 +6685,11 @@
         const onWarehouseResize = () => {
           if (!document.getElementById('pageWarehouse')?.classList.contains('active')) return;
           clearTimeout(masonryResizeTimer);
+          const delay = document.body.classList.contains('panel-open') ? 48 : 200;
           masonryResizeTimer = setTimeout(() => {
             if (isMobileViewport()) scheduleLayoutMasonry();
             else layoutMasonryGrid();
-          }, 200);
+          }, delay);
         };
         const masonryResizeObs = new ResizeObserver(onWarehouseResize);
         const mainArea = document.getElementById('mainContentArea');
@@ -9996,10 +10006,14 @@
         } catch (e) { /* ignore */ }
       }
       if (!isMobileViewport()) {
+        const container = document.getElementById('cardsContainer');
+        primeDesktopCardGrid(container);
+        scheduleWarehouseMasonryLayout(true);
         requestAnimationFrame(() => {
-          scheduleLayoutMasonry();
-          setTimeout(scheduleLayoutMasonry, 360);
+          layoutMasonryGrid();
+          requestAnimationFrame(layoutMasonryGrid);
         });
+        setTimeout(() => layoutMasonryGrid(), 140);
       }
     }
     window.addEventListener('popstate', () => {
