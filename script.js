@@ -7204,6 +7204,7 @@
       if (batchMode) container.classList.add('batch-mode');
       const start = (page - 1) * PER_PAGE;
       const pageCards = allFilteredCards.slice(start, start + PER_PAGE);
+      const isAppend = !reset && page > 1;
       if (page === 1 && pageCards.length === 0) {
         container.classList.add('feed-grid-centered');
         container.innerHTML = '<div class="feature-empty warehouse-grid-empty"><p>📦 暂无卡片</p></div>';
@@ -7245,7 +7246,6 @@
         else requestAnimationFrame(runBackfill);
       }
       const fragment = document.createDocumentFragment();
-      const isAppend = !reset && page > 1;
       const eagerImgCount = mobileGrid ? 24 : Math.min(4, pageCards.length);
       preparedRows.forEach(({ card, meta }, idx) => {
         const listThumb = meta ? listThumbFromWarehouseMeta(meta) : getWarehouseCardListThumb(card, { skipEnsure: true });
