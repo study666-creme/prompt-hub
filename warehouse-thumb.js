@@ -258,29 +258,34 @@
   async function prefetchForCards(cards, opts) {
     const list = Array.isArray(cards) ? cards : [];
     const max = Math.min(opts?.max || warehousePrefetchCardCap(), list.length);
-    const tasks = [];
-    for (let i = 0; i < max; i += 1) {
-      const card = list[i];
-      if (!card?.id) continue;
-      const thumb = window.PromptHubCardGallery?.pickWarehouseListThumb?.(card)
-        || window.PromptHubCardGallery?.pickWarehouseFeedCover?.(card);
-      const ref = thumb?.ref || card.image || '';
-      const galleryIndex = thumb?.galleryIndex ?? 0;
-      const jobId = thumb?.slotJobId?.replace(/#\d+$/, '')
-        || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(card)
-        || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');
-      if (!ref && !jobId) continue;
-      if (ref && window.SupabaseSync?.getListDisplayImageSrc) {
-        const cached = window.SupabaseSync.getListDisplayImageSrc(ref, card.id, {
-          jobId: jobId || undefined,
-          allowFullFallback: false
-        });
-        if (cached && isGridUrl(cached)) continue;
+    const concurrency = Math.min(4, max);
+    let idx = 0;
+    const worker = async () => {
+      while (idx < max) {
+        const i = idx;
+        idx += 1;
+        const card = list[i];
+        if (!card?.id) continue;
+        const thumb = window.PromptHubCardGallery?.pickWarehouseListThumb?.(card)
+          || window.PromptHubCardGallery?.pickWarehouseFeedCover?.(card);
+        const ref = thumb?.ref || card.image || '';
+        const jobId = thumb?.slotJobId?.replace(/#\d+$/, '')
+          || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(card)
+          || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');
+        if (!ref && !jobId) continue;
+        if (ref && window.SupabaseSync?.getListDisplayImageSrc) {
+          const cached = window.SupabaseSync.getListDisplayImageSrc(ref, card.id, {
+            jobId: jobId || undefined,
+            allowFullFallback: false
+          });
+          if (cached && isGridUrl(cached)) continue;
+        }
+        try {
+          await resolveForCardModel(card);
+        } catch (e) { /* ignore */ }
       }
-      tasks.push(resolveForCardModel(card));
-    }
-    if (!tasks.length) return;
-    await Promise.allSettled(tasks);
+    };
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
   }
 
   function warehousePrefetchCardCap() {

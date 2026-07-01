@@ -2349,7 +2349,6 @@
             } else {
               softHydrateWarehouseContainer(container, list);
               void hydrateWarehouseGridImages(container, list, { skipPrefetch: true });
-              warmWarehouseFirstPageQuietly(list);
             }
           }
           if (isMobileViewport()) enforceMobileCardGrid();
@@ -5901,7 +5900,7 @@
           return !cur.startsWith('http') || cur.includes('data:image/svg');
         })
         .slice(0, limit);
-      const tasks = imgs.map(async (img) => {
+      const resolveOne = async (img) => {
         const cardId = img.closest('.card[data-id]')?.dataset?.id;
         const card = cardId ? cards.find((c) => c.id === cardId) : null;
         if (!card) return;
@@ -5919,8 +5918,10 @@
           const slotJob = thumb.coverJobId;
           if (slotJob) img.setAttribute('data-job-id', slotJob);
         }
-      });
-      await Promise.allSettled(tasks);
+      };
+      for (let i = 0; i < imgs.length; i += 4) {
+        await Promise.allSettled(imgs.slice(i, i + 4).map(resolveOne));
+      }
     }
 
     async function runCardImageIntegrityAudit() {
@@ -7252,22 +7253,21 @@
       const warehouseActive = document.getElementById('pageWarehouse')?.classList.contains('active');
       const prefetchCap = mobileGrid ? 24 : 12;
       const prefetchCards = pageCards.slice(0, prefetchCap);
-      let prefetchP = Promise.resolve();
       if (page === 1 && prefetchCards.length && warehouseActive && window.MediaPipeline?.prefetchList) {
-        prefetchP = window.MediaPipeline.prefetchList(
+        void window.MediaPipeline.prefetchList(
           prefetchCards,
           mobileGrid ? 4000 : 2400,
           { maxCards: prefetchCap }
-        );
-        try {
-          await Promise.race([
-            prefetchP,
-            new Promise((r) => setTimeout(r, mobileGrid ? 200 : 180))
-          ]);
-        } catch (e) { /* ignore */ }
+        ).finally?.(() => {
+          window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: prefetchCap });
+          void boostWarehouseListThumbs(container, pageCards, mobileGrid ? 12 : 8);
+        });
       }
       const preparedRows = warehouseActive && window.PromptHubCardGallery?.prepareWarehousePageThumbs
-        ? window.PromptHubCardGallery.prepareWarehousePageThumbs(pageCards, { ensure: page === 1 && !isAppend })
+        ? window.PromptHubCardGallery.prepareWarehousePageThumbs(pageCards, {
+          ensure: page === 1 && !isAppend,
+          ensureMax: mobileGrid ? 12 : 8
+        })
         : pageCards.map((card) => ({ card, meta: null }));
       if (page === 1 && warehouseActive && window.SupabaseSync?.backfillGridThumbsForCards) {
         const backfillMax = mobileGrid ? Math.min(24, pageCards.length) : Math.min(3, pageCards.length);
@@ -7457,11 +7457,6 @@
           skipPrefetch: true,
           skipBoostList: preservedWarehouseImgs.size > 0
         });
-        if (page === 1 && prefetchCards.length) {
-          void prefetchP.finally?.(() => {
-            softHydrateWarehouseContainer(container, pageCards, { skipBackgroundPrefetch: true });
-          });
-        }
       }
       if (!mobileGrid && viewMode !== 'list') {
         if (isAppend && masonryInstance && appendedCards.length) {

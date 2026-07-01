@@ -366,7 +366,8 @@
     const list = Array.isArray(cardList) ? cardList : [];
     if (!list.length) return [];
     if (opts.ensure !== false) {
-      ensureFeedCoversForCards(list, { persist: false, backfill: false });
+      const ensureMax = Number(opts.ensureMax) > 0 ? Number(opts.ensureMax) : list.length;
+      ensureFeedCoversForCards(list.slice(0, ensureMax), { persist: false, backfill: false });
     }
     return list.map((card) => ({
       card,

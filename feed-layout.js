@@ -38,16 +38,15 @@
     return deps;
   }
 
-  function applyScrollAfterLayout(scrollRoot, capturedTop) {
+  function applyScrollAfterLayout(scrollRoot, capturedTop, containerId) {
     if (!scrollRoot || !Number.isFinite(capturedTop)) return;
-    const safe = d().safeApplyFeedScrollTop;
-    if (typeof safe === 'function') {
-      safe(scrollRoot, capturedTop);
-      return;
-    }
+    const cid = containerId || '';
+    if (cid && d().feedScrollIntentActive?.(cid)) return;
     const cur = scrollRoot.scrollTop;
-    if (cur > capturedTop + 8) return;
-    scrollRoot.scrollTop = capturedTop;
+    if (cur > capturedTop + 12) return;
+    const safe = d().safeApplyFeedScrollTop;
+    if (typeof safe === 'function') safe(scrollRoot, capturedTop);
+    else scrollRoot.scrollTop = capturedTop;
   }
 
   function isMobile() {
@@ -288,7 +287,7 @@
     container.dataset.feedCols = String(cols);
     d().ensureFeedPageSentinel?.(container);
     requestAnimationFrame(() => {
-      applyScrollAfterLayout(scrollRoot, scrollTop);
+      applyScrollAfterLayout(scrollRoot, scrollTop, container.id);
       setTimeout(() => container.classList.remove('community-feed-rebalancing'), 320);
     });
   }
@@ -329,7 +328,7 @@
       });
       d().ensureFeedPageSentinel?.(container);
       requestAnimationFrame(() => {
-        applyScrollAfterLayout(scrollRoot, scrollTop);
+        applyScrollAfterLayout(scrollRoot, scrollTop, container.id);
       });
       return;
     }
@@ -471,7 +470,7 @@
       applyColumnCss(container, measuredCols);
       d().ensureFeedPageSentinel?.(container);
       requestAnimationFrame(() => {
-        applyScrollAfterLayout(scrollRoot, scrollTop);
+        applyScrollAfterLayout(scrollRoot, scrollTop, container.id);
       });
       d().setFeedLayoutPending?.(containerId, false);
       return;
@@ -581,7 +580,7 @@
       if (isProfile) profileMasonry = instance;
       else communityMasonry = instance;
     }
-    applyScrollAfterLayout(scrollRoot, scrollTop);
+    applyScrollAfterLayout(scrollRoot, scrollTop, containerId);
     container.classList.add('masonry-ready', 'cards-grid-primed');
     const { rowGap } = getGaps();
     if (rowGap) container.style.setProperty('--feed-row-gap', `${rowGap}px`);
@@ -692,7 +691,7 @@
         const scrollTop = scrollRoot.scrollTop;
         if (typeof inst.reloadItems === 'function') inst.reloadItems();
         inst.layout();
-        applyScrollAfterLayout(scrollRoot, scrollTop);
+        applyScrollAfterLayout(scrollRoot, scrollTop, containerId);
       } else {
         layout(containerId, { force: true });
       }

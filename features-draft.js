@@ -144,6 +144,7 @@
   let communitySort = 'random';
   let communityRandomSig = '';
   let communityRandomOrder = new Map();
+  let communityRandomEpoch = 0;
   let communityMediaFilter = 'all';
   let communityScope = 'all';
   let follows = new Set();
@@ -209,7 +210,8 @@
       const grid = document.getElementById('communityGrid');
       if (!grid) return;
       const hasReal = grid.querySelector('.community-post-card:not(.community-feed-skeleton)');
-      if (hasReal && !forceRepaint && shouldPreserveCommunityFeedDom('communityGrid')) {
+      const sorted = filterAndSortPosts(getCommunityFeedForDisplay());
+      if (hasReal && !forceRepaint && shouldPreserveCommunityFeedDom('communityGrid', sorted)) {
         void growCommunityFeedAfterPublicRefresh('communityGrid');
         return;
       }
@@ -862,19 +864,18 @@
     }
   }
 
-  function shouldPreserveCommunityFeedDom(containerId = 'communityGrid') {
+  function shouldPreserveCommunityFeedDom(containerId = 'communityGrid', list) {
     const store = feedPagedStore[containerId];
     const grid = document.getElementById(containerId);
     if (!grid || !store?.posts?.length) return false;
     if (!hasRealCommunityFeedCards(grid)) return false;
     if (communityFeedDomHasDuplicates(containerId)) return false;
+    const posts = list || filterAndSortPosts(getCommunityFeedForDisplay());
+    const sig = feedListSignature(posts, containerId);
+    if (grid.dataset.feedSig !== sig) return false;
     const rendered = getCommunityFeedRenderedPostIds(containerId).size;
-    const domCards = grid.querySelectorAll('.card[data-post-id]').length;
     const firstPageTarget = Math.min(FEED_PER_PAGE, store.posts.length);
-    if (rendered > 0 && rendered < firstPageTarget) return false;
-    if (rendered > 0 && rendered < domCards) return false;
-    if (domCards > store.page * FEED_PER_PAGE + FEED_PER_PAGE) return false;
-    return domCards > FEED_PER_PAGE || (store.page || 0) > 1 || !!feedScrollIntent[containerId];
+    return rendered >= firstPageTarget;
   }
 
   function scheduleCommunityFeedInitialDrain(containerId = 'communityGrid') {
@@ -2359,7 +2360,10 @@
     if (!containerId) return;
     const container = document.getElementById(containerId);
     if (!container) return;
-    if (window.__PH_FEED_BULK_DRAIN__ && (containerId === 'communityGrid' || containerId === 'creationsGrid')) {
+    if (
+      (window.__PH_FEED_BULK_DRAIN__ || feedScrollIntent[containerId])
+      && (containerId === 'communityGrid' || containerId === 'creationsGrid')
+    ) {
       ensureFeedPageSentinel(container);
       reconnectFeedPageObserver(containerId);
       setFeedLayoutPending(containerId, false);
@@ -2771,6 +2775,7 @@
     if (containerId === 'communityGrid') {
       const q = (document.getElementById('communitySearch')?.value || '').trim().toLowerCase();
       meta = `|sort:${communitySort}|scope:${communityScope}|q:${q}`;
+      if (communitySort === 'random') meta += `|rnd:${communityRandomEpoch}`;
     }
     return `${containerId}:${posts.length}:${idKey}${meta}`;
   }
@@ -3217,6 +3222,7 @@
       getCommunityFeedGaps,
       getFeedScrollRoot,
       safeApplyFeedScrollTop,
+      feedScrollIntentActive: (containerId) => !!feedScrollIntent[containerId],
       setFeedLayoutPending,
       ensureFeedPageSentinel,
       revealCommunityFeedImages,
@@ -4099,15 +4105,15 @@
       if (now - feedPageScrollThrottle < 180) return;
       feedPageScrollThrottle = now;
       void drainFeedPages(4);
-    }, { root: ioRoot, rootMargin: '960px 0px', threshold: 0 });
+    }, { root: ioRoot, rootMargin: '420px 0px', threshold: 0 });
     io.observe(sentinel);
     container.__feedPageIo = io;
     container.__feedPageIoRoot = ioRoot;
-    if (!container.dataset.feedPageDone && canLoadMoreFeedPages(containerId)) {
+    if (!container.dataset.feedPageDone && canLoadMoreFeedPages(containerId) && !feedScrollIntent[containerId]) {
       requestAnimationFrame(() => {
-        if (!canLoadMoreFeedPages(containerId)) return;
+        if (!canLoadMoreFeedPages(containerId) || feedScrollIntent[containerId]) return;
         if (isFeedNearBottom(scrollEl) || isFeedNearBottom(container)) {
-          void drainFeedPages(2);
+          void drainFeedPages(1);
         }
       });
     }
@@ -4308,9 +4314,8 @@
       }
       if (!feedAppend && paginate && (containerId === 'communityGrid' || containerId === 'creationsGrid')) {
         const store = feedPagedStore[containerId];
-        if (store?.posts?.length > FEED_PER_PAGE && !window.__PH_FEED_BULK_DRAIN__) {
-          const initialPages = isMobileViewport() ? 2 : 5;
-          await drainCommunityFeedPages(containerId, initialPages);
+        if (store?.posts?.length > FEED_PER_PAGE && !window.__PH_FEED_BULK_DRAIN__ && !feedScrollIntent[containerId]) {
+          void drainCommunityFeedPages(containerId, 1);
         }
       }
       await new Promise((r) => requestAnimationFrame(r));
@@ -4400,15 +4405,14 @@
     if (next === 'random') {
       communityRandomOrder = new Map();
       communityRandomSig = '';
-      delete feedPagedStore.communityGrid;
-      delete feedPagedStore.creationsGrid;
-      const grid = document.getElementById('communityGrid');
-      if (grid) delete grid.dataset.feedSig;
-    } else if (next !== communitySort) {
-      delete feedPagedStore.communityGrid;
-      delete feedPagedStore.creationsGrid;
-      const grid = document.getElementById('communityGrid');
-      if (grid) delete grid.dataset.feedSig;
+      communityRandomEpoch += 1;
+    }
+    delete feedPagedStore.communityGrid;
+    delete feedPagedStore.creationsGrid;
+    const grid = document.getElementById('communityGrid');
+    if (grid) {
+      delete grid.dataset.feedSig;
+      delete grid.dataset.feedPageDone;
     }
     communitySort = next;
     document.querySelectorAll('[data-community-sort]').forEach((b) => {
@@ -4538,7 +4542,8 @@
             );
             return;
           }
-          if (shouldPreserveCommunityFeedDom('communityGrid')) {
+          const sortedAfterFetch = filterAndSortPosts(getCommunityFeedForDisplay());
+          if (shouldPreserveCommunityFeedDom('communityGrid', sortedAfterFetch)) {
             await growCommunityFeedAfterPublicRefresh('communityGrid');
             return;
           }
@@ -4552,8 +4557,9 @@
           if (communityScope === 'curated') return;
           if (!changed) return;
           const grid = document.getElementById('communityGrid');
-          patchFeedLikeLabels(grid, filterAndSortPosts(getCommunityFeedForDisplay()));
-          if (shouldPreserveCommunityFeedDom('communityGrid')) {
+          const sorted = filterAndSortPosts(getCommunityFeedForDisplay());
+          patchFeedLikeLabels(grid, sorted);
+          if (shouldPreserveCommunityFeedDom('communityGrid', sorted)) {
             await growCommunityFeedAfterPublicRefresh('communityGrid');
             return;
           }
@@ -4640,7 +4646,7 @@
     }
     if (
       !opts.forceRepaint
-      && shouldPreserveCommunityFeedDom('communityGrid')
+      && shouldPreserveCommunityFeedDom('communityGrid', list)
       && container.querySelector('.community-post-card')
     ) {
       scrubStaleCommunityFeedEmpty(container);
@@ -4650,7 +4656,9 @@
       return;
     }
     void renderPostsIntoContainer(list, 'communityGrid').then(() => {
-      void drainCommunityFeedPages('communityGrid', isMobileViewport() ? 2 : 3);
+      if (!feedScrollIntent.communityGrid) {
+        void drainCommunityFeedPages('communityGrid', 1);
+      }
     });
   }
 
@@ -7460,8 +7468,10 @@
           hydratePublicFeedFromCache();
           const hasRealCards = grid?.querySelector('.community-post-card:not(.community-feed-skeleton)');
           const feedFresh = !publicFeedNeedsFullRefresh() && publicFeedState.posts.length > 0;
-          if (hasRealCards && grid?.dataset.feedSig && feedFresh) {
-            patchFeedLikeLabels(grid, filterAndSortPosts(getCommunityFeedForDisplay()));
+          const sorted = filterAndSortPosts(getCommunityFeedForDisplay());
+          const sig = feedListSignature(sorted, 'communityGrid');
+          if (hasRealCards && grid?.dataset.feedSig === sig && feedFresh) {
+            patchFeedLikeLabels(grid, sorted);
             scheduleCommunityLayout('communityGrid', { force: true, immediate: true, recalcCols: true });
           } else {
             renderCommunity({
@@ -7485,7 +7495,8 @@
               if (grid && !hasRealCards) showCommunityFeedSkeleton(grid, 8);
               void refreshPublicCommunityFeed({ force: true, timeoutMs: 20000 }).then(async () => {
                 if (seq !== communityOnActivateSeq) return;
-                if (shouldPreserveCommunityFeedDom('communityGrid') && grid?.querySelector('.community-post-card:not(.community-feed-skeleton)')) {
+                const sortedOnActivate = filterAndSortPosts(getCommunityFeedForDisplay());
+                if (shouldPreserveCommunityFeedDom('communityGrid', sortedOnActivate) && grid?.querySelector('.community-post-card:not(.community-feed-skeleton)')) {
                   await growCommunityFeedAfterPublicRefresh('communityGrid');
                   return;
                 }
