@@ -8,7 +8,7 @@
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | https://prompt-hubs.com · **`20260701h`** |
+| **Pages** | https://prompt-hubs.com · **`20260701i`** |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
 ### 已打通

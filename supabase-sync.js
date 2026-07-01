@@ -152,6 +152,8 @@
   const USE_DIRECT_SUPABASE_SIGN = false;
   /** 本会话 CDN 404 过的路径，不再签名（即使 localStorage 标了 grid done） */
   const gridFetchFailedPaths = new Set();
+  const warmGenThumbInflight = new Set();
+  const queueGridBackfillInflight = new Set();
 
   let persistMissingPathTimer = null;
   function loadMissingPathCache() {
@@ -301,7 +303,7 @@
     return signBudgetUsed < SIGN_BUDGET_MAX;
   }
 
-  function markGridFetchFailed(path) {
+  function markGridFetchFailed(path, cardIdHint) {
     const key = normalizePathKey(path);
     if (!key) return;
     gridFetchFailedPaths.add(key);
@@ -313,8 +315,8 @@
     }
     persistSessionSignCache();
     if (/_grid\.(jpe?g|webp|png)$/i.test(key)) {
-      const card = findCardForGridPath(key);
-      if (card?.id) unmarkGridThumbReady(card.id);
+      const id = cardIdHint || findCardForGridPath(key)?.id;
+      if (id) unmarkGridThumbReady(id);
     }
   }
 
@@ -763,6 +765,8 @@
 
   function storagePathFromUrl(url) {
     if (!url || typeof url !== 'string') return null;
+    const cdnPath = storagePathFromCdnUrl(url);
+    if (cdnPath) return cdnPath;
     if (url.startsWith(STORAGE_PREFIX)) return url.slice(STORAGE_PREFIX.length).split('?')[0];
     const bare = url.trim();
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/[^/?#]+\.(jpe?g|png|webp|gif)$/i.test(bare)) {
@@ -1130,31 +1134,42 @@
     }
   }
 
-  /** 生图卡：经 warehouse-thumbs 确保 _grid 并返回 CDN URL */
+  /** 生图卡：经 warehouse-thumbs 确保 _grid（禁止再走 resolveDisplayUrl，避免递归） */
   async function warmGeneratedGridThumb(card) {
-    if (window.WarehouseThumb?.resolveForCardModel) {
-      await window.WarehouseThumb.resolveForCardModel(card);
-      return;
-    }
-    const cardId = card?.id;
-    const path = primaryImagePath(card?.image, cardId);
-    if (!cardId || !path || !storagePathOwnedByCurrentUser(path)) return;
-    if (!String(path).replace(/^\//, '').includes('/generated/')) return;
-    const jobId = card?.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null;
-    if (jobId && window.WarehouseThumb?.resolveForCard) {
-      await window.WarehouseThumb.resolveForCard(card.image, { jobId, assetId: cardId, cardId });
+    const cardId = card?.id ? String(card.id) : '';
+    if (!cardId || warmGenThumbInflight.has(cardId)) return;
+    warmGenThumbInflight.add(cardId);
+    try {
+      if (window.WarehouseThumb?.resolveForCardModel) {
+        await window.WarehouseThumb.resolveForCardModel(card);
+        return;
+      }
+      const path = primaryImagePath(card?.image, cardId);
+      if (!path || !storagePathOwnedByCurrentUser(path)) return;
+      if (!String(path).replace(/^\//, '').includes('/generated/')) return;
+      const jobId = card?.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null;
+      if (jobId && window.WarehouseThumb?.resolveForCard) {
+        await window.WarehouseThumb.resolveForCard(card.image, { jobId, assetId: cardId, cardId });
+      }
+    } finally {
+      warmGenThumbInflight.delete(cardId);
     }
   }
 
   function queueGridBackfill(card, opts) {
     if (!AUTO_GRID_BACKFILL) return;
     if (!card?.id || !card?.image || !isLoggedIn()) return;
+    const cardKey = String(card.id);
     const force = opts?.force === true;
     const path = primaryImagePath(card.image, card.id);
     if (!path || !storagePathOwnedByCurrentUser(path)) return;
-    /* 生图入库图：仅触发 CDN 签 grid + 小 Range 预热（服务端写入 _grid），勿客户端拉原图 */
-    if (String(path).replace(/^\//, '').includes('/generated/') && !force) {
-      void warmGeneratedGridThumb(card);
+    if (String(path).replace(/^\//, '').includes('/generated/')) {
+      if (!force && !queueGridBackfillInflight.has(cardKey)) {
+        queueGridBackfillInflight.add(cardKey);
+        void warmGeneratedGridThumb(card).finally(() => {
+          queueGridBackfillInflight.delete(cardKey);
+        });
+      }
       return;
     }
     if (force && isGridBackfillSkipped(card.id)) clearGridBackfillSkipped(card.id);
@@ -2310,6 +2325,9 @@
     if (!image || typeof image !== 'string') return image;
     if (isDataUrl(image) || image.startsWith('blob:')) return image;
     const o = opts && typeof opts === 'object' ? opts : {};
+    const depth = Number(o._depth) || 0;
+    if (depth > 5) return null;
+    const nextOpts = (patch) => ({ ...o, ...patch, _depth: depth + 1 });
     const assetId = o.assetId;
     const authorId = o.authorId;
     const jobId = resolveJobIdForAsset(o, assetId);
@@ -2354,11 +2372,11 @@
       && o.listOnly !== true
       && o.preferFull === true
     ) {
-      return resolveDisplayUrl(image, {
-        ...o,
+      return resolveDisplayUrl(image, nextOpts({
         variant: VARIANT_FULL,
-        allowFullFallback: false
-      });
+        allowFullFallback: false,
+        preferFull: false
+      }));
     }
     const normalized = normalizeImageRef(image);
     const bucketPath = storagePathFromRef(normalized);
@@ -2426,8 +2444,7 @@
         && isLoggedIn()
         && storagePathOwnedByCurrentUser(primary)
       ) {
-        const card = assetId && (window.__promptHubCards || []).find((c) => c.id === assetId);
-        if (card && AUTO_GRID_BACKFILL) queueGridBackfill(card);
+        /* 列表 resolve 热路径不排队 backfill，避免与 WarehouseThumb 并发打满 */
       }
       if (
         variant === VARIANT_GRID
@@ -2440,11 +2457,11 @@
       ) {
         const own = bucketPath && storagePathOwnedByCurrentUser(bucketPath);
         if (own) {
-          return resolveDisplayUrl(image, {
-            ...o,
+          return resolveDisplayUrl(image, nextOpts({
             variant: VARIANT_FULL,
-            allowFullFallback: false
-          });
+            allowFullFallback: false,
+            preferFull: false
+          }));
         }
       }
       return null;
@@ -2457,13 +2474,13 @@
         const uid = getUserId();
         const own = !!(uid && legacyPath.replace(/^\//, '').startsWith(`${uid}/`));
         const useCommunity = communityFeed || (isLoggedIn() && !own);
-        return resolveDisplayUrl(toStorageRef(legacyPath), {
-          assetId,
-          authorId,
-          cardId: o.cardId || assetId,
+        const storageRef = toStorageRef(legacyPath);
+        if (o._fromStorageRef === storageRef) return null;
+        return resolveDisplayUrl(storageRef, nextOpts({
           communityFeed: useCommunity,
-          tryAllPaths: useCommunity || o.tryAllPaths === true
-        });
+          tryAllPaths: useCommunity || o.tryAllPaths === true,
+          _fromStorageRef: storageRef
+        }));
       }
       if (isEphemeralUpstreamImageUrl(image)) return null;
       if (window.PromptHubApi?.fetchMediaAsBlobUrl && o.allowRemoteFetch === true) {
@@ -2862,17 +2879,7 @@
       const jobId = c.genJobId
         || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(c);
       if (jobId) {
-        const gp = primaryImagePath(c.image, c.id);
-        if (gp && !isPathKnownMissing(gp) && storagePathOwnedByCurrentUser(gp)) {
-          const plan = ownedListSignTargets(gp, c.id);
-          if (plan.grid) pathSet.add(plan.grid);
-          else if (!plan.primary) {
-            const gk = (gridPathFromPrimary(gp) || '').replace(/^\//, '');
-            if (gk && !isPathKnownMissing(gk)) pathSet.add(gk);
-          }
-        } else {
-          genCards.push(c);
-        }
+        genCards.push(c);
         continue;
       }
       if (isGridBackfillSkipped(c.id)) continue;
@@ -3218,10 +3225,6 @@
       };
       try {
         let url = await resolveDisplayUrl(ref, resolveOpts);
-        if (!isResolvableDisplayUrl(url) && inWarehouse && assetId) {
-          const cardModel = (window.__promptHubCards || []).find((c) => c.id === assetId);
-          if (cardModel && AUTO_GRID_BACKFILL) queueGridBackfill(cardModel);
-        }
         if (isResolvableDisplayUrl(url) && !isWarehouseBlockedFullUrl(url, img)) {
           const onFail = () => {
             if (media?.classList.contains('is-loading')) return;

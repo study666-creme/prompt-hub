@@ -3208,8 +3208,6 @@
               return;
             }
             if (!safeUrl && img.closest('#cardsContainer, #imageGenFeed')) {
-              const cardModel = cards.find((c) => c.id === cardId);
-              if (cardModel) void window.SupabaseSync?.warmGeneratedGridThumb?.(cardModel);
               markCardImageLoadFailed(img);
               return;
             }
@@ -5895,7 +5893,7 @@
     function hydrateWarehouseGridImages(container, pageCards, opts = {}) {
       if (!container) return;
       const mobile = isMobileViewport();
-      const patchMax = mobile ? Math.min(8, pageCards?.length || 8) : Math.min(12, pageCards?.length || 12);
+      const patchMax = mobile ? 6 : Math.min(8, pageCards?.length || 8);
       window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: patchMax });
       window.CardImageLoader?.observeContainer?.(container);
       window.CardImageLoader?.boostWarehouseImages?.(container, patchMax);
@@ -7248,35 +7246,24 @@
       }
       container.classList.remove('feed-grid-centered');
       const warehouseActive = document.getElementById('pageWarehouse')?.classList.contains('active');
-      const prefetchCap = mobileGrid ? 24 : 12;
+      const prefetchCap = mobileGrid ? 8 : 12;
       const prefetchCards = pageCards.slice(0, prefetchCap);
-      let warehousePrefetchP = null;
       if (page === 1 && prefetchCards.length && warehouseActive && window.SupabaseSync?.prefetchWarehousePage) {
-        warehousePrefetchP = window.SupabaseSync.prefetchWarehousePage(
+        void window.SupabaseSync.prefetchWarehousePage(
           prefetchCards,
           mobileGrid ? 3200 : 2400,
           { maxCards: prefetchCap }
-        );
+        ).finally?.(() => {
+          window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: prefetchCap });
+          window.CardImageLoader?.boostWarehouseImages?.(container, prefetchCap);
+        });
       }
       const preparedRows = warehouseActive && window.PromptHubCardGallery?.prepareWarehousePageThumbs
         ? window.PromptHubCardGallery.prepareWarehousePageThumbs(pageCards, {
           ensure: page === 1 && !isAppend,
-          ensureMax: prefetchCap
+          ensureMax: Math.min(8, prefetchCap)
         })
         : pageCards.map((card) => ({ card, meta: null }));
-      if (page === 1 && warehouseActive && !mobileGrid && window.SupabaseSync?.backfillGridThumbsForCards) {
-        const backfillMax = Math.min(3, pageCards.length);
-        const runBackfill = () => {
-          void window.SupabaseSync.backfillGridThumbsForCards(pageCards, {
-            max: backfillMax,
-            force: false,
-            quiet: true,
-            awaitDrain: false
-          });
-        };
-        if (typeof requestIdleCallback === 'function') requestIdleCallback(runBackfill, { timeout: 3000 });
-        else requestAnimationFrame(runBackfill);
-      }
       const fragment = document.createDocumentFragment();
       const eagerImgCount = mobileGrid ? 24 : Math.min(4, pageCards.length);
       preparedRows.forEach(({ card, meta }, idx) => {
@@ -7451,12 +7438,6 @@
       bindCardGridImageRelayout(container);
       if (warehouseActive) {
         hydrateWarehouseGridImages(container, pageCards);
-        if (warehousePrefetchP) {
-          void warehousePrefetchP.finally?.(() => {
-            window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: prefetchCap });
-            window.CardImageLoader?.boostWarehouseImages?.(container, prefetchCap);
-          });
-        }
       }
       if (!mobileGrid && viewMode !== 'list') {
         if (isAppend && masonryInstance && appendedCards.length) {

@@ -242,6 +242,7 @@
         galleryIndex
       });
       if (wh) return wh;
+      return '';
     }
     if (window.MediaPipeline?.resolveListUrl) {
       return window.MediaPipeline.resolveListUrl(ref, {

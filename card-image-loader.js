@@ -399,6 +399,7 @@
   }
 
   function queueGridBackfillForImg(img) {
+    if (img?.closest?.('#cardsContainer')) return false;
     const cardId = cardIdFromImg(img);
     if (!cardId || !window.SupabaseSync?.queueGridBackfill) return false;
     const ref = img.getAttribute('data-image-ref') || '';
@@ -588,15 +589,19 @@
         img.dataset.primaryRetried = '1';
         const failedKey = failedPath ? String(failedPath).replace(/^\//, '') : '';
         if (failedKey && failedKey.includes('/generated/')) {
+          if (img.dataset.whWarmTried === '1') {
+            if (ownList) window.finalizeWarehouseCardMediaFailure?.(media, img);
+            else media.classList.add('card-media--load-failed');
+            return;
+          }
+          img.dataset.whWarmTried = '1';
           window.SupabaseSync?.invalidateCorruptGrid?.(failedKey, cardId);
           const card = (window.__promptHubCards || []).find((c) => c.id === cardId);
-          if (card) {
-            void window.SupabaseSync?.warmGeneratedGridThumb?.(card).then(() => {
-              void resolveUrl(ref, cardId, { bypassSignBudget: true }, img).then((retryUrl) => {
-                if (retryUrl && applyUrlToImg(img, retryUrl)) return;
-                if (ownList) window.finalizeWarehouseCardMediaFailure?.(media, img);
-                else media.classList.add('card-media--load-failed');
-              });
+          if (card && window.WarehouseThumb?.resolveForCardModel) {
+            void window.WarehouseThumb.resolveForCardModel(card).then((retryUrl) => {
+              if (retryUrl && applyUrlToImg(img, retryUrl)) return;
+              if (ownList) window.finalizeWarehouseCardMediaFailure?.(media, img);
+              else media.classList.add('card-media--load-failed');
             });
             return;
           }
@@ -1158,9 +1163,9 @@
     if (!container || container.id !== 'cardsContainer') return;
     const mobile = window.MobileUI?.isMobileViewport?.();
     if (mobile && window.MobileUI?.isUserInteracting?.()) return;
-    const cap = max ?? (mobile ? cardEagerCap() : 8);
+    const cap = max ?? (mobile ? 6 : 8);
     let n = 0;
-    const nearPx = mobile ? 2000 : 960;
+    const nearPx = mobile ? 1200 : 720;
     const imgs = mobile ? sortImgsByViewport(feedImagesIn(container)) : feedImagesIn(container);
     imgs.forEach((img, idx) => {
       const cur = img.currentSrc || img.src || '';
