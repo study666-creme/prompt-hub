@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260628c';
+    window.__APP_BUILD__ = '20260701b';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -104,11 +104,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260628c">
-  <link rel="stylesheet" href="styles-theme.css?v=20260628c">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260628c">
+  <link rel="stylesheet" href="styles.css?v=20260701b">
+  <link rel="stylesheet" href="styles-theme.css?v=20260701b">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260701b">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260628c">
+  <link rel="stylesheet" href="styles-features.css?v=20260701b">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="pack-prelude.js"></script>
 </head>
@@ -589,6 +589,11 @@
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
         <span class="app-nav-label">图片生成</span>
         <span class="app-nav-soon">草案</span>
+      </button>
+      <button type="button" class="app-nav-item app-nav-external" onclick="openPromptCanvas()" title="在新标签页打开无限画布">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
+        <span class="app-nav-label">无限画布</span>
+        <svg class="app-nav-external-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       </button>
       <button type="button" class="app-nav-item" data-app="devlab">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
@@ -1147,38 +1152,15 @@
                     <option value="turbo">Turbo · 极速</option>
                   </select>
                 </div>
-                <div class="imagegen-param imagegen-param--mj-flags">
-                  <span class="imagegen-mj-toggle-section-label">附加开关</span>
-                  <div class="imagegen-mj-options-grid imagegen-mj-options-grid--quad" id="imageGenMjFlagGrid" role="group" aria-label="附加开关">
-                    <label class="imagegen-mj-option-card">
-                      <div class="imagegen-mj-option-head">
-                        <input type="checkbox" id="imageGenMjFlagTile" data-mj-flag="tile" aria-label="平铺模式">
-                        <span class="imagegen-mj-option-title">平铺</span>
-                      </div>
-                      <p class="imagegen-mj-option-desc">无缝重复图案，适合壁纸与纹理</p>
-                    </label>
-                    <label class="imagegen-mj-option-card">
-                      <div class="imagegen-mj-option-head">
-                        <input type="checkbox" id="imageGenMjFlagRaw" data-mj-flag="raw" aria-label="原始风格">
-                        <span class="imagegen-mj-option-title">原始</span>
-                      </div>
-                      <p class="imagegen-mj-option-desc">更少默认美化，更贴近提示词</p>
-                    </label>
-                    <label class="imagegen-mj-option-card">
-                      <div class="imagegen-mj-option-head">
-                        <input type="checkbox" id="imageGenMjFlagDraft" data-mj-flag="draft" aria-label="草稿模式">
-                        <span class="imagegen-mj-option-title">草稿</span>
-                      </div>
-                      <p class="imagegen-mj-option-desc">更快出预览，适合试构图</p>
-                    </label>
-                    <label class="imagegen-mj-option-card">
-                      <div class="imagegen-mj-option-head">
-                        <input type="checkbox" id="imageGenMjFlagHd" data-mj-flag="hd" aria-label="高清模式">
-                        <span class="imagegen-mj-option-title">高清</span>
-                      </div>
-                      <p class="imagegen-mj-option-desc">更高细节与清晰度（HD）</p>
-                    </label>
-                  </div>
+                <div class="imagegen-param">
+                  <label for="imageGenMjExtrasSelect">附加开关</label>
+                  <select id="imageGenMjExtrasSelect" class="settings-input imagegen-field-compact" aria-label="附加开关">
+                    <option value="">无</option>
+                    <option value="tile">平铺</option>
+                    <option value="raw">原始</option>
+                    <option value="draft">草稿</option>
+                    <option value="hd">高清</option>
+                  </select>
                 </div>
               </div>
               <div class="imagegen-mj-imagine-fields" id="imageGenMjImagineFields">
@@ -1250,10 +1232,8 @@
               <option value="high">中</option>
               <option value="ultra">高</option>
             </select>
-            <p class="imagegen-quality-note">质量仅影响出图效果，不额外加价</p>
             <label for="imageGenCardTitle">卡片标题</label>
-            <input type="text" id="imageGenCardTitle" class="settings-input imagegen-field-compact" maxlength="80" placeholder="可选：入库时用作卡片名，不填则自动生成" autocomplete="off">
-            <p class="panel-hint imagegen-card-title-hint">批量生图时，每张卡可用同一标题；附赠图仍按序号命名。</p>
+            <input type="text" id="imageGenCardTitle" class="settings-input imagegen-field-compact" maxlength="80" placeholder="可选，不填则自动生成" autocomplete="off">
             <div class="imagegen-params-row imagegen-save-target-row">
               <div class="imagegen-param">
                 <label for="imageGenTargetGroup">入库文件夹</label>
@@ -1704,9 +1684,10 @@
 
   <script src="vendor/supabase.min.js?v=20260606m"></script>
   <script src="api-domain.config.js"></script>
+  <script src="canvas-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260628c"></script>
+  <script src="api-client.js?v=20260701b"></script>
   <script>
     (function () {
       var FALLBACK = [
@@ -1758,15 +1739,15 @@
     })();
   </script>
   <script src="pack-foundation.js"></script>
-  <script src="supabase-sync.js?v=20260628c"></script>
+  <script src="supabase-sync.js?v=20260701b"></script>
   <script src="pack-core.js"></script>
   <script src="pack-account.js"></script>
   <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
   <script src="pack-viewer.js"></script>
   <script src="pack-appreciate.js"></script>
   <script src="pack-lightbox.js"></script>
-  <script src="card-gallery.js?v=20260628c"></script>
-  <script src="script.js?v=20260628c"></script>
+  <script src="card-gallery.js?v=20260701b"></script>
+  <script src="script.js?v=20260701b"></script>
   <script src="pack-imagegen.js"></script>
   <script src="pack-feed.js"></script>
   <script>
@@ -1784,10 +1765,10 @@
       } catch (e) { /* ignore */ }
     })();
   </script>
-  <script src="community-public-feed.js?v=20260628c"></script>
-  <script src="features-draft.js?v=20260628c"></script>
+  <script src="community-public-feed.js?v=20260701b"></script>
+  <script src="features-draft.js?v=20260701b"></script>
   <script src="pack-extra.js"></script>
-  <script src="features-assets.js?v=20260628c"></script>
+  <script src="features-assets.js?v=20260701b"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

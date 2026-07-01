@@ -10,9 +10,30 @@
   const feedResolveQueue = [];
   let resolveActive = 0;
   let feedResolveActive = 0;
-  const MAX_RESOLVE = 10;
-  const FEED_MAX_RESOLVE = 8;
-  const MAX_DOWNLOAD = 8;
+  function maxResolveCap() {
+    return window.MobileUI?.getPerf?.()?.maxResolve ?? 10;
+  }
+  function feedMaxResolveCap() {
+    return window.MobileUI?.getPerf?.()?.feedMaxResolve ?? 8;
+  }
+  function maxDownloadCap() {
+    return window.MobileUI?.getPerf?.()?.maxDownload ?? 8;
+  }
+  function igFeedPatchMax() {
+    return window.MobileUI?.getPerf?.()?.igFeedPatchMax ?? 6;
+  }
+  function igFeedBoostMax() {
+    return window.MobileUI?.getPerf?.()?.igFeedBoostMax ?? 10;
+  }
+  function igFeedPrefetchMax() {
+    return window.MobileUI?.getPerf?.()?.igFeedPrefetchCap ?? 4;
+  }
+  function cardEagerCap() {
+    return window.MobileUI?.getPerf?.()?.cardEagerCap ?? 16;
+  }
+  function cardFirstScreenCap() {
+    return window.MobileUI?.getPerf?.()?.cardFirstScreenCap ?? 16;
+  }
   const VISIBLE_LOAD_MARGIN = 160;
   const prefetchedImageRefs = new Set();
   const containerSignReady = new Map();
@@ -31,8 +52,22 @@
     return containerSignReady.get(id) || Promise.resolve();
   }
 
+  /** 手机：不阻塞等整批 prefetch，320ms 后视口内也开载 */
+  function whenContainerReady(containerOrId) {
+    const pending = whenContainerSigned(containerOrId);
+    if (!window.MobileUI?.isMobileViewport?.()) return pending;
+    return Promise.race([pending, new Promise((r) => setTimeout(r, 320))]);
+  }
+
+  function clearFeedObserverBindings(container) {
+    if (!container) return;
+    feedImagesIn(container).forEach((img) => {
+      delete img.dataset.feedObserverBound;
+    });
+  }
+
   function pumpDownloadQueue() {
-    while (downloadActive < MAX_DOWNLOAD && downloadQueue.length) {
+    while (downloadActive < maxDownloadCap() && downloadQueue.length) {
       const job = downloadQueue.shift();
       downloadActive += 1;
       job().finally(() => {
@@ -50,7 +85,7 @@
   }
 
   function runResolveQueue() {
-    while (resolveActive < MAX_RESOLVE && resolveQueue.length) {
+    while (resolveActive < maxResolveCap() && resolveQueue.length) {
       const job = resolveQueue.shift();
       resolveActive += 1;
       job().finally(() => {
@@ -75,7 +110,7 @@
   }
 
   function runFeedResolveQueue() {
-    while (feedResolveActive < FEED_MAX_RESOLVE && feedResolveQueue.length) {
+    while (feedResolveActive < feedMaxResolveCap() && feedResolveQueue.length) {
       const job = feedResolveQueue.shift();
       feedResolveActive += 1;
       job().finally(() => {
@@ -247,6 +282,12 @@
   }
 
   function isLazyOnlyContainer(container) {
+    if (window.MobileUI?.isMobileViewport?.()) {
+      if (container?.id === 'cardsContainer') return false;
+      if (container?.id === 'imageGenFeed' && document.body.classList.contains('imagegen-mobile-view-feed')) {
+        return false;
+      }
+    }
     return container?.id === 'cardsContainer' || container?.id === 'imageGenFeed';
   }
 
@@ -646,6 +687,7 @@
   }
 
   function loadImg(img) {
+    if (window.MobileUI?.isUserInteracting?.() && !isImgNearViewport(img, 120)) return;
     const ref = img.getAttribute('data-image-ref');
     if (!ref) return;
     const extra = isOwnImageGenWarehouseImg(img) ? {} : communityResolveOpts(img);
@@ -740,7 +782,7 @@
       inflight.set(img, p);
     };
     if (signedRoot?.id) {
-      void whenContainerSigned(signedRoot.id).then(startLoad);
+      void whenContainerReady(signedRoot.id).then(startLoad);
       return;
     }
     startLoad();
@@ -792,6 +834,11 @@
   }
 
   function scrollRootFor(container) {
+    if (window.MobileUI?.isMobileViewport?.()) {
+      if (container?.id === 'cardsContainer' || container?.id === 'imageGenFeed') {
+        return document.querySelector('.app-main') || null;
+      }
+    }
     if (isCommunityContainer(container) && container.classList?.contains('community-feed-columns')) {
       const st = getComputedStyle(container);
       if (st.overflowY === 'auto' || st.overflowY === 'scroll' || st.overflowY === 'overlay') {
@@ -872,7 +919,7 @@
 
     if (container.id === 'imageGenFeed') {
       let eager = 0;
-      const cap = IMAGEGEN_FEED_PATCH_MAX;
+      const cap = igFeedPatchMax();
       sortImgsByViewport(imgs).forEach((img) => {
         if (isImgVisuallyLoaded(img)) return;
         if (eager >= cap) return;
@@ -885,9 +932,10 @@
       });
     } else if (lazyOnly && container.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.()) {
       let eager = 0;
+      const eagerCap = cardEagerCap();
       sortImgsByViewport(imgs).forEach((img) => {
         if (isImgVisuallyLoaded(img)) return;
-        if (eager >= 16) return;
+        if (eager >= eagerCap) return;
         const cur = img.currentSrc || img.src || '';
         if (isReadySrc(cur, img)) return;
         const ref = img.getAttribute('data-image-ref');
@@ -905,7 +953,7 @@
     } else if (!lazyOnly && (container.id === 'cardsContainer' || isCommunityContainer(container))) {
       let eager = 0;
       const mobileWh = container.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.();
-      const firstScreenCap = isCommunityContainer(container) ? 24 : (mobileWh ? 14 : 16);
+      const firstScreenCap = isCommunityContainer(container) ? 24 : (mobileWh ? cardFirstScreenCap() : 16);
       const nearPx = isCommunityContainer(container) ? 960 : (mobileWh ? 720 : 640);
       imgs.forEach((img) => {
         const cur = img.currentSrc || img.src || '';
@@ -930,6 +978,7 @@
     }
 
     if (observedRoot !== container) {
+      if (observedRoot) clearFeedObserverBindings(observedRoot);
       observer?.disconnect();
       observedRoot = container;
       const rootMargin = lazyOnly
@@ -962,24 +1011,21 @@
         return;
       }
       if (lazyOnly) {
-        if (!img.dataset.feedObserverBound) {
-          img.dataset.feedObserverBound = '1';
-          observer.observe(img);
-        }
+        observer.observe(img);
+        img.dataset.feedObserverBound = '1';
         return;
       }
       if (isImgNearViewport(img)) {
         loadImg(img);
         return;
       }
-      if (!img.dataset.feedObserverBound) {
-        img.dataset.feedObserverBound = '1';
-        observer.observe(img);
-      }
+      observer.observe(img);
+      img.dataset.feedObserverBound = '1';
     });
   }
 
   function disconnect() {
+    if (observedRoot) clearFeedObserverBindings(observedRoot);
     observer?.disconnect();
     observer = null;
     observedRoot = null;
@@ -987,7 +1033,9 @@
 
   function prefetchItemsForContainer(container, items) {
     const mobileWh = container?.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.();
-    const cap = container?.id === 'imageGenFeed' ? IMAGEGEN_FEED_PREFETCH_MAX : (mobileWh ? 14 : 8);
+    const cap = container?.id === 'imageGenFeed'
+      ? igFeedPrefetchMax()
+      : (mobileWh ? (window.MobileUI?.getPerf?.()?.warehousePrefetchCap ?? 24) : 8);
     const list = (items || []).slice(0, cap);
     if (!list.length) return Promise.resolve();
     const hasCardIds = list.every((x) => x && x.id && x.image);
@@ -1013,7 +1061,7 @@
     const signP = prefetchItemsForContainer(container, items).then(() => {
       window.MediaPipeline?.patchContainerFromCache?.(container, {
         visibleFirst: true,
-        max: container.id === 'imageGenFeed' ? IMAGEGEN_FEED_PATCH_MAX : 6
+        max: container.id === 'imageGenFeed' ? igFeedPatchMax() : cardFirstScreenCap()
       });
     });
     setContainerSignReady(container, signP);
@@ -1031,9 +1079,9 @@
         window.MediaPipeline?.patchContainerFromCache?.(container, o);
       }
     };
-    patchCache({ visibleFirst: true, max: mobileWh ? 16 : 8 });
+    patchCache({ visibleFirst: true, max: mobileWh ? cardFirstScreenCap() : 8 });
     const signP = prefetchItemsForContainer(container, items).then(() => {
-      patchCache({ visibleFirst: true, max: mobileWh ? 24 : 14 });
+      patchCache({ visibleFirst: true, max: mobileWh ? cardFirstScreenCap() : 14 });
     });
     setContainerSignReady(container, signP);
     observeContainer(container);
@@ -1049,10 +1097,10 @@
     const wh = document.getElementById('cardsContainer');
     const ig = document.getElementById('imageGenFeed');
     if (wh && document.getElementById('pageWarehouse')?.classList.contains('active')) {
-      boostWarehouseImages(wh, window.MobileUI?.isMobileViewport?.() ? 16 : 10);
+      boostWarehouseImages(wh, window.MobileUI?.isMobileViewport?.() ? cardEagerCap() : 10);
     }
     if (ig && document.getElementById('pageImageGen')?.classList.contains('active')) {
-      boostImageGenWarehouseImages(ig, 12);
+      boostImageGenWarehouseImages(ig, igFeedBoostMax());
     }
   }
 
@@ -1076,12 +1124,16 @@
     observeContainer(container);
   }
 
-  function boostImageGenWarehouseImages(container, max = IMAGEGEN_FEED_BOOST_MAX) {
+  function boostImageGenWarehouseImages(container, max) {
     if (!container || container.id !== 'imageGenFeed') return;
+    const cap = max ?? igFeedBoostMax();
+    const mobile = window.MobileUI?.isMobileViewport?.();
+    if (mobile && window.MobileUI?.isUserInteracting?.()) return;
+    const nearPx = mobile ? 1800 : 480;
     let n = 0;
     sortImgsByViewport(feedImagesIn(container)).forEach((img) => {
       if (!isOwnImageGenWarehouseImg(img)) return;
-      if (n >= max) return;
+      if (n >= cap) return;
       if (isImgVisuallyLoaded(img)) return;
       const cur = img.currentSrc || img.src || '';
       if (isReadySrc(cur, img)) return;
@@ -1090,18 +1142,23 @@
         applyUrlToImg(img, hit);
         return;
       }
-      if (isImgNearViewport(img, 480)) {
+      if (isImgNearViewport(img, nearPx)) {
         n += 1;
         loadImg(img);
       }
     });
+    observeContainer(container);
   }
 
-  function boostWarehouseImages(container, max = 8) {
+  function boostWarehouseImages(container, max = 24) {
     if (!container || container.id !== 'cardsContainer') return;
+    const mobile = window.MobileUI?.isMobileViewport?.();
+    if (mobile && window.MobileUI?.isUserInteracting?.()) return;
+    const cap = max ?? (mobile ? cardEagerCap() : 8);
     let n = 0;
-    feedImagesIn(container).forEach((img) => {
-      if (n >= max) return;
+    const nearPx = mobile ? 2000 : 960;
+    const imgs = mobile ? sortImgsByViewport(feedImagesIn(container)) : feedImagesIn(container);
+    imgs.forEach((img, idx) => {
       const cur = img.currentSrc || img.src || '';
       if (isReadySrc(cur, img) && img.complete && img.naturalWidth > 8) return;
       const hit = cachedUrl(img.getAttribute('data-image-ref'), cardIdFromImg(img), img);
@@ -1109,8 +1166,10 @@
         applyUrlToImg(img, hit);
         return;
       }
-      if (String(cur).includes('data:image/svg')) return;
-      if (isImgNearViewport(img, 480)) {
+      const placeholder = !cur || cur.includes('data:image/svg');
+      const inView = isImgNearViewport(img, nearPx);
+      if (placeholder || inView || (mobile && idx < cardFirstScreenCap())) {
+        if (n >= cap && !inView) return;
         n += 1;
         loadImg(img);
       }

@@ -451,6 +451,16 @@ body {
     .app-nav-soon {
       display: none;
     }
+    .app-nav-external .app-nav-external-mark {
+      flex-shrink: 0;
+      width: 14px;
+      height: 14px;
+      margin-left: auto;
+      opacity: 0.55;
+    }
+    body.app-nav-collapsed .app-nav-external .app-nav-external-mark {
+      display: none;
+    }
     .app-nav-tag {
       flex-shrink: 0;
       margin-left: auto;
@@ -5211,14 +5221,16 @@ body {
 }
 
 @media (min-width: 901px) {
-  /* 桌面卡片库 Masonry 瀑布流 */
+  /* 桌面卡片库 Masonry 瀑布流（须在 flex 列内可滚动，勿 height:auto 撑破父级） */
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) {
     display: block !important;
     position: relative !important;
     width: 100% !important;
     max-width: 100%;
-    height: auto !important;
-    min-height: 0;
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
   }
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card {
     display: block;

@@ -2334,7 +2334,8 @@
             const list = allFilteredCards.length
               ? allFilteredCards.slice(start, start + PER_PAGE)
               : warehouseVisibleCards(cards).slice(start, start + PER_PAGE);
-            if (list.length) hydrateWarehouseGridImages(container, list);
+            softHydrateWarehouseContainer(container, list);
+            warmWarehouseFirstPageQuietly(list);
           }
           if (isMobileViewport()) enforceMobileCardGrid();
           else scheduleWarehouseMasonryLayout();
@@ -2345,12 +2346,30 @@
         window.FeatureDraft?.onAppChange?.(app);
         resumeRippleBackground(app);
       }, 280);
+      if (isMobileViewport()) {
+        requestAnimationFrame(() => {
+          window.MobileUI?.resetMobilePageScroll?.(app);
+          window.MobileUI?.scheduleMobileImageBoostBurst?.();
+        });
+      }
       window.mobileOnAppPageChange?.(app);
     }
     window.switchAppPage = switchAppPage;
 
+    function getPromptCanvasUrl() {
+      let url = String(window.PROMPT_CANVAS_URL || 'https://infinite-canvas-jay.vercel.app/canvas').trim();
+      if (!url) url = 'https://infinite-canvas-jay.vercel.app/canvas';
+      if (!/\/canvas\/?$/.test(url)) url = url.replace(/\/?$/, '') + '/canvas';
+      return url;
+    }
+    function openPromptCanvas() {
+      window.MobileUI?.closeAllMobileOverlays?.();
+      window.open(getPromptCanvasUrl(), '_blank', 'noopener,noreferrer');
+    }
+    window.openPromptCanvas = openPromptCanvas;
+
     function initAppNav() {
-      document.querySelectorAll('.app-nav-item').forEach(btn => {
+      document.querySelectorAll('.app-nav-item[data-app]').forEach(btn => {
         btn.addEventListener('click', () => switchAppPage(btn.dataset.app));
       });
     }
@@ -3423,6 +3442,7 @@
     }
 
     async function openCardImageLightbox(card) {
+      window.MobileUI?.markUserInteracting?.(640);
       const full = cards.find((c) => c.id === card?.id) || card;
       const draftGallery = panelDraftGallery.filter(Boolean);
       const gallery = draftGallery.length > 1
@@ -3430,14 +3450,16 @@
         : getEditPanelCardGallery(full);
       if (!full?.image && !gallery.length && !imageData) return;
       if (full.id && full.id !== 'draft') window.syncLightboxActions?.({ cardId: full.id });
+      const domGrid = listGridUrlForCard(full);
+      const mobileInstant = isMobileViewport() && domGrid && typeof window.openLightbox === 'function';
+      const lbBase = { cardId: full.id, preferFull: true, fallbackSrc: domGrid || '' };
       if (gallery.length > 1 && typeof window.openLightbox === 'function') {
         const idx = selectedCardId === full.id ? panelGalleryIndex : 0;
         const ref = gallery[idx] || full.image;
         const resolve = window.PromptHubCardGallery?.resolveMediaUrl;
         const openWith = (src) => {
-        window.openLightbox(src || ref, {
-          cardId: full.id,
-          preferFull: true,
+        window.openLightbox(src || domGrid || ref, {
+          ...lbBase,
           cardGalleryUrls: gallery,
           mjGalleryUrls: gallery,
           cardGalleryIndex: idx,
@@ -3447,6 +3469,16 @@
           feedKey: `card:${full.id}`
         });
         };
+        if (mobileInstant) {
+          openWith(domGrid);
+          if (resolve) {
+            void resolve(ref, { cardId: full.id, jobId: full.genJobId, galleryIndex: idx, preferFull: true })
+              .then((fullSrc) => {
+                if (fullSrc && fullSrc !== domGrid) openWith(fullSrc);
+              });
+          }
+          return;
+        }
         if (resolve) {
           void resolve(ref, { cardId: full.id, jobId: full.genJobId, galleryIndex: idx, preferFull: true }).then(openWith);
         } else {
@@ -3457,7 +3489,8 @@
       if (!full.image && !imageData) return;
       const primaryImage = full.image || imageData || gallery[0];
       const previewImg = document.getElementById('previewImage');
-      const gridFallback = listGridUrlForCard(full)
+      const gridFallback = domGrid
+        || listGridUrlForCard(full)
         || (previewImg && selectedCardId === full.id ? (previewImg.currentSrc || previewImg.src || '') : '');
       const gridOk = gridFallback && !gridFallback.includes('data:image/svg') && /^https?:\/\//i.test(gridFallback);
       const reuse = previewImg && selectedCardId === full.id ? previewFullUrlFromImg(previewImg) : '';
@@ -3467,6 +3500,28 @@
           preferFull: true,
           fallbackSrc: gridOk && gridFallback !== reuse ? gridFallback : ''
         });
+        return;
+      }
+      if (mobileInstant) {
+        window.openLightbox(domGrid, lbBase);
+        void (async () => {
+          let url = '';
+          try {
+            if (window.MediaPipeline?.resolvePreviewUrl) {
+              url = await window.MediaPipeline.resolvePreviewUrl(primaryImage, {
+                assetId: full.id,
+                cardId: full.id,
+                jobId: full.genJobId || null,
+                useJobImageApi: true,
+                gridFallbackUrl: domGrid,
+                allowGridFallback: true
+              });
+            }
+          } catch (e) { /* ignore */ }
+          if (url && url !== domGrid && typeof window.setLightboxSrc === 'function') {
+            window.setLightboxSrc(url, { cardId: full.id, preferFull: true, fallbackSrc: domGrid });
+          }
+        })();
         return;
       }
       if (typeof window.openLightbox === 'function') {
@@ -5799,16 +5854,18 @@
     /** 已禁用：登录后自动删卡曾误删大量卡片（首屏未加载即 markPathMissing → 误判幽灵） */
     function scheduleQuietGhostPurge() { /* disabled — use purgeGhostDataFromSettings with confirm */ }
 
-    function hydrateWarehouseGridImages(container, pageCards) {
+    function hydrateWarehouseGridImages(container, pageCards, opts = {}) {
       if (!container) return;
       const mobile = isMobileViewport();
-      const patchMax = mobile ? 12 : Math.min(12, pageCards?.length || 12);
+      const patchMax = mobile ? 24 : Math.min(12, pageCards?.length || 12);
       window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: patchMax });
-      void boostWarehouseListThumbs(container, pageCards, patchMax);
+      if (!opts.skipBoostList) {
+        void boostWarehouseListThumbs(container, pageCards, patchMax);
+      }
       window.CardImageLoader?.observeContainer?.(container);
-      window.CardImageLoader?.boostWarehouseImages?.(container, mobile ? 8 : 6);
-      if (pageCards?.length && window.WarehouseThumb?.prefetchForCards) {
-        void window.WarehouseThumb.prefetchForCards(pageCards, { max: mobile ? 6 : 12 });
+      window.CardImageLoader?.boostWarehouseImages?.(container, mobile ? 24 : 6);
+      if (!opts.skipPrefetch && pageCards?.length && window.WarehouseThumb?.prefetchForCards) {
+        void window.WarehouseThumb.prefetchForCards(pageCards, { max: mobile ? 24 : 12 });
       }
       if (!mobile && !container.classList.contains('masonry-ready')) {
         scheduleWarehouseMasonryLayout();
@@ -5828,12 +5885,12 @@
           return !cur.startsWith('http') || cur.includes('data:image/svg');
         })
         .slice(0, limit);
-      for (const img of imgs) {
+      const tasks = imgs.map(async (img) => {
         const cardId = img.closest('.card[data-id]')?.dataset?.id;
         const card = cardId ? cards.find((c) => c.id === cardId) : null;
-        if (!card) continue;
-        const thumb = getWarehouseCardListThumb(card);
-        if (!thumb.show || thumb.immediate) continue;
+        if (!card) return;
+        const thumb = getWarehouseCardListThumb(card, { skipEnsure: true });
+        if (!thumb.show || thumb.immediate) return;
         let url = '';
         try {
           if (window.MediaPipeline?.resolveCardListThumb) {
@@ -5846,7 +5903,8 @@
           const slotJob = thumb.coverJobId;
           if (slotJob) img.setAttribute('data-job-id', slotJob);
         }
-      }
+      });
+      await Promise.allSettled(tasks);
     }
 
     async function runCardImageIntegrityAudit() {
@@ -5893,8 +5951,23 @@
         void syncPromise.catch(() => {});
         refreshWarehouseUI({ softCards: true });
         if (Date.now() - lastBgCloudSyncAt > 45000) {
-          scheduleCrossDeviceGenRecovery();
-          void scheduleDeferredCloudPull({ silent: true, light: true });
+          const deferBgSync = () => {
+            scheduleCrossDeviceGenRecovery();
+            void scheduleDeferredCloudPull({ silent: true, light: true });
+          };
+          const onImageGenMobile = (localStorage.getItem('promptrepo_app_page') === 'imagegen'
+            || document.getElementById('pageImageGen')?.classList.contains('active'))
+            && isMobileViewport()
+            && document.body.classList.contains('imagegen-mobile-view-form');
+          if (onImageGenMobile) {
+            if (typeof requestIdleCallback === 'function') {
+              requestIdleCallback(deferBgSync, { timeout: 15000 });
+            } else {
+              setTimeout(deferBgSync, 8000);
+            }
+          } else {
+            deferBgSync();
+          }
         }
         return;
       }
@@ -6035,6 +6108,9 @@
       });
       setCloudSyncPhase(cards.length ? 'saved' : 'idle');
       lastBgCloudSyncAt = Date.now();
+      if (isMobileViewport() && cards.length) {
+        setTimeout(() => window.MobileUI?.primeMobileWarehouseBackground?.(cards), 480);
+      }
       scheduleCrossDeviceGenRecovery();
       try {
         sessionStorage.removeItem('promptrepo_pending_guest_migrate');
@@ -6894,8 +6970,8 @@
     }
 
     /** 仓库列表缩略：gallery 第一张单图 + 已缓存/可签 URL */
-    function getWarehouseCardListThumb(card) {
-      const meta = window.PromptHubCardGallery?.getWarehouseListThumbMeta?.(card);
+    function getWarehouseCardListThumb(card, opts = {}) {
+      const meta = window.PromptHubCardGallery?.getWarehouseListThumbMeta?.(card, opts);
       if (!meta) return { show: false };
       if (!meta.hasImage) return { show: false };
       return {
@@ -6982,29 +7058,101 @@
       bind(document.getElementById('searchInputMobile'));
     }
 
-    async function renderCards(reset = false) {
-      if (reset) {
-        page = 1; allFilteredCards = [];
-        if (masonryInstance) { masonryInstance.destroy(); masonryInstance = null; }
-        const container = document.getElementById('cardsContainer');
-        container.innerHTML = '';
-        delete container?.dataset?.masonryLoadBound;
-        window.CardImageLoader?.disconnect?.();
-        container?.classList.remove('cards-grid-primed', 'masonry-ready', 'cards-grid-priming');
+    function snapshotLoadedWarehouseImages(container) {
+      const map = new Map();
+      if (!container) return map;
+      container.querySelectorAll('.card[data-id] img.card-img').forEach((img) => {
+        const cardId = img.closest('.card')?.dataset?.id;
+        const src = img.currentSrc || img.src || '';
+        if (!cardId || !src || src.includes('data:image/svg')) return;
+        const ok = window.SupabaseSync?.isGridDisplayUrl?.(src)
+          || window.SupabaseSync?.isValidSignedDisplayUrl?.(src)
+          || /^https?:\/\//i.test(src);
+        if (ok) map.set(cardId, src);
+      });
+      return map;
+    }
+
+    function restoreLoadedWarehouseImages(container, map) {
+      if (!container || !map?.size) return;
+      map.forEach((src, cardId) => {
+        const card = container.querySelector(`.card[data-id="${CSS.escape(cardId)}"]`);
+        const img = card?.querySelector('img.card-img');
+        if (!img) return;
+        const cur = img.currentSrc || img.src || '';
+        if (cur && !cur.includes('data:image/svg') && cur === src) return;
+        if (window.CardImageLoader?.applyUrlToImg?.(img, src)) {
+          const media = img.closest('.card-media');
+          media?.classList.remove('is-loading', 'card-media--await');
+          if (typeof finishCardMediaShine === 'function') finishCardMediaShine(media);
+        }
+      });
+    }
+
+    function softHydrateWarehouseContainer(container, pageCards, opts = {}) {
+      if (!container) return;
+      const mobile = isMobileViewport();
+      const cap = mobile ? 24 : 12;
+      const list = Array.isArray(pageCards) ? pageCards : [];
+      window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: cap });
+      window.CardImageLoader?.observeContainer?.(container);
+      window.CardImageLoader?.boostWarehouseImages?.(container, cap);
+      if (!opts.skipBackgroundPrefetch && list.length && window.MediaPipeline?.prefetchList) {
+        void window.MediaPipeline.prefetchList(
+          list.slice(0, cap),
+          mobile ? 4000 : 2800,
+          { maxCards: Math.min(cap, list.length) }
+        ).finally?.(() => {
+          window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: cap });
+          window.CardImageLoader?.boostWarehouseImages?.(container, cap);
+        });
       }
+    }
+
+    function warmWarehouseFirstPageQuietly(cardList) {
+      const slice = (cardList || []).slice(0, 24);
+      if (!slice.length || !window.SupabaseSync?.prefetchWarehousePage) return;
+      void window.SupabaseSync.prefetchWarehousePage(slice, 5000, { maxCards: 24 });
+    }
+    function warehouseListSignature(list, ctx) {
+      const pageSlice = (list || []).slice(0, PER_PAGE);
+      const head = pageSlice.map((c) => `${c.id}\u001f${c.updatedAt || 0}\u001f${String(c.image || '').slice(0, 48)}`).join('\u001e');
+      const filterKey = [
+        ctx.group || 'all',
+        ctx.search || '',
+        ctx.sort || '',
+        String(ctx.page || 1),
+        ctx.batch ? '1' : '0',
+        (ctx.filters || []).slice().sort().join(',')
+      ].join('|');
+      return `${filterKey}::${head}`;
+    }
+
+    function listThumbFromWarehouseMeta(meta) {
+      if (!meta?.hasImage) return { show: false };
+      return {
+        show: true,
+        src: meta.cachedUrl || '',
+        coverImage: meta.ref,
+        coverJobId: meta.jobId,
+        thumbMeta: meta.thumbMeta,
+        immediate: !!meta.cachedUrl
+      };
+    }
+
+    async function renderCards(reset = false) {
       const container = document.getElementById('cardsContainer');
+      if (!container) return;
       const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
       const mobileGrid = isMobileViewport();
-      container.className = 'cards-container' + (mobileGrid ? ' mobile-grid' : '');
-      if (viewMode === 'list') {
-        container.classList.add('list-view');
-        container.classList.remove('cards-grid-priming', 'masonry-ready');
-        if (masonryInstance) { masonryInstance.destroy(); masonryInstance = null; }
-      }
-      if (batchMode) container.classList.add('batch-mode');
       const searchEl = document.getElementById('searchInputMobile') || document.getElementById('searchInput');
       const search = (searchEl?.value || '').toLowerCase();
       sortMode = document.getElementById('sortSelect')?.value || sortMode || 'updated-desc';
+
+      if (reset) {
+        page = 1;
+        allFilteredCards = [];
+      }
       if (reset || allFilteredCards.length === 0) {
         let filtered = warehouseVisibleCards(cards);
         if (currentGroup === 'uncategorized') filtered = filtered.filter(c => !c.group);
@@ -7013,44 +7161,95 @@
         if (activeFilters.size > 0) filtered = filtered.filter(cardMatchesFilters);
         allFilteredCards = sortCardsWithPins(filtered);
       }
+
+      const whSig = warehouseListSignature(allFilteredCards, {
+        group: currentGroup,
+        search,
+        sort: sortMode,
+        page,
+        batch: batchMode,
+        filters: [...activeFilters]
+      });
+
+      if (
+        reset
+        && page === 1
+        && container.dataset.whSig === whSig
+        && container.querySelector('.card[data-id]')
+        && document.getElementById('pageWarehouse')?.classList.contains('active')
+      ) {
+        softHydrateWarehouseContainer(container, allFilteredCards.slice(0, PER_PAGE), { skipBackgroundPrefetch: true });
+        if (mobileGrid) window.MobileUI?.boostActivePageImages?.();
+        updateBatchCountLabel();
+        return;
+      }
+
+      const preservedWarehouseImgs = reset && mobileGrid && page === 1
+        ? snapshotLoadedWarehouseImages(container)
+        : new Map();
+
+      if (reset) {
+        if (masonryInstance) { masonryInstance.destroy(); masonryInstance = null; }
+        container.innerHTML = '';
+        delete container?.dataset?.masonryLoadBound;
+        window.CardImageLoader?.disconnect?.();
+        container.classList.remove('cards-grid-primed', 'masonry-ready', 'cards-grid-priming');
+      }
+      container.className = 'cards-container' + (mobileGrid ? ' mobile-grid' : '');
+      if (viewMode === 'list') {
+        container.classList.add('list-view');
+        container.classList.remove('cards-grid-priming', 'masonry-ready');
+        if (masonryInstance) { masonryInstance.destroy(); masonryInstance = null; }
+      }
+      if (batchMode) container.classList.add('batch-mode');
       const start = (page - 1) * PER_PAGE;
       const pageCards = allFilteredCards.slice(start, start + PER_PAGE);
       if (page === 1 && pageCards.length === 0) {
         container.classList.add('feed-grid-centered');
         container.innerHTML = '<div class="feature-empty warehouse-grid-empty"><p>📦 暂无卡片</p></div>';
+        delete container.dataset.whSig;
         return;
       }
       container.classList.remove('feed-grid-centered');
-      const prefetchCards = pageCards.slice(0, 12);
-      let prefetchP = Promise.resolve();
       const warehouseActive = document.getElementById('pageWarehouse')?.classList.contains('active');
+      const prefetchCap = mobileGrid ? 24 : 12;
+      const prefetchCards = pageCards.slice(0, prefetchCap);
+      let prefetchP = Promise.resolve();
       if (page === 1 && prefetchCards.length && warehouseActive && window.MediaPipeline?.prefetchList) {
         prefetchP = window.MediaPipeline.prefetchList(
           prefetchCards,
-          mobileGrid ? 2800 : 2400,
-          { maxCards: Math.min(12, prefetchCards.length) }
+          mobileGrid ? 4000 : 2400,
+          { maxCards: prefetchCap }
         );
+        try {
+          await Promise.race([
+            prefetchP,
+            new Promise((r) => setTimeout(r, mobileGrid ? 200 : 180))
+          ]);
+        } catch (e) { /* ignore */ }
       }
-      if (page === 1 && pageCards.length && warehouseActive && window.SupabaseSync?.backfillGridThumbsForCards) {
-        void window.SupabaseSync.backfillGridThumbsForCards(pageCards, {
-          max: mobileGrid ? Math.min(2, pageCards.length) : Math.min(3, pageCards.length),
-          force: false,
-          quiet: true,
-          awaitDrain: false
-        });
-      }
-      if (page === 1 && pageCards.length && warehouseActive && window.PromptHubCardGallery?.ensureFeedCoversForCards) {
-        window.PromptHubCardGallery.ensureFeedCoversForCards(pageCards, { persist: false, backfill: false });
+      const preparedRows = warehouseActive && window.PromptHubCardGallery?.prepareWarehousePageThumbs
+        ? window.PromptHubCardGallery.prepareWarehousePageThumbs(pageCards, { ensure: page === 1 && !isAppend })
+        : pageCards.map((card) => ({ card, meta: null }));
+      if (page === 1 && warehouseActive && window.SupabaseSync?.backfillGridThumbsForCards) {
+        const backfillMax = mobileGrid ? Math.min(24, pageCards.length) : Math.min(3, pageCards.length);
+        const runBackfill = () => {
+          void window.SupabaseSync.backfillGridThumbsForCards(pageCards, {
+            max: backfillMax,
+            force: false,
+            quiet: true,
+            awaitDrain: false
+          });
+        };
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(runBackfill, { timeout: 3000 });
+        else requestAnimationFrame(runBackfill);
       }
       const fragment = document.createDocumentFragment();
       const isAppend = !reset && page > 1;
-      const eagerImgCount = mobileGrid ? 6 : Math.min(4, pageCards.length);
-      pageCards.forEach((card, idx) => {
-        const listThumb = getWarehouseCardListThumb(card);
-        const coverMeta = listThumb.thumbMeta
-          || window.PromptHubCardGallery?.pickWarehouseListThumb?.(card)
-          || window.PromptHubCardGallery?.pickWarehouseFeedCover?.(card)
-          || window.PromptHubCardGallery?.getCardFeedCoverMeta?.(card);
+      const eagerImgCount = mobileGrid ? 24 : Math.min(4, pageCards.length);
+      preparedRows.forEach(({ card, meta }, idx) => {
+        const listThumb = meta ? listThumbFromWarehouseMeta(meta) : getWarehouseCardListThumb(card, { skipEnsure: true });
+        const coverMeta = listThumb.thumbMeta;
         const div = document.createElement('div');
         div.className = `card ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
         if (!mobileGrid && pageCards.length <= 8 && reset) {
@@ -7070,14 +7269,10 @@
         }
         const checked = selectedCardIds.has(card.id);
         if (checked) div.classList.add('batch-selected');
-        const showImage = listThumb.show;
+        const showImage = listThumb.show || !!(meta?.hasImage);
         if (showImage) div.classList.add('card--visual');
         else div.classList.add('card--text-only');
-        const coverImage = listThumb.coverImage
-          || coverMeta?.ref
-          || window.PromptHubCardGallery?.getCardFeedCoverImage?.(card)
-          || window.PromptHubCardGallery?.getCardCoverImage?.(card)
-          || card.image;
+        const coverImage = listThumb.coverImage || coverMeta?.ref || card.image || '';
         const coverJobId = listThumb.coverJobId
           || coverMeta?.slotJobId
           || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');
@@ -7143,10 +7338,16 @@
           if (batchMode) {
             const cb = div.querySelector('.card-checkbox');
             toggleSelectCard(card.id, cb);
-          } else {
-            pulseWarehouseCard(div, 'press');
-            editCard(card.id);
+            return;
           }
+          pulseWarehouseCard(div, 'press');
+          if (mobileGrid) {
+            if (e.target.closest('.card-img') && settings.imageClickZoom && cardHasDisplayImage(card)) {
+              void openCardImageLightbox(card);
+            }
+            return;
+          }
+          editCard(card.id);
         });
         const img = div.querySelector('.card-img');
         if (img && card.image) {
@@ -7164,7 +7365,7 @@
               return;
             }
             if (zoomOnClick) void openCardImageLightbox(card);
-            else editCard(card.id);
+            else if (!mobileGrid) editCard(card.id);
           });
         }
         div.addEventListener('dragstart', e => {
@@ -7202,15 +7403,20 @@
       });
       const appendedCards = [...fragment.querySelectorAll('.card')];
       container.appendChild(fragment);
+      if (page === 1 && !isAppend) container.dataset.whSig = whSig;
+      restoreLoadedWarehouseImages(container, preservedWarehouseImgs);
       bindCardGridImageErrors(container);
       bindCardGridImageRelayout(container);
-      const runWarehouseImages = () => {
-        if (warehouseActive) void hydrateWarehouseGridImages(container, pageCards);
-      };
-      if (page === 1) {
-        void prefetchP.finally(runWarehouseImages);
-      } else {
-        runWarehouseImages();
+      if (warehouseActive) {
+        void hydrateWarehouseGridImages(container, pageCards, {
+          skipPrefetch: true,
+          skipBoostList: preservedWarehouseImgs.size > 0
+        });
+        if (page === 1 && prefetchCards.length) {
+          void prefetchP.finally?.(() => {
+            softHydrateWarehouseContainer(container, pageCards, { skipBackgroundPrefetch: true });
+          });
+        }
       }
       if (!mobileGrid && viewMode !== 'list') {
         if (isAppend && masonryInstance && appendedCards.length) {
@@ -7228,12 +7434,88 @@
         masonryInstance = null;
       }
       updateBatchCountLabel();
+      syncWarehouseScrollSentinel(container);
+      bindWarehousePagedScroll();
       if (mobileGrid) {
         container.classList.add('cards-grid-primed');
         enforceMobileCardGrid();
-        requestAnimationFrame(() => enforceMobileCardGrid());
+        requestAnimationFrame(() => {
+          window.MobileUI?.boostActivePageImages?.();
+          window.MobileUI?.scheduleMobileImageBoostBurst?.();
+        });
       }
     }
+
+    let warehouseScrollBoundEl = null;
+    let warehousePageObserver = null;
+    let warehouseScrollSentinel = null;
+    let warehouseScrollLoading = false;
+    const warehouseScrollRoot = () => {
+      if (!isMobileViewport()) return document.getElementById('cardsContainer');
+      return document.querySelector('.app-main') || document.getElementById('mainContentArea') || document.getElementById('cardsContainer');
+    };
+    function loadNextWarehousePage() {
+      if (warehouseScrollLoading) return;
+      if ((page * PER_PAGE) >= allFilteredCards.length) return;
+      warehouseScrollLoading = true;
+      page += 1;
+      void Promise.resolve(renderCards()).finally(() => {
+        warehouseScrollLoading = false;
+      });
+    }
+    function syncWarehouseScrollSentinel(container) {
+      if (!container) return;
+      container.querySelectorAll('.warehouse-scroll-sentinel').forEach((el) => el.remove());
+      if ((page * PER_PAGE) >= allFilteredCards.length) {
+        warehousePageObserver?.disconnect();
+        warehouseScrollSentinel = null;
+        return;
+      }
+      const sentinel = document.createElement('div');
+      sentinel.className = 'warehouse-scroll-sentinel';
+      sentinel.setAttribute('aria-hidden', 'true');
+      container.appendChild(sentinel);
+      warehouseScrollSentinel = sentinel;
+      warehousePageObserver?.disconnect();
+      const root = warehouseScrollRoot();
+      if (!root) return;
+      warehousePageObserver = new IntersectionObserver((entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        loadNextWarehousePage();
+      }, {
+        root: root === document.body ? null : root,
+        rootMargin: '280px 0px',
+        threshold: 0
+      });
+      warehousePageObserver.observe(sentinel);
+    }
+    function bindWarehousePagedScroll() {
+      const el = warehouseScrollRoot();
+      if (!el) return;
+      if (warehouseScrollBoundEl === el) return;
+      if (warehouseScrollBoundEl) {
+        warehouseScrollBoundEl.removeEventListener('scroll', onWarehouseScroll);
+      }
+      warehouseScrollBoundEl = el;
+      el.addEventListener('scroll', onWarehouseScroll, { passive: true });
+    }
+    function onWarehouseScroll() {
+      if (warehouseScrollLoading) return;
+      const el = warehouseScrollRoot();
+      if (!el) return;
+      const mobile = isMobileViewport();
+      if (mobile) {
+        const wh = document.getElementById('cardsContainer');
+        if (wh) window.CardImageLoader?.boostWarehouseImages?.(wh, 24);
+        if (el.scrollTop < 80) return;
+        if (el.scrollTop + el.clientHeight < el.scrollHeight - 280) return;
+      } else {
+        if (el.scrollTop < 48) return;
+        if (el.scrollTop + el.clientHeight < el.scrollHeight - 150) return;
+      }
+      loadNextWarehousePage();
+    }
+    bindWarehousePagedScroll();
 
     document.getElementById('cardsContainer')?.addEventListener('click', (e) => {
       const editId = e.target.closest('[data-mobile-edit]')?.getAttribute('data-mobile-edit');
@@ -7255,25 +7537,6 @@
         fillCardToImageGen(fillId);
       }
     });
-
-    let warehouseScrollLoading = false;
-    document.getElementById('cardsContainer')?.addEventListener('scroll', function() {
-      if (warehouseScrollLoading) return;
-      const mobile = isMobileViewport();
-      if (mobile) {
-        if (this.scrollTop < 100) return;
-        if (this.scrollTop + this.clientHeight < this.scrollHeight - 220) return;
-      } else {
-        if (this.scrollTop < 48) return;
-        if (this.scrollTop + this.clientHeight < this.scrollHeight - 150) return;
-      }
-      if ((page * PER_PAGE) >= allFilteredCards.length) return;
-      warehouseScrollLoading = true;
-      page += 1;
-      void Promise.resolve(renderCards()).finally(() => {
-        warehouseScrollLoading = false;
-      });
-    }, { passive: true });
 
     function enableGroupDrop() {
       document.querySelectorAll('.group-item').forEach(item => {
@@ -9697,10 +9960,12 @@
           mobileEditPanelHistory = true;
         } catch (e) { /* ignore */ }
       }
-      requestAnimationFrame(() => {
-        scheduleLayoutMasonry();
-        setTimeout(scheduleLayoutMasonry, 360);
-      });
+      if (!isMobileViewport()) {
+        requestAnimationFrame(() => {
+          scheduleLayoutMasonry();
+          setTimeout(scheduleLayoutMasonry, 360);
+        });
+      }
     }
     window.addEventListener('popstate', () => {
       if (!isMobileViewport()) return;

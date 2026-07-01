@@ -134,8 +134,8 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
     if (primary) targets.add(primary);
     if (wrap) targets.add(wrap);
     if (document.body.classList.contains('imagegen-mobile-view-feed')) {
-      const shell = wrap?.closest?.('.feature-shell');
-      if (shell) targets.add(shell);
+      const main = document.querySelector('.app-main');
+      if (main) targets.add(main);
       if (document.scrollingElement) targets.add(document.scrollingElement);
     }
     return [...targets];
@@ -297,7 +297,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
     if (!wrap) return null;
     if (deps.getFeedScrollRoot) return deps.getFeedScrollRoot(wrap) || wrap;
     if (document.body.classList.contains('imagegen-mobile-view-feed')) {
-      return wrap.closest('.feature-shell') || wrap;
+      return document.querySelector('.app-main') || wrap;
     }
     return wrap;
   }
@@ -1003,6 +1003,31 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         imageGenFeedPageIo.disconnect();
         imageGenFeedPageIo = null;
       }
+      if (!d().isMobileFeedViewport?.() || !('IntersectionObserver' in window)) return;
+      const wrap = document.getElementById('imageGenFeed');
+      const store = imageGenFeedPagedStore;
+      if (!wrap || !store || !imageGenFeedHasMorePages()) return;
+      const scrollRoot = resolveImageGenFeedScrollRoot(wrap) || wrap;
+      const sentinel = ensureImageGenFeedSentinel(wrap);
+      if (!sentinel) return;
+      imageGenFeedPageIo = new IntersectionObserver((entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        loadNextImageGenFeedPage();
+      }, {
+        root: scrollRoot === document.documentElement ? null : scrollRoot,
+        rootMargin: '320px 0px',
+        threshold: 0.01
+      });
+      imageGenFeedPageIo.observe(sentinel);
+    }
+
+    function fillImageGenFeedUntilScrollable(wrap, store) {
+      if (!d().isMobileFeedViewport?.() || !wrap || !store) return;
+      const scrollEl = resolveImageGenFeedScrollRoot(wrap) || wrap;
+      if (!scrollEl || imageGenFeedScrollLoading) return;
+      if (!imageGenFeedHasMorePages()) return;
+      if (scrollEl.scrollHeight > scrollEl.clientHeight + 120) return;
+      loadNextImageGenFeedPage();
     }
   
     function syncImageGenFeedLoadMoreBtn() {
@@ -1330,13 +1355,13 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           d().setFeedLayoutPending?.(wrap, false);
           if (scrollState) scheduleImageGenFeedScrollRestore(wrap, scrollState);
           if (d().getImageGenFeedTab?.() === 'warehouse') {
-            window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 10);
+            window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, d().isMobileFeedViewport?.() ? 24 : 10);
           }
         }
         if (!didPrimeWarehouse) {
-          window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 8 });
+          window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: d().isMobileFeedViewport?.() ? 24 : 8 });
           if (d().getImageGenFeedTab?.() === 'warehouse') {
-            window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, 10);
+            window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, d().isMobileFeedViewport?.() ? 24 : 10);
           }
         }
         delete wrap.__phIgPendingScrollState;
@@ -1351,6 +1376,12 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         }
         syncImageGenFeedLoadMoreBtn();
         reconnectImageGenFeedPageObserver();
+        if (mobileFeed && !feedAppend) {
+          requestAnimationFrame(() => {
+            fillImageGenFeedUntilScrollable(wrap, store);
+            reconnectImageGenFeedPageObserver();
+          });
+        }
         /* 生图 /generated/ 由 CDN 现场缩略，勿 backfillGridThumbs（会批量拉原图 2MB+） */
       })();
     }

@@ -9,7 +9,64 @@
   let pending = [];
   let flushTimer = null;
   const BATCH_DELAY_MS = 24;
-  const MAX_BATCH = 24;
+  const MAX_BATCH = 8;
+  const LS_WH_GRID = 'ph_wh_grid_v1';
+  const WH_GRID_TTL_MS = 45 * 60 * 1000;
+
+  function readWhGridSession() {
+    try {
+      const raw = sessionStorage.getItem(LS_WH_GRID);
+      if (!raw) return {};
+      const data = JSON.parse(raw);
+      if (!data || typeof data !== 'object') return {};
+      const now = Date.now();
+      const out = {};
+      for (const [k, v] of Object.entries(data)) {
+        if (v?.url && v.expiresAt > now) out[k] = v.url;
+      }
+      return out;
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function writeWhGridSession(key, url) {
+    if (!key || !url) return;
+    try {
+      const data = readWhGridSessionRaw();
+      data[key] = { url, expiresAt: Date.now() + WH_GRID_TTL_MS };
+      const keys = Object.keys(data);
+      if (keys.length > 240) {
+        keys.sort((a, b) => (data[a]?.expiresAt || 0) - (data[b]?.expiresAt || 0));
+        keys.slice(0, keys.length - 200).forEach((k) => delete data[k]);
+      }
+      sessionStorage.setItem(LS_WH_GRID, JSON.stringify(data));
+    } catch (e) { /* ignore */ }
+  }
+
+  function readWhGridSessionRaw() {
+    try {
+      const raw = sessionStorage.getItem(LS_WH_GRID);
+      if (!raw) return {};
+      const data = JSON.parse(raw);
+      return data && typeof data === 'object' ? data : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  (function hydrateWhGridFromSession() {
+    const sess = readWhGridSession();
+    for (const [k, url] of Object.entries(sess)) {
+      if (url && isGridUrl(url)) cache.set(k, url);
+    }
+  })();
+
+  function mobileBatchTuning() {
+    const p = window.MobileUI?.getPerf?.();
+    if (!p) return { delay: BATCH_DELAY_MS, max: MAX_BATCH };
+    return { delay: p.warehouseThumbDelay ?? BATCH_DELAY_MS, max: Math.min(p.warehouseThumbBatch ?? MAX_BATCH, MAX_BATCH) };
+  }
 
   function slotJobId(baseJobId, slot) {
     const base = String(baseJobId || '').replace(/#\d+$/, '');
@@ -59,6 +116,7 @@
   function rememberUrl(key, url, cardId) {
     if (!url) return '';
     cache.set(key, url);
+    writeWhGridSession(key, url);
     if (cardId && window.SupabaseSync?.markGridThumbReady) {
       window.SupabaseSync.markGridThumbReady(cardId);
     }
@@ -67,15 +125,17 @@
 
   function scheduleFlush() {
     if (flushTimer) return;
+    const { delay } = mobileBatchTuning();
     flushTimer = setTimeout(() => {
       flushTimer = null;
       void flushPending();
-    }, BATCH_DELAY_MS);
+    }, delay);
   }
 
   async function flushPending() {
-    const batch = pending.splice(0, MAX_BATCH);
-    if (!batch.length) return;
+    if (!pending.length) return;
+    const { max } = mobileBatchTuning();
+    const batch = pending.splice(0, max);
     if (pending.length) scheduleFlush();
 
     const grouped = new Map();
@@ -159,17 +219,24 @@
   async function resolveForCardModel(card) {
     if (!card?.id) return '';
     window.SupabaseSync?.clearPathMissingForCard?.(card.id, card.image);
-    const meta = window.PromptHubCardGallery?.getWarehouseListThumbMeta?.(card);
-    if (!meta?.hasImage) return '';
-    const jobId = meta.jobId || meta.thumbMeta?.slotJobId
+    const thumb = window.PromptHubCardGallery?.pickWarehouseListThumb?.(card)
+      || window.PromptHubCardGallery?.pickWarehouseFeedCover?.(card);
+    const ref = thumb?.ref || card.image || '';
+    const galleryIndex = thumb?.galleryIndex ?? 0;
+    const jobId = thumb?.slotJobId?.replace(/#\d+$/, '')
       || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(card)
       || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');
-    const ref = meta.ref || card.image || '';
-    const galleryIndex = meta.galleryIndex ?? 0;
-    if (meta.cachedUrl && isGridUrl(meta.cachedUrl)) return meta.cachedUrl;
+    if (!ref && !jobId) return '';
+    if (ref && window.SupabaseSync?.getListDisplayImageSrc) {
+      const cached = window.SupabaseSync.getListDisplayImageSrc(ref, card.id, {
+        jobId: jobId || undefined,
+        allowFullFallback: false
+      });
+      if (cached && isGridUrl(cached)) return cached;
+    }
     if (jobId) {
       const wh = await resolveForCard(ref, {
-        jobId: meta.thumbMeta?.slotJobId || slotJobId(jobId, galleryIndex),
+        jobId: thumb?.slotJobId || slotJobId(jobId, galleryIndex),
         assetId: card.id,
         cardId: card.id,
         galleryIndex
@@ -190,17 +257,35 @@
 
   async function prefetchForCards(cards, opts) {
     const list = Array.isArray(cards) ? cards : [];
-    const max = Math.min(opts?.max || 16, list.length);
+    const max = Math.min(opts?.max || warehousePrefetchCardCap(), list.length);
     const tasks = [];
     for (let i = 0; i < max; i += 1) {
       const card = list[i];
       if (!card?.id) continue;
-      const meta = window.PromptHubCardGallery?.getWarehouseListThumbMeta?.(card);
-      if (!meta?.hasImage) continue;
+      const thumb = window.PromptHubCardGallery?.pickWarehouseListThumb?.(card)
+        || window.PromptHubCardGallery?.pickWarehouseFeedCover?.(card);
+      const ref = thumb?.ref || card.image || '';
+      const galleryIndex = thumb?.galleryIndex ?? 0;
+      const jobId = thumb?.slotJobId?.replace(/#\d+$/, '')
+        || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(card)
+        || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');
+      if (!ref && !jobId) continue;
+      if (ref && window.SupabaseSync?.getListDisplayImageSrc) {
+        const cached = window.SupabaseSync.getListDisplayImageSrc(ref, card.id, {
+          jobId: jobId || undefined,
+          allowFullFallback: false
+        });
+        if (cached && isGridUrl(cached)) continue;
+      }
       tasks.push(resolveForCardModel(card));
     }
     if (!tasks.length) return;
     await Promise.allSettled(tasks);
+  }
+
+  function warehousePrefetchCardCap() {
+    const mp = window.MobileUI?.getPerf?.();
+    return Math.min(24, Math.max(8, Number(mp?.warehousePrefetchCap) || 24));
   }
 
   window.WarehouseThumb = {

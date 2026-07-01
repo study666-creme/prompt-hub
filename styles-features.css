@@ -122,6 +122,13 @@
   min-height: 0;
 }
 
+@media (max-width: 900px) {
+  .community-cards {
+    flex: none !important;
+    min-height: auto !important;
+  }
+}
+
 /* 绀惧尯/鍒涗綔鍗＄墖濮嬬粓鍙锛堥伩鍏?Masonry 闃查棯瑙勫垯鎴栨棫缂撳瓨瀵艰嚧绌虹綉鏍硷級 */
 #communityGrid.cards-container,
 #creationsGrid.cards-container,
@@ -6565,4 +6572,41 @@ body.community-gacha-open {
 .imagegen-purify-fast input {
   margin-top: 3px;
   flex-shrink: 0;
+}
+
+/* 手机 · 单滚动根兜底（styles-mobile 之后加载，压过 .imagegen-side > .imagegen-feed flex:1） */
+@media (max-width: 900px) {
+  body.imagegen-mobile-view-feed #pageImageGen.app-page.active.app-page-feature {
+    flex: none !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+  }
+
+  body.imagegen-mobile-view-feed #pageImageGen .feature-shell,
+  body.imagegen-mobile-view-feed #pageImageGen .imagegen-layout {
+    flex: none !important;
+    min-height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  body.imagegen-mobile-view-feed #pageImageGen .imagegen-side {
+    flex: none !important;
+    min-height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: transparent !important;
+  }
+
+  body.imagegen-mobile-view-feed #pageImageGen .imagegen-side:not(.imagegen-preview-open) > .imagegen-feed,
+  body.imagegen-mobile-view-feed #imageGenFeed.imagegen-feed {
+    flex: none !important;
+    min-height: auto !important;
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+    overflow-y: visible !important;
+    overscroll-behavior: auto;
+  }
 }

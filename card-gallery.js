@@ -80,9 +80,20 @@
   }
 
   /** 列表/feed 缩略元数据：gallery 第一张（MJ 含四宫格合成图） */
-  function getWarehouseListThumbMeta(card) {
+  const thumbMetaGuard = new WeakSet();
+  function getWarehouseListThumbMeta(card, opts = {}) {
     if (!card?.id) return { hasImage: false };
-    ensureFeedCoverFromGallery(card, { persist: false, backfill: false });
+    const guarded = thumbMetaGuard.has(card);
+    if (!guarded && !opts.skipEnsure) {
+      thumbMetaGuard.add(card);
+      try {
+        ensureFeedCoverFromGallery(card, { persist: false, backfill: false });
+      } catch (e) {
+        /* 避免 ensure → resolve → meta 递归栈溢出 */
+      } finally {
+        thumbMetaGuard.delete(card);
+      }
+    }
     const thumb = pickWarehouseListThumb(card) || pickWarehouseFeedCover(card);
     const gallery = normalizeCardGallery(card);
     const baseJob = resolveGenJobIdFromCard(card) || '';
@@ -350,6 +361,19 @@
     return n;
   }
 
+  /** 卡片库首屏：一次 ensure + 批量 meta（render 热路径勿逐卡 ensure） */
+  function prepareWarehousePageThumbs(cardList, opts = {}) {
+    const list = Array.isArray(cardList) ? cardList : [];
+    if (!list.length) return [];
+    if (opts.ensure !== false) {
+      ensureFeedCoversForCards(list, { persist: false, backfill: false });
+    }
+    return list.map((card) => ({
+      card,
+      meta: getWarehouseListThumbMeta(card, { skipEnsure: true })
+    }));
+  }
+
   function syncCardGalleryFields(card) {
     if (!card) return [];
     const imgs = normalizeCardGallery(card);
@@ -510,6 +534,7 @@
     isFeedListCoverCandidate,
     ensureFeedCoverFromGallery,
     ensureFeedCoversForCards,
+    prepareWarehousePageThumbs,
     isResolvableCoverRef,
     isMjCompositeCoverRef,
     mergeCardGalleryImages,

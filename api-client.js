@@ -924,7 +924,7 @@
   }
 
   async function postWarehouseThumbs(jobs) {
-    const list = Array.isArray(jobs) ? jobs.filter((j) => j && j.jobId).slice(0, 32) : [];
+    const list = Array.isArray(jobs) ? jobs.filter((j) => j && j.jobId).slice(0, 8) : [];
     if (!list.length) return { ok: true, data: { thumbs: {} } };
     return requestWithPrepare('POST', '/api/v1/media/warehouse-thumbs', { jobs: list }, {
       timeoutMs: Math.max(API_TIMEOUT_MS, 90000),

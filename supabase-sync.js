@@ -48,9 +48,16 @@
   const VARIANT_FULL = 'full';
   const USE_STORAGE_TRANSFORM = false;
   const GRID_SIGN_CONCURRENCY = 16;
-  const WAREHOUSE_PREFETCH_CARD_CAP = 12;
+  const WAREHOUSE_PREFETCH_CARD_CAP = 24;
   const WAREHOUSE_VISIBLE_SIGN_CAP = 10;
   const WAREHOUSE_FAST_FIRST = 10;
+
+  /** 与 MobileUI.MOBILE_PERF.warehousePrefetchCap 对齐（社区 feed 同量级 24） */
+  function warehousePrefetchCardCap() {
+    const mp = typeof window !== 'undefined' && window.MobileUI?.getPerf?.();
+    if (mp?.warehousePrefetchCap) return Math.max(8, Number(mp.warehousePrefetchCap) || 24);
+    return WAREHOUSE_PREFETCH_CARD_CAP;
+  }
   const SS_SIGN_CACHE = 'ph_signed_urls_v2';
   const LS_CLOUD_UPDATED = 'ph_cloud_updated_at';
   let pullCloudInflight = null;
@@ -2800,8 +2807,8 @@
   async function prefetchCardsImages(cards, capMs, opts) {
     if (!isLoggedIn()) return;
     const maxCards = Math.min(
-      WAREHOUSE_PREFETCH_CARD_CAP,
-      Math.max(1, Number(opts?.maxCards) || WAREHOUSE_PREFETCH_CARD_CAP)
+      warehousePrefetchCardCap(),
+      Math.max(1, Number(opts?.maxCards) || warehousePrefetchCardCap())
     );
     const limit = capMs != null ? Math.min(Math.max(800, capMs), 8000) : 2800;
     const pathSet = new Set();
@@ -2865,7 +2872,7 @@
     const mobile = typeof window !== 'undefined' && window.MobileUI?.isMobileViewport?.();
     const cap = Number(opts?.maxCards) > 0
       ? Number(opts.maxCards)
-      : (mobile ? 12 : 24);
+      : warehousePrefetchCardCap();
     const maxCards = Math.min(cap, Math.max(1, (cards || []).length));
     const list = (cards || []).slice(0, maxCards);
     if (!list.length) return;

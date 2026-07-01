@@ -1,59 +1,40 @@
-# Prompt Hub — 项目上下文（给 AI / 新对话用）
+# Prompt Hub — 项目上下文
 
-> **新聊天**：先读 **`docs/AI-PITFALLS.md`**（防炸站）→ **`docs/CURRENT-ISSUES.md`** → **`docs/AI-HANDOFF.md`**。  
-> 默认中文；**P0 拉满算力**见 `docs/AI-WORK-MODE.md`；勿提交密钥。用户是纯小白 → 分步 + 可复制命令。
-
----
-
-## 产品是什么
-
-**提示词仓库（Prompt Hub）**：纯前端 SPA + Cloudflare Workers API + Supabase。
-
-| 模块 | 说明 |
-|------|------|
-| **卡片库** | 提示词卡片、分组、Masonry、批量操作（含批量开/关社区公开） |
-| **提示词社区** | 全站 Feed（`community_posts` + API）· 桌面 **Masonry** 瀑布流 |
-| **我的主页** | 发布作品（按**首次发布时间**倒序）、关注/粉丝、拥有的/发布的资产包 |
-| **图片生成** | 扣积分；`POST /api/v1/generate`；含 **仓库/社区** Feed（仓库仅生图卡片） |
-| **资产包** | 领取存入「拥有」、封面预览、选择性导入、大图下载 |
-| **资产创作** | **前期制作**：设定库 + **分镜/视频脚本** + **图词绑定**（关联图）；非画布替代品，详见 **`docs/VIDEO-CANVAS-EXPORT.md`** |
-
-部署：**主域名** https://prompt-hubs.com · 旧站 https://prompt-hub.cn · API Worker 名 `prompt-hub-api` · 路线见 **`docs/OVERSEAS-FIRST.md`**
-
-**产品分工**：Prompt Hub = 前期（对表、找词、找图、脚本与参考图绑定）→ 画布平台（LibTV / TapNow / UpDream 等）= 正式制作（生视频）。Prompt Hub **不替代**画布，减轻进画布前的整理成本。
+> 给 AI / 协作者：新任务先读本文件 + `docs/AI-PITFALLS.md`。
 
 ---
 
-## 当前部署阶段（2026-06-07 · warehouse-thumbs 统一缩略图）
+## 当前部署阶段（2026-07-02 · 卡片库对齐社区 Feed）
 
 | 项 | 状态 |
 |----|------|
-| **Git** | `main` · `46fcf29` · 已 push |
-| **Pages** | build **`20260628c`** · `warehouse-thumb.js` + `MediaPipeline.resolveCardListThumb` · **Ctrl+Shift+R** 强刷 |
-| **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com · Version `64e24d2a` |
-| **Supabase 账期** | Pro 约至 **2026-07-07**；到期前迁 MemFire + R2 |
+| **Pages** | https://prompt-hubs.com · deploy 后见 `window.__APP_BUILD__` |
+| **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com |
 
-### 已打通
+### 已打通（卡片库架构）
 
-- ✅ **`POST /api/v1/media/warehouse-thumbs`**：服务端归档原图 → 生成 `_grid` → 只返回 CDN 缩略图 URL
-- ✅ **全站列表唯一入口**：`WarehouseThumb` / `MediaPipeline.resolveCardListThumb(card)`（卡片库、生图 feed、编辑预览共用）
-- ✅ **禁止客户端批量拉原图**：`persistGenerationImage` / 后台 repair 不再 `fetchMediaAsBlobUrl` 扫库（避免 800MB+ 流量）
-- ✅ **MJ 多 slot**：Worker 按 `meta.mjGalleryUrls[slot]` 归档；`resolveGenJobIdFromCard` 识别 tags 里的 UUID jobId
-- ✅ Worker CDN：`_grid.jpg` magic byte 校验；坏文件删 R2 后重建
+- ✅ `whSig` 跳过重复整页渲染（同社区 feedSig）
+- ✅ `softHydrateWarehouseContainer` + 切 Tab 快照保留已加载图
+- ✅ prefetch 单链路 24 张；warehouse-thumbs session 缓存
+- ✅ 生图「作品」feed 手机滚动兜底
 
-### 已知问题 / 下一步
+### 已知限制
 
-1. 强刷后 `window.__APP_BUILD__` 应为 **`20260628c`**
-2. **仍裂图/文字卡**：多为上游临时链已过期 → 登录后 `recover-warehouse` + warehouse-thumbs 批量修复；Console 可跑 `WarehouseThumb.resolveForCardModel(card)`
-3. Network 列表区应见 `warehouse-thumbs` + `/api/v1/media/i/..._grid.jpg`（<300KB），不应大量 `media/fetch?url=getapib`
-4. MemFire 迁移（7 月初 final dump）
+- 生图卡仍多一跳 Worker `warehouse-thumbs`（数据模型差异，非 CSS）
 
 ### 部署
 
 ```powershell
-cd d:\prompt-hub\server
-npx wrangler deploy
-cd ..
+cd d:\prompt-hub
+node scripts/build-foundation-bundle.mjs
+node scripts/build-core-bundle.mjs
+.\deploy-pages.ps1
+```
+
+### 部署
+
+```powershell
+cd d:\prompt-hub
 .\deploy-pages.ps1
 ```
 
@@ -61,7 +42,6 @@ cd ..
 
 - 邮箱 `2705367723@qq.com`
 - `author_id`：`ab5c77dc-570e-4af7-ac38-2d311be96244`
-- 万相/Flux 自测：`server/scripts/test-generate-wan-production.mjs`（单次提交 + 慢速轮询）
 
 ---
 

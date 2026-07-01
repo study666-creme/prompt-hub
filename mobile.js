@@ -16,6 +16,31 @@
   window.MobileUI.isMobileViewport = isMobileViewport;
   window.MobileUI.MOBILE_MQ = MOBILE_MQ;
 
+  /** 手机端性能参数（card-image-loader / warehouse-thumb / 首屏预热共用） */
+  const MOBILE_PERF = {
+    warehousePrefetchCap: 24,
+    warehouseThumbBatch: 8,
+    warehouseThumbDelay: 0,
+    cardEagerCap: 24,
+    cardFirstScreenCap: 24,
+    igFeedPatchMax: 24,
+    igFeedPrefetchCap: 24,
+    igFeedBoostMax: 24,
+    maxResolve: 12,
+    feedMaxResolve: 10,
+    maxDownload: 10,
+    firstScreenCapMs: 5000
+  };
+  window.MobileUI.MOBILE_PERF = MOBILE_PERF;
+
+  let interactUntil = 0;
+  function markUserInteracting(ms) {
+    interactUntil = Date.now() + (ms || 480);
+  }
+  function isUserInteracting() {
+    return Date.now() < interactUntil;
+  }
+
   function syncDrawerOverlayVisibility() {
     const ov = document.getElementById('mobileDrawerOverlay');
     if (!ov) return;
@@ -160,7 +185,9 @@
     if (v === 'feed') {
       void window.FeatureDraft?.resumePendingGenerationJobs?.().then(() => {
         const preserve = wasFeed || !opts?.scrollToTop;
-        window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: preserve });
+        window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: preserve, force: !wasFeed });
+        resetMobilePageScroll('imagegen');
+        scheduleMobileImageBoostBurst();
       });
     } else {
       window.FeatureDraft?.renderImageGenMobileResult?.();
@@ -364,17 +391,115 @@
 
   MOBILE_MQ.addEventListener('change', onViewportChange);
 
+  function resetMobilePageScroll(app) {
+    if (!isMobile()) return;
+    const main = document.querySelector('.app-main');
+    if (!main) return;
+    if (app === 'imagegen' || app === 'warehouse' || app === 'community' || !app) {
+      requestAnimationFrame(() => {
+        try {
+          main.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+        } catch (e) {
+          main.scrollTop = 0;
+        }
+      });
+    }
+  }
+
+  function boostActivePageImages() {
+    if (!isMobile() || isUserInteracting()) return;
+    const cap = MOBILE_PERF.cardEagerCap || 24;
+    if (document.getElementById('pageWarehouse')?.classList.contains('active')) {
+      const wh = document.getElementById('cardsContainer');
+      if (wh) {
+        window.CardImageLoader?.boostWarehouseImages?.(wh, cap);
+        window.CardImageLoader?.observeContainer?.(wh);
+      }
+    }
+    if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+      const ig = document.getElementById('imageGenFeed');
+      if (ig) {
+        window.CardImageLoader?.boostImageGenWarehouseImages?.(ig, MOBILE_PERF.igFeedBoostMax || 24);
+        window.CardImageLoader?.observeContainer?.(ig);
+      }
+    }
+    if (document.getElementById('pageCommunity')?.classList.contains('active')) {
+      const cg = document.getElementById('communityGrid');
+      if (cg) window.CardImageLoader?.boostCommunityFeedImages?.(cg, cap);
+    }
+    if (document.getElementById('pageCreations')?.classList.contains('active')) {
+      const cg = document.getElementById('creationsGrid');
+      if (cg) window.CardImageLoader?.boostCommunityFeedImages?.(cg, cap);
+    }
+  }
+
+  function bindMobileAppMainScrollBoost() {
+    if (!isMobile()) return;
+    const appMain = document.querySelector('.app-main');
+    if (!appMain || appMain.dataset.phScrollBoostBound === '1') return;
+    appMain.dataset.phScrollBoostBound = '1';
+    let scrollTimer = null;
+    appMain.addEventListener('scroll', () => {
+      if (isUserInteracting()) return;
+      clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(boostActivePageImages, 120);
+    }, { passive: true });
+  }
+
+  function bindMobileInteractionGuard() {
+    if (!isMobile() || document.body.dataset.phInteractGuard === '1') return;
+    document.body.dataset.phInteractGuard = '1';
+    const mark = () => markUserInteracting(520);
+    document.addEventListener('touchstart', mark, { passive: true, capture: true });
+    document.addEventListener('pointerdown', mark, { passive: true, capture: true });
+  }
+
+  let mobileBoostBurstTimer = null;
+  function scheduleMobileImageBoostBurst() {
+    if (!isMobile()) return;
+    if (mobileBoostBurstTimer) clearInterval(mobileBoostBurstTimer);
+    let ticks = 0;
+    boostActivePageImages();
+    mobileBoostBurstTimer = setInterval(() => {
+      ticks += 1;
+      boostActivePageImages();
+      if (ticks >= 5) {
+        clearInterval(mobileBoostBurstTimer);
+        mobileBoostBurstTimer = null;
+      }
+    }, 2000);
+  }
+
+  /** 登录/同步后后台预热卡片库 grid（不阻塞 UI；单链路 prefetchWarehousePage） */
+  function primeMobileWarehouseBackground(cardList) {
+    if (!isMobile() || !cardList?.length) return;
+    const slice = cardList.slice(0, 24);
+    if (window.SupabaseSync?.prefetchWarehousePage) {
+      void window.SupabaseSync.prefetchWarehousePage(slice, 5000, { maxCards: 24 });
+    }
+  }
+
   Object.assign(window.MobileUI, {
     openNavDrawer,
     openGroupsDrawer,
     closeDrawers,
     closeAllMobileOverlays,
     setImageGenView,
-    initImageGenMobileView
+    initImageGenMobileView,
+    boostActivePageImages,
+    scheduleMobileImageBoostBurst,
+    bindMobileAppMainScrollBoost,
+    resetMobilePageScroll,
+    primeMobileWarehouseBackground,
+    getPerf: () => (isMobile() ? MOBILE_PERF : null),
+    isUserInteracting,
+    markUserInteracting
   });
 
   function init() {
     bindMobileUI();
+    bindMobileAppMainScrollBoost();
+    bindMobileInteractionGuard();
     if (isMobile()) {
       closeAllMobileOverlays();
       syncDrawerOverlayVisibility();

@@ -31,6 +31,46 @@
     return window.MobileUI?.isMobileViewport?.() ?? window.matchMedia('(max-width: 900px)').matches;
   }
 
+  /** 手机生图「生成」tab：首屏只需表单，不必拉作品 feed / 全量云同步 */
+  function isImageGenMobileFormActive() {
+    return !!document.getElementById('pageImageGen')?.classList.contains('active')
+      && isMobileViewport()
+      && document.body.classList.contains('imagegen-mobile-view-form');
+  }
+
+  let imageGenBootSyncToken = 0;
+
+  function scheduleImageGenBootSync(opts = {}) {
+    const token = ++imageGenBootSyncToken;
+    const pending = imageGenPendingJobs.length > 0 || getActivePollJobIds().size > 0;
+    const mobileForm = isImageGenMobileFormActive();
+    const delay = pending ? (opts.urgent ? 400 : 900) : (mobileForm ? 8000 : 2800);
+
+    scheduleGenJobsSync(delay);
+    if (pending || opts.forceJobs) {
+      setTimeout(() => {
+        if (token !== imageGenBootSyncToken) return;
+        void resumePendingGenerationJobs({ force: pending });
+      }, delay);
+    }
+
+    const runQuiet = () => {
+      if (token !== imageGenBootSyncToken) return;
+      void quietSyncImageGenFromCloud();
+    };
+    if (mobileForm && !pending) {
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(runQuiet, { timeout: 20000 });
+      } else {
+        setTimeout(runQuiet, 10000);
+      }
+    } else if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(runQuiet, { timeout: pending ? 6000 : 12000 });
+    } else {
+      setTimeout(runQuiet, pending ? 2500 : 6000);
+    }
+  }
+
   /** 云同步统一入口（优先 SyncOrchestrator） */
   function queueCloudPush(opts = {}) {
     if (!window.SupabaseSync?.isLoggedIn?.()) return;
@@ -1414,7 +1454,9 @@
         renderImageGenMobileResult();
       });
     }
-    scheduleGenJobsSync(0);
+    if (imageGenPendingJobs.length > 0) {
+      scheduleGenJobsSync(2000);
+    }
   }
 
   function normalizeImageRefForCompare(image) {
@@ -2344,12 +2386,7 @@
       return container;
     }
     if (isMobileViewport() && (container.id === 'communityGrid' || container.id === 'creationsGrid' || container.id === 'imageGenFeed')) {
-      if (container.id === 'imageGenFeed' && document.body.classList.contains('imagegen-mobile-view-feed')) {
-        return container.closest('.feature-shell') || container;
-      }
-      if (container.id !== 'imageGenFeed') {
-        return container.closest('.feature-shell') || container;
-      }
+      return document.querySelector('.app-main') || container;
     }
     if (container.id === 'imageGenFeed') {
       return container;
@@ -7517,12 +7554,20 @@
       pruneCreations();
       initImageGenForm();
       updateImageGenFeedHint();
-      setTimeout(() => void resumePendingGenerationJobs({ force: true }), 400);
-      scheduleGenJobsSync(1500);
-      renderImageGenFeed({ preserveScroll: true });
+      scheduleImageGenBootSync({
+        urgent: imageGenPendingJobs.length > 0 || getActivePollJobIds().size > 0,
+        forceJobs: imageGenPendingJobs.length > 0 || getActivePollJobIds().size > 0
+      });
+      if (!isImageGenMobileFormActive()) {
+        renderImageGenFeed({ preserveScroll: true });
+      }
       renderImageGenMobileResult();
-      void window.PointsSystem?.refreshCreditsFromServer?.();
-      window.PointsSystem?.updateCreditsUI?.();
+      if (window.__phCreditsSyncedThisSession) {
+        window.PointsSystem?.updateCreditsUI?.();
+      } else {
+        window.__phCreditsSyncedThisSession = true;
+        void window.PointsSystem?.refreshCreditsFromServer?.();
+      }
     }
   }
 
@@ -7569,12 +7614,14 @@
       updateImageGenSaveTargetSelects();
       syncImageGenGenPublicUI();
       updateImageGenFeedHint();
-      if (!feedHasRenderedContent('imageGenFeed', '.imagegen-feed-card')) {
-        renderImageGenFeed();
-      } else {
-        scheduleImageGenFeedLayout();
-        renderImageGenMobileResult();
+      if (!isImageGenMobileFormActive()) {
+        if (!feedHasRenderedContent('imageGenFeed', '.imagegen-feed-card')) {
+          renderImageGenFeed();
+        } else {
+          scheduleImageGenFeedLayout();
+        }
       }
+      renderImageGenMobileResult();
       return;
     }
     imageGenFormActivated = true;
@@ -7647,38 +7694,48 @@
     syncImageGenModelParamsUI();
     setImageGenMjMode(imageGenMjMode);
     syncImageGenBatchSplitUi();
-    if (!feedHasRenderedContent('imageGenFeed', '.imagegen-feed-card')) {
-      renderImageGenFeed();
-    } else {
-      scheduleImageGenFeedLayout();
+    if (!isImageGenMobileFormActive()) {
+      if (!feedHasRenderedContent('imageGenFeed', '.imagegen-feed-card')) {
+        renderImageGenFeed();
+      } else {
+        scheduleImageGenFeedLayout();
+      }
     }
     window.PointsSystem?.updateCreditsUI?.();
-    const mobileInit = isMobileViewport();
-    if (window.SupabaseSync?.isLoggedIn?.()) {
-      scheduleGenJobsSync(mobileInit ? 2500 : 1200);
-      setTimeout(() => void quietSyncImageGenFromCloud(), mobileInit ? 600 : 1500);
-    }
   }
 
-  /** 静默拉云端 + 恢复生图任务，仅用侧栏 authCloudStatus，不弹 Toast */
+  let quietSyncImageGenInflight = null;
+
+  /** 静默拉云端 + 恢复生图任务；首屏不阻塞 await 全量 pull */
   async function quietSyncImageGenFromCloud() {
-    try {
-      await resumePendingGenerationJobs();
-      renderImageGenFeed({ preserveScroll: true });
-      renderImageGenMobileResult();
-      const last = window.__phLastBgCloudSyncAt || 0;
-      if (Date.now() - last < 120000) return;
-      if (typeof window.runDeferredCloudPull === 'function') {
-        await window.runDeferredCloudPull({ silent: true, light: true });
-      } else {
-        window.scheduleDeferredCloudPull?.({ silent: true, light: true });
+    if (quietSyncImageGenInflight) return quietSyncImageGenInflight;
+    quietSyncImageGenInflight = (async () => {
+      try {
+        const pending = imageGenPendingJobs.length > 0;
+        const mobileForm = isImageGenMobileFormActive();
+        if (pending) {
+          await resumePendingGenerationJobs();
+          if (!mobileForm) renderImageGenFeed({ preserveScroll: true });
+          renderImageGenMobileResult();
+        }
+        const last = window.__phLastBgCloudSyncAt || 0;
+        if (Date.now() - last < 120000) return;
+        if (mobileForm && !pending && (window.__promptHubCards || []).length > 0) {
+          window.scheduleDeferredCloudPull?.({ silent: true, light: true });
+          return;
+        }
+        if (typeof window.runDeferredCloudPull === 'function') {
+          void window.runDeferredCloudPull({ silent: true, light: true });
+        } else {
+          window.scheduleDeferredCloudPull?.({ silent: true, light: true });
+        }
+      } catch (e) {
+        console.warn('[imagegen] quiet cloud sync', e);
+      } finally {
+        quietSyncImageGenInflight = null;
       }
-      await resumePendingGenerationJobs();
-      renderImageGenFeed({ preserveScroll: true });
-      renderImageGenMobileResult();
-    } catch (e) {
-      console.warn('[imagegen] quiet cloud sync', e);
-    }
+    })();
+    return quietSyncImageGenInflight;
   }
 
   function getImageGenQuality() {
@@ -8074,7 +8131,7 @@
         galleryIndex,
         useJobImageApi: isCover,
         allowGridFallback: isCover,
-        preferFull: false
+        preferFull: true
       }) || Promise.resolve(ref);
       return Promise.resolve(p).then((src) => {
         const u = src && typeof src === 'string' ? src : '';
@@ -8520,7 +8577,7 @@
     return '';
   }
 
-  const MJ_EXTRA_FLAG_KEYS = ['tile', 'raw', 'draft', 'hd'];
+  const MJ_EXTRA_ALLOWED = ['', 'tile', 'raw', 'draft', 'hd', 'tile+raw'];
 
   function collectImageGenDraftMeta() {
     return {
@@ -8546,25 +8603,24 @@
   }
 
   function getImageGenMjExtrasValue() {
-    const flags = getImageGenMjExtrasFlags();
-    return MJ_EXTRA_FLAG_KEYS.filter((k) => flags[k]).join('+');
+    return document.getElementById('imageGenMjExtrasSelect')?.value || '';
   }
 
   function setImageGenMjExtrasValue(v) {
-    const parts = new Set(String(v || '').split('+').filter(Boolean));
-    document.querySelectorAll('#imageGenMjFlagGrid [data-mj-flag]').forEach((el) => {
-      el.checked = parts.has(el.dataset.mjFlag);
-    });
-    syncImageGenMjToggleCheckedClasses();
+    const sel = document.getElementById('imageGenMjExtrasSelect');
+    if (!sel) return;
+    const val = MJ_EXTRA_ALLOWED.includes(v) ? v : '';
+    sel.value = val;
   }
 
   function getImageGenMjExtrasFlags() {
-    const flags = { tile: false, raw: false, draft: false, hd: false };
-    document.querySelectorAll('#imageGenMjFlagGrid [data-mj-flag]').forEach((el) => {
-      const k = el.dataset.mjFlag;
-      if (k && flags[k] !== undefined) flags[k] = !!el.checked;
-    });
-    return flags;
+    const v = getImageGenMjExtrasValue();
+    return {
+      tile: v === 'tile' || v === 'tile+raw',
+      raw: v === 'raw' || v === 'tile+raw',
+      draft: v === 'draft',
+      hd: v === 'hd'
+    };
   }
 
   function getImageGenMaxRefImages() {
@@ -8687,12 +8743,10 @@
   }
 
   function bindImageGenMjExtras() {
-    const grid = document.getElementById('imageGenMjFlagGrid');
-    if (!grid || grid.dataset.bound) return;
-    grid.dataset.bound = '1';
-    grid.querySelectorAll('[data-mj-flag]').forEach((el) => {
-      el.addEventListener('change', persistImageGenMjPrefs);
-    });
+    const sel = document.getElementById('imageGenMjExtrasSelect');
+    if (!sel || sel.dataset.bound) return;
+    sel.dataset.bound = '1';
+    sel.addEventListener('change', persistImageGenMjPrefs);
   }
 
   function bindImageGenCardTitle() {

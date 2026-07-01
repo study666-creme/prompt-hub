@@ -273,12 +273,55 @@
   }
 
   .app-main {
-    flex: 1;
+    flex: 1 1 0;
     min-height: 0;
     width: 100%;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: calc(56px + env(safe-area-inset-bottom));
+  }
+
+  body.imagegen-mobile-view-form .app-main {
+    overflow: hidden !important;
+    padding-bottom: 0;
+  }
+
+  #pageWarehouse.app-page.active,
+  #pageCommunity.app-page.active,
+  #pageCreations.app-page.active {
+    flex: none !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* 手机生图 · 生成 tab：撑满可视区，避免下半屏露出黑底 */
+  body.imagegen-mobile-view-form #pageImageGen.app-page-feature {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    overflow: hidden !important;
+  }
+
+  body.imagegen-mobile-view-form #pageImageGen .feature-shell {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-layout {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+
+  body.imagegen-mobile-view-form .imagegen-layout--gen-mode .imagegen-gen-veil {
+    opacity: 0.45;
   }
 
   .app-page-warehouse.active {
@@ -1405,8 +1448,9 @@
   }
 
   .feature-body-cards {
-    min-height: 0;
-    flex: 1;
+    flex: none;
+    min-height: auto;
+    overflow: visible;
     display: flex;
     flex-direction: column;
   }
@@ -1706,19 +1750,29 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  /* 手机生图 · 作品：与卡片库相同 app-main 整页滚（勿 overflow:hidden 裁切） */
+  body.imagegen-mobile-view-feed #pageImageGen.app-page-feature {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: none !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+  }
+
   /* 手机生图 · 作品/社区：整页滚动，Tab/筛选随卡片上移 */
   body.imagegen-mobile-view-feed #pageImageGen .feature-shell {
-    overflow-y: auto !important;
-    overflow-x: hidden;
-    -webkit-overflow-scrolling: touch;
+    overflow: visible !important;
+    flex: none !important;
+    min-height: auto !important;
   }
 
   body.imagegen-mobile-view-feed #pageImageGen .imagegen-layout,
   body.imagegen-mobile-view-feed #pageImageGen .imagegen-side {
-    flex: none;
-    min-height: 0;
-    overflow: visible;
+    flex: none !important;
+    min-height: auto !important;
     max-height: none !important;
+    overflow: visible !important;
   }
 
   body.imagegen-mobile-view-feed .imagegen-side {
@@ -1793,8 +1847,9 @@
   }
 
   body.imagegen-mobile-view-feed .imagegen-feed {
-    flex: none;
-    min-height: 0;
+    flex: none !important;
+    min-height: auto !important;
+    max-height: none !important;
     overflow-y: visible !important;
     overflow-x: hidden;
     height: auto !important;
