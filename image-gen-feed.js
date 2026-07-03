@@ -484,20 +484,31 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       if (!list.length) return;
       if (whPrefetchInflight) return whPrefetchInflight;
       whPrefetchInflight = (async () => {
-        const prefetchItems = list.map((c) => ({ id: c.id, image: c.image })).filter((c) => c?.image);
-        if (global.SupabaseSync?.prefetchCardsImages && prefetchItems.length) {
-          try {
-            await global.SupabaseSync.prefetchCardsImages(
-              prefetchItems.slice(0, 12),
-              3200,
-              { maxCards: 12 }
-            );
-          } catch (e) {
-            console.warn('[imageGenFeed] prefetchCardsImages failed', e);
+        const isRecent = d().getImageGenFeedTab?.() === 'recent';
+        if (!isRecent) {
+          const prefetchItems = list.map((c) => ({ id: c.id, image: c.image })).filter((c) => c?.image);
+          if (prefetchItems.length) {
+            try {
+              if (global.PromptHubMedia?.prefetchWarehouseCards) {
+                await global.PromptHubMedia.prefetchWarehouseCards(
+                  prefetchItems.slice(0, 12),
+                  { capMs: 3200, maxCards: 12 }
+                );
+              } else if (global.SupabaseSync?.prefetchCardsImages) {
+                await global.SupabaseSync.prefetchCardsImages(
+                  prefetchItems.slice(0, 12),
+                  3200,
+                  { maxCards: 12 }
+                );
+              }
+            } catch (e) {
+              console.warn('[imageGenFeed] prefetch failed', e);
+            }
           }
         }
         if (wrap) {
           window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: 12 });
+          window.CardImageLoader?.boostImageGenRecentImages?.(wrap, 16);
           void boostImageGenFeedThumbs(wrap, list, 16);
         }
       })().finally(() => {
@@ -591,41 +602,86 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
     async function boostImageGenFeedThumbs(wrap, cards, cap) {
       if (!wrap || !cards?.length) return;
       const limit = Math.min(cap || 16, cards.length);
-      const fullCards = [];
       for (let i = 0; i < limit; i += 1) {
         const slim = cards[i];
-        const full = (global.__promptHubCards || []).find((x) => x.id === slim.id) || slim;
-        if (global.PromptHubCardGallery?.getWarehouseListThumbMeta?.(full)?.hasImage) {
-          fullCards.push(full);
-        }
-      }
-      if (fullCards.length && global.MediaPipeline?.prefetchList) {
-        try {
-          await global.MediaPipeline.prefetchList(fullCards, 4200, { maxCards: fullCards.length });
-        } catch (e) { /* ignore */ }
-      }
-      window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: limit });
-      for (let i = 0; i < limit; i += 1) {
-        const slim = cards[i];
-        const full = (global.__promptHubCards || []).find((x) => x.id === slim.id) || slim;
-        const meta = global.PromptHubCardGallery?.getWarehouseListThumbMeta?.(full);
-        if (!meta?.hasImage) continue;
+        const creation = d().findCreationById?.(slim.id)
+          || (d().getCreations?.() || []).find((c) => c.id === slim.id);
+        const isRecent = !!creation;
+        const feedId = isRecent ? `cr_${slim.id}` : `wh_${slim.id}`;
         const feedEl = wrap.querySelector(
-          `.imagegen-feed-card[data-feed-id="wh_${CSS.escape(String(full.id))}"]`
+          `.imagegen-feed-card[data-feed-id="${CSS.escape(feedId)}"]`
         );
         const img = feedEl?.querySelector('.imagegen-feed-media img');
         if (!img || img.dataset.feedLoadDone === '1') continue;
-        if (meta.cachedUrl && window.CardImageLoader?.applyUrlToImg?.(img, meta.cachedUrl)) {
+
+        if (isRecent && creation?.jobId && global.PromptHubApi?.getGenerationImageUrl) {
+          try {
+            const jobId = String(creation.jobId).replace(/#\d+$/, '');
+            const r = await global.PromptHubApi.getGenerationImageUrl(jobId);
+            if (r?.ok && r.data?.url && window.CardImageLoader?.applyUrlToImg?.(img, r.data.url)) {
+              continue;
+            }
+          } catch (e) { /* ignore */ }
+        }
+
+        if (isRecent && creation) {
+          const altRefs = global.FeatureDraft?.creationFeedImageCandidates?.(creation) || [];
+          let altFixed = false;
+          for (const altRef of altRefs) {
+            if (!altRef || altRef === img.getAttribute('data-image-ref')) continue;
+            img.setAttribute('data-image-ref', altRef);
+            global.SupabaseSync?.clearPathMissingForCard?.(creation.id, altRef);
+            if (global.MediaPipeline?.resolveListUrl) {
+              try {
+                const jobId = creation.jobId ? String(creation.jobId).replace(/#\d+$/, '') : '';
+                const url = await global.MediaPipeline.resolveListUrl(altRef, {
+                  assetId: creation.id,
+                  cardId: creation.id,
+                  jobId: jobId || undefined,
+                  tryAllPaths: true
+                });
+                if (url && window.CardImageLoader?.applyUrlToImg?.(img, url)) {
+                  altFixed = true;
+                  break;
+                }
+              } catch (e) { /* ignore */ }
+            }
+          }
+          if (altFixed) continue;
+        }
+
+        if (!isRecent) {
+          const full = (global.__promptHubCards || []).find((x) => x.id === slim.id) || slim;
+          const meta = global.PromptHubCardGallery?.getWarehouseListThumbMeta?.(full);
+          if (!meta?.hasImage) continue;
+          if (meta.cachedUrl && window.CardImageLoader?.applyUrlToImg?.(img, meta.cachedUrl)) {
+            continue;
+          }
+          const hit = window.SupabaseSync?.getListDisplayImageSrc?.(meta.ref || full.image, full.id, {
+            jobId: meta.jobId,
+            allowFullFallback: false
+          });
+          if (hit && window.CardImageLoader?.applyUrlToImg?.(img, hit)) {
+            continue;
+          }
+          if (feedEl) collapseWarehouseFeedCardNoThumb(feedEl);
           continue;
         }
-        const hit = window.SupabaseSync?.getListDisplayImageSrc?.(meta.ref || full.image, full.id, {
-          jobId: meta.jobId,
-          allowFullFallback: false
-        });
-        if (hit && window.CardImageLoader?.applyUrlToImg?.(img, hit)) {
-          continue;
+
+        const ref = creation.image || img.getAttribute('data-image-ref') || '';
+        const jobId = creation.jobId ? String(creation.jobId).replace(/#\d+$/, '') : '';
+        if (global.MediaPipeline?.resolveListUrl && ref) {
+          try {
+            const url = await global.MediaPipeline.resolveListUrl(ref, {
+              assetId: creation.id,
+              cardId: creation.id,
+              jobId: jobId || undefined,
+              tryAllPaths: true
+            });
+            if (url && window.CardImageLoader?.applyUrlToImg?.(img, url)) continue;
+          } catch (e) { /* ignore */ }
         }
-        if (feedEl) collapseWarehouseFeedCardNoThumb(feedEl);
+        window.CardImageLoader?.loadImg?.(img);
       }
     }
 
@@ -641,19 +697,23 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       if (!wrap) return;
       const patchMax = IMAGEGEN_FEED_PER_PAGE;
       const boostMax = IMAGEGEN_FEED_PER_PAGE;
-      const fullCards = (feedItems || []).map((slim) => (
-        (global.__promptHubCards || []).find((x) => x.id === slim.id) || slim
-      ));
-      if (fullCards.length && global.MediaPipeline?.prefetchList) {
-        void global.MediaPipeline.prefetchList(fullCards, 4200, { maxCards: fullCards.length });
+      const isRecentTab = d().getImageGenFeedTab?.() === 'recent';
+      if (!isRecentTab) {
+        const fullCards = (feedItems || []).map((slim) => (
+          (global.__promptHubCards || []).find((x) => x.id === slim.id) || slim
+        ));
+        if (fullCards.length && global.MediaPipeline?.prefetchList) {
+          void global.MediaPipeline.prefetchList(fullCards, 4200, { maxCards: fullCards.length });
+        }
       }
       window.MediaPipeline?.patchContainerFromCache?.(wrap, { visibleFirst: true, max: patchMax });
       window.CardImageLoader?.boostImageGenWarehouseImages?.(wrap, boostMax);
+      window.CardImageLoader?.boostImageGenRecentImages?.(wrap, boostMax);
       if (wrap.dataset.feedObserverPrimed !== '1') {
         wrap.dataset.feedObserverPrimed = '1';
         window.CardImageLoader?.observeContainer?.(wrap);
       }
-      if (d().getImageGenFeedTab?.() === 'recent' && feedItems?.length) {
+      if (isRecentTab && feedItems?.length) {
         void boostImageGenFeedThumbs(wrap, feedItems, boostMax);
       }
     }
@@ -738,16 +798,29 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       const jobAttr = jobId ? ` data-job-id="${d().esc?.(jobId)}"` : '';
       const cardIdAttr = sourceCardId ? ` data-source-card-id="${d().esc?.(sourceCardId)}"` : '';
       const listJobId = jobId ? String(jobId).replace(/#\d+$/, '') : '';
-      const listUrl = thumbCachedUrl
+      const isRecentFeed = String(id || '').startsWith('cr_');
+      let resolvedThumb = thumbCachedUrl;
+      const listUrl = resolvedThumb
         || ((sourceCardId && d().isDisplayableImage?.(image) && window.SupabaseSync?.getListDisplayImageSrc)
         ? window.SupabaseSync.getListDisplayImageSrc(image, sourceCardId, listJobId
-          ? { jobId: listJobId, allowFullFallback: false }
-          : { allowFullFallback: false })
+          ? { jobId: listJobId, allowFullFallback: isRecentFeed }
+          : { allowFullFallback: isRecentFeed })
           : '');
+      if (!listUrl && isRecentFeed && sourceCardId && window.SupabaseSync?.getCachedDisplayUrl) {
+        const fullCached = window.SupabaseSync.getCachedDisplayUrl(image, {
+          assetId: sourceCardId,
+          jobId: listJobId || undefined,
+          variant: 'full'
+        });
+        if (fullCached && !fullCached.startsWith('storage://')) {
+          resolvedThumb = fullCached;
+        }
+      }
+      const resolvedListUrl = resolvedThumb || listUrl;
       const hasDisplayableRef = d().isDisplayableImage?.(image);
-      const imgSrc = listUrl
+      const imgSrc = resolvedListUrl
         || (hasDisplayableRef ? d().IMG_LOADING_PLACEHOLDER : '');
-      const imgPending = hasDisplayableRef && (!listUrl || imgSrc.includes('data:image/svg'));
+      const imgPending = hasDisplayableRef && (!resolvedListUrl || imgSrc.includes('data:image/svg'));
       const loadingCls = imgPending ? ' is-loading' : '';
       const shineAt = imgPending ? ` data-shine-at="${Date.now()}"` : '';
       const imgBlock = hasDisplayableRef
@@ -859,7 +932,11 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       const linked = d().isCreationLinkedToWarehouse?.(c) || !!c.savedToWarehouse;
       const expiry = typeof d().formatExpiryLabel === 'function' ? d().formatExpiryLabel(c) : '';
       const metaLine = [model, mjBadge, expiry].filter(Boolean).join(' · ');
-      const image = c.image || (Array.isArray(c.cardImages) ? c.cardImages[0] : '') || c.mjCompositeUrl || '';
+      const image = d().pickCreationFeedImage?.(c)
+        || c.image
+        || (Array.isArray(c.cardImages) ? c.cardImages[0] : '')
+        || c.mjCompositeUrl
+        || '';
       const jobId = c.jobId ? String(c.jobId).replace(/#\d+$/, '') : '';
       return buildFeedCardHtml({
         id: 'cr_' + c.id,
@@ -1324,6 +1401,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         }
         maybeServerRepairWarehouseImages(wrap);
         if (d().getImageGenFeedTab?.() === 'recent' && feedItems.length) {
+          void d().repairRecentCreationImagesQuiet?.({ max: 12, skipThumbCheck: true });
           void prefetchWarehouseFeedCardsBackground(feedItems, wrap);
         }
         syncImageGenFeedLoadMoreBtn();

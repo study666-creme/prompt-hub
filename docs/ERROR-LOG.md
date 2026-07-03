@@ -16,7 +16,7 @@
 | 🟠 | 社区 flex 布局晃、乱飞、巨图 | [§2](#2-社区--我的主页-feed-布局高频) |
 | 🟠 | 我的主页侧栏空白 | [§2.7](#27-我的主页侧栏空白桌面端) |
 | 🟠 | 手机切后台生图丢图（sessionStorage + 恢复过严） | [§3b](#3b-手机切后台生图丢图) |
-| 🟠 | 卡片库/社区黑图、401、429 签名风暴 | [§3](#3-媒体签名与黑图高频) |
+| 🟠 | 卡片库/社区黑图、401、429 签名风暴 | [§3](#3-媒体签名与黑图高频) · [§3d](#3d-卡片库--最近生成灰块列表禁止-full--20260704c-修复) |
 | 🟠 | 画布 `Maximum update depth`（节点缩放死循环） | [§3c](#3c-画布节点缩放死循环) |
 | 🟠 | 生图仓库一进页几十～上百 MB | [§4](#4-生图仓库带宽-p0-未完全解决) |
 | 🟡 | API 522、域名 DNS 冲突 | [§5](#5-api-522--自定义域名) |
@@ -187,6 +187,19 @@
 | 过早删 Feed 空壳卡 | `pruneEmpty` 在 loading 时删卡 | 仅确认 load-failed 后删 |
 | 大量灰块/黑卡（848 张库） | ① `MEDIA_STORAGE_MODE=r2` 只读 R2，Supabase 有图也 404 ② 回归：`/generated/` 全走慢速 `warehouse-thumbs` ③ R2 同步未完成 | Worker 改 **`r2-first`**；`cardNeedsWarehouseThumbServer` / `needsServerThumb` 恢复走 **`sign-batch`**；进卡片库 `bootstrapWarehouseMediaCache({ clearAllMissing: true })`；缺文件跑 `node scripts/sync-supabase-to-r2.mjs --skip-existing` |
 | 侧栏/标题品牌被缩短 | UI 改动误删 SEO 前缀 | 侧栏 **「卡藏」**；`<title>` **卡藏 · 卡片式提示词仓库 — …**（build `20260702g`） |
+
+### 3d. 卡片库 / 最近生成灰块（列表禁止 full · 20260704c 修复）
+
+| 项 | 内容 |
+|----|------|
+| **标签** | 🟠 高频 · 🟡 绕很久 |
+| **现象** | 848 张卡片库按「最近生成」大量灰块；侧栏/大图有时能看、列表缩略图黑；Console 成批 **404**（`.png` hash 路径）；「最近」Tab 5 条里 2～3 条无缩略图 |
+| **根因** | ① `isWarehouseBlockedFullUrl` 在 `#cardsContainer` / `#imageGenFeed` **一律拦截** `/generated/` 的 full CDN URL → `getGenerationImageUrl` 能返回图但 `applyUrlToImg` 拒绝 ② `getListDisplayImageSrc` 默认 `allowFullFallback: false`，`_grid` 未签好时首屏永远占位 SVG ③ 一次加载失败 `markPathMissing` + `ph_missing_paths_v1` 持久化，后续永不重试 ④ 坏 `storage://` 挡住 MJ `mjCompositeUrl` / 四宫格备用源 ⑤ `repairRecentCreationImagesQuiet` 见 storage ref 就 skip |
+| **修复（build `20260704c`）** | 自有生图卡（`genJobId` / `cr_`）grid 未就绪时 **允许 full 列表缩略**；`pickCreationFeedImage` + 多 ref fallback；打开页/升构建号 **清 missing 缓存**（`index.html` bump 逻辑）；最近 Feed 失败 **不再 markPathMissing**；加强 quiet repair |
+| **为何能「自己补回来」** | 强刷到新构建号 → 清错误 missing 标记 → 列表可加载 CDN full → `CardImageLoader` / `WarehouseThumb` / 登录后 idle `repairGeneratedCardImagesQuiet` 陆续拉图，无需手跑控制台 |
+| **仍补不回** | Console 404 且 **`genJobId` 无 + 云端 API 无图** → 原图从未进 R2/Supabase 或上游链已过期；跑 `runWarehouseBulkRepair` 仍 0 则真丢 |
+| **诊断** | 卡片库：`await diagnoseGreyWarehouseCards(12)` · 最近 Tab：`await FeatureDraft.diagnoseRecentFeedThumbs(8)` |
+| **勿再犯** | 列表区禁止 full 时须 **排除自有 `/generated/` 卡**；repair 不能因已有 `storage://` 就 skip；改 `__APP_BUILD__` 时保留清 `ph_missing_paths_v1` |
 
 ---
 

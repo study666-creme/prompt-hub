@@ -3,7 +3,7 @@ import type { Env } from '../env';
 import { ApiError } from './errors';
 import { archiveRemoteImage, generationStorageAssetId, isStorageRef, storagePathFromRef, toStorageRef } from './image-archive';
 import { readJobProvider } from './image-upstream';
-import { cardImageExists, downloadFromR2 } from './r2-storage';
+import { cardImageExists, hasR2, mediaStorageMode, r2ObjectSize, uploadToR2 } from './r2-storage';
 import {
   gridPathFromPrimary,
   materializeGridForPrimaryPath,
@@ -84,6 +84,24 @@ function generateCardId(): string {
   return `rec_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+async function supabaseListedSize(admin: SupabaseClient, clean: string): Promise<number> {
+  try {
+    const slash = clean.lastIndexOf('/');
+    const dir = slash >= 0 ? clean.slice(0, slash) : '';
+    const name = slash >= 0 ? clean.slice(slash + 1) : clean;
+    const { data, error } = await admin.storage.from(BUCKET).list(dir, { limit: 200 });
+    if (error || !data?.length) return 0;
+    const item = data.find((row) => row.name === name);
+    if (!item) return 0;
+    const meta = item.metadata as { size?: number } | undefined;
+    const listed = Number(meta?.size) || Number((item as { size?: number }).size) || 0;
+    return listed > 0 ? listed : MIN_IMAGE_BYTES;
+  } catch {
+    return 0;
+  }
+}
+
+/** 轻量读大小：R2 HEAD → Supabase list，避免 repair 扫描时整文件 download 导致 Worker 超时 */
 async function storageBlobSize(
   admin: SupabaseClient,
   path: string,
@@ -91,17 +109,15 @@ async function storageBlobSize(
 ): Promise<number> {
   const clean = path.replace(/^\//, '');
   if (!clean) return 0;
-  if (env) {
-    const blob = await downloadFromR2(env, clean);
-    if (blob?.size) return blob.size;
+  if (env && hasR2(env)) {
+    const r2Size = await r2ObjectSize(env, clean);
+    if (r2Size > 0) return r2Size;
   }
-  try {
-    const { data, error } = await admin.storage.from(BUCKET).download(clean);
-    if (!error && data?.size) return data.size;
-  } catch { /* ignore */ }
+  const listed = await supabaseListedSize(admin, clean);
+  if (listed > 0) return listed;
   if (env && (await cardImageExists(env, clean, admin))) {
-    const blob = await downloadFromR2(env, clean);
-    return blob?.size || MIN_IMAGE_BYTES;
+    const r2Size = hasR2(env) ? await r2ObjectSize(env, clean) : 0;
+    return r2Size > 0 ? r2Size : MIN_IMAGE_BYTES;
   }
   return 0;
 }
@@ -211,6 +227,8 @@ export type RecoverWarehouseResult = {
   failures: Array<{ jobId?: string; cardId?: string; reason: string }>;
   cardIds: string[];
   totalCandidates?: number;
+  totalCards?: number;
+  nextOffset?: number | null;
   hint?: string;
 };
 
@@ -456,42 +474,60 @@ export async function repairWarehouseCardImagesFromJobs(
   userId: string,
   opts: RecoverWarehouseOpts = {}
 ): Promise<RecoverWarehouseResult> {
-  const max = Math.min(80, Math.max(1, opts.max ?? 30));
+  const max = Math.min(48, Math.max(1, opts.max ?? 24));
   const { payload, cards } = await loadUserPayload(admin, userId);
+  const cardOffset = Math.max(0, opts.offset ?? 0);
+  const scanWindow = max;
+  const cardsSlice = cards.slice(cardOffset, cardOffset + scanWindow);
+  const nextOffset = cardOffset + scanWindow < cards.length ? cardOffset + scanWindow : null;
 
-  type Candidate = { card: Record<string, unknown>; jobId: string; mode: 'grid' | 'full' };
+  type Candidate = { card: Record<string, unknown>; jobId: string; mode: 'grid' | 'full' | 'r2_backfill' };
   const candidates: Candidate[] = [];
 
-  for (const card of cards) {
+  for (const card of cardsSlice) {
     const cardId = String(card.id || '');
     const jobId = String(card.genJobId || '');
     const imageRef = String(card.image || '');
     if (!imageRef || !cardId) continue;
     const resolution = String(card.resolution || '1k');
     const minBytes = jobId ? expectedMinFullBytes(resolution) : MIN_IMAGE_BYTES;
-    const primaryCandidates = primaryPathFromImageRef(imageRef, userId, cardId);
+    const primaryCandidates = primaryPathFromImageRef(imageRef, userId, cardId).slice(0, 2);
     let primaryPath: string | null = null;
-    let primarySize = 0;
+    let r2PrimarySize = 0;
+    let supabasePrimarySize = 0;
     for (const p of primaryCandidates) {
-      const sz = await storageBlobSize(admin, p, opts.env);
-      if (sz > primarySize) {
-        primarySize = sz;
+      const clean = p.replace(/^\//, '');
+      if (opts.env && hasR2(opts.env)) {
+        r2PrimarySize = Math.max(r2PrimarySize, await r2ObjectSize(opts.env, clean));
+      }
+      supabasePrimarySize = Math.max(supabasePrimarySize, await supabaseListedSize(admin, clean));
+      if (!primaryPath && (r2PrimarySize >= minBytes || supabasePrimarySize >= minBytes)) {
         primaryPath = p;
       }
     }
-    const primaryOk = primarySize >= minBytes;
+    const storageMode = opts.env ? mediaStorageMode(opts.env) : 'supabase';
+    let primaryOk = storageMode === 'r2-first'
+      ? r2PrimarySize >= minBytes
+      : Math.max(r2PrimarySize, supabasePrimarySize) >= minBytes;
+    if (storageMode === 'r2-first' && r2PrimarySize < minBytes && supabasePrimarySize >= minBytes) {
+      primaryOk = false;
+    }
+    const primarySize = Math.max(r2PrimarySize, supabasePrimarySize);
     const gridOk = primaryPath ? await gridPathOk(admin, primaryPath, opts.env) : false;
     if (primaryOk && gridOk) continue;
     if (primaryOk && !gridOk) {
       candidates.push({ card, jobId, mode: 'grid' });
       continue;
     }
+    if (!primaryOk && primarySize >= minBytes && opts.env && hasR2(opts.env)) {
+      candidates.push({ card, jobId, mode: 'r2_backfill' });
+      continue;
+    }
     if (!jobId) continue;
     candidates.push({ card, jobId, mode: 'full' });
   }
 
-  const offset = Math.max(0, opts.offset ?? 0);
-  const batch = candidates.slice(offset, offset + max);
+  const batch = candidates.slice(0, max);
   const jobMap = new Map(
     (await loadJobsByIds(
       admin,
@@ -527,6 +563,35 @@ export async function repairWarehouseCardImagesFromJobs(
         cardIds.push(cardId);
       } else {
         failures.push({ jobId, cardId, reason: 'grid_materialize_failed' });
+        skipped += 1;
+      }
+      continue;
+    }
+
+    if (mode === 'r2_backfill') {
+      const primaryCandidates = primaryPathFromImageRef(String(card.image || ''), userId, cardId);
+      let fixed = false;
+      for (const p of primaryCandidates) {
+        const clean = p.replace(/^\//, '');
+        try {
+          const { data, error } = await admin.storage.from(BUCKET).download(clean);
+          if (error || !data || (data.size || 0) < MIN_IMAGE_BYTES) continue;
+          const ct = clean.endsWith('.webp') ? 'image/webp' : clean.endsWith('.png') ? 'image/png' : 'image/jpeg';
+          if (!(await uploadToR2(opts.env!, clean, data, ct))) {
+            failures.push({ jobId, cardId, reason: 'r2_upload_failed' });
+            continue;
+          }
+          await materializeGridForPrimaryPath(opts.env!, admin, clean).catch(() => {});
+          fixed = true;
+          break;
+        } catch {
+          failures.push({ jobId, cardId, reason: 'r2_backfill_failed' });
+        }
+      }
+      if (fixed) {
+        repaired += 1;
+        cardIds.push(cardId);
+      } else {
         skipped += 1;
       }
       continue;
@@ -569,12 +634,16 @@ export async function repairWarehouseCardImagesFromJobs(
     failures: failures.slice(0, 40),
     cardIds,
     totalCandidates: candidates.length,
+    totalCards: cards.length,
+    nextOffset,
     hint:
       repaired > 0
         ? '已尝试从生图记录重新写入 Storage 并生成缩略图；强刷后查看'
-        : skipped > 0 && failures.some((f) => f.reason === 'job_not_found')
-          ? '部分老任务记录已不存在，仅能从 R2/Supabase 已有文件恢复'
-          : '上游仍无可用图片，请稍后再试'
+        : nextOffset != null
+          ? `本批扫描 ${cardsSlice.length} 张（${cardOffset + 1}～${cardOffset + cardsSlice.length}/${cards.length}），请继续下一批`
+          : skipped > 0 && failures.some((f) => f.reason === 'job_not_found')
+            ? '部分老任务记录已不存在，仅能从 R2/Supabase 已有文件恢复'
+            : '上游仍无可用图片，请稍后再试'
   };
 }
 

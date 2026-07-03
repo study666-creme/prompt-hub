@@ -16,7 +16,8 @@ const packs = [
   'pack-feed.js',
   'pack-imagegen.js',
   'pack-account.js',
-  'pack-extra.js'
+  'pack-extra.js',
+  'pack-media-client.js'
 ];
 
 for (const name of packs) {
@@ -32,7 +33,7 @@ for (const name of packs) {
     console.error(`verify-bundle-bytes: ${name} looks like HTML, not JavaScript`);
     process.exit(1);
   }
-  if (!/function|\(function/.test(head)) {
+  if (!/function|\(function|\(\(\)=>/.test(head)) {
     console.error(`verify-bundle-bytes: ${name} does not look like bundled JS`);
     process.exit(1);
   }

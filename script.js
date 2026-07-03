@@ -192,6 +192,7 @@
     let batchImportItems = [];
     let fileHandle = null, masonryInstance = null;
     let page = 1, allFilteredCards = [];
+    const warehouseRenderedPages = new Set();
     const PER_PAGE = 24;
     const CARD_SORT_KEY = 'promptrepo_card_sort';
     let sortMode = 'updated-desc';
@@ -580,6 +581,17 @@
           || (c.tags?.some((t) => t.toLowerCase().includes(searchKey))));
       }
       if (activeFilters.size > 0) filtered = filtered.filter(cardMatchesFilters);
+      if (window.CloudSyncSafety?.dedupeWarehouseCards) {
+        filtered = window.CloudSyncSafety.dedupeWarehouseCards(filtered);
+      } else {
+        const seenIds = new Set();
+        filtered = filtered.filter((c) => {
+          const id = String(c?.id || '');
+          if (!id || seenIds.has(id)) return false;
+          seenIds.add(id);
+          return true;
+        });
+      }
       const list = sortCardsWithPins(filtered);
       warehouseFilteredListCache = { key: cacheKey, list };
       return list;
@@ -911,8 +923,12 @@
           return { ok: false, duplicate: true, skipped: true };
         }
       }
-      if (jobId && cards.some(c => c.genJobId === jobId)) {
-        const existing = cards.find(c => c.genJobId === jobId);
+      if (jobId && cards.some(c => {
+        const base = String(jobId).replace(/#\d+$/, '');
+        const existing = String(c.genJobId || '').replace(/#\d+$/, '');
+        return existing && existing === base;
+      })) {
+        const existing = cards.find(c => String(c.genJobId || '').replace(/#\d+$/, '') === String(jobId).replace(/#\d+$/, ''));
         if (existing && galleryInput?.length && CG) {
           const merged = CG.mergeCardGalleryImages(CG.normalizeCardGallery(existing), galleryInput);
           existing.cardImages = merged;
@@ -1108,38 +1124,52 @@
       if (!window.SupabaseSync?.isLoggedIn?.()) return { ok: false, error: 'not_logged_in' };
       if (warehouseBulkRepairInflight) return warehouseBulkRepairInflight;
 
-      const batchMax = Math.min(80, Math.max(1, Number(opts.max) || 80));
-      const maxRounds = Math.min(30, Math.max(1, Number(opts.maxRounds) || 12));
+      const batchMax = Math.min(80, Math.max(1, Number(opts.max) || 40));
+      const maxRounds = Math.min(40, Math.max(1, Number(opts.maxRounds) || 20));
       const silent = opts.silent === true;
+      const roundDelayMs = Math.min(5000, Math.max(800, Number(opts.roundDelayMs) || 1200));
 
       warehouseBulkRepairInflight = (async () => {
         let offset = 0;
         let totalRepaired = 0;
         let totalCandidates = 0;
         let stagnant = 0;
+        let totalCards = 0;
 
         window.SupabaseSync?.bootstrapWarehouseMediaCache?.({ clearAllMissing: true });
         window.SupabaseSync?.clearSignedUrlCache?.();
         window.SupabaseSync?.clearListImageMissMarks?.();
-        if (!silent) console.info('[warehouse-repair] start', { batchMax, maxRounds });
+        if (!silent) console.info('[warehouse-repair] start', { batchMax, maxRounds, roundDelayMs });
 
         if (!silent) {
           setCloudSyncPhase('syncing', '正在修复卡片库图片…');
           showToast('正在批量修复卡片库图片（老卡从云端重新归档）…', 6000);
         }
 
-        for (let round = 0; round < maxRounds; round += 1) {
-          const res = await window.PromptHubApi.recoverWarehouseFromJobs({
+        async function callRepair() {
+          return window.PromptHubApi.recoverWarehouseFromJobs({
             mode: 'repair',
             max: batchMax,
             days: 365,
             offset,
             providerScope: 'all'
           });
+        }
+
+        for (let round = 0; round < maxRounds; round += 1) {
+          let res = await callRepair();
+          if (!res?.ok && (res?.code === 'NETWORK_ERROR' || res?.status === 503 || res?.status === 524)) {
+            if (!silent) console.warn('[warehouse-repair] 网络/超时，3s 后重试…', res.code || res.status);
+            await new Promise((r) => setTimeout(r, 3000));
+            res = await callRepair();
+          }
           if (!res?.ok) {
             if (!silent) {
               setCloudSyncPhase('error', res.message || res.code);
-              showToast('修复失败：' + (res.message || res.code || '未知错误'), 9000);
+              showToast(
+                '修复失败：' + (res.message || res.code || '未知错误') + '（可改用终端 run-warehouse-repair.mjs）',
+                9000
+              );
             }
             break;
           }
@@ -1147,32 +1177,40 @@
           const n = Number(d.repaired) || 0;
           totalRepaired += n;
           totalCandidates = Number(d.totalCandidates) || totalCandidates;
+          totalCards = Number(d.totalCards) || totalCards;
+          const nextOff = d.nextOffset;
           if (!silent) {
             console.info('[warehouse-repair] round', round + 1, {
               repaired: n,
               totalRepaired,
               totalCandidates,
               offset,
+              nextOffset: nextOff,
+              totalCards,
               failures: (d.failures || res.failures || []).slice(0, 3)
             });
           }
           if (n > 0) {
             stagnant = 0;
-            offset = 0;
+            offset = nextOff != null ? nextOff : offset;
             window.SupabaseSync?.clearSignedUrlCache?.();
             window.SupabaseSync?.clearListImageMissMarks?.();
             await pullFromCloud();
             window.__promptHubCards = cards;
             renderGroups();
-            renderCards(true);
+            if (page > 1 && typeof rerenderWarehouseCardsKeepingScroll === 'function') {
+              await rerenderWarehouseCardsKeepingScroll();
+            } else {
+              renderCards(true);
+            }
             if (!silent) setCloudSyncPhase('syncing', `已修复 ${totalRepaired} 张…`);
+          } else if (nextOff != null) {
+            stagnant = 0;
+            offset = nextOff;
           } else {
-            stagnant += 1;
-            offset += batchMax;
-            if (totalCandidates && offset >= totalCandidates) break;
-            if (stagnant >= 2) break;
+            break;
           }
-          await new Promise((r) => setTimeout(r, 600));
+          await new Promise((r) => setTimeout(r, roundDelayMs));
         }
 
         if (totalRepaired > 0) {
@@ -1194,14 +1232,82 @@
     }
     window.runWarehouseBulkRepair = runWarehouseBulkRepair;
 
+    /** 诊断卡片库顶部灰块：判断是「加载失败」还是「图片真丢了」 */
+    async function diagnoseGreyWarehouseCards(n = 12) {
+      const limit = Math.min(24, Math.max(1, Number(n) || 12));
+      const list = [...cards].sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0)).slice(0, limit);
+      const rows = [];
+      for (const c of list) {
+        const meta = window.PromptHubCardGallery?.getWarehouseListThumbMeta?.(c, { skipEnsure: true });
+        const baseJob = String(c.genJobId || '').replace(/#\d+$/, '');
+        let apiOk = '—';
+        if (baseJob && window.PromptHubApi?.getGenerationImageUrl) {
+          try {
+            const r = await window.PromptHubApi.getGenerationImageUrl(baseJob);
+            apiOk = r?.ok && r.data?.url ? '有' : (r?.code || r?.status || '无');
+          } catch (e) {
+            apiOk = 'err';
+          }
+        }
+        const img = c.image || '';
+        let imgKind = '空';
+        if (img && window.SupabaseSync?.isStorageRef?.(img)) imgKind = 'storage';
+        else if (/^https?:\/\//i.test(img)) {
+          imgKind = window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(img) ? '临时链' : 'https';
+        } else if (img) imgKind = 'other';
+        rows.push({
+          时间: new Date(c.createdAt || 0).toLocaleDateString(),
+          genJobId: baseJob ? '有' : '无',
+          图片引用: imgKind,
+          缩略: meta?.cachedUrl ? '已缓存' : (meta?.hasImage ? '灰块/待载' : '纯文字'),
+          云端API: apiOk
+        });
+      }
+      console.table(rows);
+      console.info('[diagnose] genJobId=有 且 云端API=有 → 多半可修复，跑 runWarehouseBulkRepair');
+      console.info('[diagnose] genJobId=无 且 图片引用=空/临时链 且 云端API=无 → 可能永久丢失');
+      return { rows };
+    }
+    window.diagnoseGreyWarehouseCards = diagnoseGreyWarehouseCards;
+
+    /** 合并重复卡片（同 genJobId / 同「自动恢复」提示词）并写回云端 */
+    async function pruneDuplicateWarehouseCards(opts = {}) {
+      const dedupe = window.CloudSyncSafety?.dedupeWarehouseCards;
+      if (!dedupe) return { ok: false, error: 'dedupe_missing' };
+      const before = cards.length;
+      const next = dedupe(cards);
+      const removed = before - next.length;
+      if (removed <= 0) {
+        if (!opts.silent) showToast('未发现可合并的重复卡片', 5000);
+        return { ok: true, removed: 0, total: before };
+      }
+      cards = next;
+      window.__promptHubCards = cards;
+      window.invalidateWarehouseCardsForImageGenCache?.();
+      await saveAllData({ skipCloud: true });
+      renderGroups();
+      renderCards(true);
+      if (window.SupabaseSync?.isLoggedIn?.()) {
+        await scheduleCloudPush({ urgent: true });
+      }
+      if (!opts.silent) showToast(`已合并 ${removed} 张重复卡片（剩余 ${next.length} 张）`, 8000);
+      return { ok: true, removed, total: next.length };
+    }
+    window.pruneDuplicateWarehouseCards = pruneDuplicateWarehouseCards;
+
     async function repairGeneratedCardImagesQuiet() {
       if (!window.SupabaseSync?.isLoggedIn?.()) return;
+      try {
+        if (localStorage.getItem('ph_wh_auto_repair') !== '1') return;
+      } catch (e) {
+        return;
+      }
       if (genCardImageRepairInflight) return genCardImageRepairInflight;
       const now = Date.now();
-      if (now - genCardImageRepairLastAt < 180000) return;
+      if (now - genCardImageRepairLastAt < 600000) return;
       genCardImageRepairLastAt = now;
       genCardImageRepairInflight = (async () => {
-        await runWarehouseBulkRepair({ max: 40, maxRounds: 3, silent: true });
+        await runWarehouseBulkRepair({ max: 24, maxRounds: 1, silent: true, roundDelayMs: 2000 });
       })().finally(() => { genCardImageRepairInflight = null; });
       return genCardImageRepairInflight;
     }
@@ -2906,7 +3012,11 @@
       if (sortMode === 'updated-asc') {
         rest.sort((a, b) => (a.updatedAt || a.createdAt) - (b.updatedAt || b.createdAt));
       } else if (sortMode === 'created-desc') {
-        rest.sort((a, b) => (b.createdAt || b.updatedAt || 0) - (a.createdAt || a.updatedAt || 0));
+        rest.sort((a, b) => {
+          const diff = (b.createdAt || b.updatedAt || 0) - (a.createdAt || a.updatedAt || 0);
+          if (diff !== 0) return diff;
+          return String(b.id || '').localeCompare(String(a.id || ''));
+        });
       } else if (sortMode === 'random') {
         return [...pinned, ...shuffleCardRest(rest)];
       } else if (sortMode === 'updated-desc') {
@@ -3275,7 +3385,8 @@
       }
       const cardId = card?.dataset?.id;
       const ref = img?.getAttribute?.('data-image-ref');
-      if (opts.markMissing !== false && ref && window.SupabaseSync?.primaryImagePath) {
+      const inRecentFeed = !!img?.closest?.('#imageGenFeed .imagegen-feed-card[data-feed-id^="cr_"]');
+      if (opts.markMissing !== false && ref && !inRecentFeed && window.SupabaseSync?.primaryImagePath) {
         const primary = window.SupabaseSync.primaryImagePath(ref, cardId);
         if (primary && window.SupabaseSync?.markPathMissing) {
           window.SupabaseSync.markPathMissing(String(primary).replace(/^\//, ''));
@@ -3874,14 +3985,16 @@
     function cardImgInitialSrc(image, cardId, extraOpts) {
       const placeholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="%2318181c" width="4" height="3"/></svg>');
       const jobId = extraOpts?.jobId ? String(extraOpts.jobId).replace(/#\d+$/, '') : undefined;
+      const cardModel = cardId ? (window.__promptHubCards || []).find((c) => c.id === cardId) : null;
+      const allowFull = !!(jobId || cardModel?.genJobId);
       if (image && cardId && window.SupabaseSync?.getListDisplayImageSrc) {
         const cached = window.SupabaseSync.getListDisplayImageSrc(image, cardId, {
-          allowFullFallback: false,
-          jobId
+          allowFullFallback: allowFull,
+          jobId: jobId || (cardModel?.genJobId ? String(cardModel.genJobId).replace(/#\d+$/, '') : undefined)
         });
         if (cached && cached.startsWith('http') && !cached.includes('data:image/svg')
           && !window.SupabaseSync?.isInvalidMediaUrl?.(cached)
-          && window.SupabaseSync?.isGridDisplayUrl?.(cached)) {
+          && (window.SupabaseSync?.isGridDisplayUrl?.(cached) || allowFull)) {
           return cached;
         }
       }
@@ -5724,7 +5837,7 @@
       const cloudBytes = (() => {
         try { return JSON.stringify(cloud).length; } catch (e) { return 0; }
       })();
-      const shouldReslimCloud = cloudBytes > 3_500_000
+      let shouldReslimCloud = cloudBytes > 3_500_000
         && !sessionStorage.getItem('ph_cloud_reslim_done');
 
       const merged = window.CloudSyncSafety?.mergePayload
@@ -5792,7 +5905,11 @@
         }
       }
       if (Array.isArray(finalPayload.cards) && window.CloudSyncSafety?.dedupeWarehouseCards) {
+        const beforeDedupe = finalPayload.cards.length;
         finalPayload.cards = window.CloudSyncSafety.dedupeWarehouseCards(finalPayload.cards);
+        if (finalPayload.cards.length < beforeDedupe) {
+          shouldReslimCloud = true;
+        }
       }
       if (Array.isArray(finalPayload.creations)) {
         finalPayload.creations = filterTombstonedCreations(finalPayload.creations);
@@ -7423,6 +7540,10 @@
       if (reset) {
         page = 1;
         allFilteredCards = [];
+        warehouseRenderedPages.clear();
+        warehouseRenderedPages.add(1);
+      } else if (!warehouseRenderedPages.has(page)) {
+        warehouseRenderedPages.add(page);
       }
       if (reset || allFilteredCards.length === 0) {
         allFilteredCards = getWarehouseFilteredSortedList(search);
@@ -7518,6 +7639,7 @@
       const fragment = document.createDocumentFragment();
       const eagerImgCount = mobileGrid ? 24 : Math.min(24, pageCards.length);
       preparedRows.forEach(({ card, meta }, idx) => {
+        if (container.querySelector(`.card[data-id="${CSS.escape(card.id)}"]`)) return;
         const listThumb = meta ? listThumbFromWarehouseMeta(meta) : getWarehouseCardListThumb(card, { skipEnsure: true });
         const coverMeta = listThumb.thumbMeta;
         const div = document.createElement('div');
@@ -7732,10 +7854,15 @@
     function loadNextWarehousePage() {
       if (warehouseScrollLoading) return;
       if ((page * PER_PAGE) >= allFilteredCards.length) return;
+      const nextPage = page + 1;
+      if (warehouseRenderedPages.has(nextPage)) return;
       warehouseScrollLoading = true;
-      page += 1;
+      warehousePageObserver?.disconnect();
+      page = nextPage;
       void Promise.resolve(renderCards()).finally(() => {
         warehouseScrollLoading = false;
+        const container = document.getElementById('cardsContainer');
+        if (container) syncWarehouseScrollSentinel(container);
       });
     }
     function syncWarehouseScrollSentinel(container) {
@@ -7746,9 +7873,11 @@
         warehouseScrollSentinel = null;
         return;
       }
+      const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
       const sentinel = document.createElement('div');
       sentinel.className = 'warehouse-scroll-sentinel';
       sentinel.setAttribute('aria-hidden', 'true');
+      sentinel.dataset.ready = isMobileViewport() || viewMode === 'list' ? '1' : '0';
       container.appendChild(sentinel);
       warehouseScrollSentinel = sentinel;
       warehousePageObserver?.disconnect();
@@ -7756,6 +7885,7 @@
       if (!root) return;
       warehousePageObserver = new IntersectionObserver((entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
+        if (sentinel.dataset.ready !== '1') return;
         loadNextWarehousePage();
       }, {
         root: root === document.body ? null : root,
@@ -7794,6 +7924,7 @@
         'pointer-events:none',
         'visibility:hidden'
       ].join(';');
+      sentinel.dataset.ready = '1';
       const needH = topPx + 40;
       const masonryH = parseFloat(container.style.height);
       if (!Number.isFinite(masonryH) || needH > masonryH) {
@@ -7999,10 +8130,12 @@
       const targetPage = Math.max(1, page);
       const sel = new Set(selectedCardIds);
       const wasBatch = batchMode;
+      warehouseRenderedPages.clear();
       page = 1;
       await Promise.resolve(renderCards(true));
       for (let p = 2; p <= targetPage; p += 1) {
         page = p;
+        warehouseRenderedPages.add(p);
         await Promise.resolve(renderCards(false));
       }
       if (wasBatch) {

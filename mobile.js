@@ -474,6 +474,10 @@
   function primeMobileWarehouseBackground(cardList) {
     if (!isMobile() || !cardList?.length) return;
     const slice = cardList.slice(0, 24);
+    if (window.PromptHubMedia?.prefetchWarehouseCards) {
+      void window.PromptHubMedia.prefetchWarehouseCards(slice, { capMs: 5000, maxCards: 24 });
+      return;
+    }
     if (window.SupabaseSync?.prefetchWarehousePage) {
       void window.SupabaseSync.prefetchWarehousePage(slice, 5000, { maxCards: 24 });
     }

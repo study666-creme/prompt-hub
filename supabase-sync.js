@@ -1833,10 +1833,12 @@
     return null;
   }
 
-  /** 所有列表区（含社区网格）只显示 grid；缺 grid 时自有卡藏允许降级用 full 预览 */
+  /** 列表区默认只显示 grid；最近生成（cr_）与生图入库卡 grid 未就绪时允许 full 缩略 */
   function isWarehouseBlockedFullUrl(url, img) {
     const listRoot = img?.closest?.('#cardsContainer, #imageGenFeed, #communityGrid, #creationsGrid, #userProfileGrid');
     if (!listRoot) return false;
+    const feedId = img?.closest?.('.imagegen-feed-card[data-feed-id]')?.dataset?.feedId || '';
+    if (feedId.startsWith('cr_')) return false;
     if (isEphemeralUpstreamImageUrl(url)) return true;
     const path = storagePathFromDisplayUrl(url);
     if (!path || isGridStoragePath(path)) return false;
@@ -1851,8 +1853,12 @@
       const primary = primaryImagePath(ref, cardId);
       if (primary) {
         const pk = String(primary).replace(/^\//, '');
-        /* 生图/自有卡：CDN 对 _grid 现场缩略；禁止 !gridThumbReady 时降级 full（单张 2MB+） */
-        if (pk.includes('/generated/')) return true;
+        /* 自有生图卡：grid 未签好时允许 full，避免卡片库整片灰块 */
+        if (pk.includes('/generated/')) {
+          const card = (window.__promptHubCards || []).find((c) => c.id === cardId);
+          if (card?.genJobId) return false;
+          return true;
+        }
         if (!gridListNeedsPrimaryFallback(primary, cardId)) return true;
       }
       if (primary && gridListNeedsPrimaryFallback(primary, cardId)) return false;
@@ -2252,6 +2258,9 @@
       if (n) {
         consumeSignBudget(n);
         persistSessionSignCache();
+        try {
+          window.PromptHubMedia?.ingestSignedBatch?.(r.data.urls, v);
+        } catch (_) { /* ignore */ }
       }
       return n;
     } catch (e) {
@@ -3919,7 +3928,7 @@
     if (useJobApi && baseJobId && window.PromptHubApi?.getGenerationImageUrl) {
       try {
         const r = await window.PromptHubApi.getGenerationImageUrl(baseJobId);
-        if (r?.ok && r.data?.url && await verifyMediaUrlReachable(r.data.url)) return r.data.url;
+        if (r?.ok && r.data?.url) return r.data.url;
       } catch (e) { /* ignore */ }
     }
     const dl = await resolveCardDownloadUrl(image, {

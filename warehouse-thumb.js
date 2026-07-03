@@ -8,8 +8,11 @@
   const inflight = new Map();
   let pending = [];
   let flushTimer = null;
+  let thumbsBackoffUntil = 0;
+  let thumbsBackoffWarned = false;
   const BATCH_DELAY_MS = 16;
   const MAX_BATCH = 16;
+  const THUMBS_BACKOFF_MS = 180000;
   const LS_WH_GRID = 'ph_wh_grid_v1';
   const WH_GRID_TTL_MS = 45 * 60 * 1000;
 
@@ -145,11 +148,24 @@
     }, delay);
   }
 
+  function enterThumbsBackoff(reason) {
+    thumbsBackoffUntil = Date.now() + THUMBS_BACKOFF_MS;
+    if (!thumbsBackoffWarned) {
+      thumbsBackoffWarned = true;
+      console.warn('[WarehouseThumb] API 暂不可用，3 分钟内不再请求缩略图', reason || '');
+    }
+  }
+
   async function flushPending() {
     if (!pending.length) return;
     const { max } = mobileBatchTuning();
     const batch = pending.splice(0, max);
     if (pending.length) scheduleFlush();
+
+    if (Date.now() < thumbsBackoffUntil) {
+      batch.forEach((item) => item.resolve(''));
+      return;
+    }
 
     const grouped = new Map();
     for (const item of batch) {
@@ -180,11 +196,15 @@
     try {
       const res = await window.PromptHubApi.postWarehouseThumbs(jobs);
       if (res?.ok === false) {
-        console.warn('[WarehouseThumb] batch rejected', res?.message || res?.code);
+        if (res.status === 503 || res.status === 524 || res.code === 'NETWORK_ERROR') {
+          enterThumbsBackoff(res.message || res.code);
+        } else {
+          console.warn('[WarehouseThumb] batch rejected', res?.message || res?.code);
+        }
       }
       thumbs = res?.data?.thumbs || res?.thumbs || {};
     } catch (e) {
-      console.warn('[WarehouseThumb] batch failed', e);
+      enterThumbsBackoff(String(e?.message || e));
     }
 
     for (const [ck, g] of grouped) {

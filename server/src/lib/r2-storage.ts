@@ -62,15 +62,21 @@ export async function uploadToR2(
 }
 
 export async function existsInR2(env: Env, path: string): Promise<boolean> {
+  const size = await r2ObjectSize(env, path);
+  return size > 0;
+}
+
+/** HEAD 读 R2 对象大小（比 download 轻，用于 repair 扫描） */
+export async function r2ObjectSize(env: Env, path: string): Promise<number> {
   const bucket = r2Bucket(env);
-  if (!bucket) return false;
+  if (!bucket) return 0;
   const key = cleanPath(path);
-  if (!key) return false;
+  if (!key) return 0;
   try {
     const head = await bucket.head(key);
-    return !!(head && (head.size || 0) > 0);
+    return Number(head?.size) || 0;
   } catch {
-    return false;
+    return 0;
   }
 }
 

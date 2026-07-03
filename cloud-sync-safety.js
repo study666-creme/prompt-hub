@@ -171,9 +171,23 @@
     return [...map.values()];
   }
 
+  function normalizeWarehouseJobKey(job) {
+    return String(job || '').replace(/#\d+$/, '').trim();
+  }
+
+  function recoveryPromptDedupeKey(card) {
+    const tags = Array.isArray(card?.tags) ? card.tags : [];
+    if (!tags.includes('自动恢复')) return '';
+    const prompt = String(card?.prompt || card?.title || '').trim().slice(0, 120);
+    if (prompt.length < 8) return '';
+    return `recv:${prompt}`;
+  }
+
   function cardWarehouseDedupeKey(card) {
-    const job = card?.genJobId;
-    if (job) return `job:${String(job)}`;
+    const job = normalizeWarehouseJobKey(card?.genJobId);
+    if (job) return `job:${job}`;
+    const recv = recoveryPromptDedupeKey(card);
+    if (recv) return recv;
     const src = card?.genSourceId;
     if (src) return `src:${String(src)}`;
     return '';
@@ -182,7 +196,12 @@
   function pickBetterWarehouseCard(a, b) {
     const score = (c) => {
       let s = 0;
-      if (c?.image) s += 8;
+      const img = String(c?.image || '');
+      if (img.startsWith('storage://')) s += 12;
+      else if (img && /^https?:\/\//i.test(img)) s += 6;
+      else if (img) s += 2;
+      const tags = Array.isArray(c?.tags) ? c.tags : [];
+      if (!tags.includes('自动恢复')) s += 3;
       if ((c.prompt || '').trim().length > 10) s += 2;
       s += Math.min(4, (c.updatedAt || c.createdAt || 0) / 1e14);
       return s;

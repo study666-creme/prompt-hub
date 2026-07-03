@@ -194,6 +194,7 @@
   const displayUrlCache = new Map();
   let communityPostsSyncInflight = null;
   let lastCommunityPostsSyncAt = 0;
+  let communitySyncTransientWarned = false;
   const COMMUNITY_POSTS_SYNC_GAP_MS = 120000;
   /** 首屏可渲染的最少帖数（一页）；其余后台拉完再增量追加 */
   const PUBLIC_FEED_MIN_READY = FEED_PER_PAGE;
@@ -982,8 +983,20 @@
             continue;
           }
           lastFail = r;
-          if (r?.status === 429 || r?.code === 'RATE_LIMITED') {
-            lastCommunityPostsSyncAt = Date.now() - COMMUNITY_POSTS_SYNC_GAP_MS + 300000;
+          const transient =
+            r?.status === 429
+            || r?.code === 'RATE_LIMITED'
+            || r?.status === 503
+            || r?.status === 524
+            || r?.code === 'NETWORK_ERROR'
+            || r?.status === 0;
+          if (transient) {
+            const backoffMs = r?.status === 429 ? 300000 : 180000;
+            lastCommunityPostsSyncAt = Date.now() - COMMUNITY_POSTS_SYNC_GAP_MS + backoffMs;
+            if (!communitySyncTransientWarned) {
+              communitySyncTransientWarned = true;
+              console.warn('[community] 同步暂跳过（API 繁忙/超时），约', Math.round(backoffMs / 60000), '分钟后重试');
+            }
             break;
           }
           console.warn('[community] sync public posts failed', r, { batch: i / COMMUNITY_SYNC_BATCH_MAX + 1, size: chunk.length });
@@ -1627,6 +1640,48 @@
     return c.image ? [c.image] : [];
   }
 
+  /** 最近 Feed 列表缩略：优先可解析的 ref，避免坏 storage:// 挡住 MJ 合成图 */
+  function pickCreationFeedImage(c) {
+    if (!c) return '';
+    const candidates = [];
+    const push = (u) => {
+      if (u && String(u).trim() && !candidates.includes(u)) candidates.push(String(u).trim());
+    };
+    push(c.image);
+    if (Array.isArray(c.cardImages)) c.cardImages.forEach(push);
+    if (c.isMidjourney) {
+      push(c.mjCompositeUrl);
+      if (Array.isArray(c.mjGridUrls)) c.mjGridUrls.forEach(push);
+    }
+    for (const u of candidates) {
+      if (window.SupabaseSync?.isStorageRef?.(u)) {
+        const p = window.SupabaseSync.storagePathFromRef?.(u);
+        const key = p ? String(p).replace(/^\//, '') : '';
+        if (key && !window.SupabaseSync?.isPathKnownMissing?.(key)) return u;
+      }
+    }
+    for (const u of candidates) {
+      if (/^https?:\/\//i.test(u) && !window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(u)) return u;
+    }
+    for (const u of candidates) {
+      if (/^https?:\/\//i.test(u)) return u;
+    }
+    return candidates[0] || '';
+  }
+
+  function creationFeedImageCandidates(c) {
+    const out = [];
+    const push = (u) => {
+      if (u && String(u).trim() && !out.includes(u)) out.push(String(u).trim());
+    };
+    push(pickCreationFeedImage(c));
+    push(c.image);
+    if (Array.isArray(c.cardImages)) c.cardImages.forEach(push);
+    push(c.mjCompositeUrl);
+    if (Array.isArray(c.mjGridUrls)) c.mjGridUrls.forEach(push);
+    return out;
+  }
+
   function getRecentCreationsLimit() {
     return window.Membership?.getRecentCreationsLimit?.()
       ?? 100;
@@ -1673,6 +1728,123 @@
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }
 
+  let recentCreationRepairInflight = null;
+  let recentCreationRepairLastAt = 0;
+
+  /** 修复「最近生成」仍指向上游临时链的记录 → 归档到 Storage */
+  async function repairRecentCreationImagesQuiet(opts = {}) {
+    if (!window.SupabaseSync?.isLoggedIn?.()) return { ok: false, reason: 'not_logged_in' };
+    if (recentCreationRepairInflight) return recentCreationRepairInflight;
+    const now = Date.now();
+    if (!opts.force && now - recentCreationRepairLastAt < 120000) return { ok: true, skipped: true };
+    recentCreationRepairLastAt = now;
+    recentCreationRepairInflight = (async () => {
+      const max = Math.min(12, Math.max(1, Number(opts.max) || 8));
+      const list = getRecentCreationsForFeed().slice(0, max);
+      let repaired = 0;
+      for (const c of list) {
+        if (!c?.id || !c.jobId) continue;
+        const ref = c.image || '';
+        const ephemeral = /^https?:\/\//i.test(ref)
+          && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(ref);
+        const storageRef = window.SupabaseSync?.isStorageRef?.(ref);
+        const storageKey = storageRef
+          ? String(window.SupabaseSync.storagePathFromRef?.(ref) || '').replace(/^\//, '')
+          : '';
+        const storageMissing = !!(storageKey && window.SupabaseSync?.isPathKnownMissing?.(storageKey));
+        const thumbCached = ref && window.SupabaseSync?.getListDisplayImageSrc?.(ref, c.id, {
+          jobId: String(c.jobId).replace(/#\d+$/, ''),
+          allowFullFallback: true
+        });
+        const needsArchive = ephemeral
+          || !storageRef
+          || storageMissing
+          || (!thumbCached && !opts.skipThumbCheck);
+        if (!needsArchive && storageRef && !storageMissing) continue;
+        const baseJob = String(c.jobId).replace(/#\d+$/, '');
+        try {
+          let nextRef = ref;
+          const archiveSources = creationFeedImageCandidates(c).filter((u) =>
+            /^https?:\/\//i.test(u) || window.SupabaseSync?.isStorageRef?.(u)
+          );
+          if (ephemeral || /^https?:\/\//i.test(ref) || storageMissing || !storageRef) {
+            for (const src of archiveSources.length ? archiveSources : [ref]) {
+              if (!src) continue;
+              const archived = await window.SupabaseSync.archiveGeneratedCardImage(c.id, src, {
+                jobId: baseJob,
+                allowRemoteArchive: true
+              });
+              if (archived) {
+                nextRef = archived;
+                break;
+              }
+            }
+          }
+          if ((!nextRef || nextRef === ref || storageMissing) && baseJob && window.PromptHubApi?.getGenerationImageUrl) {
+            const r = await window.PromptHubApi.getGenerationImageUrl(baseJob);
+            if (r?.ok && r.data?.url && window.SupabaseSync?.archiveGeneratedCardImage) {
+              const archived = await window.SupabaseSync.archiveGeneratedCardImage(c.id, r.data.url, {
+                jobId: baseJob,
+                allowRemoteArchive: true
+              });
+              if (archived) nextRef = archived;
+            }
+          }
+          if (nextRef && nextRef !== ref) {
+            c.image = nextRef;
+            if (storageKey && window.SupabaseSync?.clearPathMissingForCard) {
+              window.SupabaseSync.clearPathMissingForCard(c.id, ref);
+            }
+            repaired += 1;
+          }
+        } catch (e) {
+          console.warn('[recent-repair] failed', c.id, e);
+        }
+      }
+      if (repaired > 0) {
+        persistCreations();
+        renderImageGenFeed({ preserveScroll: true, force: true });
+      }
+      return { ok: true, repaired };
+    })().finally(() => { recentCreationRepairInflight = null; });
+    return recentCreationRepairInflight;
+  }
+
+  /** 诊断「最近」Tab 缩略图：区分加载失败 vs 图片真丢 */
+  async function diagnoseRecentFeedThumbs(n = 8) {
+    const limit = Math.min(16, Math.max(1, Number(n) || 8));
+    const list = getRecentCreationsForFeed().slice(0, limit);
+    const rows = [];
+    for (const c of list) {
+      const baseJob = String(c.jobId || '').replace(/#\d+$/, '');
+      let apiOk = '—';
+      if (baseJob && window.PromptHubApi?.getGenerationImageUrl) {
+        try {
+          const r = await window.PromptHubApi.getGenerationImageUrl(baseJob);
+          apiOk = r?.ok && r.data?.url ? '有' : (r?.code || '无');
+        } catch (e) {
+          apiOk = 'err';
+        }
+      }
+      const feedImg = pickCreationFeedImage(c) || c.image || '';
+      let imgKind = '空';
+      if (feedImg && window.SupabaseSync?.isStorageRef?.(feedImg)) imgKind = 'storage';
+      else if (/^https?:\/\//i.test(feedImg)) {
+        imgKind = window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(feedImg) ? '临时链' : 'https';
+      }
+      rows.push({
+        时间: new Date(c.createdAt || 0).toLocaleDateString(),
+        MJ: c.isMidjourney ? '是' : '',
+        jobId: baseJob ? '有' : '无',
+        列表图: imgKind,
+        云端API: apiOk
+      });
+    }
+    console.table(rows);
+    console.info('[recent-diagnose] 云端API=有 → 可 repairRecentCreationImagesQuiet({ force:true })');
+    return { rows };
+  }
+
   function warehouseReferencesCreation(creation) {
     if (!creation) return false;
     const cards = window.__promptHubCards || [];
@@ -1685,6 +1857,54 @@
       if (cBase !== base) return false;
       return !!(c.image && isDisplayableImage(c.image));
     });
+  }
+
+  /**
+   * 检查云端卡片库是否仍引用此 creation
+   * 防止多设备场景下误删 Storage 图片
+   */
+  async function checkCloudCardReferences(creation) {
+    if (!window.SupabaseSync?.user) {
+      return { hasReferences: true, reason: 'not_logged_in' };
+    }
+    const base = normalizeGenJobBaseId(creation.jobId);
+    if (!base) return { hasReferences: false };
+    try {
+      const cloudData = await window.SupabaseSync.pullCloudData();
+      const cards = cloudData?.cards || [];
+      const referenced = cards.some((c) => {
+        const cBase = normalizeGenJobBaseId(c.genJobId);
+        if (cBase !== base) return false;
+        return !!(c.image && isDisplayableImage(c.image));
+      });
+      if (referenced) {
+        return {
+          hasReferences: true,
+          reason: 'cloud_card_exists',
+          details: { jobId: base }
+        };
+      }
+      const refs = new Set();
+      [creation.image, creation.mjCompositeUrl, ...(creation.mjGridUrls || [])]
+        .forEach((u) => { if (u && isDisplayableImage(u)) refs.add(u); });
+      for (const ref of refs) {
+        const storageReferenced = cards.some((c) =>
+          c.image === ref
+          || (c.cardImages || []).some((img) => img.url === ref || img.path === ref)
+        );
+        if (storageReferenced) {
+          return {
+            hasReferences: true,
+            reason: 'cloud_storage_path',
+            details: { ref }
+          };
+        }
+      }
+      return { hasReferences: false };
+    } catch (error) {
+      console.error('[purge] Cloud check failed:', error);
+      return { hasReferences: true, reason: 'check_failed', error };
+    }
   }
 
   function isCreationLinkedToWarehouse(c) {
@@ -1711,8 +1931,36 @@
   }
 
   async function purgeCreationMedia(creation) {
-    if (!creation || warehouseReferencesCreation(creation)) return;
-    const refs = new Set();
+      if (!creation) return;
+    
+      // 1. 本地检查
+      if (warehouseReferencesCreation(creation)) {
+        console.log('[purge] Skipped: local reference exists', creation.id);
+        return;
+      }
+    
+      // 2. 云端检查（Phase 0 新增）
+      const cloudCheck = await checkCloudCardReferences(creation);
+      if (cloudCheck.hasReferences) {
+        console.log('[purge] Skipped: cloud reference exists', {
+          creationId: creation.id,
+          reason: cloudCheck.reason,
+          details: cloudCheck.details
+        });
+        return;
+      }
+    
+      // 3. Dry-run 模式支持
+      if (window.__PURGE_DRY_RUN) {
+        console.log('[purge] DRY RUN - Would delete:', {
+          creationId: creation.id,
+          refs: [creation.image, creation.mjCompositeUrl, ...(creation.mjGridUrls || [])]
+        });
+        return;
+      }
+    
+      // 4. 执行删除（原有逻辑）
+      const refs = new Set();
     const add = (u) => { if (u && isDisplayableImage(u)) refs.add(u); };
     add(creation.image);
     add(creation.mjCompositeUrl);
@@ -3335,6 +3583,8 @@
       getImageGenFailedJobs: () => imageGenFailedJobs,
       prunePendingJobsWithCreations,
       getRecentCreationsForFeed,
+      pickCreationFeedImage,
+      creationFeedImageCandidates,
       saveCreationToWarehouse,
       deleteCreation,
       confirmDeleteCreation,
@@ -6785,6 +7035,22 @@
       if (c) {
         rawRef = c.image || rawRef;
         jobId = String(c.jobId || jobId).replace(/#\d+$/, '');
+      }
+      const baseJob = jobId.replace(/#\d+$/, '');
+      if (baseJob && window.PromptHubApi?.getGenerationImageUrl) {
+        try {
+          const r = await window.PromptHubApi.getGenerationImageUrl(baseJob);
+          if (r?.ok && r.data?.url) return r.data.url;
+        } catch (e) { /* ignore */ }
+      }
+      if (/^https?:\/\//i.test(rawRef) && !window.SupabaseSync?.isInvalidMediaUrl?.(rawRef)) {
+        if (window.PromptHubApi?.fetchMediaAsBlobUrl) {
+          try {
+            const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(rawRef);
+            if (blobUrl) return blobUrl;
+          } catch (e) { /* ignore */ }
+        }
+        return rawRef;
       }
     } else if (kind === 'warehouse') {
       const c = findWarehouseCardById(assetId);
@@ -10734,6 +11000,10 @@
     recoverRecentGenerationJobs,
     recoverLostGenerationsFromApi,
     repairMissingGenCardImagesQuiet,
+    repairRecentCreationImagesQuiet,
+    diagnoseRecentFeedThumbs,
+    pickCreationFeedImage,
+    creationFeedImageCandidates,
     repairMjWarehousePreviewsQuiet,
     resumePendingGenerationJobs,
     scheduleGenJobsSync,
@@ -10750,6 +11020,7 @@
     getImageGenFeedNavItems,
     openImageGenLightboxAt,
     resolveImageGenFullUrl,
+    findCreationById,
     runImageGenWithPrompt,
     recordImageGenFailure: addFailedGenJob,
     getImageGenRefImages: () => [...getImageGenRefImages()],

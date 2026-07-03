@@ -79,9 +79,21 @@
       const creations = d().getCreations() || [];
       const existingCre = baseJobId ? findCreationForBaseJob(baseJobId) : null;
       const creationId = existingCre?.id || d().genId('cr');
-      const storedImage = image;
+      let storedImage = image;
+      const archiveJobId = slotJobId || baseJobId;
+      if (global.SupabaseSync?.isLoggedIn?.() && global.SupabaseSync?.archiveGeneratedCardImage && archiveJobId) {
+        try {
+          const archived = await global.SupabaseSync.archiveGeneratedCardImage(creationId, image, {
+            jobId: archiveJobId,
+            allowRemoteArchive: true
+          });
+          if (archived) storedImage = archived;
+        } catch (e) {
+          console.warn('[finishImageGen] archive to storage failed', e);
+        }
+      }
 
-      if (slotJobId) {
+      if (slotJobId && global.SupabaseSync?.isStorageRef?.(storedImage)) {
         void global.WarehouseThumb?.resolveForCard?.(storedImage, {
           jobId: slotJobId,
           assetId: creationId,
@@ -107,6 +119,26 @@
         }
         return storedImage ? [storedImage] : [];
       };
+
+      let mjGalleryStored = null;
+      if (isMidjourney && global.SupabaseSync?.isLoggedIn?.() && global.SupabaseSync?.archiveGeneratedCardImage && archiveJobId) {
+        const rawGallery = galleryFromMj();
+        if (rawGallery.length > 1) {
+          mjGalleryStored = [];
+          for (let gi = 0; gi < rawGallery.length; gi += 1) {
+            const slot = gi === 0 ? archiveJobId : `${String(archiveJobId).replace(/#\d+$/, '')}#${gi + 1}`;
+            try {
+              const a = await global.SupabaseSync.archiveGeneratedCardImage(creationId, rawGallery[gi], {
+                jobId: slot,
+                allowRemoteArchive: true
+              });
+              mjGalleryStored.push(a || rawGallery[gi]);
+            } catch (e) {
+              mjGalleryStored.push(rawGallery[gi]);
+            }
+          }
+        }
+      }
 
       const cardMjGridUrls = isMidjourney
         ? (Array.isArray(mjGridUrls) && mjGridUrls.length
@@ -135,7 +167,7 @@
         mjGridUrls: cardMjGridUrls,
         mjCompositeUrl: isMidjourney && mjCompositeUrl ? mjCompositeUrl : null,
         mjButtons: isMidjourney && Array.isArray(mjButtons) ? mjButtons : null,
-        cardImages: isMidjourney ? galleryFromMj() : null,
+        cardImages: isMidjourney ? (mjGalleryStored || galleryFromMj()) : null,
         genBatchId: genBatchId || existingCre?.genBatchId || null,
         fromInspirationDraw: !!fromInspirationDraw,
         savedToWarehouse: !!existingCre?.savedToWarehouse,

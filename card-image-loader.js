@@ -139,12 +139,15 @@
   }
 
   function cardIdFromImg(img) {
-    return img.dataset?.sourceCardId
-      || img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
-      || img.closest('.card[data-id]')?.dataset?.id
+    const fromSource = img.dataset?.sourceCardId
+      || img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId;
+    if (fromSource) return fromSource;
+    const feedId = img.closest('[data-feed-id]')?.dataset?.feedId || '';
+    if (feedId.startsWith('cr_')) return feedId.slice(3);
+    if (feedId.startsWith('wh_')) return feedId.slice(3);
+    return img.closest('.card[data-id]')?.dataset?.id
       || img.closest('.card[data-post-id]')?.dataset?.sourceCardId
       || img.closest('.card[data-post-id]')?.dataset?.postId
-      || img.closest('[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '')
       || undefined;
   }
 
@@ -252,6 +255,82 @@
 
   function isOwnImageGenWarehouseImg(img) {
     return !!img?.closest?.('#imageGenFeed .imagegen-feed-card[data-feed-id^="wh_"]');
+  }
+
+  function isOwnImageGenRecentImg(img) {
+    return !!img?.closest?.('#imageGenFeed .imagegen-feed-card[data-feed-id^="cr_"]');
+  }
+
+  function creationFromRecentFeedImg(img) {
+    const feedId = img?.closest?.('.imagegen-feed-card')?.dataset?.feedId || '';
+    if (!feedId.startsWith('cr_')) return null;
+    const id = feedId.slice(3);
+    return window.FeatureDraft?.findCreationById?.(id)
+      || (window.FeatureDraft?.getCreations?.() || []).find((c) => c.id === id)
+      || null;
+  }
+
+  async function resolveRecentCreationFeedUrl(img, opts = {}) {
+    const creation = creationFromRecentFeedImg(img);
+    if (!creation) return '';
+    const jobId = String(creation.jobId || img.getAttribute('data-job-id') || '').replace(/#\d+$/, '');
+    const wantFull = opts.preferFull === true;
+    const refFromDom = img.getAttribute('data-image-ref') || '';
+    const refs = [];
+    const pushRef = (u) => {
+      if (u && String(u).trim() && !refs.includes(u)) refs.push(String(u).trim());
+    };
+    pushRef(refFromDom);
+    pushRef(creation.image);
+    if (window.FeatureDraft?.creationFeedImageCandidates) {
+      window.FeatureDraft.creationFeedImageCandidates(creation).forEach(pushRef);
+    } else {
+      if (Array.isArray(creation.cardImages)) creation.cardImages.forEach(pushRef);
+      pushRef(creation.mjCompositeUrl);
+      if (Array.isArray(creation.mjGridUrls)) creation.mjGridUrls.forEach(pushRef);
+    }
+    if (jobId && window.PromptHubApi?.getGenerationImageUrl) {
+      try {
+        const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
+        if (r?.ok && r.data?.url && isReadySrc(r.data.url, img)) return r.data.url;
+      } catch (e) { /* ignore */ }
+    }
+    for (const ref of refs) {
+      if (!ref) continue;
+      if (wantFull && window.MediaPipeline?.resolvePreviewUrl) {
+        const full = await window.MediaPipeline.resolvePreviewUrl(ref, {
+          assetId: creation.id,
+          cardId: creation.id,
+          jobId: jobId || undefined,
+          useJobImageApi: true,
+          allowGridFallback: true
+        });
+        if (full && isReadySrc(full, img)) return full;
+      }
+      if (window.MediaPipeline?.resolveListUrl) {
+        const list = await window.MediaPipeline.resolveListUrl(ref, {
+          assetId: creation.id,
+          cardId: creation.id,
+          jobId: jobId || undefined,
+          tryAllPaths: true
+        });
+        if (list && isReadySrc(list, img)) return list;
+      }
+      if (/^https?:\/\//i.test(ref) && !window.SupabaseSync?.isInvalidMediaUrl?.(ref)) {
+        if (window.PromptHubApi?.fetchMediaAsBlobUrl) {
+          try {
+            const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(ref);
+            if (blobUrl && isReadySrc(blobUrl, img)) return blobUrl;
+          } catch (e) { /* ignore */ }
+        }
+        if (isReadySrc(ref, img)) return ref;
+      }
+    }
+    if (window.FeatureDraft?.resolveImageGenFullUrl && wantFull) {
+      const feedKey = `cr_${creation.id}`;
+      return window.FeatureDraft.resolveImageGenFullUrl('recent', creation.id, feedKey, img) || '';
+    }
+    return '';
   }
 
   /** 浏览器已解码出像素 — 勿因签名过期重复拉 media */
@@ -364,6 +443,10 @@
       if (window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(src)) return false;
       if (!window.SupabaseSync?.isGridDisplayUrl?.(src)) return false;
     }
+    if (img && isOwnImageGenRecentImg(img)) {
+      if (window.SupabaseSync?.isValidSignedDisplayUrl?.(src)) return true;
+      if (/^https?:\/\//i.test(src) && !window.SupabaseSync?.isInvalidMediaUrl?.(src)) return true;
+    }
     if (img && isImgVisuallyLoaded(img) && (isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))) {
       return true;
     }
@@ -439,7 +522,7 @@
       || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(cardModel);
     if (!jobId) return false;
     const ref = img.getAttribute('data-image-ref') || cardModel.image || '';
-    if (!window.SupabaseSync?.isGeneratedStoragePath?.(ref)) return false;
+    if (!window.SupabaseSync?.isGeneratedStoragePath?.(ref) && !jobId) return false;
     img.dataset.whServerRecover = '1';
     window.SupabaseSync?.clearPathMissingForCard?.(cardId, ref);
     const applyOrFail = (url) => {
@@ -765,6 +848,18 @@
     const extra = isOwnImageGenWarehouseImg(img) ? {} : communityResolveOpts(img);
     if (extra.skip) {
       img.closest('.card-media, .imagegen-feed-media')?.remove();
+      return;
+    }
+    if (isOwnImageGenRecentImg(img)) {
+      const p = resolveRecentCreationFeedUrl(img).then((url) => {
+        inflight.delete(img);
+        if (url) {
+          applyUrlToImg(img, url);
+          return;
+        }
+        window.finalizeWarehouseCardMediaFailure?.(feedMediaFromImg(img), img);
+      });
+      inflight.set(img, p);
       return;
     }
     const primary = ref ? window.SupabaseSync?.primaryImagePath?.(ref, cardId) : '';
@@ -1246,7 +1341,8 @@
     const nearPx = mobile ? 1800 : 480;
     let n = 0;
     sortImgsByViewport(feedImagesIn(container)).forEach((img) => {
-      if (!isOwnImageGenWarehouseImg(img)) return;
+      const isRecent = isOwnImageGenRecentImg(img);
+      if (!isOwnImageGenWarehouseImg(img) && !isRecent) return;
       if (n >= cap) return;
       if (isImgVisuallyLoaded(img)) return;
       const cur = img.currentSrc || img.src || '';
@@ -1260,6 +1356,22 @@
         n += 1;
         loadImg(img);
       }
+    });
+    observeContainer(container);
+  }
+
+  function boostImageGenRecentImages(container, max) {
+    if (!container || container.id !== 'imageGenFeed') return;
+    const cap = max ?? igFeedBoostMax();
+    let n = 0;
+    sortImgsByViewport(feedImagesIn(container)).forEach((img) => {
+      if (!isOwnImageGenRecentImg(img)) return;
+      if (n >= cap) return;
+      if (isImgVisuallyLoaded(img)) return;
+      const cur = img.currentSrc || img.src || '';
+      if (isReadySrc(cur, img)) return;
+      n += 1;
+      loadImg(img);
     });
     observeContainer(container);
   }

@@ -103,7 +103,7 @@
     const slotJobId = thumb?.slotJobId || (baseJob || null);
     const jobId = baseJob || (slotJobId ? String(slotJobId).replace(/#\d+$/, '') : '');
     if (!ref && !gallery.length && !baseJob) return { hasImage: false };
-    const listOpts = { jobId: slotJobId || jobId || undefined, allowFullFallback: false };
+    const listOpts = { jobId: slotJobId || jobId || undefined, allowFullFallback: !!baseJob };
     let cachedUrl = '';
     if (ref && global.SupabaseSync?.getListDisplayImageSrc) {
       cachedUrl = global.SupabaseSync.getListDisplayImageSrc(ref, card.id, listOpts) || '';
