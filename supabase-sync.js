@@ -150,8 +150,9 @@
   let gridBackfillSessionCount = 0;
   /** 列表签名只走 Worker API，避免 Supabase 超限 400 风暴 */
   const USE_DIRECT_SUPABASE_SIGN = false;
-  /** 本会话 CDN 404 过的路径，不再签名（即使 localStorage 标了 grid done） */
-  const gridFetchFailedPaths = new Set();
+  /** 本会话 CDN 404 过的 grid 路径；带 TTL，避免 R2 已有文件仍整页黑卡 */
+  const gridFetchFailedPaths = new Map();
+  const GRID_FETCH_FAIL_TTL_MS = 6 * 60 * 1000;
   const warmGenThumbInflight = new Set();
   const queueGridBackfillInflight = new Set();
 
@@ -306,7 +307,7 @@
   function markGridFetchFailed(path, cardIdHint) {
     const key = normalizePathKey(path);
     if (!key) return;
-    gridFetchFailedPaths.add(key);
+    gridFetchFailedPaths.set(key, Date.now() + GRID_FETCH_FAIL_TTL_MS);
     if (/_grid\.(jpe?g|webp|png)$/i.test(key)) {
       invalidateSignedCache(key);
     } else {
@@ -322,7 +323,47 @@
 
   function isGridFetchFailed(path) {
     const key = normalizePathKey(path);
-    return !!(key && gridFetchFailedPaths.has(key));
+    if (!key) return false;
+    const exp = gridFetchFailedPaths.get(key);
+    if (!exp) return false;
+    if (exp <= Date.now()) {
+      gridFetchFailedPaths.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  function clearSessionGridFetchFailures() {
+    gridFetchFailedPaths.clear();
+  }
+
+  /** 进入卡片库 / 新版本：自动清本地「路径失败」缓存（无需用户开控制台） */
+  function bootstrapWarehouseMediaCache(opts) {
+    const uid = getUserId();
+    clearSessionGridFetchFailures();
+    signBudgetUsed = 0;
+    signBudgetResetAt = 0;
+    if (opts?.clearAllMissing !== false) {
+      missingPathCache.clear();
+      try { localStorage.removeItem(LS_MISSING_PATHS); } catch (e) { /* ignore */ }
+    } else if (uid) {
+      const prefix = `${uid}/`;
+      const drop = [];
+      missingPathCache.forEach((_exp, key) => {
+        if (String(key).startsWith(prefix)) drop.push(key);
+      });
+      drop.forEach((k) => missingPathCache.delete(k));
+      persistMissingPathCache();
+    }
+    try {
+      const build = window.__APP_BUILD__ || '';
+      const k = `ph_wh_media_boot_${build}`;
+      if (build && !sessionStorage.getItem(k)) {
+        sessionStorage.removeItem('ph_signed_urls_v2');
+        sessionStorage.removeItem('ph_wh_grid_v1');
+        sessionStorage.setItem(k, '1');
+      }
+    } catch (e) { /* ignore */ }
   }
 
   function unmarkGridThumbReady(cardId) {
@@ -354,8 +395,9 @@
     const grid = gridPathFromPrimary(pk);
     if (!grid) return true;
     const gk = grid.replace(/^\//, '');
-    if (isPathKnownMissing(gk) || gridFetchFailedPaths.has(gk)) return true;
+    if (isPathKnownMissing(gk) || isGridFetchFailed(gk)) return true;
     if (cardId && isGridThumbReady(cardId) && !isPathKnownMissing(gk)) return false;
+    if (isGridFetchFailed(gk)) return true;
     /* 生图/旧版卡：桶里可无 _grid 文件，CDN 对 _grid 路径现场缩略；列表禁止回退原图 */
     if (cardId && (pk.includes('/generated/') || isLegacyUploadCardPath(pk))) return false;
     if (!shouldSignGridPath(gk, cardId)) return true;
@@ -406,7 +448,7 @@
 
   function shouldSignGridPath(gridKey, cardId) {
     const key = normalizePathKey(gridKey);
-    if (!key || isPathKnownMissing(key) || gridFetchFailedPaths.has(key)) return false;
+    if (!key || isPathKnownMissing(key) || isGridFetchFailed(key)) return false;
     if (!/_grid\.(jpe?g|webp|png)$/i.test(key)) return false;
   /** 自有图：CDN 可按原图现场生成 grid，勿等本地 backfill 完成才签名 */
     if (storagePathOwnedByCurrentUser(key)) {
@@ -1938,17 +1980,28 @@
     return String(fallbackAssetId || Date.now());
   }
 
-  /** 列表/预览签名：opts 或卡片 genJobId → 生图 storage 路径 */
-  function resolveJobIdForAsset(opts, assetId) {
+  /** 生图 storage 路径：保留 #N 槽位（MJ 多图） */
+  function resolveStorageJobIdForAsset(opts, assetId) {
     const raw = opts?.jobId || opts?.genJobId || null;
-    if (raw) return String(raw).replace(/#\d+$/, '');
+    if (raw) return String(raw);
     const id = assetId || opts?.cardId;
     if (!id) return null;
     const card = (window.__promptHubCards || []).find((c) => c.id === id);
-    if (card?.genJobId) return String(card.genJobId).replace(/#\d+$/, '');
+    if (card) {
+      const thumb = window.PromptHubCardGallery?.pickWarehouseListThumb?.(card);
+      if (thumb?.slotJobId) return String(thumb.slotJobId);
+    }
+    if (card?.genJobId) return String(card.genJobId);
     if (window.PromptHubCardGallery?.resolveGenJobIdFromCard) {
       return window.PromptHubCardGallery.resolveGenJobIdFromCard(card);
     }
+    return null;
+  }
+
+  /** 列表/预览签名：opts 或卡片 genJobId → 生图 storage 路径 */
+  function resolveJobIdForAsset(opts, assetId) {
+    const full = resolveStorageJobIdForAsset(opts, assetId);
+    if (full) return String(full).replace(/#\d+$/, '');
     return null;
   }
 
@@ -2331,6 +2384,7 @@
     const assetId = o.assetId;
     const authorId = o.authorId;
     const jobId = resolveJobIdForAsset(o, assetId);
+    const storageJobId = resolveStorageJobIdForAsset(o, assetId) || jobId;
     const variant = displayVariantFromOpts(opts);
     const normalizedEarly = normalizeImageRef(image);
     const bucketPathEarly = storagePathFromRef(normalizedEarly);
@@ -2339,18 +2393,38 @@
     if (
       listOnlyGridEarly
       && jobId
+      && assetId
+      && isLoggedIn()
+      && bucketPathEarly
+      && !storagePathOwnedByCurrentUser(bucketPathEarly)
+    ) {
+      const card = (window.__promptHubCards || []).find((c) => c.id === assetId);
+      const stored = card ? cardListThumbStorageRef(card) : null;
+      if (stored?.ref && stored.ref !== normalizedEarly) {
+        return resolveDisplayUrl(stored.ref, nextOpts({
+          jobId: stored.thumb?.slotJobId || jobId,
+          galleryIndex: stored.thumb?.galleryIndex ?? o.galleryIndex
+        }));
+      }
+    }
+    if (
+      listOnlyGridEarly
+      && jobId
       && isLoggedIn()
       && window.WarehouseThumb?.resolveForCard
     ) {
-      const wh = await window.WarehouseThumb.resolveForCard(image, {
-        jobId,
-        assetId,
-        cardId: o.cardId || assetId,
-        galleryIndex: o.galleryIndex || 0
-      });
-      if (wh && isGridDisplayUrl(wh)) {
-        if (assetId) markGridThumbReady(assetId);
-        return wh;
+      const ownedStorage = bucketPathEarly && storagePathOwnedByCurrentUser(bucketPathEarly);
+      if (!ownedStorage) {
+        const wh = await window.WarehouseThumb.resolveForCard(image, {
+          jobId: storageJobId || jobId,
+          assetId,
+          cardId: o.cardId || assetId,
+          galleryIndex: o.galleryIndex || 0
+        });
+        if (wh && isGridDisplayUrl(wh)) {
+          if (assetId) markGridThumbReady(assetId);
+          return wh;
+        }
       }
     }
     let communityFeed = isCommunityFeedOpts(o);
@@ -2383,10 +2457,10 @@
     if (bucketPath && (isLoggedIn() || communityFeed)) {
       const primary = primaryImagePath(normalized, assetId);
       const fromRef = bucketPath.replace(/^\//, '');
-      const all = listImagePathCandidates(normalized, assetId, authorId, jobId).filter(
+      const all = listImagePathCandidates(normalized, assetId, authorId, storageJobId).filter(
         (p) => !isPathKnownMissing(p)
       );
-      const variantPaths = pathsForVariant(normalized, assetId, authorId, variant, jobId);
+      const variantPaths = pathsForVariant(normalized, assetId, authorId, variant, storageJobId);
       let candidates;
       const listOnlyGrid = variant === VARIANT_GRID && (o.listOnly === true || o.allowFullFallback === false);
       if (
@@ -2765,7 +2839,8 @@
     if (isDataUrl(image) || image.startsWith('blob:')) return image;
     const opts = typeof assetIdOrOpts === 'object' ? assetIdOrOpts : { assetId: assetIdOrOpts };
     const assetId = opts?.assetId;
-    const jobId = resolveJobIdForAsset(opts, assetId);
+    const storageJobId = resolveStorageJobIdForAsset(opts, assetId)
+      || resolveJobIdForAsset(opts, assetId);
     const variant = displayVariantFromOpts(opts);
     const primary = primaryImagePath(image, assetId);
     const pathFromImage = storagePathFromRef(image);
@@ -2787,7 +2862,7 @@
           }
         }
       }
-      for (const path of pathsForVariant(image, assetId, opts?.authorId, variant, jobId)) {
+      for (const path of pathsForVariant(image, assetId, opts?.authorId, variant, storageJobId)) {
         const key = path.replace(/^\//, '');
         if (variant === VARIANT_FULL && isGridStoragePath(key)) continue;
         if (variant === VARIANT_GRID && primary && gridListNeedsPrimaryFallback(primary, assetId)) continue;
@@ -2829,21 +2904,21 @@
     if (!image || typeof image !== 'string') return '';
     const o = extraOpts && typeof extraOpts === 'object' ? extraOpts : {};
     const id = o.assetId || assetId;
-    const jobId = resolveJobIdForAsset(o, id);
+    const storageJobId = resolveStorageJobIdForAsset(o, id);
     const primary = id ? primaryImagePath(normalizeImageRef(image), id) : null;
     const pkey = primary ? primary.replace(/^\//, '') : '';
     if (pkey && isPathKnownMissing(pkey)) return '';
     const gridKey = pkey ? (gridPathFromPrimary(pkey) || '').replace(/^\//, '') : '';
-    if (gridKey && (isPathKnownMissing(gridKey) || gridFetchFailedPaths.has(gridKey))) return '';
     const grid = getCachedDisplayUrl(image, {
       assetId: id,
       authorId: o.authorId,
-      jobId,
+      jobId: storageJobId || o.jobId,
       variant: VARIANT_GRID
     });
-    if (grid && isValidSignedDisplayUrl(grid) && !isInvalidMediaUrl(grid)) {
-      if (isGridDisplayUrl(grid)) return grid;
+    if (grid && isValidSignedDisplayUrl(grid) && !isInvalidMediaUrl(grid) && isGridDisplayUrl(grid)) {
+      return grid;
     }
+    if (gridKey && (isPathKnownMissing(gridKey) || isGridFetchFailed(gridKey))) return '';
     if (o.allowFullFallback === true && isLoggedIn() && id) {
       const normalized = normalizeImageRef(image);
       const primary = primaryImagePath(normalized, id);
@@ -2852,13 +2927,91 @@
         const full = getCachedDisplayUrl(normalized, {
           assetId: id,
           authorId: o.authorId,
-          jobId,
+          jobId: storageJobId || o.jobId,
           variant: VARIANT_FULL
         });
         if (full && isValidSignedDisplayUrl(full) && !isInvalidMediaUrl(full)) return full;
       }
     }
     return '';
+  }
+
+  /** 列表缩略图 ref 已是自有 storage:// → 与普通卡同走 batch 签 grid */
+  function cardListThumbStorageRef(card) {
+    if (!card?.id) return null;
+    const thumb = window.PromptHubCardGallery?.pickWarehouseListThumb?.(card);
+    const ref = thumb?.ref || (isStorageRef(card.image) ? card.image : null);
+    if (!ref || !isStorageRef(ref)) return null;
+    const path = storagePathFromRef(ref);
+    if (!path || !storagePathOwnedByCurrentUser(path)) return null;
+    const pkey = path.replace(/^\//, '');
+    if (isPathKnownMissing(pkey)) return null;
+    return { ref, thumb };
+  }
+
+  /** 收集卡片 gallery 内所有可 batch 签名的 grid 路径（含 MJ 多槽） */
+  function collectCardOwnedListSignPaths(card) {
+    const paths = new Set();
+    if (!card?.id) return paths;
+    const addRef = (ref) => {
+      if (!ref || !isStorageRef(ref)) return;
+      const path = storagePathFromRef(ref);
+      if (!path || !storagePathOwnedByCurrentUser(path)) return;
+      const pkey = path.replace(/^\//, '');
+      if (isPathKnownMissing(pkey)) return;
+      const plan = ownedListSignTargets(pkey, card.id);
+      if (plan.grid) paths.add(plan.grid);
+      else if (!plan.primary) {
+        const gk = (gridPathFromPrimary(pkey) || '').replace(/^\//, '');
+        if (gk && !isPathKnownMissing(gk)) paths.add(gk);
+      }
+    };
+    const thumb = window.PromptHubCardGallery?.pickWarehouseListThumb?.(card);
+    if (thumb?.ref) addRef(thumb.ref);
+    const gallery = window.PromptHubCardGallery?.normalizeCardGallery?.(card) || [];
+    for (const u of gallery) addRef(u);
+    if (isStorageRef(card.image)) addRef(card.image);
+    return paths;
+  }
+
+  function cardHasOwnedGalleryStorage(card) {
+    return collectCardOwnedListSignPaths(card).size > 0;
+  }
+
+  function isGeneratedStoragePath(pathOrRef) {
+    const raw = String(pathOrRef || '').trim();
+    if (!raw) return false;
+    const path = storagePathFromRef(raw) || raw.replace(/^\//, '');
+    return path.includes('/generated/');
+  }
+
+  /** 生图卡常带 storage://…/generated/…，R2 可能尚未归档；不能走 sign-batch */
+  function cardUsesGeneratedStorage(card) {
+    const jobId = card?.genJobId
+      || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(card);
+    if (!jobId) return false;
+    const thumb = window.PromptHubCardGallery?.pickWarehouseListThumb?.(card);
+    const ref = thumb?.ref || card.image;
+    return isGeneratedStoragePath(ref);
+  }
+
+  function cardHasGeneratedGalleryStorage(card) {
+    const gallery = window.PromptHubCardGallery?.normalizeCardGallery?.(card) || [];
+    for (const u of gallery) {
+      if (u && isGeneratedStoragePath(u)) return true;
+    }
+    return false;
+  }
+
+  /** 生图 /generated/ 路径：优先 sign-batch（服务端 ensureGrid 会现场出 grid）；仅无 storage 引用时才走 warehouse-thumbs */
+  function cardNeedsWarehouseThumbServer(card) {
+    if (cardListThumbStorageRef(card)) return false;
+    const ownedPaths = collectCardOwnedListSignPaths(card);
+    if (ownedPaths.size) return false;
+    if (cardHasOwnedGalleryStorage(card)) return false;
+    const jobId = card?.genJobId
+      || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(card);
+    return !!jobId;
   }
 
   /** 按卡片 id 收集 canonical 路径，一次 batch 签名（避免列表每张图多次试探） */
@@ -2876,10 +3029,15 @@
     const genCards = [];
     for (const c of list) {
       if (!c?.id) continue;
-      const jobId = c.genJobId
-        || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(c);
-      if (jobId) {
+      if (cardNeedsWarehouseThumbServer(c)) {
         genCards.push(c);
+        continue;
+      }
+      const ownedPaths = collectCardOwnedListSignPaths(c);
+      if (ownedPaths.size) {
+        if (!isGridBackfillSkipped(c.id)) {
+          ownedPaths.forEach((p) => pathSet.add(p));
+        }
         continue;
       }
       if (isGridBackfillSkipped(c.id)) continue;
@@ -3438,10 +3596,22 @@
   /** 生图入库：原字节写入 generated/{jobId}，列表另存 _grid 缩略 */
   async function archiveGeneratedCardImage(cardId, image, opts = {}) {
     if (!cardId || !image) return image || null;
-    if (isStorageRef(image)) {
+    if (isStorageRef(image) && !opts.copyToOwnPath) {
       const normalized = normalizeImageRef(image);
       if (await verifyStorageRef(normalized, cardId, { quick: true })) return normalized;
       return normalized;
+    }
+    if (isStorageRef(image) && opts.copyToOwnPath) {
+      const path = storagePathFromRef(image);
+      if (path) {
+        const url = await resolvePathToUrl(path.replace(/^\//, ''), VARIANT_FULL, { bypassSignBudget: true });
+        if (url) {
+          return persistGenerationImage(cardId, url, {
+            ...(opts?.jobId ? { jobId: opts.jobId } : {}),
+            allowRemoteArchive: true
+          });
+        }
+      }
     }
     if (/^https?:\/\//i.test(image) && isEphemeralUpstreamImageUrl(image) && opts.allowRemoteArchive !== true) {
       const jobId = opts?.jobId || null;
@@ -4659,6 +4829,7 @@
     isStorageUrl,
     isStorageRef,
     storagePathFromRef,
+    storagePathOwnedByCurrentUser,
     primaryImagePath,
     isGridStoragePath,
     storagePathFromCdnUrl,
@@ -4674,6 +4845,9 @@
     resetMissingPathCache,
     healMissingPathCacheForCards,
     markGridFetchFailed,
+    clearSessionGridFetchFailures,
+    bootstrapWarehouseMediaCache,
+    isGridFetchFailed,
     isGridFetchFailed,
     shouldSignGridPath,
     resolveListPrimaryFallback,
@@ -4694,6 +4868,10 @@
     prefetchDisplayUrlsWithCap,
     prefetchCardsImages,
     prefetchWarehousePage,
+    cardListThumbStorageRef,
+    cardNeedsWarehouseThumbServer,
+    isGeneratedStoragePath,
+    cardUsesGeneratedStorage,
     batchSignPaths,
     prefetchCommunityDisplayUrls,
     patchImageSrcFromCache,

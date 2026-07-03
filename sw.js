@@ -1,4 +1,4 @@
-const CACHE = 'prompt-hub-v20260701k';
+const CACHE = 'prompt-hub-v20260702g';
 /** 仅缓存静态小资源；HTML/JS/CSS 始终走网络，避免误显示「暂时无法连接」 */
 const ASSETS = [
   './manifest.webmanifest',
@@ -67,6 +67,10 @@ self.addEventListener('fetch', (e) => {
         try {
           return await fetch(e.request, { cache: 'no-store' });
         } catch (err) {
+          try {
+            const root = await fetch(new URL('/', self.location.origin).href, { cache: 'no-store' });
+            if (root.ok) return root;
+          } catch (_) { /* fall through */ }
           const cached =
             (await caches.match(e.request)) ||
             (await caches.match('/index.html')) ||

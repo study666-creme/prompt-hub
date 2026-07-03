@@ -8,8 +8,6 @@ import { supabaseProxyHandler } from './routes/supabase-proxy';
 import { v1 } from './routes/v1';
 import { webhookRoutes } from './routes/webhooks/payment';
 import type { Env } from './env';
-import { drainIthinkPendingSubmits } from './lib/ithink-drain';
-import { drainMookoPendingSubmits } from './lib/mooko-drain';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -57,7 +55,11 @@ app.get('/health', async c => {
     version: '0.1.0',
     environment: c.env.ENVIRONMENT,
     supabase: db,
-    mooko: mookoKey ? 'configured' : 'missing',
+    imageProviders: {
+      grsai: c.env.IMAGE_API_KEY?.trim() ? 'configured' : 'missing',
+      apimart: c.env.APIMART_API_KEY?.trim() ? 'configured' : 'missing'
+    },
+    legacyMooko: mookoKey ? 'configured_unused' : 'missing',
     hint
   });
 });
@@ -155,21 +157,5 @@ app.notFound(c => {
 });
 
 export default {
-  fetch: app.fetch,
-  async scheduled(
-    _controller: ScheduledController,
-    env: Env,
-    ctx: ExecutionContext
-  ): Promise<void> {
-    try {
-      await drainMookoPendingSubmits(env, { awaitSubmit: true });
-    } catch (e) {
-      console.error('[scheduled] mooko-drain failed', e);
-    }
-    try {
-      await drainIthinkPendingSubmits(env, { awaitSubmit: true });
-    } catch (e) {
-      console.error('[scheduled] ithink-drain failed', e);
-    }
-  }
+  fetch: app.fetch
 };

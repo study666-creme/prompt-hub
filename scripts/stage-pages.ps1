@@ -32,6 +32,9 @@ foreach ($dir in @('assets', 'vendor', 'functions', 'downloads', 'extension')) {
 if (Test-Path (Join-Path $root "_headers")) {
   Copy-Item (Join-Path $root "_headers") $staging
 }
+if (Test-Path (Join-Path $root "_redirects")) {
+  Copy-Item (Join-Path $root "_redirects") $staging
+}
 
 $count = (Get-ChildItem $staging -Recurse -File).Count
 $sizeMb = [math]::Round(((Get-ChildItem $staging -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 2)

@@ -194,12 +194,26 @@ export async function pollAndUpdateJob(
         : null;
   const refundOnViolation = meta.refundOnViolation !== false;
   const provider = readJobProvider(meta);
+  const legacyProvider = typeof meta.provider === 'string' ? meta.provider : provider;
+  if (
+    (legacyProvider === 'mooko' || legacyProvider === 'ithink')
+    && job.status === 'processing'
+  ) {
+    const msg = '该生图线路已下线，请换用常规或备用线路';
+    await finalizeFailedJob(admin, userId, job, msg);
+    return {
+      status: 'failed',
+      imageUrl: null,
+      errorMessage: msg,
+      refunded: true
+    };
+  }
 
   if (job.status === 'completed') {
     if (
       !job.result_image_url
       && taskId
-      && (upstream.grsaiKey || upstream.apimartKey || upstream.ithinkKey || upstream.mookoKey)
+      && (upstream.grsaiKey || upstream.apimartKey)
     ) {
       const recovered = await tryRecoverJobFromUpstream(
         admin,
@@ -301,7 +315,7 @@ export async function pollAndUpdateJob(
         refunded: !!(job.meta as Record<string, unknown>)?.refunded
       };
     }
-    if (taskId && (upstream.grsaiKey || upstream.apimartKey || upstream.ithinkKey || upstream.mookoKey)) {
+    if (taskId && (upstream.grsaiKey || upstream.apimartKey)) {
       const recovered = await tryRecoverJobFromUpstream(
         admin,
         userId,
@@ -325,7 +339,7 @@ export async function pollAndUpdateJob(
   const upstreamModel = String(meta.upstreamModel || meta.model || '').toLowerCase();
   const staleMs = jobStaleMs(provider, upstreamModel, job.resolution);
 
-  if (!upstream.grsaiKey && !upstream.apimartKey && !upstream.ithinkKey && !upstream.mookoKey) {
+  if (!upstream.grsaiKey && !upstream.apimartKey) {
     await admin
       .from('generation_requests')
       .update({

@@ -94,6 +94,24 @@
     return 'basic';
   }
 
+  /** 生图页「最近生成」条数上限（超出时删最旧，即使未满 7 天） */
+  const RECENT_CREATIONS_LIMIT = {
+    free: 100,
+    lite: 150,
+    basic: 200,
+    standard: 300,
+    pro: 400
+  };
+
+  function getRecentCreationsLimit() {
+    const tier = getMemberTier();
+    if (tier === 'pro') return RECENT_CREATIONS_LIMIT.pro;
+    if (tier === 'standard') return RECENT_CREATIONS_LIMIT.standard;
+    if (tier === 'basic') return RECENT_CREATIONS_LIMIT.basic;
+    if (tier === 'lite') return RECENT_CREATIONS_LIMIT.lite;
+    return RECENT_CREATIONS_LIMIT.free;
+  }
+
   function getGenDiscountMultiplier() {
     return 1;
   }
@@ -313,6 +331,8 @@
     GEN_DISCOUNT_BY_TIER,
     isMember,
     getMemberTier,
+    getRecentCreationsLimit,
+    RECENT_CREATIONS_LIMIT,
     getGenDiscountMultiplier,
     getGenDiscountLabel,
     getPinLimit,

@@ -4,9 +4,64 @@ import { ApiError } from './errors';
 import { archiveRemoteImage, generationStorageAssetId, isStorageRef, storagePathFromRef, toStorageRef } from './image-archive';
 import { readJobProvider } from './image-upstream';
 import { cardImageExists, downloadFromR2 } from './r2-storage';
+import {
+  gridPathFromPrimary,
+  materializeGridForPrimaryPath,
+  sanitizeCardFileBase
+} from './media-cdn';
 
 const BUCKET = 'card-images';
 const MIN_IMAGE_BYTES = 512;
+const GRID_MIN_BYTES = 2048;
+
+function stripGridSuffix(path: string): string {
+  return path.replace(/_grid\.(jpe?g|webp|png)$/i, '.jpg');
+}
+
+function primaryPathFromImageRef(ref: string, userId: string, cardId: string): string[] {
+  const out: string[] = [];
+  const add = (p: string) => {
+    const key = p.replace(/^\//, '');
+    if (key && !out.includes(key)) out.push(key);
+  };
+  const fromRef = storagePathFromRef(ref);
+  if (fromRef) add(stripGridSuffix(fromRef.replace(/^\//, '')));
+  const base = sanitizeCardFileBase(cardId);
+  add(`${userId}/${base}.jpg`);
+  add(`${userId}/${base}.webp`);
+  add(`${userId}/${base}.png`);
+  add(`${userId}/${cardId}.jpg`);
+  return out;
+}
+
+async function gridPathOk(
+  admin: SupabaseClient,
+  primaryPath: string,
+  env?: Env
+): Promise<boolean> {
+  const grid = gridPathFromPrimary(primaryPath.replace(/^\//, ''));
+  if (!grid) return false;
+  const size = await storageBlobSize(admin, grid.replace(/^\//, ''), env);
+  return size >= GRID_MIN_BYTES;
+}
+
+async function loadJobsByIds(
+  admin: SupabaseClient,
+  userId: string,
+  rawIds: string[]
+): Promise<JobRow[]> {
+  const ids = [...new Set(rawIds.map((id) => String(id || '').replace(/#\d+$/, '')).filter(Boolean))];
+  if (!ids.length) return [];
+  const { data, error } = await admin
+    .from('generation_requests')
+    .select('id,prompt,status,result_image_url,meta,created_at,resolution')
+    .eq('user_id', userId)
+    .in('id', ids.slice(0, 80));
+  if (error) {
+    throw new ApiError(500, 'DB_ERROR', error.message || '读取生图记录失败');
+  }
+  return (data || []) as JobRow[];
+}
 
 function expectedMinFullBytes(resolution?: string | null): number {
   const r = String(resolution || '1k').toLowerCase();
@@ -22,6 +77,7 @@ type JobRow = {
   result_image_url?: string | null;
   meta?: Record<string, unknown> | null;
   created_at?: string | null;
+  resolution?: string | null;
 };
 
 function generateCardId(): string {
@@ -154,6 +210,7 @@ export type RecoverWarehouseResult = {
   repaired?: number;
   failures: Array<{ jobId?: string; cardId?: string; reason: string }>;
   cardIds: string[];
+  totalCandidates?: number;
   hint?: string;
 };
 
@@ -169,9 +226,26 @@ async function loadUserPayload(admin: SupabaseClient, userId: string) {
   const payload = (row?.data || {}) as {
     cards?: Array<Record<string, unknown>>;
     schemaVersion?: number;
+    settings?: Record<string, unknown>;
   };
   const cards = Array.isArray(payload.cards) ? [...payload.cards] : [];
   return { payload, cards };
+}
+
+function deletedGenJobTombstonesFromPayload(payload: {
+  settings?: Record<string, unknown>;
+}): Set<string> {
+  const raw = payload.settings?.deletedGenerationJobTombstones;
+  if (!raw || typeof raw !== 'object') return new Set();
+  return new Set(Object.keys(raw as Record<string, unknown>));
+}
+
+function isGenJobTombstoned(jobId: string, tombstones: Set<string>): boolean {
+  const key = String(jobId || '');
+  if (!key) return false;
+  if (tombstones.has(key)) return true;
+  const base = key.replace(/#\d+$/, '');
+  return base !== key && tombstones.has(base);
 }
 
 async function saveUserCards(
@@ -238,9 +312,25 @@ export type RecoverWarehouseOpts = {
   max?: number;
   days?: number;
   hours?: number;
+  offset?: number;
   providerScope?: 'grs' | 'apimart' | 'all';
   env?: Env;
+  deletedGenerationJobTombstones?: Record<string, number>;
+  jobIds?: string[];
 };
+
+function mergeJobTombstones(
+  payload: { settings?: Record<string, unknown> },
+  clientTombstones?: Record<string, number>
+): Set<string> {
+  const fromPayload = deletedGenJobTombstonesFromPayload(payload);
+  if (!clientTombstones || typeof clientTombstones !== 'object') return fromPayload;
+  const merged = new Set(fromPayload);
+  for (const key of Object.keys(clientTombstones)) {
+    if (key) merged.add(key);
+  }
+  return merged;
+}
 
 function filterJobsByProvider(jobs: JobRow[], scope?: 'grs' | 'apimart' | 'all'): JobRow[] {
   if (!scope || scope === 'all') return jobs;
@@ -281,7 +371,14 @@ export async function recoverGenerationJobsToWarehouse(
   const { windowOpts, fallback } = resolveRecoverWindow(opts, 'import');
   let jobs = await loadCompletedJobs(admin, userId, windowOpts, 120, fallback);
   jobs = filterJobsByProvider(jobs, opts.providerScope);
+  const onlyIds = Array.isArray(opts.jobIds)
+    ? new Set(opts.jobIds.map((id) => String(id).replace(/#\d+$/, '')).filter(Boolean))
+    : null;
+  if (onlyIds?.size) {
+    jobs = jobs.filter((job) => onlyIds.has(String(job.id || '').replace(/#\d+$/, '')));
+  }
   const { payload, cards: existing } = await loadUserPayload(admin, userId);
+  const jobTombstones = mergeJobTombstones(payload, opts.deletedGenerationJobTombstones);
   const knownJobIds = new Set(
     existing.map((c) => String(c.genJobId || '')).filter(Boolean)
   );
@@ -297,6 +394,10 @@ export async function recoverGenerationJobsToWarehouse(
     if (imported >= max) break;
     const jobId = String(job.id || '');
     if (!jobId) continue;
+    if (isGenJobTombstoned(jobId, jobTombstones)) {
+      skipped += 1;
+      continue;
+    }
     if (knownJobIds.has(jobId)) {
       skipped += 1;
       continue;
@@ -310,6 +411,8 @@ export async function recoverGenerationJobsToWarehouse(
     }
 
     const cardId = generateCardId();
+    const jobTs = job.created_at ? Date.parse(String(job.created_at)) : NaN;
+    const cardTs = Number.isFinite(jobTs) ? jobTs : now;
     newCards.push({
       id: cardId,
       title: String(job.prompt || '').slice(0, 48) || '生图恢复',
@@ -319,8 +422,8 @@ export async function recoverGenerationJobsToWarehouse(
       tags: ['图片生成', '自动恢复'],
       customFields: { recoveredFromJob: jobId },
       genJobId: jobId,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: cardTs,
+      updatedAt: cardTs,
       publishedToCommunity: false,
       communityPostId: null
     });
@@ -347,76 +450,112 @@ export async function recoverGenerationJobsToWarehouse(
   };
 }
 
-/** 修复已有卡片：按 genJobId 重新归档图片到 Storage */
+/** 修复已有卡片：按 genJobId 重新归档图片到 Storage，并补齐 _grid 缩略图 */
 export async function repairWarehouseCardImagesFromJobs(
   admin: SupabaseClient,
   userId: string,
   opts: RecoverWarehouseOpts = {}
 ): Promise<RecoverWarehouseResult> {
   const max = Math.min(80, Math.max(1, opts.max ?? 30));
-  const { windowOpts, fallback } = resolveRecoverWindow(opts, 'repair');
-  let jobs = await loadCompletedJobs(admin, userId, windowOpts, 200, fallback);
-  jobs = filterJobsByProvider(jobs, opts.providerScope);
-  const jobMap = new Map(jobs.map((j) => [String(j.id), j]));
   const { payload, cards } = await loadUserPayload(admin, userId);
+
+  type Candidate = { card: Record<string, unknown>; jobId: string; mode: 'grid' | 'full' };
+  const candidates: Candidate[] = [];
+
+  for (const card of cards) {
+    const cardId = String(card.id || '');
+    const jobId = String(card.genJobId || '');
+    const imageRef = String(card.image || '');
+    if (!imageRef || !cardId) continue;
+    const resolution = String(card.resolution || '1k');
+    const minBytes = jobId ? expectedMinFullBytes(resolution) : MIN_IMAGE_BYTES;
+    const primaryCandidates = primaryPathFromImageRef(imageRef, userId, cardId);
+    let primaryPath: string | null = null;
+    let primarySize = 0;
+    for (const p of primaryCandidates) {
+      const sz = await storageBlobSize(admin, p, opts.env);
+      if (sz > primarySize) {
+        primarySize = sz;
+        primaryPath = p;
+      }
+    }
+    const primaryOk = primarySize >= minBytes;
+    const gridOk = primaryPath ? await gridPathOk(admin, primaryPath, opts.env) : false;
+    if (primaryOk && gridOk) continue;
+    if (primaryOk && !gridOk) {
+      candidates.push({ card, jobId, mode: 'grid' });
+      continue;
+    }
+    if (!jobId) continue;
+    candidates.push({ card, jobId, mode: 'full' });
+  }
+
+  const offset = Math.max(0, opts.offset ?? 0);
+  const batch = candidates.slice(offset, offset + max);
+  const jobMap = new Map(
+    (await loadJobsByIds(
+      admin,
+      userId,
+      batch.map((c) => c.jobId)
+    )).map((j) => [String(j.id), j])
+  );
 
   let repaired = 0;
   let skipped = 0;
   const failures: Array<{ jobId?: string; cardId?: string; reason: string }> = [];
   const cardIds: string[] = [];
-  const now = Date.now();
 
-  for (const card of cards) {
-    if (repaired >= max) break;
-    const jobId = String(card.genJobId || '');
-    if (!jobId) {
-      skipped += 1;
+  for (const { card, jobId, mode } of batch) {
+    const cardId = String(card.id || '');
+    const baseJobId = jobId.replace(/#\d+$/, '');
+
+    if (mode === 'grid') {
+      const primaryCandidates = primaryPathFromImageRef(String(card.image || ''), userId, cardId);
+      let fixed = false;
+      for (const p of primaryCandidates) {
+        if (!(await storageBlobOk(admin, p, MIN_IMAGE_BYTES, opts.env))) continue;
+        if (opts.env) {
+          const gridClean = await materializeGridForPrimaryPath(opts.env, admin, p);
+          if (gridClean) {
+            fixed = true;
+            break;
+          }
+        }
+      }
+      if (fixed) {
+        repaired += 1;
+        cardIds.push(cardId);
+      } else {
+        failures.push({ jobId, cardId, reason: 'grid_materialize_failed' });
+        skipped += 1;
+      }
       continue;
     }
-    const job = jobMap.get(jobId);
+
+    const job = jobMap.get(baseJobId);
     if (!job) {
-      failures.push({ jobId, cardId: String(card.id), reason: 'job_not_found' });
-      skipped += 1;
-      continue;
-    }
-
-    const genPaths = [
-      `${userId}/generated/${generationStorageAssetId(jobId)}.png`,
-      `${userId}/generated/${generationStorageAssetId(jobId)}.jpg`
-    ];
-    const minBytes = expectedMinFullBytes(
-      String(job.resolution || card.resolution || '1k')
-    );
-    const currentPath = storagePathFromRef(String(card.image || ''));
-    const currentSize = currentPath ? await storageBlobSize(admin, currentPath, opts.env) : 0;
-    let canonicalSize = 0;
-    for (const gp of genPaths) {
-      const sz = await storageBlobSize(admin, gp, opts.env);
-      if (sz > canonicalSize) canonicalSize = sz;
-    }
-    const currentOk = currentSize >= minBytes;
-    const canonicalOk = canonicalSize >= minBytes;
-    const currentIsCanonical = genPaths.some((gp) => currentPath === gp);
-    if (currentOk && canonicalOk && currentIsCanonical) {
-      skipped += 1;
-      continue;
-    }
-    if (currentOk && currentPath && !currentIsCanonical && canonicalSize < minBytes) {
+      failures.push({ jobId, cardId, reason: 'job_not_found' });
       skipped += 1;
       continue;
     }
 
     const imageRef = await resolveImageRefForJob(admin, userId, jobId, job, opts.env);
     if (!imageRef) {
-      failures.push({ jobId, cardId: String(card.id), reason: 'no_source' });
+      failures.push({ jobId, cardId, reason: 'no_source' });
       skipped += 1;
       continue;
     }
 
     card.image = imageRef;
-    card.updatedAt = now;
     repaired += 1;
-    cardIds.push(String(card.id));
+    cardIds.push(cardId);
+
+    if (opts.env) {
+      const primaryPath = storagePathFromRef(imageRef);
+      if (primaryPath) {
+        await materializeGridForPrimaryPath(opts.env, admin, primaryPath).catch(() => {});
+      }
+    }
   }
 
   if (repaired > 0) {
@@ -429,7 +568,13 @@ export async function repairWarehouseCardImagesFromJobs(
     skipped,
     failures: failures.slice(0, 40),
     cardIds,
-    hint: '已尝试从生图记录重新写入 Storage；强刷后查看缩略图'
+    totalCandidates: candidates.length,
+    hint:
+      repaired > 0
+        ? '已尝试从生图记录重新写入 Storage 并生成缩略图；强刷后查看'
+        : skipped > 0 && failures.some((f) => f.reason === 'job_not_found')
+          ? '部分老任务记录已不存在，仅能从 R2/Supabase 已有文件恢复'
+          : '上游仍无可用图片，请稍后再试'
   };
 }
 
@@ -444,6 +589,7 @@ export async function importExtraJobImagesToWarehouse(
   let jobs = await loadCompletedJobs(admin, userId, windowOpts, 150, fallback);
   jobs = filterJobsByProvider(jobs, opts.providerScope);
   const { payload, cards: existing } = await loadUserPayload(admin, userId);
+  const jobTombstones = mergeJobTombstones(payload, opts.deletedGenerationJobTombstones);
   const knownSourceIds = new Set(
     existing.map((c) => String(c.genSourceId || '')).filter(Boolean)
   );
@@ -458,6 +604,10 @@ export async function importExtraJobImagesToWarehouse(
   for (const job of jobs) {
     if (imported >= max) break;
     const jobId = String(job.id || '');
+    if (!jobId || isGenJobTombstoned(jobId, jobTombstones)) {
+      if (jobId) skipped += 1;
+      continue;
+    }
     const meta = (job.meta || {}) as Record<string, unknown>;
     const extras = Array.isArray(meta.extraImageUrls)
       ? (meta.extraImageUrls as string[]).filter((u) => typeof u === 'string' && u)

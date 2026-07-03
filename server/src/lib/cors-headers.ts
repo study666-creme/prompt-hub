@@ -19,6 +19,7 @@ export function isAllowedCorsOrigin(
     if (u.protocol !== 'https:') return false;
     if (host.endsWith('.prompt-hub-hub.pages.dev')) return true;
     if (host.endsWith('.prompt-hub-web.pages.dev')) return true;
+    if (host.endsWith('.vercel.app')) return true;
     if (origin.startsWith('chrome-extension://')) return true;
   } catch {
     return false;

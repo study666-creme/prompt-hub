@@ -17,6 +17,7 @@
 | 🟠 | 我的主页侧栏空白 | [§2.7](#27-我的主页侧栏空白桌面端) |
 | 🟠 | 手机切后台生图丢图（sessionStorage + 恢复过严） | [§3b](#3b-手机切后台生图丢图) |
 | 🟠 | 卡片库/社区黑图、401、429 签名风暴 | [§3](#3-媒体签名与黑图高频) |
+| 🟠 | 画布 `Maximum update depth`（节点缩放死循环） | [§3c](#3c-画布节点缩放死循环) |
 | 🟠 | 生图仓库一进页几十～上百 MB | [§4](#4-生图仓库带宽-p0-未完全解决) |
 | 🟡 | API 522、域名 DNS 冲突 | [§5](#5-api-522--自定义域名) |
 | 🟡 | 批量删除遮罩不消失、旧图残留 | [§6](#6-前端交互与状态) |
@@ -184,6 +185,21 @@
 | 部分图永不加载 | `SIGN_BUDGET_MAX` 过小 + 卡太多 | 批量 `sign-batch`，提高预算，勿每张单独 sign |
 | `posts/sync` 400/超时 | 一次 80+ 条 | `COMMUNITY_SYNC_BATCH_MAX = 80` 分批 |
 | 过早删 Feed 空壳卡 | `pruneEmpty` 在 loading 时删卡 | 仅确认 load-failed 后删 |
+| 大量灰块/黑卡（848 张库） | ① `MEDIA_STORAGE_MODE=r2` 只读 R2，Supabase 有图也 404 ② 回归：`/generated/` 全走慢速 `warehouse-thumbs` ③ R2 同步未完成 | Worker 改 **`r2-first`**；`cardNeedsWarehouseThumbServer` / `needsServerThumb` 恢复走 **`sign-batch`**；进卡片库 `bootstrapWarehouseMediaCache({ clearAllMissing: true })`；缺文件跑 `node scripts/sync-supabase-to-r2.mjs --skip-existing` |
+| 侧栏/标题品牌被缩短 | UI 改动误删 SEO 前缀 | 侧栏 **「卡藏」**；`<title>` **卡藏 · 卡片式提示词仓库 — …**（build `20260702g`） |
+
+---
+
+## 3c. 画布节点缩放死循环
+
+| 项 | 内容 |
+|----|------|
+| **标签** | 🟠 高频（无限画布） |
+| **现象** | 本地 `/canvas/:id` 红屏：`Maximum update depth exceeded`；栈在 `canvas-client-page.tsx` → `handleNodeResize` → `setNodes` |
+| **根因** | 节点缩放或 hover 工具栏联动时，**宽高/位置未变**仍反复 `setNodes`，React 同步更新超过深度上限；与「全节点 hover 工具栏」改动叠加后更易触发 |
+| **修复** | ① `handleNodeResize` / `handleConfigNodeChange`：**几何与 metadata 未变则 return prev** ② `canvas-node` 缩放：**重复 emit 跳过** ③ `keepNodeToolbar` / hover：**同 id 不重复 setState** |
+| **仓库** | `infinite-canvas-jay` · `canvas-client-page.tsx` + `canvas-node.tsx` |
+| **勿再犯** | 凡节点 `setNodes` 映射，先比对 width/height/position；工具栏显隐用 functional update 去重 |
 
 ---
 

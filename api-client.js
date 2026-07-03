@@ -917,6 +917,7 @@
       max: opts.max,
       days: opts.days,
       hours: opts.hours,
+      offset: opts.offset,
       providerScope: opts.providerScope,
       mode: opts.mode || 'import',
       jobIds: Array.isArray(opts.jobIds) ? opts.jobIds.filter(Boolean).slice(0, 10) : undefined

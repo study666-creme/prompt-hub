@@ -178,7 +178,7 @@
     window.getCardImageBackup = getCardImageBackup;
     window.saveCardImageBackup = saveCardImageBackup;
 
-    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, autoPromptOcr: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, defaultImageGenAutoSaveWarehouse: true, communityNotificationsEnabled: true, communityNotifyBadge: true, autoDayNight: false, themeManualOverride: false, showTrimBlackBorderTool: false, preserveOriginalCardImage: false };
+    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, autoPromptOcr: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, communityNotificationsEnabled: true, communityNotifyBadge: true, autoDayNight: false, themeManualOverride: false, showTrimBlackBorderTool: false, preserveOriginalCardImage: false };
     let pendingUploadFile = null;
     let pendingUploadBytes = 0;
     let currentGroup = 'all', selectedCardId = null, isNewCardMode = false, imageData = null;
@@ -501,7 +501,7 @@
     };
 
     window.getDefaultImageGenAutoSaveWarehouse = function () {
-      return settings.defaultImageGenAutoSaveWarehouse !== false;
+      return false;
     };
 
     function warehouseVisibleCards(list) {
@@ -511,13 +511,81 @@
 
     /** @type {{ key: string, list: any[] }|null} */
     let imageGenWarehouseListCache = null;
+    /** @type {{ rev: number, cardsLen: number, byGroup: Map<string, any[]> }|null} */
+    let warehouseGroupIndexCache = null;
+    /** @type {{ key: string, list: any[] }|null} */
+    let warehouseFilteredListCache = null;
 
     window.invalidateWarehouseCardsForImageGenCache = function () {
       imageGenWarehouseListCache = null;
+      warehouseGroupIndexCache = null;
+      warehouseFilteredListCache = null;
       window.__imageGenWhCardsRev = (window.__imageGenWhCardsRev || 0) + 1;
     };
 
-    function buildWarehouseCardsForImageGen(group, tag) {
+    function warehouseActiveFiltersKey() {
+      return [...activeFilters].sort().join(',');
+    }
+
+    function getWarehouseGroupIndexMap() {
+      const rev = window.__imageGenWhCardsRev || 0;
+      if (warehouseGroupIndexCache?.rev === rev && warehouseGroupIndexCache.cardsLen === cards.length) {
+        return warehouseGroupIndexCache.byGroup;
+      }
+      const visible = warehouseVisibleCards(cards);
+      const byGroup = new Map();
+      byGroup.set('all', visible);
+      const uncat = [];
+      const dynamicGroups = new Map();
+      for (const g of customGroups) dynamicGroups.set(g, []);
+      for (const c of visible) {
+        if (!c.group) {
+          uncat.push(c);
+          continue;
+        }
+        if (!dynamicGroups.has(c.group)) dynamicGroups.set(c.group, []);
+        dynamicGroups.get(c.group).push(c);
+      }
+      byGroup.set('uncategorized', uncat);
+      for (const [g, list] of dynamicGroups) byGroup.set(g, list);
+      warehouseGroupIndexCache = { rev, cardsLen: cards.length, byGroup };
+      return byGroup;
+    }
+
+    function getWarehouseGroupBaseList() {
+      const byGroup = getWarehouseGroupIndexMap();
+      if (currentGroup === 'uncategorized') return byGroup.get('uncategorized') || [];
+      if (currentGroup === 'all') return byGroup.get('all') || [];
+      return byGroup.get(currentGroup) || [];
+    }
+
+    function getWarehouseFilteredSortedList(search) {
+      const searchKey = (search || '').toLowerCase();
+      const cacheKey = [
+        window.__imageGenWhCardsRev || 0,
+        cards.length,
+        currentGroup,
+        searchKey,
+        sortMode,
+        warehouseActiveFiltersKey()
+      ].join('\u001f');
+      if (warehouseFilteredListCache?.key === cacheKey) {
+        return warehouseFilteredListCache.list;
+      }
+      let filtered = getWarehouseGroupBaseList();
+      if (searchKey) {
+        filtered = filtered.filter((c) =>
+          (c.title?.toLowerCase().includes(searchKey))
+          || (c.prompt || '').toLowerCase().includes(searchKey)
+          || (c.tags?.some((t) => t.toLowerCase().includes(searchKey))));
+      }
+      if (activeFilters.size > 0) filtered = filtered.filter(cardMatchesFilters);
+      const list = sortCardsWithPins(filtered);
+      warehouseFilteredListCache = { key: cacheKey, list };
+      return list;
+    }
+
+    function buildWarehouseCardsForImageGen(group, tag, buildOpts) {
       const base = warehouseVisibleCards(cards);
       const isGenCard = (c) => {
         if (window.FeatureDraft?.isGeneratedWarehouseCard?.(c)) return true;
@@ -541,8 +609,11 @@
       if (tag && tag !== 'all') {
         list = list.filter(c => (c.tags || []).includes(tag));
       }
+      list.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+      if (buildOpts?.returnTotal) window.__imageGenWhFeedBuildTotal = list.length;
+      const maxItems = Number(buildOpts?.maxItems);
+      if (Number.isFinite(maxItems) && maxItems > 0) list = list.slice(0, maxItems);
       return list
-        .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))
         .map(c => {
           window.PromptHubCardGallery?.ensureFeedCoverFromGallery?.(c, { persist: false, backfill: false });
           const CG = window.PromptHubCardGallery;
@@ -573,17 +644,29 @@
     }
 
     window.getWarehouseCardsForImageGen = function (opts) {
-      const group = opts?.group || 'all';
-      const tag = opts?.tag || 'all';
+      const lightFeed = opts?.lightFeed === true;
+      const group = lightFeed ? 'all' : (opts?.group || 'all');
+      const tag = lightFeed ? 'all' : (opts?.tag || 'all');
       const rev = window.__imageGenWhCardsRev || 0;
-      const key = `${group}\0${tag}\0${cards.length}\0${rev}\0${cards}`;
+      const key = lightFeed
+        ? `light\0${rev}\0${cards.length}`
+        : `${group}\0${tag}\0${cards.length}\0${rev}\0${cards}`;
       if (imageGenWarehouseListCache && imageGenWarehouseListCache.key === key) {
         return imageGenWarehouseListCache.list;
       }
-      const list = buildWarehouseCardsForImageGen(group, tag);
+      const buildOpts = lightFeed
+        ? { maxItems: window.IMAGEGEN_WAREHOUSE_FEED_MAX || 48, returnTotal: true }
+        : undefined;
+      const list = buildWarehouseCardsForImageGen(group, tag, buildOpts);
+      if (lightFeed) {
+        window.__imageGenWhFeedTotal = window.__imageGenWhFeedBuildTotal ?? list.length;
+        delete window.__imageGenWhFeedBuildTotal;
+      }
       imageGenWarehouseListCache = { key, list };
       return list;
     };
+
+    window.IMAGEGEN_WAREHOUSE_FEED_MAX = 48;
 
     window.getImageGenWarehouseFilterOptions = function () {
       const groups = [
@@ -947,12 +1030,34 @@
       if (CG?.syncCardGalleryFields) CG.syncCardGalleryFields(card);
       cards.push(card);
       const imagesToArchive = CG?.normalizeCardGallery(card) || (primaryImage ? [primaryImage] : []);
+      const copyStorage = payload.copyStorage === true;
       for (let i = 0; i < imagesToArchive.length; i += 1) {
         const src = imagesToArchive[i];
         if (!src) continue;
         if (i === 0) void saveCardImageBackup(card.id, src).catch(() => {});
-        if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.archiveGeneratedCardImage) {
-          try {
+        if (!window.SupabaseSync?.isLoggedIn?.()) continue;
+        try {
+          if (copyStorage && window.SupabaseSync?.uploadCardImage && i === 0) {
+            const archived = await window.SupabaseSync.uploadCardImage(card.id, src);
+            if (archived) {
+              card.image = archived;
+              if (Array.isArray(card.cardImages) && card.cardImages[i]) card.cardImages[i] = archived;
+            }
+            continue;
+          }
+          if (copyStorage && window.SupabaseSync?.archiveGeneratedCardImage && i > 0) {
+            const slotJob = jobId ? `${String(jobId).replace(/#\d+$/, '')}#${i + 1}` : null;
+            const archived = await window.SupabaseSync.archiveGeneratedCardImage(card.id, src, {
+              jobId: slotJob,
+              copyToOwnPath: true
+            });
+            if (archived) {
+              if (Array.isArray(card.cardImages) && card.cardImages[i]) card.cardImages[i] = archived;
+              if (i === 0) card.image = archived;
+            }
+            continue;
+          }
+          if (window.SupabaseSync?.archiveGeneratedCardImage) {
             const slotJob = jobId ? (i === 0 ? jobId : `${String(jobId).replace(/#\d+$/, '')}#${i + 1}`) : null;
             const archived = await window.SupabaseSync.archiveGeneratedCardImage(card.id, src, {
               jobId: slotJob
@@ -960,11 +1065,10 @@
             if (archived && archived !== src) {
               if (Array.isArray(card.cardImages) && card.cardImages[i]) card.cardImages[i] = archived;
               if (i === 0) card.image = archived;
-              card.updatedAt = Date.now();
             }
-          } catch (e) {
-            console.warn('[addCardFromGenerated] gallery archive failed', i, e);
           }
+        } catch (e) {
+          console.warn('[addCardFromGenerated] gallery archive failed', i, e);
         }
       }
       if (CG?.syncCardGalleryFields) CG.syncCardGalleryFields(card);
@@ -993,18 +1097,111 @@
 
     let genCardImageRepairInflight = null;
     let genCardImageRepairLastAt = 0;
+    let warehouseBulkRepairInflight = null;
+
+    /** 卡片库老图批量修复：从生图任务重新归档 + 生成 _grid（LabGen 对齐 · 项 1） */
+    async function runWarehouseBulkRepair(opts = {}) {
+      if (!window.PromptHubApi?.recoverWarehouseFromJobs) {
+        showToast('请先 Ctrl+Shift+R 强刷到最新版', 6000);
+        return { ok: false, error: 'api_missing' };
+      }
+      if (!window.SupabaseSync?.isLoggedIn?.()) return { ok: false, error: 'not_logged_in' };
+      if (warehouseBulkRepairInflight) return warehouseBulkRepairInflight;
+
+      const batchMax = Math.min(80, Math.max(1, Number(opts.max) || 80));
+      const maxRounds = Math.min(30, Math.max(1, Number(opts.maxRounds) || 12));
+      const silent = opts.silent === true;
+
+      warehouseBulkRepairInflight = (async () => {
+        let offset = 0;
+        let totalRepaired = 0;
+        let totalCandidates = 0;
+        let stagnant = 0;
+
+        window.SupabaseSync?.bootstrapWarehouseMediaCache?.({ clearAllMissing: true });
+        window.SupabaseSync?.clearSignedUrlCache?.();
+        window.SupabaseSync?.clearListImageMissMarks?.();
+        if (!silent) console.info('[warehouse-repair] start', { batchMax, maxRounds });
+
+        if (!silent) {
+          setCloudSyncPhase('syncing', '正在修复卡片库图片…');
+          showToast('正在批量修复卡片库图片（老卡从云端重新归档）…', 6000);
+        }
+
+        for (let round = 0; round < maxRounds; round += 1) {
+          const res = await window.PromptHubApi.recoverWarehouseFromJobs({
+            mode: 'repair',
+            max: batchMax,
+            days: 365,
+            offset,
+            providerScope: 'all'
+          });
+          if (!res?.ok) {
+            if (!silent) {
+              setCloudSyncPhase('error', res.message || res.code);
+              showToast('修复失败：' + (res.message || res.code || '未知错误'), 9000);
+            }
+            break;
+          }
+          const d = res.data || {};
+          const n = Number(d.repaired) || 0;
+          totalRepaired += n;
+          totalCandidates = Number(d.totalCandidates) || totalCandidates;
+          if (!silent) {
+            console.info('[warehouse-repair] round', round + 1, {
+              repaired: n,
+              totalRepaired,
+              totalCandidates,
+              offset,
+              failures: (d.failures || res.failures || []).slice(0, 3)
+            });
+          }
+          if (n > 0) {
+            stagnant = 0;
+            offset = 0;
+            window.SupabaseSync?.clearSignedUrlCache?.();
+            window.SupabaseSync?.clearListImageMissMarks?.();
+            await pullFromCloud();
+            window.__promptHubCards = cards;
+            renderGroups();
+            renderCards(true);
+            if (!silent) setCloudSyncPhase('syncing', `已修复 ${totalRepaired} 张…`);
+          } else {
+            stagnant += 1;
+            offset += batchMax;
+            if (totalCandidates && offset >= totalCandidates) break;
+            if (stagnant >= 2) break;
+          }
+          await new Promise((r) => setTimeout(r, 600));
+        }
+
+        if (totalRepaired > 0) {
+          setCloudSyncPhase('saved');
+          if (!silent) {
+            showToast(`卡片库图片修复完成：共 ${totalRepaired} 张。请稍等缩略图加载`, 10000);
+          }
+        } else if (!silent) {
+          setCloudSyncPhase('saved');
+          showToast('暂无可自动修复的图片（可能 R2/Supabase 里原图也不存在，需跑 sync-supabase-to-r2）', 9000);
+        }
+        if (!silent) console.info('[warehouse-repair] done', { totalRepaired, totalCandidates });
+        return { ok: true, repaired: totalRepaired, totalCandidates };
+      })().finally(() => {
+        warehouseBulkRepairInflight = null;
+      });
+
+      return warehouseBulkRepairInflight;
+    }
+    window.runWarehouseBulkRepair = runWarehouseBulkRepair;
+
     async function repairGeneratedCardImagesQuiet() {
       if (!window.SupabaseSync?.isLoggedIn?.()) return;
       if (genCardImageRepairInflight) return genCardImageRepairInflight;
       const now = Date.now();
-      if (now - genCardImageRepairLastAt < 120000) return;
+      if (now - genCardImageRepairLastAt < 180000) return;
       genCardImageRepairLastAt = now;
       genCardImageRepairInflight = (async () => {
-        await window.ImageGenWarehouseRepair?.recoverWarehouseImagesViaServer?.({ max: 6, hours: 168 });
-        const visible = warehouseVisibleCards(cards).slice(0, 12);
-        if (window.WarehouseThumb?.prefetchForCards) {
-          await window.WarehouseThumb.prefetchForCards(visible, { max: 8 });
-        }
+        await runWarehouseBulkRepair({ max: 40, maxRounds: 3, silent: true });
       })().finally(() => { genCardImageRepairInflight = null; });
       return genCardImageRepairInflight;
     }
@@ -1468,7 +1665,7 @@
         if (cardEl?.dataset?.communityCollect === '1') {
           scheduleWarehouseMasonryForCard(cardEl.dataset.id);
         } else {
-          scheduleWarehouseMasonryLayout();
+          scheduleWarehouseMasonryLightLayout();
         }
       }, true);
     }
@@ -1503,7 +1700,27 @@
       const last = warehouseMasonryCardCooldown.get(cardId) || 0;
       if (now - last < 900) return;
       warehouseMasonryCardCooldown.set(cardId, now);
-      scheduleWarehouseMasonryLayout();
+      scheduleWarehouseMasonryLightLayout();
+    }
+
+    /** 图加载后仅 layout()，避免 reloadItems 整网格重排 */
+    function scheduleWarehouseMasonryLightLayout() {
+      if (isMobileViewport()) return;
+      warehouseMasonryPending += 1;
+      const delay = document.body.classList.contains('panel-open')
+        ? 64
+        : (warehouseMasonryPending > 6 ? 640 : 420);
+      clearTimeout(warehouseMasonryTimer);
+      warehouseMasonryTimer = setTimeout(() => {
+        warehouseMasonryPending = 0;
+        if (masonryInstance) {
+          try {
+            masonryInstance.layout();
+            return;
+          } catch (e) { /* fallback */ }
+        }
+        layoutMasonryGrid();
+      }, delay);
     }
 
     function resetCardLayoutStyles(container) {
@@ -1598,6 +1815,9 @@
         }
         container.scrollTop = scrollTop;
         container.classList.add('masonry-ready', 'cards-grid-primed');
+        if (typeof repositionWarehouseScrollSentinel === 'function') {
+          repositionWarehouseScrollSentinel(container);
+        }
       };
       if (typeof Masonry !== 'undefined') {
         runLayout();
@@ -2282,7 +2502,8 @@
       });
     }
 
-    function switchAppPage(app) {
+    function switchAppPage(app, navOpts) {
+      const opts = navOpts && typeof navOpts === 'object' ? navOpts : {};
       if (app === 'assetmarket' || app === 'assetstudio') {
         switchDevLabPanel(app);
         app = 'devlab';
@@ -2301,6 +2522,7 @@
         window.FeatureDraft?.cancelCommunityPageWork?.();
       }
       if (app === 'warehouse') {
+        window.SupabaseSync?.bootstrapWarehouseMediaCache?.({ clearAllMissing: true });
         const searchDesktop = document.getElementById('searchInput');
         const searchMobile = document.getElementById('searchInputMobile');
         const hadSearch = !!(searchDesktop?.value?.trim() || searchMobile?.value?.trim());
@@ -2321,6 +2543,11 @@
         document.getElementById(id)?.classList.toggle('active', key === app);
       });
       localStorage.setItem('promptrepo_app_page', app);
+      if (!opts.skipUrl && window.AppRouter?.syncUrl) {
+        window.AppRouter.syncUrl(app, opts.replace === true);
+      } else if (window.AppRouter?.syncDocumentTitle) {
+        window.AppRouter.syncDocumentTitle(app);
+      }
       window.MobileUI?.closeAllMobileOverlays?.();
       if (app === 'devlab') {
         switchDevLabPanel(getDevLabPanel());
@@ -2335,24 +2562,24 @@
         deferAfterPagePaint(() => {
           if (!document.getElementById('pageWarehouse')?.classList.contains('active')) return;
           const container = document.getElementById('cardsContainer');
+          const start = (page - 1) * PER_PAGE;
+          const list = allFilteredCards.length
+            ? allFilteredCards.slice(start, start + PER_PAGE)
+            : warehouseVisibleCards(cards).slice(start, start + PER_PAGE);
           const hasDom = container?.querySelector('.card[data-id]');
           if (!hasDom) {
             renderCards(true);
+          } else if (warehousePageDomNeedsFullRender(container, list)) {
+            delete container.dataset.whSig;
+            renderCards(true);
           } else {
-            const start = (page - 1) * PER_PAGE;
-            const list = allFilteredCards.length
-              ? allFilteredCards.slice(start, start + PER_PAGE)
-              : warehouseVisibleCards(cards).slice(start, start + PER_PAGE);
+            softHydrateWarehouseContainer(container, list);
             if (warehousePageDomNeedsFullRender(container, list)) {
-              delete container.dataset.whSig;
-              renderCards(true);
-            } else {
-              softHydrateWarehouseContainer(container, list);
+              void repairGeneratedCardImagesQuiet();
             }
           }
           if (isMobileViewport()) enforceMobileCardGrid();
           else scheduleWarehouseMasonryLayout();
-          void repairGeneratedCardImagesQuiet();
         }, 220);
       }
       deferAfterPagePaint(() => {
@@ -2368,6 +2595,20 @@
       window.mobileOnAppPageChange?.(app);
     }
     window.switchAppPage = switchAppPage;
+
+    window.AppRouter?.init?.((app) => {
+      switchAppPage(app, { skipUrl: true, fromPopstate: true });
+    });
+
+    function warehousePageActive() {
+      return document.getElementById('pageWarehouse')?.classList.contains('active');
+    }
+
+    /** LabGen 式：非 /prompts 首屏不挂载 800+ 卡片 DOM */
+    function renderWarehouseGridIfNeeded(force) {
+      if (!force && !warehousePageActive()) return;
+      renderCards(force !== false);
+    }
 
     function getPromptCanvasUrl() {
       let url = String(window.PROMPT_CANVAS_URL || 'https://infinite-canvas-jay.vercel.app/canvas').trim();
@@ -2981,6 +3222,9 @@
         window.FeatureDraft?.scheduleCommunityLayout?.('userProfileGrid', { fromImage: true });
       } else if (media.closest('#imageGenFeed')) {
         window.FeatureDraft?.scheduleImageGenFeedLayout?.();
+      } else if (media.closest('#cardsContainer')) {
+        /* 卡片库：图加载仅轻量 layout，避免整网格 reload */
+        scheduleWarehouseMasonryLightLayout();
       } else if (typeof scheduleLayoutMasonry === 'function') {
         scheduleLayoutMasonry();
       }
@@ -3106,7 +3350,15 @@
         const collectOpts = cardModel ? getCommunityCollectImageResolveOpts(cardModel) : null;
         if (!collectOpts) {
           if (cardModel) {
-            void tryWarehouseGalleryListCover(img, cardModel, media).then((ok) => {
+            const tryGenRecover = async () => {
+              if (cardModel.genJobId && window.WarehouseThumb?.resolveForCardModel) {
+                window.SupabaseSync?.clearPathMissingForCard?.(cardModel.id, cardModel.image);
+                const wh = await window.WarehouseThumb.resolveForCardModel(cardModel);
+                if (wh && window.CardImageLoader?.applyUrlToImg?.(img, wh)) return true;
+              }
+              return tryWarehouseGalleryListCover(img, cardModel, media);
+            };
+            void tryGenRecover().then((ok) => {
               if (!ok) finalizeWarehouseCardMediaFailure(media, img);
             });
             return;
@@ -3204,7 +3456,8 @@
             if (media) media.classList.remove('card-media--load-failed');
             if (safeUrl && window.CardImageLoader?.applyUrlToImg?.(img, safeUrl)) return;
             if (safeUrl && img.closest('#cardsContainer')) {
-              markCardImageLoadFailed(img);
+              img.onerror = () => markCardImageLoadFailed(img);
+              img.src = safeUrl;
               return;
             }
             if (!safeUrl && img.closest('#cardsContainer, #imageGenFeed')) {
@@ -3344,7 +3597,8 @@
       if (!loaded) {
         const inWarehouse = media.closest('#cardsContainer');
         if (inWarehouse && isPlaceholderCardImg(img)) {
-          armMediaShineWatchdog(shineTarget, 8000);
+          armMediaShineWatchdog(shineTarget, 22000);
+          window.CardImageLoader?.loadImg?.(img);
           return;
         }
         armMediaShineWatchdog(shineTarget);
@@ -3617,10 +3871,14 @@
       }
     }
 
-    function cardImgInitialSrc(image, cardId) {
+    function cardImgInitialSrc(image, cardId, extraOpts) {
       const placeholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="%2318181c" width="4" height="3"/></svg>');
+      const jobId = extraOpts?.jobId ? String(extraOpts.jobId).replace(/#\d+$/, '') : undefined;
       if (image && cardId && window.SupabaseSync?.getListDisplayImageSrc) {
-        const cached = window.SupabaseSync.getListDisplayImageSrc(image, cardId, { allowFullFallback: false });
+        const cached = window.SupabaseSync.getListDisplayImageSrc(image, cardId, {
+          allowFullFallback: false,
+          jobId
+        });
         if (cached && cached.startsWith('http') && !cached.includes('data:image/svg')
           && !window.SupabaseSync?.isInvalidMediaUrl?.(cached)
           && window.SupabaseSync?.isGridDisplayUrl?.(cached)) {
@@ -4328,7 +4586,7 @@
         box.innerHTML = '<div class="feature-empty" style="grid-column:1/-1;padding:48px 20px;text-align:center;color:var(--text-muted)"><p>请先登录查看你的卡片库</p><button type="button" class="btn btn-primary" style="margin-top:12px" onclick="openAuthModal(\'login\')">登录</button></div>';
       }
       renderGroups();
-      renderCards(true);
+      renderWarehouseGridIfNeeded(true);
       window.FeatureDraft?.renderCommunity?.();
     }
 
@@ -4353,15 +4611,18 @@
       }
       window.__promptHubCards = cards;
       renderGroups();
-      renderCards(true);
+      renderWarehouseGridIfNeeded(true);
       updateGuestLimitUI();
       window.FeatureDraft?.renderCommunity?.();
     }
 
     function finishAppBootstrap() {
       restoreDesktopCardColumns();
-      const page = localStorage.getItem('promptrepo_app_page') || 'community';
-      switchAppPage(page);
+      renderGroups();
+      const page = window.AppRouter?.resolveBootApp?.()
+        || localStorage.getItem('promptrepo_app_page')
+        || 'community';
+      switchAppPage(page, { replace: true });
       if (window.MobileUI.isMobile()) {
         const mobileTab = page === 'community' ? 'community' : page === 'imagegen' ? 'imagegen' : 'cards';
         document.querySelectorAll('.mobile-tab').forEach((btn) => {
@@ -5199,6 +5460,7 @@
       try {
         const providerScope = opts.providerScope || (mode === 'import' ? 'grs' : 'all');
         const recoverBody = { max, mode, providerScope };
+        if (opts.offset != null) recoverBody.offset = Math.max(0, Number(opts.offset) || 0);
         if (providerScope === 'apimart') {
           recoverBody.days = Math.min(365, Math.max(1, Number(opts.days) || 7));
         } else if (providerScope === 'grs' || opts.hours != null) {
@@ -5538,6 +5800,7 @@
       applyDataPayload(finalPayload);
       cards = window.FeatureDraft?.reconcileCommunityWithCards?.(cards) || cards;
       window.__promptHubCards = cards;
+      window.FeatureDraft?.reconcileCreationsWarehouseLinks?.();
       requestFeedRefresh();
       window.FeatureDraft?.syncPublishToggleForOpenCard?.();
       await saveAllData({ skipCloud: true });
@@ -5592,7 +5855,7 @@
         if (pulled === true) {
           const uid = window.SupabaseSync?.getUserId?.();
           if (uid) await snapshotLocalForUser(uid);
-          refreshWarehouseUI();
+          refreshWarehouseUI({ softCards: warehouseUiHasRenderedCards() });
           requestFeedRefresh();
           if (!light) {
             void window.FeatureDraft?.resumePendingGenerationJobs?.().then((changed) => {
@@ -5887,55 +6150,35 @@
       }
     }
 
-    /** 已禁用：登录后自动删卡曾误删大量卡片（首屏未加载即 markPathMissing → 误判幽灵） */
-    function scheduleQuietGhostPurge() { /* disabled — use purgeGhostDataFromSettings with confirm */ }
+    /** 已禁用：登录后自动删卡曾误删大量卡片（见 purgeGhostDataFromSettings） */
 
     function hydrateWarehouseGridImages(container, pageCards, opts = {}) {
       if (!container) return;
+      window.SupabaseSync?.bootstrapWarehouseMediaCache?.({ clearAllMissing: true });
       const mobile = isMobileViewport();
-      const patchMax = mobile ? 6 : Math.min(8, pageCards?.length || 8);
-      window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: patchMax });
-      window.CardImageLoader?.observeContainer?.(container);
-      window.CardImageLoader?.boostWarehouseImages?.(container, patchMax);
+      const perfCap = window.MobileUI?.getPerf?.()?.warehousePrefetchCap ?? 24;
+      const cap = mobile
+        ? Math.min(perfCap, (pageCards || []).length || perfCap)
+        : Math.min(PER_PAGE, (pageCards || []).length || PER_PAGE);
+      const list = (pageCards || []).slice(0, cap);
+      const afterBind = () => {
+        window.CardImageLoader?.boostWarehouseImages?.(container, cap);
+        requestAnimationFrame(() => {
+          container.querySelectorAll('img.card-img[data-image-ref]').forEach((img) => {
+            const src = img.currentSrc || img.src || '';
+            if (!src || src.includes('data:image/svg')) window.CardImageLoader?.loadImg?.(img);
+          });
+        });
+      };
+      if (window.CardImageLoader?.bindWarehouse) {
+        void window.CardImageLoader.bindWarehouse(container, list).finally(afterBind);
+      } else {
+        window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: cap });
+        window.CardImageLoader?.observeContainer?.(container);
+        afterBind();
+      }
       if (!mobile && !container.classList.contains('masonry-ready')) {
         scheduleWarehouseMasonryLayout();
-      }
-    }
-
-    async function boostWarehouseListThumbs(container, pageCards, cap) {
-      if (!container || !pageCards?.length) return;
-      const limit = Math.min(cap || 8, pageCards.length);
-      const imgs = [...container.querySelectorAll('#cardsContainer .card-img[data-image-ref]')]
-        .filter((img) => {
-          if (img.dataset.feedLoadDone === '1') return false;
-          const cur = img.currentSrc || img.src || '';
-          if (cur.startsWith('http') && !cur.includes('data:image/svg') && img.complete && img.naturalWidth > 8) {
-            return false;
-          }
-          return !cur.startsWith('http') || cur.includes('data:image/svg');
-        })
-        .slice(0, limit);
-      const resolveOne = async (img) => {
-        const cardId = img.closest('.card[data-id]')?.dataset?.id;
-        const card = cardId ? cards.find((c) => c.id === cardId) : null;
-        if (!card) return;
-        const thumb = getWarehouseCardListThumb(card, { skipEnsure: true });
-        if (!thumb.show || thumb.immediate) return;
-        let url = '';
-        try {
-          if (window.MediaPipeline?.resolveCardListThumb) {
-            url = await window.MediaPipeline.resolveCardListThumb(card);
-          }
-        } catch (e) { /* ignore */ }
-        if (url && window.CardImageLoader?.applyUrlToImg?.(img, url)) {
-          const ref = thumb.coverImage || card.image;
-          if (ref) img.setAttribute('data-image-ref', ref);
-          const slotJob = thumb.coverJobId;
-          if (slotJob) img.setAttribute('data-job-id', slotJob);
-        }
-      };
-      for (let i = 0; i < imgs.length; i += 4) {
-        await Promise.allSettled(imgs.slice(i, i + 4).map(resolveOne));
       }
     }
 
@@ -6061,7 +6304,6 @@
           scheduleCrossDeviceGenRecovery();
           void syncPromise.catch(() => {});
           scheduleDeferredImageAudit();
-          scheduleQuietGhostPurge();
           return;
         }
         try {
@@ -6075,7 +6317,7 @@
             setCloudSyncPhase('pending', '云端较慢，已保留本地数据');
             void pullFromCloud().then((ok) => {
               if (ok) {
-                refreshWarehouseUI();
+                refreshWarehouseUI({ softCards: warehouseUiHasRenderedCards() });
                 requestFeedRefresh();
                 setCloudSyncPhase('saved');
               }
@@ -6134,7 +6376,6 @@
       window.TrialTasksUI?.onAuthReady?.();
       void syncPromise.catch(() => {});
       scheduleDeferredImageAudit();
-      scheduleQuietGhostPurge();
       refreshWarehouseUI({
         softCards: !loaded && paintedFromLocal && silent && !accountSwitch && !force
       });
@@ -6151,6 +6392,10 @@
 
     function isMobileViewport() {
       return window.MobileUI?.isMobileViewport?.() ?? window.matchMedia('(max-width: 900px)').matches;
+    }
+
+    function warehouseUiHasRenderedCards() {
+      return !!document.getElementById('cardsContainer')?.querySelector('.card[data-id]');
     }
 
     function refreshWarehouseUI(opts = {}) {
@@ -7011,7 +7256,7 @@
         show: true,
         src: meta.cachedUrl || '',
         coverImage: meta.ref,
-        coverJobId: meta.jobId,
+        coverJobId: meta.slotJobId || meta.thumbMeta?.slotJobId || meta.jobId || '',
         thumbMeta: meta.thumbMeta,
         immediate: !!meta.cachedUrl
       };
@@ -7135,29 +7380,11 @@
       return broken > 0;
     }
 
-    function softHydrateWarehouseContainer(container, pageCards, opts = {}) {
+    function softHydrateWarehouseContainer(container, pageCards) {
       if (!container) return;
-      const mobile = isMobileViewport();
-      const cap = mobile ? 24 : 12;
-      const list = Array.isArray(pageCards) ? pageCards : [];
-      hydrateWarehouseGridImages(container, list);
-      if (!opts.skipBackgroundPrefetch && list.length && window.MediaPipeline?.prefetchList) {
-        void window.MediaPipeline.prefetchList(
-          list.slice(0, cap),
-          mobile ? 4000 : 2800,
-          { maxCards: Math.min(cap, list.length) }
-        ).finally?.(() => {
-          window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: cap });
-          window.CardImageLoader?.boostWarehouseImages?.(container, cap);
-        });
-      }
+      hydrateWarehouseGridImages(container, Array.isArray(pageCards) ? pageCards : []);
     }
 
-    function warmWarehouseFirstPageQuietly(cardList) {
-      const slice = (cardList || []).slice(0, 24);
-      if (!slice.length || !window.SupabaseSync?.prefetchWarehousePage) return;
-      void window.SupabaseSync.prefetchWarehousePage(slice, 5000, { maxCards: 24 });
-    }
     function warehouseListSignature(list, ctx) {
       const pageSlice = (list || []).slice(0, PER_PAGE);
       const head = pageSlice.map((c) => `${c.id}\u001f${c.updatedAt || 0}\u001f${String(c.image || '').slice(0, 48)}`).join('\u001e');
@@ -7178,7 +7405,7 @@
         show: true,
         src: meta.cachedUrl || '',
         coverImage: meta.ref,
-        coverJobId: meta.jobId,
+        coverJobId: meta.slotJobId || meta.thumbMeta?.slotJobId || meta.jobId || '',
         thumbMeta: meta.thumbMeta,
         immediate: !!meta.cachedUrl
       };
@@ -7198,12 +7425,7 @@
         allFilteredCards = [];
       }
       if (reset || allFilteredCards.length === 0) {
-        let filtered = warehouseVisibleCards(cards);
-        if (currentGroup === 'uncategorized') filtered = filtered.filter(c => !c.group);
-        else if (currentGroup !== 'all') filtered = filtered.filter(c => c.group === currentGroup);
-        if (search) filtered = filtered.filter(c => (c.title?.toLowerCase().includes(search)) || (c.prompt || '').toLowerCase().includes(search) || (c.tags?.some(t => t.toLowerCase().includes(search))));
-        if (activeFilters.size > 0) filtered = filtered.filter(cardMatchesFilters);
-        allFilteredCards = sortCardsWithPins(filtered);
+        allFilteredCards = getWarehouseFilteredSortedList(search);
       }
 
       const whSig = warehouseListSignature(allFilteredCards, {
@@ -7214,6 +7436,42 @@
         batch: batchMode,
         filters: [...activeFilters]
       });
+
+      const start = (page - 1) * PER_PAGE;
+      const pageCards = allFilteredCards.slice(start, start + PER_PAGE);
+      const isAppend = !reset && page > 1;
+      const warehouseActive = document.getElementById('pageWarehouse')?.classList.contains('active');
+
+      if (
+        reset
+        && page === 1
+        && !isAppend
+        && warehouseActive
+        && container.dataset.whSig === whSig
+        && container.querySelector('.card[data-id]')
+        && !warehousePageDomNeedsFullRender(container, pageCards)
+      ) {
+        container.className = 'cards-container' + (mobileGrid ? ' mobile-grid' : '');
+        if (viewMode === 'list') container.classList.add('list-view');
+        if (batchMode) container.classList.add('batch-mode');
+        softHydrateWarehouseContainer(container, pageCards);
+        updateBatchCountLabel();
+        bindWarehousePagedScroll();
+        if (mobileGrid) {
+          syncWarehouseScrollSentinel(container);
+          enforceMobileCardGrid();
+          requestAnimationFrame(() => window.MobileUI?.boostActivePageImages?.());
+        } else if (viewMode !== 'list') {
+          requestAnimationFrame(() => {
+            scheduleWarehouseMasonryLayout(true);
+            syncWarehouseScrollSentinel(container);
+            repositionWarehouseScrollSentinel(container);
+          });
+        } else {
+          syncWarehouseScrollSentinel(container);
+        }
+        return;
+      }
 
       const pageOneCards = allFilteredCards.slice(0, PER_PAGE);
 
@@ -7226,6 +7484,7 @@
         container.innerHTML = '';
         delete container?.dataset?.masonryLoadBound;
         window.CardImageLoader?.disconnect?.();
+        window.SupabaseSync?.clearSessionGridFetchFailures?.();
         container.classList.remove('cards-grid-primed', 'masonry-ready', 'cards-grid-priming');
       }
       container.className = 'cards-container' + (mobileGrid ? ' mobile-grid' : '');
@@ -7235,37 +7494,29 @@
         if (masonryInstance) { masonryInstance.destroy(); masonryInstance = null; }
       }
       if (batchMode) container.classList.add('batch-mode');
-      const start = (page - 1) * PER_PAGE;
-      const pageCards = allFilteredCards.slice(start, start + PER_PAGE);
-      const isAppend = !reset && page > 1;
       if (page === 1 && pageCards.length === 0) {
+        if (masonryInstance) {
+          try { masonryInstance.destroy(); } catch (e) { /* ignore */ }
+          masonryInstance = null;
+        }
+        delete container?.dataset?.masonryLoadBound;
+        container.classList.remove('cards-grid-primed', 'masonry-ready', 'cards-grid-priming');
         container.classList.add('feed-grid-centered');
         container.innerHTML = '<div class="feature-empty warehouse-grid-empty"><p>📦 暂无卡片</p></div>';
         delete container.dataset.whSig;
         return;
       }
       container.classList.remove('feed-grid-centered');
-      const warehouseActive = document.getElementById('pageWarehouse')?.classList.contains('active');
-      const prefetchCap = mobileGrid ? 8 : 12;
-      const prefetchCards = pageCards.slice(0, prefetchCap);
-      if (page === 1 && prefetchCards.length && warehouseActive && window.SupabaseSync?.prefetchWarehousePage) {
-        void window.SupabaseSync.prefetchWarehousePage(
-          prefetchCards,
-          mobileGrid ? 3200 : 2400,
-          { maxCards: prefetchCap }
-        ).finally?.(() => {
-          window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: prefetchCap });
-          window.CardImageLoader?.boostWarehouseImages?.(container, prefetchCap);
-        });
-      }
+      const perfCap = window.MobileUI?.getPerf?.()?.warehousePrefetchCap ?? 24;
+      const prefetchCap = Math.min(perfCap, PER_PAGE);
       const preparedRows = warehouseActive && window.PromptHubCardGallery?.prepareWarehousePageThumbs
         ? window.PromptHubCardGallery.prepareWarehousePageThumbs(pageCards, {
           ensure: page === 1 && !isAppend,
-          ensureMax: Math.min(8, prefetchCap)
+          ensureMax: Math.min(prefetchCap, pageCards.length || prefetchCap)
         })
         : pageCards.map((card) => ({ card, meta: null }));
       const fragment = document.createDocumentFragment();
-      const eagerImgCount = mobileGrid ? 24 : Math.min(4, pageCards.length);
+      const eagerImgCount = mobileGrid ? 24 : Math.min(24, pageCards.length);
       preparedRows.forEach(({ card, meta }, idx) => {
         const listThumb = meta ? listThumbFromWarehouseMeta(meta) : getWarehouseCardListThumb(card, { skipEnsure: true });
         const coverMeta = listThumb.thumbMeta;
@@ -7304,14 +7555,14 @@
           || coverMeta?.slotJobId
           || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');
         const coverJobAttr = coverJobId ? ` data-job-id="${escapeHtml(coverJobId)}"` : '';
-        const imgSrc = showImage ? (listThumb.src || cardImgInitialSrc(coverImage, card.id)) : '';
+        const imgSrc = showImage ? (listThumb.src || cardImgInitialSrc(coverImage, card.id, { jobId: coverJobId })) : '';
         const isCollectCard = window.isCommunityCollectCard?.(card);
         const collectMeta = isCollectCard ? getCommunityCollectImageResolveOpts(card) : null;
         const needsAsyncThumb = showImage && !listThumb.immediate && !listThumb.src;
         const mediaLoadingCls = needsAsyncThumb ? ' is-loading' : '';
         const shineAt = '';
         const titleTrim = getCardDisplayTitle(card);
-        const timeLabel = formatCardTime(card.updatedAt || card.createdAt);
+        const timeLabel = formatCardTime(card.createdAt || card.updatedAt);
         const tagsHtml = buildCardTagsHtml(card.tags);
         const pinBadge = card.pinnedAt
           ? '<span class="card-pin-badge" title="置顶" aria-label="置顶"><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg></span>'
@@ -7440,9 +7691,10 @@
         hydrateWarehouseGridImages(container, pageCards);
       }
       if (!mobileGrid && viewMode !== 'list') {
-        if (isAppend && masonryInstance && appendedCards.length) {
-          masonryInstance.appended(appendedCards);
-          masonryInstance.layout();
+        syncWarehouseScrollSentinel(container);
+        if (isAppend && appendedCards.length) {
+          primeDesktopCardGrid(container);
+          preserveCardsContainerScroll(() => layoutMasonryGrid());
         } else {
           resetWarehouseGridLayout(container);
           requestAnimationFrame(layoutMasonryGrid);
@@ -7455,8 +7707,10 @@
         masonryInstance = null;
       }
       updateBatchCountLabel();
-      syncWarehouseScrollSentinel(container);
       bindWarehousePagedScroll();
+      if (mobileGrid || viewMode === 'list') {
+        syncWarehouseScrollSentinel(container);
+      }
       if (mobileGrid) {
         container.classList.add('cards-grid-primed');
         enforceMobileCardGrid();
@@ -7505,10 +7759,50 @@
         loadNextWarehousePage();
       }, {
         root: root === document.body ? null : root,
-        rootMargin: '280px 0px',
+        rootMargin: '320px 0px',
         threshold: 0
       });
       warehousePageObserver.observe(sentinel);
+    }
+    /** Masonry 绝对定位后 sentinel 会漂到顶部，需钉在最后一行卡片下方 */
+    function repositionWarehouseScrollSentinel(container) {
+      const sentinel = warehouseScrollSentinel;
+      if (!sentinel || !container?.contains(sentinel)) return;
+      const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
+      if (viewMode === 'list' || isMobileViewport()) {
+        sentinel.removeAttribute('style');
+        return;
+      }
+      const cards = container.querySelectorAll('.card');
+      if (!cards.length) return;
+      let maxBottom = 0;
+      cards.forEach((card) => {
+        const top = parseFloat(card.style.top);
+        const h = card.offsetHeight || 0;
+        if (Number.isFinite(top)) maxBottom = Math.max(maxBottom, top + h);
+        else maxBottom = Math.max(maxBottom, (card.offsetTop || 0) + h);
+      });
+      const gap = typeof getMasonryGap === 'function' ? getMasonryGap() : 16;
+      const topPx = maxBottom + gap;
+      sentinel.style.cssText = [
+        'position:absolute',
+        'left:0',
+        'right:0',
+        'width:100%',
+        'height:40px',
+        `top:${topPx}px`,
+        'pointer-events:none',
+        'visibility:hidden'
+      ].join(';');
+      const needH = topPx + 40;
+      const masonryH = parseFloat(container.style.height);
+      if (!Number.isFinite(masonryH) || needH > masonryH) {
+        container.style.height = `${needH}px`;
+      }
+      if (warehousePageObserver) {
+        warehousePageObserver.unobserve(sentinel);
+        warehousePageObserver.observe(sentinel);
+      }
     }
     function bindWarehousePagedScroll() {
       const el = warehouseScrollRoot();
@@ -7521,20 +7815,20 @@
       el.addEventListener('scroll', onWarehouseScroll, { passive: true });
     }
     function onWarehouseScroll() {
-      if (warehouseScrollLoading) return;
-      const el = warehouseScrollRoot();
-      if (!el) return;
-      const mobile = isMobileViewport();
-      if (mobile) {
-        const wh = document.getElementById('cardsContainer');
-        if (wh) window.CardImageLoader?.boostWarehouseImages?.(wh, 24);
-        if (el.scrollTop < 80) return;
-        if (el.scrollTop + el.clientHeight < el.scrollHeight - 280) return;
-      } else {
-        if (el.scrollTop < 48) return;
-        if (el.scrollTop + el.clientHeight < el.scrollHeight - 150) return;
+      const wh = document.getElementById('cardsContainer');
+      if (!wh) return;
+      if (!warehouseScrollLoading && (page * PER_PAGE) < allFilteredCards.length) {
+        const root = warehouseScrollRoot();
+        if (root) {
+          const remain = root.scrollHeight - root.scrollTop - root.clientHeight;
+          if (remain < 480) loadNextWarehousePage();
+        }
       }
-      loadNextWarehousePage();
+      if (warehouseScrollLoading) return;
+      const cap = isMobileViewport()
+        ? (window.MobileUI?.getPerf?.()?.cardEagerCap ?? 24)
+        : Math.min(PER_PAGE, 24);
+      window.CardImageLoader?.boostWarehouseImages?.(wh, cap);
     }
     bindWarehousePagedScroll();
 
@@ -9799,13 +10093,17 @@
       }
       const title = document.getElementById('cardTitle').value.trim();
       const customData = readPanelCustomFields();
+      const snapCardId = (!isNewCardMode && selectedCardId) ? selectedCardId : generateId();
+      const editingCard = !isNewCardMode ? cards.find(c => c.id === snapCardId) : null;
+      commitPanelDraftSlot();
+      const draftGallery = getPanelDraftGalleryForSave();
       const snap = {
         prompt,
         title,
         tags: [...currentTags],
         customFields: customData,
         isNewCard: isNewCardMode,
-        cardId: (!isNewCardMode && selectedCardId) ? selectedCardId : generateId(),
+        cardId: snapCardId,
         previousImage: (!isNewCardMode && selectedCardId)
           ? (cards.find(c => c.id === selectedCardId)?.image || null)
           : null,
@@ -9820,11 +10118,6 @@
         galleryPrimaryIndex: panelGalleryIndex,
         previousGallery: editingCard ? getEditPanelCardGallery(editingCard) : null
       };
-      const editingCard = !snap.isNewCard
-        ? cards.find(c => c.id === snap.cardId)
-        : null;
-      commitPanelDraftSlot();
-      const draftGallery = getPanelDraftGalleryForSave();
       if (window.isCommunityCollectCard?.(editingCard) && snap.wantPublish) {
         statusEl.textContent = '❌ 社区收藏卡片不可发布到社区';
         showToast('社区收藏卡片不可发布到社区');

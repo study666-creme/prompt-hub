@@ -383,7 +383,7 @@
     if (!global.PromptHubApi?.getGenerationJob || !global.SupabaseSync?.isLoggedIn?.()) return false;
     if (missingGenCardRepairInflight) return missingGenCardRepairInflight;
     missingGenCardRepairInflight = (async () => {
-      const serverRes = await recoverWarehouseImagesViaServer({ max: 20, hours: 72 });
+      const serverRes = await recoverWarehouseImagesViaServer({ max: 40, days: 365 });
       if (serverRes?.ok && serverRes.data?.repaired > 0) return true;
 
       const list = d().getCards() || [];

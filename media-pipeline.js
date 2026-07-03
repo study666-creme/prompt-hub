@@ -31,7 +31,28 @@
   async function resolveListUrl(image, opts) {
     if (!image && !opts?.jobId) return '';
     const o = opts && typeof opts === 'object' ? opts : {};
-    if (o.jobId && window.WarehouseThumb?.resolveForCard) {
+    const ownedStorage = image
+      && window.SupabaseSync?.isStorageRef?.(image)
+      && window.SupabaseSync?.storagePathOwnedByCurrentUser?.(
+        window.SupabaseSync.storagePathFromRef(image)
+      );
+    if (ownedStorage && window.SupabaseSync?.resolveDisplayUrl) {
+      const fast = await window.SupabaseSync.resolveDisplayUrl(image, {
+        assetId: o.assetId || o.cardId,
+        authorId: o.authorId,
+        cardId: o.cardId || o.assetId,
+        jobId: o.jobId,
+        galleryIndex: o.galleryIndex,
+        variant: VARIANT_LIST,
+        listOnly: true,
+        allowFullFallback: false,
+        tryAllPaths: o.tryAllPaths === true,
+        communityFeed: o.communityFeed === true,
+        bypassSignBudget: o.bypassSignBudget
+      });
+      if (fast) return fast;
+    }
+    if (o.jobId && !ownedStorage && window.WarehouseThumb?.resolveForCard) {
       const wh = await window.WarehouseThumb.resolveForCard(image || '', {
         jobId: o.jobId,
         assetId: o.assetId || o.cardId,
@@ -132,7 +153,7 @@
 
   async function patchContainerFromCache(container, opts) {
     if (!container || !window.SupabaseSync?.patchImageSrcFromCache) return;
-    window.SupabaseSync.patchImageSrcFromCache(container, opts || { visibleFirst: true, max: 12 });
+    window.SupabaseSync.patchImageSrcFromCache(container, opts || { visibleFirst: true, max: 24 });
   }
 
   function safeImgSrc(image) {
@@ -155,18 +176,23 @@
 
   async function resolveCardListThumb(card) {
     if (!card?.id) return '';
-    if (window.WarehouseThumb?.resolveForCardModel) {
-      return window.WarehouseThumb.resolveForCardModel(card);
-    }
-    const meta = window.PromptHubCardGallery?.getWarehouseListThumbMeta?.(card);
+    const meta = window.PromptHubCardGallery?.getWarehouseListThumbMeta?.(card, { skipEnsure: true });
     if (!meta?.hasImage) return '';
-    return resolveListUrl(meta.ref || card.image, {
+    const ref = meta.ref || card.image || '';
+    const cached = getListCached(ref, card.id, { jobId: meta.jobId });
+    if (cached) return cached;
+    const url = await resolveListUrl(ref, {
       assetId: card.id,
       cardId: card.id,
       jobId: meta.jobId,
       galleryIndex: meta.galleryIndex || 0,
       tryAllPaths: true
     });
+    if (url) return url;
+    if (window.WarehouseThumb?.resolveForCardModel) {
+      return window.WarehouseThumb.resolveForCardModel(card);
+    }
+    return '';
   }
 
   window.MediaPipeline = {

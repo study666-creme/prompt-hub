@@ -16,7 +16,8 @@ import {
   materializeCommunityGridIfMissing,
   serveCachedStorageImage,
   verifyMediaAccessToken,
-  signingPathForVariant
+  signingPathForVariant,
+  ensureGridPathForSigning
 } from '../../lib/media-cdn';
 import { deleteOwnedCardImageIfUnreferenced } from '../../lib/admin-media-refs';
 import { createAdminClient } from '../../lib/supabase';
@@ -206,7 +207,7 @@ mediaRoutes.get('/sign', async c => {
   assertOwnPath(user.id, path);
 
   const variant = (c.req.query('variant') || 'grid').trim().toLowerCase();
-  const signPath = signingPathForVariant(path, variant);
+  const signPath = await ensureGridPathForSigning(c, path, variant);
   const url = await buildPrivateMediaCdnUrl(c, signPath);
   return c.json({
     ok: true,
@@ -239,7 +240,7 @@ mediaRoutes.post('/sign-batch', async c => {
   const urls: Record<string, string> = {};
   await Promise.all(
     paths.map(async key => {
-      const signPath = signingPathForVariant(key, 'grid');
+      const signPath = await ensureGridPathForSigning(c, key, 'grid');
       urls[key] = await buildPrivateMediaCdnUrl(c, signPath);
     })
   );
@@ -257,10 +258,10 @@ const warehouseThumbsBodySchema = z.object({
         slot: z.number().int().min(0).max(8).optional()
       })
     )
-    .max(32)
+    .max(8)
 });
 
-/** 生图卡列表缩略图：服务端归档 + 生成 _grid，只返回 grid CDN URL */
+/** 生图卡列表缩略图：优先 CDN 签 grid；仅缺原图时才归档/materialize */
 mediaRoutes.post('/warehouse-thumbs', async c => {
   const user = c.get('user');
   const parsed = warehouseThumbsBodySchema.safeParse(await c.req.json().catch(() => ({})));
@@ -269,8 +270,8 @@ mediaRoutes.post('/warehouse-thumbs', async c => {
   }
   const thumbs: Record<string, string> = {};
   let idx = 0;
-  const jobs = parsed.data.jobs.filter(j => String(j.jobId || '').trim());
-  const concurrency = 4;
+  const jobs = parsed.data.jobs.filter(j => String(j.jobId || '').trim()).slice(0, 8);
+  const concurrency = 2;
   async function worker() {
     while (idx < jobs.length) {
       const item = jobs[idx];

@@ -58,6 +58,21 @@
 
 ---
 
+## 手机加载 / 腰斩（2026-06-28 · 详见 `docs/MOBILE-LOADING.md`）
+
+| 坑 | 现象 | 根因 | 正确做法 |
+|----|------|------|----------|
+| **双滚动根** | 下半屏黑、只能看半屏 | `feature-shell` / `feature-body` / grid 内嵌 `overflow-y:auto` | 手机**仅 `.app-main` 滚动**；中间层 `overflow:visible` |
+| **IO root ≠ 滚动容器** | 只有首屏 4 张有图，滑下去不加载 | `scrollRootFor` 绑 `main-content` 或 viewport | `scrollRootFor` / `getFeedScrollRoot` → `.app-main` |
+| **`#pageImageGen` feed `overflow:hidden`** | 生图作品只能看 2 张 | styles-features 5330 压过 mobile.css | feed 时 page 必须 overflow:visible |
+| **`feedObserverBound` 不重绑** | 切页后图不加载 | 换 container 后 IO 不重 observe | `clearFeedObserverBindings` + 始终 `observe` |
+| **`isLazyOnlyContainer` 手机 false** | prefetch/IO 走更严分支 | 误以为关 lazy 更快 | 手机 cardsContainer / imageGenFeed **保持 lazyOnly** |
+| **`MOBILE_PERF` cap=8** | 840 张库几乎全文字块 | 过度省流量 | `warehousePrefetchCap` / `cardEagerCap` ≥ **24** |
+| **`warehouseScrollRoot` 错误** | 滑到底不分页、不补图 | 绑到不滚动的 `mainContentArea` | 手机 → `document.querySelector('.app-main')` |
+| **Masonry inline height 残留** | 切页后腰斩 | 卡片库 Masonry 未 destroy | 切页 `resetMobilePageScroll` + `destroyLayout` + flatten |
+
+---
+
 ## 数据 / 同步（勿再犯）
 
 | 坑 | 说明 |
@@ -81,6 +96,7 @@
 
 ## 相关文档
 
+- **`docs/ARCHITECTURE-CHANGE-GUARD.md`** — 架构改动前风险说明（禁止拆东墙补西墙）  
 - **`docs/ERROR-LOG.md`** — 历史事故与高频坑（含 SEO「仅 Edge 能搜到」）  
 - `docs/SEO-SEARCH-ENGINES.md` — 收录、站标、Google/百度分工  
 - `docs/COMMUNITY-ARCHITECTURE.md` — Feed 数据流与分页  

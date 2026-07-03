@@ -75,6 +75,8 @@
 
   /** 列表/生图仓库封面：gallery 第一张（MJ 四宫格在 index 0） */
   function getCardFeedCoverImage(card) {
+    const list = pickWarehouseListThumb(card);
+    if (list?.ref) return list.ref;
     const picked = pickWarehouseFeedCover(card);
     return picked?.ref || null;
   }
@@ -98,9 +100,10 @@
     const gallery = normalizeCardGallery(card);
     const baseJob = resolveGenJobIdFromCard(card) || '';
     const ref = thumb?.ref || card.image || '';
-    const jobId = thumb?.slotJobId?.replace(/#\d+$/, '') || baseJob || '';
+    const slotJobId = thumb?.slotJobId || (baseJob || null);
+    const jobId = baseJob || (slotJobId ? String(slotJobId).replace(/#\d+$/, '') : '');
     if (!ref && !gallery.length && !baseJob) return { hasImage: false };
-    const listOpts = { jobId: jobId || undefined, allowFullFallback: false };
+    const listOpts = { jobId: slotJobId || jobId || undefined, allowFullFallback: false };
     let cachedUrl = '';
     if (ref && global.SupabaseSync?.getListDisplayImageSrc) {
       cachedUrl = global.SupabaseSync.getListDisplayImageSrc(ref, card.id, listOpts) || '';
@@ -120,6 +123,7 @@
       hasImage: !!(cachedUrl || hasResolvable || hasGalleryResolvable || hasGenJobThumb || (hasGalleryAny && baseJob)),
       ref,
       jobId,
+      slotJobId,
       cachedUrl,
       galleryIndex: thumb?.galleryIndex ?? 0,
       thumbMeta: thumb,
@@ -361,11 +365,11 @@
     return n;
   }
 
-  /** 卡片库首屏：一次 ensure + 批量 meta（render 热路径勿逐卡 ensure） */
+  /** 卡片库首屏：ensure 仅首屏；append 页只算 meta 不 ensure */
   function prepareWarehousePageThumbs(cardList, opts = {}) {
     const list = Array.isArray(cardList) ? cardList : [];
     if (!list.length) return [];
-    if (opts.ensure !== false) {
+    if (opts.ensure === true) {
       const ensureMax = Number(opts.ensureMax) > 0 ? Number(opts.ensureMax) : list.length;
       ensureFeedCoversForCards(list.slice(0, ensureMax), { persist: false, backfill: false });
     }
@@ -380,7 +384,8 @@
     const imgs = normalizeCardGallery(card);
     card.cardImages = imgs.length ? imgs : null;
     if (imgs.length) {
-      card.image = getCardFeedCoverImage({ ...card, cardImages: imgs }) || imgs[0];
+      const listCover = pickWarehouseListThumb({ ...card, cardImages: imgs });
+      card.image = listCover?.ref || getCardFeedCoverImage({ ...card, cardImages: imgs }) || imgs[0];
     }
     if (card.isMidjourney) {
       const comp = card.mjCompositeUrl && String(card.mjCompositeUrl).trim();

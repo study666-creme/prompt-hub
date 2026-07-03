@@ -118,7 +118,7 @@
       };
       d().unshiftPendingJob(pendingJob);
       d().persistPendingGenJobs();
-      d().switchImageGenFeedToWarehouse();
+      d().switchImageGenFeedToRecent();
       d().updateImageGenFeedHint();
       d().renderImageGenFeed({ preserveScroll: true });
       if (singleRun && d().isMobileViewport?.() && global.MobileUI?.setImageGenView) {

@@ -1,6 +1,7 @@
 import { createMiddleware } from 'hono/factory';
 import { createClient } from '@supabase/supabase-js';
 import { ApiError } from '../lib/errors';
+import { verifySupabaseAccessToken } from '../lib/verify-auth-jwt';
 import type { Env } from '../env';
 
 export type AuthUser = {
@@ -28,6 +29,17 @@ export const requireAuth = createMiddleware<{ Bindings: Env }>(async (c, next) =
   }
   const token = header.slice(7).trim();
   if (!token) throw new ApiError(401, 'UNAUTHORIZED', '无效的登录凭证');
+
+  const verified = await verifySupabaseAccessToken(env, token);
+  if (verified) {
+    c.set('user', verified);
+    await next();
+    return;
+  }
+
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new ApiError(401, 'UNAUTHORIZED', '登录已过期，请重新登录');
+  }
 
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false }

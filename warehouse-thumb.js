@@ -8,8 +8,8 @@
   const inflight = new Map();
   let pending = [];
   let flushTimer = null;
-  const BATCH_DELAY_MS = 24;
-  const MAX_BATCH = 8;
+  const BATCH_DELAY_MS = 16;
+  const MAX_BATCH = 16;
   const LS_WH_GRID = 'ph_wh_grid_v1';
   const WH_GRID_TTL_MS = 45 * 60 * 1000;
 
@@ -103,10 +103,23 @@
     return '';
   }
 
-  /** 有生图 jobId 且尚无 grid 缓存 → 必须走服务端 warehouse-thumbs */
+  /** 仅当无可用 storage 引用或路径已标 missing 时才走 warehouse-thumbs */
   function needsServerThumb(image, jobId, opts) {
     if (!jobId || !window.PromptHubApi?.postWarehouseThumbs) return false;
     if (!window.SupabaseSync?.isLoggedIn?.()) return false;
+    if (image && window.SupabaseSync?.isStorageRef?.(image)) {
+      const path = window.SupabaseSync.storagePathFromRef?.(image);
+      if (path && window.SupabaseSync.storagePathOwnedByCurrentUser?.(path)) {
+        const pkey = String(path).replace(/^\//, '');
+        if (!window.SupabaseSync.isPathKnownMissing?.(pkey)) {
+          const slot = Number.isFinite(opts?.galleryIndex) ? opts.galleryIndex : gallerySlotFromJobId(jobId);
+          const base = String(jobId).replace(/#\d+$/, '');
+          if (cachedGridUrl(image, opts?.assetId || opts?.cardId, base, slot)) return false;
+          return false;
+        }
+        if (window.SupabaseSync?.isGeneratedStoragePath?.(pkey)) return true;
+      }
+    }
     const slot = Number.isFinite(opts?.galleryIndex) ? opts.galleryIndex : gallerySlotFromJobId(jobId);
     const base = String(jobId).replace(/#\d+$/, '');
     if (cachedGridUrl(image, opts?.assetId || opts?.cardId, base, slot)) return false;
@@ -234,7 +247,33 @@
       });
       if (cached && isGridUrl(cached)) return cached;
     }
-    if (jobId) {
+    if (ref && window.SupabaseSync?.isStorageRef?.(ref)) {
+      const path = window.SupabaseSync.storagePathFromRef?.(ref);
+      if (path && window.SupabaseSync.storagePathOwnedByCurrentUser?.(path)) {
+        const pkey = String(path).replace(/^\//, '');
+        const isGen = window.SupabaseSync?.isGeneratedStoragePath?.(pkey);
+        if (!isGen && !window.SupabaseSync.isPathKnownMissing?.(pkey) && window.SupabaseSync?.resolveDisplayUrl) {
+          try {
+            const signed = await window.SupabaseSync.resolveDisplayUrl(ref, {
+              assetId: card.id,
+              cardId: card.id,
+              jobId: thumb?.slotJobId || jobId || undefined,
+              galleryIndex,
+              variant: 'grid',
+              listOnly: true,
+              allowFullFallback: false,
+              tryAllPaths: true
+            });
+            if (signed && isGridUrl(signed)) return signed;
+          } catch (e) { /* fallback warehouse */ }
+        }
+      }
+    }
+    if (jobId && needsServerThumb(ref, thumb?.slotJobId || slotJobId(jobId, galleryIndex), {
+      assetId: card.id,
+      cardId: card.id,
+      galleryIndex
+    })) {
       const wh = await resolveForCard(ref, {
         jobId: thumb?.slotJobId || slotJobId(jobId, galleryIndex),
         assetId: card.id,
@@ -242,7 +281,6 @@
         galleryIndex
       });
       if (wh) return wh;
-      return '';
     }
     if (window.MediaPipeline?.resolveListUrl) {
       return window.MediaPipeline.resolveListUrl(ref, {
@@ -259,34 +297,53 @@
   async function prefetchForCards(cards, opts) {
     const list = Array.isArray(cards) ? cards : [];
     const max = Math.min(opts?.max || warehousePrefetchCardCap(), list.length);
-    const concurrency = Math.min(4, max);
-    let idx = 0;
-    const worker = async () => {
-      while (idx < max) {
-        const i = idx;
-        idx += 1;
-        const card = list[i];
-        if (!card?.id) continue;
-        const thumb = window.PromptHubCardGallery?.pickWarehouseListThumb?.(card)
-          || window.PromptHubCardGallery?.pickWarehouseFeedCover?.(card);
-        const ref = thumb?.ref || card.image || '';
-        const jobId = thumb?.slotJobId?.replace(/#\d+$/, '')
-          || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(card)
-          || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');
-        if (!ref && !jobId) continue;
-        if (ref && window.SupabaseSync?.getListDisplayImageSrc) {
-          const cached = window.SupabaseSync.getListDisplayImageSrc(ref, card.id, {
-            jobId: jobId || undefined,
-            allowFullFallback: false
-          });
-          if (cached && isGridUrl(cached)) continue;
-        }
-        try {
-          await resolveForCardModel(card);
-        } catch (e) { /* ignore */ }
+    const needServer = [];
+    for (let i = 0; i < max; i += 1) {
+      const card = list[i];
+      if (!card?.id) continue;
+      if (window.SupabaseSync?.cardNeedsWarehouseThumbServer?.(card)) {
+        needServer.push(card);
       }
-    };
-    await Promise.all(Array.from({ length: concurrency }, () => worker()));
+    }
+    if (!needServer.length) return;
+
+    const jobEntries = [];
+    const seenKeys = new Set();
+    for (const card of needServer) {
+      const thumb = window.PromptHubCardGallery?.pickWarehouseListThumb?.(card)
+        || window.PromptHubCardGallery?.pickWarehouseFeedCover?.(card);
+      const baseJob = window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(card)
+        || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');
+      if (!baseJob) continue;
+      const galleryIndex = thumb?.galleryIndex ?? 0;
+      const slot = Number.isFinite(galleryIndex) ? galleryIndex : 0;
+      const resolvedJobId = thumb?.slotJobId || slotJobId(baseJob, slot);
+      const ck = cacheKey(baseJob, slot);
+      if (seenKeys.has(ck) || cache.has(ck)) continue;
+      seenKeys.add(ck);
+      jobEntries.push({ card, baseJobId: baseJob, slot, slotJobId: resolvedJobId, ck });
+    }
+    if (!jobEntries.length) return;
+
+    const { max: batchMax } = mobileBatchTuning();
+    for (let i = 0; i < jobEntries.length; i += batchMax) {
+      const chunk = jobEntries.slice(i, i + batchMax);
+      const jobs = chunk.map((e) => ({
+        jobId: e.slotJobId,
+        slot: e.slot
+      }));
+      let thumbs = {};
+      try {
+        const res = await window.PromptHubApi.postWarehouseThumbs(jobs);
+        thumbs = res?.data?.thumbs || res?.thumbs || {};
+      } catch (e) {
+        console.warn('[WarehouseThumb] prefetch batch failed', e);
+      }
+      for (const e of chunk) {
+        const url = thumbs[e.ck] || '';
+        if (url && isGridUrl(url)) rememberUrl(e.ck, url, e.card.id);
+      }
+    }
   }
 
   function warehousePrefetchCardCap() {

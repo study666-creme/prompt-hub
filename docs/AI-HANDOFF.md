@@ -9,6 +9,7 @@
 | 顺序 | 文件 | 用途 |
 |------|------|------|
 | 0 | **`docs/AI-PITFALLS.md`** + **`docs/ERROR-LOG.md`** | **防炸站** + 历史高频坑 |
+| 0b | **`docs/ARCHITECTURE-CHANGE-GUARD.md`** | **架构改动前必读**：风险说明、禁止拆东墙补西墙 |
 | 1 | **`docs/CURRENT-ISSUES.md`** | R2 同步、MemFire、活跃项（**首屏带宽已关闭**） |
 | 2 | **`docs/FEED-MODULES.md`** + **`docs/FEED-LAYOUT.md`** | Feed 四模块 + 排版调试 |
 | 3 | **`docs/PROJECT_CONTEXT.md`** | 产品、部署、构建号 |

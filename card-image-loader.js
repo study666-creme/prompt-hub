@@ -20,13 +20,28 @@
     return window.MobileUI?.getPerf?.()?.maxDownload ?? 8;
   }
   function igFeedPatchMax() {
-    return window.MobileUI?.getPerf?.()?.igFeedPatchMax ?? 6;
+    return window.MobileUI?.getPerf?.()?.igFeedPatchMax ?? 12;
   }
   function igFeedBoostMax() {
-    return window.MobileUI?.getPerf?.()?.igFeedBoostMax ?? 10;
+    return window.MobileUI?.getPerf?.()?.igFeedBoostMax ?? 12;
   }
   function igFeedPrefetchMax() {
-    return window.MobileUI?.getPerf?.()?.igFeedPrefetchCap ?? 4;
+    return window.MobileUI?.getPerf?.()?.igFeedPrefetchCap ?? 12;
+  }
+  function warehousePrefetchCap() {
+    const mp = window.MobileUI?.getPerf?.();
+    if (mp?.warehousePrefetchCap) return Math.max(12, Number(mp.warehousePrefetchCap) || 24);
+    return 24;
+  }
+  /** 首屏 batch 签名张数：与 PER_PAGE=24 对齐 */
+  function warehouseInitialSignCap() {
+    if (window.MobileUI?.isMobileViewport?.()) {
+      return warehousePrefetchCap();
+    }
+    return 24;
+  }
+  function warehouseDesktopPatchCap() {
+    return warehouseInitialSignCap();
   }
   function cardEagerCap() {
     return window.MobileUI?.getPerf?.()?.cardEagerCap ?? 16;
@@ -37,6 +52,7 @@
   const VISIBLE_LOAD_MARGIN = 160;
   const prefetchedImageRefs = new Set();
   const containerSignReady = new Map();
+  const warehousePrefetchSigs = new Map();
 
   const downloadQueue = [];
   let downloadActive = 0;
@@ -52,11 +68,13 @@
     return containerSignReady.get(id) || Promise.resolve();
   }
 
-  /** 手机：不阻塞等整批 prefetch，320ms 后视口内也开载 */
+  /** 卡片库：不等 batch 签完，视口内 img 立即单独 resolve */
   function whenContainerReady(containerOrId) {
+    const id = typeof containerOrId === 'string' ? containerOrId : containerOrId?.id;
+    if (id === 'cardsContainer') return Promise.resolve();
     const pending = whenContainerSigned(containerOrId);
-    if (!window.MobileUI?.isMobileViewport?.()) return pending;
-    return Promise.race([pending, new Promise((r) => setTimeout(r, 320))]);
+    const ms = window.MobileUI?.isMobileViewport?.() ? 320 : 480;
+    return Promise.race([pending, new Promise((r) => setTimeout(r, ms))]);
   }
 
   function clearFeedObserverBindings(container) {
@@ -291,18 +309,25 @@
     return container?.id === 'cardsContainer' || container?.id === 'imageGenFeed';
   }
 
-  const IMAGEGEN_FEED_PATCH_MAX = 6;
-  const IMAGEGEN_FEED_BOOST_MAX = 10;
-  const IMAGEGEN_FEED_PREFETCH_MAX = 4;
+  const IMAGEGEN_FEED_PATCH_MAX = 12;
+  const IMAGEGEN_FEED_BOOST_MAX = 12;
+  const IMAGEGEN_FEED_PREFETCH_MAX = 12;
 
-  function sortImgsByViewport(imgs) {
+  function sortImgsByViewport(imgs, container) {
+    const root = container ? scrollRootFor(container) : null;
+    const isVisible = (img) => {
+      const rect = img.getBoundingClientRect();
+      if (root && root !== document.body && root !== document.documentElement) {
+        const rr = root.getBoundingClientRect();
+        return rect.bottom > rr.top - 40 && rect.top < rr.bottom + 40;
+      }
+      return rect.bottom > -40 && rect.top < window.innerHeight + 40;
+    };
     return [...imgs].sort((a, b) => {
-      const ar = a.getBoundingClientRect();
-      const br = b.getBoundingClientRect();
-      const aVis = ar.bottom > -40 && ar.top < window.innerHeight + 40;
-      const bVis = br.bottom > -40 && br.top < window.innerHeight + 40;
+      const aVis = isVisible(a);
+      const bVis = isVisible(b);
       if (aVis !== bVis) return aVis ? -1 : 1;
-      return ar.top - br.top;
+      return a.getBoundingClientRect().top - b.getBoundingClientRect().top;
     });
   }
 
@@ -318,7 +343,12 @@
     }
     if ((isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))
       && window.SupabaseSync?.getListDisplayImageSrc) {
-      const url = window.SupabaseSync.getListDisplayImageSrc(ref, cardId, { authorId, assetId: cardId, allowFullFallback: false });
+      const url = window.SupabaseSync.getListDisplayImageSrc(ref, cardId, {
+        authorId,
+        assetId: cardId,
+        jobId: jobIdFromImg(img) || undefined,
+        allowFullFallback: false
+      });
       if (url && isReadySrc(url, img)) return url;
       return '';
     }
@@ -398,8 +428,48 @@
     return false;
   }
 
+  function recoverWarehouseListGeneratedImg(img, media) {
+    const cardEl = img?.closest?.('#cardsContainer .card[data-id]');
+    if (!cardEl || cardEl.dataset.communityCollect === '1') return false;
+    if (img.dataset.whServerRecover === '1') return false;
+    const cardId = cardEl.dataset.id;
+    const cardModel = (window.__promptHubCards || []).find((c) => c.id === cardId);
+    if (!cardModel) return false;
+    const jobId = cardModel.genJobId
+      || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(cardModel);
+    if (!jobId) return false;
+    const ref = img.getAttribute('data-image-ref') || cardModel.image || '';
+    if (!window.SupabaseSync?.isGeneratedStoragePath?.(ref)) return false;
+    img.dataset.whServerRecover = '1';
+    window.SupabaseSync?.clearPathMissingForCard?.(cardId, ref);
+    const applyOrFail = (url) => {
+      if (url && applyUrlToImg(img, url)) return;
+      window.finalizeWarehouseCardMediaFailure?.(media || feedMediaFromImg(img), img);
+    };
+    if (window.WarehouseThumb?.resolveForCardModel) {
+      void window.WarehouseThumb.resolveForCardModel(cardModel).then(applyOrFail);
+      return true;
+    }
+    if (window.WarehouseThumb?.resolveForCard) {
+      void window.WarehouseThumb.resolveForCard(ref, {
+        jobId: String(jobId).replace(/#\d+$/, ''),
+        assetId: cardId,
+        cardId
+      }).then(applyOrFail);
+      return true;
+    }
+    return false;
+  }
+
   function queueGridBackfillForImg(img) {
-    if (img?.closest?.('#cardsContainer')) return false;
+    const inCardsContainer = !!img?.closest?.('#cardsContainer');
+    if (inCardsContainer) {
+      const refPath = window.SupabaseSync?.storagePathFromRef?.(img.getAttribute('data-image-ref') || '') || '';
+      if (refPath.replace(/^\//, '').includes('/generated/')) {
+        return recoverWarehouseListGeneratedImg(img, feedMediaFromImg(img));
+      }
+      return false;
+    }
     const cardId = cardIdFromImg(img);
     if (!cardId || !window.SupabaseSync?.queueGridBackfill) return false;
     const ref = img.getAttribute('data-image-ref') || '';
@@ -464,21 +534,6 @@
       if (communityExtra.skip) return '';
       const ownListCard = ownWarehouseCard || ownIgWh;
       const jobId = jobIdFromImg(img) || extraOpts?.jobId || undefined;
-      if ((ownWarehouseCard || ownIgWh) && jobId && window.WarehouseThumb?.resolveForCard) {
-        const wh = await window.WarehouseThumb.resolveForCard(ref, {
-          jobId,
-          assetId: cardId,
-          cardId,
-          galleryIndex: extraOpts?.galleryIndex || 0
-        });
-        if (isReadySrc(wh, img)) return wh;
-      } else if (ownListCard && cardId && window.WarehouseThumb?.resolveForCardModel) {
-        const card = (window.__promptHubCards || []).find((c) => c.id === cardId);
-        if (card?.genJobId) {
-          const wh = await window.WarehouseThumb.resolveForCardModel(card);
-          if (isReadySrc(wh, img)) return wh;
-        }
-      }
       const degradedList = ownListCard
         && window.SupabaseSync?.needsDegradedListPreview?.(ref, cardId);
       const resolveOpts = {
@@ -517,7 +572,12 @@
     const urlPath = window.SupabaseSync?.storagePathFromDisplayUrl?.(url);
     const urlKey = urlPath ? String(urlPath).replace(/^\//, '') : '';
     if (urlKey && window.SupabaseSync?.isPathKnownMissing?.(urlKey)) return false;
-    if (urlKey && window.SupabaseSync?.isGridFetchFailed?.(urlKey)) return false;
+    if (urlKey && window.SupabaseSync?.isGridFetchFailed?.(urlKey)) {
+      const ref = img.getAttribute('data-image-ref');
+      const cid = cardIdFromImg(img);
+      const cached = ref && window.SupabaseSync?.getListDisplayImageSrc?.(ref, cid, { allowFullFallback: false });
+      if (!cached || cached !== url) return false;
+    }
     if (img.dataset.feedLoadDone === '1' && isImgVisuallyLoaded(img)) return true;
     const media = feedMediaFromImg(img);
     if (!media) return false;
@@ -589,6 +649,7 @@
         img.dataset.primaryRetried = '1';
         const failedKey = failedPath ? String(failedPath).replace(/^\//, '') : '';
         if (failedKey && failedKey.includes('/generated/')) {
+          if (ownList && recoverWarehouseListGeneratedImg(img, media)) return;
           if (img.dataset.whWarmTried === '1') {
             if (ownList) window.finalizeWarehouseCardMediaFailure?.(media, img);
             else media.classList.add('card-media--load-failed');
@@ -797,9 +858,16 @@
     startLoad();
   }
 
-  function isImgNearViewport(img, margin) {
+  function isImgNearViewport(img, margin, container) {
     const rect = img.getBoundingClientRect();
-    const m = margin || VISIBLE_LOAD_MARGIN;
+    const m = margin == null ? VISIBLE_LOAD_MARGIN : margin;
+    const root = container
+      ? scrollRootFor(container)
+      : scrollRootFor(img?.closest?.('#cardsContainer, #imageGenFeed, .community-feed-columns'));
+    if (root && root !== document.body && root !== document.documentElement) {
+      const rr = root.getBoundingClientRect();
+      return rect.bottom > rr.top - m && rect.top < rr.bottom + m;
+    }
     return rect.bottom > -m && rect.top < window.innerHeight + m;
   }
 
@@ -811,9 +879,8 @@
     if (prefetchedImageRefs.has(dedupeKey)) return;
     prefetchedImageRefs.add(dedupeKey);
     const card = cardId && (window.__promptHubCards || []).find((c) => c.id === cardId);
-    if (card?.image) {
+    if (card?.id) {
       void window.SupabaseSync.prefetchCardsImages([card], 1400, { maxCards: 1 });
-      window.SupabaseSync?.queueGridBackfill?.(card);
     }
   }
 
@@ -939,9 +1006,9 @@
           loadImg(img);
         }
       });
-    } else if (lazyOnly && container.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.()) {
+    } else if (container.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.()) {
       let eager = 0;
-      const eagerCap = cardEagerCap();
+      const eagerCap = cardFirstScreenCap();
       sortImgsByViewport(imgs).forEach((img) => {
         if (isImgVisuallyLoaded(img)) return;
         if (eager >= eagerCap) return;
@@ -961,10 +1028,11 @@
       });
     } else if (!lazyOnly && (container.id === 'cardsContainer' || isCommunityContainer(container))) {
       let eager = 0;
-      const mobileWh = container.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.();
-      const firstScreenCap = isCommunityContainer(container) ? 24 : (mobileWh ? cardFirstScreenCap() : 16);
-      const nearPx = isCommunityContainer(container) ? 960 : (mobileWh ? 720 : 640);
-      imgs.forEach((img) => {
+      const isWh = container.id === 'cardsContainer';
+      const firstScreenCap = isCommunityContainer(container) ? 24 : warehousePrefetchCap();
+      const nearPx = isCommunityContainer(container) ? 960 : 720;
+      const ordered = isWh ? sortImgsByViewport(imgs) : imgs;
+      ordered.forEach((img) => {
         const cur = img.currentSrc || img.src || '';
         if (isReadySrc(cur, img)) return;
         if (eager < firstScreenCap && isImgNearViewport(img, nearPx)) {
@@ -999,7 +1067,7 @@
         : isCommunityContainer(container)
           ? '360px 0px'
           : (container.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.()
-            ? '240px 0px'
+            ? '520px 0px'
             : '160px 0px');
       observer = new IntersectionObserver(onIntersect, {
         root: scrollRootFor(container) || null,
@@ -1020,6 +1088,8 @@
         return;
       }
       if (lazyOnly) {
+        const nearPx = container.id === 'imageGenFeed' ? 720 : 640;
+        if (isImgNearViewport(img, nearPx)) loadImg(img);
         observer.observe(img);
         img.dataset.feedObserverBound = '1';
         return;
@@ -1033,8 +1103,25 @@
     });
   }
 
+  function observeUnboundImages(container) {
+    if (!container || !('IntersectionObserver' in window)) return;
+    if (!observer || observedRoot !== container) {
+      observeContainer(container);
+      return;
+    }
+    feedImagesIn(container).forEach((img) => {
+      if (img.dataset.feedObserverBound === '1') return;
+      if (isImgVisuallyLoaded(img)) return;
+      const cur = img.currentSrc || img.src || '';
+      if (isReadySrc(cur, img)) return;
+      observer.observe(img);
+      img.dataset.feedObserverBound = '1';
+    });
+  }
+
   function disconnect() {
     if (observedRoot) clearFeedObserverBindings(observedRoot);
+    if (observedRoot?.id) warehousePrefetchSigs.delete(observedRoot.id);
     observer?.disconnect();
     observer = null;
     observedRoot = null;
@@ -1044,9 +1131,16 @@
     const mobileWh = container?.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.();
     const cap = container?.id === 'imageGenFeed'
       ? igFeedPrefetchMax()
-      : (mobileWh ? (window.MobileUI?.getPerf?.()?.warehousePrefetchCap ?? 24) : 8);
+      : (container?.id === 'cardsContainer'
+        ? warehouseInitialSignCap()
+        : (mobileWh ? warehousePrefetchCap() : warehouseInitialSignCap()));
     const list = (items || []).slice(0, cap);
     if (!list.length) return Promise.resolve();
+    if (container?.id === 'cardsContainer') {
+      const sig = list.map((x) => `${x?.id || ''}:${x?.image || ''}`).join('\u001e');
+      if (warehousePrefetchSigs.get(container.id) === sig) return Promise.resolve();
+      warehousePrefetchSigs.set(container.id, sig);
+    }
     const hasCardIds = list.every((x) => x && x.id && x.image);
     if (hasCardIds && window.MediaPipeline?.prefetchList) {
       return window.MediaPipeline.prefetchList(list, 2600);
@@ -1062,7 +1156,17 @@
   }
 
   function bindWarehouse(container, pageCards) {
-    return bindSignedContainer(container, pageCards);
+    const signCap = warehouseInitialSignCap();
+    const signList = (pageCards || []).slice(0, signCap);
+    const signP = bindSignedContainer(container, signList);
+    const mobile = container?.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.();
+    const cap = mobile
+      ? (window.MobileUI?.getPerf?.()?.cardEagerCap ?? cardEagerCap())
+      : warehousePrefetchCap();
+    void signP.finally?.(() => {
+      boostWarehouseImages(container, cap);
+    });
+    return signP;
   }
 
   function bindFeed(container, items) {
@@ -1088,9 +1192,10 @@
         window.MediaPipeline?.patchContainerFromCache?.(container, o);
       }
     };
-    patchCache({ visibleFirst: true, max: mobileWh ? cardFirstScreenCap() : 8 });
+    const patchMax = mobileWh ? cardFirstScreenCap() : warehouseDesktopPatchCap();
+    patchCache({ visibleFirst: true, max: patchMax });
     const signP = prefetchItemsForContainer(container, items).then(() => {
-      patchCache({ visibleFirst: true, max: mobileWh ? cardFirstScreenCap() : 14 });
+      patchCache({ visibleFirst: true, max: patchMax });
     });
     setContainerSignReady(container, signP);
     observeContainer(container);
@@ -1163,10 +1268,11 @@
     if (!container || container.id !== 'cardsContainer') return;
     const mobile = window.MobileUI?.isMobileViewport?.();
     if (mobile && window.MobileUI?.isUserInteracting?.()) return;
-    const cap = max ?? (mobile ? 6 : 8);
+    const defaultCap = mobile ? (window.MobileUI?.getPerf?.()?.cardEagerCap ?? cardEagerCap()) : warehousePrefetchCap();
+    const cap = max ?? defaultCap;
     let n = 0;
     const nearPx = mobile ? 1200 : 720;
-    const imgs = mobile ? sortImgsByViewport(feedImagesIn(container)) : feedImagesIn(container);
+    const imgs = sortImgsByViewport(feedImagesIn(container), container);
     imgs.forEach((img, idx) => {
       const cur = img.currentSrc || img.src || '';
       if (isReadySrc(cur, img) && img.complete && img.naturalWidth > 8) return;
@@ -1176,14 +1282,14 @@
         return;
       }
       const placeholder = !cur || cur.includes('data:image/svg');
-      const inView = isImgNearViewport(img, nearPx);
-      if (placeholder || inView || (mobile && idx < cardFirstScreenCap())) {
-        if (n >= cap && !inView) return;
-        n += 1;
-        loadImg(img);
-      }
+      const inView = isImgNearViewport(img, nearPx, container);
+      const shouldLoad = inView || (mobile && (placeholder || idx < cardFirstScreenCap()));
+      if (!shouldLoad) return;
+      if (n >= cap && !inView) return;
+      n += 1;
+      loadImg(img);
     });
-    observeContainer(container);
+    observeUnboundImages(container);
   }
 
   document.addEventListener('visibilitychange', syncVisibilityPause);

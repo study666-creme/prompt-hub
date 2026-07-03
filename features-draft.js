@@ -16,8 +16,7 @@
   const LS_GEN_JOBS_STATE = 'promptrepo_gen_jobs_state_v1';
   const PREFILL_KEY = 'promptrepo_imagegen_prefill';
 
-  const GEN_RETENTION_MIN_MS = 1 * 24 * 60 * 60 * 1000;
-  const GEN_RETENTION_MAX_MS = 3 * 24 * 60 * 60 * 1000;
+  const GEN_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
   const MIN_COMMUNITY_PROMPT_LEN = 15;
   /** 与 server syncBodySchema.posts.max(80) 一致 */
   const COMMUNITY_SYNC_BATCH_MAX = 80;
@@ -95,8 +94,8 @@
     '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect fill="%2318181c" width="16" height="16"/></svg>'
   );
 
-  function randomGenRetentionMs() {
-    return GEN_RETENTION_MIN_MS + Math.floor(Math.random() * (GEN_RETENTION_MAX_MS - GEN_RETENTION_MIN_MS + 1));
+  function genRetentionMs() {
+    return GEN_RETENTION_MS;
   }
 
   function normalizeGenJobBaseId(jobId) {
@@ -159,14 +158,14 @@
   const REF_MAX_SIDE = 2560;
   let imageGenLastResult = null;
   let imageGenActiveHistoryId = null;
-  let imageGenFeedTab = 'warehouse';
+  let imageGenFeedTab = 'recent';
   /** @type {Array<{id:string,prompt:string,model:string,modelLabel:string,resolution:string,quality:string,size:string,cost:number,startedAt:number,jobId?:string,batchIndex?:number,batchTotal?:number,batchId?:string}>} */
   let imageGenPendingJobs = [];
   /** @type {Array<{id:string,prompt:string,errorMessage:string,failedAt:number,modelLabel?:string,batchIndex?:number,batchTotal?:number,batchId?:string}>} */
   let imageGenFailedJobs = [];
   /** null = 本次进入生图页尚未手动改过；离开后再进会重置 */
   let imageGenAutoPublishSession = null;
-  let imageGenAutoSaveSession = null;
+  let imageGenAutoSaveSession = null; /* legacy — 自动入库已移除 */
   let imageGenMasonry = null;
   let imageGenWhGroup = 'all';
   let imageGenWhTag = 'all';
@@ -1455,6 +1454,7 @@
     loadNotifications();
     updateNotifyBadge();
     stripDemoCreations();
+    reconcileCreationsWarehouseLinks();
     pruneCreations();
     migrateCommunityAuthorIds();
     pruneOrphanFeatureData();
@@ -1614,13 +1614,204 @@
     if (creations.length !== before) persistCreations();
   }
 
+  function buildCreationGallery(c) {
+    if (!c) return [];
+    if (Array.isArray(c.cardImages) && c.cardImages.length) {
+      return c.cardImages.filter(Boolean).slice(0, window.PromptHubCardGallery?.MAX || 5);
+    }
+    if (c.isMidjourney) {
+      const tiles = Array.isArray(c.mjGridUrls) ? c.mjGridUrls.filter(Boolean) : [];
+      if (tiles.length) return tiles.slice(0, 5);
+      if (c.mjCompositeUrl && c.image) return [c.mjCompositeUrl, c.image].filter(Boolean);
+    }
+    return c.image ? [c.image] : [];
+  }
+
+  function getRecentCreationsLimit() {
+    return window.Membership?.getRecentCreationsLimit?.()
+      ?? 100;
+  }
+
+  function isRecentCreationEligible(c) {
+    if (!c?.id) return false;
+    if (c.permanent || c.visibility === 'published') return false;
+    return isDisplayableImage(c.image)
+      || (c.isMidjourney && (c.mjGridUrls?.length || c.mjCompositeUrl));
+  }
+
+  function getRecentCreationsActiveSorted() {
+    const now = Date.now();
+    return creations
+      .filter((c) => isRecentCreationEligible(c))
+      .filter((c) => !c.expiresAt || c.expiresAt > now)
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  }
+
+  function pruneCreationsByCountLimit() {
+    const max = getRecentCreationsLimit();
+    const active = getRecentCreationsActiveSorted();
+    if (active.length <= max) return;
+    const overflow = active.slice(0, active.length - max);
+    if (!overflow.length) return;
+    void Promise.all(
+      overflow
+        .filter((c) => !warehouseReferencesCreation(c))
+        .map((c) => purgeCreationMedia(c))
+    );
+    const dropIds = new Set(overflow.map((c) => c.id));
+    creations = creations.filter((c) => !dropIds.has(c.id));
+    persistCreations();
+  }
+
+  function getRecentCreationsForFeed() {
+    pruneCreations();
+    const now = Date.now();
+    return creations
+      .filter((c) => c?.id && (!c.expiresAt || c.expiresAt > now))
+      .filter((c) => isDisplayableImage(c.image)
+        || (c.isMidjourney && (c.mjGridUrls?.length || c.mjCompositeUrl)))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }
+
+  function warehouseReferencesCreation(creation) {
+    if (!creation) return false;
+    const cards = window.__promptHubCards || [];
+    if (creation.warehouseCardId && cards.some((c) => c.id === creation.warehouseCardId)) return true;
+    if (creation.id && cards.some((c) => c.genSourceId === creation.id)) return true;
+    const base = normalizeGenJobBaseId(creation.jobId);
+    if (!base) return false;
+    return cards.some((c) => {
+      const cBase = normalizeGenJobBaseId(c.genJobId);
+      if (cBase !== base) return false;
+      return !!(c.image && isDisplayableImage(c.image));
+    });
+  }
+
+  function isCreationLinkedToWarehouse(c) {
+    return !!(c?.savedToWarehouse && c?.warehouseCardId) || warehouseReferencesCreation(c);
+  }
+
+  function reconcileCreationsWarehouseLinks() {
+    const cards = window.__promptHubCards || [];
+    if (!cards.length || !creations.length) return;
+    let changed = false;
+    for (const c of creations) {
+      if (c.savedToWarehouse && c.warehouseCardId) continue;
+      const wh = cards.find((w) =>
+        w.genSourceId === c.id
+        || (c.jobId && normalizeGenJobBaseId(w.genJobId) === normalizeGenJobBaseId(c.jobId))
+      );
+      if (!wh?.id) continue;
+      c.savedToWarehouse = true;
+      c.warehouseCardId = wh.id;
+      c.updatedAt = Date.now();
+      changed = true;
+    }
+    if (changed) persistCreations();
+  }
+
+  async function purgeCreationMedia(creation) {
+    if (!creation || warehouseReferencesCreation(creation)) return;
+    const refs = new Set();
+    const add = (u) => { if (u && isDisplayableImage(u)) refs.add(u); };
+    add(creation.image);
+    add(creation.mjCompositeUrl);
+    (creation.mjGridUrls || []).forEach(add);
+    buildCreationGallery(creation).forEach(add);
+    if (!refs.size || !window.SupabaseSync?.deleteCardImageByUrl) return;
+    const base = normalizeGenJobBaseId(creation.jobId);
+    for (const ref of refs) {
+      try {
+        await window.SupabaseSync.deleteCardImageByUrl(ref, {
+          allowGenerated: true,
+          excludeCardId: creation.warehouseCardId || undefined,
+          genJobId: base || undefined
+        });
+      } catch (e) {
+        console.warn('[creation] purge media failed', e);
+      }
+    }
+    if (base && !warehouseReferencesCreation(creation)) {
+      window.recordGenerationJobDeletion?.(base);
+    }
+  }
+
+  async function saveCreationToWarehouse(creationId) {
+    const c = creations.find((x) => x.id === creationId);
+    if (!c) {
+      toast('记录不存在或已过期');
+      return false;
+    }
+    if (c.savedToWarehouse && c.warehouseCardId) {
+      toast('已在卡片库中');
+      if (typeof switchAppPage === 'function') switchAppPage('warehouse');
+      return true;
+    }
+    const gallery = buildCreationGallery(c);
+    const mainImage = gallery[0] || c.image;
+    if (!mainImage) {
+      toast('暂无图片可保存');
+      return false;
+    }
+    const baseJob = normalizeGenJobBaseId(c.jobId);
+    const saved = await window.addCardFromGenerated?.({
+      prompt: c.prompt,
+      image: mainImage,
+      sourceId: c.id,
+      jobId: baseJob || null,
+      title: (c.title || '').trim() || (c.isMidjourney ? 'MJ 四宫格' : ''),
+      resolution: c.resolution,
+      model: c.model,
+      quality: c.quality,
+      size: c.size,
+      publishToCommunity: false,
+      fromInspirationDraw: !!c.fromInspirationDraw,
+      copyStorage: true,
+      silentToast: true,
+      isMidjourney: !!c.isMidjourney,
+      mjGridUrls: c.mjGridUrls,
+      mjCompositeUrl: c.mjCompositeUrl,
+      mjButtons: c.mjButtons,
+      cardImages: gallery.length > 1 ? gallery : null,
+      genBatchId: c.genBatchId || null
+    });
+    if (!saved?.ok) {
+      if (saved?.duplicate) toast('该图已在卡片库中');
+      else toast('保存失败，请重试');
+      return false;
+    }
+    c.savedToWarehouse = true;
+    c.warehouseCardId = saved.cardId || null;
+    reconcileCreationsWarehouseLinks();
+    c.updatedAt = Date.now();
+    persistCreations();
+    toast('已存入卡片库');
+    if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+      renderImageGenFeed({ preserveScroll: true, force: true });
+    }
+    return true;
+  }
+
   function pruneCreations() {
     const now = Date.now();
+    const expiring = creations.filter((c) =>
+      !c.permanent
+      && c.expiresAt
+      && c.expiresAt <= now
+    );
+    if (expiring.length) {
+      void Promise.all(
+        expiring
+          .filter((c) => !warehouseReferencesCreation(c))
+          .map((c) => purgeCreationMedia(c))
+      );
+    }
     const before = creations.length;
-    creations = creations.filter(c =>
-      c.visibility === 'published' || c.permanent || !c.expiresAt || c.expiresAt > now
+    creations = creations.filter((c) =>
+      c.permanent || !c.expiresAt || c.expiresAt > now
     );
     if (creations.length !== before) persistCreations();
+    pruneCreationsByCountLimit();
   }
 
   function getDefaultPublishChecked() {
@@ -2294,7 +2485,7 @@
       const onImageGen = document.getElementById('pageImageGen')?.classList.contains('active');
       const onCreations = document.getElementById('pageCreations')?.classList.contains('active');
       if (isMobileViewport() && !onCommunity && !onImageGen && !onCreations) {
-        prunePendingJobsWithWarehouseCards();
+        prunePendingJobsWithCreations();
         return;
       }
       if (window.__promptHubCards?.length) {
@@ -3142,7 +3333,13 @@
       getImageGenWhTag: () => imageGenWhTag,
       getImageGenPendingJobs: () => getImageGenPendingJobsForFeed(),
       getImageGenFailedJobs: () => imageGenFailedJobs,
-      prunePendingJobsWithWarehouseCards,
+      prunePendingJobsWithCreations,
+      getRecentCreationsForFeed,
+      saveCreationToWarehouse,
+      deleteCreation,
+      confirmDeleteCreation,
+      isCreationLinkedToWarehouse,
+      formatExpiryLabel,
       scrubImageGenFeedCards: (wrap) => scrubImageGenFeedCards?.(wrap),
       getCommunityScope: () => communityScope,
       getCommunitySort: () => communitySort,
@@ -3526,7 +3723,7 @@
         <button type="button" class="btn btn-secondary" data-action="remix">再生成</button>
         <button type="button" class="btn btn-secondary" data-action="del">删除记录</button>
       </div>
-      <p class="panel-hint">生成记录保留 1～3 天。发布到社区请打开卡片库对应卡片并开启「发布到提示词社区」</p>`;
+      <p class="panel-hint">最近生成保留 7 天，条数上限随会员等级（轻量 150 / 基础 200 / 标准 300 / 专业 400）。超出或到期未存入库将彻底删除；喜欢请点「存入库」。</p>`;
     bindCommunitySideImageZoom(body, null, c.image, id, { jobId: c.jobId || null });
     body.querySelector('[data-action="remix"]')?.addEventListener('click', () => remixCreation(id));
     body.querySelector('[data-action="del"]')?.addEventListener('click', () => {
@@ -3618,17 +3815,24 @@
   }
 
   function confirmDeleteCreation(id) {
-    const msg = '确定删除该生成记录？无回收站，删除后不可恢复。';
-    const doDel = () => deleteCreation(id);
+    const c = creations.find((x) => x.id === id);
+    const linked = isCreationLinkedToWarehouse(c);
+    const msg = linked
+      ? '确定从最近生成中移除？卡片库里的对应卡片不会被删除。'
+      : '确定删除该条最近生成？未存入库的图片将彻底删除，不可恢复。';
+    const doDel = () => { void deleteCreation(id); };
     if (typeof window.customConfirm === 'function') {
-      window.customConfirm(msg, doDel, null, { danger: true, confirmLabel: '删除' });
-    } else if (confirm(msg)) doDel();
+      window.customConfirm(msg, doDel, null, { danger: true, confirmLabel: linked ? '移除' : '删除' });
+      return;
+    }
+    if (typeof confirm === 'function' && confirm(msg)) doDel();
   }
 
-  function deleteCreation(id) {
+  async function deleteCreation(id) {
     if (creationsSideId === id) closeCreationsSidePanel();
     if (imageGenPreviewId === id) closeImageGenPreview();
     const removed = creations.find(c => c.id === id);
+    if (!removed) return;
     if (removed?.communityPostId) {
       const post = findPost(removed.communityPostId);
       if (post?.sourceCreationId === id && !post?.sourceCardId) {
@@ -3636,39 +3840,26 @@
       }
     }
     recordCreationDeletion(id, removed?.jobId);
-    const baseJobId = normalizeGenJobBaseId(removed?.jobId);
-    if (baseJobId) {
-      window.recordGenerationJobDeletion?.(baseJobId);
-      if (removed?.jobId && String(removed.jobId) !== baseJobId) {
-        window.recordGenerationJobDeletion?.(removed.jobId);
-      }
-      const whCards = (window.__promptHubCards || []).filter((c) => {
-        if (!c?.genJobId) return false;
-        const cBase = normalizeGenJobBaseId(c.genJobId);
-        return c.genJobId === removed.jobId || cBase === baseJobId;
-      });
-      for (const wh of whCards) {
-        if (typeof window.deleteCardPermanently === 'function') {
-          void window.deleteCardPermanently(wh.id, false, { skipRender: true, silent: true });
-        }
-      }
+    const linked = isCreationLinkedToWarehouse(removed);
+    if (!linked && !removed?.savedToWarehouse) {
+      await purgeCreationMedia(removed);
     }
     creations = creations.filter(c => c.id !== id);
     persistCreations();
     renderCreations();
     if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-      renderImageGenFeed({ preserveScroll: true });
+      renderImageGenFeed({ preserveScroll: true, force: true });
     }
-    toast('已删除');
+    toast(linked ? '已从最近生成移除（卡片库不受影响）' : '已删除');
   }
 
   function remixCreation(id) {
     const c = creations.find(x => x.id === id);
     if (!c) return;
     if (typeof switchAppPage === 'function') switchAppPage('imagegen');
-    imageGenFeedTab = 'warehouse';
+    imageGenFeedTab = 'recent';
     document.querySelectorAll('[data-feed-tab]').forEach(b => {
-      b.classList.toggle('active', b.dataset.feedTab === 'warehouse');
+      b.classList.toggle('active', b.dataset.feedTab === 'recent');
     });
     updateImageGenFeedHint();
     applyHistoryToForm(c);
@@ -6020,7 +6211,8 @@
   function hasWarehouseCardForJob(jobId) { return !!jr('hasWarehouseCardForJob', jobId); }
   function pendingHasWarehouseCard(pending) { return !!jr('pendingHasWarehouseCard', pending); }
   function findWarehouseCardForPending(pending) { return jr('findWarehouseCardForPending', pending); }
-  function prunePendingJobsWithWarehouseCards() { return jr('prunePendingJobsWithWarehouseCards'); }
+  function prunePendingJobsWithCreations() { return jr('prunePendingJobsWithCreations'); }
+  function prunePendingJobsWithWarehouseCards() { return prunePendingJobsWithCreations(); }
   function findBestApiJobForPrompt(jobs, prompt, model, opts) { return jr('findBestApiJobForPrompt', jobs, prompt, model, opts); }
   function pendingPromptsMatch(a, b) { return !!jr('pendingPromptsMatch', a, b); }
   function getImageGenPendingJobsForFeed() { return jr('getImageGenPendingJobsForFeed') || imageGenPendingJobs; }
@@ -6131,10 +6323,24 @@
     const el = document.getElementById('imageGenFeedHint');
     if (!el) return;
     const mobile = isMobileViewport();
-    const warehouse = imageGenFeedTab === 'warehouse';
-    if (warehouse) {
-      el.textContent = '';
-      el.hidden = true;
+    if (imageGenFeedTab === 'recent') {
+      const list = getRecentCreationsForFeed();
+      const n = list.length;
+      const max = getRecentCreationsLimit();
+      const tier = window.Membership?.getMemberTier?.();
+      const tierHint = tier === 'pro' ? '专业版'
+        : tier === 'standard' ? '标准版'
+          : tier === 'basic' ? '基础版'
+            : tier === 'lite' ? '轻量版' : '免费';
+      if (!n) {
+        el.textContent = `最近生成保留 7 天 · 最多 ${max} 条（${tierHint}）· 喜欢请点「存入库」`;
+        el.hidden = false;
+        return;
+      }
+      el.hidden = false;
+      el.textContent = mobile
+        ? `最近 ${n}/${max} 条 · 7 天 · 点 × 可删除`
+        : `最近 ${n}/${max} 条（${tierHint}）· 7 天内有效 · 超出条数或到期未存入库将自动删除`;
       return;
     }
     el.hidden = false;
@@ -6282,6 +6488,24 @@
         fillFormRefOnly(r1, ri, { assetId: assetId || undefined });
         return;
       }
+      const saveWhBtn = e.target.closest('[data-preview-save-warehouse]');
+      if (saveWhBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (imageGenPreviewKind === 'recent' && imageGenPreviewId) {
+          void saveCreationToWarehouse(imageGenPreviewId);
+        }
+        return;
+      }
+      const delRecentBtn = e.target.closest('[data-preview-delete-recent]');
+      if (delRecentBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (imageGenPreviewKind === 'recent' && imageGenPreviewId) {
+          confirmDeleteCreation(imageGenPreviewId);
+        }
+        return;
+      }
       const likeBtn = e.target.closest('[data-preview-like]');
       if (likeBtn) {
         e.preventDefault();
@@ -6295,7 +6519,7 @@
   function primeImageGenPreviewShell(kind, id) {
     const body = document.getElementById('imageGenPreviewBody');
     if (!body) return;
-    const feedKey = kind === 'warehouse' ? 'wh_' + id : id;
+    const feedKey = kind === 'warehouse' ? 'wh_' + id : (kind === 'recent' ? 'cr_' + id : id);
     const cardEl = document.querySelector(`#imageGenFeed .imagegen-feed-card[data-feed-id="${feedKey}"]`);
     let prompt = cardEl?.dataset.feedPrompt || '';
     let image = '';
@@ -6310,7 +6534,13 @@
         instantSrc = src;
       }
     }
-    if (kind === 'warehouse') {
+    if (kind === 'recent') {
+      const c = findCreationById(id);
+      if (c) {
+        prompt = c.prompt || prompt;
+        image = c.image || image;
+      }
+    } else if (kind === 'warehouse') {
       const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === id);
       if (c) {
         prompt = c.prompt || prompt;
@@ -6396,7 +6626,23 @@
 
   async function downloadImageGenFeedItem(kind, itemId, imgEl, triggerBtn) {
     try {
-      if (kind === 'warehouse') {
+      if (kind === 'recent') {
+        const c = findCreationById(itemId);
+        if (c?.image) {
+          toast('正在准备下载…', 2500);
+          const url = await resolveImageDisplayUrl(
+            c.image,
+            c.jobId || '',
+            c.id,
+            { preferFull: true }
+          );
+          if (url) {
+            await window.promptHubSaveImage?.(url, `prompt-hub-recent-${itemId}.png`, imgEl);
+            toast('下载完成');
+            return;
+          }
+        }
+      } else if (kind === 'warehouse') {
         const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === itemId);
         if (c?.image && typeof window.downloadCardImageFile === 'function') {
           await window.downloadCardImageFile(c.image, c.id, null, {
@@ -6476,6 +6722,12 @@
     return k.startsWith('wh_') ? k.slice(3) : k;
   }
 
+  function findCreationById(creationId) {
+    const id = String(creationId || '').trim();
+    if (!id) return null;
+    return creations.find((c) => c.id === id) || null;
+  }
+
   function findWarehouseCardById(cardId) {
     const id = String(cardId || '').trim();
     if (!id) return null;
@@ -6521,12 +6773,20 @@
   async function resolveImageGenFullUrl(kind, id, feedKey, imgEl) {
     const instant = fullUrlFromImgEl(imgEl);
     if (instant) return instant;
-    const fk = feedKey || (kind === 'warehouse' ? 'wh_' + id : id);
-    const assetId = kind === 'warehouse' ? warehouseCardIdFromFeedKey(fk) : id;
+    const fk = feedKey || (kind === 'warehouse' ? 'wh_' + id : (kind === 'recent' ? 'cr_' + id : id));
+    const assetId = kind === 'warehouse'
+      ? warehouseCardIdFromFeedKey(fk)
+      : (kind === 'recent' ? id : id);
     let rawRef = imgEl?.getAttribute?.('data-image-ref') || '';
     let jobId = imgEl?.getAttribute?.('data-job-id') || '';
     let resolveOpts = {};
-    if (kind === 'warehouse') {
+    if (kind === 'recent') {
+      const c = findCreationById(assetId);
+      if (c) {
+        rawRef = c.image || rawRef;
+        jobId = String(c.jobId || jobId).replace(/#\d+$/, '');
+      }
+    } else if (kind === 'warehouse') {
       const c = findWarehouseCardById(assetId);
       if (c) {
         rawRef = c.image || rawRef;
@@ -6692,6 +6952,21 @@
       const liked = likedIds.has(post.id);
       extraActions = `
         <button type="button" class="btn btn-secondary btn-sm" data-preview-like>${liked ? '已赞' : '点赞'}</button>`;
+    } else if (imageGenPreviewKind === 'recent') {
+      const c = findCreationById(imageGenPreviewId);
+      if (!c) {
+        toast('记录不存在或已过期');
+        closeImageGenPreview();
+        return;
+      }
+      prompt = c.prompt || '';
+      image = c.image || '';
+      jobId = normalizeMjParentJobId(c.jobId || '');
+      if (isDisplayableImage(c.image)) refImage = c.image;
+      if (!isCreationLinkedToWarehouse(c)) {
+        extraActions = '<button type="button" class="btn btn-primary btn-sm" data-preview-save-warehouse>存入库</button>';
+      }
+      extraActions += '<button type="button" class="btn btn-ghost btn-sm" data-preview-delete-recent>从最近移除</button>';
     } else {
       const c = findWarehouseCardById(imageGenPreviewId);
       if (!c) {
@@ -6702,17 +6977,21 @@
       prompt = c.prompt || '';
       image = c.image || '';
       jobId = c.feedCoverJobId || normalizeMjParentJobId(c.genJobId || '')
-        || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(previewCard) || '';
+        || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(c) || '';
       if (isDisplayableImage(c.image)) refImage = c.image;
     }
-    const previewCard = imageGenPreviewKind === 'warehouse'
-      ? ((window.__promptHubCards || []).find((x) => x.id === imageGenPreviewId) || findWarehouseCardById(imageGenPreviewId))
-      : null;
-    let mjGridUrls = window.PromptHubCardGallery?.normalizeCardGallery?.(previewCard)?.length
-      ? window.PromptHubCardGallery.normalizeCardGallery(previewCard)
-      : (Array.isArray(previewCard?.mjGridUrls) && previewCard.mjGridUrls.length
-        ? previewCard.mjGridUrls.filter(Boolean)
+    const previewCard = imageGenPreviewKind === 'recent'
+      ? findCreationById(imageGenPreviewId)
+      : (imageGenPreviewKind === 'warehouse'
+        ? ((window.__promptHubCards || []).find((x) => x.id === imageGenPreviewId) || findWarehouseCardById(imageGenPreviewId))
         : null);
+    let mjGridUrls = imageGenPreviewKind === 'recent' && previewCard
+      ? (buildCreationGallery(previewCard).length > 1 ? buildCreationGallery(previewCard) : null)
+      : (window.PromptHubCardGallery?.normalizeCardGallery?.(previewCard)?.length
+        ? window.PromptHubCardGallery.normalizeCardGallery(previewCard)
+        : (Array.isArray(previewCard?.mjGridUrls) && previewCard.mjGridUrls.length
+          ? previewCard.mjGridUrls.filter(Boolean)
+          : null));
     const mjParentJobId = normalizeMjParentJobId(jobId || previewCard?.genJobId || '');
     const cachedMjButtons = Array.isArray(previewCard?.mjButtons) ? previewCard.mjButtons : null;
     const hasRef = !!(refImages?.length || (refImage && isDisplayableImage(refImage)));
@@ -6985,7 +7264,7 @@
     document.getElementById('imageGenPreviewPanel')?.classList.remove('hidden');
     document.querySelector('.imagegen-side')?.classList.add('imagegen-preview-open');
     clearImageGenFeedSelection();
-    const feedKey = kind === 'warehouse' ? 'wh_' + id : id;
+    const feedKey = kind === 'warehouse' ? 'wh_' + id : (kind === 'recent' ? 'cr_' + id : id);
     document.querySelector(`#imageGenFeed .imagegen-feed-card[data-feed-id="${feedKey}"]`)
       ?.classList.add('active-preview');
     primeImageGenPreviewShell(kind, id);
@@ -7055,28 +7334,8 @@
     const bar = document.getElementById('imageGenWarehouseFilters');
     const commBar = document.getElementById('imageGenCommunityFilters');
     if (commBar) commBar.classList.toggle('hidden', imageGenFeedTab !== 'community');
-    const groupEl = document.getElementById('imageGenWhGroup');
-    const tagEl = document.getElementById('imageGenWhTag');
-    if (!bar || !groupEl || !tagEl) return;
-    const show = imageGenFeedTab === 'warehouse';
-    bar.classList.toggle('hidden', !show);
-    if (!show) return;
-    const opts = window.getImageGenWarehouseFilterOptions?.() || { groups: [], tags: [] };
-    const mkOpts = (list, current) => list.map(o =>
-      `<option value="${esc(o.value)}"${o.value === current ? ' selected' : ''}>${esc(o.label)}</option>`
-    ).join('');
-    groupEl.innerHTML = mkOpts(opts.groups, imageGenWhGroup);
-    tagEl.innerHTML = mkOpts(opts.tags, imageGenWhTag);
-    if (!opts.groups.some(o => o.value === imageGenWhGroup)) imageGenWhGroup = 'all';
-    if (!opts.tags.some(o => o.value === imageGenWhTag)) imageGenWhTag = 'all';
-    groupEl.value = imageGenWhGroup;
-    tagEl.value = imageGenWhTag;
-    const gLabel = opts.groups.find((o) => o.value === imageGenWhGroup)?.label || '全部分组';
-    const tLabel = opts.tags.find((o) => o.value === imageGenWhTag)?.label || '全部标签';
-    const gLabelEl = document.getElementById('imageGenWhGroupLabel');
-    const tLabelEl = document.getElementById('imageGenWhTagLabel');
-    if (gLabelEl) gLabelEl.textContent = gLabel;
-    if (tLabelEl) tLabelEl.textContent = tLabel;
+    /* 生图页右侧为轻量「最近作品」流，分组/标签筛选仅在 /prompts 完整卡片库 */
+    if (bar) bar.classList.add('hidden');
   }
 
 
@@ -7091,7 +7350,7 @@
     if (items.length < 2) return false;
     const currentKey = imageGenPreviewKind === 'warehouse'
       ? 'wh_' + imageGenPreviewId
-      : imageGenPreviewId;
+      : (imageGenPreviewKind === 'recent' ? 'cr_' + imageGenPreviewId : imageGenPreviewId);
     const idx = items.findIndex((it) => it.key === currentKey);
     if (idx < 0) return false;
     const nextIdx = idx + (deltaY > 0 ? 1 : -1);
@@ -7103,12 +7362,18 @@
   }
 
   async function openImageGenLightboxAt(kind, id, key) {
-    const feedKey = key || (kind === 'warehouse' ? 'wh_' + id : id);
+    const feedKey = key || (kind === 'warehouse' ? 'wh_' + id : (kind === 'recent' ? 'cr_' + id : id));
     const card = document.querySelector(`.imagegen-feed-card[data-feed-id="${CSS.escape(feedKey)}"]`);
     const imgEl = card?.querySelector('.imagegen-feed-thumb-btn img');
-    const assetId = kind === 'warehouse' ? warehouseCardIdFromFeedKey(feedKey) : feedKey;
+    const assetId = kind === 'warehouse'
+      ? warehouseCardIdFromFeedKey(feedKey)
+      : (kind === 'recent' ? id : feedKey);
     let mjGalleryUrls = null;
-    if (kind === 'warehouse' && assetId) {
+    if (kind === 'recent' && assetId) {
+      const cre = findCreationById(assetId);
+      const gallery = buildCreationGallery(cre);
+      if (gallery.length > 1) mjGalleryUrls = gallery;
+    } else if (kind === 'warehouse' && assetId) {
       const full = (window.__promptHubCards || []).find((c) => c.id === assetId);
       const gallery = window.PromptHubCardGallery?.normalizeCardGallery?.(full) || [];
       if (gallery.length > 1) mjGalleryUrls = gallery;
@@ -7140,7 +7405,7 @@
       feedKey,
       community: kind === 'community',
       postId: kind === 'community' ? id : null,
-      cardId: kind === 'warehouse' ? assetId : null,
+      cardId: kind === 'warehouse' ? assetId : (kind === 'recent' ? assetId : null),
       preferFull: true,
       mjGalleryUrls: mjGalleryUrls || undefined,
       mjGalleryIndex: startIdx,
@@ -7173,8 +7438,8 @@
     const left = c.expiresAt - Date.now();
     if (left <= 0) return '已过期';
     const h = Math.ceil(left / 3600000);
-    if (h < 24) return `约 ${h} 小时后清理`;
-    return `约 ${Math.ceil(h / 24)} 天后清理`;
+    const timeLabel = h < 24 ? `约 ${h} 小时后清理` : `约 ${Math.ceil(h / 24)} 天后清理`;
+    return timeLabel;
   }
 
   function bindUI() {
@@ -7859,13 +8124,13 @@
     { id: 'nano-banana-pro', label: 'Nano Banana Pro', provider: 'grsai', uiFamily: 'banana', sortOrder: 3, selectable: true, status: 'active', refundOnViolation: true },
     { id: 'nano-banana-2', label: 'Nano Banana 2', provider: 'grsai', uiFamily: 'banana', sortOrder: 4, selectable: true, status: 'active', refundOnViolation: true },
     { id: 'nano-banana-fast', label: 'Nano Banana Fast', provider: 'grsai', uiFamily: 'banana', sortOrder: 6, selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'apimart-gpt-image-2', label: 'GPT Image 2 · 备用', provider: 'apimart', uiFamily: 'gim2', sortOrder: 103, selectable: true, status: 'active', refundOnViolation: true, aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'], resolutions: ['1k', '2k', '4k'] },
+    { id: 'apimart-gpt-image-2', label: 'GPT Image 2', provider: 'apimart', uiFamily: 'gim2', sortOrder: 103, selectable: true, status: 'active', refundOnViolation: true, aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'], resolutions: ['1k', '2k', '4k'] },
     { id: 'apimart-gpt-image-2-official-budget', label: 'GPT Image 2 · 特价', provider: 'apimart', uiFamily: 'gim2', sortOrder: 100, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, pricingByResolution: true, resolutions: ['1k', '2k', '4k'], aspectRatios: ['16:9', '9:16', '4:3', '3:4'] },
     { id: 'ithink-gpt-image-2-slow', label: 'GPT Image 2 · 经济', provider: 'ithink', uiFamily: 'gim2', sortOrder: 102, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'] },
-    { id: 'apimart-seedream-5-lite', label: 'Seedream 5 Lite · 备用', provider: 'apimart', uiFamily: 'jimeng', sortOrder: 104, selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'apimart-gemini-2-5-flash-preview', label: 'Nano Banana Fast · 备用', provider: 'apimart', uiFamily: 'banana', sortOrder: 103, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'] },
-    { id: 'apimart-gemini-3-1-flash-preview', label: 'Nano Banana 2 · 备用', provider: 'apimart', uiFamily: 'banana', sortOrder: 104, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
-    { id: 'apimart-gemini-3-pro-preview', label: 'Nano Banana Pro · 备用', provider: 'apimart', uiFamily: 'banana', sortOrder: 105, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
+    { id: 'apimart-seedream-5-lite', label: 'Seedream 5 Lite', provider: 'apimart', uiFamily: 'jimeng', sortOrder: 104, selectable: true, status: 'active', refundOnViolation: true },
+    { id: 'apimart-gemini-2-5-flash-preview', label: 'Nano Banana Fast', provider: 'apimart', uiFamily: 'banana', sortOrder: 103, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'] },
+    { id: 'apimart-gemini-3-1-flash-preview', label: 'Nano Banana 2', provider: 'apimart', uiFamily: 'banana', sortOrder: 104, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
+    { id: 'apimart-gemini-3-pro-preview', label: 'Nano Banana Pro', provider: 'apimart', uiFamily: 'banana', sortOrder: 105, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
     { id: 'mooko-gpt-image-2-pro', label: 'GPT Image 2 Pro · 慢速', provider: 'mooko', uiFamily: 'gim2', sortOrder: 101, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['2k', '4k'], aspectRatios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'] },
     { id: 'apimart-wan2-7-image', label: '万相 2.7', provider: 'apimart', uiFamily: 'wan', sortOrder: 105, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k', '2k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
     { id: 'apimart-wan2-7-image-pro', label: '万相 2.7 Pro', provider: 'apimart', uiFamily: 'wan', sortOrder: 106, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k', '2k', '4k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
@@ -7909,11 +8174,12 @@
   function sanitizeImageGenModelDescription(description) {
     if (!description) return null;
     let s = String(description).trim();
-    s = s.replace(/^(Apimart|GrsAI|ThinkAI|Mooko|木瓜)\s*[·•]\s*/gi, '');
-    s = s.replace(/\bApimart\s*[·•]\s*/gi, '');
+    s = s.replace(/^(Apimart|GrsAI|ThinkAI|Mooko|木瓜|OpenAI|Gemini|备用线路)\s*[·•]\s*/gi, '');
+    s = s.replace(/\b(Apimart|OpenAI|Gemini|gpt-image-2|official|备用线路)\b\s*[·•]?\s*/gi, '');
     s = s.replace(/\s*[·•]\s*出图速度可选\s*relax\s*\/\s*fast\s*\/\s*turbo/gi, '');
     s = s.replace(/\s*[·•]\s*$/g, '').trim();
-    return s || null;
+    if (!s || /^(OpenAI|Gemini|gpt-image|备用线路)/i.test(s)) return null;
+    return s;
   }
 
   function normalizeImageGenModelEntry(m) {
@@ -8460,11 +8726,6 @@
     const sel = document.getElementById('imageGenModel');
     if (!hint || !sel) return;
     const m = imageGenModelCatalog.find((x) => x.id === sel.value);
-    if (m?.description) {
-      hint.textContent = m.description;
-      hint.hidden = false;
-      return;
-    }
     if (m?.status === 'maintenance' || m?.selectable === false) {
       hint.textContent = m.statusNotice || '该模型维护中，请换用其他模型';
       hint.hidden = false;
@@ -10106,11 +10367,15 @@
     return typeof fn === 'function' ? fn(...args) : undefined;
   }
 
-  function switchImageGenFeedToWarehouse() {
-    imageGenFeedTab = 'warehouse';
+  function switchImageGenFeedToRecent() {
+    imageGenFeedTab = 'recent';
     document.querySelectorAll('[data-feed-tab]').forEach((b) => {
-      b.classList.toggle('active', b.dataset.feedTab === 'warehouse');
+      b.classList.toggle('active', b.dataset.feedTab === 'recent');
     });
+  }
+
+  function switchImageGenFeedToWarehouse() {
+    switchImageGenFeedToRecent();
   }
 
   function wireImageGenWarehouseRepair() {
@@ -10210,22 +10475,21 @@
       repairWarehouseCardImageFromJob: (...a) => wr('repairWarehouseCardImageFromJob', ...a),
       clearSessionGenJob: (...a) => jr('clearSessionGenJob', ...a),
       removePendingJob: (...a) => jr('removePendingJob', ...a),
-      prunePendingJobsWithWarehouseCards: (...a) => jr('prunePendingJobsWithWarehouseCards', ...a),
+      prunePendingJobsWithCreations: (...a) => jr('prunePendingJobsWithCreations', ...a),
       getCreations: () => creations,
       setCreations: (v) => { creations = v; },
       persistCreations,
       getImageGenRefImages,
       getImageGenPrimaryRef,
       isImageGenMjSaveAllTiles,
-      randomGenRetentionMs,
+      genRetentionMs,
       dedupeCreationsByJobId,
       setImageGenLastResult: (v) => { imageGenLastResult = v; },
       setImageGenActiveHistoryId: (v) => { imageGenActiveHistoryId = v; },
-      switchImageGenFeedToWarehouse,
+      switchImageGenFeedToRecent,
       updateImageGenFeedHint,
       restoreImageGenSubmitLabel,
       isImageGenGenPublicChecked,
-      saveGeneratedToWarehouse: (opts) => ws('saveGeneratedToWarehouse', opts),
       renderImageGenFeed: (...a) => renderImageGenFeed(...a),
       renderImageGenMobileResult,
       queueUrgentCardsSync,
@@ -10252,8 +10516,8 @@
       removePendingJob: (...a) => jr('removePendingJob', ...a),
       clearSessionGenJob: (...a) => jr('clearSessionGenJob', ...a),
       renderImageGenFeed: (...a) => renderImageGenFeed(...a),
-      repairWarehouseCardImageFromJob,
-      warehouseCardImageNeedsRecovery,
+      getCreations: () => creations,
+      persistCreations,
       toast,
       isDisplayableImage: (url) => window.MediaPipeline?.isDisplayableImage?.(url) ?? !!url
     });
@@ -10287,7 +10551,7 @@
       getImageGenSaveTarget,
       unshiftPendingJob: (job) => { imageGenPendingJobs.unshift(job); },
       persistPendingGenJobs: () => jr('persistPendingGenJobs'),
-      switchImageGenFeedToWarehouse,
+      switchImageGenFeedToRecent,
       updateImageGenFeedHint,
       renderImageGenFeed: (...a) => renderImageGenFeed(...a),
       safeRenderImageGenFeed,
@@ -10335,7 +10599,7 @@
       isGenerationJobDeleted,
       isDisplayableImage,
       isMobileViewport,
-      prunePendingJobsWithWarehouseCards: (...a) => jr('prunePendingJobsWithWarehouseCards', ...a),
+      prunePendingJobsWithCreations: (...a) => jr('prunePendingJobsWithCreations', ...a),
       tryRecoverPendingJobDirect: (...a) => jr('tryRecoverPendingJobDirect', ...a),
       needsApiImageRecovery: (...a) => jr('needsApiImageRecovery', ...a),
       pendingPromptsMatch: (...a) => jr('pendingPromptsMatch', ...a),
@@ -10394,6 +10658,7 @@
     getCloudSlice,
     applyCloudSlice,
     reconcileCommunityWithCards,
+    reconcileCreationsWarehouseLinks,
     maybeReconcileCommunityWithCards,
     invalidateCommunityReconcileCache,
     materializeCommunityFromCards,
@@ -10437,7 +10702,7 @@
     renderImageGenFeed,
     renderImageGenMobileResult,
     prunePendingGenJobsFromWarehouse: () => {
-      prunePendingJobsWithWarehouseCards();
+      prunePendingJobsWithCreations();
       if (document.getElementById('pageImageGen')?.classList.contains('active')) {
         renderImageGenFeed({ preserveScroll: true });
       }

@@ -1,32 +1,44 @@
 /**
- * 轮询完成后的仓库入库：主图、附赠图、Midjourney 四宫格
+ * 轮询完成后的最近生成写入：主图、附赠图、Midjourney 四宫格
  */
 (function (global) {
   'use strict';
 
   /** @type {Record<string, any>} */
   let deps = {};
-
   function d() { return deps; }
   function CG() { return global.PromptHubCardGallery; }
 
-  function findWarehouseCardForJob(jobId) {
+  function baseJobId(jobId) {
+    return jobId ? String(jobId).replace(/#\d+$/, '') : '';
+  }
+
+  function getCreations() {
+    return d().getCreations?.() || [];
+  }
+
+  function findCreationForJob(jobId) {
     if (!jobId) return null;
-    const key = String(jobId).replace(/#\d+$/, '');
-    return (global.__promptHubCards || []).find((c) => {
-      if (!c?.genJobId) return false;
-      const cardKey = String(c.genJobId).replace(/#\d+$/, '');
-      return c.genJobId === jobId || cardKey === key;
+    const key = baseJobId(jobId);
+    return getCreations().find((c) => {
+      if (!c?.jobId) return false;
+      return baseJobId(c.jobId) === key;
     }) || null;
   }
 
-  function hasWarehouseCardForJob(jobId) {
-    if (!jobId) return false;
-    const card = findWarehouseCardForJob(jobId);
-    if (!card) return false;
-    const cover = CG()?.getCardCoverImage?.(card) || card.image;
-    if (!cover || !d().isDisplayableImage(cover)) return false;
-    return true;
+  function creationHasImage(creation) {
+    if (!creation) return false;
+    if (creation.image && d().isDisplayableImage(creation.image)) return true;
+    if (creation.isMidjourney) {
+      if (creation.mjCompositeUrl && d().isDisplayableImage(creation.mjCompositeUrl)) return true;
+      if (Array.isArray(creation.mjGridUrls) && creation.mjGridUrls.some((u) => d().isDisplayableImage(u))) return true;
+      if (Array.isArray(creation.cardImages) && creation.cardImages.some((u) => d().isDisplayableImage(u))) return true;
+    }
+    return false;
+  }
+
+  function hasCreationForJob(jobId) {
+    return creationHasImage(findCreationForJob(jobId));
   }
 
   function getPollExtraImageUrls(poll, primaryUrl) {
@@ -36,96 +48,92 @@
     return raw.filter((u) => u && u !== main);
   }
 
-  function isGenCreationSlotSaved(baseJobId, slotIndex) {
-    if (!baseJobId) return false;
-    const slotId = slotIndex <= 1 ? String(baseJobId) : `${baseJobId}#${slotIndex}`;
-    return hasWarehouseCardForJob(slotId);
+  function isGenCreationSlotSaved(baseJobId) {
+    return hasCreationForJob(baseJobId);
   }
 
-  function allGenCreationSlotsSaved(baseJobId, extraCount) {
-    if (!baseJobId || !isGenCreationSlotSaved(baseJobId, 1)) return false;
-    for (let i = 0; i < extraCount; i += 1) {
-      if (!isGenCreationSlotSaved(baseJobId, i + 2)) return false;
+  function allGenCreationSlotsSaved(baseJobId) {
+    return hasCreationForJob(baseJobId);
+  }
+
+  function persistCreationUpdate(creation) {
+    if (!creation) return;
+    creation.updatedAt = Date.now();
+    d().persistCreations?.();
+  }
+
+  function buildCreationGallery(creation) {
+    if (!creation) return [];
+    if (Array.isArray(creation.cardImages) && creation.cardImages.length) {
+      return creation.cardImages.filter(Boolean).slice(0, CG()?.MAX || 5);
     }
-    return true;
+    if (creation.isMidjourney) {
+      const tiles = Array.isArray(creation.mjGridUrls) ? creation.mjGridUrls.filter(Boolean) : [];
+      if (tiles.length) return tiles.slice(0, 5);
+      if (creation.mjCompositeUrl && creation.image) return [creation.mjCompositeUrl, creation.image].filter(Boolean);
+    }
+    return creation.image ? [creation.image] : [];
   }
 
-  /** MJ 放大/变体：追加到父卡片的 cardImages（最多 5 张） */
+  /** MJ 放大/变体：追加到父 creation 的 cardImages（最多 5 张） */
   async function appendMjActionToParentCard(poll, ctx, pendingId) {
-    const parentJobId = String(poll?.data?.mjParentJobId || '').replace(/#\d+$/, '');
+    const parentJobId = baseJobId(poll?.data?.mjParentJobId || '');
     const actionImage = poll?.data?.imageUrl;
     const action = poll?.data?.mjAction;
     if (!parentJobId || !actionImage || !action) return false;
-    const card = findWarehouseCardForJob(parentJobId);
-    if (!card?.id) return false;
-    const galleryApi = CG();
-    if (!galleryApi) return false;
+    const creation = findCreationForJob(parentJobId);
+    if (!creation?.id) return false;
 
     let stored = actionImage;
-    const slot = galleryApi.normalizeCardGallery(card).length + 1;
+    const gallery = buildCreationGallery(creation);
+    const slot = gallery.length + 1;
     if (global.SupabaseSync?.archiveGeneratedCardImage) {
       try {
-        stored = await global.SupabaseSync.archiveGeneratedCardImage(card.id, actionImage, {
+        stored = await global.SupabaseSync.archiveGeneratedCardImage(creation.id, actionImage, {
           jobId: `${parentJobId}#a${slot}`
         }) || actionImage;
       } catch (e) {
         console.warn('[mj-action] gallery archive failed', e);
       }
     }
-    const merged = galleryApi.mergeCardGalleryImages(galleryApi.normalizeCardGallery(card), [stored]);
-    if (typeof global.persistCardGalleryUpdate === 'function') {
-      await global.persistCardGalleryUpdate(card.id, merged);
-    } else {
-      card.cardImages = merged;
-      galleryApi.syncCardGalleryFields(card);
-      card.updatedAt = Date.now();
+    const merged = CG()?.mergeCardGalleryImages
+      ? CG().mergeCardGalleryImages(gallery, [stored])
+      : [...gallery, stored].filter(Boolean).slice(0, CG()?.MAX || 5);
+    creation.cardImages = merged;
+    creation.image = merged[0] || creation.image;
+    if (merged.length > 1) {
+      creation.mjGridUrls = merged.slice(1, 5);
     }
+    creation.isMidjourney = true;
+    persistCreationUpdate(creation);
     if (pendingId) d().removePendingJob(pendingId);
     if (poll?.data?.jobId) d().clearSessionGenJob(poll.data.jobId);
     d().renderImageGenFeed({ preserveScroll: true });
     if (!ctx?.silentToast) {
-      d().toast(action === 'upscale' ? '放大图已存入原卡片' : '变体已追加到原卡片');
+      d().toast(action === 'upscale' ? '放大图已追加到最近生成' : '变体已追加到最近生成');
     }
     return true;
   }
 
-  function mjCardGalleryComplete(card) {
-    const gallery = CG()?.normalizeCardGallery?.(card) || [];
-    return gallery.length >= 4;
-  }
-
-  async function upsertMjGalleryToWarehouse(card, parsed, poll, ctx, pendingId, baseJobId) {
+  async function upsertMjGalleryToCreation(creation, parsed, poll, ctx, pendingId, baseJobId) {
     const gallery = parsed.gallery?.length
       ? parsed.gallery.slice(0, CG()?.MAX || 5)
       : CG()?.buildMjCardImages?.(parsed.composite, parsed.tiles, parsed.primary) || [];
     if (gallery.length < 4) return false;
 
-    if (card?.id) {
-      card.cardImages = gallery;
-      if (parsed.composite) card.mjCompositeUrl = parsed.composite;
-      card.mjGridUrls = parsed.tiles?.length ? parsed.tiles.slice(0, 4) : gallery.slice(1, 5);
-      card.isMidjourney = true;
-      CG()?.syncCardGalleryFields?.(card);
-      card.updatedAt = Date.now();
-      if (typeof global.persistCardGalleryUpdate === 'function') {
-        await global.persistCardGalleryUpdate(card.id, gallery);
-      } else {
-        await d().persistPromptHubCards?.();
-      }
-      if (d().repairMjGalleryFromJob) {
-        await d().repairMjGalleryFromJob(card);
-      }
+    if (creation?.id) {
+      creation.cardImages = gallery;
+      creation.image = gallery[0] || creation.image;
+      if (parsed.composite) creation.mjCompositeUrl = parsed.composite;
+      creation.mjGridUrls = parsed.tiles?.length ? parsed.tiles.slice(0, 4) : gallery.slice(1, 5);
+      creation.isMidjourney = true;
       if (Array.isArray(poll?.data?.mjButtons) && poll.data.mjButtons.length) {
-        await d().repairMjWarehouseCardFields(card, {
-          mjGridUrls: parsed.tiles,
-          mjCompositeUrl: parsed.composite,
-          mjButtons: poll.data.mjButtons
-        });
+        creation.mjButtons = poll.data.mjButtons;
       }
+      persistCreationUpdate(creation);
       if (pendingId) d().removePendingJob(pendingId);
       d().clearSessionGenJob(baseJobId);
       d().renderImageGenFeed({ preserveScroll: true, force: true });
-      d().queueUrgentCardsSync?.();
       return true;
     }
 
@@ -144,7 +152,7 @@
     return true;
   }
 
-  /** Midjourney 入库：单卡 cardImages（四宫格首图 + 单图 + 变体槽位） */
+  /** Midjourney：单条最近记录（四宫格 + 变体槽位） */
   async function saveMjToWarehouse({
     prompt,
     model,
@@ -204,64 +212,53 @@
       const n = cardImages.length;
       d().toast(
         n >= 4
-          ? `Midjourney 已入库（${n} 张在同一卡片，放大后自动追加）`
-          : `Midjourney 已入库 ${n} 张图`
+          ? `Midjourney 已加入最近生成（${n} 张在同一记录）`
+          : `Midjourney 已加入最近生成 ${n} 张图`
       );
     }
     return true;
   }
 
-  /** 同提示词批量：合并入库到同一卡片（genBatchId） */
+  /** 同提示词批量：合并到同一 creation（genBatchId） */
   async function appendImagesToBatchCard(ctx, images, pendingId) {
     const batchId = ctx?.batchId;
     const urls = (images || []).filter(Boolean);
     if (!batchId || !urls.length) return false;
-    const galleryApi = CG();
-    if (!galleryApi) return false;
-    const cards = global.__promptHubCards || [];
-    const card = cards.find((c) => c.genBatchId === batchId);
-    if (!card?.id) return false;
+    const creation = getCreations().find((c) => c.genBatchId === batchId);
+    if (!creation?.id) return false;
 
-    const beforeLen = galleryApi.normalizeCardGallery(card).length;
-    let merged = galleryApi.normalizeCardGallery(card);
+    const beforeLen = buildCreationGallery(creation).length;
+    let merged = buildCreationGallery(creation);
     for (const imageUrl of urls) {
       let stored = imageUrl;
       const slot = merged.length + 1;
       if (global.SupabaseSync?.archiveGeneratedCardImage) {
         try {
-          stored = await global.SupabaseSync.archiveGeneratedCardImage(card.id, imageUrl, {
-            jobId: ctx.jobId ? `${String(ctx.jobId).replace(/#\d+$/, '')}#b${slot}` : null
+          stored = await global.SupabaseSync.archiveGeneratedCardImage(creation.id, imageUrl, {
+            jobId: ctx.jobId ? `${baseJobId(ctx.jobId)}#b${slot}` : null
           }) || imageUrl;
         } catch (e) {
           console.warn('[batch-merge] gallery archive failed', e);
         }
       }
-      merged = galleryApi.mergeCardGalleryImages(merged, [stored]);
+      merged = CG()?.mergeCardGalleryImages
+        ? CG().mergeCardGalleryImages(merged, [stored])
+        : [...merged, stored].filter(Boolean).slice(0, CG()?.MAX || 5);
     }
     if (merged.length === beforeLen) {
-      if (!ctx?.silentToast) d().toast('该卡片已满 5 张，无法继续追加');
+      if (!ctx?.silentToast) d().toast('该记录已满 5 张，无法继续追加');
       if (pendingId) d().removePendingJob(pendingId);
       if (ctx?.jobId) d().clearSessionGenJob(ctx.jobId);
       return true;
     }
-    if (typeof global.persistCardGalleryUpdate === 'function') {
-      await global.persistCardGalleryUpdate(card.id, merged);
-    } else {
-      card.cardImages = merged;
-      galleryApi.syncCardGalleryFields(card);
-      card.updatedAt = Date.now();
-    }
-    if (ctx?.jobId) {
-      const ids = Array.isArray(card.genBatchJobIds) ? card.genBatchJobIds.slice() : [];
-      if (!ids.includes(ctx.jobId)) ids.push(ctx.jobId);
-      card.genBatchJobIds = ids;
-    }
+    creation.cardImages = merged;
+    creation.image = merged[0] || creation.image;
+    persistCreationUpdate(creation);
     if (pendingId) d().removePendingJob(pendingId);
     if (ctx?.jobId) d().clearSessionGenJob(ctx.jobId);
     d().renderImageGenFeed({ preserveScroll: true, force: true });
-    d().queueUrgentCardsSync?.();
     if (!ctx?.silentToast && ctx.batchIndex === ctx.batchTotal) {
-      d().toast(`已合并 ${merged.length} 张到同一卡片`);
+      d().toast(`已合并 ${merged.length} 张到同一最近记录`);
     }
     return true;
   }
@@ -269,8 +266,7 @@
   async function saveBatchMergedFromPoll(poll, ctx, pendingId) {
     if (!ctx?.batchMergeCards || !ctx?.batchId || !poll?.data?.imageUrl) return false;
     if (poll.data.isMidjourney || d().isImageGenMidjourneyModel?.(ctx?.model)) return false;
-    const cards = global.__promptHubCards || [];
-    const existing = cards.find((c) => c.genBatchId === ctx.batchId);
+    const existing = getCreations().find((c) => c.genBatchId === ctx.batchId);
 
     if (existing) {
       return appendImagesToBatchCard(ctx, [poll.data.imageUrl], pendingId);
@@ -289,14 +285,14 @@
       genBatchId: ctx.batchId
     });
     if (!ctx.silentToast && ctx.batchIndex === ctx.batchTotal) {
-      const card = (global.__promptHubCards || []).find((c) => c.genBatchId === ctx.batchId);
-      const n = CG()?.normalizeCardGallery?.(card)?.length || 1;
-      d().toast(`已合并 ${n} 张到同一卡片`);
+      const cre = getCreations().find((c) => c.genBatchId === ctx.batchId);
+      const n = buildCreationGallery(cre).length || 1;
+      d().toast(`已合并 ${n} 张到同一最近记录`);
     }
     return true;
   }
 
-  /** 入库主图 + 同任务附赠图；已有主图时只补缺失的附赠槽位 */
+  /** 写入最近生成；已有记录时跳过 */
   async function ensureGenJobCreationsFromPoll(poll, ctx, pendingId) {
     if (poll?.data?.status !== 'completed' || !poll.data.imageUrl) return false;
 
@@ -309,7 +305,7 @@
       return saveBatchMergedFromPoll(poll, ctx, pendingId);
     }
 
-    const baseJobId = ctx?.jobId || poll.data.jobId;
+    const baseJobIdVal = ctx?.jobId || poll.data.jobId;
     const imageUrl = poll.data.imageUrl;
     const extras = getPollExtraImageUrls(poll, imageUrl);
     const isMj = poll.data.isMidjourney || d().isImageGenMidjourneyModel?.(ctx?.model);
@@ -317,64 +313,29 @@
     if (isMj) {
       const parsed = d().resolveMjPollImages(poll);
       if ((parsed.gallery?.length || 0) < 4) return false;
-      const card = baseJobId ? findWarehouseCardForJob(baseJobId) : null;
-      return upsertMjGalleryToWarehouse(card, parsed, poll, ctx, pendingId, baseJobId);
+      const creation = baseJobIdVal ? findCreationForJob(baseJobIdVal) : null;
+      return upsertMjGalleryToCreation(creation, parsed, poll, ctx, pendingId, baseJobIdVal);
     }
 
-    if (baseJobId && allGenCreationSlotsSaved(baseJobId, extras.length)) {
-      const mainCard = findWarehouseCardForJob(baseJobId);
-      if (mainCard && d().warehouseCardImageNeedsRecovery(mainCard, imageUrl)) {
-        await d().repairWarehouseCardImageFromJob(mainCard, imageUrl, baseJobId);
-      }
-      for (let ei = 0; ei < extras.length; ei += 1) {
-        const slotId = `${baseJobId}#${ei + 2}`;
-        const slotCard = findWarehouseCardForJob(slotId);
-        if (slotCard && d().warehouseCardImageNeedsRecovery(slotCard, extras[ei])) {
-          await d().repairWarehouseCardImageFromJob(slotCard, extras[ei], slotId);
-        }
-      }
+    if (baseJobIdVal && allGenCreationSlotsSaved(baseJobIdVal)) {
       if (pendingId) d().removePendingJob(pendingId);
-      d().clearSessionGenJob(baseJobId);
+      d().clearSessionGenJob(baseJobIdVal);
       d().renderImageGenFeed({ preserveScroll: true });
       return true;
     }
 
-    if (!baseJobId || !isGenCreationSlotSaved(baseJobId, 1)) {
-      await d().finishImageGenRun({
-        ...ctx,
-        image: imageUrl,
-        extraImages: extras,
-        cost: ctx.cost,
-        jobId: baseJobId,
-        silentToast: !!ctx.silentToast,
-        isRecovery: !!ctx.isRecovery,
-        pendingId
-      });
-      if (extras.length && !ctx.silentToast) {
-        d().toast(`本次上游共 ${extras.length + 1} 张图，已全部存入仓库（仅扣 1 次积分）`);
-      }
-      return true;
-    }
-
-    for (let i = 0; i < extras.length; i += 1) {
-      if (!isGenCreationSlotSaved(baseJobId, i + 2)) {
-        await d().finishImageGenRun({
-          ...ctx,
-          image: extras[i],
-          extraImages: [],
-          cost: ctx.cost,
-          jobId: baseJobId,
-          silentToast: true,
-          isRecovery: !!ctx.isRecovery,
-          pendingId: null,
-          imageIndex: i + 2
-        });
-      }
-    }
-    if (pendingId) d().removePendingJob(pendingId);
-    d().renderImageGenFeed({ preserveScroll: true });
+    await d().finishImageGenRun({
+      ...ctx,
+      image: imageUrl,
+      extraImages: extras,
+      cost: ctx.cost,
+      jobId: baseJobIdVal,
+      silentToast: !!ctx.silentToast,
+      isRecovery: !!ctx.isRecovery,
+      pendingId
+    });
     if (extras.length && !ctx.silentToast) {
-      d().toast(`已补全同任务附赠图 ${extras.length} 张`);
+      d().toast(`本次上游共 ${extras.length + 1} 张图，已加入最近生成（仅扣 1 次积分）`);
     }
     return true;
   }
@@ -389,7 +350,9 @@
       saveBatchMergedFromPoll,
       saveMjToWarehouse,
       appendMjActionToParentCard,
-      ensureGenJobCreationsFromPoll
+      ensureGenJobCreationsFromPoll,
+      findCreationForJob,
+      hasCreationForJob
     };
   }
 

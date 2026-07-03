@@ -15,6 +15,7 @@
 |------|--------|
 | 卡片库网格无图、侧栏有图 | `renderCards` + `SupabaseSync.hydrateImageElements` + `CardImageLoader` |
 | 社区卡片叠在一起 / 间距乱 | CSS `column-count` 瀑布流 + 禁 Masonry + 清 inline 定位 |
+| **手机只有首屏几张有图 / 下半屏黑** | **`docs/MOBILE-LOADING.md`** · `.app-main` 单滚 · `whenContainerReady` · cap 24 |
 
 ## 验证清单（每轮必做）
 

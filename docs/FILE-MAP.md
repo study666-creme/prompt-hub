@@ -30,6 +30,7 @@
 | **迁 MemFire** | `docs/MEMFIRE-MIGRATION.md` · `scripts/memfire-upload-storage.mjs` · `scripts/memfire-preflight.mjs` | 迁前必先备份 |
 | R2 读写在 Worker | `server/src/lib/r2-storage.ts` · `MEDIA_STORAGE_MODE` | `wrangler.toml` 绑定 `CARD_IMAGES_R2` |
 | **资产创作 / 画布导出** | `asset-studio.js` · `asset-studio.html` | `docs/VIDEO-CANVAS-EXPORT.md`（zip 结构、LibTV 手动 `@`） |
+| **无限画布 ↔ 卡藏** | `server/src/routes/v1/extension.ts` · `server/src/lib/extension-card.ts` | `docs/CANVAS-INTEGRATION.md` · 画布 fork `study666-creme/infinite-canvas-jay` |
 
 ---
 

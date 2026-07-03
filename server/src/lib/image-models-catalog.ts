@@ -1,6 +1,6 @@
-export type ImageModelProvider = 'grsai' | 'apimart' | 'ithink' | 'mooko';
+export type ImageModelProvider = 'grsai' | 'apimart';
 
-export type ImageModelUiFamily = 'gim2' | 'banana' | 'jimeng' | 'midjourney' | 'wan' | 'flux';
+export type ImageModelUiFamily = 'gim2' | 'banana' | 'jimeng' | 'midjourney';
 
 export type MjSpeedKey = 'relax' | 'fast' | 'turbo';
 
@@ -61,14 +61,6 @@ function midjourney(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>):
   return { ...row, uiFamily: 'midjourney' };
 }
 
-function wan(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>): Omit<ImageModelCatalogEntry, 'provider'> {
-  return { ...row, uiFamily: 'wan' };
-}
-
-function flux(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>): Omit<ImageModelCatalogEntry, 'provider'> {
-  return { ...row, uiFamily: 'flux' };
-}
-
 /**
  * GrsAI 图像模型（https://grsai.com/zh/dashboard/models）
  */
@@ -78,7 +70,7 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     upstream: 'gpt-image-2-vip',
     label: 'GPT Image 2 VIP',
     group: 'classic',
-    description: 'OpenAI VIP 优化版',
+    description: '细节强化，更高品质',
     upstreamPoints: 1300,
     refundOnViolation: true,
     resolutions: ['2k', '4k'],
@@ -90,7 +82,7 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     upstream: 'gpt-image-2',
     label: 'GPT Image 2',
     group: 'classic',
-    description: 'OpenAI 基础版',
+    description: '日常通用，均衡出图',
     upstreamPoints: 600,
     refundOnViolation: true,
     resolutions: ['1k'],
@@ -219,41 +211,6 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
   })
 ]);
 
-/** ThinkAI（thinkai.tv / token.ithinkai.cn）慢速经济线路 */
-export const ITHINK_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider('ithink', [
-  gim2({
-    id: 'ithink-gpt-image-2-slow',
-    upstream: 'gpt-image-2',
-    label: 'GPT Image 2 · 经济',
-    group: 'classic',
-    description: 'ThinkAI 经济线路 · 仅 1K · 五档比例 · 上游约 $0.019/张',
-    upstreamPoints: 2,
-    refundOnViolation: true,
-    resolutions: ['1k'],
-    fixedQualityLow: true,
-    defaultCredits: 2,
-    sortOrder: 102
-  })
-]);
-
-/** 木瓜AI（api.mooko.ai /v1/images）仅 Pro · 2K/4K，对齐 gpt-img.mooko.ai */
-export const MOOKO_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider('mooko', [
-  gim2({
-    id: 'mooko-gpt-image-2-pro',
-    upstream: 'gpt-image-2-pro',
-    label: 'GPT Image 2 Pro · 慢速',
-    group: 'new',
-    description: '慢速线路 · Images API · gpt-image-2-pro · 仅 2K/4K',
-    upstreamPoints: 5,
-    refundOnViolation: true,
-    resolutions: ['2k', '4k'],
-    pricingByResolution: true,
-    defaultCreditsByResolution: { '2k': 5, '4k': 5 },
-    defaultCredits: 5,
-    sortOrder: 104
-  })
-]);
-
 /** Apimart 备用线路 */
 export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider('apimart', [
   gim2({
@@ -261,7 +218,7 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
     upstream: 'gpt-image-2-official',
     label: 'GPT Image 2 · 特价',
     group: 'new',
-    description: '备用线路 · official 低价档 · 固定低质量 · 无正方形比例',
+    description: '低价档 · 固定低质量 · 无正方形比例',
     upstreamPoints: 0,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],
@@ -276,7 +233,7 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
     upstream: 'gpt-image-2',
     label: 'GPT Image 2',
     group: 'classic',
-    description: '备用线路 · gpt-image-2 四档价（非 official 181 档）；比例+分辨率决定出图尺寸',
+    description: '四档价 · 比例与分辨率决定出图尺寸',
     upstreamPoints: 0,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],
@@ -290,7 +247,7 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
     upstream: 'doubao-seedream-5-0-lite',
     label: '即梦 5.0 Lite',
     group: 'new',
-    description: '备用线路 · 字节 Seedream 5.0（2K/4K 分开定价）',
+    description: '即梦 5.0 Lite · 2K/4K 分开定价',
     upstreamPoints: 0,
     refundOnViolation: true,
     resolutions: ['2k', '4k'],
@@ -302,9 +259,9 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
   banana({
     id: 'apimart-gemini-2-5-flash-preview',
     upstream: 'gemini-2.5-flash-image-preview',
-    label: 'Nano Banana Fast · 备用',
+    label: 'Nano Banana Fast',
     group: 'classic',
-    description: 'Gemini 2.5 Flash · 快速草稿',
+    description: '快速草稿',
     upstreamPoints: 0.088,
     refundOnViolation: true,
     resolutions: ['1k'],
@@ -315,9 +272,9 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
   banana({
     id: 'apimart-gemini-3-1-flash-preview',
     upstream: 'gemini-3.1-flash-image-preview',
-    label: 'Nano Banana 2 · 备用',
+    label: 'Nano Banana 2',
     group: 'classic',
-    description: 'Gemini 3.1 Flash · 均衡',
+    description: '日常均衡',
     upstreamPoints: 0.21,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],
@@ -330,9 +287,9 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
   banana({
     id: 'apimart-gemini-3-pro-preview',
     upstream: 'gemini-3-pro-image-preview',
-    label: 'Nano Banana Pro · 备用',
+    label: 'Nano Banana Pro',
     group: 'classic',
-    description: 'Gemini 3 Pro（Nano Banana Pro）',
+    description: '专业通用，细节更丰富',
     upstreamPoints: 0.28,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],
@@ -347,7 +304,7 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
     upstream: 'gemini-2.5-flash-image-preview-official',
     label: 'Nano Banana Fast · 官方',
     group: 'new',
-    description: 'Gemini 2.5 Flash 官方渠道',
+    description: '官方渠道 · 快速草稿',
     upstreamPoints: 0.218,
     refundOnViolation: true,
     resolutions: ['1k'],
@@ -360,7 +317,7 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
     upstream: 'gemini-3.1-flash-image-preview-official',
     label: 'Nano Banana 2 · 官方',
     group: 'new',
-    description: 'Gemini 3.1 Flash 官方渠道 · 按分辨率分档',
+    description: '官方渠道 · 按分辨率分档',
     upstreamPoints: 0.375,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],
@@ -375,7 +332,7 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
     upstream: 'gemini-3-pro-image-preview-official',
     label: 'Nano Banana Pro · 官方',
     group: 'new',
-    description: 'Gemini 3 Pro 官方渠道',
+    description: '官方渠道 · 专业通用',
     upstreamPoints: 0.75,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],
@@ -384,88 +341,6 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
     fixedQualityLow: true,
     defaultCredits: 10,
     sortOrder: 108
-  }),
-  wan({
-    id: 'apimart-wan2-7-image',
-    upstream: 'wan2.7-image',
-    label: '万相 2.7',
-    group: 'new',
-    description: '万相 2.7 标准版 · 最高 2K · 文生图/编辑',
-    upstreamPoints: 0.15,
-    refundOnViolation: true,
-    resolutions: ['1k', '2k'],
-    fixedQualityLow: true,
-    defaultCredits: 3,
-    sortOrder: 109
-  }),
-  wan({
-    id: 'apimart-wan2-7-image-pro',
-    upstream: 'wan2.7-image-pro',
-    label: '万相 2.7 Pro',
-    group: 'new',
-    description: '万相 2.7 专业版 · 文生图最高 4K',
-    upstreamPoints: 0.35,
-    refundOnViolation: true,
-    resolutions: ['1k', '2k', '4k'],
-    fixedQualityLow: true,
-    defaultCredits: 6,
-    sortOrder: 110
-  }),
-  flux({
-    id: 'apimart-flux-kontext-pro',
-    upstream: 'flux-kontext-pro',
-    label: 'Flux Kontext Pro',
-    group: 'new',
-    description: '文生图/单图编辑 · 固定价',
-    upstreamPoints: 0.14,
-    refundOnViolation: true,
-    resolutions: ['1k'],
-    fixedQualityLow: true,
-    defaultCredits: 4,
-    sortOrder: 120
-  }),
-  flux({
-    id: 'apimart-flux-kontext-max',
-    upstream: 'flux-kontext-max',
-    label: 'Flux Kontext Max',
-    group: 'new',
-    description: 'Kontext 高质量版',
-    upstreamPoints: 0.28,
-    refundOnViolation: true,
-    resolutions: ['1k'],
-    fixedQualityLow: true,
-    defaultCredits: 6,
-    sortOrder: 121
-  }),
-  flux({
-    id: 'apimart-flux-2-pro',
-    upstream: 'flux-2-pro',
-    label: 'Flux 2 Pro',
-    group: 'new',
-    description: 'Flux 2.0 Pro · 按 1K/2K 分档',
-    upstreamPoints: 0.175,
-    refundOnViolation: true,
-    resolutions: ['1k', '2k'],
-    pricingByResolution: true,
-    defaultCreditsByResolution: { '1k': 5, '2k': 7 },
-    fixedQualityLow: true,
-    defaultCredits: 5,
-    sortOrder: 122
-  }),
-  flux({
-    id: 'apimart-flux-2-flex',
-    upstream: 'flux-2-flex',
-    label: 'Flux 2 Flex',
-    group: 'new',
-    description: 'Flux 2.0 Flex · 快速迭代 · 按 1K/2K 分档',
-    upstreamPoints: 0.49,
-    refundOnViolation: true,
-    resolutions: ['1k', '2k'],
-    pricingByResolution: true,
-    defaultCreditsByResolution: { '1k': 7, '2k': 10 },
-    fixedQualityLow: true,
-    defaultCredits: 7,
-    sortOrder: 123
   }),
   midjourney({
     id: 'apimart-mj-v81',
@@ -525,12 +400,10 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
   })
 ]);
 
-/** 全站模型目录（GrsAI + Apimart 并列，后台可分别定价） */
+/** 全站模型目录（仅 GrsAI + Apimart） */
 export const IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   ...GRSAI_IMAGE_MODEL_CATALOG,
-  ...APIMART_IMAGE_MODEL_CATALOG,
-  ...ITHINK_IMAGE_MODEL_CATALOG,
-  ...MOOKO_IMAGE_MODEL_CATALOG
+  ...APIMART_IMAGE_MODEL_CATALOG
 ];
 
 export function imageModelUiFamily(modelId: string): ImageModelUiFamily {
@@ -538,28 +411,25 @@ export function imageModelUiFamily(modelId: string): ImageModelUiFamily {
   if (entry?.uiFamily) return entry.uiFamily;
   const id = String(modelId || '').toLowerCase();
   if (id.startsWith('apimart-mj-')) return 'midjourney';
-  if (id.startsWith('apimart-wan') || id.includes('wan2.7')) return 'wan';
-  if (id.startsWith('apimart-flux') || id.startsWith('flux-')) return 'flux';
   if (id.includes('seedream') || id === 'jimeng') return 'jimeng';
   if (id.includes('nano-banana')) return 'banana';
   return 'gim2';
 }
 
-export function providerLabel(provider: ImageModelProvider): string {
-  if (provider === 'apimart') return '备用线路';
-  if (provider === 'ithink') return '经济线路';
-  if (provider === 'mooko') return '慢速线路';
-  return '常规线路';
+export function providerLabel(_provider: ImageModelProvider): string {
+  return '';
 }
 
-/** 前台模型说明：去掉上游品牌名与 MJ 速度冗余文案 */
+/** 前台模型说明：去掉上游品牌名与 MJ 速度冗余文案；空则不在 UI 展示 */
 export function sanitizePublicModelDescription(description: string | null | undefined): string {
   if (!description) return '';
   let s = String(description).trim();
-  s = s.replace(/^(Apimart|GrsAI|ThinkAI|Mooko|木瓜)\s*[·•]\s*/gi, '');
-  s = s.replace(/\bApimart\s*[·•]\s*/gi, '');
+  s = s.replace(/^(Apimart|GrsAI|ThinkAI|Mooko|木瓜|OpenAI|Gemini|备用线路)\s*[·•]\s*/gi, '');
+  s = s.replace(/\b(Apimart|OpenAI|Gemini|gpt-image-2|official|备用线路)\b\s*[·•]?\s*/gi, '');
   s = s.replace(/\s*[·•]\s*出图速度可选\s*relax\s*\/\s*fast\s*\/\s*turbo/gi, '');
-  return s.replace(/\s*[·•]\s*$/g, '').trim();
+  s = s.replace(/\s*[·•]\s*$/g, '').trim();
+  if (/^(OpenAI|Gemini|gpt-image|备用线路)/i.test(s)) return '';
+  return s;
 }
 
 const LEGACY_MODEL_MAP: Record<string, string> = {
@@ -572,7 +442,7 @@ export function normalizeImageModelId(raw?: string | null): string {
     .trim()
     .toLowerCase();
   if (!id) return 'gpt-image-2';
-  if (id.startsWith('apimart-') || id.startsWith('ithink-') || id.startsWith('mooko-')) return id;
+  if (id.startsWith('apimart-')) return id;
   if (id in LEGACY_MODEL_MAP) return LEGACY_MODEL_MAP[id];
   return id;
 }

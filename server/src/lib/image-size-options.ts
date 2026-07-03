@@ -87,15 +87,10 @@ export function aspectRatiosForModel(modelId: string): readonly string[] {
     .trim()
     .toLowerCase();
   if (id === 'apimart-gpt-image-2-official-budget') return APIMART_OFFICIAL_BUDGET_RATIOS;
-  if (id.startsWith('mooko-')) return MOOKO_PRO_ASPECT_RATIOS;
   if (id === 'apimart-gpt-image-2') return IMAGE2_ASPECT_RATIOS;
   if (id === 'apimart-seedream-5-lite' || id.includes('seedream')) return BASIC_ASPECT_RATIOS;
   if (id.startsWith('apimart-gemini') || id.includes('gemini-')) return BANANA_ASPECT_RATIOS;
-  if (id.startsWith('apimart-wan') || id.includes('wan2.7')) return WAN27_ASPECT_RATIOS;
-  if (id.startsWith('apimart-flux-kontext') || id.includes('flux-kontext')) return FLUX_KONTEXT_ASPECT_RATIOS;
-  if (id.startsWith('apimart-flux-2') || id.includes('flux-2-')) return FLUX2_ASPECT_RATIOS;
   if (id.startsWith('apimart-mj-') || id.startsWith('mj-')) return MJ_ASPECT_RATIOS;
-  if (id.startsWith('ithink-')) return BASIC_ASPECT_RATIOS;
   if (id === 'gpt-image-2-vip' || id === 'gpt-image-2') return IMAGE2_ASPECT_RATIOS;
   if (BANANA2_EXTENDED_MODEL_IDS.has(id)) {
     return [...BANANA_ASPECT_RATIOS, ...BANANA2_EXTRA_RATIOS];

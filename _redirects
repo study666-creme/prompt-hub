@@ -1,0 +1,15 @@
+# LabGen 风格 SPA 路由：先匹配静态文件，其余回退 index.html
+/prompts      /index.html   200
+/prompts/*    /index.html   200
+/cards        /index.html   200
+/cards/*      /index.html   200
+/warehouse    /index.html   200
+/generate     /index.html   200
+/generate/*   /index.html   200
+/imagegen     /index.html   200
+/community    /index.html   200
+/profile      /index.html   200
+/home         /index.html   200
+/creations    /index.html   200
+/dev          /index.html   200
+/devlab       /index.html   200

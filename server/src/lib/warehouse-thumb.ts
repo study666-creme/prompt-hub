@@ -3,7 +3,7 @@ import type { Env } from '../env';
 import { createAdminClient } from './supabase';
 import { generationStorageAssetId, storagePathFromRef } from './image-archive';
 import { cardImageExists } from './r2-storage';
-import { buildPrivateMediaCdnUrl, materializeGridForPrimaryPath } from './media-cdn';
+import { buildPrivateMediaCdnUrl, materializeGridForPrimaryPath, signingPathForVariant } from './media-cdn';
 import { resolveImageRefForJob } from './recover-generation-warehouse';
 
 function slotJobId(baseJobId: string, slot: number): string {
@@ -63,6 +63,13 @@ export async function ensureWarehouseJobThumb(
   }
 
   if (!primaryPath) return null;
+
+  const signPath = signingPathForVariant(primaryPath, 'grid').replace(/^\//, '');
+  if (await cardImageExists(c.env, signPath, admin)) {
+    const url = await buildPrivateMediaCdnUrl(c, signPath);
+    if (url) return { url, gridPath: signPath };
+  }
+
   const gridClean = await materializeGridForPrimaryPath(c.env, admin, primaryPath);
   if (!gridClean) return null;
   const url = await buildPrivateMediaCdnUrl(c, gridClean);

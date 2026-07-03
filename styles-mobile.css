@@ -582,7 +582,7 @@
     position: relative !important;
     height: auto !important;
     min-height: 0 !important;
-    overflow-y: auto !important;
+    overflow-y: visible !important;
     -webkit-overflow-scrolling: touch;
     contain: layout;
   }

@@ -36,6 +36,8 @@ import {
 
 import { mergeTaskFlags } from '../../lib/membership-tasks';
 
+import { membershipCreditsPayload, syncMembershipCredits } from '../../lib/membership-credits';
+
 import { createAdminClient, getOrCreateProfile } from '../../lib/supabase';
 
 import { ensureWarehouseJobThumb } from '../../lib/warehouse-thumb';
@@ -230,7 +232,9 @@ extensionRoutes.get('/status', async c => {
 
   const admin = createAdminClient(c.env);
 
-  const profile = await getOrCreateProfile(admin, user.id);
+  const profile = await syncMembershipCredits(admin, user.id);
+
+  const credits = membershipCreditsPayload(profile);
 
   const { data: row } = await admin
 
@@ -261,6 +265,12 @@ extensionRoutes.get('/status', async c => {
         || new Date(profile.membership_until).getTime() > Date.now()
 
       ),
+
+      credits: credits.creditsSpendable,
+
+      creditsPermanent: credits.creditsPermanent,
+
+      dailyCredits: credits.dailyCredits,
 
       defaultPublishCommunity: readDefaultPublishCommunity(payload),
 

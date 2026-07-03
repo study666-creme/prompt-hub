@@ -11,9 +11,6 @@ import {
   upstreamBindingsFromEnv
 } from '../../lib/image-upstream';
 import { processFastProviderPendingSubmit } from '../../lib/fast-provider-submit';
-import { drainIthinkPendingSubmits } from '../../lib/ithink-drain';
-import { processIthinkPendingSubmit } from '../../lib/ithink-submit';
-import { tryCompleteMookoFromStoredArchive } from '../../lib/mooko-submit';
 import type { JobRow } from '../../lib/generation-jobs';
 import { aspectRatiosForModel } from '../../lib/image-size-options';
 import { providerLabel, imageModelUiFamily, sanitizePublicModelDescription } from '../../lib/image-models-catalog';
@@ -65,8 +62,24 @@ import {
   isAcceptedRefImageInput,
   resolveGenerationRefUrls
 } from '../../lib/generation-ref-images';
-import { buildPrivateMediaCdnUrl, resolveStoragePath } from '../../lib/media-cdn';
+import {
+  buildPrivateMediaCdnUrl,
+  resolveStoragePath,
+  serveCachedStorageImage
+} from '../../lib/media-cdn';
 import type { Context } from 'hono';
+
+function assertOwnMediaPath(userId: string, path: string): void {
+  const norm = path.replace(/^\//, '');
+  if (!norm.startsWith(`${userId}/`)) {
+    throw new ApiError(403, 'FORBIDDEN', '无权访问该图片');
+  }
+}
+
+function isRemoteHttpImageUrl(url: string | null | undefined): boolean {
+  const raw = String(url || '').trim();
+  return /^https?:\/\//i.test(raw);
+}
 
 async function resolveJobImageUrlForClient(
   c: Context<{ Bindings: Env }>,
@@ -325,7 +338,7 @@ function publicModelPayload(
       id: m.id,
       label: m.displayLabel,
       catalogLabel: m.label,
-      description: sanitizePublicModelDescription(m.description),
+      description: sanitizePublicModelDescription(m.description) || null,
       group: m.group,
       provider: m.provider,
       providerLabel: providerLabel(m.provider),
@@ -376,7 +389,7 @@ generateRoutes.get('/models', async c => {
   return c.json({
     ok: true,
     data: {
-      providers: ['grsai', 'apimart', 'ithink', 'mooko'],
+      providers: ['grsai', 'apimart'],
       globalDiscountPercent: settings.globalDiscountPercent,
       models: publicModelPayload(settings, profile.membership_tier, memberActive)
     }
@@ -458,7 +471,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     );
   }
 
-  const jobResolution = resolved.provider === 'ithink' ? '1k' : parsed.data.resolution;
+  const jobResolution = parsed.data.resolution;
   const isMidjourney = imageModelUiFamily(modelId) === 'midjourney' || isMidjourneyUpstream(resolved.upstream);
   const mjParams = isMidjourney && parsed.data.mjParams ? parsed.data.mjParams : undefined;
 
@@ -615,35 +628,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     );
   }
 
-  if (lineProvider === 'ithink' && isProviderConfigured(upstream, 'ithink')) {
-    const ithinkMeta: Record<string, unknown> = {
-      ...baseMeta,
-      debitSplit,
-      ithinkSubmitState: 'queued'
-    };
-    await admin
-      .from('generation_requests')
-      .update({ meta: ithinkMeta })
-      .eq('id', job.id);
-    /** Think 同步 POST 约 50–90s；HTTP waitUntil 易掐断，仅 Cron await 提交 */
-    kickBackgroundTask(
-      c,
-      drainIthinkPendingSubmits(c.env, { awaitSubmit: false }).catch((e) => {
-        console.error('[generate] ithink drain kick failed', job.id, e);
-      })
-    );
-  } else if (lineProvider === 'mooko' && isProviderConfigured(upstream, 'mooko')) {
-    const mookoMeta: Record<string, unknown> = {
-      ...baseMeta,
-      debitSplit,
-      mookoSubmitState: 'queued'
-    };
-    await admin
-      .from('generation_requests')
-      .update({ meta: mookoMeta })
-      .eq('id', job.id);
-    /** 木瓜仅 Cron await 提交；HTTP waitUntil ~30s 会假 running 堵死队列 */
-  } else if (hasAnyImageUpstream(upstream) && upstreamTaskId) {
+  if (hasAnyImageUpstream(upstream) && upstreamTaskId) {
     await admin
       .from('generation_requests')
       .update({
@@ -682,14 +667,9 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       imageUrl: null,
       demo: !hasAnyImageUpstream(upstream),
       provider: lineProvider,
-      progressNote:
-        lineProvider === 'mooko'
-          ? '已扣积分，正在生成中（约 2–12 分钟）'
-          : lineProvider === 'ithink'
-            ? '已扣积分，正在生成中（约 2–5 分钟）'
-            : hasAnyImageUpstream(upstream)
-              ? '已扣积分，正在提交（请勿重复点生成）'
-              : null
+      progressNote: hasAnyImageUpstream(upstream)
+        ? '已扣积分，正在提交（请勿重复点生成）'
+        : null
     }
   });
 });
@@ -822,9 +802,10 @@ const recoverWarehouseSchema = z.object({
   max: z.number().int().min(1).max(80).optional(),
   days: z.number().int().min(1).max(365).optional(),
   hours: z.number().int().min(1).max(168).optional(),
-  providerScope: z.enum(['grs', 'apimart', 'all']).optional(),
+  offset: z.number().int().min(0).max(5000).optional(),
   mode: z.enum(['import', 'repair', 'extras', 'settle']).optional(),
-  jobIds: z.array(z.string().min(8).max(64)).max(10).optional()
+  jobIds: z.array(z.string().min(8).max(64)).max(10).optional(),
+  deletedGenerationJobTombstones: z.record(z.string(), z.number()).optional()
 });
 
 /** 服务端一键恢复生图到卡片库（绕过浏览器 media/fetch 401） */
@@ -844,8 +825,10 @@ generateRoutes.post('/recover-warehouse', async c => {
       max: body.max,
       days: body.days,
       hours: body.hours,
+      offset: body.offset,
       providerScope: body.providerScope,
-      env: c.env
+      env: c.env,
+      deletedGenerationJobTombstones: body.deletedGenerationJobTombstones
     };
     const upstream = upstreamBindingsFromEnv(c.env);
 
@@ -895,7 +878,9 @@ generateRoutes.post('/recover-warehouse', async c => {
         }
       }
 
-      const imported = await recoverGenerationJobsToWarehouse(admin, user.id, common);
+      const imported = ids.length
+        ? await recoverGenerationJobsToWarehouse(admin, user.id, { ...common, jobIds: ids })
+        : { imported: 0, skipped: 0, failures: [], cardIds: [] as string[] };
       const repaired = await repairWarehouseCardImagesFromJobs(admin, user.id, common);
       return c.json({
         ok: true,
@@ -1342,6 +1327,90 @@ generateRoutes.post('/mj-blend', rateLimit(300, 60_000), async (c) => {
   });
 });
 
+/** 画布/插件：鉴权后直接拉任务成图（避免浏览器跨域 fetch CDN 失败） */
+generateRoutes.get('/jobs/:jobId/image', async c => {
+  const user = c.get('user');
+  const jobId = c.req.param('jobId');
+  const admin = createAdminClient(c.env);
+
+  const { data: job, error } = await admin
+    .from('generation_requests')
+    .select('*')
+    .eq('id', jobId)
+    .maybeSingle();
+
+  if (error || !job) {
+    throw new ApiError(404, 'NOT_FOUND', '任务不存在');
+  }
+
+  assertJobOwner(job, user.id);
+
+  let imageRef = job.result_image_url as string | null;
+  const status = String(job.status || '');
+
+  if (!imageRef && status === 'processing') {
+    const polled = await pollAndUpdateJob(
+      admin,
+      user.id,
+      job,
+      upstreamBindingsFromEnv(c.env),
+      c.env,
+      { quick: false, kickSubmit: pollKickSubmit(c) }
+    );
+    if (polled.imageUrl) {
+      const { data: fresh } = await admin
+        .from('generation_requests')
+        .select('result_image_url, status')
+        .eq('id', jobId)
+        .maybeSingle();
+      imageRef = (fresh?.result_image_url as string | null) || polled.imageUrl;
+    }
+  }
+
+  if (!imageRef) {
+    throw new ApiError(404, 'NOT_FOUND', status === 'failed' ? '任务已失败' : '任务尚未出图');
+  }
+
+  if (jobPollNeedsBackgroundArchive(imageRef)) {
+    try {
+      await archivePendingJobImage(admin, user.id, jobId, c.env);
+      const { data: archived } = await admin
+        .from('generation_requests')
+        .select('result_image_url')
+        .eq('id', jobId)
+        .maybeSingle();
+      if (archived?.result_image_url) {
+        imageRef = archived.result_image_url as string;
+      }
+    } catch (e) {
+      console.warn('[generate] job image archive failed', jobId, e);
+    }
+  }
+
+  const path = resolveStoragePath(imageRef);
+  if (path) {
+    assertOwnMediaPath(user.id, path);
+    return serveCachedStorageImage(c, path);
+  }
+
+  if (isRemoteHttpImageUrl(imageRef)) {
+    const upstream = await fetch(imageRef, { redirect: 'follow' });
+    if (!upstream.ok) {
+      throw new ApiError(502, 'UPSTREAM_ERROR', '上游图片不可用');
+    }
+    const body = await upstream.arrayBuffer();
+    return new Response(body, {
+      headers: {
+        'Content-Type': upstream.headers.get('Content-Type') || 'image/jpeg',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'private, max-age=120'
+      }
+    });
+  }
+
+  throw new ApiError(404, 'NOT_FOUND', '无效图片路径');
+});
+
 generateRoutes.get('/jobs/:jobId', async c => {
   const user = c.get('user');
   const jobId = c.req.param('jobId');
@@ -1362,59 +1431,6 @@ generateRoutes.get('/jobs/:jobId', async c => {
   const settle = c.req.query('settle') === '1' || c.req.query('settle') === 'true';
   const upstream = upstreamBindingsFromEnv(c.env);
   const jobMeta = (job.meta as Record<string, unknown>) || {};
-  const jobProvider = readJobProvider(jobMeta);
-  const mookoProvider = jobProvider === 'mooko';
-  const ithinkProvider = jobProvider === 'ithink';
-  if (
-    settle
-    && ithinkProvider
-    && job.status === 'processing'
-    && upstream.ithinkKey
-  ) {
-    const st = String(jobMeta.ithinkSubmitState || '');
-    const attempts = Number(jobMeta.ithinkSubmitAttempts || 0);
-    if (st === 'queued' && attempts < 1) {
-      try {
-        await processIthinkPendingSubmit(
-          admin,
-          user.id,
-          job as JobRow,
-          upstream,
-          c.env,
-          {
-            upstreamModel: String(jobMeta.upstreamModel || 'gpt-image-2'),
-            prompt: String(job.prompt || ''),
-            resolution: '1k',
-            quality: String(job.quality || 'standard'),
-            size: typeof jobMeta.size === 'string' ? jobMeta.size : undefined
-          }
-        );
-        const { data: refreshed } = await admin
-          .from('generation_requests')
-          .select('*')
-          .eq('id', jobId)
-          .maybeSingle();
-        if (refreshed) Object.assign(job, refreshed);
-      } catch (e) {
-        console.warn('[generate] ithink settle submit failed', jobId, e);
-      }
-    }
-  }
-  if (settle && mookoProvider && job.status === 'processing' && !job.result_image_url) {
-    const st = String(jobMeta.mookoSubmitState || '');
-    if (st === 'running') {
-      try {
-        await tryCompleteMookoFromStoredArchive(admin, user.id, jobId, c.env);
-      } catch (e) {
-        console.warn('[generate] mooko settle R2 recover failed', jobId, e);
-      }
-    }
-  }
-
-  const mookoNeedSettle =
-    readJobProvider(jobMeta) === 'mooko'
-    && String(jobMeta.mookoSubmitState) === 'done'
-    && !job.result_image_url;
   let polled = await pollAndUpdateJob(
     admin,
     user.id,
@@ -1434,9 +1450,9 @@ generateRoutes.get('/jobs/:jobId', async c => {
       { quick: false, kickSubmit: pollKickSubmit(c) }
     );
   } else if (
-    mookoNeedSettle
-    && polled.status === 'processing'
+    polled.status === 'processing'
     && c.executionCtx
+    && false
   ) {
     c.executionCtx.waitUntil(
       pollAndUpdateJob(

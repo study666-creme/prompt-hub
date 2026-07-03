@@ -886,12 +886,44 @@
     }) || null;
   }
 
+  function findCreationForJob(jobId) {
+    if (!jobId) return null;
+    const key = String(jobId).replace(/#\d+$/, '');
+    return creations().find((c) => {
+      if (!c?.jobId) return false;
+      const cj = String(c.jobId).replace(/#\d+$/, '');
+      return c.jobId === jobId || cj === key;
+    }) || null;
+  }
+
+  function creationHasDisplayableImage(creation) {
+    if (!creation) return false;
+    if (creation.image && d().isDisplayableImage(creation.image)) return true;
+    if (creation.isMidjourney) {
+      if (creation.mjCompositeUrl && d().isDisplayableImage(creation.mjCompositeUrl)) return true;
+      if (Array.isArray(creation.mjGridUrls) && creation.mjGridUrls.some((u) => d().isDisplayableImage(u))) return true;
+      if (Array.isArray(creation.cardImages) && creation.cardImages.some((u) => d().isDisplayableImage(u))) return true;
+    }
+    return false;
+  }
+
+  function hasCreationForJob(jobId) {
+    return creationHasDisplayableImage(findCreationForJob(jobId));
+  }
+
   function needsApiImageRecovery(jobId, apiImageUrl, force = false) {
     if (!jobId || !apiImageUrl) return false;
     if (d().isGenerationJobDeleted(jobId) && !force) return false;
-    const card = findWarehouseCardForJob(jobId);
-    if (!card) return true;
-    return warehouseCardImageNeedsRecovery(card, apiImageUrl);
+    const creation = findCreationForJob(jobId);
+    if (!creation) return true;
+    if (!creation.image || !d().isDisplayableImage(creation.image)) return true;
+    if (/^https?:\/\//i.test(creation.image)) return true;
+    if (window.SupabaseSync?.isDataUrl?.(creation.image)) return true;
+    if (window.SupabaseSync?.isStorageRef?.(creation.image)) {
+      const path = window.SupabaseSync.storagePathFromRef?.(creation.image);
+      if (path && window.SupabaseSync.isPathKnownMissing?.(path)) return true;
+    }
+    return false;
   }
 
   function jobNeedsRecovery(job) {
@@ -936,8 +968,8 @@
 
   function recoveryJobPriority(job) {
     const t = Date.parse(job?.createdAt || '') || 0;
-    const hasCard = hasWarehouseCardForJob(job?.id);
-    if (job?.status === 'completed' && job?.imageUrl && !hasCard) return 1e15 + t;
+    const hasCre = hasCreationForJob(job?.id);
+    if (job?.status === 'completed' && job?.imageUrl && !hasCre) return 1e15 + t;
     if (job?.status === 'completed' && !job?.imageUrl) return 5e14 + t;
     if (job?.status === 'processing') return 1e14 + t;
     if (job?.status === 'failed') return 1e13 + t;
@@ -1105,16 +1137,22 @@
     return candidates[0];
   }
 
-  function pendingHasWarehouseCard(pending) {
-    return !!findWarehouseCardForPending(pending);
+  function pendingHasCreation(pending) {
+    if (!pending) return false;
+    if (pending.jobId && hasCreationForJob(pending.jobId)) return true;
+    if (pending.batchMergeCards && pending.batchId) {
+      const cre = creations().find((c) => c.genBatchId === pending.batchId);
+      if (cre && creationHasDisplayableImage(cre)) return true;
+    }
+    return false;
   }
 
-  /** 卡片库已有对应生图卡片时，清掉生图区「生成中/恢复中」占位 */
-  function prunePendingJobsWithWarehouseCards() {
+  /** 最近生成已有对应记录时，清掉生图区「生成中/恢复中」占位 */
+  function prunePendingJobsWithCreations() {
     let changed = false;
     const next = [];
     for (const p of pendingList()) {
-      if (!pendingHasWarehouseCard(p)) {
+      if (!pendingHasCreation(p)) {
         next.push(p);
         continue;
       }
@@ -1125,6 +1163,10 @@
     setPending(next);
     persistPendingGenJobs();
     scheduleImageGenPendingUiRefresh();
+  }
+
+  function prunePendingJobsWithWarehouseCards() {
+    prunePendingJobsWithCreations();
   }
 
   async function tryRecoverPendingJobDirect(pending) {
@@ -1142,7 +1184,7 @@
     } catch (e) {
       console.warn('[imagegen] server settle recover failed', jobId, e);
     }
-    if (hasWarehouseCardForJob(jobId)) {
+    if (hasCreationForJob(jobId)) {
       removePendingJob(pending.id);
       clearSessionGenJob(jobId);
       d().renderImageGenFeed({ preserveScroll: true, force: true });
@@ -1159,12 +1201,12 @@
           prompt: pending.prompt,
           model: pending.model
         }, { silent: true });
-        return hasWarehouseCardForJob(jobId) || !pendingList().some((p) => p.id === pending.id);
+        return hasCreationForJob(jobId) || !pendingList().some((p) => p.id === pending.id);
       }
     } catch (e) {
       console.warn('[imagegen] direct job settle failed', jobId, e);
     }
-    return hasWarehouseCardForJob(jobId);
+    return hasCreationForJob(jobId);
   }
 
   async function tryServerRecoverPending(pending) {
@@ -1185,18 +1227,8 @@
       pending.recovering = false;
       pending.recoverNote = '';
       pending.pendingNote = '';
-      const existingCard = findWarehouseCardForJob(apiJob.id);
-      if (existingCard && hasWarehouseCardForJob(apiJob.id)) {
-        if (warehouseCardImageNeedsRecovery(existingCard, apiJob.imageUrl)) {
-          await d().repairWarehouseCardImageFromJob(existingCard, apiJob.imageUrl, apiJob.id);
-          d().renderImageGenFeed({ preserveScroll: true, force: true });
-        }
-        removePendingJob(pending.id);
-        clearSessionGenJob(apiJob.id);
-        return true;
-      }
-      if (existingCard && !existingCard.image) {
-        await d().repairWarehouseCardImageFromJob(existingCard, apiJob.imageUrl, apiJob.id);
+      const existingCre = findCreationForJob(apiJob.id);
+      if (existingCre && hasCreationForJob(apiJob.id)) {
         removePendingJob(pending.id);
         clearSessionGenJob(apiJob.id);
         return true;
@@ -1513,7 +1545,7 @@
       }
 
       for (const pending of pendingList().slice()) {
-        if (pendingHasWarehouseCard(pending)) {
+        if (pendingHasCreation(pending)) {
           removePendingJob(pending.id);
           if (pending.jobId) clearSessionGenJob(pending.jobId);
           changed = true;
@@ -1623,7 +1655,7 @@
         if (!isSessionGenJob(job.id)) continue;
         if (pendingList().some((p) => p.jobId === job.id)) continue;
         if (failedList().some((f) => f.jobId === job.id)) continue;
-        if (hasWarehouseCardForJob(job.id)) continue;
+        if (hasCreationForJob(job.id)) continue;
         const live = apiById.get(job.id) || job;
         const failCtx = {
           model: live.model || job.model,
@@ -1645,7 +1677,7 @@
         if (d().isGenerationJobDeleted(job.id)) continue;
 
         if (job.status === 'processing') {
-          if (hasWarehouseCardForJob(job.id)) {
+          if (hasCreationForJob(job.id)) {
             const stale = pendingList().find((j) => j.jobId === job.id);
             if (stale) {
               removePendingJob(stale.id);
@@ -1656,7 +1688,7 @@
           }
           const jobAge = Date.now() - (Date.parse(job.createdAt) || 0);
           if (jobAge >= RECENT_GEN_RECOVER_MS) {
-            if (job.status === 'processing' && !hasWarehouseCardForJob(job.id)) {
+            if (job.status === 'processing' && !hasCreationForJob(job.id)) {
               window.recordGenerationJobDeletion?.(job.id);
             }
             continue;
@@ -1794,8 +1826,9 @@
 
         if (!shouldAutoRecoverCompletedJob(recoverJob)) continue;
 
+        const existingCre = findCreationForJob(recoverJob.id);
+        if (existingCre && hasCreationForJob(recoverJob.id)) continue;
         const existingCard = (window.__promptHubCards || []).find((c) => c.genJobId === recoverJob.id);
-        if (existingCard && hasWarehouseCardForJob(recoverJob.id)) continue;
         const recoverExtrasEarly = Array.isArray(recoverJob.extraImageUrls)
           ? recoverJob.extraImageUrls.filter((u) => u && u !== recoverJob.imageUrl)
           : [];
@@ -1805,7 +1838,7 @@
             (c) => c.jobId === recoverJob.id || String(c.jobId || '').startsWith(`${recoverJob.id}#`)
           )
         ) {
-          if (!hasWarehouseCardForJob(recoverJob.id)) {
+          if (!hasCreationForJob(recoverJob.id)) {
             changed = true;
             attachedJobIds.add(recoverJob.id);
             setPending(pendingList().filter((p) => p.jobId !== recoverJob.id));
@@ -2057,8 +2090,11 @@
       settleStuckGenerationJob,
       needsApiImageRecovery,
       findWarehouseCardForJob,
-      hasWarehouseCardForJob,
-      pendingHasWarehouseCard,
+      findCreationForJob,
+      hasCreationForJob,
+      prunePendingJobsWithCreations,
+      pendingHasCreation,
+      pendingHasWarehouseCard: pendingHasCreation,
       findWarehouseCardForPending,
       shouldAutoRecoverCompletedJob,
       prunePendingJobsWithWarehouseCards,

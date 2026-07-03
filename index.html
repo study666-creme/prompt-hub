@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260701k';
+    window.__APP_BUILD__ = '20260702g';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -27,6 +27,7 @@
       }
       if (prev && prev !== cur) {
         localStorage.setItem(key, cur);
+        try { localStorage.removeItem('ph_missing_paths_v1'); } catch (e) { /* ignore */ }
         var onceKey = 'promptrepo_build_reload_once_' + cur;
         if (sessionStorage.getItem(onceKey)) return;
         sessionStorage.setItem(onceKey, '1');
@@ -104,11 +105,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260701k">
-  <link rel="stylesheet" href="styles-theme.css?v=20260701k">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260701k">
+  <link rel="stylesheet" href="styles.css?v=20260702g">
+  <link rel="stylesheet" href="styles-theme.css?v=20260702g">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260702g">
   <link rel="stylesheet" href="styles-settings.css?v=20260606u">
-  <link rel="stylesheet" href="styles-features.css?v=20260701k">
+  <link rel="stylesheet" href="styles-features.css?v=20260702g">
   <link rel="stylesheet" href="styles-assets.css?v=20260602w">
   <script src="pack-prelude.js"></script>
 </head>
@@ -564,8 +565,8 @@
 
   <nav class="app-nav" id="appNav" aria-label="主导航">
     <div class="app-nav-head">
-      <button type="button" class="app-brand" onclick="switchAppPage('warehouse')" title="卡藏">
-        <img class="app-brand-mark" src="assets/logo.png" width="32" height="32" alt="">
+      <button type="button" class="app-brand" onclick="switchAppPage('warehouse')" title="卡藏 卡片式提示词仓库">
+        <img class="app-brand-mark" src="assets/logo.png" width="32" height="32" alt="卡藏">
         <span class="app-brand-name"><span class="app-brand-kazang">卡藏</span></span>
       </button>
       <button type="button" class="app-nav-collapse-btn" id="appNavCollapseBtn" aria-label="收起侧栏" title="收起侧栏（仅图标）">
@@ -627,7 +628,7 @@
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status" aria-live="polite"></p>
       <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260627m</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260702b</p>
     </div>
   </nav>
 
@@ -1165,7 +1166,7 @@
               </div>
               <div class="imagegen-mj-imagine-fields" id="imageGenMjImagineFields">
               <p class="panel-hint imagegen-mj-help" id="imageGenMjHelp">
-                一次出 4 张图，四宫格自动存入同一张卡片（最多 5 张），预览里可切换查看。上传参考图即为图生图。
+                一次出 4 张图，四宫格合并为一条最近生成（最多 5 张），预览里可切换查看。上传参考图即为图生图。
                 风格化越高越艺术；混乱度越高构图越随机；垫图权重在垫图时生效。
               </p>
               <div class="imagegen-params-row">
@@ -1213,7 +1214,7 @@
               </div>
               <label for="imageGenMjNegative">反向提示词</label>
               <textarea id="imageGenMjNegative" class="settings-input imagegen-field-compact imagegen-mj-negative" maxlength="500" rows="3" placeholder="排除的内容，如 ugly, blurry、低质量"></textarea>
-              <p class="imagegen-mj-gallery-note">Midjourney 四宫格<strong>自动存入同一张卡片</strong>（最多 5 张），预览里切换即可，无需付费放大。变体按一次生图同价扣积分。</p>
+              <p class="imagegen-mj-gallery-note">Midjourney 四宫格<strong>合并为一条最近生成</strong>（最多 5 张），喜欢请点「存入库」。变体按一次生图同价扣积分。</p>
               </div>
             </div>
             <div class="imagegen-params-row imagegen-params-row--size">
@@ -1378,7 +1379,6 @@
             <details class="imagegen-inspire-fold" id="imageGenInspireFold">
               <summary class="imagegen-inspire-fold-summary">
                 <span class="imagegen-inspire-fold-title">灵感抽卡</span>
-                <span class="imagegen-inspire-fold-badge">强烈推荐</span>
               </summary>
               <div class="imagegen-inspire-fold-body" id="imageGenModeInspire" data-imagegen-mode-panel="inspire">
                 <div class="imagegen-inspire-controls">
@@ -1445,7 +1445,7 @@
           </div>
           <aside class="imagegen-side">
             <div class="imagegen-feed-tabs" role="tablist">
-              <button type="button" class="imagegen-feed-tab active" data-feed-tab="warehouse" role="tab">仓库</button>
+              <button type="button" class="imagegen-feed-tab active" data-feed-tab="recent" role="tab">最近</button>
               <button type="button" class="imagegen-feed-tab" data-feed-tab="community" role="tab">获取</button>
             </div>
             <div class="imagegen-community-filters hidden" id="imageGenCommunityFilters">
@@ -1687,21 +1687,21 @@
   <script src="canvas-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260701k"></script>
+  <script src="api-client.js?v=20260702g"></script>
   <script>
     (function () {
       var FALLBACK = [
         { id: 'gpt-image-2-vip', label: 'GPT Image 2 VIP' },
         { id: 'gpt-image-2', label: 'GPT Image 2' },
         { id: 'apimart-gpt-image-2-official-budget', label: 'GPT Image 2 · 特价' },
-        { id: 'apimart-gpt-image-2', label: 'GPT Image 2 · 备用' },
+        { id: 'apimart-gpt-image-2', label: 'GPT Image 2' },
         { id: 'ithink-gpt-image-2-slow', label: 'GPT Image 2 · 经济' },
         { id: 'mooko-gpt-image-2-pro', label: 'GPT Image 2 Pro · 慢速' },
         { id: 'nano-banana-pro', label: 'Nano Banana Pro' },
-        { id: 'apimart-seedream-5-lite', label: 'Seedream 5 Lite · 备用' },
-        { id: 'apimart-gemini-2-5-flash-preview', label: 'Nano Banana Fast · 备用' },
-        { id: 'apimart-gemini-3-1-flash-preview', label: 'Nano Banana 2 · 备用' },
-        { id: 'apimart-gemini-3-pro-preview', label: 'Nano Banana Pro · 备用' },
+        { id: 'apimart-seedream-5-lite', label: 'Seedream 5 Lite' },
+        { id: 'apimart-gemini-2-5-flash-preview', label: 'Nano Banana Fast' },
+        { id: 'apimart-gemini-3-1-flash-preview', label: 'Nano Banana 2' },
+        { id: 'apimart-gemini-3-pro-preview', label: 'Nano Banana Pro' },
         { id: 'apimart-wan2-7-image', label: '万相 2.7' },
         { id: 'apimart-wan2-7-image-pro', label: '万相 2.7 Pro' },
         { id: 'apimart-flux-kontext-pro', label: 'Flux Kontext Pro' },
@@ -1738,16 +1738,16 @@
       });
     })();
   </script>
+  <script src="app-router.js"></script>
   <script src="pack-foundation.js"></script>
-  <script src="supabase-sync.js?v=20260701k"></script>
+  <script src="supabase-sync.js?v=20260702g"></script>
   <script src="pack-core.js"></script>
   <script src="pack-account.js"></script>
-  <script src="vendor/masonry.pkgd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js'"></script>
   <script src="pack-viewer.js"></script>
   <script src="pack-appreciate.js"></script>
   <script src="pack-lightbox.js"></script>
-  <script src="card-gallery.js?v=20260701k"></script>
-  <script src="script.js?v=20260701k"></script>
+  <script src="card-gallery.js?v=20260702g"></script>
+  <script src="script.js?v=20260702g"></script>
   <script src="pack-imagegen.js"></script>
   <script src="pack-feed.js"></script>
   <script>
@@ -1765,10 +1765,10 @@
       } catch (e) { /* ignore */ }
     })();
   </script>
-  <script src="community-public-feed.js?v=20260701k"></script>
-  <script src="features-draft.js?v=20260701k"></script>
+  <script src="community-public-feed.js?v=20260702g"></script>
+  <script src="features-draft.js?v=20260702g"></script>
   <script src="pack-extra.js"></script>
-  <script src="features-assets.js?v=20260701k"></script>
+  <script src="features-assets.js?v=20260702g"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

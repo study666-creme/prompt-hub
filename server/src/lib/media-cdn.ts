@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import type { Env } from '../env';
 import { ApiError } from './errors';
 import { storagePathFromRef } from './image-archive';
+import { resolveImageRefForJob } from './recover-generation-warehouse';
 import { createAdminClient } from './supabase';
 import { deleteFromR2, downloadCardImage, uploadCardImage, cardImageExists } from './r2-storage';
 
@@ -534,6 +535,32 @@ export async function findFirstExistingStoragePath(
   return null;
 }
 
+/** CDN 拉取 generated/_grid 404 时：按 job 记录重新归档原图并生成 grid */
+async function tryRecoverGeneratedGridBlob(
+  c: Context<{ Bindings: Env }>,
+  admin: ReturnType<typeof createAdminClient>,
+  gridClean: string
+): Promise<Blob | null> {
+  const m = gridClean.match(/^([^/]+)\/generated\/(.+?)_grid\.(jpe?g|webp|png)$/i);
+  if (!m) return null;
+  const userId = m[1];
+  const assetStem = m[2];
+  const { data: job, error } = await admin
+    .from('generation_requests')
+    .select('id, result_image_url, status, user_id, meta, resolution, prompt')
+    .eq('id', assetStem)
+    .maybeSingle();
+  if (error || !job || job.user_id !== userId || job.status !== 'completed') return null;
+  const ref = await resolveImageRefForJob(admin, userId, assetStem, job, c.env);
+  if (!ref) return null;
+  const primaryPath = storagePathFromRef(ref);
+  if (!primaryPath) return null;
+  const gridBlob = await buildGridBlobFromPrimary(c.env, admin, primaryPath);
+  if (!(await isAcceptableGridBlob(gridBlob))) return null;
+  c.executionCtx.waitUntil(uploadCardImage(c.env, gridClean, gridBlob!, 'image/jpeg').catch(() => {}));
+  return gridBlob;
+}
+
 export async function serveCachedStorageImage(
   c: Context<{ Bindings: Env }>,
   path: string
@@ -593,6 +620,14 @@ export async function serveCachedStorageImage(
     }
   }
 
+  if (!body && isGrid && clean.includes('/generated/')) {
+    const recovered = await tryRecoverGeneratedGridBlob(c, admin, clean);
+    if (recovered) {
+      body = recovered;
+      contentType = 'image/jpeg';
+    }
+  }
+
   if (!body) {
     throw new ApiError(404, 'NOT_FOUND', '图片不存在');
   }
@@ -614,6 +649,37 @@ export async function serveCachedStorageImage(
   });
   c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
   return response;
+}
+
+/** 签名 grid 前先确保 R2 有 _grid 文件，避免 /media/i/ 返回 JSON 404 */
+export async function ensureGridPathForSigning(
+  c: Context<{ Bindings: Env }>,
+  rawPath: string,
+  variant: string
+): Promise<string> {
+  const admin = createAdminClient(c.env);
+  const clean = rawPath.replace(/^\//, '');
+  const signPath = signingPathForVariant(clean, variant).replace(/^\//, '');
+  if (variant === 'full') return signPath;
+  if (await cardImageExists(c.env, signPath, admin)) return signPath;
+
+  const primaryCandidates: string[] = [];
+  if (/_grid\.(jpe?g|webp|png)$/i.test(signPath)) {
+    primaryCandidates.push(...primaryCandidatesFromGridPath(signPath));
+  } else {
+    primaryCandidates.push(clean);
+  }
+  const primary = await findFirstExistingStoragePath(
+    admin,
+    primaryCandidates,
+    CARD_IMAGES_BUCKET,
+    c.env
+  );
+  if (primary) {
+    const materialized = await materializeGridForPrimaryPath(c.env, admin, primary);
+    if (materialized) return materialized;
+  }
+  return signPath;
 }
 
 export { TOKEN_TTL_SEC as MEDIA_CDN_TOKEN_TTL_SEC };
