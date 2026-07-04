@@ -1124,12 +1124,14 @@
       if (!window.SupabaseSync?.isLoggedIn?.()) return { ok: false, error: 'not_logged_in' };
       if (warehouseBulkRepairInflight) return warehouseBulkRepairInflight;
 
-      const batchMax = Math.min(80, Math.max(1, Number(opts.max) || 40));
+      const batchMax = Math.min(20, Math.max(1, Number(opts.max) || 16));
       const maxRounds = Math.min(40, Math.max(1, Number(opts.maxRounds) || 20));
       const silent = opts.silent === true;
       const roundDelayMs = Math.min(5000, Math.max(800, Number(opts.roundDelayMs) || 1200));
+      let liveBatchMax = batchMax;
 
       warehouseBulkRepairInflight = (async () => {
+        window.__phBulkRepairActive = true;
         let offset = 0;
         let totalRepaired = 0;
         let totalCandidates = 0;
@@ -1139,7 +1141,7 @@
         window.SupabaseSync?.bootstrapWarehouseMediaCache?.({ clearAllMissing: true });
         window.SupabaseSync?.clearSignedUrlCache?.();
         window.SupabaseSync?.clearListImageMissMarks?.();
-        if (!silent) console.info('[warehouse-repair] start', { batchMax, maxRounds, roundDelayMs });
+        if (!silent) console.info('[warehouse-repair] start', { batchMax: liveBatchMax, maxRounds, roundDelayMs });
 
         if (!silent) {
           setCloudSyncPhase('syncing', '正在修复卡片库图片…');
@@ -1149,7 +1151,7 @@
         async function callRepair() {
           return window.PromptHubApi.recoverWarehouseFromJobs({
             mode: 'repair',
-            max: batchMax,
+            max: liveBatchMax,
             days: 365,
             offset,
             providerScope: 'all'
@@ -1159,8 +1161,11 @@
         for (let round = 0; round < maxRounds; round += 1) {
           let res = await callRepair();
           if (!res?.ok && (res?.code === 'NETWORK_ERROR' || res?.status === 503 || res?.status === 524)) {
-            if (!silent) console.warn('[warehouse-repair] 网络/超时，3s 后重试…', res.code || res.status);
-            await new Promise((r) => setTimeout(r, 3000));
+            liveBatchMax = Math.max(8, Math.floor(liveBatchMax / 2));
+            if (!silent) {
+              console.warn('[warehouse-repair] 503/超时（非 CORS 配置问题），降为', liveBatchMax, '张/批，8s 后重试…');
+            }
+            await new Promise((r) => setTimeout(r, 8000));
             res = await callRepair();
           }
           if (!res?.ok) {
@@ -1225,6 +1230,7 @@
         if (!silent) console.info('[warehouse-repair] done', { totalRepaired, totalCandidates });
         return { ok: true, repaired: totalRepaired, totalCandidates };
       })().finally(() => {
+        window.__phBulkRepairActive = false;
         warehouseBulkRepairInflight = null;
       });
 

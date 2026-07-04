@@ -474,12 +474,15 @@ export async function repairWarehouseCardImagesFromJobs(
   userId: string,
   opts: RecoverWarehouseOpts = {}
 ): Promise<RecoverWarehouseResult> {
-  const max = Math.min(48, Math.max(1, opts.max ?? 24));
+  /** 浏览器批量 repair 须小批，否则 Worker CPU 超时 → 边缘 503（浏览器误报 CORS） */
+  const scanMax = Math.min(20, Math.max(1, opts.max ?? 12));
+  const repairMax = Math.min(8, scanMax);
   const { payload, cards } = await loadUserPayload(admin, userId);
   const cardOffset = Math.max(0, opts.offset ?? 0);
-  const scanWindow = max;
-  const cardsSlice = cards.slice(cardOffset, cardOffset + scanWindow);
-  const nextOffset = cardOffset + scanWindow < cards.length ? cardOffset + scanWindow : null;
+  const cardsSlice = cards.slice(cardOffset, cardOffset + scanMax);
+  const nextOffset = cardOffset + scanMax < cards.length ? cardOffset + scanMax : null;
+  const storageMode = opts.env ? mediaStorageMode(opts.env) : 'supabase';
+  const r2Enabled = !!(opts.env && hasR2(opts.env));
 
   type Candidate = { card: Record<string, unknown>; jobId: string; mode: 'grid' | 'full' | 'r2_backfill' };
   const candidates: Candidate[] = [];
@@ -488,7 +491,12 @@ export async function repairWarehouseCardImagesFromJobs(
     const cardId = String(card.id || '');
     const jobId = String(card.genJobId || '');
     const imageRef = String(card.image || '');
-    if (!imageRef || !cardId) continue;
+    if (!cardId) continue;
+    if (!imageRef && !jobId) continue;
+    if (!imageRef && jobId) {
+      candidates.push({ card, jobId, mode: 'full' });
+      continue;
+    }
     const resolution = String(card.resolution || '1k');
     const minBytes = jobId ? expectedMinFullBytes(resolution) : MIN_IMAGE_BYTES;
     const primaryCandidates = primaryPathFromImageRef(imageRef, userId, cardId).slice(0, 2);
@@ -497,15 +505,16 @@ export async function repairWarehouseCardImagesFromJobs(
     let supabasePrimarySize = 0;
     for (const p of primaryCandidates) {
       const clean = p.replace(/^\//, '');
-      if (opts.env && hasR2(opts.env)) {
-        r2PrimarySize = Math.max(r2PrimarySize, await r2ObjectSize(opts.env, clean));
+      if (r2Enabled) {
+        r2PrimarySize = Math.max(r2PrimarySize, await r2ObjectSize(opts.env!, clean));
       }
-      supabasePrimarySize = Math.max(supabasePrimarySize, await supabaseListedSize(admin, clean));
+      if (!r2Enabled || r2PrimarySize < minBytes) {
+        supabasePrimarySize = Math.max(supabasePrimarySize, await supabaseListedSize(admin, clean));
+      }
       if (!primaryPath && (r2PrimarySize >= minBytes || supabasePrimarySize >= minBytes)) {
         primaryPath = p;
       }
     }
-    const storageMode = opts.env ? mediaStorageMode(opts.env) : 'supabase';
     let primaryOk = storageMode === 'r2-first'
       ? r2PrimarySize >= minBytes
       : Math.max(r2PrimarySize, supabasePrimarySize) >= minBytes;
@@ -513,13 +522,15 @@ export async function repairWarehouseCardImagesFromJobs(
       primaryOk = false;
     }
     const primarySize = Math.max(r2PrimarySize, supabasePrimarySize);
-    const gridOk = primaryPath ? await gridPathOk(admin, primaryPath, opts.env) : false;
+    const gridOk = primaryOk && primaryPath
+      ? await gridPathOk(admin, primaryPath, opts.env)
+      : false;
     if (primaryOk && gridOk) continue;
     if (primaryOk && !gridOk) {
       candidates.push({ card, jobId, mode: 'grid' });
       continue;
     }
-    if (!primaryOk && primarySize >= minBytes && opts.env && hasR2(opts.env)) {
+    if (!primaryOk && primarySize >= minBytes && r2Enabled) {
       candidates.push({ card, jobId, mode: 'r2_backfill' });
       continue;
     }
@@ -527,7 +538,7 @@ export async function repairWarehouseCardImagesFromJobs(
     candidates.push({ card, jobId, mode: 'full' });
   }
 
-  const batch = candidates.slice(0, max);
+  const batch = candidates.slice(0, repairMax);
   const jobMap = new Map(
     (await loadJobsByIds(
       admin,

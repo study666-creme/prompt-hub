@@ -198,6 +198,7 @@
 | **修复（build `20260704c`）** | 自有生图卡（`genJobId` / `cr_`）grid 未就绪时 **允许 full 列表缩略**；`pickCreationFeedImage` + 多 ref fallback；打开页/升构建号 **清 missing 缓存**（`index.html` bump 逻辑）；最近 Feed 失败 **不再 markPathMissing**；加强 quiet repair |
 | **为何能「自己补回来」** | 强刷到新构建号 → 清错误 missing 标记 → 列表可加载 CDN full → `CardImageLoader` / `WarehouseThumb` / 登录后 idle `repairGeneratedCardImagesQuiet` 陆续拉图，无需手跑控制台 |
 | **仍补不回** | Console 404 且 **`genJobId` 无 + 云端 API 无图** → 原图从未进 R2/Supabase 或上游链已过期；跑 `runWarehouseBulkRepair` 仍 0 则真丢 |
+| **503 + CORS 红字** | **不是跨域配置坏了**：`recover-warehouse` / `warehouse-thumbs` 一次扫 **40+** 张 → Worker **CPU 超时**，Cloudflare 边缘 503 **不带** CORS 头 → 浏览器误报 CORS。用小批：`runWarehouseBulkRepair({ max: 16 })` 或终端 `run-warehouse-repair.mjs` |
 | **诊断** | 卡片库：`await diagnoseGreyWarehouseCards(12)` · 最近 Tab：`await FeatureDraft.diagnoseRecentFeedThumbs(8)` |
 | **勿再犯** | 列表区禁止 full 时须 **排除自有 `/generated/` 卡**；repair 不能因已有 `storage://` 就 skip；改 `__APP_BUILD__` 时保留清 `ph_missing_paths_v1` |
 

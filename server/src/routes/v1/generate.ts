@@ -799,7 +799,7 @@ generateRoutes.get('/jobs/history', async c => {
 });
 
 const recoverWarehouseSchema = z.object({
-  max: z.number().int().min(1).max(80).optional(),
+  max: z.number().int().min(1).max(24).optional(),
   days: z.number().int().min(1).max(365).optional(),
   hours: z.number().int().min(1).max(168).optional(),
   offset: z.number().int().min(0).max(5000).optional(),

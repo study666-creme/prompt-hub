@@ -158,6 +158,11 @@
 
   async function flushPending() {
     if (!pending.length) return;
+    if (window.__phBulkRepairActive) {
+      const defer = pending.splice(0, pending.length);
+      defer.forEach((item) => item.resolve(''));
+      return;
+    }
     const { max } = mobileBatchTuning();
     const batch = pending.splice(0, max);
     if (pending.length) scheduleFlush();

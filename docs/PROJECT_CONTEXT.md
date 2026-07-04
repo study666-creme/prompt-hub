@@ -4,17 +4,18 @@
 
 ---
 
-## 当前部署阶段（2026-07-04 · 构建 `20260704c`）
+## 当前部署阶段（2026-07-04 · 构建 `20260704e`）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | https://prompt-hubs.com · **`window.__APP_BUILD__` = `20260704c`** |
+| **Pages** | https://prompt-hubs.com · **`window.__APP_BUILD__` = `20260704e`** |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com · `MEDIA_STORAGE_MODE=r2-first` |
 | **架构真实进度** | **`docs/ARCH-STATUS-REAL.md`**（勿信 `MISSION-COMPLETE.md` 旧版） |
 
 ### 已打通
 
-- ✅ **卡片库 / 最近生成灰块大面积自恢复**（`20260704c`）：自有生图卡列表允许 full 降级；升构建号清 `ph_missing_paths_v1`；多图源 fallback
+- ✅ **批量 repair 防 503**（`20260704e`）：浏览器默认 16 张/批、503 自动减半重试；repair 期间暂停 `warehouse-thumbs`
+- ✅ **卡片库 / 最近生成灰块自恢复**（`20260704c`）
 - ✅ **`pack-media-client.js`** → `window.PromptHubMedia`（Phase 1～3 生产桥接）
 - ✅ Worker 分页 `recover-warehouse` + `r2_backfill`（避免 848 张全扫 503）
 - ✅ `/health`、兑换、生图 API
@@ -26,7 +27,7 @@
 
 ### 下一步
 
-1. 剩余灰卡：`await runWarehouseBulkRepair({ max: 40, maxRounds: 10 })` 或终端 `node scripts/run-warehouse-repair.mjs --all`
+1. 剩余灰卡：用小批 `await runWarehouseBulkRepair({ max: 16, maxRounds: 10 })`（勿用 40，会 503）
 2. MemFire 迁库见 `docs/MEMFIRE-MIGRATION.md`
 
 ```powershell
