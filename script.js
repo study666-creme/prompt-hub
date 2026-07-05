@@ -3995,8 +3995,10 @@
         const idx = selectedCardId === full.id ? panelGalleryIndex : 0;
         const ref = gallery[idx] || full.image;
         const resolve = window.PromptHubCardGallery?.resolveMediaUrl;
+        const refIsEphemeral = /^https?:\/\//i.test(ref || '')
+          && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(ref);
         const openWith = (src) => {
-        window.openLightbox(src || domGrid || ref, {
+        window.openLightbox(src || domGrid || (refIsEphemeral ? '' : ref), {
           ...lbBase,
           cardGalleryUrls: gallery,
           mjGalleryUrls: gallery,

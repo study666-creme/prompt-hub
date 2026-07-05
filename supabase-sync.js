@@ -3622,7 +3622,12 @@
         }
       }
     }
-    if (/^https?:\/\//i.test(image) && isEphemeralUpstreamImageUrl(image) && opts.allowRemoteArchive !== true) {
+    if (
+      /^https?:\/\//i.test(image)
+      && isEphemeralUpstreamImageUrl(image)
+      && opts.allowRemoteArchive !== true
+      && !opts?.jobId
+    ) {
       const jobId = opts?.jobId || null;
       if (jobId && window.WarehouseThumb?.resolveForCard) {
         void window.WarehouseThumb.resolveForCard(image, { jobId, assetId: cardId, cardId });
@@ -3667,7 +3672,7 @@
       return uploadGeneratedImage(storeId, image);
     }
     if (/^https?:\/\//i.test(image)) {
-      if (opts.allowRemoteArchive !== true) {
+      if (opts.allowRemoteArchive !== true && !opts?.jobId) {
         if (isEphemeralUpstreamImageUrl(image)) return image;
         if (window.WarehouseThumb?.needsServerThumb?.(image, opts?.jobId)) return image;
       }

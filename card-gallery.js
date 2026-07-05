@@ -420,8 +420,22 @@
       : (opts.jobId ? String(opts.jobId) : null);
     const isCoverSlot = galleryIndex == null || galleryIndex <= 0;
     const wantFull = opts.preferFull === true;
+    const isEphemeral = /^https?:\/\//i.test(ref)
+      && global.SupabaseSync?.isEphemeralUpstreamImageUrl?.(ref);
+    if (isEphemeral && slotJobId && global.WarehouseThumb?.resolveForCard) {
+      try {
+        const wh = await global.WarehouseThumb.resolveForCard(ref, {
+          jobId: slotJobId,
+          assetId: cardId,
+          cardId,
+          galleryIndex: galleryIndex != null ? galleryIndex : 0
+        });
+        if (wh) return wh;
+      } catch (e) { /* ignore */ }
+    }
     if (/^https?:\/\//i.test(ref) && !global.SupabaseSync?.isInvalidMediaUrl?.(ref)) {
       if (!global.SupabaseSync?.isStorageRef?.(ref)) {
+        if (isEphemeral) return '';
         if (wantFull) return ref;
         if (global.SupabaseSync?.isGridDisplayUrl?.(ref)) return ref;
         return '';

@@ -70,6 +70,7 @@
       assetId: opts.cardId || null,
       jobId: opts.cardJobId || opts.mjJobId || null,
       imageGen: !!opts.imageGen,
+      fallbackSrc: opts.fallbackSrc || '',
       preferFull: opts.preferFull !== false
     };
     window.__lightboxMjGallery = window.__lightboxCardGallery;
@@ -485,7 +486,11 @@
     const resolve = window.PromptHubCardGallery?.resolveMediaUrl;
     const apply = (src) => {
       syncLightboxGalleryUi(item.tileIndex ?? 0);
-      setLightboxSrc(src || url, {
+      const fallbackUrl = /^https?:\/\//i.test(url)
+        && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(url)
+        ? ''
+        : url;
+      setLightboxSrc(src || fallbackUrl, {
         imageGen: !!gallery.imageGen,
         feedKey: gallery.feedKey,
         cardId: gallery.assetId,
@@ -495,6 +500,7 @@
         mjGalleryIndex: item.tileIndex ?? 0,
         cardJobId: gallery.jobId,
         mjJobId: gallery.jobId,
+        fallbackSrc: gallery.fallbackSrc || '',
         preferFull: gallery.preferFull !== false
       });
     };

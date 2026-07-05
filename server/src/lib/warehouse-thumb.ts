@@ -54,7 +54,7 @@ export async function ensureWarehouseJobThumb(
     const ref = await resolveImageRefForJob(
       admin,
       userId,
-      generationStorageAssetId(jobId),
+      jobId,
       job,
       c.env
     );

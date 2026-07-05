@@ -13,6 +13,7 @@ import {
 const BUCKET = 'card-images';
 const MIN_IMAGE_BYTES = 512;
 const GRID_MIN_BYTES = 2048;
+const MAX_GALLERY_IMAGES = 5;
 
 function stripGridSuffix(path: string): string {
   return path.replace(/_grid\.(jpe?g|webp|png)$/i, '.jpg');
@@ -139,34 +140,71 @@ function slotIndexFromJobId(jobId: string): number {
   return Number.isFinite(n) && n > 1 ? n - 1 : 0;
 }
 
+function slotJobId(baseJobId: string, slotIndex: number): string {
+  const base = String(baseJobId || '').replace(/#\d+$/, '');
+  if (!Number.isFinite(slotIndex) || slotIndex <= 0) return base;
+  return `${base}#${slotIndex + 1}`;
+}
+
+function stringList(raw: unknown, max = MAX_GALLERY_IMAGES): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((u) => (typeof u === 'string' ? u.trim() : ''))
+    .filter(Boolean)
+    .slice(0, max);
+}
+
+function mjGalleryRefsFromJob(job: JobRow): string[] {
+  const meta = (job.meta || {}) as Record<string, unknown>;
+  const gallery = stringList(meta.mjGalleryUrls);
+  if (gallery.length) return gallery;
+  const composite = typeof meta.mjCompositeUrl === 'string' ? meta.mjCompositeUrl.trim() : '';
+  const tiles = stringList(meta.mjGridUrls, 4);
+  if (composite) return [composite, ...tiles.filter((u) => u !== composite)].slice(0, MAX_GALLERY_IMAGES);
+  if (tiles.length) return tiles.slice(0, MAX_GALLERY_IMAGES);
+  const raw = typeof job.result_image_url === 'string' ? job.result_image_url.trim() : '';
+  return raw ? [raw] : [];
+}
+
 function pickJobImageUrlForSlot(job: JobRow, slotIndex: number): string | null {
   const meta = (job.meta || {}) as Record<string, unknown>;
-  const urls: string[] = [];
-  if (Array.isArray(meta.mjGalleryUrls)) {
-    for (const u of meta.mjGalleryUrls as unknown[]) {
-      if (typeof u === 'string' && u.trim()) urls.push(u.trim());
-    }
-  }
-  if (!urls.length) {
-    const composite =
-      typeof meta.mjCompositeUrl === 'string' && /^https:\/\//i.test(meta.mjCompositeUrl)
-        ? meta.mjCompositeUrl.trim()
-        : '';
-    const tiles = Array.isArray(meta.mjGridUrls)
-      ? (meta.mjGridUrls as string[]).filter((u) => typeof u === 'string' && u.trim())
-      : [];
-    if (composite) urls.push(composite, ...tiles);
-    else urls.push(...tiles);
-  }
-  const pick = urls[slotIndex] || urls[0];
-  if (pick && /^https:\/\//i.test(pick)) return pick;
+  const urls = mjGalleryRefsFromJob(job);
+  const pick = urls[slotIndex] || (slotIndex <= 0 ? urls[0] : '');
+  if (pick && (/^https:\/\//i.test(pick) || isStorageRef(pick))) return pick;
   const raw = job.result_image_url;
-  if (typeof raw === 'string' && /^https:\/\//i.test(raw)) return raw;
+  if (slotIndex <= 0 && typeof raw === 'string' && (/^https:\/\//i.test(raw) || isStorageRef(raw))) return raw;
   const upstream =
-    typeof meta.upstreamImageUrl === 'string' && /^https:\/\//i.test(meta.upstreamImageUrl)
+    slotIndex <= 0 && typeof meta.upstreamImageUrl === 'string' && /^https:\/\//i.test(meta.upstreamImageUrl)
       ? meta.upstreamImageUrl
       : null;
   return upstream;
+}
+
+function cardGalleryRefs(card: Record<string, unknown>): string[] {
+  let imgs = stringList(card.cardImages);
+  if (!imgs.length) imgs = stringList(card.mjGridUrls);
+  if (!imgs.length && typeof card.image === 'string' && card.image.trim()) imgs = [card.image.trim()];
+  if (card.isMidjourney === true && typeof card.mjCompositeUrl === 'string' && card.mjCompositeUrl.trim()) {
+    const composite = card.mjCompositeUrl.trim();
+    const tiles = stringList(card.mjGridUrls, 4);
+    imgs = [composite, ...(tiles.length ? tiles : imgs.slice(1)).filter((u) => u !== composite)]
+      .slice(0, MAX_GALLERY_IMAGES);
+  }
+  return imgs.slice(0, MAX_GALLERY_IMAGES);
+}
+
+function sameStringList(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((v, i) => v === b[i]);
+}
+
+function cardNeedsGalleryRepair(card: Record<string, unknown>): boolean {
+  const jobId = String(card.genJobId || '').replace(/#\d+$/, '');
+  if (!jobId) return false;
+  const gallery = cardGalleryRefs(card);
+  const hasUnstableRef = gallery.some((ref) => ref && !isStorageRef(ref));
+  if (hasUnstableRef) return true;
+  return card.isMidjourney === true && gallery.length > 0 && gallery.length < MAX_GALLERY_IMAGES;
 }
 
 export async function resolveImageRefForJob(
@@ -174,7 +212,8 @@ export async function resolveImageRefForJob(
   userId: string,
   jobId: string,
   job: JobRow,
-  env?: Env
+  env?: Env,
+  opts: { forceRearchive?: boolean } = {}
 ): Promise<string | null> {
   const assetKey = String(jobId).replace(/#/g, '-');
   const minBytes = expectedMinFullBytes(
@@ -185,9 +224,11 @@ export async function resolveImageRefForJob(
     `${userId}/generated/${assetKey}.jpg`,
     `${userId}/generated/${assetKey}.webp`
   ];
-  for (const genPath of genPaths) {
-    if (await storageBlobOk(admin, genPath, minBytes, env)) {
-      return toStorageRef(genPath);
+  if (!opts.forceRearchive) {
+    for (const genPath of genPaths) {
+      if (await storageBlobOk(admin, genPath, minBytes, env)) {
+        return toStorageRef(genPath);
+      }
     }
   }
 
@@ -218,6 +259,83 @@ export async function resolveImageRefForJob(
     }
   }
   return null;
+}
+
+async function materializeGridForImageRef(
+  admin: SupabaseClient,
+  env: Env | undefined,
+  imageRef: string | null
+): Promise<void> {
+  if (!env || !imageRef) return;
+  const primaryPath = storagePathFromRef(imageRef);
+  if (!primaryPath) return;
+  await materializeGridForPrimaryPath(env, admin, primaryPath).catch(() => {});
+}
+
+async function repairCardGalleryFromJob(
+  admin: SupabaseClient,
+  userId: string,
+  card: Record<string, unknown>,
+  job: JobRow,
+  env?: Env
+): Promise<{ changed: boolean; recovered: number }> {
+  const baseJobId = String(card.genJobId || '').replace(/#\d+$/, '');
+  if (!baseJobId) return { changed: false, recovered: 0 };
+
+  const current = cardGalleryRefs(card);
+  const jobGallery = mjGalleryRefsFromJob(job);
+  const targetCount = Math.min(
+    MAX_GALLERY_IMAGES,
+    Math.max(current.length, jobGallery.length, card.isMidjourney === true ? 1 : 0)
+  );
+  if (targetCount <= 0) return { changed: false, recovered: 0 };
+
+  const next: string[] = [];
+  let recovered = 0;
+  for (let i = 0; i < targetCount; i += 1) {
+    const existing = current[i] || '';
+    const hasJobSource = !!jobGallery[i];
+    let ref = await resolveImageRefForJob(
+      admin,
+      userId,
+      slotJobId(baseJobId, i),
+      job,
+      env,
+      { forceRearchive: i > 0 && hasJobSource }
+    );
+    if (!ref && existing && /^https:\/\//i.test(existing) && !isStorageRef(existing)) {
+      try {
+        ref = await archiveRemoteImage(admin, userId, generationStorageAssetId(slotJobId(baseJobId, i)), existing, {
+          maxAttempts: 2,
+          env
+        });
+      } catch {
+        ref = null;
+      }
+    }
+    if (ref) {
+      next.push(ref);
+      if (ref !== existing) recovered += 1;
+      await materializeGridForImageRef(admin, env, ref);
+      continue;
+    }
+    if (existing) next.push(existing);
+  }
+
+  if (!next.length || sameStringList(current, next)) {
+    return { changed: false, recovered };
+  }
+
+  card.cardImages = next;
+  if (card.isMidjourney === true) {
+    card.mjCompositeUrl = next[0] || null;
+    card.mjGridUrls = next.slice(1, MAX_GALLERY_IMAGES);
+    card.image = next[1] || next[0] || card.image || null;
+  } else {
+    card.image = next[0] || card.image || null;
+  }
+  card.updatedAt = Date.now();
+  return { changed: true, recovered };
 }
 
 export type RecoverWarehouseResult = {
@@ -484,7 +602,7 @@ export async function repairWarehouseCardImagesFromJobs(
   const storageMode = opts.env ? mediaStorageMode(opts.env) : 'supabase';
   const r2Enabled = !!(opts.env && hasR2(opts.env));
 
-  type Candidate = { card: Record<string, unknown>; jobId: string; mode: 'grid' | 'full' | 'r2_backfill' };
+  type Candidate = { card: Record<string, unknown>; jobId: string; mode: 'grid' | 'full' | 'r2_backfill' | 'gallery' };
   const candidates: Candidate[] = [];
 
   for (const card of cardsSlice) {
@@ -493,6 +611,10 @@ export async function repairWarehouseCardImagesFromJobs(
     const imageRef = String(card.image || '');
     if (!cardId) continue;
     if (!imageRef && !jobId) continue;
+    if (cardNeedsGalleryRepair(card)) {
+      candidates.push({ card, jobId, mode: 'gallery' });
+      continue;
+    }
     if (!imageRef && jobId) {
       candidates.push({ card, jobId, mode: 'full' });
       continue;
@@ -615,6 +737,18 @@ export async function repairWarehouseCardImagesFromJobs(
       continue;
     }
 
+    if (mode === 'gallery') {
+      const fixedGallery = await repairCardGalleryFromJob(admin, userId, card, job, opts.env);
+      if (fixedGallery.changed) {
+        repaired += 1;
+        cardIds.push(cardId);
+      } else {
+        failures.push({ jobId, cardId, reason: 'gallery_repair_failed' });
+        skipped += 1;
+      }
+      continue;
+    }
+
     const imageRef = await resolveImageRefForJob(admin, userId, jobId, job, opts.env);
     if (!imageRef) {
       failures.push({ jobId, cardId, reason: 'no_source' });
@@ -623,15 +757,11 @@ export async function repairWarehouseCardImagesFromJobs(
     }
 
     card.image = imageRef;
+    await repairCardGalleryFromJob(admin, userId, card, job, opts.env);
     repaired += 1;
     cardIds.push(cardId);
 
-    if (opts.env) {
-      const primaryPath = storagePathFromRef(imageRef);
-      if (primaryPath) {
-        await materializeGridForPrimaryPath(opts.env, admin, primaryPath).catch(() => {});
-      }
-    }
+    await materializeGridForImageRef(admin, opts.env, imageRef);
   }
 
   if (repaired > 0) {
