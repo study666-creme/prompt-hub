@@ -30,7 +30,7 @@
   }
   function warehousePrefetchCap() {
     const mp = window.MobileUI?.getPerf?.();
-    if (mp?.warehousePrefetchCap) return Math.max(12, Number(mp.warehousePrefetchCap) || 24);
+    if (mp?.warehousePrefetchCap) return Math.max(4, Number(mp.warehousePrefetchCap) || 8);
     return 24;
   }
   /** 首屏 batch 签名张数：与 PER_PAGE=24 对齐 */
@@ -1116,7 +1116,7 @@
           applyUrlToImg(img, hit);
           return;
         }
-        if (isImgNearViewport(img, 960)) {
+        if (isImgNearViewport(img, 520)) {
           eager += 1;
           loadImg(img);
         }
@@ -1157,12 +1157,12 @@
         ? (container.id === 'imageGenFeed'
           ? '320px 0px'
           : container.id === 'cardsContainer'
-            ? (window.MobileUI?.isMobileViewport?.() ? '520px 0px' : '320px 0px')
+            ? (window.MobileUI?.isMobileViewport?.() ? '260px 0px' : '320px 0px')
             : '140px 0px')
         : isCommunityContainer(container)
           ? '360px 0px'
           : (container.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.()
-            ? '520px 0px'
+            ? '260px 0px'
             : '160px 0px');
       observer = new IntersectionObserver(onIntersect, {
         root: scrollRootFor(container) || null,
@@ -1383,7 +1383,7 @@
     const defaultCap = mobile ? (window.MobileUI?.getPerf?.()?.cardEagerCap ?? cardEagerCap()) : warehousePrefetchCap();
     const cap = max ?? defaultCap;
     let n = 0;
-    const nearPx = mobile ? 1200 : 720;
+    const nearPx = mobile ? 640 : 720;
     const imgs = sortImgsByViewport(feedImagesIn(container), container);
     imgs.forEach((img, idx) => {
       const cur = img.currentSrc || img.src || '';

@@ -7,6 +7,7 @@ export type Env = {
   MEDIA_STORAGE_MODE?: string;
   ENVIRONMENT: string;
   CORS_ORIGINS: string;
+  PUBLIC_SITE_URL?: string;
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   SUPABASE_JWT_SECRET?: string;

@@ -194,6 +194,10 @@
     let page = 1, allFilteredCards = [];
     const warehouseRenderedPages = new Set();
     const PER_PAGE = 24;
+    const MOBILE_PER_PAGE = 12;
+    function warehousePageSize() {
+      return isMobileViewport() ? MOBILE_PER_PAGE : PER_PAGE;
+    }
     const CARD_SORT_KEY = 'promptrepo_card_sort';
     let sortMode = 'updated-desc';
     try {
@@ -2674,10 +2678,11 @@
         deferAfterPagePaint(() => {
           if (!document.getElementById('pageWarehouse')?.classList.contains('active')) return;
           const container = document.getElementById('cardsContainer');
-          const start = (page - 1) * PER_PAGE;
+          const pageSize = warehousePageSize();
+          const start = (page - 1) * pageSize;
           const list = allFilteredCards.length
-            ? allFilteredCards.slice(start, start + PER_PAGE)
-            : warehouseVisibleCards(cards).slice(start, start + PER_PAGE);
+            ? allFilteredCards.slice(start, start + pageSize)
+            : warehouseVisibleCards(cards).slice(start, start + pageSize);
           const hasDom = container?.querySelector('.card[data-id]');
           if (!hasDom) {
             renderCards(true);
@@ -3973,7 +3978,7 @@
 
     async function hydrateWarehouseBackupsFromIdb(container, list) {
       if (!container || typeof getCardImageBackup !== 'function') return;
-      for (const card of (list || []).slice(0, PER_PAGE)) {
+      for (const card of (list || []).slice(0, warehousePageSize())) {
         if (!card?.id || !card?.image) continue;
         const img = container.querySelector(`.card[data-id="${card.id}"] .card-img`);
         if (!img) continue;
@@ -6282,7 +6287,7 @@
       const perfCap = window.MobileUI?.getPerf?.()?.warehousePrefetchCap ?? 24;
       const cap = mobile
         ? Math.min(perfCap, (pageCards || []).length || perfCap)
-        : Math.min(PER_PAGE, (pageCards || []).length || PER_PAGE);
+        : Math.min(warehousePageSize(), (pageCards || []).length || warehousePageSize());
       const list = (pageCards || []).slice(0, cap);
       const afterBind = () => {
         window.CardImageLoader?.boostWarehouseImages?.(container, cap);
@@ -7509,7 +7514,7 @@
     }
 
     function warehouseListSignature(list, ctx) {
-      const pageSlice = (list || []).slice(0, PER_PAGE);
+      const pageSlice = (list || []).slice(0, warehousePageSize());
       const head = pageSlice.map((c) => `${c.id}\u001f${c.updatedAt || 0}\u001f${String(c.image || '').slice(0, 48)}`).join('\u001e');
       const filterKey = [
         ctx.group || 'all',
@@ -7564,8 +7569,9 @@
         filters: [...activeFilters]
       });
 
-      const start = (page - 1) * PER_PAGE;
-      const pageCards = allFilteredCards.slice(start, start + PER_PAGE);
+      const pageSize = warehousePageSize();
+      const start = (page - 1) * pageSize;
+      const pageCards = allFilteredCards.slice(start, start + pageSize);
       const isAppend = !reset && page > 1;
       const warehouseActive = document.getElementById('pageWarehouse')?.classList.contains('active');
 
@@ -7600,8 +7606,6 @@
         return;
       }
 
-      const pageOneCards = allFilteredCards.slice(0, PER_PAGE);
-
       const preservedWarehouseImgs = reset && mobileGrid && page === 1
         ? snapshotLoadedWarehouseImages(container)
         : new Map();
@@ -7635,7 +7639,7 @@
       }
       container.classList.remove('feed-grid-centered');
       const perfCap = window.MobileUI?.getPerf?.()?.warehousePrefetchCap ?? 24;
-      const prefetchCap = Math.min(perfCap, PER_PAGE);
+      const prefetchCap = Math.min(perfCap, pageSize);
       const preparedRows = warehouseActive && window.PromptHubCardGallery?.prepareWarehousePageThumbs
         ? window.PromptHubCardGallery.prepareWarehousePageThumbs(pageCards, {
           ensure: page === 1 && !isAppend,
@@ -7643,7 +7647,9 @@
         })
         : pageCards.map((card) => ({ card, meta: null }));
       const fragment = document.createDocumentFragment();
-      const eagerImgCount = mobileGrid ? 24 : Math.min(24, pageCards.length);
+      const eagerImgCount = mobileGrid
+        ? Math.min(window.MobileUI?.getPerf?.()?.cardFirstScreenCap ?? 8, pageCards.length)
+        : Math.min(24, pageCards.length);
       preparedRows.forEach(({ card, meta }, idx) => {
         if (container.querySelector(`.card[data-id="${CSS.escape(card.id)}"]`)) return;
         const listThumb = meta ? listThumbFromWarehouseMeta(meta) : getWarehouseCardListThumb(card, { skipEnsure: true });
@@ -7859,7 +7865,7 @@
     };
     function loadNextWarehousePage() {
       if (warehouseScrollLoading) return;
-      if ((page * PER_PAGE) >= allFilteredCards.length) return;
+      if ((page * warehousePageSize()) >= allFilteredCards.length) return;
       const nextPage = page + 1;
       if (warehouseRenderedPages.has(nextPage)) return;
       warehouseScrollLoading = true;
@@ -7874,7 +7880,7 @@
     function syncWarehouseScrollSentinel(container) {
       if (!container) return;
       container.querySelectorAll('.warehouse-scroll-sentinel').forEach((el) => el.remove());
-      if ((page * PER_PAGE) >= allFilteredCards.length) {
+      if ((page * warehousePageSize()) >= allFilteredCards.length) {
         warehousePageObserver?.disconnect();
         warehouseScrollSentinel = null;
         return;
@@ -7895,7 +7901,7 @@
         loadNextWarehousePage();
       }, {
         root: root === document.body ? null : root,
-        rootMargin: '320px 0px',
+        rootMargin: isMobileViewport() ? '180px 0px' : '320px 0px',
         threshold: 0
       });
       warehousePageObserver.observe(sentinel);
@@ -7954,7 +7960,7 @@
     function onWarehouseScroll() {
       const wh = document.getElementById('cardsContainer');
       if (!wh) return;
-      if (!warehouseScrollLoading && (page * PER_PAGE) < allFilteredCards.length) {
+      if (!warehouseScrollLoading && (page * warehousePageSize()) < allFilteredCards.length) {
         const root = warehouseScrollRoot();
         if (root) {
           const remain = root.scrollHeight - root.scrollTop - root.clientHeight;
@@ -7964,7 +7970,7 @@
       if (warehouseScrollLoading) return;
       const cap = isMobileViewport()
         ? (window.MobileUI?.getPerf?.()?.cardEagerCap ?? 24)
-        : Math.min(PER_PAGE, 24);
+        : Math.min(warehousePageSize(), 24);
       window.CardImageLoader?.boostWarehouseImages?.(wh, cap);
     }
     bindWarehousePagedScroll();

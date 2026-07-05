@@ -19,13 +19,17 @@ import {
 import { isMidjourneyUpstream } from './midjourney-models';
 import type { ImageModelProvider } from './image-models-catalog';
 
-export type ImageUpstreamProvider = ImageModelProvider;
+export type ImageUpstreamProvider = ImageModelProvider | 'mooko' | 'ithink';
 
 export type ImageUpstreamBindings = {
   grsaiKey?: string;
   grsaiBase?: string;
   apimartKey?: string;
   apimartBase?: string;
+  mookoKey?: string;
+  mookoBase?: string;
+  ithinkKey?: string;
+  ithinkBase?: string;
 };
 
 export type ImageSubmitResult = {
@@ -50,11 +54,17 @@ export function upstreamBindingsFromEnv(env: Env): ImageUpstreamBindings {
     grsaiKey: env.IMAGE_API_KEY,
     grsaiBase: env.IMAGE_API_BASE_URL,
     apimartKey: env.APIMART_API_KEY,
-    apimartBase: env.APIMART_API_BASE_URL
+    apimartBase: env.APIMART_API_BASE_URL,
+    mookoKey: env.MOOKO_API_KEY,
+    mookoBase: env.MOOKO_API_BASE_URL,
+    ithinkKey: env.ITHINK_API_KEY,
+    ithinkBase: env.ITHINK_API_BASE_URL
   };
 }
 
 export function readJobProvider(meta: Record<string, unknown>): ImageUpstreamProvider {
+  if (meta.provider === 'mooko') return 'mooko';
+  if (meta.provider === 'ithink') return 'ithink';
   if (meta.provider === 'apimart') return 'apimart';
   return 'grsai';
 }
@@ -64,6 +74,8 @@ export function isProviderConfigured(
   provider: ImageUpstreamProvider
 ): boolean {
   if (provider === 'apimart') return !!bindings.apimartKey;
+  if (provider === 'mooko') return !!bindings.mookoKey;
+  if (provider === 'ithink') return !!bindings.ithinkKey;
   return !!bindings.grsaiKey;
 }
 
@@ -103,6 +115,9 @@ export async function fetchUpstreamTaskOnce(
       await fetchApimartTaskOnce(bindings.apimartKey, bindings.apimartBase, taskId)
     );
   }
+  if (provider === 'mooko' || provider === 'ithink') {
+    return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
+  }
   if (!bindings.grsaiKey) {
     return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
   }
@@ -122,6 +137,9 @@ export async function confirmUpstreamTaskOutcome(
     return apimartPollToUnified(
       await confirmApimartTaskOutcome(bindings.apimartKey, bindings.apimartBase, taskId, opts)
     );
+  }
+  if (provider === 'mooko' || provider === 'ithink') {
+    return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
   }
   if (!bindings.grsaiKey) {
     return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
@@ -167,5 +185,5 @@ export async function submitImageJobForProvider(
 }
 
 export function hasAnyImageUpstream(bindings: ImageUpstreamBindings): boolean {
-  return !!(bindings.grsaiKey || bindings.apimartKey);
+  return !!(bindings.grsaiKey || bindings.apimartKey || bindings.mookoKey || bindings.ithinkKey);
 }

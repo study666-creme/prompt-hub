@@ -27,15 +27,20 @@ import { confirmApimartTaskOutcome } from './apimart';
 const GEN_IMAGE_BUCKET = 'card-images';
 import { type DebitSplit, deductUserCredits, refundUserCredits } from './membership-credits';
 
-type JobRow = {
+export type JobRow = {
   id: string;
   user_id: string;
   credits_charged: number;
   status: string;
+  prompt?: string | null;
+  resolution?: string | null;
+  quality?: string | null;
+  size_label?: string | null;
   result_image_url: string | null;
   error_message: string | null;
   meta: Record<string, unknown> | null;
   created_at: string;
+  completed_at?: string | null;
 };
 
 export async function refundGenerationCredits(

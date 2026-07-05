@@ -74,9 +74,10 @@ export async function processFastProviderPendingSubmit(
   const claimed = await claimFastSubmit(admin, job.id, meta);
   if (!claimed) return;
 
-  const debitSplit = (claimed.debitSplit as { fromDaily?: number; fromPermanent?: number }) || {
-    fromDaily: 0,
-    fromPermanent: 0
+  const claimedSplit = (claimed.debitSplit as { fromDaily?: number; fromPermanent?: number } | undefined) || {};
+  const debitSplit = {
+    fromDaily: Number(claimedSplit.fromDaily) || 0,
+    fromPermanent: Number(claimedSplit.fromPermanent) || 0
   };
   const creditsCharged = Number(job.credits_charged) || 0;
 

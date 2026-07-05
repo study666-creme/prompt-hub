@@ -18,18 +18,18 @@
 
   /** 手机端性能参数（card-image-loader / warehouse-thumb / 首屏预热共用） */
   const MOBILE_PERF = {
-    warehousePrefetchCap: 24,
-    warehouseThumbBatch: 8,
-    warehouseThumbDelay: 0,
-    cardEagerCap: 24,
-    cardFirstScreenCap: 24,
-    igFeedPatchMax: 24,
-    igFeedPrefetchCap: 24,
-    igFeedBoostMax: 24,
-    maxResolve: 12,
-    feedMaxResolve: 10,
-    maxDownload: 10,
-    firstScreenCapMs: 5000
+    warehousePrefetchCap: 8,
+    warehouseThumbBatch: 4,
+    warehouseThumbDelay: 80,
+    cardEagerCap: 6,
+    cardFirstScreenCap: 8,
+    igFeedPatchMax: 12,
+    igFeedPrefetchCap: 12,
+    igFeedBoostMax: 10,
+    maxResolve: 4,
+    feedMaxResolve: 4,
+    maxDownload: 4,
+    firstScreenCapMs: 2800
   };
   window.MobileUI.MOBILE_PERF = MOBILE_PERF;
 
@@ -473,13 +473,14 @@
   /** 登录/同步后后台预热卡片库 grid（不阻塞 UI；单链路 prefetchWarehousePage） */
   function primeMobileWarehouseBackground(cardList) {
     if (!isMobile() || !cardList?.length) return;
-    const slice = cardList.slice(0, 24);
+    const maxCards = MOBILE_PERF.warehousePrefetchCap || 8;
+    const slice = cardList.slice(0, maxCards);
     if (window.PromptHubMedia?.prefetchWarehouseCards) {
-      void window.PromptHubMedia.prefetchWarehouseCards(slice, { capMs: 5000, maxCards: 24 });
+      void window.PromptHubMedia.prefetchWarehouseCards(slice, { capMs: 2800, maxCards });
       return;
     }
     if (window.SupabaseSync?.prefetchWarehousePage) {
-      void window.SupabaseSync.prefetchWarehousePage(slice, 5000, { maxCards: 24 });
+      void window.SupabaseSync.prefetchWarehousePage(slice, 2800, { maxCards });
     }
   }
 

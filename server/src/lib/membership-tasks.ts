@@ -138,7 +138,13 @@ export function taskRewardForKey(
   }
   const staticTasks: Record<
     string,
-    { days: number; credits: number; title: string; description: string }
+    {
+      days: number;
+      credits: number;
+      title: string;
+      description: string;
+      tier?: NonNullable<Profile['membership_tier']>;
+    }
   > = {
     login_desktop: {
       days: 1,

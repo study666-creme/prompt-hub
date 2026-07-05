@@ -515,7 +515,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     );
   }
 
-  const { data: job, error: jobErr } = await admin
+  const { data: insertedJob, error: jobErr } = await admin
     .from('generation_requests')
     .insert({
       user_id: user.id,
@@ -539,12 +539,13 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
         ...(isMidjourney ? { isMidjourney: true, mjParams: mjParams || {} } : {})
       }
     })
-    .select('id')
+    .select('*')
     .single();
 
-  if (jobErr) {
+  if (jobErr || !insertedJob) {
     throw wrapGenerateError(jobErr, '创建生图任务失败');
   }
+  const job = insertedJob as JobRow;
 
   let upstreamTaskId: string | null = null;
   let submitImmediateUrl: string | null = null;
@@ -804,9 +805,20 @@ const recoverWarehouseSchema = z.object({
   hours: z.number().int().min(1).max(168).optional(),
   offset: z.number().int().min(0).max(5000).optional(),
   mode: z.enum(['import', 'repair', 'extras', 'settle']).optional(),
+  providerScope: z.enum(['all', 'grs', 'grsai', 'apimart']).optional(),
   jobIds: z.array(z.string().min(8).max(64)).max(10).optional(),
   deletedGenerationJobTombstones: z.record(z.string(), z.number()).optional()
 });
+
+type RecoverProviderScope = 'all' | 'grs' | 'apimart';
+
+function normalizeRecoverProviderScope(
+  scope: z.infer<typeof recoverWarehouseSchema>['providerScope']
+): RecoverProviderScope | undefined {
+  if (scope === 'grsai') return 'grs';
+  if (scope === 'all' || scope === 'grs' || scope === 'apimart') return scope;
+  return undefined;
+}
 
 /** 服务端一键恢复生图到卡片库（绕过浏览器 media/fetch 401） */
 generateRoutes.post('/recover-warehouse', async c => {
@@ -821,12 +833,13 @@ generateRoutes.post('/recover-warehouse', async c => {
   }
   try {
     const mode = body.mode || 'import';
+    const providerScope = normalizeRecoverProviderScope(body.providerScope);
     const common = {
       max: body.max,
       days: body.days,
       hours: body.hours,
       offset: body.offset,
-      providerScope: body.providerScope,
+      providerScope,
       env: c.env,
       deletedGenerationJobTombstones: body.deletedGenerationJobTombstones
     };
@@ -1586,9 +1599,9 @@ generateRoutes.get('/jobs/:jobId', async c => {
           Array.isArray(responseMeta.mjGridUrls) ? (responseMeta.mjGridUrls as string[]) : []
         );
     if (rawGallery.length) {
-      mjGalleryUrlsOut = await Promise.all(
+      mjGalleryUrlsOut = (await Promise.all(
         rawGallery.map((u) => resolveJobImageUrlForClient(c, u))
-      );
+      )).filter((u): u is string => typeof u === 'string' && !!u);
     }
   }
 

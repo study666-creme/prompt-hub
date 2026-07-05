@@ -96,6 +96,7 @@ export function aspectRatiosForModel(modelId: string): readonly string[] {
     return [...BANANA_ASPECT_RATIOS, ...BANANA2_EXTRA_RATIOS];
   }
   if (id.includes('nano-banana')) return BANANA_ASPECT_RATIOS;
+  if (id === 'mooko-gpt-image-2-pro') return MOOKO_PRO_ASPECT_RATIOS;
   if (id.includes('gpt-image-2')) return IMAGE2_ASPECT_RATIOS;
   return BASIC_ASPECT_RATIOS;
 }

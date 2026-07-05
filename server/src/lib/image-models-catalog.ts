@@ -1,6 +1,6 @@
 export type ImageModelProvider = 'grsai' | 'apimart';
 
-export type ImageModelUiFamily = 'gim2' | 'banana' | 'jimeng' | 'midjourney';
+export type ImageModelUiFamily = 'gim2' | 'banana' | 'jimeng' | 'midjourney' | 'wan' | 'flux';
 
 export type MjSpeedKey = 'relax' | 'fast' | 'turbo';
 

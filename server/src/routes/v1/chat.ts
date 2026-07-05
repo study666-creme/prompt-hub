@@ -27,6 +27,7 @@ const bodySchema = z.object({
   messages: z.array(messageSchema).min(1).max(40),
   context: z.string().max(16000).optional(),
   model: z.enum(['deepseek-v4-flash', 'deepseek-v4-pro']).optional(),
+  thinking: z.boolean().optional(),
   attachContext: z.boolean().optional(),
   noPreset: z.boolean().optional()
 });

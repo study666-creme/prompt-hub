@@ -151,6 +151,12 @@ function bytesFromAtobBinary(binary: string): Uint8Array {
   return out;
 }
 
+function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const out = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(out).set(bytes);
+  return out;
+}
+
 /** 分块 atob，避免 2K 大图单次解码触发 Worker CPU 上限 */
 function base64ToBytes(b64: string): ArrayBuffer | null {
   try {
@@ -158,7 +164,7 @@ function base64ToBytes(b64: string): ArrayBuffer | null {
     const chunkChars = quantum * 24 * 1024;
     if (b64.length <= chunkChars) {
       const single = bytesFromAtobBinary(atob(b64));
-      return single.buffer.slice(single.byteOffset, single.byteOffset + single.byteLength);
+      return copyBytesToArrayBuffer(single);
     }
     const parts: Uint8Array[] = [];
     let total = 0;
@@ -179,7 +185,7 @@ function base64ToBytes(b64: string): ArrayBuffer | null {
       out.set(part, pos);
       pos += part.length;
     }
-    return out.buffer.slice(0);
+    return copyBytesToArrayBuffer(out);
   } catch {
     return null;
   }

@@ -3,7 +3,7 @@ import type { Env } from '../../env';
 import { formatBytes } from '../../lib/admin-helpers';
 import { scanBucketUsage } from '../../lib/admin-storage';
 import { storagePolicySummary } from '../../lib/storage-quota';
-import { createAdminClient, isMembershipActive } from '../../lib/supabase';
+import { createAdminClient, isMembershipActive, type Profile } from '../../lib/supabase';
 import { requireAdminSecret } from '../../middleware/admin';
 import { rateLimit } from '../../middleware/rate-limit';
 
@@ -68,7 +68,7 @@ adminDashboardRoutes.get('/', async c => {
   for (const p of profiles) {
     totalCredits += Number(p.credits) || 0;
     totalStorageBytes += Number(p.storage_bytes) || 0;
-    if (isMembershipActive(p as { membership_tier: typeof p.membership_tier; membership_until: string | null })) {
+    if (isMembershipActive(p as unknown as Profile)) {
       members += 1;
       const t = p.membership_tier || 'basic';
       if (t in byTier) byTier[t] += 1;

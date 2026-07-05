@@ -342,7 +342,11 @@ extensionRoutes.get('/groups', async c => {
 
     if (error) throw error;
 
-    const groups = collectUserGroups((row?.data || {}) as { customGroups?: unknown[]; cards?: unknown[] });
+    const payload =
+      row?.data && typeof row.data === 'object' && !Array.isArray(row.data)
+        ? (row.data as Parameters<typeof collectUserGroups>[0])
+        : {};
+    const groups = collectUserGroups(payload);
 
     return c.json({ ok: true, data: { groups } });
 
