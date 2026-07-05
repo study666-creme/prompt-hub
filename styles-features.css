@@ -6671,3 +6671,119 @@ body.community-gacha-open {
     overscroll-behavior: auto;
   }
 }
+
+/* Feature polish: shared tactile feedback for dense work surfaces */
+.feature-header .feature-tab,
+.imagegen-feed-tab,
+.imagegen-filter-pill,
+.imagegen-ref-tool-btn,
+.imagegen-prompt-tool-btn,
+.imagegen-tag-picker-trigger,
+.imagegen-count-trigger,
+.imagegen-generate-btn,
+.community-gacha-action {
+  transition:
+    transform var(--motion-fast, 150ms) var(--ease-ui, ease),
+    background-color var(--motion-fast, 150ms) var(--ease-ui, ease),
+    border-color var(--motion-fast, 150ms) var(--ease-ui, ease),
+    color var(--motion-fast, 150ms) var(--ease-ui, ease),
+    box-shadow var(--motion-fast, 150ms) var(--ease-ui, ease),
+    filter var(--motion-fast, 150ms) var(--ease-ui, ease);
+}
+
+.feature-header .feature-tab:hover,
+.imagegen-feed-tab:hover,
+.imagegen-filter-pill:hover,
+.imagegen-ref-tool-btn:hover,
+.imagegen-prompt-tool-btn:hover {
+  transform: translateY(-1px);
+  background: var(--surface-raised-hover, var(--bg-hover));
+  color: var(--text-primary);
+}
+
+.feature-header .feature-tab.active,
+.imagegen-feed-tab.active,
+.imagegen-filter-pill.is-active,
+.imagegen-ref-tool-btn.active {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.035)),
+    var(--accent-bg-strong);
+  box-shadow: inset 0 0 0 1px var(--border-hairline, var(--border));
+}
+
+.imagegen-generate-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.imagegen-generate-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(105deg, transparent 12%, rgba(255, 255, 255, 0.28) 45%, transparent 72%);
+  transform: translateX(-120%);
+}
+
+.imagegen-generate-btn:hover::after {
+  opacity: 1;
+  animation: generateBtnSheen 0.9s var(--ease-ui, ease) both;
+}
+
+@keyframes generateBtnSheen {
+  to { transform: translateX(120%); }
+}
+
+.imagegen-feed-card {
+  position: relative;
+  border-color: var(--border-hairline, var(--border));
+}
+
+.imagegen-feed-card:hover .imagegen-feed-thumb-btn img,
+.community-post-card:hover .card-img,
+.creation-post-card:hover .card-img {
+  transform: scale(1.018);
+}
+
+.imagegen-feed-thumb-btn img,
+.community-post-card .card-img,
+.creation-post-card .card-img {
+  transition: transform var(--motion-slow, 420ms) var(--ease-ui, ease), filter var(--motion-med, 240ms) var(--ease-ui, ease);
+}
+
+.imagegen-feed-card.active-preview,
+.imagegen-feed-card.active {
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.2),
+    0 18px 44px rgba(0, 0, 0, 0.32);
+}
+
+.imagegen-form select:focus-visible,
+.imagegen-form textarea:focus-visible,
+.imagegen-form input:focus-visible,
+.imagegen-filter-select:focus-visible,
+.imagegen-tag-picker-trigger:focus-visible,
+.imagegen-count-trigger:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-light));
+  box-shadow: var(--focus-ring, 0 0 0 3px rgba(255, 255, 255, 0.12));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imagegen-generate-btn:hover::after {
+    animation: none;
+    opacity: 0;
+  }
+  .feature-header .feature-tab:hover,
+  .imagegen-feed-tab:hover,
+  .imagegen-filter-pill:hover,
+  .imagegen-ref-tool-btn:hover,
+  .imagegen-prompt-tool-btn:hover,
+  .imagegen-feed-card:hover .imagegen-feed-thumb-btn img,
+  .community-post-card:hover .card-img,
+  .creation-post-card:hover .card-img {
+    transform: none !important;
+  }
+}
