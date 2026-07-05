@@ -11,7 +11,9 @@ server/.dev.vars.*
 scripts/taobao-*.txt
 scripts/activation-codes-insert.sql
 *.log
+*.backup.*
 node_modules/
+packages/*/package-lock.json
 .pages-deploy/
 prompt-hub-deploy.zip
 
@@ -26,6 +28,12 @@ pack-*.js
 downloads/
 server/tmp-mooko-*
 .tmp-*.js
+.tmp-index.html
+.tmp-video-frames/
+.cursor/*.html
+=
+package.json.phase*
+server/package.json.new
 
 # SillyTavern / 酒馆本地资料（与 Prompt Hub 无关，勿提交、勿部署）
 themes/

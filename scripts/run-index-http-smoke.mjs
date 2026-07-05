@@ -34,6 +34,7 @@ const mustHave = [
   'pack-feed.js',
   'pack-imagegen.js',
   'pack-account.js',
+  'pack-media-client.js',
   'pack-extra.js'
 ];
 const mustNot = [
@@ -77,6 +78,7 @@ const packs = [
   ['/pack-feed.js', 'FeedLayout', 'FeedLayout'],
   ['/pack-imagegen.js', 'PointsSystem', 'PointsSystem'],
   ['/pack-account.js', 'Membership', 'window.Membership'],
+  ['/pack-media-client.js', 'PromptHubMedia', 'PromptHubMedia'],
   ['/pack-extra.js', 'CommunityGacha', 'CommunityGacha']
 ];
 

@@ -1,5 +1,7 @@
 # Supabase → MemFire Cloud 迁移指南（小白分步）
 
+> 明早执行版见：`docs/MEMFIRE-MORNING-RUNBOOK.md`。
+
 > **目标**：数据库 + 登录用户 + 卡片图片迁到国内 MemFire；**业务代码几乎不改**（仍用 `supabase-js`）。  
 > **前提**：先按 `docs/SUPABASE-BACKUP-BEGINNER.md` 做好 **pg_dump + 图片下载**。  
 > **勿提交**：`admin.local.env`、密钥、`backups/`。
