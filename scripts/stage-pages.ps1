@@ -1,5 +1,5 @@
-# 只打包 Pages 需要的前端静态文件（排除 server/docs/backups 等）
 $ErrorActionPreference = "Stop"
+
 $root = Split-Path $PSScriptRoot -Parent
 $staging = Join-Path $root ".pages-deploy"
 
@@ -9,35 +9,101 @@ if (Test-Path $staging) {
 New-Item -ItemType Directory -Path $staging | Out-Null
 
 $rootFilePattern = '\.(html|js|css|ico|webmanifest|txt|xml|json)$'
-$rootExclude = @(
-  'package.json', 'vercel.json', 'wrangler.toml',
-  'prompt-hub-deploy.zip'
+$allowedDirs = @(
+  'assets/',
+  'vendor/',
+  'functions/',
+  'extension/'
+)
+$entryRootFiles = @(
+  'index.html',
+  'admin.html',
+  'asset-studio.html',
+  'privacy.html',
+  'terms.html',
+  'baidu_verify_codeva-ppEB3Ror5E.html'
+)
+$alwaysRootFiles = @(
+  '_headers',
+  '_redirects',
+  'favicon.ico',
+  'manifest.webmanifest',
+  'robots.txt',
+  'sitemap.xml',
+  'sw.js',
+  'features-assets.js'
 )
 
-Get-ChildItem $root -File | Where-Object {
-  $_.Name -match $rootFilePattern -and ($rootExclude -notcontains $_.Name)
-} | ForEach-Object {
-  Copy-Item $_.FullName (Join-Path $staging $_.Name)
+function Copy-StaticFile {
+  param([string] $RelativePath)
+
+  $src = Join-Path $root $RelativePath
+  if (-not (Test-Path $src -PathType Leaf)) { return }
+
+  $dest = Join-Path $staging $RelativePath
+  $destDir = Split-Path $dest -Parent
+  if (-not (Test-Path $destDir)) {
+    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+  }
+  Copy-Item $src $dest
 }
 
-foreach ($dir in @('assets', 'vendor', 'functions', 'downloads', 'extension')) {
-  $src = Join-Path $root $dir
-  if (Test-Path $src) {
-    Copy-Item $src (Join-Path $staging $dir) -Recurse
+$tracked = & git -C $root ls-files
+if ($LASTEXITCODE -ne 0 -or -not $tracked) {
+  throw "Unable to enumerate tracked files for Pages staging"
+}
+
+$allowedRoot = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+function Add-RootFile {
+  param([string] $Path)
+  if (-not $Path) { return }
+  $clean = ($Path -replace '\\', '/').TrimStart('./')
+  if ($clean -match '/') { return }
+  if ($clean -notmatch $rootFilePattern -and ($alwaysRootFiles -notcontains $clean)) { return }
+  if (Test-Path (Join-Path $root $clean) -PathType Leaf) {
+    [void] $allowedRoot.Add($clean)
   }
 }
 
-# 明确不部署：themes/（SillyTavern 本地资料）、server、docs、backups 等
-
-if (Test-Path (Join-Path $root "_headers")) {
-  Copy-Item (Join-Path $root "_headers") $staging
-}
-if (Test-Path (Join-Path $root "_redirects")) {
-  Copy-Item (Join-Path $root "_redirects") $staging
+foreach ($file in $entryRootFiles + $alwaysRootFiles) {
+  Add-RootFile $file
 }
 
-$count = (Get-ChildItem $staging -Recurse -File).Count
-$sizeMb = [math]::Round(((Get-ChildItem $staging -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 2)
+foreach ($file in $entryRootFiles) {
+  $htmlPath = Join-Path $root $file
+  if (-not (Test-Path $htmlPath -PathType Leaf)) { continue }
+  $html = Get-Content $htmlPath -Raw
+  foreach ($m in [regex]::Matches($html, '(?:src|href)=["'']([^"'']+)["'']')) {
+    $ref = $m.Groups[1].Value
+    if (-not $ref -or $ref -match '^(https?:|data:|#)') { continue }
+    $ref = ($ref -split '[?#]')[0]
+    Add-RootFile $ref
+  }
+}
+
+foreach ($rootFile in $allowedRoot) {
+  $rel = $rootFile -replace '/', [IO.Path]::DirectorySeparatorChar
+  Copy-StaticFile $rel
+}
+
+foreach ($path in $tracked) {
+  $rel = $path -replace '/', [IO.Path]::DirectorySeparatorChar
+  $isAllowedDir = $false
+  foreach ($dir in $allowedDirs) {
+    if ($path.StartsWith($dir)) {
+      $isAllowedDir = $true
+      break
+    }
+  }
+
+  if ($isAllowedDir) {
+    Copy-StaticFile $rel
+  }
+}
+
+$files = Get-ChildItem $staging -Recurse -File
+$count = $files.Count
+$sizeMb = [math]::Round((($files | Measure-Object Length -Sum).Sum / 1MB), 2)
 Write-Host "Pages staging: $staging ($count files, ${sizeMb} MB)"
-Write-Host "Note: only frontend static assets are deployed (server/docs/backups excluded). Full repo has more files." -ForegroundColor DarkGray
+Write-Host "Note: staging copies only allowlisted root entries and tracked asset directories." -ForegroundColor DarkGray
 return $staging

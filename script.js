@@ -13,8 +13,34 @@
     const DB_NAME = 'PromptRepoDB', DB_VERSION = 3;
     const EMERGENCY_BACKUP_MAX = 12;
     const LS_IDB_OWNER = 'promptrepo_idb_owner_uid';
+    const LOCAL_SNAPSHOT_MIN_INTERVAL_MS = 30_000;
+    const LOCAL_AUTOSAVE_MIN_INTERVAL_MS = 60_000;
     let db = null;
     let lastEmergencyBackupAt = 0;
+    const lastLocalPayloadWriteAt = new Map();
+
+    function localPayloadThrottleKey(kind, uid) {
+      return `${kind}:${String(uid || '')}`;
+    }
+    function shouldSkipThrottledLocalPayload(kind, uid, minIntervalMs, opts = {}) {
+      if (!opts.throttle || opts.force) return false;
+      const key = localPayloadThrottleKey(kind, uid);
+      const last = lastLocalPayloadWriteAt.get(key) || 0;
+      return Date.now() - last < minIntervalMs;
+    }
+    function markLocalPayloadWritten(kind, uid) {
+      lastLocalPayloadWriteAt.set(localPayloadThrottleKey(kind, uid), Date.now());
+    }
+    function rememberLocalPayloadMeta(kind, uid, payload) {
+      if (!uid || !payload) return;
+      try {
+        localStorage.setItem(userStorageKey(`${kind}_meta`, uid), JSON.stringify({
+          at: Date.now(),
+          cards: Array.isArray(payload.cards) ? payload.cards.length : 0,
+          groups: Array.isArray(payload.customGroups) ? payload.customGroups.length : 0
+        }));
+      } catch (e) { /* ignore */ }
+    }
 
     function getIdbOwnerUid() {
       try {
@@ -115,13 +141,34 @@
       if (!expected && idbOwner && idbOwner !== 'guest') return [];
       return rows;
     }
+    function cardPersistenceId(card) {
+      const id = card?.id;
+      return id == null ? '' : String(id);
+    }
+    function serializeCardForPersistence(card) {
+      try {
+        return JSON.stringify(card);
+      } catch (e) {
+        return null;
+      }
+    }
+    function cardsEqualForPersistence(a, b) {
+      if (a === b) return true;
+      const sa = serializeCardForPersistence(a);
+      if (sa == null) return false;
+      return sa === serializeCardForPersistence(b);
+    }
     async function saveCardsToDB(cardsArray, opts = {}) {
       if (!db) await openDB();
+      const incoming = Array.isArray(cardsArray) ? cardsArray : [];
       const ownerUid = opts.ownerUid != null
         ? String(opts.ownerUid || '')
         : (window.SupabaseSync?.getUserId?.() || activeAccountId || getIdbOwnerUid() || '');
-      if (!cardsArray.length) {
-        const existing = await loadCardsFromDB({ ignoreOwner: true });
+      const previousOwnerUid = getIdbOwnerUid();
+      const forceRewrite = opts.forceRewrite === true
+        || !!(ownerUid && previousOwnerUid && previousOwnerUid !== ownerUid);
+      const existing = await loadCardsFromDB({ ignoreOwner: true });
+      if (!incoming.length) {
         if (existing.length > 0) {
           await writeEmergencyBackup('pre_db_clear', {
             cards: existing,
@@ -132,13 +179,39 @@
           });
         }
       }
-      const tx = db.transaction(['cards'], 'readwrite');
-      const store = tx.objectStore('cards');
-      store.clear();
-      cardsArray.forEach(c => store.put(c));
-      await new Promise(resolve => { tx.oncomplete = resolve; });
+      const latestById = new Map();
+      for (const card of incoming) {
+        const id = cardPersistenceId(card);
+        if (id) latestById.set(id, card);
+      }
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(['cards'], 'readwrite');
+        const store = tx.objectStore('cards');
+        const fail = () => reject(tx.error || new Error('IndexedDB cards save failed'));
+        tx.oncomplete = () => resolve();
+        tx.onerror = fail;
+        tx.onabort = fail;
+        if (forceRewrite) {
+          store.clear();
+          latestById.forEach((card) => store.put(card));
+          return;
+        }
+        const existingById = new Map();
+        existing.forEach((card) => {
+          const id = cardPersistenceId(card);
+          if (id) existingById.set(id, card);
+        });
+        existingById.forEach((card, id) => {
+          if (!latestById.has(id)) store.delete(id);
+        });
+        latestById.forEach((card, id) => {
+          if (!cardsEqualForPersistence(card, existingById.get(id))) {
+            store.put(card);
+          }
+        });
+      });
       if (ownerUid) setIdbOwnerUid(ownerUid);
-      else if (!cardsArray.length) setIdbOwnerUid('');
+      else if (!incoming.length) setIdbOwnerUid('');
     }
 
     async function saveCardImageBackup(cardId, imageData) {
@@ -2519,6 +2592,60 @@
     };
 
     const DEVLAB_PANEL_KEY = 'promptrepo_devlab_panel';
+    let featureAssetsLoadPromise = null;
+
+    function scriptSrcWithBuild(file) {
+      const build = window.__APP_BUILD__ || '';
+      return build ? `${file}?v=${encodeURIComponent(build)}` : file;
+    }
+
+    function loadScriptOnce(src, key) {
+      const attr = `script[data-ph-dynamic="${key}"]`;
+      const existing = document.querySelector(attr);
+      if (existing?.dataset.loaded === '1') return Promise.resolve();
+      if (existing?.__phLoadPromise) return existing.__phLoadPromise;
+      const script = existing || document.createElement('script');
+      script.dataset.phDynamic = key;
+      if (!existing) {
+        script.src = src;
+        script.async = false;
+        document.body.appendChild(script);
+      }
+      script.__phLoadPromise = new Promise((resolve, reject) => {
+        script.addEventListener('load', () => {
+          script.dataset.loaded = '1';
+          resolve();
+        }, { once: true });
+        script.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
+      });
+      return script.__phLoadPromise;
+    }
+
+    function initFeatureAssetsOnce() {
+      if (!window.FeatureAssets?.init || window.__featureAssetsInitialized) return;
+      window.FeatureAssets.init();
+      window.__featureAssetsInitialized = true;
+    }
+
+    function ensureFeatureAssets() {
+      if (window.FeatureAssets?.init) {
+        initFeatureAssetsOnce();
+        return Promise.resolve(window.FeatureAssets);
+      }
+      if (!featureAssetsLoadPromise) {
+        featureAssetsLoadPromise = loadScriptOnce(scriptSrcWithBuild('features-assets.js'), 'features-assets')
+          .then(() => {
+            initFeatureAssetsOnce();
+            return window.FeatureAssets;
+          })
+          .catch((e) => {
+            featureAssetsLoadPromise = null;
+            throw e;
+          });
+      }
+      return featureAssetsLoadPromise;
+    }
+    window.ensureFeatureAssets = ensureFeatureAssets;
 
     function getDevLabPanel() {
       const p = localStorage.getItem(DEVLAB_PANEL_KEY);
@@ -2537,9 +2664,16 @@
       document.querySelectorAll('.devlab-mobile-tab[data-devlab-panel]').forEach((el) => {
         el.classList.toggle('active', el.dataset.devlabPanel === key);
       });
-      if (key === 'assetmarket') void window.FeatureAssets?.renderMarketplace?.();
-      if (key === 'assetstudio') window.FeatureAssets?.renderStudio?.();
-      window.FeatureAssets?.onAppChange?.('devlab', key);
+      const render = () => {
+        if (key === 'assetmarket') void window.FeatureAssets?.renderMarketplace?.();
+        if (key === 'assetstudio') window.FeatureAssets?.renderStudio?.();
+        window.FeatureAssets?.onAppChange?.('devlab', key);
+      };
+      if (window.FeatureAssets) render();
+      else void ensureFeatureAssets().then(render).catch((e) => {
+        console.warn('[assets] failed to load', e);
+        showToast('资产模块加载失败，请刷新后重试', 5000);
+      });
     }
     window.switchDevLabPanel = switchDevLabPanel;
 
@@ -4634,7 +4768,11 @@
 
     async function snapshotLocalForUser(uid, opts = {}) {
       if (!uid) return;
-      const payload = getDataPayload();
+      if (shouldSkipThrottledLocalPayload('snapshot', uid, LOCAL_SNAPSHOT_MIN_INTERVAL_MS, opts)) {
+        if (opts.payload) rememberLocalPayloadMeta('snapshot', uid, opts.payload);
+        return;
+      }
+      const payload = opts.payload || getDataPayload();
       const cardN = Array.isArray(payload.cards) ? payload.cards.length : 0;
       const groupN = Array.isArray(payload.customGroups) ? payload.customGroups.length : 0;
       if (!opts.allowEmpty && cardN === 0 && groupN === 0) {
@@ -4645,6 +4783,21 @@
       }
       try {
         localStorage.setItem(userStorageKey('snapshot', uid), JSON.stringify(payload));
+        markLocalPayloadWritten('snapshot', uid);
+        rememberLocalPayloadMeta('snapshot', uid, payload);
+      } catch (e) { /* quota */ }
+    }
+
+    function writeAutosavePayloadForUser(uid, payload, opts = {}) {
+      if (!uid || !payload) return;
+      if (shouldSkipThrottledLocalPayload('autosave', uid, LOCAL_AUTOSAVE_MIN_INTERVAL_MS, opts)) {
+        rememberLocalPayloadMeta('autosave', uid, payload);
+        return;
+      }
+      try {
+        localStorage.setItem(userStorageKey('autosave', uid), JSON.stringify(payload));
+        markLocalPayloadWritten('autosave', uid);
+        rememberLocalPayloadMeta('autosave', uid, payload);
       } catch (e) { /* quota */ }
     }
 
@@ -7024,7 +7177,15 @@
       initAppNav();
       initDevLabNav();
       initAppNavCollapse();
-      window.FeatureAssets?.init?.();
+      if (window.AppRouter?.resolveBootApp?.() === 'devlab') {
+        void ensureFeatureAssets().then(() => switchDevLabPanel(getDevLabPanel())).catch((e) => {
+          console.warn('[assets] boot load failed', e);
+        });
+      } else {
+        deferAfterPagePaint(() => {
+          void ensureFeatureAssets().catch((e) => console.warn('[assets] idle load failed', e));
+        }, 3500);
+      }
       initBackgroundEffect();
       const postLogout = localStorage.getItem('promptrepo_post_logout') === '1';
       const lastUid = localStorage.getItem('promptrepo_last_uid');
@@ -7107,7 +7268,7 @@
       if (!uid) return;
       clearTimeout(localSnapshotTimer);
       localSnapshotTimer = setTimeout(() => {
-        void snapshotLocalForUser(uid, { allowEmpty: true });
+        void snapshotLocalForUser(uid, { allowEmpty: true, throttle: true });
       }, 600);
     }
 
@@ -7130,11 +7291,10 @@
       } catch (e) { /* ignore */ }
       const uid = window.SupabaseSync?.getUserId?.() || activeAccountId;
       if (uid && window.SupabaseSync?.isLoggedIn?.()) {
-        await snapshotLocalForUser(uid, { allowEmpty: true });
+        const localPayload = getDataPayload();
+        await snapshotLocalForUser(uid, { allowEmpty: true, throttle: true, payload: localPayload });
         localStorage.setItem(userStorageKey('settings', uid), JSON.stringify(settings));
-        try {
-          localStorage.setItem(userStorageKey('autosave', uid), JSON.stringify(getDataPayload()));
-        } catch (e) { /* quota */ }
+        writeAutosavePayloadForUser(uid, localPayload, { throttle: true });
       }
       if (uid) {
         persistWarehouseGroups(getActiveWarehouseId());

@@ -9,7 +9,8 @@
   /** @type {ReturnType<typeof createState>|null} */
   let state = null;
 
-  const PUBLIC_FEED_TTL_MS = 120_000;
+  const PUBLIC_FEED_TTL_MS = 300_000;
+  const PUBLIC_FEED_HEAD_LIMIT = 100;
   const PUBLIC_FEED_CACHE_VERSION = 7;
   const LS_PUBLIC_FEED_CACHE = 'promptrepo_public_feed_cache';
 
@@ -159,50 +160,47 @@
     return true;
   }
 
-  async function fetchAllPublicCommunityFeedPages(timeoutMs = 22000, st) {
+  async function fetchPublicCommunityFeedHead(timeoutMs = 22000, st) {
     const s = st || state;
     if (!s || !global.PromptHubApi?.getCommunityFeed) return null;
     if (global.PromptHubApi?.prepareApiCall) await global.PromptHubApi.prepareApiCall();
     else global.__PH_API_DOWN_UNTIL__ = 0;
-    const merged = new Map();
-    let offset = 0;
-    const pageSize = 100;
+    const pageSize = PUBLIC_FEED_HEAD_LIMIT;
     let lastFeedRes = null;
+    let batch = null;
     const sortPosts = d().sortPostsByActivity;
-    for (let round = 0; round < 60; round += 1) {
-      let batch = null;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const r = await global.PromptHubApi.getCommunityFeed({
-          limit: pageSize,
-          offset,
-          timeoutMs,
-          skipUnreachableMark: true
-        });
-        if (r?.ok && Array.isArray(r.data?.posts)) {
-          batch = r.data.posts;
-          lastFeedRes = r;
-          break;
-        }
-        if (attempt < 2) await new Promise((res) => setTimeout(res, 700 + attempt * 900));
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const r = await global.PromptHubApi.getCommunityFeed({
+        limit: pageSize,
+        offset: 0,
+        timeoutMs,
+        skipUnreachableMark: true
+      });
+      if (r?.ok && Array.isArray(r.data?.posts)) {
+        batch = r.data.posts;
+        lastFeedRes = r;
+        break;
       }
-      if (!batch) return merged.size ? [...merged.values()] : null;
-      if (!batch.length) break;
-      for (const raw of batch) {
-        const p = normalizeFeedPost(raw);
-        if (p) merged.set(String(p.id), p);
-      }
-      s.posts = typeof sortPosts === 'function' ? sortPosts([...merged.values()]) : [...merged.values()];
-      const nextOff = Number(lastFeedRes?.data?.nextOffset);
-      offset = Number.isFinite(nextOff) && nextOff > offset ? nextOff : offset + batch.length;
-      s.apiOffset = offset;
-      s.nextApiOffset = offset;
-      s.remoteHasMore = lastFeedRes?.data?.hasMore === true
-        || (lastFeedRes?.data?.hasMore !== false && batch.length >= pageSize);
-      savePublicFeedCache(s.posts);
-      if (merged.size >= minReady()) d().scheduleProgressiveCommunityRender?.();
-      if (!s.remoteHasMore || batch.length < pageSize) break;
+      if (attempt < 2) await new Promise((res) => setTimeout(res, 700 + attempt * 900));
     }
-    return typeof sortPosts === 'function' ? sortPosts([...merged.values()]) : [...merged.values()];
+    if (!batch) return null;
+    const head = batch.map(normalizeFeedPost).filter(Boolean);
+    const merged = mergePostsLists(head, s.posts);
+    const sorted = typeof sortPosts === 'function' ? sortPosts(merged) : merged;
+    const nextOff = Number(lastFeedRes?.data?.nextOffset);
+    const remoteNext = Number.isFinite(nextOff) && nextOff > 0 ? nextOff : head.length;
+    s.apiOffset = Math.max(s.apiOffset, remoteNext);
+    s.nextApiOffset = Math.max(s.nextApiOffset, remoteNext, sorted.length);
+    s.remoteHasMore = lastFeedRes?.data?.hasMore === true
+      || (lastFeedRes?.data?.hasMore !== false && batch.length >= pageSize);
+    s.posts = sorted;
+    savePublicFeedCache(s.posts);
+    if (head.length >= minReady()) d().scheduleProgressiveCommunityRender?.();
+    return sorted;
+  }
+
+  async function fetchAllPublicCommunityFeedPages(timeoutMs = 22000, st) {
+    return fetchPublicCommunityFeedHead(timeoutMs, st);
   }
 
   async function refreshPublicCommunityFeed(opts = {}, st) {
@@ -216,7 +214,7 @@
     s.loading = true;
     const prevPubSig = s.posts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
     try {
-      const fetched = await fetchAllPublicCommunityFeedPages(opts.timeoutMs || 20000, s);
+      const fetched = await fetchPublicCommunityFeedHead(opts.timeoutMs || 20000, s);
       if (!fetched?.length) {
         const cached = loadPublicFeedCache();
         if (cached?.posts?.length && s.at === 0) {

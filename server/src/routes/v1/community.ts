@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Env } from '../../env';
 import { ApiError } from '../../lib/errors';
 import {
-  listPublicCommunityFeed,
+  listPublicCommunityFeedPage,
   likeCommunityPost,
   resolvePublicImageRef,
   syncAuthorCommunityPosts,
@@ -73,16 +73,15 @@ export async function communityFeedHandler(c: Context<{ Bindings: Env }>) {
   const offset = Math.max(0, Number(c.req.query('offset') || 0));
   const admin = createAdminClient(c.env);
   try {
-    const posts = await listPublicCommunityFeed(admin, limit, offset, {
+    const page = await listPublicCommunityFeedPage(admin, limit, offset, {
       repairAuthors: false,
       runMaintenance: false
     });
     c.header('Cache-Control', 'public, max-age=30, stale-while-revalidate=120');
     applyCorsHeaders(c);
-    const hasMore = posts.length >= limit;
     return c.json({
       ok: true,
-      data: { posts, limit, offset, nextOffset: offset + posts.length, hasMore }
+      data: page
     });
   } catch (e) {
     applyCorsHeaders(c);

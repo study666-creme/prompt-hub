@@ -458,6 +458,21 @@ export async function listPublicCommunityFeed(
   offset: number,
   opts?: { repairAuthors?: boolean; runMaintenance?: boolean }
 ): Promise<CommunityPostDto[]> {
+  return (await listPublicCommunityFeedPage(admin, limit, offset, opts)).posts;
+}
+
+export async function listPublicCommunityFeedPage(
+  admin: SupabaseClient,
+  limit: number,
+  offset: number,
+  opts?: { repairAuthors?: boolean; runMaintenance?: boolean }
+): Promise<{
+  posts: CommunityPostDto[];
+  limit: number;
+  offset: number;
+  nextOffset: number;
+  hasMore: boolean;
+}> {
   if (offset === 0 && opts?.runMaintenance) {
     try {
       if (opts.repairAuthors !== false) {
@@ -472,8 +487,8 @@ export async function listPublicCommunityFeed(
   }
   const safeLimit = Math.min(100, Math.max(1, limit));
   const safeOffset = Math.max(0, offset);
-  // 去重后条数会缩水：按 offset+limit 多拉一段，且不再硬 cap 200 导致 offset≥200 永远为空
-  const windowEnd = Math.min(3000, safeOffset + safeLimit + Math.max(120, safeLimit * 4));
+  const scanLimit = Math.min(360, safeLimit + Math.max(80, safeLimit * 3));
+  const windowEnd = Math.min(3000, safeOffset + scanLimit);
   const { data, error } = await admin
     .from('community_posts')
     .select(
@@ -481,13 +496,22 @@ export async function listPublicCommunityFeed(
     )
     .eq('published', true)
     .order('updated_at', { ascending: false })
-    .range(0, windowEnd - 1);
+    .range(safeOffset, windowEnd - 1);
 
   if (error) throw error;
-  const deduped = dedupeCommunityFeedPosts((data as CommunityRow[]).map(mapRowToDto));
-  return deduped
+  const rawRows = (data || []) as CommunityRow[];
+  const deduped = dedupeCommunityFeedPosts(rawRows.map(mapRowToDto));
+  const posts = deduped
     .filter((p) => String(p.image || '').trim())
-    .slice(safeOffset, safeOffset + safeLimit);
+    .slice(0, safeLimit);
+  const advance = posts.length > 0 ? posts.length : rawRows.length;
+  return {
+    posts,
+    limit: safeLimit,
+    offset: safeOffset,
+    nextOffset: safeOffset + advance,
+    hasMore: rawRows.length >= scanLimit || posts.length >= safeLimit
+  };
 }
 
 export async function upsertCommunityPost(

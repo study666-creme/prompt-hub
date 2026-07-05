@@ -238,12 +238,17 @@ mediaRoutes.post('/sign-batch', async c => {
   }
   const paths = [...pathSet];
   const urls: Record<string, string> = {};
-  await Promise.all(
-    paths.map(async key => {
+  let idx = 0;
+  const concurrency = 6;
+  async function worker() {
+    while (idx < paths.length) {
+      const key = paths[idx];
+      idx += 1;
       const signPath = await ensureGridPathForSigning(c, key, 'grid');
       urls[key] = await buildPrivateMediaCdnUrl(c, signPath);
-    })
-  );
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, paths.length || 1) }, () => worker()));
   return c.json({
     ok: true,
     data: { urls, expiresIn: MEDIA_CDN_TOKEN_TTL_SEC, cdn: true }
