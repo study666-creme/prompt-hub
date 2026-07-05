@@ -56,6 +56,10 @@
     const runQuiet = () => {
       if (token !== imageGenBootSyncToken) return;
       void quietSyncImageGenFromCloud();
+      scheduleRecentCreationsServerSync({
+        force: !!opts.forceRecent,
+        render: !isImageGenMobileFormActive()
+      }, pending ? 1200 : 2200);
     };
     if (mobileForm && !pending) {
       if (typeof requestIdleCallback === 'function') {
@@ -1473,6 +1477,11 @@
     pruneOrphanFeatureData();
     loadPendingGenJobs();
     loadFailedGenJobs();
+    if (loggedInBoot) {
+      scheduleRecentCreationsServerSync({
+        render: document.getElementById('pageImageGen')?.classList.contains('active')
+      }, 900);
+    }
     if (imageGenPendingJobs.length > 0) {
       requestAnimationFrame(() => {
         renderImageGenFeed({ preserveScroll: true });
@@ -1682,6 +1691,24 @@
     return out;
   }
 
+  function isKnownMissingImageRef(ref) {
+    if (!ref || !window.SupabaseSync?.isStorageRef?.(ref)) return false;
+    const path = window.SupabaseSync.storagePathFromRef?.(ref);
+    const key = path ? String(path).replace(/^\//, '') : '';
+    return !!(key && window.SupabaseSync?.isPathKnownMissing?.(key));
+  }
+
+  function isUsableCreationImageRef(ref) {
+    if (!isDisplayableImage(ref)) return false;
+    if (isKnownMissingImageRef(ref)) return false;
+    if (/^https?:\/\//i.test(ref) && window.SupabaseSync?.isInvalidMediaUrl?.(ref)) return false;
+    return true;
+  }
+
+  function creationHasFeedImage(c) {
+    return creationFeedImageCandidates(c).some(isUsableCreationImageRef);
+  }
+
   function getRecentCreationsLimit() {
     return window.Membership?.getRecentCreationsLimit?.()
       ?? 100;
@@ -1690,8 +1717,7 @@
   function isRecentCreationEligible(c) {
     if (!c?.id) return false;
     if (c.permanent || c.visibility === 'published') return false;
-    return isDisplayableImage(c.image)
-      || (c.isMidjourney && (c.mjGridUrls?.length || c.mjCompositeUrl));
+    return creationHasFeedImage(c);
   }
 
   function getRecentCreationsActiveSorted() {
@@ -1723,9 +1749,169 @@
     const now = Date.now();
     return creations
       .filter((c) => c?.id && (!c.expiresAt || c.expiresAt > now))
-      .filter((c) => isDisplayableImage(c.image)
-        || (c.isMidjourney && (c.mjGridUrls?.length || c.mjCompositeUrl)))
+      .filter((c) => creationHasFeedImage(c))
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }
+
+  let recentServerSyncInflight = null;
+  let recentServerSyncLastAt = 0;
+  let recentServerSyncTimer = null;
+
+  function creationBaseJobId(c) {
+    return normalizeGenJobBaseId(c?.jobId || '');
+  }
+
+  function uniqueImageRefs(list) {
+    const out = [];
+    for (const ref of list || []) {
+      const s = String(ref || '').trim();
+      if (!s || out.includes(s)) continue;
+      out.push(s);
+    }
+    return out;
+  }
+
+  function serverRecentJobToCreation(job, existing) {
+    const baseJob = normalizeGenJobBaseId(job?.id);
+    if (!baseJob) return null;
+    const createdAt = Date.parse(job.createdAt || job.completedAt || '') || Date.now();
+    const expiresAt = createdAt + GEN_RETENTION_MS;
+    const imageRefs = uniqueImageRefs([
+      job.imageUrl,
+      ...(Array.isArray(job.extraImageUrls) ? job.extraImageUrls : []),
+      job.mjCompositeUrl,
+      ...(Array.isArray(job.mjGalleryUrls) ? job.mjGalleryUrls : []),
+      ...(Array.isArray(job.mjGridUrls) ? job.mjGridUrls : [])
+    ]).filter(isUsableCreationImageRef);
+    if (!imageRefs.length) return null;
+    const mjGallery = uniqueImageRefs([
+      ...(Array.isArray(job.mjGalleryUrls) ? job.mjGalleryUrls : []),
+      job.mjCompositeUrl,
+      ...(Array.isArray(job.mjGridUrls) ? job.mjGridUrls : []),
+      job.imageUrl
+    ]).filter(isUsableCreationImageRef);
+    const gallery = job.isMidjourney
+      ? (mjGallery.length ? mjGallery : imageRefs)
+      : imageRefs;
+    const localImage = isUsableCreationImageRef(existing?.image) ? existing.image : '';
+    const mainImage = localImage || gallery[0] || imageRefs[0];
+    const existingGallery = Array.isArray(existing?.cardImages)
+      ? existing.cardImages.filter(isUsableCreationImageRef)
+      : [];
+    const cardImages = gallery.length > 1
+      ? gallery
+      : (existingGallery.length > 1 ? existingGallery : null);
+    return {
+      ...(existing || {}),
+      id: existing?.id || `cr_${baseJob}`,
+      jobId: baseJob,
+      prompt: job.prompt || existing?.prompt || '',
+      image: mainImage,
+      model: job.model || existing?.model || 'gpt-image-2',
+      modelLabel: job.modelLabel || existing?.modelLabel || imageGenModelLabel(job.model),
+      resolution: job.resolution || existing?.resolution || '1k',
+      quality: job.quality || existing?.quality || 'standard',
+      size: job.size || existing?.size || '1:1',
+      visibility: existing?.visibility || 'private',
+      createdAt: existing?.createdAt || createdAt,
+      updatedAt: Math.max(existing?.updatedAt || 0, Date.now()),
+      expiresAt: existing?.permanent ? existing.expiresAt : expiresAt,
+      isMidjourney: !!(job.isMidjourney || existing?.isMidjourney),
+      mjGridUrls: job.isMidjourney
+        ? uniqueImageRefs([
+          ...(Array.isArray(job.mjGridUrls) ? job.mjGridUrls : []),
+          ...gallery.slice(1, 5)
+        ]).filter(isUsableCreationImageRef).slice(0, 4)
+        : (existing?.mjGridUrls || null),
+      mjCompositeUrl: job.mjCompositeUrl || existing?.mjCompositeUrl || null,
+      mjButtons: Array.isArray(job.mjButtons) ? job.mjButtons : (existing?.mjButtons || null),
+      cardImages,
+      savedToWarehouse: !!existing?.savedToWarehouse,
+      warehouseCardId: existing?.warehouseCardId || null,
+      serverRecent: true
+    };
+  }
+
+  function mergeRecentCreationsFromServer(jobs) {
+    const tomb = window.getDeletedCreationTombstones?.() || {};
+    const maxAgeCutoff = Date.now() - GEN_RETENTION_MS;
+    const byJob = new Map();
+    creations.forEach((c) => {
+      const base = creationBaseJobId(c);
+      if (base && !byJob.has(base)) byJob.set(base, c);
+    });
+    const incoming = [];
+    const incomingJobs = new Set();
+    for (const job of jobs || []) {
+      if (!job?.id || job.status !== 'completed') continue;
+      const base = normalizeGenJobBaseId(job.id);
+      if (!base || isGenerationJobDeleted(base)) continue;
+      const existing = byJob.get(base);
+      const id = existing?.id || `cr_${base}`;
+      if (tomb[String(id)]) continue;
+      const creation = serverRecentJobToCreation(job, existing);
+      if (!creation || (creation.createdAt || 0) < maxAgeCutoff) continue;
+      incoming.push(creation);
+      incomingJobs.add(base);
+    }
+    if (!incoming.length && !creations.some((c) => c?.serverRecent)) return false;
+    const kept = creations.filter((c) => {
+      if (!c?.id || tomb[String(c.id)]) return false;
+      const base = creationBaseJobId(c);
+      if (base && incomingJobs.has(base)) return false;
+      return true;
+    });
+    const next = dedupeCreationsByJobId([...incoming, ...kept])
+      .filter((c) => !c.expiresAt || c.expiresAt > Date.now())
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    const sig = (list) => list
+      .map((c) => `${c.id}:${c.jobId || ''}:${c.image || ''}:${c.expiresAt || ''}`)
+      .join('|');
+    if (sig(next) === sig(creations)) return false;
+    creations = next;
+    saveJson(LS_CREATIONS, creations);
+    reconcileCreationsWarehouseLinks();
+    return true;
+  }
+
+  async function syncRecentCreationsFromServer(opts = {}) {
+    if (!window.SupabaseSync?.isLoggedIn?.()) return { ok: false, reason: 'not_logged_in' };
+    if (!window.PromptHubApi?.listRecentGeneratedCreations) return { ok: false, reason: 'api_missing' };
+    if (recentServerSyncInflight) return recentServerSyncInflight;
+    const now = Date.now();
+    if (!opts.force && now - recentServerSyncLastAt < 90000) {
+      return { ok: true, skipped: true };
+    }
+    recentServerSyncLastAt = now;
+    recentServerSyncInflight = (async () => {
+      const res = await window.PromptHubApi.listRecentGeneratedCreations({
+        days: 7,
+        limit: Math.max(80, Math.min(400, getRecentCreationsLimit() * 2))
+      });
+      if (!res?.ok) return { ok: false, code: res?.code, message: res?.message };
+      const changed = mergeRecentCreationsFromServer(res.data?.jobs || []);
+      pruneCreations();
+      if (changed && opts.render !== false && document.getElementById('pageImageGen')?.classList.contains('active')) {
+        renderImageGenFeed({ preserveScroll: true, force: true });
+        updateImageGenFeedHint();
+      }
+      return { ok: true, changed };
+    })().catch((e) => {
+      console.warn('[recent-server] sync failed', e);
+      return { ok: false, error: e };
+    }).finally(() => {
+      recentServerSyncInflight = null;
+    });
+    return recentServerSyncInflight;
+  }
+
+  function scheduleRecentCreationsServerSync(opts = {}, delayMs = 1200) {
+    if (!window.SupabaseSync?.isLoggedIn?.()) return;
+    clearTimeout(recentServerSyncTimer);
+    recentServerSyncTimer = setTimeout(() => {
+      recentServerSyncTimer = null;
+      void syncRecentCreationsFromServer(opts);
+    }, Math.max(0, Number(delayMs) || 0));
   }
 
   let recentCreationRepairInflight = null;
@@ -6566,7 +6752,14 @@
   }
 
   async function finishImageGenRun(opts) {
-    return fr('finishImageGenRun', opts);
+    const out = await fr('finishImageGenRun', opts);
+    if (opts?.jobId && !opts?.isRecovery) {
+      scheduleRecentCreationsServerSync({
+        force: true,
+        render: !isImageGenMobileFormActive()
+      }, 1800);
+    }
+    return out;
   }
 
   function updateImageGenFeedHint() {
@@ -8121,8 +8314,13 @@
       updateImageGenFeedHint();
       scheduleImageGenBootSync({
         urgent: imageGenPendingJobs.length > 0 || getActivePollJobIds().size > 0,
-        forceJobs: imageGenPendingJobs.length > 0 || getActivePollJobIds().size > 0
+        forceJobs: imageGenPendingJobs.length > 0 || getActivePollJobIds().size > 0,
+        forceRecent: true
       });
+      scheduleRecentCreationsServerSync({
+        force: true,
+        render: !isImageGenMobileFormActive()
+      }, 250);
       if (!isImageGenMobileFormActive()) {
         renderImageGenFeed({ preserveScroll: true });
       }
@@ -8283,6 +8481,10 @@
           if (!mobileForm) renderImageGenFeed({ preserveScroll: true });
           renderImageGenMobileResult();
         }
+        void syncRecentCreationsFromServer({
+          render: !mobileForm,
+          force: pending
+        });
         const last = window.__phLastBgCloudSyncAt || 0;
         if (Date.now() - last < 120000) return;
         if (mobileForm && !pending && (window.__promptHubCards || []).length > 0) {

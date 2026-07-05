@@ -633,6 +633,17 @@
     );
   }
 
+  async function listRecentGeneratedCreations(opts = {}) {
+    const days = Math.min(30, Math.max(1, Number(opts.days) || 7));
+    const limit = Math.min(400, Math.max(1, Number(opts.limit) || 200));
+    return request(
+      'GET',
+      `/api/v1/generate/jobs/recent?days=${days}&limit=${limit}`,
+      null,
+      { timeoutMs: Math.max(API_TIMEOUT_MS, 30000) }
+    );
+  }
+
   async function getLedger(limit) {
     const n = Math.min(50, Math.max(1, Number(limit) || 20));
     return request('GET', `/api/v1/me/ledger?limit=${n}`);
@@ -1041,6 +1052,7 @@
     consumeInspirationDraw,
     listRecentGenerationJobs,
     listGenerationJobsHistory,
+    listRecentGeneratedCreations,
     recoverWarehouseFromJobs,
     postWarehouseThumbs,
     getLedger,

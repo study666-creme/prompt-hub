@@ -6787,3 +6787,132 @@ body.community-gacha-open {
     transform: none !important;
   }
 }
+
+/* Polished overrides: quieter hover states, no left active rail, and softer reveal motion. */
+.app-nav-item::before,
+.app-nav-item.active::before {
+  display: none !important;
+  opacity: 0 !important;
+}
+
+body:not(.efficiency-mode) #pageImageGen.app-page,
+body:not(.efficiency-mode) #pageImageGen .feature-shell,
+body:not(.efficiency-mode) #pageImageGen .feature-body,
+body:not(.efficiency-mode) #pageImageGen .imagegen-layout {
+  background: transparent !important;
+}
+
+body:not(.efficiency-mode) #pageImageGen .imagegen-form,
+body:not(.efficiency-mode) #pageImageGen .imagegen-side {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+    color-mix(in srgb, var(--bg-card) 68%, transparent) !important;
+  backdrop-filter: blur(16px) saturate(1.06);
+  -webkit-backdrop-filter: blur(16px) saturate(1.06);
+}
+
+body:not(.efficiency-mode) #pageImageGen .imagegen-form-scroll {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #0c4a6e 9%, transparent), transparent 34%),
+    color-mix(in srgb, var(--bg-secondary) 72%, transparent) !important;
+}
+
+body:not(.efficiency-mode) #pageImageGen .imagegen-layout--inspire-mode .imagegen-form-scroll {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #1e1033 14%, transparent), transparent 38%),
+    color-mix(in srgb, var(--bg-secondary) 72%, transparent) !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  #cardsContainer:not(.list-view) .card:hover,
+  #communityGrid .card.community-post-card:hover,
+  #creationsGrid .card.community-post-card:hover,
+  .imagegen-feed-card:hover {
+    transform: translateY(-1px) !important;
+    border-color: color-mix(in srgb, var(--text-primary) 16%, var(--border)) !important;
+    box-shadow:
+      0 10px 28px rgba(0, 0, 0, 0.24),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.025) !important;
+    filter: brightness(1.006) !important;
+  }
+}
+
+#cardsContainer .card:hover::before,
+#communityGrid .card.community-post-card:hover::before,
+#creationsGrid .card.community-post-card:hover::before,
+.imagegen-feed-card:hover::before {
+  opacity: 0.32 !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 38%) !important;
+}
+
+.imagegen-feed-card:hover .imagegen-feed-thumb-btn img,
+.community-post-card:hover .card-img,
+.creation-post-card:hover .card-img {
+  transform: scale(1.006);
+}
+
+.community-side-panel.community-side-panel--open {
+  animation: communitySidePanelInSoft 0.34s cubic-bezier(0.2, 0.86, 0.2, 1) both;
+}
+
+.imagegen-side.imagegen-preview-open .imagegen-preview-panel:not(.hidden) {
+  animation: imagegenPreviewPanelInSoft 0.32s cubic-bezier(0.2, 0.86, 0.2, 1) both;
+}
+
+.community-side-img-btn,
+.imagegen-preview-img-wrap {
+  animation: mediaPanelImageInSoft 0.38s cubic-bezier(0.2, 0.86, 0.2, 1) both;
+  transform-origin: top center;
+}
+
+.community-side-img,
+.imagegen-preview-img-btn img {
+  transition:
+    opacity 0.28s ease,
+    transform 0.42s cubic-bezier(0.2, 0.86, 0.2, 1),
+    filter 0.34s ease;
+}
+
+@keyframes communitySidePanelInSoft {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes imagegenPreviewPanelInSoft {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes mediaPanelImageInSoft {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.992);
+    filter: blur(6px) saturate(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .community-side-panel.community-side-panel--open,
+  .imagegen-side.imagegen-preview-open .imagegen-preview-panel:not(.hidden),
+  .community-side-img-btn,
+  .imagegen-preview-img-wrap {
+    animation: none !important;
+  }
+}

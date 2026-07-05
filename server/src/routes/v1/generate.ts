@@ -798,6 +798,89 @@ generateRoutes.get('/jobs/history', async c => {
   });
   return c.json({ ok: true, data: { jobs, days, limit } });
 });
+generateRoutes.get('/jobs/recent', async c => {
+  const user = c.get('user');
+  const admin = createAdminClient(c.env);
+  const daysRaw = Number(c.req.query('days'));
+  const limitRaw = Number(c.req.query('limit'));
+  const days = Number.isFinite(daysRaw) ? Math.min(30, Math.max(1, Math.floor(daysRaw))) : 7;
+  const limit = Number.isFinite(limitRaw) ? Math.min(400, Math.max(1, Math.floor(limitRaw))) : 200;
+  const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+  const { data: rows, error } = await admin
+    .from('generation_requests')
+    .select('id,prompt,status,result_image_url,meta,created_at,completed_at,resolution,quality,size_label,credits_charged')
+    .eq('user_id', user.id)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+
+  const stringList = (value: unknown) =>
+    Array.isArray(value)
+      ? value.filter((u): u is string => typeof u === 'string' && !!u.trim())
+      : [];
+
+  const jobs = (await Promise.all((rows || [])
+    .map(async (job) => {
+      const meta = (job.meta as Record<string, unknown>) || {};
+      const extraImageUrls = stringList(meta.extraImageUrls);
+      const mjGridUrls = stringList(meta.mjGridUrls);
+      const mjGalleryUrls = stringList(meta.mjGalleryUrls);
+      const mjCompositeUrl =
+        typeof meta.mjCompositeUrl === 'string' && meta.mjCompositeUrl.trim()
+          ? meta.mjCompositeUrl
+          : null;
+      const isMidjourney =
+        meta.isMidjourney === true
+        || mjGridUrls.length > 0
+        || mjGalleryUrls.length > 0
+        || !!mjCompositeUrl;
+      const imageUrl = await resolveJobImageUrlForClient(c, job.result_image_url as string | null);
+      const extraImageUrlsOut = (await Promise.all(
+        extraImageUrls.map((u) => resolveJobImageUrlForClient(c, u))
+      )).filter((u): u is string => typeof u === 'string' && !!u);
+      const mjGridUrlsOut = (await Promise.all(
+        mjGridUrls.map((u) => resolveJobImageUrlForClient(c, u))
+      )).filter((u): u is string => typeof u === 'string' && !!u);
+      const mjGalleryUrlsOut = (await Promise.all(
+        mjGalleryUrls.map((u) => resolveJobImageUrlForClient(c, u))
+      )).filter((u): u is string => typeof u === 'string' && !!u);
+      const mjCompositeUrlOut = mjCompositeUrl
+        ? await resolveJobImageUrlForClient(c, mjCompositeUrl)
+        : null;
+      const hasAnyImage =
+        !!imageUrl
+        || extraImageUrlsOut.length > 0
+        || mjGridUrlsOut.length > 0
+        || mjGalleryUrlsOut.length > 0
+        || !!mjCompositeUrlOut;
+      if (job.status !== 'completed' || !hasAnyImage) return null;
+      return {
+        id: job.id,
+        prompt: job.prompt,
+        status: job.status,
+        imageUrl,
+        extraImageUrls: extraImageUrlsOut.length ? extraImageUrlsOut : undefined,
+        creditsCharged: job.credits_charged,
+        resolution: job.resolution,
+        quality: job.quality,
+        size: job.size_label,
+        model: meta.model,
+        modelLabel: meta.modelLabel,
+        provider: typeof meta.provider === 'string' ? meta.provider : null,
+        createdAt: job.created_at,
+        completedAt: job.completed_at,
+        isMidjourney,
+        mjGridUrls: mjGridUrlsOut.length ? mjGridUrlsOut : undefined,
+        mjCompositeUrl: mjCompositeUrlOut || undefined,
+        mjGalleryUrls: mjGalleryUrlsOut.length ? mjGalleryUrlsOut : undefined,
+        mjButtons: Array.isArray(meta.mjButtons) ? meta.mjButtons : undefined
+      };
+    })))
+    .filter((job): job is NonNullable<typeof job> => !!job);
+
+  return c.json({ ok: true, data: { jobs, days, limit, retentionDays: 7 } });
+});
 
 const recoverWarehouseSchema = z.object({
   max: z.number().int().min(1).max(24).optional(),

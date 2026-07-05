@@ -1625,6 +1625,6 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
     };
   }
 
-  global.__PH_FEED_PACK_REV__ = 'recent-gen-v1';
+  global.__PH_FEED_PACK_REV__ = 'grid-guard-v6';
   global.ImageGenFeed = { init };
 })(typeof window !== 'undefined' ? window : globalThis);

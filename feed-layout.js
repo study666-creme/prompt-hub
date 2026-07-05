@@ -27,6 +27,7 @@
   const layoutDebounce = {};
   const layoutImageBatch = {};
   const layoutCooldown = {};
+  const flexRebalanceTimers = {};
   const feedGridImageRelayoutBound = {};
   const resizeRelayoutBound = {};
   const visibilityWaitTimers = {};
@@ -289,6 +290,44 @@
     requestAnimationFrame(() => {
       applyScrollAfterLayout(scrollRoot, scrollTop, container.id);
       setTimeout(() => container.classList.remove('community-feed-rebalancing'), 320);
+    });
+  }
+
+  function scheduleFlexColumnRebalance(containerId, opts = {}) {
+    if (!useFlexColumns(containerId)) return;
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!isFeedPageVisible(container)) {
+      deferLayoutUntilVisible(containerId, { force: true, recalcCols: true });
+      return;
+    }
+    const delay = Number.isFinite(Number(opts.delay)) ? Number(opts.delay) : 90;
+    clearTimeout(flexRebalanceTimers[containerId]);
+    flexRebalanceTimers[containerId] = setTimeout(() => {
+      const grid = document.getElementById(containerId);
+      if (!grid || !useFlexColumns(containerId) || !isFeedPageVisible(grid)) return;
+      const cols = Math.max(2, getColumnCount(grid));
+      applyColumnCss(grid, cols);
+      if (grid.dataset.feedDistributed === '1' && grid.querySelector(':scope > .community-feed-col')) {
+        redistributeByHeight(grid, cols);
+      } else {
+        layoutFlex(containerId, { force: true, forceReflow: true, recalcCols: true });
+      }
+      d().revealCommunityFeedImages?.(grid);
+      d().setFeedLayoutPending?.(containerId, false);
+    }, Math.max(0, delay));
+  }
+
+  function settleLayoutAfterAppend(containerId) {
+    if (useFlexColumns(containerId)) {
+      [120, 420, 900].forEach((delay) => {
+        setTimeout(() => scheduleFlexColumnRebalance(containerId, { delay: 0 }), delay);
+      });
+      return;
+    }
+    if (useMobileGrid(containerId)) return;
+    [140, 460, 960].forEach((delay) => {
+      setTimeout(() => scheduleMasonryRelayout(containerId), delay);
     });
   }
 
@@ -628,7 +667,10 @@
       return;
     }
     if (useFlexColumns(containerId)) {
-      if (opts.fromImage) return;
+      if (opts.fromImage) {
+        scheduleFlexColumnRebalance(containerId, { delay: opts.immediate ? 0 : 80 });
+        return;
+      }
       const container = document.getElementById(containerId);
       if (
         container?.dataset.feedDistributed === '1'
@@ -678,10 +720,14 @@
   }
 
   function scheduleMasonryRelayout(containerId = 'communityGrid') {
-    if (isMobile() || useFlexColumns(containerId)) return;
+    if (isMobile()) return;
+    if (useFlexColumns(containerId)) {
+      scheduleFlexColumnRebalance(containerId, { delay: 90 });
+      return;
+    }
     const container = document.getElementById(containerId);
     if (!container) return;
-    const inst = communityMasonry;
+    const inst = containerId === 'userProfileGrid' ? profileMasonry : communityMasonry;
     masonryRelayoutPending += 1;
     clearTimeout(masonryRelayoutTimer);
     masonryRelayoutTimer = setTimeout(() => {
@@ -803,6 +849,7 @@
       );
       distributeColumns(container, cols, { newCards: appendedCards });
       d().setFeedLayoutPending?.(containerId, false);
+      settleLayoutAfterAppend(containerId);
       return;
     }
     if (container.querySelector(':scope > .community-feed-col')) {
@@ -814,9 +861,11 @@
     if (inst && typeof inst.appended === 'function') {
       inst.appended(appendedCards);
       inst.layout();
+      settleLayoutAfterAppend(containerId);
       return;
     }
     layout(containerId);
+    settleLayoutAfterAppend(containerId);
   }
 
   function bindImageRelayout(containerId) {
@@ -827,11 +876,13 @@
     container.addEventListener('load', (e) => {
       if (!e.target?.classList?.contains('card-img')) return;
       if (typeof global.isPlaceholderCardImg === 'function' && global.isPlaceholderCardImg(e.target)) return;
-      scheduleMasonryRelayout(containerId);
+      if (useFlexColumns(containerId)) scheduleFlexColumnRebalance(containerId, { delay: 80 });
+      else scheduleMasonryRelayout(containerId);
     }, true);
     container.addEventListener('error', (e) => {
       if (!e.target?.classList?.contains('card-img')) return;
-      scheduleMasonryRelayout(containerId);
+      if (useFlexColumns(containerId)) scheduleFlexColumnRebalance(containerId, { delay: 80 });
+      else scheduleMasonryRelayout(containerId);
     }, true);
   }
 
@@ -931,6 +982,7 @@
     layoutFlex,
     schedule,
     scheduleMasonryRelayout,
+    scheduleFlexColumnRebalance,
     relayoutAll,
     repairCreations,
     repairCommunityMasonry,
