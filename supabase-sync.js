@@ -3223,6 +3223,19 @@
             if (!media.classList.contains('is-loading')) media.classList.add('is-loading');
           }
         }
+        const currentNow = img.currentSrc || img.src || '';
+        const currentPath = storagePathFromDisplayUrl(currentNow);
+        const targetPath = storagePathFromDisplayUrl(url);
+        const targetKey = targetPath ? String(targetPath).replace(/^\//, '') : url;
+        const sameDisplayResource = currentNow === url
+          || (currentPath && targetPath && String(currentPath).replace(/^\//, '') === String(targetPath).replace(/^\//, ''));
+        if (!img.complete && (
+          img.dataset.feedLoadingUrl === url
+          || (targetKey && img.dataset.feedLoadingKey === targetKey)
+          || sameDisplayResource
+        )) {
+          return;
+        }
         const done = () => {
           if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
           else media?.classList.remove('is-loading');
@@ -3259,16 +3272,13 @@
             }).then((retryUrl) => {
               const safeRetry = window.SupabaseSync?.safeListImgUrl?.(retryUrl, img) || '';
               if (safeRetry && window.CardImageLoader?.applyUrlToImg?.(img, safeRetry)) {
-                img.addEventListener('load', done, { once: true });
                 return;
               }
               media?.classList.add('card-media--load-failed');
               done();
             });
           }, { once: true });
-          if (window.CardImageLoader?.applyUrlToImg?.(img, url)) {
-            img.addEventListener('load', done, { once: true });
-          } else {
+          if (!window.CardImageLoader?.applyUrlToImg?.(img, url)) {
             media?.classList.add('card-media--load-failed');
             done();
           }

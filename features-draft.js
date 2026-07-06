@@ -894,9 +894,9 @@
     let incoming = rawPosts.filter(isFeedRenderablePost).filter((p) => !seen.has(String(p.id)));
     if (!incoming.length) return 0;
     if (communitySort === 'new') {
-      incoming.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      incoming.sort(comparePostsByActivityDesc);
     } else if (communitySort === 'hot') {
-      incoming.sort((a, b) => (b.likes || 0) - (a.likes || 0));
+      incoming.sort(comparePostsByLikesDesc);
     } else {
       incoming = shuffleCommunityPosts(incoming);
     }
@@ -2378,8 +2378,33 @@
     return Math.max(p?.updatedAt || 0, p?.createdAt || 0);
   }
 
+  function stablePostSortKey(p) {
+    return String(p?.sourceCardId || p?.sourceCreationId || p?.id || p?.image || p?.title || '');
+  }
+
+  function compareStablePostKey(a, b) {
+    return stablePostSortKey(a).localeCompare(stablePostSortKey(b));
+  }
+
+  function comparePostsByCreatedDesc(a, b) {
+    return ((b?.createdAt || 0) - (a?.createdAt || 0))
+      || ((b?.updatedAt || 0) - (a?.updatedAt || 0))
+      || compareStablePostKey(a, b);
+  }
+
+  function comparePostsByActivityDesc(a, b) {
+    return (postActivityTs(b) - postActivityTs(a))
+      || ((b?.createdAt || 0) - (a?.createdAt || 0))
+      || compareStablePostKey(a, b);
+  }
+
+  function comparePostsByLikesDesc(a, b) {
+    return ((b?.likes || 0) - (a?.likes || 0))
+      || comparePostsByActivityDesc(a, b);
+  }
+
   function sortPostsByActivity(list) {
-    return [...(list || [])].sort((a, b) => postActivityTs(b) - postActivityTs(a));
+    return [...(list || [])].sort(comparePostsByActivityDesc);
   }
 
   function enrichPostsWithLocalTimestamps(posts) {
@@ -3967,7 +3992,7 @@
         seen.add(key);
         return true;
       })
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      .sort(comparePostsByCreatedDesc);
   }
 
   function isFollowing(authorId) {
@@ -4896,8 +4921,11 @@
     }
 
     const eagerCap = feedAppend ? postsToRender.length : (isMobileViewport() ? 24 : 18);
+    const feedOrderBase = feedAppend ? countFeedDomUnique(containerId) : 0;
     postsToRender.forEach((post, idx) => {
-      fragment.appendChild(createCommunityFeedCard(post, containerId, { eagerImage: idx < eagerCap }));
+      const cardEl = createCommunityFeedCard(post, containerId, { eagerImage: idx < eagerCap });
+      cardEl.dataset.feedOrder = String(feedOrderBase + idx);
+      fragment.appendChild(cardEl);
     });
 
     const appendedCards = [...fragment.querySelectorAll('.card')];
@@ -5103,9 +5131,9 @@
       filtered = filtered.filter(p => follows.has(String(p.authorId)));
     }
     if (communitySort === 'new') {
-      filtered.sort((a, b) => postActivityTs(b) - postActivityTs(a));
+      filtered.sort(comparePostsByActivityDesc);
     } else if (communitySort === 'hot') {
-      filtered.sort((a, b) => (b.likes || 0) - (a.likes || 0));
+      filtered.sort(comparePostsByLikesDesc);
     } else {
       filtered = shuffleCommunityPosts(filtered);
     }
@@ -5335,7 +5363,7 @@
   function renderUserProfileGrid() {
     if (!openProfileAuthorId) return;
     const posts = getPostsByAuthor(openProfileAuthorId);
-    posts.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    posts.sort(comparePostsByCreatedDesc);
     void renderPostsIntoContainer(posts, 'userProfileGrid');
   }
 

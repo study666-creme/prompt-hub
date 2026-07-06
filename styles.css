@@ -5589,6 +5589,36 @@ body {
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter {
     animation: none !important;
   }
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft {
+    animation: warehouseCardSoftFade 0.46s var(--ease-out) both !important;
+    will-change: opacity;
+  }
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-media,
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-body,
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-copy-btn {
+    animation: warehouseCardSoftLift 0.42s var(--ease-out) both;
+    animation-delay: inherit;
+    will-change: opacity, transform, filter;
+  }
+  @keyframes warehouseCardSoftFade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes warehouseCardSoftLift {
+    from { opacity: 0.72; transform: translateY(6px); filter: blur(2px); }
+    to { opacity: 1; transform: none; filter: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft,
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-media,
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-body,
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-copy-btn {
+      animation: none !important;
+      opacity: 1;
+      transform: none;
+      filter: none;
+    }
+  }
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .grid-sizer {
     display: block;
     visibility: hidden;

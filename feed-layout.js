@@ -265,7 +265,7 @@
     d().scrubStaleCommunityFeedEmpty?.(container);
     container.querySelectorAll(':scope > .grid-sizer').forEach((el) => el.remove());
     const colEls = ensureColEls(container, cols);
-    const cards = collectCards(container);
+    const cards = collectCards(container).sort(compareFeedCardsForDistribution);
     const scrollRoot = d().getFeedScrollRoot?.(container) || container;
     const scrollTop = scrollRoot.scrollTop;
     colEls.forEach((col) => { col.innerHTML = ''; });
@@ -291,6 +291,24 @@
       applyScrollAfterLayout(scrollRoot, scrollTop, container.id);
       setTimeout(() => container.classList.remove('community-feed-rebalancing'), 320);
     });
+  }
+
+  function feedCardStableKey(card) {
+    return String(card?.dataset?.feedOrder
+      || card?.dataset?.postId
+      || card?.dataset?.sourceCardId
+      || card?.dataset?.id
+      || '');
+  }
+
+  function compareFeedCardsForDistribution(a, b) {
+    const ao = Number(a?.dataset?.feedOrder);
+    const bo = Number(b?.dataset?.feedOrder);
+    const hasA = Number.isFinite(ao);
+    const hasB = Number.isFinite(bo);
+    if (hasA && hasB && ao !== bo) return ao - bo;
+    if (hasA !== hasB) return hasA ? -1 : 1;
+    return feedCardStableKey(a).localeCompare(feedCardStableKey(b));
   }
 
   function scheduleFlexColumnRebalance(containerId, opts = {}) {

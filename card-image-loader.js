@@ -654,6 +654,7 @@
     if (window.SupabaseSync?.isWarehouseBlockedFullUrl?.(url, img)) return false;
     const urlPath = window.SupabaseSync?.storagePathFromDisplayUrl?.(url);
     const urlKey = urlPath ? String(urlPath).replace(/^\//, '') : '';
+    const targetLoadKey = urlKey || url;
     if (urlKey && window.SupabaseSync?.isPathKnownMissing?.(urlKey)) return false;
     if (urlKey && window.SupabaseSync?.isGridFetchFailed?.(urlKey)) {
       const ref = img.getAttribute('data-image-ref');
@@ -674,7 +675,46 @@
       if (!media.classList.contains('is-loading')) media.classList.add('is-loading');
     }
 
+    const currentSrc = img.currentSrc || img.src || '';
+    const currentPlaceholder = !currentSrc || currentSrc.includes('data:image/svg');
+    const sameTargetLoading = !currentPlaceholder
+      && !img.complete
+      && (currentSrc === url || isImgSameDisplayResource(img, url));
+    const pendingKey = img.dataset.feedLoadingKey || '';
+    if (!img.complete && (
+      img.dataset.feedLoadingUrl === url
+      || (targetLoadKey && pendingKey === targetLoadKey)
+      || sameTargetLoading
+    )) {
+      img.dataset.feedLoadingUrl = url;
+      if (targetLoadKey) img.dataset.feedLoadingKey = targetLoadKey;
+      return true;
+    }
+
+    let requestToken = '';
+    const isStaleRequest = () => requestToken
+      && img.dataset.feedLoadToken
+      && img.dataset.feedLoadToken !== requestToken;
+    const clearPending = () => {
+      if (requestToken) {
+        if (img.dataset.feedLoadToken && img.dataset.feedLoadToken !== requestToken) return false;
+        delete img.dataset.feedLoadToken;
+        delete img.dataset.feedLoadingUrl;
+        delete img.dataset.feedLoadingKey;
+        return true;
+      }
+      if (!img.dataset.feedLoadToken
+        || img.dataset.feedLoadingUrl === url
+        || (targetLoadKey && img.dataset.feedLoadingKey === targetLoadKey)) {
+        delete img.dataset.feedLoadingUrl;
+        delete img.dataset.feedLoadingKey;
+      }
+      return true;
+    };
+
     const finish = () => {
+      if (isStaleRequest()) return;
+      clearPending();
       const w = img.naturalWidth || 0;
       const h = img.naturalHeight || 0;
       const srcNow = img.currentSrc || img.src || '';
@@ -704,6 +744,8 @@
     };
 
     const fail = () => {
+      if (isStaleRequest()) return;
+      clearPending();
       media.classList.remove('is-loading', 'media-shine-reveal');
       const ref = img.getAttribute('data-image-ref');
       const cardId = cardIdFromImg(img);
@@ -817,7 +859,17 @@
       return true;
     }
 
+    img.dataset.feedLoadingUrl = url;
+    if (targetLoadKey) img.dataset.feedLoadingKey = targetLoadKey;
     void enqueueDownload(() => new Promise((resolve) => {
+      const pendingStillMatches = img.dataset.feedLoadingUrl === url
+        || (targetLoadKey && img.dataset.feedLoadingKey === targetLoadKey);
+      if (!pendingStillMatches) {
+        resolve();
+        return;
+      }
+      requestToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      img.dataset.feedLoadToken = requestToken;
       img.decoding = 'async';
       img.addEventListener('load', () => { finish(); resolve(); }, { once: true });
       img.addEventListener('error', () => { fail(); resolve(); }, { once: true });

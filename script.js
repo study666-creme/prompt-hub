@@ -6446,12 +6446,29 @@
         : Math.min(warehousePageSize(), (pageCards || []).length || warehousePageSize());
       const list = (pageCards || []).slice(0, cap);
       const afterBind = () => {
-        window.CardImageLoader?.boostWarehouseImages?.(container, cap);
+        const boostCap = mobile ? cap : Math.min(Math.max(cap, 32), 48);
+        window.CardImageLoader?.boostWarehouseImages?.(container, boostCap);
         requestAnimationFrame(() => {
-          container.querySelectorAll('img.card-img[data-image-ref]').forEach((img) => {
-            const src = img.currentSrc || img.src || '';
-            if (!src || src.includes('data:image/svg')) window.CardImageLoader?.loadImg?.(img);
-          });
+          if (!window.CardImageLoader?.loadImg) return;
+          const rootRect = container.getBoundingClientRect();
+          const nearPx = mobile ? 900 : 1100;
+          const fallbackCap = mobile ? Math.min(cap, 12) : Math.min(Math.max(cap, 24), 36);
+          let queued = 0;
+          [...container.querySelectorAll('img.card-img[data-image-ref]')]
+            .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+            .forEach((img) => {
+              if (queued >= fallbackCap) return;
+              if (img.dataset.feedLoadingUrl || img.dataset.feedLoadingKey) return;
+              if (img.complete && img.naturalWidth > 8) return;
+              const rect = img.getBoundingClientRect();
+              const near = rect.bottom > rootRect.top - nearPx && rect.top < rootRect.bottom + nearPx;
+              if (!near) return;
+              const src = img.currentSrc || img.src || '';
+              if (!src || src.includes('data:image/svg')) {
+                queued += 1;
+                window.CardImageLoader.loadImg(img);
+              }
+            });
         });
       };
       if (window.CardImageLoader?.bindWarehouse) {
@@ -7819,7 +7836,24 @@
         const coverMeta = listThumb.thumbMeta;
         const div = document.createElement('div');
         div.className = `card ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
-        if (!mobileGrid && pageCards.length <= 8 && reset) {
+        if (!mobileGrid && isAppend && viewMode !== 'list') {
+          div.classList.add('card-enter-soft');
+          const enterDelay = Math.min((idx % 12) * 0.025, 0.24);
+          div.style.animationDelay = `${enterDelay.toFixed(3)}s`;
+          const clearSoftEnter = (event) => {
+            if (event.target !== div) return;
+            div.classList.remove('card-enter-soft');
+            div.style.animationDelay = '';
+            div.removeEventListener('animationend', clearSoftEnter);
+          };
+          div.addEventListener('animationend', clearSoftEnter);
+          window.setTimeout(() => {
+            if (!div.isConnected) return;
+            div.classList.remove('card-enter-soft');
+            div.style.animationDelay = '';
+            div.removeEventListener('animationend', clearSoftEnter);
+          }, 900 + Math.round(enterDelay * 1000));
+        } else if (!mobileGrid && pageCards.length <= 8 && reset) {
           div.classList.add('card-enter');
           div.style.animationDelay = `${Math.min(idx * 0.045, 0.36)}s`;
         }
