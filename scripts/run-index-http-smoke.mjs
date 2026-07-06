@@ -86,11 +86,13 @@ const packs = [
 
 const standaloneScripts = [
   ['/edit-panel-gallery.js', 'EditPanelGallery', 'global.EditPanelGallery'],
+  ['/supabase-sync.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
   ['/script.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
   ['/features-draft.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__']
 ];
 
 const legacyChunks = [
+  ['/legacy/supabase-sync/part-01.js', 'supabase-sync chunk', 'STORAGE_PREFIX'],
   ['/legacy/script/part-01.js', 'script chunk', 'DB_NAME'],
   ['/legacy/features-draft/part-01.js', 'features-draft chunk', 'LS_COMMUNITY']
 ];
