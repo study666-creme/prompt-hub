@@ -839,10 +839,10 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         ? `<button type="button" class="imagegen-feed-like ${liked ? 'liked' : ''}" data-like-id="${d().esc?.(id)}" title="点赞">♥ ${likeCount}</button>`
         : '';
       const saveBtn = showSave
-        ? '<button type="button" class="btn btn-ghost btn-sm imagegen-feed-save-btn" data-save-feed="1">存入库</button>'
+        ? '<button type="button" class="imagegen-feed-quick-btn imagegen-feed-save-btn" data-save-feed="1">存入库</button>'
         : '';
       const delBtn = showDel
-        ? '<button type="button" class="imagegen-feed-del" data-delete-feed="1" title="删除" aria-label="删除">×</button>'
+        ? '<button type="button" class="imagegen-feed-del imagegen-feed-card-del" data-delete-feed="1" title="删除" aria-label="删除">×</button>'
         : '';
       const titleHtml = showTitle
         ? `<p class="imagegen-feed-title">${d().esc?.(showTitle)}</p>`
@@ -851,10 +851,12 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         ? `<p class="imagegen-feed-prompt">${d().esc?.(showPrompt)}</p>`
         : '<p class="imagegen-feed-prompt imagegen-feed-prompt--empty">暂无提示词</p>';
       const noMedia = !imgBlock ? ' imagegen-feed-card--no-media' : '';
-      const quickActions = `<div class="imagegen-feed-quick-actions" aria-label="生图快捷操作">
+      const secondaryActions = `${likeBtn}${saveBtn}`;
+      const quickActions = `<div class="imagegen-feed-quick-actions imagegen-feed-action-grid" aria-label="生图快捷操作">
             <button type="button" class="imagegen-feed-quick-btn" data-feed-fill-prompt>填提示词</button>
             ${imgBlock ? '<button type="button" class="imagegen-feed-quick-btn" data-feed-fill-ref>填参考图</button>' : ''}
             <button type="button" class="imagegen-feed-quick-btn imagegen-feed-quick-btn--primary" data-feed-regenerate>再次生成</button>
+            ${secondaryActions}
           </div>`;
       const mobileActs = `<div class="imagegen-feed-mobile-actions mobile-only">
             <button type="button" class="imagegen-feed-mobile-btn" data-feed-copy>复制</button>
@@ -864,10 +866,9 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
             ${imgBlock ? '<button type="button" class="imagegen-feed-mobile-btn" data-feed-download>下载</button>' : ''}
           </div>`;
       const fillHint = '';
-      const footHtml = (metaHtml || likeBtn || saveBtn || delBtn)
+      const footHtml = metaHtml
         ? `<div class="imagegen-feed-foot">
             ${metaHtml}
-            <div class="imagegen-feed-actions">${likeBtn}${saveBtn}${delBtn}</div>
           </div>`
         : '';
       const actionStack = `<div class="imagegen-feed-action-stack">
@@ -875,6 +876,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           ${footHtml}
         </div>`;
       return `<article class="imagegen-feed-card imagegen-feed-card-tile${noMedia}${active ? ' active' : ''}" data-feed-id="${d().esc?.(id)}" data-feed-prompt="${d().esc?.(prompt || '')}" tabindex="0">
+        ${delBtn}
         ${imgBlock}
         <div class="imagegen-feed-content">
           ${titleHtml}

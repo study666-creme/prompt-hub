@@ -7279,11 +7279,18 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-side {
   gap: 6px;
 }
 
+.imagegen-feed-card-tile {
+  position: relative;
+}
+
 .imagegen-feed-action-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
   margin-top: 2px;
+}
+
+.imagegen-feed-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .imagegen-feed-quick-actions {
@@ -7291,14 +7298,22 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-side {
   gap: 6px;
 }
 
-.imagegen-feed-quick-btn {
+.imagegen-feed-action-grid .imagegen-feed-quick-btn,
+.imagegen-feed-action-grid .imagegen-feed-like {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
   min-width: 0;
-  height: 28px;
-  padding: 0 9px;
+  height: 30px;
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .imagegen-feed-card-tile .imagegen-feed-foot {
-  margin-top: 0;
+  margin-top: 6px;
 }
 
 .imagegen-feed-actions {
@@ -7309,13 +7324,52 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-side {
 }
 
 .imagegen-feed-save-btn {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent, #7c8cff) 14%, var(--bg-hover));
   min-height: 30px !important;
-  padding: 0 10px !important;
+  padding: 0 8px !important;
 }
 
-.imagegen-feed-del {
+.imagegen-feed-card-del {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 6;
   width: 30px;
   height: 30px;
+  opacity: 0;
+  transform: scale(0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 12, 16, 0.72);
+  backdrop-filter: blur(8px);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+.imagegen-feed-card:hover .imagegen-feed-card-del,
+.imagegen-feed-card:focus-within .imagegen-feed-card-del {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.imagegen-side.imagegen-preview-open .imagegen-feed-action-stack,
+.imagegen-side.imagegen-preview-open .imagegen-feed-card-del,
+.imagegen-side.imagegen-preview-open .imagegen-feed-mobile-actions {
+  display: none !important;
+}
+
+.imagegen-side.imagegen-preview-open .imagegen-feed-card-tile .imagegen-feed-content {
+  padding-bottom: 8px;
+}
+
+@media (max-width: 900px) {
+  .imagegen-feed-card-del {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @media (max-width: 900px) {
