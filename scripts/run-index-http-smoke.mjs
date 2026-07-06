@@ -85,7 +85,12 @@ const packs = [
 ];
 
 const standaloneScripts = [
-  ['/edit-panel-gallery.js', 'EditPanelGallery', 'global.EditPanelGallery']
+  ['/edit-panel-gallery.js', 'EditPanelGallery', 'global.EditPanelGallery'],
+  ['/features-draft.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__']
+];
+
+const legacyChunks = [
+  ['/legacy/features-draft/part-01.js', 'features-draft chunk', 'LS_COMMUNITY']
 ];
 
 for (const [path, label, token] of packs) {
@@ -114,6 +119,28 @@ for (const [path, label, token] of packs) {
 }
 
 for (const [path, label, token] of standaloneScripts) {
+  for (const check of [
+    { path, asScript: true, tag: 'script' },
+    { path: `${path}?v=${encodeURIComponent(buildId)}`, asScript: true, tag: 'query-script' }
+  ]) {
+    const res = await get(check.path, check.asScript);
+    if (!res.ok) {
+      console.error(`index-http-smoke: ${path} (${check.tag}) HTTP ${res.status}`);
+      process.exit(1);
+    }
+    if (/text\/html/i.test(res.ct) || res.text.trimStart().startsWith('<!')) {
+      console.error(`index-http-smoke: ${path} (${check.tag}) returned HTML`);
+      process.exit(1);
+    }
+    if (!res.text.includes(token)) {
+      console.error(`index-http-smoke: ${path} (${check.tag}) missing ${label}`);
+      process.exit(1);
+    }
+  }
+  console.log(`index-http-smoke OK: ${path} (script + query)`);
+}
+
+for (const [path, label, token] of legacyChunks) {
   for (const check of [
     { path, asScript: true, tag: 'script' },
     { path: `${path}?v=${encodeURIComponent(buildId)}`, asScript: true, tag: 'query-script' }

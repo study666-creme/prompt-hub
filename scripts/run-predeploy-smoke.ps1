@@ -4,6 +4,12 @@ $root = Split-Path $PSScriptRoot -Parent
 
 & (Join-Path $root "scripts\check-js-syntax.ps1")
 
+if (Test-Path (Join-Path $root "legacy")) {
+  Write-Host "verify-legacy-runtime-chunks ..."
+  & node (Join-Path $root "scripts\verify-legacy-runtime-chunks.mjs")
+  if ($LASTEXITCODE -ne 0) { exit 1 }
+}
+
 Write-Host "audit-features-draft-exports ..."
 & node (Join-Path $root "scripts\audit-features-draft-exports.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }

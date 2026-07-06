@@ -1,12 +1,12 @@
 /**
  * 部署前：buildFeatureDraftExports 的 shorthand 导出必须已有 function/let/const 声明。
  */
-import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readLegacyEntry } from './lib/read-legacy-entry.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const code = readFileSync(join(root, 'features-draft.js'), 'utf8');
+const code = readLegacyEntry(root, 'features-draft.js', 'legacy/features-draft');
 
 const start = code.indexOf('function buildFeatureDraftExports()');
 if (start < 0) {
