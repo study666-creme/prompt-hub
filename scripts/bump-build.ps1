@@ -34,7 +34,7 @@ $files = @(
 $syncCacheAssets = @(
   'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css',
   'styles-settings.css', 'styles-assets.css',
-  'theme.js', 'api-client.js', 'supabase-sync.js', 'script.js',
+  'theme.js', 'api-client.js', 'app-router.js', 'supabase-sync.js', 'script.js',
   'features-draft.js', 'features-assets.js', 'community-public-feed.js', 'card-gallery.js'
 )
 
@@ -44,6 +44,7 @@ foreach ($path in $files) {
   if ($path -eq $indexPath) {
     $t = [regex]::Replace($t, "__APP_BUILD__\s*=\s*'$oldEsc'", "__APP_BUILD__ = '$new'")
     $t = [regex]::Replace($t, "版本 $oldEsc", "版本 $new")
+    $t = [regex]::Replace($t, "版本\s+\d{8}[a-z]", "版本 $new")
     foreach ($asset in $syncCacheAssets) {
       $esc = [regex]::Escape($asset)
       $t = [regex]::Replace($t, "($esc\?v=)$oldEsc", "`${1}$new")
