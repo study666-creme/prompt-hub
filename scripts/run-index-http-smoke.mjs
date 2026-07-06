@@ -23,6 +23,7 @@ if (!index.ok) {
   console.error(`index-http-smoke: GET / failed (${index.status})`);
   process.exit(1);
 }
+const buildId = (index.text.match(/__APP_BUILD__\s*=\s*'([^']+)'/) || [])[1] || 'smoke';
 
 const mustHave = [
   'pack-prelude.js',
@@ -83,9 +84,14 @@ const packs = [
 ];
 
 for (const [path, label, token] of packs) {
-  for (const asScript of [false, true]) {
-    const tag = asScript ? 'script' : 'plain';
-    const res = await get(path, asScript);
+  const checks = [
+    { path, asScript: false, tag: 'plain' },
+    { path, asScript: true, tag: 'script' },
+    { path: `${path}?v=${encodeURIComponent(buildId)}`, asScript: true, tag: 'query-script' }
+  ];
+  for (const check of checks) {
+    const tag = check.tag;
+    const res = await get(check.path, check.asScript);
     if (!res.ok) {
       console.error(`index-http-smoke: ${path} (${tag}) HTTP ${res.status}`);
       process.exit(1);
@@ -99,7 +105,7 @@ for (const [path, label, token] of packs) {
       process.exit(1);
     }
   }
-  console.log(`index-http-smoke OK: ${path} (plain + script)`);
+  console.log(`index-http-smoke OK: ${path} (plain + script + query)`);
 }
 
 const packSrcRe = /src="([^"]+\.js)"/g;
