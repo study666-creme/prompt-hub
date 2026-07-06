@@ -42,9 +42,14 @@ describe('generation cost', () => {
     expect(r.discountLabel).toBeNull();
   });
 
-  it('global discount applies as promo (not stacked with member)', () => {
+  it('explicit promo price applies as activity price', () => {
     const r = computeImageGenerationCost(
-      { globalDiscountPercent: 80, models: {} },
+      {
+        globalDiscountPercent: 100,
+        models: {
+          'gpt-image-2': { creditsPerCall: 10, promoPrice: 8 }
+        }
+      },
       'gpt-image-2',
       '1k',
       'basic',
@@ -54,27 +59,25 @@ describe('generation cost', () => {
     expect(r.promoPrice).toBe(8);
     expect(r.final).toBe(8);
     expect(r.appliedDiscount).toBe('model');
+    expect(r.modelDiscountLabel).toBe('活动价');
   });
 
-  it('model promo beats member when lower', () => {
+  it('no promo price when field omitted', () => {
     const r = computeImageGenerationCost(
       {
-        globalDiscountPercent: 100,
+        globalDiscountPercent: 80,
         models: {
-          'gpt-image-2': { creditsPerCall: 6, discountPercent: 92 }
+          'gpt-image-2': { creditsPerCall: 6 }
         }
       },
       'gpt-image-2',
       '1k',
-      'basic',
-      true
+      null,
+      false
     );
     expect(r.listPrice).toBe(6);
-    expect(r.promoPrice).toBe(5.5);
-    expect(r.final).toBe(5.5);
-    expect(r.appliedDiscount).toBe('model');
-    expect(r.modelDiscountLabel).toBe('92折');
-    expect(r.discountLabel).toBeNull();
+    expect(r.final).toBe(6);
+    expect(r.appliedDiscount).toBe('none');
   });
 
   it('legacy quanneng2 maps to gpt-image-2', () => {
@@ -83,12 +86,12 @@ describe('generation cost', () => {
     expect(r.final).toBe(10);
   });
 
-  it('fixedPrice ignores member discount', () => {
+  it('fixedPrice ignores promo price', () => {
     const r = computeImageGenerationCost(
       {
         globalDiscountPercent: 100,
         models: {
-          'nano-banana-pro-vip': { creditsPerCall: 80, fixedPrice: true }
+          'nano-banana-pro-vip': { creditsPerCall: 80, promoPrice: 60, fixedPrice: true }
         }
       },
       'nano-banana-pro-vip',
@@ -105,10 +108,10 @@ describe('generation cost', () => {
       {
         globalDiscountPercent: 100,
         models: {
-          'nano-banana-pro': { creditsPerCall: 100, memberDiscountCapPercent: 90 }
+          'gpt-image-2': { creditsPerCall: 100, memberDiscountCapPercent: 90 }
         }
       },
-      'nano-banana-pro',
+      'gpt-image-2',
       '1k',
       'pro',
       true
@@ -126,6 +129,55 @@ describe('generation cost', () => {
     expect(r1.final).toBe(10);
     expect(r2.final).toBe(20);
     expect(r4.final).toBe(40);
+  });
+
+  it('grsai nano-banana-pro prices by resolution', () => {
+    const r1 = computeImageGenerationCost(settings, 'nano-banana-pro', '1k', null, false);
+    const r2 = computeImageGenerationCost(settings, 'nano-banana-pro', '2k', null, false);
+    const r4 = computeImageGenerationCost(settings, 'nano-banana-pro', '4k', null, false);
+    expect(r1.final).toBe(18);
+    expect(r2.final).toBe(18);
+    expect(r4.final).toBe(18);
+  });
+
+  it('grsai nano-banana-pro per-resolution override', () => {
+    const r2 = computeImageGenerationCost(
+      {
+        globalDiscountPercent: 100,
+        models: {
+          'nano-banana-pro': {
+            creditsByResolution: { '1k': 18, '2k': 24, '4k': 36 }
+          }
+        }
+      },
+      'nano-banana-pro',
+      '2k',
+      null,
+      false
+    );
+    expect(r2.listPrice).toBe(24);
+    expect(r2.final).toBe(24);
+  });
+
+  it('promo by resolution', () => {
+    const r = computeImageGenerationCost(
+      {
+        globalDiscountPercent: 100,
+        models: {
+          'nano-banana-pro': {
+            creditsByResolution: { '1k': 18, '2k': 24, '4k': 36 },
+            promoByResolution: { '2k': 20 }
+          }
+        }
+      },
+      'nano-banana-pro',
+      '2k',
+      null,
+      false
+    );
+    expect(r.listPrice).toBe(24);
+    expect(r.final).toBe(20);
+    expect(r.modelDiscountLabel).toBe('活动价');
   });
 
   it('apimart seedream 5 lite prices by resolution', () => {

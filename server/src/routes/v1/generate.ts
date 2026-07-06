@@ -331,8 +331,24 @@ function publicModelPayload(
           {} as Record<'relax' | 'fast' | 'turbo', ReturnType<typeof computeImageGenerationCost>>
         )
       : null;
+    const costByResolution = m.pricingByResolution
+      ? resolutions.reduce(
+          (acc, res) => {
+            acc[res] = computeImageGenerationCost(
+              settings,
+              m.id,
+              res,
+              tier,
+              memberActive
+            );
+            return acc;
+          },
+          {} as Record<string, ReturnType<typeof computeImageGenerationCost>>
+        )
+      : null;
     const cost =
       costBySpeed?.relax
+      ?? costByResolution?.[defaultRes]
       ?? computeImageGenerationCost(settings, m.id, defaultRes, tier, memberActive);
     return {
       id: m.id,
@@ -355,10 +371,13 @@ function publicModelPayload(
       resolutions: m.resolutions,
       pricingByResolution: m.pricingByResolution,
       creditsByResolution: m.pricingByResolution ? m.creditsByResolution : null,
+      promoByResolution: m.pricingByResolution ? m.promoByResolution : null,
       pricingBySpeed: m.pricingBySpeed,
       creditsBySpeed: m.pricingBySpeed ? m.creditsBySpeed : null,
+      promoBySpeed: m.pricingBySpeed ? m.promoBySpeed : null,
       costBySpeed,
-      creditsPerCall: m.effectiveBaseCredits,
+      costByResolution,
+      creditsPerCall: m.creditsPerCall,
       creditsBase: cost.listPrice,
       creditsFinal: cost.final,
       listPrice: cost.listPrice,
@@ -366,7 +385,8 @@ function publicModelPayload(
       appliedDiscount: cost.appliedDiscount,
       modelDiscountPercent: cost.modelDiscountPercent,
       modelDiscountLabel: cost.modelDiscountLabel,
-      discountLabel: cost.discountLabel
+      discountLabel: cost.discountLabel,
+      promoPriceFlat: m.promoPrice
     };
   });
 }
@@ -798,6 +818,7 @@ generateRoutes.get('/jobs/history', async c => {
   });
   return c.json({ ok: true, data: { jobs, days, limit } });
 });
+
 generateRoutes.get('/jobs/recent', async c => {
   const user = c.get('user');
   const admin = createAdminClient(c.env);

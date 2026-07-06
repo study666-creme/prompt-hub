@@ -39,7 +39,13 @@ export type ImageModelOverride = {
   creditsByResolution?: Partial<Record<ImageResolutionKey, number>>;
   /** MJ Imagine：按 relax / fast / turbo 定价 */
   creditsBySpeed?: Partial<Record<MjSpeedKey, number>>;
-  /** 100 = 原价；80 = 该模型 8 折 */
+  /** 单档售价的活动价；不填则无活动价 */
+  promoPrice?: number;
+  /** 多分辨率模型的活动价（按 1k/2k/4k） */
+  promoByResolution?: Partial<Record<ImageResolutionKey, number>>;
+  /** MJ 按 speed 的活动价 */
+  promoBySpeed?: Partial<Record<MjSpeedKey, number>>;
+  /** @deprecated 已改为 promoPrice / promoByResolution；旧数据忽略 */
   discountPercent?: number;
   sortOrder?: number;
   /** 固定积分/次：不吃全站与模型折扣%，会员也不享生图折扣 */
@@ -54,7 +60,7 @@ export type ImageModelOverride = {
 };
 
 export type ImageModelPricingSettings = {
-  /** 全站生图折扣：100=无，90=九折 */
+  /** @deprecated 已改为各模型单独折扣价；保留字段兼容旧数据 */
   globalDiscountPercent: number;
   models: Record<string, ImageModelOverride>;
 };
@@ -74,7 +80,9 @@ export type ResolvedImageModel = ImageModelCatalogEntry & {
   creditsBySpeed: Partial<Record<MjSpeedKey, number>> | null;
   effectiveCreditsBySpeed: Partial<Record<MjSpeedKey, number>> | null;
   pricingBySpeed: boolean;
-  discountPercent: number;
+  promoPrice: number | null;
+  promoByResolution: Partial<Record<ImageResolutionKey, number>> | null;
+  promoBySpeed: Partial<Record<MjSpeedKey, number>> | null;
   effectiveBaseCredits: number;
   fixedPrice: boolean;
   memberDiscountCapPercent: number | null;
@@ -170,6 +178,46 @@ function sanitizeCreditsByResolution(
   return Object.keys(out).length ? out : undefined;
 }
 
+function sanitizeOptionalPromoCredits(n: unknown): number | undefined {
+  if (n == null || n === '') return undefined;
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return undefined;
+  return clampCreditsValue(v);
+}
+
+function sanitizePromoByResolution(
+  raw: unknown,
+  catalog: ImageModelCatalogEntry
+): Partial<Record<ImageResolutionKey, number>> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const src = raw as Record<string, unknown>;
+  const out: Partial<Record<ImageResolutionKey, number>> = {};
+  for (const res of catalog.resolutions) {
+    const v = sanitizeOptionalPromoCredits(src[res]);
+    if (v != null) out[res] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function sanitizePromoBySpeed(
+  raw: unknown
+): Partial<Record<MjSpeedKey, number>> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const src = raw as Record<string, unknown>;
+  const out: Partial<Record<MjSpeedKey, number>> = {};
+  for (const speed of ['relax', 'fast', 'turbo'] as MjSpeedKey[]) {
+    const v = sanitizeOptionalPromoCredits(src[speed]);
+    if (v != null) out[speed] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** 多分辨率且非 MJ speed 定价时，允许按分辨率单独设售价 */
+export function modelUsesPerResolutionPricing(catalog: ImageModelCatalogEntry): boolean {
+  return catalog.pricingBySpeed !== true
+    && (catalog.pricingByResolution === true || catalog.resolutions.length > 1);
+}
+
 function sanitizeDisplayName(raw: unknown): string | undefined {
   const s = String(raw ?? '').trim();
   if (!s) return undefined;
@@ -217,8 +265,13 @@ export function mergeImageModelSettings(
         if (!catalog || !patch.creditsBySpeed) return undefined;
         return sanitizeCreditsBySpeed(patch.creditsBySpeed, catalog);
       })(),
-      discountPercent:
-        patch.discountPercent != null ? clampPercent(patch.discountPercent, 100) : undefined,
+      promoPrice: sanitizeOptionalPromoCredits(patch.promoPrice),
+      promoByResolution: (() => {
+        const catalog = getCatalogEntry(id);
+        if (!catalog || !patch.promoByResolution) return undefined;
+        return sanitizePromoByResolution(patch.promoByResolution, catalog);
+      })(),
+      promoBySpeed: patch.promoBySpeed ? sanitizePromoBySpeed(patch.promoBySpeed) : undefined,
       sortOrder:
         patch.sortOrder != null && Number.isFinite(Number(patch.sortOrder))
           ? Math.round(Number(patch.sortOrder))
@@ -364,7 +417,7 @@ export function resolveImageModelConfig(
     status === 'maintenance'
       ? '该模型维护中，请稍后再试或换用其他模型'
       : null;
-  const pricingByResolution = catalog.pricingByResolution === true;
+  const pricingByResolution = modelUsesPerResolutionPricing(catalog);
   const pricingBySpeed = catalog.pricingBySpeed === true;
   let creditsByResolution: Partial<Record<ImageResolutionKey, number>> | null = null;
   if (pricingByResolution) {
@@ -395,9 +448,8 @@ export function resolveImageModelConfig(
   const creditsPerCall = pricingBySpeed
     ? creditsBySpeed!.relax ?? catalog.defaultCredits
     : pricingByResolution
-      ? creditsByResolution!['1k'] ?? catalog.defaultCredits
+      ? creditsByResolution![catalog.resolutions[0] as ImageResolutionKey] ?? catalog.defaultCredits
       : clampCredits(override.creditsPerCall, catalog.defaultCredits);
-  const discountPercent = clampPercent(override.discountPercent, 100);
   const fixedPrice = override.fixedPrice === true;
   const memberDiscountCapPercent =
     override.memberDiscountCapPercent != null
@@ -409,38 +461,37 @@ export function resolveImageModelConfig(
       : override.refundOnViolation === true
         ? true
         : catalog.refundOnViolation;
-  const globalMult = clampPercent(settings.globalDiscountPercent, 100) / 100;
-  const modelMult = discountPercent / 100;
-  let effectiveCreditsByResolution: Partial<Record<ImageResolutionKey, number>> | null = null;
-  if (pricingByResolution && creditsByResolution) {
-    effectiveCreditsByResolution = {};
+  let promoByResolution: Partial<Record<ImageResolutionKey, number>> | null = null;
+  if (pricingByResolution && override.promoByResolution) {
+    promoByResolution = {};
     for (const res of catalog.resolutions) {
-      const raw = creditsByResolution[res] ?? catalog.defaultCredits;
-      effectiveCreditsByResolution[res] = fixedPrice
-        ? raw
-        : roundCredits(raw * modelMult * globalMult);
+      const v = sanitizeOptionalPromoCredits(override.promoByResolution[res]);
+      if (v != null) promoByResolution[res] = v;
     }
+    if (!Object.keys(promoByResolution).length) promoByResolution = null;
   }
-  let effectiveCreditsBySpeed: Partial<Record<MjSpeedKey, number>> | null = null;
-  if (pricingBySpeed && creditsBySpeed) {
-    effectiveCreditsBySpeed = {};
+  let promoBySpeed: Partial<Record<MjSpeedKey, number>> | null = null;
+  if (pricingBySpeed && override.promoBySpeed) {
+    promoBySpeed = {};
     for (const speed of ['relax', 'fast', 'turbo'] as MjSpeedKey[]) {
-      const raw = creditsBySpeed[speed] ?? catalog.defaultCredits;
-      effectiveCreditsBySpeed[speed] = fixedPrice
-        ? raw
-        : roundCredits(raw * modelMult * globalMult);
+      const v = sanitizeOptionalPromoCredits(override.promoBySpeed[speed]);
+      if (v != null) promoBySpeed[speed] = v;
     }
+    if (!Object.keys(promoBySpeed).length) promoBySpeed = null;
   }
+  const promoPrice = !pricingByResolution && !pricingBySpeed
+    ? sanitizeOptionalPromoCredits(override.promoPrice) ?? null
+    : null;
+  const effectiveCreditsByResolution = creditsByResolution
+    ? { ...creditsByResolution }
+    : null;
+  const effectiveCreditsBySpeed = creditsBySpeed ? { ...creditsBySpeed } : null;
   const listBase = pricingBySpeed
-    ? effectiveCreditsBySpeed!.relax ?? catalog.defaultCredits
+    ? creditsBySpeed!.relax ?? catalog.defaultCredits
     : pricingByResolution
-      ? effectiveCreditsByResolution!['1k'] ?? catalog.defaultCredits
+      ? creditsByResolution![catalog.resolutions[0] as ImageResolutionKey] ?? catalog.defaultCredits
       : creditsPerCall;
-  const effectiveBaseCredits = fixedPrice
-    ? listBase
-    : pricingBySpeed || pricingByResolution
-      ? listBase
-      : roundCredits(creditsPerCall * modelMult * globalMult);
+  const effectiveBaseCredits = listBase;
   return {
       ...catalog,
       displayLabel,
@@ -455,7 +506,9 @@ export function resolveImageModelConfig(
       creditsBySpeed,
       effectiveCreditsBySpeed,
       pricingBySpeed,
-      discountPercent,
+      promoPrice,
+      promoByResolution,
+      promoBySpeed,
       effectiveBaseCredits,
       fixedPrice,
       memberDiscountCapPercent,
@@ -515,7 +568,6 @@ export function computeImageGenerationCost(
       tier,
       memberActive,
       resolution,
-      settings.globalDiscountPercent,
       opts?.mjSpeed
     );
   }
@@ -524,7 +576,6 @@ export function computeImageGenerationCost(
     tier,
     memberActive,
     resolution,
-    settings.globalDiscountPercent,
     opts?.mjSpeed
   );
 }
@@ -536,16 +587,16 @@ function resolveModelBaseCredits(
 ): number {
   if (model.pricingBySpeed) {
     const speed = normalizeMjSpeed(mjSpeed);
-    if (model.effectiveCreditsBySpeed?.[speed] != null) {
-      return model.effectiveCreditsBySpeed[speed]!;
+    if (model.creditsBySpeed?.[speed] != null) {
+      return model.creditsBySpeed[speed]!;
     }
-    return model.effectiveBaseCredits;
+    return model.creditsPerCall;
   }
   const res = (['1k', '2k', '4k'].includes(resolution) ? resolution : '1k') as ImageResolutionKey;
-  if (model.pricingByResolution && model.effectiveCreditsByResolution?.[res] != null) {
-    return model.effectiveCreditsByResolution[res]!;
+  if (model.pricingByResolution && model.creditsByResolution?.[res] != null) {
+    return model.creditsByResolution[res]!;
   }
-  return model.effectiveBaseCredits;
+  return model.creditsPerCall;
 }
 
 /** 管理后台「售价积分」原价（未乘模型/全场折扣） */
@@ -566,23 +617,36 @@ function resolveModelListPriceCredits(
   return model.creditsPerCall;
 }
 
-function formatModelDiscountLabel(
-  discountPercent: number,
-  fixedPrice: boolean
-): string | null {
-  if (fixedPrice || discountPercent >= 100) return null;
-  return `${discountPercent}折`;
-}
-
-function computePromoCredits(
-  listPrice: number,
+function resolvePromoPriceCredits(
   model: ResolvedImageModel,
-  globalDiscountPercent: number
+  listPrice: number,
+  resolution: string,
+  mjSpeed?: string | null
 ): number {
   if (model.fixedPrice) return listPrice;
-  const globalMult = clampPercent(globalDiscountPercent, 100) / 100;
-  const modelMult = model.discountPercent / 100;
-  return roundCredits(listPrice * modelMult * globalMult);
+  if (model.pricingBySpeed) {
+    const speed = normalizeMjSpeed(mjSpeed);
+    const promo = model.promoBySpeed?.[speed];
+    if (promo != null) return promo;
+    return listPrice;
+  }
+  const res = (['1k', '2k', '4k'].includes(resolution) ? resolution : '1k') as ImageResolutionKey;
+  if (model.pricingByResolution) {
+    const promo = model.promoByResolution?.[res];
+    if (promo != null) return promo;
+    return listPrice;
+  }
+  if (model.promoPrice != null) return model.promoPrice;
+  return listPrice;
+}
+
+function formatPromoDiscountLabel(
+  listPrice: number,
+  promoPrice: number,
+  fixedPrice: boolean
+): string | null {
+  if (fixedPrice || promoPrice >= listPrice - 0.04) return null;
+  return '活动价';
 }
 
 function computeMemberCreditsFromList(
@@ -600,11 +664,10 @@ function computeFromResolved(
   tier: Profile['membership_tier'],
   memberActive: boolean,
   resolution = '1k',
-  globalDiscountPercent = 100,
   mjSpeed?: string | null
 ) {
   const listPrice = resolveModelListPriceCredits(model, resolution, mjSpeed);
-  const promoPrice = computePromoCredits(listPrice, model, globalDiscountPercent);
+  const promoPrice = resolvePromoPriceCredits(model, listPrice, resolution, mjSpeed);
   const member = computeMemberCreditsFromList(listPrice, model, tier, memberActive);
 
   let final = listPrice;
@@ -620,16 +683,13 @@ function computeFromResolved(
     final = promoPrice;
     if (promoPrice < listPrice - 0.04) {
       appliedDiscount = 'model';
-      modelDiscountLabel = formatModelDiscountLabel(model.discountPercent, false);
+      modelDiscountLabel = formatPromoDiscountLabel(listPrice, promoPrice, false);
     }
   } else if (promoPrice <= member.price) {
     final = promoPrice;
     if (promoPrice < listPrice - 0.04) {
       appliedDiscount = 'model';
-      modelDiscountLabel = formatModelDiscountLabel(model.discountPercent, false);
-      if (!modelDiscountLabel && promoPrice < listPrice - 0.04) {
-        modelDiscountLabel = '活动价';
-      }
+      modelDiscountLabel = formatPromoDiscountLabel(listPrice, promoPrice, false);
     }
   } else {
     final = member.price;
@@ -649,7 +709,9 @@ function computeFromResolved(
     final,
     listPrice,
     promoPrice,
-    modelDiscountPercent: model.discountPercent,
+    modelDiscountPercent: promoPrice < listPrice - 0.04
+      ? Math.round((promoPrice / listPrice) * 100)
+      : 100,
     modelDiscountLabel,
     discountLabel,
     appliedDiscount,
@@ -695,7 +757,9 @@ export function adminModelRows(settings: ImageModelPricingSettings) {
       creditsBySpeed: resolved.creditsBySpeed,
       effectiveCreditsBySpeed: resolved.effectiveCreditsBySpeed,
       pricingBySpeed: resolved.pricingBySpeed,
-      discountPercent: resolved.discountPercent,
+      promoPrice: resolved.promoPrice,
+      promoByResolution: resolved.promoByResolution,
+      promoBySpeed: resolved.promoBySpeed,
       effectiveBaseCredits: resolved.effectiveBaseCredits,
       fixedPrice: resolved.fixedPrice,
       memberDiscountCapPercent: resolved.memberDiscountCapPercent,

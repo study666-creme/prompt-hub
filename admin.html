@@ -402,10 +402,6 @@
           <button type="button" class="admin-view-tab" data-model-status="offline">下架</button>
         </div>
         <div class="admin-row" style="margin:12px 0">
-          <div class="admin-field" style="width:160px;margin:0">
-            <label for="modelsGlobalDiscount">全站生图折扣 %</label>
-            <input type="number" id="modelsGlobalDiscount" min="1" max="100" value="100">
-          </div>
           <button type="button" class="admin-btn admin-btn--primary" id="modelsSaveBtn">保存全部定价</button>
         </div>
         <div class="admin-table-wrap">
@@ -422,8 +418,8 @@
                 <th>违规返还</th>
                 <th>分辨率</th>
                 <th>售价积分</th>
-                <th>模型折扣%</th>
-                <th title="售价 × 模型折扣% × 全场折扣后的积分">折后售价</th>
+                <th title="不填则无活动价">折扣价</th>
+                <th title="已填折扣价时前台按此计费">活动价预览</th>
                 <th>固定价</th>
                 <th>会员最低%</th>
               </tr>

@@ -63,10 +63,13 @@
           discountLabel: hit.discountLabel,
           pricingByResolution: hit.pricingByResolution === true,
           creditsByResolution: hit.creditsByResolution || null,
+          promoByResolution: hit.promoByResolution || null,
           costByResolution: hit.costByResolution || null,
           pricingBySpeed: hit.pricingBySpeed === true,
           creditsBySpeed: hit.creditsBySpeed || null,
-          costBySpeed: hit.costBySpeed || null
+          promoBySpeed: hit.promoBySpeed || null,
+          costBySpeed: hit.costBySpeed || null,
+          promoPriceFlat: hit.promoPriceFlat ?? hit.promoPrice ?? null
         };
       }
     }
@@ -286,7 +289,8 @@
         }
         if (model.creditsBySpeed?.[speed] != null) {
           const listPrice = Number(model.creditsBySpeed[speed]);
-          const promoPrice = Number(model.promoPrice);
+          const promoRaw = model.promoBySpeed?.[speed] ?? model.promoPrice;
+          const promoPrice = Number(promoRaw);
           const hasPromo = Number.isFinite(promoPrice) && promoPrice > 0 && promoPrice < listPrice;
           const picked = pickBestGenPrice(
             listPrice,
@@ -317,7 +321,8 @@
       }
       if (model.pricingByResolution && model.creditsByResolution?.[res] != null) {
         const listPrice = Number(model.creditsByResolution[res]);
-        const promoPrice = Number(model.promoPrice);
+        const promoRaw = model.promoByResolution?.[res] ?? model.promoPriceFlat ?? model.promoPrice;
+        const promoPrice = Number(promoRaw);
         const hasPromo = Number.isFinite(promoPrice) && promoPrice > 0 && promoPrice < listPrice;
         const picked = pickBestGenPrice(
           listPrice,

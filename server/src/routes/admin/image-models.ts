@@ -129,8 +129,14 @@ adminImageModelRoutes.patch('/:modelId', async c => {
         ...(patch.creditsBySpeed && typeof patch.creditsBySpeed === 'object'
           ? { creditsBySpeed: patch.creditsBySpeed as ImageModelOverride['creditsBySpeed'] }
           : {}),
-        ...(patch.discountPercent != null
-          ? { discountPercent: Number(patch.discountPercent) }
+        ...(patch.promoPrice != null
+          ? { promoPrice: Number(patch.promoPrice) }
+          : {}),
+        ...(patch.promoByResolution && typeof patch.promoByResolution === 'object'
+          ? { promoByResolution: patch.promoByResolution as ImageModelOverride['promoByResolution'] }
+          : {}),
+        ...(patch.promoBySpeed && typeof patch.promoBySpeed === 'object'
+          ? { promoBySpeed: patch.promoBySpeed as ImageModelOverride['promoBySpeed'] }
           : {}),
         ...(patch.sortOrder != null ? { sortOrder: Number(patch.sortOrder) } : {}),
         ...(patch.fixedPrice != null ? { fixedPrice: !!patch.fixedPrice } : {}),

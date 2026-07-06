@@ -1833,17 +1833,20 @@
     });
   }
 
-  function effectiveModelCredits(row, resolution, speed) {
-    const disc = Number(row.discountPercent) || 100;
-    const globalDisc = Number($('modelsGlobalDiscount')?.value) || 100;
-    let base = Number(row.creditsPerCall) || 0;
-    if (row.pricingBySpeed && speed && row.creditsBySpeed?.[speed] != null) {
-      base = Number(row.creditsBySpeed[speed]) || 0;
-    } else if (row.pricingByResolution && resolution && row.creditsByResolution?.[resolution] != null) {
-      base = Number(row.creditsByResolution[resolution]) || 0;
+  function effectiveModelPromo(row, resolution, speed) {
+    if (row.fixedPrice) return null;
+    if (isMjPricingRow(row)) {
+      const s = speed || 'relax';
+      const v = row.promoBySpeed?.[s];
+      return v != null && v !== '' ? Number(v) : null;
     }
-    const raw = (base * disc * globalDisc) / 10000;
-    return Math.max(0.1, Math.round(raw * 10) / 10);
+    if (row.pricingByResolution) {
+      const res = resolution || (row.resolutions || ['1k'])[0] || '1k';
+      const v = row.promoByResolution?.[res];
+      return v != null && v !== '' ? Number(v) : null;
+    }
+    const v = row.promoPrice;
+    return v != null && v !== '' ? Number(v) : null;
   }
 
   function formatAdminCredits(n) {
@@ -1889,8 +1892,28 @@
           row.memberDiscountCapPercent = v === '' ? null : Number(v) || null;
         }
         if (field === 'sortOrder') row.sortOrder = Number(inp.value) || row.sortOrder;
-        if (field === 'discount') row.discountPercent = Number(inp.value) || 100;
+        if (field === 'promo') row.promoPrice = inp.value.trim() === '' ? null : Number(inp.value) || null;
         if (field === 'credits') row.creditsPerCall = Number(inp.value) || row.creditsPerCall;
+        if (field.startsWith('promo-speed-')) {
+          const speed = field.slice('promo-speed-'.length);
+          if (!row.promoBySpeed) row.promoBySpeed = {};
+          const raw = inp.value.trim();
+          if (raw === '') delete row.promoBySpeed[speed];
+          else {
+            const n = Number(raw);
+            if (Number.isFinite(n) && n > 0) row.promoBySpeed[speed] = n;
+          }
+        }
+        if (field.startsWith('promo-') && !field.startsWith('promo-speed-')) {
+          const res = field.slice('promo-'.length);
+          if (!row.promoByResolution) row.promoByResolution = {};
+          const raw = inp.value.trim();
+          if (raw === '') delete row.promoByResolution[res];
+          else {
+            const n = Number(raw);
+            if (Number.isFinite(n) && n > 0) row.promoByResolution[res] = n;
+          }
+        }
         if (field.startsWith('credits-speed-')) {
           const speed = field.slice('credits-speed-'.length);
           if (!row.creditsBySpeed) row.creditsBySpeed = {};
@@ -1939,11 +1962,45 @@
     return `<input type="number" class="admin-input-sm" data-field="credits" min="0.1" max="99999" step="0.1" value="${row.creditsPerCall}">`;
   }
 
+  function renderModelPromoInputs(row) {
+    ensureMjCreditsBySpeed(row);
+    if (isMjPricingRow(row)) {
+      const speeds = [
+        { key: 'relax', label: 'Relax' },
+        { key: 'fast', label: 'Fast' },
+        { key: 'turbo', label: 'Turbo' }
+      ];
+      if (!row.promoBySpeed) row.promoBySpeed = {};
+      return speeds
+        .map(
+          (s) =>
+            `<label class="admin-res-price"><span>${s.label}</span><input type="number" class="admin-input-sm" data-field="promo-speed-${s.key}" min="0.1" max="99999" step="0.1" placeholder="无" value="${row.promoBySpeed[s.key] ?? ''}"></label>`
+        )
+        .join('');
+    }
+    if (row.pricingByResolution) {
+      const resList = (row.resolutions || ['1k', '2k', '4k']).filter((r) =>
+        ['1k', '2k', '4k'].includes(r)
+      );
+      if (!row.promoByResolution) row.promoByResolution = {};
+      return resList
+        .map(
+          (res) =>
+            `<label class="admin-res-price"><span>${res.toUpperCase()}</span><input type="number" class="admin-input-sm" data-field="promo-${res}" min="0.1" max="99999" step="0.1" placeholder="无" value="${row.promoByResolution[res] ?? ''}"></label>`
+        )
+        .join('');
+    }
+    return `<input type="number" class="admin-input-sm" data-field="promo" min="0.1" max="99999" step="0.1" placeholder="无" value="${row.promoPrice ?? ''}">`;
+  }
+
   function renderModelEffectiveCell(row) {
     ensureMjCreditsBySpeed(row);
     if (isMjPricingRow(row)) {
       return ['relax', 'fast', 'turbo']
-        .map((s) => `${s} ${formatAdminCredits(effectiveModelCredits(row, '1k', s))}`)
+        .map((s) => {
+          const promo = effectiveModelPromo(row, '1k', s);
+          return promo != null ? `${s} ${formatAdminCredits(promo)}` : `${s} —`;
+        })
         .join('<br>');
     }
     if (row.pricingByResolution) {
@@ -1951,10 +2008,14 @@
         ['1k', '2k', '4k'].includes(r)
       );
       return resList
-        .map((res) => `${res.toUpperCase()} ${formatAdminCredits(effectiveModelCredits(row, res))}`)
+        .map((res) => {
+          const promo = effectiveModelPromo(row, res);
+          return promo != null ? `${res.toUpperCase()} ${formatAdminCredits(promo)}` : `${res.toUpperCase()} —`;
+        })
         .join('<br>');
     }
-    return formatAdminCredits(effectiveModelCredits(row));
+    const promo = effectiveModelPromo(row);
+    return promo != null ? formatAdminCredits(promo) : '—';
   }
 
   const MODEL_STATUS_OPTS = [
@@ -1978,10 +2039,12 @@
       creditsPerCall: row.creditsPerCall,
       creditsByResolution: row.creditsByResolution || null,
       creditsBySpeed: row.creditsBySpeed || null,
+      promoPrice: row.promoPrice != null && row.promoPrice !== '' ? Number(row.promoPrice) : null,
+      promoByResolution: row.promoByResolution || null,
+      promoBySpeed: row.promoBySpeed || null,
       pricingByResolution: row.pricingByResolution === true,
       pricingBySpeed: isMjPricingRow(row),
       uiFamily: row.uiFamily || 'gim2',
-      discountPercent: row.discountPercent ?? 100,
       fixedPrice: row.fixedPrice === true,
       memberDiscountCapPercent:
         row.memberDiscountCapPercent != null && row.memberDiscountCapPercent !== ''
@@ -2057,7 +2120,7 @@
           <td>${refundCell}</td>
           <td>${esc((row.resolutions || []).join(' / ') || '—')}</td>
           <td>${renderModelCreditsInputs(row)}</td>
-          <td><input type="number" class="admin-input-sm" data-field="discount" min="1" max="100" value="${row.discountPercent ?? 100}"></td>
+          <td>${renderModelPromoInputs(row)}</td>
           <td class="model-effective">${renderModelEffectiveCell(row)}</td>
           <td><label class="admin-check"><input type="checkbox" data-field="fixedPrice" ${row.fixedPrice ? 'checked' : ''}> 固定</label></td>
           <td><input type="number" class="admin-input-sm" data-field="memberCap" min="1" max="100" placeholder="不限" value="${row.memberDiscountCapPercent != null ? row.memberDiscountCapPercent : ''}" title="会员至少付售价的百分之几"></td>
@@ -2090,6 +2153,24 @@
             return;
           }
           if (inp.dataset.field === 'credits') row.creditsPerCall = Number(inp.value) || row.creditsPerCall;
+          if (inp.dataset.field === 'promo') {
+            const raw = inp.value.trim();
+            row.promoPrice = raw === '' ? null : Number(raw) || null;
+          }
+          if (inp.dataset.field?.startsWith('promo-speed-')) {
+            const speed = inp.dataset.field.slice('promo-speed-'.length);
+            if (!row.promoBySpeed) row.promoBySpeed = {};
+            const raw = inp.value.trim();
+            if (raw === '') delete row.promoBySpeed[speed];
+            else row.promoBySpeed[speed] = Number(raw) || row.promoBySpeed[speed];
+          }
+          if (inp.dataset.field?.startsWith('promo-') && !inp.dataset.field.startsWith('promo-speed-')) {
+            const res = inp.dataset.field.slice('promo-'.length);
+            if (!row.promoByResolution) row.promoByResolution = {};
+            const raw = inp.value.trim();
+            if (raw === '') delete row.promoByResolution[res];
+            else row.promoByResolution[res] = Number(raw) || row.promoByResolution[res];
+          }
           if (inp.dataset.field?.startsWith('credits-speed-')) {
             const speed = inp.dataset.field.slice('credits-speed-'.length);
             if (!row.creditsBySpeed) row.creditsBySpeed = {};
@@ -2101,7 +2182,6 @@
             if (!row.creditsByResolution) row.creditsByResolution = {};
             row.creditsByResolution[res] = Number(inp.value) || row.creditsByResolution[res];
           }
-          if (inp.dataset.field === 'discount') row.discountPercent = Number(inp.value) || 100;
           const eff = tr.querySelector('.model-effective');
           if (eff) eff.innerHTML = renderModelEffectiveCell(row);
         };
@@ -2139,9 +2219,6 @@
           warn.textContent = '';
         }
       }
-      if ($('modelsGlobalDiscount')) {
-        $('modelsGlobalDiscount').value = String(imageModelSettings.globalDiscountPercent || 100);
-      }
       renderGrsaiCostReference();
       renderApimartCostReference();
       renderModelsTable();
@@ -2168,13 +2245,18 @@
       const patch = {
         status: row.status || 'active',
         sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : (index + 1) * 10,
-        discountPercent: Number(row.discountPercent) || 100,
         fixedPrice: !!row.fixedPrice
       };
       if (row.pricingByResolution && row.creditsByResolution) {
         patch.creditsByResolution = {};
         for (const [res, val] of Object.entries(row.creditsByResolution)) {
           if (val != null && val !== '') patch.creditsByResolution[res] = Number(val) || 0;
+        }
+        if (row.promoByResolution && Object.keys(row.promoByResolution).length) {
+          patch.promoByResolution = {};
+          for (const [res, val] of Object.entries(row.promoByResolution)) {
+            if (val != null && val !== '') patch.promoByResolution[res] = Number(val);
+          }
         }
       } else if (isMjPricingRow(row)) {
         patch.creditsBySpeed = {};
@@ -2185,8 +2267,17 @@
           const n = Number(raw);
           patch.creditsBySpeed[speed] = Number.isFinite(n) && n > 0 ? n : fallback;
         }
+        if (row.promoBySpeed && Object.keys(row.promoBySpeed).length) {
+          patch.promoBySpeed = {};
+          for (const [speed, val] of Object.entries(row.promoBySpeed)) {
+            if (val != null && val !== '') patch.promoBySpeed[speed] = Number(val);
+          }
+        }
       } else {
         patch.creditsPerCall = Number(row.creditsPerCall) || 10;
+        if (row.promoPrice != null && row.promoPrice !== '') {
+          patch.promoPrice = Number(row.promoPrice);
+        }
       }
       if (displayName) patch.displayName = displayName;
       if (row.memberDiscountCapPercent != null && Number.isFinite(Number(row.memberDiscountCapPercent))) {
@@ -2200,10 +2291,7 @@
         btn.disabled = true;
         btn.textContent = '保存中…';
       }
-      const body = {
-        globalDiscountPercent: Number($('modelsGlobalDiscount')?.value) || 100,
-        models
-      };
+      const body = { models };
       let data;
       try {
         data = await adminFetch(session, '/api/admin/image-models', { method: 'PUT', body });
@@ -2394,7 +2482,6 @@
     });
     $('createCodeBtn')?.addEventListener('click', () => void createCodes());
     $('modelsSaveBtn')?.addEventListener('click', () => void saveImageModels());
-    $('modelsGlobalDiscount')?.addEventListener('input', () => renderModelsTable());
     document.getElementById('panel-models')?.addEventListener('click', (e) => {
       const grsaiFamBtn = e.target.closest('[data-grsai-cost-family]');
       if (grsaiFamBtn) {

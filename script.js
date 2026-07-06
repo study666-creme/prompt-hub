@@ -3472,7 +3472,8 @@
         return;
       }
       if (media.closest('#creationsGrid') || media.closest('#communityGrid')) {
-        /* flex 多列瀑布流：图片加载后不再重排，避免卡片跳动 */
+        const feedGrid = media.closest('#creationsGrid, #communityGrid');
+        window.FeatureDraft?.settleCommunityFeedLayout?.(feedGrid?.id, { fromImage: true });
       } else if (media.closest('#userProfileGrid')) {
         window.FeatureDraft?.scheduleCommunityLayout?.('userProfileGrid', { fromImage: true });
       } else if (media.closest('#imageGenFeed')) {

@@ -65,6 +65,16 @@
     return null;
   }
 
+  function hasGeneratedImageIntent(card) {
+    if (!card) return false;
+    if (card.genJobId || card.feedCoverJobId || card.genSourceId || card.isMidjourney) return true;
+    if (Array.isArray(card.mjGridUrls) && card.mjGridUrls.some(Boolean)) return true;
+    const tags = Array.isArray(card.tags) ? card.tags.map((t) => String(t || '').trim()) : [];
+    const autoTag = String(global.GEN_AUTO_TAG || '图片生成');
+    const inspireTag = String(global.INSPIRE_DRAW_TAG || '灵感抽卡');
+    return tags.includes(autoTag) || tags.includes(inspireTag);
+  }
+
   function isMjCompositeCoverRef(ref, card) {
     if (!ref || !card?.isMidjourney) return false;
     const comp = card.mjCompositeUrl && String(card.mjCompositeUrl).trim();
@@ -117,10 +127,9 @@
     }
     const hasResolvable = ref && isResolvableCoverRef(ref, card.id);
     const hasGalleryResolvable = gallery.some((u) => isResolvableCoverRef(u, card.id));
-    const hasGenJobThumb = !!baseJob;
-    const hasGalleryAny = gallery.some((u) => u && String(u).trim());
+    const hasGenJobThumb = !!baseJob && hasGeneratedImageIntent(card);
     return {
-      hasImage: !!(cachedUrl || hasResolvable || hasGalleryResolvable || hasGenJobThumb || (hasGalleryAny && baseJob)),
+      hasImage: !!(cachedUrl || hasResolvable || hasGalleryResolvable || hasGenJobThumb),
       ref,
       jobId,
       slotJobId,

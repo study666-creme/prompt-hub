@@ -3478,7 +3478,7 @@
     }
     const container = document.getElementById(containerId);
     if (!container) return;
-    const run = () => scheduleCommunityLayout(containerId);
+    const run = () => settleCommunityFeedLayout(containerId, { recalcCols: true });
     const imgs = [...container.querySelectorAll('.card-img')];
     const pending = imgs.filter((img) => feedImgStillPending(img));
     if (!pending.length) {
@@ -3501,6 +3501,44 @@
       img.addEventListener('error', tick, { once: true });
     });
     setTimeout(finish, 2800);
+  }
+
+  const feedLayoutSettleSeq = Object.create(null);
+  function settleCommunityFeedLayout(containerId = 'communityGrid', opts = {}) {
+    if (!containerId) return;
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (useCommunityCssGrid(containerId) || useCssGridForCommunityFeed(containerId)) {
+      setFeedLayoutPending(containerId, false);
+      return;
+    }
+    if (!container.querySelector('.community-post-card, .card')) return;
+    const seq = (feedLayoutSettleSeq[containerId] || 0) + 1;
+    feedLayoutSettleSeq[containerId] = seq;
+    const delays = opts.fromImage
+      ? [80, 260, 720]
+      : [0, 120, 360, 900, 1600];
+    const run = () => {
+      if (feedLayoutSettleSeq[containerId] !== seq) return;
+      const live = document.getElementById(containerId);
+      if (!live) return;
+      if (containerId === 'communityGrid') {
+        window.FeedLayout?.repairCommunityMasonry?.(containerId);
+      }
+      scheduleCommunityLayout(containerId, {
+        force: true,
+        immediate: true,
+        recalcCols: opts.recalcCols === true
+      });
+      window.FeedLayout?.scheduleMasonryRelayout?.(containerId);
+      if (containerId === 'communityGrid' || containerId === 'creationsGrid') {
+        requestAnimationFrame(() => reconnectFeedPageObserver(containerId));
+      }
+    };
+    delays.forEach((delay) => {
+      if (delay <= 0) requestAnimationFrame(() => requestAnimationFrame(run));
+      else setTimeout(run, delay);
+    });
   }
 
   /* —— 全站社区 Feed API：community-public-feed.js —— */
@@ -5205,7 +5243,9 @@
       patchFeedLikeLabels(container, list);
       const layoutReady = isCommunityFeedLayoutReady(container, 'communityGrid');
       if (!layoutReady && container.querySelector('.community-post-card')) {
-        scheduleCommunityLayout('communityGrid', { force: true, immediate: true });
+        settleCommunityFeedLayout('communityGrid', { recalcCols: true });
+      } else {
+        settleCommunityFeedLayout('communityGrid', { fromImage: true });
       }
       if (window.SupabaseSync?.isLoggedIn?.()) void refreshRemoteNotifications();
       return;
@@ -5267,7 +5307,9 @@
       const layoutReady2 = container.classList.contains('masonry-ready')
         || container.querySelector(':scope > .community-feed-col');
       if (!layoutReady2 && container.querySelector('.community-post-card')) {
-        scheduleCommunityLayout('communityGrid', { force: true, immediate: true });
+        settleCommunityFeedLayout('communityGrid', { recalcCols: true });
+      } else {
+        settleCommunityFeedLayout('communityGrid', { fromImage: true });
       }
       return;
     }
@@ -5279,6 +5321,7 @@
       scrubStaleCommunityFeedEmpty(container);
       patchFeedLikeLabels(container, list);
       void growCommunityFeedAfterPublicRefresh('communityGrid');
+      settleCommunityFeedLayout('communityGrid', { recalcCols: true });
       if (window.SupabaseSync?.isLoggedIn?.()) void refreshRemoteNotifications();
       return;
     }
@@ -8196,7 +8239,7 @@
           const sig = feedListSignature(sorted, 'communityGrid');
           if (hasRealCards && grid?.dataset.feedSig === sig && feedFresh) {
             patchFeedLikeLabels(grid, sorted);
-            scheduleCommunityLayout('communityGrid', { force: true, immediate: true, recalcCols: true });
+            settleCommunityFeedLayout('communityGrid', { recalcCols: true });
           } else {
             renderCommunity({
               immediate: true,
@@ -11189,6 +11232,7 @@
     scheduleImageGenFeedLayout: (...args) => scheduleImageGenFeedLayout?.(...args),
     repairCreationsFeedLayout,
     repairCommunityFeedLayout,
+    settleCommunityFeedLayout,
     syncCommunityFeedColumnCount,
     scrubCommunityFeedFlexCards,
     scheduleCommunityFeedHeightBalance,
