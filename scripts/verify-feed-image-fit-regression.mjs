@@ -1,9 +1,9 @@
-import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readCssEntry } from './lib/read-css-entry.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const css = readFileSync(join(root, 'styles-features.css'), 'utf8');
+const css = readCssEntry(root, 'styles-features.css', 'styles/features');
 
 const required = [
   '社区/我的主页/个人主页真实图片按原比例完整展示',

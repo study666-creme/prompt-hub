@@ -10,6 +10,12 @@ if (Test-Path (Join-Path $root "legacy")) {
   if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
+if (Test-Path (Join-Path $root "styles")) {
+  Write-Host "verify-css-runtime-splits ..."
+  & node (Join-Path $root "scripts\verify-css-runtime-splits.mjs")
+  if ($LASTEXITCODE -ne 0) { exit 1 }
+}
+
 Write-Host "audit-features-draft-exports ..."
 & node (Join-Path $root "scripts\audit-features-draft-exports.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }

@@ -97,6 +97,13 @@ const legacyChunks = [
   ['/legacy/features-draft/part-01.js', 'features-draft chunk', 'LS_COMMUNITY']
 ];
 
+const cssAssets = [
+  ['/styles.css', 'CSS split manifest', '__PROMPT_HUB_CSS_SPLIT_MANIFEST__'],
+  ['/styles-features.css', 'CSS split manifest', '__PROMPT_HUB_CSS_SPLIT_MANIFEST__'],
+  ['/styles/base/part-01.css', 'base CSS chunk', 'feature-shell'],
+  ['/styles/features/part-01.css', 'features CSS chunk', 'feature-shell']
+];
+
 for (const [path, label, token] of packs) {
   const checks = [
     { path, asScript: false, tag: 'plain' },
@@ -164,6 +171,25 @@ for (const [path, label, token] of legacyChunks) {
     }
   }
   console.log(`index-http-smoke OK: ${path} (script + query)`);
+}
+
+for (const [path, label, token] of cssAssets) {
+  for (const checkPath of [path, `${path}?v=${encodeURIComponent(buildId)}`]) {
+    const res = await get(checkPath, false);
+    if (!res.ok) {
+      console.error(`index-http-smoke: ${checkPath} HTTP ${res.status}`);
+      process.exit(1);
+    }
+    if (/text\/html/i.test(res.ct) || res.text.trimStart().startsWith('<!')) {
+      console.error(`index-http-smoke: ${checkPath} returned HTML`);
+      process.exit(1);
+    }
+    if (!res.text.includes(token)) {
+      console.error(`index-http-smoke: ${checkPath} missing ${label}`);
+      process.exit(1);
+    }
+  }
+  console.log(`index-http-smoke OK: ${path} (plain + query)`);
 }
 
 const packSrcRe = /src="([^"]+\.js(?:\?v=[^"]+)?)"/g;

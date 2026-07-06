@@ -1,0 +1,713 @@
+    .card-gallery-count {
+      position: absolute;
+      left: 6px;
+      bottom: 6px;
+      z-index: 4;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 999px;
+      pointer-events: none;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    }
+    .card.card-dragging-source {
+      opacity: 0.32;
+      transform: scale(0.96) !important;
+      box-shadow: none;
+      transition: opacity 0.15s var(--ease-out), transform 0.15s var(--ease-out);
+    }
+    body.is-card-dragging,
+    body.is-card-dragging * {
+      cursor: grabbing !important;
+    }
+    body.is-card-dragging .group-item,
+    body.is-card-dragging .group-item * {
+      cursor: pointer !important;
+    }
+    .group-item.group-drag-over {
+      background: var(--accent-bg-strong);
+      color: var(--text-primary);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+    }
+    .card-drag-stack {
+      position: fixed;
+      z-index: 10000;
+      width: 148px;
+      pointer-events: none;
+      filter: drop-shadow(0 16px 32px rgba(0, 0, 0, 0.5));
+    }
+    .card-drag-preview {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 148px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-light);
+      border-radius: 12px;
+      overflow: hidden;
+      transform: scale(0.9) translate(calc(var(--stack-i, 0) * 5px), calc(var(--stack-i, 0) * 5px));
+      transform-origin: top left;
+    }
+    .card-drag-preview img {
+      display: block;
+      width: 100%;
+      height: 76px;
+      object-fit: cover;
+      background: var(--bg-primary);
+    }
+    .card-drag-preview-title {
+      display: block;
+      padding: 8px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-drag-more {
+      position: absolute;
+      top: -6px;
+      right: -6px;
+      min-width: 24px;
+      height: 24px;
+      padding: 0 6px;
+      border-radius: 20px;
+      background: var(--accent-gradient);
+      color: var(--accent-on);
+      font-size: 11px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      z-index: 5;
+    }
+    .card .card-checkbox {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      z-index: 5;
+      display: none;
+      width: 24px;
+      height: 24px;
+      border-radius: 8px;
+      background: rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.3);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .batch-mode .card-checkbox { display: flex; align-items: center; justify-content: center; }
+    .card .card-checkbox::after { content: "✓"; color: #fff; font-size: 14px; font-weight: 700; display: none; }
+    .card .card-checkbox.checked { background: var(--text-primary); border-color: var(--text-primary); }
+    .card .card-checkbox.checked::after { display: block; }
+    .card-media {
+      position: relative;
+      overflow: hidden;
+      background: var(--bg-hover);
+      flex-shrink: 0;
+      line-height: 0;
+      width: 100%;
+      align-self: stretch;
+    }
+    .card-media.is-loading,
+    .imagegen-feed-card-tile .imagegen-feed-media.is-loading:not(.imagegen-gen-pending) {
+      min-height: 0;
+      width: 100%;
+      background: var(--card-skeleton-bg) !important;
+      isolation: isolate;
+    }
+    .card-media.is-loading {
+      min-height: 120px;
+    }
+    /* 加载中：夜间扫光 / 白天光球（光球见 styles-theme.css） */
+    .card-media.is-loading::before,
+    .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::before {
+      content: none;
+    }
+    #communityGrid .card-media.is-loading::after,
+    #creationsGrid .card-media.is-loading::after,
+    #userProfileGrid .card-media.is-loading::after {
+      display: none !important;
+      animation: none !important;
+    }
+    .card-media.is-loading::after,
+    .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::after {
+      display: block !important;
+      content: '';
+      position: absolute;
+      z-index: 2;
+      pointer-events: none;
+      width: var(--card-beam-width);
+      height: 260%;
+      top: -85%;
+      left: 118%;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        var(--card-strip-haze) 18%,
+        var(--card-strip-edge) 28%,
+        var(--card-strip-mid) 38%,
+        var(--card-strip-core) 50%,
+        var(--card-strip-mid) 62%,
+        var(--card-strip-edge) 72%,
+        var(--card-strip-haze) 82%,
+        transparent 100%
+      );
+      transform: rotate(-45deg);
+      transform-origin: center center;
+      filter: blur(8px);
+      mix-blend-mode: soft-light;
+      will-change: top, left, opacity, filter;
+      animation: card-beam-loading 3.2s cubic-bezier(0.35, 0.05, 0.25, 1) infinite;
+    }
+    .card-media.is-loading .card-img,
+    .imagegen-feed-media.is-loading:not(.imagegen-gen-pending) img {
+      position: absolute;
+      inset: 0;
+      width: 100% !important;
+      height: 100% !important;
+      max-width: none !important;
+      max-height: none !important;
+      visibility: hidden;
+      opacity: 0;
+      object-fit: contain;
+      object-position: center center;
+    }
+    .card-media.card-media--missing,
+    .card-media.card-media--load-failed {
+      aspect-ratio: 4 / 3;
+      background: var(--bg-hover);
+    }
+    .card-media.card-media--missing::before,
+    .card-media.card-media--load-failed::before {
+      content: none;
+    }
+    .card-media.card-media--missing .card-img,
+    .card-media.card-media--load-failed .card-img {
+      opacity: 1;
+    }
+    @keyframes card-orb-breathe {
+      0%, 100% {
+        transform: scale(0.78);
+        opacity: 0.42;
+      }
+      50% {
+        transform: scale(1.14);
+        opacity: 1;
+      }
+    }
+    /* 加载完成：柔光带右上 → 左下（崭新物品感，略带漫漶） */
+    .card-media.media-shine-reveal::after,
+    .imagegen-feed-media.media-shine-reveal::after {
+      display: block !important;
+      content: '';
+      position: absolute;
+      z-index: 4;
+      pointer-events: none;
+      width: var(--card-beam-width);
+      height: 260%;
+      top: -85%;
+      left: 118%;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        var(--card-strip-haze) 18%,
+        var(--card-strip-edge) 28%,
+        var(--card-strip-mid) 38%,
+        var(--card-strip-core) 50%,
+        var(--card-strip-mid) 62%,
+        var(--card-strip-edge) 72%,
+        var(--card-strip-haze) 82%,
+        transparent 100%
+      );
+      transform: rotate(-45deg);
+      transform-origin: center center;
+      filter: blur(8px);
+      mix-blend-mode: soft-light;
+      opacity: 0;
+      will-change: top, left, opacity, filter;
+      animation: card-beam-trbl var(--card-beam-duration) cubic-bezier(0.35, 0.05, 0.25, 1) forwards;
+    }
+    @keyframes card-beam-trbl {
+      0% {
+        top: -85%;
+        left: 118%;
+        opacity: 0;
+        filter: blur(16px);
+      }
+      12% {
+        opacity: 0.55;
+        filter: blur(14px);
+      }
+      45% {
+        opacity: 0.72;
+        filter: blur(11px);
+      }
+      88% {
+        opacity: 0.5;
+        filter: blur(13px);
+      }
+      100% {
+        top: 72%;
+        left: -52%;
+        opacity: 0;
+        filter: blur(16px);
+      }
+    }
+    /* 加载中：与加载完成同一光带（card-beam-trbl），循环播放 */
+    @keyframes card-beam-loading {
+      0% {
+        top: -85%;
+        left: 118%;
+        opacity: 0.35;
+        filter: blur(16px);
+      }
+      12% {
+        opacity: 0.55;
+        filter: blur(14px);
+      }
+      45% {
+        opacity: 0.72;
+        filter: blur(11px);
+      }
+      88% {
+        opacity: 0.5;
+        filter: blur(13px);
+      }
+      100% {
+        top: 72%;
+        left: -52%;
+        opacity: 0.35;
+        filter: blur(16px);
+      }
+    }
+    .card-media.media-revealed .card-img {
+      position: static;
+      width: 100%;
+      height: auto;
+      max-width: 100%;
+      visibility: visible;
+      opacity: 1;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .card-media.is-loading::before,
+      .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::before,
+      .card-media.is-loading::after,
+      .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::after,
+      .imagegen-gen-pending::after,
+      .card-media.media-shine-reveal::after,
+      .imagegen-feed-media.media-shine-reveal::after {
+        animation: none !important;
+      }
+    }
+    .card-head--meta-only {
+      justify-content: flex-end;
+    }
+    .card-head--meta-only .card-time {
+      margin-left: auto;
+    }
+    .card .card-img {
+      width: 100%;
+      height: auto;
+      max-width: 100%;
+      object-fit: contain;
+      object-position: center center;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+      cursor: pointer;
+      vertical-align: top;
+    }
+    .card-media-placeholder {
+      width: 100%;
+      min-height: 120px;
+      background: linear-gradient(145deg, #1a1a1a 0%, #262626 100%);
+    }
+    .cards-container:not(.list-view) .card .card-body {
+      flex: 0 0 auto;
+      padding: 8px 10px 10px;
+      gap: 4px;
+    }
+    .card .card-body {
+      padding: var(--padding-card);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+    }
+    .card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .card .card-title {
+      font-weight: 600;
+      font-size: var(--font-base);
+      line-height: var(--lh-title);
+      color: var(--text-primary);
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-time {
+      font-size: var(--font-xs);
+      font-weight: 400;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      line-height: var(--lh-title);
+    }
+    .card-desc {
+      color: var(--text-secondary);
+      font-size: var(--font-sm);
+      font-weight: 400;
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .cards-container:not(.list-view) .card-desc {
+      -webkit-line-clamp: 1;
+      font-size: var(--font-xs);
+      line-height: 1.3;
+    }
+    .card .card-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 0;
+      max-height: 22px;
+      overflow: hidden;
+    }
+    .tag {
+      background: var(--bg-hover);
+      color: var(--text-muted);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      line-height: 1.25;
+      font-weight: 400;
+      cursor: pointer;
+      transition: var(--transition);
+      border: none;
+      white-space: nowrap;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tag:hover { background: #333; color: var(--text-secondary); }
+    .tag.tag-more {
+      cursor: default;
+      background: transparent;
+      padding-left: 0;
+    }
+    .tag.tag-more:hover { background: transparent; color: var(--text-muted); }
+    .card .card-actions {
+      display: none;
+      margin-top: 4px;
+    }
+    .card-copy-btn {
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      z-index: 3;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 14, 22, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      cursor: pointer;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(4px);
+      transition: opacity 0.2s ease, transform 0.2s ease, border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+    }
+    .card:hover .card-copy-btn,
+    .card:focus-within .card-copy-btn {
+      opacity: 0.72;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    .card-copy-btn:hover {
+      opacity: 1;
+      border-color: rgba(255, 255, 255, 0.18);
+      color: var(--text-secondary);
+      background: rgba(10, 14, 22, 0.78);
+    }
+    .card-copy-btn svg {
+      width: 13px;
+      height: 13px;
+    }
+    .cards-container.list-view {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .list-view .card {
+      width: 100%;
+      height: auto;
+      min-height: 92px;
+      max-height: none;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--bg-card);
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out), border-color 0.2s;
+    }
+    .list-view .card:hover {
+      transform: translateY(-1px);
+      border-color: var(--border-light);
+      box-shadow: var(--shadow-md);
+    }
+    .list-view .card.selected {
+      border-color: var(--text-muted);
+      box-shadow: var(--shadow-glow);
+    }
+    .list-view .card .card-checkbox {
+      top: 50%;
+      left: 10px;
+      transform: translateY(-50%);
+      z-index: 3;
+    }
+    .list-view .card .card-media {
+      width: 112px;
+      min-width: 112px;
+      height: auto;
+      max-height: 160px;
+      flex-shrink: 0;
+      border-radius: 0;
+      overflow: hidden;
+      background: #141414;
+      display: block;
+      position: relative;
+    }
+    .list-view .card .card-img {
+      width: 100%;
+      height: auto;
+      max-height: 160px;
+      object-fit: contain;
+      object-position: center center;
+      display: block;
+    }
+    .list-view .card .card-media-placeholder {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      min-height: 92px;
+      background: linear-gradient(145deg, #1a1a1a 0%, #262626 100%);
+    }
+    .list-view .card .card-media-placeholder::after {
+      content: '无图';
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+    }
+    .list-view .card .card-media {
+      position: relative;
+    }
+    .list-view .card .card-body {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 14px 10px 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 4px;
+    }
+    .list-view .card .card-head {
+      align-items: center;
+      gap: 10px;
+      margin: 0;
+    }
+    .list-view .card .card-title {
+      font-size: var(--font-sm);
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    .list-view .card .card-time {
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .list-view .card .card-desc {
+      font-size: var(--font-xs);
+      line-height: 1.45;
+      color: var(--text-muted);
+      -webkit-line-clamp: 2;
+      margin: 0;
+    }
+    .list-view .card .card-tags {
+      display: none;
+    }
+    .list-view .card .card-actions {
+      display: none;
+    }
+    .list-view.batch-mode .card .card-body {
+      padding-left: 36px;
+    }
+    /* 编辑面板样式 + 图片预览修复 */
+    .edit-panel {
+      width: 340px;
+      background: var(--bg-elevated);
+      border-left: 1px solid var(--border);
+      box-shadow: -4px 0 24px rgba(0, 0, 0, 0.35);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease, border-color 0.3s ease;
+      height: 100%;
+      min-height: 0;
+      align-self: stretch;
+      z-index: 10;
+      overflow: hidden;
+    }
+    .edit-panel.hidden {
+      width: 0;
+      min-width: 0;
+      opacity: 0;
+      pointer-events: none;
+      border-left-width: 0;
+    }
+    /* 桌面：打开编辑侧栏时顶栏保持单行，隐藏「新建」并压缩控件 */
+    @media (min-width: 901px) {
+      body.panel-open .app-page-warehouse .main-header {
+        height: var(--toolbar-h);
+        min-height: var(--toolbar-h);
+        padding-top: 0;
+        padding-bottom: 0;
+        align-items: center;
+      }
+      body.panel-open .app-page-warehouse .main-header h3 {
+        display: none;
+      }
+      body.panel-open .app-page-warehouse .header-actions {
+        flex: 1;
+        min-width: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        overscroll-behavior-x: contain;
+        scrollbar-width: thin;
+      }
+      body.panel-open .app-page-warehouse .toolbar-row {
+        min-width: 0;
+        flex: 1 1 auto;
+        flex-wrap: nowrap;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+      body.panel-open .app-page-warehouse .toolbar-cluster {
+        gap: 4px;
+      }
+      body.panel-open .app-page-warehouse .toolbar-cluster-grow {
+        flex: 1 1 auto;
+        min-width: 0;
+        justify-content: flex-end;
+        gap: 4px;
+      }
+      body.panel-open .app-page-warehouse .search-box {
+        max-width: 120px;
+        min-width: 72px;
+        flex: 1 1 72px;
+        padding: 0 8px;
+      }
+      body.panel-open .app-page-warehouse .toolbar-sort-btn {
+        max-width: 112px;
+        padding-inline: 8px;
+      }
+      body.panel-open .app-page-warehouse .toolbar-sort-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 76px;
+      }
+      body.panel-open .app-page-warehouse .toolbar-cluster-actions .btn {
+        padding-inline: 10px;
+      }
+      body.panel-open .app-page-warehouse .toolbar-new-btn,
+      body.panel-open .app-page-warehouse #mobileNewCardBtn {
+        display: none !important;
+      }
+      body.panel-open .app-page-warehouse .toolbar-label-full {
+        display: none;
+      }
+      body.panel-open .app-page-warehouse .toolbar-label-compact {
+        display: inline;
+      }
+    }
+    .toolbar-label-compact {
+      display: none;
+    }
+    .edit-panel .panel-header {
+      flex-shrink: 0;
+      padding: 10px 14px;
+      min-height: 40px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      background: transparent;
+    }
+    .edit-panel .panel-header h4 {
+      margin: 0;
+      color: var(--text-secondary);
+      font-weight: 500;
+      font-size: var(--font-sm);
+      letter-spacing: 0;
+      flex: 1;
+      min-width: 0;
+    }
+    .panel-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .panel-pin-btn.is-pinned {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    .edit-panel .close-btn {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: none;
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      transition: var(--transition);
+    }

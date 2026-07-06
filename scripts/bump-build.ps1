@@ -29,7 +29,9 @@ $oldEsc = [regex]::Escape($old)
 $files = @(
   (Join-Path $root "index.html"),
   (Join-Path $root "admin.html"),
-  (Join-Path $root "sw.js")
+  (Join-Path $root "sw.js"),
+  (Join-Path $root "styles.css"),
+  (Join-Path $root "styles-features.css")
 )
 $syncCacheAssets = @(
   'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css',

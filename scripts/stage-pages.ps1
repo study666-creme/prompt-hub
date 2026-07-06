@@ -14,7 +14,8 @@ $allowedDirs = @(
   'vendor/',
   'functions/',
   'extension/',
-  'legacy/'
+  'legacy/',
+  'styles/'
 )
 $entryRootFiles = @(
   'index.html',

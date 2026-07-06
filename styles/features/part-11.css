@@ -1,0 +1,405 @@
+
+#pageImageGen .imagegen-feed-tab {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+#pageImageGen .imagegen-feed-tab:hover,
+#pageImageGen .imagegen-community-tabs .feature-tab:hover {
+  color: var(--imagegen-segment-text-active);
+  background: transparent !important;
+  transform: none;
+}
+
+#pageImageGen .imagegen-feed-tab:active,
+#pageImageGen .imagegen-community-tabs .feature-tab:active {
+  transform: scale(0.97);
+}
+
+#pageImageGen .imagegen-feed-tab.active,
+#pageImageGen .imagegen-community-tabs .feature-tab.active {
+  color: var(--imagegen-segment-text-active);
+  background: transparent !important;
+  box-shadow: none !important;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.34);
+}
+
+#pageImageGen .imagegen-segment-glider {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 0;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+  border-radius: 10px;
+  background: var(--imagegen-segment-glider);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 6px 16px rgba(0, 0, 0, 0.22);
+  transition:
+    transform 230ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    width 230ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    height 230ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    opacity 140ms ease;
+  will-change: transform, width, height, opacity;
+}
+
+#pageImageGen .imagegen-community-filters {
+  padding: 0 12px 10px;
+  border-bottom: 0;
+  background: transparent;
+}
+
+#pageImageGen .imagegen-community-filter-row {
+  gap: 8px;
+}
+
+#pageImageGen .imagegen-community-tabs {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 3px;
+  border: 1px solid var(--imagegen-segment-border);
+  border-radius: 13px;
+  background: var(--imagegen-segment-rail);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 8px 20px rgba(0, 0, 0, 0.14);
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  scrollbar-width: none;
+}
+
+#pageImageGen .imagegen-community-tabs:hover {
+  background: var(--imagegen-segment-rail-hover);
+}
+
+#pageImageGen .imagegen-community-tabs .feature-tab {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+#pageImageGen .imagegen-feed-hint {
+  margin: 0 12px;
+  padding: 2px 2px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+  background: transparent;
+  color: rgba(245, 245, 247, 0.56);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+#pageImageGen .imagegen-feed {
+  padding-top: 8px;
+}
+
+@media (max-width: 900px) {
+  #pageImageGen .imagegen-feed-tabs {
+    min-height: 48px;
+    margin: 8px 10px 6px;
+  }
+
+  #pageImageGen .imagegen-feed-tab {
+    min-height: 38px;
+    font-size: 14px;
+  }
+
+  #pageImageGen .imagegen-community-filters {
+    padding-inline: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #pageImageGen .imagegen-segment-glider,
+  #pageImageGen .imagegen-feed-tab,
+  #pageImageGen .imagegen-community-tabs .feature-tab {
+    transition: none !important;
+  }
+}
+
+/* Image generation side panel: lighter controls and unified card actions. */
+#pageImageGen .imagegen-side {
+  --imagegen-segment-surface: rgba(17, 20, 27, 0.56);
+  --imagegen-segment-rail: rgba(255, 255, 255, 0.045);
+  --imagegen-segment-rail-hover: rgba(255, 255, 255, 0.065);
+  --imagegen-segment-glider: rgba(255, 255, 255, 0.13);
+  --imagegen-segment-border: rgba(255, 255, 255, 0.09);
+  --imagegen-segment-text: rgba(245, 245, 247, 0.68);
+  --imagegen-segment-text-active: rgba(255, 255, 255, 0.94);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    0 12px 28px rgba(0, 0, 0, 0.16);
+}
+
+body:not(.efficiency-mode) #pageImageGen .imagegen-side {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0.008)),
+    color-mix(in srgb, var(--bg-card) 72%, transparent) !important;
+  backdrop-filter: blur(16px) saturate(1.08);
+  -webkit-backdrop-filter: blur(16px) saturate(1.08);
+}
+
+#pageImageGen .imagegen-feed-tabs {
+  min-height: 40px;
+  margin: 8px 10px 6px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--imagegen-segment-rail);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+#pageImageGen .imagegen-feed-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 34px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+#pageImageGen .imagegen-segment-glider {
+  border-radius: 9px;
+  background: var(--imagegen-segment-glider);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 4px 12px rgba(0, 0, 0, 0.16);
+}
+
+#pageImageGen .imagegen-community-filters {
+  padding: 0 10px 6px;
+}
+
+#pageImageGen .imagegen-community-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+#pageImageGen .imagegen-community-tabs {
+  flex: 0 1 auto;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--imagegen-segment-rail);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+}
+
+#pageImageGen .imagegen-community-tabs:hover {
+  background: var(--imagegen-segment-rail-hover);
+}
+
+#pageImageGen .imagegen-community-tabs .feature-tab {
+  height: 26px;
+  min-height: 26px;
+  padding: 0 9px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+#pageImageGen .imagegen-feed-hint {
+  margin: 0 10px;
+  padding: 3px 0 8px;
+  border-bottom-color: rgba(255, 255, 255, 0.07);
+  background: transparent;
+}
+
+#pageImageGen .imagegen-feed {
+  padding: 8px 10px 16px;
+  scrollbar-gutter: stable;
+}
+
+@media (min-width: 901px) {
+  #imageGenFeed.imagegen-feed.imagegen-feed--desktop-grid {
+    gap: 12px !important;
+    padding: 8px 10px 16px !important;
+  }
+
+  #imageGenFeed.imagegen-feed.imagegen-feed--desktop-grid > .imagegen-feed-card {
+    flex-basis: calc((100% - 36px) / 4) !important;
+    width: calc((100% - 36px) / 4) !important;
+    max-width: calc((100% - 36px) / 4) !important;
+  }
+}
+
+.imagegen-feed-card-tile .imagegen-feed-content {
+  padding: 10px;
+  gap: 6px;
+}
+
+.imagegen-feed-card-tile {
+  position: relative;
+}
+
+.imagegen-feed-action-stack {
+  margin-top: 2px;
+}
+
+.imagegen-feed-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.imagegen-feed-quick-actions {
+  margin: 0;
+  gap: 6px;
+}
+
+.imagegen-feed-action-grid .imagegen-feed-quick-btn,
+.imagegen-feed-action-grid .imagegen-feed-like {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.imagegen-feed-card-tile .imagegen-feed-foot {
+  margin-top: 6px;
+}
+
+.imagegen-feed-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+  gap: 6px;
+}
+
+.imagegen-feed-save-btn {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent, #7c8cff) 14%, var(--bg-hover));
+  min-height: 30px !important;
+  padding: 0 8px !important;
+}
+
+.imagegen-feed-card-del {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 6;
+  width: 30px;
+  height: 30px;
+  opacity: 0;
+  transform: scale(0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 12, 16, 0.72);
+  backdrop-filter: blur(8px);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+.imagegen-feed-card:hover .imagegen-feed-card-del,
+.imagegen-feed-card:focus-within .imagegen-feed-card-del {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.imagegen-side.imagegen-preview-open .imagegen-feed-action-stack,
+.imagegen-side.imagegen-preview-open .imagegen-feed-card-del,
+.imagegen-side.imagegen-preview-open .imagegen-feed-mobile-actions {
+  display: none !important;
+}
+
+.imagegen-side.imagegen-preview-open .imagegen-feed-card-tile .imagegen-feed-content {
+  padding-bottom: 8px;
+}
+
+@media (max-width: 900px) {
+  .imagegen-feed-card-del {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 900px) {
+  #pageImageGen .imagegen-feed-tabs {
+    min-height: 38px;
+    margin: 7px 10px 5px;
+  }
+
+  #pageImageGen .imagegen-feed-tab {
+    min-height: 32px;
+    height: 32px;
+  }
+}
+
+/* 社区/我的主页/个人主页真实图片按原比例完整展示，避免长图被固定比例卡片裁切。 */
+#communityGrid:not(.list-view) .community-post-card--visual,
+#creationsGrid:not(.list-view) .community-post-card--visual,
+#userProfileGrid:not(.list-view) .community-post-card--visual,
+#communityGrid.community-feed-columns .community-feed-col > .card.community-post-card--visual,
+#creationsGrid.community-feed-columns .community-feed-col > .card.community-post-card--visual {
+  aspect-ratio: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+
+#communityGrid:not(.list-view) .community-post-card--visual .card-media:not(.is-loading):not(.card-media--await),
+#creationsGrid:not(.list-view) .community-post-card--visual .card-media:not(.is-loading):not(.card-media--await),
+#userProfileGrid:not(.list-view) .community-post-card--visual .card-media:not(.is-loading):not(.card-media--await),
+#communityGrid:not(.list-view) .community-post-card--visual .card-media.media-revealed,
+#creationsGrid:not(.list-view) .community-post-card--visual .card-media.media-revealed,
+#userProfileGrid:not(.list-view) .community-post-card--visual .card-media.media-revealed,
+#communityGrid.community-feed-columns .community-feed-col > .card.community-post-card--visual .card-media:not(.is-loading):not(.card-media--await),
+#creationsGrid.community-feed-columns .community-feed-col > .card.community-post-card--visual .card-media:not(.is-loading):not(.card-media--await),
+#communityGrid.community-feed-columns .community-feed-col > .card.community-post-card--visual .card-media:has(img.card-img[src^="http"]),
+#creationsGrid.community-feed-columns .community-feed-col > .card.community-post-card--visual .card-media:has(img.card-img[src^="http"]),
+#userProfileGrid .community-post-card--visual .card-media:has(img.card-img[src^="http"]) {
+  aspect-ratio: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: hidden !important;
+}
+
+#communityGrid:not(.list-view) .community-post-card--visual .card-media .card-img,
+#creationsGrid:not(.list-view) .community-post-card--visual .card-media .card-img,
+#userProfileGrid:not(.list-view) .community-post-card--visual .card-media .card-img,
+#communityGrid.community-mobile-feed .community-post-card--visual .card-media .card-img,
+#creationsGrid.community-mobile-feed .community-post-card--visual .card-media .card-img,
+#communityGrid.community-feed-columns .community-feed-col > .card.community-post-card--visual .card-media:has(img.card-img[src^="http"]) .card-img,
+#creationsGrid.community-feed-columns .community-feed-col > .card.community-post-card--visual .card-media:has(img.card-img[src^="http"]) .card-img,
+#communityGrid.community-feed-columns .card-media:has(img.card-img[src^="http"]) .card-img,
+#creationsGrid.community-feed-columns .card-media:has(img.card-img[src^="http"]) .card-img,
+#communityGrid.community-feed-columns .community-feed-col > .card.community-post-card--visual .card-media .card-img,
+#creationsGrid.community-feed-columns .community-feed-col > .card.community-post-card--visual .card-media .card-img,
+#communityGrid .community-feed-image-only .card-media .card-img,
+#creationsGrid .community-feed-image-only .card-media .card-img {
+  position: static !important;
+  inset: auto !important;
+  display: block !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  object-fit: contain !important;
+  object-position: center center !important;
+}
