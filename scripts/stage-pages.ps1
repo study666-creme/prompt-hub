@@ -15,6 +15,7 @@ $allowedDirs = @(
   'functions/',
   'extension/',
   'legacy/',
+  'partials/',
   'styles/'
 )
 $entryRootFiles = @(
@@ -34,6 +35,9 @@ $alwaysRootFiles = @(
   'sitemap.xml',
   'sw.js',
   'features-assets.js'
+)
+$alwaysStaticFiles = @(
+  'partials/index-body.html'
 )
 
 function Copy-StaticFile {
@@ -85,6 +89,11 @@ foreach ($file in $entryRootFiles) {
 
 foreach ($rootFile in $allowedRoot) {
   $rel = $rootFile -replace '/', [IO.Path]::DirectorySeparatorChar
+  Copy-StaticFile $rel
+}
+
+foreach ($file in $alwaysStaticFiles) {
+  $rel = $file -replace '/', [IO.Path]::DirectorySeparatorChar
   Copy-StaticFile $rel
 }
 

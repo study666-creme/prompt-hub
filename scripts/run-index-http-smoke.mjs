@@ -104,6 +104,10 @@ const cssAssets = [
   ['/styles/features/part-01.css', 'features CSS chunk', 'feature-shell']
 ];
 
+const htmlPartials = [
+  ['/partials/index-body.html', 'index body partial', 'mobileBottomNav']
+];
+
 for (const [path, label, token] of packs) {
   const checks = [
     { path, asScript: false, tag: 'plain' },
@@ -182,6 +186,29 @@ for (const [path, label, token] of cssAssets) {
     }
     if (/text\/html/i.test(res.ct) || res.text.trimStart().startsWith('<!')) {
       console.error(`index-http-smoke: ${checkPath} returned HTML`);
+      process.exit(1);
+    }
+    if (!res.text.includes(token)) {
+      console.error(`index-http-smoke: ${checkPath} missing ${label}`);
+      process.exit(1);
+    }
+  }
+  console.log(`index-http-smoke OK: ${path} (plain + query)`);
+}
+
+for (const [path, label, token] of htmlPartials) {
+  for (const checkPath of [path, `${path}?v=${encodeURIComponent(buildId)}`]) {
+    const res = await get(checkPath, false);
+    if (!res.ok) {
+      console.error(`index-http-smoke: ${checkPath} HTTP ${res.status}`);
+      process.exit(1);
+    }
+    if (res.text.trimStart().startsWith('<!')) {
+      console.error(`index-http-smoke: ${checkPath} returned the app shell instead of ${label}`);
+      process.exit(1);
+    }
+    if (res.text.includes('<script')) {
+      console.error(`index-http-smoke: ${checkPath} unexpectedly contains script tags`);
       process.exit(1);
     }
     if (!res.text.includes(token)) {
