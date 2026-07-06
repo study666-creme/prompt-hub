@@ -35,7 +35,10 @@ $syncCacheAssets = @(
   'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css',
   'styles-settings.css', 'styles-assets.css',
   'theme.js', 'api-client.js', 'app-router.js', 'supabase-sync.js', 'script.js',
-  'features-draft.js', 'features-assets.js', 'community-public-feed.js', 'card-gallery.js'
+  'features-draft.js', 'features-assets.js', 'community-public-feed.js', 'card-gallery.js',
+  'pack-prelude.js', 'pack-foundation.js', 'pack-core.js', 'pack-viewer.js',
+  'pack-appreciate.js', 'pack-lightbox.js', 'pack-feed.js', 'pack-imagegen.js',
+  'pack-account.js', 'pack-media-client.js', 'pack-extra.js'
 )
 
 foreach ($path in $files) {
@@ -50,7 +53,7 @@ foreach ($path in $files) {
       $t = [regex]::Replace($t, "($esc\?v=)$oldEsc", "`${1}$new")
       $t = [regex]::Replace($t, "($esc\?v=)\d{8}[a-z]", "`${1}$new")
     }
-    # pack-*.js 不带 ?v=（verify-pack-contract）；缓存靠 __APP_BUILD__ + sw.js
+    # Core pack scripts also carry ?v= because browser/CDN caches can outlive sw.js.
   } elseif ($path -like '*admin.html') {
     $t = [regex]::Replace($t, "__ADMIN_BUILD__\s*=\s*'[^']+'", "__ADMIN_BUILD__ = '$new'")
     $t = [regex]::Replace($t, 'admin\.js\?v=[^"\s>]+', "admin.js?v=$new")

@@ -19,12 +19,12 @@ const requiredPacks = [
   'pack-feed.js',
   'pack-imagegen.js',
   'pack-account.js',
+  'pack-media-client.js',
   'pack-extra.js'
 ];
 
 const forbidden = [
-  { re: /\.bundle\.js/i, msg: '禁止引用 *.bundle.js（Pages script 请求会 SPA 回退 HTML）' },
-  { re: /pack-[a-z]+\.js\?v=/i, msg: 'pack-*.js 禁止 ?v= 查询串' }
+  { re: /\.bundle\.js/i, msg: '禁止引用 *.bundle.js（Pages script 请求会 SPA 回退 HTML）' }
 ];
 
 let failed = 0;
@@ -46,8 +46,9 @@ while ((sm = scriptSrcRe.exec(index)) !== null) {
 }
 
 for (const pack of requiredPacks) {
-  if (!index.includes(`src="${pack}"`)) {
-    console.error(`verify-pack-contract: index.html missing <script src="${pack}">`);
+  const packSrcRe = new RegExp(`src="${pack.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\?v=[^"]+)?"`);
+  if (!packSrcRe.test(index)) {
+    console.error(`verify-pack-contract: index.html missing <script src="${pack}?v=...">`);
     failed++;
   }
   const path = join(root, pack);

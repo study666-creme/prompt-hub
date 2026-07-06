@@ -108,13 +108,13 @@ for (const [path, label, token] of packs) {
   console.log(`index-http-smoke OK: ${path} (plain + script + query)`);
 }
 
-const packSrcRe = /src="([^"]+\.js)"/g;
+const packSrcRe = /src="([^"]+\.js(?:\?v=[^"]+)?)"/g;
 let m;
 while ((m = packSrcRe.exec(index.text)) !== null) {
   const src = m[1];
   if (!src.startsWith('pack-')) continue;
-  if (src.includes('?')) {
-    console.error(`index-http-smoke: pack script must not use query string: ${src}`);
+  if (!src.endsWith(`?v=${buildId}`)) {
+    console.error(`index-http-smoke: pack script must use current build query: ${src}`);
     process.exit(1);
   }
 }
