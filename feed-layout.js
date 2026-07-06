@@ -325,8 +325,32 @@
       const grid = document.getElementById(containerId);
       if (!grid || !useFlexColumns(containerId) || !isFeedPageVisible(grid)) return;
       const cols = Math.max(2, getColumnCount(grid));
+      const prevCols = Number(grid.dataset.feedDistributedCols || grid.dataset.feedLayoutCols) || 0;
+      const hasColumns = !!grid.querySelector(':scope > .community-feed-col');
+      const orphanCards = [...grid.querySelectorAll(':scope > .card')];
+      const stableColumns = grid.dataset.feedDistributed === '1'
+        && hasColumns
+        && prevCols === cols
+        && orphanCards.length === 0;
       applyColumnCss(grid, cols);
-      if (grid.dataset.feedDistributed === '1' && grid.querySelector(':scope > .community-feed-col')) {
+      if (stableColumns && !opts.force && !opts.recalcCols && !opts.allowRebalance) {
+        grid.classList.add('community-feed-grid', 'community-feed-columns');
+        grid.classList.remove('masonry-ready', 'community-mobile-feed', 'cards-grid-priming');
+        grid.style.removeProperty('height');
+        grid.style.removeProperty('max-height');
+        grid.style.overflow = 'visible';
+        d().scrubStaleCommunityFeedEmpty?.(grid);
+        d().ensureFeedPageSentinel?.(grid);
+      } else if (
+        grid.dataset.feedDistributed === '1'
+        && hasColumns
+        && orphanCards.length
+        && !opts.force
+        && !opts.recalcCols
+        && !opts.allowRebalance
+      ) {
+        distributeColumns(grid, cols, { newCards: orphanCards });
+      } else if (grid.dataset.feedDistributed === '1' && hasColumns) {
         redistributeByHeight(grid, cols);
       } else {
         layoutFlex(containerId, { force: true, forceReflow: true, recalcCols: true });

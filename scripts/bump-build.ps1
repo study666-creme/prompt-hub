@@ -33,6 +33,7 @@ $files = @(
 )
 $syncCacheAssets = @(
   'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css',
+  'styles-settings.css', 'styles-assets.css',
   'theme.js', 'api-client.js', 'supabase-sync.js', 'script.js',
   'features-draft.js', 'features-assets.js', 'community-public-feed.js', 'card-gallery.js'
 )

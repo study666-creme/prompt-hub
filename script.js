@@ -1841,6 +1841,18 @@
       layoutMasonryTimer = setTimeout(() => enforceMobileCardGrid(), 80);
     }
 
+    function shouldSkipWarehouseImageLayout(img, windowMs = 1100) {
+      if (!img) return false;
+      const key = img.currentSrc || img.src || img.dataset.imageRef || '';
+      const now = Date.now();
+      const lastKey = img.dataset.whLayoutKey || '';
+      const lastAt = Number(img.dataset.whLayoutAt || 0);
+      if (key && lastKey === key && now - lastAt < windowMs) return true;
+      img.dataset.whLayoutKey = key || String(now);
+      img.dataset.whLayoutAt = String(now);
+      return false;
+    }
+
     function bindCardGridImageRelayout(container) {
       if (!container || container.dataset.masonryLoadBound) return;
       container.dataset.masonryLoadBound = '1';
@@ -1848,6 +1860,7 @@
         if (!e.target?.classList?.contains('card-img')) return;
         if (isPlaceholderCardImg(e.target)) return;
         if (isMobileViewport()) return;
+        if (shouldSkipWarehouseImageLayout(e.target)) return;
         const media = e.target.closest('.card-media');
         if (media && !cardMediaAffectsViewport(media)) return;
         const cardEl = e.target.closest('.card[data-id]');
@@ -3863,6 +3876,11 @@
       }
       clearMediaShineWatchdog(shineTarget);
       const cardEl = media.closest('.card[data-id], .card[data-post-id]');
+      const revealKey = img ? (img.currentSrc || img.src || img.dataset.imageRef || '') : '';
+      const alreadyRevealed = !sideBtn
+        && revealKey
+        && media.classList.contains('media-revealed')
+        && media.dataset.mediaRevealKey === revealKey;
       shineTarget.classList.remove('is-loading', 'card-media--await');
       if (sideBtn) {
         if (img) {
@@ -3872,9 +3890,12 @@
       } else {
         media.classList.remove('is-loading', 'card-media--await');
         media.classList.add('media-revealed');
-        media.classList.remove('media-shine-reveal');
-        void media.offsetWidth;
-        if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        if (revealKey) media.dataset.mediaRevealKey = revealKey;
+        if (!alreadyRevealed) {
+          media.classList.remove('media-shine-reveal');
+          void media.offsetWidth;
+        }
+        if (!alreadyRevealed && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
           const cardId = cardEl?.dataset?.id || cardEl?.dataset?.postId || '';
           let stagger = 0;
           for (let i = 0; i < cardId.length; i++) stagger = (stagger + cardId.charCodeAt(i) * 13) % 200;
@@ -3885,10 +3906,10 @@
         }
         media.style.removeProperty('min-height');
       }
-      if (cardEl?.dataset?.id) {
+      if (cardEl?.dataset?.id && !alreadyRevealed) {
         try { sessionStorage.setItem('ph_card_shine_' + cardEl.dataset.id, '1'); } catch (e) { /* ignore */ }
       }
-      if (!mobile) {
+      if (!mobile && !alreadyRevealed) {
         if (sideBtn) { /* 侧栏不参与 Masonry */ }
         else if (media.closest('#creationsGrid')) {
           window.FeatureDraft?.scheduleCommunityLayout?.('creationsGrid', { fromImage: true });
@@ -3897,7 +3918,7 @@
           window.FeatureDraft?.scheduleFeedMasonryRelayout?.('communityGrid');
         }
         else if (media.closest('#cardsContainer')) {
-          if (cardMediaAffectsViewport(media)) {
+          if (cardMediaAffectsViewport(media) && !shouldSkipWarehouseImageLayout(img, 1100)) {
             const cid = cardEl?.dataset?.id;
             if (cardEl?.dataset?.communityCollect === '1') scheduleWarehouseMasonryForCard(cid);
             else scheduleWarehouseMasonryLayout();

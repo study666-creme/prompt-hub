@@ -3540,8 +3540,9 @@
     if (!container.querySelector('.community-post-card, .card')) return;
     const seq = (feedLayoutSettleSeq[containerId] || 0) + 1;
     feedLayoutSettleSeq[containerId] = seq;
-    const delays = opts.fromImage
-      ? [80, 260, 720]
+    const fromImage = opts.fromImage === true;
+    const delays = fromImage
+      ? [120, 420]
       : [0, 120, 360, 900, 1600];
     const run = () => {
       if (feedLayoutSettleSeq[containerId] !== seq) return;
@@ -3549,6 +3550,17 @@
       if (!live) return;
       if (containerId === 'communityGrid') {
         window.FeedLayout?.repairCommunityMasonry?.(containerId);
+      }
+      if (fromImage) {
+        scheduleCommunityLayout(containerId, {
+          fromImage: true,
+          immediate: false,
+          recalcCols: opts.recalcCols === true
+        });
+        if (containerId === 'communityGrid' || containerId === 'creationsGrid') {
+          requestAnimationFrame(() => reconnectFeedPageObserver(containerId));
+        }
+        return;
       }
       scheduleCommunityLayout(containerId, {
         force: true,
@@ -8413,7 +8425,7 @@
     window.finishCardMediaShine = function patchedFinishCardMediaShine(media) {
       orig.call(this, media);
       const feedGrid = media?.closest?.('#communityGrid, #creationsGrid');
-      if (feedGrid && !useCommunityCssGrid(feedGrid.id)) {
+      if (feedGrid && !useCommunityCssGrid(feedGrid.id) && !window.FeedLayout?.schedule) {
         scheduleFeedMasonryRelayout(feedGrid.id);
       }
     };
