@@ -1,9 +1,9 @@
-import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readLegacyEntry } from './lib/read-legacy-entry.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const code = readFileSync(join(root, 'script.js'), 'utf8');
+const code = readLegacyEntry(root, 'script.js', 'legacy/script');
 
 const required = [
   'function getEditPanelCardJobId(card)',
