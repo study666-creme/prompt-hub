@@ -3501,8 +3501,8 @@
       const card = media.closest('#cardsContainer .card[data-id]');
       const inWarehouseList = !!(card && !card.closest('.card[data-community-collect="1"]'));
       const cardModel = card?.dataset?.id ? cards.find((c) => c.id === card.dataset.id) : null;
-      const deferTextCollapse = !!(cardModel?.genJobId && warehouseCardShouldRenderMediaSlot(cardModel));
-      if (inWarehouseList) {
+      const keepFailureSlot = opts.keepFailureSlot === true;
+      if (inWarehouseList && keepFailureSlot) {
         clearMediaShineWatchdog(media);
         if (media.__whBackfillFailTimer) {
           clearTimeout(media.__whBackfillFailTimer);
@@ -3517,7 +3517,7 @@
         scheduleWarehouseMasonryForCard(card?.dataset?.id);
         return;
       }
-      if (card && opts.collapseToText !== false && !deferTextCollapse) {
+      if (card && opts.collapseToText !== false) {
         card.classList.remove('card--visual');
         card.classList.add('card--text-only');
         media.remove();
