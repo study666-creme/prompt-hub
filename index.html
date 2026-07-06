@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
 
   <script>
-    window.__APP_BUILD__ = '20260706r';
+    window.__APP_BUILD__ = '20260707a';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -105,13 +105,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260706r">
-  <link rel="stylesheet" href="styles-theme.css?v=20260706r">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260706r">
-  <link rel="stylesheet" href="styles-settings.css?v=20260706r">
-  <link rel="stylesheet" href="styles-features.css?v=20260706r">
-  <link rel="stylesheet" href="styles-assets.css?v=20260706r">
-  <script src="pack-prelude.js?v=20260706r"></script>
+  <link rel="stylesheet" href="styles.css?v=20260707a">
+  <link rel="stylesheet" href="styles-theme.css?v=20260707a">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260707a">
+  <link rel="stylesheet" href="styles-settings.css?v=20260707a">
+  <link rel="stylesheet" href="styles-features.css?v=20260707a">
+  <link rel="stylesheet" href="styles-assets.css?v=20260707a">
+  <script src="pack-prelude.js?v=20260707a"></script>
 </head>
 <body>
   <div class="app-chrome">
@@ -628,7 +628,7 @@
       </div>
       <p class="auth-cloud-status hidden" id="authCloudStatus" role="status" aria-live="polite"></p>
       <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
-      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260704e</p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260706x</p>
     </div>
   </nav>
 
@@ -802,8 +802,8 @@
             <button type="button" class="icon-btn mobile-only mobile-header-btn" aria-label="批量导入" title="批量导入" onclick="openBatchImportModal()">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
             </button>
-            <button class="btn btn-primary btn-sm desktop-only" onclick="createNewCard()">新建</button>
-            <button class="btn btn-ghost btn-sm desktop-only" onclick="openBatchImportModal()">批量导入</button>
+            <button class="btn btn-primary btn-sm desktop-only toolbar-new-btn" id="desktopNewCardBtn" onclick="createNewCard()">新建</button>
+            <button class="btn btn-ghost btn-sm desktop-only toolbar-batch-btn" onclick="openBatchImportModal()"><span class="toolbar-label-full">批量导入</span><span class="toolbar-label-compact">导入</span></button>
             <button class="btn btn-ghost btn-sm desktop-only" id="batchToggleBtn" onclick="toggleBatchMode()">选择</button>
           </div>
         </div>
@@ -1690,7 +1690,7 @@
   <script src="canvas-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260706r"></script>
+  <script src="api-client.js?v=20260707a"></script>
   <script>
     (function () {
       var FALLBACK = [
@@ -1741,19 +1741,20 @@
       });
     })();
   </script>
-  <script src="app-router.js?v=20260706r"></script>
-  <script src="pack-foundation.js?v=20260706r"></script>
-  <script src="supabase-sync.js?v=20260706r"></script>
-  <script src="pack-media-client.js?v=20260706r"></script>
-  <script src="pack-core.js?v=20260706r"></script>
-  <script src="pack-account.js?v=20260706r"></script>
-  <script src="pack-viewer.js?v=20260706r"></script>
-  <script src="pack-appreciate.js?v=20260706r"></script>
-  <script src="pack-lightbox.js?v=20260706r"></script>
-  <script src="card-gallery.js?v=20260706r"></script>
-  <script src="script.js?v=20260706r"></script>
-  <script src="pack-imagegen.js?v=20260706r"></script>
-  <script src="pack-feed.js?v=20260706r"></script>
+  <script src="app-router.js?v=20260707a"></script>
+  <script src="pack-foundation.js?v=20260707a"></script>
+  <script src="supabase-sync.js?v=20260707a"></script>
+  <script src="pack-media-client.js?v=20260707a"></script>
+  <script src="pack-core.js?v=20260707a"></script>
+  <script src="pack-account.js?v=20260707a"></script>
+  <script src="pack-viewer.js?v=20260707a"></script>
+  <script src="pack-appreciate.js?v=20260707a"></script>
+  <script src="pack-lightbox.js?v=20260707a"></script>
+  <script src="card-gallery.js?v=20260707a"></script>
+  <script src="edit-panel-gallery.js?v=20260707a"></script>
+  <script src="script.js?v=20260707a"></script>
+  <script src="pack-imagegen.js?v=20260707a"></script>
+  <script src="pack-feed.js?v=20260707a"></script>
   <script>
     (function () {
       var need = 'grid-guard-v6';
@@ -1769,9 +1770,9 @@
       } catch (e) { /* ignore */ }
     })();
   </script>
-  <script src="community-public-feed.js?v=20260706r"></script>
-  <script src="features-draft.js?v=20260706r"></script>
-  <script src="pack-extra.js?v=20260706r"></script>
+  <script src="community-public-feed.js?v=20260707a"></script>
+  <script src="features-draft.js?v=20260707a"></script>
+  <script src="pack-extra.js?v=20260707a"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

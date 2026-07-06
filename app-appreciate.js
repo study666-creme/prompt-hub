@@ -66,7 +66,8 @@
     window.__appreciateCardGallery = {
       urls,
       cardId: card.id,
-      jobId: card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : card.id
+      jobId: window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(card)
+        || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null)
     };
     const navItems = urls.map((_, i) => ({
       type: 'appreciateGalleryTile',

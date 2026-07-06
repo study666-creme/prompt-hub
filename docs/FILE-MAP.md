@@ -10,6 +10,7 @@
 |---------|--------|----------|
 | 卡片库 CRUD、分组、Masonry | `script.js` | `styles.css`, `mobile.js` |
 | 登录 / 登出 / 云拉取 | `script.js` | `supabase-sync.js`, `cloud-sync-safety.js` |
+| 编辑侧栏多图 / slot 预览解析 | `edit-panel-gallery.js` | `script.js` 薄代理；`card-gallery.js`, `media-pipeline.js`, `warehouse-thumb.js` |
 | **社区 Masonry / 我的主页 flex** | `feed-layout.js` | `features-draft.js`（`wireFeedLayout`） |
 | **Feed 图片 hydrate / 签名** | `feed-images.js` | `features-draft.js`（`wireFeedImages`） |
 | **生图仓库 Feed 排版/渲染** | `image-gen-feed.js` | `features-draft.js`（`wireImageGenFeed`） |
@@ -46,6 +47,15 @@
 | 墓碑 | `recordCardDeletion`, `getDeletedCardTombstones` | 删卡后防止云端复活 |
 | 导航 | `switchAppPage` | `warehouse` / `community` / `creations` / `imagegen` |
 | 云同步 | `pullFromCloud`, `pushToCloud`, `syncCloudNow` | `user_data` JSON |
+
+## `edit-panel-gallery.js`（编辑侧栏多图解析）
+
+| 区域 | 函数 | 作用 |
+|------|------|------|
+| Gallery | `getCardGallery` | 统一读取 `PromptHubCardGallery.normalizeCardGallery`，保证 MJ 合图 / 多图顺序一致 |
+| Job ID | `getCardJobId`, `getSlotJobId` | 为侧栏当前槽位生成正确 `jobId#slot`，避免翻页回到封面 |
+| 预览图 | `resolvePreview` | 只解析当前 gallery slot，不使用卡片列表缩略图兜底 |
+| 安全显示 | `isDisplayableImageUrl` | 过滤 SVG 占位与临时上游 URL |
 
 ---
 

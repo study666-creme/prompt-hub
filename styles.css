@@ -2703,14 +2703,14 @@ body {
       pointer-events: none;
       border-left-width: 0;
     }
-    /* 桌面：打开编辑侧栏时给顶栏更多横向空间，避免工具按钮挤成一团 */
+    /* 桌面：打开编辑侧栏时顶栏保持单行，隐藏「新建」并压缩控件 */
     @media (min-width: 901px) {
       body.panel-open .app-page-warehouse .main-header {
-        height: auto;
+        height: var(--toolbar-h);
         min-height: var(--toolbar-h);
-        padding-top: 6px;
-        padding-bottom: 6px;
-        align-items: flex-start;
+        padding-top: 0;
+        padding-bottom: 0;
+        align-items: center;
       }
       body.panel-open .app-page-warehouse .main-header h3 {
         display: none;
@@ -2718,42 +2718,59 @@ body {
       body.panel-open .app-page-warehouse .header-actions {
         flex: 1;
         min-width: 0;
-        overflow-x: hidden;
+        overflow-x: auto;
+        overflow-y: hidden;
         overscroll-behavior-x: contain;
         scrollbar-width: thin;
       }
       body.panel-open .app-page-warehouse .toolbar-row {
         min-width: 0;
         flex: 1 1 auto;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         align-items: center;
         justify-content: flex-end;
-        column-gap: 6px;
-        row-gap: 6px;
-      }
-      body.panel-open .app-page-warehouse .toolbar-cluster {
         gap: 6px;
       }
+      body.panel-open .app-page-warehouse .toolbar-cluster {
+        gap: 4px;
+      }
       body.panel-open .app-page-warehouse .toolbar-cluster-grow {
-        flex: 1 1 260px;
+        flex: 1 1 auto;
+        min-width: 0;
         justify-content: flex-end;
+        gap: 4px;
       }
       body.panel-open .app-page-warehouse .search-box {
-        max-width: 160px;
-        flex: 1 1 132px;
+        max-width: 120px;
+        min-width: 72px;
+        flex: 1 1 72px;
+        padding: 0 8px;
+      }
+      body.panel-open .app-page-warehouse .toolbar-sort-btn {
+        max-width: 112px;
+        padding-inline: 8px;
+      }
+      body.panel-open .app-page-warehouse .toolbar-sort-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 76px;
       }
       body.panel-open .app-page-warehouse .toolbar-cluster-actions .btn {
-        padding-inline: 12px;
+        padding-inline: 10px;
+      }
+      body.panel-open .app-page-warehouse .toolbar-new-btn,
+      body.panel-open .app-page-warehouse #mobileNewCardBtn {
+        display: none !important;
+      }
+      body.panel-open .app-page-warehouse .toolbar-label-full {
+        display: none;
+      }
+      body.panel-open .app-page-warehouse .toolbar-label-compact {
+        display: inline;
       }
     }
-    @media (min-width: 901px) and (max-width: 1360px) {
-      body.panel-open .app-page-warehouse .toolbar-cluster-grow {
-        order: 3;
-        flex: 1 0 100%;
-      }
-      body.panel-open .app-page-warehouse .search-box {
-        max-width: 220px;
-      }
+    .toolbar-label-compact {
+      display: none;
     }
     .edit-panel .panel-header {
       flex-shrink: 0;
@@ -5785,8 +5802,9 @@ body {
   #creationsGrid:not(.list-view) .card-media.is-loading,
   #communityGrid:not(.list-view) .card-media.card-media--load-failed,
   #creationsGrid:not(.list-view) .card-media.card-media--load-failed {
-    min-height: 72px;
-    max-height: 200px;
+    min-height: clamp(160px, calc(var(--feed-col-width, 180px) * 1.18), 320px);
+    max-height: none;
+    aspect-ratio: 4 / 5;
     background: var(--bg-hover);
   }
   #communityGrid:not(.list-view) .card-media.is-loading .card-img,
@@ -5804,22 +5822,23 @@ body {
   #communityGrid.masonry-ready:not(.list-view) .card-media.card-media--await,
   #creationsGrid.masonry-ready:not(.list-view) .card-media.is-loading,
   #creationsGrid.masonry-ready:not(.list-view) .card-media.card-media--await {
-    min-height: 72px;
-    height: 72px;
-    max-height: 72px;
+    min-height: clamp(160px, calc(var(--feed-col-width, 180px) * 1.18), 320px);
+    height: auto;
+    max-height: none;
+    aspect-ratio: 4 / 5;
     overflow: hidden;
   }
   #communityGrid.masonry-ready:not(.list-view) .card-media.is-loading .card-img,
   #communityGrid.masonry-ready:not(.list-view) .card-media.card-media--await .card-img,
   #creationsGrid.masonry-ready:not(.list-view) .card-media.is-loading .card-img,
   #creationsGrid.masonry-ready:not(.list-view) .card-media.card-media--await .card-img {
-    position: static !important;
-    inset: auto !important;
+    position: absolute !important;
+    inset: 0 !important;
     display: block !important;
     width: 100% !important;
-    height: 72px !important;
-    min-height: 72px !important;
-    max-height: 72px !important;
+    height: 100% !important;
+    min-height: 100% !important;
+    max-height: 100% !important;
     visibility: hidden;
     opacity: 0;
     object-fit: cover;

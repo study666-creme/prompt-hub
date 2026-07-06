@@ -864,17 +864,23 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
             ${imgBlock ? '<button type="button" class="imagegen-feed-mobile-btn" data-feed-download>下载</button>' : ''}
           </div>`;
       const fillHint = '';
+      const footHtml = (metaHtml || likeBtn || saveBtn || delBtn)
+        ? `<div class="imagegen-feed-foot">
+            ${metaHtml}
+            <div class="imagegen-feed-actions">${likeBtn}${saveBtn}${delBtn}</div>
+          </div>`
+        : '';
+      const actionStack = `<div class="imagegen-feed-action-stack">
+          ${quickActions}
+          ${footHtml}
+        </div>`;
       return `<article class="imagegen-feed-card imagegen-feed-card-tile${noMedia}${active ? ' active' : ''}" data-feed-id="${d().esc?.(id)}" data-feed-prompt="${d().esc?.(prompt || '')}" tabindex="0">
         ${imgBlock}
         <div class="imagegen-feed-content">
-          ${quickActions}
           ${titleHtml}
           ${promptHtml}
           ${metaRowHtml}
-          <div class="imagegen-feed-foot">
-            ${metaHtml}
-            <div class="imagegen-feed-actions">${likeBtn}${saveBtn}${delBtn}</div>
-          </div>
+          ${actionStack}
           ${mobileActs}
           ${fillHint}
         </div>

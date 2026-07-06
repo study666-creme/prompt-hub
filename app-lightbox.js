@@ -159,6 +159,7 @@
     window.setViewerFrameLoading?.(frame, true);
     const upgradeImageGenFull = () => {
       if (!opts.imageGen || !opts.feedKey || !window.FeatureDraft?.resolveImageGenFullUrl) return;
+      if ((getCardGalleryUrls(opts)?.length || 0) > 1) return;
       const viewerNav = window.getViewerNav?.() || { items: [], index: -1 };
       const navItem = viewerNav.items[viewerNav.index];
       const kind = navItem?.kind || (opts.community ? 'community' : opts.cardId ? 'warehouse' : null);
@@ -490,7 +491,11 @@
         && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(url)
         ? ''
         : url;
-      setLightboxSrc(src || fallbackUrl, {
+      const tileFallback = /^(https?:|blob:|data:image\/)/i.test(fallbackUrl || '')
+        && !String(fallbackUrl).includes('data:image/svg')
+        ? fallbackUrl
+        : '';
+      setLightboxSrc(src || tileFallback, {
         imageGen: !!gallery.imageGen,
         feedKey: gallery.feedKey,
         cardId: gallery.assetId,
@@ -500,7 +505,7 @@
         mjGalleryIndex: item.tileIndex ?? 0,
         cardJobId: gallery.jobId,
         mjJobId: gallery.jobId,
-        fallbackSrc: gallery.fallbackSrc || '',
+        fallbackSrc: tileFallback,
         preferFull: gallery.preferFull !== false
       });
     };

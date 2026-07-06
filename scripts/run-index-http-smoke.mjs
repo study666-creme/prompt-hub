@@ -36,7 +36,8 @@ const mustHave = [
   'pack-imagegen.js',
   'pack-account.js',
   'pack-media-client.js',
-  'pack-extra.js'
+  'pack-extra.js',
+  'edit-panel-gallery.js'
 ];
 const mustNot = [
   '.bundle.js',
@@ -83,6 +84,10 @@ const packs = [
   ['/pack-extra.js', 'CommunityGacha', 'CommunityGacha']
 ];
 
+const standaloneScripts = [
+  ['/edit-panel-gallery.js', 'EditPanelGallery', 'global.EditPanelGallery']
+];
+
 for (const [path, label, token] of packs) {
   const checks = [
     { path, asScript: false, tag: 'plain' },
@@ -106,6 +111,28 @@ for (const [path, label, token] of packs) {
     }
   }
   console.log(`index-http-smoke OK: ${path} (plain + script + query)`);
+}
+
+for (const [path, label, token] of standaloneScripts) {
+  for (const check of [
+    { path, asScript: true, tag: 'script' },
+    { path: `${path}?v=${encodeURIComponent(buildId)}`, asScript: true, tag: 'query-script' }
+  ]) {
+    const res = await get(check.path, check.asScript);
+    if (!res.ok) {
+      console.error(`index-http-smoke: ${path} (${check.tag}) HTTP ${res.status}`);
+      process.exit(1);
+    }
+    if (/text\/html/i.test(res.ct) || res.text.trimStart().startsWith('<!')) {
+      console.error(`index-http-smoke: ${path} (${check.tag}) returned HTML`);
+      process.exit(1);
+    }
+    if (!res.text.includes(token)) {
+      console.error(`index-http-smoke: ${path} (${check.tag}) missing ${label}`);
+      process.exit(1);
+    }
+  }
+  console.log(`index-http-smoke OK: ${path} (script + query)`);
 }
 
 const packSrcRe = /src="([^"]+\.js(?:\?v=[^"]+)?)"/g;

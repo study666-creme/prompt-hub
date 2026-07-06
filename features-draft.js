@@ -7945,6 +7945,123 @@
     if (commBar) commBar.classList.toggle('hidden', imageGenFeedTab !== 'community');
     /* 生图页右侧为轻量「最近作品」流，分组/标签筛选仅在 /prompts 完整卡片库 */
     if (bar) bar.classList.add('hidden');
+    scheduleImageGenSegmentGliders();
+  }
+
+  let imageGenSegmentGliderRaf = 0;
+  let imageGenSegmentResizeObserver = null;
+  let imageGenSegmentMutationObserver = null;
+  let imageGenSegmentWindowBound = false;
+  const imageGenSegmentObserved = new WeakSet();
+  const IMAGEGEN_SEGMENT_RAILS = '.imagegen-feed-tabs, .imagegen-side .imagegen-community-tabs';
+
+  function getImageGenSegmentGlider(rail) {
+    if (!rail) return null;
+    let glider = Array.from(rail.children || []).find((el) => el.classList?.contains('imagegen-segment-glider'));
+    if (!glider) {
+      glider = document.createElement('span');
+      glider.className = 'imagegen-segment-glider';
+      glider.setAttribute('aria-hidden', 'true');
+      rail.insertBefore(glider, rail.firstChild);
+    }
+    return glider;
+  }
+
+  function syncImageGenSegmentRail(rail) {
+    const glider = getImageGenSegmentGlider(rail);
+    if (!rail || !glider) return;
+    const active = rail.querySelector('.imagegen-feed-tab.active, .feature-tab.active');
+    if (!active) {
+      glider.style.opacity = '0';
+      return;
+    }
+    const railRect = rail.getBoundingClientRect();
+    const activeRect = active.getBoundingClientRect();
+    if (railRect.width < 1 || activeRect.width < 1 || activeRect.height < 1) {
+      glider.style.opacity = '0';
+      return;
+    }
+    if (rail.classList.contains('imagegen-feed-tabs')) {
+      const tabs = Array.from(rail.querySelectorAll('.imagegen-feed-tab'));
+      const idx = tabs.indexOf(active);
+      if (tabs.length > 0 && idx >= 0) {
+        const style = getComputedStyle(rail);
+        const padLeft = parseFloat(style.paddingLeft) || 0;
+        const padRight = parseFloat(style.paddingRight) || 0;
+        const padTop = parseFloat(style.paddingTop) || 0;
+        const padBottom = parseFloat(style.paddingBottom) || 0;
+        const gap = parseFloat(style.columnGap || style.gap) || 0;
+        const contentWidth = Math.max(0, rail.clientWidth - padLeft - padRight);
+        const slotWidth = Math.max(0, (contentWidth - gap * Math.max(0, tabs.length - 1)) / tabs.length);
+        const slotHeight = Math.max(0, rail.clientHeight - padTop - padBottom);
+        const left = padLeft + idx * (slotWidth + gap) + rail.scrollLeft;
+        const top = padTop + rail.scrollTop;
+        glider.style.opacity = '1';
+        glider.style.width = `${slotWidth}px`;
+        glider.style.height = `${slotHeight}px`;
+        glider.style.transform = `translate3d(${left}px, ${top}px, 0)`;
+        return;
+      }
+    }
+    const left = activeRect.left - railRect.left + rail.scrollLeft;
+    const top = activeRect.top - railRect.top + rail.scrollTop;
+    glider.style.opacity = '1';
+    glider.style.width = `${activeRect.width}px`;
+    glider.style.height = `${activeRect.height}px`;
+    glider.style.transform = `translate3d(${left}px, ${top}px, 0)`;
+  }
+
+  function syncImageGenSegmentGliders() {
+    document.querySelectorAll(IMAGEGEN_SEGMENT_RAILS).forEach(syncImageGenSegmentRail);
+  }
+
+  function scheduleImageGenSegmentGliders() {
+    const raf = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame
+      : (fn) => setTimeout(fn, 0);
+    const caf = typeof cancelAnimationFrame === 'function'
+      ? cancelAnimationFrame
+      : clearTimeout;
+    if (imageGenSegmentGliderRaf) caf(imageGenSegmentGliderRaf);
+    imageGenSegmentGliderRaf = raf(() => {
+      imageGenSegmentGliderRaf = 0;
+      syncImageGenSegmentGliders();
+    });
+  }
+
+  function initImageGenSegmentGliders() {
+    const rails = document.querySelectorAll(IMAGEGEN_SEGMENT_RAILS);
+    if (!rails.length) return;
+    if (!imageGenSegmentResizeObserver && window.ResizeObserver) {
+      imageGenSegmentResizeObserver = new ResizeObserver(scheduleImageGenSegmentGliders);
+    }
+    if (!imageGenSegmentMutationObserver && window.MutationObserver) {
+      imageGenSegmentMutationObserver = new MutationObserver(scheduleImageGenSegmentGliders);
+    }
+    rails.forEach((rail) => {
+      getImageGenSegmentGlider(rail);
+      if (!imageGenSegmentObserved.has(rail)) {
+        imageGenSegmentObserved.add(rail);
+        rail.addEventListener('scroll', scheduleImageGenSegmentGliders, { passive: true });
+        rail.addEventListener('click', scheduleImageGenSegmentGliders);
+        imageGenSegmentResizeObserver?.observe(rail);
+        imageGenSegmentMutationObserver?.observe(rail, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
+        const wrapper = rail.closest('.imagegen-community-filters, .imagegen-side');
+        if (wrapper && !imageGenSegmentObserved.has(wrapper)) {
+          imageGenSegmentObserved.add(wrapper);
+          imageGenSegmentMutationObserver?.observe(wrapper, { attributes: true, attributeFilter: ['class'] });
+        }
+      }
+      Array.from(rail.children || []).forEach((child) => {
+        if (child.classList?.contains('imagegen-segment-glider')) return;
+        imageGenSegmentResizeObserver?.observe(child);
+      });
+    });
+    if (!imageGenSegmentWindowBound) {
+      imageGenSegmentWindowBound = true;
+      window.addEventListener('resize', scheduleImageGenSegmentGliders);
+    }
+    scheduleImageGenSegmentGliders();
   }
 
 
@@ -7978,12 +8095,16 @@
       ? warehouseCardIdFromFeedKey(feedKey)
       : (kind === 'recent' ? id : feedKey);
     let mjGalleryUrls = null;
+    let galleryJobId = null;
     if (kind === 'recent' && assetId) {
       const cre = findCreationById(assetId);
+      if (cre?.jobId) galleryJobId = String(cre.jobId).replace(/#\d+$/, '');
       const gallery = buildCreationGallery(cre);
       if (gallery.length > 1) mjGalleryUrls = gallery;
     } else if (kind === 'warehouse' && assetId) {
       const full = (window.__promptHubCards || []).find((c) => c.id === assetId);
+      galleryJobId = window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(full)
+        || (full?.genJobId ? String(full.genJobId).replace(/#\d+$/, '') : null);
       const gallery = window.PromptHubCardGallery?.normalizeCardGallery?.(full) || [];
       if (gallery.length > 1) mjGalleryUrls = gallery;
       if (!mjGalleryUrls?.length && full?.isMidjourney && Array.isArray(full.mjGridUrls) && full.mjGridUrls.length > 1) {
@@ -8018,11 +8139,33 @@
       preferFull: true,
       mjGalleryUrls: mjGalleryUrls || undefined,
       mjGalleryIndex: startIdx,
+      cardJobId: galleryJobId || undefined,
+      mjJobId: galleryJobId || undefined,
       fallbackSrc: window.MediaPipeline?.gridUrlFromImgEl?.(imgEl) || ''
     };
     if (typeof window.openLightbox !== 'function') return;
     if (mjGalleryUrls?.length) {
-      window.openLightbox(mjGalleryUrls[startIdx], lbOpts);
+      const startRef = mjGalleryUrls[startIdx];
+      let startSrc = startRef;
+      if (window.PromptHubCardGallery?.resolveMediaUrl) {
+        try {
+          startSrc = await window.PromptHubCardGallery.resolveMediaUrl(startRef, {
+            cardId: lbOpts.cardId,
+            jobId: galleryJobId || undefined,
+            galleryIndex: startIdx,
+            preferFull: true
+          }) || startRef;
+        } catch (e) { /* keep raw ref */ }
+      }
+      if (!/^(https?:|blob:|data:image\/)/i.test(String(startSrc || '')) || String(startSrc).includes('data:image/svg')) {
+        startSrc = fullUrlFromImgEl(imgEl) || lbOpts.fallbackSrc || '';
+      }
+      if (!startSrc || String(startSrc).includes('data:image/svg')) {
+        window.openLightbox('', { ...lbOpts, pending: true });
+        toast('原图加载中，请稍后再试');
+        return;
+      }
+      window.openLightbox(startSrc, lbOpts);
       return;
     }
     const instant = fullUrlFromImgEl(imgEl);
@@ -8052,6 +8195,7 @@
   }
 
   function bindUI() {
+    initImageGenSegmentGliders();
     document.getElementById('communitySearch')?.addEventListener('input', () => renderCommunity());
     const communitySearch = document.getElementById('communitySearch');
     if (communitySearch && !communitySearch.dataset.searchBound) {

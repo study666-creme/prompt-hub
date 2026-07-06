@@ -4016,33 +4016,26 @@
       if (gallery.length > 1 && typeof window.openLightbox === 'function') {
         const idx = selectedCardId === full.id ? panelGalleryIndex : 0;
         const ref = gallery[idx] || full.image;
+        const lightboxJobId = getEditPanelCardJobId(full);
         const resolve = window.PromptHubCardGallery?.resolveMediaUrl;
         const refIsEphemeral = /^https?:\/\//i.test(ref || '')
           && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(ref);
+        const fallbackRef = isPanelDisplayableImageUrl(ref) && !refIsEphemeral ? ref : '';
         const openWith = (src) => {
-        window.openLightbox(src || domGrid || (refIsEphemeral ? '' : ref), {
-          ...lbBase,
-          cardGalleryUrls: gallery,
-          mjGalleryUrls: gallery,
-          cardGalleryIndex: idx,
-          mjGalleryIndex: idx,
-          cardJobId: full.genJobId ? String(full.genJobId).replace(/#\d+$/, '') : full.id,
-          mjJobId: full.genJobId ? String(full.genJobId).replace(/#\d+$/, '') : null,
-          feedKey: `card:${full.id}`
-        });
+          window.openLightbox(src || fallbackRef || '', {
+            ...lbBase,
+            fallbackSrc: fallbackRef,
+            cardGalleryUrls: gallery,
+            mjGalleryUrls: gallery,
+            cardGalleryIndex: idx,
+            mjGalleryIndex: idx,
+            cardJobId: lightboxJobId || undefined,
+            mjJobId: lightboxJobId || undefined,
+            feedKey: `card:${full.id}`
+          });
         };
-        if (mobileInstant) {
-          openWith(domGrid);
-          if (resolve) {
-            void resolve(ref, { cardId: full.id, jobId: full.genJobId, galleryIndex: idx, preferFull: true })
-              .then((fullSrc) => {
-                if (fullSrc && fullSrc !== domGrid) openWith(fullSrc);
-              });
-          }
-          return;
-        }
         if (resolve) {
-          void resolve(ref, { cardId: full.id, jobId: full.genJobId, galleryIndex: idx, preferFull: true }).then(openWith);
+          void resolve(ref, { cardId: full.id, jobId: lightboxJobId || undefined, galleryIndex: idx, preferFull: true }).then(openWith);
         } else {
           openWith(ref);
         }
@@ -4073,7 +4066,7 @@
               url = await window.MediaPipeline.resolvePreviewUrl(primaryImage, {
                 assetId: full.id,
                 cardId: full.id,
-                jobId: full.genJobId || null,
+                jobId: getEditPanelCardJobId(full) || null,
                 useJobImageApi: true,
                 gridFallbackUrl: domGrid,
                 allowGridFallback: true
@@ -4096,7 +4089,7 @@
           url = await window.MediaPipeline.resolvePreviewUrl(primaryImage, {
             assetId: full.id,
             cardId: full.id,
-            jobId: full.genJobId || null,
+            jobId: getEditPanelCardJobId(full) || null,
             useJobImageApi: true,
             gridFallbackUrl: gridOk ? gridFallback : '',
             allowGridFallback: true
@@ -4105,7 +4098,7 @@
         } else if (window.SupabaseSync?.resolvePreviewFullUrl) {
           url = await window.SupabaseSync.resolvePreviewFullUrl(primaryImage, {
             assetId: full.id,
-            jobId: full.genJobId || null,
+            jobId: getEditPanelCardJobId(full) || null,
             useJobImageApi: true,
             gridFallbackUrl: gridOk ? gridFallback : ''
           });
@@ -4113,7 +4106,7 @@
         } else if (window.SupabaseSync?.resolveCardDownloadUrl) {
           url = await window.SupabaseSync.resolveCardDownloadUrl(primaryImage, {
             assetId: full.id,
-            jobId: full.genJobId || null
+            jobId: getEditPanelCardJobId(full) || null
           });
         }
       } catch (e) { /* ignore */ }
@@ -7716,7 +7709,10 @@
 
     function warehouseListSignature(list, ctx) {
       const pageSlice = (list || []).slice(0, warehousePageSize());
-      const head = pageSlice.map((c) => `${c.id}\u001f${c.updatedAt || 0}\u001f${String(c.image || '').slice(0, 48)}`).join('\u001e');
+      const head = pageSlice.map((c) => {
+        const galleryHead = window.PromptHubCardGallery?.normalizeCardGallery?.(c)?.[0] || '';
+        return `${c.id}\u001f${c.updatedAt || 0}\u001f${String(c.image || '').slice(0, 48)}\u001f${String(galleryHead || '').slice(0, 48)}`;
+      }).join('\u001e');
       const filterKey = [
         ctx.group || 'all',
         ctx.search || '',
@@ -8829,9 +8825,35 @@
     }
 
     function getEditPanelCardGallery(card) {
-      if (!card) return [];
-      return window.PromptHubCardGallery?.normalizeCardGallery?.(card)
-        || (card.image ? [card.image] : []);
+      return window.EditPanelGallery?.getCardGallery?.(card)
+        || (card?.image ? [card.image] : []);
+    }
+
+    function getEditPanelCardJobId(card) {
+      return window.EditPanelGallery?.getCardJobId?.(card)
+        || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(card)
+        || (card?.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : null);
+    }
+
+    function getEditPanelSlotJobId(card, galleryIndex) {
+      const slotJobId = window.EditPanelGallery?.getSlotJobId?.(card, galleryIndex);
+      if (slotJobId) return slotJobId;
+      const baseJobId = getEditPanelCardJobId(card);
+      return baseJobId && window.PromptHubCardGallery?.gallerySlotJobId?.(baseJobId, galleryIndex)
+        || baseJobId
+        || null;
+    }
+
+    function isPanelDisplayableImageUrl(url) {
+      return window.EditPanelGallery?.isDisplayableImageUrl?.(url) ?? !!(url
+        && /^(https?:|blob:|data:image\/)/i.test(String(url))
+        && !String(url).includes('data:image/svg'));
+    }
+
+    async function resolveEditPanelGalleryPreview(ref, card, galleryIndex) {
+      return window.EditPanelGallery?.resolvePreview?.(ref, card, galleryIndex, {
+        cardId: card?.id || selectedCardId || null
+      }) || '';
     }
 
     function syncPanelGalleryNav(card) {
@@ -8879,8 +8901,7 @@
         img.removeAttribute('src');
         delete img.dataset.previewFullUrl;
       }
-      const cardJobId = card?.genJobId || null;
-      const slotJobId = window.PromptHubCardGallery?.gallerySlotJobId?.(cardJobId, panelGalleryIndex) || cardJobId;
+      const slotJobId = getEditPanelSlotJobId(card, panelGalleryIndex);
       const prefetchOpts = {
         assetId: selectedCardId,
         cardId: selectedCardId,
@@ -8892,7 +8913,7 @@
         if (nextIdx < gallery.length && window.MediaPipeline?.resolveListUrl) {
           void window.MediaPipeline.resolveListUrl(gallery[nextIdx], {
             ...prefetchOpts,
-            jobId: window.PromptHubCardGallery?.gallerySlotJobId?.(cardJobId, nextIdx) || cardJobId,
+            jobId: getEditPanelSlotJobId(card, nextIdx) || undefined,
             galleryIndex: nextIdx
           });
         }
@@ -8900,7 +8921,7 @@
       if (panelGalleryIndex > 0 && window.MediaPipeline?.resolveListUrl) {
         void window.MediaPipeline.resolveListUrl(gallery[panelGalleryIndex - 1], {
           ...prefetchOpts,
-          jobId: window.PromptHubCardGallery?.gallerySlotJobId?.(cardJobId, panelGalleryIndex - 1) || cardJobId,
+          jobId: getEditPanelSlotJobId(card, panelGalleryIndex - 1) || undefined,
           galleryIndex: panelGalleryIndex - 1
         });
       }
@@ -9929,10 +9950,7 @@
       const cardId = selectedCardId;
       const card = cardId ? cards.find((c) => c.id === cardId) : null;
       const previewImg = document.getElementById('previewImage');
-      const slotJobId = window.PromptHubCardGallery?.gallerySlotJobId?.(
-        card?.genJobId,
-        panelGalleryIndex
-      ) || card?.genJobId || null;
+      const slotJobId = getEditPanelSlotJobId(card, panelGalleryIndex);
       await window.downloadCardImageFile?.(imageData, cardId, null, {
         galleryIndex: panelGalleryIndex,
         jobId: slotJobId,
@@ -10059,13 +10077,18 @@
       const seq = ++panelPreviewSeq;
       const cardIdAtStart = selectedCardId;
       const imageAtStart = imageData;
+      const galleryIndexAtStart = panelGalleryIndex;
+      const cardAtStart = cardIdAtStart ? cards.find((c) => c.id === cardIdAtStart) : null;
       const img = document.getElementById('previewImage'), p = document.getElementById('dropPlaceholder');
       const removeBtn = document.getElementById('removeImageBtn'), dropArea = document.getElementById('dropArea');
       const editPanel = document.getElementById('editPanel');
       const loadPreview = shouldLoadPanelImagePreview();
       editPanel?.classList.toggle('edit-panel--no-image-preview', !loadPreview);
       const previewStale = () =>
-        seq !== panelPreviewSeq || cardIdAtStart !== selectedCardId || imageAtStart !== imageData;
+        seq !== panelPreviewSeq
+        || cardIdAtStart !== selectedCardId
+        || imageAtStart !== imageData
+        || galleryIndexAtStart !== panelGalleryIndex;
       const finishPreviewLoad = () => {
         if (previewStale()) return;
         dropArea?.classList.remove('is-loading-preview');
@@ -10080,17 +10103,13 @@
         img.onerror = () => {
           if (previewStale()) return;
           void (async () => {
-            const cardJobId = cards.find((c) => c.id === selectedCardId)?.genJobId || null;
-            const slotJob = window.PromptHubCardGallery?.gallerySlotJobId?.(
-              cardJobId ? String(cardJobId).replace(/#\d+$/, '') : null,
-              panelGalleryIndex
-            ) || cardJobId;
+            const slotJob = getEditPanelSlotJobId(cardAtStart, galleryIndexAtStart);
             if (slotJob && window.WarehouseThumb?.resolveForCard) {
-              const gridRetry = await window.WarehouseThumb.resolveForCard(imageData, {
-                assetId: selectedCardId,
-                cardId: selectedCardId,
+              const gridRetry = await window.WarehouseThumb.resolveForCard(imageAtStart, {
+                assetId: cardIdAtStart,
+                cardId: cardIdAtStart,
                 jobId: slotJob,
-                galleryIndex: panelGalleryIndex
+                galleryIndex: galleryIndexAtStart
               });
               if (!previewStale() && gridRetry && !gridRetry.includes('data:image/svg')) {
                 img.src = gridRetry;
@@ -10107,13 +10126,7 @@
         if (typeof imageData === 'string' && imageData.startsWith('data:image/')) {
           src = imageData;
         } else if (typeof imageData === 'string' && /^https?:\/\//i.test(imageData) && !window.SupabaseSync?.isInvalidMediaUrl?.(imageData)) {
-          if (window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(imageData)) {
-            src = '';
-          } else if (window.SupabaseSync?.isCdnMediaUrl?.(imageData) || window.SupabaseSync?.isValidSignedDisplayUrl?.(imageData)) {
-            src = window.SupabaseSync?.isGridDisplayUrl?.(imageData) ? imageData : '';
-          } else {
-            src = imageData;
-          }
+          src = window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(imageData) ? '' : imageData;
         }
         const waiting = !src || src.includes('data:image/svg');
         dropArea?.classList.toggle('is-loading-preview', waiting);
@@ -10143,22 +10156,19 @@
         dropArea.classList.remove('no-image');
         delete img.dataset.previewFullUrl;
         let previewGridShown = false;
-        const cardJobId = cards.find((c) => c.id === selectedCardId)?.genJobId || null;
+        const slotJobId = getEditPanelSlotJobId(cardAtStart, galleryIndexAtStart);
         const pipePreviewOpts = {
-          assetId: selectedCardId,
-          cardId: selectedCardId,
-          jobId: window.PromptHubCardGallery?.gallerySlotJobId?.(cardJobId, panelGalleryIndex) || cardJobId,
-          galleryIndex: panelGalleryIndex,
-          useJobImageApi: panelGalleryIndex <= 0,
-          allowGridFallback: panelGalleryIndex <= 0
+          assetId: cardIdAtStart,
+          cardId: cardIdAtStart,
+          jobId: slotJobId || undefined,
+          galleryIndex: galleryIndexAtStart,
+          useJobImageApi: false,
+          allowGridFallback: false
         };
-        if (waiting && selectedCardId) {
-          const cardModel = cards.find((c) => c.id === selectedCardId);
+        if (waiting && cardIdAtStart) {
           let gridUrl = '';
-          if (cardModel && window.MediaPipeline?.resolveCardListThumb) {
-            gridUrl = await window.MediaPipeline.resolveCardListThumb(cardModel);
-          } else if (cardJobId && window.WarehouseThumb?.resolveForCard) {
-            gridUrl = await window.WarehouseThumb.resolveForCard(imageData, pipePreviewOpts);
+          if (cardAtStart) {
+            gridUrl = await resolveEditPanelGalleryPreview(imageAtStart, cardAtStart, galleryIndexAtStart);
           }
           if (!previewStale() && gridUrl && !gridUrl.includes('data:image/svg')) {
             img.src = gridUrl;
@@ -10166,34 +10176,8 @@
             finishPreviewLoad();
           }
         }
-        if (waiting && window.SupabaseSync?.isStorageRef?.(imageData) && selectedCardId && !previewGridShown) {
-          const gridCached = window.MediaPipeline?.getListCached?.(imageData, selectedCardId, {
-            jobId: pipePreviewOpts.jobId
-          })
-            || window.SupabaseSync.getListDisplayImageSrc?.(imageData, selectedCardId, {
-              jobId: pipePreviewOpts.jobId
-            });
-          if (gridCached && !gridCached.includes('data:image/svg')) {
-            img.src = gridCached;
-            previewGridShown = true;
-            finishPreviewLoad();
-          } else {
-            const resolveGrid = window.MediaPipeline?.resolveListUrl
-              || ((ref, o) => window.SupabaseSync.resolveDisplayUrl(ref, {
-                assetId: o.assetId,
-                variant: 'grid',
-                listOnly: true,
-                allowFullFallback: false
-              }));
-            void resolveGrid(imageData, pipePreviewOpts).then((gridUrl) => {
-              if (previewStale() || !gridUrl || gridUrl.includes('data:image/svg')) return;
-              if (img.dataset.previewFullUrl) return;
-              img.src = gridUrl;
-              finishPreviewLoad();
-            });
-          }
-        } else if (src && !src.includes('data:image/svg')) {
-          if (!window.SupabaseSync?.isStorageRef?.(imageData)) img.dataset.previewFullUrl = src;
+        if (src && !src.includes('data:image/svg')) {
+          if (!window.SupabaseSync?.isStorageRef?.(imageAtStart)) img.dataset.previewFullUrl = src;
           finishPreviewLoad();
         } else if (previewGridShown) {
           finishPreviewLoad();

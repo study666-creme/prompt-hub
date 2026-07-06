@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 
 $files = @(
-  'script.js', 'features-draft.js', 'image-gen-feed.js', 'media-pipeline.js',
+  'script.js', 'edit-panel-gallery.js', 'features-draft.js', 'image-gen-feed.js', 'media-pipeline.js',
   'sync-orchestrator.js', 'card-image-loader.js', 'feed-images.js', 'feed-layout.js',
   'mobile.js', 'features-assets.js', 'community-public-feed.js', 'imagegen-gen-errors.js', 'imagegen-warehouse-repair.js', 'imagegen-ref-compress.js', 'imagegen-ref-ui.js', 'imagegen-ref-resolve.js', 'imagegen-warehouse-save.js', 'imagegen-finish-run.js', 'imagegen-poll-warehouse.js', 'imagegen-job-runner.js', 'imagegen-submit.js', 'asset-studio.js', 'supabase-sync.js',
   'api-client.js', 'community-gacha.js', 'admin.js', 'imagegen-prompt-tools.js',

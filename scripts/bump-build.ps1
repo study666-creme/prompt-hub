@@ -36,6 +36,7 @@ $syncCacheAssets = @(
   'styles-settings.css', 'styles-assets.css',
   'theme.js', 'api-client.js', 'app-router.js', 'supabase-sync.js', 'script.js',
   'features-draft.js', 'features-assets.js', 'community-public-feed.js', 'card-gallery.js',
+  'edit-panel-gallery.js',
   'pack-prelude.js', 'pack-foundation.js', 'pack-core.js', 'pack-viewer.js',
   'pack-appreciate.js', 'pack-lightbox.js', 'pack-feed.js', 'pack-imagegen.js',
   'pack-account.js', 'pack-media-client.js', 'pack-extra.js'

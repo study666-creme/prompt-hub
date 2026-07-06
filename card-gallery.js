@@ -24,7 +24,7 @@
     let imgs = Array.isArray(card.cardImages) ? card.cardImages.filter(Boolean) : [];
     if (!imgs.length && Array.isArray(card.mjGridUrls)) imgs = card.mjGridUrls.filter(Boolean);
     if (!imgs.length && card.image) imgs = [card.image];
-    if (card.isMidjourney && card.mjCompositeUrl) {
+    if (card.mjCompositeUrl) {
       const tiles = Array.isArray(card.mjGridUrls) && card.mjGridUrls.length
         ? card.mjGridUrls.filter(Boolean)
         : imgs.slice(1);
@@ -67,7 +67,7 @@
 
   function hasGeneratedImageIntent(card) {
     if (!card) return false;
-    if (card.genJobId || card.feedCoverJobId || card.genSourceId || card.isMidjourney) return true;
+    if (card.genJobId || card.feedCoverJobId || card.genSourceId || card.isMidjourney || card.mjCompositeUrl) return true;
     if (Array.isArray(card.mjGridUrls) && card.mjGridUrls.some(Boolean)) return true;
     const tags = Array.isArray(card.tags) ? card.tags.map((t) => String(t || '').trim()) : [];
     const autoTag = String(global.GEN_AUTO_TAG || '图片生成');
@@ -76,7 +76,7 @@
   }
 
   function isMjCompositeCoverRef(ref, card) {
-    if (!ref || !card?.isMidjourney) return false;
+    if (!ref || !card) return false;
     const comp = card.mjCompositeUrl && String(card.mjCompositeUrl).trim();
     if (comp && String(ref) === comp) return true;
     const path = global.SupabaseSync?.storagePathFromRef?.(ref);
@@ -152,16 +152,21 @@
       slotJobId: baseJob ? gallerySlotJobId(baseJob, galleryIndex >= 0 ? galleryIndex : 0) : null,
       gallery
     });
+    const first = gallery.find((u) => u && String(u).trim());
+    if (first) {
+      const firstIndex = gallery.indexOf(first);
+      if (isFeedListCoverCandidate(first, card.id, card) || baseJob) {
+        return pack(first, firstIndex >= 0 ? firstIndex : 0);
+      }
+    }
     for (let i = 0; i < gallery.length; i += 1) {
       const u = gallery[i];
       if (!u || !String(u).trim()) continue;
-      if (isMjCompositeCoverRef(u, card)) continue;
       if (global.SupabaseSync?.isStorageRef?.(u)) return pack(u, i);
     }
     for (let i = 0; i < gallery.length; i += 1) {
       const u = gallery[i];
       if (!u || !String(u).trim()) continue;
-      if (isMjCompositeCoverRef(u, card)) continue;
       if (global.SupabaseSync?.isEphemeralUpstreamImageUrl?.(u)) continue;
       if (isResolvableCoverRef(u, card.id)) return pack(u, i);
     }
@@ -169,7 +174,6 @@
       for (let i = 0; i < gallery.length; i += 1) {
         const u = gallery[i];
         if (!u || !String(u).trim()) continue;
-        if (isMjCompositeCoverRef(u, card)) continue;
         return pack(u, i);
       }
       if (card.image && String(card.image).trim()) return pack(card.image, 0);
@@ -203,7 +207,7 @@
       return null;
     };
 
-    if (card.isMidjourney && gallery.length) {
+    if ((card.isMidjourney || card.mjCompositeUrl) && gallery.length) {
       const head = gallery.find((u) => u && String(u).trim());
       if (head) {
         const idx = gallery.indexOf(head);
@@ -396,7 +400,7 @@
       const listCover = pickWarehouseListThumb({ ...card, cardImages: imgs });
       card.image = listCover?.ref || getCardFeedCoverImage({ ...card, cardImages: imgs }) || imgs[0];
     }
-    if (card.isMidjourney) {
+    if (card.isMidjourney || card.mjCompositeUrl) {
       const comp = card.mjCompositeUrl && String(card.mjCompositeUrl).trim();
       if (comp && imgs[0] === comp) {
         card.mjGridUrls = imgs.slice(1, 5);
@@ -423,9 +427,9 @@
     const galleryIndex = Number.isFinite(opts.galleryIndex) ? opts.galleryIndex : null;
     const baseJobId = opts.jobId
       ? String(opts.jobId).replace(/#\d+$/, '')
-      : (cardId && galleryIndex != null && galleryIndex > 0 ? String(cardId) : null);
-    const slotJobId = galleryIndex != null
-      ? gallerySlotJobId(baseJobId || opts.jobId, galleryIndex)
+      : null;
+    const slotJobId = galleryIndex != null && baseJobId
+      ? gallerySlotJobId(baseJobId, galleryIndex)
       : (opts.jobId ? String(opts.jobId) : null);
     const isCoverSlot = galleryIndex == null || galleryIndex <= 0;
     const wantFull = opts.preferFull === true;
