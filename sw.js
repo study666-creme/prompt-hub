@@ -1,4 +1,4 @@
-const CACHE = 'prompt-hub-v20260706b';
+const CACHE = 'prompt-hub-v20260706c';
 /** 仅缓存静态小资源；HTML/JS/CSS 始终走网络，避免误显示「暂时无法连接」 */
 const ASSETS = [
   './manifest.webmanifest',
@@ -43,26 +43,10 @@ self.addEventListener('fetch', (e) => {
     url.pathname === '/' ||
     url.pathname.endsWith('.html');
   const isScriptOrStyle = /\.(css|js)$/.test(url.pathname);
+  if (isScriptOrStyle) return;
 
   e.respondWith(
     (async () => {
-      if (isScriptOrStyle) {
-        try {
-          const res = await fetch(e.request, { cache: 'no-store' });
-          const ct = res.headers.get('content-type') || '';
-          if (/text\/html/i.test(ct)) {
-            return new Response('// script response was HTML (SPA fallback)', {
-              status: 502,
-              headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-            });
-          }
-          return res;
-        } catch (err) {
-          const cached = await caches.match(e.request);
-          if (cached) return cached;
-          throw err;
-        }
-      }
       if (isHtml) {
         try {
           return await fetch(e.request, { cache: 'no-store' });
