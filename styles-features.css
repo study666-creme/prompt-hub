@@ -3701,24 +3701,24 @@
 .imagegen-feed-tabs {
   flex-shrink: 0;
   display: flex;
-  gap: 0;
-  padding: 12px 14px 0;
-  border-bottom: 1px solid var(--border);
+  gap: 4px;
+  padding: 10px 14px;
+  border-bottom: none;
   background: var(--bg-secondary);
 }
 
 .imagegen-feed-tab {
   flex: 1;
-  padding: 10px 8px;
+  padding: 8px 10px;
   border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  border-radius: 6px;
+  margin-bottom: 0;
   background: transparent;
   color: var(--text-muted);
   font-size: var(--font-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: color 0.2s, border-color 0.2s;
+  transition: color 0.2s, background-color 0.2s;
 }
 
 .imagegen-feed-tab:hover {
@@ -3727,7 +3727,8 @@
 
 .imagegen-feed-tab.active {
   color: var(--text-primary);
-  border-bottom-color: var(--accent);
+  background: var(--accent-bg-strong);
+  box-shadow: none;
 }
 
 .imagegen-warehouse-filters {
@@ -4034,6 +4035,53 @@
   padding: 8px 10px 10px;
   gap: 4px;
   flex: 0 1 auto;
+}
+
+.imagegen-feed-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 7px;
+}
+
+.imagegen-feed-quick-btn {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-hover) 72%, transparent);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    transform 0.18s var(--ease-out, ease),
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.imagegen-feed-quick-btn:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--text-primary) 20%, var(--border));
+  background: color-mix(in srgb, var(--bg-hover) 88%, var(--text-primary) 5%);
+  color: var(--text-primary);
+}
+
+.imagegen-feed-quick-btn:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.imagegen-feed-quick-btn--primary {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, var(--bg-hover));
+}
+
+@media (max-width: 900px) {
+  .imagegen-feed-quick-actions {
+    display: none;
+  }
 }
 
 .imagegen-feed-card-tile .imagegen-feed-prompt {
@@ -6702,13 +6750,17 @@ body.community-gacha-open {
 }
 
 .feature-header .feature-tab.active,
-.imagegen-feed-tab.active,
 .imagegen-filter-pill.is-active,
 .imagegen-ref-tool-btn.active {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.035)),
     var(--accent-bg-strong);
   box-shadow: inset 0 0 0 1px var(--border-hairline, var(--border));
+}
+
+.imagegen-feed-tab.active {
+  background: var(--accent-bg-strong);
+  box-shadow: none;
 }
 
 .imagegen-generate-btn {

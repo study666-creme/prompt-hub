@@ -4467,7 +4467,7 @@
 
     function switchAuthChannel(channel) {
       if (channel === 'phone' && !window.SupabaseSync?.isPhoneAuthEnabled?.()) {
-        setAuthStatus('请先在 Supabase 开启手机登录，见 docs/SUPABASE-AUTH.md', 'error');
+        setAuthStatus('手机登录暂未开放，请使用邮箱登录', 'error');
         return;
       }
       authChannel = channel;
@@ -4602,14 +4602,11 @@
     }
 
     function authErrorMessage(e) {
-      if (!e) return '操作失败，请稍后重试';
+      if (!e) return '登录失败，请稍后重试';
       if (window.SupabaseSync?.formatAuthError) {
-        const msg = window.SupabaseSync.formatAuthError(e);
-        if (msg && msg !== '操作失败') return msg;
+        return window.SupabaseSync.formatAuthError(e);
       }
-      const m = String(e.message || e.error_description || '').trim();
-      if (m && m !== '{}' && m !== '[object Object]') return m;
-      return '登录失败，请检查网络后重试';
+      return '登录失败，请检查邮箱和密码后重试';
     }
 
     async function authSignIn() {
@@ -4682,7 +4679,10 @@
         await window.SupabaseSync.resetPassword(email);
         setAuthStatus('重置邮件已发送，请查收邮箱（含垃圾箱）', 'ok');
       } catch (e) {
-        setAuthStatus(authErrorMessage(e), 'error');
+        setAuthStatus(
+          '暂无法通过邮件重置密码，请联系管理员协助重置（QQ 群或微信客服）',
+          'error'
+        );
       } finally {
         setAuthBusy(false);
       }

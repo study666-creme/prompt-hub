@@ -851,15 +851,23 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         ? `<p class="imagegen-feed-prompt">${d().esc?.(showPrompt)}</p>`
         : '<p class="imagegen-feed-prompt imagegen-feed-prompt--empty">暂无提示词</p>';
       const noMedia = !imgBlock ? ' imagegen-feed-card--no-media' : '';
+      const quickActions = `<div class="imagegen-feed-quick-actions" aria-label="生图快捷操作">
+            <button type="button" class="imagegen-feed-quick-btn" data-feed-fill-prompt>填提示词</button>
+            ${imgBlock ? '<button type="button" class="imagegen-feed-quick-btn" data-feed-fill-ref>填参考图</button>' : ''}
+            <button type="button" class="imagegen-feed-quick-btn imagegen-feed-quick-btn--primary" data-feed-regenerate>再次生成</button>
+          </div>`;
       const mobileActs = `<div class="imagegen-feed-mobile-actions mobile-only">
             <button type="button" class="imagegen-feed-mobile-btn" data-feed-copy>复制</button>
             <button type="button" class="imagegen-feed-mobile-btn" data-feed-fill-prompt>填入生图</button>
+            ${imgBlock ? '<button type="button" class="imagegen-feed-mobile-btn" data-feed-fill-ref>填参考图</button>' : ''}
+            <button type="button" class="imagegen-feed-mobile-btn" data-feed-regenerate>再次生成</button>
             ${imgBlock ? '<button type="button" class="imagegen-feed-mobile-btn" data-feed-download>下载</button>' : ''}
           </div>`;
       const fillHint = '';
       return `<article class="imagegen-feed-card imagegen-feed-card-tile${noMedia}${active ? ' active' : ''}" data-feed-id="${d().esc?.(id)}" data-feed-prompt="${d().esc?.(prompt || '')}" tabindex="0">
         ${imgBlock}
         <div class="imagegen-feed-content">
+          ${quickActions}
           ${titleHtml}
           ${promptHtml}
           ${metaRowHtml}
@@ -920,7 +928,8 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       const posts = getImageGenCommunityFeedList();
       const head = posts.slice(0, 12).map((p) => String(p.id)).join(',');
       const tailId = posts.length > 12 ? String(posts[posts.length - 1]?.id || '') : '';
-      return `cm:${d().getCommunityScope?.()}:${d().getCommunitySort?.()}:${posts.length}:${head}:${tailId}`;
+      const randomEpoch = d().getCommunitySort?.() === 'random' ? (d().getCommunityRandomEpoch?.() || 0) : 0;
+      return `cm:${d().getCommunityScope?.()}:${d().getCommunitySort?.()}:r${randomEpoch}:${posts.length}:${head}:${tailId}`;
     }
   
     function creationToFeedHtml(c) {
@@ -1470,6 +1479,10 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         const feedItemId = feedKind === 'recent'
           ? (feedId.startsWith('cr_') ? feedId.slice(3) : feedId)
           : feedId;
+        const getFeedImageRef = () => {
+          const img = card.querySelector('.imagegen-feed-media img[data-image-ref]');
+          return img?.getAttribute('data-image-ref') || '';
+        };
         const openFeedPreview = () => {
           if (feedKind === 'recent') d().openImageGenPreview?.('recent', feedItemId);
           else d().openImageGenPreview?.('community', feedId);
@@ -1516,6 +1529,18 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           e.stopPropagation();
           d().fillFeedPromptToActiveMode?.(card.dataset.feedPrompt || '');
         });
+        card.querySelector('[data-feed-fill-ref]')?.addEventListener('click', e => {
+          e.stopPropagation();
+          d().fillFeedRefToActiveMode?.(getFeedImageRef(), {
+            assetId: feedItemId
+          });
+        });
+        card.querySelector('[data-feed-regenerate]')?.addEventListener('click', e => {
+          e.stopPropagation();
+          void d().regenerateFeedItem?.(card.dataset.feedPrompt || '', getFeedImageRef(), {
+            assetId: feedItemId
+          });
+        });
         card.querySelectorAll('[data-feed-download]').forEach((btn) => {
           btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1548,6 +1573,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           if (e.target.closest('.imagegen-feed-save-btn')) return;
           if (e.target.closest('[data-delete-feed]')) return;
           if (e.target.closest('[data-feed-download]')) return;
+          if (e.target.closest('.imagegen-feed-quick-actions')) return;
           if (e.target.closest('.imagegen-feed-mobile-actions')) return;
           if (e.target.closest('.imagegen-feed-media')) return;
           if (window.MobileUI?.isMobile?.()) return;

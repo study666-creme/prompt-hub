@@ -4,36 +4,32 @@
 
 ---
 
-## 当前部署阶段（2026-07-04 · 构建 `20260704e`）
+## 当前部署阶段（2026-07-06 · MemFire 已上线）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | https://prompt-hubs.com · **`window.__APP_BUILD__` = `20260704e`** |
+| **Pages** | https://prompt-hubs.com · 构建 `20260706l` |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com · `MEDIA_STORAGE_MODE=r2-first` |
-| **架构真实进度** | **`docs/ARCH-STATUS-REAL.md`**（勿信 `MISSION-COMPLETE.md` 旧版） |
+| **DB** | **MemFire** `d95gau8g91hmdup86ag0` · Worker `/health` → `supabase: ok` |
+| **图片** | R2（MemFire Storage 桶空属正常） |
 
 ### 已打通
 
-- ✅ **批量 repair 防 503**（`20260704e`）：浏览器默认 16 张/批、503 自动减半重试；repair 期间暂停 `warehouse-thumbs`
-- ✅ **卡片库 / 最近生成灰块自恢复**（`20260704c`）
-- ✅ **`pack-media-client.js`** → `window.PromptHubMedia`（Phase 1～3 生产桥接）
-- ✅ Worker 分页 `recover-warehouse` + `r2_backfill`（避免 848 张全扫 503）
-- ✅ `/health`、兑换、生图 API
+- ✅ MemFire 数据 + auth 已 restore
+- ✅ Worker `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` 已切 MemFire
+- ✅ Pages anon key 已切 MemFire
+- ✅ `/health`、社区 feed API 正常
 
-### 已知问题
+### 请你本地验收
 
-- 仍有个别灰卡：Console **404** 的 `.png` → R2/Supabase 无原图或 `genJobId` 记录已删，需 `runWarehouseBulkRepair` 或接受丢失
-- 全量 `CardListRenderer` 替换 **未做**
+1. 打开 https://prompt-hubs.com ，**Ctrl+Shift+R** 强刷
+2. **重新登录**（换库后旧 session 可能失效）
+3. 检查：卡片库、社区、生图、兑换码
 
-### 下一步
+### 下一步（可选）
 
-1. 剩余灰卡：用小批 `await runWarehouseBulkRepair({ max: 16, maxRounds: 10 })`（勿用 40，会 503）
-2. MemFire 迁库见 `docs/MEMFIRE-MIGRATION.md`
-
-```powershell
-cd d:\prompt-hub
-.\deploy-pages.ps1
-```
+- 定价改造（本地）待 `wrangler deploy` 后生效
+- MemFire JWT Secret 与旧 Supabase 对齐可免全员重登（未对齐则重登一次即可）
 
 ### 测试账号
 

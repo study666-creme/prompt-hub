@@ -318,8 +318,15 @@ node scripts/memfire-preflight.mjs --api https://api.prompt-hub.cn
 
 ## 常见问题
 
-**Q：restore 后登录 401？**  
-检查 JWT Secret 是否对齐；或让用户退出重新登录。
+**Q：restore 后登录 401 / 密码错误？**  
+1. **多数用户不需要改密码** — 需把 Supabase 的 `encrypted_password` 同步到 MemFire（见下）。  
+2. MemFire 控制台 → **SQL 编辑器** → 粘贴运行 `backups/memfire-sync-auth-passwords.sql`（用 `node scripts/memfire-export-auth-passwords-sql.mjs` 生成，**勿提交 git**）。  
+3. 或 MemFire 直连可用时：`.\scripts\memfire-sync-auth-passwords.ps1`  
+4. 单用户紧急重置：`node scripts/memfire-reset-password.mjs --email xxx --password "新密码"`（脚本已修复 MemFire `?email=` 返回全量用户的 bug）。  
+5. **勿依赖「忘记密码」邮件** — 未开 SMTP 时不可用；JWT Secret 对齐见第 3 步。
+
+**Q：restore 后 session 失效？**  
+检查 JWT Secret 是否对齐；或让用户用**原密码**重新登录一次。
 
 **Q：图片 403？**  
 检查 `card-images` 桶是否私有、迁移 SQL 里 storage policy 是否存在、Worker `SUPABASE_URL` 是否已指向 MemFire。
@@ -337,6 +344,9 @@ node scripts/memfire-preflight.mjs --api https://api.prompt-hub.cn
 | 文件 | 作用 |
 |------|------|
 | `scripts/memfire-upload-storage.mjs` | Supabase 或本地 → MemFire Storage |
+| `scripts/memfire-sync-auth-passwords.ps1` | Supabase → MemFire 同步登录密码哈希（直连） |
+| `scripts/memfire-export-auth-passwords-sql.mjs` | 生成 SQL 供 MemFire 控制台执行 |
+| `scripts/memfire-reset-password.mjs` | 管理员单用户重置密码（无需邮件） |
 | `scripts/memfire-preflight.mjs` | 迁移前后对象数量/API 健康检查 |
 | `supabase-config.memfire.example.js` | 主站配置模板 |
 | `extension/config.memfire.example.js` | 扩展配置模板 |

@@ -631,11 +631,13 @@ function clearImageGenRef() {
 
 function bindImageGenPromptTools() {
     const pasteBtn = document.getElementById('imageGenPromptPaste');
+    const copyBtn = document.getElementById('imageGenPromptCopy');
     const clearBtn = document.getElementById('imageGenPromptClear');
     const promptEl = document.getElementById('imageGenPrompt');
     if (!pasteBtn || !clearBtn || !promptEl) return;
     if (pasteBtn.dataset.bound === '1') return;
     pasteBtn.dataset.bound = '1';
+    if (copyBtn) copyBtn.dataset.bound = '1';
     clearBtn.dataset.bound = '1';
 
     pasteBtn.addEventListener('click', async () => {
@@ -654,6 +656,24 @@ function bindImageGenPromptTools() {
         promptEl.focus();
       } catch (e) {
         d().toast('无法读取剪贴板，请检查浏览器权限');
+      }
+    });
+
+    copyBtn?.addEventListener('click', async () => {
+      const text = promptEl.value.trim();
+      if (!text) {
+        d().toast('暂无可复制的提示词');
+        return;
+      }
+      try {
+        if (!navigator.clipboard?.writeText) {
+          d().toast('当前浏览器不支持复制到剪贴板');
+          return;
+        }
+        await navigator.clipboard?.writeText(text);
+        d().toast('已复制提示词');
+      } catch (e) {
+        d().toast('复制失败，请检查浏览器剪贴板权限');
       }
     });
 

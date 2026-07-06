@@ -13,7 +13,7 @@ window.WECHAT_OAUTH_URL = '';
     // 登录走 Worker 反代（与 API 同域）；anon 需与 server/.dev.vars 里 Supabase 项目一致
     window.SUPABASE_URL = 'http://127.0.0.1:8787/supabase';
     window.SUPABASE_ANON_KEY =
-      'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzgwNzkxMzM5LCJleHAiOjEzMjkxNDMxMzM5fQ.lAaU4MF46Cse5hFcX9QeW9Dp-cG1DRia2t42CYgwHlw';
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImV4cCI6MzM2MDEwMTQ5NywiaWF0IjoxNzgzMzAxNDk3LCJpc3MiOiJzdXBhYmFzZSJ9.5lXHe7E3Fef6XFqUjloawjQRbFVmyA7rmnRPf5ymEgM';
     try {
       var s = document.createElement('script');
       s.src = 'supabase-config.local.js';
@@ -34,7 +34,7 @@ window.WECHAT_OAUTH_URL = '';
     var apiHost = customApi || 'api.prompt-hubs.com';
     window.SUPABASE_URL =
       'https://' + apiHost.replace(/^https?:\/\//i, '').replace(/\/$/, '') + '/supabase';
-    window.SUPABASE_ANON_KEY = 'sb_publishable_PGhXkT83iWKzx5244I9t4w_HSBITvgF';
+    window.SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImV4cCI6MzM2MDEwMTQ5NywiaWF0IjoxNzgzMzAxNDk3LCJpc3MiOiJzdXBhYmFzZSJ9.5lXHe7E3Fef6XFqUjloawjQRbFVmyA7rmnRPf5ymEgM';
     return;
   }
 

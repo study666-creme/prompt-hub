@@ -1795,8 +1795,9 @@
 
   body.imagegen-mobile-view-feed .imagegen-feed-tabs {
     background: transparent;
-    border-bottom: 1px solid var(--border);
-    padding: 8px 12px 0;
+    border-bottom: none;
+    padding: 8px 12px;
+    gap: 4px;
   }
 
   body.imagegen-mobile-view-feed .imagegen-community-filters {

@@ -3854,6 +3854,7 @@
       scrubImageGenFeedCards: (wrap) => scrubImageGenFeedCards?.(wrap),
       getCommunityScope: () => communityScope,
       getCommunitySort: () => communitySort,
+      getCommunityRandomEpoch: () => communityRandomEpoch,
       getLikedIds: () => likedIds,
       getCommunityFeedForDisplay,
       filterAndSortPosts,
@@ -3874,6 +3875,9 @@
       openImageGenPreview,
       downloadImageGenFeedItem,
       fillFeedPromptToActiveMode,
+      fillFeedRefToActiveMode,
+      fillFeedAllToActiveMode,
+      regenerateFeedItem,
       copyFeedPromptText,
       getActiveImageGenMode,
       likeCommunityPostOnly,
@@ -5082,27 +5086,31 @@
   function shuffleCommunityPosts(posts) {
     const list = Array.isArray(posts) ? posts : [];
     if (!list.length) return list;
-    if (!communityRandomOrder) communityRandomOrder = new Map();
-    const idSet = new Set(list.map((p) => String(p.id)));
-    for (const id of [...communityRandomOrder.keys()]) {
-      if (!idSet.has(String(id))) communityRandomOrder.delete(id);
-    }
-    const missing = list.filter((p) => !communityRandomOrder.has(p.id));
-    if (missing.length) {
-      let nextIdx = communityRandomOrder.size
-        ? Math.max(...communityRandomOrder.values()) + 1
-        : 0;
-      missing.forEach((p) => {
-        communityRandomOrder.set(p.id, nextIdx + Math.random());
-        nextIdx += 1;
-      });
-    }
-    communityRandomSig = [...idSet].sort().join('|');
-    return [...list].sort((a, b) => {
-      const ai = communityRandomOrder.get(a.id) ?? 0;
-      const bi = communityRandomOrder.get(b.id) ?? 0;
-      return ai - bi;
+    const seenKeys = new Map();
+    const keyed = list.map((p, idx) => {
+      const base = stablePostSortKey(p) || `idx:${idx}`;
+      const n = seenKeys.get(base) || 0;
+      seenKeys.set(base, n + 1);
+      return { post: p, key: `${base}#${n}` };
     });
+    const idSig = keyed.map((x) => x.key).sort().join('|');
+    if (!communityRandomOrder || communityRandomSig !== idSig || communityRandomOrder.size !== keyed.length) {
+      const shuffled = [...keyed];
+      for (let i = shuffled.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      communityRandomOrder = new Map();
+      shuffled.forEach((item, idx) => communityRandomOrder.set(item.key, idx));
+      communityRandomSig = idSig;
+    }
+    return keyed
+      .sort((a, b) => {
+        const ai = communityRandomOrder.get(a.key) ?? 0;
+        const bi = communityRandomOrder.get(b.key) ?? 0;
+        return (ai - bi) || compareStablePostKey(a.post, b.post);
+      })
+      .map((x) => x.post);
   }
 
   function applyCommunitySort(mode) {
@@ -6905,6 +6913,48 @@
     if (isMobileViewport()) window.MobileUI?.setImageGenView?.('form');
   }
 
+  function fillFeedRefToActiveMode(refImage, opts = {}) {
+    const refs = Array.isArray(opts.refImages) ? opts.refImages : (refImage ? [refImage] : []);
+    const cleanRefs = refs.filter((ref) => isDisplayableImage(ref));
+    if (!cleanRefs.length) {
+      toast('当前作品没有可填入的参考图');
+      return false;
+    }
+    fillFormRefOnly(cleanRefs[0], cleanRefs, { assetId: opts.assetId });
+    if (isMobileViewport()) window.MobileUI?.setImageGenView?.('form');
+    return true;
+  }
+
+  function fillFeedAllToActiveMode(prompt, refImage, opts = {}) {
+    const refs = (Array.isArray(opts.refImages) ? opts.refImages : (refImage ? [refImage] : []))
+      .filter((ref) => isDisplayableImage(ref));
+    fillFormFromData({
+      prompt: String(prompt || ''),
+      refImages: refs.length ? refs : undefined,
+      refAssetId: opts.assetId
+    });
+    if (isMobileViewport()) window.MobileUI?.setImageGenView?.('form');
+  }
+
+  async function regenerateFeedItem(prompt, refImage, opts = {}) {
+    const text = String(prompt || '').trim();
+    const refs = (Array.isArray(opts.refImages) ? opts.refImages : (refImage ? [refImage] : []))
+      .filter((ref) => isDisplayableImage(ref));
+    if (!text && !refs.length) {
+      toast('当前作品缺少可再次生成的内容');
+      return { ok: false };
+    }
+    if (typeof switchAppPage === 'function') switchAppPage('imagegen');
+    fillFormFromData({
+      prompt: text,
+      refImages: refs.length ? refs : undefined,
+      refAssetId: opts.assetId
+    });
+    return runImageGenWithPrompt(text, {
+      refImages: refs.length ? refs : undefined
+    });
+  }
+
   function fillFeedPromptToImageGen(prompt) {
     fillFeedPromptToActiveMode(prompt);
   }
@@ -6994,6 +7044,22 @@
           refImages: ri.length ? ri : undefined,
           refImage: ri.length ? undefined : r1,
           refAssetId: assetId || undefined
+        });
+        return;
+      }
+      const regenerateBtn = e.target.closest('[data-preview-regenerate]');
+      if (regenerateBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const { refImages: ri, refImage: r1 } = getPreviewRefs();
+        const refs = (ri.length ? ri : (r1 ? [r1] : [])).filter((ref) => isDisplayableImage(ref));
+        fillFormFromData({
+          prompt: body.dataset.previewPrompt || '',
+          refImages: refs.length ? refs : undefined,
+          refAssetId: imageGenPreviewKind === 'warehouse' ? imageGenPreviewId : undefined
+        });
+        void runImageGenWithPrompt(body.dataset.previewPrompt || '', {
+          refImages: refs.length ? refs : undefined
         });
         return;
       }
@@ -7237,6 +7303,7 @@
           <button type="button" class="btn btn-primary btn-sm" data-preview-fill-all>全部</button>
           <button type="button" class="btn btn-secondary btn-sm" data-preview-fill-prompt>仅提示词</button>
           <button type="button" class="btn btn-secondary btn-sm" data-preview-fill-ref${refDisabled}>仅参考图</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-preview-regenerate>再次生成</button>
         </div>
       </div>
       ${extraActionsHtml ? `<div class="imagegen-preview-actions-secondary">${extraActionsHtml}</div>` : ''}`;

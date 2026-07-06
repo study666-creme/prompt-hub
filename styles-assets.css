@@ -2521,7 +2521,6 @@ body {
 .view-toggle button.active,
 .column-toggle .icon-btn.active,
 .imagegen-mobile-seg.active,
-.imagegen-feed-tab.active,
 .community-scope-tabs .feature-tab.active,
 .community-media-tabs .feature-tab.active {
   background: var(--apple-material-strong);
@@ -2529,6 +2528,12 @@ body {
   box-shadow:
     0 1px 1px rgba(0, 0, 0, 0.14),
     inset 0 0 0 1px rgba(255, 255, 255, 0.045);
+}
+
+.imagegen-feed-tab.active {
+  background: var(--accent-bg-strong);
+  color: var(--text-primary);
+  box-shadow: none;
 }
 
 .card,
@@ -2699,6 +2704,41 @@ body {
 #creationsGrid.community-feed-rebalancing .card-img,
 #cardsContainer.masonry-ready .card-img {
   transform: none !important;
+}
+
+@media (min-width: 901px) {
+  #communityGrid.community-feed-columns:not(.list-view) .community-feed-col > .card .card-media,
+  #creationsGrid.community-feed-columns:not(.list-view) .community-feed-col > .card .card-media,
+  #communityGrid:not(.list-view) .community-post-card--visual .card-media,
+  #creationsGrid:not(.list-view) .community-post-card--visual .card-media {
+    max-height: min(46vh, 460px) !important;
+    overflow: hidden !important;
+    background: var(--bg-hover);
+  }
+
+  #communityGrid.feed-layout-pending:not(.list-view) .community-post-card--visual .card-media,
+  #creationsGrid.feed-layout-pending:not(.list-view) .community-post-card--visual .card-media {
+    aspect-ratio: 4 / 3;
+    max-height: 320px !important;
+  }
+
+  #communityGrid.community-feed-columns:not(.list-view) .community-feed-col > .card .card-media .card-img,
+  #creationsGrid.community-feed-columns:not(.list-view) .community-feed-col > .card .card-media .card-img,
+  #communityGrid:not(.list-view) .community-post-card--visual .card-media .card-img,
+  #creationsGrid:not(.list-view) .community-post-card--visual .card-media .card-img {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: min(46vh, 460px) !important;
+    object-fit: cover !important;
+    object-position: center center !important;
+  }
+
+  #communityGrid.feed-layout-pending:not(.list-view) .community-post-card--visual .card-media .card-img,
+  #creationsGrid.feed-layout-pending:not(.list-view) .community-post-card--visual .card-media .card-img {
+    height: 100% !important;
+    max-height: none !important;
+  }
 }
 
 body:not(.efficiency-mode) #pageImageGen .imagegen-form-scroll,

@@ -2703,6 +2703,58 @@ body {
       pointer-events: none;
       border-left-width: 0;
     }
+    /* 桌面：打开编辑侧栏时给顶栏更多横向空间，避免工具按钮挤成一团 */
+    @media (min-width: 901px) {
+      body.panel-open .app-page-warehouse .main-header {
+        height: auto;
+        min-height: var(--toolbar-h);
+        padding-top: 6px;
+        padding-bottom: 6px;
+        align-items: flex-start;
+      }
+      body.panel-open .app-page-warehouse .main-header h3 {
+        display: none;
+      }
+      body.panel-open .app-page-warehouse .header-actions {
+        flex: 1;
+        min-width: 0;
+        overflow-x: hidden;
+        overscroll-behavior-x: contain;
+        scrollbar-width: thin;
+      }
+      body.panel-open .app-page-warehouse .toolbar-row {
+        min-width: 0;
+        flex: 1 1 auto;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
+        column-gap: 6px;
+        row-gap: 6px;
+      }
+      body.panel-open .app-page-warehouse .toolbar-cluster {
+        gap: 6px;
+      }
+      body.panel-open .app-page-warehouse .toolbar-cluster-grow {
+        flex: 1 1 260px;
+        justify-content: flex-end;
+      }
+      body.panel-open .app-page-warehouse .search-box {
+        max-width: 160px;
+        flex: 1 1 132px;
+      }
+      body.panel-open .app-page-warehouse .toolbar-cluster-actions .btn {
+        padding-inline: 12px;
+      }
+    }
+    @media (min-width: 901px) and (max-width: 1360px) {
+      body.panel-open .app-page-warehouse .toolbar-cluster-grow {
+        order: 3;
+        flex: 1 0 100%;
+      }
+      body.panel-open .app-page-warehouse .search-box {
+        max-width: 220px;
+      }
+    }
     .edit-panel .panel-header {
       flex-shrink: 0;
       padding: 10px 14px;

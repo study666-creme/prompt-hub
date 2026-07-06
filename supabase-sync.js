@@ -4540,14 +4540,16 @@
   }
 
   function formatAuthError(err) {
-    if (!err) return '操作失败';
+    if (!err) return '操作失败，请稍后重试';
     if (typeof err === 'string') {
       const s = err.trim();
-      return s && s !== '{}' ? s : '操作失败，请稍后重试';
+      if (!s || s === '{}') return '操作失败，请稍后重试';
+      if (/[\u4e00-\u9fa5]/.test(s)) return s;
+      return '操作失败，请稍后重试';
     }
     const status = Number(err.status ?? err.statusCode ?? err.code);
     if (status === 503 || status === 502 || status === 504) {
-      return '登录服务暂时繁忙（Supabase 认证），请 30～60 秒后再试；多人同时登录时较常见，不是网站被黑';
+      return '登录服务暂时繁忙，请 30～60 秒后再试';
     }
     if (status === 429) {
       return '登录尝试过于频繁，请 1 分钟后再试';
@@ -4557,13 +4559,17 @@
     ).trim();
     const msg = rawMsg.toLowerCase();
     if (/503|502|504|service unavailable|temporarily unavailable|overloaded/.test(msg)) {
-      return '登录服务暂时不可用，请稍后再试（多为 Supabase 短时繁忙）';
+      return '登录服务暂时繁忙，请稍后再试';
     }
-    if (/invalid login|invalid credentials|invalid email or password/.test(msg)) {
-      return '邮箱或密码错误，请检查后重试';
+    if (
+      /invalid login|invalid credentials|invalid email or password|invalid authentication credentials|invalid_grant/.test(
+        msg
+      )
+    ) {
+      return '邮箱或密码不正确，请核对后重试。仍无法登录？请联系管理员协助重置';
     }
     if (/email not confirmed|confirm your email/.test(msg)) {
-      return '邮箱尚未验证，请查收邮件中的确认链接（或在 Supabase 关闭邮箱验证）';
+      return '账号暂不可用，请尝试重新注册或联系管理员';
     }
     if (/user already registered|already been registered|already exists/.test(msg)) {
       return '该邮箱已注册，请直接登录';
@@ -4581,20 +4587,17 @@
       return '网络连接失败，请检查网络后重试';
     }
     if (/signup is disabled/.test(msg)) {
-      return '注册功能未开启，请联系管理员';
+      return '注册功能暂未开放，请联系管理员';
     }
     if (/phone|sms|otp|invalid token|token has expired/.test(msg)) {
       if (/invalid token|token has expired|expired/.test(msg)) return '验证码错误或已过期';
       if (/phone provider|sms provider|phone auth/.test(msg)) {
-        return '手机登录未在 Supabase 配置，请先在控制台开启 Phone 并配置短信服务';
+        return '手机登录暂未开放，请使用邮箱登录';
       }
       if (/invalid phone/.test(msg)) return '手机号格式不正确';
     }
-    if (rawMsg && rawMsg !== '{}' && rawMsg !== '[object Object]') {
-      return rawMsg;
-    }
     if (Number.isFinite(status) && status >= 400) {
-      return `登录失败（服务返回 ${status}），请稍后重试`;
+      return '操作失败，请稍后重试';
     }
     return '操作失败，请稍后重试';
   }
