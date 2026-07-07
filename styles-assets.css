@@ -2594,6 +2594,37 @@ body {
   animation: appleSelectConfirm 0.34s var(--ease-out) both;
 }
 
+@media (hover: hover) and (pointer: fine) {
+  body:not(.global-view) #cardsContainer.cards-container:not(.list-view) > .card {
+    cursor: grab;
+  }
+
+  body:not(.global-view) #cardsContainer.cards-container:not(.list-view) > .card:active:not(.card-dragging-source),
+  body:not(.global-view) #cardsContainer.cards-container:not(.list-view) > .card.card-dragging-source {
+    cursor: grabbing;
+  }
+
+  body:not(.global-view) #cardsContainer.cards-container:not(.list-view) > .card button,
+  body:not(.global-view) #cardsContainer.cards-container:not(.list-view) > .card a,
+  body:not(.global-view) #cardsContainer.cards-container:not(.list-view) > .card input,
+  body:not(.global-view) #cardsContainer.cards-container:not(.list-view) > .card textarea,
+  body:not(.global-view) #cardsContainer.cards-container:not(.list-view) > .card select,
+  body:not(.global-view) #cardsContainer.cards-container:not(.list-view) > .card .card-checkbox,
+  body:not(.global-view) #cardsContainer.cards-container:not(.list-view) > .card .card-copy-btn,
+  body:not(.global-view) #cardsContainer.cards-container:not(.list-view) > .card .card-mobile-btn {
+    cursor: pointer;
+  }
+
+  body.global-view #cardsContainer.cards-container:not(.list-view) > .card {
+    cursor: zoom-in;
+  }
+
+  #cardsContainer.cards-container.batch-marquee-active,
+  body:not(.global-view) #cardsContainer.cards-container.batch-marquee-active:not(.list-view) > .card {
+    cursor: crosshair;
+  }
+}
+
 @keyframes appleSelectConfirm {
   0% { box-shadow: var(--shadow-card); }
   55% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--apple-blue) 36%, transparent), var(--shadow-md); }
