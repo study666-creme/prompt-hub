@@ -1,0 +1,420 @@
+        <div class="ref-annotator__tool-row">
+          <div class="ref-annotator__modes" id="refAnnotatorModes">
+            <button type="button" class="ref-annotator__mode is-active" data-tool="circle" title="椭圆圈选">⭕ 圈选</button>
+            <button type="button" class="ref-annotator__mode" data-tool="brush" title="自由画笔">🖌 画笔</button>
+          </div>
+          <label class="ref-annotator__brush-size" id="refAnnotatorBrushSizeWrap" hidden>
+            <span>粗细</span>
+            <input type="range" id="refAnnotatorBrushSize" min="4" max="48" value="14">
+          </label>
+        </div>
+        <div class="ref-annotator__tool-row ref-annotator__tool-row--bottom">
+        <div class="ref-annotator__colors" id="refAnnotatorColors">
+          <button type="button" class="ref-annotator__color is-active" data-color="#ef4444" title="红色" style="--c:#ef4444"></button>
+          <button type="button" class="ref-annotator__color" data-color="#eab308" title="黄色" style="--c:#eab308"></button>
+          <button type="button" class="ref-annotator__color" data-color="#22c55e" title="绿色" style="--c:#22c55e"></button>
+          <button type="button" class="ref-annotator__color" data-color="#3b82f6" title="蓝色" style="--c:#3b82f6"></button>
+        </div>
+        <div class="ref-annotator__actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="refAnnotatorUndo">撤销</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="refAnnotatorClear">清空</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="refAnnotatorCancel">取消</button>
+          <button type="button" class="btn btn-primary btn-sm" id="refAnnotatorDone">保存标注</button>
+        </div>
+        </div>
+      </div>
+      <p class="panel-hint ref-annotator__hint">圈选：按住拖拽画椭圆；画笔：按住涂抹。保存后标注会合成到参考图上</p>
+    </div>
+  </div>
+
+  <nav class="app-nav" id="appNav" aria-label="主导航">
+    <div class="app-nav-head">
+      <button type="button" class="app-brand" onclick="switchAppPage('warehouse')" title="卡藏 卡片式提示词仓库">
+        <img class="app-brand-mark" src="assets/logo.png" width="32" height="32" alt="卡藏">
+        <span class="app-brand-name"><span class="app-brand-kazang">卡藏</span></span>
+      </button>
+      <button type="button" class="app-nav-collapse-btn" id="appNavCollapseBtn" aria-label="收起侧栏" title="收起侧栏（仅图标）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+      </button>
+    </div>
+    <div class="app-nav-menu">
+      <button type="button" class="app-nav-item" data-app="warehouse">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        <span class="app-nav-label">卡片库</span>
+      </button>
+      <button type="button" class="app-nav-item active" data-app="community">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span class="app-nav-label">提示词社区</span>
+      </button>
+      <button type="button" class="app-nav-item" data-app="creations">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+        <span class="app-nav-label">我的主页</span>
+      </button>
+      <button type="button" class="app-nav-item" data-app="imagegen">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+        <span class="app-nav-label">图片生成</span>
+        <span class="app-nav-soon">草案</span>
+      </button>
+      <button type="button" class="app-nav-item app-nav-external" onclick="openPromptCanvas()" title="在新标签页打开无限画布">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
+        <span class="app-nav-label">无限画布</span>
+        <svg class="app-nav-external-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </button>
+      <button type="button" class="app-nav-item" data-app="devlab">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+        <span class="app-nav-label">开发中</span>
+        <span class="app-nav-soon">草案</span>
+      </button>
+    </div>
+    <div class="app-nav-footer">
+      <button type="button" class="app-nav-item app-nav-util" onclick="openAppSettings()">
+        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        <span class="app-nav-label">设置</span>
+      </button>
+    </div>
+    <div class="app-nav-auth" id="appNavAuth">
+      <div class="app-nav-subscribe-wrap">
+        <button type="button" class="app-nav-trial-btn" onclick="openTrialTasksPanel()">
+          <span class="app-nav-trial-badge" id="appNavTaskBadge">任务</span>
+          <span>免费试用</span>
+        </button>
+        <button type="button" class="app-nav-subscribe-btn" onclick="openSubscribePanel()">
+          <span class="app-nav-subscribe-badge" id="appNavSubscribeBadge">五折</span>
+          <span class="app-nav-subscribe-text" id="appNavSubscribeText">会员</span>
+          <span class="app-nav-subscribe-shine" aria-hidden="true"></span>
+        </button>
+        <p class="app-nav-subscribe-meta" id="appNavSubscribeMeta">未开通 · 完成任务可免费领会员</p>
+      </div>
+      <button type="button" class="auth-login-btn" id="authOpenBtn" onclick="openAuthModal()">登录 / 注册</button>
+      <div class="auth-user-bar hidden" id="authUserBar">
+        <span class="auth-user-email" id="authUserEmail" title=""></span>
+        <button type="button" class="auth-logout-btn" onclick="authSignOut()">退出</button>
+      </div>
+      <p class="auth-cloud-status hidden" id="authCloudStatus" role="status" aria-live="polite"></p>
+      <p class="app-nav-storage-hint hidden" id="guestLimitHint" role="status"></p>
+      <p class="app-build-label" id="appBuildLabel" title="与控制台 window.__APP_BUILD__ 一致">版本 20260706x</p>
+    </div>
+  </nav>
+
+  <div class="auth-overlay" id="authOverlay" onclick="if(event.target===this) closeAuthModal()">
+    <div class="auth-box" onclick="event.stopPropagation()">
+      <button type="button" class="auth-close" onclick="closeAuthModal()" aria-label="关闭">✕</button>
+      <h3 id="authTitle">登录账号</h3>
+      <p class="auth-desc" id="authDesc">登录后改动会自动保存到云端，换设备登录即可继续用。</p>
+      <div class="auth-method-tabs" id="authMethodTabs">
+        <button type="button" class="auth-method-tab active" data-auth-channel="email" onclick="switchAuthChannel('email')">邮箱</button>
+        <button type="button" class="auth-method-tab" data-auth-channel="phone" id="authPhoneMethodTab" onclick="switchAuthChannel('phone')">手机</button>
+      </div>
+      <div class="auth-tabs" id="authTabs">
+        <button type="button" class="auth-tab active" data-auth-mode="login" onclick="switchAuthMode('login')">登录</button>
+        <button type="button" class="auth-tab" data-auth-mode="register" onclick="switchAuthMode('register')">注册</button>
+      </div>
+      <div id="authEmailPanel">
+        <div class="auth-field auth-field-displayname hidden" id="authDisplayNameWrap">
+          <label for="authDisplayName">社区昵称</label>
+          <input type="text" id="authDisplayName" class="auth-text-input" maxlength="20" placeholder="2～20 字" autocomplete="nickname">
+          <p class="auth-field-hint">社区显示用，不会公开邮箱；留空将自动生成，之后可在「我的主页」修改</p>
+        </div>
+        <label for="authEmail">邮箱</label>
+        <input type="email" id="authEmail" placeholder="your@email.com" autocomplete="email">
+        <div class="auth-field auth-field-password">
+          <label for="authPassword" id="authPasswordLabel">密码</label>
+          <div class="auth-password-wrap">
+            <input type="password" id="authPassword" placeholder="至少 6 位" autocomplete="current-password">
+            <button type="button" class="auth-pwd-toggle" id="authPwdToggle" onclick="toggleAuthPassword()" aria-label="显示密码">👁</button>
+          </div>
+        </div>
+        <div class="auth-field auth-field-confirm hidden" id="authConfirmWrap">
+          <label for="authPasswordConfirm">确认密码</label>
+          <div class="auth-password-wrap">
+            <input type="password" id="authPasswordConfirm" placeholder="再次输入密码" autocomplete="new-password">
+          </div>
+        </div>
+        <div class="auth-field auth-field-newpwd hidden" id="authNewPwdWrap">
+          <label for="authNewPassword">新密码</label>
+          <div class="auth-password-wrap">
+            <input type="password" id="authNewPassword" placeholder="至少 6 位" autocomplete="new-password">
+          </div>
+        </div>
+        <label class="auth-remember" id="authRememberWrap">
+          <input type="checkbox" id="authRemember" checked>
+          <span>保持登录（本机记住）</span>
+        </label>
+      </div>
+      <div id="authPhonePanel" class="hidden">
+        <label for="authPhone">手机号</label>
+        <div class="auth-phone-wrap">
+          <span class="auth-phone-prefix">+86</span>
+          <input type="tel" id="authPhone" inputmode="numeric" maxlength="11" placeholder="11 位手机号" autocomplete="tel">
+        </div>
+        <div class="auth-field">
+          <label for="authOtp">验证码</label>
+          <div class="auth-otp-row">
+            <input type="text" id="authOtp" inputmode="numeric" maxlength="6" placeholder="6 位验证码" autocomplete="one-time-code">
+            <button type="button" class="btn btn-secondary auth-otp-btn" id="authSendOtpBtn" onclick="authSendPhoneOtp()">获取验证码</button>
+          </div>
+        </div>
+        <p class="auth-phone-hint">未注册的手机号验证通过后将自动创建账号</p>
+      </div>
+      <button type="button" class="btn btn-primary auth-submit-btn" id="authSubmitBtn" onclick="authSubmit()">登录</button>
+      <p class="auth-links" id="authEmailLinks">
+        <button type="button" class="auth-link-btn" id="authForgotLink" onclick="switchAuthMode('forgot')">忘记密码？</button>
+        <button type="button" class="auth-link-btn hidden" id="authBackLoginLink" onclick="switchAuthMode('login')">返回登录</button>
+      </p>
+      <div class="auth-social" id="authSocial">
+        <div class="auth-social-divider"><span>其他方式</span></div>
+        <button type="button" class="auth-wechat-btn" id="authWeChatBtn" onclick="authWeChatLogin()">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8.5 4C4.9 4 2 6.4 2 9.3c0 1.5.8 2.9 2.1 3.9l-.5 2 2.1-1.1c.7.2 1.4.3 2.1.3.1 0 .2 0 .3-.1-.3-.9-.5-1.8-.5-2.8 0-3.4 3.1-6.2 7-6.2.4 0 .8 0 1.2.1C14.4 5.2 11.7 4 8.5 4zm-2.6 3.5c-.6 0-1.1.5-1.1 1.1s.5 1.1 1.1 1.1 1.1-.5 1.1-1.1-.5-1.1-1.1-1.1zm5.2 0c-.6 0-1.1.5-1.1 1.1s.5 1.1 1.1 1.1 1.1-.5 1.1-1.1-.5-1.1-1.1-1.1zM15.5 8c-3.9 0-7 2.5-7 5.6 0 1.6.9 3.1 2.3 4.1l-.6 2.2 2.4-1.3c.8.2 1.7.4 2.6.4 3.9 0 7-2.5 7-5.6S19.4 8 15.5 8zm-2.4 4.8c-.5 0-1-.4-1-.9s.4-1 .9-1 1 .4 1 .9-.4.9-1 .9zm4.8 0c-.5 0-1-.4-1-.9s.4-1 .9-1 1 .4 1 .9-.4.9-1 .9z"/></svg>
+          微信登录
+        </button>
+      </div>
+      <p class="auth-status" id="authStatus"></p>
+    </div>
+  </div>
+
+  <div class="app-main">
+    <div class="app-page app-page-warehouse" id="pageWarehouse">
+  <div class="sidebar" id="sidebarArea">
+    <button type="button" class="sidebar-new-btn" onclick="createNewCard()">+ 新建提示词</button>
+    <button type="button" class="sidebar-batch-btn" onclick="openBatchImportModal()">批量导入卡片</button>
+    <button type="button" class="sidebar-collect-btn" onclick="openExtensionCollectPanel()" title="下载插件，在任意网页保存图片和文字">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      提示词采集
+      <span class="sidebar-collect-badge">插件</span>
+    </button>
+    <div class="sidebar-section sidebar-warehouses">
+      <div class="sidebar-section-title sidebar-warehouses-head">
+        <span>卡片库</span>
+        <button type="button" class="sidebar-warehouse-add" id="sidebarWarehouseAddBtn" title="新建卡片库（免费 1 个 · 基础 2 · 标准 3 · 专业 4，不含默认库）" aria-label="新建卡片库">+</button>
+      </div>
+      <div class="group-list" id="warehouseList"></div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">默认</div>
+      <div class="group-list" id="defaultGroupList">
+        <div class="group-item active" data-group="all">全部 <span class="count" id="allCount">0</span></div>
+        <div class="group-item" data-group="uncategorized">未分类 <span class="count" id="uncategorizedCount">0</span></div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">分组 <button class="add-btn" onclick="inlineAddGroup(event)">+</button></div>
+      <div class="group-list" id="customGroupList"></div>
+    </div>
+    <button class="action-btn" onclick="openWarehouseSettings()">⚙️ 字段 & 设置</button>
+  </div>
+
+  <div class="main-content" id="mainContentArea">
+    <div class="main-header">
+      <button type="button" class="icon-btn mobile-only mobile-header-btn" id="mobileNavBtn" aria-label="菜单">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <button type="button" class="icon-btn mobile-only mobile-header-btn" id="mobileGroupsBtn" aria-label="分组">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <h3 id="currentGroupTitle">全部提示词</h3>
+      <div class="header-actions">
+        <div id="batchBar" class="batch-bar">
+          <button class="btn btn-ghost btn-sm" onclick="batchPublishCommunity()" title="提示词≥15字且需配图">公开</button>
+          <button class="btn btn-ghost btn-sm" onclick="batchUnpublishCommunity()" title="从社区下架，卡片仍保留">关闭公开</button>
+          <button class="btn btn-ghost btn-sm" onclick="batchMoveGroup()">移动</button>
+          <button class="btn btn-ghost btn-sm" onclick="batchMoveWarehouse()">移库</button>
+          <button class="btn btn-ghost btn-sm" onclick="batchAddTag()">标签</button>
+          <button class="btn btn-danger btn-sm" onclick="batchDelete()">删除</button>
+          <button class="btn btn-ghost btn-sm" onclick="cancelBatch()">取消</button>
+          <span class="batch-count" id="batchCountLabel"></span>
+        </div>
+        <div id="normalBar" class="toolbar-row">
+          <div class="toolbar-cluster">
+            <div class="column-toggle" title="每排列数 1～5">
+              <button type="button" class="icon-btn" onclick="toggleColumnUp()" title="每排加一张（最多五张）">▲</button>
+              <button type="button" class="icon-btn" onclick="toggleColumnDown()" title="每排减一张（最少一张）">▼</button>
+            </div>
+            <div class="view-toggle" id="viewToggle">
+              <button class="active" data-view="grid" title="网格">▦</button>
+              <button data-view="list" title="列表">☰</button>
+            </div>
+            <button type="button" class="icon-btn icon-btn-accent" id="globalViewBtn" onclick="toggleGlobalView()" title="快速预览">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            </button>
+          </div>
+          <div class="toolbar-cluster toolbar-cluster-grow">
+            <div class="sort-menu-wrap desktop-only" id="sortMenuWrap">
+              <button type="button" class="toolbar-sort-btn" id="sortMenuBtn" aria-expanded="false" aria-haspopup="listbox" title="排序">
+                <span class="toolbar-sort-label" id="sortMenuLabel">最近更新</span>
+                <svg class="toolbar-sort-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+              <div class="toolbar-sort-dropdown" id="sortDropdown" hidden role="listbox" aria-label="排序方式"></div>
+            </div>
+            <input type="hidden" id="sortSelect" value="updated-desc">
+            <button type="button" class="icon-btn mobile-only" id="mobileSearchBtn" aria-label="搜索" aria-expanded="false" title="搜索">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/></svg>
+            </button>
+            <div class="filter-menu-wrap">
+              <button type="button" class="btn btn-ghost btn-sm warehouse-filter-clear hidden" id="warehouseFilterClearBtn">清除筛选</button>
+              <button type="button" class="icon-btn" id="filterBtn" title="筛选">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+                <span class="mobile-only mobile-filter-label">筛选</span>
+              </button>
+              <div class="filter-dropdown" id="filterDropdown"></div>
+            </div>
+            <input type="text" class="search-box desktop-only" placeholder="搜索…" oninput="renderCards(true)" id="searchInput">
+          </div>
+          <div class="toolbar-cluster toolbar-cluster-actions">
+            <button type="button" class="icon-btn mobile-only mobile-header-btn" id="mobileNewCardBtn" aria-label="新建卡片" title="新建" onclick="createNewCard({forceOpenPanel:true})">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+            <button type="button" class="icon-btn mobile-only mobile-header-btn" aria-label="批量导入" title="批量导入" onclick="openBatchImportModal()">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            </button>
+            <button class="btn btn-primary btn-sm desktop-only toolbar-new-btn" id="desktopNewCardBtn" onclick="createNewCard()">新建</button>
+            <button class="btn btn-ghost btn-sm desktop-only toolbar-batch-btn" onclick="openBatchImportModal()"><span class="toolbar-label-full">批量导入</span><span class="toolbar-label-compact">导入</span></button>
+            <button class="btn btn-ghost btn-sm desktop-only" id="batchToggleBtn" onclick="toggleBatchMode()">选择</button>
+          </div>
+        </div>
+        <div class="mobile-search-bar mobile-only" id="mobileSearchBar" hidden>
+          <input type="search" class="mobile-search-input" placeholder="搜索标题、提示词、标签…" oninput="renderCards(true)" id="searchInputMobile" enterkeyhint="search" autocomplete="off">
+        </div>
+      </div>
+    </div>
+    <div id="batchProgressOverlay" class="batch-progress-overlay hidden" aria-live="polite" aria-busy="true">
+      <div class="batch-progress-panel">
+        <p class="batch-progress-title" id="batchProgressTitle">正在处理…</p>
+        <div class="batch-progress-track"><div class="batch-progress-fill" id="batchProgressFill"></div></div>
+        <p class="batch-progress-meta" id="batchProgressMeta"></p>
+      </div>
+    </div>
+    <div class="batch-import-overlay hidden" id="batchImportOverlay" role="dialog" aria-modal="true" aria-labelledby="batchImportTitle" onclick="if(event.target===this) closeBatchImportModal()">
+      <div class="batch-import-modal" onclick="event.stopPropagation()">
+        <div class="batch-import-header">
+          <h3 id="batchImportTitle">批量新建卡片</h3>
+          <button type="button" class="batch-import-close" onclick="closeBatchImportModal()" aria-label="关闭">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="batch-import-body">
+          <label class="batch-import-label" for="batchImportUnifiedPrompt">统一提示词</label>
+          <textarea id="batchImportUnifiedPrompt" class="batch-import-unified" rows="3" placeholder="填写后所有图片共用；与单独提示词不可同时填"></textarea>
+          <div class="batch-import-drop image-drop-area no-image" id="batchImportDrop">
+            <span class="placeholder-text">拖拽多张图片到此处，或点击选择（单次最多 40 张）</span>
+            <input type="file" id="batchImportFileInput" accept="image/*" multiple hidden>
+          </div>
+          <div class="batch-import-grid" id="batchImportGrid"></div>
+        </div>
+        <div class="batch-import-footer">
+          <p class="batch-import-status" id="batchImportStatus" role="status"></p>
+          <div class="batch-import-actions">
+            <button type="button" class="btn btn-ghost" id="batchImportClearBtn" onclick="clearBatchImportDraft()">清空</button>
+            <button type="button" class="btn btn-ghost" onclick="closeBatchImportModal()">取消</button>
+            <button type="button" class="btn btn-primary" id="batchImportSaveBtn" onclick="saveBatchImport()" disabled>创建卡片</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="cards-container" id="cardsContainer"></div>
+  </div>
+
+  <div class="edit-panel hidden" id="editPanel">
+    <div class="panel-header">
+      <h4 id="panelTitle">新建卡片</h4>
+      <div class="panel-header-actions">
+        <button type="button" class="btn btn-ghost btn-sm panel-pin-btn hidden" id="cardPinToggle" onclick="toggleCardPin()" title="置顶">置顶</button>
+        <button type="button" class="btn btn-ghost btn-sm mobile-only panel-header-clear-btn" id="actionDeleteClearBtnMobileTop" title="清空表单" aria-label="清空">清空</button>
+        <button class="close-btn desktop-only" onclick="closeEditPanel()">✕</button>
+      </div>
+    </div>
+    <div class="panel-body" id="panelBody">
+      <div class="image-drop-area no-image" id="dropArea">
+        <span class="placeholder-text" id="dropPlaceholder">点击、拖拽或 Ctrl+V 粘贴图片（可多选，最多 5 张同卡）</span>
+        <img id="previewImage" style="display:none;">
+        <button type="button" class="remove-image-btn" id="removeImageBtn" onclick="event.stopPropagation(); removeImage()" title="从编辑区去掉图片（须保存后才真正删除）" aria-label="去掉图片"><span aria-hidden="true">×</span></button>
+        <input type="file" id="fileInput" accept="image/*" multiple style="display:none;">
+      </div>
+      <div class="panel-gallery-nav hidden" id="panelGalleryNav" aria-label="卡片多图切换">
+        <button type="button" class="panel-gallery-nav-btn" id="panelGalleryPrev" aria-label="上一张">‹</button>
+        <span class="panel-gallery-nav-counter" id="panelGalleryCounter">1 / 1</span>
+        <button type="button" class="panel-gallery-nav-btn" id="panelGalleryNext" aria-label="下一张">›</button>
+      </div>
+      <div class="panel-image-tools" id="panelImageTools">
+        <button type="button" class="panel-image-tool-btn panel-image-tool-toggle" id="cardUploadOriginalToggle" aria-pressed="false">上传原图：关</button>
+        <button type="button" class="panel-image-tool-btn" id="panelAddImageBtn" title="同一张卡片最多 5 张图">添加图片</button>
+        <button type="button" class="panel-image-tool-btn hidden" id="cardDownloadImageBtn">下载当前图</button>
+        <button type="button" class="panel-image-tool-btn hidden" id="trimBlackBorderBtn" onclick="trimPanelImageBlackBorder()">裁除黑边</button>
+      </div>
+      <div class="panel-ocr-drop hidden" id="panelOcrDrop" aria-label="文字识别专用图片框">
+        <div class="panel-ocr-drop-inner" id="panelOcrDropInner">
+          <span class="panel-ocr-drop-hint" id="panelOcrDropHint">拖入或点击，仅识别文字（不保存图片）</span>
+          <span class="panel-ocr-drop-status hidden" id="panelOcrDropStatus">识别中…</span>
+        </div>
+        <input type="file" id="panelOcrFileInput" accept="image/*" hidden>
+      </div>
+      <div class="panel-form">
+        <label>标题</label>
+        <input type="text" id="cardTitle">
+        <div class="prompt-field">
+          <div class="prompt-field-bar">
+            <label class="prompt-label-text" for="cardPrompt">提示词<span class="required-mark">*</span></label>
+            <div class="prompt-field-actions">
+              <button type="button" class="prompt-header-copy" onclick="copyPromptFromPanel()" title="复制提示词">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+              <button type="button" class="prompt-header-copy" onclick="fillPromptToImageGenFromPanel()" title="填入生图">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+              </button>
+              <button type="button" class="fp-toggle-btn" id="fpToggleBtn" onclick="toggleFloatingPrompt()" title="浮动提示词框" aria-label="浮动提示词框">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+              </button>
+            </div>
+          </div>
+          <textarea id="cardPrompt" oninput="if(!floatingPromptActive) document.getElementById('floatingPromptText').value = this.value"></textarea>
+        </div>
+        <label>标签</label>
+        <div class="tag-input-area" id="tagContainer">
+          <div class="tag-chips-wrap" id="tagChipsWrap"></div>
+          <input type="text" class="tag-input" id="tagInput" placeholder="输入后回车">
+          <div class="tag-pick-wrap">
+            <button type="button" class="btn btn-secondary tag-pick-btn" id="tagPickBtn" aria-expanded="false" aria-controls="tagInlinePicker">选择标签</button>
+            <div class="tag-inline-picker" id="tagInlinePicker" hidden>
+              <div class="tag-inline-list" id="tagInlineList"></div>
+            </div>
+          </div>
+        </div>
+        <div id="customFieldsContainer"></div>
+        <div class="panel-publish-row" id="panelCommunityPublish">
+          <div class="panel-publish-copy">
+            <span class="panel-publish-title">发布到提示词社区</span>
+            <p class="panel-hint">须先保存到卡片库；提示词≥15字且需配图才会公开。未达标也可正常保存，只是不会发布。关闭开关或删除卡片将从社区下架</p>
+          </div>
+          <button type="button" class="publish-circle-btn" id="cardPublishToggle" aria-pressed="false" aria-label="发布到提示词社区" title="切换发布"></button>
+        </div>
+      </div>
+    </div>
+    <div class="panel-footer">
+      <div class="panel-save-progress hidden" id="panelSaveProgress" aria-live="polite">
+        <div class="panel-save-progress-track">
+          <div class="panel-save-progress-fill" id="panelSaveProgressFill"></div>
+        </div>
+        <span class="panel-save-progress-label" id="panelSaveProgressLabel">保存中…</span>
+      </div>
+      <button type="button" class="btn btn-primary btn-footer-save" onclick="saveCard()">保存</button>
+      <button type="button" class="btn btn-ghost btn-footer-copy" onclick="copyPromptFromPanel()">复制</button>
+      <button type="button" class="btn-icon-danger desktop-only" id="actionDeleteClearBtn" title="删除"></button>
+      <button type="button" class="close-btn panel-close-mobile mobile-only" onclick="closeEditPanel()" title="关闭" aria-label="关闭">✕</button>
+      <span class="status-message" id="statusMsg"></span>
+    </div>
+  </div>
+
+  <button type="button" class="fab-new visible" id="fabNewBtn" onclick="createNewCard()" aria-label="新建卡片">
+    <svg class="fab-new__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.35" stroke-linecap="round"/>
+    </svg>
+  </button>
+    </div>
+
+    <div class="app-page app-page-devlab" id="pageDevLab">
+      <aside class="sidebar devlab-sidebar" id="devLabSidebar" aria-label="开发中目录">
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">开发中</div>
+          <div class="group-list" id="devLabFolderList">
+            <div class="group-item active" data-devlab-panel="assetmarket" role="button" tabindex="0">卡片资产</div>
+            <div class="group-item" data-devlab-panel="assetstudio" role="button" tabindex="0">卡片式创作</div>
+          </div>

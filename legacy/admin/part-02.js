@@ -1,0 +1,520 @@
+
+  let session = loadSession();
+  let userOffset = 0;
+  let codeOffset = 0;
+  let communityOffset = 0;
+  let communityView = 'published';
+  let communityBucketRisk = 'all';
+  let communityBucketScanMeta = null;
+  let communityBucketForceRefresh = false;
+  let communityBucketPollTimer = null;
+  let communityBucketPollStarted = 0;
+  let communityBucketPageSize = 50;
+  let communityBucketTotal = 0;
+  let communityBucketItems = [];
+  let codeCategory = 'all';
+  let communityPageItems = [];
+  let communityRowBusy = false;
+  /** 批量任务在后台跑，不阻塞单行删除/下架 */
+  let communityBatchTask = null;
+  const communitySelected = new Set();
+  const communityBucketSelected = new Set();
+  const PAGE = 20;
+  let activeTab = 'overview';
+
+  function syncAdminBuildLabels() {
+    const build = window.__ADMIN_BUILD__ || 'dev';
+    ['adminBuildTag', 'adminSidebarBuild'].forEach((id) => {
+      const el = $(id);
+      if (el) el.textContent = build;
+    });
+  }
+
+  function updateAdminApiChip() {
+    const chip = $('adminApiChip');
+    if (!chip) return;
+    const base = session ? apiBase(session) : resolveApiBase();
+    chip.textContent = base.replace(/^https?:\/\//, '');
+    chip.title = base;
+  }
+
+  function getActiveTab() {
+    return document.querySelector('.admin-tab.is-active')?.dataset?.tab || activeTab;
+  }
+
+  function refreshCurrentTab() {
+    const tab = getActiveTab();
+    activeTab = tab;
+    if (tab === 'overview') void loadDashboard();
+    if (tab === 'users') void loadUsers(true);
+    if (tab === 'community') void loadCommunity(true);
+    if (tab === 'codes') void loadCodes(true);
+    if (tab === 'models') void loadImageModels();
+  }
+
+  function showApp(loggedIn) {
+    document.body.classList.toggle('admin-gate', !loggedIn);
+    $('adminLogin').hidden = loggedIn;
+    $('adminApp').hidden = !loggedIn;
+    document.title = loggedIn ? 'Prompt Hub 运营控制台' : '管理登录';
+    updateAdminApiChip();
+  }
+
+  const PAGE_TITLES = {
+    overview: ['数据概览', '用户、存储、运行环境一览'],
+    users: ['用户管理', '搜索、查看云存储额度与会员状态'],
+    community: ['社区图片', '查看在线帖数量、下架无效或已删卡的社区帖'],
+    codes: ['激活码', '生成与查询兑换码'],
+    models: ['生图模型', '定价、折扣与线路配置']
+  };
+
+  function setPageTitle(tab) {
+    const meta = PAGE_TITLES[tab] || PAGE_TITLES.overview;
+    const t = $('adminPageTitle');
+    const s = $('adminPageSubtitle');
+    if (t) t.textContent = meta[0];
+    if (s) s.textContent = meta[1];
+  }
+
+  function renderQuotaCard(title, usedLabel, quotaLabel, percent, status, meta, badge) {
+    const cls = status === 'critical' ? 'is-critical' : status === 'warn' ? 'is-warn' : status === 'unknown' ? 'is-unknown' : '';
+    const barWarn = percent != null && percent >= 80 ? ' is-warn' : '';
+    const pct = percent != null ? percent : 0;
+    const bar = percent != null
+      ? `<div class="admin-progress" title="${pct}%"><div class="admin-progress__bar${barWarn}" style="width:${Math.min(100, pct)}%"></div></div>`
+      : '';
+    return `<div class="admin-quota-card ${cls}">
+      <div class="admin-quota-card__head">
+        <span class="admin-quota-card__title">${esc(title)}</span>
+        ${badge ? `<span class="admin-badge admin-badge--${badge.kind || 'ok'}">${esc(badge.text)}</span>` : ''}
+      </div>
+      <div><strong style="font-size:18px">${esc(usedLabel)}</strong> <span class="admin-hint">/ ${esc(quotaLabel || '—')}</span></div>
+      ${bar}
+      ${meta ? `<p class="admin-quota-card__meta">${meta}</p>` : ''}
+    </div>`;
+  }
+
+  function bindTabs() {
+    document.querySelectorAll('.admin-tab').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        closeAdminConfirm(false);
+        resetCommunityUiLock();
+        document.querySelectorAll('.admin-tab').forEach((b) => b.classList.remove('is-active'));
+        document.querySelectorAll('.admin-panel').forEach((p) => (p.hidden = true));
+        btn.classList.add('is-active');
+        const tab = btn.dataset.tab;
+        activeTab = tab;
+        setPageTitle(tab);
+        const panel = $('panel-' + tab);
+        if (panel) panel.hidden = false;
+        if (tab === 'overview') void loadDashboard();
+        if (tab === 'users') void loadUsers(true);
+        if (tab === 'community') void loadCommunity(true);
+        if (tab === 'codes') void loadCodes(true);
+        if (tab === 'models') void loadImageModels();
+      });
+    });
+  }
+
+  async function loadDashboard() {
+    const el = $('dashStats');
+    if (!el || !session) return;
+    el.innerHTML = '<div class="admin-stat"><span>加载中</span><strong>…</strong></div>';
+    void loadDashboardInfra();
+    void loadDashboardStorage();
+    bindDashboardCommunityPurge();
+    try {
+      const d = await adminFetch(session, '/api/admin/dashboard');
+      const tier = d.membersByTier || {};
+      el.innerHTML = `
+        <div class="admin-stat admin-stat--blue"><span>注册用户</span><strong>${d.usersTotal}</strong></div>
+        <div class="admin-stat admin-stat--green"><span>有效会员</span><strong>${d.membersActive}</strong></div>
+        <div class="admin-stat admin-stat--amber"><span>永久积分合计</span><strong>${d.totalPermanentCredits}</strong></div>
+        <div class="admin-stat admin-stat--violet"><span>登记存储合计</span><strong>${formatBytes(d.totalStorageBytes)}</strong></div>
+        <div class="admin-stat admin-stat--rose"><span>可用激活码</span><strong>${d.codesActive}</strong></div>
+        <div class="admin-stat admin-stat--slate"><span>累计兑换</span><strong>${d.redemptionsTotal}</strong></div>
+        <div class="admin-stat admin-stat--blue"><span>轻/基/标/专</span><strong>${tier.lite || 0} / ${tier.basic || 0} / ${tier.standard || 0} / ${tier.pro || 0}</strong></div>
+      `;
+      showMsg($('dashMsg'), '', true);
+    } catch (e) {
+      el.innerHTML = '';
+      showMsg($('dashMsg'), friendlyFetchError(e), false);
+    }
+  }
+
+  async function loadDashboardInfra() {
+    const hint = $('dashInfraHint');
+    const body = $('dashInfraBody');
+    if (!session || !hint || !body) return;
+    hint.textContent = '正在读取 Worker 环境…';
+    body.hidden = true;
+    try {
+      const d = await adminFetch(session, '/api/admin/dashboard/infra');
+      const dbOk = d.supabaseDbPing === 'ok';
+      const keyOk = d.supabaseServiceKeyLooksValid;
+      hint.textContent = `API：${d.apiOrigin || '—'} · 环境 ${d.environment || '—'}`;
+      const policyRows = (d.userStoragePolicy || [])
+        .map((p) => `<li>${esc(p.tier)}：${esc(p.quotaLabel)}</li>`)
+        .join('');
+      body.innerHTML = `
+        <div class="admin-kv">
+          <div><span>API 地址</span><strong>${esc(d.apiOrigin || '—')}</strong></div>
+          <div><span>站点</span><strong>${esc(d.pagesHint || '—')}</strong></div>
+          <div><span>Supabase 项目</span><strong>${esc(d.supabaseProjectHost || '未配置')}</strong></div>
+          <div><span>Service Key</span><strong>${keyOk ? '已配置（格式正常）' : '未配置或异常'}</strong></div>
+          <div><span>数据库连通</span><strong class="${dbOk ? '' : 'admin-warn'}">${esc(d.supabaseDbPing || '—')}</strong></div>
+          <div><span>生图 API</span><strong>${d.imageApiConfigured ? '已配置' : '未配置'}</strong></div>
+          <div><span>对话 API</span><strong>${d.chatApiConfigured ? '已配置' : '未配置'}</strong></div>
+          <div><span>桶配额参考</span><strong>${d.storageQuotaMbEnv || '—'} MB</strong></div>
+          <div><span>库配额参考</span><strong>${d.dbQuotaMbEnv || '—'} MB</strong></div>
+          <div><span>Usage 文件存储</span><strong>${d.storageUsedMbEnv != null ? d.storageUsedMbEnv + ' MB' : '未填'}</strong></div>
+          <div><span>Usage 数据库</span><strong>${d.dbUsedMbEnv != null ? d.dbUsedMbEnv + ' MB' : '未填'}</strong></div>
+        </div>
+        ${policyRows ? `<p style="margin:12px 0 6px;font-size:13px"><strong>用户云存储策略</strong></p><ul class="admin-notes">${policyRows}</ul>` : ''}
+        <ul class="admin-notes" style="margin-top:10px">${(d.notes || []).map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
+      `;
+      body.hidden = false;
+    } catch (e) {
+      hint.textContent = '环境信息加载失败：' + friendlyFetchError(e);
+    }
+  }
+
+  async function loadDashboardStorage() {
+    const hint = $('dashStorageHint');
+    const body = $('dashStorageBody');
+    const alertsEl = $('dashAlerts');
+    if (!session || !hint || !body) return;
+    hint.textContent = '正在扫描 card-images 桶（文件较多时约需几秒）…';
+    body.hidden = true;
+    if (alertsEl) alertsEl.hidden = true;
+    try {
+      const s = await adminFetch(session, '/api/admin/dashboard/storage');
+      const ps = s.projectStorage || {};
+      const db = s.database || {};
+      hint.textContent = s.bucketScanTruncated
+        ? `桶扫描：前 ${s.bucketFileCount} 个文件（不完整，仅供参考）`
+        : `桶扫描：${s.bucketFileCount} 个文件 · card-images`;
+
+      const fileBadge = ps.source === 'env'
+        ? { kind: 'ok', text: 'Usage 同步' }
+        : { kind: 'warn', text: '桶扫描估算' };
+      const dbBadge = db.configured
+        ? { kind: 'ok', text: 'Usage 同步' }
+        : { kind: 'warn', text: '未填实际用量' };
+
+      const fileUsedMain = ps.source === 'env'
+        ? (ps.usedLabel || s.bucketLabel)
+        : `未填 Usage · 扫描 ${esc(s.bucketLabel)}`;
+      const filePercent = ps.source === 'env'
+        ? (ps.percentUsed != null ? ps.percentUsed : s.storageUsedPercent)
+        : null;
+      const fileStatus = ps.source === 'env' ? (ps.status || 'unknown') : 'unknown';
+
+      const topUsers = Array.isArray(s.topUsersByBucket) ? s.topUsersByBucket : [];
+      const topUsersHtml = topUsers.length
+        ? `<div class="admin-bucket-users" style="margin-top:16px">
+            <h3 style="font-size:13px;margin:0 0 8px">桶内按用户（真实文件占用，非 SQL 登记）</h3>
+            <table class="admin-table admin-table--compact">
+              <thead><tr><th>用户 ID</th><th>文件数</th><th>桶内占用</th></tr></thead>
+              <tbody>${topUsers.map((u) => `
+                <tr>
+                  <td><code>${esc(u.userId)}</code></td>
+                  <td>${esc(String(u.fileCount))}</td>
+                  <td>${esc(u.label)}</td>
+                </tr>`).join('')}</tbody>
+            </table>
+            <p class="admin-hint" style="margin-top:8px">路径前缀即用户 UUID。登记存储列来自 profiles.storage_bytes，历史上传未上报时会远低于此表。</p>
+          </div>`
+        : '';
+
+      body.innerHTML = `
+        <div class="admin-quota-grid">
+          ${renderQuotaCard(
+            '项目 File Storage（Supabase 账单）',
+            fileUsedMain,
+            ps.quotaLabel || s.storageQuotaLabel,
+            filePercent,
+            fileStatus,
+            ps.source === 'env'
+              ? '来自 Worker 变量 <code>SUPABASE_STORAGE_USED_MB</code>（与 Usage 页 File Storage 一致）'
+              : `Supabase Usage 页 Storage Size 才是账单（你那边约 0.754 GB，未超限）。下方 ${esc(s.bucketLabel)} 是逐文件 metadata 累加，常因旧图未删而偏高。请填 Worker 变量 SUPABASE_STORAGE_USED_MB=754。`,
+            fileBadge
+          )}
+          ${renderQuotaCard(
+            'Database（Postgres 账单）',
+            db.usedLabel || '未同步',
+            db.quotaLabel || s.dbQuotaLabel,
+            db.percentUsed,
+            db.status || 'unknown',
+            db.configured
+              ? '来自 Worker 变量 <code>SUPABASE_DB_USED_MB</code>（与 Usage 页 Database 一致）'
+              : 'Database 与 File Storage 分开统计。请到 Supabase → Project Settings → Usage 查看 Database 已用，填入 Worker 变量 <code>SUPABASE_DB_USED_MB</code>。',
+            dbBadge
+          )}
+          ${renderQuotaCard(
+            '用户登记存储（业务层）',
+            s.registeredLabel,
+            '—',
+            null,
+            'unknown',
+            '所有用户 <code>profiles.storage_bytes</code> 合计，用于会员配额；<strong>不是</strong> Supabase 账单数字。',
+            { kind: 'ok', text: '业务数据' }
+          )}
+        </div>
+        ${topUsersHtml}
+        <p class="admin-hint" style="margin-top:12px">${esc(s.dbNote || '')}</p>
+      `;
+      body.hidden = false;
+
+      const reconcileBtn = $('dashStorageReconcile');
+      if (reconcileBtn) {
+        reconcileBtn.hidden = false;
+        reconcileBtn.onclick = async () => {
+          if (!confirm('按 card-images 桶内文件重算并写回 profiles.storage_bytes？\n\n仅修正「登记存储」账本，不影响 Supabase 账单。')) return;
+          reconcileBtn.disabled = true;
+          try {
+            const r = await adminFetch(session, '/api/admin/dashboard/storage/reconcile', { method: 'POST', timeoutMs: 120000 });
+            toast(`已回填 ${r.updated || 0} 个用户 · 桶合计 ${r.bucketLabel || ''}`, true);
+            await loadDashboardStorage();
+            if ($('panel-users') && !$('panel-users').hidden) await loadUsers(true);
+          } catch (e) {
+            toast('回填失败：' + friendlyFetchError(e), false);
+          } finally {
+            reconcileBtn.disabled = false;
+          }
+        };
+      }
+
+      if (alertsEl && Array.isArray(s.alerts) && s.alerts.length) {
+        alertsEl.innerHTML = s.alerts.map((a) => `
+          <div class="admin-alert admin-alert--${a.level === 'critical' ? 'critical' : 'warn'}">
+            <strong>${esc(a.title)}</strong>
+            ${esc(a.detail)}
+          </div>`).join('');
+        alertsEl.hidden = false;
+      }
+    } catch (e) {
+      hint.textContent = '存储扫描失败：' + friendlyFetchError(e);
+    }
+  }
+
+  function bindDashboardCommunityPurge() {
+    const btn = $('dashCommunityPurgeBtn');
+    const result = $('dashCommunityPurgeResult');
+    if (!btn || btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', async () => {
+      try {
+        await runCommunityAdminTask({
+          btn,
+          confirmTitle: '清理无效社区帖',
+          confirmText: '将检查所有已发布社区帖：\n· 作者卡片库已删\n· Storage 无图片\n· 无效作者\n· 重复卡片\n\n会从社区隐藏（published=false），图片保留。继续？',
+          progressText: '正在扫描 Storage 与社区帖（帖多时约需 1～2 分钟）…',
+          resultEl: result,
+          request: () => adminFetch(session, '/api/admin/community/purge-ghosts', {
+            method: 'POST',
+            timeoutMs: 180000
+          }),
+          onSuccess: (r) =>
+            `已下架 ${r.unpublishedTotal || 0} 条（删卡孤儿 ${r.unpublishedOrphans || 0}，无图/无效作者 ${r.unpublishedMissing || 0}，重复 ${r.unpublishedDuplicates || 0}）· 修正作者 ${r.repairedAuthors || 0} · 仍在线 ${r.publishedRemaining ?? '—'} 条（有图 ${r.publishedWithImage ?? '—'}）`
+        });
+      } catch (e) { /* toast handled */ }
+    });
+  }
+
+  async function runCommunityPurge(btn, resultEl, msgEl) {
+    try {
+      await runCommunityAdminTask({
+        btn,
+        confirmTitle: '清理无效社区帖',
+        confirmText: '将检查所有已发布社区帖：\n· 作者卡片库已删\n· Storage 无图片\n· 无效作者\n· 重复卡片\n\n会被下架（published=false）。继续？',
+        progressText: '正在扫描无效社区帖（帖多时约需 1～2 分钟）…',
+        resultEl,
+        msgEl,
+        request: () => adminFetch(session, '/api/admin/community/purge-ghosts', {
+          method: 'POST',
+          timeoutMs: 180000
+        }),
+        onSuccess: (r) => {
+          if ($('panel-community') && !$('panel-community').hidden) void loadCommunity(true);
+          return `已下架 ${r.unpublishedTotal || 0} 条（删卡孤儿 ${r.unpublishedOrphans || 0}，无图 ${r.unpublishedMissing || 0}，重复 ${r.unpublishedDuplicates || 0}）· 仍在线 ${r.publishedRemaining ?? '—'} 条（有图 ${r.publishedWithImage ?? '—'}）`;
+        }
+      });
+    } catch (e) { /* toast handled */ }
+  }
+
+  function communityImageCell(image) {
+    const ref = String(image || '').trim();
+    if (!ref) return '<span class="admin-hint">无</span>';
+    const short = ref.length > 36 ? ref.slice(0, 18) + '…' + ref.slice(-14) : ref;
+    return `<code title="${esc(ref)}">${esc(short)}</code>`;
+  }
+
+  function communityCardLibBadge(item) {
+    if (item.cardInLibrary === true) return '<span class="admin-badge admin-badge--ok">有</span>';
+    if (item.cardInLibrary === false) return '<span class="admin-badge admin-badge--warn">无</span>';
+    return '<span class="admin-hint">—</span>';
+  }
+
+  function communityImageStatusCell(p) {
+    const img = String(p?.image || '').trim();
+    if (!img) {
+      return '<span class="admin-badge admin-badge--warn" title="数据库无 image 字段">无图</span>';
+    }
+    if (/^https?:\/\//i.test(img) && !/api\.prompt-hubs\.com/i.test(img)) {
+      return '<span class="admin-badge admin-badge--warn" title="第三方直链，易 404 失效">外链</span>';
+    }
+    if (/card-images|\/media\//i.test(img)) {
+      return '<span class="admin-badge admin-badge--ok" title="Storage / R2 路径">桶</span>';
+    }
+    const short = img.length > 28 ? img.slice(0, 14) + '…' : img;
+    return `<span class="admin-hint" title="${esc(img)}">${esc(short)}</span>`;
+  }
+
+  function communityThumbCell(p) {
+    if (!p?.thumbUrl) {
+      return '<div class="admin-thumb-wrap"><span class="admin-hint">无预览</span></div>';
+    }
+    const fb = esc(p.thumbFallbackUrl || p.thumbUrl);
+    const src = esc(p.thumbUrl);
+    return `<div class="admin-thumb-wrap"><img class="admin-thumb" src="${src}" data-fallback="${fb}" alt="" loading="lazy" onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback}else{this.classList.add('is-broken')}"><span class="admin-thumb-label">裂</span></div>`;
+  }
+
+  function setCommunityView(view) {
+    communityView = view || 'published';
+    document.querySelectorAll('[data-community-view]').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.getAttribute('data-community-view') === communityView);
+    });
+    const postTools = $('communityPostTools');
+    const bucketBatch = $('communityBucketBatchBar');
+    const guide = $('communityActionGuide');
+    const head = $('communityTableHead');
+    const hint = $('communityViewHint');
+    if (postTools) postTools.classList.toggle('hidden', communityView === 'bucket-orphans');
+    if (bucketBatch) bucketBatch.classList.toggle('hidden', communityView !== 'bucket-orphans');
+    if (guide) guide.classList.toggle('hidden', communityView === 'bucket-orphans');
+    if (head) {
+      head.innerHTML =
+        communityView === 'bucket-orphans'
+          ? '<tr><th class="admin-col-check"><span class="admin-sr-only">选择</span></th><th>缩略图</th><th>路径 / 说明</th><th>大小</th><th></th></tr>'
+          : communityPostTableHead();
+    }
+    const batchBar = $('communityBatchBar');
+    if (batchBar) {
+      batchBar.classList.toggle('hidden', communityView !== 'published');
+    }
+    if (hint) {
+      const hints = {
+        published: '在线社区帖。「从社区隐藏」仅下架展示；「永久删除」会删记录并尝试删桶内配图。与用户卡片库「是否公开」无关。',
+        'bucket-orphans':
+          '直接扫描 R2，与云端卡片库/社区/生图任务引用对比。generated/、imagegen/ 目录不再标为「高置信」——请勿批量删。删前务必逐条对缩略图；批量删除已暂停。点「重新扫描」刷新列表。'
+      };
+      hint.textContent = hints[communityView] || hints.published;
+    }
+    if (communityView === 'bucket-orphans') setBucketRiskFilter(communityBucketRisk);
+    const bucketPageTools = $('communityBucketPageTools');
+    if (bucketPageTools) bucketPageTools.classList.toggle('hidden', communityView !== 'bucket-orphans');
+    updateBucketOrphanBatchUi();
+    updateBucketPaginationUi();
+  }
+
+  function setBucketRiskFilter(risk) {
+    communityBucketRisk = risk || 'all';
+    document.querySelectorAll('[data-bucket-risk]').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.getAttribute('data-bucket-risk') === communityBucketRisk);
+    });
+  }
+
+  function setCodeCategoryFilter(category) {
+    codeCategory = category || 'all';
+    document.querySelectorAll('[data-code-category]').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.getAttribute('data-code-category') === codeCategory);
+    });
+  }
+
+  function stopBucketOrphanPoll() {
+    if (communityBucketPollTimer) {
+      clearTimeout(communityBucketPollTimer);
+      communityBucketPollTimer = null;
+    }
+  }
+
+  function normalizeBucketOrphanItem(o) {
+    return {
+      ...o,
+      paths: Array.isArray(o.paths) && o.paths.length ? o.paths : [o.path]
+    };
+  }
+
+  function updateBucketOrphanMeta(data) {
+    const meta = $('communityBucketMeta');
+    if (!meta || !data) return;
+    const src = data.scanSource === 'r2' ? 'R2' : 'Storage';
+    const counts = `高置信 ${data.safeCount ?? '—'} · 可写回 ${data.recoverableCount ?? '—'} · 可关联 ${data.relinkCount ?? '—'}`;
+    const cacheHint = data.fromCache ? ' · 缓存' : '';
+    meta.textContent = data.truncated
+      ? `${src} 扫描上限 ${data.scannedCount ?? '—'}，请分批处理 · ${counts}${cacheHint}`
+      : `${src} 已扫 ${data.scannedCount ?? '—'} 对象 · 引用 ${data.referencedCount ?? '—'} 路径 · ${counts}${cacheHint}`;
+  }
+
+  function bucketOrphanPageSize() {
+    const n = Number(communityBucketPageSize) || 50;
+    return Math.min(100, Math.max(20, n));
+  }
+
+  function bucketOrphanTotalPages() {
+    const total = Math.max(0, Number(communityBucketTotal) || 0);
+    const size = bucketOrphanPageSize();
+    return Math.max(1, Math.ceil(total / size) || 1);
+  }
+
+  function updateBucketPaginationUi() {
+    const tools = $('communityBucketPageTools');
+    const prev = $('communityPrev');
+    const next = $('communityNext');
+    const pageInput = $('communityBucketPageInput');
+    const pageTotalEl = $('communityBucketPageTotal');
+    const sizeSelect = $('communityBucketPageSize');
+    const isBucket = communityView === 'bucket-orphans';
+    if (tools) tools.classList.toggle('hidden', !isBucket);
+    if (!isBucket) {
+      if (prev) prev.disabled = false;
+      if (next) next.disabled = false;
+      return;
+    }
+    const totalPages = bucketOrphanTotalPages();
+    const currentPage = Math.floor(communityOffset / bucketOrphanPageSize()) + 1;
+    if (pageTotalEl) pageTotalEl.textContent = String(totalPages);
+    if (pageInput) {
+      pageInput.max = String(totalPages);
+      pageInput.value = String(Math.min(totalPages, Math.max(1, currentPage)));
+    }
+    if (sizeSelect && String(sizeSelect.value) !== String(bucketOrphanPageSize())) {
+      sizeSelect.value = String(bucketOrphanPageSize());
+    }
+    if (prev) prev.disabled = communityOffset <= 0;
+    if (next) {
+      next.disabled =
+        communityBucketTotal > 0
+          ? communityOffset + communityBucketItems.length >= communityBucketTotal
+          : communityBucketItems.length < bucketOrphanPageSize();
+    }
+  }
+
+  function jumpBucketOrphanPage(pageNum) {
+    const totalPages = bucketOrphanTotalPages();
+    const page = Math.min(totalPages, Math.max(1, Number(pageNum) || 1));
+    communityOffset = (page - 1) * bucketOrphanPageSize();
+    void loadBucketOrphansPage({ reset: false, forceRefresh: false });
+  }
+
+  function renderBucketOrphanPage(data) {
+    communityBucketScanMeta = data;
+    communityBucketItems = (data.items || []).map(normalizeBucketOrphanItem);
+    communityBucketTotal = Number(data.total) || 0;
+    const rawFiles = data.rawOrphanFiles ?? 0;
+    const total = communityBucketTotal || communityBucketItems.length;
+    const currentPage = Math.floor(communityOffset / bucketOrphanPageSize()) + 1;
+    const totalPages = bucketOrphanTotalPages();
+    $('communityPageInfo').textContent = `桶内孤儿 · 第 ${communityOffset + 1}–${communityOffset + communityBucketItems.length} 组 / 共 ${total} 组（${rawFiles} 个物理文件）· ${currentPage}/${totalPages} 页`;
+    updateBucketOrphanMeta(data);

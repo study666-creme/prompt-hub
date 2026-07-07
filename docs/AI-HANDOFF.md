@@ -1,6 +1,7 @@
 # AI 接手说明（省 Token）
 
 > **目标**：用最少阅读量定位问题、做最小 diff。用户是纯小白，回复用简体中文 + 分步命令。
+> 前端大文件拆分边界见 `docs/FRONTEND-SPLIT-MAP.md`（2026-07-07，loader + chunk）。
 
 ---
 

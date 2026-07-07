@@ -86,12 +86,18 @@ const packs = [
 
 const standaloneScripts = [
   ['/edit-panel-gallery.js', 'EditPanelGallery', 'global.EditPanelGallery'],
+  ['/admin.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
+  ['/asset-studio.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
+  ['/features-assets.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
   ['/supabase-sync.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
   ['/script.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
   ['/features-draft.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__']
 ];
 
 const legacyChunks = [
+  ['/legacy/admin/part-01.js', 'admin chunk', 'adminFetch'],
+  ['/legacy/asset-studio/part-01.js', 'asset-studio chunk', 'buildStudioPresetProject'],
+  ['/legacy/features-assets/part-01.js', 'features-assets chunk', 'getDemoPackages'],
   ['/legacy/supabase-sync/part-01.js', 'supabase-sync chunk', 'STORAGE_PREFIX'],
   ['/legacy/script/part-01.js', 'script chunk', 'DB_NAME'],
   ['/legacy/features-draft/part-01.js', 'features-draft chunk', 'LS_COMMUNITY']
@@ -105,7 +111,8 @@ const cssAssets = [
 ];
 
 const htmlPartials = [
-  ['/partials/index-body.html', 'index body partial', 'mobileBottomNav']
+  ['/partials/index-body/part-01.html', 'index body partial start', 'app-chrome'],
+  ['/partials/index-body/part-04.html', 'index body partial end', 'mobileBottomNav']
 ];
 
 for (const [path, label, token] of packs) {

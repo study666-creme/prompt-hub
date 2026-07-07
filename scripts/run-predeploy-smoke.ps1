@@ -16,7 +16,7 @@ if (Test-Path (Join-Path $root "styles")) {
   if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
-if (Test-Path (Join-Path $root "partials\index-body.html")) {
+if (Test-Path (Join-Path $root "partials\index-body")) {
   Write-Host "verify-index-body-partial ..."
   & node (Join-Path $root "scripts\verify-index-body-partial.mjs")
   if ($LASTEXITCODE -ne 0) { exit 1 }

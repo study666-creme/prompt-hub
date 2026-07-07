@@ -1,0 +1,420 @@
+        </div>
+        <p class="devlab-sidebar-hint panel-hint">功能完善中，欢迎试用反馈</p>
+      </aside>
+      <div class="devlab-main">
+        <div class="devlab-mobile-tabs mobile-only" role="tablist" aria-label="开发中分类">
+          <button type="button" class="devlab-mobile-tab active" data-devlab-panel="assetmarket" role="tab">卡片资产</button>
+          <button type="button" class="devlab-mobile-tab" data-devlab-panel="assetstudio" role="tab">卡片式创作</button>
+        </div>
+        <div class="devlab-panel active" id="devLabPanelAssetMarket" data-devlab-panel="assetmarket">
+          <div class="feature-shell">
+            <header class="feature-header feature-header-assets">
+              <h2>卡片资产</h2>
+              <div class="feature-header-grow">
+                <button type="button" class="btn btn-secondary btn-sm" id="assetPublishOpenBtn">发布资产包</button>
+              </div>
+            </header>
+            <div class="feature-body asset-market-body">
+              <p class="community-inline-hint">免费或付费获取成体系的可商用精品资产包，拥有后可在「我的主页 → 拥有的资产包」查看。</p>
+              <div class="asset-market-grid" id="assetMarketGrid"></div>
+            </div>
+          </div>
+        </div>
+        <div class="devlab-panel" id="devLabPanelAssetStudio" data-devlab-panel="assetstudio">
+          <div class="feature-shell">
+            <header class="feature-header feature-header-assets">
+              <h2>卡片式创作</h2>
+              <span class="asset-draft-banner">所有人可用 · 上架即将开放</span>
+            </header>
+            <div class="feature-body asset-studio-root" id="assetStudioRoot"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-page app-page-feature active" id="pageCommunity">
+      <div class="feature-shell community-shell">
+        <header class="feature-header community-header">
+          <h2>提示词社区</h2>
+          <div class="community-header-tools">
+            <div class="community-layout-tools toolbar-cluster" id="communityLayoutTools">
+              <button type="button" class="btn btn-secondary btn-sm community-gacha-entry" id="communityGachaBtn">随心一抽</button>
+              <div class="column-toggle" title="每排列数 1～5">
+                <button type="button" class="icon-btn" onclick="toggleColumnUp()" title="每排加一张（最多五张）" aria-label="每排加一张">▲</button>
+                <button type="button" class="icon-btn" onclick="toggleColumnDown()" title="每排减一张（最少一张）" aria-label="每排减一张">▼</button>
+              </div>
+              <button type="button" class="icon-btn icon-btn-accent" id="communityAppreciateBtn" onclick="window.FeatureDraft?.toggleCommunityAppreciate?.()" title="快速预览" aria-label="快速预览">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+              </button>
+            </div>
+            <button type="button" class="icon-btn community-notify-btn" id="communityNotifyBtn" aria-label="消息通知" title="消息通知">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+              <span class="community-notify-badge hidden" id="communityNotifyBadge" aria-hidden="true">0</span>
+            </button>
+          </div>
+          <div class="feature-header-grow">
+            <div class="feature-tabs">
+              <button type="button" class="feature-tab active" data-community-sort="random">随机</button>
+              <button type="button" class="feature-tab" data-community-sort="hot">热门</button>
+              <button type="button" class="feature-tab" data-community-sort="new">最新</button>
+            </div>
+            <div class="feature-tabs community-scope-tabs" role="group" aria-label="浏览范围">
+              <button type="button" class="feature-tab active" data-community-scope="all">全部</button>
+              <button type="button" class="feature-tab" data-community-scope="curated">精选</button>
+              <button type="button" class="feature-tab" data-community-scope="following">关注</button>
+            </div>
+            <input type="search" class="feature-search" id="communitySearch" placeholder="搜索提示词…" autocomplete="off">
+          </div>
+        </header>
+        <div class="community-notify-panel hidden" id="communityNotifyPanel" aria-label="消息通知">
+          <div class="community-notify-panel-head">
+            <h4>消息通知</h4>
+            <button type="button" class="btn btn-ghost btn-sm" id="communityNotifyMarkRead">全部已读</button>
+          </div>
+          <div class="community-notify-list" id="communityNotifyList"></div>
+        </div>
+        <div class="community-workspace">
+          <div class="community-page-layout">
+            <div class="community-page-main">
+              <div class="feature-body feature-body-cards">
+                <div class="cards-container community-cards" id="communityGrid"></div>
+              </div>
+            </div>
+          </div>
+          <aside class="community-side-panel hidden" id="communitySidePanel" aria-label="提示词详情">
+            <div class="community-side-head">
+              <h4 id="communitySideTitle">提示词详情</h4>
+              <button type="button" class="modal-close-btn modal-close-btn--icon" id="communitySideClose" aria-label="关闭"><span aria-hidden="true">×</span></button>
+            </div>
+            <div class="community-side-body" id="communitySideBody"></div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-page app-page-feature" id="pageCreations">
+      <div class="feature-shell community-shell my-home-shell">
+        <header class="feature-header">
+          <h2>我的主页</h2>
+        </header>
+        <div class="my-home-profile" id="myHomeProfile" aria-label="个人主页信息"></div>
+        <div class="published-reward-rules" id="publishedRewardRules"></div>
+        <div class="my-home-tabs" id="myHomeTabs" role="tablist">
+          <button type="button" class="my-home-tab active" data-home-tab="posts" role="tab">发布作品</button>
+          <button type="button" class="my-home-tab" data-home-tab="owned-packages" role="tab">拥有的资产包</button>
+          <button type="button" class="my-home-tab" data-home-tab="published-packages" role="tab">发布的资产包</button>
+        </div>
+        <div class="community-workspace my-home-pane active" data-home-pane="posts">
+          <div class="community-page-layout">
+            <div class="community-page-main">
+              <div class="feature-body feature-body-cards">
+                <p class="community-inline-hint" id="creationsHint">你在卡片库公开到社区的作品 · 点击卡片查看详情与点赞数</p>
+                <div class="cards-container creations-cards" id="creationsGrid"></div>
+              </div>
+            </div>
+          </div>
+          <aside class="community-side-panel hidden" id="creationsSidePanel" aria-label="作品详情">
+            <div class="community-side-head">
+              <h4 id="creationsSideTitle">作品详情</h4>
+              <button type="button" class="modal-close-btn modal-close-btn--icon" id="creationsSideClose" aria-label="关闭"><span aria-hidden="true">×</span></button>
+            </div>
+            <div class="community-side-body" id="creationsSideBody"></div>
+          </aside>
+        </div>
+        <div class="my-home-pane hidden" data-home-pane="owned-packages" id="myHomeOwnedPackages"></div>
+        <div class="my-home-pane hidden" data-home-pane="published-packages" id="myHomePublishedPackages"></div>
+      </div>
+    </div>
+
+    <div class="app-page app-page-feature" id="pageImageGen">
+      <input type="file" id="imageGenFissionFile" accept="image/*" hidden>
+      <div class="feature-shell">
+        <header class="feature-header feature-header-imagegen">
+          <button type="button" class="icon-btn mobile-only mobile-header-btn" id="imageGenMobileMenuBtn" aria-label="打开菜单">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          <h2 class="imagegen-header-title">图片生成</h2>
+          <div class="imagegen-header-credits mobile-only" id="imageGenHeaderCredits">
+            <span class="imagegen-header-balance">积分 <strong data-credits-display>0</strong></span>
+            <button type="button" class="btn btn-secondary btn-sm" id="imageGenCreditsOpenBtn">充值</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="imageGenHeaderLedgerBtn">明细</button>
+          </div>
+          <div class="imagegen-mobile-segments mobile-only" role="tablist" aria-label="生图视图">
+            <button type="button" class="imagegen-mobile-seg active" data-imagegen-view="form" role="tab" aria-selected="true">生成</button>
+            <button type="button" class="imagegen-mobile-seg" data-imagegen-view="feed" role="tab" aria-selected="false">作品</button>
+          </div>
+        </header>
+        <div class="imagegen-layout imagegen-layout--gen-mode" id="imageGenLayout">
+          <div class="imagegen-inspire-veil" id="imageGenInspireVeil" aria-hidden="true" hidden></div>
+          <div class="imagegen-gen-veil" id="imageGenGenVeil" aria-hidden="true" hidden></div>
+          <div class="imagegen-form">
+            <div class="imagegen-form-scroll">
+            <div class="imagegen-mode-banner" hidden>
+              <div class="imagegen-gen-hero imagegen-mode-hero" id="imageGenGenHero" hidden>
+                <p class="imagegen-mode-hero-kicker">GENERATE · STUDIO</p>
+                <h3 class="imagegen-mode-hero-title">图片创作</h3>
+                <p class="panel-hint imagegen-mode-hero-desc">选择模型与参数，填写提示词即可出图</p>
+              </div>
+              <div class="imagegen-inspire-hero imagegen-mode-hero" id="imageGenInspireHero">
+                <p class="imagegen-mode-hero-kicker">INSPIRE · REALM</p>
+                <h3 class="imagegen-mode-hero-title">灵感视界</h3>
+                <p class="panel-hint imagegen-mode-hero-desc">随机组合高风格提示词，勾选后可排队生图（与普通生图同价）</p>
+              </div>
+            </div>
+            <div class="imagegen-mode-credits imagegen-credits-box imagegen-credits-box--form desktop-only" id="imageGenModeCredits">
+              <div class="imagegen-credits-top">
+                <span class="imagegen-credits-label">当前积分 <strong data-credits-display>0</strong><span class="imagegen-credits-rate-inline">（1 元 = 100 积分）</span> <span class="imagegen-credits-detail hidden" data-credits-detail></span></span>
+                <span class="imagegen-credits-top-actions">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="openRechargePanel()">充值</button>
+                  <button type="button" class="btn btn-ghost btn-sm" id="imageGenLedgerToggleBtn">明细</button>
+                </span>
+              </div>
+              <div class="credit-ledger-panel hidden" id="creditLedgerPanel" aria-live="polite"></div>
+              <p class="imagegen-credits-note">会员订阅限时优惠（原价划线 · 折后价见充值页）。购买请点「充值」。</p>
+            </div>
+            <div class="imagegen-shared-params" id="imageGenSharedParams">
+            <p class="imagegen-promo-notice imagegen-promo-notice--model hidden" id="imageGenPromoNotice" aria-live="polite"></p>
+            <label for="imageGenModel">生图模型</label>
+            <div class="imagegen-model-family-tabs" id="imageGenModelFamilyTabs" role="tablist" aria-label="生图模型分组"></div>
+            <select id="imageGenModel" class="settings-input imagegen-field-compact" disabled aria-busy="true">
+              <option value="">加载模型列表…</option>
+            </select>
+            <p class="panel-hint imagegen-model-hint" id="imageGenModelHint" hidden></p>
+            <div class="imagegen-mj-params hidden" id="imageGenMjParams" aria-label="Midjourney 参数">
+              <div class="imagegen-mj-mode-tabs" role="tablist" aria-label="Midjourney 模式">
+                <button type="button" class="imagegen-mj-mode-tab active" data-mj-mode="imagine" role="tab" aria-selected="true">生图</button>
+                <button type="button" class="imagegen-mj-mode-tab" data-mj-mode="blend" role="tab" aria-selected="false">混图</button>
+              </div>
+              <p class="panel-hint imagegen-mj-blend-hint hidden" id="imageGenMjBlendHint">
+                混图：使用<strong>参考图框</strong>内 2～5 张图融合，提示词可选。生成后可在预览中逐张切换查看。
+              </p>
+              <div class="imagegen-params-row imagegen-mj-select-row">
+                <div class="imagegen-param">
+                  <label for="imageGenMjSpeedSelect">出图速度 <span class="imagegen-mj-tip" title="Relax 排队最慢但积分最低；Fast/Turbo 优先出图">?</span></label>
+                  <select id="imageGenMjSpeedSelect" class="settings-input imagegen-field-compact" aria-label="出图速度">
+                    <option value="relax" selected>Relax · 常规</option>
+                    <option value="fast">Fast · 快速</option>
+                    <option value="turbo">Turbo · 极速</option>
+                  </select>
+                </div>
+                <div class="imagegen-param">
+                  <label for="imageGenMjExtrasSelect">附加开关</label>
+                  <select id="imageGenMjExtrasSelect" class="settings-input imagegen-field-compact" aria-label="附加开关">
+                    <option value="">无</option>
+                    <option value="tile">平铺</option>
+                    <option value="raw">原始</option>
+                    <option value="draft">草稿</option>
+                    <option value="hd">高清</option>
+                  </select>
+                </div>
+              </div>
+              <div class="imagegen-mj-imagine-fields" id="imageGenMjImagineFields">
+              <p class="panel-hint imagegen-mj-help" id="imageGenMjHelp">
+                一次出 4 张图，四宫格合并为一条最近生成（最多 5 张），预览里可切换查看。上传参考图即为图生图。
+                风格化越高越艺术；混乱度越高构图越随机；垫图权重在垫图时生效。
+              </p>
+              <div class="imagegen-params-row">
+                <div class="imagegen-param">
+                  <label for="imageGenMjStylize">风格化 <span class="imagegen-mj-tip" title="数值越高越艺术化，默认 100">?</span></label>
+                  <input type="range" id="imageGenMjStylize" class="settings-input imagegen-field-compact" min="0" max="1000" step="10" value="100">
+                  <span class="imagegen-mj-range-val" id="imageGenMjStylizeVal">100</span>
+                </div>
+                <div class="imagegen-param">
+                  <label for="imageGenMjChaos">混乱度 <span class="imagegen-mj-tip" title="越高构图越不按常理，默认 0">?</span></label>
+                  <input type="range" id="imageGenMjChaos" class="settings-input imagegen-field-compact" min="0" max="100" step="1" value="0">
+                  <span class="imagegen-mj-range-val" id="imageGenMjChaosVal">0</span>
+                </div>
+              </div>
+              <div class="imagegen-params-row">
+                <div class="imagegen-param">
+                  <label for="imageGenMjWeird">怪异度 <span class="imagegen-mj-tip" title="越高越奇特，一般保持 0">?</span></label>
+                  <input type="range" id="imageGenMjWeird" class="settings-input imagegen-field-compact" min="0" max="3000" step="50" value="0">
+                  <span class="imagegen-mj-range-val" id="imageGenMjWeirdVal">0</span>
+                </div>
+                <div class="imagegen-param">
+                  <label for="imageGenMjIw">垫图权重 <span class="imagegen-mj-tip" title="有参考图时生效，越大越像原图">?</span></label>
+                  <input type="range" id="imageGenMjIw" class="settings-input imagegen-field-compact" min="0" max="3" step="0.1" value="1">
+                  <span class="imagegen-mj-range-val" id="imageGenMjIwVal">1</span>
+                </div>
+              </div>
+              <div class="imagegen-params-row">
+                <div class="imagegen-param">
+                  <label for="imageGenMjQuality">画质系数</label>
+                  <select id="imageGenMjQuality" class="settings-input imagegen-field-compact">
+                    <option value="">默认</option>
+                    <option value="0.25">0.25</option>
+                    <option value="0.5">0.5</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                  </select>
+                </div>
+                <div class="imagegen-param">
+                  <label for="imageGenMjStyle">风格模式</label>
+                  <select id="imageGenMjStyle" class="settings-input imagegen-field-compact">
+                    <option value="">默认</option>
+                    <option value="raw">raw</option>
+                  </select>
+                </div>
+              </div>
+              <label for="imageGenMjNegative">反向提示词</label>
+              <textarea id="imageGenMjNegative" class="settings-input imagegen-field-compact imagegen-mj-negative" maxlength="500" rows="3" placeholder="排除的内容，如 ugly, blurry、低质量"></textarea>
+              <p class="imagegen-mj-gallery-note">Midjourney 四宫格<strong>合并为一条最近生成</strong>（最多 5 张），喜欢请点「存入库」。变体按一次生图同价扣积分。</p>
+              </div>
+            </div>
+            <div class="imagegen-params-row imagegen-params-row--size">
+              <div class="imagegen-param" data-param="resolution">
+                <label for="imageGenResolution">输出分辨率</label>
+                <select id="imageGenResolution" class="settings-input imagegen-field-compact"></select>
+              </div>
+              <div class="imagegen-param" data-param="size">
+                <label for="imageGenSize">画面尺寸</label>
+                <select id="imageGenSize" class="settings-input imagegen-field-compact"></select>
+              </div>
+            </div>
+            <label for="imageGenQuality">质量</label>
+            <select id="imageGenQuality" class="settings-input imagegen-field-compact">
+              <option value="standard">低</option>
+              <option value="high">中</option>
+              <option value="ultra">高</option>
+            </select>
+            <label for="imageGenCardTitle">卡片标题</label>
+            <input type="text" id="imageGenCardTitle" class="settings-input imagegen-field-compact" maxlength="80" placeholder="可选，不填则自动生成" autocomplete="off">
+            <div class="imagegen-params-row imagegen-save-target-row">
+              <div class="imagegen-param">
+                <label for="imageGenTargetGroup">入库文件夹</label>
+                <select id="imageGenTargetGroup" class="settings-input imagegen-field-compact">
+                  <option value="">未分类（默认）</option>
+                </select>
+              </div>
+              <div class="imagegen-param imagegen-param--tags">
+                <label id="imageGenTagPickerLabel">附加标签</label>
+                <div class="imagegen-tag-picker" id="imageGenTagPicker">
+                  <button type="button" class="imagegen-tag-picker-trigger settings-input imagegen-field-compact" id="imageGenTagPickerTrigger" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="imageGenTagPickerLabel">
+                    <span class="imagegen-tag-picker-value" id="imageGenTagPickerValue">未选择</span>
+                    <svg class="imagegen-tag-picker-chevron" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M4.5 6l3.5 3.5L11.5 6z"/></svg>
+                  </button>
+                  <div class="imagegen-tag-picker-panel" id="imageGenTagPickerPanel" hidden role="listbox" aria-multiselectable="true" aria-labelledby="imageGenTagPickerLabel"></div>
+                </div>
+              </div>
+            </div>
+            </div>
+            <div class="imagegen-prompt-block imagegen-prompt-block--shared" id="imageGenPromptBlock">
+              <div class="imagegen-prompt-head">
+                <label for="imageGenPrompt">提示词</label>
+                <div class="imagegen-prompt-tools">
+                  <div class="imagegen-prompt-optimize-wrap">
+                    <button type="button" class="imagegen-optimize-link" id="imageGenOptimizeToggle" aria-expanded="false" title="用 AI 扩写提示词">优化提示词 · <span id="imageGenOptimizeCostHint">1～2分</span></button>
+                    <div class="imagegen-prompt-optimize-pop imagegen-prompt-optimize-pop--head" id="imageGenOptimizePop" hidden>
+                      <label for="imageGenOptimizeTarget">优化场景</label>
+                      <select id="imageGenOptimizeTarget" class="settings-input">
+                        <option value="general">通用（补全光影构图）</option>
+                        <option value="ecommerce_cover">电商封面（商品宣传·吸睛爆款）</option>
+                        <option value="viral_cover">信息流爆款（小红书/抖音竖屏）</option>
+                        <option value="product_studio">商品棚拍（白底/场景质感）</option>
+                        <option value="jimeng">即梦封面风（强情绪竖屏）</option>
+                        <option value="guofeng">国风仙侠</option>
+                        <option value="realistic">写实摄影</option>
+                        <option value="anime">二次元插画</option>
+                        <option value="sd">写实 / SD 细节风</option>
+                        <option value="glamour">女性时尚人像</option>
+                        <option value="malePower">男性力量肖像</option>
+                      </select>
+                      <p class="panel-hint imagegen-optimize-scene-hint" id="imageGenOptimizeSceneHint">先写商品/主体草稿，选场景后点优化，再填入提示词框生图。</p>
+                      <button type="button" class="btn btn-secondary btn-sm" id="imageGenOptimizeBtn">优化并填入 · <span class="imagegen-optimize-btn-cost">约 1～2 积分</span></button>
+                    </div>
+                  </div>
+                  <button type="button" class="imagegen-prompt-tool-btn" id="imageGenPromptPaste" title="粘贴剪贴板" aria-label="粘贴">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 2h-4.18C14.4.84 13.3 0 12 0S9.6.84 9.18 2H5a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z"/></svg>
+                  </button>
+                  <button type="button" class="imagegen-prompt-tool-btn" id="imageGenPromptCopy" title="复制提示词" aria-label="复制提示词">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
+                  </button>
+                  <button type="button" class="imagegen-prompt-tool-btn imagegen-prompt-tool-btn--clear" id="imageGenPromptClear" title="清空提示词" aria-label="清空">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                  </button>
+                </div>
+              </div>
+              <textarea id="imageGenPrompt" placeholder="描述你想生成的画面…"></textarea>
+            </div>
+            <textarea id="imageGenInspirePrompt" hidden aria-hidden="true" tabindex="-1"></textarea>
+            <div class="imagegen-ref-block">
+            <div class="imagegen-ref-head">
+              <label class="imagegen-ref-label">参考图（可选）</label>
+              <div class="imagegen-ref-tools" role="group" aria-label="参考图工具">
+                <button type="button" class="imagegen-ref-tool-btn" id="imageGenReverseToolBtn" data-ref-tool="reverse" aria-expanded="false">反推</button>
+                <button type="button" class="imagegen-ref-tool-btn" id="imageGenFissionToolBtn" data-ref-tool="fission" aria-expanded="false">裂变</button>
+              </div>
+            </div>
+            <div class="imagegen-ref imagegen-ref-zone" id="imageGenRefBox">
+              <div class="imagegen-ref-drop" id="imageGenRefDrop">
+                <p class="imagegen-ref-hint imagegen-ref-hint-desktop">仓库/社区缩略图可拖入本区 · 或点击选择 · 支持 Ctrl+V · 可多张</p>
+                <p class="imagegen-ref-hint imagegen-ref-hint-mobile">点击选择相册图片 · 可多张</p>
+                <input type="file" id="imageGenRefInput" accept="image/*" multiple>
+              </div>
+              <div class="imagegen-ref-gallery" id="imageGenRefGallery" hidden></div>
+            </div>
+            <details class="imagegen-ref-batch-fold" id="imageGenRefBatchFold">
+              <summary class="imagegen-ref-batch-fold-summary">
+                <span class="imagegen-ref-batch-fold-title">参考图批量设定</span>
+                <span class="imagegen-ref-batch-fold-hint">先选类型与选项，再点提交</span>
+              </summary>
+              <div class="imagegen-ref-batch-chips" role="tablist" aria-label="批量设定类型">
+                <button type="button" class="imagegen-ref-batch-chip" data-ref-tool="styleConvert" role="tab">风格转换</button>
+                <button type="button" class="imagegen-ref-batch-chip" data-ref-tool="turnaround" role="tab">角色三视图</button>
+                <button type="button" class="imagegen-ref-batch-chip" data-ref-tool="productAngles" role="tab">物品多角度</button>
+                <button type="button" class="imagegen-ref-batch-chip" data-ref-tool="expressions" role="tab">十六表情</button>
+              </div>
+              <div class="imagegen-ref-batch-body">
+                <div class="imagegen-ref-tool-panel imagegen-ref-batch-panel" id="imageGenStyleConvertPanel" data-ref-tool-panel="styleConvert" hidden>
+                  <p class="panel-hint imagegen-ref-tool-status" id="imageGenStyleConvertRefStatus">请先在上方添加参考图</p>
+                  <div class="imagegen-ref-batch-field">
+                    <label for="imageGenStyleConvertStyle">目标画风</label>
+                    <select id="imageGenStyleConvertStyle" class="settings-input"></select>
+                  </div>
+                  <button type="button" class="btn btn-primary btn-sm imagegen-ref-batch-submit" id="imageGenStyleConvertBatchBtn">提交风格转换 · — 积分/张</button>
+                </div>
+                <div class="imagegen-ref-tool-panel imagegen-ref-batch-panel" id="imageGenTurnaroundPanel" data-ref-tool-panel="turnaround" hidden>
+                  <p class="panel-hint imagegen-ref-tool-status" id="imageGenTurnaroundRefStatus">请先在上方添加参考图</p>
+                  <label class="imagegen-ref-option-check">
+                    <input type="checkbox" id="imageGenTurnaroundHeadshot" checked>
+                    <span>设定表内额外包含一格高清面部特写（与三视图同一张图，不另计次）</span>
+                  </label>
+                  <button type="button" class="btn btn-primary btn-sm imagegen-ref-batch-submit" id="imageGenTurnaroundBatchBtn">提交三视图 · — 积分/张</button>
+                </div>
+                <div class="imagegen-ref-tool-panel imagegen-ref-batch-panel" id="imageGenProductAnglesPanel" data-ref-tool-panel="productAngles" hidden>
+                  <p class="panel-hint imagegen-ref-tool-status" id="imageGenProductAnglesRefStatus">请先在上方添加参考图</p>
+                  <button type="button" class="btn btn-primary btn-sm imagegen-ref-batch-submit" id="imageGenProductAnglesBatchBtn">提交物品多角度 · — 积分/张</button>
+                </div>
+                <div class="imagegen-ref-tool-panel imagegen-ref-batch-panel" id="imageGenExpressionsPanel" data-ref-tool-panel="expressions" hidden>
+                  <p class="panel-hint">同一角色十六种生动不同表情，4×4 网格排在一张设定表内。</p>
+                  <p class="panel-hint imagegen-ref-tool-status" id="imageGenExpressionsRefStatus">请先在上方添加参考图</p>
+                  <button type="button" class="btn btn-primary btn-sm imagegen-ref-batch-submit" id="imageGenExpressionsBatchBtn">提交十六表情 · — 积分/张</button>
+                </div>
+                <p class="panel-hint imagegen-ref-batch-idle-hint" id="imageGenRefBatchIdleHint">选择上方类型，配置选项后提交；每张参考图各生成一次。</p>
+              </div>
+            </details>
+            <div class="imagegen-ref-tool-panel" id="imageGenReversePanel" data-ref-tool-panel="reverse" hidden>
+              <p class="panel-hint">使用上方参考图第一张，反推提示词（2 积分/次）</p>
+              <p class="panel-hint imagegen-ref-tool-status" id="imageGenReverseRefStatus">请先在上方添加参考图</p>
+              <div class="imagegen-reverse-actions">
+                <button type="button" class="btn btn-secondary btn-sm" id="imageGenReverseBtn">反推提示词</button>
+              </div>
+            </div>
+            <div class="imagegen-ref-tool-panel" id="imageGenFissionPanel" data-ref-tool-panel="fission" hidden>
+              <p class="panel-hint">使用上方参考图第一张，AI 识别美学特征并生成变体提示词（约 5 积分/次）</p>
+              <p class="panel-hint imagegen-ref-tool-status" id="imageGenFissionRefStatus">请先在上方添加参考图</p>
+              <div class="imagegen-fission-controls">
+                <label for="imageGenFissionCount">变体数</label>
+                <select id="imageGenFissionCount" class="settings-input">
+                  <option value="3">3 条</option>
+                  <option value="4" selected>4 条</option>
+                  <option value="5">5 条</option>
+                  <option value="6">6 条</option>
+                </select>
+                <label for="imageGenFissionStyle">画风</label>
+                <select id="imageGenFissionStyle" class="settings-input"></select>
+              </div>
+              <div class="imagegen-reverse-actions">
+                <button type="button" class="btn btn-secondary btn-sm" id="imageGenFissionAnalyzeBtn">分析裂变方案 · 约 5 积分</button>
+              </div>
+              <p class="panel-hint imagegen-fission-dna hidden" id="imageGenFissionDna"></p>

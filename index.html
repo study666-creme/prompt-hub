@@ -114,22 +114,33 @@
   <script src="pack-prelude.js?v=20260707h"></script>
 </head>
 <body>
+
   <script>
     window.__PROMPT_HUB_INDEX_BODY_PARTIAL__ = true;
     (function () {
-      var path = 'partials/index-body.html?v=' + encodeURIComponent(window.__APP_BUILD__ || 'dev');
-      var xhr = new XMLHttpRequest();
-      xhr.open('GET', path, false);
-      xhr.send(null);
-      if (!((xhr.status >= 200 && xhr.status < 300) || (xhr.status === 0 && xhr.responseText))) {
-        throw new Error('Prompt Hub index body partial failed to load: ' + xhr.status);
+      var parts = [
+        "partials/index-body/part-01.html",
+        "partials/index-body/part-02.html",
+        "partials/index-body/part-03.html",
+        "partials/index-body/part-04.html"
+      ];
+      var version = encodeURIComponent(window.__APP_BUILD__ || 'dev');
+      var html = '';
+      for (var i = 0; i < parts.length; i += 1) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', parts[i] + '?v=' + version, false);
+        xhr.send(null);
+        if (!((xhr.status >= 200 && xhr.status < 300) || (xhr.status === 0 && xhr.responseText))) {
+          throw new Error('Prompt Hub index body partial failed to load: ' + parts[i] + ' (' + xhr.status + ')');
+        }
+        html += xhr.responseText;
       }
       var script = document.currentScript;
       if (script && script.parentNode) {
-        script.insertAdjacentHTML('beforebegin', xhr.responseText);
+        script.insertAdjacentHTML('beforebegin', html);
         script.parentNode.removeChild(script);
       } else {
-        document.body.insertAdjacentHTML('afterbegin', xhr.responseText);
+        document.body.insertAdjacentHTML('afterbegin', html);
       }
     })();
   </script>

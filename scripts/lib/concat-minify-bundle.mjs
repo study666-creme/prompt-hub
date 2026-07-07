@@ -6,14 +6,14 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSync } from 'esbuild';
 import { execSync } from 'node:child_process';
+import { readLegacyEntry } from './read-legacy-entry.mjs';
 
 export function concatMinifyBundle({ root, sources, outFile, metaFile, label }) {
   const outDir = dirname(outFile);
   mkdirSync(outDir, { recursive: true });
 
   const combined = sources.map((rel) => {
-    const path = join(root, rel);
-    return `/* === ${rel} === */\n${readFileSync(path, 'utf8')}`;
+    return `/* === ${rel} === */\n${readLegacyEntry(root, rel)}`;
   }).join('\n;\n');
 
   buildSync({

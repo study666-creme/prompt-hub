@@ -36,8 +36,8 @@ $alwaysRootFiles = @(
   'sw.js',
   'features-assets.js'
 )
-$alwaysStaticFiles = @(
-  'partials/index-body.html'
+$alwaysStaticDirs = @(
+  'partials/index-body/'
 )
 
 function Copy-StaticFile {
@@ -92,9 +92,13 @@ foreach ($rootFile in $allowedRoot) {
   Copy-StaticFile $rel
 }
 
-foreach ($file in $alwaysStaticFiles) {
-  $rel = $file -replace '/', [IO.Path]::DirectorySeparatorChar
-  Copy-StaticFile $rel
+foreach ($dir in $alwaysStaticDirs) {
+  $dirPath = Join-Path $root ($dir -replace '/', [IO.Path]::DirectorySeparatorChar)
+  if (-not (Test-Path $dirPath -PathType Container)) { continue }
+  foreach ($file in Get-ChildItem $dirPath -File) {
+    $relPath = $file.FullName.Substring($root.Length).TrimStart('\', '/')
+    Copy-StaticFile $relPath
+  }
 }
 
 foreach ($path in $tracked) {

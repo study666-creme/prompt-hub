@@ -1,0 +1,420 @@
+  <div class="app-chrome">
+  <div id="rippleGridBg" class="ripple-grid-bg" aria-hidden="true"></div>
+  <div class="ui-vignette" aria-hidden="true"></div>
+  <div class="context-menu" id="contextMenu"></div>
+  <!-- OCR 弹窗 -->
+  <div class="modal-overlay" id="ocrModal" onclick="if(event.target===this) closeOcrModal()">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:var(--radius); width:480px; max-width:90vw; padding:28px; color:var(--text-primary); position:relative;">
+      <button onclick="closeOcrModal()" style="position:absolute; top:16px; right:16px; background:none; border:none; color:var(--text-muted); font-size:20px; cursor:pointer;">✕</button>
+      <h3 style="color:var(--accent);">🔍 提取图片文字</h3>
+      <div id="modalDropArea" style="border:2px dashed var(--border); border-radius:var(--radius); padding:20px; text-align:center; cursor:pointer;">
+        <span id="modalPlaceholder">拖拽、点击或 Ctrl+V 粘贴截图</span>
+        <img id="modalPreview" style="display:none; max-width:100%; height:auto; max-height:200px; border-radius:8px; margin-top:8px;">
+        <input type="file" id="modalFileInput" accept="image/*" style="display:none;">
+      </div>
+      <div class="ocr-progress" id="ocrProgress"><div class="ocr-progress-bar" id="ocrProgressBar"></div></div>
+      <div id="modalOcrResult" style="display:none; margin-top:16px;">
+        <label>识别文字</label>
+        <textarea id="modalOcrText" readonly style="width:100%; height:80px; background:var(--bg-card); border:1px solid var(--border); border-radius:8px; color:var(--text-primary); padding:10px; margin-top:8px;"></textarea>
+        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+          <button class="btn btn-secondary" onclick="closeOcrModal()">取消</button>
+          <button class="btn btn-primary" onclick="useOcrResult('fill')">填入提示词</button>
+        </div>
+      </div>
+      <div class="status-message" id="modalStatus"></div>
+    </div>
+  </div>
+
+  <!-- 全局设置（侧栏）：外观 / 昼夜 -->
+  <div class="settings-overlay" id="appSettingsOverlay" onclick="if(event.target===this) closeAppSettings()">
+    <div class="settings-panel settings-panel-narrow" onclick="event.stopPropagation()">
+      <header class="settings-header">
+        <div class="settings-header-text">
+          <h3 class="settings-title">全局设置</h3>
+          <p class="settings-subtitle">外观、昼夜与生图默认项</p>
+        </div>
+        <button type="button" class="settings-close" onclick="closeAppSettings()" aria-label="关闭">✕</button>
+      </header>
+      <div class="settings-body">
+        <section class="settings-section">
+          <h4 class="settings-section-title">外观</h4>
+          <p class="settings-hint settings-hint-block">默认夜间模式；点下方按钮可切换日光。自动昼夜默认关闭，需要时可勾选。</p>
+          <button type="button" class="btn btn-secondary app-settings-theme-btn" onclick="toggleAppTheme()">切换日光 / 夜间模式</button>
+          <label class="settings-check settings-check-spaced">
+            <input type="checkbox" id="autoDayNightToggle">
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">自动昼夜（早 8:00 日光 / 晚 20:00 夜间）</span>
+          </label>
+          <label class="settings-check settings-check-spaced">
+            <input type="checkbox" id="efficiencyModeToggle">
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">效率模式（关闭背景动效；社区改用固定方框布局，更流畅）</span>
+          </label>
+          <p class="settings-hint">默认关闭，社区为瀑布流（横图完整显示）。电脑较慢或社区卡顿时可开启效率模式。</p>
+        </section>
+        <section class="settings-section">
+          <h4 class="settings-section-title">生图</h4>
+          <label class="settings-check">
+            <input type="checkbox" id="defaultImageGenAutoPublishToggle" checked>
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">进入生图页时默认开启「生成后公开到社区」</span>
+          </label>
+          <p class="settings-hint">关闭后，每次打开生图页该选项默认关闭；在生图页临时切换不影响此默认。</p>
+        </section>
+        <section class="settings-section">
+          <h4 class="settings-section-title">社区通知</h4>
+          <label class="settings-check">
+            <input type="checkbox" id="communityNotificationsToggle" checked>
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">启用点赞与关注消息</span>
+          </label>
+          <label class="settings-check settings-check-spaced">
+            <input type="checkbox" id="communityNotifyBadgeToggle" checked>
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">显示小铃铛未读红点</span>
+          </label>
+        </section>
+        <section class="settings-section mobile-only settings-section-compact" id="pwaInstallSettingsSection">
+          <button type="button" class="btn btn-secondary" id="pwaInstallSettingsBtn">添加到主屏幕</button>
+        </section>
+        <section class="settings-section settings-section-help hidden" id="appSettingsHelpSection" aria-label="帮助">
+          <h4 class="settings-section-title">帮助</h4>
+          <ul class="settings-help-list">
+            <li><strong>卡片库</strong>：管理提示词与参考图；右键可置顶（免费 2 张 / 轻量 3 张 / 基础及以上不限）。</li>
+            <li><strong>社区 / 创作</strong>：发布与浏览提示词作品；社区需登录后互动。</li>
+            <li><strong>图片生成</strong>：双模式 Tab；参考图支持反推 / 裂变；优化提示词在提示词栏左侧；生成后自动入库，右侧可浏览仓库与社区。</li>
+            <li><strong>卡片资产</strong>：免费领取或购买图包，拥有后在「我的主页」一键导入卡片库。</li>
+            <li><strong>会员</strong>：升级时高档先用、低档剩余天数顺延，不会整段都算成高档。</li>
+            <li><strong>外观</strong>：默认夜间；可在上方切换日光，或开启自动昼夜。</li>
+            <li><strong>备份</strong>：卡片库设置 → 数据管理 → 备份导出，防止浏览器清数据丢失。</li>
+          </ul>
+          <h4 class="settings-section-title settings-section-title-sub">联系我们</h4>
+          <p class="settings-hint">添加微信时请备注「提示词仓库」。</p>
+          <div class="contact-wechat-row">
+            <span class="contact-wechat-label">微信号</span>
+            <code class="contact-wechat-id" id="contactWechatId">bz4jx3jp2li1</code>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="copyWechatId()">复制微信号</button>
+          </div>
+        </section>
+      </div>
+      <footer class="settings-footer">
+        <button type="button" class="btn btn-ghost btn-sm settings-footer-help-btn" onclick="toggleAppSettingsHelp()" aria-expanded="false" aria-controls="appSettingsHelpSection">帮助</button>
+        <span class="settings-status" id="appSettingsStatus"></span>
+        <button type="button" class="btn btn-primary" onclick="saveAppSettings()">保存</button>
+        <button type="button" class="btn btn-secondary" onclick="closeAppSettings()">完成</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 卡片库设置：OCR、字段、备份 -->
+  <div class="settings-overlay" id="settingsOverlay" onclick="if(event.target===this) closeWarehouseSettings()">
+    <div class="settings-panel" onclick="event.stopPropagation()">
+      <header class="settings-header">
+        <div class="settings-header-text">
+          <h3 class="settings-title">卡片库设置</h3>
+          <p class="settings-subtitle">OCR、字段与数据备份</p>
+        </div>
+        <button type="button" class="settings-close" onclick="closeWarehouseSettings()" aria-label="关闭">✕</button>
+      </header>
+
+      <div class="settings-body">
+        <section class="settings-section">
+          <h4 class="settings-section-title">文字识别（OCR）</h4>
+          <div class="settings-field">
+            <label for="ocrEngineSelect">识别引擎</label>
+            <select id="ocrEngineSelect" class="settings-input" onchange="onOcrEngineChange()">
+              <option value="tesseract">Tesseract（离线免费）</option>
+              <option value="ocrspace">OCR.space（在线高精度）</option>
+            </select>
+          </div>
+          <div class="settings-field" id="ocrApiKeyWrap">
+            <label for="ocrApiKey">OCR.space API Key</label>
+            <input type="text" id="ocrApiKey" class="settings-input" placeholder="在 ocr.space 申请后填入">
+            <p class="settings-hint">仅在选择 OCR.space 时需要</p>
+          </div>
+          <label class="settings-check">
+            <input type="checkbox" id="imageClickZoomToggle">
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">单击卡片图片时放大查看（否则进入编辑）</span>
+          </label>
+          <label class="settings-check settings-check-spaced">
+            <input type="checkbox" id="autoPromptOcrToggle">
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">编辑卡片时显示「文字识别专用图片框」</span>
+          </label>
+          <p class="settings-hint">默认关闭。开启后，编辑区会出现独立小图框：拖入/点击/粘贴图片仅用于 OCR，识别结果写入提示词，不会保存为卡片配图。</p>
+        </section>
+
+        <section class="settings-section">
+          <h4 class="settings-section-title">图片</h4>
+          <label class="settings-check">
+            <input type="checkbox" id="showTrimBlackBorderToggle">
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">编辑卡片时显示「裁除黑边」</span>
+          </label>
+          <p class="settings-hint">默认关闭。开启后，编辑区图片下方会出现小链接，一键去掉截图四周的黑边（适合录屏/截图留白）。</p>
+          <label class="settings-check" style="margin-top:10px">
+            <input type="checkbox" id="preserveOriginalCardImageToggle">
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">卡片库保存原图（不压缩，单张最大 50MB）</span>
+          </label>
+          <p class="settings-hint">默认关闭：上传后会压缩为约 2560px 边长的高质量 JPEG，省流量、同步更快。开启后按原文件上传（PNG/JPEG 等），适合 4K 参考图；列表缩略图仍会生成小图。</p>
+        </section>
+
+        <section class="settings-section">
+          <h4 class="settings-section-title">社区</h4>
+          <label class="settings-check">
+            <input type="checkbox" id="defaultPublishCommunityToggle" checked>
+            <span class="settings-check-box" aria-hidden="true"></span>
+            <span class="settings-check-label">新建卡片时默认发布到提示词社区</span>
+          </label>
+          <p class="settings-hint">发布社区：提示词≥15字且需配图；未达标保存成功但不会公开。点赞奖励：100 赞 +100 积分（每人最多 5 次）、1000 赞 +1000 积分（最多 2 次）</p>
+          <div class="settings-btn-grid settings-btn-grid-data" style="margin-top:12px">
+            <button type="button" class="btn btn-secondary" onclick="typeof restoreCardsFromCommunityFeed==='function'&&restoreCardsFromCommunityFeed()">从社区恢复卡片库</button>
+            <button type="button" class="btn btn-secondary" onclick="typeof syncCloudNow==='function'&&syncCloudNow()">与云端对齐</button>
+          </div>
+          <p class="settings-hint settings-hint-block">登录后使用。「从社区恢复」：只把<strong>社区帖 ID 在卡片库里找不到</strong>的作品新建进库；提示会写「13 张 → 18 张」这种前后数量。若显示「无需新建」说明 ID 已在库里。「同步到社区」：把卡片库推到全站 Feed。</p>
+        </section>
+
+        <section class="settings-section">
+          <h4 class="settings-section-title">全局固定字段</h4>
+          <p class="settings-section-desc">每张卡片编辑时都会显示这些字段</p>
+          <div class="settings-field-row">
+            <input type="text" id="newFieldName" class="settings-input" placeholder="字段名称">
+            <select id="newFieldType" class="settings-input settings-input-narrow">
+              <option value="text">文本</option>
+              <option value="textarea">多行文本</option>
+            </select>
+            <button type="button" class="btn btn-primary settings-add-btn" onclick="addGlobalField()">添加</button>
+          </div>
+          <div class="settings-field-list" id="fieldList"></div>
+          <p class="settings-empty-hint hidden" id="fieldListEmpty">暂无自定义字段</p>
+        </section>
+
+        <section class="settings-section">
+          <h4 class="settings-section-title">数据管理</h4>
+          <p class="settings-section-desc">JSON 只含卡片文字与结构，不含图片文件。登录后云端会自动同步，一般无需手动操作。</p>
+          <div class="settings-btn-grid settings-btn-grid-data">
+            <button type="button" class="btn btn-primary settings-save-top" onclick="saveSettings()">保存设置</button>
+            <button type="button" class="btn btn-secondary" onclick="exportBackup()" title="下载一份到「下载」文件夹，换机/灾备用">下载备份 JSON</button>
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('importFileInput').click()" title="从 JSON 覆盖恢复，任意浏览器可用">从 JSON 恢复</button>
+            <input type="file" id="importFileInput" accept=".json,application/json" class="hidden-input" onchange="importBackup(event)">
+            <button type="button" class="btn btn-secondary" onclick="saveToFile()" title="Chrome/Edge：指定路径，改卡片时自动写回">绑定本地 JSON 文件</button>
+            <button type="button" class="btn btn-secondary" onclick="loadFromFile()" title="打开并绑定 JSON，本页有效">打开本地 JSON</button>
+          </div>
+          <p class="settings-hint settings-local-file-hint" id="localFileBindingHint" hidden></p>
+          <p class="settings-hint settings-hint-block">「下载备份」= 一次性导出；「绑定本地文件」= 本页改卡片时自动写回同一文件（刷新后需重新打开）。浏览器出于安全不显示完整磁盘路径，只显示文件名。</p>
+          <button type="button" class="btn btn-danger settings-danger-btn" onclick="clearAllData()">清除所有本地数据</button>
+        </section>
+      </div>
+
+      <footer class="settings-footer">
+        <span class="settings-status" id="settingsStatus"></span>
+        <button type="button" class="btn btn-secondary" onclick="closeWarehouseSettings()">完成</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 加入社群 -->
+  <div class="side-panel-overlay" id="communityOverlay" onclick="if(event.target===this) closeCommunityPanel()">
+    <div class="side-panel-box" onclick="event.stopPropagation()">
+      <header class="side-panel-head">
+        <h3>加入社群 · 领 100 积分</h3>
+        <button type="button" class="side-panel-close-btn" onclick="closeCommunityPanel()" aria-label="关闭"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      </header>
+      <div class="side-panel-body">
+        <p class="side-panel-desc side-panel-desc-oneline">入群后联系管理员领取 100 积分。</p>
+        <div class="contact-wechat-row">
+          <span class="contact-wechat-label">QQ 群号</span>
+          <code class="contact-wechat-id" id="communityQqId">222653426</code>
+        </div>
+      </div>
+      <footer class="side-panel-foot">
+        <button type="button" class="btn btn-primary" onclick="copyCommunityQqId()">复制群号</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 联系我们 -->
+  <div class="side-panel-overlay" id="contactOverlay" onclick="if(event.target===this) closeContactPanel()">
+    <div class="side-panel-box" onclick="event.stopPropagation()">
+      <header class="side-panel-head">
+        <h3>联系我们</h3>
+        <button type="button" class="side-panel-close-btn" onclick="closeContactPanel()" aria-label="关闭"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      </header>
+      <div class="side-panel-body">
+        <p class="side-panel-desc">添加微信时请备注「提示词仓库」。</p>
+        <div class="contact-wechat-row">
+          <span class="contact-wechat-label">微信号</span>
+          <code class="contact-wechat-id" id="contactWechatId">bz4jx3jp2li1</code>
+        </div>
+      </div>
+      <footer class="side-panel-foot">
+        <button type="button" class="btn btn-primary" onclick="copyWechatId()">复制微信号</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 帮助（快捷入口，内容与设置内帮助一致） -->
+  <div class="side-panel-overlay" id="helpOverlay" onclick="if(event.target===this) closeHelpPanel()">
+    <div class="side-panel-box" onclick="event.stopPropagation()">
+      <header class="side-panel-head">
+        <h3>帮助</h3>
+        <button type="button" class="side-panel-close-btn" onclick="closeHelpPanel()" aria-label="关闭"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      </header>
+      <div class="side-panel-body">
+        <ul class="settings-help-list">
+          <li><strong>卡片库</strong>：管理提示词与参考图；右键可置顶（免费 2 张 / 轻量 3 张 / 基础及以上不限）。</li>
+          <li><strong>社区 / 创作</strong>：发布与浏览提示词作品；社区需登录后互动。</li>
+          <li><strong>图片生成</strong>：双模式 Tab；参考图支持反推 / 裂变；优化提示词在提示词栏左侧；生成后自动入库，右侧可浏览仓库与社区。</li>
+          <li><strong>卡片资产</strong>：免费领取或购买图包，拥有后在「我的主页」一键导入卡片库。</li>
+          <li><strong>会员</strong>：升级时高档先用、低档剩余天数顺延，不会整段都算成高档。</li>
+          <li><strong>自动昼夜</strong>：默认关闭；可在「设置 → 外观」中开启早 8 点日光 / 晚 8 点夜间。</li>
+          <li><strong>备份</strong>：设置 → 数据管理 → 备份导出，防止浏览器清数据丢失。</li>
+        </ul>
+      </div>
+      <footer class="side-panel-foot">
+        <button type="button" class="btn btn-secondary" onclick="closeHelpPanel()">关闭</button>
+        <button type="button" class="btn btn-primary" onclick="closeHelpPanel(); openWarehouseSettings();">打开卡片库设置</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 提示词采集（浏览器插件说明） -->
+  <div class="side-panel-overlay" id="extensionCollectOverlay" onclick="if(event.target===this) closeExtensionCollectPanel()">
+    <div class="side-panel-box side-panel-box-wide" onclick="event.stopPropagation()">
+      <header class="side-panel-head">
+        <h3>提示词采集</h3>
+        <button type="button" class="side-panel-close-btn" onclick="closeExtensionCollectPanel()" aria-label="关闭"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      </header>
+      <div class="side-panel-body">
+        <p class="collect-hook">让你在任何页面<strong>光速保存图片和文字</strong>到 Prompt Hub 卡片库。</p>
+        <div class="collect-download-row">
+          <a class="btn btn-primary collect-download-btn" href="downloads/prompt-hub-extension.zip" download="prompt-hub-extension.zip">下载浏览器插件（zip）</a>
+          <p class="settings-hint">Chrome / Edge 通用 · 约 200KB · 下载后解压到任意文件夹</p>
+        </div>
+        <h4 class="collect-section-title">安装</h4>
+        <ol class="settings-help-list collect-steps-list">
+          <li>点击上方按钮下载 zip，解压到电脑。</li>
+          <li>打开 Chrome 浏览器或 Edge 浏览器 → 地址栏输入 <strong>chrome://extensions</strong>（Edge 为 <strong>edge://extensions</strong>）。</li>
+          <li>打开右上角<strong>开发者模式</strong> → 点<strong>加载已解压的扩展程序</strong> → 选中刚解压的文件夹。</li>
+          <li>打开 <a href="https://prompt-hub.cn" target="_blank" rel="noopener">prompt-hub.cn</a> 并<strong>登录</strong>，扩展会自动同步账号。</li>
+        </ol>
+        <h4 class="collect-section-title">怎么用</h4>
+        <ol class="settings-help-list collect-steps-list">
+          <li>点击浏览器右上角 <strong>Prompt Hub 存卡</strong> 图标 → <strong>在当前页打开面板</strong>（首次需允许访问当前网站）。</li>
+          <li><strong>鼠标悬停段落</strong> → 点「复制到提示词」；或<strong>划选文字</strong> →「复制到提示词」。</li>
+          <li><strong>拖入 / 粘贴图片</strong>（无需选中图片框，截图完直接 Ctrl+V 即可）到面板。</li>
+          <li>填入图片和文字后卡片自动保存到仓库（可在面板 ⚙ 设置里关闭）。</li>
+        </ol>
+        <h4 class="collect-section-title">小提示</h4>
+        <ul class="settings-help-list">
+          <li>面板 <strong>×</strong> 关闭本页；<strong>−</strong> 只是收起，内容不会丢。</li>
+          <li>只保存您<strong>手动选择 / 拖入 / 粘贴</strong>的内容，不会自动抓取整页。</li>
+          <li>保存后回到卡片库刷新即可看到新卡片（已登录会自动云同步）。</li>
+        </ul>
+      </div>
+      <footer class="side-panel-foot">
+        <button type="button" class="btn btn-secondary" onclick="closeExtensionCollectPanel()">关闭</button>
+        <button type="button" class="btn btn-primary" onclick="closeExtensionCollectPanel(); openAuthModal();">登录后开始用</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 自定义弹窗 -->
+  <div class="custom-modal-overlay" id="customModalOverlay" onclick="if(event.target===this) closeCustomModal()">
+    <div class="custom-modal" id="customModal"></div>
+  </div>
+
+  <!-- 大图浏览：居中看图 + 柔和扫光 -->
+  <div class="appreciate-viewer" id="appreciateViewer" onclick="closeAppreciateViewer(event)">
+    <button type="button" class="appreciate-viewer-close" onclick="closeAppreciateViewer(event)" title="关闭">✕</button>
+    <div class="appreciate-viewer-inner" onclick="closeAppreciateViewer(event)">
+      <div class="appreciate-viewer-stage" id="appreciateViewerStage">
+        <div class="appreciate-viewer-media" id="appreciateViewerMedia">
+          <button type="button" class="lightbox-gallery-nav lightbox-gallery-prev hidden" id="appreciateGalleryPrev" aria-label="上一张">‹</button>
+          <button type="button" class="lightbox-gallery-nav lightbox-gallery-next hidden" id="appreciateGalleryNext" aria-label="下一张">›</button>
+          <span class="lightbox-gallery-counter hidden" id="appreciateGalleryCounter" aria-live="polite">1 / 1</span>
+          <div class="viewer-image-frame" id="appreciateViewerFrame">
+            <button type="button" class="lightbox-gallery-hit lightbox-gallery-hit-prev hidden" id="appreciateHitPrev" tabindex="-1" aria-label="上一张"></button>
+            <button type="button" class="lightbox-gallery-hit lightbox-gallery-hit-next hidden" id="appreciateHitNext" tabindex="-1" aria-label="下一张"></button>
+            <div class="viewer-image-shine-wrap">
+              <span class="viewer-shine-sweep" aria-hidden="true"></span>
+              <img id="appreciateViewerImg" src="" alt="" draggable="false">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="appreciate-viewer-foot">
+        <p class="appreciate-viewer-hint">图片上：滚轮缩放 · 拖拽移动 · 双击还原</p>
+        <p class="appreciate-viewer-hint-nav">图片外：滚轮向下下一张 · 向上上一张</p>
+        <p class="appreciate-viewer-caption" id="appreciateViewerCaption"></p>
+        <div class="appreciate-viewer-actions hidden" id="appreciateViewerActions">
+          <button type="button" class="btn btn-secondary lightbox-collect-btn" id="appreciateViewerFavBtn" title="收藏到卡片库">
+            <span>收藏到卡片库</span>
+          </button>
+        </div>
+        <div class="appreciate-viewer-actions hidden" id="appreciateViewerWarehouseActions">
+          <button type="button" class="appreciate-viewer-foot-btn appreciate-viewer-foot-btn--primary" id="appreciateViewerGenBtn">去生图</button>
+        </div>
+        <button type="button" class="appreciate-viewer-foot-btn appreciate-viewer-foot-btn--exit" id="appreciateViewerExitFootBtn" onclick="exitGlobalView(event)">退出快速预览（Esc）</button>
+      </div>
+    </div>
+  </div>
+  <button type="button" class="global-view-exit" id="globalViewExitBtn" onclick="exitGlobalView()">退出快速预览（Esc）</button>
+
+  <div class="asset-preview-overlay hidden" id="assetPreviewOverlay" role="dialog" aria-modal="true" aria-labelledby="assetPreviewTitle">
+    <div class="asset-preview-panel" id="assetPreviewBody" onclick="event.stopPropagation()"></div>
+  </div>
+  <div class="asset-publish-overlay hidden" id="assetPublishOverlay" role="dialog" aria-modal="true" aria-labelledby="assetPublishTitle">
+    <div class="asset-publish-panel" id="assetPublishBody" onclick="event.stopPropagation()"></div>
+  </div>
+  <div class="asset-open-overlay hidden" id="assetOpenOverlay" aria-hidden="true"></div>
+  <div class="asset-import-overlay hidden" id="assetImportOverlay" role="dialog" aria-modal="true" aria-labelledby="assetImportTitle">
+    <div class="asset-import-panel" id="assetImportBody" onclick="event.stopPropagation()"></div>
+  </div>
+
+  <!-- 图片灯箱 -->
+  <div class="image-lightbox" id="imageLightbox" onclick="closeLightbox(event)">
+    <div class="lightbox-container">
+      <button class="close-lightbox" onclick="closeLightbox(event)">✕</button>
+      <button type="button" class="lightbox-gallery-nav lightbox-gallery-prev hidden" id="lightboxGalleryPrev" aria-label="上一张">‹</button>
+      <button type="button" class="lightbox-gallery-nav lightbox-gallery-next hidden" id="lightboxGalleryNext" aria-label="下一张">›</button>
+      <span class="lightbox-gallery-counter hidden" id="lightboxGalleryCounter" aria-live="polite">1 / 1</span>
+      <div class="viewer-image-frame" id="lightboxFrame">
+        <button type="button" class="lightbox-gallery-hit lightbox-gallery-hit-prev hidden" id="lightboxHitPrev" tabindex="-1" aria-label="上一张"></button>
+        <button type="button" class="lightbox-gallery-hit lightbox-gallery-hit-next hidden" id="lightboxHitNext" tabindex="-1" aria-label="下一张"></button>
+        <div class="viewer-image-shine-wrap">
+          <span class="viewer-shine-sweep" aria-hidden="true"></span>
+          <img id="lightboxImage" src="" alt="放大图片">
+        </div>
+      </div>
+      <div class="lightbox-actions" id="lightboxActions">
+        <button type="button" class="lightbox-collect-btn hidden" id="lightboxCollectBtn" title="收藏到卡片库">
+          <span>收藏到卡片库</span>
+        </button>
+        <button type="button" class="lightbox-gen-btn hidden" id="lightboxGenBtn" title="用此卡片去生图">去生图</button>
+        <button type="button" class="lightbox-download-btn" id="lightboxDownloadBtn" title="保存到本地">
+          <svg class="lightbox-download-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v9.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42l2.3 2.3V4a1 1 0 0 1 1-1zm-7 14a1 1 0 0 1 1 1v2h12v-2a1 1 0 1 1 2 0v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z"/>
+          </svg>
+          <span>下载图片</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 参考图标注（圈出要修的区域） -->
+  <div class="ref-annotator" id="refAnnotatorOverlay" hidden role="dialog" aria-modal="true" aria-label="参考图标注">
+    <div class="ref-annotator__panel" onclick="event.stopPropagation()">
+      <header class="ref-annotator__head">
+        <span>标注参考图 · 圈出要 AI 修改的位置</span>
+        <button type="button" class="ref-annotator__close" id="refAnnotatorClose" aria-label="关闭">✕</button>
+      </header>
+      <div class="ref-annotator__stage" id="refAnnotatorStage">
+        <div class="ref-annotator__frame" id="refAnnotatorFrame">
+          <img id="refAnnotatorImg" alt="" draggable="false">
+          <canvas id="refAnnotatorCanvas"></canvas>
+        </div>
+      </div>
+      <div class="ref-annotator__tools">

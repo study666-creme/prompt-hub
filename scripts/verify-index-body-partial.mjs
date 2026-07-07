@@ -1,15 +1,18 @@
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const index = readFileSync(join(root, 'index.html'), 'utf8');
-const partialPath = join(root, 'partials', 'index-body.html');
-const partial = readFileSync(partialPath, 'utf8');
+const partialDir = join(root, 'partials', 'index-body');
+const partialFiles = readdirSync(partialDir)
+  .filter((name) => /^part-\d+\.html$/.test(name))
+  .sort();
+const partial = partialFiles.map((name) => readFileSync(join(partialDir, name), 'utf8')).join('');
 
 const requiredIndexTokens = [
   '__PROMPT_HUB_INDEX_BODY_PARTIAL__',
-  'partials/index-body.html?v=',
+  'partials/index-body/part-01.html',
   '<script src="vendor/supabase.min.js'
 ];
 const requiredPartialTokens = [
@@ -34,8 +37,26 @@ for (const token of requiredPartialTokens) {
 }
 
 if (partial.includes('<script')) {
-  console.error('verify-index-body-partial: partial must not contain script tags');
+  console.error('verify-index-body-partial: partial fragments must not contain script tags');
   process.exit(1);
+}
+
+if (partialFiles.length < 2) {
+  console.error('verify-index-body-partial: expected multiple body fragments');
+  process.exit(1);
+}
+
+for (const name of partialFiles) {
+  const rel = `partials/index-body/${name}`;
+  if (!index.includes(rel)) {
+    console.error(`verify-index-body-partial: index.html missing ${rel}`);
+    process.exit(1);
+  }
+  const bytes = statSync(join(partialDir, name)).size;
+  if (bytes > 50000) {
+    console.error(`verify-index-body-partial: ${rel} is too large (${bytes} bytes)`);
+    process.exit(1);
+  }
 }
 
 if (index.includes('<nav class="mobile-bottom-nav')) {
@@ -49,4 +70,4 @@ if (indexBytes > 40000) {
   process.exit(1);
 }
 
-console.log(`verify-index-body-partial OK (${indexBytes} byte shell)`);
+console.log(`verify-index-body-partial OK (${indexBytes} byte shell, ${partialFiles.length} fragments)`);
