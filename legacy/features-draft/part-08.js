@@ -864,6 +864,7 @@
         applyPrimeRefs(post);
       }
     }
+    if (!refImages.length && isDisplayableImage(image)) addPrimeRef(image);
     const hasRef = refImages.length > 0;
     const fillHtml = buildPreviewFillActions(hasRef, '');
     const imgHtml = isDisplayableImage(image)

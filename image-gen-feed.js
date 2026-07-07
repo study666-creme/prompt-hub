@@ -860,7 +860,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       }
       const resolvedListUrl = resolvedThumb || listUrl;
       const hasDisplayableRef = d().isDisplayableImage?.(image);
-      const feedRefs = normalizeFeedRefImages(refImage, refImages);
+      const feedRefs = normalizeFeedRefImages(refImage || (hasDisplayableRef ? image : ''), refImages);
       const imgSrc = resolvedListUrl
         || (hasDisplayableRef ? d().IMG_LOADING_PLACEHOLDER : '');
       const imgPending = hasDisplayableRef && (!resolvedListUrl || imgSrc.includes('data:image/svg'));
@@ -897,7 +897,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       const secondaryActions = `${likeBtn}${saveBtn}`;
       const quickActions = `<div class="imagegen-feed-quick-actions imagegen-feed-action-grid" aria-label="生图快捷操作">
             <button type="button" class="imagegen-feed-quick-btn" data-feed-fill-prompt>填提示词</button>
-            ${feedRefs.length ? '<button type="button" class="imagegen-feed-quick-btn" data-feed-fill-ref>填参考图</button>' : ''}
+            ${feedRefs.length ? '<button type="button" class="imagegen-feed-quick-btn" data-feed-fill-ref>填入参考图</button>' : ''}
             <button type="button" class="imagegen-feed-quick-btn imagegen-feed-quick-btn--primary" data-feed-regenerate>再次生成</button>
             ${secondaryActions}
           </div>`;

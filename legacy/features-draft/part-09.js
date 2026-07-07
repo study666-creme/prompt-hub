@@ -102,7 +102,7 @@
         <div class="imagegen-preview-fill-btns">
           <button type="button" class="btn btn-primary btn-sm" data-preview-fill-all>全部</button>
           <button type="button" class="btn btn-secondary btn-sm" data-preview-fill-prompt>仅提示词</button>
-          <button type="button" class="btn btn-secondary btn-sm" data-preview-fill-ref${refDisabled}>仅参考图</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-preview-fill-ref${refDisabled}>填入参考图</button>
           <button type="button" class="btn btn-secondary btn-sm" data-preview-regenerate>再次生成</button>
         </div>
       </div>
@@ -405,6 +405,10 @@
           : null));
     const mjParentJobId = normalizeMjParentJobId(jobId || previewCard?.genJobId || '');
     const cachedMjButtons = Array.isArray(previewCard?.mjButtons) ? previewCard.mjButtons : null;
+    if (!(refImages?.length) && !refImage && isDisplayableImage(image)) {
+      refImage = image;
+      refImages = [image];
+    }
     const hasRef = !!(refImages?.length || (refImage && isDisplayableImage(refImage)));
     const fillHtml = buildPreviewFillActions(hasRef, extraActions);
     const mjActionsHtml = cachedMjButtons?.length
