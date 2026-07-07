@@ -603,18 +603,38 @@
 
     const STALE_LOCAL_ONLY_CARD_GRACE_MS = 14 * 24 * 60 * 60 * 1000;
 
+    function cardTimestampMs(card) {
+      for (const raw of [card?.updatedAt, card?.createdAt]) {
+        if (raw == null || raw === '') continue;
+        let n = Number(raw);
+        if (Number.isFinite(n) && n > 0) {
+          if (n < 10_000_000_000) n *= 1000;
+          return n;
+        }
+        n = Date.parse(String(raw));
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      const idMatch = String(card?.id || '').match(/(?:^|_)(\d{12,})(?:_|$)/);
+      if (idMatch) {
+        const n = Number(idMatch[1].slice(0, 13));
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      return 0;
+    }
+
     function pruneStaleLocalOnlyCardsAfterCloudPull(localPayload, cloudPayload, payload) {
       const localCards = Array.isArray(localPayload?.cards) ? localPayload.cards : [];
       const cloudCards = Array.isArray(cloudPayload?.cards) ? cloudPayload.cards : [];
       if (!localCards.length || !cloudCards.length || !Array.isArray(payload?.cards)) {
-        return { payload, pruned: 0 };
+        return { payload, pruned: 0, prunedIds: [] };
       }
       const cloudIds = new Set(cloudCards.filter((c) => c?.id != null).map((c) => String(c.id)));
-      if (!cloudIds.size) return { payload, pruned: 0 };
+      if (!cloudIds.size) return { payload, pruned: 0, prunedIds: [] };
       const localById = new Map(localCards.filter((c) => c?.id != null).map((c) => [String(c.id), c]));
       const nextTombstones = { ...(payload.settings?.deletedCardTombstones || {}) };
       const now = Date.now();
       let pruned = 0;
+      const prunedIds = [];
       const nextCards = payload.cards.filter((card) => {
         if (!card?.id) return false;
         const id = String(card.id);
@@ -622,14 +642,15 @@
         if (cloudIds.has(id)) return true;
         const local = localById.get(id);
         if (!local) return true;
-        const ts = Number(local.updatedAt || local.createdAt || 0);
+        const ts = cardTimestampMs(local);
         if (!Number.isFinite(ts) || ts <= 0) return true;
         if (now - ts <= STALE_LOCAL_ONLY_CARD_GRACE_MS) return true;
         nextTombstones[id] = now;
         pruned += 1;
+        prunedIds.push(id);
         return false;
       });
-      if (!pruned) return { payload, pruned: 0 };
+      if (!pruned) return { payload, pruned: 0, prunedIds: [] };
       return {
         payload: {
           ...payload,
@@ -639,7 +660,8 @@
             deletedCardTombstones: nextTombstones
           }
         },
-        pruned
+        pruned,
+        prunedIds
       };
     }
 
@@ -752,7 +774,10 @@
       window.FeatureDraft?.reconcileCreationsWarehouseLinks?.();
       requestFeedRefresh();
       window.FeatureDraft?.syncPublishToggleForOpenCard?.();
-      await saveAllData({ skipCloud: true });
+      await saveAllData({
+        skipCloud: true,
+        forceLocalPayloads: staleLocalOnly.pruned > 0
+      });
       if (shouldReslimCloud && typeof pushToCloud === 'function') {
         try { sessionStorage.setItem('ph_cloud_reslim_done', '1'); } catch (e) { /* ignore */ }
         void pushToCloud({ silent: true, skipImageUpload: true, skipSafety: true }).catch((e) => {

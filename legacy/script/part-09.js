@@ -112,6 +112,7 @@
       }
       window.__promptHubCards = cards;
       cards = filterTombstonedCards(cards);
+      window.__promptHubCards = cards;
       window.invalidateWarehouseCardsForImageGenCache?.();
       await saveCardsToDB(cards, { ownerUid: currentIdbOwnerUid() });
       const now = Date.now();
@@ -126,9 +127,16 @@
       const uid = window.SupabaseSync?.getUserId?.() || activeAccountId;
       if (uid && window.SupabaseSync?.isLoggedIn?.()) {
         const localPayload = getDataPayload();
-        await snapshotLocalForUser(uid, { allowEmpty: true, throttle: true, payload: localPayload });
+        const localPayloadWriteOpts = opts.forceLocalPayloads
+          ? { allowEmpty: true, force: true, payload: localPayload }
+          : { allowEmpty: true, throttle: true, payload: localPayload };
+        await snapshotLocalForUser(uid, localPayloadWriteOpts);
         localStorage.setItem(userStorageKey('settings', uid), JSON.stringify(settings));
-        writeAutosavePayloadForUser(uid, localPayload, { throttle: true });
+        writeAutosavePayloadForUser(
+          uid,
+          localPayload,
+          opts.forceLocalPayloads ? { force: true } : { throttle: true }
+        );
       }
       if (uid) {
         persistWarehouseGroups(getActiveWarehouseId());
