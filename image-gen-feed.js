@@ -787,11 +787,53 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       wrap.querySelectorAll('.imagegen-feed-card').forEach((el) => el.removeAttribute('style'));
     }
 
+    function feedEsc(value) {
+      return typeof d().esc === 'function'
+        ? d().esc(value)
+        : String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/"/g, '&quot;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+    }
+
+    function normalizeFeedRefImages(refImage, refImages) {
+      const refs = [];
+      const add = (ref) => {
+        const value = String(ref || '').trim();
+        if (!value || !d().isDisplayableImage?.(value) || refs.includes(value)) return;
+        refs.push(value);
+      };
+      if (Array.isArray(refImages)) refImages.forEach(add);
+      add(refImage);
+      return refs;
+    }
+
+    function feedRefAttrs(refs) {
+      if (!refs?.length) return '';
+      return ` data-feed-ref="${feedEsc(refs[0])}" data-feed-refs="${feedEsc(JSON.stringify(refs))}"`;
+    }
+
+    function readFeedCardRefImages(card) {
+      const refs = [];
+      const add = (ref) => {
+        const value = String(ref || '').trim();
+        if (!value || !d().isDisplayableImage?.(value) || refs.includes(value)) return;
+        refs.push(value);
+      };
+      try {
+        const parsed = card?.dataset.feedRefs ? JSON.parse(card.dataset.feedRefs) : null;
+        if (Array.isArray(parsed)) parsed.forEach(add);
+      } catch (e) { /* ignore malformed dataset */ }
+      add(card?.dataset.feedRef);
+      return refs;
+    }
+
     function buildFeedCardHtml(opts) {
       const {
         id, prompt, image, jobId, title, badges = [], metaLine = '', meta = '', active = false,
         showLike = false, liked = false, likeCount = 0, showSave = false, showDel = false,
-        sourceCardId = '', thumbCachedUrl = ''
+        sourceCardId = '', thumbCachedUrl = '', refImage = '', refImages = null
       } = opts;
       const { showTitle, showPrompt } = resolveFeedCardDisplay(title, prompt);
       const storageAttr = feedImgStorageAttr(image);
@@ -818,6 +860,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       }
       const resolvedListUrl = resolvedThumb || listUrl;
       const hasDisplayableRef = d().isDisplayableImage?.(image);
+      const feedRefs = normalizeFeedRefImages(refImage, refImages);
       const imgSrc = resolvedListUrl
         || (hasDisplayableRef ? d().IMG_LOADING_PLACEHOLDER : '');
       const imgPending = hasDisplayableRef && (!resolvedListUrl || imgSrc.includes('data:image/svg'));
@@ -854,16 +897,9 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       const secondaryActions = `${likeBtn}${saveBtn}`;
       const quickActions = `<div class="imagegen-feed-quick-actions imagegen-feed-action-grid" aria-label="生图快捷操作">
             <button type="button" class="imagegen-feed-quick-btn" data-feed-fill-prompt>填提示词</button>
-            ${imgBlock ? '<button type="button" class="imagegen-feed-quick-btn" data-feed-fill-ref>填参考图</button>' : ''}
+            ${feedRefs.length ? '<button type="button" class="imagegen-feed-quick-btn" data-feed-fill-ref>填参考图</button>' : ''}
             <button type="button" class="imagegen-feed-quick-btn imagegen-feed-quick-btn--primary" data-feed-regenerate>再次生成</button>
             ${secondaryActions}
-          </div>`;
-      const mobileActs = `<div class="imagegen-feed-mobile-actions mobile-only">
-            <button type="button" class="imagegen-feed-mobile-btn" data-feed-copy>复制</button>
-            <button type="button" class="imagegen-feed-mobile-btn" data-feed-fill-prompt>填入生图</button>
-            ${imgBlock ? '<button type="button" class="imagegen-feed-mobile-btn" data-feed-fill-ref>填参考图</button>' : ''}
-            <button type="button" class="imagegen-feed-mobile-btn" data-feed-regenerate>再次生成</button>
-            ${imgBlock ? '<button type="button" class="imagegen-feed-mobile-btn" data-feed-download>下载</button>' : ''}
           </div>`;
       const fillHint = '';
       const footHtml = metaHtml
@@ -875,7 +911,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           ${quickActions}
           ${footHtml}
         </div>`;
-      return `<article class="imagegen-feed-card imagegen-feed-card-tile${noMedia}${active ? ' active' : ''}" data-feed-id="${d().esc?.(id)}" data-feed-prompt="${d().esc?.(prompt || '')}" tabindex="0">
+      return `<article class="imagegen-feed-card imagegen-feed-card-tile${noMedia}${active ? ' active' : ''}" data-feed-id="${d().esc?.(id)}" data-feed-prompt="${d().esc?.(prompt || '')}"${feedRefAttrs(feedRefs)} tabindex="0">
         ${delBtn}
         ${imgBlock}
         <div class="imagegen-feed-content">
@@ -883,7 +919,6 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           ${promptHtml}
           ${metaRowHtml}
           ${actionStack}
-          ${mobileActs}
           ${fillHint}
         </div>
       </article>`;
@@ -961,6 +996,8 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         jobId,
         prompt: c.prompt,
         image,
+        refImage: c.refImage,
+        refImages: c.refImages,
         title: titleTrim,
         metaLine,
         meta: '',
@@ -982,6 +1019,8 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         id: p.id,
         prompt: p.prompt,
         image: p.image,
+        refImage: p.refImage,
+        refImages: p.refImages,
         title: useTitle,
         metaLine: `${author} · ${model}`,
         meta: `♥ ${p.likes || 0} · ${d().formatTime?.(p.createdAt)}`,
@@ -1487,10 +1526,8 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         const feedItemId = feedKind === 'recent'
           ? (feedId.startsWith('cr_') ? feedId.slice(3) : feedId)
           : feedId;
-        const getFeedImageRef = () => {
-          const img = card.querySelector('.imagegen-feed-media img[data-image-ref]');
-          return img?.getAttribute('data-image-ref') || '';
-        };
+        const getFeedRefImages = () => readFeedCardRefImages(card);
+        const getFeedImageRef = () => getFeedRefImages()[0] || '';
         const openFeedPreview = () => {
           if (feedKind === 'recent') d().openImageGenPreview?.('recent', feedItemId);
           else d().openImageGenPreview?.('community', feedId);
@@ -1539,14 +1576,18 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         });
         card.querySelector('[data-feed-fill-ref]')?.addEventListener('click', e => {
           e.stopPropagation();
+          const refs = getFeedRefImages();
           d().fillFeedRefToActiveMode?.(getFeedImageRef(), {
-            assetId: feedItemId
+            assetId: feedItemId,
+            refImages: refs
           });
         });
         card.querySelector('[data-feed-regenerate]')?.addEventListener('click', e => {
           e.stopPropagation();
+          const refs = getFeedRefImages();
           void d().regenerateFeedItem?.(card.dataset.feedPrompt || '', getFeedImageRef(), {
-            assetId: feedItemId
+            assetId: feedItemId,
+            refImages: refs
           });
         });
         card.querySelectorAll('[data-feed-download]').forEach((btn) => {
@@ -1582,7 +1623,6 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           if (e.target.closest('[data-delete-feed]')) return;
           if (e.target.closest('[data-feed-download]')) return;
           if (e.target.closest('.imagegen-feed-quick-actions')) return;
-          if (e.target.closest('.imagegen-feed-mobile-actions')) return;
           if (e.target.closest('.imagegen-feed-media')) return;
           if (window.MobileUI?.isMobile?.()) return;
           openFeedPreview();

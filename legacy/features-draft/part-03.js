@@ -407,7 +407,9 @@
       mjCompositeUrl: c.mjCompositeUrl,
       mjButtons: c.mjButtons,
       cardImages: gallery.length > 1 ? gallery : null,
-      genBatchId: c.genBatchId || null
+      genBatchId: c.genBatchId || null,
+      refImage: c.refImage || null,
+      refImages: Array.isArray(c.refImages) ? c.refImages.filter(Boolean) : null
     });
     if (!saved?.ok) {
       if (saved?.duplicate) toast('该图已在卡片库中');

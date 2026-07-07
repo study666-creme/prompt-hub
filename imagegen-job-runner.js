@@ -376,6 +376,8 @@
       batchMergeCards: !!job.batchMergeCards,
       cardTitle: job.cardTitle || '',
       silentToast: !!job.silentToast,
+      refImage: job.refImage || null,
+      refImages: Array.isArray(job.refImages) ? job.refImages.filter(Boolean) : null,
       startedAt: job.startedAt || Date.now()
     };
   }

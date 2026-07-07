@@ -403,3 +403,111 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-side {
   object-fit: contain !important;
   object-position: center center !important;
 }
+
+@media (max-width: 900px) {
+  #cardsContainer.cards-container.mobile-grid:not(.list-view) {
+    display: block !important;
+    columns: 2;
+    column-count: 2 !important;
+    column-gap: 10px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 12px 10px calc(88px + env(safe-area-inset-bottom)) !important;
+    box-sizing: border-box !important;
+    contain: none !important;
+  }
+
+  #cardsContainer.cards-container.mobile-grid:not(.list-view) > .card {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 0 10px !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    overflow: hidden !important;
+  }
+
+  #cardsContainer.cards-container.mobile-grid:not(.list-view) > .grid-sizer {
+    display: none !important;
+  }
+
+  #cardsContainer.cards-container.mobile-grid:not(.list-view) > .warehouse-scroll-sentinel {
+    display: block !important;
+    column-span: all;
+    width: 100% !important;
+    height: 2px !important;
+    margin: 0 !important;
+    break-inside: avoid !important;
+    visibility: hidden;
+  }
+
+  #communityGrid.cards-container.community-feed-grid.community-feed-columns:not(.list-view),
+  #creationsGrid.cards-container.community-feed-grid.community-feed-columns:not(.list-view) {
+    display: grid !important;
+    grid-template-columns: repeat(var(--feed-columns, 2), minmax(0, 1fr)) !important;
+    column-gap: var(--feed-column-gap, 12px) !important;
+    row-gap: 0 !important;
+    align-items: start !important;
+    align-content: start !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    flex: none !important;
+    overflow: visible !important;
+    padding: 12px 10px calc(88px + env(safe-area-inset-bottom)) !important;
+    box-sizing: border-box !important;
+    contain: none !important;
+  }
+
+  #communityGrid.community-feed-columns:not(.list-view) > .community-feed-col,
+  #creationsGrid.community-feed-columns:not(.list-view) > .community-feed-col {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: var(--feed-row-gap, 12px) !important;
+    min-width: 0 !important;
+    width: auto !important;
+    max-width: 100% !important;
+    overflow: visible !important;
+  }
+
+  #communityGrid.community-feed-grid.community-feed-columns:not(.list-view) > .card,
+  #creationsGrid.community-feed-grid.community-feed-columns:not(.list-view) > .card {
+    display: none !important;
+  }
+
+  #communityGrid.community-feed-columns.cards-container .community-feed-col > .card,
+  #creationsGrid.community-feed-columns.cards-container .community-feed-col > .card {
+    display: block !important;
+    flex: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    overflow: hidden !important;
+  }
+
+  #communityGrid.community-feed-columns:not(.list-view) > .feed-page-sentinel,
+  #creationsGrid.community-feed-columns:not(.list-view) > .feed-page-sentinel {
+    grid-column: 1 / -1;
+  }
+}

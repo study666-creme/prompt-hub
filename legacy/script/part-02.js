@@ -88,6 +88,26 @@
         ? payload.cardImages.filter(Boolean).slice(0, CG?.MAX || 5)
         : null;
       const primaryImage = galleryInput?.length ? galleryInput[0] : image;
+      const payloadRefImages = [];
+      const addPayloadRef = (ref) => {
+        const value = String(ref || '').trim();
+        if (!value) return;
+        const ok = window.FeatureDraft?.isDisplayableImage?.(value)
+          ?? window.EditPanelGallery?.isDisplayableImageUrl?.(value)
+          ?? /^(data:image\/|https?:\/\/|blob:|storage:\/\/)/i.test(value);
+        if (!ok || payloadRefImages.includes(value)) return;
+        payloadRefImages.push(value);
+      };
+      if (Array.isArray(payload?.refImages)) payload.refImages.forEach(addPayloadRef);
+      addPayloadRef(payload?.refImage);
+      const payloadRefImage = payloadRefImages[0] || null;
+      const applyGeneratedRefs = (cardTarget) => {
+        if (!cardTarget || !payloadRefImage) return false;
+        cardTarget.refImage = payloadRefImage;
+        cardTarget.refImages = payloadRefImages.length ? [...payloadRefImages] : null;
+        cardTarget.hasRefImage = true;
+        return true;
+      };
       if (!primaryImage && !(prompt || '').trim()) {
         showToast('无内容可保存');
         return { ok: false };
@@ -125,6 +145,7 @@
           }
           existing.cardImages = merged;
           CG.syncCardGalleryFields(existing);
+          applyGeneratedRefs(existing);
           if (!payload.isRecovery) existing.updatedAt = Date.now();
           await saveAllData({ skipCloud: true });
           renderGroups();
@@ -152,6 +173,7 @@
               }
             }
             existing.image = stored;
+            applyGeneratedRefs(existing);
             if (!payload.isRecovery) existing.updatedAt = Date.now();
             await saveAllData({ skipCloud: true });
             renderGroups();
@@ -163,6 +185,7 @@
         }
         if (existing && primaryImage && !existing.image) {
           existing.image = primaryImage;
+          applyGeneratedRefs(existing);
           if (!payload.isRecovery) existing.updatedAt = Date.now();
           await saveAllData({ skipCloud: true });
           renderGroups();
@@ -171,11 +194,25 @@
           window.FeatureDraft?.prunePendingGenJobsFromWarehouse?.();
           return { ok: true, cardId: existing.id, repaired: true };
         }
+        if (applyGeneratedRefs(existing)) {
+          if (!payload.isRecovery) existing.updatedAt = Date.now();
+          await saveAllData({ skipCloud: true });
+          renderGroups();
+          renderCards(true);
+          if (window.SupabaseSync?.isLoggedIn?.()) scheduleCloudPush({ urgent: true });
+        }
         window.FeatureDraft?.prunePendingGenJobsFromWarehouse?.();
         return { ok: false, duplicate: true, cardId: existing?.id };
       }
       if (sourceId && cards.some(c => c.genSourceId === sourceId)) {
         const existing = cards.find(c => c.genSourceId === sourceId);
+        if (applyGeneratedRefs(existing)) {
+          if (!payload.isRecovery) existing.updatedAt = Date.now();
+          await saveAllData({ skipCloud: true });
+          renderGroups();
+          renderCards(true);
+          if (window.SupabaseSync?.isLoggedIn?.()) scheduleCloudPush({ urgent: true });
+        }
         window.FeatureDraft?.prunePendingGenJobsFromWarehouse?.();
         return { ok: false, duplicate: true, cardId: existing?.id };
       }
@@ -211,6 +248,9 @@
         resolution: payload.resolution || null,
         model: payload.model || null,
         genQuality: payload.quality || null,
+        refImage: payloadRefImage,
+        refImages: payloadRefImages.length ? [...payloadRefImages] : null,
+        hasRefImage: !!payloadRefImage,
         isMidjourney: !!payload.isMidjourney,
         cardImages: galleryInput?.length ? galleryInput : null,
         mjGridUrls: Array.isArray(payload.mjGridUrls) ? payload.mjGridUrls.filter(Boolean) : null,

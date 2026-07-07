@@ -18,11 +18,11 @@
 
   /** 手机端性能参数（card-image-loader / warehouse-thumb / 首屏预热共用） */
   const MOBILE_PERF = {
-    warehousePrefetchCap: 8,
+    warehousePrefetchCap: 16,
     warehouseThumbBatch: 4,
     warehouseThumbDelay: 80,
-    cardEagerCap: 6,
-    cardFirstScreenCap: 8,
+    cardEagerCap: 12,
+    cardFirstScreenCap: 16,
     igFeedPatchMax: 12,
     igFeedPrefetchCap: 12,
     igFeedBoostMax: 10,

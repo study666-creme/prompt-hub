@@ -36,6 +36,8 @@
       mjButtons: Array.isArray(opts.mjButtons) ? opts.mjButtons : null,
       genBatchId: opts.genBatchId || null,
       genBatchJobIds: Array.isArray(opts.genBatchJobIds) ? opts.genBatchJobIds : null,
+      refImage: opts.refImage || null,
+      refImages: Array.isArray(opts.refImages) ? opts.refImages.filter(Boolean) : null,
       deferCloudPush: !!opts.deferCloudPush,
       isRecovery: !!opts.isRecovery
     })).then((r) => r?.ok ?? false);

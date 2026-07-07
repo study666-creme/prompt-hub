@@ -570,8 +570,8 @@
   }
 
   /* 手机固定两列：仅卡片库用 flex；社区/创作走下方 CSS Grid，避免 Masonry 绝对定位叠在一起 */
-  .cards-container.mobile-grid:not(#communityGrid):not(#creationsGrid),
-  .cards-container:not(#communityGrid):not(#creationsGrid) {
+  .cards-container.mobile-grid:not(#cardsContainer):not(#communityGrid):not(#creationsGrid),
+  .cards-container:not(#cardsContainer):not(#communityGrid):not(#creationsGrid) {
     display: flex !important;
     flex-wrap: wrap !important;
     flex-direction: row !important;
@@ -587,13 +587,13 @@
     contain: layout;
   }
 
-  .cards-container.mobile-grid:not(#communityGrid):not(#creationsGrid) > .card.is-pinned,
-  .cards-container:not(#communityGrid):not(#creationsGrid) > .card.is-pinned {
+  .cards-container.mobile-grid:not(#cardsContainer):not(#communityGrid):not(#creationsGrid) > .card.is-pinned,
+  .cards-container:not(#cardsContainer):not(#communityGrid):not(#creationsGrid) > .card.is-pinned {
     order: -1000;
   }
 
-  .cards-container.mobile-grid:not(#communityGrid):not(#creationsGrid) > .card,
-  .cards-container:not(#communityGrid):not(#creationsGrid) > .card {
+  .cards-container.mobile-grid:not(#cardsContainer):not(#communityGrid):not(#creationsGrid) > .card,
+  .cards-container:not(#cardsContainer):not(#communityGrid):not(#creationsGrid) > .card {
     flex: 0 0 calc((100% - 10px) / 2) !important;
     width: calc((100% - 10px) / 2) !important;
     max-width: calc((100% - 10px) / 2) !important;

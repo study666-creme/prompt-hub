@@ -816,6 +816,22 @@
     let prompt = cardEl?.dataset.feedPrompt || '';
     let image = '';
     let instantSrc = '';
+    const refImages = [];
+    const addPrimeRef = (ref) => {
+      const value = String(ref || '').trim();
+      if (!value || !isDisplayableImage(value) || refImages.includes(value)) return;
+      refImages.push(value);
+    };
+    const applyPrimeRefs = (item) => {
+      if (!item) return;
+      if (Array.isArray(item.refImages)) item.refImages.forEach(addPrimeRef);
+      addPrimeRef(item.refImage);
+    };
+    try {
+      const parsedRefs = cardEl?.dataset.feedRefs ? JSON.parse(cardEl.dataset.feedRefs) : null;
+      if (Array.isArray(parsedRefs)) parsedRefs.forEach(addPrimeRef);
+    } catch (e) { /* ignore malformed dataset */ }
+    addPrimeRef(cardEl?.dataset.feedRef);
     const feedImg = cardEl?.querySelector('.imagegen-feed-media img');
     if (feedImg) {
       image = feedImg.getAttribute('data-image-ref') || '';
@@ -831,21 +847,24 @@
       if (c) {
         prompt = c.prompt || prompt;
         image = c.image || image;
+        applyPrimeRefs(c);
       }
     } else if (kind === 'warehouse') {
       const c = (window.getWarehouseCardsForImageGen?.() || []).find((x) => x.id === id);
       if (c) {
         prompt = c.prompt || prompt;
         image = c.image || image;
+        applyPrimeRefs(c);
       }
     } else if (kind === 'community') {
       const post = findPost(id);
       if (post) {
         prompt = post.prompt || prompt;
         image = post.image || image;
+        applyPrimeRefs(post);
       }
     }
-    const hasRef = !!(image && isDisplayableImage(image));
+    const hasRef = refImages.length > 0;
     const fillHtml = buildPreviewFillActions(hasRef, '');
     const imgHtml = isDisplayableImage(image)
       ? `<div class="imagegen-preview-img-wrap">
@@ -862,9 +881,13 @@
       : '';
     body.innerHTML = `${imgHtml}<div class="imagegen-preview-prompt">${esc(prompt)}</div>${fillHtml}`;
     body.dataset.previewPrompt = prompt;
-    if (hasRef && image) body.dataset.previewRef = image;
-    else delete body.dataset.previewRef;
-    delete body.dataset.previewRefs;
+    if (hasRef) {
+      body.dataset.previewRef = refImages[0];
+      body.dataset.previewRefs = JSON.stringify(refImages);
+    } else {
+      delete body.dataset.previewRef;
+      delete body.dataset.previewRefs;
+    }
     if (instantSrc) {
       body.dataset.previewImageUrl = instantSrc;
       body.dataset.previewImageReady = '1';

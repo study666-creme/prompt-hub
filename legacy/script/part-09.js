@@ -873,9 +873,24 @@
     let warehousePageObserver = null;
     let warehouseScrollSentinel = null;
     let warehouseScrollLoading = false;
+    function isUsableWarehouseScrollRoot(el) {
+      if (!el || el === document.body || el === document.documentElement) return false;
+      const rect = el.getBoundingClientRect?.();
+      if (!rect || rect.height < 120 || rect.width < 120) return false;
+      const st = getComputedStyle(el);
+      return /(auto|scroll|overlay)/.test(st.overflowY || '') || el.scrollHeight > el.clientHeight + 2;
+    }
     const warehouseScrollRoot = () => {
       if (!isMobileViewport()) return document.getElementById('cardsContainer');
-      return document.querySelector('.app-main') || document.getElementById('mainContentArea') || document.getElementById('cardsContainer');
+      const page = document.getElementById('pageWarehouse');
+      const candidates = [
+        page?.querySelector?.('.feature-shell'),
+        page,
+        document.querySelector('.app-main'),
+        document.getElementById('mainContentArea'),
+        document.getElementById('cardsContainer')
+      ];
+      return candidates.find(isUsableWarehouseScrollRoot) || document.scrollingElement || document.documentElement;
     };
     function loadNextWarehousePage() {
       if (warehouseScrollLoading) return;

@@ -49,7 +49,9 @@
     mjCompositeUrl,
     mjButtons,
     mjSplitSave,
-    cardImages
+    cardImages,
+    refImage: submittedRefImage,
+    refImages: submittedRefImages
   }) {
     if (!image) {
       d().toast('图片地址无效，请重试');
@@ -102,8 +104,14 @@
       }
       if (idx === 1) d().setImageGenLastResult(storedImage);
 
-      const primaryRef = d().getImageGenPrimaryRef();
-      const refImages = d().getImageGenRefImages() || [];
+      const submittedRefs = Array.isArray(submittedRefImages)
+        ? submittedRefImages.filter((ref) => d().isDisplayableImage?.(ref))
+        : [];
+      const formRefs = (d().getImageGenRefImages() || []).filter((ref) => d().isDisplayableImage?.(ref));
+      const refImages = submittedRefs.length ? submittedRefs : formRefs;
+      const primaryRef = (submittedRefImage && d().isDisplayableImage?.(submittedRefImage))
+        ? submittedRefImage
+        : (refImages[0] || d().getImageGenPrimaryRef());
       const modelId = model || 'gpt-image-2';
       const modelLabel = global.PointsSystem?.getImageGenModel?.(modelId)?.label || modelId;
 
@@ -221,7 +229,9 @@
             isRecovery,
             fromInspirationDraw,
             pendingId: null,
-            imageIndex: i + 2
+            imageIndex: i + 2,
+            refImage: primaryRef,
+            refImages
           });
         }
       }

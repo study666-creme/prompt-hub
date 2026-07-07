@@ -91,6 +91,13 @@
       const modelLabel = global.PointsSystem?.getImageGenModel?.(model)?.label || model;
       pendingId = d().genId('pending');
       const saveTarget = d().getImageGenSaveTarget();
+      const submittedRefImages = batchOpts.skipRefImages
+        ? []
+        : (Array.isArray(batchOpts.refImages) && batchOpts.refImages.length
+          ? batchOpts.refImages
+          : (d().getImageGenRefImages?.() || []))
+          .filter(Boolean);
+      const submittedRefImage = submittedRefImages[0] || (!batchOpts.skipRefImages ? d().getImageGenPrimaryRef?.() : null) || null;
       const pendingJob = {
         id: pendingId,
         prompt,
@@ -114,6 +121,8 @@
         batchTotal: batchOpts.batchTotal || null,
         batchId: batchOpts.batchId || null,
         silentToast: !!batchOpts.silentToast,
+        refImage: submittedRefImage,
+        refImages: submittedRefImages.length ? [...submittedRefImages] : null,
         startedAt: Date.now()
       };
       d().unshiftPendingJob(pendingJob);
@@ -155,11 +164,7 @@
       }
 
       if (useApi) {
-        const refSources = batchOpts.skipRefImages
-          ? []
-          : Array.isArray(batchOpts.refImages) && batchOpts.refImages.length
-            ? batchOpts.refImages
-            : (d().getImageGenRefImages?.() || []);
+        const refSources = submittedRefImages;
         const refUrls = await d().resolveRefUrlsFromList(refSources);
         if (refSources.length && refUrls.length < refSources.length && !batchOpts.silentToast) {
           d().toast(`已使用 ${refUrls.length}/${refSources.length} 张参考图继续生成`);

@@ -1056,10 +1056,30 @@
     }
   }
 
+  function isUsableScrollRoot(el) {
+    if (!el || el === document.body || el === document.documentElement) return false;
+    const rect = el.getBoundingClientRect?.();
+    if (!rect || rect.height < 120 || rect.width < 120) return false;
+    const st = getComputedStyle(el);
+    const canScroll = /(auto|scroll|overlay)/.test(st.overflowY || '');
+    return canScroll || el.scrollHeight > el.clientHeight + 2;
+  }
+
+  function mobileScrollRootFor(container) {
+    const page = container?.closest?.('.app-page.active') || container?.closest?.('.app-page');
+    const candidates = [
+      page?.querySelector?.('.feature-shell'),
+      page,
+      document.querySelector('.app-main'),
+      document.getElementById('mainContentArea')
+    ];
+    return candidates.find(isUsableScrollRoot) || document.scrollingElement || document.documentElement;
+  }
+
   function scrollRootFor(container) {
     if (window.MobileUI?.isMobileViewport?.()) {
       if (container?.id === 'cardsContainer' || container?.id === 'imageGenFeed') {
-        return document.querySelector('.app-main') || null;
+        return mobileScrollRootFor(container);
       }
     }
     if (isCommunityContainer(container) && container.classList?.contains('community-feed-columns')) {

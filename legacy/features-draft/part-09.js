@@ -371,7 +371,8 @@
       prompt = c.prompt || '';
       image = c.image || '';
       jobId = normalizeMjParentJobId(c.jobId || '');
-      if (isDisplayableImage(c.image)) refImage = c.image;
+      refImages = Array.isArray(c.refImages) ? c.refImages.filter((ref) => isDisplayableImage(ref)) : null;
+      refImage = refImages?.[0] || (isDisplayableImage(c.refImage) ? c.refImage : null);
       if (!isCreationLinkedToWarehouse(c)) {
         extraActions = '<button type="button" class="btn btn-primary btn-sm" data-preview-save-warehouse>存入库</button>';
       }
@@ -387,7 +388,8 @@
       image = c.image || '';
       jobId = c.feedCoverJobId || normalizeMjParentJobId(c.genJobId || '')
         || window.PromptHubCardGallery?.resolveGenJobIdFromCard?.(c) || '';
-      if (isDisplayableImage(c.image)) refImage = c.image;
+      refImages = Array.isArray(c.refImages) ? c.refImages.filter((ref) => isDisplayableImage(ref)) : null;
+      refImage = refImages?.[0] || (isDisplayableImage(c.refImage) ? c.refImage : null);
     }
     const previewCard = imageGenPreviewKind === 'recent'
       ? findCreationById(imageGenPreviewId)

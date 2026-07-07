@@ -4,7 +4,7 @@
  * 模式（见 FEED_LAYOUT_MODE）：
  * - communityGrid 桌面：Masonry（列间距 gutter；**上下间距靠 CSS margin-bottom**，gutter 不含纵向）
  * - creationsGrid 桌面：flex 多列（.community-feed-col，文档流）
- * - 手机：mobile-grid
+ * - 手机社区/我的主页：flex 多列（.community-feed-col，文档流）
  *
  * 调试：FeedLayout.diagnose('communityGrid') / FeedLayout.diagnose('creationsGrid')
  */
@@ -55,8 +55,9 @@
   }
 
   function getMode(containerId) {
-    if (containerId === 'creationsGrid' && isMobile()) return 'mobile-grid';
-    if (containerId === 'communityGrid' && isMobile()) return 'mobile-grid';
+    if ((containerId === 'creationsGrid' || containerId === 'communityGrid') && isMobile()) {
+      return 'flex-columns';
+    }
     return FEED_LAYOUT_MODE[containerId] || 'masonry';
   }
 
@@ -66,8 +67,7 @@
 
   function useMobileGrid(containerId) {
     if (containerId === 'userProfileGrid') return true;
-    if (containerId !== 'communityGrid' && containerId !== 'creationsGrid') return false;
-    return isMobile();
+    return false;
   }
 
   function getGaps() {
@@ -588,7 +588,7 @@
       layoutFlex('creationsGrid', { force: true, forceReflow: true });
       return;
     }
-    if (isMobile() && containerId === 'communityGrid') {
+    if (getMode(containerId) === 'mobile-grid') {
       enforceMobileGrid(containerId);
       return;
     }
@@ -762,11 +762,11 @@
   }
 
   function scheduleMasonryRelayout(containerId = 'communityGrid') {
-    if (isMobile()) return;
     if (useFlexColumns(containerId)) {
       scheduleFlexColumnRebalance(containerId, { delay: 90 });
       return;
     }
+    if (isMobile()) return;
     const container = document.getElementById(containerId);
     if (!container) return;
     const inst = containerId === 'userProfileGrid' ? profileMasonry : communityMasonry;
@@ -787,10 +787,6 @@
   }
 
   function relayoutAll() {
-    if (isMobile()) {
-      enforceMobileGrid('communityGrid');
-      enforceMobileGrid('creationsGrid');
-    }
     ['communityGrid', 'creationsGrid', 'userProfileGrid'].forEach((id) => layout(id));
   }
 
@@ -913,7 +909,8 @@
   function bindImageRelayout(containerId) {
     if (feedGridImageRelayoutBound[containerId]) return;
     const container = document.getElementById(containerId);
-    if (!container || isMobile()) return;
+    if (!container) return;
+    if (isMobile() && !useFlexColumns(containerId)) return;
     feedGridImageRelayoutBound[containerId] = true;
     container.addEventListener('load', (e) => {
       if (!e.target?.classList?.contains('card-img')) return;
