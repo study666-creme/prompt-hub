@@ -642,6 +642,7 @@
       model: getImageGenModel(),
       refImages: getImageGenRefImages(),
       refImage: getImageGenPrimaryRef(),
+      referenceAssets: getImageGenReferenceAssets(),
       resolution: normalizeImageGenResolution(document.getElementById('imageGenResolution')?.value || '1k'),
       quality: getImageGenQuality(),
       size: document.getElementById('imageGenSize')?.value || '',
@@ -707,7 +708,8 @@
     const max = getImageGenMaxRefImages();
     const refs = getImageGenRefImages();
     if (refs.length <= max) return;
-    setImageGenRefs(refs.slice(0, max));
+    const assets = getImageGenReferenceAssets();
+    setImageGenRefs(refs.slice(0, max), { referenceAssets: assets.slice(0, max) });
     toast(`Midjourney 参考图最多 ${max} 张，已保留前 ${max} 张`);
   }
 
@@ -897,4 +899,3 @@
     if (detail?.final != null) return detail.final;
     return window.PointsSystem?.getImageGenCost?.(model, '1k') ?? null;
   }
-

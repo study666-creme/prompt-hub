@@ -8,6 +8,7 @@ const root = bundleRootFromMeta(import.meta.url);
 const sources = [
   'feed-layout.js',
   'feed-images.js',
+  'image-gen-feed-cards.js',
   'image-gen-feed.js'
 ];
 

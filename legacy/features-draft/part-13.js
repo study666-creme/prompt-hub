@@ -1,6 +1,7 @@
         prompt: data.prompt,
         refImages: data.refImages,
         refImage: data.refImage,
+        referenceAssets: data.referenceAssets,
         resolution: data.resolution
       });
     } catch (e) { /* ignore */ }
@@ -8,6 +9,7 @@
 
   function getImageGenRefImages() { return ru('getImageGenRefImages') || []; }
   function getImageGenPrimaryRef() { return ru('getImageGenPrimaryRef') || null; }
+  function getImageGenReferenceAssets() { return ru('getImageGenReferenceAssets') || []; }
   function setImageGenRefs(urls, opts) { return ru('setImageGenRefs', urls, opts); }
   function clearImageGenRef() { return ru('clearImageGenRef'); }
   async function resolveRefDisplayUrl(ref, opts) { return ru('resolveRefDisplayUrl', ref, opts) || ''; }
@@ -443,6 +445,7 @@
       persistCreations,
       getImageGenRefImages,
       getImageGenPrimaryRef,
+      getImageGenReferenceAssets,
       isImageGenMjSaveAllTiles,
       genRetentionMs,
       dedupeCreationsByJobId,
@@ -501,6 +504,7 @@
       isImageGenMjSaveAllTiles,
       getImageGenRefImages,
       getImageGenPrimaryRef,
+      getImageGenReferenceAssets,
       getImageGenBatchCount,
       getImageGenCardTitle,
       isImageGenBatchSplitCards,

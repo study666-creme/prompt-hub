@@ -604,8 +604,8 @@
     if (draft) {
       const promptEl = document.getElementById('imageGenPrompt');
       if (promptEl && draft.prompt) promptEl.value = draft.prompt;
-      if (draft.refImages?.length) setImageGenRefs(draft.refImages);
-      else if (draft.refImage) setImageGenRefs([draft.refImage]);
+      if (draft.refImages?.length) setImageGenRefs(draft.refImages, { referenceAssets: draft.referenceAssets });
+      else if (draft.refImage) setImageGenRefs([draft.refImage], { referenceAssets: draft.referenceAssets });
       else clearImageGenRef();
       const resEl = document.getElementById('imageGenResolution');
       if (resEl && draft.resolution) resEl.value = draft.resolution;

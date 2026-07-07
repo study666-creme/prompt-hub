@@ -42,6 +42,18 @@ Write-Host "verify-feed-image-fit-regression ..."
 & node (Join-Path $root "scripts\verify-feed-image-fit-regression.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+Write-Host "verify-mobile-feed-regression ..."
+& node (Join-Path $root "scripts\verify-mobile-feed-regression.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+Write-Host "verify-reference-assets-regression ..."
+& node (Join-Path $root "scripts\verify-reference-assets-regression.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+Write-Host "verify-admin-split-regression ..."
+& node (Join-Path $root "scripts\verify-admin-split-regression.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 $esbuildSmoke = Join-Path $root "scripts\esbuild-bundle-smoke.mjs"
 if (-not (Test-Path (Join-Path $root "node_modules\esbuild"))) {
   Write-Host "Installing root npm deps (esbuild) ..." -ForegroundColor Yellow

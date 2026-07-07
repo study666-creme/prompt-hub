@@ -6,56 +6,21 @@
   let observer = null;
   let observedRoot = null;
   const inflight = new WeakMap();
-  const resolveQueue = [];
-  const feedResolveQueue = [];
-  let resolveActive = 0;
-  let feedResolveActive = 0;
-  function maxResolveCap() {
-    return window.MobileUI?.getPerf?.()?.maxResolve ?? 10;
-  }
-  function feedMaxResolveCap() {
-    return window.MobileUI?.getPerf?.()?.feedMaxResolve ?? 8;
-  }
-  function maxDownloadCap() {
-    return window.MobileUI?.getPerf?.()?.maxDownload ?? 8;
-  }
-  function igFeedPatchMax() {
-    return window.MobileUI?.getPerf?.()?.igFeedPatchMax ?? 12;
-  }
-  function igFeedBoostMax() {
-    return window.MobileUI?.getPerf?.()?.igFeedBoostMax ?? 12;
-  }
-  function igFeedPrefetchMax() {
-    return window.MobileUI?.getPerf?.()?.igFeedPrefetchCap ?? 12;
-  }
-  function warehousePrefetchCap() {
-    const mp = window.MobileUI?.getPerf?.();
-    if (mp?.warehousePrefetchCap) return Math.max(4, Number(mp.warehousePrefetchCap) || 8);
-    return 24;
-  }
-  /** 首屏 batch 签名张数：与 PER_PAGE=24 对齐 */
-  function warehouseInitialSignCap() {
-    if (window.MobileUI?.isMobileViewport?.()) {
-      return warehousePrefetchCap();
-    }
-    return 24;
-  }
-  function warehouseDesktopPatchCap() {
-    return warehouseInitialSignCap();
-  }
-  function cardEagerCap() {
-    return window.MobileUI?.getPerf?.()?.cardEagerCap ?? 16;
-  }
-  function cardFirstScreenCap() {
-    return window.MobileUI?.getPerf?.()?.cardFirstScreenCap ?? 16;
-  }
-  const VISIBLE_LOAD_MARGIN = 160;
-  const prefetchedImageRefs = new Set();
-  const containerSignReady = new Map();
-  const warehousePrefetchSigs = new Map();
-
-  const downloadQueue = [];
-  let downloadActive = 0;
+  const queues = window.CardImageLoaderQueues.create();
+  function maxResolveCap() { return queues.maxResolveCap(); }
+  function feedMaxResolveCap() { return queues.feedMaxResolveCap(); }
+  function maxDownloadCap() { return queues.maxDownloadCap(); }
+  function igFeedPatchMax() { return queues.igFeedPatchMax(); }
+  function igFeedBoostMax() { return queues.igFeedBoostMax(); }
+  function igFeedPrefetchMax() { return queues.igFeedPrefetchMax(); }
+  function warehousePrefetchCap() { return queues.warehousePrefetchCap(); }
+  function warehouseInitialSignCap() { return queues.warehouseInitialSignCap(); }
+  function warehouseDesktopPatchCap() { return queues.warehouseDesktopPatchCap(); }
+  function cardEagerCap() { return queues.cardEagerCap(); }
+  function cardFirstScreenCap() { return queues.cardFirstScreenCap(); }
+  function enqueueDownload(fn) { return queues.enqueueDownload(fn); }
+  function enqueueResolve(fn) { return queues.enqueueResolve(fn); }
+  function enqueueFeedResolve(fn) { return queues.enqueueFeedResolve(fn); }
 
   function setContainerSignReady(container, promise) {
     const id = container?.id;

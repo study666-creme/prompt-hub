@@ -23,6 +23,7 @@
   const IMAGEGEN_REF_DROP_MIME = 'application/x-prompt-hub-image-ref';
 
   let imageGenRefImages = [];
+  let imageGenRefAssets = [];
   let imageGenRefResolveAssetId = '';
   let refAnnotatorIdx = -1;
   let refAnnotatorStrokes = [];
@@ -181,6 +182,34 @@ function parseImageGenRefDropPayload(dt) {
     return null;
   }
 
+function normalizeRefAsset(ref, raw = {}, fallback = {}) {
+    const value = String(ref || raw.ref || raw.imageRef || '').trim();
+    if (!value) return null;
+    return {
+      ref: value,
+      sourceCardId: String(raw.sourceCardId || raw.cardId || fallback.sourceCardId || fallback.assetId || '').trim() || null,
+      jobId: String(raw.jobId || fallback.jobId || '').trim() || null,
+      source: String(raw.source || fallback.source || '').trim() || null
+    };
+  }
+
+function rebuildImageGenRefAssets(refs, opts = {}) {
+    const sourceAssets = Array.isArray(opts.referenceAssets) ? opts.referenceAssets : [];
+    return (refs || []).map((ref, index) => {
+      const matched = sourceAssets.find((a) => a && (a.ref === ref || a.imageRef === ref)) || sourceAssets[index] || {};
+      return normalizeRefAsset(ref, matched, {
+        assetId: opts.assetId,
+        sourceCardId: opts.sourceCardId,
+        jobId: opts.jobId,
+        source: opts.source || (opts.assetId || opts.sourceCardId ? 'feed' : '')
+      });
+    }).filter(Boolean);
+  }
+
+function getImageGenReferenceAssets() {
+    return rebuildImageGenRefAssets(imageGenRefImages, { referenceAssets: imageGenRefAssets });
+  }
+
 function addImageGenRefFromFeed(payload) {
     const imageRef = String(payload?.imageRef || payload || '').trim();
     if (!imageRef || !d().isDisplayableImage(imageRef)) {
@@ -197,6 +226,7 @@ function addImageGenRefFromFeed(payload) {
     }
     imageGenRefImages.push(imageRef);
     const assetId = String(payload?.sourceCardId || '').trim();
+    imageGenRefAssets.push(normalizeRefAsset(imageRef, payload, { source: 'feed' }));
     if (assetId && imageGenRefImages.length === 1) {
       imageGenRefResolveAssetId = assetId;
     }
@@ -218,6 +248,7 @@ async function addImageGenRefFiles(fileList) {
       try {
         const { dataUrl, compressed } = await prepareRefImageFromFile(f);
         imageGenRefImages.push(dataUrl);
+        imageGenRefAssets.push(normalizeRefAsset(dataUrl, { source: 'upload' }));
         added++;
         if (compressed) compressedCount++;
       } catch (e) {
@@ -238,6 +269,7 @@ async function addImageGenRefFiles(fileList) {
 
 function removeImageGenRefAt(idx) {
     imageGenRefImages.splice(idx, 1);
+    imageGenRefAssets.splice(idx, 1);
     renderImageGenRefGallery();
   }
 
@@ -403,6 +435,9 @@ function bindRefImageAnnotatorOnce() {
           paintRefAnnotatorStrokesToCtx(ctx, refAnnotatorStrokes, scaleX, scaleY);
           const dataUrl = await canvasToJpegDataUrl(out, 0.92);
           imageGenRefImages[refAnnotatorIdx] = dataUrl;
+          imageGenRefAssets[refAnnotatorIdx] = normalizeRefAsset(dataUrl, imageGenRefAssets[refAnnotatorIdx] || {}, {
+            source: 'annotation'
+          });
           renderImageGenRefGallery();
           d().toast('标注已保存，生图时会带上标记区域');
         } catch (e) {
@@ -620,11 +655,13 @@ function renderImageGenRefGallery() {
     } else {
       imageGenRefImages = Array.isArray(urls) ? urls.filter(Boolean).slice(0, maxRefImages()) : [];
     }
+    imageGenRefAssets = rebuildImageGenRefAssets(imageGenRefImages, opts);
     renderImageGenRefGallery();
   }
 
 function clearImageGenRef() {
     imageGenRefImages = [];
+    imageGenRefAssets = [];
     imageGenRefResolveAssetId = '';
     renderImageGenRefGallery();
   }
@@ -764,6 +801,7 @@ function bindImageGenUpload() {
     return {
       getImageGenRefImages,
       getImageGenPrimaryRef,
+      getImageGenReferenceAssets,
       setImageGenRefs,
       clearImageGenRef,
       resolveRefDisplayUrl,

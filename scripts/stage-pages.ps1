@@ -21,6 +21,7 @@ $allowedDirs = @(
 $entryRootFiles = @(
   'index.html',
   'admin.html',
+  'admin-login.html',
   'asset-studio.html',
   'privacy.html',
   'terms.html',

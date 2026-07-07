@@ -17,6 +17,7 @@ const sources = [
   'imagegen-warehouse-save.js',
   'imagegen-finish-run.js',
   'imagegen-poll-warehouse.js',
+  'imagegen-job-state.js',
   'imagegen-job-runner.js',
   'imagegen-submit.js'
 ];

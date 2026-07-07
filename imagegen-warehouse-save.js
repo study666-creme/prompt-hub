@@ -38,6 +38,7 @@
       genBatchJobIds: Array.isArray(opts.genBatchJobIds) ? opts.genBatchJobIds : null,
       refImage: opts.refImage || null,
       refImages: Array.isArray(opts.refImages) ? opts.refImages.filter(Boolean) : null,
+      referenceAssets: Array.isArray(opts.referenceAssets) ? opts.referenceAssets.filter(Boolean) : null,
       deferCloudPush: !!opts.deferCloudPush,
       isRecovery: !!opts.isRecovery
     })).then((r) => r?.ok ?? false);

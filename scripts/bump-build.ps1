@@ -1,4 +1,4 @@
-# Bump build id before Pages deploy (index.html, admin.html, sw.js)
+# Bump build id before Pages deploy (index.html, admin pages, sw.js)
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $today = Get-Date -Format "yyyyMMdd"
@@ -29,6 +29,7 @@ $oldEsc = [regex]::Escape($old)
 $files = @(
   (Join-Path $root "index.html"),
   (Join-Path $root "admin.html"),
+  (Join-Path $root "admin-login.html"),
   (Join-Path $root "sw.js"),
   (Join-Path $root "styles.css"),
   (Join-Path $root "styles-features.css")
@@ -57,9 +58,10 @@ foreach ($path in $files) {
       $t = [regex]::Replace($t, "($esc\?v=)\d{8}[a-z]", "`${1}$new")
     }
     # Core pack scripts also carry ?v= because browser/CDN caches can outlive sw.js.
-  } elseif ($path -like '*admin.html') {
+  } elseif ((Split-Path $path -Leaf) -in @('admin.html', 'admin-login.html')) {
     $t = [regex]::Replace($t, "__ADMIN_BUILD__\s*=\s*'[^']+'", "__ADMIN_BUILD__ = '$new'")
     $t = [regex]::Replace($t, 'admin\.js\?v=[^"\s>]+', "admin.js?v=$new")
+    $t = [regex]::Replace($t, 'styles-admin\.css\?v=[^"\s>]+', "styles-admin.css?v=$new")
   } elseif ($path -like '*sw.js') {
     $t = [regex]::Replace($t, "const CACHE = 'prompt-hub-v[^']+';", "const CACHE = 'prompt-hub-v$new';")
   } else {

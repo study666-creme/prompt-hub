@@ -25,6 +25,18 @@ if (!index.ok) {
 }
 const buildId = (index.text.match(/__APP_BUILD__\s*=\s*'([^']+)'/) || [])[1] || 'smoke';
 
+const adminLogin = await get('/admin-login.html');
+if (!adminLogin.ok || !adminLogin.text.includes('id="adminLogin"') || adminLogin.text.includes('id="adminApp"')) {
+  console.error('index-http-smoke: admin-login.html must be the standalone login page');
+  process.exit(1);
+}
+
+const adminConsole = await get('/admin.html');
+if (!adminConsole.ok || !adminConsole.text.includes('id="adminApp"') || adminConsole.text.includes('id="adminLogin"')) {
+  console.error('index-http-smoke: admin.html must be the standalone console page');
+  process.exit(1);
+}
+
 const mustHave = [
   'pack-prelude.js',
   'pack-foundation.js',

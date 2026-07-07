@@ -1,4 +1,4 @@
-# 当前问题与进度（2026-06-07）
+# 当前问题与进度（2026-07-08）
 
 > **接手顺序**：本文 → `PROJECT_CONTEXT.md` → `CARD-LOADING.md` → `AI-HANDOFF.md`  
 > **调试细节**：Cloudflare 额度 → `docs/DEBUG-GUIDE.md`
@@ -9,8 +9,8 @@
 
 | 项 | 值 |
 |----|-----|
-| **当前 Pages** | **`20260625p`**（`window.__APP_BUILD__`） |
-| **运营后台** | `admin.html` · build `20260625p` |
+| **当前 Pages** | **`20260708b`**（`window.__APP_BUILD__`） |
+| **运营后台** | `admin-login.html` 登录入口 + `admin.html` 控制台 · build `20260708b` |
 | Pages | https://prompt-hubs.com |
 | API | https://api.prompt-hubs.com |
 | Worker | `prompt-hub-api` |

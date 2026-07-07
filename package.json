@@ -8,8 +8,11 @@
     "build:feed": "node scripts/build-feed-bundle.mjs",
     "build:imagegen": "node scripts/build-imagegen-bundle.mjs",
     "build:all": "node scripts/build-all-bundles.mjs",
+    "build-all": "node scripts/build-all-bundles.mjs",
     "check:esbuild": "node scripts/esbuild-bundle-smoke.mjs",
-    "check:predeploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-predeploy-smoke.ps1"
+    "check-esbuild": "node scripts/esbuild-bundle-smoke.mjs",
+    "check:predeploy": "node scripts/run-predeploy-smoke.mjs",
+    "check-predeploy": "node scripts/run-predeploy-smoke.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.25.5"

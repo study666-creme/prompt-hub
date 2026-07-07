@@ -163,3 +163,17 @@ cd D:\prompt-hub
 
 控制台：`window.__APP_BUILD__`  
 健康检查（本机 Worker）：http://127.0.0.1:8787/health → `"supabase":"ok"`
+
+---
+
+## Windows npm check aliases
+
+On Windows with npm 8, scripts with `:` in the name can fail before Node starts because npm creates a temporary `.cmd` file using the lifecycle name. Use the colon-free aliases:
+
+```powershell
+npm run build-all
+npm run check-esbuild
+npm run check-predeploy
+```
+
+The colon scripts stay in `package.json` for compatibility, but local predeploy verification should use `npm run check-predeploy`.

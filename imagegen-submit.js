@@ -15,6 +15,20 @@
     return typeof fn === 'function' ? fn(...args) : undefined;
   }
 
+  function normalizeReferenceAssets(refs, assets, fallback = {}) {
+    const list = Array.isArray(refs) ? refs.filter(Boolean) : [];
+    const sourceAssets = Array.isArray(assets) ? assets : [];
+    return list.map((ref, index) => {
+      const matched = sourceAssets.find((a) => a && (a.ref === ref || a.imageRef === ref)) || sourceAssets[index] || {};
+      return {
+        ref,
+        sourceCardId: String(matched.sourceCardId || matched.cardId || fallback.sourceCardId || fallback.assetId || '').trim() || null,
+        jobId: String(matched.jobId || fallback.jobId || '').trim() || null,
+        source: String(matched.source || fallback.source || '').trim() || null
+      };
+    });
+  }
+
   async function runImageGenWithPrompt(promptOverride, opts) {
     const batchOpts = opts && typeof opts === 'object' ? opts : {};
     if (!global.AuthGate?.requireAuth?.('imagegen')) return { ok: false };
@@ -76,6 +90,7 @@
         model,
         refImages: d().getImageGenRefImages?.() || [],
         refImage: d().getImageGenPrimaryRef?.(),
+        referenceAssets: d().getImageGenReferenceAssets?.() || [],
         resolution,
         quality,
         size,
@@ -98,6 +113,20 @@
           : (d().getImageGenRefImages?.() || []))
           .filter(Boolean);
       const submittedRefImage = submittedRefImages[0] || (!batchOpts.skipRefImages ? d().getImageGenPrimaryRef?.() : null) || null;
+      const submittedReferenceAssets = batchOpts.skipRefImages
+        ? []
+        : normalizeReferenceAssets(
+          submittedRefImages,
+          Array.isArray(batchOpts.referenceAssets)
+            ? batchOpts.referenceAssets
+            : (d().getImageGenReferenceAssets?.() || []),
+          {
+            assetId: batchOpts.assetId,
+            sourceCardId: batchOpts.sourceCardId,
+            jobId: batchOpts.jobId,
+            source: 'form'
+          }
+        );
       const pendingJob = {
         id: pendingId,
         prompt,
@@ -123,6 +152,7 @@
         silentToast: !!batchOpts.silentToast,
         refImage: submittedRefImage,
         refImages: submittedRefImages.length ? [...submittedRefImages] : null,
+        referenceAssets: submittedReferenceAssets.length ? submittedReferenceAssets : null,
         startedAt: Date.now()
       };
       d().unshiftPendingJob(pendingJob);
@@ -265,7 +295,8 @@
                 cost,
                 jobId: gen.data.jobId,
                 silentToast: batchOpts.silentToast,
-                fromInspirationDraw: !!batchOpts.fromInspirationDraw
+                fromInspirationDraw: !!batchOpts.fromInspirationDraw,
+                referenceAssets: submittedReferenceAssets
               });
               return { ok: true, creditsCharged: cost };
             }
@@ -282,6 +313,7 @@
               cardTitle: pendingJob.cardTitle,
               genBatchId: pendingJob.batchMergeCards ? pendingJob.batchId : null,
               batchMergeCards: pendingJob.batchMergeCards,
+              referenceAssets: submittedReferenceAssets,
               silentToast: batchOpts.silentToast,
               fromInspirationDraw: !!batchOpts.fromInspirationDraw,
               pendingId,
@@ -310,6 +342,7 @@
               targetGroup: pendingJob.targetGroup,
               targetTags: pendingJob.targetTags,
               cardTitle: pendingJob.cardTitle,
+              referenceAssets: submittedReferenceAssets,
               silentToast: batchOpts.silentToast,
               fromInspirationDraw: !!batchOpts.fromInspirationDraw,
               pendingId
@@ -345,6 +378,7 @@
           size,
           cost,
           jobId,
+          referenceAssets: submittedReferenceAssets,
           targetGroup: pendingJob.targetGroup,
           targetTags: pendingJob.targetTags,
           startedAt: pendingJob.startedAt,

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <script>
+    window.__ADMIN_BUILD__ = '20260708b';
+    (function () {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function (regs) {
+          return Promise.all(regs.map(function (r) { return r.unregister(); }));
+        });
+      }
+      if ('caches' in window) {
+        caches.keys().then(function (keys) {
+          return Promise.all(
+            keys.filter(function (k) { return /prompt-hub-v/i.test(k); }).map(function (k) { return caches.delete(k); })
+          );
+        });
+      }
+    })();
+  </script>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Prompt Hub 管理登录</title>
+  <link rel="stylesheet" href="styles-admin.css?v=20260708b">
+</head>
+<body class="admin-login-page admin-gate" data-admin-page="login">
+  <main class="admin-login" id="adminLogin">
+    <div class="admin-login-shell">
+      <section class="admin-login-brand" aria-label="Prompt Hub">
+        <div class="admin-login-mark" aria-hidden="true">P</div>
+        <p class="admin-login-eyebrow">Prompt Hub Admin</p>
+        <h1>运营控制台</h1>
+        <p>管理用户、社区内容、激活码与生图模型配置。</p>
+        <div class="admin-login-meta">
+          <span>API 自动选择</span>
+          <span>构建 <code id="adminBuildTag">20260707v</code></span>
+        </div>
+      </section>
+
+      <section class="admin-card admin-login-card" aria-labelledby="adminLoginTitle">
+        <p class="admin-login-kicker">Authorized Access</p>
+        <h2 id="adminLoginTitle">管理登录</h2>
+        <p class="admin-hint">仅限授权人员使用。登录后进入独立控制台页面。</p>
+        <div class="admin-field">
+          <label for="adminSecret">访问密钥</label>
+          <input type="password" id="adminSecret" placeholder="请输入密钥" autocomplete="off" spellcheck="false" autocapitalize="off">
+          <label class="admin-check"><input type="checkbox" id="adminShowSecret"> 显示密钥</label>
+        </div>
+        <button type="button" class="admin-btn admin-btn--primary admin-login-submit" id="loginBtn">登录控制台</button>
+        <p class="admin-msg admin-msg--err" id="loginMsg" hidden></p>
+      </section>
+    </div>
+  </main>
+
+  <div class="admin-toast" id="adminToast" hidden></div>
+
+  <script src="api-domain.config.js"></script>
+  <script src="api-config.js"></script>
+  <script src="admin.js?v=20260708b"></script>
+</body>
+</html>

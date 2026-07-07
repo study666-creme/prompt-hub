@@ -51,7 +51,8 @@
     mjSplitSave,
     cardImages,
     refImage: submittedRefImage,
-    refImages: submittedRefImages
+    refImages: submittedRefImages,
+    referenceAssets: submittedReferenceAssets
   }) {
     if (!image) {
       d().toast('图片地址无效，请重试');
@@ -109,6 +110,9 @@
         : [];
       const formRefs = (d().getImageGenRefImages() || []).filter((ref) => d().isDisplayableImage?.(ref));
       const refImages = submittedRefs.length ? submittedRefs : formRefs;
+      const referenceAssets = Array.isArray(submittedReferenceAssets)
+        ? submittedReferenceAssets.filter((a) => a && (a.ref || a.imageRef))
+        : [];
       const primaryRef = (submittedRefImage && d().isDisplayableImage?.(submittedRefImage))
         ? submittedRefImage
         : (refImages[0] || d().getImageGenPrimaryRef());
@@ -161,6 +165,7 @@
         image: isMidjourney ? (galleryFromMj()[0] || storedImage) : storedImage,
         refImage: primaryRef,
         refImages: refImages.length ? [...refImages] : null,
+        referenceAssets: referenceAssets.length ? referenceAssets.map((a) => ({ ...a, ref: a.ref || a.imageRef })) : null,
         model: modelId,
         modelLabel,
         resolution,
@@ -231,7 +236,8 @@
             pendingId: null,
             imageIndex: i + 2,
             refImage: primaryRef,
-            refImages
+            refImages,
+            referenceAssets
           });
         }
       }

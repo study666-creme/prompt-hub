@@ -4,8 +4,8 @@ $root = Split-Path $PSScriptRoot -Parent
 
 $files = @(
   'script.js', 'edit-panel-gallery.js', 'features-draft.js', 'image-gen-feed.js', 'media-pipeline.js',
-  'sync-orchestrator.js', 'card-image-loader.js', 'feed-images.js', 'feed-layout.js',
-  'mobile.js', 'features-assets.js', 'community-public-feed.js', 'imagegen-gen-errors.js', 'imagegen-warehouse-repair.js', 'imagegen-ref-compress.js', 'imagegen-ref-ui.js', 'imagegen-ref-resolve.js', 'imagegen-warehouse-save.js', 'imagegen-finish-run.js', 'imagegen-poll-warehouse.js', 'imagegen-job-runner.js', 'imagegen-submit.js', 'asset-studio.js', 'supabase-sync.js',
+  'sync-orchestrator.js', 'card-image-loader-queues.js', 'card-image-loader.js', 'feed-images.js', 'feed-layout.js', 'image-gen-feed-cards.js',
+  'mobile.js', 'features-assets.js', 'community-public-feed.js', 'imagegen-gen-errors.js', 'imagegen-warehouse-repair.js', 'imagegen-ref-compress.js', 'imagegen-ref-ui.js', 'imagegen-ref-resolve.js', 'imagegen-warehouse-save.js', 'imagegen-finish-run.js', 'imagegen-poll-warehouse.js', 'imagegen-job-state.js', 'imagegen-job-runner.js', 'imagegen-submit.js', 'asset-studio.js', 'supabase-sync.js',
   'api-client.js', 'community-gacha.js', 'admin.js', 'imagegen-prompt-tools.js',
   'imagegen-prompt-kit.js', 'points-system.js', 'cloud-sync-safety.js', 'app-toast.js', 'app-viewer-core.js', 'app-appreciate.js', 'media-download.js', 'app-lightbox.js'
 )

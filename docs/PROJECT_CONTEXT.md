@@ -4,11 +4,11 @@
 
 ---
 
-## 当前部署阶段（2026-07-06 · MemFire 已上线）
+## 当前部署阶段（2026-07-08 · MemFire 已上线）
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | https://prompt-hubs.com · 构建 `20260706l` |
+| **Pages** | https://prompt-hubs.com · 构建 `20260708b` |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com · `MEDIA_STORAGE_MODE=r2-first` |
 | **DB** | **MemFire** `d95gau8g91hmdup86ag0` · Worker `/health` → `supabase: ok` |
 | **图片** | R2（MemFire Storage 桶空属正常） |

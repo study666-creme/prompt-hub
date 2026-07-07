@@ -86,6 +86,37 @@
 
 ---
 
+## 生图参考图来源（referenceAssets）
+
+`refImage` / `refImages` 仍然保存实际可用于生图的图片引用；`referenceAssets` 只保存来源元数据，用来让“填入生图”同时恢复参考图来源，便于后续签名、修复、追踪。
+
+常见位置：
+
+- 生图草稿：`localStorage` 的 `LS_IMAGEGEN`
+- 生成中任务：`imageGenPendingJobs[]`
+- 生图历史：`creations[]`
+- 存入库卡片：`cards[]`
+
+数组元素结构：
+
+```json
+{
+  "ref": "storage://card-images/{uuid}/{file}",
+  "sourceCardId": "card_or_creation_id",
+  "jobId": "generation_job_id",
+  "source": "feed"
+}
+```
+
+约定：
+
+- `ref` 必须与同下标的 `refImages[]` 对应；缺失时可按下标回填。
+- `sourceCardId` 用于列表缩略图/原图签名时定位卡片资源。
+- `jobId` 用于生图结果、MJ 四宫格和恢复任务之间的关联。
+- `source` 目前常见为 `feed`、`upload`、`annotation`。
+
+---
+
 ## 前端双列表（`features-draft.js`）
 
 | 变量 | 来源 | 用途 |

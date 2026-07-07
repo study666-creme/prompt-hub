@@ -10,8 +10,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const targets = [
   'media-pipeline.js',
   'sync-orchestrator.js',
+  'card-image-loader-queues.js',
   'feed-images.js',
   'feed-layout.js',
+  'image-gen-feed-cards.js',
   'image-gen-feed.js',
   'community-public-feed.js',
   'card-image-loader.js',
@@ -25,6 +27,7 @@ const targets = [
   'imagegen-warehouse-save.js',
   'imagegen-finish-run.js',
   'imagegen-poll-warehouse.js',
+  'imagegen-job-state.js',
   'imagegen-job-runner.js',
   'imagegen-submit.js',
   'points-system.js',

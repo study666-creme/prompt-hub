@@ -10,6 +10,7 @@ const sources = [
   'warehouse-thumb.js',
   'media-pipeline.js',
   'sync-orchestrator.js',
+  'card-image-loader-queues.js',
   'card-image-loader.js'
 ];
 

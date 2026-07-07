@@ -22,6 +22,29 @@
   const PAGE = 20;
   let activeTab = 'overview';
 
+  function adminPageMode() {
+    return document.body?.dataset?.adminPage || ($('adminApp') ? 'console' : 'login');
+  }
+
+  function adminPageQuery() {
+    const params = new URLSearchParams(window.location.search || '');
+    const v = params.get('v');
+    return v ? `?v=${encodeURIComponent(v)}` : '';
+  }
+
+  function adminConsoleHref() {
+    return `admin.html${adminPageQuery()}`;
+  }
+
+  function adminLoginHref() {
+    return `admin-login.html${adminPageQuery()}`;
+  }
+
+  function redirectAdminTo(href) {
+    const target = new URL(href, window.location.href);
+    if (target.href !== window.location.href) window.location.replace(target.href);
+  }
+
   function syncAdminBuildLabels() {
     const build = window.__ADMIN_BUILD__ || 'dev';
     ['adminBuildTag', 'adminSidebarBuild'].forEach((id) => {
@@ -53,11 +76,17 @@
   }
 
   function showApp(loggedIn) {
-    document.body.classList.toggle('admin-gate', !loggedIn);
-    $('adminLogin').hidden = loggedIn;
-    $('adminApp').hidden = !loggedIn;
-    document.title = loggedIn ? 'Prompt Hub 运营控制台' : '管理登录';
+    const mode = adminPageMode();
+    document.body.classList.toggle('admin-gate', mode === 'login' || !loggedIn);
+    document.body.classList.toggle('admin-is-authenticated', !!loggedIn);
+    const login = $('adminLogin');
+    const app = $('adminApp');
+    if (login) login.hidden = mode === 'console' || loggedIn;
+    if (app) app.hidden = !loggedIn;
+    document.title = loggedIn ? 'Prompt Hub 运营控制台' : 'Prompt Hub 管理登录';
     updateAdminApiChip();
+    if (mode === 'console' && !loggedIn) redirectAdminTo(adminLoginHref());
+    if (mode === 'login' && loggedIn) redirectAdminTo(adminConsoleHref());
   }
 
   const PAGE_TITLES = {

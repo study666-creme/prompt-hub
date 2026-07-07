@@ -34,7 +34,21 @@ The split loaders are synchronous on purpose. They preserve the old blocking ord
 node scripts/build-all-bundles.mjs
 ```
 
-Ignored local/generated outputs include `.pages-deploy/`, `dist/`, `*.bundle.js`, `.tmp-*.js`, and `prompt-hub-deploy.zip`.
+## Bundle Source Modules
+
+The generated packs are assembled from real source modules in a fixed order:
+
+- `pack-core.js`: `media-pipeline.js`, `sync-orchestrator.js`, `card-image-loader-queues.js`, `card-image-loader.js`
+- `pack-feed.js`: `feed-images.js`, `feed-layout.js`, `image-gen-feed-cards.js`, `image-gen-feed.js`
+- `pack-imagegen.js`: image generation modules, including `imagegen-job-state.js`, `imagegen-job-runner.js`, `imagegen-ref-ui.js`, `imagegen-submit.js`
+
+When continuing the split work, edit these source modules first, then rebuild the packs. Current extracted boundaries:
+
+- `imagegen-job-state.js` owns pending/failed/session generation job persistence used by `imagegen-job-runner.js`.
+- `image-gen-feed-cards.js` owns image generation feed card HTML, ref dataset extraction helpers, and card display strings used by `image-gen-feed.js`.
+- `card-image-loader-queues.js` owns image loader concurrency caps and queue helpers used by `card-image-loader.js`.
+
+Ignored local/generated outputs include `.pages-deploy/`, `dist/`, `*.bundle.js`, `.tmp-*.js`, and `prompt-hub-deploy.zip`. Removed one-off cleanup artifacts from this split pass: `.tmp-fd-head.js`, `.tmp-recover-chunks.js`, `prompt-hub-deploy.zip`, and `scripts/新建 文本文档.txt`.
 
 ## Required Checks
 
@@ -42,7 +56,15 @@ Before deploying:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-predeploy-smoke.ps1
-node scripts/run-index-http-smoke.mjs
+node scripts/run-index-local-http-smoke.mjs
 ```
 
-`run-predeploy-smoke.ps1` validates JS chunks, CSS chunks, index body fragments, bundle contracts, VM smoke tests, and key regressions. `deploy-pages.ps1` also runs production HTTP smoke after upload.
+`run-predeploy-smoke.ps1` validates JS chunks, CSS chunks, index body fragments, bundle contracts, VM smoke tests, and key regressions. `run-index-local-http-smoke.mjs` starts a temporary static server and then runs `run-index-http-smoke.mjs`. `deploy-pages.ps1` also runs production HTTP smoke after upload.
+
+On Windows, npm 8 can fail lifecycle scripts whose names contain `:` because it creates temporary `.cmd` files from the script name. Prefer the colon-free aliases:
+
+```powershell
+npm run build-all
+npm run check-esbuild
+npm run check-predeploy
+```

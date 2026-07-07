@@ -620,7 +620,7 @@
       toast('当前作品没有可填入的参考图');
       return false;
     }
-    fillFormRefOnly(cleanRefs[0], cleanRefs, { assetId: opts.assetId });
+    fillFormRefOnly(cleanRefs[0], cleanRefs, { assetId: opts.assetId, referenceAssets: opts.referenceAssets });
     if (isMobileViewport()) window.MobileUI?.setImageGenView?.('form');
     return true;
   }
@@ -631,7 +631,8 @@
     fillFormFromData({
       prompt: String(prompt || ''),
       refImages: refs.length ? refs : undefined,
-      refAssetId: opts.assetId
+      refAssetId: opts.assetId,
+      referenceAssets: opts.referenceAssets
     });
     toast(refs.length ? '已填入提示词和参考图' : '已填入提示词');
     if (isMobileViewport()) window.MobileUI?.setImageGenView?.('form');
@@ -650,10 +651,12 @@
     fillFormFromData({
       prompt: text,
       refImages: refs.length ? refs : undefined,
-      refAssetId: opts.assetId
+      refAssetId: opts.assetId,
+      referenceAssets: opts.referenceAssets
     });
     return runImageGenWithPrompt(text, {
-      refImages: refs.length ? refs : undefined
+      refImages: refs.length ? refs : undefined,
+      referenceAssets: opts.referenceAssets
     });
   }
 

@@ -1,0 +1,80 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const read = (rel) => readFileSync(join(root, rel), 'utf8');
+
+const loader = read('card-image-loader.js');
+const layout = read('feed-layout.js');
+const imageFeed = read('image-gen-feed.js');
+const mobileCss = read('styles-mobile.css');
+
+const requiredLoaderTokens = [
+  'ownWarehouseMobile',
+  'window.MobileUI?.isUserInteracting?.()',
+  'isImgNearViewport(img, 900, whRoot)',
+  'window.finalizeWarehouseCardMediaFailure?.(feedMediaFromImg(img), img)',
+  'window.FeatureDraft?.removeBrokenCommunityFeedCard?.(media)',
+  'queueGridBackfillForImg(img)',
+  'scheduleImageGenWarehouseRepair()',
+  'tryAlternateFeedCover(img)',
+  "signedRoot?.id === 'cardsContainer'"
+];
+
+const requiredLayoutTokens = [
+  'function isCreationsStale(container)',
+  'flattenColumns(container)',
+  "container.classList.add('community-feed-grid', 'community-feed-columns')",
+  "container.classList.remove('community-mobile-feed', 'masonry-ready', 'cards-grid-priming')",
+  'container.style.overflow = \'visible\''
+];
+
+const requiredImageFeedTokens = [
+  "wrap.classList.add('imagegen-feed--tiles', 'mobile-feed-grid')",
+  "wrap.querySelectorAll('.grid-sizer').forEach((el) => el.remove())",
+  "wrap.querySelectorAll('.imagegen-feed-card').forEach((el) => el.removeAttribute('style'))"
+];
+
+const requiredCssTokens = [
+  '#communityGrid.community-feed-columns:not(.list-view)',
+  '#creationsGrid.community-feed-columns:not(.list-view)',
+  'display: contents;',
+  'flex: 0 0 calc((100% - 12px) / 2) !important;',
+  '#cardsContainer.cards-container .card .card-media:not(.is-loading):not(.card-media--await) .card-img',
+  'object-fit: contain;',
+  '#imageGenFeed.mobile-feed-grid',
+  '.imagegen-feed.imagegen-feed--tiles',
+  'gap: 12px !important;',
+  'row-gap: 12px !important;',
+  'column-gap: 12px !important;'
+];
+
+checkTokens('loader', loader, requiredLoaderTokens);
+checkTokens('layout', layout, requiredLayoutTokens);
+checkTokens('image-feed', imageFeed, requiredImageFeedTokens);
+checkTokens('mobile-css', mobileCss, requiredCssTokens);
+
+const forbiddenCss = [
+  /#cardsContainer[\s\S]{0,650}\.card-img[\s\S]{0,180}object-fit:\s*cover/i,
+  /#imageGenFeed[\s\S]{0,700}gap:\s*(2[4-9]|[3-9]\d)px\s*!important/i,
+  /#communityGrid\.community-feed-columns[\s\S]{0,700}gap:\s*(2[4-9]|[3-9]\d)px\s*!important/i
+];
+
+for (const re of forbiddenCss) {
+  if (re.test(mobileCss)) {
+    console.error(`verify-mobile-feed-regression: forbidden mobile CSS pattern matched: ${re}`);
+    process.exit(1);
+  }
+}
+
+console.log('verify-mobile-feed-regression OK');
+
+function checkTokens(label, text, tokens) {
+  const missing = tokens.filter((token) => !text.includes(token));
+  if (missing.length) {
+    console.error(`verify-mobile-feed-regression: ${label} missing tokens:`);
+    for (const token of missing) console.error(`  - ${token}`);
+    process.exit(1);
+  }
+}

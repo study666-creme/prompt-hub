@@ -818,14 +818,14 @@
     return list;
   }
 
-  function fillFormFromData({ prompt, refImage, refImages, model, resolution, quality, size, sourceId, sourceType, refAssetId }) {
+  function fillFormFromData({ prompt, refImage, refImages, model, resolution, quality, size, sourceId, sourceType, refAssetId, referenceAssets }) {
     const promptEl = document.getElementById('imageGenPrompt');
     if (promptEl) promptEl.value = prompt || '';
     const refs = (refImages || []).filter(r => isDisplayableImage(r));
     const singleRef = refImage && isDisplayableImage(refImage) ? refImage : null;
     const assetId = refAssetId ? String(refAssetId) : '';
-    if (refs.length) setImageGenRefs(refs, { assetId });
-    else if (singleRef) setImageGenRefs([singleRef], { assetId });
+    if (refs.length) setImageGenRefs(refs, { assetId, referenceAssets });
+    else if (singleRef) setImageGenRefs([singleRef], { assetId, referenceAssets });
     else clearImageGenRef();
     const modelEl = document.getElementById('imageGenModel');
     if (modelEl && model) modelEl.value = model;
@@ -853,8 +853,8 @@
     const refs = (refImages || []).filter(r => isDisplayableImage(r));
     const single = refImage && isDisplayableImage(refImage) ? refImage : null;
     const assetId = opts?.assetId ? String(opts.assetId) : '';
-    if (refs.length) setImageGenRefs(refs, { assetId });
-    else if (single) setImageGenRefs([single], { assetId });
+    if (refs.length) setImageGenRefs(refs, { assetId, referenceAssets: opts?.referenceAssets });
+    else if (single) setImageGenRefs([single], { assetId, referenceAssets: opts?.referenceAssets });
     else {
       toast('当前作品没有可填入的参考图');
       return;
@@ -871,7 +871,8 @@
       quality: item.quality,
       size: item.size,
       sourceId: item.id,
-      sourceType: 'personal'
+      sourceType: 'personal',
+      referenceAssets: item.referenceAssets
     };
     if (item.hasRefImage) {
       if (item.refImages?.length) payload.refImages = item.refImages;
