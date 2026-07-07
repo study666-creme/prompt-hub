@@ -315,7 +315,7 @@
           cloudHydratedUid = uid;
           window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
           requestFeedRefresh();
-          void scheduleDeferredCloudPull({ silent: true });
+          void scheduleDeferredCloudPull({ silent: true, force: true });
           scheduleCrossDeviceGenRecovery();
           void syncPromise.catch(() => {});
           scheduleDeferredImageAudit();
