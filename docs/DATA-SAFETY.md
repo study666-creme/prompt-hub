@@ -25,6 +25,7 @@
 - 上传前 `validatePush`：禁止用「空卡片 + 空社区」覆盖云端已有数据。
 - `mergePayload`：同 id 按 `updatedAt` 合并，图片字段保留「更有内容」的一方。
 - 登录拉取后 `preferLocalCardsImages`，减少签名 URL 丢失导致列表变灰。
+- 2026-07-07：手机端本地旧卡清理以云端卡片列表为准；云拉取确认后会把 14 天以上、云端不存在的本地普通卡写入 `deletedCardTombstones`，并强制刷新 IndexedDB / snapshot / autosave，避免已删或旧黑卡被本地快照复活。
 
 ## 任务与签到
 
