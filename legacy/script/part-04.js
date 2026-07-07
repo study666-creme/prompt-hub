@@ -111,6 +111,7 @@
       } else if (window.AppRouter?.syncDocumentTitle) {
         window.AppRouter.syncDocumentTitle(app);
       }
+      window.reconcileAuthUI?.();
       window.MobileUI?.closeAllMobileOverlays?.();
       if (app === 'devlab') {
         switchDevLabPanel(getDevLabPanel());
@@ -804,6 +805,9 @@
     function finalizeWarehouseCardMediaFailure(media, img, opts = {}) {
       if (!media) return;
       if (img?.dataset?.feedLoadDone === '1' && img.complete && img.naturalWidth > 0) return;
+      const authBlocked = opts.authBlocked === true
+        || window.__PH_AUTH_SESSION_EXPIRED__ === true
+        || !!(window.__PH_AUTH_SIGN_PAUSE_UNTIL__ && Date.now() < window.__PH_AUTH_SIGN_PAUSE_UNTIL__);
       clearMediaShineWatchdog(media);
       if (media.__whBackfillFailTimer) {
         clearTimeout(media.__whBackfillFailTimer);
@@ -811,10 +815,13 @@
       }
       media.classList.remove('is-loading', 'card-media--await', 'media-shine-reveal');
       media.classList.add('card-media--load-failed');
+      media.classList.toggle('card-media--auth-blocked', authBlocked);
+      if (authBlocked) media.dataset.failureLabel = '登录后加载图片';
+      else delete media.dataset.failureLabel;
       const card = media.closest('#cardsContainer .card[data-id]');
       const inWarehouseList = !!(card && !card.closest('.card[data-community-collect="1"]'));
       const cardModel = card?.dataset?.id ? cards.find((c) => c.id === card.dataset.id) : null;
-      const keepFailureSlot = opts.keepFailureSlot === true;
+      const keepFailureSlot = opts.keepFailureSlot === true || authBlocked;
       if (inWarehouseList && keepFailureSlot) {
         clearMediaShineWatchdog(media);
         if (media.__whBackfillFailTimer) {
@@ -845,7 +852,7 @@
       const cardId = card?.dataset?.id;
       const ref = img?.getAttribute?.('data-image-ref');
       const inRecentFeed = !!img?.closest?.('#imageGenFeed .imagegen-feed-card[data-feed-id^="cr_"]');
-      if (opts.markMissing !== false && ref && !inRecentFeed && window.SupabaseSync?.primaryImagePath) {
+      if (!authBlocked && opts.markMissing !== false && ref && !inRecentFeed && window.SupabaseSync?.primaryImagePath) {
         const primary = window.SupabaseSync.primaryImagePath(ref, cardId);
         if (primary && window.SupabaseSync?.markPathMissing) {
           window.SupabaseSync.markPathMissing(String(primary).replace(/^\//, ''));

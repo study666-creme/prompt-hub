@@ -637,11 +637,13 @@
   }
 
   function getUserId() {
-    return session?.user?.id || null;
+    return sessionExpiredLocally ? null : (session?.user?.id || null);
   }
 
   let ensureSessionPromise = null;
   let refreshSessionPromise = null;
+  let sessionExpiredLocally = false;
+  let sessionExpiredNoticeAt = 0;
   const REFRESH_AHEAD_SEC = 300;
 
   function tokenExpiresInSec(sess) {
@@ -665,6 +667,51 @@
     ]);
   }
 
+  function authErrorLooksExpired(err) {
+    const msg = String(err && (err.message || err.error_description || err.error || err) || '');
+    return /invalid refresh token|refresh token not found|refresh.*token.*invalid|refresh.*token.*not found|auth session missing|jwt.*expired/i.test(msg);
+  }
+
+  function emitSessionExpired(detail = {}) {
+    const now = Date.now();
+    if (now - sessionExpiredNoticeAt < 5000) return;
+    sessionExpiredNoticeAt = now;
+    try {
+      window.dispatchEvent(new CustomEvent('ph-api-unauthorized', {
+        detail: {
+          source: 'supabase-sync',
+          reason: 'session-expired',
+          message: '登录已过期，请重新登录',
+          ...detail
+        }
+      }));
+    } catch (e) { /* ignore */ }
+  }
+
+  function markSessionExpired(detail = {}) {
+    session = null;
+    ensureSessionPromise = null;
+    refreshSessionPromise = null;
+    sessionExpiredLocally = true;
+    try {
+      window.__PH_AUTH_SESSION_EXPIRED__ = true;
+      window.__PH_AUTH_SIGN_PAUSE_UNTIL__ = Math.max(
+        window.__PH_AUTH_SIGN_PAUSE_UNTIL__ || 0,
+        Date.now() + 60000
+      );
+    } catch (e) { /* ignore */ }
+    if (detail.emit !== false) emitSessionExpired(detail);
+    return null;
+  }
+
+  function markSessionActive() {
+    sessionExpiredLocally = false;
+    try {
+      window.__PH_AUTH_SESSION_EXPIRED__ = false;
+      window.__PH_AUTH_SIGN_PAUSE_UNTIL__ = 0;
+    } catch (e) { /* ignore */ }
+  }
+
   async function refreshSessionOnce() {
     const sb = getClient();
     if (!sb) return null;
@@ -676,10 +723,12 @@
           if (error) throw error;
           if (data?.session?.access_token) {
             session = data.session;
+            markSessionActive();
             return session;
           }
           const { data: fresh } = await sb.auth.getSession();
           session = fresh?.session ?? null;
+          if (session?.access_token) markSessionActive();
           return session;
         })();
         const result = await withSessionTimeout(work);
@@ -690,6 +739,13 @@
         return result;
       } catch (e) {
         console.warn('[SupabaseSync] refreshSession failed', e);
+        if (authErrorLooksExpired(e)) {
+          return markSessionExpired({
+            source: 'supabase-sync',
+            reason: 'refresh-failed',
+            message: '登录已过期，请重新登录'
+          });
+        }
         return null;
       } finally {
         refreshSessionPromise = null;
@@ -700,22 +756,31 @@
 
   async function healSessionOnResume() {
     if (!configured()) return false;
+    if (sessionExpiredLocally) return false;
     const sb = getClient();
     if (!sb) return false;
     try {
       const { data } = await sb.auth.getSession();
-      if (data?.session) session = data.session;
+      if (data?.session) {
+        session = data.session;
+        if (session?.access_token) markSessionActive();
+      }
       if (!session?.user) return false;
       if (isAccessTokenFresh(session, 60)) return true;
       const refreshed = await refreshSessionOnce();
       return !!(refreshed?.access_token && isAccessTokenFresh(refreshed, 0));
     } catch (e) {
       console.warn('[SupabaseSync] healSessionOnResume', e);
+      if (authErrorLooksExpired(e)) markSessionExpired({ source: 'supabase-sync', reason: 'heal-failed' });
       return false;
     }
   }
 
   async function ensureSession() {
+    if (sessionExpiredLocally) {
+      emitSessionExpired({ source: 'supabase-sync', reason: 'ensure-expired' });
+      throw new Error('登录已过期，请重新登录');
+    }
     if (session?.access_token && isAccessTokenFresh(session, 60)) return session;
     if (ensureSessionPromise) return ensureSessionPromise;
     ensureSessionPromise = (async () => {
@@ -728,7 +793,10 @@
       if (!isAccessTokenFresh(session, 60)) {
         const refreshed = await refreshSessionOnce();
         if (refreshed?.access_token) session = refreshed;
-        else if (!isAccessTokenFresh(session, 0)) throw new Error('登录已过期，请重新登录');
+        else if (!isAccessTokenFresh(session, 0)) {
+          markSessionExpired({ source: 'supabase-sync', reason: 'ensure-refresh-failed' });
+          throw new Error('登录已过期，请重新登录');
+        }
       }
       return session;
     })();
@@ -740,19 +808,25 @@
   }
 
   function isConfigured() { return configured(); }
-  function isLoggedIn() { return !!session?.user; }
-  function getSession() { return session; }
+  function isLoggedIn() { return !sessionExpiredLocally && !!session?.user; }
+  function getSession() { return sessionExpiredLocally ? null : session; }
 
   /** 在 access_token 将过期时刷新，避免 UI 仍显示已登录但 API 返回「登录已过期」 */
   async function getValidAccessToken(opts = {}) {
     const force = opts.force === true;
     const sb = getClient();
     if (!sb) return null;
+    if (sessionExpiredLocally) return null;
     if (!session?.access_token || force) {
       try {
         const { data } = await sb.auth.getSession();
-        if (data?.session) session = data.session;
-      } catch (e) { /* ignore */ }
+        if (data?.session) {
+          session = data.session;
+          if (session?.access_token) markSessionActive();
+        }
+      } catch (e) {
+        if (authErrorLooksExpired(e)) markSessionExpired({ source: 'supabase-sync', reason: 'get-session-failed' });
+      }
     }
     if (!session?.access_token) return null;
     if (force || !isAccessTokenFresh(session)) {
@@ -762,7 +836,7 @@
     }
     return session.access_token || null;
   }
-  function getUserEmail() { return session?.user?.email || ''; }
+  function getUserEmail() { return sessionExpiredLocally ? '' : (session?.user?.email || ''); }
 
   function isDataUrl(str) {
     return typeof str === 'string' && str.startsWith('data:image/');

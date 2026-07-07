@@ -764,6 +764,7 @@
       const userBar = document.getElementById('authUserBar');
       const emailEl = document.getElementById('authUserEmail');
       const configured = window.SupabaseSync?.isConfigured?.();
+      const signedIn = !!(session?.user && window.SupabaseSync?.isLoggedIn?.());
       if (!openBtn) return;
       if (!configured) {
         openBtn.textContent = '云同步未配置';
@@ -773,7 +774,7 @@
         return;
       }
       openBtn.disabled = false;
-      if (session?.user) {
+      if (signedIn) {
         openBtn.classList.add('hidden');
         userBar?.classList.remove('hidden');
         const label = session.user.email || session.user.phone || '已登录';
@@ -791,8 +792,16 @@
       }
       updateGuestLimitUI();
       const syncBtn = document.getElementById('communitySyncLibraryBtn');
-      if (syncBtn) syncBtn.classList.toggle('hidden', !session?.user);
+      if (syncBtn) syncBtn.classList.toggle('hidden', !signedIn);
     }
+
+    function reconcileAuthUI() {
+      const session = window.SupabaseSync?.isLoggedIn?.()
+        ? window.SupabaseSync?.getSession?.()
+        : null;
+      updateAuthUI(session);
+    }
+    window.reconcileAuthUI = reconcileAuthUI;
 
     let loginFlowPromise = null;
 
@@ -801,7 +810,9 @@
     }
 
     async function completeAuthSession(opts = {}) {
-      const session = window.SupabaseSync?.getSession?.();
+      const session = window.SupabaseSync?.isLoggedIn?.()
+        ? window.SupabaseSync?.getSession?.()
+        : null;
       if (!session?.user) {
         if (isPostLogoutBlocked()) {
           updateAuthUI(null);
@@ -826,6 +837,47 @@
       });
       await loginFlowPromise;
     }
+
+    let authExpiredHandledAt = 0;
+    let authExpiredRenderTimer = null;
+
+    function scheduleAuthExpiredWarehouseRefresh() {
+      clearTimeout(authExpiredRenderTimer);
+      authExpiredRenderTimer = setTimeout(() => {
+        authExpiredRenderTimer = null;
+        try {
+          if (typeof warehousePageActive === 'function' && warehousePageActive()) {
+            renderCards(true);
+          }
+        } catch (e) {
+          console.warn('[auth] refresh warehouse after expired session failed', e);
+        }
+      }, 120);
+    }
+
+    function handleApiUnauthorized(event) {
+      const now = Date.now();
+      if (now - authExpiredHandledAt < 5000) return;
+      authExpiredHandledAt = now;
+      const detail = event?.detail || {};
+      try {
+        window.SupabaseSync?.markSessionExpired?.({
+          source: detail.source || 'script',
+          reason: detail.reason || 'api-unauthorized',
+          message: detail.message || '登录已过期，请重新登录',
+          emit: false
+        });
+      } catch (e) { /* ignore */ }
+      updateAuthUI(null);
+      setCloudSyncPhase('error', '登录已过期，请重新登录');
+      window.SyncOrchestrator?.cancelPending?.();
+      if (typeof showToast === 'function') {
+        showToast('登录已过期，请重新登录后加载云端图片', 7000);
+      }
+      scheduleAuthExpiredWarehouseRefresh();
+    }
+
+    window.addEventListener('ph-api-unauthorized', handleApiUnauthorized);
 
     let authMode = 'login';
     let authChannel = 'email';

@@ -49,6 +49,7 @@
     getUserId,
     getSession,
     getValidAccessToken,
+    markSessionExpired,
     healSessionOnResume,
     refreshSessionOnce,
     getUserEmail,

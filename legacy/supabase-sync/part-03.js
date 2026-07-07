@@ -650,7 +650,20 @@
       signBudgetResetAt = 0;
     }
     if (!window.PromptHubApi?.signMediaRefsBatch) return 0;
-    await ensureSession();
+    try {
+      await ensureSession();
+    } catch (e) {
+      if (/登录已过期|重新登录|session/i.test(String(e?.message || e || ''))) {
+        markSessionExpired({
+          source: 'supabase-sync',
+          reason: 'batch-sign-session',
+          message: '登录已过期，请重新登录'
+        });
+      } else {
+        console.warn('[SupabaseSync] batch sign skipped', e);
+      }
+      return 0;
+    }
     try {
       const refs = pending.map((p) => toStorageRef(p));
       let r = await window.PromptHubApi.signMediaRefsBatch(refs, { timeoutMs: 8000 });

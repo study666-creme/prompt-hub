@@ -511,13 +511,16 @@
     if (!sb) return null;
     const { data } = await sb.auth.getSession();
     session = data.session;
+    if (session?.access_token) markSessionActive();
     if (session?.user) resetMediaSignEnvironment({ clearMissing: true });
     let initialHandled = false;
     sb.auth.onAuthStateChange((event, newSession) => {
       session = newSession;
-      if (event === 'TOKEN_REFRESHED' && newSession?.access_token) {
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && newSession?.access_token) {
         session = newSession;
+        markSessionActive();
       }
+      if (event === 'SIGNED_OUT') sessionExpiredLocally = false;
       if (event === 'INITIAL_SESSION') {
         if (initialHandled) return;
         initialHandled = true;
@@ -646,6 +649,7 @@
     });
     if (error) throw new Error(formatAuthError(error));
     session = data.session;
+    if (session?.access_token) markSessionActive();
     return data;
   }
 
@@ -675,6 +679,7 @@
     });
     if (error) throw new Error(formatAuthError(error));
     session = data.session;
+    if (session?.access_token) markSessionActive();
     return data;
   }
 
@@ -687,7 +692,10 @@
       options: { emailRedirectTo: window.location.origin + window.location.pathname }
     });
     if (error) throw new Error(formatAuthError(error));
-    if (data.session) session = data.session;
+    if (data.session) {
+      session = data.session;
+      markSessionActive();
+    }
     return data;
   }
 
@@ -701,6 +709,7 @@
       const { data: fresh } = await sb.auth.getSession();
       session = fresh.session;
     }
+    if (session?.access_token) markSessionActive();
     return { ...data, session: session || data.session };
   }
 
@@ -726,6 +735,8 @@
     if (!sb) return;
     await sb.auth.signOut();
     session = null;
+    sessionExpiredLocally = false;
+    try { window.__PH_AUTH_SESSION_EXPIRED__ = false; } catch (e) { /* ignore */ }
     clearSignedUrlCache();
   }
 

@@ -856,6 +856,8 @@
           await runAuthSideEffects();
         }
       });
+      setTimeout(() => window.reconcileAuthUI?.(), 0);
+      setTimeout(() => window.reconcileAuthUI?.(), 1500);
       return true;
     }
 

@@ -417,6 +417,7 @@
         || localStorage.getItem('promptrepo_app_page')
         || 'community';
       switchAppPage(page, { replace: true });
+      window.reconcileAuthUI?.();
       if (window.MobileUI.isMobile()) {
         const mobileTab = page === 'community' ? 'community' : page === 'imagegen' ? 'imagegen' : 'cards';
         document.querySelectorAll('.mobile-tab').forEach((btn) => {

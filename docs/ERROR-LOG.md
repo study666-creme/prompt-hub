@@ -202,6 +202,16 @@
 | **诊断** | 卡片库：`await diagnoseGreyWarehouseCards(12)` · 最近 Tab：`await FeatureDraft.diagnoseRecentFeedThumbs(8)` |
 | **勿再犯** | 列表区禁止 full 时须 **排除自有 `/generated/` 卡**；repair 不能因已有 `storage://` 就 skip；改 `__APP_BUILD__` 时保留清 `ph_missing_paths_v1` |
 
+### 3e. 手机旧卡黑卡/文字卡（Refresh Token 失效 · 20260707t 修复）
+
+| 项 | 内容 |
+|----|------|
+| **现象** | 手机卡片库 6 月 3 日及更早旧 generated 卡先显示黑色 loading，占位超时后降级成纯文字卡；电脑看起来正常或只看到近 7 月新卡 |
+| **根因** | Supabase `refreshSession()` 返回 `Invalid Refresh Token: Refresh Token Not Found`，但 UI 仍显示邮箱，媒体签名继续用假登录状态请求 `media/sign` / `warehouse-thumbs`，失败后 `finalizeWarehouseCardMediaFailure` 把图片卡折叠成文字卡并可能误标 missing |
+| **修复（build `20260707t`）** | API 层把 `media/sign`、`media/sign-batch`、`warehouse-thumbs` 的无 token/401 统一广播 `ph-api-unauthorized`；SupabaseSync 增加 `markSessionExpired`，过期后 `isLoggedIn()` 立即 false；Auth UI 增加 `reconcileAuthUI()`，不再信任旧 session；认证失败时图片卡保留卡位并显示“登录后加载图片”，不再 mark missing |
+| **验证** | 移动视口 `390x844`：旧线上 `20260707q` 复现 `WarehouseThumb batch rejected 登录已过期`；上线 `20260707t` 后 2026-06-03 旧卡正常出图，最新日志无新 `WarehouseThumb batch rejected` |
+| **勿再犯** | 媒体签名失败不能默认当成图片丢失；任何 `updateAuthUI(session)` 都必须同时校验 `SupabaseSync.isLoggedIn()` |
+
 ---
 
 ## 3c. 画布节点缩放死循环

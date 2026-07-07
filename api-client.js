@@ -68,8 +68,8 @@
 
   let authRefreshInflight = null;
 
-  function isMediaSignPath(path) {
-    return /\/api\/v1\/media\/sign/i.test(String(path || ''));
+  function isMediaAuthPath(path) {
+    return /\/api\/v1\/media\/(?:sign|warehouse-thumbs)/i.test(String(path || ''));
   }
 
   function isAuthSignPaused() {
@@ -81,10 +81,26 @@
     window.__PH_AUTH_SIGN_PAUSE_UNTIL__ = Math.max(window.__PH_AUTH_SIGN_PAUSE_UNTIL__ || 0, until);
   }
 
-  function notifyAuthSignFailure() {
+  function notifyAuthSignFailure(detail = {}) {
     if (window.__PH_AUTH_SIGN_TOAST_AT__ && Date.now() - window.__PH_AUTH_SIGN_TOAST_AT__ < 60000) return;
     window.__PH_AUTH_SIGN_TOAST_AT__ = Date.now();
-    window.dispatchEvent(new CustomEvent('ph-api-unauthorized'));
+    window.__PH_AUTH_SESSION_EXPIRED__ = true;
+    try {
+      window.SupabaseSync?.markSessionExpired?.({
+        source: detail.source || 'api-client',
+        reason: detail.reason || 'media-auth',
+        message: detail.message || '登录已过期，请重新登录',
+        emit: false
+      });
+    } catch (e) { /* ignore */ }
+    window.dispatchEvent(new CustomEvent('ph-api-unauthorized', {
+      detail: {
+        source: 'api-client',
+        reason: 'media-auth',
+        message: '登录已过期，请重新登录',
+        ...detail
+      }
+    }));
   }
 
   async function recoverSessionForApi() {
@@ -119,14 +135,19 @@
     if (!isConfigured()) {
       return { ok: false, code: 'API_NOT_CONFIGURED', message: '未配置 API 地址' };
     }
-    if (isMediaSignPath(path) && isAuthSignPaused()) {
+    if (isMediaAuthPath(path) && isAuthSignPaused()) {
+      notifyAuthSignFailure({ source: 'api-client', reason: 'paused' });
       return { ok: false, code: 'UNAUTHORIZED', message: '登录已过期，请重新登录' };
     }
-    if (isMediaSignPath(path) && attempt === 0) {
+    if (isMediaAuthPath(path) && attempt === 0) {
       await ensureApiAuthFresh();
     }
     const token = await getAccessToken();
     if (!token) {
+      if (isMediaAuthPath(path)) {
+        pauseAuthSign(60000);
+        notifyAuthSignFailure({ source: 'api-client', reason: 'missing-token', message: '登录已过期，请重新登录' });
+      }
       return { ok: false, code: 'UNAUTHORIZED', message: '请先登录' };
     }
     const timeoutMs = opts.timeoutMs || API_TIMEOUT_MS;
@@ -186,7 +207,7 @@
         typeof errRaw === 'object' && errRaw !== null
           ? errRaw
           : { message: errRaw != null ? String(errRaw) : '' };
-      const code = err.code || (res.status === 429 ? 'RATE_LIMITED' : 'REQUEST_FAILED');
+      const code = err.code || (res.status === 401 ? 'UNAUTHORIZED' : res.status === 429 ? 'RATE_LIMITED' : 'REQUEST_FAILED');
       const message =
         typeof err.message === 'string'
           ? err.message
@@ -206,10 +227,13 @@
       if (res.status === 401 && attempt < 2) {
         const recovered = await ensureApiAuthFresh();
         if (recovered) return request(method, path, body, opts, attempt + 1);
-        if (isMediaSignPath(path)) {
-          pauseAuthSign(20000);
-          notifyAuthSignFailure();
+        if (isMediaAuthPath(path)) {
+          pauseAuthSign(60000);
+          notifyAuthSignFailure({ source: 'api-client', reason: 'http-401', message: fullMessage });
         }
+      } else if (res.status === 401 && isMediaAuthPath(path)) {
+        pauseAuthSign(60000);
+        notifyAuthSignFailure({ source: 'api-client', reason: 'http-401-final', message: fullMessage });
       }
       if (res.status === 429) {
         markApiRateLimited(90000 + attempt * 30000);
