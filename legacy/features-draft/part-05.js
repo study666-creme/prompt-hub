@@ -280,6 +280,8 @@
       regenerateFeedItem,
       copyFeedPromptText,
       getActiveImageGenMode,
+      findPost,
+      favoritePost,
       likeCommunityPostOnly,
       removeFailedGenJob,
       removePendingJob,

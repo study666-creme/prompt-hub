@@ -894,11 +894,9 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         ? `<p class="imagegen-feed-prompt">${d().esc?.(showPrompt)}</p>`
         : '<p class="imagegen-feed-prompt imagegen-feed-prompt--empty">暂无提示词</p>';
       const noMedia = !imgBlock ? ' imagegen-feed-card--no-media' : '';
-      const secondaryActions = `${likeBtn}${saveBtn}`;
+      const secondaryActions = `${saveBtn}`;
       const quickActions = `<div class="imagegen-feed-quick-actions imagegen-feed-action-grid" aria-label="生图快捷操作">
-            <button type="button" class="imagegen-feed-quick-btn" data-feed-fill-prompt>填提示词</button>
-            ${feedRefs.length ? '<button type="button" class="imagegen-feed-quick-btn" data-feed-fill-ref>填入参考图</button>' : ''}
-            <button type="button" class="imagegen-feed-quick-btn imagegen-feed-quick-btn--primary" data-feed-regenerate>再次生成</button>
+            <button type="button" class="imagegen-feed-quick-btn imagegen-feed-quick-btn--primary" data-feed-fill-gen>填入生图</button>
             ${secondaryActions}
           </div>`;
       const fillHint = '';
@@ -981,7 +979,6 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       const galleryN = Array.isArray(c.cardImages) ? c.cardImages.length
         : (Array.isArray(c.mjGridUrls) ? c.mjGridUrls.length : 0);
       const mjBadge = c.isMidjourney && galleryN > 1 ? `MJ·${galleryN}` : '';
-      const linked = d().isCreationLinkedToWarehouse?.(c) || !!c.savedToWarehouse;
       const expiry = typeof d().formatExpiryLabel === 'function' ? d().formatExpiryLabel(c) : '';
       const metaLine = [model, mjBadge, expiry].filter(Boolean).join(' · ');
       const image = d().pickCreationFeedImage?.(c)
@@ -1002,7 +999,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         metaLine,
         meta: '',
         showDel: true,
-        showSave: !linked
+        showSave: true
       });
     }
 
@@ -1024,7 +1021,8 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         title: useTitle,
         metaLine: `${author} · ${model}`,
         meta: `♥ ${p.likes || 0} · ${d().formatTime?.(p.createdAt)}`,
-        showLike: true,
+        showSave: true,
+        showLike: false,
         liked: d().getLikedIds?.()?.has(p.id),
         likeCount: p.likes || 0
       });
@@ -1570,6 +1568,14 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           e.stopPropagation();
           d().copyFeedPromptText?.(card.dataset.feedPrompt || '');
         });
+        card.querySelector('[data-feed-fill-gen]')?.addEventListener('click', e => {
+          e.stopPropagation();
+          const refs = getFeedRefImages();
+          d().fillFeedAllToActiveMode?.(card.dataset.feedPrompt || '', getFeedImageRef(), {
+            assetId: feedItemId,
+            refImages: refs
+          });
+        });
         card.querySelector('[data-feed-fill-prompt]')?.addEventListener('click', e => {
           e.stopPropagation();
           d().fillFeedPromptToActiveMode?.(card.dataset.feedPrompt || '');
@@ -1601,6 +1607,9 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           e.stopPropagation();
           if (feedKind === 'recent') {
             void d().saveCreationToWarehouse?.(feedItemId);
+          } else if (feedKind === 'community') {
+            const post = d().findPost?.(feedId);
+            d().favoritePost?.(feedId, post);
           }
         });
         card.querySelector('[data-delete-feed]')?.addEventListener('click', (e) => {

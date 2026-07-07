@@ -633,7 +633,9 @@
       refImages: refs.length ? refs : undefined,
       refAssetId: opts.assetId
     });
+    toast(refs.length ? '已填入提示词和参考图' : '已填入提示词');
     if (isMobileViewport()) window.MobileUI?.setImageGenView?.('form');
+    return true;
   }
 
   async function regenerateFeedItem(prompt, refImage, opts = {}) {

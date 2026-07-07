@@ -53,9 +53,7 @@ const fixture = `<!doctype html>
             <p class="imagegen-feed-prompt">测试图片生成卡片按钮布局</p>
             <div class="imagegen-feed-action-stack">
               <div class="imagegen-feed-quick-actions imagegen-feed-action-grid" aria-label="生图快捷操作">
-                <button type="button" class="imagegen-feed-quick-btn" data-feed-fill-prompt>填提示词</button>
-                <button type="button" class="imagegen-feed-quick-btn" data-feed-fill-ref>填参考图</button>
-                <button type="button" class="imagegen-feed-quick-btn imagegen-feed-quick-btn--primary" data-feed-regenerate>再次生成</button>
+                <button type="button" class="imagegen-feed-quick-btn imagegen-feed-quick-btn--primary" data-feed-fill-gen>填入生图</button>
                 <button type="button" class="imagegen-feed-quick-btn imagegen-feed-save-btn" data-save-feed="1">存入库</button>
               </div>
             </div>
@@ -110,14 +108,16 @@ try {
     return { display: style.display, columns: style.gridTemplateColumns, items };
   });
   if (layout.display !== 'grid') throw new Error(`expected grid display, got ${layout.display}`);
-  if (layout.items.length !== 4) throw new Error(`expected 4 action buttons, got ${layout.items.length}`);
+  if (layout.items.length !== 2) throw new Error(`expected 2 action buttons, got ${layout.items.length}`);
+  const legacyActions = await page.locator('[data-feed-fill-prompt], [data-feed-fill-ref], [data-feed-regenerate]').count();
+  if (legacyActions !== 0) throw new Error(`expected legacy split actions to be absent, got ${legacyActions}`);
   const rows = new Map();
   for (const item of layout.items) {
     rows.set(item.top, (rows.get(item.top) || 0) + 1);
     if (item.width < 80 || item.height < 28) throw new Error(`action button too small: ${JSON.stringify(item)}`);
   }
-  if (rows.size !== 2 || [...rows.values()].some((count) => count !== 2)) {
-    throw new Error(`expected 2x2 action layout, got ${JSON.stringify(layout.items)}`);
+  if (rows.size !== 1 || [...rows.values()][0] !== 2) {
+    throw new Error(`expected 1x2 action layout, got ${JSON.stringify(layout.items)}`);
   }
   await page.locator('.imagegen-side').evaluate((el) => el.classList.add('imagegen-preview-open'));
   const hidden = await page.evaluate(() => {
@@ -131,7 +131,7 @@ try {
   if (hidden.stack !== 'none' || hidden.del !== 'none') {
     throw new Error(`expected actions hidden while preview is open, got ${JSON.stringify(hidden)}`);
   }
-  console.log('verify-imagegen-card-actions-layout OK: 2x2 actions hidden in preview mode');
+  console.log('verify-imagegen-card-actions-layout OK: 1x2 actions hidden in preview mode');
 } finally {
   await browser.close();
   await new Promise((resolveClose) => server.close(resolveClose));
