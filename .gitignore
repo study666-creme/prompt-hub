@@ -31,9 +31,12 @@ server/tmp-mooko-*
 .tmp-index.html
 .tmp-video-frames/
 .cursor/*.html
+.cursor/PENDING_DOC_UPDATE
 =
 package.json.phase*
 server/package.json.new
+
+bilibili-sub-web/
 
 # SillyTavern / 酒馆本地资料（与 Prompt Hub 无关，勿提交、勿部署）
 themes/
