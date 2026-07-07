@@ -183,12 +183,21 @@
     return !!(p && isGridStoragePath(p));
   }
 
+  function allowMobileWarehouseFullFallback(img) {
+    const mobile = window.MobileUI?.isMobileViewport?.()
+      ?? window.matchMedia?.('(max-width: 900px)')?.matches;
+    return !!(mobile
+      && img?.dataset?.allowFullFallback === '1'
+      && img?.closest?.('#cardsContainer')
+      && !img?.closest?.('.card[data-community-collect="1"]'));
+  }
+
   /** 列表区 img.src：禁止自有卡/生图 feed 写入 full 原图 URL */
   function safeListImgUrl(url, img) {
     if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return '';
     if (url.includes('data:image/svg') || isInvalidMediaUrl(url)) return '';
     const inList = img?.closest?.('#cardsContainer, #imageGenFeed');
-    if (inList && !isGridDisplayUrl(url)) return '';
+    if (inList && !isGridDisplayUrl(url) && !allowMobileWarehouseFullFallback(img)) return '';
     if (isWarehouseBlockedFullUrl(url, img)) return '';
     return url;
   }
@@ -243,6 +252,7 @@
     const path = storagePathFromDisplayUrl(url);
     if (!path || isGridStoragePath(path)) return false;
     if (!/\.(jpe?g|webp|png|gif)$/i.test(path)) return false;
+    if (allowMobileWarehouseFullFallback(img)) return false;
     if (img?.dataset?.listPrimaryRetried === '1') return false;
     const cardId = img?.dataset?.sourceCardId
       || img?.closest?.('.card[data-id]')?.dataset?.id

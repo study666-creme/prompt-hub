@@ -406,10 +406,12 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-side {
 
 @media (max-width: 900px) {
   #cardsContainer.cards-container.mobile-grid:not(.list-view) {
-    display: block !important;
-    columns: 2;
-    column-count: 2 !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    column-count: auto !important;
     column-gap: 10px !important;
+    row-gap: 0 !important;
+    align-items: start !important;
     width: 100% !important;
     max-width: 100% !important;
     height: auto !important;
@@ -421,7 +423,16 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-side {
     contain: none !important;
   }
 
-  #cardsContainer.cards-container.mobile-grid:not(.list-view) > .card {
+  #cardsContainer.cards-container.mobile-grid:not(.list-view) > .warehouse-mobile-col {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  #cardsContainer.cards-container.mobile-grid:not(.list-view) > .card,
+  #cardsContainer.cards-container.mobile-grid:not(.list-view) > .warehouse-mobile-col > .card {
     display: flex !important;
     flex-direction: column !important;
     width: 100% !important;
@@ -445,7 +456,7 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-side {
 
   #cardsContainer.cards-container.mobile-grid:not(.list-view) > .warehouse-scroll-sentinel {
     display: block !important;
-    column-span: all;
+    grid-column: 1 / -1;
     width: 100% !important;
     height: 2px !important;
     margin: 0 !important;

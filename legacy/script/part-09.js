@@ -536,6 +536,86 @@
       };
     }
 
+    function estimateWarehouseMobileCardHeight(card, showImage) {
+      const title = getCardDisplayTitle(card) || '';
+      const desc = getCardDisplayDesc(card, { textOnly: !showImage }) || '';
+      const tagCount = Array.isArray(card?.tags) ? card.tags.length : 0;
+      const textLines = Math.min(7, Math.ceil((title.length + desc.length) / 18));
+      const media = showImage ? 150 : 0;
+      const tags = tagCount ? 24 : 0;
+      return media + 92 + (textLines * 18) + tags;
+    }
+
+    function ensureWarehouseMobileColumns(container) {
+      if (!container) return [];
+      let cols = [...container.querySelectorAll(':scope > .warehouse-mobile-col')];
+      if (cols.length !== 2) {
+        cols.forEach((col) => col.remove());
+        cols = [0, 1].map((idx) => {
+          const col = document.createElement('div');
+          col.className = 'warehouse-mobile-col';
+          col.dataset.col = String(idx);
+          container.appendChild(col);
+          return col;
+        });
+      }
+      container.classList.add('warehouse-mobile-columns');
+      return cols;
+    }
+
+    function warehouseMobileColumnLoads(cols) {
+      return cols.map((col) => [...col.querySelectorAll('.card[data-id]')].reduce((sum, card) => {
+        const real = card.offsetHeight || 0;
+        const estimate = Number(card.dataset.mobileEstimate) || 180;
+        return sum + (real > 20 ? real : estimate) + 10;
+      }, 0));
+    }
+
+    function distributeWarehouseMobileCards(container, cardEls) {
+      if (!container || !cardEls?.length) return;
+      const cols = ensureWarehouseMobileColumns(container);
+      if (cols.length !== 2) {
+        cardEls.forEach((card) => container.appendChild(card));
+        return;
+      }
+      const loads = warehouseMobileColumnLoads(cols);
+      let pinnedCount = [...container.querySelectorAll('.warehouse-mobile-col .card.is-pinned')].length;
+      cardEls.forEach((card) => {
+        const forcedCol = card.classList.contains('is-pinned')
+          ? (pinnedCount++ % 2)
+          : (loads[0] <= loads[1] ? 0 : 1);
+        cols[forcedCol].appendChild(card);
+        const estimate = Number(card.dataset.mobileEstimate) || (card.offsetHeight || 180);
+        loads[forcedCol] += estimate + 10;
+      });
+    }
+
+    function repairWarehouseMobileColumns(container) {
+      if (!container || !isMobileViewport()) return;
+      const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
+      if (viewMode === 'list') {
+        container.classList.remove('warehouse-mobile-columns');
+        const directTarget = document.createDocumentFragment();
+        container.querySelectorAll(':scope > .warehouse-mobile-col > .card').forEach((card) => {
+          directTarget.appendChild(card);
+        });
+        container.querySelectorAll(':scope > .warehouse-mobile-col').forEach((col) => col.remove());
+        container.appendChild(directTarget);
+        return;
+      }
+      const directCards = [...container.querySelectorAll(':scope > .card[data-id]')];
+      const cols = [...container.querySelectorAll(':scope > .warehouse-mobile-col')];
+      if (!directCards.length && cols.length === 2) {
+        container.classList.add('warehouse-mobile-columns');
+        return;
+      }
+      if (!directCards.length) return;
+      const sentinel = container.querySelector(':scope > .warehouse-scroll-sentinel');
+      if (sentinel) sentinel.remove();
+      distributeWarehouseMobileCards(container, directCards);
+      if (sentinel) container.appendChild(sentinel);
+    }
+
     async function renderCards(reset = false) {
       const container = document.getElementById('cardsContainer');
       if (!container) return;
@@ -588,6 +668,7 @@
         updateBatchCountLabel();
         bindWarehousePagedScroll();
         if (mobileGrid) {
+          repairWarehouseMobileColumns(container);
           syncWarehouseScrollSentinel(container);
           enforceMobileCardGrid();
           requestAnimationFrame(() => window.MobileUI?.boostActivePageImages?.());
@@ -690,6 +771,7 @@
         const showImage = listThumb.show || !!(meta?.hasImage);
         if (showImage) div.classList.add('card--visual');
         else div.classList.add('card--text-only');
+        div.dataset.mobileEstimate = String(estimateWarehouseMobileCardHeight(card, showImage));
         let coverImage = listThumb.coverImage || coverMeta?.ref || card.image || '';
         if (showImage && !coverImage && card.genJobId && window.PromptHubCardGallery?.ensureFeedCoverFromGallery) {
           window.PromptHubCardGallery.ensureFeedCoverFromGallery(card, { persist: false, backfill: false });
@@ -703,7 +785,11 @@
           || coverMeta?.slotJobId
           || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');
         const coverJobAttr = coverJobId ? ` data-job-id="${escapeHtml(coverJobId)}"` : '';
-        const imgSrc = showImage ? (listThumb.src || cardImgInitialSrc(coverImage, card.id, { jobId: coverJobId })) : '';
+        const mobileFullFallback = mobileGrid && viewMode !== 'list' && showImage;
+        const imgSrc = showImage ? (listThumb.src || cardImgInitialSrc(coverImage, card.id, {
+          jobId: coverJobId,
+          allowFullFallback: mobileFullFallback
+        })) : '';
         const isCollectCard = window.isCommunityCollectCard?.(card);
         const collectMeta = isCollectCard ? getCommunityCollectImageResolveOpts(card) : null;
         const needsAsyncThumb = showImage && !listThumb.immediate && !listThumb.src;
@@ -720,12 +806,13 @@
         const collectImgAttrs = isCollectCard && collectMeta?.authorId
           ? ` data-author-id="${escapeHtml(collectMeta.authorId)}" data-source-card-id="${escapeHtml(collectMeta.assetId || '')}"`
           : '';
+        const mobileFallbackAttr = mobileFullFallback ? ' data-allow-full-fallback="1"' : '';
         const galleryCount = window.PromptHubCardGallery?.normalizeCardGallery?.(card)?.length || 0;
         const galleryBadge = galleryCount > 1
           ? `<span class="card-gallery-count" title="本卡 ${galleryCount} 张图">${galleryCount}</span>`
           : '';
         const mediaHtml = showImage
-          ? `<div class="card-media${mediaLoadingCls}"${shineAt}>${galleryBadge}<img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(coverImage)} data-image-ref="${escapeHtml(coverImage)}"${coverJobAttr}${collectImgAttrs} loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async"${fetchPri} draggable="false" alt="" onload="${imgOnload}"></div>`
+          ? `<div class="card-media${mediaLoadingCls}"${shineAt}>${galleryBadge}<img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(coverImage)} data-image-ref="${escapeHtml(coverImage)}"${coverJobAttr}${collectImgAttrs}${mobileFallbackAttr} loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async"${fetchPri} draggable="false" alt="" onload="${imgOnload}"></div>`
           : '';
         const headHtml = titleTrim
           ? `<div class="card-head"><div class="card-title">${escapeHtml(titleTrim)}</div>${timeLabel ? `<time class="card-time">${escapeHtml(timeLabel)}</time>` : ''}</div>`
@@ -830,7 +917,13 @@
         fragment.appendChild(div);
       });
       const appendedCards = [...fragment.querySelectorAll('.card')];
-      container.appendChild(fragment);
+      if (mobileGrid && viewMode !== 'list') {
+        distributeWarehouseMobileCards(container, appendedCards);
+      } else {
+        container.classList.remove('warehouse-mobile-columns');
+        container.querySelectorAll(':scope > .warehouse-mobile-col').forEach((col) => col.remove());
+        container.appendChild(fragment);
+      }
       if (page === 1 && !isAppend) container.dataset.whSig = whSig;
       restoreLoadedWarehouseImages(container, preservedWarehouseImgs);
       bindCardGridImageErrors(container);

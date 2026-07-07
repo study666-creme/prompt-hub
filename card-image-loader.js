@@ -410,6 +410,12 @@
     });
   }
 
+  function allowWarehouseFullFallback(img) {
+    return !!(img?.dataset?.allowFullFallback === '1'
+      && window.MobileUI?.isMobileViewport?.()
+      && isOwnWarehouseListImg(img));
+  }
+
   function cachedUrl(ref, cardId, img) {
     const authorId =
       img?.dataset?.authorId
@@ -426,7 +432,7 @@
         authorId,
         assetId: cardId,
         jobId: jobIdFromImg(img) || undefined,
-        allowFullFallback: false
+        allowFullFallback: allowWarehouseFullFallback(img)
       });
       if (url && isReadySrc(url, img)) return url;
       return '';
@@ -441,7 +447,7 @@
     if (img && (isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))) {
       if (src.startsWith('blob:')) return false;
       if (window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(src)) return false;
-      if (!window.SupabaseSync?.isGridDisplayUrl?.(src)) return false;
+      if (!window.SupabaseSync?.isGridDisplayUrl?.(src) && !allowWarehouseFullFallback(img)) return false;
     }
     if (img && isOwnImageGenRecentImg(img)) {
       if (window.SupabaseSync?.isValidSignedDisplayUrl?.(src)) return true;
@@ -616,6 +622,7 @@
       const communityExtra = ownIgWh ? {} : communityResolveOpts(img);
       if (communityExtra.skip) return '';
       const ownListCard = ownWarehouseCard || ownIgWh;
+      const allowFullListFallback = allowWarehouseFullFallback(img);
       const jobId = jobIdFromImg(img) || extraOpts?.jobId || undefined;
       const degradedList = ownListCard
         && window.SupabaseSync?.needsDegradedListPreview?.(ref, cardId);
@@ -624,9 +631,9 @@
         cardId,
         jobId: jobIdFromImg(img) || undefined,
         tryAllPaths: communityExtra.tryAllPaths === true,
-        allowFullFallback: false,
+        allowFullFallback: allowFullListFallback,
         listOnly: listOnly ? true : undefined,
-        degradedListFull: degradedList === true,
+        degradedListFull: degradedList === true || allowFullListFallback,
         ...(ownWarehouseCard || ownIgWh ? {} : (collect || communityExtra)),
         ...(extraOpts || {})
       };
@@ -637,9 +644,9 @@
         url = await window.SupabaseSync.resolveDisplayUrl(ref, {
           ...resolveOpts,
           variant: (ownWarehouseCard || ownIgWh) ? 'grid' : listImageVariant(img),
-          allowFullFallback: false,
+          allowFullFallback: allowFullListFallback,
           listOnly: listOnly ? true : undefined,
-          degradedListFull: false
+          degradedListFull: allowFullListFallback
         });
       }
       return isReadySrc(url, img) ? url : '';
@@ -659,7 +666,9 @@
     if (urlKey && window.SupabaseSync?.isGridFetchFailed?.(urlKey)) {
       const ref = img.getAttribute('data-image-ref');
       const cid = cardIdFromImg(img);
-      const cached = ref && window.SupabaseSync?.getListDisplayImageSrc?.(ref, cid, { allowFullFallback: false });
+      const cached = ref && window.SupabaseSync?.getListDisplayImageSrc?.(ref, cid, {
+        allowFullFallback: allowWarehouseFullFallback(img)
+      });
       if (!cached || cached !== url) return false;
     }
     if (img.dataset.feedLoadDone === '1' && isImgVisuallyLoaded(img)) return true;
@@ -892,7 +901,14 @@
   }
 
   function loadImg(img) {
-    if (window.MobileUI?.isUserInteracting?.() && !isImgNearViewport(img, 120)) return;
+    const ownWarehouseMobile = !!img?.closest?.('#cardsContainer') && window.MobileUI?.isMobileViewport?.();
+    if (window.MobileUI?.isUserInteracting?.()) {
+      const whRoot = ownWarehouseMobile ? document.getElementById('cardsContainer') : null;
+      const nearEnough = ownWarehouseMobile
+        ? isImgNearViewport(img, 900, whRoot)
+        : isImgNearViewport(img, 120);
+      if (!nearEnough) return;
+    }
     const ref = img.getAttribute('data-image-ref') || '';
     const cardId = cardIdFromImg(img);
     const jobId = jobIdFromImg(img);
@@ -1451,7 +1467,6 @@
   function boostWarehouseImages(container, max = 24) {
     if (!container || container.id !== 'cardsContainer') return;
     const mobile = window.MobileUI?.isMobileViewport?.();
-    if (mobile && window.MobileUI?.isUserInteracting?.()) return;
     const defaultCap = mobile ? (window.MobileUI?.getPerf?.()?.cardEagerCap ?? cardEagerCap()) : warehousePrefetchCap();
     const cap = max ?? defaultCap;
     let n = 0;

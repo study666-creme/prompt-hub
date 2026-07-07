@@ -545,10 +545,10 @@
     }
 
     function cardImgInitialSrc(image, cardId, extraOpts) {
-      const placeholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="%2318181c" width="4" height="3"/></svg>');
+      const placeholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><defs><linearGradient id="g" x1="0" x2="1"><stop stop-color="#25272f"/><stop offset=".55" stop-color="#343740"/><stop offset="1" stop-color="#25272f"/></linearGradient></defs><rect fill="#25272f" width="160" height="120"/><rect fill="url(#g)" width="160" height="120" opacity=".9"/></svg>');
       const jobId = extraOpts?.jobId ? String(extraOpts.jobId).replace(/#\d+$/, '') : undefined;
       const cardModel = cardId ? (window.__promptHubCards || []).find((c) => c.id === cardId) : null;
-      const allowFull = !!(jobId || cardModel?.genJobId);
+      const allowFull = !!(extraOpts?.allowFullFallback || jobId || cardModel?.genJobId);
       if (image && cardId && window.SupabaseSync?.getListDisplayImageSrc) {
         const cached = window.SupabaseSync.getListDisplayImageSrc(image, cardId, {
           allowFullFallback: allowFull,
