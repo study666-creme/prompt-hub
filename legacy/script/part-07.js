@@ -417,6 +417,101 @@
       if (nextUid) setIdbOwnerUid(nextUid);
     }
 
+    const RECENT_CARD_TOMBSTONE_RESCUE_MS = 72 * 60 * 60 * 1000;
+
+    function tombstoneTimeMs(raw) {
+      if (raw == null || raw === '') return 0;
+      let n = Number(raw);
+      if (Number.isFinite(n) && n > 0) {
+        if (n < 10_000_000_000) n *= 1000;
+        return n;
+      }
+      n = Date.parse(String(raw));
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+
+    async function rescueEmptyCardLibraryFromRecentTombstones(uid) {
+      if (!uid || cards.length > 0) return false;
+      if (!db) await openDB();
+      if (!db?.objectStoreNames?.contains('data_backups')) return false;
+      const tombstones = settings.deletedCardTombstones || {};
+      const now = Date.now();
+      const recentIds = new Set(
+        Object.entries(tombstones)
+          .filter(([, ts]) => {
+            const ms = tombstoneTimeMs(ts);
+            return ms > 0 && now - ms <= RECENT_CARD_TOMBSTONE_RESCUE_MS;
+          })
+          .map(([id]) => String(id))
+      );
+      if (!recentIds.size) return false;
+
+      const rows = await new Promise((resolve) => {
+        const tx = db.transaction(['data_backups'], 'readonly');
+        const req = tx.objectStore('data_backups').getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
+      });
+      const candidates = rows
+        .filter((row) => {
+          const list = row?.payload?.cards;
+          if (!Array.isArray(list) || !list.length) return false;
+          if (!/pre_(db_clear|clear_workspace|pull)|auto_save|page_hide/.test(String(row.label || ''))) return false;
+          const owner = row.ownerUid || row.payload?.ownerUid || '';
+          if (owner && owner !== uid) return false;
+          return list.some((card) => card?.id != null && recentIds.has(String(card.id)));
+        })
+        .sort((a, b) => {
+          const ac = Array.isArray(a?.payload?.cards) ? a.payload.cards.length : 0;
+          const bc = Array.isArray(b?.payload?.cards) ? b.payload.cards.length : 0;
+          return bc - ac || (b.at || 0) - (a.at || 0);
+        });
+      const hit = candidates[0];
+      if (!hit?.payload?.cards?.length) return false;
+
+      const nextTombstones = { ...tombstones };
+      let cleared = 0;
+      for (const card of hit.payload.cards) {
+        if (!card?.id) continue;
+        const id = String(card.id);
+        if (!recentIds.has(id)) continue;
+        delete nextTombstones[id];
+        cleared += 1;
+      }
+      if (!cleared) return false;
+
+      settings.deletedCardTombstones = nextTombstones;
+      applyDataPayload({
+        ...hit.payload,
+        settings: {
+          ...(hit.payload.settings || {}),
+          deletedCardTombstones: nextTombstones
+        }
+      });
+      if (!cards.length) return false;
+
+      window.__promptHubCards = cards;
+      await saveCardsToDB(cards, { ownerUid: uid, forceRewrite: true });
+      setIdbOwnerUid(uid);
+      try {
+        localStorage.setItem('promptrepo_settings', JSON.stringify(settings));
+        localStorage.setItem(userStorageKey('settings', uid), JSON.stringify(settings));
+      } catch (e) { /* ignore */ }
+      const payload = getDataPayload();
+      await snapshotLocalForUser(uid, { allowEmpty: true, force: true, payload });
+      writeAutosavePayloadForUser(uid, payload, { force: true });
+      console.warn('[sync] rescued empty card library from recent tombstones', {
+        restored: cards.length,
+        cleared,
+        backup: hit.label,
+        at: hit.at
+      });
+      if (window.MobileUI?.isMobileViewport?.()) {
+        showToast(`已恢复 ${cards.length} 张本机卡片备份`, 6000);
+      }
+      return true;
+    }
+
     async function restoreAccountPrivateData(uid) {
       if (!uid) return false;
       const tombstones = settings.deletedCardTombstones || {};
@@ -497,6 +592,11 @@
         const s = localStorage.getItem(userStorageKey('settings', uid));
         if (s) settings = Object.assign(settings, JSON.parse(s));
       } catch (e) { /* ignore */ }
+      if (!cards.length) {
+        const rescued = await rescueEmptyCardLibraryFromRecentTombstones(uid);
+        if (rescued) restored = true;
+      }
+      reconcileCustomGroupsFromCards();
       normalizeCardPins();
       window.__promptHubCards = cards;
       window.FeatureDraft?.reloadStores?.();
@@ -623,6 +723,9 @@
     }
 
     function pruneStaleLocalOnlyCardsAfterCloudPull(localPayload, cloudPayload, payload) {
+      // Disabled after mobile reports showed cloud-diff pruning can remove a phone's
+      // entire local library when that device holds the only surviving snapshot.
+      return { payload, pruned: 0, prunedIds: [] };
       const localCards = Array.isArray(localPayload?.cards) ? localPayload.cards : [];
       const cloudCards = Array.isArray(cloudPayload?.cards) ? cloudPayload.cards : [];
       if (!localCards.length || !cloudCards.length || !Array.isArray(payload?.cards)) {
