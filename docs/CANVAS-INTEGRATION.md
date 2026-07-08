@@ -1,7 +1,7 @@
 # 无限画布 ↔ Prompt Hub 卡片库
 
 > **画布仓库**：https://github.com/study666-creme/infinite-canvas-jay  
-> **画布地址**：https://infinite-canvas-jay.vercel.app/canvas（Vercel 项目 prompt-canvas 修复后可改域名）  
+> **画布地址**：https://infinite-canvas-jay.vercel.app/canvas（`canvas.prompt-hubs.com` DNS 配好后再切）
 > **本地路径**：`D:\canvas\infinite-canvas\web`  
 > **卡藏站点**：https://prompt-hubs.com · API：https://api.prompt-hubs.com
 
@@ -29,7 +29,7 @@
 | GET | `/api/v1/media/sign?ref=&variant=full` | 插入画布时拉原图 |
 | POST | `/api/v1/extension/quick-card` | 画布 → 卡片库（与浏览器插件相同） |
 
-CORS：已允许 `localhost`、`*.vercel.app`、`prompt-hubs.com` 等；画布自定义域名需加入 Worker `CORS_ORIGINS`。
+CORS：已允许 `localhost`、`*.vercel.app`、`prompt-hubs.com`；`canvas.prompt-hubs.com` 已预放行，但 DNS 生效前不要作为前端入口。
 
 ## 画布内配置
 

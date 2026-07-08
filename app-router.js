@@ -59,6 +59,17 @@
     return APP_PATH[app] || '/community';
   }
 
+  function getPromptCanvasUrl() {
+    let url = String(window.PROMPT_CANVAS_URL || 'https://infinite-canvas-jay.vercel.app/canvas').trim();
+    if (!url) url = 'https://infinite-canvas-jay.vercel.app/canvas';
+    if (!/\/canvas\/?$/.test(url)) url = url.replace(/\/?$/, '') + '/canvas';
+    return url;
+  }
+
+  function openPromptCanvas() {
+    window.open(getPromptCanvasUrl(), '_blank', 'noopener,noreferrer');
+  }
+
   function syncUrl(app, replace) {
     if (!app || !APP_PATH[app]) return;
     const path = pathForApp(app);
@@ -107,4 +118,6 @@
     resolveBootApp,
     init
   };
+  window.getPromptCanvasUrl = getPromptCanvasUrl;
+  window.openPromptCanvas = openPromptCanvas;
 })();

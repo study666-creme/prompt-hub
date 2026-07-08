@@ -1,6 +1,6 @@
-# 本地开发与预览（过渡期 · 阿里云 / MemFire 前）
+# 本地开发与预览（MemFire / R2）
 
-> **线上 prompt-hub.cn** 在 ICP/MemFire 就绪前可能无法登录；**请用本机调试**。  
+> 当前主站走 `prompt-hubs.com` + MemFire + R2。
 > **卡片主备份**：设置 → 数据管理 → **备份导出 JSON**（强刷/换机可 **备份导入**）。
 
 ---
@@ -22,7 +22,8 @@ JSON 内含：`cards`、`customGroups`、`globalFields`、`settings`（不含 St
 
 **第 1 步** 编辑 `server\.dev.vars`（首次运行 `setup-local-dev.ps1` 会生成）：
 
-- `SUPABASE_SERVICE_ROLE_KEY` = 阿里云 **Legacy service_role**（不是 anon）
+- `SUPABASE_URL` = MemFire API URL（形如 `https://xxxx.baseaf.memfiredb.com`）
+- `SUPABASE_SERVICE_ROLE_KEY` = MemFire **service_role**（不是 anon / publishable）
 - `IMAGE_API_KEY` = 生图 Key（要测生图时必填）
 
 **第 2 步** 项目根目录：
@@ -38,6 +39,8 @@ cd D:\prompt-hub
 - 静态站 → http://127.0.0.1:5500  
 
 **第 3 步** 浏览器打开 **http://127.0.0.1:5500** → 登录 `2705367723@qq.com`
+
+登录态验收前先打开 **http://127.0.0.1:8787/health**：必须看到 `"supabase":"ok"`。如果是 `misconfigured`，说明本地 `server\.dev.vars` 缺 `SUPABASE_URL` 或 `SUPABASE_SERVICE_ROLE_KEY`，前端会打开但登录/社区/卡片同步无法真实验证。
 
 ---
 
@@ -110,7 +113,7 @@ cd D:\prompt-hub
 
 ## 验证
 
-- http://127.0.0.1:8787/health → `ok`
+- http://127.0.0.1:8787/health → `"supabase":"ok"`
 - 控制台：`window.API_BASE_URL` 应为 `http://127.0.0.1:8787`（**不是** `api.prompt-hubs.com`）
 - 图片仍 401/CORS：确认 **Worker 窗口在跑** → **Ctrl+Shift+R 强刷**（会清 `ph_signed_urls_v1` 生产签名缓存）
 

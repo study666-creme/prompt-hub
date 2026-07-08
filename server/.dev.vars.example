@@ -1,8 +1,9 @@
-# 复制为 .dev.vars（勿提交 git）
-# 阿里云控制台 → RDS Supabase → Settings → API Keys → Legacy service_role（不是 anon）
+# Copy to .dev.vars (never commit real secrets).
+# Current production DB is MemFire. Use the MemFire API URL and service_role key.
+# /supabase auth proxy needs SUPABASE_URL; API routes and /health need service_role.
 
-SUPABASE_URL=http://8.148.193.247:80
-SUPABASE_SERVICE_ROLE_KEY=PLACEHOLDER_SERVICE_ROLE_KEY
+SUPABASE_URL=https://YOUR_PROJECT.baseaf.memfiredb.com
+SUPABASE_SERVICE_ROLE_KEY=PLACEHOLDER_MEMFIRE_SERVICE_ROLE_KEY
 
 # 生图（GrsAI / Apimart，至少填一个才能调 /api/v1/generate）
 IMAGE_API_KEY=
@@ -14,9 +15,8 @@ IMAGE_API_KEY=
 # MOOKO_API_BASE_URL=https://api.mooko.ai
 # MOOKO_MAX_CONCURRENT_SUBMITS=8   # 慢速线并发 POST 上限（1–16，默认 8）
 
-# 与线上一致：仅 R2（不写、不读 Supabase Storage，避免超额）
+# Local R2 is empty; keep media reads pointed at production CDN for previews.
 MEDIA_STORAGE_MODE=r2
-# 本地 Miniflare R2 为空，签名 URL 走线上 CDN 出图（必填，默认即 api.prompt-hubs.com）
 LOCAL_MEDIA_UPSTREAM=https://api.prompt-hubs.com
 
 ENVIRONMENT=development

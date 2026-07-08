@@ -190,7 +190,7 @@
     if (img) {
       img.onload = null;
       img.onerror = null;
-      img.src = '';
+      img.removeAttribute('src');
       img.onwheel = null;
       img.onmousedown = null;
       img.ondblclick = null;
@@ -321,7 +321,7 @@
         if (img.complete && img.naturalWidth > 0) onReady();
       })();
     } else {
-      img.src = '';
+      img.removeAttribute('src');
       img.style.display = 'none';
       if (hint) hint.style.display = 'none';
       window.resetImageZoom?.(null);

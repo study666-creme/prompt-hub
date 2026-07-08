@@ -418,7 +418,7 @@
       collectBtn.disabled = false;
       collectBtn.textContent = '收藏入仓库';
     }
-    if (frontImg) frontImg.src = '';
+    if (frontImg) frontImg.removeAttribute('src');
   }
 
   function close() {
