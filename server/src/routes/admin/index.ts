@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../../env';
 import { applyCorsHeaders } from '../../lib/cors-headers';
+import { adminCardRoutes } from './cards';
 import { adminCodeRoutes } from './codes';
 import { adminCommunityRoutes } from './community';
 import { adminDashboardRoutes } from './dashboard';
@@ -21,6 +22,7 @@ adminRoutes.use('*', async (c, next) => {
 
 adminRoutes.route('/dashboard', adminDashboardRoutes);
 adminRoutes.route('/diagnostics', adminDiagnosticsRoutes);
+adminRoutes.route('/cards', adminCardRoutes);
 adminRoutes.route('/community', adminCommunityRoutes);
 adminRoutes.route('/users', adminUserRoutes);
 adminRoutes.route('/codes', adminCodeRoutes);

@@ -9,8 +9,8 @@
 
 | 项 | 值 |
 |----|-----|
-| **当前 Pages** | **`20260708g`**（`window.__APP_BUILD__`） |
-| **运营后台** | `admin-login.html` 登录入口 + `admin.html` 控制台 · build `20260708g` |
+| **当前 Pages** | **`20260708h`**（`window.__APP_BUILD__`） |
+| **运营后台** | `admin-login.html` 登录入口 + `admin.html` 控制台 · build `20260708h` |
 | Pages | https://prompt-hubs.com |
 | API | https://api.prompt-hubs.com |
 | Worker | `prompt-hub-api` |

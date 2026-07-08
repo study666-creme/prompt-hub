@@ -8,7 +8,7 @@
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | https://prompt-hubs.com · 构建 `20260708g` |
+| **Pages** | https://prompt-hubs.com · 构建 `20260708h` |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com · `MEDIA_STORAGE_MODE=r2-first` |
 | **DB** | **MemFire** `d95gau8g91hmdup86ag0` · Worker `/health` → `supabase: ok` |
 | **图片** | R2（MemFire Storage 桶空属正常） |

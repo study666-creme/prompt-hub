@@ -17,7 +17,7 @@
     if (!tbody) return;
     if (forceRefresh || !communityBucketScanMeta) {
       tbody.innerHTML =
-        '<tr class="admin-loading"><td colspan="5">正在扫描 R2（约 1～3 分钟，请保持本页打开）…</td></tr>';
+        '<tr class="admin-loading"><td colspan="4">正在扫描 R2（约 1～3 分钟，请保持本页打开）…</td></tr>';
       if (forceRefresh) communityBucketPollStarted = Date.now();
       else if (!communityBucketPollStarted) communityBucketPollStarted = Date.now();
     }
@@ -38,7 +38,7 @@
 
       if (data.scanStatus === 'scanning') {
         const waited = Math.max(0, Math.round((Date.now() - communityBucketPollStarted) / 1000));
-        tbody.innerHTML = `<tr class="admin-loading"><td colspan="5">正在扫描 R2… 已等待 ${waited}s（完成后自动刷新）</td></tr>`;
+        tbody.innerHTML = `<tr class="admin-loading"><td colspan="4">正在扫描 R2… 已等待 ${waited}s（完成后自动刷新）</td></tr>`;
         $('communityPageInfo').textContent = '桶内孤儿 · 扫描进行中…';
         stopBucketOrphanPoll();
         communityBucketPollTimer = setTimeout(
@@ -80,14 +80,13 @@
     if (!tbody) return;
     if (!communityBucketItems.length) {
       tbody.innerHTML =
-        '<tr><td colspan="5" class="admin-hint">暂无桶内孤儿（首次加载需扫描全桶，约 1～3 分钟）</td></tr>';
+        '<tr><td colspan="4" class="admin-hint">暂无桶内孤儿（首次加载需扫描全桶，约 1～3 分钟）</td></tr>';
       updateBucketOrphanBatchUi();
       return;
     }
     tbody.innerHTML = communityBucketItems
       .map(
         (o) => `<tr>
-            <td class="admin-col-check"><input type="checkbox" data-bucket-orphan-select="${esc(o.id)}"${communityBucketSelected.has(o.id) ? ' checked' : ''} aria-label="选择文件组"></td>
             <td>${communityThumbCell(o)}</td>
             <td><code class="admin-path" title="${esc(o.path)}">${esc(o.path.length > 42 ? o.path.slice(0, 40) + '…' : o.path)}</code>${o.variantHint ? `<br><span class="admin-hint">${esc(o.variantHint)}</span>` : ''}<br>${bucketOrphanRiskBadge(o)}</td>
             <td>${formatBytes(o.bytes || 0)}</td>
@@ -100,11 +99,6 @@
 
   function removeBucketOrphanGroups(deletedPaths) {
     communityBucketScanMeta = null;
-    const gone = new Set(deletedPaths);
-    communityBucketSelected.forEach((id) => {
-      const g = communityBucketItems.find((x) => x.id === id);
-      if (g && (g.paths || [g.path]).some((p) => gone.has(p))) communityBucketSelected.delete(id);
-    });
     void loadBucketOrphansPage({ reset: false, forceRefresh: false });
   }
 
@@ -196,11 +190,8 @@
           communitySelected.delete(id);
           if (action === 'orphan') {
             removeBucketOrphanGroups(spec.paths || orphanPaths);
-            communityBucketSelected.delete(id);
-            updateBucketOrphanBatchUi();
           } else if (action === 'restore-orphan') {
             communityBucketScanMeta = null;
-            communityBucketSelected.delete(id);
             void loadBucketOrphansPage({ reset: false, forceRefresh: false });
           } else {
             void loadCommunity(false);
@@ -293,25 +284,6 @@
         updateCommunityBatchUi();
         return;
       }
-      if (target.id === 'communityBucketSelectAll') {
-        const pageIds = communityBucketItems.map((g) => g.id).filter(Boolean);
-        if (target.checked) pageIds.forEach((id) => communityBucketSelected.add(id));
-        else pageIds.forEach((id) => communityBucketSelected.delete(id));
-        document.querySelectorAll('[data-bucket-orphan-select]').forEach((el) => {
-          const id = el.getAttribute('data-bucket-orphan-select');
-          if (id && pageIds.includes(id)) el.checked = target.checked;
-        });
-        updateBucketOrphanBatchUi();
-        return;
-      }
-      if (target.matches('[data-bucket-orphan-select]')) {
-        const id = target.getAttribute('data-bucket-orphan-select');
-        if (!id) return;
-        if (target.checked) communityBucketSelected.add(id);
-        else communityBucketSelected.delete(id);
-        updateBucketOrphanBatchUi();
-        return;
-      }
       if (target.matches('[data-community-select]')) {
         const id = target.getAttribute('data-community-select');
         if (!id) return;
@@ -329,7 +301,7 @@
     const tbody = $('communityTableBody');
     const statsEl = $('communityStats');
     if (!tbody) return;
-    const colSpan = communityView === 'bucket-orphans' ? 5 : 9;
+    const colSpan = communityView === 'bucket-orphans' ? 4 : 9;
     tbody.innerHTML = `<tr class="admin-loading"><td colspan="${colSpan}">${communityView === 'bucket-orphans' ? '正在扫描全桶（约 1～3 分钟，请稍候）…' : '加载中…'}</td></tr>`;
     try {
       if (statsEl) {
@@ -342,7 +314,6 @@
 
       if (communityView === 'bucket-orphans') {
         communityPageItems = [];
-        if (reset) communityBucketSelected.clear();
         await loadBucketOrphansPage({ reset, forceRefresh: communityBucketForceRefresh });
         return;
       }

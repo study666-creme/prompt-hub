@@ -295,19 +295,7 @@
 
   function updateBucketOrphanBatchUi() {
     const bar = $('communityBucketBatchBar');
-    const countEl = $('communityBucketSelectedCount');
-    const btn = $('communityBucketDeleteSelectedBtn');
-    const n = communityBucketSelected.size;
     if (bar) bar.classList.toggle('hidden', communityView !== 'bucket-orphans');
-    if (countEl) countEl.textContent = `已选 ${n} 组`;
-    if (btn) btn.disabled = true;
-    const allBox = $('communityBucketSelectAll');
-    if (allBox) {
-      const pageIds = communityBucketItems.map((g) => g.id).filter(Boolean);
-      allBox.checked = pageIds.length > 0 && pageIds.every((id) => communityBucketSelected.has(id));
-      allBox.indeterminate =
-        pageIds.some((id) => communityBucketSelected.has(id)) && !allBox.checked;
-    }
   }
 
   function bucketOrphanRiskBadge(o) {

@@ -485,7 +485,6 @@
     $('communityBucketPageSize')?.addEventListener('change', (e) => {
       communityBucketPageSize = Number(e.target.value) || 50;
       communityOffset = 0;
-      communityBucketSelected.clear();
       if (communityView === 'bucket-orphans') void loadBucketOrphansPage({ reset: false, forceRefresh: false });
     });
     $('communityPurgeBtn')?.addEventListener('click', () =>
@@ -514,7 +513,6 @@
       btn.addEventListener('click', () => {
         communityView = btn.getAttribute('data-community-view') || 'published';
         communitySelected.clear();
-        communityBucketSelected.clear();
         stopBucketOrphanPoll();
         if (communityView !== 'bucket-orphans') {
           communityBucketScanMeta = null;

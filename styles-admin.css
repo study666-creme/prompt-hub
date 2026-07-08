@@ -853,6 +853,40 @@ table.admin-table {
   margin: 0;
 }
 
+.admin-search-bar .admin-field--sm {
+  flex: 0 0 180px;
+  min-width: 160px;
+}
+
+.admin-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin: 0 0 16px;
+}
+
+.admin-card-framed {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+  background: rgba(249, 250, 251, 0.72);
+}
+
+.admin-card-framed h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.admin-table--cards td {
+  vertical-align: top;
+}
+
+.admin-table--cards code {
+  font-size: 11px;
+  word-break: break-all;
+}
+
 .admin-pagination {
   display: flex;
   flex-wrap: wrap;
@@ -1320,6 +1354,16 @@ body {
 .admin-tab-icon--users::after {
   inset: 10px 3px 3px;
   border-radius: 999px 999px 4px 4px;
+}
+
+.admin-tab-icon--cards::before {
+  inset: 5px 2px 7px 6px;
+  border-radius: 4px;
+}
+
+.admin-tab-icon--cards::after {
+  inset: 7px 6px 4px 2px;
+  border-radius: 4px;
 }
 
 .admin-tab-icon--community::after {

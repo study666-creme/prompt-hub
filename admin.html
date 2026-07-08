@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__ADMIN_BUILD__ = '20260708g';
+    window.__ADMIN_BUILD__ = '20260708h';
     (function () {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function (regs) {
@@ -23,7 +23,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Prompt Hub 运营控制台</title>
-  <link rel="stylesheet" href="styles-admin.css?v=20260708g">
+  <link rel="stylesheet" href="styles-admin.css?v=20260708h">
 </head>
 <body class="admin-console-page" data-admin-page="console">
   <div class="admin-app" id="adminApp" hidden>
@@ -36,6 +36,7 @@
         <nav class="admin-nav admin-tabs" aria-label="管理导航">
           <button type="button" class="admin-tab is-active" data-tab="overview"><span class="admin-tab-icon admin-tab-icon--overview" aria-hidden="true"></span>概览</button>
           <button type="button" class="admin-tab" data-tab="users"><span class="admin-tab-icon admin-tab-icon--users" aria-hidden="true"></span>用户</button>
+          <button type="button" class="admin-tab" data-tab="cards"><span class="admin-tab-icon admin-tab-icon--cards" aria-hidden="true"></span>卡片库</button>
           <button type="button" class="admin-tab" data-tab="community"><span class="admin-tab-icon admin-tab-icon--community" aria-hidden="true"></span>社区</button>
           <button type="button" class="admin-tab" data-tab="codes"><span class="admin-tab-icon admin-tab-icon--codes" aria-hidden="true"></span>激活码</button>
           <button type="button" class="admin-tab" data-tab="models"><span class="admin-tab-icon admin-tab-icon--models" aria-hidden="true"></span>生图模型</button>
@@ -81,12 +82,6 @@
         <p class="admin-hint" id="dashStorageHint">正在扫描 card-images 桶…</p>
         <div id="dashStorageBody" hidden></div>
       </div>
-      <div class="admin-card" id="dashMedia">
-        <h2>图片存储（R2）</h2>
-        <p class="admin-hint">卡片库「裂图 / 502 / 404」多为 R2 未同步或旧第三方外链失效。本机已有 <code>backups/card-images</code> 时，在项目根目录 PowerShell 执行：</p>
-        <pre class="admin-code" id="dashMediaCmd">node scripts/sync-supabase-to-r2.mjs --from-local --out backups/card-images --skip-existing</pre>
-        <p class="admin-hint">需先在 <code>scripts/admin.local.env</code> 填 R2 密钥。仍可从 Supabase 拉取并上传：<code>node scripts/sync-supabase-to-r2.mjs --out backups/card-images --skip-existing</code></p>
-      </div>
       <div class="admin-card" id="dashCommunity">
         <h2>社区维护</h2>
         <p class="admin-hint"><strong>写回卡片库</strong>：作者云端缺卡但社区仍在线时用（见社区页「卡片库无」）。<strong>清理无效帖</strong>：下架 Storage 无图、无效作者、重复、删卡孤儿——不删图片。</p>
@@ -131,6 +126,60 @@
           <button type="button" class="admin-btn" id="userNext">下一页</button>
         </div>
         <p class="admin-msg" id="userMsg" hidden></p>
+      </div>
+    </section>
+
+    <section class="admin-panel" id="panel-cards" hidden>
+      <div class="admin-stats" id="cardAdminStats"></div>
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <h2>卡片库巡检</h2>
+          <button type="button" class="admin-btn admin-btn--sm" id="cardAdminRefresh">刷新</button>
+        </div>
+        <div class="admin-search-bar">
+          <div class="admin-field">
+            <label for="cardAdminSearch">搜索卡片</label>
+            <input type="search" id="cardAdminSearch" autocomplete="off" spellcheck="false"
+              placeholder="用户 ID、昵称、卡片 ID、标题、提示词、图片路径">
+          </div>
+          <div class="admin-field admin-field--sm">
+            <label for="cardAdminRisk">风险筛选</label>
+            <select id="cardAdminRisk">
+              <option value="all">全部</option>
+              <option value="no-image">无图卡</option>
+              <option value="data-image">本地 data 图</option>
+              <option value="remote-image">第三方外链</option>
+              <option value="owner-mismatch">路径串号</option>
+              <option value="empty-content">空内容</option>
+              <option value="duplicate-id">重复 ID</option>
+            </select>
+          </div>
+          <button type="button" class="admin-btn admin-btn--primary" id="cardAdminSearchBtn">查询</button>
+          <button type="button" class="admin-btn" id="cardAdminCheckImagesBtn" title="只检查当前页 storage 图片是否真实存在">抽检本页图片</button>
+        </div>
+        <p class="admin-hint" id="cardAdminHint">只读巡检，不会修改卡片或图片。</p>
+        <div class="admin-card-grid" id="cardAdminSummary"></div>
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-table--cards">
+            <thead>
+              <tr>
+                <th>卡片</th>
+                <th>用户</th>
+                <th>图片状态</th>
+                <th>社区</th>
+                <th>更新时间</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="cardAdminTableBody"></tbody>
+          </table>
+        </div>
+        <div class="admin-pagination">
+          <button type="button" class="admin-btn" id="cardAdminPrev">上一页</button>
+          <span id="cardAdminPageInfo" class="admin-hint"></span>
+          <button type="button" class="admin-btn" id="cardAdminNext">下一页</button>
+        </div>
+        <p class="admin-msg" id="cardAdminMsg" hidden></p>
       </div>
     </section>
 
@@ -180,11 +229,6 @@
             <button type="button" class="admin-view-tab" data-bucket-risk="recoverable">可写回</button>
             <button type="button" class="admin-view-tab" data-bucket-risk="relink">需核对/可关联</button>
           </div>
-          <label class="admin-check admin-batch-select-all">
-            <input type="checkbox" id="communityBucketSelectAll"> 全选本页
-          </label>
-          <span class="admin-hint" id="communityBucketSelectedCount">已选 0 组</span>
-          <button type="button" class="admin-btn admin-btn--sm admin-btn--danger" id="communityBucketDeleteSelectedBtn" disabled title="批量删除已暂停（曾误删卡片库在用的图）。请逐条删并核对缩略图。">删除选中（已暂停）</button>
           <button type="button" class="admin-btn admin-btn--sm" id="communityBucketRescanBtn" title="重新扫描 R2（约 1～3 分钟）">重新扫描</button>
           <span class="admin-hint" id="communityBucketMeta"></span>
         </div>
@@ -459,6 +503,6 @@
 
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="admin.js?v=20260708g"></script>
+  <script src="admin.js?v=20260708h"></script>
 </body>
 </html>

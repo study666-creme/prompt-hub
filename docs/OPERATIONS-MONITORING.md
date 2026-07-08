@@ -8,6 +8,17 @@
 - 位置：概览 → **运行监控**
 - 接口：`GET /api/admin/dashboard/monitoring?hours=24`
 
+## 卡片库巡检后台
+
+- 页面：`https://prompt-hubs.com/admin.html` → **卡片库**
+- 接口：
+  - `GET /api/admin/cards/summary`
+  - `GET /api/admin/cards?limit=20&offset=0&risk=all`
+  - `GET /api/admin/cards?limit=20&offset=0&risk=all&checkImages=1`
+- 定位：只读巡检云端 `user_data.data.cards`，帮助定位黑卡、灰卡、旧外链、路径串号、重复 ID 和空内容卡。
+- 性能：后端会为卡片索引做 20 秒短缓存，并复用并发扫描；后台“刷新”按钮会带 `refresh=1` 强制重建。
+- 安全边界：不会删除用户卡片或图片；“抽检本页图片”只检查当前分页里的 Storage/R2 图片是否真实存在。
+
 ## 现在能看什么
 
 1. **Worker/API 错误**
