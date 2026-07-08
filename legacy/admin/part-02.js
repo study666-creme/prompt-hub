@@ -150,6 +150,7 @@
     if (!el || !session) return;
     el.innerHTML = '<div class="admin-stat"><span>加载中</span><strong>…</strong></div>';
     void loadDashboardInfra();
+    void loadDashboardMonitor();
     void loadDashboardStorage();
     bindDashboardCommunityPurge();
     try {
@@ -205,6 +206,198 @@
       body.hidden = false;
     } catch (e) {
       hint.textContent = '环境信息加载失败：' + friendlyFetchError(e);
+    }
+  }
+
+  function monitorNumber(n) {
+    return Number(n || 0).toLocaleString('zh-CN');
+  }
+
+  function monitorPercent(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '—';
+    return (n * 100).toFixed(n > 0 && n < 0.1 ? 1 : 0) + '%';
+  }
+
+  function monitorTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  function monitorBadge(text, kind) {
+    return `<span class="admin-badge admin-badge--${kind || 'ok'}">${esc(text)}</span>`;
+  }
+
+  function renderMonitorBars(hours) {
+    const items = Array.isArray(hours) ? hours : [];
+    if (!items.length) return '';
+    const max = Math.max(1, ...items.map((h) => Math.max(h.requestTotal || 0, h.api5xx || 0, h.image404 || 0)));
+    return `<div class="admin-monitor-bars" aria-label="近 24 小时请求趋势">
+      ${items.map((h) => {
+        const total = Math.max(0, Number(h.requestTotal) || 0);
+        const err = Math.max(0, Number(h.api5xx) || 0);
+        const img404 = Math.max(0, Number(h.image404) || 0);
+        const height = Math.max(4, Math.round((total / max) * 100));
+        const hasIssue = err > 0 || img404 > 0;
+        return `<span class="admin-monitor-bar ${hasIssue ? 'has-issue' : ''}" style="height:${height}%" title="${esc(h.hour)} · 请求 ${total} · 5xx ${err} · 图片404 ${img404}"></span>`;
+      }).join('')}
+    </div>`;
+  }
+
+  function renderMonitorRecordTable(title, record, emptyText) {
+    const entries = Object.entries(record || {}).slice(0, 10);
+    if (!entries.length) {
+      return `<div class="admin-monitor-section"><h3>${esc(title)}</h3><p class="admin-hint">${esc(emptyText || '暂无数据')}</p></div>`;
+    }
+    return `<div class="admin-monitor-section">
+      <h3>${esc(title)}</h3>
+      <div class="admin-table-wrap">
+        <table class="admin-table admin-table--compact">
+          <thead><tr><th>项目</th><th>次数</th></tr></thead>
+          <tbody>${entries.map(([key, count]) => `
+            <tr><td><code>${esc(key)}</code></td><td>${monitorNumber(count)}</td></tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  async function loadDashboardMonitor() {
+    const hint = $('dashMonitorHint');
+    const body = $('dashMonitorBody');
+    const refresh = $('dashMonitorRefresh');
+    if (!session || !hint || !body) return;
+    hint.textContent = '正在读取近 24 小时运行监控…';
+    body.hidden = true;
+    if (refresh && refresh.dataset.bound !== '1') {
+      refresh.dataset.bound = '1';
+      refresh.addEventListener('click', () => loadDashboardMonitor());
+    }
+    if (refresh) refresh.disabled = true;
+    try {
+      const d = await adminFetch(session, '/api/admin/dashboard/monitoring?hours=24', { timeoutMs: 90000 });
+      const req = d.requests || {};
+      const gen = d.generation || {};
+      const biz = d.business || {};
+      const requestSource = req.available ? 'Worker 自计数' : '未绑定 KV';
+      const lastSeen = req.lastUpdatedAt ? ` · 最新 ${monitorTime(req.lastUpdatedAt)}` : '';
+      hint.textContent = `近 ${d.hours || 24} 小时 · ${requestSource}${lastSeen}`;
+
+      const alerts = Array.isArray(d.alerts) && d.alerts.length
+        ? `<div class="admin-alerts admin-monitor-alerts">${d.alerts.map((a) => `
+            <div class="admin-alert admin-alert--${a.level === 'critical' ? 'critical' : 'warn'}">
+              <strong>${esc(a.title)}</strong>${esc(a.detail || '')}
+            </div>`).join('')}</div>`
+        : '';
+
+      const stats = `
+        <div class="admin-stats admin-monitor-stats">
+          <div class="admin-stat admin-stat--slate"><span>Cloudflare 请求量</span><strong>${monitorNumber(req.requestTotal)}</strong></div>
+          <div class="admin-stat ${req.api5xx > 0 ? 'admin-stat--rose' : 'admin-stat--slate'}"><span>Worker/API 5xx</span><strong>${monitorNumber(req.api5xx)}</strong></div>
+          <div class="admin-stat ${req.image404 > 0 ? 'admin-stat--amber' : 'admin-stat--slate'}"><span>图片 404</span><strong>${monitorNumber(req.image404)}</strong></div>
+          <div class="admin-stat ${gen.failureRate >= 0.15 ? 'admin-stat--amber' : 'admin-stat--slate'}"><span>生图失败率</span><strong>${monitorPercent(gen.failureRate)}</strong></div>
+          <div class="admin-stat ${gen.stuckProcessing > 0 ? 'admin-stat--amber' : 'admin-stat--slate'}"><span>生成中 / 卡住</span><strong>${monitorNumber(gen.processing || 0)} / ${monitorNumber(gen.stuckProcessing || 0)}</strong></div>
+          <div class="admin-stat admin-stat--slate"><span>积分消耗 / 退款</span><strong>${monitorNumber(biz.creditsSpent)} / ${monitorNumber(biz.creditsRefunded)}</strong></div>
+        </div>`;
+
+      const genBadge = gen.available
+        ? `${monitorBadge(`成功 ${monitorNumber(gen.completed || 0)}`, 'ok')} ${monitorBadge(`失败 ${monitorNumber(gen.failed || 0)}`, gen.failed ? 'warn' : 'ok')} ${monitorBadge(`平均 ${gen.averageDurationSec == null ? '—' : gen.averageDurationSec + 's'}`, 'info')}`
+        : monitorBadge(gen.error || '生图记录不可读', 'warn');
+      const businessBadge = [
+        biz.ledgerAvailable ? monitorBadge('流水可读', 'ok') : monitorBadge('流水不可读', 'warn'),
+        biz.redemptionsAvailable ? monitorBadge(`兑换 ${monitorNumber(biz.redemptions)}`, 'ok') : monitorBadge('兑换不可读', 'warn'),
+        biz.paymentsAvailable ? monitorBadge(`支付事件 ${monitorNumber(biz.payments)}`, 'ok') : monitorBadge('支付事件不可读', 'warn')
+      ].join(' ');
+
+      const recentErrors = Array.isArray(req.recentErrors) ? req.recentErrors : [];
+      const recentFailures = Array.isArray(gen.recentFailures) ? gen.recentFailures : [];
+      const recentImage404 = Array.isArray(req.recentImage404) ? req.recentImage404 : [];
+      const issueRows = [
+        ...recentErrors.slice(0, 12).map((e) => ({
+          type: e.status === 404 ? '图片 404' : `HTTP ${e.status}`,
+          at: e.ts,
+          target: `${e.method || ''} ${e.route || e.path || ''}`.trim(),
+          detail: e.path || e.message || ''
+        })),
+        ...recentFailures.slice(0, 12).map((f) => ({
+          type: '生图失败',
+          at: f.createdAt,
+          target: [f.jobId, f.model, f.provider].filter(Boolean).join(' · '),
+          detail: f.message || f.reason || ''
+        }))
+      ].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 14);
+
+      const issues = issueRows.length
+        ? `<div class="admin-table-wrap">
+            <table class="admin-table admin-table--compact">
+              <thead><tr><th>时间</th><th>类型</th><th>目标</th><th>详情</th></tr></thead>
+              <tbody>${issueRows.map((r) => `
+                <tr>
+                  <td>${esc(monitorTime(r.at))}</td>
+                  <td>${esc(r.type)}</td>
+                  <td><code>${esc(r.target || '—')}</code></td>
+                  <td class="admin-monitor-detail">${esc(r.detail || '—')}</td>
+                </tr>`).join('')}</tbody>
+            </table>
+          </div>`
+        : '<p class="admin-hint">近 24 小时没有记录到 5xx、图片 404 或生图失败。</p>';
+
+      const image404List = recentImage404.length
+        ? `<ul class="admin-notes admin-monitor-paths">${recentImage404.slice(0, 8).map((e) => `<li><code>${esc(e.path || e.route || '')}</code> · ${esc(monitorTime(e.ts))}</li>`).join('')}</ul>`
+        : '<p class="admin-hint">暂无图片代理 404。</p>';
+
+      body.innerHTML = `
+        ${alerts}
+        ${stats}
+        ${renderMonitorBars(req.lastHours || [])}
+        <div class="admin-monitor-grid">
+          <div class="admin-monitor-section">
+            <h3>生图状态</h3>
+            <p class="admin-hint">${genBadge}</p>
+            <div class="admin-kv admin-kv--compact">
+              <div><span>任务数</span><strong>${monitorNumber(gen.total)}</strong></div>
+              <div><span>有结果图</span><strong>${monitorNumber(gen.withResultImage)}</strong></div>
+              <div><span>完成但无图</span><strong>${monitorNumber(gen.missingResultImage)}</strong></div>
+              <div><span>扣费合计</span><strong>${monitorNumber(gen.totalCreditsCharged)}</strong></div>
+            </div>
+          </div>
+          <div class="admin-monitor-section">
+            <h3>运营流水</h3>
+            <p class="admin-hint">${businessBadge}</p>
+            <div class="admin-kv admin-kv--compact">
+              <div><span>积分发放</span><strong>${monitorNumber(biz.creditsGranted)}</strong></div>
+              <div><span>兑换记录</span><strong>${monitorNumber(biz.redemptions)}</strong></div>
+              <div><span>支付事件</span><strong>${monitorNumber(biz.payments)}</strong></div>
+              <div><span>流水行数</span><strong>${monitorNumber(biz.ledgerRows)}</strong></div>
+            </div>
+          </div>
+        </div>
+        <div class="admin-monitor-section">
+          <h3>最近异常</h3>
+          ${issues}
+        </div>
+        <div class="admin-monitor-grid">
+          ${renderMonitorRecordTable('热门接口', req.byRoute, '暂无请求统计')}
+          ${renderMonitorRecordTable('状态码分布', req.byStatus, '暂无状态码统计')}
+        </div>
+        <div class="admin-monitor-section">
+          <h3>最近图片 404</h3>
+          ${image404List}
+        </div>
+        <p class="admin-hint admin-monitor-footnote">请求量为 Worker 自计数近似值；正式账单/免费额度仍以 Cloudflare 控制台 Analytics 为准。</p>
+      `;
+      body.hidden = false;
+    } catch (e) {
+      hint.textContent = '监控加载失败：' + friendlyFetchError(e);
+    } finally {
+      if (refresh) refresh.disabled = false;
     }
   }
 

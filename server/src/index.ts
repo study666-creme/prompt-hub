@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { applyCorsHeaders } from './lib/cors-headers';
 import { jsonError } from './lib/errors';
+import { recordRequestMetric } from './lib/monitoring';
 import { diagnoseSupabaseUpstream } from './lib/supabase-upstream';
 import { createCorsMiddleware } from './middleware/cors';
 import { adminRoutes } from './routes/admin';
@@ -157,5 +158,24 @@ app.notFound(c => {
 });
 
 export default {
-  fetch: app.fetch
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    const startedAt = Date.now();
+    try {
+      const response = await app.fetch(request, env, ctx);
+      ctx.waitUntil(recordRequestMetric(env, request, response, Date.now() - startedAt));
+      return response;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      ctx.waitUntil(
+        recordRequestMetric(
+          env,
+          request,
+          new Response(null, { status: 500 }),
+          Date.now() - startedAt,
+          { message: msg }
+        )
+      );
+      throw err;
+    }
+  }
 };

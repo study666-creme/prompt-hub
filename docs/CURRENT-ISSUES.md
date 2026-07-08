@@ -9,8 +9,8 @@
 
 | 项 | 值 |
 |----|-----|
-| **当前 Pages** | **`20260708b`**（`window.__APP_BUILD__`） |
-| **运营后台** | `admin-login.html` 登录入口 + `admin.html` 控制台 · build `20260708b` |
+| **当前 Pages** | **`20260708g`**（`window.__APP_BUILD__`） |
+| **运营后台** | `admin-login.html` 登录入口 + `admin.html` 控制台 · build `20260708g` |
 | Pages | https://prompt-hubs.com |
 | API | https://api.prompt-hubs.com |
 | Worker | `prompt-hub-api` |
@@ -45,6 +45,7 @@
 | 🟠 | **MemFire 迁移** | Supabase Pro 约至 2026-07-07 |
 | 🟡 | **部分历史图 404** | 旧第三方直链（如 aitohumanize）无法靠 R2 恢复 |
 | 🟡 | **偶发 API 502** | R2 齐后单路径排查 |
+| 🟢 | **运营监控** | 后台概览新增 Worker/API 5xx、图片 404、生图失败率、近似请求量与积分流水 |
 | 🟢 | **Feed 滚动 / 生图 Tab** | `20260625p`：点侧栏后不再强制回拉 scroll；Tab 切换 force 重绘 |
 | 🟢 | **SyncOrchestrator** | pull/Feed 刷新走编排器 |
 
@@ -64,6 +65,7 @@
 
 - 上限 **100,000/天**；首屏已瘦身后额度压力明显低于 2026-05。
 - 查看：Cloudflare 控制台 → **Workers 和 Pages** → **分析**
+- 站内近 24 小时近似量：后台 `admin.html` → 概览 → **运行监控**。该值来自 Worker KV 自计数，图片成功请求抽样折算；官方账单仍以 Cloudflare Analytics 为准。
 
 ---
 

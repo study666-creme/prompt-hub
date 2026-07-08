@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
 import type { Env } from '../../env';
+import { extractErrorMessage } from '../../lib/cors-headers';
 import { formatBytes } from '../../lib/admin-helpers';
 import { scanBucketUsage } from '../../lib/admin-storage';
+import { summarizeRequestMetrics } from '../../lib/monitoring';
 import { storagePolicySummary } from '../../lib/storage-quota';
 import { createAdminClient, isMembershipActive, type Profile } from '../../lib/supabase';
 import { requireAdminSecret } from '../../middleware/admin';
@@ -30,6 +32,320 @@ function usageStatus(usedBytes: number, quotaBytes: number) {
   if (pct >= 95) return 'critical' as const;
   if (pct >= 80) return 'warn' as const;
   return 'ok' as const;
+}
+
+type AdminClient = ReturnType<typeof createAdminClient>;
+
+type GenerationMonitorRow = {
+  id: string;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+  completed_at: string | null;
+  credits_charged: number | string | null;
+  meta: unknown;
+  result_image_url: string | null;
+};
+
+type LedgerRow = {
+  delta: number | string;
+  reason: string | null;
+  ref_id: string | null;
+  user_id: string | null;
+  created_at: string;
+};
+
+type RedemptionRow = {
+  id: string;
+  code: string;
+  user_id: string;
+  redeemed_at: string;
+};
+
+type PaymentEventRow = {
+  event_id: string;
+  event_type: string;
+  user_id: string | null;
+  processed_at: string;
+};
+
+function missingDataSource(error: unknown) {
+  const msg = extractErrorMessage(error);
+  return /does not exist|Could not find the table|schema cache|permission denied|JWT|Invalid API key|Unauthorized/i.test(
+    msg
+  );
+}
+
+function safeMeta(meta: unknown): Record<string, unknown> {
+  return meta && typeof meta === 'object' && !Array.isArray(meta)
+    ? (meta as Record<string, unknown>)
+    : {};
+}
+
+function textValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function shortId(id: string | null | undefined) {
+  const raw = String(id || '').trim();
+  if (!raw) return null;
+  return raw.length > 13 ? `${raw.slice(0, 8)}...${raw.slice(-4)}` : raw;
+}
+
+function shortMessage(message: unknown) {
+  const raw = String(message || '').trim();
+  if (!raw) return null;
+  return raw.length > 180 ? `${raw.slice(0, 180)}...` : raw;
+}
+
+function statusLabel(status: string) {
+  if (status === 'completed') return '成功';
+  if (status === 'failed') return '失败';
+  if (status === 'processing') return '生成中';
+  if (status === 'pending') return '排队中';
+  return status || '未知';
+}
+
+function groupInc(record: Record<string, number>, key: string, amount = 1) {
+  record[key] = (record[key] || 0) + amount;
+}
+
+function topRecord(record: Record<string, number>, limit = 8) {
+  return Object.entries(record)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([key, count]) => ({ key, count }));
+}
+
+async function collectGenerationMonitor(admin: AdminClient, sinceIso: string) {
+  try {
+    const { data, error } = await admin
+      .from('generation_requests')
+      .select('id,status,error_message,created_at,completed_at,credits_charged,meta,result_image_url')
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+      .limit(1200);
+    if (error) throw error;
+
+    const rows = (data ?? []) as GenerationMonitorRow[];
+    const byStatus: Record<string, number> = {};
+    const byModel: Record<string, number> = {};
+    const byProvider: Record<string, number> = {};
+    const byFailureReason: Record<string, number> = {};
+    let totalCreditsCharged = 0;
+    let completed = 0;
+    let failed = 0;
+    let processing = 0;
+    let pending = 0;
+    let withResultImage = 0;
+    let missingResultImage = 0;
+    let totalDurationMs = 0;
+    let durationCount = 0;
+    const stuckBefore = Date.now() - 30 * 60 * 1000;
+    const recentFailures: Array<{
+      id: string;
+      jobId: string;
+      status: string;
+      model: string | null;
+      provider: string | null;
+      reason: string | null;
+      message: string | null;
+      createdAt: string;
+    }> = [];
+
+    for (const row of rows) {
+      const status = String(row.status || 'unknown');
+      const meta = safeMeta(row.meta);
+      const model = textValue(meta.model) || textValue(meta.upstreamModel) || 'unknown';
+      const provider = textValue(meta.provider) || 'unknown';
+      const credits = Number(row.credits_charged) || 0;
+      totalCreditsCharged += credits;
+      groupInc(byStatus, status);
+      groupInc(byModel, model);
+      groupInc(byProvider, provider);
+
+      if (status === 'completed') completed += 1;
+      else if (status === 'failed') failed += 1;
+      else if (status === 'processing') processing += 1;
+      else if (status === 'pending') pending += 1;
+
+      if (row.result_image_url) withResultImage += 1;
+      if (status === 'completed' && !row.result_image_url) missingResultImage += 1;
+
+      if (row.completed_at) {
+        const start = new Date(row.created_at).getTime();
+        const end = new Date(row.completed_at).getTime();
+        if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
+          totalDurationMs += end - start;
+          durationCount += 1;
+        }
+      }
+
+      if (status === 'failed') {
+        const reason =
+          textValue(meta.failReason)
+          || textValue(meta.fastSubmitError)
+          || textValue(meta.mookoSubmitError)
+          || textValue(meta.ithinkSubmitError)
+          || textValue(row.error_message)
+          || 'unknown';
+        groupInc(byFailureReason, reason);
+        if (recentFailures.length < 20) {
+          recentFailures.push({
+            id: row.id,
+            jobId: shortId(row.id) || row.id,
+            status: statusLabel(status),
+            model: model === 'unknown' ? null : model,
+            provider: provider === 'unknown' ? null : provider,
+            reason,
+            message: shortMessage(row.error_message || reason),
+            createdAt: row.created_at
+          });
+        }
+      }
+    }
+
+    const stuckProcessing = rows.filter((row) => {
+      const st = String(row.status || '');
+      const created = new Date(row.created_at).getTime();
+      return (st === 'processing' || st === 'pending') && Number.isFinite(created) && created < stuckBefore;
+    }).length;
+    const terminal = completed + failed;
+
+    return {
+      available: true,
+      total: rows.length,
+      completed,
+      failed,
+      processing,
+      pending,
+      stuckProcessing,
+      withResultImage,
+      missingResultImage,
+      failureRate: terminal ? failed / terminal : 0,
+      averageDurationSec: durationCount ? Math.round(totalDurationMs / durationCount / 1000) : null,
+      totalCreditsCharged,
+      byStatus,
+      byModel: topRecord(byModel),
+      byProvider: topRecord(byProvider),
+      topFailureReasons: topRecord(byFailureReason),
+      recentFailures
+    };
+  } catch (e) {
+    return {
+      available: false,
+      error: missingDataSource(e) ? 'generation_requests 不可读或迁移未完成' : shortMessage(extractErrorMessage(e)),
+      total: 0,
+      completed: 0,
+      failed: 0,
+      processing: 0,
+      pending: 0,
+      stuckProcessing: 0,
+      withResultImage: 0,
+      missingResultImage: 0,
+      failureRate: 0,
+      averageDurationSec: null,
+      totalCreditsCharged: 0,
+      byStatus: {},
+      byModel: [],
+      byProvider: [],
+      topFailureReasons: [],
+      recentFailures: []
+    };
+  }
+}
+
+async function collectBusinessMonitor(admin: AdminClient, sinceIso: string) {
+  const out = {
+    ledgerAvailable: true,
+    redemptionsAvailable: true,
+    paymentsAvailable: true,
+    creditsSpent: 0,
+    creditsRefunded: 0,
+    creditsGranted: 0,
+    ledgerRows: 0,
+    redemptions: 0,
+    payments: 0,
+    recentRedemptions: [] as Array<{
+      id: string;
+      code: string;
+      userId: string;
+      redeemedAt: string;
+    }>,
+    recentPayments: [] as Array<{
+      eventId: string;
+      eventType: string;
+      userId: string | null;
+      processedAt: string;
+    }>,
+    errors: [] as string[]
+  };
+
+  try {
+    const { data, error } = await admin
+      .from('credit_ledger')
+      .select('delta,reason,ref_id,user_id,created_at')
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+      .limit(1000);
+    if (error) throw error;
+    const rows = (data ?? []) as LedgerRow[];
+    out.ledgerRows = rows.length;
+    for (const row of rows) {
+      const delta = Number(row.delta) || 0;
+      const reason = String(row.reason || '');
+      if (delta < 0) out.creditsSpent += Math.abs(delta);
+      else if (/refund/i.test(reason)) out.creditsRefunded += delta;
+      else out.creditsGranted += delta;
+    }
+  } catch (e) {
+    out.ledgerAvailable = false;
+    out.errors.push(missingDataSource(e) ? 'credit_ledger 不可读' : shortMessage(extractErrorMessage(e)) || 'credit_ledger 读取失败');
+  }
+
+  try {
+    const { data, error } = await admin
+      .from('code_redemptions')
+      .select('id,code,user_id,redeemed_at')
+      .gte('redeemed_at', sinceIso)
+      .order('redeemed_at', { ascending: false })
+      .limit(20);
+    if (error) throw error;
+    const rows = (data ?? []) as RedemptionRow[];
+    out.redemptions = rows.length;
+    out.recentRedemptions = rows.map((r) => ({
+      id: r.id,
+      code: r.code,
+      userId: shortId(r.user_id) || r.user_id,
+      redeemedAt: r.redeemed_at
+    }));
+  } catch (e) {
+    out.redemptionsAvailable = false;
+    out.errors.push(missingDataSource(e) ? 'code_redemptions 不可读' : shortMessage(extractErrorMessage(e)) || 'code_redemptions 读取失败');
+  }
+
+  try {
+    const { data, error } = await admin
+      .from('payment_webhook_events')
+      .select('event_id,event_type,user_id,processed_at')
+      .gte('processed_at', sinceIso)
+      .order('processed_at', { ascending: false })
+      .limit(20);
+    if (error) throw error;
+    const rows = (data ?? []) as PaymentEventRow[];
+    out.payments = rows.length;
+    out.recentPayments = rows.map((r) => ({
+      eventId: shortId(r.event_id) || r.event_id,
+      eventType: r.event_type,
+      userId: r.user_id ? shortId(r.user_id) : null,
+      processedAt: r.processed_at
+    }));
+  } catch (e) {
+    out.paymentsAvailable = false;
+    out.errors.push(missingDataSource(e) ? 'payment_webhook_events 不可读' : shortMessage(extractErrorMessage(e)) || 'payment_webhook_events 读取失败');
+  }
+
+  return out;
 }
 
 adminDashboardRoutes.get('/', async c => {
@@ -140,6 +456,69 @@ adminDashboardRoutes.get('/infra', async c => {
         'Cloudflare Workers 用量在 Cloudflare 控制台 → Workers & Pages',
         '本接口不返回任何密钥'
       ]
+    }
+  });
+});
+
+/** 运营监控：Worker 请求量、API 错误、图片 404、生图失败率与轻量业务流水 */
+adminDashboardRoutes.get('/monitoring', async c => {
+  const hoursRaw = Number(c.req.query('hours') || 24);
+  const hours = Math.min(72, Math.max(1, Number.isFinite(hoursRaw) ? Math.floor(hoursRaw) : 24));
+  const sinceIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const admin = createAdminClient(c.env);
+  const [requests, generation, business] = await Promise.all([
+    summarizeRequestMetrics(c.env, hours),
+    collectGenerationMonitor(admin, sinceIso),
+    collectBusinessMonitor(admin, sinceIso)
+  ]);
+
+  const alerts: Array<{ level: 'warn' | 'critical'; title: string; detail: string }> = [];
+  if (!requests.available) {
+    alerts.push({
+      level: 'warn',
+      title: 'Worker 自计数未启用',
+      detail: '请绑定 PROMPT_HUB_METRICS KV 后重新部署；Cloudflare 官方请求量仍以控制台 Analytics 为准。'
+    });
+  }
+  if (requests.api5xx > 0) {
+    alerts.push({
+      level: 'critical',
+      title: 'API 5xx',
+      detail: `近 ${hours} 小时出现 ${requests.api5xx} 次 Worker/API 5xx。`
+    });
+  }
+  if (requests.image404 > 0) {
+    alerts.push({
+      level: 'warn',
+      title: '图片 404',
+      detail: `近 ${hours} 小时出现 ${requests.image404} 次图片代理 404，优先看最近 404 路径。`
+    });
+  }
+  if (generation.available && generation.failed > 0 && generation.failureRate >= 0.15) {
+    alerts.push({
+      level: 'warn',
+      title: '生图失败率偏高',
+      detail: `近 ${hours} 小时失败率约 ${(generation.failureRate * 100).toFixed(1)}%。`
+    });
+  }
+  if (generation.available && generation.stuckProcessing > 0) {
+    alerts.push({
+      level: 'warn',
+      title: '存在卡住的生图任务',
+      detail: `${generation.stuckProcessing} 个任务已排队/生成超过 30 分钟。`
+    });
+  }
+
+  return c.json({
+    ok: true,
+    data: {
+      generatedAt: new Date().toISOString(),
+      hours,
+      windowStart: sinceIso,
+      requests,
+      generation,
+      business,
+      alerts
     }
   });
 });

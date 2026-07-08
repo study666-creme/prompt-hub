@@ -1,8 +1,10 @@
-import type { R2Bucket } from '@cloudflare/workers-types';
+import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
 
 export type Env = {
   /** R2 桶绑定：wrangler.toml [[r2_buckets]] CARD_IMAGES_R2 */
   CARD_IMAGES_R2?: R2Bucket;
+  /** Optional hourly ops metrics bucket for admin monitoring. */
+  PROMPT_HUB_METRICS?: KVNamespace;
   /** 图片读写的后端：supabase | r2-first | r2（见 docs/R2-MIGRATION.md） */
   MEDIA_STORAGE_MODE?: string;
   ENVIRONMENT: string;

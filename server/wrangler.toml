@@ -29,6 +29,11 @@ binding = "CARD_IMAGES_R2"
 bucket_name = "prompt-hub-card-images"
 preview_bucket_name = "prompt-hub-card-images-dev"
 
+[[kv_namespaces]]
+binding = "PROMPT_HUB_METRICS"
+id = "37976970d22347fba80ca6c72238f6e7"
+preview_id = "c2602858d4bd40a4b1603de6d7b4af22"
+
 [[routes]]
 pattern = "api.prompt-hubs.com"
 custom_domain = true

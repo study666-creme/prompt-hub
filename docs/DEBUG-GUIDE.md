@@ -77,6 +77,7 @@ document.getElementById('lightboxImage')?.onwheel != null
 2. 左侧 **Workers 和 Pages**
 3. 点 **概述** 或 **分析** → 看 **Requests** 曲线
 4. 分别看 **prompt-hub-api**（Worker）与 **prompt-hub-hub**（Pages）哪边更高
+5. 站内快速看近 24 小时：`admin.html` → 概览 → **运行监控**（Worker 自计数近似值；图片成功请求抽样折算，404/5xx 精确记录）
 
 ### 省额度建议
 

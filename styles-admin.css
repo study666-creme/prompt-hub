@@ -761,6 +761,78 @@ table.admin-table {
   line-height: 1.5;
 }
 
+.admin-monitor-alerts {
+  margin-bottom: 12px;
+}
+
+.admin-monitor-stats {
+  margin-top: 2px;
+}
+
+.admin-monitor-bars {
+  height: 52px;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  margin: 4px 0 16px;
+  padding: 10px 10px 8px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+  background: rgba(249, 250, 251, 0.82);
+}
+
+.admin-monitor-bar {
+  flex: 1;
+  min-width: 3px;
+  border-radius: 999px 999px 2px 2px;
+  background: #111827;
+  opacity: 0.34;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.admin-monitor-bar.has-issue {
+  background: #b45309;
+  opacity: 0.9;
+}
+
+.admin-monitor-bar:hover {
+  opacity: 1;
+  transform: translateY(-2px);
+}
+
+.admin-monitor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  margin: 12px 0;
+}
+
+.admin-monitor-section {
+  min-width: 0;
+}
+
+.admin-monitor-section h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.admin-kv--compact {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.admin-monitor-detail {
+  max-width: 420px;
+  word-break: break-word;
+}
+
+.admin-monitor-paths code {
+  word-break: break-all;
+}
+
+.admin-monitor-footnote {
+  margin-top: 12px;
+}
+
 .admin-warn {
   color: var(--admin-warn);
 }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__ADMIN_BUILD__ = '20260708e';
+    window.__ADMIN_BUILD__ = '20260708g';
     (function () {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function (regs) {
@@ -23,7 +23,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Prompt Hub 运营控制台</title>
-  <link rel="stylesheet" href="styles-admin.css?v=20260708e">
+  <link rel="stylesheet" href="styles-admin.css?v=20260708g">
 </head>
 <body class="admin-console-page" data-admin-page="console">
   <div class="admin-app" id="adminApp" hidden>
@@ -64,6 +64,14 @@
         <h2>运行环境</h2>
         <p class="admin-hint" id="dashInfraHint">加载 API / 数据库状态…</p>
         <div id="dashInfraBody" hidden></div>
+      </div>
+      <div class="admin-card" id="dashMonitor">
+        <div class="admin-card-head">
+          <h2>运行监控</h2>
+          <button type="button" class="admin-btn admin-btn--sm" id="dashMonitorRefresh" title="刷新近 24 小时监控">刷新监控</button>
+        </div>
+        <p class="admin-hint" id="dashMonitorHint">加载 Worker/API、图片和生图监控…</p>
+        <div id="dashMonitorBody" hidden></div>
       </div>
       <div class="admin-card admin-storage-card" id="dashStorage">
         <div class="admin-card-head">
@@ -451,6 +459,6 @@
 
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="admin.js?v=20260708e"></script>
+  <script src="admin.js?v=20260708g"></script>
 </body>
 </html>

@@ -8,10 +8,11 @@
 
 | 项 | 状态 |
 |----|------|
-| **Pages** | https://prompt-hubs.com · 构建 `20260708b` |
+| **Pages** | https://prompt-hubs.com · 构建 `20260708g` |
 | **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com · `MEDIA_STORAGE_MODE=r2-first` |
 | **DB** | **MemFire** `d95gau8g91hmdup86ag0` · Worker `/health` → `supabase: ok` |
 | **图片** | R2（MemFire Storage 桶空属正常） |
+| **监控** | 后台概览「运行监控」· Worker KV `PROMPT_HUB_METRICS` · 见 `docs/OPERATIONS-MONITORING.md` |
 
 ### 已打通
 
@@ -32,6 +33,7 @@
 
 - 定价改造（本地）待 `wrangler deploy` 后生效
 - MemFire JWT Secret 与旧 Supabase 对齐可免全员重登（未对齐则重登一次即可）
+- Canvas 可继续商业化售卖服务/部署/额度/工作流；若沿用 AGPL 开源版，网络服务对应源码需要可获取，商业壁垒不要押在闭源代码上。
 
 ### 测试账号
 
