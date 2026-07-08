@@ -21,6 +21,10 @@
   function enqueueDownload(fn) { return queues.enqueueDownload(fn); }
   function enqueueResolve(fn) { return queues.enqueueResolve(fn); }
   function enqueueFeedResolve(fn) { return queues.enqueueFeedResolve(fn); }
+  const VISIBLE_LOAD_MARGIN = 160;
+  const prefetchedImageRefs = new Set();
+  const containerSignReady = new Map();
+  const warehousePrefetchSigs = new Map();
 
   function setContainerSignReady(container, promise) {
     const id = container?.id;
@@ -47,60 +51,6 @@
     feedImagesIn(container).forEach((img) => {
       delete img.dataset.feedObserverBound;
     });
-  }
-
-  function pumpDownloadQueue() {
-    while (downloadActive < maxDownloadCap() && downloadQueue.length) {
-      const job = downloadQueue.shift();
-      downloadActive += 1;
-      job().finally(() => {
-        downloadActive -= 1;
-        pumpDownloadQueue();
-      });
-    }
-  }
-
-  function enqueueDownload(fn) {
-    return new Promise((resolve) => {
-      downloadQueue.push(() => fn().then(resolve, resolve));
-      pumpDownloadQueue();
-    });
-  }
-
-  function runResolveQueue() {
-    while (resolveActive < maxResolveCap() && resolveQueue.length) {
-      const job = resolveQueue.shift();
-      resolveActive += 1;
-      job().finally(() => {
-        resolveActive -= 1;
-        runResolveQueue();
-      });
-    }
-  }
-
-  function enqueueResolve(fn) {
-    return new Promise((resolve) => {
-      resolveQueue.push(() => fn().then(resolve, resolve));
-      runResolveQueue();
-    });
-  }
-
-  function enqueueFeedResolve(fn) {
-    return new Promise((resolve) => {
-      feedResolveQueue.push(() => fn().then(resolve, resolve));
-      runFeedResolveQueue();
-    });
-  }
-
-  function runFeedResolveQueue() {
-    while (feedResolveActive < feedMaxResolveCap() && feedResolveQueue.length) {
-      const job = feedResolveQueue.shift();
-      feedResolveActive += 1;
-      job().finally(() => {
-        feedResolveActive -= 1;
-        runFeedResolveQueue();
-      });
-    }
   }
 
   function cardIdFromImg(img) {

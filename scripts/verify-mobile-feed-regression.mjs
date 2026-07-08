@@ -19,7 +19,11 @@ const requiredLoaderTokens = [
   'queueGridBackfillForImg(img)',
   'scheduleImageGenWarehouseRepair()',
   'tryAlternateFeedCover(img)',
-  "signedRoot?.id === 'cardsContainer'"
+  "signedRoot?.id === 'cardsContainer'",
+  'const containerSignReady = new Map();',
+  'function enqueueDownload(fn) { return queues.enqueueDownload(fn); }',
+  'function enqueueResolve(fn) { return queues.enqueueResolve(fn); }',
+  'function enqueueFeedResolve(fn) { return queues.enqueueFeedResolve(fn); }'
 ];
 
 const requiredLayoutTokens = [
@@ -54,6 +58,25 @@ checkTokens('loader', loader, requiredLoaderTokens);
 checkTokens('layout', layout, requiredLayoutTokens);
 checkTokens('image-feed', imageFeed, requiredImageFeedTokens);
 checkTokens('mobile-css', mobileCss, requiredCssTokens);
+
+const forbiddenLoader = [
+  /\bdownloadActive\b/,
+  /\bdownloadQueue\b/,
+  /\bresolveActive\b/,
+  /\bresolveQueue\b/,
+  /\bfeedResolveActive\b/,
+  /\bfeedResolveQueue\b/,
+  /function\s+pumpDownloadQueue\s*\(/,
+  /function\s+runResolveQueue\s*\(/,
+  /function\s+runFeedResolveQueue\s*\(/
+];
+
+for (const re of forbiddenLoader) {
+  if (re.test(loader)) {
+    console.error(`verify-mobile-feed-regression: forbidden loader queue residue matched: ${re}`);
+    process.exit(1);
+  }
+}
 
 const forbiddenCss = [
   /#cardsContainer[\s\S]{0,650}\.card-img[\s\S]{0,180}object-fit:\s*cover/i,
