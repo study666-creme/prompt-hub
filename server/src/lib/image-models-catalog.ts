@@ -1,4 +1,4 @@
-export type ImageModelProvider = 'grsai' | 'apimart';
+export type ImageModelProvider = 'grsai' | 'apimart' | 'newapi';
 
 export type ImageModelUiFamily = 'gim2' | 'banana' | 'jimeng' | 'midjourney' | 'wan' | 'flux';
 
@@ -59,6 +59,10 @@ function jimeng(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>): Omi
 
 function midjourney(row: Omit<ImageModelCatalogEntry, 'provider' | 'uiFamily'>): Omit<ImageModelCatalogEntry, 'provider'> {
   return { ...row, uiFamily: 'midjourney' };
+}
+
+function newApi(row: Omit<ImageModelCatalogEntry, 'provider'>): ImageModelCatalogEntry {
+  return { ...row, provider: 'newapi', followUpstreamMaintenance: undefined };
 }
 
 /**
@@ -210,6 +214,94 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
     sortOrder: 12
   })
 ]);
+
+/** New API 线路：成本从 /api/pricing 动态刷新；默认值是 2026-07-09 的兜底价 */
+export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
+  newApi(gim2({
+    id: 'newapi-gpt-image-2',
+    upstream: 'gpt-image-2',
+    label: 'GPT Image 2 · New API',
+    group: 'new',
+    description: 'New API 标准 1K 生图',
+    upstreamPoints: 0.02,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    defaultCredits: 2,
+    sortOrder: 90
+  })),
+  newApi(gim2({
+    id: 'newapi-gpt-image-2-ext-1k',
+    upstream: 'gpt-image-2-ext-1k',
+    label: 'GPT Image 2 Ext · 1K',
+    group: 'new',
+    description: 'New API 扩展版，1K，支持多比例',
+    upstreamPoints: 0.055,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    defaultCredits: 6,
+    sortOrder: 91
+  })),
+  newApi(gim2({
+    id: 'newapi-gpt-image-2-ext-2k',
+    upstream: 'gpt-image-2-ext-2k',
+    label: 'GPT Image 2 Ext · 2K',
+    group: 'new',
+    description: 'New API 扩展版，2K，支持多比例',
+    upstreamPoints: 0.15,
+    refundOnViolation: true,
+    resolutions: ['2k'],
+    defaultCredits: 15,
+    sortOrder: 92
+  })),
+  newApi(gim2({
+    id: 'newapi-gpt-image-2-ext-4k',
+    upstream: 'gpt-image-2-ext-4k',
+    label: 'GPT Image 2 Ext · 4K',
+    group: 'new',
+    description: 'New API 扩展版，4K，支持多比例',
+    upstreamPoints: 0.2,
+    refundOnViolation: true,
+    resolutions: ['4k'],
+    defaultCredits: 20,
+    sortOrder: 93
+  })),
+  newApi(banana({
+    id: 'newapi-nano-banana-fast',
+    upstream: 'nano-banana-fast',
+    label: 'Nano Banana Fast · New API',
+    group: 'new',
+    description: 'New API 快速草图，1K',
+    upstreamPoints: 0.04,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    defaultCredits: 4,
+    sortOrder: 94
+  })),
+  newApi(banana({
+    id: 'newapi-nano-banana-2',
+    upstream: 'nano-banana-2',
+    label: 'Nano Banana 2 · New API',
+    group: 'new',
+    description: 'New API 日常均衡，1K/2K/4K',
+    upstreamPoints: 0.09,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k', '4k'],
+    defaultCredits: 9,
+    sortOrder: 95
+  })),
+  newApi(banana({
+    id: 'newapi-nano-banana-pro',
+    upstream: 'nano-banana-pro',
+    label: 'Nano Banana Pro · New API',
+    group: 'new',
+    description: 'New API 专业通用，1K/2K/4K',
+    upstreamPoints: 0.13,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k', '4k'],
+    defaultCredits: 13,
+    sortOrder: 96
+  }))
+];
 
 /** Apimart 备用线路 */
 export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider('apimart', [
@@ -400,8 +492,9 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
   })
 ]);
 
-/** 全站模型目录（仅 GrsAI + Apimart） */
+/** 全站模型目录 */
 export const IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
+  ...NEWAPI_IMAGE_MODEL_CATALOG,
   ...GRSAI_IMAGE_MODEL_CATALOG,
   ...APIMART_IMAGE_MODEL_CATALOG
 ];
@@ -410,6 +503,7 @@ export function imageModelUiFamily(modelId: string): ImageModelUiFamily {
   const entry = getCatalogEntry(modelId);
   if (entry?.uiFamily) return entry.uiFamily;
   const id = String(modelId || '').toLowerCase();
+  if (id.startsWith('newapi-gpt-image-2')) return 'gim2';
   if (id.startsWith('apimart-mj-')) return 'midjourney';
   if (id.includes('seedream') || id === 'jimeng') return 'jimeng';
   if (id.includes('nano-banana')) return 'banana';
@@ -442,7 +536,7 @@ export function normalizeImageModelId(raw?: string | null): string {
     .trim()
     .toLowerCase();
   if (!id) return 'gpt-image-2';
-  if (id.startsWith('apimart-')) return id;
+  if (id.startsWith('apimart-') || id.startsWith('newapi-')) return id;
   if (id in LEGACY_MODEL_MAP) return LEGACY_MODEL_MAP[id];
   return id;
 }

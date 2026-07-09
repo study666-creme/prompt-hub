@@ -125,8 +125,15 @@ npm run secret-service-role
 # 真生图（APIMart）
 npm run secret-image-key
 npm run secret-image-base
+# New API image route (secret only; do not commit the key)
+npm exec wrangler secret put NEWAPI_API_KEY
 npm run deploy
 ```
+
+New API image pricing is read from `NEWAPI_API_BASE_URL` `/api/pricing` and converted as
+`ceil(model_price * 100)` credits, so `0.055` yuan becomes `6` credits. The non-secret
+base URL is pinned in `server/wrangler.toml`; the API key must stay in Cloudflare Secret
+`NEWAPI_API_KEY`.
 
 Windows 也可：`.\deploy.ps1`、`.\secrets.ps1 -Which image-key`
 

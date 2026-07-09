@@ -6,6 +6,11 @@ import {
   submitApimartImageJob
 } from './apimart';
 import {
+  confirmNewApiTaskOutcome,
+  fetchNewApiTaskOnce,
+  submitNewApiImageJob
+} from './newapi';
+import {
   confirmGrsaiTaskOutcome,
   fetchGrsaiTaskOnce,
   submitGrsaiImageJob,
@@ -26,6 +31,8 @@ export type ImageUpstreamBindings = {
   grsaiBase?: string;
   apimartKey?: string;
   apimartBase?: string;
+  newapiKey?: string;
+  newapiBase?: string;
   mookoKey?: string;
   mookoBase?: string;
   ithinkKey?: string;
@@ -55,6 +62,8 @@ export function upstreamBindingsFromEnv(env: Env): ImageUpstreamBindings {
     grsaiBase: env.IMAGE_API_BASE_URL,
     apimartKey: env.APIMART_API_KEY,
     apimartBase: env.APIMART_API_BASE_URL,
+    newapiKey: env.NEWAPI_API_KEY,
+    newapiBase: env.NEWAPI_API_BASE_URL,
     mookoKey: env.MOOKO_API_KEY,
     mookoBase: env.MOOKO_API_BASE_URL,
     ithinkKey: env.ITHINK_API_KEY,
@@ -65,6 +74,7 @@ export function upstreamBindingsFromEnv(env: Env): ImageUpstreamBindings {
 export function readJobProvider(meta: Record<string, unknown>): ImageUpstreamProvider {
   if (meta.provider === 'mooko') return 'mooko';
   if (meta.provider === 'ithink') return 'ithink';
+  if (meta.provider === 'newapi') return 'newapi';
   if (meta.provider === 'apimart') return 'apimart';
   return 'grsai';
 }
@@ -74,6 +84,7 @@ export function isProviderConfigured(
   provider: ImageUpstreamProvider
 ): boolean {
   if (provider === 'apimart') return !!bindings.apimartKey;
+  if (provider === 'newapi') return !!bindings.newapiKey;
   if (provider === 'mooko') return !!bindings.mookoKey;
   if (provider === 'ithink') return !!bindings.ithinkKey;
   return !!bindings.grsaiKey;
@@ -115,6 +126,14 @@ export async function fetchUpstreamTaskOnce(
       await fetchApimartTaskOnce(bindings.apimartKey, bindings.apimartBase, taskId)
     );
   }
+  if (provider === 'newapi') {
+    if (!bindings.newapiKey) {
+      return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
+    }
+    return apimartPollToUnified(
+      await fetchNewApiTaskOnce(bindings.newapiKey, bindings.newapiBase, taskId)
+    );
+  }
   if (provider === 'mooko' || provider === 'ithink') {
     return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
   }
@@ -136,6 +155,14 @@ export async function confirmUpstreamTaskOutcome(
     }
     return apimartPollToUnified(
       await confirmApimartTaskOutcome(bindings.apimartKey, bindings.apimartBase, taskId, opts)
+    );
+  }
+  if (provider === 'newapi') {
+    if (!bindings.newapiKey) {
+      return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
+    }
+    return apimartPollToUnified(
+      await confirmNewApiTaskOutcome(bindings.newapiKey, bindings.newapiBase, taskId, opts)
     );
   }
   if (provider === 'mooko' || provider === 'ithink') {
@@ -171,6 +198,13 @@ export async function submitImageJobForProvider(
     const taskId = await submitApimartImageJob(bindings.apimartKey, bindings.apimartBase, params);
     return { provider: 'apimart', taskId };
   }
+  if (provider === 'newapi') {
+    if (!bindings.newapiKey) {
+      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'New API 线路未配置，请联系站长');
+    }
+    const submitted = await submitNewApiImageJob(bindings.newapiKey, bindings.newapiBase, params);
+    return { provider: 'newapi', taskId: submitted.taskId, immediateImageUrl: submitted.imageUrl };
+  }
   if (!bindings.grsaiKey) {
     throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'GrsAI 线路未配置，请联系站长');
   }
@@ -185,5 +219,5 @@ export async function submitImageJobForProvider(
 }
 
 export function hasAnyImageUpstream(bindings: ImageUpstreamBindings): boolean {
-  return !!(bindings.grsaiKey || bindings.apimartKey || bindings.mookoKey || bindings.ithinkKey);
+  return !!(bindings.grsaiKey || bindings.apimartKey || bindings.newapiKey || bindings.mookoKey || bindings.ithinkKey);
 }

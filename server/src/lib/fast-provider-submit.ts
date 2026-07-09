@@ -67,7 +67,7 @@ export async function processFastProviderPendingSubmit(
   userId: string,
   job: JobRow,
   upstream: ImageUpstreamBindings,
-  provider: Extract<ImageUpstreamProvider, 'grsai' | 'apimart'>,
+  provider: Extract<ImageUpstreamProvider, 'grsai' | 'apimart' | 'newapi'>,
   params: FastSubmitParams
 ): Promise<void> {
   const meta = (job.meta as Record<string, unknown>) || {};

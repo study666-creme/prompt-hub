@@ -29,6 +29,11 @@
 | GET | `/api/v1/media/sign?ref=&variant=full` | 插入画布时拉原图 |
 | POST | `/api/v1/extension/quick-card` | 画布 → 卡片库（与浏览器插件相同） |
 
+New API image models are surfaced through the same `/api/v1/generate/models` and
+`/api/v1/generate/cost` endpoints. Canvas should not store the New API key; Prompt Hub
+Worker charges Prompt Hub credits and submits upstream with the Worker Secret
+`NEWAPI_API_KEY`.
+
 CORS：已允许 `localhost`、`*.vercel.app`、`prompt-hubs.com`；`canvas.prompt-hubs.com` 已预放行，但 DNS 生效前不要作为前端入口。
 
 ## 画布内配置

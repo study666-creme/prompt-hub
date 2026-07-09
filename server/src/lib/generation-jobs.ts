@@ -165,7 +165,7 @@ export function slowProviderProgressNote(
     if (st === 'running') return '正在生成中（约 2–5 分钟）…';
     if (st === 'done') return '生成完成，正在入库…';
   }
-  if (provider === 'grsai' || provider === 'apimart') {
+  if (provider === 'grsai' || provider === 'apimart' || provider === 'newapi') {
     const st = String(meta.fastSubmitState || '');
     if (st === 'queued') return '已扣积分，正在提交…';
     if (st === 'running') return '提交中，请稍候…';
@@ -218,7 +218,7 @@ export async function pollAndUpdateJob(
     if (
       !job.result_image_url
       && taskId
-      && (upstream.grsaiKey || upstream.apimartKey)
+      && (upstream.grsaiKey || upstream.apimartKey || upstream.newapiKey)
     ) {
       const recovered = await tryRecoverJobFromUpstream(
         admin,
@@ -320,7 +320,7 @@ export async function pollAndUpdateJob(
         refunded: !!(job.meta as Record<string, unknown>)?.refunded
       };
     }
-    if (taskId && (upstream.grsaiKey || upstream.apimartKey)) {
+    if (taskId && (upstream.grsaiKey || upstream.apimartKey || upstream.newapiKey)) {
       const recovered = await tryRecoverJobFromUpstream(
         admin,
         userId,
@@ -344,7 +344,7 @@ export async function pollAndUpdateJob(
   const upstreamModel = String(meta.upstreamModel || meta.model || '').toLowerCase();
   const staleMs = jobStaleMs(provider, upstreamModel, job.resolution);
 
-  if (!upstream.grsaiKey && !upstream.apimartKey) {
+  if (!upstream.grsaiKey && !upstream.apimartKey && !upstream.newapiKey) {
     await admin
       .from('generation_requests')
       .update({
@@ -641,7 +641,7 @@ export async function pollAndUpdateJob(
   }
 
   if (
-    (provider === 'grsai' || provider === 'apimart')
+    (provider === 'grsai' || provider === 'apimart' || provider === 'newapi')
     && !taskId
     && job.status === 'processing'
   ) {

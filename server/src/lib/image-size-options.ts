@@ -87,6 +87,7 @@ export function aspectRatiosForModel(modelId: string): readonly string[] {
     .trim()
     .toLowerCase();
   if (id === 'apimart-gpt-image-2-official-budget') return APIMART_OFFICIAL_BUDGET_RATIOS;
+  if (id.startsWith('newapi-gpt-image-2')) return IMAGE2_ASPECT_RATIOS;
   if (id === 'apimart-gpt-image-2') return IMAGE2_ASPECT_RATIOS;
   if (id === 'apimart-seedream-5-lite' || id.includes('seedream')) return BASIC_ASPECT_RATIOS;
   if (id.startsWith('apimart-gemini') || id.includes('gemini-')) return BANANA_ASPECT_RATIOS;

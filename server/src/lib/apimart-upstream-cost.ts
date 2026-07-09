@@ -163,7 +163,7 @@ export function buildUpstreamCostLines(catalog: ImageModelCatalogEntry): Upstrea
     return [...imagine, ...blend];
   }
 
-  if (catalog.provider === 'apimart' && catalog.upstreamPoints > 0) {
+  if ((catalog.provider === 'apimart' || catalog.provider === 'newapi') && catalog.upstreamPoints > 0) {
     return [costLine('flat', '单次', catalog.upstreamPoints)];
   }
   return [];

@@ -42,6 +42,7 @@ adminImageModelRoutes.get('/', async c => {
         settings,
         models: adminModelRows(settings),
         providers: [
+          { id: 'newapi', label: 'New API', doc: 'https://newapi.prompt-hubs.com/' },
           { id: 'grsai', label: '常规线路', doc: 'https://grsai.com/zh/dashboard/models' },
           { id: 'apimart', label: '备用线路', doc: 'https://api.apimart.ai' },
           { id: 'ithink', label: '经济线路', doc: 'https://www.thinkai.tv/console/token' },

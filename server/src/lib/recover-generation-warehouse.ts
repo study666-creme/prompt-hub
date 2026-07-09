@@ -449,7 +449,7 @@ export type RecoverWarehouseOpts = {
   days?: number;
   hours?: number;
   offset?: number;
-  providerScope?: 'grs' | 'apimart' | 'all';
+  providerScope?: 'grs' | 'apimart' | 'newapi' | 'all';
   env?: Env;
   deletedGenerationJobTombstones?: Record<string, number>;
   jobIds?: string[];
@@ -468,12 +468,13 @@ function mergeJobTombstones(
   return merged;
 }
 
-function filterJobsByProvider(jobs: JobRow[], scope?: 'grs' | 'apimart' | 'all'): JobRow[] {
+function filterJobsByProvider(jobs: JobRow[], scope?: 'grs' | 'apimart' | 'newapi' | 'all'): JobRow[] {
   if (!scope || scope === 'all') return jobs;
   return jobs.filter((job) => {
     const p = readJobProvider((job.meta || {}) as Record<string, unknown>);
     if (scope === 'apimart') return p === 'apimart';
-    return p !== 'apimart';
+    if (scope === 'newapi') return p === 'newapi';
+    return p !== 'apimart' && p !== 'newapi';
   });
 }
 
@@ -483,6 +484,10 @@ function resolveRecoverWindow(
 ): { windowOpts: RecoverWindowOpts; fallback: { days?: number; hours?: number } } {
   const scope = opts.providerScope || 'all';
   if (scope === 'apimart') {
+    const days = Math.min(365, Math.max(1, opts.days ?? (mode === 'import' ? 7 : 365)));
+    return { windowOpts: { days }, fallback: { days: 7 } };
+  }
+  if (scope === 'newapi') {
     const days = Math.min(365, Math.max(1, opts.days ?? (mode === 'import' ? 7 : 365)));
     return { windowOpts: { days }, fallback: { days: 7 } };
   }

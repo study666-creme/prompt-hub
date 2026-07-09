@@ -46,6 +46,7 @@ import {
   listResolvedImageModels,
   normalizeImageModelId
 } from '../../lib/image-model-settings';
+import { fetchNewApiPricingRules, newApiCreditsForModel } from '../../lib/newapi';
 import {
   deductUserCredits,
   refundUserCredits,
@@ -310,8 +311,24 @@ function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boole
 function publicModelPayload(
   settings: Awaited<ReturnType<typeof loadImageModelSettings>>,
   tier: import('../../lib/supabase').Profile['membership_tier'],
-  memberActive: boolean
+  memberActive: boolean,
+  opts?: { newApiPrices?: Map<string, number> }
 ) {
+  const withFixedCredits = (
+    cost: ReturnType<typeof computeImageGenerationCost>,
+    credits: number
+  ): ReturnType<typeof computeImageGenerationCost> => ({
+    ...cost,
+    base: credits,
+    final: credits,
+    listPrice: credits,
+    promoPrice: credits,
+    appliedDiscount: 'fixed',
+    discountLabel: 'New API realtime price',
+    modelDiscountPercent: 100,
+    modelDiscountLabel: null
+  });
+
   return listResolvedImageModels(settings, { publicList: true }).map((m) => {
     const resolutions = m.resolutions?.length ? m.resolutions : (['1k'] as const);
     const defaultRes = resolutions[0] || '1k';
@@ -346,10 +363,34 @@ function publicModelPayload(
           {} as Record<string, ReturnType<typeof computeImageGenerationCost>>
         )
       : null;
+    const remoteNewApiCredits = m.provider === 'newapi' ? opts?.newApiPrices?.get(m.upstream) : null;
     const cost =
       costBySpeed?.relax
       ?? costByResolution?.[defaultRes]
       ?? computeImageGenerationCost(settings, m.id, defaultRes, tier, memberActive);
+    const finalCost = remoteNewApiCredits != null && remoteNewApiCredits > 0
+      ? withFixedCredits(cost, remoteNewApiCredits)
+      : cost;
+    const finalCostByResolution = remoteNewApiCredits != null && remoteNewApiCredits > 0 && costByResolution
+      ? Object.fromEntries(
+          Object.entries(costByResolution).map(([res, resCost]) => [
+            res,
+            withFixedCredits(resCost, remoteNewApiCredits)
+          ])
+        )
+      : costByResolution;
+    const finalCreditsByResolution =
+      remoteNewApiCredits != null && remoteNewApiCredits > 0 && m.pricingByResolution
+        ? Object.fromEntries(resolutions.map((res) => [res, remoteNewApiCredits]))
+        : m.pricingByResolution
+          ? m.creditsByResolution
+          : null;
+    const finalPromoByResolution =
+      remoteNewApiCredits != null && remoteNewApiCredits > 0 && m.pricingByResolution
+        ? Object.fromEntries(resolutions.map((res) => [res, remoteNewApiCredits]))
+        : m.pricingByResolution
+          ? m.promoByResolution
+          : null;
     return {
       id: m.id,
       label: m.displayLabel,
@@ -370,25 +411,70 @@ function publicModelPayload(
       aspectRatios: [...aspectRatiosForModel(m.id)],
       resolutions: m.resolutions,
       pricingByResolution: m.pricingByResolution,
-      creditsByResolution: m.pricingByResolution ? m.creditsByResolution : null,
-      promoByResolution: m.pricingByResolution ? m.promoByResolution : null,
+      creditsByResolution: finalCreditsByResolution,
+      promoByResolution: finalPromoByResolution,
       pricingBySpeed: m.pricingBySpeed,
       creditsBySpeed: m.pricingBySpeed ? m.creditsBySpeed : null,
       promoBySpeed: m.pricingBySpeed ? m.promoBySpeed : null,
       costBySpeed,
-      costByResolution,
+      costByResolution: finalCostByResolution,
       creditsPerCall: m.creditsPerCall,
-      creditsBase: cost.listPrice,
-      creditsFinal: cost.final,
-      listPrice: cost.listPrice,
-      promoPrice: cost.promoPrice,
-      appliedDiscount: cost.appliedDiscount,
-      modelDiscountPercent: cost.modelDiscountPercent,
-      modelDiscountLabel: cost.modelDiscountLabel,
-      discountLabel: cost.discountLabel,
+      creditsBase: finalCost.listPrice,
+      creditsFinal: finalCost.final,
+      cost: { credits: finalCost.final },
+      listPrice: finalCost.listPrice,
+      promoPrice: finalCost.promoPrice,
+      appliedDiscount: finalCost.appliedDiscount,
+      modelDiscountPercent: finalCost.modelDiscountPercent,
+      modelDiscountLabel: finalCost.modelDiscountLabel,
+      discountLabel: finalCost.discountLabel,
       promoPriceFlat: m.promoPrice
     };
   });
+}
+
+async function newApiPriceMap(env: Env): Promise<Map<string, number>> {
+  const rules = await fetchNewApiPricingRules(env.NEWAPI_API_BASE_URL);
+  const map = new Map<string, number>();
+  for (const rule of rules) map.set(rule.model, rule.credits);
+  return map;
+}
+
+async function computeGenerationCostForRequest(
+  env: Env,
+  settings: Awaited<ReturnType<typeof loadImageModelSettings>>,
+  resolved: NonNullable<ReturnType<typeof resolveImageModelConfig>>,
+  modelId: string,
+  resolution: string,
+  tier: import('../../lib/supabase').Profile['membership_tier'],
+  memberActive: boolean,
+  opts?: { mjSpeed?: string | null }
+): Promise<ReturnType<typeof computeImageGenerationCost>> {
+  const baseCost = computeImageGenerationCost(
+    settings,
+    modelId,
+    resolution,
+    tier,
+    memberActive,
+    opts
+  );
+  if (resolved.provider !== 'newapi') return baseCost;
+  const credits = newApiCreditsForModel(
+    await fetchNewApiPricingRules(env.NEWAPI_API_BASE_URL),
+    resolved.upstream
+  );
+  if (credits == null || credits <= 0) return baseCost;
+  return {
+    ...baseCost,
+    base: credits,
+    final: credits,
+    listPrice: credits,
+    promoPrice: credits,
+    appliedDiscount: 'fixed',
+    discountLabel: 'New API realtime price',
+    modelDiscountPercent: 100,
+    modelDiscountLabel: null
+  };
 }
 
 function modelUnavailableMessage(resolved: NonNullable<
@@ -406,12 +492,13 @@ generateRoutes.get('/models', async c => {
   const settings = await loadImageModelSettings(admin);
   const profile = await getOrCreateProfile(admin, user.id);
   const memberActive = isMembershipActive(profile);
+  const newApiPrices = await newApiPriceMap(c.env);
   return c.json({
     ok: true,
     data: {
-      providers: ['grsai', 'apimart'],
+      providers: ['newapi', 'grsai', 'apimart'],
       globalDiscountPercent: settings.globalDiscountPercent,
-      models: publicModelPayload(settings, profile.membership_tier, memberActive)
+      models: publicModelPayload(settings, profile.membership_tier, memberActive, { newApiPrices })
     }
   });
 });
@@ -440,8 +527,10 @@ generateRoutes.get('/cost', async c => {
     throw new ApiError(400, 'VALIDATION_ERROR', `该模型不支持 ${resolution.toUpperCase()} 输出`);
   }
   const speed = c.req.query('speed') || '';
-  const cost = computeImageGenerationCost(
+  const cost = await computeGenerationCostForRequest(
+    c.env,
     settings,
+    resolved,
     model,
     resolution,
     profile.membership_tier,
@@ -496,8 +585,10 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   const mjParams = isMidjourney && parsed.data.mjParams ? parsed.data.mjParams : undefined;
 
   const { final: rawFinal, base, discountLabel, modelLabel, refundOnViolation, violationNotice } =
-    computeImageGenerationCost(
+    await computeGenerationCostForRequest(
+      c.env,
       settings,
+      resolved,
       modelId,
       jobResolution,
       profile.membership_tier,
@@ -631,7 +722,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   /** GrsAI / Apimart 同步提交易超 CF 100s → 524；改后台提交后立即返回 jobId */
   if (
     hasAnyImageUpstream(upstream)
-    && (lineProvider === 'grsai' || lineProvider === 'apimart')
+    && (lineProvider === 'grsai' || lineProvider === 'apimart' || lineProvider === 'newapi')
     && isProviderConfigured(upstream, lineProvider)
   ) {
     const fastMeta: Record<string, unknown> = {
@@ -909,18 +1000,18 @@ const recoverWarehouseSchema = z.object({
   hours: z.number().int().min(1).max(168).optional(),
   offset: z.number().int().min(0).max(5000).optional(),
   mode: z.enum(['import', 'repair', 'extras', 'settle']).optional(),
-  providerScope: z.enum(['all', 'grs', 'grsai', 'apimart']).optional(),
+  providerScope: z.enum(['all', 'grs', 'grsai', 'apimart', 'newapi']).optional(),
   jobIds: z.array(z.string().min(8).max(64)).max(10).optional(),
   deletedGenerationJobTombstones: z.record(z.string(), z.number()).optional()
 });
 
-type RecoverProviderScope = 'all' | 'grs' | 'apimart';
+type RecoverProviderScope = 'all' | 'grs' | 'apimart' | 'newapi';
 
 function normalizeRecoverProviderScope(
   scope: z.infer<typeof recoverWarehouseSchema>['providerScope']
 ): RecoverProviderScope | undefined {
   if (scope === 'grsai') return 'grs';
-  if (scope === 'all' || scope === 'grs' || scope === 'apimart') return scope;
+  if (scope === 'all' || scope === 'grs' || scope === 'apimart' || scope === 'newapi') return scope;
   return undefined;
 }
 

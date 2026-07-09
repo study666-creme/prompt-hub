@@ -58,7 +58,8 @@ app.get('/health', async c => {
     supabase: db,
     imageProviders: {
       grsai: c.env.IMAGE_API_KEY?.trim() ? 'configured' : 'missing',
-      apimart: c.env.APIMART_API_KEY?.trim() ? 'configured' : 'missing'
+      apimart: c.env.APIMART_API_KEY?.trim() ? 'configured' : 'missing',
+      newapi: c.env.NEWAPI_API_KEY?.trim() ? 'configured' : 'missing'
     },
     legacyMooko: mookoKey ? 'configured_unused' : 'missing',
     hint

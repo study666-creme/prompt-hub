@@ -19,6 +19,9 @@ export type Env = {
   /** 生图备用上游 Apimart（GrsAI 提交失败时自动切换） */
   APIMART_API_KEY?: string;
   APIMART_API_BASE_URL?: string;
+  /** New API 生图线路（OpenAI 兼容，价格从 /api/pricing 按 1 元=100 积分向上取整） */
+  NEWAPI_API_KEY?: string;
+  NEWAPI_API_BASE_URL?: string;
   /** 生图经济线路 ThinkAI（thinkai.tv 控制台 Token） */
   ITHINK_API_KEY?: string;
   ITHINK_API_BASE_URL?: string;

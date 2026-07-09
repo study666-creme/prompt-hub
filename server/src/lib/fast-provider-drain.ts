@@ -29,7 +29,7 @@ export async function drainFastProviderPendingSubmits(
   ctx?: DrainContext
 ): Promise<{ submitted: number; queued: number }> {
   const upstream = upstreamBindingsFromEnv(env);
-  if (!upstream.grsaiKey && !upstream.apimartKey) {
+  if (!upstream.grsaiKey && !upstream.apimartKey && !upstream.newapiKey) {
     return { submitted: 0, queued: 0 };
   }
 
@@ -50,7 +50,7 @@ export async function drainFastProviderPendingSubmits(
   const queued = ((rows || []) as JobRow[]).filter((row) => {
     const meta = (row.meta as Record<string, unknown>) || {};
     const m = readFastMeta(meta);
-    if (m.provider !== 'grsai' && m.provider !== 'apimart') return false;
+    if (m.provider !== 'grsai' && m.provider !== 'apimart' && m.provider !== 'newapi') return false;
     if (typeof meta.upstreamTaskId === 'string' && meta.upstreamTaskId) return false;
     return m.submitState === 'queued';
   });
@@ -60,9 +60,10 @@ export async function drainFastProviderPendingSubmits(
   const tasks = batch.map((row) => {
     const meta = (row.meta as Record<string, unknown>) || {};
     const m = readFastMeta(meta);
-    const provider = m.provider === 'apimart' ? 'apimart' : 'grsai';
+    const provider = m.provider === 'apimart' ? 'apimart' : m.provider === 'newapi' ? 'newapi' : 'grsai';
     if (!upstream.grsaiKey && provider === 'grsai') return null;
     if (!upstream.apimartKey && provider === 'apimart') return null;
+    if (!upstream.newapiKey && provider === 'newapi') return null;
     return processFastProviderPendingSubmit(
       admin,
       row.user_id,

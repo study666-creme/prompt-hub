@@ -186,4 +186,11 @@ describe('generation cost', () => {
     expect(r2.final).toBe(14);
     expect(r4.final).toBe(28);
   });
+
+  it('newapi fallback prices use yuan-to-credit rounding', () => {
+    const gptExt = computeImageGenerationCost(settings, 'newapi-gpt-image-2-ext-1k', '1k', null, false);
+    const banana = computeImageGenerationCost(settings, 'newapi-nano-banana-pro', '4k', null, false);
+    expect(gptExt.final).toBe(6);
+    expect(banana.final).toBe(13);
+  });
 });
