@@ -6,13 +6,13 @@ import {
   type ImageUpstreamBindings,
   type ImageUpstreamProvider
 } from './image-upstream';
-import { refundUserCredits } from './membership-credits';
 
 export type FastSubmitParams = {
   upstreamModel: string;
   prompt: string;
   resolution: string;
   quality: string;
+  fixedQualityLow?: boolean;
   size?: string;
   refImageUrls?: string[];
   mjParams?: Record<string, unknown>;
@@ -30,6 +30,7 @@ export function fastSubmitParamsFromJob(job: JobRow): FastSubmitParams {
     prompt: String(job.prompt || ''),
     resolution: String(job.resolution || '1k'),
     quality: String(job.quality || 'standard'),
+    fixedQualityLow: meta.fixedQualityLow === true,
     size: typeof meta.size === 'string' ? meta.size : undefined,
     refImageUrls: Array.isArray(meta.refImageUrls)
       ? (meta.refImageUrls as string[]).filter(Boolean)
@@ -74,11 +75,6 @@ export async function processFastProviderPendingSubmit(
   const claimed = await claimFastSubmit(admin, job.id, meta);
   if (!claimed) return;
 
-  const claimedSplit = (claimed.debitSplit as { fromDaily?: number; fromPermanent?: number } | undefined) || {};
-  const debitSplit = {
-    fromDaily: Number(claimedSplit.fromDaily) || 0,
-    fromPermanent: Number(claimedSplit.fromPermanent) || 0
-  };
   const creditsCharged = Number(job.credits_charged) || 0;
 
   try {
@@ -96,26 +92,16 @@ export async function processFastProviderPendingSubmit(
     await admin.from('generation_requests').update({ meta: nextMeta }).eq('id', job.id);
   } catch (e) {
     const msg = e instanceof ApiError ? e.message : String((e as Error).message || e || 'upstream_submit_failed');
-    if (creditsCharged > 0) {
-      await refundUserCredits(
-        admin,
-        userId,
-        creditsCharged,
-        'image_generation_refund',
-        job.id,
-        debitSplit,
-        { reason: msg, model: String(claimed.model || '') }
-      );
-    }
     await finalizeFailedJob(admin, userId, job, msg);
     await admin
       .from('generation_requests')
       .update({
         meta: {
           ...claimed,
+          failReason: msg,
           fastSubmitState: 'failed',
           fastSubmitError: msg.slice(0, 400),
-          refunded: true
+          refunded: creditsCharged > 0
         }
       })
       .eq('id', job.id);

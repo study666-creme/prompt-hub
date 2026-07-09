@@ -7,6 +7,7 @@ type SubmitParams = {
   prompt: string;
   resolution: string;
   quality: string;
+  fixedQualityLow?: boolean;
   size?: string;
   refImageUrls?: string[];
 };
@@ -124,8 +125,32 @@ export async function fetchNewApiPricingRules(baseUrl?: string, opts?: { force?:
   return pricingInflight;
 }
 
-export function newApiCreditsForModel(rules: NewApiPricingRule[], upstreamModel: string): number | null {
-  const exact = rules.find((r) => r.model.toLowerCase() === upstreamModel.toLowerCase());
+function normalizedResolution(resolution?: string | null): '1k' | '2k' | '4k' | null {
+  const r = String(resolution || '').trim().toLowerCase();
+  return r === '1k' || r === '2k' || r === '4k' ? r : null;
+}
+
+function pricingCandidates(upstreamModel: string, resolution?: string | null): string[] {
+  const model = upstreamModel.trim();
+  if (!model) return [];
+  const res = normalizedResolution(resolution);
+  if (!res) return [model];
+  const withoutRes = model.replace(/-(?:1k|2k|4k)$/i, '');
+  const candidates = [
+    `${withoutRes}-${res}`,
+    model,
+    withoutRes
+  ];
+  return [...new Set(candidates)];
+}
+
+export function newApiCreditsForModel(
+  rules: NewApiPricingRule[],
+  upstreamModel: string,
+  resolution?: string | null
+): number | null {
+  const candidates = pricingCandidates(upstreamModel, resolution).map((m) => m.toLowerCase());
+  const exact = rules.find((r) => candidates.includes(r.model.toLowerCase()));
   return exact?.credits ?? null;
 }
 
@@ -217,7 +242,7 @@ function requestBody(params: SubmitParams): Record<string, unknown> {
     n: 1,
     size: params.size || '1:1',
     resolution: params.resolution,
-    quality: mapQualityForGptImage(params.quality),
+    quality: params.fixedQualityLow ? 'low' : mapQualityForGptImage(params.quality),
     ...(refs?.length ? { image_urls: refs.slice(0, 14) } : {})
   };
 }

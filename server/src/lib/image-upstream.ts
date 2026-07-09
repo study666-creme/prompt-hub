@@ -51,6 +51,7 @@ export type ImageSubmitParams = {
   prompt: string;
   resolution: string;
   quality: string;
+  fixedQualityLow?: boolean;
   size?: string;
   refImageUrls?: string[];
   mjParams?: Record<string, unknown>;

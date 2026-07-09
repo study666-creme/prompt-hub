@@ -24,6 +24,7 @@ describe('newapi image upstream', () => {
       group_ratio: { default: 1 },
       data: [
         { model_name: 'gpt-image-2-ext-1k', quota_type: 1, model_price: 0.055, tags: 'image' },
+        { model_name: 'gpt-image-2-official-4k', quota_type: 1, model_price: 0.09, tags: 'image' },
         { model_name: 'nano-banana-2', quota_type: 1, model_price: 0.09, tags: 'image' },
         { model_name: 'chat-only', quota_type: 1, model_price: 0.01, tags: 'chat' }
       ]
@@ -36,6 +37,7 @@ describe('newapi image upstream', () => {
     const pricingCall = fetchMock.mock.calls[0] as unknown[];
     expect(String(pricingCall[0])).toBe('https://pricing-unit.test/api/pricing');
     expect(newApiCreditsForModel(rules, 'gpt-image-2-ext-1k')).toBe(6);
+    expect(newApiCreditsForModel(rules, 'gpt-image-2-official', '4k')).toBe(9);
     expect(newApiCreditsForModel(rules, 'nano-banana-2')).toBe(9);
     expect(newApiCreditsForModel(rules, 'chat-only')).toBeNull();
   });
@@ -46,6 +48,7 @@ describe('newapi image upstream', () => {
       expect(body.model).toBe('gpt-image-2');
       expect(body.prompt).toBe('apple');
       expect(body.resolution).toBe('1k');
+      expect(body.quality).toBe('low');
       expect(body.image_urls).toEqual(['https://ref.test/a.png']);
       return jsonResponse({ data: [{ url: 'https://image.test/out.png' }] });
     });
@@ -56,6 +59,7 @@ describe('newapi image upstream', () => {
       prompt: 'apple',
       resolution: '1k',
       quality: 'standard',
+      fixedQualityLow: true,
       refImageUrls: ['https://ref.test/a.png']
     });
 

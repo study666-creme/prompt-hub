@@ -312,7 +312,7 @@ function publicModelPayload(
   settings: Awaited<ReturnType<typeof loadImageModelSettings>>,
   tier: import('../../lib/supabase').Profile['membership_tier'],
   memberActive: boolean,
-  opts?: { newApiPrices?: Map<string, number> }
+  opts?: { newApiRules?: Awaited<ReturnType<typeof fetchNewApiPricingRules>> }
 ) {
   const withFixedCredits = (
     cost: ReturnType<typeof computeImageGenerationCost>,
@@ -363,7 +363,9 @@ function publicModelPayload(
           {} as Record<string, ReturnType<typeof computeImageGenerationCost>>
         )
       : null;
-    const remoteNewApiCredits = m.provider === 'newapi' ? opts?.newApiPrices?.get(m.upstream) : null;
+    const remoteNewApiCredits = m.provider === 'newapi'
+      ? newApiCreditsForModel(opts?.newApiRules ?? [], m.upstream, defaultRes)
+      : null;
     const cost =
       costBySpeed?.relax
       ?? costByResolution?.[defaultRes]
@@ -371,23 +373,38 @@ function publicModelPayload(
     const finalCost = remoteNewApiCredits != null && remoteNewApiCredits > 0
       ? withFixedCredits(cost, remoteNewApiCredits)
       : cost;
-    const finalCostByResolution = remoteNewApiCredits != null && remoteNewApiCredits > 0 && costByResolution
+    const finalCostByResolution = m.provider === 'newapi' && costByResolution
       ? Object.fromEntries(
-          Object.entries(costByResolution).map(([res, resCost]) => [
-            res,
-            withFixedCredits(resCost, remoteNewApiCredits)
-          ])
+          Object.entries(costByResolution).map(([res, resCost]) => {
+            const credits = newApiCreditsForModel(opts?.newApiRules ?? [], m.upstream, res);
+            return [
+              res,
+              credits != null && credits > 0 ? withFixedCredits(resCost, credits) : resCost
+            ];
+          })
         )
       : costByResolution;
     const finalCreditsByResolution =
-      remoteNewApiCredits != null && remoteNewApiCredits > 0 && m.pricingByResolution
-        ? Object.fromEntries(resolutions.map((res) => [res, remoteNewApiCredits]))
+      m.provider === 'newapi' && m.pricingByResolution
+        ? Object.fromEntries(
+            resolutions.map((res) => [
+              res,
+              newApiCreditsForModel(opts?.newApiRules ?? [], m.upstream, res)
+                ?? m.creditsByResolution?.[res]
+                ?? m.defaultCredits
+            ])
+          )
         : m.pricingByResolution
           ? m.creditsByResolution
           : null;
     const finalPromoByResolution =
-      remoteNewApiCredits != null && remoteNewApiCredits > 0 && m.pricingByResolution
-        ? Object.fromEntries(resolutions.map((res) => [res, remoteNewApiCredits]))
+      m.provider === 'newapi' && m.pricingByResolution
+        ? Object.fromEntries(
+            resolutions.map((res) => {
+              const credits = newApiCreditsForModel(opts?.newApiRules ?? [], m.upstream, res);
+              return [res, credits ?? m.promoByResolution?.[res] ?? m.defaultCredits];
+            })
+          )
         : m.pricingByResolution
           ? m.promoByResolution
           : null;
@@ -433,13 +450,6 @@ function publicModelPayload(
   });
 }
 
-async function newApiPriceMap(env: Env): Promise<Map<string, number>> {
-  const rules = await fetchNewApiPricingRules(env.NEWAPI_API_BASE_URL);
-  const map = new Map<string, number>();
-  for (const rule of rules) map.set(rule.model, rule.credits);
-  return map;
-}
-
 async function computeGenerationCostForRequest(
   env: Env,
   settings: Awaited<ReturnType<typeof loadImageModelSettings>>,
@@ -461,7 +471,8 @@ async function computeGenerationCostForRequest(
   if (resolved.provider !== 'newapi') return baseCost;
   const credits = newApiCreditsForModel(
     await fetchNewApiPricingRules(env.NEWAPI_API_BASE_URL),
-    resolved.upstream
+    resolved.upstream,
+    resolution
   );
   if (credits == null || credits <= 0) return baseCost;
   return {
@@ -492,13 +503,13 @@ generateRoutes.get('/models', async c => {
   const settings = await loadImageModelSettings(admin);
   const profile = await getOrCreateProfile(admin, user.id);
   const memberActive = isMembershipActive(profile);
-  const newApiPrices = await newApiPriceMap(c.env);
+  const newApiRules = await fetchNewApiPricingRules(c.env.NEWAPI_API_BASE_URL);
   return c.json({
     ok: true,
     data: {
       providers: ['newapi', 'grsai', 'apimart'],
       globalDiscountPercent: settings.globalDiscountPercent,
-      models: publicModelPayload(settings, profile.membership_tier, memberActive, { newApiPrices })
+      models: publicModelPayload(settings, profile.membership_tier, memberActive, { newApiRules })
     }
   });
 });
@@ -581,6 +592,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   }
 
   const jobResolution = parsed.data.resolution;
+  const jobQuality = resolved.fixedQualityLow ? 'low' : parsed.data.quality;
   const isMidjourney = imageModelUiFamily(modelId) === 'midjourney' || isMidjourneyUpstream(resolved.upstream);
   const mjParams = isMidjourney && parsed.data.mjParams ? parsed.data.mjParams : undefined;
 
@@ -632,7 +644,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       user_id: user.id,
       prompt: promptText,
       resolution: jobResolution,
-      quality: parsed.data.quality,
+      quality: jobQuality,
       size_label: parsed.data.size ?? null,
       credits_charged: final,
       status: 'processing',
@@ -647,6 +659,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
         size: parsed.data.size ?? null,
         refundOnViolation,
         violationNotice,
+        fixedQualityLow: !!resolved.fixedQualityLow,
         ...(isMidjourney ? { isMidjourney: true, mjParams: mjParams || {} } : {})
       }
     })
@@ -674,6 +687,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     size: parsed.data.size ?? null,
     refundOnViolation,
     violationNotice,
+    fixedQualityLow: !!resolved.fixedQualityLow,
     ...(isMidjourney ? { isMidjourney: true, mjParams: mjParams || {} } : {})
   };
 
@@ -713,7 +727,8 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     upstreamModel: resolved.upstream,
     prompt: promptText,
     resolution: jobResolution,
-    quality: parsed.data.quality,
+    quality: jobQuality,
+    fixedQualityLow: !!resolved.fixedQualityLow,
     size: parsed.data.size,
     refImageUrls: refUrls,
     ...(mjParams ? { mjParams } : {})
@@ -734,9 +749,10 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       .from('generation_requests')
       .update({ meta: fastMeta })
       .eq('id', job.id);
+    const queuedJob: JobRow = { ...job, meta: fastMeta };
     kickBackgroundTask(
       c,
-      processFastProviderPendingSubmit(admin, user.id, job, upstream, lineProvider, submitParams)
+      processFastProviderPendingSubmit(admin, user.id, queuedJob, upstream, lineProvider, submitParams)
     );
   }
 
