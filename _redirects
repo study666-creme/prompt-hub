@@ -1,7 +1,4 @@
 # LabGen 风格 SPA 路由：先匹配静态文件，其余回退 index.html
-/codex-remote https://infinite-canvas-jay.vercel.app/codex-remote 200
-/codex-remote/* https://infinite-canvas-jay.vercel.app/codex-remote/:splat 200
-/_next/* https://infinite-canvas-jay.vercel.app/_next/:splat 200
 /prompts      /index.html   200
 /prompts/*    /index.html   200
 /cards        /index.html   200

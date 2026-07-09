@@ -70,15 +70,6 @@
     window.open(getPromptCanvasUrl(), '_blank', 'noopener,noreferrer');
   }
 
-  function getPromptCodexRemoteUrl() {
-    const url = String(window.PROMPT_CODEX_REMOTE_URL || '/codex-remote').trim();
-    return url || '/codex-remote';
-  }
-
-  function openPromptCodexRemote() {
-    window.location.href = getPromptCodexRemoteUrl();
-  }
-
   function syncUrl(app, replace) {
     if (!app || !APP_PATH[app]) return;
     const path = pathForApp(app);
@@ -129,6 +120,4 @@
   };
   window.getPromptCanvasUrl = getPromptCanvasUrl;
   window.openPromptCanvas = openPromptCanvas;
-  window.getPromptCodexRemoteUrl = getPromptCodexRemoteUrl;
-  window.openPromptCodexRemote = openPromptCodexRemote;
 })();

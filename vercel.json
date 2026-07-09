@@ -4,11 +4,6 @@
   "installCommand": "",
   "buildCommand": "",
   "outputDirectory": ".",
-  "rewrites": [
-    { "source": "/codex-remote", "destination": "https://infinite-canvas-jay.vercel.app/codex-remote" },
-    { "source": "/codex-remote/:path*", "destination": "https://infinite-canvas-jay.vercel.app/codex-remote/:path*" },
-    { "source": "/_next/:path*", "destination": "https://infinite-canvas-jay.vercel.app/_next/:path*" }
-  ],
   "headers": [
     {
       "source": "/(.*)",
