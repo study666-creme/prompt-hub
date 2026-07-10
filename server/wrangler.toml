@@ -15,8 +15,8 @@ FISSION_CHAT_MODEL = "deepseek-v4-pro"
 MEDIA_STORAGE_MODE = "r2-first"
 
 # 敏感项请用 wrangler secret put：
-# SUPABASE_URL（prompt-hubs.com 路线：填境外 https://xxxxx.supabase.co，见 docs/OVERSEAS-FIRST.md）
-# 旧 prompt-hub.cn + 阿里云 RDS：http://sb.prompt-hub.cn（灰云 DNS，勿裸 IP，见 docs/SUPABASE-PROXY-SETUP.md）
+# SUPABASE_URL（生产填 MemFire Supabase-compatible API URL；变量名为兼容保留）
+# 旧 prompt-hub.cn 自建路线见 docs/SUPABASE-PROXY-SETUP.md，勿把裸 IP 交给 Worker fetch
 # SUPABASE_SERVICE_ROLE_KEY
 # SUPABASE_JWT_SECRET（可选，用于本地 JWT 校验加速）
 # IMAGE_API_KEY（生图 · GrsAI 主上游）
@@ -24,7 +24,7 @@ MEDIA_STORAGE_MODE = "r2-first"
 # CHAT_API_KEY（对话 · DeepSeek 官方 API Key）
 # ADMIN_API_SECRET（运营批量造激活码，见 scripts/generate-codes.ps1）
 
-# 图片桶（先在 Cloudflare R2 控制台创建 prompt-hub-card-images，见 docs/R2-MIGRATION.md）
+# 图片桶与当前 r2-first 行为见 docs/R2-MIGRATION.md
 [[r2_buckets]]
 binding = "CARD_IMAGES_R2"
 bucket_name = "prompt-hub-card-images"

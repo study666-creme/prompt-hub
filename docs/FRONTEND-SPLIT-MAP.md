@@ -1,6 +1,6 @@
 # Frontend Split Map
 
-Updated: 2026-07-10
+Updated: 2026-07-11
 
 This project still ships classic browser scripts from the site root, but several formerly large files are now thin runtime loaders. The real source is split into ordered chunks so classic script execution order and old global/IIFE behavior stay unchanged.
 

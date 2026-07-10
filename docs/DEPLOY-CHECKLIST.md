@@ -1,111 +1,68 @@
 # 部署与验证清单
 
-> 用户为小白时请写清：**第 1 步 / 第 2 步**，并给可复制命令。  
-> Cloudflare 菜单路径见 `docs/CUSTOM-DOMAIN.md`、`docs/FIX-API-522-BEGINNER.md`。
+## 哪些内容需要部署
 
----
+| 改动 | Pages | Worker |
+|---|---:|---:|
+| 前端 HTML/JS/CSS、扩展下载入口 | 是 | 否 |
+| `server/src/**`, `server/wrangler.toml` | 否 | 是 |
+| SQL migration | 否 | 先在目标数据库执行 |
+| 仅 Markdown、维护脚本、测试 | 否 | 否 |
+| 前后端契约同时变化 | 先 Worker | 再 Pages |
 
-## 何时需要部署什么
-
-| 改了什么 | 部署 |
-|----------|------|
-| `index.html`, `*.js`, `*.css`, `sw.js` | **Pages** `.\deploy-pages.ps1` |
-| `server/src/**` | **Worker** `cd server && npm run deploy` |
-| `supabase/migrations/*.sql` | **Supabase SQL Editor** 手动执行 |
-| 仅文档 | 无需部署 |
-
-改静态资源时 **必须** 同时 bump：
-
-1. `index.html` → `window.__APP_BUILD__`
-2. `sw.js` → `CACHE = 'prompt-hub-v…'`
-3. `index.html` 里脚本 `?v=`（若有）
-
----
-
-## Pages 部署（Windows）
+## 发布前
 
 ```powershell
-cd d:\prompt-hub
-.\deploy-pages.ps1
+cd D:\prompt-hub
+git status --short --branch
+npm run check:predeploy
+
+cd server
+npm run typecheck
+npm test
 ```
 
-或 Git 连 Cloudflare Pages 自动构建（仓库根目录即站点，无 npm build）。
+只改前端时 Worker 检查可不跑；只改文档时两边都不用部署。确认未暂存 `.env`、凭据、备份、账号信息或无关用户改动。
 
----
-
-## Worker 部署
+## Worker
 
 ```powershell
-cd d:\prompt-hub\server
+cd D:\prompt-hub\server
 npm run deploy
 ```
 
-生产 API：**https://api.prompt-hub.cn**  
-Worker 名：**prompt-hub-api**
-
----
-
-## 用户浏览器清缓存（每次大改后）
-
-1. 打开 https://prompt-hub.cn  
-2. F12 → **Application** → **Service Workers** → **Unregister**  
-3. **Ctrl+F5** 强刷  
-4. 左下角应显示当前构建号（如 `版本 20260603j`）
-
----
-
-## Cloudflare 用量（可选）
-
-收到「每日请求 75%」邮件时：
-
-1. [Cloudflare Dashboard](https://dash.cloudflare.com) → **Workers 和 Pages** → **概述**
-2. 看 **Requests** 是否接近 100,000/天
-3. 详见 `docs/DEBUG-GUIDE.md` → Cloudflare 请求额度
-
----
-
-## 验证项
-
-| 检查 | 方法 |
-|------|------|
-| 构建号 | 侧栏底部 `appBuildLabel` 或 Console：`window.__APP_BUILD__` |
-| API 健康 | 打开 `https://api.prompt-hub.cn/health` |
-| 社区 Feed | `https://api.prompt-hub.cn/api/v1/community/feed?limit=10` → `ok:true` |
-| 登录 | 侧栏显示邮箱；非「登录/注册」 |
-| 社区加载 | 游客/登录均不应无限「正在加载…」 |
-| 生图滚轮 | 生图页侧栏：图片上滚轮缩放，图片外滚轮换图 |
-
----
-
-## 环境配置（勿提交密钥）
-
-| 文件 | 用途 |
-|------|------|
-| `supabase-config.js` / `.local.js` | Supabase URL + anon key |
-| `api-config.js` / `.local.js` | `API_BASE_URL` |
-| `server/.dev.vars` / Wrangler secrets | `SUPABASE_SERVICE_ROLE_KEY`, `IMAGE_API_KEY` 等 |
-
----
-
-## 本地预览
+验证：
 
 ```powershell
-cd d:\prompt-hub
-.\serve-local.ps1
+Invoke-RestMethod https://api.prompt-hubs.com/health
+Invoke-RestMethod 'https://api.prompt-hubs.com/api/v1/community/feed?limit=2&offset=0'
 ```
 
-访问 http://127.0.0.1:5500（**不要** file:// 双击 html）。  
-详见 `docs/LOCAL-DEV.md`。
+`/health` 应为 `ok: true`、`supabase: ok`。provider 显示 missing 只代表对应可选线路未配置。
 
----
+## Pages
 
-## 当前生产构建（文档编写时）
+```powershell
+cd D:\prompt-hub
+.\deploy-pages.ps1
+```
 
-| 项 | 值 |
-|----|-----|
-| `__APP_BUILD__` | `20260602w` |
-| SW CACHE | `prompt-hub-v314` |
-| 站点 | https://prompt-hub.cn |
-| API | https://api.prompt-hub.cn |
+脚本会依次执行预部署检查、递增 build、构建 staging、Wrangler Pages 上传和生产 HTTP 冒烟。不要手工把整个仓库目录上传 Pages；staging 会排除文档、脚本和本地文件。
 
-（以 `index.html` / `sw.js` 为准；2026-05-30 已部署 Pages + Worker。）
+## 生产验收
+
+1. 打开 <https://prompt-hubs.com> 并确认 `window.__APP_BUILD__` 是新值。
+2. 卡片库：刷新 `/prompts/`，路由保持；手机首批 12 张并可继续滚动。
+3. 社区：首批分页、排序切换、打开/关闭侧栏、继续滚动。
+4. 生图：模型目录、参考图、提交、轮询、预览和入库。
+5. 图片：列表走 grid；详情 full；Network 无连续 404/5xx。
+6. 后台：运行监控和卡片库摘要能打开。
+
+涉及认证/同步时，用专门测试数据跨无痕窗口验证，不删除现有卡片。
+
+## 回滚
+
+- Pages：Cloudflare Dashboard -> Workers & Pages -> Pages 项目 -> Deployments -> 选择上一个成功版本 -> Rollback。
+- Worker：从 Git 切到已知良好提交后重新 `npm run deploy`；Secrets 不随 Git 回滚。
+- 数据库：不要直接覆盖生产。先新建目标库恢复 dump，核对后再切 Worker Secrets。
+- R2：删除或覆盖对象前先确认数据库引用和备份，恢复见 `R2-MIGRATION.md`。

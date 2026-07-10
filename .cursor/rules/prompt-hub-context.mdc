@@ -1,14 +1,16 @@
 ---
-description: Prompt Hub 项目总览；新对话先读 PROJECT_CONTEXT
+description: Prompt Hub current project context and safety rules
 alwaysApply: true
 ---
 
-# Prompt Hub 协作约定
+# Prompt Hub collaboration rules
 
-- 新任务先读 `docs/PROJECT_CONTEXT.md`（含**当前部署阶段**）。
-- 用户是纯小白：用分步说明 + 可复制命令；Cloudflare 写清菜单路径。
-- 部署/API 问题见 `docs/FIX-API-522-BEGINNER.md`、`docs/CUSTOM-DOMAIN.md`。
-- **P0（社区排版 / 卡片库图片 / 手机加载）拉满算力**：见 `docs/AI-WORK-MODE.md`、`docs/MOBILE-LOADING.md`，禁止最小 diff 试探，允许多文件联动与整段重写。
-- 简体中文；不提交密钥；仅用户要求时再 git commit。
-- **只改任务相关文件**：勿顺带改无关布局/动效（如灯箱按钮、加载扫光 `card-beam-trbl`、大图样式）；生图加载中复用 `media-shine-reveal` 同一光带时用 `card-beam-loading` 循环，勿另写一套扫光。
-- **架构改动**：用户为解决单一现象要求换架构时，先读 `docs/ARCHITECTURE-CHANGE-GUARD.md`；B 类改动必须先说明风险与更小方案，禁止拆东墙补西墙（见 `.cursor/rules/architecture-change-guard.mdc`）。
+- Start with `docs/PROJECT_CONTEXT.md`, `docs/CURRENT-ISSUES.md`, and `docs/AI-PITFALLS.md`.
+- Use `docs/FILE-MAP.md` to locate code; do not restore old monolithic files over split sources.
+- Preserve user work and user data. Never delete cards or images to make a test pass.
+- Do not commit credentials, real test accounts, user UUIDs, backups, `.wrangler/`, or local env files.
+- Root loaders, `legacy/`, `styles/`, `partials/`, and `pack-*.js` are one runtime system. Run `npm run check:predeploy` after frontend changes.
+- Run `npm run typecheck` and `npm test` in `server/` after Worker changes.
+- Shared sync, image, feed, or storage changes require impact analysis and regression tests; see `docs/ARCHITECTURE-CHANGE-GUARD.md`.
+- Production is `https://prompt-hubs.com` with API `https://api.prompt-hubs.com`; `.cn` is compatibility only.
+- Keep replies in Simplified Chinese unless the user requests otherwise.

@@ -25,11 +25,11 @@ if (-not $ApiBase -or -not $AdminSecret) {
   if (-not $AdminSecret) { $AdminSecret = $envMap['ADMIN_API_SECRET'] }
 }
 
-if (-not $ApiBase) { $ApiBase = 'https://api.prompt-hub.cn' }
+if (-not $ApiBase) { $ApiBase = 'https://api.prompt-hubs.com' }
 $ApiBase = $ApiBase.TrimEnd('/')
 if ($ApiBase -match 'workers\.dev$') {
-  Write-Host "admin.local.env 指向 workers.dev，改用 api.prompt-hub.cn" -ForegroundColor Yellow
-  $ApiBase = 'https://api.prompt-hub.cn'
+  Write-Host "admin.local.env 指向 workers.dev，改用 api.prompt-hubs.com" -ForegroundColor Yellow
+  $ApiBase = 'https://api.prompt-hubs.com'
 }
 
 if (-not $AdminSecret) {
@@ -59,4 +59,4 @@ Write-Host "  下架重复卡片:     $($d.unpublishedDuplicates)"
 Write-Host "  修正作者归属:     $($d.repairedAuthors)"
 Write-Host "  仍在线社区帖:     $($d.publishedRemaining)"
 Write-Host ""
-Write-Host "请强刷 prompt-hub.cn 社区页验证。" -ForegroundColor Yellow
+Write-Host "请强刷 prompt-hubs.com 社区页验证。" -ForegroundColor Yellow

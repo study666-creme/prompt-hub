@@ -1,53 +1,30 @@
-# Prompt Hub 浏览器插件
+# Prompt Hub 浏览器扩展
 
-在任意网页快速把**您手动选择**的文字和**您粘贴/拖入**的图片保存到 [Prompt Hub](https://prompt-hub.cn) 仓库。
+在任意网页把用户手动选择的文字和粘贴/拖入的图片保存到 [Prompt Hub](https://prompt-hubs.com) 卡片库。当前版本见 [`manifest.json`](manifest.json)。
 
-**当前版本：1.0.4**
+## 开发者模式安装
 
-## 安装（开发者模式）
+1. Chrome/Edge -> 扩展程序 -> 管理扩展程序。
+2. 开启开发者模式，选择“加载已解压的扩展程序”。
+3. 选择本目录 `extension/`。
+4. 在 <https://prompt-hubs.com> 登录后打开扩展同步会话。
+5. 在目标网页点击“在当前页打开面板”。
 
-1. 打开 Chrome / Edge → **扩展程序** → **管理扩展程序**
-2. 开启 **开发者模式**
-3. 点击 **加载已解压的扩展程序**
-4. 选择本仓库里的 `extension` 文件夹
-5. 改代码后点扩展卡片上的 **重新加载**
+## 行为
 
-## 使用
+- 划选文字或悬停段落后填入提示词。
+- 粘贴/拖入图片并选择标签。
+- 页面没有可编辑元素聚焦时，可用 `Ctrl+V` 快捷保存截图。
+- 发布到社区必须由用户显式选择，并继续受服务端校验。
+- 不自动读取整页 HTML，不记录未保存页面的浏览历史。
 
-1. 点击扩展图标 → **登录 / 同步**，在 prompt-hub.cn 登录（保持该标签页打开几秒以同步登录态）
-2. 点击 **在当前页打开面板**（首次需允许「访问所有网站」）
-3. **划选**网页文字 → 点 **复制到提示词**；或 **悬停段落** → **复制段落**
-4. 点 **选择标签** 勾选/新建标签（与主站仓库标签一致）
-5. 需要时可开启 **公开到提示词社区**（与主站默认规则一致：设置里默认开启 + 提示词 ≥15 字；实际公开还须配图）
-6. **保存到仓库** 提交（面板内图片/文字在保存前不会消失）
+## 开发
 
-### 截图快捷保存
+配置在 `config.js`；认证 bridge 必须使用同一 MemFire auth storage key。API 端点与架构见 [`../docs/BROWSER-EXTENSION.md`](../docs/BROWSER-EXTENSION.md)。
 
-- 面板已打开，且当前页面**没有**聚焦的输入框、文本框或可编辑区域时：**Ctrl+V** 粘贴截图 → **自动保存**
-- 若正在网页输入框里编辑，粘贴仍交给网页本身
-- 在面板图片区粘贴/拖入：仅预览，需点 **保存到仓库**
+```powershell
+cd D:\prompt-hub
+.\scripts\package-extension.ps1
+```
 
-### 关闭与收起
-
-- **−** 收起：隐藏表单，面板仍在本页
-- **×** 关闭：本标签页移除面板；需再从扩展弹窗 **在当前页打开面板**
-
-## 合规说明
-
-- 仅响应您的**手动划选、悬停、拖入、粘贴**，不自动抓取整页
-- 请确保内容合法、有权使用，并遵守所浏览网站的服务条款
-- 数据仅写入您自己的 Prompt Hub 账号
-
-## API
-
-| 接口 | 用途 |
-|------|------|
-| `POST /api/v1/extension/quick-card` | 保存卡片（含 `tags`、`publishToCommunity`） |
-| `GET /api/v1/extension/tags` | 读取已有标签 |
-| `GET /api/v1/extension/status` | 登录与 `defaultPublishCommunity` |
-
-需 Worker 已部署。本地开发时修改 `extension/config.js` 里的 `API_BASE`。
-
-## 隐私
-
-见 [PRIVACY.md](./PRIVACY.md)。上架商店见 [../docs/CHROME-WEB-STORE.md](../docs/CHROME-WEB-STORE.md)。
+隐私说明见 [`PRIVACY.md`](PRIVACY.md)，上架流程见 [`../docs/CHROME-WEB-STORE.md`](../docs/CHROME-WEB-STORE.md)。

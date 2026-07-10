@@ -11,6 +11,7 @@
     "build-all": "node scripts/build-all-bundles.mjs",
     "check:esbuild": "node scripts/esbuild-bundle-smoke.mjs",
     "check-esbuild": "node scripts/esbuild-bundle-smoke.mjs",
+    "check:docs": "node scripts/check-doc-links.mjs",
     "check:predeploy": "node scripts/run-predeploy-smoke.mjs",
     "check-predeploy": "node scripts/run-predeploy-smoke.mjs"
   },

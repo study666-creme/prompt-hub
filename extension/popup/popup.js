@@ -1,4 +1,4 @@
-const SITE = 'https://prompt-hub.cn/';
+const SITE = 'https://prompt-hubs.com/';
 
 async function send(type, extra = {}) {
   return new Promise((resolve) => {
@@ -17,7 +17,7 @@ async function refreshAuth() {
   } else {
     line.textContent = '未登录 — 请打开主站登录';
     loginBtn.textContent = '去登录';
-    loginBtn.title = '打开 prompt-hub.cn 登录';
+    loginBtn.title = '打开 prompt-hubs.com 登录';
   }
 }
 

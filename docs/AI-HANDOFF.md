@@ -1,129 +1,54 @@
-# AI 接手说明（省 Token）
+# AI 接手说明
 
-> **目标**：用最少阅读量定位问题、做最小 diff。用户是纯小白，回复用简体中文 + 分步命令。
-> 前端大文件拆分边界见 `docs/FRONTEND-SPLIT-MAP.md`（2026-07-07，loader + chunk）。
+## 最小阅读顺序
 
----
+1. `PROJECT_CONTEXT.md`: 线上拓扑和当前 build。
+2. `CURRENT-ISSUES.md`: 当前风险与已关闭问题。
+3. `AI-PITFALLS.md`: 会导致白屏、丢数据或高流量的禁区。
+4. `FILE-MAP.md`: 按任务定位文件。
+5. 涉及跨模块改动时再读 `ARCHITECTURE-CHANGE-GUARD.md`。
 
-## 第 0 步：只读这 5 个文件（按顺序）
+不要读取或引用公开文档中的真实测试账号。需要登录验收时，由维护者在本机通过未跟踪环境变量或密码管理器提供凭据。
 
-| 顺序 | 文件 | 用途 |
-|------|------|------|
-| 0 | **`docs/AI-PITFALLS.md`** + **`docs/ERROR-LOG.md`** | **防炸站** + 历史高频坑 |
-| 0b | **`docs/ARCHITECTURE-CHANGE-GUARD.md`** | **架构改动前必读**：风险说明、禁止拆东墙补西墙 |
-| 1 | **`docs/CURRENT-ISSUES.md`** | R2 同步、MemFire、活跃项（**首屏带宽已关闭**） |
-| 2 | **`docs/FEED-MODULES.md`** + **`docs/FEED-LAYOUT.md`** | Feed 四模块 + 排版调试 |
-| 3 | **`docs/PROJECT_CONTEXT.md`** | 产品、部署、构建号 |
-| 4 | **`docs/FILE-MAP.md`** | 按任务找函数 |
+## 工作流程
 
-社区 Bug → **`docs/COMMUNITY-ARCHITECTURE.md`** + **`docs/AI-PITFALLS.md`** 社区章节。  
-日光可读性 → **`docs/LIGHT-THEME-UX.md`**。
+1. `git status --short --branch`，先区分用户现有改动。
+2. 用 `rg` 定位调用链，只精读相关函数和上下文。
+3. 先复现或取得 Network/API/后台监控证据，再修改。
+4. 改动范围按根因决定；共享同步、图片和 Feed 模块要补回归验证。
+5. 运行根目录预部署检查；改 Worker 时再跑 typecheck 和 tests。
+6. 只暂存本次文件，提交前复核没有密钥、凭据或用户数据。
+7. 用户要求上线时，按 `DEPLOY-CHECKLIST.md` 部署并做生产冒烟。
 
-云同步 / 登录 → 再读 **`docs/AUTH-AND-SYNC.md`** 相关小节。
+## 常用定位
 
----
+| 问题 | 先看 |
+|---|---|
+| 卡片库分页/图片 | `legacy/script/part-09.js`、`card-image-loader.js`、`mobile.js` |
+| 社区数据/分页 | `community-public-feed.js`、`legacy/features-draft/part-01.js`、`server/src/lib/community-feed.ts` |
+| 社区/主页布局 | `feed-layout.js`、`styles/features/` |
+| 生图提交/轮询 | `imagegen-submit.js`、`imagegen-job-runner.js`、`server/src/routes/v1/generate.ts` |
+| 图片签名/R2 | `card-image-loader.js`、`server/src/routes/v1/media.ts`、`server/src/lib/r2-storage.ts` |
+| 登录/同步 | `supabase-sync.js`、`cloud-sync-safety.js`、`sync-orchestrator.js` |
+| 后台 | `legacy/admin/`、`server/src/routes/admin/` |
+| Canvas/扩展 | `server/src/routes/v1/extension.ts`、`docs/CANVAS-INTEGRATION.md` |
 
-## 第 1 步：用 Grep 定点，不要整文件读
-
-| 要找什么 | 先搜（`features-draft.js` unless noted） |
-|----------|---------------------------------------------|
-| 社区列表从哪来 | `getCommunityFeedForDisplay`, `getAllCommunityPosts`, `publicFeedPosts` |
-| **单卡发布开关 UI** | `setPublishCheckbox`, `readPublishCheckbox`, `cardPublishSessionOverride`, `syncCardPublishFromPrompt` |
-| **publishedToCommunity 持久化** | `mergePublishFlag`, `mergeCardPair`（`cloud-sync-safety.js`）, `getDataPayload`（`script.js`） |
-| 发布/下架 | `syncCardToCommunity`, `reconcileCommunityWithCards`, `ownPostAllowedInFeed` |
-| **社区侧栏空白** | `renderCommunitySidePanel`, `communitySideBody`, `openPostSidePanel` |
-| **社区 Masonry（桌面）/ 我的主页 flex** | `feed-layout.js`, `FeedLayout.*`, `wireFeedLayout` | `docs/FEED-LAYOUT.md` |
-| **Feed 出图 / 生图列表** | `feed-images.js`, `image-gen-feed.js`, `wireFeedImages`, `wireImageGenFeed` | `docs/FEED-MODULES.md` |
-| **侧栏打开重排** | `relayoutFeedGridAfterSidePanel`, `scheduleImageGenFeedLayout({ immediate })` |
-| **Mobile 断点** | `mobile.js` → `MobileUI.isMobileViewport`（须在 `script.js` 前） |
-| **我的主页巨图** | `repairCreationsFeedLayout`, `getCreationsFeedColumns`, `promptrepo_myhome_columns` — 见 **`docs/ERROR-LOG.md`** |
-| **社区 Masonry（手机）** | `enforceMobileCommunityFeedGrid`, `useCssGridForCommunityFeed` |
-| **卡片库首屏顺序** | `renderCards`, `card-image-loader.js`, `prefetchWarehousePage`, `observeContainer` |
-| **性能 / 慢加载** | `prefetchCommunityDisplayUrls`, `hydrateWarehouseImagesFast` |
-| **生图仓库带宽** | 已验收；复现才查 `hydrateFeedImages`, `#imageGenFeed` |
-| 云同步编排 | `sync-orchestrator.js`, `scheduleDeferredCloudPull`, `requestFeedRefresh`（`script.js`） |
-| 社区通知 | `pushCommunityEvent`, `refreshRemoteNotifications`, `community-notify.ts` |
-| 任务中心 | `membership-tasks.ts`, `trial-tasks.js` |
-| 云上传超时 | `pushToCloud`, `scheduleCloudPush`（`script.js`） |
-| **生图预览滚轮** | `attachImageZoom`, `bindImageGenPreviewWheelScroll`, `loadLightboxImage` |
-| 全站 API | `refreshPublicCommunityFeed`（前端）, `listPublicCommunityFeed`（`server/`） |
-
-一次任务：**最多精读 2～4 个函数**，改前先读函数体 ±30 行上下文。
-
----
-
-## 第 2 步：动手前在浏览器验证（让用户跑或自己 curl）
-
-```javascript
-// 登录后 F12 Console
-window.__APP_BUILD__                                    // 应与左下角一致，当前 20260625e
-document.querySelectorAll('#imageGenFeed img[data-image-ref]').length
-performance.getEntriesByType('resource').filter(e => e.transferSize > 500000).length  // 期望 0
-!!window.FeatureDraft?.hydrateFeedImages
-!!window.FeedImages?.feedImgStorageAttr
-window.MobileUI?.isMobileViewport?.()
-```
-
-**用户 2026-05-29 实测**：他人配图偶现后刷新像没图 → **先量 Feed/sign 耗时、等 30s 不刷新**，再判过滤 Bug。
-
-```text
-https://api.prompt-hub.cn/health
-https://api.prompt-hub.cn/api/v1/community/feed?limit=80
-```
-
-对比：**API 条数** vs **页面实际条数** → 区分后端问题还是 `features-draft.js` 展示/过滤问题。
-
----
-
-## 测试账号（用户大号）
-
-| 项 | 值 |
-|----|-----|
-| 邮箱 | `2705367723@qq.com` |
-| `author_id` / `user_id` | `ab5c77dc-570e-4af7-ac38-2d311be96244` |
-
----
-
-## 省 Token 的改代码原则
-
-1. **最小 diff**：只改与 P0 相关的函数，不顺手重构。
-2. **P0 顺序（2026-06-07 更新）**：
-   - ① **R2 历史图 / 裂图**（502、Storage 无文件）
-   - ② MemFire 迁移（7 月初）
-   - ③ 偶发 API 502 / 旧第三方外链 404
-   - **首屏带宽 / 生图仓库几百 MB**：**已关闭**（见 `CURRENT-ISSUES.md` 验收表）
-   - 详见 **`docs/CURRENT-ISSUES.md`**。
-3. **先证实根因再改**：20260601l～q 布局/CSS 多轮用户仍称未解决；下次须 DevTools 断点后再最小 diff。
-4. **不要**让用户只靠清 `localStorage` 当最终方案（云端 `user_data` 会拉回）。
-4. **不要**未验证就叠新功能；**不要**通读 `script.js`（5000+ 行）。
-5. 改静态资源：bump `index.html` 的 `__APP_BUILD__` + `sw.js` 的 `CACHE`。
-6. 仅用户明确要求时 `git commit`；**勿提交** `.env`、密钥。
-7. 改 `layoutCommunityMasonry` / `distributeCommunityFeedColumns` 前读 **`docs/AI-PITFALLS.md`**，改完搜 `const colsChanged` 是否重复。
-
----
-
-## 部署（给用户复制）
+## 必跑命令
 
 ```powershell
-cd d:\prompt-hub
-.\deploy-pages.ps1
+cd D:\prompt-hub
+npm run check:predeploy
+
+cd server
+npm run typecheck
+npm test
 ```
 
-Worker 有改动时：
+静态站生产冒烟由 `deploy-pages.ps1` 自动执行。只改文档或未部署的维护脚本时，不需要递增 Pages build。
 
-```powershell
-cd d:\prompt-hub\server
-npm run deploy
-```
+## 交付要求
 
-浏览器：Ctrl+Shift+R；仍异常 → F12 → Application → Service Workers → Unregister → 再强刷。
-
----
-
-## 给下一位 AI 的复制提示词
-
-见 **`docs/PROJECT_CONTEXT.md` 底部「新对话提示词」** 或直接把下面框内全文贴进新聊天。
-
----
-
-*最后更新：2026-06-07 · 首屏带宽 P0 关闭；SyncOrchestrator 收尾*
+- 说明改了什么、为何这样改、验证了什么。
+- 未运行的测试必须明确说出。
+- 不删除用户卡片、图片或数据库记录来“验证修复”。
+- 不把本地 `.env`、账号、UUID、token、Cloudflare 缓存文件提交到公开仓库。

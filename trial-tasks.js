@@ -204,14 +204,14 @@
       return {
         ok: false,
         hint:
-          '当前是本地文件打开（地址栏以 file:// 开头），浏览器禁止访问 API。请用 https://prompt-hub.cn 打开本站。'
+          '当前是本地文件打开（地址栏以 file:// 开头），浏览器禁止访问 API。请用 https://prompt-hubs.com 打开本站。'
       };
     }
     const api = String(window.API_BASE_URL || '').replace(/\/$/, '');
     if (!api) {
       return {
         ok: false,
-        hint: `未配置 API。当前页面：${pageOrigin || pageHref || '未知'}，请用 https://prompt-hub.cn 打开。`
+        hint: `未配置 API。当前页面：${pageOrigin || pageHref || '未知'}，请用 https://prompt-hubs.com 打开。`
       };
     }
     try {
@@ -225,7 +225,7 @@
       return {
         ok: false,
         hint:
-          `浏览器拦住了对 ${api} 的请求（页面来源：${pageOrigin || '未知'}）。请确认用 https://prompt-hub.cn 打开；Edge 请关闭「跟踪防护」；或换 Chrome 并关闭广告拦截。`
+          `浏览器拦住了对 ${api} 的请求（页面来源：${pageOrigin || '未知'}）。请确认用 https://prompt-hubs.com 打开；Edge 请关闭「跟踪防护」；或换 Chrome 并关闭广告拦截。`
       };
     }
   }
@@ -243,7 +243,7 @@
       return {
         items: [],
         lifetimeCreditsSpent: 0,
-        error: `当前页面（${host}）未配置 API。请用 https://prompt-hub.cn 打开，或在 api-domain.config.js 设置 CUSTOM_API_HOST。`
+        error: `当前页面（${host}）未配置 API。请用 https://prompt-hubs.com 打开，或在 api-domain.config.js 设置 CUSTOM_API_HOST。`
       };
     }
     let r;
@@ -316,7 +316,7 @@
     }
     if (r?.code === 'NETWORK_ERROR' || /无法连接|failed to fetch|network|超时/i.test(msg)) {
       const diag = await diagnoseApiConnection();
-      const api = String(window.API_BASE_URL || 'api.prompt-hub.cn').replace(/\/$/, '');
+      const api = String(window.API_BASE_URL || 'api.prompt-hubs.com').replace(/\/$/, '');
       const extra = diag.hint ? ` ${diag.hint}` : '';
       return {
         items: [],

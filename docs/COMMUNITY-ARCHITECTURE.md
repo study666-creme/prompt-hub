@@ -1,142 +1,69 @@
-# 社区模块架构与数据流
+# 社区架构
 
-> 对应文件：`features-draft.js`、`server/src/lib/community-feed.ts`、`api-client.js`  
-> 已知故障：`docs/CURRENT-ISSUES.md`  
-> **踩坑（必读）**：`docs/AI-PITFALLS.md` — 社区 flex 列、禁止全墙重排、SyntaxError 炸站
+## 数据层
 
-### 桌面布局（2026-06-05）
+| 层 | 数据 | 用途 |
+|---|---|---|
+| `community_posts` | 已发布公共帖 | 游客和登录用户 Feed 真源 |
+| `user_data.data.communityPosts` | 当前账号私有副本 | 跨设备编辑与恢复 |
+| `cards[].publishedToCommunity` | 发布意图 | 保存卡片时同步公共帖 |
+| `promptrepo_public_feed_cache` | 5 分钟浏览器缓存 | 快速恢复首屏 |
 
-- **社区 `#communityGrid`**：桌面 **Masonry**（`feed-layout.js`）；`gutter` 管列距，上下靠 `margin-bottom: --card-row-gap`。
-- **我的主页 `#creationsGrid`**：桌面 **flex 多列**（`.community-feed-col`），新卡 append 到最短列。
-- **禁止**：`flattenCommunityFeedColumns` + 全量 round-robin（除非列结构损坏）；`finishCardMediaShine` 触发全墙 flex 重分。
-- **分页**：首屏 `drainCommunityFeedPages(5)`；滚到底哨兵再 `loadNextCommunityFeedPage`。
-- **排版模块**：`feed-layout.js` + `features-draft.js` 内 `wireFeedLayout()`；详见 `docs/FEED-LAYOUT.md`。
+这四层不能当成同一个数组。公共 Feed 以 API 为准，私有副本和卡片用于合并、发布与恢复。
 
----
+## 读取流程
 
-## 产品行为（预期）
-
-| 角色 | 预期 |
-|------|------|
-| 游客 | 浏览 `全部作品`；点赞/收藏需登录；图走社区签名 API |
-| 登录用户 | 看全站 Feed + 自己的发布；可从卡片库「发布到社区」 |
-| 作者 | 在卡片库下架/删除；同步到 `community_posts` |
-
----
-
-## 请求链路（读 Feed）
-
-```
-用户打开「提示词社区」
-  → switchAppPage('community')
-  → FeatureDraft.onAppChange('community')
-  → renderCommunity({ immediate: true })
-  → renderCommunityNow
-       ├─ refreshPublicCommunityFeed()     // GET /api/v1/community/feed
-       │     └─ publicFeedPosts = r.data.posts
-       ├─ maybeReconcileCommunityWithCards // 登录时，与 __promptHubCards 对齐
-       └─ getAllCommunityPosts()
-             └─ merge(publicFeedPosts, communityPosts, buildPostsFromPublishedCards)
-  → renderPostsIntoContainer → Masonry
+```text
+进入社区
+  -> CommunityPublicFeed 读取有效缓存
+  -> GET /api/v1/community/feed?limit=100&offset=0
+  -> 归一化、去重、按活动排序
+  -> paged store
+  -> 手机 12 / 桌面 24 张进入 DOM
+  -> 滚动哨兵追加下一页
 ```
 
-**写帖链路：**
+API head 较大是为了减少后续 RTT 和支持随机/排序，不代表要一次渲染全部帖子。
 
+## 写入流程
+
+```text
+保存卡片 + publishedToCommunity
+  -> syncCardToCommunity
+  -> POST /api/v1/community/posts
+  -> upsert community_posts
+  -> 用户 JSON 延迟同步
 ```
-卡片保存 + publishedToCommunity
-  → syncCardToCommunity (features-draft.js)
-  → pushPostToPublicFeed → POST /api/v1/community/posts
-  → upsertCommunityPost (community-feed.ts) → community_posts 表
-  → scheduleCloudPush → user_data.data.communityPosts
+
+下架使用 DELETE/同步接口更新公共表，并保留必要 tombstone，防止旧设备重新发布。
+
+## 排版模式
+
+| 容器 | 桌面 | 手机 |
+|---|---|---|
+| `communityGrid` | Masonry | CSS Grid |
+| `creationsGrid` | flex 多列 | CSS Grid |
+| `userProfileGrid` | Masonry | 响应式 grid/Masonry |
+
+`feed-layout.js` 负责列数、Masonry 实例、增量 append 和诊断；`features-draft` 负责数据与 HTML。图片加载后只进行 debounce 布局，不清空容器、不全量 round-robin 分列。
+
+## 关键文件
+
+- `community-public-feed.js`: API 缓存、远端分页、归一化
+- `legacy/features-draft/part-01.js`: paged store 与 DOM 增量追加
+- `feed-layout.js`: 社区、主页和用户页布局
+- `feed-images.js`: 图片引用与批量签名
+- `server/src/routes/v1/community.ts`: 发布、删除、点赞、通知
+- `server/src/lib/community-feed.ts`: 查询和公共帖子转换
+
+## 排查
+
+```javascript
+({
+  build: window.__APP_BUILD__,
+  community: window.FeedLayout?.diagnose?.('communityGrid'),
+  creations: window.FeedLayout?.diagnose?.('creationsGrid')
+})
 ```
 
----
-
-## API 端点
-
-| 方法 | 路径 | 认证 | 实现 |
-|------|------|------|------|
-| GET | `/api/v1/community/feed?limit=&offset=` | 否 | `communityFeedHandler` |
-| POST | `/api/v1/community/posts` | Bearer | `upsertCommunityPost` |
-| POST | `/api/v1/community/posts/sync` | Bearer | `syncAuthorCommunityPosts` |
-| DELETE | `/api/v1/community/posts/:id` | Bearer | `unpublishCommunityPost` |
-| GET | `/api/v1/media/community/sign` | 否* | 社区图签名 |
-
-\* 具体见 `media.ts`；游客可读已发布帖的图。
-
-Feed 首屏（offset=0）Worker 会尝试：
-
-1. `repairMisattributedCommunityAuthors`
-2. `unpublishGhostCommunityPosts`
-3. `unpublishDuplicateCommunityPosts`
-
----
-
-## 关键函数行为（易踩坑）
-
-### `reconcileCommunityWithCards(cardList)`
-
-- 目的：本地 `communityPosts` 与卡片库一致。
-- **风险**：`source_card_id` 不在 `cardList` 时，历史上会 **从 communityPosts 移除** 该帖（即使 DB 仍有）。
-- `20260614b`：对 **当前用户** 的帖，若仅在 `publicFeedPosts` 存在，尝试保留到 `ownBySource`。
-
-### `pruneOwnOrphanCommunityPosts`
-
-- 删掉「自己的帖」但卡片库无对应 id 的项（`publicFeedPosts` 在 20260614b 加入白名单）。
-
-### `filterCommunityPostsForDisplay`
-
-- 过滤 mock、墓碑、`authorId` 非 UUID。
-- `skipCardTombstones: true` 时用于 **publicFeedPosts**（避免删卡后全站帖消失）。
-
-### `mergePostsLists` / `communityPostDisplayKey`
-
-- 去重键：`sourceCardId` 或 `prompt + 图片 owner`。
-- 同 prompt 多条可能合并为一条（游客曾见「重复」原因之一）。
-
----
-
-## UI 入口
-
-| 入口 | 位置 |
-|------|------|
-| 同步卡片库 → 社区 | 社区顶栏 `communitySyncLibraryBtn`；卡片库设置 → 社区 |
-| 从社区恢复卡片库 | 卡片库设置 → 社区（`restoreCardsFromCommunityFeed`） |
-| 从云端恢复卡片 | 卡片库设置 → 数据管理 / 空态按钮 `syncCloudNow` |
-
-左侧 **「设置」** = 外观/昼夜；**卡片库设置** = ⚙️ 字段 & 设置。
-
----
-
-## 布局
-
-- 桌面：`Masonry`（`layoutCommunityMasonry`），列数 `--card-columns`。
-- 移动：`useCssGridForCommunityFeed` → CSS Grid。
-- 侧栏详情：`communitySidePanel` + `#communitySideBody`；`openPostSidePanel` → `renderCommunitySidePanel`。
-- 结构参考卡片库：`#cardsContainer` | `#editPanel`（340px）→ 社区为 `#communityGrid` | `#communitySidePanel`（`.community-workspace`）。
-
-抖动：图片 `load` → `scheduleCommunityLayout` → `instance.layout()`。
-
-### 已知布局故障（2026-05-30 · 未解决）
-
-详见 **`docs/CURRENT-ISSUES.md` 问题 A/B**。摘要：
-
-| 问题 | 现象 |
-|------|------|
-| **A 侧栏空白** | 侧栏打开、标题有，`communitySideBody` 无可见内容（全黑） |
-| **B Masonry 空洞** | 滚动后网格中间大块空白、列距不齐 |
-
-关键文件：`features-draft.js`（`renderCommunitySidePanel`、`layoutCommunityMasonry`）、`styles-features.css`（`.community-side-*`）、`styles.css`（桌面 `#communityGrid` Masonry 规则）。
-
----
-
-## 调试清单
-
-1. Network：`/api/v1/community/feed` 状态码与 `posts.length`。
-2. `publicFeedAt` 是否 > 0（否则游客 loading）。
-3. `communityPosts.length` vs `publicFeedPosts.length`。
-4. `__promptHubCards.length` 与 DB `source_card_id` 集合是否交集。
-5. `settings.deletedCardTombstones` 是否误伤。
-6. 侧栏：`#communitySideBody` 的 `innerHTML` 长度与 `.community-side-prompt` 是否存在（问题 A）。
-7. 空洞处 `.card` 的 inline `top/left/width` 与 Masonry 实例是否一致（问题 B）。
-8. SW 与 `__APP_BUILD__` 是否最新。
+先比较 API `posts.length`、paged store 数量和 DOM 唯一 `data-post-id` 数量。若数据正确而布局错，再检查 Masonry 模式、容器宽度、重复卡片和图片 load 后的重排次数。

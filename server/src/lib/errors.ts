@@ -39,7 +39,7 @@ export function jsonError(c: Context, err: unknown) {
         : msg.includes('sb_secret_') || msg.includes('Publishable')
           ? '请在 server 执行 npm run secret-service-role 并粘贴 sb_secret_ 密钥后 npm run deploy'
           : /ICP Filing|aliyun_icp|备案|cloudflare_ssrf_1003|Supabase admin credentials/i.test(msg)
-            ? 'Worker 的 SUPABASE_URL 仍指向阿里云 RDS 或裸 IP。prompt-hubs.com 请改为境外 https://xxxxx.supabase.co 后 redeploy（见 docs/OVERSEAS-FIRST.md）'
+            ? 'Worker 的 SUPABASE_URL 指向不可访问的旧 RDS 或裸 IP。生产请改为当前 MemFire API URL 后重新部署（见 docs/OVERSEAS-FIRST.md）'
             : undefined;
   return c.json(
     {

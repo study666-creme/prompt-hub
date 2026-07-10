@@ -575,7 +575,7 @@
       if (!r?.ok) {
         const hint =
           r?.code === 'NETWORK_ERROR' || r?.code === 'API_UNREACHABLE'
-            ? '无法连接 api.prompt-hub.cn，请检查网络/VPN 后重试，或稍后再试'
+            ? '无法连接 api.prompt-hubs.com，请检查网络/VPN 后重试，或稍后再试'
             : r?.message || '保存失败';
         toast(hint, 6000);
         return;

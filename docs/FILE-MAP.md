@@ -1,221 +1,54 @@
-# 代码导航图（按任务找文件）
+# 代码导航图
 
-> 不必全仓搜索；按任务跳到文件 + 函数名。
+## 入口与构建
 
----
+| 文件/目录 | 作用 |
+|---|---|
+| `index.html` | 主站 head、body partial loader、脚本顺序和 build |
+| `partials/index-body/` | 主页面 body 拆分片段 |
+| `script.js`, `features-draft.js`, `supabase-sync.js` | 本地 loader；生产 staging 合并对应 `legacy/` |
+| `legacy/` | 主应用、功能、同步、后台和资产工作台源码片段 |
+| `styles.css`, `styles-features.css` | CSS loader/入口 |
+| `styles/base/`, `styles/features/` | 拆分 CSS 真源 |
+| `pack-*.js` | esbuild 生产包，由 `scripts/build-*.mjs` 生成并跟踪 |
+| `scripts/build-pages-runtime.mjs` | Pages staging 合并 loader/片段 |
+| `scripts/run-predeploy-smoke.mjs` | 前端总验证入口 |
 
-## 一页总览
+## 按任务找文件
 
-| 你想改… | 主文件 | 次要文件 |
-|---------|--------|----------|
-| 卡片库 CRUD、分组、Masonry | `script.js` | `styles.css`, `mobile.js` |
-| 登录 / 登出 / 云拉取 | `script.js` | `supabase-sync.js`, `cloud-sync-safety.js` |
-| 编辑侧栏多图 / slot 预览解析 | `edit-panel-gallery.js` | `script.js` 薄代理；`card-gallery.js`, `media-pipeline.js`, `warehouse-thumb.js` |
-| **社区 Masonry / 我的主页 flex** | `feed-layout.js` | `features-draft.js`（`wireFeedLayout`） |
-| **Feed 图片 hydrate / 签名** | `feed-images.js` | `features-draft.js`（`wireFeedImages`） |
-| **生图仓库 Feed 排版/渲染** | `image-gen-feed.js` | `features-draft.js`（`wireImageGenFeed`） |
-| **社区 Feed、发布、我发布的** | `features-draft.js` | `feed-layout.js`, `feed-images.js`, `image-gen-feed.js` |
-| 图片签名 URL | `supabase-sync.js` | `server/src/routes/v1/media.ts` |
-| 全站社区 API / DB | `server/src/lib/community-feed.ts` | `server/src/routes/v1/community.ts` |
-| 生图扣费 | `features-draft.js` + `api-client.js` | `server/src/routes/v1/generate.ts` |
-| **生图 524 / 后台提交** | `server/src/lib/fast-provider-submit.ts` | `server/src/routes/v1/generate.ts`（GrsAI/Apimart 异步） |
-| **木瓜慢速线** | `server/src/lib/mooko.ts` · `mooko-submit.ts` · `mooko-drain.ts` | Cron `*/2` **await 提交**（非全站恢复）；`GET /jobs/:id?settle=1` 亦可同步 POST；`index.ts` scheduled |
-| **4K 原图下载** | `supabase-sync.js`（`downloadCardFullResBlob`） | `script.js`（`downloadCardImageFile`） |
-| **卡片上传 50MB** | `server/src/routes/v1/media.ts` | `supabase-sync.js` · `index.html` 文案 |
-| **生图滚轮 / 灯箱** | `app-lightbox.js` → `pack-lightbox.js`（`openLightbox`, `loadLightboxImage`, `__viewerWheelNavigate`） | `app-viewer-core.js` → `pack-viewer.js`（缩放/frame）；`features-draft.js`（预览侧栏） |
-| 会员 / 积分 UI | `membership.js`, `subscription.js` | `server/src/routes/v1/me.ts` |
-| 部署 Pages | `deploy-pages.ps1` | `index.html`（`__APP_BUILD__`）, `sw.js` |
-| 部署 Worker | `server/package.json` scripts | `server/wrangler.toml` |
-| 数据库表 | `supabase/migrations/*.sql` | Supabase SQL Editor |
-| **备份 / R2** | `docs/SUPABASE-BACKUP-BEGINNER.md` · `docs/R2-MIGRATION.md` · `scripts/sync-supabase-to-r2.mjs` | Pro 恢复后 |
-| **迁 MemFire** | `docs/MEMFIRE-MIGRATION.md` · `scripts/memfire-upload-storage.mjs` · `scripts/memfire-preflight.mjs` | 迁前必先备份 |
-| R2 读写在 Worker | `server/src/lib/r2-storage.ts` · `MEDIA_STORAGE_MODE` | `wrangler.toml` 绑定 `CARD_IMAGES_R2` |
-| **资产创作 / 画布导出** | `asset-studio.js` · `asset-studio.html` | `docs/VIDEO-CANVAS-EXPORT.md`（zip 结构、LibTV 手动 `@`） |
-| **无限画布 ↔ 卡藏** | `server/src/routes/v1/extension.ts` · `server/src/lib/extension-card.ts` | `docs/CANVAS-INTEGRATION.md` · 画布 fork `study666-creme/infinite-canvas-jay` |
+| 任务 | 主要文件 |
+|---|---|
+| 路由/首屏页面 | `app-router.js`, `index.html` |
+| 卡片 CRUD/筛选/分页 | `legacy/script/`, `card-gallery.js` |
+| 编辑面板多图 | `edit-panel-gallery.js`, `card-gallery.js` |
+| 云同步/账号切换 | `supabase-sync.js`, `legacy/supabase-sync/`, `cloud-sync-safety.js`, `sync-orchestrator.js` |
+| 卡片图片 | `card-image-loader.js`, `card-image-loader-queues.js`, `warehouse-thumb.js` |
+| 社区数据 | `community-public-feed.js`, `legacy/features-draft/`, `server/src/routes/v1/community.ts` |
+| 社区布局 | `feed-layout.js`, `styles/features/` |
+| 生图表单 | `legacy/features-draft/`, `imagegen-ref-ui.js`, `imagegen-submit.js` |
+| 生图任务 | `imagegen-job-runner.js`, `imagegen-poll-warehouse.js`, `server/src/routes/v1/generate.ts` |
+| 上游 provider | `server/src/lib/image-upstream.ts`, provider 对应 `*.ts` |
+| 媒体/R2 | `server/src/routes/v1/media.ts`, `server/src/lib/media-cdn.ts`, `server/src/lib/r2-storage.ts` |
+| 会员/积分 | `subscription.js`, `membership.js`, `points-system.js`, `server/src/lib/membership-credits.ts` |
+| 运营后台 | `admin.html`, `admin.js`, `legacy/admin/`, `server/src/routes/admin/` |
+| 资产创作 | `asset-studio.html`, `legacy/asset-studio/`, `server/src/routes/v1/asset-packages.ts` |
+| 浏览器扩展/Canvas | `extension/`, `server/src/routes/v1/extension.ts` |
+| 移动端 | `mobile.js`, `styles-mobile.css` |
+| UI 主题/动效 | `styles-theme.css`, `theme.js`, `UI-GUIDELINES.md` |
 
----
+## 数据与运维
 
-## `script.js`（卡片库 + Auth，约 5000+ 行）
+| 路径 | 作用 |
+|---|---|
+| `supabase/schema.sql` | 当前数据库结构快照 |
+| `supabase/migrations/` | 有序迁移历史，MemFire 同样使用 |
+| `server/.dev.vars.example` | Worker 本地变量模板 |
+| `scripts/admin.local.env.example` | 备份、巡检和运营脚本模板 |
+| `scripts/pg-dump-for-migrate.ps1` | PostgreSQL custom dump |
+| `scripts/memfire-restore.ps1` | 向空 MemFire 项目恢复 dump |
+| `scripts/audit-card-images.mjs` | 指定用户图片元数据/R2 诊断 |
+| `scripts/run-warehouse-repair.mjs` | 指定用户 R2 回填，先 dry-run |
 
-| 区域 | 函数/变量 | 作用 |
-|------|-----------|------|
-| 初始化 | `init()` IIFE 末尾 | `openDB`, `initSupabaseAuth`, `finishAppBootstrap` |
-| 登录后 | `handleCloudAfterLogin` | 拉 `user_data`、合并卡片、触发 `FeatureDraft.reconcileCommunityWithCards` |
-| 登录 UI | `completeAuthSession`, `authSignIn` | Supabase session；`promptrepo_post_logout` 标志 |
-| 退出 | `purgeSignedOutLocalData`, `bootstrapWhenLoggedOut` | 清本地卡/社区缓存 |
-| 卡片数据 | `cards`, `window.__promptHubCards` | 内存主列表；`persistPromptHubCards` 写 IDB+云 |
-| 墓碑 | `recordCardDeletion`, `getDeletedCardTombstones` | 删卡后防止云端复活 |
-| 导航 | `switchAppPage` | `warehouse` / `community` / `creations` / `imagegen` |
-| 云同步 | `pullFromCloud`, `pushToCloud`, `syncCloudNow` | `user_data` JSON |
+## 修改原则
 
-## `edit-panel-gallery.js`（编辑侧栏多图解析）
-
-| 区域 | 函数 | 作用 |
-|------|------|------|
-| Gallery | `getCardGallery` | 统一读取 `PromptHubCardGallery.normalizeCardGallery`，保证 MJ 合图 / 多图顺序一致 |
-| Job ID | `getCardJobId`, `getSlotJobId` | 为侧栏当前槽位生成正确 `jobId#slot`，避免翻页回到封面 |
-| 预览图 | `resolvePreview` | 只解析当前 gallery slot，不使用卡片列表缩略图兜底 |
-| 安全显示 | `isDisplayableImageUrl` | 过滤 SVG 占位与临时上游 URL |
-
----
-
-## `features-draft.js`（社区 + 生图，约 9500 行）
-
-| 区域 | 函数/变量 | 作用 |
-|------|-----------|------|
-| 排版入口 | `wireFeedLayout()` | 启动时注入 `FeedLayout.init(deps)` |
-| 图片入口 | `wireFeedImages()` | 注入 `FeedImages.init(deps)` → `hydrateFeedImages` 等 |
-| 生图 Feed | `wireImageGenFeed()` | 注入 `ImageGenFeed.init(deps)` → `renderImageGenFeed` 等 |
-| 状态 | `communityPosts` | 账号私有社区帖（localStorage + 云 JSON） |
-| 状态 | `publicFeedPosts` | **全站 API Feed 缓存**（`20260614b` 新增） |
-| 拉 Feed | `refreshPublicCommunityFeed` | `PromptHubApi.getCommunityFeed` |
-| 展示列表 | `getAllCommunityPosts` | 合并 public + local + `buildPostsFromPublishedCards` |
-| 对齐卡片库 | `reconcileCommunityWithCards`, `pruneOwnOrphanCommunityPosts` | **易误删「库中无卡」的社区帖** |
-| 渲染 | `renderCommunity`, `renderCommunityNow`, `renderPostsIntoContainer` | Masonry / flex / 空态 / loading |
-| 布局 | `layoutCommunityMasonry`, `scheduleCommunityLayout` | 委托 `FeedLayout.*` |
-| 同步 | `runSyncCardLibraryToCommunity`, `syncEligibleCardsToCommunity` | 卡片库 → 社区 |
-| 恢复 | `restoreCardsFromCommunityFeed` | 社区 → 卡片库（`20260614b`） |
-| 导出 | `window.FeatureDraft` | 外部调用入口 |
-| 调试 | `window.forceRefreshAllImages` | 手动刷新各 Feed 图片与排版 |
-| 生图预览 / 灯箱 | `renderImageGenPreview`, `bindImageGenPreviewWheelScroll`, `navigateImageGenPreviewByWheel` |
-| **生图滚轮缩放** | `attachImageZoom`, `setViewerNav`（`pack-viewer.js`） | `openLightbox`, `loadLightboxImage`（`pack-lightbox.js`） |
-| 批量社区公开 | `batchPublishCommunity`, `batchUnpublishCommunity`（`script.js`） |
-| 生图 Feed / 轮询 | `renderImageGenFeed`（`image-gen-feed.js`）, `pollGenerationJobUntilDone` | 进行中任务会周期性打 Worker |
-
----
-
-## `feed-images.js`（Feed 图片，约 550 行）
-
-| 区域 | 函数 | 作用 |
-|------|------|------|
-| 签名 | `imageGenFeedSignOpts`, `communityImageSignOpts` | 列表图 resolve 选项 |
-| hydrate | `hydrateFeedImages`, `applyFeedImageSrc` | 社区/生图 Feed 出图 |
-| 清理 | `removeBrokenCommunityFeedCard`, `stripFailedFeedMedia` | 坏图卡片处理 |
-
----
-
-## `image-gen-feed.js`（生图仓库 Feed，约 660 行）
-
-| 区域 | 函数 | 作用 |
-|------|------|------|
-| Masonry | `layoutImageGenFeedMasonry`, `scheduleImageGenFeedLayout` | 桌面瀑布流 |
-| 渲染 | `renderImageGenFeed`, `buildFeedCardHtml` | 仓库/社区 Tab 列表 |
-| 分页 | `bindImageGenFeedPagedScroll` | 滚动加载更多 |
-
----
-
-## `feed-layout.js`（Feed 排版，约 850 行）
-
-| 区域 | 函数 | 作用 |
-|------|------|------|
-| 模式 | `getMode`, `useFlexColumns`, `useMobileGrid` | 社区 Masonry / 我的主页 flex / 手机 grid |
-| 排版 | `layout`, `layoutFlex`, `schedule` | Masonry 实例与 flex 分列 |
-| 修复 | `repairCreations`, `repairFlex`, `diagnose` | 条缝/孤儿卡检测与修复 |
-| 调试 | `FeedLayout.diagnose('communityGrid')` | 见 `docs/FEED-LAYOUT.md` |
-
----
-
-## `supabase-sync.js`
-
-| 函数 | 作用 |
-|------|------|
-| `init`, `onAuthStateChange` | Session |
-| `pullCloudData` / `pushCloudData` | `user_data` 表 |
-| `signCommunityMediaRef`, `prefetchCommunityDisplayUrls` | 社区图签名 |
-| `uploadCardImage`, `normalizeImageRef` | Storage `card-images/{uid}/…` |
-
----
-
-## `cloud-sync-safety.js`
-
-| 函数 | 作用 |
-|------|------|
-| `mergePayload` | 登录拉云时合并 cards / communityPosts |
-| `mergeCommunityPostsList` | 按 `sourceCardId` / `id` 合并社区帖 |
-| `validatePush` | 防止空数组覆盖云端 |
-
----
-
-## `api-client.js`
-
-| 函数 | 路径 |
-|------|------|
-| `getCommunityFeed` | `GET /api/v1/community/feed` |
-| `publishCommunityPost` | `POST /api/v1/community/posts` |
-| `syncCommunityPostsBatch` | `POST /api/v1/community/posts/sync` |
-| `signCommunityMediaRef` | `GET /api/v1/media/community/sign` |
-
----
-
-## `server/src/lib/community-feed.ts`
-
-| 函数 | 作用 |
-|------|------|
-| `listPublicCommunityFeed` | 读 `community_posts`，去重，可选 repair |
-| `repairMisattributedCommunityAuthors` | 图片路径 UUID ≠ author_id 时修正 |
-| `unpublishGhostCommunityPosts` | 下架无效作者/无图帖 |
-| `upsertCommunityPost` | 发布；校验图片归属 |
-| `dedupeCommunityFeedPosts` | 同 `source_card_id` 保留最新 |
-
----
-
-## `app-appreciate.js`（欣赏器 + 全局欣赏，约 260 行）
-
-| 区域 | 函数 | 作用 |
-|------|------|------|
-| 入口 | `AppAppreciate.init(deps)` | 注入 `cards`、Masonry、批量模式等 |
-| 欣赏器 | `openAppreciateViewer`, `closeAppreciateViewer`, `syncAppreciateViewerActions` | 卡片库快速预览 |
-| 全局欣赏 | `toggleGlobalView`, `exitGlobalView`, `forceExitGlobalView` | 全屏浏览 + `__viewerGlobalViewActive` |
-| 打包 | `scripts/build-appreciate-pack.mjs` → **`pack-appreciate.js`** | 在 `pack-viewer` 与 `pack-lightbox` 之间 |
-
----
-
-## `app-lightbox.js`（灯箱业务，约 400 行）
-
-| 区域 | 函数 | 作用 |
-|------|------|------|
-| 入口 | `AppLightbox.init(deps)` | `script.js` 注入 `cards`、下载、`openAppreciateViewer` 等 |
-| 打开/换图 | `openLightbox`, `setLightboxSrc`, `loadLightboxImage` | 卡片库/社区/生图/MJ 四宫格 |
-| 按钮 | `syncLightboxActions`, `downloadLightboxImage` | 下载/收藏/去生图按钮态 |
-| 滚轮业务 | `registerViewerWheelNavigate` → `window.__viewerWheelNavigate` | 换图目标（卡片/社区/生图） |
-| 打包 | `scripts/build-lightbox-pack.mjs` → **`pack-lightbox.js`** | 在 `pack-viewer.js` 之后、`script.js` 之前 |
-
----
-
-## `app-viewer-core.js`（灯箱/欣赏器 DOM + 缩放，约 300 行）
-
-| 区域 | 函数 | 作用 |
-|------|------|------|
-| Frame | `getLightboxFrame`, `getAppreciateViewerFrame` | 灯箱/欣赏器容器 |
-| 加载态 | `setViewerFrameLoading`, `finishViewerFrameReveal` | 扫光与 loading |
-| 缩放 | `attachImageZoom`, `resetImageZoom` | 滚轮缩放 + 拖拽 |
-| 导航 | `setViewerNav`, `getViewerNav`, `onViewerShellWheel` | 滚轮换图框架；业务回调 `window.__viewerWheelNavigate` 由 `script.js` 注册 |
-| 打包 | `scripts/build-viewer-pack.mjs` → **`pack-viewer.js`** | 须在 `script.js` 之前加载；禁止 `?v=` |
-
----
-
-## `index.html` 脚本加载顺序（节选）
-
-1. `pack-prelude.js` · `pack-foundation.js` · `supabase-sync.js` · `api-client.js`
-2. `pack-core.js` · `pack-account.js`
-3. `masonry.pkgd.min.js` · **`pack-viewer.js`** · **`pack-appreciate.js`** · **`pack-lightbox.js`**
-4. **`script.js`**（末尾 `AppAppreciate.init` + `AppLightbox.init`）
-5. `pack-imagegen.js` · `pack-feed.js` · `features-draft.js` · `pack-extra.js` · `features-assets.js`
-
-> 手机断点 **900px** 仅定义在 `pack-foundation.js` 内的 `MobileUI`（原 `mobile.js`）。
-
-> `hotfix-image-layout.js` 已废弃（逻辑并入 `features-draft.js`）；`hotfix-community-layout.js` 已删除。
-
----
-
-## localStorage / sessionStorage 键（社区相关）
-
-| 键 | 含义 |
-|----|------|
-| `promptrepo_community_posts` | 本地社区帖副本 |
-| `promptrepo_public_feed_cache` | 游客/离线 Feed 缓存 |
-| `promptrepo_post_logout` | 退出标志（影响登录） |
-| `promptrepo_last_uid` | 上次登录 uid |
-| `promptrepo_app_build` | 构建号比对自动刷新 |
-
-详见 `docs/DATA-MODEL.md`。
+先确认文件是 loader、拆分真源还是生成包。不要同时手改源片段和生成包；运行构建脚本生成 pack。新增模块优先进入现有 pack 和 wire 机制，不再把大型实现塞回 `features-draft.js` loader。

@@ -5,7 +5,7 @@
   <base href="/">
 
   <script>
-    window.__APP_BUILD__ = '20260710f';
+    window.__APP_BUILD__ = '20260711a';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -41,11 +41,9 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#121212">
-  <!-- 迁 MemFire 后改域名：docs/MEMFIRE-MIGRATION.md 第 6.2 步 -->
+  <!-- Production API; domain topology is documented in docs/CUSTOM-DOMAIN.md. -->
   <link rel="preconnect" href="https://api.prompt-hubs.com" crossorigin>
   <link rel="dns-prefetch" href="https://api.prompt-hubs.com">
-  <link rel="preconnect" href="https://api.prompt-hub.cn" crossorigin>
-  <link rel="dns-prefetch" href="https://api.prompt-hub.cn">
   <script>
     (function () {
       try {
@@ -66,24 +64,24 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Prompt Hub">
   <title>卡藏 卡片式提示词仓库 — AI 提示词管理、社区与生图</title>
-  <meta name="description" content="Prompt Hub（prompt-hub.cn）：管理 AI 提示词卡片、浏览提示词社区、灵感抽卡与生图。支持浏览器扩展快捷存卡、登录云同步，适合 Midjourney / SD / 即梦等创作者。">
+  <meta name="description" content="Prompt Hub（prompt-hubs.com）：管理 AI 提示词卡片、浏览提示词社区、灵感抽卡与生图。支持浏览器扩展快捷存卡、登录云同步，适合 Midjourney / SD / 即梦等创作者。">
   <meta name="keywords" content="AI提示词,提示词管理,Prompt Hub,提示词仓库,AI生图,灵感抽卡,Midjourney,Stable Diffusion">
-  <link rel="canonical" href="https://prompt-hub.cn/">
+  <link rel="canonical" href="https://prompt-hubs.com/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Prompt Hub">
   <meta property="og:title" content="Prompt Hub 卡片式提示词仓库 — AI 提示词管理、社区与生图">
   <meta property="og:description" content="管理提示词卡片、逛社区、灵感抽卡与生图。浏览器扩展一键存卡，登录后云同步。">
-  <meta property="og:url" content="https://prompt-hub.cn/">
-  <meta property="og:image" content="https://prompt-hub.cn/assets/logo.png">
+  <meta property="og:url" content="https://prompt-hubs.com/">
+  <meta property="og:image" content="https://prompt-hubs.com/assets/logo.png">
   <meta property="og:locale" content="zh_CN">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Prompt Hub 卡片式提示词仓库">
-  <meta name="twitter:description" content="AI 提示词管理、社区与生图 — prompt-hub.cn">
-  <meta name="twitter:image" content="https://prompt-hub.cn/assets/logo.png">
-  <link rel="icon" href="https://prompt-hub.cn/favicon.ico" sizes="any">
-  <link rel="icon" type="image/png" sizes="48x48" href="https://prompt-hub.cn/assets/favicon-48.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="https://prompt-hub.cn/assets/favicon-16.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="https://prompt-hub.cn/assets/favicon-48.png">
+  <meta name="twitter:description" content="AI 提示词管理、社区与生图 — prompt-hubs.com">
+  <meta name="twitter:image" content="https://prompt-hubs.com/assets/logo.png">
+  <link rel="icon" href="https://prompt-hubs.com/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="48x48" href="https://prompt-hubs.com/assets/favicon-48.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://prompt-hubs.com/assets/favicon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://prompt-hubs.com/assets/favicon-48.png">
   <link rel="manifest" href="manifest.webmanifest">
   <script type="application/ld+json">
   {
@@ -91,14 +89,14 @@
     "@type": "WebSite",
     "name": "Prompt Hub 卡片式提示词仓库",
     "alternateName": ["Prompt Hub", "卡片式提示词仓库", "提示词仓库"],
-    "url": "https://prompt-hub.cn/",
+    "url": "https://prompt-hubs.com/",
     "description": "AI 提示词管理、社区浏览、灵感抽卡与生图，支持浏览器扩展与云同步。",
     "inLanguage": "zh-CN",
     "publisher": {
       "@type": "Organization",
       "name": "Prompt Hub",
-      "url": "https://prompt-hub.cn/",
-      "logo": "https://prompt-hub.cn/assets/favicon-48.png"
+      "url": "https://prompt-hubs.com/",
+      "logo": "https://prompt-hubs.com/assets/favicon-48.png"
     }
   }
   </script>
@@ -106,13 +104,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260710f">
-  <link rel="stylesheet" href="styles-theme.css?v=20260710f">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260710f">
-  <link rel="stylesheet" href="styles-settings.css?v=20260710f">
-  <link rel="stylesheet" href="styles-features.css?v=20260710f">
-  <link rel="stylesheet" href="styles-assets.css?v=20260710f">
-  <script src="pack-prelude.js?v=20260710f"></script>
+  <link rel="stylesheet" href="styles.css?v=20260711a">
+  <link rel="stylesheet" href="styles-theme.css?v=20260711a">
+  <link rel="stylesheet" href="styles-mobile.css?v=20260711a">
+  <link rel="stylesheet" href="styles-settings.css?v=20260711a">
+  <link rel="stylesheet" href="styles-features.css?v=20260711a">
+  <link rel="stylesheet" href="styles-assets.css?v=20260711a">
+  <script src="pack-prelude.js?v=20260711a"></script>
 </head>
 <body>
 
@@ -150,7 +148,7 @@
   <script src="canvas-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260710f"></script>
+  <script src="api-client.js?v=20260711a"></script>
   <script>
     (function () {
       var FALLBACK = [
@@ -201,20 +199,20 @@
       });
     })();
   </script>
-  <script src="app-router.js?v=20260710f"></script>
-  <script src="pack-foundation.js?v=20260710f"></script>
-  <script src="supabase-sync.js?v=20260710f"></script>
-  <script src="pack-media-client.js?v=20260710f"></script>
-  <script src="pack-core.js?v=20260710f"></script>
-  <script src="pack-account.js?v=20260710f"></script>
-  <script src="pack-viewer.js?v=20260710f"></script>
-  <script src="pack-appreciate.js?v=20260710f"></script>
-  <script src="pack-lightbox.js?v=20260710f"></script>
-  <script src="card-gallery.js?v=20260710f"></script>
-  <script src="edit-panel-gallery.js?v=20260710f"></script>
-  <script src="script.js?v=20260710f"></script>
-  <script src="pack-imagegen.js?v=20260710f"></script>
-  <script src="pack-feed.js?v=20260710f"></script>
+  <script src="app-router.js?v=20260711a"></script>
+  <script src="pack-foundation.js?v=20260711a"></script>
+  <script src="supabase-sync.js?v=20260711a"></script>
+  <script src="pack-media-client.js?v=20260711a"></script>
+  <script src="pack-core.js?v=20260711a"></script>
+  <script src="pack-account.js?v=20260711a"></script>
+  <script src="pack-viewer.js?v=20260711a"></script>
+  <script src="pack-appreciate.js?v=20260711a"></script>
+  <script src="pack-lightbox.js?v=20260711a"></script>
+  <script src="card-gallery.js?v=20260711a"></script>
+  <script src="edit-panel-gallery.js?v=20260711a"></script>
+  <script src="script.js?v=20260711a"></script>
+  <script src="pack-imagegen.js?v=20260711a"></script>
+  <script src="pack-feed.js?v=20260711a"></script>
   <script>
     (function () {
       var need = 'grid-guard-v6';
@@ -230,9 +228,9 @@
       } catch (e) { /* ignore */ }
     })();
   </script>
-  <script src="community-public-feed.js?v=20260710f"></script>
-  <script src="features-draft.js?v=20260710f"></script>
-  <script src="pack-extra.js?v=20260710f"></script>
+  <script src="community-public-feed.js?v=20260711a"></script>
+  <script src="features-draft.js?v=20260711a"></script>
+  <script src="pack-extra.js?v=20260711a"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Prompt Hub 快捷存卡",
-  "version": "1.0.9",
-  "description": "在任意网页快速保存提示词与图片到 Prompt Hub 仓库（需登录 prompt-hub.cn）",
+  "version": "1.0.10",
+  "description": "在任意网页快速保存提示词与图片到 Prompt Hub 仓库（需登录 prompt-hubs.com）",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -17,15 +17,19 @@
   },
   "permissions": ["storage", "scripting"],
   "host_permissions": [
+    "https://prompt-hubs.com/*",
+    "https://www.prompt-hubs.com/*",
+    "https://api.prompt-hubs.com/*",
     "https://prompt-hub.cn/*",
     "https://www.prompt-hub.cn/*",
-    "https://api.prompt-hub.cn/*",
-    "https://yibawjvhmqcysdovscss.supabase.co/*"
+    "https://api.prompt-hub.cn/*"
   ],
   "optional_host_permissions": ["<all_urls>"],
   "content_scripts": [
     {
       "matches": [
+        "https://prompt-hubs.com/*",
+        "https://www.prompt-hubs.com/*",
         "https://prompt-hub.cn/*",
         "https://www.prompt-hub.cn/*",
         "http://127.0.0.1:5500/*",

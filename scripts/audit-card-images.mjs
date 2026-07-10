@@ -36,10 +36,14 @@ const R2_ACCOUNT_ID = String(env.R2_ACCOUNT_ID || '').trim();
 const R2_ACCESS_KEY_ID = String(env.R2_ACCESS_KEY_ID || '').trim();
 const R2_SECRET_ACCESS_KEY = String(env.R2_SECRET_ACCESS_KEY || '').trim();
 const R2_BUCKET = String(env.R2_BUCKET || 'prompt-hub-card-images').trim();
-const USER_ID = String(env.AUDIT_USER_ID || 'ab5c77dc-570e-4af7-ac38-2d311be96244').trim();
+const USER_ID = String(env.AUDIT_USER_ID || '').trim();
 
 if (!SUPABASE_URL || !SERVICE_KEY) {
   console.error('缺少 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY（scripts/admin.local.env）');
+  process.exit(1);
+}
+if (!USER_ID) {
+  console.error('缺少 AUDIT_USER_ID（通过环境变量或 scripts/admin.local.env 设置）');
   process.exit(1);
 }
 

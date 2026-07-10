@@ -794,7 +794,7 @@
       if (!res?.ok) {
         let msg = res?.message || '保存失败';
         if (res?.code === 'UNAUTHORIZED') {
-          msg = '请先登录：打开 prompt-hub.cn 并保持登录';
+          msg = '请先登录：打开 prompt-hubs.com 并保持登录';
         } else if (res?.code === 'DB_PERMISSION') {
           msg = '服务端未就绪，请稍后再试或联系站点管理员';
         }

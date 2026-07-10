@@ -1,32 +1,16 @@
 ---
-description: 架构改动前必须说明风险；禁止为修表象拆东墙补西墙
+description: Require evidence, impact analysis, and rollback for cross-module changes
 alwaysApply: true
 ---
 
-# 架构改动护栏（AI 必守）
+# Architecture guard
 
-用户可能为解决**一个现象**要求改架构。AI **不得**默认照做；先判断是「修 bug / 优化」还是「换架构」。
+Before changing data truth, script order, sync merge, media storage, feed pagination, or generation settlement:
 
-## 必须先做的（再写代码）
+1. State the observed symptom and evidence.
+2. Name the actual layer being changed.
+3. List affected pages/data and the rollback.
+4. Prefer a staged compatibility change over a simultaneous contract rewrite.
+5. Run the broader checks required by `docs/ARCHITECTURE-CHANGE-GUARD.md`.
 
-1. **区分根因与表象**：慢、缺图、白屏是症状；先查是否已有路径（如 batch 签 grid、MJ 槽位丢失）未走通。
-2. **说明改动类型**（用白话，一条即可）：
-   - **A 优化**：同一架构内提速/减请求/修 bug → 可直接做，仍说明影响面。
-   - **B 架构调整**：合并/拆分模块、换数据流、删字段语义 → **必须先列风险 + 回滚**，等用户确认或明确选方案。
-3. **禁止拆东墙补西墙**：为修 A 改 B 模块且可能伤及 C（社区 Feed、侧栏、MJ 多图、云同步、手机 lazy）时，**停手说明**，优先最小修复。
-4. **动这些文件前多写一句风险**：`supabase-sync.js`、`card-image-loader.js`、`warehouse-thumb.js`、`features-draft.js`、`feed-layout.js`、`script.js` 的 `renderCards` / 社区 Masonry。
-
-## 回复里必须出现的结构（B 类改动）
-
-- **想解决什么** / **实际改哪一层**
-- **可能坏什么**（1～3 条，具体）
-- **不改会怎样** / **更小的替代方案**
-- **建议**：做 / 暂缓 / 分两步（先 hotfix 再优化）
-
-## 可默许的优化（仍简短说明）
-
-- 已有 `storage://` 走与普通卡相同的 batch 签 grid（不删 `genJobId`）
-- 404 只试一次、切断递归、先出 DOM 再 prefetch
-- 文档与构建号同步
-
-细则与案例：`docs/ARCHITECTURE-CHANGE-GUARD.md`。
+Never use empty local arrays to overwrite cloud data, persist signed URLs as source data, add a second mobile scroll root, or let the frontend write credits.

@@ -31,7 +31,7 @@ $devVars = Join-Path $server ".dev.vars"
 $dvText = Get-Content $devVars -Raw -ErrorAction SilentlyContinue
 if ($dvText -match 'service_role') {
   Write-Host ""
-  Write-Host "Edit server\.dev.vars: set SUPABASE_SERVICE_ROLE_KEY (Legacy service_role from Aliyun)" -ForegroundColor Yellow
+  Write-Host "Edit server\.dev.vars: set MemFire SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY" -ForegroundColor Yellow
   Write-Host "For image gen, also set IMAGE_API_KEY" -ForegroundColor Yellow
 }
 

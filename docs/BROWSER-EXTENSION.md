@@ -1,61 +1,59 @@
-# 浏览器插件（Prompt Hub 快捷存卡）
+# 浏览器扩展
 
-> 状态：**v1.0.4** · 目录 `extension/`
+扩展位于 `extension/`，Manifest V3，当前版本以 `extension/manifest.json` 为准。它只处理用户手动选择、拖入或粘贴的内容，并保存到当前 Prompt Hub 账号。
 
-## 安装（个人 / 内测）
+## 功能
 
-1. Chrome/Edge → 扩展程序 → **开发者模式** → **加载已解压的扩展程序**
-2. 选择仓库 `extension` 文件夹
-3. Supabase 执行 `20260530100000_user_data_service_role.sql`（否则保存报 permission denied）
-4. `cd server && .\deploy.ps1` 部署 API（含 `GET /tags` 与带 `tags` 的 quick-card）
+- 在任意获授权网页注入存卡面板。
+- 划选或悬停复制文字，粘贴/拖入图片。
+- 选择标签和卡片库分组。
+- 可选发布到社区。
+- 从 `prompt-hubs.com` 同步登录会话，并通过 `api.prompt-hubs.com` 存卡。
 
-## 给全站用户用上（公开发布）
+## 认证链路
 
-| 方式 | 说明 |
-|------|------|
-| **Chrome 网上应用店** | 注册 [Chrome Web Store 开发者](https://chrome.google.com/webstore/devconsole)（一次性约 $5）→ 打包 `extension` 为 zip 上传 → 审核约数天。上架后在网站放商店链接。 |
-| **Microsoft Edge 加载项** | [Partner Center](https://partner.microsoft.com/dashboard/microsoftedge/) 提交同一套扩展，审核通常较快。 |
-| **官网下载（进阶）** | 在 prompt-hub.cn 提供「安装说明 + zip 包」；企业环境可组策略推送。普通用户仍推荐商店安装。 |
-
-**建议流程**：内测稳定 → 上架 Edge + Chrome → 在 Prompt Hub 设置页增加「安装浏览器插件」链接。详见 **`docs/CHROME-WEB-STORE.md`**。
-
-## 功能（v1.0.4）
-
-| 功能 | 说明 |
-|------|------|
-| **悬浮存卡面板** | 拖入/粘贴图片、填写提示词、**选择标签**后点「保存到仓库」 |
-| **公开到社区** | 与主页卡片库相同：开启后保存即公开；默认跟随设置「新建默认发布」；须提示词 ≥15 字且配图 |
-| **真正关闭** | 标题栏 **×** 关闭本页面板；本标签不再自动出现，需扩展弹窗「在当前页打开面板」 |
-| **收起** | **−** 仅折叠内容，面板仍保留 |
-| **内容不丢失** | 面板内拖入/粘贴图片**仅预览**，点保存才提交；成功保存后才清空 |
-| **智能全局粘贴** | 面板已打开且页面**无**聚焦的输入框/文本框/contenteditable 时，**Ctrl+V 截图直接保存**（无需先点图片框） |
-| **划选 / 悬停复制** | 划选文字 →「复制到提示词」；悬停段落 →「复制段落」 |
-| **登录同步** | 与 prompt-hub.cn 登录态同步 |
-
-## 使用步骤
-
-1. 扩展图标 → **登录 / 同步**（在 prompt-hub.cn 保持登录）
-2. **在当前页打开面板**（首次需允许「访问所有网站」）
-3. 划选或悬停复制文字 → 可选标签 → **保存到仓库**
-4. 截图：若光标不在网页输入框，直接 **Ctrl+V** 即可保存；若在面板里操作，先预览再点保存
-
-## 数据库（必做）
-
-```sql
--- supabase/migrations/20260530100000_user_data_service_role.sql
-grant select, insert, update on public.user_data to service_role;
+```text
+主站 localStorage session
+  -> extension/content/bridge.js
+  -> chrome.runtime message
+  -> chrome.storage.local ph_session
+  -> background.js 刷新 token / 调 API
 ```
 
-或在 Supabase SQL Editor 粘贴上面一行执行。
+Auth storage key 必须与 `extension/config.js` 和主站 MemFire 项目一致。换数据库时要同时更新 `content/bridge.js`，否则扩展会一直显示未登录。
 
 ## API
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/v1/extension/quick-card` | 保存卡片（body 可含 `tags`、`publishToCommunity`） |
-| GET | `/api/v1/extension/tags` | 读取用户仓库已有标签 |
-| GET | `/api/v1/extension/status` | 登录、会员、`defaultPublishCommunity` |
+| 路径 | 用途 |
+|---|---|
+| `GET /api/v1/extension/status` | 会话和用户设置 |
+| `GET /api/v1/extension/tags` | 标签 |
+| `GET /api/v1/extension/groups` | 卡片库分组 |
+| `GET /api/v1/extension/cards` | Canvas/扩展分页卡片 |
+| `POST /api/v1/extension/quick-card` | 保存文字、图片、标签和发布意图 |
 
-## 合规
+## 本地安装
 
-用户主动悬停/划选/拖入/粘贴；不自动爬取整页。详见 `extension/PRIVACY.md`。
+1. Chrome/Edge -> 扩展程序 -> 开启开发者模式。
+2. 选择“加载已解压的扩展程序”。
+3. 选择仓库 `extension/`。
+4. 修改代码后点扩展卡片“重新加载”，再刷新被注入页面。
+
+## 打包
+
+```powershell
+cd D:\prompt-hub
+.\scripts\package-extension.ps1
+```
+
+输出在被 Git 忽略的 `dist/`。上传商店前检查 zip 不包含 `.env`、源码外的测试文件或本地账号信息。
+
+## 修改检查
+
+- `manifest.json` 的 `.com` 主站、API host permissions 和 content script matches 同步。
+- `.cn` 可保留兼容，但不能作为弹窗默认登录地址。
+- `STORE-LISTING.zh-CN.txt`、版本号、隐私政策和商店截图同步。
+- 不扩大 `<all_urls>` 为安装即强制权限；继续使用 optional permission。
+- 实际登录、标签、纯文字存卡、图片存卡和社区开关各验一次。
+
+上架步骤见 `CHROME-WEB-STORE.md`，扩展隐私说明见 `extension/PRIVACY.md`。

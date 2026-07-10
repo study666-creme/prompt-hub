@@ -115,7 +115,7 @@ function Show-ShipMessage($codes, $Credits) {
   $sample = $codes[0]
   Write-Host ""
   Write-Host "--- Ship message ---" -ForegroundColor Cyan
-  Write-Host "[Prompt Hub] https://prompt-hub-hub.pages.dev"
+  Write-Host "[Prompt Hub] https://prompt-hubs.com"
   Write-Host "Register -> Image gen -> Redeem code (one-time)"
   Write-Host "Code: $sample"
   Write-Host "Credits: $Credits (~$yuan CNY)"

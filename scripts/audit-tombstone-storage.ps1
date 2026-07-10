@@ -14,7 +14,7 @@ Write-Host "第 2 步  部署 Worker（生图历史 API /jobs/history 需要）"
 Write-Host "  cd $root\server"
 Write-Host "  npx wrangler deploy"
 Write-Host ""
-Write-Host "第 3 步  打开 https://prompt-hub.cn 登录后按 Ctrl+Shift+R 强刷" -ForegroundColor Yellow
+Write-Host "第 3 步  打开 https://prompt-hubs.com 登录后按 Ctrl+Shift+R 强刷" -ForegroundColor Yellow
 Write-Host "  Console 确认: window.__APP_BUILD__  （应 >= 20260604q）"
 Write-Host ""
 Write-Host "第 4 步  在浏览器 Console 依次运行（只读扫描，不会删卡/不上传）" -ForegroundColor Green

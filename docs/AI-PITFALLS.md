@@ -1,105 +1,50 @@
-# AI 踩坑清单（必读，避免重复炸站）
+# AI 踩坑清单
 
-> **用途**：记录已踩过的致命/难查问题。改 `features-draft.js` / 社区 Feed / 媒体签名前**先扫本页**。  
-> 最后更新：**2026-06-07** · Pages 构建号 **`20260623l`** · **10 个 pack**
+这些规则来自真实回归，改前端入口、Feed、图片或同步链路时必须遵守。
 
----
+## 会导致整站故障
 
-## 致命（一条就能整站白屏）
+1. **经典脚本重复声明**：拆分片段最终会拼回同一作用域；重复 `const` 会让整包解析失败。提交前必须跑语法和 bundle VM smoke。
+2. **脚本顺序改变**：`pack-prelude`、配置、基础包、同步、核心包、生图、Feed 和 `features-draft` 有依赖顺序。不要靠浏览器偶然缓存判断可行。
+3. **部署文件回退成 HTML**：脚本 URL 若被 SPA fallback 接成 `index.html`，页面通常只剩文字。生产冒烟必须验证状态码、Content-Type 和首字节不是 `<`。
+4. **只改拆分后的聚合文件**：`script.js`、`features-draft.js`、`supabase-sync.js` 在开发环境是 loader，真实大段源码在 `legacy/`；Pages staging 会重新合并，改错层会被覆盖。
 
-| 坑 | 现象 | 根因 | 禁止 |
-|----|------|------|------|
-| **重复 `const` 声明** | 社区/主页/生图全空，背景动效也停；Console：`Identifier 'colsChanged' has already been declared` | 同一函数内两次 `const colsChanged` → **整份 `features-draft.js` 解析失败**，后续脚本全不执行 | 改 `layoutCommunityMasonry` 等长函数时，合并变量名或改名（如 `measuredColsChanged` / `colsChanged`） |
-| **bundle 放 `/dist/` 未 HTTP 验** | 卡片库只剩文字、全站无图；`MediaPipeline` 等为 false，Console 常无 SyntaxError | Cloudflare Pages SPA 把 `/dist/*.js` 回退成 `index.html`；VM 冒烟读本地文件发现不了 | bundle 输出到**根目录** `*.bundle.js`；部署后必须 `run-index-http-smoke.mjs` 验 Content-Type |
-| **`*.bundle.js` 文件名** | MIME `text/html`；`FeedImages` 等全 false | Cloudflare Pages 对 `.bundle.js` 的 `<script>` 请求 SPA 回退 HTML | 输出改名为 **`pack-*.js`**；禁止 `.bundle.js`；冒烟加 `Sec-Fetch-Dest: script` |
-| **未部署就让用户测** | 用户仍见旧 bug | 只改本地未 `deploy-pages.ps1` | 改静态资源后必须 bump `__APP_BUILD__` + 部署，让用户 `Ctrl+Shift+R` 看 `window.__APP_BUILD__` |
-| **模块化后从 git HEAD 整块恢复** | `findBestApiJobForPrompt` / `isGeneratedWarehouseCard` 等 ReferenceError；或删掉的逻辑又回来 | 阶段 3 把实现迁入 `imagegen-*.js`，`features-draft` 只留 **jr/pw/fr 薄代理** + UI 层；误用 `git show HEAD:features-draft.js` 恢复会**重复实现**或**漏导出** | 只补 **export/调用链仍引用的 UI 函数**；job-runner 逻辑用 `jr('name')`；部署前跑 `audit-features-draft-exports.mjs` + `audit-features-draft-wire.mjs` |
+## 会导致数据丢失
 
----
+1. 不得用空 `cards`、`communityPosts` 或 `creations` 覆盖有数据的云端 `user_data`。
+2. 账号切换必须清理内存与本地快照归属，再拉取新账号；不能复用上一账号的作者或图片路径。
+3. `storage://` 是持久引用，短时 CDN/签名 URL 不是。不要把过期 URL回写到卡片 JSON。
+4. 删除卡片涉及 tombstone、社区副本和图片引用计数；没有显式需求时不要执行 purge 或批量删除。
 
-## 社区 Feed 布局（flex 多列，桌面）
+## 会导致图片慢或流量暴涨
 
-| 坑 | 现象 | 根因 | 正确做法 |
-|----|------|------|----------|
-| **每次 append 清空列** | 滚到底或点卡片后，白骨架卡插入、已加载图乱飞 | `distributeCommunityFeedColumns` 在 `newCards && orphanCards>0` 时**清空所有列再 round-robin** | 仅当 orphan 含「非本批新卡」时才全量重分；正常 append 只 `newCards → 最短列` |
-| **`layoutCommunityMasonry` 先 flatten** | 持续晃动、停不下来 | 有 `.community-feed-col` 时仍 `flattenCommunityFeedColumns` 再分配 | `feedDistributed===1` 且无 `recalcCols/forceReflow/newCards` 时 **early return** |
-| **`finishCommunityFeedLayoutAfterBatch` 全墙重排** | 分页/ hydrate 时整墙抖 | 每次都 `scheduleCommunityLayout({ force, immediate })` | 已 distributed 时只 `ensureFeedPageSentinel` + `reconnectFeedPageObserver` |
-| **`hydrateFeedImages` 调 layout** | 后台补图时卡片跳 | `hydrateFeedImages` 末尾 `layoutCommunityMasonry` | 社区 Feed 的 hydrate **禁止**触发全墙 layout；用 `CardImageLoader.observeContainer` |
-| **`finishCardMediaShine` 触发 Masonry** | 每张图加载完都晃 | `scheduleCommunityLayout({ fromImage:true })` on flex 列 | **flex 多列模式**下 `fromImage` 必须 **no-op**（`scheduleCommunityLayout` 内 return） |
-| **`scheduleCommunityFeedHeightBalance`** | 新图加载后整页卡片乱跳 | onload / drain → `redistributeCommunityFeedByHeight` 清空列重分 | **禁止**（`20260604d` 已 no-op）；间距靠 CSS `aspect-ratio` |
-| **`ensureCommunityFeedColumnLayout` 早退** | **我的主页**一张巨图占满宽 | 卡已在列内但 **Masonry 遗留 absolute/width** 叠成一张；或直层 orphan | 进列时 `clearCommunityFeedCardInline`；有 orphan 才 `distribute`；CSS 强制列内 `position:relative` |
-| **我的主页列数跟社区 storage** | 社区设 1 列时主页也塌成单列 | `creationsGrid` 误用 `promptrepo_community_columns` | 主页用 **`promptrepo_myhome_columns`**（默认 3），`getCreationsFeedColumns()` 独立计算 |
-| **首屏 `drainUntilDone`** | 卡顿、DOM 400+ | 首屏把 store 全部灌进 DOM | 首屏只 `drainCommunityFeedPages(5)`，其余靠哨兵滚动 |
-| **侧栏打开 `recalcCols`** | 点卡片整墙重排 | 宽度变窄触发 `recalcCols:true` + flatten | 列数不变时只 `applyCommunityFeedColumnCss`，**不动卡片 DOM** |
-| **点卡片 `scheduleCommunityLayout`** | 点击即乱 | `openPostSidePanel` 里 force layout | 开侧栏**只加 selected class**，保留 `scrollTop` |
-| **`showCommunityFeedSkeleton` 盖掉已有 Feed** | 切回社区出现一排白卡 | `onAppChange` 不判断已有 `.community-post-card` | 已有真实卡时**不要** `innerHTML` 骨架 |
+1. 列表只请求 `_grid`；full 仅用于详情、画布插入和下载。
+2. 手机卡片库与社区首批 DOM 都是 12 张。远端可以预取更多元数据，但不能一次把全部卡片插入 DOM。
+3. 不要在每张图片 `load` 时重建整墙或清空列；使用现有 debounce 和增量 append。
+4. 404 不应无限重签、递归换路径或持续刷新。候选路径尝试完后进入稳定失败态，并交给后台巡检。
+5. `IntersectionObserver` 的滚动根在手机端是 `.app-main`；给中间容器新增 `overflow-y:auto` 会制造双滚动和“首次划不动”。
 
----
+## 会导致社区错位
 
-## 生图任务 / 生图 Feed
+1. 社区桌面是 Masonry；我的主页桌面是 flex 多列；手机使用 CSS Grid。不要把三种容器用同一个“修复布局”函数强行统一。
+2. 打开侧栏只应对变窄后的容器做一次计划重排，不能 flatten 后全量随机分列。
+3. 随机排序应改变数据顺序；布局随机和数据随机不是一回事。
+4. 公共 Feed API 可拉取较大的 head 用于缓存，但渲染层仍按 `FEED_PER_PAGE` 分页。
 
-| 坑 | 现象 | 根因 | 正确做法 |
-|----|------|------|----------|
-| **仅 sessionStorage 存 pending** | 手机切后台/重载后丢图 | iOS 等会清 session；回前台只在生图页才 resume | `localStorage` 备份 + `pagehide` 持久化；`visibilitychange` 任意页 `resumePendingGenerationJobs({ force:true })` |
-| **failed 空错误当可恢复** | 一直「恢复中」不标失败 | `isLikelyRecoverableGenFailure('')` 曾为 true | API 已 `failed` 且非明确可恢复 → **12 分钟内** `failPendingJob` |
-| **生图 Feed 跳过整页刷新** | 成功仍显示「生成中」 | `warehouseCardsListUnchanged` 只 patch pending | 完成/失败/进生图页用 `renderImageGenFeed({ force:true })` |
-| **等 prefetch 再 hydrate** | 生图页首开全黑卡、比社区慢 | `await prefetchList` 挡住 `observeContainer` | `innerHTML` 后立刻 `patchContainerFromCache` + `boostImageGenWarehouseImages` |
+## 修改后最少验证
 
----
+```powershell
+npm run check:predeploy
+node scripts/audit-production-scripts.mjs
+node scripts/audit-production-mobile-first-screen.mjs
+```
 
-## 媒体签名 / 卡片库黑图
+改 Worker 时追加：
 
-| 坑 | 现象 | 根因 | 正确做法 |
-|----|------|------|----------|
-| **`media/sign` 401** | 卡片库全黑、Console 一片 401 | JWT 过期仍疯狂请求 sign | `api-client` 401 → `ensureApiAuthFresh` + 暂停签名 + `ph-api-unauthorized` 提示**重新登录** |
-| **`posts/sync` 一次 80+ 条** | 400 / 超时 | 服务端 `max(80)` | `COMMUNITY_SYNC_BATCH_MAX = 80` 分批 |
-| **签名预算过小** | 部分图永不加载 | `SIGN_BUDGET_MAX=64` + 212 张卡 | 已提到 120；勿在循环里每张单独 sign，优先 `sign-batch` |
-| **`community/sign-batch` 429/503** | 社区白卡、Network 上千条红 | 滚动/append/`observeContainer` 并发 batch；Worker 曾 **120/min**；429 还重试 4 次 | `runCommunitySignBatchQueued` 串行+700ms；429/503 冷却；prefetch debounce；Worker **300/min** |
+```powershell
+cd server
+npm run typecheck
+npm test
+```
 
----
-
-## 手机加载 / 腰斩（2026-06-28 · 详见 `docs/MOBILE-LOADING.md`）
-
-| 坑 | 现象 | 根因 | 正确做法 |
-|----|------|------|----------|
-| **双滚动根** | 下半屏黑、只能看半屏 | `feature-shell` / `feature-body` / grid 内嵌 `overflow-y:auto` | 手机**仅 `.app-main` 滚动**；中间层 `overflow:visible` |
-| **IO root ≠ 滚动容器** | 只有首屏 4 张有图，滑下去不加载 | `scrollRootFor` 绑 `main-content` 或 viewport | `scrollRootFor` / `getFeedScrollRoot` → `.app-main` |
-| **`#pageImageGen` feed `overflow:hidden`** | 生图作品只能看 2 张 | styles-features 5330 压过 mobile.css | feed 时 page 必须 overflow:visible |
-| **`feedObserverBound` 不重绑** | 切页后图不加载 | 换 container 后 IO 不重 observe | `clearFeedObserverBindings` + 始终 `observe` |
-| **`isLazyOnlyContainer` 手机 false** | prefetch/IO 走更严分支 | 误以为关 lazy 更快 | 手机 cardsContainer / imageGenFeed **保持 lazyOnly** |
-| **`MOBILE_PERF` cap=8** | 840 张库几乎全文字块 | 过度省流量 | `warehousePrefetchCap` / `cardEagerCap` ≥ **24** |
-| **`warehouseScrollRoot` 错误** | 滑到底不分页、不补图 | 绑到不滚动的 `mainContentArea` | 手机 → `document.querySelector('.app-main')` |
-| **Masonry inline height 残留** | 切页后腰斩 | 卡片库 Masonry 未 destroy | 切页 `resetMobilePageScroll` + `destroyLayout` + flatten |
-
----
-
-## 数据 / 同步（勿再犯）
-
-| 坑 | 说明 |
-|----|------|
-| **侧栏「全部」≠ 公开数** | 212 总卡 vs 140 `publishedToCommunity`；需 `inspectCardLibraryPublishGap` / `markAllEligibleCardsPublished` |
-| **自动幽灵 purge / 盲目云端对齐** | 用户曾大量丢卡；**禁止**未经确认的全量删除或「与云端对齐」补传 |
-| **`pruneEmptyCommunityFeedCards` 过早** | 图仍 loading 时删卡 → domUnique 从 410 掉到 ~200 |
-
----
-
-## 改代码自检（30 秒）
-
-1. 保存后本地搜：`const colsChanged` 是否在同一函数出现两次。  
-2. 社区改动：搜 `flattenCommunityFeedColumns`、`finishCommunityFeedLayoutAfterBatch`、`fromImage`。  
-3. 部署前：`node scripts/verify-pack-contract.mjs`（禁止 `.bundle.js` / `pack-*.js?v=`）  
-4. 部署后：`window.__APP_BUILD__` 与 `index.html` 一致；`run-index-http-smoke.mjs` 全部 pack 须为 JS（含 script 请求头）。  
-4. 生图改动：手机提交 → 切后台 → 回来占位应自动变图或标失败。  
-5. Console 无红色 SyntaxError 再让用户验收。
-
----
-
-## 相关文档
-
-- **`docs/ARCHITECTURE-CHANGE-GUARD.md`** — 架构改动前风险说明（禁止拆东墙补西墙）  
-- **`docs/ERROR-LOG.md`** — 历史事故与高频坑（含 SEO「仅 Edge 能搜到」）  
-- `docs/SEO-SEARCH-ENGINES.md` — 收录、站标、Google/百度分工  
-- `docs/COMMUNITY-ARCHITECTURE.md` — Feed 数据流与分页  
-- `docs/CARD-LOADING.md` — 列表 grid / 签名管线  
-- `docs/LIGHT-THEME-UX.md` — 日光模式可读性优化方向  
-- `docs/PROJECT_CONTEXT.md` — 部署阶段与构建号  
+生产验收要记录 build、页面、设备宽度、初始 DOM 数、传输体积和失败 URL；“刷新后好了”不算根因修复。

@@ -1,5 +1,5 @@
 (function () {
-  const KEY = 'sb-yibawjvhmqcysdovscss-auth-token';
+  const KEY = 'sb-d95gau8g91hmdup86ag0-auth-token';
 
   function readSession() {
     try {

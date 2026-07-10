@@ -124,7 +124,7 @@ async function tryAutoInjectTab(tab) {
 async function apiRequest(method, path, body) {
   const session = await getValidSession();
   if (!session?.access_token) {
-    return { ok: false, code: 'UNAUTHORIZED', message: '请先登录 prompt-hub.cn' };
+    return { ok: false, code: 'UNAUTHORIZED', message: '请先登录 prompt-hubs.com' };
   }
   const res = await fetch(`${PH_CONFIG.API_BASE}${path}`, {
     method,

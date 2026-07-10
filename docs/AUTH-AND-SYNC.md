@@ -1,99 +1,69 @@
 # 认证与云同步
 
-> 主文件：`script.js`、`supabase-sync.js`、`cloud-sync-safety.js`
+## 当前实现
 
----
+生产认证和数据库使用 MemFire，但前端 SDK、环境变量和部分函数仍沿用 `Supabase` 命名。浏览器不直连数据库域名，而是通过 `https://api.prompt-hubs.com/supabase` 反代 Auth/REST/Storage。
+
+当前仅启用邮箱密码登录；手机号和微信登录开关在 `supabase-config.js` 中为关闭状态。
 
 ## 登录流程
 
-```
-authSignIn()
-  → SupabaseSync.signIn(email, password)
-  → completeAuthSession({ migrateGuest })
-       → localStorage.removeItem('promptrepo_post_logout')
-       → handleCloudAfterLogin()
-            → restoreAccountPrivateData(uid)  // IDB / 本地快照
-            → pullFromCloud()                 // user_data
-            → mergePayload (cloud-sync-safety)
-            → FeatureDraft.reconcileCommunityWithCards
-            → refreshFeedsAfterCardsSync
+```text
+authSignIn
+  -> SupabaseSync.signIn
+  -> completeAuthSession
+     -> restoreAccountPrivateData
+     -> pullFromCloud
+     -> CloudSyncSafety.mergePayload
+     -> refreshFeedsAfterCardsSync
 ```
 
-`onAuthStateChange`（`script.js` + `supabase-sync.js`）：
+`onAuthStateChange` 收到 `SIGNED_IN` 后延迟完成同步，避免在 Supabase SDK 回调中产生锁等待。`SIGNED_OUT` 会取消待执行的 push/pull，并清理当前账号的内存态。
 
-- `SIGNED_IN`：defer `completeAuthSession`（避免 Supabase 死锁）
-- `SIGNED_OUT`：设 `promptrepo_post_logout`，`purgeSignedOutLocalData`
+## 数据真源与合并
 
-**假登录问题（已修过一版）**：退出后 `promptrepo_post_logout=1` 时，旧逻辑会在再次登录时立刻 signOut；现改为有 session 时清除该标志。
+| 数据 | 真源 | 本地作用 |
+|---|---|---|
+| 卡片、分组、设置 | `public.user_data.data` | IndexedDB 快照、离线启动 |
+| 社区公共帖 | `public.community_posts` | 本地缓存和用户私有副本 |
+| 积分、会员 | `public.profiles` + Worker | 仅展示缓存，不由前端写 |
+| 生图任务 | `public.generation_requests` | pending/recent UI 缓存 |
 
----
+`cloud-sync-safety.js` 负责：
 
-## 账号切换
+- 拒绝空本地数组覆盖已有云端数据。
+- 同 ID 内容按更新时间合并，并保留更完整的图片引用。
+- 应用 `deletedCardTombstones`，防止已删卡片被旧设备复活。
+- 在账号切换时隔离 UID 对应的本地快照。
 
-`handleCloudAfterLogin` 检测 `uidChanged` / `idbMismatch`：
+## 同步编排
 
-- 清空 `cards`、`communityPosts`（`FeatureDraft.clearAllLocalFeatureData`）
-- `resetIdbForAccountSwitch`
-- 再 pull 新账号云数据
-
-**勿**把 A 账号社区帖显示为 B 账号作者（见 `migrateCommunityAuthorIds`）。
-
----
-
-## 云数据合并原则
-
-`cloud-sync-safety.js`：
-
-- **禁止**用空 `cards` / `communityPosts` 覆盖云端（`validatePush`）
-- 同 id 合并取较新 `updatedAt`；图片取「更有内容」的一方
-- `deletedCardTombstones`：本地删过的卡 id 不再从云复活
-
----
-
-## 游客
-
-- 卡片上限 **10**（`GUEST_CARD_LIMIT`）
-- 登录后可 `migrateGuest`：把 session 里 pending 游客数据写入新账号
-
----
-
-## 关键 localStorage
-
-| 键 | 说明 |
-|----|------|
-| `promptrepo_last_uid` | 上次登录 uuid |
-| `promptrepo_post_logout` | 退出后防串号 |
-| `promptrepo_guest_session` | 游客有过卡片 |
-| `promptrepo_pending_guest_migrate` | 待迁移 JSON |
-
----
-
-## Supabase 表
-
-- **Auth**：`auth.users`（邮箱登录）
-- **业务 JSON**：`public.user_data`（`user_id`, `data`, `updated_at`）
-
-拉取：`SupabaseSync.pullCloudData`  
-推送：`SupabaseSync.pushCloudData`（登录后 debounce `scheduleCloudPush`）
-
----
-
-## SyncOrchestrator（`sync-orchestrator.js` · 打包在 `pack-core.js`）
+`sync-orchestrator.js` 打包进 `pack-core.js`，统一调度：
 
 | API | 用途 |
-|-----|------|
-| `schedulePush` | 静默 push（默认 90s；urgent 350ms；非 urgent 跳过图片上传） |
-| `schedulePull` | 后台 pull 防抖（登录/切页/定时同步） |
-| `notifyCardsChanged` | `saveAllData` 后排队元数据 push |
-| `requestFeedRefresh` | 防抖 800ms 刷新社区/生图 Feed（替代散落 `refreshFeedsAfterCardsSync`） |
-| `cancelPending` | 退出/切账号时取消排队 push/pull |
+|---|---|
+| `schedulePush` | 防抖上传用户 JSON |
+| `schedulePull` | 后台拉取云端更新 |
+| `notifyCardsChanged` | 保存卡片后触发元数据同步 |
+| `requestFeedRefresh` | 合并社区/生图刷新请求 |
+| `cancelPending` | 退出或换号时取消任务 |
 
-`script.js`：`scheduleCloudPush` → 编排器；`scheduleDeferredCloudPull` → 编排器；需 **await pull 完成** 的路径仍直接 `runDeferredCloudPull`（如生图静默同步）。
+需要立即拿到新数据的流程可以直接等待 pull；普通保存不应同步阻塞 UI。
 
----
+## 关键本地键
 
-## 相关文档
+- `promptrepo_last_uid`: 最近账号 UID
+- `promptrepo_post_logout`: 退出隔离标记
+- `promptrepo_guest_session`: 游客数据存在标记
+- `promptrepo_pending_guest_migrate`: 登录后待迁移游客数据
+- `promptrepo_public_feed_cache`: 公共社区短期缓存
 
-- 数据分层：`docs/DATA-MODEL.md`
-- 社区与云 JSON 冲突：`docs/CURRENT-ISSUES.md`
-- Supabase 手机/微信：`docs/SUPABASE-AUTH.md`
+这些键不是云端备份。排障时清空它们可能暂时隐藏问题，不能作为正式修复。
+
+## 验收
+
+1. 本地 Worker `/health` 返回 `supabase: ok`。
+2. 登录后创建一张不公开测试卡，等待同步完成。
+3. 无痕窗口登录同账号，确认卡片出现且图片可加载。
+4. 删除测试卡后再次跨窗口确认 tombstone 生效。
+5. 验收不得使用或删除维护者已有卡片。

@@ -7,7 +7,7 @@ const envFileArg = envFlagIdx >= 0 ? args[envFlagIdx + 1] : null;
 const uid = args.find((a) => a !== '--env' && a !== envFileArg);
 if (!uid) {
   console.error('Usage: node scripts/query-user-ledger.mjs <user_id> [--env scripts/admin.local.env]');
-  console.error('  生产库：复制 scripts/admin.local.env.example → admin.local.env，填入境外 Supabase URL + sb_secret_');
+  console.error('  生产库：复制 scripts/admin.local.env.example -> admin.local.env，填入 MemFire URL + service_role');
   process.exit(1);
 }
 
@@ -73,6 +73,6 @@ for (const row of ledger || []) {
 const out = { db: base, profile: profile[0] ?? null, codes, activations, summary, ledger };
 if (!profile[0]) {
   out.hint =
-    '该 UID 在此库不存在。管理后台能看到的用户一般在境外 Supabase（yibawjvhmqcysdovscss），请用 --env scripts/admin.local.env 指向生产库。';
+    '该 UID 在此库不存在。请确认 scripts/admin.local.env 指向当前生产 MemFire，并核对 AUDIT_USER_ID。';
 }
 console.log(JSON.stringify(out, null, 2));

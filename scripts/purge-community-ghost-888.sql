@@ -15,7 +15,7 @@ WHERE published = true
   AND trim(author_name) = '888';
 
 -- 第 2 步：图片路径里的账号 UUID 与 author_id 不一致的帖（旧版换号串号）
--- 例：image 含 card-images/ab5c77dc-.../ 但 author_id 是 888 账号的 uuid
+-- 例：image 含 card-images/<owner-uuid>/ 但 author_id 是错误账号的 uuid
 UPDATE public.community_posts
 SET published = false, updated_at = now()
 WHERE published = true

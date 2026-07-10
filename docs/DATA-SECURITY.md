@@ -1,67 +1,52 @@
-# 数据安全说明
+# 数据与仓库安全
 
-本文说明 Prompt Hub 如何防止**数据丢失**、**越权读取**和**客户端篡改积分/激活码**。
+## 公开仓库边界
 
-## 数据存放位置
+这个仓库是公开的。以下内容不得提交：
 
-| 数据 | 存储 | 谁能读 | 谁能写 |
-|------|------|--------|--------|
-| 卡片、分组、设置、社区帖、创作 | `user_data.data` (JSON) | 仅本人 (RLS) | 仅本人 |
-| 卡片图片 | Storage `card-images/{userId}/…`（**私有桶**） | 仅本人（登录后 `createSignedUrl`） | 仅本人路径 |
-| 积分、会员 | `profiles` | 仅本人 | **仅 API**（`apply_credit_delta`） |
-| 积分流水 | `credit_ledger` | 仅本人 | **仅 API** |
-| 激活码 | `activation_codes` | 无人（客户端） | **仅 API** |
-| 生图记录 | `generation_requests` | 仅本人 | **仅 API** |
+- `.env`, `.env.local`, `server/.dev.vars`, `scripts/admin.local.env`
+- 数据库密码、`service_role`、Cloudflare/API token、上游生图 Key
+- 用户密码、访问令牌、真实测试账号、用户 UUID、订单或卡密清单
+- `.wrangler/`, `.pages-deploy/`, `backups/`, `dist/` 等本地产物
 
-## 前端防丢失（已实现）
+前端 anon key 和公开 API 域名可以出现在静态配置中；它们不能代替 RLS 和 Worker 授权。
 
-1. **登录后先拉云端**，再决定是否清空本地；不会因「本地卡片为 0」就清空再拉取。
-2. **切换账号前**对旧账号做 `snapshotLocalForUser` 本地备份。
-3. **上传前校验**（`cloud-sync-safety.js`）：
-   - 本地卡片为空但云端有卡 → **拒绝上传**
-   - 本地社区/创作为空但云端有记录 → **拒绝上传**
-4. **合并上传**：允许时按 `id` 合并本地与云端，避免多端少传一条就删掉云端条目。
-5. **社区、创作、点赞收藏**已纳入 `user_data` 同步（`FeatureDraft.getCloudSlice`）。
+## 权限模型
 
-## 数据库（需在 Supabase 执行）
+| 数据 | 客户端 | Worker/admin |
+|---|---|---|
+| 用户 `user_data` | 仅本人 RLS | service role 可维护 |
+| 私有卡片图片 | 仅本人签名访问 | R2/Storage 读写 |
+| 公共社区帖/图 | 只读公开接口 | 发布、下架和审核 |
+| 积分/会员/卡密 | 只读本人状态 | 唯一写入方 |
+| 生图任务 | 只读本人 | 扣费、结算、退款和归档 |
 
-1. 日常策略：`supabase/fix-policies.sql`
-2. 一次性 GRANT：`scripts/apply-grants-once.sql`
-3. 安全加固迁移：`supabase/migrations/20260526180000_data_security_hardening.sql`
-4. 私有图片桶：`supabase/migrations/20260526190000_private_card_images.sql`
+RLS 和 GRANT 定义在 `supabase/`。恢复新库后必须执行 schema/迁移并用 `/health` 验证 service role，不要临时开放全表匿名读写来绕过权限错误。
 
-在 **SQL Editor** 中按顺序执行（迁移可单独跑最新一段）。
+## 防丢失
 
-## API / Worker
+- 登录后先拉云端再合并；空本地数据不能覆盖云端。
+- 账号切换前保存 UID 归属快照并取消旧账号同步任务。
+- 删除使用 tombstone，避免旧设备复活。
+- 数据库定期 `pg_dump`；R2 与数据库备份分开保存。
+- 恢复演练在新项目/测试桶完成，禁止直接对生产执行 `--clean`。
 
-- 兑换、生图、造码、里程碑领奖均走 **Cloudflare Worker**，使用 `sb_secret_`（service role），**禁止**把 secret 放进前端或 Git。
-- `/health` 中 `supabase: ok` 表示 service role 与 GRANT 正常。
-- 管理接口 `POST /api/admin/codes` 需 `ADMIN_API_KEY`。
+备份步骤见 `MEMFIRE-MIGRATION.md`。
 
-## 运营与合规建议
+## 部署前检查
 
-1. **Supabase 控制台**开启 Point-in-Time Recovery（付费计划）作灾难恢复。
-2. 淘宝发货前自测：注册 → 造码兑换 → 建卡 → 换浏览器登录 → 卡片仍在。
-3. **不要**在 Supabase 给 `user_data` 加「所有人可读」策略。
-4. 卡片图已改为**私有桶** + 短时签名 URL；云端 JSON 存 `storage://card-images/{path}` 引用，不存长期公开链接。
-5. 演示社区帖（`MOCK_POSTS`）仅**未登录**时展示，登录后隐藏，且**不会**写入用户云数据。
-6. 生产环境 API 的 `CORS_ORIGINS` 必须配置为你的 Pages 域名（未配置则拒绝跨域，不用 `*`）。
+```powershell
+git status --short
+git diff --cached
+git grep -n -I -E "(BEGIN .*PRIVATE KEY|sk-[A-Za-z0-9_-]{20,}|service_role.*=.+)"
+```
 
-## 故障排查
+该简单扫描不能替代专用 secret scanner。发现已公开的真实密钥时，先在提供商处撤销/轮换，再从当前提交移除；仅删除 Git 文件不能让旧密钥失效。
 
-| 现象 | 可能原因 |
-|------|----------|
-| 兑换 500 | Worker 用了 publishable 密钥；或未跑 `apply-grants-once.sql` |
-| 云端同步失败：已阻止上传 | 保护生效：先点「同步」拉云端，或换设备登录恢复 |
-| 积分显示 0 但兑换成功 | 网络未拉到 `profiles`；刷新或检查 API `/api/v1/me` |
-| 社区帖换机没了 | 旧版仅 localStorage；登录并同步后写入 `user_data` |
+## 事故处理
 
-## 部署检查清单
-
-- [ ] Worker：`SUPABASE_SERVICE_ROLE_KEY` = `sb_secret_…`
-- [ ] 已执行 `20260526180000_data_security_hardening.sql`
-- [ ] 已执行 `20260526190000_private_card_images.sql`
-- [ ] 前端已部署含 `cloud-sync-safety.js` + 签名 URL 的版本（`sw.js` v37+）
-- [ ] Worker 已 `npm run deploy`（CORS / 速率限制 / 管理员密钥校验）
-- [ ] `CORS_ORIGINS` 含你的 Pages 域名（`wrangler.toml` 或 Dashboard）
-- [ ] `ADMIN_API_KEY` 仅保存在 Wrangler secrets，未提交仓库
+1. 立即撤销或轮换泄露凭据。
+2. 检查 Cloudflare、MemFire 和上游调用日志。
+3. 暂停相关 provider 或管理接口，避免继续扣费/写入。
+4. 用审计日志确认影响用户和时间段。
+5. 修复后补回归测试和最小必要的事故规则，不在主文档保留账号级细节。

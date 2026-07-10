@@ -25,6 +25,7 @@ function runNode(label, rel) {
   run(label, process.execPath, [join(scriptsDir, rel)]);
 }
 
+runNode('check-doc-links', 'check-doc-links.mjs');
 runNode('', 'check-js-syntax.mjs');
 
 if (existsSync(join(root, 'legacy'))) {

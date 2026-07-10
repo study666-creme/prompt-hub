@@ -4,7 +4,7 @@
  *
  * 用法：
  *   node scripts/memfire-preflight.mjs
- *   node scripts/memfire-preflight.mjs --api https://api.prompt-hub.cn
+ *   node scripts/memfire-preflight.mjs --api https://api.prompt-hubs.com
  *
  * admin.local.env：
  *   SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY（旧，可选）

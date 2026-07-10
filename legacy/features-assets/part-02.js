@@ -172,7 +172,7 @@
     if (!r?.ok) {
       const hint =
         r?.code === 'NETWORK_ERROR' || r?.code === 'API_UNREACHABLE'
-          ? '无法连接 api.prompt-hub.cn，请检查网络/VPN 后重试'
+          ? '无法连接 api.prompt-hubs.com，请检查网络/VPN 后重试'
           : r?.message || '下架失败';
       toast(hint, 5000);
       return;

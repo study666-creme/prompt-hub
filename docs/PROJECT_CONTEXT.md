@@ -1,53 +1,50 @@
-# Prompt Hub — 项目上下文
+# Prompt Hub 项目上下文
 
-> 给 AI / 协作者：新任务先读本文件 + `docs/AI-PITFALLS.md`。
+> 最后核对：2026-07-11。新任务先读本文、`CURRENT-ISSUES.md` 和 `AI-PITFALLS.md`。
 
----
+## 当前线上状态
 
-## 当前部署阶段（2026-07-08 · MemFire 已上线）
+| 项 | 当前值 |
+|---|---|
+| 主站 | <https://prompt-hubs.com> |
+| Pages build | `20260711a`（以 `window.__APP_BUILD__` 为准） |
+| API | <https://api.prompt-hubs.com>，Worker `prompt-hub-api` |
+| 数据库/Auth | MemFire，代码继续使用 Supabase 兼容变量名和 SDK |
+| 图片 | `MEDIA_STORAGE_MODE=r2-first`，R2 优先、MemFire Storage 回源 |
+| 监控 | `admin.html` 运行监控 + Cloudflare Observability/KV |
+| Canvas | <https://infinite-canvas-jay.vercel.app/canvas> |
 
-| 项 | 状态 |
-|----|------|
-| **Pages** | https://prompt-hubs.com · 构建 `20260708h` |
-| **Worker** | `prompt-hub-api` · https://api.prompt-hubs.com · `MEDIA_STORAGE_MODE=r2-first` |
-| **DB** | **MemFire** `d95gau8g91hmdup86ag0` · Worker `/health` → `supabase: ok` |
-| **图片** | R2（MemFire Storage 桶空属正常） |
-| **监控** | 后台概览「运行监控」· Worker KV `PROMPT_HUB_METRICS` · 见 `docs/OPERATIONS-MONITORING.md` |
+`prompt-hub.cn` 与 `api.prompt-hub.cn` 仅保留兼容，不是新功能验收主入口。
 
-### 已打通
+## 已验证基线
 
-- ✅ MemFire 数据 + auth 已 restore
-- ✅ Worker `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` 已切 MemFire
-- ✅ Pages anon key 已切 MemFire
-- ✅ `/health`、社区 feed API 正常
+- 手机卡片库首批 12 张，向下滚动再分页；生产首屏约 1.54 MiB。
+- 手机社区首屏渲染 12 张，滚动一次约 24 张；生产首屏约 1.79 MiB。
+- 列表默认请求 `_grid` 缩略图，详情/下载才请求 full。
+- `/prompts/` 刷新保持卡片库路由，不跳回社区。
+- MemFire、R2、New API、运营监控和 Canvas 生图链路已接入。
 
-### 请你本地验收
+## 架构约束
 
-1. 打开 https://prompt-hubs.com ，**Ctrl+Shift+R** 强刷
-2. **重新登录**（换库后旧 session 可能失效）
-3. 检查：卡片库、社区、生图、兑换码
+1. 根目录 loader 和 `legacy/`、`styles/`、`partials/` 是同一套源码的开发拆分；Pages 部署时会在 staging 合并。
+2. `pack-*.js` 是生产包，脚本顺序是运行时契约；改入口后必须跑 `npm run check:predeploy`。
+3. 卡片真源是 `user_data.data.cards`，本地 IndexedDB 只是快照；不得用空本地数组覆盖云端。
+4. 图片 JSON 应保存 `storage://card-images/...`，签名 URL 只作短期展示缓存。
+5. Worker Secrets 不进入 Git；前端只能保存公开 anon key。
 
-本地登录态验证必须同时启动 Worker：`cd server && npm run dev -- --ip 127.0.0.1 --port 8787`，并确认 http://127.0.0.1:8787/health 返回 `"supabase":"ok"`；否则只是前端静态页可打开，登录/同步会失败。
+## 近期重点
 
-### 下一步（可选）
+- 继续观察手机弱网首屏、图片 404 和第三方生图失败率。
+- 会员/积分产品文案应与 `subscription.js`、`membership.js`、服务端规则保持一致。
+- 对外开源前补充明确许可证；Canvas 的 AGPL 与 Prompt Hub 授权边界分开处理。
 
-- 定价改造（本地）待 `wrangler deploy` 后生效
-- MemFire JWT Secret 与旧 Supabase 对齐可免全员重登（未对齐则重登一次即可）
-- Canvas 可继续商业化售卖服务/部署/额度/工作流；若沿用 AGPL 开源版，网络服务对应源码需要可获取，商业壁垒不要押在闭源代码上。
-
-### 测试账号
-
-- 邮箱 `2705367723@qq.com`
-- `author_id`：`ab5c77dc-570e-4af7-ac38-2d311be96244`
-
----
-
-## 新对话提示词（复制整段）
+## 接手入口
 
 ```text
-项目：Prompt Hub（d:\prompt-hub），Pages https://prompt-hubs.com，API https://api.prompt-hubs.com。
-
-必读：docs/AI-PITFALLS.md、docs/ARCHITECTURE-CHANGE-GUARD.md、docs/CURRENT-ISSUES.md、docs/FEED-MODULES.md、docs/AI-HANDOFF.md。
-
-协作：简体中文；用户是小白；分步说明；Cloudflare 写清菜单路径；勿提交密钥。
+项目：D:\prompt-hub
+主站：https://prompt-hubs.com
+API：https://api.prompt-hubs.com
+先读：docs/PROJECT_CONTEXT.md、docs/CURRENT-ISSUES.md、docs/AI-PITFALLS.md、docs/FILE-MAP.md
+验证：npm run check:predeploy；server 运行 npm run typecheck && npm test
+约束：不提交密钥或真实测试账号；不删除用户卡片/图片；改静态资源后再部署 Pages。
 ```

@@ -1,255 +1,79 @@
-# 提示词仓库 (Prompt Hub)
+# Prompt Hub
 
-一个功能完整的提示词管理工具，支持卡片管理、图片生成、社区分享和云同步。
+Prompt Hub（卡藏）是一个卡片式提示词仓库，包含卡片管理、社区、AI 生图、云同步、会员积分、运营后台、浏览器扩展和无限画布联动。
 
-## ✨ 最新更新 (v20260606k)
+- Web: <https://prompt-hubs.com>
+- API: <https://api.prompt-hubs.com>
+- 文档入口: [`docs/README.md`](docs/README.md)
 
-### 🔧 图片加载与布局修复
-- ✅ 修复图片加载慢的问题（提升 60%）
-- ✅ 修复卡片排版混乱
-- ✅ 修复图片生成界面布局
-- ✅ 添加强制刷新功能 `forceRefreshAllImages()`
+## 技术结构
 
-### ⚡ 性能优化
-- ✅ 虚拟滚动（只渲染可见卡片）
-- ✅ 图片懒加载（按需加载）
-- ✅ 防抖布局（减少重排）
-- ✅ 内存优化（减少 47%）
+| 层 | 实现 |
+|---|---|
+| 前端 | 原生 JavaScript/CSS，Cloudflare Pages |
+| API | Hono + TypeScript，Cloudflare Workers |
+| 数据库与认证 | MemFire（Supabase 兼容 API） |
+| 图片 | Cloudflare R2 为主，MemFire Storage 回源 |
+| 本地数据 | IndexedDB + localStorage |
+| 监控 | Worker Observability + KV 聚合 + 运营后台 |
 
-### 🛡️ 数据安全增强
-- ✅ 自动备份（每 5 分钟）
-- ✅ 恢复点系统
-- ✅ 数据校验
-- ✅ 冲突解决
-- ✅ 健康检查
+前端仍是经典脚本应用。源文件、拆分片段和生产 `pack-*.js` 都有明确加载顺序，不能直接改成 ESM 或随意移动根目录运行文件。详见 [`docs/FRONTEND-SPLIT-MAP.md`](docs/FRONTEND-SPLIT-MAP.md)。
 
-## 🚀 快速开始
+## 本地开发
 
-### 本地运行
+要求 Node.js 18+、PowerShell 7（Windows）以及已配置的 `server/.dev.vars`。
 
-```bash
-# 方法 1：使用 PowerShell 脚本
+```powershell
 cd D:\prompt-hub
-.\serve-local.ps1
-
-# 方法 2：使用 npm
+npm ci
 cd server
-npm exec http-server .. -- -p 5500 -c-1
-
-# 方法 3：使用 Python
-python -m http.server 5500
+npm ci
+cd ..
+.\serve-local.ps1
 ```
 
-访问：http://127.0.0.1:5500/index.html
+打开 <http://127.0.0.1:5500>。登录、云同步和生图依赖本地 Worker `http://127.0.0.1:8787`；完整配置见 [`docs/LOCAL-DEV.md`](docs/LOCAL-DEV.md)。
 
-### 部署到 Cloudflare Pages
+## 验证
 
-```bash
-cd D:\prompt-hub
-.\deploy-pages.ps1
+```powershell
+npm run check:predeploy
+cd server
+npm run typecheck
+npm test
 ```
 
-## 📁 项目结构
+`check:predeploy` 会检查拆分片段、脚本语法、模块接线、回归规则和生产包，不需要手工打开旧测试页。
 
-```
-prompt-hub/
-├── index.html                          # 主页面
-├── script.js                           # 核心逻辑
-├── supabase-sync.js                    # 云同步
-├── features-draft.js                   # 社区/生图
-├── hotfix-image-layout.js              # 图片修复 ✨
-├── performance-optimization.js         # 性能优化 ✨
-├── data-safety-enhancement.js          # 数据安全 ✨
-├── mobile.js                           # 移动端
-├── theme.js                            # 主题
-├── styles.css                          # 样式
-└── docs/                               # 文档
-    ├── HOTFIX-IMAGE-LAYOUT.md         # 图片修复详解
-    ├── PERFORMANCE-OPTIMIZATION.md     # 性能优化详解
-    └── ...
-```
+## 部署
 
-## 🔧 常用命令
-
-### 控制台命令
-
-```javascript
-// 图片相关
-forceRefreshAllImages()                    // 强制刷新所有图片
-SupabaseSync.clearSignedUrlCache()        // 清除图片缓存
-
-// 布局相关
-layoutMasonryGrid()                        // 重新布局
-enforceMobileCardGrid()                    // 移动端网格
-
-// 数据相关
-DataSafety.listRecoveryPoints()           // 列出恢复点
-DataSafety.createRecoveryPoint('label')   // 创建恢复点
-DataSafety.restoreFromRecoveryPoint(key)  // 恢复数据
-DataSafety.performHealthCheck()           // 健康检查
-```
-
-## 📚 文档
-
-- **[交接文档](HANDOVER.md)** - 完整的项目交接文档
-- **[图片修复](docs/HOTFIX-IMAGE-LAYOUT.md)** - 图片加载与布局修复详解
-- **[性能优化](docs/PERFORMANCE-OPTIMIZATION.md)** - 性能优化与数据安全
-- **[部署清单](DEPLOY-CHECKLIST.md)** - 完整部署流程
-- **[快速修复](QUICK-FIX.md)** - 常见问题快速解决
-
-## 🐛 故障排查
-
-### 图片不显示
-
-```javascript
-// 1. 强制刷新
-forceRefreshAllImages()
-
-// 2. 清除缓存
-SupabaseSync.clearSignedUrlCache()
-
-// 3. 重新水合
-SupabaseSync.hydrateImageElements()
-```
-
-### 布局混乱
-
-```javascript
-// 桌面端
-layoutMasonryGrid()
-
-// 移动端
-enforceMobileCardGrid()
-```
-
-### 数据丢失
-
-```javascript
-// 1. 查看恢复点
-const points = DataSafety.listRecoveryPoints()
-console.table(points)
-
-// 2. 恢复数据
-await DataSafety.restoreFromRecoveryPoint(points[0].key)
-
-// 3. 刷新页面
-location.reload()
-```
-
-## 🎯 性能指标
-
-| 指标 | 优化前 | 优化后 | 提升 |
-|------|--------|--------|------|
-| 首次加载 | 3.2s | 1.3s | **59%** |
-| 内存占用 | 150MB | 80MB | **47%** |
-| 图片加载 | 5.1s | 2.0s | **61%** |
-| 滚动 FPS | 45 | 58 | **29%** |
-
-## 🔐 数据安全
-
-- ✅ 自动备份（每 5 分钟）
-- ✅ 恢复点（关键操作前）
-- ✅ 数据校验（保存前）
-- ✅ 冲突解决（云同步时）
-- ✅ 健康检查（每 10 分钟）
-
-## 📞 获取帮助
-
-1. 查看 [交接文档](HANDOVER.md)
-2. 运行 [测试工具](test-image-layout.html)
-3. 查看控制台错误（F12）
-4. 检查恢复点（`DataSafety.listRecoveryPoints()`）
-
-## 📝 开发指南
-
-### 添加新功能
-
-1. 创建恢复点：`await DataSafety.createRecoveryPoint('before_change')`
-2. 修改代码
-3. 本地测试
-4. 更新文档
-5. 部署
-
-### 修复 Bug
-
-1. 复现问题
-2. 创建恢复点
-3. 修改代码
-4. 测试修复
-5. 部署
-
-## 🚀 部署
-
-### 部署前检查
-
-- [ ] 更新版本号（`index.html` 中的 `__APP_BUILD__`）
-- [ ] 本地测试通过
-- [ ] 控制台无错误
-- [ ] 关键功能正常
-
-### 部署步骤
-
-```bash
-# 1. 执行部署脚本
+```powershell
+# Pages：自动检查、构建、递增 build 并做线上冒烟
 .\deploy-pages.ps1
 
-# 2. 等待部署完成
-
-# 3. 清除线上缓存
-# F12 -> Application -> Service Workers -> Unregister
-# Clear site data
-# Ctrl+Shift+R
+# Worker：仅 server/ 有改动时
+cd server
+npm run deploy
 ```
 
-### 部署后验证
+部署与回滚步骤见 [`docs/DEPLOY-CHECKLIST.md`](docs/DEPLOY-CHECKLIST.md)。
 
-```javascript
-// 1. 检查版本号
-window.__APP_BUILD__
-// 应显示: "20260606k"
+## 仓库目录
 
-// 2. 检查修复补丁
-typeof forceRefreshAllImages
-// 应显示: "function"
+| 路径 | 用途 |
+|---|---|
+| `index.html`, `*.js`, `*.css` | Pages 入口、运行时加载器及兼容入口 |
+| `legacy/`, `styles/`, `partials/` | 大文件拆分后的源码片段 |
+| `server/` | Worker API 与单元测试 |
+| `supabase/` | MemFire/Supabase 兼容 SQL schema 与迁移 |
+| `scripts/` | 构建、验证、备份和运营工具 |
+| `extension/` | Chrome/Edge 扩展 |
+| `docs/` | 当前文档；历史修复记录以 Git 历史为准 |
 
-// 3. 检查数据安全
-typeof DataSafety
-// 应显示: "object"
-```
+根目录运行文件看起来较多，是 Pages 经典脚本路径和缓存兼容约束，不应仅为目录美观移动。按任务找文件请看 [`docs/FILE-MAP.md`](docs/FILE-MAP.md)。
 
-## 📊 技术栈
+## 安全与授权
 
-- **前端**：原生 JavaScript（无框架）
-- **数据库**：IndexedDB（本地）+ Supabase（云端）
-- **存储**：Supabase Storage
-- **布局**：Masonry.js（桌面端）+ CSS Grid（移动端）
-- **部署**：Cloudflare Pages
+不要提交 `.env`、`.dev.vars`、`admin.local.env`、数据库密码、`service_role`、上游 API Key 或用户访问令牌。公开问题中也不要粘贴真实账号与 UUID；安全说明见 [`docs/DATA-SECURITY.md`](docs/DATA-SECURITY.md)。
 
-## 🎨 特性
-
-- ✅ 卡片管理（创建、编辑、删除、分组）
-- ✅ 图片上传（拖拽、粘贴、选择）
-- ✅ 标签系统
-- ✅ 搜索与筛选
-- ✅ 批量操作
-- ✅ 云同步（Supabase）
-- ✅ 社区分享
-- ✅ 图片生成（AI）
-- ✅ 主题切换（日光/夜间）
-- ✅ 移动端适配
-- ✅ 离线支持
-- ✅ 数据备份与恢复
-
-## 📄 许可证
-
-MIT License
-
-## 🙏 致谢
-
-感谢所有贡献者和用户的支持！
-
----
-
-**当前版本**：v20260606k  
-**最后更新**：2026-06-06  
-**维护者**：Kiro AI Assistant
+当前仓库没有 `LICENSE` 文件，因此不能默认视为 MIT 或其他开源许可。对外分发或开放复用前，需要由项目所有者明确许可证和前后端授权边界。

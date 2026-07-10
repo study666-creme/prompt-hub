@@ -129,7 +129,7 @@
         ok: false,
         code: 'FILE_ORIGIN',
         message:
-          '当前用 file:// 打开页面，浏览器禁止访问 API。请用 https://prompt-hub.cn 或运行 .\\serve-local.ps1 后访问 http://127.0.0.1:5500'
+          '当前用 file:// 打开页面，浏览器禁止访问 API。请用 https://prompt-hubs.com 或运行 .\\serve-local.ps1 后访问 http://127.0.0.1:5500'
       };
     }
     if (!isConfigured()) {
@@ -179,9 +179,9 @@
       }
       if (network) markApiUnreachable();
       const fileHint = isFileOrigin()
-        ? '请用 https://prompt-hub.cn 打开，或运行 .\\serve-local.ps1'
+        ? '请用 https://prompt-hubs.com 打开，或运行 .\\serve-local.ps1'
         : '';
-      const apiHost = baseUrl() || 'api.prompt-hub.cn';
+      const apiHost = baseUrl() || 'api.prompt-hubs.com';
       const decimalHint =
         '若仍报积分相关错误，请确认 Supabase 已执行 migrations/20260602211000_credits_decimal_fixup.sql';
       return {
@@ -496,7 +496,7 @@
       return { ok: true, blob, filename };
     } catch (e) {
       if (isNetworkFetchError(e)) markApiUnreachable();
-      return { ok: false, code: 'NETWORK_ERROR', message: '无法连接 api.prompt-hub.cn，请检查网络或 VPN' };
+      return { ok: false, code: 'NETWORK_ERROR', message: '无法连接 api.prompt-hubs.com，请检查网络或 VPN' };
     }
   }
 
@@ -776,7 +776,7 @@
       return {
         ok: false,
         code: 'NETWORK_ERROR',
-        message: e?.name === 'AbortError' ? '连接 api.prompt-hub.cn 超时，请换网络或稍后再试' : '无法连接社区服务'
+        message: e?.name === 'AbortError' ? '连接 api.prompt-hubs.com 超时，请换网络或稍后再试' : '无法连接社区服务'
       };
     } finally {
       clearTimeout(timer);

@@ -1,10 +1,10 @@
-# Export Supabase database before MemFire cutover.
+# Export a PostgreSQL-compatible database before cutover or for backup.
 # Usage: .\scripts\pg-dump-for-migrate.ps1
 #        .\scripts\pg-dump-for-migrate.ps1 -Mode direct
 param(
   [ValidateSet('direct', 'pooler', 'uri')]
   [string] $Mode = '',
-  [string] $ProjectRef = 'yibawjvhmqcysdovscss'
+  [string] $ProjectRef = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,10 +45,10 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmm'
 $outFile = Join-Path $outDir "prompt-hub-final-$stamp.dump"
 
-Write-Host '=== Prompt Hub final Supabase dump ===' -ForegroundColor Cyan
+Write-Host '=== Prompt Hub PostgreSQL dump ===' -ForegroundColor Cyan
 Write-Host "Output: $outFile"
 Write-Host ''
-Write-Host 'Supabase recommends Direct connection for pg_dump.'
+Write-Host 'For MemFire backups choose URI and paste the database connection URI.'
 Write-Host ''
 
 if (-not $Mode) {
@@ -85,6 +85,10 @@ if ($Mode -eq 'uri') {
     $connectionUri += '&sslmode=require'
   }
 } else {
+  if (-not $ProjectRef) {
+    $ProjectRef = (Read-Host 'Supabase project ref (required for direct/pooler mode)').Trim()
+    if (-not $ProjectRef) { throw 'ProjectRef is required for direct/pooler mode. Use -Mode uri for MemFire.' }
+  }
   if ($Mode -eq 'direct') {
     $hostName = "db.$ProjectRef.supabase.co"
     $user = 'postgres'
