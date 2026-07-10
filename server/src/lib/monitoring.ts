@@ -69,6 +69,9 @@ const METRIC_PREFIX = 'monitor:v1:hour:';
 const METRIC_TTL_SECONDS = 60 * 60 * 72;
 const MAX_ROUTE_KEYS = 80;
 const MAX_RECENT_EVENTS = 40;
+const HEALTHY_REQUEST_SAMPLE_RATE = 0.02;
+const HEALTHY_MEDIA_SAMPLE_RATE = 0.01;
+const CLIENT_ERROR_SAMPLE_RATE = 0.1;
 
 function hasMetricsKv(env: Env) {
   return !!env.PROMPT_HUB_METRICS;
@@ -173,6 +176,13 @@ function isMediaPath(pathname: string, route: string) {
   );
 }
 
+function metricSampleRate(request: Request, status: number, path: string, isMedia: boolean) {
+  if (status >= 500) return 1;
+  if (status >= 400) return CLIENT_ERROR_SAMPLE_RATE;
+  if (request.method === 'OPTIONS' || path === '/health') return 0;
+  return isMedia ? HEALTHY_MEDIA_SAMPLE_RATE : HEALTHY_REQUEST_SAMPLE_RATE;
+}
+
 function disabledSummary(hours: number): RequestMetricSummary {
   return {
     available: false,
@@ -243,13 +253,9 @@ export async function recordRequestMetric(
     const isAdmin = path.startsWith('/api/admin');
     const isMedia = isMediaPath(path, route);
     const isImage404 = status === 404 && isMedia;
-    let sampleWeight = 1;
-    if (status < 400 && isMedia && Math.random() >= 0.2) {
-      return;
-    }
-    if (status < 400 && isMedia) {
-      sampleWeight = 5;
-    }
+    const sampleRate = metricSampleRate(request, status, path, isMedia);
+    if (sampleRate <= 0 || (sampleRate < 1 && Math.random() >= sampleRate)) return;
+    const sampleWeight = Math.max(1, Math.round(1 / sampleRate));
 
     const bucket = safeBucket(await env.PROMPT_HUB_METRICS!.get(key, 'json'), hour, ts);
     bucket.lastTs = ts;
