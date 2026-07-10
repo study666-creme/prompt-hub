@@ -294,12 +294,6 @@
   }
 
   function isLazyOnlyContainer(container) {
-    if (window.MobileUI?.isMobileViewport?.()) {
-      if (container?.id === 'cardsContainer') return false;
-      if (container?.id === 'imageGenFeed' && document.body.classList.contains('imagegen-mobile-view-feed')) {
-        return false;
-      }
-    }
     return container?.id === 'cardsContainer' || container?.id === 'imageGenFeed';
   }
 
@@ -327,7 +321,6 @@
 
   function allowWarehouseFullFallback(img) {
     return !!(img?.dataset?.allowFullFallback === '1'
-      && window.MobileUI?.isMobileViewport?.()
       && isOwnWarehouseListImg(img));
   }
 
@@ -818,7 +811,7 @@
   function loadImg(img) {
     const ownWarehouseMobile = !!img?.closest?.('#cardsContainer') && window.MobileUI?.isMobileViewport?.();
     if (window.MobileUI?.isUserInteracting?.()) {
-      const whRoot = ownWarehouseMobile ? document.getElementById('cardsContainer') : null;
+      const whRoot = ownWarehouseMobile ? scrollRootFor(document.getElementById('cardsContainer')) : null;
       const nearEnough = ownWarehouseMobile
         ? isImgNearViewport(img, 900, whRoot)
         : isImgNearViewport(img, 120);
@@ -997,14 +990,9 @@
   }
 
   function mobileScrollRootFor(container) {
-    const page = container?.closest?.('.app-page.active') || container?.closest?.('.app-page');
-    const candidates = [
-      page?.querySelector?.('.feature-shell'),
-      page,
-      document.querySelector('.app-main'),
-      document.getElementById('mainContentArea')
-    ];
-    return candidates.find(isUsableScrollRoot) || document.scrollingElement || document.documentElement;
+    const appMain = document.querySelector('.app-main');
+    if (isUsableScrollRoot(appMain)) return appMain;
+    return document.scrollingElement || document.documentElement;
   }
 
   function scrollRootFor(container) {
@@ -1158,9 +1146,9 @@
       observedRoot = container;
       const rootMargin = lazyOnly
         ? (container.id === 'imageGenFeed'
-          ? '320px 0px'
+          ? (window.MobileUI?.isMobileViewport?.() ? '720px 0px' : '320px 0px')
           : container.id === 'cardsContainer'
-            ? (window.MobileUI?.isMobileViewport?.() ? '260px 0px' : '320px 0px')
+            ? (window.MobileUI?.isMobileViewport?.() ? '640px 0px' : '320px 0px')
             : '140px 0px')
         : isCommunityContainer(container)
           ? '360px 0px'

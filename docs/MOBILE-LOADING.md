@@ -53,6 +53,7 @@ body (100dvh, overflow:hidden)
 |----|------|----------------|
 | `warehousePrefetchCap` | 首屏预热卡数 | 24 |
 | `cardEagerCap` / `cardFirstScreenCap` | 不等 IO 直接 load 的上限 | 24 |
+| `MOBILE_PER_PAGE` | 卡片库移动端首批 DOM / 分页数量 | 24 |
 | `igFeedPatchMax` / `igFeedPrefetchCap` / `igFeedBoostMax` | 生图 feed | 24 |
 | `maxResolve` / `maxDownload` | 并发签 URL / 下载 | 12 / 10 |
 | `warehouseThumbBatch` | warehouse-thumbs 每批 | 24 |
@@ -60,6 +61,8 @@ body (100dvh, overflow:hidden)
 | `firstScreenCapMs` | 首屏预热最长等待 | 5000ms |
 
 **勿再**把手机 cap 压到 8 以下「省流量」——会导致 840 张库几乎只有置顶有图。
+
+移动端必须只由 `.app-main` 纵向滚动。需要裁掉横向溢出时使用 `overflow-x: clip`；`overflow-x: hidden` 会让同元素的 `overflow-y: visible` 按 CSS 规范计算成 `auto`，重新制造双滚动根。
 
 ---
 

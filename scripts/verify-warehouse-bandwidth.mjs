@@ -97,9 +97,10 @@ async function findGeneratedPrimary() {
   throw new Error('未找到 generated 图片路径');
 }
 
-async function signRef(jwt, ref) {
+async function signRef(jwt, ref, variant = '') {
   const q = encodeURIComponent(ref);
-  const res = await fetch(`${API}/api/v1/media/sign?ref=${q}`, {
+  const variantQ = variant ? `&variant=${encodeURIComponent(variant)}` : '';
+  const res = await fetch(`${API}/api/v1/media/sign?ref=${q}${variantQ}`, {
     headers: { Authorization: `Bearer ${jwt}` }
   });
   const json = await res.json();
@@ -109,9 +110,9 @@ async function signRef(jwt, ref) {
 
 async function headSize(url) {
   const res = await fetch(url, { method: 'GET' });
-  if (!res.ok) throw new Error(`GET ${res.status} ${url.slice(0, 80)}`);
+  if (!res.ok) return { ok: false, status: res.status, bytes: 0 };
   const buf = await res.arrayBuffer();
-  return buf.byteLength;
+  return { ok: true, status: res.status, bytes: buf.byteLength };
 }
 
 async function main() {
@@ -141,7 +142,9 @@ async function main() {
   console.log(`   grid in token: ${isGridUrl ? 'YES' : 'NO'}`);
 
   console.log('4) 下载 signed URL 测体积…');
-  const signedBytes = await headSize(signedUrl);
+  const signedResult = await headSize(signedUrl);
+  if (!signedResult.ok) throw new Error(`first signed grid returned ${signedResult.status}`);
+  const signedBytes = signedResult.bytes;
   console.log(`   signed: ${(signedBytes / 1024).toFixed(1)} KB`);
 
   console.log('5) 批量签 12 张生图 grid 估首屏…');
@@ -155,9 +158,18 @@ async function main() {
   let total = signedBytes;
   let max = signedBytes;
   let gridOk = isGridUrl ? 1 : 0;
+  const missing = [];
   for (const p of paths.slice(0, 11)) {
-    const u = await signRef(jwt, `storage://card-images/${p}`);
-    const n = await headSize(u);
+    const itemRef = `storage://card-images/${p}`;
+    const u = await signRef(jwt, itemRef);
+    const gridResult = await headSize(u);
+    if (!gridResult.ok) {
+      const fullUrl = await signRef(jwt, itemRef, 'full');
+      const fullResult = await headSize(fullUrl);
+      missing.push({ path: p, gridStatus: gridResult.status, fullStatus: fullResult.status });
+      continue;
+    }
+    const n = gridResult.bytes;
     total += n;
     if (n > max) max = n;
     if (/_grid/i.test(u)) gridOk += 1;
@@ -165,23 +177,23 @@ async function main() {
   const nImg = Math.min(paths.length, 11) + 1;
   console.log(`   ${nImg} 张合计: ${(total / 1024 / 1024).toFixed(2)} MB · 最大单张 ${(max / 1024).toFixed(1)} KB`);
 
-  const fullUrlRes = await fetch(
-    `${API}/api/v1/media/sign?ref=${encodeURIComponent(ref)}&variant=full`,
-    { headers: { Authorization: `Bearer ${jwt}` } }
-  );
-  const fullJson = await fullUrlRes.json();
-  const fullUrl = fullJson?.data?.url;
-  if (fullUrl) {
-    const fullBytes = await headSize(fullUrl);
-    console.log(`   full (variant=full): ${(fullBytes / 1024).toFixed(1)} KB`);
+  if (missing.length) {
+    console.log('   missing:', JSON.stringify(missing, null, 2));
   }
 
-  const pass = isGridUrl && signedBytes <= 350 * 1024 && total <= 2.5 * 1024 * 1024 && max <= 350 * 1024;
+  const fullUrl = await signRef(jwt, ref, 'full');
+  const fullResult = await headSize(fullUrl);
+  if (fullResult.ok) {
+    console.log(`   full (variant=full): ${(fullResult.bytes / 1024).toFixed(1)} KB`);
+  }
+
+  const pass = missing.length === 0 && isGridUrl && signedBytes <= 350 * 1024 && total <= 2.5 * 1024 * 1024 && max <= 350 * 1024;
   console.log('\n结果:', pass ? 'PASS' : 'FAIL');
   if (!isGridUrl) console.error('- 签名 URL 未指向 _grid');
   if (signedBytes > 350 * 1024) console.error('- grid 体积 > 350KB');
   if (total > 2.5 * 1024 * 1024) console.error('- 12 张合计 > 2.5MB');
   if (max > 350 * 1024) console.error('- 存在超大单张');
+  if (missing.length) console.error(`- ${missing.length} recent generated image grid requests returned 404`);
   process.exit(pass ? 0 : 1);
 }
 

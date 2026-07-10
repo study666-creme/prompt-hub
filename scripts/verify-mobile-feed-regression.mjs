@@ -9,6 +9,9 @@ const loader = read('card-image-loader.js');
 const layout = read('feed-layout.js');
 const imageFeed = read('image-gen-feed.js');
 const mobileCss = read('styles-mobile.css');
+const scriptPart01 = read('legacy/script/part-01.js');
+const scriptPart09 = read('legacy/script/part-09.js');
+const syncPart03 = read('legacy/supabase-sync/part-03.js');
 
 const requiredLoaderTokens = [
   'ownWarehouseMobile',
@@ -43,6 +46,8 @@ const requiredImageFeedTokens = [
 const requiredCssTokens = [
   '#communityGrid.community-feed-columns:not(.list-view)',
   '#creationsGrid.community-feed-columns:not(.list-view)',
+  '#pageCommunity .feature-shell,',
+  'overflow-x: clip;',
   'display: contents;',
   'flex: 0 0 calc((100% - 12px) / 2) !important;',
   '#cardsContainer.cards-container .card .card-media:not(.is-loading):not(.card-media--await) .card-img',
@@ -58,6 +63,12 @@ checkTokens('loader', loader, requiredLoaderTokens);
 checkTokens('layout', layout, requiredLayoutTokens);
 checkTokens('image-feed', imageFeed, requiredImageFeedTokens);
 checkTokens('mobile-css', mobileCss, requiredCssTokens);
+checkTokens('warehouse-page-size', scriptPart01, ['const MOBILE_PER_PAGE = 24;']);
+checkTokens('warehouse-full-fallback', scriptPart09, [
+  "const allowFullFallback = viewMode !== 'list' && showImage;",
+  'data-allow-full-fallback="1"'
+]);
+checkTokens('sync-full-fallback', syncPart03, ['function allowWarehouseFullFallback(img)']);
 
 const forbiddenLoader = [
   /\bdownloadActive\b/,
@@ -78,10 +89,22 @@ for (const re of forbiddenLoader) {
   }
 }
 
+if (/function allowWarehouseFullFallback\(img\)[\s\S]{0,180}isMobileViewport/.test(loader)) {
+  console.error('verify-mobile-feed-regression: warehouse full fallback was restricted to mobile');
+  process.exit(1);
+}
+
+if (/function allowWarehouseFullFallback\(img\)[\s\S]{0,180}isMobileViewport/.test(syncPart03)) {
+  console.error('verify-mobile-feed-regression: sync warehouse full fallback was restricted to mobile');
+  process.exit(1);
+}
+
 const forbiddenCss = [
   /#cardsContainer[\s\S]{0,650}\.card-img[\s\S]{0,180}object-fit:\s*cover/i,
   /#imageGenFeed[\s\S]{0,700}gap:\s*(2[4-9]|[3-9]\d)px\s*!important/i,
-  /#communityGrid\.community-feed-columns[\s\S]{0,700}gap:\s*(2[4-9]|[3-9]\d)px\s*!important/i
+  /#communityGrid\.community-feed-columns[\s\S]{0,700}gap:\s*(2[4-9]|[3-9]\d)px\s*!important/i,
+  /#pageCommunity\s+\.feature-shell[\s\S]{0,180}overflow-y:\s*auto/i,
+  /body\.efficiency-mode\s+#(?:creationsGrid|communityGrid)\.cards-container[\s\S]{0,500}overflow-y:\s*auto/i
 ];
 
 for (const re of forbiddenCss) {

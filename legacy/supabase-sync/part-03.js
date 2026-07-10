@@ -183,11 +183,8 @@
     return !!(p && isGridStoragePath(p));
   }
 
-  function allowMobileWarehouseFullFallback(img) {
-    const mobile = window.MobileUI?.isMobileViewport?.()
-      ?? window.matchMedia?.('(max-width: 900px)')?.matches;
-    return !!(mobile
-      && img?.dataset?.allowFullFallback === '1'
+  function allowWarehouseFullFallback(img) {
+    return !!(img?.dataset?.allowFullFallback === '1'
       && img?.closest?.('#cardsContainer')
       && !img?.closest?.('.card[data-community-collect="1"]'));
   }
@@ -197,7 +194,7 @@
     if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return '';
     if (url.includes('data:image/svg') || isInvalidMediaUrl(url)) return '';
     const inList = img?.closest?.('#cardsContainer, #imageGenFeed');
-    if (inList && !isGridDisplayUrl(url) && !allowMobileWarehouseFullFallback(img)) return '';
+    if (inList && !isGridDisplayUrl(url) && !allowWarehouseFullFallback(img)) return '';
     if (isWarehouseBlockedFullUrl(url, img)) return '';
     return url;
   }
@@ -252,7 +249,7 @@
     const path = storagePathFromDisplayUrl(url);
     if (!path || isGridStoragePath(path)) return false;
     if (!/\.(jpe?g|webp|png|gif)$/i.test(path)) return false;
-    if (allowMobileWarehouseFullFallback(img)) return false;
+    if (allowWarehouseFullFallback(img)) return false;
     if (img?.dataset?.listPrimaryRetried === '1') return false;
     const cardId = img?.dataset?.sourceCardId
       || img?.closest?.('.card[data-id]')?.dataset?.id

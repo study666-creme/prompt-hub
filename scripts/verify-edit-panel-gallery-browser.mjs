@@ -99,10 +99,23 @@ const seedCard = {
   createdAt: Date.now(),
   updatedAt: Date.now()
 };
+const seedCards = [
+  seedCard,
+  ...Array.from({ length: 35 }, (_, index) => ({
+    id: `codex-mobile-load-card-${index + 1}`,
+    title: `Mobile first load ${index + 1}`,
+    prompt: `mobile first load browser regression card ${index + 1}`,
+    tags: ['browser-check'],
+    image: gallery[(index + 1) % gallery.length],
+    cardImages: [gallery[(index + 1) % gallery.length]],
+    createdAt: Date.now() - index - 1,
+    updatedAt: Date.now() - index - 1
+  }))
+];
 
-function seedHtml() {
+function seedHtml(target = 'warehouse') {
   return `<!doctype html><meta charset="utf-8"><script>
-const card = ${JSON.stringify(seedCard)};
+const cards = ${JSON.stringify(seedCards)};
 function reqToPromise(req) {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
@@ -122,18 +135,179 @@ function reqToPromise(req) {
   };
   const db = await reqToPromise(open);
   const tx = db.transaction(['cards'], 'readwrite');
-  tx.objectStore('cards').put(card);
+  cards.forEach((card) => tx.objectStore('cards').put(card));
   await new Promise((resolve, reject) => {
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
   });
   localStorage.setItem('promptrepo_idb_owner_uid', 'guest');
-  localStorage.setItem('promptrepo_app_page', 'warehouse');
-  location.href = '/prompts';
+  localStorage.setItem('promptrepo_app_page', ${JSON.stringify(target)});
+  location.href = ${JSON.stringify(target)} === 'community' ? '/community' : '/prompts';
 })().catch((err) => {
   document.body.textContent = String(err && err.stack || err);
 });
 </script>`;
+}
+
+async function touchScroll(page, fromY = 700, toY = 260, x = 195) {
+  const client = await page.context().newCDPSession(page);
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x, y: fromY, radiusX: 4, radiusY: 4, force: 1 }]
+  });
+  for (let y = fromY - 70; y >= toY; y -= 70) {
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x, y, radiusX: 4, radiusY: 4, force: 1 }]
+    });
+    await page.waitForTimeout(18);
+  }
+  await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.waitForTimeout(250);
+}
+
+async function verifyMobileFirstLoad(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 2,
+    isMobile: true,
+    hasTouch: true,
+    serviceWorkers: 'block'
+  });
+  const page = await context.newPage();
+  try {
+    await page.goto(`${base}/__seed.html`, { waitUntil: 'domcontentloaded' });
+    await page.waitForURL('**/prompts', { timeout: 15000 });
+    await page.waitForFunction(() => window.MobileUI?.getPerf?.()?.cardEagerCap === 24, null, { timeout: 15000 });
+    await page.waitForFunction(() => document.querySelectorAll('#cardsContainer .card[data-id]').length >= 24, null, { timeout: 15000 });
+    await page.waitForFunction(() => (
+      [...document.querySelectorAll('#cardsContainer img.card-img')]
+        .filter((img) => img.complete && img.naturalWidth > 8).length >= 20
+    ), null, { timeout: 15000 });
+
+    const warehouseBefore = await page.evaluate(() => {
+      const main = document.querySelector('.app-main');
+      const grid = document.getElementById('cardsContainer');
+      const perf = window.MobileUI?.getPerf?.();
+      main.scrollTop = 0;
+      return {
+        mainOverflow: getComputedStyle(main).overflowY,
+        mainScrollHeight: main.scrollHeight,
+        mainClientHeight: main.clientHeight,
+        gridOverflow: getComputedStyle(grid).overflowY,
+        cards: grid.querySelectorAll('.card[data-id]').length,
+        loaded: [...grid.querySelectorAll('img.card-img')].filter((img) => img.complete && img.naturalWidth > 8).length,
+        perf,
+        blockingClasses: ['mobile-nav-open', 'mobile-groups-open', 'panel-open', 'app-modal-open']
+          .filter((name) => document.body.classList.contains(name)),
+        criticalResources: performance.getEntriesByType('resource')
+          .filter((entry) => /(?:partials\/index-body|legacy\/script)\/part-/.test(entry.name))
+          .map((entry) => ({
+            path: new URL(entry.name).pathname,
+            initiator: entry.initiatorType,
+            transferSize: entry.transferSize
+          }))
+      };
+    });
+    if (!/auto|scroll|overlay/.test(warehouseBefore.mainOverflow)) {
+      throw new Error(`mobile app-main is not scrollable: ${JSON.stringify(warehouseBefore)}`);
+    }
+    if (warehouseBefore.mainScrollHeight <= warehouseBefore.mainClientHeight + 40) {
+      throw new Error(`mobile warehouse does not overflow app-main: ${JSON.stringify(warehouseBefore)}`);
+    }
+    if (warehouseBefore.blockingClasses.length) {
+      throw new Error(`mobile first load left blocking body classes: ${JSON.stringify(warehouseBefore)}`);
+    }
+    await touchScroll(page);
+    const warehouseScrollTop = await page.locator('.app-main').evaluate((main) => main.scrollTop);
+    if (warehouseScrollTop < 40) {
+      throw new Error(`mobile first touch did not scroll warehouse: ${JSON.stringify({ warehouseScrollTop, warehouseBefore })}`);
+    }
+
+    await page.close();
+    const communityPage = await context.newPage();
+    await communityPage.goto(`${base}/__seed.html?target=community`, { waitUntil: 'domcontentloaded' });
+    await communityPage.waitForURL('**/community', { timeout: 15000 });
+    await communityPage.waitForFunction(() => document.getElementById('pageCommunity')?.classList.contains('active'), null, { timeout: 10000 });
+    await communityPage.waitForTimeout(700);
+    const communityBefore = await communityPage.evaluate(() => {
+      const main = document.querySelector('.app-main');
+      const grid = document.getElementById('communityGrid');
+      const shell = document.querySelector('#pageCommunity .feature-shell');
+      grid.innerHTML = `<div class="community-feed-col">${Array.from({ length: 32 }, (_, index) => (
+        `<article class="card community-post-card" style="min-height:${150 + (index % 3) * 35}px"><div class="card-body">Card ${index + 1}</div></article>`
+      )).join('')}</div>`;
+      main.scrollTop = 0;
+      shell.scrollTop = 100;
+      const normal = {
+        shellOverflow: getComputedStyle(shell).overflowY,
+        shellScrollTop: shell.scrollTop,
+        shellStyle: shell.getAttribute('style') || '',
+        shellClass: shell.className,
+        overflowRules: [...document.styleSheets].flatMap((sheet) => {
+          try {
+            return [...sheet.cssRules].flatMap((rule) => {
+              const rules = rule.cssRules ? [...rule.cssRules] : [rule];
+              return rules
+                .filter((item) => item.selectorText && shell.matches(item.selectorText) && item.style?.overflowY)
+                .map((item) => `${item.selectorText} => ${item.style.overflowY}${item.style.getPropertyPriority('overflow-y') ? ' !important' : ''}`);
+            });
+          } catch (e) {
+            return [];
+          }
+        }),
+        gridOverflow: getComputedStyle(grid).overflowY,
+        mainScrollHeight: main.scrollHeight,
+        mainClientHeight: main.clientHeight
+      };
+      document.body.classList.add('efficiency-mode');
+      const efficiency = {
+        shellOverflow: getComputedStyle(shell).overflowY,
+        gridOverflow: getComputedStyle(grid).overflowY,
+        gridFlex: getComputedStyle(grid).flex
+      };
+      document.body.classList.remove('efficiency-mode');
+      return { normal, efficiency };
+    });
+    if (communityBefore.normal.shellOverflow !== 'visible' || communityBefore.normal.shellScrollTop !== 0) {
+      throw new Error(`community created a nested mobile scroll root: ${JSON.stringify(communityBefore)}`);
+    }
+    if (communityBefore.efficiency.gridOverflow !== 'visible') {
+      throw new Error(`efficiency mode created a nested mobile grid scroll root: ${JSON.stringify(communityBefore)}`);
+    }
+    if (communityBefore.normal.mainScrollHeight <= communityBefore.normal.mainClientHeight + 40) {
+      throw new Error(`mobile community does not overflow app-main: ${JSON.stringify(communityBefore)}`);
+    }
+    let communityScrollTop = 0;
+    for (const x of [195, 28, 362]) {
+      await touchScroll(communityPage, 700, 260, x);
+      communityScrollTop = await communityPage.locator('.app-main').evaluate((main) => main.scrollTop);
+      if (communityScrollTop >= 40) break;
+    }
+    if (communityScrollTop < 40) {
+      throw new Error(`mobile first touch did not scroll community: ${JSON.stringify({ communityScrollTop, communityBefore })}`);
+    }
+
+    const transferredByPath = new Map();
+    for (const entry of warehouseBefore.criticalResources) {
+      if (entry.transferSize <= 0) continue;
+      transferredByPath.set(entry.path, (transferredByPath.get(entry.path) || 0) + 1);
+    }
+    const duplicateTransfers = [...transferredByPath].filter(([, count]) => count > 1);
+    if (duplicateTransfers.length) {
+      throw new Error(`critical preload resources transferred more than once: ${JSON.stringify(duplicateTransfers)}`);
+    }
+
+    return {
+      cards: warehouseBefore.cards,
+      loaded: warehouseBefore.loaded,
+      warehouseScrollTop,
+      communityScrollTop,
+      criticalRequests: warehouseBefore.criticalResources.length
+    };
+  } finally {
+    await context.close();
+  }
 }
 
 const server = createServer(async (req, res) => {
@@ -141,7 +315,7 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', base);
     if (url.pathname === '/__seed.html') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(seedHtml());
+      res.end(seedHtml(url.searchParams.get('target') || 'warehouse'));
       return;
     }
     const cdnMatch = url.pathname.match(/^\/api\/v1\/media\/c\/([^/]+)$/);
@@ -275,7 +449,12 @@ try {
   if (new Set(hashes).size !== 5) {
     throw new Error(`panel preview did not change for every gallery page: ${hashes.join(',')}`);
   }
-  console.log('verify-edit-panel-gallery-browser OK:', hashes.map((h) => h.slice(0, 8)).join(' -> '));
+  const mobile = await verifyMobileFirstLoad(browser);
+  console.log(
+    'verify-edit-panel-gallery-browser OK:',
+    hashes.map((h) => h.slice(0, 8)).join(' -> '),
+    `mobile ${mobile.loaded}/${mobile.cards}, scroll ${mobile.warehouseScrollTop}/${mobile.communityScrollTop}, resources ${mobile.criticalRequests}`
+  );
 } finally {
   if (browser) await browser.close();
   await new Promise((resolveClose) => server.close(resolveClose));

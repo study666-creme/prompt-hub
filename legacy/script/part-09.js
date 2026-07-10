@@ -793,10 +793,10 @@
           || coverMeta?.slotJobId
           || (card.genJobId ? String(card.genJobId).replace(/#\d+$/, '') : '');
         const coverJobAttr = coverJobId ? ` data-job-id="${escapeHtml(coverJobId)}"` : '';
-        const mobileFullFallback = mobileGrid && viewMode !== 'list' && showImage;
+        const allowFullFallback = viewMode !== 'list' && showImage;
         const imgSrc = showImage ? (listThumb.src || cardImgInitialSrc(coverImage, card.id, {
           jobId: coverJobId,
-          allowFullFallback: mobileFullFallback
+          allowFullFallback
         })) : '';
         const isCollectCard = window.isCommunityCollectCard?.(card);
         const collectMeta = isCollectCard ? getCommunityCollectImageResolveOpts(card) : null;
@@ -814,13 +814,13 @@
         const collectImgAttrs = isCollectCard && collectMeta?.authorId
           ? ` data-author-id="${escapeHtml(collectMeta.authorId)}" data-source-card-id="${escapeHtml(collectMeta.assetId || '')}"`
           : '';
-        const mobileFallbackAttr = mobileFullFallback ? ' data-allow-full-fallback="1"' : '';
+        const fullFallbackAttr = allowFullFallback ? ' data-allow-full-fallback="1"' : '';
         const galleryCount = window.PromptHubCardGallery?.normalizeCardGallery?.(card)?.length || 0;
         const galleryBadge = galleryCount > 1
           ? `<span class="card-gallery-count" title="本卡 ${galleryCount} 张图">${galleryCount}</span>`
           : '';
         const mediaHtml = showImage
-          ? `<div class="card-media${mediaLoadingCls}"${shineAt}>${galleryBadge}<img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(coverImage)} data-image-ref="${escapeHtml(coverImage)}"${coverJobAttr}${collectImgAttrs}${mobileFallbackAttr} loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async"${fetchPri} draggable="false" alt="" onload="${imgOnload}"></div>`
+          ? `<div class="card-media${mediaLoadingCls}"${shineAt}>${galleryBadge}<img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(coverImage)} data-image-ref="${escapeHtml(coverImage)}"${coverJobAttr}${collectImgAttrs}${fullFallbackAttr} loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async"${fetchPri} draggable="false" alt="" onload="${imgOnload}"></div>`
           : '';
         const headHtml = titleTrim
           ? `<div class="card-head"><div class="card-title">${escapeHtml(titleTrim)}</div>${timeLabel ? `<time class="card-time">${escapeHtml(timeLabel)}</time>` : ''}</div>`
@@ -983,15 +983,9 @@
     }
     const warehouseScrollRoot = () => {
       if (!isMobileViewport()) return document.getElementById('cardsContainer');
-      const page = document.getElementById('pageWarehouse');
-      const candidates = [
-        page?.querySelector?.('.feature-shell'),
-        page,
-        document.querySelector('.app-main'),
-        document.getElementById('mainContentArea'),
-        document.getElementById('cardsContainer')
-      ];
-      return candidates.find(isUsableWarehouseScrollRoot) || document.scrollingElement || document.documentElement;
+      const appMain = document.querySelector('.app-main');
+      if (isUsableWarehouseScrollRoot(appMain)) return appMain;
+      return document.scrollingElement || document.documentElement;
     };
     function loadNextWarehousePage() {
       if (warehouseScrollLoading) return;

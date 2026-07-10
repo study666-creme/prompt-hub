@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import sharp from '../server/node_modules/sharp/lib/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -57,6 +58,8 @@ const dryRun = args.includes('--dry-run');
 const scanAll = args.includes('--all');
 const maxIdx = args.indexOf('--max');
 const offsetIdx = args.indexOf('--offset');
+const primaryIdx = args.indexOf('--primary');
+const primaryPathArg = primaryIdx >= 0 ? String(args[primaryIdx + 1] || '').replace(/^\//, '') : '';
 const maxCards = scanAll
   ? 99999
   : maxIdx >= 0
@@ -151,6 +154,35 @@ async function r2Head(key) {
   }
 }
 
+async function r2Get(key) {
+  try {
+    const host = `${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+    const objectPath = `/${R2_BUCKET}/${key.split('/').map(encodeURIComponent).join('/')}`;
+    const url = `https://${host}${objectPath}`;
+    const payloadHash = crypto.createHash('sha256').update('').digest('hex');
+    const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+    const headers = { Host: host, 'x-amz-content-sha256': payloadHash, 'x-amz-date': amzDate };
+    const authorization = awsV4Sign({
+      method: 'GET',
+      url,
+      headers,
+      payloadHash,
+      accessKey: R2_ACCESS_KEY_ID,
+      secretKey: R2_SECRET_ACCESS_KEY
+    });
+    const res = await fetchRetry(url, {
+      method: 'GET',
+      headers: { ...headers, Authorization: authorization }
+    }, `R2 GET ${key}`);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    return buf.length >= 512 ? buf : null;
+  } catch (e) {
+    console.warn('[r2Get skip]', key, String(e.cause?.code || e.message || e).slice(0, 100));
+    return null;
+  }
+}
+
 async function r2Put(key, body, contentType) {
   const host = `${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
   const objectPath = `/${R2_BUCKET}/${key.split('/').map(encodeURIComponent).join('/')}`;
@@ -215,6 +247,20 @@ function gridPathFromPrimary(p) {
 }
 
 const GRID_MIN_BYTES = 2048;
+const GRID_MAX_BYTES = 220 * 1024;
+
+async function createGridJpeg(source) {
+  for (const quality of [78, 68, 58]) {
+    const out = await sharp(source)
+      .rotate()
+      .flatten({ background: '#ffffff' })
+      .resize({ width: 640, height: 640, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality, mozjpeg: true })
+      .toBuffer();
+    if (out.length >= GRID_MIN_BYTES && out.length <= GRID_MAX_BYTES) return out;
+  }
+  return null;
+}
 
 async function backfillGridForPrimary(primaryKey, dryRunFlag) {
   const gridKey = gridPathFromPrimary(primaryKey);
@@ -225,8 +271,13 @@ async function backfillGridForPrimary(primaryKey, dryRunFlag) {
     console.log('[dry-run] 将回填 grid →', gridKey);
     return true;
   }
-  const buf = await downloadFromSupabase(gridKey);
-  if (!buf) return false;
+  let buf = await downloadFromSupabase(gridKey);
+  if (!buf) {
+    const primary = await r2Get(primaryKey) || await downloadFromSupabase(primaryKey);
+    if (!primary) return false;
+    buf = await createGridJpeg(primary);
+  }
+  if (!buf || buf.length < GRID_MIN_BYTES || buf.length > GRID_MAX_BYTES) return false;
   await r2Put(gridKey, buf, 'image/jpeg');
   console.log('  ↳ grid', gridKey, buf.length);
   return true;
@@ -386,6 +437,16 @@ async function main() {
   console.log('=== 卡片库 R2 回填 ===');
   console.log('用户:', USER_ID);
   console.log('模式:', dryRun ? 'dry-run' : 'upload', useApi ? '+ API repair' : '', scanAll ? '+ 全自动' : '');
+
+  if (primaryPathArg) {
+    if (!primaryPathArg.startsWith(`${USER_ID}/`)) {
+      throw new Error('primary path does not belong to AUDIT_USER_ID');
+    }
+    const repaired = await backfillGridForPrimary(primaryPathArg, dryRun);
+    console.log('单路径:', { primary: primaryPathArg, repaired });
+    if (!repaired) process.exitCode = 2;
+    return;
+  }
 
   const cards = await fetchUserCards(USER_ID);
   console.log('卡片总数:', cards.length);

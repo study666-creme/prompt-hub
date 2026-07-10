@@ -11,7 +11,7 @@
   let thumbsBackoffUntil = 0;
   let thumbsBackoffWarned = false;
   const BATCH_DELAY_MS = 16;
-  const MAX_BATCH = 16;
+  const MAX_BATCH = 24;
   const THUMBS_BACKOFF_MS = 180000;
   const LS_WH_GRID = 'ph_wh_grid_v1';
   const WH_GRID_TTL_MS = 45 * 60 * 1000;
