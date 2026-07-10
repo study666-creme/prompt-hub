@@ -24,6 +24,13 @@ if (!index.ok) {
   process.exit(1);
 }
 const buildId = (index.text.match(/__APP_BUILD__\s*=\s*'([^']+)'/) || [])[1] || 'smoke';
+if (
+  !index.text.includes('__PROMPT_HUB_INDEX_BODY_PARTIAL__')
+  && !index.text.includes('__PROMPT_HUB_DEPLOY_BODY__')
+) {
+  console.error('index-http-smoke: index body is neither split nor deployment-inlined');
+  process.exit(1);
+}
 
 const adminLogin = await get('/admin-login.html');
 if (!adminLogin.ok || !adminLogin.text.includes('id="adminLogin"') || adminLogin.text.includes('id="adminApp"')) {
@@ -101,9 +108,9 @@ const standaloneScripts = [
   ['/admin.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
   ['/asset-studio.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
   ['/features-assets.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
-  ['/supabase-sync.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
-  ['/script.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
-  ['/features-draft.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__']
+  ['/supabase-sync.js', 'split loader or deployment bundle', /__PROMPT_HUB_(?:LEGACY_SPLIT_LOADER|DEPLOY_BUNDLE)__/],
+  ['/script.js', 'split loader or deployment bundle', /__PROMPT_HUB_(?:LEGACY_SPLIT_LOADER|DEPLOY_BUNDLE)__/],
+  ['/features-draft.js', 'split loader or deployment bundle', /__PROMPT_HUB_(?:LEGACY_SPLIT_LOADER|DEPLOY_BUNDLE)__/]
 ];
 
 const legacyChunks = [
@@ -116,8 +123,8 @@ const legacyChunks = [
 ];
 
 const cssAssets = [
-  ['/styles.css', 'CSS split manifest', '__PROMPT_HUB_CSS_SPLIT_MANIFEST__'],
-  ['/styles-features.css', 'CSS split manifest', '__PROMPT_HUB_CSS_SPLIT_MANIFEST__'],
+  ['/styles.css', 'CSS split manifest or deployment bundle', /__PROMPT_HUB_(?:CSS_SPLIT_MANIFEST|DEPLOY_BUNDLE)__/],
+  ['/styles-features.css', 'CSS split manifest or deployment bundle', /__PROMPT_HUB_(?:CSS_SPLIT_MANIFEST|DEPLOY_BUNDLE)__/],
   ['/styles/base/part-01.css', 'base CSS chunk', 'feature-shell'],
   ['/styles/features/part-01.css', 'features CSS chunk', 'feature-shell']
 ];
@@ -166,7 +173,8 @@ for (const [path, label, token] of standaloneScripts) {
       console.error(`index-http-smoke: ${path} (${check.tag}) returned HTML`);
       process.exit(1);
     }
-    if (!res.text.includes(token)) {
+    const hasToken = token instanceof RegExp ? token.test(res.text) : res.text.includes(token);
+    if (!hasToken) {
       console.error(`index-http-smoke: ${path} (${check.tag}) missing ${label}`);
       process.exit(1);
     }
@@ -207,7 +215,8 @@ for (const [path, label, token] of cssAssets) {
       console.error(`index-http-smoke: ${checkPath} returned HTML`);
       process.exit(1);
     }
-    if (!res.text.includes(token)) {
+    const hasToken = token instanceof RegExp ? token.test(res.text) : res.text.includes(token);
+    if (!hasToken) {
       console.error(`index-http-smoke: ${checkPath} missing ${label}`);
       process.exit(1);
     }

@@ -294,7 +294,9 @@
   }
 
   function isLazyOnlyContainer(container) {
-    return container?.id === 'cardsContainer' || container?.id === 'imageGenFeed';
+    return container?.id === 'cardsContainer'
+      || container?.id === 'imageGenFeed'
+      || isCommunityContainer(container);
   }
 
   const IMAGEGEN_FEED_PATCH_MAX = 12;
@@ -1149,7 +1151,7 @@
           ? (window.MobileUI?.isMobileViewport?.() ? '720px 0px' : '320px 0px')
           : container.id === 'cardsContainer'
             ? (window.MobileUI?.isMobileViewport?.() ? '640px 0px' : '320px 0px')
-            : '140px 0px')
+            : (window.MobileUI?.isMobileViewport?.() ? '160px 0px' : '280px 0px'))
         : isCommunityContainer(container)
           ? '360px 0px'
           : (container.id === 'cardsContainer' && window.MobileUI?.isMobileViewport?.()
@@ -1174,7 +1176,11 @@
         return;
       }
       if (lazyOnly) {
-        const nearPx = container.id === 'imageGenFeed' ? 720 : 640;
+        const nearPx = container.id === 'imageGenFeed'
+          ? 720
+          : container.id === 'cardsContainer'
+            ? 640
+            : (window.MobileUI?.isMobileViewport?.() ? 160 : 280);
         if (isImgNearViewport(img, nearPx)) loadImg(img);
         observer.observe(img);
         img.dataset.feedObserverBound = '1';
@@ -1306,8 +1312,9 @@
 
   function boostCommunityFeedImages(container, max = 24) {
     if (!container || !isCommunityContainer(container)) return;
+    const nearPx = window.MobileUI?.isMobileViewport?.() ? 180 : 360;
     let n = 0;
-    feedImagesIn(container).forEach((img) => {
+    sortImgsByViewport(feedImagesIn(container), container).forEach((img) => {
       if (n >= max) return;
       const cur = img.currentSrc || img.src || '';
       if (isReadySrc(cur, img)) return;
@@ -1316,7 +1323,7 @@
         applyUrlToImg(img, hit);
         return;
       }
-      if (isImgNearViewport(img, 1200)) {
+      if (isImgNearViewport(img, nearPx, container)) {
         n += 1;
         loadImg(img);
       }

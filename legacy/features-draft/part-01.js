@@ -187,6 +187,17 @@
   let layoutCommunityTimer = null;
   let communityFeedRenderGen = 0;
   const FEED_PER_PAGE = 24;
+  const MOBILE_FEED_PER_PAGE = 12;
+
+  function feedPageSize(containerId = 'communityGrid') {
+    if (
+      isMobileViewport()
+      && (containerId === 'communityGrid' || containerId === 'creationsGrid')
+    ) {
+      return MOBILE_FEED_PER_PAGE;
+    }
+    return FEED_PER_PAGE;
+  }
   const feedPagedStore = {};
   const feedPagedScrollBound = {};
   const feedScrollIntent = {};
@@ -564,7 +575,7 @@
   function inferFeedStorePageFromDom(containerId = 'communityGrid') {
     const rendered = getCommunityFeedRenderedPostIds(containerId).size;
     if (!rendered) return 1;
-    return Math.max(1, Math.ceil(rendered / FEED_PER_PAGE));
+    return Math.max(1, Math.ceil(rendered / feedPageSize(containerId)));
   }
 
   function resetCommunityFeedGrid(containerId = 'communityGrid') {
@@ -637,7 +648,7 @@
     const g = document.getElementById(containerId);
     const scrollEl = g ? (getFeedScrollRoot(g) || g) : null;
     const domUnique = getCommunityFeedRenderedPostIds(containerId).size;
-    const localEnd = store ? store.page * FEED_PER_PAGE >= store.posts.length : true;
+    const localEnd = store ? store.page * feedPageSize(containerId) >= store.posts.length : true;
     console.log('[feed-page]', label, {
       containerId,
       page: store?.page,
@@ -655,10 +666,11 @@
     });
   }
 
-  function getPendingFeedPosts(store, containerId, limit = FEED_PER_PAGE) {
+  function getPendingFeedPosts(store, containerId, limit) {
     if (!store?.posts?.length) return [];
+    const cap = Number.isFinite(limit) && limit > 0 ? limit : feedPageSize(containerId);
     const seen = getCommunityFeedRenderedPostIds(containerId);
-    return store.posts.filter((p) => !seen.has(String(p.id))).slice(0, limit);
+    return store.posts.filter((p) => !seen.has(String(p.id))).slice(0, cap);
   }
 
   function countFeedDomUnique(containerId = 'communityGrid') {
@@ -780,7 +792,6 @@
       return false;
     }
     communityFeedPageLoading = true;
-    feedScrollIntent[containerId] = true;
     try {
       const beforeDom = countFeedDomUnique(containerId);
       let batch = getPendingFeedPosts(store, containerId);
@@ -793,7 +804,7 @@
       }
       store.page = Math.max(
         store.page || 1,
-        Math.ceil((beforeDom + batch.length) / FEED_PER_PAGE)
+        Math.ceil((beforeDom + batch.length) / feedPageSize(containerId))
       );
       await renderPostsIntoContainer(store.posts, containerId, {
         feedAppend: true,
@@ -814,8 +825,8 @@
         ensureFeedPageSentinel(container);
         reconnectFeedPageObserver(containerId);
         finishCommunityFeedLayoutAfterBatch(containerId);
-        requestAnimationFrame(() => maybeChainFeedPageLoad(containerId, container));
       }
+      feedScrollIntent[containerId] = false;
     }
   }
 
@@ -859,13 +870,12 @@
     const store = feedPagedStore[containerId];
     if (!store || !store.posts.length) return;
     const rendered = getCommunityFeedRenderedPostIds(containerId).size;
-    const target = store.posts.length;
     if (!rendered) {
       await renderPostsIntoContainer(store.posts, containerId);
     }
-    if (added > 0 || rendered < target) {
-      await drainCommunityFeedPages(containerId, 8);
-    }
+    if (added > 0) delete grid?.dataset?.feedPageDone;
+    ensureFeedPageSentinel(grid);
+    reconnectFeedPageObserver(containerId);
   }
 
   function shouldPreserveCommunityFeedDom(containerId = 'communityGrid', list) {
@@ -878,13 +888,13 @@
     const sig = feedListSignature(posts, containerId);
     if (grid.dataset.feedSig !== sig) return false;
     const rendered = getCommunityFeedRenderedPostIds(containerId).size;
-    const firstPageTarget = Math.min(FEED_PER_PAGE, store.posts.length);
+    const firstPageTarget = Math.min(feedPageSize(containerId), store.posts.length);
     return rendered >= firstPageTarget;
   }
 
   function scheduleCommunityFeedInitialDrain(containerId = 'communityGrid') {
     if (!useFeedPagedRender(containerId)) return;
-    void drainCommunityFeedPages(containerId, 6);
+    requestAnimationFrame(() => reconnectFeedPageObserver(containerId));
   }
 
   function appendRenderableToFeedStore(containerId, rawPosts) {

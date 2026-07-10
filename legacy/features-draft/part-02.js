@@ -12,7 +12,7 @@
     }
     if (getPendingFeedPosts(store, containerId, 1).length) return true;
     if (countFeedDomUnique(containerId) < store.posts.length) return true;
-    if (store.page * FEED_PER_PAGE < store.posts.length) return true;
+    if (store.page * feedPageSize(containerId) < store.posts.length) return true;
     if (store.remoteExhausted && !publicFeedState.remoteHasMore) {
       logFeedPageDebug(containerId, 'remote_exhausted_local_end');
       return false;
@@ -28,7 +28,7 @@
       const batch = await fetchMorePublicCommunityFeed();
       if (batch === null) {
         logFeedPageDebug(containerId, 'api_null_keep_local', { attempts });
-        return store.page * FEED_PER_PAGE < store.posts.length;
+        return store.page * feedPageSize(containerId) < store.posts.length;
       }
       if (!batch.length) {
         store.remoteExhausted = true;
@@ -48,7 +48,7 @@
       }
       // 满页但均已存在 store：offset 已推进，继续尝试下一批
     }
-    return store.page * FEED_PER_PAGE < store.posts.length;
+    return store.page * feedPageSize(containerId) < store.posts.length;
   }
 
   async function syncMyPostsToPublicFeed() {

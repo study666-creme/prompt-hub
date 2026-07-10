@@ -117,6 +117,14 @@ foreach ($path in $tracked) {
   }
 }
 
+$runtimeBuildOutput = & node (Join-Path $root "scripts\build-pages-runtime.mjs") $staging
+if ($LASTEXITCODE -ne 0) {
+  throw "Unable to build consolidated Pages runtime assets"
+}
+foreach ($line in $runtimeBuildOutput) {
+  Write-Host $line -ForegroundColor DarkGray
+}
+
 $files = Get-ChildItem $staging -Recurse -File
 $count = $files.Count
 $sizeMb = [math]::Round((($files | Measure-Object Length -Sum).Sum / 1MB), 2)

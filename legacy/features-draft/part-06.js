@@ -166,11 +166,12 @@
     const showImage = !!(displayRef && isDisplayableImage(displayRef));
     const div = document.createElement('div');
     const visualOnly = containerId === 'communityGrid' || containerId === 'creationsGrid';
+    const enterClass = cardOpts.animate === true ? ' feed-card-enter' : '';
     div.className = visualOnly
       ? (showImage
-        ? 'card community-post-card community-post-card--visual feed-card-enter'
-        : 'card community-post-card community-post-card--text feed-card-enter')
-      : 'card community-post-card feed-card-enter';
+        ? `card community-post-card community-post-card--visual${enterClass}`
+        : `card community-post-card community-post-card--text${enterClass}`)
+      : `card community-post-card${enterClass}`;
     div.dataset.postId = post.id;
     if (post.sourceCardId) div.dataset.sourceCardId = post.sourceCardId;
     if (post.authorId) div.dataset.authorId = post.authorId;
@@ -245,9 +246,15 @@
     });
     const authorBtn = div.querySelector('.community-author-link');
     if (authorBtn) bindAuthorLink(authorBtn, post.authorId, post.authorName);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => div.classList.remove('feed-card-enter'));
-    });
+    if (cardOpts.animate === true) {
+      div.style.animationDelay = `${Math.min(Number(cardOpts.enterIndex || 0) * 0.024, 0.18).toFixed(3)}s`;
+      const clearEnter = () => {
+        div.classList.remove('feed-card-enter');
+        div.style.animationDelay = '';
+      };
+      div.addEventListener('animationend', clearEnter, { once: true });
+      setTimeout(clearEnter, 800);
+    }
     return div;
   }
 
@@ -265,9 +272,8 @@
     bindFeedScrollLock(containerId);
     container.__feedScrollLockRefresh?.();
     const scrollTargets = collectFeedScrollTargets(containerId, container);
-    const scrollEl = resolveFeedPageIoRoot(containerId, container, scrollTargets) || scrollTargets[0] || container;
 
-    async function drainFeedPages(maxPages = 8) {
+    async function drainFeedPages(maxPages = 1) {
       if (!canLoadMoreFeedPages(containerId)) return;
       logFeedPageDebug(containerId, 'drain_start', { maxPages });
       await drainCommunityFeedPages(containerId, maxPages);
@@ -284,7 +290,8 @@
       const now = Date.now();
       if (now - feedPageScrollThrottle < 180) return;
       feedPageScrollThrottle = now;
-      void drainFeedPages(6);
+      feedScrollIntent[containerId] = false;
+      void drainFeedPages(1);
     }
 
     container.__feedScrollTargets = container.__feedScrollTargets || new Set();
@@ -306,23 +313,20 @@
     const ioRoot = resolveFeedPageIoRoot(containerId, container, scrollTargets);
     const io = new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting)) return;
-      if (isFeedScrollLocked() || !canLoadMoreFeedPages(containerId)) return;
+      if (!feedScrollIntent[containerId] || isFeedScrollLocked() || !canLoadMoreFeedPages(containerId)) return;
       const now = Date.now();
       if (now - feedPageScrollThrottle < 180) return;
       feedPageScrollThrottle = now;
-      void drainFeedPages(4);
-    }, { root: ioRoot, rootMargin: '420px 0px', threshold: 0 });
+      feedScrollIntent[containerId] = false;
+      void drainFeedPages(1);
+    }, {
+      root: ioRoot,
+      rootMargin: isMobileViewport() ? '160px 0px' : '280px 0px',
+      threshold: 0
+    });
     io.observe(sentinel);
     container.__feedPageIo = io;
     container.__feedPageIoRoot = ioRoot;
-    if (!container.dataset.feedPageDone && canLoadMoreFeedPages(containerId) && !feedScrollIntent[containerId]) {
-      requestAnimationFrame(() => {
-        if (!canLoadMoreFeedPages(containerId) || feedScrollIntent[containerId]) return;
-        if (isFeedNearBottom(scrollEl) || isFeedNearBottom(container)) {
-          void drainFeedPages(1);
-        }
-      });
-    }
   }
 
   async function renderPostsIntoContainer(posts, containerId, opts = {}) {
@@ -366,15 +370,16 @@
     if (paginate) {
       if (!feedAppend) {
         feedPagedStore[containerId] = { sig, posts: renderPosts, page: 1, remoteExhausted: false };
-        postsToRender = renderPosts.slice(0, FEED_PER_PAGE);
+        postsToRender = renderPosts.slice(0, feedPageSize(containerId));
       } else {
         const store = feedPagedStore[containerId];
         if (!store) return;
         if (Array.isArray(opts.feedAppendPosts) && opts.feedAppendPosts.length) {
           postsToRender = opts.feedAppendPosts;
         } else {
-          const start = (store.page - 1) * FEED_PER_PAGE;
-          postsToRender = store.posts.slice(start, start + FEED_PER_PAGE);
+          const pageSize = feedPageSize(containerId);
+          const start = (store.page - 1) * pageSize;
+          postsToRender = store.posts.slice(start, start + pageSize);
           if (containerId === 'communityGrid' || containerId === 'creationsGrid') {
             const seenDom = getCommunityFeedRenderedPostIds(containerId);
             postsToRender = postsToRender.filter((p) => !seenDom.has(String(p.id)));
@@ -403,7 +408,7 @@
     const inCommunityFeed =
       containerId === 'communityGrid' || containerId === 'creationsGrid' || containerId === 'userProfileGrid';
     if (inCommunityFeed && imageRefs.length) {
-      const prefetchCap = Math.min(postsToRender.length, FEED_PER_PAGE);
+      const prefetchCap = Math.min(postsToRender.length, feedPageSize(containerId));
       const prefetchItems = postsToRender.slice(0, prefetchCap).map((p) => ({
         id: p.sourceCardId || p.id,
         image: canonicalCommunityImageRef(p) || p.image,
@@ -422,8 +427,11 @@
       } catch (e) { /* ignore */ }
       if (feedAppend) {
         void prefetchP.finally?.(() => {
-          window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: FEED_PER_PAGE });
-          window.CardImageLoader?.boostCommunityFeedImages?.(container, FEED_PER_PAGE);
+          window.MediaPipeline?.patchContainerFromCache?.(container, {
+            visibleFirst: true,
+            max: feedPageSize(containerId)
+          });
+          window.CardImageLoader?.boostCommunityFeedImages?.(container, feedPageSize(containerId));
         });
       }
     }
@@ -436,10 +444,14 @@
       fragment.appendChild(sizer);
     }
 
-    const eagerCap = feedAppend ? postsToRender.length : (isMobileViewport() ? 24 : 18);
+    const eagerCap = feedAppend ? 0 : (isMobileViewport() ? 6 : 12);
     const feedOrderBase = feedAppend ? countFeedDomUnique(containerId) : 0;
     postsToRender.forEach((post, idx) => {
-      const cardEl = createCommunityFeedCard(post, containerId, { eagerImage: idx < eagerCap });
+      const cardEl = createCommunityFeedCard(post, containerId, {
+        eagerImage: idx < eagerCap,
+        animate: feedAppend,
+        enterIndex: idx
+      });
       cardEl.dataset.feedOrder = String(feedOrderBase + idx);
       fragment.appendChild(cardEl);
     });
@@ -472,7 +484,7 @@
       restoreLoadedFeedImages(container, preservedImgs);
       window.MediaPipeline?.patchContainerFromCache?.(container);
       window.CardImageLoader?.observeContainer?.(container);
-      window.CardImageLoader?.boostCommunityFeedImages?.(container, FEED_PER_PAGE);
+      window.CardImageLoader?.boostCommunityFeedImages?.(container, feedPageSize(containerId));
       container.querySelectorAll('.card-media img.card-img').forEach((img) => {
         const src = img.currentSrc || img.src || '';
         if (img.complete && img.naturalWidth > 8 && src.startsWith('http') && !src.includes('data:image/svg')) {
@@ -495,7 +507,7 @@
     restoreLoadedFeedImages(container, preservedImgs);
     window.MediaPipeline?.patchContainerFromCache?.(container);
     window.CardImageLoader?.observeContainer?.(container);
-    window.CardImageLoader?.boostCommunityFeedImages?.(container, FEED_PER_PAGE);
+    window.CardImageLoader?.boostCommunityFeedImages?.(container, feedPageSize(containerId));
     container.querySelectorAll('.card-media img.card-img').forEach((img) => {
       const src = img.currentSrc || img.src || '';
       if (img.complete && img.naturalWidth > 8 && src.startsWith('http') && !src.includes('data:image/svg')) {
@@ -521,58 +533,39 @@
       if (!runCommunityFeedLayoutPass(containerId)) {
         scheduleCommunityLayout(containerId, { force: true, immediate: true });
       }
-      if (!feedAppend && paginate && (containerId === 'communityGrid' || containerId === 'creationsGrid')) {
-        const store = feedPagedStore[containerId];
-        if (store?.posts?.length > FEED_PER_PAGE && !window.__PH_FEED_BULK_DRAIN__ && !feedScrollIntent[containerId]) {
-          void drainCommunityFeedPages(containerId, 1);
-        }
-      }
       await new Promise((r) => requestAnimationFrame(r));
       if (renderGen !== communityFeedRenderGen) return;
       window.MediaPipeline?.patchContainerFromCache?.(container);
       window.CardImageLoader?.observeContainer?.(container);
-      window.CardImageLoader?.boostCommunityFeedImages?.(container, FEED_PER_PAGE);
+      window.CardImageLoader?.boostCommunityFeedImages?.(container, feedPageSize(containerId));
       const mobile = isMobileViewport();
-      const prefetchCap = mobile ? 24 : 40;
-      const cardLike = posts.map((p) => ({
-        id: p.sourceCardId || p.id,
-        image: canonicalCommunityImageRef(p) || p.image,
-        sourceCardId: p.sourceCardId,
-        authorId: p.authorId
-      }));
       const uid = window.SupabaseSync?.getUserId?.();
       if (uid && window.SupabaseSync?.backfillGridThumbsForCards) {
         const ownCards = (window.__promptHubCards || []).filter((c) => {
           if (!c?.image || !c?.publishedToCommunity) return false;
           const path = window.SupabaseSync?.storagePathFromRef?.(c.image);
           return path && window.SupabaseSync?.storagePathOwnedByCurrentUser?.(path);
-        }).slice(0, 24);
+        }).slice(0, 6);
         if (ownCards.length) {
-          void window.SupabaseSync.backfillGridThumbsForCards(ownCards, {
-            max: ownCards.length,
-            force: true,
-            quiet: true,
-            awaitDrain: false
-          });
+          const backfill = () => window.SupabaseSync.backfillGridThumbsForCards(ownCards, {
+              max: ownCards.length,
+              force: true,
+              quiet: true,
+              awaitDrain: false
+            });
+          if (typeof requestIdleCallback === 'function') requestIdleCallback(backfill, { timeout: 10000 });
+          else setTimeout(backfill, 5000);
         }
       }
-      const inCommunityFeed =
-        containerId === 'communityGrid' || containerId === 'creationsGrid' || containerId === 'userProfileGrid';
-      const prefetchP = inCommunityFeed && imageRefs.length && window.SupabaseSync?.prefetchCommunityDisplayUrls
-        ? window.SupabaseSync.prefetchCommunityDisplayUrls(cardLike.slice(0, prefetchCap), mobile ? 5000 : 5500)
-        : imageRefs.length && window.SupabaseSync?.prefetchDisplayUrlsWithCap
-          ? window.SupabaseSync.prefetchDisplayUrlsWithCap(imageRefs.slice(0, prefetchCap), mobile ? 4500 : 5500)
-          : Promise.resolve();
-      void prefetchP.catch(() => {});
       const hydrateP = hydrateFeedImages(container);
       await Promise.race([
-        Promise.all([hydrateP, prefetchP]),
+        hydrateP,
         new Promise((r) => setTimeout(r, mobile ? 3200 : 2600))
       ]);
       if (renderGen !== communityFeedRenderGen) return;
       window.MediaPipeline?.patchContainerFromCache?.(container);
       window.CardImageLoader?.observeContainer?.(container);
-      window.CardImageLoader?.boostCommunityFeedImages?.(container, FEED_PER_PAGE);
+      window.CardImageLoader?.boostCommunityFeedImages?.(container, feedPageSize(containerId));
       finalizeFeedContainer(container, containerId);
       finishLayout();
       void hydrateP.then(() => {
@@ -874,9 +867,7 @@
       return;
     }
     void renderPostsIntoContainer(list, 'communityGrid').then(() => {
-      if (!feedScrollIntent.communityGrid) {
-        void drainCommunityFeedPages('communityGrid', 1);
-      }
+      reconnectFeedPageObserver('communityGrid');
     });
   }
 

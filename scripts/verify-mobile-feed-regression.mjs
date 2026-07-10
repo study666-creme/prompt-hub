@@ -63,7 +63,12 @@ checkTokens('loader', loader, requiredLoaderTokens);
 checkTokens('layout', layout, requiredLayoutTokens);
 checkTokens('image-feed', imageFeed, requiredImageFeedTokens);
 checkTokens('mobile-css', mobileCss, requiredCssTokens);
-checkTokens('warehouse-page-size', scriptPart01, ['const MOBILE_PER_PAGE = 24;']);
+checkTokens('warehouse-page-size', scriptPart01, ['const MOBILE_PER_PAGE = 12;']);
+checkTokens('community-strict-lazy', loader, [
+  '|| isCommunityContainer(container);',
+  "window.MobileUI?.isMobileViewport?.() ? '160px 0px' : '280px 0px'",
+  'const nearPx = window.MobileUI?.isMobileViewport?.() ? 180 : 360;'
+]);
 checkTokens('warehouse-full-fallback', scriptPart09, [
   "const allowFullFallback = viewMode !== 'list' && showImage;",
   'data-allow-full-fallback="1"'

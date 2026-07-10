@@ -396,9 +396,6 @@
       });
       setCloudSyncPhase(cards.length ? 'saved' : 'idle');
       lastBgCloudSyncAt = Date.now();
-      if (isMobileViewport() && cards.length) {
-        setTimeout(() => window.MobileUI?.primeMobileWarehouseBackground?.(cards), 480);
-      }
       scheduleCrossDeviceGenRecovery();
       try {
         sessionStorage.removeItem('promptrepo_pending_guest_migrate');

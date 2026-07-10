@@ -267,7 +267,7 @@
     let page = 1, allFilteredCards = [];
     const warehouseRenderedPages = new Set();
     const PER_PAGE = 24;
-    const MOBILE_PER_PAGE = 24;
+    const MOBILE_PER_PAGE = 12;
     function warehousePageSize() {
       return isMobileViewport() ? MOBILE_PER_PAGE : PER_PAGE;
     }

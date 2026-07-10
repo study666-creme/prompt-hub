@@ -20,11 +20,11 @@
   }
 
   const APP_PATH = {
-    warehouse: '/prompts',
-    imagegen: '/generate',
-    community: '/community',
-    creations: '/profile',
-    devlab: '/dev'
+    warehouse: '/prompts/',
+    imagegen: '/generate/',
+    community: '/community/',
+    creations: '/profile/',
+    devlab: '/dev/'
   };
 
   const APP_TITLE = {
@@ -56,7 +56,7 @@
   }
 
   function pathForApp(app) {
-    return APP_PATH[app] || '/community';
+    return APP_PATH[app] || '/community/';
   }
 
   function getPromptCanvasUrl() {
@@ -74,10 +74,11 @@
     if (!app || !APP_PATH[app]) return;
     const path = pathForApp(app);
     const cur = normalizePath(window.location.pathname);
-    if (cur === path) return;
+    const sameRoute = cur === normalizePath(path);
+    if (sameRoute && window.location.pathname === path) return;
     const url = path + window.location.search + window.location.hash;
     try {
-      if (replace) window.history.replaceState({ phApp: app }, '', url);
+      if (replace || sameRoute) window.history.replaceState({ phApp: app }, '', url);
       else window.history.pushState({ phApp: app }, '', url);
     } catch (e) { /* ignore file:// */ }
     syncDocumentTitle(app);
@@ -91,13 +92,14 @@
   }
 
   function resolveBootApp() {
-    const fromUrl = appFromPath(window.location.pathname);
-    if (fromUrl) return fromUrl;
+    const path = normalizePath(window.location.pathname);
+    const fromUrl = appFromPath(path);
+    if (fromUrl && path !== '/') return fromUrl;
     try {
       const saved = localStorage.getItem('promptrepo_app_page');
       if (saved && APP_PATH[saved]) return saved;
     } catch (e) { /* ignore */ }
-    return 'community';
+    return fromUrl || 'community';
   }
 
   function init(onNavigate) {

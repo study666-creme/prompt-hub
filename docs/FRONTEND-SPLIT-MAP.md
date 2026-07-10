@@ -1,6 +1,6 @@
 # Frontend Split Map
 
-Updated: 2026-07-07
+Updated: 2026-07-10
 
 This project still ships classic browser scripts from the site root, but several formerly large files are now thin runtime loaders. The real source is split into ordered chunks so classic script execution order and old global/IIFE behavior stay unchanged.
 
@@ -24,7 +24,19 @@ Do not paste old monolithic code back into these root files. Edit the matching `
 - `styles.css` imports `styles/base/part-*.css`.
 - `styles-features.css` imports `styles/features/part-*.css`.
 
-The split loaders are synchronous on purpose. They preserve the old blocking order before downstream classic scripts run.
+The source split loaders are synchronous in the repository so local development keeps the old classic-script order. They must not be shipped as the production request graph.
+
+## Pages Runtime Consolidation
+
+`scripts/stage-pages.ps1` runs `scripts/build-pages-runtime.mjs` after copying tracked assets into `.pages-deploy/`. The staging-only build:
+
+- concatenates `supabase-sync.js`, `script.js`, and `features-draft.js` from their ordered source chunks;
+- concatenates `styles.css` and `styles-features.css` from their ordered CSS chunks;
+- inlines the four `partials/index-body/part-*.html` fragments into the staged `index.html`.
+
+The split source files remain canonical and editable. Production must contain the `__PROMPT_HUB_DEPLOY_BUNDLE__` marker in the five consolidated JS/CSS entries and must make zero requests to the main runtime `part-*` files.
+
+The browser routes use canonical trailing-slash paths (`/prompts/`, `/generate/`, `/community/`, `/profile/`, `/dev/`). Keep `<base href="/">` in `index.html`; without it, a cold refresh would resolve root assets under the route directory. `_redirects` converts old non-trailing-slash links to the canonical paths.
 
 ## Generated Files
 
@@ -60,6 +72,19 @@ node scripts/run-index-local-http-smoke.mjs
 ```
 
 `run-predeploy-smoke.ps1` validates JS chunks, CSS chunks, index body fragments, bundle contracts, VM smoke tests, and key regressions. `run-index-local-http-smoke.mjs` starts a temporary static server and then runs `run-index-http-smoke.mjs`. `deploy-pages.ps1` also runs production HTTP smoke after upload.
+
+For the first-screen paging and request-budget browser checks:
+
+```powershell
+$env:PLAYWRIGHT_PACKAGE_DIR = '<playwright package directory>'
+$env:BROWSER_EXECUTABLE_PATH = '<Chrome or Edge executable>'
+node scripts/verify-mobile-first-screen-browser.mjs
+
+$env:APP_ROOT = 'D:\prompt-hub\.pages-deploy'
+node scripts/verify-mobile-first-screen-browser.mjs
+```
+
+The production audit is `scripts/audit-production-mobile-first-screen.mjs`; pass credentials through `PH_TEST_EMAIL` and `PH_TEST_PASSWORD`, never in source.
 
 On Windows, npm 8 can fail lifecycle scripts whose names contain `:` because it creates temporary `.cmd` files from the script name. Prefer the colon-free aliases:
 

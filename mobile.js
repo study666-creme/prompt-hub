@@ -18,11 +18,11 @@
 
   /** 手机端性能参数（card-image-loader / warehouse-thumb / 首屏预热共用） */
   const MOBILE_PERF = {
-    warehousePrefetchCap: 24,
-    warehouseThumbBatch: 24,
+    warehousePrefetchCap: 12,
+    warehouseThumbBatch: 12,
     warehouseThumbDelay: 0,
-    cardEagerCap: 24,
-    cardFirstScreenCap: 24,
+    cardEagerCap: 8,
+    cardFirstScreenCap: 12,
     igFeedPatchMax: 24,
     igFeedPrefetchCap: 24,
     igFeedBoostMax: 24,
@@ -473,6 +473,7 @@
   /** 登录/同步后后台预热卡片库 grid（不阻塞 UI；单链路 prefetchWarehousePage） */
   function primeMobileWarehouseBackground(cardList) {
     if (!isMobile() || !cardList?.length) return;
+    if (!document.getElementById('pageWarehouse')?.classList.contains('active')) return;
     const maxCards = MOBILE_PERF.warehousePrefetchCap || 8;
     const slice = cardList.slice(0, maxCards);
     if (window.PromptHubMedia?.prefetchWarehouseCards) {

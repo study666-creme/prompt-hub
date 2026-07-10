@@ -558,14 +558,6 @@
     return target.scrollTop + target.clientHeight >= target.scrollHeight - margin;
   }
 
-  function maybeChainFeedPageLoad(containerId, container) {
-    if (!container || communityFeedPageLoading || !canLoadMoreFeedPages(containerId)) return;
-    const targets = collectFeedScrollTargets(containerId, container);
-    if (!targets.some((t) => isFeedNearBottom(t))) return;
-    void drainCommunityFeedPages(containerId, 3);
-  }
-
-
   function finalizeFeedContainer(container, containerId) {
     if (!container) return;
     if (container.dataset.feedFinalized === '1') return;
