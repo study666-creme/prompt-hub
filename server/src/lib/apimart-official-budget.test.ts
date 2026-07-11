@@ -32,4 +32,13 @@ describe('apimart official budget', () => {
     });
     expect(String(body.size)).not.toMatch(/x/i);
   });
+
+  it('does not expose the removed 1k tier', () => {
+    const body = buildApimartOfficialBudgetRequestBody({
+      prompt: 'test',
+      resolution: '1k',
+      size: '3:1'
+    });
+    expect(body.resolution).toBe('2k');
+  });
 });

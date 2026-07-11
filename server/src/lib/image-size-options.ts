@@ -69,8 +69,22 @@ export const BASIC_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4'] as cons
 /** Midjourney 常用宽高比 */
 export const MJ_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] as const;
 
-/** Apimart official 特价：Apimart 定价表有档位的比例，去掉 1:1（太贵） */
-export const APIMART_OFFICIAL_BUDGET_RATIOS = ['16:9', '9:16', '4:3', '3:4'] as const;
+/** official 特价：2K/4K low 均能保留至少一分钱毛差的比例 */
+export const APIMART_OFFICIAL_BUDGET_RATIOS = [
+  '3:1',
+  '1:3',
+  '21:9',
+  '9:21',
+  '2:1',
+  '1:2',
+  '16:9',
+  '9:16'
+] as const;
+
+const OFFICIAL_BUDGET_MODEL_IDS = new Set([
+  'apimart-gpt-image-2-official-budget',
+  'newapi-gpt-image-2-official-budget'
+]);
 
 /** 木瓜 gpt-image-2-pro 文档合法比例 */
 export const MOOKO_PRO_ASPECT_RATIOS = ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'] as const;
@@ -86,7 +100,7 @@ export function aspectRatiosForModel(modelId: string): readonly string[] {
   const id = String(modelId || '')
     .trim()
     .toLowerCase();
-  if (id === 'apimart-gpt-image-2-official-budget') return APIMART_OFFICIAL_BUDGET_RATIOS;
+  if (OFFICIAL_BUDGET_MODEL_IDS.has(id)) return APIMART_OFFICIAL_BUDGET_RATIOS;
   if (id.startsWith('newapi-gpt-image-2')) return IMAGE2_ASPECT_RATIOS;
   if (id === 'apimart-gpt-image-2') return IMAGE2_ASPECT_RATIOS;
   if (id === 'apimart-seedream-5-lite' || id.includes('seedream')) return BASIC_ASPECT_RATIOS;

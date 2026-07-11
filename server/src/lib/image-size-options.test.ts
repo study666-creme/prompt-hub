@@ -8,7 +8,13 @@ import {
 
 describe('aspectRatiosForModel', () => {
   it('budget line only exposes priced ratios without 1:1', () => {
+    expect(APIMART_OFFICIAL_BUDGET_RATIOS).toEqual([
+      '3:1', '1:3', '21:9', '9:21', '2:1', '1:2', '16:9', '9:16'
+    ]);
     expect(aspectRatiosForModel('apimart-gpt-image-2-official-budget')).toEqual([
+      ...APIMART_OFFICIAL_BUDGET_RATIOS
+    ]);
+    expect(aspectRatiosForModel('newapi-gpt-image-2-official-budget')).toEqual([
       ...APIMART_OFFICIAL_BUDGET_RATIOS
     ]);
   });

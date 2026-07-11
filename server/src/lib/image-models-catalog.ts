@@ -215,90 +215,95 @@ export const GRSAI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvider(
   })
 ]);
 
-/** New API 线路：成本从 /api/pricing 动态刷新；默认值是 2026-07-09 的兜底价 */
+/** New API 线路：上下架、能力和价格从 /api/model-catalog 动态刷新；这里仅保留故障兜底 */
 export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   newApi(gim2({
-    id: 'newapi-gpt-image-2',
+    id: 'image2',
     upstream: 'gpt-image-2',
-    label: 'GPT Image 2 · New API',
+    label: 'Image2',
     group: 'new',
-    description: 'New API 标准 1K 生图',
-    upstreamPoints: 0.02,
-    refundOnViolation: true,
-    resolutions: ['1k'],
-    defaultCredits: 2,
-    sortOrder: 90
-  })),
-  newApi(gim2({
-    id: 'newapi-gpt-image-2-ext-1k',
-    upstream: 'gpt-image-2-ext-1k',
-    label: 'GPT Image 2 Ext · 1K',
-    group: 'new',
-    description: 'New API 扩展版，1K，支持多比例',
+    description: '标准生图模型，固定 1K',
     upstreamPoints: 0.055,
     refundOnViolation: true,
     resolutions: ['1k'],
-    defaultCredits: 6,
+    defaultCredits: 5.5,
+    sortOrder: 90
+  })),
+  newApi(gim2({
+    id: 'image2-pro',
+    upstream: 'gpt-image-2-ext',
+    label: 'Image2 Pro',
+    group: 'new',
+    description: '扩展版，2K/4K 分档，支持多比例',
+    upstreamPoints: 0.15,
+    refundOnViolation: true,
+    resolutions: ['2k', '4k'],
+    pricingByResolution: true,
+    defaultCreditsByResolution: { '2k': 15, '4k': 20 },
+    defaultCredits: 15,
     sortOrder: 91
   })),
   newApi(gim2({
-    id: 'newapi-gpt-image-2-ext-2k',
-    upstream: 'gpt-image-2-ext-2k',
-    label: 'GPT Image 2 Ext · 2K',
+    id: 'image2-hd',
+    upstream: 'image2k4k',
+    label: 'Image2 HD',
     group: 'new',
-    description: 'New API 扩展版，2K，支持多比例',
-    upstreamPoints: 0.15,
+    description: '固定 low，2K/4K 分档，仅开放安全比例',
+    upstreamPoints: 0,
     refundOnViolation: true,
-    resolutions: ['2k'],
-    defaultCredits: 15,
+    resolutions: ['2k', '4k'],
+    pricingByResolution: true,
+    defaultCreditsByResolution: { '2k': 5.5, '4k': 9 },
+    defaultCredits: 5.5,
+    fixedQualityLow: true,
     sortOrder: 92
   })),
-  newApi(gim2({
-    id: 'newapi-gpt-image-2-ext-4k',
-    upstream: 'gpt-image-2-ext-4k',
-    label: 'GPT Image 2 Ext · 4K',
-    group: 'new',
-    description: 'New API 扩展版，4K，支持多比例',
-    upstreamPoints: 0.2,
-    refundOnViolation: true,
-    resolutions: ['4k'],
-    defaultCredits: 20,
-    sortOrder: 93
-  })),
   newApi(banana({
-    id: 'newapi-nano-banana-fast',
+    id: 'lingtu-fast',
     upstream: 'nano-banana-fast',
-    label: 'Nano Banana Fast · New API',
+    label: '灵图 极速',
     group: 'new',
-    description: 'New API 快速草图，1K',
+    description: '快速生图模型，固定 1K',
     upstreamPoints: 0.04,
     refundOnViolation: true,
     resolutions: ['1k'],
     defaultCredits: 4,
-    sortOrder: 94
+    sortOrder: 93
   })),
   newApi(banana({
-    id: 'newapi-nano-banana-2',
+    id: 'lingtu-2',
     upstream: 'nano-banana-2',
-    label: 'Nano Banana 2 · New API',
+    label: '灵图 2',
     group: 'new',
-    description: 'New API 日常均衡，1K/2K/4K',
+    description: '通用生图模型，支持 1K/2K/4K',
     upstreamPoints: 0.09,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],
     defaultCredits: 9,
-    sortOrder: 95
+    sortOrder: 94
   })),
   newApi(banana({
-    id: 'newapi-nano-banana-pro',
+    id: 'lingtu-pro',
     upstream: 'nano-banana-pro',
-    label: 'Nano Banana Pro · New API',
+    label: '灵图 Pro',
     group: 'new',
-    description: 'New API 专业通用，1K/2K/4K',
+    description: '高质量通用生图模型，支持 1K/2K/4K',
     upstreamPoints: 0.13,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],
     defaultCredits: 13,
+    sortOrder: 95
+  })),
+  newApi(banana({
+    id: 'lingtu',
+    upstream: 'nano-banana',
+    label: '灵图',
+    group: 'new',
+    description: '通用生图模型，支持 1K/2K/4K',
+    upstreamPoints: 0.11,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k', '4k'],
+    defaultCredits: 11,
     sortOrder: 96
   }))
 ];
@@ -313,10 +318,10 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = withProvide
     description: '低价档 · 固定低质量 · 无正方形比例',
     upstreamPoints: 0,
     refundOnViolation: true,
-    resolutions: ['1k', '2k', '4k'],
+    resolutions: ['2k', '4k'],
     pricingByResolution: true,
-    defaultCreditsByResolution: { '1k': 3, '2k': 4, '4k': 9 },
-    defaultCredits: 3,
+    defaultCreditsByResolution: { '2k': 6, '4k': 9 },
+    defaultCredits: 6,
     fixedQualityLow: true,
     sortOrder: 100
   }),
@@ -528,7 +533,25 @@ export function sanitizePublicModelDescription(description: string | null | unde
 
 const LEGACY_MODEL_MAP: Record<string, string> = {
   quanneng2: 'gpt-image-2',
-  jimeng: 'nano-banana-pro'
+  jimeng: 'nano-banana-pro',
+  'newapi-gpt-image-2': 'image2',
+  'gpt-image-2-ext-1k': 'image2',
+  'gpt-image-2-ext-2k': 'image2-pro',
+  'gpt-image-2-ext-4k': 'image2-pro',
+  'newapi-gpt-image-2-ext': 'image2-pro',
+  'newapi-gpt-image-2-ext-1k': 'image2',
+  'newapi-gpt-image-2-ext-2k': 'image2-pro',
+  'newapi-gpt-image-2-ext-4k': 'image2-pro',
+  'gpt-image-2-official': 'image2-hd',
+  'gpt-image-2-official-1k': 'image2-hd',
+  'gpt-image-2-official-2k': 'image2-hd',
+  'gpt-image-2-official-4k': 'image2-hd',
+  'newapi-gpt-image-2-official-budget': 'image2-hd',
+  image2k4k: 'image2-hd',
+  'newapi-nano-banana-fast': 'lingtu-fast',
+  'newapi-nano-banana-2': 'lingtu-2',
+  'newapi-nano-banana-pro': 'lingtu-pro',
+  'newapi-nano-banana': 'lingtu'
 };
 
 export function normalizeImageModelId(raw?: string | null): string {
@@ -536,8 +559,8 @@ export function normalizeImageModelId(raw?: string | null): string {
     .trim()
     .toLowerCase();
   if (!id) return 'gpt-image-2';
-  if (id.startsWith('apimart-') || id.startsWith('newapi-')) return id;
   if (id in LEGACY_MODEL_MAP) return LEGACY_MODEL_MAP[id];
+  if (id.startsWith('apimart-') || id.startsWith('newapi-')) return id;
   return id;
 }
 

@@ -46,7 +46,14 @@ import {
   listResolvedImageModels,
   normalizeImageModelId
 } from '../../lib/image-model-settings';
-import { fetchNewApiPricingRules, newApiCreditsForModel } from '../../lib/newapi';
+import {
+  fetchNewApiModelCatalog,
+  imageCatalogForNewApiSnapshot,
+  newApiCreditsForModel,
+  type NewApiCatalogParameter,
+  type NewApiCatalogSnapshot,
+  type NewApiPricingRule
+} from '../../lib/newapi';
 import {
   deductUserCredits,
   refundUserCredits,
@@ -143,6 +150,20 @@ const bodySchema = z.object({
   refImageUrls: z.array(refImageInputSchema).max(16).optional(),
   mjParams: mjParamsSchema
 });
+
+function normalizeGenerationBodyAliases(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const input = raw as Record<string, unknown>;
+  const body: Record<string, unknown> = { ...input };
+  const quality = String(input.quality || '').trim().toLowerCase();
+  if (!input.resolution && (quality === '1k' || quality === '2k' || quality === '4k')) {
+    body.resolution = quality;
+    body.quality = 'standard';
+  }
+  if (body.refImageUrl == null && typeof input.image === 'string') body.refImageUrl = input.image;
+  if (body.refImageUrls == null && Array.isArray(input.images)) body.refImageUrls = input.images;
+  return body;
+}
 
 const mjBlendSchema = z.object({
   refImageUrls: z.array(refImageInputSchema).min(2).max(5),
@@ -308,12 +329,109 @@ function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boole
   return s ? `${s}${refundNote}` : `上游生图失败${refundNote}`;
 }
 
+function parameterOptions(
+  parameters: NewApiCatalogParameter[],
+  name: string
+): string[] {
+  const parameter = parameters.find(item => item.name === name);
+  if (!parameter) return [];
+  const values = parameter.options?.length
+    ? parameter.options
+    : Object.prototype.hasOwnProperty.call(parameter, 'fixed')
+      ? [parameter.fixed]
+      : [];
+  return values.map(value => String(value));
+}
+
+function publicDirectModelParameters(
+  model: NonNullable<ReturnType<typeof resolveImageModelConfig>>
+): NewApiCatalogParameter[] {
+  const parameters: NewApiCatalogParameter[] = [
+    { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: model.id },
+    { name: 'prompt', path: 'prompt', label: '提示词', type: 'string', required: true },
+    {
+      name: 'resolution',
+      path: 'resolution',
+      label: '分辨率',
+      type: 'string',
+      required: false,
+      default: model.resolutions[0] || '1k',
+      options: [...model.resolutions]
+    },
+    {
+      name: 'size',
+      path: 'size',
+      label: '画面比例',
+      type: 'string',
+      required: false,
+      default: aspectRatiosForModel(model.id)[0] || '1:1',
+      options: [...aspectRatiosForModel(model.id)]
+    },
+    {
+      name: 'refImageUrls',
+      path: 'refImageUrls',
+      label: '参考图',
+      type: 'array',
+      required: false,
+      min_items: 1,
+      max_items: model.uiFamily === 'midjourney' ? 5 : 16,
+      items: { type: 'string', format: 'uri-or-data-image' }
+    }
+  ];
+  if (!model.fixedQualityLow && model.uiFamily !== 'midjourney') {
+    parameters.push({
+      name: 'quality',
+      path: 'quality',
+      label: '质量',
+      type: 'string',
+      required: false,
+      default: 'standard',
+      options: ['standard', 'high', 'ultra']
+    });
+  }
+  if (model.uiFamily === 'midjourney') {
+    parameters.push(
+      { name: 'speed', path: 'mjParams.speed', label: '速度', type: 'string', required: false, default: 'relax', options: ['relax', 'fast', 'turbo'] },
+      { name: 'stylize', path: 'mjParams.stylize', label: '风格化', type: 'number', required: false, min: 0, max: 1000 },
+      { name: 'chaos', path: 'mjParams.chaos', label: '变化度', type: 'number', required: false, min: 0, max: 100 },
+      { name: 'weird', path: 'mjParams.weird', label: '怪异度', type: 'number', required: false, min: 0, max: 3000 },
+      { name: 'seed', path: 'mjParams.seed', label: '随机种子', type: 'integer', required: false },
+      { name: 'quality', path: 'mjParams.quality', label: '质量', type: 'string', required: false, options: ['0.25', '0.5', '1', '2'] },
+      { name: 'iw', path: 'mjParams.iw', label: '参考图权重', type: 'number', required: false, min: 0, max: 3 },
+      { name: 'raw', path: 'mjParams.raw', label: 'Raw 模式', type: 'boolean', required: false, default: false },
+      { name: 'tile', path: 'mjParams.tile', label: '无缝平铺', type: 'boolean', required: false, default: false }
+    );
+  }
+  return parameters;
+}
+
+function publicNewApiParameters(
+  modelId: string,
+  rule: NewApiPricingRule
+): NewApiCatalogParameter[] {
+  return rule.parameters.map(parameter =>
+    parameter.name === 'model'
+      ? { ...parameter, fixed: modelId }
+      : { ...parameter }
+  );
+}
+
+function newApiRuleForModel(
+  model: NonNullable<ReturnType<typeof resolveImageModelConfig>>,
+  snapshot: NewApiCatalogSnapshot
+): NewApiPricingRule | null {
+  if (model.provider !== 'newapi') return null;
+  return snapshot.rules.find(rule => rule.model === model.upstream) || null;
+}
+
 function publicModelPayload(
   settings: Awaited<ReturnType<typeof loadImageModelSettings>>,
   tier: import('../../lib/supabase').Profile['membership_tier'],
   memberActive: boolean,
-  opts?: { newApiRules?: Awaited<ReturnType<typeof fetchNewApiPricingRules>> }
+  opts: { newApiCatalog: NewApiCatalogSnapshot }
 ) {
+  const catalogEntries = imageCatalogForNewApiSnapshot(opts.newApiCatalog);
+  const newApiRules = opts.newApiCatalog.rules;
   const withFixedCredits = (
     cost: ReturnType<typeof computeImageGenerationCost>,
     credits: number
@@ -329,7 +447,7 @@ function publicModelPayload(
     modelDiscountLabel: null
   });
 
-  return listResolvedImageModels(settings, { publicList: true }).map((m) => {
+  return listResolvedImageModels(settings, { publicList: true, catalogEntries }).map((m) => {
     const resolutions = m.resolutions?.length ? m.resolutions : (['1k'] as const);
     const defaultRes = resolutions[0] || '1k';
     const costBySpeed = m.pricingBySpeed
@@ -341,7 +459,7 @@ function publicModelPayload(
               defaultRes,
               tier,
               memberActive,
-              { mjSpeed: speed }
+              { mjSpeed: speed, catalogEntries }
             );
             return acc;
           },
@@ -356,7 +474,8 @@ function publicModelPayload(
               m.id,
               res,
               tier,
-              memberActive
+              memberActive,
+              { catalogEntries }
             );
             return acc;
           },
@@ -364,19 +483,19 @@ function publicModelPayload(
         )
       : null;
     const remoteNewApiCredits = m.provider === 'newapi'
-      ? newApiCreditsForModel(opts?.newApiRules ?? [], m.upstream, defaultRes)
+      ? newApiCreditsForModel(newApiRules, m.upstream, defaultRes)
       : null;
     const cost =
       costBySpeed?.relax
       ?? costByResolution?.[defaultRes]
-      ?? computeImageGenerationCost(settings, m.id, defaultRes, tier, memberActive);
+      ?? computeImageGenerationCost(settings, m.id, defaultRes, tier, memberActive, { catalogEntries });
     const finalCost = remoteNewApiCredits != null && remoteNewApiCredits > 0
       ? withFixedCredits(cost, remoteNewApiCredits)
       : cost;
     const finalCostByResolution = m.provider === 'newapi' && costByResolution
       ? Object.fromEntries(
           Object.entries(costByResolution).map(([res, resCost]) => {
-            const credits = newApiCreditsForModel(opts?.newApiRules ?? [], m.upstream, res);
+            const credits = newApiCreditsForModel(newApiRules, m.upstream, res);
             return [
               res,
               credits != null && credits > 0 ? withFixedCredits(resCost, credits) : resCost
@@ -389,7 +508,7 @@ function publicModelPayload(
         ? Object.fromEntries(
             resolutions.map((res) => [
               res,
-              newApiCreditsForModel(opts?.newApiRules ?? [], m.upstream, res)
+              newApiCreditsForModel(newApiRules, m.upstream, res)
                 ?? m.creditsByResolution?.[res]
                 ?? m.defaultCredits
             ])
@@ -401,13 +520,14 @@ function publicModelPayload(
       m.provider === 'newapi' && m.pricingByResolution
         ? Object.fromEntries(
             resolutions.map((res) => {
-              const credits = newApiCreditsForModel(opts?.newApiRules ?? [], m.upstream, res);
+              const credits = newApiCreditsForModel(newApiRules, m.upstream, res);
               return [res, credits ?? m.promoByResolution?.[res] ?? m.defaultCredits];
             })
           )
         : m.pricingByResolution
           ? m.promoByResolution
           : null;
+    const newApiRule = newApiRuleForModel(m, opts.newApiCatalog);
     return {
       id: m.id,
       label: m.displayLabel,
@@ -425,7 +545,16 @@ function publicModelPayload(
       refundOnViolation: m.refundOnViolation,
       violationNotice: m.violationNotice,
       fixedQualityLow: !!m.fixedQualityLow,
-      aspectRatios: [...aspectRatiosForModel(m.id)],
+      modality: 'image',
+      endpoint: { method: 'POST', path: '/api/v1/generate', contentType: 'application/json' },
+      catalogVersion: opts.newApiCatalog.version || null,
+      pricingVersion: opts.newApiCatalog.pricingVersion || null,
+      parameters: newApiRule
+        ? publicNewApiParameters(m.id, newApiRule)
+        : publicDirectModelParameters(m),
+      aspectRatios: newApiRule
+        ? parameterOptions(newApiRule.parameters, 'size')
+        : [...aspectRatiosForModel(m.id)],
       resolutions: m.resolutions,
       pricingByResolution: m.pricingByResolution,
       creditsByResolution: finalCreditsByResolution,
@@ -458,19 +587,24 @@ async function computeGenerationCostForRequest(
   resolution: string,
   tier: import('../../lib/supabase').Profile['membership_tier'],
   memberActive: boolean,
-  opts?: { mjSpeed?: string | null }
+  opts?: {
+    mjSpeed?: string | null;
+    newApiCatalog?: NewApiCatalogSnapshot;
+  }
 ): Promise<ReturnType<typeof computeImageGenerationCost>> {
+  const snapshot = opts?.newApiCatalog ?? await fetchNewApiModelCatalog(env.NEWAPI_API_BASE_URL);
+  const catalogEntries = imageCatalogForNewApiSnapshot(snapshot);
   const baseCost = computeImageGenerationCost(
     settings,
     modelId,
     resolution,
     tier,
     memberActive,
-    opts
+    { mjSpeed: opts?.mjSpeed, catalogEntries }
   );
   if (resolved.provider !== 'newapi') return baseCost;
   const credits = newApiCreditsForModel(
-    await fetchNewApiPricingRules(env.NEWAPI_API_BASE_URL),
+    snapshot.rules,
     resolved.upstream,
     resolution
   );
@@ -497,19 +631,61 @@ function modelUnavailableMessage(resolved: NonNullable<
   return '所选模型已下架，请换用其他模型';
 }
 
+function assertSupportedImageParameters(
+  model: NonNullable<ReturnType<typeof resolveImageModelConfig>>,
+  data: z.infer<typeof bodySchema>,
+  rule: NewApiPricingRule | null
+): void {
+  const allowedRatios = rule
+    ? parameterOptions(rule.parameters, 'size')
+    : [...aspectRatiosForModel(model.id)];
+  if (data.size && allowedRatios.length && !allowedRatios.includes(data.size)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `该模型不支持 ${data.size} 比例`);
+  }
+  const referenceCount = (data.refImageUrls?.length || 0) + (data.refImageUrl ? 1 : 0);
+  if (!referenceCount) return;
+  const imageParameter = rule?.parameters.find(parameter => parameter.name === 'images');
+  const singleImageParameter = rule?.parameters.find(parameter => parameter.name === 'image');
+  const maxReferences = imageParameter?.max_items
+    ?? (singleImageParameter ? 1 : model.uiFamily === 'midjourney' ? 5 : 16);
+  if (referenceCount > maxReferences) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `该模型最多支持 ${maxReferences} 张参考图`);
+  }
+}
+
+async function requireFreshNewApiCatalog(env: Env): Promise<NewApiCatalogSnapshot> {
+  try {
+    return await fetchNewApiModelCatalog(env.NEWAPI_API_BASE_URL, {
+      force: true,
+      requireFresh: true
+    });
+  } catch {
+    throw new ApiError(
+      503,
+      'SERVICE_UNAVAILABLE',
+      '暂时无法确认 New API 实时价格，请稍后重试'
+    );
+  }
+}
+
 generateRoutes.get('/models', async c => {
   const user = c.get('user');
   const admin = createAdminClient(c.env);
-  const settings = await loadImageModelSettings(admin);
-  const profile = await getOrCreateProfile(admin, user.id);
+  const [settings, profile, newApiCatalog] = await Promise.all([
+    loadImageModelSettings(admin),
+    getOrCreateProfile(admin, user.id),
+    fetchNewApiModelCatalog(c.env.NEWAPI_API_BASE_URL)
+  ]);
   const memberActive = isMembershipActive(profile);
-  const newApiRules = await fetchNewApiPricingRules(c.env.NEWAPI_API_BASE_URL);
   return c.json({
     ok: true,
     data: {
       providers: ['newapi', 'grsai', 'apimart'],
       globalDiscountPercent: settings.globalDiscountPercent,
-      models: publicModelPayload(settings, profile.membership_tier, memberActive, { newApiRules })
+      catalogVersion: newApiCatalog.version || null,
+      pricingVersion: newApiCatalog.pricingVersion || null,
+      catalogStale: newApiCatalog.stale,
+      models: publicModelPayload(settings, profile.membership_tier, memberActive, { newApiCatalog })
     }
   });
 });
@@ -523,10 +699,20 @@ generateRoutes.get('/cost', async c => {
   }
   const user = c.get('user');
   const admin = createAdminClient(c.env);
-  const settings = await loadImageModelSettings(admin);
-  const profile = await getOrCreateProfile(admin, user.id);
+  const [settings, profile, cachedNewApiCatalog] = await Promise.all([
+    loadImageModelSettings(admin),
+    getOrCreateProfile(admin, user.id),
+    fetchNewApiModelCatalog(c.env.NEWAPI_API_BASE_URL)
+  ]);
   const memberActive = isMembershipActive(profile);
-  const resolved = resolveImageModelConfig(model, settings);
+  let newApiCatalog = cachedNewApiCatalog;
+  let catalogEntries = imageCatalogForNewApiSnapshot(newApiCatalog);
+  let resolved = resolveImageModelConfig(model, settings, catalogEntries);
+  if (resolved?.provider === 'newapi') {
+    newApiCatalog = await requireFreshNewApiCatalog(c.env);
+    catalogEntries = imageCatalogForNewApiSnapshot(newApiCatalog);
+    resolved = resolveImageModelConfig(model, settings, catalogEntries);
+  }
   if (!resolved || !resolved.enabled) {
     throw new ApiError(
       400,
@@ -546,7 +732,7 @@ generateRoutes.get('/cost', async c => {
     resolution,
     profile.membership_tier,
     memberActive,
-    { mjSpeed: speed || null }
+    { mjSpeed: speed || null, newApiCatalog }
   );
   return c.json({
     ok: true,
@@ -561,7 +747,8 @@ generateRoutes.get('/cost', async c => {
 
 generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   const user = c.get('user');
-  const parsed = bodySchema.safeParse(await c.req.json().catch(() => ({})));
+  const rawBody = await c.req.json().catch(() => ({}));
+  const parsed = bodySchema.safeParse(normalizeGenerationBodyAliases(rawBody));
   if (!parsed.success) {
     throw new ApiError(400, 'VALIDATION_ERROR', '请填写有效的提示词与参数');
   }
@@ -570,9 +757,19 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   const admin = createAdminClient(c.env);
   let profile = await syncMembershipCredits(admin, user.id);
   const memberActive = isMembershipActive(profile);
-  const settings = await loadImageModelSettings(admin);
+  const [settings, cachedNewApiCatalog] = await Promise.all([
+    loadImageModelSettings(admin),
+    fetchNewApiModelCatalog(c.env.NEWAPI_API_BASE_URL)
+  ]);
+  let newApiCatalog = cachedNewApiCatalog;
+  let catalogEntries = imageCatalogForNewApiSnapshot(newApiCatalog);
   const modelId = normalizeImageModelId(parsed.data.model);
-  const resolved = resolveImageModelConfig(modelId, settings);
+  let resolved = resolveImageModelConfig(modelId, settings, catalogEntries);
+  if (resolved?.provider === 'newapi') {
+    newApiCatalog = await requireFreshNewApiCatalog(c.env);
+    catalogEntries = imageCatalogForNewApiSnapshot(newApiCatalog);
+    resolved = resolveImageModelConfig(modelId, settings, catalogEntries);
+  }
   if (!resolved || !resolved.enabled) {
     throw new ApiError(
       400,
@@ -590,10 +787,15 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       `该模型不支持 ${parsed.data.resolution.toUpperCase()}，请切换分辨率`
     );
   }
+  assertSupportedImageParameters(
+    resolved,
+    parsed.data,
+    newApiRuleForModel(resolved, newApiCatalog)
+  );
 
   const jobResolution = parsed.data.resolution;
   const jobQuality = resolved.fixedQualityLow ? 'low' : parsed.data.quality;
-  const isMidjourney = imageModelUiFamily(modelId) === 'midjourney' || isMidjourneyUpstream(resolved.upstream);
+  const isMidjourney = resolved.uiFamily === 'midjourney' || isMidjourneyUpstream(resolved.upstream);
   const mjParams = isMidjourney && parsed.data.mjParams ? parsed.data.mjParams : undefined;
 
   const { final: rawFinal, base, discountLabel, modelLabel, refundOnViolation, violationNotice } =
@@ -605,7 +807,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       jobResolution,
       profile.membership_tier,
       memberActive,
-      { mjSpeed: mjParams?.speed || null }
+      { mjSpeed: mjParams?.speed || null, newApiCatalog }
     );
   const final = roundCredits(rawFinal);
 

@@ -5,8 +5,10 @@
 SUPABASE_URL=https://YOUR_PROJECT.baseaf.memfiredb.com
 SUPABASE_SERVICE_ROLE_KEY=PLACEHOLDER_MEMFIRE_SERVICE_ROLE_KEY
 
-# 生图（GrsAI / Apimart，至少填一个才能调 /api/v1/generate）
+# 生图服务端线路（至少填一个才能调 /api/v1/generate；不要放进前端配置）
 IMAGE_API_KEY=
+# NEWAPI_API_KEY=
+# NEWAPI_API_BASE_URL=https://newapi.prompt-hubs.com
 # APIMART_API_KEY=
 # ITHINK_API_KEY=   # ThinkAI 经济线路（https://www.thinkai.tv/console/token）
 # ITHINK_API_BASE_URL=https://www.thinkai.tv

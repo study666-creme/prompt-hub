@@ -404,9 +404,11 @@ export async function saveImageModelSettings(
 
 export function resolveImageModelConfig(
   modelId: string,
-  settings: ImageModelPricingSettings
+  settings: ImageModelPricingSettings,
+  catalogEntries: readonly ImageModelCatalogEntry[] = IMAGE_MODEL_CATALOG
 ): ResolvedImageModel | null {
-  const catalog = getCatalogEntry(modelId);
+  const normalizedId = normalizeImageModelId(modelId);
+  const catalog = catalogEntries.find((entry) => entry.id === normalizedId) || null;
   if (!catalog) return null;
   const override = settings.models[catalog.id] || {};
   let status = resolveModelStatus(override);
@@ -521,11 +523,19 @@ export function resolveImageModelConfig(
 
 export function listResolvedImageModels(
   settings: ImageModelPricingSettings,
-  opts?: { enabledOnly?: boolean; publicList?: boolean }
+  opts?: {
+    enabledOnly?: boolean;
+    publicList?: boolean;
+    catalogEntries?: readonly ImageModelCatalogEntry[];
+  }
 ): ResolvedImageModel[] {
   const out: ResolvedImageModel[] = [];
-  for (const catalog of IMAGE_MODEL_CATALOG) {
-    const resolved = resolveImageModelConfig(catalog.id, settings)!;
+  for (const catalog of opts?.catalogEntries ?? IMAGE_MODEL_CATALOG) {
+    const resolved = resolveImageModelConfig(
+      catalog.id,
+      settings,
+      opts?.catalogEntries ?? IMAGE_MODEL_CATALOG
+    )!;
     if (opts?.enabledOnly && !resolved.enabled) continue;
     if (opts?.publicList && !resolved.visible) continue;
     out.push(resolved);
@@ -544,7 +554,10 @@ export function computeImageGenerationCost(
   resolution: string,
   tier: Profile['membership_tier'],
   memberActive: boolean,
-  opts?: { mjSpeed?: string | null }
+  opts?: {
+    mjSpeed?: string | null;
+    catalogEntries?: readonly ImageModelCatalogEntry[];
+  }
 ): {
   base: number;
   final: number;
@@ -560,9 +573,12 @@ export function computeImageGenerationCost(
   violationNotice: string | null;
 } {
   const id = normalizeImageModelId(modelId);
-  const model = resolveImageModelConfig(id, settings);
+  const catalogEntries = opts?.catalogEntries ?? IMAGE_MODEL_CATALOG;
+  const model = resolveImageModelConfig(id, settings, catalogEntries);
   if (!model) {
-    const fallback = resolveImageModelConfig('gpt-image-2', settings)!;
+    const fallback = resolveImageModelConfig('gpt-image-2', settings, catalogEntries)
+      ?? resolveImageModelConfig(catalogEntries[0]?.id || '', settings, catalogEntries);
+    if (!fallback) throw new Error('No image model is available for pricing');
     return computeFromResolved(
       fallback,
       tier,

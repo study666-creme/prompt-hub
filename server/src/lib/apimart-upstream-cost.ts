@@ -84,8 +84,8 @@ export const APIMART_UPSTREAM_USD: Record<
   },
   'apimart-gpt-image-2-official-budget': {
     kind: 'byResolution',
-    usd: { '1k': 0.00488, '2k': 0.00968, '4k': 0.01592 },
-    note: 'official · 1024/2048/2880 低质量档'
+    usd: { '2k': 0.00602, '4k': 0.00904 },
+    note: 'official · 2K/4K low 安全比例最高成本'
   },
   'apimart-gpt-image-2': {
     kind: 'byResolution',

@@ -6,11 +6,10 @@ export function isApimartOfficialBudgetUpstream(upstream: string): boolean {
   return upstream.trim().toLowerCase() === 'gpt-image-2-official';
 }
 
-function normalizeOfficialResolution(resolution?: string): '1k' | '2k' | '4k' {
-  const r = String(resolution || '1k').toLowerCase();
+function normalizeOfficialResolution(resolution?: string): '2k' | '4k' {
+  const r = String(resolution || '2k').toLowerCase();
   if (r === '4k') return '4k';
-  if (r === '2k') return '2k';
-  return '1k';
+  return '2k';
 }
 
 /** 特价线可选比例（无 1:1） */
@@ -21,7 +20,7 @@ export function mapApimartOfficialBudgetRatio(ratio?: string): string {
 }
 
 /**
- * gpt-image-2-official 文档：size=比例字符串，resolution=1k|2k|4k，quality=low。
+ * gpt-image-2-official 文档：size=比例字符串，resolution=2k|4k，quality=low。
  * 勿传像素 size（会落错价档，例如 4K 被计成 ~$0.015 而非 ~$0.0127）。
  */
 export function buildApimartOfficialBudgetRequestBody(params: {

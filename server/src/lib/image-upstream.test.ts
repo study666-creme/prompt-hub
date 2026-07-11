@@ -23,12 +23,25 @@ describe('image model catalog', () => {
   });
 
   it('newapi exposes price-backed image models first', () => {
-    const ext1k = getCatalogEntry('newapi-gpt-image-2-ext-1k');
+    const base1k = getCatalogEntry('newapi-gpt-image-2');
+    const ext = getCatalogEntry('newapi-gpt-image-2-ext');
+    const officialBudget = getCatalogEntry('newapi-gpt-image-2-official-budget');
     const bananaPro = getCatalogEntry('newapi-nano-banana-pro');
+    const banana = getCatalogEntry('newapi-nano-banana');
     expect(IMAGE_MODEL_CATALOG[0]?.provider).toBe('newapi');
-    expect(ext1k?.upstream).toBe('gpt-image-2-ext-1k');
-    expect(ext1k?.defaultCredits).toBe(6);
+    expect(base1k?.defaultCredits).toBe(5.5);
+    expect(ext?.upstream).toBe('gpt-image-2-ext');
+    expect(ext?.resolutions).toEqual(['2k', '4k']);
+    expect(ext?.defaultCreditsByResolution).toEqual({ '2k': 15, '4k': 20 });
+    expect(officialBudget?.provider).toBe('newapi');
+    expect(officialBudget?.upstream).toBe('image2k4k');
+    expect(officialBudget?.fixedQualityLow).toBe(true);
+    expect(officialBudget?.pricingByResolution).toBe(true);
+    expect(officialBudget?.resolutions).toEqual(['2k', '4k']);
+    expect(officialBudget?.defaultCreditsByResolution).toEqual({ '2k': 5.5, '4k': 9 });
     expect(bananaPro?.resolutions).toEqual(['1k', '2k', '4k']);
+    expect(banana?.upstream).toBe('nano-banana');
+    expect(banana?.defaultCredits).toBe(11);
   });
 
   it('apimart exposes core models without wan or flux', () => {
@@ -57,6 +70,8 @@ describe('image model catalog', () => {
   it('normalizes legacy ids', () => {
     expect(normalizeImageModelId('quanneng2')).toBe('gpt-image-2');
     expect(normalizeImageModelId('apimart-gpt-image-2')).toBe('apimart-gpt-image-2');
-    expect(normalizeImageModelId('newapi-gpt-image-2-ext-1k')).toBe('newapi-gpt-image-2-ext-1k');
+    expect(normalizeImageModelId('newapi-gpt-image-2-ext-1k')).toBe('image2');
+    expect(normalizeImageModelId('gpt-image-2-ext-2k')).toBe('image2-pro');
+    expect(normalizeImageModelId('gpt-image-2-official-4k')).toBe('image2-hd');
   });
 });
