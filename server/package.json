@@ -8,8 +8,8 @@
     "deploy": "wrangler deploy",
     "secret-supabase": "wrangler secret put SUPABASE_URL",
     "secret-service-role": "wrangler secret put SUPABASE_SERVICE_ROLE_KEY",
-    "secret-image-key": "wrangler secret put IMAGE_API_KEY",
-    "secret-image-base": "wrangler secret put IMAGE_API_BASE_URL",
+    "secret-newapi": "wrangler secret put NEWAPI_API_KEY",
+    "secret-midjourney": "wrangler secret put APIMART_API_KEY",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

@@ -116,7 +116,7 @@
       const primaryRef = (submittedRefImage && d().isDisplayableImage?.(submittedRefImage))
         ? submittedRefImage
         : (refImages[0] || d().getImageGenPrimaryRef());
-      const modelId = model || 'gpt-image-2';
+      const modelId = model || 'image2';
       const modelLabel = global.PointsSystem?.getImageGenModel?.(modelId)?.label || modelId;
 
       const galleryFromMj = () => {

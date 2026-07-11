@@ -72,10 +72,10 @@ export async function moderateCommunityContent(params: {
   admin: SupabaseClient;
   prompt: string;
   imageRef?: string | null;
-  /** Apimart/Chat 视觉密钥；勿传 GrsAI 生图 IMAGE_API_KEY */
+  /** Apimart/Chat 视觉密钥。 */
   visionApiKey?: string;
   visionApiBaseUrl?: string;
-  /** 未配置 Apimart 时仅做文本审核，不调 Gemini（避免误扣 GrsAI 上游积分） */
+  /** 未配置 Apimart 时仅做文本审核，不调 Gemini。 */
   skipVision?: boolean;
 }): Promise<{ safe: boolean; reason?: string }> {
   const promptResult = moderateCommunityPrompt(params.prompt);

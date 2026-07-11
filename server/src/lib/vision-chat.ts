@@ -8,15 +8,13 @@ function isGrsaiLikeBase(baseUrl?: string): boolean {
   return /grsai\.|dakka\.com\.cn/i.test(String(baseUrl || ''));
 }
 
-/** Gemini 视觉应走 Apimart/Chat，勿用 GrsAI 生图线路（会误打 gemini 且常失败） */
+/** Gemini 视觉只走 Apimart/Chat，不复用历史生图密钥。 */
 export function resolveVisionApiBindings(env: {
   APIMART_API_KEY?: string;
   APIMART_API_BASE_URL?: string;
   CHAT_API_KEY?: string;
   CHAT_API_BASE_URL?: string;
-  IMAGE_API_KEY?: string;
-  IMAGE_API_BASE_URL?: string;
-}): { apiKey: string; baseUrl?: string; provider: 'apimart' | 'chat' | 'image' } {
+}): { apiKey: string; baseUrl?: string; provider: 'apimart' | 'chat' } {
   if (env.APIMART_API_KEY) {
     if (isGrsaiLikeBase(env.APIMART_API_BASE_URL)) {
       throw new ApiError(
@@ -39,18 +37,10 @@ export function resolveVisionApiBindings(env: {
       provider: 'chat'
     };
   }
-  const imageBase = String(env.IMAGE_API_BASE_URL || '').toLowerCase();
-  if (env.IMAGE_API_KEY && !/grsai\.|dakka\.com\.cn/.test(imageBase)) {
-    return {
-      apiKey: env.IMAGE_API_KEY,
-      baseUrl: env.IMAGE_API_BASE_URL,
-      provider: 'image'
-    };
-  }
   throw new ApiError(
     503,
     'SERVICE_UNAVAILABLE',
-    '视觉读图服务未配置：请在 Worker 设置 APIMART_API_KEY（Gemini 反推/裂变用，与生图 GrsAI 密钥分离）'
+    '视觉读图服务未配置：请在 Worker 设置 APIMART_API_KEY'
   );
 }
 

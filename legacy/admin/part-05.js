@@ -11,12 +11,12 @@
     if (!tbody) return;
     const rows = filteredModelRows();
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="14">当前筛选无模型</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="13">当前筛选无模型</td></tr>';
       return;
     }
     tbody.innerHTML = rows
       .map((row) => {
-        const providerBadge = MODEL_PROVIDER_BADGE[row.provider] || MODEL_PROVIDER_BADGE.grsai;
+        const providerBadge = MODEL_PROVIDER_BADGE[row.provider] || '<span class="admin-badge">未知</span>';
         const familyLabel = MODEL_UI_FAMILY_LABEL[row.uiFamily] || row.uiFamily || '—';
         const statusOpts = MODEL_STATUS_OPTS.map(
           (o) =>
@@ -34,7 +34,9 @@
           <td>${esc(familyLabel)}</td>
           <td>${providerBadge}</td>
           <td><code>${esc(row.id)}</code><br><span class="admin-hint">${esc(row.label)} · ${esc(row.description || '')}</span></td>
-          <td><input type="text" class="admin-input-sm" data-field="displayName" maxlength="48" value="${esc(row.displayName)}" placeholder="${esc(row.label)}"></td>
+          <td>${row.pricingSource === 'upstream_realtime'
+            ? `<strong>${esc(row.label)}</strong><br><span class="admin-hint">名称自动同步</span>`
+            : `<input type="text" class="admin-input-sm" data-field="displayName" maxlength="48" value="${esc(row.displayName)}" placeholder="${esc(row.label)}">`}</td>
           <td><select class="admin-input-sm" data-field="status">${statusOpts}</select></td>
           <td class="admin-upstream-cost">${renderUpstreamCostCell(row)}</td>
           <td>${refundCell}</td>
@@ -42,8 +44,9 @@
           <td>${renderModelCreditsInputs(row)}</td>
           <td>${renderModelPromoInputs(row)}</td>
           <td class="model-effective">${renderModelEffectiveCell(row)}</td>
-          <td><label class="admin-check"><input type="checkbox" data-field="fixedPrice" ${row.fixedPrice ? 'checked' : ''}> 固定</label></td>
-          <td><input type="number" class="admin-input-sm" data-field="memberCap" min="1" max="100" placeholder="不限" value="${row.memberDiscountCapPercent != null ? row.memberDiscountCapPercent : ''}" title="会员至少付售价的百分之几"></td>
+          <td>${row.pricingSource === 'upstream_realtime'
+            ? '<span class="admin-badge admin-badge--ok">实时固定</span>'
+            : `<label class="admin-check"><input type="checkbox" data-field="fixedPrice" ${row.fixedPrice ? 'checked' : ''}> 固定</label>`}</td>
         </tr>`;
       })
       .join('');
@@ -62,10 +65,6 @@
           if (inp.dataset.field === 'status') row.status = inp.value;
           if (inp.dataset.field === 'fixedPrice') row.fixedPrice = inp.checked;
           if (inp.dataset.field === 'refundOnViolation') row.refundOnViolation = inp.checked;
-          if (inp.dataset.field === 'memberCap') {
-            const v = inp.value.trim();
-            row.memberDiscountCapPercent = v === '' ? null : Number(v) || null;
-          }
           if (inp.dataset.field === 'sortOrder') {
             row.sortOrder = Number(inp.value) || row.sortOrder;
             sortModelRowsInPlace();
@@ -114,17 +113,12 @@
   async function loadImageModels() {
     if (!session) return;
     const tbody = $('modelsTableBody');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="14">加载中…</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="13">加载中…</td></tr>';
     try {
       const data = await adminFetch(session, '/api/admin/image-models');
       imageModelSettings = data.settings || { globalDiscountPercent: 100, models: {} };
       imageModelRows = (data.models || []).map((row, i) => ensureMjCreditsBySpeed(normalizeModelRow(row, i)));
       sortModelRowsInPlace();
-      apimartCostReference =
-        (data.apimartCostReference && data.apimartCostReference.length
-          ? data.apimartCostReference
-          : null) || buildCostReferenceFromModelRows(imageModelRows);
-      grsaiCostReference = data.grsaiCostReference || [];
       const warn = $('modelsPersistWarn');
       if (warn) {
         const hint = data.settingsHint || '';
@@ -139,8 +133,6 @@
           warn.textContent = '';
         }
       }
-      renderGrsaiCostReference();
-      renderApimartCostReference();
       renderModelsTable();
       showMsg(
         $('modelsMsg'),
@@ -150,6 +142,133 @@
     } catch (e) {
       if (tbody) tbody.innerHTML = '';
       showMsg($('modelsMsg'), friendlyFetchError(e), false);
+    }
+  }
+
+  function canvasStageBadge(stage) {
+    const map = {
+      created: ['已创建', 'info'],
+      waiting_service: ['等待服务', 'info'],
+      service_processing: ['生成中', 'warn'],
+      waiting_result: ['等待结果', 'warn'],
+      saving_result: ['保存结果', 'warn'],
+      completed: ['已完成', 'ok'],
+      failed: ['失败', 'off']
+    };
+    const item = map[stage] || [stage || '未知', 'info'];
+    return `<span class="admin-badge admin-badge--${item[1]}">${esc(item[0])}</span>`;
+  }
+
+  function canvasPricingText(pricing) {
+    if (!pricing) return '—';
+    const tiers = Array.isArray(pricing.tiers) ? pricing.tiers : [];
+    if (tiers.length) {
+      return tiers.map((tier) => {
+        const condition = Object.entries(tier.when || {}).map(([key, value]) => `${key}=${value}`).join(' · ');
+        return `${condition || '默认'}：${Number(tier.credits || 0).toLocaleString('zh-CN')} 积分`;
+      }).join('<br>');
+    }
+    const credits = Number(pricing.credits);
+    return Number.isFinite(credits) ? `${credits.toLocaleString('zh-CN')} 积分/${pricing.unit === 'image' ? '张' : '次'}` : '—';
+  }
+
+  function canvasParameterText(parameters) {
+    const items = Array.isArray(parameters) ? parameters : [];
+    return items
+      .filter((item) => !['model', 'prompt'].includes(item.name))
+      .map((item) => {
+        if (item.name === 'images') return `参考图 ≤ ${item.max_items || '—'}`;
+        if (item.name === 'image') return '单参考图';
+        const values = Array.isArray(item.options) && item.options.length
+          ? item.options.join(' / ')
+          : Object.prototype.hasOwnProperty.call(item, 'fixed')
+            ? `固定 ${item.fixed}`
+            : Object.prototype.hasOwnProperty.call(item, 'default')
+              ? `默认 ${item.default}`
+              : item.max != null
+                ? `${item.min || 0}–${item.max}`
+                : '';
+        return `${item.label || item.name}${values ? `：${values}` : ''}`;
+      })
+      .join('<br>') || '—';
+  }
+
+  async function loadCanvasOperations() {
+    if (!session) return;
+    const modelBody = $('canvasModelMapBody');
+    const jobsBody = $('canvasJobsBody');
+    const logsBody = $('canvasServiceLogsBody');
+    if (modelBody) modelBody.innerHTML = '<tr><td colspan="6">加载中…</td></tr>';
+    if (jobsBody) jobsBody.innerHTML = '<tr><td colspan="8">加载中…</td></tr>';
+    if (logsBody) logsBody.innerHTML = '<tr><td colspan="7">加载中…</td></tr>';
+    try {
+      const data = await adminFetch(session, '/api/admin/canvas?limit=100', { timeoutMs: 20000 });
+      const catalog = data.catalog || {};
+      const models = Array.isArray(catalog.models) ? catalog.models : [];
+      const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+      const serviceLogs = data.serviceLogs || {};
+      const logs = Array.isArray(serviceLogs.items) ? serviceLogs.items : [];
+
+      const catalogMeta = $('canvasCatalogMeta');
+      if (catalogMeta) {
+        catalogMeta.textContent = `目录 ${catalog.version || '—'} · 价格 ${catalog.pricingVersion || '—'}${catalog.stale ? ' · 缓存数据' : ' · 实时'}`;
+      }
+      if (modelBody) {
+        modelBody.innerHTML = models.length ? models.map((model) => `<tr>
+          <td><strong>${esc(model.label || model.id)}</strong></td>
+          <td><code>${esc(model.id)}</code></td>
+          <td><code>${esc(model.actualModel || '—')}</code></td>
+          <td><code>${esc(model.endpoint || '—')}</code></td>
+          <td>${canvasPricingText(model.pricing)}</td>
+          <td>${canvasParameterText(model.parameters)}</td>
+        </tr>`).join('') : '<tr><td colspan="6">暂无可用图片模型</td></tr>';
+      }
+
+      if (jobsBody) {
+        jobsBody.innerHTML = jobs.length ? jobs.map((job) => `<tr>
+          <td>${monitorTime(job.createdAt)}</td>
+          <td>${esc(job.userName || '未命名')}<br><code>${esc(String(job.userId || '').slice(0, 8))}</code></td>
+          <td><strong>${esc(job.publicModelLabel || job.publicModel || '—')}</strong><br><span class="admin-hint">${esc(job.prompt || '')}</span></td>
+          <td>${esc([job.size, job.resolution, job.quality, job.referenceCount ? `${job.referenceCount} 张参考图` : ''].filter(Boolean).join(' · ') || '—')}</td>
+          <td>${canvasStageBadge(job.stage)}</td>
+          <td>${esc(job.credits ?? '—')}</td>
+          <td>${job.serviceRequestId ? `<code>${esc(job.serviceRequestId)}</code>` : job.serviceTaskId ? `<code>${esc(job.serviceTaskId)}</code>` : '—'}</td>
+          <td>${job.error ? `<span class="admin-badge admin-badge--off">${esc(job.error)}</span>` : '—'}</td>
+        </tr>`).join('') : '<tr><td colspan="8">暂无画布任务</td></tr>';
+      }
+
+      const serviceMeta = $('canvasServiceLogMeta');
+      if (serviceMeta) serviceMeta.textContent = serviceLogs.available ? `已读取 ${logs.length} 条当前服务密钥日志` : `日志不可用：${serviceLogs.error || '未知错误'}`;
+      const serviceLink = $('canvasServiceConsoleLink');
+      if (serviceLink && serviceLogs.consoleUrl) serviceLink.href = serviceLogs.consoleUrl;
+      if (logsBody) {
+        logsBody.innerHTML = logs.length ? logs.map((log) => `<tr>
+          <td>${monitorTime(log.createdAt)}</td>
+          <td><code>${esc(log.model || '—')}</code></td>
+          <td>${esc(log.channel || '—')}</td>
+          <td>${log.status === 'success' ? '<span class="admin-badge admin-badge--ok">成功</span>' : log.status === 'failed' ? '<span class="admin-badge admin-badge--off">失败</span>' : '<span class="admin-badge admin-badge--info">其他</span>'}</td>
+          <td>${Number(log.durationSeconds || 0).toLocaleString('zh-CN')} 秒</td>
+          <td><code>${esc(log.requestId || '—')}</code></td>
+          <td>${esc(log.detail || '—')}</td>
+        </tr>`).join('') : `<tr><td colspan="7">${esc(serviceLogs.error || '暂无服务日志')}</td></tr>`;
+      }
+
+      const completed = jobs.filter((job) => job.status === 'completed').length;
+      const failed = jobs.filter((job) => job.status === 'failed').length;
+      const processing = jobs.filter((job) => job.status === 'processing').length;
+      const stats = $('canvasOpsStats');
+      if (stats) stats.innerHTML = `
+        <div class="admin-stat admin-stat--blue"><span>图片模型</span><strong>${models.length}</strong></div>
+        <div class="admin-stat admin-stat--amber"><span>处理中</span><strong>${processing}</strong></div>
+        <div class="admin-stat admin-stat--green"><span>已完成</span><strong>${completed}</strong></div>
+        <div class="admin-stat admin-stat--rose"><span>失败</span><strong>${failed}</strong></div>
+      `;
+      showMsg($('canvasOpsMsg'), '', true);
+    } catch (e) {
+      if (modelBody) modelBody.innerHTML = '';
+      if (jobsBody) jobsBody.innerHTML = '';
+      if (logsBody) logsBody.innerHTML = '';
+      showMsg($('canvasOpsMsg'), friendlyFetchError(e), false);
     }
   }
 
@@ -164,10 +283,11 @@
       const displayName = String(row.displayName || '').trim();
       const patch = {
         status: row.status || 'active',
-        sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : (index + 1) * 10,
-        fixedPrice: !!row.fixedPrice
+        sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : (index + 1) * 10
       };
-      if (row.pricingByResolution && row.creditsByResolution) {
+      if (row.pricingSource === 'upstream_realtime') {
+        // 实时模型只保存上下架、排序与退款策略，价格和名称始终跟随卡藏 API。
+      } else if (row.pricingByResolution && row.creditsByResolution) {
         patch.creditsByResolution = {};
         for (const [res, val] of Object.entries(row.creditsByResolution)) {
           if (val != null && val !== '') patch.creditsByResolution[res] = Number(val) || 0;
@@ -199,9 +319,9 @@
           patch.promoPrice = Number(row.promoPrice);
         }
       }
-      if (displayName) patch.displayName = displayName;
-      if (row.memberDiscountCapPercent != null && Number.isFinite(Number(row.memberDiscountCapPercent))) {
-        patch.memberDiscountCapPercent = Number(row.memberDiscountCapPercent);
+      if (row.pricingSource !== 'upstream_realtime') {
+        patch.fixedPrice = !!row.fixedPrice;
+        if (displayName) patch.displayName = displayName;
       }
       patch.refundOnViolation = row.refundOnViolation !== false;
       models[row.id] = patch;
@@ -230,7 +350,7 @@
       if (warn) {
         if (data.settingsPersisted === false) {
           warn.textContent =
-            '保存请求已发出，但数据库仍未读到配置。请在 Supabase 执行 site_settings 迁移 SQL 后重试。';
+            '保存请求已发出，但数据库仍未读到配置。请在 MemFire SQL 编辑器执行 site_settings 迁移后重试。';
           warn.hidden = false;
         } else {
           warn.hidden = true;
@@ -340,6 +460,7 @@
         toast('已刷新', true, 1800);
       });
     });
+    $('dashStorageRefresh')?.addEventListener('click', () => void loadDashboardStorage());
 
     $('loginBtn')?.addEventListener('click', () => { void submitAdminLogin(); });
     $('adminSecret')?.addEventListener('keydown', (e) => {
@@ -403,38 +524,11 @@
     $('createCodeBtn')?.addEventListener('click', () => void createCodes());
     $('modelsSaveBtn')?.addEventListener('click', () => void saveImageModels());
     document.getElementById('panel-models')?.addEventListener('click', (e) => {
-      const grsaiFamBtn = e.target.closest('[data-grsai-cost-family]');
-      if (grsaiFamBtn) {
-        grsaiCostFamilyFilter = grsaiFamBtn.getAttribute('data-grsai-cost-family') || 'all';
-        $('grsaiCostFamilyTabs')?.querySelectorAll('[data-grsai-cost-family]').forEach((b) => {
-          b.classList.toggle('is-active', b === grsaiFamBtn);
-        });
-        renderGrsaiCostReference();
-        return;
-      }
-      const costFamBtn = e.target.closest('[data-apimart-cost-family]');
-      if (costFamBtn) {
-        apimartCostFamilyFilter = costFamBtn.getAttribute('data-apimart-cost-family') || 'all';
-        $('apimartCostFamilyTabs')?.querySelectorAll('[data-apimart-cost-family]').forEach((b) => {
-          b.classList.toggle('is-active', b === costFamBtn);
-        });
-        renderApimartCostReference();
-        return;
-      }
       const famBtn = e.target.closest('[data-model-family]');
       if (famBtn) {
         modelFamilyFilter = famBtn.getAttribute('data-model-family') || 'all';
         $('modelFamilyTabs')?.querySelectorAll('[data-model-family]').forEach((b) => {
           b.classList.toggle('is-active', b === famBtn);
-        });
-        renderModelsTable();
-        return;
-      }
-      const provBtn = e.target.closest('[data-model-provider]');
-      if (provBtn) {
-        modelProviderFilter = provBtn.getAttribute('data-model-provider') || 'all';
-        $('modelProviderTabs')?.querySelectorAll('[data-model-provider]').forEach((b) => {
-          b.classList.toggle('is-active', b === provBtn);
         });
         renderModelsTable();
         return;

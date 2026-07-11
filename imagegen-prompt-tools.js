@@ -433,7 +433,7 @@
   const COST_QUOTE_TIMEOUT_MS = 12000;
 
   async function getUnitImageGenCostQuote() {
-    const model = $('imageGenModel')?.value || 'quanneng2';
+    const model = $('imageGenModel')?.value || 'image2';
     const resolution = $('imageGenResolution')?.value || '1k';
     const quality = $('imageGenQuality')?.value || 'standard';
     let detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution) || {};

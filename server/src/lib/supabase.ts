@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Env } from '../env';
+import { CREDITS_PER_YUAN } from './credit-math';
 import { defaultDisplayName } from './display-name';
 
 export type Profile = {
@@ -171,5 +172,4 @@ export function membershipGenDiscountLabel(tier: Profile['membership_tier']): st
   return MEMBERSHIP_GEN_DISCOUNT_BY_TIER[tier]?.label ?? null;
 }
 
-export const POINTS_PER_YUAN = 100;
-export { MIN_GENERATION_CHARGE, computeGenerationCost, baseResolutionCost, IMAGE_MODELS } from './pricing';
+export const POINTS_PER_YUAN = CREDITS_PER_YUAN;

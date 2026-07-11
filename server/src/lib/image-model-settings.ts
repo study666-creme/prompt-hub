@@ -13,10 +13,6 @@ import {
   formatUpstreamCostCell,
   normalizeMjSpeed
 } from './apimart-upstream-cost';
-import {
-  buildGrsaiUpstreamCostLines,
-  formatGrsaiUpstreamCostCell
-} from './grsai-upstream-cost';
 import type { Profile } from './supabase';
 import { applyMemberCreditDiscount, clampCreditsValue, roundCredits } from './credit-math';
 import { membershipGenDiscountLabel, membershipGenMultiplier } from './supabase';
@@ -576,7 +572,7 @@ export function computeImageGenerationCost(
   const catalogEntries = opts?.catalogEntries ?? IMAGE_MODEL_CATALOG;
   const model = resolveImageModelConfig(id, settings, catalogEntries);
   if (!model) {
-    const fallback = resolveImageModelConfig('gpt-image-2', settings, catalogEntries)
+    const fallback = resolveImageModelConfig('image2', settings, catalogEntries)
       ?? resolveImageModelConfig(catalogEntries[0]?.id || '', settings, catalogEntries);
     if (!fallback) throw new Error('No image model is available for pricing');
     return computeFromResolved(
@@ -738,11 +734,16 @@ function computeFromResolved(
   };
 }
 
-export function adminModelRows(settings: ImageModelPricingSettings) {
-  return IMAGE_MODEL_CATALOG.map((catalog) => {
-    const resolved = resolveImageModelConfig(catalog.id, settings)!;
+export function adminModelRows(
+  settings: ImageModelPricingSettings,
+  catalogEntries: ImageModelCatalogEntry[] = IMAGE_MODEL_CATALOG
+) {
+  return catalogEntries.map((catalog) => {
+    const resolved = resolveImageModelConfig(catalog.id, settings, catalogEntries)!;
     const override = settings.models[catalog.id] || {};
     const costLines = buildUpstreamCostLines(catalog);
+    const realtimePricing = catalog.provider === 'newapi';
+    const realtimeCreditsByResolution = catalog.defaultCreditsByResolution || {};
     return {
       id: catalog.id,
       provider: catalog.provider,
@@ -750,35 +751,35 @@ export function adminModelRows(settings: ImageModelPricingSettings) {
       uiFamily: catalog.uiFamily,
       upstream: catalog.upstream,
       label: catalog.label,
-      displayName: resolved.displayLabel,
-      displayLabel: resolved.displayLabel,
+      displayName: realtimePricing ? catalog.label : resolved.displayLabel,
+      displayLabel: realtimePricing ? catalog.label : resolved.displayLabel,
       status: resolved.status,
       statusNotice: resolved.statusNotice,
       group: catalog.group,
       description: catalog.description,
       upstreamPoints: catalog.upstreamPoints,
-      upstreamCostText:
-        catalog.provider === 'grsai'
-          ? formatGrsaiUpstreamCostCell(buildGrsaiUpstreamCostLines(catalog))
-          : formatUpstreamCostCell(catalog.provider, costLines),
+      upstreamCostText: formatUpstreamCostCell(catalog.provider, costLines),
       upstreamCostLines: costLines,
       refundOnViolation: resolved.refundOnViolation,
       resolutions: catalog.resolutions,
       enabled: resolved.enabled,
       visible: resolved.visible,
-      creditsPerCall: resolved.creditsPerCall,
-      creditsByResolution: resolved.creditsByResolution,
-      effectiveCreditsByResolution: resolved.effectiveCreditsByResolution,
+      creditsPerCall: realtimePricing ? catalog.defaultCredits : resolved.creditsPerCall,
+      creditsByResolution: realtimePricing ? realtimeCreditsByResolution : resolved.creditsByResolution,
+      effectiveCreditsByResolution: realtimePricing
+        ? realtimeCreditsByResolution
+        : resolved.effectiveCreditsByResolution,
       pricingByResolution: resolved.pricingByResolution,
       creditsBySpeed: resolved.creditsBySpeed,
       effectiveCreditsBySpeed: resolved.effectiveCreditsBySpeed,
       pricingBySpeed: resolved.pricingBySpeed,
-      promoPrice: resolved.promoPrice,
-      promoByResolution: resolved.promoByResolution,
-      promoBySpeed: resolved.promoBySpeed,
-      effectiveBaseCredits: resolved.effectiveBaseCredits,
-      fixedPrice: resolved.fixedPrice,
-      memberDiscountCapPercent: resolved.memberDiscountCapPercent,
+      promoPrice: realtimePricing ? null : resolved.promoPrice,
+      promoByResolution: realtimePricing ? {} : resolved.promoByResolution,
+      promoBySpeed: realtimePricing ? {} : resolved.promoBySpeed,
+      effectiveBaseCredits: realtimePricing ? catalog.defaultCredits : resolved.effectiveBaseCredits,
+      fixedPrice: realtimePricing || resolved.fixedPrice,
+      memberDiscountCapPercent: realtimePricing ? null : resolved.memberDiscountCapPercent,
+      pricingSource: realtimePricing ? 'upstream_realtime' : 'manual',
       sortOrder: override.sortOrder ?? catalog.sortOrder
     };
   }).sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, 'zh-CN'));

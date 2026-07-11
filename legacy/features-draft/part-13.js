@@ -43,7 +43,7 @@
       { data: { status: 'completed', imageUrl: recoverJob.imageUrl, extraImageUrls: extras } },
       {
         prompt: recoverJob.prompt || ctx.prompt || '',
-        model: recoverJob.model || ctx.model || 'gpt-image-2',
+        model: recoverJob.model || ctx.model || 'image2',
         resolution: recoverJob.resolution || ctx.resolution || '1k',
         quality: recoverJob.quality || ctx.quality || 'standard',
         size: recoverJob.size || ctx.size || '1:1',

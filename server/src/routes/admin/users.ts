@@ -311,8 +311,13 @@ adminUserRoutes.delete('/:userId', async c => {
   }
 
   let storageFilesRemoved = 0;
+  let r2FilesRemoved = 0;
+  let memfireFilesRemoved = 0;
   try {
-    storageFilesRemoved = await deleteUserStorageFiles(admin, userId);
+    const removed = await deleteUserStorageFiles(admin, c.env, userId);
+    storageFilesRemoved = removed.totalRemoved;
+    r2FilesRemoved = removed.r2Removed;
+    memfireFilesRemoved = removed.memfireRemoved;
   } catch {
     /* 存储清理失败不阻断账号删除 */
   }
@@ -328,7 +333,9 @@ adminUserRoutes.delete('/:userId', async c => {
       userId,
       email,
       displayName: existing.display_name,
-      storageFilesRemoved
+      storageFilesRemoved,
+      r2FilesRemoved,
+      memfireFilesRemoved
     }
   });
 });

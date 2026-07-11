@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildNewApiImageRequestBody,
   fetchNewApiModelCatalog,
   fetchNewApiPricingRules,
   fetchNewApiTaskOnce,
@@ -70,6 +71,30 @@ describe('newapi image upstream', () => {
               { when: { quality: '4k' }, yuan: 0.2, credits: 20 }
             ]
           }
+        },
+        {
+          id: 'gpt-image-2-chat',
+          label: 'GPT Image 2 Chat',
+          public: { id: 'image2-chat', label: 'Image2 Chat', description: '聊天生图。' },
+          modality: 'image',
+          family: 'gim2-chat',
+          operation: 'chat',
+          selectable: true,
+          parameters: [],
+          pricing: { mode: 'fixed', unit: 'request', yuan: 0.025, credits: 999 }
+        },
+        {
+          id: 'flux-preview',
+          label: 'Flux Preview',
+          public: { id: 'flux-public', label: 'Flux Preview', description: '未接入图片族。' },
+          modality: 'image',
+          family: 'flux',
+          operation: 'generate',
+          selectable: true,
+          parameters: [
+            { name: 'resolution', path: 'resolution', label: '分辨率', type: 'string', required: false, fixed: '1k' }
+          ],
+          pricing: { mode: 'fixed', unit: 'image', yuan: 0.01, credits: 999 }
         },
         {
           id: 'image2k4k',
@@ -154,6 +179,11 @@ describe('newapi image upstream', () => {
 
     const snapshot = await fetchNewApiModelCatalog('https://pricing-unit.test/v1');
     expect(snapshot.imageCatalogEntries.map(model => model.id)).toEqual(['image2', 'image2-pro', 'image2-hd']);
+    expect(snapshot.imageCatalogEntries.map(model => model.label)).toEqual([
+      '全能模型2 · 1K',
+      '全能模型2 · 高质量 2K/4K',
+      '全能模型2 · 经济 2K/4K'
+    ]);
     expect(snapshot.imageCatalogEntries[2].fixedQualityLow).toBe(true);
     expect(resolveNewApiCatalogModel(snapshot, 'image2', 'image')?.upstreamModel).toBe('gpt-image-2');
     expect(resolveNewApiCatalogModel(snapshot, 'gpt-image-2', 'image')?.id).toBe('image2');
@@ -163,6 +193,10 @@ describe('newapi image upstream', () => {
       modality: 'text'
     }));
     expect(publicNewApiCatalogModels(snapshot).some(model => 'upstreamModel' in model)).toBe(false);
+    expect(publicNewApiCatalogModels(snapshot).some(model => model.id === 'image2-chat')).toBe(false);
+    expect(publicNewApiCatalogModels(snapshot).some(model => model.id === 'flux-public')).toBe(false);
+    expect(resolveNewApiCatalogModel(snapshot, 'image2-chat', 'image')).toBeNull();
+    expect(resolveNewApiCatalogModel(snapshot, 'flux-public', 'image')).toBeNull();
     const video = resolveNewApiCatalogModel(snapshot, 'motion-video', 'video');
     expect(video && newApiFixedCreditsForRequest(video, { duration: 10, resolution: '720p' })).toBe(16);
     const textModel = resolveNewApiCatalogModel(snapshot, 'creative-5-5', 'text');
@@ -217,6 +251,37 @@ describe('newapi image upstream', () => {
     });
     expect(result.taskId).toMatch(/^newapi-/);
     expect(result.imageUrl).toBe('https://image.test/out.png');
+  });
+
+  it('builds image requests only from the selected model parameter contract', () => {
+    const shared = [
+      { name: 'model', path: 'model', label: '模型', type: 'string' as const, required: true, fixed: 'image2k4k' },
+      { name: 'prompt', path: 'prompt', label: '提示词', type: 'string' as const, required: true },
+      { name: 'quality', path: 'quality', label: '分辨率', type: 'string' as const, required: false, default: '2k', options: ['2k', '4k'] },
+      { name: 'size', path: 'size', label: '比例', type: 'string' as const, required: false, default: '3:1', options: ['3:1', '16:9'] },
+      { name: 'images', path: 'images', label: '参考图', type: 'array' as const, required: false, max_items: 2 },
+      { name: 'n', path: 'n', label: '张数', type: 'integer' as const, required: false, default: 1, min: 1, max: 4 }
+    ];
+    const body = buildNewApiImageRequestBody({
+      upstreamModel: 'image2k4k',
+      prompt: 'apple',
+      resolution: '4k',
+      quality: 'ultra',
+      size: '1:1',
+      count: 4,
+      refImageUrls: ['a', 'b', 'c'],
+      catalogParameters: shared
+    });
+
+    expect(body).toEqual({
+      model: 'image2k4k',
+      prompt: 'apple',
+      quality: '4k',
+      size: '3:1',
+      images: ['a', 'b'],
+      n: 4
+    });
+    expect(body).not.toHaveProperty('resolution');
   });
 
   it('normalizes completed task polling responses', async () => {

@@ -709,7 +709,7 @@
       const draft = loadJson(LS_IMAGEGEN, null);
       if (draft?.model) return normalizeImageGenModelId(draft.model);
     }
-    return normalizeImageGenModelId(raw || 'gpt-image-2');
+    return normalizeImageGenModelId(raw || 'image2');
   }
 
   let imageGenModelCatalog = [];
@@ -772,34 +772,19 @@
   }
 
   const IMAGE_GEN_MODEL_FAMILIES = [
-    { key: 'gim2', label: '全能2' },
+    { key: 'gim2', label: '全能模型2' },
     { key: 'banana', label: '香蕉' },
-    { key: 'jimeng', label: '即梦' },
-    { key: 'midjourney', label: 'MJ' },
-    { key: 'wan', label: '万相' },
-    { key: 'flux', label: 'Flux' }
+    { key: 'midjourney', label: 'MJ' }
   ];
 
   const IMAGE_GEN_MODEL_FALLBACK = [
-    { id: 'gpt-image-2', label: 'GPT Image 2', provider: 'grsai', uiFamily: 'gim2', sortOrder: 2, selectable: true, status: 'active', refundOnViolation: true, aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
-    { id: 'gpt-image-2-vip', label: 'GPT Image 2 VIP', provider: 'grsai', uiFamily: 'gim2', sortOrder: 1, selectable: true, status: 'active', refundOnViolation: true, aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
-    { id: 'nano-banana-pro', label: 'Nano Banana Pro', provider: 'grsai', uiFamily: 'banana', sortOrder: 3, selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'nano-banana-2', label: 'Nano Banana 2', provider: 'grsai', uiFamily: 'banana', sortOrder: 4, selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'nano-banana-fast', label: 'Nano Banana Fast', provider: 'grsai', uiFamily: 'banana', sortOrder: 6, selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'apimart-gpt-image-2', label: 'GPT Image 2', provider: 'apimart', uiFamily: 'gim2', sortOrder: 103, selectable: true, status: 'active', refundOnViolation: true, aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'], resolutions: ['1k', '2k', '4k'] },
-    { id: 'apimart-gpt-image-2-official-budget', label: 'GPT Image 2 · 特价', provider: 'apimart', uiFamily: 'gim2', sortOrder: 100, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, pricingByResolution: true, resolutions: ['1k', '2k', '4k'], aspectRatios: ['16:9', '9:16', '4:3', '3:4'] },
-    { id: 'ithink-gpt-image-2-slow', label: 'GPT Image 2 · 经济', provider: 'ithink', uiFamily: 'gim2', sortOrder: 102, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'] },
-    { id: 'apimart-seedream-5-lite', label: 'Seedream 5 Lite', provider: 'apimart', uiFamily: 'jimeng', sortOrder: 104, selectable: true, status: 'active', refundOnViolation: true },
-    { id: 'apimart-gemini-2-5-flash-preview', label: 'Nano Banana Fast', provider: 'apimart', uiFamily: 'banana', sortOrder: 103, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'] },
-    { id: 'apimart-gemini-3-1-flash-preview', label: 'Nano Banana 2', provider: 'apimart', uiFamily: 'banana', sortOrder: 104, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
-    { id: 'apimart-gemini-3-pro-preview', label: 'Nano Banana Pro', provider: 'apimart', uiFamily: 'banana', sortOrder: 105, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
-    { id: 'mooko-gpt-image-2-pro', label: 'GPT Image 2 Pro · 慢速', provider: 'mooko', uiFamily: 'gim2', sortOrder: 101, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['2k', '4k'], aspectRatios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'] },
-    { id: 'apimart-wan2-7-image', label: '万相 2.7', provider: 'apimart', uiFamily: 'wan', sortOrder: 105, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k', '2k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
-    { id: 'apimart-wan2-7-image-pro', label: '万相 2.7 Pro', provider: 'apimart', uiFamily: 'wan', sortOrder: 106, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k', '2k', '4k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
-    { id: 'apimart-flux-kontext-pro', label: 'Flux Kontext Pro', provider: 'apimart', uiFamily: 'flux', sortOrder: 120, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '9:21'] },
-    { id: 'apimart-flux-kontext-max', label: 'Flux Kontext Max', provider: 'apimart', uiFamily: 'flux', sortOrder: 121, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '9:21'] },
-    { id: 'apimart-flux-2-pro', label: 'Flux 2 Pro', provider: 'apimart', uiFamily: 'flux', sortOrder: 122, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, pricingByResolution: true, resolutions: ['1k', '2k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'] },
-    { id: 'apimart-flux-2-flex', label: 'Flux 2 Flex', provider: 'apimart', uiFamily: 'flux', sortOrder: 123, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, pricingByResolution: true, resolutions: ['1k', '2k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'] },
+    { id: 'image2', label: '全能模型2 · 1K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 90, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
+    { id: 'image2-pro', label: '全能模型2 · 高质量 2K/4K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 91, selectable: true, status: 'active', refundOnViolation: true, pricingByResolution: true, resolutions: ['2k', '4k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
+    { id: 'image2-hd', label: '全能模型2 · 经济 2K/4K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 92, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, pricingByResolution: true, resolutions: ['2k', '4k'], aspectRatios: ['3:1', '1:3', '21:9', '9:21', '2:1', '1:2', '16:9', '9:16'] },
+    { id: 'lingtu-fast', label: '香蕉 · 极速 1K', provider: 'newapi', uiFamily: 'banana', sortOrder: 93, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'] },
+    { id: 'lingtu-2', label: '香蕉 · 2代 1K/2K/4K', provider: 'newapi', uiFamily: 'banana', sortOrder: 94, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
+    { id: 'lingtu-pro', label: '香蕉 · 专业 1K/2K/4K', provider: 'newapi', uiFamily: 'banana', sortOrder: 95, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
+    { id: 'lingtu', label: '香蕉 · 标准 1K/2K/4K', provider: 'newapi', uiFamily: 'banana', sortOrder: 96, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
     { id: 'apimart-mj-v81', label: 'MJ v8.1', description: '最新主版本 · 写实/概念通用 · 细节与光影最佳', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 110, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'] },
     { id: 'apimart-mj-v7', label: 'MJ v7', description: '上一代主力 · 复杂构图稳定 · 风格均衡', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 111, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'] },
     { id: 'apimart-mj-v61', label: 'MJ v6.1', description: '经典 v6 · 风格稳定 · 适合批量出图', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 112, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'] },

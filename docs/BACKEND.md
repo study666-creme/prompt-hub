@@ -7,7 +7,7 @@
 | 路由 | Hono + TypeScript | API、认证、CORS、错误与限流 |
 | 数据 | MemFire Postgres/Auth | 用户、积分、社区、任务和运营数据 |
 | 图片 | Cloudflare R2 + MemFire Storage | 上传、签名、缩略图、CDN 回源 |
-| 上游 | GrsAI、Apimart、New API、iThink 等 | 生图和提示词工具 |
+| 上游 | 卡藏 New API、Apimart、DeepSeek | 全能模型2/香蕉、MJ/视觉、对话工具 |
 | 监控 | Workers Observability + KV | 请求、5xx、图片 404 与生成失败率 |
 
 入口是 `server/src/index.ts`。公开 API 挂在 `/api/v1`，运营 API 挂在 `/api/admin`，认证代理挂在 `/supabase/*`。
@@ -39,14 +39,21 @@
 | `SUPABASE_URL` | Secret | MemFire Supabase-compatible API URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Secret | 服务端数据库权限 |
 | `SUPABASE_JWT_SECRET` | Secret，可选 | 本地 JWT 校验回退 |
-| `IMAGE_API_KEY` | Secret | GrsAI |
-| `APIMART_API_KEY` | Secret | Apimart/视觉能力 |
-| `NEWAPI_API_KEY` | Secret | 自建 New API |
-| `ITHINK_API_KEY`, `MOOKO_API_KEY` | Secret，可选 | 其他 provider |
+| `NEWAPI_API_KEY` | Secret | 全能模型2与香蕉；目录和价格实时同步 |
+| `APIMART_API_KEY` | Secret | MJ 与视觉能力 |
 | `CHAT_API_KEY` | Secret | 对话/提示词工具 |
 | `ADMIN_API_SECRET` | Secret | 运营后台和造码脚本 |
 | `PAYMENT_WEBHOOK_SECRET` | Secret，可选 | 支付 webhook HMAC |
 | `MEDIA_STORAGE_MODE` | 普通变量 | `supabase` / `r2-first` / `r2` |
+
+`IMAGE_API_KEY`、`ITHINK_API_KEY`、`MOOKO_API_KEY` 仅用于恢复数据库中已经存在的旧 provider 任务，不进入新任务目录。确认没有对应历史任务后可从 Worker Secrets 删除。
+
+## 图片模型边界
+
+- `/api/v1/generate/models` 只返回卡藏 API 的 7 个全能模型2/香蕉型号，以及 4 个 MJ 型号。
+- 卡藏 API 的人民币价格统一调用 `creditsFromYuan()`，按 `1 元 = 100 积分` 换算；报价或提交时无法取得新鲜目录会在扣费前失败。
+- MJ 使用 Apimart，并保留后台 Relax / Fast / Turbo 手动定价。
+- 旧 GrsAI、iThink、Mooko 和非 MJ Apimart 型号只能恢复历史任务，不能通过后台重新上架。
 
 配置命令示例：
 
@@ -55,6 +62,7 @@ cd D:\prompt-hub\server
 npm exec wrangler secret put SUPABASE_URL
 npm exec wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 npm exec wrangler secret put NEWAPI_API_KEY
+npm exec wrangler secret put APIMART_API_KEY
 ```
 
 ## 数据写入边界

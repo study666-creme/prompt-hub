@@ -1,4 +1,4 @@
-/** 画面比例 → 像素（对齐 Apimart gpt-image-2-official / 木瓜 Pro 文档） */
+/** 画面比例与像素映射；公开模型优先使用卡藏 API 实时参数。 */
 
 export const IMAGE2_ASPECT_RATIOS = [
   'auto',
@@ -82,6 +82,7 @@ export const APIMART_OFFICIAL_BUDGET_RATIOS = [
 ] as const;
 
 const OFFICIAL_BUDGET_MODEL_IDS = new Set([
+  'image2-hd',
   'apimart-gpt-image-2-official-budget',
   'newapi-gpt-image-2-official-budget'
 ]);
@@ -90,6 +91,7 @@ const OFFICIAL_BUDGET_MODEL_IDS = new Set([
 export const MOOKO_PRO_ASPECT_RATIOS = ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'] as const;
 
 const BANANA2_EXTENDED_MODEL_IDS = new Set([
+  'lingtu-2',
   'nano-banana-2',
   'nano-banana-2-cl',
   'nano-banana-2-4k-cl'
@@ -101,15 +103,17 @@ export function aspectRatiosForModel(modelId: string): readonly string[] {
     .trim()
     .toLowerCase();
   if (OFFICIAL_BUDGET_MODEL_IDS.has(id)) return APIMART_OFFICIAL_BUDGET_RATIOS;
+  if (id === 'image2' || id === 'image2-pro') return IMAGE2_ASPECT_RATIOS;
+  if (BANANA2_EXTENDED_MODEL_IDS.has(id)) {
+    return [...BANANA_ASPECT_RATIOS, ...BANANA2_EXTRA_RATIOS];
+  }
+  if (id.startsWith('lingtu')) return BANANA_ASPECT_RATIOS;
   if (id.startsWith('newapi-gpt-image-2')) return IMAGE2_ASPECT_RATIOS;
   if (id === 'apimart-gpt-image-2') return IMAGE2_ASPECT_RATIOS;
   if (id === 'apimart-seedream-5-lite' || id.includes('seedream')) return BASIC_ASPECT_RATIOS;
   if (id.startsWith('apimart-gemini') || id.includes('gemini-')) return BANANA_ASPECT_RATIOS;
   if (id.startsWith('apimart-mj-') || id.startsWith('mj-')) return MJ_ASPECT_RATIOS;
   if (id === 'gpt-image-2-vip' || id === 'gpt-image-2') return IMAGE2_ASPECT_RATIOS;
-  if (BANANA2_EXTENDED_MODEL_IDS.has(id)) {
-    return [...BANANA_ASPECT_RATIOS, ...BANANA2_EXTRA_RATIOS];
-  }
   if (id.includes('nano-banana')) return BANANA_ASPECT_RATIOS;
   if (id === 'mooko-gpt-image-2-pro') return MOOKO_PRO_ASPECT_RATIOS;
   if (id.includes('gpt-image-2')) return IMAGE2_ASPECT_RATIOS;

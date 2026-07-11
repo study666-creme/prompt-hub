@@ -8,7 +8,8 @@ import {
 import {
   confirmNewApiTaskOutcome,
   fetchNewApiTaskOnce,
-  submitNewApiImageJob
+  submitNewApiImageJob,
+  type NewApiCatalogParameter
 } from './newapi';
 import {
   confirmGrsaiTaskOutcome,
@@ -24,7 +25,8 @@ import {
 import { isMidjourneyUpstream } from './midjourney-models';
 import type { ImageModelProvider } from './image-models-catalog';
 
-export type ImageUpstreamProvider = ImageModelProvider | 'mooko' | 'ithink';
+/** 旧 provider 仅用于恢复已经落库的历史任务，不再进入可选模型目录。 */
+export type ImageUpstreamProvider = ImageModelProvider | 'grsai' | 'mooko' | 'ithink';
 
 export type ImageUpstreamBindings = {
   grsaiKey?: string;
@@ -42,8 +44,10 @@ export type ImageUpstreamBindings = {
 export type ImageSubmitResult = {
   provider: ImageUpstreamProvider;
   taskId: string;
+  upstreamRequestId?: string | null;
   /** 同步上游（ThinkAI）提交后直接返回的临时图链 */
   immediateImageUrl?: string | null;
+  immediateImageUrls?: string[];
 };
 
 export type ImageSubmitParams = {
@@ -53,7 +57,9 @@ export type ImageSubmitParams = {
   quality: string;
   fixedQualityLow?: boolean;
   size?: string;
+  count?: number;
   refImageUrls?: string[];
+  catalogParameters?: NewApiCatalogParameter[];
   mjParams?: Record<string, unknown>;
 };
 
@@ -204,7 +210,13 @@ export async function submitImageJobForProvider(
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'New API 线路未配置，请联系站长');
     }
     const submitted = await submitNewApiImageJob(bindings.newapiKey, bindings.newapiBase, params);
-    return { provider: 'newapi', taskId: submitted.taskId, immediateImageUrl: submitted.imageUrl };
+    return {
+      provider: 'newapi',
+      taskId: submitted.taskId,
+      immediateImageUrl: submitted.imageUrl,
+      immediateImageUrls: submitted.imageUrls,
+      upstreamRequestId: submitted.requestId
+    };
   }
   if (!bindings.grsaiKey) {
     throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'GrsAI 线路未配置，请联系站长');

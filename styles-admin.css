@@ -1393,6 +1393,30 @@ body {
   background: currentColor;
 }
 
+.admin-tab-icon--canvas::before {
+  inset: 2px 7px 8px 2px;
+  border-radius: 3px;
+}
+
+.admin-tab-icon--canvas::after {
+  inset: 8px 2px 2px 7px;
+  border-radius: 3px;
+}
+
+#panel-canvas .admin-card + .admin-card {
+  margin-top: 16px;
+}
+
+#panel-canvas .admin-table code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#panel-canvas .admin-table td {
+  min-width: 96px;
+  vertical-align: top;
+}
+
 .admin-sidebar-foot {
   border-top-color: var(--admin-border);
 }

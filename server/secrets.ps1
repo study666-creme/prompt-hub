@@ -1,6 +1,6 @@
 # Set Worker secrets via local Wrangler 3 (Node 18+)
 param(
-  [ValidateSet("supabase-url", "supabase-key", "image-key", "image-base", "apimart-key", "apimart-base", "chat-key", "admin", "all")]
+  [ValidateSet("supabase-url", "supabase-key", "newapi-key", "apimart-key", "chat-key", "admin", "all")]
   [string]$Which = "all"
 )
 
@@ -16,18 +16,17 @@ function Put-Secret([string]$name) {
 switch ($Which) {
   "supabase-url" { Put-Secret "SUPABASE_URL" }
   "supabase-key" { Put-Secret "SUPABASE_SERVICE_ROLE_KEY" }
-  "image-key"    { Put-Secret "IMAGE_API_KEY" }
-  "image-base"   { Put-Secret "IMAGE_API_BASE_URL" }
+  "newapi-key"   { Put-Secret "NEWAPI_API_KEY" }
   "apimart-key"  { Put-Secret "APIMART_API_KEY" }
-  "apimart-base" { Put-Secret "APIMART_API_BASE_URL" }
   "chat-key"     { Put-Secret "CHAT_API_KEY" }
   "admin"        { Put-Secret "ADMIN_API_SECRET" }
   "all" {
     Put-Secret "SUPABASE_URL"
     Put-Secret "SUPABASE_SERVICE_ROLE_KEY"
-    Put-Secret "IMAGE_API_KEY"
-    Put-Secret "IMAGE_API_BASE_URL"
+    Put-Secret "NEWAPI_API_KEY"
+    Put-Secret "APIMART_API_KEY"
     Put-Secret "CHAT_API_KEY"
+    Put-Secret "ADMIN_API_SECRET"
   }
 }
 

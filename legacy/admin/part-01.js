@@ -80,9 +80,9 @@
     }
     if (/site_settings|Could not find the table|PGRST205|SITE_SETTINGS|SAVE_VERIFY|PERMISSION/i.test(msg)) {
       return msg.includes('SAVE_VERIFY')
-        ? '保存后读不到数据：请确认 Worker 的 SUPABASE_URL 与 SQL 编辑器是同一个 Supabase 项目'
+        ? '保存后读不到数据：请确认 Worker 的 SUPABASE_URL 与 SQL 编辑器是同一个 MemFire 项目'
         : msg.includes('PERMISSION')
-          ? '无写入权限：请在 Supabase 再执行 supabase/migrations/20260602200000_site_settings_grants.sql'
+          ? '无写入权限：请在 MemFire SQL 编辑器执行 supabase/migrations/20260602200000_site_settings_grants.sql'
           : '数据库 site_settings 不可用。请执行建表+授权 SQL 后重试';
     }
     return msg || '请求失败';

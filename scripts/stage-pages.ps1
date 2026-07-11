@@ -35,7 +35,8 @@ $alwaysRootFiles = @(
   'robots.txt',
   'sitemap.xml',
   'sw.js',
-  'features-assets.js'
+  'features-assets.js',
+  'ripple-grid.js'
 )
 $alwaysStaticDirs = @(
   'partials/index-body/'

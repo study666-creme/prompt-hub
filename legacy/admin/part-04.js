@@ -162,112 +162,23 @@
 
   let imageModelSettings = null;
   let imageModelRows = [];
-  let apimartCostReference = [];
-  let apimartCostFamilyFilter = 'all';
-  let grsaiCostReference = [];
-  let grsaiCostFamilyFilter = 'all';
   let modelFamilyFilter = 'all';
-  let modelProviderFilter = 'all';
   let modelStatusFilter = 'all';
 
   const MODEL_UI_FAMILY_LABEL = {
-    gim2: '全能2',
+    gim2: '全能模型2',
     banana: '香蕉',
-    jimeng: '即梦',
-    midjourney: 'MJ',
-    wan: '万相',
-    flux: 'Flux'
+    midjourney: 'MJ'
   };
 
   const MODEL_PROVIDER_BADGE = {
-    grsai: '<span class="admin-badge admin-badge--ok">常规</span>',
-    apimart: '<span class="admin-badge admin-badge--warn">备用</span>',
-    ithink: '<span class="admin-badge">经济</span>',
-    mooko: '<span class="admin-badge">慢速</span>'
+    newapi: '<span class="admin-badge admin-badge--ok">卡藏 API</span>',
+    apimart: '<span class="admin-badge admin-badge--warn">MJ</span>'
   };
-
-  function formatAdminRmbYuan(rmb) {
-    const v = Number(rmb);
-    if (!Number.isFinite(v) || v <= 0) return '¥0';
-    if (v >= 1) return `¥${v.toFixed(2)}`;
-    if (v >= 0.1) return `¥${v.toFixed(2)}`;
-    return `¥${v.toFixed(3)}`;
-  }
-
-  function buildCostReferenceFromModelRows(rows) {
-    return rows
-      .filter((r) => r.provider === 'apimart' && Array.isArray(r.upstreamCostLines) && r.upstreamCostLines.length)
-      .map((r) => ({
-        id: r.id,
-        label: r.label,
-        uiFamily: MODEL_UI_FAMILY_LABEL[r.uiFamily] || r.uiFamily || '—',
-        uiFamilyKey: r.uiFamily || 'other',
-        functionLabel: r.pricingBySpeed ? '文生图/图生图' : '文生图',
-        lines: r.upstreamCostLines
-      }));
-  }
-
-  function filteredApimartCostReference() {
-    if (apimartCostFamilyFilter === 'all') return apimartCostReference;
-    return apimartCostReference.filter((row) => row.uiFamilyKey === apimartCostFamilyFilter);
-  }
-
-  function filteredGrsaiCostReference() {
-    if (grsaiCostFamilyFilter === 'all') return grsaiCostReference;
-    return grsaiCostReference.filter((row) => row.uiFamilyKey === grsaiCostFamilyFilter);
-  }
-
-  function renderGrsaiCostReference() {
-    const tbody = $('grsaiCostTableBody');
-    if (!tbody) return;
-    const rows = filteredGrsaiCostReference();
-    if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="6">当前筛选无成本数据</td></tr>';
-      return;
-    }
-    tbody.innerHTML = rows
-      .flatMap((row) =>
-        (row.lines || []).map((line) =>
-          `<tr>
-            <td>${esc(row.uiFamily)}</td>
-            <td><code>${esc(row.id)}</code><br>${esc(row.label)}</td>
-            <td>${esc(row.functionLabel)}</td>
-            <td>${esc(line.label)}</td>
-            <td>${esc(String(line.points))}</td>
-            <td><strong>${esc(formatAdminRmbYuan(line.rmb))}</strong></td>
-          </tr>`
-        )
-      )
-      .join('');
-  }
-
-  function renderApimartCostReference() {
-    const tbody = $('apimartCostTableBody');
-    if (!tbody) return;
-    const rows = filteredApimartCostReference();
-    if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="5">当前筛选无成本数据</td></tr>';
-      return;
-    }
-    tbody.innerHTML = rows
-      .flatMap((row) =>
-        (row.lines || []).map((line) =>
-          `<tr>
-            <td>${esc(row.uiFamily)}</td>
-            <td><code>${esc(row.id)}</code><br>${esc(row.label)}</td>
-            <td>${esc(row.functionLabel)}</td>
-            <td>${esc(line.label)}</td>
-            <td><strong>${esc(formatAdminRmbYuan(line.rmb ?? line.creditsCost))}</strong></td>
-          </tr>`
-        )
-      )
-      .join('');
-  }
 
   function filteredModelRows() {
     return imageModelRows.filter((row) => {
       if (modelFamilyFilter !== 'all' && row.uiFamily !== modelFamilyFilter) return false;
-      if (modelProviderFilter !== 'all' && row.provider !== modelProviderFilter) return false;
       if (modelStatusFilter !== 'all' && row.status !== modelStatusFilter) return false;
       return true;
     });
@@ -327,10 +238,6 @@
         if (field === 'status') row.status = inp.value;
         if (field === 'fixedPrice') row.fixedPrice = inp.checked;
         if (field === 'refundOnViolation') row.refundOnViolation = inp.checked;
-        if (field === 'memberCap') {
-          const v = inp.value.trim();
-          row.memberDiscountCapPercent = v === '' ? null : Number(v) || null;
-        }
         if (field === 'sortOrder') row.sortOrder = Number(inp.value) || row.sortOrder;
         if (field === 'promo') row.promoPrice = inp.value.trim() === '' ? null : Number(inp.value) || null;
         if (field === 'credits') row.creditsPerCall = Number(inp.value) || row.creditsPerCall;
@@ -373,6 +280,14 @@
 
   function renderModelCreditsInputs(row) {
     ensureMjCreditsBySpeed(row);
+    if (row.pricingSource === 'upstream_realtime') {
+      if (row.pricingByResolution) {
+        return (row.resolutions || [])
+          .map((res) => `<strong>${res.toUpperCase()} ${formatAdminCredits(row.creditsByResolution?.[res])}</strong>`)
+          .join('<br>');
+      }
+      return `<strong>${formatAdminCredits(row.creditsPerCall)}</strong><br><span class="admin-hint">自动同步</span>`;
+    }
     if (isMjPricingRow(row)) {
       const speeds = [
         { key: 'relax', label: 'Relax' },
@@ -404,6 +319,9 @@
 
   function renderModelPromoInputs(row) {
     ensureMjCreditsBySpeed(row);
+    if (row.pricingSource === 'upstream_realtime') {
+      return '<span class="admin-hint">不手动优惠</span>';
+    }
     if (isMjPricingRow(row)) {
       const speeds = [
         { key: 'relax', label: 'Relax' },
@@ -435,6 +353,9 @@
 
   function renderModelEffectiveCell(row) {
     ensureMjCreditsBySpeed(row);
+    if (row.pricingSource === 'upstream_realtime') {
+      return renderModelCreditsInputs(row);
+    }
     if (isMjPricingRow(row)) {
       return ['relax', 'fast', 'turbo']
         .map((s) => {

@@ -5,6 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 ENVIRONMENT = "production"
+PUBLIC_SITE_URL = "https://prompt-hubs.com"
 CORS_ORIGINS = "https://prompt-hubs.com,https://www.prompt-hubs.com,https://canvas.prompt-hubs.com,https://prompt-hub.cn,https://www.prompt-hub.cn,https://prompt-hub-hub.pages.dev,https://prompt-hub-web.pages.dev"
 CHAT_API_BASE_URL = "https://api.deepseek.com"
 CHAT_MODEL = "deepseek-chat"
@@ -19,8 +20,9 @@ MEDIA_STORAGE_MODE = "r2-first"
 # 旧 prompt-hub.cn 自建路线见 docs/SUPABASE-PROXY-SETUP.md，勿把裸 IP 交给 Worker fetch
 # SUPABASE_SERVICE_ROLE_KEY
 # SUPABASE_JWT_SECRET（可选，用于本地 JWT 校验加速）
-# IMAGE_API_KEY（生图 · GrsAI 主上游）
-# APIMART_API_KEY（生图 · Apimart 备用）
+# NEWAPI_API_KEY（全能模型2 / 香蕉；价格由卡藏 API 实时同步）
+# APIMART_API_KEY（MJ 与视觉工具）
+# IMAGE_API_KEY / ITHINK_API_KEY / MOOKO_API_KEY 仅在仍需恢复对应历史任务时保留
 # CHAT_API_KEY（对话 · DeepSeek 官方 API Key）
 # ADMIN_API_SECRET（运营批量造激活码，见 scripts/generate-codes.ps1）
 
@@ -45,3 +47,17 @@ custom_domain = true
 
 [observability]
 enabled = true
+
+[triggers]
+crons = ["*/2 * * * *"]
+
+[[queues.producers]]
+binding = "IMAGE_GENERATION_QUEUE"
+queue = "prompt-hub-image-generation"
+
+[[queues.consumers]]
+queue = "prompt-hub-image-generation"
+max_batch_size = 2
+max_batch_timeout = 5
+max_retries = 20
+dead_letter_queue = "prompt-hub-image-generation-dlq"

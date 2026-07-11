@@ -1,4 +1,4 @@
-# Shop activation codes: credits + optional basic membership bonus
+# Shop activation codes: 1 CNY = 100 credits, without recharge bonuses
 param(
   [int]$PerProduct = 2
 )
@@ -39,14 +39,14 @@ if ($key -match '^sb_secret_') {
   $headers['User-Agent'] = 'PromptHub-ShopCodeGen/1.0'
 }
 
-# credits + bonus basic membership days (daily mode on redeem)
+# Credit products use the same fixed exchange rate shown in the app.
 $creditProducts = @(
-  @{ label = '100 credits'; credits = 100; bonusDays = 0; prefix = 'CR100'; note = 'shop-cr100-0.99' },
-  @{ label = '500 credits + 1d basic'; credits = 500; bonusDays = 1; prefix = 'CR500'; note = 'shop-cr500-4.9' },
-  @{ label = '1000 credits + 3d basic'; credits = 1000; bonusDays = 3; prefix = 'CR1K'; note = 'shop-cr1k-9.8' },
-  @{ label = '3000 credits + 10d basic'; credits = 3000; bonusDays = 10; prefix = 'CR3K'; note = 'shop-cr3k-29.5' },
-  @{ label = '5000 credits + 18d basic'; credits = 5000; bonusDays = 18; prefix = 'CR5K'; note = 'shop-cr5k-48' },
-  @{ label = '10000 credits + 40d basic'; credits = 10000; bonusDays = 40; prefix = 'CR10K'; note = 'shop-cr10k-95' }
+  @{ label = '100 credits / CNY 1'; credits = 100; prefix = 'CR100'; note = 'shop-cr100-1' },
+  @{ label = '500 credits / CNY 5'; credits = 500; prefix = 'CR500'; note = 'shop-cr500-5' },
+  @{ label = '1000 credits / CNY 10'; credits = 1000; prefix = 'CR1K'; note = 'shop-cr1k-10' },
+  @{ label = '3000 credits / CNY 30'; credits = 3000; prefix = 'CR3K'; note = 'shop-cr3k-30' },
+  @{ label = '5000 credits / CNY 50'; credits = 5000; prefix = 'CR5K'; note = 'shop-cr5k-50' },
+  @{ label = '10000 credits / CNY 100'; credits = 10000; prefix = 'CR10K'; note = 'shop-cr10k-100' }
 )
 
 $memberProducts = @(
@@ -74,10 +74,6 @@ foreach ($p in $creditProducts) {
       max_uses = 1
       active = $true
       note = $p.note
-    }
-    if ($p.bonusDays -gt 0) {
-      $row.membership_tier = 'basic'
-      $row.membership_days = $p.bonusDays
     }
     $allRows += $row
     $n++

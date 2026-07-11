@@ -70,9 +70,10 @@ export async function drainFastProviderPendingSubmits(
       row,
       upstream,
       provider,
-      fastSubmitParamsFromJob(row)
+      fastSubmitParamsFromJob(row),
+      env
     );
-  }).filter(Boolean) as Promise<void>[];
+  }).filter(Boolean) as Promise<unknown>[];
 
   if (ctx?.awaitSubmit) {
     await Promise.allSettled(tasks);

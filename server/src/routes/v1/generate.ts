@@ -13,7 +13,11 @@ import {
 import { processFastProviderPendingSubmit } from '../../lib/fast-provider-submit';
 import type { JobRow } from '../../lib/generation-jobs';
 import { aspectRatiosForModel } from '../../lib/image-size-options';
-import { providerLabel, imageModelUiFamily, sanitizePublicModelDescription } from '../../lib/image-models-catalog';
+import {
+  imageModelUiFamily,
+  isRetainedPublicImageEntry,
+  sanitizePublicModelDescription
+} from '../../lib/image-models-catalog';
 import { isMidjourneyUpstream } from '../../lib/midjourney-models';
 import {
   submitMidjourneyAction,
@@ -142,10 +146,11 @@ const bodySchema = z.object({
     .min(1)
     .max(64)
     .transform((s) => s.trim().toLowerCase())
-    .default('gpt-image-2'),
+    .default('image2'),
   resolution: z.enum(['1k', '2k', '4k']).default('1k'),
   quality: z.enum(['standard', 'high', 'ultra']).default('standard'),
   size: z.string().max(32).optional(),
+  count: z.number().int().min(1).max(8).default(1),
   refImageUrl: refImageInputSchema.optional().nullable(),
   refImageUrls: z.array(refImageInputSchema).max(16).optional(),
   mjParams: mjParamsSchema
@@ -162,6 +167,7 @@ function normalizeGenerationBodyAliases(raw: unknown): unknown {
   }
   if (body.refImageUrl == null && typeof input.image === 'string') body.refImageUrl = input.image;
   if (body.refImageUrls == null && Array.isArray(input.images)) body.refImageUrls = input.images;
+  if (body.count == null && typeof input.n === 'number') body.count = input.n;
   return body;
 }
 
@@ -241,7 +247,7 @@ function readTaskId(meta: Record<string, unknown>): string | null {
 
 function kickBackgroundTask(
   c: { executionCtx?: { waitUntil: (p: Promise<unknown>) => void } },
-  task: Promise<void>
+  task: Promise<unknown>
 ) {
   const wrapped = task.catch((e) => {
     console.error('[generate] background task failed', e);
@@ -253,7 +259,7 @@ function kickBackgroundTask(
 function pollKickSubmit(
   c: { executionCtx?: { waitUntil: (p: Promise<unknown>) => void } }
 ) {
-  return (task: Promise<void>) => kickBackgroundTask(c, task);
+  return (task: Promise<unknown>) => kickBackgroundTask(c, task);
 }
 
 function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boolean; debited?: boolean }): string {
@@ -262,9 +268,9 @@ function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boole
   const s = String(raw || '');
   if (/prohibited words or images|prohibited|flagged as containing/i.test(s)) {
     if (opts?.violationNoRefund) {
-      return '提示词触发 Apimart 内容审核（含禁用词/图），该模型违规不返还积分，请改描述后重试';
+      return '提示词触发内容审核（含禁用词/图），该模型违规不返还积分，请改描述后重试';
     }
-    return `提示词触发 Apimart 内容审核（含禁用词/图），请改描述后重试${refundNote}`;
+    return `提示词触发内容审核（含禁用词/图），请改描述后重试${refundNote}`;
   }
   if (/upstream_content_violation|violation/i.test(s)) {
     if (opts?.violationNoRefund) {
@@ -273,10 +279,10 @@ function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boole
     return `提示词可能触发内容审核，请调整描述后重试${refundNote}`;
   }
   if (/insufficient balance|insufficient credits/i.test(s)) {
-    return `生图服务商账户余额不足（不是您的站内积分），请联系站长充值${refundNote}`;
+    return `生成服务暂不可用，请联系站长${refundNote}`;
   }
   if (/upstream_auth_failed|无效.*令牌|invalid.*token/i.test(s)) {
-    return `生图令牌无效或已过期，请联系站长在 thinkai.tv 重新创建并勾选 OpenAI-image2 生图分组${refundNote}`;
+    return `生成服务认证失败，请联系站长${refundNote}`;
   }
   if (/upstream_submit_not_configured/i.test(s)) {
     return `生图服务未配置，请联系站长${refundNote}`;
@@ -300,7 +306,7 @@ function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boole
     return `生图排队超时${debited ? '，积分已全额退回' : ''}；若仍在生成中可刷新页面尝试恢复`;
   }
   if (/upstream_no_image/i.test(s)) {
-    return `上游未返回图片${debited ? '，积分已全额退回' : ''}，请重试`;
+    return `生成服务未返回图片${debited ? '，积分已全额退回' : ''}，请重试`;
   }
   if (/upstream_image_archive_failed|invalid_data_url|invalid base64/i.test(s)) {
     return `图片入库失败${debited ? '，积分已全额退回' : ''}，请重试`;
@@ -318,15 +324,15 @@ function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boole
     return `任务提交异常${debited ? '，积分已全额退回' : ''}，请重试`;
   }
   if (/upstream_failed|upstream_submit/i.test(s)) {
-    return `上游生图失败，可缩短提示词后重试${refundNote}`;
+    return `生图失败，可缩短提示词后重试${refundNote}`;
   }
   if (/please wait|too many requests|rate limit|busy/i.test(s)) {
     return `生图服务繁忙，请稍等片刻后重试${refundNote}`;
   }
   if (/GrsAI 未返回任务 ID/i.test(s)) {
-    return `上游已接单但响应格式异常，请强刷页面查看是否已在生成${refundNote}`;
+    return `任务已接收但响应格式异常，请强刷页面查看是否已在生成${refundNote}`;
   }
-  return s ? `${s}${refundNote}` : `上游生图失败${refundNote}`;
+  return `生图失败${refundNote}，请重试`;
 }
 
 function parameterOptions(
@@ -434,7 +440,8 @@ function publicModelPayload(
   const newApiRules = opts.newApiCatalog.rules;
   const withFixedCredits = (
     cost: ReturnType<typeof computeImageGenerationCost>,
-    credits: number
+    credits: number,
+    modelLabel = cost.modelLabel
   ): ReturnType<typeof computeImageGenerationCost> => ({
     ...cost,
     base: credits,
@@ -442,12 +449,15 @@ function publicModelPayload(
     listPrice: credits,
     promoPrice: credits,
     appliedDiscount: 'fixed',
-    discountLabel: 'New API realtime price',
+    discountLabel: '卡藏 API 实时价',
     modelDiscountPercent: 100,
-    modelDiscountLabel: null
+    modelDiscountLabel: null,
+    modelLabel
   });
 
-  return listResolvedImageModels(settings, { publicList: true, catalogEntries }).map((m) => {
+  return listResolvedImageModels(settings, { publicList: true, catalogEntries })
+    .filter(isRetainedImageModel)
+    .map((m) => {
     const resolutions = m.resolutions?.length ? m.resolutions : (['1k'] as const);
     const defaultRes = resolutions[0] || '1k';
     const costBySpeed = m.pricingBySpeed
@@ -490,7 +500,7 @@ function publicModelPayload(
       ?? costByResolution?.[defaultRes]
       ?? computeImageGenerationCost(settings, m.id, defaultRes, tier, memberActive, { catalogEntries });
     const finalCost = remoteNewApiCredits != null && remoteNewApiCredits > 0
-      ? withFixedCredits(cost, remoteNewApiCredits)
+      ? withFixedCredits(cost, remoteNewApiCredits, m.label)
       : cost;
     const finalCostByResolution = m.provider === 'newapi' && costByResolution
       ? Object.fromEntries(
@@ -498,7 +508,7 @@ function publicModelPayload(
             const credits = newApiCreditsForModel(newApiRules, m.upstream, res);
             return [
               res,
-              credits != null && credits > 0 ? withFixedCredits(resCost, credits) : resCost
+              credits != null && credits > 0 ? withFixedCredits(resCost, credits, m.label) : resCost
             ];
           })
         )
@@ -530,15 +540,12 @@ function publicModelPayload(
     const newApiRule = newApiRuleForModel(m, opts.newApiCatalog);
     return {
       id: m.id,
-      label: m.displayLabel,
+      label: m.provider === 'newapi' ? m.label : m.displayLabel,
       catalogLabel: m.label,
       description: sanitizePublicModelDescription(m.description) || null,
       group: m.group,
-      provider: m.provider,
-      providerLabel: providerLabel(m.provider),
       uiFamily: m.uiFamily,
       sortOrder: settings.models[m.id]?.sortOrder ?? m.sortOrder,
-      upstream: m.upstream,
       status: m.status,
       selectable: m.enabled,
       statusNotice: m.statusNotice,
@@ -576,7 +583,7 @@ function publicModelPayload(
       discountLabel: finalCost.discountLabel,
       promoPriceFlat: m.promoPrice
     };
-  });
+    });
 }
 
 async function computeGenerationCostForRequest(
@@ -616,9 +623,10 @@ async function computeGenerationCostForRequest(
     listPrice: credits,
     promoPrice: credits,
     appliedDiscount: 'fixed',
-    discountLabel: 'New API realtime price',
+    discountLabel: '卡藏 API 实时价',
     modelDiscountPercent: 100,
-    modelDiscountLabel: null
+    modelDiscountLabel: null,
+    modelLabel: resolved.label
   };
 }
 
@@ -631,6 +639,10 @@ function modelUnavailableMessage(resolved: NonNullable<
   return '所选模型已下架，请换用其他模型';
 }
 
+function isRetainedImageModel(model: NonNullable<ReturnType<typeof resolveImageModelConfig>>) {
+  return isRetainedPublicImageEntry(model);
+}
+
 function assertSupportedImageParameters(
   model: NonNullable<ReturnType<typeof resolveImageModelConfig>>,
   data: z.infer<typeof bodySchema>,
@@ -641,6 +653,33 @@ function assertSupportedImageParameters(
     : [...aspectRatiosForModel(model.id)];
   if (data.size && allowedRatios.length && !allowedRatios.includes(data.size)) {
     throw new ApiError(400, 'VALIDATION_ERROR', `该模型不支持 ${data.size} 比例`);
+  }
+  if (rule) {
+    const countParameter = rule.parameters.find(parameter => parameter.name === 'n' || parameter.name === 'count');
+    const fixedCount = countParameter && Object.prototype.hasOwnProperty.call(countParameter, 'fixed')
+      ? Number(countParameter.fixed)
+      : null;
+    const allowedCounts = (countParameter?.options || [])
+      .map(value => Number(value))
+      .filter(value => Number.isInteger(value) && value > 0);
+    const minCount = Number.isFinite(Number(countParameter?.min)) ? Math.max(1, Number(countParameter?.min)) : 1;
+    const maxCount = Number.isFinite(Number(countParameter?.max))
+      ? Math.max(minCount, Number(countParameter?.max))
+      : fixedCount && fixedCount > 0
+        ? fixedCount
+        : allowedCounts.length
+          ? Math.max(...allowedCounts)
+          : 1;
+    if (
+      !countParameter
+      || (fixedCount && data.count !== fixedCount)
+      || (allowedCounts.length > 0 && !allowedCounts.includes(data.count))
+      || data.count < minCount
+      || data.count > maxCount
+    ) {
+      const label = fixedCount && fixedCount > 0 ? `${fixedCount}` : `${minCount}-${maxCount}`;
+      throw new ApiError(400, 'VALIDATION_ERROR', `该模型生成张数仅支持 ${label}`);
+    }
   }
   const referenceCount = (data.refImageUrls?.length || 0) + (data.refImageUrl ? 1 : 0);
   if (!referenceCount) return;
@@ -663,7 +702,7 @@ async function requireFreshNewApiCatalog(env: Env): Promise<NewApiCatalogSnapsho
     throw new ApiError(
       503,
       'SERVICE_UNAVAILABLE',
-      '暂时无法确认 New API 实时价格，请稍后重试'
+      '暂时无法确认实时价格，请稍后重试'
     );
   }
 }
@@ -680,7 +719,6 @@ generateRoutes.get('/models', async c => {
   return c.json({
     ok: true,
     data: {
-      providers: ['newapi', 'grsai', 'apimart'],
       globalDiscountPercent: settings.globalDiscountPercent,
       catalogVersion: newApiCatalog.version || null,
       pricingVersion: newApiCatalog.pricingVersion || null,
@@ -693,7 +731,7 @@ generateRoutes.get('/models', async c => {
 /** 报价接口：轻量、不限流（避免生图页拖动参数时卡 20s+） */
 generateRoutes.get('/cost', async c => {
   const resolution = c.req.query('resolution') || '1k';
-  const model = normalizeImageModelId(c.req.query('model') || 'gpt-image-2');
+  const model = normalizeImageModelId(c.req.query('model') || 'image2');
   if (!['1k', '2k', '4k'].includes(resolution)) {
     throw new ApiError(400, 'VALIDATION_ERROR', '无效的分辨率');
   }
@@ -713,7 +751,7 @@ generateRoutes.get('/cost', async c => {
     catalogEntries = imageCatalogForNewApiSnapshot(newApiCatalog);
     resolved = resolveImageModelConfig(model, settings, catalogEntries);
   }
-  if (!resolved || !resolved.enabled) {
+  if (!resolved || !resolved.enabled || !isRetainedImageModel(resolved)) {
     throw new ApiError(
       400,
       'VALIDATION_ERROR',
@@ -770,7 +808,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     catalogEntries = imageCatalogForNewApiSnapshot(newApiCatalog);
     resolved = resolveImageModelConfig(modelId, settings, catalogEntries);
   }
-  if (!resolved || !resolved.enabled) {
+  if (!resolved || !resolved.enabled || !isRetainedImageModel(resolved)) {
     throw new ApiError(
       400,
       'VALIDATION_ERROR',
@@ -787,10 +825,11 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       `该模型不支持 ${parsed.data.resolution.toUpperCase()}，请切换分辨率`
     );
   }
+  const newApiRule = newApiRuleForModel(resolved, newApiCatalog);
   assertSupportedImageParameters(
     resolved,
     parsed.data,
-    newApiRuleForModel(resolved, newApiCatalog)
+    newApiRule
   );
 
   const jobResolution = parsed.data.resolution;
@@ -798,8 +837,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   const isMidjourney = resolved.uiFamily === 'midjourney' || isMidjourneyUpstream(resolved.upstream);
   const mjParams = isMidjourney && parsed.data.mjParams ? parsed.data.mjParams : undefined;
 
-  const { final: rawFinal, base, discountLabel, modelLabel, refundOnViolation, violationNotice } =
-    await computeGenerationCostForRequest(
+  const unitCost = await computeGenerationCostForRequest(
       c.env,
       settings,
       resolved,
@@ -809,7 +847,10 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       memberActive,
       { mjSpeed: mjParams?.speed || null, newApiCatalog }
     );
-  const final = roundCredits(rawFinal);
+  const count = newApiRule ? parsed.data.count : 1;
+  const base = roundCredits(unitCost.base * count);
+  const final = roundCredits(unitCost.final * count);
+  const { discountLabel, modelLabel, refundOnViolation, violationNotice } = unitCost;
 
   const balance = spendableCredits(profile);
   if (balance < final) {
@@ -856,6 +897,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
         modelLabel,
         provider: lineProvider,
         refImageUrls: refUrls,
+        count,
         base,
         discountLabel,
         size: parsed.data.size ?? null,
@@ -884,6 +926,8 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     modelLabel,
     provider: lineProvider,
     refImageUrls: refUrls,
+    count,
+    ...(newApiRule ? { newApiParameters: newApiRule.parameters } : {}),
     base,
     discountLabel,
     size: parsed.data.size ?? null,
@@ -900,7 +944,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       final,
       'image_generation',
       job.id,
-      { model: modelId, resolution: parsed.data.resolution, base, discountLabel }
+      { model: modelId, resolution: parsed.data.resolution, count, base, discountLabel }
     );
     profile = debitedResult.profile;
     debitSplit = debitedResult.split;
@@ -932,30 +976,42 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     quality: jobQuality,
     fixedQualityLow: !!resolved.fixedQualityLow,
     size: parsed.data.size,
+    count,
     refImageUrls: refUrls,
+    catalogParameters: newApiRule?.parameters,
     ...(mjParams ? { mjParams } : {})
   };
 
-  /** GrsAI / Apimart 同步提交易超 CF 100s → 524；改后台提交后立即返回 jobId */
+  /** 上游同步提交易超 CF 请求时限；改后台提交后立即返回 jobId。 */
   if (
     hasAnyImageUpstream(upstream)
-    && (lineProvider === 'grsai' || lineProvider === 'apimart' || lineProvider === 'newapi')
+    && (lineProvider === 'apimart' || lineProvider === 'newapi')
     && isProviderConfigured(upstream, lineProvider)
   ) {
+    const useDurableQueue = lineProvider === 'newapi' && !!c.env.IMAGE_GENERATION_QUEUE;
     const fastMeta: Record<string, unknown> = {
       ...baseMeta,
       debitSplit,
-      fastSubmitState: 'queued'
+      fastSubmitState: 'queued',
+      ...(useDurableQueue ? { queueEnqueuedAt: new Date().toISOString() } : {})
     };
     await admin
       .from('generation_requests')
       .update({ meta: fastMeta })
       .eq('id', job.id);
     const queuedJob: JobRow = { ...job, meta: fastMeta };
-    kickBackgroundTask(
-      c,
-      processFastProviderPendingSubmit(admin, user.id, queuedJob, upstream, lineProvider, submitParams)
-    );
+    if (useDurableQueue) {
+      try {
+        await c.env.IMAGE_GENERATION_QUEUE!.send({ jobId: job.id, userId: user.id });
+      } catch (queueError) {
+        console.error('[generate] image queue enqueue failed', job.id, queueError);
+      }
+    } else {
+      kickBackgroundTask(
+        c,
+        processFastProviderPendingSubmit(admin, user.id, queuedJob, upstream, lineProvider, submitParams, c.env)
+      );
+    }
   }
 
   if (hasAnyImageUpstream(upstream) && upstreamTaskId) {
@@ -996,7 +1052,6 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       violationNotice,
       imageUrl: null,
       demo: !hasAnyImageUpstream(upstream),
-      provider: lineProvider,
       progressNote: hasAnyImageUpstream(upstream)
         ? '已扣积分，正在提交（请勿重复点生成）'
         : null
@@ -1118,8 +1173,6 @@ generateRoutes.get('/jobs/history', async c => {
       status: job.status,
       imageUrl: job.result_image_url as string | null,
       extraImageUrls: extraImageUrls.length ? extraImageUrls : undefined,
-      apimartTaskId: typeof meta.apimartTaskId === 'string' ? meta.apimartTaskId : null,
-      provider: typeof meta.provider === 'string' ? meta.provider : null,
       model: meta.model,
       modelLabel: meta.modelLabel,
       createdAt: job.created_at
@@ -1197,7 +1250,6 @@ generateRoutes.get('/jobs/recent', async c => {
         size: job.size_label,
         model: meta.model,
         modelLabel: meta.modelLabel,
-        provider: typeof meta.provider === 'string' ? meta.provider : null,
         createdAt: job.created_at,
         completedAt: job.completed_at,
         isMidjourney,
@@ -1319,7 +1371,7 @@ generateRoutes.post('/recover-warehouse', async c => {
           cardIds: [...imported.cardIds, ...(repaired.cardIds ?? [])],
           hint: settled > 0 || imported.imported > 0 || (repaired.repaired ?? 0) > 0
             ? undefined
-            : '上游仍无可用图片，请稍后再试或点占位上的重试'
+            : '生成服务仍无可用图片，请稍后再试或点占位上的重试'
         }
       });
     }
@@ -1396,7 +1448,7 @@ generateRoutes.post('/mj-action', rateLimit(300, 60_000), async (c) => {
 
   const modelId = normalizeImageModelId(String(parentMeta.model || 'apimart-mj-v61'));
   const resolved = resolveImageModelConfig(modelId, settings);
-  if (!resolved || !resolved.enabled) {
+  if (!resolved || !resolved.enabled || !isRetainedImageModel(resolved)) {
     throw new ApiError(400, 'VALIDATION_ERROR', '模型不可用');
   }
 
@@ -1822,7 +1874,7 @@ generateRoutes.get('/jobs/:jobId/image', async c => {
   if (isRemoteHttpImageUrl(imageRef)) {
     const upstream = await fetch(imageRef, { redirect: 'follow' });
     if (!upstream.ok) {
-      throw new ApiError(502, 'UPSTREAM_ERROR', '上游图片不可用');
+      throw new ApiError(502, 'UPSTREAM_ERROR', '生成图片暂不可用');
     }
     const body = await upstream.arrayBuffer();
     return new Response(body, {

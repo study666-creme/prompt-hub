@@ -27,18 +27,40 @@
   }
 
   const LEGACY_MODEL_IDS = {
-    quanneng2: 'gpt-image-2',
-    jimeng: 'nano-banana-pro'
+    quanneng2: 'image2',
+    'gpt-image-2': 'image2',
+    'gpt-image-2-vip': 'image2-pro',
+    jimeng: 'lingtu-pro',
+    'nano-banana-fast': 'lingtu-fast',
+    'nano-banana-2': 'lingtu-2',
+    'nano-banana-pro': 'lingtu-pro',
+    'nano-banana-pro-vt': 'lingtu-pro',
+    'nano-banana-pro-vip': 'lingtu-pro',
+    'nano-banana-pro-cl': 'lingtu-pro',
+    'nano-banana-2-cl': 'lingtu-2',
+    'nano-banana-2-4k-cl': 'lingtu-2',
+    'nano-banana': 'lingtu',
+    'apimart-gpt-image-2-official-budget': 'image2-hd',
+    'apimart-gpt-image-2': 'image2',
+    'apimart-seedream-5-lite': 'image2',
+    'apimart-gemini-2-5-flash-preview': 'lingtu-fast',
+    'apimart-gemini-2-5-flash-official': 'lingtu-fast',
+    'apimart-gemini-3-1-flash-preview': 'lingtu-2',
+    'apimart-gemini-3-1-flash-official': 'lingtu-2',
+    'apimart-gemini-3-pro-preview': 'lingtu-pro',
+    'apimart-gemini-3-pro-official': 'lingtu-pro',
+    'ithink-gpt-image-2-slow': 'image2',
+    'mooko-gpt-image-2-pro': 'image2-pro'
   };
 
   const FALLBACK_MODEL = {
-    id: 'gpt-image-2',
-    label: 'GPT Image 2',
+    id: 'image2',
+    label: '全能模型2 · 1K',
     pricing: 'api'
   };
 
   function normalizeImageGenModelId(modelId) {
-    const id = String(modelId || '').trim() || 'gpt-image-2';
+    const id = String(modelId || '').trim().toLowerCase() || 'image2';
     return LEGACY_MODEL_IDS[id] || id;
   }
 
@@ -368,11 +390,11 @@
 
   /** @deprecated 使用 getImageGenCostDetail */
   function getResolutionCostDetail(resolution) {
-    return getImageGenCostDetail('gpt-image-2', resolution);
+    return getImageGenCostDetail('image2', resolution);
   }
 
   function getResolutionCost(resolution) {
-    return getImageGenCost('gpt-image-2', resolution);
+    return getImageGenCost('image2', resolution);
   }
 
   function getRedeemedSet() {

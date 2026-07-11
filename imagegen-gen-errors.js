@@ -8,10 +8,34 @@
 
   function normalizeImageGenModelId(modelId) {
     const id = String(modelId || '').trim().toLowerCase();
-    if (!id) return 'gpt-image-2';
-    if (id === 'quanneng2') return 'gpt-image-2';
-    if (id === 'jimeng') return 'nano-banana-pro';
-    return id;
+    if (!id) return 'image2';
+    const legacy = {
+      quanneng2: 'image2',
+      'gpt-image-2': 'image2',
+      'gpt-image-2-vip': 'image2-pro',
+      jimeng: 'lingtu-pro',
+      'nano-banana-fast': 'lingtu-fast',
+      'nano-banana-2': 'lingtu-2',
+      'nano-banana-pro': 'lingtu-pro',
+      'nano-banana-pro-vt': 'lingtu-pro',
+      'nano-banana-pro-vip': 'lingtu-pro',
+      'nano-banana-pro-cl': 'lingtu-pro',
+      'nano-banana-2-cl': 'lingtu-2',
+      'nano-banana-2-4k-cl': 'lingtu-2',
+      'nano-banana': 'lingtu',
+      'apimart-gpt-image-2-official-budget': 'image2-hd',
+      'apimart-gpt-image-2': 'image2',
+      'apimart-seedream-5-lite': 'image2',
+      'apimart-gemini-2-5-flash-preview': 'lingtu-fast',
+      'apimart-gemini-2-5-flash-official': 'lingtu-fast',
+      'apimart-gemini-3-1-flash-preview': 'lingtu-2',
+      'apimart-gemini-3-1-flash-official': 'lingtu-2',
+      'apimart-gemini-3-pro-preview': 'lingtu-pro',
+      'apimart-gemini-3-pro-official': 'lingtu-pro',
+      'ithink-gpt-image-2-slow': 'image2',
+      'mooko-gpt-image-2-pro': 'image2-pro'
+    };
+    return legacy[id] || id;
   }
 
   function normalizeImageGenResolution(res) {

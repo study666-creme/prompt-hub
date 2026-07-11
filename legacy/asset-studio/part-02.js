@@ -225,6 +225,7 @@
   let studioRefImages = [];
   let studioImageGenCost = 10;
   let studioImageCostTimer = null;
+  let studioImageModelCatalog = [];
   const STUDIO_MAX_REF_IMAGES = 16;
   let studioModalResolver = null;
 
@@ -302,8 +303,61 @@
     if (btn && !btn.disabled) btn.textContent = `生成图片 · ${studioImageGenCost} 积分`;
   }
 
+  function syncStudioImageResolutionOptions() {
+    const modelId = document.getElementById('studioImageModel')?.value || 'image2';
+    const select = document.getElementById('studioImageResolution');
+    if (!select) return;
+    const model = studioImageModelCatalog.find((item) => item.id === modelId);
+    const resolutions = Array.isArray(model?.resolutions) && model.resolutions.length
+      ? model.resolutions.filter((value) => ['1k', '2k', '4k'].includes(value))
+      : modelId === 'image2'
+        ? ['1k']
+        : modelId === 'image2-pro' || modelId === 'image2-hd'
+          ? ['2k', '4k']
+          : modelId.startsWith('apimart-mj-')
+            ? ['1k']
+            : ['1k', '2k', '4k'];
+    const previous = select.value;
+    select.innerHTML = resolutions
+      .map((resolution) => `<option value="${resolution}">${resolution.toUpperCase()}</option>`)
+      .join('');
+    select.value = resolutions.includes(previous) ? previous : resolutions[0] || '1k';
+  }
+
+  async function loadStudioImageModelCatalog() {
+    const select = document.getElementById('studioImageModel');
+    if (!select || !window.PromptHubApi?.getGenerationModels) return;
+    try {
+      const response = await window.PromptHubApi.getGenerationModels();
+      const models = (response?.data?.models || []).filter((model) =>
+        ['gim2', 'banana', 'midjourney'].includes(model.uiFamily)
+        && model.status !== 'offline'
+      );
+      if (!response?.ok || !models.length) return;
+      studioImageModelCatalog = models;
+      const previous = select.value;
+      select.innerHTML = '';
+      for (const model of models) {
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = model.label || model.id;
+        option.disabled = model.selectable === false || model.status === 'maintenance';
+        select.appendChild(option);
+      }
+      const preferred = models.find((model) => model.id === previous && model.selectable !== false)
+        || models.find((model) => model.id === 'image2' && model.selectable !== false)
+        || models.find((model) => model.selectable !== false);
+      if (preferred) select.value = preferred.id;
+      syncStudioImageResolutionOptions();
+      updateStudioImageGenCostHint();
+    } catch (e) {
+      // 静态清单已与服务端兜底保持一致，网络恢复后下次打开会重新同步。
+    }
+  }
+
   function updateStudioImageGenCostHint() {
-    const model = document.getElementById('studioImageModel')?.value || 'quanneng2';
+    syncStudioImageResolutionOptions();
+    const model = document.getElementById('studioImageModel')?.value || 'image2';
     const resolution = document.getElementById('studioImageResolution')?.value || '1k';
     const detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution);
     studioImageGenCost = detail?.final ?? window.PointsSystem?.getImageGenCost?.(model, resolution) ?? 10;

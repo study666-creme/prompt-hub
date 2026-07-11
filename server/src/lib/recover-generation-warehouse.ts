@@ -789,7 +789,7 @@ export async function repairWarehouseCardImagesFromJobs(
           ? `本批扫描 ${cardsSlice.length} 张（${cardOffset + 1}～${cardOffset + cardsSlice.length}/${cards.length}），请继续下一批`
           : skipped > 0 && failures.some((f) => f.reason === 'job_not_found')
             ? '部分老任务记录已不存在，仅能从 R2/Supabase 已有文件恢复'
-            : '上游仍无可用图片，请稍后再试'
+            : '生成服务仍无可用图片，请稍后再试'
   };
 }
 

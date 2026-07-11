@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__ADMIN_BUILD__ = '20260711a';
+    window.__ADMIN_BUILD__ = '20260712b';
     (function () {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function (regs) {
@@ -23,7 +23,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Prompt Hub 运营控制台</title>
-  <link rel="stylesheet" href="styles-admin.css?v=20260711a">
+  <link rel="stylesheet" href="styles-admin.css?v=20260712b">
 </head>
 <body class="admin-console-page" data-admin-page="console">
   <div class="admin-app" id="adminApp" hidden>
@@ -40,6 +40,7 @@
           <button type="button" class="admin-tab" data-tab="community"><span class="admin-tab-icon admin-tab-icon--community" aria-hidden="true"></span>社区</button>
           <button type="button" class="admin-tab" data-tab="codes"><span class="admin-tab-icon admin-tab-icon--codes" aria-hidden="true"></span>激活码</button>
           <button type="button" class="admin-tab" data-tab="models"><span class="admin-tab-icon admin-tab-icon--models" aria-hidden="true"></span>生图模型</button>
+          <button type="button" class="admin-tab" data-tab="canvas"><span class="admin-tab-icon admin-tab-icon--canvas" aria-hidden="true"></span>画布调用</button>
         </nav>
         <div class="admin-sidebar-foot">
           <button type="button" class="admin-btn admin-btn--ghost-light admin-logout-btn" id="logoutBtn">退出登录</button>
@@ -76,17 +77,13 @@
       </div>
       <div class="admin-card admin-storage-card" id="dashStorage">
         <div class="admin-card-head">
-          <h2>Supabase 用量</h2>
-          <button type="button" class="admin-btn admin-btn--sm" id="dashStorageReconcile" hidden title="按桶内文件重算 profiles.storage_bytes">回填登记存储</button>
+          <h2>存储用量</h2>
+          <div class="admin-row">
+            <button type="button" class="admin-btn admin-btn--sm" id="dashStorageRefresh" title="扫描当前主存储并统计用量">扫描存储</button>
+          </div>
         </div>
-        <p class="admin-hint" id="dashStorageHint">正在扫描 card-images 桶…</p>
+        <p class="admin-hint" id="dashStorageHint">按需扫描，避免每次打开后台遍历整个图片桶。</p>
         <div id="dashStorageBody" hidden></div>
-      </div>
-      <div class="admin-card" id="dashCommunity">
-        <h2>社区维护</h2>
-        <p class="admin-hint"><strong>写回卡片库</strong>：作者云端缺卡但社区仍在线时用（见社区页「卡片库无」）。<strong>清理无效帖</strong>：下架 Storage 无图、无效作者、重复、删卡孤儿——不删图片。</p>
-        <button type="button" class="admin-btn admin-btn--primary" id="dashCommunityPurgeBtn">清理无效社区帖</button>
-        <p class="admin-hint" id="dashCommunityPurgeResult" hidden></p>
       </div>
       <p class="admin-msg" id="dashMsg" hidden></p>
     </section>
@@ -365,73 +362,14 @@
 
     <section class="admin-panel" id="panel-models" hidden>
       <div class="admin-card">
-        <h2 style="margin:0 0 8px;font-size:16px">生图模型定价</h2>
-        <p class="admin-hint">GrsAI 成本按充值套餐 <strong>¥49 = 75 万积分</strong> 换算（见 <a href="https://grsai.com/zh/dashboard/models" target="_blank" rel="noopener">模型大全</a>）。Apimart 成本来自 <a href="https://apimart.ai/zh/pricing" target="_blank" rel="noopener">定价中心</a>（USD×7≈人民币元）。MJ 按 Relax / Fast / Turbo 三档填售价。</p>
+        <h2 style="margin:0 0 8px;font-size:16px">当前生图模型</h2>
+        <p class="admin-hint">全能模型2与香蕉的模型、参数和价格由卡藏 API 自动同步，按 1 元 = 100 积分换算，不接受手动改价。MJ 保留 Apimart 的 Relax / Fast / Turbo 分档配置。</p>
         <p class="admin-msg admin-msg--err" id="modelsPersistWarn" hidden></p>
-        <details class="admin-details" id="grsaiCostDetails" open style="margin:12px 0">
-          <summary style="cursor:pointer;font-weight:600">GrsAI 成本对照表（¥49 ÷ 75 万积分）</summary>
-          <div class="admin-view-tabs admin-view-tabs--inline" id="grsaiCostFamilyTabs" style="margin-top:8px">
-            <button type="button" class="admin-view-tab is-active" data-grsai-cost-family="all">全部</button>
-            <button type="button" class="admin-view-tab" data-grsai-cost-family="gim2">全能2</button>
-            <button type="button" class="admin-view-tab" data-grsai-cost-family="banana">香蕉</button>
-          </div>
-          <div class="admin-table-wrap" style="margin-top:8px;max-height:280px;overflow:auto">
-            <table class="admin-table admin-table--compact" id="grsaiCostTable">
-              <thead>
-                <tr>
-                  <th>分类</th>
-                  <th>模型</th>
-                  <th>功能</th>
-                  <th>档位</th>
-                  <th>上游积分</th>
-                  <th>成本</th>
-                </tr>
-              </thead>
-              <tbody id="grsaiCostTableBody"></tbody>
-            </table>
-          </div>
-        </details>
-        <details class="admin-details" id="apimartCostDetails" open style="margin:12px 0">
-          <summary style="cursor:pointer;font-weight:600">Apimart 成本对照表（人民币 ≈ USD×7）</summary>
-          <div class="admin-view-tabs admin-view-tabs--inline" id="apimartCostFamilyTabs" style="margin-top:8px">
-            <button type="button" class="admin-view-tab is-active" data-apimart-cost-family="all">全部</button>
-            <button type="button" class="admin-view-tab" data-apimart-cost-family="gim2">全能2</button>
-            <button type="button" class="admin-view-tab" data-apimart-cost-family="banana">香蕉</button>
-            <button type="button" class="admin-view-tab" data-apimart-cost-family="jimeng">即梦</button>
-            <button type="button" class="admin-view-tab" data-apimart-cost-family="midjourney">MJ</button>
-            <button type="button" class="admin-view-tab" data-apimart-cost-family="wan">万相</button>
-            <button type="button" class="admin-view-tab" data-apimart-cost-family="flux">Flux</button>
-          </div>
-          <div class="admin-table-wrap" style="margin-top:8px;max-height:320px;overflow:auto">
-            <table class="admin-table admin-table--compact" id="apimartCostTable">
-              <thead>
-                <tr>
-                  <th>分类</th>
-                  <th>模型</th>
-                  <th>功能</th>
-                  <th>档位</th>
-                  <th>成本</th>
-                </tr>
-              </thead>
-              <tbody id="apimartCostTableBody"></tbody>
-            </table>
-          </div>
-        </details>
         <div class="admin-view-tabs admin-view-tabs--inline" id="modelFamilyTabs" style="margin-bottom:12px">
           <button type="button" class="admin-view-tab is-active" data-model-family="all">全部</button>
-          <button type="button" class="admin-view-tab" data-model-family="gim2">全能2</button>
+          <button type="button" class="admin-view-tab" data-model-family="gim2">全能模型2</button>
           <button type="button" class="admin-view-tab" data-model-family="banana">香蕉</button>
-          <button type="button" class="admin-view-tab" data-model-family="jimeng">即梦</button>
           <button type="button" class="admin-view-tab" data-model-family="midjourney">MJ</button>
-          <button type="button" class="admin-view-tab" data-model-family="wan">万相</button>
-          <button type="button" class="admin-view-tab" data-model-family="flux">Flux</button>
-        </div>
-        <div class="admin-view-tabs admin-view-tabs--inline" id="modelProviderTabs" style="margin-bottom:12px">
-          <button type="button" class="admin-view-tab is-active" data-model-provider="all">全部线路</button>
-          <button type="button" class="admin-view-tab" data-model-provider="grsai">常规</button>
-          <button type="button" class="admin-view-tab" data-model-provider="apimart">备用</button>
-          <button type="button" class="admin-view-tab" data-model-provider="ithink">经济</button>
-          <button type="button" class="admin-view-tab" data-model-provider="mooko">慢速</button>
         </div>
         <div class="admin-view-tabs admin-view-tabs--inline" id="modelStatusTabs" style="margin-bottom:12px">
           <button type="button" class="admin-view-tab is-active" data-model-status="all">全部状态</button>
@@ -440,7 +378,7 @@
           <button type="button" class="admin-view-tab" data-model-status="offline">下架</button>
         </div>
         <div class="admin-row" style="margin:12px 0">
-          <button type="button" class="admin-btn admin-btn--primary" id="modelsSaveBtn">保存全部定价</button>
+          <button type="button" class="admin-btn admin-btn--primary" id="modelsSaveBtn">保存上架与 MJ 定价</button>
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table admin-table--models">
@@ -452,20 +390,67 @@
                 <th>模型 ID</th>
                 <th>显示名称</th>
                 <th>状态</th>
-                <th title="Apimart USD×7≈人民币元">上游成本</th>
+                <th>服务成本</th>
                 <th>违规返还</th>
                 <th>分辨率</th>
                 <th>售价积分</th>
-                <th title="不填则无活动价">折扣价</th>
-                <th title="已填折扣价时前台按此计费">活动价预览</th>
+                <th title="仅 MJ 可配置">MJ 活动价</th>
+                <th title="全能模型2与香蕉显示实时价">有效价格</th>
                 <th>固定价</th>
-                <th>会员最低%</th>
               </tr>
             </thead>
             <tbody id="modelsTableBody"></tbody>
           </table>
         </div>
         <p class="admin-msg" id="modelsMsg" hidden></p>
+      </div>
+    </section>
+
+    <section class="admin-panel" id="panel-canvas" hidden>
+      <div class="admin-stats" id="canvasOpsStats"></div>
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <div>
+            <h2>模型映射</h2>
+            <p class="admin-hint" id="canvasCatalogMeta">正在读取实时目录…</p>
+          </div>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-table--compact">
+            <thead><tr><th>画布名称</th><th>公开 ID</th><th>实际模型</th><th>端点</th><th>实时价格</th><th>可选参数</th></tr></thead>
+            <tbody id="canvasModelMapBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <div>
+            <h2>最近画布任务</h2>
+            <p class="admin-hint">可判断请求停在创建、等待服务、生成、保存结果还是完成阶段。</p>
+          </div>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-table--compact">
+            <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>参数</th><th>状态</th><th>积分</th><th>服务任务</th><th>错误</th></tr></thead>
+            <tbody id="canvasJobsBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <div>
+            <h2>生成服务日志</h2>
+            <p class="admin-hint" id="canvasServiceLogMeta">核对服务是否收到请求及实际耗时。</p>
+          </div>
+          <a class="admin-btn admin-btn--sm" id="canvasServiceConsoleLink" href="https://console.prompt-hubs.com/usage-logs/task" target="_blank" rel="noopener">打开完整日志</a>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-table--compact">
+            <thead><tr><th>时间</th><th>模型</th><th>渠道</th><th>状态</th><th>耗时</th><th>请求 ID</th><th>明细</th></tr></thead>
+            <tbody id="canvasServiceLogsBody"></tbody>
+          </table>
+        </div>
+        <p class="admin-msg" id="canvasOpsMsg" hidden></p>
       </div>
     </section>
       </main>
@@ -503,6 +488,6 @@
 
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="admin.js?v=20260711a"></script>
+  <script src="admin.js?v=20260712b"></script>
 </body>
 </html>

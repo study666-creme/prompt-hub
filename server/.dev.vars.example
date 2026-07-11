@@ -5,21 +5,17 @@
 SUPABASE_URL=https://YOUR_PROJECT.baseaf.memfiredb.com
 SUPABASE_SERVICE_ROLE_KEY=PLACEHOLDER_MEMFIRE_SERVICE_ROLE_KEY
 
-# 生图服务端线路（至少填一个才能调 /api/v1/generate；不要放进前端配置）
-IMAGE_API_KEY=
-# NEWAPI_API_KEY=
-# NEWAPI_API_BASE_URL=https://newapi.prompt-hubs.com
-# APIMART_API_KEY=
-# ITHINK_API_KEY=   # ThinkAI 经济线路（https://www.thinkai.tv/console/token）
-# ITHINK_API_BASE_URL=https://www.thinkai.tv
-# ITHINK_UPSTREAM_MODEL=gpt-image-2   # 模型广场里的 ID，不对时改这个
-# MOOKO_API_KEY=   # 木瓜AI 线路（https://api.mooko.ai/pricing）
-# MOOKO_API_BASE_URL=https://api.mooko.ai
-# MOOKO_MAX_CONCURRENT_SUBMITS=8   # 慢速线并发 POST 上限（1–16，默认 8）
+# 当前图片模型：New API 提供全能模型2/香蕉，Apimart 提供 MJ。
+# 不要把这些密钥放进前端配置。
+NEWAPI_API_KEY=
+NEWAPI_API_BASE_URL=https://newapi.prompt-hubs.com
+APIMART_API_KEY=
+APIMART_API_BASE_URL=https://api.apimart.ai
 
 # Local R2 is empty; keep media reads pointed at production CDN for previews.
 MEDIA_STORAGE_MODE=r2
 LOCAL_MEDIA_UPSTREAM=https://api.prompt-hubs.com
 
 ENVIRONMENT=development
+PUBLIC_SITE_URL=http://127.0.0.1:5500
 CORS_ORIGINS=http://127.0.0.1:5500,http://localhost:5500,https://prompt-hubs.com,https://www.prompt-hubs.com

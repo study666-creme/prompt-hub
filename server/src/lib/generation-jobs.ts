@@ -106,14 +106,14 @@ export async function finalizeFailedJob(
 export type PollJobOpts = {
   quick?: boolean;
   /** 将慢速上游提交挂到 waitUntil，避免轮询 HTTP 被 100s 掐断 */
-  kickSubmit?: (task: Promise<void>) => void;
+  kickSubmit?: (task: Promise<unknown>) => void;
   /** MJ 超时兜底：仍只有 1～3 张时也标记完成 */
   forceMjComplete?: boolean;
 };
 
 function scheduleBackgroundSubmit(
   opts: PollJobOpts | undefined,
-  task: Promise<void>,
+  task: Promise<unknown>,
   label: string
 ) {
   const wrapped = task.catch((e) => {

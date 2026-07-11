@@ -105,6 +105,7 @@ const packs = [
 
 const standaloneScripts = [
   ['/edit-panel-gallery.js', 'EditPanelGallery', 'global.EditPanelGallery'],
+  ['/ripple-grid.js', 'RippleGrid module', 'export function initRippleGrid'],
   ['/admin.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
   ['/asset-studio.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
   ['/features-assets.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],

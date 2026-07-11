@@ -64,7 +64,7 @@ async function postMj(
   }
   const taskId = extractTaskId(json);
   if (!taskId) {
-    throw new ApiError(502, 'UPSTREAM_ERROR', '上游未返回 task_id');
+    throw new ApiError(502, 'UPSTREAM_ERROR', '生成服务未返回任务 ID');
   }
   return taskId;
 }
@@ -275,7 +275,7 @@ export function filterMjButtonsForClient(buttons: MjButtonPublic[]): MjButtonPub
   });
 }
 
-/** imagine 四宫格默认操作（上游按钮未返回时的兜底；不含放大） */
+/** imagine 四宫格默认操作（服务按钮未返回时的兜底；不含放大） */
 export function defaultGridMjButtons(): MjButtonPublic[] {
   const out: MjButtonPublic[] = [];
   for (let i = 1; i <= 4; i += 1) {

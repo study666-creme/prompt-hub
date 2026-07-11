@@ -33,6 +33,14 @@
 | 后台 | `legacy/admin/`、`server/src/routes/admin/` |
 | Canvas/扩展 | `server/src/routes/v1/extension.ts`、`docs/CANVAS-INTEGRATION.md` |
 
+## 当前生图与计费边界
+
+- 新任务只允许卡藏 API 的全能模型2/香蕉和 Apimart MJ；不要把旧 provider 重新放回公开目录。
+- 卡藏 API 价格必须从上游人民币字段按 `1 元 = 100 积分`自动换算，不能信任或复制一份手工积分表。
+- 报价与提交需要新鲜目录，目录不可用时必须在扣费前失败。
+- GrsAI、iThink、Mooko 适配器只服务已落库历史任务恢复；删除前先确认生产库没有对应未完成任务。
+- 后台存储巡检按需触发且只读；不得按全桶字节回填用户配额。
+
 ## 必跑命令
 
 ```powershell

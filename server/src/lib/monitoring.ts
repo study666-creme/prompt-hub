@@ -147,6 +147,7 @@ function routeOf(pathname: string) {
   if (p.startsWith('/api/admin/users')) return '/api/admin/users/*';
   if (p.startsWith('/api/admin/codes')) return '/api/admin/codes/*';
   if (p.startsWith('/api/admin/image-models')) return '/api/admin/image-models/*';
+  if (p.startsWith('/api/admin/canvas')) return '/api/admin/canvas/*';
   if (p.startsWith('/api/admin')) return '/api/admin/*';
   if (p.startsWith('/api/v1/media/c/')) return '/api/v1/media/c/:enc';
   if (p.startsWith('/api/v1/media/i/')) return '/api/v1/media/i/:enc';

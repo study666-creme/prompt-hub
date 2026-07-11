@@ -527,8 +527,8 @@
     }
     try {
       const raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v3') || 'null');
-      if (raw?.models?.length && Number(raw.version) >= 6 && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
-        modelsCache = { models: raw.models, globalDiscountPercent: 100, providers: ['grsai', 'apimart', 'ithink', 'mooko'] };
+      if (raw?.models?.length && Number(raw.version) >= 9 && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
+        modelsCache = { models: raw.models, globalDiscountPercent: 100, providers: ['newapi', 'apimart'] };
         modelsCacheExp = Date.now() + 45_000;
       }
     } catch (e) { /* ignore */ }
@@ -540,7 +540,7 @@
         try {
           localStorage.setItem(
             'promptrepo_imagegen_models_cache_v3',
-            JSON.stringify({ ts: Date.now(), version: 6, models: res.data.models })
+            JSON.stringify({ ts: Date.now(), version: 9, models: res.data.models })
           );
         } catch (e) { /* ignore */ }
       }
@@ -557,12 +557,12 @@
 
   async function getGenerationCost(resolution, quality, model, opts) {
     const speed = opts?.speed ? String(opts.speed) : '';
-    const key = `${model || 'gpt-image-2'}|${resolution || '1k'}|${quality || ''}|${speed}`;
+    const key = `${model || 'image2'}|${resolution || '1k'}|${quality || ''}|${speed}`;
     const hit = costCache.get(key);
     if (hit && hit.exp > Date.now()) return hit.data;
     if (costInflight.has(key)) return costInflight.get(key);
     const r = encodeURIComponent(resolution || '1k');
-    const m = encodeURIComponent(model || 'gpt-image-2');
+    const m = encodeURIComponent(model || 'image2');
     const speedQ = speed ? `&speed=${encodeURIComponent(speed)}` : '';
     const p = request('GET', `/api/v1/generate/cost?resolution=${r}&model=${m}${speedQ}`)
       .then((res) => {

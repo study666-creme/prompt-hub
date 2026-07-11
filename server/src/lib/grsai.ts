@@ -1,5 +1,4 @@
 import { ApiError } from './errors';
-import { normalizeImageModelId } from './image-models-catalog';
 
 export type TaskPollResult = {
   status: 'pending' | 'completed' | 'failed';
@@ -81,9 +80,13 @@ const VIP_PIXEL_MAP: Record<string, Record<string, string>> = {
 /** GrsAI 任务 ID 形如 9-679710cf-a1b2-... */
 const TASK_ID_RE = /^\d+-[0-9a-f-]{8,}/i;
 
+function normalizeGrsaiUpstreamModelId(value: string): string {
+  return String(value || '').trim().toLowerCase();
+}
+
 /** Banana 系列必须 POST /v1/draw/nano-banana；GPT Image 用 /v1/draw/completions */
 export function isNanoBananaUpstreamModel(upstreamModel: string): boolean {
-  const model = normalizeImageModelId(upstreamModel);
+  const model = normalizeGrsaiUpstreamModelId(upstreamModel);
   return model.includes('nano-banana');
 }
 
@@ -111,7 +114,7 @@ export function mapGrsaiDrawSize(
 ): string {
   const res = ['1k', '2k', '4k'].includes(resolution) ? resolution : '1k';
   const ratio = String(sizeLabel || '1:1').trim() || '1:1';
-  const model = normalizeImageModelId(upstreamModel);
+  const model = normalizeGrsaiUpstreamModelId(upstreamModel);
   const vipLike = model.includes('vip') || model.includes('-cl') || model.includes('nano-banana-pro');
   if (vipLike || model === 'gpt-image-2-vip') {
     return VIP_PIXEL_MAP[res]?.[ratio] || VIP_PIXEL_MAP[res]?.['1:1'] || '1024x1024';
@@ -124,7 +127,7 @@ export function mapGrsaiDrawSize(
 
 /** GPT Image：POST /v1/draw/completions */
 function buildCompletionsRequestBody(params: SubmitParams): Record<string, unknown> {
-  const model = normalizeImageModelId(params.upstreamModel);
+  const model = normalizeGrsaiUpstreamModelId(params.upstreamModel);
   const refs = params.refImageUrls?.length ? params.refImageUrls : undefined;
   const drawSize = mapGrsaiDrawSize(model, params.resolution, params.size);
   const ratio =
@@ -146,7 +149,7 @@ function buildCompletionsRequestBody(params: SubmitParams): Record<string, unkno
 
 /** Nano Banana：POST /v1/draw/nano-banana（官方文档，勿走 completions） */
 function buildNanoBananaRequestBody(params: SubmitParams): Record<string, unknown> {
-  const model = normalizeImageModelId(params.upstreamModel);
+  const model = normalizeGrsaiUpstreamModelId(params.upstreamModel);
   const refs = params.refImageUrls?.length ? params.refImageUrls : undefined;
   return {
     model,

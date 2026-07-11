@@ -257,9 +257,11 @@
         void onStudioChatSend();
       }
     });
-    ['studioImageModel', 'studioImageResolution'].forEach((id) => {
-      document.getElementById(id)?.addEventListener('change', updateStudioImageGenCostHint);
+    document.getElementById('studioImageModel')?.addEventListener('change', () => {
+      syncStudioImageResolutionOptions();
+      updateStudioImageGenCostHint();
     });
+    document.getElementById('studioImageResolution')?.addEventListener('change', updateStudioImageGenCostHint);
     document.getElementById('studioImageSubmit')?.addEventListener('click', () => void runStudioImageGen());
     document.getElementById('studioImageFillDoc')?.addEventListener('click', fillStudioImageFromDoc);
     document.getElementById('studioImageAddCard')?.addEventListener('click', addStudioGenToLibrary);
@@ -321,6 +323,7 @@
         await withTimeout(
           (async () => {
             if (window.SupabaseSync?.init) await window.SupabaseSync.init();
+            await loadStudioImageModelCatalog();
             if (window.PointsSystem?.refreshCreditsFromServer) {
               await window.PointsSystem.refreshCreditsFromServer();
             }

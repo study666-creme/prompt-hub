@@ -139,7 +139,7 @@
       setStatus('请输入至少 4 个字的提示词');
       return;
     }
-    const model = document.getElementById('studioImageModel')?.value || 'quanneng2';
+    const model = document.getElementById('studioImageModel')?.value || 'image2';
     const resolution = document.getElementById('studioImageResolution')?.value || '1k';
     const size = document.getElementById('studioImageSize')?.value || '1:1';
     const quality = 'standard';

@@ -7,7 +7,7 @@
 | 项 | 当前值 |
 |---|---|
 | 主站 | <https://prompt-hubs.com> |
-| Pages build | `20260711a`（以 `window.__APP_BUILD__` 为准） |
+| Pages build | `20260712b`（以 `window.__APP_BUILD__` 为准） |
 | API | <https://api.prompt-hubs.com>，Worker `prompt-hub-api` |
 | 数据库/Auth | MemFire，代码继续使用 Supabase 兼容变量名和 SDK |
 | 图片 | `MEDIA_STORAGE_MODE=r2-first`，R2 优先、MemFire Storage 回源 |

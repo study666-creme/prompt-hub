@@ -437,22 +437,24 @@ adminDashboardRoutes.get('/infra', async c => {
       apiOrigin: url.origin,
       environment: c.env.ENVIRONMENT || 'unknown',
       workerService: 'prompt-hub-api',
-      pagesHint: 'https://prompt-hub.cn',
-      supabaseProjectHost: supabaseHost,
-      supabaseServiceKeyConfigured: hasServiceKey,
-      supabaseServiceKeyLooksValid: serviceKeyOk,
-      supabaseDbPing: dbPing,
-      imageApiConfigured: !!(c.env.IMAGE_API_KEY?.trim()),
+      pagesHint: c.env.PUBLIC_SITE_URL?.trim() || 'https://prompt-hubs.com',
+      databaseProjectHost: supabaseHost,
+      databaseServiceKeyConfigured: hasServiceKey,
+      databaseServiceKeyLooksValid: serviceKeyOk,
+      databasePing: dbPing,
+      newApiConfigured: !!(c.env.NEWAPI_API_KEY?.trim()),
+      midjourneyApiConfigured: !!(c.env.APIMART_API_KEY?.trim()),
       chatApiConfigured: !!(c.env.CHAT_API_KEY?.trim()),
+      mediaStorageMode: c.env.MEDIA_STORAGE_MODE || 'supabase',
       storageQuotaMbEnv: quotaMb(c.env, 'SUPABASE_STORAGE_QUOTA_MB', 1024),
       dbQuotaMbEnv: quotaMb(c.env, 'SUPABASE_DB_QUOTA_MB', 500),
       storageUsedMbEnv: optionalUsedMb(c.env, 'SUPABASE_STORAGE_USED_MB'),
       dbUsedMbEnv: optionalUsedMb(c.env, 'SUPABASE_DB_USED_MB'),
       userStoragePolicy: storagePolicySummary(),
       notes: [
-        '用户云存储按 profiles.storage_bytes 登记；单文件上限见 Supabase 桶 card-images（建议 50MB）',
-        'Supabase 控制台 → Project Settings → Usage：Database 与 File Storage 分开统计，勿混为一谈',
-        '可在 Worker 环境变量填 SUPABASE_DB_USED_MB / SUPABASE_STORAGE_USED_MB（从 Usage 页读数）以显示真实占比',
+        '生产图片主存储为 R2，r2-first 模式同时写入 MemFire Storage 作为回源副本',
+        '用户配额按 profiles.storage_bytes 登记；后台存储扫描按当前 MEDIA_STORAGE_MODE 选择主存储',
+        'MemFire Database 与 Storage 用量分开统计；可用 SUPABASE_DB_USED_MB / SUPABASE_STORAGE_USED_MB 同步控制台读数',
         'Cloudflare Workers 用量在 Cloudflare 控制台 → Workers & Pages',
         '本接口不返回任何密钥'
       ]
@@ -523,7 +525,7 @@ adminDashboardRoutes.get('/monitoring', async c => {
   });
 });
 
-/** 扫描 Storage 桶用量（较慢，单独请求） */
+/** 按当前 MEDIA_STORAGE_MODE 扫描主图片存储（较慢，前端按需请求）。 */
 adminDashboardRoutes.get('/storage', async c => {
   const admin = createAdminClient(c.env);
   const storageQuotaMb = quotaMb(c.env, 'SUPABASE_STORAGE_QUOTA_MB', 1024);
@@ -532,7 +534,7 @@ adminDashboardRoutes.get('/storage', async c => {
   const dbUsedMbEnv = optionalUsedMb(c.env, 'SUPABASE_DB_USED_MB');
 
   const [bucketUsage, profilesRes] = await Promise.all([
-    scanBucketUsage(admin),
+    scanBucketUsage(admin, c.env),
     admin.from('profiles').select('storage_bytes')
   ]);
 
@@ -546,19 +548,26 @@ adminDashboardRoutes.get('/storage', async c => {
   const storageQuotaBytes = storageQuotaMb * 1024 * 1024;
   const dbQuotaBytes = dbQuotaMb * 1024 * 1024;
   const bucketBytes = bucketUsage.bytes;
-  const bucketScanPercent = storageQuotaBytes
+  const bucketScanPercent = bucketUsage.source !== 'r2' && storageQuotaBytes
     ? Math.min(100, Math.round((bucketBytes / storageQuotaBytes) * 1000) / 10)
-    : 0;
+    : null;
 
-  const projectStorageUsedBytes = storageUsedMbEnv != null
+  const primaryIsR2 = bucketUsage.source === 'r2';
+  const projectStorageUsedBytes = !primaryIsR2 && storageUsedMbEnv != null
     ? storageUsedMbEnv * 1024 * 1024
     : bucketBytes;
-  const projectStorageSource = storageUsedMbEnv != null ? 'env' : 'bucket_scan';
-  const projectStoragePercent = storageQuotaBytes
+  const projectStorageSource = primaryIsR2
+    ? 'r2'
+    : storageUsedMbEnv != null
+      ? 'env'
+      : 'memfire';
+  const projectStoragePercent = !primaryIsR2 && storageQuotaBytes
     ? Math.min(100, Math.round((projectStorageUsedBytes / storageQuotaBytes) * 1000) / 10)
-    : 0;
+    : null;
   const projectStorageStatus =
-    storageUsedMbEnv != null
+    primaryIsR2
+      ? ('unknown' as const)
+      : storageUsedMbEnv != null
       ? usageStatus(projectStorageUsedBytes, storageQuotaBytes)
       : bucketBytes > storageQuotaBytes
         ? ('warn' as const)
@@ -583,29 +592,17 @@ adminDashboardRoutes.get('/storage', async c => {
       detail: `${dbPercent}% · ${formatBytes(dbUsedBytes)} / ${formatBytes(dbQuotaBytes)}`
     });
   }
-  if (storageUsedMbEnv != null && projectStorageUsedBytes > storageQuotaBytes) {
+  if (!primaryIsR2 && storageUsedMbEnv != null && projectStorageUsedBytes > storageQuotaBytes) {
     alerts.push({
       level: 'critical',
       title: '项目文件存储超过参考配额',
-      detail: `${formatBytes(projectStorageUsedBytes)} / ${formatBytes(storageQuotaBytes)}（Supabase Usage 同步值）`
+      detail: `${formatBytes(projectStorageUsedBytes)} / ${formatBytes(storageQuotaBytes)}（MemFire Usage 同步值）`
     });
-  } else if (storageUsedMbEnv != null && projectStoragePercent >= 80) {
+  } else if (!primaryIsR2 && storageUsedMbEnv != null && projectStoragePercent != null && projectStoragePercent >= 80) {
     alerts.push({
       level: 'warn',
       title: '项目文件存储用量偏高',
       detail: `${projectStoragePercent}% · ${formatBytes(projectStorageUsedBytes)} / ${formatBytes(storageQuotaBytes)}`
-    });
-  } else if (storageUsedMbEnv == null && bucketBytes > storageQuotaBytes) {
-    alerts.push({
-      level: 'warn',
-      title: '桶扫描估算偏高，请以 Supabase Usage 为准',
-      detail: `扫描合计 ${formatBytes(bucketBytes)}，Supabase 账单 Storage Size 通常更低。请填 SUPABASE_STORAGE_USED_MB=754（或 Usage 页当前读数）。`
-    });
-  } else if (storageUsedMbEnv == null && bucketScanPercent >= 85) {
-    alerts.push({
-      level: 'warn',
-      title: '桶扫描估算偏高',
-      detail: `扫描 ${formatBytes(bucketBytes)} / 配额 ${formatBytes(storageQuotaBytes)}。未填 Usage 读数前勿据此判断超限。`
     });
   }
   if (registeredBytes > projectStorageUsedBytes * 1.5 && registeredBytes > 50 * 1024 * 1024) {
@@ -641,15 +638,16 @@ adminDashboardRoutes.get('/storage', async c => {
       bucketFileCount: bucketUsage.fileCount,
       bucketScanTruncated: bucketUsage.truncated,
       bucketScanPercent,
+      bucketSource: bucketUsage.source,
       topUsersByBucket,
       registeredBytes,
       registeredLabel: formatBytes(registeredBytes),
       projectStorage: {
         usedBytes: projectStorageUsedBytes,
         usedLabel: formatBytes(projectStorageUsedBytes),
-        quotaMb: storageQuotaMb,
-        quotaBytes: storageQuotaBytes,
-        quotaLabel: formatBytes(storageQuotaBytes),
+        quotaMb: primaryIsR2 ? null : storageQuotaMb,
+        quotaBytes: primaryIsR2 ? null : storageQuotaBytes,
+        quotaLabel: primaryIsR2 ? '按量计费' : formatBytes(storageQuotaBytes),
         percentUsed: projectStoragePercent,
         source: projectStorageSource,
         status: projectStorageStatus
@@ -669,59 +667,18 @@ adminDashboardRoutes.get('/storage', async c => {
       storageQuotaMb,
       storageQuotaBytes,
       storageQuotaLabel: formatBytes(storageQuotaBytes),
-      storageRemainingBytes: Math.max(0, storageQuotaBytes - projectStorageUsedBytes),
-      storageRemainingLabel: formatBytes(Math.max(0, storageQuotaBytes - projectStorageUsedBytes)),
+      storageRemainingBytes: primaryIsR2 ? null : Math.max(0, storageQuotaBytes - projectStorageUsedBytes),
+      storageRemainingLabel: primaryIsR2
+        ? null
+        : formatBytes(Math.max(0, storageQuotaBytes - projectStorageUsedBytes)),
       storageUsedPercent: projectStoragePercent,
       dbQuotaMb,
       dbQuotaBytes,
       dbQuotaLabel: formatBytes(dbQuotaBytes),
       dbNote:
-        'Database 与 File Storage 在 Supabase Usage 中分开统计。请填 Worker 变量 SUPABASE_DB_USED_MB / SUPABASE_STORAGE_USED_MB 同步控制台读数；未填时文件存储用桶扫描估算。'
-    }
-  });
-});
-
-/** 按桶内路径前缀回填 profiles.storage_bytes（历史未上报时修正登记账本） */
-adminDashboardRoutes.post('/storage/reconcile', async c => {
-  const admin = createAdminClient(c.env);
-  const bucketUsage = await scanBucketUsage(admin);
-  const byUser = bucketUsage.byUser ?? [];
-  if (!byUser.length) {
-    return c.json({ ok: true, data: { updated: 0, users: [] } });
-  }
-
-  const userIds = byUser.map((u) => u.userId);
-  const { data: profiles, error: profErr } = await admin
-    .from('profiles')
-    .select('user_id, storage_bytes')
-    .in('user_id', userIds);
-  if (profErr) throw profErr;
-
-  const profileMap = new Map((profiles ?? []).map((p) => [p.user_id, Number(p.storage_bytes) || 0]));
-  const updates: Array<{ userId: string; before: number; after: number; fileCount: number }> = [];
-
-  for (const row of byUser) {
-    const before = profileMap.get(row.userId) ?? 0;
-    if (before === row.bytes) continue;
-    const { error } = await admin
-      .from('profiles')
-      .update({ storage_bytes: row.bytes })
-      .eq('user_id', row.userId);
-    if (error) throw error;
-    updates.push({ userId: row.userId, before, after: row.bytes, fileCount: row.fileCount });
-  }
-
-  return c.json({
-    ok: true,
-    data: {
-      updated: updates.length,
-      bucketBytes: bucketUsage.bytes,
-      bucketLabel: formatBytes(bucketUsage.bytes),
-      users: updates.map((u) => ({
-        ...u,
-        beforeLabel: formatBytes(u.before),
-        afterLabel: formatBytes(u.after)
-      }))
+        primaryIsR2
+          ? '图片主存储来自 Cloudflare R2 对象扫描；MemFire Database 用量可通过 SUPABASE_DB_USED_MB 同步控制台读数。'
+          : '图片主存储来自 MemFire Storage；Database 与 Storage 用量需分别查看。'
     }
   });
 });

@@ -3,6 +3,8 @@ import { applyCorsHeaders } from './lib/cors-headers';
 import { jsonError } from './lib/errors';
 import { recordRequestMetric } from './lib/monitoring';
 import { diagnoseSupabaseUpstream } from './lib/supabase-upstream';
+import { drainFastProviderPendingSubmits } from './lib/fast-provider-drain';
+import { processFastProviderQueueMessage } from './lib/fast-provider-queue';
 import { createCorsMiddleware } from './middleware/cors';
 import { adminRoutes } from './routes/admin';
 import { supabaseProxyHandler } from './routes/supabase-proxy';
@@ -49,7 +51,6 @@ app.get('/health', async c => {
   } else if (db === 'error') {
     hint = (await diagnoseSupabaseUpstream(c.env)) || '执行 scripts/apply-grants-once.sql';
   }
-  const mookoKey = c.env.MOOKO_API_KEY?.trim() || '';
   return c.json({
     ok: db === 'ok',
     service: 'prompt-hub-api',
@@ -57,48 +58,11 @@ app.get('/health', async c => {
     environment: c.env.ENVIRONMENT,
     supabase: db,
     imageProviders: {
-      grsai: c.env.IMAGE_API_KEY?.trim() ? 'configured' : 'missing',
-      apimart: c.env.APIMART_API_KEY?.trim() ? 'configured' : 'missing',
-      newapi: c.env.NEWAPI_API_KEY?.trim() ? 'configured' : 'missing'
+      newapi: c.env.NEWAPI_API_KEY?.trim() ? 'configured' : 'missing',
+      midjourney: c.env.APIMART_API_KEY?.trim() ? 'configured' : 'missing'
     },
-    legacyMooko: mookoKey ? 'configured_unused' : 'missing',
     hint
   });
-});
-
-/** 本地 wrangler dev（Host=127.0.0.1）或带 X-Admin-Secret 的单次 Apimart 冒烟 */
-app.get('/__dev/apimart-smoke', async c => {
-  const hostHeader = (c.req.header('Host') || '').split(':')[0].toLowerCase();
-  const isLocalDev = hostHeader === '127.0.0.1' || hostHeader === 'localhost';
-  if (!isLocalDev) {
-    const token = c.req.header('X-Admin-Secret')?.trim();
-    const secret = c.env.ADMIN_API_SECRET?.trim();
-    if (!secret || token !== secret) return c.text('Not Found', 404);
-  }
-  const key = c.env.APIMART_API_KEY?.trim();
-  if (!key) return c.json({ ok: false, error: 'APIMART_API_KEY missing' }, 500);
-  const upstream = (c.req.query('model') || 'wan2.7-image').trim();
-  const { submitApimartImageJob, fetchApimartTaskOnce } = await import('./lib/apimart');
-  const params = {
-    upstreamModel: upstream,
-    prompt: 'a single red apple on white background, product photo',
-    resolution: '1k' as const,
-    quality: 'high' as const,
-    size: '1:1'
-  };
-  const taskId = await submitApimartImageJob(key, c.env.APIMART_API_BASE_URL, params);
-  const maxPolls = 36;
-  for (let i = 0; i < maxPolls; i++) {
-    await new Promise(r => setTimeout(r, i === 0 ? 4000 : 5000));
-    const polled = await fetchApimartTaskOnce(key, c.env.APIMART_API_BASE_URL, taskId);
-    if (polled.status === 'completed' && polled.imageUrl) {
-      return c.json({ ok: true, upstream, taskId, imageUrl: polled.imageUrl, polls: i + 1 });
-    }
-    if (polled.status === 'failed') {
-      return c.json({ ok: false, upstream, taskId, error: polled.errorMessage, polls: i + 1 }, 502);
-    }
-  }
-  return c.json({ ok: false, upstream, taskId, error: 'timeout' }, 504);
 });
 
 app.get('/api/v1/billing/plans', c =>
@@ -178,5 +142,23 @@ export default {
       );
       throw err;
     }
+  },
+  async queue(
+    batch: MessageBatch<{ jobId: string; userId: string }>,
+    env: Env
+  ) {
+    for (const message of batch.messages) {
+      try {
+        const result = await processFastProviderQueueMessage(env, message.body);
+        if (result === 'retry') message.retry({ delaySeconds: 60 });
+        else message.ack();
+      } catch (error) {
+        console.error('[image-queue] consume failed', message.id, error);
+        message.retry({ delaySeconds: 60 });
+      }
+    }
+  },
+  async scheduled(_controller: ScheduledController, env: Env) {
+    await drainFastProviderPendingSubmits(env, { awaitSubmit: true, maxSubmit: 2 });
   }
 };

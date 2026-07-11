@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../env';
-import { ApiError, jsonError } from '../../lib/errors';
+import { jsonError } from '../../lib/errors';
 import {
   adminModelRows,
   loadImageModelSettingsWithMeta,
@@ -10,10 +10,12 @@ import {
   type ImageModelOverride,
   type ImageModelPricingSettings
 } from '../../lib/image-model-settings';
+import {
+  fetchNewApiModelCatalog,
+  imageCatalogForNewApiSnapshot
+} from '../../lib/newapi';
 import { requireAdminSecret } from '../../middleware/admin';
 import { rateLimit } from '../../middleware/rate-limit';
-import { apimartCostReferenceRows } from '../../lib/apimart-upstream-cost';
-import { grsaiCostReferenceRows } from '../../lib/grsai-upstream-cost';
 import { createAdminClient } from '../../lib/supabase';
 
 export const adminImageModelRoutes = new Hono<{ Bindings: Env }>();
@@ -21,11 +23,19 @@ export const adminImageModelRoutes = new Hono<{ Bindings: Env }>();
 adminImageModelRoutes.use('*', requireAdminSecret);
 adminImageModelRoutes.use('*', rateLimit(120, 60_000));
 
+async function currentAdminModelRows(env: Env, settings: ImageModelPricingSettings) {
+  const catalog = await fetchNewApiModelCatalog(env.NEWAPI_API_BASE_URL);
+  return {
+    catalog,
+    rows: adminModelRows(settings, imageCatalogForNewApiSnapshot(catalog))
+  };
+}
+
 adminImageModelRoutes.get('/', async c => {
   try {
     const admin = createAdminClient(c.env);
-    const { settings, persisted, tableReady, tableError } =
-      await loadImageModelSettingsWithMeta(admin);
+    const { settings, persisted, tableReady, tableError } = await loadImageModelSettingsWithMeta(admin);
+    const current = await currentAdminModelRows(c.env, settings);
     let settingsHint: string | null = null;
     if (!tableReady) {
       settingsHint =
@@ -40,19 +50,17 @@ adminImageModelRoutes.get('/', async c => {
       ok: true,
       data: {
         settings,
-        models: adminModelRows(settings),
+        models: current.rows,
         providers: [
-          { id: 'newapi', label: 'New API', doc: 'https://newapi.prompt-hubs.com/' },
-          { id: 'grsai', label: '常规线路', doc: 'https://grsai.com/zh/dashboard/models' },
-          { id: 'apimart', label: '备用线路', doc: 'https://api.apimart.ai' },
-          { id: 'ithink', label: '经济线路', doc: 'https://www.thinkai.tv/console/token' },
-          { id: 'mooko', label: '木瓜线路', doc: 'https://api.mooko.ai/pricing' }
+          { id: 'newapi', label: '卡藏 API', doc: 'https://newapi.prompt-hubs.com/' },
+          { id: 'apimart', label: 'MJ 线路', doc: 'https://api.apimart.ai' }
         ],
+        catalogVersion: current.catalog.version || null,
+        pricingVersion: current.catalog.pricingVersion || null,
+        catalogStale: current.catalog.stale,
         settingsPersisted: persisted,
         settingsTableReady: tableReady,
-        settingsHint,
-        apimartCostReference: apimartCostReferenceRows(),
-        grsaiCostReference: grsaiCostReferenceRows()
+        settingsHint
       }
     });
   } catch (err) {
@@ -88,11 +96,12 @@ async function saveImageModelsHandler(c: import('hono').Context<{ Bindings: Env 
   const saved = await saveImageModelSettings(admin, next);
   invalidateImageModelSettingsCache();
   const { persisted, tableReady } = await loadImageModelSettingsWithMeta(admin);
+  const currentRows = await currentAdminModelRows(c.env, saved);
   return c.json({
     ok: true,
     data: {
       settings: saved,
-      models: adminModelRows(saved),
+      models: currentRows.rows,
       settingsPersisted: persisted,
       settingsTableReady: tableReady
     }
@@ -151,7 +160,11 @@ adminImageModelRoutes.patch('/:modelId', async c => {
     }
   });
   const saved = await saveImageModelSettings(admin, next);
-  return c.json({ ok: true, data: { settings: saved, model: adminModelRows(saved).find((m) => m.id === modelId) } });
+  const currentRows = await currentAdminModelRows(c.env, saved);
+  return c.json({
+    ok: true,
+    data: { settings: saved, model: currentRows.rows.find((m) => m.id === modelId) }
+  });
   } catch (err) {
     return jsonError(c, err);
   }

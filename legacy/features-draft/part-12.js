@@ -158,40 +158,17 @@
     if (IMAGE_GEN_ASPECT_FALLBACK[id]) {
       return [...IMAGE_GEN_ASPECT_FALLBACK[id]];
     }
-    if (id === 'apimart-gpt-image-2-official-budget') {
-      return ['16:9', '9:16', '4:3', '3:4'];
-    }
-    if (entry?.uiFamily === 'banana' || id.includes('nano-banana')) {
+    if (entry?.uiFamily === 'banana' || id.startsWith('lingtu')) {
       const list = [...IMAGE_GEN_SIZE_BANANA];
       if (BANANA2_EXTENDED_MODELS.has(id)) list.push(...IMAGE_GEN_SIZE_BANANA2_EXTRA);
       return list;
     }
-    if (id.startsWith('mooko-')) {
-      return IMAGE_GEN_ASPECT_FALLBACK['mooko-gpt-image-2-pro'];
-    }
     if (id.startsWith('apimart-mj-') || entry?.uiFamily === 'midjourney') {
       return IMAGE_GEN_SIZE_MJ;
     }
-    if (id.startsWith('apimart-wan') || entry?.uiFamily === 'wan') {
-      return IMAGE_GEN_SIZE_WAN;
-    }
-    if (id.startsWith('apimart-flux-kontext') || (entry?.uiFamily === 'flux' && id.includes('kontext'))) {
-      return IMAGE_GEN_SIZE_FLUX_KONTEXT;
-    }
-    if (id.startsWith('apimart-flux-2') || (entry?.uiFamily === 'flux' && id.includes('flux-2'))) {
-      return IMAGE_GEN_SIZE_FLUX2;
-    }
-    if (
-      id === 'gpt-image-2-vip'
-      || id === 'gpt-image-2'
-      || id === 'apimart-gpt-image-2'
-      || entry?.uiFamily === 'gim2'
-      || id.includes('gpt-image-2')
-    ) {
+    if (entry?.uiFamily === 'gim2' || id.startsWith('image2')) {
       return IMAGE_GEN_SIZE_GIM2;
     }
-    if (entry?.provider === 'apimart') return IMAGE_GEN_SIZE_BASIC;
-    if (entry?.provider === 'ithink') return IMAGE_GEN_SIZE_BASIC;
     return IMAGE_GEN_SIZE_BASIC;
   }
 

@@ -5,6 +5,8 @@ export type Env = {
   CARD_IMAGES_R2?: R2Bucket;
   /** Optional hourly ops metrics bucket for admin monitoring. */
   PROMPT_HUB_METRICS?: KVNamespace;
+  /** Durable image submission queue for synchronous New API image models. */
+  IMAGE_GENERATION_QUEUE?: Queue<{ jobId: string; userId: string }>;
   /** 图片读写的后端：supabase | r2-first | r2（见 docs/R2-MIGRATION.md） */
   MEDIA_STORAGE_MODE?: string;
   ENVIRONMENT: string;
@@ -13,21 +15,21 @@ export type Env = {
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   SUPABASE_JWT_SECRET?: string;
-  /** 生图上游（GrsAI 等，国内默认 grsai.dakka.com.cn） */
+  /** 仅用于恢复已落库的 GrsAI 历史任务；不再进入新任务模型目录。 */
   IMAGE_API_KEY?: string;
   IMAGE_API_BASE_URL?: string;
-  /** 生图备用上游 Apimart（GrsAI 提交失败时自动切换） */
+  /** MJ 与视觉工具上游 Apimart。 */
   APIMART_API_KEY?: string;
   APIMART_API_BASE_URL?: string;
   /** New API 生图线路（OpenAI 兼容；目录价格按 1 元=100 积分原值换算，支持 0.1 积分） */
   NEWAPI_API_KEY?: string;
   NEWAPI_API_BASE_URL?: string;
-  /** 生图经济线路 ThinkAI（thinkai.tv 控制台 Token） */
+  /** 仅用于恢复已落库的 ThinkAI 历史任务。 */
   ITHINK_API_KEY?: string;
   ITHINK_API_BASE_URL?: string;
   /** 可选：覆盖 ThinkAI 上游 model 字段（模型广场里的 ID，默认 gpt-image-2） */
   ITHINK_UPSTREAM_MODEL?: string;
-  /** 生图木瓜AI线路（api.mooko.ai 控制台 Token） */
+  /** 仅用于恢复已落库的 Mooko 历史任务。 */
   MOOKO_API_KEY?: string;
   MOOKO_API_BASE_URL?: string;
   /** 木瓜慢速线同时 POST 上限（默认 8，最大 16） */

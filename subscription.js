@@ -25,14 +25,19 @@
     window.showToast?.(`请加微信购买${hint}，微信号已复制。备注「提示词仓库」，站长发激活码后在上方兑换`, 6000);
   }
 
+  const CREDITS_PER_YUAN = 100;
   const CREDIT_PACKS = [
-    { id: 'cr10k', label: '10000 积分', credits: 10000, price: 95, bonusDays: 40 },
-    { id: 'cr5k', label: '5000 积分', credits: 5000, price: 48, bonusDays: 18 },
-    { id: 'cr3k', label: '3000 积分', credits: 3000, price: 29.5, bonusDays: 10 },
-    { id: 'cr1k', label: '1000 积分', credits: 1000, price: 9.8, bonusDays: 3 },
-    { id: 'cr500', label: '500 积分', credits: 500, price: 4.9, bonusDays: 1 },
-    { id: 'cr100', label: '100 积分', credits: 100, price: 0.99, bonusDays: 0 }
-  ];
+    { id: 'cr10k', credits: 10000 },
+    { id: 'cr5k', credits: 5000 },
+    { id: 'cr3k', credits: 3000 },
+    { id: 'cr1k', credits: 1000 },
+    { id: 'cr500', credits: 500 },
+    { id: 'cr100', credits: 100 }
+  ].map((pack) => ({
+    ...pack,
+    label: `${pack.credits} 积分`,
+    price: pack.credits / CREDITS_PER_YUAN
+  }));
 
   const DAILY_BY_TIER = { lite: 10, basic: 13, standard: 32, pro: 64 };
   const LUMP_BY_TIER = { basic: 130, standard: 320, pro: 700 };
@@ -76,9 +81,8 @@
       name: '基础版',
       tag: '入门',
       storage: '300MB+5GB',
-      genDiscount: '95折',
       features: [
-        '生图优先队列 · 积分 95 折',
+        '生图优先队列',
         `额外每日 ${DAILY_BY_TIER.basic} 积分或一次性 ${LUMP_BY_TIER.basic} 积分`,
         '无限置顶',
         '资产创作工作台',
@@ -92,14 +96,12 @@
       name: '标准版',
       tag: '推荐',
       storage: '300MB+10GB',
-      genDiscount: '9折',
       features: [
-        '生图优先队列 · 积分 9 折',
+        '更高生图队列优先级',
         `额外每日 ${DAILY_BY_TIER.standard} 积分或一次性 ${LUMP_BY_TIER.standard} 积分`,
         '无限置顶',
         '资产创作工作台',
         '300MB 基础 + 额外 10GB 云存储',
-        '优先生图队列',
         '可另建 3 个自命名卡片库'
       ]
     },
@@ -108,14 +110,12 @@
       name: '专业版',
       tag: '专业',
       storage: '300MB+30GB',
-      genDiscount: '85折',
       features: [
-        '最高优先级 · 积分 85 折',
+        '最高生图队列优先级',
         `额外每日 ${DAILY_BY_TIER.pro} 积分或一次性 ${LUMP_BY_TIER.pro} 积分`,
         '无限置顶',
         '资产创作工作台',
         '300MB 基础 + 额外 30GB 云存储',
-        '最高生图优先级',
         '可另建 4 个自命名卡片库'
       ]
     }
@@ -417,7 +417,7 @@
     if (sub) {
       sub.textContent = currentMainTab === 'credits'
         ? (showPublicPrices()
-          ? '1 元 = 100 积分 · 点击「购买」复制微信联系站长，激活码在上方兑换'
+        ? '1 元 = 100 积分 · 无充值折扣或额外赠送 · 激活码在上方兑换'
           : '添加微信咨询套餐 · 站长发激活码后在上方兑换')
         : (showPublicPrices()
           ? '轻量特惠 + 三档会员 · 折后价见各档 · 点击「购买」加微信购买'
@@ -431,9 +431,6 @@
     const grid = document.getElementById('subscribeCreditsGrid');
     if (!grid) return;
     grid.innerHTML = CREDIT_PACKS.map(p => {
-      const bonus = p.bonusDays > 0
-        ? ` · 赠送 ${p.bonusDays} 天基础会员（每日积分模式）`
-        : '';
       const priceLine = showPublicPrices()
         ? `<span class="subscribe-shop-card-price">¥${p.price}</span>`
         : '<span class="subscribe-shop-card-price subscribe-plan-contact">联系咨询</span>';
@@ -443,7 +440,7 @@
           <h4 class="subscribe-shop-card-title">${esc(p.label)}</h4>
           ${priceLine}
         </div>
-        <p class="subscribe-shop-card-meta">到账 ${p.credits.toLocaleString('zh-CN')} 积分${bonus}</p>
+        <p class="subscribe-shop-card-meta">到账 ${p.credits.toLocaleString('zh-CN')} 积分</p>
         <button type="button" class="btn btn-primary subscribe-shop-buy-btn" data-shop-buy="${esc(p.id)}">${purchaseBtnLabel()}</button>
       </article>`;
     }).join('');

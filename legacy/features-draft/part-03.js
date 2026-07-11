@@ -7,7 +7,7 @@
       jobId: baseJob,
       prompt: job.prompt || existing?.prompt || '',
       image: mainImage,
-      model: job.model || existing?.model || 'gpt-image-2',
+      model: job.model || existing?.model || 'image2',
       modelLabel: job.modelLabel || existing?.modelLabel || imageGenModelLabel(job.model),
       resolution: job.resolution || existing?.resolution || '1k',
       quality: job.quality || existing?.quality || 'standard',

@@ -2,11 +2,24 @@ import { describe, expect, it } from 'vitest';
 import {
   aspectRatiosForModel,
   APIMART_OFFICIAL_BUDGET_RATIOS,
+  BANANA2_EXTRA_RATIOS,
+  BANANA_ASPECT_RATIOS,
+  IMAGE2_ASPECT_RATIOS,
   MOOKO_PRO_ASPECT_RATIOS,
   mapGptImage2PixelSize
 } from './image-size-options';
 
 describe('aspectRatiosForModel', () => {
+  it('supports current public model ids', () => {
+    expect(aspectRatiosForModel('image2')).toEqual([...IMAGE2_ASPECT_RATIOS]);
+    expect(aspectRatiosForModel('image2-hd')).toEqual([...APIMART_OFFICIAL_BUDGET_RATIOS]);
+    expect(aspectRatiosForModel('lingtu')).toEqual([...BANANA_ASPECT_RATIOS]);
+    expect(aspectRatiosForModel('lingtu-2')).toEqual([
+      ...BANANA_ASPECT_RATIOS,
+      ...BANANA2_EXTRA_RATIOS
+    ]);
+  });
+
   it('budget line only exposes priced ratios without 1:1', () => {
     expect(APIMART_OFFICIAL_BUDGET_RATIOS).toEqual([
       '3:1', '1:3', '21:9', '9:21', '2:1', '1:2', '16:9', '9:16'

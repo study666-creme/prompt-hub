@@ -123,7 +123,7 @@ function collectImageUrls(value: unknown, seen: Set<string>, out: string[]): voi
   }
 }
 
-/** 收集任务结果中全部图片 URL（上游偶发 n>1 或 images/url 数组） */
+/** 收集任务结果中全部图片 URL（服务偶发 n>1 或 images/url 数组） */
 export function extractAllImageUrls(payload: unknown): string[] {
   if (!payload || typeof payload !== 'object') return [];
   const p = payload as Record<string, unknown>;
@@ -278,13 +278,13 @@ export async function submitApimartImageJob(
     throw new ApiError(
       res.status >= 500 ? 502 : res.status,
       'UPSTREAM_ERROR',
-      err?.error?.message || `上游生图失败 (${res.status})`
+      err?.error?.message || `生图服务请求失败 (${res.status})`
     );
   }
 
   const taskId = extractTaskId(json);
   if (!taskId) {
-    throw new ApiError(502, 'UPSTREAM_ERROR', '上游未返回 task_id');
+    throw new ApiError(502, 'UPSTREAM_ERROR', '生成服务未返回任务 ID');
   }
   return taskId;
 }
@@ -379,7 +379,7 @@ export async function pollApimartTask(
   return { status: 'timeout', imageUrl: null, imageUrls: [], errorMessage: 'upstream_timeout' };
 }
 
-/** 标记失败/超时前多次确认，避免上游已成功却退款 */
+/** 标记失败/超时前多次确认，避免服务已成功却退款 */
 export async function confirmApimartTaskOutcome(
   apiKey: string,
   baseUrl: string | undefined,

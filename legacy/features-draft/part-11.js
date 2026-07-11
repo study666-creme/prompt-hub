@@ -38,9 +38,34 @@
     const id = String(modelId || '')
       .trim()
       .toLowerCase();
-    if (!id) return 'gpt-image-2';
-    if (id === 'quanneng2') return 'gpt-image-2';
-    if (id === 'jimeng') return 'nano-banana-pro';
+    if (!id) return 'image2';
+    const legacy = {
+      quanneng2: 'image2',
+      'gpt-image-2': 'image2',
+      'gpt-image-2-vip': 'image2-pro',
+      jimeng: 'lingtu-pro',
+      'nano-banana-fast': 'lingtu-fast',
+      'nano-banana-2': 'lingtu-2',
+      'nano-banana-pro': 'lingtu-pro',
+      'nano-banana-pro-vt': 'lingtu-pro',
+      'nano-banana-pro-vip': 'lingtu-pro',
+      'nano-banana-pro-cl': 'lingtu-pro',
+      'nano-banana-2-cl': 'lingtu-2',
+      'nano-banana-2-4k-cl': 'lingtu-2',
+      'nano-banana': 'lingtu',
+      'apimart-gpt-image-2-official-budget': 'image2-hd',
+      'apimart-gpt-image-2': 'image2',
+      'apimart-seedream-5-lite': 'image2',
+      'apimart-gemini-2-5-flash-preview': 'lingtu-fast',
+      'apimart-gemini-2-5-flash-official': 'lingtu-fast',
+      'apimart-gemini-3-1-flash-preview': 'lingtu-2',
+      'apimart-gemini-3-1-flash-official': 'lingtu-2',
+      'apimart-gemini-3-pro-preview': 'lingtu-pro',
+      'apimart-gemini-3-pro-official': 'lingtu-pro',
+      'ithink-gpt-image-2-slow': 'image2',
+      'mooko-gpt-image-2-pro': 'image2-pro'
+    };
+    if (legacy[id]) return legacy[id];
     return id;
   }
 
@@ -48,7 +73,7 @@
     const id = normalizeImageGenModelId(modelId);
     const hit = imageGenModelCatalog.find((m) => m.id === id);
     if (hit) return imageGenModelDisplayName(hit);
-    return id === 'gpt-image-2' ? 'GPT Image 2' : id;
+    return id === 'image2' ? '全能模型2 · 1K' : id;
   }
 
   async function refreshImageGenModelCatalog(opts = {}) {
@@ -61,14 +86,10 @@
   }
 
   function imageGenModelUiFamily(m) {
-    if (m?.uiFamily === 'banana' || m?.uiFamily === 'gim2' || m?.uiFamily === 'jimeng' || m?.uiFamily === 'midjourney' || m?.uiFamily === 'wan' || m?.uiFamily === 'flux') return m.uiFamily;
+    if (m?.uiFamily === 'banana' || m?.uiFamily === 'gim2' || m?.uiFamily === 'midjourney') return m.uiFamily;
     const id = String(m?.id || '').toLowerCase();
     if (id.startsWith('apimart-mj-')) return 'midjourney';
-    if (id.startsWith('apimart-gemini') || id.includes('gemini-')) return 'banana';
-    if (id.startsWith('apimart-wan') || id.includes('wan2.7')) return 'wan';
-    if (id.startsWith('apimart-flux') || id.includes('flux-kontext') || id.includes('flux-2-')) return 'flux';
-    if (id.includes('seedream') || id === 'jimeng') return 'jimeng';
-    if (id.includes('nano-banana')) return 'banana';
+    if (id.startsWith('lingtu') || id.includes('nano-banana')) return 'banana';
     return 'gim2';
   }
 
@@ -451,7 +472,7 @@
     sel.disabled = false;
     sel.setAttribute('aria-busy', 'false');
     const draft = loadJson(LS_IMAGEGEN, null);
-    const current = opts.modelId || sel.value || draft?.model || 'gpt-image-2';
+    const current = opts.modelId || sel.value || draft?.model || 'image2';
     imageGenModelFamily = resolveImageGenModelFamily(
       opts.family ?? imageGenModelFamily ?? draft?.modelFamily,
       current
@@ -478,7 +499,7 @@
     const pick =
       keepModel && [...sel.options].some((o) => o.value === current && !o.disabled)
         ? current
-        : selectable[0]?.id || list[0]?.id || 'gpt-image-2';
+        : selectable[0]?.id || list[0]?.id || 'image2';
     if (sel.value !== pick) sel.value = pick;
     if (!opts.skipUiRefresh) scheduleImageGenModelUiRefresh();
   }
@@ -513,8 +534,6 @@
     if (!entry) return id;
     const supported = entry.resolutions?.length ? entry.resolutions : ['1k', '2k', '4k'];
     if (supported.includes(res)) return id;
-    if (id === 'mooko-gpt-image-2-pro' && res === '1k') return 'mooko-gpt-image-2-pro';
-    if (id === 'mooko-gpt-image-2') return 'mooko-gpt-image-2-pro';
     const family = imageGenModelUiFamily(entry);
     const provider = entry.provider;
     const hit = imageGenModelCatalog.find(
@@ -579,33 +598,21 @@
   const IMAGE_GEN_SIZE_BANANA2_EXTRA = ['1:4', '4:1', '1:8', '8:1'];
   const IMAGE_GEN_SIZE_GIM2 = ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'];
   /** 离线兜底：与 server aspectRatiosForModel 一致 */
-  const IMAGE_GEN_SIZE_MJ = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'];
-  const IMAGE_GEN_SIZE_WAN = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'];
-  const IMAGE_GEN_SIZE_FLUX_KONTEXT = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '9:21'];
-  const IMAGE_GEN_SIZE_FLUX2 = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'];
+  const IMAGE_GEN_SIZE_MJ = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'];
   const IMAGE_GEN_ASPECT_FALLBACK = {
-    'apimart-gpt-image-2-official-budget': ['16:9', '9:16', '4:3', '3:4'],
-    'mooko-gpt-image-2-pro': ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'],
-    'apimart-gpt-image-2': IMAGE_GEN_SIZE_BASIC,
-    'ithink-gpt-image-2-slow': IMAGE_GEN_SIZE_BASIC,
-    'gpt-image-2-vip': IMAGE_GEN_SIZE_GIM2,
-    'gpt-image-2': IMAGE_GEN_SIZE_GIM2,
-    'apimart-gpt-image-2': IMAGE_GEN_SIZE_GIM2,
+    image2: IMAGE_GEN_SIZE_GIM2,
+    'image2-pro': IMAGE_GEN_SIZE_GIM2,
+    'image2-hd': ['3:1', '1:3', '21:9', '9:21', '2:1', '1:2', '16:9', '9:16'],
+    'lingtu-fast': IMAGE_GEN_SIZE_BANANA,
+    'lingtu-2': [...IMAGE_GEN_SIZE_BANANA, ...IMAGE_GEN_SIZE_BANANA2_EXTRA],
+    'lingtu-pro': IMAGE_GEN_SIZE_BANANA,
+    lingtu: IMAGE_GEN_SIZE_BANANA,
     'apimart-mj-v61': IMAGE_GEN_SIZE_MJ,
     'apimart-mj-v81': IMAGE_GEN_SIZE_MJ,
     'apimart-mj-v7': IMAGE_GEN_SIZE_MJ,
-    'apimart-mj-niji7': IMAGE_GEN_SIZE_MJ,
-    'apimart-wan2-7-image': IMAGE_GEN_SIZE_WAN,
-    'apimart-wan2-7-image-pro': IMAGE_GEN_SIZE_WAN,
-    'apimart-flux-kontext-pro': IMAGE_GEN_SIZE_FLUX_KONTEXT,
-    'apimart-flux-kontext-max': IMAGE_GEN_SIZE_FLUX_KONTEXT,
-    'apimart-flux-2-pro': IMAGE_GEN_SIZE_FLUX2,
-    'apimart-flux-2-flex': IMAGE_GEN_SIZE_FLUX2,
-    'apimart-gemini-2-5-flash-preview': IMAGE_GEN_SIZE_BANANA,
-    'apimart-gemini-3-1-flash-preview': IMAGE_GEN_SIZE_BANANA,
-    'apimart-gemini-3-pro-preview': IMAGE_GEN_SIZE_BANANA
+    'apimart-mj-niji7': IMAGE_GEN_SIZE_MJ
   };
-  const BANANA2_EXTENDED_MODELS = new Set(['nano-banana-2', 'nano-banana-2-cl', 'nano-banana-2-4k-cl']);
+  const BANANA2_EXTENDED_MODELS = new Set(['lingtu-2']);
   const IMAGE_GEN_SAVE_TARGET_LS = 'promptHub.imageGenSaveTarget.v1';
 
   function imageGenSizeOptionLabel(value) {
@@ -617,11 +624,6 @@
     if (isImageGenMidjourneyModel(id)) return true;
     const entry = imageGenModelCatalog.find((m) => m.id === id);
     return !!entry?.fixedQualityLow;
-  }
-
-  function imageGenModelHidesResolution(modelId) {
-    const id = normalizeImageGenModelId(modelId);
-    return id.startsWith('apimart-flux-kontext');
   }
 
   function isImageGenMjSaveAllTiles() {
@@ -771,7 +773,7 @@
     }
     const resParam = document.querySelector('.imagegen-param[data-param="resolution"]');
     const resLabel = document.querySelector('label[for="imageGenResolution"]');
-    const hideResolution = isMj || imageGenModelHidesResolution(modelId);
+    const hideResolution = isMj;
     for (const el of [resParam, resLabel]) {
       if (el) el.hidden = hideResolution;
     }

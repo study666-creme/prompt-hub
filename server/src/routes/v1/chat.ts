@@ -102,7 +102,7 @@ async function freshTextModel(env: Env, modelId: string): Promise<NewApiCatalogM
   try {
     snapshot = await fetchNewApiModelCatalog(env.NEWAPI_API_BASE_URL, { force: true, requireFresh: true });
   } catch {
-    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认上游实时价格，请稍后重试');
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认实时价格，请稍后重试');
   }
   const model = resolveNewApiCatalogModel(snapshot, modelId, 'text');
   if (!model) throw new ApiError(400, 'MODEL_UNAVAILABLE', '所选文字模型已下架，请刷新后重选');

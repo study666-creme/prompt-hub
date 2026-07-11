@@ -157,7 +157,7 @@ promptToolsRoutes.get('/info', async c => {
     data: {
       reverse: {
         model: reverseModel,
-        upstream: 'IMAGE_API_KEY → Apimart /v1/chat/completions（vision）',
+        upstream: 'APIMART_API_KEY → /v1/chat/completions（vision）',
         creditsPerCall: REVERSE_PROMPT_CREDITS,
         note: 'Apimart gemini-2.5-flash-lite 低成本视觉；收 2 积分/次（仅 Gemini 系列，不 fallback 到 GPT-4o）'
       },
@@ -173,7 +173,7 @@ promptToolsRoutes.get('/info', async c => {
         chatModel: c.env.FISSION_CHAT_MODEL || DEFAULT_FISSION_CHAT_MODEL,
         creditsVision: FISSION_VISION_CREDITS,
         creditsPerPlanEstimate: FISSION_VISION_CREDITS + 2,
-        upstream: 'IMAGE_API（Gemini Flash 视觉）+ CHAT_API（DeepSeek V4 Pro）',
+        upstream: 'APIMART_API（Gemini Flash 视觉）+ CHAT_API（DeepSeek V4 Pro）',
         note: '视觉 3 积分 + Pro 对话按 token（通常 1～3 积分）；自动识别图中最突出的媒介/版式，批量生图仅按提示词出图'
       },
       purify: {

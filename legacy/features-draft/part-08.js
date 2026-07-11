@@ -695,8 +695,9 @@
   function failedJobModelLabel(job) {
     if (job.model) return imageGenModelLabel(job.model);
     const lbl = String(job.modelLabel || '').trim();
-    if (lbl === '全能模型2' || lbl === 'quanneng2') return 'GPT Image 2';
-    return lbl || 'GPT Image 2';
+    if (lbl === 'quanneng2' || /^GPT\s*Image\s*2/i.test(lbl)) return '全能模型2';
+    if (/^(?:Nano\s*)?Banana/i.test(lbl)) return '香蕉';
+    return lbl || '全能模型2';
   }
 
   function renderImageGenMobileResult() {

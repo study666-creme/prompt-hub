@@ -32,7 +32,7 @@ $dvText = Get-Content $devVars -Raw -ErrorAction SilentlyContinue
 if ($dvText -match 'service_role') {
   Write-Host ""
   Write-Host "Edit server\.dev.vars: set MemFire SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY" -ForegroundColor Yellow
-  Write-Host "For image gen, also set IMAGE_API_KEY" -ForegroundColor Yellow
+  Write-Host "For image gen, also set NEWAPI_API_KEY and APIMART_API_KEY (MJ)" -ForegroundColor Yellow
 }
 
 Write-Host ""

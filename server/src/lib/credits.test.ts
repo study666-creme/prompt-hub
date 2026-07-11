@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { applyMemberCreditDiscount, formatCreditsDisplay, roundCredits } from './credit-math';
+import {
+  applyMemberCreditDiscount,
+  creditsFromYuan,
+  formatCreditsDisplay,
+  roundCredits
+} from './credit-math';
 import { computeImageGenerationCost } from './image-model-settings';
 
 describe('credit math', () => {
@@ -14,35 +19,42 @@ describe('credit math', () => {
     expect(applyMemberCreditDiscount(10, 0.9)).toBe(9);
     expect(applyMemberCreditDiscount(10, 0.85)).toBe(8.5);
   });
+
+  it('converts upstream CNY prices at exactly 100 credits per yuan', () => {
+    expect(creditsFromYuan(1)).toBe(100);
+    expect(creditsFromYuan(0.055)).toBe(5.5);
+    expect(creditsFromYuan(0.016)).toBe(1.6);
+    expect(creditsFromYuan(-1)).toBeNull();
+  });
 });
 
 describe('generation cost', () => {
   const settings = { globalDiscountPercent: 100, models: {} };
 
-  it('gpt-image-2 default credits', () => {
+  it('legacy gpt-image-2 resolves to the current realtime fallback price', () => {
     const r = computeImageGenerationCost(settings, 'gpt-image-2', '1k', null, false);
-    expect(r.listPrice).toBe(10);
-    expect(r.base).toBe(10);
-    expect(r.final).toBe(10);
+    expect(r.listPrice).toBe(5.5);
+    expect(r.base).toBe(5.5);
+    expect(r.final).toBe(5.5);
   });
 
   it('basic member no longer gets generation discount', () => {
     const r = computeImageGenerationCost(settings, 'gpt-image-2', '1k', 'basic', true);
-    expect(r.listPrice).toBe(10);
-    expect(r.final).toBe(10);
+    expect(r.listPrice).toBe(5.5);
+    expect(r.final).toBe(5.5);
     expect(r.appliedDiscount).toBe('none');
     expect(r.discountLabel).toBeNull();
   });
 
   it('standard member no longer gets generation discount', () => {
     const r = computeImageGenerationCost(settings, 'nano-banana-pro', '2k', 'standard', true);
-    expect(r.listPrice).toBe(18);
-    expect(r.final).toBe(18);
+    expect(r.listPrice).toBe(13);
+    expect(r.final).toBe(13);
     expect(r.appliedDiscount).toBe('none');
     expect(r.discountLabel).toBeNull();
   });
 
-  it('explicit promo price applies as activity price', () => {
+  it('legacy manual promo cannot override a realtime model', () => {
     const r = computeImageGenerationCost(
       {
         globalDiscountPercent: 100,
@@ -55,11 +67,10 @@ describe('generation cost', () => {
       'basic',
       true
     );
-    expect(r.listPrice).toBe(10);
-    expect(r.promoPrice).toBe(8);
-    expect(r.final).toBe(8);
-    expect(r.appliedDiscount).toBe('model');
-    expect(r.modelDiscountLabel).toBe('活动价');
+    expect(r.listPrice).toBe(5.5);
+    expect(r.promoPrice).toBe(5.5);
+    expect(r.final).toBe(5.5);
+    expect(r.appliedDiscount).toBe('none');
   });
 
   it('no promo price when field omitted', () => {
@@ -75,18 +86,18 @@ describe('generation cost', () => {
       null,
       false
     );
-    expect(r.listPrice).toBe(6);
-    expect(r.final).toBe(6);
+    expect(r.listPrice).toBe(5.5);
+    expect(r.final).toBe(5.5);
     expect(r.appliedDiscount).toBe('none');
   });
 
-  it('legacy quanneng2 maps to gpt-image-2', () => {
+  it('legacy quanneng2 maps to image2', () => {
     const r = computeImageGenerationCost(settings, 'quanneng2', '1k', null, false);
-    expect(r.modelId).toBe('gpt-image-2');
-    expect(r.final).toBe(10);
+    expect(r.modelId).toBe('image2');
+    expect(r.final).toBe(5.5);
   });
 
-  it('fixedPrice ignores promo price', () => {
+  it('legacy fixedPrice cannot revive a removed banana model', () => {
     const r = computeImageGenerationCost(
       {
         globalDiscountPercent: 100,
@@ -99,8 +110,9 @@ describe('generation cost', () => {
       'pro',
       true
     );
-    expect(r.final).toBe(80);
-    expect(r.discountLabel).toBe('固定价');
+    expect(r.modelId).toBe('lingtu-pro');
+    expect(r.final).toBe(13);
+    expect(r.discountLabel).toBeNull();
   });
 
   it('memberDiscountCapPercent no longer applies member discount', () => {
@@ -116,31 +128,32 @@ describe('generation cost', () => {
       'pro',
       true
     );
-    expect(r.listPrice).toBe(100);
-    expect(r.final).toBe(100);
+    expect(r.listPrice).toBe(5.5);
+    expect(r.final).toBe(5.5);
     expect(r.appliedDiscount).toBe('none');
     expect(r.discountLabel).toBeNull();
   });
 
-  it('apimart gpt-image-2 prices by resolution', () => {
+  it('removed apimart gpt-image-2 migrates to image2 realtime pricing', () => {
     const r1 = computeImageGenerationCost(settings, 'apimart-gpt-image-2', '1k', null, false);
     const r2 = computeImageGenerationCost(settings, 'apimart-gpt-image-2', '2k', null, false);
     const r4 = computeImageGenerationCost(settings, 'apimart-gpt-image-2', '4k', null, false);
-    expect(r1.final).toBe(10);
-    expect(r2.final).toBe(20);
-    expect(r4.final).toBe(40);
+    expect(r1.modelId).toBe('image2');
+    expect(r1.final).toBe(5.5);
+    expect(r2.final).toBe(5.5);
+    expect(r4.final).toBe(5.5);
   });
 
-  it('grsai nano-banana-pro prices by resolution', () => {
+  it('legacy nano-banana-pro resolves to the current banana price', () => {
     const r1 = computeImageGenerationCost(settings, 'nano-banana-pro', '1k', null, false);
     const r2 = computeImageGenerationCost(settings, 'nano-banana-pro', '2k', null, false);
     const r4 = computeImageGenerationCost(settings, 'nano-banana-pro', '4k', null, false);
-    expect(r1.final).toBe(18);
-    expect(r2.final).toBe(18);
-    expect(r4.final).toBe(18);
+    expect(r1.final).toBe(13);
+    expect(r2.final).toBe(13);
+    expect(r4.final).toBe(13);
   });
 
-  it('grsai nano-banana-pro per-resolution override', () => {
+  it('legacy per-resolution overrides cannot change the current banana price', () => {
     const r2 = computeImageGenerationCost(
       {
         globalDiscountPercent: 100,
@@ -155,11 +168,11 @@ describe('generation cost', () => {
       null,
       false
     );
-    expect(r2.listPrice).toBe(24);
-    expect(r2.final).toBe(24);
+    expect(r2.listPrice).toBe(13);
+    expect(r2.final).toBe(13);
   });
 
-  it('promo by resolution', () => {
+  it('legacy resolution promos cannot change the current banana price', () => {
     const r = computeImageGenerationCost(
       {
         globalDiscountPercent: 100,
@@ -175,16 +188,17 @@ describe('generation cost', () => {
       null,
       false
     );
-    expect(r.listPrice).toBe(24);
-    expect(r.final).toBe(20);
-    expect(r.modelDiscountLabel).toBe('活动价');
+    expect(r.listPrice).toBe(13);
+    expect(r.final).toBe(13);
+    expect(r.modelDiscountLabel).toBeNull();
   });
 
-  it('apimart seedream 5 lite prices by resolution', () => {
+  it('removed apimart seedream migrates to image2 realtime pricing', () => {
     const r2 = computeImageGenerationCost(settings, 'apimart-seedream-5-lite', '2k', null, false);
     const r4 = computeImageGenerationCost(settings, 'apimart-seedream-5-lite', '4k', null, false);
-    expect(r2.final).toBe(14);
-    expect(r4.final).toBe(28);
+    expect(r2.modelId).toBe('image2');
+    expect(r2.final).toBe(5.5);
+    expect(r4.final).toBe(5.5);
   });
 
   it('newapi fallback prices preserve fractional credits', () => {
