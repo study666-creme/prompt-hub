@@ -41,6 +41,7 @@
     if (!id) return 'image2';
     const legacy = {
       quanneng2: 'image2',
+      'gpt-image-2-chat': 'image2-economy',
       'gpt-image-2': 'image2',
       'gpt-image-2-vip': 'image2-pro',
       jimeng: 'lingtu-pro',
@@ -53,6 +54,7 @@
       'nano-banana-2-cl': 'lingtu-2',
       'nano-banana-2-4k-cl': 'lingtu-2',
       'nano-banana': 'lingtu',
+      'newapi-gpt-image-2-chat': 'image2-economy',
       'apimart-gpt-image-2-official-budget': 'image2-hd',
       'apimart-gpt-image-2': 'image2',
       'apimart-seedream-5-lite': 'image2',
@@ -600,6 +602,7 @@
   /** 离线兜底：与 server aspectRatiosForModel 一致 */
   const IMAGE_GEN_SIZE_MJ = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'];
   const IMAGE_GEN_ASPECT_FALLBACK = {
+    'image2-economy': [],
     image2: IMAGE_GEN_SIZE_GIM2,
     'image2-pro': IMAGE_GEN_SIZE_GIM2,
     'image2-hd': ['3:1', '1:3', '21:9', '9:21', '2:1', '1:2', '16:9', '9:16'],
@@ -684,6 +687,7 @@
   }
 
   function getImageGenMaxRefImages() {
+    if (normalizeImageGenModelId(getImageGenModel()) === 'image2-economy') return 0;
     if (isImageGenMidjourneyModel(getImageGenModel())) {
       return getImageGenMjMode() === 'blend' ? 5 : 4;
     }
@@ -695,6 +699,10 @@
     if (!hint) return;
     const max = getImageGenMaxRefImages();
     const isMj = isImageGenMidjourneyModel(getImageGenModel());
+    if (max === 0) {
+      hint.textContent = '该模型仅支持文字生图';
+      return;
+    }
     if (!isMj) {
       hint.hidden = true;
       hint.textContent = '';
@@ -756,6 +764,7 @@
     const modelId = normalizeImageGenModelId(opts.modelId || getImageGenModel());
     const family = opts.family || imageGenModelFamily || imageGenModelUiFamily({ id: modelId });
     const isMj = family === 'midjourney';
+    const isEconomy = modelId === 'image2-economy';
     const shell = document.getElementById('imageGenSharedParams') || document.querySelector('.imagegen-shared-params');
     if (shell) {
       shell.classList.toggle('imagegen-params--mj', isMj);
@@ -773,21 +782,25 @@
     }
     const resParam = document.querySelector('.imagegen-param[data-param="resolution"]');
     const resLabel = document.querySelector('label[for="imageGenResolution"]');
-    const hideResolution = isMj;
+    const hideResolution = isMj || isEconomy;
     for (const el of [resParam, resLabel]) {
       if (el) el.hidden = hideResolution;
     }
     const sizeRow = document.querySelector('.imagegen-params-row--size');
     if (sizeRow) sizeRow.classList.toggle('imagegen-params-row--mj-size', isMj);
+    const sizeParam = document.querySelector('.imagegen-param[data-param=size]');
+    if (sizeParam) sizeParam.hidden = isEconomy;
     const sizeLabel = document.querySelector('label[for="imageGenSize"]');
     if (sizeLabel) sizeLabel.textContent = isMj ? '宽高比' : '画面尺寸';
-    const hideQuality = isMj || imageGenModelHidesQuality(modelId);
+    const hideQuality = isMj || isEconomy || imageGenModelHidesQuality(modelId);
     const qEl = document.getElementById('imageGenQuality');
     const qLabel = document.querySelector('label[for="imageGenQuality"]');
     const qNote = document.querySelector('.imagegen-quality-note');
     for (const el of [qLabel, qEl, qNote]) {
       if (el) el.hidden = hideQuality;
     }
+    const refBlock = document.querySelector('.imagegen-ref-block');
+    if (refBlock) refBlock.hidden = isEconomy;
     if (isMj) {
       updateImageGenSizeSelect();
       syncImageGenMjModeUI();

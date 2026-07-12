@@ -778,6 +778,7 @@
   ];
 
   const IMAGE_GEN_MODEL_FALLBACK = [
+    { id: 'image2-economy', label: '全能模型2 · 经济 1K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 89, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: [] },
     { id: 'image2', label: '全能模型2 · 1K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 90, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
     { id: 'image2-pro', label: '全能模型2 · 高质量 2K/4K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 91, selectable: true, status: 'active', refundOnViolation: true, pricingByResolution: true, resolutions: ['2k', '4k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
     { id: 'image2-hd', label: '全能模型2 · 经济 2K/4K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 92, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, pricingByResolution: true, resolutions: ['2k', '4k'], aspectRatios: ['3:1', '1:3', '21:9', '9:21', '2:1', '1:2', '16:9', '9:16'] },

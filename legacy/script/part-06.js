@@ -111,14 +111,27 @@
         setAuthBusy(true);
         setAuthStatus('登录中…');
         localStorage.removeItem('promptrepo_post_logout');
-        await window.SupabaseSync.signIn(email, password);
-        await completeAuthSession({ silent: false, migrateGuest: true });
-        if (!window.SupabaseSync?.isLoggedIn?.()) {
-          setAuthStatus('登录未完成，请关闭弹窗后按 Ctrl+F5 强刷再试', 'error');
+        const authData = await window.SupabaseSync.signIn(email, password);
+        const signedInSession = authData?.session || window.SupabaseSync?.getSession?.();
+        if (!signedInSession?.user || !window.SupabaseSync?.isLoggedIn?.()) {
+          setAuthStatus('登录未完成，请检查网络后重试', 'error');
           return;
         }
+        updateAuthUI(signedInSession);
         closeAuthModal();
-        showToast('登录成功');
+        showToast('登录成功，正在同步卡片');
+        try {
+          await completeAuthSession({ silent: false, migrateGuest: true });
+        } catch (syncError) {
+          console.warn('[auth] post-login sync failed', syncError);
+          setCloudSyncPhase('error', '已登录，云端卡片将在网络恢复后重试');
+          showToast('登录成功，卡片同步暂时失败，请稍后刷新重试');
+        }
+        if (!window.SupabaseSync?.isLoggedIn?.()) {
+          openAuthModal('login');
+          setAuthStatus('登录状态未保存，请检查浏览器存储权限后重试', 'error');
+          return;
+        }
       } catch (e) {
         setAuthStatus(authErrorMessage(e), 'error');
       } finally {

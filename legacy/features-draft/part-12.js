@@ -178,6 +178,12 @@
     if (!sel) return;
     const current = sel.value || '1:1';
     const options = imageGenSizeOptionsForModel(modelSel?.value || getImageGenModel());
+    if (!options.length) {
+      sel.dataset.sizeOptions = '';
+      sel.innerHTML = '';
+      sel.value = '';
+      return;
+    }
     const key = options.join('|');
     if (sel.dataset.sizeOptions === key) return;
     sel.dataset.sizeOptions = key;

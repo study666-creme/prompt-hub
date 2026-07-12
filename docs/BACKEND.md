@@ -50,8 +50,9 @@
 
 ## 图片模型边界
 
-- `/api/v1/generate/models` 只返回卡藏 API 的 7 个全能模型2/香蕉型号，以及 4 个 MJ 型号。
-- 卡藏 API 的人民币价格统一调用 `creditsFromYuan()`，按 `1 元 = 100 积分` 换算；报价或提交时无法取得新鲜目录会在扣费前失败。
+- `/api/v1/generate/models` 只返回已完成协议适配的卡藏 API 全能模型2/香蕉型号，以及 4 个 MJ 型号；当前为 8 个卡藏图片模型（含经济 1K）和 4 个 MJ。
+- 卡藏 API 的图片人民币价格统一调用 `imageRetailCreditsFromYuan()`：卡藏报价已包含上游加价，按 `1 元 = 100 积分` 直接换算，不再重复加价；报价或提交时无法取得新鲜目录会在扣费前失败。
+- `gpt-image-2-chat` 走 `/v1/chat/completions` 并从消息内容提取图片，不支持参考图、比例和多张参数。
 - MJ 使用 Apimart，并保留后台 Relax / Fast / Turbo 手动定价。
 - 旧 GrsAI、iThink、Mooko 和非 MJ Apimart 型号只能恢复历史任务，不能通过后台重新上架。
 

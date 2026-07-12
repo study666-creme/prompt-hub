@@ -170,6 +170,7 @@ describe('newapi image upstream', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const pricingCall = fetchMock.mock.calls[0] as unknown[];
     expect(String(pricingCall[0])).toBe('https://pricing-unit.test/api/model-catalog?refresh=1');
+    expect(newApiCreditsForModel(rules, 'gpt-image-2-chat')).toBe(2.5);
     expect(newApiCreditsForModel(rules, 'gpt-image-2')).toBe(5.5);
     expect(newApiCreditsForModel(rules, 'gpt-image-2-ext', '2k')).toBe(15);
     expect(newApiCreditsForModel(rules, 'gpt-image-2-ext', '4k')).toBe(20);
@@ -178,13 +179,15 @@ describe('newapi image upstream', () => {
     expect(newApiCreditsForModel(rules, 'chat-only')).toBeNull();
 
     const snapshot = await fetchNewApiModelCatalog('https://pricing-unit.test/v1');
-    expect(snapshot.imageCatalogEntries.map(model => model.id)).toEqual(['image2', 'image2-pro', 'image2-hd']);
+    expect(snapshot.imageCatalogEntries.map(model => model.id)).toEqual(['image2', 'image2-pro', 'image2-economy', 'image2-hd']);
     expect(snapshot.imageCatalogEntries.map(model => model.label)).toEqual([
       '全能模型2 · 1K',
       '全能模型2 · 高质量 2K/4K',
+      '全能模型2 · 经济 1K',
       '全能模型2 · 经济 2K/4K'
     ]);
-    expect(snapshot.imageCatalogEntries[2].fixedQualityLow).toBe(true);
+    expect(snapshot.imageCatalogEntries[3].fixedQualityLow).toBe(true);
+    expect(resolveNewApiCatalogModel(snapshot, 'image2-economy', 'image')?.upstreamModel).toBe('gpt-image-2-chat');
     expect(resolveNewApiCatalogModel(snapshot, 'image2', 'image')?.upstreamModel).toBe('gpt-image-2');
     expect(resolveNewApiCatalogModel(snapshot, 'gpt-image-2', 'image')?.id).toBe('image2');
     expect(publicNewApiCatalogModels(snapshot)).toContainEqual(expect.objectContaining({
@@ -193,9 +196,9 @@ describe('newapi image upstream', () => {
       modality: 'text'
     }));
     expect(publicNewApiCatalogModels(snapshot).some(model => 'upstreamModel' in model)).toBe(false);
-    expect(publicNewApiCatalogModels(snapshot).some(model => model.id === 'image2-chat')).toBe(false);
+    expect(publicNewApiCatalogModels(snapshot).some(model => model.id === 'image2-economy')).toBe(true);
     expect(publicNewApiCatalogModels(snapshot).some(model => model.id === 'flux-public')).toBe(false);
-    expect(resolveNewApiCatalogModel(snapshot, 'image2-chat', 'image')).toBeNull();
+    expect(resolveNewApiCatalogModel(snapshot, 'image2-economy', 'image')?.upstreamModel).toBe('gpt-image-2-chat');
     expect(resolveNewApiCatalogModel(snapshot, 'flux-public', 'image')).toBeNull();
     const video = resolveNewApiCatalogModel(snapshot, 'motion-video', 'video');
     expect(video && newApiFixedCreditsForRequest(video, { duration: 10, resolution: '720p' })).toBe(16);
@@ -251,6 +254,32 @@ describe('newapi image upstream', () => {
     });
     expect(result.taskId).toMatch(/^newapi-/);
     expect(result.imageUrl).toBe('https://image.test/out.png');
+  });
+
+  it('submits the economical image model through chat completions', async () => {
+    const fetchMock = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String((init as RequestInit).body || '{}')) as Record<string, unknown>;
+      expect(body).toEqual({
+        model: 'gpt-image-2-chat',
+        messages: [{ role: 'user', content: 'apple' }],
+        stream: false
+      });
+      return jsonResponse({
+        choices: [{ message: { content: '![result](https://image.test/chat.png)' } }]
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
+      upstreamModel: 'gpt-image-2-chat',
+      prompt: 'apple',
+      resolution: '1k',
+      quality: 'standard'
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://newapi-unit.test/v1/chat/completions');
+    expect(result.taskId).toMatch(/^newapi-/);
+    expect(result.imageUrl).toBe('https://image.test/chat.png');
   });
 
   it('builds image requests only from the selected model parameter contract', () => {

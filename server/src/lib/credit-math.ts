@@ -32,3 +32,8 @@ export function creditsFromYuan(value: unknown): number | null {
   if (!Number.isFinite(yuan) || yuan < 0) return null;
   return roundCredits(yuan * CREDITS_PER_YUAN);
 }
+
+/** 卡藏图片售价已经包含上游加价；这里只按 1 元 = 100 积分直接换算。 */
+export function imageRetailCreditsFromYuan(value: unknown): number | null {
+  return creditsFromYuan(value);
+}

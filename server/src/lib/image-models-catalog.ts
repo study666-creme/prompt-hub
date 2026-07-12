@@ -61,6 +61,18 @@ function apimart(row: CatalogWithoutProvider): ImageModelCatalogEntry {
  */
 export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   newApi(gim2({
+    id: 'image2-economy',
+    upstream: 'gpt-image-2-chat',
+    label: '全能模型2 · 经济 1K',
+    group: 'new',
+    description: '低价文字生图，固定 1K，不支持参考图与尺寸设置',
+    upstreamPoints: 0.025,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    defaultCredits: 2.5,
+    sortOrder: 89
+  })),
+  newApi(gim2({
     id: 'image2',
     upstream: 'gpt-image-2',
     label: '全能模型2 · 1K',
@@ -254,6 +266,7 @@ export function sanitizePublicModelDescription(description: string | null | unde
 
 const LEGACY_MODEL_MAP: Record<string, string> = {
   quanneng2: 'image2',
+  'gpt-image-2-chat': 'image2-economy',
   'gpt-image-2': 'image2',
   'gpt-image-2-vip': 'image2-pro',
   jimeng: 'lingtu-pro',
@@ -267,6 +280,7 @@ const LEGACY_MODEL_MAP: Record<string, string> = {
   'nano-banana-2-4k-cl': 'lingtu-2',
   'nano-banana': 'lingtu',
   'newapi-gpt-image-2': 'image2',
+  'newapi-gpt-image-2-chat': 'image2-economy',
   'gpt-image-2-ext-1k': 'image2',
   'gpt-image-2-ext-2k': 'image2-pro',
   'gpt-image-2-ext-4k': 'image2-pro',

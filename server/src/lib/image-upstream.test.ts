@@ -17,7 +17,7 @@ describe('image model catalog', () => {
     expect(IMAGE_MODEL_CATALOG.length).toBe(
       NEWAPI_IMAGE_MODEL_CATALOG.length + APIMART_IMAGE_MODEL_CATALOG.length
     );
-    expect(IMAGE_MODEL_CATALOG).toHaveLength(11);
+    expect(IMAGE_MODEL_CATALOG).toHaveLength(12);
   });
 
   it('newapi exposes price-backed image models first', () => {
@@ -27,6 +27,7 @@ describe('image model catalog', () => {
     const bananaPro = getCatalogEntry('newapi-nano-banana-pro');
     const banana = getCatalogEntry('newapi-nano-banana');
     expect(IMAGE_MODEL_CATALOG[0]?.provider).toBe('newapi');
+    expect(getCatalogEntry('gpt-image-2-chat')?.defaultCredits).toBe(2.5);
     expect(base1k?.defaultCredits).toBe(5.5);
     expect(ext?.upstream).toBe('gpt-image-2-ext');
     expect(ext?.resolutions).toEqual(['2k', '4k']);
@@ -63,13 +64,14 @@ describe('image model catalog', () => {
       (model.provider === 'newapi' && ['gim2', 'banana'].includes(model.uiFamily))
       || (model.provider === 'apimart' && model.uiFamily === 'midjourney')
     ))).toBe(true);
-    expect(retained.filter((model) => model.provider === 'newapi')).toHaveLength(7);
+    expect(retained.filter((model) => model.provider === 'newapi')).toHaveLength(8);
     expect(retained.filter((model) => model.uiFamily === 'midjourney')).toHaveLength(4);
   });
 
   it('normalizes legacy ids', () => {
     expect(normalizeImageModelId('quanneng2')).toBe('image2');
     expect(normalizeImageModelId('gpt-image-2')).toBe('image2');
+    expect(normalizeImageModelId('gpt-image-2-chat')).toBe('image2-economy');
     expect(normalizeImageModelId('nano-banana-pro')).toBe('lingtu-pro');
     expect(normalizeImageModelId('newapi-gpt-image-2-ext-1k')).toBe('image2');
     expect(normalizeImageModelId('gpt-image-2-ext-2k')).toBe('image2-pro');

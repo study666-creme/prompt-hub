@@ -11,6 +11,7 @@
     if (!id) return 'image2';
     const legacy = {
       quanneng2: 'image2',
+      'gpt-image-2-chat': 'image2-economy',
       'gpt-image-2': 'image2',
       'gpt-image-2-vip': 'image2-pro',
       jimeng: 'lingtu-pro',
@@ -100,6 +101,8 @@
     if (/content.*policy|safety|moderation|blocked|违规|敏感/i.test(s)) return true;
     if (/insufficient balance|insufficient credits/i.test(s)) return true;
     if (/apikey|invalid.*api.*key|unauthorized/i.test(s)) return true;
+    if (/missing_task_id|upstream_submit_stale|upstream_submit_not_started|upstream_submit_interrupted/i.test(s)) return true;
+    if (/insufficient_user_quota|用户额度不足|余额不足/i.test(s)) return true;
     if (/This content may violate|content may violate/i.test(s)) return true;
     return false;
   }
@@ -115,7 +118,7 @@
     if (/prohibited words or images|prohibited|flagged as containing/i.test(s)) return false;
     if (isStaleConfigError(s)) return true;
     if (/error code:\s*524|\b524\b|请求失败 \(524\)/i.test(s)) return true;
-    if (/debit_failed|upstream_no_image|missing_task_id|upstream_submit/i.test(s)) return true;
+    if (/debit_failed|upstream_no_image/i.test(s)) return true;
     if (/upstream_failed/i.test(s)) {
       const id = normalizeImageGenModelId(ctx?.model);
       if (id.startsWith('apimart-')) return false;
@@ -148,7 +151,7 @@
     if (/upstream_model_rejected/i.test(s)) {
       return '当前模型暂不可用，请换其他模型；您的积分已全额退回';
     }
-    if (/insufficient balance|insufficient credits/i.test(s)) {
+    if (/insufficient balance|insufficient credits|insufficient_user_quota|用户额度不足|余额不足/i.test(s)) {
       return '生图服务商账户余额不足（不是您的站内积分），请联系站长；您的积分已全额退回';
     }
     if (/apikey|api.key|invalid.*api.*key|无效.*令牌|invalid.*token|unauthorized/i.test(s)) {

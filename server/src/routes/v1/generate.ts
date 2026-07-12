@@ -671,8 +671,7 @@ function assertSupportedImageParameters(
           ? Math.max(...allowedCounts)
           : 1;
     if (
-      !countParameter
-      || (fixedCount && data.count !== fixedCount)
+      (countParameter && fixedCount && data.count !== fixedCount)
       || (allowedCounts.length > 0 && !allowedCounts.includes(data.count))
       || data.count < minCount
       || data.count > maxCount
@@ -685,6 +684,9 @@ function assertSupportedImageParameters(
   if (!referenceCount) return;
   const imageParameter = rule?.parameters.find(parameter => parameter.name === 'images');
   const singleImageParameter = rule?.parameters.find(parameter => parameter.name === 'image');
+  if (rule && !imageParameter && !singleImageParameter) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '该模型暂不支持参考图');
+  }
   const maxReferences = imageParameter?.max_items
     ?? (singleImageParameter ? 1 : model.uiFamily === 'midjourney' ? 5 : 16);
   if (referenceCount > maxReferences) {

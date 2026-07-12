@@ -239,6 +239,7 @@ export function mergeImageModelSettings(
   const src = raw?.models && typeof raw.models === 'object' ? raw.models : {};
   for (const [id, patch] of Object.entries(src)) {
     if (!patch || typeof patch !== 'object') continue;
+    if (!getCatalogEntry(id)) continue;
     const status =
       patch.status === 'active' ||
       patch.status === 'maintenance' ||

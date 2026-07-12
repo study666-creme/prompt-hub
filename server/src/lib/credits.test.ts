@@ -3,6 +3,7 @@ import {
   applyMemberCreditDiscount,
   creditsFromYuan,
   formatCreditsDisplay,
+  imageRetailCreditsFromYuan,
   roundCredits
 } from './credit-math';
 import { computeImageGenerationCost } from './image-model-settings';
@@ -25,6 +26,8 @@ describe('credit math', () => {
     expect(creditsFromYuan(0.055)).toBe(5.5);
     expect(creditsFromYuan(0.016)).toBe(1.6);
     expect(creditsFromYuan(-1)).toBeNull();
+    expect(imageRetailCreditsFromYuan(0.025)).toBe(2.5);
+    expect(imageRetailCreditsFromYuan(0.055)).toBe(5.5);
   });
 });
 
