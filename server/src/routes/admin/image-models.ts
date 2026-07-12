@@ -11,6 +11,7 @@ import {
   type ImageModelPricingSettings
 } from '../../lib/image-model-settings';
 import {
+  fetchNewApiAdminRoutes,
   fetchNewApiModelCatalog,
   imageCatalogForNewApiSnapshot
 } from '../../lib/newapi';
@@ -24,10 +25,35 @@ adminImageModelRoutes.use('*', requireAdminSecret);
 adminImageModelRoutes.use('*', rateLimit(120, 60_000));
 
 async function currentAdminModelRows(env: Env, settings: ImageModelPricingSettings) {
-  const catalog = await fetchNewApiModelCatalog(env.NEWAPI_API_BASE_URL);
+  const [catalog, routeCatalog] = await Promise.all([
+    fetchNewApiModelCatalog(env.NEWAPI_API_BASE_URL),
+    fetchNewApiAdminRoutes(
+      env.NEWAPI_API_BASE_URL,
+      env.NEWAPI_CATALOG_ADMIN_SECRET
+    )
+  ]);
+  const rows = adminModelRows(settings, imageCatalogForNewApiSnapshot(catalog)).map(row => ({
+    ...row,
+    routeCatalogAvailable: row.provider === 'apimart' || routeCatalog.available,
+    routeCatalogError: row.provider === 'newapi' ? routeCatalog.error : null,
+    upstreamRoutes: row.provider === 'newapi'
+      ? routeCatalog.routes[row.upstream] || []
+      : [{
+          channelId: 0,
+          channelName: 'Apimart MJ',
+          status: 'active',
+          enabled: true,
+          groups: ['midjourney'],
+          actualModel: row.upstream,
+          priority: 0,
+          weight: 0,
+          upstreamHost: 'api.apimart.ai'
+        }]
+  }));
   return {
     catalog,
-    rows: adminModelRows(settings, imageCatalogForNewApiSnapshot(catalog))
+    routeCatalog,
+    rows
   };
 }
 
@@ -51,6 +77,11 @@ adminImageModelRoutes.get('/', async c => {
       data: {
         settings,
         models: current.rows,
+        routeCatalog: {
+          available: current.routeCatalog.available,
+          fetchedAt: current.routeCatalog.fetchedAt,
+          error: current.routeCatalog.error
+        },
         providers: [
           { id: 'newapi', label: '卡藏 API', doc: 'https://newapi.prompt-hubs.com/' },
           { id: 'apimart', label: 'MJ 线路', doc: 'https://api.apimart.ai' }

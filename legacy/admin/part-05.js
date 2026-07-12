@@ -6,6 +6,40 @@
     return '—';
   }
 
+  function renderModelRouteCell(row) {
+    const providerBadge = MODEL_PROVIDER_BADGE[row.provider] || '<span class="admin-badge">未知入口</span>';
+    const apiModel = String(row.upstream || row.id || '').trim();
+    const routes = Array.isArray(row.upstreamRoutes) ? row.upstreamRoutes : [];
+    const head = `<div>${providerBadge}</div><div class="admin-model-route-head"><span class="admin-hint">卡藏</span> <code>${esc(row.id)}</code><br><span class="admin-hint">API 模型</span> <code>${esc(apiModel || '—')}</code></div>`;
+    if (!routes.length) {
+      const unavailable = row.routeCatalogAvailable === false;
+      const label = unavailable ? '渠道目录暂不可用' : '没有配置调用渠道';
+      const detail = unavailable && row.routeCatalogError
+        ? `<span class="admin-model-route__meta admin-hint">${esc(row.routeCatalogError)}</span>`
+        : '';
+      return `${head}<div class="admin-model-route"><span class="admin-badge admin-badge--${unavailable ? 'warn' : 'off'}">${label}</span>${detail}</div>`;
+    }
+    return head + routes.map((route) => {
+      const status = route.status === 'active'
+        ? ['启用', 'ok']
+        : route.status === 'auto_disabled'
+          ? ['自动停用', 'warn']
+          : ['停用', 'off'];
+      const groups = Array.isArray(route.groups) ? route.groups.filter(Boolean).join(' / ') : '';
+      const routing = [
+        route.upstreamHost,
+        groups ? `分组 ${groups}` : '',
+        `优先级 ${Number(route.priority) || 0}`,
+        `权重 ${Number(route.weight) || 0}`
+      ].filter(Boolean).join(' · ');
+      return `<div class="admin-model-route${route.enabled ? '' : ' is-disabled'}">
+        <div class="admin-model-route__title"><strong>${esc(route.channelName || `线路 #${route.channelId || '—'}`)}</strong><span class="admin-badge admin-badge--${status[1]}">${status[0]}</span></div>
+        <span class="admin-hint">真实调用</span> <code>${esc(route.actualModel || apiModel || '—')}</code>
+        <span class="admin-model-route__meta admin-hint">${esc(routing)}</span>
+      </div>`;
+    }).join('');
+  }
+
   function renderModelsTable() {
     const tbody = $('modelsTableBody');
     if (!tbody) return;
@@ -16,7 +50,6 @@
     }
     tbody.innerHTML = rows
       .map((row) => {
-        const providerBadge = MODEL_PROVIDER_BADGE[row.provider] || '<span class="admin-badge">未知</span>';
         const familyLabel = MODEL_UI_FAMILY_LABEL[row.uiFamily] || row.uiFamily || '—';
         const statusOpts = MODEL_STATUS_OPTS.map(
           (o) =>
@@ -32,7 +65,7 @@
             <input type="number" class="admin-input-sm" data-field="sortOrder" min="0" max="9999" value="${row.sortOrder}" title="数字越小越靠前">
           </td>
           <td>${esc(familyLabel)}</td>
-          <td>${providerBadge}</td>
+          <td class="admin-model-route-cell">${renderModelRouteCell(row)}</td>
           <td><code>${esc(row.id)}</code><br><span class="admin-hint">${esc(row.label)} · ${esc(row.description || '')}</span></td>
           <td>${row.pricingSource === 'upstream_realtime'
             ? `<strong>${esc(row.label)}</strong><br><span class="admin-hint">名称自动同步</span>`

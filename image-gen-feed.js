@@ -296,6 +296,64 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
     scheduleImageGenFeedScrollRestore(wrap, scrollState);
   }
 
+  // Keep loader state and decoded pixels attached across unavoidable full renders.
+  function captureRetainedImageGenFeedImages(wrap) {
+    const loaded = new Map();
+    if (!wrap) return loaded;
+    wrap.querySelectorAll('.imagegen-feed-card[data-feed-id]').forEach((card) => {
+      if (card.dataset.pending === '1' || card.dataset.failed === '1') return;
+      const img = card.querySelector('.imagegen-feed-media img[data-image-ref]');
+      const src = img?.currentSrc || img?.src || '';
+      const media = img?.closest('.imagegen-feed-media');
+      if (!img || !src || media?.classList.contains('card-media--load-failed')) return;
+      const ready = !src.includes('data:image/svg') && img.complete && img.naturalWidth > 8;
+      const loading = !ready && (
+        media?.classList.contains('is-loading')
+        || !!img.dataset.feedLoadToken
+        || !!img.dataset.feedLoadingUrl
+        || src.includes('data:image/svg')
+      );
+      if (!ready && !loading) return;
+      loaded.set(card.dataset.feedId, {
+        img,
+        ref: img.getAttribute('data-image-ref') || '',
+        ready
+      });
+    });
+    return loaded;
+  }
+
+  function restoreRetainedImageGenFeedImages(wrap, loaded) {
+    if (!wrap || !loaded?.size) return;
+    const dataAttrs = ['data-image-ref', 'data-storage-ref', 'data-job-id', 'data-source-card-id'];
+    loaded.forEach((saved, feedId) => {
+      const card = wrap.querySelector(
+        `.imagegen-feed-card[data-feed-id="${CSS.escape(String(feedId))}"]`
+      );
+      const nextImg = card?.querySelector('.imagegen-feed-media img[data-image-ref]');
+      const nextRef = nextImg?.getAttribute('data-image-ref') || '';
+      if (!nextImg || saved.ref !== nextRef) return;
+      dataAttrs.forEach((name) => {
+        const value = nextImg.getAttribute(name);
+        if (value == null) saved.img.removeAttribute(name);
+        else saved.img.setAttribute(name, value);
+      });
+      saved.img.className = nextImg.className;
+      saved.img.style.visibility = '';
+      saved.img.style.opacity = '';
+      nextImg.replaceWith(saved.img);
+      const media = saved.img.closest('.imagegen-feed-media');
+      if (saved.ready) {
+        saved.img.dataset.feedLoadDone = '1';
+        media?.classList.remove('is-loading', 'card-media--await', 'card-media--load-failed');
+      } else {
+        delete saved.img.dataset.feedLoadDone;
+        media?.classList.add('is-loading');
+        media?.classList.remove('card-media--load-failed');
+      }
+    });
+  }
+
   function d() {
     return deps;
   }
@@ -994,7 +1052,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       const feedAppend = !!opts.feedAppend;
       const wrap = document.getElementById('imageGenFeed');
       if (!wrap) return;
-      const tabSwitch = opts.scrollToTop === true || opts.force === true;
+      const tabSwitch = opts.scrollToTop === true;
       if (!feedAppend && !tabSwitch && shouldDeferImageGenFeedRender()) {
         clearTimeout(imageGenFeedDeferredRenderTimer);
         imageGenFeedDeferredRenderTimer = setTimeout(() => {
@@ -1197,6 +1255,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           else applyImageGenFeedScrollTop(scrollEl, scrollTop);
         }
       } else {
+        const retainedImages = captureRetainedImageGenFeedImages(wrap);
         resetImageGenFeedCardLayout();
         d().setFeedLayoutPending?.(wrap, true);
         window.CardImageLoader?.disconnect?.();
@@ -1208,6 +1267,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           : 'imagegen-feed imagegen-feed--desktop-grid feed-layout-pending';
         try {
           wrap.innerHTML = html;
+          restoreRetainedImageGenFeedImages(wrap, retainedImages);
         } catch (e) {
           console.error('[imageGenFeed] render failed', e);
           wrap.innerHTML = '<p class="imagegen-feed-empty">仓库加载失败，请强刷页面（Ctrl+Shift+R）</p>';

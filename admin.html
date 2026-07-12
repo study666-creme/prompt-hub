@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__ADMIN_BUILD__ = '20260712c';
+    window.__ADMIN_BUILD__ = '20260712e';
     (function () {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function (regs) {
@@ -23,7 +23,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Prompt Hub 运营控制台</title>
-  <link rel="stylesheet" href="styles-admin.css?v=20260712c">
+  <link rel="stylesheet" href="styles-admin.css?v=20260712e">
 </head>
 <body class="admin-console-page" data-admin-page="console">
   <div class="admin-app" id="adminApp" hidden>
@@ -363,7 +363,7 @@
     <section class="admin-panel" id="panel-models" hidden>
       <div class="admin-card">
         <h2 style="margin:0 0 8px;font-size:16px">当前生图模型</h2>
-        <p class="admin-hint">全能模型2与香蕉的模型、参数和价格由卡藏 API 自动同步，按 1 元 = 100 积分换算，不接受手动改价。MJ 保留 Apimart 的 Relax / Fast / Turbo 分档配置。</p>
+        <p class="admin-hint">全能模型2与香蕉的模型、参数和价格由卡藏 API 自动同步，按 1 元 = 100 积分换算，不接受手动改价。“调用链路”仅管理员可见，会列出 API 模型、真实渠道与当前启停状态。MJ 保留 Relax / Fast / Turbo 分档配置。</p>
         <p class="admin-msg admin-msg--err" id="modelsPersistWarn" hidden></p>
         <div class="admin-view-tabs admin-view-tabs--inline" id="modelFamilyTabs" style="margin-bottom:12px">
           <button type="button" class="admin-view-tab is-active" data-model-family="all">全部</button>
@@ -386,7 +386,7 @@
               <tr>
                 <th>排序</th>
                 <th>分类</th>
-                <th>线路</th>
+                <th>调用链路</th>
                 <th>模型 ID</th>
                 <th>显示名称</th>
                 <th>状态</th>
@@ -488,6 +488,6 @@
 
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="admin.js?v=20260712c"></script>
+  <script src="admin.js?v=20260712e"></script>
 </body>
 </html>

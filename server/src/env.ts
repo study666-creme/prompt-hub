@@ -24,6 +24,8 @@ export type Env = {
   /** New API 生图线路（OpenAI 兼容；目录价格按 1 元=100 积分原值换算，支持 0.1 积分） */
   NEWAPI_API_KEY?: string;
   NEWAPI_API_BASE_URL?: string;
+  /** 仅后台读取卡藏 API 的模型渠道映射，不得返回给公开模型接口。 */
+  NEWAPI_CATALOG_ADMIN_SECRET?: string;
   /** 仅用于恢复已落库的 ThinkAI 历史任务。 */
   ITHINK_API_KEY?: string;
   ITHINK_API_BASE_URL?: string;

@@ -82,6 +82,8 @@ node scripts/verify-mobile-first-screen-browser.mjs
 
 $env:APP_ROOT = 'D:\prompt-hub\.pages-deploy'
 node scripts/verify-mobile-first-screen-browser.mjs
+
+node scripts/verify-imagegen-feed-retention-browser.mjs
 ```
 
 The production audit is `scripts/audit-production-mobile-first-screen.mjs`; pass credentials through `PH_TEST_EMAIL` and `PH_TEST_PASSWORD`, never in source.

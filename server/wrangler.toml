@@ -21,6 +21,7 @@ MEDIA_STORAGE_MODE = "r2-first"
 # SUPABASE_SERVICE_ROLE_KEY
 # SUPABASE_JWT_SECRET（可选，用于本地 JWT 校验加速）
 # NEWAPI_API_KEY（全能模型2 / 香蕉；价格由卡藏 API 实时同步）
+# NEWAPI_CATALOG_ADMIN_SECRET（仅后台查看卡藏 API 渠道映射）
 # APIMART_API_KEY（MJ 与视觉工具）
 # IMAGE_API_KEY / ITHINK_API_KEY / MOOKO_API_KEY 仅在仍需恢复对应历史任务时保留
 # CHAT_API_KEY（对话 · DeepSeek 官方 API Key）

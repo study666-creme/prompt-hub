@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildNewApiImageRequestBody,
+  fetchNewApiAdminRoutes,
   fetchNewApiModelCatalog,
   fetchNewApiPricingRules,
   fetchNewApiTaskOnce,
@@ -74,8 +75,8 @@ describe('newapi image upstream', () => {
         },
         {
           id: 'gpt-image-2-chat',
-          label: 'GPT Image 2 Chat',
-          public: { id: 'image2-chat', label: 'Image2 Chat', description: '聊天生图。' },
+          label: 'GPT Image 2 Special',
+          public: { id: 'image2-special', label: 'Image2 Special', description: '特价生图。' },
           modality: 'image',
           family: 'gim2-chat',
           operation: 'chat',
@@ -183,7 +184,7 @@ describe('newapi image upstream', () => {
     expect(snapshot.imageCatalogEntries.map(model => model.label)).toEqual([
       '全能模型2 · 1K',
       '全能模型2 · 高质量 2K/4K',
-      '全能模型2 · 经济 1K',
+      '全能模型2 · 特价 1K',
       '全能模型2 · 经济 2K/4K'
     ]);
     expect(snapshot.imageCatalogEntries[3].fixedQualityLow).toBe(true);
@@ -326,5 +327,62 @@ describe('newapi image upstream', () => {
     expect(result.status).toBe('completed');
     expect(result.imageUrl).toBe('https://image.test/task.png');
     expect(result.imageUrls).toEqual(['https://image.test/task.png']);
+  });
+
+  it('loads the protected admin route catalog without exposing unknown fields', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('https://route-catalog.test/api/model-catalog/admin/routes?refresh=1');
+      expect(new Headers(init?.headers).get('X-Catalog-Admin-Secret')).toBe('route-secret');
+      return jsonResponse({
+        success: true,
+        fetched_at: '2026-07-12T00:00:00.000Z',
+        routes: {
+          'gpt-image-2': [{
+            channel_id: 9,
+            channel_name: 'GRS Image 1K',
+            status: 'active',
+            enabled: true,
+            groups: ['default', '生图'],
+            actual_model: 'gpt-image-2',
+            priority: 10,
+            weight: 1,
+            upstream_host: 'api.grsai.test',
+            key: 'must-not-be-retained'
+          }]
+        }
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const snapshot = await fetchNewApiAdminRoutes(
+      'https://route-catalog.test/v1',
+      'route-secret',
+      { force: true }
+    );
+
+    expect(snapshot.available).toBe(true);
+    expect(snapshot.routes['gpt-image-2'][0]).toEqual({
+      channelId: 9,
+      channelName: 'GRS Image 1K',
+      status: 'active',
+      enabled: true,
+      groups: ['default', '生图'],
+      actualModel: 'gpt-image-2',
+      priority: 10,
+      weight: 1,
+      upstreamHost: 'api.grsai.test'
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('must-not-be-retained');
+  });
+
+  it('does not request admin routes when the dedicated secret is missing', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const snapshot = await fetchNewApiAdminRoutes('https://route-catalog-missing.test', '');
+
+    expect(snapshot.available).toBe(false);
+    expect(snapshot.error).toContain('未配置');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -37,7 +37,8 @@
 
 - 新任务只允许卡藏 API 的全能模型2/香蕉和 Apimart MJ；不要把旧 provider 重新放回公开目录。
 - 卡藏 API 图片报价已经包含其加价，必须从上游人民币字段按 `1 元 = 100 积分`直接换算；不能再次加价、信任上游 credits 字段或复制一份手工积分表。
-- `gpt-image-2-chat` 是 `image2-economy`，走 `/v1/chat/completions`，固定 1K 且暂不支持参考图或尺寸参数；不要改回图片 generations 协议。
+- `gpt-image-2-chat` 是内部兼容 ID，对外显示为“全能模型2 · 特价 1K”；它走 `/v1/chat/completions`，固定 1K 且暂不支持参考图或尺寸参数，不要改回图片 generations 协议。
+- 实际 New API 渠道映射只允许运营后台经 `NEWAPI_CATALOG_ADMIN_SECRET` 读取；公开模型目录不得返回渠道、域名或任何凭据字段。
 - 报价与提交需要新鲜目录，目录不可用时必须在扣费前失败。
 - GrsAI、iThink、Mooko 适配器只服务已落库历史任务恢复；删除前先确认生产库没有对应未完成任务。
 - 后台存储巡检按需触发且只读；不得按全桶字节回填用户配额。

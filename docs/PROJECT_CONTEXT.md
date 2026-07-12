@@ -1,13 +1,13 @@
 # Prompt Hub 项目上下文
 
-> 最后核对：2026-07-11。新任务先读本文、`CURRENT-ISSUES.md` 和 `AI-PITFALLS.md`。
+> 最后核对：2026-07-12。新任务先读本文、`CURRENT-ISSUES.md` 和 `AI-PITFALLS.md`。
 
 ## 当前线上状态
 
 | 项 | 当前值 |
 |---|---|
 | 主站 | <https://prompt-hubs.com> |
-| Pages build | `20260712b`（以 `window.__APP_BUILD__` 为准） |
+| Pages build | `20260712e`（以 `window.__APP_BUILD__` 为准） |
 | API | <https://api.prompt-hubs.com>，Worker `prompt-hub-api` |
 | 数据库/Auth | MemFire，代码继续使用 Supabase 兼容变量名和 SDK |
 | 图片 | `MEDIA_STORAGE_MODE=r2-first`，R2 优先、MemFire Storage 回源 |
@@ -19,10 +19,11 @@
 ## 已验证基线
 
 - 手机卡片库首批 12 张，向下滚动再分页；生产首屏约 1.54 MiB。
-- 手机社区首屏渲染 12 张，滚动一次约 24 张；生产首屏约 1.79 MiB。
+- 手机社区首屏渲染 12 张，滚动一次约 24 张；生产首屏约 1.46 MiB。
 - 列表默认请求 `_grid` 缩略图，详情/下载才请求 full。
 - `/prompts/` 刷新保持卡片库路由，不跳回社区。
 - MemFire、R2、New API、运营监控和 Canvas 生图链路已接入。
+- 运营后台可只读查看卡藏模型到实际 New API 渠道的映射；该目录使用独立双端密钥，不对公开接口暴露。
 
 ## 架构约束
 

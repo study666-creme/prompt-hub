@@ -97,6 +97,25 @@ export type NewApiCatalogSnapshot = {
   imageCatalogEntries: ImageModelCatalogEntry[];
 };
 
+export type NewApiAdminRoute = {
+  channelId: number;
+  channelName: string;
+  status: 'active' | 'disabled' | 'auto_disabled';
+  enabled: boolean;
+  groups: string[];
+  actualModel: string;
+  priority: number;
+  weight: number;
+  upstreamHost: string;
+};
+
+export type NewApiAdminRouteSnapshot = {
+  available: boolean;
+  fetchedAt: string;
+  routes: Record<string, NewApiAdminRoute[]>;
+  error: string | null;
+};
+
 export type NewApiTaskPollResult = {
   status: string;
   imageUrl: string | null;
@@ -105,11 +124,12 @@ export type NewApiTaskPollResult = {
 };
 
 const PRICING_CACHE_MS = 5 * 60_000;
+const ADMIN_ROUTE_CACHE_MS = 30_000;
 
 const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; description: string }> = {
   'gpt-5.5': { id: 'creative-5-5', label: '全能模型5.5', description: '通用创作与推理模型，最高 xhigh 思考。' },
   'gpt-5.6-sol': { id: 'creative-5-6', label: '全能模型5.6', description: '旗舰创作与推理模型，最高 ultra 思考。' },
-  'gpt-image-2-chat': { id: 'image2-economy', label: '全能模型2 · 经济 1K', description: '低价文字生图，固定 1K。' },
+  'gpt-image-2-chat': { id: 'image2-economy', label: '全能模型2 · 特价 1K', description: '特价文字生图，固定 1K。' },
   'gpt-image-2': { id: 'image2', label: '全能模型2 · 1K', description: '标准生图模型，固定 1K。' },
   'gpt-image-2-ext': { id: 'image2-pro', label: '全能模型2 · 高质量 2K/4K', description: '高质量生图模型，支持 2K/4K。' },
   image2k4k: { id: 'image2-hd', label: '全能模型2 · 经济 2K/4K', description: '高分辨率经济模型，支持 2K/4K。' },
@@ -123,6 +143,7 @@ const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; 
 
 let catalogCache: { base: string; at: number; snapshot: NewApiCatalogSnapshot } | null = null;
 let catalogInflight: { base: string; promise: Promise<NewApiCatalogSnapshot> } | null = null;
+let adminRouteCache: { base: string; at: number; snapshot: NewApiAdminRouteSnapshot } | null = null;
 
 function apiBase(envBase?: string): string {
   return (envBase || 'https://newapi.prompt-hubs.com').replace(/\/$/, '');
@@ -135,6 +156,16 @@ function catalogUrl(baseUrl?: string, force = false): string {
     const stripped = path.replace(/\/(?:v1|api\/v1|api)$/i, '');
     url.pathname = `${stripped}/api/model-catalog`.replace(/\/{2,}/g, '/');
   }
+  url.search = '';
+  if (force) url.searchParams.set('refresh', '1');
+  url.hash = '';
+  return url.toString();
+}
+
+function adminRouteCatalogUrl(baseUrl?: string, force = false): string {
+  const url = new URL(apiBase(baseUrl));
+  const path = url.pathname.replace(/\/+$/, '').replace(/\/(?:v1|api\/v1|api)$/i, '');
+  url.pathname = `${path}/api/model-catalog/admin/routes`.replace(/\/{2,}/g, '/');
   url.search = '';
   if (force) url.searchParams.set('refresh', '1');
   url.hash = '';
@@ -443,6 +474,83 @@ export async function fetchNewApiModelCatalog(
       });
   catalogInflight = { base, promise };
   return promise;
+}
+
+export async function fetchNewApiAdminRoutes(
+  baseUrl?: string,
+  secret?: string,
+  opts?: { force?: boolean }
+): Promise<NewApiAdminRouteSnapshot> {
+  const base = apiBase(baseUrl);
+  const credential = String(secret || '').trim();
+  if (!credential) {
+    return { available: false, fetchedAt: '', routes: {}, error: '渠道目录密钥未配置' };
+  }
+  if (!opts?.force && adminRouteCache && adminRouteCache.base === base && Date.now() - adminRouteCache.at < ADMIN_ROUTE_CACHE_MS) {
+    return adminRouteCache.snapshot;
+  }
+
+  try {
+    const response = await fetch(adminRouteCatalogUrl(base, opts?.force === true), {
+      headers: {
+        Accept: 'application/json',
+        'X-Catalog-Admin-Secret': credential
+      },
+      signal: AbortSignal.timeout(5000)
+    });
+    const payload = await response.json() as Record<string, unknown>;
+    if (!response.ok || payload.success !== true || !payload.routes || typeof payload.routes !== 'object') {
+      throw new Error(`route catalog ${response.status}`);
+    }
+
+    const routes: Record<string, NewApiAdminRoute[]> = {};
+    for (const [model, value] of Object.entries(payload.routes as Record<string, unknown>)) {
+      if (!model.trim() || !Array.isArray(value)) continue;
+      const items = value
+        .map((raw): NewApiAdminRoute | null => {
+          if (!raw || typeof raw !== 'object') return null;
+          const row = raw as Record<string, unknown>;
+          const statusValue = stringValue(row.status);
+          const status: NewApiAdminRoute['status'] = statusValue === 'active'
+            ? 'active'
+            : statusValue === 'auto_disabled'
+              ? 'auto_disabled'
+              : 'disabled';
+          const channelName = stringValue(row.channel_name);
+          const actualModel = stringValue(row.actual_model);
+          if (!channelName || !actualModel) return null;
+          return {
+            channelId: numberValue(row.channel_id) ?? 0,
+            channelName,
+            status,
+            enabled: row.enabled === true && status === 'active',
+            groups: Array.isArray(row.groups) ? row.groups.map(stringValue).filter(Boolean) : [],
+            actualModel,
+            priority: numberValue(row.priority) ?? 0,
+            weight: numberValue(row.weight) ?? 0,
+            upstreamHost: stringValue(row.upstream_host)
+          };
+        })
+        .filter((route): route is NewApiAdminRoute => route != null);
+      if (items.length) routes[model] = items;
+    }
+
+    const snapshot: NewApiAdminRouteSnapshot = {
+      available: true,
+      fetchedAt: stringValue(payload.fetched_at),
+      routes,
+      error: null
+    };
+    adminRouteCache = { base, at: Date.now(), snapshot };
+    return snapshot;
+  } catch (error) {
+    return {
+      available: false,
+      fetchedAt: '',
+      routes: {},
+      error: String((error as Error).message || error).slice(0, 160)
+    };
+  }
 }
 
 export async function fetchNewApiPricingRules(baseUrl?: string, opts?: { force?: boolean; requireFresh?: boolean }): Promise<NewApiPricingRule[]> {
@@ -755,7 +863,7 @@ export async function submitNewApiImageJob(
 ): Promise<{ taskId: string; imageUrl?: string | null; imageUrls?: string[]; requestId?: string | null }> {
   const isChatImage = params.upstreamModel === 'gpt-image-2-chat';
   if (isChatImage && params.refImageUrls?.length) {
-    throw new ApiError(400, 'VALIDATION_ERROR', '经济 1K 暂不支持参考图');
+    throw new ApiError(400, 'VALIDATION_ERROR', '特价 1K 暂不支持参考图');
   }
   const endpoint = isChatImage ? '/v1/chat/completions' : '/v1/images/generations';
   const body = isChatImage

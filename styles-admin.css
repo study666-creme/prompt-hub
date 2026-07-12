@@ -1116,6 +1116,45 @@ table.admin-table {
   font-size: 11px;
 }
 
+.admin-model-route-cell {
+  min-width: 250px;
+  max-width: 340px;
+  vertical-align: top;
+}
+
+.admin-model-route-head {
+  margin-top: 6px;
+  line-height: 1.45;
+}
+
+.admin-model-route {
+  padding: 8px 0;
+  border-top: 1px solid var(--admin-border);
+  line-height: 1.45;
+}
+
+.admin-model-route.is-disabled {
+  opacity: 0.62;
+}
+
+.admin-model-route:first-of-type {
+  margin-top: 7px;
+}
+
+.admin-model-route__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+
+.admin-model-route__meta {
+  display: block;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
 .admin-model-sort {
   min-width: 88px;
   vertical-align: middle;

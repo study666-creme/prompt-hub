@@ -63,9 +63,9 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   newApi(gim2({
     id: 'image2-economy',
     upstream: 'gpt-image-2-chat',
-    label: '全能模型2 · 经济 1K',
+    label: '全能模型2 · 特价 1K',
     group: 'new',
-    description: '低价文字生图，固定 1K，不支持参考图与尺寸设置',
+    description: '特价文字生图，固定 1K，不支持参考图与尺寸设置',
     upstreamPoints: 0.025,
     refundOnViolation: true,
     resolutions: ['1k'],
