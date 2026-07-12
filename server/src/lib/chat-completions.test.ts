@@ -59,4 +59,28 @@ describe('chat completions tool messages', () => {
     expect(result.toolCalls[0]?.function.name).toBe('canvas_create_text_node');
     expect(result.finishReason).toBe('tool_calls');
   });
+
+  it('serializes object arguments returned by OpenAI-compatible Grok routes', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: null,
+          tool_calls: [{
+            id: 'call_grok',
+            type: 'function',
+            function: { name: 'canvas_get_state', arguments: { includeViewport: true } }
+          }]
+        },
+        finish_reason: 'tool_calls'
+      }]
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    const result = await submitChatCompletions('server-secret', 'https://newapi.example.com', {
+      model: 'grok-4.5',
+      messages: [{ role: 'user', content: 'inspect the canvas' }],
+      tools: [{ type: 'function', function: { name: 'canvas_get_state', parameters: { type: 'object' } } }]
+    });
+
+    expect(result.toolCalls[0]?.function.arguments).toBe('{"includeViewport":true}');
+  });
 });

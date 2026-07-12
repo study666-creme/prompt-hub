@@ -28,6 +28,19 @@ export type ChatCompletionResult = {
   finishReason: string | null;
 };
 
+export function normalizeToolArguments(value: unknown): string {
+  if (value == null || value === '') return '{}';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '{}';
+    }
+  }
+  return String(value);
+}
+
 /** OpenAI 兼容的 /v1/chat/completions（DeepSeek 官方等） */
 export async function submitChatCompletions(
   apiKey: string,
@@ -90,7 +103,7 @@ export async function submitChatCompletions(
         tool_calls?: Array<{
           id?: string;
           type?: string;
-          function?: { name?: string; arguments?: string };
+          function?: { name?: string; arguments?: unknown };
         }>;
       };
       finish_reason?: string;
@@ -105,7 +118,7 @@ export async function submitChatCompletions(
       type: 'function' as const,
       function: {
         name: String(call.function?.name || ''),
-        arguments: String(call.function?.arguments || '{}')
+        arguments: normalizeToolArguments(call.function?.arguments)
       }
     }))
     .filter(call => call.id && call.function.name);
