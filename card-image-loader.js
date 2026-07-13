@@ -204,32 +204,37 @@
       pushRef(creation.mjCompositeUrl);
       if (Array.isArray(creation.mjGridUrls)) creation.mjGridUrls.forEach(pushRef);
     }
-    if (jobId && window.PromptHubApi?.getGenerationImageUrl) {
-      try {
-        const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
-        if (r?.ok && r.data?.url && isReadySrc(r.data.url, img)) return r.data.url;
-      } catch (e) { /* ignore */ }
-    }
     for (const ref of refs) {
       if (!ref) continue;
-      if (wantFull && window.MediaPipeline?.resolvePreviewUrl) {
-        const full = await window.MediaPipeline.resolvePreviewUrl(ref, {
-          assetId: creation.id,
-          cardId: creation.id,
-          jobId: jobId || undefined,
-          useJobImageApi: true,
-          allowGridFallback: true
-        });
-        if (full && isReadySrc(full, img)) return full;
-      }
+      const storageRef = window.SupabaseSync?.isStorageRef?.(ref);
       if (window.MediaPipeline?.resolveListUrl) {
         const list = await window.MediaPipeline.resolveListUrl(ref, {
           assetId: creation.id,
           cardId: creation.id,
           jobId: jobId || undefined,
-          tryAllPaths: true
+          tryAllPaths: true,
+          bypassSignBudget: storageRef
         });
         if (list && isReadySrc(list, img)) return list;
+      }
+      if (storageRef && window.SupabaseSync?.resolvePreviewFullUrl) {
+        const archived = await window.SupabaseSync.resolvePreviewFullUrl(ref, {
+          assetId: creation.id,
+          cardId: creation.id,
+          jobId: jobId || undefined,
+          useJobImageApi: false,
+          allowGridFallback: true
+        });
+        if (archived && isReadySrc(archived, img)) return archived;
+      } else if (wantFull && window.MediaPipeline?.resolvePreviewUrl) {
+        const full = await window.MediaPipeline.resolvePreviewUrl(ref, {
+          assetId: creation.id,
+          cardId: creation.id,
+          jobId: jobId || undefined,
+          useJobImageApi: false,
+          allowGridFallback: true
+        });
+        if (full && isReadySrc(full, img)) return full;
       }
       if (/^https?:\/\//i.test(ref) && !window.SupabaseSync?.isInvalidMediaUrl?.(ref)) {
         if (window.PromptHubApi?.fetchMediaAsBlobUrl) {
@@ -240,6 +245,21 @@
         }
         if (isReadySrc(ref, img)) return ref;
       }
+    }
+    if (jobId && window.PromptHubApi?.getGenerationImageUrl) {
+      try {
+        const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
+        const jobUrl = r?.ok ? r.data?.url : '';
+        if (jobUrl && window.PromptHubApi?.fetchMediaAsBlobUrl) {
+          const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(jobUrl);
+          if (blobUrl && isReadySrc(blobUrl, img)) return blobUrl;
+        }
+        if (
+          jobUrl
+          && !window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(jobUrl)
+          && isReadySrc(jobUrl, img)
+        ) return jobUrl;
+      } catch (e) { /* ignore */ }
     }
     if (window.FeatureDraft?.resolveImageGenFullUrl && wantFull) {
       const feedKey = `cr_${creation.id}`;
