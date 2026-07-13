@@ -10,6 +10,9 @@ SUPABASE_SERVICE_ROLE_KEY=PLACEHOLDER_MEMFIRE_SERVICE_ROLE_KEY
 NEWAPI_API_KEY=
 # Production uses a direct-origin HTTPS host to avoid proxy timeouts on long image requests.
 NEWAPI_API_BASE_URL=https://43-153-201-78.sslip.io
+# Standard GPT Image 2 uses the same GRS channel through its async task API.
+IMAGE_API_BASE_URL=https://api.grsai.ai
+IMAGE_API_KEY=
 NEWAPI_CATALOG_ADMIN_SECRET=
 APIMART_API_KEY=
 APIMART_API_BASE_URL=https://api.apimart.ai

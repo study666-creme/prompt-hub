@@ -881,7 +881,11 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     : [];
 
   const upstream = upstreamBindingsFromEnv(c.env);
-  const lineProvider = resolved.provider;
+  // GRS exposes a true async task API. Keep New API catalog pricing, but submit
+  // standard GPT Image 2 directly so Workers never wait on a long sync response.
+  const lineProvider = resolved.provider === 'newapi' && resolved.upstream === 'gpt-image-2'
+    ? 'grsai'
+    : resolved.provider;
   if (hasAnyImageUpstream(upstream) && !isProviderConfigured(upstream, lineProvider)) {
     throw new ApiError(
       503,
@@ -994,7 +998,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   /** 上游同步提交易超 CF 请求时限；改后台提交后立即返回 jobId。 */
   if (
     hasAnyImageUpstream(upstream)
-    && (lineProvider === 'apimart' || lineProvider === 'newapi')
+    && (lineProvider === 'grsai' || lineProvider === 'apimart' || lineProvider === 'newapi')
     && isProviderConfigured(upstream, lineProvider)
   ) {
     const useDurableQueue = lineProvider === 'newapi' && !!c.env.IMAGE_GENERATION_QUEUE;

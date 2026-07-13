@@ -10,6 +10,7 @@ CORS_ORIGINS = "https://prompt-hubs.com,https://www.prompt-hubs.com,https://canv
 CHAT_API_BASE_URL = "https://api.deepseek.com"
 CHAT_MODEL = "deepseek-chat"
 NEWAPI_API_BASE_URL = "https://43-153-201-78.sslip.io"
+IMAGE_API_BASE_URL = "https://api.grsai.ai"
 REVERSE_VISION_MODEL = "gemini-2.5-flash-lite"
 FISSION_VISION_MODEL = "gemini-2.5-flash"
 FISSION_CHAT_MODEL = "deepseek-v4-pro"
