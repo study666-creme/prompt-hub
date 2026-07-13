@@ -638,8 +638,8 @@ function pricingCandidates(upstreamModel: string, resolution?: string | null): s
   if (!res) return [model];
   const withoutRes = model.replace(/-(?:1k|2k|4k)$/i, '');
   const candidates = [
-    `${withoutRes}-${res}`,
     model,
+    `${withoutRes}-${res}`,
     withoutRes
   ];
   return [...new Set(candidates)];
@@ -651,7 +651,9 @@ export function newApiCreditsForModel(
   resolution?: string | null
 ): number | null {
   const candidates = pricingCandidates(upstreamModel, resolution).map((m) => m.toLowerCase());
-  const exact = rules.find((r) => candidates.includes(r.model.toLowerCase()));
+  const exact = candidates
+    .map(candidate => rules.find(rule => rule.model.toLowerCase() === candidate))
+    .find((rule): rule is NewApiPricingRule => !!rule);
   const res = normalizedResolution(resolution);
   if (exact && res && exact.creditsByResolution?.[res] != null) {
     return exact.creditsByResolution[res] ?? null;
@@ -873,27 +875,34 @@ export async function submitNewApiImageJob(
         stream: false
       }
     : buildNewApiImageRequestBody(params);
-  const res = await fetch(`${apiBase(baseUrl)}${endpoint}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  });
-
+  let res: Response | null = null;
   let json: unknown = {};
-  try {
-    json = await res.json();
-  } catch {
-    json = {};
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    res = await fetch(`${apiBase(baseUrl)}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    try {
+      json = await res.json();
+    } catch {
+      json = {};
+    }
+    const message = pickErrorMessage(json, res.status);
+    if (res.ok || !/excessive system load/i.test(message) || attempt > 0) break;
+    await new Promise(resolve => setTimeout(resolve, 5000));
   }
 
-  if (!res.ok) {
+  if (!res?.ok) {
+    const status = res?.status || 502;
     throw new ApiError(
-      res.status >= 500 ? 502 : res.status,
+      status >= 500 ? 502 : status,
       'UPSTREAM_ERROR',
-      pickErrorMessage(json, res.status)
+      pickErrorMessage(json, status)
     );
   }
 

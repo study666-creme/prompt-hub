@@ -226,6 +226,35 @@ describe('newapi image upstream', () => {
     })).rejects.toThrow('model catalog 502');
   });
 
+  it('prefers the exact standard image price over a resolution-suffixed special model', () => {
+    expect(newApiCreditsForModel([
+      { model: 'gpt-image-2-1k', credits: 2, description: null, tags: '', label: 'special', modality: 'image', parameters: [] },
+      { model: 'gpt-image-2', credits: 5.5, description: null, tags: '', label: 'standard', modality: 'image', parameters: [] }
+    ], 'gpt-image-2', '1k')).toBe(5.5);
+  });
+
+  it('retries one transient excessive-load image response', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: { message: 'excessive system load' } }, 400))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ url: 'https://image.test/retry.png' }] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const resultPromise = submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
+      upstreamModel: 'gpt-image-2',
+      prompt: 'apple',
+      resolution: '1k',
+      quality: 'standard'
+    });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+    vi.useRealTimers();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.imageUrl).toBe('https://image.test/retry.png');
+  });
+
   it('extracts an immediate image response from compatible generation API', async () => {
     const fetchMock = vi.fn(async (_url, init) => {
       const body = JSON.parse(String((init as RequestInit).body || '{}')) as Record<string, unknown>;
