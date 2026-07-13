@@ -427,6 +427,30 @@
   line-height: 1.55;
 }
 
+.imagegen-feed-syncing {
+  gap: 12px;
+}
+
+.imagegen-feed-sync-spinner {
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid color-mix(in srgb, var(--text-muted) 28%, transparent);
+  border-top-color: var(--text-primary);
+  border-radius: 50%;
+  animation: imageGenFeedSyncSpin 0.8s linear infinite;
+}
+
+@keyframes imageGenFeedSyncSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imagegen-feed-sync-spinner {
+    animation: none;
+    border-color: var(--text-muted);
+  }
+}
+
 .imagegen-feed-card {
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);

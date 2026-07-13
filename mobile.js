@@ -183,9 +183,26 @@
       });
     }
     if (v === 'feed') {
-      void window.FeatureDraft?.resumePendingGenerationJobs?.().then(() => {
-        const preserve = wasFeed || !opts?.scrollToTop;
-        window.FeatureDraft?.renderImageGenFeed?.({ preserveScroll: preserve, force: !wasFeed });
+      const feed = document.getElementById('imageGenFeed');
+      const hadCards = !!feed?.querySelector('.imagegen-feed-card');
+      const preserve = wasFeed || !opts?.scrollToTop;
+      const syncPromise = window.FeatureDraft?.syncRecentCreationsFromServer?.({
+        force: !wasFeed,
+        render: false
+      });
+      window.FeatureDraft?.renderImageGenFeed?.({
+        preserveScroll: preserve,
+        force: !hadCards && !wasFeed,
+        recentSyncing: !hadCards
+      });
+      void Promise.all([
+        window.FeatureDraft?.resumePendingGenerationJobs?.(),
+        syncPromise
+      ]).then(([, syncResult]) => {
+        window.FeatureDraft?.renderImageGenFeed?.({
+          preserveScroll: preserve,
+          force: !hadCards && !syncResult?.changed
+        });
         resetMobilePageScroll('imagegen');
         scheduleMobileImageBoostBurst();
       });

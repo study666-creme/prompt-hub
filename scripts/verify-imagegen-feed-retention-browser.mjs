@@ -33,14 +33,15 @@ try {
 
   await page.evaluate((image) => {
     const state = {
-      creations: [{
+      creations: [],
+      initialCreation: {
         id: 'existing',
         prompt: 'existing image',
         image,
         model: 'image2-economy',
         modelLabel: 'Special 1K',
         createdAt: Date.now()
-      }],
+      },
       pending: [],
       failed: []
     };
@@ -91,7 +92,13 @@ try {
     });
   }, imageDataUrl);
 
-  await page.evaluate(() => window.__feedApi.renderImageGenFeed({ force: true }));
+  await page.evaluate(() => window.__feedApi.renderImageGenFeed({ force: true, recentSyncing: true }));
+  await page.waitForSelector('.imagegen-feed-syncing[role="status"]');
+  await page.evaluate(() => {
+    window.__feedState.creations = [window.__feedState.initialCreation];
+    window.__feedApi.renderImageGenFeed({ preserveScroll: true });
+  });
+  await page.waitForFunction(() => !document.querySelector('.imagegen-feed-empty-wrap'));
   try {
     await page.waitForFunction(() => {
       const img = document.querySelector('[data-feed-id="cr_existing"] img');

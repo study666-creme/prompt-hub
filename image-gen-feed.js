@@ -1148,6 +1148,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           const newCard = temp.firstElementChild;
           if (newCard) {
             newCard.classList.add('imagegen-feed-card--just-added');
+            wrap.querySelector('.imagegen-feed-empty-wrap')?.remove();
             const firstWh = wrap.querySelector('.imagegen-feed-card[data-feed-id^="cr_"]');
             wrap.insertBefore(newCard, firstWh || wrap.querySelector('.grid-sizer') || wrap.firstChild);
             bindImageGenFeedCardEvents(wrap, [newCard]);
@@ -1201,7 +1202,9 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
             if (fresh) list = fresh.slice(0, imageGenFeedRenderedCount(store));
           }
           if (!pending.length && !failed.length && !list.length) {
-            html = `<div class="imagegen-feed-empty-wrap"><p class="imagegen-feed-empty">暂无最近生成<span class="imagegen-feed-empty-hint">生图成功后会出现在这里 · 保留 7 天 · 仅未存入库的到期自动清理</span></p></div>`;
+            html = opts.recentSyncing
+              ? `<div class="imagegen-feed-empty-wrap imagegen-feed-syncing" role="status" aria-live="polite"><span class="imagegen-feed-sync-spinner" aria-hidden="true"></span><p class="imagegen-feed-empty">正在同步最近生成…</p></div>`
+              : `<div class="imagegen-feed-empty-wrap"><p class="imagegen-feed-empty">暂无最近生成<span class="imagegen-feed-empty-hint">生图成功后会出现在这里 · 保留 7 天 · 仅未存入库的到期自动清理</span></p></div>`;
           } else {
             html = pending.map((j) => buildFeedPendingCardHtml(j)).join('')
               + failed.map((j) => buildFeedFailedCardHtml(j)).join('')

@@ -666,6 +666,7 @@
     enforceMobileCommunityFeedGrid,
     closeImageGenFilterSheet,
     renderImageGenFeed,
+    syncRecentCreationsFromServer,
     renderImageGenMobileResult,
     prunePendingGenJobsFromWarehouse: () => {
       prunePendingJobsWithCreations();
