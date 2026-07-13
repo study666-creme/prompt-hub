@@ -204,7 +204,7 @@
       }
       if (pendingId && idx === 1) d().removePendingJob(pendingId);
       d().prunePendingJobsWithCreations?.();
-      d().renderImageGenFeed({ preserveScroll: true, force: true });
+      d().renderImageGenFeed({ preserveScroll: true });
       d().renderImageGenMobileResult?.();
 
       if (!isRecovery && !silentToast && idx === 1) {

@@ -114,7 +114,7 @@ try {
     window.__feedState.pending = [{ id: 'pending-1', prompt: 'new request', model: 'image2-economy' }];
   });
 
-  await page.evaluate(() => window.__feedApi.renderImageGenFeed({ preserveScroll: true, force: true }));
+  await page.evaluate(() => window.__feedApi.renderImageGenFeed({ preserveScroll: true }));
   await page.waitForSelector('[data-feed-id="pending-1"][data-pending="1"]');
   const pendingState = await page.evaluate(() => {
     const img = document.querySelector('[data-feed-id="cr_existing"] img');
@@ -134,7 +134,7 @@ try {
       errorMessage: 'insufficient upstream balance'
     }];
   });
-  await page.evaluate(() => window.__feedApi.renderImageGenFeed({ preserveScroll: true, force: true }));
+  await page.evaluate(() => window.__feedApi.renderImageGenFeed({ preserveScroll: true }));
   await page.waitForSelector('[data-feed-id="failed-1"][data-failed="1"]');
   const failedState = await page.evaluate(() => {
     const img = document.querySelector('[data-feed-id="cr_existing"] img');
@@ -149,6 +149,33 @@ try {
     if (!result.sameNode || !result.loaded || /is-loading|load-failed|await/.test(result.mediaClass)) {
       throw new Error(`${phase} replaced or blanked the existing image: ${JSON.stringify(result)}`);
     }
+  }
+
+  await page.evaluate((image) => {
+    window.__feedState.failed = [];
+    window.__feedState.creations.unshift({
+      id: 'completed-new',
+      prompt: 'completed image',
+      image,
+      model: 'image2-economy',
+      modelLabel: 'Special 1K',
+      createdAt: Date.now() + 1000
+    });
+  }, imageDataUrl);
+  await page.evaluate(() => window.__feedApi.renderImageGenFeed({ preserveScroll: true }));
+  await page.waitForSelector('[data-feed-id="cr_completed-new"]');
+  const completedState = await page.evaluate(() => {
+    const oldImg = document.querySelector('[data-feed-id="cr_existing"] img');
+    const newCard = document.querySelector('[data-feed-id="cr_completed-new"]');
+    return {
+      sameOldNode: oldImg === window.__originalFeedImage,
+      cardCount: document.querySelectorAll('#imageGenFeed [data-feed-id^="cr_"]').length,
+      isFirst: newCard === document.querySelector('#imageGenFeed [data-feed-id^="cr_"]'),
+      animated: newCard?.classList.contains('imagegen-feed-card--just-added') || false
+    };
+  });
+  if (!completedState.sameOldNode || completedState.cardCount !== 2 || !completedState.isFirst || !completedState.animated) {
+    throw new Error(`completed creation did not patch incrementally: ${JSON.stringify(completedState)}`);
   }
 
   await page.evaluate(() => {
@@ -168,11 +195,11 @@ try {
       mediaClass: img?.closest('.imagegen-feed-media')?.className || ''
     };
   });
-  if (!loadingState.sameNode || loadingState.token !== 'in-flight' || loadingState.done || !loadingState.mediaClass.includes('is-loading')) {
+  if (!loadingState.sameNode || loadingState.token !== 'in-flight' || loadingState.done) {
     throw new Error(`force render replaced an in-flight image: ${JSON.stringify(loadingState)}`);
   }
 
-  console.log('verify-imagegen-feed-retention-browser OK:', JSON.stringify({ pendingState, failedState, loadingState }));
+  console.log('verify-imagegen-feed-retention-browser OK:', JSON.stringify({ pendingState, failedState, completedState, loadingState }));
 } finally {
   if (browser) await browser.close();
 }

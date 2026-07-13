@@ -1147,9 +1147,13 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           temp.innerHTML = creationToFeedHtml(prependedCard);
           const newCard = temp.firstElementChild;
           if (newCard) {
+            newCard.classList.add('imagegen-feed-card--just-added');
             const firstWh = wrap.querySelector('.imagegen-feed-card[data-feed-id^="cr_"]');
             wrap.insertBefore(newCard, firstWh || wrap.querySelector('.grid-sizer') || wrap.firstChild);
             bindImageGenFeedCardEvents(wrap, [newCard]);
+            newCard.addEventListener('animationend', () => {
+              newCard.classList.remove('imagegen-feed-card--just-added');
+            }, { once: true });
           }
           bindImageGenFeedImageRelayout();
           if (scrollState) wrap.__phIgPendingScrollState = scrollState;

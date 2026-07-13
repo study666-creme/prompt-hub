@@ -90,7 +90,7 @@
     const msg = friendlyGenErrorMessage(errRaw);
     failPendingJob(pendingId, msg);
     await window.PointsSystem?.refreshCreditsFromServer?.();
-    renderImageGenFeed({ preserveScroll: true, force: true });
+    renderImageGenFeed({ preserveScroll: true });
     if (!ctx?.silentToast) toastGenFailure(ctx, msg);
   }
   function genJobPollDelayMs(ctx, attemptIndex) { return ge('genJobPollDelayMs', ctx, attemptIndex) ?? 5500; }

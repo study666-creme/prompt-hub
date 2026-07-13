@@ -60,6 +60,8 @@
     }
     if (singleRun && btn) {
       btn.disabled = true;
+      btn.classList.add('is-submitting');
+      btn.setAttribute('aria-busy', 'true');
       btn.textContent = '准备中…';
     }
 
@@ -70,6 +72,8 @@
       submitUiReleased = true;
       if (btn) {
         btn.disabled = false;
+        btn.classList.remove('is-submitting');
+        btn.removeAttribute('aria-busy');
         d().restoreImageGenSubmitLabel();
       }
     };

@@ -85,7 +85,7 @@
     removePendingJob(pending.id);
     persistPendingGenJobs();
     if (opts.toast !== false && reason) d().toast(reason, 5000);
-    d().renderImageGenFeed({ preserveScroll: true, force: true });
+    d().renderImageGenFeed({ preserveScroll: true });
   }
 
   function deferPendingJobRecovery(pendingId, ctx, note) {
@@ -296,7 +296,7 @@
     window.addEventListener('pageshow', () => {
       loadPendingGenJobs();
       if (pendingList().length > 0) {
-        d().renderImageGenFeed({ preserveScroll: true, force: true });
+        d().renderImageGenFeed({ preserveScroll: true });
         d().renderImageGenMobileResult();
       }
       scheduleGenJobsSync(200);
@@ -372,7 +372,7 @@
     const msg = ge('friendlyGenErrorMessage', errRaw);
     failPendingJob(pendingId, msg);
     await window.PointsSystem?.refreshCreditsFromServer?.();
-    d().renderImageGenFeed({ preserveScroll: true, force: true });
+    d().renderImageGenFeed({ preserveScroll: true });
     if (!ctx?.silentToast) toastGenFailure(ctx, msg);
   }
 
@@ -392,7 +392,7 @@
       scheduleImageGenPendingUiRefresh();
       return;
     }
-    d().renderImageGenFeed({ preserveScroll: true, force: true });
+    d().renderImageGenFeed({ preserveScroll: true });
   }
 
   async function pollGenerationJobUntilDone(jobId, pendingId, ctx) {
@@ -453,7 +453,7 @@
       const msg = ge('friendlyGenErrorMessage', errRaw);
       failPendingJob(pendingId, msg);
       await window.PointsSystem?.refreshCreditsFromServer?.();
-      d().renderImageGenFeed({ preserveScroll: true, force: true });
+      d().renderImageGenFeed({ preserveScroll: true });
       toastGenFailure(ctx, msg);
       return true;
     };
@@ -542,7 +542,7 @@
 
     d().toast('生图时间较长，正在恢复本次任务…');
     void resumePendingGenerationJobs();
-    d().renderImageGenFeed({ preserveScroll: true, force: true });
+    d().renderImageGenFeed({ preserveScroll: true });
     } finally {
       activePollJobIds.delete(jobId);
     }
@@ -621,7 +621,7 @@
         }
         window.refreshWarehouseUI?.();
       }
-      if (changed) d().renderImageGenFeed({ preserveScroll: true, force: true });
+      if (changed) d().renderImageGenFeed({ preserveScroll: true });
       return { ok: true, recovered };
     }
 
@@ -702,7 +702,7 @@
       );
     }
 
-    if (changed) d().renderImageGenFeed({ preserveScroll: true, force: true });
+    if (changed) d().renderImageGenFeed({ preserveScroll: true });
   }
 
   /** —— 任务恢复 / resume（自 features-draft 拆出）—— */
@@ -1049,7 +1049,7 @@
     if (hasCreationForJob(jobId)) {
       removePendingJob(pending.id);
       clearSessionGenJob(jobId);
-      d().renderImageGenFeed({ preserveScroll: true, force: true });
+      d().renderImageGenFeed({ preserveScroll: true });
       return true;
     }
     try {
@@ -1894,7 +1894,7 @@
       }
       if (changed) {
         persistPendingGenJobs();
-        d().renderImageGenFeed({ preserveScroll: true, force: true });
+        d().renderImageGenFeed({ preserveScroll: true });
       }
 
       return changed;

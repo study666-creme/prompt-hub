@@ -92,7 +92,7 @@
       const changed = mergeRecentCreationsFromServer(res.data?.jobs || []);
       pruneCreations();
       if (changed && opts.render !== false && document.getElementById('pageImageGen')?.classList.contains('active')) {
-        renderImageGenFeed({ preserveScroll: true, force: true });
+        renderImageGenFeed({ preserveScroll: true });
         updateImageGenFeedHint();
       }
       return { ok: true, changed };
@@ -189,7 +189,7 @@
       }
       if (repaired > 0) {
         persistCreations();
-        renderImageGenFeed({ preserveScroll: true, force: true });
+        renderImageGenFeed({ preserveScroll: true });
       }
       return { ok: true, repaired };
     })().finally(() => { recentCreationRepairInflight = null; });
@@ -424,7 +424,7 @@
     persistCreations();
     toast('已存入卡片库');
     if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-      renderImageGenFeed({ preserveScroll: true, force: true });
+      renderImageGenFeed({ preserveScroll: true });
     }
     return true;
   }

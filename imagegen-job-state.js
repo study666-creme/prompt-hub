@@ -103,7 +103,7 @@
     function afterGenJobsResume(changed) {
       if (!changed) return;
       if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-        d().renderImageGenFeed?.({ preserveScroll: true, force: true });
+        d().renderImageGenFeed?.({ preserveScroll: true });
         d().renderImageGenMobileResult?.();
       } else {
         global.refreshWarehouseUI?.();
@@ -116,7 +116,7 @@
       clearTimeout(scheduleImageGenPendingUiRefresh._t);
       scheduleImageGenPendingUiRefresh._t = setTimeout(() => {
         if (global.ImageGenFeed?.patchImageGenFeedPendingOnly?.()) return;
-        d().renderImageGenFeed?.({ preserveScroll: true, force: true });
+        d().renderImageGenFeed?.({ preserveScroll: true });
       }, 480);
     }
 
