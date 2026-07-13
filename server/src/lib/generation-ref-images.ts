@@ -8,7 +8,7 @@ import {
   buildPrivateMediaCdnUrl,
   resolveStoragePath
 } from './media-cdn';
-import { downloadCardImage, uploadCardImage } from './r2-storage';
+import { downloadCardImage, hasR2, mediaStorageMode, uploadCardImage } from './r2-storage';
 
 const BUCKET = 'card-images';
 const MAX_REF_BYTES = 8 * 1024 * 1024;
@@ -105,14 +105,16 @@ async function uploadDataUrlRef(
   const { bytes, mime, ext } = parseDataUrl(dataUrl);
   const path = `${userId}/imagegen/${crypto.randomUUID()}.${ext}`;
   const blob = new Blob([bytes], { type: mime });
-  const { error } = await admin.storage.from(BUCKET).upload(path, bytes, {
-    contentType: mime,
-    upsert: true
-  });
-  if (error) {
-    throw new ApiError(502, 'GENERATION_FAILED', `参考图上传失败：${error.message.slice(0, 120)}`);
+  try {
+    await uploadCardImage(c.env, path, blob, mime);
+  } catch (error) {
+    const message = String((error as Error)?.message || error || '');
+    const r2IsPrimary = hasR2(c.env) && mediaStorageMode(c.env) !== 'supabase';
+    if (!r2IsPrimary || !/bucket not found/i.test(message)) {
+      throw new ApiError(502, 'GENERATION_FAILED', `参考图上传失败：${message.slice(0, 120)}`);
+    }
+    console.warn('[generation-ref] MemFire mirror bucket missing; using uploaded R2 copy', path);
   }
-  await uploadCardImage(c.env, path, blob, mime);
   return ensureUpstreamRefUrl(c, admin, userId, path);
 }
 

@@ -682,6 +682,13 @@ function assertSupportedImageParameters(
   }
   const referenceCount = (data.refImageUrls?.length || 0) + (data.refImageUrl ? 1 : 0);
   if (!referenceCount) return;
+  if (model.upstream === 'gpt-image-2-chat') {
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      '全能模型2 · 特价 1K 暂不支持参考图，请切换到支持参考图的模型'
+    );
+  }
   const imageParameter = rule?.parameters.find(parameter => parameter.name === 'images');
   const singleImageParameter = rule?.parameters.find(parameter => parameter.name === 'image');
   if (rule && !imageParameter && !singleImageParameter) {
