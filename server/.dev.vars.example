@@ -8,7 +8,8 @@ SUPABASE_SERVICE_ROLE_KEY=PLACEHOLDER_MEMFIRE_SERVICE_ROLE_KEY
 # 当前图片模型：New API 提供全能模型2/香蕉，Apimart 提供 MJ。
 # 不要把这些密钥放进前端配置。
 NEWAPI_API_KEY=
-NEWAPI_API_BASE_URL=https://newapi.prompt-hubs.com
+# Production uses a direct-origin HTTPS host to avoid proxy timeouts on long image requests.
+NEWAPI_API_BASE_URL=https://43-153-201-78.sslip.io
 NEWAPI_CATALOG_ADMIN_SECRET=
 APIMART_API_KEY=
 APIMART_API_BASE_URL=https://api.apimart.ai
