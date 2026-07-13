@@ -199,7 +199,7 @@
 
       if (useApi) {
         const refSources = submittedRefImages;
-        const refUrls = await d().resolveRefUrlsFromList(refSources);
+        const refUrls = await d().resolveRefUrlsFromList(refSources, submittedReferenceAssets);
         if (refSources.length && refUrls.length < refSources.length && !batchOpts.silentToast) {
           d().toast(`已使用 ${refUrls.length}/${refSources.length} 张参考图继续生成`);
         }

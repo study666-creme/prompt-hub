@@ -18,17 +18,24 @@
     return false;
   }
 
-  async function resolveRefUrlsFromList(sources) {
+  async function resolveRefUrlsFromList(sources, referenceAssets) {
     const list = Array.isArray(sources) ? sources.filter(Boolean) : [];
+    const assets = Array.isArray(referenceAssets) ? referenceAssets : [];
     if (!list.length) return [];
     const timeoutMs = d().getRefResolveTimeoutMs?.() ?? 8000;
     const maxSide = d().getRefMaxSide?.() ?? 2560;
     const urls = [];
     for (let i = 0; i < list.length; i += 1) {
       const src = list[i];
+      const asset = assets.find((a) => a && (a.ref === src || a.imageRef === src)) || assets[i] || {};
       try {
         let apiUrl = null;
         const resolveOne = (async () => {
+          const sourceJobId = String(asset.jobId || '').replace(/#\d+$/, '');
+          if (sourceJobId && global.PromptHubApi?.getGenerationImageUrl) {
+            const jobImage = await global.PromptHubApi.getGenerationImageUrl(sourceJobId);
+            if (isUsableGenRefUrl(jobImage?.data?.url)) return jobImage.data.url;
+          }
           if (/^https?:\/\//i.test(src)) {
             if (global.SupabaseSync?.isInvalidMediaUrl?.(src) && global.SupabaseSync?.normalizeImageRef) {
               const fixed = global.SupabaseSync.normalizeImageRef(src);

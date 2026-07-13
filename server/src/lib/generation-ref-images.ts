@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Env } from '../env';
 import { ApiError } from './errors';
-import { isStorageRef, storagePathFromRef } from './image-archive';
+import { generationStorageAssetId, isStorageRef, storagePathFromRef } from './image-archive';
 import {
   apiOriginFromRequest,
   buildPrivateMediaCdnUrl,
@@ -96,6 +96,37 @@ async function ensureUpstreamRefUrl(
   return buildPrivateMediaCdnUrl(c, upstreamPath);
 }
 
+async function resolveArchivedJobRefUrl(
+  c: Context<{ Bindings: Env }>,
+  admin: SupabaseClient,
+  userId: string,
+  remoteUrl: string
+): Promise<string | null> {
+  const { data: jobs, error } = await admin
+    .from('generation_requests')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('status', 'completed')
+    .eq('result_image_url', remoteUrl)
+    .order('completed_at', { ascending: false })
+    .limit(5);
+  if (error || !jobs?.length) return null;
+
+  for (const job of jobs) {
+    const assetId = generationStorageAssetId(String(job.id || ''));
+    if (!assetId) continue;
+    for (const ext of ['png', 'jpg', 'webp']) {
+      const path = `${userId}/generated/${assetId}.${ext}`;
+      const blob = await downloadRefBlob(c, admin, path);
+      if (!blob) continue;
+      const upstreamPath = `${userId}/imagegen/upstream/${crypto.randomUUID()}.${ext}`;
+      await uploadCardImage(c.env, upstreamPath, blob, contentTypeForExt(ext));
+      return buildPrivateMediaCdnUrl(c, upstreamPath);
+    }
+  }
+  return null;
+}
+
 async function uploadDataUrlRef(
   c: Context<{ Bindings: Env }>,
   admin: SupabaseClient,
@@ -143,6 +174,11 @@ export async function resolveGenerationRefUrls(
       const path = resolveStoragePath(ref);
       if (path && isOwnMediaUrl(ref, origin)) {
         out.push(await resolvePathToUpstreamUrl(c, admin, userId, path));
+        continue;
+      }
+      const archived = await resolveArchivedJobRefUrl(c, admin, userId, ref);
+      if (archived) {
+        out.push(archived);
         continue;
       }
       out.push(ref);

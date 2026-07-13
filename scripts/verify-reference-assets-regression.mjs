@@ -9,6 +9,7 @@ const files = new Map([
   ['feed', read('image-gen-feed.js')],
   ['feed-cards', read('image-gen-feed-cards.js')],
   ['ref-ui', read('imagegen-ref-ui.js')],
+  ['ref-resolve', read('imagegen-ref-resolve.js')],
   ['submit', read('imagegen-submit.js')],
   ['finish-run', read('imagegen-finish-run.js')],
   ['job-runner', read('imagegen-job-runner.js')],
@@ -52,7 +53,19 @@ checkTokens('submit', [
   'referenceAssets: d().getImageGenReferenceAssets?.() || []',
   'const submittedReferenceAssets = batchOpts.skipRefImages',
   ': normalizeReferenceAssets(',
-  'referenceAssets: submittedReferenceAssets.length ? submittedReferenceAssets : null'
+  'referenceAssets: submittedReferenceAssets.length ? submittedReferenceAssets : null',
+  'resolveRefUrlsFromList(refSources, submittedReferenceAssets)'
+]);
+
+checkTokens('ref-resolve', [
+  'async function resolveRefUrlsFromList(sources, referenceAssets)',
+  'const sourceJobId = String(asset.jobId ||',
+  'getGenerationImageUrl(sourceJobId)'
+]);
+
+checkTokens('feed-cards', [
+  'refImage: image,',
+  'refImages: image ? [image] : null'
 ]);
 
 checkTokens('finish-run', [
