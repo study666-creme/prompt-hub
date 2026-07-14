@@ -800,7 +800,7 @@
       if (el) el.hidden = hideQuality;
     }
     const refBlock = document.querySelector('.imagegen-ref-block');
-    if (refBlock) refBlock.hidden = isEconomy;
+    if (refBlock) refBlock.hidden = false;
     if (isMj) {
       updateImageGenSizeSelect();
       syncImageGenMjModeUI();

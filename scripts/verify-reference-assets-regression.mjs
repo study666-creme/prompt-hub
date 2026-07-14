@@ -96,7 +96,9 @@ checkTokens('part-10', [
 
 checkTokens('part-11', [
   'referenceAssets: getImageGenReferenceAssets()',
-  'setImageGenRefs(refs.slice(0, max), { referenceAssets: assets.slice(0, max) })'
+  'setImageGenRefs(refs.slice(0, max), { referenceAssets: assets.slice(0, max) })',
+  "if (normalizeImageGenModelId(getImageGenModel()) === 'image2-economy') return 4;",
+  'if (refBlock) refBlock.hidden = false;'
 ]);
 
 checkTokens('part-12', [
