@@ -69,9 +69,14 @@ const METRIC_PREFIX = 'monitor:v1:hour:';
 const METRIC_TTL_SECONDS = 60 * 60 * 72;
 const MAX_ROUTE_KEYS = 80;
 const MAX_RECENT_EVENTS = 40;
-const HEALTHY_REQUEST_SAMPLE_RATE = 0.02;
-const HEALTHY_MEDIA_SAMPLE_RATE = 0.01;
-const CLIENT_ERROR_SAMPLE_RATE = 0.1;
+const HEALTHY_REQUEST_SAMPLE_RATE = 0.005;
+const HEALTHY_MEDIA_SAMPLE_RATE = 0.0025;
+const CLIENT_ERROR_SAMPLE_RATE = 0.02;
+const SERVER_ERROR_SAMPLE_RATE = 0.1;
+const MEDIA_NOT_FOUND_SAMPLE_RATE = 0.1;
+const METRIC_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
+
+let metricWriteCooldownUntil = 0;
 
 function hasMetricsKv(env: Env) {
   return !!env.PROMPT_HUB_METRICS;
@@ -178,7 +183,8 @@ function isMediaPath(pathname: string, route: string) {
 }
 
 function metricSampleRate(request: Request, status: number, path: string, isMedia: boolean) {
-  if (status >= 500) return 1;
+  if (status >= 500) return SERVER_ERROR_SAMPLE_RATE;
+  if (status === 404 && isMedia) return MEDIA_NOT_FOUND_SAMPLE_RATE;
   if (status >= 400) return CLIENT_ERROR_SAMPLE_RATE;
   if (request.method === 'OPTIONS' || path === '/health') return 0;
   return isMedia ? HEALTHY_MEDIA_SAMPLE_RATE : HEALTHY_REQUEST_SAMPLE_RATE;
@@ -240,6 +246,7 @@ export async function recordRequestMetric(
   opts?: { message?: string }
 ): Promise<void> {
   if (!hasMetricsKv(env)) return;
+  if (Date.now() < metricWriteCooldownUntil) return;
   try {
     const now = new Date();
     const ts = now.toISOString();
@@ -301,6 +308,7 @@ export async function recordRequestMetric(
       expirationTtl: METRIC_TTL_SECONDS
     });
   } catch (e) {
+    metricWriteCooldownUntil = Date.now() + METRIC_FAILURE_COOLDOWN_MS;
     console.warn('[monitoring] failed to record request metric', e);
   }
 }
