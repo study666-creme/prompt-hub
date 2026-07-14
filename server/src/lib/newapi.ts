@@ -23,6 +23,8 @@ type SubmitParams = {
   catalogParameters?: NewApiCatalogParameter[];
 };
 
+export const NEWAPI_CHAT_IMAGE_REF_LIMIT = 4;
+
 export type NewApiPricingRule = {
   model: string;
   credits: number;
@@ -858,20 +860,32 @@ function extractChatImageUrls(payload: unknown): string[] {
   return urls;
 }
 
+function buildChatImageMessages(prompt: string, refImageUrls?: string[]): Array<Record<string, unknown>> {
+  const refs = (refImageUrls || []).filter(Boolean).slice(0, NEWAPI_CHAT_IMAGE_REF_LIMIT);
+  if (!refs.length) return [{ role: 'user', content: prompt }];
+  return [{
+    role: 'user',
+    content: [
+      { type: 'text', text: prompt },
+      ...refs.map(url => ({
+        type: 'image_url',
+        image_url: { url }
+      }))
+    ]
+  }];
+}
+
 export async function submitNewApiImageJob(
   apiKey: string,
   baseUrl: string | undefined,
   params: SubmitParams
 ): Promise<{ taskId: string; imageUrl?: string | null; imageUrls?: string[]; requestId?: string | null }> {
   const isChatImage = params.upstreamModel === 'gpt-image-2-chat';
-  if (isChatImage && params.refImageUrls?.length) {
-    throw new ApiError(400, 'VALIDATION_ERROR', '特价 1K 暂不支持参考图');
-  }
   const endpoint = isChatImage ? '/v1/chat/completions' : '/v1/images/generations';
   const body = isChatImage
     ? {
         model: params.upstreamModel,
-        messages: [{ role: 'user', content: params.prompt }],
+        messages: buildChatImageMessages(params.prompt, params.refImageUrls),
         stream: false
       }
     : buildNewApiImageRequestBody(params);

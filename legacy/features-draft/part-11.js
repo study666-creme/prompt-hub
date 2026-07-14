@@ -687,7 +687,7 @@
   }
 
   function getImageGenMaxRefImages() {
-    if (normalizeImageGenModelId(getImageGenModel()) === 'image2-economy') return 0;
+    if (normalizeImageGenModelId(getImageGenModel()) === 'image2-economy') return 4;
     if (isImageGenMidjourneyModel(getImageGenModel())) {
       return getImageGenMjMode() === 'blend' ? 5 : 4;
     }
@@ -720,7 +720,7 @@
     if (refs.length <= max) return;
     const assets = getImageGenReferenceAssets();
     setImageGenRefs(refs.slice(0, max), { referenceAssets: assets.slice(0, max) });
-    toast(`Midjourney 参考图最多 ${max} 张，已保留前 ${max} 张`);
+    toast(`当前模型参考图最多 ${max} 张，已保留前 ${max} 张`);
   }
 
   function syncImageGenMjToggleCheckedClasses() {

@@ -312,6 +312,48 @@ describe('newapi image upstream', () => {
     expect(result.imageUrl).toBe('https://image.test/chat.png');
   });
 
+  it('submits economical image references through chat completions', async () => {
+    const fetchMock = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String((init as RequestInit).body || '{}')) as Record<string, unknown>;
+      expect(body).toEqual({
+        model: 'gpt-image-2-chat',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: 'turn it into a product shot' },
+            { type: 'image_url', image_url: { url: 'https://ref.test/a.png' } },
+            { type: 'image_url', image_url: { url: 'https://ref.test/b.png' } },
+            { type: 'image_url', image_url: { url: 'https://ref.test/c.png' } },
+            { type: 'image_url', image_url: { url: 'https://ref.test/d.png' } }
+          ]
+        }],
+        stream: false
+      });
+      return jsonResponse({
+        choices: [{ message: { content: '![result](https://image.test/chat-ref.png)' } }]
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
+      upstreamModel: 'gpt-image-2-chat',
+      prompt: 'turn it into a product shot',
+      resolution: '1k',
+      quality: 'standard',
+      refImageUrls: [
+        'https://ref.test/a.png',
+        'https://ref.test/b.png',
+        'https://ref.test/c.png',
+        'https://ref.test/d.png',
+        'https://ref.test/e.png'
+      ]
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://newapi-unit.test/v1/chat/completions');
+    expect(result.taskId).toMatch(/^newapi-/);
+    expect(result.imageUrl).toBe('https://image.test/chat-ref.png');
+  });
+
   it('builds image requests only from the selected model parameter contract', () => {
     const shared = [
       { name: 'model', path: 'model', label: '模型', type: 'string' as const, required: true, fixed: 'image2k4k' },
