@@ -1380,8 +1380,28 @@ export async function archivePendingJobImage(
   const meta = (job.meta as Record<string, unknown>) || {};
   if (meta.archived === true && meta.archivePending !== true) return false;
   try {
-    await ensureJobImageArchived(admin, userId, job as JobRow, env);
-    return true;
+    const archived = await ensureJobImageArchived(admin, userId, job as JobRow, env);
+    if (archived && isStorageRef(archived)) return true;
+    const taskId =
+      typeof meta.upstreamTaskId === 'string'
+        ? meta.upstreamTaskId
+        : typeof meta.apimartTaskId === 'string'
+          ? meta.apimartTaskId
+          : null;
+    if (taskId && env) {
+      const upstream = upstreamBindingsFromEnv(env);
+      const recovered = await tryRecoverJobFromUpstream(
+        admin,
+        userId,
+        job as JobRow,
+        upstream,
+        taskId,
+        readJobProvider(meta),
+        env
+      );
+      if (recovered?.imageUrl && isStorageRef(recovered.imageUrl)) return true;
+    }
+    return false;
   } catch (e) {
     console.warn('[generation] background archive failed', jobId, e);
     return false;

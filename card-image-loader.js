@@ -204,6 +204,17 @@
       pushRef(creation.mjCompositeUrl);
       if (Array.isArray(creation.mjGridUrls)) creation.mjGridUrls.forEach(pushRef);
     }
+    if (jobId && window.PromptHubApi?.getGenerationImageUrl) {
+      try {
+        const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
+        const jobUrl = r?.ok ? r.data?.url : '';
+        if (jobUrl && window.PromptHubApi?.fetchMediaAsBlobUrl) {
+          const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(jobUrl);
+          if (blobUrl && isReadySrc(blobUrl, img)) return blobUrl;
+        }
+        if (jobUrl && isReadySrc(jobUrl, img)) return jobUrl;
+      } catch (e) { /* continue with archived/local candidates */ }
+    }
     for (const ref of refs) {
       if (!ref) continue;
       const storageRef = window.SupabaseSync?.isStorageRef?.(ref);
@@ -236,7 +247,8 @@
         });
         if (full && isReadySrc(full, img)) return full;
       }
-      if (/^https?:\/\//i.test(ref) && !window.SupabaseSync?.isInvalidMediaUrl?.(ref)) {
+      const ephemeral = window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(ref);
+      if (/^https?:\/\//i.test(ref) && !ephemeral && !window.SupabaseSync?.isInvalidMediaUrl?.(ref)) {
         if (window.PromptHubApi?.fetchMediaAsBlobUrl) {
           try {
             const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(ref);
@@ -245,21 +257,6 @@
         }
         if (isReadySrc(ref, img)) return ref;
       }
-    }
-    if (jobId && window.PromptHubApi?.getGenerationImageUrl) {
-      try {
-        const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
-        const jobUrl = r?.ok ? r.data?.url : '';
-        if (jobUrl && window.PromptHubApi?.fetchMediaAsBlobUrl) {
-          const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(jobUrl);
-          if (blobUrl && isReadySrc(blobUrl, img)) return blobUrl;
-        }
-        if (
-          jobUrl
-          && !window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(jobUrl)
-          && isReadySrc(jobUrl, img)
-        ) return jobUrl;
-      } catch (e) { /* ignore */ }
     }
     if (window.FeatureDraft?.resolveImageGenFullUrl && wantFull) {
       const feedKey = `cr_${creation.id}`;

@@ -246,6 +246,10 @@ function readTaskId(meta: Record<string, unknown>): string | null {
   return null;
 }
 
+function isImageGenerationMeta(meta: Record<string, unknown>): boolean {
+  return String(meta.mediaType || '').trim().toLowerCase() !== 'video';
+}
+
 function kickBackgroundTask(
   c: { executionCtx?: { waitUntil: (p: Promise<unknown>) => void } },
   task: Promise<unknown>
@@ -1086,13 +1090,15 @@ generateRoutes.get('/jobs', async c => {
     .limit(24);
   if (error) throw error;
 
-  const sortedRows = [...(rows || [])].sort((a, b) => {
-    const rank = (s: string) => (s === 'processing' ? 0 : s === 'failed' ? 1 : 2);
-    const ra = rank(String(a.status || ''));
-    const rb = rank(String(b.status || ''));
-    if (ra !== rb) return ra - rb;
-    return String(b.created_at || '').localeCompare(String(a.created_at || ''));
-  });
+  const sortedRows = [...(rows || [])]
+    .filter((job) => isImageGenerationMeta((job.meta as Record<string, unknown>) || {}))
+    .sort((a, b) => {
+      const rank = (s: string) => (s === 'processing' ? 0 : s === 'failed' ? 1 : 2);
+      const ra = rank(String(a.status || ''));
+      const rb = rank(String(b.status || ''));
+      if (ra !== rb) return ra - rb;
+      return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+    });
 
   const jobs = [];
   let bonusPollBudget = 3;
@@ -1176,22 +1182,24 @@ generateRoutes.get('/jobs/history', async c => {
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
-  const jobs = (rows || []).map((job) => {
-    const meta = (job.meta as Record<string, unknown>) || {};
-    const extraImageUrls = Array.isArray(meta.extraImageUrls)
-      ? (meta.extraImageUrls as string[]).filter((u) => typeof u === 'string' && u)
-      : [];
-    return {
-      id: job.id,
-      prompt: job.prompt,
-      status: job.status,
-      imageUrl: job.result_image_url as string | null,
-      extraImageUrls: extraImageUrls.length ? extraImageUrls : undefined,
-      model: meta.model,
-      modelLabel: meta.modelLabel,
-      createdAt: job.created_at
-    };
-  });
+  const jobs = (rows || [])
+    .filter((job) => isImageGenerationMeta((job.meta as Record<string, unknown>) || {}))
+    .map((job) => {
+      const meta = (job.meta as Record<string, unknown>) || {};
+      const extraImageUrls = Array.isArray(meta.extraImageUrls)
+        ? (meta.extraImageUrls as string[]).filter((u) => typeof u === 'string' && u)
+        : [];
+      return {
+        id: job.id,
+        prompt: job.prompt,
+        status: job.status,
+        imageUrl: job.result_image_url as string | null,
+        extraImageUrls: extraImageUrls.length ? extraImageUrls : undefined,
+        model: meta.model,
+        modelLabel: meta.modelLabel,
+        createdAt: job.created_at
+      };
+    });
   return c.json({ ok: true, data: { jobs, days, limit } });
 });
 
@@ -1218,6 +1226,7 @@ generateRoutes.get('/jobs/recent', async c => {
       : [];
 
   const jobs = (await Promise.all((rows || [])
+    .filter((job) => isImageGenerationMeta((job.meta as Record<string, unknown>) || {}))
     .map(async (job) => {
       const meta = (job.meta as Record<string, unknown>) || {};
       const extraImageUrls = stringList(meta.extraImageUrls);

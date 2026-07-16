@@ -82,6 +82,24 @@
     });
   }
 
+  function restoreMobilePageInteractivity() {
+    if (!isMobile()) return;
+    const hasActiveModal = !!document.querySelector(
+      '.subscribe-overlay.active, .trial-tasks-overlay.active, .community-detail-overlay.active, .settings-overlay.active, .modal-overlay.active, #authOverlay.open'
+    );
+    if (!hasActiveModal) {
+      document.body.classList.remove(
+        'subscribe-open',
+        'trial-tasks-open',
+        'app-modal-open',
+        'panel-open',
+        'community-panel-open'
+      );
+      document.querySelector('.app-main')?.style.removeProperty('pointer-events');
+    }
+    forceHideBlockingLayers();
+  }
+
   function closeAllMobileOverlays(opts) {
     const keepModals = opts?.keepModals === true;
     closeDrawers();
@@ -410,6 +428,7 @@
 
   function resetMobilePageScroll(app) {
     if (!isMobile()) return;
+    restoreMobilePageInteractivity();
     const main = document.querySelector('.app-main');
     if (!main) return;
     if (app === 'imagegen' || app === 'warehouse' || app === 'community' || !app) {
@@ -578,7 +597,7 @@
       'touchstart',
       () => {
         if (!document.body.classList.contains('mobile-nav-open') && !document.body.classList.contains('mobile-groups-open')) {
-          forceHideBlockingLayers();
+          restoreMobilePageInteractivity();
         }
       },
       { passive: true, capture: true }

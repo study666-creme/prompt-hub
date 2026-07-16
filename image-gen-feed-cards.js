@@ -88,9 +88,13 @@
       const resolvedListUrl = resolvedThumb || listUrl;
       const hasDisplayableRef = d().isDisplayableImage?.(image);
       const feedRefs = normalizeFeedRefImages(refImage || (hasDisplayableRef ? image : ''), refImages);
-      const imgSrc = resolvedListUrl
-        || (hasDisplayableRef ? d().IMG_LOADING_PLACEHOLDER : '');
-      const imgPending = hasDisplayableRef && (!resolvedListUrl || imgSrc.includes('data:image/svg'));
+      const ephemeralRecentRef = isRecentFeed
+        && global.SupabaseSync?.isEphemeralUpstreamImageUrl?.(image);
+      const imgSrc = ephemeralRecentRef
+        ? d().IMG_LOADING_PLACEHOLDER
+        : resolvedListUrl || (hasDisplayableRef ? d().IMG_LOADING_PLACEHOLDER : '');
+      const imgPending = hasDisplayableRef
+        && (ephemeralRecentRef || !resolvedListUrl || imgSrc.includes('data:image/svg'));
       const loadingCls = imgPending ? ' is-loading' : '';
       const shineAt = imgPending ? ` data-shine-at="${Date.now()}"` : '';
       const imgBlock = hasDisplayableRef

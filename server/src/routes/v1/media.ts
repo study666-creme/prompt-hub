@@ -24,6 +24,7 @@ import { createAdminClient } from '../../lib/supabase';
 import { uploadCardImage } from '../../lib/r2-storage';
 import { rateLimit } from '../../middleware/rate-limit';
 import { ensureWarehouseJobThumb, warehouseThumbCacheKey } from '../../lib/warehouse-thumb';
+import { archivePendingJobImage } from '../../lib/generation-jobs';
 
 const BUCKET = 'card-images';
 
@@ -319,7 +320,17 @@ mediaRoutes.get('/generation/:jobId/url', async c => {
     throw new ApiError(400, 'NOT_READY', '图片尚未生成完成');
   }
 
-  const raw = job.result_image_url;
+  let raw = job.result_image_url;
+  if (typeof raw === 'string' && raw.toLowerCase().startsWith('https://')) {
+    await archivePendingJobImage(admin, user.id, jobId, c.env);
+    const { data: archived } = await admin
+      .from('generation_requests')
+      .select('result_image_url')
+      .eq('id', jobId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (archived?.result_image_url) raw = archived.result_image_url;
+  }
   const path = storagePathFromRef(raw);
   if (path) {
     assertOwnPath(user.id, path);
