@@ -69,4 +69,13 @@ if (failed.length) {
   process.exit(1);
 }
 
+const stableImageMerge = window.CloudSyncSafety.preferLocalCardsImages(
+  { cards: [{ id: 'generated-card', image: 'https://getapib.org/temporary.png' }] },
+  { cards: [{ id: 'generated-card', image: 'storage://card-images/user/generated/job.jpg' }] }
+);
+if (stableImageMerge.cards?.[0]?.image !== 'storage://card-images/user/generated/job.jpg') {
+  console.error('foundation-bundle-vm-smoke FAIL: temporary local URL replaced stable cloud image');
+  process.exit(1);
+}
+
 console.log('foundation-bundle-vm-smoke OK:', checks.map(([n]) => n).join(', '));

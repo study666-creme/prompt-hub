@@ -680,7 +680,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         if (isRecent && creation?.jobId && global.PromptHubApi?.getGenerationImageUrl) {
           try {
             const jobId = String(creation.jobId).replace(/#\d+$/, '');
-            const r = await global.PromptHubApi.getGenerationImageUrl(jobId);
+            const r = await global.PromptHubApi.getGenerationImageUrl(jobId, { variant: 'grid' });
             if (r?.ok && r.data?.url && window.CardImageLoader?.applyUrlToImg?.(img, r.data.url)) {
               continue;
             }

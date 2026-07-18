@@ -796,6 +796,8 @@
     const qEl = document.getElementById('imageGenQuality');
     const qLabel = document.querySelector('label[for="imageGenQuality"]');
     const qNote = document.querySelector('.imagegen-quality-note');
+    const qParam = qEl?.closest('.imagegen-param[data-param="quality"]');
+    if (qParam) qParam.hidden = hideQuality;
     for (const el of [qLabel, qEl, qNote]) {
       if (el) el.hidden = hideQuality;
     }

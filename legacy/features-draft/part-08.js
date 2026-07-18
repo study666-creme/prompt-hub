@@ -466,31 +466,43 @@
     }
     if (!window.AuthGate?.requireAuth?.('imagegen')) return;
 
-    const meta = getImageGenFormMeta();
-    let unit = window.PointsSystem?.getImageGenCost?.(meta.model, meta.resolution) ?? 10;
-    if (window.PointsSystem?.useApiForAccount?.()) {
-      const quoted = await quoteGenerationCost(meta.resolution, meta.quality, meta.model, unit);
-      unit = quoted.cost;
-    }
-    unit = window.PointsSystem?.roundCredits?.(unit) ?? unit;
-    const fmt = window.PointsSystem?.formatCredits || ((n) => String(n));
-    const balance = window.PointsSystem?.getCredits?.() ?? 0;
-    const totalNeed = window.PointsSystem?.roundCredits?.(unit * count) ?? unit * count;
-    if (balance < unit) {
-      toast(`积分不足（每张 ${fmt(unit)}，当前 ${fmt(balance)}）`);
-      return;
-    }
-    if (balance < totalNeed) {
-      toast(`积分约够 ${Math.floor(balance / unit)} 张，将按顺序提交直到不足（${fmt(unit)} 积分/张）`);
-    }
-
     imageGenBatchRunning = true;
     const batchId = `batch_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const btn = document.getElementById('imageGenSubmit');
-    if (btn) btn.disabled = true;
+    if (btn) {
+      if (btn.__imageGenSubmitResetTimer) {
+        clearTimeout(btn.__imageGenSubmitResetTimer);
+        btn.__imageGenSubmitResetTimer = null;
+      }
+      btn.disabled = true;
+      btn.classList.remove('is-submitted');
+      btn.classList.add('is-submitting');
+      btn.setAttribute('aria-busy', 'true');
+      btn.textContent = '正在准备…';
+    }
+    let ok = 0;
+    let charged = 0;
     try {
-      let ok = 0;
-      let charged = 0;
+      await ig('waitForSubmitPaint');
+      const meta = getImageGenFormMeta();
+      let unit = window.PointsSystem?.getImageGenCost?.(meta.model, meta.resolution) ?? 10;
+      if (window.PointsSystem?.useApiForAccount?.()) {
+        if (btn) btn.textContent = '正在确认任务…';
+        const quoted = await quoteGenerationCost(meta.resolution, meta.quality, meta.model, unit);
+        unit = quoted.cost;
+      }
+      unit = window.PointsSystem?.roundCredits?.(unit) ?? unit;
+      const fmt = window.PointsSystem?.formatCredits || ((n) => String(n));
+      const balance = window.PointsSystem?.getCredits?.() ?? 0;
+      const totalNeed = window.PointsSystem?.roundCredits?.(unit * count) ?? unit * count;
+      if (balance < unit) {
+        toast(`积分不足（每张 ${fmt(unit)}，当前 ${fmt(balance)}）`);
+        return;
+      }
+      if (balance < totalNeed) {
+        toast(`积分约够 ${Math.floor(balance / unit)} 张，将按顺序提交直到不足（${fmt(unit)} 积分/张）`);
+      }
+
       for (let i = 0; i < count; i += 1) {
         const curBalance = window.PointsSystem?.getCredits?.() ?? 0;
         if (curBalance < unit && i > 0) break;
@@ -526,9 +538,6 @@
               ? `已提交 ${ok}/${count} 张生图，已扣约 ${fmt(charged)} 积分（${fmt(unit)} 积分/张）`
               : `已提交 ${ok}/${count} 张，完成后合并存入同一卡片（最多 5 张，约 ${fmt(charged)} 积分）`
         );
-        if (isMobileViewport() && window.MobileUI?.setImageGenView) {
-          window.MobileUI.setImageGenView('feed', { scrollToTop: false });
-        }
       }
     } catch (e) {
       console.error('[imagegen] batch submit failed', e);
@@ -536,8 +545,23 @@
     } finally {
       imageGenBatchRunning = false;
       if (btn) {
-        btn.disabled = false;
-        restoreImageGenSubmitLabel();
+        btn.classList.remove('is-submitting');
+        btn.removeAttribute('aria-busy');
+        if (ok > 0) {
+          btn.classList.add('is-submitted');
+          btn.textContent = `已提交 ${ok} 张`;
+          btn.disabled = true;
+          btn.__imageGenSubmitResetTimer = setTimeout(() => {
+            btn.__imageGenSubmitResetTimer = null;
+            btn.classList.remove('is-submitted');
+            btn.disabled = false;
+            restoreImageGenSubmitLabel();
+          }, 720);
+        } else {
+          btn.classList.remove('is-submitted');
+          btn.disabled = false;
+          restoreImageGenSubmitLabel();
+        }
       }
     }
   }

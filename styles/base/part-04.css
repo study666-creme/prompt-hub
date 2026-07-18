@@ -149,7 +149,7 @@
       width: var(--card-beam-width);
       height: 260%;
       top: -85%;
-      left: 118%;
+      left: -60%;
       background: linear-gradient(
         90deg,
         transparent 0%,
@@ -162,11 +162,11 @@
         var(--card-strip-haze) 82%,
         transparent 100%
       );
-      transform: rotate(-45deg);
+      transform: translate3d(0, 0, 0) rotate(-45deg);
       transform-origin: center center;
       filter: blur(8px);
       mix-blend-mode: soft-light;
-      will-change: top, left, opacity, filter;
+      will-change: transform, opacity;
       animation: card-beam-loading 3.2s cubic-bezier(0.35, 0.05, 0.25, 1) infinite;
     }
     .card-media.is-loading .card-img,
@@ -207,7 +207,8 @@
     }
     .card-media.card-media--missing .card-img,
     .card-media.card-media--load-failed .card-img {
-      opacity: 1;
+      visibility: hidden !important;
+      opacity: 0 !important;
     }
     @keyframes card-orb-breathe {
       0%, 100% {
@@ -230,7 +231,7 @@
       width: var(--card-beam-width);
       height: 260%;
       top: -85%;
-      left: 118%;
+      left: -60%;
       background: linear-gradient(
         90deg,
         transparent 0%,
@@ -243,65 +244,51 @@
         var(--card-strip-haze) 82%,
         transparent 100%
       );
-      transform: rotate(-45deg);
+      transform: translate3d(0, 0, 0) rotate(-45deg);
       transform-origin: center center;
       filter: blur(8px);
       mix-blend-mode: soft-light;
       opacity: 0;
-      will-change: top, left, opacity, filter;
+      will-change: transform, opacity;
       animation: card-beam-trbl var(--card-beam-duration) cubic-bezier(0.35, 0.05, 0.25, 1) forwards;
     }
     @keyframes card-beam-trbl {
       0% {
-        top: -85%;
-        left: 118%;
+        transform: translate3d(0, 0, 0) rotate(-45deg);
         opacity: 0;
-        filter: blur(16px);
       }
       12% {
-        opacity: 0.55;
-        filter: blur(14px);
+        opacity: 0.42;
       }
       45% {
-        opacity: 0.72;
-        filter: blur(11px);
+        opacity: 0.58;
       }
       88% {
-        opacity: 0.5;
-        filter: blur(13px);
+        opacity: 0.34;
       }
       100% {
-        top: 72%;
-        left: -52%;
+        transform: translate3d(430%, 60%, 0) rotate(-45deg);
         opacity: 0;
-        filter: blur(16px);
       }
     }
     /* 加载中：与加载完成同一光带（card-beam-trbl），循环播放 */
     @keyframes card-beam-loading {
       0% {
-        top: -85%;
-        left: 118%;
-        opacity: 0.35;
-        filter: blur(16px);
+        transform: translate3d(0, 0, 0) rotate(-45deg);
+        opacity: 0.18;
       }
       12% {
-        opacity: 0.55;
-        filter: blur(14px);
+        opacity: 0.32;
       }
       45% {
-        opacity: 0.72;
-        filter: blur(11px);
+        opacity: 0.44;
       }
       88% {
-        opacity: 0.5;
-        filter: blur(13px);
+        opacity: 0.28;
       }
       100% {
-        top: 72%;
-        left: -52%;
-        opacity: 0.35;
-        filter: blur(16px);
+        transform: translate3d(430%, 60%, 0) rotate(-45deg);
+        opacity: 0.18;
       }
     }
     .card-media.media-revealed .card-img {

@@ -287,8 +287,7 @@
         return;
       }
       loadPendingGenJobs();
-      scheduleGenJobsSync(300);
-      void resumePendingGenerationJobs({ force: true }).then((ok) => d().afterGenJobsResume?.(ok));
+      if (shouldRunGenJobsBackgroundSync()) scheduleGenJobsSync(300);
     });
     window.addEventListener('pagehide', () => {
       persistPendingGenJobs();
@@ -299,8 +298,7 @@
         d().renderImageGenFeed({ preserveScroll: true });
         d().renderImageGenMobileResult();
       }
-      scheduleGenJobsSync(200);
-      void resumePendingGenerationJobs({ force: true }).then((ok) => d().afterGenJobsResume?.(ok));
+      if (shouldRunGenJobsBackgroundSync()) scheduleGenJobsSync(200);
     });
   }
 

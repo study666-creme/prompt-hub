@@ -155,11 +155,12 @@
   cursor: not-allowed;
 }
 
-/* 生图仓库桌面 Grid：最终兜底，覆盖 Masonry 残留 inline / 旧 padding 盒 */
+/* 生图作品区桌面 Grid：覆盖 Masonry 残留 inline / 旧 padding 盒。 */
 @media (min-width: 901px) {
   #imageGenFeed.imagegen-feed.imagegen-feed--desktop-grid {
-    display: flex !important;
-    flex-wrap: wrap !important;
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)) !important;
+    grid-auto-rows: max-content !important;
     align-content: flex-start !important;
     align-items: flex-start !important;
     position: relative !important;
@@ -169,21 +170,20 @@
     min-height: 0 !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
-    gap: 16px !important;
+    gap: 12px !important;
   }
 
   #imageGenFeed.imagegen-feed.imagegen-feed--desktop-grid > .imagegen-feed-card {
     position: relative !important;
     inset: auto !important;
-    flex: 0 0 calc((100% - 48px) / 4) !important;
-    width: calc((100% - 48px) / 4) !important;
-    max-width: calc((100% - 48px) / 4) !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
     height: auto !important;
     left: auto !important;
     top: auto !important;
     transform: none !important;
     margin: 0 !important;
-    align-self: flex-start !important;
     box-sizing: border-box !important;
   }
 
@@ -227,15 +227,16 @@
 #imageGenSubmit.is-submitting {
   position: relative;
   cursor: progress;
-  opacity: 0.82;
+  opacity: 1;
+  transform: translateY(1px);
   transition: opacity 0.16s ease, transform 0.16s var(--ease-out, ease);
 }
 
-#imageGenSubmit.is-submitting::after {
+#imageGenSubmit.is-submitting::before {
   content: '';
-  width: 12px;
-  height: 12px;
-  margin-left: 8px;
+  width: 13px;
+  height: 13px;
+  margin-right: 8px;
   display: inline-block;
   vertical-align: -2px;
   border: 1.5px solid currentColor;
@@ -244,13 +245,37 @@
   animation: imageGenSubmitSpin 0.72s linear infinite;
 }
 
+#imageGenSubmit.is-submitted {
+  opacity: 1;
+  cursor: default;
+}
+
+#imageGenSubmit.is-submitted::before {
+  content: '';
+  width: 6px;
+  height: 10px;
+  margin-right: 9px;
+  display: inline-block;
+  vertical-align: 1px;
+  border-right: 1.8px solid currentColor;
+  border-bottom: 1.8px solid currentColor;
+  transform: rotate(45deg);
+  animation: imageGenSubmitConfirm 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @keyframes imageGenSubmitSpin {
   to { transform: rotate(360deg); }
 }
 
+@keyframes imageGenSubmitConfirm {
+  from { opacity: 0; transform: translateY(2px) rotate(45deg) scale(0.75); }
+  to { opacity: 1; transform: rotate(45deg) scale(1); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   #imageGenFeed .imagegen-feed-card--just-added,
-  #imageGenSubmit.is-submitting::after {
+  #imageGenSubmit.is-submitting::before,
+  #imageGenSubmit.is-submitted::before {
     animation: none;
   }
 }
@@ -486,6 +511,8 @@
 .imagegen-generate-btn {
   position: relative;
   overflow: hidden;
+  justify-content: center;
+  letter-spacing: 0;
 }
 
 .imagegen-generate-btn::after {
@@ -501,6 +528,12 @@
 .imagegen-generate-btn:hover::after {
   opacity: 1;
   animation: generateBtnSheen 0.9s var(--ease-ui, ease) both;
+}
+
+.imagegen-generate-btn.is-submitting::after,
+.imagegen-generate-btn.is-submitted::after {
+  opacity: 0;
+  animation: none;
 }
 
 @keyframes generateBtnSheen {

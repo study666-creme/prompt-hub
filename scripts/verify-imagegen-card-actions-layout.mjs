@@ -2,9 +2,10 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
-const playwrightPackageDir = process.env.PLAYWRIGHT_PACKAGE_DIR || '';
+const playwrightPackageDir = process.env.PLAYWRIGHT_PACKAGE_DIR || process.argv[2] || '';
 const playwrightImport = playwrightPackageDir
   ? pathToFileURL(join(playwrightPackageDir, 'index.js')).href
   : 'playwright';
@@ -15,6 +16,7 @@ if (!chromium) throw new Error('Playwright chromium is unavailable');
 const root = resolve(join(import.meta.dirname, '..'));
 const port = Number(process.env.PORT || 5581);
 const base = `http://127.0.0.1:${port}`;
+const screenshotPath = join(tmpdir(), 'prompt-hub-imagegen-grid-single-card.png');
 
 const mime = {
   '.html': 'text/html; charset=utf-8',
@@ -35,7 +37,6 @@ const fixture = `<!doctype html>
     body { margin: 0; background: #101115; color: #fff; }
     #pageImageGen { width: 980px; padding: 24px; }
     .imagegen-side { width: 980px; }
-    .imagegen-feed-card { width: 220px; }
   </style>
 </head>
 <body>
@@ -93,7 +94,7 @@ await new Promise((resolveListen) => server.listen(port, '127.0.0.1', resolveLis
 
 const browser = await chromium.launch({
   headless: true,
-  executablePath: process.env.BROWSER_EXECUTABLE_PATH || undefined
+  executablePath: process.env.BROWSER_EXECUTABLE_PATH || process.argv[3] || undefined
 });
 
 try {
@@ -107,6 +108,21 @@ try {
     });
     return { display: style.display, columns: style.gridTemplateColumns, items };
   });
+  const feedLayout = await page.locator('#imageGenFeed').evaluate((feed) => {
+    const card = feed.querySelector('.imagegen-feed-card');
+    const feedStyle = getComputedStyle(feed);
+    const cardRect = card?.getBoundingClientRect();
+    return {
+      display: feedStyle.display,
+      columns: feedStyle.gridTemplateColumns,
+      feedWidth: feed.getBoundingClientRect().width,
+      cardWidth: cardRect?.width || 0
+    };
+  });
+  if (feedLayout.display !== 'grid') throw new Error(`expected desktop feed grid, got ${JSON.stringify(feedLayout)}`);
+  if (feedLayout.cardWidth <= 180 || feedLayout.cardWidth > 340) {
+    throw new Error(`single feed card must stay column-sized, got ${JSON.stringify(feedLayout)}`);
+  }
   if (layout.display !== 'grid') throw new Error(`expected grid display, got ${layout.display}`);
   if (layout.items.length !== 2) throw new Error(`expected 2 action buttons, got ${layout.items.length}`);
   const legacyActions = await page.locator('[data-feed-fill-prompt], [data-feed-fill-ref], [data-feed-regenerate]').count();
@@ -131,7 +147,46 @@ try {
   if (hidden.stack !== 'none' || hidden.del !== 'none') {
     throw new Error(`expected actions hidden while preview is open, got ${JSON.stringify(hidden)}`);
   }
-  console.log('verify-imagegen-card-actions-layout OK: 1x2 actions hidden in preview mode');
+  await page.locator('.imagegen-side').evaluate((el) => el.classList.remove('imagegen-preview-open'));
+  const multiLayout = await page.locator('#imageGenFeed').evaluate(async (feed) => {
+    const first = feed.querySelector('.imagegen-feed-card');
+    for (let i = 1; i < 6; i += 1) {
+      const clone = first.cloneNode(true);
+      clone.dataset.feedId = `fixture-${i}`;
+      feed.appendChild(clone);
+    }
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const rects = [...feed.querySelectorAll('.imagegen-feed-card')].map((card) => {
+      const rect = card.getBoundingClientRect();
+      const style = getComputedStyle(card);
+      return {
+        left: Math.round(rect.left),
+        top: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        bottom: Math.round(rect.bottom),
+        offsetHeight: card.offsetHeight,
+        offsetTop: card.offsetTop,
+        transform: style.transform,
+        zoom: style.zoom
+      };
+    });
+    const rowTops = [...new Set(rects.map((rect) => rect.top))].sort((a, b) => a - b);
+    const firstRow = rects.filter((rect) => rect.top === rowTops[0]);
+    return {
+      rects,
+      columns: [...new Set(rects.map((rect) => rect.left))].length,
+      rows: rowTops.length,
+      rowGap: rowTops.length > 1 ? rowTops[1] - Math.max(...firstRow.map((rect) => rect.bottom)) : null,
+      computedRowGap: getComputedStyle(feed).rowGap,
+      gridTemplateRows: getComputedStyle(feed).gridTemplateRows
+    };
+  });
+  if (multiLayout.columns !== 3 || multiLayout.rows !== 2 || multiLayout.rowGap < 8) {
+    throw new Error(`expected a filled 3x2 desktop feed, got ${JSON.stringify(multiLayout)}`);
+  }
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  console.log(JSON.stringify({ ok: true, feedLayout, multiLayout, screenshotPath }));
 } finally {
   await browser.close();
   await new Promise((resolveClose) => server.close(resolveClose));

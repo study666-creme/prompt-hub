@@ -58,12 +58,38 @@
       return [...byKey.values()].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
     }
 
+    function compactPendingRefForStorage(value) {
+      if (typeof value !== 'string') return value || null;
+      if (/^(?:data:|blob:)/i.test(value)) return null;
+      return value;
+    }
+
+    function compactPendingJobsForStorage(list) {
+      return (Array.isArray(list) ? list : []).slice(0, 32).map((job) => {
+        const compact = { ...job };
+        compact.refImage = compactPendingRefForStorage(job?.refImage);
+        compact.refImages = Array.isArray(job?.refImages)
+          ? job.refImages.map(compactPendingRefForStorage).filter(Boolean)
+          : null;
+        compact.referenceAssets = Array.isArray(job?.referenceAssets)
+          ? job.referenceAssets.map((asset) => {
+            if (!asset || typeof asset !== 'object') return asset;
+            const next = { ...asset };
+            if ('ref' in next) next.ref = compactPendingRefForStorage(next.ref);
+            if ('imageRef' in next) next.imageRef = compactPendingRefForStorage(next.imageRef);
+            return next;
+          })
+          : null;
+        return compact;
+      });
+    }
+
     function persistGenJobStateToLocal() {
       try {
         localStorage.setItem(LS_GEN_JOBS_STATE, JSON.stringify({
           uid: getGenJobStateUid(),
           updatedAt: Date.now(),
-          pending: pendingList().slice(0, 32),
+          pending: compactPendingJobsForStorage(pendingList()),
           session: getSessionGenJobIdsRaw()
         }));
       } catch (e) { /* ignore */ }
@@ -122,7 +148,7 @@
 
     function persistPendingGenJobs() {
       try {
-        sessionStorage.setItem(LS_PENDING_GEN_JOBS, JSON.stringify(pendingList().slice(0, 32)));
+        sessionStorage.setItem(LS_PENDING_GEN_JOBS, JSON.stringify(compactPendingJobsForStorage(pendingList())));
       } catch (e) { /* ignore */ }
       persistGenJobStateToLocal();
     }
@@ -210,6 +236,7 @@
       loadGenJobStateFromLocal,
       loadPendingGenJobs,
       mergePendingGenJobLists,
+      compactPendingJobsForStorage,
       pendingList,
       persistFailedGenJobs,
       persistGenJobStateToLocal,

@@ -15,6 +15,18 @@ function isShopRechargeCode(note: string | null | undefined): boolean {
   return typeof note === 'string' && /^shop-cr\d/i.test(note);
 }
 
+export function isRecoverablePurgedShopCode(row: {
+  code?: unknown;
+  note?: unknown;
+  active?: unknown;
+  used_count?: unknown;
+  max_uses?: unknown;
+}): boolean {
+  if (row.active !== false || !/^purged-\d{8}$/i.test(String(row.note || ''))) return false;
+  if (Number(row.used_count) !== 0 || Number(row.max_uses) < 1) return false;
+  return /^(?:CR(?:100|500|1K|3K|5K|10K)|SHOP100)-[A-Z0-9]+$/i.test(String(row.code || ''));
+}
+
 function throwDbError(err: { message?: string; code?: string }, fallback: string): never {
   const msg = String(err.message || '');
   if (
@@ -73,7 +85,7 @@ redeemRoutes.post('/', async c => {
     .maybeSingle();
 
   if (codeErr) throwDbError(codeErr, '查询激活码失败');
-  if (!row || !row.active) {
+  if (!row || (!row.active && !isRecoverablePurgedShopCode(row))) {
     throw new ApiError(400, 'INVALID_CODE', '无效的激活码');
   }
   if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) {

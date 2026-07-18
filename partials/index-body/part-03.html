@@ -261,42 +261,52 @@
               <p class="imagegen-mj-gallery-note">Midjourney 四宫格<strong>合并为一条最近生成</strong>（最多 5 张），喜欢请点「存入库」。变体按一次生图同价扣积分。</p>
               </div>
             </div>
-            <div class="imagegen-params-row imagegen-params-row--size">
-              <div class="imagegen-param" data-param="resolution">
-                <label for="imageGenResolution">输出分辨率</label>
-                <select id="imageGenResolution" class="settings-input imagegen-field-compact"></select>
-              </div>
-              <div class="imagegen-param" data-param="size">
-                <label for="imageGenSize">画面尺寸</label>
-                <select id="imageGenSize" class="settings-input imagegen-field-compact"></select>
-              </div>
-            </div>
-            <label for="imageGenQuality">质量</label>
-            <select id="imageGenQuality" class="settings-input imagegen-field-compact">
-              <option value="standard">低</option>
-              <option value="high">中</option>
-              <option value="ultra">高</option>
-            </select>
-            <label for="imageGenCardTitle">卡片标题</label>
-            <input type="text" id="imageGenCardTitle" class="settings-input imagegen-field-compact" maxlength="80" placeholder="可选，不填则自动生成" autocomplete="off">
-            <div class="imagegen-params-row imagegen-save-target-row">
-              <div class="imagegen-param">
-                <label for="imageGenTargetGroup">入库文件夹</label>
-                <select id="imageGenTargetGroup" class="settings-input imagegen-field-compact">
-                  <option value="">未分类（默认）</option>
-                </select>
-              </div>
-              <div class="imagegen-param imagegen-param--tags">
-                <label id="imageGenTagPickerLabel">附加标签</label>
-                <div class="imagegen-tag-picker" id="imageGenTagPicker">
-                  <button type="button" class="imagegen-tag-picker-trigger settings-input imagegen-field-compact" id="imageGenTagPickerTrigger" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="imageGenTagPickerLabel">
-                    <span class="imagegen-tag-picker-value" id="imageGenTagPickerValue">未选择</span>
-                    <svg class="imagegen-tag-picker-chevron" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M4.5 6l3.5 3.5L11.5 6z"/></svg>
-                  </button>
-                  <div class="imagegen-tag-picker-panel" id="imageGenTagPickerPanel" hidden role="listbox" aria-multiselectable="true" aria-labelledby="imageGenTagPickerLabel"></div>
+            <details class="imagegen-advanced-fold" id="imageGenAdvancedFold">
+              <summary class="imagegen-advanced-fold-summary">
+                <span>输出与入库</span>
+                <small>尺寸、质量、标题与分类</small>
+              </summary>
+              <div class="imagegen-advanced-fold-body">
+                <div class="imagegen-params-row imagegen-params-row--size">
+                  <div class="imagegen-param" data-param="resolution">
+                    <label for="imageGenResolution">输出分辨率</label>
+                    <select id="imageGenResolution" class="settings-input imagegen-field-compact"></select>
+                  </div>
+                  <div class="imagegen-param" data-param="size">
+                    <label for="imageGenSize">画面尺寸</label>
+                    <select id="imageGenSize" class="settings-input imagegen-field-compact"></select>
+                  </div>
+                  <div class="imagegen-param" data-param="quality">
+                    <label for="imageGenQuality">质量</label>
+                    <select id="imageGenQuality" class="settings-input imagegen-field-compact">
+                      <option value="standard">低</option>
+                      <option value="high">中</option>
+                      <option value="ultra">高</option>
+                    </select>
+                  </div>
+                </div>
+                <label for="imageGenCardTitle">卡片标题</label>
+                <input type="text" id="imageGenCardTitle" class="settings-input imagegen-field-compact" maxlength="80" placeholder="可选，不填则自动生成" autocomplete="off">
+                <div class="imagegen-params-row imagegen-save-target-row">
+                  <div class="imagegen-param">
+                    <label for="imageGenTargetGroup">入库文件夹</label>
+                    <select id="imageGenTargetGroup" class="settings-input imagegen-field-compact">
+                      <option value="">未分类（默认）</option>
+                    </select>
+                  </div>
+                  <div class="imagegen-param imagegen-param--tags">
+                    <label id="imageGenTagPickerLabel">附加标签</label>
+                    <div class="imagegen-tag-picker" id="imageGenTagPicker">
+                      <button type="button" class="imagegen-tag-picker-trigger settings-input imagegen-field-compact" id="imageGenTagPickerTrigger" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="imageGenTagPickerLabel">
+                        <span class="imagegen-tag-picker-value" id="imageGenTagPickerValue">未选择</span>
+                        <svg class="imagegen-tag-picker-chevron" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M4.5 6l3.5 3.5L11.5 6z"/></svg>
+                      </button>
+                      <div class="imagegen-tag-picker-panel" id="imageGenTagPickerPanel" hidden role="listbox" aria-multiselectable="true" aria-labelledby="imageGenTagPickerLabel"></div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            </details>
             </div>
             <div class="imagegen-prompt-block imagegen-prompt-block--shared" id="imageGenPromptBlock">
               <div class="imagegen-prompt-head">

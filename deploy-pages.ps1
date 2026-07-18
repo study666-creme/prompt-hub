@@ -1,8 +1,11 @@
-# Deploy static site to Cloudflare Pages (CLI). One-time: npm exec wrangler login (in server/)
+param([switch]$Login)
+
+# Deploy static site to Cloudflare Pages (CLI). One-time: .\deploy-pages.ps1 -Login
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 $server = Join-Path $root "server"
 $project = "prompt-hub-hub"
+$env:XDG_CONFIG_HOME = Join-Path $root ".wrangler"
 
 if (Test-Path (Join-Path $root ".wrangler\cache\pages.json")) {
   try {
@@ -14,8 +17,17 @@ if (Test-Path (Join-Path $root ".wrangler\cache\pages.json")) {
 if (-not (Test-Path (Join-Path $server "node_modules\wrangler"))) {
   Write-Host "First run: npm install in server/ ..."
   Push-Location $server
-  npm install
+  & npm.cmd install
   Pop-Location
+}
+
+$wrangler = Join-Path $server "node_modules\.bin\wrangler.cmd"
+if (-not (Test-Path $wrangler)) {
+  throw "Project Wrangler executable not found: $wrangler"
+}
+if ($Login) {
+  & $wrangler login
+  exit $LASTEXITCODE
 }
 
 $localDeployExclude = @(
@@ -61,7 +73,7 @@ function Test-CloudflareReachable {
   try {
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $out = & npm exec -- wrangler whoami 2>&1
+    $out = & $wrangler whoami 2>&1
     $exit = $LASTEXITCODE
     $ErrorActionPreference = $prevEap
     if ($exit -eq 0) { return $true }
@@ -93,7 +105,7 @@ try {
       Write-Host "wrangler pages deploy (attempt $($i + 1)) ..."
       $prevEap = $ErrorActionPreference
       $ErrorActionPreference = 'Continue'
-      & npm exec -- wrangler pages deploy $staging "--project-name=$project" --commit-dirty=true --no-bundle
+      & $wrangler pages deploy $staging "--project-name=$project" --commit-dirty=true --no-bundle
       $code = $LASTEXITCODE
       $ErrorActionPreference = $prevEap
       if ($code -eq 0) { break }

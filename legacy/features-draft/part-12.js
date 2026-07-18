@@ -734,6 +734,12 @@
     window.ImageGenPromptTools?.resetBatchState?.();
     const btn = document.getElementById('imageGenSubmit');
     if (btn) {
+      if (btn.__imageGenSubmitResetTimer) {
+        clearTimeout(btn.__imageGenSubmitResetTimer);
+        btn.__imageGenSubmitResetTimer = null;
+      }
+      btn.classList.remove('is-submitting', 'is-submitted');
+      btn.removeAttribute('aria-busy');
       btn.disabled = false;
       restoreImageGenSubmitLabel();
     }

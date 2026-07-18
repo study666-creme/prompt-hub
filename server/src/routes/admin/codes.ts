@@ -61,6 +61,7 @@ adminCodeRoutes.get('/', async c => {
       { count: 'exact' }
     )
     .order('created_at', { ascending: false })
+    .not('code', 'like', 'PAY%')
     .range(offset, offset + limit - 1);
 
   if (active === 'true') query = query.eq('active', true);

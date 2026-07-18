@@ -50,6 +50,12 @@ export type Env = {
   COMMUNITY_GEMINI_MODERATION?: string;
   /** 支付 webhook HMAC 密钥：wrangler secret put PAYMENT_WEBHOOK_SECRET */
   PAYMENT_WEBHOOK_SECRET?: string;
+  /** EasyPay credentials are server-only and must never enter browser bundles. */
+  EPAY_MERCHANT_ID?: string;
+  EPAY_MERCHANT_KEY?: string;
+  EPAY_API_BASE_URL?: string;
+  EPAY_CALLBACK_BASE_URL?: string;
+  EPAY_PUBLIC_SITE_URL?: string;
   /** 运营批量造激活码：wrangler secret put ADMIN_API_SECRET */
   ADMIN_API_SECRET?: string;
   /** 本地开发：图片走线上 R2/CDN（本地 Miniflare R2 为空时必填，默认 api.prompt-hubs.com） */

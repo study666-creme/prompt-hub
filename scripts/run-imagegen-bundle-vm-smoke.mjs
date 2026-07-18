@@ -8,6 +8,16 @@ import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const code = readFileSync(join(root, 'pack-imagegen.js'), 'utf8');
+const localValues = new Map();
+const sessionValues = new Map();
+
+function storageStub(values) {
+  return {
+    getItem: (key) => values.has(key) ? values.get(key) : null,
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: (key) => values.delete(key)
+  };
+}
 
 function elStub() {
   return {
@@ -47,7 +57,11 @@ const window = {
     addEventListener: () => {},
     removeEventListener: () => {}
   },
-  localStorage: { getItem: () => null, setItem() {} }
+  localStorage: storageStub(localValues),
+  sessionStorage: storageStub(sessionValues),
+  setTimeout,
+  clearTimeout,
+  requestAnimationFrame: (callback) => setTimeout(() => callback(Date.now()), 0)
 };
 window.window = window;
 
@@ -65,6 +79,7 @@ const checks = [
   ['ImageGenWarehouseSave', !!window.ImageGenWarehouseSave?.init],
   ['ImageGenFinishRun', !!window.ImageGenFinishRun?.init],
   ['ImageGenPollWarehouse', !!window.ImageGenPollWarehouse?.init],
+  ['ImageGenJobState', !!window.ImageGenJobState?.create],
   ['ImageGenJobRunner', !!window.ImageGenJobRunner?.init],
   ['ImageGenSubmit', !!window.ImageGenSubmit?.init]
 ];
@@ -253,5 +268,147 @@ if (typeof submitApi.runImageGenWithPrompt !== 'function') {
   console.error('imagegen-bundle-vm-smoke FAIL: runImageGenWithPrompt missing');
   process.exit(1);
 }
+
+const hugeReference = `data:image/jpeg;base64,${'A'.repeat(256 * 1024)}`;
+const pendingForStorage = [{
+  id: 'pending-storage-test',
+  prompt: 'storage compaction',
+  refImage: hugeReference,
+  refImages: [hugeReference, 'storage://imagegen/stable.webp'],
+  referenceAssets: [{ ref: hugeReference, sourceCardId: 'card-1', jobId: 'job-source' }],
+  startedAt: Date.now()
+}];
+const jobStateApi = window.ImageGenJobState.create(() => ({
+  getPendingJobs: () => pendingForStorage,
+  setPendingJobs: () => {},
+  getFailedJobs: () => [],
+  setFailedJobs: () => {}
+}));
+const compactPending = jobStateApi.compactPendingJobsForStorage(pendingForStorage);
+const compactJson = JSON.stringify(compactPending);
+if (compactJson.includes('base64') || compactJson.length > 4096) {
+  console.error('imagegen-bundle-vm-smoke FAIL: pending reference payload was not compacted');
+  process.exit(1);
+}
+if (compactPending[0]?.refImages?.[0] !== 'storage://imagegen/stable.webp') {
+  console.error('imagegen-bundle-vm-smoke FAIL: stable pending reference was not preserved');
+  process.exit(1);
+}
+jobStateApi.persistPendingGenJobs();
+const persistedPending = sessionValues.get('promptrepo_pending_gen_jobs') || '';
+if (!persistedPending || persistedPending.includes('base64') || persistedPending.length > 4096) {
+  console.error('imagegen-bundle-vm-smoke FAIL: persisted pending state contains a large reference');
+  process.exit(1);
+}
+
+function trackedClassList() {
+  const values = new Set();
+  return {
+    add: (...names) => names.forEach((name) => values.add(name)),
+    remove: (...names) => names.forEach((name) => values.delete(name)),
+    contains: (name) => values.has(name),
+    toggle: (name, force) => {
+      const on = force == null ? !values.has(name) : !!force;
+      if (on) values.add(name);
+      else values.delete(name);
+      return on;
+    }
+  };
+}
+
+const submitAttrs = new Map();
+const submitButton = {
+  disabled: false,
+  textContent: '',
+  classList: trackedClassList(),
+  setAttribute: (name, value) => submitAttrs.set(name, String(value)),
+  removeAttribute: (name) => submitAttrs.delete(name)
+};
+const originalGetElementById = window.document.getElementById;
+window.document.getElementById = (id) => {
+  if (id === 'imageGenSubmit') return submitButton;
+  if (id === 'imageGenPrompt') return { value: 'smooth submit regression' };
+  if (id === 'imageGenModel') return { value: 'gpt-image-2' };
+  return null;
+};
+window.AuthGate = { requireAuth: () => true };
+window.PointsSystem = {
+  getImageGenCost: () => 5,
+  getCredits: () => 100,
+  useApiForAccount: () => true,
+  setCreditsFromServer: () => {},
+  updateCreditsUI: () => {}
+};
+let resolveGenerate;
+let generateStarted = false;
+window.PromptHubApi = {
+  generateImage: () => {
+    generateStarted = true;
+    return new Promise((resolve) => { resolveGenerate = resolve; });
+  }
+};
+let mobileViewSwitches = 0;
+window.MobileUI = { setImageGenView: () => { mobileViewSwitches += 1; } };
+let hiddenFeedRenders = 0;
+const submitUxApi = window.ImageGenSubmit.init({
+  getImageGenFormMeta: () => ({ model: 'gpt-image-2', resolution: '1k', quality: 'standard', size: '1:1' }),
+  isImageGenMidjourneyModel: () => false,
+  getImageGenMjMode: () => 'imagine',
+  getImageGenRefImages: () => [],
+  getImageGenPrimaryRef: () => null,
+  getImageGenReferenceAssets: () => [],
+  getImageGenBatchCount: () => 1,
+  getImageGenCardTitle: () => '',
+  isImageGenBatchSplitCards: () => false,
+  getImageGenModelCatalogReady: () => true,
+  getImageGenBatchRunning: () => false,
+  genId: () => 'pending-submit-test',
+  toast: () => {},
+  restoreImageGenSubmitLabel: () => { submitButton.textContent = '生成图片'; },
+  saveImageGenDraft: () => {},
+  getImageGenSaveTarget: () => ({ targetGroup: null, targetTags: null }),
+  unshiftPendingJob: () => {},
+  persistPendingGenJobs: () => {},
+  switchImageGenFeedToRecent: () => {},
+  updateImageGenFeedHint: () => {},
+  renderImageGenFeed: () => { hiddenFeedRenders += 1; },
+  safeRenderImageGenFeed: () => { hiddenFeedRenders += 1; },
+  isImageGenMobileFormActive: () => true,
+  quoteGenerationCost: async () => ({ cost: 5, fromApi: true }),
+  getGenCostQuoteTimeoutMs: () => 20,
+  getSubmitSuccessHoldMs: () => 5,
+  resolveRefUrlsFromList: async () => [],
+  removePendingJob: () => {},
+  failPendingJob: () => {},
+  tryRecoverOrphanGenJobAfterSubmitError: async () => false,
+  deferPendingJobRecovery: () => {},
+  pendingJobToPollCtx: () => ({}),
+  trackSessionGenJob: () => {},
+  pollGenerationJobUntilDone: () => {}
+});
+const submitPromise = submitUxApi.runImageGenWithPrompt();
+if (!submitButton.disabled || !submitButton.classList.contains('is-submitting') || submitAttrs.get('aria-busy') !== 'true') {
+  console.error('imagegen-bundle-vm-smoke FAIL: submit feedback was not synchronous');
+  process.exit(1);
+}
+const submitStartDeadline = Date.now() + 250;
+while (!generateStarted && Date.now() < submitStartDeadline) {
+  await new Promise((resolve) => setTimeout(resolve, 5));
+}
+if (!generateStarted || !submitButton.classList.contains('is-submitting')) {
+  console.error('imagegen-bundle-vm-smoke FAIL: submit feedback did not remain active during request');
+  process.exit(1);
+}
+resolveGenerate({ ok: true, data: { status: 'processing', jobId: 'job-submit-test', creditsCharged: 5 } });
+const submitResult = await submitPromise;
+if (!submitResult?.ok || !submitButton.classList.contains('is-submitted')) {
+  console.error('imagegen-bundle-vm-smoke FAIL: accepted submit confirmation missing');
+  process.exit(1);
+}
+if (hiddenFeedRenders !== 0 || mobileViewSwitches !== 0) {
+  console.error('imagegen-bundle-vm-smoke FAIL: mobile form submit redrew or switched the hidden feed');
+  process.exit(1);
+}
+window.document.getElementById = originalGetElementById;
 
 console.log('imagegen-bundle-vm-smoke OK:', checks.map(([n]) => n).join(', '));

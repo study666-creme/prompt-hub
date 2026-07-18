@@ -219,14 +219,10 @@
       <header class="subscribe-panel-head">
         <div>
           <h3 id="subscribePanelTitle">会员与积分</h3>
-          <p class="subscribe-panel-sub" id="subscribePanelSub">激活码兑换 · 添加微信 <code class="subscribe-wechat-inline">bz4jx3jp2li1</code> 购买会员/积分</p>
+          <p class="subscribe-panel-sub" id="subscribePanelSub">积分充值与会员开通 · 支持支付宝和微信支付</p>
         </div>
         <button type="button" class="modal-close-btn" id="subscribeCloseBtn" aria-label="关闭"><span aria-hidden="true">×</span></button>
       </header>
-      <div class="subscribe-study-banner" id="subscribeStudyBanner" hidden>
-        <strong>仅展示参考学习</strong>
-        <span>本页套餐与价格仅供了解；有疑问请咨询微信 <code class="subscribe-wechat-inline">bz4jx3jp2li1</code></span>
-      </div>
       <div class="subscribe-main-tabs" role="tablist" aria-label="商店分类">
         <button type="button" class="subscribe-main-tab" data-subscribe-main="credits" role="tab" aria-selected="false">
           <span class="subscribe-main-tab-label">积分</span>
@@ -239,24 +235,14 @@
       </div>
       <div class="subscribe-panel-body">
         <div class="subscribe-membership-status-wrap" id="subscribeMembershipStatus" hidden></div>
-        <div class="subscribe-redeem-box" id="subscribeRedeemBox">
-          <p class="subscribe-redeem-title">激活码兑换</p>
-          <div class="subscribe-credit-mode" id="subscribeCreditMode"></div>
-          <p class="subscribe-shop-hint">积分卡密、会员卡密都在此兑换。会员卡：先选上方「每日 / 一次性」（<strong>30 天以下短期卡仅支持每日领取</strong>），再输入激活码（同一码通用；轻量会员固定每日）。</p>
-          <div class="imagegen-activate-row subscribe-redeem-row">
-            <input type="text" id="activationCodeInputSubscribe" class="settings-input" placeholder="输入激活码" autocomplete="off">
-            <button type="button" class="btn btn-primary btn-sm" onclick="redeemActivationCode()">兑换</button>
-          </div>
-          <div class="subscribe-wechat-row">
-            <span class="subscribe-wechat-label">微信购买 / 充值</span>
-            <code class="subscribe-wechat-id" id="subscribeWechatId">bz4jx3jp2li1</code>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="copyWechatId()">复制微信号</button>
-          </div>
-          <p class="subscribe-shop-hint subscribe-wechat-hint">添加微信备注「提示词仓库」，说明要买的套餐；转账后站长发激活码，在上方兑换。</p>
-        </div>
         <section class="subscribe-shop-section hidden" id="subscribeCreditsSection" data-subscribe-section="credits">
-          <p class="subscribe-shop-section-title">选择积分套餐</p>
-          <p class="subscribe-shop-hint">点击「购买」复制微信号，加微信联系站长购买；收到激活码后在上方兑换。</p>
+          <div class="subscribe-section-intro">
+            <div>
+              <p class="subscribe-shop-section-title">选择充值金额</p>
+              <p class="subscribe-shop-hint">实付金额不打折，优惠以额外站内积分形式到账；支付成功后自动充值。</p>
+            </div>
+            <span class="subscribe-secure-pay">安全在线支付</span>
+          </div>
           <div class="subscribe-shop-grid" id="subscribeCreditsGrid"></div>
         </section>
         <section class="subscribe-shop-section" id="subscribeMembershipSection" data-subscribe-section="membership">
@@ -266,13 +252,55 @@
           <button type="button" class="subscribe-billing-tab" data-subscribe-billing="auto_year">连续包年</button>
           <button type="button" class="subscribe-billing-tab" data-subscribe-billing="single_year">单年购买</button>
         </div>
+        <div class="subscribe-member-options">
+          <div class="subscribe-credit-mode" id="subscribeCreditMode"></div>
+        </div>
         <div class="subscribe-mini-offer" id="subscribeMiniOffer"></div>
         <div class="subscribe-lite-plan-row" id="subscribeLitePlanRow"></div>
         <div class="subscribe-plans-grid" id="subscribePlansGrid"></div>
         <p class="subscribe-legal">普通用户免费：每日 5 积分、云存储 300MB。会员在 300MB 基础上额外扩容（轻量 +2GB 等）。卡片式创作<strong>限免</strong>（登录可用，对话/生图按积分计费）。连续包月价见各档对比。免费会员请点侧栏「免费试用」完成任务领取。详见 <a href="terms.html" class="link-inline">用户协议</a>。</p>
         </section>
+        <details class="subscribe-redeem-box" id="subscribeRedeemBox">
+          <summary class="subscribe-redeem-summary">
+            <span>已有激活码？</span>
+            <small>在这里兑换</small>
+          </summary>
+          <div class="subscribe-redeem-content">
+            <p class="subscribe-shop-hint">输入积分卡密或会员卡密完成兑换。会员积分发放方式可在「会员」页选择。</p>
+            <div class="imagegen-activate-row subscribe-redeem-row">
+              <input type="text" id="activationCodeInputSubscribe" class="settings-input" placeholder="输入激活码" autocomplete="off">
+              <button type="button" class="btn btn-primary btn-sm" onclick="redeemActivationCode()">立即兑换</button>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
+  </div>
+
+  <div class="payment-method-overlay" id="paymentMethodOverlay" hidden aria-hidden="true">
+    <section class="payment-method-sheet" role="dialog" aria-modal="true" aria-labelledby="paymentMethodTitle">
+      <header class="payment-method-head">
+        <div>
+          <p class="payment-method-eyebrow">确认订单</p>
+          <h3 id="paymentMethodTitle">选择支付方式</h3>
+        </div>
+        <button type="button" class="payment-method-close" id="paymentMethodCloseBtn" aria-label="关闭支付方式选择"><span aria-hidden="true">×</span></button>
+      </header>
+      <div class="payment-method-summary" id="paymentMethodSummary"></div>
+      <div class="payment-method-actions" aria-label="支付方式">
+        <button type="button" class="payment-method-option payment-method-option--alipay" data-payment-method="alipay">
+          <span class="payment-method-icon">支</span>
+          <span><strong>支付宝支付</strong><small>跳转支付宝完成付款</small></span>
+          <span class="payment-method-arrow" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="payment-method-option payment-method-option--wxpay" data-payment-method="wxpay">
+          <span class="payment-method-icon">微</span>
+          <span><strong>微信支付</strong><small>跳转微信完成付款</small></span>
+          <span class="payment-method-arrow" aria-hidden="true">›</span>
+        </button>
+      </div>
+      <p class="payment-method-footnote">支付成功后将自动到账，请勿重复付款。</p>
+    </section>
   </div>
 
   <div class="mobile-drawer-overlay" id="mobileDrawerOverlay" hidden aria-hidden="true" style="display:none"></div>

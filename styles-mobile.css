@@ -935,17 +935,31 @@
     padding-top: env(safe-area-inset-top);
     padding-bottom: 0;
     pointer-events: auto;
+    visibility: visible;
+    transform: translate3d(0, 0, 0);
+    transition:
+      transform 340ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 220ms ease,
+      visibility 0s linear 0s;
+    will-change: transform, opacity;
   }
 
   .edit-panel.hidden {
+    display: flex !important;
     width: 100% !important;
-    transform: translateX(100%);
+    visibility: hidden;
+    transform: translate3d(100%, 0, 0);
     opacity: 0;
     pointer-events: none;
+    transition:
+      transform 280ms cubic-bezier(0.4, 0, 0.6, 1),
+      opacity 180ms ease,
+      visibility 0s linear 280ms;
   }
 
   .edit-panel:not(.hidden) {
-    transform: translateX(0);
+    visibility: visible;
+    transform: translate3d(0, 0, 0);
     opacity: 1;
   }
 
@@ -2422,8 +2436,15 @@
   }
   #communityGrid .card-media.card-media--load-failed .card-img,
   #creationsGrid .card-media.card-media--load-failed .card-img {
-    visibility: visible;
-    opacity: 0.35;
+    visibility: hidden !important;
+    opacity: 0 !important;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .edit-panel,
+    .edit-panel.hidden {
+      transition: none !important;
+    }
   }
 
   body.global-view #pageCommunity .feature-header,

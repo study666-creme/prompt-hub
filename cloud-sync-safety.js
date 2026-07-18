@@ -24,10 +24,10 @@
 
   function imagePresenceScore(image) {
     if (!image || typeof image !== 'string') return 0;
+    if (image.startsWith('storage://')) return 6;
     if (image.startsWith('data:image/')) return 5;
     if (/^https?:\/\//i.test(image)) return 4;
     if (image.startsWith('blob:')) return 3;
-    if (image.startsWith('storage://')) return 2;
     return 0;
   }
 

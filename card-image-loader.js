@@ -206,12 +206,10 @@
     }
     if (jobId && window.PromptHubApi?.getGenerationImageUrl) {
       try {
-        const r = await window.PromptHubApi.getGenerationImageUrl(jobId);
+        const r = await window.PromptHubApi.getGenerationImageUrl(jobId, {
+          variant: wantFull ? 'full' : 'grid'
+        });
         const jobUrl = r?.ok ? r.data?.url : '';
-        if (jobUrl && window.PromptHubApi?.fetchMediaAsBlobUrl) {
-          const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(jobUrl);
-          if (blobUrl && isReadySrc(blobUrl, img)) return blobUrl;
-        }
         if (jobUrl && isReadySrc(jobUrl, img)) return jobUrl;
       } catch (e) { /* continue with archived/local candidates */ }
     }
@@ -773,6 +771,7 @@
         return;
       }
       if (retryWarehouseList()) return;
+      if (ownList && jobIdFromImg(img) && recoverWarehouseListGeneratedImg(img, media)) return;
       if (window.FeatureDraft?.removeBrokenCommunityFeedCard?.(media)) return;
       const inWarehouseOwn = media.closest('#cardsContainer') && !media.closest('.card[data-community-collect="1"]');
       if (inWarehouseOwn && isGridFail && ref && !img.dataset.listPrimaryRetried) {
@@ -874,12 +873,18 @@
       }
       if (isOwnWarehouseListImg(img)) {
         window.SupabaseSync?.clearPathMissingForCard?.(cardId, ref);
-        void resolveUrl(ref, cardId, { bypassSignBudget: true }, img).then((url) => {
+        void resolveUrl(ref, cardId, {
+          jobId: jobId || undefined,
+          bypassSignBudget: true
+        }, img).then((url) => {
           if (url) {
             applyUrlToImg(img, url);
             return;
           }
-          window.finalizeWarehouseCardMediaFailure?.(feedMediaFromImg(img), img);
+          const media = feedMediaFromImg(img);
+          if (!jobId || !recoverWarehouseListGeneratedImg(img, media)) {
+            window.finalizeWarehouseCardMediaFailure?.(media, img);
+          }
         });
         return;
       }
@@ -903,6 +908,7 @@
         return;
       }
       if (isOwnWarehouseListImg(img)) {
+        if (jobId && recoverWarehouseListGeneratedImg(img, feedMediaFromImg(img))) return;
         if (!queueGridBackfillForImg(img)) {
           if (isOwnImageGenWarehouseImg(img) && img.dataset.igWhResolveRetry !== '1') {
             img.dataset.igWhResolveRetry = '1';

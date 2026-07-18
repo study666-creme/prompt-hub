@@ -15,6 +15,7 @@ import { assetPackagesPublicRoutes, assetPackagesRoutes } from './asset-packages
 import { rateLimit } from '../../middleware/rate-limit';
 import { modelCatalogRoutes } from './models';
 import { videoRoutes } from './video';
+import { paymentRoutes } from './payments';
 
 export const v1 = new Hono<{ Bindings: Env }>();
 
@@ -45,6 +46,7 @@ v1.route('/redeem', redeemRoutes);
 v1.route('/generate', generateRoutes);
 v1.route('/models', modelCatalogRoutes);
 v1.route('/video', videoRoutes);
+v1.route('/payments', paymentRoutes);
 v1.route('/chat', chatRoutes);
 v1.route('/prompt-tools', promptToolsRoutes);
 v1.route('/community', communityRoutes);

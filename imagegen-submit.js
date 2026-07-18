@@ -15,6 +15,22 @@
     return typeof fn === 'function' ? fn(...args) : undefined;
   }
 
+  function waitForSubmitPaint() {
+    if (typeof global.requestAnimationFrame !== 'function') return Promise.resolve();
+    return new Promise((resolve) => {
+      global.requestAnimationFrame(() => global.requestAnimationFrame(resolve));
+    });
+  }
+
+  function shouldRenderSubmitFeed() {
+    return !d().isImageGenMobileFormActive?.();
+  }
+
+  function renderSubmitFeed(opts = { preserveScroll: true }) {
+    if (!shouldRenderSubmitFeed()) return;
+    d().renderImageGenFeed(opts);
+  }
+
   function normalizeReferenceAssets(refs, assets, fallback = {}) {
     const list = Array.isArray(refs) ? refs.filter(Boolean) : [];
     const sourceAssets = Array.isArray(assets) ? assets : [];
@@ -59,25 +75,55 @@
       btn.disabled = false;
     }
     if (singleRun && btn) {
+      if (btn.__imageGenSubmitResetTimer && typeof global.clearTimeout === 'function') {
+        global.clearTimeout(btn.__imageGenSubmitResetTimer);
+        btn.__imageGenSubmitResetTimer = null;
+      }
       btn.disabled = true;
+      btn.classList.remove('is-submitted');
       btn.classList.add('is-submitting');
       btn.setAttribute('aria-busy', 'true');
-      btn.textContent = '准备中…';
+      btn.textContent = '正在准备…';
     }
 
     let pendingId = null;
+    let submitAccepted = false;
     let submitUiReleased = false;
-    const releaseSubmitUi = () => {
+    const releaseSubmitUi = (accepted = submitAccepted) => {
       if (!singleRun || submitUiReleased) return;
       submitUiReleased = true;
       if (btn) {
-        btn.disabled = false;
         btn.classList.remove('is-submitting');
         btn.removeAttribute('aria-busy');
-        d().restoreImageGenSubmitLabel();
+        if (accepted) {
+          btn.classList.add('is-submitted');
+          btn.textContent = '已开始生成';
+          btn.disabled = true;
+          const reset = () => {
+            btn.__imageGenSubmitResetTimer = null;
+            btn.classList.remove('is-submitted');
+            btn.disabled = false;
+            d().restoreImageGenSubmitLabel();
+          };
+          if (typeof global.setTimeout === 'function') {
+            btn.__imageGenSubmitResetTimer = global.setTimeout(
+              reset,
+              d().getSubmitSuccessHoldMs?.() ?? 720
+            );
+          } else {
+            reset();
+          }
+        } else {
+          btn.classList.remove('is-submitted');
+          btn.disabled = false;
+          d().restoreImageGenSubmitLabel();
+        }
       }
     };
     try {
+      // Let the browser paint the pressed/loading state before storage, image work or networking.
+      if (singleRun) await waitForSubmitPaint();
+
       const meta = d().getImageGenFormMeta();
       const { model, resolution, quality, size } = meta;
       let cost = global.PointsSystem?.getImageGenCost?.(model, resolution) ?? 10;
@@ -163,13 +209,10 @@
       d().persistPendingGenJobs();
       d().switchImageGenFeedToRecent();
       d().updateImageGenFeedHint();
-      d().renderImageGenFeed({ preserveScroll: true });
-      if (singleRun && d().isMobileViewport?.() && global.MobileUI?.setImageGenView) {
-        global.MobileUI.setImageGenView('feed', { scrollToTop: false });
-      }
-      releaseSubmitUi();
+      renderSubmitFeed({ preserveScroll: true });
 
       if (useApi) {
+        if (singleRun && btn) btn.textContent = '正在确认任务…';
         const localCost = cost;
         const quoted = await Promise.race([
           d().quoteGenerationCost(resolution, quality, model, cost),
@@ -185,20 +228,23 @@
 
       if (balance < cost) {
         d().removePendingJob(pendingId);
-        d().renderImageGenFeed({ preserveScroll: true });
+        renderSubmitFeed({ preserveScroll: true });
         d().toast(`积分不足（需要 ${cost}，当前 ${balance}）。请使用激活码兑换`);
         return { ok: false, reason: 'credits' };
       }
 
       if (!useApi && !global.PointsSystem?.deductCredits?.(cost)) {
         d().removePendingJob(pendingId);
-        d().renderImageGenFeed({ preserveScroll: true });
+        renderSubmitFeed({ preserveScroll: true });
         d().toast('积分扣除失败');
         return { ok: false };
       }
 
       if (useApi) {
         const refSources = submittedRefImages;
+        if (singleRun && btn) {
+          btn.textContent = refSources.length ? '正在处理参考图…' : '正在提交…';
+        }
         const refUrls = await d().resolveRefUrlsFromList(refSources, submittedReferenceAssets);
         if (refSources.length && refUrls.length < refSources.length && !batchOpts.silentToast) {
           d().toast(`已使用 ${refUrls.length}/${refSources.length} 张参考图继续生成`);
@@ -212,6 +258,7 @@
           refImageUrls: refUrls.length ? refUrls : undefined,
           ...(meta.mjParams ? { mjParams: meta.mjParams } : {})
         };
+        if (singleRun && btn) btn.textContent = '正在提交…';
         let gen;
         if (mjBlendMode) {
           gen = await global.PromptHubApi.mjBlend({
@@ -240,7 +287,8 @@
           if (networkLike) {
             const recovered = await d().tryRecoverOrphanGenJobAfterSubmitError(genPayload, pendingId, pendingJob);
             if (recovered) {
-              d().renderImageGenFeed({ preserveScroll: true });
+              submitAccepted = true;
+              renderSubmitFeed({ preserveScroll: true });
               return { ok: true, recovered: true, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
             }
             d().deferPendingJobRecovery(
@@ -250,7 +298,8 @@
                 ? '连接超时（524），任务可能已提交，后台继续等待…'
                 : ge('slowGenDeferNote', d().pendingJobToPollCtx(pendingJob))
             );
-            d().renderImageGenFeed({ preserveScroll: true });
+            submitAccepted = true;
+            renderSubmitFeed({ preserveScroll: true });
             return { ok: true, recovered: true, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
           }
           const errMsg = ge('friendlyGenErrorMessage', gen.message);
@@ -260,11 +309,12 @@
               d().pendingJobToPollCtx(pendingJob),
               '连接超时（524），任务可能已提交，后台继续等待…'
             );
-            d().renderImageGenFeed({ preserveScroll: true });
+            submitAccepted = true;
+            renderSubmitFeed({ preserveScroll: true });
             return { ok: true, recovered: true, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
           }
           d().failPendingJob(pendingId, errMsg);
-          d().renderImageGenFeed({ preserveScroll: true });
+          renderSubmitFeed({ preserveScroll: true });
           await global.PointsSystem?.refreshCreditsFromServer?.();
           if (!batchOpts.silentToast) d().toast(errMsg);
           return { ok: false, message: errMsg, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
@@ -302,6 +352,7 @@
                 fromInspirationDraw: !!batchOpts.fromInspirationDraw,
                 referenceAssets: submittedReferenceAssets
               });
+              submitAccepted = true;
               return { ok: true, creditsCharged: cost };
             }
             await d().saveMjToWarehouse({
@@ -352,13 +403,14 @@
               pendingId
             });
           }
+          submitAccepted = true;
           return { ok: true, creditsCharged: cost };
         }
 
         const jobId = gen.data.jobId;
         if (!jobId) {
           d().failPendingJob(pendingId, '未收到任务编号');
-          d().renderImageGenFeed();
+          renderSubmitFeed();
           if (!batchOpts.silentToast) d().toast('未收到任务编号，请重试');
           return { ok: false, message: '未收到任务编号', batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
         }
@@ -368,10 +420,11 @@
         d().trackSessionGenJob(jobId);
         d().persistPendingGenJobs();
         if (!batchOpts.silentToast) {
+          const mobileForm = d().isImageGenMobileFormActive?.();
           d().toast(
             pendingJob.slowProvider
-              ? '已提交，约 1–12 分钟出图，下方可看进度'
-              : '已提交生图，下方可查看进度，可继续点击生成'
+              ? (mobileForm ? '已提交，约 1–12 分钟出图，可在「作品」查看进度' : '已提交，约 1–12 分钟出图，下方可看进度')
+              : (mobileForm ? '已提交生图，可在「作品」查看进度，也可继续生成' : '已提交生图，下方可查看进度，可继续生成')
           );
         }
         void d().pollGenerationJobUntilDone(jobId, pendingId, {
@@ -392,18 +445,19 @@
           batchTotal: batchOpts.batchTotal || null,
           batchId: batchOpts.batchId || null
         });
+        submitAccepted = true;
         return { ok: true, creditsCharged: cost };
       }
 
       d().removePendingJob(pendingId);
-      d().renderImageGenFeed();
+      renderSubmitFeed();
       if (!batchOpts.silentToast) d().toast('请登录并连接后端 API 后使用真实生图（演示占位已关闭）');
       return { ok: false };
     } catch (e) {
       console.error('[imagegen] runImageGenWithPrompt failed', e);
       if (typeof pendingId === 'string' && pendingId) {
         d().failPendingJob(pendingId, String(e?.message || '生图提交失败'));
-        d().safeRenderImageGenFeed({ preserveScroll: true });
+        if (shouldRenderSubmitFeed()) d().safeRenderImageGenFeed({ preserveScroll: true });
       }
       if (!batchOpts.silentToast) {
         const msg = String(e?.message || '');
@@ -425,7 +479,7 @@
 
   function init(injected) {
     deps = injected || {};
-    return { runImageGenWithPrompt };
+    return { runImageGenWithPrompt, waitForSubmitPaint };
   }
 
   global.ImageGenSubmit = { init };

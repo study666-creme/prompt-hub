@@ -319,7 +319,9 @@
   }
 
   async function requestWithPrepare(method, path, body, opts) {
-    await prepareApiCall({ light: opts?.lightPrepare });
+    if (!opts?.directFirst) {
+      await prepareApiCall({ light: opts?.lightPrepare });
+    }
     let r = await request(method, path, body, opts);
     if (!r.ok && (r.code === 'NETWORK_ERROR' || r.code === 'API_UNREACHABLE')) {
       await prepareApiCall();
@@ -578,7 +580,8 @@
     window.__PH_API_DOWN_UNTIL__ = 0;
     return requestWithPrepare('POST', '/api/v1/generate', payload, {
       timeoutMs: API_GENERATE_TIMEOUT_MS,
-      lightPrepare: true
+      lightPrepare: true,
+      directFirst: true
     });
   }
 
@@ -593,7 +596,8 @@
     window.__PH_API_DOWN_UNTIL__ = 0;
     return requestWithPrepare('POST', '/api/v1/generate/mj-action', payload, {
       timeoutMs: API_GENERATE_TIMEOUT_MS,
-      lightPrepare: true
+      lightPrepare: true,
+      directFirst: true
     });
   }
 
@@ -601,7 +605,8 @@
     window.__PH_API_DOWN_UNTIL__ = 0;
     return requestWithPrepare('POST', '/api/v1/generate/mj-blend', payload, {
       timeoutMs: API_GENERATE_TIMEOUT_MS,
-      lightPrepare: true
+      lightPrepare: true,
+      directFirst: true
     });
   }
 
@@ -655,6 +660,14 @@
       null,
       { timeoutMs: Math.max(API_TIMEOUT_MS, 45000) }
     );
+  }
+
+  async function createPaymentCheckout(productId, paymentMethod, creditGrantMode) {
+    return requestWithPrepare('POST', '/api/v1/payments/checkout', {
+      productId,
+      paymentMethod,
+      creditGrantMode
+    });
   }
 
   async function listRecentGeneratedCreations(opts = {}) {
@@ -913,8 +926,12 @@
     }
   }
 
-  async function getGenerationImageUrl(jobId) {
-    return request('GET', `/api/v1/media/generation/${encodeURIComponent(jobId)}/url`);
+  async function getGenerationImageUrl(jobId, opts = {}) {
+    const variant = opts.variant === 'grid' ? 'grid' : 'full';
+    return request(
+      'GET',
+      `/api/v1/media/generation/${encodeURIComponent(jobId)}/url?variant=${variant}`
+    );
   }
 
   async function fetchMediaAsBlobUrl(remoteUrl) {
@@ -1060,6 +1077,7 @@
     checkinMembershipTask,
     redeemInviteCode,
     setCreditGrantMode,
+    createPaymentCheckout,
     getGenerationModels,
     getGenerationCost,
     generateImage,

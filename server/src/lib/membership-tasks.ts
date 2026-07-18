@@ -440,8 +440,31 @@ export async function extendMembershipDays(
   opts?: { creditGrantMode?: 'daily' | 'bundle' }
 ): Promise<Profile> {
   profile = await resolveMembershipRollover(admin, profile);
+  const patch = buildMembershipExtensionPatch(profile, days, tier, opts);
 
-  const now = Date.now();
+  const { data, error } = await admin
+    .from('profiles')
+    .update(patch)
+    .eq('user_id', profile.user_id)
+    .select()
+    .single();
+  if (error) {
+    const pgMsg =
+      typeof error.message === 'string'
+        ? error.message
+        : 'extend_membership_failed';
+    throw new Error(pgMsg);
+  }
+  return data as Profile;
+}
+
+export function buildMembershipExtensionPatch(
+  profile: Profile,
+  days: number,
+  tier: NonNullable<Profile['membership_tier']> = 'basic',
+  opts?: { creditGrantMode?: 'daily' | 'bundle'; nowMs?: number }
+): Record<string, unknown> {
+  const now = opts?.nowMs ?? Date.now();
   const curUntil = profile.membership_until
     ? new Date(profile.membership_until).getTime()
     : 0;
@@ -487,24 +510,8 @@ export async function extendMembershipDays(
     patch.membership_queued_until = null;
   }
 
-  if (opts?.creditGrantMode) {
-    patch.credit_grant_mode = opts.creditGrantMode;
-  }
-
-  const { data, error } = await admin
-    .from('profiles')
-    .update(patch)
-    .eq('user_id', profile.user_id)
-    .select()
-    .single();
-  if (error) {
-    const pgMsg =
-      typeof error.message === 'string'
-        ? error.message
-        : 'extend_membership_failed';
-    throw new Error(pgMsg);
-  }
-  return data as Profile;
+  if (opts?.creditGrantMode) patch.credit_grant_mode = opts.creditGrantMode;
+  return patch;
 }
 
 /** 任务/邀请赠送的会员走 daily；老数据若仍是 bundle 且几乎无永久积分则自动修正 */

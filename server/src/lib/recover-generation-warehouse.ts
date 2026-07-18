@@ -455,6 +455,21 @@ export type RecoverWarehouseOpts = {
   jobIds?: string[];
 };
 
+export function filterWarehouseRepairCardsByJobIds(
+  cards: Array<Record<string, unknown>>,
+  jobIds?: string[]
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(jobIds) || jobIds.length === 0) return cards;
+  const requested = new Set(
+    jobIds.map((id) => String(id || '').replace(/#\d+$/, '')).filter(Boolean)
+  );
+  if (!requested.size) return cards;
+  return cards.filter((card) => {
+    const cardJobId = String(card.genJobId || '').replace(/#\d+$/, '');
+    return !!cardJobId && requested.has(cardJobId);
+  });
+}
+
 function mergeJobTombstones(
   payload: { settings?: Record<string, unknown> },
   clientTombstones?: Record<string, number>
@@ -601,9 +616,10 @@ export async function repairWarehouseCardImagesFromJobs(
   const scanMax = Math.min(20, Math.max(1, opts.max ?? 12));
   const repairMax = Math.min(8, scanMax);
   const { payload, cards } = await loadUserPayload(admin, userId);
+  const repairCards = filterWarehouseRepairCardsByJobIds(cards, opts.jobIds);
   const cardOffset = Math.max(0, opts.offset ?? 0);
-  const cardsSlice = cards.slice(cardOffset, cardOffset + scanMax);
-  const nextOffset = cardOffset + scanMax < cards.length ? cardOffset + scanMax : null;
+  const cardsSlice = repairCards.slice(cardOffset, cardOffset + scanMax);
+  const nextOffset = cardOffset + scanMax < repairCards.length ? cardOffset + scanMax : null;
   const storageMode = opts.env ? mediaStorageMode(opts.env) : 'supabase';
   const r2Enabled = !!(opts.env && hasR2(opts.env));
 

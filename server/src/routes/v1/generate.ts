@@ -1327,6 +1327,7 @@ generateRoutes.post('/recover-warehouse', async c => {
       days: body.days,
       hours: body.hours,
       offset: body.offset,
+      jobIds: body.jobIds,
       providerScope,
       env: c.env,
       deletedGenerationJobTombstones: body.deletedGenerationJobTombstones

@@ -45,12 +45,8 @@
     const mobileForm = isImageGenMobileFormActive();
     const delay = pending ? (opts.urgent ? 400 : 900) : (mobileForm ? 8000 : 2800);
 
-    scheduleGenJobsSync(delay);
     if (pending || opts.forceJobs) {
-      setTimeout(() => {
-        if (token !== imageGenBootSyncToken) return;
-        void resumePendingGenerationJobs({ force: pending });
-      }, delay);
+      scheduleGenJobsSync(delay);
     }
 
     const runQuiet = () => {

@@ -522,6 +522,7 @@
       renderImageGenFeed: (...a) => renderImageGenFeed(...a),
       safeRenderImageGenFeed,
       isMobileViewport,
+      isImageGenMobileFormActive,
       quoteGenerationCost,
       getGenCostQuoteTimeoutMs: () => GEN_COST_QUOTE_TIMEOUT_MS,
       resolveRefUrlsFromList: (sources) => rr('resolveRefUrlsFromList', sources),

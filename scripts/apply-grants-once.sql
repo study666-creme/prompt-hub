@@ -4,6 +4,7 @@ grant select, insert on public.credit_ledger to service_role;
 grant select, insert, update on public.activation_codes to service_role;
 grant select, insert on public.code_redemptions to service_role;
 grant select, insert, update on public.generation_requests to service_role;
+grant select, insert, update, delete on public.payment_webhook_events to service_role;
 grant select, insert, update, delete on public.community_posts to service_role;
 grant select, insert, update on public.user_data to service_role;
 

@@ -46,6 +46,10 @@ Write-Host "verify-mobile-feed-regression ..."
 & node (Join-Path $root "scripts\verify-mobile-feed-regression.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+Write-Host "verify-image-delivery-regression ..."
+& node (Join-Path $root "scripts\verify-image-delivery-regression.mjs")
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 Write-Host "verify-reference-assets-regression ..."
 & node (Join-Path $root "scripts\verify-reference-assets-regression.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
