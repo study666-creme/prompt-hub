@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildMembershipExtensionPatch } from './membership-tasks';
 import type { Profile } from './supabase';
-import { createEpayCheckout } from './epay';
+import { createEpayCheckout, PAYMENT_PRODUCTS } from './epay';
 import { isRecoverablePurgedShopCode } from '../routes/v1/redeem';
 
 function profile(overrides: Partial<Profile> = {}): Profile {
@@ -78,6 +78,14 @@ describe('membership payment extension patch', () => {
 });
 
 describe('payment checkout URL', () => {
+  it('keeps every credit pack at exactly 100 credits per yuan', () => {
+    const creditProducts = PAYMENT_PRODUCTS.filter(product => product.kind === 'credits');
+    expect(creditProducts).toHaveLength(6);
+    for (const product of creditProducts) {
+      expect(product.credits).toBe(product.amountCents);
+    }
+  });
+
   it('uses the hosted cashier instead of returning an app-only payment scheme', async () => {
     const checkout = await createEpayCheckout({
       EPAY_MERCHANT_ID: '1000',

@@ -50,9 +50,9 @@ const CREDIT_PRODUCTS: CreditProduct[] = [
   { kind: 'credits', id: 'points-10', amountCents: 1000, credits: 1000 },
   { kind: 'credits', id: 'points-20', amountCents: 2000, credits: 2000 },
   { kind: 'credits', id: 'points-50', amountCents: 5000, credits: 5000 },
-  { kind: 'credits', id: 'points-100', amountCents: 10000, credits: 10100 },
-  { kind: 'credits', id: 'points-200', amountCents: 20000, credits: 21000 },
-  { kind: 'credits', id: 'points-500', amountCents: 50000, credits: 55000 }
+  { kind: 'credits', id: 'points-100', amountCents: 10000, credits: 10000 },
+  { kind: 'credits', id: 'points-200', amountCents: 20000, credits: 20000 },
+  { kind: 'credits', id: 'points-500', amountCents: 50000, credits: 50000 }
 ];
 
 const MEMBERSHIP_PRODUCTS: MembershipProduct[] = [

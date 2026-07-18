@@ -19,13 +19,12 @@
     { id: 'points-10', price: 10, credits: 1000 },
     { id: 'points-20', price: 20, credits: 2000 },
     { id: 'points-50', price: 50, credits: 5000 },
-    { id: 'points-100', price: 100, credits: 10100 },
-    { id: 'points-200', price: 200, credits: 21000 },
-    { id: 'points-500', price: 500, credits: 55000 }
+    { id: 'points-100', price: 100, credits: 10000 },
+    { id: 'points-200', price: 200, credits: 20000 },
+    { id: 'points-500', price: 500, credits: 50000 }
   ].map((pack) => ({
     ...pack,
-    label: `${pack.credits} 积分`,
-    bonus: Math.max(0, pack.credits - pack.price * CREDITS_PER_YUAN)
+    label: `${pack.credits} 积分`
   }));
 
   let pendingPaymentProduct = null;
@@ -34,9 +33,6 @@
   function getPaymentProduct(productId, creditGrantMode) {
     const creditPack = CREDIT_PACKS.find((pack) => pack.id === productId);
     if (creditPack) {
-      const bonusPercent = creditPack.bonus > 0
-        ? Math.round(creditPack.bonus / (creditPack.price * CREDITS_PER_YUAN) * 100)
-        : 0;
       return {
         productId,
         creditGrantMode: null,
@@ -45,9 +41,7 @@
         name: `${creditPack.credits.toLocaleString('zh-CN')} 积分`,
         price: creditPack.price,
         arrival: `到账 ${creditPack.credits.toLocaleString('zh-CN')} 积分`,
-        bonus: creditPack.bonus > 0
-          ? `额外赠 ${creditPack.bonus.toLocaleString('zh-CN')} 积分（+${bonusPercent}%）`
-          : '基础充值档位'
+        bonus: '1 元 = 100 积分'
       };
     }
 
@@ -543,7 +537,7 @@
     if (title) title.textContent = currentMainTab === 'credits' ? '积分充值' : '会员订阅';
     if (sub) {
       sub.textContent = currentMainTab === 'credits'
-        ? '1 元 = 100 积分 · 实付原金额，指定档位额外赠送站内积分'
+        ? '1 元 = 100 积分 · 支付成功后自动到账'
         : '轻量特惠 + 三档会员 · 支持支付宝和微信支付';
     }
     if (currentMainTab === 'credits') renderCreditPacks();
@@ -554,18 +548,14 @@
     const grid = document.getElementById('subscribeCreditsGrid');
     if (!grid) return;
     grid.innerHTML = CREDIT_PACKS.map(p => {
-      const bonusPercent = p.bonus > 0
-        ? Math.round(p.bonus / (p.price * CREDITS_PER_YUAN) * 100)
-        : 0;
       return `
-      <article class="subscribe-shop-card${p.bonus > 0 ? ' has-bonus' : ''}">
+      <article class="subscribe-shop-card">
         <div class="subscribe-shop-card-head">
           <span class="subscribe-shop-card-kicker">实付</span>
-          ${p.bonus > 0 ? `<span class="subscribe-shop-bonus-badge">+${bonusPercent}%</span>` : ''}
         </div>
         <div class="subscribe-shop-card-price">¥${p.price}</div>
         <p class="subscribe-shop-card-arrival">到账 <strong>${p.credits.toLocaleString('zh-CN')}</strong> 积分</p>
-        <p class="subscribe-shop-card-meta">${p.bonus > 0 ? `额外赠 ${p.bonus.toLocaleString('zh-CN')} 积分` : '无额外赠送'}</p>
+        <p class="subscribe-shop-card-meta">1 元 = ${CREDITS_PER_YUAN} 积分</p>
         <button type="button" class="btn btn-primary subscribe-shop-buy-btn" data-shop-buy="${esc(p.id)}">立即充值</button>
       </article>`;
     }).join('');
