@@ -17,7 +17,7 @@ describe('image model catalog', () => {
     expect(IMAGE_MODEL_CATALOG.length).toBe(
       NEWAPI_IMAGE_MODEL_CATALOG.length + APIMART_IMAGE_MODEL_CATALOG.length
     );
-    expect(IMAGE_MODEL_CATALOG).toHaveLength(12);
+    expect(IMAGE_MODEL_CATALOG).toHaveLength(13);
   });
 
   it('newapi exposes price-backed image models first', () => {
@@ -27,11 +27,16 @@ describe('image model catalog', () => {
     const bananaPro = getCatalogEntry('newapi-nano-banana-pro');
     const banana = getCatalogEntry('newapi-nano-banana');
     expect(IMAGE_MODEL_CATALOG[0]?.provider).toBe('newapi');
-    expect(getCatalogEntry('gpt-image-2-chat')?.defaultCredits).toBe(2.5);
+    expect(getCatalogEntry('gpt-image-2-1k')?.defaultCredits).toBe(2);
     expect(base1k?.defaultCredits).toBe(5.5);
+    expect(getCatalogEntry('gpt-image-2-4k-fast')).toMatchObject({
+      id: 'image2-4k-fast',
+      resolutions: ['4k'],
+      defaultCredits: 6.5
+    });
     expect(ext?.upstream).toBe('gpt-image-2-ext');
-    expect(ext?.resolutions).toEqual(['2k', '4k']);
-    expect(ext?.defaultCreditsByResolution).toEqual({ '2k': 15, '4k': 20 });
+    expect(ext?.resolutions).toEqual(['1k', '2k', '4k']);
+    expect(ext?.defaultCreditsByResolution).toEqual({ '1k': 7, '2k': 15, '4k': 20 });
     expect(officialBudget?.provider).toBe('newapi');
     expect(officialBudget?.upstream).toBe('image2k4k');
     expect(officialBudget?.fixedQualityLow).toBe(true);
@@ -64,16 +69,17 @@ describe('image model catalog', () => {
       (model.provider === 'newapi' && ['gim2', 'banana'].includes(model.uiFamily))
       || (model.provider === 'apimart' && model.uiFamily === 'midjourney')
     ))).toBe(true);
-    expect(retained.filter((model) => model.provider === 'newapi')).toHaveLength(8);
+    expect(retained.filter((model) => model.provider === 'newapi')).toHaveLength(9);
     expect(retained.filter((model) => model.uiFamily === 'midjourney')).toHaveLength(4);
   });
 
   it('normalizes legacy ids', () => {
     expect(normalizeImageModelId('quanneng2')).toBe('image2');
     expect(normalizeImageModelId('gpt-image-2')).toBe('image2');
+    expect(normalizeImageModelId('gpt-image-2-4k-fast')).toBe('image2-4k-fast');
     expect(normalizeImageModelId('gpt-image-2-chat')).toBe('image2-economy');
     expect(normalizeImageModelId('nano-banana-pro')).toBe('lingtu-pro');
-    expect(normalizeImageModelId('newapi-gpt-image-2-ext-1k')).toBe('image2');
+    expect(normalizeImageModelId('newapi-gpt-image-2-ext-1k')).toBe('image2-pro');
     expect(normalizeImageModelId('gpt-image-2-ext-2k')).toBe('image2-pro');
     expect(normalizeImageModelId('gpt-image-2-official-4k')).toBe('image2-hd');
     expect(normalizeImageModelId('apimart-gpt-image-2')).toBe('image2');

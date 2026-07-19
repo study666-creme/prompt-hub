@@ -59,15 +59,16 @@ describe('newapi image upstream', () => {
           tags: 'image',
           integrations: { prompt_hub: { id: 'newapi-gpt-image-2-ext', fixed_quality_low: false } },
           parameters: [
-            { name: 'quality', path: 'quality', label: '分辨率', type: 'string', required: false, options: ['2k', '4k'] },
+            { name: 'quality', path: 'quality', label: '分辨率', type: 'string', required: false, options: ['1k', '2k', '4k'] },
             { name: 'size', path: 'size', label: '比例', type: 'string', required: false, options: ['1:1', '16:9'] }
           ],
           pricing: {
             mode: 'tiered',
             unit: 'image',
-            yuan: 0.15,
-            credits: 15,
+            yuan: 0.0695,
+            credits: 6.95,
             tiers: [
+              { when: { quality: '1k' }, yuan: 0.0695, credits: 6.95 },
               { when: { quality: '2k' }, yuan: 0.15, credits: 15 },
               { when: { quality: '4k' }, yuan: 0.2, credits: 20 }
             ]
@@ -173,6 +174,7 @@ describe('newapi image upstream', () => {
     expect(String(pricingCall[0])).toBe('https://pricing-unit.test/api/model-catalog?refresh=1');
     expect(newApiCreditsForModel(rules, 'gpt-image-2-chat')).toBe(2.5);
     expect(newApiCreditsForModel(rules, 'gpt-image-2')).toBe(5.5);
+    expect(newApiCreditsForModel(rules, 'gpt-image-2-ext', '1k')).toBe(7);
     expect(newApiCreditsForModel(rules, 'gpt-image-2-ext', '2k')).toBe(15);
     expect(newApiCreditsForModel(rules, 'gpt-image-2-ext', '4k')).toBe(20);
     expect(newApiCreditsForModel(rules, 'image2k4k', '2k')).toBe(5.5);
@@ -183,7 +185,7 @@ describe('newapi image upstream', () => {
     expect(snapshot.imageCatalogEntries.map(model => model.id)).toEqual(['image2', 'image2-pro', 'image2-economy', 'image2-hd']);
     expect(snapshot.imageCatalogEntries.map(model => model.label)).toEqual([
       '全能模型2 · 1K',
-      '全能模型2 · 高质量 2K/4K',
+      '全能模型2 · 高质量 1K/2K/4K',
       '全能模型2 · 特价 1K',
       '全能模型2 · 经济 2K/4K'
     ]);
@@ -231,6 +233,41 @@ describe('newapi image upstream', () => {
       { model: 'gpt-image-2-1k', credits: 2, description: null, tags: '', label: 'special', modality: 'image', parameters: [] },
       { model: 'gpt-image-2', credits: 5.5, description: null, tags: '', label: 'standard', modality: 'image', parameters: [] }
     ], 'gpt-image-2', '1k')).toBe(5.5);
+  });
+
+  it('keeps fixed 4K models whose resolution is encoded in the model id', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      success: true,
+      version: 'catalog-fixed-4k',
+      pricing_version: 'pricing-fixed-4k',
+      models: [{
+        id: 'gpt-image-2-4k-fast',
+        public: { id: 'image2-4k-fast', label: 'GPT Image 2 Fast 4K' },
+        modality: 'image',
+        family: 'gim2',
+        selectable: true,
+        order: 24,
+        parameters: [
+          { name: 'model', path: 'model', type: 'string', required: true, fixed: 'gpt-image-2-4k-fast' },
+          { name: 'quality', path: 'quality', type: 'string', required: false, fixed: 'standard' },
+          { name: 'size', path: 'size', type: 'string', required: false, options: ['1:1', '16:9'] }
+        ],
+        pricing: { mode: 'fixed', unit: 'image', yuan: 0.065 }
+      }]
+    })));
+
+    const snapshot = await fetchNewApiModelCatalog('https://fixed-4k.test', { force: true });
+    expect(snapshot.imageCatalogEntries).toContainEqual(expect.objectContaining({
+      id: 'image2-4k-fast',
+      upstream: 'gpt-image-2-4k-fast',
+      resolutions: ['4k'],
+      defaultCredits: 6.5
+    }));
+    expect(newApiCreditsForModel(snapshot.rules, 'gpt-image-2-4k-fast', '4k')).toBe(6.5);
+    expect(publicNewApiCatalogModels(snapshot)).toContainEqual(expect.objectContaining({
+      id: 'image2-4k-fast',
+      modality: 'image'
+    }));
   });
 
   it('retries one transient excessive-load image response', async () => {

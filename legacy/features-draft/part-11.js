@@ -42,7 +42,9 @@
     const legacy = {
       quanneng2: 'image2',
       'gpt-image-2-chat': 'image2-economy',
+      'gpt-image-2-1k': 'image2-economy',
       'gpt-image-2': 'image2',
+      'gpt-image-2-4k-fast': 'image2-4k-fast',
       'gpt-image-2-vip': 'image2-pro',
       jimeng: 'lingtu-pro',
       'nano-banana-fast': 'lingtu-fast',
@@ -604,6 +606,7 @@
   const IMAGE_GEN_ASPECT_FALLBACK = {
     'image2-economy': [],
     image2: IMAGE_GEN_SIZE_GIM2,
+    'image2-4k-fast': IMAGE_GEN_SIZE_GIM2,
     'image2-pro': IMAGE_GEN_SIZE_GIM2,
     'image2-hd': ['3:1', '1:3', '21:9', '9:21', '2:1', '1:2', '16:9', '9:16'],
     'lingtu-fast': IMAGE_GEN_SIZE_BANANA,
@@ -625,8 +628,10 @@
   function imageGenModelHidesQuality(modelId) {
     const id = normalizeImageGenModelId(modelId);
     if (isImageGenMidjourneyModel(id)) return true;
+    if (id === 'image2-4k-fast') return true;
     const entry = imageGenModelCatalog.find((m) => m.id === id);
-    return !!entry?.fixedQualityLow;
+    const quality = entry?.parameters?.find((parameter) => parameter?.name === 'quality');
+    return !!entry?.fixedQualityLow || !!(quality && Object.prototype.hasOwnProperty.call(quality, 'fixed'));
   }
 
   function isImageGenMjSaveAllTiles() {
@@ -687,7 +692,19 @@
   }
 
   function getImageGenMaxRefImages() {
+    const modelId = normalizeImageGenModelId(getImageGenModel());
     if (normalizeImageGenModelId(getImageGenModel()) === 'image2-economy') return 4;
+    if (modelId === 'image2-4k-fast') return 0;
+    const entry = imageGenModelCatalog.find((model) => model.id === modelId);
+    if (Number.isFinite(Number(entry?.maxReferenceImages))) {
+      return Math.max(0, Number(entry.maxReferenceImages));
+    }
+    const parameters = Array.isArray(entry?.parameters) ? entry.parameters : [];
+    const images = parameters.find((parameter) => parameter?.name === 'images');
+    const image = parameters.find((parameter) => parameter?.name === 'image');
+    if (parameters.length && !images && !image) return 0;
+    if (Number.isFinite(Number(images?.max_items))) return Math.max(1, Number(images.max_items));
+    if (image && !images) return 1;
     if (isImageGenMidjourneyModel(getImageGenModel())) {
       return getImageGenMjMode() === 'blend' ? 5 : 4;
     }
@@ -764,7 +781,7 @@
     const modelId = normalizeImageGenModelId(opts.modelId || getImageGenModel());
     const family = opts.family || imageGenModelFamily || imageGenModelUiFamily({ id: modelId });
     const isMj = family === 'midjourney';
-    const isEconomy = modelId === 'image2-economy';
+    const modelEntry = imageGenModelCatalog.find((m) => m.id === modelId);
     const shell = document.getElementById('imageGenSharedParams') || document.querySelector('.imagegen-shared-params');
     if (shell) {
       shell.classList.toggle('imagegen-params--mj', isMj);
@@ -782,18 +799,22 @@
     }
     const resParam = document.querySelector('.imagegen-param[data-param="resolution"]');
     const resLabel = document.querySelector('label[for="imageGenResolution"]');
-    const hideResolution = isMj || isEconomy;
+    const hideResolution = isMj || modelEntry?.resolutions?.length === 1;
     for (const el of [resParam, resLabel]) {
       if (el) el.hidden = hideResolution;
     }
     const sizeRow = document.querySelector('.imagegen-params-row--size');
     if (sizeRow) sizeRow.classList.toggle('imagegen-params-row--mj-size', isMj);
     const sizeParam = document.querySelector('.imagegen-param[data-param=size]');
-    if (sizeParam) sizeParam.hidden = isEconomy;
+    if (sizeParam) sizeParam.hidden = false;
     const sizeLabel = document.querySelector('label[for="imageGenSize"]');
     if (sizeLabel) sizeLabel.textContent = isMj ? '宽高比' : '画面尺寸';
-    const hideQuality = isMj || isEconomy || imageGenModelHidesQuality(modelId);
+    const hideQuality = isMj || imageGenModelHidesQuality(modelId);
     const qEl = document.getElementById('imageGenQuality');
+    const fixedQuality = modelEntry?.parameters?.find((parameter) => parameter?.name === 'quality')?.fixed;
+    if (qEl && typeof fixedQuality === 'string' && [...qEl.options].some((option) => option.value === fixedQuality)) {
+      qEl.value = fixedQuality;
+    }
     const qLabel = document.querySelector('label[for="imageGenQuality"]');
     const qNote = document.querySelector('.imagegen-quality-note');
     const qParam = qEl?.closest('.imagegen-param[data-param="quality"]');
@@ -802,7 +823,12 @@
       if (el) el.hidden = hideQuality;
     }
     const refBlock = document.querySelector('.imagegen-ref-block');
-    if (refBlock) refBlock.hidden = false;
+    if (refBlock) {
+      if (normalizeImageGenModelId(getImageGenModel()) === 'image2-economy') {
+        if (refBlock) refBlock.hidden = false;
+      }
+      else refBlock.hidden = getImageGenMaxRefImages() === 0;
+    }
     if (isMj) {
       updateImageGenSizeSelect();
       syncImageGenMjModeUI();

@@ -500,6 +500,14 @@
     if (app === 'imagegen') {
       void prefetchImageGenModelCatalog();
       if (!document.getElementById('pageImageGen')?.classList.contains('active')) return;
+      if (window.__PROMPT_HUB_AUTH_RESOLVED__ !== true) {
+        const submit = document.getElementById('imageGenSubmit');
+        if (submit) {
+          submit.disabled = true;
+          submit.setAttribute('aria-busy', 'true');
+        }
+        return;
+      }
       imageGenGenPublicSession = null;
       syncImageGenGenPublicUI();
       window.MobileUI?.initImageGenMobileView?.();
@@ -778,13 +786,14 @@
   ];
 
   const IMAGE_GEN_MODEL_FALLBACK = [
-    { id: 'image2-economy', label: '全能模型2 · 特价 1K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 89, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: [] },
-    { id: 'image2', label: '全能模型2 · 1K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 90, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
-    { id: 'image2-pro', label: '全能模型2 · 高质量 2K/4K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 91, selectable: true, status: 'active', refundOnViolation: true, pricingByResolution: true, resolutions: ['2k', '4k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
-    { id: 'image2-hd', label: '全能模型2 · 经济 2K/4K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 92, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, pricingByResolution: true, resolutions: ['2k', '4k'], aspectRatios: ['3:1', '1:3', '21:9', '9:21', '2:1', '1:2', '16:9', '9:16'] },
-    { id: 'lingtu-fast', label: '香蕉 · 极速 1K', provider: 'newapi', uiFamily: 'banana', sortOrder: 93, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'] },
-    { id: 'lingtu-2', label: '香蕉 · 2代 1K/2K/4K', provider: 'newapi', uiFamily: 'banana', sortOrder: 94, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
-    { id: 'lingtu-pro', label: '香蕉 · 专业 1K/2K/4K', provider: 'newapi', uiFamily: 'banana', sortOrder: 95, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
+    { id: 'image2-economy', label: '全能模型2 · 特价 1K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 89, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 2, creditsBase: 2, creditsFinal: 2, resolutions: ['1k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '16:9', '9:16'] },
+    { id: 'image2', label: '全能模型2 · 1K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 90, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 5.5, creditsBase: 5.5, creditsFinal: 5.5, resolutions: ['1k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
+    { id: 'image2-4k-fast', label: '全能模型2 · 极速 4K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 91, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 6.5, creditsBase: 6.5, creditsFinal: 6.5, resolutions: ['4k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'], fixedQualityLow: true, maxReferenceImages: 0 },
+    { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 92, selectable: true, status: 'active', refundOnViolation: true, pricingByResolution: true, creditsByResolution: { '1k': 7, '2k': 15, '4k': 20 }, resolutions: ['1k', '2k', '4k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
+    { id: 'image2-hd', label: '全能模型2 · 经济 2K/4K', provider: 'newapi', uiFamily: 'gim2', sortOrder: 93, selectable: true, status: 'active', refundOnViolation: true, fixedQualityLow: true, pricingByResolution: true, creditsByResolution: { '2k': 5.5, '4k': 9 }, resolutions: ['2k', '4k'], aspectRatios: ['3:1', '1:3', '21:9', '9:21', '2:1', '1:2', '16:9', '9:16'] },
+    { id: 'lingtu-fast', label: '香蕉 · 极速 1K', provider: 'newapi', uiFamily: 'banana', sortOrder: 93, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 3.2, creditsBase: 3.2, creditsFinal: 3.2, resolutions: ['1k'] },
+    { id: 'lingtu-2', label: '香蕉 · 2代 1K/2K/4K', provider: 'newapi', uiFamily: 'banana', sortOrder: 94, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 7, creditsBase: 7, creditsFinal: 7, resolutions: ['1k', '2k', '4k'] },
+    { id: 'lingtu-pro', label: '香蕉 · 专业 1K/2K/4K', provider: 'newapi', uiFamily: 'banana', sortOrder: 95, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 10, creditsBase: 10, creditsFinal: 10, resolutions: ['1k', '2k', '4k'] },
     { id: 'lingtu', label: '香蕉 · 标准 1K/2K/4K', provider: 'newapi', uiFamily: 'banana', sortOrder: 96, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
     { id: 'apimart-mj-v81', label: 'MJ v8.1', description: '最新主版本 · 写实/概念通用 · 细节与光影最佳', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 110, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'] },
     { id: 'apimart-mj-v7', label: 'MJ v7', description: '上一代主力 · 复杂构图稳定 · 风格均衡', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 111, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'] },

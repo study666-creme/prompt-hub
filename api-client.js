@@ -143,7 +143,7 @@
       await ensureApiAuthFresh();
     }
     const token = await getAccessToken();
-    if (!token) {
+    if (!token && opts.public !== true) {
       if (isMediaAuthPath(path)) {
         pauseAuthSign(60000);
         notifyAuthSignFailure({ source: 'api-client', reason: 'missing-token', message: '登录已过期，请重新登录' });
@@ -158,8 +158,8 @@
       res = await fetch(`${baseUrl()}${path}`, {
         method,
         headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(body != null ? { 'Content-Type': 'application/json' } : {})
         },
         body: body != null ? JSON.stringify(body) : undefined,
         signal: controller.signal
@@ -529,12 +529,12 @@
     }
     try {
       const raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v3') || 'null');
-      if (raw?.models?.length && Number(raw.version) >= 9 && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
+      if (raw?.models?.length && Number(raw.version) >= 10 && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
         modelsCache = { models: raw.models, globalDiscountPercent: 100, providers: ['newapi', 'apimart'] };
         modelsCacheExp = Date.now() + 45_000;
       }
     } catch (e) { /* ignore */ }
-    const res = await request('GET', '/api/v1/generate/models', null, { timeoutMs: 8000 });
+    const res = await request('GET', '/api/v1/generate/models', null, { timeoutMs: 8000, public: true });
     if (res.ok && res.data) {
       modelsCache = res.data;
       modelsCacheExp = Date.now() + 120_000;
@@ -542,7 +542,7 @@
         try {
           localStorage.setItem(
             'promptrepo_imagegen_models_cache_v3',
-            JSON.stringify({ ts: Date.now(), version: 9, models: res.data.models })
+            JSON.stringify({ ts: Date.now(), version: 10, models: res.data.models })
           );
         } catch (e) { /* ignore */ }
       }

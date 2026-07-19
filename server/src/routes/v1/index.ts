@@ -3,7 +3,7 @@ import type { Env } from '../../env';
 import { requireAuth } from '../../middleware/auth';
 import { meRoutes } from './me';
 import { redeemRoutes } from './redeem';
-import { generateRoutes } from './generate';
+import { generateRoutes, publicGenerationModelsHandler } from './generate';
 import { communityFeedHandler, communityRoutes } from './community';
 import { membershipRoutes } from './membership';
 import { membershipTaskRoutes } from './membership-tasks';
@@ -30,6 +30,9 @@ v1.post('/media/community/sign-batch', rateLimit(300, 60_000), communityMediaSig
 
 /** 全站社区 Feed：游客与所有用户可见 */
 v1.get('/community/feed', rateLimit(180, 60_000), communityFeedHandler);
+
+/** 生图模型与实时基础价格：游客可见，生成和扣费仍需登录。 */
+v1.get('/generate/models', rateLimit(120, 60_000), publicGenerationModelsHandler);
 
 /** 卡片资产包市场：游客可浏览列表 */
 v1.route('/asset-packages', assetPackagesPublicRoutes);

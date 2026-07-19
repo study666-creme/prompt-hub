@@ -721,15 +721,13 @@ async function requireFreshNewApiCatalog(env: Env): Promise<NewApiCatalogSnapsho
   }
 }
 
-generateRoutes.get('/models', async c => {
-  const user = c.get('user');
+export async function publicGenerationModelsHandler(c: Context<{ Bindings: Env }>) {
   const admin = createAdminClient(c.env);
-  const [settings, profile, newApiCatalog] = await Promise.all([
+  const [settings, newApiCatalog] = await Promise.all([
     loadImageModelSettings(admin),
-    getOrCreateProfile(admin, user.id),
     fetchNewApiModelCatalog(c.env.NEWAPI_API_BASE_URL)
   ]);
-  const memberActive = isMembershipActive(profile);
+  c.header('Cache-Control', 'public, max-age=30, s-maxage=60, stale-while-revalidate=300');
   return c.json({
     ok: true,
     data: {
@@ -737,10 +735,10 @@ generateRoutes.get('/models', async c => {
       catalogVersion: newApiCatalog.version || null,
       pricingVersion: newApiCatalog.pricingVersion || null,
       catalogStale: newApiCatalog.stale,
-      models: publicModelPayload(settings, profile.membership_tier, memberActive, { newApiCatalog })
+      models: publicModelPayload(settings, null, false, { newApiCatalog })
     }
   });
-});
+}
 
 /** 报价接口：轻量、不限流（避免生图页拖动参数时卡 20s+） */
 generateRoutes.get('/cost', async c => {

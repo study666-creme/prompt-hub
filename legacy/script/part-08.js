@@ -806,11 +806,16 @@
 
     async function initSupabaseAuth() {
       if (!window.SupabaseSync?.isConfigured?.()) {
+        window.__PROMPT_HUB_AUTH_RESOLVED__ = true;
         updateAuthUI(null);
         await bootstrapWhenLoggedOut();
+        window.FeatureDraft?.onAppChange?.(window.AppRouter?.resolveBootApp?.() || 'community');
         return;
       }
       await window.SupabaseSync.init(async (session, event) => {
+        if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+          window.__PROMPT_HUB_AUTH_RESOLVED__ = true;
+        }
         updateAuthUI(session);
         if (event === 'PASSWORD_RECOVERY') {
           openAuthModal('reset');
@@ -844,6 +849,12 @@
               await bootstrapWhenLoggedOut();
             }
           }
+          if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+            const app = window.AppRouter?.resolveBootApp?.()
+              || localStorage.getItem('promptrepo_app_page')
+              || 'community';
+            window.FeatureDraft?.onAppChange?.(app);
+          }
         };
 
         // 异步 auth，避免 INITIAL_SESSION 拉云端阻塞首屏
@@ -859,10 +870,13 @@
     }
 
     async function loadGuestWorkspace() {
-      cards = await loadCardsFromDB({ ownerUid: 'guest' });
-      if (!cards.length && getIdbOwnerUid() && getIdbOwnerUid() !== 'guest') {
-        cards = [];
-      }
+      const idbOwner = getIdbOwnerUid();
+      const mayLoadGuestLocal = idbOwner === 'guest' || (!idbOwner && !hadLoggedInAccountLocally());
+      cards = mayLoadGuestLocal ? await loadCardsFromDB({ ownerUid: 'guest' }) : [];
+      customGroups = [];
+      globalFields = [];
+      settings = { ...DEFAULT_WORKSPACE_SETTINGS };
+      if (!mayLoadGuestLocal) return;
       try {
         const g = localStorage.getItem('promptrepo_groups');
         if (g) customGroups = JSON.parse(g);
@@ -893,7 +907,5 @@
       cards = [];
       customGroups = [];
       globalFields = [];
-      settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, autoPromptOcr: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, efficiencyMode: false }, {});
+      settings = { ...DEFAULT_WORKSPACE_SETTINGS };
       floatingPromptActive = false;
-      try {
-        const s = localStorage.getItem('promptrepo_settings');

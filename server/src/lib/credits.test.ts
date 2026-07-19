@@ -51,8 +51,8 @@ describe('generation cost', () => {
 
   it('standard member no longer gets generation discount', () => {
     const r = computeImageGenerationCost(settings, 'nano-banana-pro', '2k', 'standard', true);
-    expect(r.listPrice).toBe(13);
-    expect(r.final).toBe(13);
+    expect(r.listPrice).toBe(10);
+    expect(r.final).toBe(10);
     expect(r.appliedDiscount).toBe('none');
     expect(r.discountLabel).toBeNull();
   });
@@ -114,7 +114,7 @@ describe('generation cost', () => {
       true
     );
     expect(r.modelId).toBe('lingtu-pro');
-    expect(r.final).toBe(13);
+    expect(r.final).toBe(10);
     expect(r.discountLabel).toBeNull();
   });
 
@@ -151,9 +151,9 @@ describe('generation cost', () => {
     const r1 = computeImageGenerationCost(settings, 'nano-banana-pro', '1k', null, false);
     const r2 = computeImageGenerationCost(settings, 'nano-banana-pro', '2k', null, false);
     const r4 = computeImageGenerationCost(settings, 'nano-banana-pro', '4k', null, false);
-    expect(r1.final).toBe(13);
-    expect(r2.final).toBe(13);
-    expect(r4.final).toBe(13);
+    expect(r1.final).toBe(10);
+    expect(r2.final).toBe(10);
+    expect(r4.final).toBe(10);
   });
 
   it('legacy per-resolution overrides cannot change the current banana price', () => {
@@ -171,8 +171,8 @@ describe('generation cost', () => {
       null,
       false
     );
-    expect(r2.listPrice).toBe(13);
-    expect(r2.final).toBe(13);
+    expect(r2.listPrice).toBe(10);
+    expect(r2.final).toBe(10);
   });
 
   it('legacy resolution promos cannot change the current banana price', () => {
@@ -191,8 +191,8 @@ describe('generation cost', () => {
       null,
       false
     );
-    expect(r.listPrice).toBe(13);
-    expect(r.final).toBe(13);
+    expect(r.listPrice).toBe(10);
+    expect(r.final).toBe(10);
     expect(r.modelDiscountLabel).toBeNull();
   });
 
@@ -215,9 +215,11 @@ describe('generation cost', () => {
       false
     );
     const banana = computeImageGenerationCost(settings, 'newapi-nano-banana-pro', '4k', null, false);
+    const fast4k = computeImageGenerationCost(settings, 'gpt-image-2-4k-fast', '4k', null, false);
     expect(gpt1k.final).toBe(5.5);
     expect(gptExt.final).toBe(20);
     expect(official.final).toBe(5.5);
-    expect(banana.final).toBe(13);
+    expect(banana.final).toBe(10);
+    expect(fast4k.final).toBe(6.5);
   });
 });

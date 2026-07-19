@@ -103,7 +103,9 @@ export function aspectRatiosForModel(modelId: string): readonly string[] {
     .trim()
     .toLowerCase();
   if (OFFICIAL_BUDGET_MODEL_IDS.has(id)) return APIMART_OFFICIAL_BUDGET_RATIOS;
-  if (id === 'image2' || id === 'image2-pro') return IMAGE2_ASPECT_RATIOS;
+  if (id === 'image2' || id === 'image2-economy' || id === 'image2-pro' || id === 'image2-4k-fast') {
+    return IMAGE2_ASPECT_RATIOS;
+  }
   if (BANANA2_EXTENDED_MODEL_IDS.has(id)) {
     return [...BANANA_ASPECT_RATIOS, ...BANANA2_EXTRA_RATIOS];
   }

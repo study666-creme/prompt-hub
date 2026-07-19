@@ -512,22 +512,27 @@
     window.FeedLayout?.destroyAllLayouts?.();
   }
 
-  function clearAllLocalFeatureData() {
+  function clearAllLocalFeatureData(opts = {}) {
+    const preservePublicFeed = opts.preservePublicFeed === true;
     communityPosts = [];
-    publicFeedState.posts = [];
+    if (!preservePublicFeed) publicFeedState.posts = [];
     creations = [];
     likedIds = new Set();
     favIds = new Set();
     communityEvents = [];
     notifications = [];
-    publicFeedState.at = 0;
+    if (!preservePublicFeed) publicFeedState.at = 0;
     publicFeedRefreshPromise = null;
     try {
       localStorage.removeItem(LS_COMMUNITY);
       localStorage.removeItem(LS_CREATIONS);
       localStorage.removeItem(LS_LIKES);
       localStorage.removeItem(LS_FAVS);
-      localStorage.removeItem(LS_PUBLIC_FEED_CACHE);
+      if (!preservePublicFeed) localStorage.removeItem(LS_PUBLIC_FEED_CACHE);
+      if (opts.clearImageGenDraft === true) {
+        localStorage.removeItem(LS_IMAGEGEN);
+        localStorage.removeItem(PREFILL_KEY);
+      }
       sessionStorage.removeItem('promptrepo_guest_session');
       sessionStorage.removeItem('promptrepo_pending_guest_migrate');
       sessionStorage.removeItem(LS_PENDING_GEN_JOBS);
@@ -545,8 +550,29 @@
     closeUserProfile();
   }
 
+  function resetSignedOutImageGenForm() {
+    try {
+      localStorage.removeItem(LS_IMAGEGEN);
+      localStorage.removeItem(PREFILL_KEY);
+    } catch (e) { /* ignore */ }
+    const prompt = document.getElementById('imageGenPrompt');
+    const title = document.getElementById('imageGenCardTitle');
+    const model = document.getElementById('imageGenModel');
+    if (prompt) prompt.value = '';
+    if (title) title.value = '';
+    if (model?.querySelector('option[value="image2-economy"]')) model.value = 'image2-economy';
+    imageGenModelFamily = 'gim2';
+    clearImageGenRef();
+    try { localStorage.removeItem(LS_IMAGEGEN); } catch (e) { /* ignore */ }
+    if (imageGenFormActivated) {
+      syncImageGenModelToResolution();
+      scheduleImageGenModelUiRefresh();
+    }
+  }
+
   function clearSensitiveLocalStateOnSignOut() {
-    clearAllLocalFeatureData();
+    clearAllLocalFeatureData({ preservePublicFeed: true, clearImageGenDraft: true });
+    resetSignedOutImageGenForm();
     renderCommunity({ immediate: true, skipFeedFetch: true });
     void renderCreations();
     if (document.getElementById('pageImageGen')?.classList.contains('active')) renderImageGenFeed({ preserveScroll: true });
@@ -557,7 +583,25 @@
   }
 
   function loadStores() {
-    const loggedInBoot = window.SupabaseSync?.isLoggedIn?.();
+    const authResolved = window.__PROMPT_HUB_AUTH_RESOLVED__ === true;
+    const loggedInBoot = authResolved && window.SupabaseSync?.isLoggedIn?.();
+    const idbOwner = localStorage.getItem('promptrepo_idb_owner_uid') || '';
+    const lastUid = localStorage.getItem('promptrepo_last_uid') || '';
+    const guestLocalAllowed = authResolved && !loggedInBoot
+      && (idbOwner === 'guest' || (!idbOwner && !lastUid));
+    if (!loggedInBoot && !guestLocalAllowed) {
+      communityPosts = [];
+      creations = [];
+      likedIds = new Set();
+      favIds = new Set();
+      communityEvents = [];
+      notifications = [];
+      imageGenPendingJobs = [];
+      imageGenFailedJobs = [];
+      getActivePollJobIds().clear();
+      updateNotifyBadge();
+      return;
+    }
     communityPosts = filterCommunityPostsForDisplay(loadJson(LS_COMMUNITY, []));
     if (!loggedInBoot) {
       communityPosts = [];

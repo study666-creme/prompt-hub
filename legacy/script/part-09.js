@@ -1,5 +1,3 @@
-        if (s) settings = Object.assign(settings, JSON.parse(s));
-      } catch (e) { /* ignore */ }
       updatePanelOcrBoxVisibility();
       applyEfficiencyMode();
       initFilterMenu();
@@ -20,18 +18,8 @@
           void ensureFeatureAssets().catch((e) => console.warn('[assets] idle load failed', e));
         }, 3500);
       }
-      initBackgroundEffect();
-      const postLogout = localStorage.getItem('promptrepo_post_logout') === '1';
-      const lastUid = localStorage.getItem('promptrepo_last_uid');
-      if (!postLogout && lastUid) {
-        await hydrateWorkspaceFromLocal(lastUid);
-        activeAccountId = lastUid;
-        window.__promptHubCards = cards;
-      } else if (!postLogout && !hadLoggedInAccountLocally()) {
-        await loadGuestWorkspace();
-        window.__promptHubCards = cards;
-      }
       finishAppBootstrap();
+      scheduleBackgroundEffectAfterBoot(window.AppRouter?.resolveBootApp?.() || 'community');
       refreshAuthMethodUI();
       refreshAppBuildLabel();
       void initSupabaseAuth();

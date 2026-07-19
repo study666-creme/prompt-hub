@@ -342,41 +342,14 @@
       });
     }
 
-    async function clearWorkspace() {
-      cancelCloudSyncSchedulers();
-      if (cards.length > 0 || customGroups.length > 0) {
-        await writeEmergencyBackup('pre_clear_workspace');
-        const uid = window.SupabaseSync?.getUserId?.() || activeAccountId;
-        if (uid) await snapshotLocalForUser(uid);
-      }
-      cards = [];
-      customGroups = [];
-      globalFields = [];
-      selectedCardIds.clear();
-      selectedCardId = null;
-      window.__promptHubCards = [];
-      window.CardImageLoader?.disconnect?.();
-      window.FeatureDraft?.clearSensitiveLocalStateOnSignOut?.();
-      await saveCardsToDB([], { ownerUid: '' });
-      await clearIdbObjectStore('data_backups');
-      await clearIdbObjectStore('card_image_backups');
-      setIdbOwnerUid('');
-      localStorage.removeItem('promptrepo_groups');
-      localStorage.removeItem('promptrepo_fields');
-      localStorage.removeItem('promptrepo_settings');
-      localStorage.removeItem('promptrepo_autosave_snapshot');
-      try {
-        sessionStorage.removeItem('promptrepo_pending_guest_migrate');
-      } catch (e) { /* ignore */ }
-    }
-
-    /** 退出后清私人卡片库；社区/创作本地缓存一并清空，由全站 API 重新加载 */
+    /** 退出后只清内存与私有界面，账号 IndexedDB、快照和图片备份继续保留。 */
     async function purgeSignedOutLocalData() {
       flushPrivateWarehouseUI();
-      await clearWorkspace();
-      window.FeatureDraft?.clearAllLocalFeatureData?.();
-      window.FeatureDraft?.renderCommunity?.({ immediate: true, skipFeedFetch: true });
-      void window.FeatureDraft?.renderCreations?.();
+      settings = { ...DEFAULT_WORKSPACE_SETTINGS };
+      floatingPromptActive = false;
+      window.FeatureDraft?.clearSensitiveLocalStateOnSignOut?.();
+      window.PointsSystem?.resetServerCreditsState?.();
+      window.PointsSystem?.updateCreditsUI?.();
     }
 
     function flushPrivateWarehouseUI() {
@@ -403,14 +376,13 @@
 
     async function bootstrapWhenLoggedOut() {
       const postLogout = localStorage.getItem('promptrepo_post_logout') === '1';
+      const idbOwner = getIdbOwnerUid();
+      const mayLoadGuestLocal = idbOwner === 'guest' || (!idbOwner && !hadLoggedInAccountLocally());
       window.Membership?.clearLocalState?.();
       window.SubscriptionUI?.refreshOfferUI?.();
-      if (postLogout || hadLoggedInAccountLocally()) {
-        if (postLogout) localStorage.removeItem('promptrepo_post_logout');
+      if (postLogout) localStorage.removeItem('promptrepo_post_logout');
+      if (!mayLoadGuestLocal) {
         await purgeSignedOutLocalData();
-        cards = [];
-        customGroups = [];
-        window.__promptHubCards = [];
       } else {
         await loadGuestWorkspace();
         window.FeatureDraft?.reloadStores?.();
@@ -440,12 +412,10 @@
       if (cards.length > 0) {
         window.FeatureDraft?.reconcileCommunityWithCards?.(cards);
       }
-      const refreshFeeds = () => requestFeedRefresh();
-      if (window.MobileUI?.isMobile?.() && page !== 'community') {
-        if (typeof requestIdleCallback === 'function') requestIdleCallback(refreshFeeds, { timeout: 8000 });
-        else setTimeout(refreshFeeds, 2500);
-      } else {
-        refreshFeeds();
+      if (page === 'community' || page === 'creations') {
+        const refreshFeeds = () => requestFeedRefresh();
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(refreshFeeds, { timeout: 6000 });
+        else setTimeout(refreshFeeds, 1800);
       }
       if (window.SupabaseSync?.isLoggedIn?.()) {
         const runRepair = () => void repairGeneratedCardImagesQuiet();

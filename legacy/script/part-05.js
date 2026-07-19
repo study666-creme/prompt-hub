@@ -868,6 +868,12 @@
           emit: false
         });
       } catch (e) { /* ignore */ }
+      activeAccountId = null;
+      cloudHydratedUid = null;
+      flushPrivateWarehouseUI();
+      window.FeatureDraft?.clearSensitiveLocalStateOnSignOut?.();
+      window.PointsSystem?.resetServerCreditsState?.();
+      window.PointsSystem?.updateCreditsUI?.();
       updateAuthUI(null);
       setCloudSyncPhase('error', '登录已过期，请重新登录');
       window.SyncOrchestrator?.cancelPending?.();

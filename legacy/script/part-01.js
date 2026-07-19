@@ -9,6 +9,8 @@
       });
     })();
 
+    window.__PROMPT_HUB_AUTH_RESOLVED__ = false;
+
     // ---------- 数据库 ----------
     const DB_NAME = 'PromptRepoDB', DB_VERSION = 3;
     const EMERGENCY_BACKUP_MAX = 12;
@@ -251,7 +253,23 @@
     window.getCardImageBackup = getCardImageBackup;
     window.saveCardImageBackup = saveCardImageBackup;
 
-    let cards = [], customGroups = [], globalFields = [], settings = { engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, autoPromptOcr: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, communityNotificationsEnabled: true, communityNotifyBadge: true, autoDayNight: false, themeManualOverride: false, showTrimBlackBorderTool: false, preserveOriginalCardImage: false };
+    const DEFAULT_WORKSPACE_SETTINGS = Object.freeze({
+      engine: 'tesseract',
+      apiKey: '',
+      imageClickZoom: false,
+      floatingPrompt: false,
+      autoPromptOcr: false,
+      defaultPublishCommunity: true,
+      defaultImageGenAutoPublish: true,
+      communityNotificationsEnabled: true,
+      communityNotifyBadge: true,
+      autoDayNight: false,
+      themeManualOverride: false,
+      showTrimBlackBorderTool: false,
+      preserveOriginalCardImage: false,
+      efficiencyMode: false
+    });
+    let cards = [], customGroups = [], globalFields = [], settings = { ...DEFAULT_WORKSPACE_SETTINGS };
     let pendingUploadFile = null;
     let pendingUploadBytes = 0;
     let currentGroup = 'all', selectedCardId = null, isNewCardMode = false, imageData = null;

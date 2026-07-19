@@ -639,17 +639,16 @@
         cloudHydratedUid = null;
         window.Membership?.clearLocalState?.();
         window.PointsSystem?.resetServerCreditsState?.();
+        window.PointsSystem?.updateCreditsUI?.();
         window.__userDisplayName = '';
         window.SubscriptionUI?.refreshOfferUI?.();
+        flushPrivateWarehouseUI();
+        window.FeatureDraft?.clearSensitiveLocalStateOnSignOut?.();
+        switchAppPage('warehouse');
         await window.SupabaseSync.signOut();
-        await purgeSignedOutLocalData();
-        updateAuthUI(null);
         updateTagFilter();
         buildFilterMenu();
         syncFilterBtnState();
-        switchAppPage('warehouse');
-        renderGroups();
-        renderCards(true);
         if (isMobileViewport()) window.resetMobileEditPanelState?.();
         showToast('已退出登录');
       } catch (e) {

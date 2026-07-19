@@ -62,14 +62,14 @@ function apimart(row: CatalogWithoutProvider): ImageModelCatalogEntry {
 export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   newApi(gim2({
     id: 'image2-economy',
-    upstream: 'gpt-image-2-chat',
+    upstream: 'gpt-image-2-1k',
     label: '全能模型2 · 特价 1K',
     group: 'new',
-    description: '特价文字生图，固定 1K，不支持参考图与尺寸设置',
-    upstreamPoints: 0.025,
+    description: '特价 1K 生图模型，支持参考图与多种画面比例',
+    upstreamPoints: 0.02,
     refundOnViolation: true,
     resolutions: ['1k'],
-    defaultCredits: 2.5,
+    defaultCredits: 2,
     sortOrder: 89
   })),
   newApi(gim2({
@@ -85,16 +85,28 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     sortOrder: 90
   })),
   newApi(gim2({
+    id: 'image2-4k-fast',
+    upstream: 'gpt-image-2-4k-fast',
+    label: '全能模型2 · 极速 4K',
+    group: 'new',
+    description: '固定 4K 的快速生图模型，支持多种画面比例',
+    upstreamPoints: 0.065,
+    refundOnViolation: true,
+    resolutions: ['4k'],
+    defaultCredits: 6.5,
+    sortOrder: 91
+  })),
+  newApi(gim2({
     id: 'image2-pro',
     upstream: 'gpt-image-2-ext',
-    label: '全能模型2 · 高质量 2K/4K',
+    label: '全能模型2 · 高质量 1K/2K/4K',
     group: 'new',
-    description: '扩展版，2K/4K 分档，支持多比例',
+    description: '扩展版，1K/2K/4K 分档，支持多比例',
     upstreamPoints: 0.15,
     refundOnViolation: true,
-    resolutions: ['2k', '4k'],
+    resolutions: ['1k', '2k', '4k'],
     pricingByResolution: true,
-    defaultCreditsByResolution: { '2k': 15, '4k': 20 },
+    defaultCreditsByResolution: { '1k': 7, '2k': 15, '4k': 20 },
     defaultCredits: 15,
     sortOrder: 91
   })),
@@ -119,10 +131,10 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     label: '香蕉 · 极速 1K',
     group: 'new',
     description: '快速生图模型，固定 1K',
-    upstreamPoints: 0.04,
+    upstreamPoints: 0.032,
     refundOnViolation: true,
     resolutions: ['1k'],
-    defaultCredits: 4,
+    defaultCredits: 3.2,
     sortOrder: 93
   })),
   newApi(banana({
@@ -131,10 +143,10 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     label: '香蕉 · 2代 1K/2K/4K',
     group: 'new',
     description: '通用生图模型，支持 1K/2K/4K',
-    upstreamPoints: 0.09,
+    upstreamPoints: 0.07,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],
-    defaultCredits: 9,
+    defaultCredits: 7,
     sortOrder: 94
   })),
   newApi(banana({
@@ -143,10 +155,10 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     label: '香蕉 · 专业 1K/2K/4K',
     group: 'new',
     description: '高质量通用生图模型，支持 1K/2K/4K',
-    upstreamPoints: 0.13,
+    upstreamPoints: 0.1,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],
-    defaultCredits: 13,
+    defaultCredits: 10,
     sortOrder: 95
   })),
   newApi(banana({
@@ -266,8 +278,10 @@ export function sanitizePublicModelDescription(description: string | null | unde
 
 const LEGACY_MODEL_MAP: Record<string, string> = {
   quanneng2: 'image2',
+  'gpt-image-2-1k': 'image2-economy',
   'gpt-image-2-chat': 'image2-economy',
   'gpt-image-2': 'image2',
+  'gpt-image-2-4k-fast': 'image2-4k-fast',
   'gpt-image-2-vip': 'image2-pro',
   jimeng: 'lingtu-pro',
   'nano-banana-fast': 'lingtu-fast',
@@ -281,11 +295,11 @@ const LEGACY_MODEL_MAP: Record<string, string> = {
   'nano-banana': 'lingtu',
   'newapi-gpt-image-2': 'image2',
   'newapi-gpt-image-2-chat': 'image2-economy',
-  'gpt-image-2-ext-1k': 'image2',
+  'gpt-image-2-ext-1k': 'image2-pro',
   'gpt-image-2-ext-2k': 'image2-pro',
   'gpt-image-2-ext-4k': 'image2-pro',
   'newapi-gpt-image-2-ext': 'image2-pro',
-  'newapi-gpt-image-2-ext-1k': 'image2',
+  'newapi-gpt-image-2-ext-1k': 'image2-pro',
   'newapi-gpt-image-2-ext-2k': 'image2-pro',
   'newapi-gpt-image-2-ext-4k': 'image2-pro',
   'gpt-image-2-official': 'image2-hd',

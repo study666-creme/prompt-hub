@@ -28,7 +28,9 @@
 
   const LEGACY_MODEL_IDS = {
     quanneng2: 'image2',
+    'gpt-image-2-1k': 'image2-economy',
     'gpt-image-2': 'image2',
+    'gpt-image-2-4k-fast': 'image2-4k-fast',
     'gpt-image-2-vip': 'image2-pro',
     jimeng: 'lingtu-pro',
     'nano-banana-fast': 'lingtu-fast',
@@ -182,6 +184,7 @@
   }
 
   function getMemberGenMultiplier() {
+    if (window.SupabaseSync?.isLoggedIn?.() !== true) return 1;
     return window.Membership?.getGenDiscountMultiplier?.() ?? 1;
   }
 
@@ -302,7 +305,7 @@
     const mult = getMemberGenMultiplier();
     const label = window.Membership?.getGenDiscountLabel?.() || '';
 
-    if (useApiForAccount()) {
+    if (Array.isArray(window.__IMAGE_GEN_MODELS__)) {
       if (model.pricingBySpeed) {
         const speed = mjSpeed === 'fast' || mjSpeed === 'turbo' ? mjSpeed : 'relax';
         const perSpeed = model.costBySpeed?.[speed];
@@ -530,12 +533,16 @@
   }
 
   function updateCreditsUI() {
-    const total = getCredits();
+    const signedIn = window.SupabaseSync?.isLoggedIn?.() === true;
+    const total = signedIn ? getCredits() : 0;
     document.querySelectorAll('[data-credits-display]').forEach(el => {
-      el.textContent = formatCredits(total);
+      el.textContent = signedIn ? formatCredits(total) : '--';
     });
     document.querySelectorAll('[data-credits-detail]').forEach(el => {
-      if (creditsBreakdown.daily > 0) {
+      if (!signedIn) {
+        el.textContent = '登录后查看';
+        el.classList.remove('hidden');
+      } else if (creditsBreakdown.daily > 0) {
         el.textContent = `含今日 ${creditsBreakdown.daily}（当日有效）+ 永久 ${creditsBreakdown.permanent}`;
         el.classList.remove('hidden');
       } else if (creditsBreakdown.mode === 'daily' && creditsBreakdown.note) {

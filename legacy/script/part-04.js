@@ -10,6 +10,9 @@
       });
     }
 
+    let backgroundBootReady = false;
+    let backgroundBootTimer = null;
+
     function pauseRippleBackground() {
       window.__rippleGridBg?.setPaused?.(true);
     }
@@ -19,6 +22,7 @@
 
     function resumeRippleBackground(app) {
       if (settings.efficiencyMode) return;
+      if (!backgroundBootReady) return;
       const activeApp = app || document.querySelector('.app-nav-item.active')?.dataset?.app || 'warehouse';
       if (isRippleHeavyApp(activeApp)) {
         pauseRippleBackground();
@@ -34,6 +38,17 @@
       window.__rippleGridBg?.setPaused?.(false);
     }
     window.resumeRippleBackground = resumeRippleBackground;
+
+    function scheduleBackgroundEffectAfterBoot(app) {
+      if (backgroundBootReady || backgroundBootTimer) return;
+      backgroundBootTimer = setTimeout(() => {
+        backgroundBootTimer = null;
+        deferAfterPagePaint(() => {
+          backgroundBootReady = true;
+          resumeRippleBackground(app);
+        }, 3500);
+      }, 1200);
+    }
 
     function applyEfficiencyMode() {
       const on = settings.efficiencyMode === true;

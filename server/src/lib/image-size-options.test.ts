@@ -12,6 +12,7 @@ import {
 describe('aspectRatiosForModel', () => {
   it('supports current public model ids', () => {
     expect(aspectRatiosForModel('image2')).toEqual([...IMAGE2_ASPECT_RATIOS]);
+    expect(aspectRatiosForModel('image2-4k-fast')).toEqual([...IMAGE2_ASPECT_RATIOS]);
     expect(aspectRatiosForModel('image2-hd')).toEqual([...APIMART_OFFICIAL_BUDGET_RATIOS]);
     expect(aspectRatiosForModel('lingtu')).toEqual([...BANANA_ASPECT_RATIOS]);
     expect(aspectRatiosForModel('lingtu-2')).toEqual([
