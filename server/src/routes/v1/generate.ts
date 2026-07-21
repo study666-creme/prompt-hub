@@ -149,7 +149,7 @@ const bodySchema = z.object({
     .transform((s) => s.trim().toLowerCase())
     .default('image2'),
   resolution: z.enum(['1k', '2k', '4k']).default('1k'),
-  quality: z.enum(['standard', 'high', 'ultra']).default('standard'),
+  quality: z.enum(['low', 'medium', 'standard', 'high', 'ultra']).default('standard'),
   size: z.string().max(32).optional(),
   count: z.number().int().min(1).max(8).default(1),
   refImageUrl: refImageInputSchema.optional().nullable(),
@@ -169,6 +169,7 @@ function normalizeGenerationBodyAliases(raw: unknown): unknown {
   if (body.refImageUrl == null && typeof input.image === 'string') body.refImageUrl = input.image;
   if (body.refImageUrls == null && Array.isArray(input.images)) body.refImageUrls = input.images;
   if (body.count == null && typeof input.n === 'number') body.count = input.n;
+  if (body.model === 'image2-free') body.model = 'image2';
   return body;
 }
 
@@ -504,7 +505,7 @@ function publicModelPayload(
       costBySpeed?.relax
       ?? costByResolution?.[defaultRes]
       ?? computeImageGenerationCost(settings, m.id, defaultRes, tier, memberActive, { catalogEntries });
-    const finalCost = remoteNewApiCredits != null && remoteNewApiCredits > 0
+    const finalCost = remoteNewApiCredits != null
       ? withFixedCredits(cost, remoteNewApiCredits, m.label)
       : cost;
     const finalCostByResolution = m.provider === 'newapi' && costByResolution
@@ -513,7 +514,7 @@ function publicModelPayload(
             const credits = newApiCreditsForModel(newApiRules, m.upstream, res);
             return [
               res,
-              credits != null && credits > 0 ? withFixedCredits(resCost, credits, m.label) : resCost
+              credits != null ? withFixedCredits(resCost, credits, m.label) : resCost
             ];
           })
         )
@@ -620,7 +621,7 @@ async function computeGenerationCostForRequest(
     resolved.upstream,
     resolution
   );
-  if (credits == null || credits <= 0) return baseCost;
+  if (credits == null) return baseCost;
   return {
     ...baseCost,
     base: credits,
@@ -884,11 +885,10 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     : [];
 
   const upstream = upstreamBindingsFromEnv(c.env);
-  // GRS exposes a true async task API. Keep New API catalog pricing, but submit
-  // standard GPT Image 2 directly so Workers never wait on a long sync response.
-  const lineProvider = resolved.provider === 'newapi' && resolved.upstream === 'gpt-image-2'
-    ? 'grsai'
-    : resolved.provider;
+  // New submissions use the provider represented by the live catalog. Keep
+  // legacy GRS rows recoverable through generation-jobs, but do not redirect
+  // the current free Image2 route to the retired direct-GRS path.
+  const lineProvider = resolved.provider;
   if (hasAnyImageUpstream(upstream) && !isProviderConfigured(upstream, lineProvider)) {
     throw new ApiError(
       503,
@@ -1001,10 +1001,13 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   /** 上游同步提交易超 CF 请求时限；改后台提交后立即返回 jobId。 */
   if (
     hasAnyImageUpstream(upstream)
-    && (lineProvider === 'grsai' || lineProvider === 'apimart' || lineProvider === 'newapi')
+    && (lineProvider === 'apimart' || lineProvider === 'newapi')
     && isProviderConfigured(upstream, lineProvider)
   ) {
-    const useDurableQueue = lineProvider === 'newapi' && !!c.env.IMAGE_GENERATION_QUEUE;
+    // The queue consumer can be paused independently of the Worker and leave
+    // paid jobs in `queued` until the stale-job refund path runs. Submit from
+    // waitUntil here; claimFastSubmit still makes any later queue retry a no-op.
+    const useDurableQueue = false;
     const fastMeta: Record<string, unknown> = {
       ...baseMeta,
       debitSplit,

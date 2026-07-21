@@ -528,8 +528,8 @@
       return { ok: true, data: modelsCache };
     }
     try {
-      const raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v3') || 'null');
-      if (raw?.models?.length && Number(raw.version) >= 10 && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
+      const raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v4') || 'null');
+      if (raw?.models?.length && Number(raw.version) >= 11 && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
         modelsCache = { models: raw.models, globalDiscountPercent: 100, providers: ['newapi', 'apimart'] };
         modelsCacheExp = Date.now() + 45_000;
       }
@@ -541,8 +541,8 @@
       if (Array.isArray(res.data.models) && res.data.models.length) {
         try {
           localStorage.setItem(
-            'promptrepo_imagegen_models_cache_v3',
-            JSON.stringify({ ts: Date.now(), version: 10, models: res.data.models })
+            'promptrepo_imagegen_models_cache_v4',
+            JSON.stringify({ ts: Date.now(), version: 11, models: res.data.models })
           );
         } catch (e) { /* ignore */ }
       }

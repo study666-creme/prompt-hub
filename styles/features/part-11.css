@@ -149,6 +149,10 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-layout--inspire-mode .imagege
   gap: 8px;
 }
 
+#pageImageGen .imagegen-params-row--size .imagegen-param[hidden] {
+  display: none;
+}
+
 #pageImageGen .imagegen-prompt-head {
   margin-top: 14px;
 }

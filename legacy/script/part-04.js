@@ -117,6 +117,7 @@
       document.querySelectorAll('.app-nav-item').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.app === app);
       });
+      document.body.classList.toggle('app-landing-active', app === 'landing');
       Object.entries(APP_PAGE_IDS).forEach(([key, id]) => {
         document.getElementById(id)?.classList.toggle('active', key === app);
       });
@@ -201,6 +202,50 @@
       window.open(getPromptCanvasUrl(), '_blank', 'noopener,noreferrer');
     }
     window.openPromptCanvas = openPromptCanvas;
+
+    function initWarehouseHero() {
+      const hero = document.getElementById('warehouseHero');
+      if (!hero || hero.dataset.bound === '1') return;
+      hero.dataset.bound = '1';
+
+      const cardsRoot = document.getElementById('cardsContainer');
+      const appRoot = document.querySelector('.app-main');
+      const scrollRoots = [cardsRoot, appRoot].filter(Boolean);
+      let frame = 0;
+
+      const syncHeroState = () => {
+        frame = 0;
+        const top = scrollRoots.reduce((max, root) => Math.max(max, Number(root.scrollTop) || 0), 0);
+        /* Mobile uses one document scroll; resizing the hero there changes the scroll range mid-gesture. */
+        const condensed = !isMobileViewport() && top > 28;
+        hero.classList.toggle('is-condensed', condensed);
+        hero.dataset.condensed = condensed ? '1' : '0';
+      };
+      const scheduleSync = () => {
+        if (frame) return;
+        frame = requestAnimationFrame(syncHeroState);
+      };
+
+      scrollRoots.forEach((root) => root.addEventListener('scroll', scheduleSync, { passive: true }));
+      window.addEventListener('resize', scheduleSync, { passive: true });
+
+      hero.querySelector('[data-warehouse-hero-expand]')?.addEventListener('click', () => {
+        hero.classList.remove('is-condensed');
+        hero.dataset.condensed = '0';
+        scrollRoots.forEach((root) => root.scrollTo?.({ top: 0, behavior: 'smooth' }));
+      });
+
+      const countSource = document.getElementById('allCount');
+      const countTarget = document.getElementById('warehouseHeroCount');
+      const syncCount = () => {
+        if (countTarget) countTarget.textContent = countSource?.textContent?.trim() || '0';
+      };
+      syncCount();
+      if (countSource && typeof MutationObserver !== 'undefined') {
+        new MutationObserver(syncCount).observe(countSource, { childList: true, characterData: true, subtree: true });
+      }
+      scheduleSync();
+    }
 
     function initAppNav() {
       document.querySelectorAll('.app-nav-item[data-app]').forEach(btn => {

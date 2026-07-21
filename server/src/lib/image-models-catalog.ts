@@ -107,7 +107,7 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     resolutions: ['1k', '2k', '4k'],
     pricingByResolution: true,
     defaultCreditsByResolution: { '1k': 7, '2k': 15, '4k': 20 },
-    defaultCredits: 15,
+    defaultCredits: 7,
     sortOrder: 91
   })),
   newApi(gim2({
@@ -128,7 +128,7 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   newApi(banana({
     id: 'lingtu-fast',
     upstream: 'nano-banana-fast',
-    label: '香蕉 · 极速 1K',
+    label: '香蕉 · Fast 1K',
     group: 'new',
     description: '快速生图模型，固定 1K',
     upstreamPoints: 0.032,
@@ -140,7 +140,7 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   newApi(banana({
     id: 'lingtu-2',
     upstream: 'nano-banana-2',
-    label: '香蕉 · 2代 1K/2K/4K',
+    label: '香蕉 · 2 1K/2K/4K',
     group: 'new',
     description: '通用生图模型，支持 1K/2K/4K',
     upstreamPoints: 0.07,
@@ -152,7 +152,7 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   newApi(banana({
     id: 'lingtu-pro',
     upstream: 'nano-banana-pro',
-    label: '香蕉 · 专业 1K/2K/4K',
+    label: '香蕉 · Pro 1K/2K/4K',
     group: 'new',
     description: '高质量通用生图模型，支持 1K/2K/4K',
     upstreamPoints: 0.1,
@@ -164,7 +164,7 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   newApi(banana({
     id: 'lingtu',
     upstream: 'nano-banana',
-    label: '香蕉 · 标准 1K/2K/4K',
+    label: '香蕉 · Standard 1K/2K/4K',
     group: 'new',
     description: '通用生图模型，支持 1K/2K/4K',
     upstreamPoints: 0.11,
@@ -188,7 +188,7 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     resolutions: ['1k'],
     pricingBySpeed: true,
     defaultCreditsBySpeed: { relax: 8, fast: 10, turbo: 12 },
-    defaultCredits: 8,
+    defaultCredits: 7,
     sortOrder: 110
   })),
   apimart(midjourney({
@@ -202,7 +202,7 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     resolutions: ['1k'],
     pricingBySpeed: true,
     defaultCreditsBySpeed: { relax: 8, fast: 10, turbo: 12 },
-    defaultCredits: 8,
+    defaultCredits: 7,
     sortOrder: 111
   })),
   apimart(midjourney({
@@ -216,7 +216,7 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     resolutions: ['1k'],
     pricingBySpeed: true,
     defaultCreditsBySpeed: { relax: 8, fast: 10, turbo: 12 },
-    defaultCredits: 8,
+    defaultCredits: 7,
     sortOrder: 112
   })),
   apimart(midjourney({
@@ -230,7 +230,7 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     resolutions: ['1k'],
     pricingBySpeed: true,
     defaultCreditsBySpeed: { relax: 8, fast: 10, turbo: 12 },
-    defaultCredits: 8,
+    defaultCredits: 7,
     sortOrder: 113
   }))
 ];

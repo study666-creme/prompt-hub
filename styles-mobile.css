@@ -2527,3 +2527,249 @@
     display: none !important;
   }
 }
+
+/* Warehouse hero: a compact editorial entry point that keeps the library usable on touch screens. */
+@media (max-width: 900px) {
+  .warehouse-hero {
+    display: block;
+    height: 392px;
+    min-height: 392px;
+    flex: 0 0 392px;
+    padding: 22px 18px 16px;
+    box-sizing: border-box;
+  }
+
+  .warehouse-hero::before {
+    left: 18px;
+    width: 42px;
+  }
+
+  .warehouse-hero-copy {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .warehouse-hero-kicker {
+    gap: 7px;
+    font-size: 9px;
+    letter-spacing: 0;
+  }
+
+  .warehouse-hero-kicker-mark {
+    width: 17px;
+    height: 17px;
+    font-size: 9px;
+  }
+
+  .warehouse-hero-kicker-rule {
+    width: 24px;
+  }
+
+  .warehouse-hero h1 {
+    max-width: 330px;
+    margin-top: 18px;
+    font-size: 30px;
+    line-height: 1.06;
+  }
+
+  .warehouse-hero-lede {
+    max-width: 320px;
+    margin-top: 11px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .warehouse-hero-actions {
+    position: relative;
+    z-index: 3;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: min(252px, 100%);
+    margin-top: 16px;
+  }
+
+  .warehouse-hero-action,
+  .warehouse-hero-link {
+    min-width: 0;
+    min-height: 36px;
+    font-size: 12px;
+  }
+
+  .warehouse-hero-action {
+    padding: 0 8px;
+  }
+
+  .warehouse-hero-link {
+    grid-column: 1 / -1;
+    justify-self: start;
+    min-height: 28px;
+    padding-left: 0;
+  }
+
+  .warehouse-hero-meta {
+    position: absolute;
+    right: auto;
+    bottom: 16px;
+    left: 18px;
+    z-index: 4;
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+  }
+
+  .warehouse-hero-meta strong {
+    font-size: 15px;
+  }
+
+  .warehouse-hero-meta small {
+    font-size: 8px;
+  }
+
+  .warehouse-hero-visual {
+    position: absolute;
+    inset: 226px 0 0;
+    min-height: 0;
+    margin: 0;
+    pointer-events: none;
+  }
+
+  .warehouse-hero-visual-index {
+    top: 4px;
+    right: 18px;
+    font-size: 9px;
+  }
+
+  .warehouse-hero-crosshair {
+    inset: 24px 16px 14px 18px;
+  }
+
+  .warehouse-hero-card {
+    width: 96px;
+    height: 138px;
+    padding: 5px;
+    border-radius: 7px;
+  }
+
+  .warehouse-hero-card figcaption {
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    padding: 4px 5px;
+    font-size: 7px;
+  }
+
+  .warehouse-hero-card--back {
+    display: none;
+  }
+
+  .warehouse-hero-card--middle {
+    top: 31px;
+    right: 82px;
+    transform: rotate(4deg);
+  }
+
+  .warehouse-hero-card--front {
+    top: 45px;
+    right: 14px;
+    transform: rotate(1deg);
+  }
+
+  .warehouse-hero:hover .warehouse-hero-card--middle {
+    transform: rotate(4deg);
+  }
+
+  .warehouse-hero:hover .warehouse-hero-card--front {
+    transform: rotate(1deg);
+  }
+
+  .warehouse-hero-canvas-tag {
+    right: 18px;
+    bottom: 14px;
+    left: auto;
+  }
+
+  .warehouse-hero-canvas-tag span {
+    font-size: 19px;
+  }
+
+  .warehouse-hero-canvas-tag small {
+    font-size: 8px;
+  }
+
+  .warehouse-hero-expand {
+    top: 50%;
+    right: 12px;
+    min-height: 30px;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+
+  .warehouse-hero.is-condensed {
+    height: 58px;
+    min-height: 58px;
+    flex-basis: 58px;
+    padding: 0 14px;
+  }
+
+  .warehouse-hero.is-condensed .warehouse-hero-copy {
+    gap: 10px;
+    padding-right: 88px;
+  }
+
+  .warehouse-hero.is-condensed h1 {
+    max-width: 100%;
+    font-size: 14px;
+  }
+
+  .warehouse-hero.is-condensed .warehouse-hero-expand {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 360px) {
+  .warehouse-hero {
+    height: 378px;
+    min-height: 378px;
+    flex-basis: 378px;
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .warehouse-hero::before {
+    left: 14px;
+  }
+
+  .warehouse-hero h1 {
+    font-size: 28px;
+  }
+
+  .warehouse-hero-actions {
+    width: min(236px, 100%);
+  }
+
+  .warehouse-hero-meta {
+    left: 14px;
+  }
+
+  .warehouse-hero-visual {
+    inset: 220px 0 0;
+  }
+
+  .warehouse-hero-card {
+    width: 86px;
+    height: 126px;
+  }
+
+  .warehouse-hero-card--middle {
+    right: 68px;
+  }
+
+  .warehouse-hero-card--front {
+    right: 10px;
+  }
+
+  .warehouse-hero-canvas-tag {
+    right: 14px;
+  }
+}

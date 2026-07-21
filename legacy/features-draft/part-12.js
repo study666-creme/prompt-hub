@@ -149,6 +149,38 @@
     syncImageGenModelParamsUI();
   }
 
+  const IMAGE_GEN_QUALITY_LABELS = {
+    low: '低',
+    medium: '中',
+    high: '高',
+    standard: '低',
+    ultra: '高',
+    auto: '自动'
+  };
+
+  function syncImageGenQualitySelectOptions(modelEntry) {
+    const qEl = document.getElementById('imageGenQuality');
+    if (!qEl) return;
+    const qualityParam = modelEntry?.parameters?.find((parameter) => parameter?.name === 'quality');
+    const rawOptions = Array.isArray(qualityParam?.options) ? qualityParam.options.map(String) : [];
+    const options = rawOptions.length
+      ? rawOptions
+      : ['standard', 'high', 'ultra'];
+    const key = options.join('|');
+    if (qEl.dataset.qualityOptions === key) return;
+    const current = qEl.value;
+    qEl.dataset.qualityOptions = key;
+    qEl.innerHTML = options
+      .map((value) => `<option value="${esc(value)}">${esc(IMAGE_GEN_QUALITY_LABELS[value] || value)}</option>`)
+      .join('');
+    if (options.includes(current)) qEl.value = current;
+    else if (typeof qualityParam?.default === 'string' && options.includes(qualityParam.default)) {
+      qEl.value = qualityParam.default;
+    } else {
+      qEl.value = options[0];
+    }
+  }
+
   function imageGenSizeOptionsForModel(modelId) {
     const id = normalizeImageGenModelId(modelId);
     const entry = imageGenModelCatalog.find((m) => m.id === id);
@@ -175,9 +207,11 @@
   function updateImageGenSizeSelect() {
     const sel = document.getElementById('imageGenSize');
     const modelSel = document.getElementById('imageGenModel');
+    const sizeParam = document.querySelector('.imagegen-param[data-param="size"]');
     if (!sel) return;
     const current = sel.value || '1:1';
     const options = imageGenSizeOptionsForModel(modelSel?.value || getImageGenModel());
+    if (sizeParam) sizeParam.hidden = !options.length;
     if (!options.length) {
       sel.dataset.sizeOptions = '';
       sel.innerHTML = '';
@@ -546,6 +580,7 @@
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         setImageGenBatchCount(btn.dataset.count);
+        persistImageGenFormDraft();
         closeImageGenCountMenu();
       });
     });
@@ -632,7 +667,7 @@
     const sizeLabel =
       document.getElementById('imageGenSize')?.selectedOptions?.[0]?.textContent?.trim() || size;
     const qualLabel =
-      { standard: '低', high: '中', ultra: '高' }[quality] || quality;
+      { standard: '低', low: '低', medium: '中', high: '中', ultra: '高' }[quality] || quality;
     const parts = [modelLabel, qualLabel, sizeLabel];
     if (isBlend) {
       parts.push(`混图 · ${unitPerSheet}`);

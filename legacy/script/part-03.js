@@ -797,6 +797,7 @@
     })();
 
     const APP_PAGE_IDS = {
+      landing: 'pageLanding',
       warehouse: 'pageWarehouse',
       devlab: 'pageDevLab',
       community: 'pageCommunity',

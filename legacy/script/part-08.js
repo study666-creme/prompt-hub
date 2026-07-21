@@ -809,7 +809,7 @@
         window.__PROMPT_HUB_AUTH_RESOLVED__ = true;
         updateAuthUI(null);
         await bootstrapWhenLoggedOut();
-        window.FeatureDraft?.onAppChange?.(window.AppRouter?.resolveBootApp?.() || 'community');
+        window.FeatureDraft?.onAppChange?.(window.AppRouter?.resolveBootApp?.() || 'landing');
         return;
       }
       await window.SupabaseSync.init(async (session, event) => {
@@ -852,7 +852,7 @@
           if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
             const app = window.AppRouter?.resolveBootApp?.()
               || localStorage.getItem('promptrepo_app_page')
-              || 'community';
+              || 'landing';
             window.FeatureDraft?.onAppChange?.(app);
           }
         };

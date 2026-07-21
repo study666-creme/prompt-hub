@@ -9,6 +9,7 @@
       initAppNav();
       initDevLabNav();
       initAppNavCollapse();
+      initWarehouseHero();
       if (window.AppRouter?.resolveBootApp?.() === 'devlab') {
         void ensureFeatureAssets().then(() => switchDevLabPanel(getDevLabPanel())).catch((e) => {
           console.warn('[assets] boot load failed', e);
@@ -19,7 +20,7 @@
         }, 3500);
       }
       finishAppBootstrap();
-      scheduleBackgroundEffectAfterBoot(window.AppRouter?.resolveBootApp?.() || 'community');
+      scheduleBackgroundEffectAfterBoot(window.AppRouter?.resolveBootApp?.() || 'landing');
       refreshAuthMethodUI();
       refreshAppBuildLabel();
       void initSupabaseAuth();

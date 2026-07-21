@@ -206,6 +206,7 @@
       quality: meta.quality,
       size: meta.size,
       count: meta.count,
+      countPreferenceVersion: IMAGE_GEN_COUNT_PREFERENCE_VERSION,
       cardTitle: meta.cardTitle,
       batchSplit: meta.batchSplit,
       mjMode: meta.mjMode,

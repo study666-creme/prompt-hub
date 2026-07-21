@@ -44,6 +44,18 @@ export type NewApiCatalogPricingTier = {
   credits: number;
 };
 
+export type NewApiCatalogPricingGroup = {
+  id: string;
+  yuan?: number;
+  credits?: number;
+  tiers?: NewApiCatalogPricingTier[];
+  inputMultiplier?: number;
+  outputMultiplier?: number;
+  completionRatio?: number;
+  inputCreditsPerMillion?: number;
+  outputCreditsPerMillion?: number;
+};
+
 export type NewApiCatalogPricing = {
   mode: 'fixed' | 'tiered' | 'token';
   unit: 'request' | 'second' | 'image' | 'token';
@@ -56,6 +68,7 @@ export type NewApiCatalogPricing = {
   completionRatio?: number;
   inputCreditsPerMillion?: number;
   outputCreditsPerMillion?: number;
+  groups?: NewApiCatalogPricingGroup[];
 };
 
 export type NewApiCatalogModel = {
@@ -118,6 +131,12 @@ export type NewApiAdminRouteSnapshot = {
   error: string | null;
 };
 
+export type NewApiResolvedCatalogModel = {
+  model: NewApiCatalogModel;
+  route: NewApiAdminRoute | null;
+  requestedModelId: string;
+};
+
 export type NewApiTaskPollResult = {
   status: string;
   imageUrl: string | null;
@@ -137,10 +156,12 @@ const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; 
   'gpt-image-2-4k-fast': { id: 'image2-4k-fast', label: '全能模型2 · 极速 4K', description: '固定 4K 的快速生图模型，支持多种画面比例。' },
   'gpt-image-2-ext': { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K', description: '高质量生图模型，支持 1K/2K/4K。' },
   image2k4k: { id: 'image2-hd', label: '全能模型2 · 经济 2K/4K', description: '高分辨率经济模型，支持 2K/4K。' },
-  'nano-banana-fast': { id: 'lingtu-fast', label: '香蕉 · 极速 1K', description: '快速生图模型，固定 1K。' },
-  'nano-banana-2': { id: 'lingtu-2', label: '香蕉 · 2代 1K/2K/4K', description: '通用生图模型，支持 1K/2K/4K。' },
-  'nano-banana-pro': { id: 'lingtu-pro', label: '香蕉 · 专业 1K/2K/4K', description: '高质量通用生图模型，支持 1K/2K/4K。' },
-  'nano-banana': { id: 'lingtu', label: '香蕉 · 标准 1K/2K/4K', description: '通用生图模型，支持 1K/2K/4K。' },
+  'nano-banana-fast': { id: 'lingtu-fast', label: '香蕉 · Fast 1K', description: '快速生图模型，固定 1K。' },
+  'nano-banana-2': { id: 'lingtu-2', label: '香蕉 · 2 1K/2K/4K', description: '通用生图模型，支持 1K/2K/4K。' },
+  'nano-banana-pro': { id: 'lingtu-pro', label: '香蕉 · Pro 1K/2K/4K', description: '高质量通用生图模型，支持 1K/2K/4K。' },
+  'nano-banana': { id: 'lingtu', label: '香蕉 · Standard 1K/2K/4K', description: '通用生图模型，支持 1K/2K/4K。' },
+  'grok-imagine-video': { id: 'motion-video', label: 'Grok Video', description: '按秒计费的视频模型，支持文生、单图和多图生视频。' },
+  'grok-imagine-video-1.5': { id: 'motion-video-1-5', label: 'Grok Video 1.5', description: '按秒计费的视频模型，支持单图生视频。' },
   'grok-video': { id: 'motion-video', label: 'Grok Video', description: '按秒计费的视频模型，支持文生、单图和多图生视频。' },
   'grok-video-1.5': { id: 'motion-video-1-5', label: 'Grok Video 1.5', description: '按秒计费的视频模型，支持单图生视频。' }
 };
@@ -191,6 +212,69 @@ function booleanValue(value: unknown): boolean {
 
 function rounded(value: number): number {
   return Number(value.toFixed(8));
+}
+
+function normalizedPricingTiers(value: unknown, applyImageMarkup: boolean): NewApiCatalogPricingTier[] {
+  return (Array.isArray(value) ? value : [])
+    .map((entry): NewApiCatalogPricingTier | null => {
+      if (!entry || typeof entry !== 'object') return null;
+      const tier = entry as Record<string, unknown>;
+      const yuan = numberValue(tier.yuan);
+      const credits = applyImageMarkup
+        ? imageRetailCreditsFromYuan(tier.yuan)
+        : yuan == null
+          ? null
+          : rounded(yuan * 100);
+      const when = tier.when && typeof tier.when === 'object'
+        ? Object.fromEntries(
+            Object.entries(tier.when as Record<string, unknown>)
+              .filter(([, condition]) => ['string', 'number', 'boolean'].includes(typeof condition))
+          ) as Record<string, string | number | boolean>
+        : {};
+      if (yuan == null || yuan < 0 || credits == null || !Object.keys(when).length) return null;
+      return { when, yuan, credits };
+    })
+    .filter((tier): tier is NewApiCatalogPricingTier => tier != null);
+}
+
+function normalizedPricingGroups(
+  value: unknown,
+  mode: NewApiCatalogPricing['mode'],
+  applyImageMarkup: boolean
+): NewApiCatalogPricingGroup[] {
+  return (Array.isArray(value) ? value : [])
+    .map((entry): NewApiCatalogPricingGroup | null => {
+      if (!entry || typeof entry !== 'object') return null;
+      const group = entry as Record<string, unknown>;
+      const id = stringValue(group.id);
+      if (!id) return null;
+      if (mode === 'token') {
+        const inputMultiplier = numberValue(group.input_multiplier);
+        const outputMultiplier = numberValue(group.output_multiplier);
+        const completionRatio = numberValue(group.completion_ratio);
+        const inputCreditsPerMillion = numberValue(group.input_credits_per_million);
+        const outputCreditsPerMillion = numberValue(group.output_credits_per_million);
+        if (inputMultiplier == null || outputMultiplier == null) return null;
+        return {
+          id,
+          inputMultiplier,
+          outputMultiplier,
+          ...(completionRatio != null ? { completionRatio } : {}),
+          ...(inputCreditsPerMillion != null ? { inputCreditsPerMillion } : {}),
+          ...(outputCreditsPerMillion != null ? { outputCreditsPerMillion } : {})
+        };
+      }
+      const yuan = numberValue(group.yuan);
+      const credits = applyImageMarkup
+        ? imageRetailCreditsFromYuan(group.yuan)
+        : yuan == null
+          ? null
+          : rounded(yuan * 100);
+      if (yuan == null || yuan < 0 || credits == null) return null;
+      const tiers = normalizedPricingTiers(group.tiers, applyImageMarkup);
+      return { id, yuan, credits, ...(tiers.length ? { tiers } : {}) };
+    })
+    .filter((group): group is NewApiCatalogPricingGroup => group != null);
 }
 
 function canonicalImageFamilyLabel(family: string, label: string): string {
@@ -245,6 +329,7 @@ function normalizeCatalogPricing(value: unknown, applyImageMarkup = false): NewA
     const outputCreditsPerMillion = numberValue(raw.output_credits_per_million);
     if (inputMultiplier == null || inputMultiplier < 0 || outputMultiplier == null || outputMultiplier < 0) return null;
     if (inputCreditsPerMillion == null || inputCreditsPerMillion < 0 || outputCreditsPerMillion == null || outputCreditsPerMillion < 0) return null;
+    const groups = normalizedPricingGroups(raw.groups, mode, applyImageMarkup);
     return {
       mode,
       unit,
@@ -252,7 +337,8 @@ function normalizeCatalogPricing(value: unknown, applyImageMarkup = false): NewA
       outputMultiplier,
       inputCreditsPerMillion,
       outputCreditsPerMillion,
-      ...(completionRatio != null && completionRatio >= 0 ? { completionRatio } : {})
+      ...(completionRatio != null && completionRatio >= 0 ? { completionRatio } : {}),
+      ...(groups.length ? { groups } : {})
     };
   }
   const yuan = numberValue(raw.yuan);
@@ -263,33 +349,15 @@ function normalizeCatalogPricing(value: unknown, applyImageMarkup = false): NewA
         return yuanValue == null ? null : rounded(yuanValue * 100);
       })();
   if (yuan == null || yuan < 0 || credits == null) return null;
-  const tiers = (Array.isArray(raw.tiers) ? raw.tiers : [])
-    .map((value): NewApiCatalogPricingTier | null => {
-      if (!value || typeof value !== 'object') return null;
-      const tier = value as Record<string, unknown>;
-      const tierYuan = numberValue(tier.yuan);
-      const tierCredits = applyImageMarkup
-        ? imageRetailCreditsFromYuan(tier.yuan)
-        : (() => {
-            const yuanValue = numberValue(tier.yuan);
-            return yuanValue == null ? null : rounded(yuanValue * 100);
-          })();
-      const when = tier.when && typeof tier.when === 'object'
-        ? Object.fromEntries(
-            Object.entries(tier.when as Record<string, unknown>)
-              .filter(([, condition]) => ['string', 'number', 'boolean'].includes(typeof condition))
-          ) as Record<string, string | number | boolean>
-        : {};
-      if (tierYuan == null || tierYuan < 0 || tierCredits == null || !Object.keys(when).length) return null;
-      return { when, yuan: tierYuan, credits: tierCredits };
-    })
-    .filter((tier): tier is NewApiCatalogPricingTier => tier != null);
+  const tiers = normalizedPricingTiers(raw.tiers, applyImageMarkup);
+  const groups = normalizedPricingGroups(raw.groups, mode, applyImageMarkup);
   return {
     mode,
     unit,
     yuan,
     credits,
     ...(tiers.length ? { tiers } : {}),
+    ...(groups.length ? { groups } : {}),
     quantityParameter: stringValue(raw.quantity_parameter) || null
   };
 }
@@ -382,16 +450,19 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
       modality !== 'image'
       || (pricing.unit !== 'image' && !isChatImage)
       || pricing.credits == null
-      || pricing.credits <= 0
+      || pricing.credits < 0
     ) continue;
     const resolutions: ('1k' | '2k' | '4k')[] = isChatImage
       ? ['1k']
       : resolutionOptions(parameters, upstreamModel);
+    if (upstreamModel === 'gpt-image-2-ext' && !resolutions.includes('1k')) {
+      resolutions.unshift('1k');
+    }
     if (!resolutions.length) continue;
     const creditsByResolution: Partial<Record<'1k' | '2k' | '4k', number>> = {};
     for (const tier of pricing.tiers || []) {
       const resolution = stringValue(tier.when.quality ?? tier.when.resolution).toLowerCase();
-      if ((resolution === '1k' || resolution === '2k' || resolution === '4k') && tier.credits > 0) {
+      if ((resolution === '1k' || resolution === '2k' || resolution === '4k') && tier.credits >= 0) {
         creditsByResolution[resolution] = tier.credits;
       }
     }
@@ -577,7 +648,139 @@ function isPublicCatalogModel(snapshot: NewApiCatalogSnapshot, model: NewApiCata
 export function publicNewApiCatalogModels(snapshot: NewApiCatalogSnapshot) {
   return snapshot.models
     .filter(model => isPublicCatalogModel(snapshot, model))
-    .map(({ upstreamModel: _upstreamModel, ...model }) => model);
+    .map(({ upstreamModel: _upstreamModel, ...model }) => ({
+      ...model,
+      pricing: publicCatalogPricing(model.pricing)
+    }));
+}
+
+const SCOPED_MODEL_PATTERN = /^_sf-([A-Za-z0-9_-]+)::(.+)$/;
+
+function publicCatalogPricing(pricing: NewApiCatalogPricing): NewApiCatalogPricing {
+  const { groups: _groups, ...publicPricing } = pricing;
+  return publicPricing;
+}
+
+function pricingGroupScore(group: NewApiCatalogPricingGroup): number {
+  if (group.credits != null) return group.credits;
+  const input = group.inputCreditsPerMillion ?? group.inputMultiplier ?? Number.POSITIVE_INFINITY;
+  const output = group.outputCreditsPerMillion ?? group.outputMultiplier ?? Number.POSITIVE_INFINITY;
+  return input + output;
+}
+
+function pricingForRoute(pricing: NewApiCatalogPricing, route: NewApiAdminRoute): NewApiCatalogPricing {
+  const routeGroups = new Set(route.groups);
+  const group = (pricing.groups || [])
+    .filter(candidate => routeGroups.has(candidate.id))
+    .sort((left, right) => pricingGroupScore(left) - pricingGroupScore(right) || left.id.localeCompare(right.id))[0];
+  if (!group) return publicCatalogPricing(pricing);
+  if (pricing.mode === 'token') {
+    const inputRatio = pricing.inputMultiplier && group.inputMultiplier != null
+      ? group.inputMultiplier / pricing.inputMultiplier
+      : 1;
+    const outputRatio = pricing.outputMultiplier && group.outputMultiplier != null
+      ? group.outputMultiplier / pricing.outputMultiplier
+      : 1;
+    return {
+      ...publicCatalogPricing(pricing),
+      inputMultiplier: group.inputMultiplier ?? pricing.inputMultiplier,
+      outputMultiplier: group.outputMultiplier ?? pricing.outputMultiplier,
+      completionRatio: group.completionRatio ?? pricing.completionRatio,
+      inputCreditsPerMillion: group.inputCreditsPerMillion
+        ?? (pricing.inputCreditsPerMillion == null ? undefined : rounded(pricing.inputCreditsPerMillion * inputRatio)),
+      outputCreditsPerMillion: group.outputCreditsPerMillion
+        ?? (pricing.outputCreditsPerMillion == null ? undefined : rounded(pricing.outputCreditsPerMillion * outputRatio))
+    };
+  }
+  return {
+    ...publicCatalogPricing(pricing),
+    yuan: group.yuan ?? pricing.yuan,
+    credits: group.credits ?? pricing.credits,
+    tiers: group.tiers?.length ? group.tiers : pricing.tiers
+  };
+}
+
+async function scopedRouteToken(upstreamModel: string, channelId: number): Promise<string> {
+  const bytes = new TextEncoder().encode(`canvas-route-v1:${upstreamModel}:${channelId}`);
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  let binary = '';
+  for (const byte of digest.slice(0, 15)) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function activeModelRoutes(routeSnapshot: NewApiAdminRouteSnapshot, upstreamModel: string) {
+  const unique = new Map<number, NewApiAdminRoute>();
+  for (const route of routeSnapshot.routes[upstreamModel] || []) {
+    if (route.enabled && route.channelId > 0 && !unique.has(route.channelId)) unique.set(route.channelId, route);
+  }
+  return [...unique.values()];
+}
+
+function routeLabel(index: number) {
+  return `线路 ${index + 1}`;
+}
+
+export async function publicNewApiRoutedCatalogModels(
+  snapshot: NewApiCatalogSnapshot,
+  routeSnapshot: NewApiAdminRouteSnapshot
+) {
+  const models = snapshot.models.filter(model => isPublicCatalogModel(snapshot, model));
+  const result: Array<Omit<NewApiCatalogModel, 'upstreamModel'>> = [];
+  for (const model of models) {
+    const { upstreamModel: _upstreamModel, ...publicModel } = model;
+    const routes = model.modality === 'image' ? [] : activeModelRoutes(routeSnapshot, model.upstreamModel);
+    if (routes.length <= 1) {
+      result.push({ ...publicModel, pricing: publicCatalogPricing(model.pricing) });
+      continue;
+    }
+    for (const [index, route] of routes.entries()) {
+      const id = `_sf-${await scopedRouteToken(model.upstreamModel, route.channelId)}::${model.id}`;
+      result.push({
+        ...publicModel,
+        id,
+        label: `${model.label} · ${routeLabel(index)}`,
+        order: model.order + index / 100,
+        parameters: model.parameters.map(parameter => parameter.name === 'model' ? { ...parameter, fixed: id } : parameter),
+        pricing: pricingForRoute(model.pricing, route)
+      });
+    }
+  }
+  return result.sort((left, right) => left.order - right.order || left.label.localeCompare(right.label));
+}
+
+export async function resolveNewApiRoutedCatalogModel(
+  snapshot: NewApiCatalogSnapshot,
+  routeSnapshot: NewApiAdminRouteSnapshot,
+  modelId: string,
+  modality?: NewApiModelModality
+): Promise<NewApiResolvedCatalogModel | null> {
+  const requestedModelId = String(modelId || '').trim();
+  const scoped = requestedModelId.match(SCOPED_MODEL_PATTERN);
+  if (!scoped) {
+    const model = resolveNewApiCatalogModel(snapshot, requestedModelId, modality);
+    return model ? { model, route: null, requestedModelId: model.id } : null;
+  }
+  const model = resolveNewApiCatalogModel(snapshot, scoped[2], modality);
+  if (!model) return null;
+  const routes = activeModelRoutes(routeSnapshot, model.upstreamModel);
+  for (const [index, route] of routes.entries()) {
+    if (await scopedRouteToken(model.upstreamModel, route.channelId) !== scoped[1]) continue;
+    return {
+      model: {
+        ...model,
+        id: requestedModelId,
+        label: `${model.label} · ${routeLabel(index)}`,
+        pricing: pricingForRoute(model.pricing, route)
+      },
+      route,
+      requestedModelId
+    };
+  }
+  return null;
+}
+
+export function newApiKeyForRoute(apiKey: string, route: Pick<NewApiAdminRoute, 'channelId'> | null | undefined) {
+  return route?.channelId ? `${apiKey}-${route.channelId}` : apiKey;
 }
 
 export function resolveNewApiCatalogModel(

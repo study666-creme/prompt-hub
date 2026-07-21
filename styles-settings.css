@@ -1769,8 +1769,7 @@ body.payment-method-open { overflow: hidden; }
 .payment-method-option strong { font-size: 14px; }
 .payment-method-option small { color: var(--text-muted); font-size: 11px; }
 .payment-method-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; color: #fff; font-size: 16px; font-weight: 850; }
-.payment-method-option--alipay .payment-method-icon,
-.payment-method-option--wxpay .payment-method-icon {
+.payment-method-option--alipay .payment-method-icon {
   border: 1px solid var(--border-light);
   background: var(--bg-hover);
   color: var(--text-primary);

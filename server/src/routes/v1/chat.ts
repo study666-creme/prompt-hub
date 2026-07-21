@@ -10,10 +10,13 @@ import {
 } from '../../lib/chat-pricing';
 import { ApiError } from '../../lib/errors';
 import {
+  fetchNewApiAdminRoutes,
   fetchNewApiModelCatalog,
+  newApiKeyForRoute,
   newApiTextCreditsForUsage,
-  resolveNewApiCatalogModel,
-  type NewApiCatalogModel
+  resolveNewApiRoutedCatalogModel,
+  type NewApiCatalogModel,
+  type NewApiResolvedCatalogModel
 } from '../../lib/newapi';
 import {
   deductUserCredits,
@@ -97,16 +100,17 @@ function billableCredits(value: number | null) {
   return Math.max(MIN_CREDIT_CHARGE, roundCredits(value));
 }
 
-async function freshTextModel(env: Env, modelId: string): Promise<NewApiCatalogModel> {
+async function freshTextModel(env: Env, modelId: string): Promise<NewApiResolvedCatalogModel> {
   let snapshot;
   try {
     snapshot = await fetchNewApiModelCatalog(env.NEWAPI_API_BASE_URL, { force: true, requireFresh: true });
   } catch {
     throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认实时价格，请稍后重试');
   }
-  const model = resolveNewApiCatalogModel(snapshot, modelId, 'text');
-  if (!model) throw new ApiError(400, 'MODEL_UNAVAILABLE', '所选文字模型已下架，请刷新后重选');
-  return model;
+  const routes = await fetchNewApiAdminRoutes(env.NEWAPI_API_BASE_URL, env.NEWAPI_CATALOG_ADMIN_SECRET);
+  const resolved = await resolveNewApiRoutedCatalogModel(snapshot, routes, modelId, 'text');
+  if (!resolved) throw new ApiError(400, 'MODEL_UNAVAILABLE', '所选文字模型或线路已不可用，请刷新后重选');
+  return resolved;
 }
 
 function validateReasoningEffort(model: NewApiCatalogModel, value?: string) {
@@ -130,7 +134,8 @@ chatRoutes.get('/cost', async c => {
   const memberActive = isMembershipActive(profile);
 
   if (model !== 'deepseek-v4-flash') {
-    const catalogModel = await freshTextModel(c.env, model);
+    const resolved = await freshTextModel(c.env, model);
+    const catalogModel = resolved.model;
     const credits = billableCredits(newApiTextCreditsForUsage(
       catalogModel,
       inputTokens || estimateTokensFromText('示例消息'),
@@ -140,7 +145,7 @@ chatRoutes.get('/cost', async c => {
     return c.json({
       ok: true,
       data: {
-        model: catalogModel.id,
+        model: resolved.requestedModelId,
         modelLabel: catalogModel.label,
         thinking,
         base: credits,
@@ -195,9 +200,13 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
 
   const modelId = parsed.data.model || 'creative-5-5';
   const isLegacyModel = modelId === 'deepseek-v4-flash';
-  const catalogModel = isLegacyModel ? null : await freshTextModel(c.env, modelId);
+  const resolvedCatalogModel = isLegacyModel ? null : await freshTextModel(c.env, modelId);
+  const catalogModel = resolvedCatalogModel?.model || null;
   if (catalogModel) validateReasoningEffort(catalogModel, parsed.data.reasoningEffort);
-  const apiKey = (catalogModel ? c.env.NEWAPI_API_KEY : c.env.CHAT_API_KEY)?.trim();
+  const rawApiKey = (catalogModel ? c.env.NEWAPI_API_KEY : c.env.CHAT_API_KEY)?.trim();
+  const apiKey = rawApiKey && resolvedCatalogModel
+    ? newApiKeyForRoute(rawApiKey, resolvedCatalogModel.route)
+    : rawApiKey;
   const apiBase = catalogModel ? c.env.NEWAPI_API_BASE_URL : c.env.CHAT_API_BASE_URL;
   if (!apiKey) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '对话服务暂未配置');
 
@@ -306,7 +315,7 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
       'chat_generation',
       chatId,
       {
-        model: catalogModel?.id || modelId,
+        model: resolvedCatalogModel?.requestedModelId || modelId,
         thinking,
         base: cost.base,
         discountLabel: cost.discountLabel,
@@ -345,7 +354,7 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
         inputTokens,
         outputTokens
       },
-      model: catalogModel?.id || modelId,
+      model: resolvedCatalogModel?.requestedModelId || modelId,
       modelLabel: cost.modelLabel,
       thinking
     }

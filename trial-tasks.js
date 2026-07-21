@@ -561,12 +561,6 @@
           <div class="trial-hub-row-action">${dailyBtn}</div>
         </div>
         ${memberDailyRow}
-        <div class="trial-hub-row trial-hub-community-row">
-          <div class="trial-hub-row-main">
-            <strong>加入社群 · 领 100 积分</strong>
-            <p class="trial-hub-desc trial-hub-desc-oneline">入群后联系管理员领取 100 积分。</p>
-          </div>
-        </div>
         <div class="trial-hub-link-row trial-hub-qq-row">
           <span class="trial-hub-label">QQ 群号</span>
           <code class="trial-hub-code">222653426</code>

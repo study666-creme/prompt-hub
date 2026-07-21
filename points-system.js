@@ -17,7 +17,7 @@
   function roundCredits(n) {
     const v = Number(n);
     if (!Number.isFinite(v)) return MIN_CHARGE_POINTS;
-    return Math.max(MIN_CHARGE_POINTS, Math.round(v * 10) / 10);
+    return Math.max(0, Math.round(v * 10) / 10);
   }
 
   function formatCredits(n) {
@@ -58,7 +58,12 @@
   const FALLBACK_MODEL = {
     id: 'image2',
     label: '全能模型2 · 1K',
-    pricing: 'api'
+    pricing: 'api',
+    creditsPerCall: 0,
+    creditsBase: 0,
+    creditsFinal: 0,
+    listPrice: 0,
+    promoPrice: 0
   };
 
   function normalizeImageGenModelId(modelId) {
@@ -204,6 +209,7 @@
 
   /** 会员折后积分（0.1 精度，与 server 一致） */
   function applyMemberDiscount(base, mult) {
+    if (Number(base) <= 0) return 0;
     if (mult >= 1) return roundCredits(base);
     return roundCredits(Math.max(MIN_CHARGE_POINTS, base * mult));
   }
@@ -274,8 +280,12 @@
   }
 
   function costDetailFromApiQuote(model, resCost, mult, memberLabel) {
-    const listPrice = Number(resCost.listPrice) || Number(resCost.base) || Number(model.creditsPerCall) || 10;
-    const final = Number(resCost.final) || listPrice;
+    const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+    const listPrice = numberOr(
+      resCost.listPrice,
+      numberOr(resCost.base, numberOr(model.creditsPerCall, 0))
+    );
+    const final = numberOr(resCost.final, listPrice);
     const appliedDiscount = resCost.appliedDiscount || model.appliedDiscount || 'none';
     const saved = listPrice > final ? roundCredits(listPrice - final) : 0;
     return {
@@ -284,7 +294,7 @@
       base: listPrice,
       final,
       listPrice,
-      promoPrice: Number(resCost.promoPrice) || Number(model.promoPrice) || final,
+      promoPrice: numberOr(resCost.promoPrice, numberOr(model.promoPrice, final)),
       appliedDiscount,
       modelDiscountLabel: appliedDiscount === 'model'
         ? (resCost.modelDiscountLabel || model.modelDiscountLabel || null)
@@ -374,6 +384,12 @@
       if (Number.isFinite(model.creditsFinal)) {
         return costDetailFromApiQuote(model, model, mult, label);
       }
+    }
+
+    // The catalog can be unavailable during first paint. Keep the known free
+    // model free instead of falling through to the legacy resolution price.
+    if (model.id === 'image2' && Number.isFinite(model.creditsFinal)) {
+      return costDetailFromApiQuote(model, model, mult, label);
     }
 
     const base = getBaseResolutionCost(res);

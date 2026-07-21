@@ -14,12 +14,13 @@
     devlab: ['/dev', '/devlab']
   };
 
-  const PATH_TO_APP = { '/': 'community' };
+  const PATH_TO_APP = { '/': 'landing' };
   for (const [app, paths] of Object.entries(ROUTES)) {
     for (const p of paths) PATH_TO_APP[p] = app;
   }
 
   const APP_PATH = {
+    landing: '/',
     warehouse: '/prompts/',
     imagegen: '/generate/',
     community: '/community/',
@@ -28,6 +29,7 @@
   };
 
   const APP_TITLE = {
+    landing: '',
     warehouse: '',
     imagegen: '图片生成',
     community: '提示词社区',
@@ -56,7 +58,7 @@
   }
 
   function pathForApp(app) {
-    return APP_PATH[app] || '/community/';
+    return APP_PATH[app] || '/';
   }
 
   function getPromptCanvasUrl() {
@@ -94,12 +96,12 @@
   function resolveBootApp() {
     const path = normalizePath(window.location.pathname);
     const fromUrl = appFromPath(path);
-    if (fromUrl && path !== '/') return fromUrl;
+    if (fromUrl) return fromUrl;
     try {
       const saved = localStorage.getItem('promptrepo_app_page');
       if (saved && APP_PATH[saved]) return saved;
     } catch (e) { /* ignore */ }
-    return fromUrl || 'community';
+    return 'landing';
   }
 
   function init(onNavigate) {

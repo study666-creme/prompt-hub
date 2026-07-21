@@ -1,7 +1,9 @@
 /** Map Prompt Hub quality values to OpenAI-compatible image quality values. */
 export function mapQualityForGptImage(quality: string): string {
-  if (quality === 'high' || quality === 'ultra') return 'high';
-  if (quality === 'standard') return 'medium';
+  const q = String(quality || '').trim().toLowerCase();
+  if (q === 'high' || q === 'ultra') return 'high';
+  if (q === 'low') return 'low';
+  if (q === 'medium' || q === 'standard') return 'medium';
   return 'auto';
 }
 

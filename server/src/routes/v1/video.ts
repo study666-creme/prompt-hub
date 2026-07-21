@@ -7,10 +7,13 @@ import { isAcceptedRefImageInput, resolveGenerationRefUrls } from '../../lib/gen
 import { isStorageRef, storagePathFromRef } from '../../lib/image-archive';
 import { buildPrivateMediaCdnUrl } from '../../lib/media-cdn';
 import {
+  fetchNewApiAdminRoutes,
   fetchNewApiModelCatalog,
+  newApiKeyForRoute,
   newApiFixedCreditsForRequest,
-  resolveNewApiCatalogModel,
+  resolveNewApiRoutedCatalogModel,
   type NewApiCatalogModel,
+  type NewApiResolvedCatalogModel,
   type NewApiCatalogParameter
 } from '../../lib/newapi';
 import { fetchNewApiVideoContent, fetchNewApiVideoTask, submitNewApiVideo } from '../../lib/newapi-video';
@@ -25,16 +28,57 @@ import { createAdminClient } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
 
 const mediaRef = z.string().refine(value => /^https?:\/\//i.test(value) || isStorageRef(value), '仅支持媒体 URL');
+const imageRef = z.string().refine(isAcceptedRefImageInput);
 const bodySchema = z.object({
   model: z.string().min(1).max(100),
   prompt: z.string().min(1).max(12000),
-  duration: z.coerce.number().int().min(1).max(60).default(5),
-  ratio: z.string().min(1).max(30).default('16:9'),
+  duration: z.coerce.number().int().min(1).max(60).optional(),
+  seconds: z.coerce.number().int().min(1).max(60).optional(),
+  ratio: z.string().min(1).max(30).optional(),
+  aspect_ratio: z.string().min(1).max(30).optional(),
   resolution: z.string().min(1).max(30).default('720p'),
-  referenceImages: z.array(z.string().refine(isAcceptedRefImageInput)).max(14).optional(),
+  referenceImages: z.array(imageRef).max(14).optional(),
+  image: imageRef.optional(),
+  images: z.array(imageRef).max(14).optional(),
   referenceVideos: z.array(mediaRef).max(3).optional(),
   referenceAudios: z.array(mediaRef).max(3).optional()
-});
+}).superRefine((input, ctx) => {
+  if (input.duration != null && input.seconds != null && input.duration !== input.seconds) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'duration 与 seconds 不能冲突' });
+  }
+  if (input.ratio && input.aspect_ratio && input.ratio !== input.aspect_ratio) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'ratio 与 aspect_ratio 不能冲突' });
+  }
+  const populatedImageAliases = [
+    input.referenceImages?.length ? 'referenceImages' : '',
+    input.image ? 'image' : '',
+    input.images?.length ? 'images' : ''
+  ].filter(Boolean);
+  if (populatedImageAliases.length > 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: '参考图字段不能重复' });
+  }
+}).transform(input => ({
+  model: input.model,
+  prompt: input.prompt,
+  duration: input.duration ?? input.seconds ?? 5,
+  ratio: input.ratio || input.aspect_ratio || '16:9',
+  resolution: input.resolution,
+  referenceImages: input.referenceImages?.length
+    ? input.referenceImages
+    : input.image
+      ? [input.image]
+      : input.images?.length
+        ? input.images
+        : undefined,
+  referenceVideos: input.referenceVideos,
+  referenceAudios: input.referenceAudios
+}));
+
+export function parseVideoRequestBody(raw: unknown): z.infer<typeof bodySchema> {
+  const parsed = bodySchema.safeParse(raw);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', '请填写有效的视频提示词与参数');
+  return parsed.data;
+}
 
 type VideoMeta = {
   mediaType?: unknown;
@@ -42,6 +86,7 @@ type VideoMeta = {
   modelLabel?: unknown;
   upstreamModel?: unknown;
   upstreamTaskId?: unknown;
+  routeChannelId?: unknown;
   credits?: unknown;
   debitSplit?: unknown;
   progress?: unknown;
@@ -97,16 +142,17 @@ function validateReferenceCount(model: NewApiCatalogModel, names: string[], coun
   if (count > max) throw new ApiError(400, 'VALIDATION_ERROR', `该模型最多支持 ${max} 个${label}`);
 }
 
-async function freshVideoModel(env: Env, modelId: string) {
+async function freshVideoModel(env: Env, modelId: string): Promise<NewApiResolvedCatalogModel> {
   let snapshot;
   try {
     snapshot = await fetchNewApiModelCatalog(env.NEWAPI_API_BASE_URL, { force: true, requireFresh: true });
   } catch {
     throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认实时价格，请稍后重试');
   }
-  const model = resolveNewApiCatalogModel(snapshot, modelId, 'video');
-  if (!model) throw new ApiError(400, 'MODEL_UNAVAILABLE', '所选视频模型已下架，请刷新后重选');
-  return model;
+  const routes = await fetchNewApiAdminRoutes(env.NEWAPI_API_BASE_URL, env.NEWAPI_CATALOG_ADMIN_SECRET);
+  const resolved = await resolveNewApiRoutedCatalogModel(snapshot, routes, modelId, 'video');
+  if (!resolved) throw new ApiError(400, 'MODEL_UNAVAILABLE', '所选视频模型或线路已不可用，请刷新后重选');
+  return resolved;
 }
 
 function parseDebitSplit(value: unknown): DebitSplit {
@@ -155,17 +201,17 @@ async function resolveMediaReferences(
 
 videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   const user = c.get('user');
-  const parsed = bodySchema.safeParse(await c.req.json().catch(() => ({})));
-  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', '请填写有效的视频提示词与参数');
+  const input = parseVideoRequestBody(await c.req.json().catch(() => ({})));
 
   const apiKey = c.env.NEWAPI_API_KEY?.trim();
   if (!apiKey) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频服务暂未配置');
-  const model = await freshVideoModel(c.env, parsed.data.model);
-  validateVideoRequest(model, parsed.data);
+  const resolved = await freshVideoModel(c.env, input.model);
+  const { model, route } = resolved;
+  validateVideoRequest(model, input);
   const credits = newApiFixedCreditsForRequest(model, {
-    duration: parsed.data.duration,
-    resolution: parsed.data.resolution,
-    ratio: parsed.data.ratio
+    duration: input.duration,
+    resolution: input.resolution,
+    ratio: input.ratio
   });
   if (credits == null || credits <= 0) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认该模型实时价格');
 
@@ -175,32 +221,33 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   if (spendableCredits(profile) < final) {
     throw new ApiError(402, 'INSUFFICIENT_CREDITS', `积分不足（需要 ${final}，当前 ${spendableCredits(profile)}）`);
   }
-  const referenceImages = parsed.data.referenceImages?.length
-    ? await resolveGenerationRefUrls(c, admin, user.id, parsed.data.referenceImages)
+  const referenceImages = input.referenceImages?.length
+    ? await resolveGenerationRefUrls(c, admin, user.id, input.referenceImages)
     : [];
   const [referenceVideos, referenceAudios] = await Promise.all([
-    resolveMediaReferences(c, user.id, parsed.data.referenceVideos),
-    resolveMediaReferences(c, user.id, parsed.data.referenceAudios)
+    resolveMediaReferences(c, user.id, input.referenceVideos),
+    resolveMediaReferences(c, user.id, input.referenceAudios)
   ]);
   const baseMeta: VideoMeta = {
     mediaType: 'video',
-    model: model.id,
+    model: resolved.requestedModelId,
     modelLabel: model.label,
     upstreamModel: model.upstreamModel,
+    ...(route?.channelId ? { routeChannelId: route.channelId } : {}),
     credits: final,
-    duration: parsed.data.duration,
-    ratio: parsed.data.ratio,
-    resolution: parsed.data.resolution,
+    duration: input.duration,
+    ratio: input.ratio,
+    resolution: input.resolution,
     progress: 0
   };
   const { data: inserted, error: insertError } = await admin
     .from('generation_requests')
     .insert({
       user_id: user.id,
-      prompt: parsed.data.prompt,
-      resolution: parsed.data.resolution,
+      prompt: input.prompt,
+      resolution: input.resolution,
       quality: 'standard',
-      size_label: parsed.data.ratio,
+      size_label: input.ratio,
       credits_charged: final,
       status: 'processing',
       meta: baseMeta
@@ -213,19 +260,19 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   try {
     const debited = await deductUserCredits(admin, user.id, final, 'video_generation', inserted.id, {
       model: model.id,
-      duration: parsed.data.duration,
-      resolution: parsed.data.resolution
+      duration: input.duration,
+      resolution: input.resolution
     });
     profile = debited.profile;
     split = debited.split;
     await admin.from('generation_requests').update({ meta: { ...baseMeta, debitSplit: split } }).eq('id', inserted.id);
 
-    const task = await submitNewApiVideo(apiKey, c.env.NEWAPI_API_BASE_URL, {
+    const task = await submitNewApiVideo(newApiKeyForRoute(apiKey, route), c.env.NEWAPI_API_BASE_URL, {
       upstreamModel: model.upstreamModel,
-      prompt: parsed.data.prompt,
-      duration: parsed.data.duration,
-      ratio: parsed.data.ratio,
-      resolution: parsed.data.resolution,
+      prompt: input.prompt,
+      duration: input.duration,
+      ratio: input.ratio,
+      resolution: input.resolution,
       referenceImages,
       referenceVideos,
       referenceAudios
@@ -284,7 +331,9 @@ videoRoutes.get('/jobs/:jobId', async c => {
   const apiKey = c.env.NEWAPI_API_KEY?.trim();
   const upstreamTaskId = String(meta.upstreamTaskId || '');
   if (!apiKey || !upstreamTaskId) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频任务尚未完成提交');
-  const task = await fetchNewApiVideoTask(apiKey, c.env.NEWAPI_API_BASE_URL, upstreamTaskId);
+  const routeChannelId = Number(meta.routeChannelId) || 0;
+  const route = routeChannelId ? { channelId: routeChannelId } : null;
+  const task = await fetchNewApiVideoTask(newApiKeyForRoute(apiKey, route), c.env.NEWAPI_API_BASE_URL, upstreamTaskId);
   if (task.status === 'completed') {
     const nextMeta = { ...meta, progress: 100, resultUrl: task.videoUrl };
     const { data: updated } = await admin.from('generation_requests').update({
@@ -339,7 +388,9 @@ videoRoutes.get('/jobs/:jobId/content', async c => {
   const apiKey = c.env.NEWAPI_API_KEY?.trim();
   const upstreamTaskId = String(meta.upstreamTaskId || '');
   if (!apiKey || !upstreamTaskId) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频内容暂不可用');
-  const upstream = await fetchNewApiVideoContent(apiKey, c.env.NEWAPI_API_BASE_URL, upstreamTaskId, c.req.header('Range'));
+  const routeChannelId = Number(meta.routeChannelId) || 0;
+  const route = routeChannelId ? { channelId: routeChannelId } : null;
+  const upstream = await fetchNewApiVideoContent(newApiKeyForRoute(apiKey, route), c.env.NEWAPI_API_BASE_URL, upstreamTaskId, c.req.header('Range'));
   const headers = new Headers();
   for (const name of ['Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges', 'ETag']) {
     const value = upstream.headers.get(name);

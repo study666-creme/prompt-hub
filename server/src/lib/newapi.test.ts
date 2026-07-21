@@ -5,13 +5,17 @@ import {
   fetchNewApiModelCatalog,
   fetchNewApiPricingRules,
   fetchNewApiTaskOnce,
+  newApiKeyForRoute,
   newApiFixedCreditsForRequest,
   newApiTextCreditsForUsage,
   newApiCreditsForModel,
   publicNewApiCatalogModels,
+  publicNewApiRoutedCatalogModels,
   resolveNewApiCatalogModel,
+  resolveNewApiRoutedCatalogModel,
   submitNewApiImageJob
 } from './newapi';
+import type { NewApiAdminRouteSnapshot, NewApiCatalogSnapshot } from './newapi';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -492,5 +496,69 @@ describe('newapi image upstream', () => {
     expect(snapshot.available).toBe(false);
     expect(snapshot.error).toContain('未配置');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps every active route for the same Grok model selectable and routable', async () => {
+    const snapshot: NewApiCatalogSnapshot = {
+      available: true,
+      stale: false,
+      version: 'catalog-routes',
+      pricingVersion: 'pricing-routes',
+      rules: [],
+      imageCatalogEntries: [],
+      models: [{
+        id: 'grok-4.5',
+        upstreamModel: 'grok-4.5',
+        label: 'Grok 4.5',
+        description: '',
+        modality: 'text',
+        operation: 'chat',
+        order: 1,
+        endpoint: { method: 'POST', path: '/api/v1/chat', contentType: 'application/json' },
+        parameters: [{ name: 'model', path: 'model', label: 'Model', type: 'string', required: true, fixed: 'grok-4.5' }],
+        pricing: {
+          mode: 'token',
+          unit: 'token',
+          inputMultiplier: 0.009,
+          outputMultiplier: 0.027,
+          inputCreditsPerMillion: 1.8,
+          outputCreditsPerMillion: 5.4,
+          groups: [
+            { id: 'route-a', inputMultiplier: 0.009, outputMultiplier: 0.027 },
+            { id: 'route-b', inputMultiplier: 0.013, outputMultiplier: 0.039 },
+            { id: 'route-c', inputMultiplier: 0.02, outputMultiplier: 0.06 }
+          ]
+        }
+      }]
+    };
+    const routes: NewApiAdminRouteSnapshot = {
+      available: true,
+      fetchedAt: '2026-07-19T00:00:00.000Z',
+      error: null,
+      routes: {
+        'grok-4.5': [
+          { channelId: 11, channelName: 'private-a', status: 'active', enabled: true, groups: ['route-a'], actualModel: 'grok-4.5', priority: 3, weight: 1, upstreamHost: 'a.private' },
+          { channelId: 22, channelName: 'private-b', status: 'active', enabled: true, groups: ['route-b'], actualModel: 'grok-4.5', priority: 2, weight: 1, upstreamHost: 'b.private' },
+          { channelId: 33, channelName: 'private-c', status: 'active', enabled: true, groups: ['route-c'], actualModel: 'grok-4.5', priority: 1, weight: 1, upstreamHost: 'c.private' }
+        ]
+      }
+    };
+
+    const models = await publicNewApiRoutedCatalogModels(snapshot, routes);
+
+    expect(models).toHaveLength(3);
+    expect(new Set(models.map(model => model.id)).size).toBe(3);
+    expect(models.map(model => model.label)).toEqual([
+      'Grok 4.5 · 线路 1',
+      'Grok 4.5 · 线路 2',
+      'Grok 4.5 · 线路 3'
+    ]);
+    expect(models.map(model => model.pricing.inputCreditsPerMillion)).toEqual([1.8, 2.6, 4]);
+    expect(JSON.stringify(models)).not.toContain('private-a');
+    expect(JSON.stringify(models)).not.toContain('channelId');
+
+    const resolved = await Promise.all(models.map(model => resolveNewApiRoutedCatalogModel(snapshot, routes, model.id, 'text')));
+    expect(resolved.map(item => item?.route?.channelId)).toEqual([11, 22, 33]);
+    expect(newApiKeyForRoute('sk-secret', resolved[1]?.route)).toBe('sk-secret-22');
   });
 });

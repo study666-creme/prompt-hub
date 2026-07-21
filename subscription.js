@@ -123,7 +123,7 @@
 
   async function submitDirectPayment(paymentMethod) {
     const product = pendingPaymentProduct;
-    if (!product || !['alipay', 'wxpay'].includes(paymentMethod)) return;
+    if (!product || paymentMethod !== 'alipay') return;
     const overlay = document.getElementById('paymentMethodOverlay');
     const buttons = Array.from(overlay?.querySelectorAll('[data-payment-method]') || []);
     buttons.forEach((button) => {
@@ -133,7 +133,7 @@
     const result = await window.PromptHubApi?.createPaymentCheckout?.(
       product.productId,
       paymentMethod,
-      product.creditGrantMode
+      product.creditGrantMode || undefined
     );
     if (!result?.ok || !result.data?.checkoutUrl) {
       window.showToast?.(result?.message || '创建支付订单失败，请稍后重试');
@@ -538,7 +538,7 @@
     if (sub) {
       sub.textContent = currentMainTab === 'credits'
         ? '1 元 = 100 积分 · 支付成功后自动到账'
-        : '轻量特惠 + 三档会员 · 支持支付宝和微信支付';
+        : '轻量特惠 + 三档会员 · 支持支付宝支付';
     }
     if (currentMainTab === 'credits') renderCreditPacks();
     else renderPlans();

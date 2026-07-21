@@ -8,8 +8,9 @@ import { rateLimit } from '../../middleware/rate-limit';
 
 const checkoutSchema = z.object({
   productId: z.string().min(1).max(64),
-  paymentMethod: z.enum(['alipay', 'wxpay']),
-  creditGrantMode: z.enum(['daily', 'bundle']).optional()
+  paymentMethod: z.literal('alipay'),
+  // Older clients sent null for a plain credit top-up. Treat it as omitted.
+  creditGrantMode: z.enum(['daily', 'bundle']).nullable().optional()
 });
 
 export const paymentRoutes = new Hono<{ Bindings: Env }>();

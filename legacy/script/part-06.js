@@ -400,7 +400,7 @@
       renderGroups();
       const page = window.AppRouter?.resolveBootApp?.()
         || localStorage.getItem('promptrepo_app_page')
-        || 'community';
+        || 'landing';
       switchAppPage(page, { replace: true });
       window.reconcileAuthUI?.();
       if (window.MobileUI.isMobile()) {

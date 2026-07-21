@@ -604,7 +604,7 @@
   /** 离线兜底：与 server aspectRatiosForModel 一致 */
   const IMAGE_GEN_SIZE_MJ = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'];
   const IMAGE_GEN_ASPECT_FALLBACK = {
-    'image2-economy': [],
+    'image2-economy': IMAGE_GEN_SIZE_GIM2,
     image2: IMAGE_GEN_SIZE_GIM2,
     'image2-4k-fast': IMAGE_GEN_SIZE_GIM2,
     'image2-pro': IMAGE_GEN_SIZE_GIM2,
@@ -806,11 +806,13 @@
     const sizeRow = document.querySelector('.imagegen-params-row--size');
     if (sizeRow) sizeRow.classList.toggle('imagegen-params-row--mj-size', isMj);
     const sizeParam = document.querySelector('.imagegen-param[data-param=size]');
-    if (sizeParam) sizeParam.hidden = false;
+    const sizeOptions = imageGenSizeOptionsForModel(modelId);
+    if (sizeParam) sizeParam.hidden = !sizeOptions.length;
     const sizeLabel = document.querySelector('label[for="imageGenSize"]');
-    if (sizeLabel) sizeLabel.textContent = isMj ? '宽高比' : '画面尺寸';
+    if (sizeLabel) sizeLabel.textContent = isMj ? '宽高比' : '画面比例';
     const hideQuality = isMj || imageGenModelHidesQuality(modelId);
     const qEl = document.getElementById('imageGenQuality');
+    syncImageGenQualitySelectOptions(modelEntry);
     const fixedQuality = modelEntry?.parameters?.find((parameter) => parameter?.name === 'quality')?.fixed;
     if (qEl && typeof fixedQuality === 'string' && [...qEl.options].some((option) => option.value === fixedQuality)) {
       qEl.value = fixedQuality;
@@ -836,6 +838,7 @@
       syncImageGenRefLimitHint();
       trimImageGenRefsToLimit();
     } else {
+      updateImageGenSizeSelect();
       syncImageGenRefLimitHint();
     }
   }

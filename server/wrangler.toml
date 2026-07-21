@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 ENVIRONMENT = "production"
 PUBLIC_SITE_URL = "https://prompt-hubs.com"
-CORS_ORIGINS = "https://prompt-hubs.com,https://www.prompt-hubs.com,https://canvas.prompt-hubs.com,https://prompt-hub.cn,https://www.prompt-hub.cn,https://prompt-hub-hub.pages.dev,https://prompt-hub-web.pages.dev"
+CORS_ORIGINS = "https://prompt-hubs.com,https://www.prompt-hubs.com,https://canvas.prompt-hubs.com,https://canvas-cn.prompt-hubs.com,https://prompt-hub.cn,https://www.prompt-hub.cn,https://prompt-hub-hub.pages.dev,https://prompt-hub-web.pages.dev"
 CHAT_API_BASE_URL = "https://api.deepseek.com"
 CHAT_MODEL = "deepseek-chat"
 NEWAPI_API_BASE_URL = "https://43-153-201-78.sslip.io"
