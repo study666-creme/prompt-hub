@@ -523,7 +523,7 @@
   }
 
   function persistCreations() {
-    saveJson(LS_CREATIONS, creations);
+    saveJson(LS_CREATIONS, filterCreationsForCloud(creations));
     if (window.SupabaseSync?.isLoggedIn?.()) {
       queueCloudPush();
     }

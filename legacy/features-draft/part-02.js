@@ -427,7 +427,9 @@
 
   function filterCreationsForCloud(list) {
     const tomb = window.getDeletedCreationTombstones?.() || {};
-    return (list || []).filter((c) => c && c.id != null && !tomb[String(c.id)]);
+    return (list || [])
+      .filter((c) => c && c.id != null && !tomb[String(c.id)])
+      .map((c) => window.ImageGenJobState?.compactPersistedCreation?.(c) || c);
   }
 
   const FEED_AUTHOR_UUID_RE =

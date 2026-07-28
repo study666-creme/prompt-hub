@@ -43,6 +43,7 @@ if (existsSync(join(root, 'partials', 'index-body'))) {
 runNode('audit-features-draft-exports', 'audit-features-draft-exports.mjs');
 runNode('audit-features-draft-wire', 'audit-features-draft-wire.mjs');
 runNode('verify-card-gallery-regression', 'verify-card-gallery-regression.mjs');
+runNode('verify-card-image-loader-queues', 'verify-card-image-loader-queues.mjs');
 runNode('verify-edit-panel-gallery-regression', 'verify-edit-panel-gallery-regression.mjs');
 runNode('verify-feed-image-fit-regression', 'verify-feed-image-fit-regression.mjs');
 runNode('verify-mobile-feed-regression', 'verify-mobile-feed-regression.mjs');

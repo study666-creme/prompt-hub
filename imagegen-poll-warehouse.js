@@ -299,7 +299,7 @@
   }
 
   /** 写入最近生成；已有记录时跳过 */
-  async function ensureGenJobCreationsFromPoll(poll, ctx, pendingId) {
+  async function persistGenJobCreationsFromPoll(poll, ctx, pendingId) {
     if (poll?.data?.status !== 'completed' || !poll.data.imageUrl) return false;
 
     if (poll.data.mjParentJobId && poll.data.mjAction) {
@@ -338,13 +338,24 @@
       jobId: baseJobIdVal,
       silentToast: !!ctx.silentToast,
       isRecovery: !!ctx.isRecovery,
-      pendingId
+      pendingId,
+      deliveryObjectUrl: poll.data.deliveryObjectUrl === true
     });
     if (finished === false) return false;
     if (extras.length && !ctx.silentToast) {
       d().toast(`本次上游共 ${extras.length + 1} 张图，已加入最近生成（仅扣 1 次积分）`);
     }
     return true;
+  }
+
+  async function ensureGenJobCreationsFromPoll(poll, ctx, pendingId) {
+    const deliveryObjectUrl = poll?.data?.deliveryObjectUrl === true
+      && /^blob:/i.test(String(poll?.data?.imageUrl || ''));
+    try {
+      return await persistGenJobCreationsFromPoll(poll, ctx, pendingId);
+    } finally {
+      if (deliveryObjectUrl) global.URL?.revokeObjectURL?.(poll.data.imageUrl);
+    }
   }
 
   function init(injected) {

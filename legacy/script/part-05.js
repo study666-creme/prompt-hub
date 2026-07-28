@@ -224,7 +224,9 @@
         }
         const visualCard = media.closest('#communityGrid .community-post-card--visual');
         if (visualCard) {
-          visualCard.remove();
+          media.classList.remove('is-loading', 'media-shine-reveal');
+          media.classList.add('media-revealed', 'card-media--load-failed');
+          window.FeatureDraft?.removeBrokenCommunityFeedCard?.(media);
           return;
         }
         media.classList.remove('is-loading', 'media-shine-reveal');

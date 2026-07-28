@@ -4,6 +4,24 @@
 (function (global) {
   'use strict';
 
+  function compactPersistedCreation(creation) {
+    if (!creation || typeof creation !== 'object') return creation;
+    const durableRef = (value) => (
+      typeof value === 'string' && /^blob:/i.test(value) ? null : value
+    );
+    return {
+      ...creation,
+      image: durableRef(creation.image),
+      mjCompositeUrl: durableRef(creation.mjCompositeUrl),
+      cardImages: Array.isArray(creation.cardImages)
+        ? creation.cardImages.map(durableRef).filter(Boolean)
+        : creation.cardImages,
+      mjGridUrls: Array.isArray(creation.mjGridUrls)
+        ? creation.mjGridUrls.map(durableRef).filter(Boolean)
+        : creation.mjGridUrls
+    };
+  }
+
   const LS_SESSION_GEN_JOBS = 'promptrepo_session_gen_jobs';
   const LS_PENDING_GEN_JOBS = 'promptrepo_pending_gen_jobs';
   const LS_FAILED_GEN_JOBS = 'promptrepo_failed_gen_jobs';
@@ -66,6 +84,9 @@
     function compactPendingJobsForStorage(list) {
       return (Array.isArray(list) ? list : []).slice(0, 32).map((pending) => {
         const compact = { ...pending };
+        compact.image = compactPersistedImageRef(pending?.image);
+        compact.imageUrl = compactPersistedImageRef(pending?.imageUrl);
+        delete compact.deliveryObjectUrl;
         compact.refImage = compactPersistedImageRef(pending?.refImage);
         compact.refImages = Array.isArray(pending?.refImages)
           ? pending.refImages.map(compactPersistedImageRef).filter(Boolean)
@@ -249,5 +270,5 @@
     };
   }
 
-  global.ImageGenJobState = { create };
+  global.ImageGenJobState = { create, compactPersistedCreation };
 })(typeof window !== 'undefined' ? window : globalThis);

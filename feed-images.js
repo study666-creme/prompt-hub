@@ -501,20 +501,79 @@
     }
 
     /** 社区纯图卡片：仅移除已确认 load-failed 的空壳，勿在 lazy 签名阶段删掉未出图卡片 */
+    function isPermanentTaskImageMissing(result) {
+      if (result?.ok || Number(result?.status) !== 404) return false;
+      const code = String(result?.code || '').toUpperCase();
+      return code === 'RESULT_PERMANENTLY_MISSING';
+    }
+
+    async function confirmCommunityFeedCardPermanentlyMissing(img) {
+      const ref = img?.dataset?.storageRef || img?.dataset?.imageRef
+        || img?.getAttribute?.('data-image-ref') || '';
+      const jobId = img?.dataset?.jobId || img?.getAttribute?.('data-job-id') || '';
+      if (!ref || !jobId || !window.SupabaseSync?.isPathKnownMissing) return false;
+
+      const cardId = img?.dataset?.sourceCardId
+        || img?.closest?.('.card')?.dataset?.sourceCardId
+        || img?.closest?.('.card')?.dataset?.id
+        || '';
+      const storagePath = window.SupabaseSync?.primaryImagePath?.(ref, cardId)
+        || window.SupabaseSync?.storagePathFromRef?.(ref)
+        || '';
+      if (!storagePath || !window.SupabaseSync.isPathKnownMissing(storagePath)) return false;
+
+      let taskImage;
+      try {
+        taskImage = await window.PromptHubApi?.getGenerationJobImageBlobUrl?.(
+          String(jobId).replace(/#\d+$/, '')
+        );
+      } catch (e) {
+        return false;
+      }
+      if (taskImage?.ok) {
+        const objectUrl = taskImage?.data?.imageUrl;
+        if (/^blob:/i.test(String(objectUrl || ''))) window.URL?.revokeObjectURL?.(objectUrl);
+        return false;
+      }
+      if (isPermanentTaskImageMissing(taskImage)) return true;
+      if (Number(taskImage?.status) !== 404 || String(taskImage?.code || '').toUpperCase() !== 'NOT_FOUND') {
+        return false;
+      }
+
+      try {
+        const task = await window.PromptHubApi?.getGenerationJob?.(
+          String(jobId).replace(/#\d+$/, ''),
+          { noRetry: true }
+        );
+        return Number(task?.status) === 404
+          && String(task?.code || '').toUpperCase() === 'NOT_FOUND';
+      } catch (e) {
+        return false;
+      }
+    }
+
     function removeBrokenCommunityFeedCard(node) {
       if (d().getCommunityFeedPageLoading?.() || window.__PH_FEED_BULK_DRAIN__) return false;
       const media = node?.classList?.contains('card-media') ? node : node?.closest?.('.card-media');
       const card = media?.closest?.('.card.community-post-card') || node?.closest?.('.card.community-post-card');
       if (!card?.closest?.('#communityGrid, #creationsGrid')) return false;
-      if (card.querySelector('.card-media img[src^="http"]')) return false;
       const mediaEl = card.querySelector('.card-media');
       if (!mediaEl?.classList.contains('card-media--load-failed')) return false;
       const img = mediaEl.querySelector('img');
-      const pending = img?.dataset?.storageRef || img?.dataset?.imageRef
-        || mediaEl.classList.contains('is-loading') || mediaEl.classList.contains('card-media--await');
-      if (pending) return false;
-      card.remove();
-      return true;
+      if (img?.complete && img.naturalWidth > 8) return false;
+      if (mediaEl.classList.contains('is-loading') || mediaEl.classList.contains('card-media--await')) return false;
+      if (card.dataset.permanentMissingCheck === '1') return false;
+      card.dataset.permanentMissingCheck = '1';
+      void confirmCommunityFeedCardPermanentlyMissing(img).then((missing) => {
+        delete card.dataset.permanentMissingCheck;
+        if (!missing) return;
+        const currentMedia = card.querySelector?.('.card-media');
+        const currentImg = currentMedia?.querySelector?.('img');
+        if (!currentMedia?.classList?.contains('card-media--load-failed')) return;
+        if (currentImg?.complete && currentImg.naturalWidth > 8) return;
+        card.remove();
+      });
+      return false;
     }
   
     function pruneEmptyCommunityFeedCards(scope) {
@@ -533,10 +592,8 @@
         const img = media.querySelector('img');
         const src = img?.currentSrc || img?.src || '';
         if (src.startsWith('http') && img?.complete && img.naturalWidth > 8) return;
-        if (img?.dataset?.storageRef || img?.dataset?.imageRef) return;
         if (media.classList.contains('is-loading') || media.classList.contains('card-media--await')) return;
-        if (img?.dataset?.storageRef || img?.dataset?.imageRef) return;
-        card.remove();
+        removeBrokenCommunityFeedCard(media);
       });
     }
 
@@ -757,6 +814,8 @@
       hydrateFeedImageOne,
       releaseFeedMediaLoading,
       stripFailedFeedMedia,
+      isPermanentTaskImageMissing,
+      confirmCommunityFeedCardPermanentlyMissing,
       removeBrokenCommunityFeedCard,
       pruneEmptyCommunityFeedCards,
       revealCommunityFeedImages,

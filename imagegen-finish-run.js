@@ -50,6 +50,7 @@
     mjButtons,
     mjSplitSave,
     cardImages,
+    deliveryObjectUrl,
     refImage: submittedRefImage,
     refImages: submittedRefImages,
     referenceAssets: submittedReferenceAssets
@@ -84,7 +85,11 @@
       const creationId = existingCre?.id || d().genId('cr');
       let storedImage = image;
       const archiveJobId = slotJobId || baseJobId;
-      if (global.SupabaseSync?.isLoggedIn?.() && global.SupabaseSync?.archiveGeneratedCardImage && archiveJobId) {
+      if (
+        global.SupabaseSync?.archiveGeneratedCardImage
+        && archiveJobId
+        && (global.SupabaseSync?.isLoggedIn?.() || deliveryObjectUrl)
+      ) {
         try {
           const archived = await global.SupabaseSync.archiveGeneratedCardImage(creationId, image, {
             jobId: archiveJobId,
@@ -94,6 +99,9 @@
         } catch (e) {
           console.warn('[finishImageGen] archive to storage failed', e);
         }
+      }
+      if (deliveryObjectUrl && /^blob:/i.test(String(storedImage || ''))) {
+        return false;
       }
 
       if (slotJobId && global.SupabaseSync?.isStorageRef?.(storedImage)) {

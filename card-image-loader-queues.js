@@ -4,6 +4,8 @@
 (function (global) {
   'use strict';
 
+  const DOWNLOAD_SLOT_TIMEOUT_MS = 30_000;
+
   function create() {
     const resolveQueue = [];
     const feedResolveQueue = [];
@@ -65,16 +67,25 @@
       while (downloadActive < maxDownloadCap() && downloadQueue.length) {
         const job = downloadQueue.shift();
         downloadActive += 1;
-        job().finally(() => {
+        let finished = false;
+        const finish = (value) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timeoutId);
           downloadActive -= 1;
+          job.resolve(value);
           pumpDownloadQueue();
-        });
+        };
+        const timeoutId = setTimeout(() => finish(undefined), DOWNLOAD_SLOT_TIMEOUT_MS);
+        Promise.resolve()
+          .then(job.fn)
+          .then(finish, finish);
       }
     }
 
     function enqueueDownload(fn) {
       return new Promise((resolve) => {
-        downloadQueue.push(() => fn().then(resolve, resolve));
+        downloadQueue.push({ fn, resolve });
         pumpDownloadQueue();
       });
     }
