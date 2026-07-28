@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Env } from '../../env';
 import { roundCredits } from '../../lib/credit-math';
 import { ApiError } from '../../lib/errors';
@@ -16,7 +17,12 @@ import {
   type NewApiResolvedCatalogModel,
   type NewApiCatalogParameter
 } from '../../lib/newapi';
-import { fetchNewApiVideoContent, fetchNewApiVideoTask, submitNewApiVideo } from '../../lib/newapi-video';
+import {
+  fetchNewApiVideoContent,
+  fetchNewApiVideoTask,
+  submitNewApiVideo,
+  type NewApiVideoTask
+} from '../../lib/newapi-video';
 import {
   deductUserCredits,
   refundUserCredits,
@@ -92,8 +98,18 @@ type VideoMeta = {
   progress?: unknown;
   resultUrl?: unknown;
   refundState?: unknown;
+  upstreamTerminalStatus?: unknown;
   [key: string]: unknown;
 };
+
+type VideoJobRow = Record<string, unknown>;
+
+type VideoReconcileDependencies = {
+  fetchTask?: typeof fetchNewApiVideoTask;
+  refundCredits?: typeof refundUserCredits;
+};
+
+const UNKNOWN_VIDEO_ERROR = '上游无法确认视频生成结果，任务已终止';
 
 export const videoRoutes = new Hono<{ Bindings: Env }>();
 
@@ -155,12 +171,183 @@ async function freshVideoModel(env: Env, modelId: string): Promise<NewApiResolve
   return resolved;
 }
 
-function parseDebitSplit(value: unknown): DebitSplit {
+function parseDebitSplit(value: unknown, fallbackAmount = 0): DebitSplit {
   const split = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  return {
+  const parsed = {
     fromDaily: Math.max(0, Number(split.fromDaily) || 0),
     fromPermanent: Math.max(0, Number(split.fromPermanent) || 0)
   };
+  return parsed.fromDaily > 0 || parsed.fromPermanent > 0
+    ? parsed
+    : { fromDaily: 0, fromPermanent: Math.max(0, fallbackAmount) };
+}
+
+function taskFailureMessage(task: NewApiVideoTask): string {
+  if (task.status === 'unknown') return UNKNOWN_VIDEO_ERROR;
+  return task.errorMessage || '视频生成失败';
+}
+
+async function readCurrentVideoJob(admin: SupabaseClient, jobId: unknown): Promise<VideoJobRow | null> {
+  const { data, error } = await admin
+    .from('generation_requests')
+    .select('*')
+    .eq('id', jobId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as VideoJobRow | null) || null;
+}
+
+/**
+ * Reconciles one submitted video task by polling its existing upstream ID.
+ * This path never submits a new video request.
+ */
+export async function reconcileNewApiVideoJob(
+  admin: SupabaseClient,
+  env: Env,
+  row: VideoJobRow,
+  dependencies: VideoReconcileDependencies = {}
+): Promise<VideoJobRow> {
+  if (String(row.status || '') !== 'processing') return row;
+  const meta = (row.meta && typeof row.meta === 'object' ? row.meta : {}) as VideoMeta;
+  if (meta.mediaType !== 'video') return row;
+
+  const apiKey = env.NEWAPI_API_KEY?.trim();
+  const upstreamTaskId = String(meta.upstreamTaskId || '');
+  if (!apiKey || !upstreamTaskId) {
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频任务尚未完成提交');
+  }
+  const routeChannelId = Number(meta.routeChannelId) || 0;
+  const route = routeChannelId ? { channelId: routeChannelId } : null;
+  const fetchTask = dependencies.fetchTask || fetchNewApiVideoTask;
+  const task = await fetchTask(
+    newApiKeyForRoute(apiKey, route),
+    env.NEWAPI_API_BASE_URL,
+    upstreamTaskId
+  );
+
+  if (task.status === 'completed') {
+    const nextMeta = {
+      ...meta,
+      progress: 100,
+      resultUrl: task.videoUrl,
+      upstreamTerminalStatus: task.status
+    };
+    const { data: updated, error } = await admin.from('generation_requests').update({
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      meta: nextMeta
+    }).eq('id', row.id).eq('status', 'processing').select('*').maybeSingle();
+    if (error) throw error;
+    return (updated as VideoJobRow | null) || await readCurrentVideoJob(admin, row.id) || row;
+  }
+
+  if (task.status === 'failed' || task.status === 'unknown') {
+    const message = taskFailureMessage(task);
+    const nextMeta: VideoMeta = {
+      ...meta,
+      progress: task.progress ?? (Number(meta.progress) || 0),
+      refundState: 'claiming',
+      upstreamTerminalStatus: task.status
+    };
+    const { data: claimed, error } = await admin.from('generation_requests').update({
+      status: 'failed',
+      error_message: message,
+      completed_at: new Date().toISOString(),
+      meta: nextMeta
+    }).eq('id', row.id).eq('status', 'processing').select('*').maybeSingle();
+    if (error) throw error;
+
+    // The status compare-and-set makes exactly one GET/cron invocation own the refund.
+    if (claimed) {
+      const amount = Number(meta.credits) || Number(row.credits_charged) || 0;
+      const refundCredits = dependencies.refundCredits || refundUserCredits;
+      try {
+        await refundCredits(
+          admin,
+          String(row.user_id || ''),
+          amount,
+          'video_generation_refund',
+          String(row.id || ''),
+          parseDebitSplit(meta.debitSplit, amount),
+          { model: meta.model, phase: task.status === 'unknown' ? 'upstream_unknown' : 'upstream_failed' }
+        );
+      } catch (refundError) {
+        console.error('[video] refund failed', String(row.id || ''), refundError);
+        nextMeta.refundState = 'refund_failed';
+        const refundFailureMessage = `${message}，自动退还积分失败`;
+        const { data: refundFailed, error: refundStateError } = await admin
+          .from('generation_requests')
+          .update({ error_message: refundFailureMessage, meta: nextMeta })
+          .eq('id', row.id)
+          .eq('status', 'failed')
+          .select('*')
+          .maybeSingle();
+        if (refundStateError) throw refundStateError;
+        return (refundFailed as VideoJobRow | null) || {
+          ...(claimed as VideoJobRow),
+          error_message: refundFailureMessage,
+          meta: nextMeta
+        };
+      }
+      nextMeta.refundState = 'refunded';
+      const { data: refunded, error: refundMetaError } = await admin
+        .from('generation_requests')
+        .update({ error_message: `${message}，积分已退还`, meta: nextMeta })
+        .eq('id', row.id)
+        .eq('status', 'failed')
+        .select('*')
+        .maybeSingle();
+      if (refundMetaError) throw refundMetaError;
+      return (refunded as VideoJobRow | null) || await readCurrentVideoJob(admin, row.id) || (claimed as VideoJobRow);
+    }
+    return await readCurrentVideoJob(admin, row.id) || row;
+  }
+
+  const nextMeta = {
+    ...meta,
+    progress: task.progress ?? (Number(meta.progress) || 0)
+  };
+  const { data: updated, error } = await admin
+    .from('generation_requests')
+    .update({ meta: nextMeta })
+    .eq('id', row.id)
+    .eq('status', 'processing')
+    .select('*')
+    .maybeSingle();
+  if (error) throw error;
+  return (updated as VideoJobRow | null) || { ...row, meta: nextMeta };
+}
+
+export async function drainNewApiVideoJobs(
+  env: Env,
+  options?: VideoReconcileDependencies & { admin?: SupabaseClient; maxJobs?: number }
+): Promise<{ checked: number; settled: number }> {
+  if (!env.NEWAPI_API_KEY?.trim()) return { checked: 0, settled: 0 };
+  const admin = options?.admin || createAdminClient(env);
+  const maxJobs = Math.max(1, Math.min(20, options?.maxJobs ?? 8));
+  const { data: rows, error } = await admin
+    .from('generation_requests')
+    .select('*')
+    .eq('status', 'processing')
+    .contains('meta', { mediaType: 'video' })
+    .order('created_at', { ascending: true })
+    .limit(maxJobs);
+  if (error) {
+    console.error('[video-drain] list failed', error.message);
+    return { checked: 0, settled: 0 };
+  }
+
+  const jobs = (rows || []) as VideoJobRow[];
+  const results = await Promise.allSettled(jobs.map(row => reconcileNewApiVideoJob(admin, env, row, options)));
+  let settled = 0;
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      if (String(result.value.status || '') !== 'processing') settled += 1;
+      return;
+    }
+    console.error('[video-drain] reconcile failed', String(jobs[index]?.id || ''), result.reason);
+  });
+  return { checked: jobs.length, settled };
 }
 
 function videoPayload(row: Record<string, unknown>, creditsRemaining?: number) {
@@ -257,6 +444,7 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   if (insertError || !inserted) throw new ApiError(502, 'GENERATION_FAILED', '创建视频任务失败');
 
   let split: DebitSplit = { fromDaily: 0, fromPermanent: 0 };
+  let submittedMeta: VideoMeta = baseMeta;
   try {
     const debited = await deductUserCredits(admin, user.id, final, 'video_generation', inserted.id, {
       model: model.id,
@@ -265,7 +453,8 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
     });
     profile = debited.profile;
     split = debited.split;
-    await admin.from('generation_requests').update({ meta: { ...baseMeta, debitSplit: split } }).eq('id', inserted.id);
+    submittedMeta = { ...baseMeta, debitSplit: split };
+    await admin.from('generation_requests').update({ meta: submittedMeta }).eq('id', inserted.id);
 
     const task = await submitNewApiVideo(newApiKeyForRoute(apiKey, route), c.env.NEWAPI_API_BASE_URL, {
       upstreamModel: model.upstreamModel,
@@ -277,16 +466,22 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
       referenceVideos,
       referenceAudios
     });
-    if (task.status === 'failed') {
-      throw new ApiError(502, 'UPSTREAM_ERROR', task.errorMessage || '视频生成失败');
+    submittedMeta = {
+      ...submittedMeta,
+      upstreamTaskId: task.id,
+      progress: task.progress || 0,
+      resultUrl: task.videoUrl,
+      ...(task.status === 'failed' || task.status === 'unknown'
+        ? { upstreamTerminalStatus: task.status }
+        : {})
+    };
+    if (task.status === 'failed' || task.status === 'unknown') {
+      throw new ApiError(502, 'UPSTREAM_ERROR', taskFailureMessage(task));
     }
     const status = task.status === 'completed' ? 'completed' : 'processing';
     const meta: VideoMeta = {
-      ...baseMeta,
-      debitSplit: split,
-      upstreamTaskId: task.id,
-      progress: task.progress || 0,
-      resultUrl: task.videoUrl
+      ...submittedMeta,
+      ...(status === 'completed' ? { upstreamTerminalStatus: task.status } : {})
     };
     await admin.from('generation_requests').update({
       status,
@@ -297,14 +492,25 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
     return c.json({ ok: true, data: videoPayload({ ...inserted, status, meta }, spendableCredits(updated)) });
   } catch (error) {
     const message = error instanceof Error ? error.message : '视频任务提交失败';
+    let storedMessage = message;
+    let refundState = 'not_needed';
     if (split.fromDaily > 0 || split.fromPermanent > 0) {
-      await refundUserCredits(admin, user.id, final, 'video_generation_refund', inserted.id, split, { model: model.id, phase: 'submit_error' });
+      refundState = 'claiming';
+      try {
+        await refundUserCredits(admin, user.id, final, 'video_generation_refund', inserted.id, split, { model: model.id, phase: 'submit_error' });
+        refundState = 'refunded';
+        storedMessage = `${message}，积分已退还`;
+      } catch (refundError) {
+        console.error('[video] submit refund failed', String(inserted.id || ''), refundError);
+        refundState = 'refund_failed';
+        storedMessage = `${message}，自动退还积分失败`;
+      }
     }
     await admin.from('generation_requests').update({
       status: 'failed',
-      error_message: message.slice(0, 300),
+      error_message: storedMessage.slice(0, 300),
       completed_at: new Date().toISOString(),
-      meta: { ...baseMeta, debitSplit: split, refundState: 'refunded' }
+      meta: { ...submittedMeta, debitSplit: split, refundState }
     }).eq('id', inserted.id);
     if (message.includes('insufficient')) throw new ApiError(402, 'INSUFFICIENT_CREDITS', '积分不足');
     throw error;
@@ -328,50 +534,9 @@ videoRoutes.get('/jobs/:jobId', async c => {
     return c.json({ ok: true, data: videoPayload(row, spendableCredits(profile)) });
   }
 
-  const apiKey = c.env.NEWAPI_API_KEY?.trim();
-  const upstreamTaskId = String(meta.upstreamTaskId || '');
-  if (!apiKey || !upstreamTaskId) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频任务尚未完成提交');
-  const routeChannelId = Number(meta.routeChannelId) || 0;
-  const route = routeChannelId ? { channelId: routeChannelId } : null;
-  const task = await fetchNewApiVideoTask(newApiKeyForRoute(apiKey, route), c.env.NEWAPI_API_BASE_URL, upstreamTaskId);
-  if (task.status === 'completed') {
-    const nextMeta = { ...meta, progress: 100, resultUrl: task.videoUrl };
-    const { data: updated } = await admin.from('generation_requests').update({
-      status: 'completed',
-      completed_at: new Date().toISOString(),
-      meta: nextMeta
-    }).eq('id', row.id).eq('status', 'processing').select('*').maybeSingle();
-    const profile = await syncMembershipCredits(admin, user.id);
-    return c.json({ ok: true, data: videoPayload(updated || { ...row, status: 'completed', meta: nextMeta }, spendableCredits(profile)) });
-  }
-  if (task.status === 'failed') {
-    const nextMeta = { ...meta, progress: task.progress || 0, refundState: 'claiming' };
-    const { data: claimed } = await admin.from('generation_requests').update({
-      status: 'failed',
-      error_message: task.errorMessage || '视频生成失败',
-      completed_at: new Date().toISOString(),
-      meta: nextMeta
-    }).eq('id', row.id).eq('status', 'processing').select('*').maybeSingle();
-    if (claimed) {
-      await refundUserCredits(
-        admin,
-        user.id,
-        Number(meta.credits) || Number(row.credits_charged) || 0,
-        'video_generation_refund',
-        row.id,
-        parseDebitSplit(meta.debitSplit),
-        { model: meta.model, phase: 'upstream_failed' }
-      );
-      nextMeta.refundState = 'refunded';
-      await admin.from('generation_requests').update({ meta: nextMeta }).eq('id', row.id);
-    }
-    const profile = await syncMembershipCredits(admin, user.id);
-    return c.json({ ok: true, data: videoPayload(claimed || { ...row, status: 'failed', error_message: task.errorMessage, meta: nextMeta }, spendableCredits(profile)) });
-  }
-  const nextMeta = { ...meta, progress: task.progress || Number(meta.progress) || 0 };
-  await admin.from('generation_requests').update({ meta: nextMeta }).eq('id', row.id).eq('status', 'processing');
+  const reconciled = await reconcileNewApiVideoJob(admin, c.env, row as VideoJobRow);
   const profile = await syncMembershipCredits(admin, user.id);
-  return c.json({ ok: true, data: videoPayload({ ...row, meta: nextMeta }, spendableCredits(profile)) });
+  return c.json({ ok: true, data: videoPayload(reconciled, spendableCredits(profile)) });
 });
 
 videoRoutes.get('/jobs/:jobId/content', async c => {

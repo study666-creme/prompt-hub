@@ -9,6 +9,7 @@ import { createCorsMiddleware } from './middleware/cors';
 import { adminRoutes } from './routes/admin';
 import { supabaseProxyHandler } from './routes/supabase-proxy';
 import { v1 } from './routes/v1';
+import { drainNewApiVideoJobs } from './routes/v1/video';
 import { webhookRoutes } from './routes/webhooks/payment';
 import type { Env } from './env';
 
@@ -159,6 +160,9 @@ export default {
     }
   },
   async scheduled(_controller: ScheduledController, env: Env) {
-    await drainFastProviderPendingSubmits(env, { awaitSubmit: true, maxSubmit: 2 });
+    await Promise.all([
+      drainFastProviderPendingSubmits(env, { awaitSubmit: true, maxSubmit: 2 }),
+      drainNewApiVideoJobs(env)
+    ]);
   }
 };

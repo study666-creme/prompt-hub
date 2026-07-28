@@ -66,4 +66,24 @@ describe('newapi video upstream', () => {
     expect(submitted.id).toBe('request_1');
     expect(completed).toMatchObject({ status: 'completed', videoUrl: 'https://video.test/out.mp4' });
   });
+
+  it('preserves an upstream UNKNOWN terminal status instead of treating it as queued', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => json({
+      data: { id: 'task_unknown', status: 'UNKNOWN', progress: 30 }
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const task = await fetchNewApiVideoTask('secret', 'https://newapi.test', 'task_unknown');
+
+    expect(task).toEqual({
+      id: 'task_unknown',
+      status: 'unknown',
+      progress: 30,
+      errorMessage: null,
+      videoUrl: null
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe('https://newapi.test/v1/videos/task_unknown');
+    expect(fetchMock.mock.calls[0][1]).toEqual({ headers: { Authorization: 'Bearer secret' } });
+  });
 });

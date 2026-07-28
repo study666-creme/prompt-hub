@@ -13,7 +13,7 @@ export type NewApiVideoSubmitParams = {
 
 export type NewApiVideoTask = {
   id: string;
-  status: 'queued' | 'processing' | 'completed' | 'failed';
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'unknown';
   progress: number | null;
   errorMessage: string | null;
   videoUrl: string | null;
@@ -70,6 +70,7 @@ function normalizeStatus(value: unknown): NewApiVideoTask['status'] {
   const status = text(value).toLowerCase();
   if (['completed', 'succeeded', 'success', 'done'].includes(status)) return 'completed';
   if (['failed', 'cancelled', 'canceled', 'expired', 'error'].includes(status)) return 'failed';
+  if (status === 'unknown') return 'unknown';
   if (['processing', 'running', 'in_progress', 'generating'].includes(status)) return 'processing';
   return 'queued';
 }
