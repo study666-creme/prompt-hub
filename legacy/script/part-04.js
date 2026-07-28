@@ -175,17 +175,27 @@
       renderCards(force !== false);
     }
 
-    function getPromptCanvasUrl() {
+    function getPromptCanvasUrl(options = {}) {
+      if (window.PromptCanvasBridge?.buildUrl) {
+        return window.PromptCanvasBridge.buildUrl(options);
+      }
       let url = String(window.PROMPT_CANVAS_URL || 'https://canvas.prompt-hubs.com/canvas').trim();
       if (!url) url = 'https://canvas.prompt-hubs.com/canvas';
       if (!/\/canvas\/?$/.test(url)) url = url.replace(/\/?$/, '') + '/canvas';
       return url;
     }
-    function openPromptCanvas() {
+    function openPromptCanvas(options = {}) {
       window.MobileUI?.closeAllMobileOverlays?.();
-      window.open(getPromptCanvasUrl(), '_blank', 'noopener,noreferrer');
+      if (window.PromptCanvasBridge?.open) return window.PromptCanvasBridge.open(options);
+      return window.open(getPromptCanvasUrl(options), '_blank', 'noopener,noreferrer');
+    }
+    function openPromptCanvasCard(cardId) {
+      window.MobileUI?.closeAllMobileOverlays?.();
+      if (window.PromptCanvasBridge?.openCard) return window.PromptCanvasBridge.openCard(cardId);
+      return openPromptCanvas({ cardId });
     }
     window.openPromptCanvas = openPromptCanvas;
+    window.openPromptCanvasCard = openPromptCanvasCard;
 
     function initAppNav() {
       document.querySelectorAll('.app-nav-item[data-app]').forEach(btn => {

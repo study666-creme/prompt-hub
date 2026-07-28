@@ -107,6 +107,12 @@
       if (fillId) {
         e.stopPropagation();
         fillCardToImageGen(fillId);
+        return;
+      }
+      const canvasId = e.target.closest('[data-card-canvas]')?.getAttribute('data-card-canvas');
+      if (canvasId) {
+        e.stopPropagation();
+        window.openPromptCanvasCard?.(canvasId);
       }
     });
 

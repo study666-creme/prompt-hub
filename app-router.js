@@ -27,6 +27,14 @@
     devlab: '/dev/'
   };
 
+  const APP_PAGE_ID = {
+    warehouse: 'pageWarehouse',
+    imagegen: 'pageImageGen',
+    community: 'pageCommunity',
+    creations: 'pageCreations',
+    devlab: 'pageDevLab'
+  };
+
   const APP_TITLE = {
     warehouse: '',
     imagegen: '图片生成',
@@ -56,18 +64,86 @@
   }
 
   function pathForApp(app) {
-    return APP_PATH[app] || '/community/';
+    return APP_PATH[app] || '/';
   }
 
-  function getPromptCanvasUrl() {
-    let url = String(window.PROMPT_CANVAS_URL || 'https://canvas.prompt-hubs.com/canvas').trim();
-    if (!url) url = 'https://canvas.prompt-hubs.com/canvas';
-    if (!/\/canvas\/?$/.test(url)) url = url.replace(/\/?$/, '') + '/canvas';
+  const CANVAS_FALLBACK_URL = 'https://canvas.prompt-hubs.com/canvas';
+  const CANVAS_HANDOFF_KEY = 'promptrepo_canvas_handoff_at';
+  const CANVAS_HANDOFF_TTL_MS = 4 * 60 * 60 * 1000;
+
+  function normalizePromptCanvasUrl(raw) {
+    const configured = String(raw || CANVAS_FALLBACK_URL).trim() || CANVAS_FALLBACK_URL;
+    let url;
+    try {
+      const base = /^https?:\/\//i.test(window.location?.origin || '')
+        ? window.location.origin
+        : CANVAS_FALLBACK_URL;
+      url = new URL(configured, base);
+      if (!/^https?:$/.test(url.protocol)) throw new Error('unsupported protocol');
+    } catch (e) {
+      url = new URL(CANVAS_FALLBACK_URL);
+    }
+    if (!/\/canvas\/?$/.test(url.pathname)) {
+      url.pathname = url.pathname.replace(/\/+$/, '') + '/canvas';
+    }
     return url;
   }
 
-  function openPromptCanvas() {
-    window.open(getPromptCanvasUrl(), '_blank', 'noopener,noreferrer');
+  function normalizeCanvasCardId(raw) {
+    const value = String(raw || '').trim();
+    if (!value || value.length > 200 || /[\u0000-\u001f\u007f]/.test(value)) return '';
+    return value;
+  }
+
+  function getPromptCanvasUrl(options = {}) {
+    const url = normalizePromptCanvasUrl(window.PROMPT_CANVAS_URL);
+    const cardId = normalizeCanvasCardId(options.cardId);
+    if (cardId) {
+      url.search = '';
+      url.hash = '';
+      url.searchParams.set('phSource', 'prompt-hub');
+      url.searchParams.set('phVersion', '1');
+      url.searchParams.set('phIntent', 'insert-card');
+      url.searchParams.set('phCardId', cardId);
+    }
+    return url.toString();
+  }
+
+  function markCanvasHandoff() {
+    try { sessionStorage.setItem(CANVAS_HANDOFF_KEY, String(Date.now())); } catch (e) { /* ignore */ }
+  }
+
+  function shouldRefreshAfterCanvas() {
+    try {
+      const at = Number(sessionStorage.getItem(CANVAS_HANDOFF_KEY));
+      if (!Number.isFinite(at) || at <= 0) return false;
+      if (Date.now() - at > CANVAS_HANDOFF_TTL_MS) {
+        sessionStorage.removeItem(CANVAS_HANDOFF_KEY);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function consumeRefreshAfterCanvas() {
+    const shouldRefresh = shouldRefreshAfterCanvas();
+    if (shouldRefresh) {
+      try { sessionStorage.removeItem(CANVAS_HANDOFF_KEY); } catch (e) { /* ignore */ }
+    }
+    return shouldRefresh;
+  }
+
+  function openPromptCanvas(options = {}) {
+    markCanvasHandoff();
+    return window.open(getPromptCanvasUrl(options), '_blank', 'noopener,noreferrer');
+  }
+
+  function openPromptCanvasCard(cardId) {
+    const normalized = normalizeCanvasCardId(cardId);
+    if (!normalized) return null;
+    return openPromptCanvas({ cardId: normalized });
   }
 
   function syncUrl(app, replace) {
@@ -94,7 +170,7 @@
   function resolveBootApp() {
     const path = normalizePath(window.location.pathname);
     const fromUrl = appFromPath(path);
-    if (fromUrl && path !== '/') {
+    if (fromUrl) {
       if (fromUrl === 'devlab') {
         try {
           const panel = new URLSearchParams(window.location.search).get('panel');
@@ -105,11 +181,24 @@
       }
       return fromUrl;
     }
-    try {
-      const saved = localStorage.getItem('promptrepo_app_page');
-      if (saved && APP_PATH[saved]) return saved;
-    } catch (e) { /* ignore */ }
-    return fromUrl || 'community';
+    // The address bar is the persisted navigation state. Do not resurrect a
+    // stale local page when a URL does not match a known app route.
+    return 'community';
+  }
+
+  function applyInitialAppPage() {
+    if (typeof document === 'undefined') return;
+    const app = resolveBootApp();
+    const page = document.getElementById(APP_PAGE_ID[app]);
+    if (!page) return;
+    document.querySelectorAll('.app-page.active').forEach((node) => {
+      node.classList.remove('active');
+    });
+    page.classList.add('active');
+    document.querySelectorAll('.app-nav-item[data-app]').forEach((node) => {
+      node.classList.toggle('active', node.dataset.app === app);
+    });
+    syncDocumentTitle(app);
   }
 
   function init(onNavigate) {
@@ -128,8 +217,19 @@
     syncUrl,
     syncDocumentTitle,
     resolveBootApp,
+    applyInitialAppPage,
     init
   };
+  applyInitialAppPage();
   window.getPromptCanvasUrl = getPromptCanvasUrl;
   window.openPromptCanvas = openPromptCanvas;
+  window.openPromptCanvasCard = openPromptCanvasCard;
+  window.PromptCanvasBridge = {
+    buildUrl: getPromptCanvasUrl,
+    open: openPromptCanvas,
+    openCard: openPromptCanvasCard,
+    markHandoff: markCanvasHandoff,
+    shouldRefreshAfterCanvas,
+    consumeRefreshAfterCanvas
+  };
 })();

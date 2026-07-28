@@ -47,7 +47,11 @@
         if (document.visibilityState === 'visible') {
           void window.SupabaseSync?.healSessionOnResume?.();
           scheduleCrossDeviceGenRecovery();
-          scheduleBackgroundCloudSync();
+          if (window.PromptCanvasBridge?.consumeRefreshAfterCanvas?.()) {
+            window.SyncOrchestrator?.schedulePull?.({ immediate: true, force: true, silent: true });
+          } else {
+            scheduleBackgroundCloudSync();
+          }
           return;
         }
         if (document.visibilityState === 'hidden') {
@@ -770,7 +774,9 @@
           if (collectMeta?.authorId) div.dataset.authorId = collectMeta.authorId;
           if (collectMeta?.assetId) div.dataset.sourceCardId = collectMeta.assetId;
         }
-        div.draggable = !globalViewActive;
+        // Native HTML drag captures vertical touch gestures. Mobile uses the
+        // explicit card actions and keeps the page gesture available to scroll.
+        div.draggable = !globalViewActive && !mobileGrid;
         if (!mobileGrid) {
           div.style.position = 'relative';
         }
@@ -830,10 +836,14 @@
               <button type="button" class="card-mobile-btn" data-mobile-edit="${escapeHtml(card.id)}">编辑</button>
               <button type="button" class="card-mobile-btn" data-mobile-copy="${escapeHtml(card.id)}">复制</button>
               <button type="button" class="card-mobile-btn" data-mobile-fill="${escapeHtml(card.id)}">填入生图</button>
+              <button type="button" class="card-mobile-btn" data-card-canvas="${escapeHtml(card.id)}">到画布</button>
             </div>`
           : '';
         const copyBtnHtml = !window.MobileUI?.isMobile?.()
           ? `<button type="button" class="card-copy-btn" data-card-copy="${escapeHtml(card.id)}" title="复制提示词" aria-label="复制提示词"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`
+          : '';
+        const canvasBtnHtml = !window.MobileUI?.isMobile?.()
+          ? `<button type="button" class="card-canvas-btn" data-card-canvas="${escapeHtml(card.id)}" title="把这张卡插入无限画布" aria-label="把这张卡插入无限画布"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8.5 8.5C6 4.5 2 5.5 2 9.5s4 5 6.5 1l3-4c2.5-4 6.5-3 6.5 1s-4 5-6.5 1l-3-4" transform="translate(2 3)"/></svg></button>`
           : '';
         div.innerHTML = `
           <div class="card-checkbox ${checked ? 'checked' : ''}" onclick="event.stopPropagation(); toggleSelectCard('${card.id}', this)"></div>
@@ -845,9 +855,11 @@
             ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ''}
             ${mobileActions}
           </div>
+          ${canvasBtnHtml}
           ${copyBtnHtml}`;
         div.addEventListener('click', (e) => {
           if (e.target.closest('.card-copy-btn')) return;
+          if (e.target.closest('.card-canvas-btn')) return;
           if (e.target.closest('.card-mobile-actions')) return;
           if (globalViewActive) {
             e.preventDefault();
@@ -903,6 +915,7 @@
           e.preventDefault();
           const pinLabel = card.pinnedAt ? '取消置顶' : '置顶';
           const items = [
+            { label: '插入无限画布', action: () => window.openPromptCanvasCard?.(card.id) },
             { label: pinLabel, action: () => toggleCardPinById(card.id) },
             { label: '删除', action: () => deleteCardPermanently(card.id) }
           ];
@@ -983,9 +996,11 @@
     }
     const warehouseScrollRoot = () => {
       if (!isMobileViewport()) return document.getElementById('cardsContainer');
-      const appMain = document.querySelector('.app-main');
-      if (isUsableWarehouseScrollRoot(appMain)) return appMain;
-      return document.scrollingElement || document.documentElement;
+      // Geometry is not stable during first paint; bind pagination to the
+      // element that owns mobile warehouse scrolling instead of probing size.
+      return document.querySelector('.app-main')
+        || document.scrollingElement
+        || document.documentElement;
     };
     function loadNextWarehousePage() {
       if (warehouseScrollLoading) return;

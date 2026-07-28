@@ -80,6 +80,38 @@
       el.style.removeProperty('display');
       el.style.pointerEvents = 'auto';
     });
+    document.querySelectorAll('#userProfileOverlay:not(.active)').forEach((el) => {
+      el.hidden = true;
+      el.style.pointerEvents = 'none';
+    });
+  }
+
+  function hasActiveMobileBlocker() {
+    return !!document.querySelector(
+      '.subscribe-overlay.active, .trial-tasks-overlay.active, .community-detail-overlay.active, '
+      + '.settings-overlay.active, .modal-overlay.active, .custom-modal-overlay.active, '
+      + '#authOverlay.open, #userProfileOverlay.active, .batch-import-overlay:not(.hidden)'
+    );
+  }
+
+  function restoreMobilePageInteractivity() {
+    if (!isMobile()) return;
+    const hasActiveModal = hasActiveMobileBlocker();
+    if (!hasActiveModal) {
+      document.body.classList.remove(
+        'subscribe-open',
+        'trial-tasks-open',
+        'app-modal-open',
+        'panel-open',
+        'community-panel-open',
+        'user-profile-open',
+        'batch-import-open',
+        'custom-modal-open'
+      );
+      document.querySelector('.app-main')?.style.removeProperty('pointer-events');
+      document.querySelector('.app-chrome')?.style.removeProperty('pointer-events');
+    }
+    forceHideBlockingLayers();
   }
 
   function closeAllMobileOverlays(opts) {
@@ -380,6 +412,7 @@
       closeAllMobileOverlays();
       initImageGenMobileView();
     }
+    requestAnimationFrame(() => restoreMobilePageInteractivity());
   };
 
   function onViewportChange() {
@@ -410,6 +443,7 @@
 
   function resetMobilePageScroll(app) {
     if (!isMobile()) return;
+    restoreMobilePageInteractivity();
     const main = document.querySelector('.app-main');
     if (!main) return;
     if (app === 'imagegen' || app === 'warehouse' || app === 'community' || !app) {
@@ -534,12 +568,8 @@
       else if (typeof scheduleLayoutMasonry === 'function') scheduleLayoutMasonry();
       window.FeatureDraft?.resetMobileFeedGridStyles?.();
       window.FeatureDraft?.enforceMobileImageGenFeed?.();
-      const saved = localStorage.getItem('promptrepo_app_page');
-      if (saved) {
-        window.mobileOnAppPageChange?.(saved);
-      } else {
-        setBottomTab('cards');
-      }
+      const bootApp = window.AppRouter?.resolveBootApp?.() || 'community';
+      window.mobileOnAppPageChange?.(bootApp);
       if (document.getElementById('pageImageGen')?.classList.contains('active')) {
         initImageGenMobileView();
       }
@@ -578,7 +608,7 @@
       'touchstart',
       () => {
         if (!document.body.classList.contains('mobile-nav-open') && !document.body.classList.contains('mobile-groups-open')) {
-          forceHideBlockingLayers();
+          restoreMobilePageInteractivity();
         }
       },
       { passive: true, capture: true }

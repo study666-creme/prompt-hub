@@ -281,6 +281,8 @@
     overflow-x: hidden;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    overscroll-behavior-y: contain;
     padding-bottom: calc(56px + env(safe-area-inset-bottom));
   }
 
@@ -345,6 +347,13 @@
     min-width: 0;
     min-height: 0;
     width: 100%;
+    touch-action: pan-y;
+  }
+
+  #cardsContainer.cards-container,
+  #cardsContainer.cards-container .card {
+    touch-action: pan-y;
+    -webkit-user-drag: none;
   }
 
   .app-page-devlab.active {
@@ -887,6 +896,7 @@
 
   .card-mobile-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     margin-top: 8px;
     padding-top: 8px;
@@ -894,7 +904,8 @@
   }
 
   .card-mobile-btn {
-    flex: 1;
+    flex: 1 1 calc(50% - 3px);
+    min-width: 0;
     min-height: 36px;
     padding: 6px 8px;
     border: 1px solid var(--border);

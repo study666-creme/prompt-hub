@@ -48,6 +48,7 @@ runNode('verify-feed-image-fit-regression', 'verify-feed-image-fit-regression.mj
 runNode('verify-mobile-feed-regression', 'verify-mobile-feed-regression.mjs');
 runNode('verify-reference-assets-regression', 'verify-reference-assets-regression.mjs');
 runNode('verify-admin-split-regression', 'verify-admin-split-regression.mjs');
+runNode('verify-card-pages-router-vm', 'verify-card-pages-router-vm.mjs');
 
 if (!existsSync(join(root, 'node_modules', 'esbuild'))) {
   console.log('Installing root npm deps (esbuild) ...');
