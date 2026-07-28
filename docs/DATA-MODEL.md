@@ -25,7 +25,7 @@ Worker/CDN URL
 | `profiles` | 会员、积分汇总、配额和统计 | Worker |
 | `credit_ledger` | 积分流水 | Worker |
 | `activation_codes`, `code_redemptions` | 卡密和核销 | Worker/admin |
-| `generation_requests` | 生图任务、provider、结果和退款状态 | Worker |
+| `generation_requests` | 图片/视频任务、provider、提交栅栏、结果和退款状态 | Worker |
 | `community_posts` | 全站公开帖子 | Worker |
 | `community_post_likes`, `community_notifications` | 点赞和通知 | Worker |
 | `membership_task_*` | 任务进度与领取 | Worker |
@@ -33,6 +33,14 @@ Worker/CDN URL
 | `site_settings` | 后台可配置模型目录 | Worker/admin |
 
 Schema 真源是 `supabase/schema.sql` 与 `supabase/migrations/`。MemFire 使用 Supabase-compatible schema，所以目录名暂不改。
+
+视频候选使用 `generation_requests.meta` 保存 `videoSubmitState`、稳定提交信封、`upstreamTaskId`、`videoResultState`、结果未知时间和退款状态。`status=processing` 加 CAS 元数据是防重栅栏，不表示上游一定仍在运行；API 会把结果未知投影为 `submission_unknown`，SLA 到期后再写入真实 `failed` 终态。
+
+本候选依赖且只依赖以下三条新迁移，必须按顺序执行：
+
+1. `20260722010000_generation_request_idempotency.sql`
+2. `20260722020000_atomic_credit_operations.sql`
+3. `20260722030000_apply_credit_delta_idempotency.sql`
 
 ## 用户 JSON
 

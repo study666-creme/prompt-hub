@@ -1,6 +1,6 @@
 # 运营监控
 
-最后核对：2026-07-11
+最后核对：2026-07-29
 
 ## 后台入口
 
@@ -58,6 +58,14 @@ binding = "PROMPT_HUB_METRICS"
 id = "37976970d22347fba80ca6c72238f6e7"
 preview_id = "c2602858d4bd40a4b1603de6d7b4af22"
 ```
+
+视频终态候选还要求以下绑定同时存在：
+
+- producer `VIDEO_GENERATION_QUEUE` -> `prompt-hub-video-generation`
+- consumer `prompt-hub-video-generation`，DLQ 为 `prompt-hub-video-generation-dlq`
+- cron `*/2 * * * *`，用于只读轮询结果和推进 1 小时未知结果 SLA
+
+发布后先执行 `npx wrangler queues list`，确认视频队列的 producer/consumer 从 `0/0` 变为 `1/1`；随后核对 `/health.status=ready` 且 `/health.buildSha` 等于发布提交。生产任务出现 `submission_unknown` 时禁止手工重提，先核对同一 `upstreamTaskId` 的 cron 轮询与退款流水。
 
 如果后台提示“Worker 自计数未启用”，检查：
 

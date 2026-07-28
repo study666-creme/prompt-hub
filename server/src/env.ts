@@ -1,15 +1,25 @@
 import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
 
+export type GenerationSubmissionQueueMessage = {
+  kind?: 'image' | 'video';
+  jobId: string;
+  userId: string;
+};
+
 export type Env = {
   /** R2 桶绑定：wrangler.toml [[r2_buckets]] CARD_IMAGES_R2 */
   CARD_IMAGES_R2?: R2Bucket;
   /** Optional hourly ops metrics bucket for admin monitoring. */
   PROMPT_HUB_METRICS?: KVNamespace;
   /** Durable image submission queue for synchronous New API image models. */
-  IMAGE_GENERATION_QUEUE?: Queue<{ jobId: string; userId: string }>;
+  IMAGE_GENERATION_QUEUE?: Queue<GenerationSubmissionQueueMessage>;
+  /** Video submissions use an independent queue so provider latency cannot block images. */
+  VIDEO_GENERATION_QUEUE?: Queue<GenerationSubmissionQueueMessage>;
   /** 图片读写的后端：supabase | r2-first | r2（见 docs/R2-MIGRATION.md） */
   MEDIA_STORAGE_MODE?: string;
   ENVIRONMENT: string;
+  /** Reviewed Git commit injected by the Worker release command. */
+  BUILD_SHA?: string;
   CORS_ORIGINS: string;
   PUBLIC_SITE_URL?: string;
   SUPABASE_URL: string;

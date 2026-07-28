@@ -5,14 +5,23 @@ import { recordRequestMetric } from './lib/monitoring';
 import { diagnoseSupabaseUpstream } from './lib/supabase-upstream';
 import { drainFastProviderPendingSubmits } from './lib/fast-provider-drain';
 import { processFastProviderQueueMessage } from './lib/fast-provider-queue';
+import { drainVideoPendingSubmits } from './lib/video-provider-drain';
+import { drainExpiredVideoSubmitOutcomes } from './lib/video-provider-outcome';
+import { drainPendingVideoTasks } from './lib/video-provider-poll';
+import { processVideoQueueMessage } from './lib/video-provider-queue';
 import { createCorsMiddleware } from './middleware/cors';
 import { adminRoutes } from './routes/admin';
 import { supabaseProxyHandler } from './routes/supabase-proxy';
 import { v1 } from './routes/v1';
 import { webhookRoutes } from './routes/webhooks/payment';
-import type { Env } from './env';
+import type { Env, GenerationSubmissionQueueMessage } from './env';
 
 const app = new Hono<{ Bindings: Env }>();
+
+export function publicBuildSha(value: unknown): string {
+  const sha = String(value || '').trim().toLowerCase();
+  return /^[0-9a-f]{7,40}$/.test(sha) ? sha : 'unversioned';
+}
 
 app.use('*', async (c, next) => {
   applyCorsHeaders(c);
@@ -55,6 +64,8 @@ app.get('/health', async c => {
     ok: db === 'ok',
     service: 'prompt-hub-api',
     version: '0.1.0',
+    buildSha: publicBuildSha(c.env.BUILD_SHA),
+    status: db === 'ok' ? 'ready' : 'degraded',
     environment: c.env.ENVIRONMENT,
     supabase: db,
     imageProviders: {
@@ -144,11 +155,17 @@ export default {
     }
   },
   async queue(
-    batch: MessageBatch<{ jobId: string; userId: string }>,
+    batch: MessageBatch<GenerationSubmissionQueueMessage>,
     env: Env
   ) {
     for (const message of batch.messages) {
       try {
+        if (message.body?.kind === 'video') {
+          const result = await processVideoQueueMessage(env, message.body);
+          if (result === 'retry') message.retry({ delaySeconds: 60 });
+          else message.ack();
+          continue;
+        }
         const result = await processFastProviderQueueMessage(env, message.body);
         if (result === 'retry') message.retry({ delaySeconds: 60 });
         else message.ack();
@@ -159,6 +176,14 @@ export default {
     }
   },
   async scheduled(_controller: ScheduledController, env: Env) {
-    await drainFastProviderPendingSubmits(env, { awaitSubmit: true, maxSubmit: 2 });
+    const reconcileVideoWork = async () => {
+      await drainPendingVideoTasks(env, { maxPoll: 4 });
+      await drainExpiredVideoSubmitOutcomes(env);
+    };
+    await Promise.allSettled([
+      drainFastProviderPendingSubmits(env, { awaitSubmit: true, maxSubmit: 2 }),
+      drainVideoPendingSubmits(env, { maxSubmit: 2 }),
+      reconcileVideoWork()
+    ]);
   }
 };

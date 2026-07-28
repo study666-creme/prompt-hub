@@ -16,11 +16,12 @@
 
 | 路径 | 认证 | 说明 |
 |---|---|---|
-| `/health` | 无 | 数据库和生图 provider 配置状态 |
+| `/health` | 无 | 数据库状态、运行状态和发布提交 `buildSha` |
 | `/api/v1/community/feed` | 无 | 公共社区分页 |
 | `/api/v1/media/community/*` | 无 | 已发布社区图片签名/CDN |
 | `/api/v1/me`, `/membership`, `/redeem` | Bearer | 账号、积分、会员和兑换 |
 | `/api/v1/generate/*` | Bearer | 模型、报价、提交、轮询、恢复和 MJ 动作 |
+| `/api/v1/video/*` | Bearer | 视频报价、幂等提交、任务状态和内容读取 |
 | `/api/v1/media/*` | Bearer | 私有图片上传、批量签名和缩略图 |
 | `/api/v1/community/*` | Bearer | 发布、点赞、通知和灵感抽取 |
 | `/api/v1/extension/*` | Bearer | 扩展与 Canvas 列表、标签和存卡 |
@@ -73,6 +74,14 @@ npm exec wrangler secret put APIMART_API_KEY
 - 用户私有 JSON 可由登录用户 RLS 路径同步，但 `cloud-sync-safety` 必须防止空覆盖。
 - 管理后台的删除/恢复接口必须先提供预览或显式确认；卡片巡检默认只读。
 - 生成扣费与退款由同一任务记录驱动，不能在前端自行补积分。
+
+## 视频终态状态机
+
+- 新视频任务写入完整恢复信封后进入独立 `VIDEO_GENERATION_QUEUE`；队列消息只允许通过任务的 CAS 状态领取一次。
+- 上游任务 ID 一旦持久化，用户查询和 cron 都只轮询该 ID，禁止再次调用生成 POST。
+- `unknown`、`result_uncertain`、`outcome_unknown` 以及 `error.code=result_uncertain` 都归一为结果未知；公共状态暂时投影为 `submission_unknown`。
+- 结果未知满 1 小时后进入失败终态，退款通过 `refund_user_credits` 和稳定任务 ref 幂等执行。明确成功或失败可提前收敛。
+- `prompt-hub-video-generation` 使用独立 consumer 和 `prompt-hub-video-generation-dlq`，避免慢视频提交阻塞图片队列。
 
 ## 本地与部署
 

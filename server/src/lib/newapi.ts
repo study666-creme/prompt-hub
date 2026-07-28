@@ -716,6 +716,13 @@ function activeModelRoutes(routeSnapshot: NewApiAdminRouteSnapshot, upstreamMode
   return [...unique.values()];
 }
 
+export function newApiHasActiveRoute(
+  routeSnapshot: NewApiAdminRouteSnapshot,
+  upstreamModel: string
+): boolean {
+  return activeModelRoutes(routeSnapshot, upstreamModel).length > 0;
+}
+
 function routeLabel(index: number) {
   return `线路 ${index + 1}`;
 }

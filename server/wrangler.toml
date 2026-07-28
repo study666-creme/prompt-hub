@@ -57,9 +57,20 @@ crons = ["*/2 * * * *"]
 binding = "IMAGE_GENERATION_QUEUE"
 queue = "prompt-hub-image-generation"
 
+[[queues.producers]]
+binding = "VIDEO_GENERATION_QUEUE"
+queue = "prompt-hub-video-generation"
+
 [[queues.consumers]]
 queue = "prompt-hub-image-generation"
 max_batch_size = 2
 max_batch_timeout = 5
 max_retries = 20
 dead_letter_queue = "prompt-hub-image-generation-dlq"
+
+[[queues.consumers]]
+queue = "prompt-hub-video-generation"
+max_batch_size = 2
+max_batch_timeout = 1
+max_retries = 3
+dead_letter_queue = "prompt-hub-video-generation-dlq"
