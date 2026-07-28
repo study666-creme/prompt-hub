@@ -12,6 +12,8 @@ import {
 
   collectUserGroups,
 
+  findUserCardForExtension,
+
   listUserCardsForExtension,
 
   listUserTags,
@@ -42,6 +44,8 @@ import { createAdminClient, getOrCreateProfile } from '../../lib/supabase';
 
 import { ensureWarehouseJobThumb } from '../../lib/warehouse-thumb';
 
+import { resolveImageRefForJob } from '../../lib/recover-generation-warehouse';
+
 import { rateLimit } from '../../middleware/rate-limit';
 
 
@@ -60,6 +64,12 @@ const quickCardSchema = z.object({
 
   publishToCommunity: z.boolean().optional()
 
+});
+
+const canvasResultSchema = z.object({
+  generationJobId: z.string().uuid(),
+  artifactIndex: z.literal(0).optional().default(0),
+  title: z.string().trim().max(200).optional()
 });
 
 
@@ -222,6 +232,19 @@ extensionRoutes.get('/cards', async c => {
 
   }
 
+});
+
+extensionRoutes.get('/cards/:cardId', async c => {
+  const user = c.get('user');
+  const parsed = z.string().trim().min(1).max(200).safeParse(c.req.param('cardId'));
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', '卡片标识无效');
+
+  const admin = createAdminClient(c.env);
+  const card = await findUserCardForExtension(admin, user.id, parsed.data);
+  if (!card) throw new ApiError(404, 'CARD_NOT_FOUND', '卡片不存在');
+  const thumbUrl = await buildExtensionCardThumb(c, user.id, card);
+  c.header('Cache-Control', 'private, no-store');
+  return c.json({ ok: true, data: { card: { ...card, thumbUrl } } });
 });
 
 
@@ -450,6 +473,69 @@ extensionRoutes.post('/quick-card', async c => {
 
   }
 
+});
+
+extensionRoutes.post('/canvas-results', async c => {
+  const user = c.get('user');
+  const parsed = canvasResultSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', '参数无效');
+
+  const admin = createAdminClient(c.env);
+  const { data: job, error } = await admin
+    .from('generation_requests')
+    .select('id,user_id,prompt,status,result_image_url,meta,created_at,resolution')
+    .eq('id', parsed.data.generationJobId)
+    .eq('user_id', user.id)
+    .maybeSingle();
+  if (error) throw new ApiError(500, 'DB_ERROR', '读取生成任务失败');
+  if (!job) throw new ApiError(404, 'GENERATION_NOT_FOUND', '生成任务不存在');
+  if (job.status !== 'completed') throw new ApiError(409, 'RESULT_NOT_READY', '生成结果尚未完成');
+
+  const meta = job.meta && typeof job.meta === 'object' && !Array.isArray(job.meta)
+    ? job.meta as Record<string, unknown>
+    : {};
+  const fromCanvas = meta.product === 'canvas'
+    || (typeof meta.projectId === 'string' && !!meta.projectId.trim())
+    || (typeof meta.nodeId === 'string' && !!meta.nodeId.trim());
+  if (!fromCanvas) throw new ApiError(409, 'NOT_CANVAS_RESULT', '该任务不是画布生成结果');
+
+  const imageRef = await resolveImageRefForJob(
+    admin,
+    user.id,
+    parsed.data.generationJobId,
+    job,
+    c.env
+  );
+  if (!imageRef) throw new ApiError(409, 'RESULT_NOT_READY', '生成图片仍在归档，请稍后重试');
+
+  const profile = await getOrCreateProfile(admin, user.id);
+  const prompt = String(job.prompt || '').trim();
+  const result = await appendQuickCard(admin, user.id, profile, {
+    prompt,
+    title: parsed.data.title || prompt.slice(0, 48) || '画布生成',
+    imageRef,
+    cardId: `canvas_${parsed.data.generationJobId.replace(/-/g, '_')}`,
+    sourceKey: `canvas-result:${parsed.data.generationJobId}:${parsed.data.artifactIndex}`,
+    genJobId: parsed.data.generationJobId,
+    tags: ['图片生成', '无限画布'],
+    publishToCommunity: false,
+    customFields: {
+      canvasProjectId: typeof meta.projectId === 'string' ? meta.projectId : null,
+      canvasNodeId: typeof meta.nodeId === 'string' ? meta.nodeId : null,
+      canvasArtifactIndex: parsed.data.artifactIndex
+    }
+  });
+
+  c.header('Cache-Control', 'private, no-store');
+  return c.json({
+    ok: true,
+    data: {
+      message: result.replayed ? '生成结果已在卡片仓库' : '生成结果已保存到卡片仓库',
+      cardId: result.cardId,
+      cardCount: result.cardCount,
+      replayed: result.replayed
+    }
+  });
 });
 
 

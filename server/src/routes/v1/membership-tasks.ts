@@ -14,7 +14,8 @@ import {
   listClaimedKeys,
   mergeTaskFlags,
   parseTaskFlags,
-  PhoneRequiredError
+  PhoneRequiredError,
+  recordCanvasNodeCreated
 } from '../../lib/membership-tasks';
 import { ensureInviteCode, redeemInviteCode } from '../../lib/invite-codes';
 import { membershipCreditsPayload, syncMembershipCredits } from '../../lib/membership-credits';
@@ -296,6 +297,42 @@ membershipTaskRoutes.post('/redeem-invite', rateLimit(20, 60_000), async c => {
       );
     }
     throw new ApiError(500, 'INVITE_FAILED', msg.slice(0, 180));
+  }
+});
+
+membershipTaskRoutes.post('/events/canvas-create-node', rateLimit(30, 60_000), async c => {
+  const user = c.get('user');
+  const admin = createAdminClient(c.env);
+  try {
+    const result = await recordCanvasNodeCreated(admin, user.id);
+    const active = !!result.profile.membership_tier && (
+      !result.profile.membership_until ||
+      new Date(result.profile.membership_until).getTime() > Date.now()
+    );
+    return c.json({
+      ok: true,
+      data: {
+        granted: result.granted,
+        message: result.granted
+          ? '已获得 1 天基础会员'
+          : '画布节点任务奖励已领取',
+        ...membershipCreditsPayload(result.profile),
+        membership: {
+          tier: result.profile.membership_tier,
+          until: result.profile.membership_until,
+          queuedTier: result.profile.membership_queued_tier || null,
+          queuedUntil: result.profile.membership_queued_until || null,
+          active
+        }
+      }
+    });
+  } catch (e) {
+    const msg = extractErrorMessage(e);
+    if (isSchemaMigrationError(e) || /grant_canvas_create_node_reward/i.test(msg)) {
+      throw new ApiError(503, 'MIGRATION_REQUIRED', '画布节点任务奖励尚未完成数据库迁移');
+    }
+    console.error('canvas create node reward failed', e);
+    throw new ApiError(500, 'CANVAS_NODE_REWARD_FAILED', '节点已创建，奖励可稍后重试领取');
   }
 });
 

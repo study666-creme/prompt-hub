@@ -16,7 +16,6 @@ import {
   materializeCommunityGridIfMissing,
   serveCachedStorageImage,
   verifyMediaAccessToken,
-  signingPathForVariant,
   ensureGridPathForSigning
 } from '../../lib/media-cdn';
 import { deleteOwnedCardImageIfUnreferenced } from '../../lib/admin-media-refs';
@@ -313,7 +312,10 @@ mediaRoutes.get('/generation/:jobId/url', async c => {
     .eq('id', jobId)
     .maybeSingle();
 
-  if (error || !job || job.user_id !== user.id) {
+  if (error) {
+    throw new ApiError(500, 'DB_ERROR', '任务查询失败');
+  }
+  if (!job || job.user_id !== user.id) {
     throw new ApiError(404, 'NOT_FOUND', '任务不存在');
   }
   if (job.status !== 'completed' || !job.result_image_url) {
@@ -335,7 +337,9 @@ mediaRoutes.get('/generation/:jobId/url', async c => {
   if (path) {
     assertOwnPath(user.id, path);
     const variant = (c.req.query('variant') || 'full').trim().toLowerCase();
-    const signPath = signingPathForVariant(path, variant);
+    const signPath = await ensureGridPathForSigning(c, path, variant, {
+      requireExistingPrimary: true
+    });
     const url = await buildPrivateMediaCdnUrl(c, signPath);
     return c.json({ ok: true, data: { url, cdn: true, variant } });
   }

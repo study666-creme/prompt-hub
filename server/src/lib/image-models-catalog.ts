@@ -1,3 +1,5 @@
+import { sanitizePublicModelDescription } from './public-model-projection';
+
 export type ImageModelProvider = 'apimart' | 'newapi';
 
 export type ImageModelUiFamily = 'gim2' | 'banana' | 'jimeng' | 'midjourney' | 'wan' | 'flux';
@@ -61,6 +63,18 @@ function apimart(row: CatalogWithoutProvider): ImageModelCatalogEntry {
  */
 export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   newApi(gim2({
+    id: 'image2-free',
+    upstream: 'gpt-image-2-free',
+    label: '全能模型2 · 免费 1K',
+    group: 'new',
+    description: '免费 1K 生图模型，支持多种画面比例',
+    upstreamPoints: 0,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    defaultCredits: 0,
+    sortOrder: 88
+  })),
+  newApi(gim2({
     id: 'image2-economy',
     upstream: 'gpt-image-2-1k',
     label: '全能模型2 · 特价 1K',
@@ -69,7 +83,7 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     upstreamPoints: 0.02,
     refundOnViolation: true,
     resolutions: ['1k'],
-    defaultCredits: 2,
+    defaultCredits: 2.2,
     sortOrder: 89
   })),
   newApi(gim2({
@@ -86,14 +100,14 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   })),
   newApi(gim2({
     id: 'image2-4k-fast',
-    upstream: 'gpt-image-2-4k-fast',
-    label: '全能模型2 · 极速 4K',
+    upstream: 'image2-4k-fast',
+    label: '全能模型2 · 4K',
     group: 'new',
     description: '固定 4K 的快速生图模型，支持多种画面比例',
     upstreamPoints: 0.065,
     refundOnViolation: true,
     resolutions: ['4k'],
-    defaultCredits: 6.5,
+    defaultCredits: 6,
     sortOrder: 91
   })),
   newApi(gim2({
@@ -106,23 +120,20 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],
     pricingByResolution: true,
-    defaultCreditsByResolution: { '1k': 7, '2k': 15, '4k': 20 },
-    defaultCredits: 7,
+    defaultCreditsByResolution: { '1k': 8, '2k': 15, '4k': 20 },
+    defaultCredits: 8,
     sortOrder: 91
   })),
-  newApi(gim2({
-    id: 'image2-hd',
-    upstream: 'image2k4k',
-    label: '全能模型2 · 经济 2K/4K',
+  newApi(banana({
+    id: 'lingtu-lite',
+    upstream: 'nano-banana-2-lite',
+    label: '香蕉 · Lite 1K',
     group: 'new',
-    description: '固定 low，2K/4K 分档，仅开放安全比例',
-    upstreamPoints: 0,
+    description: '轻量生图模型，固定 1K',
+    upstreamPoints: 0.042,
     refundOnViolation: true,
-    resolutions: ['2k', '4k'],
-    pricingByResolution: true,
-    defaultCreditsByResolution: { '2k': 5.5, '4k': 9 },
-    defaultCredits: 5.5,
-    fixedQualityLow: true,
+    resolutions: ['1k'],
+    defaultCredits: 4.2,
     sortOrder: 92
   })),
   newApi(banana({
@@ -134,7 +145,7 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     upstreamPoints: 0.032,
     refundOnViolation: true,
     resolutions: ['1k'],
-    defaultCredits: 3.2,
+    defaultCredits: 4.2,
     sortOrder: 93
   })),
   newApi(banana({
@@ -146,7 +157,7 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     upstreamPoints: 0.07,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],
-    defaultCredits: 7,
+    defaultCredits: 6,
     sortOrder: 94
   })),
   newApi(banana({
@@ -158,19 +169,19 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     upstreamPoints: 0.1,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],
-    defaultCredits: 10,
+    defaultCredits: 6,
     sortOrder: 95
   })),
   newApi(banana({
     id: 'lingtu',
     upstream: 'nano-banana',
-    label: '香蕉 · Standard 1K/2K/4K',
+    label: '香蕉 · Standard 1K',
     group: 'new',
-    description: '通用生图模型，支持 1K/2K/4K',
+    description: '通用生图模型，固定 1K',
     upstreamPoints: 0.11,
     refundOnViolation: true,
-    resolutions: ['1k', '2k', '4k'],
-    defaultCredits: 11,
+    resolutions: ['1k'],
+    defaultCredits: 6,
     sortOrder: 96
   }))
 ];
@@ -178,7 +189,7 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
 /** MJ 继续使用 Apimart，并保留后台手动速度分档定价。 */
 export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   apimart(midjourney({
-    id: 'apimart-mj-v81',
+    id: 'mj-v81',
     upstream: 'mj-v8.1',
     label: 'MJ v8.1',
     group: 'new',
@@ -192,7 +203,7 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     sortOrder: 110
   })),
   apimart(midjourney({
-    id: 'apimart-mj-v7',
+    id: 'mj-v7',
     upstream: 'mj-v7',
     label: 'MJ v7',
     group: 'classic',
@@ -206,7 +217,7 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     sortOrder: 111
   })),
   apimart(midjourney({
-    id: 'apimart-mj-v61',
+    id: 'mj-v61',
     upstream: 'mj-v6.1',
     label: 'MJ v6.1',
     group: 'classic',
@@ -220,7 +231,7 @@ export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     sortOrder: 112
   })),
   apimart(midjourney({
-    id: 'apimart-mj-niji7',
+    id: 'mj-niji7',
     upstream: 'mj-niji7',
     label: 'MJ Niji 7',
     group: 'new',
@@ -241,8 +252,17 @@ export const IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   ...APIMART_IMAGE_MODEL_CATALOG
 ];
 
+/**
+ * Compatibility entries can remain in the internal catalog for old jobs, but
+ * retired models must never be projected back into a public selector from a
+ * stale catalog or an admin route snapshot.
+ */
+const RETIRED_PUBLIC_IMAGE_MODEL_IDS = new Set(['image2-free']);
+
 export function isPublicNewApiImageEntry(entry: ImageModelCatalogEntry): boolean {
-  return entry.provider === 'newapi' && (entry.uiFamily === 'gim2' || entry.uiFamily === 'banana');
+  return entry.provider === 'newapi'
+    && (entry.uiFamily === 'gim2' || entry.uiFamily === 'banana')
+    && !RETIRED_PUBLIC_IMAGE_MODEL_IDS.has(entry.id);
 }
 
 export function isRetainedPublicImageEntry(entry: ImageModelCatalogEntry): boolean {
@@ -254,7 +274,7 @@ export function imageModelUiFamily(modelId: string): ImageModelUiFamily {
   const entry = getCatalogEntry(modelId);
   if (entry?.uiFamily) return entry.uiFamily;
   const id = String(modelId || '').toLowerCase();
-  if (id.startsWith('apimart-mj-')) return 'midjourney';
+  if (id.startsWith('mj-')) return 'midjourney';
   if (id.includes('seedream') || id === 'jimeng') return 'jimeng';
   if (id.includes('banana')) return 'banana';
   return 'gim2';
@@ -264,27 +284,20 @@ export function providerLabel(_provider: ImageModelProvider): string {
   return '';
 }
 
-/** 前台模型说明不暴露内部供应商名。 */
-export function sanitizePublicModelDescription(description: string | null | undefined): string {
-  if (!description) return '';
-  let value = String(description).trim();
-  value = value.replace(/^(Apimart|GrsAI|ThinkAI|Mooko|木瓜|OpenAI|Gemini|备用线路)\s*[·•]\s*/gi, '');
-  value = value.replace(/\b(Apimart|OpenAI|Gemini|gpt-image-2|official|备用线路)\b\s*[·•]?\s*/gi, '');
-  value = value.replace(/\s*[·•]\s*出图速度可选\s*relax\s*\/\s*fast\s*\/\s*turbo/gi, '');
-  value = value.replace(/\s*[·•]\s*$/g, '').trim();
-  if (/^(OpenAI|Gemini|gpt-image|备用线路)/i.test(value)) return '';
-  return value;
-}
+export { sanitizePublicModelDescription };
 
 const LEGACY_MODEL_MAP: Record<string, string> = {
   quanneng2: 'image2',
   'gpt-image-2-1k': 'image2-economy',
   'gpt-image-2-chat': 'image2-economy',
+  'gpt-image-2-free': 'image2-free',
   'gpt-image-2': 'image2',
   'gpt-image-2-4k-fast': 'image2-4k-fast',
+  'gpt-image-2-4k-adobe': 'image2-4k-fast',
   'gpt-image-2-vip': 'image2-pro',
   jimeng: 'lingtu-pro',
   'nano-banana-fast': 'lingtu-fast',
+  'nano-banana-2-lite': 'lingtu-lite',
   'nano-banana-2': 'lingtu-2',
   'nano-banana-pro': 'lingtu-pro',
   'nano-banana-pro-vt': 'lingtu-pro',
@@ -309,6 +322,7 @@ const LEGACY_MODEL_MAP: Record<string, string> = {
   'newapi-gpt-image-2-official-budget': 'image2-hd',
   image2k4k: 'image2-hd',
   'newapi-nano-banana-fast': 'lingtu-fast',
+  'newapi-nano-banana-2-lite': 'lingtu-lite',
   'newapi-nano-banana-2': 'lingtu-2',
   'newapi-nano-banana-pro': 'lingtu-pro',
   'newapi-nano-banana': 'lingtu',
@@ -322,7 +336,13 @@ const LEGACY_MODEL_MAP: Record<string, string> = {
   'apimart-gemini-3-pro-preview': 'lingtu-pro',
   'apimart-gemini-3-pro-official': 'lingtu-pro',
   'ithink-gpt-image-2-slow': 'image2',
-  'mooko-gpt-image-2-pro': 'image2-pro'
+  'mooko-gpt-image-2-pro': 'image2-pro',
+  'apimart-mj-v81': 'mj-v81',
+  'apimart-mj-v7': 'mj-v7',
+  'apimart-mj-v61': 'mj-v61',
+  'apimart-mj-niji7': 'mj-niji7',
+  'mj-v8.1': 'mj-v81',
+  'mj-v6.1': 'mj-v61'
 };
 
 export function normalizeImageModelId(raw?: string | null): string {

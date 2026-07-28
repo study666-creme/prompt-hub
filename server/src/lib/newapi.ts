@@ -6,10 +6,19 @@ import {
   NEWAPI_IMAGE_MODEL_CATALOG,
   isPublicNewApiImageEntry,
   isRetainedPublicImageEntry,
+  normalizeImageModelId,
   type ImageModelCatalogEntry,
   type ImageModelUiFamily
 } from './image-models-catalog';
 import { mapQualityForGptImage } from './pricing';
+import {
+  projectPublicCatalogParameters,
+  projectPublicCatalogPricing,
+  sanitizePublicModelDescription,
+  sanitizePublicModelId,
+  sanitizePublicModelLabel,
+  sanitizePublicModelTags
+} from './public-model-projection';
 
 type SubmitParams = {
   upstreamModel: string;
@@ -21,9 +30,16 @@ type SubmitParams = {
   count?: number;
   refImageUrls?: string[];
   catalogParameters?: NewApiCatalogParameter[];
+  /** Stable caller-side correlation key. It is persisted before the paid request starts. */
+  clientRequestId?: string;
+  /** Persists the API request id as soon as response headers/body expose it. */
+  onRequestId?: (requestId: string) => Promise<void> | void;
 };
 
 export const NEWAPI_CHAT_IMAGE_REF_LIMIT = 4;
+export const NEWAPI_BANANA_IMAGE_REF_LIMIT = 14;
+
+const IMAGE_RESOLUTION_VALUES = new Set(['1k', '2k', '4k']);
 
 export type NewApiPricingRule = {
   model: string;
@@ -105,6 +121,7 @@ export type NewApiCatalogParameter = {
 export type NewApiCatalogSnapshot = {
   available: boolean;
   stale: boolean;
+  fetchedAt?: string;
   version: string;
   pricingVersion: string;
   models: NewApiCatalogModel[];
@@ -145,6 +162,12 @@ export type NewApiTaskPollResult = {
 };
 
 const PRICING_CACHE_MS = 5 * 60_000;
+export const NEWAPI_PRICING_CATALOG_MAX_AGE_MS = 5 * 60_000;
+// A catalog service can return a verified last-known-good snapshot marked
+// stale while it retries its own dependencies. Keep that state brief so the
+// image picker recovers promptly instead of hiding its live choices for the
+// normal five-minute catalog cache window.
+const STALE_CATALOG_RETRY_MS = 5_000;
 const ADMIN_ROUTE_CACHE_MS = 30_000;
 
 const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; description: string }> = {
@@ -152,16 +175,21 @@ const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; 
   'gpt-5.6-sol': { id: 'creative-5-6', label: '全能模型5.6', description: '旗舰创作与推理模型，最高 ultra 思考。' },
   'gpt-image-2-1k': { id: 'image2-economy', label: '全能模型2 · 特价 1K', description: '特价 1K 生图模型，支持参考图。' },
   'gpt-image-2-chat': { id: 'image2-economy', label: '全能模型2 · 特价 1K', description: '特价文字生图，固定 1K。' },
+  'gpt-image-2-free': { id: 'image2-free', label: '全能模型2 · 免费 1K', description: '免费生图模型，固定 1K。' },
   'gpt-image-2': { id: 'image2', label: '全能模型2 · 1K', description: '标准生图模型，固定 1K。' },
-  'gpt-image-2-4k-fast': { id: 'image2-4k-fast', label: '全能模型2 · 极速 4K', description: '固定 4K 的快速生图模型，支持多种画面比例。' },
+  'image2-4k-fast': { id: 'image2-4k-fast', label: '全能模型2 · 4K', description: '固定 4K 的生图模型，支持官方 Image 参数与参考图。' },
+  'gpt-image-2-4k-fast': { id: 'image2-4k-fast', label: '全能模型2 · 4K', description: '固定 4K 的生图模型，支持官方 Image 参数与参考图。' },
+  'gpt-image-2-4k-adobe': { id: 'image2-4k-fast', label: '全能模型2 · 4K', description: '固定 4K 的生图模型，支持官方 Image 参数与参考图。' },
   'gpt-image-2-ext': { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K', description: '高质量生图模型，支持 1K/2K/4K。' },
   image2k4k: { id: 'image2-hd', label: '全能模型2 · 经济 2K/4K', description: '高分辨率经济模型，支持 2K/4K。' },
   'nano-banana-fast': { id: 'lingtu-fast', label: '香蕉 · Fast 1K', description: '快速生图模型，固定 1K。' },
+  'nano-banana-2-lite': { id: 'lingtu-lite', label: '香蕉 · Lite 1K', description: '轻量生图模型，固定 1K。' },
   'nano-banana-2': { id: 'lingtu-2', label: '香蕉 · 2 1K/2K/4K', description: '通用生图模型，支持 1K/2K/4K。' },
   'nano-banana-pro': { id: 'lingtu-pro', label: '香蕉 · Pro 1K/2K/4K', description: '高质量通用生图模型，支持 1K/2K/4K。' },
-  'nano-banana': { id: 'lingtu', label: '香蕉 · Standard 1K/2K/4K', description: '通用生图模型，支持 1K/2K/4K。' },
+  'nano-banana': { id: 'lingtu', label: '香蕉 · Standard 1K', description: '通用生图模型，固定 1K。' },
   'grok-imagine-video': { id: 'motion-video', label: 'Grok Video', description: '按秒计费的视频模型，支持文生、单图和多图生视频。' },
   'grok-imagine-video-1.5': { id: 'motion-video-1-5', label: 'Grok Video 1.5', description: '按秒计费的视频模型，支持单图生视频。' },
+  'grok-imagine-video-1.5-fast': { id: 'motion-video-1-5-fast', label: 'Grok Video 1.5 Fast', description: '按次计费的视频模型，支持文生视频或单图生视频。' },
   'grok-video': { id: 'motion-video', label: 'Grok Video', description: '按秒计费的视频模型，支持文生、单图和多图生视频。' },
   'grok-video-1.5': { id: 'motion-video-1-5', label: 'Grok Video 1.5', description: '按秒计费的视频模型，支持单图生视频。' }
 };
@@ -169,6 +197,37 @@ const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; 
 let catalogCache: { base: string; at: number; snapshot: NewApiCatalogSnapshot } | null = null;
 let catalogInflight: { base: string; promise: Promise<NewApiCatalogSnapshot> } | null = null;
 let adminRouteCache: { base: string; at: number; snapshot: NewApiAdminRouteSnapshot } | null = null;
+
+const REVIEWED_NEWAPI_IMAGE_IDS = new Set(
+  NEWAPI_IMAGE_MODEL_CATALOG
+    .filter(isPublicNewApiImageEntry)
+    .map(model => model.id)
+);
+
+function reviewedImagePricingCoverage(snapshot: NewApiCatalogSnapshot): Set<string> {
+  const coverage = new Set<string>();
+  for (const model of snapshot.imageCatalogEntries) {
+    if (!REVIEWED_NEWAPI_IMAGE_IDS.has(model.id)) continue;
+    coverage.add(`model:${model.id}`);
+    for (const resolution of model.resolutions) {
+      coverage.add(`resolution:${model.id}:${resolution}`);
+    }
+    for (const resolution of Object.keys(model.defaultCreditsByResolution || {})) {
+      coverage.add(`tier:${model.id}:${resolution}`);
+    }
+  }
+  return coverage;
+}
+
+function losesReviewedImagePricingCoverage(
+  previous: NewApiCatalogSnapshot,
+  candidate: NewApiCatalogSnapshot
+): boolean {
+  const previousCoverage = reviewedImagePricingCoverage(previous);
+  if (!previousCoverage.size) return false;
+  const candidateCoverage = reviewedImagePricingCoverage(candidate);
+  return [...previousCoverage].some(key => !candidateCoverage.has(key));
+}
 
 function apiBase(envBase?: string): string {
   return (envBase || 'https://newapi.prompt-hubs.com').replace(/\/$/, '');
@@ -231,6 +290,11 @@ function normalizedPricingTiers(value: unknown, applyImageMarkup: boolean): NewA
               .filter(([, condition]) => ['string', 'number', 'boolean'].includes(typeof condition))
           ) as Record<string, string | number | boolean>
         : {};
+      const legacyResolution = String(when.quality || '').trim().toLowerCase();
+      if (!('resolution' in when) && IMAGE_RESOLUTION_VALUES.has(legacyResolution)) {
+        delete when.quality;
+        when.resolution = legacyResolution;
+      }
       if (yuan == null || yuan < 0 || credits == null || !Object.keys(when).length) return null;
       return { when, yuan, credits };
     })
@@ -290,17 +354,17 @@ function publicPresentation(item: Record<string, unknown>, upstreamModel: string
   const declared = item.public && typeof item.public === 'object'
     ? item.public as Record<string, unknown>
     : null;
-  const canonical = FALLBACK_PUBLIC_PRESENTATION[upstreamModel];
-  const fallback = canonical || {
-    id: upstreamModel,
-    label: stringValue(item.label) || upstreamModel,
-    description: stringValue(item.description)
-  };
-  const label = canonical?.label || stringValue(declared?.label) || fallback.label;
+  const canonical = FALLBACK_PUBLIC_PRESENTATION[upstreamModel.toLowerCase()];
+  const declaredId = sanitizePublicModelId(declared?.id);
+  const id = canonical?.id || declaredId;
+  if (!id) return null;
+  const fallbackLabel = canonical?.label || stringValue(declared?.label) || id;
+  const label = sanitizePublicModelLabel(fallbackLabel, id);
+  const fallbackDescription = canonical?.description || stringValue(declared?.description);
   return {
-    id: canonical?.id || stringValue(declared?.id) || fallback.id,
+    id,
     label: canonicalImageFamilyLabel(family, label),
-    description: stringValue(declared?.description) || fallback.description
+    description: sanitizePublicModelDescription(fallbackDescription)
   };
 }
 
@@ -351,6 +415,11 @@ function normalizeCatalogPricing(value: unknown, applyImageMarkup = false): NewA
   if (yuan == null || yuan < 0 || credits == null) return null;
   const tiers = normalizedPricingTiers(raw.tiers, applyImageMarkup);
   const groups = normalizedPricingGroups(raw.groups, mode, applyImageMarkup);
+  const rawQuantityParameter = stringValue(raw.quantity_parameter) || null;
+  const quantityParameter = rawQuantityParameter === 'quality'
+    && tiers.some(tier => 'resolution' in tier.when && !('quality' in tier.when))
+    ? 'resolution'
+    : rawQuantityParameter;
   return {
     mode,
     unit,
@@ -358,7 +427,7 @@ function normalizeCatalogPricing(value: unknown, applyImageMarkup = false): NewA
     credits,
     ...(tiers.length ? { tiers } : {}),
     ...(groups.length ? { groups } : {}),
-    quantityParameter: stringValue(raw.quantity_parameter) || null
+    quantityParameter
   };
 }
 
@@ -389,22 +458,276 @@ function normalizeCatalogParameter(value: unknown): NewApiCatalogParameter | nul
   return parameter;
 }
 
+function declaredParameterValues(parameter: NewApiCatalogParameter): unknown[] {
+  if (parameter.options?.length) return parameter.options;
+  if (Object.prototype.hasOwnProperty.call(parameter, 'fixed')) return [parameter.fixed];
+  if (Object.prototype.hasOwnProperty.call(parameter, 'default')) return [parameter.default];
+  return [];
+}
+
+function isLegacyResolutionQualityParameter(parameter: NewApiCatalogParameter): boolean {
+  const name = parameter.name.toLowerCase();
+  const path = parameter.path.toLowerCase();
+  if (name !== 'quality' && path !== 'quality') return false;
+  const values = declaredParameterValues(parameter)
+    .map(value => String(value).trim().toLowerCase())
+    .filter(Boolean);
+  return values.length > 0 && values.every(value => IMAGE_RESOLUTION_VALUES.has(value));
+}
+
+function normalizeLegacyResolutionParameters(
+  parameters: NewApiCatalogParameter[]
+): NewApiCatalogParameter[] {
+  const normalized: NewApiCatalogParameter[] = [];
+  for (const parameter of parameters) {
+    const next = isLegacyResolutionQualityParameter(parameter)
+      ? { ...parameter, name: 'resolution', path: 'resolution', label: '分辨率' }
+      : parameter;
+    if (next.name === 'resolution' && normalized.some(item => item.name === 'resolution')) continue;
+    normalized.push(next);
+  }
+  return normalized;
+}
+
+function isBananaUpstreamModel(upstreamModel: string): boolean {
+  return /^(?:nano[-_]?banana|banana|lingtu)(?:[-_]|$)/i.test(upstreamModel.trim());
+}
+
+function ensureBananaReferenceCapability(
+  parameters: NewApiCatalogParameter[],
+  upstreamModel: string,
+  family?: PublicImageFamily | null
+): NewApiCatalogParameter[] {
+  if (family !== 'banana' && !isBananaUpstreamModel(upstreamModel)) return parameters;
+  const imagesIndex = parameters.findIndex(parameter => (
+    parameter.name.toLowerCase() === 'images' || parameter.path.toLowerCase() === 'images'
+  ));
+  if (imagesIndex >= 0) {
+    return parameters.map((parameter, index) => index === imagesIndex
+      ? { ...parameter, max_items: NEWAPI_BANANA_IMAGE_REF_LIMIT }
+      : parameter);
+  }
+  return [
+    ...parameters,
+    {
+      name: 'images',
+      path: 'images',
+      label: '参考图',
+      type: 'array',
+      required: false,
+      max_items: NEWAPI_BANANA_IMAGE_REF_LIMIT,
+      items: { type: 'string', format: 'uri-or-data-image' }
+    }
+  ];
+}
+
+function isImage2ExtModel(upstreamModel: string): boolean {
+  return upstreamModel.trim().toLowerCase() === 'gpt-image-2-ext';
+}
+
+function isImage2K4KModel(upstreamModel: string): boolean {
+  return upstreamModel.trim().toLowerCase() === 'image2k4k';
+}
+
+function isImage2Fixed4KModel(upstreamModel: string): boolean {
+  return new Set([
+    'image2-4k-fast',
+    'gpt-image-2-4k-fast',
+    'gpt-image-2-4k-adobe'
+  ]).has(upstreamModel.trim().toLowerCase());
+}
+
+function qualityParameterIndex(parameters: NewApiCatalogParameter[]): number {
+  return parameters.findIndex(parameter => (
+    parameter.name.toLowerCase() === 'quality' || parameter.path.toLowerCase() === 'quality'
+  ));
+}
+
+function withFixedImageQuality(
+  parameters: NewApiCatalogParameter[],
+  quality: 'low' | 'standard'
+): NewApiCatalogParameter[] {
+  const index = qualityParameterIndex(parameters);
+  const fixed: NewApiCatalogParameter = {
+    name: 'quality',
+    path: 'quality',
+    label: '质量',
+    type: 'string',
+    required: false,
+    fixed: quality
+  };
+  return index < 0
+    ? [...parameters, fixed]
+    : parameters.map((parameter, parameterIndex) => parameterIndex === index ? fixed : parameter);
+}
+
+function normalizeImageQualityContract(
+  parameters: NewApiCatalogParameter[],
+  upstreamModel: string,
+  family?: PublicImageFamily | null
+): NewApiCatalogParameter[] {
+  if (isImage2ExtModel(upstreamModel)) {
+    return parameters.filter((_, index) => index !== qualityParameterIndex(parameters));
+  }
+  if (isImage2K4KModel(upstreamModel)) return withFixedImageQuality(parameters, 'low');
+  if (isImage2Fixed4KModel(upstreamModel)) return withFixedImageQuality(parameters, 'standard');
+  if (family === 'banana' || isBananaUpstreamModel(upstreamModel)) {
+    const index = qualityParameterIndex(parameters);
+    const selectable: NewApiCatalogParameter = {
+      name: 'quality',
+      path: 'quality',
+      label: '质量',
+      type: 'string',
+      required: false,
+      default: 'medium',
+      options: ['low', 'medium', 'high']
+    };
+    return index < 0
+      ? [...parameters, selectable]
+      : parameters.map((parameter, parameterIndex) => parameterIndex === index ? selectable : parameter);
+  }
+  return parameters;
+}
+
+function normalizeImageCatalogParameters(
+  parameters: NewApiCatalogParameter[],
+  upstreamModel: string,
+  family?: PublicImageFamily | null
+): NewApiCatalogParameter[] {
+  return normalizeImageQualityContract(
+    ensureBananaReferenceCapability(
+      normalizeLegacyResolutionParameters(parameters),
+      upstreamModel,
+      family
+    ),
+    upstreamModel,
+    family
+  );
+}
+
 function resolutionOptions(
   parameters: NewApiCatalogParameter[],
   upstreamModel = ''
 ): ('1k' | '2k' | '4k')[] {
-  const parameter = parameters.find((item) => item.name === 'resolution' || item.name === 'quality');
-  const values = parameter?.options?.length
-    ? parameter.options
-    : parameter && 'fixed' in parameter
-      ? [parameter.fixed]
-      : [];
+  const parameter = parameters.find((item) => item.name === 'resolution' || item.path === 'resolution');
+  const values = parameter ? declaredParameterValues(parameter) : [];
   const explicit = values
     .map((value) => stringValue(value).toLowerCase())
     .filter((value): value is '1k' | '2k' | '4k' => value === '1k' || value === '2k' || value === '4k');
   if (explicit.length) return [...new Set(explicit)];
   const inferred = String(upstreamModel).toLowerCase().match(/(?:^|[-_])(1k|2k|4k)(?:[-_]|$)/)?.[1];
   return inferred === '1k' || inferred === '2k' || inferred === '4k' ? [inferred] : [];
+}
+
+type PublicImageFamily = Extract<ImageModelUiFamily, 'gim2' | 'banana'>;
+
+function publicTagTokens(value: unknown): Set<string> {
+  const tags = Array.isArray(value) ? value : stringValue(value).split(',');
+  return new Set(tags.map(tag => stringValue(tag).toLowerCase()).filter(Boolean));
+}
+
+function inferPublicImageFamily(
+  item: Record<string, unknown>,
+  upstreamModel: string,
+  parameters: NewApiCatalogParameter[]
+): PublicImageFamily | null {
+  const legacyFamily = stringValue(item.family).toLowerCase();
+  if (legacyFamily === 'gim2' || legacyFamily === 'banana') return legacyFamily;
+  if (legacyFamily === 'gim2-chat' && upstreamModel === 'gpt-image-2-chat') return 'gim2';
+
+  const declared = item.public && typeof item.public === 'object'
+    ? item.public as Record<string, unknown>
+    : null;
+  const modelParameter = parameters.find(parameter => parameter.name === 'model' || parameter.path === 'model');
+  const identities = [
+    upstreamModel,
+    stringValue(declared?.id),
+    stringValue(modelParameter?.fixed)
+  ].map(value => value.toLowerCase()).filter(Boolean);
+  const tags = publicTagTokens(item.tags);
+  const labels = [
+    stringValue(item.label),
+    stringValue(declared?.label)
+  ].filter(Boolean);
+
+  if (
+    tags.has('image2')
+    || tags.has('gim2')
+    || identities.some(value => /^(?:gpt[-_]?image[-_]?2|image2)(?:[-_]|$)/i.test(value))
+    || labels.some(value => /(?:\b(?:gpt\s*image\s*2|image\s*2)\b|全能模型2)/i.test(value))
+  ) {
+    return 'gim2';
+  }
+  if (
+    tags.has('banana')
+    || tags.has('nano-banana')
+    || identities.some(value => /^(?:nano[-_]?banana|banana|lingtu)(?:[-_]|$)/i.test(value))
+    || labels.some(value => /(?:\b(?:nano\s*banana|banana)\b|香蕉)/i.test(value))
+  ) {
+    return 'banana';
+  }
+  return null;
+}
+
+function fixedQualityLowFromPublicParameters(parameters: NewApiCatalogParameter[]): boolean {
+  return parameters.some(parameter => {
+    if (parameter.name.toLowerCase() !== 'quality' && parameter.path.toLowerCase() !== 'quality') return false;
+    if (stringValue(parameter.fixed).toLowerCase() === 'low') return true;
+    const options = (parameter.options || []).map(option => stringValue(option).toLowerCase()).filter(Boolean);
+    return options.length === 1 && options[0] === 'low';
+  });
+}
+
+function ensureImage2Ext1kResolution(
+  parameters: NewApiCatalogParameter[],
+  upstreamModel: string
+): NewApiCatalogParameter[] {
+  if (upstreamModel.toLowerCase() !== 'gpt-image-2-ext') return parameters;
+  return parameters.map(parameter => {
+    const isResolutionParameter = parameter.name.toLowerCase() === 'quality'
+      || parameter.name.toLowerCase() === 'resolution'
+      || parameter.path.toLowerCase() === 'quality'
+      || parameter.path.toLowerCase() === 'resolution';
+    if (!isResolutionParameter || !Array.isArray(parameter.options)) return parameter;
+    const options = parameter.options.map(value => String(value).toLowerCase());
+    if (!options.includes('2k') && !options.includes('4k')) return parameter;
+    if (options.includes('1k')) return parameter;
+    return { ...parameter, options: ['1k', ...parameter.options] };
+  });
+}
+
+function catalogModelsWithKnownCapabilities(payload: Record<string, unknown>): unknown[] {
+  const models = Array.isArray(payload.models) ? [...payload.models] : [];
+  const hasFreeImage = models.some(raw => (
+    raw && typeof raw === 'object' && stringValue((raw as Record<string, unknown>).id) === 'gpt-image-2-free'
+  ));
+  const freeImageAdvertised = (Array.isArray(payload.unclassified_models) ? payload.unclassified_models : [])
+    .some(raw => raw && typeof raw === 'object'
+      && stringValue((raw as Record<string, unknown>).id) === 'gpt-image-2-free');
+  if (!hasFreeImage && freeImageAdvertised) {
+    models.push({
+      id: 'gpt-image-2-free',
+      label: 'GPT Image 2 Free',
+      description: '免费生图模型，固定 1K。',
+      modality: 'image',
+      family: 'gim2',
+      operation: 'generate',
+      order: 19,
+      selectable: true,
+      tags: 'image,openai,image2,free,1k,ratios',
+      public: FALLBACK_PUBLIC_PRESENTATION['gpt-image-2-free'],
+      integrations: { prompt_hub: { id: 'image2-free', fixed_quality_low: false } },
+      parameters: [
+        { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: 'gpt-image-2-free' },
+        { name: 'prompt', path: 'prompt', label: '提示词', type: 'string', required: true },
+        { name: 'resolution', path: 'resolution', label: '分辨率', type: 'string', required: false, fixed: '1k' },
+        { name: 'size', path: 'size', label: '画面比例', type: 'string', required: false, default: 'auto', options: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
+        { name: 'n', path: 'n', label: '生成张数', type: 'integer', required: false, fixed: 1 }
+      ],
+      pricing: { mode: 'fixed', unit: 'image', yuan: 0, credits: 0 }
+    });
+  }
+  return models;
 }
 
 function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
@@ -414,19 +737,28 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
   const models: NewApiCatalogModel[] = [];
   const rules: NewApiPricingRule[] = [];
   const imageCatalogEntries: ImageModelCatalogEntry[] = [];
-  for (const raw of p.models) {
+  for (const raw of catalogModelsWithKnownCapabilities(p)) {
     if (!raw || typeof raw !== 'object') continue;
     const item = raw as Record<string, unknown>;
     const upstreamModel = stringValue(item.id);
     const modality = stringValue(item.modality) as NewApiModelModality;
-    const familyValue = stringValue(item.family);
     if (!upstreamModel || item.selectable !== true || !['text', 'image', 'video', 'audio'].includes(modality)) continue;
     const pricing = normalizeCatalogPricing(item.pricing, modality === 'image');
     if (!pricing) continue;
-    const parameters = (Array.isArray(item.parameters) ? item.parameters : [])
+    const rawParameters = (Array.isArray(item.parameters) ? item.parameters : [])
       .map(normalizeCatalogParameter)
       .filter((parameter): parameter is NewApiCatalogParameter => parameter != null);
-    const presentation = publicPresentation(item, upstreamModel, familyValue);
+    const imageFamily = modality === 'image'
+      ? inferPublicImageFamily(item, upstreamModel, rawParameters)
+      : null;
+    const parameters = ensureImage2Ext1kResolution(
+      modality === 'image'
+        ? normalizeImageCatalogParameters(rawParameters, upstreamModel, imageFamily)
+        : rawParameters,
+      upstreamModel
+    );
+    const presentation = publicPresentation(item, upstreamModel, imageFamily || stringValue(item.family));
+    if (!presentation) continue;
     const publicParameters = parameters.map(parameter =>
       parameter.name === 'model'
         ? { ...parameter, fixed: presentation.id }
@@ -441,13 +773,16 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
       operation: stringValue(item.operation) === 'chat' ? 'chat' : 'generate',
       order: numberValue(item.order) ?? 100,
       endpoint: publicEndpoint(modality),
-      parameters: publicParameters,
+      parameters: projectPublicCatalogParameters(publicParameters, presentation.id),
       pricing
     });
 
-    const isChatImage = modality === 'image' && familyValue === 'gim2-chat' && upstreamModel === 'gpt-image-2-chat';
+    const isChatImage = modality === 'image'
+      && upstreamModel === 'gpt-image-2-chat'
+      && (stringValue(item.operation) === 'chat' || pricing.unit === 'request');
     if (
       modality !== 'image'
+      || !imageFamily
       || (pricing.unit !== 'image' && !isChatImage)
       || pricing.credits == null
       || pricing.credits < 0
@@ -461,7 +796,7 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
     if (!resolutions.length) continue;
     const creditsByResolution: Partial<Record<'1k' | '2k' | '4k', number>> = {};
     for (const tier of pricing.tiers || []) {
-      const resolution = stringValue(tier.when.quality ?? tier.when.resolution).toLowerCase();
+      const resolution = stringValue(tier.when.resolution ?? tier.when.quality).toLowerCase();
       if ((resolution === '1k' || resolution === '2k' || resolution === '4k') && tier.credits >= 0) {
         creditsByResolution[resolution] = tier.credits;
       }
@@ -472,8 +807,7 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
     const promptHub = integration && typeof integration === 'object'
       ? integration as Record<string, unknown>
       : {};
-    if (familyValue !== 'gim2' && familyValue !== 'banana' && !isChatImage) continue;
-    const family = (isChatImage ? 'gim2' : familyValue) as ImageModelUiFamily;
+    const family = imageFamily;
     const publicId = presentation.id || stringValue(promptHub.id) || `newapi-${upstreamModel}`;
     const description = presentation.description || null;
     const label = presentation.label;
@@ -482,7 +816,7 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
       credits: pricing.credits,
       ...(Object.keys(creditsByResolution).length ? { creditsByResolution } : {}),
       description,
-      tags: stringValue(item.tags).toLowerCase(),
+      tags: sanitizePublicModelTags(item.tags),
       label,
       modality: 'image',
       parameters
@@ -501,13 +835,15 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
       defaultCredits: pricing.credits,
       pricingByResolution: Object.keys(creditsByResolution).length > 0,
       ...(Object.keys(creditsByResolution).length ? { defaultCreditsByResolution: creditsByResolution } : {}),
-      fixedQualityLow: booleanValue(promptHub.fixed_quality_low),
+      fixedQualityLow: booleanValue(promptHub.fixed_quality_low)
+        || fixedQualityLowFromPublicParameters(parameters),
       sortOrder: numberValue(item.order) ?? 100
     });
   }
   return {
     available: true,
     stale: booleanValue(p.stale),
+    fetchedAt: stringValue(p.fetched_at),
     version: stringValue(p.version),
     pricingVersion: stringValue(p.pricing_version),
     models: models.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)),
@@ -518,14 +854,27 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
 
 export async function fetchNewApiModelCatalog(
   baseUrl?: string,
-  opts?: { force?: boolean; requireFresh?: boolean }
+  opts?: { force?: boolean; requireFresh?: boolean; maxAgeMs?: number }
 ): Promise<NewApiCatalogSnapshot> {
   const base = apiBase(baseUrl);
   const now = Date.now();
-  if (!opts?.force && catalogCache && catalogCache.base === base && now - catalogCache.at < PRICING_CACHE_MS) {
-    return catalogCache.snapshot;
+  const requestedMaxAgeMs = Number.isFinite(opts?.maxAgeMs)
+    ? Math.max(0, Number(opts?.maxAgeMs))
+    : null;
+  if (!opts?.force && catalogCache && catalogCache.base === base) {
+    const cacheMs = catalogCache.snapshot.stale
+      ? STALE_CATALOG_RETRY_MS
+      : PRICING_CACHE_MS;
+    const cachedAge = now - catalogCache.at;
+    const sourceAge = newApiCatalogAgeMs(catalogCache.snapshot, now);
+    const withinRequestedAge = requestedMaxAgeMs == null
+      || Math.max(cachedAge, sourceAge) <= requestedMaxAgeMs;
+    if (cachedAge < cacheMs && withinRequestedAge) return catalogCache.snapshot;
   }
-  if (!opts?.force && catalogInflight?.base === base) return catalogInflight.promise;
+  // A force refresh is still a fresh network request. Share it with callers
+  // arriving while that request is in flight instead of stampeding the
+  // catalog service with parallel refresh=1 requests.
+  if (catalogInflight?.base === base) return catalogInflight.promise;
 
   const promise = fetch(catalogUrl(base, opts?.force === true), {
       headers: { Accept: 'application/json' },
@@ -535,13 +884,30 @@ export async function fetchNewApiModelCatalog(
         if (!res.ok) throw new Error(`model catalog ${res.status}`);
         const snapshot = parseCatalogPayload(await res.json());
         if (!snapshot) throw new Error('invalid model catalog payload');
+        if (!snapshot.fetchedAt && !snapshot.stale) {
+          snapshot.fetchedAt = new Date().toISOString();
+        }
+        if (catalogCache?.base === base && losesReviewedImagePricingCoverage(catalogCache.snapshot, snapshot)) {
+          throw new Error('model catalog image pricing coverage regressed');
+        }
         catalogCache = { base, at: Date.now(), snapshot };
         return snapshot;
       })
       .catch((e) => {
         console.warn('[newapi] model catalog fetch failed', e);
-        if (opts?.requireFresh) throw e;
-        if (catalogCache?.base === base) return { ...catalogCache.snapshot, stale: true };
+        const cachedAge = catalogCache?.base === base ? Date.now() - catalogCache.at : Infinity;
+        const fallbackMaxAgeMs = requestedMaxAgeMs
+          ?? (opts?.requireFresh ? PRICING_CACHE_MS : null);
+        const sourceAge = catalogCache?.base === base
+          ? newApiCatalogAgeMs(catalogCache.snapshot)
+          : Infinity;
+        if (
+          catalogCache?.base === base
+          && (fallbackMaxAgeMs == null || Math.max(cachedAge, sourceAge) <= fallbackMaxAgeMs)
+        ) {
+          return { ...catalogCache.snapshot, stale: true };
+        }
+        if (opts?.requireFresh || requestedMaxAgeMs != null) throw e;
         return {
           available: false,
           stale: true,
@@ -557,6 +923,33 @@ export async function fetchNewApiModelCatalog(
       });
   catalogInflight = { base, promise };
   return promise;
+}
+
+export function newApiCatalogAgeMs(
+  snapshot: Pick<NewApiCatalogSnapshot, 'fetchedAt'>,
+  now = Date.now()
+): number {
+  const fetchedAt = Date.parse(String(snapshot.fetchedAt || ''));
+  if (!Number.isFinite(fetchedAt)) return Infinity;
+  return Math.max(0, now - fetchedAt);
+}
+
+export async function fetchTrustedNewApiPricingCatalog(
+  baseUrl?: string,
+  maxAgeMs = NEWAPI_PRICING_CATALOG_MAX_AGE_MS
+): Promise<NewApiCatalogSnapshot> {
+  const trustedMaxAgeMs = Math.max(0, Number(maxAgeMs) || 0);
+  const snapshot = await fetchNewApiModelCatalog(baseUrl, {
+    requireFresh: true,
+    maxAgeMs: trustedMaxAgeMs
+  });
+  if (!snapshot.available || !snapshot.rules.length || !snapshot.imageCatalogEntries.length) {
+    throw new Error('image pricing catalog is incomplete');
+  }
+  if (newApiCatalogAgeMs(snapshot) > trustedMaxAgeMs) {
+    throw new Error('image pricing catalog is too old');
+  }
+  return snapshot;
 }
 
 export async function fetchNewApiAdminRoutes(
@@ -627,11 +1020,18 @@ export async function fetchNewApiAdminRoutes(
     adminRouteCache = { base, at: Date.now(), snapshot };
     return snapshot;
   } catch (error) {
+    const message = String((error as Error).message || error).slice(0, 160);
+    if (adminRouteCache?.base === base) {
+      return {
+        ...adminRouteCache.snapshot,
+        error: message
+      };
+    }
     return {
       available: false,
       fetchedAt: '',
       routes: {},
-      error: String((error as Error).message || error).slice(0, 160)
+      error: message
     };
   }
 }
@@ -642,23 +1042,40 @@ export async function fetchNewApiPricingRules(baseUrl?: string, opts?: { force?:
 
 function isPublicCatalogModel(snapshot: NewApiCatalogSnapshot, model: NewApiCatalogModel): boolean {
   if (model.modality !== 'image') return true;
-  return snapshot.imageCatalogEntries.some(entry => entry.upstream === model.upstreamModel);
+  return snapshot.imageCatalogEntries.some(entry => (
+    entry.upstream === model.upstreamModel && isPublicNewApiImageEntry(entry)
+  ));
 }
 
 export function publicNewApiCatalogModels(snapshot: NewApiCatalogSnapshot) {
   return snapshot.models
-    .filter(model => isPublicCatalogModel(snapshot, model))
-    .map(({ upstreamModel: _upstreamModel, ...model }) => ({
-      ...model,
-      pricing: publicCatalogPricing(model.pricing)
-    }));
+    .filter(model => (
+      isPublicCatalogModel(snapshot, model)
+      && (model.modality !== 'image' || !snapshot.stale)
+    ))
+    .map(model => projectPublicCatalogModel(model))
+    .filter((model): model is NonNullable<typeof model> => model != null);
 }
 
 const SCOPED_MODEL_PATTERN = /^_sf-([A-Za-z0-9_-]+)::(.+)$/;
 
-function publicCatalogPricing(pricing: NewApiCatalogPricing): NewApiCatalogPricing {
-  const { groups: _groups, ...publicPricing } = pricing;
-  return publicPricing;
+function publicCatalogPricing(pricing: NewApiCatalogPricing) {
+  return projectPublicCatalogPricing(pricing as unknown as Record<string, unknown>);
+}
+
+function projectPublicCatalogModel(model: NewApiCatalogModel) {
+  const id = sanitizePublicModelId(model.id);
+  if (!id) return null;
+  const label = sanitizePublicModelLabel(model.label, id);
+  const { upstreamModel: _upstreamModel, ...publicModel } = model;
+  return {
+    ...publicModel,
+    id,
+    label,
+    description: sanitizePublicModelDescription(model.description),
+    parameters: projectPublicCatalogParameters(model.parameters, id),
+    pricing: publicCatalogPricing(model.pricing)
+  };
 }
 
 function pricingGroupScore(group: NewApiCatalogPricingGroup): number {
@@ -673,7 +1090,7 @@ function pricingForRoute(pricing: NewApiCatalogPricing, route: NewApiAdminRoute)
   const group = (pricing.groups || [])
     .filter(candidate => routeGroups.has(candidate.id))
     .sort((left, right) => pricingGroupScore(left) - pricingGroupScore(right) || left.id.localeCompare(right.id))[0];
-  if (!group) return publicCatalogPricing(pricing);
+  if (!group) return pricing;
   if (pricing.mode === 'token') {
     const inputRatio = pricing.inputMultiplier && group.inputMultiplier != null
       ? group.inputMultiplier / pricing.inputMultiplier
@@ -682,7 +1099,7 @@ function pricingForRoute(pricing: NewApiCatalogPricing, route: NewApiAdminRoute)
       ? group.outputMultiplier / pricing.outputMultiplier
       : 1;
     return {
-      ...publicCatalogPricing(pricing),
+      ...pricing,
       inputMultiplier: group.inputMultiplier ?? pricing.inputMultiplier,
       outputMultiplier: group.outputMultiplier ?? pricing.outputMultiplier,
       completionRatio: group.completionRatio ?? pricing.completionRatio,
@@ -693,7 +1110,7 @@ function pricingForRoute(pricing: NewApiCatalogPricing, route: NewApiAdminRoute)
     };
   }
   return {
-    ...publicCatalogPricing(pricing),
+    ...pricing,
     yuan: group.yuan ?? pricing.yuan,
     credits: group.credits ?? pricing.credits,
     tiers: group.tiers?.length ? group.tiers : pricing.tiers
@@ -709,11 +1126,21 @@ async function scopedRouteToken(upstreamModel: string, channelId: number): Promi
 }
 
 function activeModelRoutes(routeSnapshot: NewApiAdminRouteSnapshot, upstreamModel: string) {
+  const requestedModel = String(upstreamModel || '').trim();
+  if (!requestedModel) return [];
+  const target = normalizeImageModelId(requestedModel);
   const unique = new Map<number, NewApiAdminRoute>();
-  for (const route of routeSnapshot.routes[upstreamModel] || []) {
-    if (route.enabled && route.channelId > 0 && !unique.has(route.channelId)) unique.set(route.channelId, route);
+  for (const [routeModel, routes] of Object.entries(routeSnapshot.routes)) {
+    if (normalizeImageModelId(routeModel) !== target) continue;
+    for (const route of routes) {
+      if (route.enabled && route.channelId > 0 && !unique.has(route.channelId)) unique.set(route.channelId, route);
+    }
   }
   return [...unique.values()];
+}
+
+export function newApiHasActiveRoute(routeSnapshot: NewApiAdminRouteSnapshot, upstreamModel: string): boolean {
+  return activeModelRoutes(routeSnapshot, upstreamModel).length > 0;
 }
 
 function routeLabel(index: number) {
@@ -725,27 +1152,18 @@ export async function publicNewApiRoutedCatalogModels(
   routeSnapshot: NewApiAdminRouteSnapshot
 ) {
   const models = snapshot.models.filter(model => isPublicCatalogModel(snapshot, model));
-  const result: Array<Omit<NewApiCatalogModel, 'upstreamModel'>> = [];
+  const result: NonNullable<ReturnType<typeof projectPublicCatalogModel>>[] = [];
   for (const model of models) {
-    const { upstreamModel: _upstreamModel, ...publicModel } = model;
-    const routes = model.modality === 'image' ? [] : activeModelRoutes(routeSnapshot, model.upstreamModel);
-    if (routes.length <= 1) {
-      result.push({ ...publicModel, pricing: publicCatalogPricing(model.pricing) });
+    if (
+      (model.modality === 'image' || model.modality === 'video')
+      && !newApiHasActiveRoute(routeSnapshot, model.upstreamModel)
+    ) {
       continue;
     }
-    for (const [index, route] of routes.entries()) {
-      const id = `_sf-${await scopedRouteToken(model.upstreamModel, route.channelId)}::${model.id}`;
-      result.push({
-        ...publicModel,
-        id,
-        label: `${model.label} · ${routeLabel(index)}`,
-        order: model.order + index / 100,
-        parameters: model.parameters.map(parameter => parameter.name === 'model' ? { ...parameter, fixed: id } : parameter),
-        pricing: pricingForRoute(model.pricing, route)
-      });
-    }
+    const publicModel = projectPublicCatalogModel(model);
+    if (publicModel) result.push(publicModel);
   }
-  return result.sort((left, right) => left.order - right.order || left.label.localeCompare(right.label));
+  return result.sort((left, right) => Number(left.order) - Number(right.order) || String(left.label).localeCompare(String(right.label)));
 }
 
 export async function resolveNewApiRoutedCatalogModel(
@@ -959,19 +1377,23 @@ function extractAllNewApiImageUrls(payload: unknown): string[] {
 function legacyRequestBody(params: SubmitParams): Record<string, unknown> {
   const refs = params.refImageUrls?.length ? params.refImageUrls : undefined;
   const model = params.upstreamModel.trim();
-  const resolutionTierModel = model === 'gpt-image-2-ext' || model === 'image2k4k';
+  const quality = isImage2ExtModel(model)
+    ? undefined
+    : isImage2K4KModel(model)
+      ? 'low'
+      : isImage2Fixed4KModel(model)
+        ? 'standard'
+        : params.fixedQualityLow
+          ? 'low'
+          : mapQualityForGptImage(params.quality);
   return {
     model,
     prompt: params.prompt,
     n: Math.max(1, Math.floor(params.count || 1)),
     size: params.size || '1:1',
     resolution: params.resolution,
-    quality: resolutionTierModel
-      ? params.resolution
-      : params.fixedQualityLow
-        ? 'low'
-        : mapQualityForGptImage(params.quality),
-    ...(refs?.length ? { images: refs.slice(0, 14) } : {})
+    ...(quality ? { quality } : {}),
+    ...(refs?.length ? { images: refs.slice(0, NEWAPI_BANANA_IMAGE_REF_LIMIT) } : {})
   };
 }
 
@@ -1009,8 +1431,13 @@ function setRequestPath(target: Record<string, unknown>, path: string, value: un
 }
 
 export function buildNewApiImageRequestBody(params: SubmitParams): Record<string, unknown> {
-  const parameters = params.catalogParameters?.filter(parameter => parameter?.name && parameter.path) || [];
-  if (!parameters.length) return legacyRequestBody(params);
+  const declaredParameters = params.catalogParameters
+    ?.filter(parameter => parameter?.name && parameter.path) || [];
+  if (!declaredParameters.length) return legacyRequestBody(params);
+  const parameters = normalizeImageCatalogParameters(
+    declaredParameters,
+    params.upstreamModel
+  );
   const body: Record<string, unknown> = {};
   const byName = new Map(parameters.map(parameter => [parameter.name, parameter]));
   const set = (name: string, requested: unknown, fallback?: unknown) => {
@@ -1026,22 +1453,20 @@ export function buildNewApiImageRequestBody(params: SubmitParams): Record<string
 
   const qualityParameter = byName.get('quality');
   if (qualityParameter) {
-    const resolutionQuality = (qualityParameter.options || [])
-      .map(value => String(value).toLowerCase())
-      .some(value => value === '1k' || value === '2k' || value === '4k');
-    const quality = resolutionQuality
-      ? params.resolution
-      : params.fixedQualityLow
-        ? 'low'
-        : mapQualityForGptImage(params.quality);
+    const quality = params.fixedQualityLow
+      ? 'low'
+      : mapQualityForGptImage(params.quality);
     set('quality', quality);
   }
 
-  const nParameter = byName.get('n');
-  if (nParameter) {
-    const raw = Number(declaredValue(nParameter, params.count, 1));
-    const bounded = Math.min(nParameter.max ?? 1, Math.max(nParameter.min ?? 1, Number.isFinite(raw) ? raw : 1));
-    setRequestPath(body, nParameter.path, Math.max(1, Math.floor(bounded)));
+  const countParameter = byName.get('n') ?? byName.get('count');
+  if (countParameter) {
+    const raw = Number(declaredValue(countParameter, params.count, 1));
+    const bounded = Math.min(
+      countParameter.max ?? 1,
+      Math.max(countParameter.min ?? 1, Number.isFinite(raw) ? raw : 1)
+    );
+    setRequestPath(body, countParameter.path, Math.max(1, Math.floor(bounded)));
   }
 
   const refs = (params.refImageUrls || []).filter(Boolean);
@@ -1102,35 +1527,58 @@ export async function submitNewApiImageJob(
         stream: false
       }
     : buildNewApiImageRequestBody(params);
-  let res: Response | null = null;
-  let json: unknown = {};
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  let res: Response;
+  try {
     res = await fetch(`${apiBase(baseUrl)}${endpoint}`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...(params.clientRequestId
+          ? {
+              'Idempotency-Key': params.clientRequestId,
+              'X-Client-Request-Id': params.clientRequestId
+            }
+          : {})
       },
       body: JSON.stringify(body)
     });
-
-    try {
-      json = await res.json();
-    } catch {
-      json = {};
-    }
-    const message = pickErrorMessage(json, res.status);
-    if (res.ok || !/excessive system load/i.test(message) || attempt > 0) break;
-    await new Promise(resolve => setTimeout(resolve, 5000));
+  } catch {
+    // A transport failure does not prove the paid request failed. Never retry it here.
+    throw new ApiError(502, 'UPSTREAM_OUTCOME_UNKNOWN', 'upstream_outcome_unknown');
   }
 
-  if (!res?.ok) {
-    const status = res?.status || 502;
+  const headerRequestId =
+    stringValue(res.headers.get('x-request-id'))
+    || stringValue(res.headers.get('x-oneapi-request-id'))
+    || null;
+  if (headerRequestId && params.onRequestId) {
+    try {
+      await params.onRequestId(headerRequestId);
+    } catch (error) {
+      console.warn('[newapi-image] request id persistence failed', error);
+    }
+  }
+
+  let json: unknown = {};
+  let parsed = false;
+  try {
+    json = await res.json();
+    parsed = true;
+  } catch {
+    json = {};
+  }
+
+  if (!res.ok) {
+    const status = res.status || 502;
     throw new ApiError(
       status >= 500 ? 502 : status,
       'UPSTREAM_ERROR',
       pickErrorMessage(json, status)
     );
+  }
+  if (!parsed) {
+    throw new ApiError(502, 'UPSTREAM_OUTCOME_UNKNOWN', 'upstream_response_unreadable');
   }
 
   const imageUrls = isChatImage ? extractChatImageUrls(json) : extractAllNewApiImageUrls(json);
@@ -1138,14 +1586,20 @@ export async function submitNewApiImageJob(
   const root = json && typeof json === 'object' ? json as Record<string, unknown> : {};
   const requestId =
     stringValue(root.request_id || root.requestId)
-    || stringValue(res.headers.get('x-request-id'))
-    || stringValue(res.headers.get('x-oneapi-request-id'))
+    || headerRequestId
     || null;
+  if (requestId && requestId !== headerRequestId && params.onRequestId) {
+    try {
+      await params.onRequestId(requestId);
+    } catch (error) {
+      console.warn('[newapi-image] response request id persistence failed', error);
+    }
+  }
   if (taskId) return { taskId, imageUrl: imageUrls[0] || null, imageUrls, requestId };
   if (imageUrls.length) {
     return { taskId: `newapi-${crypto.randomUUID()}`, imageUrl: imageUrls[0], imageUrls, requestId };
   }
-  throw new ApiError(502, 'UPSTREAM_ERROR', 'New API 未返回 task_id 或图片');
+  throw new ApiError(502, 'UPSTREAM_OUTCOME_UNKNOWN', 'upstream_response_missing_result');
 }
 
 function isContentViolationMessage(msg: string | null | undefined): boolean {

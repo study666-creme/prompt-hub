@@ -30,6 +30,7 @@ import { type DebitSplit, deductUserCredits, refundUserCredits } from './members
 export type JobRow = {
   id: string;
   user_id: string;
+  client_request_id?: string | null;
   credits_charged: number;
   status: string;
   prompt?: string | null;
@@ -167,8 +168,11 @@ export function slowProviderProgressNote(
   }
   if (provider === 'grsai' || provider === 'apimart' || provider === 'newapi') {
     const st = String(meta.fastSubmitState || '');
-    if (st === 'queued') return '已扣积分，正在提交…';
-    if (st === 'running') return '提交中，请稍候…';
+    if (st === 'queued') return '已加入生成队列…';
+    if (st === 'running') return '生成请求已发出，正在等待结果…';
+    if (st === 'archiving') return '图片已生成，正在保存到作品…';
+    if (st === 'recovery_required') return '生成已提交，正在恢复结果，请勿重复生成…';
+    if (st === 'outcome_unknown') return '生成结果暂未确认，正在核对，请勿重复生成…';
     if (st === 'done' && !meta.upstreamTaskId) return '已响应，正在同步…';
   }
   return null;
@@ -211,6 +215,38 @@ export async function pollAndUpdateJob(
       imageUrl: null,
       errorMessage: msg,
       refunded: true
+    };
+  }
+
+  const hasPendingFastProviderResult =
+    (provider === 'grsai' || provider === 'apimart' || provider === 'newapi')
+    && job.status === 'processing'
+    && Array.isArray(meta.upstreamResultUrls)
+    && meta.upstreamResultUrls.some((value) => typeof value === 'string' && !!value);
+  if (hasPendingFastProviderResult) {
+    try {
+      const { recoverFastProviderResultArchive } = await import('./fast-provider-submit');
+      const recovered = await recoverFastProviderResultArchive(admin, userId, job, env);
+      if (recovered) {
+        return {
+          status: 'completed',
+          imageUrl: recovered.imageUrl,
+          errorMessage: null,
+          refunded: false,
+          ...(recovered.extraImageUrls?.length
+            ? { extraImageUrls: recovered.extraImageUrls }
+            : {})
+        };
+      }
+    } catch (e) {
+      console.warn('[generation] pending fast-provider archive recovery failed', job.id, e);
+    }
+    return {
+      status: 'processing',
+      imageUrl: null,
+      errorMessage: null,
+      refunded: false,
+      progressNote: slowProviderProgressNote(meta, provider)
     };
   }
 
@@ -646,7 +682,6 @@ export async function pollAndUpdateJob(
     && job.status === 'processing'
   ) {
     const st = String(meta.fastSubmitState || '');
-    const queuedMs = Date.now() - createdMs;
     if (st === 'failed' && meta.fastSubmitError) {
       return {
         status: 'failed',
@@ -655,15 +690,26 @@ export async function pollAndUpdateJob(
         refunded: !!meta.refunded
       };
     }
-    if (st === 'queued' || st === 'running') {
-      if (queuedMs > 6 * 60 * 1000) {
-        await finalizeFailedJob(admin, userId, job, 'upstream_submit_stale');
-        return {
-          status: 'failed',
-          imageUrl: null,
-          errorMessage: 'upstream_submit_stale',
-          refunded: true
-        };
+    if (
+      st === 'queued'
+      || st === 'running'
+      || st === 'archiving'
+      || st === 'recovery_required'
+      || st === 'outcome_unknown'
+    ) {
+      const hasRecoverableResult =
+        Array.isArray(meta.upstreamResultUrls)
+        && meta.upstreamResultUrls.some((value) => typeof value === 'string' && !!value);
+      if (
+        provider === 'newapi'
+        && env?.IMAGE_GENERATION_QUEUE
+        && (st === 'queued' || hasRecoverableResult)
+      ) {
+        scheduleBackgroundSubmit(
+          opts,
+          env.IMAGE_GENERATION_QUEUE.send({ jobId: job.id, userId }),
+          'newapi-queue'
+        );
       }
       if (st === 'queued') {
         const { processFastProviderPendingSubmit, fastSubmitParamsFromJob } = await import(
@@ -677,7 +723,8 @@ export async function pollAndUpdateJob(
             job,
             upstream,
             provider,
-            fastSubmitParamsFromJob(job)
+            fastSubmitParamsFromJob(job),
+            env
           ),
           provider
         );

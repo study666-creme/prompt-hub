@@ -1,73 +1,75 @@
 # 运营监控
 
-最后核对：2026-07-11
+最后核对：2026-07-28。本文的生成状态字段属于未部署的主树候选；生产上线后再按 `/health.buildSha` 确认生效。
 
-## 后台入口
+## 入口
 
-- 页面：`https://prompt-hubs.com/admin.html`
-- 位置：概览 → **运行监控**
+- 页面：`https://prompt-hubs.com/admin.html` → 概览 → 运行监控
 - 接口：`GET /api/admin/dashboard/monitoring?hours=24`
+- 发布身份：`GET https://api.prompt-hubs.com/health`
 
-## 卡片库巡检后台
+`/health` 必须返回 `ok`、`status`、`buildSha` 和支付配置摘要。正式发布的 `buildSha` 应是 40 位小写 Git SHA；`unversioned` 只允许本地开发出现。
 
-- 页面：`https://prompt-hubs.com/admin.html` → **卡片库**
-- 接口：
-  - `GET /api/admin/cards/summary`
-  - `GET /api/admin/cards?limit=20&offset=0&risk=all`
-  - `GET /api/admin/cards?limit=20&offset=0&risk=all&checkImages=1`
-- 定位：只读巡检云端 `user_data.data.cards`，帮助定位黑卡、灰卡、旧外链、路径串号、重复 ID 和空内容卡。
-- 性能：后端会为卡片索引做 20 秒短缓存，并复用并发扫描；后台“刷新”按钮会带 `refresh=1` 强制重建。
-- 安全边界：不会删除用户卡片或图片；“抽检本页图片”只检查当前分页里的 Storage/R2 图片是否真实存在。
+## 生成监控
 
-## 存储巡检
+### 图片
 
-- 位置：概览 → **存储用量** → **扫描存储**。
-- 后台首次打开不会自动遍历对象桶，避免无意义的 R2 列表请求。
-- `r2-first` / `r2` 扫描 Cloudflare R2，`supabase` 扫描 MemFire Storage。
-- 统计只读；不能用全桶对象字节反写 `profiles.storage_bytes`，因为桶内还包含缩略图和生成仓库对象。
-- 删除账号时会同时尝试清理 R2 与 MemFire Storage，避免留下不可归属对象。
+- 前端正常按秒 poll；cron 每 2 分钟兜底推进 submit、poll 和 archive。
+- 关注 `queued` 堆积、`running` / `outcome_unknown` 超过 1 小时、`refund_pending`、归档失败和图片 404。
+- 上游已完成但本地归档未完成时应继续给客户端临时图，不能重新生成。
 
-## 现在能看什么
+### 视频
 
-1. **Worker/API 错误**
-   - 近 24 小时 API 4xx / 5xx、状态码分布、热门接口。
-   - 5xx 和图片 404 会保留最近路径，便于定位是哪个接口炸。
+- 图片和视频队列必须分别查看，视频慢建单不能挤占图片 consumer。
+- `queued` 长时间堆积表示视频 queue binding、consumer 或 cron 异常。
+- `submitted` 且有 `upstreamTaskId` 的正常 processing 任务可以排队数百或数千秒，不应仅按生成时长判失败。
+- 带 `upstreamTaskId` 的任务进入 `result_uncertain` 后，后台必须只读 GET 同一个 NewAPI task ID。显式线路使用持久化 `routeChannelId`；普通公开视频依赖 NewAPI 持久任务中的原始 `ChannelId` 锁回提交渠道。不能重发生成 POST，也不能切换渠道重新查询或提交。
+- `result_uncertain` 持续 1 小时仍无法确认时应幂等进入 `refund_pending`，随后收敛为明确失败和 `refunded`；`running` / `outcome_unknown` 且没有可靠 task ID 也遵循一小时 SLA。
+- 每轮 cron 必须先 poll，再执行 timeout finalize。告警中若同时出现恢复成功和退款候选，先核对该顺序，避免刚成功的任务被提前退款。
+- task `not_found` 的 SLA 起点只记录第一次，重复轮询不能刷新。
+- `billingReconciliationState=pending` 表示已完成但时长差价退款待恢复；只接受明确 `billed_duration_seconds`。
 
-2. **图片 404**
-   - 覆盖 `/api/v1/media/*` 图片代理和 `/api/v1/generate/jobs/:jobId/image`。
-   - 404 精确记录；成功图片请求按 20% 抽样并折算，避免监控写 KV 拖慢图片加载。
+## 支付监控
 
-3. **生成失败率**
-   - 从 `generation_requests` 汇总近 24 小时任务数、成功、失败、生成中、卡住超过 30 分钟。
-   - 最近失败会展示 job、模型、provider、错误信息。
+- cron 同时运行 `monitorPendingPaymentOrders`，用于发现陈旧订单，不替代支付回调。
+- 查看 `payment_orders`、`payment_webhook_events` 与运营流水，区分 `pending`、`processing`、`paid`、`failed` 和 `refunded`。
+- Canvas 协作席位商品默认由 `CANVAS_COLLABORATION_SEAT_PRODUCT_ENABLED=0` 隐藏；数据库迁移和回调验收前不要开启。
 
-4. **Cloudflare 请求量**
-   - 后台展示的是 Worker 自计数近似值，来源为 KV `PROMPT_HUB_METRICS`。
-   - 正式账单、免费额度和 Pages 静态请求量仍以 Cloudflare 控制台 Analytics 为准。
+## 卡片库与存储巡检
 
-5. **轻量运营流水**
-   - 从 `credit_ledger`、`code_redemptions`、`payment_webhook_events` 读取近 24 小时积分消耗、退款、发放、兑换和支付 webhook 事件。
+- 卡片库：`GET /api/admin/cards/summary`、`GET /api/admin/cards?...`；`checkImages=1` 只抽检当前页。
+- 存储扫描按需触发且只读。不能用全桶对象字节反写 `profiles.storage_bytes`，桶中含缩略图和生成归档。
+- R2/Storage 删除前必须核对引用与备份；巡检不能自动删除用户卡片。
 
 ## Cloudflare 绑定
 
-Worker 配置：
+主树候选必须同时存在：
 
 ```toml
+[[r2_buckets]]
+binding = "CARD_IMAGES_R2"
+
 [[kv_namespaces]]
 binding = "PROMPT_HUB_METRICS"
-id = "37976970d22347fba80ca6c72238f6e7"
-preview_id = "c2602858d4bd40a4b1603de6d7b4af22"
+
+[[queues.producers]]
+binding = "IMAGE_GENERATION_QUEUE"
+queue = "prompt-hub-image-generation"
+
+[[queues.producers]]
+binding = "VIDEO_GENERATION_QUEUE"
+queue = "prompt-hub-video-generation"
+
+[triggers]
+crons = ["*/2 * * * *"]
 ```
 
-如果后台提示“Worker 自计数未启用”，检查：
+队列还必须分别配置 DLQ。实际 ID 和绑定以 `server/wrangler.toml` 与 Cloudflare Dashboard 为准，不从旧文档复制。
 
-1. `server/wrangler.toml` 是否包含上述 `kv_namespaces`。
-2. Worker 是否已重新部署：`cd server && npm run deploy`。
-3. Cloudflare → Workers & Pages → `prompt-hub-api` → Settings → Bindings 是否存在 `PROMPT_HUB_METRICS`。
+## 告警优先级
 
-## 注意
+1. **P0**：重复付费 POST、重复扣费、跨用户任务/媒体访问、支付回调重复结算。
+2. **P1**：队列持续堆积、退款槽无法清空、上游已完成但客户端长期拿不到结果、`/health` degraded。
+3. **P2**：归档重试、缩略图缺失、单个模型目录暂时不可用。
 
-- 监控只读业务数据，不会删除卡片、图片或生成记录。
-- KV 指标保留约 72 小时，后台默认展示 24 小时。
-- 图片成功请求是抽样近似；图片 404、API 5xx、生图失败来自精确路径或数据库记录。
-- 如果需要官方 Cloudflare Analytics API，可后续增加 `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID` 后做 GraphQL 查询；当前版本不要求新增密钥。
+处置时先保留任务和审计记录。不要通过重开 paid submit、删除失败记录或手工改余额来“清队列”。

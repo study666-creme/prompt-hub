@@ -5,5 +5,5 @@ if (-not (Test-Path "node_modules\wrangler")) {
   Write-Host "npm install ..."
   npm install
 }
-Write-Host "Deploying with wrangler 3.x ..."
-npm exec wrangler deploy
+Write-Host "Deploying reviewed Worker SHA with wrangler 3.x ..."
+npm run deploy

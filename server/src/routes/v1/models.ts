@@ -21,9 +21,6 @@ export async function publicModelCatalogHandler(c: Context<{ Bindings: Env }>) {
   c.header('Cache-Control', 'public, max-age=15, s-maxage=30, stale-while-revalidate=120');
   return c.json({
     success: true,
-    version: snapshot.version || null,
-    pricing_version: snapshot.pricingVersion || null,
-    stale: snapshot.stale,
     models: models.map(model => ({ ...model, selectable: true }))
   });
 }
@@ -40,9 +37,6 @@ modelCatalogRoutes.get('/', async c => {
   return c.json({
     ok: true,
     data: {
-      catalogVersion: snapshot.version || null,
-      pricingVersion: snapshot.pricingVersion || null,
-      catalogStale: snapshot.stale,
       models
     }
   });

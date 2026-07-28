@@ -14,18 +14,19 @@ import {
   fetchNewApiModelCatalog,
   newApiKeyForRoute,
   newApiTextCreditsForUsage,
+  resolveNewApiCatalogModel,
   resolveNewApiRoutedCatalogModel,
   type NewApiCatalogModel,
   type NewApiResolvedCatalogModel
 } from '../../lib/newapi';
 import {
   deductUserCredits,
-  incrementLifetimeCreditsSpent,
   spendableCredits,
   syncMembershipCredits
 } from '../../lib/membership-credits';
-import { createAdminClient, getOrCreateProfile, isMembershipActive } from '../../lib/supabase';
+import { createAdminClient, isMembershipActive } from '../../lib/supabase';
 import { mergeTaskFlags } from '../../lib/membership-tasks';
+import { sanitizePublicModelId, sanitizePublicModelLabel } from '../../lib/public-model-projection';
 import { rateLimit } from '../../middleware/rate-limit';
 
 const toolCallSchema = z.object({
@@ -100,7 +101,30 @@ function billableCredits(value: number | null) {
   return Math.max(MIN_CREDIT_CHARGE, roundCredits(value));
 }
 
-async function freshTextModel(env: Env, modelId: string): Promise<NewApiResolvedCatalogModel> {
+type FreshTextModel = NewApiResolvedCatalogModel & {
+  publicIdentity: { model: string; modelLabel: string };
+};
+
+export function publicChatQuotePayload(input: {
+  model: string;
+  modelLabel: string;
+  thinking: boolean;
+  final: number;
+}) {
+  const model = sanitizePublicModelId(input.model) || 'creative-model';
+  return {
+    model,
+    modelLabel: sanitizePublicModelLabel(input.modelLabel, model === 'creative-model' ? '创作模型' : model),
+    thinking: input.thinking,
+    final: input.final
+  };
+}
+
+export function publicChatCostPayload(final: number) {
+  return { final };
+}
+
+async function freshTextModel(env: Env, modelId: string): Promise<FreshTextModel> {
   let snapshot;
   try {
     snapshot = await fetchNewApiModelCatalog(env.NEWAPI_API_BASE_URL, { force: true, requireFresh: true });
@@ -109,8 +133,14 @@ async function freshTextModel(env: Env, modelId: string): Promise<NewApiResolved
   }
   const routes = await fetchNewApiAdminRoutes(env.NEWAPI_API_BASE_URL, env.NEWAPI_CATALOG_ADMIN_SECRET);
   const resolved = await resolveNewApiRoutedCatalogModel(snapshot, routes, modelId, 'text');
-  if (!resolved) throw new ApiError(400, 'MODEL_UNAVAILABLE', '所选文字模型或线路已不可用，请刷新后重选');
-  return resolved;
+  if (!resolved) throw new ApiError(400, 'MODEL_UNAVAILABLE', '所选文字模型已不可用，请刷新后重选');
+  const publicModel = resolveNewApiCatalogModel(snapshot, resolved.model.upstreamModel, 'text');
+  return {
+    ...resolved,
+    publicIdentity: publicModel
+      ? { model: publicModel.id, modelLabel: publicModel.label }
+      : { model: 'creative-model', modelLabel: '创作模型' }
+  };
 }
 
 function validateReasoningEffort(model: NewApiCatalogModel, value?: string) {
@@ -144,15 +174,11 @@ chatRoutes.get('/cost', async c => {
     if (credits == null) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认该模型实时价格');
     return c.json({
       ok: true,
-      data: {
-        model: resolved.requestedModelId,
-        modelLabel: catalogModel.label,
+      data: publicChatQuotePayload({
+        ...resolved.publicIdentity,
         thinking,
-        base: credits,
-        final: credits,
-        discountLabel: null,
-        note: catalogModel.pricing.mode === 'token' ? '按实际输入/输出 Token 结算' : '按次结算'
-      }
+        final: credits
+      })
     });
   }
 
@@ -176,15 +202,12 @@ chatRoutes.get('/cost', async c => {
 
   return c.json({
     ok: true,
-    data: {
+    data: publicChatQuotePayload({
       model: resolveChatModel(model).id,
       modelLabel: cost.modelLabel,
       thinking,
-      base: cost.base,
-      final: cost.final,
-      discountLabel: cost.discountLabel,
-      note: '按实际 token 用量计费，发送前为估算上限'
-    }
+      final: cost.final
+    })
   });
 });
 
@@ -293,7 +316,7 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
         base: dynamicFinal ?? estimatedCredits,
         final: dynamicFinal ?? estimatedCredits,
         discountLabel: null,
-        modelLabel: catalogModel.label,
+        modelLabel: resolvedCatalogModel?.publicIdentity.modelLabel || '创作模型',
         inputTokens,
         outputTokens
       }
@@ -324,10 +347,6 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
       }
     );
     profile = debited.profile;
-    if (cost.final > 0) {
-      await incrementLifetimeCreditsSpent(admin, user.id, cost.final);
-      profile = await getOrCreateProfile(admin, user.id);
-    }
   } catch (debitErr) {
     if (String((debitErr as Error).message).includes('insufficient')) {
       throw new ApiError(402, 'INSUFFICIENT_CREDITS', '积分不足');
@@ -347,15 +366,9 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
       finishReason: result.finishReason,
       creditsCharged: cost.final,
       creditsRemaining: spendableCredits(profile),
-      cost: {
-        base: cost.base,
-        final: cost.final,
-        discountLabel: cost.discountLabel,
-        inputTokens,
-        outputTokens
-      },
-      model: resolvedCatalogModel?.requestedModelId || modelId,
-      modelLabel: cost.modelLabel,
+      cost: publicChatCostPayload(cost.final),
+      model: resolvedCatalogModel?.publicIdentity.model || resolveChatModel(modelId).id,
+      modelLabel: resolvedCatalogModel?.publicIdentity.modelLabel || cost.modelLabel,
       thinking
     }
   });

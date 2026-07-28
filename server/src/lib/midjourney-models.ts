@@ -113,7 +113,7 @@ export function isMidjourneyUpstream(upstream: string): boolean {
 
 export function isMidjourneyModelId(modelId: string): boolean {
   const id = normalizeImageModelId(modelId);
-  return id.startsWith('apimart-mj-');
+  return id.startsWith('mj-');
 }
 
 export function mjVersionFromUpstream(upstream: string): MjVersionSpec | null {

@@ -237,35 +237,45 @@ export function mergeImageModelSettings(
 ): ImageModelPricingSettings {
   const models: Record<string, ImageModelOverride> = {};
   const src = raw?.models && typeof raw.models === 'object' ? raw.models : {};
+  const canonicalSourceIds = new Set(
+    Object.keys(src)
+      .map((id) => String(id || '').trim().toLowerCase())
+      .filter((id) => getCatalogEntry(id)?.id === id)
+  );
   for (const [id, patch] of Object.entries(src)) {
     if (!patch || typeof patch !== 'object') continue;
-    if (!getCatalogEntry(id)) continue;
+    const sourceId = String(id || '').trim().toLowerCase();
+    const normalizedId = normalizeImageModelId(id);
+    const catalog = getCatalogEntry(normalizedId);
+    if (!catalog) continue;
+    const canonicalKey = sourceId === normalizedId;
+    // Only MJ's public IDs were renamed. Old New API settings contain stale
+    // availability and manual prices that must not override its live catalog.
+    if (!canonicalKey && catalog.uiFamily !== 'midjourney') continue;
+    if (!canonicalKey && canonicalSourceIds.has(normalizedId)) continue;
     const status =
       patch.status === 'active' ||
       patch.status === 'maintenance' ||
       patch.status === 'offline'
         ? patch.status
         : undefined;
-    models[id] = {
+    models[normalizedId] = {
       displayName: sanitizeDisplayName(patch.displayName),
       status,
       enabled: patch.enabled === false ? false : patch.enabled === true ? true : undefined,
       creditsPerCall:
         patch.creditsPerCall != null ? clampCredits(patch.creditsPerCall, 10) : undefined,
       creditsByResolution: (() => {
-        const catalog = getCatalogEntry(id);
-        if (!catalog || !patch.creditsByResolution) return undefined;
+        if (!patch.creditsByResolution) return undefined;
         return sanitizeCreditsByResolution(patch.creditsByResolution, catalog);
       })(),
       creditsBySpeed: (() => {
-        const catalog = getCatalogEntry(id);
-        if (!catalog || !patch.creditsBySpeed) return undefined;
+        if (!patch.creditsBySpeed) return undefined;
         return sanitizeCreditsBySpeed(patch.creditsBySpeed, catalog);
       })(),
       promoPrice: sanitizeOptionalPromoCredits(patch.promoPrice),
       promoByResolution: (() => {
-        const catalog = getCatalogEntry(id);
-        if (!catalog || !patch.promoByResolution) return undefined;
+        if (!patch.promoByResolution) return undefined;
         return sanitizePromoByResolution(patch.promoByResolution, catalog);
       })(),
       promoBySpeed: patch.promoBySpeed ? sanitizePromoBySpeed(patch.promoBySpeed) : undefined,

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { MIN_COMMUNITY_PROMPT_LEN, upsertCommunityPost } from './community-feed';
+import { storagePathFromRef } from './image-archive';
 import { assertStorageDelta } from './storage-quota';
 import type { Profile } from './supabase';
 
@@ -19,6 +20,12 @@ export type QuickCardInput = {
   sourceUrl?: string | null;
   tags?: string[];
   publishToCommunity?: boolean;
+  /** Internal-only fields. Public routes must resolve and authorize these server-side. */
+  imageRef?: string | null;
+  cardId?: string;
+  sourceKey?: string;
+  genJobId?: string | null;
+  customFields?: Record<string, unknown>;
 };
 
 export type QuickCardResult = {
@@ -27,6 +34,7 @@ export type QuickCardResult = {
   publishedToCommunity: boolean;
   communityPostId: string | null;
   publishNote?: string | null;
+  replayed: boolean;
 };
 
 type UserDataPayload = {
@@ -139,6 +147,46 @@ function cardListImageRef(card: Record<string, unknown>): string | null {
   return image.trim();
 }
 
+export function extensionCardFromRecord(raw: Record<string, unknown>): ExtensionCardListItem | null {
+  if (!raw.id) return null;
+  const imageRef = cardListImageRef(raw) || '';
+  const title = String(raw.title || '').trim();
+  const prompt = String(raw.prompt || title || '').trim();
+  if (!imageRef && !prompt) return null;
+  return {
+    id: String(raw.id),
+    title,
+    prompt,
+    imageRef,
+    hasImage: !!imageRef,
+    tags: Array.isArray(raw.tags) ? raw.tags.map((tag) => String(tag)) : [],
+    group: String(raw.group || '').trim() || null,
+    genJobId: resolveGenJobIdFromCard(raw),
+    isMidjourney: raw.isMidjourney === true || !!(raw.mjCompositeUrl && String(raw.mjCompositeUrl).trim()),
+    updatedAt: Number(raw.updatedAt) || Number(raw.createdAt) || 0
+  };
+}
+
+function cardMatchesExtensionFilters(
+  card: ExtensionCardListItem,
+  opts: { q?: string; group?: string; tag?: string }
+): boolean {
+  const q = String(opts.q || '').trim().toLowerCase();
+  const groupFilter = String(opts.group || '').trim();
+  const tagFilter = normalizeTag(String(opts.tag || '').trim());
+  if (q) {
+    const haystack = `${card.title}\n${card.prompt}\n${card.tags.join(' ')}`.toLowerCase();
+    if (!haystack.includes(q)) return false;
+  }
+  if (groupFilter) {
+    if (groupFilter === 'uncategorized') {
+      if (card.group) return false;
+    } else if (card.group !== groupFilter) return false;
+  }
+  if (tagFilter && !card.tags.map((tag) => normalizeTag(tag)).includes(tagFilter)) return false;
+  return true;
+}
+
 export function collectUserGroups(payload: UserDataPayload): string[] {
   const set = new Set<string>();
   for (const g of payload.customGroups || []) {
@@ -164,52 +212,32 @@ export async function listUserCardsForExtension(
     .maybeSingle();
   if (error) throw error;
   const payload = (row?.data || {}) as UserDataPayload;
-  const q = String(opts.q || '').trim().toLowerCase();
-  const groupFilter = String(opts.group || '').trim();
-  const tagFilter = normalizeTag(String(opts.tag || '').trim());
   const filtered = (payload.cards || [])
-    .map((raw) => {
-      const c = raw as Record<string, unknown>;
-      if (!c.id) return null;
-      const imageRef = cardListImageRef(c) || '';
-      const title = String(c.title || '').trim();
-      const prompt = String(c.prompt || title || '').trim();
-      if (!imageRef && !prompt) return null;
-      const group = String(c.group || '').trim() || null;
-      const tags = Array.isArray(c.tags) ? c.tags.map((t) => String(t)) : [];
-      if (q) {
-        const hay = `${title}\n${prompt}\n${tags.join(' ')}`.toLowerCase();
-        if (!hay.includes(q)) return null;
-      }
-      if (groupFilter) {
-        if (groupFilter === 'uncategorized') {
-          if (group) return null;
-        } else if (group !== groupFilter) return null;
-      }
-      if (tagFilter) {
-        const normTags = tags.map((t) => normalizeTag(t));
-        if (!normTags.includes(tagFilter)) return null;
-      }
-      return {
-        id: String(c.id),
-        title,
-        prompt,
-        imageRef,
-        hasImage: !!imageRef,
-        tags,
-        group,
-        genJobId: resolveGenJobIdFromCard(c),
-        isMidjourney: c.isMidjourney === true || !!(c.mjCompositeUrl && String(c.mjCompositeUrl).trim()),
-        updatedAt: Number(c.updatedAt) || Number(c.createdAt) || 0
-      } satisfies ExtensionCardListItem;
-    })
-    .filter((c): c is ExtensionCardListItem => !!c);
+    .map((raw) => extensionCardFromRecord(raw as Record<string, unknown>))
+    .filter((card): card is ExtensionCardListItem => !!card)
+    .filter((card) => cardMatchesExtensionFilters(card, opts));
   filtered.sort((a, b) => b.updatedAt - a.updatedAt);
   const page = Math.max(1, Number(opts.page) || 1);
   const limit = Math.min(48, Math.max(1, Number(opts.limit) || 24));
   const total = filtered.length;
   const cards = filtered.slice((page - 1) * limit, page * limit);
   return { cards, total, page, limit };
+}
+
+export async function findUserCardForExtension(
+  admin: SupabaseClient,
+  userId: string,
+  cardId: string
+): Promise<ExtensionCardListItem | null> {
+  const { data: row, error } = await admin
+    .from('user_data')
+    .select('data')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  const payload = (row?.data || {}) as UserDataPayload;
+  const raw = (payload.cards || []).find((card) => String(card.id || '') === cardId);
+  return raw ? extensionCardFromRecord(raw) : null;
 }
 
 export async function listUserTags(
@@ -227,6 +255,21 @@ export async function listUserTags(
 
 function generateCardId(): string {
   return `card_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function normalizeInternalCardId(raw?: string): string | null {
+  if (!raw) return null;
+  const value = String(raw).trim();
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(value)) throw new Error('卡片来源标识无效');
+  return value;
+}
+
+function ownedInternalImageRef(userId: string, raw?: string | null): string | null {
+  if (!raw) return null;
+  const value = String(raw).trim();
+  const path = storagePathFromRef(value)?.replace(/^\//, '') || '';
+  if (!path || !path.startsWith(`${userId}/`)) throw new Error('图片来源无效');
+  return value;
 }
 
 function cardStoragePath(userId: string, cardId: string): string {
@@ -285,9 +328,34 @@ export async function appendQuickCard(
   const payload = (row?.data || {}) as UserDataPayload;
   const cards = Array.isArray(payload.cards) ? [...payload.cards] : [];
 
+  const sourceKey = String(input.sourceKey || '').trim();
+  const baseGenJobId = String(input.genJobId || '').replace(/#\d+$/, '');
+  const replay = sourceKey || baseGenJobId
+    ? cards.find((card) => {
+        const fields = card.customFields;
+        const matchesSource = !!sourceKey
+          && !!fields
+          && typeof fields === 'object'
+          && String((fields as Record<string, unknown>).canvasSourceKey || '') === sourceKey;
+        const matchesJob = !!baseGenJobId
+          && String(card.genJobId || '').replace(/#\d+$/, '') === baseGenJobId;
+        return matchesSource || matchesJob;
+      })
+    : null;
+  if (replay?.id) {
+    return {
+      cardId: String(replay.id),
+      cardCount: cards.length,
+      publishedToCommunity: replay.publishedToCommunity === true,
+      communityPostId: replay.communityPostId ? String(replay.communityPostId) : null,
+      replayed: true
+    };
+  }
+
   const now = Date.now();
-  const cardId = generateCardId();
-  let image: string | null = null;
+  const cardId = normalizeInternalCardId(input.cardId) || generateCardId();
+  let image: string | null = ownedInternalImageRef(userId, input.imageRef);
+  if (image && input.imageBase64) throw new Error('图片来源冲突');
   if (input.imageBase64) {
     const bytes = decodeBase64Image(input.imageBase64);
     assertStorageDelta(profile, bytes.length);
@@ -331,7 +399,12 @@ export async function appendQuickCard(
     image,
     group: null,
     tags,
-    customFields: input.sourceUrl ? { extSourceUrl: String(input.sourceUrl).slice(0, 500) } : {},
+    customFields: {
+      ...(input.customFields || {}),
+      ...(sourceKey ? { canvasSourceKey: sourceKey } : {}),
+      ...(input.sourceUrl ? { extSourceUrl: String(input.sourceUrl).slice(0, 500) } : {})
+    },
+    ...(input.genJobId ? { genJobId: input.genJobId } : {}),
     createdAt: now,
     updatedAt: now,
     publishedToCommunity,
@@ -396,6 +469,7 @@ export async function appendQuickCard(
     cardCount: cards.length,
     publishedToCommunity,
     communityPostId,
-    publishNote
+    publishNote,
+    replayed: false
   };
 }

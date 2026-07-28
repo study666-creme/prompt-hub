@@ -15,7 +15,7 @@ import { assetPackagesPublicRoutes, assetPackagesRoutes } from './asset-packages
 import { rateLimit } from '../../middleware/rate-limit';
 import { modelCatalogRoutes, publicModelCatalogHandler } from './models';
 import { videoRoutes } from './video';
-import { paymentRoutes } from './payments';
+import { paymentProductsHandler, paymentRoutes } from './payments';
 
 export const v1 = new Hono<{ Bindings: Env }>();
 
@@ -35,6 +35,10 @@ v1.get('/community/feed', rateLimit(180, 60_000), communityFeedHandler);
 v1.get('/generate/models', rateLimit(120, 60_000), publicGenerationModelsHandler);
 /** Public sanitized catalog, including distinct anonymous routes for multi-route models. */
 v1.get('/model-catalog', rateLimit(120, 60_000), publicModelCatalogHandler);
+/** Public fixed-price payment products; checkout and order state remain authenticated. */
+v1.get('/payments/products', rateLimit(120, 60_000), paymentProductsHandler);
+/** Compatibility alias for Canvas clients released before /payments was adopted. */
+v1.get('/wallet/products', rateLimit(120, 60_000), paymentProductsHandler);
 
 /** 卡片资产包市场：游客可浏览列表 */
 v1.route('/asset-packages', assetPackagesPublicRoutes);
@@ -52,6 +56,7 @@ v1.route('/generate', generateRoutes);
 v1.route('/models', modelCatalogRoutes);
 v1.route('/video', videoRoutes);
 v1.route('/payments', paymentRoutes);
+v1.route('/wallet', paymentRoutes);
 v1.route('/chat', chatRoutes);
 v1.route('/prompt-tools', promptToolsRoutes);
 v1.route('/community', communityRoutes);

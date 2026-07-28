@@ -2,11 +2,15 @@ name = "prompt-hub-api"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+preview_urls = false
 
 [vars]
 ENVIRONMENT = "production"
 PUBLIC_SITE_URL = "https://prompt-hubs.com"
-CORS_ORIGINS = "https://prompt-hubs.com,https://www.prompt-hubs.com,https://canvas.prompt-hubs.com,https://canvas-cn.prompt-hubs.com,https://prompt-hub.cn,https://www.prompt-hub.cn,https://prompt-hub-hub.pages.dev,https://prompt-hub-web.pages.dev"
+CORS_ORIGINS = "https://prompt-hubs.com,https://www.prompt-hubs.com,https://canvas.prompt-hubs.com,https://canvas-next.prompt-hubs.com,https://infinite-canvas-jay.vercel.app,https://kachang-canvas-next.vercel.app,https://canvas-cn.prompt-hubs.com,https://prompt-hub.cn,https://www.prompt-hub.cn,https://prompt-hub-hub.pages.dev,https://prompt-hub-web.pages.dev"
+EPAY_CANVAS_SITE_URL = "https://canvas.prompt-hubs.com"
+CANVAS_COLLABORATION_SEAT_PRODUCT_ENABLED = "0"
 CHAT_API_BASE_URL = "https://api.deepseek.com"
 CHAT_MODEL = "deepseek-chat"
 NEWAPI_API_BASE_URL = "https://43-153-201-78.sslip.io"
@@ -57,9 +61,20 @@ crons = ["*/2 * * * *"]
 binding = "IMAGE_GENERATION_QUEUE"
 queue = "prompt-hub-image-generation"
 
+[[queues.producers]]
+binding = "VIDEO_GENERATION_QUEUE"
+queue = "prompt-hub-video-generation"
+
 [[queues.consumers]]
 queue = "prompt-hub-image-generation"
-max_batch_size = 2
-max_batch_timeout = 5
+max_batch_size = 5
+max_batch_timeout = 1
 max_retries = 20
 dead_letter_queue = "prompt-hub-image-generation-dlq"
+
+[[queues.consumers]]
+queue = "prompt-hub-video-generation"
+max_batch_size = 2
+max_batch_timeout = 1
+max_retries = 3
+dead_letter_queue = "prompt-hub-video-generation-dlq"

@@ -37,8 +37,41 @@ describe('newapi video upstream', () => {
       referenceAudios: ['https://asset.test/a.mp3']
     });
 
-    expect(task).toEqual({ id: 'task_public', status: 'queued', progress: 0, errorMessage: null, videoUrl: null });
+    expect(task).toEqual({
+      id: 'task_public',
+      status: 'queued',
+      progress: 0,
+      errorCode: null,
+      errorMessage: null,
+      videoUrl: null
+    });
     expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({ Authorization: 'Bearer secret' });
+  });
+
+  it('forwards a durable submission idempotency key only when provided', async () => {
+    const fetchMock = vi.fn(async (_url, _init) => json({ id: 'task_idempotent', status: 'queued', progress: 0 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await submitNewApiVideo('secret', 'https://newapi.test', {
+      idempotencyKey: 'prompt-hub-video:job-123',
+      upstreamModel: 'grok-video',
+      prompt: 'slow camera move',
+      duration: 6,
+      ratio: '16:9',
+      resolution: '720p'
+    });
+    await submitNewApiVideo('secret', 'https://newapi.test', {
+      upstreamModel: 'grok-video',
+      prompt: 'slow camera move',
+      duration: 6,
+      ratio: '16:9',
+      resolution: '720p'
+    });
+
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      'Idempotency-Key': 'prompt-hub-video:job-123'
+    });
+    expect((fetchMock.mock.calls[1][1] as RequestInit).headers).not.toHaveProperty('Idempotency-Key');
   });
 
   it('uses neutral Grok-compatible image fields and normalizes completion', async () => {
@@ -50,7 +83,15 @@ describe('newapi video upstream', () => {
         expect(body.images).toEqual(['https://asset.test/a.jpg', 'https://asset.test/b.jpg']);
         return json({ request_id: 'request_1', status: 'processing' });
       }
-      return json({ data: { id: 'request_1', status: 'completed', video: { url: 'https://video.test/out.mp4' } } });
+      return json({
+        data: {
+          id: 'request_1',
+          status: 'completed',
+          billed_duration_seconds: 4,
+          audio: { url: 'https://video.test/sound.mp3' },
+          video: { url: 'https://video.test/out.mp4' }
+        }
+      });
     }));
 
     const submitted = await submitNewApiVideo('secret', undefined, {
@@ -64,6 +105,126 @@ describe('newapi video upstream', () => {
     const completed = await fetchNewApiVideoTask('secret', undefined, submitted.id);
 
     expect(submitted.id).toBe('request_1');
-    expect(completed).toMatchObject({ status: 'completed', videoUrl: 'https://video.test/out.mp4' });
+    expect(completed).toMatchObject({
+      status: 'completed',
+      videoUrl: 'https://video.test/out.mp4',
+      billedDurationSeconds: 4
+    });
+  });
+
+  it('forwards canonical size and first/last frame fields for New API to adapt', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(String((init as RequestInit).body));
+      expect(body).toMatchObject({
+        size: '1280x720',
+        first_image: 'https://asset.test/first.jpg',
+        last_image: 'https://asset.test/last.jpg'
+      });
+      return json({ id: 'task-frames', status: 'queued' });
+    }));
+
+    await submitNewApiVideo('secret', 'https://newapi.test', {
+      upstreamModel: 'frame-video',
+      prompt: 'transition',
+      duration: 5,
+      ratio: '16:9',
+      resolution: '720p',
+      size: '1280x720',
+      firstImage: 'https://asset.test/first.jpg',
+      lastImage: 'https://asset.test/last.jpg'
+    });
+  });
+
+  it('rejects an inline URL without a durable public task id', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      status: 'completed',
+      video_url: 'https://video.test/inline.mp4'
+    })));
+
+    await expect(submitNewApiVideo('secret', 'https://newapi.test', {
+      upstreamModel: 'video-model',
+      prompt: 'slow camera move',
+      duration: 5,
+      ratio: '16:9',
+      resolution: '720p'
+    })).rejects.toMatchObject({
+      status: 502,
+      code: 'UPSTREAM_ERROR',
+      message: '视频接口没有返回任务 ID'
+    });
+  });
+
+  it.each(['unknown', 'result_uncertain', 'outcome_unknown'])(
+    'preserves a result uncertainty reported as %s',
+    async status => {
+      vi.stubGlobal('fetch', vi.fn(async () => json({
+        id: 'task-uncertain',
+        status,
+        progress: 30,
+        error: {
+          code: 'result_uncertain',
+          message: '任务结果暂时无法确认，请勿重复提交；额度保持预扣，正在等待核对'
+        }
+      })));
+
+      await expect(fetchNewApiVideoTask('secret', 'https://newapi.test', 'task-uncertain')).resolves.toMatchObject({
+        id: 'task-uncertain',
+        status: 'unknown',
+        progress: 30,
+        errorCode: 'result_uncertain',
+        errorMessage: '任务结果暂时无法确认，请勿重复提交；额度保持预扣，正在等待核对',
+        videoUrl: null
+      });
+    }
+  );
+
+  it.each([
+    { status: 'unknown', code: 'result_uncertain' },
+    { status: 'failed', code: 'result_uncertain' }
+  ])('preserves an uncertain initial submit reported as $status + $code', async ({ status, code }) => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      id: 'task-submit-uncertain',
+      status,
+      progress: 30,
+      error: {
+        code,
+        message: 'the accepted task outcome is still being reconciled'
+      }
+    })));
+
+    await expect(submitNewApiVideo('secret', 'https://newapi.test', {
+      upstreamModel: 'video-model',
+      prompt: 'slow camera move',
+      duration: 5,
+      ratio: '16:9',
+      resolution: '720p'
+    })).resolves.toEqual({
+      id: 'task-submit-uncertain',
+      status: 'unknown',
+      progress: 30,
+      errorCode: 'result_uncertain',
+      errorMessage: 'the accepted task outcome is still being reconciled',
+      videoUrl: null
+    });
+  });
+
+  it('preserves explicit result uncertainty when a lookup uses a generic failed 502 response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      status: 'failed',
+      progress: 30,
+      error: {
+        code: 'result_uncertain',
+        message: 'the accepted task outcome is still being reconciled'
+      }
+    }, 502)));
+
+    await expect(fetchNewApiVideoTask('secret', 'https://newapi.test', 'task-uncertain-502')).resolves.toEqual({
+      id: 'task-uncertain-502',
+      status: 'unknown',
+      progress: 30,
+      errorCode: 'result_uncertain',
+      errorMessage: 'the accepted task outcome is still being reconciled',
+      videoUrl: null
+    });
   });
 });

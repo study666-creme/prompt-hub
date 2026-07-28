@@ -29,17 +29,22 @@ export async function drainFastProviderPendingSubmits(
   ctx?: DrainContext
 ): Promise<{ submitted: number; queued: number }> {
   const upstream = upstreamBindingsFromEnv(env);
-  if (!upstream.grsaiKey && !upstream.apimartKey && !upstream.newapiKey) {
+  const configuredProviders: Array<'grsai' | 'apimart' | 'newapi'> = [];
+  if (upstream.grsaiKey) configuredProviders.push('grsai');
+  if (upstream.apimartKey) configuredProviders.push('apimart');
+  if (upstream.newapiKey) configuredProviders.push('newapi');
+  if (!configuredProviders.length) {
     return { submitted: 0, queued: 0 };
   }
+  const configuredProviderSet = new Set<ImageUpstreamProvider>(configuredProviders);
 
   const admin = createAdminClient(env);
-  const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   const { data: rows, error } = await admin
     .from('generation_requests')
     .select('*')
     .eq('status', 'processing')
-    .gte('created_at', since)
+    .filter('meta->>fastSubmitState', 'eq', 'queued')
+    .in('meta->>provider', configuredProviders)
     .order('created_at', { ascending: true })
     .limit(80);
   if (error) {
@@ -51,6 +56,7 @@ export async function drainFastProviderPendingSubmits(
     const meta = (row.meta as Record<string, unknown>) || {};
     const m = readFastMeta(meta);
     if (m.provider !== 'grsai' && m.provider !== 'apimart' && m.provider !== 'newapi') return false;
+    if (!configuredProviderSet.has(m.provider)) return false;
     if (typeof meta.upstreamTaskId === 'string' && meta.upstreamTaskId) return false;
     return m.submitState === 'queued';
   });
@@ -64,6 +70,24 @@ export async function drainFastProviderPendingSubmits(
     if (!upstream.grsaiKey && provider === 'grsai') return null;
     if (!upstream.apimartKey && provider === 'apimart') return null;
     if (!upstream.newapiKey && provider === 'newapi') return null;
+    if (provider === 'newapi') {
+      if (ctx?.awaitSubmit) {
+        return processFastProviderPendingSubmit(
+          admin,
+          row.user_id,
+          row,
+          upstream,
+          provider,
+          fastSubmitParamsFromJob(row),
+          env
+        );
+      }
+      if (!env.IMAGE_GENERATION_QUEUE) {
+        console.error('[fast-drain] durable image queue binding is missing', row.id);
+        return null;
+      }
+      return env.IMAGE_GENERATION_QUEUE.send({ jobId: row.id, userId: row.user_id });
+    }
     return processFastProviderPendingSubmit(
       admin,
       row.user_id,
