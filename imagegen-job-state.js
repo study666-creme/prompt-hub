@@ -58,12 +58,37 @@
       return [...byKey.values()].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
     }
 
+    function compactPersistedImageRef(value) {
+      if (typeof value !== 'string') return value || null;
+      return /^(?:data:|blob:)/i.test(value) ? null : value;
+    }
+
+    function compactPendingJobsForStorage(list) {
+      return (Array.isArray(list) ? list : []).slice(0, 32).map((pending) => {
+        const compact = { ...pending };
+        compact.refImage = compactPersistedImageRef(pending?.refImage);
+        compact.refImages = Array.isArray(pending?.refImages)
+          ? pending.refImages.map(compactPersistedImageRef).filter(Boolean)
+          : null;
+        compact.referenceAssets = Array.isArray(pending?.referenceAssets)
+          ? pending.referenceAssets.map((asset) => {
+              if (!asset || typeof asset !== 'object') return asset;
+              const next = { ...asset };
+              if ('ref' in next) next.ref = compactPersistedImageRef(next.ref);
+              if ('imageRef' in next) next.imageRef = compactPersistedImageRef(next.imageRef);
+              return next;
+            })
+          : null;
+        return compact;
+      });
+    }
+
     function persistGenJobStateToLocal() {
       try {
         localStorage.setItem(LS_GEN_JOBS_STATE, JSON.stringify({
           uid: getGenJobStateUid(),
           updatedAt: Date.now(),
-          pending: pendingList().slice(0, 32),
+          pending: compactPendingJobsForStorage(pendingList()),
           session: getSessionGenJobIdsRaw()
         }));
       } catch (e) { /* ignore */ }
@@ -73,6 +98,7 @@
       const now = Date.now();
       return (list || []).filter((p) => {
         const age = now - (p.startedAt || 0);
+        if (p.clientRequestId) return age < RECENT_GEN_RECOVER_MS;
         if (p.recovering) {
           return p.jobId ? age < RECENT_GEN_RECOVER_MS : age < 30 * 60 * 1000;
         }
@@ -122,7 +148,7 @@
 
     function persistPendingGenJobs() {
       try {
-        sessionStorage.setItem(LS_PENDING_GEN_JOBS, JSON.stringify(pendingList().slice(0, 32)));
+        sessionStorage.setItem(LS_PENDING_GEN_JOBS, JSON.stringify(compactPendingJobsForStorage(pendingList())));
       } catch (e) { /* ignore */ }
       persistGenJobStateToLocal();
     }
@@ -132,8 +158,8 @@
       const before = pendingList().length;
       setPending(pendingList().filter((p) => {
         const age = now - (p.startedAt || 0);
-        if (!p.jobId) return age < 15 * 60 * 1000;
-        return age < RECENT_GEN_RECOVER_MS;
+        if (p.clientRequestId || p.jobId) return age < RECENT_GEN_RECOVER_MS;
+        return age < 15 * 60 * 1000;
       }));
       if (pendingList().length !== before) persistPendingGenJobs();
     }
@@ -210,6 +236,7 @@
       loadGenJobStateFromLocal,
       loadPendingGenJobs,
       mergePendingGenJobLists,
+      compactPendingJobsForStorage,
       pendingList,
       persistFailedGenJobs,
       persistGenJobStateToLocal,

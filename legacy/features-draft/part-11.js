@@ -629,6 +629,46 @@
     return !!entry?.fixedQualityLow;
   }
 
+  function imageGenQualityOptionsForModel(modelId) {
+    const id = normalizeImageGenModelId(modelId);
+    const entry = imageGenModelCatalog.find((m) => m.id === id);
+    const parameter = entry?.parameters?.find((item) => item?.name === 'quality');
+    const declared = parameter?.options?.length
+      ? parameter.options
+      : Object.prototype.hasOwnProperty.call(parameter || {}, 'fixed')
+        ? [parameter.fixed]
+        : entry?.qualityOptions || [];
+    return [...new Set(declared
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter((value) => ['low', 'medium', 'high', 'standard', 'ultra', 'auto'].includes(value)))] ;
+  }
+
+  function imageGenQualityLabel(value) {
+    const labels = { low: '低', standard: '中', medium: '中', high: '高', ultra: '高', auto: '自动' };
+    return labels[value] || value;
+  }
+
+  function updateImageGenQualitySelect() {
+    const select = document.getElementById('imageGenQuality');
+    if (!select) return;
+    const options = imageGenQualityOptionsForModel(getImageGenModel());
+    if (!options.length) return;
+    const previous = String(select.value || '').toLowerCase();
+    const normalizedPrevious = previous === 'standard' ? 'medium' : previous === 'ultra' ? 'high' : previous;
+    const key = options.join('|');
+    if (select.dataset.qualityOptions !== key) {
+      select.dataset.qualityOptions = key;
+      select.innerHTML = options
+        .map((value) => `<option value="${esc(value)}">${esc(imageGenQualityLabel(value))}</option>`)
+        .join('');
+    }
+    select.value = options.includes(normalizedPrevious)
+      ? normalizedPrevious
+      : options.includes('medium')
+        ? 'medium'
+        : options[0];
+  }
+
   function isImageGenMjSaveAllTiles() {
     return false;
   }
@@ -764,7 +804,6 @@
     const modelId = normalizeImageGenModelId(opts.modelId || getImageGenModel());
     const family = opts.family || imageGenModelFamily || imageGenModelUiFamily({ id: modelId });
     const isMj = family === 'midjourney';
-    const isEconomy = modelId === 'image2-economy';
     const shell = document.getElementById('imageGenSharedParams') || document.querySelector('.imagegen-shared-params');
     if (shell) {
       shell.classList.toggle('imagegen-params--mj', isMj);
@@ -782,17 +821,18 @@
     }
     const resParam = document.querySelector('.imagegen-param[data-param="resolution"]');
     const resLabel = document.querySelector('label[for="imageGenResolution"]');
-    const hideResolution = isMj || isEconomy;
+    const hideResolution = isMj;
     for (const el of [resParam, resLabel]) {
       if (el) el.hidden = hideResolution;
     }
     const sizeRow = document.querySelector('.imagegen-params-row--size');
     if (sizeRow) sizeRow.classList.toggle('imagegen-params-row--mj-size', isMj);
     const sizeParam = document.querySelector('.imagegen-param[data-param=size]');
-    if (sizeParam) sizeParam.hidden = isEconomy;
+    if (sizeParam) sizeParam.hidden = false;
     const sizeLabel = document.querySelector('label[for="imageGenSize"]');
     if (sizeLabel) sizeLabel.textContent = isMj ? '宽高比' : '画面尺寸';
-    const hideQuality = isMj || isEconomy || imageGenModelHidesQuality(modelId);
+    updateImageGenQualitySelect();
+    const hideQuality = isMj || imageGenModelHidesQuality(modelId) || imageGenQualityOptionsForModel(modelId).length === 0;
     const qEl = document.getElementById('imageGenQuality');
     const qLabel = document.querySelector('label[for="imageGenQuality"]');
     const qNote = document.querySelector('.imagegen-quality-note');

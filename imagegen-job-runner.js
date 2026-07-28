@@ -20,6 +20,7 @@
   } = jobState;
 
   const activePollJobIds = new Set();
+  const lastGenJobSettleAt = new Map();
   let resumeGenJobsInflight = null;
   let genJobsSyncTimer = null;
   let genJobsSyncInterval = null;
@@ -70,8 +71,8 @@
     const before = pendingList().length;
     setPending(pendingList().filter((p) => {
       const age = now - (p.startedAt || 0);
-      if (!p.jobId) return age < 15 * 60 * 1000;
-      return age < RECENT_GEN_RECOVER_MS;
+      if (p.clientRequestId || p.jobId) return age < RECENT_GEN_RECOVER_MS;
+      return age < 15 * 60 * 1000;
     }));
     if (pendingList().length !== before) persistPendingGenJobs();
   }
@@ -124,6 +125,9 @@
       failedAt: job.failedAt || Date.now(),
       model: job.model ? d().normalizeImageGenModelId(job.model) : '',
       modelLabel: job.modelLabel || (job.model ? d().imageGenModelLabel(job.model) : ''),
+      resolution: job.resolution || null,
+      quality: job.quality || null,
+      size: job.size || null,
       batchIndex: job.batchIndex || null,
       batchTotal: job.batchTotal || null,
       batchId: job.batchId || null,
@@ -133,6 +137,7 @@
     if (!entry.prompt) return;
     setFailed([entry, ...failedList().filter((f) => f.id !== entry.id)].slice(0, 24));
     persistFailedGenJobs();
+    return entry;
   }
 
   function removeFailedGenJob(failId) {
@@ -156,6 +161,36 @@
 
   /** 提交请求网络中断时，从 API 找回刚创建的 processing 任务 */
   async function tryRecoverOrphanGenJobAfterSubmitError(payload, pendingId, pendingJob) {
+    const clientRequestId = String(pendingJob?.clientRequestId || payload?.clientRequestId || '').trim();
+    const attach = (jobId) => {
+      const prompt = String(payload.prompt || '').trim();
+      const model = d().normalizeImageGenModelId(payload.model || 'gpt-image-2');
+      pendingJob.jobId = jobId;
+      pendingJob.submitPhase = 'accepted';
+      pendingJob.recovering = false;
+      pendingJob.recoverNote = '';
+      trackSessionGenJob(jobId);
+      persistPendingGenJobs();
+      clearFailedGenJobsForRecovery(clientRequestId
+        ? { jobId }
+        : { prompt, model, jobId });
+      if (!pendingJob.silentToast) {
+        d().toast('网络波动，已找回刚提交的任务，正在恢复进度…');
+      }
+      void pollGenerationJobUntilDone(jobId, pendingId, pendingJobToPollCtx(pendingJob));
+      return true;
+    };
+    if (clientRequestId) {
+      if (!window.PromptHubApi?.getGenerationJobByClientRequestId) return false;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 900 + attempt * 700));
+        try {
+          const found = await window.PromptHubApi.getGenerationJobByClientRequestId(clientRequestId);
+          if (found?.ok && found.data?.jobId) return attach(found.data.jobId);
+        } catch (e) { /* retry the exact request id */ }
+      }
+      return false;
+    }
     if (!window.PromptHubApi?.listRecentGenerationJobs) return false;
     const usedJobIds = new Set(
       pendingList().map((p) => p.jobId).filter(Boolean)
@@ -176,13 +211,7 @@
         const t = Date.parse(job.createdAt);
         const now = Date.now();
         if (Number.isFinite(t) && now - t <= 300_000) {
-          pendingJob.jobId = job.id;
-          trackSessionGenJob(job.id);
-          persistPendingGenJobs();
-          clearFailedGenJobsForRecovery({ prompt, model, jobId: job.id });
-          d().toast('网络波动，已找回刚提交的任务，正在恢复进度…');
-          void pollGenerationJobUntilDone(job.id, pendingId, pendingJobToPollCtx(pendingJob));
-          return true;
+          return attach(job.id);
         }
       }
     }
@@ -191,11 +220,17 @@
 
   function failPendingJob(pendingId, errorMessage) {
     const job = pendingList().find((j) => j.id === pendingId);
+    let failed = null;
     if (job) {
-      addFailedGenJob({
+      failed = addFailedGenJob({
+        id: job.id,
+        jobId: job.jobId,
         prompt: job.prompt,
         model: job.model,
         modelLabel: job.modelLabel || d().imageGenModelLabel(job.model),
+        resolution: job.resolution,
+        quality: job.quality,
+        size: job.size,
         batchIndex: job.batchIndex,
         batchTotal: job.batchTotal,
         batchId: job.batchId,
@@ -204,6 +239,7 @@
       });
     }
     removePendingJob(pendingId);
+    return failed;
   }
 
   function removePendingJob(pendingId) {
@@ -226,6 +262,7 @@
       size: job.size || '1:1',
       cost: job.cost || 0,
       jobId: job.jobId,
+      clientRequestId: job.clientRequestId || null,
       targetGroup: job.targetGroup || null,
       targetTags: job.targetTags || null,
       fromInspirationDraw: !!job.fromInspirationDraw,
@@ -324,6 +361,7 @@
   function clearSessionGenJob(jobId) {
     if (!jobId) return;
     const id = String(jobId);
+    lastGenJobSettleAt.delete(id);
     writeSessionGenJobIds(getSessionGenJobIds().filter((x) => x !== id));
   }
 
@@ -348,6 +386,20 @@
   function isLongRunningGenJob(ctx) {
     const fn = GE().isLongRunningGenJob;
     return typeof fn === 'function' ? fn(ctx) : false;
+  }
+
+  function shouldSettleGenerationJob(jobId, ctx) {
+    if (!jobId) return false;
+    const now = Date.now();
+    const startedAt = Number(ctx?.startedAt) || now;
+    const isMidjourney = d().isImageGenMidjourneyModel?.(ctx?.model);
+    const minAgeMs = isMidjourney ? 8000 : 12000;
+    const intervalMs = isMidjourney ? 8000 : 15000;
+    if (now - startedAt < minAgeMs) return false;
+    const id = String(jobId);
+    if (now - (lastGenJobSettleAt.get(id) || 0) < intervalMs) return false;
+    lastGenJobSettleAt.set(id, now);
+    return true;
   }
 
   function pendingRecoveryGiveUpMs(pending) {
@@ -377,12 +429,18 @@
   }
 
   function applyGenPollProgressNote(pendingId, pollData) {
-    const note = pollData?.progressNote;
-    if (!note || !pendingId) return;
+    if (!pendingId) return;
     const job = pendingList().find((j) => j.id === pendingId);
     if (!job) return;
-    if (job.pendingNote === note) return;
+    const note = typeof pollData?.progressNote === 'string' ? pollData.progressNote.trim() : '';
+    const phase = pollData?.status === 'completed'
+      ? 'delivering'
+      : pollData?.status === 'failed'
+        ? 'failed'
+        : 'processing';
+    if (job.pendingNote === note && job.generationPhase === phase) return;
     job.pendingNote = note;
+    job.generationPhase = phase;
     if (pollData?.status === 'processing' && isLongRunningGenJob({ model: job.model, resolution: job.resolution })) {
       job.recovering = false;
       job.recoverNote = '';
@@ -393,6 +451,80 @@
       return;
     }
     d().renderImageGenFeed({ preserveScroll: true });
+  }
+
+  function markPendingDelivery(pendingId, errorMessage = '') {
+    const pending = pendingList().find((job) => job.id === pendingId);
+    if (!pending) return;
+    pending.generationPhase = 'delivering';
+    pending.pendingNote = '';
+    pending.recovering = false;
+    pending.recoverNote = '';
+    pending.deliveryError = String(errorMessage || '').slice(0, 240) || null;
+    pending.deliveryAttempts = Math.max(0, Number(pending.deliveryAttempts) || 0) + 1;
+    pending.lastDeliveryAttemptAt = Date.now();
+    persistPendingGenJobs();
+    scheduleImageGenPendingUiRefresh();
+  }
+
+  async function recoverCompletedImageForDelivery(jobId, pendingId, pollData) {
+    markPendingDelivery(pendingId);
+    let delivery;
+    try {
+      delivery = await window.PromptHubApi?.getGenerationJobImageBlobUrl?.(jobId);
+    } catch (e) {
+      markPendingDelivery(pendingId, e?.message || 'result_delivery_failed');
+      return null;
+    }
+    if (!delivery?.ok || !delivery.data?.imageUrl) {
+      markPendingDelivery(pendingId, delivery?.message || 'result_not_ready');
+      return null;
+    }
+    return {
+      ...pollData,
+      status: 'completed',
+      imageUrl: delivery.data.imageUrl,
+      deliveryObjectUrl: true
+    };
+  }
+
+  async function attachPendingJobByClientRequestId(pending) {
+    const clientRequestId = String(pending?.clientRequestId || '').trim();
+    if (!pending || !clientRequestId || pending.jobId) {
+      return { keyed: !!clientRequestId, attached: false, changed: false };
+    }
+    let changed = false;
+    if (!pending.recovering) {
+      pending.recovering = true;
+      changed = true;
+    }
+    if (pending.generationPhase !== 'submitting') {
+      pending.generationPhase = 'submitting';
+      changed = true;
+    }
+    pending.pendingNote = '';
+    if (!window.PromptHubApi?.getGenerationJobByClientRequestId) {
+      if (changed) persistPendingGenJobs();
+      return { keyed: true, attached: false, changed };
+    }
+    try {
+      const result = await window.PromptHubApi.getGenerationJobByClientRequestId(clientRequestId);
+      const jobId = String(result?.data?.jobId || '').trim();
+      if (result?.ok && jobId) {
+        pending.jobId = jobId;
+        pending.submitPhase = 'accepted';
+        pending.generationPhase = result.data?.status === 'completed' ? 'delivering' : 'queued';
+        pending.recovering = false;
+        pending.recoverNote = '';
+        trackSessionGenJob(jobId);
+        persistPendingGenJobs();
+        clearFailedGenJobsForRecovery({ jobId });
+        void pollGenerationJobUntilDone(jobId, pending.id, pendingJobToPollCtx(pending));
+        return { keyed: true, attached: true, changed: true, jobId };
+      }
+    } catch (e) { /* the next coordinator pass retries the exact id */ }
+    if (changed) persistPendingGenJobs();
+    return { keyed: true, attached: false, changed };
   }
 
   async function pollGenerationJobUntilDone(jobId, pendingId, ctx) {
@@ -410,8 +542,14 @@
         return false;
       }
       if (poll.data.status === 'completed') {
+        let completedPoll = poll;
+        if (!poll.data.imageUrl) {
+          const delivered = await recoverCompletedImageForDelivery(jobId, pendingId, poll.data);
+          if (!delivered) return false;
+          completedPoll = { ...poll, data: delivered };
+        }
         if (poll.data.isMidjourney || d().isImageGenMidjourneyModel?.(ctx?.model)) {
-          const parsed = d().resolveMjPollImages?.(poll);
+          const parsed = d().resolveMjPollImages?.(completedPoll);
           if ((parsed?.gallery?.length || 0) < 4) {
             const settled = await window.PromptHubApi.getGenerationJob(jobId, { settle: true });
             if (settled?.ok && settled.data?.status === 'completed') {
@@ -424,7 +562,20 @@
             return false;
           }
         }
-        return d().ensureGenJobCreationsFromPoll(poll, { ...ctx, jobId: ctx.jobId || jobId }, pendingId);
+        markPendingDelivery(pendingId);
+        try {
+          const saved = await d().ensureGenJobCreationsFromPoll(
+            completedPoll,
+            { ...ctx, jobId: ctx.jobId || jobId },
+            pendingId
+          );
+          if (!saved) markPendingDelivery(pendingId, 'local_result_not_saved');
+          return !!saved;
+        } catch (e) {
+          console.warn('[imagegen] completed result delivery failed', jobId, e);
+          markPendingDelivery(pendingId, e?.message || 'local_result_save_failed');
+          return false;
+        }
       }
       return false;
     };
@@ -475,12 +626,12 @@
         return;
       }
       if (i > 0) await new Promise((r) => setTimeout(r, ge('genJobPollDelayMs', ctx, i)));
-      const elapsedNow = Date.now() - (ctx?.startedAt || Date.now());
-      const isMj = d().isImageGenMidjourneyModel?.(ctx?.model);
-      const useSettle = isMj
-        || ge('isSlowGenProviderModel', ctx?.model)
-        || (isLongRunningGenJob(ctx) && elapsedNow > 60_000);
-      let poll = await window.PromptHubApi.getGenerationJob(jobId, { settle: useSettle && elapsedNow > (isMj ? 8000 : 20000) });
+      const useSettle = shouldSettleGenerationJob(jobId, ctx);
+      let poll = await window.PromptHubApi.getGenerationJob(jobId, {
+        settle: useSettle,
+        timeoutMs: useSettle ? 30000 : 12000,
+        noRetry: true
+      });
       if (poll.ok) applyGenPollProgressNote(pendingId, poll.data);
       if (!poll.ok) {
         const recoverableNet =
@@ -517,6 +668,8 @@
       }
 
       if (poll.data.status === 'completed' && !poll.data.imageUrl) {
+        const delivered = await recoverCompletedImageForDelivery(jobId, pendingId, poll.data);
+        if (delivered && await finishFromPoll({ ...poll, data: delivered })) return;
         continue;
       }
 
@@ -1054,11 +1207,11 @@
     }
     try {
       const poll = await window.PromptHubApi.getGenerationJob(jobId, { settle: true });
-      if (poll.ok && poll.data?.status === 'completed' && poll.data.imageUrl) {
+      if (poll.ok && poll.data?.status === 'completed') {
         await resolvePendingFromApiJob(pending, {
           id: jobId,
           status: 'completed',
-          imageUrl: poll.data.imageUrl,
+          imageUrl: poll.data.imageUrl || null,
           extraImageUrls: poll.data.extraImageUrls,
           prompt: pending.prompt,
           model: pending.model
@@ -1085,6 +1238,15 @@
     const ctx = pendingJobToPollCtx(pending);
     ctx.silentToast = opts.silent !== false;
 
+    if (apiJob.status === 'completed' && !apiJob.imageUrl) {
+      const delivered = await recoverCompletedImageForDelivery(apiJob.id, pending.id, apiJob);
+      if (!delivered?.imageUrl) return false;
+      return resolvePendingFromApiJob(pending, {
+        ...apiJob,
+        imageUrl: delivered.imageUrl
+      }, opts);
+    }
+
     if (apiJob.status === 'completed' && apiJob.imageUrl) {
       pending.recovering = false;
       pending.recoverNote = '';
@@ -1095,17 +1257,27 @@
         clearSessionGenJob(apiJob.id);
         return true;
       }
-      await d().ensureGenJobCreationsFromPoll(
-        {
-          data: {
-            status: 'completed',
-            imageUrl: apiJob.imageUrl,
-            extraImageUrls: apiJob.extraImageUrls
-          }
-        },
-        { ...ctx, jobId: apiJob.id, isRecovery: true },
-        pending.id
-      );
+      try {
+        const saved = await d().ensureGenJobCreationsFromPoll(
+          {
+            data: {
+              status: 'completed',
+              imageUrl: apiJob.imageUrl,
+              extraImageUrls: apiJob.extraImageUrls
+            }
+          },
+          { ...ctx, jobId: apiJob.id, isRecovery: true },
+          pending.id
+        );
+        if (!saved) {
+          markPendingDelivery(pending.id, 'local_result_not_saved');
+          return false;
+        }
+      } catch (e) {
+        console.warn('[imagegen] recovered result save failed', apiJob.id, e);
+        markPendingDelivery(pending.id, e?.message || 'local_result_save_failed');
+        return false;
+      }
       clearSessionGenJob(apiJob.id);
       return true;
     }
@@ -1323,11 +1495,32 @@
   }
 
   async function resumePendingGenerationJobs(opts = {}) {
-    if (!window.PromptHubApi?.listRecentGenerationJobs) return false;
     if (!window.PointsSystem?.useApiForAccount?.()) return false;
+    const canList = !!window.PromptHubApi?.listRecentGenerationJobs;
+    const canAttachExact = !!window.PromptHubApi?.getGenerationJobByClientRequestId;
+    if (!canList && !canAttachExact) return false;
     purgeExpiredGenPendingJobs();
+    let exactChanged = false;
+    const exactResults = await Promise.all(
+      pendingList()
+        .filter((pending) => !pending.jobId && pending.clientRequestId)
+        .map((pending) => attachPendingJobByClientRequestId(pending))
+    );
+    if (exactResults.some((result) => result.changed)) exactChanged = true;
+    for (const pending of pendingList()) {
+      if (pending.jobId && !activePollJobIds.has(pending.jobId)) {
+        void pollGenerationJobUntilDone(pending.jobId, pending.id, pendingJobToPollCtx(pending));
+      }
+    }
+    const hasLegacyUnattached = pendingList().some(
+      (pending) => !pending.jobId && !pending.clientRequestId
+    );
+    if (!canList || (pendingList().length > 0 && !hasLegacyUnattached)) {
+      if (exactChanged) d().renderImageGenFeed({ preserveScroll: true });
+      return exactChanged;
+    }
     const now = Date.now();
-    if (!opts.force && now - lastGenJobsListAt < (pendingList().length > 0 ? 4000 : GEN_JOBS_LIST_MIN_MS)) return false;
+    if (!opts.force && now - lastGenJobsListAt < Math.max(30_000, GEN_JOBS_LIST_MIN_MS)) return exactChanged;
     if (resumeGenJobsInflight) return resumeGenJobsInflight;
 
     resumeGenJobsInflight = (async () => {
@@ -1348,13 +1541,13 @@
         pendingList().map((p) => p.jobId).filter(Boolean)
       )];
       for (const jobId of pendingJobIds) {
+        if (activePollJobIds.has(jobId)) continue;
         const pending = pendingList().find((p) => p.jobId === jobId);
         if (!pending) continue;
-        const pendingAge = Date.now() - (pending.startedAt || 0);
         const ctx = pendingJobToPollCtx(pending);
         try {
           const retry = await window.PromptHubApi.getGenerationJob(jobId, {
-            settle: isLongRunningGenJob(ctx) && pendingAge > 60_000
+            settle: shouldSettleGenerationJob(jobId, ctx)
           });
           if (!retry.ok) continue;
           const aj = {
@@ -1385,6 +1578,7 @@
 
       const refreshTargets = r.data.jobs.filter((j) => {
         if (!j?.id || d().isGenerationJobDeleted(j.id)) return false;
+        if (activePollJobIds.has(j.id)) return false;
         if (j.status !== 'processing' && !(j.status === 'completed' && !j.imageUrl)) return false;
         const age = Date.now() - (Date.parse(j.createdAt) || 0);
         return pendingList().some((p) => p.jobId === j.id)
@@ -1428,13 +1622,14 @@
           }
           continue;
         }
+        if (activePollJobIds.has(pending.jobId)) continue;
         let aj = apiById.get(pending.jobId);
         const pendingAge = Date.now() - (pending.startedAt || 0);
         const pollCtx = pendingJobToPollCtx(pending);
         if (pending.jobId && (!aj || aj.status === 'processing' || pendingAge > 20_000)) {
           try {
             const retry = await window.PromptHubApi.getGenerationJob(pending.jobId, {
-              settle: isLongRunningGenJob(pollCtx) && pendingAge > 60_000
+              settle: shouldSettleGenerationJob(pending.jobId, pollCtx)
             });
             if (retry.ok) {
               aj = {
@@ -1463,7 +1658,7 @@
         }
         if (pending.recovering && pending.jobId && !activePollJobIds.has(pending.jobId)) {
           const retry = await window.PromptHubApi.getGenerationJob(pending.jobId, {
-            settle: isLongRunningGenJob(pendingJobToPollCtx(pending)) && pendingAge > 60_000
+            settle: shouldSettleGenerationJob(pending.jobId, pendingJobToPollCtx(pending))
           });
           if (retry.ok) {
             const snap = {
@@ -1927,6 +2122,7 @@
       clearFailedGenJobsForRecovery,
       failPendingJob,
       pendingJobToPollCtx,
+      attachPendingJobByClientRequestId,
       pollGenerationJobUntilDone,
       deferPendingJobRecovery,
       tryRecoverOrphanGenJobAfterSubmitError,

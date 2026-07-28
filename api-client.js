@@ -34,7 +34,8 @@
   const API_SIGN_TIMEOUT_MS = 3500;
   const API_HEALTH_TIMEOUT_MS = 2000;
   const API_GENERATE_TIMEOUT_MS = 45000;
-  const API_JOB_POLL_TIMEOUT_MS = 35000;
+  const API_JOB_POLL_TIMEOUT_MS = 12000;
+  const API_JOB_DELIVERY_TIMEOUT_MS = 45000;
   const API_UNREACHABLE_COOLDOWN_MS = 10 * 60 * 1000;
 
   function markApiUnreachable() {
@@ -143,7 +144,7 @@
       await ensureApiAuthFresh();
     }
     const token = await getAccessToken();
-    if (!token) {
+    if (!token && opts.public !== true) {
       if (isMediaAuthPath(path)) {
         pauseAuthSign(60000);
         notifyAuthSignFailure({ source: 'api-client', reason: 'missing-token', message: '登录已过期，请重新登录' });
@@ -158,8 +159,8 @@
       res = await fetch(`${baseUrl()}${path}`, {
         method,
         headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(body != null ? { 'Content-Type': 'application/json' } : {})
         },
         body: body != null ? JSON.stringify(body) : undefined,
         signal: controller.signal
@@ -224,7 +225,7 @@
         message === '服务器内部错误' && details
           ? `${message}（${details.slice(0, 120)}）`
           : message;
-      if (res.status === 401 && attempt < 2) {
+      if (res.status === 401 && attempt < 2 && !opts.noRetry) {
         const recovered = await ensureApiAuthFresh();
         if (recovered) return request(method, path, body, opts, attempt + 1);
         if (isMediaAuthPath(path)) {
@@ -319,9 +320,11 @@
   }
 
   async function requestWithPrepare(method, path, body, opts) {
-    await prepareApiCall({ light: opts?.lightPrepare });
+    if (!opts?.directFirst) {
+      await prepareApiCall({ light: opts?.lightPrepare });
+    }
     let r = await request(method, path, body, opts);
-    if (!r.ok && (r.code === 'NETWORK_ERROR' || r.code === 'API_UNREACHABLE')) {
+    if (!opts?.noRetry && !r.ok && (r.code === 'NETWORK_ERROR' || r.code === 'API_UNREACHABLE')) {
       await prepareApiCall();
       r = await request(method, path, body, opts);
     }
@@ -518,36 +521,219 @@
 
   const costCache = new Map();
   const costInflight = new Map();
+  const IMAGE_GEN_CATALOG_CACHE_VERSION = 19;
+  const PUBLIC_IMAGE_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+  const RETIRED_PUBLIC_IMAGE_MODEL_IDS = new Set(['image2-free']);
+  const PUBLIC_IMAGE_MODEL_LABEL_OVERRIDES = {
+    'image2-4k-fast': '全能模型2 · 4K'
+  };
+  const PRIVATE_PUBLIC_MODEL_TEXT_RE = /(?:https?:\/\/|www\.|\b(?:upstream|provider|reseller|channel|route|priority|weight|margin|markup|multiplier|base\s*url)\b|上游|供应商|供货商|渠道|通道|线路|路由|采购|进货|成本|毛利|利润|倍率|加价|结算价|内部价|实时价|优先级|权重|故障转移)/i;
+  const PRIVATE_PUBLIC_MODEL_PARAMETER_RE = /(?:upstream|provider|reseller|channel|route|group|priority|weight|margin|markup|multiplier|cost|base_?url|api_?key)/i;
   let modelsCache = null;
   let modelsCacheExp = 0;
+  let modelsInflight = null;
 
-  async function getGenerationModels() {
+  function publicModelText(value, fallback = '', maxLength = 240) {
+    const text = String(value ?? '')
+      .replace(/[\u0000-\u001f\u007f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!text || PRIVATE_PUBLIC_MODEL_TEXT_RE.test(text)) return String(fallback || '').slice(0, maxLength);
+    return text.slice(0, maxLength);
+  }
+
+  function publicModelNumber(value) {
+    if (value == null || value === '' || typeof value === 'boolean') return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : null;
+  }
+
+  function publicModelPrimitive(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+    if (typeof value === 'string') {
+      const text = publicModelText(value, '', 160);
+      return text || undefined;
+    }
+    if (Array.isArray(value)) {
+      return value.slice(0, 64).map(publicModelPrimitive).filter((item) => item !== undefined);
+    }
+    return undefined;
+  }
+
+  function publicModelStringList(value) {
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value
+      .map((item) => String(item || '').trim())
+      .filter((item) => /^[A-Za-z0-9][A-Za-z0-9._:-]{0,31}$/.test(item)))]
+      .slice(0, 64);
+  }
+
+  function publicModelCreditMap(primary, legacy, keys) {
+    const result = {};
+    for (const key of keys) {
+      const primaryValue = primary?.[key];
+      const legacyValue = legacy?.[key];
+      const credits = publicModelNumber(
+        primaryValue && typeof primaryValue === 'object' ? primaryValue.final : primaryValue
+      ) ?? publicModelNumber(
+        legacyValue && typeof legacyValue === 'object' ? legacyValue.final : legacyValue
+      );
+      if (credits != null) result[key] = credits;
+    }
+    return result;
+  }
+
+  function projectPublicGenerationParameter(parameter, publicModelId) {
+    if (!parameter || typeof parameter !== 'object') return null;
+    const name = String(parameter.name || '').trim();
+    const path = String(parameter.path || '').trim();
+    if (!name || !path || PRIVATE_PUBLIC_MODEL_PARAMETER_RE.test(name) || PRIVATE_PUBLIC_MODEL_PARAMETER_RE.test(path)) return null;
+    if (!/^[A-Za-z0-9_.-]{1,80}$/.test(name) || !/^[A-Za-z0-9_.-]{1,120}$/.test(path)) return null;
+    const type = ['string', 'integer', 'number', 'boolean', 'array', 'object'].includes(String(parameter.type))
+      ? String(parameter.type)
+      : 'string';
+    const result = {
+      name,
+      path,
+      label: publicModelText(parameter.label, name, 80),
+      type,
+      required: parameter.required === true
+    };
+    const defaultValue = publicModelPrimitive(parameter.default);
+    const fixedValue = name === 'model' ? publicModelId : publicModelPrimitive(parameter.fixed);
+    const options = publicModelPrimitive(parameter.options);
+    if (defaultValue !== undefined) result.default = defaultValue;
+    if (fixedValue !== undefined) result.fixed = fixedValue;
+    if (Array.isArray(options) && options.length) result.options = options;
+    for (const key of ['min', 'max', 'min_items', 'max_items']) {
+      const number = Number(parameter[key]);
+      if (Number.isFinite(number)) result[key] = number;
+    }
+    if (parameter.items && typeof parameter.items === 'object') {
+      const itemType = publicModelPrimitive(parameter.items.type);
+      const itemFormat = publicModelPrimitive(parameter.items.format);
+      const items = {};
+      if (typeof itemType === 'string') items.type = itemType;
+      if (typeof itemFormat === 'string') items.format = itemFormat;
+      if (Object.keys(items).length) result.items = items;
+    }
+    return result;
+  }
+
+  function projectPublicGenerationModel(model) {
+    if (!model || typeof model !== 'object') return null;
+    const id = String(model.id || '').trim();
+    if (
+      !PUBLIC_IMAGE_MODEL_ID_RE.test(id)
+      || PRIVATE_PUBLIC_MODEL_TEXT_RE.test(id)
+      || RETIRED_PUBLIC_IMAGE_MODEL_IDS.has(id)
+    ) return null;
+    const labelOverride = PUBLIC_IMAGE_MODEL_LABEL_OVERRIDES[id];
+    const label = labelOverride || publicModelText(model.displayLabel || model.label || model.catalogLabel, id, 80);
+    const catalogLabel = labelOverride || publicModelText(model.catalogLabel || model.label, label, 80);
+    const description = publicModelText(model.description, '', 240) || null;
+    const uiFamily = ['gim2', 'banana', 'midjourney'].includes(String(model.uiFamily))
+      ? String(model.uiFamily)
+      : (id.startsWith('mj-') ? 'midjourney' : (id.startsWith('lingtu') ? 'banana' : 'gim2'));
+    const status = ['active', 'maintenance', 'offline'].includes(String(model.status))
+      ? String(model.status)
+      : 'active';
+    const creditsByResolution = publicModelCreditMap(
+      model.creditsByResolution,
+      model.costByResolution,
+      ['1k', '2k', '4k']
+    );
+    const creditsBySpeed = publicModelCreditMap(
+      model.creditsBySpeed,
+      model.costBySpeed,
+      ['relax', 'fast', 'turbo']
+    );
+    const creditsPerCall = publicModelNumber(model.creditsPerCall)
+      ?? publicModelNumber(model.creditsFinal)
+      ?? publicModelNumber(model.cost?.credits);
+    const creditsFinal = publicModelNumber(model.creditsFinal) ?? creditsPerCall;
+    const result = {
+      id,
+      label,
+      catalogLabel,
+      description,
+      uiFamily,
+      sortOrder: Number.isFinite(Number(model.sortOrder)) ? Number(model.sortOrder) : 999,
+      status,
+      selectable: model.selectable !== false,
+      refundOnViolation: model.refundOnViolation === true,
+      statusNotice: publicModelText(model.statusNotice, '', 160) || null,
+      violationNotice: publicModelText(model.violationNotice, '', 160) || null,
+      fixedQualityLow: model.fixedQualityLow === true,
+      resolutions: publicModelStringList(model.resolutions),
+      aspectRatios: publicModelStringList(model.aspectRatios),
+      parameters: Array.isArray(model.parameters)
+        ? model.parameters.slice(0, 32)
+          .map((parameter) => projectPublicGenerationParameter(parameter, id))
+          .filter(Boolean)
+        : [],
+      pricingByResolution: model.pricingByResolution === true || Object.keys(creditsByResolution).length > 0,
+      creditsByResolution,
+      pricingBySpeed: model.pricingBySpeed === true || Object.keys(creditsBySpeed).length > 0,
+      creditsBySpeed
+    };
+    const maxReferenceImages = publicModelNumber(model.maxReferenceImages);
+    if (maxReferenceImages != null) result.maxReferenceImages = Math.floor(maxReferenceImages);
+    if (creditsPerCall != null) result.creditsPerCall = creditsPerCall;
+    if (creditsFinal != null) result.creditsFinal = creditsFinal;
+    return result;
+  }
+
+  function projectGenerationModels(models) {
+    if (!Array.isArray(models)) return [];
+    return models.map(projectPublicGenerationModel).filter(Boolean);
+  }
+
+  function getGenerationModels() {
+    if (modelsInflight) return modelsInflight;
     if (modelsCache && modelsCacheExp > Date.now()) {
-      return { ok: true, data: modelsCache };
+      return Promise.resolve({ ok: true, data: modelsCache });
     }
-    try {
-      const raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v3') || 'null');
-      if (raw?.models?.length && Number(raw.version) >= 9 && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
-        modelsCache = { models: raw.models, globalDiscountPercent: 100, providers: ['newapi', 'apimart'] };
-        modelsCacheExp = Date.now() + 45_000;
-      }
-    } catch (e) { /* ignore */ }
-    const res = await request('GET', '/api/v1/generate/models', null, { timeoutMs: 8000 });
-    if (res.ok && res.data) {
-      modelsCache = res.data;
-      modelsCacheExp = Date.now() + 120_000;
-      if (Array.isArray(res.data.models) && res.data.models.length) {
-        try {
+    modelsInflight = (async () => {
+      try {
+        const raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v4') || 'null');
+        if (raw?.models?.length && Number(raw.version) >= IMAGE_GEN_CATALOG_CACHE_VERSION && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
+          const models = projectGenerationModels(raw.models);
+          modelsCache = { models };
+          modelsCacheExp = Date.now() + 45_000;
           localStorage.setItem(
-            'promptrepo_imagegen_models_cache_v3',
-            JSON.stringify({ ts: Date.now(), version: 9, models: res.data.models })
+            'promptrepo_imagegen_models_cache_v4',
+            JSON.stringify({ ts: raw.ts, version: IMAGE_GEN_CATALOG_CACHE_VERSION, models })
           );
-        } catch (e) { /* ignore */ }
+        }
+      } catch (e) { /* ignore */ }
+      const res = await request(
+        'GET',
+        `/api/v1/generate/models?refresh=1&v=${IMAGE_GEN_CATALOG_CACHE_VERSION}`,
+        null,
+        { timeoutMs: 8000, public: true }
+      );
+      if (res.ok && res.data) {
+        const models = projectGenerationModels(res.data.models);
+        modelsCache = { models };
+        modelsCacheExp = Date.now() + 120_000;
+        if (models.length) {
+          try {
+            localStorage.setItem(
+              'promptrepo_imagegen_models_cache_v4',
+              JSON.stringify({ ts: Date.now(), version: IMAGE_GEN_CATALOG_CACHE_VERSION, models })
+            );
+          } catch (e) { /* ignore */ }
+        }
+        return { ...res, data: modelsCache };
       }
+      if (modelsCache) return { ok: true, data: modelsCache };
       return res;
-    }
-    if (modelsCache) return { ok: true, data: modelsCache };
-    return res;
+    })().finally(() => {
+      modelsInflight = null;
+    });
+    return modelsInflight;
   }
 
   function prefetchGenerationModels() {
@@ -578,22 +764,103 @@
     window.__PH_API_DOWN_UNTIL__ = 0;
     return requestWithPrepare('POST', '/api/v1/generate', payload, {
       timeoutMs: API_GENERATE_TIMEOUT_MS,
-      lightPrepare: true
+      lightPrepare: true,
+      directFirst: true,
+      noRetry: true
     });
   }
 
-  async function getGenerationJob(jobId, opts) {
+  async function getGenerationJob(jobId, opts = {}) {
     const settle = opts?.settle ? '?settle=1' : '';
     return request('GET', `/api/v1/generate/jobs/${encodeURIComponent(jobId)}${settle}`, null, {
-      timeoutMs: opts?.settle ? Math.max(API_JOB_POLL_TIMEOUT_MS, 120000) : API_JOB_POLL_TIMEOUT_MS
+      timeoutMs: Number(opts.timeoutMs) > 0
+        ? Number(opts.timeoutMs)
+        : opts.settle
+          ? 30000
+          : API_JOB_POLL_TIMEOUT_MS,
+      noRetry: opts.noRetry !== false
     });
+  }
+
+  async function getGenerationJobByClientRequestId(clientRequestId) {
+    return request(
+      'GET',
+      `/api/v1/generate/requests/${encodeURIComponent(String(clientRequestId || ''))}`,
+      null,
+      { timeoutMs: API_JOB_POLL_TIMEOUT_MS, noRetry: true }
+    );
+  }
+
+  async function getGenerationJobImageBlobUrl(jobId, opts = {}, attempt = 0) {
+    let token = await getAccessToken();
+    if (!token && attempt === 0) {
+      await recoverSessionForApi();
+      token = await getAccessToken();
+    }
+    if (!token) return { ok: false, code: 'UNAUTHORIZED', message: '请先登录' };
+    const index = Math.max(0, Math.min(7, Number(opts.index) || 0));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), API_JOB_DELIVERY_TIMEOUT_MS);
+    let res;
+    try {
+      res = await fetch(
+        `${baseUrl()}/api/v1/generate/jobs/${encodeURIComponent(jobId)}/image?index=${index}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+          cache: 'no-store'
+        }
+      );
+    } catch (e) {
+      clearTimeout(timer);
+      const aborted = e?.name === 'AbortError' || String(e).includes('abort');
+      return {
+        ok: false,
+        code: aborted ? 'DELIVERY_TIMEOUT' : 'NETWORK_ERROR',
+        message: aborted ? '取图超时' : '暂时无法获取生成图片'
+      };
+    }
+    if (res.status === 401 && attempt === 0) {
+      clearTimeout(timer);
+      await recoverSessionForApi();
+      return getGenerationJobImageBlobUrl(jobId, opts, 1);
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      clearTimeout(timer);
+      return {
+        ok: false,
+        status: res.status,
+        code: body?.error?.code || (res.status === 404 ? 'NOT_READY' : 'DELIVERY_FAILED'),
+        message: body?.error?.message || (res.status === 404 ? '图片尚未就绪' : '生成图片交付失败')
+      };
+    }
+    let blob;
+    try {
+      blob = await res.blob();
+    } catch (e) {
+      const aborted = e?.name === 'AbortError' || String(e).includes('abort');
+      clearTimeout(timer);
+      return {
+        ok: false,
+        code: aborted ? 'DELIVERY_TIMEOUT' : 'DELIVERY_READ_FAILED',
+        message: aborted ? '取图超时' : '生成图片读取失败，请稍后重试'
+      };
+    }
+    clearTimeout(timer);
+    if (!blob.size || !String(blob.type || '').toLowerCase().startsWith('image/')) {
+      return { ok: false, code: 'INVALID_IMAGE', message: '生成结果不是有效图片' };
+    }
+    const imageUrl = URL.createObjectURL(blob);
+    return { ok: true, data: { imageUrl, blob, contentType: blob.type, size: blob.size } };
   }
 
   async function mjAction(payload) {
     window.__PH_API_DOWN_UNTIL__ = 0;
     return requestWithPrepare('POST', '/api/v1/generate/mj-action', payload, {
       timeoutMs: API_GENERATE_TIMEOUT_MS,
-      lightPrepare: true
+      lightPrepare: true,
+      directFirst: true
     });
   }
 
@@ -601,7 +868,8 @@
     window.__PH_API_DOWN_UNTIL__ = 0;
     return requestWithPrepare('POST', '/api/v1/generate/mj-blend', payload, {
       timeoutMs: API_GENERATE_TIMEOUT_MS,
-      lightPrepare: true
+      lightPrepare: true,
+      directFirst: true
     });
   }
 
@@ -655,6 +923,40 @@
       null,
       { timeoutMs: Math.max(API_TIMEOUT_MS, 45000) }
     );
+  }
+
+  /**
+   * Create an online payment order. The options argument is intentionally
+   * optional so older callers using the original three-argument contract keep
+   * working while custom top-ups can pass their amount and return target.
+   */
+  async function createPaymentCheckout(productId, paymentMethod, creditGrantMode, options = {}) {
+    if (typeof options === 'number' || typeof options === 'string') {
+      options = { customAmount: Number(options) };
+    } else if (!options || typeof options !== 'object') {
+      options = {};
+    }
+    const payload = {
+      productId,
+      paymentMethod,
+      creditGrantMode
+    };
+    if (options.customAmount !== undefined && options.customAmount !== null && options.customAmount !== '') {
+      payload.customAmount = Number(options.customAmount);
+    }
+    if (options.returnTarget === 'card-library' || options.returnTarget === 'canvas') {
+      payload.returnTarget = options.returnTarget;
+    }
+    if (typeof options.returnPath === 'string' && options.returnPath) {
+      payload.returnPath = options.returnPath;
+    }
+    // A lost response must never transparently submit a second payment order.
+    // Keep this POST non-retriable; the caller can explicitly retry after
+    // checking the order status.
+    return request('POST', '/api/v1/payments/checkout', payload, {
+      timeoutMs: Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : API_TIMEOUT_MS,
+      noRetry: true
+    });
   }
 
   async function listRecentGeneratedCreations(opts = {}) {
@@ -913,8 +1215,14 @@
     }
   }
 
-  async function getGenerationImageUrl(jobId) {
-    return request('GET', `/api/v1/media/generation/${encodeURIComponent(jobId)}/url`);
+  async function getGenerationImageUrl(jobId, opts = {}) {
+    const variant = opts.variant === 'grid' ? 'grid' : 'full';
+    return request(
+      'GET',
+      `/api/v1/media/generation/${encodeURIComponent(jobId)}/url?variant=${variant}`,
+      null,
+      { noRetry: true }
+    );
   }
 
   async function fetchMediaAsBlobUrl(remoteUrl) {
@@ -1060,12 +1368,16 @@
     checkinMembershipTask,
     redeemInviteCode,
     setCreditGrantMode,
+    createPaymentCheckout,
     getGenerationModels,
+    projectGenerationModels,
     getGenerationCost,
     generateImage,
     mjAction,
     mjBlend,
     getGenerationJob,
+    getGenerationJobByClientRequestId,
+    getGenerationJobImageBlobUrl,
     studioChat,
     studioChatQuote,
     promptToolsOptimize,
@@ -1110,4 +1422,9 @@
     getAssetPackageFolderImages,
     downloadAssetPackageJson
   };
+
+  const initialPath = String(window.location?.pathname || '/').replace(/\/+$/, '') || '/';
+  if (initialPath === '/generate' || initialPath === '/imagegen') {
+    prefetchGenerationModels();
+  }
 })();

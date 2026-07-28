@@ -176,8 +176,8 @@
     }
 
     function getPromptCanvasUrl() {
-      let url = String(window.PROMPT_CANVAS_URL || 'https://infinite-canvas-jay.vercel.app/canvas').trim();
-      if (!url) url = 'https://infinite-canvas-jay.vercel.app/canvas';
+      let url = String(window.PROMPT_CANVAS_URL || 'https://canvas.prompt-hubs.com/canvas').trim();
+      if (!url) url = 'https://canvas.prompt-hubs.com/canvas';
       if (!/\/canvas\/?$/.test(url)) url = url.replace(/\/?$/, '') + '/canvas';
       return url;
     }

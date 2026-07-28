@@ -29,6 +29,13 @@
     });
   }
 
+  function normalizeClientRequestId(value, pendingId) {
+    const raw = String(value || `web.image.${pendingId || ''}`).trim();
+    const normalized = raw.replace(/[^A-Za-z0-9._:-]/g, '_').slice(0, 128);
+    if (normalized.length >= 8) return normalized;
+    return `web.image.${Date.now()}.${Math.random().toString(36).slice(2, 10)}`;
+  }
+
   async function runImageGenWithPrompt(promptOverride, opts) {
     const batchOpts = opts && typeof opts === 'object' ? opts : {};
     if (!global.AuthGate?.requireAuth?.('imagegen')) return { ok: false };
@@ -66,6 +73,8 @@
     }
 
     let pendingId = null;
+    let pendingJob = null;
+    let submitStarted = false;
     let submitUiReleased = false;
     const releaseSubmitUi = () => {
       if (!singleRun || submitUiReleased) return;
@@ -109,6 +118,7 @@
 
       const modelLabel = global.PointsSystem?.getImageGenModel?.(model)?.label || model;
       pendingId = d().genId('pending');
+      const clientRequestId = normalizeClientRequestId(batchOpts.clientRequestId, pendingId);
       const saveTarget = d().getImageGenSaveTarget();
       const submittedRefImages = batchOpts.skipRefImages
         ? []
@@ -131,8 +141,9 @@
             source: 'form'
           }
         );
-      const pendingJob = {
+      pendingJob = {
         id: pendingId,
+        clientRequestId,
         prompt,
         model,
         modelLabel,
@@ -157,6 +168,8 @@
         refImage: submittedRefImage,
         refImages: submittedRefImages.length ? [...submittedRefImages] : null,
         referenceAssets: submittedReferenceAssets.length ? submittedReferenceAssets : null,
+        submitPhase: 'local',
+        generationPhase: 'submitting',
         startedAt: Date.now()
       };
       d().unshiftPendingJob(pendingJob);
@@ -204,6 +217,7 @@
           d().toast(`已使用 ${refUrls.length}/${refSources.length} 张参考图继续生成`);
         }
         const genPayload = {
+          clientRequestId,
           prompt: prompt || '[MJ 混图]',
           model,
           resolution,
@@ -213,6 +227,7 @@
           ...(meta.mjParams ? { mjParams: meta.mjParams } : {})
         };
         let gen;
+        submitStarted = true;
         if (mjBlendMode) {
           gen = await global.PromptHubApi.mjBlend({
             refImageUrls: refUrls.slice(0, 5),
@@ -222,20 +237,12 @@
         } else {
           gen = await global.PromptHubApi.generateImage(genPayload);
         }
-        if (!gen.ok && batchOpts.batch && !mjBlendMode) {
-          const retryable = gen.code === 'RATE_LIMITED'
-            || gen.status === 429
-            || /过于频繁|upstream|502|503|429|rate limit/i.test(String(gen.message || ''));
-          for (let attempt = 0; attempt < 2 && !gen.ok && retryable; attempt += 1) {
-            await new Promise((r) => setTimeout(r, 2000 + attempt * 2500));
-            gen = await global.PromptHubApi.generateImage(genPayload);
-          }
-        }
         if (!gen.ok) {
           const networkLike =
             gen.code === 'NETWORK_ERROR'
             || gen.code === 'API_UNREACHABLE'
             || gen.status === 524
+            || Number(gen.status) >= 500
             || /524|无法连接 api\.prompt-hub|连接.*超时|Failed to fetch|请求失败 \(524\)/i.test(String(gen.message || ''));
           if (networkLike) {
             const recovered = await d().tryRecoverOrphanGenJobAfterSubmitError(genPayload, pendingId, pendingJob);
@@ -357,12 +364,20 @@
 
         const jobId = gen.data.jobId;
         if (!jobId) {
-          d().failPendingJob(pendingId, '未收到任务编号');
-          d().renderImageGenFeed();
-          if (!batchOpts.silentToast) d().toast('未收到任务编号，请重试');
-          return { ok: false, message: '未收到任务编号', batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
+          if (await d().tryRecoverOrphanGenJobAfterSubmitError(genPayload, pendingId, pendingJob)) {
+            d().renderImageGenFeed({ preserveScroll: true });
+            return { ok: true, recovered: true, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
+          }
+          d().deferPendingJobRecovery(
+            pendingId,
+            d().pendingJobToPollCtx(pendingJob),
+            '正在确认任务状态，请勿重复提交…'
+          );
+          d().renderImageGenFeed({ preserveScroll: true });
+          return { ok: true, recovered: true, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
         }
         pendingJob.jobId = jobId;
+        pendingJob.submitPhase = 'accepted';
         pendingJob.slowProvider = ge('isSlowGenProviderModel', model);
         if (gen.data.progressNote) pendingJob.pendingNote = gen.data.progressNote;
         d().trackSessionGenJob(jobId);
@@ -382,6 +397,7 @@
           size,
           cost,
           jobId,
+          clientRequestId,
           referenceAssets: submittedReferenceAssets,
           targetGroup: pendingJob.targetGroup,
           targetTags: pendingJob.targetTags,
@@ -402,7 +418,15 @@
     } catch (e) {
       console.error('[imagegen] runImageGenWithPrompt failed', e);
       if (typeof pendingId === 'string' && pendingId) {
-        d().failPendingJob(pendingId, String(e?.message || '生图提交失败'));
+        if (submitStarted && pendingJob?.clientRequestId) {
+          d().deferPendingJobRecovery(
+            pendingId,
+            d().pendingJobToPollCtx(pendingJob),
+            '正在确认任务状态，请勿重复提交…'
+          );
+        } else {
+          d().failPendingJob(pendingId, String(e?.message || '生图提交失败'));
+        }
         d().safeRenderImageGenFeed({ preserveScroll: true });
       }
       if (!batchOpts.silentToast) {

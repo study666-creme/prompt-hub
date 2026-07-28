@@ -185,7 +185,7 @@
     const mainImage = cardImages[0];
     if (!mainImage) return false;
 
-    await d().finishImageGenRun({
+    const finished = await d().finishImageGenRun({
       prompt,
       model,
       resolution,
@@ -212,6 +212,7 @@
       mjCompositeUrl: composite,
       mjButtons: buttons
     });
+    if (finished === false) return false;
     if (!silentToast) {
       const n = cardImages.length;
       d().toast(
@@ -276,7 +277,7 @@
       return appendImagesToBatchCard(ctx, [poll.data.imageUrl], pendingId);
     }
 
-    await d().finishImageGenRun({
+    const finished = await d().finishImageGenRun({
       ...ctx,
       image: poll.data.imageUrl,
       extraImages: [],
@@ -288,6 +289,7 @@
       cardTitle: ctx.cardTitle,
       genBatchId: ctx.batchId
     });
+    if (finished === false) return false;
     if (!ctx.silentToast && ctx.batchIndex === ctx.batchTotal) {
       const cre = getCreations().find((c) => c.genBatchId === ctx.batchId);
       const n = buildCreationGallery(cre).length || 1;
@@ -328,7 +330,7 @@
       return true;
     }
 
-    await d().finishImageGenRun({
+    const finished = await d().finishImageGenRun({
       ...ctx,
       image: imageUrl,
       extraImages: extras,
@@ -338,6 +340,7 @@
       isRecovery: !!ctx.isRecovery,
       pendingId
     });
+    if (finished === false) return false;
     if (extras.length && !ctx.silentToast) {
       d().toast(`本次上游共 ${extras.length + 1} 张图，已加入最近生成（仅扣 1 次积分）`);
     }

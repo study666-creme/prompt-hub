@@ -3,41 +3,199 @@
  */
 (function () {
   const LS_CREDIT_MODE = 'promptrepo_credit_grant_mode';
-  const WECHAT_ID = 'bz4jx3jp2li1';
-  /** 备案审查期间 true：页内不展示 ¥ 标价；购买仍走微信 + 激活码兑换 */
+  /** 备案审查期间 true：页内不展示 ¥ 标价 */
   const FILING_REVIEW_MODE = false;
-  /** 学习展示模式（已关闭：按钮为「购买」，点击复制微信联系站长） */
+  /** 学习展示模式（保留兼容开关，正式环境关闭） */
   const STUDY_DISPLAY_MODE = false;
   /** 会员计费方式（暂只开放单月购买） */
   const MEMBERSHIP_BILLING_OPTIONS = ['single_month'];
 
   function purchaseBtnLabel() {
-    return showPublicPrices() ? '购买' : '联系购买';
-  }
-
-  function promptWechatPurchase(productHint) {
-    const id = document.getElementById('subscribeWechatId')?.textContent?.trim() || WECHAT_ID;
-    if (typeof window.copyWechatId === 'function') window.copyWechatId();
-    else {
-      navigator.clipboard.writeText(id).catch(() => {});
-    }
-    const hint = productHint ? `（${productHint}）` : '';
-    window.showToast?.(`请加微信购买${hint}，微信号已复制。备注「提示词仓库」，站长发激活码后在上方兑换`, 6000);
+    return showPublicPrices() ? '立即购买' : '暂不可购买';
   }
 
   const CREDITS_PER_YUAN = 100;
   const CREDIT_PACKS = [
-    { id: 'cr10k', credits: 10000 },
-    { id: 'cr5k', credits: 5000 },
-    { id: 'cr3k', credits: 3000 },
-    { id: 'cr1k', credits: 1000 },
-    { id: 'cr500', credits: 500 },
-    { id: 'cr100', credits: 100 }
+    { id: 'points-10', price: 10, credits: 1000 },
+    { id: 'points-20', price: 20, credits: 2000 },
+    { id: 'points-50', price: 50, credits: 5000 },
+    { id: 'points-100', price: 100, credits: 10000 },
+    { id: 'points-200', price: 200, credits: 20000 },
+    { id: 'points-500', price: 500, credits: 50000 }
   ].map((pack) => ({
     ...pack,
-    label: `${pack.credits} 积分`,
-    price: pack.credits / CREDITS_PER_YUAN
+    label: `${pack.credits} 积分`
   }));
+
+  const CUSTOM_CREDIT_PRODUCT_ID = 'points-custom';
+  const CUSTOM_CREDIT_MIN = 5;
+  const CUSTOM_CREDIT_MAX = 5000;
+
+  let pendingPaymentProduct = null;
+  let paymentReturnFocus = null;
+
+  function normalizeCustomAmount(value) {
+    const raw = String(value ?? '').trim();
+    if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) return null;
+    const amount = Number(raw);
+    if (!Number.isFinite(amount) || amount < CUSTOM_CREDIT_MIN || amount > CUSTOM_CREDIT_MAX) return null;
+    return Math.round(amount * 100) / 100;
+  }
+
+  function getPaymentProduct(productId, creditGrantMode, customAmount) {
+    if (productId === CUSTOM_CREDIT_PRODUCT_ID) {
+      const amount = normalizeCustomAmount(customAmount);
+      if (amount === null) return null;
+      const credits = Math.round(amount * CREDITS_PER_YUAN);
+      return {
+        productId,
+        customAmount: amount,
+        creditGrantMode: null,
+        kind: 'credits',
+        title: '积分充值',
+        name: `${credits.toLocaleString('zh-CN')} 积分`,
+        price: amount,
+        arrival: `到账 ${credits.toLocaleString('zh-CN')} 积分`,
+        bonus: '1 元 = 100 积分'
+      };
+    }
+    const creditPack = CREDIT_PACKS.find((pack) => pack.id === productId);
+    if (creditPack) {
+      return {
+        productId,
+        creditGrantMode: null,
+        kind: 'credits',
+        title: '积分充值',
+        name: `${creditPack.credits.toLocaleString('zh-CN')} 积分`,
+        price: creditPack.price,
+        arrival: `到账 ${creditPack.credits.toLocaleString('zh-CN')} 积分`,
+        bonus: '1 元 = 100 积分'
+      };
+    }
+
+    const planId = String(productId || '').match(/^member-(lite|basic|standard|pro)-month$/)?.[1];
+    const plan = planId === 'lite' ? LITE_PLAN : PLANS.find((item) => item.id === planId);
+    const price = planId ? PRICES[planId]?.single_month?.price : null;
+    if (!plan || !Number.isFinite(Number(price))) return null;
+    const grantMode = planId === 'lite' ? 'daily' : (creditGrantMode === 'bundle' ? 'bundle' : 'daily');
+    return {
+      productId,
+      creditGrantMode: grantMode,
+      kind: 'membership',
+      title: '会员开通',
+      name: `${plan.name} · 1 个月`,
+      price: Number(price),
+      arrival: grantMode === 'bundle' ? '会员积分一次性到账' : '会员积分每日领取',
+      bonus: '支付成功后会员权益自动生效'
+    };
+  }
+
+  function renderPaymentSummary(product) {
+    const target = document.getElementById('paymentMethodSummary');
+    const title = document.getElementById('paymentMethodTitle');
+    if (title) title.textContent = product.title;
+    if (!target) return;
+    target.innerHTML = `
+      <div class="payment-summary-product">
+        <span>${esc(product.name)}</span>
+        <strong>¥${esc(formatPriceNum(product.price))}</strong>
+      </div>
+      <div class="payment-summary-arrival">
+        <span>${esc(product.arrival)}</span>
+        <small>${esc(product.bonus)}</small>
+      </div>`;
+  }
+
+  function openPaymentMethod(product) {
+    const overlay = document.getElementById('paymentMethodOverlay');
+    if (!overlay) return;
+    pendingPaymentProduct = product;
+    paymentReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    renderPaymentSummary(product);
+    overlay.hidden = false;
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('payment-method-open');
+    requestAnimationFrame(() => {
+      overlay.classList.add('active');
+      overlay.querySelector('[data-payment-method]')?.focus();
+    });
+  }
+
+  function closePaymentMethod() {
+    const overlay = document.getElementById('paymentMethodOverlay');
+    if (!overlay) return;
+    overlay.classList.remove('active');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('payment-method-open');
+    window.setTimeout(() => {
+      if (!overlay.classList.contains('active')) overlay.hidden = true;
+    }, 180);
+    pendingPaymentProduct = null;
+    paymentReturnFocus?.focus?.();
+    paymentReturnFocus = null;
+  }
+
+  function startDirectPayment(productId, creditGrantMode, customAmount) {
+    if (!isLoggedIn()) {
+      window.showToast?.('请先登录后购买');
+      window.openLoginModal?.();
+      return;
+    }
+    const product = getPaymentProduct(productId, creditGrantMode, customAmount);
+    if (!product) {
+      window.showToast?.(productId === CUSTOM_CREDIT_PRODUCT_ID
+        ? `自定义充值金额需为 ¥${CUSTOM_CREDIT_MIN} 至 ¥${CUSTOM_CREDIT_MAX}，最多两位小数`
+        : '暂时无法读取商品信息，请刷新后重试');
+      return;
+    }
+    openPaymentMethod(product);
+  }
+
+  async function submitDirectPayment(paymentMethod) {
+    const product = pendingPaymentProduct;
+    if (!product || !['alipay', 'wxpay'].includes(paymentMethod)) return;
+    const overlay = document.getElementById('paymentMethodOverlay');
+    const buttons = Array.from(overlay?.querySelectorAll('[data-payment-method]') || []);
+    buttons.forEach((button) => {
+      button.disabled = true;
+      button.classList.toggle('is-loading', button.dataset.paymentMethod === paymentMethod);
+    });
+    let redirected = false;
+    try {
+      const result = await window.PromptHubApi?.createPaymentCheckout?.(
+        product.productId,
+        paymentMethod,
+        product.creditGrantMode || undefined,
+        {
+          customAmount: product.customAmount,
+          returnTarget: 'card-library'
+        }
+      );
+      if (!result?.ok || !result.data?.checkoutUrl) {
+        throw new Error(result?.message || '创建支付订单失败，请稍后重试');
+      }
+      let checkoutUrl;
+      try {
+        checkoutUrl = new URL(String(result.data.checkoutUrl), window.location.href);
+      } catch (_) {
+        checkoutUrl = null;
+      }
+      if (!checkoutUrl || checkoutUrl.protocol !== 'https:') {
+        throw new Error('支付渠道返回了不安全的付款地址，请稍后重试');
+      }
+      window.location.assign(checkoutUrl.href);
+      redirected = true;
+    } catch (error) {
+      window.showToast?.(error?.message || '创建支付订单失败，请稍后重试');
+    } finally {
+      if (!redirected) {
+        buttons.forEach((button) => {
+          button.disabled = false;
+          button.classList.remove('is-loading');
+        });
+      }
+    }
+  }
 
   const DAILY_BY_TIER = { lite: 10, basic: 13, standard: 32, pro: 64 };
   const LUMP_BY_TIER = { basic: 130, standard: 320, pro: 700 };
@@ -102,6 +260,7 @@
         '无限置顶',
         '资产创作工作台',
         '300MB 基础 + 额外 10GB 云存储',
+        '画布自定义 API（标准会员权益 · 当前限免）',
         '可另建 3 个自命名卡片库'
       ]
     },
@@ -116,6 +275,7 @@
         '无限置顶',
         '资产创作工作台',
         '300MB 基础 + 额外 30GB 云存储',
+        '画布多人协作，最多 5 人（含所有者）（专业会员权益 · 当前限免）',
         '可另建 4 个自命名卡片库'
       ]
     }
@@ -338,7 +498,7 @@
     const canPick = isMember && tier && tier !== 'lite';
     el.classList.remove('hidden');
     el.innerHTML = `
-      <p class="subscribe-credit-mode-label">兑换会员卡密前先选领取方式（同一码通用，轻量会员固定每日）</p>
+      <p class="subscribe-credit-mode-label">选择会员积分领取方式（轻量会员固定每日领取）</p>
       <div class="subscribe-credit-mode-options">
         <label class="subscribe-credit-mode-opt${mode === 'daily' ? ' active' : ''}">
           <input type="radio" name="creditGrantMode" value="daily" ${mode === 'daily' ? 'checked' : ''}>
@@ -398,7 +558,7 @@
       <button type="button" class="btn btn-primary btn-sm subscribe-plan-btn subscribe-lite-buy" data-plan="lite" data-billing="${currentBilling}">${purchaseBtnLabel()}</button>
     </article>`;
     row.querySelector('.subscribe-plan-btn')?.addEventListener('click', () => {
-      promptWechatPurchase(`${LITE_PLAN.name} · ${billingLabel}`);
+      void startDirectPayment('member-lite-month', 'daily');
     });
   }
 
@@ -416,12 +576,8 @@
     if (title) title.textContent = currentMainTab === 'credits' ? '积分充值' : '会员订阅';
     if (sub) {
       sub.textContent = currentMainTab === 'credits'
-        ? (showPublicPrices()
-        ? '1 元 = 100 积分 · 无充值折扣或额外赠送 · 激活码在上方兑换'
-          : '添加微信咨询套餐 · 站长发激活码后在上方兑换')
-        : (showPublicPrices()
-          ? '轻量特惠 + 三档会员 · 折后价见各档 · 点击「购买」加微信购买'
-          : '会员服务 · 添加微信咨询 · 激活码兑换');
+        ? '1 元 = 100 积分 · 支付成功后自动到账'
+        : '轻量特惠 + 三档会员 · 支持支付宝与微信支付';
     }
     if (currentMainTab === 'credits') renderCreditPacks();
     else renderPlans();
@@ -431,23 +587,41 @@
     const grid = document.getElementById('subscribeCreditsGrid');
     if (!grid) return;
     grid.innerHTML = CREDIT_PACKS.map(p => {
-      const priceLine = showPublicPrices()
-        ? `<span class="subscribe-shop-card-price">¥${p.price}</span>`
-        : '<span class="subscribe-shop-card-price subscribe-plan-contact">联系咨询</span>';
       return `
       <article class="subscribe-shop-card">
         <div class="subscribe-shop-card-head">
-          <h4 class="subscribe-shop-card-title">${esc(p.label)}</h4>
-          ${priceLine}
+          <span class="subscribe-shop-card-kicker">实付</span>
         </div>
-        <p class="subscribe-shop-card-meta">到账 ${p.credits.toLocaleString('zh-CN')} 积分</p>
-        <button type="button" class="btn btn-primary subscribe-shop-buy-btn" data-shop-buy="${esc(p.id)}">${purchaseBtnLabel()}</button>
+        <div class="subscribe-shop-card-price">¥${p.price}</div>
+        <p class="subscribe-shop-card-arrival">到账 <strong>${p.credits.toLocaleString('zh-CN')}</strong> 积分</p>
+        <p class="subscribe-shop-card-meta">1 元 = ${CREDITS_PER_YUAN} 积分</p>
+        <button type="button" class="btn btn-primary subscribe-shop-buy-btn" data-shop-buy="${esc(p.id)}">立即充值</button>
       </article>`;
     }).join('');
     grid.querySelectorAll('[data-shop-buy]').forEach(btn => {
       const pack = CREDIT_PACKS.find((x) => x.id === btn.dataset.shopBuy);
-      btn.addEventListener('click', () => promptWechatPurchase(pack?.label || '积分套餐'));
+      btn.addEventListener('click', () => { if (pack) void startDirectPayment(pack.id); });
     });
+  }
+
+  function submitCustomCreditTopUp() {
+    const input = document.getElementById('subscribeCustomAmount');
+    const hint = document.getElementById('subscribeCustomAmountHint');
+    const amount = normalizeCustomAmount(input?.value);
+    if (amount === null) {
+      if (hint) {
+        hint.textContent = `请输入 ¥${CUSTOM_CREDIT_MIN} 至 ¥${CUSTOM_CREDIT_MAX}，最多两位小数`;
+        hint.classList.add('is-error');
+      }
+      input?.focus();
+      window.showToast?.(`自定义充值最低 ¥${CUSTOM_CREDIT_MIN}，最多两位小数`);
+      return;
+    }
+    if (hint) {
+      hint.textContent = `预计到账 ${(Math.round(amount * CREDITS_PER_YUAN)).toLocaleString('zh-CN')} 积分`;
+      hint.classList.remove('is-error');
+    }
+    void startDirectPayment(CUSTOM_CREDIT_PRODUCT_ID, undefined, amount);
   }
 
   function renderPlans() {
@@ -484,9 +658,10 @@
     grid.querySelectorAll('.subscribe-plan-btn').forEach(btn => {
       const planId = btn.dataset.plan;
       const billing = btn.dataset.billing;
-      const plan = PLANS.find((p) => p.id === planId);
-      const billingLabel = BILLING_LABELS[billing] || '';
-      btn.addEventListener('click', () => promptWechatPurchase(`${plan?.name || planId} · ${billingLabel}`));
+      btn.addEventListener('click', () => {
+        if (!planId || billing !== 'single_month') return;
+        void startDirectPayment(`member-${planId}-month`, getCreditGrantMode());
+      });
     });
   }
 
@@ -516,7 +691,7 @@
   }
 
   function ensureModalOverlaysOnBody() {
-    ['trialTasksOverlay', 'subscribeOverlay'].forEach((id) => {
+    ['trialTasksOverlay', 'subscribeOverlay', 'paymentMethodOverlay'].forEach((id) => {
       const el = document.getElementById(id);
       if (el && el.parentElement !== document.body) document.body.appendChild(el);
     });
@@ -545,11 +720,39 @@
     openSubscribePanel({ tab: 'credits' });
   }
 
+  function openDeepLinkedPanel() {
+    try {
+      const panel = new URLSearchParams(window.location.search).get('panel');
+      if (panel === 'recharge' || panel === 'credits') {
+        window.requestAnimationFrame(() => openRechargePanel());
+      }
+    } catch (_) { /* ignore malformed URLs */ }
+  }
+
+  function handlePaymentReturn() {
+    try {
+      const url = new URL(window.location.href);
+      const result = url.searchParams.get('payment');
+      if (result !== 'success' && result !== 'processing') return;
+      url.searchParams.delete('payment');
+      window.history?.replaceState?.(window.history.state, '', url.href);
+      window.setTimeout(() => {
+        if (result === 'success') {
+          window.showToast?.('支付成功，积分或会员权益已到账', 5000);
+          void window.PromptHubApi?.syncMe?.({ silent: true });
+          return;
+        }
+        window.showToast?.('支付结果正在确认，请勿重复付款；如未到账请联系客服核查', 7000);
+      }, 0);
+    } catch (_) { /* ignore malformed return URLs */ }
+  }
+
   function unlockPageInteraction() {
     window.AppModalHub?.unlockAll?.();
   }
 
   function closeSubscribePanel() {
+    closePaymentMethod();
     if (window.AppModalHub) {
       window.AppModalHub.close('subscribeOverlay');
       return;
@@ -572,6 +775,7 @@
       btn.addEventListener('click', () => setBilling(btn.dataset.subscribeBilling));
     });
     const overlay = document.getElementById('subscribeOverlay');
+    const paymentOverlay = document.getElementById('paymentMethodOverlay');
     const panel = overlay?.querySelector('.subscribe-panel:not(.trial-tasks-panel)');
     panel?.addEventListener('click', (e) => e.stopPropagation());
     overlay?.addEventListener('click', (e) => {
@@ -582,9 +786,34 @@
       e.stopPropagation();
       closeSubscribePanel();
     });
+    document.getElementById('subscribeCustomBuyBtn')?.addEventListener('click', submitCustomCreditTopUp);
+    document.getElementById('subscribeCustomAmount')?.addEventListener('input', (event) => {
+      const hint = document.getElementById('subscribeCustomAmountHint');
+      const amount = normalizeCustomAmount(event.currentTarget?.value);
+      if (!hint) return;
+      hint.classList.remove('is-error');
+      hint.textContent = amount === null
+        ? `最低 ¥${CUSTOM_CREDIT_MIN}，最高 ¥${CUSTOM_CREDIT_MAX}，最多两位小数`
+        : `预计到账 ${Math.round(amount * CREDITS_PER_YUAN).toLocaleString('zh-CN')} 积分`;
+    });
+    document.getElementById('subscribeCustomAmount')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submitCustomCreditTopUp();
+      }
+    });
+    paymentOverlay?.querySelector('.payment-method-sheet')?.addEventListener('click', (e) => e.stopPropagation());
+    paymentOverlay?.addEventListener('click', (e) => {
+      if (e.target === paymentOverlay) closePaymentMethod();
+    });
+    document.getElementById('paymentMethodCloseBtn')?.addEventListener('click', closePaymentMethod);
+    paymentOverlay?.querySelectorAll('[data-payment-method]').forEach((button) => {
+      button.addEventListener('click', () => void submitDirectPayment(button.dataset.paymentMethod));
+    });
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
-      if (overlay?.classList.contains('active')) closeSubscribePanel();
+      if (paymentOverlay?.classList.contains('active')) closePaymentMethod();
+      else if (overlay?.classList.contains('active')) closeSubscribePanel();
       else if (document.getElementById('trialTasksOverlay')?.classList.contains('active')) {
         window.closeTrialTasksPanel?.();
       }
@@ -620,9 +849,13 @@
     document.addEventListener('DOMContentLoaded', () => {
       bind();
       refreshOfferUI();
+      openDeepLinkedPanel();
+      handlePaymentReturn();
     });
   } else {
     bind();
     refreshOfferUI();
+    openDeepLinkedPanel();
+    handlePaymentReturn();
   }
 })();

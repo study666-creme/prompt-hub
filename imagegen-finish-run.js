@@ -56,15 +56,15 @@
   }) {
     if (!image) {
       d().toast('图片地址无效，请重试');
-      return;
+      return false;
     }
     const baseJobId = baseJobIdFrom(jobId);
     const idx = Math.max(1, Number(imageIndex) || 1);
-    if (isMidjourney && idx > 1) return;
+    if (isMidjourney && idx > 1) return false;
 
     const slotJobId = baseJobId ? (idx === 1 ? baseJobId : `${baseJobId}#${idx}`) : null;
     if (slotJobId) {
-      if (d().isGenerationJobDeleted(slotJobId) || d().isGenerationJobDeleted(baseJobId)) return;
+      if (d().isGenerationJobDeleted(slotJobId) || d().isGenerationJobDeleted(baseJobId)) return false;
       const existingCre = findCreationForBaseJob(baseJobId);
       if (existingCre && !isMidjourney) {
         if (idx === 1) {
@@ -73,9 +73,9 @@
           d().prunePendingJobsWithCreations?.();
           d().renderImageGenFeed({ preserveScroll: true });
         }
-        return;
+        return true;
       }
-      if (finishingJobIds.has(slotJobId)) return;
+      if (finishingJobIds.has(slotJobId)) return true;
       finishingJobIds.add(slotJobId);
     }
     try {
@@ -242,6 +242,7 @@
         }
       }
       if (baseJobId && idx === 1) d().clearSessionGenJob(baseJobId);
+      return true;
     } finally {
       if (slotJobId) finishingJobIds.delete(slotJobId);
     }

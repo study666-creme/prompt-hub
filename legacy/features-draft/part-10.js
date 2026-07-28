@@ -726,7 +726,7 @@
     syncImageGenModelParamsUI();
     syncImageGenModelHint();
     updateImageGenResolutionSelect();
-    syncImageGenQualityUI();
+    updateImageGenQualitySelect();
     updateImageGenCostHint();
   }
 
@@ -785,7 +785,7 @@
     { id: 'lingtu-fast', label: '香蕉 · 极速 1K', provider: 'newapi', uiFamily: 'banana', sortOrder: 93, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'] },
     { id: 'lingtu-2', label: '香蕉 · 2代 1K/2K/4K', provider: 'newapi', uiFamily: 'banana', sortOrder: 94, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
     { id: 'lingtu-pro', label: '香蕉 · 专业 1K/2K/4K', provider: 'newapi', uiFamily: 'banana', sortOrder: 95, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
-    { id: 'lingtu', label: '香蕉 · 标准 1K/2K/4K', provider: 'newapi', uiFamily: 'banana', sortOrder: 96, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'] },
+    { id: 'lingtu', label: '香蕉 · 标准 1K', provider: 'newapi', uiFamily: 'banana', sortOrder: 96, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'] },
     { id: 'apimart-mj-v81', label: 'MJ v8.1', description: '最新主版本 · 写实/概念通用 · 细节与光影最佳', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 110, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'] },
     { id: 'apimart-mj-v7', label: 'MJ v7', description: '上一代主力 · 复杂构图稳定 · 风格均衡', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 111, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'] },
     { id: 'apimart-mj-v61', label: 'MJ v6.1', description: '经典 v6 · 风格稳定 · 适合批量出图', provider: 'apimart', uiFamily: 'midjourney', sortOrder: 112, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'] },
