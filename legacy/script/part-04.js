@@ -191,60 +191,48 @@
       renderCards(force !== false);
     }
 
-    function getPromptCanvasUrl() {
-      let url = String(window.PROMPT_CANVAS_URL || 'https://infinite-canvas-jay.vercel.app/canvas').trim();
-      if (!url) url = 'https://infinite-canvas-jay.vercel.app/canvas';
+    function getPromptCanvasUrl(options = {}) {
+      if (window.PromptCanvasBridge?.buildUrl) {
+        return window.PromptCanvasBridge.buildUrl(options);
+      }
+      let url = String(window.PROMPT_CANVAS_URL || 'https://canvas.prompt-hubs.com/canvas').trim();
+      if (!url) url = 'https://canvas.prompt-hubs.com/canvas';
       if (!/\/canvas\/?$/.test(url)) url = url.replace(/\/?$/, '') + '/canvas';
       return url;
     }
-    function openPromptCanvas() {
+    function openPromptCanvas(options = {}) {
       window.MobileUI?.closeAllMobileOverlays?.();
-      window.open(getPromptCanvasUrl(), '_blank', 'noopener,noreferrer');
+      if (window.PromptCanvasBridge?.open) return window.PromptCanvasBridge.open(options);
+      return window.open(getPromptCanvasUrl(options), '_blank', 'noopener,noreferrer');
+    }
+    function openPromptCanvasCard(cardId) {
+      window.MobileUI?.closeAllMobileOverlays?.();
+      if (window.PromptCanvasBridge?.openCard) return window.PromptCanvasBridge.openCard(cardId);
+      return openPromptCanvas({ cardId });
     }
     window.openPromptCanvas = openPromptCanvas;
+    window.openPromptCanvasCard = openPromptCanvasCard;
 
     function initWarehouseHero() {
       const hero = document.getElementById('warehouseHero');
       if (!hero || hero.dataset.bound === '1') return;
       hero.dataset.bound = '1';
 
-      const cardsRoot = document.getElementById('cardsContainer');
-      const appRoot = document.querySelector('.app-main');
-      const scrollRoots = [cardsRoot, appRoot].filter(Boolean);
-      let frame = 0;
-
-      const syncHeroState = () => {
-        frame = 0;
-        const top = scrollRoots.reduce((max, root) => Math.max(max, Number(root.scrollTop) || 0), 0);
-        /* Mobile uses one document scroll; resizing the hero there changes the scroll range mid-gesture. */
-        const condensed = !isMobileViewport() && top > 28;
-        hero.classList.toggle('is-condensed', condensed);
-        hero.dataset.condensed = condensed ? '1' : '0';
-      };
-      const scheduleSync = () => {
-        if (frame) return;
-        frame = requestAnimationFrame(syncHeroState);
-      };
-
-      scrollRoots.forEach((root) => root.addEventListener('scroll', scheduleSync, { passive: true }));
-      window.addEventListener('resize', scheduleSync, { passive: true });
-
-      hero.querySelector('[data-warehouse-hero-expand]')?.addEventListener('click', () => {
-        hero.classList.remove('is-condensed');
-        hero.dataset.condensed = '0';
-        scrollRoots.forEach((root) => root.scrollTo?.({ top: 0, behavior: 'smooth' }));
-      });
-
       const countSource = document.getElementById('allCount');
       const countTarget = document.getElementById('warehouseHeroCount');
-      const syncCount = () => {
+      const scopeSource = document.getElementById('currentGroupTitle');
+      const scopeTarget = document.getElementById('warehouseHeroScope');
+      const syncSummary = () => {
         if (countTarget) countTarget.textContent = countSource?.textContent?.trim() || '0';
+        if (scopeTarget) scopeTarget.textContent = scopeSource?.textContent?.trim() || '全部提示词';
       };
-      syncCount();
+      syncSummary();
       if (countSource && typeof MutationObserver !== 'undefined') {
-        new MutationObserver(syncCount).observe(countSource, { childList: true, characterData: true, subtree: true });
+        new MutationObserver(syncSummary).observe(countSource, { childList: true, characterData: true, subtree: true });
       }
-      scheduleSync();
+      if (scopeSource && typeof MutationObserver !== 'undefined') {
+        new MutationObserver(syncSummary).observe(scopeSource, { childList: true, characterData: true, subtree: true });
+      }
     }
 
     function initAppNav() {

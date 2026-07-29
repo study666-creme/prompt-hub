@@ -189,55 +189,61 @@
         || cardIdAtStart !== selectedCardId
         || imageAtStart !== imageData
         || galleryIndexAtStart !== panelGalleryIndex;
+      const previewLoadingText = '\u56fe\u7247\u52a0\u8f7d\u4e2d\u2026';
+      const previewErrorText = '\u56fe\u7247\u6682\u65f6\u65e0\u6cd5\u52a0\u8f7d\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5';
+      const showPreviewLoading = () => {
+        if (previewStale()) return;
+        dropArea?.classList.add('has-image', 'is-loading-preview');
+        dropArea?.classList.remove('no-image', 'is-preview-error');
+        dropArea?.setAttribute('aria-busy', 'true');
+        if (p) {
+          p.style.display = 'block';
+          p.textContent = previewLoadingText;
+        }
+        if (img) img.style.display = 'block';
+      };
       const finishPreviewLoad = () => {
         if (previewStale()) return;
-        dropArea?.classList.remove('is-loading-preview');
+        dropArea?.classList.remove('is-loading-preview', 'is-preview-error', 'no-image');
+        dropArea?.classList.add('has-image');
+        dropArea?.style.removeProperty('--panel-preview-loading-height');
+        dropArea?.removeAttribute('aria-busy');
+        if (p) p.style.display = 'none';
         const dl = document.getElementById('cardDownloadImageBtn');
         if (dl) dl.disabled = false;
       };
-      const bindPreviewImgHandlers = () => {
-        if (!img) return;
-        img.onload = () => {
-          if (!previewStale()) finishPreviewLoad();
-        };
-        img.onerror = () => {
-          if (previewStale()) return;
-          void (async () => {
-            const slotJob = getEditPanelSlotJobId(cardAtStart, galleryIndexAtStart);
-            if (slotJob && window.WarehouseThumb?.resolveForCard) {
-              const gridRetry = await window.WarehouseThumb.resolveForCard(imageAtStart, {
-                assetId: cardIdAtStart,
-                cardId: cardIdAtStart,
-                jobId: slotJob,
-                galleryIndex: galleryIndexAtStart
-              });
-              if (!previewStale() && gridRetry && !gridRetry.includes('data:image/svg')) {
-                img.src = gridRetry;
-                return;
-              }
-            }
-            dropArea?.classList.add('is-loading-preview');
-          })();
-        };
+      const failPreviewLoad = () => {
+        if (previewStale()) return;
+        dropArea?.classList.remove('is-loading-preview');
+        dropArea?.classList.add('has-image', 'is-preview-error');
+        dropArea?.classList.remove('no-image');
+        dropArea?.removeAttribute('aria-busy');
+        if (p) {
+          p.style.display = 'block';
+          p.textContent = previewErrorText;
+        }
+        if (img) {
+          img.onload = null;
+          img.onerror = null;
+          img.removeAttribute('src');
+          img.style.display = 'none';
+        }
+        const dl = document.getElementById('cardDownloadImageBtn');
+        if (dl) dl.disabled = true;
       };
       const dlBtn = document.getElementById('cardDownloadImageBtn');
       if (loadPreview) {
         let src = '';
-        if (typeof imageData === 'string' && imageData.startsWith('data:image/')) {
+        if (typeof imageData === 'string' && /^(blob:|data:image\/)/i.test(imageData)) {
           src = imageData;
-        } else if (typeof imageData === 'string' && /^https?:\/\//i.test(imageData) && !window.SupabaseSync?.isInvalidMediaUrl?.(imageData)) {
+        } else if (typeof imageData === 'string' && /^https?:\/\//i.test(imageData)
+          && isPanelDisplayableImageUrl(imageData)) {
           src = window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(imageData) ? '' : imageData;
         }
         const waiting = !src || src.includes('data:image/svg');
-        dropArea?.classList.toggle('is-loading-preview', waiting);
-        if (dlBtn) dlBtn.disabled = waiting;
         if (previewStale()) return;
-        bindPreviewImgHandlers();
-        if (src && !src.includes('data:image/svg')) {
-          img.src = src;
-        } else {
-          img.removeAttribute('src');
-        }
+        showPreviewLoading();
+        if (dlBtn) dlBtn.disabled = true;
         img.style.display = 'block';
         img.style.cursor = 'zoom-in';
         img.onclick = (e) => {
@@ -250,42 +256,88 @@
           };
           void openCardImageLightbox(selectedCardId ? cards.find((c) => c.id === selectedCardId) || draftCard : draftCard);
         };
-        p.style.display = 'none';
         removeBtn.style.display = 'flex';
         dropArea.classList.add('has-image');
         dropArea.classList.remove('no-image');
         delete img.dataset.previewFullUrl;
-        let previewGridShown = false;
         const slotJobId = getEditPanelSlotJobId(cardAtStart, galleryIndexAtStart);
-        const pipePreviewOpts = {
-          assetId: cardIdAtStart,
-          cardId: cardIdAtStart,
-          jobId: slotJobId || undefined,
-          galleryIndex: galleryIndexAtStart,
-          useJobImageApi: false,
-          allowGridFallback: false
+        const triedSources = new Set();
+        let retryCount = 0;
+        let retryPreviewSource;
+        const usePreviewSource = (nextSrc) => {
+          if (previewStale() || !isPanelDisplayableImageUrl(nextSrc)) return false;
+          const normalized = String(nextSrc);
+          if (triedSources.has(normalized)) return false;
+          triedSources.add(normalized);
+          showPreviewLoading();
+          img.onload = () => {
+            if (!previewStale()) finishPreviewLoad();
+          };
+          img.onerror = () => {
+            if (!previewStale()) void retryPreviewSource(normalized);
+          };
+          img.src = normalized;
+          // Cached data/blob URLs may complete before the event loop runs.
+          if (img.complete && img.naturalWidth > 0) finishPreviewLoad();
+          return true;
         };
-        if (waiting && cardIdAtStart) {
-          let gridUrl = '';
+        retryPreviewSource = async (failedSrc) => {
+          if (previewStale()) return;
+          if (retryCount >= 2) {
+            failPreviewLoad();
+            return;
+          }
+          retryCount += 1;
+          let retry = '';
           if (cardAtStart) {
-            gridUrl = await resolveEditPanelGalleryPreview(imageAtStart, cardAtStart, galleryIndexAtStart);
+            retry = await resolveEditPanelGalleryPreview(imageAtStart, cardAtStart, galleryIndexAtStart, {
+              forceResolve: true,
+              failedSrc
+            });
           }
-          if (!previewStale() && gridUrl && !gridUrl.includes('data:image/svg')) {
-            img.src = gridUrl;
-            previewGridShown = true;
-            finishPreviewLoad();
+          const resolvedIsNew = retry
+            && String(retry) !== String(failedSrc)
+            && !triedSources.has(String(retry));
+          if (!resolvedIsNew && slotJobId && window.WarehouseThumb?.resolveForCard) {
+            try {
+              retry = await window.WarehouseThumb.resolveForCard(imageAtStart, {
+                assetId: cardIdAtStart,
+                cardId: cardIdAtStart,
+                jobId: slotJobId,
+                galleryIndex: galleryIndexAtStart
+              });
+            } catch (e) { /* fallback below */ }
           }
-        }
-        if (src && !src.includes('data:image/svg')) {
+          if (!previewStale() && retry && String(retry) !== String(failedSrc) && usePreviewSource(retry)) return;
+          failPreviewLoad();
+        };
+        if (!waiting && src && !src.includes('data:image/svg')) {
           if (!window.SupabaseSync?.isStorageRef?.(imageAtStart)) img.dataset.previewFullUrl = src;
-          finishPreviewLoad();
-        } else if (previewGridShown) {
-          finishPreviewLoad();
+          usePreviewSource(src);
+        } else if (cardAtStart) {
+          let resolved = await resolveEditPanelGalleryPreview(imageAtStart, cardAtStart, galleryIndexAtStart);
+          if (!resolved) {
+            resolved = await resolveEditPanelGalleryPreview(imageAtStart, cardAtStart, galleryIndexAtStart, {
+              forceResolve: true
+            });
+          }
+          if (!previewStale() && resolved && usePreviewSource(resolved)) {
+            if (window.SupabaseSync?.isStorageRef?.(imageAtStart)) delete img.dataset.previewFullUrl;
+          } else if (!previewStale()) {
+            failPreviewLoad();
+          }
+        } else {
+          failPreviewLoad();
         }
       } else {
         if (dlBtn) dlBtn.disabled = true;
-        dropArea?.classList.remove('is-loading-preview');
+        dropArea?.classList.remove('is-loading-preview', 'is-preview-error');
+        dropArea?.style.removeProperty('--panel-preview-loading-height');
+        dropArea?.removeAttribute('aria-busy');
         img.style.display = 'none';
+        img.onload = null;
+        img.onerror = null;
+        img.removeAttribute('src');
         if (p) {
           p.style.display = 'block';
           p.textContent = '点击、拖拽或 Ctrl+V 粘贴图片';

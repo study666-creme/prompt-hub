@@ -1,5 +1,7 @@
 # 列表图片加载
 
+复核日期：2026-07-29。下述仓库 UI 说明属于发布冻结中的未部署候选；生产图片链路未因本次视觉改版而改变。
+
 ## 目标
 
 卡片库、社区和生图仓库需要在不拉取 full 原图的前提下快速显示首屏，并在滚动时稳定分页。长期引用存储在 JSON 中，浏览器通过 Worker 批量换取 CDN URL。
@@ -36,6 +38,7 @@ storage://card-images/{user}/{file}
 | `warehouse-thumb.js` | 生图仓库 grid 缩略图请求 |
 | `mobile.js` | 手机首屏 cap、滚动 boost |
 | `legacy/script/part-09.js` | 卡片 DOM 分页与首屏绑定 |
+| `styles-warehouse.css` | 卡片仓库媒体、元数据、空态和手机布局的独立视觉层 |
 | `feed-images.js` | 社区/生图引用归一化 |
 | `server/src/routes/v1/media.ts` | upload、sign-batch、CDN URL |
 | `server/src/lib/media-cdn.ts` | 路径候选、grid 物化和缓存 token |
@@ -60,5 +63,15 @@ storage://card-images/{user}/{file}
 npm run check:predeploy
 node scripts/audit-production-mobile-first-screen.mjs
 ```
+
+冻结树中的仓库 UI 可使用独立浏览器验收，不访问生产 API：
+
+```powershell
+$env:PLAYWRIGHT_PACKAGE_DIR = '<playwright package directory>'
+$env:SCREENSHOT_DIR = '<optional screenshot directory>'
+node scripts/verify-warehouse-ui-browser.mjs
+```
+
+该检查注入 8 张 `_grid` 图卡和 4 张文本卡，覆盖桌面、手机及空仓状态，并验证媒体槽、类型元数据、手机拖拽关闭和横向溢出。
 
 手机生产基线见 `CURRENT-ISSUES.md`。浏览器检查首批卡片数、单图体积、是否出现 full 路径、滚动后是否按页增加，以及 404 是否重复刷屏。

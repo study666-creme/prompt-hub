@@ -1,5 +1,7 @@
 # 数据与仓库安全
 
+最后核对：2026-07-27。
+
 ## 公开仓库边界
 
 这个仓库是公开的。以下内容不得提交：
@@ -20,6 +22,16 @@
 | 公共社区帖/图 | 只读公开接口 | 发布、下架和审核 |
 | 积分/会员/卡密 | 只读本人状态 | 唯一写入方 |
 | 生图任务 | 只读本人 | 扣费、结算、退款和归档 |
+
+`consume_user_credits`、`refund_user_credits`、会员原子 RPC 和 `grant_canvas_create_node_reward` 只授权 `service_role` 执行。客户端只能通过已认证 Worker 路由提交自己的用户 ID，不能直接调用奖励或钱包函数。
+
+## 付费操作安全
+
+- 图片和视频的上游 POST 必须先通过数据库 CAS 领取 `queued` 状态，并绑定唯一 attempt ID。
+- 网络超时、队列重投、Worker 中断、`running`、`outcome_unknown` 或 task `not_found` 都不能自动发起第二次付费 POST。
+- 确定性 4xx、上游明确失败和未知结果 SLA 使用持久 `refund_pending` 槽；退款 ref 唯一并可幂等恢复。
+- 视频播放只根据当前用户拥有的任务 ID访问配置好的 New API `/content` 端点，不能 fetch 数据库中的任意 `resultUrl`，避免 SSRF。
+- 上游渠道 ID、真实基址和密钥只存在服务端；公开目录使用 `public-model-projection`，不得透出渠道映射。
 
 RLS 和 GRANT 定义在 `supabase/`。恢复新库后必须执行 schema/迁移并用 `/health` 验证 service role，不要临时开放全表匿名读写来绕过权限错误。
 
@@ -42,6 +54,8 @@ git grep -n -I -E "(BEGIN .*PRIVATE KEY|sk-[A-Za-z0-9_-]{20,}|service_role.*=.+)
 ```
 
 该简单扫描不能替代专用 secret scanner。发现已公开的真实密钥时，先在提供商处撤销/轮换，再从当前提交移除；仅删除 Git 文件不能让旧密钥失效。
+
+正式 Worker 发布还会由 `server/scripts/run-worker-release.mjs` 拒绝冻结标记和脏工作区，并把已审查提交 SHA 注入 `/health.buildSha`。冻结期间只能执行 dry-run。
 
 ## 事故处理
 

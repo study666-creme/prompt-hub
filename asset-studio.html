@@ -6,20 +6,20 @@
   <meta name="theme-color" content="#0a0c10">
   <link rel="icon" href="assets/asset-studio-icon.png" type="image/png">
   <title>卡片式创作 · Prompt Hub</title>
-  <link rel="stylesheet" href="styles.css?v=20260601b">
-  <link rel="stylesheet" href="styles-features.css?v=20260601a">
-  <link rel="stylesheet" href="styles-theme.css?v=20260615z">
-  <link rel="stylesheet" href="asset-studio.css?v=20260604a">
-  <script src="vendor/supabase.min.js?v=20260606m"></script>
+  <link rel="stylesheet" href="styles.css?v=20260724b">
+  <link rel="stylesheet" href="styles-features.css?v=20260724b">
+  <link rel="stylesheet" href="styles-theme.css?v=20260724b">
+  <link rel="stylesheet" href="asset-studio.css?v=20260724b">
+  <script src="vendor/supabase.min.js?v=20260724b"></script>
   <script src="supabase-config.js"></script>
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="api-client.js?v=20260711b"></script>
-  <script src="supabase-sync.js?v=20260616t"></script>
-  <script src="membership.js?v=20260616n"></script>
-  <script src="points-system.js?v=20260619j"></script>
-  <script src="theme.js?v=20260615z"></script>
-  <script type="module" src="ui-background.js?v=20260615z"></script>
+  <script src="api-client.js?v=20260724b"></script>
+  <script src="supabase-sync.js?v=20260724b"></script>
+  <script src="membership.js?v=20260724b"></script>
+  <script src="points-system.js?v=20260724b"></script>
+  <script src="theme.js?v=20260724b"></script>
+  <script type="module" src="ui-background.js?v=20260724b"></script>
 </head>
 <body class="asset-studio-body">
   <div id="rippleGridBg" class="ripple-grid-bg" aria-hidden="true"></div>
@@ -152,16 +152,17 @@
               <label for="studioImageModel">生图模型</label>
               <select id="studioImageModel" class="settings-input studio-gen-select">
                 <option value="image2">全能模型2 · 1K</option>
+                <option value="image2-free">全能模型2 · 免费 1K</option>
                 <option value="image2-pro">全能模型2 · 高质量 2K/4K</option>
                 <option value="image2-hd">全能模型2 · 经济 2K/4K</option>
                 <option value="lingtu-fast">香蕉 · 极速 1K</option>
                 <option value="lingtu-2">香蕉 · 2代 1K/2K/4K</option>
                 <option value="lingtu-pro">香蕉 · 专业 1K/2K/4K</option>
-                <option value="lingtu">香蕉 · 标准 1K/2K/4K</option>
-                <option value="apimart-mj-v81">MJ v8.1</option>
-                <option value="apimart-mj-v7">MJ v7</option>
-                <option value="apimart-mj-v61">MJ v6.1</option>
-                <option value="apimart-mj-niji7">MJ Niji 7</option>
+                <option value="lingtu">香蕉 · 标准 1K</option>
+                <option value="mj-v81">MJ v8.1</option>
+                <option value="mj-v7">MJ v7</option>
+                <option value="mj-v61">MJ v6.1</option>
+                <option value="mj-niji7">MJ Niji 7</option>
               </select>
               <div class="studio-gen-row">
                 <div>
@@ -337,7 +338,7 @@
     <div class="custom-modal studio-modal" id="studioModal" onclick="event.stopPropagation()"></div>
   </div>
 
-  <script src="subscription.js?v=20260619j"></script>
-  <script src="asset-studio.js?v=20260711b"></script>
+  <script src="subscription.js?v=20260724b"></script>
+  <script src="asset-studio.js?v=20260724b"></script>
 </body>
 </html>

@@ -3,6 +3,12 @@ import type { Env } from '../env';
 import { mookoImageFetchCandidates } from './mooko';
 import { cardImageExists, hasR2, mediaStorageMode, uploadCardImage, uploadToR2 } from './r2-storage';
 import { storageObjectExistsLight } from './media-cdn';
+import {
+  MIN_VALID_IMAGE_BYTES,
+  normalizeSupportedImageMime,
+  validatedImageMime,
+  type SupportedImageMime
+} from './image-content';
 
 const BUCKET = 'card-images';
 const STORAGE_PREFIX = `storage://${BUCKET}/`;
@@ -202,6 +208,69 @@ function parseDataImageUrl(dataUrl: string): { mime: string; bytes: ArrayBuffer 
   return { mime, bytes };
 }
 
+type ValidatedResponseBody = {
+  body: ReadableStream<Uint8Array>;
+  mime: SupportedImageMime;
+};
+
+async function validateResponseStream(
+  response: Response,
+  declaredMime: string
+): Promise<ValidatedResponseBody | null> {
+  if (!response.body) return null;
+  if (!normalizeSupportedImageMime(declaredMime)) {
+    await response.body.cancel('invalid_image_content_type').catch(() => {});
+    return null;
+  }
+  const reader = response.body.getReader();
+  const prefetched: Uint8Array[] = [];
+  let prefetchedBytes = 0;
+
+  try {
+    while (prefetchedBytes < MIN_VALID_IMAGE_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      prefetched.push(value);
+      prefetchedBytes += value.byteLength;
+    }
+
+    const head = new Uint8Array(Math.min(prefetchedBytes, 16));
+    let headOffset = 0;
+    for (const chunk of prefetched) {
+      if (headOffset >= head.length) break;
+      const take = Math.min(chunk.byteLength, head.length - headOffset);
+      head.set(chunk.subarray(0, take), headOffset);
+      headOffset += take;
+    }
+    const mime = validatedImageMime(declaredMime, head, prefetchedBytes);
+    if (!mime) {
+      await reader.cancel('invalid_image_response');
+      return null;
+    }
+
+    let prefetchedIndex = 0;
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        if (prefetchedIndex < prefetched.length) {
+          controller.enqueue(prefetched[prefetchedIndex++]);
+          return;
+        }
+        const { done, value } = await reader.read();
+        if (done) controller.close();
+        else if (value?.byteLength) controller.enqueue(value);
+      },
+      async cancel(reason) {
+        await reader.cancel(reason);
+      }
+    });
+    return { body, mime };
+  } catch (error) {
+    await reader.cancel(error).catch(() => {});
+    throw error;
+  }
+}
+
 export function extensionFromImageMime(mime: string): string {
   const m = String(mime || '').toLowerCase();
   if (m.includes('png')) return 'png';
@@ -253,40 +322,58 @@ export async function archiveRemoteImage(
         const parsed = parseDataImageUrl(remoteUrl);
         if (!parsed) throw new Error('invalid_data_url');
         buf = parsed.bytes;
-        mime = parsed.mime;
+        const validatedMime = validatedImageMime(parsed.mime, new Uint8Array(buf));
+        if (!validatedMime) throw new Error('invalid_image_content');
+        mime = validatedMime;
       } else {
         const candidates = mookoImageFetchCandidates(remoteUrl);
-        let res: Response | null = null;
+        const mode = env ? mediaStorageMode(env) : 'supabase';
+        const streamToR2 = !!env && hasR2(env) && (mode === 'r2' || mode === 'r2-first');
+        let validBuffer: ArrayBuffer | null = null;
+        let validStream: ValidatedResponseBody | null = null;
         let lastStatus = 0;
         for (const fetchUrl of candidates) {
-          res = await fetch(fetchUrl, {
+          const res = await fetch(fetchUrl, {
             headers: { Accept: 'image/*' }
           });
           lastStatus = res.status;
-          if (res.ok) break;
+          if (!res.ok) {
+            await res.body?.cancel().catch(() => {});
+            continue;
+          }
+          const declaredMime = res.headers.get('content-type') || '';
+          if (streamToR2 && res.body) {
+            validStream = await validateResponseStream(res, declaredMime);
+            if (validStream) {
+              mime = validStream.mime;
+              break;
+            }
+            continue;
+          }
+          const candidateBuffer = await res.arrayBuffer();
+          const validMime = validatedImageMime(declaredMime, new Uint8Array(candidateBuffer));
+          if (!validMime) continue;
+          validBuffer = candidateBuffer;
+          mime = validMime;
+          break;
         }
-        if (!res || !res.ok) {
+        if (!validBuffer && !validStream) {
           throw new Error(`fetch_image_failed_${lastStatus || 0}`);
         }
-        const contentType = res.headers.get('content-type') || 'image/jpeg';
-        mime = contentType.split(';')[0] || 'image/jpeg';
         const path = generatedArchivePath(userId, jobId, mime);
 
-        if (env && hasR2(env) && res.body) {
-          const mode = mediaStorageMode(env);
-          const streamed = await uploadToR2(env, path, res.body, mime);
+        if (env && validStream) {
+          const streamed = await uploadToR2(env, path, validStream.body, mime);
           if (!streamed) throw new Error('r2_stream_upload_failed');
-          if (mode === 'r2' || mode === 'r2-first') {
-            if (await verifyStoredObject(admin, path, env)) {
-              return toStorageRef(path);
-            }
-            throw new Error('archive_verify_failed');
+          if (await verifyStoredObject(admin, path, env)) {
+            return toStorageRef(path);
           }
+          throw new Error('archive_verify_failed');
         }
 
-        buf = await res.arrayBuffer();
+        buf = validBuffer!;
       }
-      if (!buf.byteLength) throw new Error('empty_image');
+      if (buf.byteLength < MIN_VALID_IMAGE_BYTES) throw new Error('invalid_image_content');
 
       const path = generatedArchivePath(userId, jobId, mime);
 

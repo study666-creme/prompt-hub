@@ -6,8 +6,20 @@
 
   /** @type {Record<string, any>} */
   let deps = {};
+  const batchMergeChains = new Map();
   function d() { return deps; }
   function CG() { return global.PromptHubCardGallery; }
+
+  function serializeBatchMerge(batchId, work) {
+    const key = String(batchId || '');
+    if (!key) return Promise.resolve().then(work);
+    const previous = batchMergeChains.get(key) || Promise.resolve();
+    const current = previous.catch(() => {}).then(work);
+    batchMergeChains.set(key, current);
+    return current.finally(() => {
+      if (batchMergeChains.get(key) === current) batchMergeChains.delete(key);
+    });
+  }
 
   function baseJobId(jobId) {
     return jobId ? String(jobId).replace(/#\d+$/, '') : '';
@@ -228,7 +240,7 @@
     const batchId = ctx?.batchId;
     const urls = (images || []).filter(Boolean);
     if (!batchId || !urls.length) return false;
-    const creation = getCreations().find((c) => c.genBatchId === batchId);
+    let creation = getCreations().find((c) => c.genBatchId === batchId);
     if (!creation?.id) return false;
 
     const beforeLen = buildCreationGallery(creation).length;
@@ -245,6 +257,10 @@
           console.warn('[batch-merge] gallery archive failed', e);
         }
       }
+      // Archival is asynchronous. Re-read the live card before merging so a
+      // result written while this image was being stored is never overwritten.
+      creation = getCreations().find((c) => c.genBatchId === batchId) || creation;
+      merged = buildCreationGallery(creation);
       merged = CG()?.mergeCardGalleryImages
         ? CG().mergeCardGalleryImages(merged, [stored])
         : [...merged, stored].filter(Boolean).slice(0, CG()?.MAX || 5);
@@ -270,30 +286,32 @@
   async function saveBatchMergedFromPoll(poll, ctx, pendingId) {
     if (!ctx?.batchMergeCards || !ctx?.batchId || !poll?.data?.imageUrl) return false;
     if (poll.data.isMidjourney || d().isImageGenMidjourneyModel?.(ctx?.model)) return false;
-    const existing = getCreations().find((c) => c.genBatchId === ctx.batchId);
+    return serializeBatchMerge(ctx.batchId, async () => {
+      const existing = getCreations().find((c) => c.genBatchId === ctx.batchId);
 
-    if (existing) {
-      return appendImagesToBatchCard(ctx, [poll.data.imageUrl], pendingId);
-    }
+      if (existing) {
+        return appendImagesToBatchCard(ctx, [poll.data.imageUrl], pendingId);
+      }
 
-    await d().finishImageGenRun({
-      ...ctx,
-      image: poll.data.imageUrl,
-      extraImages: [],
-      cost: ctx.cost,
-      jobId: ctx.jobId,
-      silentToast: true,
-      isRecovery: !!ctx.isRecovery,
-      pendingId,
-      cardTitle: ctx.cardTitle,
-      genBatchId: ctx.batchId
+      await d().finishImageGenRun({
+        ...ctx,
+        image: poll.data.imageUrl,
+        extraImages: [],
+        cost: ctx.cost,
+        jobId: ctx.jobId,
+        silentToast: true,
+        isRecovery: !!ctx.isRecovery,
+        pendingId,
+        cardTitle: ctx.cardTitle,
+        genBatchId: ctx.batchId
+      });
+      if (!ctx.silentToast && ctx.batchIndex === ctx.batchTotal) {
+        const cre = getCreations().find((c) => c.genBatchId === ctx.batchId);
+        const n = buildCreationGallery(cre).length || 1;
+        d().toast(`已合并 ${n} 张到同一最近记录`);
+      }
+      return true;
     });
-    if (!ctx.silentToast && ctx.batchIndex === ctx.batchTotal) {
-      const cre = getCreations().find((c) => c.genBatchId === ctx.batchId);
-      const n = buildCreationGallery(cre).length || 1;
-      d().toast(`已合并 ${n} 张到同一最近记录`);
-    }
-    return true;
   }
 
   /** 写入最近生成；已有记录时跳过 */
@@ -339,7 +357,7 @@
       pendingId
     });
     if (extras.length && !ctx.silentToast) {
-      d().toast(`本次上游共 ${extras.length + 1} 张图，已加入最近生成（仅扣 1 次积分）`);
+      d().toast(`本次共生成 ${extras.length + 1} 张图，已加入最近生成（仅扣 1 次积分）`);
     }
     return true;
   }

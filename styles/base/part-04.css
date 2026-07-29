@@ -419,7 +419,8 @@
       display: none;
       margin-top: 4px;
     }
-    .card-copy-btn {
+    .card-copy-btn,
+    .card-canvas-btn {
       position: absolute;
       right: 8px;
       bottom: 8px;
@@ -440,19 +441,26 @@
       transform: translateY(4px);
       transition: opacity 0.2s ease, transform 0.2s ease, border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
     }
+    .card-canvas-btn {
+      right: 42px;
+    }
     .card:hover .card-copy-btn,
-    .card:focus-within .card-copy-btn {
+    .card:focus-within .card-copy-btn,
+    .card:hover .card-canvas-btn,
+    .card:focus-within .card-canvas-btn {
       opacity: 0.72;
       pointer-events: auto;
       transform: translateY(0);
     }
-    .card-copy-btn:hover {
+    .card-copy-btn:hover,
+    .card-canvas-btn:hover {
       opacity: 1;
       border-color: rgba(255, 255, 255, 0.18);
       color: var(--text-secondary);
       background: rgba(10, 14, 22, 0.78);
     }
-    .card-copy-btn svg {
+    .card-copy-btn svg,
+    .card-canvas-btn svg {
       width: 13px;
       height: 13px;
     }

@@ -30,6 +30,7 @@ $files = @(
   (Join-Path $root "index.html"),
   (Join-Path $root "admin.html"),
   (Join-Path $root "admin-login.html"),
+  (Join-Path $root "asset-studio.html"),
   (Join-Path $root "sw.js"),
   (Join-Path $root "styles.css"),
   (Join-Path $root "styles-features.css")
@@ -62,6 +63,12 @@ foreach ($path in $files) {
     $t = [regex]::Replace($t, "__ADMIN_BUILD__\s*=\s*'[^']+'", "__ADMIN_BUILD__ = '$new'")
     $t = [regex]::Replace($t, 'admin\.js\?v=[^"\s>]+', "admin.js?v=$new")
     $t = [regex]::Replace($t, 'styles-admin\.css\?v=[^"\s>]+', "styles-admin.css?v=$new")
+  } elseif ((Split-Path $path -Leaf) -eq 'asset-studio.html') {
+    $t = [regex]::Replace(
+      $t,
+      '((?:src|href)=["''](?!https?:|//)[^"'']+\.(?:js|css)\?v=)[^"'']+',
+      "`${1}$new"
+    )
   } elseif ($path -like '*sw.js') {
     $t = [regex]::Replace($t, "const CACHE = 'prompt-hub-v[^']+';", "const CACHE = 'prompt-hub-v$new';")
   } else {

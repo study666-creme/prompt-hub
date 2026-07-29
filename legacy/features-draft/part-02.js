@@ -561,8 +561,9 @@
     const model = document.getElementById('imageGenModel');
     if (prompt) prompt.value = '';
     if (title) title.value = '';
-    if (model?.querySelector('option[value="image2-economy"]')) model.value = 'image2-economy';
-    imageGenModelFamily = 'gim2';
+    const firstAvailableModel = [...(model?.options || [])].find((option) => !option.disabled);
+    if (model && firstAvailableModel) model.value = firstAvailableModel.value;
+    imageGenModelFamily = resolveImageGenModelFamily(null, model?.value || 'image2');
     clearImageGenRef();
     try { localStorage.removeItem(LS_IMAGEGEN); } catch (e) { /* ignore */ }
     if (imageGenFormActivated) {

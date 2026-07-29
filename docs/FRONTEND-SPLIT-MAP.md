@@ -1,6 +1,6 @@
 # Frontend Split Map
 
-Updated: 2026-07-11
+Updated: 2026-07-29
 
 This project still ships classic browser scripts from the site root, but several formerly large files are now thin runtime loaders. The real source is split into ordered chunks so classic script execution order and old global/IIFE behavior stay unchanged.
 
@@ -23,8 +23,47 @@ Do not paste old monolithic code back into these root files. Edit the matching `
 - `index.html` keeps the head and script order, while the body DOM is loaded from `partials/index-body/part-*.html`.
 - `styles.css` imports `styles/base/part-*.css`.
 - `styles-features.css` imports `styles/features/part-*.css`.
+- `styles-warehouse.css` is an unreleased, standalone warehouse UI layer loaded after the shared CSS entries. It is not generated from a split CSS directory.
 
 The source split loaders are synchronous in the repository so local development keeps the old classic-script order. They must not be shipped as the production request graph.
+
+## Warehouse UI Ownership
+
+The 2026-07-29 frozen-tree candidate keeps the warehouse redesign isolated from generated bundles:
+
+- `partials/index-body/part-02.html` owns the toolbar and compact warehouse summary markup.
+- `legacy/script/part-04.js` owns summary count/scope synchronization.
+- `legacy/script/part-09.js` owns card metadata and the actionable empty state.
+- `styles-warehouse.css` owns warehouse-only layout, surface hierarchy, status accents, list/grid presentation, light theme, and mobile overrides.
+- `scripts/verify-warehouse-ui-browser.mjs` seeds mixed cards and checks desktop, mobile, empty, media, overflow, and drag behavior without contacting production services.
+
+This candidate has not been deployed. Do not fold `styles-warehouse.css` into a generated CSS bundle while `DO-NOT-DEPLOY.md` is present.
+
+## Startup Routing
+
+`app-router.js` treats the canonical URL as the only boot route and applies the
+matching page before the larger classic-script loaders run. A refresh at
+`/prompts/`, `/generate/`, `/community/`, `/profile/`, or `/dev/` remains on
+that page; the root route always starts at the landing page. The
+`promptrepo_app_page` value remains a compatibility record for existing UI
+modules, but it must not override the URL during bootstrap.
+
+The static body has exactly one initial active page: `#pageLanding`. This keeps
+the first screen visible while the classic scripts load and prevents a later
+community node from covering it. Run `node scripts/verify-app-router-boot.mjs`
+for the focused route regression check.
+
+## Canvas Bridge Ownership
+
+The frozen working tree contains an unreleased Prompt Hub -> Canvas handoff. Its source ownership is split as follows:
+
+- `app-router.js` is the canonical root module for validating the Canvas URL and card ID, adding the four `ph*` deep-link parameters, opening the isolated window, and managing the one-shot return marker. It is not generated from a `legacy/` chunk.
+- `legacy/script/part-04.js` owns the warehouse-facing open helpers. `legacy/script/part-09.js` owns card action markup, the context-menu entry, and the forced cloud pull when the tab becomes visible after a handoff. `legacy/script/part-10.js` owns delegated clicks for `data-card-canvas`.
+- `styles/base/part-04.css`, `styles/base/part-09.css`, `styles-mobile.css`, and `styles-theme.css` own the desktop icon and the two-row mobile action layout.
+
+Keep the URL payload limited to `phSource`, `phVersion`, `phIntent`, and `phCardId`; card content and credentials are fetched through the authenticated Worker endpoint. The matching VM and Chromium checks are `scripts/verify-canvas-bridge.mjs` and `scripts/verify-canvas-card-handoff-browser.mjs`.
+
+This bridge has not been deployed. Canvas still has to consume the versioned deep link and call the result handback endpoint before the cross-repository flow is complete.
 
 ## Pages Runtime Consolidation
 

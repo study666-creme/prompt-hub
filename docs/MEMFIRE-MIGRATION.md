@@ -51,7 +51,7 @@ cd D:\prompt-hub
 - `auth.users`, `profiles`, `user_data`, `community_posts`, `generation_requests` 数量。
 - RLS、GRANT、RPC 和 `storage` schema 是否存在。
 - 用测试账号登录，读取卡片，不修改已有数据。
-- Worker 指向测试库时 `/health` 返回 `supabase: ok`。
+- Worker 指向测试库时 `/health` 返回 `ok: true`、`status: ready`；本地未注入 SHA 时可显示 `buildSha: unversioned`。
 
 ## 切换数据库
 

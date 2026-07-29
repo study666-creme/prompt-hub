@@ -310,11 +310,11 @@
     const model = studioImageModelCatalog.find((item) => item.id === modelId);
     const resolutions = Array.isArray(model?.resolutions) && model.resolutions.length
       ? model.resolutions.filter((value) => ['1k', '2k', '4k'].includes(value))
-      : modelId === 'image2'
+      : ['image2', 'image2-free', 'lingtu', 'lingtu-fast', 'lingtu-lite'].includes(modelId)
         ? ['1k']
         : modelId === 'image2-pro' || modelId === 'image2-hd'
           ? ['2k', '4k']
-          : modelId.startsWith('apimart-mj-')
+          : modelId.startsWith('mj-')
             ? ['1k']
             : ['1k', '2k', '4k'];
     const previous = select.value;

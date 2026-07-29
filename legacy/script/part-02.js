@@ -370,8 +370,7 @@
             mode: 'repair',
             max: liveBatchMax,
             days: 365,
-            offset,
-            providerScope: 'all'
+            offset
           });
         }
 

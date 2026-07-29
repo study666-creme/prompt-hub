@@ -29,8 +29,12 @@ pack-assets.js
 downloads/
 server/tmp-mooko-*
 .tmp-*.js
+.tmp-*
+tmp-*.json
 .tmp-index.html
 .tmp-video-frames/
+.worker-release/
+_worker.js
 .cursor/*.html
 .cursor/PENDING_DOC_UPDATE
 .cursor/doc-sync-state.json

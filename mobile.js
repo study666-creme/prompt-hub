@@ -80,22 +80,39 @@
       el.style.removeProperty('display');
       el.style.pointerEvents = 'auto';
     });
+    // User profile is managed by AppModalHub but older route transitions can
+    // leave the hidden node with an inline pointer-events value. Treat it like
+    // every other blocking layer so it cannot sit above the warehouse grid.
+    document.querySelectorAll('#userProfileOverlay:not(.active)').forEach((el) => {
+      el.hidden = true;
+      el.style.pointerEvents = 'none';
+    });
+  }
+
+  function hasActiveMobileBlocker() {
+    return !!document.querySelector(
+      '.subscribe-overlay.active, .trial-tasks-overlay.active, .community-detail-overlay.active, '
+      + '.settings-overlay.active, .modal-overlay.active, .custom-modal-overlay.active, '
+      + '#authOverlay.open, #userProfileOverlay.active, .batch-import-overlay:not(.hidden)'
+    );
   }
 
   function restoreMobilePageInteractivity() {
     if (!isMobile()) return;
-    const hasActiveModal = !!document.querySelector(
-      '.subscribe-overlay.active, .trial-tasks-overlay.active, .community-detail-overlay.active, .settings-overlay.active, .modal-overlay.active, #authOverlay.open'
-    );
+    const hasActiveModal = hasActiveMobileBlocker();
     if (!hasActiveModal) {
       document.body.classList.remove(
         'subscribe-open',
         'trial-tasks-open',
         'app-modal-open',
         'panel-open',
-        'community-panel-open'
+        'community-panel-open',
+        'user-profile-open',
+        'batch-import-open',
+        'custom-modal-open'
       );
       document.querySelector('.app-main')?.style.removeProperty('pointer-events');
+      document.querySelector('.app-chrome')?.style.removeProperty('pointer-events');
     }
     forceHideBlockingLayers();
   }
@@ -201,29 +218,36 @@
       });
     }
     if (v === 'feed') {
-      const feed = document.getElementById('imageGenFeed');
-      const hadCards = !!feed?.querySelector('.imagegen-feed-card');
-      const preserve = wasFeed || !opts?.scrollToTop;
-      const syncPromise = window.FeatureDraft?.syncRecentCreationsFromServer?.({
-        force: !wasFeed,
-        render: false
-      });
-      window.FeatureDraft?.renderImageGenFeed?.({
-        preserveScroll: preserve,
-        force: !hadCards && !wasFeed,
-        recentSyncing: !hadCards
-      });
-      void Promise.all([
-        window.FeatureDraft?.resumePendingGenerationJobs?.(),
-        syncPromise
-      ]).then(([, syncResult]) => {
+      const refreshFeed = () => {
+        const feed = document.getElementById('imageGenFeed');
+        const hadCards = !!feed?.querySelector('.imagegen-feed-card');
+        const preserve = wasFeed || !opts?.scrollToTop;
+        const syncPromise = window.FeatureDraft?.syncRecentCreationsFromServer?.({
+          force: !wasFeed,
+          render: false
+        });
         window.FeatureDraft?.renderImageGenFeed?.({
           preserveScroll: preserve,
-          force: !hadCards && !syncResult?.changed
+          force: !hadCards && !wasFeed,
+          recentSyncing: !hadCards
         });
-        resetMobilePageScroll('imagegen');
-        scheduleMobileImageBoostBurst();
-      });
+        void Promise.all([
+          window.FeatureDraft?.resumePendingGenerationJobs?.(),
+          syncPromise
+        ]).then(([, syncResult]) => {
+          window.FeatureDraft?.renderImageGenFeed?.({
+            preserveScroll: preserve,
+            force: !hadCards && !syncResult?.changed
+          });
+          resetMobilePageScroll('imagegen');
+          scheduleMobileImageBoostBurst();
+        });
+      };
+      if (opts?.deferRefresh && typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => requestAnimationFrame(refreshFeed));
+      } else {
+        refreshFeed();
+      }
     } else {
       window.FeatureDraft?.renderImageGenMobileResult?.();
     }
@@ -398,6 +422,9 @@
       closeAllMobileOverlays();
       initImageGenMobileView();
     }
+    // Route changes can race the close handlers on mobile browsers. Run one
+    // more cleanup after styles/layout have settled so the next swipe is live.
+    requestAnimationFrame(() => restoreMobilePageInteractivity());
   };
 
   function onViewportChange() {
@@ -553,9 +580,9 @@
       else if (typeof scheduleLayoutMasonry === 'function') scheduleLayoutMasonry();
       window.FeatureDraft?.resetMobileFeedGridStyles?.();
       window.FeatureDraft?.enforceMobileImageGenFeed?.();
-      const saved = localStorage.getItem('promptrepo_app_page');
-      if (saved) {
-        window.mobileOnAppPageChange?.(saved);
+      const bootApp = window.AppRouter?.resolveBootApp?.() || 'landing';
+      if (bootApp !== 'landing') {
+        window.mobileOnAppPageChange?.(bootApp);
       } else {
         setBottomTab('cards');
       }

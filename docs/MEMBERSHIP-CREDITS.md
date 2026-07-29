@@ -1,5 +1,7 @@
 # 会员、积分与配额
 
+最后核对：2026-07-27。原子积分与首次建点奖励迁移仍待生产备份后应用。
+
 > 产品文案必须与 `subscription.js`、`membership.js`、`server/src/lib/membership-credits.ts` 和服务端计价保持一致。
 
 ## 当前月卡
@@ -24,6 +26,8 @@
 - 每日积分按 Asia/Shanghai 自然日有效，未用完次日不结转。
 - 基础/标准/专业可在兑换时选择每日或一次性；轻量仅每日。
 - 生成失败是否退款由服务端任务结算处理，不能由前端手工加回。
+- 同一 `reason + ref_id` 的扣费或退款必须幂等；重试只能恢复数据库结算，不能再次调用付费上游。
+- 视频按秒报价只有在上游明确返回 `billed_duration_seconds` 时才退少生成时长的差价；普通进度或媒体元数据不能作为计费依据。
 - 部分内容审核违规线路可能按页面提示不退款，以实际 provider 规则为准。
 
 ## 其他配额
@@ -43,5 +47,8 @@
 - 卡密兑换通过 `/api/v1/redeem`。
 - 每日/任务领取通过 `/api/v1/membership/tasks/*`。
 - 所有扣费、发放和退款必须使用 Worker/service role。
+- 钱包扣费、退款、试用、每日积分和会员模式切换使用 `20260722020000_atomic_credit_operations.sql` 中的原子 RPC。
+- Canvas 首次创建节点调用 `/api/v1/membership/tasks/events/canvas-create-node`；数据库函数在一个事务里写入 `canvas_create_node` claim、任务标记和 1 天基础会员，每个账号只会奖励一次。
+- `/api/v1/payments` 是支付主路径，`/api/v1/wallet` 仅为旧 Canvas 客户端兼容别名，两者使用同一订单和鉴权逻辑。
 
 调整套餐时同时更新前端展示、服务端常量、数据库卡密产品和本文，并补价格/扣费测试。

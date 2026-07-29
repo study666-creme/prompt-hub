@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import type { Env } from '../env';
 import { ApiError } from './errors';
+import { blobImageMime } from './image-content';
 import { storagePathFromRef } from './image-archive';
 import { resolveImageRefForJob } from './recover-generation-warehouse';
 import { createAdminClient } from './supabase';
@@ -272,28 +273,10 @@ const GRID_MIN_BYTES = 2048;
 /** 列表 grid 单张上限（约 220KB）；超过视为误存原图，CDN 现场重缩 */
 const GRID_SERVE_MAX_BYTES = 220 * 1024;
 
-function sniffImageMime(head: Uint8Array): string | null {
-  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'image/jpeg';
-  if (head.length >= 8 && head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) {
-    return 'image/png';
-  }
-  if (head.length >= 12 && head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46
-    && head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50) {
-    return 'image/webp';
-  }
-  return null;
-}
-
-async function blobHasValidImageMagic(blob: Blob): Promise<string | null> {
-  if (!blob || (blob.size || 0) < 512) return null;
-  const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
-  return sniffImageMime(head);
-}
-
 async function isAcceptableGridBlob(blob: Blob | null | undefined): Promise<boolean> {
   const n = blob?.size || 0;
   if (n < GRID_MIN_BYTES || n > GRID_SERVE_MAX_BYTES) return false;
-  return !!(await blobHasValidImageMagic(blob!));
+  return !!(await blobImageMime(blob));
 }
 
 async function downloadGridBlob(
@@ -573,12 +556,31 @@ export async function serveCachedStorageImage(
   const cache = caches.default;
   const cached = await cache.match(cacheKey);
   if (cached) {
-    if (!isGrid) return cached;
-    if (cached.headers.get('X-PH-Grid-Ok') === '1') {
-      const len = Number(cached.headers.get('content-length') || 0);
-      if (len >= GRID_MIN_BYTES && len <= GRID_SERVE_MAX_BYTES) return cached;
+    if (isGrid) {
+      if (cached.headers.get('X-PH-Grid-Ok') === '1') {
+        const len = Number(cached.headers.get('content-length') || 0);
+        if (len >= GRID_MIN_BYTES && len <= GRID_SERVE_MAX_BYTES) return cached;
+      }
+      c.executionCtx.waitUntil(cache.delete(cacheKey));
+    } else if (cached.headers.get('X-PH-Image-Ok') === '1') {
+      return cached;
+    } else {
+      const cachedBlob = await cached.clone().blob();
+      const cachedMime = await blobImageMime(cachedBlob);
+      if (cachedMime) {
+        const headers = new Headers(cached.headers);
+        headers.set('Content-Type', cachedMime);
+        headers.set('X-PH-Image-Ok', '1');
+        const validated = new Response(cachedBlob, {
+          status: cached.status,
+          statusText: cached.statusText,
+          headers
+        });
+        c.executionCtx.waitUntil(cache.put(cacheKey, validated.clone()));
+        return validated;
+      }
+      c.executionCtx.waitUntil(cache.delete(cacheKey));
     }
-    c.executionCtx.waitUntil(cache.delete(cacheKey));
   }
 
   const admin = createAdminClient(c.env);
@@ -588,7 +590,7 @@ export async function serveCachedStorageImage(
   const stored = isGrid ? await downloadGridBlob(c.env, clean) : null;
   if (stored && (await isAcceptableGridBlob(stored))) {
     body = stored;
-    const sniffed = await blobHasValidImageMagic(stored);
+    const sniffed = await blobImageMime(stored);
     if (sniffed) contentType = sniffed;
   } else if (stored && isGrid) {
     c.executionCtx.waitUntil(deleteFromR2(c.env, clean).catch(() => {}));
@@ -596,11 +598,24 @@ export async function serveCachedStorageImage(
     for (const candidate of fullPathServeCandidates(clean)) {
       const blob = await downloadCardImage(c.env, candidate);
       if (blob) {
-        const bytes = blob.size || 0;
-        if (bytes >= 512) {
+        const sniffed = await blobImageMime(blob);
+        if (sniffed) {
           body = blob;
-          contentType = contentTypeForPath(candidate);
+          contentType = sniffed;
           break;
+        }
+        const deleted = await deleteFromR2(c.env, candidate).catch(() => false);
+        if (deleted) {
+          const fallback = await downloadCardImage(c.env, candidate);
+          const fallbackMime = await blobImageMime(fallback);
+          if (fallback && fallbackMime) {
+            body = fallback;
+            contentType = fallbackMime;
+            c.executionCtx.waitUntil(
+              uploadCardImage(c.env, candidate, fallback, fallbackMime).catch(() => {})
+            );
+            break;
+          }
         }
       }
     }
@@ -635,7 +650,7 @@ export async function serveCachedStorageImage(
   const response = new Response(body, {
     headers: {
       'Content-Type': contentType,
-      ...(isGrid ? { 'X-PH-Grid-Ok': '1' } : {}),
+      ...(isGrid ? { 'X-PH-Grid-Ok': '1' } : { 'X-PH-Image-Ok': '1' }),
       'Cache-Control': `public, max-age=${CDN_CACHE_SEC}, s-maxage=${CDN_CACHE_SEC}, immutable`,
       'CDN-Cache-Control': `max-age=${CDN_CACHE_SEC}`,
       'Vary': 'Accept',
@@ -655,29 +670,54 @@ export async function serveCachedStorageImage(
 export async function ensureGridPathForSigning(
   c: Context<{ Bindings: Env }>,
   rawPath: string,
-  variant: string
+  variant: string,
+  opts: { requireExistingPrimary?: boolean; strictStorageCheck?: boolean } = {}
 ): Promise<string> {
   const admin = createAdminClient(c.env);
   const clean = rawPath.replace(/^\//, '');
   const signPath = signingPathForVariant(clean, variant).replace(/^\//, '');
-  if (variant === 'full') return signPath;
+  let requiredPrimary: string | null = null;
+  if (opts.requireExistingPrimary) {
+    const primaryCandidates = /_grid\.(jpe?g|webp|png)$/i.test(clean)
+      ? primaryCandidatesFromGridPath(clean)
+      : [clean];
+    if (opts.strictStorageCheck) {
+      for (const candidate of primaryCandidates) {
+        if (await cardImageExists(c.env, candidate, admin)) {
+          requiredPrimary = candidate;
+          break;
+        }
+      }
+    } else {
+      requiredPrimary = await findFirstExistingStoragePath(
+        admin,
+        primaryCandidates,
+        CARD_IMAGES_BUCKET,
+        c.env
+      );
+    }
+    if (!requiredPrimary) {
+      throw new ApiError(404, 'NOT_FOUND', '图片不存在');
+    }
+  }
+  if (variant === 'full') return requiredPrimary || signPath;
   if (await cardImageExists(c.env, signPath, admin)) return signPath;
 
-  const primaryCandidates: string[] = [];
-  if (/_grid\.(jpe?g|webp|png)$/i.test(signPath)) {
-    primaryCandidates.push(...primaryCandidatesFromGridPath(signPath));
-  } else {
-    primaryCandidates.push(clean);
-  }
-  const primary = await findFirstExistingStoragePath(
-    admin,
-    primaryCandidates,
-    CARD_IMAGES_BUCKET,
-    c.env
-  );
+  const primaryCandidates = /_grid\.(jpe?g|webp|png)$/i.test(signPath)
+    ? primaryCandidatesFromGridPath(signPath)
+    : [clean];
+  const primary = requiredPrimary || await findFirstExistingStoragePath(
+      admin,
+      primaryCandidates,
+      CARD_IMAGES_BUCKET,
+      c.env
+    );
   if (primary) {
     const materialized = await materializeGridForPrimaryPath(c.env, admin, primary);
     if (materialized) return materialized;
+  }
+  if (opts.requireExistingPrimary) {
+    throw new ApiError(503, 'GRID_UNAVAILABLE', '缩略图暂时不可用');
   }
   return signPath;
 }

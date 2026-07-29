@@ -12,6 +12,8 @@ import { deleteFromR2, hasR2, mediaStorageMode, scanAllR2Objects } from './r2-st
 
 const MAX_BUCKET_SCAN = 15_000;
 
+type BackgroundExecutionContext = Pick<ExecutionContext, 'waitUntil'>;
+
 function normalizePath(p: string): string {
   return String(p || '').replace(/^\//, '').trim();
 }
@@ -529,7 +531,7 @@ async function ensureOrphanScanSnapshot(
   admin: SupabaseClient,
   env: Env,
   refresh: boolean,
-  executionCtx?: ExecutionContext
+  executionCtx?: BackgroundExecutionContext
 ): Promise<OrphanScanSnapshot> {
   if (!refresh) {
     const cached = await readOrphanScanCache();
@@ -623,7 +625,7 @@ export async function listBucketOrphanFiles(
     offset: number;
     risk?: OrphanRisk | 'all';
     refresh?: boolean;
-    executionCtx?: ExecutionContext;
+    executionCtx?: BackgroundExecutionContext;
   }
 ): Promise<BucketOrphanListResult> {
   if (!hasR2(env)) {

@@ -9,7 +9,7 @@
   let toolboxBound = false;
   let currentImageGenMode = 'gen';
   let activeRefTool = '';
-  /** 排队提交间隔：避免上游 Apimart 限流导致失败 */
+  /** 排队提交间隔：避免服务端限流导致失败 */
   const BATCH_SUBMIT_GAP_MS = 2200;
   const BATCH_SUBMIT_JITTER_MS = 800;
   const STYLE_CONVERT_SUFFIX = '【画风转换】严格保留原图人物/物体身份、姿态与构图，仅转换画面艺术风格与渲染质感，细节完整，专业插画完成度，无文字无水印';
@@ -96,7 +96,7 @@
       });
     let msg = `${unitLabel}已提交 ${okN}/${total} 张`;
     if (failN) {
-      msg += `，${failN} 张失败（见仓库顶部红色卡片）`;
+      msg += `，${failN} 张未完成（可在作品流中重新生成）`;
       if (failLines.length === 1) msg += `：${failLines[0]}`;
     }
     return msg;
@@ -435,7 +435,7 @@
   async function getUnitImageGenCostQuote() {
     const model = $('imageGenModel')?.value || 'image2';
     const resolution = $('imageGenResolution')?.value || '1k';
-    const quality = $('imageGenQuality')?.value || 'standard';
+    const quality = $('imageGenQuality')?.value || 'medium';
     let detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution) || {};
     if (window.PointsSystem?.useApiForAccount?.()) {
       try {

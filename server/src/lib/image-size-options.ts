@@ -1,3 +1,5 @@
+import { normalizeImageModelId } from './image-models-catalog';
+
 /** 画面比例与像素映射；公开模型优先使用卡藏 API 实时参数。 */
 
 export const IMAGE2_ASPECT_RATIOS = [
@@ -99,9 +101,9 @@ const BANANA2_EXTENDED_MODEL_IDS = new Set([
 
 /** 按模型 ID 返回前台可选画面比例（勿全站统一长列表） */
 export function aspectRatiosForModel(modelId: string): readonly string[] {
-  const id = String(modelId || '')
-    .trim()
-    .toLowerCase();
+  const rawId = String(modelId || '').trim().toLowerCase();
+  const normalizedId = normalizeImageModelId(rawId);
+  const id = normalizedId.startsWith('mj-') ? normalizedId : rawId;
   if (OFFICIAL_BUDGET_MODEL_IDS.has(id)) return APIMART_OFFICIAL_BUDGET_RATIOS;
   if (id === 'image2' || id === 'image2-economy' || id === 'image2-pro' || id === 'image2-4k-fast') {
     return IMAGE2_ASPECT_RATIOS;
@@ -114,7 +116,7 @@ export function aspectRatiosForModel(modelId: string): readonly string[] {
   if (id === 'apimart-gpt-image-2') return IMAGE2_ASPECT_RATIOS;
   if (id === 'apimart-seedream-5-lite' || id.includes('seedream')) return BASIC_ASPECT_RATIOS;
   if (id.startsWith('apimart-gemini') || id.includes('gemini-')) return BANANA_ASPECT_RATIOS;
-  if (id.startsWith('apimart-mj-') || id.startsWith('mj-')) return MJ_ASPECT_RATIOS;
+  if (id.startsWith('mj-')) return MJ_ASPECT_RATIOS;
   if (id === 'gpt-image-2-vip' || id === 'gpt-image-2') return IMAGE2_ASPECT_RATIOS;
   if (id.includes('nano-banana')) return BANANA_ASPECT_RATIOS;
   if (id === 'mooko-gpt-image-2-pro') return MOOKO_PRO_ASPECT_RATIOS;

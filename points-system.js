@@ -26,49 +26,20 @@
     return Number.isInteger(v) ? String(v) : v.toFixed(1);
   }
 
-  const LEGACY_MODEL_IDS = {
-    quanneng2: 'image2',
-    'gpt-image-2-1k': 'image2-economy',
-    'gpt-image-2': 'image2',
-    'gpt-image-2-4k-fast': 'image2-4k-fast',
-    'gpt-image-2-vip': 'image2-pro',
-    jimeng: 'lingtu-pro',
-    'nano-banana-fast': 'lingtu-fast',
-    'nano-banana-2': 'lingtu-2',
-    'nano-banana-pro': 'lingtu-pro',
-    'nano-banana-pro-vt': 'lingtu-pro',
-    'nano-banana-pro-vip': 'lingtu-pro',
-    'nano-banana-pro-cl': 'lingtu-pro',
-    'nano-banana-2-cl': 'lingtu-2',
-    'nano-banana-2-4k-cl': 'lingtu-2',
-    'nano-banana': 'lingtu',
-    'apimart-gpt-image-2-official-budget': 'image2-hd',
-    'apimart-gpt-image-2': 'image2',
-    'apimart-seedream-5-lite': 'image2',
-    'apimart-gemini-2-5-flash-preview': 'lingtu-fast',
-    'apimart-gemini-2-5-flash-official': 'lingtu-fast',
-    'apimart-gemini-3-1-flash-preview': 'lingtu-2',
-    'apimart-gemini-3-1-flash-official': 'lingtu-2',
-    'apimart-gemini-3-pro-preview': 'lingtu-pro',
-    'apimart-gemini-3-pro-official': 'lingtu-pro',
-    'ithink-gpt-image-2-slow': 'image2',
-    'mooko-gpt-image-2-pro': 'image2-pro'
-  };
-
   const FALLBACK_MODEL = {
     id: 'image2',
     label: '全能模型2 · 1K',
     pricing: 'api',
     creditsPerCall: 0,
-    creditsBase: 0,
-    creditsFinal: 0,
-    listPrice: 0,
-    promoPrice: 0
+    creditsFinal: 0
   };
 
   function normalizeImageGenModelId(modelId) {
     const id = String(modelId || '').trim().toLowerCase() || 'image2';
-    return LEGACY_MODEL_IDS[id] || id;
+    if (id === 'image2' || id.startsWith('image2-')) return id;
+    if (id === 'lingtu' || id.startsWith('lingtu-')) return id;
+    if (id.startsWith('mj-')) return id;
+    return 'image2';
   }
 
   function catalogModelEntry(modelId) {
@@ -82,23 +53,11 @@
           label: hit.label || hit.id,
           pricing: 'api',
           creditsPerCall: hit.creditsPerCall,
-          creditsBase: hit.creditsBase,
           creditsFinal: hit.creditsFinal,
-          listPrice: hit.listPrice,
-          promoPrice: hit.promoPrice,
-          appliedDiscount: hit.appliedDiscount,
-          modelDiscountLabel: hit.modelDiscountLabel,
-          modelDiscountPercent: hit.modelDiscountPercent,
-          discountLabel: hit.discountLabel,
           pricingByResolution: hit.pricingByResolution === true,
           creditsByResolution: hit.creditsByResolution || null,
-          promoByResolution: hit.promoByResolution || null,
-          costByResolution: hit.costByResolution || null,
           pricingBySpeed: hit.pricingBySpeed === true,
-          creditsBySpeed: hit.creditsBySpeed || null,
-          promoBySpeed: hit.promoBySpeed || null,
-          costBySpeed: hit.costBySpeed || null,
-          promoPriceFlat: hit.promoPriceFlat ?? hit.promoPrice ?? null
+          creditsBySpeed: hit.creditsBySpeed || null
         };
       }
     }
@@ -214,61 +173,13 @@
     return roundCredits(Math.max(MIN_CHARGE_POINTS, base * mult));
   }
 
-  /** 活动折 vs 会员折取更优（不叠加），与 server computeFromResolved 一致 */
-  function pickBestGenPrice(listPrice, promoPrice, memberMult, memberLabel) {
-    const list = roundCredits(listPrice);
-    const promo = roundCredits(promoPrice);
-    if (!memberMult || memberMult >= 1) {
-      return {
-        final: promo,
-        appliedDiscount: promo < list - 0.04 ? 'model' : 'none',
-        label: null
-      };
-    }
-    const memberPrice = applyMemberDiscount(list, memberMult);
-    if (promo <= memberPrice) {
-      return {
-        final: promo,
-        appliedDiscount: promo < list - 0.04 ? 'model' : 'none',
-        label: null
-      };
-    }
-    return {
-      final: memberPrice,
-      appliedDiscount: 'member',
-      label: memberLabel || null
-    };
-  }
-
   function formatImageGenUnitPrice(detail, finalOverride) {
     const finalNum = finalOverride != null ? finalOverride : detail?.final;
-    const unit = `${formatCredits(finalNum)} 积分/张`;
-    if (detail?.appliedDiscount === 'model' && detail?.modelDiscountLabel) {
-      return `${unit}（${detail.modelDiscountLabel}）`;
-    }
-    if (detail?.appliedDiscount === 'member' && detail?.label) {
-      return `${unit}（会员${detail.label}）`;
-    }
-    return unit;
+    return `${formatCredits(finalNum)} 积分/张`;
   }
 
-  /** 活动价生效时的说明文案（不与会员折扣叠加） */
-  function formatImageGenPromoNotice(detail, finalOverride) {
-    if (!detail) return '';
-    const finalNum = finalOverride != null ? finalOverride : detail.final;
-    const listPrice = Number(detail.listPrice);
-    const isModelPromo =
-      detail.appliedDiscount === 'model'
-      || (
-        detail.appliedDiscount !== 'member'
-        && detail.modelDiscountLabel
-        && Number.isFinite(listPrice)
-        && listPrice > Number(finalNum) + 0.04
-      );
-    if (!isModelPromo) return '';
-    const modelLabel = String(detail.modelLabel || '该模型').trim() || '该模型';
-    const unit = formatCredits(finalNum);
-    return `${modelLabel} 活动价 ${unit} 积分/张，不与会员折扣叠加`;
+  function formatImageGenPromoNotice() {
+    return '';
   }
 
   function getImageGenModel(modelId) {
@@ -279,36 +190,21 @@
     return getImageGenCostDetail(modelId, resolution).final;
   }
 
-  function costDetailFromApiQuote(model, resCost, mult, memberLabel) {
-    const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
-    const listPrice = numberOr(
-      resCost.listPrice,
-      numberOr(resCost.base, numberOr(model.creditsPerCall, 0))
-    );
-    const final = numberOr(resCost.final, listPrice);
-    const appliedDiscount = resCost.appliedDiscount || model.appliedDiscount || 'none';
-    const saved = listPrice > final ? roundCredits(listPrice - final) : 0;
+  function costDetailFromFinalCredits(model, value, mult) {
+    const final = Number(value);
     return {
       modelId: model.id,
       modelLabel: model.label,
-      base: listPrice,
+      base: final,
       final,
-      listPrice,
-      promoPrice: numberOr(resCost.promoPrice, numberOr(model.promoPrice, final)),
-      appliedDiscount,
-      modelDiscountLabel: appliedDiscount === 'model'
-        ? (resCost.modelDiscountLabel || model.modelDiscountLabel || null)
-        : null,
       mult,
-      label: appliedDiscount === 'member'
-        ? (resCost.discountLabel || model.discountLabel || memberLabel)
-        : null,
-      saved,
-      fixed: appliedDiscount === 'fixed'
+      label: null,
+      saved: 0,
+      fixed: true
     };
   }
 
-  /** @returns {{ modelId, modelLabel, base, final, listPrice, modelDiscountLabel, mult, label, saved, fixed }} */
+  /** @returns {{ modelId, modelLabel, base, final, mult, label, saved, fixed }} */
   function getImageGenCostDetail(modelId, resolution, mjSpeed) {
     const model = getImageGenModel(modelId);
     const res = normalizeResolution(resolution);
@@ -318,78 +214,22 @@
     if (Array.isArray(window.__IMAGE_GEN_MODELS__)) {
       if (model.pricingBySpeed) {
         const speed = mjSpeed === 'fast' || mjSpeed === 'turbo' ? mjSpeed : 'relax';
-        const perSpeed = model.costBySpeed?.[speed];
-        if (perSpeed && Number.isFinite(Number(perSpeed.final))) {
-          return costDetailFromApiQuote(model, perSpeed, mult, label);
-        }
-        if (model.creditsBySpeed?.[speed] != null) {
-          const listPrice = Number(model.creditsBySpeed[speed]);
-          const promoRaw = model.promoBySpeed?.[speed] ?? model.promoPrice;
-          const promoPrice = Number(promoRaw);
-          const hasPromo = Number.isFinite(promoPrice) && promoPrice > 0 && promoPrice < listPrice;
-          const picked = pickBestGenPrice(
-            listPrice,
-            hasPromo ? promoPrice : listPrice,
-            mult,
-            label
-          );
-          const final = picked.final;
-          return {
-            modelId: model.id,
-            modelLabel: model.label,
-            base: listPrice,
-            final,
-            listPrice,
-            promoPrice: hasPromo ? promoPrice : final,
-            appliedDiscount: picked.appliedDiscount,
-            modelDiscountLabel: picked.appliedDiscount === 'model' ? (model.modelDiscountLabel || null) : null,
-            mult,
-            label: picked.label,
-            saved: listPrice > final ? roundCredits(listPrice - final) : 0,
-            fixed: model.appliedDiscount === 'fixed'
-          };
-        }
-      }
-      const perRes = model.costByResolution?.[res];
-      if (perRes && Number.isFinite(Number(perRes.final))) {
-        return costDetailFromApiQuote(model, perRes, mult, label);
+        const final = Number(model.creditsBySpeed?.[speed]);
+        if (Number.isFinite(final)) return costDetailFromFinalCredits(model, final, mult);
       }
       if (model.pricingByResolution && model.creditsByResolution?.[res] != null) {
-        const listPrice = Number(model.creditsByResolution[res]);
-        const promoRaw = model.promoByResolution?.[res] ?? model.promoPriceFlat ?? model.promoPrice;
-        const promoPrice = Number(promoRaw);
-        const hasPromo = Number.isFinite(promoPrice) && promoPrice > 0 && promoPrice < listPrice;
-        const picked = pickBestGenPrice(
-          listPrice,
-          hasPromo ? promoPrice : listPrice,
-          mult,
-          label
-        );
-        const final = picked.final;
-        return {
-          modelId: model.id,
-          modelLabel: model.label,
-          base: listPrice,
-          final,
-          listPrice,
-          promoPrice: hasPromo ? promoPrice : final,
-          appliedDiscount: picked.appliedDiscount,
-          modelDiscountLabel: picked.appliedDiscount === 'model' ? (model.modelDiscountLabel || null) : null,
-          mult,
-          label: picked.label,
-          saved: listPrice > final ? roundCredits(listPrice - final) : 0,
-          fixed: model.appliedDiscount === 'fixed'
-        };
+        const final = Number(model.creditsByResolution[res]);
+        if (Number.isFinite(final)) return costDetailFromFinalCredits(model, final, mult);
       }
       if (Number.isFinite(model.creditsFinal)) {
-        return costDetailFromApiQuote(model, model, mult, label);
+        return costDetailFromFinalCredits(model, model.creditsFinal, mult);
       }
     }
 
     // The catalog can be unavailable during first paint. Keep the known free
     // model free instead of falling through to the legacy resolution price.
-    if (model.id === 'image2' && Number.isFinite(model.creditsFinal)) {
-      return costDetailFromApiQuote(model, model, mult, label);
+    if (model.id === 'image2-free' && Number.isFinite(model.creditsFinal)) {
+      return costDetailFromFinalCredits(model, model.creditsFinal, mult);
     }
 
     const base = getBaseResolutionCost(res);

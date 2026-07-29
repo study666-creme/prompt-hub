@@ -36,7 +36,11 @@
         if (document.visibilityState === 'visible') {
           void window.SupabaseSync?.healSessionOnResume?.();
           scheduleCrossDeviceGenRecovery();
-          scheduleBackgroundCloudSync();
+          if (window.PromptCanvasBridge?.consumeRefreshAfterCanvas?.()) {
+            window.SyncOrchestrator?.schedulePull?.({ immediate: true, force: true, silent: true });
+          } else {
+            scheduleBackgroundCloudSync();
+          }
           return;
         }
         if (document.visibilityState === 'hidden') {
@@ -708,7 +712,22 @@
         delete container?.dataset?.masonryLoadBound;
         container.classList.remove('cards-grid-primed', 'masonry-ready', 'cards-grid-priming');
         container.classList.add('feed-grid-centered');
-        container.innerHTML = '<div class="feature-empty warehouse-grid-empty"><p>📦 暂无卡片</p></div>';
+        container.innerHTML = `<div class="feature-empty warehouse-grid-empty">
+          <div class="warehouse-empty-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <h4>仓库还是空的</h4>
+          <div class="warehouse-empty-actions">
+            <button type="button" class="btn btn-primary" onclick="createNewCard()">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <span>新建卡片</span>
+            </button>
+            <button type="button" class="btn btn-ghost" onclick="openBatchImportModal()">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m0-12 4 4m-4-4L8 7"/><path d="M5 13v6h14v-6"/></svg>
+              <span>批量导入</span>
+            </button>
+          </div>
+        </div>`;
         delete container.dataset.whSig;
         return;
       }
@@ -759,7 +778,10 @@
           if (collectMeta?.authorId) div.dataset.authorId = collectMeta.authorId;
           if (collectMeta?.assetId) div.dataset.sourceCardId = collectMeta.assetId;
         }
-        div.draggable = !globalViewActive;
+        // Native HTML drag on touch devices captures the vertical gesture and can
+        // leave the warehouse feeling "stuck" until the page is recreated. Keep
+        // drag-and-drop for desktop only; mobile uses the explicit card actions.
+        div.draggable = !globalViewActive && !mobileGrid;
         if (!mobileGrid) {
           div.style.position = 'relative';
         }
@@ -811,32 +833,47 @@
         const mediaHtml = showImage
           ? `<div class="card-media${mediaLoadingCls}"${shineAt}>${galleryBadge}<img class="card-img" src="${escapeHtml(imgSrc)}"${cardImgDataAttr(coverImage)} data-image-ref="${escapeHtml(coverImage)}"${coverJobAttr}${collectImgAttrs}${fullFallbackAttr} loading="${!isAppend && idx < eagerImgCount ? 'eager' : 'lazy'}" decoding="async"${fetchPri} draggable="false" alt="" onload="${imgOnload}"></div>`
           : '';
+        const cardKindLabel = isCollectCard ? '收藏' : (showImage ? '图像' : '文本');
+        const cardKindClass = isCollectCard ? 'is-collect' : (showImage ? 'is-visual' : 'is-text');
+        const cardGroupLabel = String(card.group || '').trim() || '未分组';
+        const metaHtml = `<div class="card-meta-row">
+          <span class="card-kind ${cardKindClass}">${cardKindLabel}</span>
+          <span class="card-group-name">${escapeHtml(cardGroupLabel)}</span>
+          ${timeLabel ? `<time class="card-time">${escapeHtml(timeLabel)}</time>` : ''}
+        </div>`;
         const headHtml = titleTrim
-          ? `<div class="card-head"><div class="card-title">${escapeHtml(titleTrim)}</div>${timeLabel ? `<time class="card-time">${escapeHtml(timeLabel)}</time>` : ''}</div>`
-          : (timeLabel ? `<div class="card-head card-head--meta-only"><time class="card-time">${escapeHtml(timeLabel)}</time></div>` : '');
+          ? `<div class="card-head"><div class="card-title">${escapeHtml(titleTrim)}</div></div>`
+          : '';
         const mobileActions = window.MobileUI?.isMobile?.()
           ? `<div class="card-mobile-actions mobile-only">
-              <button type="button" class="card-mobile-btn" data-mobile-edit="${escapeHtml(card.id)}">编辑</button>
-              <button type="button" class="card-mobile-btn" data-mobile-copy="${escapeHtml(card.id)}">复制</button>
-              <button type="button" class="card-mobile-btn" data-mobile-fill="${escapeHtml(card.id)}">填入生图</button>
+             <button type="button" class="card-mobile-btn" data-mobile-edit="${escapeHtml(card.id)}">编辑</button>
+             <button type="button" class="card-mobile-btn" data-mobile-copy="${escapeHtml(card.id)}">复制</button>
+             <button type="button" class="card-mobile-btn" data-mobile-fill="${escapeHtml(card.id)}">填入生图</button>
+              <button type="button" class="card-mobile-btn" data-card-canvas="${escapeHtml(card.id)}">到画布</button>
             </div>`
           : '';
         const copyBtnHtml = !window.MobileUI?.isMobile?.()
           ? `<button type="button" class="card-copy-btn" data-card-copy="${escapeHtml(card.id)}" title="复制提示词" aria-label="复制提示词"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`
+          : '';
+        const canvasBtnHtml = !window.MobileUI?.isMobile?.()
+          ? `<button type="button" class="card-canvas-btn" data-card-canvas="${escapeHtml(card.id)}" title="把这张卡插入无限画布" aria-label="把这张卡插入无限画布"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8.5 8.5C6 4.5 2 5.5 2 9.5s4 5 6.5 1l3-4c2.5-4 6.5-3 6.5 1s-4 5-6.5 1l-3-4" transform="translate(2 3)"/></svg></button>`
           : '';
         div.innerHTML = `
           <div class="card-checkbox ${checked ? 'checked' : ''}" onclick="event.stopPropagation(); toggleSelectCard('${card.id}', this)"></div>
           ${pinBadge}
           ${mediaHtml}
           <div class="card-body">
+            ${metaHtml}
             ${headHtml}
             <div class="card-desc">${escapeHtml(getCardDisplayDesc(card, { textOnly: !showImage }))}</div>
             ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ''}
             ${mobileActions}
           </div>
+          ${canvasBtnHtml}
           ${copyBtnHtml}`;
         div.addEventListener('click', (e) => {
           if (e.target.closest('.card-copy-btn')) return;
+          if (e.target.closest('.card-canvas-btn')) return;
           if (e.target.closest('.card-mobile-actions')) return;
           if (globalViewActive) {
             e.preventDefault();
@@ -892,6 +929,7 @@
           e.preventDefault();
           const pinLabel = card.pinnedAt ? '取消置顶' : '置顶';
           const items = [
+            { label: '插入无限画布', action: () => window.openPromptCanvasCard?.(card.id) },
             { label: pinLabel, action: () => toggleCardPinById(card.id) },
             { label: '删除', action: () => deleteCardPermanently(card.id) }
           ];
@@ -972,9 +1010,13 @@
     }
     const warehouseScrollRoot = () => {
       if (!isMobileViewport()) return document.getElementById('cardsContainer');
-      const appMain = document.querySelector('.app-main');
-      if (isUsableWarehouseScrollRoot(appMain)) return appMain;
-      return document.scrollingElement || document.documentElement;
+      // Mobile warehouse scrolling is intentionally owned by .app-main. During
+      // the first paint its geometry can still be zero, so probing dimensions
+      // here used to bind pagination to document.scrollingElement permanently.
+      // Always prefer the stable app root and only fall back when it is absent.
+      return document.querySelector('.app-main')
+        || document.scrollingElement
+        || document.documentElement;
     };
     function loadNextWarehousePage() {
       if (warehouseScrollLoading) return;

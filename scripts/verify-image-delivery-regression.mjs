@@ -14,6 +14,7 @@ const imageSubmit = read('imagegen-submit.js');
 const featureBoot = read('legacy/features-draft/part-01.js');
 const featureSubmit = read('legacy/features-draft/part-08.js');
 const featureModelUi = read('legacy/features-draft/part-11.js');
+const featureQualityUi = read('legacy/features-draft/part-12.js');
 const imageGenMarkup = read('partials/index-body/part-03.html');
 const imageGenCss = read('styles/features/part-11.css');
 const imageGenMotionCss = read('styles/features/part-10.css');
@@ -34,8 +35,11 @@ checkTokens('generation direct-submit API', apiClient, [
 checkTokens('generation submit feedback', imageSubmit, [
   'function waitForSubmitPaint()',
   "btn.classList.add('is-submitting');",
-  "btn.textContent = '已开始生成';",
-  'isImageGenMobileFormActive'
+  "btn.textContent = '已加入作品';",
+  'renderImageGenPendingNow?.(pendingJob)',
+  "setImageGenView?.('feed'",
+  'markSubmitQueuedUi();',
+  'const shouldPersistInitialBatchState ='
 ]);
 
 checkTokens('pending reference compaction', jobState, [
@@ -100,9 +104,41 @@ checkTokens('generation form hierarchy', imageGenCss, [
 ]);
 
 checkTokens('quality parameter visibility', featureModelUi, [
+  'return isImageGenMidjourneyModel(normalizeImageGenModelId(modelId));',
   'const qParam = qEl?.closest(\'.imagegen-param[data-param="quality"]\');',
   'if (qParam) qParam.hidden = hideQuality;'
 ]);
+
+checkTokens('custom generation model picker', imageGenMarkup, [
+  'id="imageGenModelTrigger"',
+  'role="combobox"',
+  'id="imageGenModelMenu"',
+  'role="listbox"',
+  'class="imagegen-model-native-select"'
+]);
+
+checkTokens('custom generation model picker behavior', featureModelUi, [
+  'function bindImageGenModelPicker()',
+  'function renderImageGenModelPickerOptions()',
+  "event.key === 'ArrowDown'",
+  'if (event.target === menu) return;',
+  'select.dispatchEvent(new Event(\'change\', { bubbles: true }))'
+]);
+
+checkTokens('custom generation model picker styling', imageGenCss, [
+  '#pageImageGen .imagegen-model-trigger',
+  '#pageImageGen .imagegen-model-menu',
+  '#pageImageGen .imagegen-model-option.is-selected'
+]);
+
+checkTokens('unrestricted public quality tiers', featureQualityUi, [
+  "const IMAGE_GEN_DEFAULT_QUALITY_OPTIONS = ['low', 'medium', 'high'];",
+  'setImageGenQualitySelectOptions(qEl, [...IMAGE_GEN_DEFAULT_QUALITY_OPTIONS], preferred);'
+]);
+
+if (featureQualityUi.includes('findImageGenQualityParameter') || featureModelUi.includes('const fixedQuality =')) {
+  fail('quality choices must not be restricted or overridden by model capability metadata');
+}
 
 const modelIndex = imageGenMarkup.indexOf('id="imageGenModel"');
 const advancedIndex = imageGenMarkup.indexOf('id="imageGenAdvancedFold"');
@@ -118,10 +154,6 @@ if (/scheduleGenJobsSync\(delay\);\s*if \(pending \|\| opts\.forceJobs\)/.test(f
 
 if (/fetchMediaAsBlobUrl\(jobUrl\)/.test(loader)) {
   fail('recent signed CDN images must not be downloaded again as Blob URLs');
-}
-
-if (/MobileUI\?\.setImageGenView/.test(imageSubmit) || /setImageGenView\('feed'/.test(featureSubmit)) {
-  fail('generation submit must not force mobile users from the form to the feed');
 }
 
 if ((apiClient.match(/directFirst:\s*true/g) || []).length < 3) {

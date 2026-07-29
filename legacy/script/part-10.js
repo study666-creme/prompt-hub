@@ -107,6 +107,12 @@
       if (fillId) {
         e.stopPropagation();
         fillCardToImageGen(fillId);
+        return;
+      }
+      const canvasId = e.target.closest('[data-card-canvas]')?.getAttribute('data-card-canvas');
+      if (canvasId) {
+        e.stopPropagation();
+        window.openPromptCanvasCard?.(canvasId);
       }
     });
 
@@ -751,8 +757,12 @@
     }
 
     async function resolveEditPanelGalleryPreview(ref, card, galleryIndex) {
+      const opts = arguments[3] || {};
       return window.EditPanelGallery?.resolvePreview?.(ref, card, galleryIndex, {
-        cardId: card?.id || selectedCardId || null
+        cardId: card?.id || selectedCardId || null,
+        useJobImageApi: false,
+        allowGridFallback: false,
+        ...opts
       }) || '';
     }
 
@@ -796,9 +806,14 @@
       syncPanelGalleryNav(card);
       const dropArea = document.getElementById('dropArea');
       const img = document.getElementById('previewImage');
+      const currentPreviewHeight = dropArea?.offsetHeight || dropArea?.getBoundingClientRect?.().height || 0;
+      if (currentPreviewHeight > 0) {
+        dropArea.style.setProperty('--panel-preview-loading-height', `${currentPreviewHeight}px`);
+      }
       dropArea?.classList.add('is-loading-preview');
       if (img) {
-        img.removeAttribute('src');
+        // Keep the previous bitmap in the DOM while the next slot resolves;
+        // the loading state hides it and prevents a zero-height flash.
         delete img.dataset.previewFullUrl;
       }
       const slotJobId = getEditPanelSlotJobId(card, panelGalleryIndex);
@@ -837,7 +852,9 @@
         img.removeAttribute('src');
         img.style.display = 'none';
       }
-      dropArea?.classList.remove('is-loading-preview', 'has-image');
+      dropArea?.classList.remove('is-loading-preview', 'is-preview-error', 'has-image');
+      dropArea?.style.removeProperty('--panel-preview-loading-height');
+      dropArea?.removeAttribute('aria-busy');
       dropArea?.classList.add('no-image');
     }
 

@@ -296,6 +296,45 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
     scheduleImageGenFeedScrollRestore(wrap, scrollState);
   }
 
+  function renderImageGenTransientCardNow(job, html) {
+    const wrap = document.getElementById('imageGenFeed');
+    if (!wrap || !job?.id) return null;
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    const next = temp.firstElementChild;
+    if (!next) return null;
+
+    const existing = [...wrap.querySelectorAll('.imagegen-feed-card[data-feed-id]')]
+      .find((card) => card.dataset.feedId === String(job.id));
+    if (existing) {
+      existing.replaceWith(next);
+    } else {
+      wrap.querySelector('.imagegen-feed-empty, .imagegen-feed-empty-wrap')?.remove();
+      const anchor = wrap.querySelector('.grid-sizer') || wrap.firstElementChild;
+      wrap.insertBefore(next, anchor || null);
+    }
+
+    bindImageGenFeedCardEvents(wrap, [next]);
+    if (d().isMobileFeedViewport?.()) {
+      wrap.classList.remove('imagegen-feed--masonry', 'feed-layout-pending');
+      wrap.classList.add('imagegen-feed--tiles', 'mobile-feed-grid');
+      next.removeAttribute('style');
+    } else {
+      scheduleImageGenFeedLayout();
+    }
+    return next;
+  }
+
+  /** Submit feedback must not wait for a full feed render. */
+  function renderImageGenPendingNow(job) {
+    return renderImageGenTransientCardNow(job, buildFeedPendingCardHtml(job));
+  }
+
+  /** Keep a failed submission in the exact slot occupied by its pending card. */
+  function renderImageGenFailedNow(job) {
+    return renderImageGenTransientCardNow(job, buildFeedFailedCardHtml(job));
+  }
+
   // Keep loader state and decoded pixels attached across unavoidable full renders.
   function captureRetainedImageGenFeedImages(wrap) {
     const loaded = new Map();
@@ -781,6 +820,13 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       }
     }
 
+    function publicPendingStatusNote(value, fallback) {
+      const note = String(value || '').trim();
+      if (!note) return '';
+      const exposesInternalRouting = /(?:上游|服务商|供应商|线路|渠道|路由|provider|channel|route|base\s*url|endpoint|https?:\/\/|(?:[a-z0-9-]+\.)+[a-z]{2,24}(?::\d+)?(?:\/\S*)?)/i.test(note);
+      return (exposesInternalRouting ? fallback : note).slice(0, 56);
+    }
+
     function buildFeedPendingCardHtml(job) {
       const badges = [job.modelLabel || '生图中', (job.resolution || '1k').toUpperCase()];
       const batchTag = d().batchIndexLabel?.(job.batchIndex, job.batchTotal);
@@ -788,15 +834,20 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${d().esc?.(b)}</span>`).join('');
       const slow = d().isSlowGenProviderModel?.(job.model);
       const recovering = job.recovering === true && !(slow && job.pendingNote);
-      const pendingLabel = recovering ? '恢复中' : '生成中';
-      const meta = job.pendingNote
-        ? String(job.pendingNote).slice(0, 56)
+      const locallyQueued = job.submitPhase === 'local' && !job.jobId;
+      const pendingNote = publicPendingStatusNote(job.pendingNote, '生成服务正在处理');
+      const recoverNote = publicPendingStatusNote(job.recoverNote, '任务正在恢复');
+      const pendingLabel = locallyQueued ? '排队中' : (recovering ? '恢复中' : '生成中');
+      const meta = locallyQueued
+        ? '已加入生成队列 · 正在提交'
+        : pendingNote
+        ? pendingNote
         : recovering
-          ? (job.recoverNote || '上游可能已出图，后台同步中…').slice(0, 56)
+          ? (recoverNote || '任务可能已完成，后台同步中…')
           : slow
             ? '约 1–12 分钟 · 已提交'
             : '预计 1–3 分钟 · 可继续提交';
-      const dismissBtn = '<button type="button" class="btn btn-ghost btn-sm imagegen-feed-del" data-pending-dismiss title="关闭生成占位（不删已入库的图）">×</button>';
+      const dismissBtn = '<button type="button" class="imagegen-feed-del" data-pending-dismiss title="关闭生成占位（不删已入库的图）" aria-label="关闭生成占位">×</button>';
       return `<article class="imagegen-feed-card imagegen-feed-card-tile imagegen-feed-card--pending${recovering ? ' imagegen-feed-card--recovering' : ''}" data-feed-id="${d().esc?.(job.id)}" data-pending="1"${job.jobId ? ` data-job-id="${d().esc?.(job.jobId)}"` : ''}>
         <div class="imagegen-feed-media imagegen-gen-pending" aria-busy="true" aria-label="${d().esc?.(pendingLabel)}">
           <span class="imagegen-gen-pending-label">${d().esc?.(pendingLabel)}</span>
@@ -817,11 +868,15 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       const badges = [];
       if (batchTag) badges.push(batchTag);
       badges.push(d().failedJobModelLabel?.(job));
-      badges.push('失败');
-      const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge imagegen-feed-badge--fail">${d().esc?.(b)}</span>`).join('');
-      const err = d().friendlyGenErrorMessage?.(job.errorMessage || '生图失败').slice(0, 120);
-      const failLabel = batchTag ? `${batchTag} · 失败` : '生成失败';
-      return `<article class="imagegen-feed-card imagegen-feed-card-tile imagegen-feed-card--failed" data-feed-id="${d().esc?.(job.id)}" data-failed="1" data-feed-prompt="${d().esc?.(job.prompt || '')}"${job.fromInspirationDraw ? ' data-from-inspire="1"' : ''}${job.batchIndex ? ` data-batch-index="${job.batchIndex}"` : ''}${job.batchTotal ? ` data-batch-total="${job.batchTotal}"` : ''}>
+      if (job.resolution) badges.push(String(job.resolution).toUpperCase());
+      const badgeHtml = badges.filter(Boolean).map(b => `<span class="imagegen-feed-badge">${d().esc?.(b)}</span>`).join('');
+      const rawErr = d().friendlyGenErrorMessage?.(job.errorMessage || '生图失败') || '任务未完成，积分已按状态处理，可重新生成';
+      const err = String(rawErr)
+        .replace(/^生图失败[，,]\s*/, '')
+        .replace(/^任务提交异常[，,]\s*/, '')
+        .slice(0, 120);
+      const failLabel = batchTag ? `${batchTag} · 未完成` : '未完成';
+      return `<article class="imagegen-feed-card imagegen-feed-card-tile imagegen-feed-card--failed" data-feed-id="${d().esc?.(job.id)}" data-failed="1" data-feed-prompt="${d().esc?.(job.prompt || '')}"${job.jobId ? ` data-job-id="${d().esc?.(job.jobId)}"` : ''}${job.fromInspirationDraw ? ' data-from-inspire="1"' : ''}${job.batchIndex ? ` data-batch-index="${job.batchIndex}"` : ''}${job.batchTotal ? ` data-batch-total="${job.batchTotal}"` : ''}>
         <div class="imagegen-feed-media imagegen-gen-failed">
           <span class="imagegen-gen-failed-label">${d().esc?.(failLabel)}</span>
         </div>
@@ -830,9 +885,9 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           <p class="imagegen-gen-failed-error" title="${d().esc?.(job.errorMessage || '')}">${d().esc?.(err)}</p>
           <div class="imagegen-feed-tags">${badgeHtml}</div>
           <div class="imagegen-feed-foot imagegen-feed-foot--failed">
-            <button type="button" class="btn btn-primary btn-sm" data-failed-retry>重试</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-failed-retry>重新生成</button>
             <button type="button" class="btn btn-ghost btn-sm" data-failed-copy>复制提示词</button>
-            <button type="button" class="btn btn-ghost btn-sm imagegen-feed-del" data-failed-dismiss title="关闭">×</button>
+            <button type="button" class="imagegen-feed-del" data-failed-dismiss title="关闭" aria-label="关闭未完成任务">×</button>
           </div>
         </div>
       </article>`;
@@ -1356,9 +1411,9 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           repairImageGenFeedLayoutImmediate();
         }
         maybeServerRepairWarehouseImages(wrap);
-        if (d().getImageGenFeedTab?.() === 'recent' && feedItems.length) {
+        if (d().getImageGenFeedTab?.() === 'recent') {
           void d().repairRecentCreationImagesQuiet?.({ max: 12, skipThumbCheck: true });
-          void prefetchWarehouseFeedCardsBackground(feedItems, wrap);
+          if (feedItems.length) void prefetchWarehouseFeedCardsBackground(feedItems, wrap);
         }
         syncImageGenFeedLoadMoreBtn();
         reconnectImageGenFeedPageObserver();
@@ -1622,6 +1677,8 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       captureImageGenFeedCardPositions,
       diagnoseImageGenFeedLayout,
       patchImageGenFeedPendingOnly,
+      renderImageGenPendingNow,
+      renderImageGenFailedNow,
       imageGenFeedIsNearTop
     };
   }

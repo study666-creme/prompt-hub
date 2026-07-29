@@ -1,5 +1,5 @@
 /**
  * Prompt Canvas（无限画布）公网地址
- * 当前可用：https://infinite-canvas-jay.vercel.app（canvas.prompt-hubs.com DNS 配好后再切）
+ * 正式地址：https://canvas.prompt-hubs.com/canvas
  */
-window.PROMPT_CANVAS_URL = 'https://infinite-canvas-jay.vercel.app/canvas';
+window.PROMPT_CANVAS_URL = 'https://canvas.prompt-hubs.com/canvas';

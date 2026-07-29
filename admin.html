@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__ADMIN_BUILD__ = '20260721g';
+    window.__ADMIN_BUILD__ = '20260724b';
     (function () {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function (regs) {
@@ -23,7 +23,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Prompt Hub 运营控制台</title>
-  <link rel="stylesheet" href="styles-admin.css?v=20260721g">
+  <link rel="stylesheet" href="styles-admin.css?v=20260724b">
 </head>
 <body class="admin-console-page" data-admin-page="console">
   <div class="admin-app" id="adminApp" hidden>
@@ -363,7 +363,7 @@
     <section class="admin-panel" id="panel-models" hidden>
       <div class="admin-card">
         <h2 style="margin:0 0 8px;font-size:16px">当前生图模型</h2>
-        <p class="admin-hint">全能模型2与香蕉的模型、参数和价格由卡藏 API 自动同步，按 1 元 = 100 积分换算，不接受手动改价。“调用链路”仅管理员可见，会列出 API 模型、真实渠道与当前启停状态。MJ 保留 Relax / Fast / Turbo 分档配置。</p>
+        <p class="admin-hint">全能模型2与香蕉的公开模型、参数和最终价格由目录自动同步。MJ 保留 Relax / Fast / Turbo 分档配置。</p>
         <p class="admin-msg admin-msg--err" id="modelsPersistWarn" hidden></p>
         <div class="admin-view-tabs admin-view-tabs--inline" id="modelFamilyTabs" style="margin-bottom:12px">
           <button type="button" class="admin-view-tab is-active" data-model-family="all">全部</button>
@@ -386,11 +386,11 @@
               <tr>
                 <th>排序</th>
                 <th>分类</th>
-                <th>调用链路</th>
+                <th>公开模型</th>
                 <th>模型 ID</th>
                 <th>显示名称</th>
                 <th>状态</th>
-                <th>服务成本</th>
+                <th>定价方式</th>
                 <th>违规返还</th>
                 <th>分辨率</th>
                 <th>售价积分</th>
@@ -411,13 +411,13 @@
       <div class="admin-card">
         <div class="admin-card-head">
           <div>
-            <h2>模型映射</h2>
+            <h2>模型目录</h2>
             <p class="admin-hint" id="canvasCatalogMeta">正在读取实时目录…</p>
           </div>
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table admin-table--compact">
-            <thead><tr><th>画布名称</th><th>公开 ID</th><th>实际模型</th><th>端点</th><th>实时价格</th><th>可选参数</th></tr></thead>
+            <thead><tr><th>模型名称</th><th>公开 ID</th><th>最终价格</th><th>可选参数</th></tr></thead>
             <tbody id="canvasModelMapBody"></tbody>
           </table>
         </div>
@@ -446,7 +446,7 @@
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table admin-table--compact">
-            <thead><tr><th>时间</th><th>模型</th><th>渠道</th><th>状态</th><th>耗时</th><th>请求 ID</th><th>明细</th></tr></thead>
+            <thead><tr><th>时间</th><th>模型</th><th>状态</th><th>耗时</th><th>请求 ID</th><th>明细</th></tr></thead>
             <tbody id="canvasServiceLogsBody"></tbody>
           </table>
         </div>
@@ -488,6 +488,6 @@
 
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="admin.js?v=20260721g"></script>
+  <script src="admin.js?v=20260724b"></script>
 </body>
 </html>

@@ -1,45 +1,3 @@
-        .join('<br>');
-    }
-    if (row.provider === 'grsai' && row.upstreamPoints) {
-      return esc(String(row.upstreamPoints));
-    }
-    return '—';
-  }
-
-  function renderModelRouteCell(row) {
-    const providerBadge = MODEL_PROVIDER_BADGE[row.provider] || '<span class="admin-badge">未知入口</span>';
-    const apiModel = String(row.upstream || row.id || '').trim();
-    const routes = Array.isArray(row.upstreamRoutes) ? row.upstreamRoutes : [];
-    const head = `<div>${providerBadge}</div><div class="admin-model-route-head"><span class="admin-hint">卡藏</span> <code>${esc(row.id)}</code><br><span class="admin-hint">API 模型</span> <code>${esc(apiModel || '—')}</code></div>`;
-    if (!routes.length) {
-      const unavailable = row.routeCatalogAvailable === false;
-      const label = unavailable ? '渠道目录暂不可用' : '没有配置调用渠道';
-      const detail = unavailable && row.routeCatalogError
-        ? `<span class="admin-model-route__meta admin-hint">${esc(row.routeCatalogError)}</span>`
-        : '';
-      return `${head}<div class="admin-model-route"><span class="admin-badge admin-badge--${unavailable ? 'warn' : 'off'}">${label}</span>${detail}</div>`;
-    }
-    return head + routes.map((route) => {
-      const status = route.status === 'active'
-        ? ['启用', 'ok']
-        : route.status === 'auto_disabled'
-          ? ['自动停用', 'warn']
-          : ['停用', 'off'];
-      const groups = Array.isArray(route.groups) ? route.groups.filter(Boolean).join(' / ') : '';
-      const routing = [
-        route.upstreamHost,
-        groups ? `分组 ${groups}` : '',
-        `优先级 ${Number(route.priority) || 0}`,
-        `权重 ${Number(route.weight) || 0}`
-      ].filter(Boolean).join(' · ');
-      return `<div class="admin-model-route${route.enabled ? '' : ' is-disabled'}">
-        <div class="admin-model-route__title"><strong>${esc(route.channelName || `线路 #${route.channelId || '—'}`)}</strong><span class="admin-badge admin-badge--${status[1]}">${status[0]}</span></div>
-        <span class="admin-hint">真实调用</span> <code>${esc(route.actualModel || apiModel || '—')}</code>
-        <span class="admin-model-route__meta admin-hint">${esc(routing)}</span>
-      </div>`;
-    }).join('');
-  }
-
   function renderModelsTable() {
     const tbody = $('modelsTableBody');
     if (!tbody) return;
@@ -65,19 +23,19 @@
             <input type="number" class="admin-input-sm" data-field="sortOrder" min="0" max="9999" value="${row.sortOrder}" title="数字越小越靠前">
           </td>
           <td>${esc(familyLabel)}</td>
-          <td class="admin-model-route-cell">${renderModelRouteCell(row)}</td>
+          <td class="admin-model-route-cell">${renderPublicModelCell(row)}</td>
           <td><code>${esc(row.id)}</code><br><span class="admin-hint">${esc(row.label)} · ${esc(row.description || '')}</span></td>
-          <td>${row.pricingSource === 'upstream_realtime'
+          <td>${row.pricingSource !== 'manual'
             ? `<strong>${esc(row.label)}</strong><br><span class="admin-hint">名称自动同步</span>`
             : `<input type="text" class="admin-input-sm" data-field="displayName" maxlength="48" value="${esc(row.displayName)}" placeholder="${esc(row.label)}">`}</td>
           <td><select class="admin-input-sm" data-field="status">${statusOpts}</select></td>
-          <td class="admin-upstream-cost">${renderUpstreamCostCell(row)}</td>
+          <td>${renderPricingStatusCell(row)}</td>
           <td>${refundCell}</td>
           <td>${esc((row.resolutions || []).join(' / ') || '—')}</td>
           <td>${renderModelCreditsInputs(row)}</td>
           <td>${renderModelPromoInputs(row)}</td>
           <td class="model-effective">${renderModelEffectiveCell(row)}</td>
-          <td>${row.pricingSource === 'upstream_realtime'
+          <td>${row.pricingSource !== 'manual'
             ? '<span class="admin-badge admin-badge--ok">实时固定</span>'
             : `<label class="admin-check"><input type="checkbox" data-field="fixedPrice" ${row.fixedPrice ? 'checked' : ''}> 固定</label>`}</td>
         </tr>`;
@@ -231,9 +189,9 @@
     const modelBody = $('canvasModelMapBody');
     const jobsBody = $('canvasJobsBody');
     const logsBody = $('canvasServiceLogsBody');
-    if (modelBody) modelBody.innerHTML = '<tr><td colspan="6">加载中…</td></tr>';
+    if (modelBody) modelBody.innerHTML = '<tr><td colspan="4">加载中…</td></tr>';
     if (jobsBody) jobsBody.innerHTML = '<tr><td colspan="8">加载中…</td></tr>';
-    if (logsBody) logsBody.innerHTML = '<tr><td colspan="7">加载中…</td></tr>';
+    if (logsBody) logsBody.innerHTML = '<tr><td colspan="6">加载中…</td></tr>';
     try {
       const data = await adminFetch(session, '/api/admin/canvas?limit=100', { timeoutMs: 20000 });
       const catalog = data.catalog || {};
@@ -250,11 +208,9 @@
         modelBody.innerHTML = models.length ? models.map((model) => `<tr>
           <td><strong>${esc(model.label || model.id)}</strong></td>
           <td><code>${esc(model.id)}</code></td>
-          <td><code>${esc(model.actualModel || '—')}</code></td>
-          <td><code>${esc(model.endpoint || '—')}</code></td>
           <td>${canvasPricingText(model.pricing)}</td>
           <td>${canvasParameterText(model.parameters)}</td>
-        </tr>`).join('') : '<tr><td colspan="6">暂无可用图片模型</td></tr>';
+        </tr>`).join('') : '<tr><td colspan="4">暂无可用图片模型</td></tr>';
       }
 
       if (jobsBody) {
@@ -278,12 +234,11 @@
         logsBody.innerHTML = logs.length ? logs.map((log) => `<tr>
           <td>${monitorTime(log.createdAt)}</td>
           <td><code>${esc(log.model || '—')}</code></td>
-          <td>${esc(log.channel || '—')}</td>
           <td>${log.status === 'success' ? '<span class="admin-badge admin-badge--ok">成功</span>' : log.status === 'failed' ? '<span class="admin-badge admin-badge--off">失败</span>' : '<span class="admin-badge admin-badge--info">其他</span>'}</td>
           <td>${Number(log.durationSeconds || 0).toLocaleString('zh-CN')} 秒</td>
           <td><code>${esc(log.requestId || '—')}</code></td>
           <td>${esc(log.detail || '—')}</td>
-        </tr>`).join('') : `<tr><td colspan="7">${esc(serviceLogs.error || '暂无服务日志')}</td></tr>`;
+        </tr>`).join('') : `<tr><td colspan="6">${esc(serviceLogs.error || '暂无服务日志')}</td></tr>`;
       }
 
       const completed = jobs.filter((job) => job.status === 'completed').length;
@@ -318,8 +273,8 @@
         status: row.status || 'active',
         sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : (index + 1) * 10
       };
-      if (row.pricingSource === 'upstream_realtime') {
-        // 实时模型只保存上下架、排序与退款策略，价格和名称始终跟随卡藏 API。
+      if (row.pricingSource !== 'manual') {
+        // 自动目录模型只保存上下架、排序与退款策略。
       } else if (row.pricingByResolution && row.creditsByResolution) {
         patch.creditsByResolution = {};
         for (const [res, val] of Object.entries(row.creditsByResolution)) {
@@ -352,7 +307,7 @@
           patch.promoPrice = Number(row.promoPrice);
         }
       }
-      if (row.pricingSource !== 'upstream_realtime') {
+      if (row.pricingSource === 'manual') {
         patch.fixedPrice = !!row.fixedPrice;
         if (displayName) patch.displayName = displayName;
       }

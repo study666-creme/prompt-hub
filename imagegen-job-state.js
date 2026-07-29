@@ -99,6 +99,7 @@
       const now = Date.now();
       return (list || []).filter((p) => {
         const age = now - (p.startedAt || 0);
+        if (p.clientRequestId) return age < RECENT_GEN_RECOVER_MS;
         if (p.recovering) {
           return p.jobId ? age < RECENT_GEN_RECOVER_MS : age < 30 * 60 * 1000;
         }
@@ -158,6 +159,7 @@
       const before = pendingList().length;
       setPending(pendingList().filter((p) => {
         const age = now - (p.startedAt || 0);
+        if (p.clientRequestId) return age < RECENT_GEN_RECOVER_MS;
         if (!p.jobId) return age < 15 * 60 * 1000;
         return age < RECENT_GEN_RECOVER_MS;
       }));

@@ -123,14 +123,14 @@ try {
       observer.observe(document.documentElement, { childList: true, subtree: true });
     });
   });
-  await page.route('**/api/v1/generate/models', (route) => route.fulfill({
+  await page.route('**/api/v1/generate/models**', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({
       ok: true,
       data: {
         models: [
-          { id: 'image2-economy', label: '全能模型2 · 特价 1K', uiFamily: 'gim2', selectable: true, status: 'active', resolutions: ['1k'], creditsFinal: 2, creditsBase: 2, creditsPerCall: 2 },
+          { id: 'image2', label: '全能模型2 · 1K', uiFamily: 'gim2', selectable: true, status: 'active', resolutions: ['1k'], creditsFinal: 5.5, creditsBase: 5.5, creditsPerCall: 5.5 },
           { id: 'image2-4k-fast', label: '全能模型2 · 极速 4K', uiFamily: 'gim2', selectable: true, status: 'active', resolutions: ['4k'], creditsFinal: 6.5, creditsBase: 6.5, creditsPerCall: 6.5, parameters: [{ name: 'quality', path: 'quality', type: 'string', fixed: 'standard' }] },
           { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K', uiFamily: 'gim2', selectable: true, status: 'active', resolutions: ['1k', '2k', '4k'], pricingByResolution: true, creditsByResolution: { '1k': 7, '2k': 15, '4k': 20 } }
         ]
@@ -186,50 +186,53 @@ try {
     cost: document.getElementById('imageGenCostHint')?.textContent || '',
     submit: document.getElementById('imageGenSubmit')?.textContent || '',
     catalogIds: (window.__IMAGE_GEN_MODELS__ || []).map((model) => model.id),
-    detailFinal: window.PointsSystem?.getImageGenCostDetail?.('image2-economy', '1k')?.final
+    detailFinal: window.PointsSystem?.getImageGenCostDetail?.('image2', '1k')?.final
   }));
-  if (imagegen.model !== 'image2-economy' || !/2\s*积分/.test(`${imagegen.cost} ${imagegen.submit}`)) {
-    throw new Error(`guest image model did not use the low-cost default: ${JSON.stringify(imagegen)}`);
+  if (imagegen.model !== 'image2' || !/5\.5\s*积分/.test(`${imagegen.cost} ${imagegen.submit}`)) {
+    throw new Error(`guest image model did not use the active default: ${JSON.stringify(imagegen)}`);
   }
-  await page.evaluate(() => {
-    const model = document.getElementById('imageGenModel');
-    model.value = 'image2-4k-fast';
-    model.dispatchEvent(new Event('change', { bubbles: true }));
+  await page.locator('#imageGenModelTrigger').focus();
+  await page.keyboard.press('Enter');
+  const menuStayedOpen = await page.evaluate(() => {
+    const trigger = document.getElementById('imageGenModelTrigger');
+    const menu = document.getElementById('imageGenModelMenu');
+    menu?.dispatchEvent(new Event('scroll'));
+    return menu?.hidden === false && trigger?.getAttribute('aria-expanded') === 'true';
   });
+  if (!menuStayedOpen) throw new Error('custom model menu closed while its own list scrolled');
+  await page.locator('#imageGenModelMenu [data-model-id="image2-pro"]').click();
   await page.waitForFunction(() => {
     const selected = document.getElementById('imageGenModel')?.value;
     const resolution = document.getElementById('imageGenResolution')?.value;
     const cost = document.getElementById('imageGenCostHint')?.textContent || '';
-    const referencesHidden = document.querySelector('.imagegen-ref-block')?.hidden === true;
     const qualityHidden = document.getElementById('imageGenQuality')?.closest('.imagegen-param')?.hidden === true;
-    return selected === 'image2-4k-fast' && resolution === '4k' && /6\.5\s*积分/.test(cost) && referencesHidden && qualityHidden;
+    const qualityOptions = [...(document.getElementById('imageGenQuality')?.options || [])].map((option) => option.value).join(',');
+    return selected === 'image2-pro'
+      && resolution === '1k'
+      && /7\s*积分/.test(cost)
+      && !qualityHidden
+      && qualityOptions === 'low,medium,high';
   }, null, { timeout: 5000 });
-  const fast4k = await page.evaluate(() => ({
-
+  const pro1k = await page.evaluate(() => ({
     resolution: document.getElementById('imageGenResolution')?.value,
     cost: document.getElementById('imageGenCostHint')?.textContent || '',
-    referencesHidden: document.querySelector('.imagegen-ref-block')?.hidden === true,
-    qualityHidden: document.getElementById('imageGenQuality')?.closest('.imagegen-param')?.hidden === true
+    qualityHidden: document.getElementById('imageGenQuality')?.closest('.imagegen-param')?.hidden === true,
+    qualityOptions: [...(document.getElementById('imageGenQuality')?.options || [])].map((option) => option.value),
+    qualityLabels: [...(document.getElementById('imageGenQuality')?.options || [])].map((option) => option.textContent?.trim()),
+    triggerLabel: document.getElementById('imageGenModelTriggerLabel')?.textContent?.trim()
   }));
-  if (fast4k.resolution !== '4k' || !/6\.5\s*积分/.test(fast4k.cost) || !fast4k.referencesHidden || !fast4k.qualityHidden) {
-    throw new Error(`fixed 4K model contract is not reflected in the UI: ${JSON.stringify(fast4k)}`);
+  if (
+    pro1k.resolution !== '1k'
+    || !/7\s*积分/.test(pro1k.cost)
+    || pro1k.qualityHidden
+    || pro1k.qualityOptions.join(',') !== 'low,medium,high'
+    || pro1k.qualityLabels.join(',') !== '低,中,高'
+    || !pro1k.triggerLabel.includes('高质量')
+  ) {
+    throw new Error(`image2-pro quality contract is not reflected in the UI: ${JSON.stringify(pro1k)}`);
   }
-  await page.evaluate(() => {
-    const model = document.getElementById('imageGenModel');
-    model.value = 'image2-pro';
-    model.dispatchEvent(new Event('change', { bubbles: true }));
-    const resolution = document.getElementById('imageGenResolution');
-    resolution.value = '1k';
-    resolution.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  await page.waitForFunction(() => {
-    const selected = document.getElementById('imageGenModel')?.value;
-    const resolution = document.getElementById('imageGenResolution')?.value;
-    const cost = document.getElementById('imageGenCostHint')?.textContent || '';
-    return selected === 'image2-pro' && resolution === '1k' && /7\s*积分/.test(cost);
-  }, null, { timeout: 5000 });
   if (errors.length) throw new Error(`browser page errors: ${JSON.stringify(errors)}`);
-  console.log('verify-guest-isolation-browser OK', JSON.stringify({ result, imagegen, fast4k }));
+  console.log('verify-guest-isolation-browser OK', JSON.stringify({ result, imagegen, pro1k }));
   await context.close();
 } finally {
   await browser?.close();

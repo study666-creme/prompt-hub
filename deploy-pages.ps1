@@ -44,7 +44,7 @@ foreach ($item in $localDeployExclude) {
 }
 
 Write-Host "Pages project: $project"
-& (Join-Path $root "scripts\run-predeploy-smoke.ps1")
+& node (Join-Path $root "scripts\run-predeploy-smoke.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 & (Join-Path $root "scripts\bump-build.ps1")
 

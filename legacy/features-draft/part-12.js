@@ -153,32 +153,43 @@
     low: '低',
     medium: '中',
     high: '高',
-    standard: '低',
+    standard: '中',
     ultra: '高',
-    auto: '自动'
+    auto: '中'
   };
+  const IMAGE_GEN_DEFAULT_QUALITY_OPTIONS = ['low', 'medium', 'high'];
 
-  function syncImageGenQualitySelectOptions(modelEntry) {
-    const qEl = document.getElementById('imageGenQuality');
-    if (!qEl) return;
-    const qualityParam = modelEntry?.parameters?.find((parameter) => parameter?.name === 'quality');
-    const rawOptions = Array.isArray(qualityParam?.options) ? qualityParam.options.map(String) : [];
-    const options = rawOptions.length
-      ? rawOptions
-      : ['standard', 'high', 'ultra'];
+  function normalizeImageGenQualityOptionValue(value) {
+    const raw = String(value || '').trim();
+    const lower = raw.toLowerCase();
+    if (lower === '低') return 'low';
+    if (lower === '中' || lower === '标准') return 'medium';
+    if (lower === '高') return 'high';
+    if (lower === 'standard' || lower === 'auto') return 'medium';
+    if (lower === 'ultra') return 'high';
+    return lower || raw;
+  }
+
+  function imageGenQualityOptionLabel(value) {
+    return IMAGE_GEN_QUALITY_LABELS[normalizeImageGenQualityOptionValue(value)] || String(value || '');
+  }
+
+  function setImageGenQualitySelectOptions(qEl, options, preferredValue) {
     const key = options.join('|');
-    if (qEl.dataset.qualityOptions === key) return;
-    const current = qEl.value;
     qEl.dataset.qualityOptions = key;
     qEl.innerHTML = options
-      .map((value) => `<option value="${esc(value)}">${esc(IMAGE_GEN_QUALITY_LABELS[value] || value)}</option>`)
+      .map((value) => `<option value="${esc(value)}">${esc(imageGenQualityOptionLabel(value))}</option>`)
       .join('');
-    if (options.includes(current)) qEl.value = current;
-    else if (typeof qualityParam?.default === 'string' && options.includes(qualityParam.default)) {
-      qEl.value = qualityParam.default;
-    } else {
-      qEl.value = options[0];
-    }
+    if (preferredValue && options.includes(preferredValue)) qEl.value = preferredValue;
+    else qEl.value = options.includes(qEl.value) ? qEl.value : options[0];
+  }
+
+  function syncImageGenQualitySelectOptions() {
+    const qEl = document.getElementById('imageGenQuality');
+    if (!qEl) return;
+    const current = normalizeImageGenQualityOptionValue(qEl.value);
+    const preferred = IMAGE_GEN_DEFAULT_QUALITY_OPTIONS.includes(current) ? current : 'medium';
+    setImageGenQualitySelectOptions(qEl, [...IMAGE_GEN_DEFAULT_QUALITY_OPTIONS], preferred);
   }
 
   function imageGenSizeOptionsForModel(modelId) {
@@ -195,7 +206,7 @@
       if (BANANA2_EXTENDED_MODELS.has(id)) list.push(...IMAGE_GEN_SIZE_BANANA2_EXTRA);
       return list;
     }
-    if (id.startsWith('apimart-mj-') || entry?.uiFamily === 'midjourney') {
+    if (id.startsWith('mj-') || entry?.uiFamily === 'midjourney') {
       return IMAGE_GEN_SIZE_MJ;
     }
     if (entry?.uiFamily === 'gim2' || id.startsWith('image2')) {
@@ -667,7 +678,7 @@
     const sizeLabel =
       document.getElementById('imageGenSize')?.selectedOptions?.[0]?.textContent?.trim() || size;
     const qualLabel =
-      { standard: '低', low: '低', medium: '中', high: '中', ultra: '高' }[quality] || quality;
+      { standard: '中', low: '低', medium: '中', high: '高', ultra: '高', auto: '中' }[quality] || quality;
     const parts = [modelLabel, qualLabel, sizeLabel];
     if (isBlend) {
       parts.push(`混图 · ${unitPerSheet}`);
@@ -694,11 +705,9 @@
     if (!m) return false;
     if (m.pricingBySpeed) {
       const speed = mjSpeed === 'fast' || mjSpeed === 'turbo' ? mjSpeed : 'relax';
-      if (m.costBySpeed?.[speed] && Number.isFinite(Number(m.costBySpeed[speed].final))) return true;
       if (m.creditsBySpeed?.[speed] != null) return true;
     }
     const res = normalizeImageGenResolution(resolution);
-    if (m.costByResolution?.[res] && Number.isFinite(Number(m.costByResolution[res].final))) return true;
     if (m.pricingByResolution && m.creditsByResolution?.[res] != null) return true;
     if (Number.isFinite(Number(m.creditsFinal))) return true;
     return false;
@@ -743,25 +752,25 @@
   const GEN_COST_QUOTE_TIMEOUT_MS = window.matchMedia?.('(max-width: 900px)')?.matches ? 1200 : 1800;
   const REF_URL_RESOLVE_TIMEOUT_MS = 8000;
 
-  async function quoteGenerationCost(resolution, quality, model, localFallback) {
+  async function quoteGenerationCost(resolution, quality, model, localFallback, opts) {
     const fallback = Number(localFallback) || 10;
     if (!window.PointsSystem?.useApiForAccount?.()) {
-      return { cost: fallback, fromApi: false };
+      return { cost: fallback, quotedCredits: fallback, fromApi: false };
     }
     try {
       const quote = await Promise.race([
-        window.PromptHubApi.getGenerationCost(resolution, quality, model, localFallback?.speed ? { speed: localFallback.speed } : undefined),
+        window.PromptHubApi.getGenerationCost(resolution, quality, model, opts?.speed ? { speed: opts.speed } : undefined),
         new Promise((_, reject) => {
           setTimeout(() => reject(new Error('cost quote timeout')), GEN_COST_QUOTE_TIMEOUT_MS);
         })
       ]);
       if (quote.ok && quote.data?.final != null) {
-        return { cost: quote.data.final, fromApi: true };
+        return { cost: quote.data.final, quotedCredits: quote.data.final, fromApi: true };
       }
     } catch (e) {
       console.warn('[imagegen] cost quote fallback', e);
     }
-    return { cost: fallback, fromApi: false };
+    return { cost: fallback, quotedCredits: fallback, fromApi: false };
   }
 
   function resetImageGenSubmitState() {
@@ -795,27 +804,17 @@
       if (!quote.ok || quote.data?.final == null) return;
 
       const local = window.PointsSystem?.getImageGenCostDetail?.(model, resolution);
+      const final = Number(quote.data.final);
 
       const detail = Object.assign({}, local || {}, {
-        base: quote.data.listPrice ?? quote.data.base ?? local?.listPrice,
-        final: quote.data.final,
-        listPrice: quote.data.listPrice ?? local?.listPrice,
-        promoPrice: quote.data.promoPrice ?? local?.promoPrice,
-        appliedDiscount: quote.data.appliedDiscount ?? local?.appliedDiscount,
-        modelDiscountLabel: quote.data.appliedDiscount === 'model'
-          ? (quote.data.modelDiscountLabel ?? local?.modelDiscountLabel)
-          : null,
-        saved:
-          quote.data.listPrice != null && quote.data.listPrice > quote.data.final
-            ? quote.data.listPrice - quote.data.final
-            : local?.saved,
-        label: quote.data.appliedDiscount === 'member'
-          ? (quote.data.discountLabel || local?.label)
-          : null,
+        base: final,
+        final,
+        saved: 0,
+        label: null,
         modelLabel: quote.data.modelLabel || local?.modelLabel,
-        fixed: quote.data.appliedDiscount === 'fixed'
+        fixed: true
       });
-      applyImageGenCostDisplay(detail, quote.data.final, quality, size);
+      applyImageGenCostDisplay(detail, final, quality, size);
     } catch (e) { /* 保持本地估价 */ }
   }
 
@@ -856,7 +855,7 @@
     const resEl = document.getElementById('imageGenResolution');
     if (resEl && resolution) resEl.value = resolution;
     const qEl = document.getElementById('imageGenQuality');
-    if (qEl && quality) qEl.value = quality;
+    if (qEl && quality) qEl.value = normalizeImageGenQualityOptionValue(quality);
     const szEl = document.getElementById('imageGenSize');
     if (szEl && size) szEl.value = size;
     updateImageGenPricingUI();

@@ -209,6 +209,8 @@
   let imageGenFeedIsNearTop;
   let bindImageGenFeedCardEvents;
   let captureImageGenFeedCardPositions;
+  let renderImageGenPendingNow;
+  let renderImageGenFailedNow;
 
   function safeRenderImageGenFeed(opts) {
     if (typeof renderImageGenFeed !== 'function') return;
@@ -313,6 +315,8 @@
     imageGenFeedIsNearTop = IG.imageGenFeedIsNearTop;
     bindImageGenFeedCardEvents = IG.bindImageGenFeedCardEvents;
     captureImageGenFeedCardPositions = IG.captureImageGenFeedCardPositions;
+    renderImageGenPendingNow = IG.renderImageGenPendingNow;
+    renderImageGenFailedNow = IG.renderImageGenFailedNow;
     window.__imageGenFeedWired = true;
   }
 
@@ -601,6 +605,33 @@
     }
   }
 
+  function isExplicitPermanentMissingResponse(result) {
+    const status = Number(result?.status || 0);
+    const code = String(result?.code || '').trim().toUpperCase();
+    return status === 404 || status === 410 || code === 'NOT_FOUND' || code === 'GONE';
+  }
+
+  /** Remove only the transient recent record after the server proves its source is gone. */
+  function removePermanentlyMissingCreation(id, evidence) {
+    if (!isExplicitPermanentMissingResponse(evidence)) return false;
+    const removed = creations.find((c) => String(c?.id) === String(id));
+    if (!removed) return false;
+    const baseJobId = normalizeGenJobBaseId(removed.jobId || '');
+    if (!baseJobId) return false;
+
+    if (creationsSideId === removed.id) closeCreationsSidePanel();
+    if (imageGenPreviewId === removed.id) closeImageGenPreview();
+    recordCreationDeletion(removed.id, baseJobId);
+    window.recordGenerationJobDeletion?.(baseJobId);
+    creations = creations.filter((c) => String(c?.id) !== String(removed.id));
+    persistCreations();
+    renderCreations();
+    if (document.getElementById('pageImageGen')?.classList.contains('active')) {
+      renderImageGenFeed({ preserveScroll: true, force: true });
+    }
+    return true;
+  }
+
   function highlightCreationCard(id) {
     document.querySelectorAll('#creationsGrid .creation-post-card').forEach(el => {
       el.classList.toggle('selected', el.dataset.creationId === id);
@@ -638,7 +669,7 @@
         <button type="button" class="btn btn-secondary" data-action="remix">再生成</button>
         <button type="button" class="btn btn-secondary" data-action="del">删除记录</button>
       </div>
-      <p class="panel-hint">最近生成保留 7 天，条数上限随会员等级（轻量 150 / 基础 200 / 标准 300 / 专业 400）。超出或到期未存入库将彻底删除；喜欢请点「存入库」。</p>`;
+      <p class="panel-hint">此处不永久保存图片，记录最多保留 7 天，条数上限随会员等级（轻量 150 / 基础 200 / 标准 300 / 专业 400）。请及时下载或存入库，否则图片可能随时丢失。</p>`;
     bindCommunitySideImageZoom(body, null, c.image, id, { jobId: c.jobId || null });
     body.querySelector('[data-action="remix"]')?.addEventListener('click', () => remixCreation(id));
     body.querySelector('[data-action="del"]')?.addEventListener('click', () => {

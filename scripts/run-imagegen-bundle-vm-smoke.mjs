@@ -350,6 +350,7 @@ window.PromptHubApi = {
 let mobileViewSwitches = 0;
 window.MobileUI = { setImageGenView: () => { mobileViewSwitches += 1; } };
 let hiddenFeedRenders = 0;
+let immediatePendingRenders = 0;
 const submitUxApi = window.ImageGenSubmit.init({
   getImageGenFormMeta: () => ({ model: 'gpt-image-2', resolution: '1k', quality: 'standard', size: '1:1' }),
   isImageGenMidjourneyModel: () => false,
@@ -372,6 +373,10 @@ const submitUxApi = window.ImageGenSubmit.init({
   switchImageGenFeedToRecent: () => {},
   updateImageGenFeedHint: () => {},
   renderImageGenFeed: () => { hiddenFeedRenders += 1; },
+  renderImageGenPendingNow: () => {
+    immediatePendingRenders += 1;
+    return {};
+  },
   safeRenderImageGenFeed: () => { hiddenFeedRenders += 1; },
   isImageGenMobileFormActive: () => true,
   quoteGenerationCost: async () => ({ cost: 5, fromApi: true }),
@@ -387,16 +392,24 @@ const submitUxApi = window.ImageGenSubmit.init({
   pollGenerationJobUntilDone: () => {}
 });
 const submitPromise = submitUxApi.runImageGenWithPrompt();
-if (!submitButton.disabled || !submitButton.classList.contains('is-submitting') || submitAttrs.get('aria-busy') !== 'true') {
-  console.error('imagegen-bundle-vm-smoke FAIL: submit feedback was not synchronous');
+if (
+  !submitButton.disabled
+  || !submitButton.classList.contains('is-submitted')
+  || submitButton.classList.contains('is-submitting')
+  || submitAttrs.has('aria-busy')
+  || immediatePendingRenders !== 1
+  || mobileViewSwitches !== 1
+  || hiddenFeedRenders !== 0
+) {
+  console.error('imagegen-bundle-vm-smoke FAIL: submit did not hand off synchronously to the pending card');
   process.exit(1);
 }
 const submitStartDeadline = Date.now() + 250;
 while (!generateStarted && Date.now() < submitStartDeadline) {
   await new Promise((resolve) => setTimeout(resolve, 5));
 }
-if (!generateStarted || !submitButton.classList.contains('is-submitting')) {
-  console.error('imagegen-bundle-vm-smoke FAIL: submit feedback did not remain active during request');
+if (!generateStarted || !submitButton.classList.contains('is-submitted') || immediatePendingRenders !== 1 || mobileViewSwitches !== 1 || hiddenFeedRenders !== 0) {
+  console.error('imagegen-bundle-vm-smoke FAIL: submit did not move immediately into the mobile feed');
   process.exit(1);
 }
 resolveGenerate({ ok: true, data: { status: 'processing', jobId: 'job-submit-test', creditsCharged: 5 } });
@@ -405,8 +418,8 @@ if (!submitResult?.ok || !submitButton.classList.contains('is-submitted')) {
   console.error('imagegen-bundle-vm-smoke FAIL: accepted submit confirmation missing');
   process.exit(1);
 }
-if (hiddenFeedRenders !== 0 || mobileViewSwitches !== 0) {
-  console.error('imagegen-bundle-vm-smoke FAIL: mobile form submit redrew or switched the hidden feed');
+if (hiddenFeedRenders !== 0 || mobileViewSwitches !== 1 || immediatePendingRenders < 1) {
+  console.error('imagegen-bundle-vm-smoke FAIL: mobile submit feedback contract changed unexpectedly');
   process.exit(1);
 }
 window.document.getElementById = originalGetElementById;

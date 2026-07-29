@@ -213,9 +213,11 @@
       if (hint) {
         hint.textContent = saved.ok
           ? `已生成并保存到主站卡片库 · 消耗约 ${gen.data?.creditsCharged ?? cost} 积分`
-          : `生成完成 · 消耗约 ${gen.data?.creditsCharged ?? cost} 积分`;
+          : `生成完成 · ${saved.error || '保存失败，请重试'}`;
       }
-      setStatus(saved.ok ? '已保存到主站卡片库，返回主站刷新即可看到' : '生图完成，但写入主站卡片库失败');
+      setStatus(saved.ok
+        ? '已保存到主站卡片库，返回主站刷新即可看到'
+        : (saved.error || '生图完成，但写入主站卡片库失败'));
     } catch (e) {
       setStudioImageGenPending(false);
       document.getElementById('studioImageIdle')?.classList.remove('hidden');
@@ -282,7 +284,7 @@
         addBtn.textContent = '已保存到主站卡片库';
         addBtn.disabled = true;
       }
-      setStatus(saved.ok ? '已保存到主站卡片库' : '保存失败，请重试');
+      setStatus(saved.ok ? '已保存到主站卡片库' : (saved.error || '保存失败，请重试'));
     })();
   }
 

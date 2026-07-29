@@ -6,7 +6,11 @@
   let observer = null;
   let observedRoot = null;
   const inflight = new WeakMap();
+  const recentMissingCheckInflight = new WeakMap();
+  const ownedBlobUrls = new Set();
+  let ownedBlobRemovalObserver = null;
   const queues = window.CardImageLoaderQueues.create();
+  const DOWNLOAD_SLOT_TIMEOUT_MS = 30000;
   function maxResolveCap() { return queues.maxResolveCap(); }
   function feedMaxResolveCap() { return queues.feedMaxResolveCap(); }
   function maxDownloadCap() { return queues.maxDownloadCap(); }
@@ -173,7 +177,53 @@
   }
 
   function isOwnImageGenRecentImg(img) {
-    return !!img?.closest?.('#imageGenFeed .imagegen-feed-card[data-feed-id^="cr_"]');
+    return !!img?.closest?.('.imagegen-feed-card[data-feed-id^="cr_"]');
+  }
+
+  function isLocalRasterImageUrl(value) {
+    const url = String(value || '').trim();
+    return url.startsWith('blob:') || /^data:image\/(?!svg(?:\+xml)?[;,])/i.test(url);
+  }
+
+  function revokeOwnedBlobUrl(url) {
+    if (!url || !ownedBlobUrls.delete(url)) return;
+    try { URL.revokeObjectURL?.(url); } catch (e) { /* ignore */ }
+  }
+
+  function releaseImgOwnedBlobUrl(img, exceptUrl = '') {
+    const owned = img?.dataset?.cardImageOwnedBlobUrl || '';
+    if (!owned || owned === exceptUrl) return;
+    delete img.dataset.cardImageOwnedBlobUrl;
+    revokeOwnedBlobUrl(owned);
+  }
+
+  function ensureOwnedBlobRemovalObserver() {
+    if (ownedBlobRemovalObserver || typeof MutationObserver !== 'function') return;
+    const root = document.body || document.documentElement;
+    if (!root) return;
+    ownedBlobRemovalObserver = new MutationObserver((records) => {
+      records.forEach((record) => {
+        if (record.type === 'attributes') {
+          const img = record.target;
+          const owned = img?.dataset?.cardImageOwnedBlobUrl || '';
+          if (owned && (img.getAttribute?.('src') || '') !== owned) releaseImgOwnedBlobUrl(img);
+          return;
+        }
+        record.removedNodes?.forEach((node) => {
+          if (node?.nodeType !== 1) return;
+          if (node.matches?.('img')) releaseImgOwnedBlobUrl(node);
+          node.querySelectorAll?.('img[data-card-image-owned-blob-url]').forEach((img) => {
+            releaseImgOwnedBlobUrl(img);
+          });
+        });
+      });
+    });
+    ownedBlobRemovalObserver.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['src']
+    });
   }
 
   function creationFromRecentFeedImg(img) {
@@ -204,17 +254,9 @@
       pushRef(creation.mjCompositeUrl);
       if (Array.isArray(creation.mjGridUrls)) creation.mjGridUrls.forEach(pushRef);
     }
-    if (jobId && window.PromptHubApi?.getGenerationImageUrl) {
-      try {
-        const r = await window.PromptHubApi.getGenerationImageUrl(jobId, {
-          variant: wantFull ? 'full' : 'grid'
-        });
-        const jobUrl = r?.ok ? r.data?.url : '';
-        if (jobUrl && isReadySrc(jobUrl, img)) return jobUrl;
-      } catch (e) { /* continue with archived/local candidates */ }
-    }
     for (const ref of refs) {
       if (!ref) continue;
+      if (isLocalRasterImageUrl(ref) && isReadySrc(ref, img)) return ref;
       const storageRef = window.SupabaseSync?.isStorageRef?.(ref);
       if (window.MediaPipeline?.resolveListUrl) {
         const list = await window.MediaPipeline.resolveListUrl(ref, {
@@ -250,17 +292,101 @@
         if (window.PromptHubApi?.fetchMediaAsBlobUrl) {
           try {
             const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(ref);
-            if (blobUrl && isReadySrc(blobUrl, img)) return blobUrl;
+            if (blobUrl) {
+              ownedBlobUrls.add(blobUrl);
+              if (isReadySrc(blobUrl, img)) return blobUrl;
+              revokeOwnedBlobUrl(blobUrl);
+            }
           } catch (e) { /* ignore */ }
         }
         if (isReadySrc(ref, img)) return ref;
       }
     }
-    if (window.FeatureDraft?.resolveImageGenFullUrl && wantFull) {
+    if (opts.skipJobApi !== true && jobId && window.PromptHubApi?.getGenerationImageUrl) {
+      try {
+        const r = await window.PromptHubApi.getGenerationImageUrl(jobId, {
+          variant: wantFull ? 'full' : 'grid'
+        });
+        const jobUrl = r?.ok ? r.data?.url : '';
+        if (jobUrl && isReadySrc(jobUrl, img)) return jobUrl;
+      } catch (e) { /* continue with archived/local candidates */ }
+    }
+    if (opts.skipJobApi !== true && window.FeatureDraft?.resolveImageGenFullUrl && wantFull) {
       const feedKey = `cr_${creation.id}`;
       return window.FeatureDraft.resolveImageGenFullUrl('recent', creation.id, feedKey, img) || '';
     }
     return '';
+  }
+
+  function isExplicitPermanentMissingResponse(result) {
+    const status = Number(result?.status || 0);
+    const code = String(result?.code || '').trim().toUpperCase();
+    return status === 404 || status === 410 || code === 'NOT_FOUND' || code === 'GONE';
+  }
+
+  function confirmPermanentlyMissingRecentCreation(img) {
+    if (!isOwnImageGenRecentImg(img)) return Promise.resolve(false);
+    const existing = recentMissingCheckInflight.get(img);
+    if (existing) return existing;
+    const creation = creationFromRecentFeedImg(img);
+    const jobId = String(creation?.jobId || img.getAttribute('data-job-id') || '').replace(/#\d+$/, '');
+    if (!creation?.id || !jobId) return Promise.resolve(false);
+
+    const check = (async () => {
+      if (img.dataset.recentCandidateRetried !== '1') {
+        img.dataset.recentCandidateRetried = '1';
+        try {
+          const candidateUrl = await resolveRecentCreationFeedUrl(img, {
+            preferFull: true,
+            skipJobApi: true
+          });
+          if (candidateUrl && !isImgSameDisplayResource(img, candidateUrl)) {
+            img.closest('.card-media, .imagegen-feed-media')?.classList.remove('card-media--load-failed');
+            applyUrlToImg(img, candidateUrl);
+            return false;
+          }
+        } catch (e) { /* continue with authoritative server checks */ }
+      }
+
+      let fullResult = null;
+      if (window.PromptHubApi?.getGenerationImageUrl) {
+        try {
+          fullResult = await window.PromptHubApi.getGenerationImageUrl(jobId, { variant: 'full' });
+        } catch (e) {
+          return false;
+        }
+        if (fullResult?.ok) {
+          const fullUrl = fullResult.data?.url || '';
+          if (fullUrl && img.dataset.recentFullRetried !== '1') {
+            img.dataset.recentFullRetried = '1';
+            img.closest('.card-media, .imagegen-feed-media')?.classList.remove('card-media--load-failed');
+            applyUrlToImg(img, fullUrl);
+          }
+          return false;
+        }
+        if (isExplicitPermanentMissingResponse(fullResult)) {
+          return window.FeatureDraft?.removePermanentlyMissingCreation?.(creation.id, fullResult) === true;
+        }
+      }
+
+      if (!window.PromptHubApi?.getGenerationJob) return false;
+      let jobResult = null;
+      try {
+        jobResult = await window.PromptHubApi.getGenerationJob(jobId);
+      } catch (e) {
+        return false;
+      }
+      if (!isExplicitPermanentMissingResponse(jobResult)) return false;
+      return window.FeatureDraft?.removePermanentlyMissingCreation?.(creation.id, jobResult) === true;
+    })().finally(() => recentMissingCheckInflight.delete(img));
+    recentMissingCheckInflight.set(img, check);
+    return check;
+  }
+
+  function finalizeRecentCreationMediaFailure(img, media) {
+    media?.classList.remove('is-loading');
+    media?.classList.add('card-media--load-failed');
+    if (isOwnImageGenRecentImg(img)) void confirmPermanentlyMissingRecentCreation(img);
   }
 
   /** 浏览器已解码出像素 — 勿因签名过期重复拉 media */
@@ -268,7 +394,7 @@
     if (!img) return false;
     if (img.dataset.feedLoadDone === '1') return true;
     const src = img.currentSrc || img.src || '';
-    if (!/^https?:\/\//i.test(src) || src.includes('data:image/svg')) return false;
+    if ((!/^https?:\/\//i.test(src) && !isLocalRasterImageUrl(src)) || src.includes('data:image/svg')) return false;
     return img.complete && img.naturalWidth > 8;
   }
 
@@ -367,7 +493,15 @@
   }
 
   function isReadySrc(src, img) {
-    if (!src || !src.startsWith('http') || src.includes('data:image/svg')) return false;
+    src = String(src || '').trim();
+    if (!src || src.includes('data:image/svg')) return false;
+    const localRaster = isLocalRasterImageUrl(src);
+    if (!localRaster && !/^https?:\/\//i.test(src)) return false;
+    if (localRaster) {
+      if (img && (isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))) return false;
+      if (src.startsWith('blob:') && img && !isOwnImageGenRecentImg(img)) return false;
+      return true;
+    }
     if (window.SupabaseSync?.isInvalidMediaUrl?.(src)) return false;
     if (img && (isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))) {
       if (src.startsWith('blob:')) return false;
@@ -582,7 +716,10 @@
   }
 
   function applyUrlToImg(img, url) {
-    if (!img || !isReadySrc(url, img)) return false;
+    if (!img || !isReadySrc(url, img)) {
+      revokeOwnedBlobUrl(url);
+      return false;
+    }
     if (window.SupabaseSync?.isWarehouseBlockedFullUrl?.(url, img)) return false;
     const urlPath = window.SupabaseSync?.storagePathFromDisplayUrl?.(url);
     const urlKey = urlPath ? String(urlPath).replace(/^\//, '') : '';
@@ -596,9 +733,22 @@
       });
       if (!cached || cached !== url) return false;
     }
-    if (img.dataset.feedLoadDone === '1' && isImgVisuallyLoaded(img)) return true;
+    if (img.dataset.feedLoadDone === '1' && isImgVisuallyLoaded(img)) {
+      if (!isImgSameDisplayResource(img, url)) revokeOwnedBlobUrl(url);
+      return true;
+    }
     const media = feedMediaFromImg(img);
-    if (!media) return false;
+    if (!media) {
+      revokeOwnedBlobUrl(url);
+      return false;
+    }
+    releaseImgOwnedBlobUrl(img, url);
+    if (ownedBlobUrls.has(url)) {
+      img.dataset.cardImageOwnedBlobUrl = url;
+      ensureOwnedBlobRemovalObserver();
+    }
+    img.classList.remove('img-load-failed');
+    media.classList.remove('card-media--load-failed');
     const quietWhList = isOwnWarehouseListImg(img);
     if (quietWhList) {
       if (!media.classList.contains('card-media--await')) media.classList.add('card-media--await');
@@ -627,8 +777,11 @@
 
     let requestToken = '';
     const isStaleRequest = () => requestToken
-      && img.dataset.feedLoadToken
-      && img.dataset.feedLoadToken !== requestToken;
+      && (
+        img.dataset.feedLoadToken !== requestToken
+        || img.dataset.feedLoadingUrl !== url
+        || (targetLoadKey && img.dataset.feedLoadingKey !== targetLoadKey)
+      );
     const clearPending = () => {
       if (requestToken) {
         if (img.dataset.feedLoadToken && img.dataset.feedLoadToken !== requestToken) return false;
@@ -684,10 +837,12 @@
       const ref = img.getAttribute('data-image-ref');
       const cardId = cardIdFromImg(img);
       const failedUrl = img.currentSrc || img.src || '';
+      releaseImgOwnedBlobUrl(img);
       const failedPath = window.SupabaseSync?.storagePathFromDisplayUrl?.(failedUrl);
       const isGridFail = failedPath && /_grid\.(jpe?g|webp|png)$/i.test(failedPath);
       const ownWh = isOwnImageGenWarehouseImg(img);
       const ownList = isOwnWarehouseListImg(img);
+      const markLoadFailed = () => finalizeRecentCreationMediaFailure(img, media);
       const retryWarehouseList = () => {
         if (!ref || !ownWh || img.dataset.whListRetried === '1') return false;
         img.dataset.whListRetried = '1';
@@ -711,7 +866,7 @@
           if (ownList && recoverWarehouseListGeneratedImg(img, media)) return;
           if (img.dataset.whWarmTried === '1') {
             if (ownList) window.finalizeWarehouseCardMediaFailure?.(media, img);
-            else media.classList.add('card-media--load-failed');
+            else markLoadFailed();
             return;
           }
           img.dataset.whWarmTried = '1';
@@ -721,7 +876,7 @@
             void window.WarehouseThumb.resolveForCardModel(card).then((retryUrl) => {
               if (retryUrl && applyUrlToImg(img, retryUrl)) return;
               if (ownList) window.finalizeWarehouseCardMediaFailure?.(media, img);
-              else media.classList.add('card-media--load-failed');
+              else markLoadFailed();
             });
             return;
           }
@@ -739,14 +894,14 @@
               if (retryUrl && applyUrlToImg(img, retryUrl)) return;
               if (queueGridBackfillForImg(img)) return;
               if (ownList) window.finalizeWarehouseCardMediaFailure?.(media, img);
-              else media.classList.add('card-media--load-failed');
+              else markLoadFailed();
             });
             return;
           }
           if (ownWh && retryWarehouseList()) return;
           if (queueGridBackfillForImg(img)) return;
           if (ownList) window.finalizeWarehouseCardMediaFailure?.(media, img);
-          else media.classList.add('card-media--load-failed');
+          else markLoadFailed();
           return;
         }
         if (isCommOther) {
@@ -763,11 +918,11 @@
             bypassSignBudget: true
           }, img).then((retryUrl) => {
             if (retryUrl && retryUrl !== failedUrl) applyUrlToImg(img, retryUrl);
-            else media.classList.add('card-media--load-failed');
+            else markLoadFailed();
           });
           return;
         }
-        media.classList.add('card-media--load-failed');
+        markLoadFailed();
         return;
       }
       if (retryWarehouseList()) return;
@@ -782,7 +937,7 @@
         window.finalizeWarehouseCardMediaFailure?.(media, img);
         return;
       }
-      media.classList.add('card-media--load-failed');
+      markLoadFailed();
     };
 
     if (img.src === url && img.complete && img.naturalWidth > 0 && !img.src.includes('data:image/svg')) {
@@ -798,7 +953,7 @@
     if (targetLoadKey) img.dataset.feedLoadingKey = targetLoadKey;
     void enqueueDownload(() => new Promise((resolve) => {
       const pendingStillMatches = img.dataset.feedLoadingUrl === url
-        || (targetLoadKey && img.dataset.feedLoadingKey === targetLoadKey);
+        && (!targetLoadKey || img.dataset.feedLoadingKey === targetLoadKey);
       if (!pendingStillMatches) {
         resolve();
         return;
@@ -806,11 +961,32 @@
       requestToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       img.dataset.feedLoadToken = requestToken;
       img.decoding = 'async';
-      img.addEventListener('load', () => { finish(); resolve(); }, { once: true });
-      img.addEventListener('error', () => { fail(); resolve(); }, { once: true });
+      let outcomeHandled = false;
+      let queueSettled = false;
+      let timeoutId = null;
+      const settleQueue = () => {
+        if (queueSettled) return;
+        queueSettled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        resolve();
+      };
+      const onLoad = () => {
+        if (outcomeHandled) return;
+        outcomeHandled = true;
+        finish();
+        settleQueue();
+      };
+      const onError = () => {
+        if (outcomeHandled) return;
+        outcomeHandled = true;
+        fail();
+        settleQueue();
+      };
+      img.addEventListener('load', onLoad, { once: true });
+      img.addEventListener('error', onError, { once: true });
+      timeoutId = setTimeout(settleQueue, DOWNLOAD_SLOT_TIMEOUT_MS);
       img.src = url;
-      if (img.complete && img.naturalWidth > 0) finish();
-      resolve();
+      if (img.complete && img.naturalWidth > 0) onLoad();
     }));
     return true;
   }
@@ -823,7 +999,7 @@
     const media = img.closest('.card-media, .imagegen-feed-media');
     media?.classList.remove('is-loading');
     if (window.FeatureDraft?.removeBrokenCommunityFeedCard?.(media)) return;
-    media?.classList.add('card-media--load-failed');
+    finalizeRecentCreationMediaFailure(img, media);
   }
 
   function loadImg(img) {
@@ -851,7 +1027,10 @@
           applyUrlToImg(img, url);
           return;
         }
-        window.finalizeWarehouseCardMediaFailure?.(feedMediaFromImg(img), img);
+        finalizeRecentCreationMediaFailure(img, feedMediaFromImg(img));
+      }).catch(() => {
+        inflight.delete(img);
+        finalizeRecentCreationMediaFailure(img, feedMediaFromImg(img));
       });
       inflight.set(img, p);
       return;

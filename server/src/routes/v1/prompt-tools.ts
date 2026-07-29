@@ -10,11 +10,10 @@ import {
 import { ApiError } from '../../lib/errors';
 import {
   deductUserCredits,
-  incrementLifetimeCreditsSpent,
   spendableCredits,
   syncMembershipCredits
 } from '../../lib/membership-credits';
-import { createAdminClient, getOrCreateProfile, isMembershipActive } from '../../lib/supabase';
+import { createAdminClient, isMembershipActive } from '../../lib/supabase';
 import { submitVisionChat, resolveVisionApiBindings } from '../../lib/vision-chat';
 import { consumeInspirationDraw, INSPIRE_DRAW_DAILY_LIMIT } from '../../lib/inspiration-draw';
 import { rateLimit } from '../../middleware/rate-limit';
@@ -66,6 +65,48 @@ const DEFAULT_REVERSE_VISION_MODEL = 'gemini-2.5-flash-lite';
 const REVERSE_VISION_FALLBACK = 'gemini-2.5-flash';
 /** 优化走 DeepSeek 官方 CHAT_MODEL（wrangler 默认 deepseek-chat） */
 const OPTIMIZE_PRICING_MODEL = 'deepseek-v4-flash';
+
+const PUBLIC_PROMPT_TOOL_MODELS = {
+  reverse: { model: 'vision-lite', modelLabel: '视觉理解 Lite' },
+  optimize: { model: 'creative-optimize', modelLabel: '创意优化' },
+  fission: { model: 'creative-fission', modelLabel: '创意裂变' },
+  purify: { model: 'quality-purify', modelLabel: '画质净化' }
+} as const;
+
+export function publicPromptToolIdentity(tool: keyof typeof PUBLIC_PROMPT_TOOL_MODELS) {
+  return { ...PUBLIC_PROMPT_TOOL_MODELS[tool] };
+}
+
+export function publicPromptToolsInfoPayload() {
+  return {
+    reverse: {
+      ...publicPromptToolIdentity('reverse'),
+      creditsPerCall: REVERSE_PROMPT_CREDITS,
+      capabilities: ['图片内容理解', '绘图提示词反推']
+    },
+    optimize: {
+      ...publicPromptToolIdentity('optimize'),
+      creditsPerCall: '约 1～2 积分',
+      capabilities: ['提示词扩写', '结构与画面细节优化']
+    },
+    fission: {
+      ...publicPromptToolIdentity('fission'),
+      creditsPerPlanEstimate: FISSION_VISION_CREDITS + 2,
+      capabilities: ['图片风格分析', '多提示词裂变']
+    },
+    purify: {
+      ...publicPromptToolIdentity('purify'),
+      creditsPerDescribe: PURIFY_DESCRIBE_CREDITS,
+      creditsPerImageEstimate: PURIFY_DESCRIBE_CREDITS + 7,
+      capabilities: ['图片内容还原', '净化重绘提示词']
+    },
+    inspirationDraw: {
+      limits: INSPIRE_DRAW_DAILY_LIMIT,
+      creditsPerCall: 0,
+      capabilities: ['灵感提示词抽取']
+    }
+  };
+}
 
 const OPTIMIZE_SYSTEM: Record<string, string> = {
   general:
@@ -150,43 +191,9 @@ function parseJsonPromptArray(raw: string, expected: number): string[] {
 export const promptToolsRoutes = new Hono<{ Bindings: Env }>();
 
 promptToolsRoutes.get('/info', async c => {
-  const reverseModel = c.env.REVERSE_VISION_MODEL || DEFAULT_REVERSE_VISION_MODEL;
-  const chatModel = c.env.CHAT_MODEL || 'deepseek-chat';
   return c.json({
     ok: true,
-    data: {
-      reverse: {
-        model: reverseModel,
-        upstream: 'APIMART_API_KEY → /v1/chat/completions（vision）',
-        creditsPerCall: REVERSE_PROMPT_CREDITS,
-        note: 'Apimart gemini-2.5-flash-lite 低成本视觉；收 2 积分/次（仅 Gemini 系列，不 fallback 到 GPT-4o）'
-      },
-      optimize: {
-        model: chatModel,
-        pricingModel: OPTIMIZE_PRICING_MODEL,
-        upstream: 'CHAT_API_KEY → DeepSeek /v1/chat/completions',
-        creditsPerCall: '按 token，通常 1～2 积分',
-        note: 'DeepSeek 官方价见文档；最低 1 积分/次'
-      },
-      fission: {
-        visionModel: c.env.FISSION_VISION_MODEL || DEFAULT_FISSION_VISION_MODEL,
-        chatModel: c.env.FISSION_CHAT_MODEL || DEFAULT_FISSION_CHAT_MODEL,
-        creditsVision: FISSION_VISION_CREDITS,
-        creditsPerPlanEstimate: FISSION_VISION_CREDITS + 2,
-        upstream: 'APIMART_API（Gemini Flash 视觉）+ CHAT_API（DeepSeek V4 Pro）',
-        note: '视觉 3 积分 + Pro 对话按 token（通常 1～3 积分）；自动识别图中最突出的媒介/版式，批量生图仅按提示词出图'
-      },
-      purify: {
-        creditsPerDescribe: PURIFY_DESCRIBE_CREDITS,
-        creditsPerImageEstimate: PURIFY_DESCRIBE_CREDITS + 7,
-        note: '读图 2 积分/张 + 参考图重绘（与普通生图同价）；保持内容仅净化画质'
-      },
-      inspirationDraw: {
-        limits: INSPIRE_DRAW_DAILY_LIMIT,
-        creditsPerCall: 0,
-        note: '本地词库随机组合，不调用 AI、不扣积分；仅「随机抽卡」计每日次数'
-      }
-    }
+    data: publicPromptToolsInfoPayload()
   });
 });
 
@@ -206,7 +213,7 @@ promptToolsRoutes.post('/optimize', rateLimit(90, 60_000), async c => {
 
   const apiKey = c.env.CHAT_API_KEY;
   if (!apiKey) {
-    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '优化服务暂未配置（需 CHAT_API_KEY）');
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '优化服务暂未配置');
   }
 
   const admin = createAdminClient(c.env);
@@ -254,10 +261,6 @@ promptToolsRoutes.post('/optimize', rateLimit(90, 60_000), async c => {
     outputTokens
   });
   profile = debited.profile;
-  if (cost.final > 0) {
-    await incrementLifetimeCreditsSpent(admin, user.id, cost.final);
-    profile = await getOrCreateProfile(admin, user.id);
-  }
 
   return c.json({
     ok: true,
@@ -265,9 +268,7 @@ promptToolsRoutes.post('/optimize', rateLimit(90, 60_000), async c => {
       prompt: result.content,
       creditsCharged: cost.final,
       creditsRemaining: spendableCredits(profile),
-      model: upstreamModel,
-      modelLabel: cost.modelLabel,
-      upstream: 'CHAT_API'
+      ...publicPromptToolIdentity('optimize')
     }
   });
 });
@@ -281,7 +282,7 @@ promptToolsRoutes.post('/reverse', rateLimit(60, 60_000), async c => {
 
   const vision = resolveVisionApiBindings(c.env);
   if (!vision.apiKey) {
-    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '反推服务暂未配置（需 APIMART_API_KEY 或 CHAT_API_KEY）');
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '反推服务暂未配置');
   }
 
   const admin = createAdminClient(c.env);
@@ -331,10 +332,6 @@ promptToolsRoutes.post('/reverse', rateLimit(60, 60_000), async c => {
     { fixed: REVERSE_PROMPT_CREDITS }
   );
   profile = debited.profile;
-  if (REVERSE_PROMPT_CREDITS > 0) {
-    await incrementLifetimeCreditsSpent(admin, user.id, REVERSE_PROMPT_CREDITS);
-    profile = await getOrCreateProfile(admin, user.id);
-  }
 
   return c.json({
     ok: true,
@@ -342,9 +339,7 @@ promptToolsRoutes.post('/reverse', rateLimit(60, 60_000), async c => {
       prompt,
       creditsCharged: REVERSE_PROMPT_CREDITS,
       creditsRemaining: spendableCredits(profile),
-      model: reverseModel,
-      modelLabel: 'Gemini 2.5 Flash Lite Vision',
-      upstream: vision.provider.toUpperCase()
+      ...publicPromptToolIdentity('reverse')
     }
   });
 });
@@ -407,10 +402,6 @@ promptToolsRoutes.post('/purify-describe', rateLimit(60, 60_000), async c => {
     { fixed: PURIFY_DESCRIBE_CREDITS }
   );
   profile = debited.profile;
-  if (PURIFY_DESCRIBE_CREDITS > 0) {
-    await incrementLifetimeCreditsSpent(admin, user.id, PURIFY_DESCRIBE_CREDITS);
-    profile = await getOrCreateProfile(admin, user.id);
-  }
 
   return c.json({
     ok: true,
@@ -419,9 +410,7 @@ promptToolsRoutes.post('/purify-describe', rateLimit(60, 60_000), async c => {
       contentDescription: contentDesc.trim(),
       creditsCharged: PURIFY_DESCRIBE_CREDITS,
       creditsRemaining: spendableCredits(profile),
-      model: reverseModel,
-      modelLabel: 'Gemini 2.5 Flash Lite Vision',
-      upstream: vision.provider.toUpperCase()
+      ...publicPromptToolIdentity('purify')
     }
   });
 });
@@ -436,7 +425,7 @@ promptToolsRoutes.post('/fission', rateLimit(40, 60_000), async c => {
   const vision = resolveVisionApiBindings(c.env);
   const chatApiKey = c.env.CHAT_API_KEY;
   if (!chatApiKey) {
-    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '裂变服务暂未配置（需 CHAT_API_KEY + APIMART_API_KEY）');
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '裂变服务暂未配置');
   }
 
   const admin = createAdminClient(c.env);
@@ -553,10 +542,6 @@ promptToolsRoutes.post('/fission', rateLimit(40, 60_000), async c => {
     }
   );
   profile = debited.profile;
-  if (creditsCharged > 0) {
-    await incrementLifetimeCreditsSpent(admin, user.id, creditsCharged);
-    profile = await getOrCreateProfile(admin, user.id);
-  }
 
   return c.json({
     ok: true,
@@ -564,14 +549,8 @@ promptToolsRoutes.post('/fission', rateLimit(40, 60_000), async c => {
       dna,
       prompts,
       creditsCharged,
-      creditsVision: FISSION_VISION_CREDITS,
-      creditsChat: chatCost.final,
       creditsRemaining: spendableCredits(profile),
-      visionModel: fissionVisionModel,
-      visionModelLabel: 'Gemini 2.5 Flash Vision',
-      chatModel: fissionChatModel,
-      chatModelLabel: chatCost.modelLabel,
-      upstream: 'IMAGE_API + CHAT_API'
+      ...publicPromptToolIdentity('fission')
     }
   });
 });

@@ -336,7 +336,7 @@
         ...recentFailures.slice(0, 12).map((f) => ({
           type: '生图失败',
           at: f.createdAt,
-          target: [f.jobId, f.model, f.provider].filter(Boolean).join(' · '),
+          target: [f.jobId, f.model].filter(Boolean).join(' · '),
           detail: f.message || f.reason || ''
         }))
       ].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 14);

@@ -23,18 +23,7 @@
       'nano-banana-pro-cl': 'lingtu-pro',
       'nano-banana-2-cl': 'lingtu-2',
       'nano-banana-2-4k-cl': 'lingtu-2',
-      'nano-banana': 'lingtu',
-      'apimart-gpt-image-2-official-budget': 'image2-hd',
-      'apimart-gpt-image-2': 'image2',
-      'apimart-seedream-5-lite': 'image2',
-      'apimart-gemini-2-5-flash-preview': 'lingtu-fast',
-      'apimart-gemini-2-5-flash-official': 'lingtu-fast',
-      'apimart-gemini-3-1-flash-preview': 'lingtu-2',
-      'apimart-gemini-3-1-flash-official': 'lingtu-2',
-      'apimart-gemini-3-pro-preview': 'lingtu-pro',
-      'apimart-gemini-3-pro-official': 'lingtu-pro',
-      'ithink-gpt-image-2-slow': 'image2',
-      'mooko-gpt-image-2-pro': 'image2-pro'
+      'nano-banana': 'lingtu'
     };
     return legacy[id] || id;
   }
@@ -65,9 +54,8 @@
     return /积分小数|apply_credit_delta|SQL 编辑器|扣费函数|SERVER_CONFIG|decimal/i.test(String(msg || ''));
   }
 
-  function isSlowGenProviderModel(modelId) {
-    const id = normalizeImageGenModelId(modelId);
-    return id.startsWith('mooko-') || id.startsWith('ithink-');
+  function isSlowGenProviderModel(_modelId) {
+    return false;
   }
 
   function isLongRunningGenJob(ctx) {
@@ -110,10 +98,7 @@
   function isLikelyRecoverableGenFailure(errRaw, ctx, opts = {}) {
     const s = stringifyGenErrorRaw(errRaw);
     if (!s) return opts.confirmedFailed !== true;
-    const model = String(ctx?.model || '').toLowerCase();
-    if (model.includes('ithink') && /UPSTREAM_FAILED|upstream_failed|502|ThinkAI|无效.*令牌/i.test(s)) {
-      return false;
-    }
+    if (/UPSTREAM_FAILED|upstream_failed|502/i.test(s) && /无效.*令牌|invalid.*token/i.test(s)) return false;
     if (/upstream_content_violation|违规不返还|violation/i.test(s)) return false;
     if (/prohibited words or images|prohibited|flagged as containing/i.test(s)) return false;
     if (isStaleConfigError(s)) return true;
@@ -121,11 +106,11 @@
     if (/debit_failed|upstream_no_image/i.test(s)) return true;
     if (/upstream_failed/i.test(s)) {
       const id = normalizeImageGenModelId(ctx?.model);
-      if (id.startsWith('apimart-')) return false;
+      if (id.startsWith('mj-')) return false;
       if (/timeout|524|upstream_timeout|排队/i.test(s)) return isLongRunningGenJob(ctx);
       return isLongRunningGenJob(ctx);
     }
-    if (/不存在该模型|model.*not.*exist|GrsAI 未返回任务 ID/i.test(s)) return true;
+    if (/不存在该模型|model.*not.*exist|未返回任务 ID|missing.task.id/i.test(s)) return true;
     if (/upstream_timeout/i.test(s) && isLongRunningGenJob(ctx)) return true;
     if (/NETWORK_ERROR|API_UNREACHABLE|无法连接 api\.prompt-hub|连接.*超时|Failed to fetch/i.test(s)) {
       return true;
@@ -135,7 +120,7 @@
 
   function friendlyGenErrorMessage(msg) {
     const s = stringifyGenErrorRaw(msg);
-    if (!s || s === '[object Object]') return '生图失败，积分已全额退回';
+    if (!s || s === '[object Object]') return '任务未完成，积分已按状态处理，可重新生成';
     if (isStaleConfigError(s)) {
       return '扣费曾异常，正在从服务器恢复已完成任务；若仍未出图请点「重试」';
     }
@@ -143,7 +128,7 @@
       return '登录状态已失效，请退出后重新登录';
     }
     if (/upstream_auth_failed|无效.*令牌|invalid.*token/i.test(s)) {
-      return '生图令牌无效或已过期，请联系站长在 thinkai.tv 重新创建令牌；您的积分已全额退回';
+      return '生图服务认证已失效，请联系站长；您的积分已全额退回';
     }
     if (/upstream_submit_not_configured/i.test(s)) {
       return '生图服务未配置，请联系站长；您的积分已全额退回';
@@ -151,8 +136,11 @@
     if (/upstream_model_rejected/i.test(s)) {
       return '当前模型暂不可用，请换其他模型；您的积分已全额退回';
     }
+    if (/no available channel|没有可用线路|暂无可用线路|channel.*unavailable/i.test(s)) {
+      return '当前模型暂不可用，请换其他模型；您的积分已全额退回';
+    }
     if (/insufficient balance|insufficient credits|insufficient_user_quota|用户额度不足|余额不足/i.test(s)) {
-      return '生图服务商账户余额不足（不是您的站内积分），请联系站长；您的积分已全额退回';
+      return '生成服务暂不可用，请联系站长；您的积分已全额退回';
     }
     if (/apikey|api.key|invalid.*api.*key|无效.*令牌|invalid.*token|unauthorized/i.test(s)) {
       return '生图服务认证失败，请联系站长；您的积分已全额退回';
@@ -170,7 +158,7 @@
       return '图片入库失败，积分已全额退回，请重试';
     }
     if (/upstream_no_image|no_image/i.test(s)) {
-      return '上游未返回图片，积分已全额退回，可点「重试」';
+      return '任务未返回图片，积分已全额退回，可点「重试」';
     }
     if (/upstream_submit_not_started/i.test(s)) {
       return '未能连接生图服务，积分已退回，请重试或换其他模型';
@@ -202,11 +190,10 @@
     if (/不存在该模型|model.*not.*exist|unknown model|invalid model/i.test(s)) {
       return '模型相关提示，任务可能仍在排队；请强刷页面查看进度';
     }
-    if (/GrsAI 未返回任务 ID/i.test(s)) {
+    if (/未返回任务 ID|missing.task.id/i.test(s)) {
       return '可能已接单但响应异常，请强刷页面查看是否在生成中';
     }
-    if (s.length > 120) return s.slice(0, 120) + '…';
-    return s;
+    return '任务未完成，积分已按状态处理，可重新生成';
   }
 
   function genJobPollDelayMs(ctx, attemptIndex) {

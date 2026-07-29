@@ -273,8 +273,11 @@
         if (!raw) continue;
         const payload = JSON.parse(raw);
         const cards = Array.isArray(payload.cards) ? payload.cards : [];
-        if (cards.some((c) => c.id === card.id || (card.genJobId && c.genJobId === card.genJobId))) return;
-        cards.unshift(card);
+        const existingIndex = cards.findIndex(
+          (c) => c.id === card.id || (card.genJobId && c.genJobId === card.genJobId)
+        );
+        if (existingIndex >= 0) cards[existingIndex] = { ...cards[existingIndex], ...card };
+        else cards.unshift(card);
         payload.cards = cards;
         localStorage.setItem(key, JSON.stringify(payload));
         break;
@@ -286,35 +289,96 @@
     return `card_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
   }
 
+  async function persistStudioWarehouseImage(cardId, image, jobId) {
+    if (!image) return { ok: true, image: null };
+    const sync = window.SupabaseSync;
+    if (!sync?.isLoggedIn?.()) {
+      return { ok: false, error: '请先登录后保存图片' };
+    }
+
+    try {
+      if (sync.isStorageRef?.(image)) {
+        const valid = !sync.verifyStorageRef
+          || await sync.verifyStorageRef(image, cardId, { quick: false });
+        if (valid) return { ok: true, image };
+      }
+
+      let source = image;
+      if (jobId && window.PromptHubApi?.getGenerationImageUrl) {
+        const full = await window.PromptHubApi.getGenerationImageUrl(
+          String(jobId).replace(/#\d+$/, ''),
+          { variant: 'full' }
+        );
+        if (full?.ok && full.data?.url) source = full.data.url;
+        else if (full?.status === 404 || full?.status === 410 || ['NOT_FOUND', 'GONE'].includes(String(full?.code || '').toUpperCase())) {
+          return { ok: false, error: '原图已被清理，无法存入卡片库' };
+        }
+      }
+
+      let stored = null;
+      if (sync.uploadCardImage) {
+        try {
+          stored = await sync.uploadCardImage(cardId, source);
+        } catch (error) {
+          console.warn('[AssetStudio] card-owned image upload failed; trying generated archive', error);
+        }
+      }
+      if (!stored && sync.archiveGeneratedCardImage) {
+        stored = await sync.archiveGeneratedCardImage(cardId, source, {
+          jobId: jobId || null,
+          allowRemoteArchive: true,
+          copyToOwnPath: true
+        });
+      }
+      if (!stored && sync.persistGenerationImage) {
+        stored = await sync.persistGenerationImage(cardId, source, {
+          jobId: jobId || null,
+          allowRemoteArchive: true
+        });
+      }
+
+      if (!stored || !sync.isStorageRef?.(stored)) {
+        return { ok: false, error: '图片持久化失败，请重试' };
+      }
+      if (sync.verifyStorageRef && !(await sync.verifyStorageRef(stored, cardId, { quick: false }))) {
+        return { ok: false, error: '图片保存校验失败，请重试' };
+      }
+      return { ok: true, image: stored };
+    } catch (error) {
+      console.warn('[AssetStudio] generated image archive failed', error);
+      return { ok: false, error: error?.message || '图片持久化失败，请重试' };
+    }
+  }
+
   async function addCardToMainWarehouse(opts) {
     const { prompt, image, title, jobId } = opts || {};
     if (!image && !(prompt || '').trim()) return { ok: false };
     const mainCards = await loadMainSiteCardsList();
-    if (jobId && mainCards.some((c) => c.genJobId === jobId)) {
-      const existing = mainCards.find((c) => c.genJobId === jobId);
-      return { ok: true, duplicate: true, cardId: existing?.id, card: existing };
-    }
-    const cardId = studioMainCardId();
-    let storedImage = image || null;
-    if (storedImage && window.SupabaseSync?.persistGenerationImage) {
-      try {
-        storedImage = await window.SupabaseSync.persistGenerationImage(cardId, storedImage);
-      } catch (e) { /* 保留原始链接 */ }
-    }
+    const existing = jobId ? mainCards.find((c) => c.genJobId === jobId) : null;
+    const cardId = existing?.id || studioMainCardId();
+    const persisted = await persistStudioWarehouseImage(
+      cardId,
+      existing?.image || image || null,
+      jobId || existing?.genJobId || null
+    );
+    if (!persisted.ok) return persisted;
+    const storedImage = persisted.image;
     const promptText = (prompt || '').trim();
     const card = {
+      ...(existing || {}),
       id: cardId,
-      title: (title || promptText.slice(0, 24) || '生图').trim(),
-      prompt: promptText,
+      title: (title || existing?.title || promptText.slice(0, 24) || '生图').trim(),
+      prompt: promptText || existing?.prompt || '',
       image: storedImage,
-      group: null,
-      tags: ['图片生成'],
-      customFields: {},
-      genJobId: jobId || null,
-      createdAt: Date.now(),
+      group: existing?.group ?? null,
+      tags: existing?.tags?.length ? existing.tags : ['图片生成'],
+      customFields: existing?.customFields || {},
+      genJobId: jobId || existing?.genJobId || null,
+      createdAt: existing?.createdAt || Date.now(),
       updatedAt: Date.now()
     };
-    mainCards.unshift(card);
+    if (existing) mainCards[mainCards.indexOf(existing)] = card;
+    else mainCards.unshift(card);
     await saveMainSiteCardsList(mainCards);
     await mergeCardIntoMainAutosave(card);
     if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.pushCloudData) {
@@ -330,7 +394,7 @@
         );
       } catch (e) { /* 本地已保存 */ }
     }
-    return { ok: true, cardId: card.id, card };
+    return { ok: true, duplicate: !!existing, repaired: !!existing, cardId: card.id, card };
   }
 
   async function saveStudioGenToLibraries(opts) {
@@ -338,14 +402,11 @@
     if (!res.ok) return res;
     const normalized = normalizeImportedCard(res.card);
     const cards = getProjectCards();
-    const exists = cards.some(
-      (c) => c.id === normalized.id || (opts.jobId && c.id === res.cardId)
-    );
-    if (!exists) {
-      cards.unshift(normalized);
-      saveState();
-      renderAssetFolders();
-    }
+    const existingIndex = cards.findIndex((c) => c.id === normalized.id);
+    if (existingIndex >= 0) cards[existingIndex] = normalized;
+    else cards.unshift(normalized);
+    saveState();
+    renderAssetFolders();
     return res;
   }
 

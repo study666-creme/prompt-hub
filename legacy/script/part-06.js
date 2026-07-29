@@ -399,7 +399,6 @@
       restoreDesktopCardColumns();
       renderGroups();
       const page = window.AppRouter?.resolveBootApp?.()
-        || localStorage.getItem('promptrepo_app_page')
         || 'landing';
       switchAppPage(page, { replace: true });
       window.reconcileAuthUI?.();
@@ -876,6 +875,7 @@
       return report;
     }
 
+    /* __PROMPT_HUB_PRIVATE_OPS_START__ provider-recovery-plan */
     async function planApimartRecovery(opts = {}) {
       if (!window.SupabaseSync?.isLoggedIn?.()) {
         return { ok: false, error: '请先登录' };

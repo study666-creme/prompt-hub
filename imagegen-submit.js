@@ -31,6 +31,26 @@
     d().renderImageGenFeed(opts);
   }
 
+  function showQueuedSubmitFeedback(silent) {
+    if (silent) return;
+    const message = '已加入作品，正在生成';
+    if (typeof global.showQuickToast === 'function') {
+      global.showQuickToast(message, 900);
+      return;
+    }
+    d().toast(message, 900);
+  }
+
+  function showSubmitFailureFeedback(silent) {
+    if (silent) return;
+    const message = '任务未完成，可重新生成';
+    if (typeof global.showQuickToast === 'function') {
+      global.showQuickToast(message, 1200);
+      return;
+    }
+    d().toast(message, 1200);
+  }
+
   function normalizeReferenceAssets(refs, assets, fallback = {}) {
     const list = Array.isArray(refs) ? refs.filter(Boolean) : [];
     const sourceAssets = Array.isArray(assets) ? assets : [];
@@ -45,11 +65,34 @@
     });
   }
 
+  function normalizeClientRequestId(value) {
+    const normalized = String(value || '')
+      .replace(/[^A-Za-z0-9._:-]+/g, '_')
+      .slice(0, 128);
+    return normalized.length >= 8 ? normalized : `web.image.${normalized || Date.now()}`;
+  }
+
+  function runImageGenBatchTasks(count, taskFactory) {
+    const total = Math.min(5, Math.max(1, Math.floor(Number(count)) || 1));
+    const tasks = [];
+    for (let index = 0; index < total; index += 1) {
+      try {
+        // Invoke every task synchronously so all optimistic cards exist before
+        // waiting for any quote or generation response.
+        tasks.push(Promise.resolve(taskFactory(index, total)));
+      } catch (error) {
+        tasks.push(Promise.reject(error));
+      }
+    }
+    return Promise.allSettled(tasks);
+  }
+
   async function runImageGenWithPrompt(promptOverride, opts) {
     const batchOpts = opts && typeof opts === 'object' ? opts : {};
     if (!global.AuthGate?.requireAuth?.('imagegen')) return { ok: false };
-    const metaEarly = d().getImageGenFormMeta();
-    const mjBlendMode = d().isImageGenMidjourneyModel?.(metaEarly.model) && d().getImageGenMjMode?.() === 'blend';
+    const meta = d().getImageGenFormMeta();
+    const { model, resolution, quality, size } = meta;
+    const mjBlendMode = d().isImageGenMidjourneyModel?.(model) && d().getImageGenMjMode?.() === 'blend';
     const prompt = String(
       promptOverride ?? global.document.getElementById('imageGenPrompt')?.value ?? ''
     ).trim();
@@ -67,6 +110,15 @@
     if (!d().getImageGenModelCatalogReady?.() || !global.document.getElementById('imageGenModel')?.value) {
       d().toast('模型列表加载中，请稍候再点生成');
       return { ok: false };
+    }
+
+    let cost = global.PointsSystem?.getImageGenCost?.(model, resolution) ?? 10;
+    let quotedCredits = cost;
+    let balance = global.PointsSystem?.getCredits?.() ?? 0;
+    const useApi = global.PointsSystem?.useApiForAccount?.();
+    if (balance < cost) {
+      d().toast(`积分不足（需要 ${cost}，当前 ${balance}）。请使用激活码兑换`);
+      return { ok: false, reason: 'credits' };
     }
 
     const btn = global.document.getElementById(batchOpts.submitBtnId || 'imageGenSubmit');
@@ -97,7 +149,7 @@
         btn.removeAttribute('aria-busy');
         if (accepted) {
           btn.classList.add('is-submitted');
-          btn.textContent = '已开始生成';
+          btn.textContent = '已加入作品';
           btn.disabled = true;
           const reset = () => {
             btn.__imageGenSubmitResetTimer = null;
@@ -120,41 +172,24 @@
         }
       }
     };
+    const markSubmitQueuedUi = () => {
+      if (!singleRun || !btn || submitUiReleased) return;
+      btn.classList.remove('is-submitting');
+      btn.classList.add('is-submitted');
+      btn.removeAttribute('aria-busy');
+      btn.textContent = '已加入作品';
+      btn.disabled = true;
+    };
+    const scheduleQueuedUiConfirmation = () => {
+      if (!singleRun) return;
+      markSubmitQueuedUi();
+    };
     try {
-      // Let the browser paint the pressed/loading state before storage, image work or networking.
-      if (singleRun) await waitForSubmitPaint();
-
-      const meta = d().getImageGenFormMeta();
-      const { model, resolution, quality, size } = meta;
-      let cost = global.PointsSystem?.getImageGenCost?.(model, resolution) ?? 10;
-      let balance = global.PointsSystem?.getCredits?.() ?? 0;
-      const useApi = global.PointsSystem?.useApiForAccount?.();
-
-      if (balance < cost) {
-        d().toast(`积分不足（需要 ${cost}，当前 ${balance}）。请使用激活码兑换`);
-        return { ok: false, reason: 'credits' };
-      }
-
-      d().saveImageGenDraft({
-        prompt,
-        model,
-        refImages: d().getImageGenRefImages?.() || [],
-        refImage: d().getImageGenPrimaryRef?.(),
-        referenceAssets: d().getImageGenReferenceAssets?.() || [],
-        resolution,
-        quality,
-        size,
-        count: d().getImageGenBatchCount?.(),
-        cardTitle: d().getImageGenCardTitle?.(),
-        batchSplit: d().isImageGenBatchSplitCards?.(),
-        mjMode: d().getImageGenMjMode?.(),
-        mjSaveAllTiles: d().isImageGenMjSaveAllTiles?.(),
-        mjSpeed: d().getImageGenMjSpeed?.(),
-        mjExtras: d().getImageGenMjExtrasValue?.()
-      });
-
       const modelLabel = global.PointsSystem?.getImageGenModel?.(model)?.label || model;
       pendingId = d().genId('pending');
+      const clientRequestId = normalizeClientRequestId(
+        batchOpts.clientRequestId || `web.image.${pendingId}`
+      );
       const saveTarget = d().getImageGenSaveTarget();
       const submittedRefImages = batchOpts.skipRefImages
         ? []
@@ -179,6 +214,7 @@
         );
       const pendingJob = {
         id: pendingId,
+        clientRequestId,
         prompt,
         model,
         modelLabel,
@@ -203,24 +239,69 @@
         refImage: submittedRefImage,
         refImages: submittedRefImages.length ? [...submittedRefImages] : null,
         referenceAssets: submittedReferenceAssets.length ? submittedReferenceAssets : null,
+        submitPhase: 'local',
         startedAt: Date.now()
       };
       d().unshiftPendingJob(pendingJob);
-      d().persistPendingGenJobs();
       d().switchImageGenFeedToRecent();
       d().updateImageGenFeedHint();
-      renderSubmitFeed({ preserveScroll: true });
+      showQueuedSubmitFeedback(batchOpts.silentToast);
+
+      const inserted = d().renderImageGenPendingNow?.(pendingJob);
+      if (!inserted) d().renderImageGenFeed({ preserveScroll: true, force: true });
+      if (d().isImageGenMobileFormActive?.()) {
+        global.MobileUI?.setImageGenView?.('feed', {
+          scrollToTop: true,
+          deferRefresh: true
+        });
+      }
+      scheduleQueuedUiConfirmation();
+
+      // Every batch task reaches this point synchronously, so all optimistic
+      // cards are inserted first. Their paint waits run in parallel and keep
+      // storage/network work out of the first visible feedback frame.
+      await waitForSubmitPaint();
+
+      const shouldPersistInitialBatchState = !batchOpts.batch || !batchOpts.batchIndex || batchOpts.batchIndex === 1;
+      if (shouldPersistInitialBatchState) {
+        d().persistPendingGenJobs();
+        d().saveImageGenDraft({
+          prompt,
+          model,
+          refImages: d().getImageGenRefImages?.() || [],
+          refImage: d().getImageGenPrimaryRef?.(),
+          referenceAssets: d().getImageGenReferenceAssets?.() || [],
+          resolution,
+          quality,
+          size,
+          count: d().getImageGenBatchCount?.(),
+          cardTitle: d().getImageGenCardTitle?.(),
+          batchSplit: d().isImageGenBatchSplitCards?.(),
+          mjMode: d().getImageGenMjMode?.(),
+          mjSaveAllTiles: d().isImageGenMjSaveAllTiles?.(),
+          mjSpeed: d().getImageGenMjSpeed?.(),
+          mjExtras: d().getImageGenMjExtrasValue?.()
+        });
+      }
 
       if (useApi) {
-        if (singleRun && btn) btn.textContent = '正在确认任务…';
         const localCost = cost;
         const quoted = await Promise.race([
-          d().quoteGenerationCost(resolution, quality, model, cost),
+          d().quoteGenerationCost(
+            resolution,
+            quality,
+            model,
+            cost,
+            meta.mjParams?.speed ? { speed: meta.mjParams.speed } : undefined
+          ),
           new Promise((resolve) => {
             setTimeout(() => resolve({ cost: localCost, fromApi: false }), d().getGenCostQuoteTimeoutMs?.() ?? 1800);
           })
         ]);
         cost = quoted.cost;
+        quotedCredits = Number.isFinite(Number(quoted.quotedCredits))
+          ? Number(quoted.quotedCredits)
+          : cost;
         pendingJob.cost = cost;
         d().persistPendingGenJobs();
         balance = global.PointsSystem?.getCredits?.() ?? 0;
@@ -242,41 +323,33 @@
 
       if (useApi) {
         const refSources = submittedRefImages;
-        if (singleRun && btn) {
-          btn.textContent = refSources.length ? '正在处理参考图…' : '正在提交…';
-        }
         const refUrls = await d().resolveRefUrlsFromList(refSources, submittedReferenceAssets);
         if (refSources.length && refUrls.length < refSources.length && !batchOpts.silentToast) {
           d().toast(`已使用 ${refUrls.length}/${refSources.length} 张参考图继续生成`);
         }
         const genPayload = {
+          clientRequestId,
           prompt: prompt || '[MJ 混图]',
           model,
           resolution,
           quality,
           size,
+          quotedCredits,
           refImageUrls: refUrls.length ? refUrls : undefined,
           ...(meta.mjParams ? { mjParams: meta.mjParams } : {})
         };
-        if (singleRun && btn) btn.textContent = '正在提交…';
         let gen;
         if (mjBlendMode) {
           gen = await global.PromptHubApi.mjBlend({
             refImageUrls: refUrls.slice(0, 5),
             model,
-            speed: meta.mjParams?.speed || d().getImageGenMjSpeed?.() || 'relax'
+            resolution,
+            quality,
+            speed: meta.mjParams?.speed || d().getImageGenMjSpeed?.() || 'relax',
+            quotedCredits
           });
         } else {
           gen = await global.PromptHubApi.generateImage(genPayload);
-        }
-        if (!gen.ok && batchOpts.batch && !mjBlendMode) {
-          const retryable = gen.code === 'RATE_LIMITED'
-            || gen.status === 429
-            || /过于频繁|upstream|502|503|429|rate limit/i.test(String(gen.message || ''));
-          for (let attempt = 0; attempt < 2 && !gen.ok && retryable; attempt += 1) {
-            await new Promise((r) => setTimeout(r, 2000 + attempt * 2500));
-            gen = await global.PromptHubApi.generateImage(genPayload);
-          }
         }
         if (!gen.ok) {
           const networkLike =
@@ -313,10 +386,12 @@
             renderSubmitFeed({ preserveScroll: true });
             return { ok: true, recovered: true, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
           }
-          d().failPendingJob(pendingId, errMsg);
-          renderSubmitFeed({ preserveScroll: true });
+          const failed = d().failPendingJob(pendingId, errMsg);
+          if (!d().renderImageGenFailedNow?.(failed)) {
+            renderSubmitFeed({ preserveScroll: true });
+          }
           await global.PointsSystem?.refreshCreditsFromServer?.();
-          if (!batchOpts.silentToast) d().toast(errMsg);
+          showSubmitFailureFeedback(batchOpts.silentToast);
           return { ok: false, message: errMsg, batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
         }
         if (typeof gen.data.creditsRemaining === 'number') {
@@ -409,24 +484,18 @@
 
         const jobId = gen.data.jobId;
         if (!jobId) {
-          d().failPendingJob(pendingId, '未收到任务编号');
-          renderSubmitFeed();
-          if (!batchOpts.silentToast) d().toast('未收到任务编号，请重试');
+          const failed = d().failPendingJob(pendingId, '未收到任务编号');
+          if (!d().renderImageGenFailedNow?.(failed)) renderSubmitFeed();
+          showSubmitFailureFeedback(batchOpts.silentToast);
           return { ok: false, message: '未收到任务编号', batchIndex: batchOpts.batchIndex, batchTotal: batchOpts.batchTotal };
         }
         pendingJob.jobId = jobId;
+        pendingJob.submitPhase = 'accepted';
         pendingJob.slowProvider = ge('isSlowGenProviderModel', model);
         if (gen.data.progressNote) pendingJob.pendingNote = gen.data.progressNote;
         d().trackSessionGenJob(jobId);
         d().persistPendingGenJobs();
-        if (!batchOpts.silentToast) {
-          const mobileForm = d().isImageGenMobileFormActive?.();
-          d().toast(
-            pendingJob.slowProvider
-              ? (mobileForm ? '已提交，约 1–12 分钟出图，可在「作品」查看进度' : '已提交，约 1–12 分钟出图，下方可看进度')
-              : (mobileForm ? '已提交生图，可在「作品」查看进度，也可继续生成' : '已提交生图，下方可查看进度，可继续生成')
-          );
-        }
+        d().renderImageGenPendingNow?.(pendingJob);
         void d().pollGenerationJobUntilDone(jobId, pendingId, {
           prompt,
           model,
@@ -443,7 +512,9 @@
           silentToast: !!batchOpts.silentToast,
           batchIndex: batchOpts.batchIndex || null,
           batchTotal: batchOpts.batchTotal || null,
-          batchId: batchOpts.batchId || null
+          batchId: batchOpts.batchId || null,
+          batchMergeCards: !!pendingJob.batchMergeCards,
+          cardTitle: pendingJob.cardTitle || ''
         });
         submitAccepted = true;
         return { ok: true, creditsCharged: cost };
@@ -456,10 +527,12 @@
     } catch (e) {
       console.error('[imagegen] runImageGenWithPrompt failed', e);
       if (typeof pendingId === 'string' && pendingId) {
-        d().failPendingJob(pendingId, String(e?.message || '生图提交失败'));
-        if (shouldRenderSubmitFeed()) d().safeRenderImageGenFeed({ preserveScroll: true });
+        const failed = d().failPendingJob(pendingId, String(e?.message || '生图提交失败'));
+        if (!d().renderImageGenFailedNow?.(failed) && shouldRenderSubmitFeed()) {
+          d().safeRenderImageGenFeed({ preserveScroll: true });
+        }
       }
-      if (!batchOpts.silentToast) {
+      if (!batchOpts.silentToast && !pendingId) {
         const msg = String(e?.message || '');
         let hint = msg || '请刷新页面后重试';
         if (/quota|exceeded/i.test(msg)) {
@@ -470,6 +543,8 @@
           hint = '生图服务认证失败，请联系站长';
         }
         d().toast('生图提交失败：' + hint);
+      } else {
+        showSubmitFailureFeedback(batchOpts.silentToast);
       }
       return { ok: false, message: e?.message || 'submit failed' };
     } finally {
@@ -479,7 +554,7 @@
 
   function init(injected) {
     deps = injected || {};
-    return { runImageGenWithPrompt, waitForSubmitPaint };
+    return { runImageGenWithPrompt, runImageGenBatchTasks, waitForSubmitPaint };
   }
 
   global.ImageGenSubmit = { init };

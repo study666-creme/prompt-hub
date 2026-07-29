@@ -30,6 +30,7 @@ $entryRootFiles = @(
 $alwaysRootFiles = @(
   '_headers',
   '_redirects',
+  '_worker.js',
   'favicon.ico',
   'manifest.webmanifest',
   'robots.txt',
@@ -125,6 +126,106 @@ if ($LASTEXITCODE -ne 0) {
 foreach ($line in $runtimeBuildOutput) {
   Write-Host $line -ForegroundColor DarkGray
 }
+
+$stagingFull = [IO.Path]::GetFullPath($staging).TrimEnd('\', '/')
+$rootFull = [IO.Path]::GetFullPath($root).TrimEnd('\', '/')
+if (-not $stagingFull.StartsWith($rootFull + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+  throw "Refusing to prune source fragments outside the project staging directory: $stagingFull"
+}
+
+$consolidatedRuntimeEntries = @(
+  'admin.js',
+  'asset-studio.js',
+  'features-assets.js',
+  'supabase-sync.js',
+  'script.js',
+  'features-draft.js',
+  'styles.css',
+  'styles-features.css'
+)
+foreach ($entry in $consolidatedRuntimeEntries) {
+  $entryPath = Join-Path $staging $entry
+  if (-not (Test-Path $entryPath -PathType Leaf)) {
+    throw "Pages staging is missing consolidated runtime entry: $entry"
+  }
+  $entryText = Get-Content $entryPath -Raw
+  if ($entryText -notmatch '__PROMPT_HUB_DEPLOY_BUNDLE__') {
+    throw "Pages staging entry was not consolidated before fragment cleanup: $entry"
+  }
+  if ($entryText -match '__PROMPT_HUB_(?:LEGACY_SPLIT_LOADER|CSS_SPLIT_MANIFEST)__') {
+    throw "Pages staging entry still references source fragments: $entry"
+  }
+}
+
+$stagedIndex = Get-Content (Join-Path $staging 'index.html') -Raw
+if ($stagedIndex -notmatch '__PROMPT_HUB_DEPLOY_BODY__' -or $stagedIndex -match '__PROMPT_HUB_INDEX_BODY_PARTIAL__') {
+  throw "Pages staging index body was not inlined before fragment cleanup"
+}
+
+$sourceFragmentDirs = @('legacy', 'styles', 'partials')
+foreach ($dir in $sourceFragmentDirs) {
+  $fragmentPath = Join-Path $staging $dir
+  if (Test-Path $fragmentPath) {
+    Remove-Item -LiteralPath $fragmentPath -Recurse -Force
+  }
+}
+foreach ($dir in $sourceFragmentDirs) {
+  if (Test-Path (Join-Path $staging $dir)) {
+    throw "Pages staging still contains public source fragments: $dir"
+  }
+}
+Write-Host "Pages runtime source fragments pruned and verified." -ForegroundColor DarkGray
+
+$featuresDraftPath = Join-Path $staging 'features-draft.js'
+$featuresDraftText = Get-Content $featuresDraftPath -Raw
+$modelCatalogSections = @(
+  @{
+    Name = 'IMAGE_GEN_MODEL_FALLBACK'
+    Pattern = '(?s)const\s+IMAGE_GEN_MODEL_FALLBACK\s*=\s*\[.*?\];\s*const\s+IMAGE_GEN_MJ_MODEL_DESCRIPTIONS'
+  },
+  @{
+    Name = 'normalizeImageGenModelEntry'
+    Pattern = '(?s)function\s+normalizeImageGenModelEntry\s*\(.*?\n\s*function\s+imageGenModelDisplayName'
+  }
+)
+$privateModelFieldPattern = '(?i)\b(provider|reseller|vendor|providerBadge|vendorBadge|creditsBase|listPrice|promoPrice|cost|baseCost|unitCost|costByResolution|costBySpeed|costMultiplier|priceMultiplier|procurementCost|procurementPrice|purchaseCost|purchasePrice|wholesaleCost|wholesalePrice|margin|markup|markupFormula|upstream\w*|channel|channelId|channelName|route|routeId|routeName|routePriority|routeWeight|priority|weight|actualModel|mappedModel|modelMapping|failoverOrder)\b'
+foreach ($section in $modelCatalogSections) {
+  $match = [regex]::Match($featuresDraftText, $section.Pattern)
+  if (-not $match.Success) {
+    throw "Pages staging cannot verify public image model section: $($section.Name)"
+  }
+  $privateField = [regex]::Match($match.Value, $privateModelFieldPattern)
+  if ($privateField.Success) {
+    throw "Pages staging public image model section $($section.Name) contains private field: $($privateField.Value)"
+  }
+  if ($match.Value -match '(?i)\.\.\.\s*(m|model|entry|source|projected|publicInput)\b') {
+    throw "Pages staging public image model section $($section.Name) spreads an unreviewed model object"
+  }
+  if ($section.Name -eq 'normalizeImageGenModelEntry') {
+    if ($match.Value -notmatch '(?s)const\s+publicInput\s*=\s*\{.*?\}') {
+      throw "Pages staging image model normalization is missing its reviewed public input projection"
+    }
+    if ($match.Value -notmatch 'projectGenerationModels\?\.\(\s*\[\s*publicInput\s*\]\s*\)') {
+      throw "Pages staging image model normalization bypasses its reviewed public input projection"
+    }
+  }
+}
+Write-Host "Pages public image model projection scan OK." -ForegroundColor DarkGray
+
+$privateIdentityPattern = '(?i)(apimart|grsai|thinkai|ithink|mooko|aitohumanize|filesystem\.site|skylee|cloudns|adobe)'
+$internalRoutingPattern = '(?i)(upstream(?:Host|Url|BaseUrl|Routes?|CostText|Cost|Points|Price|Model|Provider|Domain)|channelId|channelName|actualModel|mappedModel|modelMapping|routePriority|routeWeight|failoverOrder|costMultiplier|priceMultiplier|procurement(?:Cost|Price)|purchase(?:Cost|Price)|wholesale(?:Cost|Price)|markupFormula|marginRate|MODEL_PROVIDER_BADGE|PROVIDER_BADGE|VENDOR_BADGE)'
+$publicTextFiles = Get-ChildItem $staging -Recurse -File | Where-Object {
+  $_.Extension -match '^\.(html|js|css|json|txt|xml|webmanifest|md|map|svg)$' `
+    -or $_.Name -in @('_headers', '_redirects')
+}
+$confidentialityHits = @($publicTextFiles | Select-String -Pattern @($privateIdentityPattern, $internalRoutingPattern))
+if ($confidentialityHits.Count -gt 0) {
+  $confidentialityHits | Select-Object -First 20 | ForEach-Object {
+    Write-Host ("  {0}:{1}" -f $_.Path, $_.LineNumber) -ForegroundColor Red
+  }
+  throw "Pages staging contains private provider identities or internal routing fields in public assets"
+}
+Write-Host "Pages public commercial-confidentiality scan OK." -ForegroundColor DarkGray
 
 $files = Get-ChildItem $staging -Recurse -File
 $count = $files.Count

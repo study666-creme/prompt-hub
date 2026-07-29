@@ -32,7 +32,7 @@
       </div>
     </div>
 
-    <div class="app-page app-page-feature active" id="pageCommunity">
+    <div class="app-page app-page-feature" id="pageCommunity">
       <div class="feature-shell community-shell">
         <header class="feature-header community-header">
           <h2>提示词社区</h2>
@@ -174,9 +174,16 @@
             </div>
             <div class="imagegen-shared-params" id="imageGenSharedParams">
             <p class="imagegen-promo-notice imagegen-promo-notice--model hidden" id="imageGenPromoNotice" aria-live="polite"></p>
-            <label for="imageGenModel">生图模型</label>
+            <label for="imageGenModelTrigger">生图模型</label>
             <div class="imagegen-model-family-tabs" id="imageGenModelFamilyTabs" role="tablist" aria-label="生图模型分组"></div>
-            <select id="imageGenModel" class="settings-input imagegen-field-compact" disabled aria-busy="true">
+            <div class="imagegen-model-picker" id="imageGenModelPicker">
+              <button type="button" class="imagegen-model-trigger" id="imageGenModelTrigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="imageGenModelMenu" aria-busy="true" disabled>
+                <span class="imagegen-model-trigger-label" id="imageGenModelTriggerLabel">加载模型列表…</span>
+                <span class="imagegen-model-trigger-chevron" aria-hidden="true"></span>
+              </button>
+              <div class="imagegen-model-menu" id="imageGenModelMenu" role="listbox" aria-label="生图模型" hidden></div>
+            </div>
+            <select id="imageGenModel" class="imagegen-model-native-select" disabled aria-busy="true" aria-hidden="true" tabindex="-1" hidden>
               <option value="">加载模型列表…</option>
             </select>
             <p class="panel-hint imagegen-model-hint" id="imageGenModelHint" hidden></p>
@@ -279,9 +286,9 @@
                   <div class="imagegen-param" data-param="quality">
                     <label for="imageGenQuality">质量</label>
                     <select id="imageGenQuality" class="settings-input imagegen-field-compact">
-                      <option value="standard">低</option>
-                      <option value="high">中</option>
-                      <option value="ultra">高</option>
+                      <option value="low">低</option>
+                      <option value="medium" selected>中</option>
+                      <option value="high">高</option>
                     </select>
                   </div>
                 </div>

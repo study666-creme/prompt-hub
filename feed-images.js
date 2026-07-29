@@ -20,6 +20,11 @@
     return d().isDisplayableImage?.(v) ?? false;
   }
 
+  function isLocalRasterImageUrl(value) {
+    const url = String(value || '').trim();
+    return url.startsWith('blob:') || /^data:image\/(?!svg(?:\+xml)?[;,])/i.test(url);
+  }
+
   function feedImgStorageAttr(image) {
     if (!image || typeof image !== 'string') return '';
     if (window.SupabaseSync?.isStorageRef?.(image)) {
@@ -71,6 +76,7 @@
       }
       const isStorageLike = window.SupabaseSync?.isStorageRef?.(image) || String(image).startsWith('storage://');
       const skipPipeline = /^data:image\//i.test(image) || String(image).startsWith('blob:');
+      if (skipPipeline) return isLocalRasterImageUrl(image) ? String(image) : '';
       if (!skipPipeline && window.MediaPipeline?.resolveFeedUrl) {
         try {
           const piped = await window.MediaPipeline.resolveFeedUrl(image, {
@@ -245,15 +251,30 @@
       };
     }
   
+    function finalizeFeedImageFailure(img) {
+      const media = img?.closest?.('.imagegen-feed-media, .card-media, .community-side-img-btn');
+      media?.classList.remove('is-loading', 'card-media--await', 'media-shine-reveal');
+      media?.classList.add('card-media--load-failed');
+      img?.classList.add('img-load-failed');
+    }
+
     function bindFeedImgErrorFallback(img) {
       if (!img || img.dataset.feedImgErrBound) return;
       img.dataset.feedImgErrBound = '1';
       img.addEventListener('error', () => {
-        if (img.dataset.feedImgRetry === '1') return;
-        img.dataset.feedImgRetry = '1';
+        if (img.dataset.feedLoadToken) return;
+        const failedUrl = img.currentSrc || img.src || '';
+        if (img.dataset.feedImgRetryUrl === failedUrl) {
+          finalizeFeedImageFailure(img);
+          return;
+        }
+        img.dataset.feedImgRetryUrl = failedUrl;
         const ref = img.getAttribute('data-image-ref');
         const jobId = img.getAttribute('data-job-id') || '';
-        if (!ref) return;
+        if (!ref) {
+          finalizeFeedImageFailure(img);
+          return;
+        }
         const inIgFeed = !!img.closest('#imageGenFeed');
         const ownWhFeed = inIgFeed && !!img.closest('.imagegen-feed-card[data-feed-id^="wh_"]');
         if (ownWhFeed) {
@@ -269,12 +290,17 @@
           ? { ...communityImageSignOpts(img), listOnly: true, allowFullFallback: false }
           : communityImageSignOpts(img);
         void resolveImageDisplayUrl(ref, jobId || null, feedAssetIdFromImg(img), retryOpts).then((url) => {
-          if (url && !url.startsWith('storage://')) {
-            img.src = url;
+          if (url && !url.startsWith('storage://') && url !== failedUrl) {
+            const media = img.closest('.imagegen-feed-media, .card-media, .community-side-img-btn');
+            media?.classList.remove('card-media--load-failed');
             img.classList.remove('img-load-failed');
+            if (window.CardImageLoader?.applyUrlToImg?.(img, url)) return;
+            img.src = url;
             return;
           }
-          img.src = IMG_LOADING_PLACEHOLDER;
+          finalizeFeedImageFailure(img);
+        }).catch(() => {
+          finalizeFeedImageFailure(img);
         });
       });
     }
@@ -419,6 +445,9 @@
       }
       const endLoad = () => {
         const media = img.closest('.imagegen-feed-media, .card-media, .community-side-img-btn');
+        delete img.dataset.feedImgRetryUrl;
+        img.classList.remove('img-load-failed');
+        media?.classList.remove('card-media--load-failed');
         if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
         else media?.classList.remove('is-loading');
       };
@@ -705,7 +734,8 @@
       if (media?.classList.contains('imagegen-gen-pending')) return;
       try {
         const cur = img.currentSrc || img.src || '';
-        if (cur.startsWith('http') && !cur.includes('data:image/svg') && img.complete && img.naturalWidth > 0) {
+        if ((cur.startsWith('http') || isLocalRasterImageUrl(cur))
+          && !cur.includes('data:image/svg') && img.complete && img.naturalWidth > 0) {
           releaseFeedMediaLoading(media);
           return;
         }
@@ -713,7 +743,7 @@
           if (!media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
           media.classList.add('is-loading');
         }
-        if (!cur.startsWith('http') || cur.includes('data:image/svg')) {
+        if ((!cur.startsWith('http') && !isLocalRasterImageUrl(cur)) || cur.includes('data:image/svg')) {
           img.src = IMG_LOADING_PLACEHOLDER;
         }
         img.classList.remove('img-load-failed');
@@ -727,16 +757,15 @@
             return;
           }
           if (feedCard) {
-            media?.classList.add('card-media--load-failed');
+            finalizeFeedImageFailure(img);
           } else if (media?.classList.contains('card-media')) {
-            media.classList.add('card-media--load-failed');
+            finalizeFeedImageFailure(img);
           } else if (sideBtn) {
-            img.src = IMG_LOADING_PLACEHOLDER;
-            releaseFeedMediaLoading(media);
+            finalizeFeedImageFailure(img);
           }
         }
       } catch (e) {
-        releaseFeedMediaLoading(media);
+        finalizeFeedImageFailure(img);
       }
     }
 
@@ -752,6 +781,7 @@
       imageGenFeedSignOpts,
       communityImageSignOpts,
       bindFeedImgErrorFallback,
+      finalizeFeedImageFailure,
       applyFeedImageSrc,
       hydrateFeedImages,
       hydrateFeedImageOne,

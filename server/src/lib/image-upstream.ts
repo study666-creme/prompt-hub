@@ -61,6 +61,8 @@ export type ImageSubmitParams = {
   refImageUrls?: string[];
   catalogParameters?: NewApiCatalogParameter[];
   mjParams?: Record<string, unknown>;
+  clientRequestId?: string;
+  onRequestId?: (requestId: string) => Promise<void> | void;
 };
 
 export function upstreamBindingsFromEnv(env: Env): ImageUpstreamBindings {

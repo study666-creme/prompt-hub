@@ -22,6 +22,7 @@ export function assertPhoneVerified(phoneVerified: boolean) {
   if (!phoneVerified) throw new PhoneRequiredError();
 }
 export type TaskKey =
+  | 'canvas_create_node'
   | 'login_desktop'
   | 'login_mobile'
   | 'pwa_install'
@@ -43,6 +44,7 @@ export type TaskKey =
   | `spend_${number}`;
 
 export type TaskFlags = {
+  canvas_node_created?: boolean;
   login_desktop?: boolean;
   login_mobile?: boolean;
   pwa_installed?: boolean;
@@ -146,6 +148,12 @@ export function taskRewardForKey(
       tier?: NonNullable<Profile['membership_tier']>;
     }
   > = {
+    canvas_create_node: {
+      days: 1,
+      credits: 0,
+      title: '在画布创建一个节点',
+      description: '登录卡藏画布并创建任意一个节点，奖励自动到账且每个账号仅限一次'
+    },
     login_desktop: {
       days: 1,
       credits: 0,
@@ -345,6 +353,8 @@ export function isTaskProgressMet(
   }
   const spent = profile.lifetime_credits_spent ?? 0;
   switch (key) {
+    case 'canvas_create_node':
+      return !!flags.canvas_node_created;
     case 'login_desktop':
       return !!flags.login_desktop;
     case 'login_mobile':
@@ -456,6 +466,21 @@ export async function extendMembershipDays(
     throw new Error(pgMsg);
   }
   return data as Profile;
+}
+
+export async function recordCanvasNodeCreated(
+  admin: SupabaseClient,
+  userId: string
+): Promise<{ granted: boolean; profile: Profile }> {
+  const { data, error } = await admin.rpc('grant_canvas_create_node_reward', {
+    p_user_id: userId
+  });
+  if (error) throw error;
+  const result = data && typeof data === 'object' && !Array.isArray(data)
+    ? data as Record<string, unknown>
+    : {};
+  const profile = await syncMembershipCredits(admin, userId);
+  return { granted: result.granted === true, profile };
 }
 
 export function buildMembershipExtensionPatch(
@@ -856,6 +881,7 @@ export function buildTaskList(
   const communityKey = nextCommunityPublishKey(claimed);
   const spendKey = nextSpendTaskKey(spent, claimed);
   const keys = [
+    'canvas_create_node',
     'login_desktop',
     'login_mobile',
     'pwa_install',

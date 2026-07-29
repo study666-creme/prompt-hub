@@ -24,7 +24,8 @@
   }
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-media,
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-body,
-  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-copy-btn {
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-copy-btn,
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-canvas-btn {
     animation: warehouseCardSoftLift 0.42s var(--ease-out) both;
     animation-delay: inherit;
     will-change: opacity, transform, filter;
@@ -41,7 +42,8 @@
     #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft,
     #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-media,
     #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-body,
-    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-copy-btn {
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-copy-btn,
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-canvas-btn {
       animation: none !important;
       opacity: 1;
       transform: none;

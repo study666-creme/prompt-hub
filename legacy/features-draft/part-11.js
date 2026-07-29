@@ -39,38 +39,11 @@
       .trim()
       .toLowerCase();
     if (!id) return 'image2';
-    const legacy = {
-      quanneng2: 'image2',
-      'gpt-image-2-chat': 'image2-economy',
-      'gpt-image-2-1k': 'image2-economy',
-      'gpt-image-2': 'image2',
-      'gpt-image-2-4k-fast': 'image2-4k-fast',
-      'gpt-image-2-vip': 'image2-pro',
-      jimeng: 'lingtu-pro',
-      'nano-banana-fast': 'lingtu-fast',
-      'nano-banana-2': 'lingtu-2',
-      'nano-banana-pro': 'lingtu-pro',
-      'nano-banana-pro-vt': 'lingtu-pro',
-      'nano-banana-pro-vip': 'lingtu-pro',
-      'nano-banana-pro-cl': 'lingtu-pro',
-      'nano-banana-2-cl': 'lingtu-2',
-      'nano-banana-2-4k-cl': 'lingtu-2',
-      'nano-banana': 'lingtu',
-      'newapi-gpt-image-2-chat': 'image2-economy',
-      'apimart-gpt-image-2-official-budget': 'image2-hd',
-      'apimart-gpt-image-2': 'image2',
-      'apimart-seedream-5-lite': 'image2',
-      'apimart-gemini-2-5-flash-preview': 'lingtu-fast',
-      'apimart-gemini-2-5-flash-official': 'lingtu-fast',
-      'apimart-gemini-3-1-flash-preview': 'lingtu-2',
-      'apimart-gemini-3-1-flash-official': 'lingtu-2',
-      'apimart-gemini-3-pro-preview': 'lingtu-pro',
-      'apimart-gemini-3-pro-official': 'lingtu-pro',
-      'ithink-gpt-image-2-slow': 'image2',
-      'mooko-gpt-image-2-pro': 'image2-pro'
-    };
-    if (legacy[id]) return legacy[id];
-    return id;
+    if (RETIRED_IMAGE_GEN_MODEL_IDS.has(id)) return 'image2';
+    if (id === 'image2' || id.startsWith('image2-')) return id;
+    if (id === 'lingtu' || id.startsWith('lingtu-')) return id;
+    if (id.startsWith('mj-')) return id;
+    return 'image2';
   }
 
   function imageGenModelLabel(modelId) {
@@ -92,7 +65,7 @@
   function imageGenModelUiFamily(m) {
     if (m?.uiFamily === 'banana' || m?.uiFamily === 'gim2' || m?.uiFamily === 'midjourney') return m.uiFamily;
     const id = String(m?.id || '').toLowerCase();
-    if (id.startsWith('apimart-mj-')) return 'midjourney';
+    if (id.startsWith('mj-')) return 'midjourney';
     if (id.startsWith('lingtu') || id.includes('nano-banana')) return 'banana';
     return 'gim2';
   }
@@ -105,7 +78,7 @@
     return String(jobId || '').replace(/#\d+$/, '').trim();
   }
 
-  /** APImart MJ：第 1 张常为四宫格合成图，后 4 张为单图；也可能只返回 3～4 张 */
+  /** MJ：第 1 张常为四宫格合成图，后 4 张为单图；也可能只返回 3～4 张 */
   function parseMjImagineUrls(imageUrl, extras) {
     const all = [...new Set([imageUrl, ...(extras || [])].filter((u) => u && /^https?:\/\//i.test(String(u))))];
     if (!all.length) return { composite: null, tiles: [], primary: null };
@@ -470,6 +443,209 @@
     return Number.isFinite(n) ? n : 9999;
   }
 
+  let imageGenModelPickerActiveIndex = -1;
+
+  function imageGenModelPickerButtons() {
+    return [...document.querySelectorAll('#imageGenModelMenu [data-model-id]')];
+  }
+
+  function positionImageGenModelMenu() {
+    const trigger = document.getElementById('imageGenModelTrigger');
+    const menu = document.getElementById('imageGenModelMenu');
+    if (!trigger || !menu || menu.hidden) return;
+    const rect = trigger.getBoundingClientRect();
+    const chrome = trigger.closest('.app-chrome');
+    const chromeRect = chrome?.getBoundingClientRect();
+    const rawScaleX = chrome && chrome.offsetWidth > 0 ? chromeRect.width / chrome.offsetWidth : 1;
+    const rawScaleY = chrome && chrome.offsetHeight > 0 ? chromeRect.height / chrome.offsetHeight : 1;
+    const scaleX = Number.isFinite(rawScaleX) && rawScaleX > 0 ? rawScaleX : 1;
+    const scaleY = Number.isFinite(rawScaleY) && rawScaleY > 0 ? rawScaleY : 1;
+    const originLeft = chromeRect?.left || 0;
+    const originTop = chromeRect?.top || 0;
+    const originBottom = chromeRect?.bottom || (window.visualViewport?.height || window.innerHeight);
+    const viewportHeight = window.visualViewport?.height || window.innerHeight;
+    const viewportWidth = window.visualViewport?.width || window.innerWidth;
+    const below = viewportHeight - rect.bottom - 12;
+    const above = rect.top - 12;
+    const openAbove = below < 180 && above > below;
+    const available = Math.max(120, openAbove ? above : below);
+    const width = Math.max(180, Math.min(rect.width, viewportWidth - 16));
+    const left = Math.max(8, Math.min(rect.left, viewportWidth - width - 8));
+    menu.style.position = 'fixed';
+    menu.style.left = `${(left - originLeft) / scaleX}px`;
+    menu.style.width = `${width / scaleX}px`;
+    menu.style.maxHeight = `${Math.min(360, available / scaleY)}px`;
+    menu.style.top = openAbove ? 'auto' : `${(rect.bottom + 6 - originTop) / scaleY}px`;
+    menu.style.bottom = openAbove ? `${(originBottom - rect.top + 6) / scaleY}px` : 'auto';
+  }
+
+  function setImageGenModelPickerActiveIndex(index, scrollIntoView = true) {
+    const buttons = imageGenModelPickerButtons();
+    if (!buttons.length) {
+      imageGenModelPickerActiveIndex = -1;
+      return;
+    }
+    const next = Math.max(0, Math.min(buttons.length - 1, Number(index) || 0));
+    imageGenModelPickerActiveIndex = next;
+    buttons.forEach((button, buttonIndex) => button.classList.toggle('is-active', buttonIndex === next));
+    const active = buttons[next];
+    const trigger = document.getElementById('imageGenModelTrigger');
+    if (trigger && active?.id) trigger.setAttribute('aria-activedescendant', active.id);
+    if (scrollIntoView) active?.scrollIntoView?.({ block: 'nearest' });
+  }
+
+  function moveImageGenModelPickerActiveIndex(direction) {
+    const buttons = imageGenModelPickerButtons();
+    if (!buttons.length) return;
+    let next = imageGenModelPickerActiveIndex;
+    for (let i = 0; i < buttons.length; i += 1) {
+      next = (next + direction + buttons.length) % buttons.length;
+      if (!buttons[next].disabled) {
+        setImageGenModelPickerActiveIndex(next);
+        return;
+      }
+    }
+  }
+
+  function closeImageGenModelMenu() {
+    const trigger = document.getElementById('imageGenModelTrigger');
+    const menu = document.getElementById('imageGenModelMenu');
+    if (!trigger || !menu) return;
+    menu.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.removeAttribute('aria-activedescendant');
+    imageGenModelPickerActiveIndex = -1;
+  }
+
+  function openImageGenModelMenu() {
+    const trigger = document.getElementById('imageGenModelTrigger');
+    const menu = document.getElementById('imageGenModelMenu');
+    if (!trigger || !menu || trigger.disabled || !menu.childElementCount) return;
+    menu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    positionImageGenModelMenu();
+    const buttons = imageGenModelPickerButtons();
+    const selectedIndex = buttons.findIndex((button) => button.getAttribute('aria-selected') === 'true' && !button.disabled);
+    const firstEnabledIndex = buttons.findIndex((button) => !button.disabled);
+    setImageGenModelPickerActiveIndex(selectedIndex >= 0 ? selectedIndex : Math.max(0, firstEnabledIndex));
+  }
+
+  function syncImageGenModelPicker() {
+    const select = document.getElementById('imageGenModel');
+    const trigger = document.getElementById('imageGenModelTrigger');
+    const label = document.getElementById('imageGenModelTriggerLabel');
+    if (!select || !trigger || !label) return;
+    const selected = select.selectedOptions?.[0];
+    const busy = select.getAttribute('aria-busy') === 'true';
+    trigger.disabled = select.disabled;
+    trigger.setAttribute('aria-busy', busy ? 'true' : 'false');
+    label.textContent = selected?.textContent?.trim() || (busy ? '加载模型列表…' : '选择模型');
+    const buttons = imageGenModelPickerButtons();
+    buttons.forEach((button) => {
+      const on = button.dataset.modelId === select.value;
+      button.classList.toggle('is-selected', on);
+      button.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    if (trigger.disabled) closeImageGenModelMenu();
+  }
+
+  function renderImageGenModelPickerOptions() {
+    const select = document.getElementById('imageGenModel');
+    const menu = document.getElementById('imageGenModelMenu');
+    if (!select || !menu) return;
+    const nextHtml = [...select.options]
+      .map((option, index) => {
+        const disabled = option.disabled ? ' disabled aria-disabled="true"' : '';
+        return `<button type="button" class="imagegen-model-option" id="imageGenModelOption${index}" role="option" data-model-id="${esc(option.value)}" aria-selected="false" tabindex="-1"${disabled}><span>${esc(option.textContent || option.value)}</span><span class="imagegen-model-option-check" aria-hidden="true"></span></button>`;
+      })
+      .join('');
+    if (menu.dataset.optionsHtml !== nextHtml) {
+      menu.innerHTML = nextHtml;
+      menu.dataset.optionsHtml = nextHtml;
+    }
+    syncImageGenModelPicker();
+  }
+
+  function selectImageGenModelPickerValue(value) {
+    const select = document.getElementById('imageGenModel');
+    const trigger = document.getElementById('imageGenModelTrigger');
+    const option = [...(select?.options || [])].find((entry) => entry.value === value && !entry.disabled);
+    if (!select || !option) return;
+    select.value = option.value;
+    syncImageGenModelPicker();
+    closeImageGenModelMenu();
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    trigger?.focus({ preventScroll: true });
+  }
+
+  function bindImageGenModelPicker() {
+    const trigger = document.getElementById('imageGenModelTrigger');
+    const menu = document.getElementById('imageGenModelMenu');
+    const select = document.getElementById('imageGenModel');
+    if (!trigger || !menu || !select || trigger.dataset.bound === '1') return;
+    trigger.dataset.bound = '1';
+    trigger.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (menu.hidden) openImageGenModelMenu();
+      else closeImageGenModelMenu();
+    });
+    trigger.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (menu.hidden) openImageGenModelMenu();
+        moveImageGenModelPickerActiveIndex(event.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+      if (event.key === 'Home' || event.key === 'End') {
+        if (menu.hidden) return;
+        event.preventDefault();
+        const buttons = imageGenModelPickerButtons();
+        const index = event.key === 'Home'
+          ? buttons.findIndex((button) => !button.disabled)
+          : buttons.map((button) => !button.disabled).lastIndexOf(true);
+        if (index >= 0) setImageGenModelPickerActiveIndex(index);
+        return;
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        if (menu.hidden) {
+          openImageGenModelMenu();
+          return;
+        }
+        const active = imageGenModelPickerButtons()[imageGenModelPickerActiveIndex];
+        if (active && !active.disabled) selectImageGenModelPickerValue(active.dataset.modelId);
+        return;
+      }
+      if (event.key === 'Escape' && !menu.hidden) {
+        event.preventDefault();
+        closeImageGenModelMenu();
+      }
+    });
+    menu.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const option = event.target.closest('[data-model-id]');
+      if (option && !option.disabled) selectImageGenModelPickerValue(option.dataset.modelId);
+    });
+    menu.addEventListener('pointermove', (event) => {
+      const option = event.target.closest('[data-model-id]');
+      if (!option || option.disabled) return;
+      const index = imageGenModelPickerButtons().indexOf(option);
+      if (index >= 0) setImageGenModelPickerActiveIndex(index, false);
+    });
+    select.addEventListener('change', syncImageGenModelPicker);
+    document.addEventListener('click', closeImageGenModelMenu);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeImageGenModelMenu();
+    });
+    window.addEventListener('resize', closeImageGenModelMenu);
+    window.addEventListener('scroll', (event) => {
+      if (event.target === menu) return;
+      closeImageGenModelMenu();
+    }, true);
+    window.visualViewport?.addEventListener('resize', closeImageGenModelMenu);
+    syncImageGenModelPicker();
+  }
+
   function renderImageGenModelSelect(opts = {}) {
     const sel = document.getElementById('imageGenModel');
     if (!sel || !imageGenModelCatalog.length) return;
@@ -505,6 +681,7 @@
         ? current
         : selectable[0]?.id || list[0]?.id || 'image2';
     if (sel.value !== pick) sel.value = pick;
+    renderImageGenModelPickerOptions();
     if (!opts.skipUiRefresh) scheduleImageGenModelUiRefresh();
   }
 
@@ -530,7 +707,7 @@
     return ['1k', '2k', '4k'].includes(r) ? r : '1k';
   }
 
-  /** 木瓜等分档模型：切分辨率时自动换到支持该档的 model id */
+  /** 多分档模型：切分辨率时自动换到支持该档的公共 model id */
   function resolveImageGenModelForResolution(modelId, resolution) {
     const res = normalizeImageGenResolution(resolution);
     const id = normalizeImageGenModelId(modelId);
@@ -539,11 +716,9 @@
     const supported = entry.resolutions?.length ? entry.resolutions : ['1k', '2k', '4k'];
     if (supported.includes(res)) return id;
     const family = imageGenModelUiFamily(entry);
-    const provider = entry.provider;
     const hit = imageGenModelCatalog.find(
       (m) =>
         imageGenModelUiFamily(m) === family
-        && m.provider === provider
         && (m.resolutions || []).includes(res)
         && m.selectable !== false
         && m.status !== 'maintenance'
@@ -559,6 +734,7 @@
     const nextModel = resolveImageGenModelForResolution(modelSel.value, res);
     if (nextModel && nextModel !== modelSel.value) {
       modelSel.value = nextModel;
+      syncImageGenModelPicker();
       syncImageGenModelHint();
     }
   }
@@ -613,10 +789,10 @@
     'lingtu-2': [...IMAGE_GEN_SIZE_BANANA, ...IMAGE_GEN_SIZE_BANANA2_EXTRA],
     'lingtu-pro': IMAGE_GEN_SIZE_BANANA,
     lingtu: IMAGE_GEN_SIZE_BANANA,
-    'apimart-mj-v61': IMAGE_GEN_SIZE_MJ,
-    'apimart-mj-v81': IMAGE_GEN_SIZE_MJ,
-    'apimart-mj-v7': IMAGE_GEN_SIZE_MJ,
-    'apimart-mj-niji7': IMAGE_GEN_SIZE_MJ
+    'mj-v61': IMAGE_GEN_SIZE_MJ,
+    'mj-v81': IMAGE_GEN_SIZE_MJ,
+    'mj-v7': IMAGE_GEN_SIZE_MJ,
+    'mj-niji7': IMAGE_GEN_SIZE_MJ
   };
   const BANANA2_EXTENDED_MODELS = new Set(['lingtu-2']);
   const IMAGE_GEN_SAVE_TARGET_LS = 'promptHub.imageGenSaveTarget.v1';
@@ -626,12 +802,7 @@
   }
 
   function imageGenModelHidesQuality(modelId) {
-    const id = normalizeImageGenModelId(modelId);
-    if (isImageGenMidjourneyModel(id)) return true;
-    if (id === 'image2-4k-fast') return true;
-    const entry = imageGenModelCatalog.find((m) => m.id === id);
-    const quality = entry?.parameters?.find((parameter) => parameter?.name === 'quality');
-    return !!entry?.fixedQualityLow || !!(quality && Object.prototype.hasOwnProperty.call(quality, 'fixed'));
+    return isImageGenMidjourneyModel(normalizeImageGenModelId(modelId));
   }
 
   function isImageGenMjSaveAllTiles() {
@@ -694,7 +865,6 @@
   function getImageGenMaxRefImages() {
     const modelId = normalizeImageGenModelId(getImageGenModel());
     if (normalizeImageGenModelId(getImageGenModel()) === 'image2-economy') return 4;
-    if (modelId === 'image2-4k-fast') return 0;
     const entry = imageGenModelCatalog.find((model) => model.id === modelId);
     if (Number.isFinite(Number(entry?.maxReferenceImages))) {
       return Math.max(0, Number(entry.maxReferenceImages));
@@ -728,7 +898,7 @@
     hint.hidden = false;
     hint.textContent = getImageGenMjMode() === 'blend'
       ? '混图模式：参考图 2～5 张'
-      : 'MJ 图生图：参考图最多 4 张（与 APIMart 一致）';
+      : 'MJ 图生图：参考图最多 4 张';
   }
 
   function trimImageGenRefsToLimit() {
@@ -810,13 +980,9 @@
     if (sizeParam) sizeParam.hidden = !sizeOptions.length;
     const sizeLabel = document.querySelector('label[for="imageGenSize"]');
     if (sizeLabel) sizeLabel.textContent = isMj ? '宽高比' : '画面比例';
-    const hideQuality = isMj || imageGenModelHidesQuality(modelId);
+    const hideQuality = imageGenModelHidesQuality(modelId);
     const qEl = document.getElementById('imageGenQuality');
     syncImageGenQualitySelectOptions(modelEntry);
-    const fixedQuality = modelEntry?.parameters?.find((parameter) => parameter?.name === 'quality')?.fixed;
-    if (qEl && typeof fixedQuality === 'string' && [...qEl.options].some((option) => option.value === fixedQuality)) {
-      qEl.value = fixedQuality;
-    }
     const qLabel = document.querySelector('label[for="imageGenQuality"]');
     const qNote = document.querySelector('.imagegen-quality-note');
     const qParam = qEl?.closest('.imagegen-param[data-param="quality"]');
@@ -867,6 +1033,14 @@
     if (!input || !valEl) return;
     const sync = () => {
       valEl.textContent = input.value;
+      const min = Number(input.min);
+      const max = Number(input.max);
+      const value = Number(input.value);
+      const rawProgress = max > min && Number.isFinite(value)
+        ? ((value - min) / (max - min)) * 100
+        : 0;
+      const progress = Math.max(0, Math.min(100, rawProgress));
+      input.style.setProperty('--imagegen-mj-range-progress', `${progress}%`);
     };
     input.addEventListener('input', sync);
     sync();

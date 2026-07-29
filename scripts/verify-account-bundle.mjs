@@ -24,7 +24,9 @@ const required = [
   'window.SubscriptionUI',
   'window.TrialTasksUI',
   'openSubscribePanel',
-  'openTrialTasksPanel'
+  'openTrialTasksPanel',
+  'createPaymentCheckout',
+  'wxpay'
 ];
 
 const missing = required.filter((token) => !code.includes(token));
