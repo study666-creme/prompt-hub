@@ -6,7 +6,7 @@
 
 生产 Pages 当前标记为 `20260729b`，但该部署遗漏了候选仓库的 `#warehouseHero` 内联 DOM 和 `styles-warehouse.css`，所以构建号本身不能作为资源完整性证据。主树候选已增加暂存与线上 HTTP 硬门禁，尚未发布。
 
-主树本地已收编并通过定向验证：
+主树候选 `4fcb4b0cf61a1d6260d7fd6485c2d282da71614f` 已提交，并从干净工作区通过定向验证：
 
 - 图片单次付费提交、未知结果退款 SLA、poll/archive 推进与卡片库交付修复。
 - 视频独立队列、单次原子领取、未知结果退款 SLA、长时 SD 轮询和按明确计费秒数退差价。
@@ -17,17 +17,18 @@
 
 已完成的外部前置：
 
-- 2026-07-28 已在正确 Cloudflare 账号创建并复核
-  `prompt-hub-video-generation` 与 `prompt-hub-video-generation-dlq`。冻结期间未发布 Worker，
-  因此两条新队列当前没有 producer/consumer；正式发布后仍须核对 consumer、DLQ 和 cron 冒烟。
+- 2026-07-30 公开目录确认 New API 已上线 `capability_version: 2026-07-29.1`；`sd2.0-pro`
+  明确支持 4–15 秒、固定 720p、最多 9 张参考图、3 个参考视频和 3 个参考音频。
+- 2026-07-30 已在正确 Cloudflare 账号复核图片/视频 Queue 与 DLQ、`prompt-hub-card-images`
+  R2 桶和 `PROMPT_HUB_METRICS` KV。冻结期间未发布候选 Worker，因此两条视频队列当前没有
+  producer/consumer；正式发布后仍须核对 consumer、DLQ 和 cron 冒烟。
+- 候选已通过 Worker 50 个测试文件共 340 项测试、类型检查、根目录文档/预部署门禁、Pages
+  暂存 HTTP 冒烟，以及仓库桌面/手机/空态和生图专项浏览器验收。
 
 解除冻结前仍必须完成：
 
 1. 备份生产数据库并记录可恢复性证据；生产迁移只能在解冻后按 `docs/DEPLOY-CHECKLIST.md` 的顺序应用。
-2. 核对并先上线与当前规范化参数契约匹配的 New API 能力转换层。
-3. 将候选改动整理成干净、可审查的 Git 提交。
-4. 从该干净提交重跑全量测试、根目录预部署检查和 Pages 暂存浏览器验收。
-5. 获得明确发布授权后移除本冻结标记并提交；再从干净提交运行 Worker dry-run、应用迁移和执行正式发布。发布后核对视频队列 consumer、DLQ 和 cron。
+2. 获得明确发布授权后运行 build bump、移除本冻结标记并提交干净发布 SHA；再运行 Worker dry-run、按顺序应用迁移和执行正式发布。发布后核对视频队列 consumer、DLQ 和 cron。
 
 冻结期间禁止：构建生产 Worker 镜像、正式 `wrangler deploy`、Pages 发布、生产迁移或删除本 `DO-NOT-DEPLOY.md`。
 

@@ -9,7 +9,7 @@
 - **唯一候选源**：`D:\prompt-hub`。
 - **历史生产审计源**：`D:\canvas\prompt-hub`，只读，不再作为开发或部署源。
 - **当前生产**：Worker 仍来自历史树的旧版本，不包含本轮主树的完整安全层。Pages 显示 `20260729b`，但缺少候选仓库首屏 DOM 与独立 CSS，不能据此认定候选已完整上线。
-- **当前候选**：主树仍是脏工作区，迁移未应用，队列未核验，不能部署。
+- **当前候选**：`4fcb4b0cf61a1d6260d7fd6485c2d282da71614f` 已提交并从干净工作区完成全量验证；New API 与 Cloudflare 资源已核验。生产数据库新鲜备份和五项迁移仍未完成，冻结标记仍存在，因此不能部署。
 
 双树文件完全相同不是目标。目标是逐项审计生产行为，将需要保留的能力以主树现有契约安全实现，并明确拒绝会重复付费、泄露渠道或回退公开接口的历史实现。
 
@@ -35,23 +35,25 @@
 - 在 Prompt Hub 内按某个具体视频模型拼接私有上游参数。比例格式转换、固定分辨率忽略和 provider 特有字段属于 New API 能力层。
 - 用历史树的整文件覆盖主树公开模型投影、原子积分 RPC 或安全错误响应。
 
-## 仍是发布阻塞的外部步骤
+## 发布前置状态
 
-1. 重新核对已创建的 `prompt-hub-video-generation` 和 `prompt-hub-video-generation-dlq`；确认图片队列、R2、KV、cron 仍存在。
-2. 对生产数据库做可恢复备份；解冻后按以下顺序应用：
+- **New API 已核验**：2026-07-30 公开目录返回 `capability_version: 2026-07-29.1`；`sd2.0-pro` 的公开契约为 4–15 秒、固定 720p、最多 9 图/3 视频/3 音频。
+- **Cloudflare 资源已核验**：图片/视频 Queue 与 DLQ、`prompt-hub-card-images` R2、`PROMPT_HUB_METRICS` KV 均存在。视频 Queue 在候选 Worker 发布前没有 producer/consumer，符合冻结期预期。
+- **Git 与验证已完成**：候选提交为 `4fcb4b0cf61a1d6260d7fd6485c2d282da71614f`，全量验证结果见下节。
+- **仍阻塞发布**：生产数据库尚未生成本次发布前的新鲜可恢复备份。
+
+备份完成并获得解冻授权后，按以下顺序应用迁移：
    - `20260722010000_generation_request_idempotency.sql`
    - `20260722020000_atomic_credit_operations.sql`
    - `20260722030000_apply_credit_delta_idempotency.sql`
    - `20260726010000_canvas_collaboration_seat_payments.sql`
    - `20260726020000_canvas_create_node_membership_reward.sql`
-3. New API 先部署当前能力契约：规范化比例、忽略模型不支持的可选参数、保持 `quality` 与 `resolution` 语义分离、支持稳定幂等键和真实渠道目录。
-4. 整理并审查主树提交；正式发布必须来自干净提交。
-5. 冻结期执行 `npm run check:docs`、`npm run check:predeploy`、Worker typecheck/test、Pages 暂存 HTTP/浏览器验收；不得构建生产 Worker 镜像。
-6. 获得发布授权并解除冻结后，从干净提交执行 Worker dry-run、迁移和发布。部署后 `/health.buildSha` 必须等于发布提交 SHA。
+
+正式发布必须来自解冻、build bump 和文档状态更新后的最终干净 SHA。部署后 `/health.buildSha` 必须等于该发布 SHA。
 
 ## 验证基线
 
-2026-07-30 当前候选验证已通过：Worker `npm run typecheck`、50 个测试文件共 340 项测试、根目录 `npm run check:docs` 与 `npm run check:predeploy`、Pages 暂存 HTTP 冒烟、仓库桌面/手机/空态浏览器验收，以及生图批量可靠性、提交反馈、最近生成留存、缺图清理、卡片操作布局、访客隔离和手机首屏专项。冻结标记仍存在，因此本轮未构建 Worker dry-run；历史 dry-run 结果不能替代解冻后从最终干净 SHA 重跑。以上只证明本地主树候选，不证明生产已上线。
+2026-07-30 候选 `4fcb4b0cf61a1d6260d7fd6485c2d282da71614f` 验证已通过：Worker `npm run typecheck`、50 个测试文件共 340 项测试、根目录 `npm run check:docs` 与 `npm run check:predeploy`、Pages 暂存 HTTP 冒烟、仓库桌面/手机/空态浏览器验收，以及生图批量可靠性、提交反馈、最近生成留存、缺图清理、卡片操作布局、访客隔离和手机首屏专项。冻结标记仍存在，因此本轮未构建 Worker dry-run；历史 dry-run 结果不能替代解冻后从最终干净 SHA 重跑。以上只证明本地主树候选，不证明生产已上线。
 
 ## 以后如何避免再次分叉
 
