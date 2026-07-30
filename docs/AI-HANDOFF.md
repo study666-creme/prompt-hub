@@ -12,11 +12,11 @@
 
 不要读取或引用公开文档中的真实测试账号。需要登录验收时，由维护者在本机通过未跟踪环境变量或密码管理器提供凭据。
 
-## 当前发布冻结
+## 发布状态与守卫
 
-- Worker 最终目标仓库是 `D:\prompt-hub`；`D:\canvas\prompt-hub` 是仍待完整收编的历史生产树，禁止从任一脏目录直接发布。
-- 修改 Worker、生成、支付、数据库或发布工具前必须阅读根目录 `AGENTS.md`、`DO-NOT-DEPLOY.md` 和 `docs/RECONCILE-20260726.md`。
-- 当前只有 `D:\prompt-hub\DO-NOT-DEPLOY.md` 存在；历史树标记已不存在。主树标记存在期间不得构建生产 Worker 镜像、`wrangler deploy`、发布 Pages、应用生产迁移或删除冻结标记。先完成双树差异收编、数据库备份、New API 前置版本核对、干净提交审查和非生产构建检查；获得解冻授权并移除标记后，再执行 Worker dry-run、迁移和正式发布。
+- Worker 唯一发布仓库是 `D:\prompt-hub`；`D:\canvas\prompt-hub` 只保留作历史生产审计，禁止从任一脏目录直接发布。
+- 修改 Worker、生成、支付、数据库或发布工具前必须阅读根目录 `AGENTS.md` 和 `docs/RECONCILE-20260726.md`；如果根目录存在 `DO-NOT-DEPLOY.md`，还必须先遵守其中的冻结条件。
+- 2026-07-30 已完成数据库备份、New API/Cloudflare 前置核对、干净候选提交和全量非生产验证，并获得明确发布授权。冻结标记随 `20260730a` 发布提交移除；正式发布仍必须依次通过干净 SHA、Worker dry-run、五项迁移和生产验收。
 
 ## 文档时效纪律
 
@@ -81,7 +81,7 @@ npm run typecheck
 npm test
 ```
 
-冻结标记移除后、正式发布前，从干净提交运行 `npm run deploy:dry-run`。正式 `npm run deploy` 会拒绝冻结标记或脏工作区，并自动把当前 Git SHA 注入 `/health.buildSha`。
+正式发布前从干净提交运行 `npm run deploy:dry-run`。正式 `npm run deploy` 会拒绝冻结标记或脏工作区，并自动把当前 Git SHA 注入 `/health.buildSha`。
 
 静态站生产冒烟由 `deploy-pages.ps1` 自动执行。该脚本拒绝冻结标记和脏工作区；先单独运行 `scripts/bump-build.ps1`、验证并提交，再从该干净 SHA 发布。只改文档或未部署的维护脚本时，不需要递增 Pages build。
 
@@ -94,7 +94,7 @@ npm test
 
 ## 主树目标生图契约（2026-07-28）
 
-以下规则优先于本文档中较早的模型兼容性描述，但在发布冻结解除前仅代表主树目标，不代表生产已上线：
+以下规则优先于本文档中较早的模型兼容性描述；生产是否已切到该契约以 `/health.buildSha` 和实时模型目录为准：
 
 - `全能模型2 · 特价 1K` 公开 ID 为 `image2-economy`；价格读取实时目录，支持比例和可选参考图，不公开质量控件。
 - `全能模型2 · 4K` 公开 ID 为 `image2-4k-fast`，固定发送 `resolution=4k`、`quality=standard`、`n=1`；纯文生图不需要参考图。
@@ -104,10 +104,10 @@ npm test
 
 ## 主树目标 Canvas 桥接契约（2026-07-27）
 
-本节同样只描述冻结中的主树候选，不代表生产已上线：
+本节描述 Prompt Hub 侧桥接契约；生产版本以 `/health.buildSha` 为准：
 
 - 卡片库到 Canvas 的 URL 只允许 `phSource=prompt-hub`、`phVersion=1`、`phIntent=insert-card` 和 `phCardId`；不得把提示词、图片 URL、Token 或上游信息放入查询参数。
 - Canvas 使用现有 Prompt Hub Bearer 会话调用 `GET /api/v1/extension/cards/:cardId` 精确取当前用户的卡。卡片入口覆盖桌面图标、移动端“到画布”和右键“插入无限画布”。
 - Canvas 生图完成后调用 `POST /api/v1/extension/canvas-results`，只传 UUID `generationJobId`、固定 `artifactIndex=0` 和可选标题。Worker 只接受当前用户的已完成 Canvas 任务，并从生成记录解析受控归档引用。
 - 回仓幂等键固定为 `canvas-result:<generationJobId>:0`；重复提交返回原卡，不重复上传图片或公开社区。Prompt Hub 从 Canvas 返回可见时会消费一次性标记并强制拉云端一次。
-- Canvas 仓库仍需实现深链消费与结果回仓调用；Prompt Hub 与 Canvas 必须协调版本后再解除发布冻结，不能只发布其中一侧并宣称链路完成。
+- Canvas 仓库仍需实现深链消费与结果回仓调用；Prompt Hub 侧发布不等于跨仓库链路已经完成，只有两侧按同一协议上线后才能宣称端到端可用。

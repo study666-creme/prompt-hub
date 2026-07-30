@@ -2,9 +2,9 @@
 
 最后核对：2026-07-30
 
-## 当前冻结
+## 当前发布状态
 
-当前只有 `D:\prompt-hub\DO-NOT-DEPLOY.md` 存在，历史树标记已不存在。主树标记存在期间禁止构建生产 Worker 镜像、正式 Worker/Pages 发布、生产迁移和删除标记。不要为了让脚本通过而提前删除冻结标记。
+2026-07-30 已完成候选审查、New API/Cloudflare 前置核对、全量非生产验证和可恢复数据库备份，并获得明确发布授权。冻结标记随 `20260730a` 发布提交移除；后续仍必须从同一干净 SHA 依次执行 Worker dry-run、五项迁移、Worker/Pages 发布和生产验收。
 
 ## 发布顺序
 
@@ -44,7 +44,7 @@ npx --yes wrangler@4.114.0 queues create prompt-hub-video-generation-dlq
 
 ### 4. 备份生产数据库
 
-先按 `MEMFIRE-MIGRATION.md` 生成可恢复备份并记录校验结果。冻结期不执行生产 SQL；解冻后的迁移顺序固定为：
+先按 `MEMFIRE-MIGRATION.md` 生成可恢复备份并记录校验结果。本轮备份为 `backups/prompt-hub-final-20260730-102016.dump`，大小 15,330,250 字节，`pg_restore --list` 返回 732 项，SHA-256 为 `7A83BD87B42E1B195121E542655A65B4C2F4E5EAABE0EDACDF45ABD34C488448`；项目外 DPAPI 加密副本已完成解密回算验证。迁移顺序固定为：
 
 1. `supabase/migrations/20260722010000_generation_request_idempotency.sql`
 2. `supabase/migrations/20260722020000_atomic_credit_operations.sql`
@@ -52,7 +52,7 @@ npx --yes wrangler@4.114.0 queues create prompt-hub-video-generation-dlq
 4. `supabase/migrations/20260726010000_canvas_collaboration_seat_payments.sql`
 5. `supabase/migrations/20260726020000_canvas_create_node_membership_reward.sql`
 
-迁移需要明确授权。本地收尾和 dry-run 不执行这些 SQL。
+迁移需要明确授权。本轮授权已取得，但仍须等最终干净 SHA 的 dry-run 通过后才能执行这些 SQL。
 
 ### 5. 本地验证
 
@@ -73,7 +73,7 @@ node scripts\run-index-local-http-smoke.mjs
 
 ### 6. 解冻、dry-run 与迁移
 
-只有前五步完成并获得明确授权后，才能移除主树冻结标记。先运行 `scripts/bump-build.ps1`，审查并将标记删除、build 变更和候选代码提交为同一个干净发布 SHA。随后运行：
+前五步已完成并获得明确授权。运行 `scripts/bump-build.ps1`，审查并将标记删除、build 变更和状态文档提交为同一个干净发布 SHA。随后运行：
 
 ```powershell
 cd D:\prompt-hub\server

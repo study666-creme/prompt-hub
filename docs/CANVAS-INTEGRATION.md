@@ -1,6 +1,6 @@
 # 无限画布集成
 
-最后核对：2026-07-27。生成与奖励条目描述冻结中的主树候选，尚未作为同一版本部署生产。
+最后核对：2026-07-30。生成与奖励条目描述 `20260730a` Prompt Hub 侧受控发布契约；生产是否已切换以 `/health.buildSha` 为准。
 
 - Canvas 仓库: <https://github.com/study666-creme/infinite-canvas-jay>
 - 正式地址: <https://canvas.prompt-hubs.com>
@@ -75,7 +75,7 @@ Canvas 在图片任务完成后提交：
 - 客户端不能提交 `imageBase64`、任意结果 URL 或内部 `imageRef`。Worker 从生成任务解析当前用户的受控存储引用，优先复用已归档图片；现有归档恢复路径仍取不到图片时返回 `409 RESULT_NOT_READY`，不会另外创建一份客户端上传。
 - 稳定幂等键为 `canvas-result:<generationJobId>:0`，保存卡同时记录 `genJobId`。重复提交返回原卡及 `replayed=true`，不重复新增卡片；回仓卡默认不公开到社区。
 
-以上深链与结果回仓协议目前只存在于发布冻结中的 `D:\prompt-hub` 主树候选，尚未部署。Canvas 仓库仍需消费深链并在生成完成后调用回仓接口，两个仓库必须按同一协议版本上线。
+以上深链与结果回仓协议属于 `D:\prompt-hub` 的 `20260730a` 发布契约。Canvas 仓库仍需消费深链并在生成完成后调用回仓接口，两个仓库必须按同一协议版本上线后才能宣称端到端链路完成。
 
 ## Prompt Hub 侧文件
 

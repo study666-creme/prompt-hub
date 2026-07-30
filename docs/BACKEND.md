@@ -1,6 +1,6 @@
 # Worker 后端架构
 
-最后核对：2026-07-29。除非明确写“生产”，本文描述的是冻结中的主树候选契约。
+最后核对：2026-07-30。本文描述 `20260730a` 受控发布契约；生产是否已切换以 `/health.buildSha` 为准。
 
 ## 组件
 
@@ -40,7 +40,7 @@
 
 ## 支付方式边界
 
-冻结中的候选主树中，`POST /api/v1/payments/checkout` 与 `/wallet/checkout`
+`20260730a` 受控发布契约中，`POST /api/v1/payments/checkout` 与 `/wallet/checkout`
 新建订单仅接受 `paymentMethod=alipay`。前端支付弹层也只展示支付宝。
 `EpayMethod` 仍保留 `wxpay`，仅用于读取、验签和结算已存储的历史微信订单及其
 回调；不得据此恢复微信新订单入口。
@@ -106,7 +106,7 @@ npm exec wrangler secret put APIMART_API_KEY
 - 结果回仓不接受客户端图片内容或内部存储引用。Worker 通过生成任务解析当前用户的归档引用，并以 `canvas-result:<generationJobId>:0` 保存来源键；重复调用返回已有卡片和 `replayed=true`，不公开到社区。
 - Prompt Hub 新窗口打开 Canvas 后记录一次性返回标记；页面恢复可见时立即强制拉取云端一次，接收 Canvas 写回结果。该标记只用于触发同步，不是鉴权凭据。
 
-这一桥接契约仍是冻结中的主树候选，未部署到生产；Canvas 侧消费深链和调用结果回仓接口是跨仓库依赖。
+这一桥接契约属于 `20260730a` Prompt Hub 侧发布；Canvas 侧消费深链和调用结果回仓接口仍是跨仓库依赖，只有两侧按同一协议上线后才能宣称端到端可用。
 
 ## 视频生成生命周期
 
@@ -133,11 +133,11 @@ npm test
 npm run deploy:dry-run
 ```
 
-正式发布只能在冻结解除、迁移完成且工作区干净后运行 `npm run deploy`。脚本会注入当前 Git SHA，并拒绝冻结标记或脏工作区。使用仓库锁定的 Wrangler 版本，不要临时安装不兼容的大版本。数据库备份/恢复见 `MEMFIRE-MIGRATION.md`，图片存储见 `R2-MIGRATION.md`。
+正式发布只能在迁移完成且工作区干净后运行 `npm run deploy`。脚本会注入当前 Git SHA，并拒绝冻结标记或脏工作区。使用仓库锁定的 Wrangler 版本，不要临时安装不兼容的大版本。数据库备份/恢复见 `MEMFIRE-MIGRATION.md`，图片存储见 `R2-MIGRATION.md`。
 
 ## 当前公开图像模型契约
 
-`GET /api/v1/generate/models` 是模型名称、参数和价格的唯一运行时来源；下面记录主树下一次受控发布必须满足的契约，生产仍以接口实时返回为准。冻结解除前不能把本节当成已上线声明。
+`GET /api/v1/generate/models` 是模型名称、参数和价格的唯一运行时来源；下面记录受控发布必须满足的契约，生产仍以接口实时返回为准。
 
 | 公开号 | 关键参数 | 备注 |
 |---|---|---|

@@ -69,7 +69,7 @@
 | `scripts/verify-canvas-card-handoff-browser.mjs` | Chromium 点击深链及移动端按钮布局回归 |
 | `server/src/lib/extension-card.test.ts`, `server/src/routes/v1/extension.test.ts` | Worker 精确取卡、来源校验与结果回仓幂等测试 |
 
-桥接实现目前只在发布冻结中的主树候选，尚未部署；Canvas 仓库对深链和回仓端点的消费不归这些文件所有。
+桥接实现属于 `20260730a` Prompt Hub 发布候选；Canvas 仓库对深链和回仓端点的消费不归这些文件所有，Prompt Hub 侧上线不等于跨仓库链路已完成。
 
 ## 卡片仓库 UI 归属
 

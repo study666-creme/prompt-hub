@@ -37,7 +37,7 @@ The 2026-07-29 frozen-tree candidate keeps the warehouse redesign isolated from 
 - `styles-warehouse.css` owns warehouse-only layout, surface hierarchy, status accents, list/grid presentation, light theme, and mobile overrides.
 - `scripts/verify-warehouse-ui-browser.mjs` seeds mixed cards and checks desktop, mobile, empty, media, overflow, and drag behavior without contacting production services.
 
-This candidate has not been deployed. Do not fold `styles-warehouse.css` into a generated CSS bundle while `DO-NOT-DEPLOY.md` is present.
+Keep `styles-warehouse.css` as a standalone Pages asset. Staging and HTTP smoke checks must fail when the file, hero rules, or warehouse hero images are missing.
 
 ## Startup Routing
 

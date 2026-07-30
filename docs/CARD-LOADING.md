@@ -1,6 +1,6 @@
 # 列表图片加载
 
-复核日期：2026-07-30。下述仓库 UI 说明属于发布冻结中的未部署候选；生产图片链路未因本次视觉改版而改变。
+复核日期：2026-07-30。下述仓库 UI 对应 `20260730a` 发布候选；生产是否已切换以线上 build 和资源 HTTP 冒烟为准。图片存储链路未因本次视觉改版而改变。
 
 ## 目标
 
@@ -64,7 +64,7 @@ npm run check:predeploy
 node scripts/audit-production-mobile-first-screen.mjs
 ```
 
-冻结树中的仓库 UI 可使用独立浏览器验收，不访问生产 API：
+发布候选中的仓库 UI 可使用独立浏览器验收，不访问生产 API：
 
 ```powershell
 $env:PLAYWRIGHT_PACKAGE_DIR = '<playwright package directory>'

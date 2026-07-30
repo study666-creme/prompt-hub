@@ -2,14 +2,14 @@
 
 最后核对：2026-07-30
 
-> 本文区分“生产已上线”和“主树本地完成”。冻结标记存在期间，任何本地完成项都不能写成线上能力。
+> 本文区分“生产已上线”和“主树本地完成”。生产切换必须通过 `/health.buildSha`、Pages build 和线上冒烟取证，不能只凭本地提交或测试通过作结论。
 
 ## 当前结论
 
 - **唯一候选源**：`D:\prompt-hub`。
 - **历史生产审计源**：`D:\canvas\prompt-hub`，只读，不再作为开发或部署源。
 - **当前生产**：Worker 仍来自历史树的旧版本，不包含本轮主树的完整安全层。Pages 显示 `20260729b`，但缺少候选仓库首屏 DOM 与独立 CSS，不能据此认定候选已完整上线。
-- **当前候选**：`4fcb4b0cf61a1d6260d7fd6485c2d282da71614f` 已提交并从干净工作区完成全量验证；New API 与 Cloudflare 资源已核验。生产数据库新鲜备份和五项迁移仍未完成，冻结标记仍存在，因此不能部署。
+- **当前候选**：功能候选 `4fcb4b0cf61a1d6260d7fd6485c2d282da71614f` 已完成全量验证；New API、Cloudflare 资源和生产数据库新鲜备份均已核验。发布已获明确授权，冻结标记随 `20260730a` 发布提交移除；五项迁移仍须等最终 SHA dry-run 通过后按顺序执行。
 
 双树文件完全相同不是目标。目标是逐项审计生产行为，将需要保留的能力以主树现有契约安全实现，并明确拒绝会重复付费、泄露渠道或回退公开接口的历史实现。
 
@@ -40,9 +40,9 @@
 - **New API 已核验**：2026-07-30 公开目录返回 `capability_version: 2026-07-29.1`；`sd2.0-pro` 的公开契约为 4–15 秒、固定 720p、最多 9 图/3 视频/3 音频。
 - **Cloudflare 资源已核验**：图片/视频 Queue 与 DLQ、`prompt-hub-card-images` R2、`PROMPT_HUB_METRICS` KV 均存在。视频 Queue 在候选 Worker 发布前没有 producer/consumer，符合冻结期预期。
 - **Git 与验证已完成**：候选提交为 `4fcb4b0cf61a1d6260d7fd6485c2d282da71614f`，全量验证结果见下节。
-- **仍阻塞发布**：生产数据库尚未生成本次发布前的新鲜可恢复备份。
+- **数据库备份已核验**：`prompt-hub-final-20260730-102016.dump` 为 15,330,250 字节，`pg_restore --list` 返回 732 项，SHA-256 为 `7A83BD87B42E1B195121E542655A65B4C2F4E5EAABE0EDACDF45ABD34C488448`；项目外 DPAPI 加密副本已完成解密回算。
 
-备份完成并获得解冻授权后，按以下顺序应用迁移：
+最终干净 SHA 的 dry-run 通过后，按以下顺序应用迁移：
    - `20260722010000_generation_request_idempotency.sql`
    - `20260722020000_atomic_credit_operations.sql`
    - `20260722030000_apply_credit_delta_idempotency.sql`
@@ -53,7 +53,7 @@
 
 ## 验证基线
 
-2026-07-30 候选 `4fcb4b0cf61a1d6260d7fd6485c2d282da71614f` 验证已通过：Worker `npm run typecheck`、50 个测试文件共 340 项测试、根目录 `npm run check:docs` 与 `npm run check:predeploy`、Pages 暂存 HTTP 冒烟、仓库桌面/手机/空态浏览器验收，以及生图批量可靠性、提交反馈、最近生成留存、缺图清理、卡片操作布局、访客隔离和手机首屏专项。冻结标记仍存在，因此本轮未构建 Worker dry-run；历史 dry-run 结果不能替代解冻后从最终干净 SHA 重跑。以上只证明本地主树候选，不证明生产已上线。
+2026-07-30 候选 `4fcb4b0cf61a1d6260d7fd6485c2d282da71614f` 验证已通过：Worker `npm run typecheck`、50 个测试文件共 340 项测试、根目录 `npm run check:docs` 与 `npm run check:predeploy`、Pages 暂存 HTTP 冒烟、仓库桌面/手机/空态浏览器验收，以及生图批量可靠性、提交反馈、最近生成留存、缺图清理、卡片操作布局、访客隔离和手机首屏专项。最终发布 SHA 仍须重跑 Worker dry-run；以上只证明本地主树候选，不证明生产已经切换。
 
 ## 以后如何避免再次分叉
 
