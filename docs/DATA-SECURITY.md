@@ -1,6 +1,6 @@
 # 数据与仓库安全
 
-最后核对：2026-07-27。
+最后核对：2026-07-30。
 
 ## 公开仓库边界
 
@@ -24,6 +24,8 @@
 | 生图任务 | 只读本人 | 扣费、结算、退款和归档 |
 
 `consume_user_credits`、`refund_user_credits`、会员原子 RPC 和 `grant_canvas_create_node_reward` 只授权 `service_role` 执行。客户端只能通过已认证 Worker 路由提交自己的用户 ID，不能直接调用奖励或钱包函数。
+
+2026-07-30 生产迁移后已核验上述 RPC 均为 `SECURITY DEFINER` 且仅由受控角色执行；`payment_orders` 与 `payment_events` 已启用 RLS。
 
 ## 付费操作安全
 

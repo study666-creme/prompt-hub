@@ -16,7 +16,7 @@
 
 - Worker 唯一发布仓库是 `D:\prompt-hub`；`D:\canvas\prompt-hub` 只保留作历史生产审计，禁止从任一脏目录直接发布。
 - 修改 Worker、生成、支付、数据库或发布工具前必须阅读根目录 `AGENTS.md` 和 `docs/RECONCILE-20260726.md`；如果根目录存在 `DO-NOT-DEPLOY.md`，还必须先遵守其中的冻结条件。
-- 2026-07-30 已完成数据库备份、New API/Cloudflare 前置核对、干净候选提交和全量非生产验证，并获得明确发布授权。冻结标记随 `20260730a` 发布提交移除；正式发布仍必须依次通过干净 SHA、Worker dry-run、五项迁移和生产验收。
+- 2026-07-30 已完成数据库备份与五项迁移、New API/Cloudflare 核对、Worker/Pages 发布和生产验收；`20260730a` 已上线。后续发布仍必须使用干净 SHA，并分别以 `/health.buildSha` 和线上 Pages build 取证。
 
 ## 文档时效纪律
 
@@ -83,7 +83,7 @@ npm test
 
 正式发布前从干净提交运行 `npm run deploy:dry-run`。正式 `npm run deploy` 会拒绝冻结标记或脏工作区，并自动把当前 Git SHA 注入 `/health.buildSha`。
 
-静态站生产冒烟由 `deploy-pages.ps1` 自动执行。该脚本拒绝冻结标记和脏工作区；先单独运行 `scripts/bump-build.ps1`、验证并提交，再从该干净 SHA 发布。只改文档或未部署的维护脚本时，不需要递增 Pages build。
+静态站生产冒烟由 `deploy-pages.ps1` 自动执行。该脚本拒绝冻结标记和脏工作区，明确发布到 `main` production 分支，并在别名传播期间重试自定义域名冒烟；先单独运行 `scripts/bump-build.ps1`、验证并提交，再从该干净 SHA 发布。只改文档或未部署的维护脚本时，不需要递增 Pages build。
 
 ## 交付要求
 
@@ -92,9 +92,9 @@ npm test
 - 不删除用户卡片、图片或数据库记录来“验证修复”。
 - 不把本地 `.env`、账号、UUID、token、Cloudflare 缓存文件提交到公开仓库。
 
-## 主树目标生图契约（2026-07-28）
+## 当前生产生图契约（2026-07-30）
 
-以下规则优先于本文档中较早的模型兼容性描述；生产是否已切到该契约以 `/health.buildSha` 和实时模型目录为准：
+以下规则优先于本文档中较早的模型兼容性描述；运行状态以 `/health.buildSha` 和实时模型目录为准：
 
 - `全能模型2 · 特价 1K` 公开 ID 为 `image2-economy`；价格读取实时目录，支持比例和可选参考图，不公开质量控件。
 - `全能模型2 · 4K` 公开 ID 为 `image2-4k-fast`，固定发送 `resolution=4k`、`quality=standard`、`n=1`；纯文生图不需要参考图。

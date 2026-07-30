@@ -16,11 +16,11 @@
 | 图片 | R2 优先、MemFire Storage 回源 |
 | Canvas | `https://canvas.prompt-hubs.com` 为正式回跳目标；其他域名仅按 CORS/部署记录兼容 |
 
-双树收编与发布前置已完成，`20260730a` 已获受控发布授权。生产是否已经切到该版本必须通过 `/health.buildSha`、Pages build 和线上冒烟取证，不能只凭本地测试通过作结论。
+双树收编与发布已完成，`20260730a` 已上线。生产运行版本仍必须通过 `/health.buildSha`、Pages build 和线上冒烟取证，不能只凭本地提交或测试通过作结论。
 
-Pages 的准确 build 只从线上 `window.__APP_BUILD__` 读取；Worker 在本轮受控发布前没有可靠提交指纹。发布后以 `/health.buildSha` 为唯一 Worker 版本证据，不在本文长期复制构建号。
+Pages 的准确 build 只从线上 `window.__APP_BUILD__` 读取；Worker 以 `/health.buildSha` 为唯一版本证据，不在本文长期复制提交号。
 
-## 主树候选已经具备
+## 当前生产已经具备
 
 - 图片和视频的稳定请求幂等、单次付费提交、未知结果退款 SLA 与持久恢复槽。
 - 图片秒级前端轮询、服务端 poll/archive drain、临时结果优先展示和本地归档重试。
@@ -29,7 +29,7 @@ Pages 的准确 build 只从线上 `window.__APP_BUILD__` 读取；Worker 在本
 - 支付回调审计、订单监控、Canvas 席位契约、`/wallet` 兼容入口和首次建点奖励。
 - 正式发布的冻结/脏树守卫和 Git SHA 注入。
 
-以上属于 `20260730a` 受控发布契约，执行顺序和生产验收见 `DEPLOY-CHECKLIST.md`。
+以上属于 `20260730a` 生产契约，发布与验收记录见 `DEPLOY-CHECKLIST.md`。
 
 ## 架构约束
 
@@ -42,10 +42,10 @@ Pages 的准确 build 只从线上 `window.__APP_BUILD__` 读取；Worker 在本
 
 ## 当前优先级
 
-1. 从最终干净 SHA 完成 Worker dry-run，核对全部绑定。
-2. 按固定顺序执行五项生产迁移并记录结果。
-3. 发布 Worker 与 Pages，核对 `/health.buildSha`、队列 consumer、DLQ、cron 和仓库首屏资源。
-4. 只使用只读或明确幂等的生产验收，不发起重复付费生成。
+1. 持续核对 `/health.buildSha`、Pages build、队列 consumer、DLQ、cron 和仓库首屏资源。
+2. 监控未知生成结果、退款槽、长时 processing 与归档失败，不用重复付费提交做恢复。
+3. 定期生成并校验数据库与 R2 备份，数据库变更继续遵守备份和显式授权要求。
+4. 后续发布只从干净提交执行，Pages 必须明确落到 `main` production 分支。
 
 ## 接手命令
 

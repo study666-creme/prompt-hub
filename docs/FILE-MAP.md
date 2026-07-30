@@ -13,7 +13,7 @@
 | `pack-*.js` | esbuild 生产包，由 `scripts/build-*.mjs` 生成并跟踪 |
 | `scripts/build-pages-runtime.mjs` | Pages staging 合并 loader/片段 |
 | `scripts/stage-pages.ps1` | Pages 允许清单、内联产物与首屏资源完整性门禁 |
-| `deploy-pages.ps1` | 只从无冻结标记、干净 Git SHA 发布 Pages，并执行线上 HTTP 冒烟 |
+| `deploy-pages.ps1` | 只从无冻结标记、干净 Git SHA 发布 Pages `main` production 分支，并重试线上 HTTP 冒烟 |
 | `scripts/run-predeploy-smoke.mjs` | 前端总验证入口 |
 
 ## 按任务找文件

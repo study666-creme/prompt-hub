@@ -1,6 +1,6 @@
 # 会员、积分与配额
 
-最后核对：2026-07-30。原子积分与首次建点奖励迁移仍待生产备份后应用。
+最后核对：2026-07-30。原子积分、Canvas 席位支付与首次建点奖励迁移已在生产应用并核验。
 
 > 产品文案必须与 `subscription.js`、`membership.js`、`server/src/lib/membership-credits.ts` 和服务端计价保持一致。
 

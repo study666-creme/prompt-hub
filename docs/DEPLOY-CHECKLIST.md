@@ -4,7 +4,7 @@
 
 ## 当前发布状态
 
-2026-07-30 已完成候选审查、New API/Cloudflare 前置核对、全量非生产验证和可恢复数据库备份，并获得明确发布授权。冻结标记随 `20260730a` 发布提交移除；后续仍必须从同一干净 SHA 依次执行 Worker dry-run、五项迁移、Worker/Pages 发布和生产验收。
+2026-07-30 已完成候选审查、New API/Cloudflare 核对、全量验证、可恢复数据库备份、五项迁移和 Worker/Pages 生产发布。`20260730a` 已上线；`/health.buildSha`、Pages build、队列绑定、仓库首屏资源和只读生图目录均已验收。
 
 ## 发布顺序
 
@@ -52,7 +52,7 @@ npx --yes wrangler@4.114.0 queues create prompt-hub-video-generation-dlq
 4. `supabase/migrations/20260726010000_canvas_collaboration_seat_payments.sql`
 5. `supabase/migrations/20260726020000_canvas_create_node_membership_reward.sql`
 
-迁移需要明确授权。本轮授权已取得，但仍须等最终干净 SHA 的 dry-run 通过后才能执行这些 SQL。
+本轮迁移已在明确授权和最终 dry-run 通过后，以 `ON_ERROR_STOP` 和单事务模式按上述顺序执行。已核验幂等列/索引、原子积分 RPC、Canvas 支付表/RLS/权限和首次建点奖励 RPC。
 
 ### 5. 本地验证
 
@@ -73,14 +73,14 @@ node scripts\run-index-local-http-smoke.mjs
 
 ### 6. 解冻、dry-run 与迁移
 
-前五步已完成并获得明确授权。运行 `scripts/bump-build.ps1`，审查并将标记删除、build 变更和状态文档提交为同一个干净发布 SHA。随后运行：
+本轮已完成解冻、build bump、最终 dry-run 和五项迁移。以后发布仍先运行 `scripts/bump-build.ps1`，审查并将 build 变更和状态文档提交为同一个干净发布 SHA，随后运行：
 
 ```powershell
 cd D:\prompt-hub\server
 npm run deploy:dry-run
 ```
 
-保存 Worker 大小和全部绑定清单，检查没有资源丢失。dry-run 通过后，按第 4 节顺序应用五项生产迁移。任一步失败都停止发布并恢复冻结标记。
+保存 Worker 大小和全部绑定清单，检查没有资源丢失。若发布包含新迁移，dry-run 通过后再按时间戳顺序应用。任一步失败都停止发布并重新建立冻结标记。
 
 ### 7. 正式发布
 
@@ -94,7 +94,7 @@ cd D:\prompt-hub
 .\deploy-pages.ps1
 ```
 
-两个受控脚本都拒绝脏工作区或残留冻结标记。Worker 自动注入当前 40 位 Git SHA；Pages 记录同一 release SHA，且不会在发布脚本内再次修改 build。
+两个受控脚本都拒绝脏工作区或残留冻结标记。Worker 自动注入当前 40 位 Git SHA；Pages 明确发布到 `main` production 分支并记录同一 release SHA，且不会在发布脚本内再次修改 build。Pages 上传后会重试自定义域名冒烟，传播窗口结束仍失败则命令返回非零。
 
 ### 8. 生产验收
 

@@ -5,6 +5,7 @@ $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 $server = Join-Path $root "server"
 $project = "prompt-hub-hub"
+$productionBranch = "main"
 $env:XDG_CONFIG_HOME = Join-Path $root ".wrangler"
 
 $freezeMarkers = @(
@@ -62,7 +63,7 @@ foreach ($item in $localDeployExclude) {
   $localDeployBak += @{ Path = $item.Path; Bak = $bak }
 }
 
-Write-Host "Pages project: $project"
+Write-Host "Pages project: $project (production branch: $productionBranch)"
 & node (Join-Path $root "scripts\run-predeploy-smoke.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
 $dirtyAfterChecks = @(& git -C $root status --porcelain)
@@ -127,7 +128,7 @@ try {
       Write-Host "wrangler pages deploy (attempt $($i + 1)) ..."
       $prevEap = $ErrorActionPreference
       $ErrorActionPreference = 'Continue'
-      & $wrangler pages deploy $staging "--project-name=$project" "--commit-hash=$releaseSha" --commit-dirty=false --no-bundle
+      & $wrangler pages deploy $staging "--project-name=$project" "--branch=$productionBranch" "--commit-hash=$releaseSha" --commit-dirty=false --no-bundle
       $code = $LASTEXITCODE
       $ErrorActionPreference = $prevEap
       if ($code -eq 0) { break }
@@ -158,13 +159,31 @@ if ($code -ne 0) {
 }
 
 Write-Host "Post-deploy bundle smoke (production) ..." -ForegroundColor DarkGray
-$env:SMOKE_BASE = "https://prompt-hubs.com"
-& node (Join-Path $root "scripts\run-index-http-smoke.mjs")
-if ($LASTEXITCODE -ne 0) {
-  Write-Host "WARNING: production bundle smoke failed — site may still show blank images until fixed" -ForegroundColor Red
-} else {
-  Write-Host "Production bundle smoke OK" -ForegroundColor Green
+$previousSmokeBase = $env:SMOKE_BASE
+$smokeCode = 1
+try {
+  $env:SMOKE_BASE = "https://prompt-hubs.com"
+  $smokeWaits = @(0, 5, 15, 30, 45)
+  foreach ($wait in $smokeWaits) {
+    if ($wait -gt 0) {
+      Write-Host "Waiting ${wait}s for the production alias to propagate ..." -ForegroundColor Yellow
+      Start-Sleep -Seconds $wait
+    }
+    & node (Join-Path $root "scripts\run-index-http-smoke.mjs")
+    $smokeCode = $LASTEXITCODE
+    if ($smokeCode -eq 0) { break }
+  }
+} finally {
+  if ($null -eq $previousSmokeBase) {
+    Remove-Item Env:SMOKE_BASE -ErrorAction SilentlyContinue
+  } else {
+    $env:SMOKE_BASE = $previousSmokeBase
+  }
 }
+if ($smokeCode -ne 0) {
+  throw "Production bundle smoke failed after Pages alias propagation retries"
+}
+Write-Host "Production bundle smoke OK" -ForegroundColor Green
 
 Write-Host "OK. Open your site and hard refresh (Ctrl+Shift+R)."
 Write-Host "Check build: window.__APP_BUILD__ in browser console"

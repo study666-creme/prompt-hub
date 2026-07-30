@@ -49,10 +49,7 @@ try {
     && window.__IMAGE_GEN_CATALOG_SOURCE__ === 'api'
     && Array.isArray(window.__IMAGE_GEN_MODELS__)
     && window.__IMAGE_GEN_MODELS__.length >= 12
-    && !window.__IMAGE_GEN_MODELS__.some(model => (
-      model?.id === 'image2-free'
-      || model?.id === 'image2-economy'
-    ))
+    && !window.__IMAGE_GEN_MODELS__.some(model => model?.id === 'image2-free')
   ), null, { timeout: 45_000 });
 
   const allModelIds = new Set();
@@ -108,8 +105,8 @@ try {
     || state.activePage !== 'pageImageGen'
     || state.header !== '图片生成'
     || state.totalModelCount < 12
-    || !['lingtu-fast', 'lingtu-lite', 'image2', 'image2-4k-fast', 'lingtu'].every(id => state.catalogModelIds.includes(id))
-    || ['image2-free', 'image2-economy'].some(id => state.catalogModelIds.includes(id))
+    || !['lingtu-fast', 'lingtu-lite', 'image2-economy', 'image2', 'image2-4k-fast', 'lingtu'].every(id => state.catalogModelIds.includes(id))
+    || state.catalogModelIds.includes('image2-free')
     || state.modelCount < 1
     || state.customOptionCount !== state.modelCount
     || state.customExpanded !== 'true'

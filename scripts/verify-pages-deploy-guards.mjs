@@ -42,6 +42,8 @@ requireTokens('deploy-pages.ps1', deployPages, [
   'scripts\\run-predeploy-smoke.mjs',
   'DO-NOT-DEPLOY.md',
   'status --porcelain',
+  '$productionBranch = "main"',
+  '--branch=$productionBranch',
   '--commit-dirty=false',
   '--commit-hash=$releaseSha'
 ]);

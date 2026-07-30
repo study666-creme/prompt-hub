@@ -1,6 +1,6 @@
 # 运营监控
 
-最后核对：2026-07-30。本文的生成状态字段属于未部署的主树候选；生产上线后再按 `/health.buildSha` 确认生效。
+最后核对：2026-07-30。本文的生成状态字段已随 `20260730a` 上线；运行版本继续以 `/health.buildSha` 为准。
 
 ## 入口
 
@@ -32,7 +32,7 @@
 ## 支付监控
 
 - cron 同时运行 `monitorPendingPaymentOrders`，用于发现陈旧订单，不替代支付回调。
-- 查看 `payment_orders`、`payment_webhook_events` 与运营流水，区分 `pending`、`processing`、`paid`、`failed` 和 `refunded`。
+- 查看 Canvas 席位的 `payment_orders` / `payment_events`、通用支付的 `payment_webhook_events` 与运营流水，区分 `pending`、`processing`、`paid`、`failed` 和 `refunded`。
 - Canvas 协作席位商品默认由 `CANVAS_COLLABORATION_SEAT_PRODUCT_ENABLED=0` 隐藏；数据库迁移和回调验收前不要开启。
 
 ## 卡片库与存储巡检
@@ -44,7 +44,7 @@
 
 ## Cloudflare 绑定
 
-主树候选必须同时存在：
+生产 Worker 必须同时存在：
 
 ```toml
 [[r2_buckets]]
