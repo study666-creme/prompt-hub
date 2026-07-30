@@ -21,7 +21,8 @@ import { rateLimit } from '../../middleware/rate-limit';
 
 export const checkoutSchema = z.object({
   productId: z.string().min(1).max(64),
-  paymentMethod: z.enum(['alipay', 'wxpay']),
+  // 仅限制新订单；epay 回调仍接受并结算历史 wxpay 订单。
+  paymentMethod: z.literal('alipay'),
   // Older clients sent null for a plain credit top-up. Treat it as omitted.
   creditGrantMode: z.enum(['daily', 'bundle']).nullable().optional(),
   customAmount: z.number()

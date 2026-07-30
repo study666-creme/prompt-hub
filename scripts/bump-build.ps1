@@ -36,7 +36,7 @@ $files = @(
   (Join-Path $root "styles-features.css")
 )
 $syncCacheAssets = @(
-  'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css',
+  'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css', 'styles-warehouse.css',
   'styles-settings.css', 'styles-assets.css',
   'theme.js', 'api-client.js', 'app-router.js', 'supabase-sync.js', 'script.js',
   'features-draft.js', 'features-assets.js', 'community-public-feed.js', 'card-gallery.js',

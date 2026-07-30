@@ -7,6 +7,25 @@ $server = Join-Path $root "server"
 $project = "prompt-hub-hub"
 $env:XDG_CONFIG_HOME = Join-Path $root ".wrangler"
 
+$freezeMarkers = @(
+  (Join-Path $root 'DO-NOT-DEPLOY.md'),
+  'D:\canvas\prompt-hub\DO-NOT-DEPLOY.md'
+)
+foreach ($marker in $freezeMarkers) {
+  if (Test-Path $marker -PathType Leaf) {
+    throw "Pages deploy blocked by freeze marker: $marker"
+  }
+}
+
+$releaseSha = (& git -C $root rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $releaseSha) {
+  throw "Pages deploy requires a committed Git SHA"
+}
+$dirty = @(& git -C $root status --porcelain)
+if ($LASTEXITCODE -ne 0 -or $dirty.Count -gt 0) {
+  throw "Pages deploy requires a clean worktree. Bump the build, verify, and commit before deploying."
+}
+
 if (Test-Path (Join-Path $root ".wrangler\cache\pages.json")) {
   try {
     $pj = Get-Content (Join-Path $root ".wrangler\cache\pages.json") -Raw | ConvertFrom-Json
@@ -46,7 +65,10 @@ foreach ($item in $localDeployExclude) {
 Write-Host "Pages project: $project"
 & node (Join-Path $root "scripts\run-predeploy-smoke.mjs")
 if ($LASTEXITCODE -ne 0) { exit 1 }
-& (Join-Path $root "scripts\bump-build.ps1")
+$dirtyAfterChecks = @(& git -C $root status --porcelain)
+if ($LASTEXITCODE -ne 0 -or $dirtyAfterChecks.Count -gt 0) {
+  throw "Pages deploy checks changed tracked files. Review and commit the generated output first."
+}
 
 $staging = & (Join-Path $root "scripts\stage-pages.ps1")
 Write-Host "Deploying staged assets from: $staging"
@@ -105,7 +127,7 @@ try {
       Write-Host "wrangler pages deploy (attempt $($i + 1)) ..."
       $prevEap = $ErrorActionPreference
       $ErrorActionPreference = 'Continue'
-      & $wrangler pages deploy $staging "--project-name=$project" --commit-dirty=true --no-bundle
+      & $wrangler pages deploy $staging "--project-name=$project" "--commit-hash=$releaseSha" --commit-dirty=false --no-bundle
       $code = $LASTEXITCODE
       $ErrorActionPreference = $prevEap
       if ($code -eq 0) { break }

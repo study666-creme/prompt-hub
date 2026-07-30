@@ -1,6 +1,6 @@
 # 运营监控
 
-最后核对：2026-07-28。本文的生成状态字段属于未部署的主树候选；生产上线后再按 `/health.buildSha` 确认生效。
+最后核对：2026-07-30。本文的生成状态字段属于未部署的主树候选；生产上线后再按 `/health.buildSha` 确认生效。
 
 ## 入口
 
@@ -37,6 +37,7 @@
 
 ## 卡片库与存储巡检
 
+- Pages 发布前后必须确认 `/prompts/` 的内联 HTML 包含 `#warehouseHero`，`/styles-warehouse.css` 返回 `text/css` 而不是 SPA HTML 回退，三张 `assets/studio-preset/*.png` 首屏图均返回 `image/*`。`scripts/run-index-http-smoke.mjs` 已将这些条件设为硬失败。
 - 卡片库：`GET /api/admin/cards/summary`、`GET /api/admin/cards?...`；`checkImages=1` 只抽检当前页。
 - 存储扫描按需触发且只读。不能用全桶对象字节反写 `profiles.storage_bytes`，桶中含缩略图和生成归档。
 - R2/Storage 删除前必须核对引用与备份；巡检不能自动删除用户卡片。

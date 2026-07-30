@@ -1,6 +1,6 @@
 # 列表图片加载
 
-复核日期：2026-07-29。下述仓库 UI 说明属于发布冻结中的未部署候选；生产图片链路未因本次视觉改版而改变。
+复核日期：2026-07-30。下述仓库 UI 说明属于发布冻结中的未部署候选；生产图片链路未因本次视觉改版而改变。
 
 ## 目标
 
@@ -69,9 +69,10 @@ node scripts/audit-production-mobile-first-screen.mjs
 ```powershell
 $env:PLAYWRIGHT_PACKAGE_DIR = '<playwright package directory>'
 $env:SCREENSHOT_DIR = '<optional screenshot directory>'
+$env:APP_ROOT = 'D:\prompt-hub\.pages-deploy'
 node scripts/verify-warehouse-ui-browser.mjs
 ```
 
-该检查注入 8 张 `_grid` 图卡和 4 张文本卡，覆盖桌面、手机及空仓状态，并验证媒体槽、类型元数据、手机拖拽关闭和横向溢出。
+该检查注入 8 张 `_grid` 图卡和 4 张文本卡，覆盖桌面、手机及空仓状态，并验证媒体槽、三张首屏广告图、类型元数据、手机拖拽关闭和横向溢出。Pages 的 HTTP 冒烟还会确认仓库 CSS 未被 SPA HTML 回退替代。
 
 手机生产基线见 `CURRENT-ISSUES.md`。浏览器检查首批卡片数、单图体积、是否出现 full 路径、滚动后是否按页增加，以及 404 是否重复刷屏。

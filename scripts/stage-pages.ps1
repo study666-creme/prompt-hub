@@ -162,6 +162,36 @@ if ($stagedIndex -notmatch '__PROMPT_HUB_DEPLOY_BODY__' -or $stagedIndex -match 
   throw "Pages staging index body was not inlined before fragment cleanup"
 }
 
+$warehouseHeroTokens = @(
+  'id="warehouseHero"',
+  'assets/studio-preset/scene.png',
+  'assets/studio-preset/peishen.png',
+  'assets/studio-preset/linche.png'
+)
+foreach ($token in $warehouseHeroTokens) {
+  if (-not $stagedIndex.Contains($token)) {
+    throw "Pages staging warehouse first screen is missing: $token"
+  }
+}
+$warehouseStylePath = Join-Path $staging 'styles-warehouse.css'
+if (-not (Test-Path $warehouseStylePath -PathType Leaf)) {
+  throw "Pages staging is missing styles-warehouse.css"
+}
+$warehouseStyle = Get-Content $warehouseStylePath -Raw
+if ($warehouseStyle.TrimStart().StartsWith('<') -or $warehouseStyle -notmatch '\.app-page-warehouse\s+\.warehouse-hero') {
+  throw "Pages staging styles-warehouse.css is invalid or missing the hero rules"
+}
+foreach ($asset in @(
+  'assets\studio-preset\scene.png',
+  'assets\studio-preset\peishen.png',
+  'assets\studio-preset\linche.png'
+)) {
+  if (-not (Test-Path (Join-Path $staging $asset) -PathType Leaf)) {
+    throw "Pages staging is missing warehouse hero asset: $asset"
+  }
+}
+Write-Host "Pages warehouse first-screen assets verified." -ForegroundColor DarkGray
+
 $sourceFragmentDirs = @('legacy', 'styles', 'partials')
 foreach ($dir in $sourceFragmentDirs) {
   $fragmentPath = Join-Path $staging $dir

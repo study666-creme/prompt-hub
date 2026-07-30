@@ -12,7 +12,7 @@ const playwright = await import(playwrightImport);
 const chromium = playwright.chromium || playwright.default?.chromium;
 if (!chromium) throw new Error('Playwright chromium is unavailable');
 
-const root = resolve(join(import.meta.dirname, '..'));
+const root = resolve(process.env.APP_ROOT || join(import.meta.dirname, '..'));
 const port = Number(process.env.PORT || 5593);
 const base = `http://127.0.0.1:${port}`;
 const screenshotDir = process.env.SCREENSHOT_DIR

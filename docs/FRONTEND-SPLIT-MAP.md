@@ -1,6 +1,6 @@
 # Frontend Split Map
 
-Updated: 2026-07-29
+Updated: 2026-07-30
 
 This project still ships classic browser scripts from the site root, but several formerly large files are now thin runtime loaders. The real source is split into ordered chunks so classic script execution order and old global/IIFE behavior stay unchanged.
 
@@ -72,6 +72,7 @@ This bridge has not been deployed. Canvas still has to consume the versioned dee
 - concatenates `supabase-sync.js`, `script.js`, and `features-draft.js` from their ordered source chunks;
 - concatenates `styles.css` and `styles-features.css` from their ordered CSS chunks;
 - inlines the four `partials/index-body/part-*.html` fragments into the staged `index.html`.
+- fails if the inlined warehouse hero, `styles-warehouse.css`, or any of its three first-screen images is missing.
 
 The split source files remain canonical and editable. Production must contain the `__PROMPT_HUB_DEPLOY_BUNDLE__` marker in the five consolidated JS/CSS entries and must make zero requests to the main runtime `part-*` files.
 
@@ -126,6 +127,8 @@ node scripts/verify-imagegen-feed-retention-browser.mjs
 ```
 
 The production audit is `scripts/audit-production-mobile-first-screen.mjs`; pass credentials through `PH_TEST_EMAIL` and `PH_TEST_PASSWORD`, never in source.
+
+`deploy-pages.ps1` does not bump the build automatically. Run `scripts/bump-build.ps1`, validate and commit its output, then deploy from that clean SHA. The deploy script refuses either freeze marker or any dirty tracked/untracked state and records the release SHA with the Pages deployment.
 
 On Windows, npm 8 can fail lifecycle scripts whose names contain `:` because it creates temporary `.cmd` files from the script name. Prefer the colon-free aliases:
 

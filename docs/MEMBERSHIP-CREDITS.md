@@ -1,6 +1,6 @@
 # 会员、积分与配额
 
-最后核对：2026-07-27。原子积分与首次建点奖励迁移仍待生产备份后应用。
+最后核对：2026-07-30。原子积分与首次建点奖励迁移仍待生产备份后应用。
 
 > 产品文案必须与 `subscription.js`、`membership.js`、`server/src/lib/membership-credits.ts` 和服务端计价保持一致。
 
@@ -50,5 +50,6 @@
 - 钱包扣费、退款、试用、每日积分和会员模式切换使用 `20260722020000_atomic_credit_operations.sql` 中的原子 RPC。
 - Canvas 首次创建节点调用 `/api/v1/membership/tasks/events/canvas-create-node`；数据库函数在一个事务里写入 `canvas_create_node` claim、任务标记和 1 天基础会员，每个账号只会奖励一次。
 - `/api/v1/payments` 是支付主路径，`/api/v1/wallet` 仅为旧 Canvas 客户端兼容别名，两者使用同一订单和鉴权逻辑。
+- `/payments/checkout` 与 `/wallet/checkout` 的新订单只接受支付宝。历史微信订单仍通过原回调类型验签和幂等结算，不重新开放微信新下单入口。
 
 调整套餐时同时更新前端展示、服务端常量、数据库卡密产品和本文，并补价格/扣费测试。

@@ -1,6 +1,6 @@
 # Prompt Hub 双树收编记录
 
-最后核对：2026-07-27
+最后核对：2026-07-30
 
 > 本文区分“生产已上线”和“主树本地完成”。冻结标记存在期间，任何本地完成项都不能写成线上能力。
 
@@ -8,7 +8,7 @@
 
 - **唯一候选源**：`D:\prompt-hub`。
 - **历史生产审计源**：`D:\canvas\prompt-hub`，只读，不再作为开发或部署源。
-- **当前生产**：仍来自历史树的旧版本，不包含本轮主树的完整安全层。
+- **当前生产**：Worker 仍来自历史树的旧版本，不包含本轮主树的完整安全层。Pages 显示 `20260729b`，但缺少候选仓库首屏 DOM 与独立 CSS，不能据此认定候选已完整上线。
 - **当前候选**：主树仍是脏工作区，迁移未应用，队列未核验，不能部署。
 
 双树文件完全相同不是目标。目标是逐项审计生产行为，将需要保留的能力以主树现有契约安全实现，并明确拒绝会重复付费、泄露渠道或回退公开接口的历史实现。
@@ -21,9 +21,9 @@
 | 视频生成 | 已重写 | 独立视频队列；CAS + attempt ID 单次领取；有任务 ID 的长时 `processing` 不设生成超时；未知建单结果 1 小时后进入持久退款槽 |
 | 视频计费 | 已收编 | 只信任明确 `billed_duration_seconds`；差价退款使用独立幂等 ref `<jobId>:duration-adjustment` |
 | 路由一致性 | 已收编 | submit、poll、content 保留同一 `routeChannelId`；内容只通过上游 task content 接口获取 |
-| 支付 | 已收编 | EasyPay 回调审计、陈旧订单监控、Canvas 席位迁移；`/payments` 为主入口，`/wallet` 为兼容别名 |
+| 支付 | 已收编 | EasyPay 回调审计、陈旧订单监控、Canvas 席位迁移；`/payments` 为主入口，`/wallet` 为兼容别名；新订单仅支付宝，历史微信回调继续结算 |
 | 会员任务 | 已收编 | 首次创建 Canvas 节点通过 `grant_canvas_create_node_reward` 原子标记并奖励一次 |
-| 发布治理 | 已收编 | 正式发布拒绝冻结标记和脏工作区；构建注入 Git SHA；`/health` 返回 `buildSha` |
+| 发布治理 | 已收编 | Worker/Pages 正式发布拒绝冻结标记和脏工作区；构建注入 Git SHA；`/health` 返回 `buildSha`；Pages 暂存强制验证仓库首屏 DOM/CSS/图片 |
 
 ## 明确拒绝的历史实现
 
@@ -37,8 +37,8 @@
 
 ## 仍是发布阻塞的外部步骤
 
-1. Cloudflare 中创建并核对 `prompt-hub-video-generation` 和 `prompt-hub-video-generation-dlq`；确认图片队列、R2、KV、cron 仍存在。
-2. 对生产数据库做可恢复备份，随后按以下顺序应用：
+1. 重新核对已创建的 `prompt-hub-video-generation` 和 `prompt-hub-video-generation-dlq`；确认图片队列、R2、KV、cron 仍存在。
+2. 对生产数据库做可恢复备份；解冻后按以下顺序应用：
    - `20260722010000_generation_request_idempotency.sql`
    - `20260722020000_atomic_credit_operations.sql`
    - `20260722030000_apply_credit_delta_idempotency.sql`
@@ -46,12 +46,12 @@
    - `20260726020000_canvas_create_node_membership_reward.sql`
 3. New API 先部署当前能力契约：规范化比例、忽略模型不支持的可选参数、保持 `quality` 与 `resolution` 语义分离、支持稳定幂等键和真实渠道目录。
 4. 整理并审查主树提交；正式发布必须来自干净提交。
-5. 执行 `npm run check:docs`、`npm run check:predeploy`、Worker typecheck/test 和 `npm run deploy:dry-run`。
-6. 获得发布授权后再解除冻结。部署后 `/health.buildSha` 必须等于发布提交 SHA。
+5. 冻结期执行 `npm run check:docs`、`npm run check:predeploy`、Worker typecheck/test、Pages 暂存 HTTP/浏览器验收；不得构建生产 Worker 镜像。
+6. 获得发布授权并解除冻结后，从干净提交执行 Worker dry-run、迁移和发布。部署后 `/health.buildSha` 必须等于发布提交 SHA。
 
 ## 验证基线
 
-2026-07-27 收尾验证已通过：Worker `npm run typecheck`、46 个测试文件共 283 项测试、根目录 `npm run check:docs`、`npm run check:predeploy` 和 `server npm run deploy:dry-run`。dry-run 产物为 1990.07 KiB（gzip 390.99 KiB），解析后的配置保留 13 个普通变量、R2、KV、双生产者/双 consumer、两个 DLQ、cron 和两个自定义域名。以上只证明本地主树候选，不证明生产已上线。
+2026-07-30 当前候选验证已通过：Worker `npm run typecheck`、50 个测试文件共 340 项测试、根目录 `npm run check:docs` 与 `npm run check:predeploy`、Pages 暂存 HTTP 冒烟、仓库桌面/手机/空态浏览器验收，以及生图批量可靠性、提交反馈、最近生成留存、缺图清理、卡片操作布局、访客隔离和手机首屏专项。冻结标记仍存在，因此本轮未构建 Worker dry-run；历史 dry-run 结果不能替代解冻后从最终干净 SHA 重跑。以上只证明本地主树候选，不证明生产已上线。
 
 ## 以后如何避免再次分叉
 

@@ -12,6 +12,8 @@
 | `styles/base/`, `styles/features/` | 拆分 CSS 真源 |
 | `pack-*.js` | esbuild 生产包，由 `scripts/build-*.mjs` 生成并跟踪 |
 | `scripts/build-pages-runtime.mjs` | Pages staging 合并 loader/片段 |
+| `scripts/stage-pages.ps1` | Pages 允许清单、内联产物与首屏资源完整性门禁 |
+| `deploy-pages.ps1` | 只从无冻结标记、干净 Git SHA 发布 Pages，并执行线上 HTTP 冒烟 |
 | `scripts/run-predeploy-smoke.mjs` | 前端总验证入口 |
 
 ## 按任务找文件
@@ -71,9 +73,9 @@
 
 ## 卡片仓库 UI 归属
 
-2026-07-29 复核的未部署候选把仓库视觉覆盖集中在 `styles-warehouse.css`，不修改拆分 CSS 真源或生成包。`partials/index-body/part-02.html` 负责紧凑概览、工具栏图标和搜索结构；`legacy/script/part-04.js` 同步概览中的卡片数与当前分组；`legacy/script/part-09.js` 输出类型、分组、时间元数据和可操作空态。
+2026-07-30 复核的未部署候选把仓库视觉覆盖集中在 `styles-warehouse.css`，不修改拆分 CSS 真源或生成包。`partials/index-body/part-02.html` 负责紧凑概览、工具栏图标和搜索结构；`legacy/script/part-04.js` 同步概览中的卡片数与当前分组；`legacy/script/part-09.js` 输出类型、分组、时间元数据和可操作空态。
 
-桌面、手机和空仓状态由 `scripts/verify-warehouse-ui-browser.mjs` 验收。脚本使用本地模拟的 `_grid` CDN URL，不触发真实 API、生产存储或部署流程。
+桌面、手机和空仓状态由 `scripts/verify-warehouse-ui-browser.mjs` 验收。脚本使用本地模拟的 `_grid` CDN URL，不触发真实 API、生产存储或部署流程；设置 `APP_ROOT=.pages-deploy` 时直接验收最终 Pages 暂存包。
 
 ## 修改原则
 

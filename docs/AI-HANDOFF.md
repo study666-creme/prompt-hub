@@ -1,6 +1,6 @@
 # AI 接手说明
 
-最后核对：2026-07-28。
+最后核对：2026-07-30。
 
 ## 最小阅读顺序
 
@@ -16,7 +16,7 @@
 
 - Worker 最终目标仓库是 `D:\prompt-hub`；`D:\canvas\prompt-hub` 是仍待完整收编的历史生产树，禁止从任一脏目录直接发布。
 - 修改 Worker、生成、支付、数据库或发布工具前必须阅读根目录 `AGENTS.md`、`DO-NOT-DEPLOY.md` 和 `docs/RECONCILE-20260726.md`。
-- 两处冻结标记存在期间不得 `wrangler deploy`、发布 Pages、应用生产迁移或删除冻结标记。只有双树差异收编、数据库备份/迁移、New API 前置版本上线、干净提交审查和 dry-run 全部完成后才能解冻。
+- 当前只有 `D:\prompt-hub\DO-NOT-DEPLOY.md` 存在；历史树标记已不存在。主树标记存在期间不得构建生产 Worker 镜像、`wrangler deploy`、发布 Pages、应用生产迁移或删除冻结标记。先完成双树差异收编、数据库备份、New API 前置版本核对、干净提交审查和非生产构建检查；获得解冻授权并移除标记后，再执行 Worker dry-run、迁移和正式发布。
 
 ## 文档时效纪律
 
@@ -57,6 +57,7 @@
 - 实际 New API 渠道映射只允许运营后台经 `NEWAPI_CATALOG_ADMIN_SECRET` 读取；公开模型目录不得返回渠道、域名或任何凭据字段。
 - 报价与提交读取普通卡藏目录并共享进程内 single-flight；只接受完整、精确且最多 5 分钟的目录/LKG，不要恢复逐次 `refresh=1`。目录不可用或模型价格缺失时必须在创建任务和扣费前失败。
 - 卡片库提交必须带回用户看到的 `quotedCredits`；服务端重算不一致时返回 `409 CONFLICT`、不扣费且不提交。前端应清除对应的 90 秒报价缓存，让下一次点击重新报价，但不得自动重发生成 POST。报价 GET 的 `500/502/503/504` 最多短退避重试一次。
+- 访客无持久草稿时，当前全能模型2家族默认选择公开目录中排序最前的 `image2-economy`；它与标准 `image2` 的价格必须分别从目录读取，不能用旧默认值覆盖。
 - `resolution` 只表示 `1k/2k/4k`，`quality` 只表示质量，但不是每个模型都有质量控件。只有香蕉公开 `low/medium/high`；`image2k4k` 固定 `low`，4K 型号固定 `standard`，`gpt-image-2-ext` 省略 `quality` 并使用默认画质。仅历史精确值 `quality=1k|2k|4k` 会在入口转换为 `resolution`。
 - 所有香蕉模型支持最多 14 张参考图。不能根据缺字段、陈旧目录或 `max_items=0` 推断香蕉不支持参考图。
 - 卡片库点击生成后先同步插入作品占位；New API 通过持久队列提交，页面按秒 poll，cron 每 2 分钟兜底 poll/archive。上游已出图时先返回临时图，归档独立重试。
@@ -67,6 +68,7 @@
 - Prompt Hub 只提交规范化的视频参数。模型专属比例格式、固定分辨率或应忽略的可选参数由 New API 转换，不能在这里按渠道复制适配分支。
 - GrsAI、iThink、Mooko 适配器只服务已落库历史任务恢复；删除前先确认生产库没有对应未完成任务。
 - 后台存储巡检按需触发且只读；不得按全桶字节回填用户配额。
+- 新支付订单只接受 `paymentMethod=alipay`；历史 `wxpay` 类型只保留给已落库订单的回调验签和结算，前端不得重新展示微信新订单入口。
 
 ## 必跑命令
 
@@ -77,12 +79,11 @@ npm run check:predeploy
 cd server
 npm run typecheck
 npm test
-npm run deploy:dry-run
 ```
 
-`deploy:dry-run` 在冻结期间允许执行；正式 `npm run deploy` 会拒绝冻结标记或脏工作区，并自动把当前 Git SHA 注入 `/health.buildSha`。
+冻结标记移除后、正式发布前，从干净提交运行 `npm run deploy:dry-run`。正式 `npm run deploy` 会拒绝冻结标记或脏工作区，并自动把当前 Git SHA 注入 `/health.buildSha`。
 
-静态站生产冒烟由 `deploy-pages.ps1` 自动执行。只改文档或未部署的维护脚本时，不需要递增 Pages build。
+静态站生产冒烟由 `deploy-pages.ps1` 自动执行。该脚本拒绝冻结标记和脏工作区；先单独运行 `scripts/bump-build.ps1`、验证并提交，再从该干净 SHA 发布。只改文档或未部署的维护脚本时，不需要递增 Pages build。
 
 ## 交付要求
 

@@ -35,10 +35,15 @@ for (const asset of localAssetVersions) {
 requireTokens('scripts/bump-build.ps1', bumpBuild, [
   '(Join-Path $root "asset-studio.html")',
   "-eq 'asset-studio.html'",
-  '(?:js|css)\\?v='
+  '(?:js|css)\\?v=',
+  "'styles-warehouse.css'"
 ]);
 requireTokens('deploy-pages.ps1', deployPages, [
-  'scripts\\run-predeploy-smoke.mjs'
+  'scripts\\run-predeploy-smoke.mjs',
+  'DO-NOT-DEPLOY.md',
+  'status --porcelain',
+  '--commit-dirty=false',
+  '--commit-hash=$releaseSha'
 ]);
 assert(
   !deployPages.includes('scripts\\run-predeploy-smoke.ps1'),
@@ -51,7 +56,10 @@ requireTokens('scripts/run-predeploy-smoke.mjs', predeploy, [
 requireTokens('scripts/stage-pages.ps1', stagePages, [
   '$internalRoutingPattern',
   'Select-String -Pattern @($privateIdentityPattern, $internalRoutingPattern)',
-  "@('legacy', 'styles', 'partials')"
+  "@('legacy', 'styles', 'partials')",
+  'Pages warehouse first-screen assets verified.',
+  'styles-warehouse.css',
+  'assets\\studio-preset\\scene.png'
 ]);
 assert(
   !stagePages.includes("$_.Name -notin @('admin.html', 'admin.js')"),

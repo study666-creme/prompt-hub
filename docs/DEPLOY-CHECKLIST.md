@@ -1,10 +1,10 @@
 # 部署与验证清单
 
-最后核对：2026-07-27
+最后核对：2026-07-30
 
 ## 当前冻结
 
-两处 `DO-NOT-DEPLOY.md` 存在期间禁止正式 Worker/Pages 发布和生产迁移。`npm run deploy:dry-run` 只构建本地产物，允许在冻结期间核验。不要为了让脚本通过而提前删除冻结标记。
+当前只有 `D:\prompt-hub\DO-NOT-DEPLOY.md` 存在，历史树标记已不存在。主树标记存在期间禁止构建生产 Worker 镜像、正式 Worker/Pages 发布、生产迁移和删除标记。不要为了让脚本通过而提前删除冻结标记。
 
 ## 发布顺序
 
@@ -42,9 +42,9 @@ npx --yes wrangler@4.114.0 queues create prompt-hub-video-generation-dlq
 - `*/2 * * * *` cron
 - 两个自定义域名、完整 `[vars]` 和 CORS 列表
 
-### 4. 备份并迁移生产数据库
+### 4. 备份生产数据库
 
-先按 `MEMFIRE-MIGRATION.md` 生成可恢复备份并记录校验结果，再依次执行：
+先按 `MEMFIRE-MIGRATION.md` 生成可恢复备份并记录校验结果。冻结期不执行生产 SQL；解冻后的迁移顺序固定为：
 
 1. `supabase/migrations/20260722010000_generation_request_idempotency.sql`
 2. `supabase/migrations/20260722020000_atomic_credit_operations.sql`
@@ -60,27 +60,43 @@ npx --yes wrangler@4.114.0 queues create prompt-hub-video-generation-dlq
 cd D:\prompt-hub\server
 npm run typecheck
 npm test
-npm run deploy:dry-run
 
 cd D:\prompt-hub
 npm run check:docs
 npm run check:predeploy
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\stage-pages.ps1
+$env:APP_ROOT = 'D:\prompt-hub\.pages-deploy'
+node scripts\run-index-local-http-smoke.mjs
 ```
 
-dry-run 允许脏工作区是为了冻结期核验，不能据此发布。保存输出中的 Worker 大小和全部绑定清单，检查没有资源丢失。
+使用 `APP_ROOT=.pages-deploy` 运行仓库和手机浏览器检查，确保验收的是最终 Pages 暂存包。特别确认 `#warehouseHero`、`styles-warehouse.css` 和三张首屏图存在。
 
-### 6. 正式发布
+### 6. 解冻、dry-run 与迁移
 
-只有前五步完成并获得明确授权后，才能移除两处冻结标记、提交该变更并从干净提交运行：
+只有前五步完成并获得明确授权后，才能移除主树冻结标记。先运行 `scripts/bump-build.ps1`，审查并将标记删除、build 变更和候选代码提交为同一个干净发布 SHA。随后运行：
+
+```powershell
+cd D:\prompt-hub\server
+npm run deploy:dry-run
+```
+
+保存 Worker 大小和全部绑定清单，检查没有资源丢失。dry-run 通过后，按第 4 节顺序应用五项生产迁移。任一步失败都停止发布并恢复冻结标记。
+
+### 7. 正式发布
+
+从上述同一个干净 SHA 运行：
 
 ```powershell
 cd D:\prompt-hub\server
 npm run deploy
+
+cd D:\prompt-hub
+.\deploy-pages.ps1
 ```
 
-受控脚本会拒绝脏工作区或残留冻结标记，并自动注入当前 40 位 Git SHA。
+两个受控脚本都拒绝脏工作区或残留冻结标记。Worker 自动注入当前 40 位 Git SHA；Pages 记录同一 release SHA，且不会在发布脚本内再次修改 build。
 
-### 7. 生产验收
+### 8. 生产验收
 
 ```powershell
 $health = Invoke-RestMethod https://api.prompt-hubs.com/health
@@ -95,7 +111,7 @@ git rev-parse HEAD
 3. `/api/v1/payments/products` 与 `/api/v1/wallet/products` 返回相同商品。
 4. 首次建点奖励只到账一次，重复事件不延长会员。
 5. 管理后台运行监控、支付事件和卡片库摘要可读取。
-6. Pages 发布后再验证卡片库与 Canvas 完整用户流程。
+6. Pages 发布后确认 `/prompts/` 的首屏广告图、仓库 CSS Content-Type 和卡片加载，再验证卡片库与 Canvas 完整用户流程。
 
 生产验收不得通过删除用户数据、重复付费生成或手工补积分完成。
 

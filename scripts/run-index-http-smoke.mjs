@@ -33,6 +33,56 @@ if (
   process.exit(1);
 }
 
+const warehouseMarkup = deploymentRuntime
+  ? index
+  : await get('/partials/index-body/part-02.html');
+if (!warehouseMarkup.ok) {
+  console.error(`index-http-smoke: warehouse markup failed (${warehouseMarkup.status})`);
+  process.exit(1);
+}
+for (const token of [
+  'id="warehouseHero"',
+  'assets/studio-preset/scene.png',
+  'assets/studio-preset/peishen.png',
+  'assets/studio-preset/linche.png'
+]) {
+  if (!warehouseMarkup.text.includes(token)) {
+    console.error(`index-http-smoke: warehouse first screen missing ${token}`);
+    process.exit(1);
+  }
+}
+
+for (const checkPath of [
+  '/styles-warehouse.css',
+  `/styles-warehouse.css?v=${encodeURIComponent(buildId)}`
+]) {
+  const stylesheet = await get(checkPath);
+  if (!stylesheet.ok || !/text\/css/i.test(stylesheet.ct)) {
+    console.error(`index-http-smoke: ${checkPath} is not CSS (${stylesheet.status} ${stylesheet.ct})`);
+    process.exit(1);
+  }
+  if (
+    stylesheet.text.trimStart().startsWith('<!')
+    || !stylesheet.text.includes('.app-page-warehouse .warehouse-hero')
+  ) {
+    console.error(`index-http-smoke: ${checkPath} is missing the warehouse hero stylesheet`);
+    process.exit(1);
+  }
+}
+
+for (const imagePath of [
+  '/assets/studio-preset/scene.png',
+  '/assets/studio-preset/peishen.png',
+  '/assets/studio-preset/linche.png'
+]) {
+  const asset = await get(imagePath);
+  if (!asset.ok || !/^image\//i.test(asset.ct)) {
+    console.error(`index-http-smoke: ${imagePath} is not an image (${asset.status} ${asset.ct})`);
+    process.exit(1);
+  }
+}
+console.log('index-http-smoke OK: warehouse hero markup, CSS, and images');
+
 const adminLogin = await get('/admin-login.html');
 if (!adminLogin.ok || !adminLogin.text.includes('id="adminLogin"') || adminLogin.text.includes('id="adminApp"')) {
   console.error('index-http-smoke: admin-login.html must be the standalone login page');

@@ -108,14 +108,14 @@ describe('payment checkout URL', () => {
     expect(url.searchParams.get('sign')).toMatch(/^[a-f0-9]{32}$/);
   });
 
-  it('accepts WeChat and sends the browser return through the signed callback route', async () => {
-    const parsed = checkoutSchema.parse({
+  it('rejects WeChat for a new checkout while retaining the gateway type for historical callbacks', async () => {
+    const parsed = checkoutSchema.safeParse({
       productId: 'points-10',
       paymentMethod: 'wxpay',
       returnTarget: 'canvas',
       returnPath: '/canvas/project-1'
     });
-    expect(parsed.paymentMethod).toBe('wxpay');
+    expect(parsed.success).toBe(false);
     expect(() => checkoutSchema.parse({
       productId: 'points-10',
       paymentMethod: 'wxpay',

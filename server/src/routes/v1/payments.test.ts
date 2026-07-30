@@ -120,7 +120,7 @@ describe('payment routes', () => {
   it('rejects a forged seat checkout while the product flag is disabled', async () => {
     const response = await checkout({
       productId: CANVAS_COLLABORATION_SEAT_PRODUCT_ID,
-      paymentMethod: 'wxpay',
+      paymentMethod: 'alipay',
       returnTarget: 'canvas'
     });
 
@@ -173,7 +173,7 @@ describe('payment routes', () => {
     const response = await checkout({
       productId: CUSTOM_CREDIT_PRODUCT_ID,
       customAmount,
-      paymentMethod: 'wxpay',
+      paymentMethod: 'alipay',
       returnTarget: 'canvas'
     });
 
@@ -195,7 +195,7 @@ describe('payment routes', () => {
     const response = await checkout({
       productId: CUSTOM_CREDIT_PRODUCT_ID,
       customAmount: 5,
-      paymentMethod: 'wxpay',
+      paymentMethod: 'alipay',
       returnTarget: 'canvas'
     });
 
@@ -229,14 +229,30 @@ describe('payment routes', () => {
       product_id: CUSTOM_CREDIT_PRODUCT_ID,
       amount_cents: 500,
       credits: 500,
-      payment_method: 'wxpay',
+      payment_method: 'alipay',
       state: 'pending'
     });
     expect(createEpayCheckoutMock).toHaveBeenCalledWith(env, expect.objectContaining({
       orderNo: body.data.orderNo,
-      method: 'wxpay',
+      method: 'alipay',
       amountCents: 500
     }));
+  });
+
+  it('rejects WeChat for a new checkout before creating an order', async () => {
+    const response = await checkout({
+      productId: CUSTOM_CREDIT_PRODUCT_ID,
+      customAmount: 5,
+      paymentMethod: 'wxpay'
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'VALIDATION_ERROR' }
+    });
+    expect(createAdminClientMock).not.toHaveBeenCalled();
+    expect(createEpayCheckoutMock).not.toHaveBeenCalled();
   });
 
   it.each([

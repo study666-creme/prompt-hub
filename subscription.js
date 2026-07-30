@@ -123,7 +123,8 @@
 
   async function submitDirectPayment(paymentMethod) {
     const product = pendingPaymentProduct;
-    if (!product || !['wxpay', 'alipay'].includes(paymentMethod)) return;
+    // 新订单入口只允许支付宝，和服务端 checkoutSchema 保持一致。
+    if (!product || paymentMethod !== 'alipay') return;
     const overlay = document.getElementById('paymentMethodOverlay');
     const buttons = Array.from(overlay?.querySelectorAll('[data-payment-method]') || []);
     buttons.forEach((button) => {
@@ -538,7 +539,7 @@
     if (sub) {
       sub.textContent = currentMainTab === 'credits'
         ? '1 元 = 100 积分 · 支付成功后自动到账'
-        : '轻量特惠 + 三档会员 · 支持微信支付与支付宝';
+        : '轻量特惠 + 三档会员 · 支付宝支付';
     }
     if (currentMainTab === 'credits') renderCreditPacks();
     else renderPlans();

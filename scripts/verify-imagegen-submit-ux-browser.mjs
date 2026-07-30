@@ -85,6 +85,8 @@ const fixture = `<!doctype html>
         clickAt: 0,
         pendingAt: 0,
         toastAt: 0,
+        toastQuickAtCall: false,
+        toastVisibleAtCall: false,
         mobileSwitchAt: 0,
         handoffAt: 0,
         draftAt: 0,
@@ -114,7 +116,11 @@ const fixture = `<!doctype html>
         const at = performance.now();
         if (!state.toastAt) state.toastAt = at;
         state.toastCalls.push({ at, message: String(args[0] || '') });
-        return quickToast(...args);
+        const result = quickToast(...args);
+        const toast = document.getElementById('toast');
+        state.toastQuickAtCall = toast?.classList.contains('toast--quick-confirm') || false;
+        state.toastVisibleAtCall = toast?.classList.contains('show') || false;
+        return result;
       };
 
       const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -335,8 +341,8 @@ async function runScenario(name, viewport, mobile, theme = 'dark') {
       dismissJustify: dismissStyle?.justifyContent || '',
       submitting: button.classList.contains('is-submitting'),
       toastText: toast?.textContent || '',
-      toastQuick: toast?.classList.contains('toast--quick-confirm'),
-      toastVisible: toast?.classList.contains('show'),
+      toastQuick: state.toastQuickAtCall,
+      toastVisible: state.toastVisibleAtCall,
       bodyFeed: document.body.classList.contains('imagegen-mobile-view-feed')
     };
   });

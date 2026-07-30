@@ -130,6 +130,7 @@ try {
       ok: true,
       data: {
         models: [
+          { id: 'image2-economy', label: '全能模型2 · 特价 1K', uiFamily: 'gim2', sortOrder: 20, selectable: true, status: 'active', resolutions: ['1k'], creditsFinal: 2.2, creditsBase: 2.2, creditsPerCall: 2.2 },
           { id: 'image2', label: '全能模型2 · 1K', uiFamily: 'gim2', selectable: true, status: 'active', resolutions: ['1k'], creditsFinal: 5.5, creditsBase: 5.5, creditsPerCall: 5.5 },
           { id: 'image2-4k-fast', label: '全能模型2 · 极速 4K', uiFamily: 'gim2', selectable: true, status: 'active', resolutions: ['4k'], creditsFinal: 6.5, creditsBase: 6.5, creditsPerCall: 6.5, parameters: [{ name: 'quality', path: 'quality', type: 'string', fixed: 'standard' }] },
           { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K', uiFamily: 'gim2', selectable: true, status: 'active', resolutions: ['1k', '2k', '4k'], pricingByResolution: true, creditsByResolution: { '1k': 7, '2k': 15, '4k': 20 } }
@@ -186,9 +187,18 @@ try {
     cost: document.getElementById('imageGenCostHint')?.textContent || '',
     submit: document.getElementById('imageGenSubmit')?.textContent || '',
     catalogIds: (window.__IMAGE_GEN_MODELS__ || []).map((model) => model.id),
+    selectedDetailFinal: window.PointsSystem?.getImageGenCostDetail?.(
+      document.getElementById('imageGenModel')?.value,
+      '1k'
+    )?.final,
     detailFinal: window.PointsSystem?.getImageGenCostDetail?.('image2', '1k')?.final
   }));
-  if (imagegen.model !== 'image2' || !/5\.5\s*积分/.test(`${imagegen.cost} ${imagegen.submit}`)) {
+  if (
+    imagegen.model !== 'image2-economy'
+    || imagegen.selectedDetailFinal !== 2.2
+    || imagegen.detailFinal !== 5.5
+    || !/2\.2\s*积分/.test(`${imagegen.cost} ${imagegen.submit}`)
+  ) {
     throw new Error(`guest image model did not use the active default: ${JSON.stringify(imagegen)}`);
   }
   await page.locator('#imageGenModelTrigger').focus();
