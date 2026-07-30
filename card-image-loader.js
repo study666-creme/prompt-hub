@@ -6,11 +6,12 @@
   let observer = null;
   let observedRoot = null;
   const inflight = new WeakMap();
+  const pendingSrcRecovery = new WeakMap();
   const recentMissingCheckInflight = new WeakMap();
   const ownedBlobUrls = new Set();
   let ownedBlobRemovalObserver = null;
   const queues = window.CardImageLoaderQueues.create();
-  const DOWNLOAD_SLOT_TIMEOUT_MS = 30000;
+  const DOWNLOAD_SLOT_TIMEOUT_MS = Math.max(100, Number(window.__PH_TEST_DOWNLOAD_TIMEOUT_MS__) || 30000);
   function maxResolveCap() { return queues.maxResolveCap(); }
   function feedMaxResolveCap() { return queues.feedMaxResolveCap(); }
   function maxDownloadCap() { return queues.maxDownloadCap(); }
@@ -240,6 +241,7 @@
     if (!creation) return '';
     const jobId = String(creation.jobId || img.getAttribute('data-job-id') || '').replace(/#\d+$/, '');
     const wantFull = opts.preferFull === true;
+    const forceFresh = opts.forceFresh === true || img.dataset.feedForceFresh === '1';
     const refFromDom = img.getAttribute('data-image-ref') || '';
     const refs = [];
     const pushRef = (u) => {
@@ -256,9 +258,21 @@
     }
     for (const ref of refs) {
       if (!ref) continue;
-      if (isLocalRasterImageUrl(ref) && isReadySrc(ref, img)) return ref;
+      if (!forceFresh && isLocalRasterImageUrl(ref) && isReadySrc(ref, img)) return ref;
       const storageRef = window.SupabaseSync?.isStorageRef?.(ref);
-      if (window.MediaPipeline?.resolveListUrl) {
+      if (forceFresh && storageRef && window.SupabaseSync?.resolveDisplayUrl) {
+        const fresh = await window.SupabaseSync.resolveDisplayUrl(ref, {
+          assetId: creation.id,
+          cardId: creation.id,
+          jobId: jobId || undefined,
+          variant: wantFull ? 'full' : 'grid',
+          tryAllPaths: true,
+          allowFullFallback: wantFull,
+          listOnly: wantFull ? undefined : true,
+          bypassSignBudget: true
+        });
+        if (fresh && isReadySrc(fresh, img)) return fresh;
+      } else if (window.MediaPipeline?.resolveListUrl) {
         const list = await window.MediaPipeline.resolveListUrl(ref, {
           assetId: creation.id,
           cardId: creation.id,
@@ -299,7 +313,7 @@
             }
           } catch (e) { /* ignore */ }
         }
-        if (isReadySrc(ref, img)) return ref;
+        if (!forceFresh && isReadySrc(ref, img)) return ref;
       }
     }
     if (opts.skipJobApi !== true && jobId && window.PromptHubApi?.getGenerationImageUrl) {
@@ -392,10 +406,75 @@
   /** 浏览器已解码出像素 — 勿因签名过期重复拉 media */
   function isImgVisuallyLoaded(img) {
     if (!img) return false;
-    if (img.dataset.feedLoadDone === '1') return true;
     const src = img.currentSrc || img.src || '';
     if ((!/^https?:\/\//i.test(src) && !isLocalRasterImageUrl(src)) || src.includes('data:image/svg')) return false;
     return img.complete && img.naturalWidth > 8;
+  }
+
+  function clearPendingSrcRecovery(img) {
+    const entry = pendingSrcRecovery.get(img);
+    if (!entry) return;
+    img.removeEventListener('load', entry.onLoad);
+    img.removeEventListener('error', entry.onError);
+    pendingSrcRecovery.delete(img);
+  }
+
+  function watchPendingSrcRecovery(img, src) {
+    if (!img || !src || img.complete || img.dataset.feedLoadToken || img.dataset.feedLoadingUrl) return;
+    const current = pendingSrcRecovery.get(img);
+    if (current?.src === src) return;
+    clearPendingSrcRecovery(img);
+    const entry = { src, onLoad: null, onError: null };
+    const settle = () => {
+      if (pendingSrcRecovery.get(img) !== entry) return;
+      clearPendingSrcRecovery(img);
+    };
+    entry.onLoad = settle;
+    entry.onError = () => {
+      if (pendingSrcRecovery.get(img) !== entry) return;
+      const currentSrc = img.currentSrc || img.src || '';
+      clearPendingSrcRecovery(img);
+      if (currentSrc !== src && !isImgSameDisplayResource(img, src)) return;
+      loadImg(img);
+    };
+    img.addEventListener('load', entry.onLoad, { once: true });
+    img.addEventListener('error', entry.onError, { once: true });
+    pendingSrcRecovery.set(img, entry);
+  }
+
+  function isCurrentSrcLoadedOrPending(img) {
+    if (isImgVisuallyLoaded(img)) {
+      clearPendingSrcRecovery(img);
+      return true;
+    }
+    const src = img?.currentSrc || img?.src || '';
+    const concreteSrc = /^https?:\/\//i.test(src) || isLocalRasterImageUrl(src);
+    const pending = concreteSrc && !src.includes('data:image/svg') && img.complete === false;
+    if (pending) watchPendingSrcRecovery(img, src);
+    return pending;
+  }
+
+  function isBrokenCurrentSrc(img) {
+    if (!img?.complete || img.naturalWidth > 8) return false;
+    const src = img.currentSrc || img.src || '';
+    return (/^https?:\/\//i.test(src) || isLocalRasterImageUrl(src)) && !src.includes('data:image/svg');
+  }
+
+  function prepareBrokenCurrentSrcRetry(img, ref, cardId) {
+    if (!isBrokenCurrentSrc(img)) return false;
+    const src = img.currentSrc || img.src || '';
+    const path = window.SupabaseSync?.storagePathFromDisplayUrl?.(src);
+    if (path) window.SupabaseSync?.invalidateSignedCache?.(String(path).replace(/^\//, ''));
+    if (ref) window.SupabaseSync?.invalidateSignedCacheForRef?.(ref, cardId);
+    clearPendingSrcRecovery(img);
+    img.dataset.feedForceFresh = '1';
+    delete img.dataset.feedLoadDone;
+    delete img.dataset.feedLoadToken;
+    delete img.dataset.feedLoadingUrl;
+    delete img.dataset.feedLoadingKey;
+    img.removeAttribute('src');
+    inflight.delete(img);
+    return true;
   }
 
   function isImgSameDisplayResource(img, url) {
@@ -468,16 +547,17 @@
   }
 
   function cachedUrl(ref, cardId, img) {
+    const forceFresh = img?.dataset?.feedForceFresh === '1' || isBrokenCurrentSrc(img);
     const authorId =
       img?.dataset?.authorId
       || img?.closest('.card')?.dataset?.authorId
       || img?.closest('[data-author-id]')?.dataset?.authorId
       || undefined;
-    if (window.MediaPipeline?.getListCached) {
+    if (!forceFresh && window.MediaPipeline?.getListCached) {
       const piped = window.MediaPipeline.getListCached(ref, cardId, { authorId, assetId: cardId });
       if (piped && isReadySrc(piped, img)) return piped;
     }
-    if ((isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))
+    if (!forceFresh && (isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))
       && window.SupabaseSync?.getListDisplayImageSrc) {
       const url = window.SupabaseSync.getListDisplayImageSrc(ref, cardId, {
         authorId,
@@ -488,6 +568,7 @@
       if (url && isReadySrc(url, img)) return url;
       return '';
     }
+    if (forceFresh) return '';
     const variant = listImageVariant(img);
     return window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId: cardId, authorId, variant }) || '';
   }
@@ -671,8 +752,11 @@
     const ownIgWh = isOwnImageGenWarehouseImg(img);
     const collect = inWarehouse ? warehouseCollectResolveOpts(img) : null;
     const ownWarehouseCard = inWarehouse && !collect;
-    const hit = cachedUrl(ref, cardId, img);
-    if (isReadySrc(hit, img)) return hit;
+    const forceFresh = img?.dataset?.feedForceFresh === '1';
+    if (!forceFresh) {
+      const hit = cachedUrl(ref, cardId, img);
+      if (isReadySrc(hit, img)) return hit;
+    }
     if (extraOpts?.skip) return '';
     if (!window.SupabaseSync?.resolveDisplayUrl && !window.MediaPipeline?.resolveListUrl) return '';
     try {
@@ -694,10 +778,11 @@
         listOnly: listOnly ? true : undefined,
         degradedListFull: degradedList === true || allowFullListFallback,
         ...(ownWarehouseCard || ownIgWh ? {} : (collect || communityExtra)),
-        ...(extraOpts || {})
+        ...(extraOpts || {}),
+        ...(forceFresh ? { bypassSignBudget: true } : {})
       };
       let url = '';
-      if (listOnly && window.MediaPipeline?.resolveListUrl) {
+      if (listOnly && window.MediaPipeline?.resolveListUrl && !forceFresh) {
         url = await window.MediaPipeline.resolveListUrl(ref, resolveOpts);
       } else if (window.SupabaseSync?.resolveDisplayUrl) {
         url = await window.SupabaseSync.resolveDisplayUrl(ref, {
@@ -707,6 +792,8 @@
           listOnly: listOnly ? true : undefined,
           degradedListFull: allowFullListFallback
         });
+      } else if (listOnly && window.MediaPipeline?.resolveListUrl) {
+        url = await window.MediaPipeline.resolveListUrl(ref, resolveOpts);
       }
       return isReadySrc(url, img) ? url : '';
     } catch (e) {
@@ -821,6 +908,7 @@
         return;
       }
       img.dataset.feedLoadDone = '1';
+      delete img.dataset.feedForceFresh;
       observer?.unobserve(img);
       const cardIdDone = cardIdFromImg(img);
       if (isGridSrc && cardIdDone && (isOwnWarehouseListImg(img) || isOwnImageGenWarehouseImg(img))) {
@@ -830,15 +918,19 @@
       else media.classList.remove('is-loading');
     };
 
-    const fail = () => {
+    const fail = (failedUrlOverride = '') => {
       if (isStaleRequest()) return;
       clearPending();
       media.classList.remove('is-loading', 'media-shine-reveal');
       const ref = img.getAttribute('data-image-ref');
       const cardId = cardIdFromImg(img);
-      const failedUrl = img.currentSrc || img.src || '';
+      const failedUrl = failedUrlOverride || img.currentSrc || img.src || '';
       releaseImgOwnedBlobUrl(img);
       const failedPath = window.SupabaseSync?.storagePathFromDisplayUrl?.(failedUrl);
+      if (isOwnImageGenRecentImg(img)) {
+        img.dataset.feedForceFresh = '1';
+        if (ref) window.SupabaseSync?.invalidateSignedCacheForRef?.(ref, cardId);
+      }
       const isGridFail = failedPath && /_grid\.(jpe?g|webp|png)$/i.test(failedPath);
       const ownWh = isOwnImageGenWarehouseImg(img);
       const ownList = isOwnWarehouseListImg(img);
@@ -970,21 +1062,35 @@
         if (timeoutId) clearTimeout(timeoutId);
         resolve();
       };
-      const onLoad = () => {
+    const onLoad = () => {
         if (outcomeHandled) return;
         outcomeHandled = true;
         finish();
         settleQueue();
       };
-      const onError = () => {
+    const onError = () => {
         if (outcomeHandled) return;
         outcomeHandled = true;
         fail();
         settleQueue();
       };
+      const onTimeout = () => {
+        if (outcomeHandled) return;
+        outcomeHandled = true;
+        const timedOutUrl = img.currentSrc || img.src || url;
+        img.removeEventListener('load', onLoad);
+        img.removeEventListener('error', onError);
+        img.removeAttribute('src');
+        img.dataset.feedForceFresh = '1';
+        const timeoutRef = img.getAttribute('data-image-ref') || '';
+        if (timeoutRef) window.SupabaseSync?.invalidateSignedCacheForRef?.(timeoutRef, cardIdFromImg(img));
+        fail(timedOutUrl);
+        settleQueue();
+      };
       img.addEventListener('load', onLoad, { once: true });
       img.addEventListener('error', onError, { once: true });
-      timeoutId = setTimeout(settleQueue, DOWNLOAD_SLOT_TIMEOUT_MS);
+      timeoutId = setTimeout(onTimeout, DOWNLOAD_SLOT_TIMEOUT_MS);
+      clearPendingSrcRecovery(img);
       img.src = url;
       if (img.complete && img.naturalWidth > 0) onLoad();
     }));
@@ -1021,7 +1127,10 @@
       return;
     }
     if (isOwnImageGenRecentImg(img)) {
-      const p = resolveRecentCreationFeedUrl(img).then((url) => {
+      if (isCurrentSrcLoadedOrPending(img) || inflight.has(img)) return;
+      const forceFresh = prepareBrokenCurrentSrcRetry(img, ref, cardId);
+      const p = resolveRecentCreationFeedUrl(img, { forceFresh }).then((url) => {
+        if (inflight.get(img) !== p) return;
         inflight.delete(img);
         if (url) {
           applyUrlToImg(img, url);
@@ -1029,6 +1138,7 @@
         }
         finalizeRecentCreationMediaFailure(img, feedMediaFromImg(img));
       }).catch(() => {
+        if (inflight.get(img) !== p) return;
         inflight.delete(img);
         finalizeRecentCreationMediaFailure(img, feedMediaFromImg(img));
       });
@@ -1070,8 +1180,8 @@
       void tryMissingPathFallback(img, cardId);
       return;
     }
-    const cur = img.currentSrc || img.src || '';
-    if (isImgVisuallyLoaded(img) || isReadySrc(cur, img)) return;
+    if (isCurrentSrcLoadedOrPending(img)) return;
+    prepareBrokenCurrentSrcRetry(img, ref, cardId);
     const hit = cachedUrl(ref, cardId, img);
     if (hit) {
       applyUrlToImg(img, hit);
@@ -1080,7 +1190,9 @@
     if (inflight.has(img)) return;
 
     const signedRoot = img.closest('#cardsContainer, #imageGenFeed');
+    let activeResolve = null;
     const finishResolve = (url) => {
+      if (inflight.get(img) !== activeResolve) return;
       inflight.delete(img);
       if (url) {
         applyUrlToImg(img, url);
@@ -1121,13 +1233,17 @@
     };
     const job = () => resolveUrl(ref, cardId, extra, img).then(finishResolve);
     const startLoad = () => {
-      const p = signedRoot
-        ? enqueueFeedResolve(job)
-        : enqueueResolve(job);
+      const p = signedRoot ? enqueueFeedResolve(job) : enqueueResolve(job);
+      activeResolve = p;
       inflight.set(img, p);
+      return p;
     };
     if (signedRoot?.id) {
-      void whenContainerReady(signedRoot.id).then(startLoad);
+      const waiting = whenContainerReady(signedRoot.id).then(() => {
+        if (inflight.get(img) !== waiting) return;
+        return startLoad();
+      });
+      inflight.set(img, waiting);
       return;
     }
     startLoad();
@@ -1174,8 +1290,7 @@
         delete img.dataset.primaryRetried;
         delete img.dataset.listPrimaryRetried;
       }
-      const cur = img.currentSrc || img.src || '';
-      if (isImgVisuallyLoaded(img) || img.dataset.feedLoadDone === '1' || (isReadySrc(cur, img) && img.complete && img.naturalWidth > 8)) {
+      if (isCurrentSrcLoadedOrPending(img)) {
         observer?.unobserve(img);
         continue;
       }
@@ -1245,8 +1360,7 @@
       if (items.length >= cap) return;
       const ref = img.getAttribute('data-image-ref');
       if (!ref || !ref.startsWith('storage://')) return;
-      const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img)) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       const authorId = img.dataset?.authorId || img.closest('.card')?.dataset?.authorId || '';
       const cardId = cardIdFromImg(img) || '';
       const key = `${ref}|${authorId}|${cardId}`;
@@ -1258,8 +1372,7 @@
       void window.SupabaseSync.prefetchCommunityDisplayUrls(items, 3500).then(() => {
         window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: 24 });
         feedImagesIn(container).forEach((img) => {
-          const cur = img.currentSrc || img.src || '';
-          if (isReadySrc(cur, img)) return;
+          if (isCurrentSrcLoadedOrPending(img)) return;
           const hit = cachedUrl(img.getAttribute('data-image-ref'), cardIdFromImg(img), img);
           if (hit) applyUrlToImg(img, hit);
         });
@@ -1287,10 +1400,8 @@
       let eager = 0;
       const cap = igFeedPatchMax();
       sortImgsByViewport(imgs).forEach((img) => {
-        if (isImgVisuallyLoaded(img)) return;
+        if (isCurrentSrcLoadedOrPending(img)) return;
         if (eager >= cap) return;
-        const cur = img.currentSrc || img.src || '';
-        if (isReadySrc(cur, img)) return;
         if (isImgNearViewport(img, 480)) {
           eager += 1;
           loadImg(img);
@@ -1300,10 +1411,8 @@
       let eager = 0;
       const eagerCap = cardFirstScreenCap();
       sortImgsByViewport(imgs).forEach((img) => {
-        if (isImgVisuallyLoaded(img)) return;
+        if (isCurrentSrcLoadedOrPending(img)) return;
         if (eager >= eagerCap) return;
-        const cur = img.currentSrc || img.src || '';
-        if (isReadySrc(cur, img)) return;
         const ref = img.getAttribute('data-image-ref');
         const cardId = cardIdFromImg(img);
         const hit = cachedUrl(ref, cardId, img);
@@ -1323,8 +1432,7 @@
       const nearPx = isCommunityContainer(container) ? 960 : 720;
       const ordered = isWh ? sortImgsByViewport(imgs) : imgs;
       ordered.forEach((img) => {
-        const cur = img.currentSrc || img.src || '';
-        if (isReadySrc(cur, img)) return;
+        if (isCurrentSrcLoadedOrPending(img)) return;
         if (eager < firstScreenCap && isImgNearViewport(img, nearPx)) {
           eager += 1;
           loadImg(img);
@@ -1367,9 +1475,7 @@
     }
 
     imgs.forEach((img) => {
-      if (isImgVisuallyLoaded(img)) return;
-      const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img)) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       const ref = img.getAttribute('data-image-ref');
       const cardId = cardIdFromImg(img);
       const hit = cachedUrl(ref, cardId, img);
@@ -1405,9 +1511,7 @@
     }
     feedImagesIn(container).forEach((img) => {
       if (img.dataset.feedObserverBound === '1') return;
-      if (isImgVisuallyLoaded(img)) return;
-      const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img)) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       observer.observe(img);
       img.dataset.feedObserverBound = '1';
     });
@@ -1518,8 +1622,7 @@
     let n = 0;
     sortImgsByViewport(feedImagesIn(container), container).forEach((img) => {
       if (n >= max) return;
-      const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img)) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       const hit = cachedUrl(img.getAttribute('data-image-ref'), cardIdFromImg(img), img);
       if (hit) {
         applyUrlToImg(img, hit);
@@ -1544,9 +1647,7 @@
       const isRecent = isOwnImageGenRecentImg(img);
       if (!isOwnImageGenWarehouseImg(img) && !isRecent) return;
       if (n >= cap) return;
-      if (isImgVisuallyLoaded(img)) return;
-      const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img)) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       const hit = cachedUrl(img.getAttribute('data-image-ref'), cardIdFromImg(img), img);
       if (hit) {
         applyUrlToImg(img, hit);
@@ -1567,9 +1668,7 @@
     sortImgsByViewport(feedImagesIn(container)).forEach((img) => {
       if (!isOwnImageGenRecentImg(img)) return;
       if (n >= cap) return;
-      if (isImgVisuallyLoaded(img)) return;
-      const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img)) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       n += 1;
       loadImg(img);
     });
@@ -1586,7 +1685,7 @@
     const imgs = sortImgsByViewport(feedImagesIn(container), container);
     imgs.forEach((img, idx) => {
       const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img) && img.complete && img.naturalWidth > 8) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       const hit = cachedUrl(img.getAttribute('data-image-ref'), cardIdFromImg(img), img);
       if (hit) {
         applyUrlToImg(img, hit);

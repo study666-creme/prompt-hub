@@ -221,6 +221,34 @@
     }
   }
 
+  let imageGenCommunityRefreshPromise = null;
+  function ensureImageGenCommunityFeed(opts = {}) {
+    hydratePublicFeedFromCache();
+    if (imageGenCommunityRefreshPromise) return imageGenCommunityRefreshPromise;
+    const force = opts.force === true;
+    if (!force && !publicFeedState.refreshPromise && !publicFeedNeedsFullRefresh()) {
+      return Promise.resolve(false);
+    }
+    const refreshTask = refreshPublicCommunityFeed({ force, timeoutMs: 8000 })
+      .then((changed) => {
+        if (imageGenFeedTab !== 'community') return changed;
+        if (!document.getElementById('pageImageGen')?.classList.contains('active')) return changed;
+        return Promise.resolve(renderImageGenFeed({ preserveScroll: true, force: true }))
+          .then(() => changed);
+      })
+      .catch((e) => {
+        console.warn('[imagegen] community feed refresh failed', e);
+        return false;
+      })
+      .finally(() => {
+        if (imageGenCommunityRefreshPromise === refreshTask) {
+          imageGenCommunityRefreshPromise = null;
+        }
+      });
+    imageGenCommunityRefreshPromise = refreshTask;
+    return refreshTask;
+  }
+
   function wireImageGenFeed() {
     if (window.__imageGenFeedWired) return;
     if (!window.ImageGenFeed?.init) {
@@ -255,6 +283,8 @@
       getCommunityScope: () => communityScope,
       getCommunitySort: () => communitySort,
       getCommunityRandomEpoch: () => communityRandomEpoch,
+      ensureImageGenCommunityFeed,
+      getPublicCommunityFeedState: () => publicFeedState,
       getLikedIds: () => likedIds,
       getCommunityFeedForDisplay,
       filterAndSortPosts,

@@ -332,7 +332,7 @@
             </button>
             <div class="filter-menu-wrap">
               <button type="button" class="btn btn-ghost btn-sm warehouse-filter-clear hidden" id="warehouseFilterClearBtn">清除筛选</button>
-              <button type="button" class="icon-btn" id="filterBtn" title="筛选">
+              <button type="button" class="icon-btn" id="filterBtn" aria-label="筛选" title="筛选">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
                 <span class="mobile-only mobile-filter-label">筛选</span>
               </button>
@@ -347,7 +347,7 @@
             <button type="button" class="icon-btn mobile-only mobile-header-btn" id="mobileNewCardBtn" aria-label="新建卡片" title="新建" onclick="createNewCard({forceOpenPanel:true})">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
             </button>
-            <button type="button" class="icon-btn mobile-only mobile-header-btn" aria-label="批量导入" title="批量导入" onclick="openBatchImportModal()">
+            <button type="button" class="icon-btn mobile-only mobile-header-btn mobile-batch-import-btn" id="mobileBatchImportBtn" aria-label="批量导入" title="批量导入" onclick="openBatchImportModal()">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
             </button>
             <button class="btn btn-primary btn-sm desktop-only toolbar-new-btn" id="desktopNewCardBtn" onclick="createNewCard()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>新建</span></button>

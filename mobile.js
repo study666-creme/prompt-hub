@@ -100,12 +100,13 @@
   function restoreMobilePageInteractivity() {
     if (!isMobile()) return;
     const hasActiveModal = hasActiveMobileBlocker();
+    const editPanel = document.getElementById('editPanel');
+    const editPanelOpen = !!editPanel && !editPanel.classList.contains('hidden');
     if (!hasActiveModal) {
       document.body.classList.remove(
         'subscribe-open',
         'trial-tasks-open',
         'app-modal-open',
-        'panel-open',
         'community-panel-open',
         'user-profile-open',
         'batch-import-open',
@@ -114,6 +115,7 @@
       document.querySelector('.app-main')?.style.removeProperty('pointer-events');
       document.querySelector('.app-chrome')?.style.removeProperty('pointer-events');
     }
+    document.body.classList.toggle('panel-open', editPanelOpen);
     forceHideBlockingLayers();
   }
 

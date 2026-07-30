@@ -412,7 +412,7 @@
             ensureCommunityFromCardsThrottled(false);
             if (publicFeedNeedsFullRefresh() && !publicFeedState.loading) {
               if (grid && !hasRealCards) showCommunityFeedSkeleton(grid, 8);
-              void refreshPublicCommunityFeed({ force: true, timeoutMs: 20000 }).then(async () => {
+              void refreshPublicCommunityFeed({ force: true, timeoutMs: 8000 }).then(async () => {
                 if (seq !== communityOnActivateSeq) return;
                 const sortedOnActivate = filterAndSortPosts(getCommunityFeedForDisplay());
                 if (shouldPreserveCommunityFeedDom('communityGrid', sortedOnActivate) && grid?.querySelector('.community-post-card:not(.community-feed-skeleton)')) {

@@ -135,7 +135,8 @@
   /** 全站 API Feed，不被 reconcile 裁剪（解决「库里有帖、登录却看不到」） */
   const publicFeedState = window.CommunityPublicFeed?.createState?.() || {
     posts: [], at: 0, apiOffset: 0, nextApiOffset: 0,
-    remoteHasMore: true, loading: false, refreshPromise: null, moreInflight: false
+    remoteHasMore: true, loading: false, refreshPromise: null, moreInflight: false,
+    lastAttemptAt: 0
   };
   let creations = [];
   let likedIds = new Set();
@@ -280,7 +281,9 @@
   function isUsableWarehouseImage(card) {
     if (!card) return false;
     if (window.SupabaseSync?.shouldShowCardInWarehouse?.(card) === false) return false;
-    const image = window.PromptHubCardGallery?.getCardCoverImage?.(card) || card.image;
+    const thumbMeta = window.PromptHubCardGallery?.getWarehouseListThumbMeta?.(card, { skipEnsure: true });
+    if (thumbMeta && thumbMeta.hasImage === false) return false;
+    const image = thumbMeta?.ref || window.PromptHubCardGallery?.getCardCoverImage?.(card) || card.image;
     if (!image || !isDisplayableImage(image)) return false;
     if (window.SupabaseSync?.isInvalidMediaUrl?.(image)) return false;
     if (/^https?:\/\//i.test(image)) return true;

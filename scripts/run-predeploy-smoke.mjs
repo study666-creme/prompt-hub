@@ -46,6 +46,7 @@ runNode('verify-card-gallery-regression', 'verify-card-gallery-regression.mjs');
 runNode('verify-edit-panel-gallery-regression', 'verify-edit-panel-gallery-regression.mjs');
 runNode('verify-feed-image-fit-regression', 'verify-feed-image-fit-regression.mjs');
 runNode('verify-mobile-feed-regression', 'verify-mobile-feed-regression.mjs');
+runNode('verify-community-feed-reliability', 'verify-community-feed-reliability.mjs');
 runNode('verify-image-delivery-regression', 'verify-image-delivery-regression.mjs');
 runNode('verify-imagegen-catalog-cache', 'verify-imagegen-catalog-cache.mjs');
 runNode('verify-generation-cost-retry', 'verify-generation-cost-retry.mjs');

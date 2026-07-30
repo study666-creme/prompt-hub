@@ -990,7 +990,7 @@
       const json = await res.json().catch(() => ({}));
       if (!res.ok || json.ok === false) {
         const code = json.error?.code || (res.status === 429 ? 'RATE_LIMITED' : 'REQUEST_FAILED');
-        if (res.status === 429 && attempt < 4) {
+        if (res.status === 429 && attempt < 4 && !opts.noRetry) {
           await new Promise((r) => setTimeout(r, 1000 + attempt * 900));
           return publicGet(path, opts, attempt + 1);
         }

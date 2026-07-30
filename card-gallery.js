@@ -52,6 +52,15 @@
 
   const GEN_JOB_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+  function isImageReferenceShape(ref) {
+    if (typeof ref !== 'string') return false;
+    const value = ref.trim();
+    if (!value) return false;
+    if (global.SupabaseSync?.isStorageRef?.(value)) return true;
+    if (/^https?:\/\//i.test(value) || /^blob:/i.test(value)) return true;
+    return /^data:image\/(?!svg(?:\+xml)?(?:[;,]|$))/i.test(value);
+  }
+
   /** genJobId 可能在 tags 里（自动恢复卡） */
   function resolveGenJobIdFromCard(card) {
     if (!card) return null;
@@ -112,10 +121,10 @@
     const ref = thumb?.ref || card.image || '';
     const slotJobId = thumb?.slotJobId || (baseJob || null);
     const jobId = baseJob || (slotJobId ? String(slotJobId).replace(/#\d+$/, '') : '');
-    if (!ref && !gallery.length && !baseJob) return { hasImage: false };
+    if (!ref && !gallery.length) return { hasImage: false };
     const listOpts = { jobId: slotJobId || jobId || undefined, allowFullFallback: !!baseJob };
     let cachedUrl = '';
-    if (ref && global.SupabaseSync?.getListDisplayImageSrc) {
+    if (isImageReferenceShape(ref) && global.SupabaseSync?.getListDisplayImageSrc) {
       cachedUrl = global.SupabaseSync.getListDisplayImageSrc(ref, card.id, listOpts) || '';
     }
     if (!cachedUrl && ref && /^https?:\/\//i.test(ref) && !global.SupabaseSync?.isEphemeralUpstreamImageUrl?.(ref)) {
@@ -127,7 +136,9 @@
     }
     const hasResolvable = ref && isResolvableCoverRef(ref, card.id);
     const hasGalleryResolvable = gallery.some((u) => isResolvableCoverRef(u, card.id));
-    const hasGenJobThumb = !!baseJob && hasGeneratedImageIntent(card);
+    const hasGenJobThumb = !!baseJob
+      && hasGeneratedImageIntent(card)
+      && (isImageReferenceShape(ref) || gallery.some(isImageReferenceShape));
     return {
       hasImage: !!(cachedUrl || hasResolvable || hasGalleryResolvable || hasGenJobThumb),
       ref,
@@ -155,7 +166,7 @@
     const first = gallery.find((u) => u && String(u).trim());
     if (first) {
       const firstIndex = gallery.indexOf(first);
-      if (isFeedListCoverCandidate(first, card.id, card) || baseJob) {
+      if (isFeedListCoverCandidate(first, card.id, card) || (baseJob && isImageReferenceShape(first))) {
         return pack(first, firstIndex >= 0 ? firstIndex : 0);
       }
     }
@@ -174,9 +185,9 @@
       for (let i = 0; i < gallery.length; i += 1) {
         const u = gallery[i];
         if (!u || !String(u).trim()) continue;
-        return pack(u, i);
+        if (isImageReferenceShape(u)) return pack(u, i);
       }
-      if (card.image && String(card.image).trim()) return pack(card.image, 0);
+      if (isImageReferenceShape(card.image)) return pack(card.image, 0);
     }
     return null;
   }
@@ -219,11 +230,11 @@
     if (strict) return strict;
 
     const relaxed = getCardCoverImage(card);
-    if (relaxed) {
+    if (relaxed && isImageReferenceShape(relaxed)) {
       const idx = gallery.findIndex((u) => String(u || '') === String(relaxed));
       return pack(relaxed, idx >= 0 ? idx : 0);
     }
-    const first = gallery.find((u) => u && String(u).trim());
+    const first = gallery.find(isImageReferenceShape);
     if (first) return pack(first, gallery.indexOf(first));
     return null;
   }
@@ -263,6 +274,7 @@
     const gallery = normalizeCardGallery(card);
     for (const u of gallery) {
       if (!u || typeof u !== 'string') continue;
+      if (!isImageReferenceShape(u)) continue;
       if (global.SupabaseSync?.isInvalidMediaUrl?.(u)) continue;
       if (global.SupabaseSync?.isEphemeralUpstreamImageUrl?.(u)) continue;
       if (global.SupabaseSync?.isStorageRef?.(u)) {
@@ -272,7 +284,7 @@
       return u;
     }
     const fb = card?.image;
-    if (fb && typeof fb === 'string' && !global.SupabaseSync?.isInvalidMediaUrl?.(fb)) return fb;
+    if (isImageReferenceShape(fb) && !global.SupabaseSync?.isInvalidMediaUrl?.(fb)) return fb;
     return null;
   }
 
@@ -331,7 +343,7 @@
     const gallery = normalizeCardGallery(card);
     const picked = pickWarehouseFeedCover(card);
     if (!picked?.ref && gallery.length) {
-      const first = gallery.find((u) => u && String(u).trim()) || gallery[0];
+      const first = gallery.find(isImageReferenceShape);
       if (first) {
         card.image = first;
         syncCardGalleryFields(card);

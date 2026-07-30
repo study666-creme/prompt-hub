@@ -29,13 +29,14 @@ The source split loaders are synchronous in the repository so local development 
 
 ## Warehouse UI Ownership
 
-The 2026-07-29 frozen-tree candidate keeps the warehouse redesign isolated from generated bundles:
+The 2026-07-30 frozen-tree candidate keeps the warehouse redesign isolated from generated bundles:
 
 - `partials/index-body/part-02.html` owns the toolbar and compact warehouse summary markup.
 - `legacy/script/part-04.js` owns summary count/scope synchronization.
 - `legacy/script/part-09.js` owns card metadata and the actionable empty state.
 - `styles-warehouse.css` owns warehouse-only layout, surface hierarchy, status accents, list/grid presentation, light theme, and mobile overrides.
-- `scripts/verify-warehouse-ui-browser.mjs` seeds mixed cards and checks desktop, mobile, empty, media, overflow, and drag behavior without contacting production services.
+- `styles-mobile.css` owns narrow-toolbar compaction, while `mobile.js` keeps the bottom navigation suppressed whenever the edit panel remains open.
+- `scripts/verify-warehouse-ui-browser.mjs` seeds mixed cards and checks desktop, 320/360/390px mobile, empty, media, toolbar overflow, touch scrolling, and edit-control reachability without contacting production services.
 
 Keep `styles-warehouse.css` as a standalone Pages asset. Staging and HTTP smoke checks must fail when the file, hero rules, or warehouse hero images are missing.
 
@@ -99,6 +100,10 @@ When continuing the split work, edit these source modules first, then rebuild th
 - `imagegen-job-state.js` owns pending/failed/session generation job persistence used by `imagegen-job-runner.js`.
 - `image-gen-feed-cards.js` owns image generation feed card HTML, ref dataset extraction helpers, and card display strings used by `image-gen-feed.js`.
 - `card-image-loader-queues.js` owns image loader concurrency caps and queue helpers used by `card-image-loader.js`.
+- `card-gallery.js` decides whether a warehouse card has a real media reference; generation job IDs and tags alone must remain text cards.
+- `community-public-feed.js` owns the shared public-feed refresh promise, partial-cache hydration, bounded head request, and retry cooldown used by both community surfaces.
+
+`card-image-loader.js` treats a URL as loaded only after the browser has decoded pixels (or while that exact request is still pending). A completed broken signed URL invalidates its cached path/reference and performs one fresh-sign resolution with the existing bounded fallback and authoritative-missing cleanup rules. Run `scripts/verify-card-image-loader-retry-browser.mjs` for the focused MJ multi-slot and recent-generation regression.
 
 Ignored local/generated outputs include `.pages-deploy/`, `dist/`, `*.bundle.js`, `.tmp-*.js`, and `prompt-hub-deploy.zip`. Removed one-off cleanup artifacts from this split pass: `.tmp-fd-head.js`, `.tmp-recover-chunks.js`, `prompt-hub-deploy.zip`, and `scripts/新建 文本文档.txt`.
 

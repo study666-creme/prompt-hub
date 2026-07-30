@@ -29,6 +29,12 @@ const images = [
 const imageBodies = await Promise.all(images.map((pathname) => (
   readFile(join(root, pathname.replace(/^\/+/, '')))
 )));
+const foundationSource = (await Promise.all([
+  'cloud-sync-safety.js',
+  'modal-hub.js',
+  'mobile.js',
+  'app-toast.js'
+].map((pathname) => readFile(join(root, pathname), 'utf8')))).join('\n;\n');
 const cdnAssets = new Map(images.map((_, index) => {
   const token = Buffer.from(`guest/generated/warehouse-ui-${index}_grid.jpg`).toString('base64url');
   return [token, imageBodies[index]];
@@ -126,6 +132,11 @@ const server = createServer(async (req, res) => {
         res.end(body);
         return;
       }
+    }
+    if (url.pathname === '/pack-foundation.js') {
+      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
+      res.end(foundationSource);
+      return;
     }
     let pathname = decodeURIComponent(url.pathname);
     if (pathname === '/' || pathname === '/prompts' || pathname === '/prompts/') {
@@ -227,6 +238,133 @@ async function inspectWarehouse(page, mobile) {
   }, mobile);
 }
 
+async function inspectMobileToolbar(page) {
+  return page.evaluate(() => {
+    const viewportWidth = document.documentElement.clientWidth;
+    const controls = [
+      ['menu', '#mobileNavBtn'],
+      ['groups', '#mobileGroupsBtn'],
+      ['title', '#currentGroupTitle'],
+      ['search', '#mobileSearchBtn'],
+      ['filter', '#filterBtn'],
+      ['new-card', '#mobileNewCardBtn']
+    ].map(([name, selector]) => {
+      const node = document.querySelector(selector);
+      const rect = node?.getBoundingClientRect();
+      const style = node ? getComputedStyle(node) : null;
+      return {
+        name,
+        present: !!node,
+        visible: !!node && style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 1,
+        left: rect?.left || 0,
+        right: rect?.right || 0,
+        width: rect?.width || 0
+      };
+    });
+    const visible = controls.filter((control) => control.visible).sort((a, b) => a.left - b.left);
+    const overlaps = [];
+    for (let index = 1; index < visible.length; index += 1) {
+      if (visible[index].left < visible[index - 1].right - 0.5) {
+        overlaps.push(`${visible[index - 1].name}:${visible[index].name}`);
+      }
+    }
+    const outside = visible
+      .filter((control) => control.left < -0.5 || control.right > viewportWidth + 0.5)
+      .map((control) => control.name);
+    const header = document.querySelector('.app-page-warehouse .main-header');
+    const batchImport = document.getElementById('mobileBatchImportBtn');
+    const filter = document.getElementById('filterBtn');
+    const filterLabel = filter?.querySelector('.mobile-filter-label');
+    return {
+      viewportWidth,
+      controls,
+      overlaps,
+      outside,
+      headerOverflow: (header?.scrollWidth || 0) - (header?.clientWidth || 0),
+      batchImportDisplay: batchImport ? getComputedStyle(batchImport).display : 'missing',
+      filterLabelDisplay: filterLabel ? getComputedStyle(filterLabel).display : 'missing',
+      filterAriaLabel: filter?.getAttribute('aria-label') || '',
+      filterTitle: filter?.getAttribute('title') || ''
+    };
+  });
+}
+
+function assertMobileToolbar(label, state) {
+  if (state.controls.some((control) => !control.present || !control.visible)) {
+    throw new Error(`${label} mobile toolbar control missing: ${JSON.stringify(state)}`);
+  }
+  if (state.overlaps.length || state.outside.length || state.headerOverflow > 1) {
+    throw new Error(`${label} mobile toolbar overlap/overflow: ${JSON.stringify(state)}`);
+  }
+  if (state.batchImportDisplay !== 'none') {
+    throw new Error(`${label} duplicate mobile batch import is visible: ${JSON.stringify(state)}`);
+  }
+  if (state.filterLabelDisplay !== 'none' || state.filterAriaLabel !== '筛选' || state.filterTitle !== '筛选') {
+    throw new Error(`${label} compact filter accessibility mismatch: ${JSON.stringify(state)}`);
+  }
+}
+
+async function inspectMobileEditPanelAfterTouch(page) {
+  await page.locator('#cardsContainer [data-mobile-edit]').first().click();
+  await page.waitForFunction(() => (
+    !document.getElementById('editPanel')?.classList.contains('hidden')
+    && document.body.classList.contains('panel-open')
+  ), null, { timeout: 10000 });
+
+  const panelBody = await page.locator('#panelBody').boundingBox();
+  if (!panelBody) throw new Error('mobile edit panel body has no layout box');
+  const x = Math.round(panelBody.x + panelBody.width / 2);
+  const fromY = Math.round(Math.min(panelBody.y + panelBody.height - 24, 700));
+  const toY = Math.round(Math.max(panelBody.y + 24, fromY - 220));
+  const client = await page.context().newCDPSession(page);
+  try {
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x, y: fromY, id: 1 }]
+    });
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x, y: toY, id: 1 }]
+    });
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  } finally {
+    await client.detach();
+  }
+  await page.waitForTimeout(150);
+
+  return page.evaluate(() => {
+    const rect = (selector) => {
+      const node = document.querySelector(selector);
+      const box = node?.getBoundingClientRect();
+      return box ? { top: box.top, right: box.right, bottom: box.bottom, left: box.left } : null;
+    };
+    const nav = document.getElementById('mobileBottomNav');
+    return {
+      panelOpen: document.body.classList.contains('panel-open'),
+      panelVisible: !document.getElementById('editPanel')?.classList.contains('hidden'),
+      navDisplay: nav ? getComputedStyle(nav).display : 'missing',
+      footer: rect('#editPanel .panel-footer'),
+      save: rect('#editPanel .btn-footer-save'),
+      close: rect('#editPanel .panel-close-mobile'),
+      viewport: { width: innerWidth, height: innerHeight }
+    };
+  });
+}
+
+function assertMobileEditPanel(state) {
+  const insideViewport = (box) => !!box
+    && box.left >= -1
+    && box.right <= state.viewport.width + 1
+    && box.top >= -1
+    && box.bottom <= state.viewport.height + 1;
+  if (!state.panelOpen || !state.panelVisible || state.navDisplay !== 'none') {
+    throw new Error(`mobile edit panel lost blocking state after touch: ${JSON.stringify(state)}`);
+  }
+  if (!insideViewport(state.footer) || !insideViewport(state.save) || !insideViewport(state.close)) {
+    throw new Error(`mobile edit panel footer controls are not reachable: ${JSON.stringify(state)}`);
+  }
+}
+
 await new Promise((resolveListen) => server.listen(port, '127.0.0.1', resolveListen));
 if (screenshotDir) await mkdir(screenshotDir, { recursive: true });
 
@@ -289,23 +427,101 @@ try {
   if (screenshotDir) {
     await mobile.page.screenshot({ path: join(screenshotDir, 'warehouse-mobile.png'), fullPage: false });
   }
+  const mobileEditPanelState = await inspectMobileEditPanelAfterTouch(mobile.page);
+  assertMobileEditPanel(mobileEditPanelState);
   await mobile.context.close();
 
+  const narrowToolbarStates = {};
+  for (const width of [320, 360]) {
+    const narrow = await openWarehouse(browser, { width, height: 844 });
+    const toolbarState = await inspectMobileToolbar(narrow.page);
+    assertMobileToolbar(`${width}px`, toolbarState);
+    narrowToolbarStates[width] = toolbarState;
+    await narrow.context.close();
+  }
+
   const empty = await openWarehouse(browser, { width: 1440, height: 900 }, true);
-  const emptyState = await empty.page.evaluate(() => ({
-    heading: document.querySelector('.warehouse-grid-empty h4')?.textContent?.trim() || '',
-    actions: document.querySelectorAll('.warehouse-empty-actions button').length,
-    overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
-  }));
+  const emptyState = await empty.page.evaluate(() => {
+    const grid = document.getElementById('cardsContainer');
+    const emptyBox = document.querySelector('.warehouse-grid-empty');
+    const gridRect = grid?.getBoundingClientRect();
+    const emptyRect = emptyBox?.getBoundingClientRect();
+    const gridStyle = grid ? getComputedStyle(grid) : null;
+    const padding = (property) => parseFloat(gridStyle?.[property] || '0') || 0;
+    const scaleX = gridRect && grid?.offsetWidth ? gridRect.width / grid.offsetWidth : 1;
+    const scaleY = gridRect && grid?.offsetHeight ? gridRect.height / grid.offsetHeight : 1;
+    const contentLeft = (gridRect?.left || 0)
+      + ((grid?.clientLeft || 0) + padding('paddingLeft')) * scaleX;
+    const contentRight = (gridRect?.left || 0)
+      + ((grid?.clientLeft || 0) + (grid?.clientWidth || 0) - padding('paddingRight')) * scaleX;
+    const contentTop = (gridRect?.top || 0)
+      + ((grid?.clientTop || 0) + padding('paddingTop')) * scaleY;
+    const contentBottom = (gridRect?.top || 0)
+      + ((grid?.clientTop || 0) + (grid?.clientHeight || 0) - padding('paddingBottom')) * scaleY;
+    return {
+      heading: document.querySelector('.warehouse-grid-empty h4')?.textContent?.trim() || '',
+      actions: document.querySelectorAll('.warehouse-empty-actions button').length,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      gridCenter: gridRect ? (gridRect.left + gridRect.right) / 2 : 0,
+      emptyCenter: emptyRect ? (emptyRect.left + emptyRect.right) / 2 : 0,
+      gridContentCenter: (contentLeft + contentRight) / 2,
+      gridVerticalCenter: gridRect ? (gridRect.top + gridRect.bottom) / 2 : 0,
+      emptyVerticalCenter: emptyRect ? (emptyRect.top + emptyRect.bottom) / 2 : 0,
+      gridContentVerticalCenter: (contentTop + contentBottom) / 2
+    };
+  });
   if (!emptyState.heading || emptyState.actions !== 2 || emptyState.overflow > 1) {
     throw new Error(`warehouse empty state incomplete: ${JSON.stringify(emptyState)}`);
+  }
+  if (Math.abs(emptyState.emptyCenter - emptyState.gridContentCenter) > 2
+    || Math.abs(emptyState.emptyVerticalCenter - emptyState.gridContentVerticalCenter) > 2) {
+    throw new Error(`warehouse empty state is not centered: ${JSON.stringify(emptyState)}`);
   }
   if (screenshotDir) {
     await empty.page.screenshot({ path: join(screenshotDir, 'warehouse-empty.png'), fullPage: false });
   }
   await empty.context.close();
 
-  console.log('verify-warehouse-ui-browser OK', JSON.stringify({ desktopState, mobileState, emptyState }));
+  const emptyMobile = await openWarehouse(browser, { width: 390, height: 844 }, true);
+  const emptyMobileState = await emptyMobile.page.evaluate(() => {
+    const gridNode = document.getElementById('cardsContainer');
+    const grid = gridNode?.getBoundingClientRect();
+    const emptyBox = document.querySelector('.warehouse-grid-empty')?.getBoundingClientRect();
+    const gridStyle = gridNode ? getComputedStyle(gridNode) : null;
+    const padding = (property) => parseFloat(gridStyle?.[property] || '0') || 0;
+    const scaleX = grid && gridNode?.offsetWidth ? grid.width / gridNode.offsetWidth : 1;
+    const scaleY = grid && gridNode?.offsetHeight ? grid.height / gridNode.offsetHeight : 1;
+    const contentLeft = (grid?.left || 0)
+      + ((gridNode?.clientLeft || 0) + padding('paddingLeft')) * scaleX;
+    const contentRight = (grid?.left || 0)
+      + ((gridNode?.clientLeft || 0) + (gridNode?.clientWidth || 0) - padding('paddingRight')) * scaleX;
+    const contentTop = (grid?.top || 0)
+      + ((gridNode?.clientTop || 0) + padding('paddingTop')) * scaleY;
+    const contentBottom = (grid?.top || 0)
+      + ((gridNode?.clientTop || 0) + (gridNode?.clientHeight || 0) - padding('paddingBottom')) * scaleY;
+    return {
+      gridCenter: grid ? (grid.left + grid.right) / 2 : 0,
+      emptyCenter: emptyBox ? (emptyBox.left + emptyBox.right) / 2 : 0,
+      gridContentCenter: (contentLeft + contentRight) / 2,
+      gridVerticalCenter: grid ? (grid.top + grid.bottom) / 2 : 0,
+      emptyVerticalCenter: emptyBox ? (emptyBox.top + emptyBox.bottom) / 2 : 0,
+      gridContentVerticalCenter: (contentTop + contentBottom) / 2
+    };
+  });
+  if (Math.abs(emptyMobileState.emptyCenter - emptyMobileState.gridContentCenter) > 2
+    || Math.abs(emptyMobileState.emptyVerticalCenter - emptyMobileState.gridContentVerticalCenter) > 2) {
+    throw new Error(`mobile warehouse empty state is not centered: ${JSON.stringify(emptyMobileState)}`);
+  }
+  await emptyMobile.context.close();
+
+  console.log('verify-warehouse-ui-browser OK', JSON.stringify({
+    desktopState,
+    mobileState,
+    mobileEditPanelState,
+    narrowToolbarStates,
+    emptyState,
+    emptyMobileState
+  }));
 } finally {
   await browser?.close();
   await new Promise((resolveClose) => server.close(resolveClose));

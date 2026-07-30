@@ -268,7 +268,9 @@
         }
       };
       void syncMyPostsToPublicFeed().finally(() => {
-        void refreshPublicCommunityFeed({ force: publicFeedState.at === 0 }).then(afterFeed);
+        void refreshPublicCommunityFeed({
+          force: publicFeedState.at === 0 && publicFeedNeedsFullRefresh()
+        }).then(afterFeed);
       });
       prunePendingJobsWithWarehouseCards();
       if (document.getElementById('pageImageGen')?.classList.contains('active')) {

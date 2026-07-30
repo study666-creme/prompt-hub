@@ -954,6 +954,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
     }
   
     function getImageGenCommunityFeedList() {
+      void d().ensureImageGenCommunityFeed?.();
       return d().filterAndSortPosts?.(d().getCommunityFeedForDisplay?.());
     }
   
@@ -1277,12 +1278,20 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         if (!feedAppend) {
           const list = store.commPosts.slice(0, imageGenFeedRenderedCount(store));
           if (!list.length) {
+            const publicFeedState = d().getPublicCommunityFeedState?.();
             const emptyMsg = d().getCommunityScope?.() === 'curated'
               ? '社区精选正在开发中'
               : d().getCommunityScope?.() === 'following'
                 ? '暂无关注作者的作品'
-                : '社区暂无内容';
-            html = `<p class="imagegen-feed-empty">${d().esc?.(emptyMsg)}</p>`;
+                : publicFeedState?.loading
+                  ? '社区内容加载中…'
+                  : !publicFeedState?.at && publicFeedState?.lastAttemptAt
+                    ? '社区加载失败'
+                    : '社区暂无内容';
+            const retry = !publicFeedState?.loading && !publicFeedState?.at && publicFeedState?.lastAttemptAt
+              ? '<button type="button" class="btn btn-ghost btn-sm" data-imagegen-community-retry>重试</button>'
+              : '';
+            html = `<div class="imagegen-feed-empty-wrap"><p class="imagegen-feed-empty">${d().esc?.(emptyMsg)}</p>${retry}</div>`;
           } else {
             html = list.map((p) => communityPostToFeedHtml(p)).join('');
           }
@@ -1432,6 +1441,14 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       if (!wrap.dataset.whCtaBound) {
         wrap.dataset.whCtaBound = '1';
         wrap.addEventListener('click', (e) => {
+          const retry = e.target.closest('[data-imagegen-community-retry]');
+          if (retry) {
+            e.preventDefault();
+            retry.disabled = true;
+            retry.setAttribute('aria-busy', 'true');
+            void d().ensureImageGenCommunityFeed?.({ force: true });
+            return;
+          }
           const link = e.target.closest('[data-open-warehouse]');
           if (!link) return;
           e.preventDefault();

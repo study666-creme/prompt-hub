@@ -509,6 +509,10 @@
     color: var(--accent);
   }
 
+  #mobileBatchImportBtn {
+    display: none !important;
+  }
+
   #mobileSearchBtn {
     flex-shrink: 0;
     width: 36px;
@@ -2506,6 +2510,19 @@
     height: 100dvh;
     max-height: 100dvh;
     border-radius: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  #filterBtn {
+    width: 36px;
+    padding-right: 0;
+    padding-left: 0;
+    gap: 0;
+  }
+
+  #filterBtn .mobile-filter-label {
+    display: none !important;
   }
 }
 

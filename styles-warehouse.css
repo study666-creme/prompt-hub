@@ -714,6 +714,10 @@
 }
 
 .app-page-warehouse #cardsContainer.feed-grid-centered {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   min-height: min(62vh, 520px);
   background: var(--warehouse-surface);
 }
@@ -1043,8 +1047,19 @@ body.panel-open .app-page-warehouse .warehouse-hero-visual {
     font-size: 10px;
   }
 
-  .app-page-warehouse #cardsContainer.feed-grid-centered {
-    min-height: calc(100dvh - 240px);
+  .app-page-warehouse #cardsContainer.cards-container.feed-grid-centered {
+    display: flex !important;
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    align-content: center !important;
+    justify-content: center !important;
+    grid-template-columns: none !important;
+    gap: 0 !important;
+    column-gap: 0 !important;
+    row-gap: 0 !important;
+    min-height: calc(100dvh - 240px) !important;
+    overflow: auto !important;
   }
 
   .app-page-warehouse .warehouse-grid-empty {

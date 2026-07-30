@@ -33,7 +33,8 @@ storage://card-images/{user}/{file}
 
 | 文件 | 职责 |
 |---|---|
-| `card-image-loader.js` | 队列、批量签名、IO、失败缓存和视口加载 |
+| `card-gallery.js` | 只有真实可解析图片引用存在时才为卡片创建媒体槽 |
+| `card-image-loader.js` | 队列、批量签名、解码状态、失效签名重取、失败缓存和视口加载 |
 | `card-image-loader-queues.js` | 并发和 cap 配置 |
 | `warehouse-thumb.js` | 生图仓库 grid 缩略图请求 |
 | `mobile.js` | 手机首屏 cap、滚动 boost |
@@ -53,15 +54,27 @@ storage://card-images/{user}/{file}
 
 1. 先区分外链 404、R2 miss、Storage miss、签名 401 和 API 5xx。
 2. 同一路径候选只尝试有限次数；失败写入短期缓存，防止滚动时刷请求。
-3. 纯文字卡片不渲染图片占位符。
-4. 只有对象确实存在但缺 grid 时才生成缩略图。
-5. 不删除卡片或图片来消除灰卡；使用后台抽检定位元数据与对象差异。
+3. URL 字符串存在不代表图片加载成功。浏览器只有在图片仍处于请求中且已绑定失败监听，或 `complete` 且解码出有效像素时才保留当前 URL；已完成但无像素的签名 URL 会失效对应路径和引用缓存，并绕过旧签名缓存重新解析一次。下载超时会清理 pending token 和旧 `src`，保留有限重试入口，不把图片永久卡在加载状态。
+4. 纯文字卡片不渲染图片占位符。生成任务 ID、来源 ID 或生图标签本身不构成图片引用。
+5. 只有对象确实存在但缺 grid 时才生成缩略图。
+6. 不删除卡片或图片来消除灰卡；只有现有权威 404/410 清理路径可以移除缺失引用，其他错误继续保留数据并按有限恢复链处理。
 
 ## 验收
 
 ```powershell
 npm run check:predeploy
 node scripts/audit-production-mobile-first-screen.mjs
+```
+
+失效签名、MJ 多图、近期生图和文字卡的本地回归：
+
+```powershell
+node scripts/verify-card-gallery-regression.mjs
+$env:PLAYWRIGHT_PACKAGE_DIR = '<playwright package directory>'
+$env:BROWSER_EXECUTABLE_PATH = '<Chrome or Edge executable>'
+node scripts/verify-card-image-loader-retry-browser.mjs
+node scripts/verify-card-image-loader-missing-cleanup-browser.mjs
+node scripts/verify-recent-image-resolution-browser.mjs
 ```
 
 发布候选中的仓库 UI 可使用独立浏览器验收，不访问生产 API：
@@ -73,6 +86,6 @@ $env:APP_ROOT = 'D:\prompt-hub\.pages-deploy'
 node scripts/verify-warehouse-ui-browser.mjs
 ```
 
-该检查注入 8 张 `_grid` 图卡和 4 张文本卡，覆盖桌面、手机及空仓状态，并验证媒体槽、三张首屏广告图、类型元数据、手机拖拽关闭和横向溢出。Pages 的 HTTP 冒烟还会确认仓库 CSS 未被 SPA HTML 回退替代。
+该检查注入 8 张 `_grid` 图卡和 4 张文本卡，覆盖桌面、320/360/390px 手机及空仓状态，并验证媒体槽、三张首屏广告图、类型元数据、窄屏工具栏、编辑面板触摸滚动、保存/关闭按钮可达性和横向溢出。Pages 的 HTTP 冒烟还会确认仓库 CSS 未被 SPA HTML 回退替代。
 
 手机生产基线见 `CURRENT-ISSUES.md`。浏览器检查首批卡片数、单图体积、是否出现 full 路径、滚动后是否按页增加，以及 404 是否重复刷屏。
