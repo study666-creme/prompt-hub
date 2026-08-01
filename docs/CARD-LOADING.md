@@ -88,6 +88,18 @@ $env:APP_ROOT = 'D:\prompt-hub\.pages-deploy'
 node scripts/verify-warehouse-ui-browser.mjs
 ```
 
+## Generated-card archive invariant
+
+Reviewed: 2026-08-02.
+
+When a signed-in user saves a generated result with `copyStorage`,
+`legacy/script/part-02.js` requires `archiveGeneratedCardImage` to return a
+verified `storage://` reference before persisting the card. Temporary upstream
+URLs and SVG loading placeholders are never accepted as durable primary media.
+If archival fails, the new card is removed instead of leaving a broken or black
+card. The paid acceptance guard likewise ignores `data:image/svg` and requires
+decoded raster pixels before recording a successful result.
+
 该检查注入 8 张 `_grid` 图卡和 4 张文本卡，覆盖桌面、320/360/390px 手机及空仓状态，并验证媒体槽、三张首屏广告图、类型元数据、窄屏工具栏、编辑面板触摸滚动、保存/关闭按钮可达性和横向溢出。Pages 的 HTTP 冒烟还会确认仓库 CSS 未被 SPA HTML 回退替代。
 
 手机生产基线见 `CURRENT-ISSUES.md`。浏览器检查首批卡片数、单图体积、是否出现 full 路径、滚动后是否按页增加，以及 404 是否重复刷屏。

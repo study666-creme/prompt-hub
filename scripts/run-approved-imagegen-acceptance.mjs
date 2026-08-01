@@ -7,21 +7,24 @@ import { pathToFileURL } from 'node:url';
 const SITE_BASE = 'https://prompt-hubs.com';
 const API_BASE = 'https://api.prompt-hubs.com';
 const APPROVAL_FLAG = 'PH_PAID_TEST_APPROVED';
-const MAX_BILLABLE_REQUESTS = 1;
+const MAX_BILLABLE_REQUESTS = 5;
 const MAX_IMAGES_PER_REQUEST = 1;
 const RESOLUTION = '1k';
 const QUALITY = 'medium';
 const SIZE = '1:1';
-const MAX_TOTAL_CREDITS = 5;
+const MAX_TOTAL_CREDITS = 200;
 const CREDITS_PER_YUAN = 100;
-const MAX_TOTAL_YUAN = 0.05;
+const MAX_TOTAL_YUAN = 2;
 const JOB_TIMEOUT_MS = 30 * 60_000;
 const UI_ARCHIVE_TIMEOUT_MS = 2 * 60_000;
 const CREDIT_TOLERANCE = 0.0001;
 const LEDGER_LIMIT = 50;
-const MODELS = Object.freeze([
-  'lingtu-lite'
-]);
+const MODELS = Object.freeze(
+  String(process.env.PH_ACCEPTANCE_MODELS || 'image2-economy,lingtu-fast,lingtu-lite,lingtu-2,lingtu-pro')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean)
+);
 
 if (process.env[APPROVAL_FLAG] !== '1') {
   console.error(`Refusing paid acceptance: set ${APPROVAL_FLAG}=1 only after explicit approval.`);
@@ -898,17 +901,17 @@ async function selectRequiredVisibleOption(selector, value, label) {
     enabledOption: [...select.options].some(option => option.value === expected && !option.disabled)
   }), expectedValue);
   if (!state.visible || state.disabled || !state.enabledOption || state.value !== expectedValue) {
-    throw new Error(`${label} UI selection could not be confirmed.`);
+    throw new Error(`${label} UI selection could not be confirmed: ${JSON.stringify(state)}.`);
   }
   return state;
 }
 
 async function assertOrSetApprovedResolution() {
   const control = page.locator('#imageGenResolution');
-  const visible = await control.isVisible();
   const state = await control.evaluate(select => ({
     disabled: select.disabled,
     value: select.value,
+    visible: select.checkVisibility?.() ?? select.getClientRects().length > 0,
     fixedParamHidden: select.closest('.imagegen-param[data-param="resolution"]')?.hidden === true,
     options: [...select.options].map(option => ({
       value: String(option.value || '').toLowerCase(),
@@ -916,15 +919,14 @@ async function assertOrSetApprovedResolution() {
     }))
   }));
 
-  if (visible) {
+  if (state.visible && state.options.length > 1 && state.options.some(option => option.value !== RESOLUTION && !option.disabled)) {
     await selectRequiredVisibleOption('#imageGenResolution', RESOLUTION, 'Resolution');
     return { mode: 'visible-selected', value: RESOLUTION };
   }
 
   const enabledOptions = state.options.filter(option => !option.disabled).map(option => option.value);
   if (
-    !state.fixedParamHidden
-    || state.disabled
+    state.disabled
     || state.value.toLowerCase() !== RESOLUTION
     || state.options.length !== 1
     || enabledOptions.length !== 1
@@ -946,20 +948,49 @@ async function configureApprovedGenerationForm({ prompt, modelId, index, title }
   await page.locator('#imageGenCardTitle').fill(cardTitle);
   await clearReferenceImagesThroughUi();
   await disableCommunityPublishThroughUi();
-  await page.waitForFunction(({ expectedModel, resolution, quality, size }) => {
-    const button = document.getElementById('imageGenSubmit');
-    const fold = document.getElementById('imageGenAdvancedFold');
-    const buttonVisible = !!button && (button.checkVisibility?.() ?? button.getClientRects().length > 0);
-    return fold?.open === true
-      && document.getElementById('imageGenModel')?.value === expectedModel
-      && document.getElementById('imageGenResolution')?.value.toLowerCase() === resolution
-      && document.getElementById('imageGenQuality')?.value === quality
-      && document.getElementById('imageGenSize')?.value === size
-      && document.getElementById('imageGenCount')?.value === '1'
-      && buttonVisible
-      && !button.disabled
-      && button.getAttribute('aria-busy') !== 'true';
-  }, { expectedModel: modelId, resolution: RESOLUTION, quality: QUALITY, size: SIZE }, { timeout: 20_000 });
+  try {
+    await page.waitForFunction(({ expectedModel, resolution, quality, size }) => {
+      const button = document.getElementById('imageGenSubmit');
+      const fold = document.getElementById('imageGenAdvancedFold');
+      const buttonVisible = !!button && (button.checkVisibility?.() ?? button.getClientRects().length > 0);
+      return fold?.open === true
+        && document.getElementById('imageGenModel')?.value === expectedModel
+        && document.getElementById('imageGenResolution')?.value.toLowerCase() === resolution
+        && document.getElementById('imageGenQuality')?.value === quality
+        && document.getElementById('imageGenSize')?.value === size
+        && document.getElementById('imageGenCount')?.value === '1'
+        && buttonVisible
+        && !button.disabled
+        && button.getAttribute('aria-busy') !== 'true';
+    }, { expectedModel: modelId, resolution: RESOLUTION, quality: QUALITY, size: SIZE }, { timeout: 20_000 });
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => {
+      const read = id => {
+        const node = document.getElementById(id);
+        return node ? {
+          value: 'value' in node ? node.value : null,
+          disabled: 'disabled' in node ? node.disabled : null,
+          hidden: node.hidden,
+          visible: node.checkVisibility?.() ?? node.getClientRects().length > 0,
+          busy: node.getAttribute('aria-busy')
+        } : null;
+      };
+      return {
+        activePage: document.querySelector('.app-page.active')?.id || '',
+        foldOpen: document.getElementById('imageGenAdvancedFold')?.open === true,
+        model: read('imageGenModel'),
+        resolution: read('imageGenResolution'),
+        quality: read('imageGenQuality'),
+        size: read('imageGenSize'),
+        count: read('imageGenCount'),
+        submit: read('imageGenSubmit'),
+        promptLength: String(document.getElementById('imageGenPrompt')?.value || '').length,
+        titleLength: String(document.getElementById('imageGenCardTitle')?.value || '').length,
+        bodyText: document.body?.innerText?.slice(-1200) || ''
+      };
+    });
+    throw new Error(`Generation form readiness timed out for ${modelId}: ${JSON.stringify(diagnostic)}`, { cause: error });
+  }
 
   return page.evaluate(({ expectedModel, resolutionMode }) => ({
     model: document.getElementById('imageGenModel')?.value || '',
@@ -1096,7 +1127,14 @@ async function waitForRecentCreation(jobId) {
       await image.waitFor({ state: 'attached', timeout: 30_000 });
       await image.scrollIntoViewIfNeeded();
       await page.waitForFunction(expectedJobId => [...document.querySelectorAll('#imageGenFeed img[data-job-id]')]
-        .some(img => img.getAttribute('data-job-id') === expectedJobId && img.complete && img.naturalWidth > 8), jobId, { timeout: 60_000 });
+        .some(img => {
+          const src = img.currentSrc || img.src || '';
+          return img.getAttribute('data-job-id') === expectedJobId
+            && img.complete
+            && img.naturalWidth > 8
+            && !src.includes('data:image/svg')
+            && (/^https?:\/\//i.test(src) || /^data:image\/(?!svg)/i.test(src) || src.startsWith('blob:'));
+        }), jobId, { timeout: 60_000 });
       const imageState = await image.evaluate(img => ({
         imageRef: img.getAttribute('data-image-ref') || '',
         storageRef: img.getAttribute('data-storage-ref') || '',

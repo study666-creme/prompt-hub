@@ -15,6 +15,8 @@ const serviceKey = required(env.MEMFIRE_SERVICE_ROLE_KEY, 'MEMFIRE_SERVICE_ROLE_
 const email = `image-ui-${Date.now()}-${randomBytes(3).toString('hex')}@prompt-hubs.invalid`;
 const password = `T-${randomBytes(24).toString('base64url')}!7a`;
 const runRef = `ui-image-acceptance-${Date.now()}-${randomUUID().slice(0, 8)}`;
+const MAX_BILLABLE_REQUESTS = 5;
+const MAX_TOTAL_CREDITS = 200;
 
 const created = await jsonRequest(`${serviceUrl}/auth/v1/admin/users`, {
   method: 'POST',
@@ -40,24 +42,30 @@ const credited = await jsonRequest(`${serviceUrl}/rest/v1/rpc/apply_credit_delta
   headers: serviceHeaders(serviceKey, { Prefer: 'return=representation' }),
   body: {
     p_user_id: userId,
-    p_delta: 5,
+    p_delta: MAX_TOTAL_CREDITS,
     p_reason: 'isolated_paid_image_ui_acceptance',
     p_ref_id: `${runRef}-credit`,
-    p_meta: { maxRequests: 1, maxImagesPerRequest: 1, resolution: '1k' }
+    p_meta: {
+      maxRequests: MAX_BILLABLE_REQUESTS,
+      maxImagesPerRequest: 1,
+      maxTotalCredits: MAX_TOTAL_CREDITS,
+      resolution: '1k'
+    }
   }
 });
 if (!credited.ok) throw new Error(`Isolated test credit grant failed (${credited.status}).`);
 const fundedProfile = await readProfile(userId);
 const fundedCredits = Number(fundedProfile.credits || 0);
 const fundedDailyCredits = Number(fundedProfile.daily_credits || 0);
-if (fundedCredits !== 5 || fundedDailyCredits !== 0) {
-  throw new Error('Isolated test account balance did not match the 5-credit hard cap.');
+if (fundedCredits !== MAX_TOTAL_CREDITS || fundedDailyCredits !== 0) {
+  throw new Error(`Isolated test account balance did not match the ${MAX_TOTAL_CREDITS}-credit hard cap.`);
 }
 
 console.log(JSON.stringify({
   event: 'isolated-test-account-ready',
   userId,
-  grantedCredits: 5,
+  grantedCredits: MAX_TOTAL_CREDITS,
+  maxBillableRequests: MAX_BILLABLE_REQUESTS,
   retainedForAudit: true
 }));
 

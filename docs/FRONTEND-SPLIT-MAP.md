@@ -102,6 +102,7 @@ When continuing the split work, edit these source modules first, then rebuild th
 - `card-image-loader-queues.js` owns image loader concurrency caps and queue helpers used by `card-image-loader.js`.
 - `card-gallery.js` decides whether a warehouse card has a real media reference; generation job IDs and tags alone must remain text cards.
 - `community-public-feed.js` owns the shared public-feed refresh promise, partial-cache hydration, bounded head request, and retry cooldown used by both community surfaces.
+- `legacy/script/part-02.js` owns generated-card persistence. Signed-in `copyStorage` saves must finish through `archiveGeneratedCardImage` and produce a verified `storage://` primary reference; failed archival removes the new card instead of persisting a temporary upstream URL.
 
 `card-image-loader.js` treats a URL as loaded only after the browser has decoded pixels (or while that exact request is still pending). A completed broken signed URL invalidates its cached path/reference and performs one fresh-sign resolution with the existing bounded fallback and authoritative-missing cleanup rules. Failed `cr_`/`wh_` feed media is collapsed to a text card while recovery continues, so a failed image never leaves a black media slot. Run `scripts/verify-card-image-loader-retry-browser.mjs`, `scripts/verify-imagegen-failed-media-collapse-browser.mjs`, and `scripts/verify-imagegen-finish-immediate-browser.mjs` for the focused regressions.
 

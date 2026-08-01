@@ -155,4 +155,5 @@ npm run deploy:dry-run
 2. Worker 先按同一可信目录重算并核对 `quotedCredits`，确认一致后才以请求键创建任务并幂等扣费，再把 New API 提交写入持久队列；队列投递不确定时保留数据库 outbox，由 cron 补投队列消息。New API 的 durable queue 是唯一付费 submit owner，请求响应和普通页面 poll 都不直接领取 `queued` 行。
 3. 队列消费只允许从 `queued` 原子领取一次。上游 HTTP 不确定、`running`、`outcome_unknown` 或任务查询 `not_found` 都不得重新发起付费 POST。
 4. 页面按秒轮询；服务端 cron 每 2 分钟兜底推进 submit、poll 和 archive。上游返回临时图后先把任务标为完成并立即给客户端展示，前端先写入“最近生成”并移除 pending，占用较慢的 R2/Storage 归档在后台独立重试，不重做生成。
-5. 未知上游结果超过 1 小时进入幂等退款 SLA。发布前必须验证队列 binding、cron、幂等迁移和原子积分 RPC 已同步存在。
+5. Signed-in `copyStorage` saves must complete `archiveGeneratedCardImage` and return a verified `storage://` primary reference before a generated card is persisted. SVG placeholders and temporary upstream URLs are display-only; a failed archive removes the newly created card.
+6. 未知上游结果超过 1 小时进入幂等退款 SLA。发布前必须验证队列 binding、cron、幂等迁移和原子积分 RPC 已同步存在。

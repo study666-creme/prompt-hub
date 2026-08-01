@@ -264,14 +264,26 @@
       cards.push(card);
       const imagesToArchive = CG?.normalizeCardGallery(card) || (primaryImage ? [primaryImage] : []);
       const copyStorage = payload.copyStorage === true;
+      const requiresStablePrimary = copyStorage
+        && !!window.SupabaseSync?.isLoggedIn?.()
+        && !!primaryImage;
+      let primaryArchiveError = null;
       for (let i = 0; i < imagesToArchive.length; i += 1) {
         const src = imagesToArchive[i];
         if (!src) continue;
         if (i === 0) void saveCardImageBackup(card.id, src).catch(() => {});
         if (!window.SupabaseSync?.isLoggedIn?.()) continue;
         try {
-          if (copyStorage && window.SupabaseSync?.uploadCardImage && i === 0) {
-            const archived = await window.SupabaseSync.uploadCardImage(card.id, src);
+          if (copyStorage && i === 0 && window.SupabaseSync?.archiveGeneratedCardImage) {
+            // Generated results can still point at a short-lived upstream URL.
+            // Archive through the authenticated Worker proxy before creating a card.
+            const archived = await window.SupabaseSync.archiveGeneratedCardImage(card.id, src, {
+              jobId: jobId || null,
+              allowRemoteArchive: true
+            });
+            if (!archived || !window.SupabaseSync?.isStorageRef?.(archived)) {
+              throw new Error('generated_primary_archive_failed');
+            }
             if (archived) {
               card.image = archived;
               if (Array.isArray(card.cardImages) && card.cardImages[i]) card.cardImages[i] = archived;
@@ -301,8 +313,15 @@
             }
           }
         } catch (e) {
+          if (i === 0) primaryArchiveError = e;
           console.warn('[addCardFromGenerated] gallery archive failed', i, e);
         }
+      }
+      if (requiresStablePrimary && (primaryArchiveError || !window.SupabaseSync?.isStorageRef?.(card.image))) {
+        const createdIndex = cards.indexOf(card);
+        if (createdIndex >= 0) cards.splice(createdIndex, 1);
+        await saveAllData({ skipCloud: true });
+        return { ok: false, error: 'image_archive_failed' };
       }
       if (CG?.syncCardGalleryFields) CG.syncCardGalleryFields(card);
       if (payload.publishToCommunity && window.FeatureDraft?.syncCardToCommunity) {

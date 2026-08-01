@@ -105,7 +105,7 @@ try {
     || state.activePage !== 'pageImageGen'
     || state.header !== '图片生成'
     || state.totalModelCount < 12
-    || !['lingtu-fast', 'lingtu-lite', 'image2-economy', 'image2', 'image2-4k-fast', 'lingtu'].every(id => state.catalogModelIds.includes(id))
+    || !['lingtu-fast', 'lingtu-lite', 'image2-economy', 'image2', 'image2-pro', 'image2-A', 'lingtu'].every(id => state.catalogModelIds.includes(id))
     || state.catalogModelIds.includes('image2-free')
     || state.modelCount < 1
     || state.customOptionCount !== state.modelCount
