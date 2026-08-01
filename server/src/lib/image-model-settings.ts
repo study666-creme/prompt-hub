@@ -542,7 +542,11 @@ export function listResolvedImageModels(
       catalog.id,
       settings,
       opts?.catalogEntries ?? IMAGE_MODEL_CATALOG
-    )!;
+    );
+    // Live catalogs may contain a newly published or mixed-case id before a
+    // reviewed static entry exists. Ignore that entry instead of making the
+    // whole public model projection fail.
+    if (!resolved) continue;
     if (opts?.enabledOnly && !resolved.enabled) continue;
     if (opts?.publicList && !resolved.visible) continue;
     out.push(resolved);

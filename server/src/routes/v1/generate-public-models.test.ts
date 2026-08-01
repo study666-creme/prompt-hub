@@ -436,4 +436,29 @@ describe('public image model projection', () => {
       'mj-niji7'
     ]);
   });
+
+  it('skips live entries without a reviewed static configuration', () => {
+    const image2 = NEWAPI_IMAGE_MODEL_CATALOG.find((entry) => entry.id === 'image2');
+    expect(image2).toBeTruthy();
+    const dynamicEntry = { ...image2!, id: 'image2-A', upstream: 'image2-A' };
+    const models = publicModelPayload(
+      { globalDiscountPercent: 100, models: {} },
+      null,
+      false,
+      {
+        newApiCatalog: {
+          available: true,
+          stale: false,
+          version: 'dynamic-entry',
+          pricingVersion: 'dynamic-entry',
+          models: [],
+          rules: [],
+          imageCatalogEntries: [...NEWAPI_IMAGE_MODEL_CATALOG, dynamicEntry]
+        }
+      }
+    );
+
+    expect(models.some((model) => model.id === 'image2-A')).toBe(false);
+    expect(models.some((model) => model.id === 'image2')).toBe(true);
+  });
 });
