@@ -1160,10 +1160,23 @@ async function saveRecentCreationThroughUi(jobId, creationId, expectedModel) {
   await save.waitFor({ state: 'visible' });
   await save.click();
 
-  await page.waitForFunction(expectedJobId => {
+  // addCardFromGenerated renders the card before saveCreationToWarehouse writes
+  // the recent-record link. Wait for both sides of that async handoff so the
+  // assertion cannot observe the transient pre-link state.
+  await page.waitForFunction(({ expectedJobId, expectedCreationId }) => {
     const base = value => String(value || '').replace(/#\d+$/, '');
-    return (window.__promptHubCards || []).some(card => base(card?.genJobId) === expectedJobId && card?.image);
-  }, jobId, { timeout: UI_ARCHIVE_TIMEOUT_MS });
+    const card = (window.__promptHubCards || [])
+      .find(entry => base(entry?.genJobId) === expectedJobId) || null;
+    let creations = [];
+    try { creations = JSON.parse(localStorage.getItem('promptrepo_creations') || '[]'); } catch { /* ignore */ }
+    const creation = creations.find(entry => entry?.id === expectedCreationId) || null;
+    return Boolean(
+      card?.image
+      && window.SupabaseSync?.isStorageRef?.(card.image)
+      && creation?.savedToWarehouse
+      && String(creation?.warehouseCardId || '') === String(card?.id || '')
+    );
+  }, { expectedJobId: jobId, expectedCreationId: creationId }, { timeout: UI_ARCHIVE_TIMEOUT_MS });
 
   const result = await page.evaluate(({ expectedJobId, expectedCreationId }) => {
     const base = value => String(value || '').replace(/#\d+$/, '');
