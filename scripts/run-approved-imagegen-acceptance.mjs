@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 const SITE_BASE = 'https://prompt-hubs.com';
 const API_BASE = 'https://api.prompt-hubs.com';
 const APPROVAL_FLAG = 'PH_PAID_TEST_APPROVED';
-const MAX_BILLABLE_REQUESTS = 5;
+const MAX_BILLABLE_REQUESTS = Number(process.env.PH_ACCEPTANCE_REQUESTS || 5);
 const MAX_IMAGES_PER_REQUEST = 1;
 const RESOLUTION = '1k';
 const QUALITY = 'medium';
@@ -39,7 +39,10 @@ if (!testEmail || !testPassword) {
 }
 
 if (
-  MODELS.length !== MAX_BILLABLE_REQUESTS
+  !Number.isInteger(MAX_BILLABLE_REQUESTS)
+  || MAX_BILLABLE_REQUESTS < 1
+  || MAX_BILLABLE_REQUESTS > 5
+  || MODELS.length !== MAX_BILLABLE_REQUESTS
   || new Set(MODELS).size !== MODELS.length
   || MAX_IMAGES_PER_REQUEST !== 1
   || RESOLUTION !== '1k'

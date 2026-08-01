@@ -27,6 +27,9 @@ storage://card-images/{user}/{file}
   -> R2，缺失时按 r2-first 回源 MemFire Storage
 ```
 
+Generated results from `newapi.prompt-hubs.com` are fetched only through the
+authenticated Worker media proxy before browser-side validation and upload.
+
 详情、下载、Canvas 插入使用 `variant=full`。列表不得因为 grid 404 自动把所有卡片降级成 full。
 
 ## 关键模块

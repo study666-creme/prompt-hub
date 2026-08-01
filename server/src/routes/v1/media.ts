@@ -362,6 +362,7 @@ const ALLOWED_FETCH_HOSTS = [
   'prompt-hub.cn',
   'api.prompt-hubs.com',
   'prompt-hubs.com',
+  'newapi.prompt-hubs.com',
   'grsai.com',
   'api.grsai.com',
   'aitohumanize.com',
@@ -370,7 +371,7 @@ const ALLOWED_FETCH_HOSTS = [
   'blob.core.windows.net'
 ];
 
-function isAllowedRemoteUrl(url: string): boolean {
+export function isAllowedRemoteUrl(url: string): boolean {
   try {
     const u = new URL(url);
     if (u.protocol !== 'https:') return false;

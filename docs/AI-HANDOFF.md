@@ -44,7 +44,7 @@
 | 社区/主页布局 | `feed-layout.js`、`styles/features/` |
 | 生图提交/轮询 | `imagegen-submit.js`、`imagegen-job-runner.js`、`server/src/routes/v1/generate.ts` |
 | 视频提交/轮询 | `server/src/routes/v1/video.ts`、`server/src/lib/video-provider-*.ts`、`server/src/lib/newapi-video.ts` |
-| 图片签名/R2 | `card-image-loader.js`、`server/src/routes/v1/media.ts`、`server/src/lib/r2-storage.ts` |
+| 图片签名/R2/上游归档代理 | `card-image-loader.js`、`server/src/routes/v1/media.ts`、`server/src/lib/r2-storage.ts` |
 | 登录/同步 | `supabase-sync.js`、`cloud-sync-safety.js`、`sync-orchestrator.js` |
 | 后台 | `legacy/admin/`、`server/src/routes/admin/` |
 | Canvas/扩展 | `app-router.js`、`legacy/script/part-04.js`、`legacy/script/part-09.js`、`legacy/script/part-10.js`、`server/src/routes/v1/extension.ts`、`server/src/lib/extension-card.ts`、`docs/CANVAS-INTEGRATION.md` |

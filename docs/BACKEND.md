@@ -27,7 +27,7 @@
 | `/api/v1/video/*` | Bearer | 视频目录、报价、提交、轮询和受控内容代理 |
 | `/api/v1/payments/*`, `/wallet/*` | 商品列表公开，其余 Bearer | 支付主入口与旧 Canvas 兼容别名 |
 | `/api/v1/membership/tasks/events/canvas-create-node` | Bearer | 原子记录首次建点并只奖励一次 |
-| `/api/v1/media/*` | Bearer | 私有图片上传、批量签名和缩略图 |
+| `/api/v1/media/*` | Bearer | 私有图片上传、批量签名、缩略图和受控上游图片代理 |
 | `/api/v1/community/*` | Bearer | 发布、点赞、通知和灵感抽取 |
 | `/api/v1/extension/*` | Bearer | 扩展与 Canvas 列表、标签和存卡 |
 | `/api/v1/extension/cards/:cardId` | Bearer | 按当前用户精确取卡，响应 `private, no-store` |
