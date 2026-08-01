@@ -24,6 +24,62 @@
     }) || null;
   }
 
+  function replaceArchivedImageRefs(creation, rawImage, archivedImage) {
+    if (!creation || !rawImage || !archivedImage || rawImage === archivedImage) return null;
+    const replace = (value) => value === rawImage ? archivedImage : value;
+    const next = { ...creation };
+    let changed = false;
+    for (const key of ['image', 'mjCompositeUrl']) {
+      if (next[key] === rawImage) {
+        next[key] = archivedImage;
+        changed = true;
+      }
+    }
+    for (const key of ['cardImages', 'mjGridUrls']) {
+      if (!Array.isArray(next[key])) continue;
+      const values = next[key].map((value) => replace(value));
+      if (values.some((value, index) => value !== next[key][index])) {
+        next[key] = values;
+        changed = true;
+      }
+    }
+    return changed ? next : null;
+  }
+
+  function archiveImageInBackground(creationId, rawImage, archiveJobId) {
+    if (
+      !creationId
+      || !rawImage
+      || !archiveJobId
+      || !global.SupabaseSync?.isLoggedIn?.()
+      || !global.SupabaseSync?.archiveGeneratedCardImage
+    ) return;
+    void Promise.resolve()
+      .then(() => global.SupabaseSync.archiveGeneratedCardImage(creationId, rawImage, {
+        jobId: archiveJobId,
+        allowRemoteArchive: true
+      }))
+      .then((archived) => {
+        if (!archived || archived === rawImage) return;
+        const current = d().getCreations?.() || [];
+        const live = current.find((item) => item?.id === creationId);
+        const next = replaceArchivedImageRefs(live, rawImage, archived);
+        if (!next) return;
+        d().setCreations?.(current.map((item) => item?.id === creationId ? next : item));
+        d().persistCreations?.();
+        if (next.image === archived) d().setImageGenLastResult?.(archived);
+        if (global.SupabaseSync?.isStorageRef?.(archived)) {
+          void global.WarehouseThumb?.resolveForCard?.(archived, {
+            jobId: archiveJobId,
+            assetId: creationId,
+            cardId: creationId
+          });
+        }
+        d().renderImageGenFeed?.({ preserveScroll: true });
+      })
+      .catch((error) => console.warn('[finishImageGen] background archive failed', error));
+  }
+
   async function finishImageGenRun({
     prompt,
     model,
@@ -82,27 +138,10 @@
       const creations = d().getCreations() || [];
       const existingCre = baseJobId ? findCreationForBaseJob(baseJobId) : null;
       const creationId = existingCre?.id || d().genId('cr');
-      let storedImage = image;
+      // Show the upstream result immediately. Storage archiving is best-effort
+      // and must not hold the paid generation in a pending state.
+      const storedImage = image;
       const archiveJobId = slotJobId || baseJobId;
-      if (global.SupabaseSync?.isLoggedIn?.() && global.SupabaseSync?.archiveGeneratedCardImage && archiveJobId) {
-        try {
-          const archived = await global.SupabaseSync.archiveGeneratedCardImage(creationId, image, {
-            jobId: archiveJobId,
-            allowRemoteArchive: true
-          });
-          if (archived) storedImage = archived;
-        } catch (e) {
-          console.warn('[finishImageGen] archive to storage failed', e);
-        }
-      }
-
-      if (slotJobId && global.SupabaseSync?.isStorageRef?.(storedImage)) {
-        void global.WarehouseThumb?.resolveForCard?.(storedImage, {
-          jobId: slotJobId,
-          assetId: creationId,
-          cardId: creationId
-        });
-      }
       if (idx === 1) d().setImageGenLastResult(storedImage);
 
       const submittedRefs = Array.isArray(submittedRefImages)
@@ -132,26 +171,6 @@
         return storedImage ? [storedImage] : [];
       };
 
-      let mjGalleryStored = null;
-      if (isMidjourney && global.SupabaseSync?.isLoggedIn?.() && global.SupabaseSync?.archiveGeneratedCardImage && archiveJobId) {
-        const rawGallery = galleryFromMj();
-        if (rawGallery.length > 1) {
-          mjGalleryStored = [];
-          for (let gi = 0; gi < rawGallery.length; gi += 1) {
-            const slot = gi === 0 ? archiveJobId : `${String(archiveJobId).replace(/#\d+$/, '')}#${gi + 1}`;
-            try {
-              const a = await global.SupabaseSync.archiveGeneratedCardImage(creationId, rawGallery[gi], {
-                jobId: slot,
-                allowRemoteArchive: true
-              });
-              mjGalleryStored.push(a || rawGallery[gi]);
-            } catch (e) {
-              mjGalleryStored.push(rawGallery[gi]);
-            }
-          }
-        }
-      }
-
       const cardMjGridUrls = isMidjourney
         ? (Array.isArray(mjGridUrls) && mjGridUrls.length
           ? mjGridUrls.slice(0, 4)
@@ -180,7 +199,7 @@
         mjGridUrls: cardMjGridUrls,
         mjCompositeUrl: isMidjourney && mjCompositeUrl ? mjCompositeUrl : null,
         mjButtons: isMidjourney && Array.isArray(mjButtons) ? mjButtons : null,
-        cardImages: isMidjourney ? (mjGalleryStored || galleryFromMj()) : null,
+        cardImages: isMidjourney ? galleryFromMj() : null,
         genBatchId: genBatchId || existingCre?.genBatchId || null,
         fromInspirationDraw: !!fromInspirationDraw,
         savedToWarehouse: !!existingCre?.savedToWarehouse,
@@ -206,6 +225,19 @@
       d().prunePendingJobsWithCreations?.();
       d().renderImageGenFeed({ preserveScroll: true });
       d().renderImageGenMobileResult?.();
+
+      if (archiveJobId) {
+        if (isMidjourney) {
+          galleryFromMj().forEach((rawImage, galleryIndex) => {
+            const archiveSlot = galleryIndex === 0
+              ? archiveJobId
+              : `${String(archiveJobId).replace(/#\d+$/, '')}#${galleryIndex + 1}`;
+            archiveImageInBackground(creationId, rawImage, archiveSlot);
+          });
+        } else {
+          archiveImageInBackground(creationId, image, archiveJobId);
+        }
+      }
 
       if (!isRecovery && !silentToast && idx === 1) {
         d().toast(isMidjourney

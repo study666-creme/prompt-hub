@@ -256,6 +256,8 @@
       media?.classList.remove('is-loading', 'card-media--await', 'media-shine-reveal');
       media?.classList.add('card-media--load-failed');
       img?.classList.add('img-load-failed');
+      const feedCard = img?.closest?.('.imagegen-feed-card');
+      if (feedCard) collapseWarehouseFeedCardNoThumb(feedCard);
     }
 
     function bindFeedImgErrorFallback(img) {
@@ -306,9 +308,11 @@
     }
   
     function collapseWarehouseFeedCardNoThumb(feedCard) {
-      if (!feedCard?.dataset?.feedId?.startsWith?.('wh_')) return;
+      const feedId = String(feedCard?.dataset?.feedId || '');
+      if (!/^cr_|^wh_/.test(feedId) && !feedCard?.closest?.('#imageGenFeed')) return false;
       feedCard.querySelector('.imagegen-feed-media')?.remove();
       feedCard.classList.add('imagegen-feed-card--no-media');
+      return true;
     }
 
     async function tryWarehouseFeedGalleryCovers(img) {
@@ -615,6 +619,7 @@
         const media = img.closest('.imagegen-feed-media');
         const card = img.closest('.imagegen-feed-card');
         if (media?.closest('#imageGenFeed')) {
+          if (collapseWarehouseFeedCardNoThumb(card)) return;
           media.classList.add('card-media--load-failed');
           card?.classList.remove('imagegen-feed-card--no-media');
           return;

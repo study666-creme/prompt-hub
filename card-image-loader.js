@@ -398,6 +398,14 @@
   }
 
   function finalizeRecentCreationMediaFailure(img, media) {
+    const feedCard = img?.closest?.('.imagegen-feed-card');
+    const feedId = String(feedCard?.dataset?.feedId || '');
+    if ((/^cr_|^wh_/.test(feedId) || feedCard?.closest?.('#imageGenFeed'))) {
+      media?.remove();
+      feedCard.classList.add('imagegen-feed-card--no-media');
+      if (isOwnImageGenRecentImg(img)) void confirmPermanentlyMissingRecentCreation(img);
+      return;
+    }
     media?.classList.remove('is-loading');
     media?.classList.add('card-media--load-failed');
     if (isOwnImageGenRecentImg(img)) void confirmPermanentlyMissingRecentCreation(img);

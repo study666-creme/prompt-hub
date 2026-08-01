@@ -1,6 +1,6 @@
 # 列表图片加载
 
-复核日期：2026-07-30。下述仓库 UI 对应 `20260730a` 发布候选；生产是否已切换以线上 build 和资源 HTTP 冒烟为准。图片存储链路未因本次视觉改版而改变。
+复核日期：2026-08-01。下述仓库 UI 对应当前生图媒体可靠性候选；生产是否已切换以线上 build 和资源 HTTP 冒烟为准。
 
 ## 目标
 
@@ -57,7 +57,7 @@ storage://card-images/{user}/{file}
 3. URL 字符串存在不代表图片加载成功。浏览器只有在图片仍处于请求中且已绑定失败监听，或 `complete` 且解码出有效像素时才保留当前 URL；已完成但无像素的签名 URL 会失效对应路径和引用缓存，并绕过旧签名缓存重新解析一次。下载超时会清理 pending token 和旧 `src`，保留有限重试入口，不把图片永久卡在加载状态。
 4. 纯文字卡片不渲染图片占位符。生成任务 ID、来源 ID 或生图标签本身不构成图片引用。
 5. 只有对象确实存在但缺 grid 时才生成缩略图。
-6. 不删除卡片或图片来消除灰卡；只有现有权威 404/410 清理路径可以移除缺失引用，其他错误继续保留数据并按有限恢复链处理。
+6. 失败的近期生成/生图仓库媒体只移除失败的媒体槽并保留文字卡，避免黑色方块和浏览器破图图标；不会删除卡片或原始引用。只有现有权威 404/410 清理路径可以移除确实不存在的近期记录，其他错误继续保留数据并按有限恢复链处理。
 
 ## 验收
 
@@ -75,6 +75,8 @@ $env:BROWSER_EXECUTABLE_PATH = '<Chrome or Edge executable>'
 node scripts/verify-card-image-loader-retry-browser.mjs
 node scripts/verify-card-image-loader-missing-cleanup-browser.mjs
 node scripts/verify-recent-image-resolution-browser.mjs
+node scripts/verify-imagegen-failed-media-collapse-browser.mjs
+node scripts/verify-imagegen-finish-immediate-browser.mjs
 ```
 
 发布候选中的仓库 UI 可使用独立浏览器验收，不访问生产 API：

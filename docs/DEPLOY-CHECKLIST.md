@@ -1,10 +1,10 @@
 # 部署与验证清单
 
-最后核对：2026-07-30
+最后核对：2026-08-02
 
 ## 当前发布状态
 
-2026-07-30 已完成候选审查、New API/Cloudflare 核对、全量验证、可恢复数据库备份、五项迁移和 Worker/Pages 生产发布。`20260730a` 已上线；`/health.buildSha`、Pages build、队列绑定、仓库首屏资源和只读生图目录均已验收。
+生产基线仍为 `20260730a`。本候选 build `20260802a` 修复 New API 生图 durable queue 提交、完成态先行渲染和失败媒体折叠；代码、测试与文档已完成，待同一干净提交发布后以 `/health.buildSha` 和 Pages production build 核对。
 
 ## 发布顺序
 
@@ -73,7 +73,7 @@ node scripts\run-index-local-http-smoke.mjs
 
 ### 6. 解冻、dry-run 与迁移
 
-本轮已完成解冻、build bump、最终 dry-run 和五项迁移。以后发布仍先运行 `scripts/bump-build.ps1`，审查并将 build 变更和状态文档提交为同一个干净发布 SHA，随后运行：
+本轮已完成 build bump；数据库没有新增迁移。审查并将 build 变更和状态文档提交为同一个干净发布 SHA，随后运行：
 
 ```powershell
 cd D:\prompt-hub\server

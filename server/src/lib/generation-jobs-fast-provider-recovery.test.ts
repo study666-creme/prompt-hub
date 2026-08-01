@@ -160,11 +160,10 @@ describe('pollAndUpdateJob fast-provider archive recovery', () => {
     });
   });
 
-  it('nudges the durable queue and starts an idempotent submit fallback for queued NewAPI jobs', async () => {
+  it('nudges the durable queue without starting a second submit owner for queued NewAPI jobs', async () => {
     const { admin } = updateAdmin();
     const queue = { send: vi.fn(async () => undefined) };
     const kicked: Promise<unknown>[] = [];
-    fastSubmitMocks.processFastProviderPendingSubmit.mockResolvedValueOnce(true);
 
     const result = await pollAndUpdateJob(
       admin,
@@ -182,16 +181,8 @@ describe('pollAndUpdateJob fast-provider archive recovery', () => {
       refunded: false
     });
     expect(queue.send).toHaveBeenCalledWith({ jobId: 'job-queued-1', userId: 'user-1' });
-    expect(fastSubmitMocks.fastSubmitParamsFromJob).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-queued-1' }));
-    expect(fastSubmitMocks.processFastProviderPendingSubmit).toHaveBeenCalledWith(
-      admin,
-      'user-1',
-      expect.objectContaining({ id: 'job-queued-1' }),
-      expect.objectContaining({ newapiKey: 'unit-key' }),
-      'newapi',
-      expect.objectContaining({ upstreamModel: 'gpt-image-2' }),
-      expect.objectContaining({ IMAGE_GENERATION_QUEUE: queue })
-    );
+    expect(fastSubmitMocks.fastSubmitParamsFromJob).not.toHaveBeenCalled();
+    expect(fastSubmitMocks.processFastProviderPendingSubmit).not.toHaveBeenCalled();
   });
 
 });

@@ -1356,10 +1356,10 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
           final > 0 ? '生成队列暂不可用，积分已退回' : '生成队列暂不可用，请稍后重试'
         );
       }
-      kickBackgroundTask(
-        c,
-        processFastProviderPendingSubmit(admin, user.id, queuedJob, upstream, lineProvider, submitParams, c.env)
-      );
+      // Durable queue is the single submit owner for NewAPI.  Do not also
+      // claim the row in request-scoped waitUntil: an upstream request that
+      // runs past the Worker lifetime would strand the row in `running` and
+      // the queue's deliberate running-state retry would never resubmit it.
     } else {
       const { error: persistError } = await admin
         .from('generation_requests')

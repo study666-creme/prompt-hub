@@ -1,6 +1,6 @@
 # Prompt Hub 双树收编记录
 
-最后核对：2026-07-30
+最后核对：2026-08-02
 
 > 本文区分“生产已上线”和“主树本地完成”。生产切换必须通过 `/health.buildSha`、Pages build 和线上冒烟取证，不能只凭本地提交或测试通过作结论。
 
@@ -8,8 +8,8 @@
 
 - **唯一候选源**：`D:\prompt-hub`。
 - **历史生产审计源**：`D:\canvas\prompt-hub`，只读，不再作为开发或部署源。
-- **当前生产**：主树 `20260730a` 已完成 Worker、Pages 与五项数据库迁移发布；`/health.buildSha`、Pages build、仓库首屏 DOM/CSS/图片、图片/视频队列和只读生图目录均已取证。
-- **当前候选**：没有待发布功能候选；后续维护继续从 `D:\prompt-hub` 的独立分支/工作树和干净提交进入发布流程。
+- **当前生产**：`20260730a` 仍是线上基线，Worker、Pages 与五项数据库迁移已取证。
+- **当前候选**：`20260802a` 修复 New API 生图队列提交、完成态即时渲染和失败媒体折叠；待同一干净提交发布后，以 `/health.buildSha` 和 Pages production build 完成切换取证。
 
 双树文件完全相同不是目标。目标是逐项审计生产行为，将需要保留的能力以主树现有契约安全实现，并明确拒绝会重复付费、泄露渠道或回退公开接口的历史实现。
 
@@ -39,7 +39,7 @@
 
 - **New API 已核验**：2026-07-30 公开目录返回 `capability_version: 2026-07-29.1`；`sd2.0-pro` 的公开契约为 4–15 秒、固定 720p、最多 9 图/3 视频/3 音频。
 - **Cloudflare 资源已核验**：图片/视频 Queue 与 DLQ、`prompt-hub-card-images` R2、`PROMPT_HUB_METRICS` KV 均存在；图片与视频 Queue 均显示 1 producer / 1 consumer。
-- **Git 与验证已完成**：功能候选 `4fcb4b0cf61a1d6260d7fd6485c2d282da71614f` 经发布提交进入生产，全量验证结果见下节；最终运行提交始终从 `/health.buildSha` 读取。
+- **Git 与验证已完成**：线上基线为 `20260730a`；本候选的最终发布 SHA 需在提交后写入并通过 `/health.buildSha` 核对，最终运行提交始终从线上健康检查读取。
 - **数据库备份已核验**：`prompt-hub-final-20260730-102016.dump` 为 15,330,250 字节，`pg_restore --list` 返回 732 项，SHA-256 为 `7A83BD87B42E1B195121E542655A65B4C2F4E5EAABE0EDACDF45ABD34C488448`；项目外 DPAPI 加密副本已完成解密回算。
 
 - **数据库迁移已应用**：最终 dry-run 通过后用单事务按以下顺序应用，并核验列、索引、RPC、支付表、RLS 与 `service_role` 权限：
@@ -53,7 +53,7 @@
 
 ## 验证基线
 
-2026-07-30 功能候选 `4fcb4b0cf61a1d6260d7fd6485c2d282da71614f` 已通过 Worker `npm run typecheck`、50 个测试文件共 340 项测试、根目录 `npm run check:docs` 与 `npm run check:predeploy`、Pages 暂存 HTTP 冒烟、仓库桌面/手机/空态浏览器验收，以及生图批量可靠性、提交反馈、最近生成留存、缺图清理、卡片操作布局、访客隔离和手机首屏专项。发布后又验证了 `/health.buildSha`、Pages `20260730a`、生产资源 MIME/图片、队列、支付别名与公开生图目录。
+2026-08-02 候选 `20260802a` 已通过 Worker `npm run typecheck`、50 个测试文件共 340 项测试、根目录文档/预部署检查，以及失败媒体折叠和归档挂起即时完成浏览器回归。发布后还需验证 `/health.buildSha`、Pages production build、模型目录 HTTP 200 和一次隔离账号低价生图闭环。
 
 ## 以后如何避免再次分叉
 

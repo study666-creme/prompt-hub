@@ -60,7 +60,7 @@
 - 访客无持久草稿时，当前全能模型2家族默认选择公开目录中排序最前的 `image2-economy`；它与标准 `image2` 的价格必须分别从目录读取，不能用旧默认值覆盖。
 - `resolution` 只表示 `1k/2k/4k`，`quality` 只表示质量，但不是每个模型都有质量控件。只有香蕉公开 `low/medium/high`；`image2k4k` 固定 `low`，4K 型号固定 `standard`，`gpt-image-2-ext` 省略 `quality` 并使用默认画质。仅历史精确值 `quality=1k|2k|4k` 会在入口转换为 `resolution`。
 - 所有香蕉模型支持最多 14 张参考图。不能根据缺字段、陈旧目录或 `max_items=0` 推断香蕉不支持参考图。
-- 卡片库点击生成后先同步插入作品占位；New API 通过持久队列提交，页面按秒 poll，cron 每 2 分钟兜底 poll/archive。上游已出图时先返回临时图，归档独立重试。
+- 卡片库点击生成后先同步插入作品占位；New API 只由持久队列提交，页面按秒 poll，cron 每 2 分钟兜底 poll/archive，避免请求结束时再次领取同一 `queued` 任务。上游已出图时前端先写入最近生成并移除 pending，临时图可立即展示，归档独立重试。
 - 付费提交只允许原子领取一次；网络结果未知、任务 `not_found` 或队列重投都不得触发第二次上游 POST。稳定幂等键与 1 小时未知结果退款 SLA 必须保留。
 - 视频使用独立 `VIDEO_GENERATION_QUEUE`。有上游 task ID 的正常 `processing` 可以持续数百或数千秒，不按生成时长判失败；进入 `result_uncertain`（包括 `error.code=result_uncertain`）后则保留 `submitted` 和公开投影 `submission_unknown`，由后台只读 GET 同一个 NewAPI task ID。显式线路任务继续使用持久化 `routeChannelId`；普通公开模型由 NewAPI 任务记录中的原始 `ChannelId` 固定渠道。两种情况都绝不重发生成 POST 或重新选路。
 - 带 `upstreamTaskId` 的 `result_uncertain` 持续 1 小时仍无法恢复为 processing/completed/明确 failed 时，必须以幂等 `refund_pending` -> `refunded` 收敛为失败并退款。cron 必须先 poll，再执行 timeout finalize，避免任务刚成功却先被退款的竞态。

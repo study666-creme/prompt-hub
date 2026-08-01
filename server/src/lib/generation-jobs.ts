@@ -711,7 +711,8 @@ export async function pollAndUpdateJob(
           'newapi-queue'
         );
       }
-      if (st === 'queued') {
+      const durableQueueOwnsSubmit = provider === 'newapi' && !!env?.IMAGE_GENERATION_QUEUE;
+      if (st === 'queued' && !durableQueueOwnsSubmit) {
         const { processFastProviderPendingSubmit, fastSubmitParamsFromJob } = await import(
           './fast-provider-submit'
         );

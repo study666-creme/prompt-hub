@@ -25,11 +25,11 @@
 | 卡片仓库 UI | `styles-warehouse.css`, `partials/index-body/part-02.html`, `legacy/script/part-04.js`, `legacy/script/part-09.js` |
 | 编辑面板多图/移动端遮挡 | `edit-panel-gallery.js`, `card-gallery.js`, `mobile.js`, `styles-mobile.css` |
 | 云同步/账号切换 | `supabase-sync.js`, `legacy/supabase-sync/`, `cloud-sync-safety.js`, `sync-orchestrator.js` |
-| 卡片图片/文字卡判定 | `card-gallery.js`, `card-image-loader.js`, `card-image-loader-queues.js`, `warehouse-thumb.js` |
+| 卡片图片/文字卡判定 | `card-gallery.js`, `card-image-loader.js`, `card-image-loader-queues.js`, `feed-images.js`, `warehouse-thumb.js` |
 | 社区数据/共享首屏请求 | `community-public-feed.js`, `image-gen-feed.js`, `legacy/features-draft/`, `server/src/routes/v1/community.ts` |
 | 社区布局 | `feed-layout.js`, `styles/features/` |
 | 生图表单 | `legacy/features-draft/`, `imagegen-ref-ui.js`, `imagegen-submit.js` |
-| 生图任务 | `imagegen-job-runner.js`, `imagegen-poll-warehouse.js`, `server/src/routes/v1/generate.ts` |
+| 生图任务 | `imagegen-job-runner.js`, `imagegen-poll-warehouse.js`, `imagegen-finish-run.js`, `server/src/routes/v1/generate.ts`, `server/src/lib/fast-provider-queue.ts` |
 | 上游 provider | `server/src/lib/image-upstream.ts`, provider 对应 `*.ts` |
 | 媒体/R2 | `server/src/routes/v1/media.ts`, `server/src/lib/media-cdn.ts`, `server/src/lib/r2-storage.ts` |
 | 会员/积分 | `subscription.js`, `membership.js`, `points-system.js`, `server/src/lib/membership-credits.ts` |

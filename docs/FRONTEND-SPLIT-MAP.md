@@ -93,7 +93,7 @@ The generated packs are assembled from real source modules in a fixed order:
 
 - `pack-core.js`: `media-pipeline.js`, `sync-orchestrator.js`, `card-image-loader-queues.js`, `card-image-loader.js`
 - `pack-feed.js`: `feed-images.js`, `feed-layout.js`, `image-gen-feed-cards.js`, `image-gen-feed.js`
-- `pack-imagegen.js`: image generation modules, including `imagegen-job-state.js`, `imagegen-job-runner.js`, `imagegen-ref-ui.js`, `imagegen-submit.js`
+- `pack-imagegen.js`: image generation modules, including `imagegen-job-state.js`, `imagegen-job-runner.js`, `imagegen-finish-run.js`, `imagegen-ref-ui.js`, `imagegen-submit.js`
 
 When continuing the split work, edit these source modules first, then rebuild the packs. Current extracted boundaries:
 
@@ -103,7 +103,7 @@ When continuing the split work, edit these source modules first, then rebuild th
 - `card-gallery.js` decides whether a warehouse card has a real media reference; generation job IDs and tags alone must remain text cards.
 - `community-public-feed.js` owns the shared public-feed refresh promise, partial-cache hydration, bounded head request, and retry cooldown used by both community surfaces.
 
-`card-image-loader.js` treats a URL as loaded only after the browser has decoded pixels (or while that exact request is still pending). A completed broken signed URL invalidates its cached path/reference and performs one fresh-sign resolution with the existing bounded fallback and authoritative-missing cleanup rules. Run `scripts/verify-card-image-loader-retry-browser.mjs` for the focused MJ multi-slot and recent-generation regression.
+`card-image-loader.js` treats a URL as loaded only after the browser has decoded pixels (or while that exact request is still pending). A completed broken signed URL invalidates its cached path/reference and performs one fresh-sign resolution with the existing bounded fallback and authoritative-missing cleanup rules. Failed `cr_`/`wh_` feed media is collapsed to a text card while recovery continues, so a failed image never leaves a black media slot. Run `scripts/verify-card-image-loader-retry-browser.mjs`, `scripts/verify-imagegen-failed-media-collapse-browser.mjs`, and `scripts/verify-imagegen-finish-immediate-browser.mjs` for the focused regressions.
 
 Ignored local/generated outputs include `.pages-deploy/`, `dist/`, `*.bundle.js`, `.tmp-*.js`, and `prompt-hub-deploy.zip`. Removed one-off cleanup artifacts from this split pass: `.tmp-fd-head.js`, `.tmp-recover-chunks.js`, `prompt-hub-deploy.zip`, and `scripts/新建 文本文档.txt`.
 

@@ -788,11 +788,13 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
     }
 
     function collapseWarehouseFeedCardNoThumb(feedEl) {
-      if (!feedEl?.dataset?.feedId?.startsWith?.('wh_')) return;
+      const feedId = String(feedEl?.dataset?.feedId || '');
+      if (!/^cr_|^wh_/.test(feedId)) return false;
       feedEl.querySelector('.imagegen-feed-media')?.remove();
       feedEl.classList.add('imagegen-feed-card--no-media');
       bindImageGenFeedImageRelayout();
       if (!d().isMobileFeedViewport?.()) scheduleImageGenFeedLayout();
+      return true;
     }
 
     function primeImageGenFeedImages(wrap, feedItems) {
