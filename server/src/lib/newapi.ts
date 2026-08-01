@@ -166,6 +166,7 @@ export type NewApiTaskPollResult = {
 };
 
 const PRICING_CACHE_MS = 5 * 60_000;
+const EXECUTABLE_CATALOG_CACHE_MS = 15_000;
 export const NEWAPI_PRICING_CATALOG_MAX_AGE_MS = 5 * 60_000;
 // A catalog service can return a verified last-known-good snapshot marked
 // stale while it retries its own dependencies. Keep that state brief so the
@@ -200,6 +201,12 @@ const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; 
 
 let catalogCache: { base: string; at: number; snapshot: NewApiCatalogSnapshot } | null = null;
 let catalogInflight: { base: string; promise: Promise<NewApiCatalogSnapshot> } | null = null;
+let executableCatalogCache: { base: string; at: number; snapshot: NewApiCatalogSnapshot } | null = null;
+let executableCatalogInflight: {
+  base: string;
+  force: boolean;
+  promise: Promise<NewApiCatalogSnapshot>;
+} | null = null;
 let adminRouteCache: { base: string; at: number; snapshot: NewApiAdminRouteSnapshot } | null = null;
 
 const REVIEWED_NEWAPI_IMAGE_IDS = new Set(
@@ -246,6 +253,18 @@ function catalogUrl(baseUrl?: string, force = false): string {
   }
   url.search = '';
   if (force) url.searchParams.set('refresh', '1');
+  url.hash = '';
+  return url.toString();
+}
+
+function executableModelsUrl(baseUrl?: string): string {
+  const url = new URL(apiBase(baseUrl));
+  const path = url.pathname.replace(/\/+$/, '');
+  if (!path.toLowerCase().endsWith('/v1/models')) {
+    const stripped = path.replace(/\/(?:v1|api\/v1|api)$/i, '');
+    url.pathname = `${stripped}/v1/models`.replace(/\/{2,}/g, '/');
+  }
+  url.search = '';
   url.hash = '';
   return url.toString();
 }
@@ -936,6 +955,110 @@ export async function fetchNewApiModelCatalog(
         if (catalogInflight?.promise === promise) catalogInflight = null;
       });
   catalogInflight = { base, promise };
+  return promise;
+}
+
+function normalizedModelId(value: unknown): string {
+  return stringValue(value).toLowerCase();
+}
+
+function parseExecutableModelIds(payload: unknown): Set<string> | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const root = payload as Record<string, unknown>;
+  if (root.success === false) return null;
+  const rows = Array.isArray(root.data)
+    ? root.data
+    : Array.isArray(root.models)
+      ? root.models
+      : null;
+  if (!rows) return null;
+  return new Set(rows
+    .map(row => row && typeof row === 'object'
+      ? normalizedModelId((row as Record<string, unknown>).id)
+      : '')
+    .filter(Boolean));
+}
+
+async function fetchExecutableModelIds(apiKey: string, baseUrl?: string): Promise<Set<string>> {
+  const response = await fetch(executableModelsUrl(baseUrl), {
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    signal: AbortSignal.timeout(5000)
+  });
+  if (!response.ok) throw new Error(`executable models ${response.status}`);
+  const ids = parseExecutableModelIds(await response.json());
+  if (!ids) throw new Error('invalid executable models payload');
+  return ids;
+}
+
+function executableCatalogSnapshot(
+  catalog: NewApiCatalogSnapshot,
+  executableIds: Set<string>
+): NewApiCatalogSnapshot {
+  const models = catalog.models.filter(model =>
+    executableIds.has(normalizedModelId(model.id))
+    || executableIds.has(normalizedModelId(model.upstreamModel))
+  );
+  const upstreamModels = new Set(models.map(model => normalizedModelId(model.upstreamModel)));
+  return {
+    ...catalog,
+    models,
+    rules: catalog.rules.filter(rule => upstreamModels.has(normalizedModelId(rule.model))),
+    imageCatalogEntries: catalog.imageCatalogEntries.filter(entry =>
+      upstreamModels.has(normalizedModelId(entry.upstream))
+    )
+  };
+}
+
+/**
+ * Return only reviewed catalog entries that the execution credential can
+ * actually use. The short cache prevents every canvas request from hitting
+ * the upstream model-list endpoint while keeping disabled models out quickly.
+ */
+export async function fetchNewApiExecutableCatalog(
+  apiKey: string | undefined,
+  baseUrl?: string,
+  opts?: { force?: boolean; requireFresh?: boolean }
+): Promise<NewApiCatalogSnapshot> {
+  const credential = String(apiKey || '').trim();
+  if (!credential) throw new Error('New API execution credential is not configured');
+
+  const base = apiBase(baseUrl);
+  const force = opts?.force === true;
+  const now = Date.now();
+  if (
+    !force
+    && executableCatalogCache?.base === base
+    && now - executableCatalogCache.at < EXECUTABLE_CATALOG_CACHE_MS
+  ) {
+    return executableCatalogCache.snapshot;
+  }
+  if (
+    executableCatalogInflight?.base === base
+    && (!force || executableCatalogInflight.force)
+  ) {
+    return executableCatalogInflight.promise;
+  }
+
+  const promise = Promise.all([
+    fetchNewApiModelCatalog(base, {
+      force,
+      requireFresh: opts?.requireFresh === true
+    }),
+    fetchExecutableModelIds(credential, base)
+  ])
+    .then(([catalog, executableIds]) => {
+      if (!catalog.available) throw new Error('reviewed model catalog is unavailable');
+      const snapshot = executableCatalogSnapshot(catalog, executableIds);
+      executableCatalogCache = { base, at: Date.now(), snapshot };
+      return snapshot;
+    })
+    .finally(() => {
+      if (executableCatalogInflight?.promise === promise) executableCatalogInflight = null;
+    });
+  executableCatalogInflight = { base, force, promise };
   return promise;
 }
 

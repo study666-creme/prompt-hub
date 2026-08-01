@@ -15,6 +15,7 @@ import {
 } from '../../lib/generation-idempotency';
 import {
   fetchNewApiAdminRoutes,
+  fetchNewApiExecutableCatalog,
   fetchNewApiModelCatalog,
   newApiKeyForRoute,
   newApiFixedCreditsForRequest,
@@ -357,10 +358,13 @@ type FreshVideoModel = NewApiResolvedCatalogModel & {
   publicIdentity: { model: string; modelLabel: string };
 };
 
-async function freshVideoModel(env: Env, modelId: string): Promise<FreshVideoModel> {
+async function freshVideoModel(env: Env, apiKey: string, modelId: string): Promise<FreshVideoModel> {
   let snapshot;
   try {
-    snapshot = await fetchNewApiModelCatalog(env.NEWAPI_API_BASE_URL, { force: true, requireFresh: true });
+    snapshot = await fetchNewApiExecutableCatalog(apiKey, env.NEWAPI_API_BASE_URL, {
+      force: true,
+      requireFresh: true
+    });
   } catch {
     throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认实时价格，请稍后重试');
   }
@@ -577,11 +581,12 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   const user = c.get('user');
   const parsed = parseVideoRequestBody(await c.req.json().catch(() => ({})));
   const requestFingerprint = await videoRequestFingerprint(parsed);
-  const admin = createAdminClient(c.env);
+  let admin = parsed.clientRequestId ? createAdminClient(c.env) : undefined;
   const requestId = parsed.clientRequestId
     ? await generationRequestId(user.id, parsed.clientRequestId)
     : crypto.randomUUID();
   if (parsed.clientRequestId) {
+    if (!admin) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频服务暂未配置');
     const existing = await findOwnedGenerationRequest<GenerationRequestRecord>(
       admin,
       user.id,
@@ -606,7 +611,8 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   if (!c.env.VIDEO_GENERATION_QUEUE) {
     throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频生成队列暂不可用，请稍后重试');
   }
-  const resolved = await freshVideoModel(c.env, parsed.model);
+  const resolved = await freshVideoModel(c.env, apiKey, parsed.model);
+  if (!admin) admin = createAdminClient(c.env);
   const { model, route, publicIdentity } = resolved;
   const input = resolveVideoRequest(model, parsed);
   validateVideoRequest(model, input);

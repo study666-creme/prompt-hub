@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   findOwnedGenerationRequest: vi.fn(),
   insertGenerationRequest: vi.fn(),
   fetchCatalog: vi.fn(),
+  fetchExecutableCatalog: vi.fn(),
   fetchRoutes: vi.fn(),
   resolveRouted: vi.fn(),
   resolveCatalog: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('../../lib/generation-idempotency', async importOriginal => ({
 vi.mock('../../lib/newapi', async importOriginal => ({
   ...await importOriginal<typeof import('../../lib/newapi')>(),
   fetchNewApiModelCatalog: mocks.fetchCatalog,
+  fetchNewApiExecutableCatalog: mocks.fetchExecutableCatalog,
   fetchNewApiAdminRoutes: mocks.fetchRoutes,
   resolveNewApiRoutedCatalogModel: mocks.resolveRouted,
   resolveNewApiCatalogModel: mocks.resolveCatalog,
@@ -85,6 +87,7 @@ describe('video creation durability', () => {
     vi.clearAllMocks();
     mocks.findOwnedGenerationRequest.mockResolvedValue({ row: null, error: null });
     mocks.fetchCatalog.mockResolvedValue({ models: [model], rules: [], available: true });
+    mocks.fetchExecutableCatalog.mockResolvedValue({ models: [model], rules: [], available: true });
     mocks.fetchRoutes.mockResolvedValue({
       available: true,
       fetchedAt: '2026-07-28T00:00:00.000Z',

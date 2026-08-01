@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildNewApiImageRequestBody,
   fetchNewApiAdminRoutes,
+  fetchNewApiExecutableCatalog,
   fetchNewApiModelCatalog,
   fetchNewApiPricingRules,
   fetchNewApiTaskOnce,
@@ -90,6 +91,117 @@ describe('newapi image upstream', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  it('intersects the reviewed catalog with models visible to the execution credential', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v1/models')) {
+        expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer execution-key');
+        return jsonResponse({ object: 'list', data: [{ id: 'video-public' }, { id: 'not-reviewed' }] });
+      }
+      return jsonResponse({
+        success: true,
+        version: 'catalog-executable-1',
+        pricing_version: 'pricing-executable-1',
+        models: [
+          {
+            id: 'video-upstream',
+            public: { id: 'video-public', label: 'Video Public', description: 'Reviewed video model.' },
+            modality: 'video',
+            selectable: true,
+            parameters: [],
+            pricing: { mode: 'fixed', unit: 'request', yuan: 1 }
+          },
+          {
+            id: 'catalog-only',
+            public: { id: 'catalog-only-public', label: 'Catalog Only', description: 'Not executable.' },
+            modality: 'video',
+            selectable: true,
+            parameters: [],
+            pricing: { mode: 'fixed', unit: 'request', yuan: 1 }
+          }
+        ]
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const snapshot = await fetchNewApiExecutableCatalog(
+      'execution-key',
+      'https://execution-intersection.test/api',
+      { force: true, requireFresh: true }
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(snapshot.models.map(model => model.id)).toEqual(['video-public']);
+    expect(JSON.stringify(publicNewApiCatalogModels(snapshot))).not.toContain('video-upstream');
+    expect(JSON.stringify(snapshot)).not.toContain('execution-key');
+  });
+
+  it('caches executable snapshots and coalesces concurrent forced refreshes', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/models')) return jsonResponse({ object: 'list', data: [{ id: 'video-upstream' }] });
+      return jsonResponse({
+        success: true,
+        version: 'catalog-coalesced-1',
+        models: [{
+          id: 'video-upstream',
+          modality: 'video',
+          selectable: true,
+          parameters: [],
+          pricing: { mode: 'fixed', unit: 'request', yuan: 1 }
+        }]
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const options = { force: true, requireFresh: true };
+    const [first, second] = await Promise.all([
+      fetchNewApiExecutableCatalog('execution-key', 'https://execution-coalesced.test', options),
+      fetchNewApiExecutableCatalog('execution-key', 'https://execution-coalesced.test', options)
+    ]);
+    const cached = await fetchNewApiExecutableCatalog('execution-key', 'https://execution-coalesced.test');
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(first).toBe(second);
+    expect(cached).toBe(first);
+  });
+
+  it('fails closed when a required execution refresh fails', async () => {
+    let failExecutionLookup = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/models')) {
+        return failExecutionLookup
+          ? jsonResponse({ error: 'unavailable' }, 503)
+          : jsonResponse({ object: 'list', data: [{ id: 'video-upstream' }] });
+      }
+      return jsonResponse({
+        success: true,
+        version: 'catalog-fail-closed-1',
+        models: [{
+          id: 'video-upstream',
+          modality: 'video',
+          selectable: true,
+          parameters: [],
+          pricing: { mode: 'fixed', unit: 'request', yuan: 1 }
+        }]
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchNewApiExecutableCatalog('execution-key', 'https://execution-fail-closed.test', {
+      force: true,
+      requireFresh: true
+    });
+    failExecutionLookup = true;
+
+    await expect(fetchNewApiExecutableCatalog('execution-key', 'https://execution-fail-closed.test', {
+      force: true,
+      requireFresh: true
+    })).rejects.toThrow('executable models 503');
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it('preserves reviewed aggregate media limits from the live catalog', async () => {
