@@ -69,6 +69,10 @@ $env:APP_ROOT = 'D:\prompt-hub\.pages-deploy'
 node scripts\run-index-local-http-smoke.mjs
 ```
 
+`check:predeploy` is worktree-safe on Windows: it normalizes CRLF while
+inspecting source fragments and invokes the repository's npm dependency
+bootstrap through the Windows command shell when root dependencies are absent.
+
 使用 `APP_ROOT=.pages-deploy` 运行仓库和手机浏览器检查，确保验收的是最终 Pages 暂存包。特别确认 `#warehouseHero`、`styles-warehouse.css` 和三张首屏图存在。
 
 ### 6. 解冻、dry-run 与迁移

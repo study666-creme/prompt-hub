@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const read = (rel) => readFileSync(join(root, rel), 'utf8');
+const read = (rel) => readFileSync(join(root, rel), 'utf8').replace(/\r\n?/g, '\n');
 const apiClient = read('api-client.js');
 const indexHtml = read('index.html');
 const featureBoot = read('legacy/features-draft/part-01.js');

@@ -29,6 +29,7 @@ export function concatMinifyBundle({ root, sources, outFile, metaFile, label }) 
 
   const stat = readFileSync(outFile, 'utf8');
   if (metaFile) {
+    mkdirSync(dirname(metaFile), { recursive: true });
     writeFileSync(metaFile, JSON.stringify({
       builtAt: new Date().toISOString(),
       sources,

@@ -12,7 +12,7 @@ function run(label, command, args) {
   const result = spawnSync(command, args, {
     cwd: root,
     stdio: 'inherit',
-    shell: false
+    shell: process.platform === 'win32' && command === npmBin
   });
   if (result.error) {
     console.error(result.error.message);
