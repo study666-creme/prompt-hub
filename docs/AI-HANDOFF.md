@@ -66,6 +66,9 @@
 - 带 `upstreamTaskId` 的 `result_uncertain` 持续 1 小时仍无法恢复为 processing/completed/明确 failed 时，必须以幂等 `refund_pending` -> `refunded` 收敛为失败并退款。cron 必须先 poll，再执行 timeout finalize，避免任务刚成功却先被退款的竞态。
 - 上游已返回 task ID 后，checkpoint 最多重试三次并读后确认，绝不重试付费 POST。若 task ID 仍未可靠落库，保留 `running` 栅栏并报警；未拿到 task ID 的 `outcome_unknown` 和持续 `not_found` 继续遵循同一小时级幂等退款 SLA。
 - Prompt Hub 只提交规范化的视频参数。模型专属比例格式、固定分辨率或应忽略的可选参数由 New API 转换，不能在这里按渠道复制适配分支。
+- 未部署的 2026-08-01 候选把视频图片素材拆分为普通帧、风格和元素角色，并把目录 `path/type`、角色 URL 与请求幂等键一起固化到 `videoSubmitEnvelope`。恢复任务必须重放这个原始信封，不能按当前目录重新分类；没有 binding 的历史信封继续走旧字段兼容。
+- 视频角色的单项上限、`aggregate_constraint` 总上限以及 binding path 的语法/字段冲突必须在余额查询、任务创建和扣费之前失败。不要把 path 校验留到队列消费者，否则目录配置错误会先扣费再退款。
+- 视频 fingerprint 对新增角色采用向后兼容编码：只有非空 `styleImages` 或 `elementImages` 才进入 canonical JSON。不得把空数组无条件加入旧 canonical 对象，否则相同 `clientRequestId` 的历史任务会被误判为参数复用冲突。
 - GrsAI、iThink、Mooko 适配器只服务已落库历史任务恢复；删除前先确认生产库没有对应未完成任务。
 - 后台存储巡检按需触发且只读；不得按全桶字节回填用户配额。
 - 新支付订单只接受 `paymentMethod=alipay`；历史 `wxpay` 类型只保留给已落库订单的回调验签和结算，前端不得重新展示微信新订单入口。

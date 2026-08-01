@@ -92,6 +92,42 @@ describe('newapi image upstream', () => {
     vi.useRealTimers();
   });
 
+  it('preserves reviewed aggregate media limits from the live catalog', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      success: true,
+      version: 'video-semantic-media-1',
+      pricing_version: 'pricing-1',
+      models: [{
+        id: 'kling-o3-standard-v2v-reference',
+        label: 'Kling O3 Standard',
+        public: { id: 'kling-o3-standard-v2v-reference', label: 'Kling O3 Standard', description: 'Video reference model.' },
+        modality: 'video',
+        operation: 'generate',
+        selectable: true,
+        order: 1,
+        parameters: [{
+          name: 'style_references',
+          path: 'style_references',
+          label: 'Style references',
+          type: 'array',
+          required: false,
+          max_items: 3,
+          aggregate_constraint: {
+            fields: ['images', 'style_references', 'element_references', 'input_video'],
+            max_total_items: 4
+          }
+        }],
+        pricing: { mode: 'fixed', unit: 'request', yuan: 1, credits: 100 }
+      }]
+    })));
+
+    const snapshot = await fetchNewApiModelCatalog('https://semantic-media-catalog.test', { force: true });
+    expect(snapshot.models[0]?.parameters[0]?.aggregateConstraint).toEqual({
+      fields: ['images', 'style_references', 'element_references', 'input_video'],
+      maxTotalItems: 4
+    });
+  });
+
   it('loads reviewed image capabilities and preserves fractional credits', async () => {
     const fetchMock = vi.fn(async (_input: Parameters<typeof fetch>[0]) => jsonResponse({
       success: true,

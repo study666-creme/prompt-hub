@@ -9,10 +9,26 @@ export type NewApiVideoSubmitParams = {
   resolution: string;
   size?: string;
   referenceImages?: string[];
+  styleImages?: string[];
+  elementImages?: string[];
   firstImage?: string;
   lastImage?: string;
   referenceVideos?: string[];
   referenceAudios?: string[];
+  mediaBindings?: NewApiVideoMediaBindings;
+};
+
+export type NewApiVideoMediaBinding = {
+  path: string;
+  type: 'string' | 'array';
+};
+
+export type NewApiVideoMediaBindings = {
+  referenceImages?: NewApiVideoMediaBinding;
+  styleImages?: NewApiVideoMediaBinding;
+  elementImages?: NewApiVideoMediaBinding;
+  referenceVideos?: NewApiVideoMediaBinding;
+  referenceAudios?: NewApiVideoMediaBinding;
 };
 
 export type NewApiVideoTask = {
@@ -27,6 +43,7 @@ export type NewApiVideoTask = {
 };
 
 const NEWAPI_VIDEO_REQUEST_TIMEOUT_MS = 45_000;
+const BLOCKED_PATH_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function apiBase(value?: string): string {
   return (value || 'https://newapi.prompt-hubs.com').replace(/\/+$/, '');
@@ -40,6 +57,59 @@ function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function setPath(target: Record<string, unknown>, path: string, value: unknown): void {
+  const segments = path.split('.');
+  if (
+    !segments.length
+    || segments.length > 8
+    || segments.some(segment => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(segment) || BLOCKED_PATH_SEGMENTS.has(segment))
+  ) {
+    throw new ApiError(500, 'UPSTREAM_ERROR', '视频模型的素材字段配置无效');
+  }
+  let current = target;
+  for (const segment of segments.slice(0, -1)) {
+    const next = current[segment];
+    if (next == null) current[segment] = {};
+    else if (!record(next)) throw new ApiError(500, 'UPSTREAM_ERROR', '视频模型的素材字段配置冲突');
+    current = current[segment] as Record<string, unknown>;
+  }
+  const leaf = segments.at(-1)!;
+  if (Object.prototype.hasOwnProperty.call(current, leaf)) {
+    throw new ApiError(500, 'UPSTREAM_ERROR', '视频模型的素材字段配置冲突');
+  }
+  current[leaf] = value;
+}
+
+function bindMedia(
+  body: Record<string, unknown>,
+  binding: NewApiVideoMediaBinding | undefined,
+  values: string[] | undefined
+): boolean {
+  if (!binding || !values?.length) return false;
+  if (binding.type === 'string' && values.length !== 1) {
+    throw new ApiError(400, 'UPSTREAM_ERROR', '该视频模型只支持一个对应类型的参考素材');
+  }
+  setPath(body, binding.path, binding.type === 'array' ? values : values[0]);
+  return true;
+}
+
+function validateMediaBindingPaths(
+  body: Record<string, unknown>,
+  bindings: NewApiVideoMediaBindings | undefined
+): void {
+  const draft = { ...body };
+  const declared = [
+    bindings?.referenceImages,
+    bindings?.styleImages,
+    bindings?.elementImages,
+    bindings?.referenceVideos,
+    bindings?.referenceAudios
+  ];
+  for (const binding of declared) {
+    if (binding) setPath(draft, binding.path, binding.type === 'array' ? [] : '');
+  }
 }
 
 function errorMessage(value: unknown, status: number): string {
@@ -222,11 +292,7 @@ async function jsonResponse(response: Response): Promise<unknown> {
   }
 }
 
-export async function submitNewApiVideo(
-  apiKey: string,
-  baseUrl: string | undefined,
-  params: NewApiVideoSubmitParams
-): Promise<NewApiVideoTask> {
+function newApiVideoRequestBody(params: NewApiVideoSubmitParams): Record<string, unknown> {
   const isSd = params.upstreamModel.toLowerCase().startsWith('sd');
   const body: Record<string, unknown> = {
     model: params.upstreamModel,
@@ -235,20 +301,40 @@ export async function submitNewApiVideo(
     resolution: params.resolution,
     ...(params.size ? { size: params.size } : {}),
     ...(isSd ? { ratio: params.ratio } : { aspect_ratio: params.ratio }),
-    ...(params.referenceImages?.length
-      ? isSd
-        ? { referenceImages: params.referenceImages }
-        : params.referenceImages.length === 1
-          ? { image: params.referenceImages[0] }
-          : { images: params.referenceImages }
-      : {}),
     ...(params.firstImage ? { first_image: params.firstImage } : {}),
     ...(params.lastImage ? { last_image: params.lastImage } : {}),
-    ...(params.referenceVideos?.length ? { referenceVideos: params.referenceVideos } : {}),
-    ...(params.referenceAudios?.length ? { referenceAudios: params.referenceAudios } : {}),
     async: true,
     n: 1
   };
+  const bindings = params.mediaBindings;
+  validateMediaBindingPaths(body, bindings);
+  const boundReferenceImages = bindMedia(body, bindings?.referenceImages, params.referenceImages);
+  bindMedia(body, bindings?.styleImages, params.styleImages);
+  bindMedia(body, bindings?.elementImages, params.elementImages);
+  const boundReferenceVideos = bindMedia(body, bindings?.referenceVideos, params.referenceVideos);
+  const boundReferenceAudios = bindMedia(body, bindings?.referenceAudios, params.referenceAudios);
+  // Jobs created before capability-driven bindings were persisted still need
+  // their exact durable envelope to remain recoverable.
+  if (!boundReferenceImages && params.referenceImages?.length) {
+    if (isSd) body.referenceImages = params.referenceImages;
+    else if (params.referenceImages.length === 1) body.image = params.referenceImages[0];
+    else body.images = params.referenceImages;
+  }
+  if (!boundReferenceVideos && params.referenceVideos?.length) body.referenceVideos = params.referenceVideos;
+  if (!boundReferenceAudios && params.referenceAudios?.length) body.referenceAudios = params.referenceAudios;
+  return body;
+}
+
+export function validateNewApiVideoMediaBindings(params: NewApiVideoSubmitParams): void {
+  newApiVideoRequestBody(params);
+}
+
+export async function submitNewApiVideo(
+  apiKey: string,
+  baseUrl: string | undefined,
+  params: NewApiVideoSubmitParams
+): Promise<NewApiVideoTask> {
+  const body = newApiVideoRequestBody(params);
   const response = await fetch(`${apiBase(baseUrl)}/v1/videos`, {
     method: 'POST',
     headers: {

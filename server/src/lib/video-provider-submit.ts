@@ -5,6 +5,7 @@ import { deductUserCredits, refundUserCredits, type DebitSplit } from './members
 import { newApiKeyForRoute } from './newapi';
 import {
   submitNewApiVideo,
+  type NewApiVideoMediaBindings,
   type NewApiVideoSubmitParams,
   type NewApiVideoTask
 } from './newapi-video';
@@ -50,6 +51,24 @@ function strings(value: unknown): string[] | undefined {
   return result.length ? result : undefined;
 }
 
+function mediaBindings(value: unknown): NewApiVideoMediaBindings | undefined {
+  const raw = videoMeta(value);
+  const result: NewApiVideoMediaBindings = {};
+  for (const key of [
+    'referenceImages',
+    'styleImages',
+    'elementImages',
+    'referenceVideos',
+    'referenceAudios'
+  ] as const) {
+    const binding = videoMeta(raw[key]);
+    const path = String(binding.path || '').trim();
+    const type = binding.type === 'array' || binding.type === 'string' ? binding.type : null;
+    if (path && type) result[key] = { path, type };
+  }
+  return Object.keys(result).length ? result : undefined;
+}
+
 function requiredString(value: unknown, field: string): string {
   const result = String(value || '').trim();
   if (!result) throw new Error(`video submission envelope is missing ${field}`);
@@ -76,10 +95,13 @@ export function videoSubmitParamsFromJob(job: VideoSubmissionJob): NewApiVideoSu
     resolution: requiredString(envelope.resolution, 'resolution'),
     size: String(envelope.size || '').trim() || undefined,
     referenceImages: strings(envelope.referenceImages),
+    styleImages: strings(envelope.styleImages),
+    elementImages: strings(envelope.elementImages),
     firstImage: String(envelope.firstImage || '').trim() || undefined,
     lastImage: String(envelope.lastImage || '').trim() || undefined,
     referenceVideos: strings(envelope.referenceVideos),
-    referenceAudios: strings(envelope.referenceAudios)
+    referenceAudios: strings(envelope.referenceAudios),
+    mediaBindings: mediaBindings(envelope.mediaBindings)
   };
 }
 

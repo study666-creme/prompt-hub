@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchNewApiVideoTask, submitNewApiVideo } from './newapi-video';
+import { fetchNewApiVideoTask, submitNewApiVideo, validateNewApiVideoMediaBindings } from './newapi-video';
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -46,6 +46,73 @@ describe('newapi video upstream', () => {
       videoUrl: null
     });
     expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({ Authorization: 'Bearer secret' });
+  });
+
+  it('uses catalog paths for frame, style, element, and single-video roles', async () => {
+    const fetchMock = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String((init as RequestInit).body));
+      expect(body).toMatchObject({
+        images: ['https://asset.test/frame.jpg'],
+        style_references: ['https://asset.test/style.jpg'],
+        element_references: ['https://asset.test/element.jpg'],
+        input_video: 'https://asset.test/source.mp4'
+      });
+      expect(body.image).toBeUndefined();
+      expect(body.referenceImages).toBeUndefined();
+      expect(body.referenceVideos).toBeUndefined();
+      return json({ id: 'task-semantic-references', status: 'queued', progress: 0 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await submitNewApiVideo('secret', 'https://newapi.test', {
+      upstreamModel: 'kling-o3-standard-v2v-reference',
+      prompt: 'preserve the subject',
+      duration: 14,
+      ratio: '16:9',
+      resolution: '720p',
+      referenceImages: ['https://asset.test/frame.jpg'],
+      styleImages: ['https://asset.test/style.jpg'],
+      elementImages: ['https://asset.test/element.jpg'],
+      referenceVideos: ['https://asset.test/source.mp4'],
+      mediaBindings: {
+        referenceImages: { path: 'images', type: 'array' },
+        styleImages: { path: 'style_references', type: 'array' },
+        elementImages: { path: 'element_references', type: 'array' },
+        referenceVideos: { path: 'input_video', type: 'string' }
+      }
+    });
+  });
+
+  it('validates every persisted binding path before media is present', () => {
+    expect(() => validateNewApiVideoMediaBindings({
+      upstreamModel: 'video-model',
+      prompt: 'test',
+      duration: 5,
+      ratio: '16:9',
+      resolution: '720p',
+      mediaBindings: {
+        styleImages: { path: 'payload.__proto__.style_references', type: 'array' }
+      }
+    })).toThrowError(expect.objectContaining({
+      status: 500,
+      code: 'UPSTREAM_ERROR',
+      message: '视频模型的素材字段配置无效'
+    }));
+
+    expect(() => validateNewApiVideoMediaBindings({
+      upstreamModel: 'video-model',
+      prompt: 'test',
+      duration: 5,
+      ratio: '16:9',
+      resolution: '720p',
+      mediaBindings: {
+        referenceImages: { path: 'resolution', type: 'string' }
+      }
+    })).toThrowError(expect.objectContaining({
+      status: 500,
+      code: 'UPSTREAM_ERROR',
+      message: '视频模型的素材字段配置冲突'
+    }));
   });
 
   it('forwards a durable submission idempotency key only when provided', async () => {

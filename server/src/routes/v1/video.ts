@@ -26,7 +26,12 @@ import {
   type NewApiResolvedCatalogModel,
   type NewApiCatalogParameter
 } from '../../lib/newapi';
-import { fetchNewApiVideoContent } from '../../lib/newapi-video';
+import {
+  fetchNewApiVideoContent,
+  validateNewApiVideoMediaBindings,
+  type NewApiVideoMediaBinding,
+  type NewApiVideoMediaBindings
+} from '../../lib/newapi-video';
 import { pollVideoProviderJob } from '../../lib/video-provider-poll';
 import {
   processVideoPendingSubmit,
@@ -59,6 +64,8 @@ const bodySchema = z.object({
   size: z.string().min(1).max(64).optional(),
   resolution: z.string().min(1).max(30).default('720p'),
   referenceImages: z.array(imageRef).max(14).optional(),
+  styleImages: z.array(imageRef).max(14).optional(),
+  elementImages: z.array(imageRef).max(14).optional(),
   image: imageRef.optional(),
   images: z.array(imageRef).max(14).optional(),
   first_image: imageRef.optional(),
@@ -98,6 +105,8 @@ const bodySchema = z.object({
       : input.images?.length
         ? input.images
         : undefined,
+  styleImages: input.styleImages,
+  elementImages: input.elementImages,
   firstImage: input.first_image,
   lastImage: input.last_image,
   referenceVideos: input.referenceVideos,
@@ -162,6 +171,35 @@ function parameter(model: NewApiCatalogModel, names: string[]): NewApiCatalogPar
   }) || null;
 }
 
+function mediaParameter(model: NewApiCatalogModel, paths: string[]): NewApiCatalogParameter | null {
+  return model.parameters.find(item => {
+    const pathName = String(item.path || '').split('.').filter(Boolean).at(-1);
+    return pathName ? paths.includes(pathName) : false;
+  }) || null;
+}
+
+const REFERENCE_IMAGE_PATHS = ['referenceImages', 'reference_images', 'images', 'image'];
+const STYLE_IMAGE_PATHS = ['style_references', 'styleImages', 'style_images'];
+const ELEMENT_IMAGE_PATHS = ['element_references', 'elementImages', 'element_images'];
+const REFERENCE_VIDEO_PATHS = ['referenceVideos', 'reference_videos', 'input_video', 'video'];
+const REFERENCE_AUDIO_PATHS = ['referenceAudios', 'reference_audios', 'input_audio', 'audio'];
+
+function mediaBinding(model: NewApiCatalogModel, paths: string[]): NewApiVideoMediaBinding | undefined {
+  const declared = mediaParameter(model, paths);
+  if (!declared || (declared.type !== 'array' && declared.type !== 'string')) return undefined;
+  return { path: declared.path, type: declared.type };
+}
+
+export function videoMediaBindings(model: NewApiCatalogModel): NewApiVideoMediaBindings {
+  return {
+    referenceImages: mediaBinding(model, REFERENCE_IMAGE_PATHS),
+    styleImages: mediaBinding(model, STYLE_IMAGE_PATHS),
+    elementImages: mediaBinding(model, ELEMENT_IMAGE_PATHS),
+    referenceVideos: mediaBinding(model, REFERENCE_VIDEO_PATHS),
+    referenceAudios: mediaBinding(model, REFERENCE_AUDIO_PATHS)
+  };
+}
+
 function integerValue(value: unknown): number | null {
   if ((typeof value !== 'number' && typeof value !== 'string') || value === '') return null;
   const parsed = Number(value);
@@ -205,9 +243,19 @@ export function resolveVideoRequest(model: NewApiCatalogModel, input: ParsedVide
   const duration = declaredDuration && Object.prototype.hasOwnProperty.call(declaredDuration, 'fixed')
     ? omittedVideoDuration(model)
     : input.duration ?? omittedVideoDuration(model);
+  const referenceImages = [...(input.referenceImages || [])];
+  let firstImage = input.firstImage;
+  let lastImage = input.lastImage;
+  if (!videoMediaBindings(model).referenceImages && referenceImages.length) {
+    if (!firstImage && mediaParameter(model, ['first_image'])) firstImage = referenceImages.shift();
+    if (!lastImage && mediaParameter(model, ['last_image'])) lastImage = referenceImages.shift();
+  }
   return {
     ...input,
     duration,
+    referenceImages: referenceImages.length ? referenceImages : undefined,
+    firstImage,
+    lastImage,
     ratio: fixedStringParameter(model, ['ratio', 'aspect_ratio']) || input.ratio,
     resolution: fixedStringParameter(model, ['resolution']) || input.resolution,
     size: fixedStringParameter(model, ['size']) || input.size
@@ -242,20 +290,67 @@ export function validateVideoRequest(model: NewApiCatalogModel, input: VideoRequ
   if (sizes.length && input.size && !sizes.includes(input.size)) {
     throw new ApiError(400, 'VALIDATION_ERROR', `该模型不支持 ${input.size} 尺寸`);
   }
-  validateReferenceCount(model, ['referenceImages', 'images', 'image'], input.referenceImages?.length || 0, '参考图片');
-  validateReferenceCount(model, ['first_image'], input.firstImage ? 1 : 0, '首帧图片');
-  validateReferenceCount(model, ['last_image'], input.lastImage ? 1 : 0, '尾帧图片');
-  validateReferenceCount(model, ['referenceVideos'], input.referenceVideos?.length || 0, '参考视频');
-  validateReferenceCount(model, ['referenceAudios'], input.referenceAudios?.length || 0, '参考音频');
+  validateReferenceCount(mediaParameter(model, REFERENCE_IMAGE_PATHS), input.referenceImages?.length || 0, '参考图片');
+  validateReferenceCount(mediaParameter(model, STYLE_IMAGE_PATHS), input.styleImages?.length || 0, '风格参考图片');
+  validateReferenceCount(mediaParameter(model, ELEMENT_IMAGE_PATHS), input.elementImages?.length || 0, '元素参考图片');
+  validateReferenceCount(mediaParameter(model, ['first_image']), input.firstImage ? 1 : 0, '首帧图片');
+  validateReferenceCount(mediaParameter(model, ['last_image']), input.lastImage ? 1 : 0, '尾帧图片');
+  validateReferenceCount(mediaParameter(model, REFERENCE_VIDEO_PATHS), input.referenceVideos?.length || 0, '参考视频');
+  validateReferenceCount(mediaParameter(model, REFERENCE_AUDIO_PATHS), input.referenceAudios?.length || 0, '参考音频');
+  validateAggregateReferenceCount(model, input);
+  validateNewApiVideoMediaBindings({
+    upstreamModel: model.upstreamModel,
+    prompt: input.prompt,
+    duration: input.duration,
+    ratio: input.ratio,
+    resolution: input.resolution,
+    size: input.size,
+    referenceImages: input.referenceImages,
+    styleImages: input.styleImages,
+    elementImages: input.elementImages,
+    firstImage: input.firstImage,
+    lastImage: input.lastImage,
+    referenceVideos: input.referenceVideos,
+    referenceAudios: input.referenceAudios,
+    mediaBindings: videoMediaBindings(model)
+  });
 }
 
-function validateReferenceCount(model: NewApiCatalogModel, names: string[], count: number, label: string): void {
-  const declared = parameter(model, names);
+function validateReferenceCount(declared: NewApiCatalogParameter | null, count: number, label: string): void {
   const required = declared?.required === true || Number(declared?.min_items || 0) > 0;
   const min = declared?.type === 'array' ? Number(declared.min_items || (required ? 1 : 0)) : required ? 1 : 0;
   const max = declared?.type === 'array' ? Number(declared.max_items ?? Number.POSITIVE_INFINITY) : declared ? 1 : 0;
   if (count < min) throw new ApiError(400, 'VALIDATION_ERROR', `该模型至少需要 ${min} 个${label}`);
   if (count > max) throw new ApiError(400, 'VALIDATION_ERROR', `该模型最多支持 ${max} 个${label}`);
+}
+
+function validateAggregateReferenceCount(model: NewApiCatalogModel, input: VideoRequest): void {
+  const bindings = videoMediaBindings(model);
+  const counted: Array<[NewApiVideoMediaBinding | undefined, number]> = [
+    [bindings.referenceImages, input.referenceImages?.length || 0],
+    [bindings.styleImages, input.styleImages?.length || 0],
+    [bindings.elementImages, input.elementImages?.length || 0],
+    [mediaBinding(model, ['first_image']), input.firstImage ? 1 : 0],
+    [mediaBinding(model, ['last_image']), input.lastImage ? 1 : 0],
+    [bindings.referenceVideos, input.referenceVideos?.length || 0],
+    [bindings.referenceAudios, input.referenceAudios?.length || 0]
+  ];
+  const checked = new Set<string>();
+  for (const parameter of model.parameters) {
+    const constraint = parameter.aggregateConstraint;
+    if (!constraint) continue;
+    const key = `${constraint.maxTotalItems}:${[...constraint.fields].sort().join(',')}`;
+    if (checked.has(key)) continue;
+    checked.add(key);
+    const total = counted.reduce((sum, [binding, count]) => {
+      if (!binding || !count) return sum;
+      const pathTail = binding.path.split('.').filter(Boolean).at(-1);
+      return constraint.fields.some(field => field === binding.path || field === pathTail) ? sum + count : sum;
+    }, 0);
+    if (total > constraint.maxTotalItems) {
+      throw new ApiError(400, 'VALIDATION_ERROR', `参考素材最多可使用 ${constraint.maxTotalItems} 个`);
+    }
+  }
 }
 
 type FreshVideoModel = NewApiResolvedCatalogModel & {
@@ -373,6 +468,8 @@ export async function videoRequestFingerprint(input: ParsedVideoRequest): Promis
     size: input.size ?? null,
     resolution: input.resolution,
     referenceImages: input.referenceImages ?? [],
+    ...(input.styleImages?.length ? { styleImages: input.styleImages } : {}),
+    ...(input.elementImages?.length ? { elementImages: input.elementImages } : {}),
     firstImage: input.firstImage ?? null,
     lastImage: input.lastImage ?? null,
     referenceVideos: input.referenceVideos ?? [],
@@ -525,10 +622,10 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   if (spendableCredits(profile) < final) {
     throw new ApiError(402, 'INSUFFICIENT_CREDITS', `积分不足（需要 ${final}，当前 ${spendableCredits(profile)}）`);
   }
-  const referenceImages = input.referenceImages?.length
-    ? await resolveGenerationRefUrls(c, admin, user.id, input.referenceImages)
-    : [];
-  const [firstImageRefs, lastImageRefs, referenceVideos, referenceAudios] = await Promise.all([
+  const [referenceImages, styleImages, elementImages, firstImageRefs, lastImageRefs, referenceVideos, referenceAudios] = await Promise.all([
+    input.referenceImages?.length ? resolveGenerationRefUrls(c, admin, user.id, input.referenceImages) : Promise.resolve([]),
+    input.styleImages?.length ? resolveGenerationRefUrls(c, admin, user.id, input.styleImages) : Promise.resolve([]),
+    input.elementImages?.length ? resolveGenerationRefUrls(c, admin, user.id, input.elementImages) : Promise.resolve([]),
     input.firstImage ? resolveGenerationRefUrls(c, admin, user.id, [input.firstImage]) : Promise.resolve([]),
     input.lastImage ? resolveGenerationRefUrls(c, admin, user.id, [input.lastImage]) : Promise.resolve([]),
     resolveMediaReferences(c, user.id, input.referenceVideos),
@@ -545,10 +642,13 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
     size: input.size,
     resolution: input.resolution,
     referenceImages,
+    styleImages,
+    elementImages,
     firstImage,
     lastImage,
     referenceVideos,
-    referenceAudios
+    referenceAudios,
+    mediaBindings: videoMediaBindings(model)
   };
   const baseMeta: VideoMeta = {
     ...(input.clientRequestId ? { clientRequestId: input.clientRequestId } : {}),

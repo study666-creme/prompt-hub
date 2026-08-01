@@ -18,7 +18,8 @@ import { videoProviderQueueAction } from './video-provider-queue';
 import {
   processVideoPendingSubmit,
   type VideoSubmissionJob,
-  videoMeta
+  videoMeta,
+  videoSubmitParamsFromJob
 } from './video-provider-submit';
 
 type MutableJob = VideoSubmissionJob & {
@@ -150,6 +151,35 @@ beforeEach(() => {
 });
 
 describe('durable video submission', () => {
+  it('restores semantic media roles and catalog bindings from the durable envelope', () => {
+    const job = queuedJob();
+    job.meta = {
+      ...(job.meta || {}),
+      videoSubmitEnvelope: {
+        ...videoMeta(job.meta?.videoSubmitEnvelope),
+        styleImages: ['https://asset.test/style.jpg'],
+        elementImages: ['https://asset.test/element.jpg'],
+        referenceVideos: ['https://asset.test/source.mp4'],
+        mediaBindings: {
+          styleImages: { path: 'style_references', type: 'array' },
+          elementImages: { path: 'element_references', type: 'array' },
+          referenceVideos: { path: 'input_video', type: 'string' }
+        }
+      }
+    };
+
+    expect(videoSubmitParamsFromJob(job)).toMatchObject({
+      styleImages: ['https://asset.test/style.jpg'],
+      elementImages: ['https://asset.test/element.jpg'],
+      referenceVideos: ['https://asset.test/source.mp4'],
+      mediaBindings: {
+        styleImages: { path: 'style_references', type: 'array' },
+        elementImages: { path: 'element_references', type: 'array' },
+        referenceVideos: { path: 'input_video', type: 'string' }
+      }
+    });
+  });
+
   it('recovers a crash before debit/queue preparation without charging twice', async () => {
     const job = awaitingDebitJob();
     const { admin, row } = fakeAdmin(job);

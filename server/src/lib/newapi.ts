@@ -116,6 +116,10 @@ export type NewApiCatalogParameter = {
   min_items?: number;
   max_items?: number;
   items?: Record<string, unknown>;
+  aggregateConstraint?: {
+    fields: string[];
+    maxTotalItems: number;
+  };
 };
 
 export type NewApiCatalogSnapshot = {
@@ -455,6 +459,16 @@ function normalizeCatalogParameter(value: unknown): NewApiCatalogParameter | nul
     if (value != null) parameter[key] = value;
   }
   if (raw.items && typeof raw.items === 'object') parameter.items = raw.items as Record<string, unknown>;
+  if (raw.aggregate_constraint && typeof raw.aggregate_constraint === 'object') {
+    const aggregate = raw.aggregate_constraint as Record<string, unknown>;
+    const fields = Array.isArray(aggregate.fields)
+      ? aggregate.fields.map(stringValue).filter(field => /^[A-Za-z_][A-Za-z0-9_.]*$/.test(field))
+      : [];
+    const maxTotalItems = numberValue(aggregate.max_total_items);
+    if (fields.length && maxTotalItems != null && Number.isInteger(maxTotalItems) && maxTotalItems >= 0) {
+      parameter.aggregateConstraint = { fields: [...new Set(fields)], maxTotalItems };
+    }
+  }
   return parameter;
 }
 

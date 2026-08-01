@@ -106,6 +106,10 @@ export type PublicCatalogParameter = {
   min_items?: number;
   max_items?: number;
   items?: Record<string, unknown>;
+  aggregateConstraint?: {
+    fields: string[];
+    maxTotalItems: number;
+  };
 };
 
 export function projectPublicCatalogParameters<T extends PublicCatalogParameter>(
@@ -143,6 +147,15 @@ export function projectPublicCatalogParameters<T extends PublicCatalogParameter>
       if (typeof itemType === 'string') items.type = itemType;
       if (typeof itemFormat === 'string') items.format = itemFormat;
       if (Object.keys(items).length) out.items = items;
+    }
+    if (parameter.aggregateConstraint) {
+      const fields = parameter.aggregateConstraint.fields
+        .map(value => String(value || '').trim())
+        .filter(value => /^[A-Za-z_][A-Za-z0-9_.]*$/.test(value));
+      const maxTotalItems = Number(parameter.aggregateConstraint.maxTotalItems);
+      if (fields.length && Number.isInteger(maxTotalItems) && maxTotalItems >= 0) {
+        out.aggregateConstraint = { fields: [...new Set(fields)], maxTotalItems };
+      }
     }
     return [out];
   });

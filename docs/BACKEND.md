@@ -121,6 +121,10 @@ npm exec wrangler secret put APIMART_API_KEY
 
 Prompt Hub 的视频契约只包含规范化 `duration`、`ratio`、`resolution` 和引用素材。具体模型需要 `aspect_ratio` 还是 `ratio`、固定分辨率时忽略什么字段，属于 New API 能力层。
 
+视频引用素材按用途分为 `referenceImages`、`styleImages`、`elementImages`、`referenceVideos` 和 `referenceAudios`。Worker 必须以实时目录参数的 `path` 和 `type` 绑定上游字段，不能根据模型 ID 或参数 `name` 猜测；V3 Omni 这类 `name=referenceImages`、`path=style_references` 的目录行必须按 `path` 归入风格参考。
+
+单项数量、目录 `aggregate_constraint` 总数、binding path 语法以及与基础请求字段的路径冲突，均在读取余额、创建任务和扣费前完成校验。通过校验后，解析出的媒体 URL 和完整 binding 映射一并写入 `videoSubmitEnvelope`，队列恢复只重放该持久信封，不重新读取目录或改变用途。旧信封没有 binding 映射时继续使用原有兼容字段；新增角色为空时不得改变旧请求的幂等 fingerprint，已有 `clientRequestId` 重放仍应命中原任务。
+
 ## 本地与部署
 
 ```powershell
