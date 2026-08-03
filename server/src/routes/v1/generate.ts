@@ -763,6 +763,29 @@ export function publicModelPayload(
         )
       : null;
     const newApiRule = newApiRuleForModel(m, opts.newApiCatalog);
+    const qualityOptions = newApiRule
+      ? parameterOptions(newApiRule.parameters, 'quality')
+          .map(value => value.trim().toLowerCase())
+          .filter(value => value === 'low' || value === 'standard' || value === 'high')
+      : [];
+    const creditsByResolutionAndQuality = m.provider === 'newapi' && qualityOptions.length
+      ? Object.fromEntries(
+          resolutions.map(resolution => [
+            resolution,
+            Object.fromEntries(
+              qualityOptions.flatMap(quality => {
+                const credits = newApiCreditsForModel(
+                  newApiRules,
+                  m.upstream,
+                  resolution,
+                  quality
+                );
+                return credits == null ? [] : [[quality, credits]];
+              })
+            )
+          ]).filter(([, prices]) => Object.keys(prices).length > 0)
+        )
+      : null;
     return {
       id: m.id,
       label: sanitizePublicModelLabel(m.label, m.id),
@@ -788,6 +811,7 @@ export function publicModelPayload(
       resolutions: m.resolutions,
       pricingByResolution: m.pricingByResolution,
       creditsByResolution: finalCreditsByResolution,
+      creditsByResolutionAndQuality,
       pricingBySpeed: m.pricingBySpeed,
       creditsBySpeed: m.pricingBySpeed && publicCostBySpeed
         ? Object.fromEntries(
@@ -813,6 +837,7 @@ async function computeGenerationCostForRequest(
   memberActive: boolean,
   opts?: {
     mjSpeed?: string | null;
+    quality?: string | null;
     newApiCatalog?: NewApiCatalogSnapshot;
   }
 ): Promise<ReturnType<typeof computeImageGenerationCost>> {
@@ -830,7 +855,8 @@ async function computeGenerationCostForRequest(
   const credits = newApiCreditsForModel(
     snapshot.rules,
     resolved.upstream,
-    resolution
+    resolution,
+    opts?.quality
   );
   if (credits == null) return baseCost;
   return {
@@ -970,10 +996,11 @@ export function assertQuotedGenerationCost(
 function assertCatalogPriceAvailable(
   snapshot: NewApiCatalogSnapshot,
   resolved: NonNullable<ReturnType<typeof resolveImageModelConfig>>,
-  resolution: string
+  resolution: string,
+  quality?: string | null
 ): void {
   if (resolved.provider !== 'newapi') return;
-  const credits = newApiCreditsForModel(snapshot.rules, resolved.upstream, resolution);
+  const credits = newApiCreditsForModel(snapshot.rules, resolved.upstream, resolution, quality);
   if (credits == null || !Number.isFinite(credits) || credits < 0) {
     throw new ApiError(
       503,
@@ -1024,9 +1051,13 @@ export async function publicGenerationModelsHandler(c: Context<{ Bindings: Env }
 /** 报价接口：轻量、不限流（避免生图页拖动参数时卡 20s+） */
 generateRoutes.get('/cost', async c => {
   const resolution = c.req.query('resolution') || '1k';
+  const quality = c.req.query('quality') || 'standard';
   const model = normalizeImageModelId(c.req.query('model') || 'image2');
   if (!['1k', '2k', '4k'].includes(resolution)) {
     throw new ApiError(400, 'VALIDATION_ERROR', '无效的分辨率');
+  }
+  if (!['low', 'medium', 'standard', 'high', 'ultra'].includes(quality)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '无效的画质选项');
   }
   const user = c.get('user');
   const admin = createAdminClient(c.env);
@@ -1051,7 +1082,7 @@ generateRoutes.get('/cost', async c => {
       resolved ? modelUnavailableMessage(resolved) : '模型不可用'
     );
   }
-  assertCatalogPriceAvailable(newApiCatalog, resolved, resolution);
+  assertCatalogPriceAvailable(newApiCatalog, resolved, resolution, quality);
   await assertNewApiRouteAvailable(c.env, resolved);
   if (resolved.resolutions.length && !resolved.resolutions.includes(resolution as '1k')) {
     throw new ApiError(400, 'VALIDATION_ERROR', `该模型不支持 ${resolution.toUpperCase()} 输出`);
@@ -1065,7 +1096,7 @@ generateRoutes.get('/cost', async c => {
     resolution,
     profile.membership_tier,
     memberActive,
-    { mjSpeed: speed || null, newApiCatalog }
+    { mjSpeed: speed || null, quality, newApiCatalog }
   );
   return c.json({
     ok: true,
@@ -1126,7 +1157,12 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       resolved ? modelUnavailableMessage(resolved) : '所选模型不可用'
     );
   }
-  assertCatalogPriceAvailable(newApiCatalog, resolved, parsed.data.resolution);
+  assertCatalogPriceAvailable(
+    newApiCatalog,
+    resolved,
+    parsed.data.resolution,
+    resolved.fixedQualityLow ? 'low' : parsed.data.quality
+  );
   await assertNewApiRouteAvailable(c.env, resolved);
   if (
     resolved.resolutions.length
@@ -1159,7 +1195,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       jobResolution,
       profile.membership_tier,
       memberActive,
-      { mjSpeed: mjParams?.speed || null, newApiCatalog }
+      { mjSpeed: mjParams?.speed || null, quality: upstreamQuality, newApiCatalog }
     );
   const count = resolveSupportedImageCount(parsed.data.count, newApiRule);
   const base = roundCredits(unitCost.base * count);

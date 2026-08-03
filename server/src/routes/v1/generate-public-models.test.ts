@@ -250,6 +250,62 @@ describe('public image model projection', () => {
     expect(image2Pro?.parameters.some((parameter) => parameter.name === 'quality')).toBe(false);
   });
 
+  it('projects image quality prices for the browser without flattening them', () => {
+    const image2Catalog = NEWAPI_IMAGE_MODEL_CATALOG.map((entry) => (
+      entry.id === 'image2'
+        ? {
+            ...entry,
+            upstream: 'image2-A',
+            resolutions: ['1k', '2k', '4k'] as ('1k' | '2k' | '4k')[],
+            pricingByResolution: true
+          }
+        : entry
+    ));
+    const models = publicModelPayload(
+      { globalDiscountPercent: 100, models: {} },
+      null,
+      false,
+      {
+        newApiCatalog: {
+          available: true,
+          stale: false,
+          version: 'image2-a-quality-pricing',
+          pricingVersion: '',
+          models: [],
+          rules: [{
+            model: 'image2-A',
+            credits: 4,
+            creditsByResolution: { '1k': 4, '2k': 5, '4k': 6 },
+            creditsByResolutionAndQuality: {
+              '1k': { high: 6 },
+              '2k': { high: 7 },
+              '4k': { high: 8 }
+            },
+            description: null,
+            tags: '',
+            label: 'Image2 A',
+            modality: 'image',
+            parameters: [
+              { name: 'resolution', path: 'resolution', label: 'Resolution', type: 'string', required: false, options: ['1k', '2k', '4k'] },
+              { name: 'quality', path: 'quality', label: 'Quality', type: 'string', required: false, options: ['low', 'standard', 'high'] }
+            ]
+          }],
+          imageCatalogEntries: image2Catalog
+        }
+      }
+    );
+
+    expect(models.find(model => model.id === 'image2')).toMatchObject({
+      creditsPerCall: 4,
+      creditsByResolution: { '1k': 4, '2k': 5, '4k': 6 },
+      creditsByResolutionAndQuality: {
+        '1k': { low: 4, standard: 4, high: 6 },
+        '2k': { low: 5, standard: 5, high: 7 },
+        '4k': { low: 6, standard: 6, high: 8 }
+      }
+    });
+  });
+
   it('keeps the live 4K parameter contract when the upstream id is an alias', () => {
     const aliasedCatalog = NEWAPI_IMAGE_MODEL_CATALOG.map((entry) => (
       entry.id === 'image2-4k-fast'

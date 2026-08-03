@@ -700,7 +700,7 @@
     syncImageGenPromoNotice(detail, final);
   }
 
-  function catalogHasPricingFor(modelId, resolution, mjSpeed) {
+  function catalogHasPricingFor(modelId, resolution, mjSpeed, quality) {
     const m = imageGenModelCatalog.find((x) => x.id === modelId);
     if (!m) return false;
     if (m.pricingBySpeed) {
@@ -708,6 +708,12 @@
       if (m.creditsBySpeed?.[speed] != null) return true;
     }
     const res = normalizeImageGenResolution(resolution);
+    const normalizedQuality = quality === 'low'
+      ? 'low'
+      : quality === 'high' || quality === 'ultra'
+        ? 'high'
+        : 'standard';
+    if (m.creditsByResolutionAndQuality?.[res]?.[normalizedQuality] != null) return true;
     if (m.pricingByResolution && m.creditsByResolution?.[res] != null) return true;
     if (Number.isFinite(Number(m.creditsFinal))) return true;
     return false;
@@ -723,7 +729,7 @@
     }
     const { model, resolution, quality, size } = getImageGenFormMeta();
     const mjSpeed = isImageGenMidjourneyModel(model) ? getImageGenMjSpeed() : null;
-    const detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution, mjSpeed);
+    const detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution, mjSpeed, quality);
     const final = detail?.final;
     if (final == null || !Number.isFinite(Number(final))) {
       if (btn && !btn.disabled && !imageGenBatchRunning) btn.textContent = '生成图片 · — 积分';
@@ -732,7 +738,7 @@
     }
     applyImageGenCostDisplay(detail, final, quality, size);
     window.ImageGenPromptTools?.updateBatchCostLabel?.();
-    if (catalogHasPricingFor(model, resolution, mjSpeed)) return;
+    if (catalogHasPricingFor(model, resolution, mjSpeed, quality)) return;
     clearTimeout(imageGenCostDebounceTimer);
     imageGenCostDebounceTimer = setTimeout(() => {
       const speed = isImageGenMidjourneyModel(model) ? getImageGenMjSpeed() : null;
@@ -803,7 +809,7 @@
       if (seq !== imageGenCostHintSeq) return;
       if (!quote.ok || quote.data?.final == null) return;
 
-      const local = window.PointsSystem?.getImageGenCostDetail?.(model, resolution);
+      const local = window.PointsSystem?.getImageGenCostDetail?.(model, resolution, null, quality);
       const final = Number(quote.data.final);
 
       const detail = Object.assign({}, local || {}, {

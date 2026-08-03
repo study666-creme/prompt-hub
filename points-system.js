@@ -56,6 +56,7 @@
           creditsFinal: hit.creditsFinal,
           pricingByResolution: hit.pricingByResolution === true,
           creditsByResolution: hit.creditsByResolution || null,
+          creditsByResolutionAndQuality: hit.creditsByResolutionAndQuality || null,
           pricingBySpeed: hit.pricingBySpeed === true,
           creditsBySpeed: hit.creditsBySpeed || null
         };
@@ -186,8 +187,8 @@
     return catalogModelEntry(modelId);
   }
 
-  function getImageGenCost(modelId, resolution) {
-    return getImageGenCostDetail(modelId, resolution).final;
+  function getImageGenCost(modelId, resolution, quality, mjSpeed) {
+    return getImageGenCostDetail(modelId, resolution, mjSpeed, quality).final;
   }
 
   function costDetailFromFinalCredits(model, value, mult) {
@@ -205,7 +206,7 @@
   }
 
   /** @returns {{ modelId, modelLabel, base, final, mult, label, saved, fixed }} */
-  function getImageGenCostDetail(modelId, resolution, mjSpeed) {
+  function getImageGenCostDetail(modelId, resolution, mjSpeed, quality) {
     const model = getImageGenModel(modelId);
     const res = normalizeResolution(resolution);
     const mult = getMemberGenMultiplier();
@@ -216,6 +217,16 @@
         const speed = mjSpeed === 'fast' || mjSpeed === 'turbo' ? mjSpeed : 'relax';
         const final = Number(model.creditsBySpeed?.[speed]);
         if (Number.isFinite(final)) return costDetailFromFinalCredits(model, final, mult);
+      }
+      const pricingQuality = (() => {
+        const value = String(quality || '').trim().toLowerCase();
+        if (value === 'low') return 'low';
+        if (value === 'high' || value === 'ultra') return 'high';
+        return 'standard';
+      })();
+      const qualityPrice = Number(model.creditsByResolutionAndQuality?.[res]?.[pricingQuality]);
+      if (Number.isFinite(qualityPrice)) {
+        return costDetailFromFinalCredits(model, qualityPrice, mult);
       }
       if (model.pricingByResolution && model.creditsByResolution?.[res] != null) {
         const final = Number(model.creditsByResolution[res]);

@@ -852,6 +852,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       const dismissBtn = '<button type="button" class="imagegen-feed-del" data-pending-dismiss title="关闭生成占位（不删已入库的图）" aria-label="关闭生成占位">×</button>';
       return `<article class="imagegen-feed-card imagegen-feed-card-tile imagegen-feed-card--pending${recovering ? ' imagegen-feed-card--recovering' : ''}" data-feed-id="${d().esc?.(job.id)}" data-pending="1"${job.jobId ? ` data-job-id="${d().esc?.(job.jobId)}"` : ''}>
         <div class="imagegen-feed-media imagegen-gen-pending" aria-busy="true" aria-label="${d().esc?.(pendingLabel)}">
+          <span class="imagegen-gen-pending-indicator" aria-hidden="true"><i></i><i></i><i></i></span>
           <span class="imagegen-gen-pending-label">${d().esc?.(pendingLabel)}</span>
         </div>
         <div class="imagegen-feed-content">

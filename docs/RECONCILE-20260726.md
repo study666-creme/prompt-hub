@@ -1,6 +1,6 @@
 # Prompt Hub 双树收编记录
 
-最后核对：2026-08-02
+最后核对：2026-08-03
 
 > 本文区分“生产已上线”和“主树本地完成”。生产切换必须通过 `/health.buildSha`、Pages build 和线上冒烟取证，不能只凭本地提交或测试通过作结论。
 
@@ -9,7 +9,7 @@
 - **唯一候选源**：`D:\prompt-hub`。
 - **历史生产审计源**：`D:\canvas\prompt-hub`，只读，不再作为开发或部署源。
 - **当前生产**：`20260730a` 仍是线上基线，Worker、Pages 与五项数据库迁移已取证。
-- **当前候选**：`20260802a` 修复 New API 生图队列提交、完成态即时渲染和失败媒体折叠；待同一干净提交发布后，以 `/health.buildSha` 和 Pages production build 完成切换取证。
+- **当前候选**：`20260803a` 补齐 `image2-A` 的画质/分辨率计价、全能模型选择器隔离、异步结果轮询和失效最近图片操作；待同一干净提交发布后，以 `/health.buildSha` 和 Pages production build 完成切换取证。
 
 双树文件完全相同不是目标。目标是逐项审计生产行为，将需要保留的能力以主树现有契约安全实现，并明确拒绝会重复付费、泄露渠道或回退公开接口的历史实现。
 
@@ -37,7 +37,7 @@
 
 ## 发布证据
 
-- **New API 已核验**：2026-07-30 公开目录返回 `capability_version: 2026-07-29.1`；`sd2.0-pro` 的公开契约为 4–15 秒、固定 720p、最多 9 图/3 视频/3 音频。
+- **New API 已核验**：2026-08-03 公开目录返回 `capability_version: 2026-08-03.2`；`image2-A` 保持独立的 `resolution` 与 `quality` 参数，标准/低画质 1K/2K/4K 为 4/5/6 积分，高画质为 6/7/8 积分。
 - **Cloudflare 资源已核验**：图片/视频 Queue 与 DLQ、`prompt-hub-card-images` R2、`PROMPT_HUB_METRICS` KV 均存在；图片与视频 Queue 均显示 1 producer / 1 consumer。
 - **Git 与验证已完成**：线上基线为 `20260730a`；本候选的最终发布 SHA 需在提交后写入并通过 `/health.buildSha` 核对，最终运行提交始终从线上健康检查读取。
 - **数据库备份已核验**：`prompt-hub-final-20260730-102016.dump` 为 15,330,250 字节，`pg_restore --list` 返回 732 项，SHA-256 为 `7A83BD87B42E1B195121E542655A65B4C2F4E5EAABE0EDACDF45ABD34C488448`；项目外 DPAPI 加密副本已完成解密回算。
@@ -53,7 +53,7 @@
 
 ## 验证基线
 
-2026-08-02 候选 `20260802a` 已通过 Worker `npm run typecheck`、50 个测试文件共 340 项测试、根目录文档/预部署检查，以及失败媒体折叠和归档挂起即时完成浏览器回归。发布后还需验证 `/health.buildSha`、Pages production build、模型目录 HTTP 200 和一次隔离账号低价生图闭环。
+2026-08-03 候选 `20260803a` 已通过 Worker `npm run typecheck`、52 个测试文件共 345 项测试、根目录文档/预部署检查、bundle/VM 冒烟，以及 4K 高画质 8 积分、选择器隔离和失效最近图片操作的浏览器契约回归。发布后还需验证 `/health.buildSha`、Pages production build、模型目录 HTTP 200；付费闭环仅在当前任务授权范围内执行，并在首个异常结果后停止。
 
 ## 以后如何避免再次分叉
 

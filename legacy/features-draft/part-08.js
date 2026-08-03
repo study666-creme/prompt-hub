@@ -484,7 +484,7 @@
     let charged = 0;
     try {
       const meta = getImageGenFormMeta();
-      let unit = window.PointsSystem?.getImageGenCost?.(meta.model, meta.resolution) ?? 10;
+      let unit = window.PointsSystem?.getImageGenCost?.(meta.model, meta.resolution, meta.quality) ?? 10;
       unit = window.PointsSystem?.roundCredits?.(unit) ?? unit;
       const fmt = window.PointsSystem?.formatCredits || ((n) => String(n));
       const balance = window.PointsSystem?.getCredits?.() ?? 0;

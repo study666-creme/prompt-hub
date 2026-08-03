@@ -397,12 +397,81 @@
     return check;
   }
 
+  function clearRecentCreationMediaFailure(img, media) {
+    const target = media || feedMediaFromImg(img);
+    target?.querySelector('.imagegen-feed-broken-state')?.remove();
+    target?.classList.remove('card-media--load-failed');
+    img?.classList.remove('img-load-failed');
+  }
+
+  function retryRecentCreationMedia(img, media) {
+    if (!img || !media) return;
+    clearRecentCreationMediaFailure(img, media);
+    const card = img.closest('.imagegen-feed-card');
+    card?.classList.remove('imagegen-feed-card--no-media', 'imagegen-feed-card--media-failed');
+    delete img.dataset.feedLoadDone;
+    delete img.dataset.feedLoadToken;
+    delete img.dataset.feedLoadingUrl;
+    delete img.dataset.feedLoadingKey;
+    delete img.dataset.feedImgRetry;
+    delete img.dataset.recentCandidateRetried;
+    delete img.dataset.recentFullRetried;
+    delete img.dataset.primaryRetried;
+    img.dataset.feedForceFresh = '1';
+    media.classList.add('is-loading');
+    loadImg(img);
+  }
+
+  function ensureRecentCreationFailureState(img, media) {
+    if (!media || media.querySelector('.imagegen-feed-broken-state')) return;
+    media.classList.add('card-media--load-failed');
+    const state = document.createElement('div');
+    state.className = 'imagegen-feed-broken-state';
+    state.setAttribute('role', 'status');
+    const icon = document.createElement('span');
+    icon.className = 'imagegen-feed-broken-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '!';
+    const title = document.createElement('strong');
+    title.textContent = '图片暂时无法显示';
+    const note = document.createElement('small');
+    note.textContent = '可以重新加载，或删除这条记录';
+    const actions = document.createElement('div');
+    actions.className = 'imagegen-feed-broken-actions';
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'btn btn-ghost btn-sm';
+    retry.dataset.feedMediaRetry = '1';
+    retry.textContent = '重新加载';
+    retry.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      retryRecentCreationMedia(img, media);
+    });
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn btn-ghost btn-sm imagegen-feed-broken-delete';
+    remove.dataset.feedMediaDelete = '1';
+    remove.textContent = '删除';
+    remove.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      media.closest('.imagegen-feed-card')?.querySelector('[data-delete-feed]')?.click();
+    });
+    actions.append(retry, remove);
+    state.append(icon, title, note, actions);
+    media.append(state);
+  }
+
   function finalizeRecentCreationMediaFailure(img, media) {
     const feedCard = img?.closest?.('.imagegen-feed-card');
     const feedId = String(feedCard?.dataset?.feedId || '');
     if ((/^cr_|^wh_/.test(feedId) || feedCard?.closest?.('#imageGenFeed'))) {
-      media?.remove();
-      feedCard.classList.add('imagegen-feed-card--no-media');
+      media?.classList.remove('is-loading', 'media-shine-reveal');
+      media?.classList.add('card-media--load-failed');
+      img?.classList.add('img-load-failed');
+      feedCard?.classList.add('imagegen-feed-card--media-failed');
+      ensureRecentCreationFailureState(img, media);
       if (isOwnImageGenRecentImg(img)) void confirmPermanentlyMissingRecentCreation(img);
       return;
     }
@@ -844,6 +913,8 @@
     }
     img.classList.remove('img-load-failed');
     media.classList.remove('card-media--load-failed');
+    media.querySelector('.imagegen-feed-broken-state')?.remove();
+    img.closest('.imagegen-feed-card')?.classList.remove('imagegen-feed-card--media-failed', 'imagegen-feed-card--no-media');
     const quietWhList = isOwnWarehouseListImg(img);
     if (quietWhList) {
       if (!media.classList.contains('card-media--await')) media.classList.add('card-media--await');

@@ -707,6 +707,123 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-side {
   }
 }
 
+/* Recent results stay operable even when a signed or upstream image expires. */
+#imageGenFeed .imagegen-feed-card-del {
+  opacity: 1;
+  transform: none;
+}
+
+#imageGenFeed .imagegen-feed-card--media-failed {
+  cursor: default;
+}
+
+#imageGenFeed .imagegen-feed-media.card-media--load-failed {
+  display: flex;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg-hover) 72%, var(--bg-card));
+}
+
+#imageGenFeed .imagegen-feed-media.card-media--load-failed .imagegen-feed-thumb-btn,
+#imageGenFeed .imagegen-feed-media.card-media--load-failed .imagegen-feed-media-dl {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.imagegen-feed-broken-state {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 6px;
+  padding: 24px 16px 18px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.imagegen-feed-broken-icon {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--text-primary) 18%, var(--border));
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.imagegen-feed-broken-state strong {
+  font-size: 13px;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.imagegen-feed-broken-state small {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0;
+}
+
+.imagegen-feed-broken-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.imagegen-feed-broken-actions .btn {
+  min-width: 76px;
+  min-height: 32px;
+}
+
+.imagegen-feed-broken-delete {
+  color: var(--danger, #e55);
+}
+
+.imagegen-gen-pending-indicator {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  height: 18px;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.imagegen-gen-pending-indicator i {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  animation: imageGenPendingDot 1.2s ease-in-out infinite;
+}
+
+.imagegen-gen-pending-indicator i:nth-child(2) { animation-delay: 0.14s; }
+.imagegen-gen-pending-indicator i:nth-child(3) { animation-delay: 0.28s; }
+
+@keyframes imageGenPendingDot {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imagegen-gen-pending-indicator i {
+    animation: none;
+    opacity: 0.72;
+    transform: none;
+  }
+}
+
 .imagegen-feed-card-tile .imagegen-feed-content {
   padding: 10px;
   gap: 6px;

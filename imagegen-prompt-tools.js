@@ -436,7 +436,7 @@
     const model = $('imageGenModel')?.value || 'image2';
     const resolution = $('imageGenResolution')?.value || '1k';
     const quality = $('imageGenQuality')?.value || 'medium';
-    let detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution) || {};
+    let detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution, null, quality) || {};
     if (window.PointsSystem?.useApiForAccount?.()) {
       try {
         const quote = await Promise.race([
@@ -461,7 +461,7 @@
         }
       } catch (e) { /* 本地估价 */ }
     }
-    const final = detail.final ?? window.PointsSystem?.getImageGenCost?.(model, resolution) ?? 10;
+    const final = detail.final ?? window.PointsSystem?.getImageGenCost?.(model, resolution, quality) ?? 10;
     const display = window.PointsSystem?.formatImageGenUnitPrice?.(detail, final)
       || `${final} 积分`;
     window.syncImageGenPromoNotice?.(detail, final);

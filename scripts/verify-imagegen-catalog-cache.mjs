@@ -16,7 +16,7 @@ const assetStudioRuntime = read('legacy/asset-studio/part-02.js');
 const pointsSystem = read('points-system.js');
 const imagegenBundle = read('pack-imagegen.js');
 const cacheKey = 'promptrepo_imagegen_models_cache_v4';
-const expectedVersion = 19;
+const expectedVersion = 20;
 const forbiddenModelKeys = new Set([
   'provider',
   'creditsBase',
@@ -46,8 +46,8 @@ assert(
   'only retired models must be removed from a current browser cache'
 );
 assert(
-  indexHtml.includes("model.id === 'image2-free'"),
-  'first-paint fallback must filter every retired model'
+  !indexHtml.includes('var FALLBACK = ['),
+  'first paint must not inject a mixed hard-coded model catalog'
 );
 assert(
   featureCatalog.includes("new Set(['image2-free'])"),
@@ -74,6 +74,9 @@ const taintedModel = {
   listPrice: 2,
   promoPrice: 1.5,
   costByResolution: { '1k': { base: 1, final: 5.5 } },
+  creditsByResolutionAndQuality: {
+    '4k': { low: 6, standard: 6, high: 8 }
+  },
   creditsFinal: 5.5,
   parameters: [
     { name: 'prompt', path: 'prompt', label: '提示词', type: 'string', required: true },
@@ -88,14 +91,18 @@ assert(
   taintedCacheResult.result.data?.models?.[0]?.creditsByResolution?.['1k'] === 5.5,
   'legacy final resolution price must project to creditsByResolution'
 );
+assert(
+  taintedCacheResult.result.data?.models?.[0]?.creditsByResolutionAndQuality?.['4k']?.high === 8,
+  'resolution and quality pricing must survive the public cache projection'
+);
+assert(
+  localImagePrice(taintedCacheResult.result.data.models, 'image2', '4k', 'high') === 8,
+  'browser-local pricing must use the 4K high-quality price'
+);
 
 assert(
   apiClient.includes(`const IMAGE_GEN_CATALOG_CACHE_VERSION = ${expectedVersion};`),
   'api-client catalog cache version is out of sync'
-);
-assert(
-  indexHtml.includes(`if (Number(raw.version) < ${expectedVersion}) return null;`),
-  'first-paint catalog cache gate is out of sync'
 );
 assert(
   featureBoot.includes(`const IMAGE_GEN_CATALOG_CACHE_VERSION = ${expectedVersion};`),
@@ -132,7 +139,7 @@ for (const [name, source] of Object.entries({
 const applyCatalog = extractBetween(
   featureCatalog,
   '  function applyImageGenModelCatalog(models, opts = {}) {',
-  '\n\n  function warmImageGenModelCatalog() {'
+  '  function warmImageGenModelCatalog() {'
 );
 const catalogContext = { window: {} };
 catalogContext.globalThis = catalogContext;
@@ -170,7 +177,7 @@ assertPublicModelProjection(catalogContext.persistedCatalog, 'feature catalog pe
 const normalizeEntrySource = extractBetween(
   featureCatalog,
   '  function normalizeImageGenModelEntry(m) {',
-  '\n\n  function imageGenModelDisplayName(m) {'
+  '  function imageGenModelDisplayName(m) {'
 );
 assert(!normalizeEntrySource.includes('...m'), 'feature catalog normalization must not spread raw API models');
 
@@ -244,6 +251,29 @@ async function generationModelsInFlight(models) {
   });
   const results = await Promise.all([first, second]);
   return { samePromise: first === second, catalogFetchCount, results };
+}
+
+function localImagePrice(models, modelId, resolution, quality) {
+  const storage = new Map();
+  const context = {
+    __IMAGE_GEN_MODELS__: models,
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, String(value))
+    },
+    document: {
+      readyState: 'loading',
+      addEventListener: () => {},
+      getElementById: () => null,
+      querySelectorAll: () => []
+    },
+    console,
+    JSON
+  };
+  context.window = context;
+  context.globalThis = context;
+  vm.runInNewContext(pointsSystem, context, { filename: 'points-system.js' });
+  return context.PointsSystem.getImageGenCostDetail(modelId, resolution, null, quality).final;
 }
 
 function assertPublicModelProjection(value, name) {

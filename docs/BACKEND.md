@@ -1,6 +1,6 @@
 # Worker 后端架构
 
-最后核对：2026-07-30。本文描述 `20260730a` 受控发布契约；生产是否已切换以 `/health.buildSha` 为准。
+最后核对：2026-08-03。本文同时记录 `20260730a` 生产基线与未部署的图片计价/结果恢复候选；生产是否已切换以 `/health.buildSha` 为准。
 
 ## 组件
 
@@ -70,7 +70,7 @@
 ## 图片模型边界
 
 - `/api/v1/generate/models` 只返回已完成协议适配且当前可用的卡藏 API 全能模型2/香蕉型号，以及公开 MJ 型号；目录数量和参数来自实时目录，不在文档中硬编码。
-- 图片参数语义固定为：`resolution` 只表示 `1k` / `2k` / `4k`，`quality` 只表示质量，但不是每个模型都公开质量控件。香蕉质量选项为 `low` / `medium` / `high`；`image2k4k` 固定 `low`，4K 型号固定 `standard`，`gpt-image-2-ext` 使用上游默认画质且不发送 `quality`。仅兼容历史请求中精确的 `quality=1k|2k|4k`，入口会把它归一到 `resolution`，不能继续生成两个“分辨率”字段。
+- 图片参数语义固定为：`resolution` 只表示 `1k` / `2k` / `4k`，`quality` 只表示质量。公开 `image2` 和香蕉按实时目录声明公开 `low` / `standard|medium` / `high`；`image2` 的标准/低质量 `1K/2K/4K` 为 `4/5/6` 积分，高质量为 `6/7/8` 积分。`image2k4k` 固定 `low`，4K 型号固定 `standard`，`gpt-image-2-ext` 使用模型默认画质且不发送 `quality`。仅兼容历史请求中精确的 `quality=1k|2k|4k`，入口会把它归一到 `resolution`，不能继续生成两个“分辨率”字段。
 - 卡藏 API 的图片人民币价格统一调用 `imageRetailCreditsFromYuan()`：卡藏报价已包含上游加价，按 `1 元 = 100 积分` 直接换算，不再重复加价。
 - 图片报价和提交读取普通 `/api/model-catalog`，进程内以 single-flight 合并并发请求；完整且精确匹配模型价格的 LKG 最多可信 5 分钟，不再为每次报价发送 `refresh=1`。没有可信价格时必须在创建任务和扣费前失败。
 - 卡片库把用户看到的 `quotedCredits` 随生成请求带回。服务端按当前可信目录重算，报价变化时返回 `409 CONFLICT` 且不创建任务、不扣积分；浏览器只清除对应报价缓存，下一次点击重新报价，不自动重发付费 POST。报价 GET 遇到 `500/502/503/504` 只短退避重试一次。
@@ -142,12 +142,13 @@ npm run deploy:dry-run
 | 公开号 | 关键参数 | 备注 |
 |---|---|---|
 | `全能模型2 · 特价 1K` | `resolution=1k`；不公开质量控件 | 支持比例和目录声明的参考图数量 |
+| `image2` 标准型号 | `resolution=1k/2k/4k`、`quality=low/standard/high` | 浏览器与 Worker 都按分辨率和质量二维矩阵计价；报价 URL 和提交体必须保留质量 |
 | `全能模型2 · 4K` | `resolution=4k`、`quality=standard`、`n=1` | 文生图不需要参考图；`image` / `images` 均为可选 |
 | `全能模型2 · 高质量 1K/2K/4K` | 只公开 `resolution=1k/2k/4k`；省略 `quality` | 使用模型默认画质；支持比例、参考图和目录声明的 `n` 范围 |
 | `image2k4k` 兼容型号 | `resolution=2k/4k`、`quality=low` | 质量固定，不公开可选质量控件 |
 | 全部香蕉型号 | 分辨率与 `quality=low/medium/high` 分别提交 | 全部支持最多 14 张参考图；旧目录缺失能力或错误返回 `max_items=0` 时也不能禁用参考图 |
 
-只有香蕉显示质量选择，公开文案顺序为“低 / 中 / 高”，对应值 `low` / `medium` / `high`。不要在客户端恢复 `Adobe`、`极速 4K` 或旧的 `全能模型4K` 名称；上游别名只允许留在服务端归一化映射中。
+质量控件只由公开目录参数决定；显示文案顺序为“低 / 中 / 高”，标准值兼容 `standard` / `medium`。不要在客户端恢复内部线路名或旧的供应侧别名；别名只允许留在服务端归一化映射中。
 
 ## 卡片库生图生命周期
 
@@ -155,5 +156,6 @@ npm run deploy:dry-run
 2. Worker 先按同一可信目录重算并核对 `quotedCredits`，确认一致后才以请求键创建任务并幂等扣费，再把 New API 提交写入持久队列；队列投递不确定时保留数据库 outbox，由 cron 补投队列消息。New API 的 durable queue 是唯一付费 submit owner，请求响应和普通页面 poll 都不直接领取 `queued` 行。
 3. 队列消费只允许从 `queued` 原子领取一次。上游 HTTP 不确定、`running`、`outcome_unknown` 或任务查询 `not_found` 都不得重新发起付费 POST。
 4. 页面按秒轮询；服务端 cron 每 2 分钟兜底推进 submit、poll 和 archive。上游返回临时图后先把任务标为完成并立即给客户端展示，前端先写入“最近生成”并移除 pending，占用较慢的 R2/Storage 归档在后台独立重试，不重做生成。
-5. Signed-in `copyStorage` saves must complete `archiveGeneratedCardImage` and return a verified `storage://` primary reference before a generated card is persisted. SVG placeholders and temporary upstream URLs are display-only; a failed archive removes the newly created card.
-6. 未知上游结果超过 1 小时进入幂等退款 SLA。发布前必须验证队列 binding、cron、幂等迁移和原子积分 RPC 已同步存在。
+5. 模型目录浏览器缓存版本为 `20`，必须保留 `creditsByResolutionAndQuality`；首屏不得注入混合的硬编码香蕉/MJ 目录，实时目录或同版本已审查缓存才是选择器来源。
+6. Signed-in `copyStorage` saves must complete `archiveGeneratedCardImage` and return a verified `storage://` primary reference before a generated card is persisted. SVG placeholders and temporary upstream URLs are display-only; a failed archive removes the newly created card.
+7. 未知上游结果超过 1 小时进入幂等退款 SLA。发布前必须验证队列 binding、cron、幂等迁移和原子积分 RPC 已同步存在。

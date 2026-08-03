@@ -45,6 +45,10 @@ export type NewApiPricingRule = {
   model: string;
   credits: number;
   creditsByResolution?: Partial<Record<'1k' | '2k' | '4k', number>>;
+  creditsByResolutionAndQuality?: Partial<Record<
+    '1k' | '2k' | '4k',
+    Partial<Record<'low' | 'standard' | 'high', number>>
+  >>;
   description: string | null;
   tags: string;
   label: string;
@@ -795,9 +799,27 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
     }
     if (!resolutions.length) continue;
     const creditsByResolution: Partial<Record<'1k' | '2k' | '4k', number>> = {};
+    const creditsByResolutionAndQuality: Partial<Record<
+      '1k' | '2k' | '4k',
+      Partial<Record<'low' | 'standard' | 'high', number>>
+    >> = {};
     for (const tier of pricing.tiers || []) {
       const resolution = stringValue(tier.when.resolution ?? tier.when.quality).toLowerCase();
-      if ((resolution === '1k' || resolution === '2k' || resolution === '4k') && tier.credits >= 0) {
+      if (resolution !== '1k' && resolution !== '2k' && resolution !== '4k') continue;
+      if (tier.credits < 0) continue;
+      const rawQuality = stringValue(tier.when.quality).toLowerCase();
+      const quality = rawQuality === 'low'
+        ? 'low'
+        : rawQuality === 'high' || rawQuality === 'ultra'
+          ? 'high'
+          : rawQuality === 'medium' || rawQuality === 'standard' || rawQuality === 'auto'
+            ? 'standard'
+            : null;
+      if (quality) {
+        const row = creditsByResolutionAndQuality[resolution] || {};
+        row[quality] = tier.credits;
+        creditsByResolutionAndQuality[resolution] = row;
+      } else {
         creditsByResolution[resolution] = tier.credits;
       }
     }
@@ -815,6 +837,9 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
       model: upstreamModel,
       credits: pricing.credits,
       ...(Object.keys(creditsByResolution).length ? { creditsByResolution } : {}),
+      ...(Object.keys(creditsByResolutionAndQuality).length
+        ? { creditsByResolutionAndQuality }
+        : {}),
       description,
       tags: sanitizePublicModelTags(item.tags),
       label,
@@ -1281,13 +1306,23 @@ function pricingCandidates(upstreamModel: string, resolution?: string | null): s
 export function newApiCreditsForModel(
   rules: NewApiPricingRule[],
   upstreamModel: string,
-  resolution?: string | null
+  resolution?: string | null,
+  quality?: string | null
 ): number | null {
   const candidates = pricingCandidates(upstreamModel, resolution).map((m) => m.toLowerCase());
   const exact = candidates
     .map(candidate => rules.find(rule => rule.model.toLowerCase() === candidate))
     .find((rule): rule is NewApiPricingRule => !!rule);
   const res = normalizedResolution(resolution);
+  const mappedQuality = mapQualityForGptImage(String(quality || ''));
+  const normalizedQuality = mappedQuality === 'low'
+    ? 'low'
+    : mappedQuality === 'high'
+      ? 'high'
+      : 'standard';
+  if (exact && res && exact.creditsByResolutionAndQuality?.[res]?.[normalizedQuality] != null) {
+    return exact.creditsByResolutionAndQuality[res]?.[normalizedQuality] ?? null;
+  }
   if (exact && res && exact.creditsByResolution?.[res] != null) {
     return exact.creditsByResolution[res] ?? null;
   }

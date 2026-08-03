@@ -520,7 +520,7 @@
 
   const costCache = new Map();
   const costInflight = new Map();
-  const IMAGE_GEN_CATALOG_CACHE_VERSION = 19;
+  const IMAGE_GEN_CATALOG_CACHE_VERSION = 20;
   const PUBLIC_IMAGE_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
   const RETIRED_PUBLIC_IMAGE_MODEL_IDS = new Set(['image2-free']);
   const PUBLIC_IMAGE_MODEL_LABEL_OVERRIDES = {
@@ -579,6 +579,21 @@
         legacyValue && typeof legacyValue === 'object' ? legacyValue.final : legacyValue
       );
       if (credits != null) result[key] = credits;
+    }
+    return result;
+  }
+
+  function publicModelCreditMatrix(value) {
+    const result = {};
+    for (const resolution of ['1k', '2k', '4k']) {
+      const source = value?.[resolution];
+      if (!source || typeof source !== 'object' || Array.isArray(source)) continue;
+      const row = {};
+      for (const quality of ['low', 'standard', 'high']) {
+        const credits = publicModelNumber(source[quality]);
+        if (credits != null) row[quality] = credits;
+      }
+      if (Object.keys(row).length) result[resolution] = row;
     }
     return result;
   }
@@ -648,6 +663,9 @@
       model.costBySpeed,
       ['relax', 'fast', 'turbo']
     );
+    const creditsByResolutionAndQuality = publicModelCreditMatrix(
+      model.creditsByResolutionAndQuality
+    );
     const creditsPerCall = publicModelNumber(model.creditsPerCall)
       ?? publicModelNumber(model.creditsFinal)
       ?? publicModelNumber(model.cost?.credits);
@@ -674,6 +692,7 @@
         : [],
       pricingByResolution: model.pricingByResolution === true || Object.keys(creditsByResolution).length > 0,
       creditsByResolution,
+      creditsByResolutionAndQuality,
       pricingBySpeed: model.pricingBySpeed === true || Object.keys(creditsBySpeed).length > 0,
       creditsBySpeed
     };
@@ -758,8 +777,9 @@
     if (costInflight.has(key)) return costInflight.get(key);
     const r = encodeURIComponent(resolution || '1k');
     const m = encodeURIComponent(model || 'image2');
+    const qualityQ = quality ? `&quality=${encodeURIComponent(quality)}` : '';
     const speedQ = speed ? `&speed=${encodeURIComponent(speed)}` : '';
-    const p = requestGenerationCost(`/api/v1/generate/cost?resolution=${r}&model=${m}${speedQ}`)
+    const p = requestGenerationCost(`/api/v1/generate/cost?resolution=${r}&model=${m}${qualityQ}${speedQ}`)
       .then((res) => {
         if (res.ok) costCache.set(key, { data: res, exp: Date.now() + 90_000 });
         return res;

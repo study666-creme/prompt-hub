@@ -30,7 +30,9 @@
 | 社区数据/共享首屏请求 | `community-public-feed.js`, `image-gen-feed.js`, `legacy/features-draft/`, `server/src/routes/v1/community.ts` |
 | 社区布局 | `feed-layout.js`, `styles/features/` |
 | 生图表单 | `legacy/features-draft/`, `imagegen-ref-ui.js`, `imagegen-submit.js` |
+| 生图目录缓存/二维计价 | `api-client.js`, `points-system.js`, `legacy/features-draft/part-10.js`, `legacy/features-draft/part-12.js`, `server/src/lib/newapi.ts`, `server/src/routes/v1/generate.ts` |
 | 生图任务 | `imagegen-job-runner.js`, `imagegen-poll-warehouse.js`, `imagegen-finish-run.js`, `server/src/routes/v1/generate.ts`, `server/src/lib/fast-provider-queue.ts` |
+| 近期生成失败媒体恢复 | `card-image-loader.js`, `image-gen-feed.js`, `styles/features/part-11.css` |
 | 上游 provider | `server/src/lib/image-upstream.ts`, provider 对应 `*.ts` |
 | 媒体/R2 | `server/src/routes/v1/media.ts`, `server/src/lib/media-cdn.ts`, `server/src/lib/r2-storage.ts` |
 | 会员/积分 | `subscription.js`, `membership.js`, `points-system.js`, `server/src/lib/membership-credits.ts` |

@@ -1,6 +1,6 @@
 # AI 接手说明
 
-最后核对：2026-07-30。
+最后核对：2026-08-03。
 
 ## 最小阅读顺序
 
@@ -58,9 +58,10 @@
 - 报价与提交读取普通卡藏目录并共享进程内 single-flight；只接受完整、精确且最多 5 分钟的目录/LKG，不要恢复逐次 `refresh=1`。目录不可用或模型价格缺失时必须在创建任务和扣费前失败。
 - 卡片库提交必须带回用户看到的 `quotedCredits`；服务端重算不一致时返回 `409 CONFLICT`、不扣费且不提交。前端应清除对应的 90 秒报价缓存，让下一次点击重新报价，但不得自动重发生成 POST。报价 GET 的 `500/502/503/504` 最多短退避重试一次。
 - 访客无持久草稿时，当前全能模型2家族默认选择公开目录中排序最前的 `image2-economy`；它与标准 `image2` 的价格必须分别从目录读取，不能用旧默认值覆盖。
-- `resolution` 只表示 `1k/2k/4k`，`quality` 只表示质量，但不是每个模型都有质量控件。只有香蕉公开 `low/medium/high`；`image2k4k` 固定 `low`，4K 型号固定 `standard`，`gpt-image-2-ext` 省略 `quality` 并使用默认画质。仅历史精确值 `quality=1k|2k|4k` 会在入口转换为 `resolution`。
+- `resolution` 只表示 `1k/2k/4k`，`quality` 只表示质量。标准 `image2` 及香蕉按实时目录公开质量选项；`image2` 标准/低质量 `1K/2K/4K` 为 `4/5/6` 积分，高质量为 `6/7/8` 积分。浏览器报价 URL、本地价格、余额校验、提交体和 Worker 重算都必须使用同一质量值。`image2k4k` 固定 `low`，4K 型号固定 `standard`，`gpt-image-2-ext` 省略 `quality` 并使用默认画质。
 - 所有香蕉模型支持最多 14 张参考图。不能根据缺字段、陈旧目录或 `max_items=0` 推断香蕉不支持参考图。
 - 卡片库点击生成后先同步插入作品占位；New API 只由持久队列提交，页面按秒 poll，cron 每 2 分钟兜底 poll/archive，避免请求结束时再次领取同一 `queued` 任务。上游已出图时前端先写入最近生成并移除 pending，临时图可立即展示，归档独立重试。
+- 模型缓存版本 `20` 必须保留二维质量价格；首屏不再注入硬编码模型，避免香蕉/MJ 混入全能模型选择器。近期生成图片最终加载失败时保留记录并显示“重新加载/删除”，不得直接移除媒体区让用户误以为记录消失。
 - Signed-in generated-card saves with `copyStorage` must archive through `archiveGeneratedCardImage` and persist only a verified `storage://` primary reference. A temporary upstream URL or SVG placeholder must not become the durable card image; failed archival removes the new card.
 - 付费提交只允许原子领取一次；网络结果未知、任务 `not_found` 或队列重投都不得触发第二次上游 POST。稳定幂等键与 1 小时未知结果退款 SLA 必须保留。
 - 视频使用独立 `VIDEO_GENERATION_QUEUE`。有上游 task ID 的正常 `processing` 可以持续数百或数千秒，不按生成时长判失败；进入 `result_uncertain`（包括 `error.code=result_uncertain`）后则保留 `submitted` 和公开投影 `submission_unknown`，由后台只读 GET 同一个 NewAPI task ID。显式线路任务继续使用持久化 `routeChannelId`；普通公开模型由 NewAPI 任务记录中的原始 `ChannelId` 固定渠道。两种情况都绝不重发生成 POST 或重新选路。
@@ -93,14 +94,15 @@ npm test
 - 不删除用户卡片、图片或数据库记录来“验证修复”。
 - 不把本地 `.env`、账号、UUID、token、Cloudflare 缓存文件提交到公开仓库。
 
-## 当前生产生图契约（2026-07-30）
+## 当前主树生图契约（未部署候选，2026-08-03）
 
 以下规则优先于本文档中较早的模型兼容性描述；运行状态以 `/health.buildSha` 和实时模型目录为准：
 
 - `全能模型2 · 特价 1K` 公开 ID 为 `image2-economy`；价格读取实时目录，支持比例和可选参考图，不公开质量控件。
+- 标准 `image2` 使用实时目录的 `1K/2K/4K × low/standard/high` 二维价格，公开最终积分为标准/低 `4/5/6`、高 `6/7/8`；不得把价格压平成单一分辨率表。
 - `全能模型2 · 4K` 公开 ID 为 `image2-4k-fast`，固定发送 `resolution=4k`、`quality=standard`、`n=1`；纯文生图不需要参考图。
 - `全能模型2 · 高质量 1K/2K/4K` 只用 `resolution` 选择 `1k`、`2k`、`4k`，省略 `quality` 并使用模型默认画质；`image2k4k` 固定发送 `quality=low`。
-- 所有香蕉型号最多接收 14 张参考图，分辨率与质量字段必须独立，且只有香蕉公开 `quality=low/medium/high` 选择。
+- 所有香蕉型号最多接收 14 张参考图，分辨率与质量字段必须独立；质量控件是否出现以审查后的公开目录参数为准。
 - 前端质量文案只使用“低 / 中 / 高”，上游别名（包括 Adobe）不得泄漏到公开模型目录。
 
 ## 主树目标 Canvas 桥接契约（2026-07-27）

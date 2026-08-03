@@ -112,7 +112,12 @@
       return { ok: false };
     }
 
-    let cost = global.PointsSystem?.getImageGenCost?.(model, resolution) ?? 10;
+    let cost = global.PointsSystem?.getImageGenCost?.(
+      model,
+      resolution,
+      quality,
+      meta.mjParams?.speed
+    ) ?? 10;
     let quotedCredits = cost;
     let balance = global.PointsSystem?.getCredits?.() ?? 0;
     const useApi = global.PointsSystem?.useApiForAccount?.();

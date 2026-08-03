@@ -14,6 +14,7 @@ const serverGenerateSource = readFileSync(
 );
 
 await verifyRetryableColdStart();
+await verifyQualityIsIncludedInQuoteUrl();
 await verifyConcurrentSingleFlight();
 await verifyRetryLimit();
 await verifyNonRetryableResponse();
@@ -52,6 +53,19 @@ assert(
 );
 
 console.log('verify-generation-cost-retry OK');
+
+async function verifyQualityIsIncludedInQuoteUrl() {
+  const test = apiWithResponses([
+    response(200, { ok: true, data: { final: 8 } })
+  ]);
+  const result = await test.api.getGenerationCost('4k', 'high', 'image2');
+  const requestUrl = new URL(test.requests[0]?.url || 'https://invalid.test');
+
+  assert(result.ok && result.data?.final === 8, '4K high quality quote must return its dedicated price');
+  assert(requestUrl.searchParams.get('resolution') === '4k', 'quote URL must include the selected resolution');
+  assert(requestUrl.searchParams.get('quality') === 'high', 'quote URL must include the selected quality');
+  assert(requestUrl.searchParams.get('model') === 'image2', 'quote URL must include the selected public model');
+}
 
 async function verifyRetryableColdStart() {
   const test = apiWithResponses([

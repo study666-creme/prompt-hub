@@ -27,6 +27,9 @@ try {
     body: readyImageBytes
   }));
   await page.setContent('<!doctype html><html><body><div id="imageGenFeed"></div></body></html>');
+  await page.addStyleTag({ path: join(root, 'styles', 'features', 'part-06.css') });
+  await page.addStyleTag({ path: join(root, 'styles', 'features', 'part-07.css') });
+  await page.addStyleTag({ path: join(root, 'styles', 'features', 'part-11.css') });
   await page.evaluate(({ readyImage }) => {
     window.__startRecentMissingScenario = (kind) => {
       const id = `creation-${kind}`;
@@ -42,6 +45,7 @@ try {
         imageVariants: [],
         job: 0,
         list: 0,
+        deleted: 0,
         removed: []
       };
       window.__recentMissingScenario = { kind, creation, calls };
@@ -49,11 +53,13 @@ try {
       const feed = document.getElementById('imageGenFeed');
       feed.innerHTML = `
         <article class="imagegen-feed-card" data-feed-id="cr_${id}">
+          <button type="button" data-delete-feed>Delete</button>
           <div class="imagegen-feed-media is-loading">
             <img data-image-ref="${creation.image}" data-job-id="${jobId}" alt="">
           </div>
         </article>
       `;
+      feed.querySelector('[data-delete-feed]').addEventListener('click', () => { calls.deleted += 1; });
 
       window.FeatureDraft = {
         findCreationById: (candidateId) => candidateId === id ? creation : null,
@@ -67,7 +73,9 @@ try {
       window.MediaPipeline = {
         resolveListUrl: async () => {
           calls.list += 1;
-          return recoverable && calls.list >= 2 ? readyImage : '';
+          if (recoverable && calls.list >= 2) return readyImage;
+          if (kind === 'retry-success' && calls.list >= 3) return readyImage;
+          return '';
         }
       };
       window.SupabaseSync = {
@@ -125,14 +133,47 @@ try {
   await page.waitForFunction(() => window.__recentMissingScenario.calls.job === 1);
   const transient = await page.evaluate(() => ({
     calls: window.__recentMissingScenario.calls,
-    failed: document.querySelector('.imagegen-feed-media')?.classList.contains('card-media--load-failed')
+    failed: document.querySelector('.imagegen-feed-media')?.classList.contains('card-media--load-failed'),
+    mediaRetained: !!document.querySelector('.imagegen-feed-media'),
+    failureState: !!document.querySelector('.imagegen-feed-broken-state'),
+    retryAction: !!document.querySelector('[data-feed-media-retry]'),
+    deleteAction: !!document.querySelector('[data-feed-media-delete]'),
+    mediaHeight: Math.round(document.querySelector('.imagegen-feed-media')?.getBoundingClientRect().height || 0),
+    actionWidths: [...document.querySelectorAll('.imagegen-feed-broken-actions .btn')]
+      .map((button) => Math.round(button.getBoundingClientRect().width))
   }));
   if (
     transient.calls.removed.length !== 0
     || transient.calls.imageVariants.join(',') !== 'grid,full'
     || !transient.failed
+    || !transient.mediaRetained
+    || !transient.failureState
+    || !transient.retryAction
+    || !transient.deleteAction
+    || transient.mediaHeight < 180
+    || transient.actionWidths.some((width) => width < 76)
   ) {
     throw new Error(`transient failure removed a card: ${JSON.stringify(transient)}`);
+  }
+  await page.click('[data-feed-media-delete]');
+  const deleted = await page.evaluate(() => window.__recentMissingScenario.calls.deleted);
+  if (deleted !== 1) throw new Error(`broken result delete action was not forwarded: ${deleted}`);
+
+  await page.evaluate(() => window.__startRecentMissingScenario('retry-success'));
+  await page.waitForSelector('.imagegen-feed-broken-state');
+  await page.click('[data-feed-media-retry]');
+  await page.waitForFunction(() => {
+    const img = document.querySelector('#imageGenFeed img');
+    return img?.complete && img.naturalWidth > 8;
+  });
+  const retried = await page.evaluate(() => ({
+    calls: window.__recentMissingScenario.calls,
+    failed: document.querySelector('.imagegen-feed-media')?.classList.contains('card-media--load-failed'),
+    failureState: !!document.querySelector('.imagegen-feed-broken-state'),
+    loaded: document.querySelector('#imageGenFeed img')?.naturalWidth > 8
+  }));
+  if (!retried.loaded || retried.failed || retried.failureState || retried.calls.list < 3) {
+    throw new Error(`manual retry did not restore the result: ${JSON.stringify(retried)}`);
   }
 
   await page.evaluate(() => window.__startRecentMissingScenario('recoverable-candidate'));

@@ -287,6 +287,57 @@ describe('newapi image upstream', () => {
     expect(textModel && newApiTextCreditsForUsage(textModel, 100_000, 10_000)).toBe(1.6);
   });
 
+  it('keeps image2-A resolution and quality prices independent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      success: true,
+      version: 'image2-a-quality-pricing',
+      models: [{
+        ...publicImageCatalogFixture({
+        id: 'gpt-image-2',
+        label: 'Image2 A',
+        tags: 'image,image2,1k,2k,4k,quality',
+        order: 20,
+        resolution: { name: 'resolution', options: ['1k', '2k', '4k'] },
+        quality: { options: ['low', 'standard', 'high'] },
+        pricing: {
+          mode: 'tiered',
+          unit: 'image',
+          currency: 'CNY',
+          yuan: 0.04,
+          credits: 4,
+          tiers: [
+            { when: { resolution: '1k' }, yuan: 0.04, credits: 4 },
+            { when: { resolution: '2k' }, yuan: 0.05, credits: 5 },
+            { when: { resolution: '4k' }, yuan: 0.06, credits: 6 },
+            { when: { resolution: '1k', quality: 'high' }, yuan: 0.06, credits: 6 },
+            { when: { resolution: '2k', quality: 'high' }, yuan: 0.07, credits: 7 },
+            { when: { resolution: '4k', quality: 'high' }, yuan: 0.08, credits: 8 }
+          ]
+        }
+        }),
+        public: {
+          id: 'image2-A',
+          label: 'Image2 A',
+          description: 'Public image generation model'
+        }
+      }]
+    })));
+
+    const snapshot = await fetchNewApiModelCatalog('https://image2-a-pricing.test', { force: true });
+    const rule = snapshot.rules.find(candidate => candidate.model === 'gpt-image-2');
+
+    expect(rule?.creditsByResolution).toEqual({ '1k': 4, '2k': 5, '4k': 6 });
+    expect(rule?.creditsByResolutionAndQuality).toEqual({
+      '1k': { high: 6 },
+      '2k': { high: 7 },
+      '4k': { high: 8 }
+    });
+    expect(snapshot.imageCatalogEntries[0]?.id).toBe('image2');
+    expect(newApiCreditsForModel(snapshot.rules, 'gpt-image-2', '4k', 'low')).toBe(6);
+    expect(newApiCreditsForModel(snapshot.rules, 'gpt-image-2', '4k', 'standard')).toBe(6);
+    expect(newApiCreditsForModel(snapshot.rules, 'gpt-image-2', '4k', 'high')).toBe(8);
+  });
+
   it('builds all ten live image entries and prices from the production public catalog shape', async () => {
     const models = [
       publicImageCatalogFixture({
