@@ -1,10 +1,10 @@
 # 部署与验证清单
 
-最后核对：2026-08-03
+最后核对：2026-08-04
 
 ## 当前发布状态
 
-生产基线已为 `20260803a`。New API 生图 durable queue、完成态交付、缩略图加载、卡片库稳定 Grid 和生图分页布局已从同一干净 SHA 完成全量验证、Worker dry-run、Pages staging、Worker/Pages 发布和生产验收；五项既有数据库迁移未改变。
+本次生产发布目标为 `20260804a`。它保留 `20260803a` 的 New API 生图 durable queue、完成态交付、缩略图加载、卡片库稳定 Grid 和生图分页布局，并将文字模型收敛到实时目录中的 `deepseek-v4-flash` 与 `deepseek-v4-pro`；五项既有 Prompt Hub 数据库迁移未改变。
 
 ## 发布顺序
 
@@ -16,7 +16,7 @@
 
 ### 2. 核对 New API 前置版本
 
-New API 必须先支持当前规范化契约：稳定幂等键、公开模型与真实渠道映射、比例格式转换、固定参数模型忽略无效可选字段，以及独立的 `quality` / `resolution` 语义。未完成此前置条件时不得部署 Prompt Hub 候选。
+New API 必须先支持当前规范化契约：稳定幂等键、公开模型与真实渠道映射、比例格式转换、固定参数模型忽略无效可选字段，以及独立的 `quality` / `resolution` 语义。文字模型发布还必须确认 `/api/pricing`、`/api/model-catalog` 与带普通服务令牌的 `/v1/models` 只公开两个 DeepSeek 短名和最终价格，不包含 GLM 5.1、内部模型标识或路由字段。未完成此前置条件时不得部署 Prompt Hub 候选。
 
 ### 3. 创建和核对 Cloudflare 资源
 

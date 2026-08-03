@@ -1,6 +1,6 @@
 # AI 接手说明
 
-最后核对：2026-08-03。生产基线已切换为 `20260803a`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
+最后核对：2026-08-04。生产发布目标为 `20260804a`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
 
 ## 最小阅读顺序
 
@@ -16,8 +16,8 @@
 
 - Worker 唯一发布仓库是 `D:\prompt-hub`；`D:\canvas\prompt-hub` 只保留作历史生产审计，禁止从任一脏目录直接发布。
 - 修改 Worker、生成、支付、数据库或发布工具前必须阅读根目录 `AGENTS.md` 和 `docs/RECONCILE-20260726.md`；如果根目录存在 `DO-NOT-DEPLOY.md`，还必须先遵守其中的冻结条件。
-- 2026-08-03 已完成 `20260803a` 的数据库无迁移发布、New API/Cloudflare 核对、Worker/Pages 发布和生产验收；五项既有迁移保持不变。后续发布仍必须使用干净 SHA，并分别以 `/health.buildSha` 和线上 Pages build 取证。
-- 2026-08-03 的文字模型清理仍是未部署候选：资产工作台仅保留 `deepseek-v4-flash`、`deepseek-v4-pro`，两者统一读取实时目录并通过 New API 调用；生产是否切换仍以 `/health.buildSha` 为准。
+- 2026-08-04 的 `20260804a` 发布仅变更文字模型目录和调用链，不新增 Prompt Hub 数据库迁移；五项既有迁移保持不变。发布仍必须使用干净 SHA，并分别以 `/health.buildSha` 和线上 Pages build 取证。
+- 本次文字模型清理后，资产工作台仅保留 `deepseek-v4-flash`、`deepseek-v4-pro`，两者统一读取实时目录并通过 New API 调用。New API 的公开目录、定价和带服务令牌的 `/v1/models` 已确认只返回这两个短名、各 `0.002 元/次`，且不返回 GLM 5.1 或内部模型标识。
 
 ## 文档时效纪律
 
@@ -50,7 +50,7 @@
 | 后台 | `legacy/admin/`、`server/src/routes/admin/` |
 | Canvas/扩展 | `app-router.js`、`legacy/script/part-04.js`、`legacy/script/part-09.js`、`legacy/script/part-10.js`、`server/src/routes/v1/extension.ts`、`server/src/lib/extension-card.ts`、`docs/CANVAS-INTEGRATION.md` |
 
-## 文字模型边界（2026-08-03 未部署候选）
+## 文字模型边界（2026-08-04 发布契约）
 
 - Prompt Hub 的 DeepSeek 公开号只允许 `deepseek-v4-flash` 和 `deepseek-v4-pro`。其余 DeepSeek 后缀型号以及 GLM 5.1 系列必须同时从公开模型投影和模型解析入口排除。
 - `/api/v1/chat/cost` 与 `POST /api/v1/chat` 都通过 `server/src/lib/newapi-text.ts` 强制读取新鲜目录；默认模型为 `deepseek-v4-flash`，提交时使用同一解析结果，不存在 Flash 直连特判。
