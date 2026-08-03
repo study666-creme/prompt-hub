@@ -20,13 +20,18 @@
       });
       warehousePageObserver.observe(sentinel);
     }
-    /** Masonry 绝对定位后 sentinel 会漂到顶部，需钉在最后一行卡片下方 */
+    /** Legacy Masonry needs an absolute sentinel; stable Grid keeps normal flow. */
     function repositionWarehouseScrollSentinel(container) {
       const sentinel = warehouseScrollSentinel;
       if (!sentinel || !container?.contains(sentinel)) return;
       const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
-      if (viewMode === 'list' || isMobileViewport()) {
+      if (viewMode === 'list' || isMobileViewport() || container.classList.contains('warehouse-stable-grid')) {
         sentinel.removeAttribute('style');
+        sentinel.dataset.ready = '1';
+        if (warehousePageObserver) {
+          warehousePageObserver.unobserve(sentinel);
+          warehousePageObserver.observe(sentinel);
+        }
         return;
       }
       const cards = container.querySelectorAll('.card');

@@ -1,5 +1,7 @@
 # 代码导航图
 
+最后核对：2026-08-03。
+
 ## 入口与构建
 
 | 文件/目录 | 作用 |
@@ -22,11 +24,28 @@
 |---|---|
 | 路由/首屏页面 | `app-router.js`, `index.html` |
 | 卡片 CRUD/筛选/分页 | `legacy/script/`, `card-gallery.js` |
-| 卡片仓库 UI | `styles-warehouse.css`, `partials/index-body/part-02.html`, `legacy/script/part-04.js`, `legacy/script/part-09.js` |
+| 卡片仓库 UI | `styles-warehouse.css`, `styles/base/part-08.css`, `styles/base/part-09.css`, `partials/index-body/part-02.html`, `legacy/script/part-02.js`, `part-03.js`, `part-04.js`, `part-09.js`, `part-10.js` |
 | 编辑面板多图/移动端遮挡 | `edit-panel-gallery.js`, `card-gallery.js`, `mobile.js`, `styles-mobile.css` |
 | 云同步/账号切换 | `supabase-sync.js`, `legacy/supabase-sync/`, `cloud-sync-safety.js`, `sync-orchestrator.js` |
 | 卡片图片/文字卡判定 | `card-gallery.js`, `card-image-loader.js`, `card-image-loader-queues.js`, `feed-images.js`, `warehouse-thumb.js` |
 | Generated-card save/archive | `legacy/script/part-02.js`, `legacy/supabase-sync/part-05.js` |
+
+## Generation Media Ownership (2026-08-03)
+
+`imagegen-job-runner.js` owns client polling and only resolves a pending job
+when the API returns a deliverable image reference. `server/src/lib/generation-jobs.ts`
+owns upstream completion, archival checkpoints, and the `completed` contract.
+`server/src/lib/apimart.ts` and `server/src/lib/newapi.ts` normalize transient
+terminal-without-URL responses as pending. `pack-feed.js` is generated from
+`feed-layout.js`, `feed-images.js`, `image-gen-feed-cards.js`, and
+`image-gen-feed.js`.
+
+Warehouse desktop layout is owned by `legacy/script/part-02.js` and
+`part-03.js` plus `styles/base/part-09.css`. It is a stable CSS Grid; do not
+reintroduce Masonry width/top/left writes for `#cardsContainer`. `part-10.js`
+keeps the paging sentinel in normal Grid flow. Exhausted warehouse media
+failures collapse through `styles/base/part-08.css` instead of leaving a black
+slot.
 | 社区数据/共享首屏请求 | `community-public-feed.js`, `image-gen-feed.js`, `legacy/features-draft/`, `server/src/routes/v1/community.ts` |
 | 社区布局 | `feed-layout.js`, `styles/features/` |
 | 生图表单 | `legacy/features-draft/`, `imagegen-ref-ui.js`, `imagegen-submit.js` |
@@ -74,7 +93,7 @@
 
 ## 卡片仓库 UI 归属
 
-2026-07-30 复核的未部署候选把仓库视觉覆盖集中在 `styles-warehouse.css`，不修改拆分 CSS 真源。`partials/index-body/part-02.html` 负责紧凑概览、工具栏图标和搜索结构；`styles-mobile.css` 负责窄屏工具栏收缩；`mobile.js` 负责编辑面板打开时持续隐藏底部导航。`legacy/script/part-04.js` 同步概览中的卡片数与当前分组；`legacy/script/part-09.js` 输出类型、分组、时间元数据和可操作空态。
+2026-08-03 复核的 `20260803a` 候选继续由 `styles-warehouse.css` 管理仓库独立视觉层，并由 `styles/base/part-09.css` 和 `legacy/script/part-02.js`、`part-03.js`、`part-10.js` 共同管理桌面稳定 Grid、固定列表媒体框和分页哨兵。`partials/index-body/part-02.html` 负责紧凑概览、工具栏图标和搜索结构；`styles-mobile.css` 负责窄屏工具栏收缩；`mobile.js` 负责编辑面板打开时持续隐藏底部导航。`legacy/script/part-04.js` 同步概览中的卡片数与当前分组；`legacy/script/part-09.js` 输出类型、分组、时间元数据和可操作空态。
 
 桌面、手机和空仓状态由 `scripts/verify-warehouse-ui-browser.mjs` 验收。脚本同时检查 320/360px 工具栏无重叠，以及编辑面板滚动后底部导航仍隐藏、保存和关闭按钮仍可达。它使用本地模拟的 `_grid` CDN URL，不触发真实 API、生产存储或部署流程；设置 `APP_ROOT=.pages-deploy` 时直接验收最终 Pages 暂存包。
 

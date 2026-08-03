@@ -282,7 +282,7 @@
         });
         if (list && isReadySrc(list, img)) return list;
       }
-      if (storageRef && window.SupabaseSync?.resolvePreviewFullUrl) {
+      if (wantFull && storageRef && window.SupabaseSync?.resolvePreviewFullUrl) {
         const archived = await window.SupabaseSync.resolvePreviewFullUrl(ref, {
           assetId: creation.id,
           cardId: creation.id,
@@ -1151,7 +1151,7 @@
         finalizeRecentCreationMediaFailure(img, feedMediaFromImg(img));
       });
       inflight.set(img, p);
-      return;
+      return p;
     }
     const primary = ref ? window.SupabaseSync?.primaryImagePath?.(ref, cardId) : '';
     const commOther = isCommunityImg(img) && !isOwnCommunityGridImg(img) && !isOwnWarehouseListImg(img);

@@ -677,6 +677,9 @@ export async function ensureGridPathForSigning(
   const clean = rawPath.replace(/^\//, '');
   const signPath = signingPathForVariant(clean, variant).replace(/^\//, '');
   let requiredPrimary: string | null = null;
+  /* A stored grid is already a safe list asset. Check it before requiring the
+   * original so grid-only MJ records do not 404 or trigger a 4K lookup. */
+  if (variant !== 'full' && await cardImageExists(c.env, signPath, admin)) return signPath;
   if (opts.requireExistingPrimary) {
     const primaryCandidates = /_grid\.(jpe?g|webp|png)$/i.test(clean)
       ? primaryCandidatesFromGridPath(clean)

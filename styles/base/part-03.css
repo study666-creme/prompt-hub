@@ -581,7 +581,7 @@
       box-shadow: var(--shadow-card);
       position: relative;
       overflow: hidden;
-      will-change: transform;
+      will-change: auto;
       -webkit-tap-highlight-color: transparent;
     }
     #cardsContainer .card::after {

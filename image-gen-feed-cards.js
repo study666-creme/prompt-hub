@@ -72,19 +72,9 @@
       const listUrl = resolvedThumb
         || ((sourceCardId && d().isDisplayableImage?.(image) && global.SupabaseSync?.getListDisplayImageSrc)
           ? global.SupabaseSync.getListDisplayImageSrc(image, sourceCardId, listJobId
-            ? { jobId: listJobId, allowFullFallback: isRecentFeed }
-            : { allowFullFallback: isRecentFeed })
+            ? { jobId: listJobId, allowFullFallback: false }
+            : { allowFullFallback: false })
           : '');
-      if (!listUrl && isRecentFeed && sourceCardId && global.SupabaseSync?.getCachedDisplayUrl) {
-        const fullCached = global.SupabaseSync.getCachedDisplayUrl(image, {
-          assetId: sourceCardId,
-          jobId: listJobId || undefined,
-          variant: 'full'
-        });
-        if (fullCached && !fullCached.startsWith('storage://')) {
-          resolvedThumb = fullCached;
-        }
-      }
       const resolvedListUrl = resolvedThumb || listUrl;
       const hasDisplayableRef = d().isDisplayableImage?.(image);
       const feedRefs = normalizeFeedRefImages(refImage || (hasDisplayableRef ? image : ''), refImages);

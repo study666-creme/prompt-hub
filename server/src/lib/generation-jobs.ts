@@ -4,6 +4,7 @@ import { isMookoPlaceholderTaskId } from './mooko';
 import {
   confirmUpstreamTaskOutcome,
   fetchUpstreamTaskOnce,
+  isProviderConfigured,
   readJobProvider,
   upstreamBindingsFromEnv,
   type ImageUpstreamBindings
@@ -22,7 +23,6 @@ import { findFirstExistingStoragePath } from './media-cdn';
 import type { MjButtonPublic } from './midjourney-models';
 import { defaultGridMjButtons, filterMjButtonsForClient, fetchMidjourneyTaskGallery } from './apimart-midjourney';
 import { parseMjImagineUrls, buildMjGalleryUrls, mjPollHasFullGallery } from './midjourney-models';
-import { confirmApimartTaskOutcome } from './apimart';
 
 const GEN_IMAGE_BUCKET = 'card-images';
 import { type DebitSplit, deductUserCredits, refundUserCredits } from './membership-credits';
@@ -43,6 +43,30 @@ export type JobRow = {
   created_at: string;
   completed_at?: string | null;
 };
+
+export type GenerationPollStatus = 'processing' | 'completed' | 'failed';
+
+/**
+ * A generation is not publicly complete until a deliverable image reference
+ * exists. Legacy rows can be marked completed before archival/recovery has
+ * populated result_image_url; expose those rows as processing so callers keep
+ * recovering the result instead of showing a false completion.
+ */
+export function normalizeGenerationPollResult<T extends {
+  status: GenerationPollStatus;
+  imageUrl: string | null;
+  progressNote?: string | null;
+}>(result: T): Omit<T, 'status'> & {
+  status: GenerationPollStatus;
+  progressNote?: string | null;
+} {
+  if (result.status !== 'completed' || String(result.imageUrl || '').trim()) return result;
+  return {
+    ...result,
+    status: 'processing',
+    progressNote: result.progressNote || '图片已生成，正在同步到图库'
+  };
+}
 
 export async function refundGenerationCredits(
   admin: SupabaseClient,
@@ -251,6 +275,30 @@ export async function pollAndUpdateJob(
   }
 
   if (job.status === 'completed') {
+    // Some older workers persisted the upstream URL in meta before the
+    // archive write completed. Recover that durable checkpoint first instead
+    // of returning completed/null to every caller.
+    const checkpointUrls = [
+      typeof meta.syncImageUrl === 'string' ? meta.syncImageUrl : null,
+      typeof meta.upstreamImageUrl === 'string' ? meta.upstreamImageUrl : null,
+      ...(Array.isArray(meta.upstreamResultUrls) ? meta.upstreamResultUrls : [])
+    ].filter((value, index, all): value is string =>
+      typeof value === 'string' && !!value.trim() && all.indexOf(value) === index
+    );
+    if (!job.result_image_url && checkpointUrls.length) {
+      try {
+        return await finishPollAsCompleted(
+          admin,
+          userId,
+          job,
+          { imageUrl: checkpointUrls[0], imageUrls: checkpointUrls },
+          env,
+          { quick: !!opts?.quick }
+        );
+      } catch (e) {
+        console.warn('[generation] checkpoint archive recovery failed', job.id, e);
+      }
+    }
     if (
       !job.result_image_url
       && taskId
@@ -335,13 +383,24 @@ export async function pollAndUpdateJob(
     if (!extraImageUrls?.length && Array.isArray(meta.extraImageUrls)) {
       extraImageUrls = (meta.extraImageUrls as string[]).filter((u) => typeof u === 'string' && u);
     }
-    return {
-      status: 'completed',
+    if (!archived && (!taskId || !isProviderConfigured(upstream, provider))) {
+      const msg = 'upstream_no_image';
+      await finalizeFailedJob(admin, userId, job, msg);
+      return {
+        status: 'failed',
+        imageUrl: null,
+        errorMessage: msg,
+        refunded: true
+      };
+    }
+    return normalizeGenerationPollResult({
+      status: 'completed' as const,
       imageUrl: archived,
       errorMessage: null,
       refunded: !!meta.refunded,
-      extraImageUrls: extraImageUrls?.length ? extraImageUrls : undefined
-    };
+      extraImageUrls: extraImageUrls?.length ? extraImageUrls : undefined,
+      progressNote: '图片已生成，正在同步到图库'
+    });
   }
   if (job.status === 'failed') {
     const storedArchive = await tryRestoreJobImageFromStorage(admin, userId, job.id, env);
@@ -381,14 +440,17 @@ export async function pollAndUpdateJob(
   const staleMs = jobStaleMs(provider, upstreamModel, job.resolution);
 
   if (!upstream.grsaiKey && !upstream.apimartKey && !upstream.newapiKey) {
-    await admin
-      .from('generation_requests')
-      .update({
-        status: 'completed',
-        completed_at: new Date().toISOString()
-      })
-      .eq('id', job.id);
-    return { status: 'completed', imageUrl: null, errorMessage: null, refunded: false };
+    // A missing upstream is a configuration/recovery failure, never a
+    // successful generation. Finalize it so paid legacy rows are refunded
+    // exactly once instead of polling completed/null forever.
+    const msg = 'upstream_not_configured';
+    await finalizeFailedJob(admin, userId, job, msg);
+    return {
+      status: 'failed',
+      imageUrl: null,
+      errorMessage: msg,
+      refunded: true
+    };
   }
 
   const mookoStoredUrls = (() => {
@@ -950,20 +1012,24 @@ export async function syncMjImagesFromUpstream(
   gallery: string[];
   allUrls: string[];
 } | null> {
-  if (!upstream.apimartKey || !taskId) return null;
+  if (!taskId) return null;
   const meta = (job.meta as Record<string, unknown>) || {};
   if (meta.isMidjourney !== true) return null;
+  const provider = readJobProvider(meta);
+  if (!isProviderConfigured(upstream, provider)) return null;
   const fetched = opts?.settle
-    ? await confirmApimartTaskOutcome(upstream.apimartKey, upstream.apimartBase, taskId, {
+    ? await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
         attempts: 8,
         intervalMs: 2500
       })
-    : await fetchUpstreamTaskOnce(upstream, 'apimart', taskId);
-  const mjDetail = await fetchMidjourneyTaskGallery(
-    upstream.apimartKey,
-    upstream.apimartBase,
-    taskId
-  );
+    : await fetchUpstreamTaskOnce(upstream, provider, taskId);
+  const mjDetail = provider === 'apimart' && upstream.apimartKey
+    ? await fetchMidjourneyTaskGallery(
+        upstream.apimartKey,
+        upstream.apimartBase,
+        taskId
+      )
+    : null;
   let allUrls = (fetched.imageUrls || []).filter(Boolean);
   if (!allUrls.length && fetched.imageUrl) allUrls.push(fetched.imageUrl);
   if (mjDetail) {
@@ -1030,7 +1096,8 @@ async function enrichMjPollUrls(
         : null;
   if (!taskId) return { urls };
   const upstream = upstreamBindingsFromEnv(env);
-  if (!upstream.apimartKey) return { urls };
+  const provider = readJobProvider(meta);
+  if (provider !== 'apimart' || !upstream.apimartKey) return { urls };
   const mjDetail = await fetchMidjourneyTaskGallery(
     upstream.apimartKey,
     upstream.apimartBase,
@@ -1090,6 +1157,7 @@ async function completeJobFromPoll(
 }> {
   const meta = (job.meta as Record<string, unknown>) || {};
   const isMj = meta.isMidjourney === true;
+  const provider = readJobProvider(meta);
   const enriched = isMj ? await enrichMjPollUrls(env, meta, polled) : { urls: [] as string[] };
   const allUrls = isMj && enriched.urls.length
     ? enriched.urls
@@ -1114,7 +1182,7 @@ async function completeJobFromPoll(
   if (isMj && enriched.mjButtons?.length) {
     mjButtons = filterMjButtonsForClient(enriched.mjButtons);
   }
-  if (isMj && !mjButtons?.length) {
+  if (isMj && provider === 'apimart' && !mjButtons?.length) {
     mjButtons = defaultGridMjButtons();
   }
   if (mjButtons?.length) {

@@ -46,6 +46,7 @@ import {
   assertJobOwner,
   finalizeFailedJob,
   jobPollNeedsBackgroundArchive,
+  normalizeGenerationPollResult,
   pollAndUpdateJob,
   slowProviderProgressNote,
   syncMjImagesFromUpstream
@@ -504,7 +505,7 @@ function publicDirectModelParameters(
     {
       name: 'resolution',
       path: 'resolution',
-      label: '分辨率',
+      label: model.uiFamily === 'midjourney' ? '清晰度' : '分辨率',
       type: 'string',
       required: false,
       default: model.resolutions[0] || '1k',
@@ -565,12 +566,11 @@ function publicDirectModelParameters(
   }
   if (model.uiFamily === 'midjourney') {
     parameters.push(
-      { name: 'speed', path: 'mjParams.speed', label: '速度', type: 'string', required: false, default: 'relax', options: ['relax', 'fast', 'turbo'] },
-      { name: 'stylize', path: 'mjParams.stylize', label: '风格化', type: 'number', required: false, min: 0, max: 1000 },
-      { name: 'chaos', path: 'mjParams.chaos', label: '变化度', type: 'number', required: false, min: 0, max: 100 },
-      { name: 'weird', path: 'mjParams.weird', label: '怪异度', type: 'number', required: false, min: 0, max: 3000 },
+      { name: 'speed', path: 'mjParams.speed', label: '速度', type: 'string', required: false, fixed: 'relax' },
+      { name: 'stylize', path: 'mjParams.stylize', label: '风格化', type: 'number', required: false, default: 0, min: 0, max: 1000 },
+      { name: 'chaos', path: 'mjParams.chaos', label: '混乱度', type: 'number', required: false, default: 0, min: 0, max: 100 },
+      { name: 'weird', path: 'mjParams.weird', label: '怪异度', type: 'number', required: false, default: 0, min: 0, max: 3000 },
       { name: 'seed', path: 'mjParams.seed', label: '随机种子', type: 'integer', required: false },
-      { name: 'quality', path: 'mjParams.quality', label: '质量', type: 'string', required: false, options: ['0.25', '0.5', '1', '2'] },
       { name: 'iw', path: 'mjParams.iw', label: '参考图权重', type: 'number', required: false, min: 0, max: 3 },
       { name: 'raw', path: 'mjParams.raw', label: 'Raw 模式', type: 'boolean', required: false, default: false },
       { name: 'tile', path: 'mjParams.tile', label: '无缝平铺', type: 'boolean', required: false, default: false }
@@ -595,7 +595,7 @@ function publicNewApiParameters(
         ...parameter,
         name: 'resolution',
         path: 'resolution',
-        label: '分辨率'
+        label: imageModelUiFamily(modelId) === 'midjourney' ? '清晰度' : '分辨率'
       });
       continue;
     }
@@ -1149,7 +1149,9 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   const upstreamQuality = resolved.fixedQualityLow ? 'low' : parsed.data.quality;
   const jobQuality = persistedGenerationQuality(upstreamQuality);
   const isMidjourney = resolved.uiFamily === 'midjourney' || isMidjourneyUpstream(resolved.upstream);
-  const mjParams = isMidjourney && parsed.data.mjParams ? parsed.data.mjParams : undefined;
+  const mjParams = isMidjourney
+    ? { ...(parsed.data.mjParams || {}), speed: 'relax' as const }
+    : undefined;
 
   const unitCost = await computeGenerationCostForRequest(
       c.env,
@@ -1191,7 +1193,10 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   // legacy GRS rows recoverable through generation-jobs, but do not redirect
   // the current free Image2 route to the retired direct-GRS path.
   const lineProvider = resolved.provider;
-  if (hasAnyImageUpstream(upstream) && !isProviderConfigured(upstream, lineProvider)) {
+  // A paid request must have a configured provider before it is inserted or
+  // debited. The old no-provider branch persisted completed/null jobs that
+  // could never become deliverable.
+  if (!isProviderConfigured(upstream, lineProvider)) {
     throw new ApiError(
       503,
       'SERVICE_UNAVAILABLE',
@@ -1386,14 +1391,6 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
           debitSplit,
           ...(submitImmediateUrl ? { syncImageUrl: submitImmediateUrl } : {})
         }
-      })
-      .eq('id', job.id);
-  } else if (!hasAnyImageUpstream(upstream)) {
-    await admin
-      .from('generation_requests')
-      .update({
-        status: 'completed',
-        completed_at: new Date().toISOString()
       })
       .eq('id', job.id);
   }
@@ -2345,6 +2342,7 @@ generateRoutes.get('/jobs/:jobId', async c => {
     c.env,
     { quick: !settle, kickSubmit: pollKickSubmit(c) }
   );
+  polled = normalizeGenerationPollResult(polled);
 
   if (settle && polled.status === 'processing') {
     polled = await pollAndUpdateJob(
@@ -2355,6 +2353,7 @@ generateRoutes.get('/jobs/:jobId', async c => {
       c.env,
       { quick: false, kickSubmit: pollKickSubmit(c) }
     );
+    polled = normalizeGenerationPollResult(polled);
   } else if (
     polled.status === 'processing'
     && c.executionCtx
@@ -2383,8 +2382,10 @@ generateRoutes.get('/jobs/:jobId', async c => {
   const liveMeta = (liveJob.meta as Record<string, unknown>) || {};
   const liveImageUrl =
     polled.imageUrl || (liveJob.result_image_url as string | null) || null;
+  // A persisted completed row can predate archival. Only report completed
+  // when a deliverable image reference is present; otherwise keep polling.
   const liveStatus =
-    polled.status === 'processing' && liveJob.status === 'completed'
+    polled.status === 'processing' && liveJob.status === 'completed' && liveImageUrl
       ? 'completed'
       : polled.status;
 
@@ -2445,6 +2446,7 @@ generateRoutes.get('/jobs/:jobId', async c => {
 
   let responseMeta: Record<string, unknown> = { ...updatedMeta };
   if (meta.isMidjourney === true && liveStatus === 'completed') {
+    const mjProvider = readJobProvider(meta);
     const mjTaskId =
       typeof meta.upstreamTaskId === 'string'
         ? meta.upstreamTaskId
@@ -2455,7 +2457,7 @@ generateRoutes.get('/jobs/:jobId', async c => {
     const hasMjComposite =
       typeof responseMeta.mjCompositeUrl === 'string' && !!responseMeta.mjCompositeUrl.trim();
     const needsMjGallerySync = !hasMjComposite || curGalleryCount < 5;
-    if (mjTaskId && upstream.apimartKey && (settle || needsMjGallerySync)) {
+    if (mjTaskId && isProviderConfigured(upstream, mjProvider) && (settle || needsMjGallerySync)) {
       try {
         await syncMjImagesFromUpstream(
           admin,
@@ -2499,11 +2501,12 @@ generateRoutes.get('/jobs/:jobId', async c => {
     }
   }
 
-  let mjButtonsOut = Array.isArray(meta.mjButtons) ? meta.mjButtons : undefined;
+  let mjButtonsOut = Array.isArray(responseMeta.mjButtons) ? responseMeta.mjButtons : undefined;
   if (
     meta.isMidjourney === true
     && liveStatus === 'completed'
     && !mjButtonsOut?.length
+    && readJobProvider(meta) === 'apimart'
     && upstream.apimartKey
   ) {
     const mjTaskId =

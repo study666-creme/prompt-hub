@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildApimartRequestBody, extractAllImageUrls, isApimartContentViolationMessage } from './apimart';
+import {
+  buildApimartRequestBody,
+  extractAllImageUrls,
+  fetchApimartTaskOnce,
+  isApimartContentViolationMessage
+} from './apimart';
 
 describe('buildApimartRequestBody', () => {
   it('builds wan2.7 text-to-image body', () => {
@@ -82,6 +87,15 @@ describe('isApimartContentViolationMessage', () => {
 });
 
 describe('extractAllImageUrls', () => {
+  it('accepts a data array and direct result shape', () => {
+    expect(extractAllImageUrls({
+      data: [{ url: 'https://example.com/array.png' }]
+    })).toEqual(['https://example.com/array.png']);
+    expect(extractAllImageUrls({
+      result: { image_url: 'https://example.com/direct.png' }
+    })).toEqual(['https://example.com/direct.png']);
+  });
+
   it('collects every url in Apimart result.images[].url[]', () => {
     const payload = {
       data: {
@@ -151,5 +165,20 @@ describe('extractAllImageUrls', () => {
       'https://cdn.apimart.ai/mj_xxxx_2.png',
       'https://cdn.apimart.ai/mj_xxxx_3.png'
     ]);
+  });
+});
+
+describe('fetchApimartTaskOnce', () => {
+  it.each(['1K', '2K', '4K'])('keeps terminal %s without a URL pending', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      data: { status: 'completed' }
+    }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch;
+    try {
+      await expect(fetchApimartTaskOnce('key', 'https://apimart.test', 'task-1'))
+        .resolves.toMatchObject({ status: 'pending', imageUrl: null });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

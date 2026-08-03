@@ -18,7 +18,7 @@ describe('image model catalog', () => {
     expect(IMAGE_MODEL_CATALOG.length).toBe(
       NEWAPI_IMAGE_MODEL_CATALOG.length + APIMART_IMAGE_MODEL_CATALOG.length
     );
-    expect(IMAGE_MODEL_CATALOG).toHaveLength(14);
+    expect(IMAGE_MODEL_CATALOG).toHaveLength(17);
   });
 
   it('newapi exposes price-backed image models first', () => {
@@ -37,7 +37,10 @@ describe('image model catalog', () => {
       'lingtu-fast',
       'lingtu-2',
       'lingtu-pro',
-      'lingtu'
+      'lingtu',
+      'mj-v81',
+      'mj-v7',
+      'mj-niji7'
     ]);
     expect(IMAGE_MODEL_CATALOG[0]?.provider).toBe('newapi');
     expect(getCatalogEntry('gpt-image-2-free')).toMatchObject({
@@ -84,16 +87,21 @@ describe('image model catalog', () => {
     expect(providerLabel('newapi')).toBe('');
   });
 
-  it('retains only New API image2/banana models plus MJ', () => {
+  it('publishes only New API image2, banana, and current MJ models', () => {
     const retained = IMAGE_MODEL_CATALOG.filter(isRetainedPublicImageEntry);
     expect(retained.every((model) => (
-      (model.provider === 'newapi' && ['gim2', 'banana'].includes(model.uiFamily))
-      || (model.provider === 'apimart' && model.uiFamily === 'midjourney')
+      model.provider === 'newapi'
+      && ['gim2', 'banana', 'midjourney'].includes(model.uiFamily)
     ))).toBe(true);
-    expect(retained.filter((model) => model.provider === 'newapi')).toHaveLength(9);
+    expect(retained).toHaveLength(12);
     expect(retained.some((model) => model.id === 'image2-economy')).toBe(true);
     expect(retained.some((model) => model.id === 'image2-free')).toBe(false);
-    expect(retained.filter((model) => model.uiFamily === 'midjourney')).toHaveLength(4);
+    expect(retained.filter((model) => model.uiFamily === 'midjourney')).toEqual([
+      expect.objectContaining({ id: 'mj-v81', provider: 'newapi', defaultCredits: 40 }),
+      expect.objectContaining({ id: 'mj-v7', provider: 'newapi', defaultCredits: 40 }),
+      expect.objectContaining({ id: 'mj-niji7', provider: 'newapi', defaultCredits: 40 })
+    ]);
+    expect(retained.some((model) => model.id === 'mj-v61')).toBe(false);
   });
 
   it('normalizes legacy ids', () => {

@@ -29,12 +29,17 @@ const images = [
 const imageBodies = await Promise.all(images.map((pathname) => (
   readFile(join(root, pathname.replace(/^\/+/, '')))
 )));
-const foundationSource = (await Promise.all([
+const foundationFiles = [
   'cloud-sync-safety.js',
   'modal-hub.js',
   'mobile.js',
   'app-toast.js'
-].map((pathname) => readFile(join(root, pathname), 'utf8')))).join('\n;\n');
+];
+const foundationSource = foundationFiles.every((pathname) => existsSync(join(root, pathname)))
+  ? (await Promise.all(foundationFiles.map((pathname) => (
+      readFile(join(root, pathname), 'utf8')
+    )))).join('\n;\n')
+  : await readFile(join(root, 'pack-foundation.js'), 'utf8');
 const cdnAssets = new Map(images.map((_, index) => {
   const token = Buffer.from(`guest/generated/warehouse-ui-${index}_grid.jpg`).toString('base64url');
   return [token, imageBodies[index]];
@@ -196,6 +201,8 @@ async function inspectWarehouse(page, mobile) {
     const header = document.querySelector('.app-page-warehouse .main-header');
     const metaRows = [...document.querySelectorAll('#cardsContainer .card-meta-row')];
     const cards = [...document.querySelectorAll('#cardsContainer .card[data-id]')];
+    const cardRects = cards.map((card) => card.getBoundingClientRect());
+    const gridStyle = grid ? getComputedStyle(grid) : null;
     const viewportWidth = document.documentElement.clientWidth;
     const overflowNodes = [...document.querySelectorAll('.app-page-warehouse.active *')].filter((node) => {
       const rect = node.getBoundingClientRect();
@@ -223,6 +230,13 @@ async function inspectWarehouse(page, mobile) {
       heroImageWidths: [...document.querySelectorAll('.warehouse-hero-card img')].map((img) => img.naturalWidth),
       warehouseStylesheet: [...document.styleSheets].some((sheet) => /styles-warehouse\.css/.test(sheet.href || '')),
       gridWidth: Math.round(grid?.getBoundingClientRect().width || 0),
+      gridDisplay: gridStyle?.display || '',
+      gridColumnCount: String(gridStyle?.gridTemplateColumns || '').split(/\s+/).filter(Boolean).length,
+      absoluteCards: cards.filter((card) => getComputedStyle(card).position === 'absolute').length,
+      firstRowTopSpread: cardRects.length >= 3
+        ? Math.round(Math.max(...cardRects.slice(0, 3).map((rect) => rect.top))
+          - Math.min(...cardRects.slice(0, 3).map((rect) => rect.top)))
+        : 0,
       pageOverflow: document.documentElement.scrollWidth - viewportWidth,
       draggableCards: grid?.querySelectorAll('.card[draggable="true"]').length || 0,
       overflowNodes,
@@ -403,8 +417,25 @@ try {
   if (desktopState.pageOverflow > 1 || desktopState.overflowNodes.length) {
     throw new Error(`desktop horizontal overflow: ${JSON.stringify(desktopState.overflowNodes)}`);
   }
+  if (desktopState.gridDisplay !== 'grid' || desktopState.gridColumnCount !== 3
+    || desktopState.absoluteCards !== 0 || desktopState.firstRowTopSpread > 1) {
+    throw new Error(`desktop warehouse grid is unstable: ${JSON.stringify(desktopState)}`);
+  }
   if (screenshotDir) {
     await desktop.page.screenshot({ path: join(screenshotDir, 'warehouse-desktop.png'), fullPage: false });
+  }
+  const failedMediaState = await desktop.page.evaluate(() => {
+    const media = document.querySelector('#cardsContainer .card.card--visual .card-media');
+    const card = media?.closest('.card');
+    media?.classList.add('card-media--load-failed');
+    return {
+      mediaDisplay: media ? getComputedStyle(media).display : '',
+      cardText: card?.textContent?.trim() || '',
+      cardHeight: Math.round(card?.getBoundingClientRect().height || 0)
+    };
+  });
+  if (failedMediaState.mediaDisplay !== 'none' || !failedMediaState.cardText || failedMediaState.cardHeight < 80) {
+    throw new Error(`failed warehouse media left a black or broken slot: ${JSON.stringify(failedMediaState)}`);
   }
   await desktop.context.close();
 

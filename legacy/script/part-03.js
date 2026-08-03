@@ -1,6 +1,3 @@
-      container.querySelectorAll('.card').forEach(card => {
-        card.style.width = colWidth + 'px';
-      });
     }
 
     function markCardsGridPriming(container) {
@@ -108,6 +105,8 @@
     /** 图加载后仅 layout()，避免 reloadItems 整网格重排 */
     function scheduleWarehouseMasonryLightLayout() {
       if (isMobileViewport()) return;
+      const container = document.getElementById('cardsContainer');
+      if (container?.classList.contains('warehouse-stable-grid')) return;
       warehouseMasonryPending += 1;
       const delay = document.body.classList.contains('panel-open')
         ? 64
@@ -128,12 +127,13 @@
     function resetCardLayoutStyles(container) {
       if (!container) return;
       container.querySelectorAll('.card').forEach((card) => {
-        card.removeAttribute('style');
         card.style.position = 'relative';
         card.style.left = '';
         card.style.top = '';
         card.style.width = '';
         card.style.height = '';
+        card.style.right = '';
+        card.style.bottom = '';
       });
     }
 
@@ -141,7 +141,7 @@
       if (!container) return;
       resetCardLayoutStyles(container);
       container.classList.remove('cards-grid-priming', 'mobile-grid');
-      container.classList.add('cards-grid-primed', 'masonry-ready');
+      container.classList.add('cards-grid-primed', 'masonry-ready', 'warehouse-stable-grid');
     }
 
     function enforceMobileCardGrid() {
@@ -153,6 +153,9 @@
         masonryInstance = null;
       }
       container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
+      container.classList.remove('warehouse-stable-grid');
+      container.style.removeProperty('--warehouse-grid-columns');
+      container.style.removeProperty('--warehouse-grid-gap');
       container.classList.add('mobile-grid', 'cards-grid-primed');
       container.removeAttribute('style');
       resetCardLayoutStyles(container);
@@ -177,54 +180,22 @@
           try { masonryInstance.destroy(); } catch (e) { /* ignore */ }
           masonryInstance = null;
         }
+        container.classList.remove('warehouse-stable-grid');
         return;
       }
-      const gap = getMasonryGap();
-      const innerW = getCardsInnerWidth();
-      if (innerW < 200) {
-        scheduleWarehouseMasonryLayout();
-        return;
+      if (masonryInstance) {
+        try { masonryInstance.destroy(); } catch (e) { /* ignore */ }
+        masonryInstance = null;
       }
-      const cols = Math.max(1, cardColumns);
-      const colWidth = Math.max(120, Math.floor((innerW - gap * (cols - 1)) / cols));
-      let sizer = container.querySelector('.grid-sizer');
-      if (!sizer) {
-        sizer = document.createElement('div');
-        sizer.className = 'grid-sizer';
-        container.insertBefore(sizer, container.firstChild);
-      }
-      sizer.style.width = colWidth + 'px';
-      cardEls.forEach((card) => {
-        card.style.width = colWidth + 'px';
-      });
-      const opts = {
-        itemSelector: '.card',
-        columnWidth: '.grid-sizer',
-        gutter: gap,
-        percentPosition: false,
-        horizontalOrder: true,
-        transitionDuration: 0
-      };
+      container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
       container.style.removeProperty('height');
-      const scrollTop = container.scrollTop;
-      const runLayout = () => {
-        if (masonryInstance) {
-          masonryInstance.option(opts);
-          masonryInstance.reloadItems();
-          masonryInstance.layout();
-        } else if (typeof Masonry !== 'undefined') {
-          masonryInstance = new Masonry(container, opts);
-        }
-        container.scrollTop = scrollTop;
-        container.classList.add('masonry-ready', 'cards-grid-primed');
-        if (typeof repositionWarehouseScrollSentinel === 'function') {
-          repositionWarehouseScrollSentinel(container);
-        }
-      };
-      if (typeof Masonry !== 'undefined') {
-        runLayout();
-      } else if (typeof ensureMasonryScript === 'function') {
-        void ensureMasonryScript().then(runLayout);
+      container.style.setProperty('--warehouse-grid-columns', String(Math.max(1, cardColumns)));
+      container.style.setProperty('--warehouse-grid-gap', `${getMasonryGap()}px`);
+      resetCardLayoutStyles(container);
+      container.classList.add('warehouse-stable-grid', 'masonry-ready', 'cards-grid-primed');
+      container.classList.remove('cards-grid-priming');
+      if (typeof repositionWarehouseScrollSentinel === 'function') {
+        repositionWarehouseScrollSentinel(container);
       }
     }
 

@@ -2,10 +2,8 @@ import { ApiError } from './errors';
 import { extractAllImageUrls, extractTaskId } from './apimart';
 import { imageRetailCreditsFromYuan } from './credit-math';
 import {
-  APIMART_IMAGE_MODEL_CATALOG,
   NEWAPI_IMAGE_MODEL_CATALOG,
   isPublicNewApiImageEntry,
-  isRetainedPublicImageEntry,
   normalizeImageModelId,
   type ImageModelCatalogEntry,
   type ImageModelUiFamily
@@ -30,6 +28,7 @@ type SubmitParams = {
   count?: number;
   refImageUrls?: string[];
   catalogParameters?: NewApiCatalogParameter[];
+  mjParams?: Record<string, unknown>;
   /** Stable caller-side correlation key. It is persisted before the paid request starts. */
   clientRequestId?: string;
   /** Persists the API request id as soon as response headers/body expose it. */
@@ -596,7 +595,7 @@ function normalizeImageCatalogParameters(
 ): NewApiCatalogParameter[] {
   return normalizeImageQualityContract(
     ensureBananaReferenceCapability(
-      normalizeLegacyResolutionParameters(parameters),
+      family === 'midjourney' ? parameters : normalizeLegacyResolutionParameters(parameters),
       upstreamModel,
       family
     ),
@@ -619,7 +618,7 @@ function resolutionOptions(
   return inferred === '1k' || inferred === '2k' || inferred === '4k' ? [inferred] : [];
 }
 
-type PublicImageFamily = Extract<ImageModelUiFamily, 'gim2' | 'banana'>;
+type PublicImageFamily = Extract<ImageModelUiFamily, 'gim2' | 'banana' | 'midjourney'>;
 
 function publicTagTokens(value: unknown): Set<string> {
   const tags = Array.isArray(value) ? value : stringValue(value).split(',');
@@ -632,7 +631,7 @@ function inferPublicImageFamily(
   parameters: NewApiCatalogParameter[]
 ): PublicImageFamily | null {
   const legacyFamily = stringValue(item.family).toLowerCase();
-  if (legacyFamily === 'gim2' || legacyFamily === 'banana') return legacyFamily;
+  if (legacyFamily === 'gim2' || legacyFamily === 'banana' || legacyFamily === 'midjourney') return legacyFamily;
   if (legacyFamily === 'gim2-chat' && upstreamModel === 'gpt-image-2-chat') return 'gim2';
 
   const declared = item.public && typeof item.public === 'object'
@@ -665,6 +664,13 @@ function inferPublicImageFamily(
     || labels.some(value => /(?:\b(?:nano\s*banana|banana)\b|香蕉)/i.test(value))
   ) {
     return 'banana';
+  }
+  if (
+    tags.has('midjourney')
+    || identities.some(value => /^mj(?:[-_]|$)/i.test(value))
+    || labels.some(value => /midjourney/i.test(value))
+  ) {
+    return 'midjourney';
   }
   return null;
 }
@@ -780,15 +786,24 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
     const isChatImage = modality === 'image'
       && upstreamModel === 'gpt-image-2-chat'
       && (stringValue(item.operation) === 'chat' || pricing.unit === 'request');
+    const isMidjourneyImage = modality === 'image'
+      && imageFamily === 'midjourney'
+      && pricing.unit === 'request';
     if (
       modality !== 'image'
       || !imageFamily
-      || (pricing.unit !== 'image' && !isChatImage)
+      || (pricing.unit !== 'image' && !isChatImage && !isMidjourneyImage)
       || pricing.credits == null
       || pricing.credits < 0
     ) continue;
     const resolutions: ('1k' | '2k' | '4k')[] = isChatImage
       ? ['1k']
+      : isMidjourneyImage
+        ? resolutionOptions(parameters.map(parameter => (
+            parameter.name === 'quality' || parameter.path === 'quality'
+              ? { ...parameter, name: 'resolution', path: 'resolution' }
+              : parameter
+          )), upstreamModel)
       : resolutionOptions(parameters, upstreamModel);
     if (upstreamModel === 'gpt-image-2-ext' && !resolutions.includes('1k')) {
       resolutions.unshift('1k');
@@ -1253,10 +1268,7 @@ export function imageCatalogForNewApiSnapshot(snapshot: NewApiCatalogSnapshot): 
   const newApiEntries = snapshot.available
     ? snapshot.imageCatalogEntries.filter(isPublicNewApiImageEntry)
     : NEWAPI_IMAGE_MODEL_CATALOG.filter(isPublicNewApiImageEntry);
-  return [
-    ...newApiEntries,
-    ...APIMART_IMAGE_MODEL_CATALOG.filter(isRetainedPublicImageEntry)
-  ];
+  return newApiEntries;
 }
 
 function normalizedResolution(resolution?: string | null): '1k' | '2k' | '4k' | null {
@@ -1480,6 +1492,43 @@ export function buildNewApiImageRequestBody(params: SubmitParams): Record<string
   return body;
 }
 
+function buildNewApiMidjourneyRequestBody(params: SubmitParams): Record<string, unknown> {
+  const parameters = params.catalogParameters
+    ?.filter(parameter => parameter?.name && parameter.path) || [];
+  const byName = new Map(parameters.map(parameter => [parameter.name, parameter]));
+  const body: Record<string, unknown> = {};
+  const mj = params.mjParams || {};
+  const requestedValue = (name: string): unknown => {
+    if (Object.prototype.hasOwnProperty.call(mj, name)) return mj[name];
+    if (name === 'negative_prompt') return mj.negativePrompt;
+    return undefined;
+  };
+  const set = (name: string, requested: unknown, fallback?: unknown) => {
+    const parameter = byName.get(name);
+    if (!parameter) return;
+    setRequestPath(body, parameter.path, declaredValue(parameter, requested, fallback));
+  };
+
+  set('model', params.upstreamModel);
+  set('prompt', params.prompt);
+  set('size', params.size);
+  set('quality', requestedValue('quality'), params.resolution);
+  for (const parameter of parameters) {
+    if (['model', 'prompt', 'size', 'quality', 'image_urls'].includes(parameter.name)) continue;
+    set(parameter.name, requestedValue(parameter.name));
+  }
+  const refs = (params.refImageUrls || []).filter(Boolean);
+  const images = byName.get('image_urls');
+  if (images && refs.length) {
+    const max = Math.max(1, images.max_items ?? refs.length);
+    setRequestPath(body, images.path, refs.slice(0, max));
+  }
+  // The API station exposes only the regular-price Midjourney tier.
+  if (byName.has('speed')) set('speed', 'relax');
+  else body.speed = 'relax';
+  return body;
+}
+
 function extractChatImageUrls(payload: unknown): string[] {
   const root = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
   const choices = Array.isArray(root.choices) ? root.choices : [];
@@ -1519,14 +1568,21 @@ export async function submitNewApiImageJob(
   params: SubmitParams
 ): Promise<{ taskId: string; imageUrl?: string | null; imageUrls?: string[]; requestId?: string | null }> {
   const isChatImage = params.upstreamModel === 'gpt-image-2-chat';
-  const endpoint = isChatImage ? '/v1/chat/completions' : '/v1/images/generations';
+  const isMidjourneyImage = /^mj-/i.test(params.upstreamModel);
+  const endpoint = isChatImage
+    ? '/v1/chat/completions'
+    : isMidjourneyImage
+      ? '/v1/midjourney/generations'
+      : '/v1/images/generations';
   const body = isChatImage
     ? {
         model: params.upstreamModel,
         messages: buildChatImageMessages(params.prompt, params.refImageUrls),
         stream: false
       }
-    : buildNewApiImageRequestBody(params);
+    : isMidjourneyImage
+      ? buildNewApiMidjourneyRequestBody(params)
+      : buildNewApiImageRequestBody(params);
   let res: Response;
   try {
     res = await fetch(`${apiBase(baseUrl)}${endpoint}`, {
@@ -1637,7 +1693,10 @@ export async function fetchNewApiTaskOnce(
   if (['completed', 'succeeded', 'success', 'done'].includes(status) || (status !== 'failed' && imageUrls.length)) {
     return imageUrls.length
       ? { status: 'completed', imageUrl: imageUrls[0], imageUrls, errorMessage: null }
-      : { status: 'failed', imageUrl: null, imageUrls: [], errorMessage: 'upstream_no_image' };
+      // A task may become terminal before the provider exposes its output.
+      // Keep it pending so the caller can confirm the result instead of
+      // refunding a successful paid request as `upstream_no_image`.
+      : { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
   }
   if (['failed', 'failure', 'error', 'timeout', 'cancelled', 'canceled'].includes(status)) {
     const raw = stringValue(data.error_message || data.error || root.error || 'upstream_failed');

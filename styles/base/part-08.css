@@ -335,18 +335,15 @@
     /* 辅助 */
     .no-image-placeholder { display: none; }
 
-    /* 纯文字卡片：不占图片位；图片卡加载失败仍保留占位 */
+    /* 纯文字卡片和已穷尽恢复链的图片卡都不保留黑色媒体槽。 */
     #cardsContainer .card.card--text-only .card-media {
       display: none !important;
     }
     #cardsContainer .card.card--visual .card-media.card-media--load-failed {
-      display: block !important;
-      min-height: 72px;
-      max-height: 200px;
-      background: var(--bg-hover);
+      display: none !important;
     }
     #cardsContainer .card.card--visual:has(.card-media.card-media--load-failed):not(:has(.card-media.media-revealed)) .card-body {
-      padding-top: 0;
+      padding-top: 12px;
     }
     #cardsContainer .card.card--text-only .card-body {
       padding-top: 12px;

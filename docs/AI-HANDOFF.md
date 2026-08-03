@@ -1,6 +1,6 @@
 # AI 接手说明
 
-最后核对：2026-07-30。
+最后核对：2026-08-03。生产基线仍为 `20260730a`；下述媒体可靠性改动已冻结为 `20260803a` 发布候选，生产切换仍以 `/health.buildSha` 和 Pages build 取证为准。
 
 ## 最小阅读顺序
 
@@ -51,7 +51,8 @@
 
 ## 当前生图与计费边界
 
-- 新任务只允许卡藏 API 的全能模型2/香蕉和 Apimart MJ；不要把旧 provider 重新放回公开目录。
+- 新任务只允许卡藏 API 的全能模型2、香蕉和 MJ 8.1 / MJ 7 / Niji 7；所有公开 MJ 均为 New API provider，固定 `relax`、40 积分/次，旧 Apimart provider 只恢复历史任务。
+- New API MJ 完成态必须包含四宫格封面和 4 张单图。Worker 直接消费 `/v1/tasks/:taskId` 返回的五个 URL，不得为了新任务读取 `APIMART_API_KEY` 或补查 Apimart 详情。
 - 卡藏 API 图片报价已经包含其加价，必须从上游人民币字段按 `1 元 = 100 积分`直接换算；不能再次加价、信任上游 credits 字段或复制一份手工积分表。
 - `gpt-image-2-chat` 是内部兼容 ID，统一归一化到公开模型 `image2-economy`；不要根据旧别名硬编码端点或能力，参数必须来自实时目录，当前支持比例和可选参考图。
 - 实际 New API 渠道映射只允许运营后台经 `NEWAPI_CATALOG_ADMIN_SECRET` 读取；公开模型目录不得返回渠道、域名或任何凭据字段。
@@ -62,6 +63,16 @@
 - 所有香蕉模型支持最多 14 张参考图。不能根据缺字段、陈旧目录或 `max_items=0` 推断香蕉不支持参考图。
 - 卡片库点击生成后先同步插入作品占位；New API 只由持久队列提交，页面按秒 poll，cron 每 2 分钟兜底 poll/archive，避免请求结束时再次领取同一 `queued` 任务。上游已出图时前端先写入最近生成并移除 pending，临时图可立即展示，归档独立重试。
 - Signed-in generated-card saves with `copyStorage` must archive through `archiveGeneratedCardImage` and persist only a verified `storage://` primary reference. A temporary upstream URL or SVG placeholder must not become the durable card image; failed archival removes the new card.
+
+## Generation Delivery Contract (2026-08-03)
+
+The Worker and browser now share one completion rule: `completed` requires a
+deliverable image reference. A provider response that says completed before a
+URL is exposed stays pending and is confirmed again. Legacy rows recover
+durable URL checkpoints before failing; unrecoverable rows use idempotent
+`upstream_no_image` or `upstream_not_configured` failure/refund paths. Recent
+feed cards use `CardImageLoader` with `_grid` variants and never fetch a 4K
+source merely to render a list card.
 - 付费提交只允许原子领取一次；网络结果未知、任务 `not_found` 或队列重投都不得触发第二次上游 POST。稳定幂等键与 1 小时未知结果退款 SLA 必须保留。
 - 视频使用独立 `VIDEO_GENERATION_QUEUE`。有上游 task ID 的正常 `processing` 可以持续数百或数千秒，不按生成时长判失败；进入 `result_uncertain`（包括 `error.code=result_uncertain`）后则保留 `submitted` 和公开投影 `submission_unknown`，由后台只读 GET 同一个 NewAPI task ID。显式线路任务继续使用持久化 `routeChannelId`；普通公开模型由 NewAPI 任务记录中的原始 `ChannelId` 固定渠道。两种情况都绝不重发生成 POST 或重新选路。
 - 带 `upstreamTaskId` 的 `result_uncertain` 持续 1 小时仍无法恢复为 processing/completed/明确 failed 时，必须以幂等 `refund_pending` -> `refunded` 收敛为失败并退款。cron 必须先 poll，再执行 timeout finalize，避免任务刚成功却先被退款的竞态。

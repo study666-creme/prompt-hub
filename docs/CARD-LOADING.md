@@ -1,6 +1,6 @@
 # 列表图片加载
 
-复核日期：2026-08-01。下述仓库 UI 对应当前生图媒体可靠性候选；生产是否已切换以线上 build 和资源 HTTP 冒烟为准。
+复核日期：2026-08-03。下述仓库 UI 对应 `20260803a` 生图媒体可靠性发布候选；生产是否已切换以线上 build 和资源 HTTP 冒烟为准。
 
 ## 目标
 
@@ -42,6 +42,7 @@ authenticated Worker media proxy before browser-side validation and upload.
 | `warehouse-thumb.js` | 生图仓库 grid 缩略图请求 |
 | `mobile.js` | 手机首屏 cap、滚动 boost |
 | `legacy/script/part-09.js` | 卡片 DOM 分页与首屏绑定 |
+| `legacy/script/part-02.js`, `part-03.js`, `part-10.js` | 桌面稳定 Grid、列数切换与分页哨兵 |
 | `styles-warehouse.css` | 卡片仓库媒体、元数据、空态和手机布局的独立视觉层 |
 | `feed-images.js` | 社区/生图引用归一化 |
 | `server/src/routes/v1/media.ts` | upload、sign-batch、CDN URL |
@@ -52,6 +53,13 @@ authenticated Worker media proxy before browser-side validation and upload.
 `.app-main` 是唯一纵向滚动根。页面、feature shell 和 grid 不得再增加独立 `overflow-y:auto`。横向裁切优先 `overflow-x: clip`，避免浏览器把纵向 visible 计算成新的 auto 滚动容器。
 
 新卡片进入视口可使用轻微 opacity/translate 缓出，但动画不能改变卡片尺寸、触发 Masonry 反复测量或在 `prefers-reduced-motion` 下强制播放。
+
+## 稳定布局与首屏优先级
+
+- 卡片库桌面网格使用 CSS Grid 和固定 `4:3` 列表媒体框，不再按图片解码结果运行 Masonry 全量 `reloadItems/layout`。图片比例只影响详情页，列表通过 `_grid` 缩略图 `object-fit: cover` 保持行列稳定。
+- 生图最近列表使用固定 `1:1` 媒体框；前 6 张设为 eager，其中前 4 张为高请求优先级，其余卡片继续 lazy。
+- 最近列表分页只能把新卡插在 `data-imagegen-feed-footer="recent"` 之前，说明条始终位于所有图片之后，不能隔断第 12 张和后续图片。
+- 图片 class/style 变化不再触发整个生图列表的属性级 MutationObserver 扫描；新增直属卡片时才执行布局残留清理。
 
 ## 失败处理
 
@@ -80,6 +88,7 @@ node scripts/verify-card-image-loader-missing-cleanup-browser.mjs
 node scripts/verify-recent-image-resolution-browser.mjs
 node scripts/verify-imagegen-failed-media-collapse-browser.mjs
 node scripts/verify-imagegen-finish-immediate-browser.mjs
+node scripts/verify-imagegen-feed-retention-browser.mjs
 ```
 
 发布候选中的仓库 UI 可使用独立浏览器验收，不访问生产 API：
@@ -93,7 +102,7 @@ node scripts/verify-warehouse-ui-browser.mjs
 
 ## Generated-card archive invariant
 
-Reviewed: 2026-08-02.
+Reviewed: 2026-08-03.
 
 When a signed-in user saves a generated result with `copyStorage`,
 `legacy/script/part-02.js` requires `archiveGeneratedCardImage` to return a
@@ -102,6 +111,19 @@ URLs and SVG loading placeholders are never accepted as durable primary media.
 If archival fails, the new card is removed instead of leaving a broken or black
 card. The paid acceptance guard likewise ignores `data:image/svg` and requires
 decoded raster pixels before recording a successful result.
+
+## Recent Generation Thumbnails (2026-08-03)
+
+Recent generation cards are resolved through `CardImageLoader` and use the
+`_grid` variant for list media. The loader promise is returned to the feed
+thumbnail workers, so at most three recent thumbnails are resolved in parallel
+and a 4K source is never downloaded merely to render a list card. Full media is
+reserved for the detail view.
+
+The browser regression also verifies that the first six recent thumbnails are
+eager, the first four have high fetch priority, retained decoded images are not
+replaced during pending/failed updates, and the recent-list footer remains
+after the thirteenth paginated card.
 
 该检查注入 8 张 `_grid` 图卡和 4 张文本卡，覆盖桌面、320/360/390px 手机及空仓状态，并验证媒体槽、三张首屏广告图、类型元数据、窄屏工具栏、编辑面板触摸滚动、保存/关闭按钮可达性和横向溢出。Pages 的 HTTP 冒烟还会确认仓库 CSS 未被 SPA HTML 回退替代。
 

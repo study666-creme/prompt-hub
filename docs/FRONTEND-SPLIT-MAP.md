@@ -1,6 +1,6 @@
 # Frontend Split Map
 
-Updated: 2026-07-30
+Updated: 2026-08-03
 
 This project still ships classic browser scripts from the site root, but several formerly large files are now thin runtime loaders. The real source is split into ordered chunks so classic script execution order and old global/IIFE behavior stay unchanged.
 
@@ -23,13 +23,13 @@ Do not paste old monolithic code back into these root files. Edit the matching `
 - `index.html` keeps the head and script order, while the body DOM is loaded from `partials/index-body/part-*.html`.
 - `styles.css` imports `styles/base/part-*.css`.
 - `styles-features.css` imports `styles/features/part-*.css`.
-- `styles-warehouse.css` is an unreleased, standalone warehouse UI layer loaded after the shared CSS entries. It is not generated from a split CSS directory.
+- `styles-warehouse.css` is the `20260803a` standalone warehouse UI layer loaded after the shared CSS entries. It is not generated from a split CSS directory.
 
 The source split loaders are synchronous in the repository so local development keeps the old classic-script order. They must not be shipped as the production request graph.
 
 ## Warehouse UI Ownership
 
-The 2026-07-30 frozen-tree candidate keeps the warehouse redesign isolated from generated bundles:
+The 2026-08-03 `20260803a` candidate keeps the warehouse redesign isolated from generated bundles:
 
 - `partials/index-body/part-02.html` owns the toolbar and compact warehouse summary markup.
 - `legacy/script/part-04.js` owns summary count/scope synchronization.
@@ -37,6 +37,13 @@ The 2026-07-30 frozen-tree candidate keeps the warehouse redesign isolated from 
 - `styles-warehouse.css` owns warehouse-only layout, surface hierarchy, status accents, list/grid presentation, light theme, and mobile overrides.
 - `styles-mobile.css` owns narrow-toolbar compaction, while `mobile.js` keeps the bottom navigation suppressed whenever the edit panel remains open.
 - `scripts/verify-warehouse-ui-browser.mjs` seeds mixed cards and checks desktop, 320/360/390px mobile, empty, media, toolbar overflow, touch scrolling, and edit-control reachability without contacting production services.
+
+Desktop `#cardsContainer` is now a stable CSS Grid owned by
+`legacy/script/part-02.js`, `legacy/script/part-03.js`,
+`legacy/script/part-10.js`, and `styles/base/part-09.css`. Image decode events
+must not restore Masonry absolute positioning or full-list relayouts. The
+warehouse browser check requires `display:grid`, zero absolute cards, aligned
+first-row tops, and collapsed failed media slots.
 
 Keep `styles-warehouse.css` as a standalone Pages asset. Staging and HTTP smoke checks must fail when the file, hero rules, or warehouse hero images are missing.
 
@@ -143,3 +150,16 @@ npm run build-all
 npm run check-esbuild
 npm run check-predeploy
 ```
+
+## Image Generation Feed Delivery (2026-08-03)
+
+`image-gen-feed.js` now delegates recent-card loading to `CardImageLoader` and
+waits on its promise with a bounded worker pool. Recent and warehouse list
+views request `_grid` variants only; full-resolution media remains an explicit
+detail action. Rebuild `pack-feed.js` with `node scripts/build-feed-bundle.mjs`
+after changing the feed sources.
+
+The first six recent thumbnails are eager (the first four high priority), and
+paginated cards are inserted before the recent-feed footer so that the footer
+cannot split the image grid. The Grid guard observes direct child insertion
+only; image attribute changes must not rescan every feed card.

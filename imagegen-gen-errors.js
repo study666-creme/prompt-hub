@@ -89,7 +89,7 @@
     if (/content.*policy|safety|moderation|blocked|违规|敏感/i.test(s)) return true;
     if (/insufficient balance|insufficient credits/i.test(s)) return true;
     if (/apikey|invalid.*api.*key|unauthorized/i.test(s)) return true;
-    if (/missing_task_id|upstream_submit_stale|upstream_submit_not_started|upstream_submit_interrupted/i.test(s)) return true;
+    if (/missing_task_id|upstream_not_configured|upstream_submit_stale|upstream_submit_not_started|upstream_submit_interrupted/i.test(s)) return true;
     if (/insufficient_user_quota|用户额度不足|余额不足/i.test(s)) return true;
     if (/This content may violate|content may violate/i.test(s)) return true;
     return false;
@@ -129,6 +129,9 @@
     }
     if (/upstream_auth_failed|无效.*令牌|invalid.*token/i.test(s)) {
       return '生图服务认证已失效，请联系站长；您的积分已全额退回';
+    }
+    if (/upstream_not_configured/i.test(s)) {
+      return '生图服务未配置，积分已全额退回，请联系站长';
     }
     if (/upstream_submit_not_configured/i.test(s)) {
       return '生图服务未配置，请联系站长；您的积分已全额退回';

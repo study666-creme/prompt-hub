@@ -351,7 +351,7 @@ try {
     return {
       src: img?.src || '',
       loading: media?.classList.contains('is-loading'),
-      failed: media?.classList.contains('card-media--load-failed'),
+      failed: !media || media.classList.contains('card-media--load-failed'),
       token: img?.dataset.feedLoadToken || '',
       loadingUrl: img?.dataset.feedLoadingUrl || ''
     };

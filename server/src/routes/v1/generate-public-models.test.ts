@@ -12,25 +12,34 @@ describe('public image model projection', () => {
       false,
       {
         newApiCatalog: {
-          available: false,
-          stale: true,
-          version: '',
+          available: true,
+          stale: false,
+          version: 'midjourney-public-catalog',
           pricingVersion: '',
           models: [],
           rules: [],
-          imageCatalogEntries: []
+          imageCatalogEntries: NEWAPI_IMAGE_MODEL_CATALOG.filter((model) => model.uiFamily === 'midjourney')
         }
       }
     );
     const mjModels = models.filter((model) => model.uiFamily === 'midjourney');
 
-    expect(models).toHaveLength(4);
+    expect(models).toHaveLength(3);
     expect(mjModels.map((model) => model.id)).toEqual([
       'mj-v81',
       'mj-v7',
-      'mj-v61',
       'mj-niji7'
     ]);
+    expect(mjModels.every((model) => model.creditsPerCall === 40)).toBe(true);
+    expect(mjModels[0]?.parameters).toContainEqual(expect.objectContaining({
+      name: 'resolution',
+      label: '清晰度',
+      options: ['1k', '2k']
+    }));
+    expect(mjModels[0]?.parameters).toContainEqual(expect.objectContaining({
+      name: 'speed',
+      fixed: 'relax'
+    }));
     for (const model of models) {
       expect(model).not.toHaveProperty('provider');
       expect(model).not.toHaveProperty('upstream');
@@ -160,7 +169,7 @@ describe('public image model projection', () => {
       }
     });
 
-    expect(models).toHaveLength(10);
+    expect(models).toHaveLength(6);
     expect(models.some((model) => model.id === 'image2-economy')).toBe(true);
     expect(models.some((model) => model.id === 'image2-free')).toBe(false);
     expect(models.every((model) => model.status === 'active' && model.selectable === true)).toBe(true);
@@ -302,7 +311,7 @@ describe('public image model projection', () => {
     expect(model?.parameters.some((parameter) => parameter.name === 'images')).toBe(true);
   });
 
-  it('keeps only NewAPI models with an active admin route without hiding Apimart models', () => {
+  it('keeps only NewAPI models with an active admin route', () => {
     const newApiRoutes: NewApiAdminRouteSnapshot = {
       available: true,
       fetchedAt: '2026-07-22T00:00:00.000Z',
@@ -363,12 +372,7 @@ describe('public image model projection', () => {
     const newApiIds = new Set(NEWAPI_IMAGE_MODEL_CATALOG.map((model) => model.id));
 
     expect(models.filter((model) => newApiIds.has(model.id)).map((model) => model.id)).toEqual(['image2-economy']);
-    expect(models.filter((model) => !newApiIds.has(model.id)).map((model) => model.id)).toEqual([
-      'mj-v81',
-      'mj-v7',
-      'mj-v61',
-      'mj-niji7'
-    ]);
+    expect(models.filter((model) => !newApiIds.has(model.id))).toEqual([]);
   });
 
   it('keeps the last-known-good image choices visible while a catalog refresh is stale', () => {
@@ -429,11 +433,6 @@ describe('public image model projection', () => {
       }
     );
 
-    expect(models.map((model) => model.id)).toEqual([
-      'mj-v81',
-      'mj-v7',
-      'mj-v61',
-      'mj-niji7'
-    ]);
+    expect(models).toEqual([]);
   });
 });

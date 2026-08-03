@@ -947,12 +947,7 @@
       if (!container || isMobileViewport()) return;
       const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
       if (viewMode === 'list') return;
-      const colWidth = getDesktopCardColumnWidth();
-      if (!colWidth) return;
-      let sizer = container.querySelector('.grid-sizer');
-      if (!sizer) {
-        sizer = document.createElement('div');
-        sizer.className = 'grid-sizer';
-        container.insertBefore(sizer, container.firstChild);
-      }
-      sizer.style.width = colWidth + 'px';
+      container.style.setProperty('--warehouse-grid-columns', String(Math.max(1, cardColumns)));
+      container.style.setProperty('--warehouse-grid-gap', `${getMasonryGap()}px`);
+      container.classList.add('warehouse-stable-grid');
+      container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());

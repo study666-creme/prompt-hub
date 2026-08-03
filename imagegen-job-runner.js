@@ -607,6 +607,11 @@
       }
 
       if (poll.data.status === 'completed' && !poll.data.imageUrl) {
+        applyGenPollProgressNote(pendingId, {
+          ...poll.data,
+          status: 'processing',
+          progressNote: poll.data.progressNote || '图片已生成，正在同步到图库'
+        });
         continue;
       }
 
@@ -895,10 +900,16 @@
         settle: opts.settle === true
       });
       if (!retry.ok) return job;
+      const imageUrl = retry.data.imageUrl || job.imageUrl || null;
+      const rawStatus = retry.data.status || job.status;
+      // The API treats completed-without-image as a recoverable archival
+      // state. Keep the browser on the same contract so legacy rows do not
+      // enter a false-completed branch or get shown as a broken card.
+      const status = rawStatus === 'completed' && !imageUrl ? 'processing' : rawStatus;
       return {
         ...job,
-        status: retry.data.status || job.status,
-        imageUrl: retry.data.imageUrl || job.imageUrl || null,
+        status,
+        imageUrl,
         extraImageUrls: retry.data.extraImageUrls || job.extraImageUrls,
         isMidjourney: retry.data.isMidjourney || job.isMidjourney,
         mjGridUrls: retry.data.mjGridUrls || job.mjGridUrls,
@@ -1175,7 +1186,12 @@
     const ctx = pendingJobToPollCtx(pending);
     ctx.silentToast = opts.silent !== false;
 
-    if (apiJob.status === 'completed' && apiJob.imageUrl) {
+    const apiImageUrl = apiJob.imageUrl || null;
+    const apiStatus = apiJob.status === 'completed' && !apiImageUrl
+      ? 'processing'
+      : apiJob.status;
+
+    if (apiStatus === 'completed' && apiImageUrl) {
       pending.recovering = false;
       pending.recoverNote = '';
       pending.pendingNote = '';
@@ -1189,7 +1205,7 @@
         {
           data: {
             status: 'completed',
-            imageUrl: apiJob.imageUrl,
+            imageUrl: apiImageUrl,
             extraImageUrls: apiJob.extraImageUrls
           }
         },
@@ -1200,7 +1216,7 @@
       return true;
     }
 
-    if (apiJob.status === 'failed') {
+    if (apiStatus === 'failed') {
       const refreshed = await refreshGenerationJobFromServer(apiJob);
       if (refreshed.status === 'completed' && refreshed.imageUrl) {
         return resolvePendingFromApiJob(pending, refreshed, opts);
@@ -1233,7 +1249,7 @@
       && Date.now() - (pending.startedAt || 0) >= pendingRecoveryGiveUpMs(pending)
     ) {
       if (await tryServerRecoverPending(pending)) return true;
-      if (apiJob.status === 'processing') {
+      if (apiStatus === 'processing') {
         if (!activePollJobIds.has(apiJob.id)) {
           void pollGenerationJobUntilDone(apiJob.id, pending.id, ctx);
         }

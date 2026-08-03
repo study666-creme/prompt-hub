@@ -967,6 +967,49 @@ describe('newapi image upstream', () => {
     expect(result.imageUrl).toBe('https://image.test/out.png');
   });
 
+  it('submits Midjourney through the API station with fixed relax speed', async () => {
+    const fetchMock = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String((init as RequestInit).body || '{}')) as Record<string, unknown>;
+      expect(body).toEqual({
+        model: 'mj-v8.1',
+        prompt: 'cinematic city',
+        size: '16:9',
+        quality: '2k',
+        image_urls: ['https://ref.test/a.png'],
+        stylize: 0,
+        chaos: 0,
+        weird: 0,
+        speed: 'relax'
+      });
+      return jsonResponse({ data: { task_id: 'task_public' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
+      upstreamModel: 'mj-v8.1',
+      prompt: 'cinematic city',
+      resolution: '2k',
+      quality: 'standard',
+      size: '16:9',
+      refImageUrls: ['https://ref.test/a.png'],
+      mjParams: { stylize: 0, chaos: 0, weird: 0, speed: 'turbo' },
+      catalogParameters: [
+        { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: 'mj-v8.1' },
+        { name: 'prompt', path: 'prompt', label: '提示词', type: 'string', required: true },
+        { name: 'size', path: 'size', label: '画面比例', type: 'string', required: false },
+        { name: 'quality', path: 'quality', label: '清晰度', type: 'string', required: false, options: ['1k', '2k'] },
+        { name: 'image_urls', path: 'image_urls', label: '参考图', type: 'array', required: false, max_items: 5 },
+        { name: 'stylize', path: 'stylize', label: '风格化', type: 'number', required: false, min: 0, max: 1000 },
+        { name: 'chaos', path: 'chaos', label: '混乱度', type: 'number', required: false, min: 0, max: 100 },
+        { name: 'weird', path: 'weird', label: '怪异度', type: 'number', required: false, min: 0, max: 3000 },
+        { name: 'speed', path: 'speed', label: '速度', type: 'string', required: false, fixed: 'relax' }
+      ]
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://newapi-unit.test/v1/midjourney/generations');
+    expect(result.taskId).toBe('task_public');
+  });
+
   it('submits the economical image model through chat completions', async () => {
     const fetchMock = vi.fn(async (_url, init) => {
       const body = JSON.parse(String((init as RequestInit).body || '{}')) as Record<string, unknown>;
@@ -1233,6 +1276,15 @@ describe('newapi image upstream', () => {
     expect(result.status).toBe('completed');
     expect(result.imageUrl).toBe('https://image.test/task.png');
     expect(result.imageUrls).toEqual(['https://image.test/task.png']);
+  });
+
+  it.each(['1k', '2k', '4k'])('keeps %s terminal tasks without an output URL pending', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      data: { status: 'completed' }
+    })));
+
+    await expect(fetchNewApiTaskOnce('unit-key', 'https://newapi-unit.test', 'task-no-url'))
+      .resolves.toMatchObject({ status: 'pending', imageUrl: null });
   });
 
   it('loads the protected admin route catalog without exposing unknown fields', async () => {

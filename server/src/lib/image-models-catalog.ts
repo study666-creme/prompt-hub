@@ -183,10 +183,46 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     resolutions: ['1k'],
     defaultCredits: 6,
     sortOrder: 96
+  })),
+  newApi(midjourney({
+    id: 'mj-v81',
+    upstream: 'mj-v8.1',
+    label: 'Midjourney 8.1',
+    group: 'new',
+    description: '\u6700\u65b0\u4e3b\u7248\u672c\uff0c\u5355\u6b21\u8fd4\u56de\u56db\u5bab\u683c\u5c01\u9762\u548c 4 \u5f20\u5355\u56fe',
+    upstreamPoints: 0.4504,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k'],
+    defaultCredits: 40,
+    sortOrder: 110
+  })),
+  newApi(midjourney({
+    id: 'mj-v7',
+    upstream: 'mj-v7',
+    label: 'Midjourney 7',
+    group: 'classic',
+    description: '\u7ecf\u5178\u4e3b\u7248\u672c\uff0c\u5355\u6b21\u8fd4\u56de\u56db\u5bab\u683c\u5c01\u9762\u548c 4 \u5f20\u5355\u56fe',
+    upstreamPoints: 0.4504,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k'],
+    defaultCredits: 40,
+    sortOrder: 111
+  })),
+  newApi(midjourney({
+    id: 'mj-niji7',
+    upstream: 'mj-niji7',
+    label: 'Midjourney Niji 7',
+    group: 'new',
+    description: '\u52a8\u6f2b\u4e0e\u63d2\u753b\u4e13\u7528\u7248\u672c\uff0c\u5355\u6b21\u8fd4\u56de\u56db\u5bab\u683c\u5c01\u9762\u548c 4 \u5f20\u5355\u56fe',
+    upstreamPoints: 0.4504,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k'],
+    defaultCredits: 40,
+    sortOrder: 112
   }))
 ];
 
-/** MJ 继续使用 Apimart，并保留后台手动速度分档定价。 */
+/** 历史 MJ 任务兼容目录；不再投射到公开模型选择器。 */
 export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   apimart(midjourney({
     id: 'mj-v81',
@@ -261,13 +297,12 @@ const RETIRED_PUBLIC_IMAGE_MODEL_IDS = new Set(['image2-free']);
 
 export function isPublicNewApiImageEntry(entry: ImageModelCatalogEntry): boolean {
   return entry.provider === 'newapi'
-    && (entry.uiFamily === 'gim2' || entry.uiFamily === 'banana')
+    && (entry.uiFamily === 'gim2' || entry.uiFamily === 'banana' || entry.uiFamily === 'midjourney')
     && !RETIRED_PUBLIC_IMAGE_MODEL_IDS.has(entry.id);
 }
 
 export function isRetainedPublicImageEntry(entry: ImageModelCatalogEntry): boolean {
-  return isPublicNewApiImageEntry(entry)
-    || (entry.provider === 'apimart' && entry.uiFamily === 'midjourney');
+  return isPublicNewApiImageEntry(entry);
 }
 
 export function imageModelUiFamily(modelId: string): ImageModelUiFamily {

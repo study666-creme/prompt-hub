@@ -11,6 +11,9 @@
   const IMAGEGEN_FEED_MAX_AUTO_PAGES = 4;
 /** 卡片媒体区低于此高度视为布局未就绪，禁止自动翻页 */
 const IMAGEGEN_FEED_MIN_CARD_PX = 72;
+  /** Keep recent thumbnail scheduling bounded while 4K sources materialize. */
+  const IMAGEGEN_RECENT_THUMB_CONCURRENCY = 3;
+  const imageGenRecentThumbInflight = new WeakMap();
 
   /** @type {Record<string, any>} */
   let deps = {};
@@ -637,12 +640,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         clearTimeout(guardTimer);
         guardTimer = setTimeout(runGuard, 16);
       });
-      obs.observe(wrap, {
-        subtree: true,
-        childList: true,
-        attributes: true,
-        attributeFilter: ['style', 'class']
-      });
+      obs.observe(wrap, { childList: true });
     }
 
     function resetImageGenFeedCardLayout() {
@@ -704,6 +702,46 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
     async function boostImageGenFeedThumbs(wrap, cards, cap) {
       if (!wrap || !cards?.length) return;
       const limit = Math.min(cap || 16, cards.length);
+
+      /* CardImageLoader already resolves storage refs and grid variants before
+       * falling back to a job URL. Reuse that path so the feed does not race a
+       * second request for the same 4K source. */
+      if (window.CardImageLoader?.loadImg) {
+        const items = cards.slice(0, limit);
+        let next = 0;
+        const worker = async () => {
+          while (next < items.length) {
+            const slim = items[next++];
+            const creation = d().findCreationById?.(slim.id)
+              || (d().getCreations?.() || []).find((c) => c.id === slim.id);
+            if (!creation) continue;
+            const feedEl = wrap.querySelector(
+              `.imagegen-feed-card[data-feed-id="cr_${CSS.escape(String(slim.id))}"]`
+            );
+            const img = feedEl?.querySelector('.imagegen-feed-media img');
+            if (!img || img.dataset.feedLoadDone === '1') continue;
+            const running = imageGenRecentThumbInflight.get(img);
+            if (running) {
+              await running;
+              continue;
+            }
+            const task = Promise.resolve().then(() => window.CardImageLoader.loadImg(img));
+            imageGenRecentThumbInflight.set(img, task);
+            try {
+              await task;
+            } finally {
+              if (imageGenRecentThumbInflight.get(img) === task) {
+                imageGenRecentThumbInflight.delete(img);
+              }
+            }
+          }
+        };
+        await Promise.all(Array.from({
+          length: Math.min(IMAGEGEN_RECENT_THUMB_CONCURRENCY, items.length)
+        }, worker));
+        return;
+      }
+
       for (let i = 0; i < limit; i += 1) {
         const slim = cards[i];
         const creation = d().findCreationById?.(slim.id)
@@ -716,7 +754,10 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         const img = feedEl?.querySelector('.imagegen-feed-media img');
         if (!img || img.dataset.feedLoadDone === '1') continue;
 
-        if (isRecent && creation?.jobId && global.PromptHubApi?.getGenerationImageUrl) {
+        const hasStorageCandidate = isRecent && creation
+          && (global.FeatureDraft?.creationFeedImageCandidates?.(creation) || [])
+            .some((ref) => global.SupabaseSync?.isStorageRef?.(ref));
+        if (isRecent && creation?.jobId && !hasStorageCandidate && global.PromptHubApi?.getGenerationImageUrl) {
           try {
             const jobId = String(creation.jobId).replace(/#\d+$/, '');
             const r = await global.PromptHubApi.getGenerationImageUrl(jobId, { variant: 'grid' });
@@ -802,6 +843,14 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       const patchMax = IMAGEGEN_FEED_PER_PAGE;
       const boostMax = IMAGEGEN_FEED_PER_PAGE;
       const isRecentTab = d().getImageGenFeedTab?.() === 'recent';
+      const firstScreenImages = [...wrap.querySelectorAll(
+        '.imagegen-feed-card:not([data-pending="1"]):not([data-failed="1"]) .imagegen-feed-media img'
+      )].slice(0, 6);
+      firstScreenImages.forEach((img, index) => {
+        img.loading = 'eager';
+        img.fetchPriority = index < 4 ? 'high' : 'auto';
+        img.decoding = 'async';
+      });
       if (!isRecentTab) {
         const fullCards = (feedItems || []).map((slim) => (
           (global.__promptHubCards || []).find((x) => x.id === slim.id) || slim
@@ -945,7 +994,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
     }
 
     function buildRecentLibraryCtaHtml() {
-      return `<div class="imagegen-feed-library-cta" role="note">
+      return `<div class="imagegen-feed-library-cta" data-imagegen-feed-footer="recent" role="note">
         <p class="imagegen-feed-library-cta-text">最近生成有条数上限 · 点卡片下方 × 可删除 · 喜欢请「存入库」</p>
         <a href="/prompts" class="btn btn-secondary btn-sm imagegen-feed-library-link" data-open-warehouse="1">打开卡片库</a>
       </div>`;
@@ -953,6 +1002,12 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
 
     function buildImageGenWarehouseLibraryCtaHtml() {
       return buildRecentLibraryCtaHtml();
+    }
+
+    function appendImageGenFeedCards(wrap, cards) {
+      if (!wrap || !cards?.length) return;
+      const footer = wrap.querySelector(':scope > [data-imagegen-feed-footer="recent"]');
+      cards.forEach((card) => wrap.insertBefore(card, footer || null));
     }
   
     function getImageGenCommunityFeedList() {
@@ -1312,7 +1367,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         temp.innerHTML = appendHtml;
         const newCards = [...temp.children];
         if (!newCards.length) return;
-        newCards.forEach((el) => wrap.appendChild(el));
+        appendImageGenFeedCards(wrap, newCards);
         bindImageGenFeedCardEvents(wrap, newCards);
         bindImageGenFeedImageRelayout();
         if (mobileFeed) enforceMobileImageGenFeed();
@@ -1681,6 +1736,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       getRecentCreationsFeedList,
       getImageGenWarehouseFeedList: getRecentCreationsFeedList,
       creationToFeedHtml,
+      appendImageGenFeedCards,
       getImageGenCommunityFeedList,
       imageGenFeedListSignature,
       warehouseCardToFeedHtml,

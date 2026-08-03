@@ -1,10 +1,10 @@
 # 部署与验证清单
 
-最后核对：2026-08-02
+最后核对：2026-08-03
 
 ## 当前发布状态
 
-生产基线仍为 `20260730a`。本候选 build `20260802a` 修复 New API 生图 durable queue 提交、完成态先行渲染和失败媒体折叠；代码、测试与文档已完成，待同一干净提交发布后以 `/health.buildSha` 和 Pages production build 核对。
+生产基线仍为 `20260730a`。New API 生图 durable queue、完成态交付、缩略图加载、卡片库稳定 Grid 和生图分页布局已冻结为 `20260803a` 发布候选。正式发布必须提交 build 与状态文档，并从同一干净 SHA 完成全量验证、Worker dry-run、Pages staging 和生产验收。
 
 ## 发布顺序
 
@@ -73,7 +73,7 @@ node scripts\run-index-local-http-smoke.mjs
 
 ### 6. 解冻、dry-run 与迁移
 
-本轮已完成 build bump；数据库没有新增迁移。审查并将 build 变更和状态文档提交为同一个干净发布 SHA，随后运行：
+数据库没有新增迁移。审查全部工作树改动后重新运行 `scripts/bump-build.ps1`，将 build 变更和状态文档提交为同一个干净发布 SHA，随后运行：
 
 ```powershell
 cd D:\prompt-hub\server

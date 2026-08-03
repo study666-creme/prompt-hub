@@ -50,7 +50,7 @@ try {
     window.MediaPipeline = {
       resolveListUrl: async () => {
         window.__calls.list += 1;
-        return '';
+        return readyImage;
       }
     };
     window.SupabaseSync = {
@@ -86,8 +86,8 @@ try {
     calls: window.__calls,
     loaded: document.querySelector('#imageGenFeed img')?.naturalWidth > 8
   }));
-  if (!result.loaded || result.calls.list !== 1 || result.calls.archive !== 1) {
-    throw new Error(`Storage archive was not resolved first: ${JSON.stringify(result)}`);
+  if (!result.loaded || result.calls.list !== 1 || result.calls.archive !== 0) {
+    throw new Error(`Storage grid was not resolved first: ${JSON.stringify(result)}`);
   }
   if (result.calls.job !== 0 || result.calls.proxy !== 0) {
     throw new Error(`Expired job URL was requested before Storage: ${JSON.stringify(result)}`);

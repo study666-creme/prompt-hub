@@ -18,11 +18,6 @@ import {
   type TaskPollResult
 } from './grsai';
 import { extractErrorMessage } from './cors-headers';
-import {
-  submitMidjourneyImagine,
-  type SubmitMidjourneyParams
-} from './apimart-midjourney';
-import { isMidjourneyUpstream } from './midjourney-models';
 import type { ImageModelProvider } from './image-models-catalog';
 
 /** 旧 provider 仅用于恢复已经落库的历史任务，不再进入可选模型目录。 */
@@ -192,17 +187,6 @@ export async function submitImageJobForProvider(
   if (provider === 'apimart') {
     if (!bindings.apimartKey) {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Apimart 线路未配置，请联系站长');
-    }
-    if (isMidjourneyUpstream(params.upstreamModel)) {
-      const mjParams: SubmitMidjourneyParams = {
-        upstreamModel: params.upstreamModel,
-        prompt: params.prompt,
-        size: params.size,
-        refImageUrls: params.refImageUrls,
-        mjParams: params.mjParams
-      };
-      const taskId = await submitMidjourneyImagine(bindings.apimartKey, bindings.apimartBase, mjParams);
-      return { provider: 'apimart', taskId };
     }
     const taskId = await submitApimartImageJob(bindings.apimartKey, bindings.apimartBase, params);
     return { provider: 'apimart', taskId };

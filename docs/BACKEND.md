@@ -1,6 +1,6 @@
 # Worker 后端架构
 
-最后核对：2026-07-30。本文描述 `20260730a` 受控发布契约；生产是否已切换以 `/health.buildSha` 为准。
+最后核对：2026-08-03。生产基线仍为 `20260730a`；本文新增的生图交付规则已冻结为 `20260803a` 发布候选，生产是否已切换以 `/health.buildSha` 为准。
 
 ## 组件
 
@@ -9,7 +9,7 @@
 | 路由 | Hono + TypeScript | API、认证、CORS、错误与限流 |
 | 数据 | MemFire Postgres/Auth | 用户、积分、社区、任务和运营数据 |
 | 图片 | Cloudflare R2 + MemFire Storage | 上传、签名、缩略图、CDN 回源 |
-| 上游 | 卡藏 New API、Apimart、DeepSeek | 全能模型2/香蕉、MJ/视觉、对话工具 |
+| 上游 | 卡藏 New API、DeepSeek | 全能模型2/香蕉/MJ、视觉与对话工具；Apimart 仅恢复历史任务 |
 | 队列 | Cloudflare Queues + cron | 图片和视频独立提交；poll、归档、退款与支付兜底 |
 | 监控 | Workers Observability + KV | 请求、5xx、图片 404、生成失败率与支付事件 |
 
@@ -54,8 +54,8 @@
 | `SUPABASE_URL` | Secret | MemFire Supabase-compatible API URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Secret | 服务端数据库权限 |
 | `SUPABASE_JWT_SECRET` | Secret，可选 | 本地 JWT 校验回退 |
-| `NEWAPI_API_KEY` | Secret | 全能模型2与香蕉；目录和价格实时同步 |
-| `APIMART_API_KEY` | Secret | MJ 与视觉能力 |
+| `NEWAPI_API_KEY` | Secret | 全能模型2、香蕉与 MJ；目录和价格实时同步 |
+| `APIMART_API_KEY` | 历史兼容，可选 | 仅恢复已经落库的旧 Apimart 任务；新 MJ 任务不读取 |
 | `CHAT_API_KEY` | Secret | 对话/提示词工具 |
 | `ADMIN_API_SECRET` | Secret | 运营后台和造码脚本 |
 | `PAYMENT_WEBHOOK_SECRET` | Secret，可选 | 支付 webhook HMAC |
@@ -76,8 +76,9 @@
 - 卡片库把用户看到的 `quotedCredits` 随生成请求带回。服务端按当前可信目录重算，报价变化时返回 `409 CONFLICT` 且不创建任务、不扣积分；浏览器只清除对应报价缓存，下一次点击重新报价，不自动重发付费 POST。报价 GET 遇到 `500/502/503/504` 只短退避重试一次。
 - `gpt-image-2-chat` 是服务端兼容别名，统一归一化到公开模型 `image2-economy`；不要根据别名硬编码端点或能力，当前参数以实时目录为准并支持比例和可选参考图。
 - 运营后台的调用链路由卡藏 API `/api/model-catalog/admin/routes` 提供，并使用 `NEWAPI_CATALOG_ADMIN_SECRET` 与服务端共享密钥鉴权；公开 `/api/model-catalog` 不包含真实渠道信息。
-- MJ 使用 Apimart，并保留后台 Relax / Fast / Turbo 手动定价。
-- 旧 GrsAI、iThink、Mooko 和非 MJ Apimart 型号只能恢复历史任务，不能通过后台重新上架。
+- MJ 8.1、MJ 7 和 Niji 7 与其他公开图片型号一样通过卡藏 New API 提交；固定常规 `relax` 档，单次 40 积分（0.4 元），不公开 Fast / Turbo。
+- MJ 完成结果固定保留四宫格封面和 4 张单图。New API 的 `/v1/tasks/:taskId` 是新任务唯一查询来源；仅历史 `provider=apimart` 任务继续使用旧详情查询。
+- 旧 GrsAI、iThink、Mooko 和 Apimart 型号只能恢复历史任务，不能通过后台重新上架。新 New API MJ 任务不返回仍会直连旧上游的二次操作按钮。
 
 配置命令示例：
 
@@ -86,7 +87,6 @@ cd D:\prompt-hub\server
 npm exec wrangler secret put SUPABASE_URL
 npm exec wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 npm exec wrangler secret put NEWAPI_API_KEY
-npm exec wrangler secret put APIMART_API_KEY
 ```
 
 ## 数据写入边界
@@ -156,4 +156,13 @@ npm run deploy:dry-run
 3. 队列消费只允许从 `queued` 原子领取一次。上游 HTTP 不确定、`running`、`outcome_unknown` 或任务查询 `not_found` 都不得重新发起付费 POST。
 4. 页面按秒轮询；服务端 cron 每 2 分钟兜底推进 submit、poll 和 archive。上游返回临时图后先把任务标为完成并立即给客户端展示，前端先写入“最近生成”并移除 pending，占用较慢的 R2/Storage 归档在后台独立重试，不重做生成。
 5. Signed-in `copyStorage` saves must complete `archiveGeneratedCardImage` and return a verified `storage://` primary reference before a generated card is persisted. SVG placeholders and temporary upstream URLs are display-only; a failed archive removes the newly created card.
+
+## Generation Delivery Contract (2026-08-03)
+
+The Worker now separates upstream completion from media delivery. A public
+`completed` response always carries a non-empty `imageUrl`; terminal upstream
+responses without a URL remain pollable. Legacy completed rows first recover
+`syncImageUrl`, `upstreamImageUrl`, or `upstreamResultUrls`; rows with no
+recoverable source end as `upstream_no_image` or `upstream_not_configured` and
+are refunded idempotently.
 6. 未知上游结果超过 1 小时进入幂等退款 SLA。发布前必须验证队列 binding、cron、幂等迁移和原子积分 RPC 已同步存在。

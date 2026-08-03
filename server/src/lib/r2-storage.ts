@@ -214,17 +214,27 @@ export async function cardImageExists(
     if (mode === 'r2') return false;
   }
 
-  try {
-    const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).download(key);
-    if (!error && data && (data.size || 0) > 0) return true;
-  } catch {
-    /* fall through */
-  }
-
   const slash = key.lastIndexOf('/');
   const dir = slash >= 0 ? key.slice(0, slash) : '';
   const name = slash >= 0 ? key.slice(slash + 1) : key;
-  const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).list(dir, { limit: 200 });
-  if (error || !data?.length) return false;
-  return data.some((item) => item.name === name);
+  /* A list/search request is metadata-only. Downloading a 4K primary just to
+   * answer an existence check made the first grid request pay the full image
+   * transfer before the thumbnail could be generated. */
+  try {
+    const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).list(dir, {
+      limit: 1,
+      search: name
+    });
+    if (!error && data?.some((item) => item.name === name)) return true;
+  } catch {
+    /* fall through to the legacy download check for storage providers whose
+     * list endpoint is unavailable or does not support search. */
+  }
+
+  try {
+    const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).download(key);
+    return !error && !!data && (data.size || 0) > 0;
+  } catch {
+    return false;
+  }
 }

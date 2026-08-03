@@ -105,6 +105,26 @@ describe('generation media grid signing', () => {
     );
   });
 
+  it('signs an existing grid without requiring or downloading the primary', async () => {
+    const env = {
+      ENVIRONMENT: 'production',
+      MEDIA_STORAGE_MODE: 'r2-first'
+    } as Env;
+    mocks.cardImageExists.mockImplementation(async (_env, path) => (
+      path === 'user-1/generated/job-grid_grid.jpg'
+    ));
+
+    await expect(ensureGridPathForSigning(
+      context(env),
+      'user-1/generated/job-grid_grid.jpg',
+      'grid',
+      { requireExistingPrimary: true }
+    )).resolves.toBe('user-1/generated/job-grid_grid.jpg');
+
+    expect(mocks.uploadCardImage).not.toHaveBeenCalled();
+    expect(mocks.downloadCardImage).not.toHaveBeenCalled();
+  });
+
   it('returns an explicit not-found error instead of signing when the primary is gone', async () => {
     const env = {
       ENVIRONMENT: 'production',
