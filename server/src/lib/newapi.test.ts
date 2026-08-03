@@ -1533,8 +1533,8 @@ describe('newapi image upstream', () => {
       rules: [],
       imageCatalogEntries: [],
       models: [
-        textEntry('deepseek-v4-flash', 'deepseek-ai/deepseek-v4-flash'),
-        textEntry('deepseek-v4-pro', 'deepseek-ai/deepseek-v4-pro'),
+        textEntry('deepseek-v4-flash', 'private-text-route-a'),
+        textEntry('deepseek-v4-pro', 'private-text-route-b'),
         textEntry('deepseek-v4-flash-none'),
         textEntry('deepseek-reasoner'),
         textEntry('glm-5.1'),
