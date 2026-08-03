@@ -1,6 +1,6 @@
 # AI 接手说明
 
-最后核对：2026-08-03。生产基线仍为 `20260730a`；下述媒体可靠性改动已冻结为 `20260803a` 发布候选，生产切换仍以 `/health.buildSha` 和 Pages build 取证为准。
+最后核对：2026-08-03。生产基线已切换为 `20260803a`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
 
 ## 最小阅读顺序
 
@@ -16,7 +16,7 @@
 
 - Worker 唯一发布仓库是 `D:\prompt-hub`；`D:\canvas\prompt-hub` 只保留作历史生产审计，禁止从任一脏目录直接发布。
 - 修改 Worker、生成、支付、数据库或发布工具前必须阅读根目录 `AGENTS.md` 和 `docs/RECONCILE-20260726.md`；如果根目录存在 `DO-NOT-DEPLOY.md`，还必须先遵守其中的冻结条件。
-- 2026-07-30 已完成数据库备份与五项迁移、New API/Cloudflare 核对、Worker/Pages 发布和生产验收；`20260730a` 已上线。后续发布仍必须使用干净 SHA，并分别以 `/health.buildSha` 和线上 Pages build 取证。
+- 2026-08-03 已完成 `20260803a` 的数据库无迁移发布、New API/Cloudflare 核对、Worker/Pages 发布和生产验收；五项既有迁移保持不变。后续发布仍必须使用干净 SHA，并分别以 `/health.buildSha` 和线上 Pages build 取证。
 
 ## 文档时效纪律
 
@@ -104,7 +104,7 @@ npm test
 - 不删除用户卡片、图片或数据库记录来“验证修复”。
 - 不把本地 `.env`、账号、UUID、token、Cloudflare 缓存文件提交到公开仓库。
 
-## 当前生产生图契约（2026-07-30）
+## 当前生产生图契约（2026-08-03）
 
 以下规则优先于本文档中较早的模型兼容性描述；运行状态以 `/health.buildSha` 和实时模型目录为准：
 

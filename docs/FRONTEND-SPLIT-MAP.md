@@ -29,7 +29,7 @@ The source split loaders are synchronous in the repository so local development 
 
 ## Warehouse UI Ownership
 
-The 2026-08-03 `20260803a` candidate keeps the warehouse redesign isolated from generated bundles:
+The 2026-08-03 `20260803a` production release keeps the warehouse redesign isolated from generated bundles:
 
 - `partials/index-body/part-02.html` owns the toolbar and compact warehouse summary markup.
 - `legacy/script/part-04.js` owns summary count/scope synchronization.

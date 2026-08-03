@@ -1,6 +1,6 @@
 # 列表图片加载
 
-复核日期：2026-08-03。下述仓库 UI 对应 `20260803a` 生图媒体可靠性发布候选；生产是否已切换以线上 build 和资源 HTTP 冒烟为准。
+复核日期：2026-08-03。下述仓库 UI 对应已上线的 `20260803a` 生图媒体可靠性；生产资源以线上 build 和资源 HTTP 冒烟为准。
 
 ## 目标
 
@@ -91,7 +91,7 @@ node scripts/verify-imagegen-finish-immediate-browser.mjs
 node scripts/verify-imagegen-feed-retention-browser.mjs
 ```
 
-发布候选中的仓库 UI 可使用独立浏览器验收，不访问生产 API：
+仓库 UI 可使用独立浏览器验收，不访问生产 API：
 
 ```powershell
 $env:PLAYWRIGHT_PACKAGE_DIR = '<playwright package directory>'

@@ -1,6 +1,6 @@
 # Prompt Hub 项目上下文
 
-最后核对：2026-07-30
+最后核对：2026-08-03
 
 > 新任务先读本文、`RECONCILE-20260726.md`、`CURRENT-ISSUES.md` 和 `AI-PITFALLS.md`；如果根目录存在 `DO-NOT-DEPLOY.md`，还必须先遵守其中的冻结条件。
 
@@ -16,7 +16,7 @@
 | 图片 | R2 优先、MemFire Storage 回源 |
 | Canvas | `https://canvas.prompt-hubs.com` 为正式回跳目标；其他域名仅按 CORS/部署记录兼容 |
 
-双树收编与发布已完成，`20260730a` 已上线。生产运行版本仍必须通过 `/health.buildSha`、Pages build 和线上冒烟取证，不能只凭本地提交或测试通过作结论。
+双树收编与发布已完成，`20260803a` 已上线。生产运行版本仍必须通过 `/health.buildSha`、Pages build 和线上冒烟取证，不能只凭本地提交或测试通过作结论。
 
 Pages 的准确 build 只从线上 `window.__APP_BUILD__` 读取；Worker 以 `/health.buildSha` 为唯一版本证据，不在本文长期复制提交号。
 
@@ -29,7 +29,7 @@ Pages 的准确 build 只从线上 `window.__APP_BUILD__` 读取；Worker 以 `/
 - 支付回调审计、订单监控、Canvas 席位契约、`/wallet` 兼容入口和首次建点奖励。
 - 正式发布的冻结/脏树守卫和 Git SHA 注入。
 
-以上属于 `20260730a` 生产契约，发布与验收记录见 `DEPLOY-CHECKLIST.md`。
+以上属于 `20260803a` 生产契约，发布与验收记录见 `DEPLOY-CHECKLIST.md`。
 
 ## 架构约束
 

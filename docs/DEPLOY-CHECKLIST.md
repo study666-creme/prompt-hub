@@ -4,7 +4,7 @@
 
 ## 当前发布状态
 
-生产基线仍为 `20260730a`。New API 生图 durable queue、完成态交付、缩略图加载、卡片库稳定 Grid 和生图分页布局已冻结为 `20260803a` 发布候选。正式发布必须提交 build 与状态文档，并从同一干净 SHA 完成全量验证、Worker dry-run、Pages staging 和生产验收。
+生产基线已为 `20260803a`。New API 生图 durable queue、完成态交付、缩略图加载、卡片库稳定 Grid 和生图分页布局已从同一干净 SHA 完成全量验证、Worker dry-run、Pages staging、Worker/Pages 发布和生产验收；五项既有数据库迁移未改变。
 
 ## 发布顺序
 
