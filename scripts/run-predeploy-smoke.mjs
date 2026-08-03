@@ -49,6 +49,7 @@ runNode('verify-mobile-feed-regression', 'verify-mobile-feed-regression.mjs');
 runNode('verify-community-feed-reliability', 'verify-community-feed-reliability.mjs');
 runNode('verify-image-delivery-regression', 'verify-image-delivery-regression.mjs');
 runNode('verify-imagegen-catalog-cache', 'verify-imagegen-catalog-cache.mjs');
+runNode('verify-deepseek-text-models', 'verify-deepseek-text-models.mjs');
 runNode('verify-generation-cost-retry', 'verify-generation-cost-retry.mjs');
 runNode('verify-pages-deploy-guards', 'verify-pages-deploy-guards.mjs');
 runNode('verify-reference-assets-regression', 'verify-reference-assets-regression.mjs');

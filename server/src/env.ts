@@ -46,16 +46,10 @@ export type Env = {
   MOOKO_API_BASE_URL?: string;
   /** 木瓜慢速线同时 POST 上限（默认 8，最大 16） */
   MOOKO_MAX_CONCURRENT_SUBMITS?: string;
-  /** 对话上游（DeepSeek 官方等，与生图密钥分离） */
-  CHAT_API_KEY?: string;
-  CHAT_API_BASE_URL?: string;
-  CHAT_MODEL?: string;
   /** 反推提示词视觉模型（Apimart 等，默认 gemini-2.5-flash-lite） */
   REVERSE_VISION_MODEL?: string;
   /** 裂变美学 DNA 视觉模型（默认 gemini-2.5-flash，比反推 lite 更懂排版/卡面） */
   FISSION_VISION_MODEL?: string;
-  /** 裂变变体策划对话模型（默 deepseek-v4-pro） */
-  FISSION_CHAT_MODEL?: string;
   /** 社区发帖 Gemini 配图审核：默认关；设 1/true 开启（Apimart 视觉，按次扣费） */
   COMMUNITY_GEMINI_MODERATION?: string;
   /** 支付 webhook HMAC 密钥：wrangler secret put PAYMENT_WEBHOOK_SECRET */

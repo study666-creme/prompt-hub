@@ -1508,4 +1508,47 @@ describe('newapi image upstream', () => {
     expect(resolved?.route).toBeNull();
     expect(newApiKeyForRoute('sk-secret', resolved?.route)).toBe('sk-secret');
   });
+
+  it('retains only the two reviewed DeepSeek ids and hides GLM 5.1 text entries', () => {
+    const textEntry = (
+      id: string,
+      upstreamModel = id
+    ): NewApiCatalogSnapshot['models'][number] => ({
+      id,
+      upstreamModel,
+      label: id,
+      description: '',
+      modality: 'text',
+      operation: 'chat',
+      order: 1,
+      endpoint: { method: 'POST', path: '/api/v1/chat', contentType: 'application/json' },
+      parameters: [],
+      pricing: { mode: 'fixed', unit: 'request', yuan: 0.002, credits: 0.2 }
+    });
+    const snapshot: NewApiCatalogSnapshot = {
+      available: true,
+      stale: false,
+      version: 'reviewed-text-models',
+      pricingVersion: 'reviewed-text-pricing',
+      rules: [],
+      imageCatalogEntries: [],
+      models: [
+        textEntry('deepseek-v4-flash', 'deepseek-ai/deepseek-v4-flash'),
+        textEntry('deepseek-v4-pro', 'deepseek-ai/deepseek-v4-pro'),
+        textEntry('deepseek-v4-flash-none'),
+        textEntry('deepseek-reasoner'),
+        textEntry('glm-5.1'),
+        textEntry('glm-5.1-standard'),
+        textEntry('creative-5-5', 'gpt-5.5')
+      ]
+    };
+
+    expect(publicNewApiCatalogModels(snapshot).map(model => model.id)).toEqual([
+      'deepseek-v4-flash',
+      'deepseek-v4-pro',
+      'creative-5-5'
+    ]);
+    expect(resolveNewApiCatalogModel(snapshot, 'deepseek-v4-flash-none', 'text')).toBeNull();
+    expect(resolveNewApiCatalogModel(snapshot, 'glm-5.1', 'text')).toBeNull();
+  });
 });

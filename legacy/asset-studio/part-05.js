@@ -607,11 +607,6 @@
     bindChatActionButtons(block);
   }
 
-  const CHAT_COST_HINTS = {
-    'deepseek-v4-flash': { input: '769万', output: '385万', outputThink: '333万' },
-    'deepseek-v4-pro': { input: '64.1万', output: '32.1万', outputThink: '27.8万' }
-  };
-
   function getStudioChatOptions() {
     const model = document.getElementById('studioChatModel')?.value || 'deepseek-v4-flash';
     const thinking = !!document.getElementById('studioChatThinking')?.checked;

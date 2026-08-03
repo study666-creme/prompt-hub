@@ -2,29 +2,21 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Env } from '../../env';
 import { submitChatCompletions, type ChatMessage } from '../../lib/chat-completions';
-import { MIN_CREDIT_CHARGE, roundCredits } from '../../lib/credit-math';
 import {
-  computeChatCostFromTokens,
-  estimateChatCost,
-  resolveChatModel
-} from '../../lib/chat-pricing';
+  billableNewApiTextCredits,
+  DEFAULT_PUBLIC_TEXT_MODEL,
+  estimateTextTokens,
+  fetchFreshNewApiTextModel,
+  newApiTextRequestTarget
+} from '../../lib/newapi-text';
 import { ApiError } from '../../lib/errors';
-import {
-  fetchNewApiAdminRoutes,
-  fetchNewApiModelCatalog,
-  newApiKeyForRoute,
-  newApiTextCreditsForUsage,
-  resolveNewApiCatalogModel,
-  resolveNewApiRoutedCatalogModel,
-  type NewApiCatalogModel,
-  type NewApiResolvedCatalogModel
-} from '../../lib/newapi';
+import type { NewApiCatalogModel } from '../../lib/newapi';
 import {
   deductUserCredits,
   spendableCredits,
   syncMembershipCredits
 } from '../../lib/membership-credits';
-import { createAdminClient, isMembershipActive } from '../../lib/supabase';
+import { createAdminClient } from '../../lib/supabase';
 import { mergeTaskFlags } from '../../lib/membership-tasks';
 import { sanitizePublicModelId, sanitizePublicModelLabel } from '../../lib/public-model-projection';
 import { rateLimit } from '../../middleware/rate-limit';
@@ -79,31 +71,9 @@ function estimateTokens(messages: ChatMessage[]) {
     const toolCalls = message.role === 'assistant' && message.tool_calls?.length
       ? JSON.stringify(message.tool_calls)
       : '';
-    return sum + estimateTokensFromText(`${content}${toolCalls}`);
+    return sum + estimateTextTokens(`${content}${toolCalls}`);
   }, 0);
 }
-
-function legacyBillingMessages(messages: ChatMessage[]) {
-  return messages.map(message => {
-    const content = typeof message.content === 'string' ? message.content : '';
-    if (message.role === 'tool') {
-      return { role: 'user' as const, content: `[tool ${message.tool_call_id}] ${content}` };
-    }
-    const toolCalls = message.role === 'assistant' && message.tool_calls?.length
-      ? JSON.stringify(message.tool_calls)
-      : '';
-    return { role: message.role, content: `${content}${toolCalls}` || '[empty message]' };
-  });
-}
-
-function billableCredits(value: number | null) {
-  if (value == null || !Number.isFinite(value)) return null;
-  return Math.max(MIN_CREDIT_CHARGE, roundCredits(value));
-}
-
-type FreshTextModel = NewApiResolvedCatalogModel & {
-  publicIdentity: { model: string; modelLabel: string };
-};
 
 export function publicChatQuotePayload(input: {
   model: string;
@@ -124,25 +94,6 @@ export function publicChatCostPayload(final: number) {
   return { final };
 }
 
-async function freshTextModel(env: Env, modelId: string): Promise<FreshTextModel> {
-  let snapshot;
-  try {
-    snapshot = await fetchNewApiModelCatalog(env.NEWAPI_API_BASE_URL, { force: true, requireFresh: true });
-  } catch {
-    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认实时价格，请稍后重试');
-  }
-  const routes = await fetchNewApiAdminRoutes(env.NEWAPI_API_BASE_URL, env.NEWAPI_CATALOG_ADMIN_SECRET);
-  const resolved = await resolveNewApiRoutedCatalogModel(snapshot, routes, modelId, 'text');
-  if (!resolved) throw new ApiError(400, 'MODEL_UNAVAILABLE', '所选文字模型已不可用，请刷新后重选');
-  const publicModel = resolveNewApiCatalogModel(snapshot, resolved.model.upstreamModel, 'text');
-  return {
-    ...resolved,
-    publicIdentity: publicModel
-      ? { model: publicModel.id, modelLabel: publicModel.label }
-      : { model: 'creative-model', modelLabel: '创作模型' }
-  };
-}
-
 function validateReasoningEffort(model: NewApiCatalogModel, value?: string) {
   if (!value) return;
   const parameter = model.parameters.find(item => item.name === 'reasoning_effort');
@@ -153,60 +104,27 @@ function validateReasoningEffort(model: NewApiCatalogModel, value?: string) {
 }
 
 chatRoutes.get('/cost', async c => {
-  const user = c.get('user');
-  const model = c.req.query('model') || 'creative-5-5';
+  const model = c.req.query('model') || DEFAULT_PUBLIC_TEXT_MODEL;
   const thinking = c.req.query('thinking') === '1' || c.req.query('thinking') === 'true';
   const inputTokens = Math.max(0, Number(c.req.query('inputTokens') || 0));
   const outputTokens = Math.max(1, Math.min(8192, Number(c.req.query('outputTokens') || 2048)));
 
-  const admin = createAdminClient(c.env);
-  const profile = await syncMembershipCredits(admin, user.id);
-  const memberActive = isMembershipActive(profile);
-
-  if (model !== 'deepseek-v4-flash') {
-    const resolved = await freshTextModel(c.env, model);
-    const catalogModel = resolved.model;
-    const credits = billableCredits(newApiTextCreditsForUsage(
-      catalogModel,
-      inputTokens || estimateTokensFromText('示例消息'),
-      outputTokens
-    ));
-    if (credits == null) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认该模型实时价格');
-    return c.json({
-      ok: true,
-      data: publicChatQuotePayload({
-        ...resolved.publicIdentity,
-        thinking,
-        final: credits
-      })
-    });
+  const resolved = await fetchFreshNewApiTextModel(c.env, model);
+  const credits = billableNewApiTextCredits(
+    resolved.model,
+    inputTokens || estimateTextTokens('示例消息'),
+    outputTokens
+  );
+  if (credits == null) {
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认该模型实时价格');
   }
-
-  const cost =
-    inputTokens > 0
-      ? computeChatCostFromTokens(
-          model,
-          thinking,
-          inputTokens,
-          2048,
-          profile.membership_tier,
-          memberActive
-        )
-      : estimateChatCost(
-          model,
-          thinking,
-          [{ role: 'user', content: '示例消息' }],
-          profile.membership_tier,
-          memberActive
-        );
 
   return c.json({
     ok: true,
     data: publicChatQuotePayload({
-      model: resolveChatModel(model).id,
-      modelLabel: cost.modelLabel,
+      ...resolved.publicIdentity,
       thinking,
-      final: cost.final
+      final: credits
     })
   });
 });
@@ -221,20 +139,13 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
   const admin = createAdminClient(c.env);
   let profile = await syncMembershipCredits(admin, user.id);
 
-  const modelId = parsed.data.model || 'creative-5-5';
-  const isLegacyModel = modelId === 'deepseek-v4-flash';
-  const resolvedCatalogModel = isLegacyModel ? null : await freshTextModel(c.env, modelId);
-  const catalogModel = resolvedCatalogModel?.model || null;
-  if (catalogModel) validateReasoningEffort(catalogModel, parsed.data.reasoningEffort);
-  const rawApiKey = (catalogModel ? c.env.NEWAPI_API_KEY : c.env.CHAT_API_KEY)?.trim();
-  const apiKey = rawApiKey && resolvedCatalogModel
-    ? newApiKeyForRoute(rawApiKey, resolvedCatalogModel.route)
-    : rawApiKey;
-  const apiBase = catalogModel ? c.env.NEWAPI_API_BASE_URL : c.env.CHAT_API_BASE_URL;
-  if (!apiKey) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '对话服务暂未配置');
+  const modelId = parsed.data.model || DEFAULT_PUBLIC_TEXT_MODEL;
+  const resolvedCatalogModel = await fetchFreshNewApiTextModel(c.env, modelId);
+  const catalogModel = resolvedCatalogModel.model;
+  validateReasoningEffort(catalogModel, parsed.data.reasoningEffort);
+  const requestTarget = newApiTextRequestTarget(c.env, resolvedCatalogModel);
 
   const thinking = !!parsed.data.thinking;
-  const memberActive = isMembershipActive(profile);
   const maxOutputTokens = parsed.data.maxTokens || 2048;
 
   const messages: ChatMessage[] = [...parsed.data.messages];
@@ -258,19 +169,11 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
   }
 
   const estimatedInputTokens = estimateTokens(messages);
-  const legacyEstimate = catalogModel
-    ? null
-    : estimateChatCost(
-        modelId,
-        thinking,
-        legacyBillingMessages(messages),
-        profile.membership_tier,
-        memberActive,
-        maxOutputTokens
-      );
-  const estimatedCredits = catalogModel
-    ? billableCredits(newApiTextCreditsForUsage(catalogModel, estimatedInputTokens, maxOutputTokens))
-    : legacyEstimate?.final ?? null;
+  const estimatedCredits = billableNewApiTextCredits(
+    catalogModel,
+    estimatedInputTokens,
+    maxOutputTokens
+  );
   if (estimatedCredits == null) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认该模型实时价格');
   const balance = spendableCredits(profile);
   if (balance < estimatedCredits) {
@@ -283,10 +186,10 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
 
   const chatId = `chat_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
-  const result = await submitChatCompletions(apiKey, apiBase, {
-    model: catalogModel?.upstreamModel || modelId,
+  const result = await submitChatCompletions(requestTarget.apiKey, requestTarget.baseUrl, {
+    model: requestTarget.model,
     messages,
-    thinking: catalogModel ? false : thinking,
+    thinking,
     reasoningEffort: parsed.data.reasoningEffort,
     temperature: parsed.data.temperature,
     maxTokens: maxOutputTokens,
@@ -297,30 +200,16 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
   const usage = result.usage;
 
   const inputTokens = usage?.prompt_tokens ?? estimatedInputTokens;
-  const outputTokens = usage?.completion_tokens ?? estimateTokensFromText(reply || JSON.stringify(result.toolCalls));
-  const legacyCost = catalogModel
-    ? null
-    : computeChatCostFromTokens(
-        modelId,
-        thinking,
-        inputTokens,
-        outputTokens,
-        profile.membership_tier,
-        memberActive
-      );
-  const dynamicFinal = catalogModel
-    ? billableCredits(newApiTextCreditsForUsage(catalogModel, inputTokens, outputTokens))
-    : null;
-  const cost = catalogModel
-    ? {
-        base: dynamicFinal ?? estimatedCredits,
-        final: dynamicFinal ?? estimatedCredits,
-        discountLabel: null,
-        modelLabel: resolvedCatalogModel?.publicIdentity.modelLabel || '创作模型',
-        inputTokens,
-        outputTokens
-      }
-    : legacyCost!;
+  const outputTokens = usage?.completion_tokens ?? estimateTextTokens(reply || JSON.stringify(result.toolCalls));
+  const dynamicFinal = billableNewApiTextCredits(catalogModel, inputTokens, outputTokens);
+  const cost = {
+    base: dynamicFinal ?? estimatedCredits,
+    final: dynamicFinal ?? estimatedCredits,
+    discountLabel: null,
+    modelLabel: resolvedCatalogModel.publicIdentity.modelLabel,
+    inputTokens,
+    outputTokens
+  };
 
   if (balance < cost.final) {
     throw new ApiError(
@@ -338,7 +227,7 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
       'chat_generation',
       chatId,
       {
-        model: resolvedCatalogModel?.requestedModelId || modelId,
+        model: resolvedCatalogModel.requestedModelId,
         thinking,
         base: cost.base,
         discountLabel: cost.discountLabel,
@@ -367,13 +256,9 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
       creditsCharged: cost.final,
       creditsRemaining: spendableCredits(profile),
       cost: publicChatCostPayload(cost.final),
-      model: resolvedCatalogModel?.publicIdentity.model || resolveChatModel(modelId).id,
-      modelLabel: resolvedCatalogModel?.publicIdentity.modelLabel || cost.modelLabel,
+      model: resolvedCatalogModel.publicIdentity.model,
+      modelLabel: resolvedCatalogModel.publicIdentity.modelLabel,
       thinking
     }
   });
 });
-
-function estimateTokensFromText(text: string): number {
-  return Math.max(1, Math.ceil(String(text || '').length / 3));
-}

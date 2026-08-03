@@ -1055,7 +1055,25 @@ export async function fetchNewApiPricingRules(baseUrl?: string, opts?: { force?:
   return (await fetchNewApiModelCatalog(baseUrl, opts)).rules;
 }
 
+const PUBLIC_DEEPSEEK_TEXT_MODELS = new Set([
+  'deepseek-v4-flash',
+  'deepseek-v4-pro'
+]);
+
+function isRetainedPublicTextModel(model: NewApiCatalogModel): boolean {
+  if (model.modality !== 'text') return true;
+  const identities = [model.id, model.upstreamModel].map(value => value.trim().toLowerCase());
+  if (identities.some(value => /(?:^|[\/_-])glm[-_.]?5[-_.]?1(?:$|[\/_-])/.test(value))) {
+    return false;
+  }
+  if (identities.some(value => value.includes('deepseek'))) {
+    return PUBLIC_DEEPSEEK_TEXT_MODELS.has(model.id.trim().toLowerCase());
+  }
+  return true;
+}
+
 function isPublicCatalogModel(snapshot: NewApiCatalogSnapshot, model: NewApiCatalogModel): boolean {
+  if (!isRetainedPublicTextModel(model)) return false;
   if (model.modality !== 'image') return true;
   return snapshot.imageCatalogEntries.some(entry => (
     entry.upstream === model.upstreamModel && isPublicNewApiImageEntry(entry)

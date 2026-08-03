@@ -52,6 +52,7 @@ describe('chat completions tool messages', () => {
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
 
     const result = await submitChatCompletions('server-secret', 'https://newapi.example.com', {
+      model: 'deepseek-v4-flash',
       messages: [{ role: 'user', content: 'create a note' }]
     });
 
@@ -82,5 +83,16 @@ describe('chat completions tool messages', () => {
     });
 
     expect(result.toolCalls[0]?.function.arguments).toBe('{"includeViewport":true}');
+  });
+
+  it('refuses to guess an upstream base URL', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(submitChatCompletions('server-secret', undefined, {
+      model: 'deepseek-v4-flash',
+      messages: [{ role: 'user', content: 'hello' }]
+    })).rejects.toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

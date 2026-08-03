@@ -14,10 +14,14 @@ function keysDeep(value: unknown): string[] {
 
 describe('ordinary-user response projections', () => {
   it('publishes prompt tools as single reviewed products with final customer prices', () => {
-    const payload = publicPromptToolsInfoPayload();
+    const payload = publicPromptToolsInfoPayload({
+      optimizeCredits: 0.2,
+      fissionPlanCredits: 3.2
+    });
     expect(keysDeep(payload).some(key => PRIVATE_KEY_PATTERN.test(key))).toBe(false);
     expect(payload.reverse).toMatchObject({ model: 'vision-lite', creditsPerCall: 2 });
-    expect(payload.fission).toMatchObject({ model: 'creative-fission', creditsPerPlanEstimate: 5 });
+    expect(payload.optimize).toMatchObject({ creditsPerCall: '0.2 积分' });
+    expect(payload.fission).toMatchObject({ model: 'creative-fission', creditsPerPlanEstimate: 3.2 });
   });
 
   it('keeps chat quotes and charged cost limited to the final retail amount', () => {

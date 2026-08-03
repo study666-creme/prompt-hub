@@ -17,6 +17,7 @@
 - Worker 唯一发布仓库是 `D:\prompt-hub`；`D:\canvas\prompt-hub` 只保留作历史生产审计，禁止从任一脏目录直接发布。
 - 修改 Worker、生成、支付、数据库或发布工具前必须阅读根目录 `AGENTS.md` 和 `docs/RECONCILE-20260726.md`；如果根目录存在 `DO-NOT-DEPLOY.md`，还必须先遵守其中的冻结条件。
 - 2026-08-03 已完成 `20260803a` 的数据库无迁移发布、New API/Cloudflare 核对、Worker/Pages 发布和生产验收；五项既有迁移保持不变。后续发布仍必须使用干净 SHA，并分别以 `/health.buildSha` 和线上 Pages build 取证。
+- 2026-08-03 的文字模型清理仍是未部署候选：资产工作台仅保留 `deepseek-v4-flash`、`deepseek-v4-pro`，两者统一读取实时目录并通过 New API 调用；生产是否切换仍以 `/health.buildSha` 为准。
 
 ## 文档时效纪律
 
@@ -48,6 +49,14 @@
 | 登录/同步 | `supabase-sync.js`、`cloud-sync-safety.js`、`sync-orchestrator.js` |
 | 后台 | `legacy/admin/`、`server/src/routes/admin/` |
 | Canvas/扩展 | `app-router.js`、`legacy/script/part-04.js`、`legacy/script/part-09.js`、`legacy/script/part-10.js`、`server/src/routes/v1/extension.ts`、`server/src/lib/extension-card.ts`、`docs/CANVAS-INTEGRATION.md` |
+
+## 文字模型边界（2026-08-03 未部署候选）
+
+- Prompt Hub 的 DeepSeek 公开号只允许 `deepseek-v4-flash` 和 `deepseek-v4-pro`。其余 DeepSeek 后缀型号以及 GLM 5.1 系列必须同时从公开模型投影和模型解析入口排除。
+- `/api/v1/chat/cost` 与 `POST /api/v1/chat` 都通过 `server/src/lib/newapi-text.ts` 强制读取新鲜目录；默认模型为 `deepseek-v4-flash`，提交时使用同一解析结果，不存在 Flash 直连特判。
+- 提示词优化固定选择 `deepseek-v4-flash`，裂变文字阶段固定选择 `deepseek-v4-pro`，但两者的可用性、调用目标和最终扣费同样来自实时目录。不要恢复 `CHAT_API_KEY`、`CHAT_API_BASE_URL`、`CHAT_MODEL` 或 `FISSION_CHAT_MODEL` 文字直连配置。
+- 当前目录最终价格应为两个模型各 `0.002 元/次`，对应 `0.2 积分/次`。前端只展示 `/api/v1/chat/cost` 返回值；不得恢复手工 token 价目表、旧积分估算或无目录价格时的本地兜底。
+- 新增文字模型只能先进入审核后的公共目录；不得把内部模型标识、渠道字段、API 基址或凭据写入浏览器资源、普通用户日志或错误响应。
 
 ## 当前生图与计费边界
 

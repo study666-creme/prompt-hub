@@ -153,6 +153,7 @@ const PUBLIC_LEDGER_MODEL_IDS = new Set([
   'creative-5-5',
   'creative-5-6',
   'deepseek-v4-flash',
+  'deepseek-v4-pro',
   'motion-video',
   'motion-video-1-5',
   'motion-video-1-5-fast'

@@ -450,7 +450,7 @@ adminDashboardRoutes.get('/infra', async c => {
       databasePing: dbPing,
       newApiConfigured: !!(c.env.NEWAPI_API_KEY?.trim()),
       midjourneyApiConfigured: !!(c.env.APIMART_API_KEY?.trim()),
-      chatApiConfigured: !!(c.env.CHAT_API_KEY?.trim()),
+      chatApiConfigured: !!(c.env.NEWAPI_API_KEY?.trim()),
       mediaStorageMode: c.env.MEDIA_STORAGE_MODE || 'supabase',
       storageQuotaMbEnv: quotaMb(c.env, 'SUPABASE_STORAGE_QUOTA_MB', 1024),
       dbQuotaMbEnv: quotaMb(c.env, 'SUPABASE_DB_QUOTA_MB', 500),

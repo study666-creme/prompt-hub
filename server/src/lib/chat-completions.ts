@@ -1,7 +1,9 @@
 import { ApiError } from './errors';
 
 function apiBase(envBase?: string): string {
-  return (envBase || 'https://api.deepseek.com').replace(/\/$/, '');
+  const value = String(envBase || '').trim();
+  if (!value) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '文字服务暂未配置');
+  return value.replace(/\/$/, '');
 }
 
 export type ChatToolCall = {
@@ -41,13 +43,13 @@ export function normalizeToolArguments(value: unknown): string {
   return String(value);
 }
 
-/** OpenAI 兼容的 /v1/chat/completions（DeepSeek 官方等） */
+/** OpenAI 兼容的 /v1/chat/completions。调用方必须显式提供目录解析后的模型。 */
 export async function submitChatCompletions(
   apiKey: string,
   baseUrl: string | undefined,
   params: {
     messages: ChatMessage[];
-    model?: string;
+    model: string;
     thinking?: boolean;
     reasoningEffort?: string;
     temperature?: number;
@@ -57,7 +59,7 @@ export async function submitChatCompletions(
   }
 ): Promise<ChatCompletionResult> {
   const body: Record<string, unknown> = {
-    model: params.model || 'deepseek-v4-flash',
+    model: params.model,
     messages: params.messages,
     temperature: params.temperature ?? 0.7,
     max_tokens: params.maxTokens ?? 2048,

@@ -2,18 +2,21 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Env } from '../../env';
 import { submitChatCompletions } from '../../lib/chat-completions';
+import { roundCredits } from '../../lib/credit-math';
 import {
-  computeChatCostFromTokens,
-  estimateChatCost,
-  estimateTokensFromText
-} from '../../lib/chat-pricing';
+  billableNewApiTextCredits,
+  estimateTextTokens,
+  fetchFreshNewApiTextModel,
+  fetchFreshNewApiTextModels,
+  newApiTextRequestTarget
+} from '../../lib/newapi-text';
 import { ApiError } from '../../lib/errors';
 import {
   deductUserCredits,
   spendableCredits,
   syncMembershipCredits
 } from '../../lib/membership-credits';
-import { createAdminClient, isMembershipActive } from '../../lib/supabase';
+import { createAdminClient } from '../../lib/supabase';
 import { submitVisionChat, resolveVisionApiBindings } from '../../lib/vision-chat';
 import { consumeInspirationDraw, INSPIRE_DRAW_DAILY_LIMIT } from '../../lib/inspiration-draw';
 import { rateLimit } from '../../middleware/rate-limit';
@@ -58,13 +61,12 @@ const FISSION_VISION_CREDITS = 3;
 const DEFAULT_FISSION_VISION_MODEL = 'gemini-2.5-flash';
 const FISSION_VISION_FALLBACK = 'gemini-2.5-flash-lite';
 /** 裂变策划：DeepSeek V4 Pro（比 Flash 更懂创意发散与 JSON 结构） */
-const FISSION_CHAT_PRICING_MODEL = 'deepseek-v4-pro';
-const DEFAULT_FISSION_CHAT_MODEL = 'deepseek-v4-pro';
+const FISSION_CHAT_MODEL = 'deepseek-v4-pro';
 /** 反推视觉模型：Apimart gemini-2.5-flash-lite（低成本，不用 gpt-4o 兜底以免亏本） */
 const DEFAULT_REVERSE_VISION_MODEL = 'gemini-2.5-flash-lite';
 const REVERSE_VISION_FALLBACK = 'gemini-2.5-flash';
-/** 优化走 DeepSeek 官方 CHAT_MODEL（wrangler 默认 deepseek-chat） */
-const OPTIMIZE_PRICING_MODEL = 'deepseek-v4-flash';
+/** 优化与公开对话共用 New API 的实时模型目录和线路。 */
+const OPTIMIZE_CHAT_MODEL = 'deepseek-v4-flash';
 
 const PUBLIC_PROMPT_TOOL_MODELS = {
   reverse: { model: 'vision-lite', modelLabel: '视觉理解 Lite' },
@@ -77,7 +79,12 @@ export function publicPromptToolIdentity(tool: keyof typeof PUBLIC_PROMPT_TOOL_M
   return { ...PUBLIC_PROMPT_TOOL_MODELS[tool] };
 }
 
-export function publicPromptToolsInfoPayload() {
+export function publicPromptToolsInfoPayload(pricing?: {
+  optimizeCredits?: number | null;
+  fissionPlanCredits?: number | null;
+}) {
+  const optimizeCredits = pricing?.optimizeCredits;
+  const fissionPlanCredits = pricing?.fissionPlanCredits;
   return {
     reverse: {
       ...publicPromptToolIdentity('reverse'),
@@ -86,12 +93,12 @@ export function publicPromptToolsInfoPayload() {
     },
     optimize: {
       ...publicPromptToolIdentity('optimize'),
-      creditsPerCall: '约 1～2 积分',
+      creditsPerCall: optimizeCredits == null ? null : `${optimizeCredits} 积分`,
       capabilities: ['提示词扩写', '结构与画面细节优化']
     },
     fission: {
       ...publicPromptToolIdentity('fission'),
-      creditsPerPlanEstimate: FISSION_VISION_CREDITS + 2,
+      creditsPerPlanEstimate: fissionPlanCredits ?? null,
       capabilities: ['图片风格分析', '多提示词裂变']
     },
     purify: {
@@ -191,9 +198,26 @@ function parseJsonPromptArray(raw: string, expected: number): string[] {
 export const promptToolsRoutes = new Hono<{ Bindings: Env }>();
 
 promptToolsRoutes.get('/info', async c => {
+  let pricing: Parameters<typeof publicPromptToolsInfoPayload>[0];
+  try {
+    const [optimizeModel, fissionModel] = await fetchFreshNewApiTextModels(c.env, [
+      OPTIMIZE_CHAT_MODEL,
+      FISSION_CHAT_MODEL
+    ]);
+    const optimizeCredits = billableNewApiTextCredits(optimizeModel.model, 1, 1);
+    const fissionChatCredits = billableNewApiTextCredits(fissionModel.model, 1, 1);
+    pricing = {
+      optimizeCredits,
+      fissionPlanCredits: fissionChatCredits == null
+        ? null
+        : roundCredits(FISSION_VISION_CREDITS + fissionChatCredits)
+    };
+  } catch {
+    pricing = undefined;
+  }
   return c.json({
     ok: true,
-    data: publicPromptToolsInfoPayload()
+    data: publicPromptToolsInfoPayload(pricing)
   });
 });
 
@@ -211,51 +235,50 @@ promptToolsRoutes.post('/optimize', rateLimit(90, 60_000), async c => {
     throw new ApiError(400, 'VALIDATION_ERROR', '请填写有效的提示词');
   }
 
-  const apiKey = c.env.CHAT_API_KEY;
-  if (!apiKey) {
-    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '优化服务暂未配置');
-  }
-
   const admin = createAdminClient(c.env);
   let profile = await syncMembershipCredits(admin, user.id);
-  const memberActive = isMembershipActive(profile);
-  const modelId = OPTIMIZE_PRICING_MODEL;
-  const upstreamModel = c.env.CHAT_MODEL || 'deepseek-chat';
+  const resolvedModel = await fetchFreshNewApiTextModel(c.env, OPTIMIZE_CHAT_MODEL);
+  const requestTarget = newApiTextRequestTarget(c.env, resolvedModel);
   const target = parsed.data.target || 'general';
   const messages = [
     { role: 'system' as const, content: OPTIMIZE_SYSTEM[target] || OPTIMIZE_SYSTEM.general },
     { role: 'user' as const, content: parsed.data.prompt.trim() }
   ];
 
-  const est = estimateChatCost(modelId, false, messages, profile.membership_tier, memberActive, 1024);
+  const estimatedInputTokens = estimateTextTokens(messages.map(message => message.content).join('\n'));
+  const estimatedCredits = billableNewApiTextCredits(
+    resolvedModel.model,
+    estimatedInputTokens,
+    1024
+  );
+  if (estimatedCredits == null) {
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认优化服务实时价格');
+  }
   const balance = spendableCredits(profile);
-  if (balance < est.final) {
-    throw new ApiError(402, 'INSUFFICIENT_CREDITS', `积分不足（预估 ${est.final}，当前 ${balance}）`);
+  if (balance < estimatedCredits) {
+    throw new ApiError(402, 'INSUFFICIENT_CREDITS', `积分不足（预估 ${estimatedCredits}，当前 ${balance}）`);
   }
 
   const toolId = `opt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-  const result = await submitChatCompletions(apiKey, c.env.CHAT_API_BASE_URL, {
-    model: upstreamModel,
+  const result = await submitChatCompletions(requestTarget.apiKey, requestTarget.baseUrl, {
+    model: requestTarget.model,
     messages,
     thinking: false
   });
 
-  const inputTokens = result.usage?.prompt_tokens ?? est.inputTokens;
-  const outputTokens = result.usage?.completion_tokens ?? estimateTokensFromText(result.content);
-  const cost = computeChatCostFromTokens(
-    modelId,
-    false,
+  const inputTokens = result.usage?.prompt_tokens ?? estimatedInputTokens;
+  const outputTokens = result.usage?.completion_tokens ?? estimateTextTokens(result.content);
+  const creditsCharged = billableNewApiTextCredits(
+    resolvedModel.model,
     inputTokens,
-    outputTokens,
-    profile.membership_tier,
-    memberActive
-  );
+    outputTokens
+  ) ?? estimatedCredits;
 
-  if (balance < cost.final) {
-    throw new ApiError(402, 'INSUFFICIENT_CREDITS', `积分不足（本次 ${cost.final}，当前 ${balance}）`);
+  if (balance < creditsCharged) {
+    throw new ApiError(402, 'INSUFFICIENT_CREDITS', `积分不足（本次 ${creditsCharged}，当前 ${balance}）`);
   }
 
-  const debited = await deductUserCredits(admin, user.id, cost.final, 'prompt_optimize', toolId, {
+  const debited = await deductUserCredits(admin, user.id, creditsCharged, 'prompt_optimize', toolId, {
     target,
     inputTokens,
     outputTokens
@@ -266,7 +289,7 @@ promptToolsRoutes.post('/optimize', rateLimit(90, 60_000), async c => {
     ok: true,
     data: {
       prompt: result.content,
-      creditsCharged: cost.final,
+      creditsCharged,
       creditsRemaining: spendableCredits(profile),
       ...publicPromptToolIdentity('optimize')
     }
@@ -423,10 +446,8 @@ promptToolsRoutes.post('/fission', rateLimit(40, 60_000), async c => {
   }
 
   const vision = resolveVisionApiBindings(c.env);
-  const chatApiKey = c.env.CHAT_API_KEY;
-  if (!chatApiKey) {
-    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '裂变服务暂未配置');
-  }
+  const resolvedChatModel = await fetchFreshNewApiTextModel(c.env, FISSION_CHAT_MODEL);
+  const chatRequestTarget = newApiTextRequestTarget(c.env, resolvedChatModel);
 
   const admin = createAdminClient(c.env);
   let profile = await syncMembershipCredits(admin, user.id);
@@ -438,9 +459,7 @@ promptToolsRoutes.post('/fission', rateLimit(40, 60_000), async c => {
     imageUrl = raw.startsWith('data:') ? raw : `data:image/jpeg;base64,${raw}`;
   }
 
-  const memberActive = isMembershipActive(profile);
   const fissionVisionModel = c.env.FISSION_VISION_MODEL || DEFAULT_FISSION_VISION_MODEL;
-  const fissionChatModel = c.env.FISSION_CHAT_MODEL || DEFAULT_FISSION_CHAT_MODEL;
   const chatMessages = [
     { role: 'system' as const, content: FISSION_CHAT_SYSTEM },
     {
@@ -448,15 +467,18 @@ promptToolsRoutes.post('/fission', rateLimit(40, 60_000), async c => {
       content: `美学 DNA：（分析完成后填入）\n\n请生成恰好 ${count} 条裂变变体提示词，JSON 数组输出。`
     }
   ];
-  const estChat = estimateChatCost(
-    FISSION_CHAT_PRICING_MODEL,
-    false,
-    chatMessages,
-    profile.membership_tier,
-    memberActive,
+  const estimatedChatInputTokens = estimateTextTokens(
+    chatMessages.map(message => message.content).join('\n')
+  );
+  const estimatedChatCredits = billableNewApiTextCredits(
+    resolvedChatModel.model,
+    estimatedChatInputTokens,
     2800
   );
-  const estTotal = FISSION_VISION_CREDITS + estChat.final;
+  if (estimatedChatCredits == null) {
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认裂变服务实时价格');
+  }
+  const estTotal = roundCredits(FISSION_VISION_CREDITS + estimatedChatCredits);
   const balance = spendableCredits(profile);
   if (balance < estTotal) {
     throw new ApiError(
@@ -499,26 +521,23 @@ promptToolsRoutes.post('/fission', rateLimit(40, 60_000), async c => {
     role: 'user',
     content: `美学 DNA：\n${dna}\n\n请生成恰好 ${count} 条裂变变体提示词，JSON 数组输出。${styleNote}`
   };
-  const chatResult = await submitChatCompletions(chatApiKey, c.env.CHAT_API_BASE_URL, {
-    model: fissionChatModel,
+  const chatResult = await submitChatCompletions(chatRequestTarget.apiKey, chatRequestTarget.baseUrl, {
+    model: chatRequestTarget.model,
     messages: chatMessages,
     thinking: false
   });
   const prompts = parseJsonPromptArray(chatResult.content, count);
 
   const inputTokens =
-    chatResult.usage?.prompt_tokens ?? estimateTokensFromText(chatMessages.map(m => m.content).join('\n'));
+    chatResult.usage?.prompt_tokens ?? estimateTextTokens(chatMessages.map(m => m.content).join('\n'));
   const outputTokens =
-    chatResult.usage?.completion_tokens ?? estimateTokensFromText(chatResult.content);
-  const chatCost = computeChatCostFromTokens(
-    FISSION_CHAT_PRICING_MODEL,
-    false,
+    chatResult.usage?.completion_tokens ?? estimateTextTokens(chatResult.content);
+  const chatCredits = billableNewApiTextCredits(
+    resolvedChatModel.model,
     inputTokens,
-    outputTokens,
-    profile.membership_tier,
-    memberActive
-  );
-  const creditsCharged = FISSION_VISION_CREDITS + chatCost.final;
+    outputTokens
+  ) ?? estimatedChatCredits;
+  const creditsCharged = roundCredits(FISSION_VISION_CREDITS + chatCredits);
   if (balance < creditsCharged) {
     throw new ApiError(
       402,
@@ -534,11 +553,9 @@ promptToolsRoutes.post('/fission', rateLimit(40, 60_000), async c => {
     'prompt_fission',
     toolId,
     {
-      vision: FISSION_VISION_CREDITS,
-      chat: chatCost.final,
       count: prompts.length,
       visionModel: fissionVisionModel,
-      chatModel: fissionChatModel
+      chatModel: FISSION_CHAT_MODEL
     }
   );
   profile = debited.profile;

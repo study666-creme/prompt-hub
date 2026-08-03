@@ -11,13 +11,10 @@ PUBLIC_SITE_URL = "https://prompt-hubs.com"
 CORS_ORIGINS = "https://prompt-hubs.com,https://www.prompt-hubs.com,https://canvas.prompt-hubs.com,https://canvas-next.prompt-hubs.com,https://infinite-canvas-jay.vercel.app,https://kachang-canvas-next.vercel.app,https://canvas-cn.prompt-hubs.com,https://prompt-hub.cn,https://www.prompt-hub.cn,https://prompt-hub-hub.pages.dev,https://prompt-hub-web.pages.dev"
 EPAY_CANVAS_SITE_URL = "https://canvas.prompt-hubs.com"
 CANVAS_COLLABORATION_SEAT_PRODUCT_ENABLED = "0"
-CHAT_API_BASE_URL = "https://api.deepseek.com"
-CHAT_MODEL = "deepseek-chat"
 NEWAPI_API_BASE_URL = "https://43-153-201-78.sslip.io"
 IMAGE_API_BASE_URL = "https://api.grsai.ai"
 REVERSE_VISION_MODEL = "gemini-2.5-flash-lite"
 FISSION_VISION_MODEL = "gemini-2.5-flash"
-FISSION_CHAT_MODEL = "deepseek-v4-pro"
 MEDIA_STORAGE_MODE = "r2-first"
 
 # 敏感项请用 wrangler secret put：
@@ -25,11 +22,10 @@ MEDIA_STORAGE_MODE = "r2-first"
 # 旧 prompt-hub.cn 自建路线见 docs/SUPABASE-PROXY-SETUP.md，勿把裸 IP 交给 Worker fetch
 # SUPABASE_SERVICE_ROLE_KEY
 # SUPABASE_JWT_SECRET（可选，用于本地 JWT 校验加速）
-# NEWAPI_API_KEY（全能模型2 / 香蕉；价格由卡藏 API 实时同步）
+# NEWAPI_API_KEY（文字、图片与视频模型；价格由模型目录实时同步）
 # NEWAPI_CATALOG_ADMIN_SECRET（仅后台查看卡藏 API 渠道映射）
 # APIMART_API_KEY（MJ 与视觉工具）
 # IMAGE_API_KEY / ITHINK_API_KEY / MOOKO_API_KEY 仅在仍需恢复对应历史任务时保留
-# CHAT_API_KEY（对话 · DeepSeek 官方 API Key）
 # ADMIN_API_SECRET（运营批量造激活码，见 scripts/generate-codes.ps1）
 
 # 图片桶与当前 r2-first 行为见 docs/R2-MIGRATION.md

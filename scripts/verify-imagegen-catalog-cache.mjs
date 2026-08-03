@@ -262,7 +262,9 @@ function assertPublicModelProjection(value, name) {
 
 function extractBetween(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
-  const end = source.indexOf(endMarker, start);
+  const normalizedEndMarker = endMarker.replaceAll('\n', '\r\n');
+  let end = source.indexOf(endMarker, start);
+  if (end < 0) end = source.indexOf(normalizedEndMarker, start);
   assert(start >= 0 && end > start, `unable to extract ${startMarker.trim()}`);
   return source.slice(start, end);
 }

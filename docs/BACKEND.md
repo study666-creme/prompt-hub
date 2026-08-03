@@ -1,6 +1,6 @@
 # Worker 后端架构
 
-最后核对：2026-08-03。`20260803a` 已上线；本文生图交付规则的运行版本以 `/health.buildSha` 为准。
+最后核对：2026-08-03。`20260803a` 已上线；本文同时记录未部署的文字模型候选，运行版本以 `/health.buildSha` 为准。
 
 ## 组件
 
@@ -9,7 +9,7 @@
 | 路由 | Hono + TypeScript | API、认证、CORS、错误与限流 |
 | 数据 | MemFire Postgres/Auth | 用户、积分、社区、任务和运营数据 |
 | 图片 | Cloudflare R2 + MemFire Storage | 上传、签名、缩略图、CDN 回源 |
-| 上游 | 卡藏 New API、DeepSeek | 全能模型2/香蕉/MJ、视觉与对话工具；Apimart 仅恢复历史任务 |
+| 模型服务 | 卡藏 New API、Apimart | 文字/图片/视频目录与提交；Apimart 仅用于视觉工具和历史任务 |
 | 队列 | Cloudflare Queues + cron | 图片和视频独立提交；poll、归档、退款与支付兜底 |
 | 监控 | Workers Observability + KV | 请求、5xx、图片 404、生成失败率与支付事件 |
 
@@ -54,9 +54,8 @@
 | `SUPABASE_URL` | Secret | MemFire Supabase-compatible API URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Secret | 服务端数据库权限 |
 | `SUPABASE_JWT_SECRET` | Secret，可选 | 本地 JWT 校验回退 |
-| `NEWAPI_API_KEY` | Secret | 全能模型2、香蕉与 MJ；目录和价格实时同步 |
-| `APIMART_API_KEY` | 历史兼容，可选 | 仅恢复已经落库的旧 Apimart 任务；新 MJ 任务不读取 |
-| `CHAT_API_KEY` | Secret | 对话/提示词工具 |
+| `NEWAPI_API_KEY` | Secret | 文字、图片与视频模型；目录和价格实时同步 |
+| `APIMART_API_KEY` | Secret | 视觉工具和历史任务；新 MJ 任务不读取 |
 | `ADMIN_API_SECRET` | Secret | 运营后台和造码脚本 |
 | `PAYMENT_WEBHOOK_SECRET` | Secret，可选 | 支付 webhook HMAC |
 | `EPAY_MERCHANT_ID`, `EPAY_MERCHANT_KEY` | Secret | EasyPay 商户鉴权 |
@@ -66,6 +65,13 @@
 | `MEDIA_STORAGE_MODE` | 普通变量 | `supabase` / `r2-first` / `r2` |
 
 `IMAGE_API_KEY`、`ITHINK_API_KEY`、`MOOKO_API_KEY` 仅用于恢复数据库中已经存在的旧 provider 任务，不进入新任务目录。确认没有对应历史任务后可从 Worker Secrets 删除。
+
+## 文字模型边界（2026-08-03 未部署候选）
+
+- 资产工作台只公开 `deepseek-v4-flash` 和 `deepseek-v4-pro` 两个精确名称。其他 DeepSeek 变体和 GLM 5.1 系列即使出现在远端目录中，也不得进入 Prompt Hub 的公开目录或解析路径。
+- `/api/v1/chat/cost`、`POST /api/v1/chat`、提示词优化和裂变文字阶段共用同一个实时模型目录解析器；报价、提交模型和可用状态来自同一快照，不再读取独立直连变量。
+- 两个模型按目录声明的最终 `0.002 元/次` 计价，Worker 按 `1 元 = 100 积分` 得到 `0.2 积分/次`。代码和前端不保留手工 token 单价或本地兜底价；目录或精确价格不可用时必须在提交前失败。
+- 文字请求必须显式提供目录解析后的 API 基址和模型；通用 OpenAI-compatible 客户端不允许猜测默认域名或默认模型。
 
 ## 图片模型边界
 
