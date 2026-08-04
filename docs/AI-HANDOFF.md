@@ -1,6 +1,6 @@
 # AI 接手说明
 
-最后核对：2026-08-04。生产发布目标为 `20260804a`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
+最后核对：2026-08-04。生产发布目标为 `20260804b`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
 
 ## 最小阅读顺序
 
@@ -16,7 +16,7 @@
 
 - Worker 唯一发布仓库是 `D:\prompt-hub`；`D:\canvas\prompt-hub` 只保留作历史生产审计，禁止从任一脏目录直接发布。
 - 修改 Worker、生成、支付、数据库或发布工具前必须阅读根目录 `AGENTS.md` 和 `docs/RECONCILE-20260726.md`；如果根目录存在 `DO-NOT-DEPLOY.md`，还必须先遵守其中的冻结条件。
-- 2026-08-04 的 `20260804a` 发布仅变更文字模型目录和调用链，不新增 Prompt Hub 数据库迁移；五项既有迁移保持不变。发布仍必须使用干净 SHA，并分别以 `/health.buildSha` 和线上 Pages build 取证。
+- `20260804a` 已发布文字模型目录收敛；`20260804b` 候选修正 MJ 动态目录解析并统一新任务到 New API，不新增 Prompt Hub 数据库迁移。五项既有迁移保持不变，发布仍必须使用干净 SHA 并以 `/health.buildSha` 取证；本轮不改 Pages。
 - 本次文字模型清理后，资产工作台仅保留 `deepseek-v4-flash`、`deepseek-v4-pro`，两者统一读取实时目录并通过 New API 调用。New API 的公开目录、定价和带服务令牌的 `/v1/models` 已确认只返回这两个短名、各 `0.002 元/次`，且不返回 GLM 5.1 或内部模型标识。
 
 ## 文档时效纪律
@@ -61,6 +61,7 @@
 ## 当前生图与计费边界
 
 - 新任务只允许卡藏 API 的全能模型2、香蕉和 MJ 8.1 / MJ 7 / Niji 7；所有公开 MJ 均为 New API provider，固定 `relax`、40 积分/次，旧 Apimart provider 只恢复历史任务。
+- 已核验 New API `capability_version=2026-08-04.2` 的三个 MJ 公开号均为按次 0.4 元 / 40 积分；动态目录解析必须为 MJ 保留固定内部 `1k` 占位，不得把质量档 `0.25/0.5/1/2` 当作分辨率而丢弃模型。
 - New API MJ 完成态必须包含四宫格封面和 4 张单图。Worker 直接消费 `/v1/tasks/:taskId` 返回的五个 URL，不得为了新任务读取 `APIMART_API_KEY` 或补查 Apimart 详情。
 - 卡藏 API 图片报价已经包含其加价，必须从上游人民币字段按 `1 元 = 100 积分`直接换算；不能再次加价、信任上游 credits 字段或复制一份手工积分表。
 - `gpt-image-2-chat` 是内部兼容 ID，统一归一化到公开模型 `image2-economy`；不要根据旧别名硬编码端点或能力，参数必须来自实时目录，当前支持比例和可选参考图。

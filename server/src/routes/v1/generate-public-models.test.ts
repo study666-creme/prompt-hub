@@ -34,7 +34,7 @@ describe('public image model projection', () => {
     expect(mjModels[0]?.parameters).toContainEqual(expect.objectContaining({
       name: 'resolution',
       label: '清晰度',
-      options: ['1k', '2k']
+      options: ['1k']
     }));
     expect(mjModels[0]?.parameters).toContainEqual(expect.objectContaining({
       name: 'speed',

@@ -287,6 +287,42 @@ describe('newapi image upstream', () => {
     expect(textModel && newApiTextCreditsForUsage(textModel, 100_000, 10_000)).toBe(1.6);
   });
 
+  it('keeps live Midjourney quality models in the New API image catalog', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      success: true,
+      version: 'mj-catalog-1',
+      pricing_version: 'mj-pricing-1',
+      models: [publicImageCatalogFixture({
+        id: 'mj-v81',
+        label: 'Midjourney 8.1',
+        tags: 'image,midjourney,per-request',
+        order: 50,
+        quality: { options: ['0.25', '0.5', '1', '2'] },
+        pricing: { mode: 'fixed', unit: 'request', currency: 'CNY', yuan: 0.4, credits: 40 }
+      })]
+    })));
+
+    const snapshot = await fetchNewApiModelCatalog('https://midjourney-catalog.test/v1', { force: true });
+    expect(snapshot.imageCatalogEntries).toEqual([
+      expect.objectContaining({
+        id: 'mj-v81',
+        provider: 'newapi',
+        upstream: 'mj-v81',
+        uiFamily: 'midjourney',
+        resolutions: ['1k'],
+        defaultCredits: 40,
+        upstreamPoints: 0.4
+      })
+    ]);
+    expect(publicNewApiCatalogModels(snapshot).find(model => model.id === 'mj-v81')).toMatchObject({
+      id: 'mj-v81',
+      pricing: { unit: 'request', credits: 40 },
+      parameters: expect.arrayContaining([
+        expect.objectContaining({ name: 'quality', options: ['0.25', '0.5', '1', '2'] })
+      ])
+    });
+  });
+
   it('builds all ten live image entries and prices from the production public catalog shape', async () => {
     const models = [
       publicImageCatalogFixture({
@@ -971,10 +1007,10 @@ describe('newapi image upstream', () => {
     const fetchMock = vi.fn(async (_url, init) => {
       const body = JSON.parse(String((init as RequestInit).body || '{}')) as Record<string, unknown>;
       expect(body).toEqual({
-        model: 'mj-v8.1',
+        model: 'mj-v81',
         prompt: 'cinematic city',
         size: '16:9',
-        quality: '2k',
+        quality: '1',
         image_urls: ['https://ref.test/a.png'],
         stylize: 0,
         chaos: 0,
@@ -986,18 +1022,18 @@ describe('newapi image upstream', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
-      upstreamModel: 'mj-v8.1',
+      upstreamModel: 'mj-v81',
       prompt: 'cinematic city',
-      resolution: '2k',
+      resolution: '1k',
       quality: 'standard',
       size: '16:9',
       refImageUrls: ['https://ref.test/a.png'],
       mjParams: { stylize: 0, chaos: 0, weird: 0, speed: 'turbo' },
       catalogParameters: [
-        { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: 'mj-v8.1' },
+        { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: 'mj-v81' },
         { name: 'prompt', path: 'prompt', label: '提示词', type: 'string', required: true },
         { name: 'size', path: 'size', label: '画面比例', type: 'string', required: false },
-        { name: 'quality', path: 'quality', label: '清晰度', type: 'string', required: false, options: ['1k', '2k'] },
+        { name: 'quality', path: 'quality', label: '质量', type: 'string', required: false, default: '1', options: ['0.25', '0.5', '1', '2'] },
         { name: 'image_urls', path: 'image_urls', label: '参考图', type: 'array', required: false, max_items: 5 },
         { name: 'stylize', path: 'stylize', label: '风格化', type: 'number', required: false, min: 0, max: 1000 },
         { name: 'chaos', path: 'chaos', label: '混乱度', type: 'number', required: false, min: 0, max: 100 },

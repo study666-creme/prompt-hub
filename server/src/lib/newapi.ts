@@ -796,14 +796,8 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
       || pricing.credits == null
       || pricing.credits < 0
     ) continue;
-    const resolutions: ('1k' | '2k' | '4k')[] = isChatImage
+    const resolutions: ('1k' | '2k' | '4k')[] = isChatImage || isMidjourneyImage
       ? ['1k']
-      : isMidjourneyImage
-        ? resolutionOptions(parameters.map(parameter => (
-            parameter.name === 'quality' || parameter.path === 'quality'
-              ? { ...parameter, name: 'resolution', path: 'resolution' }
-              : parameter
-          )), upstreamModel)
       : resolutionOptions(parameters, upstreamModel);
     if (upstreamModel === 'gpt-image-2-ext' && !resolutions.includes('1k')) {
       resolutions.unshift('1k');

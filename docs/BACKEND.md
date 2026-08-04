@@ -1,6 +1,6 @@
 # Worker 后端架构
 
-最后核对：2026-08-04。生产发布目标为 `20260804a`；运行版本以 `/health.buildSha` 为准。
+最后核对：2026-08-04。生产发布目标为 `20260804b`；运行版本以 `/health.buildSha` 为准。
 
 ## 组件
 
@@ -83,6 +83,7 @@
 - `gpt-image-2-chat` 是服务端兼容别名，统一归一化到公开模型 `image2-economy`；不要根据别名硬编码端点或能力，当前参数以实时目录为准并支持比例和可选参考图。
 - 运营后台的调用链路由卡藏 API `/api/model-catalog/admin/routes` 提供，并使用 `NEWAPI_CATALOG_ADMIN_SECRET` 与服务端共享密钥鉴权；公开 `/api/model-catalog` 不包含真实渠道信息。
 - MJ 8.1、MJ 7 和 Niji 7 与其他公开图片型号一样通过卡藏 New API 提交；固定常规 `relax` 档，单次 40 积分（0.4 元），不公开 Fast / Turbo。
+- New API `capability_version=2026-08-04.2` 已核验同时公开 `mj-v81`、`mj-v7`、`mj-niji7`；Worker 必须把这类按次图片型号保留在动态图片目录中，不能把 `quality=0.25/0.5/1/2` 误判成 `resolution` 后过滤。
 - MJ 完成结果固定保留四宫格封面和 4 张单图。New API 的 `/v1/tasks/:taskId` 是新任务唯一查询来源；仅历史 `provider=apimart` 任务继续使用旧详情查询。
 - 旧 GrsAI、iThink、Mooko 和 Apimart 型号只能恢复历史任务，不能通过后台重新上架。新 New API MJ 任务不返回仍会直连旧上游的二次操作按钮。
 

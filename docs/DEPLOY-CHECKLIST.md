@@ -4,7 +4,7 @@
 
 ## 当前发布状态
 
-本次生产发布目标为 `20260804a`。它保留 `20260803a` 的 New API 生图 durable queue、完成态交付、缩略图加载、卡片库稳定 Grid 和生图分页布局，并将文字模型收敛到实时目录中的 `deepseek-v4-flash` 与 `deepseek-v4-pro`；五项既有 Prompt Hub 数据库迁移未改变。
+本次生产发布目标为 `20260804b`。它保留 `20260804a` 的文字模型收敛和既有生图 durable queue，并让 `mj-v81`、`mj-v7`、`mj-niji7` 从 New API 实时目录进入卡片仓库；固定 Relax、40 积分/次，旧直连只服务历史任务。五项既有 Prompt Hub 数据库迁移未改变，本轮不发布 Pages。
 
 ## 发布顺序
 
@@ -16,7 +16,7 @@
 
 ### 2. 核对 New API 前置版本
 
-New API 必须先支持当前规范化契约：稳定幂等键、公开模型与真实渠道映射、比例格式转换、固定参数模型忽略无效可选字段，以及独立的 `quality` / `resolution` 语义。文字模型发布还必须确认 `/api/pricing`、`/api/model-catalog` 与带普通服务令牌的 `/v1/models` 只公开两个 DeepSeek 短名和最终价格，不包含 GLM 5.1、内部模型标识或路由字段。未完成此前置条件时不得部署 Prompt Hub 候选。
+New API 必须先支持当前规范化契约：稳定幂等键、公开模型与真实渠道映射、比例格式转换、固定参数模型忽略无效可选字段，以及独立的 `quality` / `resolution` 语义。`20260804b` 还要求 `/api/pricing` 和 `/api/model-catalog?refresh=1` 返回 `mj-v81`、`mj-v7`、`mj-niji7`，目录能力版本为 `2026-08-04.2`，每个模型均为 0.4 元 / 40 积分/次、`n=1`、`speed=relax`、固定五图输出，且公开响应不包含内部路由信息。未完成此前置条件时不得部署 Prompt Hub 候选。
 
 ### 3. 创建和核对 Cloudflare 资源
 

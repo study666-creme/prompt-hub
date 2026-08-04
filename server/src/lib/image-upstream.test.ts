@@ -97,7 +97,7 @@ describe('image model catalog', () => {
     expect(retained.some((model) => model.id === 'image2-economy')).toBe(true);
     expect(retained.some((model) => model.id === 'image2-free')).toBe(false);
     expect(retained.filter((model) => model.uiFamily === 'midjourney')).toEqual([
-      expect.objectContaining({ id: 'mj-v81', provider: 'newapi', defaultCredits: 40 }),
+      expect.objectContaining({ id: 'mj-v81', provider: 'newapi', upstream: 'mj-v81', defaultCredits: 40 }),
       expect.objectContaining({ id: 'mj-v7', provider: 'newapi', defaultCredits: 40 }),
       expect.objectContaining({ id: 'mj-niji7', provider: 'newapi', defaultCredits: 40 })
     ]);
