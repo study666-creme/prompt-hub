@@ -1,6 +1,6 @@
 # 运营监控
 
-最后核对：2026-08-03。本文的生成状态字段和图片交付监控已随 `20260803a` 上线；运行版本继续以 `/health.buildSha` 为准。
+最后核对：2026-08-06。New API 上游已迁移到稳定服务域名；运行版本继续以 `/health.buildSha` 为准。
 
 ## 入口
 
@@ -11,6 +11,8 @@
 `/health` 必须返回 `ok`、`status`、`buildSha` 和支付配置摘要。正式发布的 `buildSha` 应是 40 位小写 Git SHA；`unversioned` 只允许本地开发出现。
 
 ## 生成监控
+
+`NEWAPI_API_BASE_URL` 必须为 `https://newapi.prompt-hubs.com`，不能固定当前解析 IP 或 `sslip.io` 临时域名。巡检 `GET /api/v1/generate/models` 时同时确认 `catalogStale=false`、`catalogVersion` 非空；若目录退回 stale，先只读检查稳定域名的 `/api/model-catalog?refresh=1` 和 Worker binding，不得用付费 POST 反复探活。
 
 ### 图片
 

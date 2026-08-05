@@ -1,10 +1,10 @@
 # 部署与验证清单
 
-最后核对：2026-08-04
+最后核对：2026-08-06
 
 ## 当前发布状态
 
-本次生产发布目标为 `20260804b`。它保留 `20260804a` 的文字模型收敛和既有生图 durable queue，并让 `mj-v81`、`mj-v7`、`mj-niji7` 从 New API 实时目录进入卡片仓库；固定 Relax、40 积分/次，旧直连只服务历史任务。五项既有 Prompt Hub 数据库迁移未改变，本轮不发布 Pages。
+本次生产发布目标为 `20260806a`。它保留 `20260804b` 的目录、计费、幂等队列和未知结果退款契约，只把 Worker 的 `NEWAPI_API_BASE_URL` 从已停机的旧 `sslip.io` 主机迁移到 `https://newapi.prompt-hubs.com`。五项既有 Prompt Hub 数据库迁移未改变，本轮不发布 Pages。
 
 ## 发布顺序
 
@@ -16,7 +16,7 @@
 
 ### 2. 核对 New API 前置版本
 
-New API 必须先支持当前规范化契约：稳定幂等键、公开模型与真实渠道映射、比例格式转换、固定参数模型忽略无效可选字段，以及独立的 `quality` / `resolution` 语义。`20260804b` 还要求 `/api/pricing` 和 `/api/model-catalog?refresh=1` 返回 `mj-v81`、`mj-v7`、`mj-niji7`，目录能力版本为 `2026-08-04.2`，每个模型均为 0.4 元 / 40 积分/次、`n=1`、`speed=relax`、固定五图输出，且公开响应不包含内部路由信息。未完成此前置条件时不得部署 Prompt Hub 候选。
+New API 必须先支持当前规范化契约：稳定幂等键、公开模型与真实渠道映射、比例格式转换、固定参数模型忽略无效可选字段，以及独立的 `quality` / `resolution` 语义。`https://newapi.prompt-hubs.com/api/model-catalog?refresh=1` 必须返回实时、非空版本和 `capability_version=2026-08-04.2`；目录仍需包含 `mj-v81`、`mj-v7`、`mj-niji7`，每个模型均为 0.4 元 / 40 积分/次、`n=1`、`speed=relax`、固定五图输出，且公开响应不包含内部路由信息。`server/wrangler.toml` 不得保存裸 IP 或 `sslip.io` 临时主机名。未完成此前置条件时不得部署 Prompt Hub 候选。
 
 ### 3. 创建和核对 Cloudflare 资源
 
@@ -73,7 +73,7 @@ node scripts\run-index-local-http-smoke.mjs
 
 ### 6. 解冻、dry-run 与迁移
 
-数据库没有新增迁移。审查全部工作树改动后重新运行 `scripts/bump-build.ps1`，将 build 变更和状态文档提交为同一个干净发布 SHA，随后运行：
+数据库没有新增迁移。`20260806a` 是 Worker-only 发布，不递增 Pages build；将 Worker 配置、回归测试和状态文档提交为同一个干净发布 SHA，随后运行：
 
 ```powershell
 cd D:\prompt-hub\server
@@ -84,17 +84,14 @@ npm run deploy:dry-run
 
 ### 7. 正式发布
 
-从上述同一个干净 SHA 运行：
+从上述同一个干净 SHA 运行 Worker 发布：
 
 ```powershell
 cd D:\prompt-hub\server
 npm run deploy
-
-cd D:\prompt-hub
-.\deploy-pages.ps1
 ```
 
-两个受控脚本都拒绝脏工作区或残留冻结标记。Worker 自动注入当前 40 位 Git SHA；Pages 明确发布到 `main` production 分支并记录同一 release SHA，且不会在发布脚本内再次修改 build。Pages 上传后会重试自定义域名冒烟，传播窗口结束仍失败则命令返回非零。
+Worker 受控脚本拒绝脏工作区或残留冻结标记，并自动注入当前 40 位 Git SHA。本轮不运行 `deploy-pages.ps1`；若另一个发布同时包含 Pages 改动，仍须先递增 Pages build、提交并从同一干净 SHA 使用 Pages 受控脚本发布。
 
 ### 8. 生产验收
 

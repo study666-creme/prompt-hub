@@ -1,6 +1,6 @@
 # Worker 后端架构
 
-最后核对：2026-08-04。生产发布目标为 `20260804b`；运行版本以 `/health.buildSha` 为准。
+最后核对：2026-08-06。生产发布目标为 `20260806a`；本轮只将 Worker 的 New API 上游迁移到稳定服务域名，运行版本以 `/health.buildSha` 为准。
 
 ## 组件
 
@@ -55,6 +55,7 @@
 | `SUPABASE_SERVICE_ROLE_KEY` | Secret | 服务端数据库权限 |
 | `SUPABASE_JWT_SECRET` | Secret，可选 | 本地 JWT 校验回退 |
 | `NEWAPI_API_KEY` | Secret | 文字、图片与视频模型；目录和价格实时同步 |
+| `NEWAPI_API_BASE_URL` | 普通变量 | 固定为 `https://newapi.prompt-hubs.com`；不得绑定裸 IP 或 `sslip.io` 临时主机名 |
 | `APIMART_API_KEY` | Secret | 视觉工具和历史任务；新 MJ 任务不读取 |
 | `ADMIN_API_SECRET` | Secret | 运营后台和造码脚本 |
 | `PAYMENT_WEBHOOK_SECRET` | Secret，可选 | 支付 webhook HMAC |
@@ -65,6 +66,8 @@
 | `MEDIA_STORAGE_MODE` | 普通变量 | `supabase` / `r2-first` / `r2` |
 
 `IMAGE_API_KEY`、`ITHINK_API_KEY`、`MOOKO_API_KEY` 仅用于恢复数据库中已经存在的旧 provider 任务，不进入新任务目录。确认没有对应历史任务后可从 Worker Secrets 删除。
+
+2026-08-06 迁移核验中，稳定域名解析到新服务器并能返回实时模型目录；旧地址 `43.153.201.78` 的 80/443 端口均已停止服务。Worker 必须通过稳定域名访问 New API，使后续主机迁移只需更新 DNS/TLS，不再要求重新发布 Prompt Hub 才能追随 IP 变化。
 
 ## 文字模型边界（2026-08-04 发布契约）
 
