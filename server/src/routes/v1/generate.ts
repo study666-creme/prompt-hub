@@ -1005,7 +1005,7 @@ export function publicGenerationCatalogMeta(catalog: {
 }) {
   return {
     catalogVersion: catalog.version || null,
-    pricingVersion: catalog.pricingVersion || null,
+    pricingVersion: catalog.pricingVersion || catalog.version || null,
     catalogStale: catalog.stale
   };
 }

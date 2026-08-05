@@ -12,7 +12,7 @@ describe('public image model projection', () => {
       stale: false
     })).toEqual({
       catalogVersion: 'catalog-v1',
-      pricingVersion: null,
+      pricingVersion: 'catalog-v1',
       catalogStale: false
     });
   });

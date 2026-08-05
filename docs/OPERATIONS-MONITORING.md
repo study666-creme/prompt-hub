@@ -12,7 +12,7 @@
 
 ## 生成监控
 
-`NEWAPI_API_BASE_URL` 必须为 `https://newapi.prompt-hubs.com`，不能固定当前解析 IP 或 `sslip.io` 临时域名。巡检 `GET /api/v1/generate/models` 时同时确认 `catalogStale=false`、`catalogVersion` 非空；若目录退回 stale，先只读检查稳定域名的 `/api/model-catalog?refresh=1` 和 Worker binding，不得用付费 POST 反复探活。
+`NEWAPI_API_BASE_URL` 必须为 `https://newapi.prompt-hubs.com`，不能固定当前解析 IP 或 `sslip.io` 临时域名。巡检 `GET /api/v1/generate/models` 时同时确认 `catalogStale=false`、`catalogVersion` 与 `pricingVersion` 非空；新服务未单独发布价格版本时，后者等于覆盖完整价格负载的目录版本。若目录退回 stale，先只读检查稳定域名的 `/api/model-catalog?refresh=1` 和 Worker binding，不得用付费 POST 反复探活。
 
 ### 图片
 
