@@ -998,6 +998,18 @@ async function assertNewApiRouteAvailable(
   }
 }
 
+export function publicGenerationCatalogMeta(catalog: {
+  version: string;
+  pricingVersion: string;
+  stale: boolean;
+}) {
+  return {
+    catalogVersion: catalog.version || null,
+    pricingVersion: catalog.pricingVersion || null,
+    catalogStale: catalog.stale
+  };
+}
+
 export async function publicGenerationModelsHandler(c: Context<{ Bindings: Env }>) {
   const admin = createAdminClient(c.env);
   const bypassResponseCache = c.req.query('refresh') === '1';
@@ -1013,6 +1025,7 @@ export async function publicGenerationModelsHandler(c: Context<{ Bindings: Env }
   return c.json({
     ok: true,
     data: {
+      ...publicGenerationCatalogMeta(newApiCatalog),
       models: publicModelPayload(settings, null, false, {
         newApiCatalog,
         newApiRoutes

@@ -2,9 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { mergeImageModelSettings } from '../../lib/image-model-settings';
 import { NEWAPI_IMAGE_MODEL_CATALOG } from '../../lib/image-models-catalog';
 import type { NewApiAdminRouteSnapshot } from '../../lib/newapi';
-import { publicModelPayload } from './generate';
+import { publicGenerationCatalogMeta, publicModelPayload } from './generate';
 
 describe('public image model projection', () => {
+  it('publishes catalog freshness metadata for production monitoring', () => {
+    expect(publicGenerationCatalogMeta({
+      version: 'catalog-v1',
+      pricingVersion: '',
+      stale: false
+    })).toEqual({
+      catalogVersion: 'catalog-v1',
+      pricingVersion: null,
+      catalogStale: false
+    });
+  });
+
   it('uses neutral MJ ids and omits private routing fields', () => {
     const models = publicModelPayload(
       { globalDiscountPercent: 100, models: {} },
