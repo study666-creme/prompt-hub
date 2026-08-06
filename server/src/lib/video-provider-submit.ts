@@ -431,7 +431,7 @@ export async function processVideoPendingSubmit(
   const initialState = String(initialMeta.videoSubmitState || '');
   if (initialState !== 'awaiting_debit' && initialState !== 'queued') return 'ignored';
 
-  const apiKey = env.NEWAPI_API_KEY?.trim();
+  const apiKey = env.NEWAPI_VIDEO_API_KEY?.trim();
   if (!apiKey) return 'retry';
   const now = options.now?.() ?? new Date();
   const pending = initialState === 'awaiting_debit'

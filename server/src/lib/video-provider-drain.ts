@@ -7,7 +7,7 @@ export async function drainVideoPendingSubmits(
   env: Env,
   opts?: { maxSubmit?: number }
 ): Promise<{ submitted: number; queued: number }> {
-  if (!env.NEWAPI_API_KEY?.trim()) return { submitted: 0, queued: 0 };
+  if (!env.NEWAPI_VIDEO_API_KEY?.trim()) return { submitted: 0, queued: 0 };
   const admin = createAdminClient(env);
   const { data, error } = await admin
     .from('generation_requests')

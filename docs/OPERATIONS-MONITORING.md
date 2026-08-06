@@ -22,6 +22,7 @@
 
 ### 视频
 
+- `NEWAPI_VIDEO_API_KEY` 必须单独存在并固定绑定 `视频模型` 分组；不要与文字/图片的 `NEWAPI_API_KEY` 共用，也不要配置为 `auto`。
 - 图片和视频队列必须分别查看，视频慢建单不能挤占图片 consumer。
 - `queued` 长时间堆积表示视频 queue binding、consumer 或 cron 异常。
 - `submitted` 且有 `upstreamTaskId` 的正常 processing 任务可以排队数百或数千秒，不应仅按生成时长判失败。

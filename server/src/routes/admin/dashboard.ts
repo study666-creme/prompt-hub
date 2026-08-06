@@ -449,6 +449,7 @@ adminDashboardRoutes.get('/infra', async c => {
       databaseServiceKeyLooksValid: serviceKeyOk,
       databasePing: dbPing,
       newApiConfigured: !!(c.env.NEWAPI_API_KEY?.trim()),
+      newApiVideoConfigured: !!(c.env.NEWAPI_VIDEO_API_KEY?.trim()),
       midjourneyApiConfigured: !!(c.env.APIMART_API_KEY?.trim()),
       chatApiConfigured: !!(c.env.NEWAPI_API_KEY?.trim()),
       mediaStorageMode: c.env.MEDIA_STORAGE_MODE || 'supabase',

@@ -1,6 +1,6 @@
 # Worker 后端架构
 
-最后核对：2026-08-06。生产发布目标为 `20260806a`；本轮只将 Worker 的 New API 上游迁移到稳定服务域名，运行版本以 `/health.buildSha` 为准。
+最后核对：2026-08-06。生产发布目标为 `20260806b`；本轮在稳定 New API 服务域名上将视频与文字/图片 Key 分离，运行版本以 `/health.buildSha` 为准。
 
 ## 组件
 
@@ -54,7 +54,8 @@
 | `SUPABASE_URL` | Secret | MemFire Supabase-compatible API URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Secret | 服务端数据库权限 |
 | `SUPABASE_JWT_SECRET` | Secret，可选 | 本地 JWT 校验回退 |
-| `NEWAPI_API_KEY` | Secret | 文字、图片与视频模型；目录和价格实时同步 |
+| `NEWAPI_API_KEY` | Secret | 文字与图片模型；固定绑定其审核分组，目录和价格实时同步 |
+| `NEWAPI_VIDEO_API_KEY` | Secret | 视频模型；固定绑定 `视频模型` 分组，不回退到文字/图片 Key |
 | `NEWAPI_API_BASE_URL` | 普通变量 | 固定为 `https://newapi.prompt-hubs.com`；不得绑定裸 IP 或 `sslip.io` 临时主机名 |
 | `APIMART_API_KEY` | Secret | 视觉工具和历史任务；新 MJ 任务不读取 |
 | `ADMIN_API_SECRET` | Secret | 运营后台和造码脚本 |
@@ -97,6 +98,7 @@ cd D:\prompt-hub\server
 npm exec wrangler secret put SUPABASE_URL
 npm exec wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 npm exec wrangler secret put NEWAPI_API_KEY
+npm exec wrangler secret put NEWAPI_VIDEO_API_KEY
 ```
 
 ## 数据写入边界
@@ -119,6 +121,8 @@ npm exec wrangler secret put NEWAPI_API_KEY
 这一桥接契约属于 `20260730a` Prompt Hub 侧发布；Canvas 侧消费深链和调用结果回仓接口仍是跨仓库依赖，只有两侧按同一协议上线后才能宣称端到端可用。
 
 ## 视频生成生命周期
+
+视频建单、状态查询、内容下载、队列 consumer 与 cron 兜底统一使用 `NEWAPI_VIDEO_API_KEY`。该 Key 必须在 New API 中固定绑定 `视频模型` 分组；即使 `NEWAPI_API_KEY` 已配置，视频链路也不得回退使用它。
 
 1. `POST /api/v1/video` 校验实时目录和报价，以 `clientRequestId` 幂等创建任务并原子扣费。
 2. 任务写入持久 `queued` outbox 后投递 `VIDEO_GENERATION_QUEUE`；队列发送不确定时，cron 只重新投递仍为 `queued` 的记录。

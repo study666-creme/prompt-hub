@@ -4,7 +4,7 @@
 
 ## 当前发布状态
 
-本次生产发布目标为 `20260806a`。它保留 `20260804b` 的目录、计费、幂等队列和未知结果退款契约，只把 Worker 的 `NEWAPI_API_BASE_URL` 从已停机的旧 `sslip.io` 主机迁移到 `https://newapi.prompt-hubs.com`。五项既有 Prompt Hub 数据库迁移未改变，本轮不发布 Pages。
+本次生产发布目标为 `20260806b`。它保留 `20260806a` 的稳定 New API 服务入口以及既有目录、计费、幂等队列和未知结果退款契约，将视频调用切换到独立 `视频模型` Key。五项既有 Prompt Hub 数据库迁移未改变，本轮不发布 Pages。
 
 ## 发布顺序
 
@@ -39,6 +39,7 @@ npx --yes wrangler@4.114.0 queues create prompt-hub-video-generation-dlq
 - `PROMPT_HUB_METRICS`
 - `IMAGE_GENERATION_QUEUE` 与图片 DLQ
 - `VIDEO_GENERATION_QUEUE` 与视频 DLQ
+- `NEWAPI_VIDEO_API_KEY` Secret 已存在且对应固定 `视频模型` 分组；视频链路不得回退到 `NEWAPI_API_KEY`
 - `*/2 * * * *` cron
 - 两个自定义域名、完整 `[vars]` 和 CORS 列表
 
@@ -73,7 +74,7 @@ node scripts\run-index-local-http-smoke.mjs
 
 ### 6. 解冻、dry-run 与迁移
 
-数据库没有新增迁移。`20260806a` 是 Worker-only 发布，不递增 Pages build；将 Worker 配置、回归测试和状态文档提交为同一个干净发布 SHA，随后运行：
+Prompt Hub 数据库没有新增迁移。`20260806b` 是 Worker-only 发布，不递增 Pages build；将 Worker 配置、回归测试和状态文档提交为同一个干净发布 SHA，随后运行：
 
 ```powershell
 cd D:\prompt-hub\server
