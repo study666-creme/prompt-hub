@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   assertQuotedGenerationCost,
   assertSupportedImageParameters,
+  generationImageReferences,
   isCanvasOriginMeta,
   parseImageGenerationRequestBody,
+  parseGenerationImageResultIndex,
   publicGenerationRequestLookupPayload,
   resolveSupportedImageCount
 } from './generate';
@@ -162,5 +164,46 @@ describe('generation request recovery projection', () => {
     });
     expect(JSON.stringify(payload)).not.toContain('private');
     expect(JSON.stringify(payload)).not.toContain('routeChannelId');
+  });
+});
+
+describe('Canvas generation artifact media routing', () => {
+  it('keeps the Midjourney cover and four individual images in stable artifact order', () => {
+    const cover = 'storage://card-images/user-1/generated/mj-cover.jpg';
+    const tiles = [1, 2, 3, 4].map(index => `storage://card-images/user-1/generated/mj-${index}.jpg`);
+
+    expect(generationImageReferences({
+      result_image_url: cover,
+      meta: {
+        isMidjourney: true,
+        mjGalleryUrls: [cover, ...tiles],
+        mjGridUrls: tiles
+      }
+    })).toEqual([cover, ...tiles]);
+  });
+
+  it('keeps ordinary batch results distinct after the primary image', () => {
+    expect(generationImageReferences({
+      result_image_url: 'https://images.test/primary.png',
+      meta: {
+        extraImageUrls: [
+          'https://images.test/primary.png',
+          'https://images.test/second.png',
+          'https://images.test/third.png'
+        ]
+      }
+    })).toEqual([
+      'https://images.test/primary.png',
+      'https://images.test/second.png',
+      'https://images.test/third.png'
+    ]);
+  });
+
+  it('only accepts bounded integer artifact indexes', () => {
+    expect(parseGenerationImageResultIndex(undefined)).toBe(0);
+    expect(parseGenerationImageResultIndex('4')).toBe(4);
+    for (const invalid of ['-1', '1.5', '08', '8', 'hello']) {
+      expect(() => parseGenerationImageResultIndex(invalid)).toThrow('图片结果序号无效');
+    }
   });
 });

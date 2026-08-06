@@ -330,6 +330,7 @@ const LEGACY_MODEL_MAP: Record<string, string> = {
   'gpt-image-2-4k-fast': 'image2-4k-fast',
   'gpt-image-2-4k-adobe': 'image2-4k-fast',
   'gpt-image-2-vip': 'image2-pro',
+  'gpt-image-2-ext': 'image2-pro',
   jimeng: 'lingtu-pro',
   'nano-banana-fast': 'lingtu-fast',
   'nano-banana-2-lite': 'lingtu-lite',

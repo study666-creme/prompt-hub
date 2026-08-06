@@ -85,10 +85,12 @@
 - 图片报价和提交读取普通 `/api/model-catalog`，进程内以 single-flight 合并并发请求；完整且精确匹配模型价格的 LKG 最多可信 5 分钟，不再为每次报价发送 `refresh=1`。没有可信价格时必须在创建任务和扣费前失败。
 - 卡片库把用户看到的 `quotedCredits` 随生成请求带回。服务端按当前可信目录重算，报价变化时返回 `409 CONFLICT` 且不创建任务、不扣积分；浏览器只清除对应报价缓存，下一次点击重新报价，不自动重发付费 POST。报价 GET 遇到 `500/502/503/504` 只短退避重试一次。
 - `gpt-image-2-chat` 是服务端兼容别名，统一归一化到公开模型 `image2-economy`；不要根据别名硬编码端点或能力，当前参数以实时目录为准并支持比例和可选参考图。
+- Canvas 当前目录中的高质量原始 ID `gpt-image-2-ext` 必须在可用性和报价校验前归一化到公开模型 `image2-pro`；归一化只统一模型身份，保留用户选择的 `1k` / `2k` / `4k` 分辨率。
 - 运营后台的调用链路由卡藏 API `/api/model-catalog/admin/routes` 提供，并使用 `NEWAPI_CATALOG_ADMIN_SECRET` 与服务端共享密钥鉴权；公开 `/api/model-catalog` 不包含真实渠道信息。
 - MJ 8.1、MJ 7 和 Niji 7 与其他公开图片型号一样通过卡藏 New API 提交；固定常规 `relax` 档，单次 40 积分（0.4 元），不公开 Fast / Turbo。
 - New API `capability_version=2026-08-04.2` 已核验同时公开 `mj-v81`、`mj-v7`、`mj-niji7`；Worker 必须把这类按次图片型号保留在动态图片目录中，不能把 `quality=0.25/0.5/1/2` 误判成 `resolution` 后过滤。
 - MJ 完成结果固定保留四宫格封面和 4 张单图。New API 的 `/v1/tasks/:taskId` 是新任务唯一查询来源；仅历史 `provider=apimart` 任务继续使用旧详情查询。
+- 受保护的 `GET /api/v1/generate/jobs/:jobId/image` 通过可选 `index=0..7` 返回单一成图；MJ 顺序固定为四宫格封面后接四张单图，普通批量任务为主图后接额外图片。相同 URL 只保留一个结果，非法索引返回 `400`。
 - 旧 GrsAI、iThink、Mooko 和 Apimart 型号只能恢复历史任务，不能通过后台重新上架。新 New API MJ 任务不返回仍会直连旧上游的二次操作按钮。
 
 配置命令示例：

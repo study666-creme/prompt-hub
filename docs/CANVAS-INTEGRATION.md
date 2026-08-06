@@ -35,7 +35,7 @@ Canvas 不保存 New API、Apimart 等上游 Key。它只持有用户 Prompt Hub
 | `GET /api/v1/generate/cost` | 报价 |
 | `POST /api/v1/generate` | 提交并扣费 |
 | `GET /api/v1/generate/jobs/:jobId` | 轮询/结算 |
-| `GET /api/v1/generate/jobs/:jobId/image` | 鉴权代理成图 |
+| `GET /api/v1/generate/jobs/:jobId/image?index=N` | 鉴权代理第 `N` 张成图；省略时为 `0` |
 | `POST /api/v1/video` | 幂等提交视频任务并扣费 |
 | `GET /api/v1/video/jobs/:jobId` | 视频轮询/结算 |
 | `GET /api/v1/video/jobs/:jobId/content` | 鉴权视频播放与 Range 代理 |
@@ -44,6 +44,8 @@ Canvas 不保存 New API、Apimart 等上游 Key。它只持有用户 Prompt Hub
 | `GET /api/v1/media/sign?variant=full` | 插入 Canvas 的原图 |
 
 所有 `/api/v1/extension/*` 请求都使用当前用户的 Prompt Hub Bearer 会话。精确取卡和结果回仓响应均为 `private, no-store`，不能做跨用户或共享缓存。
+
+Canvas 渲染多图生成结果时使用 `GET /api/v1/generate/jobs/:jobId/image?index=N`。`N` 只能是 `0..7`；MJ 的 `0` 是四宫格封面、`1..4` 是四张单图，普通批量结果按主图后接额外图片的稳定顺序返回。相同 URL 只投影一次，非法索引返回 `400`。结果回仓接口仍只接受首张成图的 `artifactIndex=0`。
 
 ## 一键插卡深链
 

@@ -115,6 +115,63 @@ function isRemoteHttpImageUrl(url: string | null | undefined): boolean {
   return /^https?:\/\//i.test(raw);
 }
 
+const MAX_GENERATION_IMAGE_RESULT_INDEX = 7;
+
+/**
+ * Canvas assigns one stable media id to each delivered artifact. Keep that
+ * artifact index explicit at the protected media route so multi-image results
+ * cannot silently collapse back to the primary image.
+ */
+export function parseGenerationImageResultIndex(value: string | undefined): number {
+  if (value === undefined || value === '') return 0;
+  if (!/^(?:0|[1-7])$/.test(value)) {
+    throw new ApiError(400, 'INVALID_IMAGE_INDEX', '图片结果序号无效');
+  }
+  const index = Number(value);
+  if (index > MAX_GENERATION_IMAGE_RESULT_INDEX) {
+    throw new ApiError(400, 'INVALID_IMAGE_INDEX', '图片结果序号无效');
+  }
+  return index;
+}
+
+/**
+ * Returns the deliverable image references in the same order that Canvas
+ * exposes them as artifacts. Midjourney keeps its cover first followed by the
+ * four individual images; other batch models keep their primary then extras.
+ */
+export function generationImageReferences(row: Pick<JobRow, 'result_image_url' | 'meta'>): string[] {
+  const meta = row.meta || {};
+  const primary = imageReference(row.result_image_url);
+  const extras = imageReferenceList(meta.extraImageUrls);
+  const gallery = imageReferenceList(meta.mjGalleryUrls);
+  const composite = imageReference(meta.mjCompositeUrl);
+  const tiles = imageReferenceList(meta.mjGridUrls);
+  const isMidjourney = meta.isMidjourney === true || gallery.length > 0 || Boolean(composite) || tiles.length > 0;
+
+  if (isMidjourney) {
+    const orderedGallery = gallery.length
+      ? gallery
+      : buildMjGalleryUrls(composite, tiles, primary);
+    return uniqueImageReferences(orderedGallery.length ? orderedGallery : [primary, ...extras]);
+  }
+
+  return uniqueImageReferences([primary, ...extras]);
+}
+
+function imageReference(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function imageReferenceList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map(imageReference).filter((item): item is string => Boolean(item))
+    : [];
+}
+
+function uniqueImageReferences(references: Array<string | null | undefined>): string[] {
+  return [...new Set(references.filter((reference): reference is string => Boolean(reference)))];
+}
+
 async function resolveJobImageUrlForClient(
   c: Context<{ Bindings: Env }>,
   imageUrl: string | null | undefined,
@@ -2247,6 +2304,7 @@ generateRoutes.post('/mj-blend', rateLimit(300, 60_000), async (c) => {
 generateRoutes.get('/jobs/:jobId/image', async c => {
   const user = c.get('user');
   const jobId = c.req.param('jobId');
+  const resultIndex = parseGenerationImageResultIndex(c.req.query('index'));
   const admin = createAdminClient(c.env);
 
   const { data: job, error } = await admin
@@ -2261,8 +2319,9 @@ generateRoutes.get('/jobs/:jobId/image', async c => {
 
   assertJobOwner(job, user.id);
 
-  let imageRef = job.result_image_url as string | null;
-  const status = String(job.status || '');
+  let liveJob = job as JobRow;
+  let imageRef = generationImageReferences(liveJob)[resultIndex] || null;
+  let status = String(liveJob.status || '');
 
   if (!imageRef && status === 'processing') {
     const polled = await pollAndUpdateJob(
@@ -2276,10 +2335,12 @@ generateRoutes.get('/jobs/:jobId/image', async c => {
     if (polled.imageUrl) {
       const { data: fresh } = await admin
         .from('generation_requests')
-        .select('result_image_url, status')
+        .select('*')
         .eq('id', jobId)
         .maybeSingle();
-      imageRef = (fresh?.result_image_url as string | null) || polled.imageUrl;
+      if (fresh) liveJob = fresh as JobRow;
+      imageRef = generationImageReferences(liveJob)[resultIndex] || (resultIndex === 0 ? polled.imageUrl : null);
+      status = String(liveJob.status || polled.status || '');
     }
   }
 
@@ -2287,16 +2348,17 @@ generateRoutes.get('/jobs/:jobId/image', async c => {
     throw new ApiError(404, 'NOT_FOUND', status === 'failed' ? '任务已失败' : '任务尚未出图');
   }
 
-  if (jobPollNeedsBackgroundArchive(imageRef)) {
+  if (resultIndex === 0 && jobPollNeedsBackgroundArchive(imageRef)) {
     try {
       await archivePendingJobImage(admin, user.id, jobId, c.env);
       const { data: archived } = await admin
         .from('generation_requests')
-        .select('result_image_url')
+        .select('*')
         .eq('id', jobId)
         .maybeSingle();
-      if (archived?.result_image_url) {
-        imageRef = archived.result_image_url as string;
+      if (archived) {
+        liveJob = archived as JobRow;
+        imageRef = generationImageReferences(liveJob)[resultIndex] || imageRef;
       }
     } catch (e) {
       console.warn('[generate] job image archive failed', jobId, e);

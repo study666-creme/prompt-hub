@@ -109,6 +109,7 @@ describe('image model catalog', () => {
     expect(normalizeImageModelId('gpt-image-2')).toBe('image2');
     expect(normalizeImageModelId('gpt-image-2-4k-fast')).toBe('image2-4k-fast');
     expect(normalizeImageModelId('gpt-image-2-chat')).toBe('image2-economy');
+    expect(normalizeImageModelId('gpt-image-2-ext')).toBe('image2-pro');
     expect(normalizeImageModelId('nano-banana-pro')).toBe('lingtu-pro');
     expect(normalizeImageModelId('newapi-gpt-image-2-ext-1k')).toBe('image2-pro');
     expect(normalizeImageModelId('gpt-image-2-ext-2k')).toBe('image2-pro');
