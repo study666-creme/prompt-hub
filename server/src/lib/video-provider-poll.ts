@@ -167,8 +167,8 @@ export async function pollVideoProviderJob(
   const meta = videoMeta(job.meta);
   const upstreamTaskId = String(meta.upstreamTaskId || '').trim();
   if (job.status !== 'processing' || meta.mediaType !== 'video' || !upstreamTaskId) return 'ignored';
-  const apiKey = env.NEWAPI_API_KEY?.trim();
-  if (!apiKey) throw new Error('NEWAPI_API_KEY is not configured');
+  const apiKey = env.NEWAPI_VIDEO_API_KEY?.trim();
+  if (!apiKey) throw new Error('NEWAPI_VIDEO_API_KEY is not configured');
   const routeChannelId = Number(meta.routeChannelId) || 0;
   const now = options.now?.() ?? new Date();
   let task: NewApiVideoTask;

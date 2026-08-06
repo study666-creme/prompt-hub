@@ -504,7 +504,7 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
     }
   }
 
-  const apiKey = c.env.NEWAPI_API_KEY?.trim();
+  const apiKey = c.env.NEWAPI_VIDEO_API_KEY?.trim();
   if (!apiKey) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频服务暂未配置');
   if (!c.env.VIDEO_GENERATION_QUEUE) {
     throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频生成队列暂不可用，请稍后重试');
@@ -701,7 +701,7 @@ videoRoutes.get('/jobs/:jobId', async c => {
     return c.json({ ok: true, data: await videoPayload(c.env, row, spendableCredits(profile)) });
   }
 
-  const apiKey = c.env.NEWAPI_API_KEY?.trim();
+  const apiKey = c.env.NEWAPI_VIDEO_API_KEY?.trim();
   const upstreamTaskId = String(meta.upstreamTaskId || '');
   if (!upstreamTaskId) {
     if (
@@ -754,7 +754,7 @@ videoRoutes.get('/jobs/:jobId/content', async c => {
     .maybeSingle();
   const meta = (row?.meta && typeof row.meta === 'object' ? row.meta : {}) as VideoMeta;
   if (!row || row.status !== 'completed' || meta.mediaType !== 'video') throw new ApiError(404, 'NOT_FOUND', '视频尚未完成');
-  const apiKey = c.env.NEWAPI_API_KEY?.trim();
+  const apiKey = c.env.NEWAPI_VIDEO_API_KEY?.trim();
   const upstreamTaskId = String(meta.upstreamTaskId || '');
   if (!apiKey || !upstreamTaskId) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频内容暂不可用');
   const routeChannelId = Number(meta.routeChannelId) || 0;

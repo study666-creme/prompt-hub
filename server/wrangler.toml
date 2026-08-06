@@ -22,7 +22,8 @@ MEDIA_STORAGE_MODE = "r2-first"
 # 旧 prompt-hub.cn 自建路线见 docs/SUPABASE-PROXY-SETUP.md，勿把裸 IP 交给 Worker fetch
 # SUPABASE_SERVICE_ROLE_KEY
 # SUPABASE_JWT_SECRET（可选，用于本地 JWT 校验加速）
-# NEWAPI_API_KEY（文字、图片与视频模型；价格由模型目录实时同步）
+# NEWAPI_API_KEY（文字与图片模型；价格由模型目录实时同步）
+# NEWAPI_VIDEO_API_KEY（仅视频模型，必须绑定视频服务分组）
 # NEWAPI_CATALOG_ADMIN_SECRET（仅后台查看卡藏 API 渠道映射）
 # APIMART_API_KEY（MJ 与视觉工具）
 # IMAGE_API_KEY / ITHINK_API_KEY / MOOKO_API_KEY 仅在仍需恢复对应历史任务时保留

@@ -144,7 +144,7 @@ describe('video creation durability', () => {
   it('persists a complete recovery envelope before debit and queues the same job', async () => {
     const env = {
       CORS_ORIGINS: '',
-      NEWAPI_API_KEY: 'secret',
+      NEWAPI_VIDEO_API_KEY: 'secret',
       NEWAPI_API_BASE_URL: 'https://newapi.test',
       VIDEO_GENERATION_QUEUE: { send: mocks.queueSend }
     } as unknown as Env;
@@ -207,7 +207,7 @@ describe('video creation durability', () => {
   it('preserves awaiting_debit when the wallet response is ambiguous', async () => {
     const env = {
       CORS_ORIGINS: '',
-      NEWAPI_API_KEY: 'secret',
+      NEWAPI_VIDEO_API_KEY: 'secret',
       NEWAPI_API_BASE_URL: 'https://newapi.test',
       VIDEO_GENERATION_QUEUE: { send: mocks.queueSend }
     } as unknown as Env;
@@ -264,7 +264,7 @@ describe('video creation durability', () => {
       })
     }, {
       CORS_ORIGINS: '',
-      NEWAPI_API_KEY: 'secret',
+      NEWAPI_VIDEO_API_KEY: 'secret',
       NEWAPI_API_BASE_URL: 'https://newapi.test',
       VIDEO_GENERATION_QUEUE: { send: mocks.queueSend }
     } as unknown as Env);
@@ -309,7 +309,7 @@ describe('video creation durability', () => {
       })
     }, {
       CORS_ORIGINS: '',
-      NEWAPI_API_KEY: 'secret',
+      NEWAPI_VIDEO_API_KEY: 'secret',
       NEWAPI_API_BASE_URL: 'https://newapi.test',
       VIDEO_GENERATION_QUEUE: { send: mocks.queueSend }
     } as unknown as Env);

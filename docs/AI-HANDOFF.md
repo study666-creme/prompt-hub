@@ -1,6 +1,6 @@
 # AI 接手说明
 
-最后核对：2026-08-06。生产发布目标为 `20260806a`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
+最后核对：2026-08-06。生产发布目标为 `20260806b`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
 
 ## 最小阅读顺序
 
@@ -16,7 +16,7 @@
 
 - Worker 唯一发布仓库是 `D:\prompt-hub`；`D:\canvas\prompt-hub` 只保留作历史生产审计，禁止从任一脏目录直接发布。
 - 修改 Worker、生成、支付、数据库或发布工具前必须阅读根目录 `AGENTS.md` 和 `docs/RECONCILE-20260726.md`；如果根目录存在 `DO-NOT-DEPLOY.md`，还必须先遵守其中的冻结条件。
-- `20260804a` 已发布文字模型目录收敛，`20260804b` 修正 MJ 动态目录解析并统一新任务到 New API。`20260806a` 将 `NEWAPI_API_BASE_URL` 从已停机的旧 `sslip.io` 地址迁移到稳定域名 `https://newapi.prompt-hubs.com`；不新增数据库迁移、不改 Pages，发布仍必须使用干净 SHA 并以 `/health.buildSha` 取证。
+- `20260804a` 已发布文字模型目录收敛，`20260804b` 修正 MJ 动态目录解析并统一新任务到 New API。`20260806a` 将 `NEWAPI_API_BASE_URL` 迁移到稳定域名；`20260806b` 新增独立视频 Key 并禁止回退到文字/图片 Key。两次发布均不改 Pages，发布仍必须使用干净 SHA 并以 `/health.buildSha` 取证。
 - 本次文字模型清理后，资产工作台仅保留 `deepseek-v4-flash`、`deepseek-v4-pro`，两者统一读取实时目录并通过 New API 调用。New API 的公开目录、定价和带服务令牌的 `/v1/models` 已确认只返回这两个短名、各 `0.002 元/次`，且不返回 GLM 5.1 或内部模型标识。
 
 ## 文档时效纪律
@@ -86,6 +86,7 @@ feed cards use `CardImageLoader` with `_grid` variants and never fetch a 4K
 source merely to render a list card.
 - 付费提交只允许原子领取一次；网络结果未知、任务 `not_found` 或队列重投都不得触发第二次上游 POST。稳定幂等键与 1 小时未知结果退款 SLA 必须保留。
 - 视频使用独立 `VIDEO_GENERATION_QUEUE`。有上游 task ID 的正常 `processing` 可以持续数百或数千秒，不按生成时长判失败；进入 `result_uncertain`（包括 `error.code=result_uncertain`）后则保留 `submitted` 和公开投影 `submission_unknown`，由后台只读 GET 同一个 NewAPI task ID。显式线路任务继续使用持久化 `routeChannelId`；普通公开模型由 NewAPI 任务记录中的原始 `ChannelId` 固定渠道。两种情况都绝不重发生成 POST 或重新选路。
+- 视频建单、轮询、内容下载、队列 consumer 和 cron 只读取 `NEWAPI_VIDEO_API_KEY`。该 Key 固定属于 `视频模型` 分组；`NEWAPI_API_KEY` 仅服务文字/图片，视频不得回退到它或依赖 `auto` 猜测分组。
 - 带 `upstreamTaskId` 的 `result_uncertain` 持续 1 小时仍无法恢复为 processing/completed/明确 failed 时，必须以幂等 `refund_pending` -> `refunded` 收敛为失败并退款。cron 必须先 poll，再执行 timeout finalize，避免任务刚成功却先被退款的竞态。
 - 上游已返回 task ID 后，checkpoint 最多重试三次并读后确认，绝不重试付费 POST。若 task ID 仍未可靠落库，保留 `running` 栅栏并报警；未拿到 task ID 的 `outcome_unknown` 和持续 `not_found` 继续遵循同一小时级幂等退款 SLA。
 - Prompt Hub 只提交规范化的视频参数。模型专属比例格式、固定分辨率或应忽略的可选参数由 New API 转换，不能在这里按渠道复制适配分支。

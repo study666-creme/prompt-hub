@@ -136,7 +136,8 @@ function awaitingDebitJob(): MutableJob {
 }
 
 const env = {
-  NEWAPI_API_KEY: 'secret',
+  NEWAPI_API_KEY: 'image-secret',
+  NEWAPI_VIDEO_API_KEY: 'video-secret',
   NEWAPI_API_BASE_URL: 'https://newapi.test'
 } as Env;
 
@@ -150,6 +151,19 @@ beforeEach(() => {
 });
 
 describe('durable video submission', () => {
+  it('does not fall back to the image key when the video key is missing', async () => {
+    const job = queuedJob();
+    const { admin } = fakeAdmin(job);
+    const submit = vi.fn();
+
+    await expect(processVideoPendingSubmit(admin, job, {
+      NEWAPI_API_KEY: 'image-only-key',
+      NEWAPI_API_BASE_URL: 'https://newapi.test'
+    } as Env, { submit })).resolves.toBe('retry');
+
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it('recovers a crash before debit/queue preparation without charging twice', async () => {
     const job = awaitingDebitJob();
     const { admin, row } = fakeAdmin(job);
@@ -221,7 +235,7 @@ describe('durable video submission', () => {
     let release!: () => void;
     const waiting = new Promise<void>(resolve => { release = resolve; });
     const submit = vi.fn(async (key: string, _base: string | undefined, params: Record<string, unknown>) => {
-      expect(key).toBe('secret-7');
+      expect(key).toBe('video-secret-7');
       expect(params.idempotencyKey).toBe('prompt-hub-video:video-job-1');
       await waiting;
       return {

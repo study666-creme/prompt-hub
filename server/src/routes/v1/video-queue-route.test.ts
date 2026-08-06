@@ -234,7 +234,7 @@ describe('video queued status route', () => {
     });
     const env = {
       CORS_ORIGINS: '',
-      NEWAPI_API_KEY: 'secret',
+      NEWAPI_VIDEO_API_KEY: 'secret',
       NEWAPI_API_BASE_URL: 'https://newapi.test'
     } as unknown as Env;
 
@@ -298,7 +298,7 @@ describe('video queued status route', () => {
     });
     const env = {
       CORS_ORIGINS: '',
-      NEWAPI_API_KEY: 'secret',
+      NEWAPI_VIDEO_API_KEY: 'secret',
       NEWAPI_API_BASE_URL: 'https://newapi.test'
     } as unknown as Env;
 
@@ -352,7 +352,7 @@ describe('video queued status route', () => {
       {},
       {
         CORS_ORIGINS: '',
-        NEWAPI_API_KEY: 'secret',
+        NEWAPI_VIDEO_API_KEY: 'secret',
         NEWAPI_API_BASE_URL: 'https://newapi.test'
       } as unknown as Env
     );
@@ -390,7 +390,7 @@ describe('video queued status route', () => {
       {},
       {
         CORS_ORIGINS: '',
-        NEWAPI_API_KEY: 'secret',
+        NEWAPI_VIDEO_API_KEY: 'secret',
         NEWAPI_API_BASE_URL: 'https://newapi.test'
       } as unknown as Env
     );
@@ -437,7 +437,7 @@ describe('video queued status route', () => {
       {},
       {
         CORS_ORIGINS: '',
-        NEWAPI_API_KEY: 'secret',
+        NEWAPI_VIDEO_API_KEY: 'secret',
         NEWAPI_API_BASE_URL: 'https://newapi.test'
       } as unknown as Env
     );

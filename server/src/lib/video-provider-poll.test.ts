@@ -103,7 +103,8 @@ function drainAdmin(rows: VideoSubmissionJob[]) {
 }
 
 const env = {
-  NEWAPI_API_KEY: 'newapi-key',
+  NEWAPI_API_KEY: 'image-key',
+  NEWAPI_VIDEO_API_KEY: 'video-key',
   NEWAPI_API_BASE_URL: 'https://newapi.test'
 } as Env;
 
@@ -122,7 +123,7 @@ describe('video provider background polling', () => {
       now: () => now
     })).resolves.toBe('unknown');
 
-    expect(fetchTask).toHaveBeenCalledWith('newapi-key-85', 'https://newapi.test', 'task-1');
+    expect(fetchTask).toHaveBeenCalledWith('video-key-85', 'https://newapi.test', 'task-1');
     expect(store.row().meta).toMatchObject({
       videoSubmitState: 'submitted',
       videoResultState: 'result_uncertain',
