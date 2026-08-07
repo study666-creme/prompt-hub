@@ -61,6 +61,20 @@ function memoryR2() {
   return { bucket: { put, head }, store, put };
 }
 
+function streamRejectingR2() {
+  const store = new Map<string, Uint8Array>();
+  const put = vi.fn(async (key: string, body: ReadableStream | ArrayBuffer | Blob) => {
+    if (body instanceof ReadableStream) throw new TypeError('stream body unsupported');
+    const bytes = new Uint8Array(await new Response(body).arrayBuffer());
+    store.set(key, bytes);
+  });
+  const head = vi.fn(async (key: string) => {
+    const bytes = store.get(key);
+    return bytes ? { size: bytes.byteLength } : null;
+  });
+  return { bucket: { put, head }, store, put };
+}
+
 describe('image-archive helpers', () => {
   it('detects data image urls', () => {
     expect(isDataImageUrl('data:image/png;base64,abc')).toBe(true);
@@ -166,5 +180,30 @@ describe('archiveRemoteImage', () => {
 
     expect(r2.put).not.toHaveBeenCalled();
     expect(admin.upload).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to a buffered R2 upload when the runtime rejects the response stream', async () => {
+    const r2 = streamRejectingR2();
+    const admin = storageAdmin(new Map());
+    const fetchMock = vi.fn(async () => new Response(imageBytes('image/jpeg'), {
+      status: 200,
+      headers: { 'content-type': 'image/jpeg' }
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(archiveRemoteImage(
+      admin.client as never,
+      'user-1',
+      'job-stream-fallback',
+      'https://images.example.test/result',
+      {
+        maxAttempts: 1,
+        env: { MEDIA_STORAGE_MODE: 'r2', CARD_IMAGES_R2: r2.bucket } as unknown as Env
+      }
+    )).resolves.toBe('storage://card-images/user-1/generated/job-stream-fallback.jpg');
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(r2.put).toHaveBeenCalledTimes(2);
+    expect(r2.store.get('user-1/generated/job-stream-fallback.jpg')).toBeDefined();
   });
 });

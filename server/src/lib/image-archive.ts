@@ -331,6 +331,7 @@ export async function archiveRemoteImage(
         const streamToR2 = !!env && hasR2(env) && (mode === 'r2' || mode === 'r2-first');
         let validBuffer: ArrayBuffer | null = null;
         let validStream: ValidatedResponseBody | null = null;
+        let validStreamSourceUrl: string | null = null;
         let lastStatus = 0;
         for (const fetchUrl of candidates) {
           const res = await fetch(fetchUrl, {
@@ -346,6 +347,7 @@ export async function archiveRemoteImage(
             validStream = await validateResponseStream(res, declaredMime);
             if (validStream) {
               mime = validStream.mime;
+              validStreamSourceUrl = fetchUrl;
               break;
             }
             continue;
@@ -364,7 +366,33 @@ export async function archiveRemoteImage(
 
         if (env && validStream) {
           const streamed = await uploadToR2(env, path, validStream.body, mime);
-          if (!streamed) throw new Error('r2_stream_upload_failed');
+          if (!streamed) {
+            // Some R2 runtimes reject a reconstructed ReadableStream even when
+            // its bytes are valid. Re-fetch the same short-lived result and use
+            // the proven ArrayBuffer upload path before the upstream URL expires.
+            const fallback = validStreamSourceUrl
+              ? await fetch(validStreamSourceUrl, { headers: { Accept: 'image/*' } })
+              : null;
+            if (!fallback?.ok) {
+              await fallback?.body?.cancel().catch(() => {});
+              throw new Error('r2_stream_upload_failed');
+            }
+            const fallbackMimeHeader = fallback.headers.get('content-type') || mime;
+            const fallbackBuffer = await fallback.arrayBuffer();
+            const fallbackMime = validatedImageMime(
+              fallbackMimeHeader,
+              new Uint8Array(fallbackBuffer)
+            );
+            if (!fallbackMime || fallbackBuffer.byteLength < MIN_VALID_IMAGE_BYTES) {
+              throw new Error('invalid_image_content');
+            }
+            const fallbackPath = generatedArchivePath(userId, jobId, fallbackMime);
+            await uploadCardImage(env, fallbackPath, fallbackBuffer, fallbackMime);
+            if (await verifyStoredObject(admin, fallbackPath, env)) {
+              return toStorageRef(fallbackPath);
+            }
+            throw new Error('archive_verify_failed');
+          }
           if (await verifyStoredObject(admin, path, env)) {
             return toStorageRef(path);
           }

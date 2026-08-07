@@ -242,6 +242,48 @@ describe('video creation durability', () => {
     });
   });
 
+  it('recovers a refunded video by its Canvas request id without resubmitting', async () => {
+    const clientRequestId = 'canvas:video-recovery-refunded-001';
+    mocks.findOwnedGenerationRequest.mockResolvedValueOnce({
+      row: {
+        id: 'video-job-refunded',
+        user_id: userId,
+        status: 'failed',
+        credits_charged: 12,
+        error_message: 'private upstream failure',
+        meta: {
+          mediaType: 'video',
+          model: model.id,
+          credits: 12,
+          refundState: 'refunded'
+        }
+      },
+      error: null
+    });
+
+    const response = await app().request(
+      `http://local.test/video/requests/${encodeURIComponent(clientRequestId)}`,
+      {},
+      { CORS_ORIGINS: '', NEWAPI_API_BASE_URL: 'https://newapi.test' } as unknown as Env
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        jobId: 'video-job-refunded',
+        status: 'failed',
+        errorMessage: '视频生成未完成，积分已自动退回',
+        refunded: true,
+        creditsRemaining: 100,
+        idempotentReplay: true
+      }
+    });
+    expect(mocks.insertGenerationRequest).not.toHaveBeenCalled();
+    expect(mocks.deductUserCredits).not.toHaveBeenCalled();
+    expect(mocks.queueSend).not.toHaveBeenCalled();
+  });
+
   it('rejects a video model with no active route before creating or charging', async () => {
     mocks.fetchRoutes.mockResolvedValueOnce({
       available: true,

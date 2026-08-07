@@ -294,14 +294,22 @@ export function projectPublicVideoResultState(row: Record<string, unknown>) {
   const meta = (row.meta && typeof row.meta === 'object' ? row.meta : {}) as VideoMeta;
   const storedStatus = String(row.status || 'processing');
   const resultUncertain = storedStatus === 'processing' && meta.videoResultState === 'result_uncertain';
+  const refunded = meta.refundState === 'refunded';
+  const refundPending = meta.refundState === 'pending';
   return {
     status: resultUncertain ? 'submission_unknown' : storedStatus,
     progress: normalizedVideoProgress(meta.progress),
     errorMessage: resultUncertain
       ? VIDEO_RESULT_UNCERTAIN_PUBLIC_MESSAGE
       : storedStatus === 'failed'
-        ? '视频生成未完成，请调整参数后重试'
-        : null
+        ? refunded
+          ? '视频生成未完成，积分已自动退回'
+          : refundPending
+            ? '视频生成未完成，积分退款处理中'
+            : '视频生成未完成，请调整参数后重试'
+        : null,
+    ...(refunded ? { refunded: true as const } : {}),
+    ...(refundPending ? { refundPending: true as const } : {})
   };
 }
 
@@ -321,6 +329,8 @@ export function projectPublicVideoPayload(
     progress: result.progress,
     videoUrl: result.status === 'completed' ? `/api/v1/video/jobs/${encodeURIComponent(String(row.id || ''))}/content` : null,
     errorMessage: result.errorMessage,
+    ...(result.refunded === true ? { refunded: true as const } : {}),
+    ...(result.refundPending === true ? { refundPending: true as const } : {}),
     creditsCharged: Number(meta.credits) || Number(row.credits_charged) || 0,
     ...(creditsRemaining == null ? {} : { creditsRemaining })
   };
@@ -682,6 +692,43 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
     if (/insufficient/i.test(message)) throw new ApiError(402, 'INSUFFICIENT_CREDITS', '积分不足');
     throw error;
   }
+});
+
+/** Read-only video recovery by the caller-generated idempotency key. */
+videoRoutes.get('/requests/:clientRequestId', async c => {
+  const user = c.get('user');
+  const clientRequestId = String(c.req.param('clientRequestId') || '').trim();
+  if (
+    clientRequestId.length < 8
+    || clientRequestId.length > 128
+    || !CLIENT_REQUEST_ID_PATTERN.test(clientRequestId)
+  ) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '无效的请求编号');
+  }
+  const admin = createAdminClient(c.env);
+  const requestId = await generationRequestId(user.id, clientRequestId);
+  const existing = await findOwnedGenerationRequest<GenerationRequestRecord>(
+    admin,
+    user.id,
+    requestId,
+    clientRequestId
+  );
+  if (existing.error) throw existing.error;
+  if (!existing.row) throw new ApiError(404, 'NOT_FOUND', '未找到对应视频任务');
+  const meta = (existing.row.meta && typeof existing.row.meta === 'object'
+    ? existing.row.meta
+    : {}) as VideoMeta;
+  if (meta.mediaType !== 'video') {
+    throw new ApiError(409, 'IDEMPOTENCY_KEY_REUSED', '该请求标识已用于其他生成任务');
+  }
+  const profile = await syncMembershipCredits(admin, user.id);
+  return c.json({
+    ok: true,
+    data: {
+      ...await videoPayload(c.env, existing.row, spendableCredits(profile)),
+      idempotentReplay: true
+    }
+  });
 });
 
 videoRoutes.get('/jobs/:jobId', async c => {

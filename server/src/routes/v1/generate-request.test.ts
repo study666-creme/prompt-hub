@@ -165,6 +165,25 @@ describe('generation request recovery projection', () => {
     expect(JSON.stringify(payload)).not.toContain('private');
     expect(JSON.stringify(payload)).not.toContain('routeChannelId');
   });
+
+  it('projects an upstream video failure as refunded when the ledger refund completed', () => {
+    expect(publicGenerationRequestLookupPayload({
+      id: 'video-job-refunded',
+      user_id: 'user-1',
+      status: 'failed',
+      credits_charged: 8.5,
+      result_image_url: null,
+      error_message: 'private upstream message',
+      created_at: '2026-07-28T00:00:00.000Z',
+      meta: { mediaType: 'video', refundState: 'refunded' }
+    })).toEqual({
+      jobId: 'video-job-refunded',
+      status: 'failed',
+      progress: 0,
+      errorMessage: '视频生成未完成，积分已自动退回',
+      refunded: true
+    });
+  });
 });
 
 describe('Canvas generation artifact media routing', () => {
