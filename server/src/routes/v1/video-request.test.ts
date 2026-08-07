@@ -179,3 +179,57 @@ describe('video duration catalog validation', () => {
     expect(input.duration).toBe(6);
   });
 });
+
+describe('video resolution catalog normalization', () => {
+  it.each([
+    ['sd2.0-480p', '480p'],
+    ['sd2.0-720p', '720p'],
+    ['sd2.0-1080p', '1080p']
+  ])('derives %s resolution when the catalog omits the resolution parameter', (modelId, expected) => {
+    const model = {
+      ...videoModel([{
+        name: 'size',
+        path: 'size',
+        label: 'Size',
+        type: 'string' as const,
+        required: false,
+        options: ['16:9']
+      }]),
+      id: modelId,
+      upstreamModel: modelId
+    };
+    const input = resolveVideoRequest(
+      model,
+      parseVideoRequestBody({ model: model.id, prompt: 'animate this image' })
+    );
+
+    expect(input.resolution).toBe(expected);
+    expect(() => validateVideoRequest(model, input)).not.toThrow();
+  });
+
+  it('preserves a selected resolution when the catalog declares resolution options', () => {
+    const model = {
+      ...videoModel([{
+        name: 'resolution',
+        path: 'resolution',
+        label: 'Resolution',
+        type: 'string' as const,
+        required: false,
+        options: ['480p', '720p']
+      }]),
+      id: 'sd2.0-720p-pro',
+      upstreamModel: 'sd2.0-720p-pro'
+    };
+    const input = resolveVideoRequest(
+      model,
+      parseVideoRequestBody({
+        model: model.id,
+        prompt: 'animate this image',
+        resolution: '480p'
+      })
+    );
+
+    expect(input.resolution).toBe('480p');
+    expect(() => validateVideoRequest(model, input)).not.toThrow();
+  });
+});

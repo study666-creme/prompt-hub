@@ -2,6 +2,8 @@
 
 最后核对：2026-08-06。生产发布目标为 `20260806b`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
 
+未部署候选（2026-08-07）：在生产 SHA `a449a0f2afe4854de12d3f7a087607341db330e1` 上增量修复固定 480P/720P/1080P 视频模型的分辨率推导；当前没有部署、迁移或付费生成验证。
+
 ## 最小阅读顺序
 
 1. `PROJECT_CONTEXT.md`: 线上拓扑和当前 build。
@@ -91,7 +93,7 @@ source merely to render a list card.
 - 视频建单、轮询、内容下载、队列 consumer 和 cron 只读取 `NEWAPI_VIDEO_API_KEY`。该 Key 固定属于 `视频模型` 分组；`NEWAPI_API_KEY` 仅服务文字/图片，视频不得回退到它或依赖 `auto` 猜测分组。
 - 带 `upstreamTaskId` 的 `result_uncertain` 持续 1 小时仍无法恢复为 processing/completed/明确 failed 时，必须以幂等 `refund_pending` -> `refunded` 收敛为失败并退款。cron 必须先 poll，再执行 timeout finalize，避免任务刚成功却先被退款的竞态。
 - 上游已返回 task ID 后，checkpoint 最多重试三次并读后确认，绝不重试付费 POST。若 task ID 仍未可靠落库，保留 `running` 栅栏并报警；未拿到 task ID 的 `outcome_unknown` 和持续 `not_found` 继续遵循同一小时级幂等退款 SLA。
-- Prompt Hub 只提交规范化的视频参数。模型专属比例格式、固定分辨率或应忽略的可选参数由 New API 转换，不能在这里按渠道复制适配分支。
+- Prompt Hub 只提交规范化的视频参数。模型专属比例格式、固定分辨率或应忽略的可选参数由 New API 转换，不能在这里按渠道复制适配分支。目录未声明 `resolution` 的 `*-480p` / `*-720p` / `*-1080p` 固定模型从 ID 推导分辨率；目录声明了 `resolution` 时必须保留其固定值或用户选择，避免覆盖 `sd2.0-720p-pro` 一类可选型号。
 - GrsAI、iThink、Mooko 适配器只服务已落库历史任务恢复；删除前先确认生产库没有对应未完成任务。
 - 后台存储巡检按需触发且只读；不得按全桶字节回填用户配额。
 - 新支付订单只接受 `paymentMethod=alipay`；历史 `wxpay` 类型只保留给已落库订单的回调验签和结算，前端不得重新展示微信新订单入口。

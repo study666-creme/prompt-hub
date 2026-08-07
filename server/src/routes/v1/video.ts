@@ -200,8 +200,17 @@ function fixedStringParameter(model: NewApiCatalogModel, names: string[]): strin
   return String(declared.fixed ?? '').trim() || null;
 }
 
+function fixedResolutionFromModelId(model: NewApiCatalogModel): string | null {
+  for (const value of [model.id, model.upstreamModel]) {
+    const match = String(value || '').trim().match(/[-_.](480p|720p|1080p)$/i);
+    if (match) return match[1].toLowerCase();
+  }
+  return null;
+}
+
 export function resolveVideoRequest(model: NewApiCatalogModel, input: ParsedVideoRequest): VideoRequest {
   const declaredDuration = parameter(model, ['duration', 'seconds']);
+  const declaredResolution = parameter(model, ['resolution']);
   const duration = declaredDuration && Object.prototype.hasOwnProperty.call(declaredDuration, 'fixed')
     ? omittedVideoDuration(model)
     : input.duration ?? omittedVideoDuration(model);
@@ -209,7 +218,9 @@ export function resolveVideoRequest(model: NewApiCatalogModel, input: ParsedVide
     ...input,
     duration,
     ratio: fixedStringParameter(model, ['ratio', 'aspect_ratio']) || input.ratio,
-    resolution: fixedStringParameter(model, ['resolution']) || input.resolution,
+    resolution: fixedStringParameter(model, ['resolution'])
+      || (!declaredResolution ? fixedResolutionFromModelId(model) : null)
+      || input.resolution,
     size: fixedStringParameter(model, ['size']) || input.size
   };
 }
