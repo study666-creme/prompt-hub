@@ -1,6 +1,6 @@
 # 运营监控
 
-最后核对：2026-08-06。New API 上游已迁移到稳定服务域名；运行版本继续以 `/health.buildSha` 为准。
+最后核对：2026-08-08。生产 Worker `buildSha=ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；运行版本继续以 `/health.buildSha` 为准。
 
 ## 入口
 

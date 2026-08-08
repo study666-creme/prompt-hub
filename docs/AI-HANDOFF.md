@@ -1,8 +1,8 @@
 # AI 接手说明
 
-最后核对：2026-08-06。生产发布目标为 `20260806b`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
+最后核对：2026-08-08。生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
 
-未部署候选（2026-08-07）：在生产 SHA `a449a0f2afe4854de12d3f7a087607341db330e1` 上增量修复固定 480P/720P/1080P 视频模型的分辨率推导；当前没有部署、迁移或付费生成验证。
+Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery-20260808` 的媒体归档和恢复改动已提交并通过本地回归，尚未部署或执行付费验收；生产仍以 `/health.buildSha` 为准。
 
 ## 最小阅读顺序
 

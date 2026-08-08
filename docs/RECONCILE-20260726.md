@@ -1,6 +1,6 @@
 # Prompt Hub 双树收编记录
 
-最后核对：2026-08-06
+最后核对：2026-08-08
 
 > 本文区分“生产已上线”和“主树本地完成”。生产切换必须通过 `/health.buildSha`、Pages build 和线上冒烟取证，不能只凭本地提交或测试通过作结论。
 
@@ -8,7 +8,7 @@
 
 - **唯一候选源**：`D:\prompt-hub`。
 - **历史生产审计源**：`D:\canvas\prompt-hub`，只读，不再作为开发或部署源。
-- **当前发布目标**：`20260806b`，Worker、Pages 与五项既有数据库迁移状态仍分别以 `/health.buildSha`、Pages build 和生产核验为准。
+- **当前发布目标**：`ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`，Worker、Pages 与五项既有数据库迁移状态仍分别以 `/health.buildSha`、Pages build 和生产核验为准。
 - **本轮发布**：保留 `20260804b` 的目录、计费和生成幂等契约，将 Worker 从已停机的旧 `sslip.io` 上游迁移到 `https://newapi.prompt-hubs.com`；Prompt Hub 不新增数据库迁移，也不改 Pages。
 
 双树文件完全相同不是目标。目标是逐项审计生产行为，将需要保留的能力以主树现有契约安全实现，并明确拒绝会重复付费、泄露渠道或回退公开接口的历史实现。
@@ -39,7 +39,7 @@
 
 - **New API 已核验**：2026-08-06 稳定域名解析到新服务器并返回 66 个目录型号、非空目录版本和 `capability_version: 2026-08-04.2`；旧地址 `43.153.201.78` 的 80/443 端口均拒绝连接。`mj-v81`、`mj-v7`、`mj-niji7` 保持 0.4 元 / 40 积分/次、固定 Relax 和五图输出，公开目录与定价无内部渠道、域名或映射字段。
 - **Cloudflare 资源已核验**：图片/视频 Queue 与 DLQ、`prompt-hub-card-images` R2、`PROMPT_HUB_METRICS` KV 均存在；图片与视频 Queue 均显示 1 producer / 1 consumer。
-- **Git 与验证状态**：`20260806b` 只增加独立视频 Key、对应视频调用链和验证/文档；最终运行提交仍必须从线上 `/health.buildSha` 读取并核对，生产目录必须保持非 stale。
+- **Git 与验证状态**：`ca8cbf6e658766e5d98e9748c258ca4e6f02dab6` 增加视频音轨参数转发、提交阶段日志和回归验证；最终运行提交仍必须从线上 `/health.buildSha` 读取并核对，生产目录必须保持非 stale。
 - **数据库备份已核验**：`prompt-hub-final-20260730-102016.dump` 为 15,330,250 字节，`pg_restore --list` 返回 732 项，SHA-256 为 `7A83BD87B42E1B195121E542655A65B4C2F4E5EAABE0EDACDF45ABD34C488448`；项目外 DPAPI 加密副本已完成解密回算。
 
 - **数据库迁移已应用**：最终 dry-run 通过后用单事务按以下顺序应用，并核验列、索引、RPC、支付表、RLS 与 `service_role` 权限：
@@ -53,7 +53,7 @@
 
 ## 验证基线
 
-2026-08-06 `20260806b` 候选已通过 Worker `npm run typecheck`、55 个测试文件共 363 项测试、36 份文档检查和完整前端预部署冒烟。新增独立 `NEWAPI_VIDEO_API_KEY`，视频建单、轮询、内容下载、队列 consumer 与 cron 均禁止回退到文字/图片 Key；原有生成幂等、未知结果退款和图片交付回归保持通过。本任务没有发送付费生成 POST；任何失败或超时都不得在本任务重提。
+2026-08-08 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6` 已通过 Worker `npm run typecheck`、55 个测试文件共 374 项测试、36 份文档检查和完整前端预部署冒烟。`generate_audio` 在视频入口、持久 envelope 和 New API body 中保持一致；提交日志只记录无敏感元数据。本任务没有发送付费生成 POST；任何失败或超时都不得在本任务重提。
 
 ## 以后如何避免再次分叉
 

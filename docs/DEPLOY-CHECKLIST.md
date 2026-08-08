@@ -4,7 +4,7 @@
 
 ## 当前发布状态
 
-本次生产发布目标为 `20260806b`。它保留 `20260806a` 的稳定 New API 服务入口以及既有目录、计费、幂等队列和未知结果退款契约，将视频调用切换到独立 `视频模型` Key。五项既有 Prompt Hub 数据库迁移未改变，本轮不发布 Pages。
+本次生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`。它保留稳定 New API 服务入口、独立视频 Key、既有目录、计费、幂等队列和未知结果退款契约，并修复视频音轨参数转发与提交日志。本轮不发布 Pages；Canvas 媒体交付候选另行验收。
 
 ## 发布顺序
 
@@ -74,7 +74,7 @@ node scripts\run-index-local-http-smoke.mjs
 
 ### 6. 解冻、dry-run 与迁移
 
-Prompt Hub 数据库没有新增迁移。`20260806b` 是 Worker-only 发布，不递增 Pages build；将 Worker 配置、回归测试和状态文档提交为同一个干净发布 SHA，随后运行：
+Prompt Hub 数据库没有新增迁移。`ca8cbf6e658766e5d98e9748c258ca4e6f02dab6` 是 Worker-only 发布，不递增 Pages build；将 Worker 配置、回归测试和状态文档提交为同一个干净发布 SHA，随后运行：
 
 ```powershell
 cd D:\prompt-hub\server
