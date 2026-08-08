@@ -135,6 +135,24 @@ describe('newapi video upstream', () => {
     });
   });
 
+  it('forwards the audio-generation switch to New API', async () => {
+    const fetchMock = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String((init as RequestInit).body));
+      expect(body.generate_audio).toBe(true);
+      return json({ id: 'task-audio', status: 'queued', progress: 0 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await submitNewApiVideo('secret', 'https://newapi.test', {
+      upstreamModel: 'kling-v3',
+      prompt: 'camera move',
+      duration: 4,
+      ratio: '16:9',
+      resolution: '720p',
+      generateAudio: true
+    });
+  });
+
   it('rejects an inline URL without a durable public task id', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({
       status: 'completed',

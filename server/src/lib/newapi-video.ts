@@ -8,6 +8,7 @@ export type NewApiVideoSubmitParams = {
   ratio: string;
   resolution: string;
   size?: string;
+  generateAudio?: boolean;
   referenceImages?: string[];
   firstImage?: string;
   lastImage?: string;
@@ -234,6 +235,7 @@ export async function submitNewApiVideo(
     duration: params.duration,
     resolution: params.resolution,
     ...(params.size ? { size: params.size } : {}),
+    ...(params.generateAudio != null ? { generate_audio: params.generateAudio } : {}),
     ...(isSd ? { ratio: params.ratio } : { aspect_ratio: params.ratio }),
     ...(params.referenceImages?.length
       ? isSd

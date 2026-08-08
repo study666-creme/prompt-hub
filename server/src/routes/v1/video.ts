@@ -45,6 +45,13 @@ import { rateLimit } from '../../middleware/rate-limit';
 
 const mediaRef = z.string().refine(value => /^https?:\/\//i.test(value) || isStorageRef(value), '仅支持媒体 URL');
 const imageRef = z.string().refine(isAcceptedRefImageInput);
+const generateAudioInput = z.preprocess(value => {
+  if (typeof value === 'string') {
+    if (value.trim().toLowerCase() === 'true') return true;
+    if (value.trim().toLowerCase() === 'false') return false;
+  }
+  return value;
+}, z.boolean().optional());
 const bodySchema = z.object({
   clientRequestId: z.string().min(8).max(128).regex(CLIENT_REQUEST_ID_PATTERN).optional(),
   product: z.literal('canvas').optional(),
@@ -58,6 +65,7 @@ const bodySchema = z.object({
   aspect_ratio: z.string().min(1).max(30).optional(),
   size: z.string().min(1).max(64).optional(),
   resolution: z.string().min(1).max(30).default('720p'),
+  generate_audio: generateAudioInput,
   referenceImages: z.array(imageRef).max(14).optional(),
   image: imageRef.optional(),
   images: z.array(imageRef).max(14).optional(),
@@ -91,6 +99,7 @@ const bodySchema = z.object({
   ratio: input.ratio || input.aspect_ratio || '16:9',
   size: input.size,
   resolution: input.resolution,
+  generateAudio: input.generate_audio,
   referenceImages: input.referenceImages?.length
     ? input.referenceImages
     : input.image
@@ -126,6 +135,7 @@ type VideoMeta = {
   resultUrl?: unknown;
   refundState?: unknown;
   requestedDuration?: unknown;
+  generateAudio?: unknown;
   billingUnit?: unknown;
   billingUnitCredits?: unknown;
   actualDurationSeconds?: unknown;
@@ -393,6 +403,7 @@ export async function videoRequestFingerprint(input: ParsedVideoRequest): Promis
     ratio: input.ratio,
     size: input.size ?? null,
     resolution: input.resolution,
+    generateAudio: input.generateAudio,
     referenceImages: input.referenceImages ?? [],
     firstImage: input.firstImage ?? null,
     lastImage: input.lastImage ?? null,
@@ -534,9 +545,16 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   const { model, route, publicIdentity } = resolved;
   const input = resolveVideoRequest(model, parsed);
   validateVideoRequest(model, input);
+  console.info('[video] submit received', {
+    jobId: requestId,
+    clientRequestId: input.clientRequestId || requestId,
+    model: input.model,
+    phase: 'received'
+  });
   const credits = newApiFixedCreditsForRequest(model, {
     duration: input.duration,
     resolution: input.resolution,
+    generate_audio: input.generateAudio,
     ratio: input.ratio
   });
   if (credits == null || credits <= 0) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认该模型实时价格');
@@ -566,6 +584,7 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
     size: input.size,
     resolution: input.resolution,
     referenceImages,
+    generateAudio: input.generateAudio,
     firstImage,
     lastImage,
     referenceVideos,
@@ -589,6 +608,7 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
     ratio: input.ratio,
     size: input.size,
     resolution: input.resolution,
+    generateAudio: input.generateAudio,
     progress: 0,
     requestFingerprint,
     videoSubmitState: 'awaiting_debit',

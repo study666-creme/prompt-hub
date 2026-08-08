@@ -75,6 +75,7 @@ export function videoSubmitParamsFromJob(job: VideoSubmissionJob): NewApiVideoSu
     ratio: requiredString(envelope.ratio, 'ratio'),
     resolution: requiredString(envelope.resolution, 'resolution'),
     size: String(envelope.size || '').trim() || undefined,
+    generateAudio: typeof envelope.generateAudio === 'boolean' ? envelope.generateAudio : undefined,
     referenceImages: strings(envelope.referenceImages),
     firstImage: String(envelope.firstImage || '').trim() || undefined,
     lastImage: String(envelope.lastImage || '').trim() || undefined,
@@ -448,6 +449,12 @@ export async function processVideoPendingSubmit(
 
   let task: NewApiVideoTask;
   try {
+    console.info('[video-submit] upstream submission phase', {
+      jobId: claimed.id,
+      clientRequestId: String(claimedMeta.clientRequestId || videoEnvelopeKey(claimedMeta)),
+      model: String(claimedMeta.model || ''),
+      phase: 'newapi_submit'
+    });
     task = await submit(
       newApiKeyForRoute(apiKey, routeChannelId ? { channelId: routeChannelId } : null),
       env.NEWAPI_API_BASE_URL,
@@ -455,6 +462,13 @@ export async function processVideoPendingSubmit(
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || 'video submit failed');
+    console.error('[video-submit] upstream submission failed', {
+      jobId: claimed.id,
+      clientRequestId: String(claimedMeta.clientRequestId || videoEnvelopeKey(claimedMeta)),
+      model: String(claimedMeta.model || ''),
+      phase: 'newapi_submit',
+      errorCode: error instanceof ApiError ? error.code : error instanceof Error ? error.name : 'UPSTREAM_SUBMIT_FAILED'
+    });
     if (isDefinitiveVideoSubmitError(error)) {
       await failClaimedVideoSubmit(admin, claimed, message, now);
       return 'processed';
@@ -474,6 +488,15 @@ export async function processVideoPendingSubmit(
     );
     return 'processed';
   }
+
+  console.info('[video-submit] upstream submission phase', {
+    jobId: claimed.id,
+    clientRequestId: String(claimedMeta.clientRequestId || videoEnvelopeKey(claimedMeta)),
+    model: String(claimedMeta.model || ''),
+    phase: 'accepted',
+    upstreamTaskId: task.id,
+    status: task.status
+  });
 
   const resultUncertain = task.status === 'unknown';
   const nextMeta = {

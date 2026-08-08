@@ -49,7 +49,7 @@ vi.mock('../../lib/video-provider-submit', async importOriginal => ({
   processVideoPendingSubmit: mocks.processVideoPendingSubmit
 }));
 
-import { videoRoutes } from './video';
+import { parseVideoRequestBody, videoRoutes } from './video';
 
 const userId = '11111111-1111-4111-8111-111111111111';
 const model = {
@@ -141,6 +141,14 @@ describe('video creation durability', () => {
     mocks.createAdminClient.mockReturnValue({ from: vi.fn(() => query) });
   });
 
+  it('preserves an explicit disabled audio-generation switch', () => {
+    expect(parseVideoRequestBody({
+      model: model.id,
+      prompt: '镜头缓慢推进',
+      generate_audio: 'false'
+    })).toMatchObject({ generateAudio: false });
+  });
+
   it('persists a complete recovery envelope before debit and queues the same job', async () => {
     const env = {
       CORS_ORIGINS: '',
@@ -159,7 +167,8 @@ describe('video creation durability', () => {
         prompt: '镜头缓慢推进',
         duration: 8,
         ratio: '16:9',
-        resolution: '720p'
+        resolution: '720p',
+        generate_audio: true
       })
     }, env);
 
@@ -177,7 +186,8 @@ describe('video creation durability', () => {
         prompt: '镜头缓慢推进',
         duration: 8,
         ratio: '16:9',
-        resolution: '720p'
+        resolution: '720p',
+        generateAudio: true
       }
     });
     expect(mocks.deductUserCredits).toHaveBeenCalledWith(

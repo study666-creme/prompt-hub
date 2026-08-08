@@ -137,7 +137,7 @@ npm exec wrangler secret put NEWAPI_VIDEO_API_KEY
 7. cron 每轮必须先 poll 上游状态，再执行 timeout finalize；这样刚恢复 completed/processing/明确 failed 的任务会先离开未知状态，不会与超时退款竞争。
 8. 完成后仅在上游明确返回 `billed_duration_seconds` 时核算时长差价；播放内容通过 `/v1/videos/{taskId}/content` 代理，不请求任意结果 URL。
 
-Prompt Hub 的视频契约只包含规范化 `duration`、`ratio`、`resolution` 和引用素材。具体模型需要 `aspect_ratio` 还是 `ratio`、固定分辨率时忽略什么字段，属于 New API 能力层。目录未声明 `resolution` 时，以 `-480p`、`-720p` 或 `-1080p` 结尾的固定视频模型 ID 必须推导出对应分辨率；目录声明了固定值或可选值时仍以目录为准，不能用 ID 覆盖用户选择。
+Prompt Hub 的视频契约包含规范化 `duration`、`ratio`、`resolution`、可选 `generate_audio` 和引用素材。`generate_audio` 只接受布尔值或字符串 `true`/`false`，持久化在同一提交 envelope 中，并原样以蛇形字段转发到 New API；它必须参与请求指纹与任何按该字段定义的目录价格档位。具体模型需要 `aspect_ratio` 还是 `ratio`、固定分辨率时忽略什么字段，属于 New API 能力层。目录未声明 `resolution` 时，以 `-480p`、`-720p` 或 `-1080p` 结尾的固定视频模型 ID 必须推导出对应分辨率；目录声明了固定值或可选值时仍以目录为准，不能用 ID 覆盖用户选择。
 
 ## 本地与部署
 

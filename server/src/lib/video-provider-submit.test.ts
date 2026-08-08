@@ -119,7 +119,8 @@ function queuedJob(): MutableJob {
         prompt: 'slow camera move',
         duration: 6,
         ratio: '16:9',
-        resolution: '720p'
+        resolution: '720p',
+        generateAudio: true
       }
     }
   };
