@@ -97,6 +97,7 @@ export type MjButtonPublic = {
 
 const UPSTREAM_TO_SPEC: Record<string, MjVersionSpec> = {
   'mj-v6.1': { version: '6.1' },
+  'mj-v81': { version: '8.1' },
   'mj-v8.1': { version: '8.1' },
   'mj-v7': { version: '7' },
   'mj-niji7': { version: '7', niji: true },
@@ -113,7 +114,7 @@ export function isMidjourneyUpstream(upstream: string): boolean {
 
 export function isMidjourneyModelId(modelId: string): boolean {
   const id = normalizeImageModelId(modelId);
-  return id.startsWith('apimart-mj-');
+  return id.startsWith('mj-') || id.startsWith('apimart-mj-');
 }
 
 export function mjVersionFromUpstream(upstream: string): MjVersionSpec | null {

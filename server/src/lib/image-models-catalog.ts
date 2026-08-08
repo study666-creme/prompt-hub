@@ -23,6 +23,8 @@ export type ImageModelCatalogEntry = {
   pricingBySpeed?: boolean;
   defaultCreditsBySpeed?: Partial<Record<MjSpeedKey, number>>;
   fixedQualityLow?: boolean;
+  /** Historical compatibility entry; never expose it in public catalogs. */
+  legacyOnly?: boolean;
   sortOrder: number;
 };
 
@@ -178,59 +180,52 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
 /** MJ 继续使用 Apimart，并保留后台手动速度分档定价。 */
 export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   apimart(midjourney({
-    id: 'apimart-mj-v81',
-    upstream: 'mj-v8.1',
-    label: 'MJ v8.1',
+    id: 'mj-v81',
+    upstream: 'mj-v81',
+    label: 'Midjourney 8.1',
     group: 'new',
     description: '最新主版本 · 写实/概念通用 · 细节与光影最佳',
-    upstreamPoints: 0.1,
+    upstreamPoints: 0.4,
     refundOnViolation: true,
     resolutions: ['1k'],
-    pricingBySpeed: true,
-    defaultCreditsBySpeed: { relax: 8, fast: 10, turbo: 12 },
-    defaultCredits: 7,
+    defaultCredits: 40,
     sortOrder: 110
   })),
   apimart(midjourney({
-    id: 'apimart-mj-v7',
+    id: 'mj-v7',
     upstream: 'mj-v7',
-    label: 'MJ v7',
+    label: 'Midjourney 7',
     group: 'classic',
     description: '上一代主力 · 复杂构图稳定 · 风格均衡',
-    upstreamPoints: 0.1,
+    upstreamPoints: 0.4,
     refundOnViolation: true,
     resolutions: ['1k'],
-    pricingBySpeed: true,
-    defaultCreditsBySpeed: { relax: 8, fast: 10, turbo: 12 },
-    defaultCredits: 7,
+    defaultCredits: 40,
     sortOrder: 111
   })),
   apimart(midjourney({
     id: 'apimart-mj-v61',
     upstream: 'mj-v6.1',
-    label: 'MJ v6.1',
+    label: 'Midjourney 6.1',
     group: 'classic',
-    description: '经典 v6 · 风格稳定 · 适合批量出图',
-    upstreamPoints: 0.1,
+    description: '历史 Midjourney 6.1 任务兼容入口，不在公开模型目录展示。',
+    upstreamPoints: 0.4,
     refundOnViolation: true,
     resolutions: ['1k'],
-    pricingBySpeed: true,
-    defaultCreditsBySpeed: { relax: 8, fast: 10, turbo: 12 },
-    defaultCredits: 7,
+    defaultCredits: 40,
+    legacyOnly: true,
     sortOrder: 112
   })),
   apimart(midjourney({
-    id: 'apimart-mj-niji7',
+    id: 'mj-niji7',
     upstream: 'mj-niji7',
-    label: 'MJ Niji 7',
+    label: 'Midjourney Niji 7',
     group: 'new',
     description: '动漫/二次元专版 · 角色与插画表现力强',
-    upstreamPoints: 0.1,
+    upstreamPoints: 0.4,
     refundOnViolation: true,
     resolutions: ['1k'],
-    pricingBySpeed: true,
-    defaultCreditsBySpeed: { relax: 8, fast: 10, turbo: 12 },
-    defaultCredits: 7,
+    defaultCredits: 40,
     sortOrder: 113
   }))
 ];
@@ -246,6 +241,7 @@ export function isPublicNewApiImageEntry(entry: ImageModelCatalogEntry): boolean
 }
 
 export function isRetainedPublicImageEntry(entry: ImageModelCatalogEntry): boolean {
+  if (entry.legacyOnly) return false;
   return isPublicNewApiImageEntry(entry)
     || (entry.provider === 'apimart' && entry.uiFamily === 'midjourney');
 }
@@ -254,7 +250,7 @@ export function imageModelUiFamily(modelId: string): ImageModelUiFamily {
   const entry = getCatalogEntry(modelId);
   if (entry?.uiFamily) return entry.uiFamily;
   const id = String(modelId || '').toLowerCase();
-  if (id.startsWith('apimart-mj-')) return 'midjourney';
+  if (id.startsWith('apimart-mj-') || id.startsWith('mj-')) return 'midjourney';
   if (id.includes('seedream') || id === 'jimeng') return 'jimeng';
   if (id.includes('banana')) return 'banana';
   return 'gim2';
@@ -321,19 +317,25 @@ const LEGACY_MODEL_MAP: Record<string, string> = {
   'apimart-gemini-3-1-flash-official': 'lingtu-2',
   'apimart-gemini-3-pro-preview': 'lingtu-pro',
   'apimart-gemini-3-pro-official': 'lingtu-pro',
+  'apimart-mj-v81': 'mj-v81',
+  'apimart-mj-v7': 'mj-v7',
+  'apimart-mj-niji7': 'mj-niji7',
   'ithink-gpt-image-2-slow': 'image2',
   'mooko-gpt-image-2-pro': 'image2-pro'
 };
 
 export function normalizeImageModelId(raw?: string | null): string {
-  const id = String(raw || '').trim().toLowerCase();
-  if (!id) return 'image2';
-  return LEGACY_MODEL_MAP[id] || id;
+  const value = String(raw || '').trim();
+  if (!value) return 'image2';
+  const lower = value.toLowerCase();
+  const legacy = LEGACY_MODEL_MAP[lower];
+  if (legacy) return legacy;
+  return IMAGE_MODEL_CATALOG.find(model => model.id.toLowerCase() === lower)?.id || value;
 }
 
 export function getCatalogEntry(modelId: string): ImageModelCatalogEntry | null {
   const id = normalizeImageModelId(modelId);
-  return IMAGE_MODEL_CATALOG.find((model) => model.id === id) || null;
+  return IMAGE_MODEL_CATALOG.find((model) => model.id.toLowerCase() === id.toLowerCase()) || null;
 }
 
 export function catalogById(): Map<string, ImageModelCatalogEntry> {
