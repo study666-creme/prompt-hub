@@ -405,7 +405,7 @@ export function resolveImageModelConfig(
   catalogEntries: readonly ImageModelCatalogEntry[] = IMAGE_MODEL_CATALOG
 ): ResolvedImageModel | null {
   const normalizedId = normalizeImageModelId(modelId);
-  const catalog = catalogEntries.find((entry) => entry.id === normalizedId) || null;
+  const catalog = catalogEntries.find((entry) => entry.id.toLowerCase() === normalizedId.toLowerCase()) || null;
   if (!catalog) return null;
   const override = settings.models[catalog.id] || {};
   let status = resolveModelStatus(override);

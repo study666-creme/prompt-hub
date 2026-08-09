@@ -25,24 +25,6 @@ export async function processFastProviderQueueMessage(
   const meta = (job.meta as Record<string, unknown>) || {};
   if (meta.provider !== 'newapi') return 'ignored';
   const state = String(meta.fastSubmitState || '');
-  if (state === 'running') {
-    const startedAt = Date.parse(String(meta.fastSubmitStartedAt || ''));
-    const runningMs = Number.isFinite(startedAt) ? Date.now() - startedAt : 0;
-    if (runningMs < 10 * 60_000) return 'retry';
-    const resetMeta = {
-      ...meta,
-      fastSubmitState: 'queued',
-      fastSubmitRecoveredAt: new Date().toISOString()
-    };
-    const { error: resetError } = await admin
-      .from('generation_requests')
-      .update({ meta: resetMeta })
-      .eq('id', job.id)
-      .eq('status', 'processing')
-      .filter('meta->>fastSubmitState', 'eq', 'running');
-    if (resetError) throw resetError;
-    return 'retry';
-  }
   if (state !== 'queued') return 'ignored';
 
   const upstream = upstreamBindingsFromEnv(env);

@@ -1,11 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Env } from '../env';
 import { mookoImageFetchCandidates } from './mooko';
-import { cardImageExists, hasR2, mediaStorageMode, uploadCardImage, uploadToR2 } from './r2-storage';
+import { cardImageExists, uploadCardImage } from './r2-storage';
 import { storageObjectExistsLight } from './media-cdn';
 
 const BUCKET = 'card-images';
 const STORAGE_PREFIX = `storage://${BUCKET}/`;
+const MAX_REMOTE_IMAGE_BYTES = 64 * 1024 * 1024;
+const REMOTE_IMAGE_FETCH_TIMEOUT_MS = 20_000;
 
 export function toStorageRef(path: string): string {
   return STORAGE_PREFIX + path.replace(/^\//, '');
@@ -38,19 +40,13 @@ export async function archiveGenerationResultUrls(
     const archiveKey = i === 0 ? jobId : `${jobId}-extra-${i}`;
     if (isDataImageUrl(raw)) {
       if (!isParseableDataImageUrl(raw)) {
-        console.warn('[archive] skip invalid data url', archiveKey);
-        continue;
+        throw new Error('invalid_data_url');
       }
       out.push(await archiveRemoteImage(admin, userId, archiveKey, raw, { env, maxAttempts: 3 }));
       continue;
     }
     if (/^https?:\/\//i.test(raw)) {
-      try {
-        out.push(await archiveRemoteImage(admin, userId, archiveKey, raw, { env, maxAttempts: 2 }));
-      } catch (e) {
-        console.warn('[archive] keep upstream http for pending', archiveKey, e);
-        out.push(raw);
-      }
+      out.push(await archiveRemoteImage(admin, userId, archiveKey, raw, { env, maxAttempts: 2 }));
     }
   }
   return out;
@@ -145,47 +141,29 @@ export function isLikelyDataImageUrl(dataUrl: string | null | undefined): boolea
   return b64.length >= 80 && b64.length % 4 === 0;
 }
 
-function bytesFromAtobBinary(binary: string): Uint8Array {
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
-  return out;
-}
-
-function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const out = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(out).set(bytes);
-  return out;
-}
-
-/** 分块 atob，避免 2K 大图单次解码触发 Worker CPU 上限 */
+/** 分块 atob，并直接写入最终缓冲区，避免 4K 图片同时保留多份解码结果。 */
 function base64ToBytes(b64: string): ArrayBuffer | null {
   try {
     const quantum = 4;
     const chunkChars = quantum * 24 * 1024;
-    if (b64.length <= chunkChars) {
-      const single = bytesFromAtobBinary(atob(b64));
-      return copyBytesToArrayBuffer(single);
-    }
-    const parts: Uint8Array[] = [];
-    let total = 0;
+    const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+    const expectedBytes = Math.max(0, Math.floor(b64.length / 4) * 3 - padding);
+    const out = new Uint8Array(expectedBytes);
+    let written = 0;
     let off = 0;
     while (off < b64.length) {
       let end = Math.min(off + chunkChars, b64.length);
       if (end < b64.length) end -= (end - off) % quantum;
       const slice = b64.slice(off, end);
       if (!slice) break;
-      const bytes = bytesFromAtobBinary(atob(slice));
-      parts.push(bytes);
-      total += bytes.length;
+      const binary = atob(slice);
+      for (let i = 0; i < binary.length; i += 1) {
+        out[written++] = binary.charCodeAt(i);
+      }
       off = end;
     }
-    const out = new Uint8Array(total);
-    let pos = 0;
-    for (const part of parts) {
-      out.set(part, pos);
-      pos += part.length;
-    }
-    return copyBytesToArrayBuffer(out);
+    if (written !== expectedBytes) return out.slice(0, written).buffer as ArrayBuffer;
+    return out.buffer as ArrayBuffer;
   } catch {
     return null;
   }
@@ -242,54 +220,63 @@ export async function archiveRemoteImage(
     if (path && (await verifyStoredObject(admin, path, env))) return remoteUrl;
   }
 
+  let buf: ArrayBuffer;
+  let mime = 'image/jpeg';
+  if (/^data:image\//i.test(remoteUrl)) {
+    const parsed = parseDataImageUrl(remoteUrl);
+    if (!parsed) throw new Error('invalid_data_url');
+    buf = parsed.bytes;
+    mime = parsed.mime;
+  } else {
+    const candidates = mookoImageFetchCandidates(remoteUrl);
+    let response: Response | null = null;
+    let lastStatus = 0;
+    let lastFetchError: unknown = null;
+    for (const fetchUrl of candidates) {
+      try {
+        const current = await fetch(fetchUrl, {
+          headers: { Accept: 'image/*' },
+          signal: AbortSignal.timeout(REMOTE_IMAGE_FETCH_TIMEOUT_MS)
+        });
+        lastStatus = current.status;
+        if (!current.ok) {
+          await current.body?.cancel().catch(() => undefined);
+          continue;
+        }
+        response = current;
+        break;
+      } catch (error) {
+        lastFetchError = error;
+      }
+    }
+    if (!response) {
+      if (lastFetchError instanceof Error && !lastStatus) throw lastFetchError;
+      throw new Error(`fetch_image_failed_${lastStatus || 0}`);
+    }
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    mime = contentType.split(';')[0] || 'image/jpeg';
+    if (!/^image\//i.test(mime)) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error('fetch_image_invalid_content_type');
+    }
+    const contentLength = Number(response.headers.get('content-length'));
+    if (Number.isFinite(contentLength) && contentLength > MAX_REMOTE_IMAGE_BYTES) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error('fetch_image_too_large');
+    }
+    // Read the temporary result exactly once. Storage retries below reuse these
+    // bytes so a short-lived or single-read URL is never fetched a second time.
+    buf = await response.arrayBuffer();
+  }
+  if (!buf.byteLength) throw new Error('empty_image');
+  if (buf.byteLength > MAX_REMOTE_IMAGE_BYTES) throw new Error('fetch_image_too_large');
+
+  const path = generatedArchivePath(userId, jobId, mime);
   const maxAttempts = Math.max(1, opts?.maxAttempts ?? 3);
   let lastErr: unknown = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      let buf: ArrayBuffer;
-      let mime = 'image/jpeg';
-      if (/^data:image\//i.test(remoteUrl)) {
-        const parsed = parseDataImageUrl(remoteUrl);
-        if (!parsed) throw new Error('invalid_data_url');
-        buf = parsed.bytes;
-        mime = parsed.mime;
-      } else {
-        const candidates = mookoImageFetchCandidates(remoteUrl);
-        let res: Response | null = null;
-        let lastStatus = 0;
-        for (const fetchUrl of candidates) {
-          res = await fetch(fetchUrl, {
-            headers: { Accept: 'image/*' }
-          });
-          lastStatus = res.status;
-          if (res.ok) break;
-        }
-        if (!res || !res.ok) {
-          throw new Error(`fetch_image_failed_${lastStatus || 0}`);
-        }
-        const contentType = res.headers.get('content-type') || 'image/jpeg';
-        mime = contentType.split(';')[0] || 'image/jpeg';
-        const path = generatedArchivePath(userId, jobId, mime);
-
-        if (env && hasR2(env) && res.body) {
-          const mode = mediaStorageMode(env);
-          const streamed = await uploadToR2(env, path, res.body, mime);
-          if (!streamed) throw new Error('r2_stream_upload_failed');
-          if (mode === 'r2' || mode === 'r2-first') {
-            if (await verifyStoredObject(admin, path, env)) {
-              return toStorageRef(path);
-            }
-            throw new Error('archive_verify_failed');
-          }
-        }
-
-        buf = await res.arrayBuffer();
-      }
-      if (!buf.byteLength) throw new Error('empty_image');
-
-      const path = generatedArchivePath(userId, jobId, mime);
-
       if (env) {
         await uploadCardImage(env, path, buf, mime);
       } else {

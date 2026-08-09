@@ -60,6 +60,7 @@ export type ImageSubmitParams = {
   count?: number;
   refImageUrls?: string[];
   catalogParameters?: NewApiCatalogParameter[];
+  idempotencyKey?: string;
   mjParams?: Record<string, unknown>;
 };
 

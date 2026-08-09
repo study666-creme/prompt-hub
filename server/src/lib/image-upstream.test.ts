@@ -8,6 +8,7 @@ import {
   normalizeImageModelId,
   providerLabel
 } from './image-models-catalog';
+import { computeImageGenerationCost, mergeImageModelSettings } from './image-model-settings';
 
 describe('image model catalog', () => {
   it('lists only current newapi and Midjourney models', () => {
@@ -48,14 +49,25 @@ describe('image model catalog', () => {
     expect(banana?.defaultCredits).toBe(11);
   });
 
-  it('apimart catalog keeps only MJ', () => {
+  it('publishes only the three current MJ ids and keeps v6.1 hidden for history', () => {
     expect(APIMART_IMAGE_MODEL_CATALOG).toHaveLength(4);
     expect(APIMART_IMAGE_MODEL_CATALOG.map((model) => model.id)).toEqual([
-      'apimart-mj-v81',
-      'apimart-mj-v7',
+      'mj-v81',
+      'mj-v7',
       'apimart-mj-v61',
-      'apimart-mj-niji7'
+      'mj-niji7'
     ]);
+    expect(APIMART_IMAGE_MODEL_CATALOG.filter(isRetainedPublicImageEntry).map((model) => model.id)).toEqual([
+      'mj-v81',
+      'mj-v7',
+      'mj-niji7'
+    ]);
+    expect(getCatalogEntry('mj-v81')).toMatchObject({
+      upstream: 'mj-v81',
+      label: 'Midjourney 8.1',
+      defaultCredits: 40
+    });
+    expect(getCatalogEntry('mj-v81')?.pricingBySpeed).toBeUndefined();
   });
 
   it('provider labels hide vendor names', () => {
@@ -70,7 +82,7 @@ describe('image model catalog', () => {
       || (model.provider === 'apimart' && model.uiFamily === 'midjourney')
     ))).toBe(true);
     expect(retained.filter((model) => model.provider === 'newapi')).toHaveLength(9);
-    expect(retained.filter((model) => model.uiFamily === 'midjourney')).toHaveLength(4);
+    expect(retained.filter((model) => model.uiFamily === 'midjourney')).toHaveLength(3);
   });
 
   it('normalizes legacy ids', () => {
@@ -84,5 +96,17 @@ describe('image model catalog', () => {
     expect(normalizeImageModelId('gpt-image-2-official-4k')).toBe('image2-hd');
     expect(normalizeImageModelId('apimart-gpt-image-2')).toBe('image2');
     expect(normalizeImageModelId('mooko-gpt-image-2-pro')).toBe('image2-pro');
+    expect(normalizeImageModelId('apimart-mj-v81')).toBe('mj-v81');
+    expect(normalizeImageModelId('apimart-mj-v7')).toBe('mj-v7');
+    expect(normalizeImageModelId('apimart-mj-niji7')).toBe('mj-niji7');
+  });
+
+  it('charges one MJ call as exactly 40 credits regardless of requested speed', () => {
+    const settings = mergeImageModelSettings(null);
+    const relax = computeImageGenerationCost(settings, 'mj-v81', '1k', null, false, { mjSpeed: 'relax' });
+    const turbo = computeImageGenerationCost(settings, 'mj-v81', '1k', null, false, { mjSpeed: 'turbo' });
+
+    expect(relax).toMatchObject({ base: 40, final: 40, modelId: 'mj-v81' });
+    expect(turbo).toMatchObject({ base: 40, final: 40, modelId: 'mj-v81' });
   });
 });

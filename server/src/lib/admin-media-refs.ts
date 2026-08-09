@@ -258,6 +258,7 @@ function toStorageRef(path: string): string {
 }
 
 export type OrphanRisk = 'safe' | 'recoverable' | 'relink';
+type WaitUntilContext = { waitUntil(promise: Promise<unknown>): void };
 
 export type BucketOrphanItem = {
   id: string;
@@ -529,7 +530,7 @@ async function ensureOrphanScanSnapshot(
   admin: SupabaseClient,
   env: Env,
   refresh: boolean,
-  executionCtx?: ExecutionContext
+  executionCtx?: WaitUntilContext
 ): Promise<OrphanScanSnapshot> {
   if (!refresh) {
     const cached = await readOrphanScanCache();
@@ -623,7 +624,7 @@ export async function listBucketOrphanFiles(
     offset: number;
     risk?: OrphanRisk | 'all';
     refresh?: boolean;
-    executionCtx?: ExecutionContext;
+    executionCtx?: WaitUntilContext;
   }
 ): Promise<BucketOrphanListResult> {
   if (!hasR2(env)) {

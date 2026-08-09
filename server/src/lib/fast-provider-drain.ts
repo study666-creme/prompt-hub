@@ -11,6 +11,9 @@ type DrainContext = {
   maxSubmit?: number;
 };
 
+const NEWAPI_IDEMPOTENT_RECOVERY_DELAY_MS = 60_000;
+const LEGACY_RUNNING_RECOVERY_DELAY_MS = 15 * 60_000;
+
 function readFastMeta(meta: Record<string, unknown>) {
   return {
     provider: String(meta.provider || '') as ImageUpstreamProvider,
@@ -21,6 +24,22 @@ function readFastMeta(meta: Record<string, unknown>) {
       ? (meta.refImageUrls as string[]).filter(Boolean)
       : undefined
   };
+}
+
+export function isFastProviderSubmitRecoverable(row: JobRow, now = Date.now()): boolean {
+  const meta = (row.meta as Record<string, unknown>) || {};
+  const m = readFastMeta(meta);
+  if (m.provider !== 'grsai' && m.provider !== 'apimart' && m.provider !== 'newapi') return false;
+  if (typeof meta.upstreamTaskId === 'string' && meta.upstreamTaskId) return false;
+  if (m.submitState === 'queued') return true;
+
+  const startedAt = Date.parse(String(meta.fastSubmitStartedAt || ''));
+  const elapsed = Number.isFinite(startedAt) ? now - startedAt : Number.POSITIVE_INFINITY;
+  if (m.provider === 'newapi') {
+    return (m.submitState === 'running' || m.submitState === 'uncertain')
+      && elapsed >= NEWAPI_IDEMPOTENT_RECOVERY_DELAY_MS;
+  }
+  return m.submitState === 'running' && elapsed >= LEGACY_RUNNING_RECOVERY_DELAY_MS;
 }
 
 /** GrsAI / Apimart：Cron / 列表轮询补提，避免 waitUntil 丢失导致长期卡在「正在提交」 */
@@ -47,13 +66,7 @@ export async function drainFastProviderPendingSubmits(
     return { submitted: 0, queued: 0 };
   }
 
-  const queued = ((rows || []) as JobRow[]).filter((row) => {
-    const meta = (row.meta as Record<string, unknown>) || {};
-    const m = readFastMeta(meta);
-    if (m.provider !== 'grsai' && m.provider !== 'apimart' && m.provider !== 'newapi') return false;
-    if (typeof meta.upstreamTaskId === 'string' && meta.upstreamTaskId) return false;
-    return m.submitState === 'queued';
-  });
+  const queued = ((rows || []) as JobRow[]).filter((row) => isFastProviderSubmitRecoverable(row));
 
   const maxSubmit = Math.min(12, Math.max(1, ctx?.maxSubmit ?? 4));
   const batch = queued.slice(0, maxSubmit);
@@ -71,7 +84,11 @@ export async function drainFastProviderPendingSubmits(
       upstream,
       provider,
       fastSubmitParamsFromJob(row),
-      env
+      env,
+      {
+        reclaimRunning: m.submitState === 'running',
+        reclaimUncertain: provider === 'newapi' && m.submitState === 'uncertain'
+      }
     );
   }).filter(Boolean) as Promise<unknown>[];
 

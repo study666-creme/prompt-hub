@@ -43,6 +43,23 @@ export type JobRow = {
   completed_at?: string | null;
 };
 
+const DATABASE_GENERATION_QUALITIES = new Set(['standard', 'high', 'ultra']);
+
+/** Compatibility for databases created before low/medium quality tiers existed. */
+export function databaseGenerationQuality(quality: string | null | undefined): string {
+  const normalized = String(quality || 'standard').trim().toLowerCase();
+  return DATABASE_GENERATION_QUALITIES.has(normalized) ? normalized : 'standard';
+}
+
+/** The public/upstream quality remains exact even when the legacy column needs a fallback. */
+export function requestedGenerationQuality(job: Pick<JobRow, 'quality' | 'meta'>): string {
+  const meta = (job.meta as Record<string, unknown>) || {};
+  const requested = typeof meta.requestedQuality === 'string'
+    ? meta.requestedQuality.trim().toLowerCase()
+    : '';
+  return requested || String(job.quality || 'standard').trim().toLowerCase() || 'standard';
+}
+
 export async function refundGenerationCredits(
   admin: SupabaseClient,
   userId: string,
@@ -169,6 +186,7 @@ export function slowProviderProgressNote(
     const st = String(meta.fastSubmitState || '');
     if (st === 'queued') return '已扣积分，正在提交…';
     if (st === 'running') return '提交中，请稍候…';
+    if (st === 'uncertain') return '提交结果待确认，系统不会重复发送请求，请勿再次提交…';
     if (st === 'done' && !meta.upstreamTaskId) return '已响应，正在同步…';
   }
   return null;
@@ -655,13 +673,14 @@ export async function pollAndUpdateJob(
         refunded: !!meta.refunded
       };
     }
-    if (st === 'queued' || st === 'running') {
-      if (queuedMs > 6 * 60 * 1000) {
-        await finalizeFailedJob(admin, userId, job, 'upstream_submit_stale');
+    if (st === 'queued' || st === 'running' || st === 'uncertain') {
+      if (queuedMs > 18 * 60 * 1000) {
+        const failure = st === 'uncertain' ? 'upstream_submission_unknown' : 'upstream_submit_stale';
+        await finalizeFailedJob(admin, userId, job, failure);
         return {
           status: 'failed',
           imageUrl: null,
-          errorMessage: 'upstream_submit_stale',
+          errorMessage: failure,
           refunded: true
         };
       }
@@ -1034,11 +1053,12 @@ async function completeJobFromPoll(
   polled: { imageUrl: string | null; imageUrls?: string[] },
   env?: Env
 ): Promise<{
-  status: 'completed';
+  status: 'processing' | 'completed';
   imageUrl: string | null;
   errorMessage: null;
   refunded: boolean;
   extraImageUrls?: string[];
+  progressNote?: string | null;
 }> {
   const meta = (job.meta as Record<string, unknown>) || {};
   const isMj = meta.isMidjourney === true;
@@ -1073,46 +1093,38 @@ async function completeJobFromPoll(
     mjButtons = filterMjButtonsForClient(mjButtons as MjButtonPublic[]);
   }
 
-  /** 4K 等大图：先标记完成并返回上游临时链，R2 归档放后台（避免轮询 35s 超时） */
-  if (isRemoteHttpImageUrl(primary)) {
+  const archiveTargets = isMj ? [primary] : [primary, ...extras];
+  let archivedTargets: string[];
+  try {
+    archivedTargets = await archiveGenerationResultUrls(admin, userId, job.id, archiveTargets, env);
+    if (!archivedTargets[0] || !isStorageRef(archivedTargets[0])) {
+      throw new Error('upstream_image_archive_failed');
+    }
+  } catch (error) {
+    const archiveError = String(error instanceof Error ? error.message : error).slice(0, 400);
     await admin
       .from('generation_requests')
       .update({
-        status: 'completed',
-        result_image_url: primary,
-        error_message: null,
-        completed_at: new Date().toISOString(),
         meta: {
           ...meta,
-          extraImageUrls: isMj ? undefined : extras.length ? extras : meta.extraImageUrls || undefined,
-          ...(isMj && mjParsed
-            ? {
-                mjGridUrls: mjParsed.tiles.length ? mjParsed.tiles : undefined,
-                mjCompositeUrl: mjParsed.composite || undefined,
-                mjGalleryUrls: mjGallery.length ? mjGallery : undefined,
-                mjAllUrls: allUrls.length ? allUrls : undefined
-              }
-            : {}),
+          syncImageUrl: primary,
+          ...(!isMj && archiveTargets.length > 1 ? { mookoSubmitImageUrls: archiveTargets } : {}),
           archivePending: true,
-          upstreamImageUrl: primary,
-          ...(mjButtons?.length ? { mjButtons } : {})
+          archiveError
         }
       })
       .eq('id', job.id);
     return {
-      status: 'completed',
-      imageUrl: primary,
+      status: 'processing',
+      imageUrl: null,
       errorMessage: null,
       refunded: false,
-      extraImageUrls: isMj ? undefined : extras.length ? extras : undefined
+      progressNote: '图片已生成，正在安全保存结果'
     };
   }
 
-  const storedUrl = await ensureJobImageArchived(admin, userId, {
-    ...job,
-    status: 'completed',
-    result_image_url: primary
-  }, env);
+  const storedUrl = archivedTargets[0];
+  const storedExtras = isMj ? extras : archivedTargets.slice(1);
   await admin
     .from('generation_requests')
     .update({
@@ -1122,10 +1134,13 @@ async function completeJobFromPoll(
       completed_at: new Date().toISOString(),
       meta: {
         ...meta,
-        extraImageUrls: isMj ? undefined : extras.length ? extras : meta.extraImageUrls || undefined,
+        syncImageUrl: storedUrl,
+        mookoSubmitImageUrls: undefined,
+        extraImageUrls: isMj ? undefined : storedExtras.length ? storedExtras : meta.extraImageUrls || undefined,
         recoveredFromUpstream: meta.recoveredFromUpstream || undefined,
         archived: true,
         archivePending: false,
+        archiveError: null,
         ...(isMj && mjParsed
           ? {
               mjGridUrls: mjParsed.tiles.length ? mjParsed.tiles : undefined,
@@ -1143,7 +1158,7 @@ async function completeJobFromPoll(
     imageUrl: storedUrl,
     errorMessage: null,
     refunded: false,
-    extraImageUrls: isMj ? undefined : extras.length ? extras : undefined
+    extraImageUrls: isMj ? undefined : storedExtras.length ? storedExtras : undefined
   };
 }
 
@@ -1224,11 +1239,12 @@ async function tryRecoverJobFromUpstream(
   provider: ReturnType<typeof readJobProvider>,
   env?: Env
 ): Promise<{
-  status: 'completed' | 'failed';
+  status: 'processing' | 'completed' | 'failed';
   imageUrl: string | null;
   errorMessage: string | null;
   refunded: boolean;
   extraImageUrls?: string[];
+  progressNote?: string | null;
 } | null> {
   const polled = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
     attempts: 10,

@@ -1,5 +1,5 @@
 import type { Env } from '../env';
-import { type JobRow } from './generation-jobs';
+import { requestedGenerationQuality, type JobRow } from './generation-jobs';
 import { upstreamBindingsFromEnv } from './image-upstream';
 import { completeMookoJobWithImage } from './mooko-submit';
 import { processIthinkPendingSubmit } from './ithink-submit';
@@ -77,7 +77,7 @@ export async function drainIthinkPendingSubmits(
       upstreamModel: env.ITHINK_UPSTREAM_MODEL?.trim() || m.upstreamModel,
       prompt: String(row.prompt || ''),
       resolution: '1k',
-      quality: String(row.quality || 'standard'),
+      quality: requestedGenerationQuality(row),
       size: m.size
     }).catch((e) => {
       console.error('[ithink-drain] submit failed', row.id, e);

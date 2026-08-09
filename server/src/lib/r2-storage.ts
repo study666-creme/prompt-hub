@@ -180,12 +180,14 @@ export async function uploadCardImage(
   const mode = mediaStorageMode(env);
   const key = cleanPath(path);
   if (!key) return;
+  let storedInR2 = false;
 
   if (hasR2(env) && mode !== 'supabase') {
     const ok = await uploadToR2(env, key, body, contentType);
     if (!ok) {
       throw new Error('R2 图片上传失败，请检查桶绑定 prompt-hub-card-images');
     }
+    storedInR2 = true;
     if (mode === 'r2') return;
   }
 
@@ -195,7 +197,9 @@ export async function uploadCardImage(
       contentType,
       upsert: true
     });
-    if (error) throw error;
+    // R2 is authoritative in r2-first mode. The Supabase copy is best-effort
+    // and may reject large 1K/4K outputs after R2 has already stored them.
+    if (error && !(mode === 'r2-first' && storedInR2)) throw error;
   }
 }
 

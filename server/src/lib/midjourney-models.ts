@@ -31,6 +31,8 @@ export type MjImagineBody = {
   sw?: number;
   cref?: string;
   sref?: string;
+  dref?: string;
+  dw?: number;
   stop?: number;
   extra?: string;
 };
@@ -97,6 +99,7 @@ export type MjButtonPublic = {
 
 const UPSTREAM_TO_SPEC: Record<string, MjVersionSpec> = {
   'mj-v6.1': { version: '6.1' },
+  'mj-v81': { version: '8.1' },
   'mj-v8.1': { version: '8.1' },
   'mj-v7': { version: '7' },
   'mj-niji7': { version: '7', niji: true },
@@ -113,7 +116,7 @@ export function isMidjourneyUpstream(upstream: string): boolean {
 
 export function isMidjourneyModelId(modelId: string): boolean {
   const id = normalizeImageModelId(modelId);
-  return id.startsWith('apimart-mj-');
+  return id.startsWith('mj-') || id.startsWith('apimart-mj-');
 }
 
 export function mjVersionFromUpstream(upstream: string): MjVersionSpec | null {
@@ -274,6 +277,7 @@ export function buildImagineBody(
   const body: MjImagineBody = {
     prompt,
     version: spec.version,
+    speed: 'relax',
     ...(spec.niji ? { niji: true } : {})
   };
   if (opts.size) body.size = opts.size;
@@ -307,27 +311,28 @@ export function buildImagineBody(
   if (sw !== undefined) body.sw = Math.floor(sw);
   const stop = num('stop');
   if (stop !== undefined) body.stop = Math.floor(stop);
+  const dw = num('dw');
+  if (dw !== undefined) body.dw = dw;
 
   const neg = str('negativePrompt') || str('negative_prompt');
-  if (neg) body.negative_prompt = neg.slice(0, 500);
+  if (neg) body.negative_prompt = neg.slice(0, 4000);
   const quality = str('quality');
   if (quality) body.quality = quality;
   const style = str('style');
   if (style) body.style = style;
   const extra = str('extra');
-  if (extra) body.extra = extra.slice(0, 200);
+  if (extra) body.extra = extra.slice(0, 1000);
   const cref = str('cref');
   if (cref) body.cref = cref;
   const sref = str('sref');
   if (sref) body.sref = sref;
+  const dref = str('dref');
+  if (dref) body.dref = dref;
 
   if (bool('tile')) body.tile = true;
   if (bool('raw')) body.raw = true;
   if (bool('draft')) body.draft = true;
   if (bool('hd')) body.hd = true;
-
-  const speed = str('speed');
-  if (speed === 'fast' || speed === 'turbo' || speed === 'relax') body.speed = speed;
 
   return body;
 }

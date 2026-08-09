@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Env } from '../env';
-import { finalizeFailedJob, pollAndUpdateJob, type JobRow } from './generation-jobs';
+import { finalizeFailedJob, pollAndUpdateJob, requestedGenerationQuality, type JobRow } from './generation-jobs';
 import { upstreamBindingsFromEnv, type ImageUpstreamBindings } from './image-upstream';
 import {
   finalizeMookoArchivedImage,
@@ -328,7 +328,7 @@ export async function drainMookoPendingSubmits(
       upstreamModel: m.upstreamModel,
       prompt: String(row.prompt || ''),
       resolution: String(row.resolution || '1k'),
-      quality: String(row.quality || 'standard'),
+      quality: requestedGenerationQuality(row),
       size: m.size,
       refImageUrls: m.refImageUrls
     }).catch((e) => {

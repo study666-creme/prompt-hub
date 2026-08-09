@@ -21,6 +21,7 @@ type SubmitParams = {
   count?: number;
   refImageUrls?: string[];
   catalogParameters?: NewApiCatalogParameter[];
+  idempotencyKey?: string;
 };
 
 export const NEWAPI_CHAT_IMAGE_REF_LIMIT = 4;
@@ -29,6 +30,7 @@ export type NewApiPricingRule = {
   model: string;
   credits: number;
   creditsByResolution?: Partial<Record<'1k' | '2k' | '4k', number>>;
+  pricingTiers?: NewApiCatalogPricingTier[];
   description: string | null;
   tags: string;
   label: string;
@@ -146,6 +148,7 @@ export type NewApiTaskPollResult = {
 
 const PRICING_CACHE_MS = 5 * 60_000;
 const ADMIN_ROUTE_CACHE_MS = 30_000;
+const PUBLIC_MIDJOURNEY_MODEL_IDS = new Set(['mj-v81', 'mj-v7', 'mj-niji7']);
 
 const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; description: string }> = {
   'gpt-5.5': { id: 'creative-5-5', label: '全能模型5.5', description: '通用创作与推理模型，最高 xhigh 思考。' },
@@ -299,7 +302,7 @@ function publicPresentation(item: Record<string, unknown>, upstreamModel: string
   const label = canonical?.label || stringValue(declared?.label) || fallback.label;
   return {
     id: canonical?.id || stringValue(declared?.id) || fallback.id,
-    label: canonicalImageFamilyLabel(family, label),
+    label: canonical ? canonicalImageFamilyLabel(family, label) : label,
     description: stringValue(declared?.description) || fallback.description
   };
 }
@@ -311,6 +314,49 @@ function publicEndpoint(modality: NewApiModelModality) {
       ? '/api/v1/video'
       : '/api/v1/chat';
   return { method: 'POST' as const, path, contentType: 'application/json' as const };
+}
+
+function isMidjourneyCatalogItem(
+  item: Record<string, unknown>,
+  upstreamModel: string,
+  modality: NewApiModelModality
+): boolean {
+  if (modality !== 'image' || !PUBLIC_MIDJOURNEY_MODEL_IDS.has(upstreamModel)) return false;
+  const endpoint = item.endpoint && typeof item.endpoint === 'object'
+    ? item.endpoint as Record<string, unknown>
+    : null;
+  return stringValue(endpoint?.path).replace(/\/$/, '') === '/v1/midjourney/generations';
+}
+
+type CatalogImageFamily = ImageModelUiFamily | 'gim2-chat';
+
+function inferredImageFamily(
+  item: Record<string, unknown>,
+  upstreamModel: string,
+  modality: NewApiModelModality
+): CatalogImageFamily | null {
+  if (modality !== 'image') return null;
+  const declared = stringValue(item.family).toLowerCase();
+  if (declared === 'gim2' || declared === 'gim2-chat' || declared === 'banana') return declared;
+  if (isMidjourneyCatalogItem(item, upstreamModel, modality)) return 'midjourney';
+
+  const id = upstreamModel.toLowerCase();
+  const tags = new Set(
+    stringValue(item.tags)
+      .toLowerCase()
+      .split(',')
+      .map(tag => tag.trim())
+      .filter(Boolean)
+  );
+  if (id === 'gpt-image-2-chat') return 'gim2-chat';
+  if (id.startsWith('nano-banana-') || id === 'nano-banana' || tags.has('banana')) return 'banana';
+  if (
+    id === 'image2k4k'
+    || /^image2(?:-|$)/.test(id)
+    || /^gpt-image-2(?:-|$)/.test(id)
+    || tags.has('image2')
+  ) return 'gim2';
+  return null;
 }
 
 function normalizeCatalogPricing(value: unknown, applyImageMarkup = false): NewApiCatalogPricing | null {
@@ -426,7 +472,9 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
     const parameters = (Array.isArray(item.parameters) ? item.parameters : [])
       .map(normalizeCatalogParameter)
       .filter((parameter): parameter is NewApiCatalogParameter => parameter != null);
-    const presentation = publicPresentation(item, upstreamModel, familyValue);
+    const isMidjourney = isMidjourneyCatalogItem(item, upstreamModel, modality);
+    const imageFamily = inferredImageFamily(item, upstreamModel, modality);
+    const presentation = publicPresentation(item, upstreamModel, imageFamily || familyValue);
     const publicParameters = parameters.map(parameter =>
       parameter.name === 'model'
         ? { ...parameter, fixed: presentation.id }
@@ -445,14 +493,16 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
       pricing
     });
 
-    const isChatImage = modality === 'image' && familyValue === 'gim2-chat' && upstreamModel === 'gpt-image-2-chat';
+    const isChatImage = imageFamily === 'gim2-chat' && upstreamModel === 'gpt-image-2-chat';
     if (
       modality !== 'image'
-      || (pricing.unit !== 'image' && !isChatImage)
+      || (pricing.unit !== 'image' && !isChatImage && !isMidjourney)
       || pricing.credits == null
       || pricing.credits < 0
     ) continue;
-    const resolutions: ('1k' | '2k' | '4k')[] = isChatImage
+    const resolutions: ('1k' | '2k' | '4k')[] = isMidjourney
+      ? ['1k']
+      : isChatImage
       ? ['1k']
       : resolutionOptions(parameters, upstreamModel);
     if (upstreamModel === 'gpt-image-2-ext' && !resolutions.includes('1k')) {
@@ -462,7 +512,8 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
     const creditsByResolution: Partial<Record<'1k' | '2k' | '4k', number>> = {};
     for (const tier of pricing.tiers || []) {
       const resolution = stringValue(tier.when.quality ?? tier.when.resolution).toLowerCase();
-      if ((resolution === '1k' || resolution === '2k' || resolution === '4k') && tier.credits >= 0) {
+      const isResolutionOnly = Object.keys(tier.when).length === 1;
+      if (isResolutionOnly && (resolution === '1k' || resolution === '2k' || resolution === '4k') && tier.credits >= 0) {
         creditsByResolution[resolution] = tier.credits;
       }
     }
@@ -472,36 +523,39 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
     const promptHub = integration && typeof integration === 'object'
       ? integration as Record<string, unknown>
       : {};
-    if (familyValue !== 'gim2' && familyValue !== 'banana' && !isChatImage) continue;
-    const family = (isChatImage ? 'gim2' : familyValue) as ImageModelUiFamily;
+    if (!imageFamily) continue;
+    const family = (isChatImage ? 'gim2' : imageFamily) as ImageModelUiFamily;
     const publicId = presentation.id || stringValue(promptHub.id) || `newapi-${upstreamModel}`;
     const description = presentation.description || null;
     const label = presentation.label;
-    rules.push({
-      model: upstreamModel,
-      credits: pricing.credits,
-      ...(Object.keys(creditsByResolution).length ? { creditsByResolution } : {}),
-      description,
-      tags: stringValue(item.tags).toLowerCase(),
-      label,
-      modality: 'image',
-      parameters
-    });
+    if (!isMidjourney) {
+      rules.push({
+        model: upstreamModel,
+        credits: pricing.credits,
+        ...(Object.keys(creditsByResolution).length ? { creditsByResolution } : {}),
+        ...(pricing.tiers?.length ? { pricingTiers: pricing.tiers } : {}),
+        description,
+        tags: stringValue(item.tags).toLowerCase(),
+        label,
+        modality: 'image',
+        parameters
+      });
+    }
     imageCatalogEntries.push({
       id: publicId,
-      provider: 'newapi',
+      provider: isMidjourney ? 'apimart' : 'newapi',
       uiFamily: family,
       upstream: upstreamModel,
       label,
-      group: 'new',
+      group: upstreamModel === 'mj-v7' ? 'classic' : 'new',
       description: description || '',
       upstreamPoints: pricing.yuan ?? 0,
       refundOnViolation: true,
       resolutions,
       defaultCredits: pricing.credits,
-      pricingByResolution: Object.keys(creditsByResolution).length > 0,
-      ...(Object.keys(creditsByResolution).length ? { defaultCreditsByResolution: creditsByResolution } : {}),
-      fixedQualityLow: booleanValue(promptHub.fixed_quality_low),
+      pricingByResolution: !isMidjourney && Object.keys(creditsByResolution).length > 0,
+      ...(!isMidjourney && Object.keys(creditsByResolution).length ? { defaultCreditsByResolution: creditsByResolution } : {}),
+      ...(!isMidjourney ? { fixedQualityLow: booleanValue(promptHub.fixed_quality_low) } : {}),
       sortOrder: numberValue(item.order) ?? 100
     });
   }
@@ -803,11 +857,13 @@ export function newApiFixedCreditsForRequest(
   params: Record<string, unknown>
 ): number | null {
   if (model.pricing.mode === 'token' || model.pricing.credits == null) return null;
-  const tier = model.pricing.tiers?.find(candidate =>
-    Object.entries(candidate.when).every(([key, expected]) =>
-      String(params[key] ?? '').toLowerCase() === String(expected).toLowerCase()
-    )
-  );
+  const tier = [...(model.pricing.tiers || [])]
+    .sort((a, b) => Object.keys(b.when).length - Object.keys(a.when).length)
+    .find(candidate =>
+      Object.entries(candidate.when).every(([key, expected]) =>
+        String(params[key] ?? '').toLowerCase() === String(expected).toLowerCase()
+      )
+    );
   const unitCredits = tier?.credits ?? model.pricing.credits;
   const quantityKey = model.pricing.quantityParameter
     || (model.pricing.unit === 'second' ? 'duration' : model.pricing.unit === 'image' ? 'n' : '');
@@ -832,13 +888,17 @@ export function newApiTextCreditsForUsage(
 }
 
 export function imageCatalogForNewApiSnapshot(snapshot: NewApiCatalogSnapshot): ImageModelCatalogEntry[] {
-  const newApiEntries = snapshot.available
-    ? snapshot.imageCatalogEntries.filter(isPublicNewApiImageEntry)
+  const snapshotEntries = snapshot.available
+    ? snapshot.imageCatalogEntries.filter(isRetainedPublicImageEntry)
     : NEWAPI_IMAGE_MODEL_CATALOG.filter(isPublicNewApiImageEntry);
-  return [
-    ...newApiEntries,
+  const merged = new Map<string, ImageModelCatalogEntry>();
+  for (const entry of [
+    ...snapshotEntries,
     ...APIMART_IMAGE_MODEL_CATALOG.filter(isRetainedPublicImageEntry)
-  ];
+  ]) {
+    if (!merged.has(entry.id)) merged.set(entry.id, entry);
+  }
+  return [...merged.values()];
 }
 
 function normalizedResolution(resolution?: string | null): '1k' | '2k' | '4k' | null {
@@ -863,13 +923,38 @@ function pricingCandidates(upstreamModel: string, resolution?: string | null): s
 export function newApiCreditsForModel(
   rules: NewApiPricingRule[],
   upstreamModel: string,
-  resolution?: string | null
+  resolution?: string | null,
+  quality?: string | null
 ): number | null {
   const candidates = pricingCandidates(upstreamModel, resolution).map((m) => m.toLowerCase());
   const exact = candidates
     .map(candidate => rules.find(rule => rule.model.toLowerCase() === candidate))
     .find((rule): rule is NewApiPricingRule => !!rule);
   const res = normalizedResolution(resolution);
+  const normalizedQuality = String(quality || '').toLowerCase();
+  if (upstreamModel.toLowerCase() === 'image2-a' && normalizedQuality === 'high') {
+    const baseTier = [...(exact?.pricingTiers || [])]
+      .sort((a, b) => Object.keys(b.when).length - Object.keys(a.when).length)
+      .find(candidate => {
+        const whenQuality = candidate.when.quality;
+        const whenResolution = candidate.when.resolution;
+        return whenQuality == null
+          && (whenResolution == null || String(whenResolution).toLowerCase() === res);
+      });
+    const baseCredits = baseTier?.credits
+      ?? (res ? exact?.creditsByResolution?.[res] : null)
+      ?? exact?.credits;
+    if (baseCredits != null) return Math.round((baseCredits + 2) * 100) / 100;
+  }
+  const tier = [...(exact?.pricingTiers || [])]
+    .sort((a, b) => Object.keys(b.when).length - Object.keys(a.when).length)
+    .find(candidate =>
+      Object.entries(candidate.when).every(([key, expected]) => {
+        const actual = key === 'resolution' ? res : key === 'quality' ? quality : undefined;
+        return actual != null && String(actual).toLowerCase() === String(expected).toLowerCase();
+      })
+    );
+  if (tier) return tier.credits;
   if (exact && res && exact.creditsByResolution?.[res] != null) {
     return exact.creditsByResolution[res] ?? null;
   }
@@ -877,10 +962,24 @@ export function newApiCreditsForModel(
 }
 
 function pickErrorMessage(payload: unknown, status: number): string {
-  if (!payload || typeof payload !== 'object') return `New API error (${status})`;
+  if (!payload || typeof payload !== 'object') return 'request failed';
   const p = payload as Record<string, unknown>;
   const err = p.error && typeof p.error === 'object' ? p.error as Record<string, unknown> : null;
-  return stringValue(err?.message) || stringValue(p.message) || stringValue(p.error) || `New API error (${status})`;
+  return stringValue(err?.message) || stringValue(p.message) || stringValue(p.error) || 'request failed';
+}
+
+function pickErrorCode(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return '';
+  const p = payload as Record<string, unknown>;
+  const err = p.error && typeof p.error === 'object' ? p.error as Record<string, unknown> : null;
+  const code = stringValue(err?.code) || stringValue(p.code);
+  return /^[a-z0-9_.:-]{2,80}$/i.test(code) ? code : '';
+}
+
+function newApiHttpErrorMessage(payload: unknown, status: number): string {
+  const code = pickErrorCode(payload);
+  const reason = pickErrorMessage(payload, status);
+  return `HTTP ${status}${code ? ` [${code}]` : ''}: ${reason}`;
 }
 
 function collectDataImageUrls(payload: unknown): string[] {
@@ -956,6 +1055,58 @@ function extractAllNewApiImageUrls(payload: unknown): string[] {
   ];
 }
 
+type NewApiImageResponsePayload = {
+  payloads: unknown[];
+  rawText: string;
+};
+
+function parseNewApiImageSse(rawText: string): unknown[] {
+  const payloads: unknown[] = [];
+  for (const line of rawText.split(/\r?\n/)) {
+    const match = line.match(/^data:\s?(.*)$/i);
+    if (!match) continue;
+    const data = match[1].trim();
+    if (!data || data === '[DONE]') continue;
+    try {
+      payloads.push(JSON.parse(data));
+    } catch {
+      // Ignore keepalive or non-JSON event data. A missing final image is
+      // handled below as an invalid upstream response.
+    }
+  }
+  return payloads;
+}
+
+async function readNewApiImageResponse(res: Response): Promise<NewApiImageResponsePayload> {
+  const rawText = await res.text();
+  const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+  if (contentType.includes('text/event-stream')) {
+    return { payloads: parseNewApiImageSse(rawText), rawText };
+  }
+  try {
+    return { payloads: [JSON.parse(rawText)], rawText };
+  } catch {
+    return { payloads: [], rawText };
+  }
+}
+
+function newApiImageStreamError(payloads: unknown[]): unknown | null {
+  return payloads.find(payload => {
+    if (!payload || typeof payload !== 'object') return false;
+    const root = payload as Record<string, unknown>;
+    const type = stringValue(root.type).toLowerCase();
+    return type === 'error' || type === 'upstream_error' || root.error != null;
+  }) || null;
+}
+
+function preferredNewApiImagePayloads(payloads: unknown[]): unknown[] {
+  const completed = payloads.filter(payload => {
+    if (!payload || typeof payload !== 'object') return false;
+    return stringValue((payload as Record<string, unknown>).type).toLowerCase().includes('completed');
+  });
+  return completed.length ? completed : [...payloads].reverse();
+}
+
 function legacyRequestBody(params: SubmitParams): Record<string, unknown> {
   const refs = params.refImageUrls?.length ? params.refImageUrls : undefined;
   const model = params.upstreamModel.trim();
@@ -971,6 +1122,7 @@ function legacyRequestBody(params: SubmitParams): Record<string, unknown> {
       : params.fixedQualityLow
         ? 'low'
         : mapQualityForGptImage(params.quality),
+    ...(model.toLowerCase() === 'gpt-image-2-1k' ? { response_format: 'b64_json' } : {}),
     ...(refs?.length ? { images: refs.slice(0, 14) } : {})
   };
 }
@@ -1052,25 +1204,39 @@ export function buildNewApiImageRequestBody(params: SubmitParams): Record<string
   } else if (refs.length) {
     set('image', refs[0]);
   }
+  if (params.upstreamModel.toLowerCase() === 'gpt-image-2-1k') {
+    body.response_format = 'b64_json';
+  }
   return body;
 }
 
 function extractChatImageUrls(payload: unknown): string[] {
   const root = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
   const choices = Array.isArray(root.choices) ? root.choices : [];
-  const message = choices[0] && typeof choices[0] === 'object'
-    ? (choices[0] as Record<string, unknown>).message
+  const firstChoice = choices[0] && typeof choices[0] === 'object'
+    ? choices[0] as Record<string, unknown>
+    : null;
+  const message = firstChoice
+    ? firstChoice.message
     : null;
   const content = message && typeof message === 'object'
     ? (message as Record<string, unknown>).content
     : null;
-  const urls = extractAllNewApiImageUrls({ data: { output: content } });
+  const urls = [
+    message,
+    firstChoice,
+    root.data,
+    root.output,
+    root.response
+  ].flatMap(extractAllNewApiImageUrls);
   if (typeof content === 'string') {
     const markdown = [...content.matchAll(/!\[[^\]]*\]\((https?:\/\/[^\s)]+|data:image\/[^)]+)\)/gi)]
       .map(match => match[1]);
-    return [...new Set([...urls, ...markdown])];
+    const plainLinks = [...content.matchAll(/https?:\/\/[^\s<>"')\]]+/gi)]
+      .map(match => match[0]);
+    return [...new Set([...urls, ...markdown, ...plainLinks])];
   }
-  return urls;
+  return [...new Set(urls)];
 }
 
 function buildChatImageMessages(prompt: string, refImageUrls?: string[]): Array<Record<string, unknown>> {
@@ -1094,7 +1260,9 @@ export async function submitNewApiImageJob(
   params: SubmitParams
 ): Promise<{ taskId: string; imageUrl?: string | null; imageUrls?: string[]; requestId?: string | null }> {
   const isChatImage = params.upstreamModel === 'gpt-image-2-chat';
-  const endpoint = isChatImage ? '/v1/chat/completions' : '/v1/images/generations';
+  const endpoint = isChatImage
+    ? '/v1/chat/completions'
+    : '/v1/images/generations';
   const body = isChatImage
     ? {
         model: params.upstreamModel,
@@ -1102,46 +1270,58 @@ export async function submitNewApiImageJob(
         stream: false
       }
     : buildNewApiImageRequestBody(params);
+  const idempotencyKey = stringValue(params.idempotencyKey).slice(0, 128);
   let res: Response | null = null;
-  let json: unknown = {};
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    res = await fetch(`${apiBase(baseUrl)}${endpoint}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(body)
-    });
+  res = await fetch(`${apiBase(baseUrl)}${endpoint}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      ...(!isChatImage ? { Prefer: 'respond-async' } : {}),
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+    },
+    body: JSON.stringify(body)
+  });
 
-    try {
-      json = await res.json();
-    } catch {
-      json = {};
-    }
-    const message = pickErrorMessage(json, res.status);
-    if (res.ok || !/excessive system load/i.test(message) || attempt > 0) break;
-    await new Promise(resolve => setTimeout(resolve, 5000));
-  }
+  const response = await readNewApiImageResponse(res);
+  const json = response.payloads[0] || {};
 
   if (!res?.ok) {
     const status = res?.status || 502;
+    const errorPayload = response.payloads[0]
+      || (response.rawText.trim() ? { message: response.rawText.trim().slice(0, 400) } : {});
     throw new ApiError(
       status >= 500 ? 502 : status,
       'UPSTREAM_ERROR',
-      pickErrorMessage(json, status)
+      newApiHttpErrorMessage(errorPayload, status)
     );
   }
 
-  const imageUrls = isChatImage ? extractChatImageUrls(json) : extractAllNewApiImageUrls(json);
-  const taskId = extractTaskId(json);
-  const root = json && typeof json === 'object' ? json as Record<string, unknown> : {};
+  const streamError = newApiImageStreamError(response.payloads);
+  if (streamError) {
+    throw new ApiError(502, 'UPSTREAM_ERROR', newApiHttpErrorMessage(streamError, 502));
+  }
+
+  const preferredPayloads = preferredNewApiImagePayloads(response.payloads);
+  const imageUrls = [...new Set(preferredPayloads.flatMap(payload =>
+    isChatImage ? extractChatImageUrls(payload) : extractAllNewApiImageUrls(payload)
+  ))];
+  const taskPayload = preferredPayloads.find(payload => extractTaskId(payload)) || json;
+  const root = taskPayload && typeof taskPayload === 'object' ? taskPayload as Record<string, unknown> : {};
+  const taskId = extractTaskId(taskPayload) || stringValue(root.task_id || root.id) || null;
   const requestId =
     stringValue(root.request_id || root.requestId)
     || stringValue(res.headers.get('x-request-id'))
     || stringValue(res.headers.get('x-oneapi-request-id'))
     || null;
-  if (taskId) return { taskId, imageUrl: imageUrls[0] || null, imageUrls, requestId };
+  if (taskId) {
+    return {
+      taskId,
+      imageUrl: imageUrls[0] || null,
+      imageUrls,
+      requestId
+    };
+  }
   if (imageUrls.length) {
     return { taskId: `newapi-${crypto.randomUUID()}`, imageUrl: imageUrls[0], imageUrls, requestId };
   }
@@ -1186,7 +1366,14 @@ export async function fetchNewApiTaskOnce(
       : { status: 'failed', imageUrl: null, imageUrls: [], errorMessage: 'upstream_no_image' };
   }
   if (['failed', 'failure', 'error', 'timeout', 'cancelled', 'canceled'].includes(status)) {
-    const raw = stringValue(data.error_message || data.error || root.error || 'upstream_failed');
+    const errorPayload = data.error_message || data.error || root.error || root;
+    const raw = typeof errorPayload === 'string'
+      ? errorPayload
+      : (() => {
+          const code = pickErrorCode(data) || pickErrorCode(root);
+          const reason = pickErrorMessage(data, res.status) || pickErrorMessage(root, res.status);
+          return `${code ? `[${code}] ` : ''}${reason || 'upstream_failed'}`;
+        })();
     return {
       status: 'failed',
       imageUrl: null,

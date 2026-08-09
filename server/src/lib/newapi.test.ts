@@ -5,6 +5,7 @@ import {
   fetchNewApiModelCatalog,
   fetchNewApiPricingRules,
   fetchNewApiTaskOnce,
+  imageCatalogForNewApiSnapshot,
   newApiKeyForRoute,
   newApiFixedCreditsForRequest,
   newApiTextCreditsForUsage,
@@ -213,6 +214,231 @@ describe('newapi image upstream', () => {
     expect(textModel && newApiTextCreditsForUsage(textModel, 100_000, 10_000)).toBe(1.6);
   });
 
+  it('retains reviewed image models without the legacy family field and prices quality tiers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      success: true,
+      version: 'catalog-familyless-1',
+      pricing_version: 'pricing-familyless-1',
+      models: [
+        {
+          id: 'image2-A',
+          label: '全能模型2-A',
+          description: '支持多档分辨率和质量。',
+          modality: 'image',
+          selectable: true,
+          tags: 'image,image2,per-image,1k,2k,4k,quality',
+          endpoint: { method: 'POST', path: '/v1/images/generations', content_type: 'application/json' },
+          parameters: [
+            { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: 'image2-A' },
+            { name: 'prompt', path: 'prompt', label: '提示词', type: 'string', required: true },
+            { name: 'resolution', path: 'resolution', label: '分辨率', type: 'string', default: '1k', options: ['1k', '2k', '4k'] },
+            { name: 'quality', path: 'quality', label: '质量', type: 'string', default: 'standard', options: ['low', 'standard', 'high'] },
+            { name: 'n', path: 'n', label: '张数', type: 'integer', fixed: 1 }
+          ],
+          pricing: {
+            mode: 'tiered',
+            unit: 'image',
+            yuan: 0.04,
+            tiers: [
+              { when: { resolution: '1k' }, yuan: 0.04 },
+              { when: { resolution: '2k' }, yuan: 0.05 },
+              { when: { resolution: '4k' }, yuan: 0.06 },
+              { when: { resolution: '1k', quality: 'high' }, yuan: 0.06 },
+              { when: { resolution: '2k', quality: 'high' }, yuan: 0.07 },
+              { when: { resolution: '4k', quality: 'high' }, yuan: 0.08 }
+            ]
+          }
+        },
+        {
+          id: 'nano-banana-2',
+          label: '香蕉 2',
+          modality: 'image',
+          selectable: true,
+          tags: 'image,banana,1k',
+          endpoint: { method: 'POST', path: '/v1/images/generations', content_type: 'application/json' },
+          parameters: [{ name: 'resolution', path: 'resolution', label: '分辨率', type: 'string', fixed: '1k' }],
+          pricing: { mode: 'fixed', unit: 'image', yuan: 0.03 }
+        },
+        {
+          id: 'mj-v7',
+          label: 'Midjourney 7',
+          modality: 'image',
+          selectable: true,
+          tags: 'image,midjourney',
+          endpoint: { method: 'POST', path: '/v1/midjourney/generations', content_type: 'application/json' },
+          parameters: [],
+          pricing: { mode: 'fixed', unit: 'request', yuan: 0.4 }
+        },
+        {
+          id: 'flux-preview',
+          label: 'Flux Preview',
+          modality: 'image',
+          selectable: true,
+          tags: 'image,flux,1k',
+          endpoint: { method: 'POST', path: '/v1/images/generations', content_type: 'application/json' },
+          parameters: [{ name: 'resolution', path: 'resolution', label: '分辨率', type: 'string', fixed: '1k' }],
+          pricing: { mode: 'fixed', unit: 'image', yuan: 0.01 }
+        }
+      ]
+    })));
+
+    const snapshot = await fetchNewApiModelCatalog('https://familyless-catalog.test', { force: true });
+
+    expect(snapshot.imageCatalogEntries.map(model => [model.id, model.uiFamily])).toEqual([
+      ['image2-A', 'gim2'],
+      ['lingtu-2', 'banana'],
+      ['mj-v7', 'midjourney']
+    ]);
+    expect(snapshot.imageCatalogEntries.find(model => model.id === 'image2-A')?.label).toBe('全能模型2-A');
+    expect(resolveNewApiCatalogModel(snapshot, 'image2-a', 'image')?.id).toBe('image2-A');
+    expect(newApiCreditsForModel(snapshot.rules, 'image2-A', '1k', 'standard')).toBe(4);
+    expect(newApiCreditsForModel(snapshot.rules, 'image2-A', '1k', 'high')).toBe(6);
+    expect(newApiCreditsForModel(snapshot.rules, 'image2-A', '2k', 'high')).toBe(7);
+    expect(newApiCreditsForModel(snapshot.rules, 'image2-A', '4k', 'standard')).toBe(6);
+    expect(newApiCreditsForModel(snapshot.rules, 'image2-A', '4k', 'high')).toBe(8);
+    expect(publicNewApiCatalogModels(snapshot).some(model => model.id === 'flux-preview')).toBe(false);
+  });
+
+  it('routes the three published MJ models through APIMart at 40 credits per request', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      success: true,
+      version: 'catalog-mj-1',
+      pricing_version: 'pricing-mj-1',
+      models: [{
+        id: 'mj-v81',
+        label: 'Midjourney 8.1',
+        public: {
+          id: 'mj-v81',
+          label: 'Midjourney 8.1',
+          description: '固定 Relax，一次提交返回 5 张图。'
+        },
+        modality: 'image',
+        operation: 'generate',
+        selectable: true,
+        order: 50,
+        endpoint: {
+          method: 'POST',
+          path: '/v1/midjourney/generations',
+          content_type: 'application/json'
+        },
+        parameters: [
+          { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: 'mj-v81' },
+          { name: 'prompt', path: 'prompt', label: '提示词', type: 'string', required: true },
+          { name: 'quality', path: 'quality', label: '质量', type: 'string', default: '1', options: ['0.25', '0.5', '1', '2'] },
+          { name: 'speed', path: 'speed', label: '速度', type: 'string', fixed: 'relax' },
+          { name: 'n', path: 'n', label: '提交次数', type: 'integer', fixed: 1 }
+        ],
+        pricing: {
+          mode: 'fixed',
+          unit: 'request',
+          currency: 'CNY',
+          yuan: 0.4,
+          credits: 40
+        }
+      }]
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const snapshot = await fetchNewApiModelCatalog('https://midjourney-catalog.test', { force: true });
+    expect(snapshot.rules).toEqual([]);
+    expect(snapshot.imageCatalogEntries).toEqual([
+      expect.objectContaining({
+        id: 'mj-v81',
+        upstream: 'mj-v81',
+        provider: 'apimart',
+        uiFamily: 'midjourney',
+        defaultCredits: 40,
+        pricingByResolution: false
+      })
+    ]);
+    expect(publicNewApiCatalogModels(snapshot)).toContainEqual(expect.objectContaining({
+      id: 'mj-v81',
+      endpoint: { method: 'POST', path: '/api/v1/generate', contentType: 'application/json' },
+      pricing: expect.objectContaining({ unit: 'request', credits: 40 })
+    }));
+
+    const merged = imageCatalogForNewApiSnapshot(snapshot);
+    expect(merged.filter(model => model.id === 'mj-v81')).toHaveLength(1);
+    expect(merged.filter(model => model.uiFamily === 'midjourney' && !model.legacyOnly).map(model => model.id)).toEqual([
+      'mj-v81',
+      'mj-v7',
+      'mj-niji7'
+    ]);
+    expect(merged.some(model => model.id.startsWith('apimart-mj-'))).toBe(false);
+  });
+
+  it('submits image2-A once as a durable native image task', async () => {
+    const fetchMock = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String((init as RequestInit).body || '{}')) as Record<string, unknown>;
+      expect((init as RequestInit | undefined)?.method).toBe('POST');
+      expect(body).toEqual({
+        model: 'image2-A',
+        prompt: 'a clean product photograph',
+        resolution: '4k',
+        quality: 'high',
+        n: 1
+      });
+      return jsonResponse({
+        id: 'task_image2a_4k_high',
+        task_id: 'task_image2a_4k_high',
+        status: 'queued',
+        progress: '0%'
+      }, 202);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
+      upstreamModel: 'image2-A',
+      prompt: 'a clean product photograph',
+      resolution: '4k',
+      quality: 'high',
+      count: 1,
+      idempotencyKey: 'image2-a-4k-high-job',
+      catalogParameters: [
+        { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: 'image2-A' },
+        { name: 'prompt', path: 'prompt', label: '提示词', type: 'string', required: true },
+        { name: 'resolution', path: 'resolution', label: '分辨率', type: 'string', required: false, default: '1k', options: ['1k', '2k', '4k'] },
+        { name: 'quality', path: 'quality', label: '质量', type: 'string', required: false, default: 'standard', options: ['low', 'standard', 'high'] },
+        { name: 'n', path: 'n', label: '张数', type: 'integer', required: false, fixed: 1 }
+      ]
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://newapi-unit.test/v1/images/generations');
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('Idempotency-Key'))
+      .toBe('image2-a-4k-high-job');
+    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get('Prefer'))
+      .toBe('respond-async');
+    expect(result.taskId).toBe('task_image2a_4k_high');
+    expect(result.imageUrl).toBeNull();
+    expect(fetchMock.mock.calls.map(([url, init]) => `${(init as RequestInit | undefined)?.method || 'GET'} ${new URL(String(url)).pathname}`))
+      .toEqual(['POST /v1/images/generations']);
+  });
+
+  it('surfaces a safe native image stream error without retrying', async () => {
+    const fetchMock = vi.fn(async () => new Response([
+      'event: error',
+      'data: {"type":"error","error":{"code":"request_rejected","message":"reference image format is not supported"}}',
+      '',
+      'data: [DONE]',
+      ''
+    ].join('\n'), {
+      headers: { 'content-type': 'text/event-stream' }
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
+      upstreamModel: 'image2-A',
+      prompt: 'product photo',
+      resolution: '4k',
+      quality: 'high'
+    })).rejects.toMatchObject({
+      status: 502,
+      code: 'UPSTREAM_ERROR',
+      message: 'HTTP 502 [request_rejected]: reference image format is not supported'
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('fails closed when a required fresh catalog cannot be loaded', async () => {
     const fetchMock = vi
       .fn()
@@ -274,26 +500,40 @@ describe('newapi image upstream', () => {
     }));
   });
 
-  it('retries one transient excessive-load image response', async () => {
-    vi.useFakeTimers();
+  it('does not retry a transient excessive-load image response', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ error: { message: 'excessive system load' } }, 400))
-      .mockResolvedValueOnce(jsonResponse({ data: [{ url: 'https://image.test/retry.png' }] }));
+      .mockResolvedValueOnce(jsonResponse({ error: { message: 'excessive system load' } }, 400));
     vi.stubGlobal('fetch', fetchMock);
 
-    const resultPromise = submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
+    await expect(submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
       upstreamModel: 'gpt-image-2',
       prompt: 'apple',
       resolution: '1k',
       quality: 'standard'
-    });
-    await vi.runAllTimersAsync();
-    const result = await resultPromise;
-    vi.useRealTimers();
+    })).rejects.toThrow('excessive system load');
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(result.imageUrl).toBe('https://image.test/retry.png');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the HTTP status and safe error code for queued image failures', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      error: {
+        code: 'insufficient_user_quota',
+        message: '请求被拒绝'
+      }
+    }, 403)));
+
+    await expect(submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
+      upstreamModel: 'image2-A',
+      prompt: 'product photo',
+      resolution: '2k',
+      quality: 'standard'
+    })).rejects.toMatchObject({
+      status: 403,
+      code: 'UPSTREAM_ERROR',
+      message: 'HTTP 403 [insufficient_user_quota]: 请求被拒绝'
+    });
   });
 
   it('extracts an immediate image response from compatible generation API', async () => {
@@ -314,6 +554,7 @@ describe('newapi image upstream', () => {
       resolution: '4k',
       quality: 'standard',
       fixedQualityLow: true,
+      idempotencyKey: 'job-unit-123',
       refImageUrls: ['https://ref.test/a.png']
     });
 
@@ -321,7 +562,8 @@ describe('newapi image upstream', () => {
     expect(String(submitCall[0])).toBe('https://newapi-unit.test/v1/images/generations');
     expect((submitCall[1] as RequestInit).headers).toMatchObject({
       Authorization: 'Bearer unit-key',
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'job-unit-123'
     });
     expect(result.taskId).toMatch(/^newapi-/);
     expect(result.imageUrl).toBe('https://image.test/out.png');
@@ -351,6 +593,52 @@ describe('newapi image upstream', () => {
     expect(String(fetchMock.mock.calls[0][0])).toBe('https://newapi-unit.test/v1/chat/completions');
     expect(result.taskId).toMatch(/^newapi-/);
     expect(result.imageUrl).toBe('https://image.test/chat.png');
+  });
+
+  it('parses economical image outputs returned beside chat content', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      choices: [{
+        message: {
+          content: null,
+          images: [{ type: 'image_url', image_url: { url: 'https://image.test/chat-images.png' } }]
+        }
+      }]
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
+      upstreamModel: 'gpt-image-2-chat',
+      prompt: 'apple',
+      resolution: '1k',
+      quality: 'medium'
+    });
+
+    expect(result.imageUrl).toBe('https://image.test/chat-images.png');
+  });
+
+  it('parses economical image outputs from root data and plain chat links', async () => {
+    const responses = [
+      { data: [{ url: 'https://image.test/chat-data.png' }] },
+      { choices: [{ message: { content: 'Generated image: https://image.test/chat-plain.png' } }] }
+    ];
+    const fetchMock = vi.fn(async () => jsonResponse(responses.shift()));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = await submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
+      upstreamModel: 'gpt-image-2-chat',
+      prompt: 'apple',
+      resolution: '1k',
+      quality: 'medium'
+    });
+    const second = await submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
+      upstreamModel: 'gpt-image-2-chat',
+      prompt: 'pear',
+      resolution: '1k',
+      quality: 'medium'
+    });
+
+    expect(first.imageUrl).toBe('https://image.test/chat-data.png');
+    expect(second.imageUrl).toBe('https://image.test/chat-plain.png');
   });
 
   it('submits economical image references through chat completions', async () => {
@@ -424,6 +712,35 @@ describe('newapi image upstream', () => {
       n: 4
     });
     expect(body).not.toHaveProperty('resolution');
+  });
+
+  it('requests an inline result for the fixed 1K model whose upstream URLs are not durable', () => {
+    const body = buildNewApiImageRequestBody({
+      upstreamModel: 'gpt-image-2-1k',
+      prompt: 'white ceramic cup',
+      resolution: '1k',
+      quality: 'medium',
+      size: '1:1',
+      count: 1,
+      catalogParameters: [
+        { name: 'model', path: 'model', label: 'model', type: 'string', required: true, fixed: 'gpt-image-2-1k' },
+        { name: 'prompt', path: 'prompt', label: 'prompt', type: 'string', required: true },
+        { name: 'resolution', path: 'resolution', label: 'resolution', type: 'string', required: false, fixed: '1k' },
+        { name: 'quality', path: 'quality', label: 'quality', type: 'string', required: false, default: 'medium' },
+        { name: 'size', path: 'size', label: 'size', type: 'string', required: false, default: 'auto' },
+        { name: 'n', path: 'n', label: 'count', type: 'integer', required: false, fixed: 1 }
+      ]
+    });
+
+    expect(body).toEqual({
+      model: 'gpt-image-2-1k',
+      prompt: 'white ceramic cup',
+      resolution: '1k',
+      quality: 'medium',
+      size: '1:1',
+      n: 1,
+      response_format: 'b64_json'
+    });
   });
 
   it('normalizes completed task polling responses', async () => {
