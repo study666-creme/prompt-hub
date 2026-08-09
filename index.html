@@ -5,7 +5,7 @@
   <base href="/">
 
   <script>
-    window.__APP_BUILD__ = '20260721g';
+    window.__APP_BUILD__ = '20260805f';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -36,6 +36,29 @@
         return;
       }
       if (!prev) localStorage.setItem(key, cur);
+
+      var buildCheckBusy = false;
+      var lastBuildCheckAt = 0;
+      function checkForCurrentBuild() {
+        if (buildCheckBusy || Date.now() - lastBuildCheckAt < 30000) return;
+        buildCheckBusy = true;
+        lastBuildCheckAt = Date.now();
+        fetch('/?__build_check=' + Date.now(), { cache: 'no-store', credentials: 'same-origin' })
+          .then(function (res) { return res.ok ? res.text() : ''; })
+          .then(function (html) {
+            var match = /__APP_BUILD__\s*=\s*'([^']+)'/.exec(html);
+            if (!match || match[1] === cur) return;
+            localStorage.setItem(key, match[1]);
+            purgeCachesAndSw().finally(function () { location.reload(); });
+          })
+          .catch(function () {})
+          .finally(function () { buildCheckBusy = false; });
+      }
+      window.addEventListener('pageshow', checkForCurrentBuild);
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') checkForCurrentBuild();
+      });
+      window.setInterval(checkForCurrentBuild, 120000);
     })();
   </script>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -104,14 +127,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260721g">
-  <link rel="stylesheet" href="styles-theme.css?v=20260721g">
+  <link rel="stylesheet" href="styles.css?v=20260805f">
+  <link rel="stylesheet" href="styles-theme.css?v=20260805f">
   <link rel="stylesheet" href="styles-landing.css?v=20260721g">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260721g">
-  <link rel="stylesheet" href="styles-settings.css?v=20260721g">
-  <link rel="stylesheet" href="styles-features.css?v=20260721g">
-  <link rel="stylesheet" href="styles-assets.css?v=20260721g">
-  <script src="pack-prelude.js?v=20260721g"></script>
+  <link rel="stylesheet" href="styles-mobile.css?v=20260805f">
+  <link rel="stylesheet" href="styles-settings.css?v=20260805f">
+  <link rel="stylesheet" href="styles-features.css?v=20260805f">
+  <link rel="stylesheet" href="styles-assets.css?v=20260805f">
+  <script src="pack-prelude.js?v=20260805f"></script>
 </head>
 <body>
   <script>
@@ -154,7 +177,7 @@
   <script src="canvas-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260721g"></script>
+  <script src="api-client.js?v=20260805f"></script>
   <script>
     (function () {
       var FALLBACK = [
@@ -162,15 +185,16 @@
         { id: 'image2', label: '全能模型2 · 1K' },
         { id: 'image2-4k-fast', label: '全能模型2 · 极速 4K' },
         { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K' },
+        { id: 'image2-A', label: '全能模型2-A' },
         { id: 'image2-hd', label: '全能模型2 · 经济 2K/4K' },
         { id: 'lingtu-fast', label: '香蕉 · Fast 1K' },
         { id: 'lingtu-2', label: '香蕉 · 2 1K/2K/4K' },
         { id: 'lingtu-pro', label: '香蕉 · Pro 1K/2K/4K' },
         { id: 'lingtu', label: '香蕉 · Standard 1K/2K/4K' },
-        { id: 'apimart-mj-v81', label: 'MJ v8.1' },
-        { id: 'apimart-mj-v7', label: 'MJ v7' },
-        { id: 'apimart-mj-v61', label: 'MJ v6.1' },
-        { id: 'apimart-mj-niji7', label: 'MJ Niji 7' }
+        { id: 'mj-v81', label: 'MJ v8.1' },
+        { id: 'mj-v7', label: 'MJ v7' },
+        { id: 'mj-v61', label: 'MJ v6.1' },
+        { id: 'mj-niji7', label: 'MJ Niji 7' }
       ];
       function paint(sel, models) {
         if (!sel || !models || !models.length) return;
@@ -189,7 +213,7 @@
           var raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v4') || 'null');
           if (!raw || !raw.models || !raw.models.length) return null;
           if (raw.ts < Date.now() - 86400000) return null;
-          if (Number(raw.version) < 11) return null;
+          if (Number(raw.version) < 12) return null;
           return raw.models;
         } catch (e) { return null; }
       }
@@ -201,20 +225,20 @@
       });
     })();
   </script>
-  <script src="app-router.js?v=20260721g"></script>
-  <script src="pack-foundation.js?v=20260721g"></script>
-  <script src="supabase-sync.js?v=20260721g"></script>
-  <script src="pack-media-client.js?v=20260721g"></script>
-  <script src="pack-core.js?v=20260721g"></script>
-  <script src="pack-account.js?v=20260721g"></script>
-  <script src="pack-viewer.js?v=20260721g"></script>
-  <script src="pack-appreciate.js?v=20260721g"></script>
-  <script src="pack-lightbox.js?v=20260721g"></script>
-  <script src="card-gallery.js?v=20260721g"></script>
-  <script src="edit-panel-gallery.js?v=20260721g"></script>
-  <script src="script.js?v=20260721g"></script>
-  <script src="pack-imagegen.js?v=20260721g"></script>
-  <script src="pack-feed.js?v=20260721g"></script>
+  <script src="app-router.js?v=20260805f"></script>
+  <script src="pack-foundation.js?v=20260805f"></script>
+  <script src="supabase-sync.js?v=20260805f"></script>
+  <script src="pack-media-client.js?v=20260805f"></script>
+  <script src="pack-core.js?v=20260805f"></script>
+  <script src="pack-account.js?v=20260805f"></script>
+  <script src="pack-viewer.js?v=20260805f"></script>
+  <script src="pack-appreciate.js?v=20260805f"></script>
+  <script src="pack-lightbox.js?v=20260805f"></script>
+  <script src="card-gallery.js?v=20260805f"></script>
+  <script src="edit-panel-gallery.js?v=20260805f"></script>
+  <script src="script.js?v=20260805f"></script>
+  <script src="pack-imagegen.js?v=20260805f"></script>
+  <script src="pack-feed.js?v=20260805f"></script>
   <script>
     (function () {
       var need = 'grid-guard-v6';
@@ -230,9 +254,9 @@
       } catch (e) { /* ignore */ }
     })();
   </script>
-  <script src="community-public-feed.js?v=20260721g"></script>
-  <script src="features-draft.js?v=20260721g"></script>
-  <script src="pack-extra.js?v=20260721g"></script>
+  <script src="community-public-feed.js?v=20260805f"></script>
+  <script src="features-draft.js?v=20260805f"></script>
+  <script src="pack-extra.js?v=20260805f"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

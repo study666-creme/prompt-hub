@@ -149,29 +149,50 @@
     syncImageGenModelParamsUI();
   }
 
-  const IMAGE_GEN_QUALITY_LABELS = {
-    low: '低',
-    medium: '中',
-    high: '高',
-    standard: '低',
-    ultra: '高',
-    auto: '自动'
-  };
+  function imageGenQualityChoices(modelEntry) {
+    const qualityParam = modelEntry?.parameters?.find((parameter) => parameter?.name === 'quality');
+    const raw = Array.isArray(qualityParam?.options)
+      ? qualityParam.options.map(String)
+      : [];
+    const options = raw.length ? raw : ['standard', 'high', 'ultra'];
+    const values = new Set(options);
+    const pick = (...candidates) => candidates.find((value) => values.has(value));
+    let low;
+    let medium;
+    let high;
+
+    if (values.has('low')) {
+      low = 'low';
+      medium = pick('medium', 'standard');
+      if (!medium && values.has('high') && values.has('ultra')) medium = 'high';
+      high = medium === 'high' ? pick('ultra') : pick('high', 'ultra');
+    } else {
+      low = pick('standard');
+      medium = pick('medium');
+      if (!medium && values.has('high') && values.has('ultra')) medium = 'high';
+      high = medium === 'high' ? pick('ultra') : pick('ultra', 'high');
+    }
+
+    const used = new Set();
+    return [
+      { value: low, label: '低' },
+      { value: medium, label: '中' },
+      { value: high, label: '高' }
+    ].filter((entry) => entry.value && !used.has(entry.value) && used.add(entry.value));
+  }
 
   function syncImageGenQualitySelectOptions(modelEntry) {
     const qEl = document.getElementById('imageGenQuality');
     if (!qEl) return;
     const qualityParam = modelEntry?.parameters?.find((parameter) => parameter?.name === 'quality');
-    const rawOptions = Array.isArray(qualityParam?.options) ? qualityParam.options.map(String) : [];
-    const options = rawOptions.length
-      ? rawOptions
-      : ['standard', 'high', 'ultra'];
-    const key = options.join('|');
+    const choices = imageGenQualityChoices(modelEntry);
+    const options = choices.map((choice) => choice.value);
+    const key = choices.map((choice) => `${choice.value}:${choice.label}`).join('|');
     if (qEl.dataset.qualityOptions === key) return;
     const current = qEl.value;
     qEl.dataset.qualityOptions = key;
-    qEl.innerHTML = options
-      .map((value) => `<option value="${esc(value)}">${esc(IMAGE_GEN_QUALITY_LABELS[value] || value)}</option>`)
+    qEl.innerHTML = choices
+      .map(({ value, label }) => `<option value="${esc(value)}">${esc(label)}</option>`)
       .join('');
     if (options.includes(current)) qEl.value = current;
     else if (typeof qualityParam?.default === 'string' && options.includes(qualityParam.default)) {
@@ -195,7 +216,7 @@
       if (BANANA2_EXTENDED_MODELS.has(id)) list.push(...IMAGE_GEN_SIZE_BANANA2_EXTRA);
       return list;
     }
-    if (id.startsWith('apimart-mj-') || entry?.uiFamily === 'midjourney') {
+    if (id.startsWith('mj-') || entry?.uiFamily === 'midjourney') {
       return IMAGE_GEN_SIZE_MJ;
     }
     if (entry?.uiFamily === 'gim2' || id.startsWith('image2')) {
@@ -667,7 +688,8 @@
     const sizeLabel =
       document.getElementById('imageGenSize')?.selectedOptions?.[0]?.textContent?.trim() || size;
     const qualLabel =
-      { standard: '低', low: '低', medium: '中', high: '中', ultra: '高' }[quality] || quality;
+      document.getElementById('imageGenQuality')?.selectedOptions?.[0]?.textContent?.trim()
+      || quality;
     const parts = [modelLabel, qualLabel, sizeLabel];
     if (isBlend) {
       parts.push(`混图 · ${unitPerSheet}`);
@@ -714,7 +736,7 @@
     }
     const { model, resolution, quality, size } = getImageGenFormMeta();
     const mjSpeed = isImageGenMidjourneyModel(model) ? getImageGenMjSpeed() : null;
-    const detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution, mjSpeed);
+    const detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution, mjSpeed, quality);
     const final = detail?.final;
     if (final == null || !Number.isFinite(Number(final))) {
       if (btn && !btn.disabled && !imageGenBatchRunning) btn.textContent = '生成图片 · — 积分';
@@ -794,7 +816,7 @@
       if (seq !== imageGenCostHintSeq) return;
       if (!quote.ok || quote.data?.final == null) return;
 
-      const local = window.PointsSystem?.getImageGenCostDetail?.(model, resolution);
+      const local = window.PointsSystem?.getImageGenCostDetail?.(model, resolution, null, quality);
 
       const detail = Object.assign({}, local || {}, {
         base: quote.data.listPrice ?? quote.data.base ?? local?.listPrice,

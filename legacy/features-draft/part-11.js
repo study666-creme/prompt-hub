@@ -35,10 +35,9 @@
   }
 
   function normalizeImageGenModelId(modelId) {
-    const id = String(modelId || '')
-      .trim()
-      .toLowerCase();
-    if (!id) return 'image2';
+    const raw = String(modelId || '').trim();
+    if (!raw) return 'image2';
+    const id = raw.toLowerCase();
     const legacy = {
       quanneng2: 'image2',
       'gpt-image-2-chat': 'image2-economy',
@@ -55,22 +54,13 @@
       'nano-banana-pro-cl': 'lingtu-pro',
       'nano-banana-2-cl': 'lingtu-2',
       'nano-banana-2-4k-cl': 'lingtu-2',
-      'nano-banana': 'lingtu',
-      'newapi-gpt-image-2-chat': 'image2-economy',
-      'apimart-gpt-image-2-official-budget': 'image2-hd',
-      'apimart-gpt-image-2': 'image2',
-      'apimart-seedream-5-lite': 'image2',
-      'apimart-gemini-2-5-flash-preview': 'lingtu-fast',
-      'apimart-gemini-2-5-flash-official': 'lingtu-fast',
-      'apimart-gemini-3-1-flash-preview': 'lingtu-2',
-      'apimart-gemini-3-1-flash-official': 'lingtu-2',
-      'apimart-gemini-3-pro-preview': 'lingtu-pro',
-      'apimart-gemini-3-pro-official': 'lingtu-pro',
-      'ithink-gpt-image-2-slow': 'image2',
-      'mooko-gpt-image-2-pro': 'image2-pro'
+      'nano-banana': 'lingtu'
     };
-    if (legacy[id]) return legacy[id];
-    return id;
+    const mapped = legacy[id] || raw;
+    const canonical = imageGenModelCatalog.find(
+      (model) => String(model?.id || '').toLowerCase() === String(mapped).toLowerCase()
+    );
+    return canonical?.id || mapped;
   }
 
   function imageGenModelLabel(modelId) {
@@ -92,7 +82,7 @@
   function imageGenModelUiFamily(m) {
     if (m?.uiFamily === 'banana' || m?.uiFamily === 'gim2' || m?.uiFamily === 'midjourney') return m.uiFamily;
     const id = String(m?.id || '').toLowerCase();
-    if (id.startsWith('apimart-mj-')) return 'midjourney';
+    if (id.startsWith('mj-') || id.startsWith('midjourney-')) return 'midjourney';
     if (id.startsWith('lingtu') || id.includes('nano-banana')) return 'banana';
     return 'gim2';
   }
@@ -105,7 +95,7 @@
     return String(jobId || '').replace(/#\d+$/, '').trim();
   }
 
-  /** APImart MJ：第 1 张常为四宫格合成图，后 4 张为单图；也可能只返回 3～4 张 */
+  /** MJ 第 1 张常为四宫格合成图，后 4 张为单图；也可能只返回 3～4 张 */
   function parseMjImagineUrls(imageUrl, extras) {
     const all = [...new Set([imageUrl, ...(extras || [])].filter((u) => u && /^https?:\/\//i.test(String(u))))];
     if (!all.length) return { composite: null, tiles: [], primary: null };
@@ -476,9 +466,12 @@
     sel.disabled = false;
     sel.setAttribute('aria-busy', 'false');
     const draft = loadJson(LS_IMAGEGEN, null);
-    const current = opts.modelId || sel.value || draft?.model || 'image2';
+    const requested = opts.modelId || sel.value || lastValidImageGenModelId || draft?.model || 'image2';
+    const current = normalizeImageGenModelId(requested);
+    const currentEntry = imageGenModelCatalog.find((m) => m.id === current);
+    const explicitFamily = Object.prototype.hasOwnProperty.call(opts, 'family');
     imageGenModelFamily = resolveImageGenModelFamily(
-      opts.family ?? imageGenModelFamily ?? draft?.modelFamily,
+      explicitFamily ? opts.family : (currentEntry ? null : (imageGenModelFamily || draft?.modelFamily)),
       current
     );
     updateImageGenModelFamilyTabsActive();
@@ -500,11 +493,14 @@
     }
     const selectable = list.filter((m) => m.selectable !== false && m.status !== 'maintenance');
     const keepModel = opts.keepModel !== false;
+    const currentOption = findSelectableImageGenModelOption(sel, current);
     const pick =
-      keepModel && [...sel.options].some((o) => o.value === current && !o.disabled)
-        ? current
+      keepModel && currentOption
+        ? currentOption.value
         : selectable[0]?.id || list[0]?.id || 'image2';
-    if (sel.value !== pick) sel.value = pick;
+    const pickOption = findSelectableImageGenModelOption(sel, pick);
+    if (pickOption && sel.value !== pickOption.value) sel.value = pickOption.value;
+    rememberSelectedImageGenModel();
     if (!opts.skipUiRefresh) scheduleImageGenModelUiRefresh();
   }
 
@@ -539,11 +535,9 @@
     const supported = entry.resolutions?.length ? entry.resolutions : ['1k', '2k', '4k'];
     if (supported.includes(res)) return id;
     const family = imageGenModelUiFamily(entry);
-    const provider = entry.provider;
     const hit = imageGenModelCatalog.find(
       (m) =>
         imageGenModelUiFamily(m) === family
-        && m.provider === provider
         && (m.resolutions || []).includes(res)
         && m.selectable !== false
         && m.status !== 'maintenance'
@@ -556,11 +550,29 @@
     const modelSel = document.getElementById('imageGenModel');
     if (!resSel || !modelSel) return;
     const res = normalizeImageGenResolution(resSel.value);
-    const nextModel = resolveImageGenModelForResolution(modelSel.value, res);
-    if (nextModel && nextModel !== modelSel.value) {
-      modelSel.value = nextModel;
-      syncImageGenModelHint();
+    const currentModel = modelSel.value || lastValidImageGenModelId || getImageGenModel();
+    const nextModel = resolveImageGenModelForResolution(currentModel, res);
+    let nextOption = findSelectableImageGenModelOption(modelSel, nextModel);
+    if (!nextOption) {
+      const nextEntry = imageGenModelCatalog.find(
+        (model) => String(model.id).toLowerCase() === String(nextModel).toLowerCase()
+          && model.selectable !== false
+          && model.status !== 'maintenance'
+      );
+      if (nextEntry) {
+        imageGenModelFamily = imageGenModelUiFamily(nextEntry);
+        renderImageGenModelSelect({ modelId: nextEntry.id, family: imageGenModelFamily, skipUiRefresh: true });
+        nextOption = findSelectableImageGenModelOption(modelSel, nextEntry.id);
+      }
     }
+    if (!nextOption) {
+      nextOption = findSelectableImageGenModelOption(modelSel, currentModel)
+        || findSelectableImageGenModelOption(modelSel, lastValidImageGenModelId);
+    }
+    if (!nextOption) return;
+    if (modelSel.value !== nextOption.value) modelSel.value = nextOption.value;
+    rememberSelectedImageGenModel();
+    syncImageGenModelHint();
   }
 
   function getImageGenFormMeta() {
@@ -613,10 +625,10 @@
     'lingtu-2': [...IMAGE_GEN_SIZE_BANANA, ...IMAGE_GEN_SIZE_BANANA2_EXTRA],
     'lingtu-pro': IMAGE_GEN_SIZE_BANANA,
     lingtu: IMAGE_GEN_SIZE_BANANA,
-    'apimart-mj-v61': IMAGE_GEN_SIZE_MJ,
-    'apimart-mj-v81': IMAGE_GEN_SIZE_MJ,
-    'apimart-mj-v7': IMAGE_GEN_SIZE_MJ,
-    'apimart-mj-niji7': IMAGE_GEN_SIZE_MJ
+    'mj-v61': IMAGE_GEN_SIZE_MJ,
+    'mj-v81': IMAGE_GEN_SIZE_MJ,
+    'mj-v7': IMAGE_GEN_SIZE_MJ,
+    'mj-niji7': IMAGE_GEN_SIZE_MJ
   };
   const BANANA2_EXTENDED_MODELS = new Set(['lingtu-2']);
   const IMAGE_GEN_SAVE_TARGET_LS = 'promptHub.imageGenSaveTarget.v1';
@@ -728,7 +740,7 @@
     hint.hidden = false;
     hint.textContent = getImageGenMjMode() === 'blend'
       ? '混图模式：参考图 2～5 张'
-      : 'MJ 图生图：参考图最多 4 张（与 APIMart 一致）';
+        : 'MJ 图生图：参考图最多 4 张';
   }
 
   function trimImageGenRefsToLimit() {

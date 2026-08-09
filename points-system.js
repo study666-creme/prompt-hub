@@ -67,15 +67,21 @@
   };
 
   function normalizeImageGenModelId(modelId) {
-    const id = String(modelId || '').trim().toLowerCase() || 'image2';
-    return LEGACY_MODEL_IDS[id] || id;
+    const raw = String(modelId || '').trim() || 'image2';
+    const lower = raw.toLowerCase();
+    const mapped = LEGACY_MODEL_IDS[lower] || raw;
+    const list = window.__IMAGE_GEN_MODELS__;
+    const canonical = Array.isArray(list)
+      ? list.find((model) => model && String(model.id || '').toLowerCase() === String(mapped).toLowerCase())
+      : null;
+    return canonical?.id || mapped;
   }
 
   function catalogModelEntry(modelId) {
     const id = normalizeImageGenModelId(modelId);
     const list = window.__IMAGE_GEN_MODELS__;
     if (Array.isArray(list)) {
-      const hit = list.find((m) => m && m.id === id);
+      const hit = list.find((m) => m && String(m.id || '').toLowerCase() === id.toLowerCase());
       if (hit) {
         return {
           id: hit.id,
@@ -91,7 +97,8 @@
           modelDiscountPercent: hit.modelDiscountPercent,
           discountLabel: hit.discountLabel,
           pricingByResolution: hit.pricingByResolution === true,
-          creditsByResolution: hit.creditsByResolution || null,
+           creditsByResolution: hit.creditsByResolution || null,
+           creditsByResolutionQuality: hit.creditsByResolutionQuality || null,
           promoByResolution: hit.promoByResolution || null,
           costByResolution: hit.costByResolution || null,
           pricingBySpeed: hit.pricingBySpeed === true,
@@ -309,7 +316,7 @@
   }
 
   /** @returns {{ modelId, modelLabel, base, final, listPrice, modelDiscountLabel, mult, label, saved, fixed }} */
-  function getImageGenCostDetail(modelId, resolution, mjSpeed) {
+  function getImageGenCostDetail(modelId, resolution, mjSpeed, quality) {
     const model = getImageGenModel(modelId);
     const res = normalizeResolution(resolution);
     const mult = getMemberGenMultiplier();
@@ -349,6 +356,25 @@
             fixed: model.appliedDiscount === 'fixed'
           };
         }
+      }
+      const qualityKey = String(quality || 'standard').toLowerCase();
+      const perQuality = model.creditsByResolutionQuality?.[res]?.[qualityKey];
+      if (perQuality != null && Number.isFinite(Number(perQuality))) {
+        const listPrice = Number(perQuality);
+        return {
+          modelId: model.id,
+          modelLabel: model.label,
+          base: listPrice,
+          final: listPrice,
+          listPrice,
+          promoPrice: listPrice,
+          appliedDiscount: 'fixed',
+          modelDiscountLabel: null,
+          mult,
+          label: null,
+          saved: 0,
+          fixed: true
+        };
       }
       const perRes = model.costByResolution?.[res];
       if (perRes && Number.isFinite(Number(perRes.final))) {
