@@ -4,6 +4,10 @@
     display: grid !important;
     grid-template-columns: repeat(var(--warehouse-grid-columns, var(--card-columns, 3)), minmax(0, 1fr));
     grid-auto-flow: row;
+    /* 卡片媒体框使用 aspect-ratio 且图片在列表加载完成前无固有尺寸：
+       `auto` 行会把行高缩到卡片 min-content（≈文字卡 178px），视觉卡实际
+       402px 溢出到下一行造成重叠。行高必须按内容 max-content 计算。 */
+    grid-auto-rows: max-content;
     gap: var(--warehouse-grid-gap, var(--card-gap, 16px));
     align-content: start;
     align-items: start;
