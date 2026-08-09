@@ -376,7 +376,7 @@ const submitUxApi = window.ImageGenSubmit.init({
   isImageGenMobileFormActive: () => true,
   quoteGenerationCost: async () => ({ cost: 5, fromApi: true }),
   getGenCostQuoteTimeoutMs: () => 20,
-  getSubmitSuccessHoldMs: () => 5,
+  getSubmitSuccessHoldMs: () => 1000,
   resolveRefUrlsFromList: async () => [],
   removePendingJob: () => {},
   failPendingJob: () => {},
@@ -395,8 +395,15 @@ const submitStartDeadline = Date.now() + 250;
 while (!generateStarted && Date.now() < submitStartDeadline) {
   await new Promise((resolve) => setTimeout(resolve, 5));
 }
-if (!generateStarted || !submitButton.classList.contains('is-submitting')) {
-  console.error('imagegen-bundle-vm-smoke FAIL: submit feedback did not remain active during request');
+if (
+  !generateStarted
+  || !submitButton.classList.contains('is-submitted')
+  || submitButton.classList.contains('is-submitting')
+  || submitButton.disabled
+  || submitAttrs.has('aria-busy')
+  || submitButton.textContent !== '已加入生成队列'
+) {
+  console.error('imagegen-bundle-vm-smoke FAIL: submit button did not become reusable after local queue acceptance');
   process.exit(1);
 }
 resolveGenerate({ ok: true, data: { status: 'processing', jobId: 'job-submit-test', creditsCharged: 5 } });

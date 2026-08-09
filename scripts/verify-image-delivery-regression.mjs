@@ -28,13 +28,16 @@ checkTokens('generation image API', apiClient, [
 
 checkTokens('generation direct-submit API', apiClient, [
   'if (!opts?.directFirst)',
-  'directFirst: true'
+  'directFirst: true',
+  'if (!opts?.noRetry && !r.ok',
+  'noRetry: true'
 ]);
 
 checkTokens('generation submit feedback', imageSubmit, [
   'function waitForSubmitPaint()',
   "btn.classList.add('is-submitting');",
-  "btn.textContent = '已开始生成';",
+  "btn.textContent = '已加入生成队列';",
+  'if (singleRun) releaseSubmitUi(true);',
   'isImageGenMobileFormActive'
 ]);
 
@@ -126,6 +129,10 @@ if (/MobileUI\?\.setImageGenView/.test(imageSubmit) || /setImageGenView\('feed'/
 
 if ((apiClient.match(/directFirst:\s*true/g) || []).length < 3) {
   fail('image, MJ action and MJ blend requests must all skip the successful-path health preflight');
+}
+
+if ((apiClient.match(/noRetry:\s*true/g) || []).length < 3) {
+  fail('image, MJ action and MJ blend requests must not retry paid submissions');
 }
 
 const desktopGridBlock = cssRuleBlock(

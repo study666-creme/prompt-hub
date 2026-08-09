@@ -47,6 +47,7 @@ runNode('verify-edit-panel-gallery-regression', 'verify-edit-panel-gallery-regre
 runNode('verify-feed-image-fit-regression', 'verify-feed-image-fit-regression.mjs');
 runNode('verify-mobile-feed-regression', 'verify-mobile-feed-regression.mjs');
 runNode('verify-image-delivery-regression', 'verify-image-delivery-regression.mjs');
+runNode('verify-imagegen-job-recovery-regression', 'verify-imagegen-job-recovery-regression.mjs');
 runNode('verify-reference-assets-regression', 'verify-reference-assets-regression.mjs');
 runNode('verify-admin-split-regression', 'verify-admin-split-regression.mjs');
 

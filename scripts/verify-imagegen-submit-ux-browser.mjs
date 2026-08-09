@@ -58,6 +58,7 @@ const fixture = `<!doctype html>
         generateAt: 0,
         feedRenders: 0,
         mobileSwitches: 0,
+        toasts: 0,
         pending: []
       };
       let resolveGenerate;
@@ -94,7 +95,7 @@ const fixture = `<!doctype html>
         getImageGenModelCatalogReady: () => true,
         getImageGenBatchRunning: () => false,
         genId: () => 'pending-browser-test',
-        toast: () => {},
+        toast: () => { state.toasts += 1; },
         restoreImageGenSubmitLabel: () => { button.textContent = '生成图片 · 5 积分/张'; },
         saveImageGenDraft: () => {
           state.draftAt = performance.now();
@@ -181,19 +182,19 @@ try {
   const button = page.locator('#imageGenSubmit');
   const before = await button.boundingBox();
   await button.click();
+  await page.waitForFunction(() => window.__submitUx?.state?.firstFrameAt > 0);
+  const firstFrame = await page.evaluate(() => ({ ...window.__submitUx.state }));
   await page.waitForFunction(() => window.__submitUx?.state?.generateAt > 0);
 
-  const running = await page.evaluate(() => {
+  const queued = await page.evaluate(() => {
     const btn = document.getElementById('imageGenSubmit');
     const buttonStyle = getComputedStyle(btn);
-    const spinner = getComputedStyle(btn, '::before');
     return {
       text: btn.textContent,
       disabled: btn.disabled,
       busy: btn.getAttribute('aria-busy'),
       submitting: btn.classList.contains('is-submitting'),
-      spinnerAnimation: spinner.animationName,
-      spinnerWidth: parseFloat(spinner.width),
+      submitted: btn.classList.contains('is-submitted'),
       justifyContent: buttonStyle.justifyContent,
       bodyForm: document.body.classList.contains('imagegen-mobile-view-form'),
       bodyFeed: document.body.classList.contains('imagegen-mobile-view-feed'),
@@ -202,23 +203,27 @@ try {
   });
   const during = await button.boundingBox();
 
-  if (!running.submitting || !running.disabled || running.busy !== 'true') {
-    throw new Error(`submit loading state missing: ${JSON.stringify(running)}`);
+  if (!firstFrame.firstFrameSubmitting || firstFrame.firstFrameAt <= firstFrame.clickAt || firstFrame.draftAt < firstFrame.firstFrameAt) {
+    throw new Error(`submit work started before first feedback frame: ${JSON.stringify(firstFrame)}`);
   }
-  if (!running.firstFrameSubmitting || running.firstFrameAt <= running.clickAt || running.draftAt < running.firstFrameAt) {
-    throw new Error(`submit work started before first feedback frame: ${JSON.stringify(running)}`);
+  if (firstFrame.firstFrameAt - firstFrame.clickAt > 80) {
+    throw new Error(`first submit feedback frame was too slow: ${Math.round(firstFrame.firstFrameAt - firstFrame.clickAt)}ms`);
   }
-  if (running.firstFrameAt - running.clickAt > 80) {
-    throw new Error(`first submit feedback frame was too slow: ${Math.round(running.firstFrameAt - running.clickAt)}ms`);
+  if (
+    !queued.submitted
+    || queued.submitting
+    || queued.disabled
+    || queued.busy != null
+    || queued.text !== '已加入生成队列'
+    || queued.pending.length !== 1
+  ) {
+    throw new Error(`queued submit feedback is incorrect: ${JSON.stringify(queued)}`);
   }
-  if (running.spinnerAnimation !== 'imageGenSubmitSpin' || running.spinnerWidth < 10) {
-    throw new Error(`submit spinner is not visibly styled: ${JSON.stringify(running)}`);
+  if (queued.justifyContent !== 'center') {
+    throw new Error(`submit feedback is not centered: ${JSON.stringify(queued)}`);
   }
-  if (running.justifyContent !== 'center') {
-    throw new Error(`submit feedback is not centered: ${JSON.stringify(running)}`);
-  }
-  if (!running.bodyForm || running.bodyFeed || running.mobileSwitches !== 0 || running.feedRenders !== 0) {
-    throw new Error(`mobile submit switched or redrew the hidden feed: ${JSON.stringify(running)}`);
+  if (!queued.bodyForm || queued.bodyFeed || queued.mobileSwitches !== 0 || queued.feedRenders !== 0 || queued.toasts !== 0) {
+    throw new Error(`mobile submit caused unrelated UI feedback: ${JSON.stringify(queued)}`);
   }
   if (!before || !during || Math.abs(before.height - during.height) > 0.5 || Math.abs(before.width - during.width) > 0.5) {
     throw new Error(`submit button shifted while loading: before=${JSON.stringify(before)} during=${JSON.stringify(during)}`);
@@ -236,14 +241,14 @@ try {
       feedRenders: window.__submitUx.state.feedRenders
     };
   });
-  if (!accepted.submitted || accepted.text !== '已开始生成' || accepted.mobileSwitches !== 0 || accepted.feedRenders !== 0) {
+  if (!accepted.submitted || accepted.text !== '已加入生成队列' || accepted.mobileSwitches !== 0 || accepted.feedRenders !== 0) {
     throw new Error(`accepted submit feedback is incorrect: ${JSON.stringify(accepted)}`);
   }
 
   console.log(JSON.stringify({
     ok: true,
-    firstFeedbackMs: Math.round((running.firstFrameAt - running.clickAt) * 10) / 10,
-    requestStartedMs: Math.round((running.generateAt - running.clickAt) * 10) / 10,
+    firstFeedbackMs: Math.round((firstFrame.firstFrameAt - firstFrame.clickAt) * 10) / 10,
+    requestStartedMs: Math.round((queued.generateAt - queued.clickAt) * 10) / 10,
     screenshotPath
   }));
 } finally {
