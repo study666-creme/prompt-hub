@@ -3,6 +3,7 @@ import { drainFastProviderPendingSubmits } from './fast-provider-drain';
 import {
   archivePendingJobImage,
   pollAndUpdateJob,
+  warmJobGridImage,
   type JobRow
 } from './generation-jobs';
 import { readJobProvider, upstreamBindingsFromEnv } from './image-upstream';
@@ -86,6 +87,7 @@ export async function drainPendingImageTasks(
       if (/^https?:\/\//i.test(String(result.imageUrl || ''))) {
         await archivePendingJobImage(admin, job.user_id, job.id, env);
       }
+      void warmJobGridImage(admin, job.user_id, job.id, env).catch(() => {});
     } else if (result.status === 'failed') {
       failed += 1;
     }

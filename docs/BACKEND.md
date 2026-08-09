@@ -1,6 +1,6 @@
 # Worker 后端架构
 
-最后核对：2026-08-08。生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；运行版本以 `/health.buildSha` 为准。本次发布保留独立视频 Key，并修复视频音轨参数转发与提交阶段日志。
+最后核对：2026-08-09。生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；运行版本以 `/health.buildSha` 为准。本次发布保留独立视频 Key，并修复视频音轨参数转发与提交阶段日志。
 
 Canvas 媒体交付候选（2026-08-08）已提交到 `codex/unified-media-delivery-20260808` 并通过本地回归，但尚未部署；它包含媒体归档迁移，需单独完成数据库备份、迁移授权和生产验收。
 
@@ -174,6 +174,12 @@ npm run deploy:dry-run
 3. 队列消费只允许从 `queued` 原子领取一次。上游 HTTP 不确定、`running`、`outcome_unknown` 或任务查询 `not_found` 都不得重新发起付费 POST。
 4. 页面按秒轮询；服务端 cron 每 2 分钟兜底推进 submit、poll 和 archive。上游返回临时图后先把任务标为完成并立即给客户端展示，前端先写入“最近生成”并移除 pending，占用较慢的 R2/Storage 归档在后台独立重试，不重做生成。
 5. Signed-in `copyStorage` saves must complete `archiveGeneratedCardImage` and return a verified `storage://` primary reference before a generated card is persisted. SVG placeholders and temporary upstream URLs are display-only; a failed archive removes the newly created card.
+
+### 生图列表缩略图与预热（2026-08-09）
+
+- 任务完成后（轮询归档、settle 归档、`/media/generation/:id/url` 触发归档、后台 drain 恢复），Worker 通过 `waitUntil` 后台调用 `warmJobGridImage` 把 `_grid` 缩略图生成并写入 R2；失败仅记日志，不影响响应与扣费。
+- `GET /api/v1/generate/jobs/recent` 的列表图片优先签名 R2 中已存在的 `_grid` 缩略图（快速存在性检查，不触发现场生成）；`_grid` 不存在时签名原图。
+- `ensureGridPathForSigning` 在缩略图现场生成失败时降级返回已确认存在的原图路径，绝不返回不存在的 `_grid` 签名 URL；`requireExistingPrimary` 时仍按原契约抛 `NOT_FOUND` / `GRID_UNAVAILABLE`。
 
 ## Generation Delivery Contract (2026-08-03)
 

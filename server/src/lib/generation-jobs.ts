@@ -17,9 +17,10 @@ import {
   archiveRemoteImage,
   isDataImageUrl,
   isStorageRef,
+  storagePathFromRef,
   toStorageRef
 } from './image-archive';
-import { findFirstExistingStoragePath } from './media-cdn';
+import { findFirstExistingStoragePath, materializeGridForPrimaryPath } from './media-cdn';
 import type { MjButtonPublic } from './midjourney-models';
 import { defaultGridMjButtons, filterMjButtonsForClient, fetchMidjourneyTaskGallery } from './apimart-midjourney';
 import { parseMjImagineUrls, buildMjGalleryUrls, mjPollHasFullGallery } from './midjourney-models';
@@ -1474,6 +1475,34 @@ export function jobPollNeedsBackgroundArchive(
   imageUrl: string | null | undefined
 ): boolean {
   return isRemoteHttpImageUrl(imageUrl);
+}
+
+/** 已完成任务后台预热列表缩略图到 R2（不阻塞调用方，失败仅记日志） */
+export async function warmJobGridImage(
+  admin: SupabaseClient,
+  userId: string,
+  jobId: string,
+  env?: Env
+): Promise<boolean> {
+  if (!env) return false;
+  try {
+    const { data: job, error } = await admin
+      .from('generation_requests')
+      .select('result_image_url')
+      .eq('id', jobId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error || !job) return false;
+    const url = job.result_image_url as string | null;
+    if (!url || !isStorageRef(url)) return false;
+    const path = storagePathFromRef(url);
+    if (!path) return false;
+    const materialized = await materializeGridForPrimaryPath(env, admin, path);
+    return !!materialized;
+  } catch (e) {
+    console.warn('[generation] grid warm failed', jobId, e);
+    return false;
+  }
 }
 
 /** 后台把上游临时链归档到 R2/Storage（不阻塞轮询响应） */

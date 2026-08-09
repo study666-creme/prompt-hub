@@ -722,7 +722,9 @@ export async function ensureGridPathForSigning(
   if (opts.requireExistingPrimary) {
     throw new ApiError(503, 'GRID_UNAVAILABLE', '缩略图暂时不可用');
   }
-  return signPath;
+  /* 缩略图生成失败时降级到已确认存在的原图路径，避免列表签名返回 404 URL */
+  const fallbackPath = requiredPrimary || primary || null;
+  return fallbackPath || signPath;
 }
 
 export { TOKEN_TTL_SEC as MEDIA_CDN_TOKEN_TTL_SEC };

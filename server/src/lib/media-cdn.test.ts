@@ -163,6 +163,28 @@ describe('generation media grid signing', () => {
       code: 'NOT_FOUND'
     });
   });
+
+  it('falls back to the existing primary path when grid materialization fails', async () => {
+    const env = {
+      ENVIRONMENT: 'production',
+      MEDIA_STORAGE_MODE: 'r2-first'
+    } as Env;
+    mocks.createAdminClient.mockReturnValue({});
+    mocks.cardImageExists.mockImplementation(async (_env, path) => (
+      path === 'user-1/generated/job-1.jpg'
+    ));
+    mocks.downloadCardImage.mockResolvedValue(null);
+    mocks.uploadCardImage.mockResolvedValue(undefined);
+
+    const result = await ensureGridPathForSigning(
+      context(env),
+      'user-1/generated/job-1.jpg',
+      'grid'
+    );
+
+    expect(result).toBe('user-1/generated/job-1.jpg');
+    expect(mocks.uploadCardImage).not.toHaveBeenCalled();
+  });
 });
 
 describe('full image CDN validation', () => {

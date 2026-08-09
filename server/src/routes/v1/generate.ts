@@ -49,7 +49,8 @@ import {
   normalizeGenerationPollResult,
   pollAndUpdateJob,
   slowProviderProgressNote,
-  syncMjImagesFromUpstream
+  syncMjImagesFromUpstream,
+  warmJobGridImage
 } from '../../lib/generation-jobs';
 import { buildMjGalleryUrls, mjGalleryUrlCount } from '../../lib/midjourney-models';
 import {
@@ -99,8 +100,10 @@ import {
   buildPrivateMediaCdnUrl,
   ensureGridPathForSigning,
   resolveStoragePath,
-  serveCachedStorageImage
+  serveCachedStorageImage,
+  signingPathForVariant
 } from '../../lib/media-cdn';
+import { cardImageExists } from '../../lib/r2-storage';
 import type { Context } from 'hono';
 
 function assertOwnMediaPath(userId: string, path: string): void {
@@ -195,6 +198,33 @@ async function resolveJobImageUrlForClient(
     }
   }
   return raw;
+}
+
+/** 列表场景：原图必须存在；R2 已缓存 _grid 时签缩略图，否则签原图（不现场生成） */
+async function resolveJobListImageUrlForClient(
+  c: Context<{ Bindings: Env }>,
+  imageUrl: string | null | undefined
+): Promise<string | null> {
+  const raw = String(imageUrl || '').trim();
+  if (!raw) return null;
+  const path = resolveStoragePath(raw);
+  if (!path) return raw;
+  try {
+    const admin = createAdminClient(c.env);
+    const clean = path.replace(/^\//, '');
+    const fullPath = await ensureGridPathForSigning(c, clean, 'full', {
+      requireExistingPrimary: true,
+      strictStorageCheck: true
+    });
+    const gridPath = signingPathForVariant(clean, 'grid').replace(/^\//, '');
+    if (gridPath && gridPath !== clean && await cardImageExists(c.env, gridPath, admin)) {
+      return await buildPrivateMediaCdnUrl(c, gridPath);
+    }
+    return await buildPrivateMediaCdnUrl(c, fullPath || clean);
+  } catch (e) {
+    console.warn('[generate] resolve list image url failed', path, e);
+    return null;
+  }
 }
 
 const refImageInputSchema = z
@@ -1694,7 +1724,7 @@ generateRoutes.get('/jobs/recent', async c => {
         || mjGalleryUrls.length > 0
         || !!mjCompositeUrl;
       const resolveRecentImage = (url: string | null | undefined) =>
-        resolveJobImageUrlForClient(c, url, { requireExistingStorage: true });
+        resolveJobListImageUrlForClient(c, url);
       const imageUrl = await resolveRecentImage(job.result_image_url as string | null);
       const extraImageUrlsOut = (await Promise.all(
         extraImageUrls.map(resolveRecentImage)
@@ -2511,6 +2541,11 @@ generateRoutes.get('/jobs/:jobId', async c => {
       archivePendingJobImage(admin, user.id, jobId, c.env).catch((e) => {
         console.warn('[generate] waitUntil archive failed', jobId, e);
       })
+    );
+  }
+  if (c.executionCtx && liveStatus === 'completed') {
+    c.executionCtx.waitUntil(
+      warmJobGridImage(admin, user.id, jobId, c.env).catch(() => {})
     );
   }
 

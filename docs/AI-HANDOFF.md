@@ -88,6 +88,7 @@ durable URL checkpoints before failing; unrecoverable rows use idempotent
 `upstream_no_image` or `upstream_not_configured` failure/refund paths. Recent
 feed cards use `CardImageLoader` with `_grid` variants and never fetch a 4K
 source merely to render a list card.
+- 2026-08-09：任务完成归档后由 `warmJobGridImage` 在 `waitUntil` 中后台预热 `_grid` 缩略图到 R2；`GET /api/v1/generate/jobs/recent` 列表图片优先返回已存在的 `_grid` 签名（快速 R2 检查，不现场生成），缺失时签名原图。`ensureGridPathForSigning` 缩略图生成失败时降级为已确认存在的原图路径，不得返回不存在的 `_grid` 签名 URL 造成列表黑卡。
 - 付费提交只允许原子领取一次；网络结果未知、任务 `not_found` 或队列重投都不得触发第二次上游 POST。稳定幂等键与 1 小时未知结果退款 SLA 必须保留。
 - 视频使用独立 `VIDEO_GENERATION_QUEUE`。有上游 task ID 的正常 `processing` 可以持续数百或数千秒，不按生成时长判失败；进入 `result_uncertain`（包括 `error.code=result_uncertain`）后则保留 `submitted` 和公开投影 `submission_unknown`，由后台只读 GET 同一个 NewAPI task ID。显式线路任务继续使用持久化 `routeChannelId`；普通公开模型由 NewAPI 任务记录中的原始 `ChannelId` 固定渠道。两种情况都绝不重发生成 POST 或重新选路。
 - 视频建单、轮询、内容下载、队列 consumer 和 cron 只读取 `NEWAPI_VIDEO_API_KEY`。该 Key 固定属于 `视频模型` 分组；`NEWAPI_API_KEY` 仅服务文字/图片，视频不得回退到它或依赖 `auto` 猜测分组。

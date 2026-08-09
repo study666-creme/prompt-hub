@@ -23,7 +23,7 @@ import { createAdminClient } from '../../lib/supabase';
 import { uploadCardImage } from '../../lib/r2-storage';
 import { rateLimit } from '../../middleware/rate-limit';
 import { ensureWarehouseJobThumb, warehouseThumbCacheKey } from '../../lib/warehouse-thumb';
-import { archivePendingJobImage } from '../../lib/generation-jobs';
+import { archivePendingJobImage, warmJobGridImage } from '../../lib/generation-jobs';
 
 const BUCKET = 'card-images';
 
@@ -332,6 +332,11 @@ mediaRoutes.get('/generation/:jobId/url', async c => {
       .eq('user_id', user.id)
       .maybeSingle();
     if (archived?.result_image_url) raw = archived.result_image_url;
+    if (c.executionCtx) {
+      c.executionCtx.waitUntil(
+        warmJobGridImage(admin, user.id, jobId, c.env).catch(() => {})
+      );
+    }
   }
   const path = storagePathFromRef(raw);
   if (path) {
