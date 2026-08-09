@@ -128,20 +128,61 @@
     function resetCardLayoutStyles(container) {
       if (!container) return;
       container.querySelectorAll('.card').forEach((card) => {
-        card.removeAttribute('style');
-        card.style.position = 'relative';
+        card.style.removeProperty('position');
         card.style.left = '';
         card.style.top = '';
+        card.style.right = '';
+        card.style.bottom = '';
         card.style.width = '';
         card.style.height = '';
+        card.style.transform = '';
       });
     }
 
     function resetWarehouseGridLayout(container) {
       if (!container) return;
       resetCardLayoutStyles(container);
-      container.classList.remove('cards-grid-priming', 'mobile-grid');
+      container.classList.remove('cards-grid-priming', 'mobile-grid', 'warehouse-css-grid');
       container.classList.add('cards-grid-primed', 'masonry-ready');
+    }
+
+    function collectWarehouseCardsInStableOrder(container) {
+      if (!container) return [];
+      const cardEls = [...container.querySelectorAll(
+        ':scope > .card[data-id], '
+        + ':scope > .warehouse-desktop-col > .card[data-id], '
+        + ':scope > .warehouse-mobile-col > .card[data-id]'
+      )];
+      const filteredOrder = new Map(
+        (Array.isArray(allFilteredCards) ? allFilteredCards : [])
+          .map((card, index) => [String(card?.id || ''), index])
+          .filter(([id]) => !!id)
+      );
+      let nextFallback = filteredOrder.size;
+      cardEls.forEach((card) => {
+        const id = String(card.dataset.id || '');
+        const filteredRank = filteredOrder.get(id);
+        const savedRank = Number(card.dataset.warehouseOrder);
+        const rank = Number.isFinite(filteredRank)
+          ? filteredRank
+          : Number.isFinite(savedRank)
+            ? savedRank
+            : nextFallback++;
+        card.dataset.warehouseOrder = String(rank);
+      });
+      return cardEls.sort((a, b) =>
+        Number(a.dataset.warehouseOrder || 0) - Number(b.dataset.warehouseOrder || 0)
+      );
+    }
+
+    function flattenWarehouseDesktopColumns(container) {
+      if (!container?.querySelector(':scope > .warehouse-desktop-col')) return;
+      const cards = collectWarehouseCardsInStableOrder(container);
+      const sentinel = container.querySelector(':scope > .warehouse-scroll-sentinel');
+      const fragment = document.createDocumentFragment();
+      cards.forEach((card) => fragment.appendChild(card));
+      container.querySelectorAll(':scope > .warehouse-desktop-col').forEach((col) => col.remove());
+      container.insertBefore(fragment, sentinel || null);
     }
 
     function enforceMobileCardGrid() {
@@ -153,9 +194,14 @@
         masonryInstance = null;
       }
       container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
+      flattenWarehouseDesktopColumns(container);
+      container.classList.remove('warehouse-desktop-columns', 'warehouse-css-grid');
       container.classList.add('mobile-grid', 'cards-grid-primed');
       container.removeAttribute('style');
       resetCardLayoutStyles(container);
+      if (typeof repairWarehouseMobileColumns === 'function') {
+        repairWarehouseMobileColumns(container);
+      }
     }
     window.enforceMobileCardGrid = enforceMobileCardGrid;
 
@@ -169,6 +215,83 @@
           masonryInstance = null;
         }
         enforceMobileCardGrid();
+        return;
+      }
+
+      // Independent normal-flow columns avoid both async-image overlap and the
+      // tall-row gaps produced by a conventional CSS grid.
+      if (container.id === 'cardsContainer') {
+        if (masonryInstance) {
+          try { masonryInstance.destroy(); } catch (e) { /* ignore */ }
+          masonryInstance = null;
+        }
+        container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
+        const colsCount = Math.max(1, cardColumns);
+        const existingCols = [...container.querySelectorAll(':scope > .warehouse-desktop-col')];
+        const directCards = collectWarehouseCardsInStableOrder(container)
+          .filter((card) => card.parentElement === container);
+        const stableColumns = container.classList.contains('warehouse-desktop-columns')
+          && existingCols.length === colsCount;
+        if (stableColumns) {
+          if (directCards.length) {
+            const gap = getMasonryGap();
+            const loads = existingCols.map((col) => col.scrollHeight || 0);
+            directCards.forEach((card) => {
+              let target = 0;
+              for (let index = 1; index < loads.length; index += 1) {
+                if (loads[index] < loads[target]) target = index;
+              }
+              existingCols[target].appendChild(card);
+              const height = card.offsetHeight || Number(card.dataset.desktopEstimate) || 180;
+              card.dataset.desktopEstimate = String(height);
+              loads[target] += height + gap;
+            });
+          }
+          container.style.setProperty('--warehouse-card-columns', String(colsCount));
+          if (typeof repositionWarehouseScrollSentinel === 'function') {
+            repositionWarehouseScrollSentinel(container);
+          }
+          return;
+        }
+        const cardEls = collectWarehouseCardsInStableOrder(container);
+        const sentinel = container.querySelector(':scope > .warehouse-scroll-sentinel');
+        const staging = document.createDocumentFragment();
+        cardEls.forEach((card) => staging.appendChild(card));
+        container.querySelectorAll(
+          ':scope > .warehouse-desktop-col, :scope > .warehouse-mobile-col'
+        ).forEach((col) => col.remove());
+        container.insertBefore(staging, sentinel || null);
+        container.removeAttribute('style');
+        resetCardLayoutStyles(container);
+        container.style.setProperty('--warehouse-card-columns', String(colsCount));
+        container.classList.remove('mobile-grid', 'warehouse-mobile-columns', 'warehouse-css-grid');
+        container.classList.add('warehouse-desktop-columns', 'cards-grid-primed', 'masonry-ready');
+        const cols = Array.from({ length: colsCount }, (_, index) => {
+          const col = document.createElement('div');
+          col.className = 'warehouse-desktop-col';
+          col.dataset.col = String(index);
+          container.insertBefore(col, sentinel || null);
+          return col;
+        });
+        const gap = getMasonryGap();
+        const loads = new Array(colsCount).fill(0);
+        cardEls.forEach((card) => {
+          let target = 0;
+          for (let index = 1; index < loads.length; index += 1) {
+            if (loads[index] < loads[target]) target = index;
+          }
+          cols[target].appendChild(card);
+          const measured = card.offsetHeight || 0;
+          const estimate = Number(card.dataset.desktopEstimate)
+            || Number(card.dataset.mobileEstimate)
+            || 180;
+          const height = measured > 20 ? measured : estimate;
+          card.dataset.desktopEstimate = String(height);
+          loads[target] += height + gap;
+        });
+        if (typeof repositionWarehouseScrollSentinel === 'function') {
+          repositionWarehouseScrollSentinel(container);
+        }
         return;
       }
       const cardEls = [...container.querySelectorAll('.card')];

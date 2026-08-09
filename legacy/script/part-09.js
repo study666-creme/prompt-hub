@@ -618,7 +618,9 @@
       if (!container) return;
       const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
       const mobileGrid = isMobileViewport();
-      const searchEl = document.getElementById('searchInputMobile') || document.getElementById('searchInput');
+      const searchEl = isMobileViewport()
+        ? (document.getElementById('searchInputMobile') || document.getElementById('searchInput'))
+        : (document.getElementById('searchInput') || document.getElementById('searchInputMobile'));
       const search = (searchEl?.value || '').toLowerCase();
       sortMode = document.getElementById('sortSelect')?.value || sortMode || 'updated-desc';
 
@@ -753,6 +755,7 @@
           div.style.animationDelay = `${Math.min(idx * 0.045, 0.36)}s`;
         }
         div.dataset.id = card.id;
+        div.dataset.warehouseOrder = String(start + idx);
         if (window.isCommunityCollectCard?.(card)) {
           div.dataset.communityCollect = '1';
           const collectMeta = getCommunityCollectImageResolveOpts(card);

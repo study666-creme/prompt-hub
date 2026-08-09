@@ -2,8 +2,7 @@
  * 社区 / 我的主页 Feed 排版模块（与 features-draft 业务解耦）
  *
  * 模式（见 FEED_LAYOUT_MODE）：
- * - communityGrid 桌面：Masonry（列间距 gutter；**上下间距靠 CSS margin-bottom**，gutter 不含纵向）
- * - creationsGrid 桌面：flex 多列（.community-feed-col，文档流）
+ * - communityGrid / creationsGrid 桌面：flex 多列（.community-feed-col，文档流）
  * - 手机社区/我的主页：flex 多列（.community-feed-col，文档流）
  *
  * 调试：FeedLayout.diagnose('communityGrid') / FeedLayout.diagnose('creationsGrid')
@@ -12,7 +11,7 @@
   'use strict';
 
   const FEED_LAYOUT_MODE = {
-    communityGrid: 'masonry',
+    communityGrid: 'flex-columns',
     creationsGrid: 'flex-columns',
     userProfileGrid: 'masonry'
   };

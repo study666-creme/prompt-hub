@@ -590,6 +590,9 @@
     }
 
     function resolveWarehouseCardKind(card) {
+      if (typeof warehouseCardShouldRenderMediaSlot === 'function') {
+        return warehouseCardShouldRenderMediaSlot(card) ? 'visual' : 'text';
+      }
       if (window.FeatureDraft?.getWarehouseCardKind) {
         return window.FeatureDraft.getWarehouseCardKind(card);
       }

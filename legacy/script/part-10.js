@@ -29,6 +29,24 @@
         sentinel.removeAttribute('style');
         return;
       }
+      if (container.classList.contains('warehouse-desktop-columns')) {
+        sentinel.style.cssText = [
+          'position:relative',
+          'grid-column:1 / -1',
+          'width:100%',
+          'height:2px',
+          'margin:0',
+          'pointer-events:none',
+          'visibility:hidden'
+        ].join(';');
+        sentinel.dataset.ready = '1';
+        container.style.removeProperty('height');
+        if (warehousePageObserver) {
+          warehousePageObserver.unobserve(sentinel);
+          warehousePageObserver.observe(sentinel);
+        }
+        return;
+      }
       const cards = container.querySelectorAll('.card');
       if (!cards.length) return;
       let maxBottom = 0;
