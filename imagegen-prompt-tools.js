@@ -436,7 +436,7 @@
     const model = $('imageGenModel')?.value || 'image2';
     const resolution = $('imageGenResolution')?.value || '1k';
     const quality = $('imageGenQuality')?.value || 'standard';
-    let detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution) || {};
+    let detail = window.PointsSystem?.getImageGenCostDetail?.(model, resolution, null, quality) || {};
     if (window.PointsSystem?.useApiForAccount?.()) {
       try {
         const quote = await Promise.race([

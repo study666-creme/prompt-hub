@@ -97,11 +97,13 @@
         btn.removeAttribute('aria-busy');
         if (accepted) {
           btn.classList.add('is-submitted');
-          btn.textContent = '已开始生成';
-          btn.disabled = true;
+          btn.textContent = '已加入生成队列';
+          btn.disabled = false;
+          btn.setAttribute('aria-live', 'polite');
           const reset = () => {
             btn.__imageGenSubmitResetTimer = null;
             btn.classList.remove('is-submitted');
+            btn.removeAttribute('aria-live');
             btn.disabled = false;
             d().restoreImageGenSubmitLabel();
           };
@@ -210,9 +212,11 @@
       d().switchImageGenFeedToRecent();
       d().updateImageGenFeedHint();
       renderSubmitFeed({ preserveScroll: true });
+      // The local queue card is the immediate acknowledgement. Keep the form
+      // usable while quoting, reference uploads and server submission continue.
+      if (singleRun) releaseSubmitUi(true);
 
       if (useApi) {
-        if (singleRun && btn) btn.textContent = '正在确认任务…';
         const localCost = cost;
         const quoted = await Promise.race([
           d().quoteGenerationCost(resolution, quality, model, cost),
@@ -242,9 +246,6 @@
 
       if (useApi) {
         const refSources = submittedRefImages;
-        if (singleRun && btn) {
-          btn.textContent = refSources.length ? '正在处理参考图…' : '正在提交…';
-        }
         const refUrls = await d().resolveRefUrlsFromList(refSources, submittedReferenceAssets);
         if (refSources.length && refUrls.length < refSources.length && !batchOpts.silentToast) {
           d().toast(`已使用 ${refUrls.length}/${refSources.length} 张参考图继续生成`);
@@ -258,7 +259,6 @@
           refImageUrls: refUrls.length ? refUrls : undefined,
           ...(meta.mjParams ? { mjParams: meta.mjParams } : {})
         };
-        if (singleRun && btn) btn.textContent = '正在提交…';
         let gen;
         if (mjBlendMode) {
           gen = await global.PromptHubApi.mjBlend({
@@ -419,14 +419,7 @@
         if (gen.data.progressNote) pendingJob.pendingNote = gen.data.progressNote;
         d().trackSessionGenJob(jobId);
         d().persistPendingGenJobs();
-        if (!batchOpts.silentToast) {
-          const mobileForm = d().isImageGenMobileFormActive?.();
-          d().toast(
-            pendingJob.slowProvider
-              ? (mobileForm ? '已提交，约 1–12 分钟出图，可在「作品」查看进度' : '已提交，约 1–12 分钟出图，下方可看进度')
-              : (mobileForm ? '已提交生图，可在「作品」查看进度，也可继续生成' : '已提交生图，下方可查看进度，可继续生成')
-          );
-        }
+        renderSubmitFeed({ preserveScroll: true });
         void d().pollGenerationJobUntilDone(jobId, pendingId, {
           prompt,
           model,

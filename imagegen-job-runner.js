@@ -329,9 +329,16 @@
     return jobId && getSessionGenJobIds().includes(String(jobId));
   }
 
+  function apiJobFailureText(apiJob) {
+    const message = String(apiJob?.errorMessage || apiJob?.message || '').trim();
+    const code = String(apiJob?.failureCode || '').trim();
+    if (!code || message.includes(code)) return message || code;
+    return `${message || '生图失败'} [${code}]`;
+  }
+
   function shouldDeferFailedPendingRecovery(pending, apiJob, ctx) {
     const age = Date.now() - (pending.startedAt || 0);
-    const errRaw = apiJob?.errorMessage || apiJob?.message || '';
+    const errRaw = apiJobFailureText(apiJob);
     if (ge('isDefinitiveGenFailure', errRaw, apiJob)) return false;
     if (age >= pendingRecoveryGiveUpMs(pending)) return false;
     if (age >= FAILED_JOB_RECOVER_MAX_MS && !ge('isLikelyRecoverableGenFailure', errRaw, ctx, { confirmedFailed: true })) {
@@ -400,7 +407,7 @@
     const maxAttempts = 90;
     const finishFromPoll = async (poll) => {
       if (poll.data.status === 'failed') {
-        const errRaw = poll.data.errorMessage || poll.data.message || '';
+        const errRaw = apiJobFailureText(poll.data);
         if (ge('isDefinitiveGenFailure', errRaw, poll.data)) {
           await failPendingJobImmediately(pendingId, ctx, errRaw);
           return true;
@@ -882,9 +889,9 @@
       const created = Date.parse(j.createdAt) || 0;
       if (minCreated && created < minCreated - 120000) continue;
       let score = created;
-      if (j.status === 'processing') score += 2e15;
-      else if (preferProcessing) score -= 1e15;
-      else if (j.status === 'completed') score += 1e12;
+      if (j.status === 'completed' && j.imageUrl) score += 3e15;
+      else if (j.status === 'processing') score += preferProcessing ? 2e15 : 1e15;
+      else if (j.status === 'completed') score += 5e14;
       if (score > bestScore) {
         bestScore = score;
         best = j;

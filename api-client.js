@@ -323,7 +323,7 @@
       await prepareApiCall({ light: opts?.lightPrepare });
     }
     let r = await request(method, path, body, opts);
-    if (!r.ok && (r.code === 'NETWORK_ERROR' || r.code === 'API_UNREACHABLE')) {
+    if (!opts?.noRetry && !r.ok && (r.code === 'NETWORK_ERROR' || r.code === 'API_UNREACHABLE')) {
       await prepareApiCall();
       r = await request(method, path, body, opts);
     }
@@ -529,8 +529,8 @@
     }
     try {
       const raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v4') || 'null');
-      if (raw?.models?.length && Number(raw.version) >= 11 && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
-        modelsCache = { models: raw.models, globalDiscountPercent: 100, providers: ['newapi', 'apimart'] };
+      if (raw?.models?.length && Number(raw.version) >= 12 && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
+        modelsCache = { models: raw.models, globalDiscountPercent: 100 };
         modelsCacheExp = Date.now() + 45_000;
       }
     } catch (e) { /* ignore */ }
@@ -542,7 +542,7 @@
         try {
           localStorage.setItem(
             'promptrepo_imagegen_models_cache_v4',
-            JSON.stringify({ ts: Date.now(), version: 11, models: res.data.models })
+            JSON.stringify({ ts: Date.now(), version: 12, models: res.data.models })
           );
         } catch (e) { /* ignore */ }
       }
@@ -565,8 +565,9 @@
     if (costInflight.has(key)) return costInflight.get(key);
     const r = encodeURIComponent(resolution || '1k');
     const m = encodeURIComponent(model || 'image2');
+    const q = encodeURIComponent(quality || 'standard');
     const speedQ = speed ? `&speed=${encodeURIComponent(speed)}` : '';
-    const p = request('GET', `/api/v1/generate/cost?resolution=${r}&model=${m}${speedQ}`)
+    const p = request('GET', `/api/v1/generate/cost?resolution=${r}&quality=${q}&model=${m}${speedQ}`)
       .then((res) => {
         if (res.ok) costCache.set(key, { data: res, exp: Date.now() + 90_000 });
         return res;
@@ -581,7 +582,8 @@
     return requestWithPrepare('POST', '/api/v1/generate', payload, {
       timeoutMs: API_GENERATE_TIMEOUT_MS,
       lightPrepare: true,
-      directFirst: true
+      directFirst: true,
+      noRetry: true
     });
   }
 
@@ -597,7 +599,8 @@
     return requestWithPrepare('POST', '/api/v1/generate/mj-action', payload, {
       timeoutMs: API_GENERATE_TIMEOUT_MS,
       lightPrepare: true,
-      directFirst: true
+      directFirst: true,
+      noRetry: true
     });
   }
 
@@ -606,7 +609,8 @@
     return requestWithPrepare('POST', '/api/v1/generate/mj-blend', payload, {
       timeoutMs: API_GENERATE_TIMEOUT_MS,
       lightPrepare: true,
-      directFirst: true
+      directFirst: true,
+      noRetry: true
     });
   }
 

@@ -788,11 +788,14 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${d().esc?.(b)}</span>`).join('');
       const slow = d().isSlowGenProviderModel?.(job.model);
       const recovering = job.recovering === true && !(slow && job.pendingNote);
-      const pendingLabel = recovering ? '恢复中' : '生成中';
+      const locallyQueued = !job.jobId && !recovering;
+      const pendingLabel = recovering ? '同步中' : locallyQueued ? '排队中' : '生成中';
       const meta = job.pendingNote
         ? String(job.pendingNote).slice(0, 56)
         : recovering
           ? (job.recoverNote || '上游可能已出图，后台同步中…').slice(0, 56)
+          : locallyQueued
+            ? '正在提交 · 可继续生成'
           : slow
             ? '约 1–12 分钟 · 已提交'
             : '预计 1–3 分钟 · 可继续提交';
@@ -1246,7 +1249,9 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         temp.innerHTML = appendHtml;
         const newCards = [...temp.children];
         if (!newCards.length) return;
-        newCards.forEach((el) => wrap.appendChild(el));
+        const appendBoundary = wrap.querySelector(':scope > .imagegen-feed-library-cta')
+          || wrap.querySelector(':scope > .feed-page-sentinel');
+        newCards.forEach((el) => wrap.insertBefore(el, appendBoundary || null));
         bindImageGenFeedCardEvents(wrap, newCards);
         bindImageGenFeedImageRelayout();
         if (mobileFeed) enforceMobileImageGenFeed();
