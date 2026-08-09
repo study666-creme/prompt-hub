@@ -5,6 +5,29 @@
   const LS_DISMISS = 'promptrepo_pwa_install_dismissed_at';
   const REASK_MS = 7 * 86400000;
   let deferredPrompt = null;
+  let autoHideCleanup = null;
+
+  function armBannerAutoHide() {
+    disarmBannerAutoHide();
+    const onInteract = (e) => {
+      if (e?.target?.closest && e.target.closest('#pwaInstallBanner')) return;
+      hideBanner();
+      disarmBannerAutoHide();
+    };
+    document.addEventListener('scroll', onInteract, { capture: true, passive: true });
+    document.addEventListener('touchstart', onInteract, { capture: true, passive: true });
+    autoHideCleanup = () => {
+      document.removeEventListener('scroll', onInteract, { capture: true });
+      document.removeEventListener('touchstart', onInteract, { capture: true });
+    };
+  }
+
+  function disarmBannerAutoHide() {
+    if (autoHideCleanup) {
+      autoHideCleanup();
+      autoHideCleanup = null;
+    }
+  }
 
   function isStandalone() {
     if (window.matchMedia?.('(display-mode: standalone)')?.matches) return true;
@@ -45,6 +68,7 @@
   }
 
   function hideBanner() {
+    disarmBannerAutoHide();
     document.getElementById('pwaInstallBanner')?.classList.add('hidden');
   }
 
@@ -52,6 +76,7 @@
     if (isStandalone() || !isMobile()) return;
     if (dismissedRecently() && !deferredPrompt) return;
     document.getElementById('pwaInstallBanner')?.classList.remove('hidden');
+    armBannerAutoHide();
   }
 
   function showGuideMessage(msg, durationMs) {
