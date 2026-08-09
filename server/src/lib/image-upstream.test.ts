@@ -18,7 +18,7 @@ describe('image model catalog', () => {
     expect(IMAGE_MODEL_CATALOG.length).toBe(
       NEWAPI_IMAGE_MODEL_CATALOG.length + APIMART_IMAGE_MODEL_CATALOG.length
     );
-    expect(IMAGE_MODEL_CATALOG).toHaveLength(17);
+    expect(IMAGE_MODEL_CATALOG).toHaveLength(18);
   });
 
   it('newapi exposes price-backed image models first', () => {
@@ -72,8 +72,9 @@ describe('image model catalog', () => {
   });
 
   it('apimart catalog keeps only MJ', () => {
-    expect(APIMART_IMAGE_MODEL_CATALOG).toHaveLength(4);
+    expect(APIMART_IMAGE_MODEL_CATALOG).toHaveLength(5);
     expect(APIMART_IMAGE_MODEL_CATALOG.map((model) => model.id)).toEqual([
+      'mj-v82',
       'mj-v81',
       'mj-v7',
       'mj-v61',

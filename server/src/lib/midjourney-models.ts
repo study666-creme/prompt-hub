@@ -96,6 +96,7 @@ export type MjButtonPublic = {
 };
 
 const UPSTREAM_TO_SPEC: Record<string, MjVersionSpec> = {
+  'mj-v8.2': { version: '8.2' },
   'mj-v6.1': { version: '6.1' },
   'mj-v8.1': { version: '8.1' },
   'mj-v7': { version: '7' },

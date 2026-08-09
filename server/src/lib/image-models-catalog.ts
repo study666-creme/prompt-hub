@@ -225,6 +225,20 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
 /** 历史 MJ 任务兼容目录；不再投射到公开模型选择器。 */
 export const APIMART_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   apimart(midjourney({
+    id: 'mj-v82',
+    upstream: 'mj-v8.2',
+    label: 'MJ v8.2',
+    group: 'new',
+    description: '最新主版本 · 写实/概念通用 · 细节与光影最佳',
+    upstreamPoints: 0.1,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    pricingBySpeed: true,
+    defaultCreditsBySpeed: { relax: 8, fast: 10, turbo: 12 },
+    defaultCredits: 7,
+    sortOrder: 109
+  })),
+  apimart(midjourney({
     id: 'mj-v81',
     upstream: 'mj-v8.1',
     label: 'MJ v8.1',
@@ -374,9 +388,11 @@ const LEGACY_MODEL_MAP: Record<string, string> = {
   'ithink-gpt-image-2-slow': 'image2',
   'mooko-gpt-image-2-pro': 'image2-pro',
   'apimart-mj-v81': 'mj-v81',
+  'apimart-mj-v82': 'mj-v82',
   'apimart-mj-v7': 'mj-v7',
   'apimart-mj-v61': 'mj-v61',
   'apimart-mj-niji7': 'mj-niji7',
+  'mj-v8.2': 'mj-v82',
   'mj-v8.1': 'mj-v81',
   'mj-v6.1': 'mj-v61'
 };
