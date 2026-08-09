@@ -18,7 +18,7 @@ import {
   isRetainedPublicImageEntry,
   sanitizePublicModelDescription
 } from '../../lib/image-models-catalog';
-import { isMidjourneyUpstream } from '../../lib/midjourney-models';
+import { isMidjourneyModelId, isMidjourneyUpstream } from '../../lib/midjourney-models';
 import {
   submitMidjourneyAction,
   submitMidjourneyBlend,
@@ -31,9 +31,11 @@ import type { MjActionKind } from '../../lib/midjourney-models';
 import {
   archivePendingJobImage,
   assertJobOwner,
+  databaseGenerationQuality,
   finalizeFailedJob,
   jobPollNeedsBackgroundArchive,
   pollAndUpdateJob,
+  requestedGenerationQuality,
   slowProviderProgressNote,
   syncMjImagesFromUpstream
 } from '../../lib/generation-jobs';
@@ -89,11 +91,6 @@ function assertOwnMediaPath(userId: string, path: string): void {
   }
 }
 
-function isRemoteHttpImageUrl(url: string | null | undefined): boolean {
-  const raw = String(url || '').trim();
-  return /^https?:\/\//i.test(raw);
-}
-
 async function resolveJobImageUrlForClient(
   c: Context<{ Bindings: Env }>,
   imageUrl: string | null | undefined
@@ -123,8 +120,8 @@ const mjParamsSchema = z
     stylize: z.number().min(0).max(1000).optional(),
     chaos: z.number().min(0).max(100).optional(),
     weird: z.number().min(0).max(3000).optional(),
-    negativePrompt: z.string().max(500).optional(),
-    seed: z.number().optional(),
+    negativePrompt: z.string().max(4000).optional(),
+    seed: z.number().int().min(0).max(4_294_967_295).optional(),
     tile: z.boolean().optional(),
     raw: z.boolean().optional(),
     draft: z.boolean().optional(),
@@ -132,11 +129,15 @@ const mjParamsSchema = z
     speed: z.enum(['relax', 'fast', 'turbo']).optional(),
     iw: z.number().min(0).max(3).optional(),
     quality: z.enum(['0.25', '0.5', '1', '2']).optional(),
-    style: z.string().max(32).optional(),
-    cw: z.number().min(0).max(100).optional(),
-    sw: z.number().min(0).max(1000).optional(),
+    style: z.string().max(64).optional(),
+    cw: z.number().int().min(0).max(100).optional(),
+    sw: z.number().int().min(0).max(1000).optional(),
+    cref: z.string().max(6000).optional(),
+    sref: z.string().max(6000).optional(),
+    dref: z.string().max(6000).optional(),
+    dw: z.number().min(0).max(100).optional(),
     stop: z.number().min(10).max(100).optional(),
-    extra: z.string().max(200).optional()
+    extra: z.string().max(1000).optional()
   })
   .optional();
 
@@ -146,7 +147,7 @@ const bodySchema = z.object({
     .string()
     .min(1)
     .max(64)
-    .transform((s) => s.trim().toLowerCase())
+    .transform((s) => s.trim())
     .default('image2'),
   resolution: z.enum(['1k', '2k', '4k']).default('1k'),
   quality: z.enum(['low', 'medium', 'standard', 'high', 'ultra']).default('standard'),
@@ -157,7 +158,7 @@ const bodySchema = z.object({
   mjParams: mjParamsSchema
 });
 
-function normalizeGenerationBodyAliases(raw: unknown): unknown {
+export function normalizeGenerationBodyAliases(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
   const input = raw as Record<string, unknown>;
   const body: Record<string, unknown> = { ...input };
@@ -168,9 +169,64 @@ function normalizeGenerationBodyAliases(raw: unknown): unknown {
   }
   if (body.refImageUrl == null && typeof input.image === 'string') body.refImageUrl = input.image;
   if (body.refImageUrls == null && Array.isArray(input.images)) body.refImageUrls = input.images;
+  if (body.refImageUrls == null && Array.isArray(input.image_urls)) body.refImageUrls = input.image_urls;
   if (body.count == null && typeof input.n === 'number') body.count = input.n;
   if (body.model === 'image2-free') body.model = 'image2';
+
+  const modelId = normalizeImageModelId(typeof body.model === 'string' ? body.model : null);
+  if (isMidjourneyModelId(modelId)) {
+    const nested = input.mjParams && typeof input.mjParams === 'object' && !Array.isArray(input.mjParams)
+      ? { ...(input.mjParams as Record<string, unknown>) }
+      : {};
+    const aliases: Array<[string, string]> = [
+      ['stylize', 'stylize'],
+      ['chaos', 'chaos'],
+      ['weird', 'weird'],
+      ['negative_prompt', 'negativePrompt'],
+      ['negativePrompt', 'negativePrompt'],
+      ['seed', 'seed'],
+      ['tile', 'tile'],
+      ['raw', 'raw'],
+      ['draft', 'draft'],
+      ['hd', 'hd'],
+      ['iw', 'iw'],
+      ['style', 'style'],
+      ['cw', 'cw'],
+      ['sw', 'sw'],
+      ['cref', 'cref'],
+      ['sref', 'sref'],
+      ['dref', 'dref'],
+      ['dw', 'dw'],
+      ['stop', 'stop'],
+      ['extra', 'extra']
+    ];
+    for (const [source, target] of aliases) {
+      if (nested[target] === undefined && input[source] !== undefined) nested[target] = input[source];
+    }
+    if (['0.25', '0.5', '1', '2'].includes(quality)) nested.quality = quality;
+    nested.speed = 'relax';
+    body.model = modelId;
+    body.mjParams = nested;
+    body.quality = 'standard';
+    body.count = 1;
+  }
   return body;
+}
+
+export function parseGenerationRequestBody(raw: unknown) {
+  return bodySchema.parse(normalizeGenerationBodyAliases(raw));
+}
+
+function generationValidationMessage(error: z.ZodError): string {
+  const issue = error.issues[0];
+  const field = String(issue?.path?.[0] || '参数');
+  if (field === 'prompt') return '提示词不能为空，且不能超过 8000 字';
+  if (field === 'model') return '模型 ID 无效';
+  if (field === 'resolution') return '分辨率仅支持 1K、2K 或 4K';
+  if (field === 'quality') return '质量参数仅支持 low、medium、standard、high 或 ultra';
+  if (field === 'refImageUrl' || field === 'refImageUrls') return '参考图参数格式无效或数量超限';
+  if (field === 'count') return '生成张数参数无效';
+  return `请求参数无效（${field}）`;
 }
 
 const mjBlendSchema = z.object({
@@ -284,7 +340,7 @@ function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boole
     }
     return `提示词可能触发内容审核，请调整描述后重试${refundNote}`;
   }
-  if (/insufficient balance|insufficient credits/i.test(s)) {
+  if (/insufficient balance|insufficient credits|insufficient_user_quota|quota.*(?:exhausted|insufficient)/i.test(s)) {
     return `生成服务暂不可用，请联系站长${refundNote}`;
   }
   if (/upstream_auth_failed|无效.*令牌|invalid.*token/i.test(s)) {
@@ -323,8 +379,17 @@ function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boole
   if (/upstream_submit_interrupted/i.test(s)) {
     return `提交被中断，积分已退回；请等 1 分钟后重试，勿重复连点`;
   }
+  if (/upstream_submission_unknown/i.test(s)) {
+    return `任务提交结果未能确认，系统已停止自动重试${debited ? '，积分已全额退回' : ''}；请稍后重新提交`;
+  }
   if (/upstream_submit_stale/i.test(s)) {
     return `生图长时间无响应，积分已退回；请稍后再试或换其他模型`;
+  }
+  if (/job_state_failed|job_state_update_failed|fast_submit_claim_failed|database|postgres|supabase/i.test(s)) {
+    return `生图任务状态保存失败${debited ? '，积分已全额退回' : ''}；请联系站长并提供任务时间`;
+  }
+  if (/fetch failed|network|econn|socket|tls|certificate|connection reset|connection refused|dns/i.test(s)) {
+    return `生图服务连接失败${debited ? '，积分已全额退回' : ''}；请稍后重试或联系站长`;
   }
   if (/missing_task_id/i.test(s)) {
     return `任务提交异常${debited ? '，积分已全额退回' : ''}，请重试`;
@@ -339,6 +404,87 @@ function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boole
     return `任务已接收但响应格式异常，请强刷页面查看是否已在生成${refundNote}`;
   }
   return `生图失败${refundNote}，请重试`;
+}
+
+function publicFailurePrefix(raw: string): string {
+  const status = raw.match(/\bHTTP\s+(\d{3})\b/i)?.[1];
+  const code = publicGenerationFailureCode(raw);
+  return `${status ? `HTTP ${status} · ` : ''}${code} · `;
+}
+
+function sanitizeActionableErrorReason(raw: string): string {
+  return raw
+    .replace(/^\s*HTTP\s+\d{3}\s*(?:\[[^\]]{1,100}\])?\s*[:：·-]?\s*/i, '')
+    .replace(/https?:\/\/[^\s，。；;]+/gi, '[已隐藏地址]')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, '[已隐藏地址]')
+    .replace(/\bbearer\s+[^\s，。；;]+/gi, '[已隐藏凭据]')
+    .replace(/\bsk-[a-z0-9_-]{8,}\b/gi, '[已隐藏凭据]')
+    .replace(/\b(?:provider|upstream|channel|route|base_?url|api_?url|cost|multiplier|markup)\s*[:=]\s*[^\s，。；;]+/gi, '')
+    .replace(/\b(?:New API|APIMart|GrsAI)\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s:：·,，;；-]+|[\s:：·,，;；-]+$/g, '')
+    .trim();
+}
+
+export function publicGenerationErrorDetail(
+  raw: string | null | undefined,
+  opts?: { violationNoRefund?: boolean; debited?: boolean }
+): string {
+  const value = String(raw || '').trim();
+  const prefix = publicFailurePrefix(value);
+  const refundNote = opts?.debited === false ? '' : '；您的积分已全额退回';
+  const failureCode = publicGenerationFailureCode(value);
+  if (failureCode === 'UPSTREAM_BALANCE_LOW') {
+    return `${prefix}生图服务额度不足，请联系站长${refundNote}`;
+  }
+  if (failureCode === 'UPSTREAM_AUTH_FAILED') {
+    return `${prefix}生图服务认证或访问权限失败，请联系站长${refundNote}`;
+  }
+  const explicitValidation = /VALIDATION_ERROR|\bHTTP\s+(?:400|422)\b|validation|required|invalid.*(?:parameter|request|body)|unprocessable/i.test(value);
+  if (explicitValidation) {
+    const reason = sanitizeActionableErrorReason(value).slice(0, 180);
+    return `${prefix}参数校验失败：${reason || '请求参数不符合模型要求'}`;
+  }
+  return `${prefix}${friendlyGenerationError(value, opts)}`;
+}
+
+export function publicGenerationFailureCode(raw: string | null | undefined): string {
+  const value = String(raw || '').trim();
+  if (!value) return 'GENERATION_FAILED';
+  if (/upstream_submission_unknown/i.test(value)) return 'SUBMISSION_UNCONFIRMED';
+  if (/fast_submit_claim_failed|database|postgres|supabase|statement timeout/i.test(value)) {
+    return 'JOB_STATE_FAILED';
+  }
+  if (/fetch failed|network|econn|socket|tls|certificate|connection reset|connection refused|dns/i.test(value)) {
+    return 'UPSTREAM_CONNECTION_FAILED';
+  }
+  if (/timeout|timed out|upstream_submit_stale/i.test(value)) return 'UPSTREAM_TIMEOUT';
+  if (/insufficient balance|insufficient credits|insufficient_user_quota|quota.*(?:exhausted|insufficient)/i.test(value)) {
+    return 'UPSTREAM_BALANCE_LOW';
+  }
+  if (/apikey|api.key|unauthorized|invalid.*(?:key|token)|\b401\b|\b403\b/i.test(value)) {
+    return 'UPSTREAM_AUTH_FAILED';
+  }
+  if (/unknown model|invalid model|model.*not.*exist|upstream_model_rejected/i.test(value)) {
+    return 'UPSTREAM_MODEL_REJECTED';
+  }
+  if (/validation|required|invalid.*(?:parameter|request|body)|unprocessable|\b400\b|\b422\b/i.test(value)) {
+    return 'UPSTREAM_VALIDATION_FAILED';
+  }
+  if (/rate limit|too many requests|excessive system load|please wait|busy|\b429\b/i.test(value)) {
+    return 'UPSTREAM_BUSY';
+  }
+  if (/content.*policy|safety|moderation|blocked|prohibited|violation/i.test(value)) {
+    return 'CONTENT_REJECTED';
+  }
+  if (/upstream_image_archive_failed|invalid_data_url|invalid base64/i.test(value)) {
+    return 'IMAGE_ARCHIVE_FAILED';
+  }
+  if (/upstream_no_image|missing_task_id|not return.*task|not return.*image/i.test(value)) {
+    return 'UPSTREAM_RESPONSE_INVALID';
+  }
+  if (/\b5\d\d\b|upstream_failed|upstream_submit/i.test(value)) return 'UPSTREAM_FAILED';
+  return 'GENERATION_FAILED';
 }
 
 function parameterOptions(
@@ -358,6 +504,36 @@ function parameterOptions(
 function publicDirectModelParameters(
   model: NonNullable<ReturnType<typeof resolveImageModelConfig>>
 ): NewApiCatalogParameter[] {
+  if (model.uiFamily === 'midjourney') {
+    return [
+      { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: model.id },
+      { name: 'prompt', path: 'prompt', label: '提示词', type: 'string', required: true },
+      { name: 'size', path: 'size', label: '画面比例', type: 'string', required: false, default: 'auto', options: ['auto', ...aspectRatiosForModel(model.id)] },
+      { name: 'quality', path: 'quality', label: '质量', type: 'string', required: false, default: '1', options: ['0.25', '0.5', '1', '2'] },
+      { name: 'image_urls', path: 'image_urls', label: '参考图', type: 'array', required: false, min_items: 1, max_items: 5, items: { type: 'string', format: 'public-http-url' } },
+      { name: 'stylize', path: 'stylize', label: '风格化强度', type: 'integer', required: false, default: 0, min: 0, max: 1000 },
+      { name: 'chaos', path: 'chaos', label: '混乱度', type: 'integer', required: false, default: 0, min: 0, max: 100 },
+      { name: 'weird', path: 'weird', label: '怪异度', type: 'integer', required: false, default: 0, min: 0, max: 3000 },
+      { name: 'negative_prompt', path: 'negative_prompt', label: '反向提示词', type: 'string', required: false },
+      { name: 'seed', path: 'seed', label: '随机种子', type: 'integer', required: false, min: 0, max: 4_294_967_295 },
+      { name: 'style', path: 'style', label: '风格', type: 'string', required: false },
+      { name: 'tile', path: 'tile', label: '无缝平铺', type: 'boolean', required: false, default: false },
+      { name: 'raw', path: 'raw', label: '原始风格', type: 'boolean', required: false, default: false },
+      { name: 'draft', path: 'draft', label: '草图模式', type: 'boolean', required: false, default: false },
+      { name: 'hd', path: 'hd', label: '高清模式', type: 'boolean', required: false, default: false },
+      { name: 'iw', path: 'iw', label: '参考图权重', type: 'number', required: false, min: 0, max: 3 },
+      { name: 'cw', path: 'cw', label: '角色参考权重', type: 'integer', required: false, min: 0, max: 100 },
+      { name: 'sw', path: 'sw', label: '风格参考权重', type: 'integer', required: false, min: 0, max: 1000 },
+      { name: 'cref', path: 'cref', label: '角色参考图', type: 'string', required: false },
+      { name: 'sref', path: 'sref', label: '风格参考图', type: 'string', required: false },
+      { name: 'dref', path: 'dref', label: '深度参考图', type: 'string', required: false },
+      { name: 'dw', path: 'dw', label: '深度权重', type: 'number', required: false, min: 0, max: 100 },
+      { name: 'stop', path: 'stop', label: '提前停止百分比', type: 'integer', required: false, min: 10, max: 100 },
+      { name: 'extra', path: 'extra', label: '附加参数', type: 'string', required: false },
+      { name: 'speed', path: 'speed', label: '速度', type: 'string', required: false, fixed: 'relax' },
+      { name: 'n', path: 'n', label: '提交次数', type: 'integer', required: false, fixed: 1 }
+    ];
+  }
   const parameters: NewApiCatalogParameter[] = [
     { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: model.id },
     { name: 'prompt', path: 'prompt', label: '提示词', type: 'string', required: true },
@@ -386,11 +562,11 @@ function publicDirectModelParameters(
       type: 'array',
       required: false,
       min_items: 1,
-      max_items: model.uiFamily === 'midjourney' ? 5 : 16,
+      max_items: 16,
       items: { type: 'string', format: 'uri-or-data-image' }
     }
   ];
-  if (!model.fixedQualityLow && model.uiFamily !== 'midjourney') {
+  if (!model.fixedQualityLow) {
     parameters.push({
       name: 'quality',
       path: 'quality',
@@ -400,19 +576,6 @@ function publicDirectModelParameters(
       default: 'standard',
       options: ['standard', 'high', 'ultra']
     });
-  }
-  if (model.uiFamily === 'midjourney') {
-    parameters.push(
-      { name: 'speed', path: 'mjParams.speed', label: '速度', type: 'string', required: false, default: 'relax', options: ['relax', 'fast', 'turbo'] },
-      { name: 'stylize', path: 'mjParams.stylize', label: '风格化', type: 'number', required: false, min: 0, max: 1000 },
-      { name: 'chaos', path: 'mjParams.chaos', label: '变化度', type: 'number', required: false, min: 0, max: 100 },
-      { name: 'weird', path: 'mjParams.weird', label: '怪异度', type: 'number', required: false, min: 0, max: 3000 },
-      { name: 'seed', path: 'mjParams.seed', label: '随机种子', type: 'integer', required: false },
-      { name: 'quality', path: 'mjParams.quality', label: '质量', type: 'string', required: false, options: ['0.25', '0.5', '1', '2'] },
-      { name: 'iw', path: 'mjParams.iw', label: '参考图权重', type: 'number', required: false, min: 0, max: 3 },
-      { name: 'raw', path: 'mjParams.raw', label: 'Raw 模式', type: 'boolean', required: false, default: false },
-      { name: 'tile', path: 'mjParams.tile', label: '无缝平铺', type: 'boolean', required: false, default: false }
-    );
   }
   return parameters;
 }
@@ -455,7 +618,7 @@ function publicModelPayload(
     listPrice: credits,
     promoPrice: credits,
     appliedDiscount: 'fixed',
-    discountLabel: '卡藏 API 实时价',
+    discountLabel: null,
     modelDiscountPercent: 100,
     modelDiscountLabel: null,
     modelLabel
@@ -543,6 +706,21 @@ function publicModelPayload(
         : m.pricingByResolution
           ? m.promoByResolution
           : null;
+    const finalCreditsByResolutionQuality = m.provider === 'newapi'
+      ? Object.fromEntries(
+          resolutions.map((res) => [
+            res,
+            Object.fromEntries(
+              ['low', 'medium', 'standard', 'high', 'ultra'].map((quality) => [
+                quality,
+                newApiCreditsForModel(newApiRules, m.upstream, res, quality)
+                  ?? finalCreditsByResolution?.[res]
+                  ?? m.defaultCredits
+              ])
+            )
+          ])
+        )
+      : null;
     const newApiRule = newApiRuleForModel(m, opts.newApiCatalog);
     return {
       id: m.id,
@@ -559,6 +737,7 @@ function publicModelPayload(
       violationNotice: m.violationNotice,
       fixedQualityLow: !!m.fixedQualityLow,
       modality: 'image',
+      outputCount: m.uiFamily === 'midjourney' ? 5 : 1,
       endpoint: { method: 'POST', path: '/api/v1/generate', contentType: 'application/json' },
       catalogVersion: opts.newApiCatalog.version || null,
       pricingVersion: opts.newApiCatalog.pricingVersion || null,
@@ -571,6 +750,7 @@ function publicModelPayload(
       resolutions: m.resolutions,
       pricingByResolution: m.pricingByResolution,
       creditsByResolution: finalCreditsByResolution,
+      creditsByResolutionQuality: finalCreditsByResolutionQuality,
       promoByResolution: finalPromoByResolution,
       pricingBySpeed: m.pricingBySpeed,
       creditsBySpeed: m.pricingBySpeed ? m.creditsBySpeed : null,
@@ -602,6 +782,7 @@ async function computeGenerationCostForRequest(
   memberActive: boolean,
   opts?: {
     mjSpeed?: string | null;
+    quality?: string | null;
     newApiCatalog?: NewApiCatalogSnapshot;
   }
 ): Promise<ReturnType<typeof computeImageGenerationCost>> {
@@ -619,7 +800,8 @@ async function computeGenerationCostForRequest(
   const credits = newApiCreditsForModel(
     snapshot.rules,
     resolved.upstream,
-    resolution
+    resolution,
+    opts?.quality
   );
   if (credits == null) return baseCost;
   return {
@@ -629,7 +811,7 @@ async function computeGenerationCostForRequest(
     listPrice: credits,
     promoPrice: credits,
     appliedDiscount: 'fixed',
-    discountLabel: '卡藏 API 实时价',
+    discountLabel: null,
     modelDiscountPercent: 100,
     modelDiscountLabel: null,
     modelLabel: resolved.label
@@ -744,9 +926,13 @@ export async function publicGenerationModelsHandler(c: Context<{ Bindings: Env }
 /** 报价接口：轻量、不限流（避免生图页拖动参数时卡 20s+） */
 generateRoutes.get('/cost', async c => {
   const resolution = c.req.query('resolution') || '1k';
+  const quality = c.req.query('quality') || 'standard';
   const model = normalizeImageModelId(c.req.query('model') || 'image2');
   if (!['1k', '2k', '4k'].includes(resolution)) {
     throw new ApiError(400, 'VALIDATION_ERROR', '无效的分辨率');
+  }
+  if (!['low', 'medium', 'standard', 'high', 'ultra'].includes(quality)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', '无效的质量参数');
   }
   const user = c.get('user');
   const admin = createAdminClient(c.env);
@@ -783,7 +969,7 @@ generateRoutes.get('/cost', async c => {
     resolution,
     profile.membership_tier,
     memberActive,
-    { mjSpeed: speed || null, newApiCatalog }
+    { mjSpeed: speed || null, quality, newApiCatalog }
   );
   return c.json({
     ok: true,
@@ -801,7 +987,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   const rawBody = await c.req.json().catch(() => ({}));
   const parsed = bodySchema.safeParse(normalizeGenerationBodyAliases(rawBody));
   if (!parsed.success) {
-    throw new ApiError(400, 'VALIDATION_ERROR', '请填写有效的提示词与参数');
+    throw new ApiError(400, 'VALIDATION_ERROR', generationValidationMessage(parsed.error));
   }
 
   const promptText = parsed.data.prompt.slice(0, 8000);
@@ -814,12 +1000,12 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   ]);
   let newApiCatalog = cachedNewApiCatalog;
   let catalogEntries = imageCatalogForNewApiSnapshot(newApiCatalog);
-  const modelId = normalizeImageModelId(parsed.data.model);
-  let resolved = resolveImageModelConfig(modelId, settings, catalogEntries);
+  const requestedModelId = normalizeImageModelId(parsed.data.model);
+  let resolved = resolveImageModelConfig(requestedModelId, settings, catalogEntries);
   if (resolved?.provider === 'newapi') {
     newApiCatalog = await requireFreshNewApiCatalog(c.env);
     catalogEntries = imageCatalogForNewApiSnapshot(newApiCatalog);
-    resolved = resolveImageModelConfig(modelId, settings, catalogEntries);
+    resolved = resolveImageModelConfig(requestedModelId, settings, catalogEntries);
   }
   if (!resolved || !resolved.enabled || !isRetainedImageModel(resolved)) {
     throw new ApiError(
@@ -828,6 +1014,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       resolved ? modelUnavailableMessage(resolved) : '所选模型不可用'
     );
   }
+  const modelId = resolved.id;
   if (
     resolved.resolutions.length
     && !resolved.resolutions.includes(parsed.data.resolution)
@@ -847,6 +1034,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
 
   const jobResolution = parsed.data.resolution;
   const jobQuality = resolved.fixedQualityLow ? 'low' : parsed.data.quality;
+  const storedJobQuality = databaseGenerationQuality(jobQuality);
   const isMidjourney = resolved.uiFamily === 'midjourney' || isMidjourneyUpstream(resolved.upstream);
   const mjParams = isMidjourney && parsed.data.mjParams ? parsed.data.mjParams : undefined;
 
@@ -858,7 +1046,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       jobResolution,
       profile.membership_tier,
       memberActive,
-      { mjSpeed: mjParams?.speed || null, newApiCatalog }
+      { mjSpeed: mjParams?.speed || null, quality: jobQuality, newApiCatalog }
     );
   const count = newApiRule ? parsed.data.count : 1;
   const base = roundCredits(unitCost.base * count);
@@ -903,7 +1091,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       user_id: user.id,
       prompt: promptText,
       resolution: jobResolution,
-      quality: jobQuality,
+      quality: storedJobQuality,
       size_label: parsed.data.size ?? null,
       credits_charged: final,
       status: 'processing',
@@ -920,6 +1108,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
         refundOnViolation,
         violationNotice,
         fixedQualityLow: !!resolved.fixedQualityLow,
+        requestedQuality: jobQuality,
         ...(isMidjourney ? { isMidjourney: true, mjParams: mjParams || {} } : {})
       }
     })
@@ -950,6 +1139,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     refundOnViolation,
     violationNotice,
     fixedQualityLow: !!resolved.fixedQualityLow,
+    requestedQuality: jobQuality,
     ...(isMidjourney ? { isMidjourney: true, mjParams: mjParams || {} } : {})
   };
 
@@ -995,6 +1185,7 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     count,
     refImageUrls: refUrls,
     catalogParameters: newApiRule?.parameters,
+    idempotencyKey: job.id,
     ...(mjParams ? { mjParams } : {})
   };
 
@@ -1004,28 +1195,44 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
     && (lineProvider === 'apimart' || lineProvider === 'newapi')
     && isProviderConfigured(upstream, lineProvider)
   ) {
-    // The queue consumer can be paused independently of the Worker and leave
-    // paid jobs in `queued` until the stale-job refund path runs. Submit from
-    // waitUntil here; claimFastSubmit still makes any later queue retry a no-op.
-    const useDurableQueue = false;
     const fastMeta: Record<string, unknown> = {
       ...baseMeta,
       debitSplit,
       fastSubmitState: 'queued',
-      ...(useDurableQueue ? { queueEnqueuedAt: new Date().toISOString() } : {})
+      ...(lineProvider === 'newapi' && c.env.IMAGE_GENERATION_QUEUE
+        ? { queueEnqueuedAt: new Date().toISOString() }
+        : {})
     };
-    await admin
+    const { error: fastMetaError } = await admin
       .from('generation_requests')
       .update({ meta: fastMeta })
       .eq('id', job.id);
     const queuedJob: JobRow = { ...job, meta: fastMeta };
-    if (useDurableQueue) {
+    if (fastMetaError) {
+      await finalizeFailedJob(
+        admin,
+        user.id,
+        queuedJob,
+        `job_state_update_failed: ${String(fastMetaError.message || fastMetaError)}`
+      );
+      throw new ApiError(
+        502,
+        'JOB_STATE_FAILED',
+        '生图任务状态保存失败，积分已全额退回；请稍后重试'
+      );
+    }
+    let queueAccepted = false;
+    if (lineProvider === 'newapi' && c.env.IMAGE_GENERATION_QUEUE) {
       try {
-        await c.env.IMAGE_GENERATION_QUEUE!.send({ jobId: job.id, userId: user.id });
+        await c.env.IMAGE_GENERATION_QUEUE.send({ jobId: job.id, userId: user.id });
+        queueAccepted = true;
       } catch (queueError) {
         console.error('[generate] image queue enqueue failed', job.id, queueError);
       }
-    } else {
+    }
+    // Queue consumers can hold the synchronous image request to completion.
+    // waitUntil is only a fallback because its lifetime ends shortly after this response.
+    if (!queueAccepted) {
       kickBackgroundTask(
         c,
         processFastProviderPendingSubmit(admin, user.id, queuedJob, upstream, lineProvider, submitParams, c.env)
@@ -1118,6 +1325,14 @@ generateRoutes.get('/jobs', async c => {
       && !job.result_image_url;
     let status = job.status as string;
     let imageUrl = job.result_image_url as string | null;
+    let errorMessage = status === 'failed'
+      ? publicGenerationErrorDetail(job.error_message, {
+          violationNoRefund: meta.refundOnViolation === false && meta.refunded !== true,
+          debited: Number(job.credits_charged) > 0
+        })
+      : null;
+    let failureRaw = status === 'failed' ? String(job.error_message || '') : '';
+    let refunded = meta.refunded === true;
     let extraFromMeta = Array.isArray(meta.extraImageUrls)
       ? (meta.extraImageUrls as string[]).filter((u) => typeof u === 'string' && u)
       : undefined;
@@ -1143,6 +1358,14 @@ generateRoutes.get('/jobs', async c => {
       );
       status = polled.status;
       imageUrl = polled.imageUrl;
+      if (polled.status === 'failed') {
+        failureRaw = String(polled.errorMessage || '');
+        errorMessage = publicGenerationErrorDetail(polled.errorMessage, {
+          violationNoRefund: meta.refundOnViolation === false && polled.refunded === false,
+          debited: Number(job.credits_charged) > 0
+        });
+        refunded = polled.refunded;
+      }
       if (polled.extraImageUrls?.length) {
         extraFromMeta = polled.extraImageUrls;
       }
@@ -1155,10 +1378,13 @@ generateRoutes.get('/jobs', async c => {
       extraImageUrls: extraFromMeta?.length ? extraFromMeta : undefined,
       creditsCharged: job.credits_charged,
       resolution: job.resolution,
-      quality: job.quality,
+      quality: requestedGenerationQuality(job as JobRow),
       size: job.size_label,
       model: meta.model,
       modelLabel: meta.modelLabel,
+      errorMessage: status === 'failed' ? errorMessage : null,
+      failureCode: status === 'failed' ? publicGenerationFailureCode(failureRaw) : null,
+      refunded: status === 'failed' ? refunded : undefined,
       createdAt: job.created_at
     });
   }
@@ -1177,7 +1403,7 @@ generateRoutes.get('/jobs/history', async c => {
   const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
   const { data: rows, error } = await admin
     .from('generation_requests')
-    .select('id,prompt,status,result_image_url,meta,created_at,resolution,quality,size_label,credits_charged')
+    .select('id,prompt,status,result_image_url,error_message,meta,created_at,resolution,quality,size_label,credits_charged')
     .eq('user_id', user.id)
     .gte('created_at', since)
     .order('created_at', { ascending: false })
@@ -1198,6 +1424,14 @@ generateRoutes.get('/jobs/history', async c => {
         extraImageUrls: extraImageUrls.length ? extraImageUrls : undefined,
         model: meta.model,
         modelLabel: meta.modelLabel,
+        errorMessage: job.status === 'failed'
+          ? publicGenerationErrorDetail(job.error_message, {
+              violationNoRefund: meta.refundOnViolation === false && meta.refunded !== true,
+              debited: Number(job.credits_charged) > 0
+            })
+          : null,
+        failureCode: job.status === 'failed' ? publicGenerationFailureCode(job.error_message) : null,
+        refunded: job.status === 'failed' ? meta.refunded === true : undefined,
         createdAt: job.created_at
       };
     });
@@ -1270,7 +1504,7 @@ generateRoutes.get('/jobs/recent', async c => {
         extraImageUrls: extraImageUrlsOut.length ? extraImageUrlsOut : undefined,
         creditsCharged: job.credits_charged,
         resolution: job.resolution,
-        quality: job.quality,
+        quality: requestedGenerationQuality(job as JobRow),
         size: job.size_label,
         model: meta.model,
         modelLabel: meta.modelLabel,
@@ -1471,7 +1705,7 @@ generateRoutes.post('/mj-action', rateLimit(300, 60_000), async (c) => {
     throw new ApiError(400, 'VALIDATION_ERROR', '父任务尚未完成提交，请稍后再试');
   }
 
-  const modelId = normalizeImageModelId(String(parentMeta.model || 'apimart-mj-v61'));
+  const modelId = normalizeImageModelId(String(parentMeta.model || 'mj-v81'));
   const resolved = resolveImageModelConfig(modelId, settings);
   if (!resolved || !resolved.enabled || !isRetainedImageModel(resolved)) {
     throw new ApiError(400, 'VALIDATION_ERROR', '模型不可用');
@@ -1669,7 +1903,7 @@ generateRoutes.post('/mj-blend', rateLimit(300, 60_000), async (c) => {
   const memberActive = isMembershipActive(profile);
   const settings = await loadImageModelSettings(admin);
 
-  const modelId = normalizeImageModelId(parsed.data.model || 'apimart-mj-v81');
+  const modelId = normalizeImageModelId(parsed.data.model || 'mj-v81');
   const resolved = resolveImageModelConfig(modelId, settings);
   if (!resolved || !resolved.enabled || !isMidjourneyUpstream(resolved.upstream)) {
     throw new ApiError(400, 'VALIDATION_ERROR', '请选择可用的 Midjourney 模型');
@@ -1858,7 +2092,7 @@ generateRoutes.get('/jobs/:jobId/image', async c => {
       job,
       upstreamBindingsFromEnv(c.env),
       c.env,
-      { quick: false, kickSubmit: pollKickSubmit(c) }
+      { quick: true, kickSubmit: pollKickSubmit(c) }
     );
     if (polled.imageUrl) {
       const { data: fresh } = await admin
@@ -1875,40 +2109,18 @@ generateRoutes.get('/jobs/:jobId/image', async c => {
   }
 
   if (jobPollNeedsBackgroundArchive(imageRef)) {
-    try {
-      await archivePendingJobImage(admin, user.id, jobId, c.env);
-      const { data: archived } = await admin
-        .from('generation_requests')
-        .select('result_image_url')
-        .eq('id', jobId)
-        .maybeSingle();
-      if (archived?.result_image_url) {
-        imageRef = archived.result_image_url as string;
-      }
-    } catch (e) {
+    const archive = archivePendingJobImage(admin, user.id, jobId, c.env).catch((e) => {
       console.warn('[generate] job image archive failed', jobId, e);
-    }
+    });
+    if (c.executionCtx) c.executionCtx.waitUntil(archive);
+    else void archive;
+    throw new ApiError(425, 'RESULT_ARCHIVING', '图片已生成，正在安全保存，请稍后重试');
   }
 
   const path = resolveStoragePath(imageRef);
   if (path) {
     assertOwnMediaPath(user.id, path);
     return serveCachedStorageImage(c, path);
-  }
-
-  if (isRemoteHttpImageUrl(imageRef)) {
-    const upstream = await fetch(imageRef, { redirect: 'follow' });
-    if (!upstream.ok) {
-      throw new ApiError(502, 'UPSTREAM_ERROR', '生成图片暂不可用');
-    }
-    const body = await upstream.arrayBuffer();
-    return new Response(body, {
-      headers: {
-        'Content-Type': upstream.headers.get('Content-Type') || 'image/jpeg',
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'private, max-age=120'
-      }
-    });
   }
 
   throw new ApiError(404, 'NOT_FOUND', '无效图片路径');
@@ -1996,10 +2208,14 @@ generateRoutes.get('/jobs/:jobId', async c => {
         jobId: job.id,
         status: 'failed',
         imageUrl: null,
-        errorMessage: polled.errorMessage,
+        errorMessage: publicGenerationErrorDetail(polled.errorMessage, {
+          violationNoRefund: violationNoRefund && polled.refunded === false,
+          debited: Number(liveJob.credits_charged) > 0
+        }),
+        failureCode: publicGenerationFailureCode(polled.errorMessage),
         creditsRemaining: spendableCredits(profile),
         refunded: polled.refunded,
-        message: friendlyGenerationError(String(polled.errorMessage || ''), {
+        message: publicGenerationErrorDetail(polled.errorMessage, {
           violationNoRefund: violationNoRefund && polled.refunded === false
         })
       }
