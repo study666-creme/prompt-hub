@@ -1,6 +1,6 @@
 # 代码导航图
 
-最后核对：2026-08-03。
+最后核对：2026-08-09。
 
 ## 入口与构建
 
@@ -96,6 +96,8 @@ slot.
 2026-08-03 复核的已上线 `20260803a` 继续由 `styles-warehouse.css` 管理仓库独立视觉层，并由 `styles/base/part-09.css` 和 `legacy/script/part-02.js`、`part-03.js`、`part-10.js` 共同管理桌面稳定 Grid、固定列表媒体框和分页哨兵。`partials/index-body/part-02.html` 负责紧凑概览、工具栏图标和搜索结构；`styles-mobile.css` 负责窄屏工具栏收缩；`mobile.js` 负责编辑面板打开时持续隐藏底部导航。`legacy/script/part-04.js` 同步概览中的卡片数与当前分组；`legacy/script/part-09.js` 输出类型、分组、时间元数据和可操作空态。
 
 桌面、手机和空仓状态由 `scripts/verify-warehouse-ui-browser.mjs` 验收。脚本同时检查 320/360px 工具栏无重叠，以及编辑面板滚动后底部导航仍隐藏、保存和关闭按钮仍可达。它使用本地模拟的 `_grid` CDN URL，不触发真实 API、生产存储或部署流程；设置 `APP_ROOT=.pages-deploy` 时直接验收最终 Pages 暂存包。
+
+桌面网格行高由 `styles/base/part-09.css` 的 `grid-auto-rows: max-content` 约束，避免媒体框 `aspect-ratio` 在图片解码前把隐式行缩到文字卡 min-content 高度、导致视觉卡重叠下一行。`scripts/verify-warehouse-card-layout-browser.mjs` 用 192/816 张混合卡在 1440x900、1024x768、390x844 视口翻完分页后断言前 20 张卡无两两重叠、无横向溢出、关键控件可达，并覆盖网格/列表视图与 1..5 列切换。
 
 ## 修改原则
 
