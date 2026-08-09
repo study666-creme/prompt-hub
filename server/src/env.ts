@@ -77,6 +77,8 @@ export type Env = {
   SUPABASE_STORAGE_USED_MB?: string;
   /** 可选：从 Supabase Usage 页手动同步的 Database 已用（MB） */
   SUPABASE_DB_USED_MB?: string;
+  /** 可选：置为 "1" 时启用服务端 grid 预热（默认关闭；缩略图由浏览器端生成上传） */
+  GRID_WARM_ENABLED?: string;
 };
 
 export function parseCorsOrigins(raw: string): string[] {

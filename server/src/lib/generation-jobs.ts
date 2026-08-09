@@ -1477,14 +1477,20 @@ export function jobPollNeedsBackgroundArchive(
   return isRemoteHttpImageUrl(imageUrl);
 }
 
-/** 已完成任务后台预热列表缩略图到 R2（不阻塞调用方，失败仅记日志） */
+/**
+ * 已完成任务后台预热列表缩略图到 R2（不阻塞调用方，失败仅记日志）。
+ * 生产 Worker 无 Canvas 且 MemFire 不支持 render/image，服务端 materialize
+ * 恒失败；缩略图已改由浏览器端生成上传（finishImageGenRun →
+ * uploadGeneratedGridThumb）。因此默认关闭，避免每个完成任务空耗一次
+ * 原图下载；如需重新启用服务端预热，设置环境变量 GRID_WARM_ENABLED=1 即可。
+ */
 export async function warmJobGridImage(
   admin: SupabaseClient,
   userId: string,
   jobId: string,
   env?: Env
 ): Promise<boolean> {
-  if (!env) return false;
+  if (!env || env.GRID_WARM_ENABLED !== '1') return false;
   try {
     const { data: job, error } = await admin
       .from('generation_requests')

@@ -177,7 +177,8 @@ npm run deploy:dry-run
 
 ### 生图列表缩略图与预热（2026-08-09）
 
-- 任务完成后（轮询归档、settle 归档、`/media/generation/:id/url` 触发归档、后台 drain 恢复），Worker 通过 `waitUntil` 后台调用 `warmJobGridImage` 把 `_grid` 缩略图生成并写入 R2；失败仅记日志，不影响响应与扣费。
+- 生产 Worker 无 Canvas 且 MemFire 不支持 `render/image`，**服务端缩略图生成恒失败**；`_grid` 由浏览器端生成上传（`finishImageGenRun` → `uploadGeneratedGridThumb`，640px JPEG 经 `/api/v1/media/upload` 写入 R2，失败静默）。
+- 服务端预热 `warmJobGridImage` **默认关闭**（`GRID_WARM_ENABLED` 未设或非 `"1"` 时直接返回），避免每个完成任务空耗一次原图下载；重新启用只需设置 `GRID_WARM_ENABLED=1`。
 - `GET /api/v1/generate/jobs/recent` 的列表图片优先签名 R2 中已存在的 `_grid` 缩略图（快速存在性检查，不触发现场生成）；`_grid` 不存在时签名原图。
 - `ensureGridPathForSigning` 在缩略图现场生成失败时降级返回已确认存在的原图路径，绝不返回不存在的 `_grid` 签名 URL；`requireExistingPrimary` 时仍按原契约抛 `NOT_FOUND` / `GRID_UNAVAILABLE`。
 - 归档下载重试退避从 `400ms × attempt` 调整为 `1200ms × attempt`：New API 图片代理（`console.prompt-hubs.com`，Cloudflare 边缘 → 源站）偶发瞬时 502，较长的退避让重试落在上游临时图 token 仍有效的窗口内；归档仍受 `maxAttempts` 上限约束，不属于付费操作重试。
