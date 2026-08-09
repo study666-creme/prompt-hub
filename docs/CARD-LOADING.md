@@ -1,6 +1,6 @@
 # 列表图片加载
 
-复核日期：2026-08-03。下述仓库 UI 对应已上线的 `20260803a` 生图媒体可靠性；生产资源以线上 build 和资源 HTTP 冒烟为准。
+复核日期：2026-08-09。下述仓库 UI 对应已上线的 `20260803a` 生图媒体可靠性；生产资源以线上 build 和资源 HTTP 冒烟为准。桌面卡片库行高规则与几何回归（`grid-auto-rows: max-content`、`scripts/verify-warehouse-card-layout-browser.mjs`）为本任务新增，属于未部署候选行为。
 
 ## 目标
 
@@ -57,6 +57,8 @@ authenticated Worker media proxy before browser-side validation and upload.
 ## 稳定布局与首屏优先级
 
 - 卡片库桌面网格使用 CSS Grid 和固定 `4:3` 列表媒体框，不再按图片解码结果运行 Masonry 全量 `reloadItems/layout`。图片比例只影响详情页，列表通过 `_grid` 缩略图 `object-fit: cover` 保持行列稳定。
+- 桌面卡片库网格的隐式行必须使用 `grid-auto-rows: max-content`（见 `styles/base/part-09.css`）。默认 `auto` 行会在媒体框 `aspect-ratio: 4/3` 且图片尚未解码时把行高缩到卡片 min-content（≈文字卡 178px），视觉卡实际 402px 溢出到下一行造成卡片重叠；`max-content` 让行高始终等于卡片的真实内容高度。
+- 桌面网格的几何回归由 `scripts/verify-warehouse-card-layout-browser.mjs` 验收：在 1440x900、1024x768、390x844 视口对 192/816 张混合卡（文字卡、单图卡、多图卡、缺图卡、慢图卡）翻完分页后记录容器 class、computed display/列数与首 20 张卡 DOMRect 两两重叠结果，要求零重叠、零绝对定位、无横向溢出且关键控件可达。该测试在 `grid-auto-rows` 回退为 `auto` 时稳定失败，修复后稳定通过。
 - 生图最近列表使用固定 `1:1` 媒体框；前 6 张设为 eager，其中前 4 张为高请求优先级，其余卡片继续 lazy。
 - 最近列表分页只能把新卡插在 `data-imagegen-feed-footer="recent"` 之前，说明条始终位于所有图片之后，不能隔断第 12 张和后续图片。
 - 图片 class/style 变化不再触发整个生图列表的属性级 MutationObserver 扫描；新增直属卡片时才执行布局残留清理。
@@ -103,6 +105,17 @@ $env:PLAYWRIGHT_PACKAGE_DIR = '<playwright package directory>'
 $env:SCREENSHOT_DIR = '<optional screenshot directory>'
 $env:APP_ROOT = 'D:\prompt-hub\.pages-deploy'
 node scripts/verify-warehouse-ui-browser.mjs
+```
+
+桌面网格行高/重叠回归（固定数据、固定视口、真实 DOM/CSS 几何，不访问生产）：
+
+```powershell
+$env:PLAYWRIGHT_PACKAGE_DIR = '<playwright package directory>'
+$env:BROWSER_EXECUTABLE_PATH = '<Chrome or Edge executable>'
+$env:LAYOUT_CARD_COUNTS = '192,816'
+$env:SCREENSHOT_DIR = '<optional screenshot directory>'
+$env:LAYOUT_EVIDENCE_FILE = '<optional geometry evidence json>'
+node scripts/verify-warehouse-card-layout-browser.mjs
 ```
 
 ## Generated-card archive invariant
