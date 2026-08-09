@@ -15,6 +15,12 @@
     return jobId ? String(jobId).replace(/#\d+$/, '') : '';
   }
 
+  function slotFromArchiveJobId(jobId) {
+    const m = String(jobId || '').match(/#(\d+)$/);
+    if (!m) return 0;
+    return Math.max(0, Number(m[1]) - 1);
+  }
+
   function findCreationForBaseJob(jobId) {
     const base = baseJobIdFrom(jobId);
     if (!base) return null;
@@ -46,6 +52,53 @@
     return changed ? next : null;
   }
 
+  function gridPathFromStorageRef(storageRef) {
+    const path = String(storageRef || '')
+      .replace(/^storage:\/\/card-images\//i, '')
+      .replace(/^\//, '');
+    if (!path || !/^[A-Za-z0-9-]+\//.test(path)) return '';
+    return path.replace(/\.(png|jpe?g|webp)$/i, '') + '_grid.jpg';
+  }
+
+  function gridDataUrlToBlob(dataUrl) {
+    if (!dataUrl || !dataUrl.startsWith('data:image/')) return Promise.resolve(null);
+    return fetch(dataUrl).then((res) => (res.ok ? res.blob() : null)).catch(() => null);
+  }
+
+  /** 浏览器端生成 _grid 并上传 R2（失败静默，不阻塞生图流程） */
+  function uploadGeneratedGridThumb(creationId, storageRef, jobId, slot) {
+    if (
+      !creationId
+      || !storageRef
+      || !global.SupabaseSync?.isStorageRef?.(storageRef)
+      || !global.SupabaseSync?.resolveDisplayUrl
+      || !global.PromptHubApi?.uploadStorageBlob
+      || !global.ImageGenRefCompress?.compressRefImageFromSource
+    ) return;
+    const gridPath = gridPathFromStorageRef(storageRef);
+    if (!gridPath) return;
+    void Promise.resolve()
+      .then(() => global.SupabaseSync.resolveDisplayUrl(storageRef, {
+        variant: 'full',
+        jobId: jobId || undefined,
+        assetId: creationId
+      }))
+      .then((url) => url && global.ImageGenRefCompress.compressRefImageFromSource(url, 640, { crossOrigin: true }))
+      .then((dataUrl) => gridDataUrlToBlob(dataUrl))
+      .then((blob) => blob && blob.size >= 2048
+        ? global.PromptHubApi.uploadStorageBlob(gridPath, blob)
+        : null)
+      .then((uploaded) => {
+        if (!uploaded) return;
+        if (global.WarehouseThumb?.invalidateGridCache) {
+          global.WarehouseThumb.invalidateGridCache(jobId || gridPath, Number(slot) || 0);
+        }
+        global.SupabaseSync?.markGridThumbReady?.(creationId);
+        d().renderImageGenFeed?.({ preserveScroll: true });
+      })
+      .catch((error) => console.warn('[finishImageGen] grid thumb upload skipped', error));
+  }
+
   function archiveImageInBackground(creationId, rawImage, archiveJobId) {
     if (
       !creationId
@@ -74,6 +127,7 @@
             assetId: creationId,
             cardId: creationId
           });
+          uploadGeneratedGridThumb(creationId, archived, archiveJobId, slotFromArchiveJobId(archiveJobId));
         }
         d().renderImageGenFeed?.({ preserveScroll: true });
       })
