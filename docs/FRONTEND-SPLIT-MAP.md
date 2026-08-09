@@ -1,6 +1,6 @@
 # Frontend Split Map
 
-Updated: 2026-08-03
+Updated: 2026-08-09
 
 This project still ships classic browser scripts from the site root, but several formerly large files are now thin runtime loaders. The real source is split into ordered chunks so classic script execution order and old global/IIFE behavior stay unchanged.
 
@@ -43,7 +43,13 @@ Desktop `#cardsContainer` is now a stable CSS Grid owned by
 `legacy/script/part-10.js`, and `styles/base/part-09.css`. Image decode events
 must not restore Masonry absolute positioning or full-list relayouts. The
 warehouse browser check requires `display:grid`, zero absolute cards, aligned
-first-row tops, and collapsed failed media slots.
+first-row tops, and collapsed failed media slots. `styles/base/part-09.css`
+keeps `grid-auto-rows: max-content` for the desktop warehouse grid; reverting it
+to `auto` makes rows collapse to the text-card min-content height and lets
+visual cards overlap the following row. The geometry regression
+`scripts/verify-warehouse-card-layout-browser.mjs` covers 192/816 cards at
+1440x900 / 1024x768 / 390x844 and asserts pairwise non-overlap of the first 20
+cards plus grid/list and 1..5 column modes.
 
 Keep `styles-warehouse.css` as a standalone Pages asset. Staging and HTTP smoke checks must fail when the file, hero rules, or warehouse hero images are missing.
 
