@@ -342,16 +342,16 @@ export async function archiveRemoteImage(
             await res.body?.cancel().catch(() => {});
             continue;
           }
-          const declaredMime = res.headers.get('content-type') || '';
-          if (streamToR2 && res.body) {
-            validStream = await validateResponseStream(res, declaredMime);
-            if (validStream) {
-              mime = validStream.mime;
-              validStreamSourceUrl = fetchUrl;
-              break;
+            const declaredMime = res.headers.get('content-type') || '';
+            if (streamToR2 && res.body) {
+              validStream = await validateResponseStream(res, declaredMime);
+              if (validStream) {
+                mime = validStream.mime;
+                validStreamSourceUrl = fetchUrl;
+                break;
+              }
+              continue;
             }
-            continue;
-          }
           const candidateBuffer = await res.arrayBuffer();
           const validMime = validatedImageMime(declaredMime, new Uint8Array(candidateBuffer));
           if (!validMime) continue;
@@ -423,7 +423,9 @@ export async function archiveRemoteImage(
     } catch (e) {
       lastErr = e;
       if (attempt < maxAttempts) {
-        await new Promise(r => setTimeout(r, 400 * attempt));
+        // 网关瞬时故障（New API 图片代理 502）通常持续数秒；间隔加大，
+        // 让重试落在上游临时图 token 仍有效的窗口内
+        await new Promise(r => setTimeout(r, 1200 * attempt));
       }
     }
   }
