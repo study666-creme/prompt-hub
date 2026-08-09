@@ -70,6 +70,11 @@ authenticated Worker media proxy before browser-side validation and upload.
 5. 只有对象确实存在但缺 grid 时才生成缩略图。
 6. 失败的近期生成/生图仓库媒体只移除失败的媒体槽并保留文字卡，避免黑色方块和浏览器破图图标；不会删除卡片或原始引用。只有现有权威 404/410 清理路径可以移除确实不存在的近期记录，其他错误继续保留数据并按有限恢复链处理。
 
+## 生图列表缩略图预热（2026-08-09）
+
+- Worker 无 Canvas 且 MemFire 不支持 `render/image` 变换，`_grid` 无法在服务端生成；改为**浏览器端生成**：`finishImageGenRun` 归档成功后，`uploadGeneratedGridThumb` 用 `ImageGenRefCompress.compressRefImageFromSource(640px JPEG, crossOrigin)` 压缩原图，经 `/api/v1/media/upload` 上传为 `{user}/generated/{job}_grid.jpg`，失败静默。
+- 上传成功后 `WarehouseThumb.invalidateGridCache` 清除本地缓存，feed 重新解析立即命中 R2 上的 `_grid`（签名 ~0.7s、约 60KB），不再触发服务端现场生成或加载 full 原图。
+
 ## 验收
 
 ```powershell
