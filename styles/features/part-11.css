@@ -547,6 +547,91 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-side {
   }
 }
 
+/* Stable media loading and tactile submit feedback. */
+@media (min-width: 901px) {
+  #cardsContainer.warehouse-desktop-columns > .warehouse-desktop-col > .card.card-enter-soft {
+    animation: warehouseCardSoftFade 0.34s var(--ease-out, ease) both !important;
+    will-change: opacity;
+  }
+
+  #cardsContainer.warehouse-desktop-columns > .warehouse-desktop-col > .card.card-enter-soft > .card-media,
+  #cardsContainer.warehouse-desktop-columns > .warehouse-desktop-col > .card.card-enter-soft > .card-body,
+  #cardsContainer.warehouse-desktop-columns > .warehouse-desktop-col > .card.card-enter-soft > .card-copy-btn {
+    animation: warehouseCardSoftLift 0.34s var(--ease-out, ease) both;
+    animation-delay: inherit;
+  }
+}
+
+.imagegen-gen-pending::after {
+  left: -60%;
+  width: 46%;
+  animation: card-beam-loading 2.45s cubic-bezier(0.35, 0.05, 0.25, 1) infinite;
+}
+
+#imageGenSubmit.is-submitted {
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  #imageGenFeed.imagegen-feed,
+  #imageGenFeed.imagegen-feed.imagegen-feed--tiles,
+  body.imagegen-mobile-view-feed #imageGenFeed.imagegen-feed {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-auto-flow: row !important;
+    align-items: start !important;
+  }
+
+  #imageGenFeed.imagegen-feed > .imagegen-feed-card {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    position: relative !important;
+    inset: auto !important;
+    transform: none !important;
+  }
+
+  #imageGenFeed > .imagegen-feed-library-cta,
+  #imageGenFeed > .imagegen-feed-empty-wrap,
+  #imageGenFeed > .imagegen-feed-empty,
+  #imageGenFeed > .feed-page-sentinel {
+    grid-column: 1 / -1 !important;
+  }
+
+  #imageGenFeed .imagegen-feed-card--failed .imagegen-feed-foot--failed {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  #imageGenFeed .imagegen-feed-card--failed .imagegen-feed-foot--failed > .btn:not([data-failed-dismiss]) {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 6px;
+  }
+
+  #imageGenFeed .imagegen-feed-card--failed [data-failed-dismiss] {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    z-index: 6;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(10, 12, 16, 0.74);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #cardsContainer.warehouse-desktop-columns > .warehouse-desktop-col > .card.card-enter-soft,
+  #cardsContainer.warehouse-desktop-columns > .warehouse-desktop-col > .card.card-enter-soft > *,
+  .imagegen-gen-pending::after {
+    animation: none !important;
+  }
+}
+
 .imagegen-feed-card-tile .imagegen-feed-content {
   padding: 10px;
   gap: 6px;

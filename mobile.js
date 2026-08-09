@@ -10,6 +10,134 @@
     return isMobile();
   }
 
+  let activeMobileSelect = null;
+  let mobileSelectOverlay = null;
+  let mobileSelectTitle = null;
+  let mobileSelectOptions = null;
+  let mobileSelectReturnFocus = null;
+
+  function ensureMobileSelectOverlay() {
+    if (mobileSelectOverlay) return mobileSelectOverlay;
+    const overlay = document.createElement('div');
+    overlay.className = 'mobile-select-overlay';
+    overlay.hidden = true;
+    overlay.innerHTML = '<div class="mobile-select-sheet" role="dialog" aria-modal="true" aria-labelledby="mobileSelectTitle"><div class="mobile-select-grabber" aria-hidden="true"></div><div class="mobile-select-head"><h2 class="mobile-select-title" id="mobileSelectTitle">选择</h2><button type="button" class="mobile-select-close" aria-label="关闭">×</button></div><div class="mobile-select-options" role="listbox"></div></div>';
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay || e.target.closest('.mobile-select-close')) closeMobileSelect();
+    });
+    document.body.appendChild(overlay);
+    mobileSelectOverlay = overlay;
+    mobileSelectTitle = overlay.querySelector('.mobile-select-title');
+    mobileSelectOptions = overlay.querySelector('.mobile-select-options');
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && activeMobileSelect) closeMobileSelect();
+    });
+    return overlay;
+  }
+
+  function syncMobileSelect(select) {
+    const trigger = select?.nextElementSibling;
+    if (!select || !trigger?.classList.contains('mobile-custom-select-trigger')) return;
+    const option = select.options[select.selectedIndex];
+    trigger.textContent = option?.textContent?.trim() || '请选择';
+    trigger.disabled = select.disabled;
+    trigger.setAttribute('aria-disabled', select.disabled ? 'true' : 'false');
+    trigger.setAttribute('aria-expanded', activeMobileSelect === select ? 'true' : 'false');
+  }
+
+  function renderMobileSelectOptions(select) {
+    const overlay = ensureMobileSelectOverlay();
+    const fieldLabel = select.closest('.settings-field, .imagegen-field, .imagegen-control')?.querySelector('label')?.textContent?.trim();
+    const explicitLabel = select.id
+      ? document.querySelector(`label[for="${CSS.escape(select.id)}"]`)?.textContent?.trim()
+      : '';
+    mobileSelectTitle.textContent = select.getAttribute('aria-label') || explicitLabel || fieldLabel || '选择';
+    mobileSelectOptions.innerHTML = '';
+    [...select.options].forEach((option, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'mobile-select-option';
+      button.textContent = option.textContent;
+      button.disabled = option.disabled;
+      button.setAttribute('role', 'option');
+      button.setAttribute('aria-selected', option.selected ? 'true' : 'false');
+      if (option.selected) button.classList.add('selected');
+      button.addEventListener('click', () => {
+        if (option.disabled) return;
+        select.selectedIndex = index;
+        select.dispatchEvent(new Event('input', { bubbles: true }));
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        syncMobileSelect(select);
+        closeMobileSelect();
+      });
+      mobileSelectOptions.appendChild(button);
+    });
+    return overlay;
+  }
+
+  function openMobileSelect(select) {
+    if (!isMobile() || !select || select.disabled) return;
+    if (select.selectedIndex < 0) {
+      const firstEnabled = [...select.options].findIndex((option) => !option.disabled && option.value !== '');
+      if (firstEnabled >= 0) select.selectedIndex = firstEnabled;
+    }
+    const overlay = renderMobileSelectOptions(select);
+    mobileSelectReturnFocus = document.activeElement;
+    activeMobileSelect = select;
+    syncMobileSelect(select);
+    overlay.hidden = false;
+    requestAnimationFrame(() => overlay.classList.add('open'));
+    document.body.classList.add('mobile-select-open');
+  }
+
+  function closeMobileSelect() {
+    if (!mobileSelectOverlay) return;
+    const returnFocus = mobileSelectReturnFocus;
+    activeMobileSelect = null;
+    mobileSelectOverlay.classList.remove('open');
+    mobileSelectOverlay.hidden = true;
+    document.body.classList.remove('mobile-select-open');
+    mobileSelectReturnFocus = null;
+    if (returnFocus?.focus) returnFocus.focus({ preventScroll: true });
+  }
+
+  function enhanceMobileSelect(select) {
+    if (!select || select.multiple || select.dataset.mobileSelectEnhanced === '1' || select.closest('.mobile-select-overlay')) return;
+    select.dataset.mobileSelectEnhanced = '1';
+    select.classList.add('mobile-custom-select-native');
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = `${select.className || ''} mobile-custom-select-trigger`.trim();
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-controls', 'mobileSelectTitle');
+    trigger.addEventListener('click', () => openMobileSelect(select));
+    select.insertAdjacentElement('afterend', trigger);
+    syncMobileSelect(select);
+    if (typeof MutationObserver === 'function') {
+      const observer = new MutationObserver(() => syncMobileSelect(select));
+      observer.observe(select, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'selected'] });
+    }
+    select.addEventListener('change', () => syncMobileSelect(select));
+  }
+
+  function enhanceMobileSelects(root = document) {
+    if (!isMobile()) return;
+    root.querySelectorAll?.('select:not([multiple])').forEach(enhanceMobileSelect);
+  }
+
+  function bindMobileSelects() {
+    enhanceMobileSelects();
+    if (typeof MutationObserver !== 'function') return;
+    const observer = new MutationObserver((records) => {
+      records.forEach((record) => record.addedNodes.forEach((node) => {
+        if (node.nodeType !== 1) return;
+        if (node.matches?.('select')) enhanceMobileSelect(node);
+        enhanceMobileSelects(node);
+      }));
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
   /** 解析前即可用（mobile.js 在 script.js 之前加载） */
   window.MobileUI = window.MobileUI || {};
   window.MobileUI.isMobile = isMobile;
@@ -407,6 +535,7 @@
       restoreDesktopLayout();
     } else {
       applyMobileColumns();
+      enhanceMobileSelects();
       if (typeof closeEditPanel === 'function') closeEditPanel();
       window.FeatureDraft?.resetMobileFeedGridStyles?.();
       window.FeatureDraft?.enforceMobileImageGenFeed?.();
@@ -540,6 +669,7 @@
 
   function init() {
     bindMobileUI();
+    bindMobileSelects();
     bindMobileAppMainScrollBoost();
     bindMobileInteractionGuard();
     if (isMobile()) {
