@@ -25,6 +25,8 @@
 | 会员任务 | 已收编 | 首次创建 Canvas 节点通过 `grant_canvas_create_node_reward` 原子标记并奖励一次 |
 | 发布治理 | 已收编 | Worker/Pages 正式发布拒绝冻结标记和脏工作区；构建注入 Git SHA；`/health` 返回 `buildSha`；Pages 暂存强制验证仓库首屏 DOM/CSS/图片 |
 
+2026-08-09 收敛 Midjourney 图片链路：移除 e352500 引入的"专用 APIMart 直连"新任务提交分支与 `mj-v82` 幽灵模型。新 MJ 任务只保留 New API `POST /v1/midjourney/generations` 提交和 `GET /v1/tasks/:taskId` 查询；Apimart 详情查询 `/v1/midjourney/:taskId` 仅用于历史 `provider=apimart` 任务恢复。契约表与测试分别见 `docs/BACKEND.md` 和 `server/src/lib/midjourney-contract.test.ts`。
+
 ## 明确拒绝的历史实现
 
 - 将 `outcome_unknown`、`running` 或长时间 lease 自动改回可提交状态。

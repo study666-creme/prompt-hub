@@ -3,12 +3,9 @@ import { extractTaskId } from './apimart';
 import {
   type MjActionKind,
   type MjButtonPublic,
-  type MjImagineBody,
   MJ_ACTION_PATH,
-  buildImagineBody,
   isMidjourneyUpstream,
   localizeMjButtonLabel,
-  mjVersionFromUpstream,
   parseMjActionFromCustomId
 } from './midjourney-models';
 import { normalizeMjSpeed, type MjSpeedKey } from './apimart-upstream-cost';
@@ -69,14 +66,6 @@ async function postMj(
   return taskId;
 }
 
-export type SubmitMidjourneyParams = {
-  upstreamModel: string;
-  prompt: string;
-  size?: string;
-  refImageUrls?: string[];
-  mjParams?: Record<string, unknown>;
-};
-
 /** 独立混图：2～5 张参考图，无需父任务 */
 export async function submitMidjourneyBlend(
   apiKey: string,
@@ -90,23 +79,6 @@ export async function submitMidjourneyBlend(
   }
   const path = blendPathForSpeed(normalizeMjSpeed(speed));
   return postMj(apiKey, baseUrl, path, { image_urls: urls });
-}
-
-export async function submitMidjourneyImagine(
-  apiKey: string,
-  baseUrl: string | undefined,
-  params: SubmitMidjourneyParams
-): Promise<string> {
-  const spec = mjVersionFromUpstream(params.upstreamModel);
-  if (!spec) {
-    throw new ApiError(400, 'VALIDATION_ERROR', '无效的 Midjourney 模型配置');
-  }
-  const body = buildImagineBody(spec, params.prompt, {
-    size: params.size,
-    refImageUrls: params.refImageUrls,
-    mj: params.mjParams
-  });
-  return postMj(apiKey, baseUrl, '', body as unknown as Record<string, unknown>);
 }
 
 export type SubmitMjActionParams = {

@@ -3,38 +3,6 @@ import { normalizeImageModelId } from './image-models-catalog';
 /** Apimart MJ 模型 upstream 前缀 */
 export const MJ_UPSTREAM_PREFIX = 'mj-';
 
-export type MjVersionSpec = {
-  version: string;
-  niji?: boolean;
-};
-
-export type MjImagineBody = {
-  prompt: string;
-  size?: string;
-  version?: string;
-  niji?: boolean;
-  speed?: 'relax' | 'fast' | 'turbo';
-  image_urls?: string[];
-  stylize?: number;
-  chaos?: number;
-  weird?: number;
-  negative_prompt?: string;
-  seed?: number;
-  tile?: boolean;
-  raw?: boolean;
-  draft?: boolean;
-  hd?: boolean;
-  iw?: number;
-  quality?: string;
-  style?: string;
-  cw?: number;
-  sw?: number;
-  cref?: string;
-  sref?: string;
-  stop?: number;
-  extra?: string;
-};
-
 export type MjActionKind =
   | 'upscale'
   | 'variation'
@@ -95,16 +63,6 @@ export type MjButtonPublic = {
   customId?: string;
 };
 
-const UPSTREAM_TO_SPEC: Record<string, MjVersionSpec> = {
-  'mj-v8.2': { version: '8.2' },
-  'mj-v6.1': { version: '6.1' },
-  'mj-v8.1': { version: '8.1' },
-  'mj-v7': { version: '7' },
-  'mj-niji7': { version: '7', niji: true },
-  'mj-niji6': { version: '6', niji: true },
-  'mj-v5.2': { version: '5.2' }
-};
-
 export function isMidjourneyUpstream(upstream: string): boolean {
   return String(upstream || '')
     .trim()
@@ -115,13 +73,6 @@ export function isMidjourneyUpstream(upstream: string): boolean {
 export function isMidjourneyModelId(modelId: string): boolean {
   const id = normalizeImageModelId(modelId);
   return id.startsWith('mj-');
-}
-
-export function mjVersionFromUpstream(upstream: string): MjVersionSpec | null {
-  const key = String(upstream || '')
-    .trim()
-    .toLowerCase();
-  return UPSTREAM_TO_SPEC[key] || null;
 }
 
 export function localizeMjButtonLabel(raw: string, action?: string, index?: number): string {
@@ -260,75 +211,4 @@ export function mjGalleryUrlCount(meta: Record<string, unknown>): number {
 export function mjPollHasFullGallery(urls: string[]): boolean {
   const parsed = parseMjImagineUrls(urls);
   return parsed.tiles.length >= 4;
-}
-
-export function buildImagineBody(
-  spec: MjVersionSpec,
-  prompt: string,
-  opts: {
-    size?: string;
-    refImageUrls?: string[];
-    mj?: Record<string, unknown>;
-  }
-): MjImagineBody {
-  const mj = opts.mj || {};
-  const body: MjImagineBody = {
-    prompt,
-    version: spec.version,
-    ...(spec.niji ? { niji: true } : {})
-  };
-  if (opts.size) body.size = opts.size;
-  if (opts.refImageUrls?.length) body.image_urls = opts.refImageUrls;
-
-  const num = (k: string) => {
-    const v = mj[k];
-    if (v === undefined || v === null || v === '') return undefined;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : undefined;
-  };
-  const str = (k: string) => {
-    const v = mj[k];
-    return typeof v === 'string' && v.trim() ? v.trim() : undefined;
-  };
-  const bool = (k: string) => (mj[k] === true ? true : undefined);
-
-  const stylize = num('stylize');
-  if (stylize !== undefined) body.stylize = stylize;
-  const chaos = num('chaos');
-  if (chaos !== undefined) body.chaos = chaos;
-  const weird = num('weird');
-  if (weird !== undefined) body.weird = weird;
-  const seed = num('seed');
-  if (seed !== undefined) body.seed = Math.floor(seed);
-  const iw = num('iw');
-  if (iw !== undefined) body.iw = iw;
-  const cw = num('cw');
-  if (cw !== undefined) body.cw = Math.floor(cw);
-  const sw = num('sw');
-  if (sw !== undefined) body.sw = Math.floor(sw);
-  const stop = num('stop');
-  if (stop !== undefined) body.stop = Math.floor(stop);
-
-  const neg = str('negativePrompt') || str('negative_prompt');
-  if (neg) body.negative_prompt = neg.slice(0, 500);
-  const quality = str('quality');
-  if (quality) body.quality = quality;
-  const style = str('style');
-  if (style) body.style = style;
-  const extra = str('extra');
-  if (extra) body.extra = extra.slice(0, 200);
-  const cref = str('cref');
-  if (cref) body.cref = cref;
-  const sref = str('sref');
-  if (sref) body.sref = sref;
-
-  if (bool('tile')) body.tile = true;
-  if (bool('raw')) body.raw = true;
-  if (bool('draft')) body.draft = true;
-  if (bool('hd')) body.hd = true;
-
-  const speed = str('speed');
-  if (speed === 'fast' || speed === 'turbo' || speed === 'relax') body.speed = speed;
-
-  return body;
 }

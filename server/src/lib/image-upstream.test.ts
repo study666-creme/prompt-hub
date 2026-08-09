@@ -18,7 +18,7 @@ describe('image model catalog', () => {
     expect(IMAGE_MODEL_CATALOG.length).toBe(
       NEWAPI_IMAGE_MODEL_CATALOG.length + APIMART_IMAGE_MODEL_CATALOG.length
     );
-    expect(IMAGE_MODEL_CATALOG).toHaveLength(18);
+    expect(IMAGE_MODEL_CATALOG).toHaveLength(17);
   });
 
   it('newapi exposes price-backed image models first', () => {
@@ -72,15 +72,21 @@ describe('image model catalog', () => {
   });
 
   it('apimart catalog keeps only MJ', () => {
-    expect(APIMART_IMAGE_MODEL_CATALOG).toHaveLength(5);
+    expect(APIMART_IMAGE_MODEL_CATALOG).toHaveLength(4);
     expect(APIMART_IMAGE_MODEL_CATALOG.map((model) => model.id)).toEqual([
-      'mj-v82',
       'mj-v81',
       'mj-v7',
       'mj-v61',
       'mj-niji7'
     ]);
     expect(APIMART_IMAGE_MODEL_CATALOG.every((model) => !model.id.includes('apimart'))).toBe(true);
+  });
+
+  it('does not expose a v8.2 ghost model that has no executable submit path', () => {
+    expect(getCatalogEntry('mj-v82')).toBeNull();
+    expect(getCatalogEntry('apimart-mj-v82')).toBeNull();
+    expect(getCatalogEntry('mj-v8.2')).toBeNull();
+    expect(getCatalogEntry('mj-v81')?.upstream).toBe('mj-v81');
   });
 
   it('provider labels hide vendor names', () => {

@@ -1,6 +1,6 @@
 # Worker 后端架构
 
-最后核对：2026-08-09。生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；运行版本以 `/health.buildSha` 为准。本次发布保留独立视频 Key，并修复视频音轨参数转发与提交阶段日志。
+最后核对：2026-08-09。生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；运行版本以 `/health.buildSha` 为准。本次发布保留独立视频 Key，并修复视频音轨参数转发与提交阶段日志。2026-08-09 收敛 Midjourney 图片链路：移除 e352500 引入的"专用 APIMart 直连"新任务提交分支与 `mj-v82` 幽灵模型，新 MJ 任务只保留 New API 一条提交/查询路径（见下文"Midjourney 链路唯一契约"）。
 
 Canvas 媒体交付候选（2026-08-08）已提交到 `codex/unified-media-delivery-20260808` 并通过本地回归，但尚未部署；它包含媒体归档迁移，需单独完成数据库备份、迁移授权和生产验收。
 
@@ -89,11 +89,28 @@ Canvas 媒体交付候选（2026-08-08）已提交到 `codex/unified-media-deliv
 - `gpt-image-2-chat` 是服务端兼容别名，统一归一化到公开模型 `image2-economy`；不要根据别名硬编码端点或能力，当前参数以实时目录为准并支持比例和可选参考图。
 - Canvas 当前目录中的高质量原始 ID `gpt-image-2-ext` 必须在可用性和报价校验前归一化到公开模型 `image2-pro`；归一化只统一模型身份，保留用户选择的 `1k` / `2k` / `4k` 分辨率。
 - 运营后台的调用链路由卡藏 API `/api/model-catalog/admin/routes` 提供，并使用 `NEWAPI_CATALOG_ADMIN_SECRET` 与服务端共享密钥鉴权；公开 `/api/model-catalog` 不包含真实渠道信息。
-- MJ 8.1、MJ 7 和 Niji 7 与其他公开图片型号一样通过卡藏 New API 提交；固定常规 `relax` 档，单次 40 积分（0.4 元），不公开 Fast / Turbo。
-- New API `capability_version=2026-08-04.2` 已核验同时公开 `mj-v81`、`mj-v7`、`mj-niji7`；Worker 必须把这类按次图片型号保留在动态图片目录中，不能把 `quality=0.25/0.5/1/2` 误判成 `resolution` 后过滤。
-- MJ 完成结果固定保留四宫格封面和 4 张单图。New API 的 `/v1/tasks/:taskId` 是新任务唯一查询来源；仅历史 `provider=apimart` 任务继续使用旧详情查询。
+- MJ 8.1、MJ 7 和 Niji 7 与其他公开图片型号一样通过卡藏 New API 提交；固定常规 `relax` 档，单次 40 积分（0.4 元），不公开 Fast / Turbo。不得保留"专用 APIMart 直连"的新任务提交分支，新 MJ 任务只走 New API。
+- New API `capability_version=2026-08-04.2` 已核验同时公开 `mj-v81`、`mj-v7`、`mj-niji7`；Worker 必须把这类按次图片型号保留在动态图片目录中，不能把 `quality=0.25/0.5/1/2` 误判成 `resolution` 后过滤。公开目录不得出现无 New API 支持证据的 `mj-v82` 等幽灵型号。
+- MJ 完成结果固定保留四宫格封面和 4 张单图。New API 的 `/v1/tasks/:taskId` 是新任务唯一查询来源（单次查询限时 8 秒，超时按瞬时失败保持 `pending`，不退款、不重发）；仅历史 `provider=apimart` 任务继续使用旧详情查询 `/v1/midjourney/:taskId`。
 - 受保护的 `GET /api/v1/generate/jobs/:jobId/image` 通过可选 `index=0..7` 返回单一成图；MJ 顺序固定为四宫格封面后接四张单图，普通批量任务为主图后接额外图片。相同 URL 只保留一个结果，非法索引返回 `400`。
 - 旧 GrsAI、iThink、Mooko 和 Apimart 型号只能恢复历史任务，不能通过后台重新上架。新 New API MJ 任务不返回仍会直连旧上游的二次操作按钮。
+
+### Midjourney 链路唯一契约（2026-08-09 收敛）
+
+e352500 曾把新 MJ 提交路由到专用 APIMart 直连端点（`/v1/midjourney/generations` 发往 `APIMART_API_BASE_URL`），与文档"通过 New API 提交并从 `/v1/tasks/:taskId` 查询"矛盾。该分支已移除，新任务提交只保留 New API 一条路径；Apimart 仅用于历史 `provider=apimart` 任务恢复，两者在代码与测试中明确区分（见 `server/src/lib/midjourney-contract.test.ts`）。
+
+| 维度 | 契约 |
+|---|---|
+| 公开模型 id | `mj-v81`、`mj-v7`、`mj-niji7`；不公开 `mj-v82`（无 New API 支持证据，属不可执行的幽灵模型，目录与提交转换均不保留） |
+| 内部 provider | `newapi`；`apimart` 只出现在历史任务 `meta.provider` |
+| 提交 endpoint | `POST {NEWAPI_API_BASE_URL}/v1/midjourney/generations` |
+| 提交请求关键字段 | `model=<upstreamModel>`、`prompt`、`size`、可选 `image_urls`（≤4）、`speed=relax`（固定）、`n=1`；`Idempotency-Key=clientRequestId` |
+| 返回 task id 语义 | 提交响应中的 `task_id`（兼容 `data.task_id` / `data.id` / `data[0].task_id`）持久化为 `upstreamTaskId` |
+| 唯一查询 endpoint | `GET {NEWAPI_API_BASE_URL}/v1/tasks/:taskId`，每次查询限时 8 秒 |
+| 状态映射 | `queued` / `running` / 未知名 → `pending`；`completed`/`succeeded`/`success`/`done` 且含图片 → `completed`；`failed`/`failure`/`error`/`timeout`/`cancelled` → `failed`；完成态但无 URL 保持 `pending` 待复核 |
+| grid 与单图结果字段 | 完成态为四宫格封面 + 4 张单图：优先 `grid_image_url` + `image_urls[4]`（等价别名 `gridImageUrl` / `imageUrls`），解析为 composite + 4 tiles + gallery(5) |
+| 幂等键 | `clientRequestId` 在扣费前持久化，并作为 `Idempotency-Key`/`X-Client-Request-Id` 随提交发出；付费 POST 只由 durable queue 单次领取，重投不重发 |
+| 退款判据 | 确定性失败按现有原子积分规则退款；未知提交结果 / 持续 `not_found` 1 小时进入幂等退款 SLA；瞬时 5xx / 超时 / 未知名查询保持 `pending`，不退款、不重发付费 POST |
 
 配置命令示例：
 

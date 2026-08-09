@@ -1,6 +1,6 @@
 # AI 接手说明
 
-最后核对：2026-08-08。生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
+最后核对：2026-08-09。生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。2026-08-09 收敛 Midjourney 链路：移除"专用 APIMart 直连"新任务提交分支与 `mj-v82` 幽灵模型，新 MJ 任务只保留 New API 提交 + `/v1/tasks/:taskId` 查询。
 
 Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery-20260808` 的媒体归档和恢复改动已提交并通过本地回归，尚未部署或执行付费验收；生产仍以 `/health.buildSha` 为准。
 
@@ -66,6 +66,7 @@ Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery
 - 新任务只允许卡藏 API 的全能模型2、香蕉和 MJ 8.1 / MJ 7 / Niji 7；所有公开 MJ 均为 New API provider，固定 `relax`、40 积分/次，旧 Apimart provider 只恢复历史任务。
 - 已核验 New API `capability_version=2026-08-04.2` 的三个 MJ 公开号均为按次 0.4 元 / 40 积分；动态目录解析必须为 MJ 保留固定内部 `1k` 占位，不得把质量档 `0.25/0.5/1/2` 当作分辨率而丢弃模型。
 - New API MJ 完成态必须包含四宫格封面和 4 张单图。Worker 直接消费 `/v1/tasks/:taskId` 返回的五个 URL，不得为了新任务读取 `APIMART_API_KEY` 或补查 Apimart 详情。
+- MJ 新任务提交只保留一条路径：New API `POST /v1/midjourney/generations`（固定 `relax`），任务查询只走 `GET /v1/tasks/:taskId`（每次限时 8 秒，瞬时失败保持 `pending` 不退款）。e352500 引入的"专用 APIMart 直连"提交分支与 `mj-v82` 幽灵模型已移除；公开目录不得出现 v8.2 之类的不可执行型号，不得把新任务提交改回 Apimart。契约表见 `docs/BACKEND.md`，测试见 `server/src/lib/midjourney-contract.test.ts`。
 - 卡藏 API 图片报价已经包含其加价，必须从上游人民币字段按 `1 元 = 100 积分`直接换算；不能再次加价、信任上游 credits 字段或复制一份手工积分表。
 - `gpt-image-2-chat` 是内部兼容 ID，统一归一化到公开模型 `image2-economy`；不要根据旧别名硬编码端点或能力，参数必须来自实时目录，当前支持比例和可选参考图。
 - Canvas 当前模型目录提交的高质量原始 ID `gpt-image-2-ext` 也必须在可用性和报价校验前归一化到公开 `image2-pro`，但不得改写用户选择的 `1k` / `2k` / `4k` 分辨率。

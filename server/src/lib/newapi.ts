@@ -162,6 +162,8 @@ export type NewApiTaskPollResult = {
 
 const PRICING_CACHE_MS = 5 * 60_000;
 export const NEWAPI_PRICING_CATALOG_MAX_AGE_MS = 5 * 60_000;
+/** 每次任务查询的上限时间；超时按瞬时失败处理，保持任务 pending 而不是退款。 */
+export const NEWAPI_TASK_QUERY_TIMEOUT_MS = 8_000;
 // A catalog service can return a verified last-known-good snapshot marked
 // stale while it retries its own dependencies. Keep that state brief so the
 // image picker recovers promptly instead of hiding its live choices for the
@@ -1682,9 +1684,17 @@ export async function fetchNewApiTaskOnce(
   if (taskId.startsWith('newapi-')) {
     return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
   }
-  const res = await fetch(`${apiBase(baseUrl)}/v1/tasks/${encodeURIComponent(taskId)}`, {
-    headers: { Authorization: `Bearer ${apiKey}` }
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${apiBase(baseUrl)}/v1/tasks/${encodeURIComponent(taskId)}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(NEWAPI_TASK_QUERY_TIMEOUT_MS)
+    });
+  } catch {
+    // A transient query failure (timeout / network blip) is never a refundable
+    // outcome. Stay pending so the next poll can re-check the same task.
+    return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
+  }
 
   let json: unknown = {};
   try {

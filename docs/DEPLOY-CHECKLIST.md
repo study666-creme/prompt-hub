@@ -1,6 +1,6 @@
 # 部署与验证清单
 
-最后核对：2026-08-06
+最后核对：2026-08-09
 
 ## 当前发布状态
 
@@ -16,7 +16,7 @@
 
 ### 2. 核对 New API 前置版本
 
-New API 必须先支持当前规范化契约：稳定幂等键、公开模型与真实渠道映射、比例格式转换、固定参数模型忽略无效可选字段，以及独立的 `quality` / `resolution` 语义。`https://newapi.prompt-hubs.com/api/model-catalog?refresh=1` 必须返回实时、非空版本和 `capability_version=2026-08-04.2`；目录仍需包含 `mj-v81`、`mj-v7`、`mj-niji7`，每个模型均为 0.4 元 / 40 积分/次、`n=1`、`speed=relax`、固定五图输出，且公开响应不包含内部路由信息。`server/wrangler.toml` 不得保存裸 IP 或 `sslip.io` 临时主机名。未完成此前置条件时不得部署 Prompt Hub 候选。
+New API 必须先支持当前规范化契约：稳定幂等键、公开模型与真实渠道映射、比例格式转换、固定参数模型忽略无效可选字段，以及独立的 `quality` / `resolution` 语义。`https://newapi.prompt-hubs.com/api/model-catalog?refresh=1` 必须返回实时、非空版本和 `capability_version=2026-08-04.2`；目录仍需包含 `mj-v81`、`mj-v7`、`mj-niji7`，每个模型均为 0.4 元 / 40 积分/次、`n=1`、`speed=relax`、固定五图输出，且公开响应不包含内部路由信息。新 MJ 任务提交与查询只走 New API（`/v1/midjourney/generations` + `/v1/tasks/:taskId`），不接受专用 APIMart 直连；公开目录不得出现 `mj-v82` 等无 New API 支持证据的型号。`server/wrangler.toml` 不得保存裸 IP 或 `sslip.io` 临时主机名。未完成此前置条件时不得部署 Prompt Hub 候选。
 
 ### 3. 创建和核对 Cloudflare 资源
 

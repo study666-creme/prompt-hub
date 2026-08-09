@@ -6,11 +6,6 @@ import {
   submitApimartImageJob
 } from './apimart';
 import {
-  submitMidjourneyImagine,
-  type SubmitMidjourneyParams
-} from './apimart-midjourney';
-import { isMidjourneyUpstream } from './midjourney-models';
-import {
   confirmNewApiTaskOutcome,
   fetchNewApiTaskOnce,
   submitNewApiImageJob,
@@ -192,17 +187,6 @@ export async function submitImageJobForProvider(
   if (provider === 'apimart') {
     if (!bindings.apimartKey) {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Apimart 线路未配置，请联系站长');
-    }
-    if (isMidjourneyUpstream(params.upstreamModel)) {
-      const mjParams: SubmitMidjourneyParams = {
-        upstreamModel: params.upstreamModel,
-        prompt: params.prompt,
-        size: params.size,
-        ...(params.refImageUrls?.length ? { refImageUrls: params.refImageUrls } : {}),
-        ...(params.mjParams && typeof params.mjParams === 'object' ? { mjParams: params.mjParams } : {})
-      };
-      const taskId = await submitMidjourneyImagine(bindings.apimartKey, bindings.apimartBase, mjParams);
-      return { provider: 'apimart', taskId };
     }
     const taskId = await submitApimartImageJob(bindings.apimartKey, bindings.apimartBase, params);
     return { provider: 'apimart', taskId };
