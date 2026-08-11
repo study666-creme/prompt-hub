@@ -44,6 +44,44 @@ type MonitorImage404Event = {
   route: string;
 };
 
+/**
+ * 生图交付阶段指标。只记录计数/耗时，绝不记录提示词、私有图片 URL、Cookie 或令牌。
+ * phase 取值：
+ *   upstream_completed  上游状态接口返回 completed（含可显示 URL）
+ *   archive             任务归档（archivePendingJobImage）
+ *   grid                服务端 _grid 预热（warmJobGridImage，默认 GRID_WARM_ENABLED 关闭）
+ *   mj_gallery_sync     MJ 四宫格/单图同步
+ *   sign                列表/灯箱签名
+ *   image_401 | image_403 | image_404 | image_timeout   图片交付错误
+ */
+export type GenMetricPhase =
+  | 'upstream_completed'
+  | 'archive'
+  | 'grid'
+  | 'mj_gallery_sync'
+  | 'sign'
+  | 'image_401'
+  | 'image_403'
+  | 'image_404'
+  | 'image_timeout';
+
+export type GenMetricSummary = {
+  available: boolean;
+  hours: number;
+  counts: Record<string, number>;
+  latency: Array<{ phase: string; averageMs: number | null; maxMs: number | null; count: number }>;
+};
+
+type GenMetricBucket = {
+  hour: string;
+  firstTs: string;
+  lastTs: string;
+  counts: Record<string, number>;
+  latencyTotalMs: Record<string, number>;
+  latencyCount: Record<string, number>;
+  maxLatencyMs: Record<string, number>;
+};
+
 type MonitorBucket = {
   hour: string;
   firstTs: string;
@@ -66,6 +104,7 @@ type MonitorBucket = {
 };
 
 const METRIC_PREFIX = 'monitor:v1:hour:';
+const GEN_METRIC_PREFIX = 'monitor:v1:gen:';
 const METRIC_TTL_SECONDS = 60 * 60 * 72;
 const MAX_ROUTE_KEYS = 80;
 const MAX_RECENT_EVENTS = 40;
@@ -78,8 +117,8 @@ const METRIC_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 
 let metricWriteCooldownUntil = 0;
 
-function hasMetricsKv(env: Env) {
-  return !!env.PROMPT_HUB_METRICS;
+function hasMetricsKv(env: Env | undefined) {
+  return !!env && !!env.PROMPT_HUB_METRICS;
 }
 
 function pad(n: number) {
@@ -92,6 +131,37 @@ function hourId(date: Date) {
 
 function hourKey(hour: string) {
   return `${METRIC_PREFIX}${hour}`;
+}
+
+function genHourKey(hour: string) {
+  return `${GEN_METRIC_PREFIX}${hour}`;
+}
+
+function emptyGenBucket(hour: string, ts: string): GenMetricBucket {
+  return {
+    hour,
+    firstTs: ts,
+    lastTs: ts,
+    counts: {},
+    latencyTotalMs: {},
+    latencyCount: {},
+    maxLatencyMs: {}
+  };
+}
+
+function safeGenBucket(raw: unknown, hour: string, ts: string): GenMetricBucket {
+  const b = raw && typeof raw === 'object' ? (raw as Partial<GenMetricBucket>) : {};
+  return {
+    ...emptyGenBucket(hour, ts),
+    ...b,
+    hour,
+    firstTs: typeof b.firstTs === 'string' ? b.firstTs : ts,
+    lastTs: typeof b.lastTs === 'string' ? b.lastTs : ts,
+    counts: b.counts && typeof b.counts === 'object' ? b.counts : {},
+    latencyTotalMs: b.latencyTotalMs && typeof b.latencyTotalMs === 'object' ? b.latencyTotalMs : {},
+    latencyCount: b.latencyCount && typeof b.latencyCount === 'object' ? b.latencyCount : {},
+    maxLatencyMs: b.maxLatencyMs && typeof b.maxLatencyMs === 'object' ? b.maxLatencyMs : {}
+  };
 }
 
 function emptyBucket(hour: string, ts: string): MonitorBucket {
@@ -316,7 +386,6 @@ export async function recordRequestMetric(
 export async function summarizeRequestMetrics(env: Env, hours = 24): Promise<RequestMetricSummary> {
   const boundedHours = Math.min(72, Math.max(1, Math.floor(hours || 24)));
   if (!hasMetricsKv(env)) return disabledSummary(boundedHours);
-
   try {
     const ids = recentHours(boundedHours);
     const buckets = await Promise.all(
@@ -373,5 +442,81 @@ export async function summarizeRequestMetrics(env: Env, hours = 24): Promise<Req
   } catch (e) {
     console.warn('[monitoring] failed to summarize request metrics', e);
     return disabledSummary(boundedHours);
+  }
+}
+
+/**
+ * 记录生图交付阶段指标（计数 + 耗时分布）。不采样，只记无敏感字段。
+ */
+export async function recordGenerationMetric(
+  env: Env | undefined,
+  phase: GenMetricPhase,
+  opts: { status?: 'ok' | 'fail'; elapsedMs?: number } = {}
+): Promise<void> {
+  if (!env || !hasMetricsKv(env)) return;
+  try {
+    const now = new Date();
+    const ts = now.toISOString();
+    const hour = hourId(now);
+    const key = genHourKey(hour);
+    const countKey = opts.status === 'fail' ? `${phase}:fail` : phase;
+    const elapsed = Math.max(0, Math.round(opts.elapsedMs || 0));
+
+    const bucket = safeGenBucket(await env.PROMPT_HUB_METRICS!.get(key, 'json'), hour, ts);
+    bucket.lastTs = ts;
+    inc(bucket.counts, countKey);
+    if (elapsed > 0) {
+      bucket.latencyTotalMs[phase] = (Number(bucket.latencyTotalMs[phase]) || 0) + elapsed;
+      bucket.latencyCount[phase] = (Number(bucket.latencyCount[phase]) || 0) + 1;
+      bucket.maxLatencyMs[phase] = Math.max(Number(bucket.maxLatencyMs[phase]) || 0, elapsed);
+    }
+    await env.PROMPT_HUB_METRICS!.put(key, JSON.stringify(bucket), {
+      expirationTtl: METRIC_TTL_SECONDS
+    });
+  } catch (e) {
+    metricWriteCooldownUntil = Date.now() + METRIC_FAILURE_COOLDOWN_MS;
+    console.warn('[monitoring] failed to record generation metric', e);
+  }
+}
+
+export async function summarizeGenerationMetrics(env: Env, hours = 24): Promise<GenMetricSummary> {
+  const boundedHours = Math.min(72, Math.max(1, Math.floor(hours || 24)));
+  const disabled = (): GenMetricSummary => ({
+    available: false,
+    hours: boundedHours,
+    counts: {},
+    latency: []
+  });
+  if (!hasMetricsKv(env)) return disabled();
+
+  try {
+    const ids = recentHours(boundedHours);
+    const buckets = await Promise.all(
+      ids.map(async (id) => safeGenBucket(await env.PROMPT_HUB_METRICS!.get(genHourKey(id), 'json'), id, new Date().toISOString()))
+    );
+    const counts: Record<string, number> = {};
+    const latencyTotalMs: Record<string, number> = {};
+    const latencyCount: Record<string, number> = {};
+    const maxLatencyMs: Record<string, number> = {};
+    for (const b of buckets) {
+      mergeRecord(counts, b.counts);
+      mergeRecord(latencyTotalMs, b.latencyTotalMs);
+      mergeRecord(latencyCount, b.latencyCount);
+      for (const [k, v] of Object.entries(b.maxLatencyMs || {})) {
+        maxLatencyMs[k] = Math.max(Number(maxLatencyMs[k]) || 0, Number(v) || 0);
+      }
+    }
+    const latency = Object.keys(latencyCount)
+      .sort()
+      .map((phase) => ({
+        phase,
+        averageMs: latencyCount[phase] ? Math.round(latencyTotalMs[phase] / latencyCount[phase]) : null,
+        maxMs: maxLatencyMs[phase] ?? null,
+        count: latencyCount[phase] || 0
+      }));
+    return { available: true, hours: boundedHours, counts, latency };
+  } catch (e) {
+    console.warn('[monitoring] failed to summarize generation metrics', e);
+    return disabled();
   }
 }

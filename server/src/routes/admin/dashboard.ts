@@ -3,7 +3,7 @@ import type { Env } from '../../env';
 import { extractErrorMessage } from '../../lib/cors-headers';
 import { formatBytes } from '../../lib/admin-helpers';
 import { scanBucketUsage } from '../../lib/admin-storage';
-import { summarizeRequestMetrics } from '../../lib/monitoring';
+import { summarizeRequestMetrics, summarizeGenerationMetrics } from '../../lib/monitoring';
 import { collectPaymentOrderMonitor } from '../../lib/payment-monitoring';
 import { storagePolicySummary } from '../../lib/storage-quota';
 import { createAdminClient, isMembershipActive, type Profile } from '../../lib/supabase';
@@ -475,8 +475,9 @@ adminDashboardRoutes.get('/monitoring', async c => {
   const hours = Math.min(72, Math.max(1, Number.isFinite(hoursRaw) ? Math.floor(hoursRaw) : 24));
   const sinceIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
   const admin = createAdminClient(c.env);
-  const [requests, generation, business] = await Promise.all([
+  const [requests, delivery, generation, business] = await Promise.all([
     summarizeRequestMetrics(c.env, hours),
+    summarizeGenerationMetrics(c.env, hours),
     collectGenerationMonitor(admin, sinceIso),
     collectBusinessMonitor(admin, sinceIso)
   ]);
@@ -532,6 +533,7 @@ adminDashboardRoutes.get('/monitoring', async c => {
       hours,
       windowStart: sinceIso,
       requests,
+      delivery,
       generation,
       business,
       alerts

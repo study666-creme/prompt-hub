@@ -43,6 +43,7 @@ function recentQuery(rows: unknown[]) {
   query.gte = vi.fn(() => query);
   query.order = vi.fn(() => query);
   query.limit = vi.fn().mockResolvedValue({ data: rows, error: null });
+  query.range = vi.fn().mockResolvedValue({ data: rows, error: null });
   return query;
 }
 
@@ -143,5 +144,33 @@ describe('/jobs/recent image existence', () => {
     expect(body.data.jobs[0].imageUrl).toBe(upstream);
     expect(mocks.ensureGridPathForSigning).not.toHaveBeenCalled();
     expect(mocks.buildPrivateMediaCdnUrl).not.toHaveBeenCalled();
+  });
+
+  it('paginates with offset so the first screen stays small and fast', async () => {
+    const query = setRows([completedJob()]);
+
+    const response = await app().request('http://localhost/jobs/recent?limit=12&offset=12', {}, env);
+    const body = await response.json() as {
+      data: { jobs: Array<Record<string, unknown>>; offset: number; limit: number }
+    };
+
+    expect(body.data.offset).toBe(12);
+    expect(body.data.limit).toBe(12);
+    expect(body.data.jobs).toHaveLength(1);
+    expect(query.range).toHaveBeenCalledWith(12, 23);
+    expect(query.limit).not.toHaveBeenCalled();
+  });
+
+  it('drops a bad image without blocking the rest of the batch', async () => {
+    setRows([
+      completedJob({ result_image_url: 'storage://card-images/user-1/generated/missing.jpg' }),
+      completedJob({ id: 'job-2' })
+    ]);
+
+    const response = await app().request('http://localhost/jobs/recent?limit=12', {}, env);
+    const body = await response.json() as { data: { jobs: Array<{ id: string }> } };
+
+    expect(body.data.jobs).toHaveLength(1);
+    expect(body.data.jobs[0].id).toBe('job-2');
   });
 });

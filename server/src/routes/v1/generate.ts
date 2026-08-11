@@ -4,6 +4,7 @@ import type { Env } from '../../env';
 import { roundCredits } from '../../lib/credit-math';
 import { ApiError } from '../../lib/errors';
 import { extractErrorMessage } from '../../lib/cors-headers';
+import { recordGenerationMetric } from '../../lib/monitoring';
 import {
   hasAnyImageUpstream,
   isProviderConfigured,
@@ -1684,16 +1685,21 @@ generateRoutes.get('/jobs/recent', async c => {
   const admin = createAdminClient(c.env);
   const daysRaw = Number(c.req.query('days'));
   const limitRaw = Number(c.req.query('limit'));
+  const offsetRaw = Number(c.req.query('offset'));
   const days = Number.isFinite(daysRaw) ? Math.min(30, Math.max(1, Math.floor(daysRaw))) : 7;
   const limit = Number.isFinite(limitRaw) ? Math.min(400, Math.max(1, Math.floor(limitRaw))) : 200;
+  const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.floor(offsetRaw)) : 0;
   const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
-  const { data: rows, error } = await admin
+  const baseQuery = admin
     .from('generation_requests')
     .select('id,prompt,status,result_image_url,meta,created_at,completed_at,resolution,quality,size_label,credits_charged')
     .eq('user_id', user.id)
     .gte('created_at', since)
-    .order('created_at', { ascending: false })
-    .limit(limit);
+    .order('created_at', { ascending: false });
+  const settledQuery = offset > 0
+    ? baseQuery.range(offset, offset + limit - 1)
+    : baseQuery.limit(limit);
+  const { data: rows, error } = await settledQuery;
   if (error) throw error;
 
   const stringList = (value: unknown) =>
@@ -1767,7 +1773,7 @@ generateRoutes.get('/jobs/recent', async c => {
     })))
     .filter((job): job is NonNullable<typeof job> => !!job);
 
-  return c.json({ ok: true, data: { jobs, days, limit, retentionDays: 7 } });
+  return c.json({ ok: true, data: { jobs, days, limit, offset, retentionDays: 7 } });
 });
 
 const recoverWarehouseSchema = z.object({
@@ -2379,20 +2385,13 @@ generateRoutes.get('/jobs/:jobId/image', async c => {
   }
 
   if (resultIndex === 0 && jobPollNeedsBackgroundArchive(imageRef)) {
-    try {
-      await archivePendingJobImage(admin, user.id, jobId, c.env);
-      const { data: archived } = await admin
-        .from('generation_requests')
-        .select('*')
-        .eq('id', jobId)
-        .maybeSingle();
-      if (archived) {
-        liveJob = archived as JobRow;
-        imageRef = generationImageReferences(liveJob)[resultIndex] || imageRef;
-      }
-    } catch (e) {
+    // Never block the protected single-image read on archival: serve the
+    // temporary upstream bytes now and archive in the background.
+    const backgroundArchive = archivePendingJobImage(admin, user.id, jobId, c.env).catch((e) => {
       console.warn('[generate] job image archive failed', jobId, e);
-    }
+    });
+    if (c.executionCtx) c.executionCtx.waitUntil(backgroundArchive);
+    else void backgroundArchive;
   }
 
   const path = resolveStoragePath(imageRef);
@@ -2404,6 +2403,7 @@ generateRoutes.get('/jobs/:jobId/image', async c => {
   if (isRemoteHttpImageUrl(imageRef)) {
     const upstream = await fetch(imageRef, { redirect: 'follow' });
     if (!upstream.ok) {
+      void recordGenerationMetric(c.env, 'image_timeout');
       throw new ApiError(502, 'UPSTREAM_ERROR', '生成图片暂不可用');
     }
     const body = await upstream.arrayBuffer();
@@ -2416,6 +2416,7 @@ generateRoutes.get('/jobs/:jobId/image', async c => {
     });
   }
 
+  void recordGenerationMetric(c.env, 'image_404');
   throw new ApiError(404, 'NOT_FOUND', '无效图片路径');
 });
 
@@ -2494,6 +2495,12 @@ generateRoutes.get('/jobs/:jobId', async c => {
       ? 'completed'
       : polled.status;
 
+  if (liveStatus === 'completed' && liveImageUrl) {
+    void recordGenerationMetric(c.env, 'upstream_completed', {
+      elapsedMs: Math.max(0, Date.now() - (Date.parse(String(job.created_at)) || Date.now()))
+    });
+  }
+
   const profile = await syncMembershipCredits(admin, user.id);
   const meta = liveMeta;
   const violationNoRefund = meta.refundOnViolation === false;
@@ -2521,27 +2528,17 @@ generateRoutes.get('/jobs/:jobId', async c => {
     polled.extraImageUrls
     || (Array.isArray(updatedMeta.extraImageUrls) ? (updatedMeta.extraImageUrls as string[]) : undefined);
 
+  // The first visible result must never wait for archive. When the job still
+  // points at a temporary upstream URL, keep returning it immediately and let
+  // `archivePendingJobImage` run in the background (`waitUntil`); the browser
+  // swaps to the durable `storage://` ref once archival finishes.
   let responseImageUrl = liveImageUrl;
-  if (settle && liveStatus === 'completed' && jobPollNeedsBackgroundArchive(liveImageUrl)) {
-    try {
-      await archivePendingJobImage(admin, user.id, jobId, c.env);
-      const { data: archivedRow } = await admin
-        .from('generation_requests')
-        .select('result_image_url')
-        .eq('id', jobId)
-        .maybeSingle();
-      if (archivedRow?.result_image_url) {
-        responseImageUrl = archivedRow.result_image_url as string;
-      }
-    } catch (e) {
-      console.warn('[generate] settle archive failed', jobId, e);
-    }
-  } else if (jobPollNeedsBackgroundArchive(liveImageUrl) && c.executionCtx) {
-    c.executionCtx.waitUntil(
-      archivePendingJobImage(admin, user.id, jobId, c.env).catch((e) => {
-        console.warn('[generate] waitUntil archive failed', jobId, e);
-      })
-    );
+  if (jobPollNeedsBackgroundArchive(liveImageUrl)) {
+    const backgroundArchive = archivePendingJobImage(admin, user.id, jobId, c.env).catch((e) => {
+      console.warn('[generate] waitUntil archive failed', jobId, e);
+    });
+    if (c.executionCtx) c.executionCtx.waitUntil(backgroundArchive);
+    else void backgroundArchive;
   }
   if (c.executionCtx && liveStatus === 'completed') {
     c.executionCtx.waitUntil(
@@ -2567,32 +2564,39 @@ generateRoutes.get('/jobs/:jobId', async c => {
     const hasMjComposite =
       typeof responseMeta.mjCompositeUrl === 'string' && !!responseMeta.mjCompositeUrl.trim();
     const needsMjGallerySync = !hasMjComposite || curGalleryCount < 5;
+    // MJ gallery sync may need several upstream round-trips. It must never hold
+    // up the first visible result: run it in the background and reply with the
+    // gallery meta the job already has (composite + four grid tiles).
     if (mjTaskId && isProviderConfigured(upstream, mjProvider) && (settle || needsMjGallerySync)) {
-      try {
-        await syncMjImagesFromUpstream(
-          admin,
-          liveJob as JobRow,
-          upstream,
-          mjTaskId,
-          { settle: !!settle || needsMjGallerySync }
-        );
+      const syncStartedAt = Date.now();
+      const backgroundSync = syncMjImagesFromUpstream(
+        admin,
+        liveJob as JobRow,
+        upstream,
+        mjTaskId,
+        { settle: !!settle || needsMjGallerySync }
+      ).then(async () => {
+        void recordGenerationMetric(c.env, 'mj_gallery_sync', {
+          status: 'ok',
+          elapsedMs: Date.now() - syncStartedAt
+        });
         const { data: mjFresh } = await admin
           .from('generation_requests')
           .select('meta, result_image_url')
           .eq('id', jobId)
           .maybeSingle();
-        if (mjFresh?.meta && typeof mjFresh.meta === 'object') {
-          responseMeta = mjFresh.meta as Record<string, unknown>;
-        }
         if (mjFresh?.result_image_url) {
-          responseImageUrl = await resolveJobImageUrlForClient(
-            c,
-            mjFresh.result_image_url as string
-          );
+          await resolveJobImageUrlForClient(c, mjFresh.result_image_url as string).catch(() => {});
         }
-      } catch (e) {
+      }).catch((e) => {
+        void recordGenerationMetric(c.env, 'mj_gallery_sync', {
+          status: 'fail',
+          elapsedMs: Date.now() - syncStartedAt
+        });
         console.warn('[generate] mj gallery sync failed', jobId, e);
-      }
+      });
+      if (c.executionCtx) c.executionCtx.waitUntil(backgroundSync);
+      else void backgroundSync;
     }
   }
 

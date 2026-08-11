@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { recordRequestMetric } from './monitoring';
+import { recordGenerationMetric, recordRequestMetric, summarizeGenerationMetrics } from './monitoring';
 
 function metricsEnv() {
   const get = vi.fn(async () => null);
@@ -83,5 +83,38 @@ describe('request metric sampling', () => {
 
     expect(failed.get).toHaveBeenCalledTimes(1);
     expect(failed.put).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('generation delivery metrics', () => {
+  it('records distinct phase counters without sensitive fields', async () => {
+    const store = new Map<string, unknown>();
+    const get = vi.fn(async (key: string) => store.get(key) ?? null);
+    const put = vi.fn(async (key: string, value: string) => {
+      store.set(key, JSON.parse(value));
+    });
+    const env = { PROMPT_HUB_METRICS: { get, put } } as never;
+
+    await recordGenerationMetric(env, 'upstream_completed', { elapsedMs: 3400 });
+    await recordGenerationMetric(env, 'archive', { status: 'ok', elapsedMs: 5200 });
+    await recordGenerationMetric(env, 'archive', { status: 'fail', elapsedMs: 900 });
+    await recordGenerationMetric(env, 'image_404');
+
+    const summary = await summarizeGenerationMetrics(env, 1);
+    expect(summary.available).toBe(true);
+    expect(summary.counts['upstream_completed']).toBe(1);
+    expect(summary.counts.archive).toBe(1);
+    expect(summary.counts['archive:fail']).toBe(1);
+    expect(summary.counts.image_404).toBe(1);
+    const archiveLatency = summary.latency.find((l) => l.phase === 'archive');
+    expect(archiveLatency?.count).toBe(2);
+    expect(archiveLatency?.averageMs).toBe(Math.round((5200 + 900) / 2));
+    expect(archiveLatency?.maxMs).toBe(5200);
+  });
+
+  it('skips writes when metrics KV is missing', async () => {
+    await recordGenerationMetric(undefined as never, 'archive', { elapsedMs: 10 });
+    const summary = await summarizeGenerationMetrics(undefined as never, 1);
+    expect(summary.available).toBe(false);
   });
 });

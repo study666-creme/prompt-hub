@@ -27,6 +27,7 @@ import { parseMjImagineUrls, buildMjGalleryUrls, mjPollHasFullGallery } from './
 
 const GEN_IMAGE_BUCKET = 'card-images';
 import { type DebitSplit, deductUserCredits, refundUserCredits } from './membership-credits';
+import { recordGenerationMetric } from './monitoring';
 
 export type JobRow = {
   id: string;
@@ -1491,6 +1492,7 @@ export async function warmJobGridImage(
   env?: Env
 ): Promise<boolean> {
   if (!env || env.GRID_WARM_ENABLED !== '1') return false;
+  const startedAt = Date.now();
   try {
     const { data: job, error } = await admin
       .from('generation_requests')
@@ -1504,9 +1506,14 @@ export async function warmJobGridImage(
     const path = storagePathFromRef(url);
     if (!path) return false;
     const materialized = await materializeGridForPrimaryPath(env, admin, path);
+    void recordGenerationMetric(env, 'grid', {
+      status: materialized ? 'ok' : 'fail',
+      elapsedMs: Date.now() - startedAt
+    });
     return !!materialized;
   } catch (e) {
     console.warn('[generation] grid warm failed', jobId, e);
+    void recordGenerationMetric(env, 'grid', { status: 'fail', elapsedMs: Date.now() - startedAt });
     return false;
   }
 }
@@ -1518,6 +1525,7 @@ export async function archivePendingJobImage(
   jobId: string,
   env?: Env
 ): Promise<boolean> {
+  const startedAt = Date.now();
   const { data: job, error } = await admin
     .from('generation_requests')
     .select('*')
@@ -1532,7 +1540,10 @@ export async function archivePendingJobImage(
   if (meta.archived === true && meta.archivePending !== true) return false;
   try {
     const archived = await ensureJobImageArchived(admin, userId, job as JobRow, env);
-    if (archived && isStorageRef(archived)) return true;
+    if (archived && isStorageRef(archived)) {
+      void recordGenerationMetric(env, 'archive', { status: 'ok', elapsedMs: Date.now() - startedAt });
+      return true;
+    }
     const taskId =
       typeof meta.upstreamTaskId === 'string'
         ? meta.upstreamTaskId
@@ -1550,11 +1561,16 @@ export async function archivePendingJobImage(
         readJobProvider(meta),
         env
       );
-      if (recovered?.imageUrl && isStorageRef(recovered.imageUrl)) return true;
+      if (recovered?.imageUrl && isStorageRef(recovered.imageUrl)) {
+        void recordGenerationMetric(env, 'archive', { status: 'ok', elapsedMs: Date.now() - startedAt });
+        return true;
+      }
     }
+    void recordGenerationMetric(env, 'archive', { status: 'fail', elapsedMs: Date.now() - startedAt });
     return false;
   } catch (e) {
     console.warn('[generation] background archive failed', jobId, e);
+    void recordGenerationMetric(env, 'archive', { status: 'fail', elapsedMs: Date.now() - startedAt });
     return false;
   }
 }

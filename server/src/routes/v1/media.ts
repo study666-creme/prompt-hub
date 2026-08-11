@@ -324,18 +324,18 @@ mediaRoutes.get('/generation/:jobId/url', async c => {
 
   let raw = job.result_image_url;
   if (typeof raw === 'string' && raw.toLowerCase().startsWith('https://')) {
-    await archivePendingJobImage(admin, user.id, jobId, c.env);
-    const { data: archived } = await admin
-      .from('generation_requests')
-      .select('result_image_url')
-      .eq('id', jobId)
-      .eq('user_id', user.id)
-      .maybeSingle();
-    if (archived?.result_image_url) raw = archived.result_image_url;
+    // Never hold the full-image URL on archival: return the temporary upstream
+    // URL now and let archive + grid warm run in the background.
+    const backgroundArchive = archivePendingJobImage(admin, user.id, jobId, c.env).catch((e) => {
+      console.warn('[media] generation url background archive failed', jobId, e);
+    });
     if (c.executionCtx) {
+      c.executionCtx.waitUntil(backgroundArchive);
       c.executionCtx.waitUntil(
         warmJobGridImage(admin, user.id, jobId, c.env).catch(() => {})
       );
+    } else {
+      void backgroundArchive;
     }
   }
   const path = storagePathFromRef(raw);
