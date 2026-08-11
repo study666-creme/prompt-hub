@@ -1,6 +1,6 @@
 # 列表图片加载
 
-复核日期：2026-08-09。下述仓库 UI 对应已上线的 `20260803a` 生图媒体可靠性；生产资源以线上 build 和资源 HTTP 冒烟为准。桌面卡片库行高规则与几何回归（`grid-auto-rows: max-content`、`scripts/verify-warehouse-card-layout-browser.mjs`）为本任务新增，属于未部署候选行为。
+复核日期：2026-08-11。下述仓库 UI 对应已上线的 `20260803a` 生图媒体可靠性；生产资源以线上 build 和资源 HTTP 冒烟为准。桌面卡片库紧凑瀑布流与几何回归（`.warehouse-desktop-col` 分列布局、`scripts/verify-warehouse-card-layout-browser.mjs`）为本任务（TASK-20260811-PROMPT-WAREHOUSE-MASONRY-RESTORE-001）新增，属于未部署候选行为；生产基线 `91d654e` 仍是整行按最高卡统一撑开的普通行式 Grid。
 
 ## 目标
 
@@ -42,7 +42,7 @@ authenticated Worker media proxy before browser-side validation and upload.
 | `warehouse-thumb.js` | 生图仓库 grid 缩略图请求 |
 | `mobile.js` | 手机首屏 cap、滚动 boost |
 | `legacy/script/part-09.js` | 卡片 DOM 分页与首屏绑定 |
-| `legacy/script/part-02.js`, `part-03.js`, `part-10.js` | 桌面稳定 Grid、列数切换与分页哨兵 |
+| `legacy/script/part-02.js`, `part-03.js`, `part-10.js` | 桌面紧凑瀑布流列分发、列数切换与分页哨兵 |
 | `styles-warehouse.css` | 卡片仓库媒体、元数据、空态和手机布局的独立视觉层 |
 | `feed-images.js` | 社区/生图引用归一化 |
 | `server/src/routes/v1/media.ts` | upload、sign-batch、CDN URL |
@@ -56,9 +56,9 @@ authenticated Worker media proxy before browser-side validation and upload.
 
 ## 稳定布局与首屏优先级
 
-- 卡片库桌面网格使用 CSS Grid 和固定 `4:3` 列表媒体框，不再按图片解码结果运行 Masonry 全量 `reloadItems/layout`。图片比例只影响详情页，列表通过 `_grid` 缩略图 `object-fit: cover` 保持行列稳定。
-- 桌面卡片库网格的隐式行必须使用 `grid-auto-rows: max-content`（见 `styles/base/part-09.css`）。默认 `auto` 行会在媒体框 `aspect-ratio: 4/3` 且图片尚未解码时把行高缩到卡片 min-content（≈文字卡 178px），视觉卡实际 402px 溢出到下一行造成卡片重叠；`max-content` 让行高始终等于卡片的真实内容高度。
-- 桌面网格的几何回归由 `scripts/verify-warehouse-card-layout-browser.mjs` 验收：在 1440x900、1024x768、390x844 视口对 192/816 张混合卡（文字卡、单图卡、多图卡、缺图卡、慢图卡）翻完分页后记录容器 class、computed display/列数与首 20 张卡 DOMRect 两两重叠结果，要求零重叠、零绝对定位、无横向溢出且关键控件可达。该测试在 `grid-auto-rows` 回退为 `auto` 时稳定失败，修复后稳定通过。
+- 卡片库桌面网格使用 CSS Grid 和固定 `4:3` 列表媒体框，不再按图片解码结果运行 Masonry 全量 `reloadItems/layout`。图片比例只影响详情页，列表通过 `_grid` 缩略图 `object-fit: cover` 保持列内稳定。
+- 桌面卡片库网格的紧凑瀑布流由 `legacy/script/part-03.js` 的 `ensureWarehouseDesktopColumns` 实现：卡片按最短列贪心分发进 N 个 `.warehouse-desktop-col` 弹性列（`styles/base/part-09.css`，非绝对定位），列内 flex + gap 垂直堆叠，行高恒等于卡片真实内容高度，图片就绪后按阈值做一次防抖重平衡。既有 `grid-auto-rows: max-content` 整行撑高虽然消除重叠，但会让短卡下方的下一张卡等待相邻列最高卡的行底，瀑布流错落效果消失；也绝不能回退 `grid-auto-rows: auto`（图片未解码时会把行高缩到文字卡 min-content ≈178px，视觉卡实际 402px 溢出到下一行造成重叠）。
+- 桌面网格的几何回归由 `scripts/verify-warehouse-card-layout-browser.mjs` 验收：在 1440x900、1024x768、390x844 视口对 192/816 张混合卡（文字卡、单图卡、多图卡、缺图卡、慢图卡）翻完分页后记录容器 class、computed display/列数、首 20 张卡 DOMRect、列内间隙、最大无效空洞与两两重叠，要求零重叠、零绝对定位、无横向溢出且关键控件可达。桌面视图额外断言紧凑瀑布流：列内相邻卡片纵向间隙≈gap、最大无效空洞为 0、相邻列高差不超过约 1.25 张最高卡；该紧凑度断言在生产整行撑高行为（`91d654e`）下稳定失败（列内出现数百像素空洞）。
 - 生图最近列表使用固定 `1:1` 媒体框；前 6 张设为 eager，其中前 4 张为高请求优先级，其余卡片继续 lazy。
 - 最近列表分页只能把新卡插在 `data-imagegen-feed-footer="recent"` 之前，说明条始终位于所有图片之后，不能隔断第 12 张和后续图片。
 - 图片 class/style 变化不再触发整个生图列表的属性级 MutationObserver 扫描；新增直属卡片时才执行布局残留清理。
@@ -107,7 +107,7 @@ $env:APP_ROOT = 'D:\prompt-hub\.pages-deploy'
 node scripts/verify-warehouse-ui-browser.mjs
 ```
 
-桌面网格行高/重叠回归（固定数据、固定视口、真实 DOM/CSS 几何，不访问生产）：
+桌面网格紧凑瀑布流/重叠回归（固定数据、固定视口、真实 DOM/CSS 几何，不访问生产）：
 
 ```powershell
 $env:PLAYWRIGHT_PACKAGE_DIR = '<playwright package directory>'
