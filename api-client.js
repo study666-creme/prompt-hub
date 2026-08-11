@@ -897,9 +897,10 @@
   async function listRecentGeneratedCreations(opts = {}) {
     const days = Math.min(30, Math.max(1, Number(opts.days) || 7));
     const limit = Math.min(400, Math.max(1, Number(opts.limit) || 200));
+    const offset = Math.max(0, Number(opts.offset) || 0);
     return request(
       'GET',
-      `/api/v1/generate/jobs/recent?days=${days}&limit=${limit}`,
+      `/api/v1/generate/jobs/recent?days=${days}&limit=${limit}&offset=${offset}`,
       null,
       { timeoutMs: Math.max(API_TIMEOUT_MS, 30000) }
     );

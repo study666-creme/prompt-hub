@@ -377,6 +377,11 @@
       loadPendingGenJobs();
       if (shouldRunGenJobsBackgroundSync()) scheduleGenJobsSync(300);
     });
+    window.addEventListener('online', () => {
+      // 网络恢复：立即做一次合并后的状态刷新，避免多个恢复入口并行。
+      loadPendingGenJobs();
+      if (shouldRunGenJobsBackgroundSync()) scheduleGenJobsSync(150);
+    });
     window.addEventListener('pagehide', () => {
       persistPendingGenJobs();
     });

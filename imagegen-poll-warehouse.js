@@ -74,6 +74,60 @@
     d().persistCreations?.();
   }
 
+  /**
+   * 后台归档画廊引用：先展示临时 URL，归档完成后只原子替换仍指向旧 URL 的引用，
+   * 绝不覆盖用户已经切换的图，也绝不让归档阻塞结果可见。
+   */
+  function archiveGalleryRefInBackground(creationId, archiveJobId, rawUrl) {
+    if (
+      !creationId
+      || !rawUrl
+      || !archiveJobId
+      || !global.SupabaseSync?.isLoggedIn?.()
+      || !global.SupabaseSync?.archiveGeneratedCardImage
+    ) return;
+    void Promise.resolve()
+      .then(() => global.SupabaseSync.archiveGeneratedCardImage(creationId, rawUrl, {
+        jobId: archiveJobId,
+        allowRemoteArchive: true
+      }))
+      .then((archived) => {
+        if (!archived || archived === rawUrl) return;
+        const live = d().getCreations?.() || [];
+        const creation = live.find((item) => item?.id === creationId);
+        if (!creation) return;
+        const replace = (value) => value === rawUrl ? archived : value;
+        let changed = false;
+        if (creation.image === rawUrl) {
+          creation.image = archived;
+          changed = true;
+        }
+        if (creation.mjCompositeUrl === rawUrl) {
+          creation.mjCompositeUrl = archived;
+          changed = true;
+        }
+        for (const key of ['cardImages', 'mjGridUrls']) {
+          if (!Array.isArray(creation[key])) continue;
+          const values = creation[key].map(replace);
+          if (values.some((value, index) => value !== creation[key][index])) {
+            creation[key] = values;
+            changed = true;
+          }
+        }
+        if (!changed) return;
+        persistCreationUpdate(creation);
+        if (global.SupabaseSync?.isStorageRef?.(archived)) {
+          void global.WarehouseThumb?.resolveForCard?.(archived, {
+            jobId: archiveJobId,
+            assetId: creationId,
+            cardId: creationId
+          });
+        }
+        d().renderImageGenFeed?.({ preserveScroll: true });
+      })
+      .catch((e) => console.warn('[gallery] background archive failed', e));
+  }
+
   function buildCreationGallery(creation) {
     if (!creation) return [];
     if (Array.isArray(creation.cardImages) && creation.cardImages.length) {
@@ -87,7 +141,7 @@
     return creation.image ? [creation.image] : [];
   }
 
-  /** MJ 放大/变体：追加到父 creation 的 cardImages（最多 5 张） */
+  /** MJ 放大/变体：先展示临时图，后台归档到父 creation 的 cardImages（最多 5 张） */
   async function appendMjActionToParentCard(poll, ctx, pendingId) {
     const parentJobId = baseJobId(poll?.data?.mjParentJobId || '');
     const actionImage = poll?.data?.imageUrl;
@@ -96,21 +150,11 @@
     const creation = findCreationForJob(parentJobId);
     if (!creation?.id) return false;
 
-    let stored = actionImage;
     const gallery = buildCreationGallery(creation);
     const slot = gallery.length + 1;
-    if (global.SupabaseSync?.archiveGeneratedCardImage) {
-      try {
-        stored = await global.SupabaseSync.archiveGeneratedCardImage(creation.id, actionImage, {
-          jobId: `${parentJobId}#a${slot}`
-        }) || actionImage;
-      } catch (e) {
-        console.warn('[mj-action] gallery archive failed', e);
-      }
-    }
     const merged = CG()?.mergeCardGalleryImages
-      ? CG().mergeCardGalleryImages(gallery, [stored])
-      : [...gallery, stored].filter(Boolean).slice(0, CG()?.MAX || 5);
+      ? CG().mergeCardGalleryImages(gallery, [actionImage])
+      : [...gallery, actionImage].filter(Boolean).slice(0, CG()?.MAX || 5);
     creation.cardImages = merged;
     creation.image = merged[0] || creation.image;
     if (merged.length > 1) {
@@ -118,6 +162,10 @@
     }
     creation.isMidjourney = true;
     persistCreationUpdate(creation);
+    // Archival is asynchronous and must not delay the visible result. The
+    // background archive only replaces refs that still point at the temporary
+    // URL, so a card the user switched to is never overwritten.
+    archiveGalleryRefInBackground(creation.id, `${parentJobId}#a${slot}`, actionImage);
     if (pendingId) d().removePendingJob(pendingId);
     if (poll?.data?.jobId) d().clearSessionGenJob(poll.data.jobId);
     d().renderImageGenFeed({ preserveScroll: true });
@@ -235,7 +283,7 @@
     return true;
   }
 
-  /** 同提示词批量：合并到同一 creation（genBatchId） */
+  /** 同提示词批量：合并到同一 creation（genBatchId），临时图先展示、后台归档 */
   async function appendImagesToBatchCard(ctx, images, pendingId) {
     const batchId = ctx?.batchId;
     const urls = (images || []).filter(Boolean);
@@ -243,42 +291,38 @@
     let creation = getCreations().find((c) => c.genBatchId === batchId);
     if (!creation?.id) return false;
 
-    const beforeLen = buildCreationGallery(creation).length;
-    let merged = buildCreationGallery(creation);
+    let appended = 0;
     for (const imageUrl of urls) {
-      let stored = imageUrl;
-      const slot = merged.length + 1;
-      if (global.SupabaseSync?.archiveGeneratedCardImage) {
-        try {
-          stored = await global.SupabaseSync.archiveGeneratedCardImage(creation.id, imageUrl, {
-            jobId: ctx.jobId ? `${baseJobId(ctx.jobId)}#b${slot}` : null
-          }) || imageUrl;
-        } catch (e) {
-          console.warn('[batch-merge] gallery archive failed', e);
-        }
-      }
       // Archival is asynchronous. Re-read the live card before merging so a
       // result written while this image was being stored is never overwritten.
       creation = getCreations().find((c) => c.genBatchId === batchId) || creation;
-      merged = buildCreationGallery(creation);
-      merged = CG()?.mergeCardGalleryImages
-        ? CG().mergeCardGalleryImages(merged, [stored])
-        : [...merged, stored].filter(Boolean).slice(0, CG()?.MAX || 5);
+      const current = buildCreationGallery(creation);
+      const slot = current.length + 1;
+      const merged = CG()?.mergeCardGalleryImages
+        ? CG().mergeCardGalleryImages(current, [imageUrl])
+        : [...current, imageUrl].filter(Boolean).slice(0, CG()?.MAX || 5);
+      if (merged.length === current.length) continue;
+      creation.cardImages = merged;
+      creation.image = merged[0] || creation.image;
+      persistCreationUpdate(creation);
+      appended += 1;
+      archiveGalleryRefInBackground(
+        creation.id,
+        ctx.jobId ? `${baseJobId(ctx.jobId)}#b${slot}` : `${String(batchId)}#b${slot}`,
+        imageUrl
+      );
     }
-    if (merged.length === beforeLen) {
+    if (!appended) {
       if (!ctx?.silentToast) d().toast('该记录已满 5 张，无法继续追加');
       if (pendingId) d().removePendingJob(pendingId);
       if (ctx?.jobId) d().clearSessionGenJob(ctx.jobId);
       return true;
     }
-    creation.cardImages = merged;
-    creation.image = merged[0] || creation.image;
-    persistCreationUpdate(creation);
     if (pendingId) d().removePendingJob(pendingId);
     if (ctx?.jobId) d().clearSessionGenJob(ctx.jobId);
     d().renderImageGenFeed({ preserveScroll: true, force: true });
     if (!ctx?.silentToast && ctx.batchIndex === ctx.batchTotal) {
-      d().toast(`已合并 ${merged.length} 张到同一最近记录`);
+      d().toast(`已合并 ${buildCreationGallery(creation).length} 张到同一最近记录`);
     }
     return true;
   }
@@ -373,6 +417,7 @@
       saveMjToWarehouse,
       appendMjActionToParentCard,
       ensureGenJobCreationsFromPoll,
+      archiveGalleryRefInBackground,
       findCreationForJob,
       hasCreationForJob
     };

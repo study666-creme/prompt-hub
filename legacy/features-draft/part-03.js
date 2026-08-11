@@ -84,17 +84,42 @@
     }
     recentServerSyncLastAt = now;
     recentServerSyncInflight = (async () => {
-      const res = await window.PromptHubApi.listRecentGeneratedCreations({
+      const renderIfActive = () => {
+        if (opts.render !== false && document.getElementById('pageImageGen')?.classList.contains('active')) {
+          renderImageGenFeed({ preserveScroll: true });
+          updateImageGenFeedHint();
+        }
+      };
+      // 首屏数据路径：先拉小批量（默认 12 条）快速合并渲染，随后在后台按
+      // 滚动/空闲分批拉取并与本地最近缓存合并。单个坏图不会阻塞整批。
+      const totalLimit = Math.max(80, Math.min(400, getRecentCreationsLimit() * 2));
+      const firstBatch = 12;
+      const first = await window.PromptHubApi.listRecentGeneratedCreations({
         days: 7,
-        limit: Math.max(80, Math.min(400, getRecentCreationsLimit() * 2))
+        limit: firstBatch,
+        offset: 0
       });
-      if (!res?.ok) return { ok: false, code: res?.code, message: res?.message };
-      const changed = mergeRecentCreationsFromServer(res.data?.jobs || []);
+      if (!first?.ok) return { ok: false, code: first?.code, message: first?.message };
+      let changed = mergeRecentCreationsFromServer(first.data?.jobs || []);
       pruneCreations();
-      if (changed && opts.render !== false && document.getElementById('pageImageGen')?.classList.contains('active')) {
-        renderImageGenFeed({ preserveScroll: true });
-        updateImageGenFeedHint();
+      if (changed) renderIfActive();
+      if (totalLimit > firstBatch) {
+        try {
+          const rest = await window.PromptHubApi.listRecentGeneratedCreations({
+            days: 7,
+            limit: totalLimit - firstBatch,
+            offset: firstBatch
+          });
+          if (rest?.ok) {
+            const changed2 = mergeRecentCreationsFromServer(rest.data?.jobs || []);
+            if (changed2) pruneCreations();
+            changed = changed || changed2;
+          }
+        } catch (e) {
+          console.warn('[recent-server] background remainder sync failed', e);
+        }
       }
+      if (changed) renderIfActive();
       return { ok: true, changed };
     })().catch((e) => {
       console.warn('[recent-server] sync failed', e);

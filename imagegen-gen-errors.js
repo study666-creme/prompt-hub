@@ -203,8 +203,8 @@
     const elapsed = Math.max(0, Date.now() - (ctx?.startedAt || Date.now()));
     const activeMax = genActivePollMaxMs(ctx);
     if (elapsed >= activeMax) return isLongRunningGenJob(ctx) ? 9000 : 7000;
-    if (attemptIndex <= 1) return 1500;
-    if (attemptIndex <= 4) return 2200;
+    if (attemptIndex <= 1) return 1000;
+    if (attemptIndex <= 4) return 2000;
     if (isLongRunningGenJob(ctx)) {
       if (elapsed < 120_000) return 4000;
       if (elapsed < 360_000) return 6000;

@@ -169,19 +169,48 @@
         `.imagegen-feed-card[data-feed-id="${CSS.escape(opts.feedKey)}"]`
       );
       const feedImg = cardEl?.querySelector('.imagegen-feed-thumb-btn img');
-      void window.FeatureDraft.resolveImageGenFullUrl(kind, navId, opts.feedKey, feedImg).then((full) => {
-        if (loadStale() || !full || full === displaySrc) return;
+      const installFull = (full) => {
+        if (loadStale() || !full || full === displaySrc || full === img.src) return;
         if (/data:image\/svg/i.test(full)) return;
         const looksGrid = /_grid\.|width=\d+&quality=/i.test(displaySrc) || /_grid\.|width=\d+&quality=/i.test(img.src || '');
         const small = img.naturalWidth > 0 && img.naturalWidth < 720;
         if (!looksGrid && !small && img.src === full) return;
-        img.onload = onReady;
-        img.onerror = onFail;
-        if (/^https?:\/\//i.test(full)) img.crossOrigin = 'anonymous';
-        img.src = full;
-      });
+        // 后台预加载并 decode full，成功后无闪黑原子替换；失败则继续显示预览图。
+        const preload = new Image();
+        const swap = () => {
+          if (loadStale()) return;
+          if (!looksGrid && !small && img.src === full) return;
+          const ephemeralFull = /^https?:\/\//i.test(full)
+            && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(full);
+          if (/^https?:\/\//i.test(full) && !ephemeralFull) img.crossOrigin = 'anonymous';
+          else img.removeAttribute('crossorigin');
+          img.onload = null;
+          img.onerror = () => {
+            // CORS 模式下重取失败时恢复已解码预览，不黑屏、不重复下载。
+            if (prevSrc && prevSrc !== full) {
+              img.onerror = null;
+              img.src = prevSrc;
+            }
+          };
+          img.src = full;
+          window.setViewerFrameLoading?.(frame, false);
+        };
+        preload.onload = () => {
+          if (loadStale()) return;
+          if (typeof preload.decode === 'function') {
+            preload.decode().then(swap).catch(() => {});
+          } else {
+            swap();
+          }
+        };
+        // 预加载只用于展示，不因 crossOrigin 失败重下同一大图。
+        preload.onerror = () => {};
+        preload.src = full;
+      };
+      void window.FeatureDraft.resolveImageGenFullUrl(kind, navId, opts.feedKey, feedImg).then(installFull).catch(() => {});
     };
     let shown = false;
+    const prevSrc = img.src || '';
     const onReady = () => {
       if (shown || loadStale()) return;
       shown = true;
@@ -207,6 +236,17 @@
       if (loadStale()) return;
       img.onerror = null;
       img.onload = null;
+      if (prevSrc && hasDecodedImage && img.src !== prevSrc) {
+        // 大图升级失败：恢复已解码的预览图，不关灯箱、不把媒体区清空。
+        const ephemeralPrev = /^https?:\/\//i.test(prevSrc)
+          && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(prevSrc);
+        if (/^https?:\/\//i.test(prevSrc) && !ephemeralPrev) img.crossOrigin = 'anonymous';
+        else img.removeAttribute('crossorigin');
+        img.src = prevSrc;
+        window.setViewerFrameLoading?.(frame, false);
+        if (!opts.silentFail) deps.showToast?.('原图暂不可用，已显示预览图', 4000);
+        return;
+      }
       if (!opts.fallbackTried && opts.fallbackSrc && opts.fallbackSrc !== displaySrc
         && !opts.fallbackSrc.includes('data:image/svg')) {
         loadLightboxImage(opts.fallbackSrc, {
@@ -223,25 +263,38 @@
       lightbox.classList.remove('active');
       if (!opts.silentFail) deps.showToast?.('图片加载失败，请稍后重试');
     };
-    img.removeAttribute('src');
+    // 已有解码图时保持可见：升级/切换大图先不清空 src，等新图 ready 再原子替换。
+    const hasDecodedImage = img.complete && img.naturalWidth > 0 && !!img.src
+      && !String(img.src).includes('data:image/svg');
     if (!displaySrc || displaySrc.includes('data:image/svg')) {
-      if (opts.pending) {
+      if (opts.pending && !hasDecodedImage && opts.fallbackSrc
+        && /^(https?:|blob:|data:image\/)/i.test(opts.fallbackSrc)
+        && !opts.fallbackSrc.includes('data:image/svg')) {
+        // 灯箱 shell 先展示可用的缩略图/临时图，不等 full。
+        displaySrc = opts.fallbackSrc;
+      } else if (opts.pending) {
         img.onwheel = null;
         img.onmousedown = null;
         img.ondblclick = null;
         img.removeAttribute('src');
         return;
+      } else if (!hasDecodedImage) {
+        onFail();
+        return;
+      } else {
+        return;
       }
-      onFail();
-      return;
     }
+    if (!hasDecodedImage) img.removeAttribute('src');
     frame?.classList.remove('viewer-glow-active');
     frame?.querySelector('.viewer-image-shine-wrap')?.classList.remove('viewer-glow-active', 'media-shine-reveal', 'viewer-shine-active');
     img.onwheel = null;
     img.onmousedown = null;
     img.ondblclick = null;
     let corsRetried = false;
-    if (/^https?:\/\//i.test(displaySrc)) img.crossOrigin = 'anonymous';
+    const ephemeralUpstream = /^https?:\/\//i.test(displaySrc)
+      && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(displaySrc);
+    if (/^https?:\/\//i.test(displaySrc) && !ephemeralUpstream) img.crossOrigin = 'anonymous';
     else img.removeAttribute('crossorigin');
     if (img.src === displaySrc && img.complete && img.naturalWidth > 0) {
       onReady();
@@ -249,7 +302,8 @@
       return;
     }
     img.onerror = () => {
-      if (!corsRetried && img.hasAttribute('crossorigin')) {
+      // 上游临时图本就不支持 CORS，不再因 crossOrigin 重下同一大图。
+      if (!corsRetried && img.hasAttribute('crossorigin') && !ephemeralUpstream) {
         corsRetried = true;
         img.removeAttribute('crossorigin');
         img.onload = onReady;
