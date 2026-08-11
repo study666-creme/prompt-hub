@@ -4,10 +4,15 @@
     display: grid !important;
     grid-template-columns: repeat(var(--warehouse-grid-columns, var(--card-columns, 3)), minmax(0, 1fr));
     grid-auto-flow: row;
-    /* 卡片媒体框使用 aspect-ratio 且图片在列表加载完成前无固有尺寸：
-       `auto` 行会把行高缩到卡片 min-content（≈文字卡 178px），视觉卡实际
-       402px 溢出到下一行造成重叠。行高必须按内容 max-content 计算。 */
-    grid-auto-rows: max-content;
+    /* 桌面紧凑瀑布流：卡片不直接作为 Grid item，而是由
+       legacy/script/part-03.js 的 ensureWarehouseDesktopColumns 按最短列
+       贪心分发进 N 个 .warehouse-desktop-col 弹性列。外层 Grid 只排布这
+       N 个列容器，行高由最高的列决定；列内卡片用 flex + gap 垂直堆叠，
+       行高恒等于卡片真实内容高度，因此既没有整行 max-content 撑开造成
+       的纵向空洞，也不会出现把行高缩到文字卡 min-content 导致的视觉卡
+       溢出重叠。grid-auto-rows 只作用于列容器所在的行，不得再让卡片直接
+       参与行高计算，也不得恢复按行统一的 max-content 或互压的绝对定位。 */
+    grid-auto-rows: auto;
     gap: var(--warehouse-grid-gap, var(--card-gap, 16px));
     align-content: start;
     align-items: start;
@@ -19,8 +24,21 @@
     overflow-x: hidden !important;
     overflow-y: auto !important;
   }
-  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card {
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .warehouse-desktop-col {
     display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    flex-shrink: 1;
+    min-width: 0;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
+    gap: var(--warehouse-grid-gap, var(--card-gap, 16px));
+  }
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card,
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .warehouse-desktop-col > .card {
+    display: flex;
+    flex-shrink: 0;
     box-sizing: border-box;
     width: auto !important;
     margin: 0 !important;
@@ -28,17 +46,23 @@
     left: auto !important;
     top: auto !important;
   }
-  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter {
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter,
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .warehouse-desktop-col > .card.card-enter {
     animation: none !important;
   }
-  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft {
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft,
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .warehouse-desktop-col > .card.card-enter-soft {
     animation: warehouseCardSoftFade 0.46s var(--ease-out) both !important;
     will-change: opacity;
   }
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-media,
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-body,
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-copy-btn,
-  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-canvas-btn {
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-canvas-btn,
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .warehouse-desktop-col > .card.card-enter-soft > .card-media,
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .warehouse-desktop-col > .card.card-enter-soft > .card-body,
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .warehouse-desktop-col > .card.card-enter-soft > .card-copy-btn,
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .warehouse-desktop-col > .card.card-enter-soft > .card-canvas-btn {
     animation: warehouseCardSoftLift 0.42s var(--ease-out) both;
     animation-delay: inherit;
     will-change: opacity, transform, filter;
@@ -56,7 +80,12 @@
     #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-media,
     #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-body,
     #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-copy-btn,
-    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-canvas-btn {
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-canvas-btn,
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .warehouse-desktop-col > .card.card-enter-soft,
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .warehouse-desktop-col > .card.card-enter-soft > .card-media,
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .warehouse-desktop-col > .card.card-enter-soft > .card-body,
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .warehouse-desktop-col > .card.card-enter-soft > .card-copy-btn,
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .warehouse-desktop-col > .card.card-enter-soft > .card-canvas-btn {
       animation: none !important;
       opacity: 1;
       transform: none;

@@ -293,7 +293,7 @@ async function loadAllPages(page, viewport, count) {
       return el.classList.contains('is-loading') || el.classList.contains('card-media--await');
     });
   }, null, { timeout: 15000 }).catch(() => {});
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(900);
 }
 
 async function inspectLayout(page, viewport) {
@@ -343,10 +343,40 @@ async function inspectLayout(page, viewport) {
     }));
     const absoluteCards = cards.filter((card) => getComputedStyle(card).position === 'absolute').length;
     const inlineAbs = cards.filter((card) => card.style.position === 'absolute').length;
-    const firstRowTopSpread = rects.length >= 3
-      ? Math.round(Math.max(...rects.slice(0, 3).map((r) => r.top))
-        - Math.min(...rects.slice(0, 3).map((r) => r.top)))
+    // 紧凑瀑布流几何证据：按 left 聚类成列，统计列内相邻纵向间隙与列高差。
+    // 普通行式 Grid 每行按最高卡统一撑开时，短卡下方的列内间隙会远大于 gap。
+    const gapPx = gridStyle ? parseFloat(gridStyle.rowGap || gridStyle.gap || '0') || 0 : 0;
+    const colBuckets = new Map();
+    cards.forEach((card, index) => {
+      const rect = card.getBoundingClientRect();
+      const key = Math.round(rect.left / 4);
+      if (!colBuckets.has(key)) colBuckets.set(key, []);
+      colBuckets.get(key).push({ index, top: rect.top, bottom: rect.bottom, height: rect.height });
+    });
+    const colStats = [...colBuckets.values()].map((col) => {
+      col.sort((a, b) => a.top - b.top);
+      const gaps = [];
+      for (let i = 1; i < col.length; i += 1) gaps.push(col[i].top - col[i - 1].bottom);
+      const height = col.length ? col[col.length - 1].bottom - col[0].top : 0;
+      return { count: col.length, gaps, height, top: col.length ? col[0].top : 0 };
+    }).filter((col) => col.count > 0);
+    // 紧凑瀑布流是列式 DOM 顺序，首行对齐改为断言每列首卡 top 一致。
+    const columnStarts = colStats.map((c) => c.top);
+    const firstRowTopSpread = columnStarts.length >= 2
+      ? Math.round(Math.max(...columnStarts) - Math.min(...columnStarts))
       : 0;
+    const allInColumnGaps = colStats.flatMap((col) => col.gaps);
+    const maxInColumnGap = allInColumnGaps.length ? Math.max(...allInColumnGaps) : 0;
+    const colHeights = colStats.map((col) => col.height);
+    const maxColHeight = colHeights.length ? Math.max(...colHeights) : 0;
+    const minColHeight = colHeights.length ? Math.min(...colHeights) : 0;
+    const maxColumnDelta = maxColHeight - minColHeight;
+    const maxCardHeight = cards.length
+      ? Math.max(...cards.map((card) => card.getBoundingClientRect().height))
+      : 0;
+    const holeTolerance = 6;
+    const invalidHoles = allInColumnGaps.map((g) => Math.max(0, g - gapPx - holeTolerance));
+    const maxInvalidHole = invalidHoles.length ? Math.max(...invalidHoles) : 0;
     const media = [...document.querySelectorAll('#cardsContainer .card-media')];
     const zeroHeightMedia = media.filter((el) => {
       const r = el.getBoundingClientRect();
@@ -382,7 +412,18 @@ async function inspectLayout(page, viewport) {
       pageOverflow: document.documentElement.scrollWidth - viewportWidth,
       overflowNodes,
       rects,
-      overlappingPairs: pairs
+      overlappingPairs: pairs,
+      compactness: {
+        columnCount: colStats.length,
+        columnCardCounts: colStats.map((c) => c.count),
+        columnHeights: colHeights.map((h) => Math.round(h * 100) / 100),
+        inColumnGaps: allInColumnGaps.map((g) => Math.round(g * 100) / 100),
+        maxInColumnGap: Math.round(maxInColumnGap * 100) / 100,
+        maxColumnDelta: Math.round(maxColumnDelta * 100) / 100,
+        maxCardHeight: Math.round(maxCardHeight * 100) / 100,
+        gridGapPx: Math.round(gapPx * 100) / 100,
+        maxInvalidHole: Math.round(maxInvalidHole * 100) / 100
+      }
     };
   }, viewport.mobile);
 }
@@ -412,6 +453,31 @@ function assertStableLayout(label, state, allowBrokenImages) {
   }
   if (problems.length) {
     throw new Error(`${label} layout unstable: ${problems.join('; ')}`);
+  }
+}
+
+function assertCompactWaterfall(label, state) {
+  if (state.mobile) return;
+  const c = state.compactness || {};
+  const gap = c.gridGapPx || 0;
+  if (c.maxInColumnGap == null || c.maxColumnDelta == null) {
+    throw new Error(`${label} missing compactness geometry`);
+  }
+  const allowedGap = Math.max(gap + 6, 24);
+  if (c.maxInColumnGap > allowedGap) {
+    throw new Error(
+      `${label} NOT a compact waterfall: max in-column gap ${c.maxInColumnGap}px ` +
+      `exceeds ${allowedGap}px (grid gap ${gap}px, columns=${c.columnCount}, ` +
+      `maxInvalidHole=${c.maxInvalidHole}px); a row-stretched grid leaves short cards ` +
+      `waiting for the tallest card in their row`
+    );
+  }
+  const allowedDelta = (c.maxCardHeight || 0) * 1.25 + gap + 24;
+  if (c.maxColumnDelta > allowedDelta) {
+    throw new Error(
+      `${label} unbalanced waterfall columns: max column delta ${c.maxColumnDelta}px ` +
+      `exceeds ${Math.round(allowedDelta)}px (tallest ${Math.round(c.maxCardHeight)}px card)`
+    );
   }
 }
 
@@ -450,49 +516,50 @@ async function checkControlsReachable(page, mobile) {
   }, mobile);
 }
 
-async function checkViewModes(page) {
+async function checkViewModes(page, viewport) {
   const modeStates = [];
-  const measure = async (mode) => {
-    await page.waitForTimeout(600);
-    return page.evaluate((label) => {
-      const container = document.getElementById('cardsContainer');
-      const cards = [...document.querySelectorAll('#cardsContainer .card[data-id]')].slice(0, 12);
-      const rects = cards.map((card) => {
-        const rect = card.getBoundingClientRect();
-        return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+  const settleMedia = async () => {
+    await page.waitForTimeout(350);
+    await page.waitForFunction(() => {
+      const cards = [...document.querySelectorAll('#cardsContainer .card[data-id]')].slice(0, 24);
+      return cards.every((card) => {
+        const media = card.querySelector('.card-media');
+        if (!media) return true;
+        if (media.classList.contains('is-loading') || media.classList.contains('card-media--await')) return false;
+        if (media.classList.contains('card-media--load-failed')) return true;
+        const img = card.querySelector('.card-img');
+        if (!img) return true;
+        return img.complete;
       });
-      const pairs = [];
-      for (let i = 0; i < rects.length; i += 1) {
-        for (let j = i + 1; j < rects.length; j += 1) {
-          const a = rects[i]; const b = rects[j];
-          const x = Math.min(a.right, b.right) - Math.max(a.left, b.left);
-          const y = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-          if (x > 0 && y > 0 && x * y > 4) pairs.push({ i, j });
-        }
-      }
-      const cs = container ? getComputedStyle(container) : null;
-      const activeView = document.querySelector('#viewToggle .active')?.dataset.view || '';
-      return {
-        mode: label,
-        activeView,
-        containerClass: container?.className || '',
-        gridCols: String(cs?.gridTemplateColumns || '').split(/\s+/).filter(Boolean).length,
-        cardCount: cards.length,
-        overlappingPairs: pairs,
-        columns: Number(document.documentElement.style.getPropertyValue('--card-columns')) || 0
-      };
-    }, mode);
+    }, null, { timeout: 12000 }).catch(() => {});
+    await page.waitForTimeout(700);
+  };
+  const measure = async (mode) => {
+    await settleMedia();
+    const state = await inspectLayout(page, viewport);
+    const activeView = await page.evaluate(() => (
+      document.querySelector('#viewToggle .active')?.dataset.view || ''
+    ));
+    const columns = await page.evaluate(() => (
+      Number(document.documentElement.style.getPropertyValue('--card-columns')) || 0
+    ));
+    const record = { mode, activeView, columns, state };
+    if (screenshotDir) {
+      await page.screenshot({
+        path: join(screenshotDir, `warehouse-layout-${viewport.name}-${mode}.png`),
+        fullPage: false
+      });
+    }
+    return record;
   };
   const setColumns = (cols) => page.evaluate((c) => {
     if (typeof window.setCardColumns !== 'function') throw new Error('setCardColumns unavailable');
     window.setCardColumns(c);
   }, cols);
-  await setColumns(4);
-  modeStates.push(await measure('columns=4'));
-  await setColumns(2);
-  modeStates.push(await measure('columns=2'));
-  await setColumns(3);
-  modeStates.push(await measure('columns=3'));
+  for (let cols = 1; cols <= 5; cols += 1) {
+    await setColumns(cols);
+    modeStates.push(await measure(`columns=${cols}`));
+  }
   await page.evaluate(() => {
     const btn = document.querySelector('#viewToggle button[data-view="list"]');
     if (btn) btn.click();
@@ -503,17 +570,59 @@ async function checkViewModes(page) {
     if (btn) btn.click();
   });
   modeStates.push(await measure('grid-view-restored'));
-  for (const state of modeStates) {
+  for (const record of modeStates) {
+    const state = record.state;
     if (state.overlappingPairs.length) {
-      throw new Error(`mode ${state.mode} cards overlap: ${JSON.stringify(state.overlappingPairs)}`);
+      throw new Error(`mode ${record.mode} cards overlap: ${JSON.stringify(state.overlappingPairs)}`);
     }
-    if (state.mode === 'list-view') {
-      if (state.activeView !== 'list' || state.cardCount < 12) {
-        throw new Error(`list-view did not activate: ${JSON.stringify(state)}`);
+    if (record.mode !== 'list-view') {
+      assertCompactWaterfall(`${viewport.name} ${record.mode}`, state);
+    }
+    if (record.mode === 'list-view') {
+      if (record.activeView !== 'list' || state.cardCount < 12) {
+        throw new Error(`list-view did not activate: ${JSON.stringify(record)}`);
       }
     }
   }
   return modeStates;
+}
+
+async function checkWidthChange(page, viewport) {
+  const checks = [];
+  const measureWidth = async (label) => {
+    await page.waitForTimeout(600);
+    const state = await inspectLayout(page, viewport);
+    const record = { label, state };
+    checks.push(record);
+    if (state.overlappingPairs.length) {
+      throw new Error(`${viewport.name} ${label} cards overlap: ${JSON.stringify(state.overlappingPairs)}`);
+    }
+    assertCompactWaterfall(`${viewport.name} ${label}`, state);
+    if (state.pageOverflow > 1 || state.overflowNodes.length) {
+      throw new Error(`${viewport.name} ${label} horizontal overflow: ${JSON.stringify(state.overflowNodes)}`);
+    }
+    if (screenshotDir) {
+      await page.screenshot({
+        path: join(screenshotDir, `warehouse-layout-${viewport.name}-${label}.png`),
+        fullPage: false
+      });
+    }
+    return record;
+  };
+  const toggleSidebar = () => page.evaluate(() => {
+    const btn = document.getElementById('appNavCollapseBtn');
+    if (!btn) throw new Error('appNavCollapseBtn unavailable');
+    btn.click();
+  });
+  await toggleSidebar();
+  await measureWidth('sidebar-collapsed');
+  await toggleSidebar();
+  await measureWidth('sidebar-restored');
+  await page.setViewportSize({ width: Math.round(viewport.width * 0.86), height: viewport.height });
+  await measureWidth('width-shrunk');
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  await measureWidth('width-restored');
+  return checks;
 }
 
 await new Promise((resolveListen) => server.listen(port, '127.0.0.1', resolveListen));
@@ -542,12 +651,15 @@ try {
       }
       const allowBrokenImages = process.env.ALLOW_BROKEN_IMAGES === '1';
       assertStableLayout(label, state, allowBrokenImages);
+      assertCompactWaterfall(label, state);
       if (controls.hidden.length || controls.offscreen.length) {
         throw new Error(`${label} controls unreachable: ${JSON.stringify(controls)}`);
       }
       if (viewport.name === 'desktop-1440x900') {
-        const modes = await checkViewModes(page);
+        const modes = await checkViewModes(page, viewport);
         record.modes = modes;
+        const widthChecks = await checkWidthChange(page, viewport);
+        record.widthChecks = widthChecks;
       }
       if (screenshotDir) {
         await page.screenshot({
@@ -560,6 +672,7 @@ try {
         cardCount: state.cardCount,
         overlaps: state.overlappingPairs.length,
         overflow: state.pageOverflow,
+        compact: `${state.compactness.maxInColumnGap}px gap / ${state.compactness.maxColumnDelta}px colDelta`,
         controls: { hidden: controls.hidden, offscreen: controls.offscreen }
       }));
       await context.close();

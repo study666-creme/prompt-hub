@@ -233,9 +233,17 @@ async function inspectWarehouse(page, mobile) {
       gridDisplay: gridStyle?.display || '',
       gridColumnCount: String(gridStyle?.gridTemplateColumns || '').split(/\s+/).filter(Boolean).length,
       absoluteCards: cards.filter((card) => getComputedStyle(card).position === 'absolute').length,
+      // 桌面紧凑瀑布流是列式 DOM 顺序：首行对齐改为断言每列首卡 top 一致。
       firstRowTopSpread: cardRects.length >= 3
-        ? Math.round(Math.max(...cardRects.slice(0, 3).map((rect) => rect.top))
-          - Math.min(...cardRects.slice(0, 3).map((rect) => rect.top)))
+        ? (() => {
+          const columnStarts = new Map();
+          cardRects.forEach((rect) => {
+            const key = Math.round(rect.left / 4);
+            if (!columnStarts.has(key)) columnStarts.set(key, rect.top);
+          });
+          const tops = [...columnStarts.values()];
+          return tops.length >= 2 ? Math.round(Math.max(...tops) - Math.min(...tops)) : 0;
+        })()
         : 0,
       pageOverflow: document.documentElement.scrollWidth - viewportWidth,
       draggableCards: grid?.querySelectorAll('.card[draggable="true"]').length || 0,

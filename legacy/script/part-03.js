@@ -105,8 +105,6 @@
     /** 图加载后仅 layout()，避免 reloadItems 整网格重排 */
     function scheduleWarehouseMasonryLightLayout() {
       if (isMobileViewport()) return;
-      const container = document.getElementById('cardsContainer');
-      if (container?.classList.contains('warehouse-stable-grid')) return;
       warehouseMasonryPending += 1;
       const delay = document.body.classList.contains('panel-open')
         ? 64
@@ -153,7 +151,8 @@
         masonryInstance = null;
       }
       container.querySelectorAll('.grid-sizer').forEach((el) => el.remove());
-      container.classList.remove('warehouse-stable-grid');
+      flattenWarehouseDesktopColumns(container);
+      container.classList.remove('warehouse-stable-grid', 'warehouse-desktop-columns');
       container.style.removeProperty('--warehouse-grid-columns');
       container.style.removeProperty('--warehouse-grid-gap');
       container.classList.add('mobile-grid', 'cards-grid-primed');
@@ -161,6 +160,155 @@
       resetCardLayoutStyles(container);
     }
     window.enforceMobileCardGrid = enforceMobileCardGrid;
+
+    /** 桌面紧凑瀑布流：把移动端两列分发模式推广到 N 列。卡片不是 Grid
+        item，而是按最短列贪心放进 .warehouse-desktop-col 弹性列，列内
+        flex + gap 垂直堆叠。列容器彼此独立，任何列的高度变化都不会拉伸
+        相邻列，因此列内纵向间隙恒等于 gap，天然零重叠、无绝对定位。 */
+    function flattenWarehouseDesktopColumns(container) {
+      if (!container) return;
+      const cols = [...container.querySelectorAll(':scope > .warehouse-desktop-col')];
+      if (!cols.length) return;
+      const frag = document.createDocumentFragment();
+      cols.forEach((col) => {
+        col.querySelectorAll(':scope > .card[data-id]').forEach((card) => frag.appendChild(card));
+      });
+      cols.forEach((col) => col.remove());
+      const sentinel = container.querySelector(':scope > .warehouse-scroll-sentinel');
+      if (sentinel) sentinel.before(frag);
+      else container.appendChild(frag);
+    }
+
+    function warehouseDesktopColumnLoads(cols) {
+      return cols.map((col) => {
+        const h = col.offsetHeight;
+        if (h > 1) return h;
+        return [...col.querySelectorAll(':scope > .card[data-id]')].reduce((sum, card) => sum + (card.offsetHeight || 0), 0);
+      });
+    }
+
+    /** 视觉卡的媒体框用 aspect-ratio: 4/3 固定，加载完成后高度必然等于
+        列宽 * 3/4；加载中/await 态媒体框被 max-height 压低，失败卡会塌陷。
+        统一用 offsetHeight/offsetWidth（CSS 像素，不受 .app-chrome 0.9 缩放
+        影响），对已加载/已失败卡直接采用实测高度，仅对仍在加载的媒体框投影
+        到 aspect-ratio 最终高度，避免分发权重在图片解码前后失真造成列失衡。 */
+    function estimateWarehouseDesktopCardHeight(card, colW) {
+      if (!card) return 0;
+      const currentH = card.offsetHeight || 0;
+      if (currentH <= 0) return 0;
+      const media = card.querySelector(':scope > .card-media');
+      if (!media) return currentH;
+      if (media.classList.contains('card-media--load-failed')) return currentH;
+      if (media.classList.contains('is-loading') || media.classList.contains('card-media--await')) {
+        const currentMediaH = media.offsetHeight || 0;
+        return Math.max(1, currentH - currentMediaH + (colW > 0 ? colW * 0.75 : currentMediaH));
+      }
+      return currentH;
+    }
+
+    function distributeWarehouseDesktopCards(container, cols, cardEls, opts) {
+      if (!cardEls?.length) return;
+      if (cols.length === 1) {
+        cardEls.forEach((card) => cols[0].appendChild(card));
+        return;
+      }
+      const gap = (typeof getMasonryGap === 'function' ? getMasonryGap() : 16);
+      const colW = opts?.colW || (typeof getDesktopCardColumnWidth === 'function' ? getDesktopCardColumnWidth() : 0);
+      const loads = warehouseDesktopColumnLoads(cols);
+      let pinnedSeen = [...container.querySelectorAll('.warehouse-desktop-col > .card.is-pinned')].length;
+      cardEls.forEach((card) => {
+        let target = 0;
+        if (card.classList.contains('is-pinned')) {
+          target = pinnedSeen % cols.length;
+          pinnedSeen += 1;
+        } else {
+          let minIdx = 0;
+          for (let i = 1; i < loads.length; i += 1) {
+            if (loads[i] < loads[minIdx]) minIdx = i;
+          }
+          target = minIdx;
+        }
+        cols[target].appendChild(card);
+        loads[target] += estimateWarehouseDesktopCardHeight(card, colW) + gap;
+      });
+    }
+
+    /** 图片在分发后才解码就绪时，列会按最终高度轻微失衡；仅在失衡超过
+        阈值时整列重排（合并多次图片 load 为单次批处理），阈值内保持稳定
+        不移动卡片，避免滚动时反复跳动。 */
+    function maybeRebalanceWarehouseDesktopColumns(container, cols) {
+      if (!cols || cols.length < 2) return;
+      const allCards = [];
+      cols.forEach((col) => {
+        col.querySelectorAll(':scope > .card[data-id]').forEach((card) => allCards.push(card));
+      });
+      if (allCards.length < cols.length * 2) return;
+      const maxCardH = Math.max(...allCards.map((c) => c.offsetHeight || 0));
+      const gap = (typeof getMasonryGap === 'function' ? getMasonryGap() : 16);
+      const threshold = maxCardH * 1.25 + gap;
+      const colW = (typeof getDesktopCardColumnWidth === 'function' ? getDesktopCardColumnWidth() : 0);
+      for (let pass = 0; pass < 2; pass += 1) {
+        const loads = warehouseDesktopColumnLoads(cols);
+        const maxLoad = Math.max(...loads);
+        const minLoad = Math.min(...loads);
+        if (maxLoad - minLoad <= threshold) return;
+        cols.forEach((col) => {
+          while (col.firstElementChild) col.removeChild(col.firstElementChild);
+        });
+        distributeWarehouseDesktopCards(container, cols, allCards, { colW });
+      }
+      const loads = warehouseDesktopColumnLoads(cols);
+      const maxLoad = Math.max(...loads);
+      const minLoad = Math.min(...loads);
+      if (maxLoad - minLoad > threshold * 1.5) {
+        cols.forEach((col) => {
+          while (col.firstElementChild) col.removeChild(col.firstElementChild);
+        });
+        distributeWarehouseDesktopCards(container, cols, allCards, { colW });
+      }
+    }
+
+    function ensureWarehouseDesktopColumns(container) {
+      if (!container || isMobileViewport()) return;
+      const target = Math.max(1, cardColumns);
+      container.querySelectorAll(':scope > .warehouse-mobile-col').forEach((col) => {
+        const frag = document.createDocumentFragment();
+        col.querySelectorAll(':scope > .card[data-id]').forEach((card) => frag.appendChild(card));
+        const sentinel = container.querySelector(':scope > .warehouse-scroll-sentinel');
+        if (sentinel) sentinel.before(frag);
+        else container.appendChild(frag);
+        col.remove();
+      });
+      let cols = [...container.querySelectorAll(':scope > .warehouse-desktop-col')];
+      const directCards = [...container.querySelectorAll(':scope > .card[data-id]')];
+      if (cols.length === target && !directCards.length) {
+        container.classList.add('warehouse-desktop-columns');
+        maybeRebalanceWarehouseDesktopColumns(container, cols);
+        return;
+      }
+      if (cols.length !== target) {
+        const all = [];
+        cols.forEach((col) => {
+          col.querySelectorAll(':scope > .card[data-id]').forEach((card) => all.push(card));
+          col.remove();
+        });
+        all.push(...directCards);
+        cols = [];
+        const sentinel = container.querySelector(':scope > .warehouse-scroll-sentinel');
+        for (let i = 0; i < target; i += 1) {
+          const col = document.createElement('div');
+          col.className = 'warehouse-desktop-col';
+          col.dataset.col = String(i);
+          if (sentinel) sentinel.before(col);
+          else container.appendChild(col);
+          cols.push(col);
+        }
+        distributeWarehouseDesktopCards(container, cols, all);
+      } else {
+        distributeWarehouseDesktopCards(container, cols, directCards);
+      }
+      container.classList.add('warehouse-desktop-columns');
+    }
 
     function layoutMasonryGrid() {
       const container = document.getElementById('cardsContainer');
@@ -181,6 +329,8 @@
           masonryInstance = null;
         }
         container.classList.remove('warehouse-stable-grid');
+        container.querySelectorAll(':scope > .warehouse-desktop-col').forEach((col) => col.remove());
+        container.classList.remove('warehouse-desktop-columns');
         return;
       }
       if (masonryInstance) {
@@ -194,6 +344,7 @@
       resetCardLayoutStyles(container);
       container.classList.add('warehouse-stable-grid', 'masonry-ready', 'cards-grid-primed');
       container.classList.remove('cards-grid-priming');
+      ensureWarehouseDesktopColumns(container);
       if (typeof repositionWarehouseScrollSentinel === 'function') {
         repositionWarehouseScrollSentinel(container);
       }
