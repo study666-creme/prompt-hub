@@ -916,6 +916,7 @@
         return;
       }
       img.dataset.feedLoadDone = '1';
+      img.dataset.feedLastDecoded = srcNow;
       delete img.dataset.feedForceFresh;
       observer?.unobserve(img);
       const cardIdDone = cardIdFromImg(img);
@@ -933,6 +934,22 @@
       const ref = img.getAttribute('data-image-ref');
       const cardId = cardIdFromImg(img);
       const failedUrl = failedUrlOverride || img.currentSrc || img.src || '';
+      // 保图：升级/刷新失败时保留已解码的旧图，不折叠媒体区、不剩纯文字。
+      const keepDecoded = img.dataset.feedLastDecoded;
+      if (
+        keepDecoded
+        && keepDecoded !== failedUrl
+        && !isImgSameDisplayResource(img, keepDecoded)
+        && (img.complete || img.dataset.feedLoadToken)
+      ) {
+        img.onload = null;
+        img.onerror = null;
+        img.dataset.feedLoadDone = '1';
+        delete img.dataset.feedForceFresh;
+        media.classList.remove('card-media--load-failed');
+        img.src = keepDecoded;
+        return;
+      }
       releaseImgOwnedBlobUrl(img);
       const failedPath = window.SupabaseSync?.storagePathFromDisplayUrl?.(failedUrl);
       if (isOwnImageGenRecentImg(img)) {
