@@ -1,6 +1,6 @@
 # Frontend Split Map
 
-Updated: 2026-08-11
+Updated: 2026-08-12
 
 This project still ships classic browser scripts from the site root, but several formerly large files are now thin runtime loaders. The real source is split into ordered chunks so classic script execution order and old global/IIFE behavior stay unchanged.
 
@@ -105,6 +105,14 @@ The browser routes use canonical trailing-slash paths (`/prompts/`, `/generate/`
 ```powershell
 node scripts/build-all-bundles.mjs
 ```
+
+The root `package.json` pins esbuild to an exact version (`0.28.2`, no `^`/`~`) and
+`package-lock.json` locks the esbuild package plus all platform optionals to that same
+version. The lockfile and the exact esbuild version are the bundle source of truth:
+install with `npm ci` and rebuild with `npm run build:all` must reproduce the committed
+`pack-*.js` byte-for-byte (zero drift, clean `git status`). `deploy-pages.ps1` refuses a
+dirty worktree after predeploy for exactly this reason, so never hand-edit generated
+bundles and never build a release with a different esbuild.
 
 ## Bundle Source Modules
 

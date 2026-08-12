@@ -12,7 +12,7 @@
 | `legacy/` | 主应用、功能、同步、后台和资产工作台源码片段 |
 | `styles.css`, `styles-features.css` | CSS loader/入口 |
 | `styles/base/`, `styles/features/` | 拆分 CSS 真源 |
-| `pack-*.js` | esbuild 生产包，由 `scripts/build-*.mjs` 生成并跟踪 |
+| `pack-*.js` | esbuild 生产包，由 `scripts/build-*.mjs` 用根 `package.json`/`package-lock.json` 锁定的精确 esbuild 版本（当前 `0.28.2`，不接受 `^`/`~`）生成并跟踪。锁文件与精确 esbuild 版本是 bundle 真源：发布前必须从干净依赖 `npm ci` 后执行 `npm run build:all` 全量重建，且 `git status` 零漂移 |
 | `scripts/build-pages-runtime.mjs` | Pages staging 合并 loader/片段 |
 | `scripts/stage-pages.ps1` | Pages 允许清单、内联产物与首屏资源完整性门禁 |
 | `deploy-pages.ps1` | 只从无冻结标记、干净 Git SHA 发布 Pages `main` production 分支，并重试线上 HTTP 冒烟 |

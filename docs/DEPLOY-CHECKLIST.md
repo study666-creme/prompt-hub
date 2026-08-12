@@ -1,6 +1,6 @@
 # 部署与验证清单
 
-最后核对：2026-08-06
+最后核对：2026-08-12
 
 ## 当前发布状态
 
@@ -13,6 +13,7 @@
 1. 只在 `D:\prompt-hub` 整理候选，历史树保持只读。
 2. 审查全部改动和未跟踪文件，排除临时截图、缓存、凭据和本地构建产物。
 3. 运行全量验证并创建一个可审查提交；正式发布要求 `git status --porcelain` 为空。
+4. 前端 bundle 真源是根 `package.json`/`package-lock.json` 锁定的精确 esbuild 版本（当前 `0.28.2`，不接受 `^`/`~`）。发布候选必须用 `npm ci` 安装该版本，执行 `npm run build:all` 全量重建，并核对 `git status` 零漂移——任何 esbuild 版本不一致都会让 `deploy-pages.ps1` predeploy 后的 clean-worktree 门禁失败。
 
 ### 2. 核对 New API 前置版本
 
@@ -63,6 +64,8 @@ npm run typecheck
 npm test
 
 cd D:\prompt-hub
+npm run build:all
+# 零漂移硬门槛：构建后 git status --porcelain 必须为空（bundle 与锁定的 esbuild 0.28.2 字节一致）
 npm run check:docs
 npm run check:predeploy
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\stage-pages.ps1
