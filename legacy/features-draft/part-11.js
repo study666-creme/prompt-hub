@@ -3,8 +3,12 @@
     if (!window.PromptHubApi?.getGenerationModels) return false;
     try {
       const r = await window.PromptHubApi.getGenerationModels();
-      if (r?.ok && Array.isArray(r.data?.models) && r.data.models.length) {
-        applyImageGenModelCatalog(r.data.models, {
+      if (r?.ok && r.data && typeof r.data === 'object') {
+        // A trusted live catalog (catalogStale !== true) must become current
+        // even when the projected list is empty, so an omitted model or an
+        // empty catalog never resurrects old options. Stale payloads keep the
+        // last verified LKG.
+        applyImageGenModelCatalog(r.data.models || [], {
           forceRender: isImageGenPageVisible(),
           source: 'api',
           catalogStale: r.data?.catalogStale === true
@@ -677,11 +681,22 @@
 
   function renderImageGenModelSelect(opts = {}) {
     const sel = document.getElementById('imageGenModel');
-    if (!sel || !imageGenModelCatalog.length) return;
+    if (!sel) return;
     sel.disabled = false;
     sel.setAttribute('aria-busy', 'false');
     const draft = loadJson(LS_IMAGEGEN, null);
     const current = opts.modelId || sel.value || normalizeImageGenModelId(draft?.model) || 'image2';
+    if (!imageGenModelCatalog.length) {
+      // Trusted empty catalog: clear any invalid selection and show the
+      // explicit "暂无可用模型" state instead of resurrecting old options.
+      sel.disabled = true;
+      sel.setAttribute('aria-busy', 'false');
+      sel.innerHTML = '<option value="">暂无可用模型</option>';
+      sel.dataset.optionsHtml = '';
+      if (sel.value) sel.value = '';
+      renderImageGenModelPickerOptions();
+      return;
+    }
     imageGenModelFamily = resolveImageGenModelFamily(
       opts.family ?? imageGenModelFamily ?? draft?.modelFamily,
       current
@@ -703,6 +718,7 @@
       sel.setAttribute('aria-busy', 'true');
       sel.innerHTML = '<option value="">暂无可用模型</option>';
       sel.dataset.optionsHtml = '';
+      if (sel.value) sel.value = '';
       renderImageGenModelPickerOptions();
       return;
     }

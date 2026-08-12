@@ -81,10 +81,11 @@ authenticated Worker media proxy before browser-side validation and upload.
 
 ## 媒体入场与占位（2026-08-13 候选）
 
-- 社区与卡片库媒体揭示（`finishCardMediaShine` 置 `media-revealed`）时，每张卡只加一次 `ph-media-enter`：`opacity + translateY(6px) → 1/none`，约 200ms，仅合成属性，不用 blur/glow；`animationend` 后移除类。`data-ph-media-entered="1"` 持久标记保证滚动回屏/虚拟化不重复播放。
+- 社区与卡片库媒体揭示（`finishCardMediaShine` 置 `media-revealed`）时，每张卡只加一次 `ph-media-enter`：`opacity + translateY(6px) → 1/none`，约 200ms，仅合成属性，不用 blur/glow；`animationend` 后移除类。`data-ph-media-entered="1"` 持久标记 + `legacy/script/part-05.js` 的按 card id 去重 Set（`mediaEnteredByCardId`）双重保证滚动回屏/虚拟化/媒体元素重建都不重复播放。
+- 浏览器证据以**自然 `animationstart` 事件**为主：`scripts/verify-media-ux-browser.mjs` 的 `page.addInitScript` 在 document 捕获阶段监听 `animationstart`，只记录 `animationName === 'ph-media-enter'` 并按稳定 media key（card/post/feed id）汇总；普通模式断言至少触发一次且每个 key 最多一次，`prefers-reduced-motion: reduce` 下事件数为 0。人工重新 add class + computed `animationName` 只作辅助证据，不作为主通过标准。
 - `prefers-reduced-motion: reduce` 下 `animation: none`，媒体立即显示最终态。
 - 失败媒体占位（`.card-media--load-failed > .card-media-placeholder`）为固定高度短槽（卡片库桌面 `max-height: 96px`），内部为“图片加载失败”+“重试”按钮，避免大块黑位或 4/3 假大图位造成瀑布流空洞。
-- 浏览器证据：`scripts/verify-media-ux-browser.mjs` 在 1440x900/1024x768/390x844 用本地 fixture（缺图/慢图/正常图混合卡 + 公开模型目录 stub，端口 127.0.0.1:8787）验证瀑布流几何、图片解码与占位、入场动画一次性、reduced-motion 立即显示、目录刷新选择保持、首屏 LCP/CLS/long-task 与 `window.__PH_IMAGE_STATS__`（requests/deduped/failures/timedOut）指标，并保存截图与 trace。`scripts/verify-feed-surfaces-browser.mjs` 用零网络 data-URL fixture 在同一组视口验证最近生成与社区首屏工作图解码渲染、缺图占位且不出现纯文字/黑卡。
+- 浏览器证据：`scripts/verify-media-ux-browser.mjs` 在 1440x900/1024x768/390x844 用本地 fixture（缺图/慢图/正常图混合卡 + 公开模型目录 stub，端口 127.0.0.1:8787）验证瀑布流几何、图片解码与占位、自然 `animationstart` 入场一次性、reduced-motion 事件为 0、目录刷新选择保持、首屏 LCP/CLS/long-task 与 `window.__PH_IMAGE_STATS__`（requests/deduped/failures/timedOut）指标，并保存截图与 trace；移动端 CLS 实测约 0.22 记录为剩余风险，不声称零布局偏移。`scripts/verify-card-image-loader-dedupe-browser.mjs` 用最小本地 HTTP fixture（127.0.0.1:8792）真实载入 `CardImageLoader` 依赖并显式调用 `CardImageLoader.loadImg`，硬断言 requests > 0、deduped > 0、相同 ref 的服务端真实请求数少于对应 DOM img 数、404 显示稳定 placeholder+重试、慢图最终 complete 且 naturalWidth>0。`scripts/verify-feed-surfaces-browser.mjs` 用零网络 data-URL fixture 在同一组视口验证最近生成与社区首屏工作图解码渲染、缺图占位且不出现纯文字/黑卡。
 
 ## 生图列表缩略图预热（2026-08-09）
 
@@ -140,6 +141,14 @@ $env:BROWSER_EXECUTABLE_PATH = '<Chrome or Edge executable>'
 $env:SCREENSHOT_DIR = '<optional screenshot directory>'
 $env:MEDIA_UX_EVIDENCE_FILE = '<optional evidence json>'
 node scripts/verify-media-ux-browser.mjs
+```
+
+图片加载器去重/失败占位/慢图浏览器证据（最小本地 HTTP fixture）：
+
+```powershell
+$env:PLAYWRIGHT_PACKAGE_DIR = '<playwright package directory>'
+$env:BROWSER_EXECUTABLE_PATH = '<Chrome or Edge executable>'
+node scripts/verify-card-image-loader-dedupe-browser.mjs
 ```
 
 最近生成 + 社区首屏媒体（工作图解码渲染、缺图占位、无黑卡/纯文字）三视口浏览器证据：

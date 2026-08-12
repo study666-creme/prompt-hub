@@ -717,13 +717,18 @@
       );
       if (res.ok && res.data) {
         const models = projectGenerationModels(res.data.models);
-        // A live response that omits every model (stale upstream) must not
-        // replace a known-good warm catalog with an empty one.
-        if (models.length || !modelsCache) {
-          modelsCache = { models, catalogStale: res.data?.catalogStale === true };
+        const isStale = res.data?.catalogStale === true;
+        // A trusted live payload (catalogStale !== true) always becomes the
+        // current catalog, even when the projected list is empty — it must
+        // override any previously verified memory cache and the persisted
+        // catalog so an omitted model or empty catalog never resurrects.
+        // Only an explicit stale marker or a failed request may keep the last
+        // verified LKG.
+        if (!isStale || !modelsCache) {
+          modelsCache = { models, catalogStale: isStale };
           modelsCacheExp = Date.now() + 120_000;
         }
-        if (models.length) {
+        if (!isStale) {
           try {
             localStorage.setItem(
               'promptrepo_imagegen_models_cache_v4',

@@ -236,6 +236,10 @@
       }, ms);
     }
 
+    /** 每张卡（稳定 card id）只入场一次：即使 media 元素被重建/软刷新，
+        也保证 ph-media-enter 动画每张卡最多播放一次（滚动回屏/虚拟化不重复）。 */
+    const mediaEnteredByCardId = new Set();
+
     function finishCardMediaShine(media) {
       if (!media) return;
       const igMedia = media.classList?.contains('imagegen-feed-media')
@@ -294,11 +298,19 @@
         if (!alreadyRevealed) {
           media.classList.remove('media-shine-reveal');
           void media.offsetWidth;
-          // 克制入场：每张卡只播一次，滚动回屏不重复（mediaRevealKey 已去重）。
+          // 克制入场：每张卡只播一次，滚动回屏/虚拟化/媒体重建都不重复。
+          // media 元素上的标记防止同一元素重播；Set 按稳定 card id 防止
+          // 元素被重建后再次入场（配合自然 animationstart 浏览器证据）。
           if (media.dataset.phMediaEntered !== '1') {
             media.dataset.phMediaEntered = '1';
-            media.classList.add('ph-media-enter');
-            media.addEventListener('animationend', () => media.classList.remove('ph-media-enter'), { once: true });
+            const enterCardId = cardEl?.dataset?.id || cardEl?.dataset?.postId || '';
+            if (enterCardId && mediaEnteredByCardId.has(enterCardId)) {
+              media.classList.remove('ph-media-enter');
+            } else {
+              if (enterCardId) mediaEnteredByCardId.add(enterCardId);
+              media.classList.add('ph-media-enter');
+              media.addEventListener('animationend', () => media.classList.remove('ph-media-enter'), { once: true });
+            }
           }
         }
         if (!alreadyRevealed && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {

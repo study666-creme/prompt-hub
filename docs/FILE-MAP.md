@@ -104,7 +104,7 @@ slot.
 
 桌面网格使用紧凑瀑布流：`legacy/script/part-03.js` 的 `ensureWarehouseDesktopColumns` 把卡片按最短列贪心分发进 `styles/base/part-09.css` 定义的 `.warehouse-desktop-col` 弹性列（非绝对定位、列内 flex 堆叠、列内间隙恒等于 gap），避免媒体框 `aspect-ratio` 在图片解码前把行高缩到文字卡 min-content 高度导致视觉卡重叠，也不再用整行 `max-content` 撑高抹掉瀑布流错落。`scripts/verify-warehouse-card-layout-browser.mjs` 用 192/816 张混合卡在 1440x900、1024x768、390x844 视口翻完分页后断言零重叠、零横向溢出、关键控件可达、列内间隙≈gap 且相邻列高差有界，并覆盖网格/列表视图与 1..5 列切换；宽度/侧栏变化后等瀑布流重排与图片解码稳定再测量。
 
-2026-08-13 候选新增：`legacy/script/part-04.js` 的 `finalizeWarehouseCardMediaFailure` 改为保留稳定媒体占位与可重试按钮（`.card-media--load-failed > .card-media-placeholder`，`styles/base/part-04.css`），瞬时失败不再写 24h missing；`legacy/script/part-05.js` 的 `finishCardMediaShine` 对每张卡只播放一次 `ph-media-enter`（opacity+transform，约 200ms，`prefers-reduced-motion` 下立即显示）；移动端两列容器加 `overflow-x: clip`（`styles-assets.css`）。媒体 UX 证据由 `scripts/verify-media-ux-browser.mjs` 采集（瀑布流几何、占位、一次性入场、reduced-motion、首屏 LCP 与 `window.__PH_IMAGE_STATS__`）。
+2026-08-13 候选新增：`legacy/script/part-04.js` 的 `finalizeWarehouseCardMediaFailure` 改为保留稳定媒体占位与可重试按钮（`.card-media--load-failed > .card-media-placeholder`，`styles/base/part-04.css`），瞬时失败不再写 24h missing；`legacy/script/part-05.js` 的 `finishCardMediaShine` 对每张卡只播放一次 `ph-media-enter`（opacity+transform，约 200ms，`prefers-reduced-motion` 下立即显示；`mediaEnteredByCardId` 按 card id 去重，媒体重建也不重播）。媒体 UX 证据由 `scripts/verify-media-ux-browser.mjs` 采集（瀑布流几何、占位、自然 `animationstart` 入场一次性、reduced-motion 事件为 0、首屏 LCP/CLS/long-task 与 `window.__PH_IMAGE_STATS__`），加载器去重/占位/慢图证据由 `scripts/verify-card-image-loader-dedupe-browser.mjs` 采集。
 
 ## 修改原则
 

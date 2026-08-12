@@ -926,8 +926,9 @@
   }
 
   function applyImageGenModelCatalog(models, opts = {}) {
-    if (!Array.isArray(models) || !models.length) return false;
+    if (!Array.isArray(models)) return false;
     const source = opts.source || 'api';
+    const trustedLive = source === 'api' && opts.catalogStale !== true;
     const updateStaleHint = () => {
       if (typeof document === 'undefined') return;
       const hint = document.getElementById('imageGenCatalogStaleHint');
@@ -946,10 +947,11 @@
       .filter(Boolean)
       .filter((m) => !RETIRED_IMAGE_GEN_MODEL_IDS.has(m.id))
       .filter((m) => m.status !== 'offline');
-    // Never let an empty/fully-hidden live payload wipe a good catalog. Keep
-    // the last known-good list and surface the stale state instead so the
-    // picker never falls back to "选择模型".
-    if (!filtered.length && imageGenModelCatalog.length) {
+    // Only a stale or failed catalog may keep the last known-good list. A
+    // trusted live payload (source=api, catalogStale !== true) always becomes
+    // the current catalog — an empty or fully-hidden live list must clear the
+    // picker instead of resurrecting old models from the fallback or cache.
+    if (!filtered.length && imageGenModelCatalog.length && !trustedLive) {
       imageGenModelCatalogStale = true;
       window.__IMAGE_GEN_MODELS__ = imageGenModelCatalog;
       window.__IMAGE_GEN_CATALOG_STALE__ = true;
@@ -964,6 +966,8 @@
     window.__IMAGE_GEN_CATALOG_STALE__ = imageGenModelCatalogStale;
     window.__IMAGE_GEN_CATALOG_SOURCE__ = source;
     if (source === 'api') {
+      // Trusted live catalogs persist at the same cache version, including an
+      // empty list that must overwrite any previously cached model catalog.
       persistCachedImageGenModels(imageGenModelCatalog);
     }
     imageGenModelCatalogReady = true;
