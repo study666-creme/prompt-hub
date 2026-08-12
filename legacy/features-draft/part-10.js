@@ -594,7 +594,7 @@
     bindImageGenModelFamilyTabs();
     if (!imageGenModelCatalog.length) {
       const cached = loadCachedImageGenModels();
-      if (cached?.length) {
+      if (cached) {
         applyImageGenModelCatalog(cached, { forceRender: true, source: 'cache' });
       } else {
         applyImageGenModelCatalog(IMAGE_GEN_MODEL_FALLBACK, { forceRender: true, source: 'fallback' });
@@ -829,9 +829,11 @@
   function loadCachedImageGenModels() {
     try {
       const raw = JSON.parse(localStorage.getItem(LS_IMAGEGEN_MODELS) || 'null');
-      if (!raw?.models?.length) return null;
+      if (!raw || !Array.isArray(raw.models)) return null;
       if (Number(raw.version) < IMAGE_GEN_CATALOG_CACHE_VERSION) return null;
       if (raw.ts < Date.now() - 7 * 24 * 3600 * 1000) return null;
+      // 同版本空数组是上一次可信成功响应核验过的“空目录”，不是缺失缓存。
+      // 返回空数组让 reload 后应用空目录，避免 IMAGE_GEN_MODEL_FALLBACK 复活旧模型。
       return raw.models;
     } catch (e) { /* ignore */ }
     return null;
@@ -965,9 +967,9 @@
     imageGenModelCatalogStale = source !== 'api' || opts.catalogStale === true;
     window.__IMAGE_GEN_CATALOG_STALE__ = imageGenModelCatalogStale;
     window.__IMAGE_GEN_CATALOG_SOURCE__ = source;
-    if (source === 'api') {
-      // Trusted live catalogs persist at the same cache version, including an
-      // empty list that must overwrite any previously cached model catalog.
+    if (trustedLive) {
+      // 只有可信成功响应可以覆盖持久化缓存（包括用空数组清除旧目录）；
+      // catalogStale=true / 失败路径绝不覆盖已核验的 LKG。
       persistCachedImageGenModels(imageGenModelCatalog);
     }
     imageGenModelCatalogReady = true;
@@ -986,7 +988,7 @@
   function warmImageGenModelCatalog() {
     if (imageGenModelCatalog.length) return true;
     const cached = loadCachedImageGenModels();
-    if (cached?.length) {
+    if (cached) {
       return applyImageGenModelCatalog(cached, { renderUi: false, source: 'cache' });
     }
     return applyImageGenModelCatalog(IMAGE_GEN_MODEL_FALLBACK, { renderUi: false, source: 'fallback' });

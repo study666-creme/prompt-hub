@@ -355,7 +355,7 @@ assert(
 );
 const staleEmptyPersisted = JSON.parse(staleEmptyLive.storage.get(cacheKey) || 'null');
 assert(
-  staleEmptyPersisted?.models?.length > 0,
+  (staleEmptyPersisted?.models || []).map((model) => model.id).join(',') === 'image2,image2-4k-fast',
   'catalogStale=true empty payload must not wipe the persisted LKG'
 );
 
@@ -366,6 +366,163 @@ const failedLive = await generationModelsLive({
 assert(
   failedLive.result.ok === true && (failedLive.result.data?.models || []).length > 0,
   'a failed request must keep the last verified LKG'
+);
+
+// ===== Cross-reload: a persisted same-version trusted-empty cache must be
+// recognized as a verified empty catalog on the next boot and must never fall
+// back to IMAGE_GEN_MODEL_FALLBACK (which would resurrect image2-economy). =====
+
+const reloadEmptyCache = await generationModelsLive({
+  storage: new Map([[cacheKey, JSON.stringify({ ts: Date.now(), version: expectedVersion, models: [] })]]),
+  fetchImpl: async () => { throw new Error('network down'); }
+});
+assert(
+  reloadEmptyCache.result.ok === true,
+  'reload with a trusted-empty cache must return the verified empty catalog when the live request is unavailable'
+);
+assert(
+  Array.isArray(reloadEmptyCache.result.data?.models) && reloadEmptyCache.result.data.models.length === 0,
+  'reload must warm the persisted empty cache as the verified LKG (not treat it as missing)'
+);
+
+const cacheLoadSource = extractBetween(
+  featureCatalog,
+  '  function loadCachedImageGenModels() {',
+  '\n\n  function persistCachedImageGenModels(models) {'
+);
+const warmCatalogSource = extractBetween(
+  featureCatalog,
+  '  function warmImageGenModelCatalog() {',
+  '\n\n  let imageGenModelCatalogFetchPromise = null;'
+);
+const initEmptyBranchSource = extractBetween(
+  featureCatalog,
+  '    if (!imageGenModelCatalog.length) {\n      const cached = loadCachedImageGenModels();',
+  '\n    void prefetchImageGenModelCatalog().then(() => {'
+);
+
+const emptyCacheStorage = () => ({
+  getItem: () => JSON.stringify({ ts: Date.now(), version: expectedVersion, models: [] }),
+  setItem: () => {}
+});
+
+const emptyCacheReloadContext = { window: {}, localStorage: emptyCacheStorage(), Date, JSON };
+emptyCacheReloadContext.globalThis = emptyCacheReloadContext;
+vm.runInNewContext(`
+  let imageGenModelCatalog = [];
+  const LS_IMAGEGEN_MODELS = ${JSON.stringify(cacheKey)};
+  const IMAGE_GEN_CATALOG_CACHE_VERSION = ${expectedVersion};
+  const IMAGE_GEN_MODEL_FALLBACK = [{ id: 'image2-economy', label: 'fallback' }];
+  let applyCalls = [];
+  function applyImageGenModelCatalog(models, opts) {
+    applyCalls.push({ models: models.slice(), source: opts.source || '' });
+    return true;
+  }
+${cacheLoadSource}
+${warmCatalogSource}
+  const loaded = loadCachedImageGenModels();
+  warmImageGenModelCatalog();
+  globalThis.__result = { loaded: loaded.slice(), applyCalls };
+`, emptyCacheReloadContext, { filename: 'imagegen-catalog-reload-empty.vm.js' });
+assert(
+  Array.isArray(emptyCacheReloadContext.__result.loaded) && emptyCacheReloadContext.__result.loaded.length === 0,
+  'loadCachedImageGenModels must recognize a same-version empty cache on reload'
+);
+assert(
+  emptyCacheReloadContext.__result.applyCalls.length === 1 && emptyCacheReloadContext.__result.applyCalls[0].source === 'cache',
+  'reload must apply the cached empty catalog from the cache source'
+);
+assert(
+  Array.isArray(emptyCacheReloadContext.__result.applyCalls[0].models) && emptyCacheReloadContext.__result.applyCalls[0].models.length === 0,
+  'reload must apply the empty catalog, not the fallback'
+);
+assert(
+  !emptyCacheReloadContext.__result.applyCalls.some((call) => call.source === 'fallback'),
+  'fallback must not be used after a trusted-empty cache reload'
+);
+
+const noCacheReloadContext = { window: {}, localStorage: { getItem: () => null, setItem: () => {} }, Date, JSON };
+noCacheReloadContext.globalThis = noCacheReloadContext;
+vm.runInNewContext(`
+  let imageGenModelCatalog = [];
+  const LS_IMAGEGEN_MODELS = ${JSON.stringify(cacheKey)};
+  const IMAGE_GEN_CATALOG_CACHE_VERSION = ${expectedVersion};
+  const IMAGE_GEN_MODEL_FALLBACK = [{ id: 'image2-economy', label: 'fallback' }];
+  let applyCalls = [];
+  function applyImageGenModelCatalog(models, opts) {
+    applyCalls.push({ models: models.slice(), source: opts.source || '' });
+    return true;
+  }
+${cacheLoadSource}
+${warmCatalogSource}
+  const loaded = loadCachedImageGenModels();
+  warmImageGenModelCatalog();
+  globalThis.__result = { loaded, applyCalls };
+`, noCacheReloadContext, { filename: 'imagegen-catalog-reload-missing.vm.js' });
+assert(
+  noCacheReloadContext.__result.loaded === null,
+  'an absent cache must still report no cached catalog'
+);
+assert(
+  noCacheReloadContext.__result.applyCalls.some((call) => call.source === 'fallback'),
+  'without any cached catalog the boot fallback may be used'
+);
+
+const initReloadContext = { window: {}, localStorage: emptyCacheStorage(), Date, JSON };
+initReloadContext.globalThis = initReloadContext;
+vm.runInNewContext(`
+  let imageGenModelCatalog = [];
+  const LS_IMAGEGEN_MODELS = ${JSON.stringify(cacheKey)};
+  const IMAGE_GEN_CATALOG_CACHE_VERSION = ${expectedVersion};
+  const IMAGE_GEN_MODEL_FALLBACK = [{ id: 'image2-economy', label: 'fallback' }];
+  let applyCalls = [];
+  function applyImageGenModelCatalog(models, opts) {
+    applyCalls.push({ models: models.slice(), source: opts.source || '' });
+    return true;
+  }
+  function setImageGenModelSelectLoading() {}
+  function rebuildImageGenModelFamilyTabs() {}
+  function renderImageGenModelSelect() {}
+  function flushImageGenModelUiRefresh() {}
+${cacheLoadSource}
+${initEmptyBranchSource}
+  globalThis.__result = { applyCalls };
+`, initReloadContext, { filename: 'imagegen-catalog-init-empty.vm.js' });
+assert(
+  initReloadContext.__result.applyCalls.length === 1 && initReloadContext.__result.applyCalls[0].source === 'cache',
+  'initImageGenForm must apply the cached empty catalog, not the fallback'
+);
+assert(
+  Array.isArray(initReloadContext.__result.applyCalls[0].models) && initReloadContext.__result.applyCalls[0].models.length === 0,
+  'initImageGenForm must apply the empty catalog after a trusted-empty reload'
+);
+
+// catalogStale=true payloads (even non-empty, e.g. bootstrap) must never
+// overwrite the persisted LKG — only trusted live payloads may persist.
+const stalePersistContext = { window: {} };
+stalePersistContext.globalThis = stalePersistContext;
+vm.runInNewContext(`
+  let imageGenModelCatalog = [
+    { id: 'image2', status: 'active' },
+    { id: 'image2-4k-fast', status: 'active' }
+  ];
+  let imageGenModelCatalogStale = false;
+  let imageGenModelCatalogReady = false;
+  function normalizeImageGenModelEntry(model) { return model; }
+  const RETIRED_IMAGE_GEN_MODEL_IDS = new Set(['image2-free']);
+  function invalidateImageGenFamilyCache() {}
+  function persistCachedImageGenModels(models) { globalThis.persistedCatalog = models; }
+  function isImageGenPageVisible() { return false; }
+  function setImageGenModelSelectLoading() {}
+  function rebuildImageGenModelFamilyTabs() {}
+  function renderImageGenModelSelect() {}
+  function flushImageGenModelUiRefresh() {}
+${applyCatalog}
+  applyImageGenModelCatalog([{ id: 'image2', status: 'active' }], { source: 'api', catalogStale: true, renderUi: false });
+`, stalePersistContext, { filename: 'imagegen-catalog-stale-nonempty.vm.js' });
+assert(
+  stalePersistContext.persistedCatalog === undefined,
+  'catalogStale=true payloads (even non-empty) must never overwrite the persisted LKG'
 );
 
 // Picker selection: after an omission catalog, image2-economy is removed and

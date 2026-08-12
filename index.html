@@ -192,13 +192,15 @@
       function readCache() {
         try {
           var raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v4') || 'null');
-          if (!raw || !raw.models || !raw.models.length) return null;
+          if (!raw || !Array.isArray(raw.models)) return null;
           if (raw.ts < Date.now() - 86400000) return null;
           if (Number(raw.version) < 20) return null;
           var models = raw.models.filter(function (model) {
             return model && !isRetired(model);
           });
-          return models.length ? models : null;
+          // 同版本空数组是已核验的空目录：返回空数组（truthy），不落到 FALLBACK，
+          // 避免 reload 首屏把 image2-economy 之类旧模型画回选择器。
+          return models;
         } catch (e) { return null; }
       }
       document.addEventListener('DOMContentLoaded', function () {

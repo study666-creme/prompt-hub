@@ -699,7 +699,7 @@
     modelsInflight = (async () => {
       try {
         const raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v4') || 'null');
-        if (raw?.models?.length && Number(raw.version) >= IMAGE_GEN_CATALOG_CACHE_VERSION && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
+        if (raw && Array.isArray(raw.models) && Number(raw.version) >= IMAGE_GEN_CATALOG_CACHE_VERSION && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
           const models = projectGenerationModels(raw.models);
           modelsCache = { models, catalogStale: true };
           modelsCacheExp = Date.now() + 45_000;
