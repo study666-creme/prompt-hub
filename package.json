@@ -16,6 +16,6 @@
     "check-predeploy": "node scripts/run-predeploy-smoke.mjs"
   },
   "devDependencies": {
-    "esbuild": "^0.25.5"
+    "esbuild": "0.28.2"
   }
 }
