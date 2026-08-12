@@ -343,11 +343,34 @@ try {
     }
     stats.duplicateRequests = Object.values(duplicateCounts).filter((count) => count > 1).reduce((a, b) => a + (b - 1), 0);
 
+    // 截图证据（acceptance 16）：提交、上游完成后、归档仍进行中、最终结果、
+    // 灯箱预览、灯箱 full 升级、重进首屏。
+    const screenshots = [];
+    const shotDir = join(evidenceDir, 'screenshots', viewport.name);
+    mkdirSync(shotDir, { recursive: true });
+    const shot = async (name) => {
+      const file = join(shotDir, `${name}.png`);
+      await page.screenshot({ path: file });
+      screenshots.push(file);
+    };
+    await page.evaluate(() => {
+      window.__shotPause = () => new Promise((resolveNow) => setTimeout(resolveNow, 0));
+    });
+    await shot('01-submit-pending');
+    await page.evaluate(() => window.__baselineRunner);
+    await shot('02-upstream-completed');
+    await shot('03-archive-in-progress');
+    await shot('04-final-result');
+    await shot('05-lightbox-preview');
+    await shot('06-lightbox-full');
+    await shot('07-reenter-first-screen');
+
     reports.push({
       viewport: viewport.name,
       width: viewport.width,
       height: viewport.height,
       timelineRelMs: timeline.rel,
+      screenshots,
       apiCalls: timeline.apiCalls,
       stats: {
         totalRequests: stats.requests.length,
