@@ -1,6 +1,6 @@
 # 运营监控
 
-最后核对：2026-08-08。生产 Worker `buildSha=ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；运行版本继续以 `/health.buildSha` 为准。
+最后核对：2026-08-12。生产 Worker `buildSha=ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；运行版本继续以 `/health.buildSha` 为准。
 
 ## 入口
 
@@ -21,6 +21,18 @@
 - 前端正常按秒 poll；cron 每 2 分钟兜底推进 submit、poll 和 archive。
 - 关注 `queued` 堆积、`running` / `outcome_unknown` 超过 1 小时、`refund_pending`、归档失败和图片 404。
 - 上游已完成但本地归档未完成时应继续给客户端临时图，不能重新生成。
+
+### 生图交付阶段指标（2026-08-12 候选）
+
+`/api/admin/dashboard/monitoring` 的 `delivery` 字段按小时汇总 `recordGenerationMetric`：
+
+- `upstream_completed`：上游状态接口返回 completed（含可显示 URL）的次数与上游耗时。
+- `archive`：后台归档成功/失败次数与耗时（`archive:fail` 单独计数）。
+- `grid`：服务端 `_grid` 预热结果（默认 `GRID_WARM_ENABLED` 关闭时不产生）。
+- `mj_gallery_sync`：MJ 四宫格/单图同步成功/失败次数与耗时。
+- `image_404` / `image_timeout`：受保护单图读取返回权威 404 或上游拉取超时。
+
+只记录计数与耗时；绝不记录提示词、私有图片 URL、Cookie、Token 或用户媒体。`completed-to-visible`、`decode`、`lightbox-full` 等纯客户端阶段由 `scripts/capture-imagegen-experience-baseline.mjs` 的确定性时间线记录（Mock API、免付费），不在服务端上送。
 
 ### 视频
 

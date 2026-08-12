@@ -1,6 +1,6 @@
 # 列表图片加载
 
-复核日期：2026-08-11。下述仓库 UI 对应已上线的 `20260803a` 生图媒体可靠性；生产资源以线上 build 和资源 HTTP 冒烟为准。桌面卡片库紧凑瀑布流与几何回归（`.warehouse-desktop-col` 分列布局、`scripts/verify-warehouse-card-layout-browser.mjs`）为本任务（TASK-20260811-PROMPT-WAREHOUSE-MASONRY-RESTORE-001）新增，属于未部署候选行为；生产基线 `91d654e` 仍是整行按最高卡统一撑开的普通行式 Grid。
+复核日期：2026-08-12。下述仓库 UI 对应已上线的 `20260803a` 生图媒体可靠性；生产资源以线上 build 和资源 HTTP 冒烟为准。桌面卡片库紧凑瀑布流与几何回归（`.warehouse-desktop-col` 分列布局、`scripts/verify-warehouse-card-layout-browser.mjs`）为本任务（TASK-20260811-PROMPT-WAREHOUSE-MASONRY-RESTORE-001）新增，属于未部署候选行为；生产基线 `91d654e` 仍是整行按最高卡统一撑开的普通行式 Grid。生图交付链路候选（TASK-20260812-PROMPT-IMAGEGEN-EXPERIENCE-P0-001）：临时图先展示、后台归档、最近首屏分页、灯箱渐进升级与交付监控指标，均为未部署候选行为。
 
 ## 目标
 
@@ -71,11 +71,18 @@ authenticated Worker media proxy before browser-side validation and upload.
 4. 纯文字卡片不渲染图片占位符。生成任务 ID、来源 ID 或生图标签本身不构成图片引用。
 5. 只有对象确实存在但缺 grid 时才生成缩略图。
 6. 失败的近期生成/生图仓库媒体只移除失败的媒体槽并保留文字卡，避免黑色方块和浏览器破图图标；不会删除卡片或原始引用。只有现有权威 404/410 清理路径可以移除确实不存在的近期记录，其他错误继续保留数据并按有限恢复链处理。
+7. **保图（2026-08-12 候选）**：图片加载器在升级/刷新失败时保留最后一次已解码的图片（`img.dataset.feedLastDecoded`），只恢复仍指向旧临时 URL 的引用，不折叠媒体区、不剩纯文字；首次加载即失败（无任何已解码图）仍按上面第 6 条折叠。这样“已有可见图不被失败升级替换掉”。
 
 ## 生图列表缩略图预热（2026-08-09）
 
 - Worker 无 Canvas 且 MemFire 不支持 `render/image` 变换，`_grid` 无法在服务端生成；改为**浏览器端生成**：`finishImageGenRun` 归档成功后，`uploadGeneratedGridThumb` 用 `ImageGenRefCompress.compressRefImageFromSource(640px JPEG, crossOrigin)` 压缩原图，经 `/api/v1/media/upload` 上传为 `{user}/generated/{job}_grid.jpg`，失败静默。
 - 上传成功后 `WarehouseThumb.invalidateGridCache` 清除本地缓存，feed 重新解析立即命中 R2 上的 `_grid`（签名 ~0.7s、约 60KB），不再触发服务端现场生成或加载 full 原图。
+
+## 最近首屏分页与灯箱渐进升级（2026-08-12 候选）
+
+- `GET /api/v1/generate/jobs/recent` 新增 `offset` 分页；客户端 `syncRecentCreationsFromServer` 先拉默认 12 条快速合并渲染，随后在后台拉取剩余批次并与本地最近缓存合并，刷新/重新进入不再等待 200 条记录及其所有图片逐条存在性检查后才渲染。
+- 灯箱（`app-lightbox.js`）打开时立即显示当前已解码缩略图/临时图，不先清空 `src` 再等 full；full 原图在后台预加载并 `decode()` 成功后才原子替换，失败继续显示预览图；上游临时图不再因 `crossOrigin` 失败而重复下载同一大图。
+- 生图交付故障矩阵、性能预算与时间线基线：`scripts/verify-imagegen-experience-fault-matrix.mjs`、`scripts/verify-imagegen-performance-budget.mjs`、`scripts/capture-imagegen-experience-baseline.mjs`（1440x900 / 390x844，Mock API，免付费）。
 
 ## 验收
 

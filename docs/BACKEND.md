@@ -1,6 +1,6 @@
 # Worker 后端架构
 
-最后核对：2026-08-09。生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；运行版本以 `/health.buildSha` 为准。本次发布保留独立视频 Key，并修复视频音轨参数转发与提交阶段日志。
+最后核对：2026-08-12。生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；运行版本以 `/health.buildSha` 为准。本次发布保留独立视频 Key，并修复视频音轨参数转发与提交阶段日志。
 
 Canvas 媒体交付候选（2026-08-08）已提交到 `codex/unified-media-delivery-20260808` 并通过本地回归，但尚未部署；它包含媒体归档迁移，需单独完成数据库备份、迁移授权和生产验收。
 
@@ -179,9 +179,16 @@ npm run deploy:dry-run
 
 - 生产 Worker 无 Canvas 且 MemFire 不支持 `render/image`，**服务端缩略图生成恒失败**；`_grid` 由浏览器端生成上传（`finishImageGenRun` → `uploadGeneratedGridThumb`，640px JPEG 经 `/api/v1/media/upload` 写入 R2，失败静默）。
 - 服务端预热 `warmJobGridImage` **默认关闭**（`GRID_WARM_ENABLED` 未设或非 `"1"` 时直接返回），避免每个完成任务空耗一次原图下载；重新启用只需设置 `GRID_WARM_ENABLED=1`。
-- `GET /api/v1/generate/jobs/recent` 的列表图片优先签名 R2 中已存在的 `_grid` 缩略图（快速存在性检查，不触发现场生成）；`_grid` 不存在时签名原图。
+- `GET /api/v1/generate/jobs/recent` 的列表图片优先签名 R2 中已存在的 `_grid` 缩略图（快速存在性检查，不触发现场生成）；`_grid` 不存在时签名原图。新增 `offset` 分页参数（2026-08-12），客户端默认首屏 12 条，刷新/重新进入不再等待 200 条记录及其全部图片逐条存在性检查后才渲染；单个坏图返回 `null` 只丢弃该条，不阻塞整批。
 - `ensureGridPathForSigning` 在缩略图现场生成失败时降级返回已确认存在的原图路径，绝不返回不存在的 `_grid` 签名 URL；`requireExistingPrimary` 时仍按原契约抛 `NOT_FOUND` / `GRID_UNAVAILABLE`。
 - 归档下载重试退避从 `400ms × attempt` 调整为 `1200ms × attempt`：New API 图片代理（`console.prompt-hubs.com`，Cloudflare 边缘 → 源站）偶发瞬时 502，较长的退避让重试落在上游临时图 token 仍有效的窗口内；归档仍受 `maxAttempts` 上限约束，不属于付费操作重试。
+
+### 首张可见结果不等待归档（2026-08-12 候选）
+
+- `GET /api/v1/generate/jobs/:jobId?settle=1`、`GET /jobs/:jobId/image`、`GET /media/generation/:jobId/url` 在任务仍指向上游临时 URL 时，**先返回该 URL，归档在 `executionCtx.waitUntil` 后台执行**，不再串行等待 `archivePendingJobImage`/R2 存在性检查/整批 URL 签名后才回包。
+- MJ 四宫格/单图同步（`syncMjImagesFromUpstream`）同样改为后台 `waitUntil`；响应直接用任务已有 meta 中的 composite + 四格 tiles。
+- 已完成但缺可显示 URL 的行保持可恢复（poll 仍可推进），不会返回“completed 但无图”的坏卡片，也不会无限空转。
+- 生图交付阶段监控（`monitoring.ts` 的 `recordGenerationMetric`）：区分 `upstream_completed`、`archive`、`grid`、`mj_gallery_sync`、`image_404`、`image_timeout`，只记计数与耗时，不记录提示词、私有图片 URL、Cookie 或 Token；汇总经 `/api/admin/dashboard/monitoring` 的 `delivery` 字段暴露。
 
 ## Generation Delivery Contract (2026-08-03)
 

@@ -4,6 +4,8 @@
 
 Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery-20260808` 的媒体归档和恢复改动已提交并通过本地回归，尚未部署或执行付费验收；生产仍以 `/health.buildSha` 为准。
 
+生图交付体验候选（2026-08-12）：`TASK-20260812-PROMPT-IMAGEGEN-EXPERIENCE-P0-001` 分支把生图交付改为“临时图先展示、后台归档”，最近首屏分页（默认 12 条 + offset）、MJ action/批量合并去同步归档阻塞、灯箱渐进升级、图片加载器保图、轮询/恢复去重与交付监控指标已提交并通过本地回归，尚未部署或执行付费验收；生产仍以 `/health.buildSha` 为准。
+
 ## 最小阅读顺序
 
 1. `PROJECT_CONTEXT.md`: 线上拓扑和当前 build。

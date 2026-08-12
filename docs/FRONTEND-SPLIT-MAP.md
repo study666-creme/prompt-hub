@@ -175,3 +175,30 @@ The first six recent thumbnails are eager (the first four high priority), and
 paginated cards are inserted before the recent-feed footer so that the footer
 cannot split the image grid. The Grid guard observes direct child insertion
 only; image attribute changes must not rescan every feed card.
+
+## Generation Delivery Experience (2026-08-12 candidate)
+
+- `imagegen-poll-warehouse.js` appends MJ action / batch-merge results with the
+  temporary upstream URL first and archives in the background
+  (`archiveGalleryRefInBackground`); the background archive only atomically
+  replaces refs still pointing at the old URL, so a card the user switched to is
+  never overwritten and an 8s/failed archive never delays the visible result.
+- `legacy/features-draft/part-03.js` `syncRecentCreationsFromServer` fetches the
+  first 12 records (`limit=12&offset=0`) and merges/renders them before pulling
+  the remainder in the background and merging; `api-client.js`
+  `listRecentGeneratedCreations` passes `offset` through to
+  `GET /jobs/recent`.
+- `imagegen-job-runner.js` adds a network-recovery (`online`) merged refresh and
+  keeps the first poll immediate; `imagegen-gen-errors.js` probes active short
+  jobs around 1s.
+- `app-lightbox.js` shows the decoded preview immediately, preloads + decodes
+  the full image before an atomic no-flash upgrade, and keeps the preview when
+  the upgrade fails; ephemeral upstream images are not re-downloaded for
+  crossOrigin retries.
+- `card-image-loader.js` keeps the last decoded image when an upgrade/refresh
+  fails (`feedLastDecoded`) instead of collapsing the media slot.
+- Local free regression harnesses: `verify-imagegen-experience-fault-matrix.mjs`,
+  `verify-imagegen-performance-budget.mjs`, and
+  `capture-imagegen-experience-baseline.mjs` (1440x900 / 390x844 timelines).
+  Rebuild packs with `node scripts/build-all-bundles.mjs` after changing any of
+  these sources.

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-12（未部署候选）
+
+- 生图交付链路改为“临时图先展示、归档后台化”：MJ action 放大/变体、同提示词批量合并不再被同步归档阻塞，归档完成后只原子替换仍指向旧临时 URL 的引用，不覆盖用户已切换的图；Worker 的 settle/单图读取/MJ 图库同步也不再在任何首张可见结果之前串行归档。
+- 最近生成首屏改为分页拉取：客户端先拉默认 12 条快速合并渲染，随后在后台分批拉取剩余并与本地缓存合并；`GET /jobs/recent` 新增 `offset` 分页，单个坏图不阻塞整批。
+- 图片加载器在升级/刷新失败时保留已解码旧图，不再把媒体区折叠成纯文字或黑卡；灯箱先显示已解码缩略图/临时图，full 原图在后台预加载并 decode 成功后才无闪黑原子升级，失败继续显示预览。
+- 生图轮询与恢复合并去重：可见页面首次 poll 立即执行、活跃短任务约 1 秒级探测、网络恢复（online）与页面恢复做一次合并刷新，禁止多个恢复入口为同一 job 启动并行轮询风暴。
+- 新增生图交付阶段监控指标（upstream_completed / archive / grid / mj_gallery_sync / image_404 / image_timeout），只记计数与耗时，不记录提示词、私有图片 URL、Cookie 或 Token。
+- 新增本地免付费回归：`verify-imagegen-experience-fault-matrix`、`verify-imagegen-performance-budget`、`capture-imagegen-experience-baseline`（1440x900 / 390x844 时间线与请求统计）。
+
 ## 2026-08-11（未部署候选）
 
 - 恢复卡片仓库桌面网格的真正紧凑瀑布流：卡片按最短列贪心分发进 `.warehouse-desktop-col` 弹性列，列内间隙恒等于网格 gap，短卡下方的下一张卡不再等待相邻列最高卡的行底；仍保持零重叠、图片懒加载稳定、分页稳定与移动端双列布局不变，不使用绝对定位。生产基线 `91d654e` 的整行 `max-content` 撑高行为保留到正式发布前。

@@ -1,6 +1,6 @@
 # 代码导航图
 
-最后核对：2026-08-11。
+最后核对：2026-08-12。
 
 ## 入口与构建
 
@@ -55,6 +55,9 @@ slot.
 | 社区布局 | `feed-layout.js`, `styles/features/` |
 | 生图表单 | `legacy/features-draft/`, `imagegen-ref-ui.js`, `imagegen-submit.js` |
 | 生图任务 | `imagegen-job-runner.js`, `imagegen-poll-warehouse.js`, `imagegen-finish-run.js`, `server/src/routes/v1/generate.ts`, `server/src/lib/fast-provider-queue.ts` |
+| 最近首屏分页/恢复 | `legacy/features-draft/part-03.js`, `api-client.js`, `imagegen-job-runner.js`, `server/src/routes/v1/generate.ts`（`/jobs/recent?offset=`） |
+| 交付监控指标 | `server/src/lib/monitoring.ts`（`recordGenerationMetric`）、`server/src/routes/admin/dashboard.ts`（`delivery`） |
+| 免付费交付回归 | `scripts/verify-imagegen-experience-fault-matrix.mjs`, `scripts/verify-imagegen-performance-budget.mjs`, `scripts/capture-imagegen-experience-baseline.mjs` |
 | 上游 provider | `server/src/lib/image-upstream.ts`, provider 对应 `*.ts` |
 | 媒体/R2 | `server/src/routes/v1/media.ts`, `server/src/lib/media-cdn.ts`, `server/src/lib/r2-storage.ts` |
 | 会员/积分 | `subscription.js`, `membership.js`, `points-system.js`, `server/src/lib/membership-credits.ts` |
