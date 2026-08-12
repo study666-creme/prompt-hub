@@ -11,6 +11,7 @@ import { readLegacyEntry } from './read-legacy-entry.mjs';
 export function concatMinifyBundle({ root, sources, outFile, metaFile, label }) {
   const outDir = dirname(outFile);
   mkdirSync(outDir, { recursive: true });
+  if (metaFile) mkdirSync(dirname(metaFile), { recursive: true });
 
   const combined = sources.map((rel) => {
     return `/* === ${rel} === */\n${readLegacyEntry(root, rel)}`;
