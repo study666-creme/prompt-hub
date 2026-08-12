@@ -48,3 +48,8 @@ bilibili-sub-web/
 
 # SillyTavern / é…’é¦†æœ¬åœ°èµ„æ–™ï¼ˆä¸ Prompt Hub æ— å…³ï¼Œå‹¿æäº¤ã€å‹¿éƒ¨ç½²ï¼‰
 themes/
+
+# ±¾µØ npm °²×°»º´æ£¨worktree ÄÚ£¬ÎğÌá½»£©
+.dsflash-npm-cache/
+.dsflash-npm-nodecc/
+.dsflash-npm-tmp/
