@@ -251,13 +251,45 @@
       };
     }
   
+    function ensureFeedMediaPlaceholder(media, img) {
+      if (!media) return;
+      media.classList.remove('is-loading', 'card-media--await', 'media-shine-reveal');
+      media.classList.add('card-media--load-failed');
+      if (img) img.classList.add('img-load-failed');
+      if (!media.querySelector(':scope > .card-media-placeholder')) {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'card-media-placeholder';
+        placeholder.setAttribute('role', 'status');
+        const label = document.createElement('span');
+        label.className = 'card-media-placeholder-label';
+        label.textContent = '图片加载失败';
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'card-media-placeholder-retry';
+        retry.textContent = '重试';
+        retry.setAttribute('aria-label', '重新加载图片');
+        retry.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          if (typeof window.retryWarehouseCardImage === 'function') {
+            window.retryWarehouseCardImage(img, media);
+          } else {
+            window.CardImageLoader?.loadImg?.(img);
+          }
+        });
+        placeholder.appendChild(label);
+        placeholder.appendChild(retry);
+        media.appendChild(placeholder);
+      }
+      if (img) {
+        img.style.visibility = '';
+        img.style.opacity = '';
+      }
+    }
+
     function finalizeFeedImageFailure(img) {
       const media = img?.closest?.('.imagegen-feed-media, .card-media, .community-side-img-btn');
-      media?.classList.remove('is-loading', 'card-media--await', 'media-shine-reveal');
-      media?.classList.add('card-media--load-failed');
-      img?.classList.add('img-load-failed');
-      const feedCard = img?.closest?.('.imagegen-feed-card');
-      if (feedCard) collapseWarehouseFeedCardNoThumb(feedCard);
+      ensureFeedMediaPlaceholder(media, img);
     }
 
     function bindFeedImgErrorFallback(img) {
@@ -310,8 +342,10 @@
     function collapseWarehouseFeedCardNoThumb(feedCard) {
       const feedId = String(feedCard?.dataset?.feedId || '');
       if (!/^cr_|^wh_/.test(feedId) && !feedCard?.closest?.('#imageGenFeed')) return false;
-      feedCard.querySelector('.imagegen-feed-media')?.remove();
-      feedCard.classList.add('imagegen-feed-card--no-media');
+      // 失败媒体保留稳定的占位槽 + 重试按钮，不再移除媒体槽塌成纯文字卡。
+      const media = feedCard.querySelector('.imagegen-feed-media, .card-media');
+      const img = feedCard.querySelector('img');
+      if (media) ensureFeedMediaPlaceholder(media, img);
       return true;
     }
 

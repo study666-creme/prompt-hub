@@ -311,9 +311,10 @@ async function openFixture(browser, viewport, { reducedMotion = false } = {}) {
   });
   const page = await context.newPage();
   await page.addInitScript(() => {
-    window.__phMediaUxCounts = { entered: 0, revealed: 0 };
     if (typeof window.PerformanceObserver !== 'undefined') {
       window.__phMediaUxLcp = null;
+      window.__phMediaUxLongTasks = [];
+      window.__phMediaUxCls = 0;
       try {
         new PerformanceObserver((list) => {
           for (const entry of list.getEntries()) {
@@ -322,6 +323,21 @@ async function openFixture(browser, viewport, { reducedMotion = false } = {}) {
             }
           }
         }).observe({ type: 'largest-contentful-paint', buffered: true });
+      } catch (e) { /* ignore */ }
+      try {
+        new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            window.__phMediaUxLongTasks.push(Math.round(entry.duration));
+          }
+        }).observe({ type: 'longtask', buffered: true });
+      } catch (e) { /* ignore */ }
+      try {
+        new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            if (entry.hadRecentInput) continue;
+            window.__phMediaUxCls += entry.value;
+          }
+        }).observe({ type: 'layout-shift', buffered: true });
       } catch (e) { /* ignore */ }
     }
   });
@@ -373,6 +389,8 @@ try {
     });
     const stats = await page.evaluate(() => window.__PH_IMAGE_STATS__ || {});
     const lcp = await page.evaluate(() => window.__phMediaUxLcp || null);
+    const longTasks = await page.evaluate(() => window.__phMediaUxLongTasks || []);
+    const cls = await page.evaluate(() => window.__phMediaUxCls || 0);
     const catalog = await page.evaluate(() => ({
       modelIds: (window.__IMAGE_GEN_MODELS__ || []).map((m) => m.id),
       stale: window.__IMAGE_GEN_CATALOG_STALE__ === true,
@@ -383,7 +401,7 @@ try {
     }
     if (tracePath) await context.tracing.stop({ path: tracePath });
 
-    evidence.viewports[viewport.name] = { geometry, entranceCount: entrance, entranceAnimation, stats, lcp, debugMedia };
+    evidence.viewports[viewport.name] = { geometry, entranceCount: entrance, entranceAnimation, stats, lcp, longTasks, cls, debugMedia };
     if (viewport.name === 'desktop-1440x900') evidence.catalog = catalog;
 
     if (geometry.missing) fail(`${viewport.name}: cardsContainer missing`);
@@ -412,6 +430,11 @@ try {
     }
     if (viewport.mobile && geometry.decoded < 6) fail(`${viewport.name}: too few decoded media on mobile`);
     if (!viewport.mobile && geometry.decoded < 16) fail(`${viewport.name}: too few decoded media on desktop`);
+    const clsLimit = viewport.mobile ? 0.25 : 0.1;
+    if (cls > clsLimit) fail(`${viewport.name}: layout shift CLS=${cls.toFixed(4)} > ${clsLimit}`);
+    if (longTasks.some((duration) => duration > 500)) {
+      fail(`${viewport.name}: long tasks over 500ms: ${longTasks.join(',')}`);
+    }
 
     await context.close();
   }
@@ -477,6 +500,30 @@ try {
     if (!picker.value && picker.options.length > 1) {
       fail('select is empty while canonical options exist');
     }
+
+    // 选择持久性：目录刷新后保持已选 canonical id。
+    const persistence = await page.evaluate(async () => {
+      const sel = document.getElementById('imageGenModel');
+      const result = { before: '', afterRefresh: '', note: '' };
+      if (!sel) return result;
+      const option = sel.querySelector('option[value="image2-pro"]');
+      if (!option) {
+        result.note = 'image2-pro not in options';
+        return result;
+      }
+      sel.value = 'image2-pro';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      result.before = sel.value;
+      await window.FeatureDraft?.refreshImageGenModelCatalog?.({ force: true }).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      result.afterRefresh = sel.value;
+      return result;
+    });
+    evidence.selectionPersistence = persistence;
+    if (persistence.afterRefresh && persistence.afterRefresh !== 'image2-pro') {
+      fail(`selection not preserved across catalog refresh: ${persistence.afterRefresh}`);
+    }
+
     await context.close();
   }
 } finally {

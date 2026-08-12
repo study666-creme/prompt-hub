@@ -124,6 +124,21 @@ describe('image model catalog', () => {
     expect(getCatalogEntry('apimart-mj-v81')?.id).toBe('mj-v81');
   });
 
+  it('keeps retired historical job ids readable without reviving them in the public picker', () => {
+    // 历史 job 只读兼容解析：退役/内部 id 折叠到仍公开的 canonical id，或在
+    // 内部目录中保留仅供历史解析（image2-free 永不上公开选择器）。
+    expect(normalizeImageModelId('gpt-image-2-free')).toBe('image2-free');
+    expect(normalizeImageModelId('gpt-image-2-1k')).toBe('image2-economy');
+    expect(normalizeImageModelId('gpt-image-2-vip')).toBe('image2-pro');
+    expect(normalizeImageModelId('gpt-image-2-4k-adobe')).toBe('image2-4k-fast');
+    expect(normalizeImageModelId('nano-banana-2-lite')).toBe('lingtu-lite');
+    expect(isRetainedPublicImageEntry(getCatalogEntry('image2-free')!)).toBe(false);
+    expect(isRetainedPublicImageEntry(getCatalogEntry('mj-v61')!)).toBe(false);
+    // image2-hd 只用于历史解析，不得作为公开选择器模型复活。
+    expect(NEWAPI_IMAGE_MODEL_CATALOG.some((entry) => entry.id === 'image2-hd')).toBe(false);
+    expect(NEWAPI_IMAGE_MODEL_CATALOG.some((entry) => entry.id === 'mj-v61')).toBe(false);
+  });
+
   it('migrates legacy MJ pricing keys to public ids', () => {
     const settings = mergeImageModelSettings({
       globalDiscountPercent: 100,
