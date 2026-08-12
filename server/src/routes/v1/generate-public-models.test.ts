@@ -409,7 +409,38 @@ describe('public image model projection', () => {
     expect(models.some((model) => model.id === 'lingtu')).toBe(true);
   });
 
-  it('never treats an admin route snapshot as a public catalog fallback', () => {
+  it('serves the reviewed static catalog as LKG when the live catalog is unavailable', () => {
+    const models = publicModelPayload(
+      { globalDiscountPercent: 100, models: {} },
+      null,
+      false,
+      {
+        newApiCatalog: {
+          available: false,
+          stale: true,
+          version: '',
+          pricingVersion: '',
+          models: [],
+          rules: [],
+          imageCatalogEntries: []
+        }
+      }
+    );
+
+    // The route snapshot never adds public models: a model that has no static
+    // reviewed entry cannot appear even if a route exists for it.
+    expect(models.filter((model) => model.id === 'image2-economy')).toHaveLength(1);
+    expect(models.filter((model) => model.id === 'image2')).toHaveLength(1);
+    expect(models.filter((model) => model.id === 'image2-free')).toEqual([]);
+    expect(models.filter((model) => model.id === 'mj-v61')).toEqual([]);
+    expect(publicGenerationCatalogMeta({
+      version: '',
+      pricingVersion: '',
+      stale: true
+    })).toMatchObject({ catalogStale: true });
+  });
+
+  it('filters the static LKG by an available admin route snapshot without inventing models', () => {
     const models = publicModelPayload(
       { globalDiscountPercent: 100, models: {} },
       null,
@@ -445,6 +476,36 @@ describe('public image model projection', () => {
       }
     );
 
-    expect(models).toEqual([]);
+    expect(models.map((model) => model.id)).toEqual(['image2-economy']);
+  });
+
+  it('honors admin hidden/disabled models even when serving the static LKG', () => {
+    const settings = mergeImageModelSettings({
+      globalDiscountPercent: 100,
+      models: {
+        'image2-economy': { status: 'offline' },
+        'image2-pro': { status: 'maintenance' },
+        image2: { enabled: false }
+      }
+    });
+    const models = publicModelPayload(settings, null, false, {
+      newApiCatalog: {
+        available: false,
+        stale: true,
+        version: '',
+        pricingVersion: '',
+        models: [],
+        rules: [],
+        imageCatalogEntries: []
+      }
+    });
+
+    expect(models.some((model) => model.id === 'image2-economy')).toBe(false);
+    const image2Pro = models.find((model) => model.id === 'image2-pro');
+    expect(image2Pro?.status).toBe('maintenance');
+    expect(image2Pro?.selectable).toBe(false);
+    expect(models.some((model) => model.id === 'image2')).toBe(false);
+    // Offline/missing models must not come back from the static LKG either.
+    expect(models.filter((model) => model.status === 'offline')).toEqual([]);
   });
 });

@@ -1,6 +1,8 @@
 # AI 接手说明
 
-最后核对：2026-08-08。生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
+最后核对：2026-08-13。生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；线上 Worker `/health.buildSha` 实测为 `b9c0d00`，Pages 最新 build 为 `20260812a`（`c10b5a2`）。Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
+
+未部署候选（TASK-20260812-PROMPT-HUB-IMAGEGEN-CATALOG-LOADING-MASONRY-UX-P0-006，基于 `c10b5a2`）：生图模型目录公开真源 LKG、稳定 canonical 选择、媒体占位/重试与克制入场、紧凑瀑布流与几何回归。详见「当前生图与计费边界」与 `docs/CARD-LOADING.md`。
 
 Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery-20260808` 的媒体归档和恢复改动已提交并通过本地回归，尚未部署或执行付费验收；生产仍以 `/health.buildSha` 为准。
 
@@ -61,6 +63,10 @@ Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery
 - 新增文字模型只能先进入审核后的公共目录；不得把内部模型标识、渠道字段、API 基址或凭据写入浏览器资源、普通用户日志或错误响应。
 
 ## 当前生图与计费边界
+
+- 公开生图模型选择器（`GET /api/v1/generate/models`）的单一公开真源是 sanitized 实时目录；实时目录不可用时，`publicModelPayload` 回退到审核过的静态 `NEWAPI_IMAGE_MODEL_CATALOG` 作为 LKG 并置 `catalogStale: true`，绝不返回空列表让前端落到“选择模型”。管理后台 `status: offline`/`enabled:false` 的模型即使目录不可用也保持隐藏；`image2-free` 与历史 MJ `mj-v61` 永不投射到公开选择器，前端静态 fallback / 首屏 paint / 资产工作台硬编码入口已同步清理（历史 job 仍按 `normalizeImageModelId` 别名只读兼容解析）。
+- 前端模型目录缓存版本已升到 `IMAGE_GEN_CATALOG_CACHE_VERSION = 20`（`promptrepo_imagegen_models_cache_v4`）。实时响应为空或全 offline 时保留上一次已验证 LKG 并置 `__IMAGE_GEN_CATALOG_STALE__`，页面在 `#imageGenCatalogStaleHint` 提示“目录暂时不可用，已显示上次已核验的模型”。`applyImageGenModelCatalog` 的空目录守卫与 stale 展示同时受 `scripts/verify-imagegen-catalog-cache.mjs` 的 VM 断言覆盖。
+- 模型选择使用稳定 canonical id：`normalizeImageGenModelId` 把 `gpt-image-2-1k/chat→image2-economy`、`gpt-image-2-4k-*→image2-4k-fast`、`gpt-image-2-vip/ext→image2-pro`、`nano-banana*→lingtu*` 等历史别名折叠到仍公开的 id（与 server `LEGACY_MODEL_MAP` 对齐，但不含 `newapi-*` 私有前缀）。目录刷新/分组切换/参数变化后只要该 id 仍公开就保持选择；被隐藏/移除时自动选同组首个可用模型，不留下“标签已选但 select 为空”的分裂状态。
 
 - Worker 只能通过 `https://newapi.prompt-hubs.com` 访问卡藏 New API；不得把 DNS 当前解析出的 IP 或 `sslip.io` 地址写回 `wrangler.toml`。实时目录必须返回非空版本且公开投影不得为 `catalogStale=true`，否则付费提交应在扣费前停止。
 - 新任务只允许卡藏 API 的全能模型2、香蕉和 MJ 8.1 / MJ 7 / Niji 7；所有公开 MJ 均为 New API provider，固定 `relax`、40 积分/次，旧 Apimart provider 只恢复历史任务。

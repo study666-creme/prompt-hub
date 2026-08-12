@@ -16,7 +16,7 @@ const assetStudioRuntime = read('legacy/asset-studio/part-02.js');
 const pointsSystem = read('points-system.js');
 const imagegenBundle = read('pack-imagegen.js');
 const cacheKey = 'promptrepo_imagegen_models_cache_v4';
-const expectedVersion = 19;
+const expectedVersion = 20;
 const forbiddenModelKeys = new Set([
   'provider',
   'creditsBase',
@@ -52,6 +52,26 @@ assert(
 assert(
   featureCatalog.includes("new Set(['image2-free'])"),
   'feature fallback must filter every retired model'
+);
+assert(
+  !featureCatalog.includes("id: 'image2-free'") && !featureCatalog.includes("'mj-v61'"),
+  'feature fallback must not hardcode retired public entries (image2-free / mj-v61)'
+);
+assert(
+  !indexHtml.includes("id: 'image2-free'") && !indexHtml.includes("'mj-v61'"),
+  'first-paint fallback must not hardcode retired public entries'
+);
+assert(
+  featureModelUi.includes("'gpt-image-2-chat': 'image2-economy'"),
+  'legacy image aliases must normalize to canonical public ids'
+);
+assert(
+  !pointsSystem.includes("model.id === 'image2-free'"),
+  'retired image2-free must not keep a special price path'
+);
+assert(
+  !assetStudioHtml.includes('<option value="image2-free">'),
+  'asset studio must not expose a retired public image model option'
 );
 
 const inFlightResult = await generationModelsInFlight([
@@ -166,6 +186,38 @@ assert(
 );
 assertPublicModelProjection(catalogContext.window.__IMAGE_GEN_MODELS__, 'window image model catalog');
 assertPublicModelProjection(catalogContext.persistedCatalog, 'feature catalog persistence');
+
+const lkgContext = { window: {} };
+lkgContext.globalThis = lkgContext;
+vm.runInNewContext(`
+  let imageGenModelCatalog = [
+    { id: 'image2', status: 'active' },
+    { id: 'image2-4k-fast', status: 'active' }
+  ];
+  let imageGenModelCatalogStale = false;
+  let imageGenModelCatalogReady = false;
+  function normalizeImageGenModelEntry(model) { return model; }
+  const RETIRED_IMAGE_GEN_MODEL_IDS = new Set(['image2-free']);
+  function invalidateImageGenFamilyCache() {}
+  function persistCachedImageGenModels() {}
+  function isImageGenPageVisible() { return false; }
+  function setImageGenModelSelectLoading() {}
+  function rebuildImageGenModelFamilyTabs() {}
+  function renderImageGenModelSelect() {}
+  function flushImageGenModelUiRefresh() {}
+${applyCatalog}
+  applyImageGenModelCatalog([], { source: 'api', renderUi: false });
+  applyImageGenModelCatalog([{ id: 'image2', status: 'offline' }], { source: 'api', renderUi: false });
+`, lkgContext, { filename: 'imagegen-catalog-lkg.vm.js' });
+const lkgIds = Array.from(lkgContext.window.__IMAGE_GEN_MODELS__ || [], (model) => model.id);
+assert(
+  lkgIds.join(',') === 'image2,image2-4k-fast',
+  'empty or fully-hidden live payload must keep the last known-good catalog'
+);
+assert(
+  lkgContext.window.__IMAGE_GEN_CATALOG_STALE__ === true,
+  'LKG preservation must surface the stale catalog state'
+);
 
 const normalizeEntrySource = extractBetween(
   featureCatalog,

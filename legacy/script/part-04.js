@@ -850,6 +850,34 @@
     window.scheduleMasonryForMedia = scheduleMasonryForMedia;
     window.ensureMasonryScript = ensureMasonryScript;
 
+    function retryWarehouseCardImage(img, media) {
+      if (!img) return;
+      const cardId = img.closest?.('.card[data-id]')?.dataset?.id || '';
+      const ref = img.getAttribute?.('data-image-ref') || '';
+      ['whListRetried', 'primaryRetried', 'whWarmTried', 'listPrimaryRetried',
+       'feedLoadDone', 'feedForceFresh', 'recentCandidateRetried', 'recentFullRetried']
+        .forEach((key) => delete img.dataset[key]);
+      media?.classList.remove('card-media--load-failed', 'card-media--auth-blocked', 'card-media--placeholder');
+      media?.querySelector(':scope > .card-media-placeholder')?.remove();
+      if (media) media.classList.add('is-loading');
+      if (ref && window.SupabaseSync?.clearPathMissingForCard && cardId) {
+        window.SupabaseSync.clearPathMissingForCard(cardId, ref);
+      }
+      if (window.CardImageLoader?.loadImg) {
+        window.CardImageLoader.loadImg(img);
+      } else {
+        const src = img.currentSrc || img.src || '';
+        if (src && !src.includes('data:image/svg')) {
+          img.onload = null;
+          img.onerror = null;
+          img.removeAttribute('src');
+          img.src = src;
+        }
+      }
+      if (cardId) scheduleWarehouseMasonryForCard(cardId);
+    }
+    window.retryWarehouseCardImage = retryWarehouseCardImage;
+
     function finalizeWarehouseCardMediaFailure(media, img, opts = {}) {
       if (!media) return;
       if (img?.dataset?.feedLoadDone === '1' && img.complete && img.naturalWidth > 0) return;
@@ -866,41 +894,40 @@
       media.classList.toggle('card-media--auth-blocked', authBlocked);
       if (authBlocked) media.dataset.failureLabel = '登录后加载图片';
       else delete media.dataset.failureLabel;
+      // 稳定媒体占位 + 可重试状态，而不是隐藏成黑块或塌缩成纯文字卡。
+      let placeholder = media.querySelector(':scope > .card-media-placeholder');
+      if (!placeholder) {
+        placeholder = document.createElement('div');
+        placeholder.className = 'card-media-placeholder';
+        placeholder.setAttribute('role', 'status');
+        const label = document.createElement('span');
+        label.className = 'card-media-placeholder-label';
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'card-media-placeholder-retry';
+        retry.textContent = '重试';
+        retry.setAttribute('aria-label', '重新加载图片');
+        retry.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          retryWarehouseCardImage(img, media);
+        });
+        placeholder.appendChild(label);
+        placeholder.appendChild(retry);
+        media.appendChild(placeholder);
+      }
+      const labelEl = placeholder.querySelector('.card-media-placeholder-label');
+      if (labelEl) labelEl.textContent = authBlocked ? '登录后加载图片' : '图片加载失败';
+      if (img) {
+        img.style.visibility = '';
+        img.style.opacity = '';
+      }
       const card = media.closest('#cardsContainer .card[data-id]');
-      const inWarehouseList = !!(card && !card.closest('.card[data-community-collect="1"]'));
-      const cardModel = card?.dataset?.id ? cards.find((c) => c.id === card.dataset.id) : null;
-      const keepFailureSlot = opts.keepFailureSlot === true || authBlocked;
-      if (inWarehouseList && keepFailureSlot) {
-        clearMediaShineWatchdog(media);
-        if (media.__whBackfillFailTimer) {
-          clearTimeout(media.__whBackfillFailTimer);
-          media.__whBackfillFailTimer = null;
-        }
-        media.classList.remove('is-loading', 'card-media--await', 'media-shine-reveal');
-        media.classList.add('card-media--load-failed');
-        if (img) {
-          img.style.visibility = 'hidden';
-          img.style.opacity = '0';
-        }
-        scheduleWarehouseMasonryForCard(card?.dataset?.id);
-        return;
-      }
-      if (card && opts.collapseToText !== false) {
-        card.classList.remove('card--visual');
-        card.classList.add('card--text-only');
-        media.remove();
-        const desc = card.querySelector('.card-desc');
-        if (desc && cardModel) {
-          desc.textContent = getCardDisplayDesc(cardModel, { textOnly: true });
-        }
-      } else if (img) {
-        img.style.visibility = 'hidden';
-        img.style.opacity = '0';
-      }
       const cardId = card?.dataset?.id;
+      // 仅显式确认永久缺失（404/410）才写 24h missing；瞬时失败不标记，
+      // 避免网速慢/签名超时被误判成黑块（曾导致数百张黑卡）。
       const ref = img?.getAttribute?.('data-image-ref');
-      const inRecentFeed = !!img?.closest?.('#imageGenFeed .imagegen-feed-card[data-feed-id^="cr_"]');
-      if (!authBlocked && opts.markMissing !== false && ref && !inRecentFeed && window.SupabaseSync?.primaryImagePath) {
+      if (!authBlocked && opts.markMissing === true && ref && window.SupabaseSync?.primaryImagePath) {
         const primary = window.SupabaseSync.primaryImagePath(ref, cardId);
         if (primary && window.SupabaseSync?.markPathMissing) {
           window.SupabaseSync.markPathMissing(String(primary).replace(/^\//, ''));

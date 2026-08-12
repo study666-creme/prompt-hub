@@ -6,7 +6,8 @@
       if (r?.ok && Array.isArray(r.data?.models) && r.data.models.length) {
         applyImageGenModelCatalog(r.data.models, {
           forceRender: isImageGenPageVisible(),
-          source: 'api'
+          source: 'api',
+          catalogStale: r.data?.catalogStale === true
         });
         return true;
       }
@@ -34,11 +35,34 @@
     }
   }
 
+  /** 历史/兼容别名 → 仍公开的 canonical id（与 server LEGACY_MODEL_MAP 对齐）。 */
+  const LEGACY_IMAGE_GEN_MODEL_ALIASES = {
+    'gpt-image-2-1k': 'image2-economy',
+    'gpt-image-2-chat': 'image2-economy',
+    'gpt-image-2-free': 'image2',
+    'gpt-image-2': 'image2',
+    'gpt-image-2-4k-fast': 'image2-4k-fast',
+    'gpt-image-2-4k-adobe': 'image2-4k-fast',
+    'gpt-image-2-vip': 'image2-pro',
+    'gpt-image-2-ext': 'image2-pro',
+    'gpt-image-2-ext-1k': 'image2-pro',
+    'gpt-image-2-ext-2k': 'image2-pro',
+    'gpt-image-2-ext-4k': 'image2-pro',
+    'nano-banana-fast': 'lingtu-fast',
+    'nano-banana-2-lite': 'lingtu-lite',
+    'nano-banana-2': 'lingtu-2',
+    'nano-banana-pro': 'lingtu-pro',
+    'nano-banana': 'lingtu'
+  };
+
   function normalizeImageGenModelId(modelId) {
     const id = String(modelId || '')
       .trim()
       .toLowerCase();
     if (!id) return 'image2';
+    // 历史/兼容别名归一化到仍公开的 canonical id，与 server 的
+    // LEGACY_MODEL_MAP 对齐；退役的 image2-free 也折叠到 image2。
+    if (LEGACY_IMAGE_GEN_MODEL_ALIASES[id]) return LEGACY_IMAGE_GEN_MODEL_ALIASES[id];
     if (RETIRED_IMAGE_GEN_MODEL_IDS.has(id)) return 'image2';
     if (id === 'image2' || id.startsWith('image2-')) return id;
     if (id === 'lingtu' || id.startsWith('lingtu-')) return id;
@@ -539,7 +563,12 @@
     const busy = select.getAttribute('aria-busy') === 'true';
     trigger.disabled = select.disabled;
     trigger.setAttribute('aria-busy', busy ? 'true' : 'false');
-    label.textContent = selected?.textContent?.trim() || (busy ? '加载模型列表…' : '选择模型');
+    let triggerLabel = selected?.textContent?.trim() || '';
+    if (!triggerLabel && !busy) {
+      const firstUsable = [...select.options].find((o) => o.value && !o.disabled);
+      triggerLabel = firstUsable?.textContent?.trim() || '选择模型';
+    }
+    label.textContent = triggerLabel || (busy ? '加载模型列表…' : '选择模型');
     const buttons = imageGenModelPickerButtons();
     buttons.forEach((button) => {
       const on = button.dataset.modelId === select.value;
@@ -652,13 +681,31 @@
     sel.disabled = false;
     sel.setAttribute('aria-busy', 'false');
     const draft = loadJson(LS_IMAGEGEN, null);
-    const current = opts.modelId || sel.value || draft?.model || 'image2';
+    const current = opts.modelId || sel.value || normalizeImageGenModelId(draft?.model) || 'image2';
     imageGenModelFamily = resolveImageGenModelFamily(
       opts.family ?? imageGenModelFamily ?? draft?.modelFamily,
       current
     );
     updateImageGenModelFamilyTabsActive();
-    const list = imageGenModelsInFamily(imageGenModelFamily);
+    let list = imageGenModelsInFamily(imageGenModelFamily);
+    // 当前分组若没有任何可选模型，自动切到仍有模型的最近分组，避免出现
+    // “标签已选但 select 为空”的分裂状态。
+    if (!list.length) {
+      const fallbackFamily = resolveImageGenModelFamily(undefined, current);
+      if (fallbackFamily && fallbackFamily !== imageGenModelFamily) {
+        imageGenModelFamily = fallbackFamily;
+        updateImageGenModelFamilyTabsActive();
+        list = imageGenModelsInFamily(imageGenModelFamily);
+      }
+    }
+    if (!list.length) {
+      sel.disabled = true;
+      sel.setAttribute('aria-busy', 'true');
+      sel.innerHTML = '<option value="">暂无可用模型</option>';
+      sel.dataset.optionsHtml = '';
+      renderImageGenModelPickerOptions();
+      return;
+    }
     const nextHtml = list
       .map((m) => {
         const name = imageGenModelDisplayName(m);
@@ -679,8 +726,9 @@
     const pick =
       keepModel && [...sel.options].some((o) => o.value === current && !o.disabled)
         ? current
-        : selectable[0]?.id || list[0]?.id || 'image2';
-    if (sel.value !== pick) sel.value = pick;
+        : selectable[0]?.id || list[0]?.id || '';
+    if (pick && sel.value !== pick) sel.value = pick;
+    if (!pick && sel.value) sel.value = '';
     renderImageGenModelPickerOptions();
     if (!opts.skipUiRefresh) scheduleImageGenModelUiRefresh();
   }

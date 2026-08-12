@@ -763,10 +763,11 @@ export function publicModelPayload(
       if (!isRetainedImageModel(model)) return false;
       if (model.provider !== 'newapi') return true;
       // The private route catalog is an availability check, never a source of
-      // public models. A stale snapshot is still a verified last-known-good
-      // projection; keep it visible while the route check prevents retired
-      // models from returning to the picker.
-      if (!opts.newApiCatalog.available) return false;
+      // public models. When the live New API catalog is unavailable we serve
+      // the reviewed static catalog (imageCatalogForNewApiSnapshot) as the
+      // verified last-known-good projection and mark the response stale; the
+      // picker must never go empty just because the upstream is briefly down.
+      // The route snapshot only filters that LKG further when it is readable.
       if (opts.newApiRoutes?.available) {
         return newApiHasActiveRoute(opts.newApiRoutes, model.upstream);
       }

@@ -520,7 +520,7 @@
 
   const costCache = new Map();
   const costInflight = new Map();
-  const IMAGE_GEN_CATALOG_CACHE_VERSION = 19;
+  const IMAGE_GEN_CATALOG_CACHE_VERSION = 20;
   const PUBLIC_IMAGE_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
   const RETIRED_PUBLIC_IMAGE_MODEL_IDS = new Set(['image2-free']);
   const PUBLIC_IMAGE_MODEL_LABEL_OVERRIDES = {
@@ -686,7 +686,9 @@
 
   function projectGenerationModels(models) {
     if (!Array.isArray(models)) return [];
-    return models.map(projectPublicGenerationModel).filter(Boolean);
+    return models
+      .map(projectPublicGenerationModel)
+      .filter((model) => model != null && model.status !== 'offline');
   }
 
   function getGenerationModels() {
@@ -699,7 +701,7 @@
         const raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v4') || 'null');
         if (raw?.models?.length && Number(raw.version) >= IMAGE_GEN_CATALOG_CACHE_VERSION && raw.ts > Date.now() - 7 * 24 * 3600 * 1000) {
           const models = projectGenerationModels(raw.models);
-          modelsCache = { models };
+          modelsCache = { models, catalogStale: true };
           modelsCacheExp = Date.now() + 45_000;
           localStorage.setItem(
             'promptrepo_imagegen_models_cache_v4',
@@ -715,8 +717,12 @@
       );
       if (res.ok && res.data) {
         const models = projectGenerationModels(res.data.models);
-        modelsCache = { models };
-        modelsCacheExp = Date.now() + 120_000;
+        // A live response that omits every model (stale upstream) must not
+        // replace a known-good warm catalog with an empty one.
+        if (models.length || !modelsCache) {
+          modelsCache = { models, catalogStale: res.data?.catalogStale === true };
+          modelsCacheExp = Date.now() + 120_000;
+        }
         if (models.length) {
           try {
             localStorage.setItem(

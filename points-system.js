@@ -34,8 +34,29 @@
     creditsFinal: 0
   };
 
+  const LEGACY_IMAGE_GEN_MODEL_ALIASES = {
+    'gpt-image-2-1k': 'image2-economy',
+    'gpt-image-2-chat': 'image2-economy',
+    'gpt-image-2-free': 'image2',
+    'gpt-image-2': 'image2',
+    'gpt-image-2-4k-fast': 'image2-4k-fast',
+    'gpt-image-2-4k-adobe': 'image2-4k-fast',
+    'gpt-image-2-vip': 'image2-pro',
+    'gpt-image-2-ext': 'image2-pro',
+    'gpt-image-2-ext-1k': 'image2-pro',
+    'gpt-image-2-ext-2k': 'image2-pro',
+    'gpt-image-2-ext-4k': 'image2-pro',
+    'nano-banana-fast': 'lingtu-fast',
+    'nano-banana-2-lite': 'lingtu-lite',
+    'nano-banana-2': 'lingtu-2',
+    'nano-banana-pro': 'lingtu-pro',
+    'nano-banana': 'lingtu'
+  };
+
   function normalizeImageGenModelId(modelId) {
     const id = String(modelId || '').trim().toLowerCase() || 'image2';
+    if (LEGACY_IMAGE_GEN_MODEL_ALIASES[id]) return LEGACY_IMAGE_GEN_MODEL_ALIASES[id];
+    if (id === 'image2-free') return 'image2';
     if (id === 'image2' || id.startsWith('image2-')) return id;
     if (id === 'lingtu' || id.startsWith('lingtu-')) return id;
     if (id.startsWith('mj-')) return id;
@@ -226,12 +247,10 @@
       }
     }
 
-    // The catalog can be unavailable during first paint. Keep the known free
-    // model free instead of falling through to the legacy resolution price.
-    if (model.id === 'image2-free' && Number.isFinite(model.creditsFinal)) {
-      return costDetailFromFinalCredits(model, model.creditsFinal, mult);
-    }
-
+    // The live catalog is the only price source. Historical retired ids
+    // (image2-free) are folded to image2 by normalizeImageGenModelId so old
+    // jobs keep resolving read-only; the fallback resolution price below is
+    // used only while the catalog has not arrived yet.
     const base = getBaseResolutionCost(res);
     const final = applyMemberDiscount(base, mult);
     const saved = mult < 1 && final < base ? base - final : 0;

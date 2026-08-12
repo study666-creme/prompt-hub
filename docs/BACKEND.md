@@ -82,6 +82,7 @@ Canvas 媒体交付候选（2026-08-08）已提交到 `codex/unified-media-deliv
 ## 图片模型边界
 
 - `/api/v1/generate/models` 只返回已完成协议适配且当前可用的卡藏 API 全能模型2/香蕉型号，以及公开 MJ 型号；目录数量和参数来自实时目录，不在文档中硬编码。响应顶层同时返回 `catalogVersion`、`pricingVersion` 和 `catalogStale` 供运行监控；新服务未单独发布价格版本时，`pricingVersion` 使用覆盖完整价格负载的 `catalogVersion`。模型项不得包含上游渠道、主机或内部映射。
+- 实时目录不可用时，`publicModelPayload` 回退到审核过的静态 `NEWAPI_IMAGE_MODEL_CATALOG` 作为最后已验证 LKG 并置 `catalogStale: true`，绝不返回空模型列表（空列表会让公开选择器落到“选择模型”）；管理后台 `status=offline`/`enabled=false` 的模型即使目录不可用也保持隐藏，退役的 `image2-free` 与历史 MJ `mj-v61` 永不投射到公开选择器。
 - 图片参数语义固定为：`resolution` 只表示 `1k` / `2k` / `4k`，`quality` 只表示质量，但不是每个模型都公开质量控件。香蕉质量选项为 `low` / `medium` / `high`；`image2k4k` 固定 `low`，4K 型号固定 `standard`，`gpt-image-2-ext` 使用上游默认画质且不发送 `quality`。仅兼容历史请求中精确的 `quality=1k|2k|4k`，入口会把它归一到 `resolution`，不能继续生成两个“分辨率”字段。
 - 卡藏 API 的图片人民币价格统一调用 `imageRetailCreditsFromYuan()`：卡藏报价已包含上游加价，按 `1 元 = 100 积分` 直接换算，不再重复加价。
 - 图片报价和提交读取普通 `/api/model-catalog`，进程内以 single-flight 合并并发请求；完整且精确匹配模型价格的 LKG 最多可信 5 分钟，不再为每次报价发送 `refresh=1`。没有可信价格时必须在创建任务和扣费前失败。

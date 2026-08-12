@@ -11,6 +11,19 @@
   const ownedBlobUrls = new Set();
   let ownedBlobRemovalObserver = null;
   const queues = window.CardImageLoaderQueues.create();
+  /* 轻量首屏媒体指标：浏览器验证脚本读取（不参与业务逻辑） */
+  const imageLoadStats = {
+    requests: 0,
+    deduped: 0,
+    failures: 0,
+    timedOut: 0,
+    startedAt: 0
+  };
+  function bumpImageLoadStat(key) {
+    if (typeof window.__PH_IMAGE_STATS__ !== 'object') return;
+    window.__PH_IMAGE_STATS__[key] = (Number(window.__PH_IMAGE_STATS__[key]) || 0) + 1;
+  }
+  window.__PH_IMAGE_STATS__ = imageLoadStats;
   const DOWNLOAD_SLOT_TIMEOUT_MS = Math.max(100, Number(window.__PH_TEST_DOWNLOAD_TIMEOUT_MS__) || 30000);
   function maxResolveCap() { return queues.maxResolveCap(); }
   function feedMaxResolveCap() { return queues.feedMaxResolveCap(); }
@@ -400,14 +413,41 @@
   function finalizeRecentCreationMediaFailure(img, media) {
     const feedCard = img?.closest?.('.imagegen-feed-card');
     const feedId = String(feedCard?.dataset?.feedId || '');
-    if ((/^cr_|^wh_/.test(feedId) || feedCard?.closest?.('#imageGenFeed'))) {
-      media?.remove();
-      feedCard.classList.add('imagegen-feed-card--no-media');
-      if (isOwnImageGenRecentImg(img)) void confirmPermanentlyMissingRecentCreation(img);
-      return;
+    // 稳定媒体占位 + 可重试状态，而不是移除媒体变成纯文字卡。真正的永久
+    // 缺失由 confirmPermanentlyMissingRecentCreation 在显式 404/410 时移除整卡。
+    if (media) {
+      media.classList.remove('is-loading', 'media-shine-reveal');
+      media.classList.add('card-media--load-failed');
+      if (!media.querySelector(':scope > .card-media-placeholder')) {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'card-media-placeholder';
+        placeholder.setAttribute('role', 'status');
+        const label = document.createElement('span');
+        label.className = 'card-media-placeholder-label';
+        label.textContent = '图片加载失败';
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'card-media-placeholder-retry';
+        retry.textContent = '重试';
+        retry.setAttribute('aria-label', '重新加载图片');
+        retry.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          if (typeof window.retryWarehouseCardImage === 'function') {
+            window.retryWarehouseCardImage(img, media);
+          } else {
+            window.CardImageLoader?.loadImg?.(img);
+          }
+        });
+        placeholder.appendChild(label);
+        placeholder.appendChild(retry);
+        media.appendChild(placeholder);
+      }
+      if (img) {
+        img.style.visibility = '';
+        img.style.opacity = '';
+      }
     }
-    media?.classList.remove('is-loading');
-    media?.classList.add('card-media--load-failed');
     if (isOwnImageGenRecentImg(img)) void confirmPermanentlyMissingRecentCreation(img);
   }
 
@@ -867,6 +907,7 @@
     )) {
       img.dataset.feedLoadingUrl = url;
       if (targetLoadKey) img.dataset.feedLoadingKey = targetLoadKey;
+      bumpImageLoadStat('deduped');
       return true;
     }
 
@@ -929,6 +970,7 @@
     const fail = (failedUrlOverride = '') => {
       if (isStaleRequest()) return;
       clearPending();
+      bumpImageLoadStat('failures');
       media.classList.remove('is-loading', 'media-shine-reveal');
       const ref = img.getAttribute('data-image-ref');
       const cardId = cardIdFromImg(img);
@@ -1092,6 +1134,7 @@
         img.dataset.feedForceFresh = '1';
         const timeoutRef = img.getAttribute('data-image-ref') || '';
         if (timeoutRef) window.SupabaseSync?.invalidateSignedCacheForRef?.(timeoutRef, cardIdFromImg(img));
+        bumpImageLoadStat('timedOut');
         fail(timedOutUrl);
         settleQueue();
       };
@@ -1099,6 +1142,10 @@
       img.addEventListener('error', onError, { once: true });
       timeoutId = setTimeout(onTimeout, DOWNLOAD_SLOT_TIMEOUT_MS);
       clearPendingSrcRecovery(img);
+      if (window.__PH_IMAGE_STATS__ && !window.__PH_IMAGE_STATS__.startedAt) {
+        window.__PH_IMAGE_STATS__.startedAt = Date.now();
+      }
+      bumpImageLoadStat('requests');
       img.src = url;
       if (img.complete && img.naturalWidth > 0) onLoad();
     }));

@@ -310,7 +310,7 @@
     const model = studioImageModelCatalog.find((item) => item.id === modelId);
     const resolutions = Array.isArray(model?.resolutions) && model.resolutions.length
       ? model.resolutions.filter((value) => ['1k', '2k', '4k'].includes(value))
-      : ['image2', 'image2-free', 'lingtu', 'lingtu-fast', 'lingtu-lite'].includes(modelId)
+      : ['image2', 'image2-economy', 'lingtu', 'lingtu-fast', 'lingtu-lite'].includes(modelId)
         ? ['1k']
         : modelId === 'image2-pro' || modelId === 'image2-hd'
           ? ['2k', '4k']

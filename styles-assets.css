@@ -2827,6 +2827,7 @@ input[type="radio"] {
     min-height: 0 !important;
     max-height: none !important;
     overflow: visible !important;
+    overflow-x: clip !important;
     padding: 12px 10px calc(88px + env(safe-area-inset-bottom)) !important;
     box-sizing: border-box !important;
     contain: none !important;

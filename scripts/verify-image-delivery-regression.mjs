@@ -7,6 +7,7 @@ const read = (rel) => readFileSync(join(root, rel), 'utf8');
 
 const apiClient = read('api-client.js');
 const loader = read('card-image-loader.js');
+const scriptPart04 = read('legacy/script/part-04.js');
 const imageFeed = read('image-gen-feed.js');
 const jobRunner = read('imagegen-job-runner.js');
 const jobState = read('imagegen-job-state.js');
@@ -75,6 +76,23 @@ checkTokens('broken image concealment', baseCss, [
   '.card-media.card-media--load-failed .card-img',
   'visibility: hidden !important;',
   'opacity: 0 !important;'
+]);
+
+checkTokens('broken image stable placeholder + retry', scriptPart04, [
+  'function finalizeWarehouseCardMediaFailure(media, img, opts = {})',
+  'card-media-placeholder',
+  'retryWarehouseCardImage'
+]);
+checkTokens('recent feed keeps a placeholder instead of collapsing to text-only', loader, [
+  'function finalizeRecentCreationMediaFailure(img, media)',
+  'card-media-placeholder'
+]);
+checkTokens('failure keeps a stable media slot (no text-only collapse)', baseCss, [
+  '.card-media.card-media--load-failed > .card-media-placeholder'
+]);
+checkTokens('media entrance is compositor-only and motion-safe', baseCss, [
+  '@keyframes ph-media-enter',
+  '@media (prefers-reduced-motion: reduce)'
 ]);
 
 checkTokens('mobile edit panel motion', mobileCss, [

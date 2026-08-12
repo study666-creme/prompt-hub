@@ -388,7 +388,15 @@ async function inspectLayout(page, viewport) {
       return true;
     }).length;
     const images = [...document.querySelectorAll('#cardsContainer .card-media img')];
-    const brokenImages = images.filter((img) => img.complete && img.naturalWidth <= 1).length;
+    // 失败卡现在保留稳定的媒体占位（.card-media-placeholder），不再塌成纯
+    // 文字卡；这类有占位的失败 img 不算是布局退化。
+    const brokenImages = images.filter((img) => {
+      if (!(img.complete && img.naturalWidth <= 1)) return false;
+      const media = img.closest('.card-media');
+      if (media && media.classList.contains('card-media--load-failed')
+        && media.querySelector(':scope > .card-media-placeholder')) return false;
+      return true;
+    }).length;
     return {
       viewport: { width: innerWidth, height: innerHeight },
       mobile: isMobile,
@@ -590,7 +598,9 @@ async function checkViewModes(page, viewport) {
 async function checkWidthChange(page, viewport) {
   const checks = [];
   const measureWidth = async (label) => {
-    await page.waitForTimeout(600);
+    // 宽度变化后先等瀑布流重排与图片解码稳定，再测量几何；否则慢图
+    // 仍在加载时按投影高排布的列会在真实短高下被误判为空洞。
+    await page.waitForTimeout(2400);
     const state = await inspectLayout(page, viewport);
     const record = { label, state };
     checks.push(record);

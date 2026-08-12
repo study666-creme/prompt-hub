@@ -130,6 +130,13 @@
     min-height: 72px;
     max-height: 360px;
   }
+  /* 失败卡保留稳定的短媒体占位（高度贴近纯文字卡，避免给瀑布流塞进整块
+     4/3 大图位造成列间空洞），并附可重试按钮。 */
+  #cardsContainer:not(.list-view) .card-media.card-media--load-failed {
+    aspect-ratio: auto;
+    max-height: 96px;
+    min-height: 72px;
+  }
   #cardsContainer:not(.list-view) .card-media.is-loading .card-img {
     position: absolute !important;
     inset: 0;

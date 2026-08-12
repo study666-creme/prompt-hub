@@ -294,6 +294,12 @@
         if (!alreadyRevealed) {
           media.classList.remove('media-shine-reveal');
           void media.offsetWidth;
+          // 克制入场：每张卡只播一次，滚动回屏不重复（mediaRevealKey 已去重）。
+          if (media.dataset.phMediaEntered !== '1') {
+            media.dataset.phMediaEntered = '1';
+            media.classList.add('ph-media-enter');
+            media.addEventListener('animationend', () => media.classList.remove('ph-media-enter'), { once: true });
+          }
         }
         if (!alreadyRevealed && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
           const cardId = cardEl?.dataset?.id || cardEl?.dataset?.postId || '';

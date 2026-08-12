@@ -730,6 +730,7 @@
 
   let imageGenModelCatalog = [];
   let imageGenModelCatalogReady = false;
+  let imageGenModelCatalogStale = false;
   let imageGenModelsByFamilyCache = null;
   let imageGenFamilyTabsBound = false;
   let imageGenModelUiRefreshRaf = 0;
@@ -787,6 +788,13 @@
     }
     if (resSel && !loading) resSel.disabled = false;
     if (tabs) tabs.hidden = !!loading;
+    if (loading) {
+      const staleHint = document.getElementById('imageGenCatalogStaleHint');
+      if (staleHint) {
+        staleHint.hidden = true;
+        staleHint.textContent = '';
+      }
+    }
   }
 
   const IMAGE_GEN_MODEL_FAMILIES = [
@@ -798,7 +806,6 @@
   const RETIRED_IMAGE_GEN_MODEL_IDS = new Set(['image2-free']);
 
   const IMAGE_GEN_MODEL_FALLBACK = [
-    { id: 'image2-free', label: '全能模型2 · 免费 1K', uiFamily: 'gim2', sortOrder: 22, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 0, creditsFinal: 0, resolutions: ['1k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
     { id: 'image2-economy', label: '全能模型2 · 特价 1K', uiFamily: 'gim2', sortOrder: 20, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 2.2, creditsFinal: 2.2, resolutions: ['1k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
     { id: 'image2', label: '全能模型2 · 1K', uiFamily: 'gim2', sortOrder: 21, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 5.5, creditsFinal: 5.5, resolutions: ['1k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
     { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K', uiFamily: 'gim2', sortOrder: 22, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 8, creditsFinal: 8, pricingByResolution: true, creditsByResolution: { '1k': 8, '2k': 15, '4k': 20 }, resolutions: ['1k', '2k', '4k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
@@ -810,14 +817,12 @@
     { id: 'lingtu-2', label: '香蕉 · 2 1K/2K/4K', uiFamily: 'banana', sortOrder: 44, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 6, creditsFinal: 6, pricingByResolution: true, creditsByResolution: { '1k': 6, '2k': 6, '4k': 6 }, resolutions: ['1k', '2k', '4k'] },
     { id: 'mj-v81', label: 'MJ v8.1', description: '最新主版本 · 写实/概念通用 · 细节与光影最佳', uiFamily: 'midjourney', sortOrder: 110, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 35, creditsFinal: 35, pricingBySpeed: true, creditsBySpeed: { relax: 35, fast: 45, turbo: 90 }, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
     { id: 'mj-v7', label: 'MJ v7', description: '上一代主力 · 复杂构图稳定 · 风格均衡', uiFamily: 'midjourney', sortOrder: 111, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 35, creditsFinal: 35, pricingBySpeed: true, creditsBySpeed: { relax: 35, fast: 45, turbo: 90 }, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
-    { id: 'mj-v61', label: 'MJ v6.1', description: '经典 v6 · 风格稳定 · 适合批量出图', uiFamily: 'midjourney', sortOrder: 112, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 35, creditsFinal: 35, pricingBySpeed: true, creditsBySpeed: { relax: 35, fast: 45, turbo: 90 }, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
     { id: 'mj-niji7', label: 'MJ Niji 7', description: '动漫/二次元专版 · 角色与插画表现力强', uiFamily: 'midjourney', sortOrder: 113, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 35, creditsFinal: 35, pricingBySpeed: true, creditsBySpeed: { relax: 35, fast: 45, turbo: 90 }, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] }
   ];
 
   const IMAGE_GEN_MJ_MODEL_DESCRIPTIONS = {
     'mj-v81': '最新主版本 · 写实/概念通用 · 细节与光影最佳',
     'mj-v7': '上一代主力 · 复杂构图稳定 · 风格均衡',
-    'mj-v61': '经典 v6 · 风格稳定 · 适合批量出图',
     'mj-niji7': '动漫/二次元专版 · 角色与插画表现力强'
   };
 
@@ -923,15 +928,42 @@
   function applyImageGenModelCatalog(models, opts = {}) {
     if (!Array.isArray(models) || !models.length) return false;
     const source = opts.source || 'api';
+    const updateStaleHint = () => {
+      if (typeof document === 'undefined') return;
+      const hint = document.getElementById('imageGenCatalogStaleHint');
+      if (!hint) return;
+      if (imageGenModelCatalogStale) {
+        hint.textContent = '模型目录暂时不可用，已显示上次已核验的模型，请稍后刷新';
+        hint.hidden = false;
+      } else {
+        hint.hidden = true;
+        hint.textContent = '';
+      }
+    };
     invalidateImageGenFamilyCache();
-    imageGenModelCatalog = models
+    const filtered = models
       .map(normalizeImageGenModelEntry)
       .filter(Boolean)
       .filter((m) => !RETIRED_IMAGE_GEN_MODEL_IDS.has(m.id))
       .filter((m) => m.status !== 'offline');
+    // Never let an empty/fully-hidden live payload wipe a good catalog. Keep
+    // the last known-good list and surface the stale state instead so the
+    // picker never falls back to "选择模型".
+    if (!filtered.length && imageGenModelCatalog.length) {
+      imageGenModelCatalogStale = true;
+      window.__IMAGE_GEN_MODELS__ = imageGenModelCatalog;
+      window.__IMAGE_GEN_CATALOG_STALE__ = true;
+      imageGenModelCatalogReady = true;
+      window.__IMAGE_GEN_CATALOG_READY__ = true;
+      updateStaleHint();
+      return true;
+    }
+    imageGenModelCatalog = filtered;
     window.__IMAGE_GEN_MODELS__ = imageGenModelCatalog;
+    imageGenModelCatalogStale = source !== 'api' || opts.catalogStale === true;
+    window.__IMAGE_GEN_CATALOG_STALE__ = imageGenModelCatalogStale;
     window.__IMAGE_GEN_CATALOG_SOURCE__ = source;
-    if (source === 'api' || source === 'cache') {
+    if (source === 'api') {
       persistCachedImageGenModels(imageGenModelCatalog);
     }
     imageGenModelCatalogReady = true;
@@ -943,6 +975,7 @@
       renderImageGenModelSelect({ skipUiRefresh: true });
       flushImageGenModelUiRefresh();
     }
+    updateStaleHint();
     return true;
   }
 

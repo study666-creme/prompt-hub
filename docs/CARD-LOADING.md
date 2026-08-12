@@ -1,6 +1,12 @@
 # 列表图片加载
 
-复核日期：2026-08-11。下述仓库 UI 对应已上线的 `20260803a` 生图媒体可靠性；生产资源以线上 build 和资源 HTTP 冒烟为准。桌面卡片库紧凑瀑布流与几何回归（`.warehouse-desktop-col` 分列布局、`scripts/verify-warehouse-card-layout-browser.mjs`）为本任务（TASK-20260811-PROMPT-WAREHOUSE-MASONRY-RESTORE-001）新增，属于未部署候选行为；生产基线 `91d654e` 仍是整行按最高卡统一撑开的普通行式 Grid。
+复核日期：2026-08-13。下述仓库 UI 对应已上线的 `20260803a` 生图媒体可靠性；生产资源以线上 build 和资源 HTTP 冒烟为准。
+
+未部署候选（本任务 TASK-20260812-PROMPT-HUB-IMAGEGEN-CATALOG-LOADING-MASONRY-UX-P0-006，基于 `c10b5a2`）：
+- 卡片库桌面紧凑瀑布流（`.warehouse-desktop-col` 分列布局 + `grid-auto-rows: auto` + 最短列贪心/阈值重平衡），几何回归 `scripts/verify-warehouse-card-layout-browser.mjs`。
+- 失败媒体改为保留稳定的短媒体占位与可重试按钮（`.card-media--load-failed > .card-media-placeholder`），不再塌成纯文字卡或隐藏成黑块；瞬时失败不再写 24h missing（仅显式 404/410 由权威路径标记）。
+- 社区/卡片库媒体克制入场：`opacity + transform` 约 200ms、每张卡一次、`prefers-reduced-motion` 下立即显示。
+- 生图模型目录公开真源与稳定选择见 `docs/AI-HANDOFF.md`「当前生图与计费边界」。
 
 ## 目标
 
@@ -57,8 +63,9 @@ authenticated Worker media proxy before browser-side validation and upload.
 ## 稳定布局与首屏优先级
 
 - 卡片库桌面网格使用 CSS Grid 和固定 `4:3` 列表媒体框，不再按图片解码结果运行 Masonry 全量 `reloadItems/layout`。图片比例只影响详情页，列表通过 `_grid` 缩略图 `object-fit: cover` 保持列内稳定。
-- 桌面卡片库网格的紧凑瀑布流由 `legacy/script/part-03.js` 的 `ensureWarehouseDesktopColumns` 实现：卡片按最短列贪心分发进 N 个 `.warehouse-desktop-col` 弹性列（`styles/base/part-09.css`，非绝对定位），列内 flex + gap 垂直堆叠，行高恒等于卡片真实内容高度，图片就绪后按阈值做一次防抖重平衡。既有 `grid-auto-rows: max-content` 整行撑高虽然消除重叠，但会让短卡下方的下一张卡等待相邻列最高卡的行底，瀑布流错落效果消失；也绝不能回退 `grid-auto-rows: auto`（图片未解码时会把行高缩到文字卡 min-content ≈178px，视觉卡实际 402px 溢出到下一行造成重叠）。
-- 桌面网格的几何回归由 `scripts/verify-warehouse-card-layout-browser.mjs` 验收：在 1440x900、1024x768、390x844 视口对 192/816 张混合卡（文字卡、单图卡、多图卡、缺图卡、慢图卡）翻完分页后记录容器 class、computed display/列数、首 20 张卡 DOMRect、列内间隙、最大无效空洞与两两重叠，要求零重叠、零绝对定位、无横向溢出且关键控件可达。桌面视图额外断言紧凑瀑布流：列内相邻卡片纵向间隙≈gap、最大无效空洞为 0、相邻列高差不超过约 1.25 张最高卡；该紧凑度断言在生产整行撑高行为（`91d654e`）下稳定失败（列内出现数百像素空洞）。
+- 桌面卡片库网格的紧凑瀑布流由 `legacy/script/part-03.js` 的 `ensureWarehouseDesktopColumns` 实现：卡片不是 Grid item，而是按最短列贪心分发进 N 个 `.warehouse-desktop-col` 弹性列（`styles/base/part-09.css`，非绝对定位），列内 flex + gap 垂直堆叠，外层 `grid-auto-rows: auto` 只排布 N 个列容器，行高恒等于列内卡片真实内容高度，图片就绪后按阈值做一次防抖重平衡。不得恢复按行统一的 `max-content`（会把整行撑到最高卡，短卡下方出现数百像素纵向空洞）或互压的绝对定位。
+- 移动端两列由 `styles-assets.css` 的 `repeat(2, minmax(0,1fr))` + `.warehouse-mobile-col` flex 列分发，容器加 `overflow-x: clip` 防止横向溢出。
+- 桌面网格的几何回归由 `scripts/verify-warehouse-card-layout-browser.mjs` 验收：在 1440x900、1024x768、390x844 视口对 192/816 张混合卡（文字卡、单图卡、多图卡、缺图卡、慢图卡）翻完分页后记录容器 class、computed display/列数、首 20 张卡 DOMRect、列内间隙、最大无效空洞与两两重叠，要求零重叠、零绝对定位、无横向溢出且关键控件可达。桌面视图额外断言紧凑瀑布流：列内相邻卡片纵向间隙≈gap、最大无效空洞为 0、相邻列高差不超过约 1.25 张最高卡。宽度/侧栏变化后先等瀑布流重排与图片解码稳定（约 2.4s）再测量，避免慢图仍在加载时把按投影高排布的列误判为空洞。
 - 生图最近列表使用固定 `1:1` 媒体框；前 6 张设为 eager，其中前 4 张为高请求优先级，其余卡片继续 lazy。
 - 最近列表分页只能把新卡插在 `data-imagegen-feed-footer="recent"` 之前，说明条始终位于所有图片之后，不能隔断第 12 张和后续图片。
 - 图片 class/style 变化不再触发整个生图列表的属性级 MutationObserver 扫描；新增直属卡片时才执行布局残留清理。
@@ -70,7 +77,14 @@ authenticated Worker media proxy before browser-side validation and upload.
 3. URL 字符串存在不代表图片加载成功。浏览器只有在图片仍处于请求中且已绑定失败监听，或 `complete` 且解码出有效像素时才保留当前 URL；已完成但无像素的签名 URL 会失效对应路径和引用缓存，并绕过旧签名缓存重新解析一次。下载超时会清理 pending token 和旧 `src`，保留有限重试入口，不把图片永久卡在加载状态。
 4. 纯文字卡片不渲染图片占位符。生成任务 ID、来源 ID 或生图标签本身不构成图片引用。
 5. 只有对象确实存在但缺 grid 时才生成缩略图。
-6. 失败的近期生成/生图仓库媒体只移除失败的媒体槽并保留文字卡，避免黑色方块和浏览器破图图标；不会删除卡片或原始引用。只有现有权威 404/410 清理路径可以移除确实不存在的近期记录，其他错误继续保留数据并按有限恢复链处理。
+6. 失败的仓库/近期生成媒体保留稳定的媒体占位（`.card-media--load-failed > .card-media-placeholder`，含“图片加载失败”与“重试”按钮），不再移除媒体槽塌成纯文字卡，也不隐藏成黑块；重试只重新走有限恢复链，绝不无限重试。瞬时失败（签名超时、CDN 短暂 404、限流）不写入 24h missing 标记；只有权威 404/410 路径才移除确实不存在的近期记录。
+
+## 媒体入场与占位（2026-08-13 候选）
+
+- 社区与卡片库媒体揭示（`finishCardMediaShine` 置 `media-revealed`）时，每张卡只加一次 `ph-media-enter`：`opacity + translateY(6px) → 1/none`，约 200ms，仅合成属性，不用 blur/glow；`animationend` 后移除类。`data-ph-media-entered="1"` 持久标记保证滚动回屏/虚拟化不重复播放。
+- `prefers-reduced-motion: reduce` 下 `animation: none`，媒体立即显示最终态。
+- 失败媒体占位（`.card-media--load-failed > .card-media-placeholder`）为固定高度短槽（卡片库桌面 `max-height: 96px`），内部为“图片加载失败”+“重试”按钮，避免大块黑位或 4/3 假大图位造成瀑布流空洞。
+- 浏览器证据：`scripts/verify-media-ux-browser.mjs` 在 1440x900/1024x768/390x844 用本地 fixture（缺图/慢图/正常图混合卡 + 公开模型目录 stub，端口 127.0.0.1:8787）验证瀑布流几何、图片解码与占位、入场动画一次性、reduced-motion 立即显示、首屏 LCP 与 `window.__PH_IMAGE_STATS__`（requests/deduped/failures/timedOut）指标，并保存截图与 trace。
 
 ## 生图列表缩略图预热（2026-08-09）
 
@@ -116,6 +130,16 @@ $env:LAYOUT_CARD_COUNTS = '192,816'
 $env:SCREENSHOT_DIR = '<optional screenshot directory>'
 $env:LAYOUT_EVIDENCE_FILE = '<optional geometry evidence json>'
 node scripts/verify-warehouse-card-layout-browser.mjs
+```
+
+媒体 UX（瀑布流 + 占位 + 入场 + reduced-motion + 目录）浏览器证据：
+
+```powershell
+$env:PLAYWRIGHT_PACKAGE_DIR = '<playwright package directory>'
+$env:BROWSER_EXECUTABLE_PATH = '<Chrome or Edge executable>'
+$env:SCREENSHOT_DIR = '<optional screenshot directory>'
+$env:MEDIA_UX_EVIDENCE_FILE = '<optional evidence json>'
+node scripts/verify-media-ux-browser.mjs
 ```
 
 ## Generated-card archive invariant

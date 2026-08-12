@@ -43,19 +43,21 @@ Desktop `#cardsContainer` is now a stable CSS Grid owned by
 `legacy/script/part-10.js`, and `styles/base/part-09.css`. Image decode events
 must not restore Masonry absolute positioning or full-list relayouts. The
 warehouse browser check requires `display:grid`, zero absolute cards, aligned
-column-start tops, and collapsed failed media slots. The desktop warehouse grid
+column-start tops, and placeholder media slots. The desktop warehouse grid
 is a compact waterfall: `part-03.js` distributes cards into
 `.warehouse-desktop-col` flex columns (defined in `styles/base/part-09.css`) by
 a greedy shortest-column pass and runs one debounced rebalance when image
 heights settle; column gaps equal the grid gap so a short card is followed
-immediately by the next card in its column. Do not reintroduce row-aligned
-`grid-auto-rows: max-content` stretching (which erases the waterfall), and do
-not revert the rows to `auto` (undecked visual cards would overlap the
-following row). The geometry regression
-`scripts/verify-warehouse-card-layout-browser.mjs` covers 192/816 cards at
-1440x900 / 1024x768 / 390x844 and asserts pairwise non-overlap, in-column gaps
-≈ the grid gap, bounded adjacent-column deltas, zero horizontal overflow, plus
-grid/list and 1..5 column modes.
+immediately by the next card in its column. The outer grid uses
+`grid-auto-rows: auto` only for the N column containers; do not reintroduce
+row-aligned `grid-auto-rows: max-content` stretching (which erases the
+waterfall and leaves hundreds of pixels of fillable vertical holes) and do not
+make cards themselves grid items that participate in row height. The geometry
+regression `scripts/verify-warehouse-card-layout-browser.mjs` covers 192/816
+cards at 1440x900 / 1024x768 / 390x844 and asserts pairwise non-overlap,
+in-column gaps ≈ the grid gap, bounded adjacent-column deltas, zero horizontal
+overflow, plus grid/list and 1..5 column modes; width/sidebar changes wait for
+the masonry to settle and images to decode before measuring.
 
 Keep `styles-warehouse.css` as a standalone Pages asset. Staging and HTTP smoke checks must fail when the file, hero rules, or warehouse hero images are missing.
 
@@ -123,7 +125,7 @@ When continuing the split work, edit these source modules first, then rebuild th
 - `community-public-feed.js` owns the shared public-feed refresh promise, partial-cache hydration, bounded head request, and retry cooldown used by both community surfaces.
 - `legacy/script/part-02.js` owns generated-card persistence. Signed-in `copyStorage` saves must finish through `archiveGeneratedCardImage` and produce a verified `storage://` primary reference; failed archival removes the new card instead of persisting a temporary upstream URL.
 
-`card-image-loader.js` treats a URL as loaded only after the browser has decoded pixels (or while that exact request is still pending). A completed broken signed URL invalidates its cached path/reference and performs one fresh-sign resolution with the existing bounded fallback and authoritative-missing cleanup rules. Failed `cr_`/`wh_` feed media is collapsed to a text card while recovery continues, so a failed image never leaves a black media slot. Run `scripts/verify-card-image-loader-retry-browser.mjs`, `scripts/verify-imagegen-failed-media-collapse-browser.mjs`, and `scripts/verify-imagegen-finish-immediate-browser.mjs` for the focused regressions.
+`card-image-loader.js` treats a URL as loaded only after the browser has decoded pixels (or while that exact request is still pending). A completed broken signed URL invalidates its cached path/reference and performs one fresh-sign resolution with the existing bounded fallback and authoritative-missing cleanup rules. Failed media keeps a stable placeholder slot with a retry button (`.card-media--load-failed > .card-media-placeholder`) instead of collapsing to a text card or leaving a black slot; transient failures do not write the 24h missing mark. Loader requests/dedup/failure counters are exposed on `window.__PH_IMAGE_STATS__`. Run `scripts/verify-card-image-loader-retry-browser.mjs`, `scripts/verify-imagegen-failed-media-collapse-browser.mjs`, `scripts/verify-imagegen-finish-immediate-browser.mjs`, and `scripts/verify-media-ux-browser.mjs` for the focused regressions.
 
 Ignored local/generated outputs include `.pages-deploy/`, `dist/`, `*.bundle.js`, `.tmp-*.js`, and `prompt-hub-deploy.zip`. Removed one-off cleanup artifacts from this split pass: `.tmp-fd-head.js`, `.tmp-recover-chunks.js`, `prompt-hub-deploy.zip`, and `scripts/新建 文本文档.txt`.
 

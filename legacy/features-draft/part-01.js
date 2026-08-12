@@ -8,7 +8,7 @@
   const LS_FAVS = 'promptrepo_community_favorites';
   const LS_IMAGEGEN = 'promptrepo_imagegen_draft';
   const LS_IMAGEGEN_MODELS = 'promptrepo_imagegen_models_cache_v4';
-  const IMAGE_GEN_CATALOG_CACHE_VERSION = 19;
+  const IMAGE_GEN_CATALOG_CACHE_VERSION = 20;
   const IMAGE_GEN_COUNT_PREFERENCE_VERSION = 2;
   const LS_SESSION_GEN_JOBS = 'promptrepo_session_gen_jobs';
   const LS_PENDING_GEN_JOBS = 'promptrepo_pending_gen_jobs';

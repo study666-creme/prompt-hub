@@ -161,7 +161,6 @@
       var FALLBACK = [
         { id: 'image2-economy', label: '全能模型2 · 特价 1K', creditsPerCall: 2.2, creditsFinal: 2.2, resolutions: ['1k'] },
         { id: 'image2', label: '全能模型2 · 1K' },
-        { id: 'image2-free', label: '全能模型2 · 免费 1K' },
         { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K' },
         { id: 'image2-4k-fast', label: '全能模型2 · 4K' },
         { id: 'lingtu', label: '香蕉 · Standard 1K' },
@@ -171,7 +170,6 @@
         { id: 'lingtu-2', label: '香蕉 · 2 1K/2K/4K' },
         { id: 'mj-v81', label: 'MJ v8.1' },
         { id: 'mj-v7', label: 'MJ v7' },
-        { id: 'mj-v61', label: 'MJ v6.1' },
         { id: 'mj-niji7', label: 'MJ Niji 7' }
       ];
       function isRetired(model) {
@@ -196,7 +194,7 @@
           var raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v4') || 'null');
           if (!raw || !raw.models || !raw.models.length) return null;
           if (raw.ts < Date.now() - 86400000) return null;
-          if (Number(raw.version) < 19) return null;
+          if (Number(raw.version) < 20) return null;
           var models = raw.models.filter(function (model) {
             return model && !isRetired(model);
           });
