@@ -176,9 +176,11 @@ const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; 
   'gpt-image-2-chat': { id: 'image2-economy', label: '全能模型2 · 特价 1K', description: '特价文字生图，固定 1K。' },
   'gpt-image-2-free': { id: 'image2-free', label: '全能模型2 · 免费 1K', description: '免费生图模型，固定 1K。' },
   'gpt-image-2': { id: 'image2', label: '全能模型2 · 1K', description: '标准生图模型，固定 1K。' },
-  'image2-4k-fast': { id: 'image2-4k-fast', label: '全能模型2 · 4K', description: '固定 4K 的生图模型，支持官方 Image 参数与参考图。' },
-  'gpt-image-2-4k-fast': { id: 'image2-4k-fast', label: '全能模型2 · 4K', description: '固定 4K 的生图模型，支持官方 Image 参数与参考图。' },
-  'gpt-image-2-4k-adobe': { id: 'image2-4k-fast', label: '全能模型2 · 4K', description: '固定 4K 的生图模型，支持官方 Image 参数与参考图。' },
+  'image2-4k-fast': { id: 'image2-A', label: '全能模型2-A', description: '固定 4K 的生图模型，支持官方 Image 参数与参考图。' },
+  'gpt-image-2-4k-fast': { id: 'image2-A', label: '全能模型2-A', description: '固定 4K 的生图模型，支持官方 Image 参数与参考图。' },
+  'gpt-image-2-4k-adobe': { id: 'image2-A', label: '全能模型2-A', description: '固定 4K 的生图模型，支持官方 Image 参数与参考图。' },
+  '全能模型2-a': { id: 'image2-A', label: '全能模型2-A', description: '固定 4K 的快速生图模型，支持多种画面比例。' },
+  'image2-a': { id: 'image2-A', label: '全能模型2-A', description: '固定 4K 的快速生图模型，支持多种画面比例。' },
   'gpt-image-2-ext': { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K', description: '高质量生图模型，支持 1K/2K/4K。' },
   image2k4k: { id: 'image2-hd', label: '全能模型2 · 经济 2K/4K', description: '高分辨率经济模型，支持 2K/4K。' },
   'nano-banana-fast': { id: 'lingtu-fast', label: '香蕉 · Fast 1K', description: '快速生图模型，固定 1K。' },
@@ -343,7 +345,11 @@ function normalizedPricingGroups(
 function canonicalImageFamilyLabel(family: string, label: string): string {
   const base = family === 'gim2' ? '全能模型2' : family === 'banana' ? '香蕉' : '';
   if (!base) return label;
-  const suffix = label
+  const trimmed = String(label || '').trim();
+  // A reviewed canonical label such as `全能模型2-A` is already canonical and
+  // must not be re-suffixed into `全能模型2 · A`.
+  if (trimmed === base || trimmed.startsWith(`${base}-`)) return trimmed;
+  const suffix = trimmed
     .replace(/^(?:GPT\s*Image\s*2|Image\s*2|Image2|全能模型2|Nano\s*Banana|Banana|香蕉)\s*[·:：/\-]?\s*/i, '')
     .trim();
   return suffix ? `${base} · ${suffix}` : base;
@@ -532,7 +538,9 @@ function isImage2Fixed4KModel(upstreamModel: string): boolean {
   return new Set([
     'image2-4k-fast',
     'gpt-image-2-4k-fast',
-    'gpt-image-2-4k-adobe'
+    'gpt-image-2-4k-adobe',
+    '全能模型2-a',
+    'image2-a'
   ]).has(upstreamModel.trim().toLowerCase());
 }
 

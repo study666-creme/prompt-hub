@@ -132,7 +132,7 @@ try {
         models: [
           { id: 'image2-economy', label: '全能模型2 · 特价 1K', uiFamily: 'gim2', sortOrder: 20, selectable: true, status: 'active', resolutions: ['1k'], creditsFinal: 2.2, creditsBase: 2.2, creditsPerCall: 2.2 },
           { id: 'image2', label: '全能模型2 · 1K', uiFamily: 'gim2', selectable: true, status: 'active', resolutions: ['1k'], creditsFinal: 5.5, creditsBase: 5.5, creditsPerCall: 5.5 },
-          { id: 'image2-4k-fast', label: '全能模型2 · 极速 4K', uiFamily: 'gim2', selectable: true, status: 'active', resolutions: ['4k'], creditsFinal: 6.5, creditsBase: 6.5, creditsPerCall: 6.5, parameters: [{ name: 'quality', path: 'quality', type: 'string', fixed: 'standard' }] },
+          { id: 'image2-A', label: '全能模型2-A', uiFamily: 'gim2', selectable: true, status: 'active', resolutions: ['4k'], creditsFinal: 6.5, creditsBase: 6.5, creditsPerCall: 6.5, parameters: [{ name: 'quality', path: 'quality', type: 'string', fixed: 'standard' }] },
           { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K', uiFamily: 'gim2', selectable: true, status: 'active', resolutions: ['1k', '2k', '4k'], pricingByResolution: true, creditsByResolution: { '1k': 7, '2k': 15, '4k': 20 } }
         ]
       }

@@ -45,11 +45,11 @@ assert(currentResult.data?.models?.[0]?.id === 'mj-v81', 'current cache returned
 const retiredResult = await generationModelsFromCache(expectedVersion, [
   { id: 'image2-economy', label: 'public economy model' },
   { id: 'image2-free', label: 'retired model' },
-  { id: 'image2-4k-fast', label: 'public fast 4K model' },
+  { id: 'image2-A', label: 'public fast 4K model' },
   { id: 'image2', label: '全能模型2 · 1K', creditsFinal: 5.5 }
 ]);
 assert(
-  retiredResult.result.data?.models?.map(model => model.id).join(',') === 'image2-economy,image2-4k-fast,image2',
+  retiredResult.result.data?.models?.map(model => model.id).join(',') === 'image2-economy,image2-A,image2',
   'only retired models must be removed from a current browser cache'
 );
 assert(
@@ -82,12 +82,12 @@ assert(
 );
 
 const inFlightResult = await generationModelsInFlight([
-  { id: 'image2-4k-fast', label: 'public fast 4K model' }
+  { id: 'image2-A', label: 'public fast 4K model' }
 ]);
 assert(inFlightResult.samePromise, 'concurrent catalog reads must share one in-flight promise');
 assert(inFlightResult.catalogFetchCount === 1, 'concurrent catalog reads must issue one network request');
 assert(
-  inFlightResult.results.every(result => result.data?.models?.[0]?.id === 'image2-4k-fast'),
+  inFlightResult.results.every(result => result.data?.models?.[0]?.id === 'image2-A'),
   'the shared catalog result must retain the public fast 4K model'
 );
 
@@ -140,6 +140,17 @@ const privateIdentities = [
   'filesystem.site'
 ];
 
+// 公开资源不得再出现旧的 4K 模型公开别名或旧显示名；只允许留在服务端
+// LEGACY_MODEL_MAP 只读归一化边界（image-models-catalog.ts / newapi.ts）。
+const retiredPublicModelNames = [
+  'adobe',
+  'gpt-image-2-4k-adobe',
+  'gpt-image-2-4k-fast',
+  'image2-4k-fast',
+  '全能模型2 · 4K',
+  '全能模型2·4K'
+];
+
 for (const [name, source] of Object.entries({
   apiClient,
   indexHtml,
@@ -153,6 +164,9 @@ for (const [name, source] of Object.entries({
 })) {
   for (const identity of privateIdentities) {
     assert(!source.toLowerCase().includes(identity), `${name} exposes a private provider identity: ${identity}`);
+  }
+  for (const retiredName of retiredPublicModelNames) {
+    assert(!source.toLowerCase().includes(retiredName), `${name} exposes a retired 4K model name: ${retiredName}`);
   }
 }
 
@@ -182,13 +196,13 @@ ${applyCatalog}
   applyImageGenModelCatalog([
     { id: 'image2', status: 'offline' },
     projectedModels[0],
-    { id: 'image2-4k-fast', status: 'active' }
+    { id: 'image2-A', status: 'active' }
   ], { source: 'api', renderUi: false });
 `, catalogContext, { filename: 'imagegen-catalog-apply.vm.js' });
 
 const appliedIds = Array.from(catalogContext.window.__IMAGE_GEN_MODELS__ || [], (model) => model.id);
 assert(
-  appliedIds.join(',') === 'image2,image2-4k-fast',
+  appliedIds.join(',') === 'image2,image2-A',
   'API catalog must replace fallback models while retaining every public model'
 );
 assertPublicModelProjection(catalogContext.window.__IMAGE_GEN_MODELS__, 'window image model catalog');
@@ -202,7 +216,7 @@ emptyCatalogContext.globalThis = emptyCatalogContext;
 vm.runInNewContext(`
   let imageGenModelCatalog = [
     { id: 'image2', status: 'active' },
-    { id: 'image2-4k-fast', status: 'active' }
+    { id: 'image2-A', status: 'active' }
   ];
   let imageGenModelCatalogStale = false;
   let imageGenModelCatalogReady = false;
@@ -251,7 +265,7 @@ vm.runInNewContext(`
 ${applyCatalog}
   applyImageGenModelCatalog([
     { id: 'image2', status: 'active' },
-    { id: 'image2-4k-fast', status: 'active' }
+    { id: 'image2-A', status: 'active' }
   ], { source: 'api', catalogStale: false, renderUi: false });
 `, omissionContext, { filename: 'imagegen-catalog-omission.vm.js' });
 const omissionIds = Array.from(omissionContext.window.__IMAGE_GEN_MODELS__ || [], (model) => model.id);
@@ -260,7 +274,7 @@ assert(
   'success omission must remove image2-economy from the applied catalog'
 );
 assert(
-  omissionIds.includes('image2') && omissionIds.includes('image2-4k-fast'),
+  omissionIds.includes('image2') && omissionIds.includes('image2-A'),
   'success omission must keep the remaining public models'
 );
 assert(
@@ -274,7 +288,7 @@ lkgContext.globalThis = lkgContext;
 vm.runInNewContext(`
   let imageGenModelCatalog = [
     { id: 'image2', status: 'active' },
-    { id: 'image2-4k-fast', status: 'active' }
+    { id: 'image2-A', status: 'active' }
   ];
   let imageGenModelCatalogStale = false;
   let imageGenModelCatalogReady = false;
@@ -293,7 +307,7 @@ ${applyCatalog}
 `, lkgContext, { filename: 'imagegen-catalog-stale-lkg.vm.js' });
 const lkgIds = Array.from(lkgContext.window.__IMAGE_GEN_MODELS__ || [], (model) => model.id);
 assert(
-  lkgIds.join(',') === 'image2,image2-4k-fast',
+  lkgIds.join(',') === 'image2,image2-A',
   'stale empty or fully-hidden payload must keep the last known-good catalog'
 );
 assert(
@@ -330,7 +344,7 @@ assert(
 
 const omissionLive = await generationModelsLive({
   storage: freshCache([{ id: 'image2-economy', label: 'economy' }, { id: 'image2', label: 'standard' }]),
-  responseData: { models: [{ id: 'image2', label: 'standard' }, { id: 'image2-4k-fast', label: '4k' }], catalogStale: false }
+  responseData: { models: [{ id: 'image2', label: 'standard' }, { id: 'image2-A', label: '4k' }], catalogStale: false }
 });
 assert(
   !(omissionLive.result.data?.models || []).some((m) => m.id === 'image2-economy'),
@@ -342,11 +356,11 @@ assert(
 );
 
 const staleEmptyLive = await generationModelsLive({
-  storage: freshCache([{ id: 'image2', label: 'standard' }, { id: 'image2-4k-fast', label: '4k' }]),
+  storage: freshCache([{ id: 'image2', label: 'standard' }, { id: 'image2-A', label: '4k' }]),
   responseData: { models: [], catalogStale: true }
 });
 assert(
-  (staleEmptyLive.result.data?.models || []).map((m) => m.id).join(',') === 'image2,image2-4k-fast',
+  (staleEmptyLive.result.data?.models || []).map((m) => m.id).join(',') === 'image2,image2-A',
   'catalogStale=true empty payload must keep the last verified LKG'
 );
 assert(
@@ -355,12 +369,12 @@ assert(
 );
 const staleEmptyPersisted = JSON.parse(staleEmptyLive.storage.get(cacheKey) || 'null');
 assert(
-  (staleEmptyPersisted?.models || []).map((model) => model.id).join(',') === 'image2,image2-4k-fast',
+  (staleEmptyPersisted?.models || []).map((model) => model.id).join(',') === 'image2,image2-A',
   'catalogStale=true empty payload must not wipe the persisted LKG'
 );
 
 const failedLive = await generationModelsLive({
-  storage: freshCache([{ id: 'image2', label: 'standard' }, { id: 'image2-4k-fast', label: '4k' }]),
+  storage: freshCache([{ id: 'image2', label: 'standard' }, { id: 'image2-A', label: '4k' }]),
   fetchImpl: async () => { throw new Error('network down'); }
 });
 assert(
@@ -504,7 +518,7 @@ stalePersistContext.globalThis = stalePersistContext;
 vm.runInNewContext(`
   let imageGenModelCatalog = [
     { id: 'image2', status: 'active' },
-    { id: 'image2-4k-fast', status: 'active' }
+    { id: 'image2-A', status: 'active' }
   ];
   let imageGenModelCatalogStale = false;
   let imageGenModelCatalogReady = false;

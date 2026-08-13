@@ -216,10 +216,15 @@ describe('generation cost', () => {
     );
     const banana = computeImageGenerationCost(settings, 'newapi-nano-banana-pro', '4k', null, false);
     const fast4k = computeImageGenerationCost(settings, 'gpt-image-2-4k-fast', '4k', null, false);
+    const image2A = computeImageGenerationCost(settings, 'image2-A', '4k', null, false);
     expect(gpt1k.final).toBe(5.5);
     expect(gptExt.final).toBe(20);
     expect(official.final).toBe(5.5);
     expect(banana.final).toBe(6);
+    // 历史 4K 别名只读归一化到 image2-A，不得重新投影为旧的公开别名。
     expect(fast4k.final).toBe(6);
+    expect(fast4k.modelId).toBe('image2-A');
+    expect(image2A.final).toBe(6);
+    expect(image2A.modelId).toBe('image2-A');
   });
 });

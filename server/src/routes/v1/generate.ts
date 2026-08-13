@@ -631,7 +631,7 @@ function publicDirectModelParameters(
       required: false,
       fixed: 'low'
     });
-  } else if (model.id === 'image2-4k-fast') {
+  } else if (model.id === 'image2-A') {
     parameters.push({
       name: 'quality',
       path: 'quality',
@@ -723,8 +723,8 @@ function newApiRuleForModel(
   if (exact) return exact;
 
   // The live catalog and the reviewed fallback catalog can use different
-  // aliases for the same public model (for example image2-4k-fast and the
-  // older gpt-image-2-4k-Adobe name). Keep the live parameter contract when
+  // aliases for the same public model (for example image2-A and the
+  // historical 4K upstream names). Keep the live parameter contract when
   // the identity normalizes to the same public model.
   const target = normalizeImageModelId(upstream);
   return snapshot.rules.find(rule => normalizeImageModelId(rule.model) === target) || null;

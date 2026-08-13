@@ -145,7 +145,7 @@ describe('public image model projection', () => {
       'lingtu',
       'image2-economy',
       'image2-free',
-      'image2-4k-fast',
+      'image2-A',
       'lingtu-lite',
       'image2'
     ]);
@@ -273,7 +273,7 @@ describe('public image model projection', () => {
 
   it('keeps the live 4K parameter contract when the upstream id is an alias', () => {
     const aliasedCatalog = NEWAPI_IMAGE_MODEL_CATALOG.map((entry) => (
-      entry.id === 'image2-4k-fast'
+      entry.id === 'image2-A'
         ? { ...entry, upstream: 'gpt-image-2-4k-Adobe' }
         : entry
     ));
@@ -289,14 +289,14 @@ describe('public image model projection', () => {
           pricingVersion: '',
           models: [],
           rules: [{
-            model: 'image2-4k-fast',
+            model: 'image2-A',
             credits: 6,
             description: null,
             tags: 'image,4k',
-            label: '全能模型2 · 4K',
+            label: '全能模型2-A',
             modality: 'image',
             parameters: [
-              { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: 'image2-4k-fast' },
+              { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: 'image2-A' },
               { name: 'prompt', path: 'prompt', label: '提示词', type: 'string', required: true },
               { name: 'resolution', path: 'resolution', label: '分辨率', type: 'string', required: false, fixed: '4k' },
               { name: 'size', path: 'size', label: '画面比例', type: 'string', required: false, default: 'auto', options: ['auto', '1:1'] },
@@ -309,7 +309,7 @@ describe('public image model projection', () => {
         }
       }
     );
-    const model = models.find((entry) => entry.id === 'image2-4k-fast');
+    const model = models.find((entry) => entry.id === 'image2-A');
     expect(model?.parameters).toContainEqual(expect.objectContaining({
       name: 'quality',
       path: 'quality',

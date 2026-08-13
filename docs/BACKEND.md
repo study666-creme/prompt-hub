@@ -161,12 +161,12 @@ npm run deploy:dry-run
 | 公开号 | 关键参数 | 备注 |
 |---|---|---|
 | `全能模型2 · 特价 1K` | `resolution=1k`；不公开质量控件 | 支持比例和目录声明的参考图数量 |
-| `全能模型2 · 4K` | `resolution=4k`、`quality=standard`、`n=1` | 文生图不需要参考图；`image` / `images` 均为可选 |
+| `全能模型2-A` | `resolution=4k`、`quality=standard`、`n=1` | 文生图不需要参考图；`image` / `images` 均为可选；公开 ID 为 `image2-A` |
 | `全能模型2 · 高质量 1K/2K/4K` | 只公开 `resolution=1k/2k/4k`；省略 `quality` | 使用模型默认画质；支持比例、参考图和目录声明的 `n` 范围 |
 | `image2k4k` 兼容型号 | `resolution=2k/4k`、`quality=low` | 质量固定，不公开可选质量控件 |
 | 全部香蕉型号 | 分辨率与 `quality=low/medium/high` 分别提交 | 全部支持最多 14 张参考图；旧目录缺失能力或错误返回 `max_items=0` 时也不能禁用参考图 |
 
-只有香蕉显示质量选择，公开文案顺序为“低 / 中 / 高”，对应值 `low` / `medium` / `high`。不要在客户端恢复 `Adobe`、`极速 4K` 或旧的 `全能模型4K` 名称；上游别名只允许留在服务端归一化映射中。
+只有香蕉显示质量选择，公开文案顺序为“低 / 中 / 高”，对应值 `low` / `medium` / `high`。不要在客户端恢复旧的 4K Adobe/fast 别名或旧 4K 显示名；旧别名只允许留在服务端只读归一化映射中，不得重新暴露到公开模型目录、公开缓存、前端 fallback、公开 JS 或公开文档。
 
 ## 卡片库生图生命周期
 

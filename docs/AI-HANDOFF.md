@@ -66,7 +66,7 @@ Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery
 
 - 公开生图模型选择器（`GET /api/v1/generate/models`）的单一公开真源是 sanitized 实时目录；实时目录不可用时，`publicModelPayload` 回退到审核过的静态 `NEWAPI_IMAGE_MODEL_CATALOG` 作为 LKG 并置 `catalogStale: true`，绝不返回空列表让前端落到“选择模型”。管理后台 `status: offline`/`enabled:false` 的模型即使目录不可用也保持隐藏；`image2-free` 与历史 MJ `mj-v61` 永不投射到公开选择器，前端静态 fallback / 首屏 paint / 资产工作台硬编码入口已同步清理（历史 job 仍按 `normalizeImageModelId` 别名只读兼容解析）。
 - 前端模型目录缓存版本已升到 `IMAGE_GEN_CATALOG_CACHE_VERSION = 20`（`promptrepo_imagegen_models_cache_v4`）。可信成功响应（`catalogStale !== true`）必须成为当前目录：`api-client.js` 即使 models 为空也替换内存缓存，并以同版本空数组覆盖/清除 localStorage 旧目录；省略的模型（如 `image2-economy`）会立即从公开 picker 移除，当前非法 selection 自动回落到同组/全局仍合法的首项。只有请求失败或明确 `catalogStale === true` 才保留上一次已验证 LKG 并置 `__IMAGE_GEN_CATALOG_STALE__`，页面在 `#imageGenCatalogStaleHint` 提示“目录暂时不可用，已显示上次已核验的模型”。空目录时 UI 明确显示“暂无可用模型”并清除非法 select 值。**reload 后同版本 `models:[]` 仍是已核验空目录**：`api-client.js` warm 缓存、`index.html` 首屏 `readCache` 与 `loadCachedImageGenModels` 均以 `Array.isArray(raw.models)` 识别空数组，`initImageGenForm`/`warmImageGenModelCatalog` 应用它而不是 `IMAGE_GEN_MODEL_FALLBACK`；`applyImageGenModelCatalog` 只在 `trustedLive`（source=api 且 catalogStale!==true）时覆盖持久化缓存，stale/失败路径绝不写盘。上述缓存/应用/选择语义由 `scripts/verify-imagegen-catalog-cache.mjs` 的 VM 断言（含跨 reload 回归）覆盖。
-- 模型选择使用稳定 canonical id：`normalizeImageGenModelId` 把 `gpt-image-2-1k/chat→image2-economy`、`gpt-image-2-4k-*→image2-4k-fast`、`gpt-image-2-vip/ext→image2-pro`、`nano-banana*→lingtu*` 等历史别名折叠到仍公开的 id（与 server `LEGACY_MODEL_MAP` 对齐，但不含 `newapi-*` 私有前缀）。目录刷新/分组切换/参数变化后只要该 id 仍公开就保持选择；被隐藏/移除时自动选同组首个可用模型，不留下“标签已选但 select 为空”的分裂状态。
+- 模型选择使用稳定 canonical id：`normalizeImageGenModelId` 把 `gpt-image-2-1k/chat→image2-economy`、旧的 4K Adobe/fast 上游别名→`image2-A`、`gpt-image-2-vip/ext→image2-pro`、`nano-banana*→lingtu*` 等历史别名折叠到仍公开的 id（与 server `LEGACY_MODEL_MAP` 对齐，但不含 `newapi-*` 私有前缀）。公开层和前端选择器不得再出现旧的 4K Adobe/fast 别名或旧 4K 显示名；4K 快速型号的公开 ID 为 `image2-A`、用户可见名称为 `全能模型2-A`，旧别名只保留在服务端只读归一化边界。目录刷新/分组切换/参数变化后只要该 id 仍公开就保持选择；被隐藏/移除时自动选同组首个可用模型，不留下“标签已选但 select 为空”的分裂状态。
 
 - Worker 只能通过 `https://newapi.prompt-hubs.com` 访问卡藏 New API；不得把 DNS 当前解析出的 IP 或 `sslip.io` 地址写回 `wrangler.toml`。实时目录必须返回非空版本且公开投影不得为 `catalogStale=true`，否则付费提交应在扣费前停止。
 - 新任务只允许卡藏 API 的全能模型2、香蕉和 MJ 8.1 / MJ 7 / Niji 7；所有公开 MJ 均为 New API provider，固定 `relax`、40 积分/次，旧 Apimart provider 只恢复历史任务。
@@ -133,7 +133,7 @@ npm test
 以下规则优先于本文档中较早的模型兼容性描述；运行状态以 `/health.buildSha` 和实时模型目录为准：
 
 - `全能模型2 · 特价 1K` 公开 ID 为 `image2-economy`；价格读取实时目录，支持比例和可选参考图，不公开质量控件。
-- `全能模型2 · 4K` 公开 ID 为 `image2-4k-fast`，固定发送 `resolution=4k`、`quality=standard`、`n=1`；纯文生图不需要参考图。
+- `全能模型2-A` 公开 ID 为 `image2-A`，固定发送 `resolution=4k`、`quality=standard`、`n=1`；纯文生图不需要参考图。公开层不得再出现旧的 4K Adobe/fast 别名或旧 4K 显示名。
 - `全能模型2 · 高质量 1K/2K/4K` 只用 `resolution` 选择 `1k`、`2k`、`4k`，省略 `quality` 并使用模型默认画质；`image2k4k` 固定发送 `quality=low`。
 - 所有香蕉型号最多接收 14 张参考图，分辨率与质量字段必须独立，且只有香蕉公开 `quality=low/medium/high` 选择。
 - 前端质量文案只使用“低 / 中 / 高”，上游别名（包括 Adobe）不得泄漏到公开模型目录。

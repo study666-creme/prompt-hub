@@ -162,7 +162,7 @@
         { id: 'image2-economy', label: '全能模型2 · 特价 1K', creditsPerCall: 2.2, creditsFinal: 2.2, resolutions: ['1k'] },
         { id: 'image2', label: '全能模型2 · 1K' },
         { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K' },
-        { id: 'image2-4k-fast', label: '全能模型2 · 4K' },
+        { id: 'image2-A', label: '全能模型2-A' },
         { id: 'lingtu', label: '香蕉 · Standard 1K' },
         { id: 'lingtu-fast', label: '香蕉 · Fast 1K' },
         { id: 'lingtu-lite', label: '香蕉 · Lite 1K' },
@@ -183,8 +183,8 @@
         models.forEach(function (m) {
           var opt = document.createElement('option');
           opt.value = m.id;
-          opt.textContent = m.id === 'image2-4k-fast'
-            ? '全能模型2 · 4K'
+          opt.textContent = m.id === 'image2-A'
+            ? '全能模型2-A'
             : (m.label || m.catalogLabel || m.id);
           sel.appendChild(opt);
         });

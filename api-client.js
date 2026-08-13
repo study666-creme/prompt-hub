@@ -524,7 +524,7 @@
   const PUBLIC_IMAGE_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
   const RETIRED_PUBLIC_IMAGE_MODEL_IDS = new Set(['image2-free']);
   const PUBLIC_IMAGE_MODEL_LABEL_OVERRIDES = {
-    'image2-4k-fast': '全能模型2 · 4K'
+    'image2-A': '全能模型2-A'
   };
   const PRIVATE_PUBLIC_MODEL_TEXT_RE = /(?:https?:\/\/|www\.|\b(?:upstream|provider|reseller|channel|route|priority|weight|margin|markup|multiplier|base\s*url)\b|上游|供应商|供货商|渠道|通道|线路|路由|采购|进货|成本|毛利|利润|倍率|加价|结算价|内部价|实时价|优先级|权重|故障转移)/i;
   const PRIVATE_PUBLIC_MODEL_PARAMETER_RE = /(?:upstream|provider|reseller|channel|route|group|priority|weight|margin|markup|multiplier|cost|base_?url|api_?key)/i;

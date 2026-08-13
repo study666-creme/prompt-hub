@@ -31,7 +31,7 @@ describe('image model catalog', () => {
       'image2-free',
       'image2-economy',
       'image2',
-      'image2-4k-fast',
+      'image2-A',
       'image2-pro',
       'lingtu-lite',
       'lingtu-fast',
@@ -51,7 +51,7 @@ describe('image model catalog', () => {
     expect(getCatalogEntry('gpt-image-2-1k')?.defaultCredits).toBe(2.2);
     expect(base1k?.defaultCredits).toBe(5.5);
     expect(getCatalogEntry('gpt-image-2-4k-fast')).toMatchObject({
-      id: 'image2-4k-fast',
+      id: 'image2-A',
       resolutions: ['4k'],
       defaultCredits: 6
     });
@@ -108,7 +108,7 @@ describe('image model catalog', () => {
   it('normalizes legacy ids', () => {
     expect(normalizeImageModelId('quanneng2')).toBe('image2');
     expect(normalizeImageModelId('gpt-image-2')).toBe('image2');
-    expect(normalizeImageModelId('gpt-image-2-4k-fast')).toBe('image2-4k-fast');
+    expect(normalizeImageModelId('gpt-image-2-4k-fast')).toBe('image2-A');
     expect(normalizeImageModelId('gpt-image-2-chat')).toBe('image2-economy');
     expect(normalizeImageModelId('gpt-image-2-ext')).toBe('image2-pro');
     expect(normalizeImageModelId('nano-banana-pro')).toBe('lingtu-pro');
@@ -130,7 +130,7 @@ describe('image model catalog', () => {
     expect(normalizeImageModelId('gpt-image-2-free')).toBe('image2-free');
     expect(normalizeImageModelId('gpt-image-2-1k')).toBe('image2-economy');
     expect(normalizeImageModelId('gpt-image-2-vip')).toBe('image2-pro');
-    expect(normalizeImageModelId('gpt-image-2-4k-adobe')).toBe('image2-4k-fast');
+    expect(normalizeImageModelId('gpt-image-2-4k-adobe')).toBe('image2-A');
     expect(normalizeImageModelId('nano-banana-2-lite')).toBe('lingtu-lite');
     expect(isRetainedPublicImageEntry(getCatalogEntry('image2-free')!)).toBe(false);
     expect(isRetainedPublicImageEntry(getCatalogEntry('mj-v61')!)).toBe(false);

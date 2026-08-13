@@ -434,7 +434,7 @@ describe('newapi image upstream', () => {
       'image2',
       'image2-pro',
       'image2-free',
-      'image2-4k-fast',
+      'image2-A',
       'lingtu',
       'lingtu-fast',
       'lingtu-lite',
@@ -443,7 +443,7 @@ describe('newapi image upstream', () => {
     ]));
     expect(snapshot.imageCatalogEntries.map(model => model.uiFamily).filter(family => family === 'gim2')).toHaveLength(5);
     expect(snapshot.imageCatalogEntries.map(model => model.uiFamily).filter(family => family === 'banana')).toHaveLength(5);
-    expect(snapshot.imageCatalogEntries.find(model => model.id === 'image2-4k-fast')?.label).toBe('全能模型2 · 4K');
+    expect(snapshot.imageCatalogEntries.find(model => model.id === 'image2-A')?.label).toBe('全能模型2-A');
     expect(JSON.stringify(snapshot.imageCatalogEntries.map(model => ({
       id: model.id,
       label: model.label,
@@ -889,14 +889,14 @@ describe('newapi image upstream', () => {
 
     const snapshot = await fetchNewApiModelCatalog('https://fixed-4k.test', { force: true });
     expect(snapshot.imageCatalogEntries).toContainEqual(expect.objectContaining({
-      id: 'image2-4k-fast',
+      id: 'image2-A',
       upstream: 'gpt-image-2-4k-fast',
       resolutions: ['4k'],
       defaultCredits: 6.5
     }));
     expect(newApiCreditsForModel(snapshot.rules, 'gpt-image-2-4k-fast', '4k')).toBe(6.5);
     expect(publicNewApiCatalogModels(snapshot)).toContainEqual(expect.objectContaining({
-      id: 'image2-4k-fast',
+      id: 'image2-A',
       modality: 'image'
     }));
   });
@@ -938,7 +938,7 @@ describe('newapi image upstream', () => {
 
     expect(newApiHasActiveRoute(routes, 'image2-4k-fast')).toBe(true);
     expect(await publicNewApiRoutedCatalogModels(snapshot, routes)).toContainEqual(
-      expect.objectContaining({ id: 'image2-4k-fast', modality: 'image' })
+      expect.objectContaining({ id: 'image2-A', modality: 'image' })
     );
   });
 
@@ -1252,14 +1252,14 @@ describe('newapi image upstream', () => {
 
   it('submits text-only 4K requests with the fixed official parameters', () => {
     const body = buildNewApiImageRequestBody({
-      upstreamModel: 'image2-4k-fast',
+      upstreamModel: '全能模型2-A',
       prompt: 'a clean product photo',
       resolution: '4k',
       quality: 'high',
       size: '16:9',
       count: 1,
       catalogParameters: [
-        { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: 'image2-4k-fast' },
+        { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: '全能模型2-A' },
         { name: 'prompt', path: 'prompt', label: '提示词', type: 'string', required: true },
         { name: 'resolution', path: 'resolution', label: '分辨率', type: 'string', required: false, fixed: '4k' },
         { name: 'size', path: 'size', label: '画面比例', type: 'string', required: false, default: 'auto', options: ['auto', '16:9'] },
@@ -1268,7 +1268,7 @@ describe('newapi image upstream', () => {
       ]
     });
     expect(body).toEqual({
-      model: 'image2-4k-fast',
+      model: '全能模型2-A',
       prompt: 'a clean product photo',
       resolution: '4k',
       size: '16:9',

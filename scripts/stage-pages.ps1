@@ -257,6 +257,16 @@ if ($confidentialityHits.Count -gt 0) {
 }
 Write-Host "Pages public commercial-confidentiality scan OK." -ForegroundColor DarkGray
 
+$retiredModelNamePattern = '(?i)(gpt-image-2-4k-adobe|gpt-image-2-4k-fast|image2-4k-fast|\u5168\u80fd\u6a21\u578b2\s*[\u00b7\u2022]\s*4K|\u5168\u80fd\u6a21\u578b2\u00b74K)'
+$retiredModelHits = @($publicTextFiles | Select-String -Pattern $retiredModelNamePattern)
+if ($retiredModelHits.Count -gt 0) {
+  $retiredModelHits | Select-Object -First 20 | ForEach-Object {
+    Write-Host ("  {0}:{1}" -f $_.Path, $_.LineNumber) -ForegroundColor Red
+  }
+  throw "Pages staging re-exposes a retired 4K image model name in public assets"
+}
+Write-Host "Pages retired image model name scan OK." -ForegroundColor DarkGray
+
 $files = Get-ChildItem $staging -Recurse -File
 $count = $files.Count
 $sizeMb = [math]::Round((($files | Measure-Object Length -Sum).Sum / 1MB), 2)
