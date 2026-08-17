@@ -109,28 +109,41 @@ function parameterValues(model: NewApiCatalogModel, name: string): string[] {
 }
 
 function parameter(model: NewApiCatalogModel, names: string[]): NewApiCatalogParameter | null {
-  return model.parameters.find(item => names.includes(item.name)) || null;
+  for (const name of names) {
+    const declared = model.parameters.find(item => item.name === name);
+    if (declared) return declared;
+  }
+  return null;
 }
 
-function validateVideoRequest(model: NewApiCatalogModel, input: z.infer<typeof bodySchema>): void {
-  const duration = parameter(model, ['duration']);
+function validateParameterChoice(parameter: NewApiCatalogParameter | null, value: string | number, label: string): void {
+  const values = parameter?.options?.length
+    ? parameter.options
+    : parameter && Object.prototype.hasOwnProperty.call(parameter, 'fixed')
+      ? [parameter.fixed]
+      : [];
+  if (values.length && !values.some(candidate => String(candidate).toLowerCase() === String(value).toLowerCase())) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `该模型不支持 ${value} ${label}`);
+  }
+}
+
+export function validateVideoRequest(model: NewApiCatalogModel, input: z.infer<typeof bodySchema>): void {
+  const duration = parameter(model, ['seconds', 'duration']);
   if (duration?.min != null && input.duration < duration.min) {
     throw new ApiError(400, 'VALIDATION_ERROR', `该模型最短支持 ${duration.min} 秒`);
   }
   if (duration?.max != null && input.duration > duration.max) {
     throw new ApiError(400, 'VALIDATION_ERROR', `该模型最长支持 ${duration.max} 秒`);
   }
+  validateParameterChoice(duration, input.duration, '秒时长');
   const ratios = [...parameterValues(model, 'ratio'), ...parameterValues(model, 'aspect_ratio')];
-  if (ratios.length && !ratios.includes(input.ratio)) {
+  if (ratios.length && !ratios.some(ratio => ratio.toLowerCase() === input.ratio.toLowerCase())) {
     throw new ApiError(400, 'VALIDATION_ERROR', `该模型不支持 ${input.ratio} 比例`);
   }
-  const resolutions = parameterValues(model, 'resolution');
-  if (resolutions.length && !resolutions.includes(input.resolution)) {
-    throw new ApiError(400, 'VALIDATION_ERROR', `该模型不支持 ${input.resolution} 分辨率`);
-  }
-  validateReferenceCount(model, ['referenceImages', 'images', 'image'], input.referenceImages?.length || 0, '参考图片');
-  validateReferenceCount(model, ['referenceVideos'], input.referenceVideos?.length || 0, '参考视频');
-  validateReferenceCount(model, ['referenceAudios'], input.referenceAudios?.length || 0, '参考音频');
+  validateParameterChoice(parameter(model, ['size', 'resolution']), input.resolution, '分辨率');
+  validateReferenceCount(model, ['images', 'referenceImages', 'reference_images', 'image', 'input_reference'], input.referenceImages?.length || 0, '参考图片');
+  validateReferenceCount(model, ['reference_videos', 'referenceVideos', 'video_references', 'videos', 'reference_video', 'input_video'], input.referenceVideos?.length || 0, '参考视频');
+  validateReferenceCount(model, ['reference_audios', 'referenceAudios', 'audio_reference', 'audios', 'reference_audio'], input.referenceAudios?.length || 0, '参考音频');
 }
 
 function validateReferenceCount(model: NewApiCatalogModel, names: string[], count: number, label: string): void {
@@ -210,8 +223,11 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   validateVideoRequest(model, input);
   const credits = newApiFixedCreditsForRequest(model, {
     duration: input.duration,
+    seconds: input.duration,
     resolution: input.resolution,
-    ratio: input.ratio
+    size: input.resolution,
+    ratio: input.ratio,
+    aspect_ratio: input.ratio
   });
   if (credits == null || credits <= 0) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认该模型实时价格');
 
@@ -275,7 +291,8 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
       resolution: input.resolution,
       referenceImages,
       referenceVideos,
-      referenceAudios
+      referenceAudios,
+      catalogParameters: model.parameters
     });
     if (task.status === 'failed') {
       throw new ApiError(502, 'UPSTREAM_ERROR', task.errorMessage || '视频生成失败');

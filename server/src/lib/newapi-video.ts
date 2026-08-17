@@ -1,4 +1,5 @@
 import { ApiError } from './errors';
+import type { NewApiCatalogParameter } from './newapi';
 
 export type NewApiVideoSubmitParams = {
   upstreamModel: string;
@@ -9,6 +10,7 @@ export type NewApiVideoSubmitParams = {
   referenceImages?: string[];
   referenceVideos?: string[];
   referenceAudios?: string[];
+  catalogParameters?: NewApiCatalogParameter[];
 };
 
 export type NewApiVideoTask = {
@@ -94,13 +96,87 @@ async function jsonResponse(response: Response): Promise<unknown> {
   }
 }
 
-export async function submitNewApiVideo(
-  apiKey: string,
-  baseUrl: string | undefined,
-  params: NewApiVideoSubmitParams
-): Promise<NewApiVideoTask> {
+function setRequestPath(target: Record<string, unknown>, path: string, value: unknown): void {
+  if (value == null || value === '') return;
+  const keys = path.split('.').map(key => key.trim()).filter(Boolean);
+  if (!keys.length || keys.some(key => key === '__proto__' || key === 'constructor' || key === 'prototype')) return;
+  let cursor = target;
+  for (const key of keys.slice(0, -1)) {
+    const next = cursor[key];
+    if (!next || typeof next !== 'object' || Array.isArray(next)) cursor[key] = {};
+    cursor = cursor[key] as Record<string, unknown>;
+  }
+  cursor[keys[keys.length - 1]] = value;
+}
+
+function boundedRefs(parameter: NewApiCatalogParameter, refs: string[]): string[] {
+  const max = parameter.max_items == null ? refs.length : Math.max(0, Math.floor(parameter.max_items));
+  return refs.slice(0, max);
+}
+
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function declaredValue(parameter: NewApiCatalogParameter, requested: unknown): unknown {
+  if (hasOwn(parameter, 'fixed')) return parameter.fixed;
+  const candidate = requested ?? (hasOwn(parameter, 'default') ? parameter.default : undefined);
+  if (!parameter.options?.length || candidate == null) return candidate;
+  return parameter.options.find(option => String(option).toLowerCase() === String(candidate).toLowerCase()) ?? candidate;
+}
+
+function firstDeclared(
+  declared: Map<string, NewApiCatalogParameter>,
+  names: readonly string[]
+): NewApiCatalogParameter | null {
+  for (const name of names) {
+    const parameter = declared.get(name);
+    if (parameter) return parameter;
+  }
+  return null;
+}
+
+function setDeclaredMedia(
+  body: Record<string, unknown>,
+  parameter: NewApiCatalogParameter | null,
+  refs: string[] | undefined
+): void {
+  const clean = (refs || []).map(value => value.trim()).filter(Boolean);
+  if (!parameter || !clean.length) return;
+  const bounded = boundedRefs(parameter, clean);
+  setRequestPath(body, parameter.path, parameter.type === 'array' ? bounded : bounded[0]);
+}
+
+function buildCatalogRequestBody(params: NewApiVideoSubmitParams): Record<string, unknown> {
+  const parameters = (params.catalogParameters || []).filter(parameter => parameter?.name && parameter.path);
+  const declared = new Map(parameters.map(parameter => [parameter.name, parameter]));
+  const body: Record<string, unknown> = {};
+  const set = (names: readonly string[], requested: unknown) => {
+    const parameter = firstDeclared(declared, names);
+    if (parameter) setRequestPath(body, parameter.path, declaredValue(parameter, requested));
+  };
+
+  set(['model'], params.upstreamModel);
+  set(['prompt'], params.prompt);
+  set(['seconds', 'duration'], params.duration);
+  set(['size', 'resolution'], params.resolution);
+
+  const ratioParameter = firstDeclared(declared, ['aspect_ratio', 'ratio']);
+  if (ratioParameter && (ratioParameter.options?.length || hasOwn(ratioParameter, 'fixed') || hasOwn(ratioParameter, 'default'))) {
+    setRequestPath(body, ratioParameter.path, declaredValue(ratioParameter, params.ratio));
+  }
+
+  setDeclaredMedia(body, firstDeclared(declared, ['images', 'referenceImages', 'reference_images', 'image', 'input_reference']), params.referenceImages);
+  setDeclaredMedia(body, firstDeclared(declared, ['reference_videos', 'referenceVideos', 'video_references', 'videos', 'reference_video', 'input_video']), params.referenceVideos);
+  setDeclaredMedia(body, firstDeclared(declared, ['reference_audios', 'referenceAudios', 'audio_reference', 'audios', 'reference_audio']), params.referenceAudios);
+  return body;
+}
+
+export function buildNewApiVideoRequestBody(params: NewApiVideoSubmitParams): Record<string, unknown> {
+  if (params.catalogParameters?.length) return buildCatalogRequestBody(params);
+
   const isSd = params.upstreamModel.toLowerCase().startsWith('sd');
-  const body: Record<string, unknown> = {
+  return {
     model: params.upstreamModel,
     prompt: params.prompt,
     duration: params.duration,
@@ -118,6 +194,14 @@ export async function submitNewApiVideo(
     async: true,
     n: 1
   };
+}
+
+export async function submitNewApiVideo(
+  apiKey: string,
+  baseUrl: string | undefined,
+  params: NewApiVideoSubmitParams
+): Promise<NewApiVideoTask> {
+  const body = buildNewApiVideoRequestBody(params);
   const response = await fetch(`${apiBase(baseUrl)}/v1/videos`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },

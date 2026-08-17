@@ -878,4 +878,74 @@ describe('newapi image upstream', () => {
     expect(resolved.map(item => item?.route?.channelId)).toEqual([11, 22, 33]);
     expect(newApiKeyForRoute('sk-secret', resolved[1]?.route)).toBe('sk-secret-22');
   });
+
+  it('resolves every published canvas video id without requiring an admin route snapshot', async () => {
+    const videoIds = [
+      'minimax_h3',
+      'S-2.0满血-933',
+      'S-2.0-720p-稳定',
+      'S-2.0mini-官转',
+      'S-2.0fast-官转',
+      'S-videos-t-431-pro-720-5',
+      'S-videos-t-431-fast-720-5',
+      'runway-gen4.5',
+      'kling-o3',
+      'kling-o3-pro-v2v-reference',
+      'kling-v3',
+      'kling-v3-omni-v2v-create',
+      'veo-3.1',
+      'veo-3.1-fast',
+      'veo-3.1-lite',
+      'S-videos-f-933-pro-3',
+      'S-videos-f-933-fast-3'
+    ];
+    const snapshot: NewApiCatalogSnapshot = {
+      available: true,
+      stale: false,
+      version: 'canvas-video-models',
+      pricingVersion: 'canvas-video-pricing',
+      rules: [],
+      imageCatalogEntries: [],
+      models: videoIds.map((id, order) => ({
+        id,
+        upstreamModel: id,
+        label: id,
+        description: '',
+        modality: 'video' as const,
+        operation: 'generate' as const,
+        order,
+        endpoint: { method: 'POST' as const, path: '/api/v1/video', contentType: 'application/json' as const },
+        parameters: [{ name: 'model', path: 'model', label: 'Model', type: 'string' as const, required: true, fixed: id }],
+        pricing: { mode: 'fixed' as const, unit: 'request' as const, yuan: 0.01, credits: 1, quantityParameter: null }
+      }))
+    };
+    const unavailableRoutes: NewApiAdminRouteSnapshot = {
+      available: false,
+      fetchedAt: '',
+      routes: {},
+      error: 'not configured'
+    };
+
+    const resolved = await Promise.all(videoIds.map(id => resolveNewApiRoutedCatalogModel(snapshot, unavailableRoutes, id, 'video')));
+
+    expect(resolved.map(item => item?.requestedModelId)).toEqual(videoIds);
+    expect(resolved.every(item => item?.route == null)).toBe(true);
+  });
+
+  it('prices native video models with a seconds quantity parameter', () => {
+    const model: NewApiCatalogSnapshot['models'][number] = {
+      id: 'kling-v3',
+      upstreamModel: 'kling-v3',
+      label: 'Kling V3',
+      description: '',
+      modality: 'video',
+      operation: 'generate',
+      order: 1,
+      endpoint: { method: 'POST', path: '/api/v1/video', contentType: 'application/json' },
+      parameters: [],
+      pricing: { mode: 'fixed', unit: 'second', yuan: 0.1, credits: 10, quantityParameter: 'seconds' }
+    };
+
+    expect(newApiFixedCreditsForRequest(model, { duration: 8, seconds: 8 })).toBe(80);
+  });
 });
