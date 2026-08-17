@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildNewApiVideoRequestBody, fetchNewApiVideoTask, submitNewApiVideo } from './newapi-video';
+import { buildNewApiVideoRequestBody, fetchNewApiVideoContent, fetchNewApiVideoTask, submitNewApiVideo } from './newapi-video';
 import type { NewApiCatalogParameter } from './newapi';
 
 function json(body: unknown, status = 200) {
@@ -70,6 +70,26 @@ describe('newapi video upstream', () => {
 
     expect(submitted.id).toBe('request_1');
     expect(completed).toMatchObject({ status: 'completed', videoUrl: 'https://video.test/out.mp4' });
+  });
+
+  it('retries briefly when completed content is not ready at the proxy yet', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1;
+      return calls < 3
+        ? json({ error: { message: 'content warming up' } }, 425)
+        : new Response('video-bytes', { status: 200, headers: { 'Content-Type': 'video/mp4' } });
+    }));
+
+    const pending = fetchNewApiVideoContent('secret', 'https://newapi.test', 'task_content');
+    await vi.runAllTimersAsync();
+    const response = await pending;
+
+    expect(calls).toBe(3);
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe('video-bytes');
+    vi.useRealTimers();
   });
 
   it('submits MiniMax H3 with native fields and preserves reference images', async () => {

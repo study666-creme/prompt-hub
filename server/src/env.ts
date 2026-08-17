@@ -21,8 +21,10 @@ export type Env = {
   /** MJ 与视觉工具上游 Apimart。 */
   APIMART_API_KEY?: string;
   APIMART_API_BASE_URL?: string;
-  /** New API 生图线路（OpenAI 兼容；目录价格按 1 元=100 积分原值换算，支持 0.1 积分） */
+  /** New API 图片线路（OpenAI 兼容；目录价格按 1 元=100 积分原值换算） */
   NEWAPI_API_KEY?: string;
+  /** 可选的视频专用 New API 令牌；未配置时兼容回退到全能令牌。 */
+  NEWAPI_VIDEO_API_KEY?: string;
   NEWAPI_API_BASE_URL?: string;
   /** 仅后台读取卡藏 API 的模型渠道映射，不得返回给公开模型接口。 */
   NEWAPI_CATALOG_ADMIN_SECRET?: string;
@@ -69,6 +71,11 @@ export type Env = {
   /** 可选：从 Supabase Usage 页手动同步的 Database 已用（MB） */
   SUPABASE_DB_USED_MB?: string;
 };
+
+/** 视频优先使用独立令牌，旧部署没有该 Secret 时保持兼容。 */
+export function newApiVideoKey(env: Pick<Env, 'NEWAPI_API_KEY' | 'NEWAPI_VIDEO_API_KEY'>): string | undefined {
+  return env.NEWAPI_VIDEO_API_KEY?.trim() || env.NEWAPI_API_KEY?.trim();
+}
 
 export function parseCorsOrigins(raw: string): string[] {
   return raw

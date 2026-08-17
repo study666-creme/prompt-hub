@@ -39,7 +39,8 @@
 | `SUPABASE_URL` | Secret | MemFire Supabase-compatible API URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Secret | 服务端数据库权限 |
 | `SUPABASE_JWT_SECRET` | Secret，可选 | 本地 JWT 校验回退 |
-| `NEWAPI_API_KEY` | Secret | 全能模型2与香蕉；目录和价格实时同步 |
+| `NEWAPI_API_KEY` | Secret | New API 图片/通用线路；目录和价格实时同步 |
+| `NEWAPI_VIDEO_API_KEY` | Secret，可选 | New API 视频专用令牌；配置后视频优先使用，未配置时兼容回退通用令牌 |
 | `APIMART_API_KEY` | Secret | MJ 与视觉能力 |
 | `CHAT_API_KEY` | Secret | 对话/提示词工具 |
 | `ADMIN_API_SECRET` | Secret | 运营后台和造码脚本 |
@@ -56,6 +57,8 @@
 - 运营后台的调用链路由卡藏 API `/api/model-catalog/admin/routes` 提供，并使用 `NEWAPI_CATALOG_ADMIN_SECRET` 与服务端共享密钥鉴权；公开 `/api/model-catalog` 不包含真实渠道信息。
 - 视频提交使用同一份管理渠道目录决定可执行性：零渠道不发布、单渠道按稳定公开 ID 绑定、多渠道发布独立线路 ID。管理渠道目录暂不可读时公共目录保留基础模型，付费提交在扣费前失败，不能退回 distributor 猜路由。
 - Canvas 视频请求将 `clientRequestId` 持久化为幂等身份；重复 POST 返回原任务，`GET /api/v1/video/requests/:clientRequestId` 只读恢复原任务。数据库唯一索引防止同一用户同一请求产生两次扣费。
+- 视频提交、状态和内容接口均优先使用 `NEWAPI_VIDEO_API_KEY`，不得因为令牌名称或用途把视频改发到图片端点；视频始终走 `/v1/videos`。上游完成后内容短暂返回 `404`、`425`、`429` 或 `5xx` 时只做有界读取重试，不重放生成 POST。
+- 迁移 `20260817150000_video_request_idempotency.sql` 必须在目标 Supabase 执行后，数据库层唯一索引才正式生效；在迁移窗口前，Worker 的同请求查询仍会阻止普通重复提交。
 - MJ 使用 Apimart，并保留后台 Relax / Fast / Turbo 手动定价。
 - 旧 GrsAI、iThink、Mooko 和非 MJ Apimart 型号只能恢复历史任务，不能通过后台重新上架。
 
@@ -66,6 +69,7 @@ cd D:\prompt-hub\server
 npm exec wrangler secret put SUPABASE_URL
 npm exec wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 npm exec wrangler secret put NEWAPI_API_KEY
+npm exec wrangler secret put NEWAPI_VIDEO_API_KEY
 npm exec wrangler secret put APIMART_API_KEY
 ```
 

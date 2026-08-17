@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import type { Env } from '../../env';
+import { newApiVideoKey, type Env } from '../../env';
 import { roundCredits } from '../../lib/credit-math';
 import { ApiError } from '../../lib/errors';
 import { isAcceptedRefImageInput, resolveGenerationRefUrls } from '../../lib/generation-ref-images';
@@ -340,7 +340,7 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   const user = c.get('user');
   const input = parseVideoRequestBody(await c.req.json().catch(() => ({})));
 
-  const apiKey = c.env.NEWAPI_API_KEY?.trim();
+  const apiKey = newApiVideoKey(c.env);
   if (!apiKey) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频服务暂未配置');
   const admin = createAdminClient(c.env);
   if (input.clientRequestId) {
@@ -536,7 +536,7 @@ videoRoutes.get('/jobs/:jobId', async c => {
     return c.json({ ok: true, data: videoPayload(row, spendableCredits(profile)) });
   }
 
-  const apiKey = c.env.NEWAPI_API_KEY?.trim();
+  const apiKey = newApiVideoKey(c.env);
   const upstreamTaskId = String(meta.upstreamTaskId || '');
   if (!apiKey || !upstreamTaskId) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频任务尚未完成提交');
   const routeChannelId = Number(meta.routeChannelId) || 0;
@@ -593,7 +593,7 @@ videoRoutes.get('/jobs/:jobId/content', async c => {
     .maybeSingle();
   const meta = (row?.meta && typeof row.meta === 'object' ? row.meta : {}) as VideoMeta;
   if (!row || row.status !== 'completed' || meta.mediaType !== 'video') throw new ApiError(404, 'NOT_FOUND', '视频尚未完成');
-  const apiKey = c.env.NEWAPI_API_KEY?.trim();
+  const apiKey = newApiVideoKey(c.env);
   const upstreamTaskId = String(meta.upstreamTaskId || '');
   if (!apiKey || !upstreamTaskId) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频内容暂不可用');
   const routeChannelId = Number(meta.routeChannelId) || 0;

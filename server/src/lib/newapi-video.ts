@@ -27,6 +27,8 @@ export type NewApiVideoTask = {
   videoUrl: string | null;
 };
 
+const CONTENT_RETRY_DELAYS_MS = [500, 1_500, 3_500, 7_000] as const;
+
 function apiBase(value?: string): string {
   return (value || 'https://newapi.prompt-hubs.com').replace(/\/+$/, '');
 }
@@ -319,15 +321,25 @@ export async function fetchNewApiVideoContent(
   taskId: string,
   range?: string
 ): Promise<Response> {
-  const response = await fetch(`${apiBase(baseUrl)}/v1/videos/${encodeURIComponent(taskId)}/content`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      ...(range ? { Range: range } : {})
-    }
-  });
-  if (!response.ok) {
+  const url = `${apiBase(baseUrl)}/v1/videos/${encodeURIComponent(taskId)}/content`;
+  for (let attempt = 0; attempt <= CONTENT_RETRY_DELAYS_MS.length; attempt += 1) {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        ...(range ? { Range: range } : {})
+      }
+    });
+    if (response.ok) return response;
+    const retryable = response.status === 404
+      || response.status === 408
+      || response.status === 425
+      || response.status === 429
+      || response.status >= 500;
     const payload = await jsonResponse(response);
-    throw new ApiError(response.status >= 500 ? 502 : response.status, 'UPSTREAM_ERROR', errorMessage(payload, response.status));
+    if (!retryable || attempt >= CONTENT_RETRY_DELAYS_MS.length) {
+      throw new ApiError(response.status >= 500 ? 502 : response.status, 'UPSTREAM_ERROR', errorMessage(payload, response.status));
+    }
+    await new Promise<void>(resolve => setTimeout(resolve, CONTENT_RETRY_DELAYS_MS[attempt]));
   }
-  return response;
+  throw new ApiError(502, 'UPSTREAM_ERROR', '视频内容暂时无法读取');
 }

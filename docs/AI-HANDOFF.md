@@ -1,5 +1,19 @@
 # AI 接手说明
 
+## 2026-08-17 视频路由修复生产发布
+
+- Prompt Hub Worker 已发布版本 `156d606b-0c57-48e8-a7da-7cce51df88f8`；
+  Canvas API 已原子切换到 release
+  `20260817T-video-routing-f41bd7bb`（commit `f41bd7bb`）。两边均通过
+  无费用健康、就绪和公开目录验收，未发送生成 POST。
+- 公开目录仍返回 45 个模型、18 个视频模型，H3、S-2.0mini 和
+  S-2.0fast 均未被误清空；Canvas 目录版本仍为
+  `46006424e305c1e58e7ad3b0` / `2026-08-17.4`。
+- Supabase 幂等索引迁移文件为
+  `supabase/migrations/20260817150000_video_request_idempotency.sql`。
+  本次环境没有 Supabase CLI 或数据库管理员凭据，未执行远程 SQL；Worker
+  已先上线查询式幂等逻辑，索引需由数据库管理员按发布窗口补执行。
+
 ## 2026-08-17 视频渠道与幂等恢复修复
 
 - 视频模型可执行性由实时模型目录和管理渠道目录共同决定。渠道目录可用
@@ -35,6 +49,10 @@
   `element_references`、`input_video` 角色字段，避免参考素材在中继校验
   时被丢弃。
 - H3 的真实付费生成由维护者手工测试；自动化验证不得提交付费任务。
+- H3 与其他视频始终提交到 New API `/v1/videos`。Worker 优先读取
+  `NEWAPI_VIDEO_API_KEY`，仅为兼容旧部署才回退 `NEWAPI_API_KEY`；API 站显示
+  通用/生图令牌不代表请求走了图片 endpoint。视频内容完成后允许短暂延迟，
+  content 读取只做有界重试，不能重放付费任务。
 
 ### 部署与生产验收
 
