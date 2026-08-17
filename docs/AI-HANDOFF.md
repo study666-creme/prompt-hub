@@ -18,13 +18,15 @@
 
 ### 部署与生产验收
 
-- 实现提交：`d63cf3c`（`fix: adapt canvas video requests to catalog
-  contracts`）。Cloudflare Worker `prompt-hub-api` 已部署为版本
-  `c9630d4b-91be-4c2f-ac23-48b651457d57`，部署列表确认该版本承载 100%
+- Relay 实现提交为 `d63cf3c`（`fix: adapt canvas video requests to catalog
+  contracts`）和 `91f4bbe`（`fix: support live S-2.5 video contract`）。
+  Cloudflare Worker `prompt-hub-api` 已部署为版本
+  `54b026c2-d474-4541-8118-833a7b2b33f7`，部署列表确认该版本承载 100%
   流量。
-- 零费用验证：聚焦契约测试 14/14，完整 Worker 单测 28 个文件
-  169/169，TypeScript、35/35 文档链接、根目录 bundle 构建和
-  `git diff --check` 均通过。
+- 零费用验证：聚焦契约测试 15/15，完整 Worker 单测 28 个文件
+  170/170，TypeScript、35/35 文档链接、根目录 bundle 构建和
+  `git diff --check` 均通过。S-2.5 的实时契约为 4-30 秒、480p/720p、
+  16:9/9:16/1:1，最多 30 张图片、10 个视频和 10 个音频参考。
 - 2026-08-17 最终只读生产复核：Prompt Hub 公共目录版本
   `46006424e305c1e58e7ad3b0` 返回 45 个模型、其中 18 个视频模型；
   Canvas 归一化目录返回 63 个模型、其中 18 个视频模型，能力版本为
