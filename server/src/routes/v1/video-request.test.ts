@@ -85,6 +85,74 @@ describe('video request aliases', () => {
     });
   });
 
+  it('accepts S-2.5 current media limits and first/last frame aliases', () => {
+    const referenceImages = Array.from({ length: 30 }, (_, index) => `https://asset.test/image-${index}.jpg`);
+    const referenceVideos = Array.from({ length: 10 }, (_, index) => `https://asset.test/video-${index}.mp4`);
+    const referenceAudios = Array.from({ length: 10 }, (_, index) => `https://asset.test/audio-${index}.mp3`);
+    const parsed = parseVideoRequestBody({
+      model: 'S-2.5-满血',
+      prompt: 'animate',
+      duration: 30,
+      ratio: '1:1',
+      resolution: '720p',
+      referenceImages,
+      referenceVideos,
+      referenceAudios,
+      first_image: 'https://asset.test/first.jpg',
+      last_image: 'https://asset.test/last.jpg'
+    });
+    const parameters = [
+      field('model', 'string', { fixed: 'S-2.5-满血' }),
+      field('prompt'),
+      field('duration', 'integer', { min: 4, max: 30 }),
+      field('ratio', 'string', { options: ['16:9', '9:16', '1:1'] }),
+      field('resolution', 'string', { options: ['480p', '720p'] }),
+      field('referenceImages', 'array', { max_items: 30 }),
+      field('referenceVideos', 'array', { max_items: 10 }),
+      field('referenceAudios', 'array', { max_items: 10 }),
+      field('first_image'),
+      field('last_image')
+    ];
+    const model = videoModel(parameters);
+
+    expect(parsed).toMatchObject({
+      duration: 30,
+      ratio: '1:1',
+      resolution: '720p',
+      referenceImages,
+      referenceVideos,
+      referenceAudios,
+      startFrame: 'https://asset.test/first.jpg',
+      endFrame: 'https://asset.test/last.jpg'
+    });
+    expect(() => validateVideoRequest(model, parsed)).not.toThrow();
+    expect(buildNewApiVideoRequestBody({
+      upstreamModel: parsed.model,
+      prompt: parsed.prompt,
+      duration: parsed.duration,
+      ratio: parsed.ratio,
+      resolution: parsed.resolution,
+      referenceImages: parsed.referenceImages,
+      referenceVideos: parsed.referenceVideos,
+      referenceAudios: parsed.referenceAudios,
+      startFrame: parsed.startFrame,
+      endFrame: parsed.endFrame,
+      catalogValues: parsed.catalogValues,
+      catalogParameters: parameters
+    })).toEqual({
+      model: 'S-2.5-满血',
+      prompt: 'animate',
+      duration: 30,
+      ratio: '1:1',
+      resolution: '720p',
+      referenceImages,
+      referenceVideos,
+      referenceAudios,
+      first_image: 'https://asset.test/first.jpg',
+      last_image: 'https://asset.test/last.jpg'
+    });
+  });
+
   it('carries typed canvas references through the catalog wire contract', () => {
     const parsed = parseVideoRequestBody({
       model: 'kling-o3-pro-v2v-reference',
@@ -155,6 +223,12 @@ describe('video request aliases', () => {
       prompt: 'animate this image',
       image: 'https://asset.test/a.jpg',
       images: ['https://asset.test/b.jpg']
+    })).toThrow();
+    expect(() => parseVideoRequestBody({
+      model: 'S-2.5-满血',
+      prompt: 'animate',
+      start_frame: 'https://asset.test/a.jpg',
+      first_image: 'https://asset.test/b.jpg'
     })).toThrow();
   });
 

@@ -38,27 +38,29 @@ const bodySchema = z.object({
   aspect_ratio: z.string().min(1).max(30).optional(),
   resolution: z.string().min(1).max(30).optional(),
   size: z.string().min(1).max(30).optional(),
-  referenceImages: z.array(imageRef).max(14).optional(),
+  referenceImages: z.array(imageRef).max(30).optional(),
   image: imageRef.optional(),
-  images: z.array(imageRef).max(14).optional(),
-  reference_images: z.array(imageRef).max(14).optional(),
+  images: z.array(imageRef).max(30).optional(),
+  reference_images: z.array(imageRef).max(30).optional(),
   input_reference: imageRef.optional(),
   styleImages: z.array(imageRef).max(14).optional(),
   style_references: z.array(imageRef).max(14).optional(),
   elementImages: z.array(imageRef).max(14).optional(),
   element_references: z.array(imageRef).max(14).optional(),
   start_frame: imageRef.optional(),
+  first_image: imageRef.optional(),
   end_frame: imageRef.optional(),
-  referenceVideos: z.array(mediaRef).max(3).optional(),
-  reference_videos: z.array(mediaRef).max(3).optional(),
-  video_references: z.array(mediaRef).max(3).optional(),
-  videos: z.array(mediaRef).max(3).optional(),
+  last_image: imageRef.optional(),
+  referenceVideos: z.array(mediaRef).max(10).optional(),
+  reference_videos: z.array(mediaRef).max(10).optional(),
+  video_references: z.array(mediaRef).max(10).optional(),
+  videos: z.array(mediaRef).max(10).optional(),
   reference_video: mediaRef.optional(),
   input_video: mediaRef.optional(),
-  referenceAudios: z.array(mediaRef).max(3).optional(),
-  reference_audios: z.array(mediaRef).max(3).optional(),
-  audio_reference: z.array(mediaRef).max(3).optional(),
-  audios: z.array(mediaRef).max(3).optional(),
+  referenceAudios: z.array(mediaRef).max(10).optional(),
+  reference_audios: z.array(mediaRef).max(10).optional(),
+  audio_reference: z.array(mediaRef).max(10).optional(),
+  audios: z.array(mediaRef).max(10).optional(),
   reference_audio: mediaRef.optional()
 }).passthrough().superRefine((input, ctx) => {
   if (input.resolution && input.size && input.resolution !== input.size) {
@@ -80,6 +82,12 @@ const bodySchema = z.object({
   }
   if (populated([input.elementImages, input.element_references]) > 1) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: '元素参考图字段不能重复' });
+  }
+  if (populated([input.start_frame, input.first_image]) > 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: '首帧图片字段不能重复' });
+  }
+  if (populated([input.end_frame, input.last_image]) > 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: '尾帧图片字段不能重复' });
   }
   if (populated([input.referenceVideos, input.reference_videos, input.video_references, input.videos, input.reference_video, input.input_video]) > 1) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: '参考视频字段不能重复' });
@@ -106,8 +114,8 @@ const bodySchema = z.object({
             : undefined,
   styleImages: input.styleImages?.length ? input.styleImages : input.style_references,
   elementImages: input.elementImages?.length ? input.elementImages : input.element_references,
-  startFrame: input.start_frame,
-  endFrame: input.end_frame,
+  startFrame: input.start_frame || input.first_image,
+  endFrame: input.end_frame || input.last_image,
   referenceVideos: input.referenceVideos?.length
     ? input.referenceVideos
     : input.reference_videos?.length
@@ -205,8 +213,8 @@ export function validateVideoRequest(model: NewApiCatalogModel, input: z.infer<t
   validateReferenceCount(model, ['images', 'referenceImages', 'reference_images', 'image', 'input_reference'], input.referenceImages?.length || 0, '参考图片');
   validateReferenceCount(model, ['style_references', 'styleImages'], input.styleImages?.length || 0, '风格参考图片');
   validateReferenceCount(model, ['element_references', 'elementImages'], input.elementImages?.length || 0, '元素参考图片');
-  validateReferenceCount(model, ['start_frame'], input.startFrame ? 1 : 0, '首帧图片');
-  validateReferenceCount(model, ['end_frame'], input.endFrame ? 1 : 0, '尾帧图片');
+  validateReferenceCount(model, ['start_frame', 'first_image'], input.startFrame ? 1 : 0, '首帧图片');
+  validateReferenceCount(model, ['end_frame', 'last_image'], input.endFrame ? 1 : 0, '尾帧图片');
   validateReferenceCount(model, ['reference_videos', 'referenceVideos', 'video_references', 'videos', 'reference_video', 'input_video'], input.referenceVideos?.length || 0, '参考视频');
   validateReferenceCount(model, ['reference_audios', 'referenceAudios', 'audio_reference', 'audios', 'reference_audio'], input.referenceAudios?.length || 0, '参考音频');
 }
@@ -341,8 +349,8 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   );
   catalogValues = replaceResolvedAliases(catalogValues, ['styleImages', 'style_references'], styleImages);
   catalogValues = replaceResolvedAliases(catalogValues, ['elementImages', 'element_references'], elementImages);
-  catalogValues = replaceResolvedAliases(catalogValues, ['start_frame'], startFrame);
-  catalogValues = replaceResolvedAliases(catalogValues, ['end_frame'], endFrame);
+  catalogValues = replaceResolvedAliases(catalogValues, ['start_frame', 'first_image'], startFrame);
+  catalogValues = replaceResolvedAliases(catalogValues, ['end_frame', 'last_image'], endFrame);
   catalogValues = replaceResolvedAliases(
     catalogValues,
     ['referenceVideos', 'reference_videos', 'video_references', 'videos', 'reference_video', 'input_video'],
@@ -401,6 +409,8 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
       referenceImages,
       styleImages,
       elementImages,
+      startFrame: startFrame[0],
+      endFrame: endFrame[0],
       referenceVideos,
       referenceAudios,
       catalogValues,

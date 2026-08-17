@@ -145,6 +145,8 @@ describe('newapi video upstream', () => {
       model: string;
       duration?: number;
       resolution: string;
+      startFrame?: string;
+      endFrame?: string;
       parameters: NewApiCatalogParameter[];
       expected: Record<string, unknown>;
     }> = [
@@ -164,6 +166,35 @@ describe('newapi video upstream', () => {
           field('referenceImages', 'array')
         ],
         expected: { model: 'minimax_h3', prompt: 'animate', async: true, seconds: 4, size: '768', images: refs.referenceImages, reference_videos: refs.referenceVideos, reference_audios: refs.referenceAudios }
+      },
+      {
+        model: 'S-2.5-满血',
+        resolution: '720p',
+        startFrame: 'https://asset.test/first.png',
+        endFrame: 'https://asset.test/last.png',
+        parameters: [
+          ...base('S-2.5-满血'),
+          field('duration', 'integer', { min: 4, max: 30 }),
+          field('ratio', 'string', { options: ['16:9', '9:16', '1:1'] }),
+          field('resolution', 'string', { options: ['480p', '720p'] }),
+          field('referenceImages', 'array', { max_items: 30 }),
+          field('referenceVideos', 'array', { max_items: 10 }),
+          field('referenceAudios', 'array', { max_items: 10 }),
+          field('first_image'),
+          field('last_image')
+        ],
+        expected: {
+          model: 'S-2.5-满血',
+          prompt: 'animate',
+          duration: 4,
+          ratio: '16:9',
+          resolution: '720p',
+          referenceImages: refs.referenceImages,
+          referenceVideos: refs.referenceVideos,
+          referenceAudios: refs.referenceAudios,
+          first_image: 'https://asset.test/first.png',
+          last_image: 'https://asset.test/last.png'
+        }
       },
       ...['S-2.0满血-933', 'S-2.0-720p-稳定', 'S-2.0mini-官转', 'S-2.0fast-官转'].map(model => ({
         model,
@@ -245,7 +276,7 @@ describe('newapi video upstream', () => {
       }))
     ];
 
-    expect(cases).toHaveLength(17);
+    expect(cases).toHaveLength(18);
     for (const testCase of cases) {
       expect(buildNewApiVideoRequestBody({
         upstreamModel: testCase.model,
@@ -254,6 +285,8 @@ describe('newapi video upstream', () => {
         ratio: '16:9',
         resolution: testCase.resolution,
         ...refs,
+        startFrame: testCase.startFrame,
+        endFrame: testCase.endFrame,
         catalogParameters: testCase.parameters
       }), testCase.model).toEqual(testCase.expected);
     }

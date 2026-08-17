@@ -10,6 +10,8 @@ export type NewApiVideoSubmitParams = {
   referenceImages?: string[];
   styleImages?: string[];
   elementImages?: string[];
+  startFrame?: string;
+  endFrame?: string;
   referenceVideos?: string[];
   referenceAudios?: string[];
   catalogValues?: Record<string, unknown>;
@@ -171,6 +173,10 @@ const MEDIA_PARAMETER_NAMES = new Set([
   'style_references',
   'elementImages',
   'element_references',
+  'start_frame',
+  'first_image',
+  'end_frame',
+  'last_image',
   'referenceVideos',
   'reference_videos',
   'video_references',
@@ -236,6 +242,8 @@ function buildCatalogRequestBody(params: NewApiVideoSubmitParams): Record<string
   setDeclaredMedia(body, firstDeclared(declared, ['images', 'referenceImages', 'reference_images', 'image', 'input_reference']), params.referenceImages);
   setDeclaredMedia(body, firstDeclared(declared, ['style_references', 'styleImages']), params.styleImages);
   setDeclaredMedia(body, firstDeclared(declared, ['element_references', 'elementImages']), params.elementImages);
+  setDeclaredMedia(body, firstDeclared(declared, ['start_frame', 'first_image']), params.startFrame ? [params.startFrame] : undefined);
+  setDeclaredMedia(body, firstDeclared(declared, ['end_frame', 'last_image']), params.endFrame ? [params.endFrame] : undefined);
   setDeclaredMedia(body, firstDeclared(declared, ['reference_videos', 'referenceVideos', 'video_references', 'videos', 'reference_video', 'input_video']), params.referenceVideos);
   setDeclaredMedia(body, firstDeclared(declared, ['reference_audios', 'referenceAudios', 'audio_reference', 'audios', 'reference_audio']), params.referenceAudios);
   return body;
