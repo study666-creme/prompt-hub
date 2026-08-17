@@ -8,8 +8,11 @@ export type NewApiVideoSubmitParams = {
   ratio: string;
   resolution: string;
   referenceImages?: string[];
+  styleImages?: string[];
+  elementImages?: string[];
   referenceVideos?: string[];
   referenceAudios?: string[];
+  catalogValues?: Record<string, unknown>;
   catalogParameters?: NewApiCatalogParameter[];
 };
 
@@ -147,6 +150,51 @@ function setDeclaredMedia(
   setRequestPath(body, parameter.path, parameter.type === 'array' ? bounded : bounded[0]);
 }
 
+const CORE_PARAMETER_NAMES = new Set([
+  'model',
+  'prompt',
+  'seconds',
+  'duration',
+  'size',
+  'resolution',
+  'aspect_ratio',
+  'ratio'
+]);
+
+const MEDIA_PARAMETER_NAMES = new Set([
+  'referenceImages',
+  'images',
+  'reference_images',
+  'image',
+  'input_reference',
+  'styleImages',
+  'style_references',
+  'elementImages',
+  'element_references',
+  'referenceVideos',
+  'reference_videos',
+  'video_references',
+  'videos',
+  'reference_video',
+  'input_video',
+  'referenceAudios',
+  'reference_audios',
+  'audio_reference',
+  'audios',
+  'reference_audio'
+]);
+
+function hasRequestValue(value: unknown): boolean {
+  if (value == null || value === '') return false;
+  return !Array.isArray(value) || value.length > 0;
+}
+
+function catalogValue(parameter: NewApiCatalogParameter, value: unknown): unknown {
+  const declared = declaredValue(parameter, value);
+  if (parameter.type === 'array') return Array.isArray(declared) ? declared : [declared];
+  return Array.isArray(declared) ? declared[0] : declared;
+}
+
 function buildCatalogRequestBody(params: NewApiVideoSubmitParams): Record<string, unknown> {
   const parameters = (params.catalogParameters || []).filter(parameter => parameter?.name && parameter.path);
   const declared = new Map(parameters.map(parameter => [parameter.name, parameter]));
@@ -155,6 +203,25 @@ function buildCatalogRequestBody(params: NewApiVideoSubmitParams): Record<string
     const parameter = firstDeclared(declared, names);
     if (parameter) setRequestPath(body, parameter.path, declaredValue(parameter, requested));
   };
+
+  // Fixed catalog fields are part of the upstream contract, not browser
+  // choices. Apply every one by its declared path before dynamic values are
+  // projected into the mutually compatible field families below.
+  for (const parameter of parameters) {
+    if (hasOwn(parameter, 'fixed')) setRequestPath(body, parameter.path, parameter.fixed);
+  }
+
+  // Preserve model-specific controls such as generate_audio,
+  // reference_strength, and prompt_enhance. Core aliases and media slots are
+  // handled separately so legacy and native fields are never emitted together.
+  for (const parameter of parameters) {
+    if (hasOwn(parameter, 'fixed')
+      || CORE_PARAMETER_NAMES.has(parameter.name)
+      || MEDIA_PARAMETER_NAMES.has(parameter.name)
+      || !hasOwn(params.catalogValues || {}, parameter.name)) continue;
+    const value = params.catalogValues![parameter.name];
+    if (hasRequestValue(value)) setRequestPath(body, parameter.path, catalogValue(parameter, value));
+  }
 
   set(['model'], params.upstreamModel);
   set(['prompt'], params.prompt);
@@ -167,6 +234,8 @@ function buildCatalogRequestBody(params: NewApiVideoSubmitParams): Record<string
   }
 
   setDeclaredMedia(body, firstDeclared(declared, ['images', 'referenceImages', 'reference_images', 'image', 'input_reference']), params.referenceImages);
+  setDeclaredMedia(body, firstDeclared(declared, ['style_references', 'styleImages']), params.styleImages);
+  setDeclaredMedia(body, firstDeclared(declared, ['element_references', 'elementImages']), params.elementImages);
   setDeclaredMedia(body, firstDeclared(declared, ['reference_videos', 'referenceVideos', 'video_references', 'videos', 'reference_video', 'input_video']), params.referenceVideos);
   setDeclaredMedia(body, firstDeclared(declared, ['reference_audios', 'referenceAudios', 'audio_reference', 'audios', 'reference_audio']), params.referenceAudios);
   return body;

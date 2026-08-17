@@ -36,12 +36,34 @@ const bodySchema = z.object({
   seconds: z.coerce.number().int().min(1).max(60).optional(),
   ratio: z.string().min(1).max(30).optional(),
   aspect_ratio: z.string().min(1).max(30).optional(),
-  resolution: z.string().min(1).max(30).default('720p'),
+  resolution: z.string().min(1).max(30).optional(),
+  size: z.string().min(1).max(30).optional(),
   referenceImages: z.array(imageRef).max(14).optional(),
   image: imageRef.optional(),
   images: z.array(imageRef).max(14).optional(),
+  reference_images: z.array(imageRef).max(14).optional(),
+  input_reference: imageRef.optional(),
+  styleImages: z.array(imageRef).max(14).optional(),
+  style_references: z.array(imageRef).max(14).optional(),
+  elementImages: z.array(imageRef).max(14).optional(),
+  element_references: z.array(imageRef).max(14).optional(),
+  start_frame: imageRef.optional(),
+  end_frame: imageRef.optional(),
   referenceVideos: z.array(mediaRef).max(3).optional(),
-  referenceAudios: z.array(mediaRef).max(3).optional()
+  reference_videos: z.array(mediaRef).max(3).optional(),
+  video_references: z.array(mediaRef).max(3).optional(),
+  videos: z.array(mediaRef).max(3).optional(),
+  reference_video: mediaRef.optional(),
+  input_video: mediaRef.optional(),
+  referenceAudios: z.array(mediaRef).max(3).optional(),
+  reference_audios: z.array(mediaRef).max(3).optional(),
+  audio_reference: z.array(mediaRef).max(3).optional(),
+  audios: z.array(mediaRef).max(3).optional(),
+  reference_audio: mediaRef.optional()
+}).passthrough().superRefine((input, ctx) => {
+  if (input.resolution && input.size && input.resolution !== input.size) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'resolution 与 size 不能冲突' });
+  }
 }).superRefine((input, ctx) => {
   if (input.duration != null && input.seconds != null && input.duration !== input.seconds) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'duration 与 seconds 不能冲突' });
@@ -49,29 +71,68 @@ const bodySchema = z.object({
   if (input.ratio && input.aspect_ratio && input.ratio !== input.aspect_ratio) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'ratio 与 aspect_ratio 不能冲突' });
   }
-  const populatedImageAliases = [
-    input.referenceImages?.length ? 'referenceImages' : '',
-    input.image ? 'image' : '',
-    input.images?.length ? 'images' : ''
-  ].filter(Boolean);
-  if (populatedImageAliases.length > 1) {
+  const populated = (values: unknown[]) => values.filter(value => Array.isArray(value) ? value.length > 0 : value != null && value !== '').length;
+  if (populated([input.referenceImages, input.image, input.images, input.reference_images, input.input_reference]) > 1) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: '参考图字段不能重复' });
+  }
+  if (populated([input.styleImages, input.style_references]) > 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: '风格参考图字段不能重复' });
+  }
+  if (populated([input.elementImages, input.element_references]) > 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: '元素参考图字段不能重复' });
+  }
+  if (populated([input.referenceVideos, input.reference_videos, input.video_references, input.videos, input.reference_video, input.input_video]) > 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: '参考视频字段不能重复' });
+  }
+  if (populated([input.referenceAudios, input.reference_audios, input.audio_reference, input.audios, input.reference_audio]) > 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: '参考音频字段不能重复' });
   }
 }).transform(input => ({
   model: input.model,
   prompt: input.prompt,
   duration: input.duration ?? input.seconds ?? 5,
   ratio: input.ratio || input.aspect_ratio || '16:9',
-  resolution: input.resolution,
+  resolution: input.size || input.resolution || '720p',
   referenceImages: input.referenceImages?.length
     ? input.referenceImages
     : input.image
       ? [input.image]
       : input.images?.length
         ? input.images
-        : undefined,
-  referenceVideos: input.referenceVideos,
-  referenceAudios: input.referenceAudios
+        : input.reference_images?.length
+          ? input.reference_images
+          : input.input_reference
+            ? [input.input_reference]
+            : undefined,
+  styleImages: input.styleImages?.length ? input.styleImages : input.style_references,
+  elementImages: input.elementImages?.length ? input.elementImages : input.element_references,
+  startFrame: input.start_frame,
+  endFrame: input.end_frame,
+  referenceVideos: input.referenceVideos?.length
+    ? input.referenceVideos
+    : input.reference_videos?.length
+      ? input.reference_videos
+      : input.video_references?.length
+        ? input.video_references
+        : input.videos?.length
+          ? input.videos
+          : input.reference_video
+            ? [input.reference_video]
+            : input.input_video
+              ? [input.input_video]
+              : undefined,
+  referenceAudios: input.referenceAudios?.length
+    ? input.referenceAudios
+    : input.reference_audios?.length
+      ? input.reference_audios
+      : input.audio_reference?.length
+        ? input.audio_reference
+        : input.audios?.length
+          ? input.audios
+          : input.reference_audio
+            ? [input.reference_audio]
+            : undefined,
+  catalogValues: { ...input }
 }));
 
 export function parseVideoRequestBody(raw: unknown): z.infer<typeof bodySchema> {
@@ -142,6 +203,10 @@ export function validateVideoRequest(model: NewApiCatalogModel, input: z.infer<t
   }
   validateParameterChoice(parameter(model, ['size', 'resolution']), input.resolution, '分辨率');
   validateReferenceCount(model, ['images', 'referenceImages', 'reference_images', 'image', 'input_reference'], input.referenceImages?.length || 0, '参考图片');
+  validateReferenceCount(model, ['style_references', 'styleImages'], input.styleImages?.length || 0, '风格参考图片');
+  validateReferenceCount(model, ['element_references', 'elementImages'], input.elementImages?.length || 0, '元素参考图片');
+  validateReferenceCount(model, ['start_frame'], input.startFrame ? 1 : 0, '首帧图片');
+  validateReferenceCount(model, ['end_frame'], input.endFrame ? 1 : 0, '尾帧图片');
   validateReferenceCount(model, ['reference_videos', 'referenceVideos', 'video_references', 'videos', 'reference_video', 'input_video'], input.referenceVideos?.length || 0, '参考视频');
   validateReferenceCount(model, ['reference_audios', 'referenceAudios', 'audio_reference', 'audios', 'reference_audio'], input.referenceAudios?.length || 0, '参考音频');
 }
@@ -212,6 +277,19 @@ async function resolveMediaReferences(
   return urls;
 }
 
+function replaceResolvedAliases(
+  values: Record<string, unknown>,
+  aliases: readonly string[],
+  resolved: string[]
+) {
+  const next = { ...values };
+  for (const alias of aliases) {
+    if (!Object.prototype.hasOwnProperty.call(next, alias)) continue;
+    next[alias] = Array.isArray(next[alias]) ? resolved : resolved[0];
+  }
+  return next;
+}
+
 videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   const user = c.get('user');
   const input = parseVideoRequestBody(await c.req.json().catch(() => ({})));
@@ -237,13 +315,44 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   if (spendableCredits(profile) < final) {
     throw new ApiError(402, 'INSUFFICIENT_CREDITS', `积分不足（需要 ${final}，当前 ${spendableCredits(profile)}）`);
   }
-  const referenceImages = input.referenceImages?.length
-    ? await resolveGenerationRefUrls(c, admin, user.id, input.referenceImages)
-    : [];
-  const [referenceVideos, referenceAudios] = await Promise.all([
+  const [referenceImages, styleImages, elementImages, startFrame, endFrame, referenceVideos, referenceAudios] = await Promise.all([
+    input.referenceImages?.length
+      ? resolveGenerationRefUrls(c, admin, user.id, input.referenceImages)
+      : Promise.resolve([]),
+    input.styleImages?.length
+      ? resolveGenerationRefUrls(c, admin, user.id, input.styleImages)
+      : Promise.resolve([]),
+    input.elementImages?.length
+      ? resolveGenerationRefUrls(c, admin, user.id, input.elementImages)
+      : Promise.resolve([]),
+    input.startFrame
+      ? resolveGenerationRefUrls(c, admin, user.id, [input.startFrame])
+      : Promise.resolve([]),
+    input.endFrame
+      ? resolveGenerationRefUrls(c, admin, user.id, [input.endFrame])
+      : Promise.resolve([]),
     resolveMediaReferences(c, user.id, input.referenceVideos),
     resolveMediaReferences(c, user.id, input.referenceAudios)
   ]);
+  let catalogValues = replaceResolvedAliases(
+    input.catalogValues,
+    ['referenceImages', 'image', 'images', 'reference_images', 'input_reference'],
+    referenceImages
+  );
+  catalogValues = replaceResolvedAliases(catalogValues, ['styleImages', 'style_references'], styleImages);
+  catalogValues = replaceResolvedAliases(catalogValues, ['elementImages', 'element_references'], elementImages);
+  catalogValues = replaceResolvedAliases(catalogValues, ['start_frame'], startFrame);
+  catalogValues = replaceResolvedAliases(catalogValues, ['end_frame'], endFrame);
+  catalogValues = replaceResolvedAliases(
+    catalogValues,
+    ['referenceVideos', 'reference_videos', 'video_references', 'videos', 'reference_video', 'input_video'],
+    referenceVideos
+  );
+  catalogValues = replaceResolvedAliases(
+    catalogValues,
+    ['referenceAudios', 'reference_audios', 'audio_reference', 'audios', 'reference_audio'],
+    referenceAudios
+  );
   const baseMeta: VideoMeta = {
     mediaType: 'video',
     model: resolved.requestedModelId,
@@ -290,8 +399,11 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
       ratio: input.ratio,
       resolution: input.resolution,
       referenceImages,
+      styleImages,
+      elementImages,
       referenceVideos,
       referenceAudios,
+      catalogValues,
       catalogParameters: model.parameters
     });
     if (task.status === 'failed') {

@@ -1,5 +1,20 @@
 # AI 接手说明
 
+## 2026-08-17 Canvas 视频目录契约
+
+- 画布视频入口由实时目录驱动，当前线上目录包含 17 个视频模型；不要在
+  浏览器或 Worker 另维护一份模型名称黑名单。
+- Prompt Hub 视频中继同时接受原生 `size`/`seconds` 与兼容
+  `resolution`/`duration`，并按目录声明的 `path` 组装 New API 请求。目录
+  中的 `fixed` 参数（例如 H3 的 `async: true`、部分线路的 `n: 1` 和固定
+  时长）由服务端补入。
+- H3 只使用 `768`（`1376x768`）和 `1080p`（`1920x1080`）；`2K` 不是 H3
+  选项。原生请求不能同时发送 H3 的原生字段与兼容字段。
+- 入口还保留 Kling O3 Pro 的 `images`、`style_references`、
+  `element_references`、`input_video` 角色字段，避免参考素材在中继校验
+  时被丢弃。
+- H3 的真实付费生成由维护者手工测试；自动化验证不得提交付费任务。
+
 ## 最小阅读顺序
 
 1. `PROJECT_CONTEXT.md`: 线上拓扑和当前 build。

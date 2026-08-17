@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NewApiCatalogModel, NewApiCatalogParameter } from '../../lib/newapi';
+import { buildNewApiVideoRequestBody } from '../../lib/newapi-video';
 import { parseVideoRequestBody, validateVideoRequest } from './video';
 
 function videoModel(parameters: NewApiCatalogParameter[]): NewApiCatalogModel {
@@ -60,6 +61,86 @@ describe('video request aliases', () => {
       prompt: 'animate this image',
       image: 'https://asset.test/a.jpg'
     }).referenceImages).toEqual(['https://asset.test/a.jpg']);
+  });
+
+  it('normalizes native size and typed reference-role aliases', () => {
+    const parsed = parseVideoRequestBody({
+      model: 'kling-o3-pro-v2v-reference',
+      prompt: 'restyle',
+      seconds: 4,
+      size: '1280x720',
+      images: ['https://asset.test/frame.jpg'],
+      style_references: ['https://asset.test/style.jpg'],
+      element_references: ['https://asset.test/element.jpg'],
+      input_video: 'https://asset.test/source.mp4'
+    });
+
+    expect(parsed).toMatchObject({
+      duration: 4,
+      resolution: '1280x720',
+      referenceImages: ['https://asset.test/frame.jpg'],
+      styleImages: ['https://asset.test/style.jpg'],
+      elementImages: ['https://asset.test/element.jpg'],
+      referenceVideos: ['https://asset.test/source.mp4']
+    });
+  });
+
+  it('carries typed canvas references through the catalog wire contract', () => {
+    const parsed = parseVideoRequestBody({
+      model: 'kling-o3-pro-v2v-reference',
+      prompt: 'restyle',
+      seconds: 4,
+      size: '1280x720',
+      images: ['https://asset.test/frame.jpg'],
+      style_references: ['https://asset.test/style.jpg'],
+      element_references: ['https://asset.test/element.jpg'],
+      input_video: 'https://asset.test/source.mp4'
+    });
+    const parameters = [
+      field('model', 'string', { fixed: 'kling-o3-pro-v2v-reference' }),
+      field('prompt'),
+      field('seconds', 'integer'),
+      field('size'),
+      field('referenceImages', 'array', { path: 'images', max_items: 2 }),
+      field('style_references', 'array', { max_items: 1 }),
+      field('element_references', 'array', { max_items: 1 }),
+      field('referenceVideos', 'string', { path: 'input_video' }),
+      field('n', 'integer', { fixed: 1 })
+    ];
+
+    expect(buildNewApiVideoRequestBody({
+      upstreamModel: parsed.model,
+      prompt: parsed.prompt,
+      duration: parsed.duration,
+      ratio: parsed.ratio,
+      resolution: parsed.resolution,
+      referenceImages: parsed.referenceImages,
+      styleImages: parsed.styleImages,
+      elementImages: parsed.elementImages,
+      referenceVideos: parsed.referenceVideos,
+      referenceAudios: parsed.referenceAudios,
+      catalogValues: parsed.catalogValues,
+      catalogParameters: parameters
+    })).toEqual({
+      model: 'kling-o3-pro-v2v-reference',
+      prompt: 'restyle',
+      seconds: 4,
+      size: '1280x720',
+      images: ['https://asset.test/frame.jpg'],
+      style_references: ['https://asset.test/style.jpg'],
+      element_references: ['https://asset.test/element.jpg'],
+      input_video: 'https://asset.test/source.mp4',
+      n: 1
+    });
+  });
+
+  it('rejects conflicting native and compatibility size fields', () => {
+    expect(() => parseVideoRequestBody({
+      model: 'runway-gen4.5',
+      prompt: 'animate',
+      size: '1280x720',
+      resolution: '720p'
+    })).toThrow();
   });
 
   it('rejects conflicting aliases', () => {
