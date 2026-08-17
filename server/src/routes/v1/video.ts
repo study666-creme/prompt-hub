@@ -29,9 +29,11 @@ import { rateLimit } from '../../middleware/rate-limit';
 
 const mediaRef = z.string().refine(value => /^https?:\/\//i.test(value) || isStorageRef(value), '仅支持媒体 URL');
 const imageRef = z.string().refine(isAcceptedRefImageInput);
+const clientRequestId = z.string().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 const bodySchema = z.object({
   model: z.string().min(1).max(100),
   prompt: z.string().min(1).max(12000),
+  clientRequestId: clientRequestId.optional(),
   duration: z.coerce.number().int().min(1).max(60).optional(),
   seconds: z.coerce.number().int().min(1).max(60).optional(),
   ratio: z.string().min(1).max(30).optional(),
@@ -98,6 +100,7 @@ const bodySchema = z.object({
 }).transform(input => ({
   model: input.model,
   prompt: input.prompt,
+  clientRequestId: input.clientRequestId,
   duration: input.duration ?? input.seconds ?? 5,
   ratio: input.ratio || input.aspect_ratio || '16:9',
   resolution: input.size || input.resolution || '720p',
@@ -151,6 +154,7 @@ export function parseVideoRequestBody(raw: unknown): z.infer<typeof bodySchema> 
 
 type VideoMeta = {
   mediaType?: unknown;
+  clientRequestId?: unknown;
   model?: unknown;
   modelLabel?: unknown;
   upstreamModel?: unknown;
@@ -236,6 +240,9 @@ async function freshVideoModel(env: Env, modelId: string): Promise<NewApiResolve
     throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认实时价格，请稍后重试');
   }
   const routes = await fetchNewApiAdminRoutes(env.NEWAPI_API_BASE_URL, env.NEWAPI_CATALOG_ADMIN_SECRET);
+  if (!routes.available) {
+    throw new ApiError(503, 'ROUTING_UNAVAILABLE', '暂时无法确认视频模型可用渠道，请稍后重试');
+  }
   const resolved = await resolveNewApiRoutedCatalogModel(snapshot, routes, modelId, 'video');
   if (!resolved) throw new ApiError(400, 'MODEL_UNAVAILABLE', '所选视频模型或线路已不可用，请刷新后重选');
   return resolved;
@@ -251,6 +258,8 @@ function parseDebitSplit(value: unknown): DebitSplit {
 
 function videoPayload(row: Record<string, unknown>, creditsRemaining?: number) {
   const meta = (row.meta && typeof row.meta === 'object' ? row.meta : {}) as VideoMeta;
+  const refunded = row.status === 'failed' && meta.refundState === 'refunded';
+  const rawError = String(row.error_message || '视频生成失败');
   return {
     jobId: String(row.id || ''),
     status: String(row.status || 'processing'),
@@ -258,7 +267,10 @@ function videoPayload(row: Record<string, unknown>, creditsRemaining?: number) {
     modelLabel: String(meta.modelLabel || ''),
     progress: Number(meta.progress) || 0,
     videoUrl: row.status === 'completed' ? `/api/v1/video/jobs/${encodeURIComponent(String(row.id || ''))}/content` : null,
-    errorMessage: row.status === 'failed' ? String(row.error_message || '视频生成失败') : null,
+    errorMessage: row.status === 'failed'
+      ? (refunded && !/已自动退回|已退款/.test(rawError) ? `${rawError}，积分已自动退回` : rawError)
+      : null,
+    refunded: row.status === 'failed' ? refunded : undefined,
     creditsCharged: Number(meta.credits) || Number(row.credits_charged) || 0,
     ...(creditsRemaining == null ? {} : { creditsRemaining })
   };
@@ -285,6 +297,32 @@ async function resolveMediaReferences(
   return urls;
 }
 
+async function findVideoRequestByClientId(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  value: string,
+) {
+  const { data, error } = await admin
+    .from('generation_requests')
+    .select('*')
+    .eq('user_id', userId)
+    .filter('meta->>mediaType', 'eq', 'video')
+    .filter('meta->>clientRequestId', 'eq', value)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+function decodedClientRequestId(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function replaceResolvedAliases(
   values: Record<string, unknown>,
   aliases: readonly string[],
@@ -304,6 +342,14 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
 
   const apiKey = c.env.NEWAPI_API_KEY?.trim();
   if (!apiKey) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频服务暂未配置');
+  const admin = createAdminClient(c.env);
+  if (input.clientRequestId) {
+    const existing = await findVideoRequestByClientId(admin, user.id, input.clientRequestId);
+    if (existing) {
+      const profile = await syncMembershipCredits(admin, user.id);
+      return c.json({ ok: true, data: videoPayload(existing, spendableCredits(profile)) });
+    }
+  }
   const resolved = await freshVideoModel(c.env, input.model);
   const { model, route } = resolved;
   validateVideoRequest(model, input);
@@ -317,7 +363,6 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   });
   if (credits == null || credits <= 0) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认该模型实时价格');
 
-  const admin = createAdminClient(c.env);
   let profile = await syncMembershipCredits(admin, user.id);
   const final = roundCredits(credits);
   if (spendableCredits(profile) < final) {
@@ -363,6 +408,7 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   );
   const baseMeta: VideoMeta = {
     mediaType: 'video',
+    ...(input.clientRequestId ? { clientRequestId: input.clientRequestId } : {}),
     model: resolved.requestedModelId,
     modelLabel: model.label,
     upstreamModel: model.upstreamModel,
@@ -387,7 +433,18 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
     })
     .select('*')
     .single();
-  if (insertError || !inserted) throw new ApiError(502, 'GENERATION_FAILED', '创建视频任务失败');
+  if (insertError || !inserted) {
+    // A concurrent retry may have won the same client request identity. Return
+    // that durable row instead of charging or submitting a second task.
+    if (input.clientRequestId) {
+      const existing = await findVideoRequestByClientId(admin, user.id, input.clientRequestId);
+      if (existing) {
+        const current = await syncMembershipCredits(admin, user.id);
+        return c.json({ ok: true, data: videoPayload(existing, spendableCredits(current)) });
+      }
+    }
+    throw new ApiError(502, 'GENERATION_FAILED', '创建视频任务失败');
+  }
 
   let split: DebitSplit = { fromDaily: 0, fromPermanent: 0 };
   try {
@@ -402,6 +459,7 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
 
     const task = await submitNewApiVideo(newApiKeyForRoute(apiKey, route), c.env.NEWAPI_API_BASE_URL, {
       upstreamModel: model.upstreamModel,
+      ...(input.clientRequestId ? { idempotencyKey: input.clientRequestId } : {}),
       prompt: input.prompt,
       duration: input.duration,
       ratio: input.ratio,
@@ -448,6 +506,17 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
     if (message.includes('insufficient')) throw new ApiError(402, 'INSUFFICIENT_CREDITS', '积分不足');
     throw error;
   }
+});
+
+videoRoutes.get('/requests/:clientRequestId', async c => {
+  const user = c.get('user');
+  const value = clientRequestId.safeParse(decodedClientRequestId(c.req.param('clientRequestId')));
+  if (!value.success) throw new ApiError(400, 'VALIDATION_ERROR', '请求标识格式不正确');
+  const admin = createAdminClient(c.env);
+  const row = await findVideoRequestByClientId(admin, user.id, value.data);
+  if (!row) throw new ApiError(404, 'NOT_FOUND', '视频请求不存在');
+  const profile = await syncMembershipCredits(admin, user.id);
+  return c.json({ ok: true, data: videoPayload(row, spendableCredits(profile)) });
 });
 
 videoRoutes.get('/jobs/:jobId', async c => {

@@ -31,10 +31,12 @@ describe('video request aliases', () => {
     expect(parseVideoRequestBody({
       model: 'grok-video',
       prompt: 'animate this image',
+      clientRequestId: 'canvas:video-request-001',
       duration: 6,
       ratio: '16:9',
       referenceImages: ['https://asset.test/a.jpg']
     })).toMatchObject({
+      clientRequestId: 'canvas:video-request-001',
       duration: 6,
       ratio: '16:9',
       referenceImages: ['https://asset.test/a.jpg']

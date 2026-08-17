@@ -54,6 +54,8 @@
 - 卡藏 API 的图片人民币价格统一调用 `imageRetailCreditsFromYuan()`：卡藏报价已包含上游加价，按 `1 元 = 100 积分` 直接换算，不再重复加价；报价或提交时无法取得新鲜目录会在扣费前失败。
 - `gpt-image-2-chat` 走 `/v1/chat/completions` 并从消息内容提取图片，不支持参考图、比例和多张参数。
 - 运营后台的调用链路由卡藏 API `/api/model-catalog/admin/routes` 提供，并使用 `NEWAPI_CATALOG_ADMIN_SECRET` 与服务端共享密钥鉴权；公开 `/api/model-catalog` 不包含真实渠道信息。
+- 视频提交使用同一份管理渠道目录决定可执行性：零渠道不发布、单渠道按稳定公开 ID 绑定、多渠道发布独立线路 ID。管理渠道目录暂不可读时公共目录保留基础模型，付费提交在扣费前失败，不能退回 distributor 猜路由。
+- Canvas 视频请求将 `clientRequestId` 持久化为幂等身份；重复 POST 返回原任务，`GET /api/v1/video/requests/:clientRequestId` 只读恢复原任务。数据库唯一索引防止同一用户同一请求产生两次扣费。
 - MJ 使用 Apimart，并保留后台 Relax / Fast / Turbo 手动定价。
 - 旧 GrsAI、iThink、Mooko 和非 MJ Apimart 型号只能恢复历史任务，不能通过后台重新上架。
 

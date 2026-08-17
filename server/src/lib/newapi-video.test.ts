@@ -29,6 +29,7 @@ describe('newapi video upstream', () => {
 
     const task = await submitNewApiVideo('secret', 'https://newapi.test', {
       upstreamModel: 'sd2.0',
+      idempotencyKey: 'canvas:video-request-001',
       prompt: '镜头向前推进',
       duration: 8,
       ratio: '16:9',
@@ -39,7 +40,10 @@ describe('newapi video upstream', () => {
     });
 
     expect(task).toEqual({ id: 'task_public', status: 'queued', progress: 0, errorMessage: null, videoUrl: null });
-    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({ Authorization: 'Bearer secret' });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      Authorization: 'Bearer secret',
+      'Idempotency-Key': 'canvas:video-request-001'
+    });
   });
 
   it('uses neutral Grok-compatible image fields and normalizes completion', async () => {

@@ -784,6 +784,9 @@ export async function publicNewApiRoutedCatalogModels(
   for (const model of models) {
     const { upstreamModel: _upstreamModel, ...publicModel } = model;
     const routes = model.modality === 'image' ? [] : activeModelRoutes(routeSnapshot, model.upstreamModel);
+    if (model.modality === 'video' && routeSnapshot.available && routes.length === 0) {
+      continue;
+    }
     if (routes.length <= 1) {
       result.push({ ...publicModel, pricing: publicCatalogPricing(model.pricing) });
       continue;
@@ -813,7 +816,17 @@ export async function resolveNewApiRoutedCatalogModel(
   const scoped = requestedModelId.match(SCOPED_MODEL_PATTERN);
   if (!scoped) {
     const model = resolveNewApiCatalogModel(snapshot, requestedModelId, modality);
-    return model ? { model, route: null, requestedModelId: model.id } : null;
+    if (!model) return null;
+    if (model.modality !== 'video' || !routeSnapshot.available) {
+      return { model, route: null, requestedModelId: model.id };
+    }
+    const routes = activeModelRoutes(routeSnapshot, model.upstreamModel);
+    if (routes.length !== 1) return null;
+    return {
+      model: { ...model, pricing: pricingForRoute(model.pricing, routes[0]) },
+      route: routes[0],
+      requestedModelId: model.id
+    };
   }
   const model = resolveNewApiCatalogModel(snapshot, scoped[2], modality);
   if (!model) return null;

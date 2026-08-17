@@ -3,6 +3,7 @@ import type { NewApiCatalogParameter } from './newapi';
 
 export type NewApiVideoSubmitParams = {
   upstreamModel: string;
+  idempotencyKey?: string;
   prompt: string;
   duration: number;
   ratio: string;
@@ -281,7 +282,11 @@ export async function submitNewApiVideo(
   const body = buildNewApiVideoRequestBody(params);
   const response = await fetch(`${apiBase(baseUrl)}/v1/videos`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      ...(params.idempotencyKey ? { 'Idempotency-Key': params.idempotencyKey } : {})
+    },
     body: JSON.stringify(body)
   });
   const payload = await jsonResponse(response);

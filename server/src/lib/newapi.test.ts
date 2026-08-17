@@ -16,7 +16,7 @@ import {
   resolveNewApiRoutedCatalogModel,
   submitNewApiImageJob
 } from './newapi';
-import type { NewApiAdminRouteSnapshot, NewApiCatalogSnapshot } from './newapi';
+import type { NewApiAdminRoute, NewApiAdminRouteSnapshot, NewApiCatalogSnapshot } from './newapi';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -945,6 +945,66 @@ describe('newapi image upstream', () => {
 
     expect(resolved.map(item => item?.requestedModelId)).toEqual(videoIds);
     expect(resolved.every(item => item?.route == null)).toBe(true);
+  });
+
+  it('hides unroutable video models and binds the sole active route to the stable public id', async () => {
+    const model = {
+      id: 'minimax_h3',
+      upstreamModel: 'minimax_h3',
+      label: 'Hailuo 2.3',
+      description: '',
+      modality: 'video' as const,
+      operation: 'generate' as const,
+      order: 1,
+      endpoint: { method: 'POST' as const, path: '/api/v1/video', contentType: 'application/json' as const },
+      parameters: [{ name: 'model', path: 'model', label: 'Model', type: 'string' as const, required: true, fixed: 'minimax_h3' }],
+      pricing: { mode: 'fixed' as const, unit: 'request' as const, yuan: 0.01, credits: 1, quantityParameter: null }
+    };
+    const snapshot: NewApiCatalogSnapshot = {
+      available: true,
+      stale: false,
+      version: 'video-route-catalog',
+      pricingVersion: 'video-route-pricing',
+      rules: [],
+      imageCatalogEntries: [],
+      models: [model]
+    };
+    const noRoutes: NewApiAdminRouteSnapshot = {
+      available: true,
+      fetchedAt: '2026-08-17T00:00:00.000Z',
+      routes: {},
+      error: null
+    };
+
+    expect(await publicNewApiRoutedCatalogModels(snapshot, noRoutes)).toEqual([]);
+    await expect(resolveNewApiRoutedCatalogModel(snapshot, noRoutes, model.id, 'video')).resolves.toBeNull();
+
+    const soleRoute: NewApiAdminRoute = {
+      channelId: 73,
+      channelName: 'private-h3',
+      status: 'active',
+      enabled: true,
+      groups: ['生图'],
+      actualModel: 'minimax_h3',
+      priority: 1,
+      weight: 1,
+      upstreamHost: 'video.private'
+    };
+    const oneRoute: NewApiAdminRouteSnapshot = {
+      ...noRoutes,
+      routes: { minimax_h3: [soleRoute] }
+    };
+
+    const published = await publicNewApiRoutedCatalogModels(snapshot, oneRoute);
+    expect(published).toHaveLength(1);
+    expect(published[0].id).toBe('minimax_h3');
+    expect(JSON.stringify(published)).not.toContain('channelId');
+    expect(JSON.stringify(published)).not.toContain('private-h3');
+
+    const resolved = await resolveNewApiRoutedCatalogModel(snapshot, oneRoute, model.id, 'video');
+    expect(resolved?.requestedModelId).toBe('minimax_h3');
+    expect(resolved?.route?.channelId).toBe(73);
+    expect(newApiKeyForRoute('sk-secret', resolved?.route)).toBe('sk-secret-73');
   });
 
   it('prices native video models with a seconds quantity parameter', () => {

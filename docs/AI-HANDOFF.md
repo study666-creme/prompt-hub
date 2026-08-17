@@ -1,5 +1,25 @@
 # AI 接手说明
 
+## 2026-08-17 视频渠道与幂等恢复修复
+
+- 视频模型可执行性由实时模型目录和管理渠道目录共同决定。渠道目录可用
+  时，零条 active 渠道的视频模型不公开；恰好一条时保留稳定模型 ID 并
+  在服务端绑定该渠道；多条时继续发布独立线路 ID。渠道目录自身不可读
+  时，公共模型目录沿用基础目录，避免模型广场被清空，但付费提交在扣费
+  和 New API POST 之前以 `ROUTING_UNAVAILABLE` 失败。
+- Canvas 的 `clientRequestId` 现在持久化到视频任务 `meta`，同一用户由
+  `generation_requests_video_client_request_id_uidx` 唯一约束。重复 POST
+  返回原任务，不会二次扣费或二次提交；New API 请求同时携带
+  `Idempotency-Key`。
+- `GET /api/v1/video/requests/:clientRequestId` 是只读恢复接口。它返回原
+  任务的真实 `processing`/`completed`/`failed` 状态和退款结果，不创建、
+  重试或重放任务。
+- New API 的 `无可用渠道 (distributor)` 属于提交前可确定拒绝。Canvas
+  必须立即显示失败，不能把它当作传输丢包进入 `submission_unknown`；真正
+  的断网、超时或未知 5xx 仍保持不重放的保护状态。
+- 自动化只验证目录、解析、路由、幂等头、恢复状态和错误映射；真实 H3
+  付费生成仍由维护者手工执行。
+
 ## 2026-08-17 Canvas 视频目录契约
 
 - 画布视频入口由实时目录驱动；目录数量会随上游变化（本次部署时为 17
