@@ -18,7 +18,10 @@ export async function publicModelCatalogHandler(c: Context<{ Bindings: Env }>) {
   const models = routes.available
     ? await publicNewApiRoutedCatalogModels(snapshot, routes)
     : publicNewApiCatalogModels(snapshot);
-  c.header('Cache-Control', 'public, max-age=15, s-maxage=30, stale-while-revalidate=120');
+  c.header(
+    'Cache-Control',
+    models.length ? 'public, max-age=15, s-maxage=30, stale-while-revalidate=120' : 'no-store'
+  );
   return c.json({
     success: true,
     version: snapshot.version || null,

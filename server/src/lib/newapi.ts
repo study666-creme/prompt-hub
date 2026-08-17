@@ -148,6 +148,7 @@ export type NewApiTaskPollResult = {
 
 const PRICING_CACHE_MS = 5 * 60_000;
 const ADMIN_ROUTE_CACHE_MS = 30_000;
+const NEWAPI_CATALOG_FETCH_TIMEOUT_MS = 15_000;
 const PUBLIC_MIDJOURNEY_MODEL_IDS = new Set(['mj-v81', 'mj-v7', 'mj-niji7']);
 
 const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; description: string }> = {
@@ -583,7 +584,7 @@ export async function fetchNewApiModelCatalog(
 
   const promise = fetch(catalogUrl(base, opts?.force === true), {
       headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(NEWAPI_CATALOG_FETCH_TIMEOUT_MS)
     })
       .then(async (res) => {
         if (!res.ok) throw new Error(`model catalog ${res.status}`);
@@ -633,7 +634,7 @@ export async function fetchNewApiAdminRoutes(
         Accept: 'application/json',
         'X-Catalog-Admin-Secret': credential
       },
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(NEWAPI_CATALOG_FETCH_TIMEOUT_MS)
     });
     const payload = await response.json() as Record<string, unknown>;
     if (!response.ok || payload.success !== true || !payload.routes || typeof payload.routes !== 'object') {

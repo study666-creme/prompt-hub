@@ -30,6 +30,21 @@ describe('newapi image upstream', () => {
     vi.unstubAllGlobals();
   });
 
+  it('waits long enough for the live model catalog before declaring it unavailable', async () => {
+    const timeout = vi.fn(() => new AbortController().signal);
+    vi.stubGlobal('AbortSignal', { timeout });
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      success: true,
+      version: 'catalog-timeout',
+      pricing_version: 'pricing-timeout',
+      models: []
+    })));
+
+    await fetchNewApiModelCatalog('https://catalog-timeout.test', { force: true });
+
+    expect(timeout).toHaveBeenCalledWith(15_000);
+  });
+
   it('loads reviewed image capabilities and preserves fractional credits', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({
       success: true,
