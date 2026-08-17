@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../env';
 import * as imageArchive from './image-archive';
+import * as mediaCdn from './media-cdn';
 import { pollAndUpdateJob, type JobRow } from './generation-jobs';
 
 describe('generation result archival gate', () => {
@@ -57,5 +58,60 @@ describe('generation result archival gate', () => {
         archivePending: true
       }
     });
+  });
+
+  it('fails a stale pending task in the quick Canvas polling path', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: { id: 'upstream-stale', status: 'processing' }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    }));
+    vi.spyOn(mediaCdn, 'findFirstExistingStoragePath').mockResolvedValue(null);
+    const query = {
+      update: vi.fn(),
+      eq: vi.fn()
+    };
+    query.update.mockReturnValue(query);
+    query.eq.mockReturnValue(query);
+    const admin = { from: vi.fn(() => query) };
+    const job: JobRow = {
+      id: 'job-stale-quick-poll',
+      user_id: 'user-stale-quick-poll',
+      credits_charged: 0,
+      status: 'processing',
+      prompt: 'product photo',
+      resolution: '1k',
+      quality: 'standard',
+      result_image_url: null,
+      error_message: null,
+      meta: {
+        provider: 'newapi',
+        upstreamModel: 'image2-A',
+        upstreamTaskId: 'upstream-stale',
+        fastSubmitState: 'done'
+      },
+      created_at: new Date(Date.now() - 29 * 60 * 1000).toISOString()
+    };
+
+    const result = await pollAndUpdateJob(
+      admin as never,
+      job.user_id,
+      job,
+      { newapiKey: 'unit-key', newapiBase: 'https://newapi-unit.test' },
+      undefined,
+      { quick: true }
+    );
+
+    expect(result).toEqual({
+      status: 'failed',
+      imageUrl: null,
+      errorMessage: 'upstream_timeout',
+      refunded: true
+    });
+    expect(query.update).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed',
+      error_message: 'upstream_timeout'
+    }));
   });
 });

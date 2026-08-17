@@ -774,6 +774,19 @@ export async function pollAndUpdateJob(
     if (storedArchive) {
       return finishJobFromStoredArchive(admin, userId, job, storedArchive);
     }
+    // Canvas uses the quick polling path. Keep the stale-job guard inside
+    // that path as well; otherwise an upstream task that stays pending
+    // forever can leave the Canvas node spinning indefinitely and never
+    // release the charged credits.
+    if (ageMs > staleMs) {
+      await finalizeFailedJob(admin, userId, job, 'upstream_timeout');
+      return {
+        status: 'failed',
+        imageUrl: null,
+        errorMessage: 'upstream_timeout',
+        refunded: true
+      };
+    }
     return {
       status: 'processing',
       imageUrl: null,
