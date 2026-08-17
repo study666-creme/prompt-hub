@@ -2,8 +2,9 @@
 
 ## 2026-08-17 Canvas 视频目录契约
 
-- 画布视频入口由实时目录驱动，当前线上目录包含 17 个视频模型；不要在
-  浏览器或 Worker 另维护一份模型名称黑名单。
+- 画布视频入口由实时目录驱动；目录数量会随上游变化（本次部署时为 17
+  个，2026-08-17 最终只读复核时为 18 个）。不要在浏览器或 Worker
+  另维护一份模型名称黑名单，也不要把文档中的数量当作固定清单。
 - Prompt Hub 视频中继同时接受原生 `size`/`seconds` 与兼容
   `resolution`/`duration`，并按目录声明的 `path` 组装 New API 请求。目录
   中的 `fixed` 参数（例如 H3 的 `async: true`、部分线路的 `n: 1` 和固定
@@ -14,6 +15,28 @@
   `element_references`、`input_video` 角色字段，避免参考素材在中继校验
   时被丢弃。
 - H3 的真实付费生成由维护者手工测试；自动化验证不得提交付费任务。
+
+### 部署与生产验收
+
+- 实现提交：`d63cf3c`（`fix: adapt canvas video requests to catalog
+  contracts`）。Cloudflare Worker `prompt-hub-api` 已部署为版本
+  `c9630d4b-91be-4c2f-ac23-48b651457d57`，部署列表确认该版本承载 100%
+  流量。
+- 零费用验证：聚焦契约测试 14/14，完整 Worker 单测 28 个文件
+  169/169，TypeScript、35/35 文档链接、根目录 bundle 构建和
+  `git diff --check` 均通过。
+- 2026-08-17 最终只读生产复核：Prompt Hub 公共目录版本
+  `46006424e305c1e58e7ad3b0` 返回 45 个模型、其中 18 个视频模型；
+  Canvas 归一化目录返回 63 个模型、其中 18 个视频模型，能力版本为
+  `2026-08-17.4`。H3、`S-2.0mini-官转`、`S-2.0fast-官转` 均存在。
+- Playwright 只读打开 `https://canvas.prompt-hubs.com/generate/video`，
+  页面实际显示“18 个可用模型”；选择 H3 后模型 ID 为 `minimax_h3`，
+  画面尺寸和分辨率选项仅为 `768` 与 `1080p`。Prompt Hub 图片生成页
+  的三个模型分组合计实际渲染 8 个可用图片模型，目录接口
+  `/api/v1/generate/models` 同样返回 8 个模型，且未显示目录不可用提示。
+- 验收脚本拦截所有非 GET 请求；只拦截到 Cloudflare RUM 统计请求，
+  没有发送生成 POST、H3 请求或任何付费任务。H3 真实生成仍由维护者
+  执行。
 
 ## 最小阅读顺序
 
