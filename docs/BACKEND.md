@@ -62,6 +62,20 @@
 - MJ 使用 Apimart，并保留后台 Relax / Fast / Turbo 手动定价。
 - 旧 GrsAI、iThink、Mooko 和非 MJ Apimart 型号只能恢复历史任务，不能通过后台重新上架。
 
+### 图片兼容协议
+
+`image.v1` 是图片请求的内部兼容层，统一表达文生图、参考图生图和编辑图
+意图。它使用 `resolution`、`aspect_ratio`、`quality`、`count` 和带有
+`reference`、`style_reference`、`element_reference`、`mask` 角色的
+`media_inputs`。Prompt Hub 的 `/api/v1/generate` 在校验前接受该协议并
+投影到现有公开请求字段；不带版本的旧请求保持原样。
+
+New API 中继在根据实时目录组装图片请求时也先建立同一份语义请求，再按目录
+声明的参数路径写入兼容字段。投影只发生一次，不新增任务、不重复扣费，也不
+改写已存在的 `generation_requests`、`genJobId`、卡片图片引用或历史任务恢复
+路径。Card Library 继续使用原有任务、归档和缩略图流程，因此在线用户无需重新
+接入。
+
 配置命令示例：
 
 ```powershell

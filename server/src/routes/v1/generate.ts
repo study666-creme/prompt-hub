@@ -83,6 +83,7 @@ import {
   serveCachedStorageImage
 } from '../../lib/media-cdn';
 import type { Context } from 'hono';
+import type { ImageProtocolRequest } from '../../lib/image-protocol';
 
 function assertOwnMediaPath(userId: string, path: string): void {
   const norm = path.replace(/^\//, '');
@@ -162,6 +163,21 @@ export function normalizeGenerationBodyAliases(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
   const input = raw as Record<string, unknown>;
   const body: Record<string, unknown> = { ...input };
+  if (input.version === 'image.v1') {
+    const protocol = input as unknown as Partial<ImageProtocolRequest>;
+    body.model = protocol.model;
+    body.prompt = protocol.prompt;
+    if (protocol.resolution !== undefined) body.resolution = protocol.resolution;
+    if (protocol.quality !== undefined) body.quality = protocol.quality;
+    if (protocol.aspect_ratio !== undefined) body.size = protocol.aspect_ratio;
+    if (protocol.count !== undefined) body.count = protocol.count;
+    const media = Array.isArray(protocol.media_inputs) ? protocol.media_inputs : [];
+    const refs = media
+      .filter((item) => item && typeof item === 'object' && ['reference', 'style_reference', 'element_reference'].includes(String((item as { role?: unknown }).role)))
+      .map((item) => (item as { url?: unknown }).url)
+      .filter((url): url is string => typeof url === 'string' && url.trim().length > 0);
+    if (refs.length) body.refImageUrls = refs;
+  }
   const quality = String(input.quality || '').trim().toLowerCase();
   if (!input.resolution && (quality === '1k' || quality === '2k' || quality === '4k')) {
     body.resolution = quality;

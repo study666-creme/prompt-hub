@@ -78,6 +78,19 @@
   没有发送生成 POST、H3 请求或任何付费任务。H3 真实生成仍由维护者
   执行。
 
+## 2026-08-19 图片兼容协议本地候选
+
+- Worker 新增 `image.v1` 语义请求类型。`/api/v1/generate` 在进入旧的计费、
+  任务和归档逻辑前，把带版本请求归一化为原有的 prompt/model/resolution/
+  quality/size/count/refImageUrls 字段；无版本请求完全保持旧行为。
+- New API 图片中继先构造同一语义请求，再使用实时目录参数路径生成兼容请求。
+  固定参数、质量与分辨率档位、参考图数量和旧模型特殊分支仍由目录及现有
+  适配器决定，协议层不复制价格或模型清单。
+- 卡片库生图继续复用现有 `generation_requests`、积分扣费、幂等任务、结果
+  归档和 `genJobId` 关联。此次只增加输入归一化，不迁移或重写现有卡片和任务。
+- 本地验证已通过 Worker typecheck、Worker 全量单测及 Canvas 共享契约/API/Web
+  相关测试；该候选尚未部署，也没有发送付费生图请求。
+
 ## 最小阅读顺序
 
 1. `PROJECT_CONTEXT.md`: 线上拓扑和当前 build。

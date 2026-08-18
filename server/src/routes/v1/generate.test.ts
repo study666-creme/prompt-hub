@@ -86,6 +86,32 @@ describe('image generation request aliases', () => {
     expect(parsed.resolution).toBe('4k');
     expect(parsed.quality).toBe('high');
   });
+
+  it('accepts image.v1 without changing the legacy parsed shape', () => {
+    const parsed = parseGenerationRequestBody({
+      version: 'image.v1',
+      model: 'image2',
+      operation: 'image_to_image',
+      prompt: 'make the product scene brighter',
+      resolution: '1k',
+      aspect_ratio: '16:9',
+      quality: 'standard',
+      count: 1,
+      media_inputs: [
+        { kind: 'image', role: 'reference', url: 'https://image.test/reference.png' }
+      ]
+    });
+
+    expect(parsed).toMatchObject({
+      model: 'image2',
+      prompt: 'make the product scene brighter',
+      resolution: '1k',
+      size: '16:9',
+      quality: 'standard',
+      count: 1,
+      refImageUrls: ['https://image.test/reference.png']
+    });
+  });
 });
 
 describe('public image generation failure codes', () => {

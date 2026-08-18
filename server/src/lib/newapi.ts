@@ -10,6 +10,7 @@ import {
   type ImageModelUiFamily
 } from './image-models-catalog';
 import { mapQualityForGptImage } from './pricing';
+import { buildImageProtocolRequest, type ImageProtocolRequest } from './image-protocol';
 
 type SubmitParams = {
   upstreamModel: string;
@@ -1141,6 +1142,24 @@ function legacyRequestBody(params: SubmitParams): Record<string, unknown> {
   };
 }
 
+function imageProtocolForSubmit(params: SubmitParams): ImageProtocolRequest {
+  const model = params.upstreamModel.trim();
+  const resolutionTierModel = model === 'gpt-image-2-ext' || model === 'image2k4k';
+  return buildImageProtocolRequest({
+    model,
+    prompt: params.prompt,
+    resolution: params.resolution,
+    aspectRatio: params.size || '1:1',
+    quality: resolutionTierModel
+      ? params.resolution
+      : params.fixedQualityLow
+        ? 'low'
+        : mapQualityForGptImage(params.quality),
+    count: Math.max(1, Math.floor(params.count || 1)),
+    mediaInputs: (params.refImageUrls || []).filter(Boolean).map((url) => ({ kind: 'image' as const, role: 'reference' as const, url }))
+  });
+}
+
 function hasOwn(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
@@ -1177,6 +1196,7 @@ function setRequestPath(target: Record<string, unknown>, path: string, value: un
 export function buildNewApiImageRequestBody(params: SubmitParams): Record<string, unknown> {
   const parameters = params.catalogParameters?.filter(parameter => parameter?.name && parameter.path) || [];
   if (!parameters.length) return legacyRequestBody(params);
+  const protocol = imageProtocolForSubmit(params);
   const body: Record<string, unknown> = {};
   const byName = new Map(parameters.map(parameter => [parameter.name, parameter]));
   const set = (name: string, requested: unknown, fallback?: unknown) => {
@@ -1186,31 +1206,27 @@ export function buildNewApiImageRequestBody(params: SubmitParams): Record<string
   };
 
   set('model', params.upstreamModel);
-  set('prompt', params.prompt);
-  set('size', params.size);
-  set('resolution', params.resolution);
+  set('prompt', protocol.prompt);
+  set('size', protocol.aspect_ratio);
+  set('resolution', protocol.resolution);
 
   const qualityParameter = byName.get('quality');
   if (qualityParameter) {
     const resolutionQuality = (qualityParameter.options || [])
       .map(value => String(value).toLowerCase())
       .some(value => value === '1k' || value === '2k' || value === '4k');
-    const quality = resolutionQuality
-      ? params.resolution
-      : params.fixedQualityLow
-        ? 'low'
-        : mapQualityForGptImage(params.quality);
+    const quality = resolutionQuality ? protocol.resolution : protocol.quality;
     set('quality', quality);
   }
 
   const nParameter = byName.get('n');
   if (nParameter) {
-    const raw = Number(declaredValue(nParameter, params.count, 1));
+    const raw = Number(declaredValue(nParameter, protocol.count, 1));
     const bounded = Math.min(nParameter.max ?? 1, Math.max(nParameter.min ?? 1, Number.isFinite(raw) ? raw : 1));
     setRequestPath(body, nParameter.path, Math.max(1, Math.floor(bounded)));
   }
 
-  const refs = (params.refImageUrls || []).filter(Boolean);
+  const refs = (protocol.media_inputs || []).filter((item) => item.role === 'reference').map((item) => item.url);
   const imagesParameter = byName.get('images');
   if (refs.length && imagesParameter) {
     const max = Math.max(1, imagesParameter.max_items ?? refs.length);
