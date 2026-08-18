@@ -13,16 +13,22 @@ describe('newapi video upstream', () => {
     const fetchMock = vi.fn(async (_url, init) => {
       const body = JSON.parse(String((init as RequestInit).body));
       expect(body).toMatchObject({
+        version: 'video.v1',
         model: 'sd2.0',
+        operation: 'video_to_video',
         prompt: '镜头向前推进',
-        duration: 8,
-        ratio: '16:9',
+        duration_seconds: 8,
+        aspect_ratio: '16:9',
         resolution: '720p',
-        referenceImages: ['https://asset.test/a.jpg'],
-        referenceVideos: ['https://asset.test/a.mp4'],
-        referenceAudios: ['https://asset.test/a.mp3']
+        media_inputs: [
+          { kind: 'image', role: 'reference', url: 'https://asset.test/a.jpg' },
+          { kind: 'video', role: 'reference', url: 'https://asset.test/a.mp4' },
+          { kind: 'audio', role: 'audio_reference', url: 'https://asset.test/a.mp3' }
+        ],
+        options: { async: true, n: 1 }
       });
-      expect(body.aspect_ratio).toBeUndefined();
+      expect(body.duration).toBeUndefined();
+      expect(body.referenceImages).toBeUndefined();
       return json({ id: 'task_public', status: 'queued', progress: 0 });
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -52,7 +58,10 @@ describe('newapi video upstream', () => {
         const body = JSON.parse(String((init as RequestInit).body));
         expect(body.model).toBe('grok-video');
         expect(body.aspect_ratio).toBe('1:1');
-        expect(body.images).toEqual(['https://asset.test/a.jpg', 'https://asset.test/b.jpg']);
+        expect(body.media_inputs).toEqual([
+          { kind: 'image', role: 'reference', url: 'https://asset.test/a.jpg' },
+          { kind: 'image', role: 'reference', url: 'https://asset.test/b.jpg' }
+        ]);
         return json({ request_id: 'request_1', status: 'processing' });
       }
       return json({ data: { id: 'request_1', status: 'completed', video: { url: 'https://video.test/out.mp4' } } });
@@ -108,12 +117,17 @@ describe('newapi video upstream', () => {
     ];
     const fetchMock = vi.fn(async (_url, init) => {
       expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+        version: 'video.v1',
         model: 'minimax_h3',
+        operation: 'image_to_video',
         prompt: '让画面中的主体自然运动',
-        async: true,
-        seconds: 4,
-        size: '768',
-        images: ['https://asset.test/reference.png']
+        duration_seconds: 4,
+        resolution: '768',
+        aspect_ratio: '16:9',
+        media_inputs: [
+          { kind: 'image', role: 'reference', url: 'https://asset.test/reference.png' }
+        ],
+        options: { async: true, n: 1 }
       });
       return json({ id: 'h3_task', status: 'queued' });
     });
@@ -133,7 +147,7 @@ describe('newapi video upstream', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('builds every published canvas video model from its declared wire fields', () => {
+  it('uses one protocol for legacy and native catalog wire dialects', () => {
     const field = (
       name: string,
       type: NewApiCatalogParameter['type'] = 'string',
@@ -143,40 +157,9 @@ describe('newapi video upstream', () => {
       field('model', 'string', { required: true, fixed: model }),
       field('prompt', 'string', { required: true })
     ];
-    const legacy = (model: string, fixedDuration = false): NewApiCatalogParameter[] => [
-      ...base(model),
-      field('duration', 'integer', fixedDuration ? { fixed: 15 } : { min: 4, max: 15 }),
-      field('ratio', 'string', { options: ['16:9', '9:16'] }),
-      field('resolution', 'string', { options: ['480p', '720p', '1080p'] }),
-      field('referenceImages', 'array', { max_items: 9 }),
-      field('referenceVideos', 'array', { max_items: 3 }),
-      field('referenceAudios', 'array', { max_items: 3 })
-    ];
-    const native = (model: string, image: NewApiCatalogParameter, video?: NewApiCatalogParameter, audio?: NewApiCatalogParameter): NewApiCatalogParameter[] => [
-      ...base(model),
-      field('seconds', 'integer', { min: 4, max: 15 }),
-      field('size', 'string', { options: ['1280x720', '720x1280'] }),
-      image,
-      ...(video ? [video] : []),
-      ...(audio ? [audio] : [])
-    ];
-    const refs = {
-      referenceImages: ['https://asset.test/image.png'],
-      referenceVideos: ['https://asset.test/video.mp4'],
-      referenceAudios: ['https://asset.test/audio.mp3']
-    };
-    const cases: Array<{
-      model: string;
-      duration?: number;
-      resolution: string;
-      startFrame?: string;
-      endFrame?: string;
-      parameters: NewApiCatalogParameter[];
-      expected: Record<string, unknown>;
-    }> = [
+    const cases = [
       {
         model: 'minimax_h3',
-        resolution: '768',
         parameters: [
           ...base('minimax_h3'),
           field('async', 'boolean', { fixed: true }),
@@ -184,18 +167,11 @@ describe('newapi video upstream', () => {
           field('size', 'string', { options: ['768', '1080p'] }),
           field('images', 'array', { max_items: 9 }),
           field('reference_videos', 'array', { max_items: 3 }),
-          field('reference_audios', 'array', { max_items: 3 }),
-          field('duration', 'integer'),
-          field('resolution'),
-          field('referenceImages', 'array')
-        ],
-        expected: { model: 'minimax_h3', prompt: 'animate', async: true, seconds: 4, size: '768', images: refs.referenceImages, reference_videos: refs.referenceVideos, reference_audios: refs.referenceAudios }
+          field('reference_audios', 'array', { max_items: 3 })
+        ]
       },
       {
         model: 'S-2.5-满血',
-        resolution: '720p',
-        startFrame: 'https://asset.test/first.png',
-        endFrame: 'https://asset.test/last.png',
         parameters: [
           ...base('S-2.5-满血'),
           field('duration', 'integer', { min: 4, max: 30 }),
@@ -206,117 +182,54 @@ describe('newapi video upstream', () => {
           field('referenceAudios', 'array', { max_items: 10 }),
           field('first_image'),
           field('last_image')
-        ],
-        expected: {
-          model: 'S-2.5-满血',
-          prompt: 'animate',
-          duration: 4,
-          ratio: '16:9',
-          resolution: '720p',
-          referenceImages: refs.referenceImages,
-          referenceVideos: refs.referenceVideos,
-          referenceAudios: refs.referenceAudios,
-          first_image: 'https://asset.test/first.png',
-          last_image: 'https://asset.test/last.png'
-        }
-      },
-      ...['S-2.0满血-933', 'S-2.0-720p-稳定', 'S-2.0mini-官转', 'S-2.0fast-官转'].map(model => ({
-        model,
-        resolution: '720p',
-        parameters: legacy(model, model === 'S-2.0满血-933'),
-        expected: { model, prompt: 'animate', duration: model === 'S-2.0满血-933' ? 15 : 4, ratio: '16:9', resolution: '720p', referenceImages: refs.referenceImages, referenceVideos: refs.referenceVideos, referenceAudios: refs.referenceAudios }
-      })),
-      ...['S-videos-t-431-pro-720-5', 'S-videos-t-431-fast-720-5'].map(model => ({
-        model,
-        resolution: '720p',
-        parameters: [
-          ...base(model),
-          field('seconds', 'integer', { options: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] }),
-          field('resolution', 'string', { fixed: '720P' }),
-          field('aspect_ratio', 'string', { options: ['16:9', '9:16'] }),
-          field('reference_images', 'array', { max_items: 4 }),
-          field('video_references', 'array', { max_items: 3 }),
-          field('audio_reference', 'array', { max_items: 1 }),
-          field('motion_has_audio', 'boolean', { default: true }),
-          field('n', 'integer', { fixed: 1 })
-        ],
-        expected: { model, prompt: 'animate', seconds: 4, resolution: '720P', aspect_ratio: '16:9', reference_images: refs.referenceImages, video_references: refs.referenceVideos, audio_reference: refs.referenceAudios, n: 1 }
-      })),
-      {
-        model: 'runway-gen4.5',
-        duration: 5,
-        resolution: '1280x720',
-        parameters: [
-          ...base('runway-gen4.5'),
-          field('seconds', 'integer', { options: [5, 8, 10] }),
-          field('size', 'string', { options: ['1280x720', '720x1280'] }),
-          field('images', 'array', { max_items: 1 }),
-          field('n', 'integer', { fixed: 1 })
-        ],
-        expected: { model: 'runway-gen4.5', prompt: 'animate', seconds: 5, size: '1280x720', images: refs.referenceImages, n: 1 }
+        ]
       },
       {
         model: 'kling-o3',
-        resolution: '1280x720',
-        parameters: [...native('kling-o3', field('referenceImages', 'array', { path: 'reference_images', max_items: 6 }), field('referenceVideos', 'string', { path: 'input_video' })), field('n', 'integer', { fixed: 1 })],
-        expected: { model: 'kling-o3', prompt: 'animate', seconds: 4, size: '1280x720', reference_images: refs.referenceImages, input_video: refs.referenceVideos[0], n: 1 }
-      },
-      {
-        model: 'kling-o3-pro-v2v-reference',
-        resolution: '1280x720',
-        parameters: [...native('kling-o3-pro-v2v-reference', field('referenceImages', 'array', { path: 'images', max_items: 2 }), field('referenceVideos', 'string', { path: 'input_video' })), field('n', 'integer', { fixed: 1 })],
-        expected: { model: 'kling-o3-pro-v2v-reference', prompt: 'animate', seconds: 4, size: '1280x720', images: refs.referenceImages, input_video: refs.referenceVideos[0], n: 1 }
-      },
-      {
-        model: 'kling-v3',
-        resolution: '1280x720',
-        parameters: [...native('kling-v3', field('referenceImages', 'array', { path: 'images', max_items: 2 })), field('n', 'integer', { fixed: 1 })],
-        expected: { model: 'kling-v3', prompt: 'animate', seconds: 4, size: '1280x720', images: refs.referenceImages, n: 1 }
-      },
-      {
-        model: 'kling-v3-omni-v2v-create',
-        resolution: '1280x720',
-        parameters: [...native('kling-v3-omni-v2v-create', field('referenceImages', 'array', { path: 'style_references', max_items: 3 }), field('referenceVideos', 'string', { path: 'input_video' })), field('n', 'integer', { fixed: 1 })],
-        expected: { model: 'kling-v3-omni-v2v-create', prompt: 'animate', seconds: 4, size: '1280x720', style_references: refs.referenceImages, input_video: refs.referenceVideos[0], n: 1 }
-      },
-      ...['veo-3.1', 'veo-3.1-fast', 'veo-3.1-lite'].map(model => ({
-        model,
-        duration: model === 'veo-3.1-fast' ? 8 : 4,
-        resolution: '1280x720',
         parameters: [
-          ...base(model),
-          field('seconds', 'integer', model === 'veo-3.1-fast' ? { fixed: 8 } : { options: [4, 6, 8] }),
-          field('size', 'string', { options: ['1280x720', '720x1280', '1920x1080', '1080x1920'] }),
-          field('images', 'array', { max_items: model === 'veo-3.1-lite' ? 2 : 3 }),
+          ...base('kling-o3'),
+          field('seconds', 'integer', { options: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] }),
+          field('size', 'string', { options: ['1280x720', '720x1280'] }),
+          field('aspect_ratio', 'string', { options: ['16:9', '9:16'] }),
+          field('referenceImages', 'array', { path: 'reference_images', max_items: 6 }),
+          field('referenceVideos', 'string', { path: 'input_video' }),
+          field('generate_audio', 'boolean'),
           field('n', 'integer', { fixed: 1 })
-        ],
-        expected: { model, prompt: 'animate', seconds: model === 'veo-3.1-fast' ? 8 : 4, size: '1280x720', images: refs.referenceImages, n: 1 }
-      })),
-      ...['S-videos-f-933-pro-3', 'S-videos-f-933-fast-3'].map(model => ({
-        model,
-        resolution: '720p',
-        parameters: [...legacy(model, true), field('n', 'integer', { fixed: 1 })],
-        expected: { model, prompt: 'animate', duration: 15, ratio: '16:9', resolution: '720p', referenceImages: refs.referenceImages, referenceVideos: refs.referenceVideos, referenceAudios: refs.referenceAudios, n: 1 }
-      }))
+        ]
+      }
     ];
 
-    expect(cases).toHaveLength(18);
     for (const testCase of cases) {
-      expect(buildNewApiVideoRequestBody({
+      const body = buildNewApiVideoRequestBody({
         upstreamModel: testCase.model,
         prompt: 'animate',
-        duration: testCase.duration ?? 4,
+        duration: 4,
         ratio: '16:9',
-        resolution: testCase.resolution,
-        ...refs,
-        startFrame: testCase.startFrame,
-        endFrame: testCase.endFrame,
+        resolution: testCase.model === 'minimax_h3' ? '768' : '720p',
+        referenceImages: ['https://asset.test/image.png'],
+        referenceVideos: ['https://asset.test/video.mp4'],
+        referenceAudios: ['https://asset.test/audio.mp3'],
+        startFrame: 'https://asset.test/first.png',
+        endFrame: 'https://asset.test/last.png',
+        catalogValues: { generate_audio: true },
         catalogParameters: testCase.parameters
-      }), testCase.model).toEqual(testCase.expected);
+      });
+      expect(body).toMatchObject({
+        version: 'video.v1',
+        model: testCase.model,
+        operation: 'video_to_video',
+        prompt: 'animate',
+        duration_seconds: 4,
+        aspect_ratio: '16:9'
+      });
+      expect(body).not.toHaveProperty('seconds');
+      expect(body).not.toHaveProperty('duration');
+      expect(body).not.toHaveProperty('size');
+      expect(body).not.toHaveProperty('referenceImages');
     }
   });
 
-  it('forwards declared model controls and nested fixed paths without emitting compatibility aliases', () => {
+  it('keeps model controls in protocol options instead of catalog wire paths', () => {
     const parameters: NewApiCatalogParameter[] = [
       { name: 'model', path: 'model', label: 'model', type: 'string', required: true, fixed: 'native-video' },
       { name: 'prompt', path: 'prompt', label: 'prompt', type: 'string', required: true },
@@ -337,11 +250,14 @@ describe('newapi video upstream', () => {
       catalogValues: { generate_audio: true, duration: 6, resolution: '1280x720' },
       catalogParameters: parameters
     })).toEqual({
+      version: 'video.v1',
       model: 'native-video',
+      operation: 'text_to_video',
       prompt: 'animate',
-      seconds: 6,
-      size: '1280x720',
-      options: { generate_audio: true, count: 1 }
+      duration_seconds: 6,
+      resolution: '1280x720',
+      aspect_ratio: '16:9',
+      options: { async: true, n: 1, generate_audio: true }
     });
   });
 });

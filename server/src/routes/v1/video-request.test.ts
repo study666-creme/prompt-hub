@@ -142,16 +142,21 @@ describe('video request aliases', () => {
       catalogValues: parsed.catalogValues,
       catalogParameters: parameters
     })).toEqual({
+      version: 'video.v1',
       model: 'S-2.5-满血',
+      operation: 'video_to_video',
       prompt: 'animate',
-      duration: 30,
-      ratio: '1:1',
+      duration_seconds: 30,
+      aspect_ratio: '1:1',
       resolution: '720p',
-      referenceImages,
-      referenceVideos,
-      referenceAudios,
-      first_image: 'https://asset.test/first.jpg',
-      last_image: 'https://asset.test/last.jpg'
+      media_inputs: [
+        ...referenceImages.map((url) => ({ kind: 'image', role: 'reference', url })),
+        { kind: 'image', role: 'first_frame', url: 'https://asset.test/first.jpg' },
+        { kind: 'image', role: 'last_frame', url: 'https://asset.test/last.jpg' },
+        ...referenceVideos.map((url) => ({ kind: 'video', role: 'reference', url })),
+        ...referenceAudios.map((url) => ({ kind: 'audio', role: 'audio_reference', url }))
+      ],
+      options: { async: true, n: 1 }
     });
   });
 
@@ -192,15 +197,20 @@ describe('video request aliases', () => {
       catalogValues: parsed.catalogValues,
       catalogParameters: parameters
     })).toEqual({
+      version: 'video.v1',
       model: 'kling-o3-pro-v2v-reference',
+      operation: 'video_to_video',
       prompt: 'restyle',
-      seconds: 4,
-      size: '1280x720',
-      images: ['https://asset.test/frame.jpg'],
-      style_references: ['https://asset.test/style.jpg'],
-      element_references: ['https://asset.test/element.jpg'],
-      input_video: 'https://asset.test/source.mp4',
-      n: 1
+      duration_seconds: 4,
+      resolution: '1280x720',
+      aspect_ratio: '16:9',
+      media_inputs: [
+        { kind: 'image', role: 'reference', url: 'https://asset.test/frame.jpg' },
+        { kind: 'image', role: 'style_reference', url: 'https://asset.test/style.jpg' },
+        { kind: 'image', role: 'element_reference', url: 'https://asset.test/element.jpg' },
+        { kind: 'video', role: 'source_video', url: 'https://asset.test/source.mp4' }
+      ],
+      options: { async: true, n: 1 }
     });
   });
 
