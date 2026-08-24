@@ -147,6 +147,9 @@ const MEDIA_PARAMETER_NAMES = new Set([
   'reference_audio'
 ]);
 
+const H3_SUPER_RESOLUTIONS = new Set(['2K', '4K']);
+const H3_SUPER_WORKFLOWS = new Set(['cf-multi-reference', 'cf-fl2v', 'cf-mj']);
+
 type VideoMediaKind = 'image' | 'video' | 'audio';
 type VideoMediaRole = 'reference' | 'first_frame' | 'last_frame' | 'source_video' | 'audio_reference' | 'style_reference' | 'element_reference';
 type VideoMediaInput = { kind: VideoMediaKind; role: VideoMediaRole; url: string };
@@ -190,11 +193,53 @@ function videoOptions(params: NewApiVideoSubmitParams, parameters: NewApiCatalog
   return options;
 }
 
+function isMiniMaxH3(model: string) {
+  return /^minimax[ _-]*h3(?:$|[ _-])/i.test(model.trim());
+}
+
+function h3SuperResolutionBody(
+  params: NewApiVideoSubmitParams,
+  resolution: unknown,
+): Record<string, unknown> | null {
+  if (!isMiniMaxH3(params.upstreamModel) || typeof resolution !== 'string') return null;
+  const size = resolution.trim().toUpperCase();
+  if (!H3_SUPER_RESOLUTIONS.has(size)) return null;
+
+  const requestedWorkflow = params.catalogValues?.workflow_id;
+  const workflow = typeof requestedWorkflow === 'string' && H3_SUPER_WORKFLOWS.has(requestedWorkflow)
+    ? requestedWorkflow
+    : params.startFrame || params.endFrame
+      ? 'cf-fl2v'
+      : 'cf-multi-reference';
+  const images = [
+    ...(params.referenceImages || []),
+    ...(params.startFrame ? [params.startFrame] : []),
+    ...(params.endFrame ? [params.endFrame] : []),
+  ].map(value => value.trim()).filter(Boolean);
+
+  // The H3 super-resolution workflows use the native New API envelope. In
+  // particular, `size` selects the 2K/4K tier and `workflow_id` selects the
+  // ComfyUI workflow; sending `resolution` or `aspect_ratio` makes the
+  // upstream interpret the tier as an ordinary aspect-ratio size.
+  return {
+    model: params.upstreamModel,
+    prompt: params.prompt,
+    seconds: params.duration,
+    workflow_id: workflow,
+    size,
+    ...(images.length ? { images } : {}),
+    ...(params.referenceVideos?.length ? { reference_videos: params.referenceVideos } : {}),
+    ...(params.referenceAudios?.length ? { reference_audios: params.referenceAudios } : {}),
+  };
+}
+
 export function buildNewApiVideoRequestBody(params: NewApiVideoSubmitParams): Record<string, unknown> {
   const parameters = (params.catalogParameters || []).filter(parameter => parameter?.name);
   const duration = declaredScalar(findParameter(parameters, ['duration_seconds', 'seconds', 'duration']), params.duration);
   const resolution = declaredScalar(findParameter(parameters, ['resolution', 'size']), params.resolution);
   const aspectRatio = declaredScalar(findParameter(parameters, ['aspect_ratio', 'ratio']), params.ratio);
+  const h3SuperResolution = h3SuperResolutionBody(params, resolution);
+  if (h3SuperResolution) return h3SuperResolution;
   const mediaInputs: VideoMediaInput[] = [];
 
   const imageParameter = findParameter(parameters, ['referenceImages', 'images', 'reference_images', 'image', 'input_reference']);

@@ -147,6 +147,34 @@ describe('newapi video upstream', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('submits MiniMax H3 2K/4K through the native super-resolution workflow envelope', () => {
+    const body = buildNewApiVideoRequestBody({
+      upstreamModel: 'minimax_h3',
+      prompt: '保持人物外观并自然运动',
+      duration: 10,
+      ratio: '16:9',
+      resolution: '4K',
+      referenceImages: ['https://asset.test/person.png'],
+      catalogValues: { workflow_id: 'cf-multi-reference', size: '4K' },
+      catalogParameters: [
+        { name: 'seconds', path: 'seconds', label: '时长', type: 'integer', required: false },
+        { name: 'size', path: 'size', label: '尺寸', type: 'string', required: false },
+      ],
+    });
+
+    expect(body).toEqual({
+      model: 'minimax_h3',
+      prompt: '保持人物外观并自然运动',
+      seconds: 10,
+      workflow_id: 'cf-multi-reference',
+      size: '4K',
+      images: ['https://asset.test/person.png'],
+    });
+    expect(body).not.toHaveProperty('version');
+    expect(body).not.toHaveProperty('resolution');
+    expect(body).not.toHaveProperty('aspect_ratio');
+  });
+
   it('uses one protocol for legacy and native catalog wire dialects', () => {
     const field = (
       name: string,
