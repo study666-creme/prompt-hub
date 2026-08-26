@@ -678,5 +678,8 @@ videoRoutes.get('/jobs/:jobId/content', async c => {
   const upstream = await fetchNewApiVideoContent(upstreamKey, c.env.NEWAPI_API_BASE_URL, upstreamTaskId, range);
   const upstreamType = String(upstream.headers.get('Content-Type') || '').toLowerCase();
   if (upstreamType.startsWith('audio/')) throw new ApiError(502, 'UPSTREAM_ERROR', '上游返回了音频文件，而不是视频结果');
+  if (upstreamType.includes('json') || upstreamType.startsWith('text/')) {
+    throw new ApiError(502, 'UPSTREAM_ERROR', '上游返回了错误信息，而不是视频结果');
+  }
   return proxyVideoResponse(upstream);
 });
