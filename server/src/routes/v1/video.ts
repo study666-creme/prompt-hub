@@ -297,6 +297,63 @@ async function resolveMediaReferences(
   return urls;
 }
 
+function isAudioResultUrl(value: string): boolean {
+  return /\.(?:mp3|wav|aac|m4a|flac|oga|ogg)(?:$|[?#])/i.test(value)
+    || /(?:^|[?&])(?:mime|type)=audio%2f/i.test(value);
+}
+
+function normalizedVideoContentType(response: Response, sourceUrl = ''): string {
+  const declared = String(response.headers.get('Content-Type') || '').split(';', 1)[0].trim().toLowerCase();
+  if (declared.startsWith('video/')) return declared;
+  if (/\.webm(?:$|[?#])/i.test(sourceUrl)) return 'video/webm';
+  if (/\.mov(?:$|[?#])/i.test(sourceUrl)) return 'video/quicktime';
+  return 'video/mp4';
+}
+
+function proxyVideoResponse(upstream: Response, sourceUrl = ''): Response {
+  const headers = new Headers();
+  for (const name of ['Content-Length', 'Content-Range', 'Accept-Ranges', 'ETag', 'Last-Modified']) {
+    const value = upstream.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  headers.set('Content-Type', normalizedVideoContentType(upstream, sourceUrl));
+  headers.set('Cache-Control', 'private, max-age=300');
+  return new Response(upstream.body, { status: upstream.status, headers });
+}
+
+function trustedNewApiVideoResult(url: string, baseUrl: string | undefined, taskId: string): boolean {
+  try {
+    const target = new URL(url);
+    const base = new URL(String(baseUrl || '').trim());
+    const expectedPath = `/v1/videos/${encodeURIComponent(taskId)}/content`;
+    const knownHost = target.hostname === base.hostname
+      || target.hostname === 'newapi.prompt-hubs.com'
+      || target.hostname === 'console.prompt-hubs.com';
+    return knownHost && target.pathname === expectedPath;
+  } catch {
+    return false;
+  }
+}
+
+async function fetchDirectVideoResult(
+  url: string,
+  range: string | undefined,
+  auth: { apiKey: string; baseUrl?: string; taskId: string }
+): Promise<Response | null> {
+  if (!/^https?:\/\//i.test(url) || isAudioResultUrl(url)) return null;
+  try {
+    const headers: Record<string, string> = range ? { Range: range } : {};
+    if (trustedNewApiVideoResult(url, auth.baseUrl, auth.taskId)) headers.Authorization = `Bearer ${auth.apiKey}`;
+    const response = await fetch(url, { headers });
+    if (!response.ok) return null;
+    const contentType = String(response.headers.get('Content-Type') || '').toLowerCase();
+    if (contentType.startsWith('audio/') || contentType.includes('json') || contentType.startsWith('text/')) return null;
+    return response;
+  } catch {
+    return null;
+  }
+}
+
 async function findVideoRequestByClientId(
   admin: ReturnType<typeof createAdminClient>,
   userId: string,
@@ -598,12 +655,28 @@ videoRoutes.get('/jobs/:jobId/content', async c => {
   if (!apiKey || !upstreamTaskId) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频内容暂不可用');
   const routeChannelId = Number(meta.routeChannelId) || 0;
   const route = routeChannelId ? { channelId: routeChannelId } : null;
-  const upstream = await fetchNewApiVideoContent(newApiKeyForRoute(apiKey, route), c.env.NEWAPI_API_BASE_URL, upstreamTaskId, c.req.header('Range'));
-  const headers = new Headers();
-  for (const name of ['Content-Type', 'Content-Length', 'Content-Range', 'Accept-Ranges', 'ETag']) {
-    const value = upstream.headers.get(name);
-    if (value) headers.set(name, value);
+  const upstreamKey = newApiKeyForRoute(apiKey, route);
+  const range = c.req.header('Range');
+  const directAuth = { apiKey: upstreamKey, baseUrl: c.env.NEWAPI_API_BASE_URL, taskId: upstreamTaskId };
+
+  const savedResultUrl = String(meta.resultUrl || '').trim();
+  const savedResult = await fetchDirectVideoResult(savedResultUrl, range, directAuth);
+  if (savedResult) return proxyVideoResponse(savedResult, savedResultUrl);
+
+  // Some adapters only expose the result URL on a later task read. Refresh it
+  // before falling back to the standard content endpoint.
+  const refreshedTask = await fetchNewApiVideoTask(upstreamKey, c.env.NEWAPI_API_BASE_URL, upstreamTaskId).catch(() => null);
+  const refreshedResultUrl = String(refreshedTask?.videoUrl || '').trim();
+  const refreshedResult = await fetchDirectVideoResult(refreshedResultUrl, range, directAuth);
+  if (refreshedResult) {
+    if (refreshedResultUrl && refreshedResultUrl !== savedResultUrl) {
+      await admin.from('generation_requests').update({ meta: { ...meta, resultUrl: refreshedResultUrl } }).eq('id', row.id);
+    }
+    return proxyVideoResponse(refreshedResult, refreshedResultUrl);
   }
-  headers.set('Cache-Control', 'private, max-age=300');
-  return new Response(upstream.body, { status: upstream.status, headers });
+
+  const upstream = await fetchNewApiVideoContent(upstreamKey, c.env.NEWAPI_API_BASE_URL, upstreamTaskId, range);
+  const upstreamType = String(upstream.headers.get('Content-Type') || '').toLowerCase();
+  if (upstreamType.startsWith('audio/')) throw new ApiError(502, 'UPSTREAM_ERROR', '上游返回了音频文件，而不是视频结果');
+  return proxyVideoResponse(upstream);
 });
