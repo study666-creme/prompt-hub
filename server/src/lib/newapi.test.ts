@@ -202,14 +202,15 @@ describe('newapi image upstream', () => {
     expect(newApiCreditsForModel(rules, 'chat-only')).toBeNull();
 
     const snapshot = await fetchNewApiModelCatalog('https://pricing-unit.test/v1');
-    expect(snapshot.imageCatalogEntries.map(model => model.id)).toEqual(['image2', 'image2-pro', 'image2-economy', 'image2-hd']);
+    expect(snapshot.imageCatalogEntries.map(model => model.id)).toEqual(['image2', 'image2-pro', 'image2-economy', 'flux-public', 'image2-hd']);
     expect(snapshot.imageCatalogEntries.map(model => model.label)).toEqual([
       '全能模型2 · 1K',
       '全能模型2 · 高质量 1K/2K/4K',
       '全能模型2 · 特价 1K',
+      'Flux Preview',
       '全能模型2 · 经济 2K/4K'
     ]);
-    expect(snapshot.imageCatalogEntries[3].fixedQualityLow).toBe(true);
+    expect(snapshot.imageCatalogEntries[4].fixedQualityLow).toBe(true);
     expect(resolveNewApiCatalogModel(snapshot, 'image2-economy', 'image')?.upstreamModel).toBe('gpt-image-2-chat');
     expect(resolveNewApiCatalogModel(snapshot, 'image2', 'image')?.upstreamModel).toBe('gpt-image-2');
     expect(resolveNewApiCatalogModel(snapshot, 'gpt-image-2', 'image')?.id).toBe('image2');
@@ -220,9 +221,9 @@ describe('newapi image upstream', () => {
     }));
     expect(publicNewApiCatalogModels(snapshot).some(model => 'upstreamModel' in model)).toBe(false);
     expect(publicNewApiCatalogModels(snapshot).some(model => model.id === 'image2-economy')).toBe(true);
-    expect(publicNewApiCatalogModels(snapshot).some(model => model.id === 'flux-public')).toBe(false);
+    expect(publicNewApiCatalogModels(snapshot).some(model => model.id === 'flux-public')).toBe(true);
     expect(resolveNewApiCatalogModel(snapshot, 'image2-economy', 'image')?.upstreamModel).toBe('gpt-image-2-chat');
-    expect(resolveNewApiCatalogModel(snapshot, 'flux-public', 'image')).toBeNull();
+    expect(resolveNewApiCatalogModel(snapshot, 'flux-public', 'image')?.upstreamModel).toBe('flux-preview');
     const video = resolveNewApiCatalogModel(snapshot, 'motion-video', 'video');
     expect(video && newApiFixedCreditsForRequest(video, { duration: 10, resolution: '720p' })).toBe(16);
     const textModel = resolveNewApiCatalogModel(snapshot, 'creative-5-5', 'text');
@@ -302,7 +303,8 @@ describe('newapi image upstream', () => {
     expect(snapshot.imageCatalogEntries.map(model => [model.id, model.uiFamily])).toEqual([
       ['image2-A', 'gim2'],
       ['lingtu-2', 'banana'],
-      ['mj-v7', 'midjourney']
+      ['mj-v7', 'midjourney'],
+      ['flux-preview', 'generic']
     ]);
     expect(snapshot.imageCatalogEntries.find(model => model.id === 'image2-A')?.label).toBe('全能模型2-A');
     expect(resolveNewApiCatalogModel(snapshot, 'image2-a', 'image')?.id).toBe('image2-A');
@@ -311,7 +313,7 @@ describe('newapi image upstream', () => {
     expect(newApiCreditsForModel(snapshot.rules, 'image2-A', '2k', 'high')).toBe(7);
     expect(newApiCreditsForModel(snapshot.rules, 'image2-A', '4k', 'standard')).toBe(6);
     expect(newApiCreditsForModel(snapshot.rules, 'image2-A', '4k', 'high')).toBe(8);
-    expect(publicNewApiCatalogModels(snapshot).some(model => model.id === 'flux-preview')).toBe(false);
+    expect(publicNewApiCatalogModels(snapshot).some(model => model.id === 'flux-preview')).toBe(true);
   });
 
   it('routes the three published MJ models through APIMart at 40 credits per request', async () => {
@@ -380,6 +382,62 @@ describe('newapi image upstream', () => {
       'mj-niji7'
     ]);
     expect(merged.some(model => model.id.startsWith('apimart-mj-'))).toBe(false);
+  });
+
+  it('keeps the Chinese Midjourney v8.2 public id and dedicated route', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      success: true,
+      version: 'catalog-mj-friendly-1',
+      pricing_version: 'pricing-mj-friendly-1',
+      models: [{
+        id: 'Midjourney v8.2 高速',
+        label: 'Midjourney v8.2 高速',
+        public: {
+          id: 'Midjourney v8.2 高速',
+          label: 'Midjourney v8.2 高速',
+          description: '支持文生图和参考图生图，单次固定返回 4 张图片。'
+        },
+        modality: 'image',
+        operation: 'generate',
+        selectable: true,
+        order: 49,
+        input: { text: { required: true }, images: { min: 0, max: 5, multiple: true } },
+        output: { type: 'image', count: { fixed: 4 } },
+        endpoint: {
+          method: 'POST',
+          path: '/v1/midjourney/generations',
+          content_type: 'application/json'
+        },
+        parameters: [
+          { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: 'Midjourney v8.2 高速' },
+          { name: 'prompt', path: 'prompt', label: '提示词', type: 'string', required: true },
+          { name: 'size', path: 'size', label: '画面比例', type: 'string', default: '9:16', options: ['1:1', '16:9', '9:16'] },
+          { name: 'raw', path: 'raw', label: 'Raw', type: 'boolean', default: false },
+          { name: 'n', path: 'n', label: '提交次数', type: 'integer', fixed: 1 }
+        ],
+        pricing: { mode: 'fixed', unit: 'request', currency: 'CNY', yuan: 0.4, credits: 40 }
+      }]
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const snapshot = await fetchNewApiModelCatalog('https://midjourney-friendly-catalog.test', { force: true });
+    expect(snapshot.imageCatalogEntries).toEqual([
+      expect.objectContaining({
+        id: 'Midjourney v8.2 高速',
+        upstream: 'Midjourney v8.2 高速',
+        provider: 'apimart',
+        uiFamily: 'midjourney',
+        defaultCredits: 40
+      })
+    ]);
+    expect(publicNewApiCatalogModels(snapshot)).toContainEqual(expect.objectContaining({
+      id: 'Midjourney v8.2 高速',
+      endpoint: { method: 'POST', path: '/api/v1/generate', contentType: 'application/json' },
+      parameters: expect.arrayContaining([
+        expect.objectContaining({ name: 'model', fixed: 'Midjourney v8.2 高速' }),
+        expect.objectContaining({ name: 'size' })
+      ])
+    }));
   });
 
   it('submits image2-A once as a durable native image task', async () => {

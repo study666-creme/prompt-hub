@@ -99,6 +99,8 @@ export type MjButtonPublic = {
 
 const UPSTREAM_TO_SPEC: Record<string, MjVersionSpec> = {
   'mj-v6.1': { version: '6.1' },
+  'mj-v82': { version: '8.2' },
+  'midjourney v8.2 高速': { version: '8.2' },
   'mj-v81': { version: '8.1' },
   'mj-v8.1': { version: '8.1' },
   'mj-v7': { version: '7' },
@@ -108,15 +110,19 @@ const UPSTREAM_TO_SPEC: Record<string, MjVersionSpec> = {
 };
 
 export function isMidjourneyUpstream(upstream: string): boolean {
-  return String(upstream || '')
-    .trim()
-    .toLowerCase()
-    .startsWith(MJ_UPSTREAM_PREFIX);
+  const normalized = String(upstream || '').trim().toLowerCase();
+  // The public New API catalog currently publishes v8.2 with its full
+  // Chinese display id. It is still an MJ route even though it does not use
+  // the historical `mj-*` upstream prefix.
+  return normalized.startsWith(MJ_UPSTREAM_PREFIX)
+    || normalized === 'midjourney v8.2 高速';
 }
 
 export function isMidjourneyModelId(modelId: string): boolean {
   const id = normalizeImageModelId(modelId);
-  return id.startsWith('mj-') || id.startsWith('apimart-mj-');
+  return id.startsWith('mj-')
+    || id.startsWith('apimart-mj-')
+    || isMidjourneyUpstream(id);
 }
 
 export function mjVersionFromUpstream(upstream: string): MjVersionSpec | null {

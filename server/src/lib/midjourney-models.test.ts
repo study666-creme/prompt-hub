@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildImagineBody,
+  isMidjourneyUpstream,
   isMidjourneyModelId,
   mjVersionFromUpstream,
   parseMjImagineUrls
@@ -40,6 +41,8 @@ describe('Midjourney generation helpers', () => {
   it('recognizes current and legacy public ids', () => {
     expect(isMidjourneyModelId('mj-v81')).toBe(true);
     expect(isMidjourneyModelId('apimart-mj-v81')).toBe(true);
+    expect(isMidjourneyModelId('Midjourney v8.2 高速')).toBe(true);
+    expect(isMidjourneyUpstream('Midjourney v8.2 高速')).toBe(true);
     expect(isMidjourneyModelId('image2')).toBe(false);
   });
 

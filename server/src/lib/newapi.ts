@@ -150,7 +150,7 @@ export type NewApiTaskPollResult = {
 const PRICING_CACHE_MS = 5 * 60_000;
 const ADMIN_ROUTE_CACHE_MS = 30_000;
 const NEWAPI_CATALOG_FETCH_TIMEOUT_MS = 15_000;
-const PUBLIC_MIDJOURNEY_MODEL_IDS = new Set(['mj-v81', 'mj-v7', 'mj-niji7']);
+const PUBLIC_MIDJOURNEY_MODEL_IDS = new Set(['Midjourney v8.2 高速', 'mj-v82', 'mj-v81', 'mj-v7', 'mj-niji7']);
 
 const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; description: string }> = {
   'gpt-5.5': { id: 'creative-5-5', label: '全能模型5.5', description: '通用创作与推理模型，最高 xhigh 思考。' },
@@ -502,15 +502,15 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
       || pricing.credits == null
       || pricing.credits < 0
     ) continue;
+    const declaredResolutions = resolutionOptions(parameters, upstreamModel);
     const resolutions: ('1k' | '2k' | '4k')[] = isMidjourney
-      ? ['1k']
+      ? (declaredResolutions.length ? declaredResolutions : ['1k'])
       : isChatImage
       ? ['1k']
       : resolutionOptions(parameters, upstreamModel);
     if (upstreamModel === 'gpt-image-2-ext' && !resolutions.includes('1k')) {
       resolutions.unshift('1k');
     }
-    if (!resolutions.length) continue;
     const creditsByResolution: Partial<Record<'1k' | '2k' | '4k', number>> = {};
     for (const tier of pricing.tiers || []) {
       const resolution = stringValue(tier.when.quality ?? tier.when.resolution).toLowerCase();
@@ -525,8 +525,9 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
     const promptHub = integration && typeof integration === 'object'
       ? integration as Record<string, unknown>
       : {};
-    if (!imageFamily) continue;
-    const family = (isChatImage ? 'gim2' : imageFamily) as ImageModelUiFamily;
+    const resolvedImageFamily = imageFamily || (modality === 'image' ? 'generic' : null);
+    if (!resolvedImageFamily) continue;
+    const family = (isChatImage ? 'gim2' : resolvedImageFamily) as ImageModelUiFamily;
     const publicId = presentation.id || stringValue(promptHub.id) || `newapi-${upstreamModel}`;
     const description = presentation.description || null;
     const label = presentation.label;

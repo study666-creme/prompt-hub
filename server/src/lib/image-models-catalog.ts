@@ -1,6 +1,6 @@
 export type ImageModelProvider = 'apimart' | 'newapi';
 
-export type ImageModelUiFamily = 'gim2' | 'banana' | 'jimeng' | 'midjourney' | 'wan' | 'flux';
+export type ImageModelUiFamily = 'gim2' | 'banana' | 'jimeng' | 'midjourney' | 'wan' | 'flux' | 'generic';
 
 export type MjSpeedKey = 'relax' | 'fast' | 'turbo';
 
@@ -237,7 +237,7 @@ export const IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
 ];
 
 export function isPublicNewApiImageEntry(entry: ImageModelCatalogEntry): boolean {
-  return entry.provider === 'newapi' && (entry.uiFamily === 'gim2' || entry.uiFamily === 'banana');
+  return entry.provider === 'newapi' && (entry.uiFamily === 'gim2' || entry.uiFamily === 'banana' || entry.uiFamily === 'generic');
 }
 
 export function isRetainedPublicImageEntry(entry: ImageModelCatalogEntry): boolean {
