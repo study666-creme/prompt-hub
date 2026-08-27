@@ -425,9 +425,10 @@ describe('newapi image upstream', () => {
       expect.objectContaining({
         id: 'Midjourney v8.2 高速',
         upstream: 'Midjourney v8.2 高速',
-        provider: 'apimart',
+        provider: 'newapi',
         uiFamily: 'midjourney',
-        defaultCredits: 40
+        defaultCredits: 40,
+        outputCount: 4
       })
     ]);
     expect(publicNewApiCatalogModels(snapshot)).toContainEqual(expect.objectContaining({
@@ -485,6 +486,67 @@ describe('newapi image upstream', () => {
     expect(result.imageUrl).toBeNull();
     expect(fetchMock.mock.calls.map(([url, init]) => `${(init as RequestInit | undefined)?.method || 'GET'} ${new URL(String(url)).pathname}`))
       .toEqual(['POST /v1/images/generations']);
+  });
+
+  it('submits both live 8.2 MJ ids to the API-station MJ endpoint with documented fields', async () => {
+    const fetchMock = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String((init as RequestInit).body || '{}')) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        model: expect.any(String),
+        prompt: 'cinematic city',
+        size: '16:9',
+        raw: false,
+        n: 1
+      });
+      if (body.model === 'mj-v82') expect(body.resolution).toBe('2K');
+      else expect(body).not.toHaveProperty('resolution');
+      return jsonResponse({ task_id: `mj-${body.model}`, status: 'queued' }, 202);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const cases = [
+      {
+        model: 'mj-v82',
+        parameters: [
+          { name: 'model', path: 'model', label: '模型', type: 'string' as const, required: true, fixed: 'mj-v82' },
+          { name: 'prompt', path: 'prompt', label: '提示词', type: 'string' as const, required: true },
+          { name: 'size', path: 'size', label: '画面比例', type: 'string' as const, required: false, options: ['1:1', '16:9'] },
+          { name: 'raw', path: 'raw', label: 'Raw', type: 'boolean' as const, required: false, default: false },
+          { name: 'resolution', path: 'resolution', label: '分辨率', type: 'string' as const, required: false, options: ['1K', '2K'] },
+          { name: 'n', path: 'n', label: '提交次数', type: 'integer' as const, required: false, fixed: 1 }
+        ]
+      },
+      {
+        model: 'Midjourney v8.2 高速',
+        parameters: [
+          { name: 'model', path: 'model', label: '模型', type: 'string' as const, required: true, fixed: 'Midjourney v8.2 高速' },
+          { name: 'prompt', path: 'prompt', label: '提示词', type: 'string' as const, required: true },
+          { name: 'size', path: 'size', label: '画面比例', type: 'string' as const, required: false, options: ['1:1', '16:9'] },
+          { name: 'raw', path: 'raw', label: 'Raw', type: 'boolean' as const, required: false, default: false },
+          { name: 'n', path: 'n', label: '提交次数', type: 'integer' as const, required: false, fixed: 1 }
+        ]
+      }
+    ];
+
+    for (const { model, parameters } of cases) {
+      await submitNewApiImageJob('unit-key', 'https://newapi-unit.test', {
+        prompt: 'cinematic city',
+        resolution: '2K',
+        quality: 'standard',
+        size: '16:9',
+        count: 1,
+        mjParams: { raw: false },
+        upstreamModel: model,
+        catalogParameters: parameters,
+        idempotencyKey: `mj-${model}`
+      });
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://newapi-unit.test/v1/midjourney/generations',
+      'https://newapi-unit.test/v1/midjourney/generations'
+    ]);
   });
 
   it('surfaces a safe native image stream error without retrying', async () => {

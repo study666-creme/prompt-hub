@@ -112,6 +112,24 @@ describe('image generation request aliases', () => {
       refImageUrls: ['https://image.test/reference.png']
     });
   });
+
+  it('projects image.v1 options into MJ parameters', () => {
+    const parsed = parseGenerationRequestBody({
+      version: 'image.v1',
+      model: 'mj-v82',
+      operation: 'text_to_image',
+      prompt: 'cinematic city',
+      aspect_ratio: '16:9',
+      options: { raw: true, stylize: 250 }
+    });
+
+    expect(parsed).toMatchObject({
+      model: 'mj-v82',
+      quality: 'standard',
+      count: 1,
+      mjParams: { raw: true, stylize: 250, speed: 'relax' }
+    });
+  });
 });
 
 describe('public image generation failure codes', () => {

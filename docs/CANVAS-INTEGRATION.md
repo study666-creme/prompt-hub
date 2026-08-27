@@ -40,6 +40,16 @@ Canvas 不保存 New API、Apimart 等上游 Key。它只持有用户 Prompt Hub
 
 Canvas 侧实现和部署说明以其仓库 `DEPLOY.md` 为准，不在两个仓库复制文件级清单。
 
+## 8.2 MJ 参数
+
+Canvas 只向 Prompt Hub 公共入口提交 `image.v1`，由服务端按公开模型目录
+投影到 API 站的 MJ 请求契约。两个模型的公开模型 ID 必须原样保留：
+`mj-v82` 与 `Midjourney v8.2 高速`。
+
+两者都要求 `prompt`，固定一次提交 `n: 1`，支持 `size`、`raw` 和参考图
+（`image` 或 `images`）。只有 `mj-v82` 支持 `resolution`，可选 `1K` 或
+`2K`。一次提交返回四张候选图；Canvas 会将它们作为一个任务的多个结果展示。
+
 ## 验收
 
 1. Canvas 设置连接 Prompt Hub 测试账号。

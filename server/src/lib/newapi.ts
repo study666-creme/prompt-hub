@@ -23,6 +23,7 @@ type SubmitParams = {
   refImageUrls?: string[];
   catalogParameters?: NewApiCatalogParameter[];
   idempotencyKey?: string;
+  mjParams?: Record<string, unknown>;
 };
 
 export const NEWAPI_CHAT_IMAGE_REF_LIMIT = 4;
@@ -151,6 +152,9 @@ const PRICING_CACHE_MS = 5 * 60_000;
 const ADMIN_ROUTE_CACHE_MS = 30_000;
 const NEWAPI_CATALOG_FETCH_TIMEOUT_MS = 15_000;
 const PUBLIC_MIDJOURNEY_MODEL_IDS = new Set(['Midjourney v8.2 高速', 'mj-v82', 'mj-v81', 'mj-v7', 'mj-niji7']);
+// The two live 8.2 entries are routed by New API to their configured API
+// station channels. Older MJ ids remain on the legacy APIMart adapter.
+const API_STATION_MIDJOURNEY_MODEL_IDS = new Set(['Midjourney v8.2 高速', 'mj-v82']);
 
 const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; description: string }> = {
   'gpt-5.5': { id: 'creative-5-5', label: '全能模型5.5', description: '通用创作与推理模型，最高 xhigh 思考。' },
@@ -330,6 +334,10 @@ function isMidjourneyCatalogItem(
   return stringValue(endpoint?.path).replace(/\/$/, '') === '/v1/midjourney/generations';
 }
 
+function isApiStationMidjourneyModel(upstreamModel: string): boolean {
+  return API_STATION_MIDJOURNEY_MODEL_IDS.has(String(upstreamModel || '').trim());
+}
+
 type CatalogImageFamily = ImageModelUiFamily | 'gim2-chat';
 
 function inferredImageFamily(
@@ -476,6 +484,12 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
       .filter((parameter): parameter is NewApiCatalogParameter => parameter != null);
     const isMidjourney = isMidjourneyCatalogItem(item, upstreamModel, modality);
     const imageFamily = inferredImageFamily(item, upstreamModel, modality);
+    const output = item.output && typeof item.output === 'object'
+      ? item.output as Record<string, unknown>
+      : null;
+    const outputCount = output?.count && typeof output.count === 'object'
+      ? numberValue((output.count as Record<string, unknown>).fixed)
+      : null;
     const presentation = publicPresentation(item, upstreamModel, imageFamily || familyValue);
     const publicParameters = parameters.map(parameter =>
       parameter.name === 'model'
@@ -531,7 +545,7 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
     const publicId = presentation.id || stringValue(promptHub.id) || `newapi-${upstreamModel}`;
     const description = presentation.description || null;
     const label = presentation.label;
-    if (!isMidjourney) {
+    if (!isMidjourney || isApiStationMidjourneyModel(upstreamModel)) {
       rules.push({
         model: upstreamModel,
         credits: pricing.credits,
@@ -546,13 +560,14 @@ function parseCatalogPayload(payload: unknown): NewApiCatalogSnapshot | null {
     }
     imageCatalogEntries.push({
       id: publicId,
-      provider: isMidjourney ? 'apimart' : 'newapi',
+      provider: isMidjourney && !isApiStationMidjourneyModel(upstreamModel) ? 'apimart' : 'newapi',
       uiFamily: family,
       upstream: upstreamModel,
       label,
       group: upstreamModel === 'mj-v7' ? 'classic' : 'new',
       description: description || '',
       upstreamPoints: pricing.yuan ?? 0,
+      ...(outputCount != null ? { outputCount } : {}),
       refundOnViolation: true,
       resolutions,
       defaultCredits: pricing.credits,
@@ -1161,6 +1176,10 @@ function imageProtocolForSubmit(params: SubmitParams): ImageProtocolRequest {
   });
 }
 
+function isApiStationMidjourneyRequest(model: string): boolean {
+  return API_STATION_MIDJOURNEY_MODEL_IDS.has(String(model || '').trim());
+}
+
 function hasOwn(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
@@ -1235,6 +1254,13 @@ export function buildNewApiImageRequestBody(params: SubmitParams): Record<string
   } else if (refs.length) {
     set('image', refs[0]);
   }
+  if (isApiStationMidjourneyRequest(params.upstreamModel)) {
+    // One API-station task returns the four-image MJ gallery. Keep the
+    // provider submission count fixed at one and pass only documented MJ
+    // controls through the OpenAI-compatible endpoint.
+    if (typeof params.mjParams?.raw === 'boolean') set('raw', params.mjParams.raw);
+    set('n', 1);
+  }
   if (params.upstreamModel.toLowerCase() === 'gpt-image-2-1k') {
     body.response_format = 'b64_json';
   }
@@ -1291,9 +1317,12 @@ export async function submitNewApiImageJob(
   params: SubmitParams
 ): Promise<{ taskId: string; imageUrl?: string | null; imageUrls?: string[]; requestId?: string | null }> {
   const isChatImage = params.upstreamModel === 'gpt-image-2-chat';
+  const isMidjourney = isApiStationMidjourneyRequest(params.upstreamModel);
   const endpoint = isChatImage
     ? '/v1/chat/completions'
-    : '/v1/images/generations';
+    : isMidjourney
+      ? '/v1/midjourney/generations'
+      : '/v1/images/generations';
   const body = isChatImage
     ? {
         model: params.upstreamModel,

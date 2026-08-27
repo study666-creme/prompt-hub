@@ -59,7 +59,13 @@
 - Canvas 视频请求将 `clientRequestId` 持久化为幂等身份；重复 POST 返回原任务，`GET /api/v1/video/requests/:clientRequestId` 只读恢复原任务。数据库唯一索引防止同一用户同一请求产生两次扣费。
 - 视频提交、状态和内容接口均优先使用 `NEWAPI_VIDEO_API_KEY`，不得因为令牌名称或用途把视频改发到图片端点；视频始终走 `/v1/videos`。上游完成后内容短暂返回 `404`、`425`、`429` 或 `5xx` 时只做有界读取重试，不重放生成 POST。
 - 迁移 `20260817150000_video_request_idempotency.sql` 必须在目标 Supabase 执行后，数据库层唯一索引才正式生效；在迁移窗口前，Worker 的同请求查询仍会阻止普通重复提交。
-- MJ 使用 Apimart，并保留后台 Relax / Fast / Turbo 手动定价。
+- 已发布的 `mj-v82` 和 `Midjourney v8.2 高速` 使用 API 站的
+  `/v1/midjourney/generations` 契约；请求中的 `model` 必须分别原样传递为
+  `mj-v82` 或 `Midjourney v8.2 高速`。两个模型都要求 `prompt`，固定
+  `n: 1`，并接受目录声明的 `size`、`image`/`images` 和 `raw`；`mj-v82`
+  另外接受 `resolution: 1K | 2K`。一次 API 站请求返回四张候选图，不能将
+  四张结果当成四次提交或四次扣费。旧的 `mj-v81`、`mj-v7` 和 `mj-niji7`
+  仅保留历史 APIMart 任务恢复路径。
 - 旧 GrsAI、iThink、Mooko 和非 MJ Apimart 型号只能恢复历史任务，不能通过后台重新上架。
 
 ### 图片兼容协议
@@ -75,6 +81,44 @@ New API 中继在根据实时目录组装图片请求时也先建立同一份语
 改写已存在的 `generation_requests`、`genJobId`、卡片图片引用或历史任务恢复
 路径。Card Library 继续使用原有任务、归档和缩略图流程，因此在线用户无需重新
 接入。
+
+### API 站 MJ 参数契约
+
+两个公开 8.2 模型都使用同一个 POST 路径：
+
+```http
+POST /v1/midjourney/generations
+Content-Type: application/json
+```
+
+`Midjourney v8.2 高速` 的请求字段为：
+
+```json
+{
+  "model": "Midjourney v8.2 高速",
+  "prompt": "提示词",
+  "size": "16:9",
+  "raw": false,
+  "n": 1
+}
+```
+
+`mj-v82` 在此基础上可以增加 `resolution`，值只能是 `1K` 或 `2K`：
+
+```json
+{
+  "model": "mj-v82",
+  "prompt": "提示词",
+  "size": "16:9",
+  "raw": false,
+  "resolution": "2K",
+  "n": 1
+}
+```
+
+参考图使用 `image`（单张）或 `images`（多张，最多 5 张），两者不能同时
+出现。任务状态统一通过 `GET /v1/tasks/{task_id}` 查询，结果从
+`image_urls` 读取。Canvas 的 `image.v1` 请求会在服务端投影到上述字段。
 
 配置命令示例：
 

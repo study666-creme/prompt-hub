@@ -171,6 +171,16 @@ export function normalizeGenerationBodyAliases(raw: unknown): unknown {
     if (protocol.quality !== undefined) body.quality = protocol.quality;
     if (protocol.aspect_ratio !== undefined) body.size = protocol.aspect_ratio;
     if (protocol.count !== undefined) body.count = protocol.count;
+    if (protocol.options && typeof protocol.options === 'object' && !Array.isArray(protocol.options)) {
+      const options = protocol.options as Record<string, unknown>;
+      for (const key of [
+        'stylize', 'chaos', 'weird', 'negative_prompt', 'negativePrompt',
+        'seed', 'tile', 'raw', 'draft', 'hd', 'iw', 'quality', 'style',
+        'cw', 'sw', 'cref', 'sref', 'dref', 'dw', 'stop', 'extra'
+      ]) {
+        if (body[key] === undefined && options[key] !== undefined) body[key] = options[key];
+      }
+    }
     const media = Array.isArray(protocol.media_inputs) ? protocol.media_inputs : [];
     const refs = media
       .filter((item) => item && typeof item === 'object' && ['reference', 'style_reference', 'element_reference'].includes(String((item as { role?: unknown }).role)))
@@ -217,7 +227,8 @@ export function normalizeGenerationBodyAliases(raw: unknown): unknown {
       ['extra', 'extra']
     ];
     for (const [source, target] of aliases) {
-      if (nested[target] === undefined && input[source] !== undefined) nested[target] = input[source];
+      const value = input[source] !== undefined ? input[source] : body[source];
+      if (nested[target] === undefined && value !== undefined) nested[target] = value;
     }
     if (['0.25', '0.5', '1', '2'].includes(quality)) nested.quality = quality;
     nested.speed = 'relax';
@@ -753,7 +764,7 @@ function publicModelPayload(
       violationNotice: m.violationNotice,
       fixedQualityLow: !!m.fixedQualityLow,
       modality: 'image',
-      outputCount: m.uiFamily === 'midjourney' ? 5 : 1,
+      outputCount: m.outputCount ?? (m.uiFamily === 'midjourney' ? 5 : 1),
       endpoint: { method: 'POST', path: '/api/v1/generate', contentType: 'application/json' },
       catalogVersion: opts.newApiCatalog.version || null,
       pricingVersion: opts.newApiCatalog.pricingVersion || null,

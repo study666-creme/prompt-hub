@@ -15,6 +15,8 @@ export type ImageModelCatalogEntry = {
   description: string;
   /** 上游人民币成本，仅用于后台只读展示 */
   upstreamPoints: number;
+  /** Provider-declared number of artifacts returned by one request. */
+  outputCount?: number;
   refundOnViolation: boolean;
   resolutions: ('1k' | '2k' | '4k')[];
   defaultCredits: number;
