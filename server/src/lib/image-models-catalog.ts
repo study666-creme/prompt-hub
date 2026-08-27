@@ -239,7 +239,11 @@ export const IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
 ];
 
 export function isPublicNewApiImageEntry(entry: ImageModelCatalogEntry): boolean {
-  return entry.provider === 'newapi' && (entry.uiFamily === 'gim2' || entry.uiFamily === 'banana' || entry.uiFamily === 'generic');
+  return entry.provider === 'newapi'
+    && (entry.uiFamily === 'gim2'
+      || entry.uiFamily === 'banana'
+      || entry.uiFamily === 'generic'
+      || entry.uiFamily === 'midjourney');
 }
 
 export function isRetainedPublicImageEntry(entry: ImageModelCatalogEntry): boolean {

@@ -549,6 +549,45 @@ describe('newapi image upstream', () => {
     ]);
   });
 
+  it('keeps live API-station MJ entries in the public image catalog', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      success: true,
+      version: 'catalog-mj-public',
+      pricing_version: 'pricing-mj-public',
+      models: [
+        {
+          id: 'mj-v82',
+          label: 'Midjourney 8.2',
+          modality: 'image',
+          operation: 'generate',
+          selectable: true,
+          family: 'midjourney',
+          endpoint: { method: 'POST', path: '/v1/midjourney/generations', content_type: 'application/json' },
+          output: { type: 'image', count: { fixed: 4 } },
+          parameters: [
+            { name: 'model', path: 'model', type: 'string', required: true, fixed: 'mj-v82' },
+            { name: 'prompt', path: 'prompt', type: 'string', required: true },
+            { name: 'n', path: 'n', type: 'integer', required: false, fixed: 1 }
+          ],
+          pricing: { mode: 'fixed', unit: 'request', currency: 'CNY', yuan: 0.4, credits: 40 }
+        }
+      ]
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const snapshot = await fetchNewApiModelCatalog('https://midjourney-public-catalog.test', { force: true });
+    expect(publicNewApiCatalogModels(snapshot)).toContainEqual(expect.objectContaining({
+      id: 'mj-v82',
+      endpoint: { method: 'POST', path: '/api/v1/generate', contentType: 'application/json' }
+    }));
+    expect(snapshot.imageCatalogEntries).toContainEqual(expect.objectContaining({
+      id: 'mj-v82',
+      provider: 'newapi',
+      uiFamily: 'midjourney',
+      outputCount: 4
+    }));
+  });
+
   it('surfaces a safe native image stream error without retrying', async () => {
     const fetchMock = vi.fn(async () => new Response([
       'event: error',
