@@ -571,6 +571,54 @@
       return { savedCard, didPublishToCommunity, finalImage };
     }
 
+    // Prompt-first composer entry: persist a complete card without opening the legacy editor.
+    window.createPromptHubCardDirectly = async function createPromptHubCardDirectly(payload = {}) {
+      const prompt = String(payload.prompt || '').trim();
+      if (!prompt) throw new Error('提示词不能为空');
+      const check = canGuestCreateCard();
+      if (!check.ok) {
+        promptLogin(check.msg);
+        return { ok: false, reason: 'guest_limit', message: check.msg };
+      }
+      const incomingFiles = Array.isArray(payload.files)
+        ? payload.files.filter((file) => file && /^image\//i.test(file.type)).slice(0, panelGalleryMax())
+        : [];
+      const loggedIn = isUserLoggedIn();
+      const dataUrls = loggedIn
+        ? []
+        : await Promise.all(incomingFiles.map((file) => readFileAsDataUrl(file)));
+      const cardId = generateId();
+      const galleryImages = loggedIn ? incomingFiles : dataUrls;
+      const snap = {
+        prompt,
+        title: String(payload.title || '').trim(),
+        tags: Array.isArray(payload.tags) ? payload.tags.filter(Boolean).slice(0, 40) : [],
+        customFields: payload.customFields && typeof payload.customFields === 'object' ? { ...payload.customFields } : {},
+        isNewCard: true,
+        cardId,
+        previousImage: null,
+        imageValue: dataUrls[0] || null,
+        uploadFile: loggedIn ? (incomingFiles[0] || null) : null,
+        uploadBytes: incomingFiles[0]?.size || 0,
+        uploadOriginal: window.__cardUploadOriginal === true,
+        wantPublish: payload.wantPublish === true,
+        imageRemovalPending: false,
+        galleryImages,
+        galleryUploads: Object.fromEntries(incomingFiles.map((file, index) => [index, file])),
+        galleryPrimaryIndex: 0,
+        previousGallery: null
+      };
+      const result = await persistCardSnap(snap, { deferSave: true });
+      if (!result?.savedCard) throw new Error('卡片保存失败');
+      await saveAllData({ skipCloud: true });
+      if (loggedIn && typeof scheduleCloudPush === 'function') scheduleCloudPush({ urgent: true });
+      updateTagFilter();
+      renderGroups();
+      renderCards(true);
+      updateGuestLimitUI();
+      return { ok: true, cardId, savedCard: result.savedCard };
+    };
+
     async function saveBatchImport() {
       const statusEl = document.getElementById('batchImportStatus');
       const saveBtn = document.getElementById('batchImportSaveBtn');

@@ -520,8 +520,10 @@
 
   const costCache = new Map();
   const costInflight = new Map();
-  const IMAGE_GEN_CATALOG_CACHE_VERSION = 19;
-  const PUBLIC_IMAGE_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+  const IMAGE_GEN_CATALOG_CACHE_VERSION = 20;
+  // Public catalog ids may be human-readable (including spaces/CJK); reject
+  // only control characters and keep the private-identity guard below.
+  const PUBLIC_IMAGE_MODEL_ID_RE = /^[^\u0000-\u001f\u007f]{1,128}$/;
   const RETIRED_PUBLIC_IMAGE_MODEL_IDS = new Set(['image2-free']);
   const PUBLIC_IMAGE_MODEL_LABEL_OVERRIDES = {
     'image2-4k-fast': '全能模型2 · 4K'
@@ -632,9 +634,9 @@
     const label = labelOverride || publicModelText(model.displayLabel || model.label || model.catalogLabel, id, 80);
     const catalogLabel = labelOverride || publicModelText(model.catalogLabel || model.label, label, 80);
     const description = publicModelText(model.description, '', 240) || null;
-    const uiFamily = ['gim2', 'banana', 'midjourney'].includes(String(model.uiFamily))
+    const uiFamily = ['gim2', 'banana', 'midjourney', 'generic'].includes(String(model.uiFamily))
       ? String(model.uiFamily)
-      : (id.startsWith('mj-') ? 'midjourney' : (id.startsWith('lingtu') ? 'banana' : 'gim2'));
+      : (id.startsWith('mj-') ? 'midjourney' : (id.startsWith('lingtu') ? 'banana' : 'generic'));
     const status = ['active', 'maintenance', 'offline'].includes(String(model.status))
       ? String(model.status)
       : 'active';
@@ -689,6 +691,30 @@
     return models.map(projectPublicGenerationModel).filter(Boolean);
   }
 
+  async function fetchPublicGenerationModels() {
+    if (typeof fetch !== 'function') return null;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      let response;
+      try {
+        response = await fetch(`https://api.prompt-hubs.com/api/v1/generate/models?refresh=1&v=${IMAGE_GEN_CATALOG_CACHE_VERSION}`, {
+          method: 'GET',
+          credentials: 'omit',
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!response.ok) return null;
+      const json = await response.json();
+      const models = projectGenerationModels(json?.data?.models);
+      return models.length ? { models } : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function getGenerationModels() {
     if (modelsInflight) return modelsInflight;
     if (modelsCache && modelsCacheExp > Date.now()) {
@@ -707,6 +733,21 @@
           );
         }
       } catch (e) { /* ignore */ }
+      const localPreview = /^(localhost|127\.0\.0\.1)$/i.test(String(location?.hostname || ''));
+      if (localPreview) {
+        const publicModels = await fetchPublicGenerationModels();
+        if (publicModels) {
+          modelsCache = publicModels;
+          modelsCacheExp = Date.now() + 120_000;
+          try {
+            localStorage.setItem(
+              'promptrepo_imagegen_models_cache_v4',
+              JSON.stringify({ ts: Date.now(), version: IMAGE_GEN_CATALOG_CACHE_VERSION, models: publicModels.models })
+            );
+          } catch (e) { /* ignore */ }
+          return { ok: true, data: modelsCache, source: 'public-fallback' };
+        }
+      }
       const res = await request(
         'GET',
         `/api/v1/generate/models?refresh=1&v=${IMAGE_GEN_CATALOG_CACHE_VERSION}`,
@@ -726,6 +767,21 @@
           } catch (e) { /* ignore */ }
         }
         return { ...res, data: modelsCache };
+      }
+      // Local Worker previews may not have the provider catalog secrets that
+      // production uses. The catalog is public, so use the public API as a
+      // read-only fallback instead of presenting stale hardcoded models.
+      const publicModels = await fetchPublicGenerationModels();
+      if (publicModels) {
+        modelsCache = publicModels;
+        modelsCacheExp = Date.now() + 120_000;
+        try {
+          localStorage.setItem(
+            'promptrepo_imagegen_models_cache_v4',
+            JSON.stringify({ ts: Date.now(), version: IMAGE_GEN_CATALOG_CACHE_VERSION, models: publicModels.models })
+          );
+        } catch (e) { /* ignore */ }
+        return { ok: true, data: modelsCache, source: 'public-fallback' };
       }
       if (modelsCache) return { ok: true, data: modelsCache };
       return res;

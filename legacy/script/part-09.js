@@ -622,7 +622,11 @@
       if (!container) return;
       const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
       const mobileGrid = isMobileViewport();
-      const searchEl = document.getElementById('searchInputMobile') || document.getElementById('searchInput');
+      const desktopSearch = document.getElementById('searchInput');
+      const mobileSearch = document.getElementById('searchInputMobile');
+      const searchEl = [desktopSearch, mobileSearch].find((el) => el && !el.hidden && el.getClientRects().length)
+        || desktopSearch
+        || mobileSearch;
       const search = (searchEl?.value || '').toLowerCase();
       sortMode = document.getElementById('sortSelect')?.value || sortMode || 'updated-desc';
 

@@ -196,6 +196,12 @@
     const id = normalizeImageGenModelId(modelId);
     const entry = imageGenModelCatalog.find((m) => m.id === id);
     if (Array.isArray(entry?.aspectRatios) && entry.aspectRatios.length) {
+      if (entry?.uiFamily === 'banana' && entry.aspectRatios.length < IMAGE_GEN_SIZE_BANANA.length) {
+        return [...IMAGE_GEN_SIZE_BANANA];
+      }
+      if (entry?.uiFamily === 'gim2' && entry.aspectRatios.length < IMAGE_GEN_SIZE_GIM2.length) {
+        return [...IMAGE_GEN_SIZE_GIM2];
+      }
       return [...entry.aspectRatios];
     }
     if (IMAGE_GEN_ASPECT_FALLBACK[id]) {
@@ -698,6 +704,7 @@
     }
     hint.textContent = parts.join(' · ');
     syncImageGenPromoNotice(detail, final);
+    window.WarehouseComposer?.updateCostHint?.(detail, final);
   }
 
   function catalogHasPricingFor(modelId, resolution, mjSpeed) {

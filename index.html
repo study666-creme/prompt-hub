@@ -5,11 +5,16 @@
   <base href="/">
 
   <script>
-    window.__APP_BUILD__ = '20260804a';
+    window.__APP_BUILD__ = '20260828a';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
+      var recoveryRevision = '20260828b';
       var prev = localStorage.getItem(key);
+      var localHost = /^(127\.0\.0\.1|localhost)$/i.test(window.location.hostname || '');
+      var query = new URLSearchParams(window.location.search || '');
+      var explicitClear = query.get('clear-cache') === '1';
+      var reloadScheduled = false;
       function purgeCachesAndSw() {
         var tasks = [];
         if ('caches' in window) {
@@ -26,13 +31,66 @@
         }
         return Promise.all(tasks);
       }
+
+      // Expose the cleanup hook to the partial loader so a stale local
+      // service worker cannot leave the page with an empty black body.
+      window.__PROMPT_HUB_PURGE_CACHES__ = purgeCachesAndSw;
+      window.__PROMPT_HUB_BOOT_RECOVERY__ = function (error) {
+        var onceKey = 'promptrepo_boot_recovery_once_' + recoveryRevision;
+        var alreadyRetried = false;
+        try { alreadyRetried = sessionStorage.getItem(onceKey) === '1'; } catch (e) { /* ignore */ }
+        if (!alreadyRetried) {
+          try { sessionStorage.setItem(onceKey, '1'); } catch (e) { /* ignore */ }
+          var retryUrl = new URL(window.location.href);
+          retryUrl.searchParams.delete('clear-cache');
+          if (!reloadScheduled) {
+            reloadScheduled = true;
+            purgeCachesAndSw().finally(function () { window.location.replace(retryUrl.href); });
+          }
+        }
+        try {
+          document.documentElement.style.background = '#101114';
+          document.body.innerHTML = '';
+          var box = document.createElement('main');
+          box.setAttribute('role', 'alert');
+          box.style.cssText = 'box-sizing:border-box;min-height:100vh;display:grid;place-items:center;padding:32px;background:#101114;color:#f4f5f7;font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;text-align:center';
+          box.innerHTML = '<div style="max-width:520px"><h1 style="margin:0 0 12px;font-size:24px">正在恢复卡藏</h1><p style="margin:0 0 18px;color:#b8bec8">检测到浏览器缓存了旧页面，正在清理并重新加载。若页面没有自动恢复，请点击下方按钮。</p><button type="button" style="border:0;border-radius:10px;padding:10px 18px;background:#5dd5c0;color:#071311;font-weight:700;cursor:pointer">重新加载</button><p style="margin:16px 0 0;color:#737b87;font-size:13px">' + String(error && error.message || '页面局部内容加载失败').replace(/[<>]/g, '') + '</p></div>';
+          box.querySelector('button').addEventListener('click', function () { window.location.reload(); });
+          document.body.appendChild(box);
+        } catch (e) { /* keep the recovery path best-effort */ }
+      };
+
+      // The local preview no longer installs a service worker. If an older
+      // build still controls localhost, clear it once before attempting to
+      // assemble the split body. `?clear-cache=1` provides an explicit escape
+      // hatch for a browser profile that has retained an unusual cache entry.
+      if (explicitClear || (localHost && navigator.serviceWorker && navigator.serviceWorker.controller)) {
+        var localOnceKey = 'promptrepo_local_cleanup_once_' + recoveryRevision;
+        var localAlreadyRetried = !explicitClear;
+        try {
+          if (!explicitClear) localAlreadyRetried = sessionStorage.getItem(localOnceKey) === '1';
+        } catch (e) { /* ignore */ }
+        if (!localAlreadyRetried) {
+          try { sessionStorage.setItem(localOnceKey, '1'); } catch (e) { /* ignore */ }
+          window.__PROMPT_HUB_BOOT_RECOVERING__ = true;
+          var localRetryUrl = new URL(window.location.href);
+          localRetryUrl.searchParams.delete('clear-cache');
+          if (!reloadScheduled) {
+            reloadScheduled = true;
+            purgeCachesAndSw().finally(function () { window.location.replace(localRetryUrl.href); });
+          }
+        }
+      }
       if (prev && prev !== cur) {
         localStorage.setItem(key, cur);
         try { localStorage.removeItem('ph_missing_paths_v1'); } catch (e) { /* ignore */ }
         var onceKey = 'promptrepo_build_reload_once_' + cur;
         if (sessionStorage.getItem(onceKey)) return;
         sessionStorage.setItem(onceKey, '1');
-        purgeCachesAndSw().finally(function () { location.reload(); });
+        if (!reloadScheduled) {
+          reloadScheduled = true;
+          purgeCachesAndSw().finally(function () { location.reload(); });
+        }
         return;
       }
       if (!prev) localStorage.setItem(key, cur);
@@ -104,17 +162,25 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260804a">
-  <link rel="stylesheet" href="styles-theme.css?v=20260804a">
+  <link rel="stylesheet" href="styles.css?v=20260828a">
+  <link rel="stylesheet" href="styles-theme.css?v=20260828a">
   <link rel="stylesheet" href="styles-landing.css?v=20260721g">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260804a">
-  <link rel="stylesheet" href="styles-settings.css?v=20260804a">
-  <link rel="stylesheet" href="styles-features.css?v=20260804a">
-  <link rel="stylesheet" href="styles-assets.css?v=20260804a">
-  <link rel="stylesheet" href="styles-warehouse.css?v=20260804a">
-  <script src="pack-prelude.js?v=20260804a"></script>
+  <link rel="stylesheet" href="styles-mobile.css?v=20260828a">
+  <link rel="stylesheet" href="styles-settings.css?v=20260828a">
+  <link rel="stylesheet" href="styles-features.css?v=20260828a">
+  <link rel="stylesheet" href="styles-assets.css?v=20260828a">
+  <link rel="stylesheet" href="styles-warehouse.css?v=20260828a">
+  <script src="pack-prelude.js?v=20260828a"></script>
 </head>
 <body>
+  <noscript>
+    <main style="box-sizing:border-box;min-height:100vh;display:grid;place-items:center;padding:32px;background:#101114;color:#f4f5f7;font:16px/1.6 system-ui,-apple-system,'Segoe UI',sans-serif;text-align:center">
+      <div style="max-width:520px">
+        <h1 style="margin:0 0 12px;font-size:24px">卡藏需要启用 JavaScript</h1>
+        <p style="margin:0;color:#b8bec8">请在浏览器设置中允许此本地页面运行脚本，然后重新加载。</p>
+      </div>
+    </main>
+  </noscript>
   <script>
     if ((window.location.pathname || '/').replace(/\/+$/, '') === '') {
       document.body.classList.add('app-landing-active');
@@ -132,21 +198,36 @@
       ];
       var version = encodeURIComponent(window.__APP_BUILD__ || 'dev');
       var html = '';
-      for (var i = 0; i < parts.length; i += 1) {
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', parts[i] + '?v=' + version, false);
-        xhr.send(null);
-        if (!((xhr.status >= 200 && xhr.status < 300) || (xhr.status === 0 && xhr.responseText))) {
-          throw new Error('Prompt Hub index body partial failed to load: ' + parts[i] + ' (' + xhr.status + ')');
+      try {
+        for (var i = 0; i < parts.length; i += 1) {
+          var xhr = new XMLHttpRequest();
+          xhr.open('GET', parts[i] + '?v=' + version, false);
+          xhr.send(null);
+          var responseText = xhr.responseText || '';
+          var statusOk = (xhr.status >= 200 && xhr.status < 300) || (xhr.status === 0 && responseText);
+          // A legacy service worker may answer a partial request with the
+          // cached full index document. Treat that as a boot failure so the
+          // recovery hook can unregister it and retry instead of rendering a
+          // blank page.
+          var looksLikeDocument = /<!doctype\s+html|<html[\s>]/i.test(responseText);
+          if (!statusOk || !responseText || looksLikeDocument) {
+            throw new Error('Prompt Hub index body partial failed to load: ' + parts[i] + ' (' + xhr.status + ')');
+          }
+          html += responseText;
         }
-        html += xhr.responseText;
-      }
-      var script = document.currentScript;
-      if (script && script.parentNode) {
-        script.insertAdjacentHTML('beforebegin', html);
-        script.parentNode.removeChild(script);
-      } else {
-        document.body.insertAdjacentHTML('afterbegin', html);
+        var script = document.currentScript;
+        if (script && script.parentNode) {
+          script.insertAdjacentHTML('beforebegin', html);
+          script.parentNode.removeChild(script);
+        } else {
+          document.body.insertAdjacentHTML('afterbegin', html);
+        }
+      } catch (error) {
+        if (typeof window.__PROMPT_HUB_BOOT_RECOVERY__ === 'function') {
+          window.__PROMPT_HUB_BOOT_RECOVERY__(error);
+        } else {
+          document.body.innerHTML = '<main style="padding:32px;color:#f4f5f7;background:#101114;font:16px system-ui">卡藏页面加载失败，请刷新重试。</main>';
+        }
       }
     })();
   </script>
@@ -155,24 +236,21 @@
   <script src="canvas-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260804a"></script>
+  <script src="api-client.js?v=20260828a"></script>
   <script>
     (function () {
       var FALLBACK = [
-        { id: 'image2-economy', label: '全能模型2 · 特价 1K', creditsPerCall: 2.2, creditsFinal: 2.2, resolutions: ['1k'] },
-        { id: 'image2', label: '全能模型2 · 1K' },
-        { id: 'image2-free', label: '全能模型2 · 免费 1K' },
-        { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K' },
-        { id: 'image2-4k-fast', label: '全能模型2 · 4K' },
-        { id: 'lingtu', label: '香蕉 · Standard 1K' },
-        { id: 'lingtu-fast', label: '香蕉 · Fast 1K' },
-        { id: 'lingtu-lite', label: '香蕉 · Lite 1K' },
+        { id: 'image2-economy', label: '全能模型2 · 特价 1K' },
+        { id: 'image2-pro', label: '全能模型2 · 稳定 1K/2K/4K' },
+        { id: 'image2-A', label: '全能模型2-A' },
         { id: 'lingtu-pro', label: '香蕉 · Pro 1K/2K/4K' },
         { id: 'lingtu-2', label: '香蕉 · 2 1K/2K/4K' },
-        { id: 'mj-v81', label: 'MJ v8.1' },
-        { id: 'mj-v7', label: 'MJ v7' },
-        { id: 'mj-v61', label: 'MJ v6.1' },
-        { id: 'mj-niji7', label: 'MJ Niji 7' }
+        { id: 'sensenova-1.5-一秒出图', label: '一秒出图' },
+        { id: 'seedream-5.0', label: 'Seedream 5.0 Pro 1K/2K' },
+        { id: 'mj-v82', label: 'Midjourney 8.2' },
+        { id: 'mj-v81', label: 'Midjourney 8.1' },
+        { id: 'mj-v7', label: 'Midjourney 7' },
+        { id: 'mj-niji7', label: 'Midjourney Niji 7' }
       ];
       function isRetired(model) {
         return model && model.id === 'image2-free';
@@ -196,7 +274,7 @@
           var raw = JSON.parse(localStorage.getItem('promptrepo_imagegen_models_cache_v4') || 'null');
           if (!raw || !raw.models || !raw.models.length) return null;
           if (raw.ts < Date.now() - 86400000) return null;
-          if (Number(raw.version) < 19) return null;
+          if (Number(raw.version) < 20) return null;
           var models = raw.models.filter(function (model) {
             return model && !isRetired(model);
           });
@@ -213,20 +291,21 @@
       });
     })();
   </script>
-  <script src="app-router.js?v=20260804a"></script>
-  <script src="pack-foundation.js?v=20260804a"></script>
-  <script src="supabase-sync.js?v=20260804a"></script>
-  <script src="pack-media-client.js?v=20260804a"></script>
-  <script src="pack-core.js?v=20260804a"></script>
-  <script src="pack-account.js?v=20260804a"></script>
-  <script src="pack-viewer.js?v=20260804a"></script>
-  <script src="pack-appreciate.js?v=20260804a"></script>
-  <script src="pack-lightbox.js?v=20260804a"></script>
-  <script src="card-gallery.js?v=20260804a"></script>
-  <script src="edit-panel-gallery.js?v=20260804a"></script>
-  <script src="script.js?v=20260804a"></script>
-  <script src="pack-imagegen.js?v=20260804a"></script>
-  <script src="pack-feed.js?v=20260804a"></script>
+  <script src="app-router.js?v=20260828a"></script>
+  <script src="pack-foundation.js?v=20260828a"></script>
+  <script src="supabase-sync.js?v=20260828a"></script>
+  <script src="pack-media-client.js?v=20260828a"></script>
+  <script src="pack-core.js?v=20260828a"></script>
+  <script src="pack-account.js?v=20260828a"></script>
+  <script src="pack-viewer.js?v=20260828a"></script>
+  <script src="pack-appreciate.js?v=20260828a"></script>
+  <script src="pack-lightbox.js?v=20260828a"></script>
+  <script src="card-gallery.js?v=20260828a"></script>
+  <script src="edit-panel-gallery.js?v=20260828a"></script>
+  <script src="script.js?v=20260828a"></script>
+  <script src="warehouse-composer.js?v=20260828a"></script>
+  <script src="pack-imagegen.js?v=20260828a"></script>
+  <script src="pack-feed.js?v=20260828a"></script>
   <script>
     (function () {
       var need = 'grid-guard-v6';
@@ -242,9 +321,9 @@
       } catch (e) { /* ignore */ }
     })();
   </script>
-  <script src="community-public-feed.js?v=20260804a"></script>
-  <script src="features-draft.js?v=20260804a"></script>
-  <script src="pack-extra.js?v=20260804a"></script>
+  <script src="community-public-feed.js?v=20260828a"></script>
+  <script src="features-draft.js?v=20260828a"></script>
+  <script src="pack-extra.js?v=20260828a"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {
@@ -267,4 +346,3 @@
   </script>
 </body>
 </html>
-

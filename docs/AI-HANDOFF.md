@@ -1,8 +1,10 @@
 # AI 接手说明
 
-最后核对：2026-08-08。生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
+最后核对：2026-08-28。生产发布目标仍为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；Worker `/health.buildSha`、Pages production build 和线上冒烟是运行版本证据。
 
 Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery-20260808` 的媒体归档和恢复改动已提交并通过本地回归，尚未部署或执行付费验收；生产仍以 `/health.buildSha` 为准。
+
+卡片库提示词首页候选（2026-08-28）尚未部署：`warehouse-composer.js` 直接保存卡片到现有仓库，并在同页内联卡片库、社区和生成记录。卡片库工具条常驻文件分类、标签分类、搜索和排序；首个明确向下滚轮手势收起输入区与左侧导航，顶部向上滚动恢复。生图菜单只消费公开实时目录，目录缓存版本为 `20`，不把 `generic` 模型归入全能模型2。
 
 ## 最小阅读顺序
 
@@ -63,12 +65,12 @@ Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery
 ## 当前生图与计费边界
 
 - Worker 只能通过 `https://newapi.prompt-hubs.com` 访问卡藏 New API；不得把 DNS 当前解析出的 IP 或 `sslip.io` 地址写回 `wrangler.toml`。实时目录必须返回非空版本且公开投影不得为 `catalogStale=true`，否则付费提交应在扣费前停止。
-- 新任务只允许卡藏 API 的全能模型2、香蕉和 MJ 8.1 / MJ 7 / Niji 7；所有公开 MJ 均为 New API provider，固定 `relax`、40 积分/次，旧 Apimart provider 只恢复历史任务。
-- 已核验 New API `capability_version=2026-08-04.2` 的三个 MJ 公开号均为按次 0.4 元 / 40 积分；动态目录解析必须为 MJ 保留固定内部 `1k` 占位，不得把质量档 `0.25/0.5/1/2` 当作分辨率而丢弃模型。
+- 新任务只允许 `GET /api/v1/generate/models` 当次公开且已适配的图片型号；当前目录除全能模型2、香蕉和 MJ 外还可能包含 SenseNova、Seedream 等 `generic` 型号，前端不得维护旧白名单或把它们改名为全能模型2。旧 provider 只恢复历史任务。
+- 动态目录解析必须保留所有公开 MJ 身份（当前可包括 `mj-v82`、`mj-v81`、`mj-v7`、`mj-niji7`），并为按次 MJ 保留协议需要的内部 `1k` 占位；不得把质量档 `0.25/0.5/1/2` 当作分辨率而丢弃模型。实际可用性和最终零售价以公开目录为准。
 - New API MJ 完成态必须包含四宫格封面和 4 张单图。Worker 直接消费 `/v1/tasks/:taskId` 返回的五个 URL，不得为了新任务读取 `APIMART_API_KEY` 或补查 Apimart 详情。
 - 卡藏 API 图片报价已经包含其加价，必须从上游人民币字段按 `1 元 = 100 积分`直接换算；不能再次加价、信任上游 credits 字段或复制一份手工积分表。
 - `gpt-image-2-chat` 是内部兼容 ID，统一归一化到公开模型 `image2-economy`；不要根据旧别名硬编码端点或能力，参数必须来自实时目录，当前支持比例和可选参考图。
-- Canvas 当前模型目录提交的高质量原始 ID `gpt-image-2-ext` 也必须在可用性和报价校验前归一化到公开 `image2-pro`，但不得改写用户选择的 `1k` / `2k` / `4k` 分辨率。
+- Canvas 当前模型目录提交的稳定版原始 ID `gpt-image-2-ext` 也必须在可用性和报价校验前归一化到公开 `image2-pro`，但不得改写用户选择的 `1k` / `2k` / `4k` 分辨率。
 - 实际 New API 渠道映射只允许运营后台经 `NEWAPI_CATALOG_ADMIN_SECRET` 读取；公开模型目录不得返回渠道、域名或任何凭据字段。
 - 报价与提交读取普通卡藏目录并共享进程内 single-flight；只接受完整、精确且最多 5 分钟的目录/LKG，不要恢复逐次 `refresh=1`。目录不可用或模型价格缺失时必须在创建任务和扣费前失败。
 - 卡片库提交必须带回用户看到的 `quotedCredits`；服务端重算不一致时返回 `409 CONFLICT`、不扣费且不提交。前端应清除对应的 90 秒报价缓存，让下一次点击重新报价，但不得自动重发生成 POST。报价 GET 的 `500/502/503/504` 最多短退避重试一次。
@@ -128,7 +130,7 @@ npm test
 
 - `全能模型2 · 特价 1K` 公开 ID 为 `image2-economy`；价格读取实时目录，支持比例和可选参考图，不公开质量控件。
 - `全能模型2 · 4K` 公开 ID 为 `image2-4k-fast`，固定发送 `resolution=4k`、`quality=standard`、`n=1`；纯文生图不需要参考图。
-- `全能模型2 · 高质量 1K/2K/4K` 只用 `resolution` 选择 `1k`、`2k`、`4k`，省略 `quality` 并使用模型默认画质；`image2k4k` 固定发送 `quality=low`。
+- `全能模型2 · 稳定 1K/2K/4K` 只用 `resolution` 选择 `1k`、`2k`、`4k`，省略 `quality` 并使用模型默认画质；`image2k4k` 固定发送 `quality=low`。
 - 所有香蕉型号最多接收 14 张参考图，分辨率与质量字段必须独立，且只有香蕉公开 `quality=low/medium/high` 选择。
 - 前端质量文案只使用“低 / 中 / 高”，上游别名（包括 Adobe）不得泄漏到公开模型目录。
 

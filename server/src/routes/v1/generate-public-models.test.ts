@@ -163,7 +163,7 @@ describe('public image model projection', () => {
             creditsByResolution: { '2k': 15, '4k': 20 },
             description: null,
             tags: '',
-            label: '全能模型2 · 高质量 1K/2K/4K',
+            label: '全能模型2 · 稳定 1K/2K/4K',
             modality: 'image',
             parameters: []
           },
@@ -231,7 +231,7 @@ describe('public image model projection', () => {
               credits: 8,
               description: null,
               tags: '',
-              label: '全能模型2 · 高质量 1K/2K/4K',
+              label: '全能模型2 · 稳定 1K/2K/4K',
               modality: 'image',
               parameters: [
                 { name: 'model', path: 'model', label: '模型', type: 'string', required: true, fixed: 'gpt-image-2-ext' },

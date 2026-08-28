@@ -113,9 +113,9 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
   newApi(gim2({
     id: 'image2-pro',
     upstream: 'gpt-image-2-ext',
-    label: '全能模型2 · 高质量 1K/2K/4K',
+    label: '全能模型2 · 稳定 1K/2K/4K',
     group: 'new',
-    description: '扩展版，1K/2K/4K 分档，支持多比例',
+    description: '稳定版，1K/2K/4K 分档，支持多比例',
     upstreamPoints: 0.15,
     refundOnViolation: true,
     resolutions: ['1k', '2k', '4k'],

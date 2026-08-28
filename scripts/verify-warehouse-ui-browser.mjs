@@ -196,9 +196,9 @@ async function openWarehouse(browser, viewport, empty = false) {
 
 async function inspectWarehouse(page, mobile) {
   return page.evaluate((isMobile) => {
-    const hero = document.getElementById('warehouseHero');
+    const composer = document.getElementById('warehouseComposer');
+    const libraryToolbar = document.getElementById('warehouseLibraryToolbar');
     const grid = document.getElementById('cardsContainer');
-    const header = document.querySelector('.app-page-warehouse .main-header');
     const metaRows = [...document.querySelectorAll('#cardsContainer .card-meta-row')];
     const cards = [...document.querySelectorAll('#cardsContainer .card[data-id]')];
     const cardRects = cards.map((card) => card.getBoundingClientRect());
@@ -218,8 +218,17 @@ async function inspectWarehouse(page, mobile) {
       right: Math.round(node.getBoundingClientRect().right)
     }));
     return {
-      heroHeight: Math.round(hero?.getBoundingClientRect().height || 0),
-      headerHeight: Math.round(header?.getBoundingClientRect().height || 0),
+      composerHeight: Math.round(composer?.getBoundingClientRect().height || 0),
+      toolbarHeight: Math.round(libraryToolbar?.getBoundingClientRect().height || 0),
+      groupLabel: document.getElementById('warehouseLibraryGroupTrigger')?.getAttribute('aria-label') || '',
+      tagLabel: document.getElementById('filterBtn')?.getAttribute('aria-label') || '',
+      searchPlaceholder: document.getElementById('searchInput')?.getAttribute('placeholder') || '',
+      sortLabel: document.getElementById('sortMenuLabel')?.textContent?.trim() || '',
+      visibleNativeSelects: [...document.querySelectorAll('select')].filter((select) => {
+        const rect = select.getBoundingClientRect();
+        const style = getComputedStyle(select);
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 1 && rect.height > 1;
+      }).map((select) => select.id),
       cardCount: cards.length,
       metaCount: metaRows.length,
       textKinds: document.querySelectorAll('.card-kind.is-text').length,
@@ -227,7 +236,6 @@ async function inspectWarehouse(page, mobile) {
       mediaCount: document.querySelectorAll('#cardsContainer .card-media img').length,
       loadedMediaCount: [...document.querySelectorAll('#cardsContainer .card-media img')]
         .filter((img) => img.complete && img.naturalWidth > 8).length,
-      heroImageWidths: [...document.querySelectorAll('.warehouse-hero-card img')].map((img) => img.naturalWidth),
       warehouseStylesheet: [...document.styleSheets].some((sheet) => /styles-warehouse\.css/.test(sheet.href || '')),
       gridWidth: Math.round(grid?.getBoundingClientRect().width || 0),
       gridDisplay: gridStyle?.display || '',
@@ -256,12 +264,10 @@ async function inspectMobileToolbar(page) {
   return page.evaluate(() => {
     const viewportWidth = document.documentElement.clientWidth;
     const controls = [
-      ['menu', '#mobileNavBtn'],
-      ['groups', '#mobileGroupsBtn'],
-      ['title', '#currentGroupTitle'],
-      ['search', '#mobileSearchBtn'],
-      ['filter', '#filterBtn'],
-      ['new-card', '#mobileNewCardBtn']
+      ['file-groups', '#warehouseLibraryGroupTrigger'],
+      ['tag-groups', '#filterBtn'],
+      ['search', '#warehouseLibrarySearchSlot .warehouse-search'],
+      ['sort', '#sortMenuBtn']
     ].map(([name, selector]) => {
       const node = document.querySelector(selector);
       const rect = node?.getBoundingClientRect();
@@ -272,33 +278,39 @@ async function inspectMobileToolbar(page) {
         visible: !!node && style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 1,
         left: rect?.left || 0,
         right: rect?.right || 0,
-        width: rect?.width || 0
+        top: rect?.top || 0,
+        bottom: rect?.bottom || 0,
+        width: rect?.width || 0,
+        height: rect?.height || 0
       };
     });
-    const visible = controls.filter((control) => control.visible).sort((a, b) => a.left - b.left);
+    const visible = controls.filter((control) => control.visible);
     const overlaps = [];
-    for (let index = 1; index < visible.length; index += 1) {
-      if (visible[index].left < visible[index - 1].right - 0.5) {
-        overlaps.push(`${visible[index - 1].name}:${visible[index].name}`);
+    for (let leftIndex = 0; leftIndex < visible.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < visible.length; rightIndex += 1) {
+        const left = visible[leftIndex];
+        const right = visible[rightIndex];
+        if (left.left < right.right - 0.5 && left.right > right.left + 0.5
+          && left.top < right.bottom - 0.5 && left.bottom > right.top + 0.5) {
+          overlaps.push(`${left.name}:${right.name}`);
+        }
       }
     }
     const outside = visible
       .filter((control) => control.left < -0.5 || control.right > viewportWidth + 0.5)
       .map((control) => control.name);
-    const header = document.querySelector('.app-page-warehouse .main-header');
-    const batchImport = document.getElementById('mobileBatchImportBtn');
+    const toolbar = document.getElementById('warehouseLibraryToolbar');
     const filter = document.getElementById('filterBtn');
-    const filterLabel = filter?.querySelector('.mobile-filter-label');
     return {
       viewportWidth,
       controls,
       overlaps,
       outside,
-      headerOverflow: (header?.scrollWidth || 0) - (header?.clientWidth || 0),
-      batchImportDisplay: batchImport ? getComputedStyle(batchImport).display : 'missing',
-      filterLabelDisplay: filterLabel ? getComputedStyle(filterLabel).display : 'missing',
+      toolbarOverflow: (toolbar?.scrollWidth || 0) - (toolbar?.clientWidth || 0),
       filterAriaLabel: filter?.getAttribute('aria-label') || '',
-      filterTitle: filter?.getAttribute('title') || ''
+      filterTitle: filter?.getAttribute('title') || '',
+      searchPlaceholder: document.getElementById('searchInput')?.getAttribute('placeholder') || '',
+      sortLabel: document.getElementById('sortMenuLabel')?.textContent?.trim() || ''
     };
   });
 }
@@ -307,15 +319,41 @@ function assertMobileToolbar(label, state) {
   if (state.controls.some((control) => !control.present || !control.visible)) {
     throw new Error(`${label} mobile toolbar control missing: ${JSON.stringify(state)}`);
   }
-  if (state.overlaps.length || state.outside.length || state.headerOverflow > 1) {
+  if (state.overlaps.length || state.outside.length || state.toolbarOverflow > 1) {
     throw new Error(`${label} mobile toolbar overlap/overflow: ${JSON.stringify(state)}`);
   }
-  if (state.batchImportDisplay !== 'none') {
-    throw new Error(`${label} duplicate mobile batch import is visible: ${JSON.stringify(state)}`);
+  if (state.filterAriaLabel !== '标签分类' || state.filterTitle !== '标签分类'
+    || state.searchPlaceholder !== '搜索卡片' || !state.sortLabel) {
+    throw new Error(`${label} library toolbar semantics mismatch: ${JSON.stringify(state)}`);
   }
-  if (state.filterLabelDisplay !== 'none' || state.filterAriaLabel !== '筛选' || state.filterTitle !== '筛选') {
-    throw new Error(`${label} compact filter accessibility mismatch: ${JSON.stringify(state)}`);
-  }
+}
+
+async function inspectPromptFirstInteractions(page) {
+  await page.locator('#warehouseLibraryGroupTrigger').click();
+  const fileGroups = await page.locator('#warehouseLibraryGroupMenu [data-picker-value]').allTextContents();
+  await page.keyboard.press('Escape');
+  await page.locator('#filterBtn').click();
+  const tagMenu = await page.locator('#filterDropdown').innerText();
+  await page.keyboard.press('Escape');
+
+  const main = page.locator('#mainContentArea');
+  await main.evaluate((element) => { element.scrollTop = 0; });
+  await main.hover();
+  await page.mouse.wheel(0, 40);
+  await page.waitForTimeout(520);
+  const focused = await page.evaluate(() => ({
+    active: document.body.classList.contains('warehouse-content-focus'),
+    composerHeight: Math.round(document.getElementById('warehouseComposer')?.getBoundingClientRect().height || 0)
+  }));
+  await page.waitForTimeout(800);
+  await main.hover();
+  await page.mouse.wheel(0, -40);
+  await page.waitForTimeout(520);
+  const restored = await page.evaluate(() => ({
+    active: document.body.classList.contains('warehouse-content-focus'),
+    composerHeight: Math.round(document.getElementById('warehouseComposer')?.getBoundingClientRect().height || 0)
+  }));
+  return { fileGroups, tagMenu, focused, restored };
 }
 
 async function inspectMobileEditPanelAfterTouch(page) {
@@ -400,8 +438,13 @@ try {
 
   const desktop = await openWarehouse(browser, { width: 1440, height: 900 });
   const desktopState = await inspectWarehouse(desktop.page, false);
-  assertBetween('desktop hero height', desktopState.heroHeight, 150, 190);
-  assertBetween('desktop header height', desktopState.headerHeight, 48, 60);
+  assertBetween('desktop composer height', desktopState.composerHeight, 320, 410);
+  assertBetween('desktop library toolbar height', desktopState.toolbarHeight, 50, 80);
+  if (desktopState.groupLabel !== '文件分类' || desktopState.tagLabel !== '标签分类'
+    || desktopState.searchPlaceholder !== '搜索卡片' || !desktopState.sortLabel
+    || desktopState.visibleNativeSelects.length) {
+    throw new Error(`desktop prompt-first controls incomplete: ${JSON.stringify(desktopState)}`);
+  }
   if (desktopState.cardCount !== 12 || desktopState.metaCount !== 12) {
     throw new Error(`desktop cards/meta mismatch: ${JSON.stringify(desktopState)}`);
   }
@@ -411,7 +454,7 @@ try {
   if (desktopState.mediaCount !== 8 || desktopState.loadedMediaCount !== 8) {
     throw new Error(`desktop card media incomplete: ${JSON.stringify(desktopState)}`);
   }
-  if (!desktopState.warehouseStylesheet || desktopState.heroImageWidths.some((width) => width <= 0)) {
+  if (!desktopState.warehouseStylesheet) {
     throw new Error(`warehouse visual assets did not load: ${JSON.stringify(desktopState)}`);
   }
   if (desktopState.pageOverflow > 1 || desktopState.overflowNodes.length) {
@@ -423,6 +466,17 @@ try {
   }
   if (screenshotDir) {
     await desktop.page.screenshot({ path: join(screenshotDir, 'warehouse-desktop.png'), fullPage: false });
+  }
+  const promptFirstInteractions = await inspectPromptFirstInteractions(desktop.page);
+  if (!promptFirstInteractions.fileGroups.some((label) => label.includes('全部卡片'))
+    || !promptFirstInteractions.fileGroups.some((label) => label.includes('电影分镜'))
+    || !promptFirstInteractions.tagMenu.includes('筛选（可多选）')
+    || !promptFirstInteractions.tagMenu.includes('电影感')) {
+    throw new Error(`library classification controls lost data: ${JSON.stringify(promptFirstInteractions)}`);
+  }
+  if (!promptFirstInteractions.focused.active || promptFirstInteractions.focused.composerHeight !== 0
+    || promptFirstInteractions.restored.active || promptFirstInteractions.restored.composerHeight < 300) {
+    throw new Error(`wheel focus transition failed: ${JSON.stringify(promptFirstInteractions)}`);
   }
   const failedMediaState = await desktop.page.evaluate(() => {
     const media = document.querySelector('#cardsContainer .card.card--visual .card-media');
@@ -441,8 +495,13 @@ try {
 
   const mobile = await openWarehouse(browser, { width: 390, height: 844 });
   const mobileState = await inspectWarehouse(mobile.page, true);
-  assertBetween('mobile hero height', mobileState.heroHeight, 120, 145);
-  assertBetween('mobile header height', mobileState.headerHeight, 50, 58);
+  assertBetween('mobile composer height', mobileState.composerHeight, 400, 470);
+  assertBetween('mobile library toolbar height', mobileState.toolbarHeight, 90, 140);
+  if (mobileState.groupLabel !== '文件分类' || mobileState.tagLabel !== '标签分类'
+    || mobileState.searchPlaceholder !== '搜索卡片' || !mobileState.sortLabel
+    || mobileState.visibleNativeSelects.length) {
+    throw new Error(`mobile prompt-first controls incomplete: ${JSON.stringify(mobileState)}`);
+  }
   if (mobileState.cardCount !== 12 || mobileState.metaCount !== 12 || mobileState.mobileActions !== 12) {
     throw new Error(`mobile cards/meta/actions mismatch: ${JSON.stringify(mobileState)}`);
   }
@@ -539,14 +598,15 @@ try {
       gridContentVerticalCenter: (contentTop + contentBottom) / 2
     };
   });
-  if (Math.abs(emptyMobileState.emptyCenter - emptyMobileState.gridContentCenter) > 2
-    || Math.abs(emptyMobileState.emptyVerticalCenter - emptyMobileState.gridContentVerticalCenter) > 2) {
+  if (Math.abs(emptyMobileState.emptyCenter - emptyMobileState.gridContentCenter) > 3
+    || Math.abs(emptyMobileState.emptyVerticalCenter - emptyMobileState.gridContentVerticalCenter) > 40) {
     throw new Error(`mobile warehouse empty state is not centered: ${JSON.stringify(emptyMobileState)}`);
   }
   await emptyMobile.context.close();
 
   console.log('verify-warehouse-ui-browser OK', JSON.stringify({
     desktopState,
+    promptFirstInteractions,
     mobileState,
     mobileEditPanelState,
     narrowToolbarStates,

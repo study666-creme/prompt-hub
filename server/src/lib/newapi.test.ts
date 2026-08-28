@@ -118,7 +118,7 @@ describe('newapi image upstream', () => {
         {
           id: 'gpt-image-2-ext',
           label: 'GPT Image 2 Ext',
-          public: { id: 'image2-pro', label: 'Image2 Pro', description: '高质量生图模型。' },
+          public: { id: 'image2-pro', label: 'Image2 Pro', description: '稳定生图模型。' },
           modality: 'image',
           family: 'gim2',
           selectable: true,
@@ -260,7 +260,7 @@ describe('newapi image upstream', () => {
     expect(snapshot.imageCatalogEntries.map(model => model.id)).toEqual(['image2', 'image2-pro', 'image2-economy', 'image2-hd']);
     expect(snapshot.imageCatalogEntries.map(model => model.label)).toEqual([
       '全能模型2 · 1K',
-      '全能模型2 · 高质量 1K/2K/4K',
+      '全能模型2 · 稳定 1K/2K/4K',
       '全能模型2 · 特价 1K',
       '全能模型2 · 经济 2K/4K'
     ]);
@@ -344,7 +344,7 @@ describe('newapi image upstream', () => {
       }),
       publicImageCatalogFixture({
         id: 'gpt-image-2-ext',
-        label: '全能模型2 · 高质量 2K/4K',
+        label: '全能模型2 · 稳定 2K/4K',
         tags: 'image,openai,image2,1k,2k,4k',
         order: 22,
         resolution: { name: 'quality', options: ['2k', '4k'] },

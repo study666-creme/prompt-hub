@@ -39,11 +39,13 @@
       .trim()
       .toLowerCase();
     if (!id) return 'image2';
+    const catalogHit = imageGenModelCatalog.find((model) => String(model.id || '').toLowerCase() === id);
+    if (catalogHit?.id) return catalogHit.id;
     if (RETIRED_IMAGE_GEN_MODEL_IDS.has(id)) return 'image2';
     if (id === 'image2' || id.startsWith('image2-')) return id;
     if (id === 'lingtu' || id.startsWith('lingtu-')) return id;
     if (id.startsWith('mj-')) return id;
-    return 'image2';
+    return modelId ? String(modelId).trim() : 'image2';
   }
 
   function imageGenModelLabel(modelId) {
@@ -63,11 +65,11 @@
   }
 
   function imageGenModelUiFamily(m) {
-    if (m?.uiFamily === 'banana' || m?.uiFamily === 'gim2' || m?.uiFamily === 'midjourney') return m.uiFamily;
+    if (m?.uiFamily === 'banana' || m?.uiFamily === 'gim2' || m?.uiFamily === 'midjourney' || m?.uiFamily === 'generic') return m.uiFamily;
     const id = String(m?.id || '').toLowerCase();
     if (id.startsWith('mj-')) return 'midjourney';
     if (id.startsWith('lingtu') || id.includes('nano-banana')) return 'banana';
-    return 'gim2';
+    return 'generic';
   }
 
   function isImageGenMidjourneyModel(modelId) {
@@ -774,7 +776,7 @@
     '8:1': '超宽 8∶1'
   };
   const IMAGE_GEN_SIZE_BASIC = ['1:1', '16:9', '9:16', '4:3', '3:4'];
-  const IMAGE_GEN_SIZE_BANANA = ['auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'];
+  const IMAGE_GEN_SIZE_BANANA = ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'];
   const IMAGE_GEN_SIZE_BANANA2_EXTRA = ['1:4', '4:1', '1:8', '8:1'];
   const IMAGE_GEN_SIZE_GIM2 = ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'];
   /** 离线兜底：与 server aspectRatiosForModel 一致 */

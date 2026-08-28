@@ -42,10 +42,6 @@
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
         <span class="app-nav-label">卡片库</span>
       </button>
-      <button type="button" class="app-nav-item" data-app="community">
-        <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        <span class="app-nav-label">提示词社区</span>
-      </button>
       <button type="button" class="app-nav-item" data-app="creations">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
         <span class="app-nav-label">我的主页</span>
@@ -55,10 +51,9 @@
         <span class="app-nav-label">图片生成</span>
         <span class="app-nav-soon">草案</span>
       </button>
-      <button type="button" class="app-nav-item app-nav-external" onclick="openPromptCanvas()" title="在新标签页打开无限画布">
+      <button type="button" class="app-nav-item" data-app="canvas" title="打开无限画布">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
         <span class="app-nav-label">无限画布</span>
-        <svg class="app-nav-external-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       </button>
       <button type="button" class="app-nav-item" data-app="devlab">
         <svg class="app-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
@@ -314,9 +309,6 @@
               <button class="active" data-view="grid" title="网格" aria-label="网格视图"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button>
               <button data-view="list" title="列表" aria-label="列表视图"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></button>
             </div>
-            <button type="button" class="icon-btn icon-btn-accent" id="globalViewBtn" onclick="toggleGlobalView()" title="快速预览">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-            </button>
           </div>
           <div class="toolbar-cluster toolbar-cluster-grow">
             <div class="sort-menu-wrap desktop-only" id="sortMenuWrap">
@@ -332,9 +324,9 @@
             </button>
             <div class="filter-menu-wrap">
               <button type="button" class="btn btn-ghost btn-sm warehouse-filter-clear hidden" id="warehouseFilterClearBtn">清除筛选</button>
-              <button type="button" class="icon-btn" id="filterBtn" aria-label="筛选" title="筛选">
+              <button type="button" class="icon-btn" id="filterBtn" aria-label="标签分类" title="标签分类">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
-                <span class="mobile-only mobile-filter-label">筛选</span>
+                <span class="warehouse-filter-label">标签分类</span>
               </button>
               <div class="filter-dropdown" id="filterDropdown"></div>
             </div>
@@ -360,6 +352,108 @@
         </div>
       </div>
     </div>
+    <section class="warehouse-composer" id="warehouseComposer" aria-labelledby="warehouseComposerTitle">
+      <div class="warehouse-composer-heading">
+        <span class="warehouse-composer-kicker">PROMPT WORKSPACE</span>
+        <h1 id="warehouseComposerTitle">先把灵感存下来</h1>
+        <p>输入提示词，附上参考图，然后继续整理成可复用的卡片。</p>
+      </div>
+      <div class="warehouse-composer-box" id="warehouseComposerBox">
+        <div class="warehouse-composer-input-row">
+          <button type="button" class="warehouse-composer-attach" id="warehouseComposerAttach" title="添加参考图" aria-label="添加参考图">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            <span>参考图</span>
+          </button>
+          <input type="file" id="warehouseComposerFile" accept="image/*" multiple hidden>
+          <div class="warehouse-composer-text-wrap">
+            <textarea id="warehouseComposerPrompt" rows="3" placeholder="写下你的提示词，或把图片拖到这里…" spellcheck="false"></textarea>
+            <div class="warehouse-composer-ref-strip" id="warehouseComposerRefStrip" hidden></div>
+          </div>
+        </div>
+        <div class="warehouse-composer-toolbar">
+          <div class="warehouse-composer-mode" role="group" aria-label="创作类型">
+            <button type="button" class="warehouse-composer-mode-btn active" data-composer-mode="card">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v18H6.5A2.5 2.5 0 0 1 4 18.5v-13Z"/><path d="M4 6h13M8 9h8M8 13h6"/></svg>
+              <span>创建卡片</span>
+            </button>
+            <button type="button" class="warehouse-composer-mode-btn" data-composer-mode="image">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+              <span>生成图片</span>
+            </button>
+            <button type="button" class="warehouse-composer-mode-btn" data-composer-mode="video" disabled title="视频生成即将开放">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
+              <span>视频生成</span><em>即将开放</em>
+            </button>
+          </div>
+          <div class="warehouse-composer-options" id="warehouseComposerOptions">
+            <div class="warehouse-composer-picker-wrap warehouse-composer-model-wrap" id="warehouseComposerModelWrap" hidden>
+              <span class="warehouse-composer-picker-label">模型</span>
+              <button type="button" class="warehouse-composer-picker-trigger" id="warehouseComposerModelTrigger" role="combobox" aria-label="生图模型" aria-haspopup="listbox" aria-controls="warehouseComposerModelMenu" aria-expanded="false"><span>加载模型…</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+              <div class="warehouse-composer-picker-menu" id="warehouseComposerModelMenu" role="listbox" aria-label="生图模型" hidden></div>
+              <select id="warehouseComposerModel" class="warehouse-composer-state-select" aria-hidden="true" tabindex="-1"><option value="">加载模型…</option></select>
+            </div>
+            <div class="warehouse-composer-picker-wrap" id="warehouseComposerRatioWrap" hidden>
+              <span class="warehouse-composer-picker-label">比例</span>
+              <button type="button" class="warehouse-composer-picker-trigger" id="warehouseComposerRatioTrigger" role="combobox" aria-label="画面比例" aria-haspopup="listbox" aria-controls="warehouseComposerRatioMenu" aria-expanded="false"><span>1:1</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+              <div class="warehouse-composer-picker-menu" id="warehouseComposerRatioMenu" role="listbox" aria-label="画面比例" hidden></div>
+              <select id="warehouseComposerRatio" class="warehouse-composer-state-select" aria-hidden="true" tabindex="-1"><option value="1:1">1:1</option></select>
+            </div>
+            <div class="warehouse-composer-picker-wrap" id="warehouseComposerResolutionWrap" hidden>
+              <span class="warehouse-composer-picker-label">清晰度</span>
+              <button type="button" class="warehouse-composer-picker-trigger" id="warehouseComposerResolutionTrigger" role="combobox" aria-label="输出分辨率" aria-haspopup="listbox" aria-controls="warehouseComposerResolutionMenu" aria-expanded="false"><span>1K</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+              <div class="warehouse-composer-picker-menu" id="warehouseComposerResolutionMenu" role="listbox" aria-label="输出分辨率" hidden></div>
+              <select id="warehouseComposerResolution" class="warehouse-composer-state-select" aria-hidden="true" tabindex="-1"><option value="1k">1K</option><option value="2k">2K</option><option value="4k">4K</option></select>
+            </div>
+            <button type="button" class="warehouse-composer-extra" id="warehouseComposerExtra" title="打开完整卡片编辑面板">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18"/></svg>
+              <span>更多字段</span>
+            </button>
+            <span class="warehouse-composer-cost" id="warehouseComposerCostHint" aria-live="polite" hidden></span>
+            <button type="button" class="warehouse-composer-submit" id="warehouseComposerSubmit">
+              <span>创建卡片</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="warehouse-composer-drop-hint" id="warehouseComposerDropHint" aria-live="polite">支持拖拽、点击上传或 Ctrl+V 粘贴图片</div>
+      </div>
+    </section>
+    <section class="warehouse-content-stage" aria-label="卡片内容">
+      <nav class="warehouse-discover-nav" aria-label="内容导航">
+        <div class="warehouse-discover-tabs" role="tablist">
+          <button type="button" class="warehouse-discover-tab active" data-discover-target="warehouse" role="tab" aria-selected="true">卡片库</button>
+          <button type="button" class="warehouse-discover-tab" data-discover-target="community" role="tab" aria-selected="false">社区</button>
+          <button type="button" class="warehouse-discover-tab" data-discover-target="creations" role="tab" aria-selected="false">生成记录</button>
+        </div>
+        <div class="warehouse-discover-actions">
+          <span class="warehouse-discover-count"><strong id="warehouseDiscoverCount">0</strong> 张卡片</span>
+        </div>
+      </nav>
+      <div class="warehouse-inline-view warehouse-inline-view--library" id="warehouseLibraryView" data-warehouse-view="library">
+        <div class="warehouse-library-toolbar" id="warehouseLibraryToolbar" aria-label="卡片库筛选工具">
+          <div class="warehouse-library-toolbar-primary">
+            <div class="warehouse-composer-picker-wrap warehouse-library-group-picker" id="warehouseLibraryGroupWrap">
+              <span class="warehouse-composer-picker-label">文件分类</span>
+              <button type="button" class="warehouse-composer-picker-trigger" id="warehouseLibraryGroupTrigger" role="combobox" aria-label="文件分类" aria-haspopup="listbox" aria-controls="warehouseLibraryGroupMenu" aria-expanded="false"><span>全部卡片</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+              <div class="warehouse-composer-picker-menu" id="warehouseLibraryGroupMenu" role="listbox" aria-label="文件分类" hidden></div>
+              <select id="warehouseLibraryGroup" class="warehouse-composer-state-select" aria-hidden="true" tabindex="-1"><option value="all">全部卡片</option></select>
+            </div>
+            <div class="warehouse-library-filter-slot" id="warehouseLibraryFilterSlot"></div>
+          </div>
+          <div class="warehouse-library-search-slot" id="warehouseLibrarySearchSlot"></div>
+          <div class="warehouse-library-sort-slot" id="warehouseLibrarySortSlot"></div>
+          <div class="warehouse-library-preview-slot" id="warehouseLibraryPreviewSlot">
+            <button type="button" class="icon-btn icon-btn-accent" id="globalViewBtn" onclick="toggleGlobalView()" title="快速预览" aria-label="快速预览">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="warehouse-inline-view warehouse-inline-view--community" id="warehouseCommunityView" data-warehouse-view="community" hidden>
+      </div>
+      <div class="warehouse-inline-view warehouse-inline-view--creations" id="warehouseCreationsView" data-warehouse-view="creations" hidden>
+      </div>
+    </section>
     <section class="warehouse-hero" id="warehouseHero" aria-labelledby="warehouseHeroTitle">
       <div class="warehouse-hero-copy">
         <div class="warehouse-hero-kicker">

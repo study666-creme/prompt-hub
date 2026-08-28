@@ -16,7 +16,7 @@ const assetStudioRuntime = read('legacy/asset-studio/part-02.js');
 const pointsSystem = read('points-system.js');
 const imagegenBundle = read('pack-imagegen.js');
 const cacheKey = 'promptrepo_imagegen_models_cache_v4';
-const expectedVersion = 19;
+const expectedVersion = 20;
 const forbiddenModelKeys = new Set([
   'provider',
   'creditsBase',
@@ -49,10 +49,14 @@ assert(
   indexHtml.includes("model.id === 'image2-free'"),
   'first-paint fallback must filter every retired model'
 );
+assert(indexHtml.includes("sensenova-1.5-一秒出图"), 'first-paint fallback must include the current generic catalog family');
 assert(
   featureCatalog.includes("new Set(['image2-free'])"),
   'feature fallback must filter every retired model'
 );
+for (const retiredId of ['lingtu-fast', 'lingtu-lite', 'mj-v61']) {
+  assert(!featureCatalog.includes(`id: '${retiredId}'`), `feature fallback must not expose retired model ${retiredId}`);
+}
 
 const inFlightResult = await generationModelsInFlight([
   { id: 'image2-4k-fast', label: 'public fast 4K model' }
@@ -87,6 +91,37 @@ assertPublicModelProjection(taintedCacheResult.cached?.models, 'persisted browse
 assert(
   taintedCacheResult.result.data?.models?.[0]?.creditsByResolution?.['1k'] === 5.5,
   'legacy final resolution price must project to creditsByResolution'
+);
+
+const currentGenericModels = [
+  { id: 'sensenova-1.5-一秒出图', label: '一秒出图', uiFamily: 'generic', aspectRatios: ['1:1', '16:9'] },
+  { id: 'seedream-5.0', label: 'Seedream 5.0', uiFamily: 'generic', aspectRatios: ['1:1', '3:2'] },
+  { id: 'Midjourney v8.2 高速', label: 'Midjourney v8.2 高速', uiFamily: 'midjourney' }
+];
+const genericCacheResult = await generationModelsFromCache(expectedVersion, currentGenericModels);
+assert(
+  genericCacheResult.result.data?.models?.map((model) => model.id).join(',')
+    === currentGenericModels.map((model) => model.id).join(','),
+  'current public model ids with CJK or spaces must survive browser projection'
+);
+assert(
+  genericCacheResult.result.data?.models?.slice(0, 2).every((model) => model.uiFamily === 'generic'),
+  'generic public models must not be relabeled as 全能模型2'
+);
+
+const localPublicFallback = await generationModelsFromLocalPublicCatalog(currentGenericModels);
+const localCatalogCalls = localPublicFallback.calls.filter((call) => call.url.includes('/api/v1/generate/models'));
+assert(localPublicFallback.result.ok === true, 'local preview must accept the read-only public catalog');
+assert(localPublicFallback.result.source === 'public-fallback', 'local preview must identify the public catalog fallback');
+assert(localCatalogCalls.length >= 1, 'local preview catalog refresh must make a public request');
+assert(
+  localCatalogCalls.every((call) => call.url.startsWith('https://api.prompt-hubs.com/api/v1/generate/models?')),
+  'local preview must read models from the public API base URL'
+);
+assert(
+  localCatalogCalls.every((call) => call.method === 'GET')
+    && !localPublicFallback.calls.some((call) => call.method === 'POST'),
+  'local preview catalog fallback must never submit a paid POST'
 );
 
 assert(
@@ -244,6 +279,37 @@ async function generationModelsInFlight(models) {
   });
   const results = await Promise.all([first, second]);
   return { samePromise: first === second, catalogFetchCount, results };
+}
+
+async function generationModelsFromLocalPublicCatalog(models) {
+  const storage = new Map();
+  const calls = [];
+  const context = {
+    console,
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, String(value))
+    },
+    location: { protocol: 'http:', hostname: '127.0.0.1' },
+    setTimeout,
+    clearTimeout,
+    AbortController,
+    Date,
+    JSON,
+    fetch: async (url, options = {}) => {
+      calls.push({ url: String(url), method: String(options.method || 'GET').toUpperCase() });
+      return {
+        ok: true,
+        json: async () => ({ ok: true, data: { models } })
+      };
+    }
+  };
+  context.window = context;
+  context.globalThis = context;
+  context.API_BASE_URL = 'http://127.0.0.1:8787';
+  vm.runInNewContext(apiClient, context, { filename: 'api-client.js' });
+  const result = await context.PromptHubApi.getGenerationModels();
+  return { result, calls };
 }
 
 function assertPublicModelProjection(value, name) {

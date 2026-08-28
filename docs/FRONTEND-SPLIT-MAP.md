@@ -1,6 +1,6 @@
 # Frontend Split Map
 
-Updated: 2026-08-03
+Updated: 2026-08-28
 
 This project still ships classic browser scripts from the site root, but several formerly large files are now thin runtime loaders. The real source is split into ordered chunks so classic script execution order and old global/IIFE behavior stay unchanged.
 
@@ -20,7 +20,8 @@ Do not paste old monolithic code back into these root files. Edit the matching `
 
 ## HTML And CSS Splits
 
-- `index.html` keeps the head and script order, while the body DOM is loaded from `partials/index-body/part-*.html`.
+- `index.html` keeps the head and script order, while the body DOM is loaded from `partials/index-body/part-*.html`. The boot loader detects a stale full-document response from an older local service worker, clears Prompt Hub caches once, and retries; `?clear-cache=1` forces the same local recovery path.
+- `warehouse-composer.js` is a small root runtime entry loaded after `script.js`; it owns the prompt-first warehouse composer, delegates card persistence and image generation to the existing globals, and owns the optional Canvas iframe/standalone buttons.
 - `styles.css` imports `styles/base/part-*.css`.
 - `styles-features.css` imports `styles/features/part-*.css`.
 - `styles-warehouse.css` is the `20260803a` standalone warehouse UI layer loaded after the shared CSS entries. It is not generated from a split CSS directory.
@@ -29,9 +30,11 @@ The source split loaders are synchronous in the repository so local development 
 
 ## Warehouse UI Ownership
 
-The 2026-08-03 `20260803a` production release keeps the warehouse redesign isolated from generated bundles:
+The current candidate warehouse redesign keeps the warehouse surface isolated from generated bundles:
 
-- `partials/index-body/part-02.html` owns the toolbar and compact warehouse summary markup.
+- `partials/index-body/part-02.html` owns the legacy toolbar shell (hidden on the prompt-first home), prompt-first composer, application-drawn model/ratio/resolution picker shells, and compact warehouse summary markup. The warehouse page's visible content tabs are named `卡片库`, `社区`, and `生成记录`; the old `发现` label is retired.
+- `partials/index-body/part-03.html` owns the dedicated `pageCanvas` route shell. The homepage no longer embeds Canvas; the Canvas route contains the iframe and a standalone-open action.
+- `warehouse-composer.js` owns composer mode state, bounded reference-image intake (drag/drop, file picker, paste), direct card-save handoff, image-generation form bridging, inline library/community/creation views, and warehouse content-focus behavior. It mounts the existing file-group switcher, multi-select tag filter, search field, and custom sort menu into one persistent library toolbar. Its model menu reads the complete public catalog, keeps `generic` models in an “其他模型” group, and derives the supported aspect-ratio and resolution options per model; the application-drawn pickers support keyboard navigation and block unavailable entries. The first deliberate downward wheel gesture collapses the surrounding chrome, while an upward gesture at the content top restores the same composer. It must not duplicate paid-generation requests.
 - `legacy/script/part-04.js` owns summary count/scope synchronization.
 - `legacy/script/part-09.js` owns card metadata and the actionable empty state.
 - `styles-warehouse.css` owns warehouse-only layout, surface hierarchy, status accents, list/grid presentation, light theme, and mobile overrides.

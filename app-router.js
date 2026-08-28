@@ -1,5 +1,5 @@
 /**
- * LabGen 风格客户端路由：/prompts /generate /community /profile
+ * LabGen 风格客户端路由：/prompts /generate /community /profile /canvas
  * 静态 Pages + history API，不改后端。
  */
 (function () {
@@ -11,6 +11,7 @@
     imagegen: ['/generate', '/imagegen'],
     community: ['/community'],
     creations: ['/profile', '/home', '/creations'],
+    canvas: ['/canvas'],
     devlab: ['/dev', '/devlab']
   };
 
@@ -25,6 +26,7 @@
     imagegen: '/generate/',
     community: '/community/',
     creations: '/profile/',
+    canvas: '/canvas/',
     devlab: '/dev/'
   };
 
@@ -34,6 +36,7 @@
     imagegen: 'pageImageGen',
     community: 'pageCommunity',
     creations: 'pageCreations',
+    canvas: 'pageCanvas',
     devlab: 'pageDevLab'
   };
 
@@ -43,6 +46,7 @@
     imagegen: '图片生成',
     community: '提示词社区',
     creations: '我的主页',
+    canvas: '无限画布',
     devlab: '开发实验室'
   };
 

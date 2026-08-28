@@ -179,7 +179,7 @@ const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; 
   'image2-4k-fast': { id: 'image2-4k-fast', label: '全能模型2 · 4K', description: '固定 4K 的生图模型，支持官方 Image 参数与参考图。' },
   'gpt-image-2-4k-fast': { id: 'image2-4k-fast', label: '全能模型2 · 4K', description: '固定 4K 的生图模型，支持官方 Image 参数与参考图。' },
   'gpt-image-2-4k-adobe': { id: 'image2-4k-fast', label: '全能模型2 · 4K', description: '固定 4K 的生图模型，支持官方 Image 参数与参考图。' },
-  'gpt-image-2-ext': { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K', description: '高质量生图模型，支持 1K/2K/4K。' },
+  'gpt-image-2-ext': { id: 'image2-pro', label: '全能模型2 · 稳定 1K/2K/4K', description: '稳定生图模型，支持 1K/2K/4K。' },
   image2k4k: { id: 'image2-hd', label: '全能模型2 · 经济 2K/4K', description: '高分辨率经济模型，支持 2K/4K。' },
   'nano-banana-fast': { id: 'lingtu-fast', label: '香蕉 · Fast 1K', description: '快速生图模型，固定 1K。' },
   'nano-banana-2-lite': { id: 'lingtu-lite', label: '香蕉 · Lite 1K', description: '轻量生图模型，固定 1K。' },

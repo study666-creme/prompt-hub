@@ -377,11 +377,11 @@
     clearTimeout(communityOnActivateTimer);
     communityOnActivateTimer = setTimeout(() => {
       if (seq !== communityOnActivateSeq) return;
-      if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
+      if (!(document.getElementById('pageCommunity')?.classList.contains('active') || document.body.classList.contains('warehouse-inline-community-active'))) return;
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           if (seq !== communityOnActivateSeq) return;
-          if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
+          if (!(document.getElementById('pageCommunity')?.classList.contains('active') || document.body.classList.contains('warehouse-inline-community-active'))) return;
           const grid = document.getElementById('communityGrid');
           window.FeedLayout?.repairCommunityMasonry?.('communityGrid');
           hydratePublicFeedFromCache();
@@ -408,7 +408,7 @@
           }
           deferCommunityIdle(() => {
             if (seq !== communityOnActivateSeq) return;
-            if (!document.getElementById('pageCommunity')?.classList.contains('active')) return;
+            if (!(document.getElementById('pageCommunity')?.classList.contains('active') || document.body.classList.contains('warehouse-inline-community-active'))) return;
             ensureCommunityFromCardsThrottled(false);
             if (publicFeedNeedsFullRefresh() && !publicFeedState.loading) {
               if (grid && !hasRealCards) showCommunityFeedSkeleton(grid, 8);
@@ -596,6 +596,10 @@
       const cached = loadCachedImageGenModels();
       if (cached?.length) {
         applyImageGenModelCatalog(cached, { forceRender: true, source: 'cache' });
+      } else if (String(window.API_BASE_URL || '').trim() && window.API_BASE_URL !== 'disabled') {
+        // Keep the picker in a loading state until the public API catalog is
+        // read. A stale local fallback must never look like the current list.
+        setImageGenModelSelectLoading(true);
       } else {
         applyImageGenModelCatalog(IMAGE_GEN_MODEL_FALLBACK, { forceRender: true, source: 'fallback' });
       }
@@ -792,32 +796,31 @@
   const IMAGE_GEN_MODEL_FAMILIES = [
     { key: 'gim2', label: '全能模型2' },
     { key: 'banana', label: '香蕉' },
-    { key: 'midjourney', label: 'MJ' }
+    { key: 'midjourney', label: 'Midjourney' },
+    { key: 'generic', label: '其他模型' }
   ];
 
   const RETIRED_IMAGE_GEN_MODEL_IDS = new Set(['image2-free']);
 
+  // Compatibility-only seed used when no API base is configured. Normal pages
+  // replace this list with the public catalog before exposing model controls.
   const IMAGE_GEN_MODEL_FALLBACK = [
-    { id: 'image2-free', label: '全能模型2 · 免费 1K', uiFamily: 'gim2', sortOrder: 22, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 0, creditsFinal: 0, resolutions: ['1k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
     { id: 'image2-economy', label: '全能模型2 · 特价 1K', uiFamily: 'gim2', sortOrder: 20, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 2.2, creditsFinal: 2.2, resolutions: ['1k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
-    { id: 'image2', label: '全能模型2 · 1K', uiFamily: 'gim2', sortOrder: 21, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 5.5, creditsFinal: 5.5, resolutions: ['1k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
-    { id: 'image2-pro', label: '全能模型2 · 高质量 1K/2K/4K', uiFamily: 'gim2', sortOrder: 22, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 8, creditsFinal: 8, pricingByResolution: true, creditsByResolution: { '1k': 8, '2k': 15, '4k': 20 }, resolutions: ['1k', '2k', '4k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
-    { id: 'image2-4k-fast', label: '全能模型2 · 4K', uiFamily: 'gim2', sortOrder: 24, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 6, creditsFinal: 6, resolutions: ['4k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
-    { id: 'lingtu', label: '香蕉 · Standard 1K', uiFamily: 'banana', sortOrder: 40, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 6, creditsFinal: 6, resolutions: ['1k'] },
-    { id: 'lingtu-fast', label: '香蕉 · Fast 1K', uiFamily: 'banana', sortOrder: 41, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 4.2, creditsFinal: 4.2, resolutions: ['1k'] },
-    { id: 'lingtu-lite', label: '香蕉 · Lite 1K', uiFamily: 'banana', sortOrder: 42, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 4.2, creditsFinal: 4.2, resolutions: ['1k'] },
-    { id: 'lingtu-pro', label: '香蕉 · Pro 1K/2K/4K', uiFamily: 'banana', sortOrder: 43, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 6, creditsFinal: 6, pricingByResolution: true, creditsByResolution: { '1k': 6, '2k': 6, '4k': 6 }, resolutions: ['1k', '2k', '4k'] },
-    { id: 'lingtu-2', label: '香蕉 · 2 1K/2K/4K', uiFamily: 'banana', sortOrder: 44, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 6, creditsFinal: 6, pricingByResolution: true, creditsByResolution: { '1k': 6, '2k': 6, '4k': 6 }, resolutions: ['1k', '2k', '4k'] },
-    { id: 'mj-v81', label: 'MJ v8.1', description: '最新主版本 · 写实/概念通用 · 细节与光影最佳', uiFamily: 'midjourney', sortOrder: 110, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 35, creditsFinal: 35, pricingBySpeed: true, creditsBySpeed: { relax: 35, fast: 45, turbo: 90 }, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
-    { id: 'mj-v7', label: 'MJ v7', description: '上一代主力 · 复杂构图稳定 · 风格均衡', uiFamily: 'midjourney', sortOrder: 111, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 35, creditsFinal: 35, pricingBySpeed: true, creditsBySpeed: { relax: 35, fast: 45, turbo: 90 }, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
-    { id: 'mj-v61', label: 'MJ v6.1', description: '经典 v6 · 风格稳定 · 适合批量出图', uiFamily: 'midjourney', sortOrder: 112, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 35, creditsFinal: 35, pricingBySpeed: true, creditsBySpeed: { relax: 35, fast: 45, turbo: 90 }, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
-    { id: 'mj-niji7', label: 'MJ Niji 7', description: '动漫/二次元专版 · 角色与插画表现力强', uiFamily: 'midjourney', sortOrder: 113, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 35, creditsFinal: 35, pricingBySpeed: true, creditsBySpeed: { relax: 35, fast: 45, turbo: 90 }, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] }
+    { id: 'image2-pro', label: '全能模型2 · 稳定 1K/2K/4K', uiFamily: 'gim2', sortOrder: 22, selectable: true, status: 'active', refundOnViolation: true, creditsPerCall: 8, creditsFinal: 8, pricingByResolution: true, creditsByResolution: { '1k': 8, '2k': 15, '4k': 20 }, resolutions: ['1k', '2k', '4k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
+    { id: 'image2-A', label: '全能模型2-A', uiFamily: 'gim2', sortOrder: 23, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'] },
+    { id: 'lingtu-pro', label: '香蕉 · Pro', uiFamily: 'banana', sortOrder: 43, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
+    { id: 'lingtu-2', label: '香蕉 · 2', uiFamily: 'banana', sortOrder: 44, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k', '4k'], aspectRatios: ['auto', '1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21'] },
+    { id: 'sensenova-1.5-一秒出图', label: '一秒出图', uiFamily: 'generic', sortOrder: 60, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'] },
+    { id: 'seedream-5.0', label: 'Seedream 5.0', uiFamily: 'generic', sortOrder: 61, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k', '2k'], aspectRatios: ['1:1', '3:2', '2:3', '16:9', '9:16'] },
+    { id: 'mj-v82', label: 'Midjourney v8.2', uiFamily: 'midjourney', sortOrder: 110, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
+    { id: 'mj-v81', label: 'Midjourney v8.1', uiFamily: 'midjourney', sortOrder: 111, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
+    { id: 'mj-v7', label: 'Midjourney v7', uiFamily: 'midjourney', sortOrder: 112, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] },
+    { id: 'mj-niji7', label: 'Midjourney Niji 7', uiFamily: 'midjourney', sortOrder: 113, selectable: true, status: 'active', refundOnViolation: true, resolutions: ['1k'], aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9'] }
   ];
 
   const IMAGE_GEN_MJ_MODEL_DESCRIPTIONS = {
     'mj-v81': '最新主版本 · 写实/概念通用 · 细节与光影最佳',
     'mj-v7': '上一代主力 · 复杂构图稳定 · 风格均衡',
-    'mj-v61': '经典 v6 · 风格稳定 · 适合批量出图',
     'mj-niji7': '动漫/二次元专版 · 角色与插画表现力强'
   };
 
@@ -880,8 +883,11 @@
     };
     const projected = window.PromptHubApi?.projectGenerationModels?.([publicInput])?.[0];
     if (!projected?.id) return null;
-    const catalogLabel = projected.catalogLabel || projected.label || projected.id;
-    const label = String(projected.label || catalogLabel).trim() || catalogLabel;
+    const catalogLabel = String(projected.catalogLabel || projected.label || projected.id)
+      .replace(/全能模型2\s*·\s*高质量/g, '全能模型2 · 稳定');
+    const label = String(projected.label || catalogLabel)
+      .replace(/全能模型2\s*·\s*高质量/g, '全能模型2 · 稳定')
+      .trim() || catalogLabel;
     const mjDesc = IMAGE_GEN_MJ_MODEL_DESCRIPTIONS[projected.id];
     const rawDesc = projected.description || mjDesc || null;
     const description = sanitizeImageGenModelDescription(rawDesc);
@@ -931,6 +937,9 @@
       .filter((m) => m.status !== 'offline');
     window.__IMAGE_GEN_MODELS__ = imageGenModelCatalog;
     window.__IMAGE_GEN_CATALOG_SOURCE__ = source;
+    try {
+      window.dispatchEvent?.(new CustomEvent('ph-imagegen-catalog-updated'));
+    } catch (e) { /* ignore non-browser test contexts */ }
     if (source === 'api' || source === 'cache') {
       persistCachedImageGenModels(imageGenModelCatalog);
     }
@@ -951,6 +960,9 @@
     const cached = loadCachedImageGenModels();
     if (cached?.length) {
       return applyImageGenModelCatalog(cached, { renderUi: false, source: 'cache' });
+    }
+    if (String(window.API_BASE_URL || '').trim() && window.API_BASE_URL !== 'disabled') {
+      return false;
     }
     return applyImageGenModelCatalog(IMAGE_GEN_MODEL_FALLBACK, { renderUi: false, source: 'fallback' });
   }

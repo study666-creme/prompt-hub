@@ -35,7 +35,15 @@
   };
 
   function normalizeImageGenModelId(modelId) {
-    const id = String(modelId || '').trim().toLowerCase() || 'image2';
+    const raw = String(modelId || '').trim();
+    const catalog = window.__IMAGE_GEN_MODELS__;
+    if (Array.isArray(catalog) && raw) {
+      const exact = catalog.find((model) => model && String(model.id || '') === raw);
+      if (exact?.id) return String(exact.id);
+      const insensitive = catalog.find((model) => model && String(model.id || '').toLowerCase() === raw.toLowerCase());
+      if (insensitive?.id) return String(insensitive.id);
+    }
+    const id = raw.toLowerCase() || 'image2';
     if (id === 'image2' || id.startsWith('image2-')) return id;
     if (id === 'lingtu' || id.startsWith('lingtu-')) return id;
     if (id.startsWith('mj-')) return id;

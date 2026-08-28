@@ -1,13 +1,14 @@
 # 代码导航图
 
-最后核对：2026-08-03。
+最后核对：2026-08-28。
 
 ## 入口与构建
 
 | 文件/目录 | 作用 |
 |---|---|
-| `index.html` | 主站 head、body partial loader、脚本顺序和 build |
+| `index.html` | 主站 head、body partial loader、脚本顺序、build 与本地缓存恢复 |
 | `partials/index-body/` | 主页面 body 拆分片段 |
+| `warehouse-composer.js` | 卡片库首页主输入框：直接创建卡片 / 生图模式、自绘模型比例清晰度菜单、参考图上传拖拽粘贴、文件分类/标签分类/搜索/排序挂载、卡片库社区记录内联聚焦与画布页桥接 |
 | `script.js`, `features-draft.js`, `supabase-sync.js` | 本地 loader；生产 staging 合并对应 `legacy/` |
 | `legacy/` | 主应用、功能、同步、后台和资产工作台源码片段 |
 | `styles.css`, `styles-features.css` | CSS loader/入口 |
@@ -24,7 +25,7 @@
 |---|---|
 | 路由/首屏页面 | `app-router.js`, `index.html` |
 | 卡片 CRUD/筛选/分页 | `legacy/script/`, `card-gallery.js` |
-| 卡片仓库 UI | `styles-warehouse.css`, `styles/base/part-08.css`, `styles/base/part-09.css`, `partials/index-body/part-02.html`, `legacy/script/part-02.js`, `part-03.js`, `part-04.js`, `part-09.js`, `part-10.js` |
+| 卡片仓库 UI | `styles-warehouse.css`, `styles/base/part-08.css`, `styles/base/part-09.css`, `partials/index-body/part-02.html`, `warehouse-composer.js`, `legacy/script/part-02.js`, `part-03.js`, `part-04.js`, `part-09.js`, `part-10.js` |
 | 编辑面板多图/移动端遮挡 | `edit-panel-gallery.js`, `card-gallery.js`, `mobile.js`, `styles-mobile.css` |
 | 云同步/账号切换 | `supabase-sync.js`, `legacy/supabase-sync/`, `cloud-sync-safety.js`, `sync-orchestrator.js` |
 | 卡片图片/文字卡判定 | `card-gallery.js`, `card-image-loader.js`, `card-image-loader-queues.js`, `feed-images.js`, `warehouse-thumb.js` |

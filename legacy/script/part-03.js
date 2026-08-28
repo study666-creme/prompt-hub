@@ -773,6 +773,7 @@
       devlab: 'pageDevLab',
       community: 'pageCommunity',
       creations: 'pageCreations',
+      canvas: 'pageCanvas',
       imagegen: 'pageImageGen'
     };
 
