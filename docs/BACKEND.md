@@ -1,6 +1,6 @@
 # Worker 后端架构
 
-最后核对：2026-08-28。生产 Worker 已部署并核对 `buildSha=464e06883fc8e304280d49826c58436eab05c2dc`；Pages 已发布 `20260828a`。运行版本仍以 `/health.buildSha` 和 Pages 线上冒烟为准。
+最后核对：2026-08-28。生产 Worker 已部署并核对 `buildSha=685008cc02694183a5fc767fa236f12f77faedf7`；Pages 已发布 `20260828a`。运行版本仍以 `/health` 和 Pages 线上冒烟为准。
 
 Canvas 媒体交付候选（2026-08-08）已提交到 `codex/unified-media-delivery-20260808` 并通过本地回归，但尚未部署；它包含媒体归档迁移，需单独完成数据库备份、迁移授权和生产验收。
 

@@ -4,7 +4,7 @@
 
 ## 当前发布状态
 
-本轮已完成生产发布：Worker `buildSha=464e06883fc8e304280d49826c58436eab05c2dc`，Pages build `20260828a`。Prompt-first 卡片库首页、旧缓存黑屏自愈、公开图片模型目录投影和“全能模型2 · 稳定”标签均已通过线上验收。
+本轮已完成生产发布：Worker `buildSha=685008cc02694183a5fc767fa236f12f77faedf7`，Pages build `20260828a`。Canvas `image.v1.media_inputs` 参考图归一化、公开图片模型目录和现有页面能力均已通过线上验收。
 
 ## 发布顺序
 

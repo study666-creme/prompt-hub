@@ -1,6 +1,6 @@
 # 无限画布集成
 
-最后核对：2026-07-30。生成与奖励条目描述 `20260730a` Prompt Hub 侧受控发布契约；生产是否已切换以 `/health.buildSha` 为准。
+最后核对：2026-08-28。图片参考协议已发布，Worker `buildSha=685008cc02694183a5fc767fa236f12f77faedf7`；生产运行版本仍以 `/health` 和实时目录为准。
 
 - Canvas 仓库: <https://github.com/study666-creme/infinite-canvas-jay>
 - 正式地址: <https://canvas.prompt-hubs.com>
@@ -59,7 +59,7 @@ Content-Type: application/json
 ```json
 {
   "version": "image.v1",
-  "model": "nano-banana-2",
+  "model": "lingtu-2",
   "operation": "image_to_image",
   "prompt": "保持主体和构图，生成新的场景",
   "resolution": "2k",

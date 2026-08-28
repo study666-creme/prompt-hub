@@ -1,6 +1,6 @@
 # AI 接手说明
 
-最后核对：2026-08-28。生产 Worker 已核对为 `464e06883fc8e304280d49826c58436eab05c2dc`，Pages build 为 `20260828a`；Worker `/health.buildSha`、Pages production build 和线上冒烟均已取证。
+最后核对：2026-08-28。生产 Worker 已核对为 `685008cc02694183a5fc767fa236f12f77faedf7`，Pages build 为 `20260828a`；Worker `/health`、Pages production build 和线上冒烟均已取证。
 
 Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery-20260808` 的媒体归档和恢复改动已提交并通过本地回归，尚未部署或执行付费验收；生产仍以 `/health.buildSha` 为准。
 
