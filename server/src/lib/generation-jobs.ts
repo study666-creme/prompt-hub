@@ -1106,11 +1106,15 @@ async function completeJobFromPoll(
     mjButtons = filterMjButtonsForClient(mjButtons as MjButtonPublic[]);
   }
 
-  const archiveTargets = isMj ? [primary] : [primary, ...extras];
+  // MJ providers may return either four standalone images (API-station style)
+  // or a composite cover followed by four standalone images (legacy APIMart).
+  // Archive the complete gallery so the indexed image proxy can serve each
+  // artifact independently after upstream URLs expire.
+  const archiveTargets = [...new Set((isMj ? mjGallery : [primary, ...extras]).filter(Boolean))];
   let archivedTargets: string[];
   try {
     archivedTargets = await archiveGenerationResultUrls(admin, userId, job.id, archiveTargets, env);
-    if (!archivedTargets[0] || !isStorageRef(archivedTargets[0])) {
+    if (archivedTargets.length !== archiveTargets.length || archivedTargets.some((target) => !isStorageRef(target))) {
       throw new Error('upstream_image_archive_failed');
     }
   } catch (error) {
@@ -1137,7 +1141,15 @@ async function completeJobFromPoll(
   }
 
   const storedUrl = archivedTargets[0];
-  const storedExtras = isMj ? extras : archivedTargets.slice(1);
+  const storedExtras = archivedTargets.slice(1);
+  const storedMjParsed = isMj
+    ? parseMjImagineUrls(archivedTargets)
+    : null;
+  const storedMjGallery = isMj && storedMjParsed
+    ? (storedMjParsed.gallery.length
+      ? storedMjParsed.gallery
+      : buildMjGalleryUrls(storedMjParsed.composite, storedMjParsed.tiles, storedMjParsed.primary))
+    : [];
   await admin
     .from('generation_requests')
     .update({
@@ -1149,17 +1161,17 @@ async function completeJobFromPoll(
         ...meta,
         syncImageUrl: storedUrl,
         mookoSubmitImageUrls: undefined,
-        extraImageUrls: isMj ? undefined : storedExtras.length ? storedExtras : meta.extraImageUrls || undefined,
+        extraImageUrls: !isMj && storedExtras.length ? storedExtras : meta.extraImageUrls || undefined,
         recoveredFromUpstream: meta.recoveredFromUpstream || undefined,
         archived: true,
         archivePending: false,
         archiveError: null,
-        ...(isMj && mjParsed
+        ...(isMj && storedMjParsed
           ? {
-              mjGridUrls: mjParsed.tiles.length ? mjParsed.tiles : undefined,
-              mjCompositeUrl: mjParsed.composite || undefined,
-              mjGalleryUrls: mjGallery.length ? mjGallery : undefined,
-              mjAllUrls: allUrls.length ? allUrls : undefined
+              mjGridUrls: storedMjParsed.tiles.length ? storedMjParsed.tiles : undefined,
+              mjCompositeUrl: storedMjParsed.composite || undefined,
+              mjGalleryUrls: storedMjGallery.length ? storedMjGallery : undefined,
+              mjAllUrls: archivedTargets.length ? archivedTargets : undefined
             }
           : {}),
         ...(mjButtons?.length ? { mjButtons } : {})
@@ -1171,7 +1183,7 @@ async function completeJobFromPoll(
     imageUrl: storedUrl,
     errorMessage: null,
     refunded: false,
-    extraImageUrls: isMj ? undefined : storedExtras.length ? storedExtras : undefined
+    extraImageUrls: !isMj && storedExtras.length ? storedExtras : undefined
   };
 }
 

@@ -193,6 +193,10 @@ function isLikelyMjCompositeUrl(url: string): boolean {
   return /grid|composite|四宫|_0_0|\/0_0[./]|\/split\//i.test(u);
 }
 
+function isMjImageRef(value: string): boolean {
+  return /^https?:\/\//i.test(value) || /^storage:\/\/card-images\//i.test(value);
+}
+
 export function parseMjImagineUrls(
   raw: string[],
   primaryHint?: string | null
@@ -202,8 +206,8 @@ export function parseMjImagineUrls(
   primary: string | null;
   gallery: string[];
 } {
-  const hint = primaryHint && /^https?:\/\//i.test(primaryHint.trim()) ? primaryHint.trim() : null;
-  let urls = [...new Set(raw.filter((u) => typeof u === 'string' && /^https?:\/\//i.test(u.trim())).map((u) => u.trim()))];
+  const hint = primaryHint && isMjImageRef(primaryHint.trim()) ? primaryHint.trim() : null;
+  let urls = [...new Set(raw.filter((u) => typeof u === 'string' && isMjImageRef(u.trim())).map((u) => u.trim()))];
   if (hint && !urls.includes(hint)) urls = [hint, ...urls];
   if (!urls.length) {
     return { composite: null, tiles: [], primary: null, gallery: [] };
@@ -222,15 +226,8 @@ export function parseMjImagineUrls(
       const gallery = buildMjGalleryUrls(composite, tiles, composite);
       return { composite, tiles, primary: composite || tiles[0], gallery };
     }
-    if (hint && !urls.includes(hint)) {
-      const gallery = buildMjGalleryUrls(hint, urls, hint);
-      return { composite: hint, tiles: urls.slice(0, 4), primary: hint, gallery };
-    }
-    if (hint && urls.includes(hint)) {
-      const tiles = urls.filter((u) => u !== hint).slice(0, 4);
-      const gallery = buildMjGalleryUrls(hint, tiles, hint);
-      return { composite: hint, tiles, primary: hint, gallery };
-    }
+    // A primary hint that is one of four results is only a preferred tile; it
+    // is not evidence of a composite cover. This is the API-station shape.
     const gallery = buildMjGalleryUrls(null, urls, urls[0]);
     return { composite: null, tiles: urls, primary: urls[0], gallery };
   }

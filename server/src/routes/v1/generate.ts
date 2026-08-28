@@ -110,6 +110,29 @@ async function resolveJobImageUrlForClient(
   return raw;
 }
 
+function stringImageRefs(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && !!item.trim())
+    : [];
+}
+
+export function generationJobImageRefAtIndex(
+  resultImageUrl: unknown,
+  meta: Record<string, unknown>,
+  requestedIndex: number
+): string | null {
+  const primary = typeof resultImageUrl === 'string' && resultImageUrl.trim() ? resultImageUrl : null;
+  if (meta.isMidjourney !== true) return primary;
+  const publishedGallery = stringImageRefs(meta.mjGalleryUrls);
+  const gallery = publishedGallery.length
+    ? publishedGallery
+    : [
+        ...(primary ? [primary] : []),
+        ...stringImageRefs(meta.mjGridUrls)
+      ].filter((url, index, list) => list.indexOf(url) === index);
+  return gallery[requestedIndex] || null;
+}
+
 const refImageInputSchema = z
   .string()
   .min(1)
@@ -2109,7 +2132,11 @@ generateRoutes.get('/jobs/:jobId/image', async c => {
 
   assertJobOwner(job, user.id);
 
-  let imageRef = job.result_image_url as string | null;
+  const queryIndex = Number(c.req.query('index'));
+  const requestedIndex = Number.isInteger(queryIndex) && queryIndex >= 0 ? queryIndex : 0;
+  const jobMeta = (job.meta as Record<string, unknown>) || {};
+  const isMj = jobMeta.isMidjourney === true;
+  let imageRef = generationJobImageRefAtIndex(job.result_image_url, jobMeta, requestedIndex);
   const status = String(job.status || '');
 
   if (!imageRef && status === 'processing') {
@@ -2124,10 +2151,12 @@ generateRoutes.get('/jobs/:jobId/image', async c => {
     if (polled.imageUrl) {
       const { data: fresh } = await admin
         .from('generation_requests')
-        .select('result_image_url, status')
+        .select('result_image_url, status, meta')
         .eq('id', jobId)
         .maybeSingle();
-      imageRef = (fresh?.result_image_url as string | null) || polled.imageUrl;
+      const freshMeta = fresh?.meta && typeof fresh.meta === 'object' ? fresh.meta as Record<string, unknown> : {};
+      imageRef = generationJobImageRefAtIndex(fresh?.result_image_url, freshMeta, requestedIndex)
+        || (!isMj && polled.imageUrl ? polled.imageUrl : null);
     }
   }
 

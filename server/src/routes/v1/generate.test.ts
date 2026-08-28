@@ -1,9 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import {
+  generationJobImageRefAtIndex,
   parseGenerationRequestBody,
   publicGenerationErrorDetail,
   publicGenerationFailureCode
 } from './generate';
+
+describe('generation image gallery indexing', () => {
+  const four = [0, 1, 2, 3].map((index) => 'storage://card-images/user/generated/four-' + index + '.png');
+  const five = [0, 1, 2, 3, 4].map((index) => 'storage://card-images/user/generated/five-' + index + '.png');
+
+  it('selects every API-station MJ image by its requested index', () => {
+    const meta = { isMidjourney: true, mjGalleryUrls: four };
+    expect(four.map((_, index) => generationJobImageRefAtIndex(four[0], meta, index))).toEqual(four);
+  });
+
+  it('preserves the cover-first legacy five-image ordering', () => {
+    const meta = { isMidjourney: true, mjGalleryUrls: five, mjGridUrls: five.slice(1) };
+    expect(five.map((_, index) => generationJobImageRefAtIndex(five[0], meta, index))).toEqual(five);
+  });
+
+  it('does not duplicate the primary image when a requested MJ index is missing', () => {
+    expect(generationJobImageRefAtIndex(four[0], { isMidjourney: true, mjGalleryUrls: four }, 4)).toBeNull();
+  });
+});
 
 describe('image generation request aliases', () => {
   it('normalizes the Canvas Midjourney payload before generic quality validation', () => {

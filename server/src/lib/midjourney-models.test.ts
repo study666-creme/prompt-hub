@@ -60,4 +60,28 @@ describe('Midjourney generation helpers', () => {
     expect(parsed.tiles).toEqual(urls.slice(1));
     expect(parsed.gallery).toEqual(urls);
   });
+
+  it('keeps four standalone images as tiles when the primary hint is the first image', () => {
+    const urls = [
+      'https://image.test/result-a.png',
+      'https://image.test/result-b.png',
+      'https://image.test/result-c.png',
+      'https://image.test/result-d.png'
+    ];
+    const parsed = parseMjImagineUrls(urls, urls[0]);
+
+    expect(parsed.composite).toBeNull();
+    expect(parsed.tiles).toEqual(urls);
+    expect(parsed.gallery).toEqual(urls);
+  });
+
+  it('parses archived storage references without losing four-image gallery metadata', () => {
+    const refs = [0, 1, 2, 3].map((index) => 'storage://card-images/user/generated/job-extra-' + index + '.png');
+    const parsed = parseMjImagineUrls(refs);
+
+    expect(parsed.composite).toBeNull();
+    expect(parsed.primary).toBe(refs[0]);
+    expect(parsed.tiles).toEqual(refs);
+    expect(parsed.gallery).toEqual(refs);
+  });
 });
