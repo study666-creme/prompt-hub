@@ -1,21 +1,8 @@
-import { initRippleGrid } from './ripple-grid.js';
-
 const bg = document.getElementById('rippleGridBg');
-const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-if (bg && !reduceMotion) {
-  initRippleGrid(bg, {
-    enableRainbow: false,
-    gridColor: '#ffffff',
-    rippleIntensity: 0.16,
-    gridSize: 11,
-    gridThickness: 13,
-    fadeDistance: 1.4,
-    vignetteStrength: 1.8,
-    glowIntensity: 0.42,
-    opacity: 0.42,
-    gridRotation: 8,
-    mouseInteraction: true,
-    mouseInteractionRadius: 1.35
-  });
+// WebGL 涟漪网格在部分 GPU/驱动下渲染失败（黑屏/黑杠/不动），已弃用。
+// 背景层次改由 main-content 的纯 CSS 多层光斑承担（见 styles-warehouse.css），
+// 这里保留容器但不再初始化 WebGL canvas，避免产生黑屏/黑条。
+if (bg) {
+  bg.style.display = 'none';
 }

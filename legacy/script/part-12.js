@@ -774,14 +774,9 @@
         } catch (e) { /* ignore */ }
       }
       if (!isMobileViewport()) {
+        // multicol 瀑布流由 CSS 自动布局，打开编辑面板无需全网格 JS 重排（会跳动/跳回顶部）。
         const container = document.getElementById('cardsContainer');
         primeDesktopCardGrid(container);
-        scheduleWarehouseMasonryLayout(true);
-        requestAnimationFrame(() => {
-          layoutMasonryGrid();
-          requestAnimationFrame(layoutMasonryGrid);
-        });
-        setTimeout(() => layoutMasonryGrid(), 140);
       }
     }
     window.addEventListener('popstate', () => {

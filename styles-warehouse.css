@@ -2059,7 +2059,7 @@ body.mobile-groups-open .app-page-warehouse #sidebarArea {
   padding: 0 2px;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   border: 0;
   background: transparent;
   color: var(--text-primary);
@@ -2905,22 +2905,24 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card-media,
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card-media.media-revealed,
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card-media:not(.is-loading):not(.card-media--await) {
+    /* 统一固定 3/4 占位宽高比：加载前后高度不变，彻底消除 multicol 重排抖动/乱跳/疯狂刷新 */
+    aspect-ratio: 3 / 4 !important;
     height: auto !important;
     max-height: none !important;
-    aspect-ratio: auto !important;
   }
-  /* 加载中的图片卡：预留 3/4 占位高，图片加载后高度不变 → 不触发整列重排/跳变 */
+  /* 加载中的图片卡同样 3/4 占位 */
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card-media.is-loading,
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card-media.card-media--await {
     aspect-ratio: 3 / 4 !important;
     max-height: none !important;
     min-height: 200px;
   }
-  body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card-media:not(.is-loading):not(.card-media--await) .card-img {
-    position: static !important;
+  body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card-media .card-img {
+    position: absolute !important;
+    inset: 0 !important;
     width: 100% !important;
-    height: auto !important;
-    max-height: none !important;
+    height: 100% !important;
+    max-height: 100% !important;
     object-fit: cover !important;
   }
   /* 文字卡不再为底部悬浮按钮预留 48px 底部空白，按钮改为顶部悬浮 */
@@ -3151,4 +3153,16 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
 }
 @media (prefers-reduced-motion: reduce) {
   .app-page-warehouse #cardsContainer.warehouse-grid-crossfade { animation: none !important; }
+}
+
+/* 模型/比例/清晰度触发器：文字与下拉箭头留间距，文字省略号不压箭头 */
+.warehouse-composer-picker-trigger > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.warehouse-composer-picker-trigger > svg {
+  flex: 0 0 auto;
+  margin-left: 4px;
 }
