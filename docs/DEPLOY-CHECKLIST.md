@@ -4,7 +4,7 @@
 
 ## 当前发布状态
 
-生产当前仍运行既有 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；本轮候选同时包含 Prompt-first 卡片库首页、旧缓存黑屏自愈、公开图片模型目录投影和“全能模型2 · 稳定”标签。候选 Pages build 为 `20260828a`，Worker 与 Pages 必须从最终干净提交（以 `git rev-parse HEAD` 为准）按同一 SHA 发布；部署后以 `/health.buildSha` 和 Pages 线上冒烟更新生产证据。
+本轮已完成生产发布：Worker `buildSha=464e06883fc8e304280d49826c58436eab05c2dc`，Pages build `20260828a`。Prompt-first 卡片库首页、旧缓存黑屏自愈、公开图片模型目录投影和“全能模型2 · 稳定”标签均已通过线上验收。
 
 ## 发布顺序
 
@@ -92,7 +92,7 @@ cd D:\prompt-hub\server
 npm run deploy
 ```
 
-Worker 受控脚本拒绝脏工作区或残留冻结标记，并自动注入当前 40 位 Git SHA。随后运行 `npm run deploy`；Worker 成功后从同一 SHA 运行 `deploy-pages.ps1`，发布 `20260828a` 静态资源。
+Worker 受控脚本拒绝脏工作区或残留冻结标记，并自动注入当前 40 位 Git SHA。本轮已从同一干净 SHA 完成 `npm run deploy` 和 `deploy-pages.ps1`，并核对 `/health.buildSha` 与 Pages 线上 bundle。
 
 ### 8. 生产验收
 

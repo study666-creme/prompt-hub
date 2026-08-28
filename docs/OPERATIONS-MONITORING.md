@@ -1,6 +1,6 @@
 # 运营监控
 
-最后核对：2026-08-28。生产 Worker 当前仍为 `buildSha=ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；本轮候选发布后，必须以 `/health.buildSha` 重新核对，不能只看本地提交。
+最后核对：2026-08-28。生产 Worker 已核对为 `buildSha=464e06883fc8e304280d49826c58436eab05c2dc`；后续运行版本继续以 `/health.buildSha` 重新核对，不能只看本地提交。
 
 ## 入口
 
