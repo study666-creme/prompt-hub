@@ -525,7 +525,9 @@
           title: snap.title,
           prompt: snap.prompt,
           image: snap.imageRemovalPending ? null : finalImage,
-          group: (currentGroup !== 'all' && currentGroup !== 'uncategorized') ? currentGroup : null,
+          group: snap.group !== undefined
+            ? (snap.group || null)
+            : ((currentGroup !== 'all' && currentGroup !== 'uncategorized') ? currentGroup : null),
           tags: [...snap.tags],
           customFields: snap.customFields,
           warehouseId: getActiveWarehouseId(),
@@ -592,6 +594,7 @@
       const snap = {
         prompt,
         title: String(payload.title || '').trim(),
+        group: String(payload.group || '').trim() || null,
         tags: Array.isArray(payload.tags) ? payload.tags.filter(Boolean).slice(0, 40) : [],
         customFields: payload.customFields && typeof payload.customFields === 'object' ? { ...payload.customFields } : {},
         isNewCard: true,

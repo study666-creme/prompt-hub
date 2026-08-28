@@ -18,7 +18,7 @@ describe('image model catalog', () => {
     expect(IMAGE_MODEL_CATALOG.length).toBe(
       NEWAPI_IMAGE_MODEL_CATALOG.length + APIMART_IMAGE_MODEL_CATALOG.length
     );
-    expect(IMAGE_MODEL_CATALOG).toHaveLength(18);
+    expect(IMAGE_MODEL_CATALOG).toHaveLength(20);
   });
 
   it('newapi exposes price-backed image models first', () => {
@@ -38,6 +38,8 @@ describe('image model catalog', () => {
       'lingtu-2',
       'lingtu-pro',
       'lingtu',
+      'seedream-5.0',
+      'sensenova-1.5-一秒出图',
       'mj-v81',
       'mj-v7',
       'mj-niji7'
@@ -88,15 +90,17 @@ describe('image model catalog', () => {
     expect(providerLabel('newapi')).toBe('');
   });
 
-  it('publishes only New API image2, banana, and current MJ models', () => {
+  it('publishes only New API image2, banana, jimeng, and current MJ models', () => {
     const retained = IMAGE_MODEL_CATALOG.filter(isRetainedPublicImageEntry);
     expect(retained.every((model) => (
       model.provider === 'newapi'
-      && ['gim2', 'banana', 'midjourney'].includes(model.uiFamily)
+      && ['gim2', 'banana', 'midjourney', 'jimeng'].includes(model.uiFamily)
     ))).toBe(true);
-    expect(retained).toHaveLength(12);
+    expect(retained).toHaveLength(14);
     expect(retained.some((model) => model.id === 'image2-economy')).toBe(true);
     expect(retained.some((model) => model.id === 'image2-free')).toBe(false);
+    expect(retained.some((model) => model.id === 'seedream-5.0')).toBe(true);
+    expect(retained.some((model) => model.id === 'sensenova-1.5-一秒出图')).toBe(true);
     expect(retained.filter((model) => model.uiFamily === 'midjourney')).toEqual([
       expect.objectContaining({ id: 'mj-v81', provider: 'newapi', upstream: 'mj-v81', defaultCredits: 40 }),
       expect.objectContaining({ id: 'mj-v7', provider: 'newapi', defaultCredits: 40 }),

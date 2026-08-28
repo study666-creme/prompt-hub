@@ -318,11 +318,8 @@
           window.FeatureDraft?.scheduleFeedMasonryRelayout?.('communityGrid');
         }
         else if (media.closest('#cardsContainer')) {
-          if (cardMediaAffectsViewport(media) && !shouldSkipWarehouseImageLayout(img, 1100)) {
-            const cid = cardEl?.dataset?.id;
-            if (cardEl?.dataset?.communityCollect === '1') scheduleWarehouseMasonryForCard(cid);
-            else scheduleWarehouseMasonryLayout();
-          }
+          // 仓库媒体框已用占位高（非聚焦 3/4、聚焦加载态 3/4），图片加载不改变卡片高度，
+          // 任何重排都只会空转掉帧；CSS multi-column/Grid 会自动处理布局，无需 JS 介入。
         }
         else scheduleMasonryForMedia(media);
       } else if (media.closest('#imageGenFeed')) window.FeatureDraft?.resetMobileFeedGridStyles?.();

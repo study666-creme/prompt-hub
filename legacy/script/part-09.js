@@ -635,6 +635,12 @@
         allFilteredCards = [];
         warehouseRenderedPages.clear();
         warehouseRenderedPages.add(1);
+        // 聚焦整页滚动时翻页位置记在 main-content 上，重置列表时一并归位，
+        // 避免换分组/搜索后停留在旧滚动深度。
+        if (document.body?.classList?.contains('warehouse-content-focus')) {
+          const main = document.getElementById('mainContentArea');
+          if (main) main.scrollTop = 0;
+        }
       } else if (!warehouseRenderedPages.has(page)) {
         warehouseRenderedPages.add(page);
       }
@@ -756,7 +762,8 @@
         div.className = `card ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
         if (!mobileGrid && isAppend && viewMode !== 'list') {
           div.classList.add('card-enter-soft');
-          const enterDelay = Math.min((idx % 12) * 0.025, 0.24);
+          // 下滑加载的 stagger 入场：按列内顺序依次浮现，节奏感更强
+          const enterDelay = Math.min((idx % 12) * 0.045, 0.42);
           div.style.animationDelay = `${enterDelay.toFixed(3)}s`;
           const clearSoftEnter = (event) => {
             if (event.target !== div) return;
@@ -1010,9 +1017,17 @@
       const rect = el.getBoundingClientRect?.();
       if (!rect || rect.height < 120 || rect.width < 120) return false;
       const st = getComputedStyle(el);
-      return /(auto|scroll|overlay)/.test(st.overflowY || '') || el.scrollHeight > el.clientHeight + 2;
+      // overflow:visible 容器（如聚焦态下的 #cardsContainer）scrollHeight 恒大于
+      // clientHeight，但不是滚动容器；仅 overflow 可滚才能作为滚动根。
+      return /(auto|scroll|overlay)/.test(st.overflowY || '');
     }
     const warehouseScrollRoot = () => {
+      // 聚焦卡片库（含 inline community/creations）时 #cardsContainer 不再独立滚动，
+      // 页面滚动由 .main-content 承担；哨兵必须挂到真正会滚动的容器上。
+      if (document.body?.classList?.contains('warehouse-content-focus')) {
+        const main = document.getElementById('mainContentArea');
+        if (isUsableWarehouseScrollRoot(main)) return main;
+      }
       if (!isMobileViewport()) return document.getElementById('cardsContainer');
       // Mobile warehouse scrolling is intentionally owned by .app-main. During
       // the first paint its geometry can still be zero, so probing dimensions

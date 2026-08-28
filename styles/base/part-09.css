@@ -1,12 +1,11 @@
 @media (min-width: 901px) {
-  /* 桌面卡片库使用稳定 Grid：图片解码不会触发全列表重排。 */
+  /* 桌面卡片库：CSS multi-column 原生瀑布流，浏览器自动把新卡填入最矮列，
+   * 不打乱 DOM、不需要 JS 重排，文本卡/图片卡都按内容自然增高、无行高撑空。 */
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) {
-    display: grid !important;
-    grid-template-columns: repeat(var(--warehouse-grid-columns, var(--card-columns, 3)), minmax(0, 1fr));
-    grid-auto-flow: row;
-    gap: var(--warehouse-grid-gap, var(--card-gap, 16px));
-    align-content: start;
-    align-items: start;
+    display: block !important;
+    column-count: var(--warehouse-grid-columns, var(--card-columns, 3));
+    column-gap: var(--warehouse-grid-gap, var(--card-gap, 12px));
+    column-fill: balance;
     position: relative !important;
     width: 100% !important;
     max-width: 100%;
@@ -18,34 +17,37 @@
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card {
     display: flex;
     box-sizing: border-box;
-    width: auto !important;
-    margin: 0 !important;
+    width: 100% !important;
+    margin: 0 0 var(--warehouse-grid-gap, var(--card-gap, 12px)) !important;
     position: relative !important;
     left: auto !important;
     top: auto !important;
+    break-inside: avoid;
+    -webkit-column-break-inside: avoid;
   }
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter {
     animation: none !important;
   }
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft {
-    animation: warehouseCardSoftFade 0.46s var(--ease-out) both !important;
+    animation: warehouseCardSoftFade 0.5s var(--ease-out) both !important;
     will-change: opacity;
   }
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-media,
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-body,
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-copy-btn,
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-canvas-btn {
-    animation: warehouseCardSoftLift 0.42s var(--ease-out) both;
+    animation: warehouseCardSoftLift 0.5s var(--ease-out) both;
     animation-delay: inherit;
-    will-change: opacity, transform, filter;
+    will-change: opacity, transform;
   }
   @keyframes warehouseCardSoftFade {
     from { opacity: 0; }
     to { opacity: 1; }
   }
+  /* 下滑加载入场：仅用 transform/opacity（不用 blur，避免合成层开销卡顿） */
   @keyframes warehouseCardSoftLift {
-    from { opacity: 0.72; transform: translateY(6px); filter: blur(2px); }
-    to { opacity: 1; transform: none; filter: none; }
+    from { opacity: 0; transform: translateY(18px); }
+    to { opacity: 1; transform: none; }
   }
   @media (prefers-reduced-motion: reduce) {
     #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft,
@@ -65,12 +67,13 @@
   #cardsContainer:not(.list-view) .card-media {
     width: 100%;
     min-height: 0;
-    aspect-ratio: 4 / 3;
+    /* 竖向媒体框更贴近生成图常见比例，减少横向裁切，瀑布感更强 */
+    aspect-ratio: 3 / 4;
     overflow: hidden;
     position: relative;
   }
   #cardsContainer:not(.list-view) .card-media.card-media--await {
-    aspect-ratio: 4 / 3;
+    aspect-ratio: 3 / 4;
     max-height: 200px;
     min-height: 72px;
     background: var(--bg-hover);
@@ -111,6 +114,15 @@
     max-width: 100%;
     object-fit: cover;
     object-position: center center;
+    /* 图片加载完成平滑淡入（transform/opacity，不触发 layout） */
+    animation: warehouseImgFadeIn 0.42s var(--ease-out) both;
+  }
+  @keyframes warehouseImgFadeIn {
+    from { opacity: 0; transform: scale(1.03); }
+    to { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #cardsContainer:not(.list-view) .card-img { animation: none !important; }
   }
   #cardsContainer.cards-container:not(.list-view) {
     opacity: 1;

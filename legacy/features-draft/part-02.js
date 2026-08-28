@@ -893,10 +893,26 @@
   function getRecentCreationsForFeed() {
     pruneCreations();
     const now = Date.now();
-    return creations
+    // 临时最近生成（未入库，保留 7 天）
+    const temp = creations
       .filter((c) => c?.id && (!c.expiresAt || c.expiresAt > now))
-      .filter((c) => creationHasFeedImage(c))
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      .filter((c) => creationHasFeedImage(c));
+    // 仓库：卡片库「图片生成」分组的卡片（已入库，永久保存）
+    const genGroup = window.GEN_AUTO_GROUP || '图片生成';
+    const genTag = window.GEN_AUTO_TAG || '图片生成';
+    const warehouseCards = (window.__promptHubCards || [])
+      .filter((c) => c?.id && (c.group === genGroup || (Array.isArray(c.tags) && c.tags.includes(genTag))))
+      .map((c) => ({ ...c, __fromWarehouse: true }));
+    // 合并去重（临时记录若已入库，以仓库卡片为准），按创建时间倒序（最近生成在前）
+    const seen = new Set();
+    const merged = [];
+    for (const c of [...warehouseCards, ...temp]) {
+      const key = c.genJobId || c.jobId || c.id;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(c);
+    }
+    return merged.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }
 
   let recentServerSyncInflight = null;

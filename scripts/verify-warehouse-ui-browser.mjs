@@ -46,7 +46,8 @@ const cdnAssets = new Map(images.map((_, index) => {
 }));
 const imageCdnUrls = [...cdnAssets.keys()].map((token) => `${base}/api/v1/media/c/${token}`);
 const groups = ['电影分镜', '角色设定', '产品视觉', '灵感收集'];
-const cards = Array.from({ length: 12 }, (_, index) => {
+const seedCardCount = Math.max(12, Number(process.env.SEED_CARD_COUNT) || 12);
+const cards = Array.from({ length: seedCardCount }, (_, index) => {
   const image = index % 3 === 2 ? '' : imageCdnUrls[index % imageCdnUrls.length];
   return {
     id: `warehouse-ui-${index}`,
@@ -181,15 +182,21 @@ async function openWarehouse(browser, viewport, empty = false) {
   await page.goto(`${base}/__seed.html${empty ? '?empty=1' : ''}`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction((expectEmpty) => {
     if (!document.getElementById('pageWarehouse')?.classList.contains('active')) return false;
+    const rendered = document.querySelectorAll('#cardsContainer .card[data-id]').length;
     return expectEmpty
       ? !!document.querySelector('.warehouse-grid-empty')
-      : document.querySelectorAll('#cardsContainer .card[data-id]').length >= 12;
+      : rendered >= 12;
   }, empty, { timeout: 20000 });
   await page.waitForTimeout(900);
   if (!empty) {
-    await page.waitForFunction(() => (
-      document.querySelectorAll('#cardsContainer .card-media img').length === 8
-    ), null, { timeout: 5000 });
+    // 等渲染稳定：卡片数连续两帧不变，且图片卡媒体槽位已建立。
+    // 阈值按已渲染卡片中"每 3 张约 2 张图片卡"推算，避免首屏分页/懒加载差异导致死等。
+    await page.waitForFunction(() => {
+      const cards = document.querySelectorAll('#cardsContainer .card[data-id]').length;
+      const media = document.querySelectorAll('#cardsContainer .card-media img').length;
+      const expectedMedia = cards - Math.floor((cards + 1) / 3);
+      return cards >= 12 && media >= Math.max(6, expectedMedia - 2);
+    }, null, { timeout: 15000 });
   }
   return { context, page };
 }
@@ -322,7 +329,7 @@ function assertMobileToolbar(label, state) {
   if (state.overlaps.length || state.outside.length || state.toolbarOverflow > 1) {
     throw new Error(`${label} mobile toolbar overlap/overflow: ${JSON.stringify(state)}`);
   }
-  if (state.filterAriaLabel !== '标签分类' || state.filterTitle !== '标签分类'
+  if (state.filterAriaLabel !== '标签' || state.filterTitle !== '标签'
     || state.searchPlaceholder !== '搜索卡片' || !state.sortLabel) {
     throw new Error(`${label} library toolbar semantics mismatch: ${JSON.stringify(state)}`);
   }
@@ -345,15 +352,105 @@ async function inspectPromptFirstInteractions(page) {
     active: document.body.classList.contains('warehouse-content-focus'),
     composerHeight: Math.round(document.getElementById('warehouseComposer')?.getBoundingClientRect().height || 0)
   }));
-  await page.waitForTimeout(800);
-  await main.hover();
-  await page.mouse.wheel(0, -40);
+
+  // 深度验证聚焦卡片库：整页可滚动、网格不再自持滚动、可继续翻页、行内无大缝、哨兵挂到主流。
+  const readFocusState = () => page.evaluate(() => {
+    const main = document.getElementById('mainContentArea');
+    const grid = document.getElementById('cardsContainer');
+    const composer = document.getElementById('warehouseComposer');
+    const gridStyle = grid ? getComputedStyle(grid) : null;
+    const mainStyle = main ? getComputedStyle(main) : null;
+    const cards = [...(grid?.querySelectorAll('.card[data-id]') || [])];
+    const rows = new Map();
+    cards.forEach((card) => {
+      const top = Math.round(card.getBoundingClientRect().top);
+      if (!rows.has(top)) rows.set(top, []);
+      rows.get(top).push(card);
+    });
+    let worstRowSlack = 0;
+    rows.forEach((list) => {
+      const heights = list.map((card) => Math.round(card.getBoundingClientRect().height));
+      const max = Math.max(...heights);
+      heights.forEach((h) => { worstRowSlack = Math.max(worstRowSlack, max - h); });
+    });
+    // 瀑布流（CSS multi-column）：按 x 坐标分列，量每列相邻卡的真实垂直间距（应均匀 = --card-gap）。
+    const byLeft = new Map();
+    cards.forEach((card) => {
+      const left = Math.round(card.getBoundingClientRect().left / 10) * 10;
+      if (!byLeft.has(left)) byLeft.set(left, []);
+      byLeft.get(left).push(card);
+    });
+    const colCardGaps = [];
+    byLeft.forEach((list) => {
+      list.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+      for (let i = 1; i < list.length; i += 1) {
+        colCardGaps.push(Math.round(list[i].getBoundingClientRect().top - list[i - 1].getBoundingClientRect().bottom));
+      }
+    });
+    return {
+      focusLib: document.body.classList.contains('warehouse-content-focus--library'),
+      mainScrollTop: main ? Math.round(main.scrollTop) : 0,
+      mainOverflow: mainStyle?.overflowY || '',
+      mainScrollable: !!(main && /(auto|scroll)/.test(mainStyle.overflowY || '') && main.scrollHeight > main.clientHeight),
+      gridOverflow: gridStyle?.overflowY || '',
+      gridRowGap: gridStyle?.rowGap || '',
+      gridDisplay: gridStyle?.display || '',
+      gridColumnCount: gridStyle?.columnCount || '',
+      focusColumnCount: byLeft.size,
+      colCardGapMax: colCardGaps.length ? Math.max(...colCardGaps) : 0,
+      colCardGapMin: colCardGaps.length ? Math.min(...colCardGaps) : 0,
+      worstRowSlack,
+      composerHeight: Math.round(composer?.getBoundingClientRect().height || 0),
+      sentinelParent: document.querySelector('.warehouse-scroll-sentinel')?.parentElement?.id || null,
+      cardCount: cards.length
+    };
+  });
+  await page.waitForTimeout(700);
+  // 等首屏图片加载稳定后再测瀑布流行内间隙，避免把加载中的临时高度当成最终布局。
+  await page.waitForFunction(() => {
+    const imgs = [...document.querySelectorAll('#cardsContainer .card-media img.card-img')];
+    if (!imgs.length) return true;
+    return imgs.every((img) => img.complete && img.naturalWidth > 0);
+  }, null, { timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(400);
+  const focusEntry = await readFocusState();
+  const tops = [focusEntry.mainScrollTop];
+  const baseCardCount = focusEntry.cardCount;
+  for (let i = 0; i < 3; i += 1) {
+    await main.hover();
+    await page.mouse.wheel(0, 700);
+    await page.waitForTimeout(380);
+    tops.push((await readFocusState()).mainScrollTop);
+  }
+  const afterScroll = await readFocusState();
+  const pagedDuringFocus = afterScroll.cardCount > baseCardCount;
+  const sentinelInMainWhenFocused = pagedDuringFocus
+    ? afterScroll.sentinelParent === 'mainContentArea'
+    : (afterScroll.sentinelParent === 'mainContentArea' || afterScroll.sentinelParent === null);
+  for (let i = 0; i < 5; i += 1) {
+    await main.hover();
+    await page.mouse.wheel(0, -800);
+    await page.waitForTimeout(340);
+  }
   await page.waitForTimeout(520);
+  const restoredState = await readFocusState();
+  const focusFlow = {
+    focusedMainScrollable: focusEntry.focusLib && focusEntry.mainScrollable,
+    gridNotScrollContainerInFocus: focusEntry.gridOverflow === 'visible',
+    scrollMovedInFocus: Math.max(...tops) > 0,
+    restoreWorked: !restoredState.focusLib && restoredState.composerHeight >= 300,
+    // 瀑布流（multicol）：列内间距应均匀 = --card-gap（≈12px），无行式 Grid 的整行撑空巨缝。
+    gapsTight: focusEntry.colCardGapMax <= 20 && focusEntry.colCardGapMin >= 0,
+    gapIsTight: focusEntry.focusColumnCount >= 2 && focusEntry.colCardGapMax <= 20,
+    pagedDuringFocus,
+    sentinelInMainWhenFocused,
+    detail: { focusEntry, tops, afterScroll, restoredState }
+  };
   const restored = await page.evaluate(() => ({
     active: document.body.classList.contains('warehouse-content-focus'),
     composerHeight: Math.round(document.getElementById('warehouseComposer')?.getBoundingClientRect().height || 0)
   }));
-  return { fileGroups, tagMenu, focused, restored };
+  return { fileGroups, tagMenu, focused, restored, focusFlow };
 }
 
 async function inspectMobileEditPanelAfterTouch(page) {
@@ -440,18 +537,21 @@ try {
   const desktopState = await inspectWarehouse(desktop.page, false);
   assertBetween('desktop composer height', desktopState.composerHeight, 320, 410);
   assertBetween('desktop library toolbar height', desktopState.toolbarHeight, 50, 80);
-  if (desktopState.groupLabel !== '文件分类' || desktopState.tagLabel !== '标签分类'
+  if (desktopState.groupLabel !== '分组' || desktopState.tagLabel !== '标签'
     || desktopState.searchPlaceholder !== '搜索卡片' || !desktopState.sortLabel
     || desktopState.visibleNativeSelects.length) {
     throw new Error(`desktop prompt-first controls incomplete: ${JSON.stringify(desktopState)}`);
   }
-  if (desktopState.cardCount !== 12 || desktopState.metaCount !== 12) {
+  const expectedPageCards = seedCardCount;
+  if (desktopState.cardCount < 12 || desktopState.cardCount > expectedPageCards || desktopState.metaCount !== desktopState.cardCount) {
     throw new Error(`desktop cards/meta mismatch: ${JSON.stringify(desktopState)}`);
   }
   if (!desktopState.textKinds || !desktopState.visualKinds) {
     throw new Error(`desktop card type hierarchy missing: ${JSON.stringify(desktopState)}`);
   }
-  if (desktopState.mediaCount !== 8 || desktopState.loadedMediaCount !== 8) {
+  // 图片卡 ≈ 已渲染卡片的 2/3（每 3 张 1 张文字卡），允许懒加载少量缺口。
+  const expectedMediaCount = desktopState.cardCount - Math.floor((desktopState.cardCount + 1) / 3);
+  if (desktopState.mediaCount < expectedMediaCount - 2 || desktopState.loadedMediaCount < expectedMediaCount - 2) {
     throw new Error(`desktop card media incomplete: ${JSON.stringify(desktopState)}`);
   }
   if (!desktopState.warehouseStylesheet) {
@@ -478,6 +578,30 @@ try {
     || promptFirstInteractions.restored.active || promptFirstInteractions.restored.composerHeight < 300) {
     throw new Error(`wheel focus transition failed: ${JSON.stringify(promptFirstInteractions)}`);
   }
+  if (!promptFirstInteractions.focusFlow) {
+    throw new Error('wheel focus transition did not return focus-flow metrics');
+  }
+  const focusFlow = promptFirstInteractions.focusFlow;
+  if (!focusFlow.focusedMainScrollable || !focusFlow.gridNotScrollContainerInFocus) {
+    throw new Error(`focused library lost its page scroller: ${JSON.stringify(focusFlow)}`);
+  }
+  if (!focusFlow.scrollMovedInFocus) {
+    throw new Error(`focused library cannot scroll up/down: ${JSON.stringify(focusFlow)}`);
+  }
+  if (!focusFlow.restoreWorked) {
+    throw new Error(`focused library cannot restore the composer on wheel up: ${JSON.stringify(focusFlow)}`);
+  }
+  if (!focusFlow.gapsTight) {
+    throw new Error(`focused library waterfall rows have excessive slack: ${JSON.stringify(focusFlow)}`);
+  }
+  if (!focusFlow.gapIsTight) {
+    throw new Error(`warehouse card gap is not tightened: ${JSON.stringify(focusFlow)}`);
+  }
+  // 哨兵只在"还有更多页可翻"时存在。聚焦滚动触发了翻页（卡片数增加）时，哨兵必须挂到主流；
+  // 种子数据一次渲染完（无翻页）时不要求哨兵存在，但聚焦可滚动已由上面断言保证。
+  if (focusFlow.pagedDuringFocus && !focusFlow.sentinelInMainWhenFocused) {
+    throw new Error(`paging sentinel is not on the focused page scroller: ${JSON.stringify(focusFlow)}`);
+  }
   const failedMediaState = await desktop.page.evaluate(() => {
     const media = document.querySelector('#cardsContainer .card.card--visual .card-media');
     const card = media?.closest('.card');
@@ -497,15 +621,17 @@ try {
   const mobileState = await inspectWarehouse(mobile.page, true);
   assertBetween('mobile composer height', mobileState.composerHeight, 400, 470);
   assertBetween('mobile library toolbar height', mobileState.toolbarHeight, 90, 140);
-  if (mobileState.groupLabel !== '文件分类' || mobileState.tagLabel !== '标签分类'
+  if (mobileState.groupLabel !== '分组' || mobileState.tagLabel !== '标签'
     || mobileState.searchPlaceholder !== '搜索卡片' || !mobileState.sortLabel
     || mobileState.visibleNativeSelects.length) {
     throw new Error(`mobile prompt-first controls incomplete: ${JSON.stringify(mobileState)}`);
   }
-  if (mobileState.cardCount !== 12 || mobileState.metaCount !== 12 || mobileState.mobileActions !== 12) {
+  const expectedMobileCards = seedCardCount;
+  if (mobileState.cardCount < 12 || mobileState.cardCount > expectedMobileCards || mobileState.metaCount !== mobileState.cardCount || mobileState.mobileActions !== mobileState.cardCount) {
     throw new Error(`mobile cards/meta/actions mismatch: ${JSON.stringify(mobileState)}`);
   }
-  if (mobileState.mediaCount !== 8 || mobileState.loadedMediaCount < 6) {
+  const expectedMobileMedia = mobileState.cardCount - Math.floor((mobileState.cardCount + 1) / 3);
+  if (mobileState.mediaCount < expectedMobileMedia - 2 || mobileState.loadedMediaCount < expectedMobileMedia - 3) {
     throw new Error(`mobile card media incomplete: ${JSON.stringify(mobileState)}`);
   }
   if (mobileState.draggableCards !== 0) {

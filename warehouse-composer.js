@@ -317,7 +317,10 @@
     });
     const isImage = mode === 'image';
     byId('warehouseComposer')?.classList.toggle('is-image-mode', isImage);
+    // 模型/比例/清晰度仅生图模式；分组/标签仅卡片模式
     ['warehouseComposerModelWrap', 'warehouseComposerRatioWrap', 'warehouseComposerResolutionWrap'].forEach((id) => { const el = byId(id); if (el) el.hidden = !isImage; });
+    ['warehouseComposerGroupWrap', 'warehouseComposerTagWrap'].forEach((id) => { const el = byId(id); if (el) el.hidden = isImage; });
+    if (!isImage) { renderComposerGroupPicker(); renderComposerTagPicker(); }
     const submit = byId('warehouseComposerSubmit');
     if (submit) submit.querySelector('span').textContent = isImage ? '生成图片' : '创建卡片';
     const extra = byId('warehouseComposerExtra');
@@ -365,7 +368,9 @@
     if (typeof window.createPromptHubCardDirectly !== 'function') { toast('创建卡片功能仍在加载，请稍后重试'); return; }
     setStatus('正在保存卡片…', 'ready');
     try {
-      const result = await window.createPromptHubCardDirectly({ prompt, files });
+      const group = String(byId('warehouseComposerGroup')?.value || '').trim() || null;
+      const tags = composerSelectedTags();
+      const result = await window.createPromptHubCardDirectly({ prompt, files, group, tags });
       if (!result?.ok) return;
       const promptEl = byId('warehouseComposerPrompt');
       if (promptEl) promptEl.value = '';
@@ -440,11 +445,33 @@
 
   function setFocusState(view, focused) {
     focusActive = focused;
+    // 先打过渡类：让网格媒体框高度、卡片位移在聚焦/退出时平滑补间，
+    // 再切换 display 类的硬结构（侧栏/头部本身有 420ms 折叠动画）。
+    document.body.classList.add('warehouse-focus-transition');
+    window.setTimeout(() => document.body.classList.remove('warehouse-focus-transition'), 560);
+    // 网格内容淡入淡出：先快淡出，切换结构后再淡入，弱化生硬感。
+    const grid = document.getElementById('cardsContainer');
+    if (grid) {
+      grid.classList.remove('warehouse-grid-crossfade');
+      void grid.offsetWidth;
+      grid.classList.add('warehouse-grid-crossfade');
+      window.setTimeout(() => grid.classList.remove('warehouse-grid-crossfade'), 460);
+    }
     document.body.classList.toggle('warehouse-content-focus', focused);
     ['library', 'community', 'creations'].forEach((name) => document.body.classList.toggle(`warehouse-content-focus--${name}`, focused && name === view));
     document.body.classList.toggle('warehouse-inline-community-active', view === 'community');
     syncLibraryPresentation(view === 'library' && focused);
     document.querySelectorAll('[data-warehouse-return]').forEach((button) => { button.hidden = !focused; });
+    // 聚焦切换会更换卡片库滚动容器（网格 <-> main-content），分页监听与哨兵要跟着走。
+    if (view === 'library') {
+      window.requestAnimationFrame(() => {
+        try {
+          window.bindWarehousePagedScroll?.();
+          const grid = document.getElementById('cardsContainer');
+          if (grid) window.syncWarehouseScrollSentinel?.(grid);
+        } catch (e) { /* 分页模块未就绪时忽略 */ }
+      });
+    }
   }
 
   function activateWarehouseView(view, opts = {}) {
@@ -467,14 +494,19 @@
     if (focused) {
       const main = byId('mainContentArea');
       const stage = document.querySelector('.warehouse-content-stage');
-      if (main && stage) {
-        // Let the composer collapse finish, then align the shared content rail
-        // to the viewport. This keeps library/community/creation views in the
-        // same focused frame even when the user was already scrolled down.
+      const hero = document.querySelector('.warehouse-hero');
+      const grid = byId('cardsContainer');
+      if (main) {
+        // 等 composer 折叠动画落定，再把共享内容轨对齐到视口。
+        // 聚焦卡片库时 stage/hero 都隐藏，锚定到卡片网格；community/creations 锚定到 stage。
+        // 用相对 main 的坐标换算，避免隐藏元素把 scrollTop 误拉到 0 与滚轮打架。
         window.setTimeout(() => {
-          const top = Math.max(0, main.scrollTop + stage.getBoundingClientRect().top);
+          const visible = (el) => el && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().height > 0;
+          const anchor = [hero, stage, grid].find(visible) || grid;
+          if (!anchor) return;
+          const top = Math.max(0, main.scrollTop + anchor.getBoundingClientRect().top - main.getBoundingClientRect().top);
           main.scrollTo({ top, behavior: 'smooth' });
-        }, 420);
+        }, 430);
       }
     }
   }
@@ -501,6 +533,51 @@
     const selected = options.find((option) => option.value === current) || options[0];
     picker.trigger.querySelector('span').textContent = selected?.label || '全部卡片';
     picker.menu.innerHTML = `<div class="warehouse-picker-group"><div class="warehouse-picker-group-title">文件分类</div>${options.map((option) => `<button type="button" role="option" class="warehouse-picker-option${option.value === current ? ' is-selected' : ''}" data-picker-value="${esc(option.value)}"><span>${esc(option.label)}</span><small>${esc(option.count)}</small></button>`).join('')}</div>`;
+  }
+
+  /* 创建卡片：分组选择（不含"全部/未分类"这类筛选伪分组，"不分组"为空值） */
+  function composerGroupOptions() {
+    return warehouseGroupOptions().filter((option) => option.value !== 'all' && option.value !== 'uncategorized');
+  }
+
+  function renderComposerGroupPicker() {
+    const picker = pickers.get('composerGroup');
+    if (!picker) return;
+    const options = composerGroupOptions();
+    const values = ['', ...options.map((option) => option.value)];
+    const current = picker.select.value;
+    const value = setHiddenOptions(picker.select, values, values.includes(current) ? current : '');
+    const selected = value ? options.find((option) => option.value === value) : null;
+    picker.trigger.querySelector('span').textContent = selected?.label || '不分组';
+    const opts = [`<button type="button" role="option" class="warehouse-picker-option${!value ? ' is-selected' : ''}" data-picker-value=""><span>不分组</span></button>`]
+      .concat(options.map((option) => `<button type="button" role="option" class="warehouse-picker-option${option.value === value ? ' is-selected' : ''}" data-picker-value="${esc(option.value)}"><span>${esc(option.label)}</span><small>${esc(option.count)}</small></button>`));
+    picker.menu.innerHTML = `<div class="warehouse-picker-group"><div class="warehouse-picker-group-title">归入分组</div>${opts.join('')}</div>`;
+  }
+
+  /* 创建卡片：标签选择（取自现有卡片标签，可多选；存到隐藏的 state select 以逗号连接） */
+  function composerSelectedTags() {
+    return String(byId('warehouseComposerTag')?.value || '').split('||').map((t) => t.trim()).filter(Boolean);
+  }
+
+  function renderComposerTagPicker() {
+    const picker = pickers.get('composerTag');
+    if (!picker) return;
+    const cards = Array.isArray(window.__promptHubCards) ? window.__promptHubCards : [];
+    const tags = (window.getSelectableCardTags?.(cards) || []).map((t) => String(t).replace(/^#+/, '').trim()).filter(Boolean);
+    const selected = composerSelectedTags();
+    picker.trigger.querySelector('span').textContent = selected.length ? selected.map((t) => '#' + t).join(' ') : '无标签';
+    picker.menu.innerHTML = tags.length
+      ? `<div class="warehouse-picker-group"><div class="warehouse-picker-group-title">添加标签（可多选）</div>${tags.map((tag) => `<button type="button" role="option" class="warehouse-picker-option${selected.includes(tag) ? ' is-selected' : ''}" data-picker-value="${esc(tag)}"><span>#${esc(tag)}</span></button>`).join('')}</div>`
+      : '<div class="warehouse-picker-empty">还没有可用标签，保存卡片后可在编辑面板添加</div>';
+  }
+
+  function toggleComposerTag(tag) {
+    const select = byId('warehouseComposerTag');
+    if (!select || !tag) return;
+    const cur = composerSelectedTags();
+    const next = cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag];
+    select.value = next.join('||');
+    renderComposerTagPicker();
   }
 
   function mountLibraryToolbar() {
@@ -587,10 +664,12 @@
       return false;
     };
     main.addEventListener('scroll', enterOnScroll, { passive: true });
+    // 切入聚焦需要"明确的向下手势"：单滚轮 deltaY>40，或连续滚动使 scrollTop 超过阈值，
+    // 避免轻轻一滚就生硬切入卡片库。
     main.addEventListener('wheel', (event) => {
       const ownsWheel = wheelTargetOwnsScroll(event.target, event.deltaY)
         || (event.target instanceof Element && event.target.closest('.warehouse-composer-picker-menu:not([hidden]), .filter-dropdown.open, .toolbar-sort-dropdown:not([hidden])'));
-      if (!focusActive && event.deltaY > 8 && !ownsWheel) {
+      if (!focusActive && event.deltaY > 40 && !ownsWheel) {
         enterFocusFromScroll();
         return;
       }
@@ -636,6 +715,8 @@
     makePicker('model', { wrap: 'warehouseComposerModelWrap', trigger: 'warehouseComposerModelTrigger', menu: 'warehouseComposerModelMenu', select: 'warehouseComposerModel' }, renderModelPicker, (value) => { syncImageGenField('imageGenModel', value); renderModelPicker(); renderRatioPicker(); renderResolutionPicker(); updateCostHintFromForm(); });
     makePicker('ratio', { wrap: 'warehouseComposerRatioWrap', trigger: 'warehouseComposerRatioTrigger', menu: 'warehouseComposerRatioMenu', select: 'warehouseComposerRatio' }, renderRatioPicker, (value) => { syncImageGenField('imageGenSize', value); renderRatioPicker(); updateCostHintFromForm(); });
     makePicker('resolution', { wrap: 'warehouseComposerResolutionWrap', trigger: 'warehouseComposerResolutionTrigger', menu: 'warehouseComposerResolutionMenu', select: 'warehouseComposerResolution' }, renderResolutionPicker, (value) => { syncImageGenField('imageGenResolution', value); renderResolutionPicker(); updateCostHintFromForm(); });
+    makePicker('composerGroup', { wrap: 'warehouseComposerGroupWrap', trigger: 'warehouseComposerGroupTrigger', menu: 'warehouseComposerGroupMenu', select: 'warehouseComposerGroup' }, renderComposerGroupPicker, () => {});
+    makePicker('composerTag', { wrap: 'warehouseComposerTagWrap', trigger: 'warehouseComposerTagTrigger', menu: 'warehouseComposerTagMenu', select: 'warehouseComposerTag' }, renderComposerTagPicker, () => {});
     byId('warehouseComposerSubmit')?.addEventListener('click', submit);
     byId('warehouseComposerExtra')?.addEventListener('click', () => prepareCardEditor(String(byId('warehouseComposerPrompt')?.value || '').trim()));
     document.addEventListener('click', () => closePickers());
@@ -646,6 +727,23 @@
     renderModelPicker();
     renderRatioPicker();
     renderResolutionPicker();
+    renderComposerGroupPicker();
+    renderComposerTagPicker();
+    // 标签多选：拦截菜单点击切换选中而不关闭菜单
+    byId('warehouseComposerTagMenu')?.addEventListener('click', (event) => {
+      const option = event.target.closest('[data-picker-value]');
+      if (!option) return;
+      event.stopPropagation();
+      toggleComposerTag(option.dataset.pickerValue);
+    }, true);
+    // 分组/标签候选随卡片库变化刷新
+    if (typeof MutationObserver !== 'undefined') {
+      const refresh = () => { renderComposerGroupPicker(); renderComposerTagPicker(); };
+      const customGroupList = byId('customGroupList');
+      if (customGroupList) new MutationObserver(refresh).observe(customGroupList, { childList: true, subtree: true });
+      const grid = byId('cardsContainer');
+      if (grid) new MutationObserver(refresh).observe(grid, { childList: true });
+    }
     const source = byId('imageGenModel');
     if (source && typeof MutationObserver !== 'undefined') new MutationObserver(() => { renderModelPicker(); renderRatioPicker(); renderResolutionPicker(); }).observe(source, { childList: true });
     window.addEventListener('ph-imagegen-catalog-updated', () => {

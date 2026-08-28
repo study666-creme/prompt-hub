@@ -3,8 +3,8 @@
   --ui-scale: 0.9;
   --card-columns: 3;
   --community-columns: 4;
-  --card-gap: 16px;
-  --card-row-gap: 16px;
+  --card-gap: 12px;
+  --card-row-gap: 12px;
   --card-skeleton-bg: #121218;
   --card-orb-core: rgba(255, 255, 255, 0.26);
   --card-orb-mid: rgba(255, 255, 255, 0.1);

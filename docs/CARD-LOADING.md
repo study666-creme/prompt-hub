@@ -56,7 +56,7 @@ authenticated Worker media proxy before browser-side validation and upload.
 
 ## 稳定布局与首屏优先级
 
-- 卡片库普通列表继续使用 CSS Grid 和稳定的 `_grid` 媒体框；聚焦卡片库视图使用自然高度瀑布流，避免把不同图片裁成统一正方形，同时仍优先加载 `_grid` 缩略图，不按图片解码结果反复重排。
+- 卡片库普通列表继续使用 CSS Grid 和稳定的 `_grid` 媒体框；聚焦卡片库视图改用列式瀑布流（`distributeWarehouseFocusColumns` 把卡片按最矮列分发到 `.warehouse-focus-col`），媒体按自然宽高比完整展示、不裁切，列内卡片间距统一为 `--card-gap`（12px），彻底消除行式 Grid"整行被最高卡撑空"的大缝；仍优先加载 `_grid` 缩略图。非聚焦态媒体框固定 4/3，图片加载不再触发全网格重排（避免无谓掉帧），仅聚焦态才随图片加载重新分列。
 - 生图最近列表使用固定 `1:1` 媒体框；前 6 张设为 eager，其中前 4 张为高请求优先级，其余卡片继续 lazy。
 - 最近列表分页只能把新卡插在 `data-imagegen-feed-footer="recent"` 之前，说明条始终位于所有图片之后，不能隔断第 12 张和后续图片。
 - 图片 class/style 变化不再触发整个生图列表的属性级 MutationObserver 扫描；新增直属卡片时才执行布局残留清理。

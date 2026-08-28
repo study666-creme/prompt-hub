@@ -50,6 +50,10 @@ function midjourney(row: CatalogWithoutFamily): CatalogWithoutProvider {
   return withFamily('midjourney', row);
 }
 
+function jimeng(row: CatalogWithoutFamily): CatalogWithoutProvider {
+  return withFamily('jimeng', row);
+}
+
 function newApi(row: CatalogWithoutProvider): ImageModelCatalogEntry {
   return { ...row, provider: 'newapi' };
 }
@@ -184,6 +188,32 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     defaultCredits: 6,
     sortOrder: 96
   })),
+  newApi(jimeng({
+    id: 'seedream-5.0',
+    upstream: 'seedream-5.0',
+    label: 'Seedream 5.0 Pro 1K/2K',
+    group: 'new',
+    description: 'Seedream 5.0 Pro 图片生成模型，支持 1K/2K 分辨率和参考图',
+    upstreamPoints: 0.05,
+    refundOnViolation: true,
+    resolutions: ['1k', '2k'],
+    pricingByResolution: true,
+    defaultCreditsByResolution: { '1k': 5, '2k': 6 },
+    defaultCredits: 5,
+    sortOrder: 97
+  })),
+  newApi(banana({
+    id: 'sensenova-1.5-一秒出图',
+    upstream: 'sensenova-1.5-一秒出图',
+    label: '一秒出图 1K',
+    group: 'new',
+    description: '一秒一张图，质量高于 image1.5；支持文生图及 1-5 张参考图编辑，可选 5 种固定尺寸',
+    upstreamPoints: 0.0035,
+    refundOnViolation: true,
+    resolutions: ['1k'],
+    defaultCredits: 0.35,
+    sortOrder: 98
+  })),
   newApi(midjourney({
     id: 'mj-v81',
     upstream: 'mj-v81',
@@ -311,7 +341,7 @@ const RETIRED_PUBLIC_IMAGE_MODEL_IDS = new Set(['image2-free']);
 
 export function isPublicNewApiImageEntry(entry: ImageModelCatalogEntry): boolean {
   return entry.provider === 'newapi'
-    && (entry.uiFamily === 'gim2' || entry.uiFamily === 'banana' || entry.uiFamily === 'midjourney')
+    && (entry.uiFamily === 'gim2' || entry.uiFamily === 'banana' || entry.uiFamily === 'midjourney' || entry.uiFamily === 'jimeng')
     && !RETIRED_PUBLIC_IMAGE_MODEL_IDS.has(entry.id);
 }
 

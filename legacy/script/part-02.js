@@ -238,7 +238,8 @@
         title: (title || '').trim(),
         prompt: promptText,
         image: primaryImage || null,
-        group: targetGroup || null,
+        // 生成的卡片默认归入「图片生成」分组（未显式指定分组时）
+        group: targetGroup || (window.GEN_AUTO_GROUP || '图片生成'),
         tags,
         customFields: {},
         genSourceId: sourceId || null,

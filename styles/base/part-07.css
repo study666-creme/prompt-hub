@@ -376,6 +376,10 @@
     body.global-view #fabNewBtn,
     body.global-view #floatingPrompt { display: none !important; }
     body.global-view .main-content { flex: 1; width: 100%; max-width: 100%; }
+    /* 快速预览：移除任何残留的分栏边框/阴影，主区占满 */
+    body.global-view .sidebar,
+    body.global-view .app-nav { border-right: 0 !important; box-shadow: none !important; }
+    body.global-view .app-main { gap: 0 !important; }
     body.global-view .cards-container { padding: 28px 32px; }
     body.global-view .card {
       cursor: zoom-in;

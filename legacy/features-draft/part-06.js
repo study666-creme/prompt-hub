@@ -827,9 +827,7 @@
         ? (cardN === 0
           ? '「我的关注」只显示你关注的作者；卡片库为空时请先恢复卡片'
           : '暂无关注作者的作品，去「全部作品」点头像关注作者吧')
-        : cardN === 0
-          ? '卡片库暂无作品，因此社区里也没有你的发布记录'
-          : '暂无社区内容';
+        : '这里还没有社区作品，敬请期待';
       const restoreCardsBtn = window.SupabaseSync?.isLoggedIn?.() && cardN === 0
         ? '<button type="button" class="btn btn-secondary" onclick="syncCloudNow()">从云端恢复卡片库</button>'
         : '';

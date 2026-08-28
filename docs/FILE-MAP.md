@@ -43,7 +43,14 @@ terminal-without-URL responses as pending. `pack-feed.js` is generated from
 
 Warehouse desktop layout is owned by `legacy/script/part-02.js` and
 `part-03.js` plus `styles/base/part-09.css`. It is a stable CSS Grid; do not
-reintroduce Masonry width/top/left writes for `#cardsContainer`. `part-10.js`
+reintroduce Masonry width/top/left writes for `#cardsContainer`. The focused
+library view (`body.warehouse-content-focus--library`) switches the same grid
+to a column waterfall: `legacy/script/part-03.js`
+`distributeWarehouseFocusColumns` deals cards into `.warehouse-focus-col`
+columns (natural-height media, no cropping, uniform `--card-gap` spacing),
+while `.main-content` becomes the single page scroller and the paging
+sentinel/`warehouseScrollRoot` re-target it (`legacy/script/part-09.js`,
+`part-10.js`, `warehouse-composer.js`). `part-10.js`
 keeps the paging sentinel in normal Grid flow. Exhausted warehouse media
 failures collapse through `styles/base/part-08.css` instead of leaving a black
 slot.

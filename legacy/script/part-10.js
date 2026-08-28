@@ -1,10 +1,23 @@
       }
       const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
-      const sentinel = document.createElement('div');
-      sentinel.className = 'warehouse-scroll-sentinel';
+      const focused = document.body?.classList?.contains('warehouse-content-focus');
+      const main = document.getElementById('mainContentArea');
+      // 聚焦整页滚动时分页哨兵必须留在主流（main-content 内、网格之后）；
+      // 网格内 overflow:visible，哨兵放里面永远不会与滚动根相交。
+      const host = (focused && main) ? main : container;
+      let sentinel = warehouseScrollSentinel;
+      if (sentinel && sentinel.parentElement !== host) {
+        sentinel.remove();
+        sentinel = null;
+      }
+      if (!sentinel) {
+        sentinel = document.createElement('div');
+        sentinel.className = 'warehouse-scroll-sentinel'
+          + (host === main ? ' warehouse-scroll-sentinel--page' : '');
+        host.appendChild(sentinel);
+      }
       sentinel.setAttribute('aria-hidden', 'true');
       sentinel.dataset.ready = isMobileViewport() || viewMode === 'list' ? '1' : '0';
-      container.appendChild(sentinel);
       warehouseScrollSentinel = sentinel;
       warehousePageObserver?.disconnect();
       const root = warehouseScrollRoot();
@@ -23,7 +36,17 @@
     /** Legacy Masonry needs an absolute sentinel; stable Grid keeps normal flow. */
     function repositionWarehouseScrollSentinel(container) {
       const sentinel = warehouseScrollSentinel;
-      if (!sentinel || !container?.contains(sentinel)) return;
+      if (!sentinel) return;
+      // 页级哨兵（聚焦态挂在 main-content）保持文档流位置，不做网格内重排。
+      if (sentinel.classList.contains('warehouse-scroll-sentinel--page')) {
+        sentinel.dataset.ready = '1';
+        if (warehousePageObserver) {
+          warehousePageObserver.unobserve(sentinel);
+          warehousePageObserver.observe(sentinel);
+        }
+        return;
+      }
+      if (!container?.contains(sentinel)) return;
       const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
       if (viewMode === 'list' || isMobileViewport() || container.classList.contains('warehouse-stable-grid')) {
         sentinel.removeAttribute('style');
@@ -93,6 +116,9 @@
       window.CardImageLoader?.boostWarehouseImages?.(wh, cap);
     }
     bindWarehousePagedScroll();
+    window.bindWarehousePagedScroll = bindWarehousePagedScroll;
+    window.syncWarehouseScrollSentinel = syncWarehouseScrollSentinel;
+    window.repositionWarehouseScrollSentinel = repositionWarehouseScrollSentinel;
 
     document.getElementById('cardsContainer')?.addEventListener('click', (e) => {
       const editId = e.target.closest('[data-mobile-edit]')?.getAttribute('data-mobile-edit');
