@@ -618,7 +618,7 @@ function resolutionOptions(
   return inferred === '1k' || inferred === '2k' || inferred === '4k' ? [inferred] : [];
 }
 
-type PublicImageFamily = Extract<ImageModelUiFamily, 'gim2' | 'banana' | 'midjourney'>;
+type PublicImageFamily = Extract<ImageModelUiFamily, 'gim2' | 'banana' | 'midjourney' | 'jimeng'>;
 
 function publicTagTokens(value: unknown): Set<string> {
   const tags = Array.isArray(value) ? value : stringValue(value).split(',');
@@ -671,6 +671,19 @@ function inferPublicImageFamily(
     || labels.some(value => /midjourney/i.test(value))
   ) {
     return 'midjourney';
+  }
+  if (
+    tags.has('jimeng')
+    || tags.has('seedream')
+    || identities.some(value => /(?:seedream|jimeng)/i.test(value))
+    || labels.some(value => /seedream/i.test(value))
+  ) {
+    return 'jimeng';
+  }
+  // sensenova 等通用生图型号：归入 jimeng，与 seedream 同属"其他模型"公开分组，
+  // 不伪装成全能模型2。
+  if (identities.some(value => /sensenova/i.test(value))) {
+    return 'jimeng';
   }
   return null;
 }

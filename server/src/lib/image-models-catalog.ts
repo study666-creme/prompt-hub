@@ -202,7 +202,7 @@ export const NEWAPI_IMAGE_MODEL_CATALOG: ImageModelCatalogEntry[] = [
     defaultCredits: 5,
     sortOrder: 97
   })),
-  newApi(banana({
+  newApi(jimeng({
     id: 'sensenova-1.5-一秒出图',
     upstream: 'sensenova-1.5-一秒出图',
     label: '一秒出图 1K',
