@@ -233,6 +233,14 @@ const refImageInputSchema = z
   .max(6_000_000)
   .refine(isAcceptedRefImageInput, '参考图须为有效 URL、storage:// 或 data:image');
 
+const imageProtocolMediaInputSchema = z.object({
+  kind: z.literal('image'),
+  role: z.enum(['reference', 'style_reference', 'element_reference', 'mask']),
+  url: refImageInputSchema
+}).strict();
+
+const imageProtocolOperationSchema = z.enum(['text_to_image', 'image_to_image', 'image_edit']);
+
 const mjParamsSchema = z
   .object({
     stylize: z.number().min(0).max(1000).optional(),
@@ -256,6 +264,8 @@ const mjParamsSchema = z
   .optional();
 
 const bodySchema = z.object({
+  version: z.literal('image.v1').optional(),
+  operation: imageProtocolOperationSchema.optional(),
   clientRequestId: z.string().min(8).max(128).regex(CLIENT_REQUEST_ID_PATTERN).optional(),
   product: z.literal('canvas').optional(),
   projectId: z.string().trim().min(1).max(128).optional(),
@@ -270,11 +280,78 @@ const bodySchema = z.object({
   resolution: z.enum(['1k', '2k', '4k']).default('1k'),
   quality: z.enum(['low', 'medium', 'standard', 'high', 'ultra']).default('standard'),
   size: z.string().max(32).optional(),
+  aspect_ratio: z.string().trim().min(1).max(32).optional(),
   count: z.number().int().min(1).max(8).default(1),
   quotedCredits: z.number().finite().min(0).max(100_000).optional(),
   refImageUrl: refImageInputSchema.optional().nullable(),
   refImageUrls: z.array(refImageInputSchema).max(16).optional(),
+  media_inputs: z.array(imageProtocolMediaInputSchema).max(32).optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
   mjParams: mjParamsSchema
+}).superRefine((input, ctx) => {
+  const protocolReferences = (input.media_inputs || []).filter(item => item.role === 'reference');
+  const unsupportedProtocolReferences = (input.media_inputs || []).filter(item => item.role !== 'reference');
+  if (unsupportedProtocolReferences.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['media_inputs'],
+      message: '当前图片接口仅支持 role=reference 的参考图'
+    });
+  }
+  if (input.operation === 'image_edit') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['operation'],
+      message: '当前图片接口不支持 image_edit'
+    });
+  }
+  if (input.operation === 'text_to_image' && (input.media_inputs?.length || 0) > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['operation'],
+      message: 'text_to_image 不能携带参考图'
+    });
+  }
+  if (input.size && input.aspect_ratio && input.size !== input.aspect_ratio) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['aspect_ratio'],
+      message: 'size 与 aspect_ratio 不能冲突'
+    });
+  }
+
+  const populatedImageAliases = [
+    input.refImageUrl ? 'refImageUrl' : '',
+    input.refImageUrls?.length ? 'refImageUrls' : '',
+    protocolReferences.length ? 'media_inputs' : ''
+  ].filter(Boolean);
+  if (populatedImageAliases.length > 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['media_inputs'],
+      message: '参考图字段不能重复'
+    });
+  }
+}).transform(input => {
+  const protocolReferences = (input.media_inputs || [])
+    .filter(item => item.role === 'reference')
+    .map(item => item.url);
+  return {
+    clientRequestId: input.clientRequestId,
+    product: input.product,
+    projectId: input.projectId,
+    nodeId: input.nodeId,
+    prompt: input.prompt,
+    model: input.model,
+    resolution: input.resolution,
+    quality: input.quality,
+    size: input.size || input.aspect_ratio,
+    count: input.count,
+    quotedCredits: input.quotedCredits,
+    refImageUrl: input.refImageUrl,
+    refImageUrls: protocolReferences.length ? protocolReferences : input.refImageUrls,
+    mjParams: input.mjParams
+  };
 });
 
 function normalizeGenerationBodyAliases(raw: unknown): unknown {

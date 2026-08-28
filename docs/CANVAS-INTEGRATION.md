@@ -45,6 +45,36 @@ Canvas 不保存 New API、Apimart 等上游 Key。它只持有用户 Prompt Hub
 
 所有 `/api/v1/extension/*` 请求都使用当前用户的 Prompt Hub Bearer 会话。精确取卡和结果回仓响应均为 `private, no-store`，不能做跨用户或共享缓存。
 
+### 图片参考素材请求
+
+Canvas 生图可使用公开 API 的 `image.v1` 请求形状（验证日期 `2026-08-28`，
+`capability_version=image-protocol-2026-08-28.1`）：
+
+```http
+POST https://api.prompt-hubs.com/api/v1/generate
+Authorization: Bearer <session-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "version": "image.v1",
+  "model": "nano-banana-2",
+  "operation": "image_to_image",
+  "prompt": "保持主体和构图，生成新的场景",
+  "resolution": "2k",
+  "aspect_ratio": "16:9",
+  "media_inputs": [
+    { "kind": "image", "role": "reference", "url": "https://media.example/reference.png" }
+  ]
+}
+```
+
+`role=reference` 会按现有 `refImageUrls` 路径解析并随任务持久化；`aspect_ratio`
+会映射为比例参数。当前图片端点不支持 `style_reference`、`element_reference` 或
+`mask`，这些角色会明确返回 `400`，不会在没有参考图的情况下继续生成。旧的
+`refImageUrl`、`refImageUrls`、`image`、`images` 字段仍可用于兼容客户端。
+
 Canvas 渲染多图生成结果时使用 `GET /api/v1/generate/jobs/:jobId/image?index=N`。`N` 只能是 `0..7`；MJ 的 `0` 是四宫格封面、`1..4` 是四张单图，普通批量结果按主图后接额外图片的稳定顺序返回。相同 URL 只投影一次，非法索引返回 `400`。结果回仓接口仍只接受首张成图的 `artifactIndex=0`。
 
 ## 一键插卡深链

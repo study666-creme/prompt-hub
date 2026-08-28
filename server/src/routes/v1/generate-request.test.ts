@@ -65,6 +65,56 @@ describe('image generation request idempotency key', () => {
     expect(parsed.quality).toBe('standard');
   });
 
+  it('normalizes image.v1 media_inputs into the existing reference-image contract', () => {
+    const parsed = parseImageGenerationRequestBody({
+      ...base,
+      version: 'image.v1',
+      operation: 'image_to_image',
+      resolution: '2k',
+      aspect_ratio: '16:9',
+      media_inputs: [
+        { kind: 'image', role: 'reference', url: 'https://ref.test/reference.png' }
+      ],
+      options: { ignoredProviderOption: true }
+    });
+
+    expect(parsed).toMatchObject({
+      resolution: '2k',
+      size: '16:9',
+      refImageUrls: ['https://ref.test/reference.png']
+    });
+    expect(parsed.refImageUrl).toBeUndefined();
+  });
+
+  it('rejects image.v1 roles that the image endpoint cannot preserve', () => {
+    for (const role of ['style_reference', 'element_reference', 'mask']) {
+      expect(() => parseImageGenerationRequestBody({
+        ...base,
+        version: 'image.v1',
+        operation: role === 'mask' ? 'image_edit' : 'image_to_image',
+        media_inputs: [{ kind: 'image', role, url: 'https://ref.test/reference.png' }]
+      })).toThrow();
+    }
+  });
+
+  it('rejects duplicate legacy and image.v1 reference fields', () => {
+    expect(() => parseImageGenerationRequestBody({
+      ...base,
+      version: 'image.v1',
+      operation: 'image_to_image',
+      refImageUrls: ['https://ref.test/legacy.png'],
+      media_inputs: [{ kind: 'image', role: 'reference', url: 'https://ref.test/protocol.png' }]
+    })).toThrow();
+  });
+
+  it('rejects unsupported image.v1 versions instead of silently treating them as text-to-image', () => {
+    expect(() => parseImageGenerationRequestBody({
+      ...base,
+      version: 'image.v2',
+      media_inputs: [{ kind: 'image', role: 'reference', url: 'https://ref.test/reference.png' }]
+    })).toThrow();
+  });
+
   it('rejects keys outside the Canvas length or character contract', () => {
     expect(() => parseImageGenerationRequestBody({ ...base, clientRequestId: 'short' })).toThrow();
     expect(() => parseImageGenerationRequestBody({ ...base, clientRequestId: 'canvas request 001' })).toThrow();

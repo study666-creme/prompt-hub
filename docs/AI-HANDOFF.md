@@ -77,6 +77,7 @@ Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery
 - 访客无持久草稿时，当前全能模型2家族默认选择公开目录中排序最前的 `image2-economy`；它与标准 `image2` 的价格必须分别从目录读取，不能用旧默认值覆盖。
 - `resolution` 只表示 `1k/2k/4k`，`quality` 只表示质量，但不是每个模型都有质量控件。只有香蕉公开 `low/medium/high`；`image2k4k` 固定 `low`，4K 型号固定 `standard`，`gpt-image-2-ext` 省略 `quality` 并使用默认画质。仅历史精确值 `quality=1k|2k|4k` 会在入口转换为 `resolution`。
 - 所有香蕉模型支持最多 14 张参考图。不能根据缺字段、陈旧目录或 `max_items=0` 推断香蕉不支持参考图。
+- Canvas 图片请求的 `image.v1.media_inputs`（验证日期 `2026-08-28`，`capability_version=image-protocol-2026-08-28.1`）必须在 Worker 入口归一化：`role=reference` 的图片写入 `refImageUrls`，`aspect_ratio` 写入 `size`，随后沿用同一 URL 解析、报价、幂等和队列路径；`style_reference`、`element_reference`、`mask` 当前不支持，必须明确返回 `400`，不能把未知字段丢弃后继续扣费。
 - 卡片库点击生成后先同步插入作品占位；New API 只由持久队列提交，页面按秒 poll，cron 每 2 分钟兜底 poll/archive，避免请求结束时再次领取同一 `queued` 任务。上游已出图时前端先写入最近生成并移除 pending，临时图可立即展示，归档独立重试。
 - `GET /api/v1/generate/jobs/:jobId/image?index=N` 是 Canvas 的受保护单图读取路径；`N=0` 为主图或 MJ 四宫格封面，MJ 的 `N=1..4` 为四张单图，普通批量任务随后读取额外图片。重复 URL 只投影一次，超出 `0..7` 的索引在读取前返回 `400`。
 - Signed-in generated-card saves with `copyStorage` must archive through `archiveGeneratedCardImage` and persist only a verified `storage://` primary reference. A temporary upstream URL or SVG placeholder must not become the durable card image; failed archival removes the new card.

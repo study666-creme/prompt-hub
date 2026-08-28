@@ -85,6 +85,7 @@ Canvas 媒体交付候选（2026-08-08）已提交到 `codex/unified-media-deliv
 
 - `/api/v1/generate/models` 返回所有已完成协议适配且当前可用的公开图片模型；全能模型2、香蕉、Midjourney 和其他通用型号均按目录项的公开 `uiFamily` 分组，客户端不得把未知或 `generic` 型号伪装成全能模型2。目录数量、公开名称、比例、分辨率和价格来自实时响应，不在前端硬编码当前清单。响应顶层同时返回 `catalogVersion`、`pricingVersion` 和 `catalogStale` 供运行监控；新服务未单独发布价格版本时，`pricingVersion` 使用覆盖完整价格负载的 `catalogVersion`。模型项不得包含上游渠道、主机或内部映射。
 - 图片参数语义固定为：`resolution` 只表示 `1k` / `2k` / `4k`，`quality` 只表示质量，但不是每个模型都公开质量控件。香蕉质量选项为 `low` / `medium` / `high`；`image2k4k` 固定 `low`，4K 型号固定 `standard`，`gpt-image-2-ext` 使用上游默认画质且不发送 `quality`。仅兼容历史请求中精确的 `quality=1k|2k|4k`，入口会把它归一到 `resolution`，不能继续生成两个“分辨率”字段。
+- Canvas 图片桥接协议（验证日期 `2026-08-28`，`capability_version=image-protocol-2026-08-28.1`）：`POST https://api.prompt-hubs.com/api/v1/generate` 接受 `version=image.v1` 的 `text_to_image` / `image_to_image` 请求。`media_inputs` 中 `kind=image`、`role=reference` 的 URL 会归一化到现有 `refImageUrls`，继续经过用户归属校验、上游 URL 解析、报价、幂等和持久队列；`aspect_ratio` 映射到公开的 `size` 比例字段。当前图片入口无法保真转发 `style_reference`、`element_reference` 或 `mask`，收到这些角色会返回 `400`，不会静默降级为纯文生图。旧的 `refImageUrl`、`refImageUrls`、`image`、`images` 字段继续兼容。
 - 卡藏 API 的图片人民币价格统一调用 `imageRetailCreditsFromYuan()`：卡藏报价已包含上游加价，按 `1 元 = 100 积分` 直接换算，不再重复加价。
 - 图片报价和提交读取普通 `/api/model-catalog`，进程内以 single-flight 合并并发请求；完整且精确匹配模型价格的 LKG 最多可信 5 分钟，不再为每次报价发送 `refresh=1`。没有可信价格时必须在创建任务和扣费前失败。
 - 卡片库把用户看到的 `quotedCredits` 随生成请求带回。服务端按当前可信目录重算，报价变化时返回 `409 CONFLICT` 且不创建任务、不扣积分；浏览器只清除对应报价缓存，下一次点击重新报价，不自动重发付费 POST。报价 GET 遇到 `500/502/503/504` 只短退避重试一次。
