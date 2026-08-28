@@ -1,6 +1,6 @@
 # 列表图片加载
 
-复核日期：2026-08-03。下述仓库 UI 对应已上线的 `20260803a` 生图媒体可靠性；生产资源以线上 build 和资源 HTTP 冒烟为准。
+复核日期：2026-08-28。下述仓库 UI 对应 `20260828a` 候选的生图媒体可靠性和卡片库聚焦视图；生产资源以线上 build 和资源 HTTP 冒烟为准。
 
 ## 目标
 
@@ -56,7 +56,7 @@ authenticated Worker media proxy before browser-side validation and upload.
 
 ## 稳定布局与首屏优先级
 
-- 卡片库桌面网格使用 CSS Grid 和固定 `4:3` 列表媒体框，不再按图片解码结果运行 Masonry 全量 `reloadItems/layout`。图片比例只影响详情页，列表通过 `_grid` 缩略图 `object-fit: cover` 保持行列稳定。
+- 卡片库普通列表继续使用 CSS Grid 和稳定的 `_grid` 媒体框；聚焦卡片库视图使用自然高度瀑布流，避免把不同图片裁成统一正方形，同时仍优先加载 `_grid` 缩略图，不按图片解码结果反复重排。
 - 生图最近列表使用固定 `1:1` 媒体框；前 6 张设为 eager，其中前 4 张为高请求优先级，其余卡片继续 lazy。
 - 最近列表分页只能把新卡插在 `data-imagegen-feed-footer="recent"` 之前，说明条始终位于所有图片之后，不能隔断第 12 张和后续图片。
 - 图片 class/style 变化不再触发整个生图列表的属性级 MutationObserver 扫描；新增直属卡片时才执行布局残留清理。

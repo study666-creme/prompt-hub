@@ -1,6 +1,6 @@
 # Prompt Hub 双树收编记录
 
-最后核对：2026-08-08
+最后核对：2026-08-28
 
 > 本文区分“生产已上线”和“主树本地完成”。生产切换必须通过 `/health.buildSha`、Pages build 和线上冒烟取证，不能只凭本地提交或测试通过作结论。
 
@@ -8,8 +8,8 @@
 
 - **唯一候选源**：`D:\prompt-hub`。
 - **历史生产审计源**：`D:\canvas\prompt-hub`，只读，不再作为开发或部署源。
-- **当前发布目标**：`ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`，Worker、Pages 与五项既有数据库迁移状态仍分别以 `/health.buildSha`、Pages build 和生产核验为准。
-- **本轮发布**：保留 `20260804b` 的目录、计费和生成幂等契约，将 Worker 从已停机的旧 `sslip.io` 上游迁移到 `https://newapi.prompt-hubs.com`；Prompt Hub 不新增数据库迁移，也不改 Pages。
+- **生产基线**：`ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`，直到本轮发布成功前仍以线上 `/health.buildSha` 和 Pages build 为准。
+- **本轮候选**：当前分支最终干净提交，包含 Prompt-first 卡片库首页、黑屏缓存恢复、公开图片模型目录投影和 `20260828a` Pages build；不新增数据库迁移。发布 SHA 以 `git rev-parse HEAD` 为准。
 
 双树文件完全相同不是目标。目标是逐项审计生产行为，将需要保留的能力以主树现有契约安全实现，并明确拒绝会重复付费、泄露渠道或回退公开接口的历史实现。
 

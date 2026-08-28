@@ -1,10 +1,10 @@
 # 部署与验证清单
 
-最后核对：2026-08-06
+最后核对：2026-08-28
 
 ## 当前发布状态
 
-本次生产发布目标为 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`。它保留稳定 New API 服务入口、独立视频 Key、既有目录、计费、幂等队列和未知结果退款契约，并修复视频音轨参数转发与提交日志。本轮不发布 Pages；Canvas 媒体交付候选另行验收。
+生产当前仍运行既有 `ca8cbf6e658766e5d98e9748c258ca4e6f02dab6`；本轮候选同时包含 Prompt-first 卡片库首页、旧缓存黑屏自愈、公开图片模型目录投影和“全能模型2 · 稳定”标签。候选 Pages build 为 `20260828a`，Worker 与 Pages 必须从最终干净提交（以 `git rev-parse HEAD` 为准）按同一 SHA 发布；部署后以 `/health.buildSha` 和 Pages 线上冒烟更新生产证据。
 
 ## 发布顺序
 
@@ -74,7 +74,7 @@ node scripts\run-index-local-http-smoke.mjs
 
 ### 6. 解冻、dry-run 与迁移
 
-Prompt Hub 数据库没有新增迁移。`ca8cbf6e658766e5d98e9748c258ca4e6f02dab6` 是 Worker-only 发布，不递增 Pages build；将 Worker 配置、回归测试和状态文档提交为同一个干净发布 SHA，随后运行：
+Prompt Hub 数据库没有新增迁移。本轮不应用数据库迁移；Worker 与 Pages 代码必须从同一个干净发布 SHA 发布。先运行 Worker dry-run：
 
 ```powershell
 cd D:\prompt-hub\server
@@ -92,7 +92,7 @@ cd D:\prompt-hub\server
 npm run deploy
 ```
 
-Worker 受控脚本拒绝脏工作区或残留冻结标记，并自动注入当前 40 位 Git SHA。本轮不运行 `deploy-pages.ps1`；若另一个发布同时包含 Pages 改动，仍须先递增 Pages build、提交并从同一干净 SHA 使用 Pages 受控脚本发布。
+Worker 受控脚本拒绝脏工作区或残留冻结标记，并自动注入当前 40 位 Git SHA。随后运行 `npm run deploy`；Worker 成功后从同一 SHA 运行 `deploy-pages.ps1`，发布 `20260828a` 静态资源。
 
 ### 8. 生产验收
 
