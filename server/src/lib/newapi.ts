@@ -615,7 +615,10 @@ function resolutionOptions(
     .filter((value): value is '1k' | '2k' | '4k' => value === '1k' || value === '2k' || value === '4k');
   if (explicit.length) return [...new Set(explicit)];
   const inferred = String(upstreamModel).toLowerCase().match(/(?:^|[-_])(1k|2k|4k)(?:[-_]|$)/)?.[1];
-  return inferred === '1k' || inferred === '2k' || inferred === '4k' ? [inferred] : [];
+  if (inferred === '1k' || inferred === '2k' || inferred === '4k') return [inferred];
+  // 无 resolution 参数且 id 不含分辨率标识的型号（如 sensenova 只有固定 size），
+  // 默认按 1K 归入公开目录，而不是因 resolutions 为空被过滤掉。
+  return ['1k'];
 }
 
 type PublicImageFamily = Extract<ImageModelUiFamily, 'gim2' | 'banana' | 'midjourney' | 'jimeng'>;
