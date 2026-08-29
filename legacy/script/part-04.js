@@ -23,19 +23,9 @@
     function resumeRippleBackground(app) {
       if (settings.efficiencyMode) return;
       if (!backgroundBootReady) return;
-      const activeApp = app || document.querySelector('.app-nav-item.active')?.dataset?.app || 'warehouse';
-      if (isRippleHeavyApp(activeApp)) {
-        pauseRippleBackground();
-        return;
-      }
       const bg = document.getElementById('rippleGridBg');
-      if (!bg) return;
-      bg.style.display = '';
-      if (!window.__rippleGridBg && !bg.classList.contains('ripple-fallback-active')) {
-        void initBackgroundEffect();
-        return;
-      }
-      window.__rippleGridBg?.setPaused?.(false);
+      if (bg) bg.style.display = 'none';
+      document.body.classList.add('css-global-bg');
     }
     window.resumeRippleBackground = resumeRippleBackground;
 
@@ -55,8 +45,9 @@
       document.body.classList.toggle('efficiency-mode', on);
       const bg = document.getElementById('rippleGridBg');
       const vig = document.querySelector('.ui-vignette');
-      if (bg) bg.style.display = on ? 'none' : '';
+      if (bg) bg.style.display = 'none';
       if (vig) vig.style.display = on ? 'none' : '';
+      document.body.classList.add('css-global-bg');
       if (on) pauseRippleBackground();
       else resumeRippleBackground();
       window.FeatureDraft?.relayoutCommunityFeeds?.();
@@ -366,22 +357,11 @@
 
     async function initBackgroundEffect() {
       const bg = document.getElementById('rippleGridBg');
-      if (!bg || settings.efficiencyMode || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-      if (isMobileViewport()) {
-        bg.style.display = 'none';
-        return;
-      }
-      try {
-        const build = window.__APP_BUILD__ || '1';
-        const mod = await import(`./ripple-grid.js?v=${encodeURIComponent(build)}`);
-        window.__rippleGridBg = mod.initRippleGrid(bg, RIPPLE_BG_OPTS);
-        document.addEventListener('visibilitychange', () => {
-          if (document.hidden) pauseRippleBackground();
-          else resumeRippleBackground();
-        });
-      } catch {
-        initCanvasRippleFallback(bg);
-      }
+      // WebGL/canvas 背景在部分 GPU/驱动下渲染失败（黑屏/黑杠/卡死）。
+      // 全站统一改用纯 CSS 全局背景（body::before 多层光斑），不再初始化任何
+      // WebGL/canvas 背景，所有页面共享同一套稳定的静态背景。
+      if (bg) bg.style.display = 'none';
+      document.body.classList.add('css-global-bg');
     }
 
     let cloudPushTimer = null;

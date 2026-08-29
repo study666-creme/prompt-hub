@@ -96,6 +96,26 @@ body {
   margin: 0;
 }
 
+/* 全站纯 CSS 全局背景（不依赖 WebGL/canvas）：所有页面共享的多层光斑，
+ * 替代原 ripple-grid 动态网格（在部分 GPU 下渲染失败成黑屏/黑杠/卡死）。 */
+body.css-global-bg::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 62% 44% at 50% -8%, color-mix(in srgb, #ffffff 8%, transparent), transparent 66%),
+    radial-gradient(ellipse 44% 36% at 92% 108%, color-mix(in srgb, #9db4ff 6%, transparent), transparent 68%),
+    radial-gradient(ellipse 42% 34% at 4% 104%, color-mix(in srgb, #ffffff 3.5%, transparent), transparent 66%),
+    radial-gradient(ellipse 92% 62% at 50% 50%, transparent 58%, color-mix(in srgb, #000000 16%, transparent) 100%);
+}
+body.css-global-bg .app-main,
+body.css-global-bg .app-page {
+  position: relative;
+  z-index: 1;
+}
+
 /*
  * 界面整体 90% 视觉比例（浏览器 100% 时信息密度适中）。日光/夜间共用同一缩放。
  * 先放大布局画布再 scale，铺满视口；与幽灵图/云同步无关。

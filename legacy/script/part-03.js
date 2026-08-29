@@ -289,6 +289,34 @@
       fab.addEventListener('animationend', () => fab.classList.remove('fab-new--ripple'), { once: true });
     }
 
+    /* 一键回顶：监听卡片库当前滚动容器（非聚焦=网格自身，聚焦=main-content），
+     * 滚动超过一屏后显示按钮，点击平滑回顶。 */
+    (function initBackToTop() {
+      const btn = document.getElementById('backToTopBtn');
+      if (!btn) return;
+      const scrollRoot = () => {
+        if (document.body?.classList?.contains('warehouse-content-focus')) {
+          return document.getElementById('mainContentArea');
+        }
+        return document.getElementById('cardsContainer') || document.getElementById('mainContentArea');
+      };
+      const update = () => {
+        const root = scrollRoot();
+        const show = !!root && root.scrollTop > Math.max(300, (root.clientHeight || 600) * 0.6);
+        btn.classList.toggle('visible', show);
+        btn.hidden = false;
+      };
+      ['cardsContainer', 'mainContentArea'].forEach((id) => {
+        document.getElementById(id)?.addEventListener('scroll', update, { passive: true });
+      });
+      window.addEventListener('resize', update);
+      btn.addEventListener('click', () => {
+        const root = scrollRoot();
+        if (root) root.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+      update();
+    })();
+
     const CARD_DRAG_BLANK_IMG = (() => {
       const img = new Image();
       img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
