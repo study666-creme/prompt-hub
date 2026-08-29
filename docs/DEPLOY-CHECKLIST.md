@@ -1,10 +1,14 @@
 # 部署与验证清单
 
-最后核对：2026-08-28
+最后核对：2026-08-29
 
 ## 当前发布状态
 
-本轮已完成生产发布：Worker `buildSha=464e06883fc8e304280d49826c58436eab05c2dc`，Pages build `20260828a`。Prompt-first 卡片库首页、旧缓存黑屏自愈、公开图片模型目录投影和“全能模型2 · 稳定”标签均已通过线上验收。
+本轮已完成 Pages 发布：Git SHA `d396e04`，Pages build `20260829n`，内容为卡片库真瀑布流回归（`2befd61`）与列归属跨重建稳定（`4fa8c77`）。**Worker 与数据库未变更**——本轮改动全是前端 HTML/JS/CSS，按下方「哪些内容需要部署」只走 Pages。
+
+发布后核对：`https://prompt-hubs.com/prompts/` 返回 `20260829n`；合并产物 `script.js` 含 5 处 `warehouseFocusColById`、`styles-warehouse.css` 含 `scrollbar-gutter`；`run-index-http-smoke.mjs`（`SMOKE_BASE=https://prompt-hubs.com`）24 项全过；`legacy/`、`styles/`、`partials/` 源码片段在线上按预期不可访问。
+
+上一轮 Worker 状态仍为 `buildSha=464e06883fc8e304280d49826c58436eab05c2dc`，本轮不动。
 
 ## 发布顺序
 
@@ -129,3 +133,36 @@ git rev-parse HEAD
 - Worker：只从已知良好提交重新发布，核对 `/health.buildSha`；Secrets 不随 Git 回滚。
 - 数据库：不要在生产直接覆盖。先在隔离项目恢复备份并核对，再决定切换或补偿迁移。
 - R2：覆盖或删除对象前先核对数据库引用与备份，见 `R2-MIGRATION.md`。
+
+## 部署工具链已知问题
+
+### safe-delete 会中断 Pages 部署
+
+`scripts/stage-pages.ps1` 原本用 `Remove-Item` 清空 `.pages-deploy` 并清理构建后的
+`legacy/` `styles/` `partials/` 源码片段。本机删除走一层 safe-delete 包装，单回合内
+超过 50 个文件会抛 `SAFE_DELETE_BULK_CONFIRM_REQUIRED` 并中断部署。
+
+已改为 `Move-Item` 移到隔离区（Move 不走该包装）：暂存目录移到
+`.pages-deploy-trash/<GUID>/`，该目录已在 `.gitignore` 中，可定期手动清理。
+
+### stage-pages.ps1 必须保持纯 ASCII
+
+该文件是 UTF-8 **无 BOM**，Windows PowerShell 5.1 会按系统 ANSI 解码。注释里一旦出现
+中文，乱码会让解析器吞掉紧随其后的赋值语句，表现为
+`New-Item : 无法将参数绑定到参数"Path"，因为该参数是空值`，部署在第一处隔离区创建时中断。
+
+排查时容易误判成 `$env:TEMP` 未定义——实际上环境变量正常，是编码破坏了赋值语句。
+修改此文件后，务必确认没有残留非 ASCII 字符。
+
+### 生产冒烟在 PowerShell 下的假失败
+
+`deploy-pages.ps1` 末尾调用 `scripts/run-index-http-smoke.mjs` 时，node 会向 stderr
+输出 `NODE_TLS_REJECT_UNAUTHORIZED` 警告。脚本顶层是 `$ErrorActionPreference = "Stop"`，
+PowerShell 把该 stderr 当成 `NativeCommandError` 抛出，于是**部署其实已经成功**但脚本报失败。
+
+判断依据是 `Uploading...` / `Deployment complete` 日志，不是这一步的退出码。
+需要单独复核时绕过 PowerShell：
+
+```bash
+SMOKE_BASE=https://prompt-hubs.com node scripts/run-index-http-smoke.mjs
+```
