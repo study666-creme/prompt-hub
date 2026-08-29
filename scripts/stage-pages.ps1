@@ -3,10 +3,18 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $staging = Join-Path $root ".pages-deploy"
 
+# 隔离区根目录：部分部署宿主没有定义 TEMP/TMP，逐级回退，最后落到项目内目录。
+function Get-StageTrashRoot {
+  param([string] $ProjectRoot)
+  if ($env:TEMP) { return $env:TEMP }
+  if ($env:TMP) { return $env:TMP }
+  return (Join-Path $ProjectRoot '.pages-deploy-trash')
+}
+
 if (Test-Path $staging) {
   # 用 Move-Item 移到隔离区代替 Remove-Item：本机 safe-delete 包装会对
   # 单回合内超过 50 个文件的删除要求确认，导致部署中断；Move 不走该包装。
-  $stageTrash = Join-Path ([IO.Path]::GetTempPath()) ("ph-stage-trash-" + [guid]::NewGuid().ToString("n"))
+  $stageTrash = Join-Path (Get-StageTrashRoot $root) ("ph-stage-trash-" + [guid]::NewGuid().ToString("n"))
   New-Item -ItemType Directory -Path $stageTrash -Force | Out-Null
   Move-Item -Path $staging -Destination (Join-Path $stageTrash "pages-deploy") -Force
 }
@@ -201,7 +209,7 @@ foreach ($dir in $sourceFragmentDirs) {
   $fragmentPath = Join-Path $staging $dir
   if (Test-Path $fragmentPath) {
     # 同上：Move 到隔离区，规避 safe-delete 的批量确认阈值
-    $fragTrash = Join-Path ([IO.Path]::GetTempPath()) ("ph-frag-trash-" + [guid]::NewGuid().ToString("n"))
+    $fragTrash = Join-Path (Get-StageTrashRoot $root) ("ph-frag-trash-" + [guid]::NewGuid().ToString("n"))
     New-Item -ItemType Directory -Path $fragTrash -Force | Out-Null
     Move-Item -LiteralPath $fragmentPath -Destination (Join-Path $fragTrash $dir) -Force
   }

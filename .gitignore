@@ -15,6 +15,7 @@ scripts/activation-codes-insert.sql
 node_modules/
 packages/*/package-lock.json
 .pages-deploy/
+.pages-deploy-trash/
 prompt-hub-deploy.zip
 
 .vercel
