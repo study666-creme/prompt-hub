@@ -5,7 +5,7 @@
     display: block !important;
     column-count: var(--warehouse-grid-columns, var(--card-columns, 3));
     column-gap: var(--warehouse-grid-gap, var(--card-gap, 12px));
-    column-fill: auto;
+    column-fill: balance;
     position: relative !important;
     width: 100% !important;
     max-width: 100%;
@@ -67,10 +67,11 @@
   #cardsContainer:not(.list-view) .card-media {
     width: 100%;
     min-height: 0;
-    /* 竖向媒体框更贴近生成图常见比例，减少横向裁切，瀑布感更强 */
+    /* 统一竖向媒体框防瀑布流抖动；img 用 contain 完整显示任何比例（横向图上下留白但不裁切） */
     aspect-ratio: 3 / 4;
     overflow: hidden;
     position: relative;
+    background: color-mix(in srgb, var(--bg-primary) 88%, #1a1e24);
   }
   /* 图片加载后由 JS 写入实际宽高比（card-media--natural-ar）：
    * 媒体框跟随图片真实比例（内联 aspect-ratio 优先于这里的 3/4），
@@ -123,7 +124,8 @@
     width: 100%;
     height: 100%;
     max-width: 100%;
-    object-fit: cover;
+    /* contain：任何比例的图片都完整显示在统一媒体框内，不裁切（横向图上下留白） */
+    object-fit: contain;
     object-position: center center;
   }
   #cardsContainer.cards-container:not(.list-view) {

@@ -2893,7 +2893,7 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
     display: block !important;
     column-count: var(--warehouse-grid-columns, var(--card-columns, 3));
     column-gap: var(--warehouse-grid-gap, var(--card-gap, 12px));
-    column-fill: auto;
+    column-fill: balance;
   }
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) > .card {
     display: flex !important;
@@ -2923,7 +2923,8 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
     width: 100% !important;
     height: 100% !important;
     max-height: 100% !important;
-    object-fit: cover !important;
+    /* contain：任何比例完整显示，横向图上下留白但不裁切 */
+    object-fit: contain !important;
   }
   /* 文字卡不再为底部悬浮按钮预留 48px 底部空白，按钮改为顶部悬浮 */
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card.card--text-only {
