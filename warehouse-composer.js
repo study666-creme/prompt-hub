@@ -653,22 +653,26 @@
     document.querySelectorAll('[data-warehouse-return]').forEach((button) => button.addEventListener('click', () => { setFocusState(activeView, false); main.scrollTo({ top: 0, behavior: 'smooth' }); }));
   }
 
-  /* 显眼的"展开/收起卡片库"切换按钮：固定悬浮在主内容区顶部右侧（styles-warehouse.css），
-   * 不放进会被聚焦态隐藏的 discover-nav，保证展开后仍可点击收起。 */
+  /* "展开/收起卡片库"按钮：图标按钮，放进左侧导航栏头部（左上角）。
+   * 展开态下 app-nav 仍保留，按钮始终可点击收起；非卡片库页面自动隐藏。 */
   function bindFocusToggleButton() {
     if (byId('warehouseFocusToggleBtn')) return;
-    const main = byId('mainContentArea');
-    if (!main) return;
+    const navHead = byId('appNav')?.querySelector('.app-nav-head');
+    if (!navHead) return;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.id = 'warehouseFocusToggleBtn';
     btn.className = 'warehouse-focus-toggle';
     const syncLabel = () => {
+      const pageActive = !!byId('pageWarehouse')?.classList.contains('active');
       const focused = document.body.classList.contains('warehouse-content-focus');
+      btn.hidden = !pageActive;
       btn.setAttribute('aria-pressed', focused ? 'true' : 'false');
+      btn.title = focused ? '收起卡片库' : '展开卡片库';
+      btn.setAttribute('aria-label', btn.title);
       btn.innerHTML = focused
-        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg><span>收起卡片库</span>'
-        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg><span>展开卡片库</span>';
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/><path d="M21 5l-7 7 7 7"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/><path d="M3 5l7 7-7 7"/></svg>';
     };
     btn.addEventListener('click', () => {
       const mainEl = byId('mainContentArea');
@@ -681,10 +685,12 @@
       }
       window.setTimeout(syncLabel, 60);
     });
-    (byId('mainContentArea') || document.body).appendChild(btn);
-    // 聚焦态变化时同步按钮文案（比如滚轮/返回触发）
+    navHead.appendChild(btn);
+    // 聚焦态/页面切换时同步图标（比如滚轮/返回触发）
     if (typeof MutationObserver !== 'undefined') {
       new MutationObserver(syncLabel).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+      const page = byId('pageWarehouse');
+      if (page) new MutationObserver(syncLabel).observe(page, { attributes: true, attributeFilter: ['class'] });
     }
     syncLabel();
   }

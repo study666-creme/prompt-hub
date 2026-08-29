@@ -3044,6 +3044,41 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
   border-color: color-mix(in srgb, #ffffff 22%, transparent);
 }
 
+/* 左上角导航栏内的"展开/收起卡片库"图标按钮（非悬浮文字按钮） */
+.warehouse-focus-toggle {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.warehouse-focus-toggle:hover {
+  border-color: var(--border-light);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+.warehouse-focus-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+.warehouse-focus-toggle[aria-pressed="true"] {
+  border-color: var(--border-light);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+.warehouse-focus-toggle[hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .warehouse-focus-toggle svg { transition: none; }
+}
+
 /* ===== 交互增色微动效（全部 transform/opacity，不触发 layout，不卡顿） ===== */
 /* 按钮按下回弹 */
 .app-page-warehouse button:not(:disabled),
@@ -3157,39 +3192,3 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
   margin-left: 4px;
 }
 
-/* 展开/收起卡片库切换按钮：固定悬浮在主内容区顶部右侧，聚焦态下也保持可见可点 */
-.warehouse-focus-toggle {
-  position: fixed;
-  top: 14px;
-  right: 18px;
-  left: auto;
-  transform: none;
-  z-index: 200;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 34px;
-  padding: 0 16px;
-  width: max-content;
-  border: 1px solid color-mix(in srgb, #ffffff 24%, transparent);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--warehouse-raised-2, #1b1e23) 88%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.36);
-  color: var(--text-primary);
-  font-size: 11px;
-  font-weight: 650;
-  cursor: pointer;
-  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
-}
-.warehouse-focus-toggle:hover {
-  background: color-mix(in srgb, #ffffff 14%, var(--warehouse-raised-2, #1b1e23));
-  border-color: color-mix(in srgb, #ffffff 36%, transparent);
-  transform: translateY(-1px);
-}
-.warehouse-focus-toggle svg { width: 14px; height: 14px; }
-.warehouse-focus-toggle[aria-pressed="true"] {
-  background: color-mix(in srgb, #ffffff 16%, var(--warehouse-raised-2, #1b1e23));
-  border-color: color-mix(in srgb, #ffffff 40%, transparent);
-}

@@ -149,6 +149,15 @@
   #cardsContainer.cards-container:not(.list-view) > .warehouse-scroll-sentinel {
     grid-column: 1 / -1;
   }
+  /* 列容器模式下哨兵绝不能作为 flex 项参与宽度分配：它默认宽度约等于整行，
+   * 会把四个 .warehouse-focus-col（flex-basis:0）挤成 ~2px 的细条，
+   * 未聚焦首页滚动分页时整片卡片就一直在"细条 -> 正常列宽"之间闪烁。 */
+  #cardsContainer.cards-container.warehouse-focus-columns:not(.list-view):not(.mobile-grid) > .warehouse-scroll-sentinel {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+  }
 
   /* 社区 Feed：Masonry 容器占满主区并可滚动 */
   #communityGrid.cards-container:not(.list-view):not(.community-feed-columns) {
