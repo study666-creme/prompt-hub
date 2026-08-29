@@ -3,18 +3,17 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $staging = Join-Path $root ".pages-deploy"
 
-# 隔离区根目录：部分部署宿主没有定义 TEMP/TMP，逐级回退，最后落到项目内目录。
-function Get-StageTrashRoot {
-  param([string] $ProjectRoot)
-  if ($env:TEMP) { return $env:TEMP }
-  if ($env:TMP) { return $env:TMP }
-  return (Join-Path $ProjectRoot '.pages-deploy-trash')
-}
+# Staging trash root. Deliberately inside the project: some deploy hosts leave
+# TEMP/TMP undefined, and a null path aborts the deploy.
+# NOTE: keep this file ASCII-only. It is UTF-8 without BOM, and Windows
+# PowerShell 5.1 decodes it as ANSI, so non-ASCII comments get mangled and
+# break parsing of the statements that follow.
+$trashRoot = Join-Path $root '.pages-deploy-trash'
 
 if (Test-Path $staging) {
-  # 用 Move-Item 移到隔离区代替 Remove-Item：本机 safe-delete 包装会对
-  # 单回合内超过 50 个文件的删除要求确认，导致部署中断；Move 不走该包装。
-  $stageTrash = Join-Path (Get-StageTrashRoot $root) ("ph-stage-trash-" + [guid]::NewGuid().ToString("n"))
+  # Move instead of Remove: the local safe-delete wrapper asks for bulk
+  # confirmation above 50 deletions per turn, which aborts the deploy.
+  $stageTrash = Join-Path $trashRoot ("ph-stage-trash-" + [guid]::NewGuid().ToString("n"))
   New-Item -ItemType Directory -Path $stageTrash -Force | Out-Null
   Move-Item -Path $staging -Destination (Join-Path $stageTrash "pages-deploy") -Force
 }
@@ -208,8 +207,8 @@ $sourceFragmentDirs = @('legacy', 'styles', 'partials')
 foreach ($dir in $sourceFragmentDirs) {
   $fragmentPath = Join-Path $staging $dir
   if (Test-Path $fragmentPath) {
-    # 同上：Move 到隔离区，规避 safe-delete 的批量确认阈值
-    $fragTrash = Join-Path (Get-StageTrashRoot $root) ("ph-frag-trash-" + [guid]::NewGuid().ToString("n"))
+    # Same as above: Move to the trash dir to dodge the bulk-delete threshold.
+    $fragTrash = Join-Path $trashRoot ("ph-frag-trash-" + [guid]::NewGuid().ToString("n"))
     New-Item -ItemType Directory -Path $fragTrash -Force | Out-Null
     Move-Item -LiteralPath $fragmentPath -Destination (Join-Path $fragTrash $dir) -Force
   }
