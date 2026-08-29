@@ -1,7 +1,7 @@
     /* ===== 提示词仓库 · 高级灰设计系统 ===== */
    :root {
   --ui-scale: 0.9;
-  --card-columns: 3;
+  --card-columns: 4;
   --community-columns: 4;
   --card-gap: 12px;
   --card-row-gap: 12px;

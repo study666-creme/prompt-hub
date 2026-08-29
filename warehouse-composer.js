@@ -632,10 +632,12 @@
     document.querySelectorAll('[data-warehouse-return]').forEach((button) => button.addEventListener('click', () => { setFocusState(activeView, false); main.scrollTo({ top: 0, behavior: 'smooth' }); }));
   }
 
-  /* 显眼的"展开/收起卡片库"切换按钮，放在 discover 标题旁 */
+  /* 显眼的"展开/收起卡片库"切换按钮：固定悬浮在主内容区顶部右侧，
+   * 不放进会被聚焦态隐藏的 discover-nav，保证展开后仍可点击收起。 */
   function bindFocusToggleButton() {
-    const nav = document.querySelector('.warehouse-discover-nav');
-    if (!nav || byId('warehouseFocusToggleBtn')) return;
+    if (byId('warehouseFocusToggleBtn')) return;
+    const main = byId('mainContentArea');
+    if (!main) return;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.id = 'warehouseFocusToggleBtn';
@@ -648,17 +650,17 @@
         : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg><span>展开卡片库</span>';
     };
     btn.addEventListener('click', () => {
-      const main = byId('mainContentArea');
+      const mainEl = byId('mainContentArea');
       const focused = document.body.classList.contains('warehouse-content-focus');
       if (focused) {
         setFocusState(activeView, false);
-        main?.scrollTo({ top: 0, behavior: 'smooth' });
+        mainEl?.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
         setFocusState(activeView, true);
       }
       window.setTimeout(syncLabel, 60);
     });
-    nav.appendChild(btn);
+    (byId('mainContentArea') || document.body).appendChild(btn);
     // 聚焦态变化时同步按钮文案（比如滚轮/返回触发）
     if (typeof MutationObserver !== 'undefined') {
       new MutationObserver(syncLabel).observe(document.body, { attributes: true, attributeFilter: ['class'] });

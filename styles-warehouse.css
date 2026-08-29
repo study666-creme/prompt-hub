@@ -3155,17 +3155,24 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
   margin-left: 4px;
 }
 
-/* 展开/收起卡片库切换按钮：显眼的主操作样式，放在 discover 标题旁 */
+/* 展开/收起卡片库切换按钮：固定悬浮在主内容区顶部居中，聚焦态下也保持可见可点 */
 .warehouse-focus-toggle {
+  position: sticky;
+  top: 12px;
+  z-index: 30;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 14px;
-  margin-left: auto;
-  border: 1px solid color-mix(in srgb, #ffffff 22%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, #ffffff 7%, transparent);
+  height: 34px;
+  padding: 0 16px;
+  margin: 10px auto 0;
+  width: max-content;
+  border: 1px solid color-mix(in srgb, #ffffff 24%, transparent);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--warehouse-raised-2, #1b1e23) 88%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.36);
   color: var(--text-primary);
   font-size: 11px;
   font-weight: 650;
@@ -3173,12 +3180,14 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
   transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
 }
 .warehouse-focus-toggle:hover {
-  background: color-mix(in srgb, #ffffff 12%, transparent);
-  border-color: color-mix(in srgb, #ffffff 32%, transparent);
+  background: color-mix(in srgb, #ffffff 14%, var(--warehouse-raised-2, #1b1e23));
+  border-color: color-mix(in srgb, #ffffff 36%, transparent);
   transform: translateY(-1px);
 }
 .warehouse-focus-toggle svg { width: 14px; height: 14px; }
 .warehouse-focus-toggle[aria-pressed="true"] {
-  background: color-mix(in srgb, #ffffff 14%, transparent);
+  background: color-mix(in srgb, #ffffff 16%, var(--warehouse-raised-2, #1b1e23));
+  border-color: color-mix(in srgb, #ffffff 40%, transparent);
+}
   border-color: color-mix(in srgb, #ffffff 38%, transparent);
 }

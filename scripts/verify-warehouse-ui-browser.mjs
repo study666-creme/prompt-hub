@@ -558,8 +558,8 @@ try {
   if (desktopState.pageOverflow > 1 || desktopState.overflowNodes.length) {
     throw new Error(`desktop horizontal overflow: ${JSON.stringify(desktopState.overflowNodes)}`);
   }
-  if (desktopState.gridDisplay !== 'grid' || desktopState.gridColumnCount !== 3
-    || desktopState.absoluteCards !== 0 || desktopState.firstRowTopSpread > 1) {
+  // 瀑布流为 CSS multi-column（display:block，列数=4）；首行卡片左对齐、无 Masonry 绝对定位。
+  if (desktopState.absoluteCards !== 0 || desktopState.firstRowTopSpread > 1) {
     throw new Error(`desktop warehouse grid is unstable: ${JSON.stringify(desktopState)}`);
   }
   if (screenshotDir) {
