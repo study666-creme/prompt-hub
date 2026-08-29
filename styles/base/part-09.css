@@ -1,11 +1,10 @@
 @media (min-width: 901px) {
-  /* 桌面卡片库：CSS multi-column 原生瀑布流，浏览器自动把新卡填入最矮列，
-   * 不打乱 DOM、不需要 JS 重排，文本卡/图片卡都按内容自然增高、无行高撑空。 */
+  /* 桌面卡片库：JS 分发的列容器瀑布流（.warehouse-focus-columns）。
+   * 不用 CSS multi-column：那种布局在图片加载时会由浏览器反复 balance 重排，
+   * 导致卡片在各列之间跳来跳去（闪动）。列容器方案保持卡片自然比例（真瀑布流），
+   * 图片加载只改变该卡片在自己列里的高度，不会把其他列已有卡片挤走。 */
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) {
     display: block !important;
-    column-count: var(--warehouse-grid-columns, var(--card-columns, 3));
-    column-gap: var(--warehouse-grid-gap, var(--card-gap, 12px));
-    column-fill: balance;
     position: relative !important;
     width: 100% !important;
     max-width: 100%;
@@ -13,6 +12,22 @@
     min-height: 0 !important;
     overflow-x: hidden !important;
     overflow-y: auto !important;
+  }
+  #cardsContainer.cards-container.warehouse-focus-columns:not(.list-view):not(.mobile-grid) {
+    display: flex !important;
+    align-items: flex-start;
+    column-gap: var(--warehouse-grid-gap, var(--card-gap, 12px));
+    row-gap: 0;
+  }
+  #cardsContainer.cards-container.warehouse-focus-columns > .warehouse-focus-col {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  #cardsContainer.cards-container.warehouse-focus-columns > .warehouse-focus-col > .card {
+    width: 100% !important;
+    margin: 0 0 var(--warehouse-grid-gap, var(--card-gap, 12px)) !important;
   }
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card {
     display: flex;
@@ -72,17 +87,6 @@
     aspect-ratio: auto;
     overflow: hidden;
     position: relative;
-  }
-  /* 图片加载后由 JS 写入实际宽高比（card-media--natural-ar）：
-   * 媒体框跟随图片真实比例（内联 aspect-ratio 优先于这里的 3/4），
-   * 横向图完整展示不被竖向框 cover 裁切。 */
-  #cardsContainer:not(.list-view) .card-media.card-media--natural-ar .card-img {
-    position: absolute !important;
-    inset: 0;
-    width: 100% !important;
-    height: 100% !important;
-    max-height: 100% !important;
-    object-fit: cover !important;
   }
   #cardsContainer:not(.list-view) .card-media.card-media--await {
     aspect-ratio: 3 / 4;

@@ -157,17 +157,67 @@
     }
     window.enforceMobileCardGrid = enforceMobileCardGrid;
 
-    /** 聚焦卡片库：把卡片按"当前最矮列"分发到列容器，消除行式 Grid 的整行撑高大缝。
-     * 用预估宽高比占位（图片未加载时也能均衡列高），并避免同类矮卡（文字卡）连续堆进同一列。 */
-    function distributeWarehouseFocusColumns(container, columns) {
-      if (!container) return;
-      const cols = Math.max(1, columns);
+    /* ===== 列容器瀑布流 =====
+     * 卡片由 JS 分发到固定数量的 .warehouse-focus-col 列容器，DOM 顺序不变但归属固定。
+     * 相比 CSS multi-column：浏览器不会在图片加载时 balance 重排把卡片在列之间搬来搬去
+     * （那种搬移就是"其他几列疯狂被替换/闪动"的来源）。图片加载只改变该卡片在自己列
+     * 内的高度，其他列已有的卡片不会被挤走。 */
+    function warehouseFocusColumnCount(columns) {
+      const raw = Number.isFinite(columns) && Number(columns) > 0 ? Number(columns) : Number(cardColumns);
+      const n = Number.isFinite(raw) ? raw : 4;
+      return Math.min(5, Math.max(1, n));
+    }
+
+    /** 卡片在网格里的稳定序号：首次分发时按文档顺序写入，之后重排都按它还原次序。
+     * 列容器会把卡片按"列0整列、列1整列…"的文档顺序串起来，不还原就会打乱卡片次序。 */
+    function warehouseCardOrder(card) {
+      const raw = Number(card?.dataset?.whOrder);
+      return Number.isFinite(raw) && raw >= 0 ? raw : Number.MAX_SAFE_INTEGER;
+    }
+
+    /** 给缺少序号的卡片按当前文档顺序补号；已编号的卡片沿用原号以保持次序。 */
+    function ensureWarehouseCardOrders(cardEls) {
+      let maxOrder = -1;
+      cardEls.forEach((card) => {
+        const raw = Number(card.dataset.whOrder);
+        if (Number.isFinite(raw) && raw > maxOrder) maxOrder = raw;
+      });
+      cardEls.forEach((card) => {
+        const raw = Number(card.dataset.whOrder);
+        if (!Number.isFinite(raw)) card.dataset.whOrder = String(maxOrder += 1);
+      });
+    }
+
+    /** 取回列容器里的所有卡片回到容器直属，并移除列容器。
+     * 首次分发时卡片仍是容器直属子元素，必须一并收集；只从列容器里取会导致
+     * 首次调用返回空数组、分发函数早退，列容器永远建不起来（卡片退化成单列堆叠）。 */
+    function flattenWarehouseFocusColumns(container) {
+      if (!container) return [];
+      const cards = [];
       container.querySelectorAll(':scope > .warehouse-focus-col').forEach((col) => {
-        while (col.firstChild) container.appendChild(col.firstChild);
+        while (col.firstChild) {
+          const node = col.firstChild;
+          container.appendChild(node);
+          if (node.nodeType === 1 && node.classList?.contains('card')) cards.push(node);
+        }
         col.remove();
       });
-      const cards = [...container.querySelectorAll(':scope > .card')];
-      if (!cards.length) return;
+      container.querySelectorAll(':scope > .card').forEach((card) => cards.push(card));
+      container.classList.remove('warehouse-focus-columns');
+      return cards.sort((a, b) => warehouseCardOrder(a) - warehouseCardOrder(b));
+    }
+    window.flattenWarehouseFocusColumns = flattenWarehouseFocusColumns;
+
+    /** 确保列容器存在且数量正确；已有且数量一致时直接复用（不搬动卡片） */
+    function ensureWarehouseFocusColumns(container, columns) {
+      if (!container) return [];
+      const cols = warehouseFocusColumnCount(columns);
+      const existing = [...container.querySelectorAll(':scope > .warehouse-focus-col')];
+      if (existing.length === cols) {
+        container.classList.add('warehouse-focus-columns');
+        return existing;
+      }
+      flattenWarehouseFocusColumns(container);
       const colEls = [];
       for (let i = 0; i < cols; i += 1) {
         const col = document.createElement('div');
@@ -175,40 +225,88 @@
         container.appendChild(col);
         colEls.push(col);
       }
-      const heights = new Array(cols).fill(0);
+      container.classList.add('warehouse-focus-columns');
+      return colEls;
+    }
+    window.ensureWarehouseFocusColumns = ensureWarehouseFocusColumns;
+
+    /** 图片未加载时用宽高比估算高度，使首次分发的列高尽量均衡 */
+    function estimateWarehouseFocusCardHeight(card, colWidth) {
+      if (!card) return 200;
+      const actual = card.offsetHeight;
+      if (actual > 40) return actual;
+      const img = card.querySelector('.card-img');
+      if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+        const w = colWidth || card.clientWidth || 300;
+        return Math.round(w * (img.naturalHeight / img.naturalWidth)) + 96;
+      }
+      return card.classList.contains('card--text-only') ? 150 : 320;
+    }
+
+    function warehouseFocusColumnLoads(colEls, colWidth, gap) {
+      return colEls.map((col) => {
+        let h = 0;
+        col.querySelectorAll(':scope > .card').forEach((card) => {
+          h += estimateWarehouseFocusCardHeight(card, colWidth) + gap;
+        });
+        return h;
+      });
+    }
+
+    /** 全量重排：重置列表、切列数或窗口尺寸变化时使用 */
+    function distributeWarehouseFocusColumns(container, columns) {
+      if (!container || isMobileViewport()) return;
+      const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
+      if (viewMode === 'list') return;
+      const cardEls = flattenWarehouseFocusColumns(container);
+      if (!cardEls.length) return;
+      ensureWarehouseCardOrders(cardEls);
+      const colEls = ensureWarehouseFocusColumns(container, columns);
+      if (!colEls.length) return;
       const gap = getMasonryGap();
-      // 预估卡片高度：图片未加载时用其宽高比推算，避免分发时列高全为 0 导致偏斜。
-      const estimateHeight = (card) => {
-        const actual = card.offsetHeight;
-        if (actual > 40) return actual;
-        const img = card.querySelector('.card-img');
-        if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
-          const colW = colEls[0] ? colEls[0].clientWidth : card.clientWidth || 300;
-          return Math.round(colW * (img.naturalHeight / img.naturalWidth)) + 96;
-        }
-        return card.classList.contains('card--text-only') ? 150 : 320;
-      };
-      // 记录每列末尾是否为文字卡，尽量不把连续文字卡压进同一列。
-      const lastWasText = new Array(cols).fill(false);
-      cards.forEach((card) => {
+      const colWidth = colEls[0].clientWidth || (container.clientWidth / colEls.length) || 300;
+      const loads = new Array(colEls.length).fill(0);
+      const lastWasText = new Array(colEls.length).fill(false);
+      cardEls.forEach((card) => {
         const isText = card.classList.contains('card--text-only');
         let target = 0;
-        for (let i = 1; i < cols; i += 1) if (heights[i] < heights[target]) target = i;
+        for (let i = 1; i < loads.length; i += 1) if (loads[i] < loads[target]) target = i;
         // 若最矮列末尾也是文字卡且当前是文字卡，改放次矮列，避免文字卡堆叠。
         if (isText && lastWasText[target]) {
           let best = -1;
-          for (let i = 0; i < cols; i += 1) {
+          for (let i = 0; i < loads.length; i += 1) {
             if (i === target || lastWasText[i]) continue;
-            if (best < 0 || heights[i] < heights[best]) best = i;
+            if (best < 0 || loads[i] < loads[best]) best = i;
           }
-          if (best >= 0 && heights[best] - heights[target] < 260) target = best;
+          if (best >= 0 && loads[best] - loads[target] < 260) target = best;
         }
         colEls[target].appendChild(card);
-        heights[target] += estimateHeight(card) + gap;
+        loads[target] += estimateWarehouseFocusCardHeight(card, colWidth) + gap;
         lastWasText[target] = isText;
       });
     }
     window.distributeWarehouseFocusColumns = distributeWarehouseFocusColumns;
+
+    /** 增量追加：分页加载新卡时只把新卡放进当前最矮列，已有卡片原地不动 */
+    function appendWarehouseFocusCards(container, cardEls) {
+      if (!container || !cardEls?.length || isMobileViewport()) return;
+      const viewMode = document.querySelector('#viewToggle .active')?.dataset.view || 'grid';
+      if (viewMode === 'list') return;
+      const pending = cardEls.filter((card) => card?.parentElement === container);
+      if (!pending.length) return;
+      const colEls = ensureWarehouseFocusColumns(container);
+      if (!colEls.length) return;
+      const gap = getMasonryGap();
+      const colWidth = colEls[0].clientWidth || (container.clientWidth / colEls.length) || 300;
+      const loads = warehouseFocusColumnLoads(colEls, colWidth, gap);
+      pending.forEach((card) => {
+        let target = 0;
+        for (let i = 1; i < loads.length; i += 1) if (loads[i] < loads[target]) target = i;
+        colEls[target].appendChild(card);
+        loads[target] += estimateWarehouseFocusCardHeight(card, colWidth) + gap;
+      });
+    }
+    window.appendWarehouseFocusCards = appendWarehouseFocusCards;
 
     function layoutMasonryGrid() {
       const container = document.getElementById('cardsContainer');
@@ -228,6 +326,7 @@
           try { masonryInstance.destroy(); } catch (e) { /* ignore */ }
           masonryInstance = null;
         }
+        flattenWarehouseFocusColumns(container);
         container.classList.remove('warehouse-stable-grid', 'warehouse-focus-columns');
         return;
       }
@@ -240,11 +339,18 @@
       container.style.setProperty('--warehouse-grid-columns', String(Math.max(1, cardColumns)));
       container.style.setProperty('--warehouse-grid-gap', `${getMasonryGap()}px`);
       resetCardLayoutStyles(container);
-      // 聚焦瀑布流改用 CSS multi-column 原生分列（见 styles-warehouse.css），
-      // 不再用 JS 分发列容器 → 不打乱 DOM、不触发滑动重排。
-      container.classList.remove('warehouse-focus-columns');
-      container.classList.add('warehouse-stable-grid', 'masonry-ready', 'cards-grid-primed');
+      // 列容器瀑布流：卡片按最矮列分发到 .warehouse-focus-col（见 styles/base/part-09.css）。
+      // 卡片位置由 JS 固定，图片加载不会把卡片在列之间搬动，避免闪动。
+      container.classList.remove('warehouse-stable-grid');
+      container.classList.add('masonry-ready', 'cards-grid-primed');
       container.classList.remove('cards-grid-priming');
+      const existingCols = [...container.querySelectorAll(':scope > .warehouse-focus-col')];
+      if (existingCols.length === warehouseFocusColumnCount(cardColumns) && existingCols.length) {
+        // 列结构一致：只补发新增的直属卡片，已有卡片原地不动。
+        appendWarehouseFocusCards(container, [...container.querySelectorAll(':scope > .card')]);
+      } else {
+        distributeWarehouseFocusColumns(container, cardColumns);
+      }
       if (typeof repositionWarehouseScrollSentinel === 'function') {
         repositionWarehouseScrollSentinel(container);
       }

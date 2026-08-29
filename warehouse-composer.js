@@ -632,7 +632,7 @@
     document.querySelectorAll('[data-warehouse-return]').forEach((button) => button.addEventListener('click', () => { setFocusState(activeView, false); main.scrollTo({ top: 0, behavior: 'smooth' }); }));
   }
 
-  /* 显眼的"展开/收起卡片库"切换按钮：固定悬浮在主内容区顶部右侧，
+  /* 显眼的"展开/收起卡片库"切换按钮：固定悬浮在主内容区顶部右侧（styles-warehouse.css），
    * 不放进会被聚焦态隐藏的 discover-nav，保证展开后仍可点击收起。 */
   function bindFocusToggleButton() {
     if (byId('warehouseFocusToggleBtn')) return;

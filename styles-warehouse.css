@@ -2889,18 +2889,18 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
 @media (min-width: 901px) {
   /* 聚焦卡片库瀑布流：CSS multi-column 原生分列，浏览器自动把新卡填入最矮列，
    * 不打乱 DOM 顺序、不需要 JS 重排，从根上消除"滑动重绘"和"中间空"。 */
-  body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) {
-    display: block !important;
-    column-count: var(--warehouse-grid-columns, var(--card-columns, 3));
+  /* 聚焦态同样走 JS 列容器瀑布流（.warehouse-focus-columns，见 styles/base/part-09.css），
+   * 保持卡片自然比例的同时避免 multi-column balance 的跳列闪动。 */
+  body.warehouse-content-focus--library #cardsContainer.cards-container.warehouse-focus-columns:not(.list-view) {
+    display: flex !important;
+    align-items: flex-start;
     column-gap: var(--warehouse-grid-gap, var(--card-gap, 12px));
-    column-fill: balance;
+    row-gap: 0;
   }
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) > .card {
     display: flex !important;
     width: 100% !important;
     margin: 0 0 var(--warehouse-grid-gap, var(--card-gap, 12px)) !important;
-    break-inside: avoid;
-    -webkit-column-break-inside: avoid;
   }
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card-media,
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card-media.media-revealed,
@@ -3155,19 +3155,19 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
   margin-left: 4px;
 }
 
-/* 展开/收起卡片库切换按钮：固定悬浮在主内容区顶部居中，聚焦态下也保持可见可点 */
+/* 展开/收起卡片库切换按钮：固定悬浮在主内容区顶部右侧，聚焦态下也保持可见可点 */
 .warehouse-focus-toggle {
   position: fixed;
   top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 18px;
+  left: auto;
+  transform: none;
   z-index: 200;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 34px;
   padding: 0 16px;
-  margin: 10px auto 0;
   width: max-content;
   border: 1px solid color-mix(in srgb, #ffffff 24%, transparent);
   border-radius: 20px;
@@ -3190,6 +3190,4 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
 .warehouse-focus-toggle[aria-pressed="true"] {
   background: color-mix(in srgb, #ffffff 16%, var(--warehouse-raised-2, #1b1e23));
   border-color: color-mix(in srgb, #ffffff 40%, transparent);
-}
-  border-color: color-mix(in srgb, #ffffff 38%, transparent);
 }
