@@ -248,10 +248,17 @@ async function inspectWarehouse(page, mobile) {
       gridDisplay: gridStyle?.display || '',
       gridColumnCount: String(gridStyle?.gridTemplateColumns || '').split(/\s+/).filter(Boolean).length,
       absoluteCards: cards.filter((card) => getComputedStyle(card).position === 'absolute').length,
-      firstRowTopSpread: cardRects.length >= 3
-        ? Math.round(Math.max(...cardRects.slice(0, 3).map((rect) => rect.top))
-          - Math.min(...cardRects.slice(0, 3).map((rect) => rect.top)))
-        : 0,
+      // 列容器瀑布流：DOM 顺序是"列0全部、列1全部…"，前 N 张卡片同属第一列，
+      // 不能拿它们的 top 比。改为比较"每列第一张卡片"的 top —— 各列顶部必须对齐。
+      firstRowTopSpread: (() => {
+        const cols = [...(grid?.querySelectorAll(':scope > .warehouse-focus-col') || [])];
+        const tops = (cols.length
+          ? cols.map((col) => col.querySelector(':scope > .card')?.getBoundingClientRect().top)
+          : cardRects.slice(0, 3).map((rect) => rect.top)
+        ).filter((top) => typeof top === 'number' && Number.isFinite(top));
+        if (tops.length < 2) return 0;
+        return Math.round(Math.max(...tops) - Math.min(...tops));
+      })(),
       pageOverflow: document.documentElement.scrollWidth - viewportWidth,
       draggableCards: grid?.querySelectorAll('.card[draggable="true"]').length || 0,
       overflowNodes,

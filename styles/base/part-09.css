@@ -88,9 +88,15 @@
     overflow: hidden;
     position: relative;
   }
-  #cardsContainer:not(.list-view) .card-media.card-media--await {
+  /* 图片还没就绪（未 media-revealed）时先用 3/4 占位，避免媒体框从 ~0 高度突变。
+   * 这里绝不能加 max-height：那会把所有卡片压成等高的方格，瀑布流就没了。
+   * 加载完成后移除占位类，媒体框放开为图片真实比例（aspect-ratio: auto）。 */
+  #cardsContainer:not(.list-view) .card-media:not(.media-revealed) {
     aspect-ratio: 3 / 4;
-    max-height: 200px;
+    min-height: 72px;
+    background: var(--bg-hover);
+  }
+  #cardsContainer:not(.list-view) .card-media.card-media--await {
     min-height: 72px;
     background: var(--bg-hover);
   }

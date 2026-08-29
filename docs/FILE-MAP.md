@@ -44,13 +44,17 @@ terminal-without-URL responses as pending. `pack-feed.js` is generated from
 `image-gen-feed.js`.
 
 Warehouse desktop layout is owned by `legacy/script/part-02.js` and
-`part-03.js` plus `styles/base/part-09.css`. It is a CSS multi-column
-waterfall (`column-fill: auto`); do not reintroduce Masonry width/top/left
-writes for `#cardsContainer`. The focused library view
-(`body.warehouse-content-focus--library`, styled in `styles-warehouse.css`)
-uses the same multi-column approach. To prevent columns from rebalancing
-while images load, both modes keep media boxes at a fixed `4/3` aspect ratio
-with `object-fit: cover`. `.main-content` becomes the single page scroller
+`part-03.js` plus `styles/base/part-09.css`. It is a **JS-distributed column
+waterfall** (`.warehouse-focus-columns`): cards are appended by JS into a
+fixed set of column containers, so image loading cannot make the browser
+re-balance cards across columns (that was the "cards jumping between
+columns" flicker). Do not reintroduce Masonry width/top/left writes for
+`#cardsContainer`, and do not switch back to CSS multi-column. The focused
+library view (`body.warehouse-content-focus--library`, styled in
+`styles-warehouse.css`) uses the same column-container approach. Media boxes
+keep each image's real aspect ratio (a fixed `4/3` frame would flatten the
+waterfall into equal-height squares); only the not-yet-`media-revealed` state
+uses a `3/4` placeholder **without** any `max-height`. `.main-content` becomes the single page scroller
 and the paging sentinel/`warehouseScrollRoot` re-targets it
 (`legacy/script/part-09.js`, `part-10.js`, `warehouse-composer.js`).
 `part-10.js` keeps the paging sentinel in normal flow. Exhausted warehouse

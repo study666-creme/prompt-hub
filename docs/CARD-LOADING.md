@@ -56,7 +56,8 @@ authenticated Worker media proxy before browser-side validation and upload.
 
 ## 稳定布局与首屏优先级
 
-- 桌面卡片库（非聚焦与聚焦）均使用 CSS multi-column 原生分列（`column-fill: auto`），浏览器按顺序把卡片填入各列，不依赖 JS 绝对定位。为避免图片加载过程中列高变化触发浏览器反复重平衡、导致卡片在其他列之间跳来跳去（"闪动/替换"现象），媒体框统一保持固定 `4/3` 比例并用 `object-fit: cover` 填充；加载态与加载完成后高度一致，从而把列重排降到最低。仍优先加载 `_grid` 缩略图。
+- 桌面卡片库（非聚焦与聚焦）均使用 **JS 分发的列容器瀑布流**（`.warehouse-focus-columns`，见 `styles/base/part-09.css` 与 `legacy/script/part-03.js`），不用 CSS multi-column：multi-column 会在图片加载时由浏览器反复 balance 重排，把卡片在各列之间搬来搬去，这正是"其他几列被新卡片挤掉/疯狂闪动"的来源。列容器方案下卡片位置由 JS 固定，图片加载只改变该卡片在自己列内的高度，不会把其他列已有卡片挤走；增量分页只把新卡放进当前最矮列（`appendWarehouseFocusCards`），已有卡片原地不动。
+- **媒体框保持图片真实比例**（竖图竖卡、横图横卡、无留白），不做固定 `4/3` 裁切——固定比例会把所有卡片压成等高方格，瀑布流就没了。图片未就绪（未 `media-revealed`）时用 `3/4` 占位并带 `min-height: 72px`，加载完成后放开为 `aspect-ratio: auto` 由图片自然高接管。占位阶段**不能加 `max-height`**：那会让所有卡片停在等高占位上，退化成方格。实测占位 396px → 加载完成 397/529px，跳变极小且卡片不再跨列搬动。仍优先加载 `_grid` 缩略图。
 - 生图最近列表使用固定 `1:1` 媒体框；前 6 张设为 eager，其中前 4 张为高请求优先级，其余卡片继续 lazy。
 - 最近列表分页只能把新卡插在 `data-imagegen-feed-footer="recent"` 之前，说明条始终位于所有图片之后，不能隔断第 12 张和后续图片。
 - 图片 class/style 变化不再触发整个生图列表的属性级 MutationObserver 扫描；新增直属卡片时才执行布局残留清理。
