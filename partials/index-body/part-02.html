@@ -178,10 +178,17 @@
   <div class="app-main">
     <div class="app-page app-page-landing active" id="pageLanding">
       <main class="landing-shell" aria-labelledby="landingTitle">
+        <div class="landing-ambience" aria-hidden="true">
+          <span class="landing-aurora landing-aurora--one"></span>
+          <span class="landing-aurora landing-aurora--two"></span>
+          <span class="landing-grain"></span>
+        </div>
+
         <header class="landing-topbar">
           <button type="button" class="landing-brand" onclick="switchAppPage('landing')" aria-label="卡藏首页">
             <img src="assets/logo.png" width="30" height="30" alt="">
             <strong>卡藏</strong>
+            <span class="landing-brand-tag">Prompt Hub</span>
           </button>
           <div class="landing-top-actions">
             <button type="button" class="landing-login" onclick="openAuthModal()">登录</button>
@@ -195,55 +202,88 @@
         <section class="landing-stage">
           <div class="landing-copy">
             <p class="landing-eyebrow">PRIVATE CREATIVE SYSTEM / 2026</p>
-            <h1 id="landingTitle">卡藏<span>把灵感变成可复用的资产。</span></h1>
-            <p class="landing-lede">让收藏、提示词、生图与画布，停留在同一条创作路径里。</p>
+            <h1 id="landingTitle">卡藏<span>把灵感变成<em>可复用的资产</em>。</span></h1>
+            <p class="landing-lede">收藏、提示词、生图与画布，停留在同一条创作路径里。存一次，处处可用。</p>
             <div class="landing-actions">
               <button type="button" class="landing-action landing-action--primary" onclick="switchAppPage('warehouse')">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
                 <span>进入卡片库</span>
+                <i class="landing-action-shine" aria-hidden="true"></i>
               </button>
               <button type="button" class="landing-action" onclick="openPromptCanvas()">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
                 <span>打开无限画布</span>
               </button>
             </div>
-            <div class="landing-ledger" aria-label="工作台模块">
-              <span><i></i>提示词仓库</span>
-              <span><i></i>图片生成</span>
-              <span><i></i>无限画布</span>
-            </div>
+            <dl class="landing-stats" aria-label="工作台能力速览">
+              <div class="landing-stat">
+                <dt>存卡方式</dt>
+                <dd><strong>3</strong><span>手动 · 批量 · 插件</span></dd>
+              </div>
+              <div class="landing-stat">
+                <dt>生图模型</dt>
+                <dd><strong>11+</strong><span>MJ · Seedream · 香蕉</span></dd>
+              </div>
+              <div class="landing-stat">
+                <dt>创作闭环</dt>
+                <dd><strong>∞</strong><span>卡片直达无限画布</span></dd>
+              </div>
+            </dl>
           </div>
 
           <div class="landing-atlas" aria-hidden="true">
             <span class="landing-atlas-index">01 / 03</span>
-            <div class="landing-grid"><i></i><i></i><i></i><i></i></div>
-            <figure class="landing-card landing-card--back">
-              <img src="assets/studio-preset/scene.png" alt="" width="256" height="384" loading="lazy" decoding="async" draggable="false">
-              <figcaption>画面 / 03</figcaption>
-            </figure>
-            <figure class="landing-card landing-card--middle">
-              <img src="assets/studio-preset/peishen.png" alt="" width="256" height="384" loading="eager" decoding="async" draggable="false">
-              <figcaption>风格 / 02</figcaption>
-            </figure>
-            <figure class="landing-card landing-card--front">
-              <img src="assets/studio-preset/linche.png" alt="" width="256" height="384" loading="eager" fetchpriority="high" decoding="async" draggable="false">
-              <figcaption>提示词 / 01</figcaption>
-            </figure>
+            <div class="landing-scene" data-depth="14">
+              <span class="landing-orbit landing-orbit--outer"></span>
+              <span class="landing-orbit landing-orbit--inner"></span>
+              <figure class="landing-card landing-card--back" data-depth="26">
+                <img src="assets/studio-preset/scene.png" alt="" width="256" height="384" loading="lazy" decoding="async" draggable="false">
+                <figcaption>画面 / 03</figcaption>
+              </figure>
+              <figure class="landing-card landing-card--middle" data-depth="40">
+                <img src="assets/studio-preset/peishen.png" alt="" width="256" height="384" loading="eager" decoding="async" draggable="false">
+                <figcaption>风格 / 02</figcaption>
+              </figure>
+              <figure class="landing-card landing-card--front" data-depth="58">
+                <img src="assets/studio-preset/linche.png" alt="" width="256" height="384" loading="eager" fetchpriority="high" decoding="async" draggable="false">
+                <figcaption>提示词 / 01</figcaption>
+              </figure>
+              <span class="landing-chip landing-chip--prompt" data-depth="70">
+                <i></i>
+                <span>提示词已入库</span>
+              </span>
+              <span class="landing-chip landing-chip--sync" data-depth="52">
+                <i></i>
+                <span>云同步中</span>
+              </span>
+            </div>
             <div class="landing-atlas-note"><strong>∞</strong><span>画布已连接</span></div>
           </div>
         </section>
 
         <nav class="landing-destinations" aria-label="进入工作台">
           <button type="button" class="landing-route" onclick="switchAppPage('warehouse')">
-            <span class="landing-route-index">01</span><span class="landing-route-label">卡片库</span>
+            <span class="landing-route-index">01</span>
+            <span class="landing-route-body">
+              <span class="landing-route-label">卡片库</span>
+              <span class="landing-route-desc">卡片式管理，随时复用</span>
+            </span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </button>
           <button type="button" class="landing-route" onclick="switchAppPage('imagegen')">
-            <span class="landing-route-index">02</span><span class="landing-route-label">图片生成</span>
+            <span class="landing-route-index">02</span>
+            <span class="landing-route-body">
+              <span class="landing-route-label">图片生成</span>
+              <span class="landing-route-desc">多模型排队出图</span>
+            </span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </button>
           <button type="button" class="landing-route" onclick="switchAppPage('community')">
-            <span class="landing-route-index">03</span><span class="landing-route-label">提示词社区</span>
+            <span class="landing-route-index">03</span>
+            <span class="landing-route-body">
+              <span class="landing-route-label">提示词社区</span>
+              <span class="landing-route-desc">灵感抽卡与公开分享</span>
+            </span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </button>
         </nav>
