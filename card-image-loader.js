@@ -680,7 +680,10 @@
     img.dataset.whServerRecover = '1';
     window.SupabaseSync?.clearPathMissingForCard?.(cardId, ref);
     const applyOrFail = (url) => {
-      if (url && applyUrlToImg(img, url)) return;
+      // resolve 返回的若仍是上游临时签名链（会再次过期 → 再次失败 → 循环刷新），
+      // 不再换上，直接失败收敛，避免"疯狂刷新"。只有稳定可展示的 URL 才应用。
+      const stillEphemeral = url && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(url);
+      if (url && !stillEphemeral && applyUrlToImg(img, url)) return;
       window.finalizeWarehouseCardMediaFailure?.(media || feedMediaFromImg(img), img);
     };
     if (window.WarehouseThumb?.resolveForCardModel) {

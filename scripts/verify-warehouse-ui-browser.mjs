@@ -345,9 +345,9 @@ async function inspectPromptFirstInteractions(page) {
 
   const main = page.locator('#mainContentArea');
   await main.evaluate((element) => { element.scrollTop = 0; });
-  await main.hover();
-  await page.mouse.wheel(0, 40);
-  await page.waitForTimeout(520);
+  // 点击"展开卡片库"按钮切入聚焦（不再滚动自动切入）
+  await page.locator('#warehouseFocusToggleBtn').click();
+  await page.waitForTimeout(620);
   const focused = await page.evaluate(() => ({
     active: document.body.classList.contains('warehouse-content-focus'),
     composerHeight: Math.round(document.getElementById('warehouseComposer')?.getBoundingClientRect().height || 0)
@@ -416,6 +416,7 @@ async function inspectPromptFirstInteractions(page) {
   const focusEntry = await readFocusState();
   const tops = [focusEntry.mainScrollTop];
   const baseCardCount = focusEntry.cardCount;
+  // 滚动仍可在聚焦网格内翻页（main-content 是页面滚动容器）
   for (let i = 0; i < 3; i += 1) {
     await main.hover();
     await page.mouse.wheel(0, 700);
@@ -427,12 +428,9 @@ async function inspectPromptFirstInteractions(page) {
   const sentinelInMainWhenFocused = pagedDuringFocus
     ? afterScroll.sentinelParent === 'mainContentArea'
     : (afterScroll.sentinelParent === 'mainContentArea' || afterScroll.sentinelParent === null);
-  for (let i = 0; i < 5; i += 1) {
-    await main.hover();
-    await page.mouse.wheel(0, -800);
-    await page.waitForTimeout(340);
-  }
-  await page.waitForTimeout(520);
+  // 点击"收起卡片库"按钮退出聚焦（不再滚轮向上自动退出）
+  await page.locator('#warehouseFocusToggleBtn').click();
+  await page.waitForTimeout(620);
   const restoredState = await readFocusState();
   const focusFlow = {
     focusedMainScrollable: focusEntry.focusLib && focusEntry.mainScrollable,

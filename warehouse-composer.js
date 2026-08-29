@@ -625,64 +625,45 @@
 
   function bindContentFocus() {
     const main = byId('mainContentArea');
-    const nav = document.querySelector('.warehouse-discover-nav');
-    if (!main || !nav) return;
-    let lastScrollTop = main.scrollTop;
-    let suppressRestoreUntil = 0;
-    const enterFocusFromScroll = () => {
-      if (focusActive) return;
-      setFocusState(activeView, true);
-      suppressRestoreUntil = Date.now() + 700;
-      requestAnimationFrame(() => {
-        // Collapsing the composer changes the scrollable height. Re-anchor
-        // the same page at its content rail so the first focused frame is not
-        // left halfway through the empty state.
-        main.scrollTo({ top: 0, behavior: 'smooth' });
-        lastScrollTop = 0;
-      });
-    };
-    const enterOnScroll = () => {
-      const top = main.scrollTop;
-      if (top > 120 && !focusActive) enterFocusFromScroll();
-      // A click on a content tab can focus the view while the scroll position
-      // is still zero. Only restore the composer after a real upward gesture.
-      if (top < 60 && focusActive && lastScrollTop > 80 && Date.now() > suppressRestoreUntil) setFocusState(activeView, false);
-      lastScrollTop = top;
-    };
-    const wheelTargetOwnsScroll = (target, deltaY) => {
-      let node = target instanceof Element ? target : null;
-      while (node && node !== main) {
-        const style = window.getComputedStyle(node);
-        const canScroll = (node instanceof HTMLTextAreaElement || /(auto|scroll|overlay)/.test(style.overflowY || ''))
-          && node.scrollHeight > node.clientHeight + 1;
-        if (canScroll) {
-          if (deltaY < 0 && node.scrollTop > 0) return true;
-          if (deltaY > 0 && node.scrollTop + node.clientHeight < node.scrollHeight - 1) return true;
-        }
-        node = node.parentElement;
-      }
-      return false;
-    };
-    main.addEventListener('scroll', enterOnScroll, { passive: true });
-    // 切入聚焦需要"明确的向下手势"：单滚轮 deltaY>40，或连续滚动使 scrollTop 超过阈值，
-    // 避免轻轻一滚就生硬切入卡片库。
-    main.addEventListener('wheel', (event) => {
-      const ownsWheel = wheelTargetOwnsScroll(event.target, event.deltaY)
-        || (event.target instanceof Element && event.target.closest('.warehouse-composer-picker-menu:not([hidden]), .filter-dropdown.open, .toolbar-sort-dropdown:not([hidden])'));
-      if (!focusActive && event.deltaY > 40 && !ownsWheel) {
-        enterFocusFromScroll();
-        return;
-      }
-      if (focusActive && event.deltaY < 0 && main.scrollTop <= 60 && Date.now() > suppressRestoreUntil) {
-        setFocusState(activeView, false);
-        main.scrollTo({ top: 0, behavior: 'smooth' });
-      }
-    }, { passive: true });
-    if (typeof IntersectionObserver === 'function') {
-      const observer = new IntersectionObserver((entries) => { if (entries[0] && !entries[0].isIntersecting && main.scrollTop > 120) enterFocusFromScroll(); }, { root: main, threshold: 0.05 });
-      observer.observe(nav);
-    }
+    if (!main) return;
+    // 不再滚动自动切入/切出聚焦卡片库（用户反馈切换生硬、两界面割裂）。
+    // 改为一个显眼的手动"展开/收起卡片库"按钮：默认收起，点击展开；再点或"返回"收起。
+    // 两个界面在同一页面内一体平滑过渡（composer 折叠 + 网格 crossfade）。
     document.querySelectorAll('[data-warehouse-return]').forEach((button) => button.addEventListener('click', () => { setFocusState(activeView, false); main.scrollTo({ top: 0, behavior: 'smooth' }); }));
+  }
+
+  /* 显眼的"展开/收起卡片库"切换按钮，放在 discover 标题旁 */
+  function bindFocusToggleButton() {
+    const nav = document.querySelector('.warehouse-discover-nav');
+    if (!nav || byId('warehouseFocusToggleBtn')) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'warehouseFocusToggleBtn';
+    btn.className = 'warehouse-focus-toggle';
+    const syncLabel = () => {
+      const focused = document.body.classList.contains('warehouse-content-focus');
+      btn.setAttribute('aria-pressed', focused ? 'true' : 'false');
+      btn.innerHTML = focused
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg><span>收起卡片库</span>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg><span>展开卡片库</span>';
+    };
+    btn.addEventListener('click', () => {
+      const main = byId('mainContentArea');
+      const focused = document.body.classList.contains('warehouse-content-focus');
+      if (focused) {
+        setFocusState(activeView, false);
+        main?.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        setFocusState(activeView, true);
+      }
+      window.setTimeout(syncLabel, 60);
+    });
+    nav.appendChild(btn);
+    // 聚焦态变化时同步按钮文案（比如滚轮/返回触发）
+    if (typeof MutationObserver !== 'undefined') {
+      new MutationObserver(syncLabel).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    }
+    syncLabel();
   }
 
   function initCanvasPage() {
@@ -723,6 +704,7 @@
     mountLibraryToolbar();
     bindDiscoverTabs();
     bindContentFocus();
+    bindFocusToggleButton();
     initCanvasPage();
     renderModelPicker();
     renderRatioPicker();

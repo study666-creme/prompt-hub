@@ -3154,3 +3154,31 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
   flex: 0 0 auto;
   margin-left: 4px;
 }
+
+/* 展开/收起卡片库切换按钮：显眼的主操作样式，放在 discover 标题旁 */
+.warehouse-focus-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  margin-left: auto;
+  border: 1px solid color-mix(in srgb, #ffffff 22%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, #ffffff 7%, transparent);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+.warehouse-focus-toggle:hover {
+  background: color-mix(in srgb, #ffffff 12%, transparent);
+  border-color: color-mix(in srgb, #ffffff 32%, transparent);
+  transform: translateY(-1px);
+}
+.warehouse-focus-toggle svg { width: 14px; height: 14px; }
+.warehouse-focus-toggle[aria-pressed="true"] {
+  background: color-mix(in srgb, #ffffff 14%, transparent);
+  border-color: color-mix(in srgb, #ffffff 38%, transparent);
+}
