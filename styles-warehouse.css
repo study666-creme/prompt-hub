@@ -2905,8 +2905,8 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card-media,
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card-media.media-revealed,
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card-media:not(.is-loading):not(.card-media--await) {
-    /* 统一固定 3/4 占位宽高比：加载前后高度不变，彻底消除 multicol 重排抖动/乱跳/疯狂刷新 */
-    aspect-ratio: 3 / 4 !important;
+    /* 真瀑布流：媒体框跟随图片实际比例（横图横卡、无留白） */
+    aspect-ratio: auto !important;
     height: auto !important;
     max-height: none !important;
   }
@@ -2918,13 +2918,11 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
     min-height: 200px;
   }
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card-media .card-img {
-    position: absolute !important;
-    inset: 0 !important;
+    position: static !important;
     width: 100% !important;
-    height: 100% !important;
-    max-height: 100% !important;
-    /* contain：任何比例完整显示，横向图上下留白但不裁切 */
-    object-fit: contain !important;
+    height: auto !important;
+    max-height: none !important;
+    object-fit: cover !important;
   }
   /* 文字卡不再为底部悬浮按钮预留 48px 底部空白，按钮改为顶部悬浮 */
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) .card.card--text-only {

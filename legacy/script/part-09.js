@@ -760,28 +760,8 @@
         const coverMeta = listThumb.thumbMeta;
         const div = document.createElement('div');
         div.className = `card ${card.id === selectedCardId ? 'selected' : ''}${card.pinnedAt ? ' is-pinned' : ''}`;
-        if (!mobileGrid && isAppend && viewMode !== 'list') {
-          div.classList.add('card-enter-soft');
-          // 下滑加载的 stagger 入场：按列内顺序依次浮现，节奏感更强
-          const enterDelay = Math.min((idx % 12) * 0.045, 0.42);
-          div.style.animationDelay = `${enterDelay.toFixed(3)}s`;
-          const clearSoftEnter = (event) => {
-            if (event.target !== div) return;
-            div.classList.remove('card-enter-soft');
-            div.style.animationDelay = '';
-            div.removeEventListener('animationend', clearSoftEnter);
-          };
-          div.addEventListener('animationend', clearSoftEnter);
-          window.setTimeout(() => {
-            if (!div.isConnected) return;
-            div.classList.remove('card-enter-soft');
-            div.style.animationDelay = '';
-            div.removeEventListener('animationend', clearSoftEnter);
-          }, 900 + Math.round(enterDelay * 1000));
-        } else if (!mobileGrid && pageCards.length <= 8 && reset) {
-          div.classList.add('card-enter');
-          div.style.animationDelay = `${Math.min(idx * 0.045, 0.36)}s`;
-        }
+        // 真瀑布流（自然比例）下，入场动画会在 multicol 重排/归档换 src 时反复触发，
+        // 造成"卡片疯狂更换"的视觉。不再给卡片加入场动画。
         div.dataset.id = card.id;
         if (window.isCommunityCollectCard?.(card)) {
           div.dataset.communityCollect = '1';

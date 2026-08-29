@@ -67,11 +67,11 @@
   #cardsContainer:not(.list-view) .card-media {
     width: 100%;
     min-height: 0;
-    /* 统一竖向媒体框防瀑布流抖动；img 用 contain 完整显示任何比例（横向图上下留白但不裁切） */
-    aspect-ratio: 3 / 4;
+    /* 真瀑布流：媒体框跟随图片实际比例（横图横卡、竖图竖卡、无留白）。
+     * 加载完成前用 3/4 占位（见 is-loading/card-media--await），加载后放开为自然高。 */
+    aspect-ratio: auto;
     overflow: hidden;
     position: relative;
-    background: color-mix(in srgb, var(--bg-primary) 88%, #1a1e24);
   }
   /* 图片加载后由 JS 写入实际宽高比（card-media--natural-ar）：
    * 媒体框跟随图片真实比例（内联 aspect-ratio 优先于这里的 3/4），
@@ -122,10 +122,10 @@
   #cardsContainer:not(.list-view) .card-img {
     display: block;
     width: 100%;
-    height: 100%;
+    height: auto;
     max-width: 100%;
-    /* contain：任何比例的图片都完整显示在统一媒体框内，不裁切（横向图上下留白） */
-    object-fit: contain;
+    /* 真瀑布流：图片按实际比例自然展示，容器跟随图片高度（横图横卡、无留白） */
+    object-fit: cover;
     object-position: center center;
   }
   #cardsContainer.cards-container:not(.list-view) {
