@@ -2893,7 +2893,7 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
     display: block !important;
     column-count: var(--warehouse-grid-columns, var(--card-columns, 3));
     column-gap: var(--warehouse-grid-gap, var(--card-gap, 12px));
-    column-fill: balance;
+    column-fill: auto;
   }
   body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-view) > .card {
     display: flex !important;
