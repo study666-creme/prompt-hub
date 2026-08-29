@@ -24,7 +24,7 @@
 
 | 任务 | 主要文件 |
 |---|---|
-| 路由/首屏页面 | `app-router.js`, `index.html` |
+| 路由/首屏页面 | `app-router.js`, `index.html`；离开卡片库前由 `legacy/script/part-04.js` 调用 `window.WarehouseComposer.exitFocus()` 完整退出聚焦态（见 CARD-LOADING 的聚焦切换规则） |
 | 落地页视觉/滚动首屏 | `styles-landing.css`, `partials/index-body/part-06.html`（整个落地页）, `index.html`（视差脚本与样式版本）, `scripts/verify-landing-scroll-browser.mjs`（桌面+移动滚动回归） |
 | 卡片 CRUD/筛选/分页 | `legacy/script/`, `card-gallery.js` |
 | 卡片仓库 UI | `styles-warehouse.css`, `styles/base/part-08.css`, `styles/base/part-09.css`, `partials/index-body/part-02.html`, `warehouse-composer.js`, `legacy/script/part-02.js`, `part-03.js`, `part-04.js`, `part-09.js`, `part-10.js` |

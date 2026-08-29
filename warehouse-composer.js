@@ -12,6 +12,9 @@
   let files = [];
   let activeView = 'library';
   let focusActive = false;
+  let focusView = 'library';
+  let focusTransitionTimer = null;
+  let gridCrossfadeTimer = null;
   let catalogLoading = true;
   let catalogRefreshPromise = null;
   const mountedShells = new Map();
@@ -444,22 +447,40 @@
   }
 
   function setFocusState(view, focused) {
+    // Repeated calls with the same view + focus state (re-clicking the active
+    // tab, double taps, duplicate activations) used to restart the whole-grid
+    // crossfade and reparent #cardsContainer. That made the entire card library
+    // visibly disappear and reappear. Treat them as no-ops instead.
+    if (focusActive === focused && focusView === view) return;
     focusActive = focused;
+    focusView = view;
     // 先打过渡类：让网格媒体框高度、卡片位移在聚焦/退出时平滑补间，
     // 再切换 display 类的硬结构（侧栏/头部本身有 420ms 折叠动画）。
     document.body.classList.add('warehouse-focus-transition');
-    window.setTimeout(() => document.body.classList.remove('warehouse-focus-transition'), 560);
+    if (focusTransitionTimer) clearTimeout(focusTransitionTimer);
+    focusTransitionTimer = window.setTimeout(() => {
+      focusTransitionTimer = null;
+      document.body.classList.remove('warehouse-focus-transition');
+    }, 560);
     // 网格内容淡入淡出：先快淡出，切换结构后再淡入，弱化生硬感。
+    // 使用 token 定时器：旧的 remove 不会把新一轮动画的类提前摘掉。
     const grid = document.getElementById('cardsContainer');
     if (grid) {
       grid.classList.remove('warehouse-grid-crossfade');
       void grid.offsetWidth;
       grid.classList.add('warehouse-grid-crossfade');
-      window.setTimeout(() => grid.classList.remove('warehouse-grid-crossfade'), 460);
+      if (gridCrossfadeTimer) clearTimeout(gridCrossfadeTimer);
+      gridCrossfadeTimer = window.setTimeout(() => {
+        gridCrossfadeTimer = null;
+        grid.classList.remove('warehouse-grid-crossfade');
+      }, 460);
     }
     document.body.classList.toggle('warehouse-content-focus', focused);
     ['library', 'community', 'creations'].forEach((name) => document.body.classList.toggle(`warehouse-content-focus--${name}`, focused && name === view));
-    document.body.classList.toggle('warehouse-inline-community-active', view === 'community');
+    // This marker must follow the focus state. Leaving the inline community
+    // view (or leaving the warehouse entirely) must not leave the body marked
+    // as an inline-community presentation.
+    document.body.classList.toggle('warehouse-inline-community-active', focused && view === 'community');
     syncLibraryPresentation(view === 'library' && focused);
     document.querySelectorAll('[data-warehouse-return]').forEach((button) => { button.hidden = !focused; });
     // 聚焦切换会更换卡片库滚动容器（网格 <-> main-content），分页监听与哨兵要跟着走。
@@ -751,7 +772,19 @@
     setFeatureShellMounted('community', false);
     setFeatureShellMounted('creations', false);
   };
-  window.WarehouseComposer = { updateCostHint };
+  // Full exit used by the top-level router when the user leaves the warehouse.
+  // It must do more than restore the borrowed shells: the focused library mode
+  // moves #cardsContainer and the toolbar nodes into #mainContentArea, hides
+  // the composer, and (for inline community/creations) marks the source page
+  // active while its shell is mounted inside the warehouse. Exiting only the
+  // focus class leaves the DOM reparented and community/creations hidden by
+  // `body.warehouse-content-focus #pageCommunity, #pageCreations { display:none }`.
+  window.exitWarehouseFocus = () => {
+    setFocusState(activeView, false);
+    setFeatureShellMounted('community', false);
+    setFeatureShellMounted('creations', false);
+  };
+  window.WarehouseComposer = { updateCostHint, exitFocus: window.exitWarehouseFocus };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind, { once: true });
   else bind();

@@ -3131,13 +3131,15 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
   }
 }
 
-/* 聚焦/退出时网格整体淡入淡出（crossfade，transform+opacity，不卡顿） */
+/* 聚焦/退出时网格整体只做轻微位移，不透明淡出。
+ * 曾经的 opacity:0 -> 1 会让整片卡片在每次切换时"消失再出现"，
+ * 用户感知就是卡片库闪烁；卡片必须全程保持可见。 */
 .app-page-warehouse #cardsContainer.warehouse-grid-crossfade {
-  animation: warehouseGridCrossfade 460ms cubic-bezier(.22, .8, .24, 1) both;
+  animation: warehouseGridCrossfade 420ms cubic-bezier(.22, .8, .24, 1) both;
 }
 @keyframes warehouseGridCrossfade {
-  0% { opacity: 0; transform: translateY(10px); }
-  100% { opacity: 1; transform: none; }
+  0% { transform: translateY(8px); }
+  100% { transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .app-page-warehouse #cardsContainer.warehouse-grid-crossfade { animation: none !important; }

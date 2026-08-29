@@ -85,10 +85,15 @@
         safeForceExitGlobalView(true);
         closeEditPanel();
         if (typeof closeTagSheet === 'function') closeTagSheet();
-        // 社区/我的主页若曾被内联进卡片库，切回原页面前把 feature-shell 移回，避免空白。
-        if (app === 'community' || app === 'creations') {
-          try { window.restoreWarehouseInlineShells?.(); } catch (e) { /* ignore */ }
-        }
+        // Leaving the warehouse must fully exit the focused library /
+        // inline-community presentation. Otherwise the body keeps
+        // `warehouse-content-focus*` classes and the CSS rule that hides
+        // #pageCommunity / #pageCreations stays active, so navigating to
+        // community or creations ends on an active-but-invisible page.
+        try { window.WarehouseComposer?.exitFocus?.(); } catch (e) { /* ignore */ }
+        // Fallback for older/mid-boot loads: move any borrowed feature-shell
+        // back to its source page before the active page is toggled.
+        try { window.restoreWarehouseInlineShells?.(); } catch (e) { /* ignore */ }
       }
       const leavingCommunity = document.getElementById('pageCommunity')?.classList.contains('active') && app !== 'community';
       if (leavingCommunity) {

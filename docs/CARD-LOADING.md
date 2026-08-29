@@ -1,6 +1,6 @@
 # 列表图片加载
 
-复核日期：2026-08-28。下述仓库 UI 对应已上线的 `20260828a` 生图媒体可靠性和卡片库聚焦视图；生产资源以线上 build 和资源 HTTP 冒烟为准。
+复核日期：2026-08-29。下述仓库 UI 对应候选 `20260829o`（尚未上线时不要据此描述生产行为）；生产资源以线上 build 和资源 HTTP 冒烟为准。
 
 ## 目标
 
@@ -53,6 +53,12 @@ authenticated Worker media proxy before browser-side validation and upload.
 `.app-main` 是唯一纵向滚动根。页面、feature shell 和 grid 不得再增加独立 `overflow-y:auto`。横向裁切优先 `overflow-x: clip`，避免浏览器把纵向 visible 计算成新的 auto 滚动容器。
 
 新卡片进入视口可使用轻微 opacity/translate 缓出，但动画不能改变卡片尺寸、触发 Masonry 反复测量或在 `prefers-reduced-motion` 下强制播放。
+
+## 聚焦切换与整片可见性（2026-08-29）
+
+- 卡片库"展开/收起"、内联社区/我的主页的切换必须保持卡片**全程可见**。`warehouse-grid-crossfade` 只允许轻微 `translateY`，不允许 `opacity: 0 -> 1`——整片淡出在用户看来就是"卡片库一下消失一下出现"的闪烁。
+- `setFocusState` 对同一 view + 同一 focus 状态是幂等 no-op；重复点击活动 tab、双击或重复激活不会重新触发 crossfade、不会重复搬移 `#cardsContainer`。crossfade 与 focus-transition 的 class 清理使用带 token 的定时器，旧定时器不能提前摘掉新一轮动画类。
+- 路由离开卡片库时必须调用 `window.WarehouseComposer.exitFocus()`（`warehouse-composer.js`）：它同时恢复 `#cardsContainer`/工具栏的父节点、把借用的 community/creations shell 移回原页面，并清掉 `warehouse-content-focus*` 与 `warehouse-inline-community-active` body class。否则 `switchAppPage` 切到社区/我的主页时目标页 active 但仍被 CSS `display:none`，表现为"点开什么都没有、消失了"。
 
 ## 稳定布局与首屏优先级
 
