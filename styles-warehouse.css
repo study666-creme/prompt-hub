@@ -3157,9 +3157,11 @@ body.warehouse-content-focus--library #cardsContainer.cards-container:not(.list-
 
 /* 展开/收起卡片库切换按钮：固定悬浮在主内容区顶部居中，聚焦态下也保持可见可点 */
 .warehouse-focus-toggle {
-  position: sticky;
-  top: 12px;
-  z-index: 30;
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
   display: inline-flex;
   align-items: center;
   gap: 6px;
