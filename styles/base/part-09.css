@@ -72,6 +72,17 @@
     overflow: hidden;
     position: relative;
   }
+  /* 图片加载后由 JS 写入实际宽高比（card-media--natural-ar）：
+   * 媒体框跟随图片真实比例（内联 aspect-ratio 优先于这里的 3/4），
+   * 横向图完整展示不被竖向框 cover 裁切。 */
+  #cardsContainer:not(.list-view) .card-media.card-media--natural-ar .card-img {
+    position: absolute !important;
+    inset: 0;
+    width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    object-fit: cover !important;
+  }
   #cardsContainer:not(.list-view) .card-media.card-media--await {
     aspect-ratio: 3 / 4;
     max-height: 200px;

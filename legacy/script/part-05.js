@@ -276,6 +276,18 @@
       }
       clearMediaShineWatchdog(shineTarget);
       const cardEl = media.closest('.card[data-id], .card[data-post-id]');
+      // 图片加载完成后：把媒体框宽高比设为图片实际比例，横向图（16:9/21:9）完整展示不被
+      // 3/4 竖向框 cover 裁切。仅在仓库卡片库生效（社区/创作有自己的媒体规则）。
+      const whMedia = !sideBtn && media.closest?.('#cardsContainer:not(.list-view)');
+      if (whMedia && img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+        const ar = img.naturalWidth / img.naturalHeight;
+        if (Number.isFinite(ar) && ar > 0) {
+          // 限制极端比例，避免超宽/超高卡片把瀑布流拉崩
+          const clamped = Math.min(2.4, Math.max(0.42, ar));
+          media.style.setProperty('aspect-ratio', String(clamped.toFixed(3)));
+          media.classList.add('card-media--natural-ar');
+        }
+      }
       const revealKey = img ? (img.currentSrc || img.src || img.dataset.imageRef || '') : '';
       const alreadyRevealed = !sideBtn
         && revealKey
