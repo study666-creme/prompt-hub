@@ -1,6 +1,6 @@
 # Frontend Split Map
 
-Updated: 2026-08-28
+Updated: 2026-08-29
 
 This project still ships classic browser scripts from the site root, but several formerly large files are now thin runtime loaders. The real source is split into ordered chunks so classic script execution order and old global/IIFE behavior stay unchanged.
 
@@ -25,6 +25,7 @@ Do not paste old monolithic code back into these root files. Edit the matching `
 - `styles.css` imports `styles/base/part-*.css`.
 - `styles-features.css` imports `styles/features/part-*.css`.
 - `styles-warehouse.css` is the `20260803a` standalone warehouse UI layer loaded after the shared CSS entries. It is not generated from a split CSS directory.
+- `styles-landing.css` is the standalone landing-page layer. Its markup lives in `partials/index-body/part-06.html` (the whole `#pageLanding` block, split out of part-02 when the scrollable narrative sections pushed it over the 50 KB partial cap), and the pointer-parallax micro-interaction is an inline script in `index.html` (partials must not contain script tags). The hero uses only local `assets/studio-preset/` images and degrades cleanly with reduced motion, touch input, or light theme. The landing page scrolls as a full-page document: `.landing-shell` is the unified fixed scroller on desktop and mobile, while the landing-active `.app-chrome` is demoted to `display:contents` so its 90% ui-scale transform layer cannot cover the landing surface. Below the hero the page continues through workflow steps, feature pillars, a closing CTA, and a footer; `scripts/verify-landing-scroll-browser.mjs` is the focused desktop+mobile scroll regression check.
 
 The source split loaders are synchronous in the repository so local development keeps the old classic-script order. They must not be shipped as the production request graph.
 

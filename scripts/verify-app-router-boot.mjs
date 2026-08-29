@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const routerSource = readFileSync(join(root, 'app-router.js'), 'utf8');
-const bodySource = [
-  'part-01.html',
-  'part-02.html',
-  'part-03.html',
-  'part-04.html'
-].map((name) => readFileSync(join(root, 'partials', 'index-body', name), 'utf8')).join('\n');
+const bodySource = readdirSync(join(root, 'partials', 'index-body'))
+  .filter((name) => /^part-\d+\.html$/.test(name))
+  .sort()
+  .map((name) => readFileSync(join(root, 'partials', 'index-body', name), 'utf8'))
+  .join('\n');
 
 function resolveBootApp(pathname, savedPage = 'community') {
   const window = {

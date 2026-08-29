@@ -1,13 +1,14 @@
 # 代码导航图
 
-最后核对：2026-08-28。
+最后核对：2026-08-29。
 
 ## 入口与构建
 
 | 文件/目录 | 作用 |
 |---|---|
-| `index.html` | 主站 head、body partial loader、脚本顺序、build 与本地缓存恢复 |
-| `partials/index-body/` | 主页面 body 拆分片段 |
+| `index.html` | 主站 head、body partial loader、脚本顺序、build 与本地缓存恢复、落地页指针视差脚本 |
+| `partials/index-body/` | 主页面 body 拆分片段；`part-06.html` 单独承载整个落地页 `#pageLanding`（含 hero、创作流转、功能矩阵、CTA、页脚） |
+| `styles-landing.css` | 落地页视觉与滚动模型：`.landing-shell` 固定全页滚动层、极光背景、卡片扇、滚动叙事区块、深浅主题与移动端布局 |
 | `warehouse-composer.js` | 卡片库首页主输入框：直接创建卡片 / 生图模式、自绘模型比例清晰度菜单、参考图上传拖拽粘贴、文件分类/标签分类/搜索/排序挂载、卡片库社区记录内联聚焦与画布页桥接 |
 | `script.js`, `features-draft.js`, `supabase-sync.js` | 本地 loader；生产 staging 合并对应 `legacy/` |
 | `legacy/` | 主应用、功能、同步、后台和资产工作台源码片段 |
@@ -24,6 +25,7 @@
 | 任务 | 主要文件 |
 |---|---|
 | 路由/首屏页面 | `app-router.js`, `index.html` |
+| 落地页视觉/滚动首屏 | `styles-landing.css`, `partials/index-body/part-06.html`（整个落地页）, `index.html`（视差脚本与样式版本）, `scripts/verify-landing-scroll-browser.mjs`（桌面+移动滚动回归） |
 | 卡片 CRUD/筛选/分页 | `legacy/script/`, `card-gallery.js` |
 | 卡片仓库 UI | `styles-warehouse.css`, `styles/base/part-08.css`, `styles/base/part-09.css`, `partials/index-body/part-02.html`, `warehouse-composer.js`, `legacy/script/part-02.js`, `part-03.js`, `part-04.js`, `part-09.js`, `part-10.js` |
 | 编辑面板多图/移动端遮挡 | `edit-panel-gallery.js`, `card-gallery.js`, `mobile.js`, `styles-mobile.css` |
@@ -42,18 +44,18 @@ terminal-without-URL responses as pending. `pack-feed.js` is generated from
 `image-gen-feed.js`.
 
 Warehouse desktop layout is owned by `legacy/script/part-02.js` and
-`part-03.js` plus `styles/base/part-09.css`. It is a stable CSS Grid; do not
-reintroduce Masonry width/top/left writes for `#cardsContainer`. The focused
-library view (`body.warehouse-content-focus--library`) switches the same grid
-to a column waterfall: `legacy/script/part-03.js`
-`distributeWarehouseFocusColumns` deals cards into `.warehouse-focus-col`
-columns (natural-height media, no cropping, uniform `--card-gap` spacing),
-while `.main-content` becomes the single page scroller and the paging
-sentinel/`warehouseScrollRoot` re-target it (`legacy/script/part-09.js`,
-`part-10.js`, `warehouse-composer.js`). `part-10.js`
-keeps the paging sentinel in normal Grid flow. Exhausted warehouse media
-failures collapse through `styles/base/part-08.css` instead of leaving a black
-slot.
+`part-03.js` plus `styles/base/part-09.css`. It is a CSS multi-column
+waterfall (`column-fill: auto`); do not reintroduce Masonry width/top/left
+writes for `#cardsContainer`. The focused library view
+(`body.warehouse-content-focus--library`, styled in `styles-warehouse.css`)
+uses the same multi-column approach. To prevent columns from rebalancing
+while images load, both modes keep media boxes at a fixed `4/3` aspect ratio
+with `object-fit: cover`. `.main-content` becomes the single page scroller
+and the paging sentinel/`warehouseScrollRoot` re-targets it
+(`legacy/script/part-09.js`, `part-10.js`, `warehouse-composer.js`).
+`part-10.js` keeps the paging sentinel in normal flow. Exhausted warehouse
+media failures collapse through `styles/base/part-08.css` instead of leaving
+a black slot.
 | 社区数据/共享首屏请求 | `community-public-feed.js`, `image-gen-feed.js`, `legacy/features-draft/`, `server/src/routes/v1/community.ts` |
 | 社区布局 | `feed-layout.js`, `styles/features/` |
 | 生图表单 | `legacy/features-draft/`, `imagegen-ref-ui.js`, `imagegen-submit.js` |

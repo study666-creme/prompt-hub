@@ -186,7 +186,8 @@ const cssChunks = [
 
 const htmlPartials = [
   ['/partials/index-body/part-01.html', 'index body partial start', 'app-chrome'],
-  ['/partials/index-body/part-04.html', 'index body partial end', 'mobileBottomNav']
+  ['/partials/index-body/part-04.html', 'index body chrome fragment', 'mobileBottomNav'],
+  ['/partials/index-body/part-06.html', 'index body landing fragment', 'pageLanding']
 ];
 
 for (const [path, label, token] of packs) {
