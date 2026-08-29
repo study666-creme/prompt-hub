@@ -162,6 +162,14 @@
      * 相比 CSS multi-column：浏览器不会在图片加载时 balance 重排把卡片在列之间搬来搬去
      * （那种搬移就是"其他几列疯狂被替换/闪动"的来源）。图片加载只改变该卡片在自己列
      * 内的高度，其他列已有的卡片不会被挤走。 */
+    /** 上一次分发时的列数。列数没变就沿用卡片既有的列归属，
+     * 避免列表重建时整片卡片换列闪烁；列数变了才重新分配。 */
+    let lastFocusColumnCount = 0;
+
+    /** 卡片 id → 列索引。列表重建时卡片是全新 DOM 元素，挂在元素上的
+     * data-wh-col 会跟着丢，所以归属要按卡片 id 记在这里才能跨重建保持。 */
+    const warehouseFocusColById = new Map();
+
     function warehouseFocusColumnCount(columns) {
       const raw = Number.isFinite(columns) && Number(columns) > 0 ? Number(columns) : Number(cardColumns);
       const n = Number.isFinite(raw) ? raw : 4;
@@ -194,15 +202,23 @@
     function flattenWarehouseFocusColumns(container) {
       if (!container) return [];
       const cards = [];
+      // 列容器里的卡片移回直属后也会命中第二个查询，必须去重：
+      // 否则同一张卡片会被收集两次，列高被重复累加、分发结果随之抖动。
+      const seen = new Set();
       container.querySelectorAll(':scope > .warehouse-focus-col').forEach((col) => {
         while (col.firstChild) {
           const node = col.firstChild;
           container.appendChild(node);
-          if (node.nodeType === 1 && node.classList?.contains('card')) cards.push(node);
+          if (node.nodeType === 1 && node.classList?.contains('card')) {
+            cards.push(node);
+            seen.add(node);
+          }
         }
         col.remove();
       });
-      container.querySelectorAll(':scope > .card').forEach((card) => cards.push(card));
+      container.querySelectorAll(':scope > .card').forEach((card) => {
+        if (!seen.has(card)) cards.push(card);
+      });
       container.classList.remove('warehouse-focus-columns');
       return cards.sort((a, b) => warehouseCardOrder(a) - warehouseCardOrder(b));
     }
@@ -267,23 +283,37 @@
       const colWidth = colEls[0].clientWidth || (container.clientWidth / colEls.length) || 300;
       const loads = new Array(colEls.length).fill(0);
       const lastWasText = new Array(colEls.length).fill(false);
+      // 列数没变时沿用卡片上次所属的列：列表重建（刷新/同步/重渲染）后如果每次都
+      // 重新按"最矮列"贪心分配，估算高度的差异会让大量卡片整体换列 —— 表现就是
+      // 整片卡片闪一下重排。只有新卡片（没有列归属）才参与最矮列选择。
+      const reuseColumns = colEls.length === lastFocusColumnCount;
       cardEls.forEach((card) => {
         const isText = card.classList.contains('card--text-only');
-        let target = 0;
-        for (let i = 1; i < loads.length; i += 1) if (loads[i] < loads[target]) target = i;
-        // 若最矮列末尾也是文字卡且当前是文字卡，改放次矮列，避免文字卡堆叠。
-        if (isText && lastWasText[target]) {
-          let best = -1;
-          for (let i = 0; i < loads.length; i += 1) {
-            if (i === target || lastWasText[i]) continue;
-            if (best < 0 || loads[i] < loads[best]) best = i;
+        const cardId = card.dataset.id || '';
+        const remembered = cardId ? warehouseFocusColById.get(cardId) : undefined;
+        let target = -1;
+        if (reuseColumns && Number.isInteger(remembered) && remembered >= 0 && remembered < colEls.length) {
+          target = remembered;
+        } else {
+          target = 0;
+          for (let i = 1; i < loads.length; i += 1) if (loads[i] < loads[target]) target = i;
+          // 若最矮列末尾也是文字卡且当前是文字卡，改放次矮列，避免文字卡堆叠。
+          if (isText && lastWasText[target]) {
+            let best = -1;
+            for (let i = 0; i < loads.length; i += 1) {
+              if (i === target || lastWasText[i]) continue;
+              if (best < 0 || loads[i] < loads[best]) best = i;
+            }
+            if (best >= 0 && loads[best] - loads[target] < 260) target = best;
           }
-          if (best >= 0 && loads[best] - loads[target] < 260) target = best;
         }
         colEls[target].appendChild(card);
+        card.dataset.whCol = String(target);
+        if (cardId) warehouseFocusColById.set(cardId, target);
         loads[target] += estimateWarehouseFocusCardHeight(card, colWidth) + gap;
         lastWasText[target] = isText;
       });
+      lastFocusColumnCount = colEls.length;
     }
     window.distributeWarehouseFocusColumns = distributeWarehouseFocusColumns;
 
@@ -300,11 +330,20 @@
       const colWidth = colEls[0].clientWidth || (container.clientWidth / colEls.length) || 300;
       const loads = warehouseFocusColumnLoads(colEls, colWidth, gap);
       pending.forEach((card) => {
-        let target = 0;
-        for (let i = 1; i < loads.length; i += 1) if (loads[i] < loads[target]) target = i;
+        const cardId = card.dataset.id || '';
+        const remembered = cardId ? warehouseFocusColById.get(cardId) : undefined;
+        let target = -1;
+        if (Number.isInteger(remembered) && remembered >= 0 && remembered < colEls.length) target = remembered;
+        else {
+          target = 0;
+          for (let i = 1; i < loads.length; i += 1) if (loads[i] < loads[target]) target = i;
+        }
         colEls[target].appendChild(card);
+        card.dataset.whCol = String(target);
+        if (cardId) warehouseFocusColById.set(cardId, target);
         loads[target] += estimateWarehouseFocusCardHeight(card, colWidth) + gap;
       });
+      lastFocusColumnCount = colEls.length;
     }
     window.appendWarehouseFocusCards = appendWarehouseFocusCards;
 

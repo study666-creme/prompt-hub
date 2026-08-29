@@ -12,6 +12,10 @@
     min-height: 0 !important;
     overflow-x: hidden !important;
     overflow-y: auto !important;
+    /* 始终为纵向滚动条预留槽位：分页加载时内容一超过一屏，滚动条出现会压窄
+     * 可用宽度，四列整体左移一次、其后每次再变化又移一次 —— 卡片数多（分页持续
+     * 追加）时这种整体位移会反复发生，看起来就是整片卡片在闪。 */
+    scrollbar-gutter: stable;
   }
   #cardsContainer.cards-container.warehouse-focus-columns:not(.list-view):not(.mobile-grid) {
     display: flex !important;
