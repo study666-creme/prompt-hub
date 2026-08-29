@@ -761,6 +761,12 @@
   }
 
   window.activateWarehouseView = activateWarehouseView;
+  // 路由直接切到社区/我的主页时，把之前内联进卡片库的 feature-shell 移回原页面，
+  // 否则原页面会空白（shell 还留在隐藏的 pageWarehouse 里）。
+  window.restoreWarehouseInlineShells = () => {
+    setFeatureShellMounted('community', false);
+    setFeatureShellMounted('creations', false);
+  };
   window.WarehouseComposer = { updateCostHint };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind, { once: true });

@@ -85,6 +85,10 @@
         safeForceExitGlobalView(true);
         closeEditPanel();
         if (typeof closeTagSheet === 'function') closeTagSheet();
+        // 社区/我的主页若曾被内联进卡片库，切回原页面前把 feature-shell 移回，避免空白。
+        if (app === 'community' || app === 'creations') {
+          try { window.restoreWarehouseInlineShells?.(); } catch (e) { /* ignore */ }
+        }
       }
       const leavingCommunity = document.getElementById('pageCommunity')?.classList.contains('active') && app !== 'community';
       if (leavingCommunity) {
