@@ -37,10 +37,10 @@ $files = @(
 )
 $syncCacheAssets = @(
   'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css', 'styles-warehouse.css',
-  'styles-settings.css', 'styles-assets.css',
-  'theme.js', 'api-client.js', 'app-router.js', 'supabase-sync.js', 'script.js',
+  'styles-settings.css', 'styles-assets.css', 'styles-landing.css',
+  'theme.js', 'api-client.js', 'app-router.js', 'supabase-sync.js', 'script.js', 'warehouse-composer.js',
   'features-draft.js', 'features-assets.js', 'community-public-feed.js', 'card-gallery.js',
-  'edit-panel-gallery.js',
+  'edit-panel-gallery.js', 'vendor/supabase.min.js',
   'pack-prelude.js', 'pack-foundation.js', 'pack-core.js', 'pack-viewer.js',
   'pack-appreciate.js', 'pack-lightbox.js', 'pack-feed.js', 'pack-imagegen.js',
   'pack-account.js', 'pack-media-client.js', 'pack-extra.js'
