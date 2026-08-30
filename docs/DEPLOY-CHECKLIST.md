@@ -4,11 +4,16 @@
 
 ## 当前发布状态
 
-本轮已完成 Pages 发布：Git SHA `d396e04`，Pages build `20260829n`，内容为卡片库真瀑布流回归（`2befd61`）与列归属跨重建稳定（`4fa8c77`）。**Worker 与数据库未变更**——本轮改动全是前端 HTML/JS/CSS，按下方「哪些内容需要部署」只走 Pages。
+本轮已完成 Pages 发布：Git SHA `6cd6058`，Pages build `20260830c`，内容为卡片库入场动效、首屏并行预取与 `file://` 指引页。**Worker 与数据库未变更**——本轮改动全是前端 HTML/JS/CSS 与构建脚本，按下方「哪些内容需要部署」只走 Pages。
 
-发布后核对：`https://prompt-hubs.com/prompts/` 返回 `20260829n`；合并产物 `script.js` 含 5 处 `warehouseFocusColById`、`styles-warehouse.css` 含 `scrollbar-gutter`；`run-index-http-smoke.mjs`（`SMOKE_BASE=https://prompt-hubs.com`）24 项全过；`legacy/`、`styles/`、`partials/` 源码片段在线上按预期不可访问。
+发布后核对：`https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260830c'`；线上 `styles.css` 含 `card-enter-pending` / `card-enter-in`；线上 `index.html` 无 `__PH_PART_STORE__` 残留、无 `rel="preload" as="style"` 残留、body 已内联（`__PROMPT_HUB_DEPLOY_BODY__`）；`run-index-http-smoke.mjs`（`SMOKE_BASE=https://prompt-hubs.com`）全过；`legacy/`、`styles/`、`partials/` 源码片段在线上按预期不可访问；`/health` 返回 `ok: true`。
 
 上一轮 Worker 状态仍为 `buildSha=464e06883fc8e304280d49826c58436eab05c2dc`，本轮不动。
+
+> **本次带上的前序提交**：本轮分支在 `d396e04` 之后还累积了 11 个未发布提交（含
+> `f8fb7b7` 聚焦态路由残留修复、`b770327` 未聚焦分页哨兵挤列修复、`ffc8174` composer
+> 版本号失效修复、`7a0f269` pageWarehouse 闭合、`f1749f6` 生图完成自动入库），
+> 已与本次改动一并发布。
 
 ## 发布顺序
 
@@ -166,3 +171,24 @@ PowerShell 把该 stderr 当成 `NativeCommandError` 抛出，于是**部署其�
 ```bash
 SMOKE_BASE=https://prompt-hubs.com node scripts/run-index-http-smoke.mjs
 ```
+
+### 只针对「源码分片」的首屏优化，必须在打包产物里剥掉
+
+源码模式首屏有 39 个分片（6 个 `partials/index-body/part-*.html` + 33 个
+`legacy/**/part-*.js`），`index.html` 因此带了一套「解析期并行预取」和 20 条 CSS
+`preload` 提示。但 `.pages-deploy` 里这些分片已被 `build-pages-runtime.mjs` 合并成
+monolith，源码片段随后被剪掉 —— 那两套提示在生产里**全是死链**，合计约 59 个 404，
+比不优化更糟。
+
+`build-pages-runtime.mjs` 的 `stripBundleOnlyAssets()` 按
+`__PROMPT_HUB_PART_PREFETCH_START__/END__` 与
+`__PROMPT_HUB_CSS_PRELOAD_START__/END__ <entry>` 标记把它们剥掉；**任一标记没匹配到
+就直接构建失败**，避免静默上线一堆 404。
+
+推论（重要）：**任何只针对源码分片的首屏优化，对生产都无效。** 生产是打包后的
+monolith —— body 已内联、`script.js` 是单文件、`styles.css` 已内联，既没有分片请求
+也没有同步 XHR。要改善线上首屏只能从打包体积和阻塞脚本入手（例如
+`pack-imagegen.js` 385KB 的加载时机），而不是继续优化分片请求。
+
+验证方式：`APP_ROOT` 指向 `.pages-deploy` 跑相关的浏览器回归，确保验的是最终产物
+而不是源码树。
