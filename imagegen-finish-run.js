@@ -1,5 +1,5 @@
 /**
- * 生图完成：写入「最近生成」（7 天），不自动入库卡片库
+ * 生图完成：写入「最近生成」并默认自动入库卡片库「图片生成」分组
  */
 (function (global) {
   'use strict';
@@ -280,6 +280,53 @@
       d().renderImageGenFeed({ preserveScroll: true });
       d().renderImageGenMobileResult?.();
 
+      // 默认自动入库：生图完成后直接存进卡片库（未指定分组时归入「图片生成」）。
+      // 手动「存入库」不再必要，仅在自动入库失败（如游客额度满）时作为回退保留。
+      let autoSaved = !!creation.warehouseCardId || !!creation.savedToWarehouse;
+      if (!autoSaved) {
+        try {
+          const saveRes = await global.addCardFromGenerated?.({
+            prompt: prompt || '',
+            image: storedImage,
+            sourceId: creationId,
+            jobId: baseJobId || slotJobId || null,
+            title: (cardTitle || title || '').trim(),
+            resolution,
+            model: modelId,
+            quality,
+            size,
+            targetGroup,
+            targetTags,
+            fromInspirationDraw,
+            silentToast: true,
+            guestQuiet: true,
+            isMidjourney,
+            cardImages: isMidjourney
+              ? (Array.isArray(cardImages) ? cardImages.filter(Boolean).slice(0, 5) : galleryFromMj())
+              : null,
+            mjGridUrls: isMidjourney && Array.isArray(mjGridUrls) ? mjGridUrls : null,
+            mjCompositeUrl: isMidjourney && mjCompositeUrl ? mjCompositeUrl : null,
+            mjButtons: isMidjourney && Array.isArray(mjButtons) ? mjButtons : null,
+            genBatchId: genBatchId || null,
+            refImage: primaryRef,
+            refImages: refImages.length ? refImages : null,
+            referenceAssets: referenceAssets.length ? referenceAssets : null,
+            copyStorage: true,
+            isRecovery: !!isRecovery
+          });
+          if (saveRes?.ok || saveRes?.duplicate) {
+            autoSaved = true;
+            creation.savedToWarehouse = true;
+            creation.warehouseCardId = saveRes.cardId || creation.warehouseCardId || null;
+            creation.updatedAt = Date.now();
+            d().persistCreations?.();
+            d().reconcileCreationsWarehouseLinks?.();
+          }
+        } catch (e) {
+          console.warn('[imagegen] auto warehouse save failed', e);
+        }
+      }
+
       if (archiveJobId) {
         if (isMidjourney) {
           galleryFromMj().forEach((rawImage, galleryIndex) => {
@@ -294,9 +341,10 @@
       }
 
       if (!isRecovery && !silentToast && idx === 1) {
-        d().toast(isMidjourney
-          ? `已生成（最近保留 7 天，喜欢请点「存入库」）· -${cost} 积分`
-          : `已加入最近生成（7 天内可存入库）· -${cost} 积分`);
+        const creditPart = cost > 0 ? `· -${cost} 积分` : '';
+        d().toast(autoSaved
+          ? `已生成并自动存入卡片库「图片生成」${creditPart}`
+          : `已生成 · 图片暂存于最近生成${creditPart}`);
       }
 
       const extras = Array.isArray(extraImages)

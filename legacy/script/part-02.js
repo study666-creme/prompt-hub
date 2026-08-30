@@ -219,7 +219,9 @@
       if (!isUserLoggedIn()) {
         const check = canGuestCreateCard();
         if (!check.ok) {
-          promptLogin(check.msg);
+          // 生图完成后的自动入库静默失败（不弹登录打断生图流程），
+          // 图片留在「最近生成」作为回退，卡片上仍保留手动存入库入口。
+          if (payload.guestQuiet !== true) promptLogin(check.msg);
           return { ok: false };
         }
       }

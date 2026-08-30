@@ -369,6 +369,7 @@
       getFeedScrollRoot,
       safeApplyFeedScrollTop,
       feedScrollIntentActive: (containerId) => !!feedScrollIntent[containerId],
+      feedUserScrollingActive: () => Date.now() < feedUserScrollUntil,
       setFeedLayoutPending,
       ensureFeedPageSentinel,
       revealCommunityFeedImages,
@@ -699,7 +700,7 @@
         <button type="button" class="btn btn-secondary" data-action="remix">再生成</button>
         <button type="button" class="btn btn-secondary" data-action="del">删除记录</button>
       </div>
-      <p class="panel-hint">此处不永久保存图片，记录最多保留 7 天，条数上限随会员等级（轻量 150 / 基础 200 / 标准 300 / 专业 400）。请及时下载或存入库，否则图片可能随时丢失。</p>`;
+      <p class="panel-hint">生图完成后会自动存入卡片库「图片生成」分组，本记录列表最多保留最近条数（轻量 150 / 基础 200 / 标准 300 / 专业 400），移除本记录不影响卡片库中的图片。</p>`;
     bindCommunitySideImageZoom(body, null, c.image, id, { jobId: c.jobId || null });
     body.querySelector('[data-action="remix"]')?.addEventListener('click', () => remixCreation(id));
     body.querySelector('[data-action="del"]')?.addEventListener('click', () => {
@@ -795,7 +796,7 @@
     const linked = isCreationLinkedToWarehouse(c);
     const msg = linked
       ? '确定从最近生成中移除？卡片库里的对应卡片不会被删除。'
-      : '确定删除该条最近生成？未存入库的图片将彻底删除，不可恢复。';
+      : '确定删除该条最近生成？该图可能尚未自动入库，删除后不可恢复。';
     const doDel = () => { void deleteCreation(id); };
     if (typeof window.customConfirm === 'function') {
       window.customConfirm(msg, doDel, null, { danger: true, confirmLabel: linked ? '移除' : '删除' });

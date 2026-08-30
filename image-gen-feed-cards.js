@@ -143,7 +143,12 @@
       const galleryN = Array.isArray(c.cardImages) ? c.cardImages.length
         : (Array.isArray(c.mjGridUrls) ? c.mjGridUrls.length : 0);
       const mjBadge = c.isMidjourney && galleryN > 1 ? `MJ·${galleryN}` : '';
-      const expiry = typeof d().formatExpiryLabel === 'function' ? d().formatExpiryLabel(c) : '';
+      // 已自动入库（或本身就是仓库卡片）的不显示 7 天到期提示，也不显示「存入库」
+      // 按钮；仅自动入库失败的回退记录保留到期提示与手动存入库入口。
+      const warehouseLinked = !!(c.__fromWarehouse || c.savedToWarehouse || c.warehouseCardId);
+      const expiry = !warehouseLinked && typeof d().formatExpiryLabel === 'function'
+        ? d().formatExpiryLabel(c)
+        : '';
       const metaLine = [model, mjBadge, expiry].filter(Boolean).join(' · ');
       const image = d().pickCreationFeedImage?.(c)
         || c.image
@@ -163,7 +168,7 @@
         metaLine,
         meta: '',
         showDel: true,
-        showSave: true
+        showSave: !warehouseLinked
       });
     }
 

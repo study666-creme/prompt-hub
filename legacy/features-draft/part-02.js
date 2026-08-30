@@ -893,7 +893,7 @@
   function getRecentCreationsForFeed() {
     pruneCreations();
     const now = Date.now();
-    // 临时最近生成（未入库，保留 7 天）
+    // 未自动入库的临时最近生成（游客额度满等回退场景才存在）
     const temp = creations
       .filter((c) => c?.id && (!c.expiresAt || c.expiresAt > now))
       .filter((c) => creationHasFeedImage(c));

@@ -31,6 +31,7 @@
   const feedGridImageRelayoutBound = {};
   const resizeRelayoutBound = {};
   const visibilityWaitTimers = {};
+  const scrollWaitRelayout = {};
   const widthRetryCounts = {};
   let masonryRelayoutTimer = null;
   let masonryRelayoutPending = 0;
@@ -767,6 +768,32 @@
       return;
     }
     if (isMobile()) return;
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    // 用户滚动中图片陆续加载会让卡片高度逐个变化，立即 layout 会让整列上下
+    // 跳动（浏览时闪烁重绘）。等滚动停稳后再重排；最多等 2.4s，避免无限拖延。
+    const userScrolling = typeof d().feedUserScrollingActive === 'function'
+      && d().feedUserScrollingActive(containerId);
+    if (userScrolling) {
+      clearTimeout(scrollWaitRelayout[containerId]);
+      const startedAt = Date.now();
+      const retry = () => {
+        if (!document.getElementById(containerId)) return;
+        const still = typeof d().feedUserScrollingActive === 'function'
+          && d().feedUserScrollingActive(containerId);
+        if (still && Date.now() - startedAt < 2400) {
+          scrollWaitRelayout[containerId] = setTimeout(retry, 300);
+          return;
+        }
+        scheduleMasonryRelayoutNow(containerId);
+      };
+      scrollWaitRelayout[containerId] = setTimeout(retry, 340);
+      return;
+    }
+    scheduleMasonryRelayoutNow(containerId);
+  }
+
+  function scheduleMasonryRelayoutNow(containerId) {
     const container = document.getElementById(containerId);
     if (!container) return;
     const inst = containerId === 'userProfileGrid' ? profileMasonry : communityMasonry;

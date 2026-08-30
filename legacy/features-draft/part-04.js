@@ -797,7 +797,10 @@
     }
     const container = document.getElementById(containerId);
     if (!container) return;
-    const run = () => settleCommunityFeedLayout(containerId, { recalcCols: true });
+    // 图片加载完成后的排版沉降走轻量路径（少几轮重排）。用户正在滚动时先不
+    // 动 Masonry——图片高度逐个变化会让整列上下跳，等停稳后再排。
+    const run = () => settleWhenIdle(containerId, () =>
+      settleCommunityFeedLayout(containerId, { recalcCols: true, fromImage: true }));
     const imgs = [...container.querySelectorAll('.card-img')];
     const pending = imgs.filter((img) => feedImgStillPending(img));
     if (!pending.length) {
@@ -820,6 +823,16 @@
       img.addEventListener('error', tick, { once: true });
     });
     setTimeout(finish, 2800);
+  }
+
+  /** 滚动停稳后再执行排版：轮询 feedUserScrollUntil，最多等 2.6s。 */
+  function settleWhenIdle(containerId, run, startedAt = Date.now()) {
+    if (!document.getElementById(containerId)) return;
+    if (Date.now() < feedUserScrollUntil && Date.now() - startedAt < 2600) {
+      setTimeout(() => settleWhenIdle(containerId, run, startedAt), 360);
+      return;
+    }
+    run();
   }
 
   const feedLayoutSettleSeq = Object.create(null);

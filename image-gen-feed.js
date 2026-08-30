@@ -5,7 +5,7 @@
   'use strict';
 
   const IMAGEGEN_FEED_PER_PAGE = 12;
-  /** 生图页右侧「最近生成」列表（7 天内，与卡片库解耦） */
+  /** 生图页右侧「最近生成」列表（仓库卡 + 未自动入库的回退记录） */
   const IMAGEGEN_RECENT_FEED_MAX = 200;
   /** 自动滚动/哨兵最多追加页数（12×4=48 张） */
   const IMAGEGEN_FEED_MAX_AUTO_PAGES = 4;
@@ -995,7 +995,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
 
     function buildRecentLibraryCtaHtml() {
       return `<div class="imagegen-feed-library-cta" data-imagegen-feed-footer="recent" role="note">
-        <p class="imagegen-feed-library-cta-text">最近生成有条数上限 · 点卡片下方 × 可删除 · 喜欢请「存入库」</p>
+        <p class="imagegen-feed-library-cta-text">生图完成会自动存入卡片库「图片生成」分组 · 点卡片下方 × 仅从本列表移除</p>
         <a href="/prompts" class="btn btn-secondary btn-sm imagegen-feed-library-link" data-open-warehouse="1">打开卡片库</a>
       </div>`;
     }
@@ -1317,7 +1317,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           if (!pending.length && !failed.length && !list.length) {
             html = opts.recentSyncing
               ? `<div class="imagegen-feed-empty-wrap imagegen-feed-syncing" role="status" aria-live="polite"><span class="imagegen-feed-sync-spinner" aria-hidden="true"></span><p class="imagegen-feed-empty">正在同步最近生成…</p></div>`
-              : `<div class="imagegen-feed-empty-wrap"><p class="imagegen-feed-empty">暂无最近生成<span class="imagegen-feed-empty-hint">生图成功后会出现在这里 · 保留 7 天 · 仅未存入库的到期自动清理</span></p></div>`;
+              : `<div class="imagegen-feed-empty-wrap"><p class="imagegen-feed-empty">暂无最近生成<span class="imagegen-feed-empty-hint">生图成功后会出现在这里，并自动存入卡片库「图片生成」分组</span></p></div>`;
           } else {
             html = pending.map((j) => buildFeedPendingCardHtml(j)).join('')
               + failed.map((j) => buildFeedFailedCardHtml(j)).join('')

@@ -602,14 +602,14 @@
           : tier === 'basic' ? '基础版'
             : tier === 'lite' ? '轻量版' : '免费';
       if (!n) {
-        el.textContent = `这里不永久保存图片 · 最多保留 7 天 / ${max} 条（${tierHint}）· 请及时下载或存入库，否则可能随时丢失`;
+        el.textContent = `生图完成会自动存入卡片库「图片生成」分组 · 本列表最多显示最近 ${max} 条（${tierHint}）`;
         el.hidden = false;
         return;
       }
       el.hidden = false;
       el.textContent = mobile
-        ? `最近 ${n}/${max} 条 · 不永久保存，请及时下载或存入库，否则可能丢失`
-        : `最近 ${n}/${max} 条（${tierHint}）· 最多保留 7 天 · 此处不永久保存，请及时下载或存入库，否则图片可能随时丢失`;
+        ? `最近 ${n}/${max} 条 · 已自动存入卡片库「图片生成」分组`
+        : `最近 ${n}/${max} 条（${tierHint}）· 生图已自动存入卡片库「图片生成」分组`;
       return;
     }
     el.hidden = false;
