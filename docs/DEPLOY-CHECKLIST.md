@@ -4,28 +4,22 @@
 
 ## 当前发布状态
 
-本轮已完成 Pages 发布：Git SHA `ec04515`，Pages build `20260830e`，内容为卡片库入场动效、首屏并行预取、`file://` 指引页与首屏图片 WebP 化。**Worker 与数据库未变更**——本轮改动全是前端 HTML/JS/CSS、图片资源与构建/校验脚本，按下方「哪些内容需要部署」只走 Pages。
+本轮已完成 Pages 发布：Git SHA `b7604c1`，Pages build `20260830f`，内容为卡片库入场动效、首屏并行预取、`file://` 指引页、首屏图片 WebP 化与非首屏脚本延迟加载。**Worker 与数据库未变更**——本轮改动全是前端 HTML/JS/CSS、图片资源与构建/校验脚本，按下方「哪些内容需要部署」只走 Pages。
 
-发布后核对：`https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260830e'`；线上 `styles.css` 含 `card-enter-pending` / `card-enter-in`；线上 `index.html` 无 `__PH_PART_STORE__` 残留、无 `rel="preload" as="style"` 残留、body 已内联（`__PROMPT_HUB_DEPLOY_BODY__`）、含 6 处 `<source srcset=>`（落地页 3 + 仓库 3）；`run-index-http-smoke.mjs`（`SMOKE_BASE=https://prompt-hubs.com`）全过；`legacy/`、`styles/`、`partials/` 源码片段在线上按预期不可访问；`/health` 返回 `ok: true`。
+发布后核对：`https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260830f'`；线上 `styles.css` 含 `card-enter-pending` / `card-enter-in`；线上 `index.html` 无 `__PH_PART_STORE__` 残留、无 `rel="preload" as="style"` 残留、body 已内联（`__PROMPT_HUB_DEPLOY_BODY__`）、含 6 处 `<source srcset=>`（落地页 3 + 仓库 3）、含 `__PH_DEFERRED_PACKS_START__` 且不再有阻塞式 `pack-imagegen.js` 标签；五个延迟 pack 在线上均可访问（200）；`run-index-http-smoke.mjs`（`SMOKE_BASE=https://prompt-hubs.com`）全过；`legacy/`、`styles/`、`partials/` 源码片段在线上按预期不可访问；`/health` 返回 `ok: true`。
 
 首屏实测（`https://prompt-hubs.com/`，浏览器 Resource Timing）：
 
-| | 优化前 | 现在 |
+| | 本轮开始前 | 现在 |
 |---|---:|---:|
-| 传输量 | 1222KB | **924KB** |
+| 传输量 | 1222KB | **917KB**（-25%） |
 | 图片 | 590KB（4 张 PNG） | **232KB**（3 张 WebP + logo-64） |
-| FCP | 约 5.9s | **0.82～0.92s** |
+| FCP - TTFB（前端处理部分） | 约 595ms | **547ms** |
+| FCP（含网络） | — | 约 1.1s（TTFB 约 0.63s） |
 
-注意：优化前那次 5.9s FCP 里混进了自定义域名的**瞬时** TLS 慢握手（当时 5.2s，同期
-`prompt-hub-hub.pages.dev` 仅 0.6s），复测已恢复到约 0.5s。不要把那 5.9s 当成纯前端耗时，
-但它说明自定义域名的 TLS 值得偶尔复查一次。
+收益主要来自**图片**（传输量 -25%）。非首屏脚本延迟加载是真实但较小的收益：本机 A/B（同一份打包产物、只切换加载方式、各 5 次取中位数）为 FCP -48ms / DCL -70ms / load -48ms。生产环境这个量级会淹没在网络抖动里，衡量它请用「FCP - TTFB」而不是裸 FCP。
 
-上一轮 Worker 状态仍为 `buildSha=464e06883fc8e304280d49826c58436eab05c2dc`，本轮不动。
-
-> **本次带上的前序提交**：本轮分支在 `d396e04` 之后还累积了 11 个未发布提交（含
-> `f8fb7b7` 聚焦态路由残留修复、`b770327` 未聚焦分页哨兵挤列修复、`ffc8174` composer
-> 版本号失效修复、`7a0f269` pageWarehouse 闭合、`f1749f6` 生图完成自动入库），
-> 已与本次改动一并发布。
+测量注意：自定义域名曾出现**瞬时** 5.2s TLS 握手（同期 `prompt-hub-hub.pages.dev` 仅 0.6s），复测恢复到约 0.5–0.7s。单次慢测量不能当作前端问题，先比对 pages.dev 与对照站点。
 
 ## 发布顺序
 
@@ -223,3 +217,27 @@ monolith —— body 已内联、`script.js` 是单文件、`styles.css` 已内�
 
 这些 PNG 已经是优化过的：Pillow 无损重编码（`optimize=True`）反而让它们**变大 435%**
 （658KB → 3520KB）。要省体积只能换格式（WebP 省 53%），不要试图重新压 PNG。
+
+### 延迟加载的 pack 会被 stage-pages 裁掉
+
+`stage-pages.ps1` 靠扫描入口 HTML 的 `src="..."` / `href="..."` 收集根目录白名单文件。
+改为首帧后动态注入的 pack 不再以 `src=` 出现，会被**静默裁出暂存包** —— 源码模式和
+本地预览一切正常，只有线上缺文件、功能静默失效，极易漏过。
+
+已修：从 `index.html` 的 `__PH_DEFERRED_PACKS_START__/END__` 标记块读出队列并加入白名单。
+新增延迟项时必须在标记块里登记，否则同样会被裁掉。
+
+同理，`verify-pack-contract.mjs` 原本只认 `<script src="pack.js?v=...">`，已改为阻塞式
+src 与延迟队列命中任意一种即可，但仍要求至少命中一种。
+
+### 改延迟加载时的两个顺序约束
+
+`pack-imagegen` / `pack-feed` / `community-public-feed` / `features-draft` / `pack-extra`
+必须**串行**按此顺序注入，不能并行 async：
+
+1. `features-draft` 初始化会用到 `pack-imagegen` 的 `ImageGenJobRunner`（缺了会报
+   `[FeatureDraft] pack-imagegen.js not loaded`）。
+2. feed 包版本校验（原本是 `pack-feed.js` 后面的内联脚本，版本不符就 reload 整页）
+   必须跟着 `pack-feed` 走。留在原地会在 pack-feed 到达之前就判定不符并 reload。
+
+回归里有三条断言守着「延迟脚本最终必须补齐」，别删。
