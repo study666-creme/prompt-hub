@@ -895,3 +895,56 @@
   .warehouse-hero-card--middle,
   .warehouse-hero-card--front { animation: none; }
 }
+
+/* ===== 仓库卡片入场（2026-08-30）=====
+ * 旧版 .card-enter / .card-enter-soft 是死代码：选择器只匹配 #cardsContainer 的
+ * 直接子卡片，而桌面列容器瀑布流把卡片放进 .warehouse-focus-col，永远命中不了；
+ * 而且它们用的是 animation —— 瀑布流分发卡片时 appendChild 移动节点会重启 CSS
+ * animation，整片卡片反复重放就是"疯狂闪动"，所以当年整段被摘掉了。
+ *
+ * 重写要点：
+ *   - 用 transition 而不是 animation：transition 只在计算值变化时播放，重插节点
+ *     不会重放，从根子上避开闪动。
+ *   - 位移放在 .card-media / .card-body 上，不放 .card：.card 的 transform 已被
+ *     hover（translateY(-6px) scale(1.018)）占用，两者叠在同一属性上会互相打断。
+ *   - 只动 opacity / transform，不改变卡片尺寸，不会触发瀑布流重排，也不会在
+ *     prefers-reduced-motion 下强制播放（JS 侧也会直接跳过）。 */
+#cardsContainer .card.card-enter-pending {
+  opacity: 0;
+}
+#cardsContainer .card.card-enter-pending > .card-media,
+#cardsContainer .card.card-enter-pending > .card-body {
+  transform: translate3d(0, 12px, 0);
+}
+#cardsContainer .card.card-enter-in {
+  /* 保留 .card 原有的 transform / box-shadow / filter 过渡，
+   * 只额外补一条 opacity，避免入场期间 hover 的位移和阴影变成硬跳。 */
+  transition:
+    opacity 400ms var(--ease-out) var(--card-enter-delay, 0ms),
+    transform 0.2s var(--ease-spring),
+    box-shadow 0.22s var(--ease-out),
+    filter 0.2s var(--ease-out);
+}
+#cardsContainer .card.card-enter-in > .card-media,
+#cardsContainer .card.card-enter-in > .card-body {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 400ms var(--ease-out) var(--card-enter-delay, 0ms),
+    transform 400ms var(--ease-out) var(--card-enter-delay, 0ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  #cardsContainer .card.card-enter-pending,
+  #cardsContainer .card.card-enter-pending > .card-media,
+  #cardsContainer .card.card-enter-pending > .card-body {
+    opacity: 1;
+    transform: none;
+  }
+  #cardsContainer .card.card-enter-in,
+  #cardsContainer .card.card-enter-in > .card-media,
+  #cardsContainer .card.card-enter-in > .card-body {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}

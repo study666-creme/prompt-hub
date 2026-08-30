@@ -18,6 +18,12 @@ Root loader files:
 
 Do not paste old monolithic code back into these root files. Edit the matching `legacy/.../part-*.js` chunk, then run the checks below.
 
+**Chunk prefetch contract.** Each loader still runs synchronously (downstream classic scripts depend on that ordering), but it no longer pays a serial blocking round trip per chunk. `index.html` fires one parallel `fetch()` per chunk during head parsing and stores the response text in `window.__PH_PART_STORE__.text`, keyed by the chunk's relative path **without** the `?v=` query. Every loader checks that map first and falls back to synchronous XHR only on a miss. Consequences:
+
+- The loader template lives in `scripts/create-legacy-runtime-split.mjs`; editing a generated root loader by hand will be lost the next time the splitter runs.
+- A new `legacy/.../part-*.js` chunk must also be added to the prefetch list in `index.html`, or it silently degrades to the old serial path.
+- The map is keyed by path only, so a `?v=` mismatch never causes a wrong-file mixup — worst case is a redundant fetch.
+
 ## HTML And CSS Splits
 
 - `index.html` keeps the head and script order, while the body DOM is loaded from `partials/index-body/part-*.html`. The boot loader detects a stale full-document response from an older local service worker, clears Prompt Hub caches once, and retries; `?clear-cache=1` forces the same local recovery path.

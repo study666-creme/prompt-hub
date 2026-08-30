@@ -16,16 +16,23 @@
   var current = document.currentScript;
   var baseUrl = current && current.src ? current.src : 'imagegen-prompt-kit.js';
   var version = (baseUrl.match(/[?&]v=([^&]+)/) || [])[1] || window.__APP_BUILD__ || String(Date.now());
+  // 首屏并行预取：index.html 在解析期已用 fetch 并行取走这些分片并缓存文本，
+  // 命中时直接取用，未命中才退回同步 XHR —— 把 N 个串行阻塞 RTT 压成 1 次并行等待。
+  var store = window.__PH_PART_STORE__;
   var code = '';
   for (var i = 0; i < parts.length; i += 1) {
-    var url = new URL(parts[i] + '?v=' + encodeURIComponent(version), baseUrl).href;
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', url, false);
-    xhr.send(null);
-    if ((xhr.status && (xhr.status < 200 || xhr.status >= 300)) || !xhr.responseText) {
-      throw new Error('Failed to load imagegen-prompt-kit.js chunk: ' + parts[i] + ' (' + xhr.status + ')');
+    var chunk = store && store.text ? store.text.get(parts[i]) : null;
+    if (chunk == null) {
+      var url = new URL(parts[i] + '?v=' + encodeURIComponent(version), baseUrl).href;
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', url, false);
+      xhr.send(null);
+      if ((xhr.status && (xhr.status < 200 || xhr.status >= 300)) || !xhr.responseText) {
+        throw new Error('Failed to load imagegen-prompt-kit.js chunk: ' + parts[i] + ' (' + xhr.status + ')');
+      }
+      chunk = xhr.responseText;
     }
-    code += xhr.responseText + '\n';
+    code += chunk + '\n';
   }
   (0, eval)(code + '\n//# sourceURL=imagegen-prompt-kit.js.legacy-runtime.js');
 })();

@@ -5,7 +5,7 @@
   <base href="/">
 
   <script>
-    window.__APP_BUILD__ = '20260830b';
+    window.__APP_BUILD__ = '20260830c';
     (function () {
       var key = 'promptrepo_app_build';
       var cur = window.__APP_BUILD__;
@@ -36,6 +36,29 @@
       // service worker cannot leave the page with an empty black body.
       window.__PROMPT_HUB_PURGE_CACHES__ = purgeCachesAndSw;
       window.__PROMPT_HUB_BOOT_RECOVERY__ = function (error) {
+        if (window.location.protocol === 'file:') {
+          // file:// 协议下浏览器拒绝跨文件 XHR / fetch，body 片段与脚本分片都会失败。
+          // 这里不能套用 SW 缓存清理 + reload 的恢复流程：重载同一个 file:// URL
+          // 毫无意义，而且会盖掉 pack-prelude 的文件源横幅。直接给出本地服务器
+          // 指引，避免用户对着"恢复卡藏"误以为需要清缓存。
+          try {
+            document.documentElement.style.background = '#101114';
+            document.body.innerHTML = '';
+            var box = document.createElement('main');
+            box.setAttribute('role', 'alert');
+            box.style.cssText = 'box-sizing:border-box;min-height:100vh;display:grid;place-items:center;padding:32px;background:#101114;color:#f4f5f7;font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;text-align:center';
+            box.innerHTML = '<div style="max-width:560px;text-align:left">'
+              + '<h1 style="margin:0 0 14px;font-size:22px;text-align:center">请用本地服务器打开</h1>'
+              + '<p style="margin:0 0 14px;color:#b8bec8">当前地址是 <code style="background:#2a2a32;padding:2px 6px;border-radius:4px">file://</code>，浏览器禁止从 <code style="background:#2a2a32;padding:2px 6px;border-radius:4px">file://</code> 发起跨文件的 XHR / fetch，所以 body 片段和脚本分片都加载不到。</p>'
+              + '<p style="margin:0 0 14px;color:#b8bec8">本机预览：在 index.html 所在文件夹打开 PowerShell，执行：</p>'
+              + '<pre style="margin:0 0 14px;padding:12px;background:#121218;border-radius:8px;font-size:13px;overflow:auto;white-space:pre-wrap">.\\serve-local.ps1</pre>'
+              + '<p style="margin:0 0 0;color:#b8bec8">然后用浏览器访问 <a href="http://127.0.0.1:5500" style="color:#7eb8ff">http://127.0.0.1:5500</a>。</p>'
+              + '<p style="margin:14px 0 0;color:#737b87;font-size:13px;text-align:center">错误：' + String(error && error.message || '').replace(/[<>]/g, '') + '</p>'
+              + '</div>';
+            document.body.appendChild(box);
+          } catch (e) { /* keep best-effort */ }
+          return;
+        }
         var onceKey = 'promptrepo_boot_recovery_once_' + recoveryRevision;
         var alreadyRetried = false;
         try { alreadyRetried = sessionStorage.getItem(onceKey) === '1'; } catch (e) { /* ignore */ }
@@ -96,6 +119,88 @@
       if (!prev) localStorage.setItem(key, cur);
     })();
   </script>
+  <!-- __PROMPT_HUB_PART_PREFETCH_START__ -->
+  <!--
+    首屏并行预取：首屏原本要用 39 次**串行同步 XHR** 取内容 —— 6 个 body 片段、
+    13 个 legacy/script 分片、7 个 legacy/supabase-sync 分片、13 个
+    legacy/features-draft 分片。同步 XHR 会完全冻结主线程，串行又让每个分片各付
+    一次 RTT，合计约 1.36MB / 39 次往返，是首屏卡顿的主因。
+    这里在 HTML 解析期就一次性并行发出全部请求，把响应文本存进内存表；后面的同步
+    加载器（index body 片段与各 legacy 拆分加载器）命中即取，未命中才退回同步 XHR。
+    净效果：39 次串行往返压成一次并行等待，主线程阻塞时间从 sum(RTT) 降到 ~max(RTT)。
+  -->
+  <script>
+    (function () {
+      if (typeof fetch !== 'function' || typeof Map !== 'function') return;
+      if (window.location.protocol === 'file:') return;
+      var store = window.__PH_PART_STORE__ = window.__PH_PART_STORE__ || { text: new Map() };
+      var paths;
+      // 关键路径优先：body 片段直接决定首屏 DOM，script.js 分片紧随其后；
+      // supabase-sync / features-draft 要到 body 末尾才用得上，让它们排后面，
+      // 免得在带宽紧张时把首屏真正等的那几个挤到队尾。
+      var critical = [
+        'partials/index-body/part-01.html',
+        'partials/index-body/part-02.html',
+        'partials/index-body/part-03.html',
+        'partials/index-body/part-04.html',
+        'partials/index-body/part-05.html',
+        'partials/index-body/part-06.html',
+        'legacy/script/part-01.js',
+        'legacy/script/part-02.js',
+        'legacy/script/part-03.js',
+        'legacy/script/part-04.js',
+        'legacy/script/part-05.js',
+        'legacy/script/part-06.js',
+        'legacy/script/part-07.js',
+        'legacy/script/part-08.js',
+        'legacy/script/part-09.js',
+        'legacy/script/part-10.js',
+        'legacy/script/part-11.js',
+        'legacy/script/part-12.js',
+        'legacy/script/part-13.js'
+      ];
+      var deferred = [
+        'legacy/supabase-sync/part-01.js',
+        'legacy/supabase-sync/part-02.js',
+        'legacy/supabase-sync/part-03.js',
+        'legacy/supabase-sync/part-04.js',
+        'legacy/supabase-sync/part-05.js',
+        'legacy/supabase-sync/part-06.js',
+        'legacy/supabase-sync/part-07.js',
+        'legacy/features-draft/part-01.js',
+        'legacy/features-draft/part-02.js',
+        'legacy/features-draft/part-03.js',
+        'legacy/features-draft/part-04.js',
+        'legacy/features-draft/part-05.js',
+        'legacy/features-draft/part-06.js',
+        'legacy/features-draft/part-07.js',
+        'legacy/features-draft/part-08.js',
+        'legacy/features-draft/part-09.js',
+        'legacy/features-draft/part-10.js',
+        'legacy/features-draft/part-11.js',
+        'legacy/features-draft/part-12.js',
+        'legacy/features-draft/part-13.js'
+      ];
+      var version = encodeURIComponent(window.__APP_BUILD__ || 'dev');
+      paths = critical.concat(deferred);
+      for (var i = 0; i < paths.length; i += 1) {
+        (function (path, priority) {
+          var opts = { credentials: 'same-origin' };
+          // priority 是给浏览器的调度提示，不支持的浏览器会直接忽略。
+          if (priority) opts.priority = priority;
+          fetch(path + '?v=' + version, opts)
+            .then(function (res) {
+              if (!res.ok) throw new Error(String(res.status));
+              return res.text();
+            })
+            .then(function (text) {
+              store.text.set(path, text);
+            }, function () { /* 失败不缓存，同步加载器自动退回 XHR */ });
+        })(paths[i], i < critical.length ? 'high' : 'low');
+      }
+    })();
+  </script>
+  <!-- __PROMPT_HUB_PART_PREFETCH_END__ -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#121212">
@@ -162,16 +267,46 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="styles.css?v=20260830b">
-  <link rel="stylesheet" href="styles-theme.css?v=20260830b">
-  <link rel="stylesheet" href="styles-landing.css?v=20260830b">
+  <!--
+    styles.css 只是一份 @import 清单，浏览器要等它下载并解析完才能发现下面 9 个
+    真实分片，等于让全部基础样式多等一次阻塞往返。预加载扫描器可以直接从这份 HTML
+    看到这些链接并与清单并行取走。版本号由 scripts/create-css-runtime-split.mjs 维护。
+  -->
+  <!-- __PROMPT_HUB_CSS_PRELOAD_START__ styles.css -->
+  <link rel="preload" as="style" href="styles/base/part-01.css?v=20260718f">
+  <link rel="preload" as="style" href="styles/base/part-02.css?v=20260718f">
+  <link rel="preload" as="style" href="styles/base/part-03.css?v=20260718f">
+  <link rel="preload" as="style" href="styles/base/part-04.css?v=20260718f">
+  <link rel="preload" as="style" href="styles/base/part-05.css?v=20260718f">
+  <link rel="preload" as="style" href="styles/base/part-06.css?v=20260718f">
+  <link rel="preload" as="style" href="styles/base/part-07.css?v=20260718f">
+  <link rel="preload" as="style" href="styles/base/part-08.css?v=20260718f">
+  <link rel="preload" as="style" href="styles/base/part-09.css?v=20260718f">
+  <!-- __PROMPT_HUB_CSS_PRELOAD_END__ styles.css -->
+  <link rel="stylesheet" href="styles.css?v=20260830c">
+  <link rel="stylesheet" href="styles-theme.css?v=20260830c">
+  <link rel="stylesheet" href="styles-landing.css?v=20260830c">
   <link rel="preload" as="image" href="assets/studio-preset/linche.png" media="(min-width: 901px)">
-  <link rel="stylesheet" href="styles-mobile.css?v=20260830b">
-  <link rel="stylesheet" href="styles-settings.css?v=20260830b">
-  <link rel="stylesheet" href="styles-features.css?v=20260830b">
-  <link rel="stylesheet" href="styles-assets.css?v=20260830b">
-  <link rel="stylesheet" href="styles-warehouse.css?v=20260830b">
-  <script src="pack-prelude.js?v=20260830b"></script>
+  <link rel="stylesheet" href="styles-mobile.css?v=20260830c">
+  <link rel="stylesheet" href="styles-settings.css?v=20260830c">
+  <!-- 同上：styles-features.css 也是 @import 清单，这里把 11 个分片提前并行取走。 -->
+  <!-- __PROMPT_HUB_CSS_PRELOAD_START__ styles-features.css -->
+  <link rel="preload" as="style" href="styles/features/part-01.css?v=20260828a">
+  <link rel="preload" as="style" href="styles/features/part-02.css?v=20260828a">
+  <link rel="preload" as="style" href="styles/features/part-03.css?v=20260828a">
+  <link rel="preload" as="style" href="styles/features/part-04.css?v=20260828a">
+  <link rel="preload" as="style" href="styles/features/part-05.css?v=20260828a">
+  <link rel="preload" as="style" href="styles/features/part-06.css?v=20260828a">
+  <link rel="preload" as="style" href="styles/features/part-07.css?v=20260828a">
+  <link rel="preload" as="style" href="styles/features/part-08.css?v=20260828a">
+  <link rel="preload" as="style" href="styles/features/part-09.css?v=20260828a">
+  <link rel="preload" as="style" href="styles/features/part-10.css?v=20260828a">
+  <link rel="preload" as="style" href="styles/features/part-11.css?v=20260828a">
+  <!-- __PROMPT_HUB_CSS_PRELOAD_END__ styles-features.css -->
+  <link rel="stylesheet" href="styles-features.css?v=20260830c">
+  <link rel="stylesheet" href="styles-assets.css?v=20260830c">
+  <link rel="stylesheet" href="styles-warehouse.css?v=20260830c">
+  <script src="pack-prelude.js?v=20260830c"></script>
 </head>
 <body>
   <noscript>
@@ -260,21 +395,29 @@
         "partials/index-body/part-06.html"
       ];
       var version = encodeURIComponent(window.__APP_BUILD__ || 'dev');
+      var partStore = window.__PH_PART_STORE__;
       var html = '';
       try {
         for (var i = 0; i < parts.length; i += 1) {
-          var xhr = new XMLHttpRequest();
-          xhr.open('GET', parts[i] + '?v=' + version, false);
-          xhr.send(null);
-          var responseText = xhr.responseText || '';
-          var statusOk = (xhr.status >= 200 && xhr.status < 300) || (xhr.status === 0 && responseText);
+          // 优先取解析期并行预取的文本；未命中才退回同步 XHR（预取器见 <head>）。
+          var responseText = (partStore && partStore.text && partStore.text.get(parts[i])) || '';
+          var status = 200;
+          if (!responseText) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', parts[i] + '?v=' + version, false);
+            xhr.send(null);
+            responseText = xhr.responseText || '';
+            status = xhr.status;
+            var statusOk = (status >= 200 && status < 300) || (status === 0 && responseText);
+            if (!statusOk) responseText = '';
+          }
           // A legacy service worker may answer a partial request with the
           // cached full index document. Treat that as a boot failure so the
           // recovery hook can unregister it and retry instead of rendering a
           // blank page.
           var looksLikeDocument = /<!doctype\s+html|<html[\s>]/i.test(responseText);
-          if (!statusOk || !responseText || looksLikeDocument) {
-            throw new Error('Prompt Hub index body partial failed to load: ' + parts[i] + ' (' + xhr.status + ')');
+          if (!responseText || looksLikeDocument) {
+            throw new Error('Prompt Hub index body partial failed to load: ' + parts[i] + ' (' + status + ')');
           }
           html += responseText;
         }
@@ -294,12 +437,12 @@
       }
     })();
   </script>
-  <script src="vendor/supabase.min.js?v=20260830b"></script>
+  <script src="vendor/supabase.min.js?v=20260830c"></script>
   <script src="api-domain.config.js"></script>
   <script src="canvas-domain.config.js"></script>
   <script src="supabase-config.js"></script>
   <script src="api-config.js?v=20260610a2b"></script>
-  <script src="api-client.js?v=20260830b"></script>
+  <script src="api-client.js?v=20260830c"></script>
   <script>
     (function () {
       var FALLBACK = [
@@ -354,21 +497,21 @@
       });
     })();
   </script>
-  <script src="app-router.js?v=20260830b"></script>
-  <script src="pack-foundation.js?v=20260830b"></script>
-  <script src="supabase-sync.js?v=20260830b"></script>
-  <script src="pack-media-client.js?v=20260830b"></script>
-  <script src="pack-core.js?v=20260830b"></script>
-  <script src="pack-account.js?v=20260830b"></script>
-  <script src="pack-viewer.js?v=20260830b"></script>
-  <script src="pack-appreciate.js?v=20260830b"></script>
-  <script src="pack-lightbox.js?v=20260830b"></script>
-  <script src="card-gallery.js?v=20260830b"></script>
-  <script src="edit-panel-gallery.js?v=20260830b"></script>
-  <script src="script.js?v=20260830b"></script>
-  <script src="warehouse-composer.js?v=20260830b"></script>
-  <script src="pack-imagegen.js?v=20260830b"></script>
-  <script src="pack-feed.js?v=20260830b"></script>
+  <script src="app-router.js?v=20260830c"></script>
+  <script src="pack-foundation.js?v=20260830c"></script>
+  <script src="supabase-sync.js?v=20260830c"></script>
+  <script src="pack-media-client.js?v=20260830c"></script>
+  <script src="pack-core.js?v=20260830c"></script>
+  <script src="pack-account.js?v=20260830c"></script>
+  <script src="pack-viewer.js?v=20260830c"></script>
+  <script src="pack-appreciate.js?v=20260830c"></script>
+  <script src="pack-lightbox.js?v=20260830c"></script>
+  <script src="card-gallery.js?v=20260830c"></script>
+  <script src="edit-panel-gallery.js?v=20260830c"></script>
+  <script src="script.js?v=20260830c"></script>
+  <script src="warehouse-composer.js?v=20260830c"></script>
+  <script src="pack-imagegen.js?v=20260830c"></script>
+  <script src="pack-feed.js?v=20260830c"></script>
   <script>
     (function () {
       var need = 'grid-guard-v6';
@@ -384,9 +527,9 @@
       } catch (e) { /* ignore */ }
     })();
   </script>
-  <script src="community-public-feed.js?v=20260830b"></script>
-  <script src="features-draft.js?v=20260830b"></script>
-  <script src="pack-extra.js?v=20260830b"></script>
+  <script src="community-public-feed.js?v=20260830c"></script>
+  <script src="features-draft.js?v=20260830c"></script>
+  <script src="pack-extra.js?v=20260830c"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

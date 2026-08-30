@@ -115,6 +115,39 @@ async function inlineIndexBody() {
   return { entry: basename(indexPath), parts: files.length, bytes: Buffer.byteLength(output) };
 }
 
+/**
+ * 打包模式下首屏已经没有分片了：`legacy/**` 被合并成单文件、`styles/base` 与
+ * `styles/features` 被内联进 `styles.css` / `styles-features.css`，源码片段随后从
+ * 暂存包里剪掉。开发态那两套东西因此在生产里全是死链：
+ *   - 解析期并行预取器会对 39 个不存在的文件发 fetch；
+ *   - CSS preload 提示指向 20 个已被内联的分片。
+ * 合起来是每次加载几十个 404，比不优化还糟，必须在这里剥掉。
+ */
+async function stripBundleOnlyAssets() {
+  const indexPath = join(staging, 'index.html');
+  const before = await readFile(indexPath, 'utf8');
+  const marker = (name) => new RegExp(
+    `[ \\t]*<!-- __PROMPT_HUB_${name}_START__[^>]*-->[\\s\\S]*?[ \\t]*<!-- __PROMPT_HUB_${name}_END__[^>]*-->\\n?`,
+    'g'
+  );
+  let index = before;
+  let removed = 0;
+  for (const name of ['PART_PREFETCH', 'CSS_PRELOAD']) {
+    const pattern = marker(name);
+    const matches = [...index.matchAll(pattern)];
+    if (!matches.length) {
+      throw new Error(`stripBundleOnlyAssets: no __PROMPT_HUB_${name}_ block found — markup changed?`);
+    }
+    index = index.replace(pattern, '');
+    removed += matches.length;
+  }
+  if (index === before) {
+    throw new Error('stripBundleOnlyAssets: nothing removed');
+  }
+  await writeFile(indexPath, index, 'utf8');
+  return { entry: 'index.html (bundle-only assets stripped)', parts: removed, bytes: Buffer.byteLength(index) };
+}
+
 const results = [];
 results.push(await bundleJavaScript('admin.js', 'legacy/admin'));
 results.push(await bundleJavaScript('asset-studio.js', 'legacy/asset-studio'));
@@ -125,6 +158,7 @@ results.push(await bundleJavaScript('features-draft.js', 'legacy/features-draft'
 results.push(await bundleCss('styles.css', 'styles/base'));
 results.push(await bundleCss('styles-features.css', 'styles/features'));
 results.push(await inlineIndexBody());
+results.push(await stripBundleOnlyAssets());
 
 for (const result of results) {
   const privateNote = result.privateBlocksRemoved

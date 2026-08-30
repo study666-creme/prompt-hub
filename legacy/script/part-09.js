@@ -943,6 +943,10 @@
         fragment.appendChild(div);
       });
       const appendedCards = [...fragment.querySelectorAll('.card')];
+      // 入场动效：先藏起来，等瀑布流把它们分发到最终列之后再统一放行。
+      // 顺序是硬要求 —— 分发会 appendChild 移动节点，动画必须在移动之后才开始，
+      // 否则每搬一次就重放一次，看起来就是整片卡片在闪。
+      markWarehouseCardsPending(appendedCards);
       if (mobileGrid && viewMode !== 'list') {
         distributeWarehouseMobileCards(container, appendedCards);
       } else {
@@ -986,6 +990,9 @@
           window.MobileUI?.scheduleMobileImageBoostBurst?.();
         });
       }
+      // 放在最后：非移动端的 layoutMasonryGrid 是前面注册的 rAF，这一帧里它先跑完，
+      // 卡片已经落到最终列，此时放行入场动画不会再被打断。
+      revealWarehouseCards(appendedCards);
     }
 
     let warehouseScrollBoundEl = null;

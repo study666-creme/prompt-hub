@@ -27,6 +27,8 @@
 | 路由/首屏页面 | `app-router.js`, `index.html`；离开卡片库前由 `legacy/script/part-04.js` 调用 `window.WarehouseComposer.exitFocus()` 完整退出聚焦态（见 CARD-LOADING 的聚焦切换规则） |
 | 落地页视觉/滚动首屏 | `styles-landing.css`, `partials/index-body/part-06.html`（整个落地页）, `index.html`（视差脚本与样式版本）, `scripts/verify-landing-scroll-browser.mjs`（桌面+移动滚动回归） |
 | 卡片 CRUD/筛选/分页 | `legacy/script/`, `card-gallery.js` |
+| 卡片入场动效 | `legacy/script/part-03.js`（`markWarehouseCardsPending` / `revealWarehouseCards`）, `legacy/script/part-09.js`（`renderCards` 调用点）, `styles/base/part-09.css` |
+| 首屏并行预取 | `index.html`（解析期并行预取器 + CSS preload 块）, `script.js`, `supabase-sync.js`, `features-draft.js`（查 `window.__PH_PART_STORE__`）, `scripts/create-legacy-runtime-split.mjs`, `scripts/create-css-runtime-split.mjs` |
 | 卡片仓库 UI | `styles-warehouse.css`, `styles/base/part-08.css`, `styles/base/part-09.css`, `partials/index-body/part-02.html`, `warehouse-composer.js`, `legacy/script/part-02.js`, `part-03.js`, `part-04.js`, `part-09.js`, `part-10.js` |
 | 编辑面板多图/移动端遮挡 | `edit-panel-gallery.js`, `card-gallery.js`, `mobile.js`, `styles-mobile.css` |
 | 云同步/账号切换 | `supabase-sync.js`, `legacy/supabase-sync/`, `cloud-sync-safety.js`, `sync-orchestrator.js` |

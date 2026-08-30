@@ -52,7 +52,7 @@ authenticated Worker media proxy before browser-side validation and upload.
 
 `.app-main` 是唯一纵向滚动根。页面、feature shell 和 grid 不得再增加独立 `overflow-y:auto`。横向裁切优先 `overflow-x: clip`，避免浏览器把纵向 visible 计算成新的 auto 滚动容器。
 
-新卡片进入视口可使用轻微 opacity/translate 缓出，但动画不能改变卡片尺寸、触发 Masonry 反复测量或在 `prefers-reduced-motion` 下强制播放。
+新卡片进入视口可使用轻微 opacity/translate 缓出，但动画不能改变卡片尺寸、触发 Masonry 反复测量或在 `prefers-reduced-motion` 下强制播放。落地实现见下面「卡片入场动效」。
 
 ## 聚焦切换与整片可见性（2026-08-29）
 
@@ -72,6 +72,58 @@ authenticated Worker media proxy before browser-side validation and upload.
 - 生图最近列表使用固定 `1:1` 媒体框；前 6 张设为 eager，其中前 4 张为高请求优先级，其余卡片继续 lazy。
 - 最近列表分页只能把新卡插在 `data-imagegen-feed-footer="recent"` 之前，说明条始终位于所有图片之后，不能隔断第 12 张和后续图片。
 - 图片 class/style 变化不再触发整个生图列表的属性级 MutationObserver 扫描；新增直属卡片时才执行布局残留清理。
+
+## 卡片入场动效（2026-08-30）
+
+卡片库此前是**硬生生出现**的：`styles/base/part-09.css` 里那套 `.card-enter-soft` /
+`.card-enter` 从未被任何 JS 使用，而且选择器写的是 `#cardsContainer > .card.card-enter-soft`
+——只匹配容器的**直接子**卡片。桌面列容器瀑布流把卡片放进 `.warehouse-focus-col`，
+这条选择器永远命中不了，属于死代码。
+
+现方案（`legacy/script/part-03.js` 的 `markWarehouseCardsPending` / `revealWarehouseCards`，
+样式在 `styles/base/part-09.css`）：
+
+- **用 transition，不用 animation**。瀑布流分发卡片时会 `appendChild` 移动节点，而移动
+  节点会重启 CSS animation——这正是当年"整片卡片疯狂闪动"、导致入场动效被整段摘掉的根因。
+  transition 只在计算值变化时播放，重插节点不会重放。
+- **位移放在 `.card-media` / `.card-body` 上，不放 `.card`**。`.card` 的 `transform` 已被
+  hover（`translateY(-6px) scale(1.018)`）占用，两者叠在同一属性上会互相打断，hover 会把
+  卡片从入场中途拽走。
+- **顺序是硬要求**：`renderCards` 先把新卡片标成 `card-enter-pending`（`opacity: 0`）再交给
+  布局，最后才调 `revealWarehouseCards`。`layoutMasonryGrid` 是更早注册的 rAF，所以放行时
+  卡片已经落到最终列，不会边入场边被搬。
+- 错峰 `28ms`/张，最多累计 10 档（约 280ms），避免整片卡片"啪"地一起出现。
+- 入场结束会摘掉 `card-enter-in`：它覆盖了 `.card` 原本的 transition，留着会让 hover 变迟钝。
+- 兜底 1500ms 保险丝：任何异常分支下都必须保证卡片可见，绝不允许停在 `opacity: 0`。
+- `prefers-reduced-motion: reduce` 时 JS 直接跳过标记，CSS 侧也一并降级为无动画。
+
+回归：`node scripts/verify-warehouse-card-entrance-browser.mjs`（含"重排后不重放、不留隐藏卡片"断言）。
+
+## 首屏并行预取（2026-08-30）
+
+首屏原本要用 **39 次串行同步 XHR** 取内容：6 个 `partials/index-body/part-*.html`、
+13 个 `legacy/script/part-*.js`、7 个 `legacy/supabase-sync/part-*.js`、
+13 个 `legacy/features-draft/part-*.js`，合计约 1.36MB。同步 XHR 会完全冻结主线程，
+串行又让每个分片各付一次 RTT，是首屏卡顿的主因。
+
+改法：
+
+- `index.html` 在 `<head>` 解析期用 `fetch` **一次性并行**发出全部请求，响应文本存进
+  `window.__PH_PART_STORE__.text`（键 = 分片相对路径，不含 `?v=`）。
+- 同步加载器（body 片段 loader 与各 legacy 拆分 loader）先查这张表，**未命中才退回同步
+  XHR**，所以是纯增益、不会引入新的失败模式。
+- 关键路径优先：body 片段与 `legacy/script` 分片用 `priority: 'high'`，
+  `supabase-sync` / `features-draft` 用 `'low'`（它们要到 body 末尾才用得上）。
+- 拆分加载器是**生成物**：`scripts/create-legacy-runtime-split.mjs` 的模板已同步改好，
+  重新拆分时会自动带上这段查表逻辑。
+
+同一套机制也修掉了 CSS 的 `@import` 瀑布：`styles.css` / `styles-features.css` 只是
+`@import` 清单，浏览器必须先下载解析它才能发现 20 个真实分片，等于全部样式多等一次阻塞
+往返。`index.html` 用 `__PROMPT_HUB_CSS_PRELOAD_START__/END__ <entry>` 标记维护对应的
+`<link rel="preload">` 块，版本号由 `scripts/create-css-runtime-split.mjs` 在重新拆分时同步重写。
+
+实测（本机 HTTP/1.1，56 个首屏请求争 6 条连接，属悲观下限）：同步 XHR 39 → 6，
+`DOMContentLoaded` 960ms → 554ms。生产 HTTP/2 可多路复用，同步 XHR 应趋近 0。
 
 ## 失败处理
 

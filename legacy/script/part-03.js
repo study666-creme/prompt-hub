@@ -425,6 +425,65 @@
       cardEl.style.setProperty('--card-ripple-y', `${(y / rect.height) * 100}%`);
     }
 
+    /* ===== 卡片入场 =====
+     * 旧版 .card-enter-soft 只匹配 #cardsContainer 的直接子卡片，而桌面列容器
+     * 瀑布流把卡片放进 .warehouse-focus-col，选择器永远命中不了；再加上入场用的是
+     * animation —— 瀑布流分发卡片时会 appendChild 移动节点，而移动节点会重启 CSS
+     * animation，看起来就是"整片卡片疯狂闪动"，所以整段被摘掉了。
+     *
+     * 这里改成：
+     *   - 入场用 transition，不用 animation。transition 只在计算值变化时播放，
+     *     重插节点不会重放，从根子上避开闪动。
+     *   - 位移放在 .card-media / .card-body 上，不放 .card：.card 的 transform
+     *     已经被 hover（translateY(-6px) scale(1.018)）占用，两者叠在同一属性上
+     *     会互相打断，hover 会把卡片从入场中途拽走。
+     *   - 卡片先隐藏（pending）再放行（enter-in），所以不会先完整闪一帧再淡入。
+     *   - 只动 opacity / transform，不改变卡片尺寸，不触发瀑布流重排。 */
+    const WAREHOUSE_ENTER_STAGGER_MS = 28;
+    const WAREHOUSE_ENTER_STAGGER_MAX_STEPS = 10;
+    const WAREHOUSE_ENTER_DURATION_MS = 400;
+
+    function warehouseEntranceAllowed() {
+      return !window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    }
+
+    /** 布局前把新卡片藏起来，避免先渲染出完整卡片再淡入造成闪一下。 */
+    function markWarehouseCardsPending(cardEls) {
+      if (!cardEls?.length || !warehouseEntranceAllowed()) return;
+      cardEls.forEach((card) => {
+        if (card.dataset.whEnter === '1') return;
+        card.classList.add('card-enter-pending');
+      });
+    }
+
+    /** 布局完成后放行，按文档顺序做一点错峰，让整片卡片不是"啪"地一起出现。 */
+    function revealWarehouseCards(cardEls) {
+      if (!cardEls?.length) return;
+      const pending = cardEls.filter((card) => card.classList.contains('card-enter-pending'));
+      if (!pending.length) return;
+      requestAnimationFrame(() => {
+        pending.forEach((card, i) => {
+          if (!card.classList.contains('card-enter-pending')) return;
+          const steps = Math.min(i, WAREHOUSE_ENTER_STAGGER_MAX_STEPS);
+          card.style.setProperty('--card-enter-delay', `${steps * WAREHOUSE_ENTER_STAGGER_MS}ms`);
+          card.classList.remove('card-enter-pending');
+          card.classList.add('card-enter-in');
+          card.dataset.whEnter = '1';
+          // 入场结束后摘掉 class：它覆盖了 .card 原本的 transition，
+          // 留着会让 hover 变迟钝。
+          setTimeout(() => {
+            card.classList.remove('card-enter-in');
+            card.style.removeProperty('--card-enter-delay');
+          }, (steps * WAREHOUSE_ENTER_STAGGER_MS) + WAREHOUSE_ENTER_DURATION_MS + 120);
+        });
+      });
+      // 保险丝：万一 rAF 被打断（后台标签页、异常分支），兜底保证卡片可见，
+      // 绝不让任何卡片停在 opacity: 0。
+      setTimeout(() => {
+        pending.forEach((card) => card.classList.remove('card-enter-pending'));
+      }, 1500);
+    }
+
     function pulseFabButton() {
       const fab = document.getElementById('fabNewBtn');
       if (!fab || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return;
