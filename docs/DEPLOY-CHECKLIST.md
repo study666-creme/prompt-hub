@@ -1,12 +1,24 @@
 # 部署与验证清单
 
-最后核对：2026-08-29
+最后核对：2026-08-30
 
 ## 当前发布状态
 
-本轮已完成 Pages 发布：Git SHA `6cd6058`，Pages build `20260830c`，内容为卡片库入场动效、首屏并行预取与 `file://` 指引页。**Worker 与数据库未变更**——本轮改动全是前端 HTML/JS/CSS 与构建脚本，按下方「哪些内容需要部署」只走 Pages。
+本轮已完成 Pages 发布：Git SHA `ec04515`，Pages build `20260830e`，内容为卡片库入场动效、首屏并行预取、`file://` 指引页与首屏图片 WebP 化。**Worker 与数据库未变更**——本轮改动全是前端 HTML/JS/CSS、图片资源与构建/校验脚本，按下方「哪些内容需要部署」只走 Pages。
 
-发布后核对：`https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260830c'`；线上 `styles.css` 含 `card-enter-pending` / `card-enter-in`；线上 `index.html` 无 `__PH_PART_STORE__` 残留、无 `rel="preload" as="style"` 残留、body 已内联（`__PROMPT_HUB_DEPLOY_BODY__`）；`run-index-http-smoke.mjs`（`SMOKE_BASE=https://prompt-hubs.com`）全过；`legacy/`、`styles/`、`partials/` 源码片段在线上按预期不可访问；`/health` 返回 `ok: true`。
+发布后核对：`https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260830e'`；线上 `styles.css` 含 `card-enter-pending` / `card-enter-in`；线上 `index.html` 无 `__PH_PART_STORE__` 残留、无 `rel="preload" as="style"` 残留、body 已内联（`__PROMPT_HUB_DEPLOY_BODY__`）、含 6 处 `<source srcset=>`（落地页 3 + 仓库 3）；`run-index-http-smoke.mjs`（`SMOKE_BASE=https://prompt-hubs.com`）全过；`legacy/`、`styles/`、`partials/` 源码片段在线上按预期不可访问；`/health` 返回 `ok: true`。
+
+首屏实测（`https://prompt-hubs.com/`，浏览器 Resource Timing）：
+
+| | 优化前 | 现在 |
+|---|---:|---:|
+| 传输量 | 1222KB | **924KB** |
+| 图片 | 590KB（4 张 PNG） | **232KB**（3 张 WebP + logo-64） |
+| FCP | 约 5.9s | **0.82～0.92s** |
+
+注意：优化前那次 5.9s FCP 里混进了自定义域名的**瞬时** TLS 慢握手（当时 5.2s，同期
+`prompt-hub-hub.pages.dev` 仅 0.6s），复测已恢复到约 0.5s。不要把那 5.9s 当成纯前端耗时，
+但它说明自定义域名的 TLS 值得偶尔复查一次。
 
 上一轮 Worker 状态仍为 `buildSha=464e06883fc8e304280d49826c58436eab05c2dc`，本轮不动。
 
@@ -192,3 +204,22 @@ monolith —— body 已内联、`script.js` 是单文件、`styles.css` 已内�
 
 验证方式：`APP_ROOT` 指向 `.pages-deploy` 跑相关的浏览器回归，确保验的是最终产物
 而不是源码树。
+
+### 首屏 hero 图有两套标记，改一处不够
+
+`assets/studio-preset/{scene,peishen,linche}.png` 在 **两个** partial 里各有一份：
+
+- `partials/index-body/part-02.html` — 仓库 hero（`.warehouse-hero-card`）
+- `partials/index-body/part-06.html` — 落地页 hero（`.landing-card`，也是 `/` 的默认路由）
+
+两套标记同时存在于 DOM（未激活的页面只是被隐藏），所以只改其中一处会让 WebP 与 PNG
+**各下载一份**，460KB 一点没省、还多出请求。改图片路径/格式时必须两处一起改，并用
+`verify-warehouse-card-entrance-browser.mjs` 的「首屏 hero 图已走 WebP」断言兜底。
+
+另外 `legacy/asset-studio/part-01.js` 的 preset 表也引用了这些 PNG（含 `shenmei.png`），
+那是 asset-studio 独立页面，不属于首屏，暂未改动。
+
+### 原始 PNG 不要再重编码
+
+这些 PNG 已经是优化过的：Pillow 无损重编码（`optimize=True`）反而让它们**变大 435%**
+（658KB → 3520KB）。要省体积只能换格式（WebP 省 53%），不要试图重新压 PNG。
