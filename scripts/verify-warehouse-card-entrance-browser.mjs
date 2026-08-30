@@ -79,12 +79,15 @@ const page = await context.newPage();
 
 const consoleErrors = [];
 const failedRepoRequests = new Set();
+const imageRequests = new Set();
 page.on('console', (msg) => {
   if (msg.type() === 'error') consoleErrors.push(msg.text());
 });
 page.on('pageerror', (err) => consoleErrors.push(`pageerror: ${err.message}`));
 page.on('response', (res) => {
-  if (res.status() >= 400 && res.url().startsWith(base)) failedRepoRequests.add(res.url());
+  const url = res.url();
+  if (res.status() >= 400 && url.startsWith(base)) failedRepoRequests.add(url);
+  if (/\.(png|webp|jpe?g)(\?|$)/i.test(url)) imageRequests.add(url.split('?')[0]);
 });
 
 // 在任何页面脚本之前挂钩，统计同步 XHR（async === false）。
@@ -256,6 +259,14 @@ try {
     (u) => !/favicon/i.test(u) && !/supabase-config\.local\.js/i.test(u)
   );
   check('仓库内资源无 404', localNotFound.length === 0, localNotFound.slice(0, 3).join(' | '));
+
+  // 首屏 hero 图必须是 WebP。曾经只改了仓库 hero（part-02），漏了落地页 hero
+  // （part-06，也就是 / 的默认路由），结果两套图都在 DOM 里、WebP 和 PNG 全部下载，
+  // 460KB 一点没省 —— 这条断言防止再漏改。
+  const bigPng = [...imageRequests].filter(
+    (u) => /studio-preset\/.*\.png$/i.test(u)
+  );
+  check('首屏 hero 图已走 WebP（不再下载原始大 PNG）', bigPng.length === 0, bigPng.slice(0, 3).join(' | '));
   const realErrors = consoleErrors.filter(
     (t) => !/favicon/i.test(t)
       && !/127\.0\.0\.1:8787|api\.prompt-hubs\.com|fonts\.g(oogleapis|static)/i.test(t)
