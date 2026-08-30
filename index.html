@@ -527,6 +527,7 @@
   <script>
     (function () {
       var version = encodeURIComponent(window.__APP_BUILD__ || 'dev');
+      /* __PH_DEFERRED_PACKS_START__ */
       var queue = [
         'pack-imagegen.js',
         'pack-feed.js',
@@ -534,6 +535,7 @@
         'features-draft.js',
         'pack-extra.js'
       ];
+      /* __PH_DEFERRED_PACKS_END__ */
       function feedRevCheck() {
         var need = 'grid-guard-v6';
         if (window.__PH_FEED_PACK_REV__ === need) {
