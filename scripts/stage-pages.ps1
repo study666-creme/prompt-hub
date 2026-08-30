@@ -203,6 +203,29 @@ foreach ($asset in @(
 }
 Write-Host "Pages warehouse first-screen assets verified." -ForegroundColor DarkGray
 
+# General guard: every assets/... path referenced by the staged index must exist.
+# This script only copies git-tracked files, so a newly added asset that has not
+# been committed yet is silently dropped and ships as a broken reference.
+$assetRefs = [System.Collections.Generic.HashSet[string]]::new()
+foreach ($m in [regex]::Matches($stagedIndex, '(?:src|href|srcset)="(assets/[^"?#]+)"')) {
+  [void]$assetRefs.Add($m.Groups[1].Value)
+}
+foreach ($m in [regex]::Matches($stagedIndex, 'srcset="([^"]+)"')) {
+  foreach ($part in ($m.Groups[1].Value -split ',')) {
+    $u = (($part.Trim()) -split '\s+')[0]
+    if ($u -like 'assets/*') { [void]$assetRefs.Add($u) }
+  }
+}
+$missingAssets = @()
+foreach ($rel in $assetRefs) {
+  $p = Join-Path $staging ($rel -replace '/', '\')
+  if (-not (Test-Path $p -PathType Leaf)) { $missingAssets += $rel }
+}
+if ($missingAssets.Count -gt 0) {
+  throw ("Pages staging is missing assets referenced by index.html. New assets must be committed first (staging copies git-tracked files only): " + ($missingAssets -join ', '))
+}
+Write-Host ("Pages referenced assets verified: " + $assetRefs.Count + " asset(s).") -ForegroundColor DarkGray
+
 $sourceFragmentDirs = @('legacy', 'styles', 'partials')
 foreach ($dir in $sourceFragmentDirs) {
   $fragmentPath = Join-Path $staging $dir

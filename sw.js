@@ -1,8 +1,10 @@
-const CACHE = 'prompt-hub-v20260830c';
+const CACHE = 'prompt-hub-v20260830d';
 /** 仅缓存静态小资源；HTML/JS/CSS 始终走网络，避免误显示「暂时无法连接」 */
 const ASSETS = [
   './manifest.webmanifest',
-  './assets/logo.png',
+  // 1024x1024 的 logo.png 只留给 PWA 图标（manifest）和社交卡片 og:image；
+  // UI 里 32/30/24px 的品牌标改用 64x64 的 logo-64.png，不再下载整张原图。
+  './assets/logo-64.png',
   './assets/asset-studio-icon.png'
 ];
 
