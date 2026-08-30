@@ -101,6 +101,21 @@ foreach ($file in $entryRootFiles) {
   }
 }
 
+# Packs loaded by the deferred runtime loader are no longer referenced through
+# src="...", so the scan above cannot see them and they would be pruned from
+# staging (features silently dead in production). Read them from the loader's
+# queue block instead.
+foreach ($file in $entryRootFiles) {
+  $htmlPath = Join-Path $root $file
+  if (-not (Test-Path $htmlPath -PathType Leaf)) { continue }
+  $html = Get-Content $htmlPath -Raw
+  foreach ($m in [regex]::Matches($html, '__PH_DEFERRED_PACKS_START__\s*\*/([\s\S]*?)/\*\s*__PH_DEFERRED_PACKS_END__')) {
+    foreach ($q in [regex]::Matches($m.Groups[1].Value, "'([^']+\.js)'")) {
+      Add-RootFile $q.Groups[1].Value
+    }
+  }
+}
+
 foreach ($rootFile in $allowedRoot) {
   $rel = $rootFile -replace '/', [IO.Path]::DirectorySeparatorChar
   Copy-StaticFile $rel
