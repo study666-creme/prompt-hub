@@ -512,26 +512,71 @@
   <script src="edit-panel-gallery.js?v=20260830e"></script>
   <script src="script.js?v=20260830e"></script>
   <script src="warehouse-composer.js?v=20260830e"></script>
-  <script src="pack-imagegen.js?v=20260830e"></script>
-  <script src="pack-feed.js?v=20260830e"></script>
+  <!--
+    非首屏脚本延迟加载。pack-imagegen / pack-feed / community-public-feed /
+    features-draft / pack-extra 合计约 256KB 传输（解码后约 990KB），占脚本总量
+    约 45%，但首屏（落地页、卡片库）并不依赖它们 —— 实测逐个屏蔽后 boot 与卡片
+    库渲染都正常。它们原本是 body 末尾的阻塞脚本，会把首屏绘制一直压到全部执行完。
+
+    改为首帧之后按原顺序串行注入，两个硬性约束：
+      1. 顺序不能变。features-draft 初始化会用到 pack-imagegen 的 ImageGenJobRunner，
+         pack-feed 又必须先于它的版本校验。所以是串行 onload 链，不是并行 async。
+      2. feed 包版本校验（原 pack-feed.js 后面的内联脚本）必须跟着 pack-feed 走。
+         留在原地会在 pack-feed 到达之前就判定版本不符并 reload 整页。
+  -->
   <script>
     (function () {
-      var need = 'grid-guard-v6';
-      if (window.__PH_FEED_PACK_REV__ === need) {
-        try { sessionStorage.removeItem('ph-feed-pack-reload'); } catch (e) { /* ignore */ }
-        return;
-      }
-      try {
-        if (!sessionStorage.getItem('ph-feed-pack-reload')) {
-          sessionStorage.setItem('ph-feed-pack-reload', '1');
-          location.reload();
+      var version = encodeURIComponent(window.__APP_BUILD__ || 'dev');
+      var queue = [
+        'pack-imagegen.js',
+        'pack-feed.js',
+        'community-public-feed.js',
+        'features-draft.js',
+        'pack-extra.js'
+      ];
+      function feedRevCheck() {
+        var need = 'grid-guard-v6';
+        if (window.__PH_FEED_PACK_REV__ === need) {
+          try { sessionStorage.removeItem('ph-feed-pack-reload'); } catch (e) { /* ignore */ }
+          return;
         }
-      } catch (e) { /* ignore */ }
+        try {
+          if (!sessionStorage.getItem('ph-feed-pack-reload')) {
+            sessionStorage.setItem('ph-feed-pack-reload', '1');
+            location.reload();
+          }
+        } catch (e) { /* ignore */ }
+      }
+      function loadNext(i) {
+        if (i >= queue.length) return;
+        var name = queue[i];
+        var s = document.createElement('script');
+        s.src = name + '?v=' + version;
+        s.async = false;
+        s.onload = function () {
+          if (name === 'pack-feed.js') feedRevCheck();
+          loadNext(i + 1);
+        };
+        s.onerror = function () {
+          // 单个脚本失败不阻塞后续：缺哪块功能就退化哪块，不要让整页瘫掉。
+          console.error('[PromptHub] 延迟加载失败: ' + name);
+          loadNext(i + 1);
+        };
+        document.body.appendChild(s);
+      }
+      var started = false;
+      function start() {
+        if (started) return;
+        started = true;
+        loadNext(0);
+      }
+      // 先让首帧画出来再开始拉这些脚本。rAF 回调之后浏览器才提交首帧绘制，
+      // 再套一个 setTimeout 确保加载动作排在绘制之后，不和首屏抢主线程。
+      requestAnimationFrame(function () { setTimeout(start, 0); });
+      // 兜底：极端情况下 rAF 不触发（后台标签页等）也要把功能补上。
+      setTimeout(start, 3000);
     })();
   </script>
-  <script src="community-public-feed.js?v=20260830e"></script>
-  <script src="features-draft.js?v=20260830e"></script>
-  <script src="pack-extra.js?v=20260830e"></script>
   <script>
     window.addEventListener('load', function () {
       if (typeof supabase === 'undefined') {

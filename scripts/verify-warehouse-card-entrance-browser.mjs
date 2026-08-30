@@ -267,6 +267,22 @@ try {
     (u) => /studio-preset\/.*\.png$/i.test(u)
   );
   check('首屏 hero 图已走 WebP（不再下载原始大 PNG）', bigPng.length === 0, bigPng.slice(0, 3).join(' | '));
+
+  // 延迟加载的非首屏脚本必须最终补齐，否则生图、生成记录、社区等功能会静默失效。
+  // 关键：pack-imagegen 必须先于 features-draft（后者初始化要用 ImageGenJobRunner），
+  // pack-feed 又必须先于它的版本校验，所以顺序错了这里会先炸。
+  const deferred = await page.evaluate(() => ({
+    feedRev: window.__PH_FEED_PACK_REV__ || '',
+    featureDraft: !!window.FeatureDraft,
+    imageGen: !!window.ImageGenFeed
+  }));
+  check(
+    '延迟脚本已补齐：pack-feed 版本标记',
+    deferred.feedRev === 'grid-guard-v6',
+    deferred.feedRev || '(未加载)'
+  );
+  check('延迟脚本已补齐：FeatureDraft', deferred.featureDraft);
+  check('延迟脚本已补齐：ImageGenFeed', deferred.imageGen);
   const realErrors = consoleErrors.filter(
     (t) => !/favicon/i.test(t)
       && !/127\.0\.0\.1:8787|api\.prompt-hubs\.com|fonts\.g(oogleapis|static)/i.test(t)
