@@ -19,6 +19,7 @@ Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery
 ## 发布状态与守卫
 
 - Worker 唯一发布仓库是 `D:\prompt-hub`；`D:\canvas\prompt-hub` 只保留作历史生产审计，禁止从任一脏目录直接发布。
+- **2026-08-31 线上取证**：`api.prompt-hubs.com/health` 返回 `environment` + `imageProviders` 形态且**无 `buildSha` 字段**，与本文档记载的 464e068 发布形态不一致——生产 Worker 实际运行的不是本轮记录中声称的构建（形似 `D:\canvas\prompt-hub` 的旧 `/health` 实现）。下次发布 Worker 后必须重新核对 `/health.buildSha`，并确认该变量在部署环境注入。
 - 修改 Worker、生成、支付、数据库或发布工具前必须阅读根目录 `AGENTS.md` 和 `docs/RECONCILE-20260726.md`；如果根目录存在 `DO-NOT-DEPLOY.md`，还必须先遵守其中的冻结条件。
 - `20260804a` 已发布文字模型目录收敛，`20260804b` 修正 MJ 动态目录解析并统一新任务到 New API。`20260806a` 将 `NEWAPI_API_BASE_URL` 迁移到稳定域名；`20260806b` 新增独立视频 Key 并禁止回退到文字/图片 Key。两次发布均不改 Pages，发布仍必须使用干净 SHA 并以 `/health.buildSha` 取证。
 - 本次文字模型清理后，资产工作台仅保留 `deepseek-v4-flash`、`deepseek-v4-pro`，两者统一读取实时目录并通过 New API 调用。New API 的公开目录、定价和带服务令牌的 `/v1/models` 已确认只返回这两个短名、各 `0.002 元/次`，且不返回 GLM 5.1 或内部模型标识。
@@ -76,6 +77,8 @@ Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery
 - 卡片库提交必须带回用户看到的 `quotedCredits`；服务端重算不一致时返回 `409 CONFLICT`、不扣费且不提交。前端应清除对应的 90 秒报价缓存，让下一次点击重新报价，但不得自动重发生成 POST。报价 GET 的 `500/502/503/504` 最多短退避重试一次。
 - 访客无持久草稿时，当前全能模型2家族默认选择公开目录中排序最前的 `image2-economy`；它与标准 `image2` 的价格必须分别从目录读取，不能用旧默认值覆盖。
 - `resolution` 只表示 `1k/2k/4k`，`quality` 只表示质量，但不是每个模型都有质量控件。只有香蕉公开 `low/medium/high`；`image2k4k` 固定 `low`，4K 型号固定 `standard`，`gpt-image-2-ext` 省略 `quality` 并使用默认画质。仅历史精确值 `quality=1k|2k|4k` 会在入口转换为 `resolution`。
+- `size` 单位随模型不同：`gim2`、香蕉、MJ 是画面比例（`1:1`、`16:9`…），Sensenova 等 `generic` 模型可能是像素尺寸（`1024x1024`…）。前端尺寸选择器必须按目录项 `parameters.size.options` 渲染并原样提交；把比例发给像素尺寸模型会得到 `400 该模型不支持 1:1 比例`（2026-08-31 生产实测，`imagegenSizeOptionsForModel` 曾忽略目录 size 参数）。服务端按目录逐项校验，不做隐式换算。
+- **2026-08-31 生产实测**：`image2-economy`、`seedream-5.0` 提交与出图正常；`sensenova-1.5-一秒出图` 两项失败——(1) 前端发比例值被 `400` 拒绝；(2) 改发像素尺寸后任务被站内接受（`task_i35ri…`）但执行失败 «请求被拒绝，请稍后再试» 并退款，属卡藏 New API 站内渠道/上游问题，需在站上核对该型号渠道与上游模型名，不属于 Prompt Hub 适配。
 - 所有香蕉模型支持最多 14 张参考图。不能根据缺字段、陈旧目录或 `max_items=0` 推断香蕉不支持参考图。
 - 卡片库点击生成后先同步插入作品占位；New API 只由持久队列提交，页面按秒 poll，cron 每 2 分钟兜底 poll/archive，避免请求结束时再次领取同一 `queued` 任务。上游已出图时前端先写入最近生成并移除 pending，临时图可立即展示，归档独立重试。
 - `GET /api/v1/generate/jobs/:jobId/image?index=N` 是 Canvas 的受保护单图读取路径；`N=0` 为主图或 MJ 四宫格封面，MJ 的 `N=1..4` 为四张单图，普通批量任务随后读取额外图片。重复 URL 只投影一次，超出 `0..7` 的索引在读取前返回 `400`。

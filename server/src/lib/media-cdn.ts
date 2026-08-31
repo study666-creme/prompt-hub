@@ -5,7 +5,7 @@ import { blobImageMime } from './image-content';
 import { storagePathFromRef } from './image-archive';
 import { resolveImageRefForJob } from './recover-generation-warehouse';
 import { createAdminClient } from './supabase';
-import { deleteFromR2, downloadCardImage, uploadCardImage, cardImageExists } from './r2-storage';
+import { deleteFromR2, downloadCardImage, existsInR2, uploadCardImage, cardImageExists } from './r2-storage';
 
 export const CARD_IMAGES_BUCKET = 'card-images';
 const CDN_CACHE_SEC = 60 * 60 * 24 * 30;
@@ -298,6 +298,32 @@ async function rebuildGridAtPath(
   return gridBlob;
 }
 
+/**
+ * 有预算的 grid 物化：3 秒内完成则返回 grid 路径；超时则后台继续物化并返回 null，
+ * 调用方降级到原图路径。避免列表首屏被单张 16–22s 的现场缩放阻塞——这正是
+ * 「列表只出文字、点进卡片才有图」的原因（列表等不到 URL，详情走原图立即可见）。
+ */
+const GRID_MATERIALIZE_BUDGET_MS = 3000;
+
+async function materializeGridWithinBudget(
+  c: Context<{ Bindings: Env }>,
+  admin: ReturnType<typeof createAdminClient>,
+  primaryPath: string
+): Promise<string | null> {
+  const task = materializeGridForPrimaryPath(c.env, admin, primaryPath);
+  const result = await Promise.race([
+    task.then((path) => ({ path }), () => ({ path: null })),
+    new Promise<{ path: null }>((resolve) => setTimeout(() => resolve({ path: null }), GRID_MATERIALIZE_BUDGET_MS))
+  ]);
+  if (result.path) return result.path;
+  // 超时：交给 waitUntil 继续物化（把 grid 落到 R2，下一轮直接命中），
+  // 不在请求内等待，避免列表首屏被 16–22s 现场缩放卡住。
+  if (c.executionCtx) {
+    c.executionCtx.waitUntil(task.catch(() => {}));
+  }
+  return null;
+}
+
 /** 确保 primary 对应 _grid 已写入 R2；返回 grid 路径（不含 leading /） */
 export async function materializeGridForPrimaryPath(
   env: Env,
@@ -383,7 +409,16 @@ export async function materializeCommunityGridIfMissing(
   const primary = await findFirstExistingStoragePath(admin, primaryCandidates, CARD_IMAGES_BUCKET, c.env);
   if (!primary) return;
 
-  await rebuildGridAtPath(c.env, admin, gridClean, primary);
+  // 有预算的物化：3s 内完成则立即就绪；超时交给 waitUntil 继续落 R2，
+  // /media/i 命中该 grid 时会回源原图兜底，签名不必等 16–22s 现场缩放。
+  const rebuild = rebuildGridAtPath(c.env, admin, gridClean, primary);
+  const done = await Promise.race([
+    rebuild.then(() => true, () => false),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), GRID_MATERIALIZE_BUDGET_MS))
+  ]);
+  if (!done && c.executionCtx) {
+    c.executionCtx.waitUntil(rebuild.catch(() => {}));
+  }
 }
 
 async function resizeImageToGridJpeg(source: Blob): Promise<Blob | null> {
@@ -544,6 +579,26 @@ async function tryRecoverGeneratedGridBlob(
   return gridBlob;
 }
 
+/** R2 缺失、Supabase 回源命中时把对象回传 R2，让后续请求走 R2/CDN 缓存 */
+function scheduleR2Backfill(
+  c: Context<{ Bindings: Env }>,
+  key: string,
+  blob?: Blob | null
+): void {
+  if (!c.executionCtx) return;
+  c.executionCtx.waitUntil((async () => {
+    if (blob) {
+      const mime = (await blobImageMime(blob)) || 'image/jpeg';
+      await uploadCardImage(c.env, key, blob, mime);
+      return;
+    }
+    const fetched = await downloadCardImage(c.env, key);
+    if (!fetched) return;
+    const mime = (await blobImageMime(fetched)) || 'image/jpeg';
+    await uploadCardImage(c.env, key, fetched, mime);
+  })().catch(() => {}));
+}
+
 export async function serveCachedStorageImage(
   c: Context<{ Bindings: Env }>,
   path: string
@@ -587,11 +642,13 @@ export async function serveCachedStorageImage(
   let body: Blob | null = null;
   let contentType = contentTypeForPath(clean);
 
-  const stored = isGrid ? await downloadGridBlob(c.env, clean) : null;
+  const stored = isGrid ? await downloadCardImage(c.env, clean) : null;
   if (stored && (await isAcceptableGridBlob(stored))) {
     body = stored;
     const sniffed = await blobImageMime(stored);
     if (sniffed) contentType = sniffed;
+    // Supabase 回源命中但 R2 缺失（迁移未完成）时回传 R2，之后走 R2/CDN
+    if (!(await existsInR2(c.env, clean))) scheduleR2Backfill(c, clean, stored);
   } else if (stored && isGrid) {
     c.executionCtx.waitUntil(deleteFromR2(c.env, clean).catch(() => {}));
   } else if (!isGrid) {
@@ -602,6 +659,7 @@ export async function serveCachedStorageImage(
         if (sniffed) {
           body = blob;
           contentType = sniffed;
+          if (!(await existsInR2(c.env, candidate))) scheduleR2Backfill(c, candidate, blob);
           break;
         }
         const deleted = await deleteFromR2(c.env, candidate).catch(() => false);
@@ -623,13 +681,25 @@ export async function serveCachedStorageImage(
 
   if (!body && isGrid) {
     for (const primary of primaryCandidatesFromGridPath(clean)) {
-      const gridBlob = await buildGridBlobFromPrimary(c.env, admin, primary);
-      if (await isAcceptableGridBlob(gridBlob)) {
-        body = gridBlob;
-        contentType = 'image/jpeg';
-        c.executionCtx.waitUntil(
-          uploadCardImage(c.env, clean, gridBlob!, 'image/jpeg').catch(() => {})
-        );
+      // 有预算的物化：3s 内生成 grid（内部已落 R2）就直接返回缩略图
+      const gridPath = await materializeGridWithinBudget(c, admin, primary);
+      if (gridPath) {
+        const blob = await downloadGridBlob(c.env, gridPath);
+        if (await isAcceptableGridBlob(blob)) {
+          body = blob;
+          contentType = 'image/jpeg';
+          break;
+        }
+      }
+      // 预算超时或生成失败：直接回源原图提供可看内容（grid 已由后台继续物化），
+      // 避免列表卡片卡在占位/文字状态直到 16–22s 的缩放完成。
+      const fullBlob = await downloadCardImage(c.env, primary, (key, blob) => {
+        scheduleR2Backfill(c, key, blob);
+      });
+      const fullMime = await blobImageMime(fullBlob);
+      if (fullBlob && fullMime) {
+        body = fullBlob;
+        contentType = fullMime;
         break;
       }
     }
@@ -679,7 +749,12 @@ export async function ensureGridPathForSigning(
   let requiredPrimary: string | null = null;
   /* A stored grid is already a safe list asset. Check it before requiring the
    * original so grid-only MJ records do not 404 or trigger a 4K lookup. */
-  if (variant !== 'full' && await cardImageExists(c.env, signPath, admin)) return signPath;
+  if (variant !== 'full' && await cardImageExists(c.env, signPath, admin)) {
+    // 对象只存在于 Supabase（R2 未回填）时异步回传 R2，避免签名后每次
+    // media/i 都走慢速回源（实测单张 4-8s，批量 8-10s）。
+    if (!(await existsInR2(c.env, signPath))) scheduleR2Backfill(c, signPath);
+    return signPath;
+  }
   if (opts.requireExistingPrimary) {
     const primaryCandidates = /_grid\.(jpe?g|webp|png)$/i.test(clean)
       ? primaryCandidatesFromGridPath(clean)
@@ -716,14 +791,15 @@ export async function ensureGridPathForSigning(
       c.env
     );
   if (primary) {
-    const materialized = await materializeGridForPrimaryPath(c.env, admin, primary);
+    const materialized = await materializeGridWithinBudget(c, admin, primary);
     if (materialized) return materialized;
   }
-  if (opts.requireExistingPrimary) {
+  /* 缩略图 3s 内未就绪（原图在慢速库或现场缩放超时）时一律降级到已确认存在的
+     原图路径：列表签名必须拿到可下载 URL，不能让卡片停在占位/文字状态。 */
+  const fallbackPath = requiredPrimary || primary || null;
+  if (!fallbackPath && opts.requireExistingPrimary) {
     throw new ApiError(503, 'GRID_UNAVAILABLE', '缩略图暂时不可用');
   }
-  /* 缩略图生成失败时降级到已确认存在的原图路径，避免列表签名返回 404 URL */
-  const fallbackPath = requiredPrimary || primary || null;
   return fallbackPath || signPath;
 }
 

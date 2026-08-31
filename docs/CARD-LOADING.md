@@ -1,6 +1,6 @@
 # 列表图片加载
 
-复核日期：2026-08-29。下述仓库 UI 对应候选 `20260829p`（尚未上线时不要据此描述生产行为）；生产资源以线上 build 和资源 HTTP 冒烟为准。
+复核日期：2026-08-31。下述仓库 UI 对应候选 `20260830f` 后的未发布修复（尚未上线时不要据此描述生产行为）；生产资源以线上 build 和资源 HTTP 冒烟为准。
 
 ## 目标
 
@@ -26,6 +26,26 @@ storage://card-images/{user}/{file}
   -> Cloudflare cache
   -> R2，缺失时按 r2-first 回源 MemFire Storage
 ```
+
+**R2 回源自愈（2026-08-31）**：r2-first 回源命中（R2 缺失、Supabase 有对象）时，`serveCachedStorageImage`
+与 `ensureGridPathForSigning` 会通过 `scheduleR2Backfill` 把该对象（含 `_grid`）异步回传 R2。
+在此之前，R2 未回填的对象每张卡都走慢速 MemFire 回源（实测 `media/sign` 单张 2–4s、
+`sign-batch` 8–9s、`media/i` 4–8s），`_grid` 缺失时还按主图现场生成（单张 16–22s），
+这正是卡片库“很卡”的来源。存量缺图请批量回填：
+
+```powershell
+# scripts/admin.local.env 需含 MEMFIRE_URL / MEMFIRE_SERVICE_ROLE_KEY（当前库）与 R2_*
+set AUDIT_USER_ID=<UUID>
+node scripts/run-warehouse-repair.mjs --dry-run
+node scripts/run-warehouse-repair.mjs --max 200
+node scripts/run-warehouse-repair.mjs --all
+```
+
+**grid 物化预算（2026-08-31）**：签名/`/media/i` 命中缺失 `_grid` 时不再同步等 16–22s 的现场缩放。
+`materializeGridWithinBudget` 给 3s 预算：超时则交 `waitUntil` 后台继续物化（落 R2，下一轮命中），
+本次响应降级到已确认存在的原图路径——列表必须拿到可下载 URL，否则卡片只会停在占位/文字状态
+（“点进卡片才有图”就是这么来的：详情走原图立即可见，列表等在缩略图上）。
+`materializeCommunityGridIfMissing` 同样按 3s 预算后异步完成。
 
 Generated results from `newapi.prompt-hubs.com` are fetched only through the
 authenticated Worker media proxy before browser-side validation and upload.

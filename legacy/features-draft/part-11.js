@@ -800,7 +800,11 @@
   const IMAGE_GEN_SAVE_TARGET_LS = 'promptHub.imageGenSaveTarget.v1';
 
   function imageGenSizeOptionLabel(value) {
-    return IMAGE_GEN_SIZE_LABELS[value] || String(value || '1:1');
+    if (IMAGE_GEN_SIZE_LABELS[value]) return IMAGE_GEN_SIZE_LABELS[value];
+    const raw = String(value || '1:1').trim();
+    // 像素尺寸（Sensenova 等）提交目录规范值，仅把标签显示为 1024×1024
+    if (/^[0-9]+x[0-9]+$/i.test(raw)) return raw.replace(/x/i, '×');
+    return raw;
   }
 
   function imageGenModelHidesQuality(modelId) {

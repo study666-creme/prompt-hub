@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   cardImageExists: vi.fn(),
   deleteFromR2: vi.fn(),
   downloadCardImage: vi.fn(),
+  existsInR2: vi.fn(async () => false),
   uploadCardImage: vi.fn()
 }));
 
@@ -18,6 +19,7 @@ vi.mock('./r2-storage', () => ({
   cardImageExists: mocks.cardImageExists,
   deleteFromR2: mocks.deleteFromR2,
   downloadCardImage: mocks.downloadCardImage,
+  existsInR2: mocks.existsInR2,
   uploadCardImage: mocks.uploadCardImage
 }));
 

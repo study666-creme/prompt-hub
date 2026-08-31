@@ -698,7 +698,7 @@
       const timer = setTimeout(() => controller.abort(), 8000);
       let response;
       try {
-        response = await fetch(`https://api.prompt-hubs.com/api/v1/generate/models?refresh=1&v=${IMAGE_GEN_CATALOG_CACHE_VERSION}`, {
+        response = await fetch(`https://api.prompt-hubs.com/api/v1/generate/models?v=${IMAGE_GEN_CATALOG_CACHE_VERSION}`, {
           method: 'GET',
           credentials: 'omit',
           signal: controller.signal
@@ -750,7 +750,7 @@
       }
       const res = await request(
         'GET',
-        `/api/v1/generate/models?refresh=1&v=${IMAGE_GEN_CATALOG_CACHE_VERSION}`,
+        `/api/v1/generate/models?v=${IMAGE_GEN_CATALOG_CACHE_VERSION}`,
         null,
         { timeoutMs: 8000, public: true }
       );

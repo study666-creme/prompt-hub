@@ -31,7 +31,21 @@
 | P1 | 上游已完成但客户端长期拿不到图片/视频 | 对照 task ID、poll 时间、归档状态和 Network；不能用重新提交验证 |
 | P1 | 退款槽堆积 | 监控 `refund_pending`、credit ledger ref 和 cron 错误 |
 | P1 | 历史第三方图片直链失效 | 先查 R2/Storage 是否有持久引用；源站永久 404 不能靠重签恢复 |
+| P1 | R2 未回填对象仍走慢速回源 | `media/sign` 单张 >1s、`media/i` >2s 或 `_grid` 现场生成 >5s 即回源未命中；批量用 `run-warehouse-repair.mjs` 回填 |
 | P2 | 手机弱网首屏或图片加载回归 | 首批 DOM、图片规格、传输量和滚动增量均需实测；桌面卡片库已不再使用 Masonry 绝对定位 |
+
+## 2026-08-31 实测记录（生产，登录态）
+
+- 生图：`image2-economy`、`seedream-5.0` 提交/出图正常；`sensenova-1.5-一秒出图`
+  前端发比例值 `1:1` 被 `400 该模型不支持 1:1 比例` 拒绝（前端尺寸选择器未按目录
+  `size` 参数渲染，已在主树修复）；改发像素尺寸后任务被站内接受但执行失败
+  «请求被拒绝，请稍后再试» 并退款——属卡藏 New API 站内渠道/上游问题，已报告站长。
+- 卡片库慢：`media/sign` 单张约 2–4s、`sign-batch` 8–9s、`media/i` 4–8s、缺失
+  `_grid` 现场生成 16–22s，且同一引用被重复签名/重复拉取——根因是历史对象
+  R2 未回填（部分 `_grid.jpg` R2 404），已在主树加 R2 回源自愈
+  （`scheduleR2Backfill`）并修正回填脚本指向当前 MemFire 库。
+- 生产 Worker 实证：`/health` 无 `buildSha` 字段（`environment`+`imageProviders`
+  形态），与文档记载的 464e068 构建不一致；发布后必须重新核对。
 
 ## 排查顺序
 

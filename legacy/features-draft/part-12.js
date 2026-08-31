@@ -195,6 +195,14 @@
   function imageGenSizeOptionsForModel(modelId) {
     const id = normalizeImageGenModelId(modelId);
     const entry = imageGenModelCatalog.find((m) => m.id === id);
+    // 目录声明的 size 参数优先：Sensenova 等模型声明像素尺寸（1024x1024…），
+    // 按家族比例列表发送会被服务端按目录校验拒绝（400 该模型不支持 1:1 比例）。
+    const sizeParam = Array.isArray(entry?.parameters)
+      ? entry.parameters.find((p) => p.name === 'size' || p.path === 'size')
+      : null;
+    if (sizeParam && Array.isArray(sizeParam.options) && sizeParam.options.length) {
+      return [...sizeParam.options];
+    }
     if (Array.isArray(entry?.aspectRatios) && entry.aspectRatios.length) {
       if (entry?.uiFamily === 'banana' && entry.aspectRatios.length < IMAGE_GEN_SIZE_BANANA.length) {
         return [...IMAGE_GEN_SIZE_BANANA];

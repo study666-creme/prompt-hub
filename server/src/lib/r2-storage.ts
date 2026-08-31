@@ -156,7 +156,16 @@ async function downloadFromSupabase(env: Env, path: string): Promise<Blob | null
 }
 
 /** 按 MEDIA_STORAGE_MODE 下载对象 */
-export async function downloadCardImage(env: Env, path: string): Promise<Blob | null> {
+/**
+ * 按 MEDIA_STORAGE_MODE 下载对象。
+ * R2 缺失而 Supabase 回源命中时，若提供 onSupabaseHit 回调，会把「回源后
+ * 回传 R2」交给调用方（waitUntil 回填，一次性成本，之后走 R2/CDN）。
+ */
+export async function downloadCardImage(
+  env: Env,
+  path: string,
+  onSupabaseHit?: (key: string, blob: Blob) => void
+): Promise<Blob | null> {
   const mode = mediaStorageMode(env);
   const key = cleanPath(path);
   if (!key) return null;
@@ -167,7 +176,9 @@ export async function downloadCardImage(env: Env, path: string): Promise<Blob | 
     if (mode === 'r2') return null;
   }
 
-  return downloadFromSupabase(env, key);
+  const fromSupabase = await downloadFromSupabase(env, key);
+  if (fromSupabase && onSupabaseHit) onSupabaseHit(key, fromSupabase);
+  return fromSupabase;
 }
 
 /** 上传：有 R2 时双写 R2 + Supabase（r2-only 时只写 R2） */

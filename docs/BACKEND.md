@@ -85,6 +85,7 @@ Canvas 媒体交付候选（2026-08-08）已提交到 `codex/unified-media-deliv
 
 - `/api/v1/generate/models` 返回所有已完成协议适配且当前可用的公开图片模型；全能模型2、香蕉、Midjourney 和其他通用型号均按目录项的公开 `uiFamily` 分组，客户端不得把未知或 `generic` 型号伪装成全能模型2。目录数量、公开名称、比例、分辨率和价格来自实时响应，不在前端硬编码当前清单。响应顶层同时返回 `catalogVersion`、`pricingVersion` 和 `catalogStale` 供运行监控；新服务未单独发布价格版本时，`pricingVersion` 使用覆盖完整价格负载的 `catalogVersion`。模型项不得包含上游渠道、主机或内部映射。
 - 图片参数语义固定为：`resolution` 只表示 `1k` / `2k` / `4k`，`quality` 只表示质量，但不是每个模型都公开质量控件。香蕉质量选项为 `low` / `medium` / `high`；`image2k4k` 固定 `low`，4K 型号固定 `standard`，`gpt-image-2-ext` 使用上游默认画质且不发送 `quality`。仅兼容历史请求中精确的 `quality=1k|2k|4k`，入口会把它归一到 `resolution`，不能继续生成两个“分辨率”字段。
+- `size` 单位随模型不同：`gim2`、香蕉、MJ 声明的是画面比例（`1:1`、`16:9`…），Sensenova 等 `generic` 模型声明的是像素尺寸（`1024x1024`…）。前端尺寸选择器必须按目录项 `parameters.size.options` 渲染并原样提交，服务端按目录逐项校验 `size`——把比例值发给像素尺寸模型会得到 `400 该模型不支持 1:1 比例`；服务端不做隐式换算。
 - 卡藏 API 的图片人民币价格统一调用 `imageRetailCreditsFromYuan()`：卡藏报价已包含上游加价，按 `1 元 = 100 积分` 直接换算，不再重复加价。
 - 图片报价和提交读取普通 `/api/model-catalog`，进程内以 single-flight 合并并发请求；完整且精确匹配模型价格的 LKG 最多可信 5 分钟，不再为每次报价发送 `refresh=1`。没有可信价格时必须在创建任务和扣费前失败。
 - 卡片库把用户看到的 `quotedCredits` 随生成请求带回。服务端按当前可信目录重算，报价变化时返回 `409 CONFLICT` 且不创建任务、不扣积分；浏览器只清除对应报价缓存，下一次点击重新报价，不自动重发付费 POST。报价 GET 遇到 `500/502/503/504` 只短退避重试一次。
@@ -114,6 +115,8 @@ npm exec wrangler secret put NEWAPI_VIDEO_API_KEY
 - 管理后台的删除/恢复接口必须先提供预览或显式确认；卡片巡检默认只读。
 - 生成扣费与退款由同一任务记录驱动，不能在前端自行补积分。
 - 图片和视频付费 POST 只能由 `queued` 状态通过 CAS 领取一次；`running`、`outcome_unknown`、`not_found` 和队列重投都不能重开提交。
+- `r2-first` 模式下对象在 Supabase 回源成功但 R2 缺失时，媒体路径会把对象异步回传 R2（`scheduleR2Backfill`），避免每张卡片都走慢速回源；存量缺图用 `scripts/run-warehouse-repair.mjs` 批量回填。
+- 列表缩略图缺失时用 3 秒预算现场物化（`materializeGridWithinBudget`）：超时交 `waitUntil` 后台继续并把 grid 落 R2，本次签名/`/media/i` 响应降级到已确认存在的原图路径，保证列表一定拿到可下载 URL。不得回到“同步等单张 16–22s 缩放”的实现。
 - Canvas 首次建点奖励只调用 `grant_canvas_create_node_reward`；任务 claim 与会员延期在一个数据库事务中完成。
 
 ## Prompt Hub 与 Canvas 桥接边界
