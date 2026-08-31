@@ -23,7 +23,9 @@ Prompt Hub 是高频创作工具，不是营销落地页。整体风格应高级
 | 颜色 | swatch |
 | 工具动作 | 图标按钮 + tooltip |
 | 明确命令 | 图标+文字按钮 |
-| 多选项 | menu/select |
+| 多选项 | menu/select（表单里用应用绘制下拉 `imagegen-select-ui.js` + `.ph-cselect*`，不裸露原生 `<select>` 弹层） |
+
+昼夜切换不放进设置面板：桌面用侧栏底 `#themeToggleBtn`、手机用底栏「昼夜」`#themeToggleBtnMobile`，自动昼夜默认开启（早 8 点日光 / 晚 8 点夜间），手动切换会暂停自动，可在设置 → 外观重新开启。浅色/深色两套配色都必须保持文字可读，禁止出现“只有黑夜版本”的控件（例如白色文字贴白底、深色文字贴深菜单）。
 
 按钮尺寸、工具栏高度、网格列宽和图片 aspect ratio 要稳定，hover/loading 不得改变布局尺寸。
 

@@ -613,6 +613,40 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-layout--inspire-mode .imagege
     0 12px 28px rgba(0, 0, 0, 0.16);
 }
 
+/* 白天模式：侧栏分段控件（仓库/获取、社区排序）与提示文字切为深色文字，
+   否则白色文字与浅色背景融为一体（图二/图三类问题）。 */
+[data-theme="light"] #pageImageGen .imagegen-side {
+  --imagegen-segment-surface: rgba(255, 255, 255, 0.66);
+  --imagegen-segment-rail: rgba(17, 24, 39, 0.07);
+  --imagegen-segment-rail-hover: rgba(17, 24, 39, 0.1);
+  --imagegen-segment-glider: rgba(17, 24, 39, 0.12);
+  --imagegen-segment-border: rgba(17, 24, 39, 0.16);
+  --imagegen-segment-text: rgba(50, 58, 70, 0.72);
+  --imagegen-segment-text-active: rgba(24, 30, 40, 0.95);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 12px 28px rgba(23, 31, 38, 0.1);
+}
+
+[data-theme="light"] #pageImageGen .imagegen-feed-tabs {
+  box-shadow: inset 0 1px 0 rgba(21, 28, 34, 0.06);
+}
+
+[data-theme="light"] #pageImageGen .imagegen-community-tabs {
+  box-shadow: inset 0 1px 0 rgba(21, 28, 34, 0.06);
+}
+
+[data-theme="light"] #pageImageGen .imagegen-segment-glider {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] #pageImageGen .imagegen-feed-hint {
+  border-bottom-color: rgba(21, 28, 34, 0.12);
+  color: rgba(52, 62, 74, 0.68);
+}
+
 body:not(.efficiency-mode) #pageImageGen .imagegen-side {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0.008)),
@@ -1019,4 +1053,169 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-side {
     max-width: none !important;
     flex-basis: auto !important;
   }
+}
+
+/* ---- 生图页自定义下拉选择器（替换原生 <select>，图四/图五类问题） ---- */
+#pageImageGen .ph-cselect {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: stretch;
+  flex: 1 1 auto;
+}
+
+#pageImageGen .ph-cselect-trigger {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-sm);
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease, transform 0.15s var(--ease-out);
+}
+
+#pageImageGen .ph-cselect-trigger:hover,
+#pageImageGen .ph-cselect-trigger[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--apple-blue, #007aff) 28%, var(--border));
+  background: var(--bg-hover);
+}
+
+#pageImageGen .ph-cselect-trigger:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--text-primary) 42%, var(--border-light));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-primary) 9%, transparent);
+}
+
+#pageImageGen .ph-cselect-trigger:disabled {
+  color: var(--text-muted);
+  cursor: wait;
+  opacity: 0.72;
+}
+
+#pageImageGen .ph-cselect-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#pageImageGen .ph-cselect-chevron {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: var(--text-muted);
+  pointer-events: none;
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+#pageImageGen .ph-cselect-trigger[aria-expanded="true"] .ph-cselect-chevron {
+  transform: rotate(180deg);
+}
+
+.ph-cselect-menu {
+  z-index: 300;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid color-mix(in srgb, var(--text-primary) 14%, var(--border));
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.ph-cselect-menu[hidden] {
+  display: none !important;
+}
+
+.ph-cselect-option {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ph-cselect-option > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ph-cselect-option:hover,
+.ph-cselect-option.is-active {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.ph-cselect-option.is-selected {
+  background: var(--accent-bg-strong);
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.ph-cselect-option[aria-disabled="true"] {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.ph-cselect-option-check {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-light);
+  pointer-events: none;
+  position: relative;
+}
+
+.ph-cselect-option.is-selected .ph-cselect-option-check {
+  border-color: var(--text-primary);
+  background: var(--text-primary);
+}
+
+.ph-cselect-option.is-selected .ph-cselect-option-check::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 2px;
+  width: 5px;
+  height: 3px;
+  border-left: 1.5px solid var(--bg-primary);
+  border-bottom: 1.5px solid var(--bg-primary);
+  transform: rotate(-45deg);
+}
+
+.ph-cselect-empty {
+  margin: 8px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
 }

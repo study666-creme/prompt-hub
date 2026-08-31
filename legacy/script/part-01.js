@@ -263,7 +263,7 @@
       defaultImageGenAutoPublish: true,
       communityNotificationsEnabled: true,
       communityNotifyBadge: true,
-      autoDayNight: false,
+      autoDayNight: true,
       themeManualOverride: false,
       showTrimBlackBorderTool: false,
       preserveOriginalCardImage: false,

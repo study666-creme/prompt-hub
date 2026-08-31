@@ -107,7 +107,8 @@ const mustHave = [
   'pack-account.js',
   'pack-media-client.js',
   'pack-extra.js',
-  'edit-panel-gallery.js'
+  'edit-panel-gallery.js',
+  'imagegen-select-ui.js'
 ];
 const mustNot = [
   '.bundle.js',

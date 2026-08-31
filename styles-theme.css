@@ -406,6 +406,23 @@ body.app-nav-collapsed .app-nav-theme-btn {
   height: 20px;
 }
 
+/* 手机底栏「昼夜」页签：按当前主题切换太阳/月亮图标（纯 CSS，不依赖 JS 状态） */
+.mobile-theme-tab .icon-sun {
+  display: inline;
+}
+
+.mobile-theme-tab .icon-moon {
+  display: none;
+}
+
+[data-theme="light"] .mobile-theme-tab .icon-sun {
+  display: none;
+}
+
+[data-theme="light"] .mobile-theme-tab .icon-moon {
+  display: inline;
+}
+
 /* 浅色模式：提升正文/输入可读性，保持清爽 */
 [data-theme="light"] .prompt-field textarea,
 [data-theme="light"] #cardPrompt,

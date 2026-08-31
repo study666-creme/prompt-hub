@@ -64,7 +64,7 @@ media failures collapse through `styles/base/part-08.css` instead of leaving
 a black slot.
 | 社区数据/共享首屏请求 | `community-public-feed.js`, `image-gen-feed.js`, `legacy/features-draft/`, `server/src/routes/v1/community.ts` |
 | 社区布局 | `feed-layout.js`, `styles/features/` |
-| 生图表单 | `legacy/features-draft/`, `imagegen-ref-ui.js`, `imagegen-submit.js` |
+| 生图表单 | `legacy/features-draft/`, `imagegen-ref-ui.js`, `imagegen-submit.js`, `imagegen-select-ui.js` |
 | 生图任务 | `imagegen-job-runner.js`, `imagegen-poll-warehouse.js`, `imagegen-finish-run.js`, `server/src/routes/v1/generate.ts`, `server/src/lib/fast-provider-queue.ts` |
 | 上游 provider | `server/src/lib/image-upstream.ts`, provider 对应 `*.ts` |
 | 媒体/R2 | `server/src/routes/v1/media.ts`, `server/src/lib/media-cdn.ts`, `server/src/lib/r2-storage.ts` |
@@ -76,7 +76,7 @@ a black slot.
 | Canvas 桥接样式 | `styles/base/part-04.css`, `styles/base/part-09.css`, `styles-mobile.css`, `styles-theme.css` |
 | Canvas 精确取卡/结果回仓 | `server/src/routes/v1/extension.ts`, `server/src/lib/extension-card.ts` |
 | 移动端 | `mobile.js`, `styles-mobile.css` |
-| UI 主题/动效 | `styles-theme.css`, `theme.js`, `UI-GUIDELINES.md` |
+| UI 主题/动效 | `styles-theme.css`, `theme.js`, `UI-GUIDELINES.md`；昼夜按钮在 `partials/index-body/part-02.html`（侧栏底，`#themeToggleBtn`）与 `partials/index-body/part-04.html`（手机底栏，`#themeToggleBtnMobile`），随 `theme.js` 打进 `pack-prelude.js` |
 
 ## 数据与运维
 

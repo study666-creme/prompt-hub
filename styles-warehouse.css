@@ -1717,11 +1717,31 @@ body.panel-open .app-page-warehouse .warehouse-hero-visual {
   --warehouse-surface: #f4f5f6;
   --warehouse-panel: #fafafa;
   --warehouse-raised: #ffffff;
+  --warehouse-raised-2: #ffffff;
   --warehouse-line: rgba(21, 28, 34, 0.1);
   --warehouse-line-strong: rgba(21, 28, 34, 0.18);
   --warehouse-visual: #187f70;
+  --warehouse-visual-soft: color-mix(in srgb, #187f70 10%, transparent);
   --warehouse-text: #956014;
   --warehouse-collect: #a54f70;
+}
+
+/* 日光模式下仓库下拉菜单：底色、悬停与选中高亮全部切为浅色方案，
+   避免深色菜单上的日光文字（图六/图七类“只有黑夜版本”的问题）。 */
+[data-theme="light"] .app-page-warehouse .warehouse-composer-picker-menu {
+  border-color: var(--warehouse-line);
+  background: var(--warehouse-raised-2);
+  box-shadow: 0 8px 20px rgba(23, 31, 38, 0.16), 0 24px 56px rgba(23, 31, 38, 0.18);
+}
+
+[data-theme="light"] .app-page-warehouse .warehouse-picker-option:hover,
+[data-theme="light"] .app-page-warehouse .warehouse-picker-option:focus-visible,
+[data-theme="light"] .app-page-warehouse .warehouse-picker-option.is-keyboard-active {
+  background: color-mix(in srgb, #10161c 7%, transparent);
+}
+
+[data-theme="light"] .app-page-warehouse .warehouse-picker-option.is-selected {
+  background: color-mix(in srgb, #10161c 9%, transparent);
 }
 
 [data-theme="light"] .app-page-warehouse #cardsContainer .card {
@@ -2727,6 +2747,10 @@ body.warehouse-content-focus .warehouse-content-stage {
     min-height: 438px;
     max-height: none;
     justify-content: flex-start;
+    /* 手机端主内容区是固定高度的滚动容器：这里必须禁止 flex 收缩，
+       否则输入区内容（卡片模式下选项两行）高于 438px 时会溢出容器、
+       把下方的「卡片库」导航条盖住一半。 */
+    flex-shrink: 0;
   }
 
   .warehouse-composer.is-image-mode {

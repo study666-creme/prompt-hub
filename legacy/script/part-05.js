@@ -661,7 +661,7 @@
       if (Array.isArray(payload.customGroups)) customGroups = payload.customGroups;
       if (Array.isArray(payload.globalFields)) globalFields = payload.globalFields;
       if (payload.settings && typeof payload.settings === 'object') {
-        settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, autoDayNight: false, themeManualOverride: false }, payload.settings);
+        settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, autoDayNight: true, themeManualOverride: false }, payload.settings);
         settings.deletedCardTombstones = mergeDeletedCardTombstones(
           prevTombstones,
           payload.settings.deletedCardTombstones
@@ -706,7 +706,7 @@
       settings.floatingPrompt = false;
       document.getElementById('imageClickZoomToggle').checked = settings.imageClickZoom;
       applyEfficiencyMode();
-      if (settings.autoDayNight === true) {
+      if (settings.autoDayNight !== false) {
         settings.themeManualOverride = false;
         window.ThemeSchedule?.applyAutoThemeIfNeeded?.();
       } else if (settings.theme && typeof window.applyAppTheme === 'function') {
