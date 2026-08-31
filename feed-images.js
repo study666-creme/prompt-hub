@@ -8,8 +8,10 @@
   let deps = {};
   const displayUrlCache = new Map();
 
+  // 透明占位（保留 data:image/svg 供 isPlaceholderCardImg 识别）：主题化骨架背景
+  // （--card-skeleton-bg）负责加载观感，避免写死的深灰色块在浅色模式下像「灰卡」。
   const IMG_LOADING_PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect fill="%2318181c" width="16" height="16"/></svg>'
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"></svg>'
   );
 
   function d() {

@@ -700,6 +700,13 @@
         : new Map();
 
       if (reset) {
+        // 排序变化：清空列归属缓存，瀑布流按新顺序重新贪心分配；否则每张卡片
+        // 沿用「上次所属列」，视觉顺序永远停在旧排列（排序不生效的根因）。
+        if (typeof window.__phLastRenderSort !== 'undefined' && window.__phLastRenderSort !== sortMode) {
+          warehouseFocusColById.clear();
+          lastFocusColumnCount = 0;
+        }
+        window.__phLastRenderSort = sortMode;
         if (masonryInstance) { masonryInstance.destroy(); masonryInstance = null; }
         container.innerHTML = '';
         delete container?.dataset?.masonryLoadBound;

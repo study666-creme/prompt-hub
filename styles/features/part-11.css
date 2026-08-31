@@ -900,9 +900,21 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-side {
   width: 100% !important;
   height: auto !important;
   min-height: 0 !important;
-  max-height: none !important;
+  max-height: min(75vh, 640px) !important;
   object-fit: contain !important;
   object-position: center center !important;
+}
+
+/* 社区/作品「纯图卡」加载占位：grid 模式下先占 4:3 形状 + 最小高（与 masonry 一致），
+   避免「0 高 → 图片加载完成瞬间撑成大图」的突脸；加载完成由媒体类摘除自动放开。 */
+#communityGrid .community-feed-image-only .card-media.is-loading,
+#communityGrid .community-feed-image-only .card-media.card-media--await,
+#creationsGrid .community-feed-image-only .card-media.is-loading,
+#creationsGrid .community-feed-image-only .card-media.card-media--await {
+  aspect-ratio: 4 / 3 !important;
+  min-height: clamp(160px, calc(var(--feed-col-width, 180px) * 1.18), 320px) !important;
+  max-height: min(75vh, 640px) !important;
+  background: var(--card-skeleton-bg) !important;
 }
 
 @media (max-width: 900px) {

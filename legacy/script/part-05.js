@@ -267,7 +267,8 @@
       if (!loaded) {
         const inWarehouse = media.closest('#cardsContainer');
         if (inWarehouse && isPlaceholderCardImg(img)) {
-          armMediaShineWatchdog(shineTarget, 22000);
+          // 灰占位处理：短等待后仍无真实图则折叠为文字卡，避免「文字/失效图卡片」长时间出现灰框。
+          armMediaShineWatchdog(shineTarget, 6500);
           window.CardImageLoader?.loadImg?.(img);
           return;
         }
@@ -296,9 +297,15 @@
           void media.offsetWidth;
         }
         if (!alreadyRevealed && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-          const cardId = cardEl?.dataset?.id || cardEl?.dataset?.postId || '';
+          // 按 DOM 顺序级联扫光（而非按 cardId 哈希随机），保证靠前的卡片先亮、视觉上先出，
+          // 避免「后面的先加载出来」的观感；单卡最多延迟 0.3s。
           let stagger = 0;
-          for (let i = 0; i < cardId.length; i++) stagger = (stagger + cardId.charCodeAt(i) * 13) % 200;
+          const revealRoot = media.closest('#communityGrid, #creationsGrid, #userProfileGrid, #cardsContainer, #imageGenFeed');
+          if (revealRoot && cardEl) {
+            const siblings = [...revealRoot.querySelectorAll('.card[data-id], .card[data-post-id], .imagegen-feed-card')];
+            const idx = siblings.indexOf(cardEl);
+            if (idx >= 0) stagger = Math.min(idx * 34, 300);
+          }
           setTimeout(() => {
             media.classList.add('media-shine-reveal');
             setTimeout(() => media.classList.remove('media-shine-reveal'), 1250);
@@ -542,7 +549,9 @@
     }
 
     function cardImgInitialSrc(image, cardId, extraOpts) {
-      const placeholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><defs><linearGradient id="g" x1="0" x2="1"><stop stop-color="#25272f"/><stop offset=".55" stop-color="#343740"/><stop offset="1" stop-color="#25272f"/></linearGradient></defs><rect fill="#25272f" width="160" height="120"/><rect fill="url(#g)" width="160" height="120" opacity=".9"/></svg>');
+      // 透明占位（保持 data:image/svg 以被 isPlaceholderCardImg 识别）：避免写死深灰
+      // 色块盖住主题化骨架背景（`--card-skeleton-bg`），在浅色模式下显得像「灰卡」。
+      const placeholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"></svg>');
       const jobId = extraOpts?.jobId ? String(extraOpts.jobId).replace(/#\d+$/, '') : undefined;
       const cardModel = cardId ? (window.__promptHubCards || []).find((c) => c.id === cardId) : null;
       const allowFull = !!(extraOpts?.allowFullFallback || jobId || cardModel?.genJobId);

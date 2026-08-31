@@ -479,6 +479,11 @@
   background: rgba(232, 197, 71, 0.1);
   border: 1px solid rgba(232, 197, 71, 0.22);
 }
+[data-theme="light"] .imagegen-promo-notice {
+  color: #7a5a00;
+  background: rgba(232, 197, 71, 0.18);
+  border-color: rgba(232, 197, 71, 0.45);
+}
 
 .imagegen-promo-notice--model {
   margin: 0 0 8px;

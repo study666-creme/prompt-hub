@@ -18,6 +18,17 @@
   display: block;
   vertical-align: top;
   background: transparent;
+  transition: opacity 0.4s ease;
+}
+
+/* 加载中隐藏图片，.is-loading 摘除后平滑淡入（与卡片库/社区一致） */
+.imagegen-feed-media.is-loading:not(.imagegen-gen-pending) img {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .imagegen-feed-media.is-loading:not(.imagegen-gen-pending) img {
+    opacity: 1;
+  }
 }
 
 .imagegen-feed-media.is-loading:not(.imagegen-gen-pending),

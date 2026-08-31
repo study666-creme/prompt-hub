@@ -1,6 +1,8 @@
 # AI 接手说明
 
-最后核对：2026-08-28。生产 Worker 已核对为 `464e06883fc8e304280d49826c58436eab05c2dc`，Pages build 为 `20260828a`；Worker `/health.buildSha`、Pages production build 和线上冒烟均已取证。
+最后核对：2026-08-31。生产 Pages build 为 `20260831b`（SHA `a27f8ad15bcda6d82be9aa4d5fa569436d605d28`），Worker 为 c7b6f93；`/health.buildSha` 与 Pages production build 以线上冒烟为准。
+
+白天适配与出图动效批次（2026-08-31）：视频生成从仓库作曲器中整体移除（不计划开通，也无服务端模型入口）。仓库右侧编辑卡片面板原本被 `styles-warehouse.css` 强制深色（`#171a20→#101216` + 白色叠加 `color-mix` 控件），已补 `[data-theme="light"]` 覆盖；同类「只有黑夜」问题一并修复：`card-media-placeholder` 深色渐变改 `var(--card-skeleton-bg)`（styles/base/part-04.css）、`warehouse-composer-picker-trigger` hover 白字改 `var(--text-primary)`、`imagegen-promo-notice` 浅色黄字、`#cardsContainer .card-copy-btn/.card-canvas-btn` 浅色玻璃、`imagegen-mj-filmstrip-main img` 底色改 `var(--bg-elevated)`。所有加载占位（`cardImgInitialSrc`、`imgPlaceholderSrc`、`IMG_LOADING_PLACEHOLDER`×2，feed-images.js / features-draft part-01）由写死深灰 SVG 改为**透明**占位，加载观感交给主题化 `--card-skeleton-bg`；浅色加载光球改为柔和扫光（styles-theme.css）。出图统一缓入：`.card-media.is-loading .card-img` 透明度 0、加载完成淡入（styles/base/part-03.css、features/part-07、part-08）；社区/作品纯图卡加载占 4:3 形状、完成后按 `min(75vh,640px)` 封顶（features/part-11、styles/base/part-09），修「大图突脸」。`finishCardMediaShine` 扫光级联由按 cardId 哈希随机改为 **DOM 顺序**（`legacy/script/part-05.js`），保证靠前卡片先亮，修「后面的先出来」。卡片库排序清空列归属缓存（`legacy/script/part-09.js` `renderCards`）；存卡提速（`legacy/supabase-sync/part-05.js` 单解码+全量/网格并行、`legacy/script/part-02.js` 生成入库多槽并行、`part-11.js` 画廊并行落地、灰占位看门狗 6.5s）。手机底栏「昼夜」按钮已删，只保留桌面侧栏 `#themeToggleBtn`，手机用设置→外观；自动昼夜默认开启。
 
 Canvas 媒体交付候选（2026-08-08）：分支 `codex/unified-media-delivery-20260808` 的媒体归档和恢复改动已提交并通过本地回归，尚未部署或执行付费验收；生产仍以 `/health.buildSha` 为准。
 

@@ -706,8 +706,10 @@
   }
 
   function imgPlaceholderSrc() {
+    // 透明占位：保留 data:image/svg 以被 isPlaceholderImgSrc 识别，但不再渲染写死
+    // 的深灰色块，改用主题化的 .card-media 背景（--card-skeleton-bg），避免浅色模式「灰卡」。
     return 'data:image/svg+xml,' + encodeURIComponent(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="#18181c" width="4" height="3"/></svg>'
+      '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"></svg>'
     );
   }
 

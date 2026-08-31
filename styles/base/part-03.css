@@ -675,6 +675,16 @@
       transition: transform 0.38s var(--ease-out), opacity 0.28s ease;
       transform-origin: center center;
     }
+    /* 加载中先隐藏，加载完成后随 .is-loading 摘除平滑淡入，避免图片「突脸」 */
+    #cardsContainer .card-media.is-loading .card-img,
+    #cardsContainer .card-media.card-media--await .card-img {
+      opacity: 0;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #cardsContainer .card-media.is-loading .card-img {
+        opacity: 1;
+      }
+    }
     .card.is-pinned {
       box-shadow: 0 0 0 1px var(--accent), var(--shadow-card);
     }

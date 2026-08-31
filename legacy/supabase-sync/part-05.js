@@ -602,6 +602,55 @@
     }
   }
 
+  /** 基于已解码图片的 48px 采样校验（全黑/无效拒绝），避免再解码一次上传前的 blob */
+  async function imageSampleLooksUsable(img) {
+    try {
+      const w = img.naturalWidth || 0;
+      const h = img.naturalHeight || 0;
+      if (!w || !h || w < 16 || h < 16) return false;
+      const sw = Math.min(48, w);
+      const sh = Math.min(48, h);
+      const canvas = document.createElement('canvas');
+      canvas.width = sw;
+      canvas.height = sh;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, sw, sh);
+      const data = ctx.getImageData(0, 0, sw, sh).data;
+      let sum = 0;
+      let sumSq = 0;
+      const n = sw * sh;
+      for (let i = 0; i < data.length; i += 4) {
+        const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        sum += lum;
+        sumSq += lum * lum;
+      }
+      const mean = sum / n;
+      const variance = sumSq / n - mean * mean;
+      if (variance < 6 && mean < 14) return false;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** 从已解码图片直接渲染 grid 缩略图（复用位图，无需再次加载源） */
+  async function renderImageToGridFromDecoded(img) {
+    const w = img.naturalWidth || 0;
+    const h = img.naturalHeight || 0;
+    if (!w || !h) throw new Error('图片尺寸无效');
+    const scale = Math.min(1, GRID_MAX_SIDE / Math.max(w, h));
+    const gw = Math.max(1, Math.round(w * scale));
+    const gh = Math.max(1, Math.round(h * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = gw;
+    canvas.height = gh;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, gw, gh);
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('缩略图生成失败'))), 'image/jpeg', GRID_JPEG_QUALITY);
+    });
+  }
+
   async function compressImage(source, opts) {
     const maxSide = opts?.maxSide || MAX_SIDE;
     const quality = opts?.quality != null ? opts.quality : JPEG_QUALITY;
@@ -647,9 +696,6 @@
     await ensureSession();
     const original = opts.original != null ? !!opts.original : cardUploadOriginalEnabled();
     const fullBlob = await prepareCardFullUploadBlob(source, { original });
-    if (!(await blobLooksLikeUsableImage(fullBlob))) {
-      throw new Error('图片无效（全黑或无法解码），已拒绝上传以免覆盖云端原图');
-    }
     const encodeMode = fullBlob.__uploadEncodeMode || 'raw';
     const ext = original
       ? (encodeMode === 'full_res_jpeg' ? 'jpg' : extFromImageMime(fullBlob.type))
@@ -658,18 +704,35 @@
     if (!path) throw new Error('未登录或卡片无效');
     const gridPath = gridImageStoragePath(cardId);
     clearSignedCacheForPaths([path, gridPath, ...listImagePathCandidates(toStorageRef(path), cardId)]);
-    await uploadStorageBlob(path, fullBlob, { skipVerify: true, onProgress: opts.onProgress });
+
+    // 单次解码：黑块校验与缩略图复用同一张位图，避免「解全图校验 → 上传 → 再解码出缩略图」
+    // 的串行开销；full 与 grid 上传并行，网速越慢收益越大。失败语义与原实现一致。
+    let decodedObjectUrl = null;
     let gridBytes = 0;
-    if (gridPath) {
-      try {
-        const gridBlob = await compressImageToGrid(source);
-        gridBytes = gridBlob.size || 0;
-        if (gridBytes >= GRID_MIN_VALID_BYTES && await blobLooksLikeUsableImage(gridBlob)) {
-          await uploadStorageBlob(gridPath, gridBlob, { skipVerify: true });
-          markGridThumbReady(cardId);
+    try {
+      if (fullBlob instanceof Blob) decodedObjectUrl = URL.createObjectURL(fullBlob);
+      const decodedImg = await loadImageFromSource(decodedObjectUrl || fullBlob);
+      if (!(await imageSampleLooksUsable(decodedImg))) {
+        throw new Error('图片无效（全黑或无法解码），已拒绝上传以免覆盖云端原图');
+      }
+      const uploadFull = uploadStorageBlob(path, fullBlob, { skipVerify: true, onProgress: opts.onProgress });
+      const uploadGrid = (async () => {
+        try {
+          if (!gridPath) return;
+          const gridBlob = await renderImageToGridFromDecoded(decodedImg);
+          gridBytes = gridBlob.size || 0;
+          if (gridBytes >= GRID_MIN_VALID_BYTES) {
+            await uploadStorageBlob(gridPath, gridBlob, { skipVerify: true });
+            markGridThumbReady(cardId);
+          }
+        } catch (e) {
+          console.warn('[SupabaseSync] grid thumb upload failed', cardId, e);
         }
-      } catch (e) {
-        console.warn('[SupabaseSync] grid thumb upload failed', cardId, e);
+      })();
+      await Promise.all([uploadFull, uploadGrid]);
+    } finally {
+      if (decodedObjectUrl) {
+        try { URL.revokeObjectURL(decodedObjectUrl); } catch (e) { /* ignore */ }
       }
     }
     const totalBytes = (fullBlob.size || 0) + gridBytes;

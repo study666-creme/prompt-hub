@@ -51,7 +51,7 @@
   function updateToggleLabel(theme) {
     const light = theme === 'light';
     const title = light ? '切换夜间模式' : '切换日光模式';
-    ['themeToggleBtn', 'themeToggleBtnMobile'].forEach((id) => {
+    ['themeToggleBtn'].forEach((id) => {
       const btn = document.getElementById(id);
       if (!btn) return;
       btn.title = title;
@@ -138,7 +138,7 @@
   };
 
   function bind() {
-    ['themeToggleBtn', 'themeToggleBtnMobile'].forEach((id) => {
+    ['themeToggleBtn'].forEach((id) => {
       document.getElementById(id)?.addEventListener('click', toggleTheme);
     });
   }

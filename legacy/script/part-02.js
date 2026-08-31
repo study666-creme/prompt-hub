@@ -132,9 +132,9 @@
           CG.syncCardGalleryFields(existing);
           if (Array.isArray(payload.mjButtons) && payload.mjButtons.length) existing.mjButtons = payload.mjButtons;
           if (payload.mjCompositeUrl) existing.mjCompositeUrl = payload.mjCompositeUrl;
-          for (let i = 0; i < merged.length; i += 1) {
-            const src = galleryInput[i] || merged[i];
-            if (!src || merged[i] !== src) continue;
+          await Promise.all(merged.map(async (m, i) => {
+            const src = galleryInput[i] || m;
+            if (!src || merged[i] !== src) return;
             if (window.SupabaseSync?.isLoggedIn?.() && window.SupabaseSync?.archiveGeneratedCardImage) {
               try {
                 const slotJob = i === 0 ? jobId : `${String(jobId).replace(/#\d+$/, '')}#${i + 1}`;
@@ -142,7 +142,7 @@
                 if (archived && archived !== src) merged[i] = archived;
               } catch (e) { /* ignore */ }
             }
-          }
+          }));
           existing.cardImages = merged;
           CG.syncCardGalleryFields(existing);
           applyGeneratedRefs(existing);
@@ -271,11 +271,11 @@
         && !!window.SupabaseSync?.isLoggedIn?.()
         && !!primaryImage;
       let primaryArchiveError = null;
-      for (let i = 0; i < imagesToArchive.length; i += 1) {
-        const src = imagesToArchive[i];
-        if (!src) continue;
+      // 多槽位并存档：并行拉取+上传（MJ 四宫格+单图等场景），失败语义与串行版一致
+      const slotResults = await Promise.all(imagesToArchive.map(async (src, i) => {
+        if (!src) return { i, archived: null, error: null };
         if (i === 0) void saveCardImageBackup(card.id, src).catch(() => {});
-        if (!window.SupabaseSync?.isLoggedIn?.()) continue;
+        if (!window.SupabaseSync?.isLoggedIn?.()) return { i, archived: null, error: null };
         try {
           if (copyStorage && i === 0 && window.SupabaseSync?.archiveGeneratedCardImage) {
             // Generated results can still point at a short-lived upstream URL.
@@ -287,11 +287,7 @@
             if (!archived || !window.SupabaseSync?.isStorageRef?.(archived)) {
               throw new Error('generated_primary_archive_failed');
             }
-            if (archived) {
-              card.image = archived;
-              if (Array.isArray(card.cardImages) && card.cardImages[i]) card.cardImages[i] = archived;
-            }
-            continue;
+            return { i, archived, error: null };
           }
           if (copyStorage && window.SupabaseSync?.archiveGeneratedCardImage && i > 0) {
             const slotJob = jobId ? `${String(jobId).replace(/#\d+$/, '')}#${i + 1}` : null;
@@ -299,25 +295,26 @@
               jobId: slotJob,
               copyToOwnPath: true
             });
-            if (archived) {
-              if (Array.isArray(card.cardImages) && card.cardImages[i]) card.cardImages[i] = archived;
-              if (i === 0) card.image = archived;
-            }
-            continue;
+            return { i, archived, error: null };
           }
           if (window.SupabaseSync?.archiveGeneratedCardImage) {
             const slotJob = jobId ? (i === 0 ? jobId : `${String(jobId).replace(/#\d+$/, '')}#${i + 1}`) : null;
             const archived = await window.SupabaseSync.archiveGeneratedCardImage(card.id, src, {
               jobId: slotJob
             });
-            if (archived && archived !== src) {
-              if (Array.isArray(card.cardImages) && card.cardImages[i]) card.cardImages[i] = archived;
-              if (i === 0) card.image = archived;
-            }
+            return { i, archived, error: null };
           }
+          return { i, archived: null, error: null };
         } catch (e) {
           if (i === 0) primaryArchiveError = e;
           console.warn('[addCardFromGenerated] gallery archive failed', i, e);
+          return { i, archived: null, error: e };
+        }
+      }));
+      for (const r of slotResults) {
+        if (r && r.archived) {
+          if (Array.isArray(card.cardImages) && card.cardImages[r.i]) card.cardImages[r.i] = r.archived;
+          if (r.i === 0) card.image = r.archived;
         }
       }
       if (requiresStablePrimary && (primaryArchiveError || !window.SupabaseSync?.isStorageRef?.(card.image))) {

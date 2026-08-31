@@ -90,9 +90,9 @@
     window.scheduleCloudPush?.({ urgent: true });
   }
 
-  /** 列表图加载占位（与 feed-images.js 同值；须在 wire* 之前可用） */
+  /** 列表图加载占位（与 feed-images.js 同值；须在 wire* 之前可用）。透明占位，由主题化骨架背景呈现 */
   const IMG_LOADING_PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect fill="%2318181c" width="16" height="16"/></svg>'
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"></svg>'
   );
 
   function genRetentionMs() {

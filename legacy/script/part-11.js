@@ -392,17 +392,19 @@
       const previous = Array.isArray(snap.previousGallery) ? snap.previousGallery : [];
       const uploads = snap.galleryUploads || {};
       const finalGallery = [];
-      for (let i = 0; i < gallery.length; i += 1) {
-        let ref = gallery[i];
+      // 多图槽位并行归档，保持原槽位顺序（响应与画布顺序一致）
+      const results = await Promise.all(gallery.map(async (ref, i) => {
         const upload = uploads[i] || (i === snap.galleryPrimaryIndex ? snap.uploadFile : null);
         if (i === 0 && coverImage) {
-          ref = coverImage;
-        } else if (window.SupabaseSync?.isLoggedIn?.()) {
+          return coverImage;
+        }
+        if (window.SupabaseSync?.isLoggedIn?.()) {
           if (upload || (ref && !window.SupabaseSync.isStorageRef?.(ref))) {
             const slotJobId = `${cardId}#${i + 1}`;
-            ref = await window.SupabaseSync.archiveGeneratedCardImage(cardId, ref || upload, { jobId: slotJobId });
-          } else if (ref && window.SupabaseSync.isStorageRef?.(ref)) {
-            ref = await window.SupabaseSync.resolveCardImageForSave(
+            return await window.SupabaseSync.archiveGeneratedCardImage(cardId, ref || upload, { jobId: slotJobId });
+          }
+          if (ref && window.SupabaseSync.isStorageRef?.(ref)) {
+            return await window.SupabaseSync.resolveCardImageForSave(
               cardId,
               ref,
               previous[i] || null,
@@ -410,6 +412,9 @@
             );
           }
         }
+        return ref;
+      }));
+      for (const ref of results) {
         if (ref) finalGallery.push(ref);
       }
       if (!finalGallery.length) return;

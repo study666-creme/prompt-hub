@@ -161,6 +161,26 @@ authenticated Worker media proxy before browser-side validation and upload.
 
 ## 验收
 
+## 白天适配与出图动效（2026-08-31）
+
+- 所有加载占位改为**透明** SVG（`cardImgInitialSrc`(legacy/script/part-05.js)、
+  `imgPlaceholderSrc`(legacy/supabase-sync/part-04.js)、`IMG_LOADING_PLACEHOLDER`×2
+  (feed-images.js、legacy/features-draft/part-01.js)），但都保留 `data:image/svg`
+  前缀，`isPlaceholderCardImg` / `isPlaceholderImgSrc` 判定不变；加载观感统一由
+  `--card-skeleton-bg`（浅色 `#e5e5ea`）呈现，消除写死深灰块。
+- 图片**淡入**：`.card-media.is-loading .card-img`/`card-media--await .card-img`
+  透明度 0（warehouse styles/base/part-03.css、社区 features/part-08.css、生图
+  features/part-07.css），`.is-loading` 摘除后随现有 `transition: opacity 0.28–0.4s`
+  淡入——修「图片突脸」。社区/作品**纯图卡**加载中占 4:3 形状（features/part-11.css），
+  完成后图片按 `max-height: min(75vh, 640px)` 封顶（styles/base/part-09.css 与
+  features/part-11.css），修「整片变成一张大图」。
+- **加载顺序**：`finishCardMediaShine` 的媒体扫光级联延迟从「按 cardId 哈希随机
+  （0–200ms）」改为**按 DOM 顺序**（`revealRoot` 内卡片索引 × 34ms，上限 300ms），
+  保证靠前的卡片先亮先出。图片请求本身仍是并行（队列并发上限），依赖网络耗时，
+  无法严格序贯；首屏/cap/viewport 优先逻辑见「首屏并行预取」。
+- 深浅色：浅色模式加载态由「白色光球」改为柔和扫光（styles-theme.css
+  `card-loading-sheen`）。
+
 ```powershell
 npm run check:predeploy
 node scripts/audit-production-mobile-first-screen.mjs
