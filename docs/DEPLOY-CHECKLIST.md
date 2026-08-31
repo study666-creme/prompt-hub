@@ -4,13 +4,17 @@
 
 ## 当前发布状态
 
-本轮已完成 Pages 发布：Git SHA `a27f8ad15bcda6d82be9aa4d5fa569436d605d28`，Pages build `20260831b`（Pages 部署 `b69644b2.prompt-hub-hub.pages.dev`），内容为：
-- 生图表单原生 `<select>` 全部替换为应用绘制下拉（`imagegen-select-ui.js` + `.ph-cselect*`），原生 select 仅作状态载体；
-- 浅色模式修复图片生成侧栏分段/排序/提示文字不可读（`--imagegen-segment-*` 浅色变量）与卡片库分组/模型下拉白底白字（`--warehouse-raised-2` 浅色化）；
-- 手机端卡片库输入区溢出盖住「卡片库」导航（`.warehouse-composer` 禁止 flex 收缩）；
-- 昼夜切换按钮外置（桌面侧栏底 `#themeToggleBtn`、手机底栏「昼夜」`#themeToggleBtnMobile`），自动昼夜默认开启，可在设置→外观关闭。
+本轮已完成 Pages 发布：Git SHA `29ae1c4942604dfba5b17e2e10f760a416290a08`，Pages build `20260831c`（Pages 部署 `8eccfa2a.prompt-hub-hub.pages.dev`），内容为：
+- 视频生成从仓库作曲器移除（不计划开通，无服务端模型入口）；
+- 卡片库右侧编辑卡片面板等「只有黑夜没白天适配」UI 全面浅色化：编辑面板 `[data-theme="light"]` 覆盖（styles-warehouse.css）、`card-media-placeholder` 深色渐变改 `var(--card-skeleton-bg)`、composer 模型下拉 hover 白字、`imagegen-promo-notice` 黄字、复制/画布悬浮按钮浅色玻璃、MJ 胶片底色；
+- 所有加载占位改透明 SVG（`data:image/svg` 判定不变），浅色加载由柔和扫光替代白球；`.card-media.is-loading .card-img` 透明度 0、摘除后淡入（卡片库/社区/生图统一）；
+- 社区/作品纯图卡加载占 4:3 形状、完成后按 `min(75vh, 640px)` 封顶，修「整片变成一张大图」；`finishCardMediaShine` 扫光按 DOM 顺序级联（修「后面的先出来」）；
+- 存卡提速（单解码 + 全量/网格并行、生成入库多槽并行、画廊并行落地、灰占位看门狗 6.5s）；卡片库排序清空列归属缓存（默认/最近生成/最近更新/最远/随机真正生效）；
+- 手机底栏「昼夜」按钮删除，只保留桌面侧栏 `#themeToggleBtn`，手机用设置→外观。
 
-**Worker 与数据库未变更**——本轮改动全是前端 HTML/JS/CSS、主题打包（`pack-prelude.js` 由 `theme.js` 重建）与校验脚本，按下方「哪些内容需要部署」只走 Pages。
+**Worker 与数据库未变更**——本轮改动全是前端 HTML/JS/CSS、feed/主题打包（`pack-feed.js` 由 `feed-images.js` 重建、`pack-prelude.js` 由 `theme.js` 重建）与文档，按下方「哪些内容需要部署」只走 Pages。
+
+上一轮（`a27f8ad` / `20260831b`，部署 `b69644b2.prompt-hub-hub.pages.dev`）：生图自定义下拉、浅色对比度、昼夜外置按钮与自动昼夜默认开启。
 
 发布后核对：`https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260831b'`；线上 `pack-prelude.js` 与发布 SHA 的本地构建 SHA-256 一致；`imagegen-select-ui.js` 可访问且与本地一致；线上 `index.html` 无 `__PH_PART_STORE__` 残留、body 已内联（`__PROMPT_HUB_DEPLOY_BODY__`）、含 `__PH_DEFERRED_PACKS_START__` 且不再有阻塞式 `pack-imagegen.js` 标签；延迟 pack 在线上均可访问（200）；`run-index-http-smoke.mjs`（`SMOKE_BASE=https://prompt-hubs.com`，24 项）全过；`legacy/`、`styles/`、`partials/` 源码片段在线上按预期不可访问；`/health` 返回 `ok: true`；Playwright 生产实测（390×844 手机端）：17 个自定义下拉正常打开/选择/同步、底栏「昼夜」按钮存在、卡片库输入区与导航无重叠、无页面脚本错误。
 
