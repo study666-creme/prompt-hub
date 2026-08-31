@@ -401,9 +401,43 @@
     const feedCard = img?.closest?.('.imagegen-feed-card');
     const feedId = String(feedCard?.dataset?.feedId || '');
     if ((/^cr_|^wh_/.test(feedId) || feedCard?.closest?.('#imageGenFeed'))) {
+      // 生成记录里的画布/生图卡：缩略图失败时先走原图恢复（getGenerationImageUrl full），
+      // 恢复成功就亮原图；只有明确失败/确认缺失才去掉媒体变成文字卡。
+      if (img?.dataset?.recentFullRetried === '1') {
+        media?.classList?.remove?.('card-media--load-failed', 'card-media--await', 'is-loading');
+        media?.classList?.add?.('media-revealed');
+        feedCard?.classList?.remove?.('imagegen-feed-card--no-media');
+        window.finishCardMediaShine?.(media);
+        return;
+      }
+      if (isOwnImageGenRecentImg(img) && img.dataset.recentFinalTried !== '1') {
+        img.dataset.recentFinalTried = '1';
+        media?.classList?.remove?.('is-loading');
+        media?.classList?.add?.('card-media--await');
+        void confirmPermanentlyMissingRecentCreation(img).then((permanentlyMissing) => {
+          if (permanentlyMissing) {
+            media?.remove();
+            feedCard?.classList?.add?.('imagegen-feed-card--no-media');
+            return;
+          }
+          const applied = img.dataset.recentFullRetried === '1'
+            && /^(https?:|data:image\/)/i.test(img.getAttribute('src') || '');
+          if (applied) {
+            media?.classList?.remove?.('card-media--await', 'card-media--load-failed', 'is-loading');
+            media?.classList?.add?.('media-revealed');
+            feedCard?.classList?.remove?.('imagegen-feed-card--no-media');
+            window.finishCardMediaShine?.(media);
+            return;
+          }
+          media?.remove();
+          feedCard?.classList?.add?.('imagegen-feed-card--no-media');
+        });
+        return;
+      }
+      // 恢复已在进行中：保留媒体，由上面的回调收尾，避免并发路径提前删媒体。
+      if (img?.dataset?.recentFinalTried === '1') return;
       media?.remove();
       feedCard.classList.add('imagegen-feed-card--no-media');
-      if (isOwnImageGenRecentImg(img)) void confirmPermanentlyMissingRecentCreation(img);
       return;
     }
     media?.classList.remove('is-loading');

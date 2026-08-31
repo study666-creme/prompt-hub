@@ -900,7 +900,7 @@ body:not(.efficiency-mode) #pageImageGen .imagegen-side {
   width: 100% !important;
   height: auto !important;
   min-height: 0 !important;
-  max-height: min(75vh, 640px) !important;
+  max-height: none !important;
   object-fit: contain !important;
   object-position: center center !important;
 }

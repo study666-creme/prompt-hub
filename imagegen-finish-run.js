@@ -282,45 +282,92 @@
 
       // 默认自动入库：生图完成后直接存进卡片库（未指定分组时归入「图片生成」）。
       // 手动「存入库」不再必要，仅在自动入库失败（如游客额度满）时作为回退保留。
+      // MJ 结果按变体拆成多张「单图卡」（每卡一张图，不用多图画廊），
+      // 槽位 sourceId = `${creationId}::mj:<n>` 幂等去重；不传 jobId 避免合并进已有卡。
       let autoSaved = !!creation.warehouseCardId || !!creation.savedToWarehouse;
       if (!autoSaved) {
         try {
-          const saveRes = await global.addCardFromGenerated?.({
-            prompt: prompt || '',
-            image: storedImage,
-            sourceId: creationId,
-            jobId: baseJobId || slotJobId || null,
-            title: (cardTitle || title || '').trim(),
-            resolution,
-            model: modelId,
-            quality,
-            size,
-            targetGroup,
-            targetTags,
-            fromInspirationDraw,
-            silentToast: true,
-            guestQuiet: true,
-            isMidjourney,
-            cardImages: isMidjourney
-              ? (Array.isArray(cardImages) ? cardImages.filter(Boolean).slice(0, 5) : galleryFromMj())
-              : null,
-            mjGridUrls: isMidjourney && Array.isArray(mjGridUrls) ? mjGridUrls : null,
-            mjCompositeUrl: isMidjourney && mjCompositeUrl ? mjCompositeUrl : null,
-            mjButtons: isMidjourney && Array.isArray(mjButtons) ? mjButtons : null,
-            genBatchId: genBatchId || null,
-            refImage: primaryRef,
-            refImages: refImages.length ? refImages : null,
-            referenceAssets: referenceAssets.length ? referenceAssets : null,
-            copyStorage: true,
-            isRecovery: !!isRecovery
-          });
-          if (saveRes?.ok || saveRes?.duplicate) {
-            autoSaved = true;
-            creation.savedToWarehouse = true;
-            creation.warehouseCardId = saveRes.cardId || creation.warehouseCardId || null;
-            creation.updatedAt = Date.now();
-            d().persistCreations?.();
-            d().reconcileCreationsWarehouseLinks?.();
+          const mjImages = isMidjourney ? galleryFromMj().filter(Boolean).slice(0, 4) : [];
+          if (isMidjourney && mjImages.length > 1) {
+            const slotSaved = [];
+            for (let si = 0; si < mjImages.length; si += 1) {
+              const slotRes = await global.addCardFromGenerated?.({
+                prompt: prompt || '',
+                image: mjImages[si],
+                sourceId: `${creationId}::mj:${si}`,
+                jobId: null,
+                title: (cardTitle || title || '').trim() || 'MJ 出图',
+                resolution,
+                model: modelId,
+                quality,
+                size,
+                targetGroup,
+                targetTags,
+                fromInspirationDraw,
+                silentToast: true,
+                guestQuiet: true,
+                isMidjourney: true,
+                cardImages: null,
+                mjGridUrls: null,
+                mjCompositeUrl: null,
+                mjButtons: null,
+                genBatchId: genBatchId || null,
+                refImage: primaryRef,
+                refImages: refImages.length ? refImages : null,
+                referenceAssets: referenceAssets.length ? referenceAssets : null,
+                copyStorage: true,
+                isRecovery: !!isRecovery
+              });
+              if (slotRes?.ok || slotRes?.duplicate) slotSaved.push(slotRes.cardId || null);
+            }
+            const okCount = slotSaved.filter(Boolean).length;
+            if (okCount) {
+              autoSaved = true;
+              creation.savedToWarehouse = true;
+              creation.warehouseCardId = slotSaved[0] || creation.warehouseCardId || null;
+              creation.warehouseCardIds = slotSaved;
+              creation.updatedAt = Date.now();
+              d().persistCreations?.();
+              d().reconcileCreationsWarehouseLinks?.();
+            }
+          } else {
+            const saveRes = await global.addCardFromGenerated?.({
+              prompt: prompt || '',
+              image: storedImage,
+              sourceId: creationId,
+              jobId: baseJobId || slotJobId || null,
+              title: (cardTitle || title || '').trim(),
+              resolution,
+              model: modelId,
+              quality,
+              size,
+              targetGroup,
+              targetTags,
+              fromInspirationDraw,
+              silentToast: true,
+              guestQuiet: true,
+              isMidjourney,
+              cardImages: isMidjourney
+                ? (Array.isArray(cardImages) ? cardImages.filter(Boolean).slice(0, 5) : galleryFromMj())
+                : null,
+              mjGridUrls: isMidjourney && Array.isArray(mjGridUrls) ? mjGridUrls : null,
+              mjCompositeUrl: isMidjourney && mjCompositeUrl ? mjCompositeUrl : null,
+              mjButtons: isMidjourney && Array.isArray(mjButtons) ? mjButtons : null,
+              genBatchId: genBatchId || null,
+              refImage: primaryRef,
+              refImages: refImages.length ? refImages : null,
+              referenceAssets: referenceAssets.length ? referenceAssets : null,
+              copyStorage: true,
+              isRecovery: !!isRecovery
+            });
+            if (saveRes?.ok || saveRes?.duplicate) {
+              autoSaved = true;
+              creation.savedToWarehouse = true;
+              creation.warehouseCardId = saveRes.cardId || creation.warehouseCardId || null;
+              creation.updatedAt = Date.now();
+              d().persistCreations?.();
+              d().reconcileCreationsWarehouseLinks?.();
+            }
           }
         } catch (e) {
           console.warn('[imagegen] auto warehouse save failed', e);

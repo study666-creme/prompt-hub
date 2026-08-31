@@ -845,6 +845,57 @@
       const authBlocked = opts.authBlocked === true
         || window.__PH_AUTH_SESSION_EXPIRED__ === true
         || !!(window.__PH_AUTH_SIGN_PAUSE_UNTIL__ && Date.now() < window.__PH_AUTH_SIGN_PAUSE_UNTIL__);
+      const card = media.closest('#cardsContainer .card[data-id]');
+      const inWarehouseList = !!(card && !card.closest('.card[data-community-collect="1"]'));
+      const failRef = img?.getAttribute?.('data-image-ref');
+      const failCardId = card?.dataset?.id;
+      // 已发起 full 变体回退（进行中/已成功）：其它失败路径不得折叠成文字卡。
+      // full fallback 明确失败会以 fullFallbackTried:true 重入，届时才允许折叠。
+      if (inWarehouseList && img && opts.fullFallbackTried !== true
+          && img.dataset.whFullFallback === '1') {
+        const recovered = /^(https?:|data:image\/)/i.test(img.getAttribute('src') || '');
+        if (recovered) {
+          clearMediaShineWatchdog(media);
+          media.classList.remove('is-loading', 'card-media--await', 'card-media--load-failed', 'card-media--auth-blocked');
+          media.classList.add('media-revealed');
+          img.style.removeProperty('opacity');
+          img.style.removeProperty('visibility');
+        }
+        return;
+      }
+      // 列表缩略图失败但原图仍可解析（画布/生图入仓：_grid 缩略图缺失或签名慢）：
+      // 折叠成文字卡前先尝试一次 full 变体；能拿到稳定 URL 就亮图，而不是把卡打回文字。
+      if (!authBlocked && inWarehouseList && failRef && failCardId && img
+          && img.dataset.whFullFallback !== '1'
+          && opts.fullFallbackTried !== true
+          && window.SupabaseSync?.resolveDisplayUrl && !opts.keepFailureSlot) {
+        img.dataset.whFullFallback = '1';
+        void window.SupabaseSync.resolveDisplayUrl(failRef, {
+          assetId: failCardId,
+          cardId: failCardId,
+          variant: 'full',
+          allowFullFallback: true,
+          tryAllPaths: true,
+          communityFeed: false
+        }).then((url) => {
+          const stillEphemeral = url && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(url);
+          const stable = url && /^(https?:|data:image\/)/i.test(url) && !stillEphemeral;
+          if (stable && img) {
+            media.classList.remove('card-media--load-failed', 'is-loading', 'card-media--await', 'card-media--auth-blocked');
+            img.classList.remove('img-load-failed');
+            img.src = url; // 先应用 src，再让后续失败路径看到「已恢复」
+            media.classList.add('media-revealed');
+            window.finishCardMediaShine?.(media);
+            return;
+          }
+          finalizeWarehouseCardMediaFailure(media, img, {
+            ...opts,
+            fullFallbackTried: true,
+            markMissing: false
+          });
+        });
+        return;
+      }
       clearMediaShineWatchdog(media);
       if (media.__whBackfillFailTimer) {
         clearTimeout(media.__whBackfillFailTimer);
@@ -855,8 +906,6 @@
       media.classList.toggle('card-media--auth-blocked', authBlocked);
       if (authBlocked) media.dataset.failureLabel = '登录后加载图片';
       else delete media.dataset.failureLabel;
-      const card = media.closest('#cardsContainer .card[data-id]');
-      const inWarehouseList = !!(card && !card.closest('.card[data-community-collect="1"]'));
       const cardModel = card?.dataset?.id ? cards.find((c) => c.id === card.dataset.id) : null;
       const keepFailureSlot = opts.keepFailureSlot === true || authBlocked;
       if (inWarehouseList && keepFailureSlot) {
@@ -886,16 +935,14 @@
         img.style.visibility = 'hidden';
         img.style.opacity = '0';
       }
-      const cardId = card?.dataset?.id;
-      const ref = img?.getAttribute?.('data-image-ref');
       const inRecentFeed = !!img?.closest?.('#imageGenFeed .imagegen-feed-card[data-feed-id^="cr_"]');
-      if (!authBlocked && opts.markMissing !== false && ref && !inRecentFeed && window.SupabaseSync?.primaryImagePath) {
-        const primary = window.SupabaseSync.primaryImagePath(ref, cardId);
+      if (!authBlocked && opts.markMissing !== false && failRef && !inRecentFeed && window.SupabaseSync?.primaryImagePath) {
+        const primary = window.SupabaseSync.primaryImagePath(failRef, failCardId);
         if (primary && window.SupabaseSync?.markPathMissing) {
           window.SupabaseSync.markPathMissing(String(primary).replace(/^\//, ''));
         }
       }
-      scheduleWarehouseMasonryForCard(cardId);
+      scheduleWarehouseMasonryForCard(failCardId);
     }
     window.finalizeWarehouseCardMediaFailure = finalizeWarehouseCardMediaFailure;
 

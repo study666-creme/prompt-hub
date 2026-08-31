@@ -260,7 +260,7 @@
   #creationsGrid.masonry-ready:not(.list-view) .card-media.media-revealed,
   #creationsGrid.masonry-ready:not(.list-view) .card-media:not(.is-loading):not(.card-media--await) {
     height: auto;
-    max-height: min(75vh, 640px);
+    max-height: none;
     min-height: 0;
   }
   #communityGrid.masonry-ready:not(.list-view) .card-media.media-revealed .card-img,
@@ -269,7 +269,7 @@
   #creationsGrid.masonry-ready:not(.list-view) .card-media:not(.is-loading):not(.card-media--await) .card-img {
     height: auto !important;
     min-height: 0 !important;
-    max-height: min(75vh, 640px) !important;
+    max-height: none !important;
     visibility: visible;
     opacity: 1;
   }

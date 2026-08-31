@@ -172,14 +172,21 @@ authenticated Worker media proxy before browser-side validation and upload.
   透明度 0（warehouse styles/base/part-03.css、社区 features/part-08.css、生图
   features/part-07.css），`.is-loading` 摘除后随现有 `transition: opacity 0.28–0.4s`
   淡入——修「图片突脸」。社区/作品**纯图卡**加载中占 4:3 形状（features/part-11.css），
-  完成后图片按 `max-height: min(75vh, 640px)` 封顶（styles/base/part-09.css 与
-  features/part-11.css），修「整片变成一张大图」。
+  完成后图片按 `max-height: min(75vh, 640px)` 封顶\uff08styles/base/part-09.css 与
+  features/part-11.css），修「整片变成一张大图」。\uff08\u6ce8\uff1a2026-08-31d \u8d77\u56fe\u7247\u6062\u590d\u81ea\u7136\u9ad8\u5ea6\uff08max-height: none\uff09\uff0c\u7ad6\u56fe\u5168\u5305\u88f9\u4e0d\u518d\u51fa\u73b0\u7070\u8fb9\uff1b\u52a0\u8f7d\u5360\u4f4d + \u6de1\u5165\u8d1f\u8d23\u6d88\u9664\u7a81\u8138\u3002\uff09
 - **加载顺序**：`finishCardMediaShine` 的媒体扫光级联延迟从「按 cardId 哈希随机
   （0–200ms）」改为**按 DOM 顺序**（`revealRoot` 内卡片索引 × 34ms，上限 300ms），
   保证靠前的卡片先亮先出。图片请求本身仍是并行（队列并发上限），依赖网络耗时，
   无法严格序贯；首屏/cap/viewport 优先逻辑见「首屏并行预取」。
 - 深浅色：浅色模式加载态由「白色光球」改为柔和扫光（styles-theme.css
   `card-loading-sheen`）。
+## 放弃高度封顶、全图回退与 MJ 拆卡（2026-08-31d）
+
+- 社区/作品纯图卡加载完成后恢复**自然高度全宽展示**（styles/base/part-09.css、styles/features/part-11.css 的 `max-height: none`），修「竖图周围出现相框」；保留 4:3 加载占位 + 淡入（「突脸」/闪屏仍由占位与淡入控制）。
+- **生图仓库列表缩略失败不再直接折叠成文字卡**：`finalizeWarehouseCardMediaFailure`（legacy/script/part-04.js）在折叠前先尝试一次 **full 变体**（`resolveDisplayUrl(ref, { variant: 'full', allowFullFallback: true, tryAllPaths: true })`，`img.dataset.whFullFallback` 显式记录）；原图可解析则保留媒体并以原图亮图，只有确定无法解析才走原折叠路径。其它失败路径在该卡还原中/已还原时不再折叠。
+- **生成记录（cr_）媒体失败**：`finalizeRecentCreationMediaFailure`（card-image-loader.js）改为先让 `confirmPermanentlyMissingRecentCreation` 的 full 恢复链跑完（`getGenerationImageUrl(jobId, { variant: 'full' })` 成功则 `recentFullRetried=1` 且保留媒体亮原图），只有恢复失败/确认缺失才摘除媒体——修「画布/生图卡加载后又变成文字卡」。
+- **MJ 结果拆为 4 张单图卡**（新生成）：自动入库（imagegen-finish-run.js）与手动存卡（legacy/features-draft/part-03.js `saveCreationToWarehouse`）对 `isMidjourney && gallery.length > 1` 按变体循环调用 `addCardFromGenerated`：每张卡一张图、`cardImages/mjGridUrls/mjCompositeUrl` 置空，`sourceId = <creationId>::mj:<n>`（命中 genSourceId 去重，幂等）、`jobId: null`（避开同批生成合并进一张卡的分支）。旧多图卡仍按 gallery 展示（后向兼容）。
+
 
 ```powershell
 npm run check:predeploy
