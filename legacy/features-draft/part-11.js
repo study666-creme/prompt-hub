@@ -744,11 +744,14 @@
   function getImageGenFormMeta() {
     const rawRes = document.getElementById('imageGenResolution')?.value || '1k';
     const mjParams = getImageGenMjParams();
+    const model = getImageGenModel();
+    const sizeSel = document.getElementById('imageGenSize');
     return {
-      model: getImageGenModel(),
+      model,
       resolution: normalizeImageGenResolution(rawRes),
       quality: getImageGenQuality(),
-      size: document.getElementById('imageGenSize')?.value || '1:1',
+      // 下拉展示统一为比例；像素型模型（Sensenova 等）提交时换算回目录规范像素值
+      size: imageGenSizeForSubmit(model, sizeSel?.value || '1:1'),
       ...(mjParams ? { mjParams } : {})
     };
   }
@@ -824,15 +827,16 @@
   const MJ_EXTRA_ALLOWED = ['', 'tile', 'raw', 'draft', 'hd', 'tile+raw'];
 
   function collectImageGenDraftMeta() {
+    const model = getImageGenModel();
     return {
       prompt: document.getElementById('imageGenPrompt')?.value || '',
-      model: getImageGenModel(),
+      model,
       refImages: getImageGenRefImages(),
       refImage: getImageGenPrimaryRef(),
       referenceAssets: getImageGenReferenceAssets(),
       resolution: normalizeImageGenResolution(document.getElementById('imageGenResolution')?.value || '1k'),
       quality: getImageGenQuality(),
-      size: document.getElementById('imageGenSize')?.value || '',
+      size: imageGenSizeForSubmit(model, document.getElementById('imageGenSize')?.value || ''),
       count: getImageGenBatchCount(),
       cardTitle: getImageGenCardTitle(),
       batchSplit: isImageGenBatchSplitCards(),

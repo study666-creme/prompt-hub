@@ -185,7 +185,10 @@ authenticated Worker media proxy before browser-side validation and upload.
 - 社区/作品纯图卡加载完成后恢复**自然高度全宽展示**（styles/base/part-09.css、styles/features/part-11.css 的 `max-height: none`），修「竖图周围出现相框」；保留 4:3 加载占位 + 淡入（「突脸」/闪屏仍由占位与淡入控制）。
 - **生图仓库列表缩略失败不再直接折叠成文字卡**：`finalizeWarehouseCardMediaFailure`（legacy/script/part-04.js）在折叠前先尝试一次 **full 变体**（`resolveDisplayUrl(ref, { variant: 'full', allowFullFallback: true, tryAllPaths: true })`，`img.dataset.whFullFallback` 显式记录）；原图可解析则保留媒体并以原图亮图，只有确定无法解析才走原折叠路径。其它失败路径在该卡还原中/已还原时不再折叠。
 - **生成记录（cr_）媒体失败**：`finalizeRecentCreationMediaFailure`（card-image-loader.js）改为先让 `confirmPermanentlyMissingRecentCreation` 的 full 恢复链跑完（`getGenerationImageUrl(jobId, { variant: 'full' })` 成功则 `recentFullRetried=1` 且保留媒体亮原图），只有恢复失败/确认缺失才摘除媒体——修「画布/生图卡加载后又变成文字卡」。
-- **MJ 结果拆为 4 张单图卡**（新生成）：自动入库（imagegen-finish-run.js）与手动存卡（legacy/features-draft/part-03.js `saveCreationToWarehouse`）对 `isMidjourney && gallery.length > 1` 按变体循环调用 `addCardFromGenerated`：每张卡一张图、`cardImages/mjGridUrls/mjCompositeUrl` 置空，`sourceId = <creationId>::mj:<n>`（命中 genSourceId 去重，幂等）、`jobId: null`（避开同批生成合并进一张卡的分支）。旧多图卡仍按 gallery 展示（后向兼容）。
+- **MJ 拆卡改动已撤回**（用户要求暂保留一卡多图机制）：imagegen-finish-run.js 与 part-03.js 恢复为单卡存 gallery，旧存多图卡与新生成均保留多图展示。
+- **排序时间戳归一化（2026-08-31e）**：`getRecentCreationsForFeed`（frontend part-02）与 `sortCardsWithPins`（legacy/script/part-04.js）改为 `phTimeOf`归一化（epoch 数字/数字串/ISO 字符串），避免字符串时间戳相减为 NaN 导致排序退化为原序。
+- **主页/画布生图入口显式传模型与尺寸（2026-08-31e）**：`runImageGenWithPrompt(prompt, opts)`（imagegen-submit.js）支持 `opts.model/size/resolution/quality`覆盖，warehouse-composer.js `submitImage` 直接传入选中模型（修「主页选商汤但提交却是生图页停留的 MJ」）。
+- **商汤等像素尺寸模型统一比例展示（2026-08-31e）**：编辑页尺寸选项把 `WxH` 折算为比例（part-12 `imageGenRatioFromPixel`），提交时 `imageGenSizeForSubmit` 反查回规范像素值（否则服务端 `declaredValue` 回落 options[0]，所有比例变正方形）。
 
 
 ```powershell

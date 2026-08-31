@@ -91,7 +91,13 @@
     const batchOpts = opts && typeof opts === 'object' ? opts : {};
     if (!global.AuthGate?.requireAuth?.('imagegen')) return { ok: false };
     const meta = d().getImageGenFormMeta();
-    const { model, resolution, quality, size } = meta;
+    // 调用方可显式指定模型/尺寸等（主页/画布生图入口带自己的表单选值），
+    // 不依赖先改动生图页表单——否则模型列表未就绪/选项缺失时会被静默跳过，
+    // 退化成「用生图页上次停留的模型提交」。
+    const model = String(batchOpts.model || meta.model || '');
+    const resolution = String(batchOpts.resolution || meta.resolution || '1k');
+    const quality = String(batchOpts.quality || meta.quality || '');
+    const size = String(batchOpts.size || meta.size || '1:1');
     const mjBlendMode = d().isImageGenMidjourneyModel?.(model) && d().getImageGenMjMode?.() === 'blend';
     const prompt = String(
       promptOverride ?? global.document.getElementById('imageGenPrompt')?.value ?? ''

@@ -717,6 +717,8 @@
     renderMyHomeProfile,
     onDisplayNameChanged,
     scheduleCreationsLayout: () => scheduleCommunityLayout?.('creationsGrid'),
+    imageGenSizeForSubmit: (modelId, ratioValue) => imageGenSizeForSubmit?.(modelId, ratioValue),
+    imageGenRatioFromPixel: (value) => imageGenRatioFromPixel?.(value),
     fillFormPromptOnly,
     copyFeedPromptText,
     fillFeedPromptToImageGen,

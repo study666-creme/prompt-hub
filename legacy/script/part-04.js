@@ -502,23 +502,33 @@
       });
     }
 
+    /** 时间戳归一化：兼容 epoch 数字、数字串与 ISO 字符串（云端同步可能存字符串） */
+    function phTimeOf(v) {
+      if (v == null || v === '') return 0;
+      if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+      const s = String(v).trim();
+      if (/^[0-9]+$/.test(s)) { const n = Number(s); return Number.isFinite(n) ? n : 0; }
+      const t = Date.parse(s);
+      return Number.isFinite(t) ? t : 0;
+    }
+
     function sortCardsWithPins(list) {
-      const pinned = list.filter(c => c.pinnedAt).sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
+      const pinned = list.filter(c => c.pinnedAt).sort((a, b) => phTimeOf(b.pinnedAt) - phTimeOf(a.pinnedAt));
       const rest = list.filter(c => !c.pinnedAt);
       if (sortMode === 'updated-asc') {
-        rest.sort((a, b) => (a.updatedAt || a.createdAt) - (b.updatedAt || b.createdAt));
+        rest.sort((a, b) => phTimeOf(a.updatedAt || a.createdAt) - phTimeOf(b.updatedAt || b.createdAt));
       } else if (sortMode === 'created-desc') {
         rest.sort((a, b) => {
-          const diff = (b.createdAt || b.updatedAt || 0) - (a.createdAt || a.updatedAt || 0);
+          const diff = phTimeOf(b.createdAt || b.updatedAt) - phTimeOf(a.createdAt || a.updatedAt);
           if (diff !== 0) return diff;
           return String(b.id || '').localeCompare(String(a.id || ''));
         });
       } else if (sortMode === 'random') {
         return [...pinned, ...shuffleCardRest(rest)];
       } else if (sortMode === 'updated-desc') {
-        rest.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+        rest.sort((a, b) => phTimeOf(b.updatedAt || b.createdAt) - phTimeOf(a.updatedAt || a.createdAt));
       } else {
-        rest.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+        rest.sort((a, b) => phTimeOf(b.updatedAt || b.createdAt) - phTimeOf(a.updatedAt || a.createdAt));
       }
       return [...pinned, ...rest];
     }

@@ -407,63 +407,6 @@
       return false;
     }
     const baseJob = normalizeGenJobBaseId(c.jobId);
-    // MJ 结果按变体拆成多张「单图卡」保存（每张卡只有一张图，不再用多图画廊机制）：
-    // 每个变体用 sourceId = `${c.id}::mj:<n>` 幂等去重；不传 jobId 避免命中
-    // addCardFromGenerated 的「同批生成合并进一张卡」分支。
-    if (c.isMidjourney && gallery.length > 1) {
-      const savedIds = [];
-      const basePayload = {
-        prompt: c.prompt,
-        title: (c.title || '').trim() || 'MJ 出图',
-        resolution: c.resolution,
-        model: c.model,
-        quality: c.quality,
-        size: c.size,
-        publishToCommunity: false,
-        fromInspirationDraw: !!c.fromInspirationDraw,
-        copyStorage: true,
-        silentToast: true,
-        isMidjourney: true,
-        cardImages: null,
-        mjGridUrls: null,
-        mjCompositeUrl: null,
-        mjButtons: null,
-        genBatchId: c.genBatchId || null,
-        refImage: c.refImage || null,
-        refImages: Array.isArray(c.refImages) ? c.refImages.filter(Boolean) : null,
-        referenceAssets: Array.isArray(c.referenceAssets) ? c.referenceAssets.filter(Boolean) : null
-      };
-      const slotCount = Math.min(gallery.length, 4);
-      for (let i = 0; i < slotCount; i += 1) {
-        const src = gallery[i];
-        if (!src) continue;
-        const res = await window.addCardFromGenerated?.({
-          ...basePayload,
-          image: src,
-          sourceId: `${c.id}::mj:${i}`,
-          jobId: null
-        });
-        if (res?.ok) savedIds.push(res.cardId);
-        else if (res?.duplicate && res.cardId) savedIds.push(res.cardId);
-      }
-      const okCount = savedIds.filter(Boolean).length;
-      if (!okCount) {
-        toast('保存失败，请重试');
-        return false;
-      }
-      c.savedToWarehouse = true;
-      c.warehouseCardId = savedIds[0] || null;
-      c.warehouseCardIds = savedIds;
-      reconcileCreationsWarehouseLinks();
-      c.updatedAt = Date.now();
-      persistCreations();
-      if (okCount < slotCount) toast(`已存入卡片库（${okCount}/${slotCount} 张）`);
-      else toast(`已存入卡片库（${okCount} 张卡片）`);
-      if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-        renderImageGenFeed({ preserveScroll: true });
-      }
-      return true;
-    }
     const saved = await window.addCardFromGenerated?.({
       prompt: c.prompt,
       image: mainImage,

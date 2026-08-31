@@ -635,7 +635,7 @@
         imageGenModelFamily = resolveImageGenModelFamily(draft.modelFamily, draft.model);
       }
       const szEl = document.getElementById('imageGenSize');
-      if (szEl && draft.size) szEl.value = draft.size;
+      if (szEl && draft.size) szEl.value = imageGenRatioFromPixel(draft.size);
       const countEl = document.getElementById('imageGenCount');
       if (countEl && draft.count) {
         const c = Math.min(5, Math.max(1, Math.floor(Number(draft.count)) || 1));

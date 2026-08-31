@@ -354,6 +354,7 @@
     const ratio = byId('warehouseComposerRatio')?.value || '1:1';
     const resolution = byId('warehouseComposerResolution')?.value || '1k';
     if (!model) { toast('生图模型仍在加载，请稍后再试'); return; }
+    // 同步生图页表单仅作联动展示；提交必须显式带模型/尺寸（不依赖页面表单状态）
     syncImageGenField('imageGenModel', model);
     syncImageGenField('imageGenSize', ratio);
     syncImageGenField('imageGenResolution', resolution);
@@ -362,7 +363,8 @@
     if (files.length) copyFilesToInput(byId('imageGenRefInput'), files);
     if (typeof window.FeatureDraft?.runImageGenWithPrompt !== 'function') { toast('生图模块仍在加载，请稍后再试'); return; }
     setStatus('正在提交生图任务…', 'ready');
-    const result = await window.FeatureDraft.runImageGenWithPrompt(prompt);
+    const sizeForSubmit = window.FeatureDraft?.imageGenSizeForSubmit?.(model, ratio) || ratio;
+    const result = await window.FeatureDraft.runImageGenWithPrompt(prompt, { model, size: sizeForSubmit, resolution });
     if (result?.ok) { setStatus('已加入生成记录，可在下方“生成记录”查看', 'ready'); files = []; renderFiles(); return; }
     setStatus(result?.message || '生图提交未完成', 'warning');
   }

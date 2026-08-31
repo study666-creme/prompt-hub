@@ -912,7 +912,18 @@
       seen.add(key);
       merged.push(c);
     }
-    return merged.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    return merged.sort((a, b) => phTimeOf(b.createdAt || b.updatedAt) - phTimeOf(a.createdAt || a.updatedAt));
+
+  /** \u65f6\u95f4\u6233\u5f52\u4e00\u5316\uff1a\u517c\u5bb9 epoch \u6570\u5b57\u3001\u6570\u5b57\u4e32\u4e0e ISO \u5b57\u7b26\u4e32\uff08\u4e91\u7aef\u540c\u6b65\u53ef\u80fd\u5b58\u5b57\u7b26\u4e32\uff09 */
+  function phTimeOf(v) {
+    if (v == null || v === '') return 0;
+    if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+    const s = String(v).trim();
+    if (/^[0-9]+$/.test(s)) { const n = Number(s); return Number.isFinite(n) ? n : 0; }
+    const t = Date.parse(s);
+    return Number.isFinite(t) ? t : 0;
+  }
+
   }
 
   let recentServerSyncInflight = null;

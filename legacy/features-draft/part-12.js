@@ -229,13 +229,52 @@
     return IMAGE_GEN_SIZE_BASIC;
   }
 
+  function gcdInt(a, b) {
+    a = Math.abs(a); b = Math.abs(b);
+    while (b) { const t = a % b; a = b; b = t; }
+    return a || 1;
+  }
+
+  /** 像素尺寸字符串 → 比例（1024x1024 → 1:1；1024x576 → 16:9 等） */
+  function imageGenRatioFromPixel(value) {
+    const m = /^(\d+)x(\d+)$/i.exec(String(value || '').trim());
+    if (!m) return String(value || '').trim();
+    const w = Number(m[1]); const h = Number(m[2]);
+    if (!w || !h) return String(value || '').trim();
+    const g = gcdInt(w, h);
+    return `${w / g}:${h / g}`;
+  }
+
+  /**
+   * 比例 → 该模型目录规范值（Sensenova 等 size 参数是像素串）。
+   * 返回的值可直接提交；普通比例模型原样返回。
+   */
+  function imageGenSizeForSubmit(modelId, ratioValue) {
+    const ratio = String(ratioValue || '1:1').trim();
+    try {
+      const raw = imageGenSizeOptionsForModel(String(modelId || ''));
+      for (const value of raw) {
+        const m = /^(\d+)x(\d+)$/i.exec(String(value || '').trim());
+        if (!m) continue;
+        const w = Number(m[1]); const h = Number(m[2]);
+        if (!w || !h) continue;
+        const g = gcdInt(w, h);
+        if (`${w / g}:${h / g}` === ratio) return String(value);
+      }
+    } catch (e) { /* ignore */ }
+    return ratio;
+  }
+
   function updateImageGenSizeSelect() {
     const sel = document.getElementById('imageGenSize');
     const modelSel = document.getElementById('imageGenModel');
     const sizeParam = document.querySelector('.imagegen-param[data-param="size"]');
     if (!sel) return;
-    const current = sel.value || '1:1';
-    const options = imageGenSizeOptionsForModel(modelSel?.value || getImageGenModel());
+    const currentRaw = sel.value || '1:1';
+    const current = imageGenRatioFromPixel(currentRaw);
+    const rawOptions = imageGenSizeOptionsForModel(modelSel?.value || getImageGenModel());
+    // 像素尺寸（Sensenova 等）统一折算成比例对外展示；提交时经 imageGenSizeForSubmit 反查像素值
+    const options = [...new Set(rawOptions.map((value) => imageGenRatioFromPixel(value)).filter(Boolean))];
     if (sizeParam) sizeParam.hidden = !options.length;
     if (!options.length) {
       sel.dataset.sizeOptions = '';
