@@ -1,23 +1,20 @@
 # 部署与验证清单
 
-最后核对：2026-08-30
+最后核对：2026-08-31
 
 ## 当前发布状态
 
-本轮已完成 Pages 发布：Git SHA `b7604c1`，Pages build `20260830f`，内容为卡片库入场动效、首屏并行预取、`file://` 指引页、首屏图片 WebP 化与非首屏脚本延迟加载。**Worker 与数据库未变更**——本轮改动全是前端 HTML/JS/CSS、图片资源与构建/校验脚本，按下方「哪些内容需要部署」只走 Pages。
+本轮已完成 Pages 发布：Git SHA `a27f8ad15bcda6d82be9aa4d5fa569436d605d28`，Pages build `20260831b`（Pages 部署 `b69644b2.prompt-hub-hub.pages.dev`），内容为：
+- 生图表单原生 `<select>` 全部替换为应用绘制下拉（`imagegen-select-ui.js` + `.ph-cselect*`），原生 select 仅作状态载体；
+- 浅色模式修复图片生成侧栏分段/排序/提示文字不可读（`--imagegen-segment-*` 浅色变量）与卡片库分组/模型下拉白底白字（`--warehouse-raised-2` 浅色化）；
+- 手机端卡片库输入区溢出盖住「卡片库」导航（`.warehouse-composer` 禁止 flex 收缩）；
+- 昼夜切换按钮外置（桌面侧栏底 `#themeToggleBtn`、手机底栏「昼夜」`#themeToggleBtnMobile`），自动昼夜默认开启，可在设置→外观关闭。
 
-发布后核对：`https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260830f'`；线上 `styles.css` 含 `card-enter-pending` / `card-enter-in`；线上 `index.html` 无 `__PH_PART_STORE__` 残留、无 `rel="preload" as="style"` 残留、body 已内联（`__PROMPT_HUB_DEPLOY_BODY__`）、含 6 处 `<source srcset=>`（落地页 3 + 仓库 3）、含 `__PH_DEFERRED_PACKS_START__` 且不再有阻塞式 `pack-imagegen.js` 标签；五个延迟 pack 在线上均可访问（200）；`run-index-http-smoke.mjs`（`SMOKE_BASE=https://prompt-hubs.com`）全过；`legacy/`、`styles/`、`partials/` 源码片段在线上按预期不可访问；`/health` 返回 `ok: true`。
+**Worker 与数据库未变更**——本轮改动全是前端 HTML/JS/CSS、主题打包（`pack-prelude.js` 由 `theme.js` 重建）与校验脚本，按下方「哪些内容需要部署」只走 Pages。
 
-首屏实测（`https://prompt-hubs.com/`，浏览器 Resource Timing）：
+发布后核对：`https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260831b'`；线上 `pack-prelude.js` 与发布 SHA 的本地构建 SHA-256 一致；`imagegen-select-ui.js` 可访问且与本地一致；线上 `index.html` 无 `__PH_PART_STORE__` 残留、body 已内联（`__PROMPT_HUB_DEPLOY_BODY__`）、含 `__PH_DEFERRED_PACKS_START__` 且不再有阻塞式 `pack-imagegen.js` 标签；延迟 pack 在线上均可访问（200）；`run-index-http-smoke.mjs`（`SMOKE_BASE=https://prompt-hubs.com`，24 项）全过；`legacy/`、`styles/`、`partials/` 源码片段在线上按预期不可访问；`/health` 返回 `ok: true`；Playwright 生产实测（390×844 手机端）：17 个自定义下拉正常打开/选择/同步、底栏「昼夜」按钮存在、卡片库输入区与导航无重叠、无页面脚本错误。
 
-| | 本轮开始前 | 现在 |
-|---|---:|---:|
-| 传输量 | 1222KB | **917KB**（-25%） |
-| 图片 | 590KB（4 张 PNG） | **232KB**（3 张 WebP + logo-64） |
-| FCP - TTFB（前端处理部分） | 约 595ms | **547ms** |
-| FCP（含网络） | — | 约 1.1s（TTFB 约 0.63s） |
-
-收益主要来自**图片**（传输量 -25%）。非首屏脚本延迟加载是真实但较小的收益：本机 A/B（同一份打包产物、只切换加载方式、各 5 次取中位数）为 FCP -48ms / DCL -70ms / load -48ms。生产环境这个量级会淹没在网络抖动里，衡量它请用「FCP - TTFB」而不是裸 FCP。
+上次发布（`b7604c1` / `20260830f`）的首屏实测结论（917KB、FCP - TTFB 547ms）仍有效，本轮为 UI 修复未再做首屏测速。
 
 测量注意：自定义域名曾出现**瞬时** 5.2s TLS 握手（同期 `prompt-hub-hub.pages.dev` 仅 0.6s），复测恢复到约 0.5–0.7s。单次慢测量不能当作前端问题，先比对 pages.dev 与对照站点。
 
