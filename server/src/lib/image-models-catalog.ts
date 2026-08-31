@@ -297,6 +297,7 @@ const LEGACY_MODEL_MAP: Record<string, string> = {
   'nano-banana': 'lingtu',
   'newapi-gpt-image-2': 'image2',
   'newapi-gpt-image-2-chat': 'image2-economy',
+  'gpt-image-2-ext': 'image2-pro',
   'gpt-image-2-ext-1k': 'image2-pro',
   'gpt-image-2-ext-2k': 'image2-pro',
   'gpt-image-2-ext-4k': 'image2-pro',
