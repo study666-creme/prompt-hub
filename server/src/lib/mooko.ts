@@ -2,6 +2,11 @@ import { ApiError } from './errors';
 import { isLikelyDataImageUrl, isParseableDataImageUrl } from './image-archive';
 import { mapMookoProSize } from './image-size-options';
 
+// 付费提交 / 任务轮询的 fetch 超时：每个上游 fetch 都必须有界，防止卡死
+// 连接占满 queue consumer 的执行时限。
+const MOOKO_SUBMIT_TIMEOUT_MS = 120_000;
+const MOOKO_TASK_POLL_TIMEOUT_MS = 15_000;
+
 const MOOKO_IMG_ORIGIN = 'https://gimg.mooko.ai';
 /** 木瓜官网 gpt-img 在 gimg 失败时用香港 OSS 同路径拉取 */
 export const MOOKO_OSS_ORIGIN = 'https://mooko-hk.oss-cn-hongkong.aliyuncs.com';
@@ -457,7 +462,8 @@ export async function submitMookoImageJob(
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(MOOKO_SUBMIT_TIMEOUT_MS)
     });
 
   let res = await doFetch();
@@ -550,7 +556,8 @@ export async function fetchMookoTaskOnce(
   taskId: string
 ): Promise<MookoPollResult> {
   const res = await fetch(`${apiBase(baseUrl)}/v1/tasks/${encodeURIComponent(taskId)}`, {
-    headers: { Authorization: `Bearer ${apiKey}` }
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(MOOKO_TASK_POLL_TIMEOUT_MS)
   });
   let json: unknown = {};
   try {

@@ -158,6 +158,8 @@ The production audit is `scripts/audit-production-mobile-first-screen.mjs`; pass
 
 `deploy-pages.ps1` does not bump the build automatically. Run `scripts/bump-build.ps1`, validate and commit its output, then deploy from that clean SHA. The deploy script refuses either freeze marker or any dirty tracked/untracked state, targets the `main` production branch explicitly, records the release SHA, and retries the custom-domain smoke while the production alias propagates.
 
+静态资源缓存契约（2026-09-01 起）：版本化静态资源（`pack-*.js` 带 `?v=` 由 `functions/_middleware.js` 下发，其余清单文件由 `_headers` 覆盖）一律 `Cache-Control: public, max-age=31536000, immutable`；入口 HTML（`index.html`、admin、asset-studio）与 `sw.js` 保持 `no-cache, no-store`。失效完全依赖 `?v=` 随发版变化，所以**改任何静态资源后必须先跑 `scripts/bump-build.ps1` 再部署**。`scripts/verify-versioned-cache.mjs`（挂在 predeploy smoke 末尾）会拦截两类事故：引用版本与 `__APP_BUILD__` 不一致、以及内容相对上次通过基线变化而版本未变（本地基线 `scripts/.versioned-cache-baseline.json`，gitignore）。不带 `?v=` 的直接 pack 请求仍走 `no-store` 兜底。
+
 On Windows, npm 8 can fail lifecycle scripts whose names contain `:` because it creates temporary `.cmd` files from the script name. Prefer the colon-free aliases:
 
 ```powershell

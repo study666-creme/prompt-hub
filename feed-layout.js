@@ -269,20 +269,30 @@
     const cards = collectCards(container).sort(compareFeedCardsForDistribution);
     const scrollRoot = d().getFeedScrollRoot?.(container) || container;
     const scrollTop = scrollRoot.scrollTop;
+    // 清空前预读每张卡的高度：原来在 append 循环里逐卡读
+    // col.offsetHeight，N 张卡强制 N 次全文档回流（读-写-读抖动）。
+    // 列宽在 applyColumnCss 阶段已定型，卡高度不随所在列变化，预读值
+    // 与实时读取等价；之后纯数字记账即可。
+    const cardHeights = new Map();
+    const rowGap = getGaps().rowGap;
+    for (const card of cards) {
+      clearCardInline(card);
+      cardHeights.set(card, card.getBoundingClientRect().height);
+    }
+    const colHeights = new Array(colEls.length).fill(0);
     colEls.forEach((col) => { col.innerHTML = ''; });
     cards.forEach((card) => {
-      clearCardInline(card);
       let target = 0;
       let minH = Infinity;
-      colEls.forEach((col, i) => {
-        const h = col.offsetHeight;
-        if (h < minH) {
-          minH = h;
+      for (let i = 0; i < colHeights.length; i += 1) {
+        if (colHeights[i] < minH) {
+          minH = colHeights[i];
           target = i;
         }
-      });
+      }
       colEls[target].appendChild(card);
       card.dataset.feedCol = String(target);
+      colHeights[target] += (cardHeights.get(card) || 0) + rowGap;
     });
     container.dataset.feedDistributed = '1';
     container.dataset.feedDistributedCols = String(cols);

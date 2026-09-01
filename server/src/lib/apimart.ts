@@ -5,6 +5,12 @@ import {
 } from './apimart-official-budget';
 import { mapQualityForGptImage, mapResolutionForSeedream } from './pricing';
 
+// 付费提交 / 任务轮询的上限耗时：卡死的 TCP 连接会占满 queue consumer
+// (max_batch_size=5) 的整个执行时限，所以每个上游 fetch 都必须有超时。
+// 提交类给宽上限（正常排队也可能慢），轮询类是轻量 JSON GET，15s 足够。
+const APIMART_SUBMIT_TIMEOUT_MS = 120_000;
+const APIMART_TASK_POLL_TIMEOUT_MS = 15_000;
+
 type SubmitParams = {
   upstreamModel: string;
   prompt: string;
@@ -275,7 +281,8 @@ export async function submitApimartImageJob(
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(buildApimartRequestBody(params))
+    body: JSON.stringify(buildApimartRequestBody(params)),
+    signal: AbortSignal.timeout(APIMART_SUBMIT_TIMEOUT_MS)
   });
 
   let json: unknown = {};
@@ -307,7 +314,8 @@ export async function fetchApimartTaskOnce(
   taskId: string
 ): Promise<TaskPollResult> {
   const res = await fetch(`${apiBase(baseUrl)}/v1/tasks/${encodeURIComponent(taskId)}`, {
-    headers: { Authorization: `Bearer ${apiKey}` }
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(APIMART_TASK_POLL_TIMEOUT_MS)
   });
 
   let json: unknown = {};

@@ -79,5 +79,6 @@ runNode('verify-viewer-pack', 'verify-viewer-pack.mjs');
 runNode('verify-appreciate-pack', 'verify-appreciate-pack.mjs');
 runNode('verify-lightbox-pack', 'verify-lightbox-pack.mjs');
 runNode('verify-pack-contract', 'verify-pack-contract.mjs');
+runNode('verify-versioned-cache', 'verify-versioned-cache.mjs');
 
 console.log('predeploy-smoke: all checks passed');

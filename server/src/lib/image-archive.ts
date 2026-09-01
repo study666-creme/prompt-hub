@@ -12,6 +12,9 @@ import {
 
 const BUCKET = 'card-images';
 const STORAGE_PREFIX = `storage://${BUCKET}/`;
+// 归档下载的是数 MB 的生成图，也可能在候选源之间重试；120s 是单次 fetch 的
+// 宽上限，防止上游卡死时占满 queue consumer 的执行时限。
+const IMAGE_ARCHIVE_FETCH_TIMEOUT_MS = 120_000;
 
 export function toStorageRef(path: string): string {
   return STORAGE_PREFIX + path.replace(/^\//, '');
@@ -335,7 +338,8 @@ export async function archiveRemoteImage(
         let lastStatus = 0;
         for (const fetchUrl of candidates) {
           const res = await fetch(fetchUrl, {
-            headers: { Accept: 'image/*' }
+            headers: { Accept: 'image/*' },
+            signal: AbortSignal.timeout(IMAGE_ARCHIVE_FETCH_TIMEOUT_MS)
           });
           lastStatus = res.status;
           if (!res.ok) {
@@ -371,7 +375,10 @@ export async function archiveRemoteImage(
             // its bytes are valid. Re-fetch the same short-lived result and use
             // the proven ArrayBuffer upload path before the upstream URL expires.
             const fallback = validStreamSourceUrl
-              ? await fetch(validStreamSourceUrl, { headers: { Accept: 'image/*' } })
+              ? await fetch(validStreamSourceUrl, {
+                  headers: { Accept: 'image/*' },
+                  signal: AbortSignal.timeout(IMAGE_ARCHIVE_FETCH_TIMEOUT_MS)
+                })
               : null;
             if (!fallback?.ok) {
               await fallback?.body?.cancel().catch(() => {});

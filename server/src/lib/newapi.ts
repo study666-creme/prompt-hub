@@ -168,6 +168,12 @@ export const NEWAPI_PRICING_CATALOG_MAX_AGE_MS = 5 * 60_000;
 // normal five-minute catalog cache window.
 const STALE_CATALOG_RETRY_MS = 5_000;
 const ADMIN_ROUTE_CACHE_MS = 30_000;
+// 付费提交可能同步出图（gpt-image-2-chat 走 /chat/completions），超时须宽于
+// 正常排队耗时；卡死的 TCP 连接靠它兜底，超时后按既有路径进
+// UPSTREAM_OUTCOME_UNKNOWN → 退款 SLA，绝不原地重试。
+const NEWAPI_IMAGE_SUBMIT_TIMEOUT_MS = 120_000;
+// 任务轮询是轻量 JSON GET，正常秒级返回；慢于 15s 视同故障，下个 tick 再试。
+const NEWAPI_TASK_POLL_TIMEOUT_MS = 15_000;
 
 const FALLBACK_PUBLIC_PRESENTATION: Record<string, { id: string; label: string; description: string }> = {
   'gpt-5.5': { id: 'creative-5-5', label: '全能模型5.5', description: '通用创作与推理模型，最高 xhigh 思考。' },
@@ -1625,7 +1631,8 @@ export async function submitNewApiImageJob(
             }
           : {})
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(NEWAPI_IMAGE_SUBMIT_TIMEOUT_MS)
     });
   } catch {
     // A transport failure does not prove the paid request failed. Never retry it here.
@@ -1699,7 +1706,8 @@ export async function fetchNewApiTaskOnce(
     return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
   }
   const res = await fetch(`${apiBase(baseUrl)}/v1/tasks/${encodeURIComponent(taskId)}`, {
-    headers: { Authorization: `Bearer ${apiKey}` }
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(NEWAPI_TASK_POLL_TIMEOUT_MS)
   });
 
   let json: unknown = {};

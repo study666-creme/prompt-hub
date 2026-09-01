@@ -16,6 +16,8 @@ node_modules/
 packages/*/package-lock.json
 .pages-deploy/
 .pages-deploy-trash/
+# immutable 长缓存守卫的本地基线（每次 predeploy smoke 通过后重写，跨机器不共享）
+scripts/.versioned-cache-baseline.json
 prompt-hub-deploy.zip
 
 .vercel

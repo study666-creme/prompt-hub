@@ -15,6 +15,10 @@ const FORWARD_REQUEST_HEADERS = [
   'content-profile'
 ] as const;
 
+// 反代处于用户请求路径上：Supabase 正常毫秒级返回，卡死时 30s 内必须放行
+// 客户端（客户端自带超时/重试），不能让请求挂到边缘 100s 的 524。
+const SUPABASE_PROXY_TIMEOUT_MS = 30_000;
+
 const BLOCKED_RESPONSE_HEADERS = new Set([
   'connection',
   'keep-alive',
@@ -101,7 +105,8 @@ export async function supabaseProxyHandler(c: Context<{ Bindings: Env }>) {
     method: c.req.method,
     headers: collectForwardHeaders(c),
     body: c.req.raw.body,
-    redirect: 'manual'
+    redirect: 'manual',
+    signal: AbortSignal.timeout(SUPABASE_PROXY_TIMEOUT_MS)
   });
 
   applyCorsHeaders(c);

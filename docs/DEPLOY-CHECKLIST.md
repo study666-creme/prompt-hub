@@ -14,6 +14,18 @@
 
 **Worker 与数据库未变更**——本轮改动全是前端 HTML/JS/CSS、feed/主题打包（`pack-feed.js` 由 `feed-images.js` 重建、`pack-prelude.js` 由 `theme.js` 重建）与文档，按下方「哪些内容需要部署」只走 Pages。
 
+## 候选（未部署）：性能与稳定性加固 20260901b
+
+分支 `codex/perf-caching-hardening-20260901`，Pages build `20260901b`，**尚未发布**。内容：
+
+- 静态资源缓存从全量 `no-store` 改为版本化长缓存：带 `?v=` 的 `pack-*.js`（`functions/_middleware.js`）与 `_headers` 清单内其余版本化资源返回 `public, max-age=31536000, immutable`；入口 HTML 与 `sw.js` 保持 no-cache；不带 `?v=` 的直接 pack 请求仍 no-store 兜底。失效靠既有 `bump-build.ps1` 刷新 `?v=`。
+- 新守卫 `scripts/verify-versioned-cache.mjs` 挂入 predeploy smoke：拦截「引用版本与 `__APP_BUILD__` 不一致」和「内容变化但版本未 bump」（immutable 会把旧内容锁一年）；本地基线 `scripts/.versioned-cache-baseline.json`（gitignore）。
+- Worker：CORS 删除任意 `*.vercel.app` 与任意 `chrome-extension://` 通配放行（正式域名仍在 `CORS_ORIGINS` 精确匹配，扩展走 host_permissions 不经 CORS）；回归测试 `cors-allowlist.test.ts`。
+- Worker：11 处付费/上游 fetch 补 `AbortSignal.timeout`（提交 120s、对话 90s、轮询 15s、归档 120s、grid 缩略 45s、Supabase 反代 30s）；超时与既有传输失败路径合并，付费 POST 超时进 `UPSTREAM_OUTCOME_UNKNOWN` 退款 SLA，不新增任何重试。
+- 前端渲染：`sortImgsByViewport`（card-image-loader）预读 rect 再排序，消除 comparator 内 O(n log n) 次强制布局读取；`redistributeByHeight`（feed-layout）清空前预读卡高、纯数字记账选最短列，消除逐卡读 `col.offsetHeight` 的 N 次全文档回流。观感行为不变（排序结果等价、列分布算法不变）。
+
+发布时注意：需要 **Pages + Worker 一起**（CORS/超时在 Worker，缓存在 Pages + `_headers`）。发布后核对新增项：`curl -I 'https://prompt-hubs.com/pack-core.js?v=20260901b'` 应返回 `Cache-Control: public, max-age=31536000, immutable`；不带 `?v=` 的 `pack-core.js` 应仍为 no-store；回访二次加载时 pack 应命中磁盘缓存（DevTools Network 无重复下载）。
+
 上一轮（`a27f8ad` / `20260831b`，部署 `b69644b2.prompt-hub-hub.pages.dev`）：生图自定义下拉、浅色对比度、昼夜外置按钮与自动昼夜默认开启。
 
 发布后核对：`https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260831b'`；线上 `pack-prelude.js` 与发布 SHA 的本地构建 SHA-256 一致；`imagegen-select-ui.js` 可访问且与本地一致；线上 `index.html` 无 `__PH_PART_STORE__` 残留、body 已内联（`__PROMPT_HUB_DEPLOY_BODY__`）、含 `__PH_DEFERRED_PACKS_START__` 且不再有阻塞式 `pack-imagegen.js` 标签；延迟 pack 在线上均可访问（200）；`run-index-http-smoke.mjs`（`SMOKE_BASE=https://prompt-hubs.com`，24 项）全过；`legacy/`、`styles/`、`partials/` 源码片段在线上按预期不可访问；`/health` 返回 `ok: true`；Playwright 生产实测（390×844 手机端）：17 个自定义下拉正常打开/选择/同步、底栏「昼夜」按钮存在、卡片库输入区与导航无重叠、无页面脚本错误。

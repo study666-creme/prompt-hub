@@ -1,5 +1,10 @@
 import { ApiError } from './errors';
 
+// 同步对话（stream:false）正常数十秒内返回；挂死的连接 90s 强制中断，让用户
+// 拿到干净的 502 而不是边缘节点 100s 之后的 524。超时与断连同路径（未扣费
+// 即报错），不会造成重复计费。
+const CHAT_COMPLETIONS_TIMEOUT_MS = 90_000;
+
 function apiBase(envBase?: string): string {
   const value = String(envBase || '').trim();
   if (!value) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '文字服务暂未配置');
@@ -79,7 +84,8 @@ export async function submitChatCompletions(
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(CHAT_COMPLETIONS_TIMEOUT_MS)
   });
 
   let json: unknown = {};

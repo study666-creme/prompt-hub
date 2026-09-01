@@ -356,7 +356,8 @@ async function fetchSupabaseGridBytes(env: Env, primaryPath: string): Promise<Bl
     `?width=${GRID_SERVE_MAX_SIDE}&quality=78&resize=contain`;
   try {
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${key}`, apikey: key }
+      headers: { Authorization: `Bearer ${key}`, apikey: key },
+      signal: AbortSignal.timeout(45_000)
     });
     if (!res.ok) return null;
     const buf = await res.arrayBuffer();

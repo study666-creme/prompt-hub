@@ -119,6 +119,17 @@ npm exec wrangler secret put NEWAPI_VIDEO_API_KEY
 - 列表缩略图缺失时用 3 秒预算现场物化（`materializeGridWithinBudget`）：超时交 `waitUntil` 后台继续并把 grid 落 R2，本次签名/`/media/i` 响应降级到已确认存在的原图路径，保证列表一定拿到可下载 URL。不得回到“同步等单张 16–22s 缩放”的实现。
 - Canvas 首次建点奖励只调用 `grant_canvas_create_node_reward`；任务 claim 与会员延期在一个数据库事务中完成。
 
+## CORS 白名单边界（2026-09-01）
+
+- 跨域放行只认三种来源：`CORS_ORIGINS` 环境变量的精确 origin（含两个正式 vercel 域）、`*.prompt-hub-hub.pages.dev` / `*.prompt-hub-web.pages.dev` 预览域，以及本机 `http(s)://(localhost|127.0.0.1)` 开发地址；生产域名一律要求 https。
+- **不做任何后缀通配**：任意 `*.vercel.app` 子域与任意 `chrome-extension://` origin 已从 `isAllowedCorsOrigin`（`server/src/lib/cors-headers.ts`）删除——`credentials: true` 下通配等于把已登录身份借给任何第三方页面/扩展。新增正式域名进 `CORS_ORIGINS`；官方浏览器扩展的 background 请求持 host_permissions，本身不经 CORS。
+- 回归测试 `server/src/lib/cors-allowlist.test.ts` 固化以上行为，防止通配被无声加回。
+
+## 上游 fetch 超时边界（2026-09-01）
+
+- 所有付费/上游 fetch 必须带 `AbortSignal.timeout`：提交类（newapi/apimart/grsai/mooko/MJ）120s、同步对话 90s、任务轮询 15s、图片归档下载 120s、grid 缩略 45s、Supabase 反代 30s。常量在各 lib 文件顶部，同类上游保持一致量级。
+- 超时 abort 与传输失败走同一错误路径：付费图生 POST 抛 `UPSTREAM_OUTCOME_UNKNOWN` 进退款 SLA（绝不原地重试）；轮询失败按 pending 留待下个 tick；用户路径超时返回干净 5xx 而不是边缘 100s 后的 524。新增上游 fetch 必须同时给超时，否则卡死连接会占满 queue consumer（`max_batch_size=5`）的整批执行时限。
+
 ## Prompt Hub 与 Canvas 桥接边界
 
 - Prompt Hub 的插卡深链固定为 `phSource=prompt-hub`、`phVersion=1`、`phIntent=insert-card`、`phCardId=<cardId>`。URL 只传 ID，不传卡片正文、图片地址、Bearer Token 或上游凭据。

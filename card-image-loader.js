@@ -567,20 +567,24 @@
 
   function sortImgsByViewport(imgs, container) {
     const root = container ? scrollRootFor(container) : null;
-    const isVisible = (img) => {
+    const hasScrollRoot = !!(root && root !== document.body && root !== document.documentElement);
+    // 预读一次所有 rect 再排序：comparator 内逐次 getBoundingClientRect 会把
+    // O(n log n) 次比较放大成同量级的强制布局读取（渲染/补刷期的主要抖动源）。
+    // 排序不写 DOM，预读值与惰性读取完全等价。
+    const rootRect = hasScrollRoot ? root.getBoundingClientRect() : null;
+    const decorated = [];
+    for (const img of imgs) {
       const rect = img.getBoundingClientRect();
-      if (root && root !== document.body && root !== document.documentElement) {
-        const rr = root.getBoundingClientRect();
-        return rect.bottom > rr.top - 40 && rect.top < rr.bottom + 40;
-      }
-      return rect.bottom > -40 && rect.top < window.innerHeight + 40;
-    };
-    return [...imgs].sort((a, b) => {
-      const aVis = isVisible(a);
-      const bVis = isVisible(b);
-      if (aVis !== bVis) return aVis ? -1 : 1;
-      return a.getBoundingClientRect().top - b.getBoundingClientRect().top;
+      const visible = rootRect
+        ? rect.bottom > rootRect.top - 40 && rect.top < rootRect.bottom + 40
+        : rect.bottom > -40 && rect.top < window.innerHeight + 40;
+      decorated.push({ img, visible, top: rect.top });
+    }
+    decorated.sort((a, b) => {
+      if (a.visible !== b.visible) return a.visible ? -1 : 1;
+      return a.top - b.top;
     });
+    return decorated.map((item) => item.img);
   }
 
   function allowWarehouseFullFallback(img) {
