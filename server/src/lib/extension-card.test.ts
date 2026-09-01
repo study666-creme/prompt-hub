@@ -20,6 +20,7 @@ describe('Prompt Hub card projection for Canvas', () => {
       title: '标题',
       prompt: '提示词',
       imageRef: 'storage://card-images/user/generated/job.png',
+      imageRefs: [],
       hasImage: true,
       tags: ['#产品'],
       group: '灵感',
@@ -28,6 +29,33 @@ describe('Prompt Hub card projection for Canvas', () => {
       updatedAt: 123
     });
     expect(card).not.toHaveProperty('customFields');
+  });
+
+  it('exposes the full gallery refs so Canvas can collect every image', () => {
+    const cover = 'storage://card-images/user/generated/a.png';
+    const second = 'storage://card-images/user/generated/b.png';
+    const third = 'storage://card-images/user/generated/c.png';
+
+    const mj = extensionCardFromRecord({
+      id: 'card_mj',
+      title: 'MJ 四图',
+      prompt: 'p',
+      isMidjourney: true,
+      mjCompositeUrl: cover,
+      mjGridUrls: [second, third],
+      updatedAt: 5
+    });
+    expect(mj).toMatchObject({ imageRef: cover, imageRefs: [second, third] });
+
+    const gallery = extensionCardFromRecord({
+      id: 'card_gallery',
+      title: '多图画廊',
+      prompt: 'p',
+      image: cover,
+      cardImages: [cover, second, third, ''],
+      updatedAt: 6
+    });
+    expect(gallery).toMatchObject({ imageRef: cover, imageRefs: [second, third] });
   });
 
   it('rejects empty records instead of creating unusable deep-link payloads', () => {

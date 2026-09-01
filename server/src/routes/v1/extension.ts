@@ -158,6 +158,53 @@ async function buildExtensionCardThumb(
 
 }
 
+/** 签名 URL 本身有小时级 TTL，按 isolate 短缓存可避免翻页/回看时重复做存在性检查。 */
+const THUMB_CACHE_TTL_MS = 2 * 60_000;
+const THUMB_CACHE_LIMIT = 512;
+const thumbCache = new Map<string, { url: string; expiresAt: number }>();
+
+async function buildExtensionCardThumbCached(
+
+  c: Parameters<typeof ensureWarehouseJobThumb>[0],
+
+  userId: string,
+
+  card: ExtensionCardListItem
+
+): Promise<string> {
+
+  const key = `${userId}:${card.id}:${card.imageRef}`;
+
+  const cached = thumbCache.get(key);
+
+  if (cached) {
+
+    if (cached.expiresAt > Date.now()) return cached.url;
+
+    thumbCache.delete(key);
+
+  }
+
+  const url = await buildExtensionCardThumb(c, userId, card);
+
+  if (!url) return '';
+
+  thumbCache.set(key, { url, expiresAt: Date.now() + THUMB_CACHE_TTL_MS });
+
+  while (thumbCache.size > THUMB_CACHE_LIMIT) {
+
+    const oldest = thumbCache.keys().next().value;
+
+    if (oldest === undefined) break;
+
+    thumbCache.delete(oldest);
+
+  }
+
+  return url;
+
+}
+
 
 
 extensionRoutes.get('/cards', async c => {
@@ -184,7 +231,7 @@ extensionRoutes.get('/cards', async c => {
 
       listed.cards.map(async (card) => {
 
-        const thumbUrl = await buildExtensionCardThumb(c, user.id, card);
+        const thumbUrl = await buildExtensionCardThumbCached(c, user.id, card);
 
         return { ...card, thumbUrl };
 

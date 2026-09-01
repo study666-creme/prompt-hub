@@ -96,6 +96,8 @@ export type ExtensionCardListItem = {
   prompt: string;
   /** storage ref；纯文字卡为空字符串 */
   imageRef: string;
+  /** 多图卡片除封面外的其余图片引用 */
+  imageRefs: string[];
   hasImage: boolean;
   tags: string[];
   group: string | null;
@@ -147,17 +149,35 @@ function cardListImageRef(card: Record<string, unknown>): string | null {
   return image.trim();
 }
 
+/** 卡片全部可用图片引用（storage ref），封面在前；供画布端收藏整组图片。 */
+function cardListImageRefs(card: Record<string, unknown>): string[] {
+  const cover = cardListImageRef(card);
+  const gallery = Array.isArray(card.cardImages)
+    ? card.cardImages.filter((u) => isUsableListRef(u)) as string[]
+    : [];
+  const tiles = Array.isArray(card.mjGridUrls)
+    ? card.mjGridUrls.filter((u) => isUsableListRef(u)) as string[]
+    : [];
+  const refs = [cover, ...gallery, ...tiles]
+    .filter((ref): ref is string => !!ref && isUsableListRef(ref));
+  return [...new Set(refs)].slice(0, MAX_GALLERY_IMAGES_FOR_LIST);
+}
+
+const MAX_GALLERY_IMAGES_FOR_LIST = 8;
+
 export function extensionCardFromRecord(raw: Record<string, unknown>): ExtensionCardListItem | null {
   if (!raw.id) return null;
   const imageRef = cardListImageRef(raw) || '';
   const title = String(raw.title || '').trim();
   const prompt = String(raw.prompt || title || '').trim();
   if (!imageRef && !prompt) return null;
+  const imageRefs = cardListImageRefs(raw).filter((ref) => ref !== imageRef);
   return {
     id: String(raw.id),
     title,
     prompt,
     imageRef,
+    imageRefs,
     hasImage: !!imageRef,
     tags: Array.isArray(raw.tags) ? raw.tags.map((tag) => String(tag)) : [],
     group: String(raw.group || '').trim() || null,
