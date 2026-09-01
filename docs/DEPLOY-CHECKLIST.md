@@ -1,10 +1,25 @@
 # 部署与验证清单
 
-最后核对：2026-08-31
+最后核对：2026-09-01
 
 ## 当前发布状态
 
-本轮已完成 Pages 发布：Git SHA `29ae1c4942604dfba5b17e2e10f760a416290a08`，Pages build `20260831c`（Pages 部署 `8eccfa2a.prompt-hub-hub.pages.dev`），内容为：
+本轮已完成 Pages + Worker 联合发布（2026-09-01）：Worker SHA `7f2c2afa557d90a1168c42ede1c6a004933fa2aa`（`/health.buildSha` 与 `api.prompt-hub.cn` 均已核对一致，Worker Version `70ac8541-e991-49c5-a02d-b852118fcad4`，绑定含 KV/双队列/R2/双自定义域/`*/2` cron 全部保留），Pages build `20260901c`。内容为两批性能与稳定性加固：
+
+第一批（`3fe56ed`）：
+- 版本化静态资源改 `immutable` 一年长缓存（带 `?v=` 的 pack 由 `functions/_middleware.js` 下发、其余清单文件由 `_headers` 覆盖），入口 HTML 与 `sw.js` 保持不缓存，不带 `?v=` 的 pack 请求仍 no-store 兜底；失效继续依赖 `bump-build.ps1` 刷新 `?v=`，新增守卫 `scripts/verify-versioned-cache.mjs` 挂入 predeploy smoke。
+- CORS 删除任意 `*.vercel.app` 与任意 `chrome-extension://` 通配放行（生产已核对：恶意 vercel origin 不再反射 `Access-Control-Allow-Origin`，合法 origin 正常放行）；生产域名 https 强制。
+- 11 处付费/上游 fetch 补 `AbortSignal.timeout`；`sortImgsByViewport` / `redistributeByHeight` 消除渲染期强制布局读取。
+
+第二批（`7f2c2af`）：
+- settle/confirm 轮询预算时钟（`opts.deadlineAt` 80s，用户路径不再同步自旋到边缘 524；recover 批耗尽标记 `settle_budget_exhausted`）；
+- chat 扣费改「预扣 + 结算」并支持 `clientRequestId` 幂等（前端 studioChat 自动携带，上游带 `Idempotency-Key`）；
+- 请求体 Content-Length 预检（generate/mj 32MB、video 64MB）；
+- newapi 轮询侧补投限 3 分钟一次（`meta.newapiQueueEnqueuedAt`）。
+
+数据库无变更、无迁移。发布后核对已完成：`https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260901c'`；`curl -I pack-core.js?v=20260901c` 返回 `Cache-Control: public, max-age=31536000, immutable`，不带 `?v=` 仍为 no-store；`styles.css?v=` 同为 immutable；根 HTML 为 Pages 默认 `max-age=0, must-revalidate`（每次校验）；`legacy/`、`styles/` 源码分片线上 404；deploy-pages.ps1 内建生产 bundle smoke（24 项）全过。chat 幂等留观察项：一次成功发送后 `credit_ledger` 应仅有 1 条 `chat_generation` 预扣（或 replay 标记）+ 至多 1 条 `:settle` 差价，异常多扣请按 `chat_generation:<clientRequestId>` ref 对账。
+
+上一轮（`29ae1c49…` / `20260831c`，Pages 部署 `8eccfa2a.prompt-hub-hub.pages.dev`）明细：
 - 视频生成从仓库作曲器移除（不计划开通，无服务端模型入口）；
 - 卡片库右侧编辑卡片面板等「只有黑夜没白天适配」UI 全面浅色化：编辑面板 `[data-theme="light"]` 覆盖（styles-warehouse.css）、`card-media-placeholder` 深色渐变改 `var(--card-skeleton-bg)`、composer 模型下拉 hover 白字、`imagegen-promo-notice` 黄字、复制/画布悬浮按钮浅色玻璃、MJ 胶片底色；
 - 所有加载占位改透明 SVG（`data:image/svg` 判定不变），浅色加载由柔和扫光替代白球；`.card-media.is-loading .card-img` 透明度 0、摘除后淡入（卡片库/社区/生图统一）；
@@ -12,35 +27,11 @@
 - 存卡提速（单解码 + 全量/网格并行、生成入库多槽并行、画廊并行落地、灰占位看门狗 6.5s）；卡片库排序清空列归属缓存（默认/最近生成/最近更新/最远/随机真正生效）；
 - 手机底栏「昼夜」按钮删除，只保留桌面侧栏 `#themeToggleBtn`，手机用设置→外观。
 
-**Worker 与数据库未变更**——本轮改动全是前端 HTML/JS/CSS、feed/主题打包（`pack-feed.js` 由 `feed-images.js` 重建、`pack-prelude.js` 由 `theme.js` 重建）与文档，按下方「哪些内容需要部署」只走 Pages。
+**该轮 Worker 与数据库未变更**——改动全是前端 HTML/JS/CSS、feed/主题打包与文档。
 
-## 候选（未部署）：性能与稳定性加固 20260901c
+上上轮（`a27f8ad` / `20260831b`，部署 `b69644b2.prompt-hub-hub.pages.dev`）：生图自定义下拉、浅色对比度、昼夜外置按钮与自动昼夜默认开启。发布后核对记录：`__APP_BUILD__ = '20260831b'`；`run-index-http-smoke.mjs`（24 项）全过；源码片段不可访问；Playwright 生产实测（390×844）：17 个自定义下拉正常、无页面脚本错误。
 
-分支 `codex/perf-caching-hardening-20260901`，Pages build `20260901c`，**尚未发布**。在 20260901b 基础上追加：
-
-- **轮询预算时钟（M2）**：`pollAndUpdateJob` 新增 `opts.deadlineAt`，内部 4 处 sleep-轮询循环按剩余预算裁剪尝试次数。用户路径 settle（`GET /generate/jobs/:jobId?settle=1`）、图片直取（`/jobs/:jobId/image`）、recover-warehouse 批处理统一 80s 预算；recover 批耗尽后剩余任务标记 `settle_budget_exhausted` 交给下轮/cron。消除原 quick=false 分支在请求内同步自旋最多 ~105s（撞边缘 100s → 524）。
-- **chat 幂等 + 预扣结算（M4）**：`POST /api/v1/chat` 接受可选 `clientRequestId`（8-128 位，`[A-Za-z0-9._:-]`），扣费改为「预扣最坏情况 → 失败退款 → 成功按实际 usage 结算差价」三笔账均按 ledger ref 幂等；上游 POST 携带 `Idempotency-Key`。前端 `studioChat` 每次发送自动生成 id，api-client 内置重试复用同一 id——客户端重试不再重复扣费，上游已消耗但 402 漏收的窗口消除。退款按预扣真实 debitSplit（replay 拿不到 split 时兜底全退永久积分）。
-- **请求体预检（M5）**：generate/mj-action/mj-blend 32MB、video 64MB，`content-length` 在 `JSON.parse` 前拒绝（413 `PAYLOAD_TOO_LARGE`），防参考图 schema 理论上限 ~96MB body 撞 isolate 内存墙。
-- **newapi 队列补投节流（M6）**：轮询侧重复入队限 3 分钟一次（`meta.newapiQueueEnqueuedAt`），消除前端每几秒一拍把同一任务灌满队列（每条重复消息最多空转 retry 20 次）。claim 栅栏仍防重复付费。
-- 前端：`api-client.js` studioChat 幂等键（独立脚本，不进 pack）。**评估后未做**：vendor/supabase.min.js + supabase-sync.js 延迟加载——`SupabaseSync` 被 pack-core 引用 91 处且 OAuth 回跳对 `detectSessionInUrl` 时序敏感，需专项浏览器实测后再做。
-
-以及此前 `20260901b` 批次的全部内容（缓存 immutable + 守卫、CORS 收紧、11 处上游超时、两处 layout thrashing 修复），见 CHANGELOG 2026-09-01。
-
-发布时注意：需要 **Pages + Worker 一起**。发布后核对新增项：`curl -I 'https://prompt-hubs.com/pack-core.js?v=20260901c'` 应返回 `Cache-Control: public, max-age=31536000, immutable`；不带 `?v=` 的 pack 请求应仍为 no-store；回访二次加载 pack 命中磁盘缓存；chat 发送一次成功后检查 `credit_ledger` 仅一条 `chat_generation` 预扣记录（或 replay 标记）+ 至多一条 `:settle` 差价记录。
-
-- 静态资源缓存从全量 `no-store` 改为版本化长缓存：带 `?v=` 的 `pack-*.js`（`functions/_middleware.js`）与 `_headers` 清单内其余版本化资源返回 `public, max-age=31536000, immutable`；入口 HTML 与 `sw.js` 保持 no-cache；不带 `?v=` 的直接 pack 请求仍 no-store 兜底。失效靠既有 `bump-build.ps1` 刷新 `?v=`。
-- 新守卫 `scripts/verify-versioned-cache.mjs` 挂入 predeploy smoke：拦截「引用版本与 `__APP_BUILD__` 不一致」和「内容变化但版本未 bump」（immutable 会把旧内容锁一年）；本地基线 `scripts/.versioned-cache-baseline.json`（gitignore）。
-- Worker：CORS 删除任意 `*.vercel.app` 与任意 `chrome-extension://` 通配放行（正式域名仍在 `CORS_ORIGINS` 精确匹配，扩展走 host_permissions 不经 CORS）；回归测试 `cors-allowlist.test.ts`。
-- Worker：11 处付费/上游 fetch 补 `AbortSignal.timeout`（提交 120s、对话 90s、轮询 15s、归档 120s、grid 缩略 45s、Supabase 反代 30s）；超时与既有传输失败路径合并，付费 POST 超时进 `UPSTREAM_OUTCOME_UNKNOWN` 退款 SLA，不新增任何重试。
-- 前端渲染：`sortImgsByViewport`（card-image-loader）预读 rect 再排序，消除 comparator 内 O(n log n) 次强制布局读取；`redistributeByHeight`（feed-layout）清空前预读卡高、纯数字记账选最短列，消除逐卡读 `col.offsetHeight` 的 N 次全文档回流。观感行为不变（排序结果等价、列分布算法不变）。
-
-发布时注意：需要 **Pages + Worker 一起**（CORS/超时在 Worker，缓存在 Pages + `_headers`）。发布后核对新增项：`curl -I 'https://prompt-hubs.com/pack-core.js?v=20260901b'` 应返回 `Cache-Control: public, max-age=31536000, immutable`；不带 `?v=` 的 `pack-core.js` 应仍为 no-store；回访二次加载时 pack 应命中磁盘缓存（DevTools Network 无重复下载）。
-
-上一轮（`a27f8ad` / `20260831b`，部署 `b69644b2.prompt-hub-hub.pages.dev`）：生图自定义下拉、浅色对比度、昼夜外置按钮与自动昼夜默认开启。
-
-发布后核对：`https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260831b'`；线上 `pack-prelude.js` 与发布 SHA 的本地构建 SHA-256 一致；`imagegen-select-ui.js` 可访问且与本地一致；线上 `index.html` 无 `__PH_PART_STORE__` 残留、body 已内联（`__PROMPT_HUB_DEPLOY_BODY__`）、含 `__PH_DEFERRED_PACKS_START__` 且不再有阻塞式 `pack-imagegen.js` 标签；延迟 pack 在线上均可访问（200）；`run-index-http-smoke.mjs`（`SMOKE_BASE=https://prompt-hubs.com`，24 项）全过；`legacy/`、`styles/`、`partials/` 源码片段在线上按预期不可访问；`/health` 返回 `ok: true`；Playwright 生产实测（390×844 手机端）：17 个自定义下拉正常打开/选择/同步、底栏「昼夜」按钮存在、卡片库输入区与导航无重叠、无页面脚本错误。
-
-上次发布（`b7604c1` / `20260830f`）的首屏实测结论（917KB、FCP - TTFB 547ms）仍有效，本轮为 UI 修复未再做首屏测速。
+首屏基线：`b7604c1` / `20260830f` 实测 917KB、FCP - TTFB 547ms，后续 UI 轮次未重测；本轮 20260901c 的 immutable 缓存收益建议在回访场景下重测（二次加载 Network 面板 pack 全部 from disk cache）。
 
 测量注意：自定义域名曾出现**瞬时** 5.2s TLS 握手（同期 `prompt-hub-hub.pages.dev` 仅 0.6s），复测恢复到约 0.5–0.7s。单次慢测量不能当作前端问题，先比对 pages.dev 与对照站点。
 
