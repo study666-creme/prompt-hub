@@ -130,6 +130,12 @@ npm exec wrangler secret put NEWAPI_VIDEO_API_KEY
 - 所有付费/上游 fetch 必须带 `AbortSignal.timeout`：提交类（newapi/apimart/grsai/mooko/MJ）120s、同步对话 90s、任务轮询 15s、图片归档下载 120s、grid 缩略 45s、Supabase 反代 30s。常量在各 lib 文件顶部，同类上游保持一致量级。
 - 超时 abort 与传输失败走同一错误路径：付费图生 POST 抛 `UPSTREAM_OUTCOME_UNKNOWN` 进退款 SLA（绝不原地重试）；轮询失败按 pending 留待下个 tick；用户路径超时返回干净 5xx 而不是边缘 100s 后的 524。新增上游 fetch 必须同时给超时，否则卡死连接会占满 queue consumer（`max_batch_size=5`）的整批执行时限。
 
+## 轮询预算与队列入队边界（2026-09-01）
+
+- `pollAndUpdateJob` 的 `opts.deadlineAt` 是轮询预算时钟（绝对时间戳）：设置后内部 4 处 sleep-轮询循环（mooko 同步恢复、mooko 归档确认、deep confirm、failed confirm）的尝试次数收敛在剩余预算内。用户 HTTP 路径（`GET /generate/jobs/:jobId?settle=1`、`/jobs/:jobId/image`、`recover-warehouse` settle 批）一律传 `Date.now() + 80_000`（前端超时 120s、边缘 ~100s 会 524）；recover 批处理在预算耗尽时把剩余任务标记 `settle_budget_exhausted` 留给下轮/cron。队列 consumer 与 cron **不传** deadlineAt，保留完整重试深度。
+- newapi 任务的队列补投由轮询侧节流：`meta.newapiQueueEnqueuedAt` 间隔 ≥3 分钟才允许再投（首投由 `fast-provider-drain` 负责，轮询侧只兜消息丢失）。此前前端每几秒一拍轮询都会重复入队，每条重复消息最多空转 retry 20 次污染队列吞吐。
+- 生成/混图/MJ 二次操作请求体在 `JSON.parse` 前用 Content-Length 预检（generate/mj 32MB、video 64MB，`server/src/lib/request-guards.ts`）：参考图 schema 允许的 ~96MB 合法 body 会在 zod 校验前就把 isolate 撞向 128MB 内存墙。
+
 ## Prompt Hub 与 Canvas 桥接边界
 
 - Prompt Hub 的插卡深链固定为 `phSource=prompt-hub`、`phVersion=1`、`phIntent=insert-card`、`phCardId=<cardId>`。URL 只传 ID，不传卡片正文、图片地址、Bearer Token 或上游凭据。

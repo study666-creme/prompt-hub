@@ -4,6 +4,7 @@ import type { Env } from '../../env';
 import { roundCredits } from '../../lib/credit-math';
 import { ApiError } from '../../lib/errors';
 import { extractErrorMessage } from '../../lib/cors-headers';
+import { assertRequestBodySizeLimit } from '../../lib/request-guards';
 import {
   hasAnyImageUpstream,
   isProviderConfigured,
@@ -549,6 +550,21 @@ function pollKickSubmit(
 ) {
   return (task: Promise<unknown>) => kickBackgroundTask(c, task);
 }
+
+/**
+ * 用户请求内 settle/确认轮询的预算时钟。前端 settle 请求超时 120s，Cloudflare
+ * 边缘 ~100s 会 524；80s 预算给 DB 与响应序列化留出余量。预算只裁剪 sleep
+ * 等待的尝试次数，不影响任何一次真正的上游查询；队列 consumer 不传时钟。
+ */
+const SETTLE_POLL_BUDGET_MS = 80_000;
+
+/**
+ * 生成/混图/二次操作请求的 body 上限：单张参考图 schema 上限 6M 字符，
+ * 常规用户最多 5 张（banana 类目录上限 14 张但前端压缩后远小于满额），
+ * 32MB 容纳满额合法请求并留出 JSON 结构余量；超限在 JSON.parse 前拒绝，
+ * 防 96MB 级 body 撞 isolate 内存墙。
+ */
+const GENERATION_BODY_LIMIT_BYTES = 32 * 1024 * 1024;
 
 function friendlyGenerationError(raw: string, opts?: { violationNoRefund?: boolean; debited?: boolean }): string {
   const debited = opts?.debited !== false;
@@ -1258,6 +1274,7 @@ generateRoutes.get('/cost', async c => {
 
 generateRoutes.post('/', rateLimit(600, 60_000), async c => {
   const user = c.get('user');
+  assertRequestBodySizeLimit(c, GENERATION_BODY_LIMIT_BYTES);
   const rawBody = await c.req.json().catch(() => ({}));
   const parsed = bodySchema.safeParse(normalizeGenerationBodyAliases(rawBody));
   if (!parsed.success) {
@@ -1942,10 +1959,19 @@ generateRoutes.post('/recover-warehouse', async c => {
         return rows || [];
       };
 
+      // 多个任务在同一个请求里串行 settle：共享一个预算时钟，预算耗尽后
+      // 剩余任务留给下一次 recover 或 cron 兜底，而不是把请求拖到边缘 100s
+      // 之后 524。
+      const settleDeadline = Date.now() + SETTLE_POLL_BUDGET_MS;
       for (const job of await loadJobs()) {
+        if (Date.now() >= settleDeadline) {
+          failures.push({ jobId: String(job.id), reason: 'settle_budget_exhausted' });
+          continue;
+        }
         try {
           const polled = await pollAndUpdateJob(admin, user.id, job, upstream, c.env, {
-            kickSubmit: pollKickSubmit(c)
+            kickSubmit: pollKickSubmit(c),
+            deadlineAt: settleDeadline
           });
           if (polled.status === 'completed' && polled.imageUrl) {
             settled += 1;
@@ -1998,6 +2024,7 @@ generateRoutes.post('/recover-warehouse', async c => {
 /** Midjourney 二次操作（放大 / 变体 / 重新生成等） */
 generateRoutes.post('/mj-action', rateLimit(300, 60_000), async (c) => {
   const user = c.get('user');
+  assertRequestBodySizeLimit(c, GENERATION_BODY_LIMIT_BYTES);
   const parsed = mjActionSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
     throw new ApiError(400, 'VALIDATION_ERROR', '请填写有效的 Midjourney 操作参数');
@@ -2235,6 +2262,7 @@ generateRoutes.post('/mj-action', rateLimit(300, 60_000), async (c) => {
 /** Midjourney 独立混图（2～5 张垫图） */
 generateRoutes.post('/mj-blend', rateLimit(300, 60_000), async (c) => {
   const user = c.get('user');
+  assertRequestBodySizeLimit(c, GENERATION_BODY_LIMIT_BYTES);
   const parsed = mjBlendSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
     throw new ApiError(400, 'VALIDATION_ERROR', '混图需要 2～5 张有效参考图');
@@ -2437,7 +2465,7 @@ generateRoutes.get('/jobs/:jobId/image', async c => {
       job,
       upstreamBindingsFromEnv(c.env),
       c.env,
-      { quick: false, kickSubmit: pollKickSubmit(c) }
+      { quick: false, kickSubmit: pollKickSubmit(c), deadlineAt: Date.now() + SETTLE_POLL_BUDGET_MS }
     );
     if (polled.imageUrl) {
       const { data: fresh } = await admin
@@ -2516,13 +2544,18 @@ generateRoutes.get('/jobs/:jobId', async c => {
   const settle = c.req.query('settle') === '1' || c.req.query('settle') === 'true';
   const upstream = upstreamBindingsFromEnv(c.env);
   const jobMeta = (job.meta as Record<string, unknown>) || {};
+  // settle 轮询发生在用户 HTTP 请求内：所有 sleep-轮询循环共享这个预算时钟，
+  // 确保总耗时落在前端 120s 超时与边缘 ~100s 限制之内（此前 quick=false 分支
+  // 最多可同步自旋 105s，慢任务直接 524）。队列 consumer 不传 deadlineAt，
+  // 保留完整重试深度。
+  const settleDeadline = settle ? Date.now() + SETTLE_POLL_BUDGET_MS : undefined;
   let polled = await pollAndUpdateJob(
     admin,
     user.id,
     job,
     upstreamBindingsFromEnv(c.env),
     c.env,
-    { quick: !settle, kickSubmit: pollKickSubmit(c) }
+    { quick: !settle, kickSubmit: pollKickSubmit(c), deadlineAt: settleDeadline }
   );
   polled = normalizeGenerationPollResult(polled);
 
@@ -2533,26 +2566,9 @@ generateRoutes.get('/jobs/:jobId', async c => {
       job,
       upstreamBindingsFromEnv(c.env),
       c.env,
-      { quick: false, kickSubmit: pollKickSubmit(c) }
+      { quick: false, kickSubmit: pollKickSubmit(c), deadlineAt: settleDeadline }
     );
     polled = normalizeGenerationPollResult(polled);
-  } else if (
-    polled.status === 'processing'
-    && c.executionCtx
-    && false
-  ) {
-    c.executionCtx.waitUntil(
-      pollAndUpdateJob(
-        admin,
-        user.id,
-        job,
-        upstreamBindingsFromEnv(c.env),
-        c.env,
-        { quick: false }
-      ).catch((e) => {
-        console.warn('[generate] background settle failed', jobId, e);
-      })
-    );
   }
 
   const { data: freshJob } = await admin

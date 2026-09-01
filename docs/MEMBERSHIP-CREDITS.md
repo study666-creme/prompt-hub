@@ -51,5 +51,6 @@
 - Canvas 首次创建节点调用 `/api/v1/membership/tasks/events/canvas-create-node`；数据库函数在一个事务里写入 `canvas_create_node` claim、任务标记和 1 天基础会员，每个账号只会奖励一次。
 - `/api/v1/payments` 是支付主路径，`/api/v1/wallet` 仅为旧 Canvas 客户端兼容别名，两者使用同一订单和鉴权逻辑。
 - `/payments/checkout` 与 `/wallet/checkout` 的新订单只接受支付宝。历史微信订单仍通过原回调类型验签和幂等结算，不重新开放微信新下单入口。
+- 文字对话（`POST /api/v1/chat`）扣费采用「预扣 + 结算」两段式（2026-09-01 起）：先按 `maxTokens` 最坏输出预扣（ledger ref `chat_generation:<clientRequestId>`），上游调用失败立刻按真实 debitSplit 幂等全退；成功后按实际 usage 结算差价（多退少补；差价结算失败仅记日志不阻断回复，差额上限被 `maxTokens` 约束）。带 `clientRequestId` 的客户端重试复用同一 ref，不会重复扣费；「上游已消耗但用户 402 漏收」的窗口随预扣顺序消除。
 
 调整套餐时同时更新前端展示、服务端常量、数据库卡密产品和本文，并补价格/扣费测试。

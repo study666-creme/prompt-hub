@@ -880,7 +880,15 @@
   }
 
   async function studioChat(payload) {
-    return request('POST', '/api/v1/chat', payload, { timeoutMs: 120000 });
+    // 每次逻辑发送生成一个幂等键；request 内置的网络/5xx 重试复用同一个键，
+    // 服务端按 (user, reason, ref_id) ledger 幂等扣费，重试不再重复扣积分。
+    const body = { ...(payload || {}) };
+    if (!body.clientRequestId) {
+      body.clientRequestId = 'chat-'
+        + Date.now().toString(36)
+        + '-' + Math.random().toString(36).slice(2, 10);
+    }
+    return request('POST', '/api/v1/chat', body, { timeoutMs: 120000 });
   }
 
   async function studioChatQuote(params) {

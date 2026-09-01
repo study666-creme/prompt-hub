@@ -13,11 +13,13 @@ import { ApiError } from '../../lib/errors';
 import type { NewApiCatalogModel } from '../../lib/newapi';
 import {
   deductUserCredits,
+  refundUserCredits,
   spendableCredits,
   syncMembershipCredits
 } from '../../lib/membership-credits';
 import { createAdminClient } from '../../lib/supabase';
 import { mergeTaskFlags } from '../../lib/membership-tasks';
+import { CLIENT_REQUEST_ID_PATTERN } from '../../lib/generation-idempotency';
 import { sanitizePublicModelId, sanitizePublicModelLabel } from '../../lib/public-model-projection';
 import { rateLimit } from '../../middleware/rate-limit';
 
@@ -60,7 +62,13 @@ const bodySchema = z.object({
   tools: z.array(z.record(z.unknown())).max(64).optional(),
   toolChoice: z.unknown().optional(),
   attachContext: z.boolean().optional(),
-  noPreset: z.boolean().optional()
+  noPreset: z.boolean().optional(),
+  /**
+   * 客户端幂等键：同一次逻辑请求的网络重试复用同一个 id，积分扣减按
+   * (user, reason, ref_id) ledger 幂等，杜绝客户端重试导致的重复扣费。
+   * 缺省时退回历史随机 id（无幂等，行为同旧版）。
+   */
+  clientRequestId: z.string().min(8).max(128).regex(CLIENT_REQUEST_ID_PATTERN).optional()
 });
 
 export const chatRoutes = new Hono<{ Bindings: Env }>();
@@ -184,63 +192,148 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
     );
   }
 
-  const chatId = `chat_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  // 扣费改为「预扣最坏情况 + 调用后结算」，与生图流程同纪律：
+  //   1) 预扣按 maxTokens 输出估算的 credits —— 保证上游消耗发生前积分已锁定，
+  //      上游失败（网络/超时）立刻全额退款，杜绝"先调用后扣费"下上游已消耗
+  //      却 402 漏收的窗口；
+  //   2) 成功后按实际 usage 结算差价（多退少补，delta 补扣失败仅记日志不阻断
+  //      回复 —— 差额上限被 maxTokens 约束，风险有界）；
+  //   3) 带 clientRequestId 时三笔账（预扣/结算/退款）都以同一 ref 幂等，
+  //      客户端网络重试不会重复扣费。
+  const clientRequestId = parsed.data.clientRequestId?.trim() || '';
+  const chatRef = clientRequestId
+    ? `chat_generation:${clientRequestId}`
+    : `chat_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const settleRef = `${chatRef}:settle`;
+  const refundRef = `${chatRef}:refund`;
 
-  const result = await submitChatCompletions(requestTarget.apiKey, requestTarget.baseUrl, {
-    model: requestTarget.model,
-    messages,
-    thinking,
-    reasoningEffort: parsed.data.reasoningEffort,
-    temperature: parsed.data.temperature,
-    maxTokens: maxOutputTokens,
-    tools: parsed.data.tools,
-    toolChoice: parsed.data.toolChoice
-  });
+  let debitedProfile = profile;
+  let reserveSplit: { fromDaily: number; fromPermanent: number } = {
+    fromDaily: 0,
+    fromPermanent: estimatedCredits
+  };
+  try {
+    const reserved = await deductUserCredits(
+      admin,
+      user.id,
+      estimatedCredits,
+      'chat_generation',
+      chatRef,
+      {
+        model: resolvedCatalogModel.requestedModelId,
+        thinking,
+        base: estimatedCredits,
+        discountLabel: null,
+        phase: 'reserve'
+      }
+    );
+    debitedProfile = reserved.profile;
+    // 扣减返回真实 debitSplit；replay 响应拿不到时兜底全退永久积分
+    // （宁可控小概率多退，也不静默吞用户的钱）。
+    if (
+      reserved.split
+      && (Number.isFinite(Number(reserved.split.fromDaily)) || Number.isFinite(Number(reserved.split.fromPermanent)))
+    ) {
+      reserveSplit = {
+        fromDaily: Number(reserved.split.fromDaily) || 0,
+        fromPermanent: Number(reserved.split.fromPermanent) || 0
+      };
+    }
+  } catch (debitErr) {
+    if (String((debitErr as Error).message).includes('insufficient')) {
+      throw new ApiError(402, 'INSUFFICIENT_CREDITS', '积分不足');
+    }
+    throw debitErr;
+  }
+
+  let result;
+  try {
+    result = await submitChatCompletions(requestTarget.apiKey, requestTarget.baseUrl, {
+      model: requestTarget.model,
+      messages,
+      thinking,
+      reasoningEffort: parsed.data.reasoningEffort,
+      temperature: parsed.data.temperature,
+      maxTokens: maxOutputTokens,
+      tools: parsed.data.tools,
+      toolChoice: parsed.data.toolChoice,
+      idempotencyKey: clientRequestId || undefined
+    });
+  } catch (upstreamErr) {
+    // 上游失败：预扣全退（幂等 ref + 预扣的真实 split，重试安全），再把
+    // 原错误抛给客户端。
+    try {
+      await refundUserCredits(
+        admin,
+        user.id,
+        estimatedCredits,
+        'chat_generation_refund',
+        refundRef,
+        reserveSplit,
+        { model: resolvedCatalogModel.requestedModelId, phase: 'reserve_refund' }
+      );
+    } catch (refundErr) {
+      console.error('[chat] reserve refund failed after upstream error', {
+        user: user.id,
+        ref: refundRef,
+        amount: estimatedCredits,
+        err: String((refundErr as Error)?.message || refundErr)
+      });
+    }
+    throw upstreamErr;
+  }
+
   const reply = result.content;
   const usage = result.usage;
 
   const inputTokens = usage?.prompt_tokens ?? estimatedInputTokens;
   const outputTokens = usage?.completion_tokens ?? estimateTextTokens(reply || JSON.stringify(result.toolCalls));
   const dynamicFinal = billableNewApiTextCredits(catalogModel, inputTokens, outputTokens);
+  const finalCredits = dynamicFinal ?? estimatedCredits;
   const cost = {
-    base: dynamicFinal ?? estimatedCredits,
-    final: dynamicFinal ?? estimatedCredits,
+    base: finalCredits,
+    final: finalCredits,
     discountLabel: null,
     modelLabel: resolvedCatalogModel.publicIdentity.modelLabel,
     inputTokens,
     outputTokens
   };
 
-  if (balance < cost.final) {
-    throw new ApiError(
-      402,
-      'INSUFFICIENT_CREDITS',
-      `积分不足（本次消耗 ${cost.final}，当前 ${balance}）`
-    );
-  }
-
-  try {
-    const debited = await deductUserCredits(
-      admin,
-      user.id,
-      cost.final,
-      'chat_generation',
-      chatId,
-      {
-        model: resolvedCatalogModel.requestedModelId,
-        thinking,
-        base: cost.base,
-        discountLabel: cost.discountLabel,
-        inputTokens,
-        outputTokens
+  // 结算差价（|delta| < 0.01 忽略，避免微额账目抖动）。
+  const delta = Math.round((finalCredits - estimatedCredits) * 100) / 100;
+  if (Math.abs(delta) >= 0.01) {
+    try {
+      if (delta > 0) {
+        const settled = await deductUserCredits(
+          admin,
+          user.id,
+          delta,
+          'chat_generation',
+          settleRef,
+          { model: resolvedCatalogModel.requestedModelId, phase: 'settle_topup' }
+        );
+        debitedProfile = settled.profile;
+      } else {
+        await refundUserCredits(
+          admin,
+          user.id,
+          -delta,
+          'chat_generation_refund',
+          settleRef,
+          reserveSplit,
+          { model: resolvedCatalogModel.requestedModelId, phase: 'settle_rebate' }
+        );
       }
-    );
-    profile = debited.profile;
-  } catch (debitErr) {
-    if (String((debitErr as Error).message).includes('insufficient')) {
-      throw new ApiError(402, 'INSUFFICIENT_CREDITS', '积分不足');
+    } catch (settleErr) {
+      // 差价结算失败不阻断回复：差额上限被 maxTokens 约束、预扣按最坏情况
+      // 估算，风险有界；记录日志供对账。
+      console.warn('[chat] settle delta failed', {
+        user: user.id,
+        ref: settleRef,
+        delta,
+        err: String((settleErr as Error)?.message || settleErr)
+      });
     }
-    throw debitErr;
   }
 
   void mergeTaskFlags(admin, user.id, { asset_studio_chat_used: true }).catch((err) => {
@@ -254,7 +347,7 @@ chatRoutes.post('/', rateLimit(120, 60_000), async c => {
       toolCalls: result.toolCalls,
       finishReason: result.finishReason,
       creditsCharged: cost.final,
-      creditsRemaining: spendableCredits(profile),
+      creditsRemaining: spendableCredits(debitedProfile),
       cost: publicChatCostPayload(cost.final),
       model: resolvedCatalogModel.publicIdentity.model,
       modelLabel: resolvedCatalogModel.publicIdentity.modelLabel,

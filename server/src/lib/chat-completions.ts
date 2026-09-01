@@ -61,6 +61,8 @@ export async function submitChatCompletions(
     maxTokens?: number;
     tools?: Array<Record<string, unknown>>;
     toolChoice?: unknown;
+    /** 透传给上游的幂等键；有 clientRequestId 时携带，网络重试防重复消费 */
+    idempotencyKey?: string;
   }
 ): Promise<ChatCompletionResult> {
   const body: Record<string, unknown> = {
@@ -82,7 +84,10 @@ export async function submitChatCompletions(
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      ...(params.idempotencyKey
+        ? { 'Idempotency-Key': params.idempotencyKey, 'X-Client-Request-Id': params.idempotencyKey }
+        : {})
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(CHAT_COMPLETIONS_TIMEOUT_MS)
