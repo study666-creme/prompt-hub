@@ -590,7 +590,22 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       if (whPrefetchInflight) return whPrefetchInflight;
       whPrefetchInflight = (async () => {
         const isRecent = d().getImageGenFeedTab?.() === 'recent';
-        if (!isRecent) {
+        if (isRecent) {
+          /* recent 首屏含卡片库卡片（__fromWarehouse）：批量签 grid（sign-batch，
+           * 与卡片库同一链路），签名缓存与 getListDisplayImageSrc 共享，
+           * DOM patch 即可亮图，不再逐张单签。 */
+          try {
+            if (global.SupabaseSync?.prefetchWarehousePage) {
+              await global.SupabaseSync.prefetchWarehousePage(
+                list.slice(0, 24),
+                3200,
+                { maxCards: 24 }
+              );
+            }
+          } catch (e) {
+            console.warn('[imageGenFeed] recent grid prefetch failed', e);
+          }
+        } else {
           const prefetchItems = list.map((c) => ({ id: c.id, image: c.image })).filter((c) => c?.image);
           if (prefetchItems.length) {
             try {

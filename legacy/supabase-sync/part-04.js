@@ -794,7 +794,9 @@
         || img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
         || img.closest('.card[data-id]')?.dataset?.id
         || img.closest('.card[data-post-id]')?.dataset?.postId
-        || img.closest('.imagegen-feed-card[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '')
+        || String(img.closest('.imagegen-feed-card[data-feed-id]')?.dataset?.feedId || '')
+          .replace(/^wh_/, '')
+          .replace(/^cr_/, '')
         || undefined;
       const inWarehouse = !!img.closest('#cardsContainer');
       const inImageGenWh = !!img.closest('#imageGenFeed .imagegen-feed-card[data-feed-id^="wh_"]');

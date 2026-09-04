@@ -47,6 +47,29 @@
 - 生产 Worker 实证：`/health` 无 `buildSha` 字段（`environment`+`imageProviders`
   形态），与文档记载的 464e068 构建不一致；发布后必须重新核对。
 
+## 2026-09-05 诊断与修复（主树候选，未发布）
+
+用户复测（生产 `20260901c`）：生图页「最近生成」里来自卡片库的卡片长时间停在加载
+占位；卡片库首屏依旧卡。代码核查（非刷新碰运气）结论：
+
+- **生图页慢的独立客户端根因**：`cr_` 卡（含 `__fromWarehouse` 仓库卡）不走
+  sign-batch 批量签名（`bindFeed` 的批量预热对 `cr_` 不生效、该图也不等容器签名门），
+  且封面选 `pickCreationFeedImage`（原图路径，非 `_grid`）。缓存未命中时逐张
+  `/media/sign`（2–4s/张）串行排队，R2 缺对象时叠加服务端回源/物化——首屏几十秒。
+  已在主树修复：recent 首屏 `prefetchWarehousePage` 批量预签 + 仓库卡封面走
+  `pickWarehouseListThumb`（grid 池）+ `patchImageSrcFromCache` assetId 链补 `cr_`
+  剥前缀（详见 `CARD-LOADING.md`「生图 recent 首屏批量预签（2026-09-05）」）。
+- **卡片库首屏**：批量链路（bindWarehouse → prefetchList → sign-batch）已在；桌面
+  `hydrateWarehouseGridImages` 用同步自旋 `waitForCloudSyncIdle`（200–250ms 轮询）
+  阻塞 hydrate，慢网/大库时感知为「卡」。未改——与网络回源耗时相比不是主因，先随
+  本轮批量修复观察；仍慢再做非阻塞化。
+- **运营项仍在**：历史对象 R2 批量回填脚本（`scripts/run-warehouse-repair.mjs`）
+  是否已在生产跑过没有证据；自愈只加速"被请求过的对象"。上线本轮候选后若
+  `sign-batch` 仍 >2s，先跑回填再查代码。
+- 发布验证：`npm run check:predeploy` 全量通过（构建号 bump `20260905a`）；
+  verify-feed-bundle / verify-card-gallery-regression / verify-imagegen-bundle /
+  foundation-bundle-vm-smoke / check-js-syntax 全过。
+
 ## 排查顺序
 
 1. 先确认观察的是生产还是本地主树候选；生产以 Pages build 和 `/health.buildSha` 为证据。

@@ -142,7 +142,9 @@
         || img.closest('.card[data-id]')?.dataset?.id
         || img.closest('.card[data-post-id]')?.dataset?.postId
         || img.closest('.card[data-creation-id]')?.dataset?.creationId
-        || img.closest('[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '')
+        || String(img.closest('[data-feed-id]')?.dataset?.feedId || '')
+          .replace(/^wh_/, '')
+          .replace(/^cr_/, '')
         || undefined;
       let resolveOpts = {
         assetId,

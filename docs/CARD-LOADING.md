@@ -1,6 +1,6 @@
 # 列表图片加载
 
-复核日期：2026-08-31。下述仓库 UI 对应候选 `20260830f` 后的未发布修复（尚未上线时不要据此描述生产行为）；生产资源以线上 build 和资源 HTTP 冒烟为准。
+复核日期：2026-09-05。下述仓库 UI 对应候选 `20260830f` 后的未发布修复（尚未上线时不要据此描述生产行为）；生产资源以线上 build 和资源 HTTP 冒烟为准。
 
 ## 目标
 
@@ -46,6 +46,28 @@ node scripts/run-warehouse-repair.mjs --all
 本次响应降级到已确认存在的原图路径——列表必须拿到可下载 URL，否则卡片只会停在占位/文字状态
 （“点进卡片才有图”就是这么来的：详情走原图立即可见，列表等在缩略图上）。
 `materializeCommunityGridIfMissing` 同样按 3s 预算后异步完成。
+
+**生图 recent 首屏批量预签（2026-09-05）**：生图页「最近生成」列表的卡片库卡片
+（`__fromWarehouse` 合并进 `cr_` 渲染）此前既不走 sign-batch 批量签名（`bindFeed` 的
+`prefetchList` 只对「每项都有 image 的仓库卡」生效，且 `cr_` 图不等容器签名门），
+也不优先 `_grid`（`pickCreationFeedImage` 取 `c.image` 原图路径）——缓存未命中时逐张
+走单条 `/media/sign`（生产实测 2–4s/张，feed 并发 8–12），首屏十几秒全在排队。
+修复（均在主树，随下一构建上线）：
+
+1. `prefetchWarehouseFeedCardsBackground` 在 recent 首屏先跑
+   `SupabaseSync.prefetchWarehousePage(list.slice(0,24), 3200, { maxCards: 24 })`
+   ——与卡片库同一条批量链路（collectCardOwnedListSignPaths → batchSignPaths →
+   `/media/sign-batch`），签名缓存与 `getListDisplayImageSrc` 共享；完成后既有
+   `patchContainerFromCache` + `boostImageGenRecentImages` 会把新签 URL 应用到 DOM。
+2. `image-gen-feed-cards.js` `creationToFeedHtml` 对 `__fromWarehouse` 卡改用
+   `PromptHubCardGallery.pickWarehouseListThumb`（gallery grid 池）选封面，DOM
+   `data-image-ref` 直接是 grid 目标路径；jobId 兼容 `genJobId`/`slotJobId`。
+   普通临时 `cr_` 记录保持原链路。
+3. `patchImageSrcFromCache` / `hydrateImageElements` 的 assetId 推导链补 `cr_` 前缀剥除
+   （原来只剥 `wh_`）：批量签名落地后 DOM patch 能命中 `cr_` 卡的 grid 缓存。
+
+不要绕开 `prefetchWarehousePage` 自建生图页批量签名——首屏 warm 必须与卡片库共享
+同一个 signedUrlCache 入口，否则两处各签一轮（单签 2–4s/张，40 张卡就是灾难）。
 
 Generated results from `newapi.prompt-hubs.com` are fetched only through the
 authenticated Worker media proxy before browser-side validation and upload.

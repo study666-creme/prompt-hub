@@ -150,12 +150,21 @@
         ? d().formatExpiryLabel(c)
         : '';
       const metaLine = [model, mjBadge, expiry].filter(Boolean).join(' · ');
-      const image = d().pickCreationFeedImage?.(c)
+      // 仓库卡（__fromWarehouse）封面与卡片库一致走 pickWarehouseListThumb（grid 池），
+      // DOM src 直接命中 getListDisplayImageSrc 的 grid 缓存；普通 cr_ 记录保持原链路。
+      const whThumb = c.__fromWarehouse
+        ? global.PromptHubCardGallery?.pickWarehouseListThumb?.(c)
+        : null;
+      const whCover = whThumb?.ref && d().isDisplayableImage?.(whThumb.ref) ? whThumb.ref : '';
+      const image = whCover
+        || d().pickCreationFeedImage?.(c)
         || c.image
         || (Array.isArray(c.cardImages) ? c.cardImages[0] : '')
         || c.mjCompositeUrl
         || '';
-      const jobId = c.jobId ? String(c.jobId).replace(/#\d+$/, '') : '';
+      const jobId = (c.jobId || c.genJobId || whThumb?.slotJobId || '')
+        ? String(c.jobId || c.genJobId || whThumb?.slotJobId).replace(/#\d+$/, '')
+        : '';
       return buildFeedCardHtml({
         id: 'cr_' + c.id,
         sourceCardId: c.id,
