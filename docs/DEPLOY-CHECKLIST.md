@@ -1,10 +1,14 @@
 # 部署与验证清单
 
-最后核对：2026-09-01
+最后核对：2026-09-05
 
 ## 当前发布状态
 
-本轮已完成 Pages + Worker 联合发布（2026-09-01）：Worker SHA `7f2c2afa557d90a1168c42ede1c6a004933fa2aa`（`/health.buildSha` 与 `api.prompt-hub.cn` 均已核对一致，Worker Version `70ac8541-e991-49c5-a02d-b852118fcad4`，绑定含 KV/双队列/R2/双自定义域/`*/2` cron 全部保留），Pages build `20260901c`。内容为两批性能与稳定性加固：
+本轮已完成 Pages 发布（2026-09-05，两次构建 `20260905a` → `20260905b`）：发布 SHA `eaac167`（`86f7e0a` + 跟进修复），Pages 部署 `https://a9016a60.prompt-hub-hub.pages.dev`（及后续部署），线上 `https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260905b'` 已核对；deploy-pages.ps1 内建生产 bundle smoke（24 项）两次全过；`pack-feed.js?v=20260905b` 与 `supabase-sync.js?v=20260905b` 线上内容命中本轮新代码（recent 批量预签、`__fromWarehouse` grid 封面、`cr_` 剥前缀、afterBind 去重门、临时链接封面排除）。**Worker 与数据库未变更**（Worker 仍为 2026-09-01 的 `7f2c2af…` 构建）；`https://api.prompt-hubs.com/health` 发布后核对 200 OK（自定义域偶发 5s+ TLS 握手为已知瞬时现象，`api.prompt-hub.cn` 本机探测 TLS 失败与 Worker 无关，未变更代码）。
+
+内容：生图页「最近生成」首屏批量预签 grid（复用卡片库 sign-batch 链）、卡片库卡片封面走 `_grid` 池、`patchImageSrcFromCache`/`hydrateImageElements` assetId 链补 `cr_` 剥前缀、`__fromWarehouse` 封面排除临时上游 http 引用（护住「填入生图」参考图）、recent 批量预签等 bindFeed 落地后去重执行。详见 `CARD-LOADING.md`「生图 recent 首屏批量预签（2026-09-05）」与 `CURRENT-ISSUES.md`「2026-09-05 诊断与修复」。发布后待办运营项：历史对象 R2 批量回填（`scripts/run-warehouse-repair.mjs`）是否已跑无证据，若 `sign-batch` 仍 >2s 先跑回填。
+
+上一轮（2026-09-01）：已完成 Pages + Worker 联合发布：Worker SHA `7f2c2afa557d90a1168c42ede1c6a004933fa2aa`（`/health.buildSha` 与 `api.prompt-hub.cn` 均已核对一致，Worker Version `70ac8541-e991-49c5-a02d-b852118fcad4`，绑定含 KV/双队列/R2/双自定义域/`*/2` cron 全部保留），Pages build `20260901c`。内容为两批性能与稳定性加固：
 
 第一批（`3fe56ed`）：
 - 版本化静态资源改 `immutable` 一年长缓存（带 `?v=` 的 pack 由 `functions/_middleware.js` 下发、其余清单文件由 `_headers` 覆盖），入口 HTML 与 `sw.js` 保持不缓存，不带 `?v=` 的 pack 请求仍 no-store 兜底；失效继续依赖 `bump-build.ps1` 刷新 `?v=`，新增守卫 `scripts/verify-versioned-cache.mjs` 挂入 predeploy smoke。
