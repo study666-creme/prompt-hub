@@ -584,7 +584,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
       return fresh;
     }
 
-    async function prefetchWarehouseFeedCardsBackground(cards, wrap) {
+    async function prefetchWarehouseFeedCardsBackground(cards, wrap, afterBind) {
       const list = (cards || []).filter((c) => c?.id);
       if (!list.length) return;
       if (whPrefetchInflight) return whPrefetchInflight;
@@ -593,8 +593,10 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         if (isRecent) {
           /* recent 首屏含卡片库卡片（__fromWarehouse）：批量签 grid（sign-batch，
            * 与卡片库同一链路），签名缓存与 getListDisplayImageSrc 共享，
-           * DOM patch 即可亮图，不再逐张单签。 */
+           * DOM patch 即可亮图，不再逐张单签。先等 bindFeed 的批量落地，
+           * 已缓存的路径会被 batchSignPaths 过滤，避免同屏重复 sign-batch。 */
           try {
+            await (afterBind?.catch?.(() => {}) || Promise.resolve());
             if (global.SupabaseSync?.prefetchWarehousePage) {
               await global.SupabaseSync.prefetchWarehousePage(
                 list.slice(0, 24),
@@ -1462,10 +1464,12 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
 
       void (async () => {
         const skipImageBind = !feedAppend && wrap.dataset.feedImageBindKey === feedImageBindKey;
+        let feedBindPromise = null;
         if (!skipImageBind) {
           wrap.dataset.feedImageBindKey = feedImageBindKey;
           if (window.CardImageLoader?.bindFeed) {
-            void window.CardImageLoader.bindFeed(wrap, feedPrefetchItems);
+            feedBindPromise = window.CardImageLoader.bindFeed(wrap, feedPrefetchItems);
+            void feedBindPromise;
           } else if (!didPrimeWarehouse && window.FeatureDraft?.hydrateFeedImages) {
             void window.FeatureDraft.hydrateFeedImages(wrap);
           }
@@ -1494,7 +1498,9 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         maybeServerRepairWarehouseImages(wrap);
         if (d().getImageGenFeedTab?.() === 'recent') {
           void d().repairRecentCreationImagesQuiet?.({ max: 12, skipThumbCheck: true });
-          if (feedItems.length) void prefetchWarehouseFeedCardsBackground(feedItems, wrap);
+          if (feedItems.length) {
+            void prefetchWarehouseFeedCardsBackground(feedItems, wrap, feedBindPromise);
+          }
         }
         syncImageGenFeedLoadMoreBtn();
         reconnectImageGenFeedPageObserver();

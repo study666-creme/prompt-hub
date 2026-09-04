@@ -155,7 +155,12 @@
       const whThumb = c.__fromWarehouse
         ? global.PromptHubCardGallery?.pickWarehouseListThumb?.(c)
         : null;
-      const whCover = whThumb?.ref && d().isDisplayableImage?.(whThumb.ref) ? whThumb.ref : '';
+      // 临时上游 http 链不能当封面（会进 data-feed-ref 劣化参考图），交回原链路优先 storage ref
+      const whCover = whThumb?.ref
+        && d().isDisplayableImage?.(whThumb.ref)
+        && !global.SupabaseSync?.isEphemeralUpstreamImageUrl?.(whThumb.ref)
+        ? whThumb.ref
+        : '';
       const image = whCover
         || d().pickCreationFeedImage?.(c)
         || c.image

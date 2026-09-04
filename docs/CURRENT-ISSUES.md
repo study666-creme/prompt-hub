@@ -59,16 +59,21 @@
   已在主树修复：recent 首屏 `prefetchWarehousePage` 批量预签 + 仓库卡封面走
   `pickWarehouseListThumb`（grid 池）+ `patchImageSrcFromCache` assetId 链补 `cr_`
   剥前缀（详见 `CARD-LOADING.md`「生图 recent 首屏批量预签（2026-09-05）」）。
-- **卡片库首屏**：批量链路（bindWarehouse → prefetchList → sign-batch）已在；桌面
-  `hydrateWarehouseGridImages` 用同步自旋 `waitForCloudSyncIdle`（200–250ms 轮询）
-  阻塞 hydrate，慢网/大库时感知为「卡」。未改——与网络回源耗时相比不是主因，先随
-  本轮批量修复观察；仍慢再做非阻塞化。
+- **卡片库首屏**：批量链路（bindWarehouse → prefetchList → sign-batch）已在；
+  早前怀疑的 `waitForCloudSyncIdle` 同步自旋经核实**不在首屏路径**（仅云端拉取的
+  async 流程 `await` 使用），首屏卡顿主因仍指向 R2 存量回源耗时，见下条运营项。
 - **运营项仍在**：历史对象 R2 批量回填脚本（`scripts/run-warehouse-repair.mjs`）
   是否已在生产跑过没有证据；自愈只加速"被请求过的对象"。上线本轮候选后若
   `sign-batch` 仍 >2s，先跑回填再查代码。
+- **发布后跟进修复（同日 20260905b）**：①`__fromWarehouse` 封面排除临时上游 http
+  引用（防 `data-feed-ref` 劣化「填入生图」参考图）；②recent 批量预签改为等
+  `bindFeed` 批量落地后再跑，靠 `batchSignPaths` 的缓存过滤去重，消除同屏重复
+  sign-batch；③修正本条 `waitForCloudSyncIdle` 误判记录。
 - 发布验证：`npm run check:predeploy` 全量通过（构建号 bump `20260905a`）；
   verify-feed-bundle / verify-card-gallery-regression / verify-imagegen-bundle /
-  foundation-bundle-vm-smoke / check-js-syntax 全过。
+  foundation-bundle-vm-smoke / check-js-syntax 全过。20260905a 已发布生产
+  （Pages 部署 + 24 项线上冒烟全过，`__APP_BUILD__=20260905a` 核对，`pack-feed.js`/
+  `supabase-sync.js` 新代码在线上命中）；Worker/数据库未变更。
 
 ## 排查顺序
 
