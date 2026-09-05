@@ -60,3 +60,27 @@ describe('canvas create-node membership task', () => {
     expect(countGrowthTasksClaimed(claimedKeys)).toBe(1);
   });
 });
+
+describe('retired task-center entries (2026-09-06)', () => {
+  it('no longer lists extension/chat/link-card tasks or the mini-99 promo', () => {
+    const items = buildTaskList(profile, {}, new Set(), false).items;
+    const keys = items.map((t) => t.key);
+    expect(keys).not.toContain('extension_save_card');
+    expect(keys).not.toContain('asset_studio_chat');
+    expect(keys).not.toContain('asset_studio_link_card');
+    expect(keys).not.toContain('mini_99_membership');
+  });
+
+  it('keeps reward + progress definitions so already-earned users can still claim', () => {
+    expect(taskRewardForKey('extension_save_card')?.title).toBe('浏览器插件保存卡片');
+    expect(taskRewardForKey('asset_studio_chat')?.days).toBe(1);
+    expect(taskRewardForKey('asset_studio_link_card')?.days).toBe(2);
+    expect(isTaskProgressMet(
+      'extension_save_card',
+      { extension_card_saved: true },
+      profile,
+      false
+    )).toBe(true);
+    expect(isTaskProgressMet('extension_save_card', {}, profile, false)).toBe(false);
+  });
+});

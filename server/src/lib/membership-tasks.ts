@@ -874,12 +874,15 @@ export function buildTaskList(
   flags: TaskFlags,
   claimed: Set<string>,
   phoneVerified: boolean,
-  opts?: { mini99Redeemed?: boolean; includeDailyInList?: boolean }
+  opts?: { includeDailyInList?: boolean }
 ) {
   const spent = profile.lifetime_credits_spent ?? 0;
   const dailyKey = dailyBonusTaskKey();
   const communityKey = nextCommunityPublishKey(claimed);
   const spendKey = nextSpendTaskKey(spent, claimed);
+  // extension_save_card / asset_studio_chat / asset_studio_link_card 与 mini_99
+  // 体验包 promo 已按要求从任务中心下线（2026-09-06）：这里不再下发。reward/claim
+  // 与 flags 同步链路保留，存量已达标但未领取的用户仍可通过 claim 接口领取。
   const keys = [
     'canvas_create_node',
     'login_desktop',
@@ -889,9 +892,6 @@ export function buildTaskList(
     communityKey,
     'warehouse_quick_preview_fav',
     'community_quick_preview_fav',
-    'extension_save_card',
-    'asset_studio_chat',
-    'asset_studio_link_card',
     'inspiration_draw',
     'community_gacha_collect',
     'cards_count_10',
@@ -967,20 +967,8 @@ export function buildTaskList(
     }
   }
 
-  if (!opts?.mini99Redeemed) {
-    items.push({
-      key: 'mini_99_membership',
-      title: '¥0.99 体验三天基础会员',
-      description: '微信购买后，在「兑换」输入激活码（一人一码）',
-      rewardDays: 3,
-      rewardCredits: 0,
-      claimed: false,
-      ready: false,
-      progress: null,
-      kind: 'promo' as const
-    });
-  }
-
+  // mini_99 体验包 promo 已从任务中心下线（2026-09-06）：
+  // 兑换入口改由生图页「兑换」承载，这里不再下发任务卡片。
   const nextSpend = nextSpendMilestone(spent);
   return { items, lifetimeCreditsSpent: spent, nextSpendMilestone: nextSpend };
 }

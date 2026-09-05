@@ -46,6 +46,7 @@
 - 流水写入 `credit_ledger`。
 - 卡密兑换通过 `/api/v1/redeem`。
 - 每日/任务领取通过 `/api/v1/membership/tasks/*`。
+- 任务中心自 2026-09-06 起不再展示「浏览器插件保存卡片」「卡片式创作 AI 对话」「卡片式创作关联卡片」与「¥0.99 体验三天基础会员」四项（`buildTaskList` 不再下发）；reward/claim 与进度同步链路保留，存量已达标用户仍可经 `POST /api/v1/membership/tasks/:taskKey/claim` 领取，`mini_3d` 兑换码本身继续可用（入口在生图页「兑换」）。
 - 所有扣费、发放和退款必须使用 Worker/service role。
 - 钱包扣费、退款、试用、每日积分和会员模式切换使用 `20260722020000_atomic_credit_operations.sql` 中的原子 RPC。
 - Canvas 首次创建节点调用 `/api/v1/membership/tasks/events/canvas-create-node`；数据库函数在一个事务里写入 `canvas_create_node` claim、任务标记和 1 天基础会员，每个账号只会奖励一次。

@@ -71,19 +71,6 @@ function siteUrlFromRequest(c: {
   }
 }
 
-async function hasMini99Redemption(
-  admin: ReturnType<typeof createAdminClient>,
-  userId: string
-): Promise<boolean> {
-  const { data } = await admin
-    .from('code_redemptions')
-    .select('code')
-    .eq('user_id', userId)
-    .eq('code', 'MINI-99-3D')
-    .maybeSingle();
-  return !!data;
-}
-
 async function loadTaskPayload(
   c: {
     req: { url: string; header: (n: string) => string | undefined };
@@ -137,8 +124,8 @@ async function loadTaskPayload(
     siteUrl,
     referred
   });
+  // mini_99 体验包 promo 已从任务中心下线（2026-09-06），不再查询兑换状态。
   const list = buildTaskList(profile, flags, claimed, user.phoneVerified, {
-    mini99Redeemed: await hasMini99Redemption(admin, user.id),
     includeDailyInList: false
   });
 
