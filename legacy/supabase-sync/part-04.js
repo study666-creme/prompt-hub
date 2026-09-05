@@ -775,14 +775,16 @@
     const scope = root || document;
     let imgs = [...scope.querySelectorAll('img[data-image-ref], img[data-storage-ref]')];
     if (opts?.visibleFirst) {
-      imgs.sort((a, b) => {
-        const ar = a.getBoundingClientRect();
-        const br = b.getBoundingClientRect();
-        const aVis = ar.top < window.innerHeight + 120 && ar.bottom > -80;
-        const bVis = br.top < window.innerHeight + 120 && br.bottom > -80;
+      // 预读一次 rect 再排序（与 sortImgsByViewport 同因）：comparator 里逐次
+      // getBoundingClientRect 会把 O(n log n) 次比较放大成同量级强制布局。
+      const decorated = imgs.map((img) => ({ img, rect: img.getBoundingClientRect() }));
+      decorated.sort((a, b) => {
+        const aVis = a.rect.top < window.innerHeight + 120 && a.rect.bottom > -80;
+        const bVis = b.rect.top < window.innerHeight + 120 && b.rect.bottom > -80;
         if (aVis !== bVis) return aVis ? -1 : 1;
-        return ar.top - br.top;
+        return a.rect.top - b.rect.top;
       });
+      imgs = decorated.map((d) => d.img);
       if (opts.max > 0) imgs = imgs.slice(0, opts.max);
     }
     imgs.forEach((img) => {

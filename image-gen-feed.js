@@ -1384,6 +1384,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
         temp.innerHTML = appendHtml;
         const newCards = [...temp.children];
         if (!newCards.length) return;
+        global.bumpShineOrderEpoch?.(wrap);
         appendImageGenFeedCards(wrap, newCards);
         bindImageGenFeedCardEvents(wrap, newCards);
         bindImageGenFeedImageRelayout();
@@ -1412,6 +1413,7 @@ const IMAGEGEN_FEED_MIN_CARD_PX = 72;
           : 'imagegen-feed imagegen-feed--desktop-grid feed-layout-pending';
         try {
           wrap.innerHTML = html;
+          global.bumpShineOrderEpoch?.(wrap);
           restoreRetainedImageGenFeedImages(wrap, retainedImages);
         } catch (e) {
           console.error('[imageGenFeed] render failed', e);

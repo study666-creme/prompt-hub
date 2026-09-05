@@ -39,29 +39,38 @@
   --card-strip-edge: rgba(255, 255, 255, 0.1);
 }
 
-/* 浅色主题：生图/卡片加载用柔和扫光；深色仍扫光 */
+/* 浅色主题：生图/卡片加载用柔和扫光；深色仍扫光。
+ * 注意：styles-assets.css 后加载的 appleMediaSheen（transform 版）会覆盖这里的
+ * ::before 定义，全局加载态实际由那条渲染；本条保留作为 assets 缺席页面的回退，
+ * 与 appleMediaSheen 同样只动 transform，不逐帧改 background-position。 */
 [data-theme="light"] .card-media.is-loading::before,
 [data-theme="light"] .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::before {
   content: '';
   position: absolute;
-  inset: 0;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 240%;
   z-index: 1;
   pointer-events: none;
   background: linear-gradient(
-    105deg,
-    transparent 32%,
-    rgba(0, 0, 0, 0.05) 46%,
-    rgba(255, 255, 255, 0.5) 50%,
-    rgba(0, 0, 0, 0.05) 54%,
-    transparent 68%
+    90deg,
+    transparent 0%,
+    transparent 38%,
+    rgba(0, 0, 0, 0.03) 46%,
+    rgba(255, 255, 255, 0.45) 50%,
+    rgba(0, 0, 0, 0.03) 54%,
+    transparent 62%,
+    transparent 100%
   );
-  background-size: 240% 100%;
+  background-size: 100% 100%;
+  will-change: transform;
   animation: card-loading-sheen 1.6s ease-in-out infinite;
 }
 
 @keyframes card-loading-sheen {
-  0% { background-position: 130% 0; }
-  100% { background-position: -130% 0; }
+  0% { transform: translate3d(-70%, 0, 0); }
+  100% { transform: translate3d(0%, 0, 0); }
 }
 
 [data-theme="light"] .card-media.is-loading::after,

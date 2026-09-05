@@ -1311,6 +1311,26 @@
     return rect.bottom > -m && rect.top < window.innerHeight + m;
   }
 
+  /** 预读版滚动根 rect：配合 isImgNearRect 在循环里只测一次根，
+   * 避免每张卡各一次 root.getBoundingClientRect()。 */
+  function rectOfScrollRoot(container) {
+    const root = container
+      ? scrollRootFor(container)
+      : null;
+    if (root && root !== document.body && root !== document.documentElement) {
+      return root.getBoundingClientRect();
+    }
+    return null;
+  }
+
+  function isImgNearRect(img, margin, rootRect) {
+    if (!img) return false;
+    const rect = img.getBoundingClientRect();
+    const m = margin == null ? VISIBLE_LOAD_MARGIN : margin;
+    if (rootRect) return rect.bottom > rootRect.top - m && rect.top < rootRect.bottom + m;
+    return rect.bottom > -m && rect.top < window.innerHeight + m;
+  }
+
   function prefetchOneCardImg(img) {
     const ref = img?.getAttribute?.('data-image-ref');
     const cardId = cardIdFromImg(img);
@@ -1523,32 +1543,44 @@
       });
     }
 
+    // 末段（cache 命中 / near 判定 / observer.observe）同样先读后写：
+    // applyUrlToImg 会改 class、属性并触发样式失效，若循环内继续读 rect，
+    // 每张卡都要一次强制布局。这里预读 rect、统一决策，最后一次性写 DOM。
+    const tailRootRect = rectOfScrollRoot(container);
+    const lazyNearPx = container.id === 'imageGenFeed'
+      ? 720
+      : container.id === 'cardsContainer'
+        ? 640
+        : (window.MobileUI?.isMobileViewport?.() ? 160 : 280);
+    const lazyOnlyNearPx = lazyOnly ? lazyNearPx : VISIBLE_LOAD_MARGIN;
+    const tailActions = [];
     imgs.forEach((img) => {
       if (isCurrentSrcLoadedOrPending(img)) return;
       const ref = img.getAttribute('data-image-ref');
       const cardId = cardIdFromImg(img);
       const hit = cachedUrl(ref, cardId, img);
       if (hit) {
-        applyUrlToImg(img, hit);
+        tailActions.push({ img, kind: 'cache', url: hit });
         return;
       }
       if (lazyOnly) {
-        const nearPx = container.id === 'imageGenFeed'
-          ? 720
-          : container.id === 'cardsContainer'
-            ? 640
-            : (window.MobileUI?.isMobileViewport?.() ? 160 : 280);
-        if (isImgNearViewport(img, nearPx)) loadImg(img);
-        observer.observe(img);
-        img.dataset.feedObserverBound = '1';
+        if (isImgNearRect(img, lazyNearPx, tailRootRect)) tailActions.push({ img, kind: 'load' });
+        tailActions.push({ img, kind: 'observe' });
         return;
       }
-      if (isImgNearViewport(img)) {
-        loadImg(img);
+      if (isImgNearRect(img, lazyOnlyNearPx, tailRootRect)) {
+        tailActions.push({ img, kind: 'load' });
         return;
       }
-      observer.observe(img);
-      img.dataset.feedObserverBound = '1';
+      tailActions.push({ img, kind: 'observe' });
+    });
+    tailActions.forEach((a) => {
+      if (a.kind === 'cache') applyUrlToImg(a.img, a.url);
+      else if (a.kind === 'load') loadImg(a.img);
+      else {
+        observer.observe(a.img);
+        a.img.dataset.feedObserverBound = '1';
+      }
     });
   }
 
@@ -1732,21 +1764,30 @@
     let n = 0;
     const nearPx = mobile ? 640 : 720;
     const imgs = sortImgsByViewport(feedImagesIn(container), container);
+    // 先读后写：把所有 rect 测量收进这一轮（sortImgsByViewport 之外每张卡还要
+    // 判一次 near），决策完后统一落 DOM。读写交替会退化为每张卡一次强制布局，
+    // 首屏几十张图连续 boost 时正是滚动掉帧的来源。
+    const rootRect = rectOfScrollRoot(container);
+    const actions = [];
     imgs.forEach((img, idx) => {
       const cur = img.currentSrc || img.src || '';
       if (isCurrentSrcLoadedOrPending(img)) return;
       const hit = cachedUrl(img.getAttribute('data-image-ref'), cardIdFromImg(img), img);
       if (hit) {
-        applyUrlToImg(img, hit);
+        actions.push({ img, kind: 'cache', url: hit });
         return;
       }
       const placeholder = !cur || cur.includes('data:image/svg');
-      const inView = isImgNearViewport(img, nearPx, container);
+      const inView = isImgNearRect(img, nearPx, rootRect);
       const shouldLoad = inView || (mobile && (placeholder || idx < cardFirstScreenCap()));
       if (!shouldLoad) return;
       if (n >= cap && !inView) return;
       n += 1;
-      loadImg(img);
+      actions.push({ img, kind: 'load' });
+    });
+    actions.forEach((a) => {
+      if (a.kind === 'cache') applyUrlToImg(a.img, a.url);
+      else loadImg(a.img);
     });
     observeUnboundImages(container);
   }

@@ -1,6 +1,6 @@
 # 列表图片加载
 
-复核日期：2026-09-05。下述仓库 UI 对应候选 `20260830f` 后的未发布修复（尚未上线时不要据此描述生产行为）；生产资源以线上 build 和资源 HTTP 冒烟为准。
+复核日期：2026-09-05。下述仓库 UI 对应候选 `20260905b` 后的未发布修复（含 2026-09-05c 加载动效与主线程分离，尚未上线时不要据此描述生产行为）；生产资源以线上 build 和资源 HTTP 冒烟为准。
 
 ## 目标
 
@@ -211,6 +211,54 @@ authenticated Worker media proxy before browser-side validation and upload.
 - **排序时间戳归一化（2026-08-31e）**：`getRecentCreationsForFeed`（frontend part-02）与 `sortCardsWithPins`（legacy/script/part-04.js）改为 `phTimeOf`归一化（epoch 数字/数字串/ISO 字符串），避免字符串时间戳相减为 NaN 导致排序退化为原序。
 - **主页/画布生图入口显式传模型与尺寸（2026-08-31e）**：`runImageGenWithPrompt(prompt, opts)`（imagegen-submit.js）支持 `opts.model/size/resolution/quality`覆盖，warehouse-composer.js `submitImage` 直接传入选中模型（修「主页选商汤但提交却是生图页停留的 MJ」）。
 - **商汤等像素尺寸模型统一比例展示（2026-08-31e）**：编辑页尺寸选项把 `WxH` 折算为比例（part-12 `imageGenRatioFromPixel`），提交时 `imageGenSizeForSubmit` 反查回规范像素值（否则服务端 `declaredValue` 回落 options[0]，所有比例变正方形）。
+
+## 加载动效与主线程分离（2026-09-05c，候选未发布）
+
+目标：卡片图片加载慢时，滚动/点击/其他动效依然流畅——加载动效在合成线程渲染，
+加载管线（签名、解码、重排）不与用户交互争抢主线程。
+
+1. **加载扫光合成器化**。全局加载态实际渲染者是 `styles-assets.css` 的
+   `appleMediaSheen`（`styles-theme.css` 的 `card-loading-sheen` 是早加载的
+   回退层，两处此前都用 `background-position` 动画——每帧 paint，主线程忙时
+   扫光跟着卡）。两处均改为「窄渐变光条 + `transform: translate3d` 平移」，
+   `will-change: transform`，静态背景只铺一次；深色 beam（`card-beam-loading`/
+   `card-beam-trbl`，styles/base/part-04.css）原本就是 transform+opacity。
+   实测（本机 Chromium）：主线程 busy-block 250ms 期间扫光动画照常推进。
+2. **揭示路径去噪（`finishCardMediaShine`，legacy/script/part-05.js）**：
+   - DOM 顺序级联的序号不再每张图整树 `querySelectorAll`——改为容器级
+     `shineOrderFor` 缓存（`revealRoot.dataset.phShineEpoch` 代数失效，
+     `window.bumpShineOrderEpoch` 在 renderCards / feed 渲染 / 社区分页时调用）。
+   - 动画重启的强制 reflow（`void offsetWidth`）与 `media-shine-reveal` class
+     写入合并进 `flushShineRevealQueue` 批处理：一批揭示只 reflow 一次、
+     同 stagger 组只挂一批 timer。
+   - 生图 feed 揭示后的桌面重排（`repairImageGenFeedLayout`）同样合批
+     （`scheduleIgRevealLayout`），连续解码多张图不再逐张同步清理布局。
+   - 删除只写不读的 `sessionStorage.ph_card_shine_<id>` 写入。
+3. **补刷热循环读写分离**：
+   - `card-image-loader.js` 的 `observeContainer` 尾段与 `boostWarehouseImages`
+     改为先批量读 rect（含一次性 `rectOfScrollRoot`）、统一决策、最后一次性写
+     DOM（`applyUrlToImg` 改 class/属性后继续读 rect 会退化为每张卡一次强制布局）。
+   - `patchImageSrcFromCache`（legacy/supabase-sync/part-04.js）与
+     `hydrateImageElements`（part-05.js）的 comparator 不再逐次
+     `getBoundingClientRect`（O(n log n) 次比较 → 同量级强制布局），预读 rect 后排序。
+4. **交互感知全端口**。`markUserInteracting` 的 pointerdown/touchstart 捕获监听
+   不再限手机（mobile.js `bindMobileInteractionGuard`）——桌面端同样进入 520ms
+   交互窗口；`loadImg` 里既有的近视口豁免（交互中只放行视口 ±120px 内的图）与
+   `boostActivePageImages` 的交互短路因此对桌面生效。卡片库非紧急瀑布流重排
+   （`scheduleWarehouseMasonryLayout` 非 immediate 路径）在交互窗口内顺延
+   320ms 重试，不与点击/拖拽抢主线程。
+
+回归：`verify-warehouse-card-entrance-browser`（含重排不重放入场断言）、
+`verify-card-image-loader-retry-browser`、`verify-card-image-loader-download-queue-browser`、
+`verify-imagegen-feed-retention-browser`、`verify-feed-image-fit-browser`、
+`verify-imagegen-failed-media-collapse-browser`、`verify-recent-image-resolution-browser`、
+`verify-imagegen-finish-immediate-browser` 均通过（2026-09-05 本机）。
+既有失败（与本次改动无关，改动前复现一致）：
+`verify-card-image-loader-missing-cleanup-browser`（transient 场景
+`card-media--load-failed` class 断言时序）、`verify-warehouse-ui-browser`
+（mobile composer 高度 487 > 断言上限 470，CSS 布局漂移）与
+`verify-mobile-first-screen-browser`（滚动翻页后 24 卡断言超时）。
+
 
 
 ```powershell

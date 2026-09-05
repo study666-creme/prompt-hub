@@ -512,9 +512,12 @@
   }
 
   function bindMobileInteractionGuard() {
-    if (!isMobile() || document.body.dataset.phInteractGuard === '1') return;
+    if (document.body.dataset.phInteractGuard === '1') return;
     document.body.dataset.phInteractGuard = '1';
     const mark = () => markUserInteracting(520);
+    // 交互感知不再只限手机：桌面端同样把 pointerdown/touch 标进交互窗口，
+    // CardImageLoader 的视口外加载与 mobile 无关的补刷会先过 isUserInteracting，
+    // 用户正在点/拖时不与新解码、新签名抢主线程。
     document.addEventListener('touchstart', mark, { passive: true, capture: true });
     document.addEventListener('pointerdown', mark, { passive: true, capture: true });
   }

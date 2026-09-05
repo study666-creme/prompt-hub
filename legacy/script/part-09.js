@@ -950,6 +950,8 @@
         fragment.appendChild(div);
       });
       const appendedCards = [...fragment.querySelectorAll('.card')];
+      // 揭示序号缓存失效：列表 DOM 变了，扫光级联的序号要按新列表重建。
+      window.bumpShineOrderEpoch?.(container);
       // 入场动效：先藏起来，等瀑布流把它们分发到最终列之后再统一放行。
       // 顺序是硬要求 —— 分发会 appendChild 移动节点，动画必须在移动之后才开始，
       // 否则每搬一次就重放一次，看起来就是整片卡片在闪。

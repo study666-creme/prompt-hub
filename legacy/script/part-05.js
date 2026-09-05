@@ -236,6 +236,84 @@
       }, ms);
     }
 
+    /** 揭示序号缓存：revealRoot.dataset + 代数失效。
+     * 此前每张图揭示都在整棵容器里 querySelectorAll 找自己的位置算级联延迟，
+     * 首屏几十张图连续解码时每次都是 O(n) 扫描 + 分配，直接和滚动抢主线程。
+     * 列表内容变化才失效；renderCards 翻页用 bumpShineOrderEpoch 通知。 */
+    const shineOrderCache = new WeakMap();
+
+    function bumpShineOrderEpoch(root) {
+      if (!root) return;
+      const cur = Number(root.dataset.phShineEpoch || 0) + 1;
+      root.dataset.phShineEpoch = String(cur);
+      shineOrderCache.delete(root);
+    }
+    window.bumpShineOrderEpoch = bumpShineOrderEpoch;
+
+    function shineOrderFor(root) {
+      const epoch = Number(root.dataset.phShineEpoch || 0);
+      const cached = shineOrderCache.get(root);
+      if (cached && cached.epoch === epoch) return cached.map;
+      const map = new Map();
+      const cards = root.querySelectorAll('.card[data-id], .card[data-post-id], .imagegen-feed-card');
+      cards.forEach((el, i) => map.set(el, i));
+      const entry = { epoch, map };
+      shineOrderCache.set(root, entry);
+      return map;
+    }
+
+    /** 空转 reflow（void offsetWidth）与 stagger timer 都合并进同一批微任务：
+     * 一批揭示只触发一次样式重算，扫光 class 的加/摘也在这里统一调度。 */
+    let shineRevealQueue = [];
+    let shineRevealTimer = null;
+
+    function queueShineReveal(media, staggerMs) {
+      shineRevealQueue.push({ media, staggerMs });
+      if (shineRevealTimer) return;
+      shineRevealTimer = setTimeout(flushShineRevealQueue, 0);
+    }
+
+    function flushShineRevealQueue() {
+      shineRevealTimer = null;
+      const batch = shineRevealQueue;
+      shineRevealQueue = [];
+      batch.forEach(({ media, staggerMs }) => {
+        media.classList.remove('media-shine-reveal');
+      });
+      void document.body.offsetWidth;
+      const groups = new Map();
+      batch.forEach(({ media, staggerMs }) => {
+        if (!groups.has(staggerMs)) groups.set(staggerMs, []);
+        groups.get(staggerMs).push(media);
+      });
+      groups.forEach((medias, staggerMs) => {
+        setTimeout(() => {
+          medias.forEach((m) => {
+            if (!m.isConnected) return;
+            m.classList.add('media-shine-reveal');
+            setTimeout(() => m.classList.remove('media-shine-reveal'), 1250);
+          });
+        }, staggerMs);
+      });
+    }
+
+    /** 生图 feed 揭示后的桌面重排也合批：连续解码多张图时不再逐张
+     * repairImageGenFeedLayout（每张都是同步样式清理 + 布局），只保留一次。 */
+    let igRevealLayoutTimer = null;
+
+    function scheduleIgRevealLayout() {
+      if (isMobileViewport()) {
+        window.FeatureDraft?.resetMobileFeedGridStyles?.();
+        return;
+      }
+      if (igRevealLayoutTimer) return;
+      igRevealLayoutTimer = setTimeout(() => {
+        igRevealLayoutTimer = null;
+        window.repairImageGenFeedLayout?.()
+          || window.FeatureDraft?.scheduleImageGenFeedLayout?.({ immediate: true });
+      }, 0);
+    }
+
     function finishCardMediaShine(media) {
       if (!media) return;
       const igMedia = media.classList?.contains('imagegen-feed-media')
@@ -249,12 +327,7 @@
           igImg.style.removeProperty('opacity');
           igImg.style.removeProperty('visibility');
         }
-        if (!isMobileViewport()) {
-          window.repairImageGenFeedLayout?.()
-            || window.FeatureDraft?.scheduleImageGenFeedLayout?.({ immediate: true });
-        } else {
-          window.FeatureDraft?.resetMobileFeedGridStyles?.();
-        }
+        scheduleIgRevealLayout();
         return;
       }
       const mobile = isMobileViewport();
@@ -299,22 +372,17 @@
         if (!alreadyRevealed && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
           // 按 DOM 顺序级联扫光（而非按 cardId 哈希随机），保证靠前的卡片先亮、视觉上先出，
           // 避免「后面的先加载出来」的观感；单卡最多延迟 0.3s。
+          // 序号来自容器级缓存（shineOrderFor），不再逐张整树 querySelectorAll；
+          // reflow（重启动画用）与 class 写入统一进 flushShineRevealQueue 批处理。
           let stagger = 0;
           const revealRoot = media.closest('#communityGrid, #creationsGrid, #userProfileGrid, #cardsContainer, #imageGenFeed');
           if (revealRoot && cardEl) {
-            const siblings = [...revealRoot.querySelectorAll('.card[data-id], .card[data-post-id], .imagegen-feed-card')];
-            const idx = siblings.indexOf(cardEl);
-            if (idx >= 0) stagger = Math.min(idx * 34, 300);
+            const idx = shineOrderFor(revealRoot).get(cardEl);
+            if (idx != null) stagger = Math.min(idx * 34, 300);
           }
-          setTimeout(() => {
-            media.classList.add('media-shine-reveal');
-            setTimeout(() => media.classList.remove('media-shine-reveal'), 1250);
-          }, stagger);
+          queueShineReveal(media, stagger);
         }
         media.style.removeProperty('min-height');
-      }
-      if (cardEl?.dataset?.id && !alreadyRevealed) {
-        try { sessionStorage.setItem('ph_card_shine_' + cardEl.dataset.id, '1'); } catch (e) { /* ignore */ }
       }
       if (!mobile && !alreadyRevealed) {
         if (sideBtn) { /* 侧栏不参与 Masonry */ }

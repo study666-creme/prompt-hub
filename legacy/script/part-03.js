@@ -80,6 +80,12 @@
       clearTimeout(warehouseMasonryTimer);
       warehouseMasonryTimer = setTimeout(() => {
         warehouseMasonryPending = 0;
+        // 用户正点/拖时顺延非紧急重排（列容器全量分发是大块同步工作），
+        // 交互窗口结束后再跑；连续交互时按 320ms 步进重试，不累积。
+        if (window.MobileUI?.isUserInteracting?.()) {
+          warehouseMasonryTimer = setTimeout(() => scheduleWarehouseMasonryLayout(), 320);
+          return;
+        }
         layoutMasonryGrid();
       }, delay);
     }

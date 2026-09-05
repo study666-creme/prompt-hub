@@ -99,13 +99,12 @@
     const onlyMissing = opts?.onlyMissing === true;
     const scope = root || document;
     const imgs = [...scope.querySelectorAll('img[data-storage-ref], img[data-image-ref]')];
-    imgs.sort((a, b) => {
-      const ar = a.getBoundingClientRect();
-      const br = b.getBoundingClientRect();
-      const aVis = ar.top < window.innerHeight && ar.bottom > 0;
-      const bVis = br.top < window.innerHeight && br.bottom > 0;
+    const decorated = imgs.map((img) => ({ img, rect: img.getBoundingClientRect() }));
+    decorated.sort((a, b) => {
+      const aVis = a.rect.top < window.innerHeight && a.rect.bottom > 0;
+      const bVis = b.rect.top < window.innerHeight && b.rect.bottom > 0;
       if (aVis !== bVis) return aVis ? -1 : 1;
-      return ar.top - br.top;
+      return a.rect.top - b.rect.top;
     });
     const concurrency = opts?.warehouseBoost
       ? (window.matchMedia('(max-width: 900px)').matches ? 10 : 18)
@@ -263,12 +262,12 @@
       }
     }
     async function worker() {
-      while (idx < imgs.length) {
+      while (idx < decorated.length) {
         const i = idx++;
-        await hydrateOne(imgs[i]);
+        await hydrateOne(decorated[i].img);
       }
     }
-    const workers = Array.from({ length: Math.min(concurrency, imgs.length) }, () => worker());
+    const workers = Array.from({ length: Math.min(concurrency, decorated.length) }, () => worker());
     await Promise.all(workers);
   }
 

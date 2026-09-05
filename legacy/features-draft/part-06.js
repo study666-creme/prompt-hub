@@ -457,6 +457,7 @@
     });
 
     const appendedCards = [...fragment.querySelectorAll('.card')];
+    window.bumpShineOrderEpoch?.(container);
     const preservedImgs = !feedAppend && isMobileViewport() ? snapshotLoadedFeedImages(container) : new Map();
     if (!feedAppend) {
       container.innerHTML = '';
