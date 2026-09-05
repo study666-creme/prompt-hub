@@ -512,8 +512,9 @@
   }
 
   function bindMobileInteractionGuard() {
-    if (document.body.dataset.phInteractGuard === '1') return;
-    document.body.dataset.phInteractGuard = '1';
+    const body = document.body;
+    if (!body || body.dataset.phInteractGuard === '1') return;
+    body.dataset.phInteractGuard = '1';
     const mark = () => markUserInteracting(520);
     // 交互感知不再只限手机：桌面端同样把 pointerdown/touch 标进交互窗口，
     // CardImageLoader 的视口外加载与 mobile 无关的补刷会先过 isUserInteracting，

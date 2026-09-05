@@ -31,6 +31,7 @@ const body = {
     remove() {},
     toggle() {}
   },
+  dataset: {},
   appendChild() {}
 };
 
