@@ -1,12 +1,14 @@
 # 部署与验证清单
 
-最后核对：2026-09-05
+最后核对：2026-09-06
 
 ## 当前发布状态
 
-本轮已完成 Pages 发布（2026-09-05，两次构建 `20260905a` → `20260905b`）：发布 SHA `eaac167`（`86f7e0a` + 跟进修复），Pages 部署 `https://a9016a60.prompt-hub-hub.pages.dev`（及后续部署），线上 `https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260905b'` 已核对；deploy-pages.ps1 内建生产 bundle smoke（24 项）两次全过；`pack-feed.js?v=20260905b` 与 `supabase-sync.js?v=20260905b` 线上内容命中本轮新代码（recent 批量预签、`__fromWarehouse` grid 封面、`cr_` 剥前缀、afterBind 去重门、临时链接封面排除）。**Worker 与数据库未变更**（Worker 仍为 2026-09-01 的 `7f2c2af…` 构建）；`https://api.prompt-hubs.com/health` 发布后核对 200 OK（自定义域偶发 5s+ TLS 握手为已知瞬时现象，`api.prompt-hub.cn` 本机探测 TLS 失败与 Worker 无关，未变更代码）。
+本轮已完成 Pages 发布（2026-09-06，build `20260906b`）：发布 SHA `fd6889a`（`cb15190` 卡顿分离 + foundation VM 修复 + build bump），线上 `https://prompt-hubs.com/` 返回 `__APP_BUILD__ = '20260906b'` 已核对；deploy-pages.ps1 内建生产 bundle smoke（24 项）全过；`styles-assets.css?v=20260906b` 线上命中新版 `appleMediaSheen`（`translate3d(-70%)` transform 扫光，1 处 keyframes）、`script.js?v=20260906b` 命中 `bumpShineOrderEpoch`/`flushShineRevealQueue`（6 处）、`pack-core.js?v=20260906b` 命中 `feedObserverBound` 新循环、`pack-foundation.js?v=20260906b` 命中 `phInteractGuard` 全端交互守卫；`pack-core.js?v=20260906b` 返回 `Cache-Control: public, max-age=31536000, immutable`。**Worker 与数据库未变更**（Worker 仍为 2026-09-01 的 `7f2c2af…` 构建，本轮发布后 `https://api.prompt-hubs.com/health` 复核 200 OK）。
 
-内容：生图页「最近生成」首屏批量预签 grid（复用卡片库 sign-batch 链）、卡片库卡片封面走 `_grid` 池、`patchImageSrcFromCache`/`hydrateImageElements` assetId 链补 `cr_` 剥前缀、`__fromWarehouse` 封面排除临时上游 http 引用（护住「填入生图」参考图）、recent 批量预签等 bindFeed 落地后去重执行。详见 `CARD-LOADING.md`「生图 recent 首屏批量预签（2026-09-05）」与 `CURRENT-ISSUES.md`「2026-09-05 诊断与修复」。发布后待办运营项：历史对象 R2 批量回填（`scripts/run-warehouse-repair.mjs`）是否已跑无证据，若 `sign-batch` 仍 >2s 先跑回填。
+内容：卡片库加载动效与主线程分离（详见 `CARD-LOADING.md`「加载动效与主线程分离（2026-09-05c）」）——加载扫光合成器化（appleMediaSheen/card-loading-sheen 改 transform）、`finishCardMediaShine` 揭示路径去噪（序号缓存 + 合批 reflow/class 写入）、observe/boost/patch/hydrate 热循环读写分离、交互感知推广到桌面端（pointerdown/touch 进 520ms 交互窗口，非紧急瀑布流重排顺延）。发布前修复：`bindMobileInteractionGuard` 在 `document.body` 缺失时早退（VM smoke 抓到），body stub 补 `dataset` 后守卫逻辑被真实执行。
+
+上一轮（2026-09-05，两次构建 `20260905a` → `20260905b`）：发布 SHA `eaac167`（`86f7e0a` + 跟进修复），Pages 部署 `https://a9016a60.prompt-hub-hub.pages.dev`（及后续部署），线上 `__APP_BUILD__ = '20260905b'` 已核对。内容：生图页「最近生成」首屏批量预签 grid（复用卡片库 sign-batch 链）、卡片库卡片封面走 `_grid` 池、`patchImageSrcFromCache`/`hydrateImageElements` assetId 链补 `cr_` 剥前缀、`__fromWarehouse` 封面排除临时上游 http 引用（护住「填入生图」参考图）、recent 批量预签等 bindFeed 落地后去重执行。详见 `CARD-LOADING.md`「生图 recent 首屏批量预签（2026-09-05）」与 `CURRENT-ISSUES.md`「2026-09-05 诊断与修复」。运营待办不变：历史对象 R2 批量回填（`scripts/run-warehouse-repair.mjs`）是否已跑无证据，若 `sign-batch` 仍 >2s 先跑回填。
 
 上一轮（2026-09-01）：已完成 Pages + Worker 联合发布：Worker SHA `7f2c2afa557d90a1168c42ede1c6a004933fa2aa`（`/health.buildSha` 与 `api.prompt-hub.cn` 均已核对一致，Worker Version `70ac8541-e991-49c5-a02d-b852118fcad4`，绑定含 KV/双队列/R2/双自定义域/`*/2` cron 全部保留），Pages build `20260901c`。内容为两批性能与稳定性加固：
 
