@@ -1243,6 +1243,18 @@ export function resolveNewApiCatalogModel(
   ) || null;
 }
 
+/**
+ * 计费安全：任何进入钱包的金额必须为有限正数。0 积分只允许出现在显式
+ * 声明的免费目录条目上（当前免费图模型已退役，公开目录不应再出现 0 价）。
+ * 计价返回 null（拒绝服务）而不是 0：宁可 503 暂停售卖，绝不 0 元放行。
+ */
+export function assertChargeableCredits(credits: number | null): number {
+  if (credits == null || !Number.isFinite(credits) || credits <= 0) {
+    throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认该模型实时价格');
+  }
+  return credits;
+}
+
 export function newApiFixedCreditsForRequest(
   model: NewApiCatalogModel,
   params: Record<string, unknown>

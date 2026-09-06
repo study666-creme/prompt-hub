@@ -11,6 +11,7 @@ import { drainVideoPendingSubmits } from './lib/video-provider-drain';
 import { drainExpiredVideoSubmitOutcomes } from './lib/video-provider-outcome';
 import { drainPendingVideoTasks } from './lib/video-provider-poll';
 import { processVideoQueueMessage } from './lib/video-provider-queue';
+import { drainUnderchargedGenerationWork } from './lib/billing-reconcile';
 import { createCorsMiddleware } from './middleware/cors';
 import { adminRoutes } from './routes/admin';
 import { supabaseProxyHandler } from './routes/supabase-proxy';
@@ -181,7 +182,9 @@ export default {
       drainExpiredFastProviderOutcomes(env),
       drainVideoPendingSubmits(env, { maxSubmit: 2 }),
       reconcileVideoWork(),
-      monitorPendingPaymentOrders(env)
+      monitorPendingPaymentOrders(env),
+      // 计费对账兜底：已受理/已完成但钱包查无扣费的任务补扣或标记追账。
+      drainUnderchargedGenerationWork(env, { maxReconcile: 20, windowHours: 48 })
     ]);
   }
 };

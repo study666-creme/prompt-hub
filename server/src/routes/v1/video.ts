@@ -17,6 +17,7 @@ import {
   fetchNewApiAdminRoutes,
   fetchNewApiModelCatalog,
   newApiKeyForRoute,
+  assertChargeableCredits,
   newApiFixedCreditsForRequest,
   newApiHasActiveRoute,
   resolveNewApiCatalogModel,
@@ -557,6 +558,7 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
     ratio: input.ratio
   });
   if (credits == null || credits <= 0) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认该模型实时价格');
+  assertChargeableCredits(credits);
 
   let profile = await syncMembershipCredits(admin, user.id);
   const final = roundCredits(credits);
@@ -685,7 +687,7 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频任务状态正在确认，请稍后查看任务');
     }
     const debited = split.fromDaily > 0 || split.fromPermanent > 0;
-    const definitiveDebitFailure = /insufficient|amount_invalid/i.test(message);
+    const definitiveDebitFailure = /insufficient|amount_invalid|amount_must_be_positive/i.test(message);
     if (!debited && !definitiveDebitFailure) {
       // The wallet RPC may have committed before its response was interrupted.
       // Keep awaiting_debit so cron can replay the same ledger ref safely and

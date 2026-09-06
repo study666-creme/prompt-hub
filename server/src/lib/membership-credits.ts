@@ -252,11 +252,19 @@ export async function deductUserCredits(
   meta: Record<string, unknown> = {}
 ): Promise<{ profile: Profile; split: DebitSplit; replayed?: boolean }> {
   const rawAmount = Number(amount);
-  if (!Number.isFinite(rawAmount)) {
+  if (!Number.isFinite(rawAmount) || rawAmount < 0) {
     throw new Error('amount_invalid');
   }
   amount = roundCredits(rawAmount);
   if (amount <= 0) {
+    // 计费安全：0 元“扣费”不再是静默成功。只有显式声明的免费场景
+    // （免费图模型，当前已退役，仅防历史重放）允许通过；其余 0 金额
+    // 一律视为计价事故并报错，任务不得在未扣费状态下继续。
+    const metaModel = String(meta.model || '');
+    const isLegacyFreeImage = reason === 'image_generation' && /free/i.test(metaModel);
+    if (!isLegacyFreeImage) {
+      throw new Error('amount_must_be_positive');
+    }
     const profile = await syncMembershipCredits(admin, userId);
     return { profile, split: { fromDaily: 0, fromPermanent: 0 } };
   }

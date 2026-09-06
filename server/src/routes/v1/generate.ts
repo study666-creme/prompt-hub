@@ -1032,7 +1032,9 @@ function assertCatalogPriceAvailable(
 ): void {
   if (resolved.provider !== 'newapi') return;
   const credits = newApiCreditsForModel(snapshot.rules, resolved.upstream, resolution);
-  if (credits == null || !Number.isFinite(credits) || credits < 0) {
+  // 收费安全：0 元或异常价一律拒绝售卖（503），绝不放行到扣费环节。
+  // 退费的 free 模型已从公开目录退役；0 价在这里只能是配置事故。
+  if (credits == null || !Number.isFinite(credits) || credits <= 0) {
     throw new ApiError(
       503,
       'SERVICE_UNAVAILABLE',
