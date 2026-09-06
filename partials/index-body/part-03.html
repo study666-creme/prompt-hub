@@ -32,22 +32,7 @@
       </div>
     </div>
 
-    <div class="app-page app-page-feature app-page-canvas" id="pageCanvas">
-      <div class="canvas-page-shell">
-        <header class="feature-header canvas-page-header">
-          <div>
-            <span class="warehouse-composer-kicker">CANVAS</span>
-            <h2>无限画布</h2>
-          </div>
-          <button type="button" class="btn btn-secondary btn-sm" id="canvasOpenExternalBtn">在新标签页打开</button>
-        </header>
-        <div class="canvas-page-frame-wrap">
-          <iframe id="canvasPageFrame" title="Prompt Hub 无限画布" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="clipboard-read; clipboard-write"></iframe>
-        </div>
-      </div>
-    </div>
-
-    <div class="app-page app-page-feature" id="pageCommunity">
+    <div class="app-page app-page-feature active" id="pageCommunity">
       <div class="feature-shell community-shell">
         <header class="feature-header community-header">
           <h2>提示词社区</h2>
@@ -189,16 +174,9 @@
             </div>
             <div class="imagegen-shared-params" id="imageGenSharedParams">
             <p class="imagegen-promo-notice imagegen-promo-notice--model hidden" id="imageGenPromoNotice" aria-live="polite"></p>
-            <label for="imageGenModelTrigger">生图模型</label>
+            <label for="imageGenModel">生图模型</label>
             <div class="imagegen-model-family-tabs" id="imageGenModelFamilyTabs" role="tablist" aria-label="生图模型分组"></div>
-            <div class="imagegen-model-picker" id="imageGenModelPicker">
-              <button type="button" class="imagegen-model-trigger" id="imageGenModelTrigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="imageGenModelMenu" aria-busy="true" disabled>
-                <span class="imagegen-model-trigger-label" id="imageGenModelTriggerLabel">加载模型列表…</span>
-                <span class="imagegen-model-trigger-chevron" aria-hidden="true"></span>
-              </button>
-              <div class="imagegen-model-menu" id="imageGenModelMenu" role="listbox" aria-label="生图模型" hidden></div>
-            </div>
-            <select id="imageGenModel" class="imagegen-model-native-select" disabled aria-busy="true" aria-hidden="true" tabindex="-1" hidden>
+            <select id="imageGenModel" class="settings-input imagegen-field-compact" disabled aria-busy="true">
               <option value="">加载模型列表…</option>
             </select>
             <p class="panel-hint imagegen-model-hint" id="imageGenModelHint" hidden></p>
@@ -280,7 +258,7 @@
               </div>
               <label for="imageGenMjNegative">反向提示词</label>
               <textarea id="imageGenMjNegative" class="settings-input imagegen-field-compact imagegen-mj-negative" maxlength="500" rows="3" placeholder="排除的内容，如 ugly, blurry、低质量"></textarea>
-              <p class="imagegen-mj-gallery-note">Midjourney 四宫格<strong>合并为一条最近生成</strong>（最多 5 张），完成后自动存入卡片库「图片生成」分组。变体按一次生图同价扣积分。</p>
+              <p class="imagegen-mj-gallery-note">Midjourney 四宫格<strong>合并为一条最近生成</strong>（最多 5 张），喜欢请点「存入库」。变体按一次生图同价扣积分。</p>
               </div>
             </div>
             <details class="imagegen-advanced-fold" id="imageGenAdvancedFold">
@@ -301,9 +279,9 @@
                   <div class="imagegen-param" data-param="quality">
                     <label for="imageGenQuality">质量</label>
                     <select id="imageGenQuality" class="settings-input imagegen-field-compact">
-                      <option value="low">低</option>
-                      <option value="medium" selected>中</option>
-                      <option value="high">高</option>
+                      <option value="standard">低</option>
+                      <option value="high">中</option>
+                      <option value="ultra">高</option>
                     </select>
                   </div>
                 </div>

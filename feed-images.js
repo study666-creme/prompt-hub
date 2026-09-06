@@ -8,10 +8,8 @@
   let deps = {};
   const displayUrlCache = new Map();
 
-  // 透明占位（保留 data:image/svg 供 isPlaceholderCardImg 识别）：主题化骨架背景
-  // （--card-skeleton-bg）负责加载观感，避免写死的深灰色块在浅色模式下像「灰卡」。
   const IMG_LOADING_PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"></svg>'
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect fill="%2318181c" width="16" height="16"/></svg>'
   );
 
   function d() {
@@ -20,11 +18,6 @@
 
   function isDisplayableImage(v) {
     return d().isDisplayableImage?.(v) ?? false;
-  }
-
-  function isLocalRasterImageUrl(value) {
-    const url = String(value || '').trim();
-    return url.startsWith('blob:') || /^data:image\/(?!svg(?:\+xml)?[;,])/i.test(url);
   }
 
   function feedImgStorageAttr(image) {
@@ -78,7 +71,6 @@
       }
       const isStorageLike = window.SupabaseSync?.isStorageRef?.(image) || String(image).startsWith('storage://');
       const skipPipeline = /^data:image\//i.test(image) || String(image).startsWith('blob:');
-      if (skipPipeline) return isLocalRasterImageUrl(image) ? String(image) : '';
       if (!skipPipeline && window.MediaPipeline?.resolveFeedUrl) {
         try {
           const piped = await window.MediaPipeline.resolveFeedUrl(image, {
@@ -253,32 +245,15 @@
       };
     }
   
-    function finalizeFeedImageFailure(img) {
-      const media = img?.closest?.('.imagegen-feed-media, .card-media, .community-side-img-btn');
-      media?.classList.remove('is-loading', 'card-media--await', 'media-shine-reveal');
-      media?.classList.add('card-media--load-failed');
-      img?.classList.add('img-load-failed');
-      const feedCard = img?.closest?.('.imagegen-feed-card');
-      if (feedCard) collapseWarehouseFeedCardNoThumb(feedCard);
-    }
-
     function bindFeedImgErrorFallback(img) {
       if (!img || img.dataset.feedImgErrBound) return;
       img.dataset.feedImgErrBound = '1';
       img.addEventListener('error', () => {
-        if (img.dataset.feedLoadToken) return;
-        const failedUrl = img.currentSrc || img.src || '';
-        if (img.dataset.feedImgRetryUrl === failedUrl) {
-          finalizeFeedImageFailure(img);
-          return;
-        }
-        img.dataset.feedImgRetryUrl = failedUrl;
+        if (img.dataset.feedImgRetry === '1') return;
+        img.dataset.feedImgRetry = '1';
         const ref = img.getAttribute('data-image-ref');
         const jobId = img.getAttribute('data-job-id') || '';
-        if (!ref) {
-          finalizeFeedImageFailure(img);
-          return;
-        }
+        if (!ref) return;
         const inIgFeed = !!img.closest('#imageGenFeed');
         const ownWhFeed = inIgFeed && !!img.closest('.imagegen-feed-card[data-feed-id^="wh_"]');
         if (ownWhFeed) {
@@ -294,27 +269,20 @@
           ? { ...communityImageSignOpts(img), listOnly: true, allowFullFallback: false }
           : communityImageSignOpts(img);
         void resolveImageDisplayUrl(ref, jobId || null, feedAssetIdFromImg(img), retryOpts).then((url) => {
-          if (url && !url.startsWith('storage://') && url !== failedUrl) {
-            const media = img.closest('.imagegen-feed-media, .card-media, .community-side-img-btn');
-            media?.classList.remove('card-media--load-failed');
-            img.classList.remove('img-load-failed');
-            if (window.CardImageLoader?.applyUrlToImg?.(img, url)) return;
+          if (url && !url.startsWith('storage://')) {
             img.src = url;
+            img.classList.remove('img-load-failed');
             return;
           }
-          finalizeFeedImageFailure(img);
-        }).catch(() => {
-          finalizeFeedImageFailure(img);
+          img.src = IMG_LOADING_PLACEHOLDER;
         });
       });
     }
   
     function collapseWarehouseFeedCardNoThumb(feedCard) {
-      const feedId = String(feedCard?.dataset?.feedId || '');
-      if (!/^cr_|^wh_/.test(feedId) && !feedCard?.closest?.('#imageGenFeed')) return false;
+      if (!feedCard?.dataset?.feedId?.startsWith?.('wh_')) return;
       feedCard.querySelector('.imagegen-feed-media')?.remove();
       feedCard.classList.add('imagegen-feed-card--no-media');
-      return true;
     }
 
     async function tryWarehouseFeedGalleryCovers(img) {
@@ -451,9 +419,6 @@
       }
       const endLoad = () => {
         const media = img.closest('.imagegen-feed-media, .card-media, .community-side-img-btn');
-        delete img.dataset.feedImgRetryUrl;
-        img.classList.remove('img-load-failed');
-        media?.classList.remove('card-media--load-failed');
         if (typeof window.finishCardMediaShine === 'function') window.finishCardMediaShine(media);
         else media?.classList.remove('is-loading');
       };
@@ -621,7 +586,6 @@
         const media = img.closest('.imagegen-feed-media');
         const card = img.closest('.imagegen-feed-card');
         if (media?.closest('#imageGenFeed')) {
-          if (collapseWarehouseFeedCardNoThumb(card)) return;
           media.classList.add('card-media--load-failed');
           card?.classList.remove('imagegen-feed-card--no-media');
           return;
@@ -741,8 +705,7 @@
       if (media?.classList.contains('imagegen-gen-pending')) return;
       try {
         const cur = img.currentSrc || img.src || '';
-        if ((cur.startsWith('http') || isLocalRasterImageUrl(cur))
-          && !cur.includes('data:image/svg') && img.complete && img.naturalWidth > 0) {
+        if (cur.startsWith('http') && !cur.includes('data:image/svg') && img.complete && img.naturalWidth > 0) {
           releaseFeedMediaLoading(media);
           return;
         }
@@ -750,7 +713,7 @@
           if (!media.dataset.shineAt) media.dataset.shineAt = String(Date.now());
           media.classList.add('is-loading');
         }
-        if ((!cur.startsWith('http') && !isLocalRasterImageUrl(cur)) || cur.includes('data:image/svg')) {
+        if (!cur.startsWith('http') || cur.includes('data:image/svg')) {
           img.src = IMG_LOADING_PLACEHOLDER;
         }
         img.classList.remove('img-load-failed');
@@ -764,15 +727,16 @@
             return;
           }
           if (feedCard) {
-            finalizeFeedImageFailure(img);
+            media?.classList.add('card-media--load-failed');
           } else if (media?.classList.contains('card-media')) {
-            finalizeFeedImageFailure(img);
+            media.classList.add('card-media--load-failed');
           } else if (sideBtn) {
-            finalizeFeedImageFailure(img);
+            img.src = IMG_LOADING_PLACEHOLDER;
+            releaseFeedMediaLoading(media);
           }
         }
       } catch (e) {
-        finalizeFeedImageFailure(img);
+        releaseFeedMediaLoading(media);
       }
     }
 
@@ -788,7 +752,6 @@
       imageGenFeedSignOpts,
       communityImageSignOpts,
       bindFeedImgErrorFallback,
-      finalizeFeedImageFailure,
       applyFeedImageSrc,
       hydrateFeedImages,
       hydrateFeedImageOne,

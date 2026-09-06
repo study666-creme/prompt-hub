@@ -184,6 +184,7 @@
           mode: 'repair',
           hours: opts.hours ?? 72,
           max: opts.max ?? 24,
+          providerScope: opts.providerScope || 'all',
           jobIds: Array.isArray(opts.jobIds) ? opts.jobIds.filter(Boolean).slice(0, 10) : undefined
         });
         if (r?.ok && r.data?.repaired > 0) {

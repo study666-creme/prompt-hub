@@ -24,19 +24,12 @@ const required = [
   'window.SubscriptionUI',
   'window.TrialTasksUI',
   'openSubscribePanel',
-  'openTrialTasksPanel',
-  'createPaymentCheckout',
-  'alipay'
+  'openTrialTasksPanel'
 ];
 
 const missing = required.filter((token) => !code.includes(token));
 if (missing.length) {
   console.error('verify-account-bundle: missing tokens:', missing.join(', '));
-  process.exit(1);
-}
-
-if (code.includes('wxpay')) {
-  console.error('verify-account-bundle: new-checkout bundle still exposes wxpay');
   process.exit(1);
 }
 

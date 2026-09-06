@@ -561,9 +561,8 @@
     const model = document.getElementById('imageGenModel');
     if (prompt) prompt.value = '';
     if (title) title.value = '';
-    const firstAvailableModel = [...(model?.options || [])].find((option) => !option.disabled);
-    if (model && firstAvailableModel) model.value = firstAvailableModel.value;
-    imageGenModelFamily = resolveImageGenModelFamily(null, model?.value || 'image2');
+    if (model?.querySelector('option[value="image2-economy"]')) model.value = 'image2-economy';
+    imageGenModelFamily = 'gim2';
     clearImageGenRef();
     try { localStorage.removeItem(LS_IMAGEGEN); } catch (e) { /* ignore */ }
     if (imageGenFormActivated) {
@@ -893,37 +892,10 @@
   function getRecentCreationsForFeed() {
     pruneCreations();
     const now = Date.now();
-    // 未自动入库的临时最近生成（游客额度满等回退场景才存在）
-    const temp = creations
+    return creations
       .filter((c) => c?.id && (!c.expiresAt || c.expiresAt > now))
-      .filter((c) => creationHasFeedImage(c));
-    // 仓库：卡片库「图片生成」分组的卡片（已入库，永久保存）
-    const genGroup = window.GEN_AUTO_GROUP || '图片生成';
-    const genTag = window.GEN_AUTO_TAG || '图片生成';
-    const warehouseCards = (window.__promptHubCards || [])
-      .filter((c) => c?.id && (c.group === genGroup || (Array.isArray(c.tags) && c.tags.includes(genTag))))
-      .map((c) => ({ ...c, __fromWarehouse: true }));
-    // 合并去重（临时记录若已入库，以仓库卡片为准），按创建时间倒序（最近生成在前）
-    const seen = new Set();
-    const merged = [];
-    for (const c of [...warehouseCards, ...temp]) {
-      const key = c.genJobId || c.jobId || c.id;
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      merged.push(c);
-    }
-    return merged.sort((a, b) => phTimeOf(b.createdAt || b.updatedAt) - phTimeOf(a.createdAt || a.updatedAt));
-
-  /** \u65f6\u95f4\u6233\u5f52\u4e00\u5316\uff1a\u517c\u5bb9 epoch \u6570\u5b57\u3001\u6570\u5b57\u4e32\u4e0e ISO \u5b57\u7b26\u4e32\uff08\u4e91\u7aef\u540c\u6b65\u53ef\u80fd\u5b58\u5b57\u7b26\u4e32\uff09 */
-  function phTimeOf(v) {
-    if (v == null || v === '') return 0;
-    if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
-    const s = String(v).trim();
-    if (/^[0-9]+$/.test(s)) { const n = Number(s); return Number.isFinite(n) ? n : 0; }
-    const t = Date.parse(s);
-    return Number.isFinite(t) ? t : 0;
-  }
-
+      .filter((c) => creationHasFeedImage(c))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }
 
   let recentServerSyncInflight = null;

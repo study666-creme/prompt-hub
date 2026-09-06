@@ -10,7 +10,6 @@
   let state = null;
 
   const PUBLIC_FEED_TTL_MS = 300_000;
-  const PUBLIC_FEED_RETRY_COOLDOWN_MS = 30_000;
   const PUBLIC_FEED_HEAD_LIMIT = 100;
   const PUBLIC_FEED_CACHE_VERSION = 7;
   const LS_PUBLIC_FEED_CACHE = 'promptrepo_public_feed_cache';
@@ -28,8 +27,7 @@
       remoteHasMore: true,
       loading: false,
       refreshPromise: null,
-      moreInflight: false,
-      lastAttemptAt: 0
+      moreInflight: false
     };
   }
 
@@ -122,15 +120,9 @@
   function publicFeedNeedsFullRefresh(st) {
     const s = st || state;
     if (!s) return true;
-    const now = Date.now();
-    const retryReady = !s.lastAttemptAt || now - s.lastAttemptAt >= PUBLIC_FEED_RETRY_COOLDOWN_MS;
-    if (s.at === 0) {
-      return retryReady;
-    }
-    if (now - s.at >= PUBLIC_FEED_TTL_MS) return retryReady;
-    return s.posts.length < minReady()
-      && s.remoteHasMore !== false
-      && retryReady;
+    return s.at === 0
+      || s.posts.length < minReady()
+      || Date.now() - s.at >= PUBLIC_FEED_TTL_MS;
   }
 
   function hydratePublicFeedFromCache(st) {
@@ -138,6 +130,10 @@
     if (!s || s.at > 0) return false;
     const cached = loadPublicFeedCache();
     if (!cached?.posts?.length) return false;
+    if (cached.posts.length < minReady()) {
+      localStorage.removeItem(LS_PUBLIC_FEED_CACHE);
+      return false;
+    }
     s.posts = cached.posts.map(normalizeFeedPost).filter(Boolean);
     s.at = cached.cachedAt || Date.now();
     s.apiOffset = s.posts.length;
@@ -167,29 +163,36 @@
   async function fetchPublicCommunityFeedHead(timeoutMs = 22000, st) {
     const s = st || state;
     if (!s || !global.PromptHubApi?.getCommunityFeed) return null;
+    if (global.PromptHubApi?.prepareApiCall) await global.PromptHubApi.prepareApiCall();
+    else global.__PH_API_DOWN_UNTIL__ = 0;
     const pageSize = PUBLIC_FEED_HEAD_LIMIT;
+    let lastFeedRes = null;
+    let batch = null;
     const sortPosts = d().sortPostsByActivity;
-    const feedRes = await global.PromptHubApi.getCommunityFeed({
-      limit: pageSize,
-      offset: 0,
-      timeoutMs,
-      skipUnreachableMark: true,
-      noRetry: true
-    });
-    if (!feedRes?.ok || !Array.isArray(feedRes.data?.posts)) return null;
-    const batch = feedRes.data.posts;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const r = await global.PromptHubApi.getCommunityFeed({
+        limit: pageSize,
+        offset: 0,
+        timeoutMs,
+        skipUnreachableMark: true
+      });
+      if (r?.ok && Array.isArray(r.data?.posts)) {
+        batch = r.data.posts;
+        lastFeedRes = r;
+        break;
+      }
+      if (attempt < 2) await new Promise((res) => setTimeout(res, 700 + attempt * 900));
+    }
+    if (!batch) return null;
     const head = batch.map(normalizeFeedPost).filter(Boolean);
-    const nextOff = Number(feedRes.data?.nextOffset);
-    const remoteNext = Number.isFinite(nextOff) && (nextOff > 0 || head.length === 0)
-      ? nextOff
-      : head.length;
-    const remoteHasMore = feedRes.data?.hasMore === true
-      || (feedRes.data?.hasMore !== false && batch.length >= pageSize);
-    const merged = remoteHasMore ? mergePostsLists(head, s.posts) : head;
+    const merged = mergePostsLists(head, s.posts);
     const sorted = typeof sortPosts === 'function' ? sortPosts(merged) : merged;
-    s.apiOffset = remoteNext;
-    s.nextApiOffset = remoteNext;
-    s.remoteHasMore = remoteHasMore;
+    const nextOff = Number(lastFeedRes?.data?.nextOffset);
+    const remoteNext = Number.isFinite(nextOff) && nextOff > 0 ? nextOff : head.length;
+    s.apiOffset = Math.max(s.apiOffset, remoteNext);
+    s.nextApiOffset = Math.max(s.nextApiOffset, remoteNext, sorted.length);
+    s.remoteHasMore = lastFeedRes?.data?.hasMore === true
+      || (lastFeedRes?.data?.hasMore !== false && batch.length >= pageSize);
     s.posts = sorted;
     savePublicFeedCache(s.posts);
     if (head.length >= minReady()) d().scheduleProgressiveCommunityRender?.();
@@ -200,63 +203,56 @@
     return fetchPublicCommunityFeedHead(timeoutMs, st);
   }
 
-  function refreshPublicCommunityFeed(opts = {}, st) {
+  async function refreshPublicCommunityFeed(opts = {}, st) {
     const s = st || state;
-    if (!s || !global.PromptHubApi?.getCommunityFeed) return Promise.resolve(false);
-    if (s.refreshPromise) return s.refreshPromise;
+    if (!s || !global.PromptHubApi?.getCommunityFeed) return false;
+    if (s.loading) return false;
     const loggedIn = global.SupabaseSync?.isLoggedIn?.();
-    if (!opts.force && !publicFeedNeedsFullRefresh(s)) {
-      return Promise.resolve(false);
+    if (!opts.force && !publicFeedNeedsFullRefresh(s) && s.posts.length > 0) {
+      return false;
     }
     s.loading = true;
-    s.lastAttemptAt = Date.now();
     const prevPubSig = s.posts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
-    let refreshTask;
-    refreshTask = (async () => {
-      try {
-        const fetched = await fetchPublicCommunityFeedHead(opts.timeoutMs || 8000, s);
-        if (!Array.isArray(fetched)) {
-          const cached = loadPublicFeedCache();
-          if (cached?.posts?.length && s.at === 0) {
-            const cachedSig = cached.posts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
-            if (cachedSig !== prevPubSig) {
-              s.posts = cached.posts.map(normalizeFeedPost).filter(Boolean);
-              s.at = cached.cachedAt || Date.now();
-              s.apiOffset = Math.max(s.apiOffset, s.posts.length);
-              return true;
-            }
-            return false;
+    try {
+      const fetched = await fetchPublicCommunityFeedHead(opts.timeoutMs || 20000, s);
+      if (!fetched?.length) {
+        const cached = loadPublicFeedCache();
+        if (cached?.posts?.length && s.at === 0) {
+          const cachedSig = cached.posts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
+          if (cachedSig !== prevPubSig) {
+            s.posts = cached.posts.map(normalizeFeedPost).filter(Boolean);
+            s.at = cached.cachedAt || Date.now();
+            s.apiOffset = Math.max(s.apiOffset, s.posts.length);
+            return true;
           }
           return false;
         }
-        s.posts = fetched;
-        s.at = Date.now();
-        s.apiOffset = s.nextApiOffset;
-        savePublicFeedCache(s.posts);
-        if (loggedIn) d().onLoggedInFeedRefreshed?.(s.posts);
-        d().rebuildOwnPostFilterCache?.();
-        d().invalidateCommunityReconcileCache?.();
-        d().pruneLocalCommunityNotOnServer?.();
-        const nextPubSig = s.posts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
-        return nextPubSig !== prevPubSig;
-      } catch (e) {
-        console.warn('[community] public feed failed', e);
-        if (s.at > 0 && Date.now() - s.at < 5 * 60 * 1000) return false;
-        const cached = loadPublicFeedCache();
-        if (cached?.posts?.length && !s.posts.length) {
-          s.posts = cached.posts.map(normalizeFeedPost).filter(Boolean);
-          s.at = cached.cachedAt || Date.now();
-          s.apiOffset = Math.max(s.apiOffset, s.posts.length);
-          return true;
-        }
         return false;
-      } finally {
-        s.loading = false;
-        if (s.refreshPromise === refreshTask) s.refreshPromise = null;
       }
-    })();
-    s.refreshPromise = refreshTask;
-    return refreshTask;
+      s.posts = fetched;
+      s.at = Date.now();
+      s.apiOffset = s.nextApiOffset;
+      savePublicFeedCache(s.posts);
+      if (loggedIn) d().onLoggedInFeedRefreshed?.(s.posts);
+      d().rebuildOwnPostFilterCache?.();
+      d().invalidateCommunityReconcileCache?.();
+      d().pruneLocalCommunityNotOnServer?.();
+      const nextPubSig = s.posts.map((p) => `${p.id}:${p.updatedAt || 0}`).join('|');
+      return nextPubSig !== prevPubSig;
+    } catch (e) {
+      console.warn('[community] public feed failed', e);
+      if (s.at > 0 && Date.now() - s.at < 5 * 60 * 1000) return false;
+      const cached = loadPublicFeedCache();
+      if (cached?.posts?.length && !s.posts.length) {
+        s.posts = cached.posts.map(normalizeFeedPost).filter(Boolean);
+        s.at = cached.cachedAt || Date.now();
+        s.apiOffset = Math.max(s.apiOffset, s.posts.length);
+        return true;
+      }
+      return false;
+    } finally {
+      s.loading = false;
+    }
   }
 
   async function fetchMorePublicCommunityFeed(st) {
@@ -321,7 +317,6 @@
     return {
       createState,
       PUBLIC_FEED_TTL_MS,
-      PUBLIC_FEED_RETRY_COOLDOWN_MS,
       PUBLIC_FEED_CACHE_VERSION,
       LS_PUBLIC_FEED_CACHE,
       loadPublicFeedCache,

@@ -96,7 +96,6 @@
       }, '→ window.__lastApPlan');
       return result;
     }
-    /* __PROMPT_HUB_PRIVATE_OPS_END__ provider-recovery-plan */
 
     async function restoreCardsFromRecoveryPlan(entries, opts = {}) {
       const list = Array.isArray(entries) ? entries : [];
@@ -163,7 +162,6 @@
       return restoreCardsFromRecoveryPlan(entries, opts);
     }
 
-    /* __PROMPT_HUB_PRIVATE_OPS_START__ provider-recovery-browser-tools */
     async function runFullRecoveryDiagnosis(opts = {}) {
       console.log('[Recovery] 开始完整诊断…（404 为探测缺失路径，属正常）');
       const base = await inspectCardLibraryRecovery();
@@ -333,12 +331,9 @@
     }
 
     window.runFullRecoveryDiagnosis = runFullRecoveryDiagnosis;
-    window.planApimartRecovery = planApimartRecovery;
     window.importApimartRecoveryFromPlan = importApimartRecoveryFromPlan;
     window.preflightApimartRecovery = preflightApimartRecovery;
-    /* __PROMPT_HUB_PRIVATE_OPS_END__ provider-recovery-browser-tools */
 
-    /* __PROMPT_HUB_PRIVATE_OPS_START__ provider-recovery-server-tool */
     /** 服务端一键恢复（推荐）：不经过浏览器拉 Apimart，避免 401/404 */
     async function runServerApimartImport(opts = {}) {
       if (!window.PromptHubApi?.recoverWarehouseFromJobs) {
@@ -357,9 +352,12 @@
       setCloudSyncPhase('syncing', `服务端${modeLabel}中…`);
       showToast(`正在服务端${modeLabel}（最多 ${max} 条）…`, 5000);
       try {
-        const recoverBody = { max, mode };
+        const providerScope = opts.providerScope || (mode === 'import' ? 'grs' : 'all');
+        const recoverBody = { max, mode, providerScope };
         if (opts.offset != null) recoverBody.offset = Math.max(0, Number(opts.offset) || 0);
-        if (mode === 'import' || opts.hours != null) {
+        if (providerScope === 'apimart') {
+          recoverBody.days = Math.min(365, Math.max(1, Number(opts.days) || 7));
+        } else if (providerScope === 'grs' || opts.hours != null) {
           recoverBody.hours = Math.min(168, Math.max(1, Number(opts.hours) || 2));
         } else if (opts.days != null) {
           recoverBody.days = Math.min(365, Math.max(1, Number(opts.days)));
@@ -402,8 +400,8 @@
       }
     }
     window.runServerApimartImport = runServerApimartImport;
-    /* __PROMPT_HUB_PRIVATE_OPS_END__ provider-recovery-server-tool */
     window.inspectTombstoneStorageRecovery = inspectTombstoneStorageRecovery;
+    window.planApimartRecovery = planApimartRecovery;
     window.restoreCardsFromRecoveryPlan = restoreCardsFromRecoveryPlan;
     window.restoreFromTombstoneStorageScan = restoreFromTombstoneStorageScan;
 

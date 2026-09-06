@@ -70,7 +70,6 @@
     const before = pendingList().length;
     setPending(pendingList().filter((p) => {
       const age = now - (p.startedAt || 0);
-      if (p.clientRequestId) return age < RECENT_GEN_RECOVER_MS;
       if (!p.jobId) return age < 15 * 60 * 1000;
       return age < RECENT_GEN_RECOVER_MS;
     }));
@@ -96,7 +95,7 @@
     if (age >= RECENT_GEN_RECOVER_MS) {
       abandonUnrecoverablePendingJob(
         job,
-        '任务结果临时保留约 2 小时，该任务已过期，无法恢复（积分若已扣请查消费记录）'
+        '上游临时链接约 2 小时有效，该任务已过期，无法恢复（积分若已扣请查消费记录）'
       );
       return;
     }
@@ -106,7 +105,7 @@
       job.pendingNote = formatPendingRecoveryNote(job, note || '仍在后台生成中（请勿重复提交）');
     } else {
       job.recovering = true;
-      job.recoverNote = formatPendingRecoveryNote(job, note || '任务可能仍在生成，后台继续恢复…');
+      job.recoverNote = formatPendingRecoveryNote(job, note || '上游可能仍在出图，后台继续恢复…');
     }
     persistPendingGenJobs();
     if (job.jobId && age >= SERVER_RECOVER_AFTER_MS) {
@@ -125,19 +124,15 @@
       failedAt: job.failedAt || Date.now(),
       model: job.model ? d().normalizeImageGenModelId(job.model) : '',
       modelLabel: job.modelLabel || (job.model ? d().imageGenModelLabel(job.model) : ''),
-      resolution: job.resolution || null,
-      quality: job.quality || null,
-      size: job.size || null,
       batchIndex: job.batchIndex || null,
       batchTotal: job.batchTotal || null,
       batchId: job.batchId || null,
       fromInspirationDraw: !!job.fromInspirationDraw,
       needsRecovery: !!job.needsRecovery || ge('isStaleConfigError', job.errorMessage)
     };
-    if (!entry.prompt) return null;
+    if (!entry.prompt) return;
     setFailed([entry, ...failedList().filter((f) => f.id !== entry.id)].slice(0, 24));
     persistFailedGenJobs();
-    return entry;
   }
 
   function removeFailedGenJob(failId) {
@@ -161,38 +156,6 @@
 
   /** 提交请求网络中断时，从 API 找回刚创建的 processing 任务 */
   async function tryRecoverOrphanGenJobAfterSubmitError(payload, pendingId, pendingJob) {
-    const clientRequestId = String(pendingJob?.clientRequestId || payload?.clientRequestId || '').trim();
-    const attachRecoveredJob = (jobId) => {
-      const prompt = String(payload.prompt || '').trim();
-      const model = d().normalizeImageGenModelId(payload.model || 'gpt-image-2');
-      pendingJob.jobId = jobId;
-      pendingJob.submitPhase = 'accepted';
-      pendingJob.recovering = false;
-      pendingJob.recoverNote = '';
-      trackSessionGenJob(jobId);
-      persistPendingGenJobs();
-      clearFailedGenJobsForRecovery(clientRequestId ? { jobId } : { prompt, model, jobId });
-      if (!pendingJob.silentToast) d().toast('网络波动，已找回刚提交的任务，正在恢复进度…');
-      void pollGenerationJobUntilDone(jobId, pendingId, pendingJobToPollCtx(pendingJob));
-      return true;
-    };
-
-    if (clientRequestId) {
-      if (!window.PromptHubApi?.getGenerationJobByClientRequestId) return false;
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        if (attempt > 0) await new Promise((r) => setTimeout(r, 900 + attempt * 700));
-        try {
-          const found = await window.PromptHubApi.getGenerationJobByClientRequestId(clientRequestId);
-          if (found?.ok && found.data?.jobId) return attachRecoveredJob(found.data.jobId);
-        } catch (e) {
-          // A read-only lookup failure does not prove that submission failed.
-        }
-      }
-      // A keyed request must never fall back to prompt matching: concurrent
-      // siblings can share prompt/model/resolution and would be mis-associated.
-      return false;
-    }
-
     if (!window.PromptHubApi?.listRecentGenerationJobs) return false;
     const usedJobIds = new Set(
       pendingList().map((p) => p.jobId).filter(Boolean)
@@ -213,7 +176,13 @@
         const t = Date.parse(job.createdAt);
         const now = Date.now();
         if (Number.isFinite(t) && now - t <= 300_000) {
-          return attachRecoveredJob(job.id);
+          pendingJob.jobId = job.id;
+          trackSessionGenJob(job.id);
+          persistPendingGenJobs();
+          clearFailedGenJobsForRecovery({ prompt, model, jobId: job.id });
+          d().toast('网络波动，已找回刚提交的任务，正在恢复进度…');
+          void pollGenerationJobUntilDone(job.id, pendingId, pendingJobToPollCtx(pendingJob));
+          return true;
         }
       }
     }
@@ -222,17 +191,11 @@
 
   function failPendingJob(pendingId, errorMessage) {
     const job = pendingList().find((j) => j.id === pendingId);
-    let failed = null;
     if (job) {
-      failed = addFailedGenJob({
-        id: job.id,
-        jobId: job.jobId,
+      addFailedGenJob({
         prompt: job.prompt,
         model: job.model,
         modelLabel: job.modelLabel || d().imageGenModelLabel(job.model),
-        resolution: job.resolution,
-        quality: job.quality,
-        size: job.size,
         batchIndex: job.batchIndex,
         batchTotal: job.batchTotal,
         batchId: job.batchId,
@@ -241,7 +204,6 @@
       });
     }
     removePendingJob(pendingId);
-    return failed;
   }
 
   function removePendingJob(pendingId) {
@@ -251,12 +213,8 @@
 
   function toastGenFailure(ctx, message) {
     const label = d().batchIndexLabel?.(ctx?.batchIndex, ctx?.batchTotal) || '';
-    const msg = label ? `${label} 未完成，可重新生成` : '任务未完成，可重新生成';
-    if (typeof window.showQuickToast === 'function') {
-      window.showQuickToast(msg, 1200);
-      return;
-    }
-    d().toast(msg, 1200);
+    const msg = String(message || '生图失败，积分已全额退回');
+    d().toast(label ? `${label} ${msg}` : msg);
   }
 
   function pendingJobToPollCtx(job) {
@@ -268,7 +226,6 @@
       size: job.size || '1:1',
       cost: job.cost || 0,
       jobId: job.jobId,
-      clientRequestId: job.clientRequestId || null,
       targetGroup: job.targetGroup || null,
       targetTags: job.targetTags || null,
       fromInspirationDraw: !!job.fromInspirationDraw,
@@ -283,51 +240,6 @@
       referenceAssets: Array.isArray(job.referenceAssets) ? job.referenceAssets.filter(Boolean) : null,
       startedAt: job.startedAt || Date.now()
     };
-  }
-
-  async function recoverPendingJobByClientRequestId(pending) {
-    const clientRequestId = String(pending?.clientRequestId || '').trim();
-    if (!pending || !clientRequestId || pending.jobId) {
-      return { keyed: !!clientRequestId, attached: false, changed: false };
-    }
-
-    let changed = false;
-    if (!pending.recovering) {
-      pending.recovering = true;
-      changed = true;
-    }
-    if (!pending.recoverNote) {
-      pending.recoverNote = '正在确认任务状态，请勿重复提交…';
-      changed = true;
-    }
-
-    if (!window.PromptHubApi?.getGenerationJobByClientRequestId) {
-      if (changed) persistPendingGenJobs();
-      return { keyed: true, attached: false, changed };
-    }
-
-    try {
-      const found = await window.PromptHubApi.getGenerationJobByClientRequestId(clientRequestId);
-      const jobId = String(found?.data?.jobId || '').trim();
-      if (found?.ok && jobId) {
-        pending.jobId = jobId;
-        pending.submitPhase = 'accepted';
-        pending.recovering = false;
-        pending.recoverNote = '';
-        trackSessionGenJob(jobId);
-        persistPendingGenJobs();
-        clearFailedGenJobsForRecovery({ jobId });
-        if (!activePollJobIds.has(jobId)) {
-          void pollGenerationJobUntilDone(jobId, pending.id, pendingJobToPollCtx(pending));
-        }
-        return { keyed: true, attached: true, changed: true, jobId };
-      }
-    } catch (e) {
-      // Read-only recovery is retried by the normal background sync cycle.
-    }
-
-    if (changed) persistPendingGenJobs();
-    return { keyed: true, attached: false, changed };
   }
 
   function scheduleGenJobsSync(delayMs) {
@@ -463,11 +375,9 @@
 
   async function failPendingJobImmediately(pendingId, ctx, errRaw) {
     const msg = ge('friendlyGenErrorMessage', errRaw);
-    const failed = failPendingJob(pendingId, msg);
+    failPendingJob(pendingId, msg);
     await window.PointsSystem?.refreshCreditsFromServer?.();
-    if (!d().renderImageGenFailedNow?.(failed)) {
-      d().renderImageGenFeed({ preserveScroll: true });
-    }
+    d().renderImageGenFeed({ preserveScroll: true });
     if (!ctx?.silentToast) toastGenFailure(ctx, msg);
   }
 
@@ -540,17 +450,15 @@
       if (last.ok && await finishFromPoll(last)) return true;
       const errRaw = last.ok && last.data.status === 'failed'
         ? (last.data.errorMessage || last.data.message)
-        : '生图超时或任务暂无结果';
+        : '生图超时或上游无结果';
         if (ge('isLikelyRecoverableGenFailure', errRaw, ctx)) {
         deferPendingJobRecovery(pendingId, ctx, slowGenDeferNote(ctx));
         return true;
       }
       const msg = ge('friendlyGenErrorMessage', errRaw);
-      const failed = failPendingJob(pendingId, msg);
+      failPendingJob(pendingId, msg);
       await window.PointsSystem?.refreshCreditsFromServer?.();
-      if (!d().renderImageGenFailedNow?.(failed)) {
-        d().renderImageGenFeed({ preserveScroll: true });
-      }
+      d().renderImageGenFeed({ preserveScroll: true });
       toastGenFailure(ctx, msg);
       return true;
     };
@@ -614,11 +522,6 @@
       }
 
       if (poll.data.status === 'completed' && !poll.data.imageUrl) {
-        applyGenPollProgressNote(pendingId, {
-          ...poll.data,
-          status: 'processing',
-          progressNote: poll.data.progressNote || '图片已生成，正在同步到图库'
-        });
         continue;
       }
 
@@ -907,16 +810,10 @@
         settle: opts.settle === true
       });
       if (!retry.ok) return job;
-      const imageUrl = retry.data.imageUrl || job.imageUrl || null;
-      const rawStatus = retry.data.status || job.status;
-      // The API treats completed-without-image as a recoverable archival
-      // state. Keep the browser on the same contract so legacy rows do not
-      // enter a false-completed branch or get shown as a broken card.
-      const status = rawStatus === 'completed' && !imageUrl ? 'processing' : rawStatus;
       return {
         ...job,
-        status,
-        imageUrl,
+        status: retry.data.status || job.status,
+        imageUrl: retry.data.imageUrl || job.imageUrl || null,
         extraImageUrls: retry.data.extraImageUrls || job.extraImageUrls,
         isMidjourney: retry.data.isMidjourney || job.isMidjourney,
         mjGridUrls: retry.data.mjGridUrls || job.mjGridUrls,
@@ -1193,12 +1090,7 @@
     const ctx = pendingJobToPollCtx(pending);
     ctx.silentToast = opts.silent !== false;
 
-    const apiImageUrl = apiJob.imageUrl || null;
-    const apiStatus = apiJob.status === 'completed' && !apiImageUrl
-      ? 'processing'
-      : apiJob.status;
-
-    if (apiStatus === 'completed' && apiImageUrl) {
+    if (apiJob.status === 'completed' && apiJob.imageUrl) {
       pending.recovering = false;
       pending.recoverNote = '';
       pending.pendingNote = '';
@@ -1212,7 +1104,7 @@
         {
           data: {
             status: 'completed',
-            imageUrl: apiImageUrl,
+            imageUrl: apiJob.imageUrl,
             extraImageUrls: apiJob.extraImageUrls
           }
         },
@@ -1223,7 +1115,7 @@
       return true;
     }
 
-    if (apiStatus === 'failed') {
+    if (apiJob.status === 'failed') {
       const refreshed = await refreshGenerationJobFromServer(apiJob);
       if (refreshed.status === 'completed' && refreshed.imageUrl) {
         return resolvePendingFromApiJob(pending, refreshed, opts);
@@ -1231,7 +1123,7 @@
       if (shouldDeferFailedPendingRecovery(pending, refreshed, ctx)) {
         if (await tryServerRecoverPending(pending)) return true;
         pending.recovering = true;
-        pending.recoverNote = formatPendingRecoveryNote(pending, '任务可能仍在生成，后台继续恢复…');
+        pending.recoverNote = formatPendingRecoveryNote(pending, '上游可能仍在出图，后台继续恢复…');
         persistPendingGenJobs();
         if (pending.jobId && Date.now() - (pending.startedAt || 0) >= SERVER_RECOVER_AFTER_MS) {
           void tryRecoverPendingJobDirect(pending);
@@ -1256,7 +1148,7 @@
       && Date.now() - (pending.startedAt || 0) >= pendingRecoveryGiveUpMs(pending)
     ) {
       if (await tryServerRecoverPending(pending)) return true;
-      if (apiStatus === 'processing') {
+      if (apiJob.status === 'processing') {
         if (!activePollJobIds.has(apiJob.id)) {
           void pollGenerationJobUntilDone(apiJob.id, pending.id, ctx);
         }
@@ -1301,7 +1193,7 @@
       }
       if (await tryServerRecoverPending(pending)) return true;
       if (Date.now() - (pending.startedAt || 0) < RECENT_GEN_RECOVER_MS) return false;
-      await failPendingJobImmediately(pending.id, ctx, '生图超时或任务暂无结果，积分已全额退回');
+      await failPendingJobImmediately(pending.id, ctx, '生图超时或上游无结果，积分已全额退回');
       clearSessionGenJob(apiJob.id);
       return true;
     }
@@ -1436,10 +1328,8 @@
   }
 
   async function resumePendingGenerationJobs(opts = {}) {
+    if (!window.PromptHubApi?.listRecentGenerationJobs) return false;
     if (!window.PointsSystem?.useApiForAccount?.()) return false;
-    const canListJobs = !!window.PromptHubApi?.listRecentGenerationJobs;
-    const canRecoverKeyed = !!window.PromptHubApi?.getGenerationJobByClientRequestId;
-    if (!canListJobs && !canRecoverKeyed) return false;
     purgeExpiredGenPendingJobs();
     const now = Date.now();
     if (!opts.force && now - lastGenJobsListAt < (pendingList().length > 0 ? 4000 : GEN_JOBS_LIST_MIN_MS)) return false;
@@ -1447,24 +1337,10 @@
 
     resumeGenJobsInflight = (async () => {
       lastGenJobsListAt = Date.now();
-      let changed = false;
-      const keyedResults = await Promise.all(
-        pendingList()
-          .filter((pending) => !pending.jobId && pending.clientRequestId)
-          .map((pending) => recoverPendingJobByClientRequestId(pending))
-      );
-      if (keyedResults.some((result) => result.changed)) changed = true;
-
-      if (!canListJobs) {
-        if (changed) d().renderImageGenFeed({ preserveScroll: true });
-        return changed;
-      }
       const r = await window.PromptHubApi.listRecentGenerationJobs();
-      if (!r?.ok || !Array.isArray(r.data?.jobs)) {
-        if (changed) d().renderImageGenFeed({ preserveScroll: true });
-        return changed;
-      }
+      if (!r?.ok || !Array.isArray(r.data?.jobs)) return false;
 
+      let changed = false;
       const apiById = new Map();
       const attachedJobIds = new Set();
 
@@ -1528,7 +1404,6 @@
       /** 按提示词+模型匹配 API 任务（无 jobId 的旧占位；取最新/进行中） */
       function matchApiJobForPending(p) {
         if (p.jobId && apiById.has(p.jobId)) return apiById.get(p.jobId);
-        if (p.clientRequestId) return null;
         return findBestApiJobForPrompt(r.data.jobs, p.prompt, p.model, {
           minCreatedAt: p.startedAt || Date.now(),
           preferProcessing: true,
@@ -1552,10 +1427,8 @@
           }
         }
         if (!pending.jobId) {
-          if (pending.clientRequestId) continue;
           if (Date.now() - (pending.startedAt || 0) > 20 * 60 * 1000) {
-            const failed = failPendingJob(pending.id, '未找到对应任务，积分已全额退回');
-            d().renderImageGenFailedNow?.(failed);
+            failPendingJob(pending.id, '未找到对应任务，积分已全额退回');
             changed = true;
           }
           continue;
@@ -1903,7 +1776,7 @@
       const processingOnApi = r.data.jobs.filter(
         (j) => j?.id && j.status === 'processing' && !attachedJobIds.has(j.id) && !d().isGenerationJobDeleted(j.id)
       );
-      for (const p of pendingList().filter((x) => !x.jobId && !x.clientRequestId)) {
+      for (const p of pendingList().filter((x) => !x.jobId)) {
         if (Date.now() - (p.startedAt || 0) > 15 * 60 * 1000) continue;
         const match = findBestApiJobForPrompt(processingOnApi, p.prompt, p.model, {
           minCreatedAt: p.startedAt || Date.now(),
@@ -1930,9 +1803,6 @@
         }
       }
       setPending(pendingList().filter((p) => {
-        if (p.clientRequestId && !p.jobId) {
-          return Date.now() - (p.startedAt || 0) < RECENT_GEN_RECOVER_MS;
-        }
         if (p.recovering) {
           if (p.jobId) return Date.now() - (p.startedAt || 0) < RECENT_GEN_RECOVER_MS;
           return Date.now() - (p.startedAt || 0) < 30 * 60 * 1000;
@@ -2020,7 +1890,7 @@
         if (age >= RECENT_GEN_RECOVER_MS) {
           abandonUnrecoverablePendingJob(
             p,
-            '任务结果临时保留约 2 小时，该任务已过期，无法恢复（可点 × 关闭占位）',
+            '上游临时链接约 2 小时有效，该任务已过期，无法恢复（可点 × 关闭占位）',
             { toast: true }
           );
           if (p.jobId) window.recordGenerationJobDeletion?.(p.jobId);
@@ -2062,7 +1932,6 @@
       clearFailedGenJobsForRecovery,
       failPendingJob,
       pendingJobToPollCtx,
-      recoverPendingJobByClientRequestId,
       pollGenerationJobUntilDone,
       deferPendingJobRecovery,
       tryRecoverOrphanGenJobAfterSubmitError,

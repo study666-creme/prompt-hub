@@ -39,8 +39,8 @@
     });
   }
 
-  async function compressRefImageFromSource(source, maxSide, opts = {}) {
-    const img = await loadRefImageElement(source, { crossOrigin: opts.crossOrigin });
+  async function compressRefImageFromSource(source, maxSide) {
+    const img = await loadRefImageElement(source);
     let w = img.naturalWidth || img.width;
     let h = img.naturalHeight || img.height;
     if (!w || !h) throw new Error('图片尺寸无效');

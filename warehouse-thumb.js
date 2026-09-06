@@ -376,30 +376,12 @@
     return Math.min(24, Math.max(8, Number(mp?.warehousePrefetchCap) || 24));
   }
 
-  /** 客户端缩略图已上传到 R2 后：清掉本地缓存，让下次解析直接命中新 _grid */
-  function invalidateGridCache(jobId, slot = 0) {
-    const base = String(jobId || '').replace(/#\d+$/, '');
-    if (!base) return;
-    const ck = cacheKey(base, slot);
-    cache.delete(ck);
-    try {
-      const raw = sessionStorage.getItem(LS_WH_GRID);
-      if (!raw) return;
-      const data = JSON.parse(raw);
-      if (data && typeof data === 'object' && data[ck]) {
-        delete data[ck];
-        sessionStorage.setItem(LS_WH_GRID, JSON.stringify(data));
-      }
-    } catch (e) { /* ignore */ }
-  }
-
   window.WarehouseThumb = {
     resolveForCard,
     resolveForCardModel,
     needsServerThumb,
     prefetchForCards,
     cacheKey,
-    slotJobId,
-    invalidateGridCache
+    slotJobId
   };
 })();

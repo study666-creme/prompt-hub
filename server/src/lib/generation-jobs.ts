@@ -126,7 +126,54 @@ export type PollJobOpts = {
   kickSubmit?: (task: Promise<unknown>) => void;
   /** MJ 超时兜底：仍只有 1～3 张时也标记完成 */
   forceMjComplete?: boolean;
+  /**
+   * 轮询预算时钟（绝对时间戳）。设置后内部所有 sleep-轮询循环的尝试次数
+   * 会收敛在剩余预算内——用于用户 HTTP 请求路径（Cloudflare 边缘 ~100s 会
+   * 524），队列 consumer 不传，保留完整重试深度。
+   */
+  deadlineAt?: number;
 };
+
+/**
+ * 按剩余预算裁剪尝试次数：至少 1 次（立即打一轮），预算耗尽后不再等。
+ * deadlineAt 未设置时返回调用方给的完整尝试数。
+ */
+function attemptsWithinBudget(
+  defaultAttempts: number,
+  intervalMs: number,
+  deadlineAt: number | undefined
+): number {
+  if (!deadlineAt) return defaultAttempts;
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= intervalMs) return 1;
+  return Math.max(1, Math.min(defaultAttempts, Math.floor(remaining / intervalMs)));
+}
+
+/**
+ * 轮询侧 newapi 补投队列的最小间隔：正常提交消息由 fast-provider-drain 首
+ * 投，这里只兜消息丢失；3 分钟内不重复投递，避免前端每几秒一拍轮询把队列
+ * 灌满（每条重复消息最多还会空转 retry 20 次）。
+ */
+const NEWAPI_QUEUE_REENQUEUE_INTERVAL_MS = 3 * 60 * 1000;
+
+export type GenerationPollStatus = 'processing' | 'completed' | 'failed';
+
+/** completed 但没有可用图片 URL 时降级为 processing，避免前端拿到空图当成品。 */
+export function normalizeGenerationPollResult<T extends {
+  status: GenerationPollStatus;
+  imageUrl: string | null;
+  progressNote?: string | null;
+}>(result: T): Omit<T, 'status'> & {
+  status: GenerationPollStatus;
+  progressNote?: string | null;
+} {
+  if (result.status !== 'completed' || String(result.imageUrl || '').trim()) return result;
+  return {
+    ...result,
+    status: 'processing',
+    progressNote: result.progressNote || '图片已生成，正在同步到图库'
+  };
+}
 
 function scheduleBackgroundSubmit(
   opts: PollJobOpts | undefined,
@@ -404,7 +451,7 @@ export async function pollAndUpdateJob(
     && !urlsToComplete.length
     && upstream.mookoKey
   ) {
-    const pollAttempts = opts?.quick ? 6 : 40;
+    const pollAttempts = attemptsWithinBudget(opts?.quick ? 6 : 40, 3000, opts?.deadlineAt);
     const recovered = await resolveMookoHttpImageFromTask(
       upstream.mookoKey,
       upstream.mookoBase,
@@ -529,7 +576,10 @@ export async function pollAndUpdateJob(
         upstream.mookoKey,
         upstream.mookoBase,
         taskId,
-        { attempts: opts?.quick ? 8 : 35, intervalMs: 3000 }
+        {
+          attempts: attemptsWithinBudget(opts?.quick ? 8 : 35, 3000, opts?.deadlineAt),
+          intervalMs: 3000
+        }
       );
       if (recovered) {
         return completeJobFromPoll(
@@ -684,6 +734,34 @@ export async function pollAndUpdateJob(
           refunded: true
         };
       }
+      // 每次轮询都 re-send 会把同一个任务的消息灌满队列（前端每几秒一拍，
+      // 每条重复消息最多再空转 retry 20 次）。把轮询侧的补投间隔限制到
+      // REENQUEUE_INTERVAL；首投由 fast-provider-drain 在提交时负责，这里
+      // 只是消息丢失时的兜底。
+      const hasRecoverableResult =
+        Array.isArray(meta.upstreamResultUrls)
+        && meta.upstreamResultUrls.some((value) => typeof value === 'string' && !!value);
+      const lastEnqueuedAt = Number(meta.newapiQueueEnqueuedAt) || 0;
+      const imageQueue = env?.IMAGE_GENERATION_QUEUE;
+      const reEnqueueDue =
+        provider === 'newapi'
+        && !!imageQueue
+        && (st === 'queued' || hasRecoverableResult)
+        && Date.now() - lastEnqueuedAt >= NEWAPI_QUEUE_REENQUEUE_INTERVAL_MS;
+      if (reEnqueueDue && imageQueue) {
+        admin
+          .from('generation_requests')
+          .update({ meta: { ...meta, newapiQueueEnqueuedAt: Date.now() } })
+          .eq('id', job.id)
+          .then(() => undefined, (e) => {
+            console.warn('[generation] newapi re-enqueue marker write failed', job.id, e);
+          });
+        scheduleBackgroundSubmit(
+          opts,
+          imageQueue.send({ jobId: job.id, userId }),
+          'newapi-queue'
+        );
+      }
       if (st === 'queued') {
         const { processFastProviderPendingSubmit, fastSubmitParamsFromJob } = await import(
           './fast-provider-submit'
@@ -800,9 +878,10 @@ export async function pollAndUpdateJob(
   }
 
   if (job.status === 'processing' && ageMs > 45 * 1000 && ageMs < staleMs) {
+    const deepIntervalMs = provider === 'mooko' ? 3000 : 2000;
     const deep = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
-      attempts: provider === 'mooko' ? 24 : 6,
-      intervalMs: provider === 'mooko' ? 3000 : 2000
+      attempts: attemptsWithinBudget(provider === 'mooko' ? 24 : 6, deepIntervalMs, opts?.deadlineAt),
+      intervalMs: deepIntervalMs
     });
     if (deep.status === 'completed' && deep.imageUrl) {
       return finishPollAsCompleted(admin, userId, job, deep, env, { quick: false });
@@ -876,7 +955,7 @@ export async function pollAndUpdateJob(
       };
     }
     const confirmed = await confirmUpstreamTaskOutcome(upstream, provider, taskId, {
-      attempts: 8,
+      attempts: attemptsWithinBudget(8, 5000, opts?.deadlineAt),
       intervalMs: 5000
     });
     if (confirmed.status === 'completed' && confirmed.imageUrl) {

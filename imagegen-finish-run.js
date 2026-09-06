@@ -1,5 +1,5 @@
 /**
- * 生图完成：写入「最近生成」并默认自动入库卡片库「图片生成」分组
+ * 生图完成：写入「最近生成」（7 天），不自动入库卡片库
  */
 (function (global) {
   'use strict';
@@ -15,12 +15,6 @@
     return jobId ? String(jobId).replace(/#\d+$/, '') : '';
   }
 
-  function slotFromArchiveJobId(jobId) {
-    const m = String(jobId || '').match(/#(\d+)$/);
-    if (!m) return 0;
-    return Math.max(0, Number(m[1]) - 1);
-  }
-
   function findCreationForBaseJob(jobId) {
     const base = baseJobIdFrom(jobId);
     if (!base) return null;
@@ -28,110 +22,6 @@
       if (!c?.jobId) return false;
       return baseJobIdFrom(c.jobId) === base;
     }) || null;
-  }
-
-  function replaceArchivedImageRefs(creation, rawImage, archivedImage) {
-    if (!creation || !rawImage || !archivedImage || rawImage === archivedImage) return null;
-    const replace = (value) => value === rawImage ? archivedImage : value;
-    const next = { ...creation };
-    let changed = false;
-    for (const key of ['image', 'mjCompositeUrl']) {
-      if (next[key] === rawImage) {
-        next[key] = archivedImage;
-        changed = true;
-      }
-    }
-    for (const key of ['cardImages', 'mjGridUrls']) {
-      if (!Array.isArray(next[key])) continue;
-      const values = next[key].map((value) => replace(value));
-      if (values.some((value, index) => value !== next[key][index])) {
-        next[key] = values;
-        changed = true;
-      }
-    }
-    return changed ? next : null;
-  }
-
-  function gridPathFromStorageRef(storageRef) {
-    const path = String(storageRef || '')
-      .replace(/^storage:\/\/card-images\//i, '')
-      .replace(/^\//, '');
-    if (!path || !/^[A-Za-z0-9-]+\//.test(path)) return '';
-    return path.replace(/\.(png|jpe?g|webp)$/i, '') + '_grid.jpg';
-  }
-
-  function gridDataUrlToBlob(dataUrl) {
-    if (!dataUrl || !dataUrl.startsWith('data:image/')) return Promise.resolve(null);
-    return fetch(dataUrl).then((res) => (res.ok ? res.blob() : null)).catch(() => null);
-  }
-
-  /** 浏览器端生成 _grid 并上传 R2（失败静默，不阻塞生图流程） */
-  function uploadGeneratedGridThumb(creationId, storageRef, jobId, slot) {
-    if (
-      !creationId
-      || !storageRef
-      || !global.SupabaseSync?.isStorageRef?.(storageRef)
-      || !global.SupabaseSync?.resolveDisplayUrl
-      || !global.PromptHubApi?.uploadStorageBlob
-      || !global.ImageGenRefCompress?.compressRefImageFromSource
-    ) return;
-    const gridPath = gridPathFromStorageRef(storageRef);
-    if (!gridPath) return;
-    void Promise.resolve()
-      .then(() => global.SupabaseSync.resolveDisplayUrl(storageRef, {
-        variant: 'full',
-        jobId: jobId || undefined,
-        assetId: creationId
-      }))
-      .then((url) => url && global.ImageGenRefCompress.compressRefImageFromSource(url, 640, { crossOrigin: true }))
-      .then((dataUrl) => gridDataUrlToBlob(dataUrl))
-      .then((blob) => blob && blob.size >= 2048
-        ? global.PromptHubApi.uploadStorageBlob(gridPath, blob)
-        : null)
-      .then((uploaded) => {
-        if (!uploaded) return;
-        if (global.WarehouseThumb?.invalidateGridCache) {
-          global.WarehouseThumb.invalidateGridCache(jobId || gridPath, Number(slot) || 0);
-        }
-        global.SupabaseSync?.markGridThumbReady?.(creationId);
-        d().renderImageGenFeed?.({ preserveScroll: true });
-      })
-      .catch((error) => console.warn('[finishImageGen] grid thumb upload skipped', error));
-  }
-
-  function archiveImageInBackground(creationId, rawImage, archiveJobId) {
-    if (
-      !creationId
-      || !rawImage
-      || !archiveJobId
-      || !global.SupabaseSync?.isLoggedIn?.()
-      || !global.SupabaseSync?.archiveGeneratedCardImage
-    ) return;
-    void Promise.resolve()
-      .then(() => global.SupabaseSync.archiveGeneratedCardImage(creationId, rawImage, {
-        jobId: archiveJobId,
-        allowRemoteArchive: true
-      }))
-      .then((archived) => {
-        if (!archived || archived === rawImage) return;
-        const current = d().getCreations?.() || [];
-        const live = current.find((item) => item?.id === creationId);
-        const next = replaceArchivedImageRefs(live, rawImage, archived);
-        if (!next) return;
-        d().setCreations?.(current.map((item) => item?.id === creationId ? next : item));
-        d().persistCreations?.();
-        if (next.image === archived) d().setImageGenLastResult?.(archived);
-        if (global.SupabaseSync?.isStorageRef?.(archived)) {
-          void global.WarehouseThumb?.resolveForCard?.(archived, {
-            jobId: archiveJobId,
-            assetId: creationId,
-            cardId: creationId
-          });
-          uploadGeneratedGridThumb(creationId, archived, archiveJobId, slotFromArchiveJobId(archiveJobId));
-        }
-        d().renderImageGenFeed?.({ preserveScroll: true });
-      })
-      .catch((error) => console.warn('[finishImageGen] background archive failed', error));
   }
 
   async function finishImageGenRun({
@@ -192,10 +82,27 @@
       const creations = d().getCreations() || [];
       const existingCre = baseJobId ? findCreationForBaseJob(baseJobId) : null;
       const creationId = existingCre?.id || d().genId('cr');
-      // Show the upstream result immediately. Storage archiving is best-effort
-      // and must not hold the paid generation in a pending state.
-      const storedImage = image;
+      let storedImage = image;
       const archiveJobId = slotJobId || baseJobId;
+      if (global.SupabaseSync?.isLoggedIn?.() && global.SupabaseSync?.archiveGeneratedCardImage && archiveJobId) {
+        try {
+          const archived = await global.SupabaseSync.archiveGeneratedCardImage(creationId, image, {
+            jobId: archiveJobId,
+            allowRemoteArchive: true
+          });
+          if (archived) storedImage = archived;
+        } catch (e) {
+          console.warn('[finishImageGen] archive to storage failed', e);
+        }
+      }
+
+      if (slotJobId && global.SupabaseSync?.isStorageRef?.(storedImage)) {
+        void global.WarehouseThumb?.resolveForCard?.(storedImage, {
+          jobId: slotJobId,
+          assetId: creationId,
+          cardId: creationId
+        });
+      }
       if (idx === 1) d().setImageGenLastResult(storedImage);
 
       const submittedRefs = Array.isArray(submittedRefImages)
@@ -225,6 +132,26 @@
         return storedImage ? [storedImage] : [];
       };
 
+      let mjGalleryStored = null;
+      if (isMidjourney && global.SupabaseSync?.isLoggedIn?.() && global.SupabaseSync?.archiveGeneratedCardImage && archiveJobId) {
+        const rawGallery = galleryFromMj();
+        if (rawGallery.length > 1) {
+          mjGalleryStored = [];
+          for (let gi = 0; gi < rawGallery.length; gi += 1) {
+            const slot = gi === 0 ? archiveJobId : `${String(archiveJobId).replace(/#\d+$/, '')}#${gi + 1}`;
+            try {
+              const a = await global.SupabaseSync.archiveGeneratedCardImage(creationId, rawGallery[gi], {
+                jobId: slot,
+                allowRemoteArchive: true
+              });
+              mjGalleryStored.push(a || rawGallery[gi]);
+            } catch (e) {
+              mjGalleryStored.push(rawGallery[gi]);
+            }
+          }
+        }
+      }
+
       const cardMjGridUrls = isMidjourney
         ? (Array.isArray(mjGridUrls) && mjGridUrls.length
           ? mjGridUrls.slice(0, 4)
@@ -253,7 +180,7 @@
         mjGridUrls: cardMjGridUrls,
         mjCompositeUrl: isMidjourney && mjCompositeUrl ? mjCompositeUrl : null,
         mjButtons: isMidjourney && Array.isArray(mjButtons) ? mjButtons : null,
-        cardImages: isMidjourney ? galleryFromMj() : null,
+        cardImages: isMidjourney ? (mjGalleryStored || galleryFromMj()) : null,
         genBatchId: genBatchId || existingCre?.genBatchId || null,
         fromInspirationDraw: !!fromInspirationDraw,
         savedToWarehouse: !!existingCre?.savedToWarehouse,
@@ -280,71 +207,10 @@
       d().renderImageGenFeed({ preserveScroll: true });
       d().renderImageGenMobileResult?.();
 
-      // 默认自动入库：生图完成后直接存进卡片库（未指定分组时归入「图片生成」）。
-      // 手动「存入库」不再必要，仅在自动入库失败（如游客额度满）时作为回退保留。
-      let autoSaved = !!creation.warehouseCardId || !!creation.savedToWarehouse;
-      if (!autoSaved) {
-        try {
-          const saveRes = await global.addCardFromGenerated?.({
-            prompt: prompt || '',
-            image: storedImage,
-            sourceId: creationId,
-            jobId: baseJobId || slotJobId || null,
-            title: (cardTitle || title || '').trim(),
-            resolution,
-            model: modelId,
-            quality,
-            size,
-            targetGroup,
-            targetTags,
-            fromInspirationDraw,
-            silentToast: true,
-            guestQuiet: true,
-            isMidjourney,
-            cardImages: isMidjourney
-              ? (Array.isArray(cardImages) ? cardImages.filter(Boolean).slice(0, 5) : galleryFromMj())
-              : null,
-            mjGridUrls: isMidjourney && Array.isArray(mjGridUrls) ? mjGridUrls : null,
-            mjCompositeUrl: isMidjourney && mjCompositeUrl ? mjCompositeUrl : null,
-            mjButtons: isMidjourney && Array.isArray(mjButtons) ? mjButtons : null,
-            genBatchId: genBatchId || null,
-            refImage: primaryRef,
-            refImages: refImages.length ? refImages : null,
-            referenceAssets: referenceAssets.length ? referenceAssets : null,
-            copyStorage: true,
-            isRecovery: !!isRecovery
-          });
-          if (saveRes?.ok || saveRes?.duplicate) {
-            autoSaved = true;
-            creation.savedToWarehouse = true;
-            creation.warehouseCardId = saveRes.cardId || creation.warehouseCardId || null;
-            creation.updatedAt = Date.now();
-            d().persistCreations?.();
-            d().reconcileCreationsWarehouseLinks?.();
-          }
-        } catch (e) {
-          console.warn('[imagegen] auto warehouse save failed', e);
-        }
-      }
-
-      if (archiveJobId) {
-        if (isMidjourney) {
-          galleryFromMj().forEach((rawImage, galleryIndex) => {
-            const archiveSlot = galleryIndex === 0
-              ? archiveJobId
-              : `${String(archiveJobId).replace(/#\d+$/, '')}#${galleryIndex + 1}`;
-            archiveImageInBackground(creationId, rawImage, archiveSlot);
-          });
-        } else {
-          archiveImageInBackground(creationId, image, archiveJobId);
-        }
-      }
-
       if (!isRecovery && !silentToast && idx === 1) {
-        const creditPart = cost > 0 ? `· -${cost} 积分` : '';
-        d().toast(autoSaved
-          ? `已生成并自动存入卡片库「图片生成」${creditPart}`
-          : `已生成 · 图片暂存于最近生成${creditPart}`);
+        d().toast(isMidjourney
+          ? `已生成（最近保留 7 天，喜欢请点「存入库」）· -${cost} 积分`
+          : `已加入最近生成（7 天内可存入库）· -${cost} 积分`);
       }
 
       const extras = Array.isArray(extraImages)

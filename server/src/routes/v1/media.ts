@@ -16,6 +16,7 @@ import {
   materializeCommunityGridIfMissing,
   serveCachedStorageImage,
   verifyMediaAccessToken,
+  signingPathForVariant,
   ensureGridPathForSigning
 } from '../../lib/media-cdn';
 import { deleteOwnedCardImageIfUnreferenced } from '../../lib/admin-media-refs';
@@ -23,7 +24,7 @@ import { createAdminClient } from '../../lib/supabase';
 import { uploadCardImage } from '../../lib/r2-storage';
 import { rateLimit } from '../../middleware/rate-limit';
 import { ensureWarehouseJobThumb, warehouseThumbCacheKey } from '../../lib/warehouse-thumb';
-import { archivePendingJobImage, warmJobGridImage } from '../../lib/generation-jobs';
+import { archivePendingJobImage } from '../../lib/generation-jobs';
 
 const BUCKET = 'card-images';
 
@@ -312,10 +313,7 @@ mediaRoutes.get('/generation/:jobId/url', async c => {
     .eq('id', jobId)
     .maybeSingle();
 
-  if (error) {
-    throw new ApiError(500, 'DB_ERROR', '任务查询失败');
-  }
-  if (!job || job.user_id !== user.id) {
+  if (error || !job || job.user_id !== user.id) {
     throw new ApiError(404, 'NOT_FOUND', '任务不存在');
   }
   if (job.status !== 'completed' || !job.result_image_url) {
@@ -332,19 +330,12 @@ mediaRoutes.get('/generation/:jobId/url', async c => {
       .eq('user_id', user.id)
       .maybeSingle();
     if (archived?.result_image_url) raw = archived.result_image_url;
-    if (c.executionCtx) {
-      c.executionCtx.waitUntil(
-        warmJobGridImage(admin, user.id, jobId, c.env).catch(() => {})
-      );
-    }
   }
   const path = storagePathFromRef(raw);
   if (path) {
     assertOwnPath(user.id, path);
     const variant = (c.req.query('variant') || 'full').trim().toLowerCase();
-    const signPath = await ensureGridPathForSigning(c, path, variant, {
-      requireExistingPrimary: true
-    });
+    const signPath = signingPathForVariant(path, variant);
     const url = await buildPrivateMediaCdnUrl(c, signPath);
     return c.json({ ok: true, data: { url, cdn: true, variant } });
   }
@@ -367,7 +358,6 @@ const ALLOWED_FETCH_HOSTS = [
   'prompt-hub.cn',
   'api.prompt-hubs.com',
   'prompt-hubs.com',
-  'newapi.prompt-hubs.com',
   'grsai.com',
   'api.grsai.com',
   'aitohumanize.com',
@@ -376,7 +366,7 @@ const ALLOWED_FETCH_HOSTS = [
   'blob.core.windows.net'
 ];
 
-export function isAllowedRemoteUrl(url: string): boolean {
+function isAllowedRemoteUrl(url: string): boolean {
   try {
     const u = new URL(url);
     if (u.protocol !== 'https:') return false;

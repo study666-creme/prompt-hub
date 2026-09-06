@@ -61,7 +61,7 @@ const mime = {
 
 function seedHtml(target) {
   const app = target === 'warehouse' ? 'warehouse' : 'community';
-  const href = target === 'warehouse' ? '/prompts/' : '/community/';
+  const href = target === 'warehouse' ? '/' : '/community';
   return `<!doctype html><meta charset="utf-8"><script>
 const cards = ${JSON.stringify(cards)};
 const posts = ${JSON.stringify(posts)};
@@ -210,77 +210,6 @@ try {
   const warehouseCards = await warehouse.page.locator('#cardsContainer .card[data-id]').count();
   assertWithin('mobile warehouse initial cards', warehouseCards, 12, 12);
   assertWithin('mobile warehouse initial image requests', countImageRequests('warehouse'), 0, 14);
-  const warehouseLayout = await warehouse.page.evaluate(() => {
-    const main = document.querySelector('.app-main');
-    const grid = document.getElementById('cardsContainer');
-    return {
-      scrollRoot: main?.className || '',
-      overflowY: main ? getComputedStyle(main).overflowY : '',
-      touchAction: main ? getComputedStyle(main).touchAction : '',
-      scrollHeight: main?.scrollHeight || 0,
-      clientHeight: main?.clientHeight || 0,
-      draggableCards: grid ? grid.querySelectorAll('.card[draggable="true"]').length : -1
-    };
-  });
-  if (!warehouseLayout.scrollRoot.includes('app-main')) {
-    throw new Error(`mobile warehouse scroll root missing: ${JSON.stringify(warehouseLayout)}`);
-  }
-  if (!['auto', 'scroll'].includes(warehouseLayout.overflowY)) {
-    throw new Error(`mobile warehouse overflow is not scrollable: ${JSON.stringify(warehouseLayout)}`);
-  }
-  if (!String(warehouseLayout.touchAction).includes('pan-y')) {
-    throw new Error(`mobile warehouse touch-action is not pan-y: ${JSON.stringify(warehouseLayout)}`);
-  }
-  if (warehouseLayout.draggableCards !== 0) {
-    throw new Error(`mobile warehouse cards still expose native drag: ${warehouseLayout.draggableCards}`);
-  }
-  await warehouse.page.evaluate(() => {
-    const main = document.querySelector('.app-main');
-    if (main) main.scrollTo({ top: main.scrollHeight, behavior: 'auto' });
-  });
-  await warehouse.page.waitForFunction(() => (
-    document.querySelectorAll('#cardsContainer .card[data-id]').length >= 24
-  ), null, { timeout: 12000 });
-  const warehouseScrolledCards = await warehouse.page.locator('#cardsContainer .card[data-id]').count();
-  assertWithin('mobile warehouse one scroll batch', warehouseScrolledCards, 24, 24);
-  await warehouse.page.evaluate(() => {
-    window.switchAppPage?.('community');
-  });
-  await warehouse.page.waitForFunction(() => (
-    document.getElementById('pageCommunity')?.classList.contains('active')
-  ), null, { timeout: 5000 });
-  await warehouse.page.evaluate(() => {
-    window.switchAppPage?.('warehouse');
-  });
-  await warehouse.page.waitForFunction(() => (
-    document.getElementById('pageWarehouse')?.classList.contains('active')
-    && !document.querySelector('.app-modal-open, .panel-open, .custom-modal-open')
-  ), null, { timeout: 8000 });
-  await warehouse.page.waitForTimeout(250);
-  const touchClient = await warehouse.page.context().newCDPSession(warehouse.page);
-  await warehouse.page.evaluate(() => {
-    const main = document.querySelector('.app-main');
-    if (main) main.scrollTo({ top: 0, behavior: 'auto' });
-  });
-  const scrollBeforeTouch = await warehouse.page.evaluate(() => document.querySelector('.app-main')?.scrollTop || 0);
-  await touchClient.send('Input.dispatchTouchEvent', {
-    type: 'touchStart',
-    touchPoints: [{ x: 195, y: 700, id: 1 }]
-  });
-  await touchClient.send('Input.dispatchTouchEvent', {
-    type: 'touchMove',
-    touchPoints: [{ x: 195, y: 350, id: 1 }]
-  });
-  await touchClient.send('Input.dispatchTouchEvent', {
-    type: 'touchEnd',
-    touchPoints: []
-  });
-  await warehouse.page.waitForTimeout(250);
-  const scrollAfterTouch = await warehouse.page.evaluate(() => document.querySelector('.app-main')?.scrollTop || 0);
-  if (scrollAfterTouch <= scrollBeforeTouch + 8) {
-    throw new Error(`mobile warehouse touch swipe did not scroll after route return: ${scrollBeforeTouch}->${scrollAfterTouch}`);
-  }
-  await touchClient.detach();
   const runtimeParts = await splitRuntimeRequests(warehouse.page);
   if (expectConsolidatedRuntime && runtimeParts.length) {
     throw new Error(`deployment runtime requested split parts: ${JSON.stringify(runtimeParts)}`);

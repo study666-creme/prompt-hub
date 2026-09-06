@@ -21,8 +21,7 @@
 
   function isAutoDayNightEnabled() {
     const s = readSettings();
-    // 自动昼夜默认开启：只有用户在设置里明确关闭（autoDayNight === false）才停用。
-    return s.autoDayNight !== false;
+    return s.autoDayNight === true;
   }
 
   function isThemeManualOverride() {
@@ -49,14 +48,11 @@
   }
 
   function updateToggleLabel(theme) {
+    const btn = document.getElementById('themeToggleBtn');
+    if (!btn) return;
     const light = theme === 'light';
-    const title = light ? '切换夜间模式' : '切换日光模式';
-    ['themeToggleBtn'].forEach((id) => {
-      const btn = document.getElementById(id);
-      if (!btn) return;
-      btn.title = title;
-      btn.setAttribute('aria-label', title);
-    });
+    btn.title = light ? '切换夜间模式' : '切换日光模式';
+    btn.setAttribute('aria-label', btn.title);
   }
 
   function applyTheme(theme, opts) {
@@ -111,11 +107,6 @@
 
   function initTheme() {
     if (isAutoDayNightEnabled()) {
-      if (isThemeManualOverride()) {
-        // 用户手动点过昼夜按钮：保留选择，刷新后不回跳到自动时刻。
-        applyTheme(getPreferred(), { fromAuto: false });
-        return;
-      }
       setThemeManualOverride(false);
       applyTheme(getScheduledTheme(), { fromAuto: true });
       return;
@@ -138,9 +129,7 @@
   };
 
   function bind() {
-    ['themeToggleBtn'].forEach((id) => {
-      document.getElementById(id)?.addEventListener('click', toggleTheme);
-    });
+    document.getElementById('themeToggleBtn')?.addEventListener('click', toggleTheme);
   }
 
   if (document.readyState === 'loading') {

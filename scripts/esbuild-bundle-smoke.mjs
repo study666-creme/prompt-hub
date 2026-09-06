@@ -17,7 +17,6 @@ const targets = [
   'image-gen-feed.js',
   'community-public-feed.js',
   'card-image-loader.js',
-  'imagegen-select-ui.js',
   'imagegen-prompt-kit.js',
   'imagegen-prompt-tools.js',
   'imagegen-gen-errors.js',

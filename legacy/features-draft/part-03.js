@@ -126,24 +126,8 @@
     recentCreationRepairLastAt = now;
     recentCreationRepairInflight = (async () => {
       const max = Math.min(12, Math.max(1, Number(opts.max) || 8));
-      const list = creations
-        .filter((c) => {
-          if (!c?.id || !c?.jobId || c.permanent || c.visibility === 'published') return false;
-          if (c.expiresAt && c.expiresAt <= Date.now()) return false;
-          const ref = c.image || '';
-          const storageRef = window.SupabaseSync?.isStorageRef?.(ref);
-          const storageKey = storageRef
-            ? String(window.SupabaseSync.storagePathFromRef?.(ref) || '').replace(/^\//, '')
-            : '';
-          return !ref
-            || !storageRef
-            || /^https?:\/\//i.test(ref) && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(ref)
-            || !!(storageKey && window.SupabaseSync?.isPathKnownMissing?.(storageKey));
-        })
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-        .slice(0, max);
+      const list = getRecentCreationsForFeed().slice(0, max);
       let repaired = 0;
-      let removed = 0;
       for (const c of list) {
         if (!c?.id || !c.jobId) continue;
         const ref = c.image || '';
@@ -183,16 +167,13 @@
             }
           }
           if ((!nextRef || nextRef === ref || storageMissing) && baseJob && window.PromptHubApi?.getGenerationImageUrl) {
-            const r = await window.PromptHubApi.getGenerationImageUrl(baseJob, { variant: 'full' });
+            const r = await window.PromptHubApi.getGenerationImageUrl(baseJob);
             if (r?.ok && r.data?.url && window.SupabaseSync?.archiveGeneratedCardImage) {
               const archived = await window.SupabaseSync.archiveGeneratedCardImage(c.id, r.data.url, {
                 jobId: baseJob,
                 allowRemoteArchive: true
               });
               if (archived) nextRef = archived;
-            } else if (isExplicitPermanentMissingResponse(r)) {
-              if (removePermanentlyMissingCreation(c.id, r)) removed += 1;
-              continue;
             }
           }
           if (nextRef && nextRef !== ref) {
@@ -210,7 +191,7 @@
         persistCreations();
         renderImageGenFeed({ preserveScroll: true });
       }
-      return { ok: true, repaired, removed };
+      return { ok: true, repaired };
     })().finally(() => { recentCreationRepairInflight = null; });
     return recentCreationRepairInflight;
   }

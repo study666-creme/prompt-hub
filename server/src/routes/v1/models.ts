@@ -24,6 +24,9 @@ export async function publicModelCatalogHandler(c: Context<{ Bindings: Env }>) {
   );
   return c.json({
     success: true,
+    version: snapshot.version || null,
+    pricing_version: snapshot.pricingVersion || null,
+    stale: snapshot.stale,
     models: models.map(model => ({ ...model, selectable: true }))
   });
 }
@@ -40,6 +43,9 @@ modelCatalogRoutes.get('/', async c => {
   return c.json({
     ok: true,
     data: {
+      catalogVersion: snapshot.version || null,
+      pricingVersion: snapshot.pricingVersion || null,
+      catalogStale: snapshot.stale,
       models
     }
   });

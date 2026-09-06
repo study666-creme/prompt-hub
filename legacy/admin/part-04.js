@@ -171,6 +171,11 @@
     midjourney: 'MJ'
   };
 
+  const MODEL_PROVIDER_BADGE = {
+    newapi: '<span class="admin-badge admin-badge--ok">卡藏 API</span>',
+    apimart: '<span class="admin-badge admin-badge--warn">MJ</span>'
+  };
+
   function filteredModelRows() {
     return imageModelRows.filter((row) => {
       if (modelFamilyFilter !== 'all' && row.uiFamily !== modelFamilyFilter) return false;
@@ -202,7 +207,7 @@
   }
 
   function isMjPricingRow(row) {
-    return row.pricingBySpeed === true || row.uiFamily === 'midjourney';
+    return row.pricingBySpeed === true || String(row.id || '').startsWith('apimart-mj-');
   }
 
   function ensureMjCreditsBySpeed(row) {
@@ -275,7 +280,7 @@
 
   function renderModelCreditsInputs(row) {
     ensureMjCreditsBySpeed(row);
-    if (row.pricingSource !== 'manual') {
+    if (row.pricingSource === 'upstream_realtime') {
       if (row.pricingByResolution) {
         return (row.resolutions || [])
           .map((res) => `<strong>${res.toUpperCase()} ${formatAdminCredits(row.creditsByResolution?.[res])}</strong>`)
@@ -314,7 +319,7 @@
 
   function renderModelPromoInputs(row) {
     ensureMjCreditsBySpeed(row);
-    if (row.pricingSource !== 'manual') {
+    if (row.pricingSource === 'upstream_realtime') {
       return '<span class="admin-hint">不手动优惠</span>';
     }
     if (isMjPricingRow(row)) {
@@ -348,7 +353,7 @@
 
   function renderModelEffectiveCell(row) {
     ensureMjCreditsBySpeed(row);
-    if (row.pricingSource !== 'manual') {
+    if (row.pricingSource === 'upstream_realtime') {
       return renderModelCreditsInputs(row);
     }
     if (isMjPricingRow(row)) {
@@ -429,12 +434,8 @@
     renderModelsTable();
   }
 
-  function renderPricingStatusCell(row) {
-    return row.pricingSource !== 'manual'
-      ? '<span class="admin-badge admin-badge--ok">自动同步</span>'
-      : '<span class="admin-badge">后台配置</span>';
-  }
-
-  function renderPublicModelCell(row) {
-    return `<div class="admin-model-route-head"><span class="admin-hint">公开模型</span><br><code>${esc(row.id)}</code></div>`;
-  }
+  function renderUpstreamCostCell(row) {
+    if (row.upstreamCostText) {
+      return String(row.upstreamCostText)
+        .split('\n')
+        .map((line) => esc(line))

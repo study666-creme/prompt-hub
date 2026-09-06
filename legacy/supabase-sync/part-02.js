@@ -136,6 +136,9 @@
       if (isCdnMediaUrl(card.image) || /supabase\.co\/storage\/v1\/object/i.test(card.image)) {
         return false;
       }
+      if (/aitohumanize|filesystem\.site|apimart\.ai|grsai\.com/i.test(card.image)) {
+        return false;
+      }
       return true;
     }
     if (!isStorageRef(card.image)) return false;

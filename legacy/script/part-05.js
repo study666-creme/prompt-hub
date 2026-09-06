@@ -236,84 +236,6 @@
       }, ms);
     }
 
-    /** 揭示序号缓存：revealRoot.dataset + 代数失效。
-     * 此前每张图揭示都在整棵容器里 querySelectorAll 找自己的位置算级联延迟，
-     * 首屏几十张图连续解码时每次都是 O(n) 扫描 + 分配，直接和滚动抢主线程。
-     * 列表内容变化才失效；renderCards 翻页用 bumpShineOrderEpoch 通知。 */
-    const shineOrderCache = new WeakMap();
-
-    function bumpShineOrderEpoch(root) {
-      if (!root) return;
-      const cur = Number(root.dataset.phShineEpoch || 0) + 1;
-      root.dataset.phShineEpoch = String(cur);
-      shineOrderCache.delete(root);
-    }
-    window.bumpShineOrderEpoch = bumpShineOrderEpoch;
-
-    function shineOrderFor(root) {
-      const epoch = Number(root.dataset.phShineEpoch || 0);
-      const cached = shineOrderCache.get(root);
-      if (cached && cached.epoch === epoch) return cached.map;
-      const map = new Map();
-      const cards = root.querySelectorAll('.card[data-id], .card[data-post-id], .imagegen-feed-card');
-      cards.forEach((el, i) => map.set(el, i));
-      const entry = { epoch, map };
-      shineOrderCache.set(root, entry);
-      return map;
-    }
-
-    /** 空转 reflow（void offsetWidth）与 stagger timer 都合并进同一批微任务：
-     * 一批揭示只触发一次样式重算，扫光 class 的加/摘也在这里统一调度。 */
-    let shineRevealQueue = [];
-    let shineRevealTimer = null;
-
-    function queueShineReveal(media, staggerMs) {
-      shineRevealQueue.push({ media, staggerMs });
-      if (shineRevealTimer) return;
-      shineRevealTimer = setTimeout(flushShineRevealQueue, 0);
-    }
-
-    function flushShineRevealQueue() {
-      shineRevealTimer = null;
-      const batch = shineRevealQueue;
-      shineRevealQueue = [];
-      batch.forEach(({ media, staggerMs }) => {
-        media.classList.remove('media-shine-reveal');
-      });
-      void document.body.offsetWidth;
-      const groups = new Map();
-      batch.forEach(({ media, staggerMs }) => {
-        if (!groups.has(staggerMs)) groups.set(staggerMs, []);
-        groups.get(staggerMs).push(media);
-      });
-      groups.forEach((medias, staggerMs) => {
-        setTimeout(() => {
-          medias.forEach((m) => {
-            if (!m.isConnected) return;
-            m.classList.add('media-shine-reveal');
-            setTimeout(() => m.classList.remove('media-shine-reveal'), 1250);
-          });
-        }, staggerMs);
-      });
-    }
-
-    /** 生图 feed 揭示后的桌面重排也合批：连续解码多张图时不再逐张
-     * repairImageGenFeedLayout（每张都是同步样式清理 + 布局），只保留一次。 */
-    let igRevealLayoutTimer = null;
-
-    function scheduleIgRevealLayout() {
-      if (isMobileViewport()) {
-        window.FeatureDraft?.resetMobileFeedGridStyles?.();
-        return;
-      }
-      if (igRevealLayoutTimer) return;
-      igRevealLayoutTimer = setTimeout(() => {
-        igRevealLayoutTimer = null;
-        window.repairImageGenFeedLayout?.()
-          || window.FeatureDraft?.scheduleImageGenFeedLayout?.({ immediate: true });
-      }, 0);
-    }
-
     function finishCardMediaShine(media) {
       if (!media) return;
       const igMedia = media.classList?.contains('imagegen-feed-media')
@@ -327,7 +249,12 @@
           igImg.style.removeProperty('opacity');
           igImg.style.removeProperty('visibility');
         }
-        scheduleIgRevealLayout();
+        if (!isMobileViewport()) {
+          window.repairImageGenFeedLayout?.()
+            || window.FeatureDraft?.scheduleImageGenFeedLayout?.({ immediate: true });
+        } else {
+          window.FeatureDraft?.resetMobileFeedGridStyles?.();
+        }
         return;
       }
       const mobile = isMobileViewport();
@@ -340,8 +267,7 @@
       if (!loaded) {
         const inWarehouse = media.closest('#cardsContainer');
         if (inWarehouse && isPlaceholderCardImg(img)) {
-          // 灰占位处理：短等待后仍无真实图则折叠为文字卡，避免「文字/失效图卡片」长时间出现灰框。
-          armMediaShineWatchdog(shineTarget, 6500);
+          armMediaShineWatchdog(shineTarget, 22000);
           window.CardImageLoader?.loadImg?.(img);
           return;
         }
@@ -370,19 +296,18 @@
           void media.offsetWidth;
         }
         if (!alreadyRevealed && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-          // 按 DOM 顺序级联扫光（而非按 cardId 哈希随机），保证靠前的卡片先亮、视觉上先出，
-          // 避免「后面的先加载出来」的观感；单卡最多延迟 0.3s。
-          // 序号来自容器级缓存（shineOrderFor），不再逐张整树 querySelectorAll；
-          // reflow（重启动画用）与 class 写入统一进 flushShineRevealQueue 批处理。
+          const cardId = cardEl?.dataset?.id || cardEl?.dataset?.postId || '';
           let stagger = 0;
-          const revealRoot = media.closest('#communityGrid, #creationsGrid, #userProfileGrid, #cardsContainer, #imageGenFeed');
-          if (revealRoot && cardEl) {
-            const idx = shineOrderFor(revealRoot).get(cardEl);
-            if (idx != null) stagger = Math.min(idx * 34, 300);
-          }
-          queueShineReveal(media, stagger);
+          for (let i = 0; i < cardId.length; i++) stagger = (stagger + cardId.charCodeAt(i) * 13) % 200;
+          setTimeout(() => {
+            media.classList.add('media-shine-reveal');
+            setTimeout(() => media.classList.remove('media-shine-reveal'), 1250);
+          }, stagger);
         }
         media.style.removeProperty('min-height');
+      }
+      if (cardEl?.dataset?.id && !alreadyRevealed) {
+        try { sessionStorage.setItem('ph_card_shine_' + cardEl.dataset.id, '1'); } catch (e) { /* ignore */ }
       }
       if (!mobile && !alreadyRevealed) {
         if (sideBtn) { /* 侧栏不参与 Masonry */ }
@@ -393,8 +318,11 @@
           window.FeatureDraft?.scheduleFeedMasonryRelayout?.('communityGrid');
         }
         else if (media.closest('#cardsContainer')) {
-          // 仓库媒体框已用占位高（非聚焦 3/4、聚焦加载态 3/4），图片加载不改变卡片高度，
-          // 任何重排都只会空转掉帧；CSS multi-column/Grid 会自动处理布局，无需 JS 介入。
+          if (cardMediaAffectsViewport(media) && !shouldSkipWarehouseImageLayout(img, 1100)) {
+            const cid = cardEl?.dataset?.id;
+            if (cardEl?.dataset?.communityCollect === '1') scheduleWarehouseMasonryForCard(cid);
+            else scheduleWarehouseMasonryLayout();
+          }
         }
         else scheduleMasonryForMedia(media);
       } else if (media.closest('#imageGenFeed')) window.FeatureDraft?.resetMobileFeedGridStyles?.();
@@ -617,9 +545,7 @@
     }
 
     function cardImgInitialSrc(image, cardId, extraOpts) {
-      // 透明占位（保持 data:image/svg 以被 isPlaceholderCardImg 识别）：避免写死深灰
-      // 色块盖住主题化骨架背景（`--card-skeleton-bg`），在浅色模式下显得像「灰卡」。
-      const placeholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"></svg>');
+      const placeholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><defs><linearGradient id="g" x1="0" x2="1"><stop stop-color="#25272f"/><stop offset=".55" stop-color="#343740"/><stop offset="1" stop-color="#25272f"/></linearGradient></defs><rect fill="#25272f" width="160" height="120"/><rect fill="url(#g)" width="160" height="120" opacity=".9"/></svg>');
       const jobId = extraOpts?.jobId ? String(extraOpts.jobId).replace(/#\d+$/, '') : undefined;
       const cardModel = cardId ? (window.__promptHubCards || []).find((c) => c.id === cardId) : null;
       const allowFull = !!(extraOpts?.allowFullFallback || jobId || cardModel?.genJobId);
@@ -738,7 +664,7 @@
       if (Array.isArray(payload.customGroups)) customGroups = payload.customGroups;
       if (Array.isArray(payload.globalFields)) globalFields = payload.globalFields;
       if (payload.settings && typeof payload.settings === 'object') {
-        settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, autoDayNight: true, themeManualOverride: false }, payload.settings);
+        settings = Object.assign({ engine: 'tesseract', apiKey: '', imageClickZoom: false, floatingPrompt: false, defaultPublishCommunity: true, defaultImageGenAutoPublish: true, autoDayNight: false, themeManualOverride: false }, payload.settings);
         settings.deletedCardTombstones = mergeDeletedCardTombstones(
           prevTombstones,
           payload.settings.deletedCardTombstones
@@ -783,7 +709,7 @@
       settings.floatingPrompt = false;
       document.getElementById('imageClickZoomToggle').checked = settings.imageClickZoom;
       applyEfficiencyMode();
-      if (settings.autoDayNight !== false) {
+      if (settings.autoDayNight === true) {
         settings.themeManualOverride = false;
         window.ThemeSchedule?.applyAutoThemeIfNeeded?.();
       } else if (settings.theme && typeof window.applyAppTheme === 'function') {

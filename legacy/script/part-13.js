@@ -58,7 +58,7 @@
       const helpBtn = document.querySelector('.settings-footer-help-btn');
       if (helpBtn) helpBtn.setAttribute('aria-expanded', 'false');
       const autoDay = document.getElementById('autoDayNightToggle');
-      if (autoDay) autoDay.checked = settings.autoDayNight !== false;
+      if (autoDay) autoDay.checked = settings.autoDayNight === true;
       const eff = document.getElementById('efficiencyModeToggle');
       if (eff) eff.checked = settings.efficiencyMode === true;
       const imgPub = document.getElementById('defaultImageGenAutoPublishToggle');
@@ -85,13 +85,13 @@
       const effEl = document.getElementById('efficiencyModeToggle');
       settings.efficiencyMode = effEl ? effEl.checked : false;
       applyEfficiencyMode();
-      const wasAuto = settings.autoDayNight !== false;
+      const wasAuto = settings.autoDayNight === true;
       settings.autoDayNight = autoOn;
       if (autoOn && !wasAuto) {
         settings.themeManualOverride = false;
         window.ThemeSchedule?.clearThemeManualOverride?.();
       } else if (autoOn) {
-        // 自动本就开着：保留用户手动暂停（manual override），不强制回自动
+        settings.themeManualOverride = false;
         window.ThemeSchedule?.applyAutoThemeIfNeeded?.();
       }
       await saveAllData();

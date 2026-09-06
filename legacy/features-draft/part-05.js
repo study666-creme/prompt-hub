@@ -209,8 +209,6 @@
   let imageGenFeedIsNearTop;
   let bindImageGenFeedCardEvents;
   let captureImageGenFeedCardPositions;
-  let renderImageGenPendingNow;
-  let renderImageGenFailedNow;
 
   function safeRenderImageGenFeed(opts) {
     if (typeof renderImageGenFeed !== 'function') return;
@@ -219,34 +217,6 @@
     } catch (e) {
       console.warn('[imagegen] renderImageGenFeed failed', e);
     }
-  }
-
-  let imageGenCommunityRefreshPromise = null;
-  function ensureImageGenCommunityFeed(opts = {}) {
-    hydratePublicFeedFromCache();
-    if (imageGenCommunityRefreshPromise) return imageGenCommunityRefreshPromise;
-    const force = opts.force === true;
-    if (!force && !publicFeedState.refreshPromise && !publicFeedNeedsFullRefresh()) {
-      return Promise.resolve(false);
-    }
-    const refreshTask = refreshPublicCommunityFeed({ force, timeoutMs: 8000 })
-      .then((changed) => {
-        if (imageGenFeedTab !== 'community') return changed;
-        if (!document.getElementById('pageImageGen')?.classList.contains('active')) return changed;
-        return Promise.resolve(renderImageGenFeed({ preserveScroll: true, force: true }))
-          .then(() => changed);
-      })
-      .catch((e) => {
-        console.warn('[imagegen] community feed refresh failed', e);
-        return false;
-      })
-      .finally(() => {
-        if (imageGenCommunityRefreshPromise === refreshTask) {
-          imageGenCommunityRefreshPromise = null;
-        }
-      });
-    imageGenCommunityRefreshPromise = refreshTask;
-    return refreshTask;
   }
 
   function wireImageGenFeed() {
@@ -283,8 +253,6 @@
       getCommunityScope: () => communityScope,
       getCommunitySort: () => communitySort,
       getCommunityRandomEpoch: () => communityRandomEpoch,
-      ensureImageGenCommunityFeed,
-      getPublicCommunityFeedState: () => publicFeedState,
       getLikedIds: () => likedIds,
       getCommunityFeedForDisplay,
       filterAndSortPosts,
@@ -345,8 +313,6 @@
     imageGenFeedIsNearTop = IG.imageGenFeedIsNearTop;
     bindImageGenFeedCardEvents = IG.bindImageGenFeedCardEvents;
     captureImageGenFeedCardPositions = IG.captureImageGenFeedCardPositions;
-    renderImageGenPendingNow = IG.renderImageGenPendingNow;
-    renderImageGenFailedNow = IG.renderImageGenFailedNow;
     window.__imageGenFeedWired = true;
   }
 
@@ -369,7 +335,6 @@
       getFeedScrollRoot,
       safeApplyFeedScrollTop,
       feedScrollIntentActive: (containerId) => !!feedScrollIntent[containerId],
-      feedUserScrollingActive: () => Date.now() < feedUserScrollUntil,
       setFeedLayoutPending,
       ensureFeedPageSentinel,
       revealCommunityFeedImages,
@@ -636,33 +601,6 @@
     }
   }
 
-  function isExplicitPermanentMissingResponse(result) {
-    const status = Number(result?.status || 0);
-    const code = String(result?.code || '').trim().toUpperCase();
-    return status === 404 || status === 410 || code === 'NOT_FOUND' || code === 'GONE';
-  }
-
-  /** Remove only the transient recent record after the server proves its source is gone. */
-  function removePermanentlyMissingCreation(id, evidence) {
-    if (!isExplicitPermanentMissingResponse(evidence)) return false;
-    const removed = creations.find((c) => String(c?.id) === String(id));
-    if (!removed) return false;
-    const baseJobId = normalizeGenJobBaseId(removed.jobId || '');
-    if (!baseJobId) return false;
-
-    if (creationsSideId === removed.id) closeCreationsSidePanel();
-    if (imageGenPreviewId === removed.id) closeImageGenPreview();
-    recordCreationDeletion(removed.id, baseJobId);
-    window.recordGenerationJobDeletion?.(baseJobId);
-    creations = creations.filter((c) => String(c?.id) !== String(removed.id));
-    persistCreations();
-    renderCreations();
-    if (document.getElementById('pageImageGen')?.classList.contains('active')) {
-      renderImageGenFeed({ preserveScroll: true, force: true });
-    }
-    return true;
-  }
-
   function highlightCreationCard(id) {
     document.querySelectorAll('#creationsGrid .creation-post-card').forEach(el => {
       el.classList.toggle('selected', el.dataset.creationId === id);
@@ -700,7 +638,7 @@
         <button type="button" class="btn btn-secondary" data-action="remix">再生成</button>
         <button type="button" class="btn btn-secondary" data-action="del">删除记录</button>
       </div>
-      <p class="panel-hint">生图完成后会自动存入卡片库「图片生成」分组，本记录列表最多保留最近条数（轻量 150 / 基础 200 / 标准 300 / 专业 400），移除本记录不影响卡片库中的图片。</p>`;
+      <p class="panel-hint">最近生成保留 7 天，条数上限随会员等级（轻量 150 / 基础 200 / 标准 300 / 专业 400）。超出或到期未存入库将彻底删除；喜欢请点「存入库」。</p>`;
     bindCommunitySideImageZoom(body, null, c.image, id, { jobId: c.jobId || null });
     body.querySelector('[data-action="remix"]')?.addEventListener('click', () => remixCreation(id));
     body.querySelector('[data-action="del"]')?.addEventListener('click', () => {
@@ -796,7 +734,7 @@
     const linked = isCreationLinkedToWarehouse(c);
     const msg = linked
       ? '确定从最近生成中移除？卡片库里的对应卡片不会被删除。'
-      : '确定删除该条最近生成？该图可能尚未自动入库，删除后不可恢复。';
+      : '确定删除该条最近生成？未存入库的图片将彻底删除，不可恢复。';
     const doDel = () => { void deleteCreation(id); };
     if (typeof window.customConfirm === 'function') {
       window.customConfirm(msg, doDel, null, { danger: true, confirmLabel: linked ? '移除' : '删除' });

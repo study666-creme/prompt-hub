@@ -194,6 +194,10 @@
       if (isCdnMediaUrl(image) || /supabase\.co\/storage\/v1\/object/i.test(image)) {
         return { ok: true, image: normalizeImageRef(image) || image };
       }
+      if (/aitohumanize|filesystem\.site|apimart\.ai|grsai\.com/i.test(image)) {
+        markImageUploadSkip(cardId);
+        return { ok: true, image };
+      }
       try {
         const url = await resolveCardImageForSave(cardId, image, null, uploadOptsForCard(card));
         if (typeof window.clearCardImageBackup === 'function') {

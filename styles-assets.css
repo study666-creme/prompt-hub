@@ -2637,19 +2637,14 @@ body {
 [data-theme="light"] .imagegen-feed-media.is-loading:not(.imagegen-gen-pending)::before {
   content: '';
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 220%;
+  inset: 0;
   z-index: 1;
   pointer-events: none;
-  /* 光条只平移（transform），背景静态：background-position 动画会逐帧 paint，
-   * 与签名/解码/重排抢主线程；transform 动画在合成线程跑，滚动/点击不受影响。 */
   background:
-    linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, 0.09) 42%, rgba(255, 255, 255, 0.18) 50%, rgba(255, 255, 255, 0.09) 58%, transparent 100%);
-  background-size: 100% 100%;
+    linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, 0.09) 42%, rgba(255, 255, 255, 0.18) 50%, rgba(255, 255, 255, 0.09) 58%, transparent 100%),
+    color-mix(in srgb, var(--bg-hover) 86%, var(--bg-card));
+  background-size: 220% 100%, 100% 100%;
   box-shadow: none;
-  will-change: transform;
   animation: appleMediaSheen 1.35s var(--ease-ui) infinite;
 }
 
@@ -2661,8 +2656,8 @@ body {
 }
 
 @keyframes appleMediaSheen {
-  from { transform: translate3d(-70%, 0, 0); }
-  to { transform: translate3d(0%, 0, 0); }
+  from { background-position: 160% 0, 0 0; }
+  to { background-position: -60% 0, 0 0; }
 }
 
 .card-media.media-revealed .card-img,

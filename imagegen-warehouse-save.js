@@ -39,10 +39,6 @@
       refImage: opts.refImage || null,
       refImages: Array.isArray(opts.refImages) ? opts.refImages.filter(Boolean) : null,
       referenceAssets: Array.isArray(opts.referenceAssets) ? opts.referenceAssets.filter(Boolean) : null,
-      // Saving from the recent-generation feed must persist the upstream
-      // result before the card is created. Keep this flag intact through the
-      // adapter so addCardFromGenerated can enforce a stable storage ref.
-      copyStorage: opts.copyStorage === true,
       deferCloudPush: !!opts.deferCloudPush,
       isRecovery: !!opts.isRecovery
     })).then((r) => r?.ok ?? false);

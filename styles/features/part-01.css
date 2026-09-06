@@ -702,28 +702,3 @@
   background: rgba(0,0,0,0.55);
   color: #fff;
 }
-
-
-/* 社区首屏防突脸：Masonry 就绪前用 CSS 网格占位，避免卡片整列 100% 宽大图。
-   一旦 .masonry-ready 生效，这些规则自动失效，Masonry 接管绝对定位。 */
-@media (min-width: 901px) {
-  #communityGrid.cards-grid-primed:not(.masonry-ready):not(.community-mobile-feed):not(.list-view) {
-    display: grid !important;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    column-gap: var(--feed-col-gap, 16px);
-    row-gap: var(--feed-row-gap, 16px);
-    align-content: start;
-  }
-  #communityGrid.cards-grid-primed:not(.masonry-ready):not(.community-mobile-feed):not(.list-view) > .grid-sizer {
-    display: none !important;
-  }
-  #communityGrid.cards-grid-primed:not(.masonry-ready):not(.community-mobile-feed):not(.list-view) > .card {
-    position: static !important;
-    width: auto !important;
-    max-width: none !important;
-    left: auto !important;
-    top: auto !important;
-    transform: none !important;
-    margin: 0 !important;
-  }
-}

@@ -3,27 +3,16 @@ import { applyCorsHeaders } from './lib/cors-headers';
 import { jsonError } from './lib/errors';
 import { recordRequestMetric } from './lib/monitoring';
 import { diagnoseSupabaseUpstream } from './lib/supabase-upstream';
-import { drainExpiredFastProviderOutcomes } from './lib/fast-provider-outcome';
+import { drainFastProviderPendingSubmits } from './lib/fast-provider-drain';
 import { processFastProviderQueueMessage } from './lib/fast-provider-queue';
-import { drainImageGenerationWork } from './lib/image-generation-drain';
-import { monitorPendingPaymentOrders } from './lib/payment-monitoring';
-import { drainVideoPendingSubmits } from './lib/video-provider-drain';
-import { drainExpiredVideoSubmitOutcomes } from './lib/video-provider-outcome';
-import { drainPendingVideoTasks } from './lib/video-provider-poll';
-import { processVideoQueueMessage } from './lib/video-provider-queue';
 import { createCorsMiddleware } from './middleware/cors';
 import { adminRoutes } from './routes/admin';
 import { supabaseProxyHandler } from './routes/supabase-proxy';
 import { v1 } from './routes/v1';
 import { webhookRoutes } from './routes/webhooks/payment';
-import type { Env, GenerationSubmissionQueueMessage } from './env';
+import type { Env } from './env';
 
 const app = new Hono<{ Bindings: Env }>();
-
-export function publicBuildSha(value: unknown): string {
-  const sha = String(value || '').trim().toLowerCase();
-  return /^[0-9a-f]{7,40}$/.test(sha) ? sha : 'unversioned';
-}
 
 app.use('*', async (c, next) => {
   applyCorsHeaders(c);
@@ -42,12 +31,6 @@ app.use('*', async (c, next) => {
 
 app.get('/health', async c => {
   const key = c.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || '';
-  const epayConfigured = [
-    c.env.EPAY_MERCHANT_ID,
-    c.env.EPAY_MERCHANT_KEY,
-    c.env.EPAY_API_BASE_URL,
-    c.env.EPAY_CALLBACK_BASE_URL
-  ].every(value => !!value?.trim());
   let db: 'ok' | 'misconfigured' | 'error' = 'ok';
   if (!key || key.startsWith('sb_publishable_')) {
     db = 'misconfigured';
@@ -61,14 +44,24 @@ app.get('/health', async c => {
       db = 'error';
     }
   }
-  if (db !== 'ok') await diagnoseSupabaseUpstream(c.env);
+  let hint: string | undefined;
+  if (db === 'misconfigured') {
+    hint =
+      'SUPABASE_SERVICE_ROLE_KEY 需为 service_role（Legacy eyJ），请 wrangler secret put 后重新 deploy';
+  } else if (db === 'error') {
+    hint = (await diagnoseSupabaseUpstream(c.env)) || '执行 scripts/apply-grants-once.sql';
+  }
   return c.json({
     ok: db === 'ok',
     service: 'prompt-hub-api',
     version: '0.1.0',
-    buildSha: publicBuildSha(c.env.BUILD_SHA),
-    status: db === 'ok' ? 'ready' : 'degraded',
-    payment: { epay: epayConfigured ? 'configured' : 'missing' }
+    environment: c.env.ENVIRONMENT,
+    supabase: db,
+    imageProviders: {
+      newapi: c.env.NEWAPI_API_KEY?.trim() ? 'configured' : 'missing',
+      midjourney: c.env.APIMART_API_KEY?.trim() ? 'configured' : 'missing'
+    },
+    hint
   });
 });
 
@@ -151,17 +144,11 @@ export default {
     }
   },
   async queue(
-    batch: MessageBatch<GenerationSubmissionQueueMessage>,
+    batch: MessageBatch<{ jobId: string; userId: string }>,
     env: Env
   ) {
-    await Promise.all(batch.messages.map(async message => {
+    for (const message of batch.messages) {
       try {
-        if (message.body?.kind === 'video') {
-          const result = await processVideoQueueMessage(env, message.body);
-          if (result === 'retry') message.retry({ delaySeconds: 60 });
-          else message.ack();
-          return;
-        }
         const result = await processFastProviderQueueMessage(env, message.body);
         if (result === 'retry') message.retry({ delaySeconds: 60 });
         else message.ack();
@@ -169,19 +156,9 @@ export default {
         console.error('[image-queue] consume failed', message.id, error);
         message.retry({ delaySeconds: 60 });
       }
-    }));
+    }
   },
   async scheduled(_controller: ScheduledController, env: Env) {
-    const reconcileVideoWork = async () => {
-      await drainPendingVideoTasks(env, { maxPoll: 4 });
-      await drainExpiredVideoSubmitOutcomes(env);
-    };
-    await Promise.allSettled([
-      drainImageGenerationWork(env, { maxSubmit: 2, maxPoll: 4, maxArchive: 2 }),
-      drainExpiredFastProviderOutcomes(env),
-      drainVideoPendingSubmits(env, { maxSubmit: 2 }),
-      reconcileVideoWork(),
-      monitorPendingPaymentOrders(env)
-    ]);
+    await drainFastProviderPendingSubmits(env, { awaitSubmit: true, maxSubmit: 2 });
   }
 };

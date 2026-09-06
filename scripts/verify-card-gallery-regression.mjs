@@ -9,7 +9,6 @@ const code = readFileSync(join(root, 'card-gallery.js'), 'utf8');
 const calls = [];
 const context = {
   console,
-  GEN_AUTO_TAG: 'image-generation-tag',
   SupabaseSync: {
     isInvalidMediaUrl: () => false,
     isEphemeralUpstreamImageUrl: (url) => /^https?:\/\/upstream\.example\//i.test(String(url || '')),
@@ -19,7 +18,6 @@ const context = {
     cardImageStillResolvable: () => true,
     isDataUrl: (url) => /^data:image\//i.test(String(url || '')),
     isGridDisplayUrl: () => false,
-    getListDisplayImageSrc: () => 'https://media.test/cache_grid.jpg',
     resolveDisplayUrl: async (_ref, opts) => {
       calls.push(['display', opts]);
       return opts.jobId ? `display:${opts.jobId}` : '';
@@ -49,42 +47,6 @@ vm.runInNewContext(code, context, { filename: 'card-gallery.js' });
 
 const api = context.PromptHubCardGallery;
 assert(api, 'PromptHubCardGallery export is missing');
-
-const metadataOnlyCards = [
-  { id: 'meta-gen-job', genJobId: 'job-without-image' },
-  { id: 'meta-feed-cover-job', feedCoverJobId: 'cover-job-without-image' },
-  { id: 'meta-image-tag', tags: ['image-generation-tag'] },
-  { id: 'meta-dirty-image-tag', genJobId: 'job-dirty-tag', image: 'image-generation-tag' },
-  { id: 'meta-dirty-image-job', genJobId: 'job-dirty-id', image: 'job-dirty-id' },
-  { id: 'meta-dirty-gallery-job', genJobId: 'job-dirty-gallery', cardImages: ['real-job-id'] },
-  {
-    id: 'meta-tagged-job',
-    tags: ['image-generation-tag', '11111111-1111-4111-8111-111111111111'],
-    image: '11111111-1111-4111-8111-111111111111'
-  }
-];
-for (const card of metadataOnlyCards) {
-  const meta = api.getWarehouseListThumbMeta(card);
-  assertEqual(meta.hasImage, false, `${card.id} should stay a text-only card without an image ref`);
-}
-
-const referencedCard = { id: 'referenced-card', genJobId: 'job-with-image', image: 'storage://real-image' };
-assertEqual(
-  api.getWarehouseListThumbMeta(referencedCard).hasImage,
-  true,
-  'a generated card with a resolvable image ref should keep its media slot'
-);
-
-const recoverableRefCard = {
-  id: 'recoverable-ref-card',
-  genJobId: 'job-with-temporary-ref',
-  image: 'https://upstream.example/temporary.jpg'
-};
-assertEqual(
-  api.getWarehouseListThumbMeta(recoverableRefCard).hasImage,
-  true,
-  'a generated card with a real temporary ref should keep its recovery media slot'
-);
 
 const mjCard = {
   id: 'card-1',

@@ -222,138 +222,6 @@
   margin-top: 6px;
 }
 
-.imagegen-mj-params input[type="range"].imagegen-field-compact {
-  --imagegen-mj-range-track: color-mix(in srgb, var(--text-muted) 24%, var(--bg-input));
-  --imagegen-mj-range-fill: color-mix(in srgb, var(--accent) 88%, var(--text-muted));
-  --imagegen-mj-range-progress: 0%;
-  width: 100%;
-  height: 32px;
-  min-height: 32px;
-  margin: 0;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 0;
-  appearance: none;
-  -webkit-appearance: none;
-  background: transparent !important;
-  box-shadow: none !important;
-  outline: none;
-  transform: none;
-  cursor: pointer;
-  touch-action: pan-y;
-  user-select: none;
-  accent-color: var(--accent);
-}
-
-.imagegen-mj-params input[type="range"].imagegen-field-compact:hover,
-.imagegen-mj-params input[type="range"].imagegen-field-compact:focus,
-.imagegen-mj-params input[type="range"].imagegen-field-compact:active {
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  transform: none;
-}
-
-.imagegen-mj-params input[type="range"]::-webkit-slider-runnable-track {
-  box-sizing: border-box;
-  width: 100%;
-  height: 6px;
-  border: 1px solid color-mix(in srgb, var(--border-light) 58%, transparent);
-  border-radius: 999px;
-  background: linear-gradient(
-    to right,
-    var(--imagegen-mj-range-fill) 0 var(--imagegen-mj-range-progress),
-    var(--imagegen-mj-range-track) var(--imagegen-mj-range-progress) 100%
-  );
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
-}
-
-.imagegen-mj-params input[type="range"]::-webkit-slider-thumb {
-  box-sizing: border-box;
-  width: 20px;
-  height: 20px;
-  margin-top: -8px;
-  border: 2px solid var(--bg-card);
-  border-radius: 50%;
-  -webkit-appearance: none;
-  appearance: none;
-  background: var(--accent-gradient);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 44%, transparent),
-    0 3px 9px rgba(0, 0, 0, 0.32);
-  transition: box-shadow 0.16s ease, transform 0.16s ease;
-}
-
-.imagegen-mj-params input[type="range"]:hover::-webkit-slider-thumb {
-  transform: scale(1.06);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 58%, transparent),
-    0 4px 11px rgba(0, 0, 0, 0.36);
-}
-
-.imagegen-mj-params input[type="range"]:active::-webkit-slider-thumb {
-  transform: scale(0.96);
-}
-
-.imagegen-mj-params input[type="range"]:focus-visible::-webkit-slider-thumb {
-  box-shadow:
-    0 0 0 1px var(--bg-card),
-    0 0 0 4px color-mix(in srgb, var(--accent) 28%, transparent),
-    0 3px 9px rgba(0, 0, 0, 0.32);
-}
-
-.imagegen-mj-params input[type="range"]::-moz-range-track {
-  box-sizing: border-box;
-  width: 100%;
-  height: 6px;
-  border: 1px solid color-mix(in srgb, var(--border-light) 58%, transparent);
-  border-radius: 999px;
-  background: var(--imagegen-mj-range-track);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
-}
-
-.imagegen-mj-params input[type="range"]::-moz-range-progress {
-  height: 6px;
-  border-radius: 999px;
-  background: var(--imagegen-mj-range-fill);
-}
-
-.imagegen-mj-params input[type="range"]::-moz-range-thumb {
-  box-sizing: border-box;
-  width: 20px;
-  height: 20px;
-  border: 2px solid var(--bg-card);
-  border-radius: 50%;
-  background: var(--accent-gradient);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 44%, transparent),
-    0 3px 9px rgba(0, 0, 0, 0.32);
-  transition: box-shadow 0.16s ease, transform 0.16s ease;
-}
-
-.imagegen-mj-params input[type="range"]:hover::-moz-range-thumb {
-  transform: scale(1.06);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 58%, transparent),
-    0 4px 11px rgba(0, 0, 0, 0.36);
-}
-
-.imagegen-mj-params input[type="range"]:active::-moz-range-thumb {
-  transform: scale(0.96);
-}
-
-.imagegen-mj-params input[type="range"]:focus-visible::-moz-range-thumb {
-  box-shadow:
-    0 0 0 1px var(--bg-card),
-    0 0 0 4px color-mix(in srgb, var(--accent) 28%, transparent),
-    0 3px 9px rgba(0, 0, 0, 0.32);
-}
-
-.imagegen-mj-params input[type="range"]:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 .imagegen-mj-range-val {
   display: inline-block;
   min-width: 2.5em;
@@ -726,7 +594,7 @@
   height: 100%;
   object-fit: contain;
   display: block;
-  background: var(--bg-elevated, #0a0a0a);
+  background: #0a0a0a;
   transition: opacity 0.18s ease;
 }
 

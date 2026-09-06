@@ -392,19 +392,17 @@
       const previous = Array.isArray(snap.previousGallery) ? snap.previousGallery : [];
       const uploads = snap.galleryUploads || {};
       const finalGallery = [];
-      // 多图槽位并行归档，保持原槽位顺序（响应与画布顺序一致）
-      const results = await Promise.all(gallery.map(async (ref, i) => {
+      for (let i = 0; i < gallery.length; i += 1) {
+        let ref = gallery[i];
         const upload = uploads[i] || (i === snap.galleryPrimaryIndex ? snap.uploadFile : null);
         if (i === 0 && coverImage) {
-          return coverImage;
-        }
-        if (window.SupabaseSync?.isLoggedIn?.()) {
+          ref = coverImage;
+        } else if (window.SupabaseSync?.isLoggedIn?.()) {
           if (upload || (ref && !window.SupabaseSync.isStorageRef?.(ref))) {
             const slotJobId = `${cardId}#${i + 1}`;
-            return await window.SupabaseSync.archiveGeneratedCardImage(cardId, ref || upload, { jobId: slotJobId });
-          }
-          if (ref && window.SupabaseSync.isStorageRef?.(ref)) {
-            return await window.SupabaseSync.resolveCardImageForSave(
+            ref = await window.SupabaseSync.archiveGeneratedCardImage(cardId, ref || upload, { jobId: slotJobId });
+          } else if (ref && window.SupabaseSync.isStorageRef?.(ref)) {
+            ref = await window.SupabaseSync.resolveCardImageForSave(
               cardId,
               ref,
               previous[i] || null,
@@ -412,9 +410,6 @@
             );
           }
         }
-        return ref;
-      }));
-      for (const ref of results) {
         if (ref) finalGallery.push(ref);
       }
       if (!finalGallery.length) return;
@@ -530,9 +525,7 @@
           title: snap.title,
           prompt: snap.prompt,
           image: snap.imageRemovalPending ? null : finalImage,
-          group: snap.group !== undefined
-            ? (snap.group || null)
-            : ((currentGroup !== 'all' && currentGroup !== 'uncategorized') ? currentGroup : null),
+          group: (currentGroup !== 'all' && currentGroup !== 'uncategorized') ? currentGroup : null,
           tags: [...snap.tags],
           customFields: snap.customFields,
           warehouseId: getActiveWarehouseId(),
@@ -577,55 +570,6 @@
       }
       return { savedCard, didPublishToCommunity, finalImage };
     }
-
-    // Prompt-first composer entry: persist a complete card without opening the legacy editor.
-    window.createPromptHubCardDirectly = async function createPromptHubCardDirectly(payload = {}) {
-      const prompt = String(payload.prompt || '').trim();
-      if (!prompt) throw new Error('提示词不能为空');
-      const check = canGuestCreateCard();
-      if (!check.ok) {
-        promptLogin(check.msg);
-        return { ok: false, reason: 'guest_limit', message: check.msg };
-      }
-      const incomingFiles = Array.isArray(payload.files)
-        ? payload.files.filter((file) => file && /^image\//i.test(file.type)).slice(0, panelGalleryMax())
-        : [];
-      const loggedIn = isUserLoggedIn();
-      const dataUrls = loggedIn
-        ? []
-        : await Promise.all(incomingFiles.map((file) => readFileAsDataUrl(file)));
-      const cardId = generateId();
-      const galleryImages = loggedIn ? incomingFiles : dataUrls;
-      const snap = {
-        prompt,
-        title: String(payload.title || '').trim(),
-        group: String(payload.group || '').trim() || null,
-        tags: Array.isArray(payload.tags) ? payload.tags.filter(Boolean).slice(0, 40) : [],
-        customFields: payload.customFields && typeof payload.customFields === 'object' ? { ...payload.customFields } : {},
-        isNewCard: true,
-        cardId,
-        previousImage: null,
-        imageValue: dataUrls[0] || null,
-        uploadFile: loggedIn ? (incomingFiles[0] || null) : null,
-        uploadBytes: incomingFiles[0]?.size || 0,
-        uploadOriginal: window.__cardUploadOriginal === true,
-        wantPublish: payload.wantPublish === true,
-        imageRemovalPending: false,
-        galleryImages,
-        galleryUploads: Object.fromEntries(incomingFiles.map((file, index) => [index, file])),
-        galleryPrimaryIndex: 0,
-        previousGallery: null
-      };
-      const result = await persistCardSnap(snap, { deferSave: true });
-      if (!result?.savedCard) throw new Error('卡片保存失败');
-      await saveAllData({ skipCloud: true });
-      if (loggedIn && typeof scheduleCloudPush === 'function') scheduleCloudPush({ urgent: true });
-      updateTagFilter();
-      renderGroups();
-      renderCards(true);
-      updateGuestLimitUI();
-      return { ok: true, cardId, savedCard: result.savedCard };
-    };
 
     async function saveBatchImport() {
       const statusEl = document.getElementById('batchImportStatus');

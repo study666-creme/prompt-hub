@@ -4,7 +4,7 @@ import { dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
-const root = resolve(process.env.APP_ROOT || join(scriptsDir, '..'));
+const root = resolve(join(scriptsDir, '..'));
 const types = new Map([
   ['.html', 'text/html; charset=utf-8'],
   ['.js', 'application/javascript; charset=utf-8'],

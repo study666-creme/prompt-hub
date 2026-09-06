@@ -18,21 +18,6 @@
   transition: opacity 0.28s ease;
 }
 
-/* 加载中图片先淡出（opacity 0），加载完成由 finishCardMediaShine 摘掉 .is-loading 后
-   平滑淡入，避免大图「突脸」；`prefers-reduced-motion` 下直接可见。 */
-.community-post-card .card-media.is-loading .card-img,
-.creation-post-card .card-media.is-loading .card-img,
-.community-post-card .card-media.card-media--await .card-img,
-.creation-post-card .card-media.card-media--await .card-img {
-  opacity: 0;
-}
-@media (prefers-reduced-motion: reduce) {
-  .community-post-card .card-media.is-loading .card-img,
-  .creation-post-card .card-media.is-loading .card-img {
-    opacity: 1;
-  }
-}
-
 #communityGrid .card,
 #creationsGrid .card,
 #userProfileGrid .card {

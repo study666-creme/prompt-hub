@@ -26,18 +26,14 @@
   }
 
   function isDisplayableImageUrl(url) {
-    if (!url || !/^(https?:|blob:|data:image\/)/i.test(String(url))) return false;
-    if (String(url).includes('data:image/svg')) return false;
-    // A stale/known-invalid signed URL should go through the resolver again.
-    if (global.SupabaseSync?.isInvalidMediaUrl?.(url)) return false;
-    if (global.SupabaseSync?.isIncompleteSignedStorageUrl?.(url)) return false;
-    return true;
+    return !!(url
+      && /^(https?:|blob:|data:image\/)/i.test(String(url))
+      && !String(url).includes('data:image/svg'));
   }
 
   async function resolvePreview(ref, card, galleryIndex, opts = {}) {
     if (!ref) return '';
-    const forceResolve = opts.forceResolve === true;
-    if (!forceResolve && isDisplayableImageUrl(ref) && !global.SupabaseSync?.isEphemeralUpstreamImageUrl?.(ref)) {
+    if (isDisplayableImageUrl(ref) && !global.SupabaseSync?.isEphemeralUpstreamImageUrl?.(ref)) {
       return ref;
     }
     const cardId = card?.id || opts.cardId || null;
@@ -67,19 +63,6 @@
         tryAllPaths: true
       });
       if (isDisplayableImageUrl(signed)) return signed;
-    } catch (e) { /* fallback below */ }
-    // A preview/full resolver can recover a slot when its grid URL was not
-    // signed yet. Keep the slot id and index so a multi-image generated card
-    // cannot accidentally resolve back to the cover image.
-    try {
-      const preview = await global.MediaPipeline?.resolvePreviewUrl?.(ref, {
-        ...resolveOpts,
-        forceResolve: true,
-        useJobImageApi: false,
-        allowGridFallback: false,
-        tryAllPaths: true
-      });
-      if (isDisplayableImageUrl(preview)) return preview;
     } catch (e) { /* fallback below */ }
     if (slotJobId && global.WarehouseThumb?.resolveForCard) {
       try {

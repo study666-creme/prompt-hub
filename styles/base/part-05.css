@@ -474,9 +474,7 @@
 .image-drop-area.has-image.is-loading-preview {
   width: 100%;
   max-width: 100%;
-  height: var(--panel-preview-loading-height, auto);
-  min-height: var(--panel-preview-loading-height, min(36vh, 280px));
-  aspect-ratio: 4 / 3;
+  min-height: min(36vh, 280px);
   background: var(--card-skeleton-bg, var(--bg-hover));
   position: relative;
   isolation: isolate;
@@ -488,61 +486,14 @@
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  background: color-mix(in srgb, var(--bg-elevated) 68%, var(--bg-hover));
-}
-
-/* Keep the panel dimension stable while a gallery slot is resolving. */
-.image-drop-area.has-image.is-loading-preview::after {
-  content: '';
-  position: absolute;
-  inset: -35% -60%;
-  z-index: 2;
-  pointer-events: none;
-  background: linear-gradient(
-    108deg,
-    transparent 36%,
-    rgba(255, 255, 255, 0.03) 42%,
-    rgba(255, 255, 255, 0.2) 50%,
-    rgba(255, 255, 255, 0.04) 58%,
-    transparent 65%
+  background: radial-gradient(
+    circle at 50% 50%,
+    var(--card-orb-core) 0%,
+    var(--card-orb-mid) 28%,
+    var(--card-orb-halo) 48%,
+    transparent 68%
   );
-  transform: translateX(-42%) rotate(8deg);
-  animation: panel-image-shimmer 1.35s ease-in-out infinite;
-}
-
-.image-drop-area.has-image.is-loading-preview .placeholder-text,
-.image-drop-area.has-image.is-preview-error .placeholder-text {
-  position: absolute;
-  inset: 50% 16px auto;
-  z-index: 3;
-  display: block !important;
-  margin: 0;
-  transform: translateY(-50%);
-  color: var(--text-muted);
-  font-size: var(--font-sm);
-  line-height: 1.5;
-  text-align: center;
-  pointer-events: none;
-}
-
-.image-drop-area.has-image.is-preview-error {
-  height: var(--panel-preview-loading-height, auto);
-  min-height: var(--panel-preview-loading-height, min(36vh, 280px));
-  aspect-ratio: 4 / 3;
-  background: var(--card-skeleton-bg, var(--bg-hover));
-}
-
-@keyframes panel-image-shimmer {
-  0% { transform: translateX(-58%) rotate(8deg); opacity: 0; }
-  18% { opacity: 0.75; }
-  58% { opacity: 1; }
-  100% { transform: translateX(58%) rotate(8deg); opacity: 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .image-drop-area.has-image.is-loading-preview::after {
-    animation: none;
-  }
+  animation: viewer-orb-pulse 2.1s ease-in-out infinite;
 }
 
 .image-drop-area.has-image.is-loading-preview img,

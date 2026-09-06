@@ -1,110 +1,11 @@
 /index.html
   Cache-Control: no-cache, no-store, must-revalidate
 
+/pack-*
+  Cache-Control: no-cache, no-store, must-revalidate
+
 /sw.js
   Cache-Control: no-cache, no-store, must-revalidate
 
 /asset-studio.html
   Cache-Control: no-cache, no-store, must-revalidate
-
-/admin.html
-  Cache-Control: no-cache, no-store, must-revalidate
-
-/admin-login.html
-  Cache-Control: no-cache, no-store, must-revalidate
-
-# 版本化静态资源（scripts/bump-build.ps1 每次发版统一刷新 ?v=）。
-# URL 变了就是新内容，长缓存不可能命中过期文件；入口 HTML 仍走 no-cache，
-# 由 HTML 里带新 v 的引用完成失效。未版本化的运行时配置
-# （api-config.js / supabase-config.js 等）和 assets/ 图片保持默认协商缓存。
-# 版本化 pack 请求（带 ?v=）由 functions/_middleware.js 拦截并下发 immutable。
-# 这里只兜底不带 query 的直接命中：URL 不随发版变化，必须每次校验。
-/pack-*
-  Cache-Control: no-cache, no-store, must-revalidate
-
-/styles.css
-  Cache-Control: public, max-age=31536000, immutable
-
-/styles-theme.css
-  Cache-Control: public, max-age=31536000, immutable
-
-/styles-landing.css
-  Cache-Control: public, max-age=31536000, immutable
-
-/styles-mobile.css
-  Cache-Control: public, max-age=31536000, immutable
-
-/styles-settings.css
-  Cache-Control: public, max-age=31536000, immutable
-
-/styles-features.css
-  Cache-Control: public, max-age=31536000, immutable
-
-/styles-warehouse.css
-  Cache-Control: public, max-age=31536000, immutable
-
-/styles-assets.css
-  Cache-Control: public, max-age=31536000, immutable
-
-/styles-admin.css
-  Cache-Control: public, max-age=31536000, immutable
-
-/asset-studio.css
-  Cache-Control: public, max-age=31536000, immutable
-
-/theme.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/api-client.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/app-router.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/supabase-sync.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/script.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/warehouse-composer.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/features-draft.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/features-assets.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/community-public-feed.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/card-gallery.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/edit-panel-gallery.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/admin.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/membership.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/points-system.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/subscription.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/ui-background.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/asset-studio.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/imagegen-select-ui.js
-  Cache-Control: public, max-age=31536000, immutable
-
-/vendor/supabase.min.js
-  Cache-Control: public, max-age=31536000, immutable

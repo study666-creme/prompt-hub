@@ -85,44 +85,4 @@ const manifest = [
 ].join('\n');
 
 await writeFile(entryPath, manifest, 'utf8');
-
-/**
- * 首屏 CSS 分片预取提示。
- *
- * 拆分后 entry 只剩一份 `@import` 清单，浏览器必须先下载并解析它才能发现真正的
- * CSS 分片 —— 也就是说全部样式都要多等一次阻塞往返。把每个分片写成
- * `<link rel="preload">` 后，预加载扫描器可以和清单本身并行取走全部分片。
- * 版本号跟着清单走，重新拆分时这里会一并重写，不会失效。
- */
-async function syncIndexCssPreload() {
-  const indexPath = join(root, 'index.html');
-  if (!existsSync(indexPath)) return;
-  const index = readFileSync(indexPath, 'utf8');
-  // 只在该样式表确实被首屏引用时才写提示，避免给别的页面白送带宽。
-  if (!new RegExp(`<link[^>]+href="${entry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?v=`).test(index)) return;
-
-  // 标记带 entry 名：多份拆分清单（styles.css / styles-features.css）各自维护
-  // 自己的一段提示，共用同一对标记会互相覆盖。
-  const start = `  <!-- __PROMPT_HUB_CSS_PRELOAD_START__ ${entry} -->`;
-  const end = `  <!-- __PROMPT_HUB_CSS_PRELOAD_END__ ${entry} -->`;
-  const block = [
-    start,
-    ...relParts.map((rel) => `  <link rel="preload" as="style" href="${rel}?v=${build}">`),
-    end
-  ].join('\n');
-
-  if (index.includes(start) && index.includes(end)) {
-    const from = index.indexOf(start);
-    const to = index.indexOf(end) + end.length;
-    await writeFile(indexPath, index.slice(0, from) + block + index.slice(to), 'utf8');
-    console.log(`syncIndexCssPreload: refreshed ${relParts.length} hints in index.html for ${entry}`);
-    return;
-  }
-  const anchor = index.indexOf(`<link rel="stylesheet" href="${entry}?v=`);
-  if (anchor < 0) return;
-  await writeFile(indexPath, `${index.slice(0, anchor)}${block}\n${index.slice(anchor)}`, 'utf8');
-  console.log(`syncIndexCssPreload: inserted ${relParts.length} hints in index.html for ${entry}`);
-}
-
-await syncIndexCssPreload();
 console.log(`split ${entry} into ${chunks.length} CSS chunks under ${outDir}`);

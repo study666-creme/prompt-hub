@@ -45,18 +45,10 @@ while ((sm = scriptSrcRe.exec(index)) !== null) {
   }
 }
 
-// 部分 pack 改为首帧后延迟注入（见 index.html 的 __PH_DEFERRED_PACKS_ 标记），
-// 因此不再有 <script src="pack.js"> 标签。这里两种形式都接受，但必须至少命中一种，
-// 避免某个 pack 被悄悄从 index.html 里摘掉却没人发现。
-const deferredBlock = (index.match(/\/\* __PH_DEFERRED_PACKS_START__ \*\/([\s\S]*?)\/\* __PH_DEFERRED_PACKS_END__ \*\//) || [])[1] || '';
-const isDeferred = (pack) => deferredBlock.includes(`'${pack}'`);
-
 for (const pack of requiredPacks) {
   const packSrcRe = new RegExp(`src="${pack.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\?v=[^"]+)?"`);
-  if (!packSrcRe.test(index) && !isDeferred(pack)) {
-    console.error(
-      `verify-pack-contract: index.html 既没有 <script src="${pack}?v=...">，也不在延迟加载队列里`
-    );
+  if (!packSrcRe.test(index)) {
+    console.error(`verify-pack-contract: index.html missing <script src="${pack}?v=...">`);
     failed++;
   }
   const path = join(root, pack);

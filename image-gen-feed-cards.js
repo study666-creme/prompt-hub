@@ -72,9 +72,19 @@
       const listUrl = resolvedThumb
         || ((sourceCardId && d().isDisplayableImage?.(image) && global.SupabaseSync?.getListDisplayImageSrc)
           ? global.SupabaseSync.getListDisplayImageSrc(image, sourceCardId, listJobId
-            ? { jobId: listJobId, allowFullFallback: false }
-            : { allowFullFallback: false })
+            ? { jobId: listJobId, allowFullFallback: isRecentFeed }
+            : { allowFullFallback: isRecentFeed })
           : '');
+      if (!listUrl && isRecentFeed && sourceCardId && global.SupabaseSync?.getCachedDisplayUrl) {
+        const fullCached = global.SupabaseSync.getCachedDisplayUrl(image, {
+          assetId: sourceCardId,
+          jobId: listJobId || undefined,
+          variant: 'full'
+        });
+        if (fullCached && !fullCached.startsWith('storage://')) {
+          resolvedThumb = fullCached;
+        }
+      }
       const resolvedListUrl = resolvedThumb || listUrl;
       const hasDisplayableRef = d().isDisplayableImage?.(image);
       const feedRefs = normalizeFeedRefImages(refImage || (hasDisplayableRef ? image : ''), refImages);
@@ -88,7 +98,7 @@
       const loadingCls = imgPending ? ' is-loading' : '';
       const shineAt = imgPending ? ` data-shine-at="${Date.now()}"` : '';
       const imgBlock = hasDisplayableRef
-        ? `<div class="imagegen-feed-media${loadingCls}"${shineAt}><button type="button" class="imagegen-feed-thumb-btn" title="放大预览"><img class="card-img" src="${d().esc?.(imgSrc || d().IMG_LOADING_PLACEHOLDER)}" data-image-ref="${d().esc?.(image)}"${storageAttr}${jobAttr}${cardIdAttr} alt="" decoding="async" loading="lazy" onload="if((this.currentSrc||this.src||'').includes('data:image/svg'))return;if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.imagegen-feed-media'));else this.closest('.imagegen-feed-media')?.classList.remove('is-loading')"></button><button type="button" class="imagegen-feed-media-dl desktop-only" data-feed-download title="下载图片" aria-label="下载图片"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0l4-4m-4 4l-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span>下载</span></button></div>`
+        ? `<div class="imagegen-feed-media${loadingCls}"${shineAt}><button type="button" class="imagegen-feed-thumb-btn" title="放大预览"><img class="card-img" src="${d().esc?.(imgSrc || d().IMG_LOADING_PLACEHOLDER)}" data-image-ref="${d().esc?.(image)}"${storageAttr}${jobAttr}${cardIdAttr} alt="" decoding="async" loading="lazy" onload="if(typeof finishCardMediaShine==='function')finishCardMediaShine(this.closest('.imagegen-feed-media'));else this.closest('.imagegen-feed-media')?.classList.remove('is-loading')"></button><button type="button" class="imagegen-feed-media-dl desktop-only" data-feed-download title="下载图片" aria-label="下载图片"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0l4-4m-4 4l-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span>下载</span></button></div>`
         : '';
       const badgeHtml = badges.map(b => `<span class="imagegen-feed-badge">${d().esc?.(b)}</span>`).join('');
       const metaRowHtml = (metaLine || '').trim()
@@ -143,33 +153,14 @@
       const galleryN = Array.isArray(c.cardImages) ? c.cardImages.length
         : (Array.isArray(c.mjGridUrls) ? c.mjGridUrls.length : 0);
       const mjBadge = c.isMidjourney && galleryN > 1 ? `MJ·${galleryN}` : '';
-      // 已自动入库（或本身就是仓库卡片）的不显示 7 天到期提示，也不显示「存入库」
-      // 按钮；仅自动入库失败的回退记录保留到期提示与手动存入库入口。
-      const warehouseLinked = !!(c.__fromWarehouse || c.savedToWarehouse || c.warehouseCardId);
-      const expiry = !warehouseLinked && typeof d().formatExpiryLabel === 'function'
-        ? d().formatExpiryLabel(c)
-        : '';
+      const expiry = typeof d().formatExpiryLabel === 'function' ? d().formatExpiryLabel(c) : '';
       const metaLine = [model, mjBadge, expiry].filter(Boolean).join(' · ');
-      // 仓库卡（__fromWarehouse）封面与卡片库一致走 pickWarehouseListThumb（grid 池），
-      // DOM src 直接命中 getListDisplayImageSrc 的 grid 缓存；普通 cr_ 记录保持原链路。
-      const whThumb = c.__fromWarehouse
-        ? global.PromptHubCardGallery?.pickWarehouseListThumb?.(c)
-        : null;
-      // 临时上游 http 链不能当封面（会进 data-feed-ref 劣化参考图），交回原链路优先 storage ref
-      const whCover = whThumb?.ref
-        && d().isDisplayableImage?.(whThumb.ref)
-        && !global.SupabaseSync?.isEphemeralUpstreamImageUrl?.(whThumb.ref)
-        ? whThumb.ref
-        : '';
-      const image = whCover
-        || d().pickCreationFeedImage?.(c)
+      const image = d().pickCreationFeedImage?.(c)
         || c.image
         || (Array.isArray(c.cardImages) ? c.cardImages[0] : '')
         || c.mjCompositeUrl
         || '';
-      const jobId = (c.jobId || c.genJobId || whThumb?.slotJobId || '')
-        ? String(c.jobId || c.genJobId || whThumb?.slotJobId).replace(/#\d+$/, '')
-        : '';
+      const jobId = c.jobId ? String(c.jobId).replace(/#\d+$/, '') : '';
       return buildFeedCardHtml({
         id: 'cr_' + c.id,
         sourceCardId: c.id,
@@ -182,7 +173,7 @@
         metaLine,
         meta: '',
         showDel: true,
-        showSave: !warehouseLinked
+        showSave: true
       });
     }
 
