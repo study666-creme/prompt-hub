@@ -17,7 +17,7 @@
   const CREDITS_PER_YUAN = 100;
   const CREDIT_PACKS = [
     { id: 'points-10', price: 10, credits: 1000 },
-    { id: 'points-20', price: 20, credits: 2000 },
+    { id: 'points-20', price: 30, credits: 3000 },
     { id: 'points-50', price: 50, credits: 5000 },
     { id: 'points-100', price: 100, credits: 10000 },
     { id: 'points-200', price: 200, credits: 20000 },
