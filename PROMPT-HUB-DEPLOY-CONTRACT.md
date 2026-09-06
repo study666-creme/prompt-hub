@@ -16,7 +16,15 @@
 - 任何部署前必须确认：目标改动已合入 `merge/prompt-hub-20260906`。
 - 两树共同祖先之后的开发分支，完成后 `git merge` 进 merge 分支再部署。
 
-## 当前内容基线（deploy-base-20260906 = 线上 Worker 6f65fb31）
+## 当前内容基线（deploy-base-20260907 = main 4fa82c8，线上 Worker 94d42a31）
+
+- 2026-09-07 后台重构上线：订单/流水/审计页、用户封禁、积分 RPC 修正、
+  视频模型映射 + 按模型统计 + 错误日志、admin 前端 ES module 化（admin/ 目录）。
+- Pages staging allowlist 新增 admin/（stage-pages.ps1）。
+- 待办：MemFire 执行 supabase/migrations/20260906200000_admin_console_rework.sql
+  （未执行前订单/审计页提示表不可用，支付不受影响）。
+
+### 旧基线（deploy-base-20260906 = 线上 Worker 6f65fb31）
 
 - 任务中心四项下线（extension_save_card / asset_studio_chat /
   asset_studio_link_card / mini-99）
