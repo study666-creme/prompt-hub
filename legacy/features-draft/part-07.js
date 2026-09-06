@@ -663,7 +663,8 @@
     if (panelId === 'creationsSidePanel') {
       return document.querySelector('#pageCreations .community-workspace');
     }
-    return document.querySelector('#pageCommunity .community-workspace');
+    return document.querySelector('#pageCommunity .community-workspace')
+      || document.querySelector('#warehouseCommunityView .community-workspace');
   }
 
   function getFeatureSidePanelMountRoot() {
@@ -699,7 +700,7 @@
       !document.getElementById('communitySidePanel')?.classList.contains('hidden')
       || !document.getElementById('creationsSidePanel')?.classList.contains('hidden');
     const onFeedPage =
-      document.getElementById('pageCommunity')?.classList.contains('active')
+      (document.getElementById('pageCommunity')?.classList.contains('active') || document.body.classList.contains('warehouse-inline-community-active'))
       || document.getElementById('pageCreations')?.classList.contains('active');
     document.body.classList.toggle(
       'community-panel-open',

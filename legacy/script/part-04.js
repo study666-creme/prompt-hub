@@ -23,19 +23,9 @@
     function resumeRippleBackground(app) {
       if (settings.efficiencyMode) return;
       if (!backgroundBootReady) return;
-      const activeApp = app || document.querySelector('.app-nav-item.active')?.dataset?.app || 'warehouse';
-      if (isRippleHeavyApp(activeApp)) {
-        pauseRippleBackground();
-        return;
-      }
       const bg = document.getElementById('rippleGridBg');
-      if (!bg) return;
-      bg.style.display = '';
-      if (!window.__rippleGridBg && !bg.classList.contains('ripple-fallback-active')) {
-        void initBackgroundEffect();
-        return;
-      }
-      window.__rippleGridBg?.setPaused?.(false);
+      if (bg) bg.style.display = 'none';
+      document.body.classList.add('css-global-bg');
     }
     window.resumeRippleBackground = resumeRippleBackground;
 
@@ -55,8 +45,9 @@
       document.body.classList.toggle('efficiency-mode', on);
       const bg = document.getElementById('rippleGridBg');
       const vig = document.querySelector('.ui-vignette');
-      if (bg) bg.style.display = on ? 'none' : '';
+      if (bg) bg.style.display = 'none';
       if (vig) vig.style.display = on ? 'none' : '';
+      document.body.classList.add('css-global-bg');
       if (on) pauseRippleBackground();
       else resumeRippleBackground();
       window.FeatureDraft?.relayoutCommunityFeeds?.();
@@ -94,6 +85,15 @@
         safeForceExitGlobalView(true);
         closeEditPanel();
         if (typeof closeTagSheet === 'function') closeTagSheet();
+        // Leaving the warehouse must fully exit the focused library /
+        // inline-community presentation. Otherwise the body keeps
+        // `warehouse-content-focus*` classes and the CSS rule that hides
+        // #pageCommunity / #pageCreations stays active, so navigating to
+        // community or creations ends on an active-but-invisible page.
+        try { window.WarehouseComposer?.exitFocus?.(); } catch (e) { /* ignore */ }
+        // Fallback for older/mid-boot loads: move any borrowed feature-shell
+        // back to its source page before the active page is toggled.
+        try { window.restoreWarehouseInlineShells?.(); } catch (e) { /* ignore */ }
       }
       const leavingCommunity = document.getElementById('pageCommunity')?.classList.contains('active') && app !== 'community';
       if (leavingCommunity) {
@@ -191,60 +191,48 @@
       renderCards(force !== false);
     }
 
-    function getPromptCanvasUrl() {
-      let url = String(window.PROMPT_CANVAS_URL || 'https://infinite-canvas-jay.vercel.app/canvas').trim();
-      if (!url) url = 'https://infinite-canvas-jay.vercel.app/canvas';
+    function getPromptCanvasUrl(options = {}) {
+      if (window.PromptCanvasBridge?.buildUrl) {
+        return window.PromptCanvasBridge.buildUrl(options);
+      }
+      let url = String(window.PROMPT_CANVAS_URL || 'https://canvas.prompt-hubs.com/canvas').trim();
+      if (!url) url = 'https://canvas.prompt-hubs.com/canvas';
       if (!/\/canvas\/?$/.test(url)) url = url.replace(/\/?$/, '') + '/canvas';
       return url;
     }
-    function openPromptCanvas() {
+    function openPromptCanvas(options = {}) {
       window.MobileUI?.closeAllMobileOverlays?.();
-      window.open(getPromptCanvasUrl(), '_blank', 'noopener,noreferrer');
+      if (window.PromptCanvasBridge?.open) return window.PromptCanvasBridge.open(options);
+      return window.open(getPromptCanvasUrl(options), '_blank', 'noopener,noreferrer');
+    }
+    function openPromptCanvasCard(cardId) {
+      window.MobileUI?.closeAllMobileOverlays?.();
+      if (window.PromptCanvasBridge?.openCard) return window.PromptCanvasBridge.openCard(cardId);
+      return openPromptCanvas({ cardId });
     }
     window.openPromptCanvas = openPromptCanvas;
+    window.openPromptCanvasCard = openPromptCanvasCard;
 
     function initWarehouseHero() {
       const hero = document.getElementById('warehouseHero');
       if (!hero || hero.dataset.bound === '1') return;
       hero.dataset.bound = '1';
 
-      const cardsRoot = document.getElementById('cardsContainer');
-      const appRoot = document.querySelector('.app-main');
-      const scrollRoots = [cardsRoot, appRoot].filter(Boolean);
-      let frame = 0;
-
-      const syncHeroState = () => {
-        frame = 0;
-        const top = scrollRoots.reduce((max, root) => Math.max(max, Number(root.scrollTop) || 0), 0);
-        /* Mobile uses one document scroll; resizing the hero there changes the scroll range mid-gesture. */
-        const condensed = !isMobileViewport() && top > 28;
-        hero.classList.toggle('is-condensed', condensed);
-        hero.dataset.condensed = condensed ? '1' : '0';
-      };
-      const scheduleSync = () => {
-        if (frame) return;
-        frame = requestAnimationFrame(syncHeroState);
-      };
-
-      scrollRoots.forEach((root) => root.addEventListener('scroll', scheduleSync, { passive: true }));
-      window.addEventListener('resize', scheduleSync, { passive: true });
-
-      hero.querySelector('[data-warehouse-hero-expand]')?.addEventListener('click', () => {
-        hero.classList.remove('is-condensed');
-        hero.dataset.condensed = '0';
-        scrollRoots.forEach((root) => root.scrollTo?.({ top: 0, behavior: 'smooth' }));
-      });
-
       const countSource = document.getElementById('allCount');
       const countTarget = document.getElementById('warehouseHeroCount');
-      const syncCount = () => {
+      const scopeSource = document.getElementById('currentGroupTitle');
+      const scopeTarget = document.getElementById('warehouseHeroScope');
+      const syncSummary = () => {
         if (countTarget) countTarget.textContent = countSource?.textContent?.trim() || '0';
+        if (scopeTarget) scopeTarget.textContent = scopeSource?.textContent?.trim() || '全部提示词';
       };
-      syncCount();
+      syncSummary();
       if (countSource && typeof MutationObserver !== 'undefined') {
-        new MutationObserver(syncCount).observe(countSource, { childList: true, characterData: true, subtree: true });
+        new MutationObserver(syncSummary).observe(countSource, { childList: true, characterData: true, subtree: true });
       }
-      scheduleSync();
+      if (scopeSource && typeof MutationObserver !== 'undefined') {
+        new MutationObserver(syncSummary).observe(scopeSource, { childList: true, characterData: true, subtree: true });
+      }
     }
 
     function initAppNav() {
@@ -378,22 +366,11 @@
 
     async function initBackgroundEffect() {
       const bg = document.getElementById('rippleGridBg');
-      if (!bg || settings.efficiencyMode || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-      if (isMobileViewport()) {
-        bg.style.display = 'none';
-        return;
-      }
-      try {
-        const build = window.__APP_BUILD__ || '1';
-        const mod = await import(`./ripple-grid.js?v=${encodeURIComponent(build)}`);
-        window.__rippleGridBg = mod.initRippleGrid(bg, RIPPLE_BG_OPTS);
-        document.addEventListener('visibilitychange', () => {
-          if (document.hidden) pauseRippleBackground();
-          else resumeRippleBackground();
-        });
-      } catch {
-        initCanvasRippleFallback(bg);
-      }
+      // WebGL/canvas 背景在部分 GPU/驱动下渲染失败（黑屏/黑杠/卡死）。
+      // 全站统一改用纯 CSS 全局背景（body::before 多层光斑），不再初始化任何
+      // WebGL/canvas 背景，所有页面共享同一套稳定的静态背景。
+      if (bg) bg.style.display = 'none';
+      document.body.classList.add('css-global-bg');
     }
 
     let cloudPushTimer = null;
@@ -525,23 +502,33 @@
       });
     }
 
+    /** 时间戳归一化：兼容 epoch 数字、数字串与 ISO 字符串（云端同步可能存字符串） */
+    function phTimeOf(v) {
+      if (v == null || v === '') return 0;
+      if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+      const s = String(v).trim();
+      if (/^[0-9]+$/.test(s)) { const n = Number(s); return Number.isFinite(n) ? n : 0; }
+      const t = Date.parse(s);
+      return Number.isFinite(t) ? t : 0;
+    }
+
     function sortCardsWithPins(list) {
-      const pinned = list.filter(c => c.pinnedAt).sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
+      const pinned = list.filter(c => c.pinnedAt).sort((a, b) => phTimeOf(b.pinnedAt) - phTimeOf(a.pinnedAt));
       const rest = list.filter(c => !c.pinnedAt);
       if (sortMode === 'updated-asc') {
-        rest.sort((a, b) => (a.updatedAt || a.createdAt) - (b.updatedAt || b.createdAt));
+        rest.sort((a, b) => phTimeOf(a.updatedAt || a.createdAt) - phTimeOf(b.updatedAt || b.createdAt));
       } else if (sortMode === 'created-desc') {
         rest.sort((a, b) => {
-          const diff = (b.createdAt || b.updatedAt || 0) - (a.createdAt || a.updatedAt || 0);
+          const diff = phTimeOf(b.createdAt || b.updatedAt) - phTimeOf(a.createdAt || a.updatedAt);
           if (diff !== 0) return diff;
           return String(b.id || '').localeCompare(String(a.id || ''));
         });
       } else if (sortMode === 'random') {
         return [...pinned, ...shuffleCardRest(rest)];
       } else if (sortMode === 'updated-desc') {
-        rest.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+        rest.sort((a, b) => phTimeOf(b.updatedAt || b.createdAt) - phTimeOf(a.updatedAt || a.createdAt));
       } else {
-        rest.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+        rest.sort((a, b) => phTimeOf(b.updatedAt || b.createdAt) - phTimeOf(a.updatedAt || a.createdAt));
       }
       return [...pinned, ...rest];
     }
@@ -868,6 +855,57 @@
       const authBlocked = opts.authBlocked === true
         || window.__PH_AUTH_SESSION_EXPIRED__ === true
         || !!(window.__PH_AUTH_SIGN_PAUSE_UNTIL__ && Date.now() < window.__PH_AUTH_SIGN_PAUSE_UNTIL__);
+      const card = media.closest('#cardsContainer .card[data-id]');
+      const inWarehouseList = !!(card && !card.closest('.card[data-community-collect="1"]'));
+      const failRef = img?.getAttribute?.('data-image-ref');
+      const failCardId = card?.dataset?.id;
+      // 已发起 full 变体回退（进行中/已成功）：其它失败路径不得折叠成文字卡。
+      // full fallback 明确失败会以 fullFallbackTried:true 重入，届时才允许折叠。
+      if (inWarehouseList && img && opts.fullFallbackTried !== true
+          && img.dataset.whFullFallback === '1') {
+        const recovered = /^(https?:|data:image\/)/i.test(img.getAttribute('src') || '');
+        if (recovered) {
+          clearMediaShineWatchdog(media);
+          media.classList.remove('is-loading', 'card-media--await', 'card-media--load-failed', 'card-media--auth-blocked');
+          media.classList.add('media-revealed');
+          img.style.removeProperty('opacity');
+          img.style.removeProperty('visibility');
+        }
+        return;
+      }
+      // 列表缩略图失败但原图仍可解析（画布/生图入仓：_grid 缩略图缺失或签名慢）：
+      // 折叠成文字卡前先尝试一次 full 变体；能拿到稳定 URL 就亮图，而不是把卡打回文字。
+      if (!authBlocked && inWarehouseList && failRef && failCardId && img
+          && img.dataset.whFullFallback !== '1'
+          && opts.fullFallbackTried !== true
+          && window.SupabaseSync?.resolveDisplayUrl && !opts.keepFailureSlot) {
+        img.dataset.whFullFallback = '1';
+        void window.SupabaseSync.resolveDisplayUrl(failRef, {
+          assetId: failCardId,
+          cardId: failCardId,
+          variant: 'full',
+          allowFullFallback: true,
+          tryAllPaths: true,
+          communityFeed: false
+        }).then((url) => {
+          const stillEphemeral = url && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(url);
+          const stable = url && /^(https?:|data:image\/)/i.test(url) && !stillEphemeral;
+          if (stable && img) {
+            media.classList.remove('card-media--load-failed', 'is-loading', 'card-media--await', 'card-media--auth-blocked');
+            img.classList.remove('img-load-failed');
+            img.src = url; // 先应用 src，再让后续失败路径看到「已恢复」
+            media.classList.add('media-revealed');
+            window.finishCardMediaShine?.(media);
+            return;
+          }
+          finalizeWarehouseCardMediaFailure(media, img, {
+            ...opts,
+            fullFallbackTried: true,
+            markMissing: false
+          });
+        });
+        return;
+      }
       clearMediaShineWatchdog(media);
       if (media.__whBackfillFailTimer) {
         clearTimeout(media.__whBackfillFailTimer);
@@ -878,8 +916,6 @@
       media.classList.toggle('card-media--auth-blocked', authBlocked);
       if (authBlocked) media.dataset.failureLabel = '登录后加载图片';
       else delete media.dataset.failureLabel;
-      const card = media.closest('#cardsContainer .card[data-id]');
-      const inWarehouseList = !!(card && !card.closest('.card[data-community-collect="1"]'));
       const cardModel = card?.dataset?.id ? cards.find((c) => c.id === card.dataset.id) : null;
       const keepFailureSlot = opts.keepFailureSlot === true || authBlocked;
       if (inWarehouseList && keepFailureSlot) {
@@ -909,16 +945,14 @@
         img.style.visibility = 'hidden';
         img.style.opacity = '0';
       }
-      const cardId = card?.dataset?.id;
-      const ref = img?.getAttribute?.('data-image-ref');
       const inRecentFeed = !!img?.closest?.('#imageGenFeed .imagegen-feed-card[data-feed-id^="cr_"]');
-      if (!authBlocked && opts.markMissing !== false && ref && !inRecentFeed && window.SupabaseSync?.primaryImagePath) {
-        const primary = window.SupabaseSync.primaryImagePath(ref, cardId);
+      if (!authBlocked && opts.markMissing !== false && failRef && !inRecentFeed && window.SupabaseSync?.primaryImagePath) {
+        const primary = window.SupabaseSync.primaryImagePath(failRef, failCardId);
         if (primary && window.SupabaseSync?.markPathMissing) {
           window.SupabaseSync.markPathMissing(String(primary).replace(/^\//, ''));
         }
       }
-      scheduleWarehouseMasonryForCard(cardId);
+      scheduleWarehouseMasonryForCard(failCardId);
     }
     window.finalizeWarehouseCardMediaFailure = finalizeWarehouseCardMediaFailure;
 

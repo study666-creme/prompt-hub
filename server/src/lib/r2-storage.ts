@@ -156,7 +156,16 @@ async function downloadFromSupabase(env: Env, path: string): Promise<Blob | null
 }
 
 /** 按 MEDIA_STORAGE_MODE 下载对象 */
-export async function downloadCardImage(env: Env, path: string): Promise<Blob | null> {
+/**
+ * 按 MEDIA_STORAGE_MODE 下载对象。
+ * R2 缺失而 Supabase 回源命中时，若提供 onSupabaseHit 回调，会把「回源后
+ * 回传 R2」交给调用方（waitUntil 回填，一次性成本，之后走 R2/CDN）。
+ */
+export async function downloadCardImage(
+  env: Env,
+  path: string,
+  onSupabaseHit?: (key: string, blob: Blob) => void
+): Promise<Blob | null> {
   const mode = mediaStorageMode(env);
   const key = cleanPath(path);
   if (!key) return null;
@@ -167,7 +176,9 @@ export async function downloadCardImage(env: Env, path: string): Promise<Blob | 
     if (mode === 'r2') return null;
   }
 
-  return downloadFromSupabase(env, key);
+  const fromSupabase = await downloadFromSupabase(env, key);
+  if (fromSupabase && onSupabaseHit) onSupabaseHit(key, fromSupabase);
+  return fromSupabase;
 }
 
 /** 上传：有 R2 时双写 R2 + Supabase（r2-only 时只写 R2） */
@@ -218,17 +229,27 @@ export async function cardImageExists(
     if (mode === 'r2') return false;
   }
 
-  try {
-    const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).download(key);
-    if (!error && data && (data.size || 0) > 0) return true;
-  } catch {
-    /* fall through */
-  }
-
   const slash = key.lastIndexOf('/');
   const dir = slash >= 0 ? key.slice(0, slash) : '';
   const name = slash >= 0 ? key.slice(slash + 1) : key;
-  const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).list(dir, { limit: 200 });
-  if (error || !data?.length) return false;
-  return data.some((item) => item.name === name);
+  /* A list/search request is metadata-only. Downloading a 4K primary just to
+   * answer an existence check made the first grid request pay the full image
+   * transfer before the thumbnail could be generated. */
+  try {
+    const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).list(dir, {
+      limit: 1,
+      search: name
+    });
+    if (!error && data?.some((item) => item.name === name)) return true;
+  } catch {
+    /* fall through to the legacy download check for storage providers whose
+     * list endpoint is unavailable or does not support search. */
+  }
+
+  try {
+    const { data, error } = await admin.storage.from(CARD_IMAGES_BUCKET).download(key);
+    return !error && !!data && (data.size || 0) > 0;
+  } catch {
+    return false;
+  }
 }

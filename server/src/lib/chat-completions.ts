@@ -1,7 +1,14 @@
 import { ApiError } from './errors';
 
+// 同步对话（stream:false）正常数十秒内返回；挂死的连接 90s 强制中断，让用户
+// 拿到干净的 502 而不是边缘节点 100s 之后的 524。超时与断连同路径（未扣费
+// 即报错），不会造成重复计费。
+const CHAT_COMPLETIONS_TIMEOUT_MS = 90_000;
+
 function apiBase(envBase?: string): string {
-  return (envBase || 'https://api.deepseek.com').replace(/\/$/, '');
+  const value = String(envBase || '').trim();
+  if (!value) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '文字服务暂未配置');
+  return value.replace(/\/$/, '');
 }
 
 export type ChatToolCall = {
@@ -41,23 +48,25 @@ export function normalizeToolArguments(value: unknown): string {
   return String(value);
 }
 
-/** OpenAI 兼容的 /v1/chat/completions（DeepSeek 官方等） */
+/** OpenAI 兼容的 /v1/chat/completions。调用方必须显式提供目录解析后的模型。 */
 export async function submitChatCompletions(
   apiKey: string,
   baseUrl: string | undefined,
   params: {
     messages: ChatMessage[];
-    model?: string;
+    model: string;
     thinking?: boolean;
     reasoningEffort?: string;
     temperature?: number;
     maxTokens?: number;
     tools?: Array<Record<string, unknown>>;
     toolChoice?: unknown;
+    /** 透传给上游的幂等键；有 clientRequestId 时携带，网络重试防重复消费 */
+    idempotencyKey?: string;
   }
 ): Promise<ChatCompletionResult> {
   const body: Record<string, unknown> = {
-    model: params.model || 'deepseek-v4-flash',
+    model: params.model,
     messages: params.messages,
     temperature: params.temperature ?? 0.7,
     max_tokens: params.maxTokens ?? 2048,
@@ -75,9 +84,13 @@ export async function submitChatCompletions(
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      ...(params.idempotencyKey
+        ? { 'Idempotency-Key': params.idempotencyKey, 'X-Client-Request-Id': params.idempotencyKey }
+        : {})
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(CHAT_COMPLETIONS_TIMEOUT_MS)
   });
 
   let json: unknown = {};

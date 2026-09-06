@@ -4,6 +4,7 @@ import { extractErrorMessage } from '../../lib/cors-headers';
 import { formatBytes } from '../../lib/admin-helpers';
 import { scanBucketUsage } from '../../lib/admin-storage';
 import { summarizeRequestMetrics } from '../../lib/monitoring';
+import { collectPaymentOrderMonitor } from '../../lib/payment-monitoring';
 import { storagePolicySummary } from '../../lib/storage-quota';
 import { createAdminClient, isMembershipActive, type Profile } from '../../lib/supabase';
 import { requireAdminSecret } from '../../middleware/admin';
@@ -266,6 +267,7 @@ async function collectBusinessMonitor(admin: AdminClient, sinceIso: string) {
     ledgerRows: 0,
     redemptions: 0,
     payments: 0,
+    paymentOrders: null as Awaited<ReturnType<typeof collectPaymentOrderMonitor>> | null,
     recentRedemptions: [] as Array<{
       id: string;
       code: string;
@@ -345,6 +347,10 @@ async function collectBusinessMonitor(admin: AdminClient, sinceIso: string) {
     out.errors.push(missingDataSource(e) ? 'payment_webhook_events 不可读' : shortMessage(extractErrorMessage(e)) || 'payment_webhook_events 读取失败');
   }
 
+  out.paymentOrders = await collectPaymentOrderMonitor(admin);
+  if (!out.paymentOrders.available && out.paymentOrders.error) {
+    out.errors.push(out.paymentOrders.error);
+  }
   return out;
 }
 
@@ -443,8 +449,9 @@ adminDashboardRoutes.get('/infra', async c => {
       databaseServiceKeyLooksValid: serviceKeyOk,
       databasePing: dbPing,
       newApiConfigured: !!(c.env.NEWAPI_API_KEY?.trim()),
+      newApiVideoConfigured: !!(c.env.NEWAPI_VIDEO_API_KEY?.trim()),
       midjourneyApiConfigured: !!(c.env.APIMART_API_KEY?.trim()),
-      chatApiConfigured: !!(c.env.CHAT_API_KEY?.trim()),
+      chatApiConfigured: !!(c.env.NEWAPI_API_KEY?.trim()),
       mediaStorageMode: c.env.MEDIA_STORAGE_MODE || 'supabase',
       storageQuotaMbEnv: quotaMb(c.env, 'SUPABASE_STORAGE_QUOTA_MB', 1024),
       dbQuotaMbEnv: quotaMb(c.env, 'SUPABASE_DB_QUOTA_MB', 500),
@@ -508,6 +515,13 @@ adminDashboardRoutes.get('/monitoring', async c => {
       level: 'warn',
       title: '存在卡住的生图任务',
       detail: `${generation.stuckProcessing} 个任务已排队/生成超过 30 分钟。`
+    });
+  }
+  if (business.paymentOrders?.stale) {
+    alerts.push({
+      level: 'critical',
+      title: '支付订单长时间未结算',
+      detail: `${business.paymentOrders.stale} 个充值订单超过 10 分钟仍未收到可验证的支付回调，请在 EPay 商户后台核对后人工重试。`
     });
   }
 

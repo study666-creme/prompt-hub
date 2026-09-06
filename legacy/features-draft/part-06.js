@@ -457,6 +457,7 @@
     });
 
     const appendedCards = [...fragment.querySelectorAll('.card')];
+    window.bumpShineOrderEpoch?.(container);
     const preservedImgs = !feedAppend && isMobileViewport() ? snapshotLoadedFeedImages(container) : new Map();
     if (!feedAppend) {
       container.innerHTML = '';
@@ -733,18 +734,28 @@
       return;
     }
     const gen = ++communityFeedRenderGen;
+    const pendingFeedRefresh = publicFeedState.refreshPromise;
+    if (pendingFeedRefresh) {
+      void pendingFeedRefresh.then(() => {
+        if (gen !== communityFeedRenderGen) return;
+        if (communityScope === 'curated') return;
+        renderCommunityNow({ skipFeedFetch: true, forceRepaint: true });
+      }).catch((e) => console.warn('[community] shared feed refresh failed', e));
+    }
     if (!opts.skipFeedFetch) {
       hydratePublicFeedFromCache();
       const feedStale = publicFeedNeedsFullRefresh();
-      if ((publicFeedState.at === 0 || publicFeedState.posts.length < PUBLIC_FEED_MIN_READY) && !publicFeedState.loading) {
-        showCommunityFeedSkeleton(container, 8);
-        void refreshPublicCommunityFeed({ force: true, timeoutMs: 15000 }).then(async () => {
+      const forceFeedRefresh = opts.forceFeedRefresh === true;
+      if ((feedStale || forceFeedRefresh) && (publicFeedState.at === 0 || publicFeedState.posts.length < PUBLIC_FEED_MIN_READY) && !publicFeedState.loading) {
+        const hasUsablePosts = publicFeedState.posts.length > 0;
+        if (!hasUsablePosts) showCommunityFeedSkeleton(container, 8);
+        void refreshPublicCommunityFeed({ force: true, timeoutMs: 8000 }).then(async () => {
           if (gen !== communityFeedRenderGen) return;
           if (communityScope === 'curated') return;
           if (publicFeedState.at === 0) {
             setFeedGridEmpty(
               container,
-              '<div class="feature-empty community-feed-empty"><p>社区加载失败</p><button type="button" class="btn btn-ghost btn-sm" onclick="renderCommunity({ immediate: true, forceRepaint: true })">重试</button></div>'
+              '<div class="feature-empty community-feed-empty"><p>社区加载失败</p><button type="button" class="btn btn-ghost btn-sm" onclick="renderCommunity({ immediate: true, forceRepaint: true, forceFeedRefresh: true })">重试</button></div>'
             );
             return;
           }
@@ -755,10 +766,10 @@
           }
           renderCommunityNow({ skipFeedFetch: true, forceRepaint: true });
         });
-        return;
+        if (!hasUsablePosts) return;
       }
       if (feedStale && !publicFeedState.loading) {
-        void refreshPublicCommunityFeed({ force: true, timeoutMs: 15000 }).then(async (changed) => {
+        void refreshPublicCommunityFeed({ force: true, timeoutMs: 8000 }).then(async (changed) => {
           if (gen !== communityFeedRenderGen) return;
           if (communityScope === 'curated') return;
           if (!changed) return;
@@ -802,7 +813,7 @@
     }
     const guestUser = getActiveUser().id === 'guest';
     const loggedInUser = window.SupabaseSync?.isLoggedIn?.();
-    if (!list.length && (guestUser || loggedInUser) && (publicFeedState.loading || !publicFeedState.at)) {
+    if (!list.length && (guestUser || loggedInUser) && (publicFeedState.loading || (!publicFeedState.at && !publicFeedState.lastAttemptAt))) {
       showCommunityFeedSkeleton(container, 6);
       return;
     }
@@ -817,17 +828,17 @@
         ? (cardN === 0
           ? '「我的关注」只显示你关注的作者；卡片库为空时请先恢复卡片'
           : '暂无关注作者的作品，去「全部作品」点头像关注作者吧')
-        : cardN === 0
-          ? '卡片库暂无作品，因此社区里也没有你的发布记录'
-          : '暂无社区内容';
+        : '这里还没有社区作品，敬请期待';
       const restoreCardsBtn = window.SupabaseSync?.isLoggedIn?.() && cardN === 0
         ? '<button type="button" class="btn btn-secondary" onclick="syncCloudNow()">从云端恢复卡片库</button>'
         : '';
       const rateHint = publicFeedState.loading
         ? '<p class="panel-hint">正在加载全站社区内容…</p>'
-        : (loadPublicFeedCache()?.posts?.length
-          ? '<p class="panel-hint">社区列表加载受限，已显示缓存；请稍后再刷新</p>'
-          : '<p class="panel-hint">正在加载全站社区内容…若长时间空白，请稍后再试（勿连续强刷）</p>');
+        : (!publicFeedState.at && publicFeedState.lastAttemptAt
+          ? '<p class="panel-hint">社区加载失败，请稍后重试</p><button type="button" class="btn btn-ghost btn-sm" onclick="renderCommunity({ immediate: true, forceRepaint: true, forceFeedRefresh: true })">重试</button>'
+          : (loadPublicFeedCache()?.posts?.length
+            ? '<p class="panel-hint">社区列表加载受限，已显示缓存；请稍后再刷新</p>'
+            : '<p class="panel-hint">正在加载全站社区内容…若长时间空白，请稍后再试（勿连续强刷）</p>'));
       const cardHint = cardN === 0
         ? '<p class="panel-hint">若你之前发布过作品：请到「设置」→「恢复备份」，或点下方「从云端恢复卡片库」。</p>'
         : '<p class="panel-hint">发布到社区的作品会进入全站 Feed（提示词至少 15 字）。在卡片库打开「发布到社区」开关即可。</p>';

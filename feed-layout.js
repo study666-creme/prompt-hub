@@ -30,6 +30,7 @@
   const feedGridImageRelayoutBound = {};
   const resizeRelayoutBound = {};
   const visibilityWaitTimers = {};
+  const scrollWaitRelayout = {};
   const widthRetryCounts = {};
   let masonryRelayoutTimer = null;
   let masonryRelayoutPending = 0;
@@ -267,20 +268,30 @@
     const cards = collectCards(container).sort(compareFeedCardsForDistribution);
     const scrollRoot = d().getFeedScrollRoot?.(container) || container;
     const scrollTop = scrollRoot.scrollTop;
+    // 清空前预读每张卡的高度：原来在 append 循环里逐卡读
+    // col.offsetHeight，N 张卡强制 N 次全文档回流（读-写-读抖动）。
+    // 列宽在 applyColumnCss 阶段已定型，卡高度不随所在列变化，预读值
+    // 与实时读取等价；之后纯数字记账即可。
+    const cardHeights = new Map();
+    const rowGap = getGaps().rowGap;
+    for (const card of cards) {
+      clearCardInline(card);
+      cardHeights.set(card, card.getBoundingClientRect().height);
+    }
+    const colHeights = new Array(colEls.length).fill(0);
     colEls.forEach((col) => { col.innerHTML = ''; });
     cards.forEach((card) => {
-      clearCardInline(card);
       let target = 0;
       let minH = Infinity;
-      colEls.forEach((col, i) => {
-        const h = col.offsetHeight;
-        if (h < minH) {
-          minH = h;
+      for (let i = 0; i < colHeights.length; i += 1) {
+        if (colHeights[i] < minH) {
+          minH = colHeights[i];
           target = i;
         }
-      });
+      }
       colEls[target].appendChild(card);
       card.dataset.feedCol = String(target);
+      colHeights[target] += (cardHeights.get(card) || 0) + rowGap;
     });
     container.dataset.feedDistributed = '1';
     container.dataset.feedDistributedCols = String(cols);
@@ -766,6 +777,32 @@
       return;
     }
     if (isMobile()) return;
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    // 用户滚动中图片陆续加载会让卡片高度逐个变化，立即 layout 会让整列上下
+    // 跳动（浏览时闪烁重绘）。等滚动停稳后再重排；最多等 2.4s，避免无限拖延。
+    const userScrolling = typeof d().feedUserScrollingActive === 'function'
+      && d().feedUserScrollingActive(containerId);
+    if (userScrolling) {
+      clearTimeout(scrollWaitRelayout[containerId]);
+      const startedAt = Date.now();
+      const retry = () => {
+        if (!document.getElementById(containerId)) return;
+        const still = typeof d().feedUserScrollingActive === 'function'
+          && d().feedUserScrollingActive(containerId);
+        if (still && Date.now() - startedAt < 2400) {
+          scrollWaitRelayout[containerId] = setTimeout(retry, 300);
+          return;
+        }
+        scheduleMasonryRelayoutNow(containerId);
+      };
+      scrollWaitRelayout[containerId] = setTimeout(retry, 340);
+      return;
+    }
+    scheduleMasonryRelayoutNow(containerId);
+  }
+
+  function scheduleMasonryRelayoutNow(containerId) {
     const container = document.getElementById(containerId);
     if (!container) return;
     const inst = containerId === 'userProfileGrid' ? profileMasonry : communityMasonry;

@@ -15,6 +15,9 @@ scripts/activation-codes-insert.sql
 node_modules/
 packages/*/package-lock.json
 .pages-deploy/
+.pages-deploy-trash/
+# immutable 长缓存守卫的本地基线（每次 predeploy smoke 通过后重写，跨机器不共享）
+scripts/.versioned-cache-baseline.json
 prompt-hub-deploy.zip
 
 .vercel
@@ -29,8 +32,12 @@ pack-assets.js
 downloads/
 server/tmp-mooko-*
 .tmp-*.js
+.tmp-*
+tmp-*.json
 .tmp-index.html
 .tmp-video-frames/
+.worker-release/
+_worker.js
 .cursor/*.html
 .cursor/PENDING_DOC_UPDATE
 .cursor/doc-sync-state.json
@@ -44,7 +51,3 @@ bilibili-sub-web/
 
 # SillyTavern / 酒馆本地资料（与 Prompt Hub 无关，勿提交、勿部署）
 themes/
-
-# 测试与构建产物（自动生成，勿提交）
-artifacts/
-server/.wrangler-dry-run*/

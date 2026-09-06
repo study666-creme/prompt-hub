@@ -152,13 +152,24 @@
 
     function hydrateWarehouseGridImages(container, pageCards, opts = {}) {
       if (!container) return;
-      window.SupabaseSync?.bootstrapWarehouseMediaCache?.({ clearAllMissing: true });
       const mobile = isMobileViewport();
       const perfCap = window.MobileUI?.getPerf?.()?.warehousePrefetchCap ?? 24;
       const cap = mobile
         ? Math.min(perfCap, (pageCards || []).length || perfCap)
         : Math.min(warehousePageSize(), (pageCards || []).length || warehousePageSize());
       const list = (pageCards || []).slice(0, cap);
+      // Auth hydration and route transitions can render the same first page
+      // several times. Avoid repeating the network signing pass for an
+      // unchanged page while still re-observing newly inserted DOM nodes.
+      const sig = `${mobile ? 'm' : 'd'}:${list.map((card) => `${card?.id || ''}:${card?.image || ''}`).join('|')}`;
+      const alreadyHydrated = container.dataset.whHydrateSig === sig;
+      if (alreadyHydrated && opts.force !== true) {
+        window.CardImageLoader?.observeContainer?.(container);
+        window.CardImageLoader?.boostWarehouseImages?.(container, mobile ? Math.min(cap, 4) : Math.min(cap, 12));
+        return;
+      }
+      container.dataset.whHydrateSig = sig;
+      window.SupabaseSync?.bootstrapWarehouseMediaCache?.({ clearAllMissing: true });
       const afterBind = () => {
         const boostCap = mobile ? cap : Math.min(Math.max(cap, 32), 48);
         window.CardImageLoader?.boostWarehouseImages?.(container, boostCap);
@@ -851,7 +862,6 @@
           }
           if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
             const app = window.AppRouter?.resolveBootApp?.()
-              || localStorage.getItem('promptrepo_app_page')
               || 'landing';
             window.FeatureDraft?.onAppChange?.(app);
           }

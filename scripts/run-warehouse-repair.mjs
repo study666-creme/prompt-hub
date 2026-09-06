@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * 卡片库 R2 回填：Supabase 有原图、R2 缺失时上传到 R2
+ * 卡片库 R2 回填：存储桶有原图、R2 缺失时上传到 R2（primary 与 _grid）
  *
  * 用法：
  *   node scripts/run-warehouse-repair.mjs
  *   node scripts/run-warehouse-repair.mjs --dry-run
  *   node scripts/run-warehouse-repair.mjs --max 200
  *   node scripts/run-warehouse-repair.mjs --offset 200 --max 200   # 续跑下一批
- *   node scripts/run-warehouse-repair.mjs --all                    # 扫完全部 848 张
+ *   node scripts/run-warehouse-repair.mjs --all                    # 扫完全部卡片
  *
- * 配置：scripts/admin.local.env（SUPABASE_* + R2_*）
+ * 配置：scripts/admin.local.env（MEMFIRE_* 当前库 + R2_*；旧 SUPABASE_* 仅在缺少 MEMFIRE_* 时回退）
  * 必填：AUDIT_USER_ID（目标账号 UUID；不要写进公开仓库）
  *
  * 若出现 Connect Timeout：多为网络连不上 Cloudflare R2，请开 VPN 后重试，或用 --offset 续跑。
@@ -44,8 +44,9 @@ function loadEnvFile(filePath) {
 }
 
 const env = { ...process.env, ...loadEnvFile(path.join(__dirname, 'admin.local.env')) };
-const SUPABASE_URL = String(env.SUPABASE_URL || '').replace(/\/$/, '');
-const SERVICE_KEY = String(env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+// 当前存储为 MemFire；仅当缺少 MEMFIRE_* 时才回退到旧 Supabase 备份库。
+const SUPABASE_URL = String(env.MEMFIRE_URL || env.SUPABASE_URL || '').replace(/\/$/, '');
+const SERVICE_KEY = String(env.MEMFIRE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const R2_ACCOUNT_ID = String(env.R2_ACCOUNT_ID || '').trim();
 const R2_ACCESS_KEY_ID = String(env.R2_ACCESS_KEY_ID || '').trim();
 const R2_SECRET_ACCESS_KEY = String(env.R2_SECRET_ACCESS_KEY || '').trim();
@@ -69,7 +70,7 @@ const startOffset = offsetIdx >= 0 ? Math.max(0, Number(args[offsetIdx + 1]) || 
 const useApi = args.includes('--api');
 
 if (!SUPABASE_URL || !SERVICE_KEY) {
-  console.error('缺少 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY（scripts/admin.local.env）');
+  console.error('缺少 MEMFIRE_URL / MEMFIRE_SERVICE_ROLE_KEY（scripts/admin.local.env，回退旧 SUPABASE_*）');
   process.exit(1);
 }
 if (!USER_ID) {

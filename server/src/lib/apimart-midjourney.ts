@@ -1,5 +1,10 @@
 import { ApiError } from './errors';
 import { extractTaskId } from './apimart';
+
+// 付费提交 / 任务查询的 fetch 超时：每个上游 fetch 都必须有界，防止卡死
+// 连接占满 queue consumer 的执行时限。
+const MJ_SUBMIT_TIMEOUT_MS = 120_000;
+const MJ_TASK_QUERY_TIMEOUT_MS = 15_000;
 import {
   type MjActionKind,
   type MjButtonPublic,
@@ -51,7 +56,8 @@ async function postMj(
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(MJ_SUBMIT_TIMEOUT_MS)
   });
   let json: unknown = {};
   try {
@@ -200,7 +206,8 @@ export async function fetchMidjourneyTaskGallery(
   buttons: MjButtonPublic[];
 } | null> {
   const res = await fetch(`${apiBase(baseUrl)}/v1/midjourney/${encodeURIComponent(taskId)}`, {
-    headers: { Authorization: `Bearer ${apiKey}` }
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(MJ_TASK_QUERY_TIMEOUT_MS)
   });
   if (!res.ok) return null;
   let json: unknown = {};
@@ -241,7 +248,8 @@ export async function fetchMidjourneyTaskButtons(
   taskId: string
 ): Promise<MjButtonPublic[]> {
   const res = await fetch(`${apiBase(baseUrl)}/v1/midjourney/${encodeURIComponent(taskId)}`, {
-    headers: { Authorization: `Bearer ${apiKey}` }
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(MJ_TASK_QUERY_TIMEOUT_MS)
   });
   if (!res.ok) return [];
   let json: unknown = {};

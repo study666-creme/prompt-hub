@@ -1,5 +1,8 @@
 @media (min-width: 901px) {
-  /* 桌面卡片库 Masonry 瀑布流（须在 flex 列内可滚动，勿 height:auto 撑破父级） */
+  /* 桌面卡片库：JS 分发的列容器瀑布流（.warehouse-focus-columns）。
+   * 不用 CSS multi-column：那种布局在图片加载时会由浏览器反复 balance 重排，
+   * 导致卡片在各列之间跳来跳去（闪动）。列容器方案保持卡片自然比例（真瀑布流），
+   * 图片加载只改变该卡片在自己列里的高度，不会把其他列已有卡片挤走。 */
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) {
     display: block !important;
     position: relative !important;
@@ -9,39 +12,68 @@
     min-height: 0 !important;
     overflow-x: hidden !important;
     overflow-y: auto !important;
+    /* 始终为纵向滚动条预留槽位：分页加载时内容一超过一屏，滚动条出现会压窄
+     * 可用宽度，四列整体左移一次、其后每次再变化又移一次 —— 卡片数多（分页持续
+     * 追加）时这种整体位移会反复发生，看起来就是整片卡片在闪。 */
+    scrollbar-gutter: stable;
+  }
+  #cardsContainer.cards-container.warehouse-focus-columns:not(.list-view):not(.mobile-grid) {
+    display: flex !important;
+    align-items: flex-start;
+    column-gap: var(--warehouse-grid-gap, var(--card-gap, 12px));
+    row-gap: 0;
+  }
+  #cardsContainer.cards-container.warehouse-focus-columns > .warehouse-focus-col {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  #cardsContainer.cards-container.warehouse-focus-columns > .warehouse-focus-col > .card {
+    width: 100% !important;
+    margin: 0 0 var(--warehouse-grid-gap, var(--card-gap, 12px)) !important;
   }
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card {
-    display: block;
+    display: flex;
     box-sizing: border-box;
-    margin-bottom: var(--card-row-gap) !important;
+    width: 100% !important;
+    margin: 0 0 var(--warehouse-grid-gap, var(--card-gap, 12px)) !important;
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    break-inside: avoid;
+    -webkit-column-break-inside: avoid;
   }
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter {
     animation: none !important;
   }
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft {
-    animation: warehouseCardSoftFade 0.46s var(--ease-out) both !important;
+    animation: warehouseCardSoftFade 0.5s var(--ease-out) both !important;
     will-change: opacity;
   }
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-media,
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-body,
-  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-copy-btn {
-    animation: warehouseCardSoftLift 0.42s var(--ease-out) both;
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-copy-btn,
+  #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-canvas-btn {
+    animation: warehouseCardSoftLift 0.5s var(--ease-out) both;
     animation-delay: inherit;
-    will-change: opacity, transform, filter;
+    will-change: opacity, transform;
   }
   @keyframes warehouseCardSoftFade {
     from { opacity: 0; }
     to { opacity: 1; }
   }
+  /* 下滑加载入场：仅用 transform/opacity（不用 blur，避免合成层开销卡顿） */
   @keyframes warehouseCardSoftLift {
-    from { opacity: 0.72; transform: translateY(6px); filter: blur(2px); }
-    to { opacity: 1; transform: none; filter: none; }
+    from { opacity: 0; transform: translateY(18px); }
+    to { opacity: 1; transform: none; }
   }
   @media (prefers-reduced-motion: reduce) {
     #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft,
     #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-media,
     #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-body,
-    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-copy-btn {
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-copy-btn,
+    #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .card.card-enter-soft > .card-canvas-btn {
       animation: none !important;
       opacity: 1;
       transform: none;
@@ -49,20 +81,26 @@
     }
   }
   #cardsContainer.cards-container:not(.list-view):not(.mobile-grid) > .grid-sizer {
-    display: block;
-    visibility: hidden;
-    height: 0;
-    margin: 0;
-    padding: 0;
+    display: none !important;
   }
   #cardsContainer:not(.list-view) .card-media {
+    width: 100%;
     min-height: 0;
+    /* 真瀑布流：媒体框跟随图片实际比例（横图横卡、竖图竖卡、无留白）。
+     * 加载完成前用 3/4 占位（见 is-loading/card-media--await），加载后放开为自然高。 */
+    aspect-ratio: auto;
     overflow: hidden;
     position: relative;
   }
+  /* 图片还没就绪（未 media-revealed）时先用 3/4 占位，避免媒体框从 ~0 高度突变。
+   * 这里绝不能加 max-height：那会把所有卡片压成等高的方格，瀑布流就没了。
+   * 加载完成后移除占位类，媒体框放开为图片真实比例（aspect-ratio: auto）。 */
+  #cardsContainer:not(.list-view) .card-media:not(.media-revealed) {
+    aspect-ratio: 3 / 4;
+    min-height: 72px;
+    background: var(--bg-hover);
+  }
   #cardsContainer:not(.list-view) .card-media.card-media--await {
-    aspect-ratio: 4 / 3;
-    max-height: 200px;
     min-height: 72px;
     background: var(--bg-hover);
   }
@@ -72,8 +110,8 @@
     min-height: 72px;
   }
   #cardsContainer:not(.list-view) .card[data-community-collect="1"] .card-media.media-revealed {
-    aspect-ratio: auto;
-    max-height: none;
+    aspect-ratio: 4 / 3;
+    max-height: 360px;
   }
   #cardsContainer:not(.list-view) .card-media.card-media--await:not(.is-loading)::before,
   #cardsContainer:not(.list-view) .card-media.card-media--await:not(.is-loading)::after {
@@ -100,11 +138,25 @@
     width: 100%;
     height: auto;
     max-width: 100%;
-    object-fit: contain;
+    /* 真瀑布流：图片按实际比例自然展示，容器跟随图片高度（横图横卡、无留白） */
+    object-fit: cover;
     object-position: center center;
   }
   #cardsContainer.cards-container:not(.list-view) {
     opacity: 1;
+  }
+
+  #cardsContainer.cards-container:not(.list-view) > .warehouse-scroll-sentinel {
+    grid-column: 1 / -1;
+  }
+  /* 列容器模式下哨兵绝不能作为 flex 项参与宽度分配：它默认宽度约等于整行，
+   * 会把四个 .warehouse-focus-col（flex-basis:0）挤成 ~2px 的细条，
+   * 未聚焦首页滚动分页时整片卡片就一直在"细条 -> 正常列宽"之间闪烁。 */
+  #cardsContainer.cards-container.warehouse-focus-columns:not(.list-view):not(.mobile-grid) > .warehouse-scroll-sentinel {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
   }
 
   /* 社区 Feed：Masonry 容器占满主区并可滚动 */
@@ -842,4 +894,57 @@
   .warehouse-hero-card--back,
   .warehouse-hero-card--middle,
   .warehouse-hero-card--front { animation: none; }
+}
+
+/* ===== 仓库卡片入场（2026-08-30）=====
+ * 旧版 .card-enter / .card-enter-soft 是死代码：选择器只匹配 #cardsContainer 的
+ * 直接子卡片，而桌面列容器瀑布流把卡片放进 .warehouse-focus-col，永远命中不了；
+ * 而且它们用的是 animation —— 瀑布流分发卡片时 appendChild 移动节点会重启 CSS
+ * animation，整片卡片反复重放就是"疯狂闪动"，所以当年整段被摘掉了。
+ *
+ * 重写要点：
+ *   - 用 transition 而不是 animation：transition 只在计算值变化时播放，重插节点
+ *     不会重放，从根子上避开闪动。
+ *   - 位移放在 .card-media / .card-body 上，不放 .card：.card 的 transform 已被
+ *     hover（translateY(-6px) scale(1.018)）占用，两者叠在同一属性上会互相打断。
+ *   - 只动 opacity / transform，不改变卡片尺寸，不会触发瀑布流重排，也不会在
+ *     prefers-reduced-motion 下强制播放（JS 侧也会直接跳过）。 */
+#cardsContainer .card.card-enter-pending {
+  opacity: 0;
+}
+#cardsContainer .card.card-enter-pending > .card-media,
+#cardsContainer .card.card-enter-pending > .card-body {
+  transform: translate3d(0, 12px, 0);
+}
+#cardsContainer .card.card-enter-in {
+  /* 保留 .card 原有的 transform / box-shadow / filter 过渡，
+   * 只额外补一条 opacity，避免入场期间 hover 的位移和阴影变成硬跳。 */
+  transition:
+    opacity 400ms var(--ease-out) var(--card-enter-delay, 0ms),
+    transform 0.2s var(--ease-spring),
+    box-shadow 0.22s var(--ease-out),
+    filter 0.2s var(--ease-out);
+}
+#cardsContainer .card.card-enter-in > .card-media,
+#cardsContainer .card.card-enter-in > .card-body {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 400ms var(--ease-out) var(--card-enter-delay, 0ms),
+    transform 400ms var(--ease-out) var(--card-enter-delay, 0ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  #cardsContainer .card.card-enter-pending,
+  #cardsContainer .card.card-enter-pending > .card-media,
+  #cardsContainer .card.card-enter-pending > .card-body {
+    opacity: 1;
+    transform: none;
+  }
+  #cardsContainer .card.card-enter-in,
+  #cardsContainer .card.card-enter-in > .card-media,
+  #cardsContainer .card.card-enter-in > .card-body {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
 }

@@ -207,7 +207,7 @@
     return ws('saveGeneratedToWarehouse', opts);
   }
 
-  /** GrsAI 临时链约 2 小时失效，恢复窗口与之对齐 */
+  /** 临时结果链接约 2 小时失效，恢复窗口与之对齐。 */
   const RECENT_GEN_RECOVER_MS = 2 * 3600 * 1000;
   /** 后台恢复超过此时间仍无图 → 标失败并清占位 */
   const RECOVERY_GIVE_UP_MS = 25 * 60 * 1000;
@@ -483,14 +483,8 @@
     let ok = 0;
     let charged = 0;
     try {
-      await ig('waitForSubmitPaint');
       const meta = getImageGenFormMeta();
       let unit = window.PointsSystem?.getImageGenCost?.(meta.model, meta.resolution) ?? 10;
-      if (window.PointsSystem?.useApiForAccount?.()) {
-        if (btn) btn.textContent = '正在确认任务…';
-        const quoted = await quoteGenerationCost(meta.resolution, meta.quality, meta.model, unit);
-        unit = quoted.cost;
-      }
       unit = window.PointsSystem?.roundCredits?.(unit) ?? unit;
       const fmt = window.PointsSystem?.formatCredits || ((n) => String(n));
       const balance = window.PointsSystem?.getCredits?.() ?? 0;
@@ -499,32 +493,49 @@
         toast(`积分不足（每张 ${fmt(unit)}，当前 ${fmt(balance)}）`);
         return;
       }
+      const affordableCount = unit > 0 ? Math.floor(balance / unit) : count;
+      const submitCount = Math.min(count, Math.max(1, affordableCount));
       if (balance < totalNeed) {
-        toast(`积分约够 ${Math.floor(balance / unit)} 张，将按顺序提交直到不足（${fmt(unit)} 积分/张）`);
+        toast(`积分约够 ${submitCount} 张，本次将提交 ${submitCount} 张（${fmt(unit)} 积分/张）`);
       }
 
-      for (let i = 0; i < count; i += 1) {
-        const curBalance = window.PointsSystem?.getCredits?.() ?? 0;
-        if (curBalance < unit && i > 0) break;
-        if (btn) btn.textContent = `提交中 ${i + 1}/${count}…`;
-        const res = await runImageGenWithPrompt(undefined, {
+      if (btn) btn.textContent = `提交中 ${submitCount} 张…`;
+      const batchPromise = ig('runImageGenBatchTasks', submitCount, (i) => (
+        runImageGenWithPrompt(undefined, {
           silentToast: true,
           batch: true,
           batchId,
           batchIndex: i + 1,
-          batchTotal: count,
+          batchTotal: submitCount,
           batchMergeCards: shouldImageGenBatchMergeCards(),
-          cardTitle: getImageGenCardTitle()
-        });
+          cardTitle: getImageGenCardTitle(),
+          clientRequestId: `web.image.${batchId}.${i + 1}`
+        })
+      ));
+      if (!batchPromise || typeof batchPromise.then !== 'function') {
+        throw new Error('批量生图模块未就绪');
+      }
+      const queuedMessage = `已加入 ${submitCount} 张，正在生成`;
+      if (typeof window.showQuickToast === 'function') window.showQuickToast(queuedMessage, 900);
+      else toast(queuedMessage, 900);
+      if (btn && imageGenBatchRunning) {
+        btn.classList.remove('is-submitting');
+        btn.classList.add('is-submitted');
+        btn.removeAttribute('aria-busy');
+        btn.textContent = `已加入 ${submitCount} 张`;
+        btn.disabled = true;
+      }
+      const settled = await batchPromise;
+      const results = settled.map((entry) => (
+        entry.status === 'fulfilled'
+          ? entry.value
+          : { ok: false, message: String(entry.reason?.message || entry.reason || '提交失败') }
+      ));
+      for (const res of results) {
         if (res?.ok) {
           ok += 1;
           charged += res.creditsCharged || unit;
-        } else if (res?.reason === 'credits') {
-          break;
-        } else if (i === 0) {
-          break;
         }
-        if (i < count - 1) await new Promise((r) => setTimeout(r, 2200 + Math.floor(Math.random() * 800)));
       }
       await window.PointsSystem?.refreshCreditsFromServer?.();
       window.PointsSystem?.updateCreditsUI?.();
@@ -533,10 +544,10 @@
         const isMj = isImageGenMidjourneyModel(getImageGenModel());
         toast(
           isMj
-            ? `已提交 ${ok}/${count} 个 MJ 任务，每张完成后单独建卡（约 ${fmt(charged)} 积分）`
+            ? `已提交 ${ok}/${submitCount} 个 MJ 任务，每张完成后单独建卡（约 ${fmt(charged)} 积分）`
             : split
-              ? `已提交 ${ok}/${count} 张生图，已扣约 ${fmt(charged)} 积分（${fmt(unit)} 积分/张）`
-              : `已提交 ${ok}/${count} 张，完成后合并存入同一卡片（最多 5 张，约 ${fmt(charged)} 积分）`
+              ? `已提交 ${ok}/${submitCount} 张生图，已扣约 ${fmt(charged)} 积分（${fmt(unit)} 积分/张）`
+              : `已提交 ${ok}/${submitCount} 张，完成后合并存入同一卡片（最多 5 张，约 ${fmt(charged)} 积分）`
         );
       }
     } catch (e) {
@@ -591,14 +602,14 @@
           : tier === 'basic' ? '基础版'
             : tier === 'lite' ? '轻量版' : '免费';
       if (!n) {
-        el.textContent = `最近生成保留 7 天 · 最多 ${max} 条（${tierHint}）· 喜欢请点「存入库」`;
+        el.textContent = `生图完成会自动存入卡片库「图片生成」分组 · 本列表最多显示最近 ${max} 条（${tierHint}）`;
         el.hidden = false;
         return;
       }
       el.hidden = false;
       el.textContent = mobile
-        ? `最近 ${n}/${max} 条 · 7 天 · 点 × 可删除`
-        : `最近 ${n}/${max} 条（${tierHint}）· 7 天内有效 · 超出条数或到期未存入库将自动删除`;
+        ? `最近 ${n}/${max} 条 · 已自动存入卡片库「图片生成」分组`
+        : `最近 ${n}/${max} 条（${tierHint}）· 生图已自动存入卡片库「图片生成」分组`;
       return;
     }
     el.hidden = false;

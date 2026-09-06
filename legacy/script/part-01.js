@@ -263,7 +263,7 @@
       defaultImageGenAutoPublish: true,
       communityNotificationsEnabled: true,
       communityNotifyBadge: true,
-      autoDayNight: false,
+      autoDayNight: true,
       themeManualOverride: false,
       showTrimBlackBorderTool: false,
       preserveOriginalCardImage: false,
@@ -325,7 +325,7 @@
     const GUEST_CARD_LIMIT = 10;
 
     let cardColumns = Number(localStorage.getItem('promptrepo_card_columns'));
-    if (!Number.isFinite(cardColumns) || cardColumns < 1) cardColumns = 3;
+    if (!Number.isFinite(cardColumns) || cardColumns < 1) cardColumns = 4;
     cardColumns = Math.min(5, Math.max(1, cardColumns));
     try {
       localStorage.setItem('promptrepo_card_columns', String(cardColumns));

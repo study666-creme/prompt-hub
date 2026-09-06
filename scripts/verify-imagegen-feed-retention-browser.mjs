@@ -42,6 +42,7 @@ try {
         modelLabel: 'Special 1K',
         createdAt: Date.now()
       },
+      mobile: true,
       pending: [],
       failed: []
     };
@@ -82,7 +83,7 @@ try {
       getRecentCreationsForFeed: () => state.creations,
       imageGenModelLabel: () => 'Special 1K',
       isDisplayableImage: (ref) => typeof ref === 'string' && ref.length > 0,
-      isMobileFeedViewport: () => true,
+      isMobileFeedViewport: () => state.mobile,
       isSlowGenProviderModel: () => false,
       pickCreationFeedImage: (creation) => creation.image,
       prunePendingJobsWithCreations: () => {},
@@ -206,7 +207,70 @@ try {
     throw new Error(`force render replaced an in-flight image: ${JSON.stringify(loadingState)}`);
   }
 
-  console.log('verify-imagegen-feed-retention-browser OK:', JSON.stringify({ pendingState, failedState, completedState, loadingState }));
+  await page.addStyleTag({ content: `
+    #imageGenFeed { display: grid; grid-template-columns: 1fr 1fr; height: 280px; overflow-y: auto; }
+    #imageGenFeed .imagegen-feed-card { min-height: 130px; }
+    #imageGenFeed .imagegen-feed-media { min-height: 80px; }
+    #imageGenFeed .imagegen-feed-library-cta { grid-column: 1 / -1; min-height: 80px; }
+  ` });
+  await page.evaluate(async (image) => {
+    window.__feedState.mobile = false;
+    window.__feedState.pending = [];
+    window.__feedState.failed = [];
+    window.__feedState.creations = Array.from({ length: 13 }, (_, index) => ({
+      id: `page-${index + 1}`,
+      prompt: `paginated image ${index + 1}`,
+      image,
+      model: 'image2-economy',
+      modelLabel: 'Special 1K',
+      createdAt: Date.now() - index
+    }));
+    await window.__feedApi.renderImageGenFeed({ force: true, scrollToTop: true });
+  }, imageDataUrl);
+  await page.waitForFunction(() => document.querySelectorAll('#imageGenFeed [data-feed-id^="cr_page-"]').length === 12);
+  const priorityState = await page.evaluate(() => (
+    [...document.querySelectorAll('#imageGenFeed [data-feed-id^="cr_page-"] img')]
+      .slice(0, 6)
+      .map((img) => ({ loading: img.loading, fetchPriority: img.fetchPriority }))
+  ));
+  if (priorityState.length !== 6
+    || priorityState.some((item) => item.loading !== 'eager')
+    || priorityState.slice(0, 4).some((item) => item.fetchPriority !== 'high')) {
+    throw new Error(`recent first-screen images were not prioritized: ${JSON.stringify(priorityState)}`);
+  }
+  await page.evaluate(() => {
+    const feed = document.getElementById('imageGenFeed');
+    const last = window.__feedState.creations[12];
+    const temp = document.createElement('div');
+    temp.innerHTML = window.__feedApi.creationToFeedHtml(last);
+    window.__feedApi.appendImageGenFeedCards(feed, [temp.firstElementChild]);
+  });
+  const paginationState = await page.evaluate(() => {
+    const feed = document.getElementById('imageGenFeed');
+    const footer = feed.querySelector(':scope > [data-imagegen-feed-footer="recent"]');
+    const cards = [...feed.querySelectorAll(':scope > .imagegen-feed-card[data-feed-id^="cr_page-"]')];
+    return {
+      cardCount: cards.length,
+      footerCount: feed.querySelectorAll(':scope > [data-imagegen-feed-footer="recent"]').length,
+      footerAfterEveryCard: cards.every((card) => (
+        !!(card.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING)
+      )),
+      lastCardId: cards.at(-1)?.dataset.feedId || ''
+    };
+  });
+  if (paginationState.cardCount !== 13 || paginationState.footerCount !== 1
+    || !paginationState.footerAfterEveryCard || paginationState.lastCardId !== 'cr_page-13') {
+    throw new Error(`recent feed footer split paginated images: ${JSON.stringify(paginationState)}`);
+  }
+
+  console.log('verify-imagegen-feed-retention-browser OK:', JSON.stringify({
+    pendingState,
+    failedState,
+    completedState,
+    loadingState,
+    priorityState,
+    paginationState
+  }));
 } finally {
   if (browser) await browser.close();
 }

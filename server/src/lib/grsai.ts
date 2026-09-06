@@ -1,5 +1,10 @@
 import { ApiError } from './errors';
 
+// 付费提交 / 任务轮询的 fetch 超时：卡死连接会占满 queue consumer 的执行
+// 时限，每个上游 fetch 都必须有界。提交类给宽上限，轮询类 15s 足够。
+const GRSAI_SUBMIT_TIMEOUT_MS = 120_000;
+const GRSAI_TASK_POLL_TIMEOUT_MS = 15_000;
+
 export type TaskPollResult = {
   status: 'pending' | 'completed' | 'failed';
   imageUrl: string | null;
@@ -390,7 +395,8 @@ export async function submitGrsaiImageJob(
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(GRSAI_SUBMIT_TIMEOUT_MS)
   });
 
   const rawText = await res.text();
@@ -544,7 +550,8 @@ async function requestGrsaiResult(
       mode === 'api-get'
         ? headers
         : { ...headers, 'Content-Type': 'application/json' },
-    body: mode === 'api-get' ? undefined : JSON.stringify({ id: taskId })
+    body: mode === 'api-get' ? undefined : JSON.stringify({ id: taskId }),
+    signal: AbortSignal.timeout(GRSAI_TASK_POLL_TIMEOUT_MS)
   });
 
   const rawText = await res.text();

@@ -706,8 +706,10 @@
   }
 
   function imgPlaceholderSrc() {
+    // 透明占位：保留 data:image/svg 以被 isPlaceholderImgSrc 识别，但不再渲染写死
+    // 的深灰色块，改用主题化的 .card-media 背景（--card-skeleton-bg），避免浅色模式「灰卡」。
     return 'data:image/svg+xml,' + encodeURIComponent(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect fill="#18181c" width="4" height="3"/></svg>'
+      '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"></svg>'
     );
   }
 
@@ -773,14 +775,16 @@
     const scope = root || document;
     let imgs = [...scope.querySelectorAll('img[data-image-ref], img[data-storage-ref]')];
     if (opts?.visibleFirst) {
-      imgs.sort((a, b) => {
-        const ar = a.getBoundingClientRect();
-        const br = b.getBoundingClientRect();
-        const aVis = ar.top < window.innerHeight + 120 && ar.bottom > -80;
-        const bVis = br.top < window.innerHeight + 120 && br.bottom > -80;
+      // 预读一次 rect 再排序（与 sortImgsByViewport 同因）：comparator 里逐次
+      // getBoundingClientRect 会把 O(n log n) 次比较放大成同量级强制布局。
+      const decorated = imgs.map((img) => ({ img, rect: img.getBoundingClientRect() }));
+      decorated.sort((a, b) => {
+        const aVis = a.rect.top < window.innerHeight + 120 && a.rect.bottom > -80;
+        const bVis = b.rect.top < window.innerHeight + 120 && b.rect.bottom > -80;
         if (aVis !== bVis) return aVis ? -1 : 1;
-        return ar.top - br.top;
+        return a.rect.top - b.rect.top;
       });
+      imgs = decorated.map((d) => d.img);
       if (opts.max > 0) imgs = imgs.slice(0, opts.max);
     }
     imgs.forEach((img) => {
@@ -792,7 +796,9 @@
         || img.closest('.card[data-source-card-id]')?.dataset?.sourceCardId
         || img.closest('.card[data-id]')?.dataset?.id
         || img.closest('.card[data-post-id]')?.dataset?.postId
-        || img.closest('.imagegen-feed-card[data-feed-id]')?.dataset?.feedId?.replace(/^wh_/, '')
+        || String(img.closest('.imagegen-feed-card[data-feed-id]')?.dataset?.feedId || '')
+          .replace(/^wh_/, '')
+          .replace(/^cr_/, '')
         || undefined;
       const inWarehouse = !!img.closest('#cardsContainer');
       const inImageGenWh = !!img.closest('#imageGenFeed .imagegen-feed-card[data-feed-id^="wh_"]');

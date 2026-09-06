@@ -30,16 +30,17 @@ $files = @(
   (Join-Path $root "index.html"),
   (Join-Path $root "admin.html"),
   (Join-Path $root "admin-login.html"),
+  (Join-Path $root "asset-studio.html"),
   (Join-Path $root "sw.js"),
   (Join-Path $root "styles.css"),
   (Join-Path $root "styles-features.css")
 )
 $syncCacheAssets = @(
-  'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css',
-  'styles-settings.css', 'styles-assets.css',
-  'theme.js', 'api-client.js', 'app-router.js', 'supabase-sync.js', 'script.js',
+  'styles.css', 'styles-theme.css', 'styles-mobile.css', 'styles-features.css', 'styles-warehouse.css',
+  'styles-settings.css', 'styles-assets.css', 'styles-landing.css',
+  'theme.js', 'api-client.js', 'app-router.js', 'supabase-sync.js', 'script.js', 'warehouse-composer.js',
   'features-draft.js', 'features-assets.js', 'community-public-feed.js', 'card-gallery.js',
-  'edit-panel-gallery.js',
+  'edit-panel-gallery.js', 'vendor/supabase.min.js',
   'pack-prelude.js', 'pack-foundation.js', 'pack-core.js', 'pack-viewer.js',
   'pack-appreciate.js', 'pack-lightbox.js', 'pack-feed.js', 'pack-imagegen.js',
   'pack-account.js', 'pack-media-client.js', 'pack-extra.js'
@@ -62,6 +63,12 @@ foreach ($path in $files) {
     $t = [regex]::Replace($t, "__ADMIN_BUILD__\s*=\s*'[^']+'", "__ADMIN_BUILD__ = '$new'")
     $t = [regex]::Replace($t, 'admin\.js\?v=[^"\s>]+', "admin.js?v=$new")
     $t = [regex]::Replace($t, 'styles-admin\.css\?v=[^"\s>]+', "styles-admin.css?v=$new")
+  } elseif ((Split-Path $path -Leaf) -eq 'asset-studio.html') {
+    $t = [regex]::Replace(
+      $t,
+      '((?:src|href)=["''](?!https?:|//)[^"'']+\.(?:js|css)\?v=)[^"'']+',
+      "`${1}$new"
+    )
   } elseif ($path -like '*sw.js') {
     $t = [regex]::Replace($t, "const CACHE = 'prompt-hub-v[^']+';", "const CACHE = 'prompt-hub-v$new';")
   } else {

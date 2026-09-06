@@ -6,7 +6,12 @@
   let observer = null;
   let observedRoot = null;
   const inflight = new WeakMap();
+  const pendingSrcRecovery = new WeakMap();
+  const recentMissingCheckInflight = new WeakMap();
+  const ownedBlobUrls = new Set();
+  let ownedBlobRemovalObserver = null;
   const queues = window.CardImageLoaderQueues.create();
+  const DOWNLOAD_SLOT_TIMEOUT_MS = Math.max(100, Number(window.__PH_TEST_DOWNLOAD_TIMEOUT_MS__) || 30000);
   function maxResolveCap() { return queues.maxResolveCap(); }
   function feedMaxResolveCap() { return queues.feedMaxResolveCap(); }
   function maxDownloadCap() { return queues.maxDownloadCap(); }
@@ -173,7 +178,53 @@
   }
 
   function isOwnImageGenRecentImg(img) {
-    return !!img?.closest?.('#imageGenFeed .imagegen-feed-card[data-feed-id^="cr_"]');
+    return !!img?.closest?.('.imagegen-feed-card[data-feed-id^="cr_"]');
+  }
+
+  function isLocalRasterImageUrl(value) {
+    const url = String(value || '').trim();
+    return url.startsWith('blob:') || /^data:image\/(?!svg(?:\+xml)?[;,])/i.test(url);
+  }
+
+  function revokeOwnedBlobUrl(url) {
+    if (!url || !ownedBlobUrls.delete(url)) return;
+    try { URL.revokeObjectURL?.(url); } catch (e) { /* ignore */ }
+  }
+
+  function releaseImgOwnedBlobUrl(img, exceptUrl = '') {
+    const owned = img?.dataset?.cardImageOwnedBlobUrl || '';
+    if (!owned || owned === exceptUrl) return;
+    delete img.dataset.cardImageOwnedBlobUrl;
+    revokeOwnedBlobUrl(owned);
+  }
+
+  function ensureOwnedBlobRemovalObserver() {
+    if (ownedBlobRemovalObserver || typeof MutationObserver !== 'function') return;
+    const root = document.body || document.documentElement;
+    if (!root) return;
+    ownedBlobRemovalObserver = new MutationObserver((records) => {
+      records.forEach((record) => {
+        if (record.type === 'attributes') {
+          const img = record.target;
+          const owned = img?.dataset?.cardImageOwnedBlobUrl || '';
+          if (owned && (img.getAttribute?.('src') || '') !== owned) releaseImgOwnedBlobUrl(img);
+          return;
+        }
+        record.removedNodes?.forEach((node) => {
+          if (node?.nodeType !== 1) return;
+          if (node.matches?.('img')) releaseImgOwnedBlobUrl(node);
+          node.querySelectorAll?.('img[data-card-image-owned-blob-url]').forEach((img) => {
+            releaseImgOwnedBlobUrl(img);
+          });
+        });
+      });
+    });
+    ownedBlobRemovalObserver.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['src']
+    });
   }
 
   function creationFromRecentFeedImg(img) {
@@ -190,6 +241,7 @@
     if (!creation) return '';
     const jobId = String(creation.jobId || img.getAttribute('data-job-id') || '').replace(/#\d+$/, '');
     const wantFull = opts.preferFull === true;
+    const forceFresh = opts.forceFresh === true || img.dataset.feedForceFresh === '1';
     const refFromDom = img.getAttribute('data-image-ref') || '';
     const refs = [];
     const pushRef = (u) => {
@@ -204,19 +256,23 @@
       pushRef(creation.mjCompositeUrl);
       if (Array.isArray(creation.mjGridUrls)) creation.mjGridUrls.forEach(pushRef);
     }
-    if (jobId && window.PromptHubApi?.getGenerationImageUrl) {
-      try {
-        const r = await window.PromptHubApi.getGenerationImageUrl(jobId, {
-          variant: wantFull ? 'full' : 'grid'
-        });
-        const jobUrl = r?.ok ? r.data?.url : '';
-        if (jobUrl && isReadySrc(jobUrl, img)) return jobUrl;
-      } catch (e) { /* continue with archived/local candidates */ }
-    }
     for (const ref of refs) {
       if (!ref) continue;
+      if (!forceFresh && isLocalRasterImageUrl(ref) && isReadySrc(ref, img)) return ref;
       const storageRef = window.SupabaseSync?.isStorageRef?.(ref);
-      if (window.MediaPipeline?.resolveListUrl) {
+      if (forceFresh && storageRef && window.SupabaseSync?.resolveDisplayUrl) {
+        const fresh = await window.SupabaseSync.resolveDisplayUrl(ref, {
+          assetId: creation.id,
+          cardId: creation.id,
+          jobId: jobId || undefined,
+          variant: wantFull ? 'full' : 'grid',
+          tryAllPaths: true,
+          allowFullFallback: wantFull,
+          listOnly: wantFull ? undefined : true,
+          bypassSignBudget: true
+        });
+        if (fresh && isReadySrc(fresh, img)) return fresh;
+      } else if (window.MediaPipeline?.resolveListUrl) {
         const list = await window.MediaPipeline.resolveListUrl(ref, {
           assetId: creation.id,
           cardId: creation.id,
@@ -226,7 +282,7 @@
         });
         if (list && isReadySrc(list, img)) return list;
       }
-      if (storageRef && window.SupabaseSync?.resolvePreviewFullUrl) {
+      if (wantFull && storageRef && window.SupabaseSync?.resolvePreviewFullUrl) {
         const archived = await window.SupabaseSync.resolvePreviewFullUrl(ref, {
           assetId: creation.id,
           cardId: creation.id,
@@ -250,26 +306,217 @@
         if (window.PromptHubApi?.fetchMediaAsBlobUrl) {
           try {
             const blobUrl = await window.PromptHubApi.fetchMediaAsBlobUrl(ref);
-            if (blobUrl && isReadySrc(blobUrl, img)) return blobUrl;
+            if (blobUrl) {
+              ownedBlobUrls.add(blobUrl);
+              if (isReadySrc(blobUrl, img)) return blobUrl;
+              revokeOwnedBlobUrl(blobUrl);
+            }
           } catch (e) { /* ignore */ }
         }
-        if (isReadySrc(ref, img)) return ref;
+        if (!forceFresh && isReadySrc(ref, img)) return ref;
       }
     }
-    if (window.FeatureDraft?.resolveImageGenFullUrl && wantFull) {
+    if (opts.skipJobApi !== true && jobId && window.PromptHubApi?.getGenerationImageUrl) {
+      try {
+        const r = await window.PromptHubApi.getGenerationImageUrl(jobId, {
+          variant: wantFull ? 'full' : 'grid'
+        });
+        const jobUrl = r?.ok ? r.data?.url : '';
+        if (jobUrl && isReadySrc(jobUrl, img)) return jobUrl;
+      } catch (e) { /* continue with archived/local candidates */ }
+    }
+    if (opts.skipJobApi !== true && window.FeatureDraft?.resolveImageGenFullUrl && wantFull) {
       const feedKey = `cr_${creation.id}`;
       return window.FeatureDraft.resolveImageGenFullUrl('recent', creation.id, feedKey, img) || '';
     }
     return '';
   }
 
+  function isExplicitPermanentMissingResponse(result) {
+    const status = Number(result?.status || 0);
+    const code = String(result?.code || '').trim().toUpperCase();
+    return status === 404 || status === 410 || code === 'NOT_FOUND' || code === 'GONE';
+  }
+
+  function confirmPermanentlyMissingRecentCreation(img) {
+    if (!isOwnImageGenRecentImg(img)) return Promise.resolve(false);
+    const existing = recentMissingCheckInflight.get(img);
+    if (existing) return existing;
+    const creation = creationFromRecentFeedImg(img);
+    const jobId = String(creation?.jobId || img.getAttribute('data-job-id') || '').replace(/#\d+$/, '');
+    if (!creation?.id || !jobId) return Promise.resolve(false);
+
+    const check = (async () => {
+      if (img.dataset.recentCandidateRetried !== '1') {
+        img.dataset.recentCandidateRetried = '1';
+        try {
+          const candidateUrl = await resolveRecentCreationFeedUrl(img, {
+            preferFull: true,
+            skipJobApi: true
+          });
+          if (candidateUrl && !isImgSameDisplayResource(img, candidateUrl)) {
+            img.closest('.card-media, .imagegen-feed-media')?.classList.remove('card-media--load-failed');
+            applyUrlToImg(img, candidateUrl);
+            return false;
+          }
+        } catch (e) { /* continue with authoritative server checks */ }
+      }
+
+      let fullResult = null;
+      if (window.PromptHubApi?.getGenerationImageUrl) {
+        try {
+          fullResult = await window.PromptHubApi.getGenerationImageUrl(jobId, { variant: 'full' });
+        } catch (e) {
+          return false;
+        }
+        if (fullResult?.ok) {
+          const fullUrl = fullResult.data?.url || '';
+          if (fullUrl && img.dataset.recentFullRetried !== '1') {
+            img.dataset.recentFullRetried = '1';
+            img.closest('.card-media, .imagegen-feed-media')?.classList.remove('card-media--load-failed');
+            applyUrlToImg(img, fullUrl);
+          }
+          return false;
+        }
+        if (isExplicitPermanentMissingResponse(fullResult)) {
+          return window.FeatureDraft?.removePermanentlyMissingCreation?.(creation.id, fullResult) === true;
+        }
+      }
+
+      if (!window.PromptHubApi?.getGenerationJob) return false;
+      let jobResult = null;
+      try {
+        jobResult = await window.PromptHubApi.getGenerationJob(jobId);
+      } catch (e) {
+        return false;
+      }
+      if (!isExplicitPermanentMissingResponse(jobResult)) return false;
+      return window.FeatureDraft?.removePermanentlyMissingCreation?.(creation.id, jobResult) === true;
+    })().finally(() => recentMissingCheckInflight.delete(img));
+    recentMissingCheckInflight.set(img, check);
+    return check;
+  }
+
+  function finalizeRecentCreationMediaFailure(img, media) {
+    const feedCard = img?.closest?.('.imagegen-feed-card');
+    const feedId = String(feedCard?.dataset?.feedId || '');
+    if ((/^cr_|^wh_/.test(feedId) || feedCard?.closest?.('#imageGenFeed'))) {
+      // 生成记录里的画布/生图卡：缩略图失败时先走原图恢复（getGenerationImageUrl full），
+      // 恢复成功就亮原图；只有明确失败/确认缺失才去掉媒体变成文字卡。
+      if (img?.dataset?.recentFullRetried === '1') {
+        media?.classList?.remove?.('card-media--load-failed', 'card-media--await', 'is-loading');
+        media?.classList?.add?.('media-revealed');
+        feedCard?.classList?.remove?.('imagegen-feed-card--no-media');
+        window.finishCardMediaShine?.(media);
+        return;
+      }
+      if (isOwnImageGenRecentImg(img) && img.dataset.recentFinalTried !== '1') {
+        img.dataset.recentFinalTried = '1';
+        media?.classList?.remove?.('is-loading');
+        media?.classList?.add?.('card-media--await');
+        void confirmPermanentlyMissingRecentCreation(img).then((permanentlyMissing) => {
+          if (permanentlyMissing) {
+            media?.remove();
+            feedCard?.classList?.add?.('imagegen-feed-card--no-media');
+            return;
+          }
+          const applied = img.dataset.recentFullRetried === '1'
+            && /^(https?:|data:image\/)/i.test(img.getAttribute('src') || '');
+          if (applied) {
+            media?.classList?.remove?.('card-media--await', 'card-media--load-failed', 'is-loading');
+            media?.classList?.add?.('media-revealed');
+            feedCard?.classList?.remove?.('imagegen-feed-card--no-media');
+            window.finishCardMediaShine?.(media);
+            return;
+          }
+          media?.remove();
+          feedCard?.classList?.add?.('imagegen-feed-card--no-media');
+        });
+        return;
+      }
+      // 恢复已在进行中：保留媒体，由上面的回调收尾，避免并发路径提前删媒体。
+      if (img?.dataset?.recentFinalTried === '1') return;
+      media?.remove();
+      feedCard.classList.add('imagegen-feed-card--no-media');
+      return;
+    }
+    media?.classList.remove('is-loading');
+    media?.classList.add('card-media--load-failed');
+    if (isOwnImageGenRecentImg(img)) void confirmPermanentlyMissingRecentCreation(img);
+  }
+
   /** 浏览器已解码出像素 — 勿因签名过期重复拉 media */
   function isImgVisuallyLoaded(img) {
     if (!img) return false;
-    if (img.dataset.feedLoadDone === '1') return true;
     const src = img.currentSrc || img.src || '';
-    if (!/^https?:\/\//i.test(src) || src.includes('data:image/svg')) return false;
+    if ((!/^https?:\/\//i.test(src) && !isLocalRasterImageUrl(src)) || src.includes('data:image/svg')) return false;
     return img.complete && img.naturalWidth > 8;
+  }
+
+  function clearPendingSrcRecovery(img) {
+    const entry = pendingSrcRecovery.get(img);
+    if (!entry) return;
+    img.removeEventListener('load', entry.onLoad);
+    img.removeEventListener('error', entry.onError);
+    pendingSrcRecovery.delete(img);
+  }
+
+  function watchPendingSrcRecovery(img, src) {
+    if (!img || !src || img.complete || img.dataset.feedLoadToken || img.dataset.feedLoadingUrl) return;
+    const current = pendingSrcRecovery.get(img);
+    if (current?.src === src) return;
+    clearPendingSrcRecovery(img);
+    const entry = { src, onLoad: null, onError: null };
+    const settle = () => {
+      if (pendingSrcRecovery.get(img) !== entry) return;
+      clearPendingSrcRecovery(img);
+    };
+    entry.onLoad = settle;
+    entry.onError = () => {
+      if (pendingSrcRecovery.get(img) !== entry) return;
+      const currentSrc = img.currentSrc || img.src || '';
+      clearPendingSrcRecovery(img);
+      if (currentSrc !== src && !isImgSameDisplayResource(img, src)) return;
+      loadImg(img);
+    };
+    img.addEventListener('load', entry.onLoad, { once: true });
+    img.addEventListener('error', entry.onError, { once: true });
+    pendingSrcRecovery.set(img, entry);
+  }
+
+  function isCurrentSrcLoadedOrPending(img) {
+    if (isImgVisuallyLoaded(img)) {
+      clearPendingSrcRecovery(img);
+      return true;
+    }
+    const src = img?.currentSrc || img?.src || '';
+    const concreteSrc = /^https?:\/\//i.test(src) || isLocalRasterImageUrl(src);
+    const pending = concreteSrc && !src.includes('data:image/svg') && img.complete === false;
+    if (pending) watchPendingSrcRecovery(img, src);
+    return pending;
+  }
+
+  function isBrokenCurrentSrc(img) {
+    if (!img?.complete || img.naturalWidth > 8) return false;
+    const src = img.currentSrc || img.src || '';
+    return (/^https?:\/\//i.test(src) || isLocalRasterImageUrl(src)) && !src.includes('data:image/svg');
+  }
+
+  function prepareBrokenCurrentSrcRetry(img, ref, cardId) {
+    if (!isBrokenCurrentSrc(img)) return false;
+    const src = img.currentSrc || img.src || '';
+    const path = window.SupabaseSync?.storagePathFromDisplayUrl?.(src);
+    if (path) window.SupabaseSync?.invalidateSignedCache?.(String(path).replace(/^\//, ''));
+    if (ref) window.SupabaseSync?.invalidateSignedCacheForRef?.(ref, cardId);
+    clearPendingSrcRecovery(img);
+    img.dataset.feedForceFresh = '1';
+    delete img.dataset.feedLoadDone;
+    delete img.dataset.feedLoadToken;
+    delete img.dataset.feedLoadingUrl;
+    delete img.dataset.feedLoadingKey;
+    img.removeAttribute('src');
+    inflight.delete(img);
+    return true;
   }
 
   function isImgSameDisplayResource(img, url) {
@@ -320,20 +567,24 @@
 
   function sortImgsByViewport(imgs, container) {
     const root = container ? scrollRootFor(container) : null;
-    const isVisible = (img) => {
+    const hasScrollRoot = !!(root && root !== document.body && root !== document.documentElement);
+    // 预读一次所有 rect 再排序：comparator 内逐次 getBoundingClientRect 会把
+    // O(n log n) 次比较放大成同量级的强制布局读取（渲染/补刷期的主要抖动源）。
+    // 排序不写 DOM，预读值与惰性读取完全等价。
+    const rootRect = hasScrollRoot ? root.getBoundingClientRect() : null;
+    const decorated = [];
+    for (const img of imgs) {
       const rect = img.getBoundingClientRect();
-      if (root && root !== document.body && root !== document.documentElement) {
-        const rr = root.getBoundingClientRect();
-        return rect.bottom > rr.top - 40 && rect.top < rr.bottom + 40;
-      }
-      return rect.bottom > -40 && rect.top < window.innerHeight + 40;
-    };
-    return [...imgs].sort((a, b) => {
-      const aVis = isVisible(a);
-      const bVis = isVisible(b);
-      if (aVis !== bVis) return aVis ? -1 : 1;
-      return a.getBoundingClientRect().top - b.getBoundingClientRect().top;
+      const visible = rootRect
+        ? rect.bottom > rootRect.top - 40 && rect.top < rootRect.bottom + 40
+        : rect.bottom > -40 && rect.top < window.innerHeight + 40;
+      decorated.push({ img, visible, top: rect.top });
+    }
+    decorated.sort((a, b) => {
+      if (a.visible !== b.visible) return a.visible ? -1 : 1;
+      return a.top - b.top;
     });
+    return decorated.map((item) => item.img);
   }
 
   function allowWarehouseFullFallback(img) {
@@ -342,16 +593,17 @@
   }
 
   function cachedUrl(ref, cardId, img) {
+    const forceFresh = img?.dataset?.feedForceFresh === '1' || isBrokenCurrentSrc(img);
     const authorId =
       img?.dataset?.authorId
       || img?.closest('.card')?.dataset?.authorId
       || img?.closest('[data-author-id]')?.dataset?.authorId
       || undefined;
-    if (window.MediaPipeline?.getListCached) {
+    if (!forceFresh && window.MediaPipeline?.getListCached) {
       const piped = window.MediaPipeline.getListCached(ref, cardId, { authorId, assetId: cardId });
       if (piped && isReadySrc(piped, img)) return piped;
     }
-    if ((isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))
+    if (!forceFresh && (isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))
       && window.SupabaseSync?.getListDisplayImageSrc) {
       const url = window.SupabaseSync.getListDisplayImageSrc(ref, cardId, {
         authorId,
@@ -362,12 +614,21 @@
       if (url && isReadySrc(url, img)) return url;
       return '';
     }
+    if (forceFresh) return '';
     const variant = listImageVariant(img);
     return window.SupabaseSync?.getCachedDisplayUrl?.(ref, { assetId: cardId, authorId, variant }) || '';
   }
 
   function isReadySrc(src, img) {
-    if (!src || !src.startsWith('http') || src.includes('data:image/svg')) return false;
+    src = String(src || '').trim();
+    if (!src || src.includes('data:image/svg')) return false;
+    const localRaster = isLocalRasterImageUrl(src);
+    if (!localRaster && !/^https?:\/\//i.test(src)) return false;
+    if (localRaster) {
+      if (img && (isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))) return false;
+      if (src.startsWith('blob:') && img && !isOwnImageGenRecentImg(img)) return false;
+      return true;
+    }
     if (window.SupabaseSync?.isInvalidMediaUrl?.(src)) return false;
     if (img && (isOwnImageGenWarehouseImg(img) || isOwnWarehouseListImg(img))) {
       if (src.startsWith('blob:')) return false;
@@ -457,7 +718,10 @@
     img.dataset.whServerRecover = '1';
     window.SupabaseSync?.clearPathMissingForCard?.(cardId, ref);
     const applyOrFail = (url) => {
-      if (url && applyUrlToImg(img, url)) return;
+      // resolve 返回的若仍是上游临时签名链（会再次过期 → 再次失败 → 循环刷新），
+      // 不再换上，直接失败收敛，避免"疯狂刷新"。只有稳定可展示的 URL 才应用。
+      const stillEphemeral = url && window.SupabaseSync?.isEphemeralUpstreamImageUrl?.(url);
+      if (url && !stillEphemeral && applyUrlToImg(img, url)) return;
       window.finalizeWarehouseCardMediaFailure?.(media || feedMediaFromImg(img), img);
     };
     if (window.WarehouseThumb?.resolveForCardModel) {
@@ -537,8 +801,11 @@
     const ownIgWh = isOwnImageGenWarehouseImg(img);
     const collect = inWarehouse ? warehouseCollectResolveOpts(img) : null;
     const ownWarehouseCard = inWarehouse && !collect;
-    const hit = cachedUrl(ref, cardId, img);
-    if (isReadySrc(hit, img)) return hit;
+    const forceFresh = img?.dataset?.feedForceFresh === '1';
+    if (!forceFresh) {
+      const hit = cachedUrl(ref, cardId, img);
+      if (isReadySrc(hit, img)) return hit;
+    }
     if (extraOpts?.skip) return '';
     if (!window.SupabaseSync?.resolveDisplayUrl && !window.MediaPipeline?.resolveListUrl) return '';
     try {
@@ -560,10 +827,11 @@
         listOnly: listOnly ? true : undefined,
         degradedListFull: degradedList === true || allowFullListFallback,
         ...(ownWarehouseCard || ownIgWh ? {} : (collect || communityExtra)),
-        ...(extraOpts || {})
+        ...(extraOpts || {}),
+        ...(forceFresh ? { bypassSignBudget: true } : {})
       };
       let url = '';
-      if (listOnly && window.MediaPipeline?.resolveListUrl) {
+      if (listOnly && window.MediaPipeline?.resolveListUrl && !forceFresh) {
         url = await window.MediaPipeline.resolveListUrl(ref, resolveOpts);
       } else if (window.SupabaseSync?.resolveDisplayUrl) {
         url = await window.SupabaseSync.resolveDisplayUrl(ref, {
@@ -573,6 +841,8 @@
           listOnly: listOnly ? true : undefined,
           degradedListFull: allowFullListFallback
         });
+      } else if (listOnly && window.MediaPipeline?.resolveListUrl) {
+        url = await window.MediaPipeline.resolveListUrl(ref, resolveOpts);
       }
       return isReadySrc(url, img) ? url : '';
     } catch (e) {
@@ -582,7 +852,10 @@
   }
 
   function applyUrlToImg(img, url) {
-    if (!img || !isReadySrc(url, img)) return false;
+    if (!img || !isReadySrc(url, img)) {
+      revokeOwnedBlobUrl(url);
+      return false;
+    }
     if (window.SupabaseSync?.isWarehouseBlockedFullUrl?.(url, img)) return false;
     const urlPath = window.SupabaseSync?.storagePathFromDisplayUrl?.(url);
     const urlKey = urlPath ? String(urlPath).replace(/^\//, '') : '';
@@ -596,9 +869,22 @@
       });
       if (!cached || cached !== url) return false;
     }
-    if (img.dataset.feedLoadDone === '1' && isImgVisuallyLoaded(img)) return true;
+    if (img.dataset.feedLoadDone === '1' && isImgVisuallyLoaded(img)) {
+      if (!isImgSameDisplayResource(img, url)) revokeOwnedBlobUrl(url);
+      return true;
+    }
     const media = feedMediaFromImg(img);
-    if (!media) return false;
+    if (!media) {
+      revokeOwnedBlobUrl(url);
+      return false;
+    }
+    releaseImgOwnedBlobUrl(img, url);
+    if (ownedBlobUrls.has(url)) {
+      img.dataset.cardImageOwnedBlobUrl = url;
+      ensureOwnedBlobRemovalObserver();
+    }
+    img.classList.remove('img-load-failed');
+    media.classList.remove('card-media--load-failed');
     const quietWhList = isOwnWarehouseListImg(img);
     if (quietWhList) {
       if (!media.classList.contains('card-media--await')) media.classList.add('card-media--await');
@@ -627,8 +913,11 @@
 
     let requestToken = '';
     const isStaleRequest = () => requestToken
-      && img.dataset.feedLoadToken
-      && img.dataset.feedLoadToken !== requestToken;
+      && (
+        img.dataset.feedLoadToken !== requestToken
+        || img.dataset.feedLoadingUrl !== url
+        || (targetLoadKey && img.dataset.feedLoadingKey !== targetLoadKey)
+      );
     const clearPending = () => {
       if (requestToken) {
         if (img.dataset.feedLoadToken && img.dataset.feedLoadToken !== requestToken) return false;
@@ -668,6 +957,7 @@
         return;
       }
       img.dataset.feedLoadDone = '1';
+      delete img.dataset.feedForceFresh;
       observer?.unobserve(img);
       const cardIdDone = cardIdFromImg(img);
       if (isGridSrc && cardIdDone && (isOwnWarehouseListImg(img) || isOwnImageGenWarehouseImg(img))) {
@@ -677,17 +967,23 @@
       else media.classList.remove('is-loading');
     };
 
-    const fail = () => {
+    const fail = (failedUrlOverride = '') => {
       if (isStaleRequest()) return;
       clearPending();
       media.classList.remove('is-loading', 'media-shine-reveal');
       const ref = img.getAttribute('data-image-ref');
       const cardId = cardIdFromImg(img);
-      const failedUrl = img.currentSrc || img.src || '';
+      const failedUrl = failedUrlOverride || img.currentSrc || img.src || '';
+      releaseImgOwnedBlobUrl(img);
       const failedPath = window.SupabaseSync?.storagePathFromDisplayUrl?.(failedUrl);
+      if (isOwnImageGenRecentImg(img)) {
+        img.dataset.feedForceFresh = '1';
+        if (ref) window.SupabaseSync?.invalidateSignedCacheForRef?.(ref, cardId);
+      }
       const isGridFail = failedPath && /_grid\.(jpe?g|webp|png)$/i.test(failedPath);
       const ownWh = isOwnImageGenWarehouseImg(img);
       const ownList = isOwnWarehouseListImg(img);
+      const markLoadFailed = () => finalizeRecentCreationMediaFailure(img, media);
       const retryWarehouseList = () => {
         if (!ref || !ownWh || img.dataset.whListRetried === '1') return false;
         img.dataset.whListRetried = '1';
@@ -711,7 +1007,7 @@
           if (ownList && recoverWarehouseListGeneratedImg(img, media)) return;
           if (img.dataset.whWarmTried === '1') {
             if (ownList) window.finalizeWarehouseCardMediaFailure?.(media, img);
-            else media.classList.add('card-media--load-failed');
+            else markLoadFailed();
             return;
           }
           img.dataset.whWarmTried = '1';
@@ -721,7 +1017,7 @@
             void window.WarehouseThumb.resolveForCardModel(card).then((retryUrl) => {
               if (retryUrl && applyUrlToImg(img, retryUrl)) return;
               if (ownList) window.finalizeWarehouseCardMediaFailure?.(media, img);
-              else media.classList.add('card-media--load-failed');
+              else markLoadFailed();
             });
             return;
           }
@@ -739,14 +1035,14 @@
               if (retryUrl && applyUrlToImg(img, retryUrl)) return;
               if (queueGridBackfillForImg(img)) return;
               if (ownList) window.finalizeWarehouseCardMediaFailure?.(media, img);
-              else media.classList.add('card-media--load-failed');
+              else markLoadFailed();
             });
             return;
           }
           if (ownWh && retryWarehouseList()) return;
           if (queueGridBackfillForImg(img)) return;
           if (ownList) window.finalizeWarehouseCardMediaFailure?.(media, img);
-          else media.classList.add('card-media--load-failed');
+          else markLoadFailed();
           return;
         }
         if (isCommOther) {
@@ -763,11 +1059,11 @@
             bypassSignBudget: true
           }, img).then((retryUrl) => {
             if (retryUrl && retryUrl !== failedUrl) applyUrlToImg(img, retryUrl);
-            else media.classList.add('card-media--load-failed');
+            else markLoadFailed();
           });
           return;
         }
-        media.classList.add('card-media--load-failed');
+        markLoadFailed();
         return;
       }
       if (retryWarehouseList()) return;
@@ -782,7 +1078,7 @@
         window.finalizeWarehouseCardMediaFailure?.(media, img);
         return;
       }
-      media.classList.add('card-media--load-failed');
+      markLoadFailed();
     };
 
     if (img.src === url && img.complete && img.naturalWidth > 0 && !img.src.includes('data:image/svg')) {
@@ -798,7 +1094,7 @@
     if (targetLoadKey) img.dataset.feedLoadingKey = targetLoadKey;
     void enqueueDownload(() => new Promise((resolve) => {
       const pendingStillMatches = img.dataset.feedLoadingUrl === url
-        || (targetLoadKey && img.dataset.feedLoadingKey === targetLoadKey);
+        && (!targetLoadKey || img.dataset.feedLoadingKey === targetLoadKey);
       if (!pendingStillMatches) {
         resolve();
         return;
@@ -806,11 +1102,46 @@
       requestToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       img.dataset.feedLoadToken = requestToken;
       img.decoding = 'async';
-      img.addEventListener('load', () => { finish(); resolve(); }, { once: true });
-      img.addEventListener('error', () => { fail(); resolve(); }, { once: true });
+      let outcomeHandled = false;
+      let queueSettled = false;
+      let timeoutId = null;
+      const settleQueue = () => {
+        if (queueSettled) return;
+        queueSettled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        resolve();
+      };
+    const onLoad = () => {
+        if (outcomeHandled) return;
+        outcomeHandled = true;
+        finish();
+        settleQueue();
+      };
+    const onError = () => {
+        if (outcomeHandled) return;
+        outcomeHandled = true;
+        fail();
+        settleQueue();
+      };
+      const onTimeout = () => {
+        if (outcomeHandled) return;
+        outcomeHandled = true;
+        const timedOutUrl = img.currentSrc || img.src || url;
+        img.removeEventListener('load', onLoad);
+        img.removeEventListener('error', onError);
+        img.removeAttribute('src');
+        img.dataset.feedForceFresh = '1';
+        const timeoutRef = img.getAttribute('data-image-ref') || '';
+        if (timeoutRef) window.SupabaseSync?.invalidateSignedCacheForRef?.(timeoutRef, cardIdFromImg(img));
+        fail(timedOutUrl);
+        settleQueue();
+      };
+      img.addEventListener('load', onLoad, { once: true });
+      img.addEventListener('error', onError, { once: true });
+      timeoutId = setTimeout(onTimeout, DOWNLOAD_SLOT_TIMEOUT_MS);
+      clearPendingSrcRecovery(img);
       img.src = url;
-      if (img.complete && img.naturalWidth > 0) finish();
-      resolve();
+      if (img.complete && img.naturalWidth > 0) onLoad();
     }));
     return true;
   }
@@ -823,7 +1154,7 @@
     const media = img.closest('.card-media, .imagegen-feed-media');
     media?.classList.remove('is-loading');
     if (window.FeatureDraft?.removeBrokenCommunityFeedCard?.(media)) return;
-    media?.classList.add('card-media--load-failed');
+    finalizeRecentCreationMediaFailure(img, media);
   }
 
   function loadImg(img) {
@@ -845,16 +1176,23 @@
       return;
     }
     if (isOwnImageGenRecentImg(img)) {
-      const p = resolveRecentCreationFeedUrl(img).then((url) => {
+      if (isCurrentSrcLoadedOrPending(img) || inflight.has(img)) return;
+      const forceFresh = prepareBrokenCurrentSrcRetry(img, ref, cardId);
+      const p = resolveRecentCreationFeedUrl(img, { forceFresh }).then((url) => {
+        if (inflight.get(img) !== p) return;
         inflight.delete(img);
         if (url) {
           applyUrlToImg(img, url);
           return;
         }
-        window.finalizeWarehouseCardMediaFailure?.(feedMediaFromImg(img), img);
+        finalizeRecentCreationMediaFailure(img, feedMediaFromImg(img));
+      }).catch(() => {
+        if (inflight.get(img) !== p) return;
+        inflight.delete(img);
+        finalizeRecentCreationMediaFailure(img, feedMediaFromImg(img));
       });
       inflight.set(img, p);
-      return;
+      return p;
     }
     const primary = ref ? window.SupabaseSync?.primaryImagePath?.(ref, cardId) : '';
     const commOther = isCommunityImg(img) && !isOwnCommunityGridImg(img) && !isOwnWarehouseListImg(img);
@@ -891,8 +1229,8 @@
       void tryMissingPathFallback(img, cardId);
       return;
     }
-    const cur = img.currentSrc || img.src || '';
-    if (isImgVisuallyLoaded(img) || isReadySrc(cur, img)) return;
+    if (isCurrentSrcLoadedOrPending(img)) return;
+    prepareBrokenCurrentSrcRetry(img, ref, cardId);
     const hit = cachedUrl(ref, cardId, img);
     if (hit) {
       applyUrlToImg(img, hit);
@@ -901,7 +1239,9 @@
     if (inflight.has(img)) return;
 
     const signedRoot = img.closest('#cardsContainer, #imageGenFeed');
+    let activeResolve = null;
     const finishResolve = (url) => {
+      if (inflight.get(img) !== activeResolve) return;
       inflight.delete(img);
       if (url) {
         applyUrlToImg(img, url);
@@ -942,13 +1282,17 @@
     };
     const job = () => resolveUrl(ref, cardId, extra, img).then(finishResolve);
     const startLoad = () => {
-      const p = signedRoot
-        ? enqueueFeedResolve(job)
-        : enqueueResolve(job);
+      const p = signedRoot ? enqueueFeedResolve(job) : enqueueResolve(job);
+      activeResolve = p;
       inflight.set(img, p);
+      return p;
     };
     if (signedRoot?.id) {
-      void whenContainerReady(signedRoot.id).then(startLoad);
+      const waiting = whenContainerReady(signedRoot.id).then(() => {
+        if (inflight.get(img) !== waiting) return;
+        return startLoad();
+      });
+      inflight.set(img, waiting);
       return;
     }
     startLoad();
@@ -964,6 +1308,26 @@
       const rr = root.getBoundingClientRect();
       return rect.bottom > rr.top - m && rect.top < rr.bottom + m;
     }
+    return rect.bottom > -m && rect.top < window.innerHeight + m;
+  }
+
+  /** 预读版滚动根 rect：配合 isImgNearRect 在循环里只测一次根，
+   * 避免每张卡各一次 root.getBoundingClientRect()。 */
+  function rectOfScrollRoot(container) {
+    const root = container
+      ? scrollRootFor(container)
+      : null;
+    if (root && root !== document.body && root !== document.documentElement) {
+      return root.getBoundingClientRect();
+    }
+    return null;
+  }
+
+  function isImgNearRect(img, margin, rootRect) {
+    if (!img) return false;
+    const rect = img.getBoundingClientRect();
+    const m = margin == null ? VISIBLE_LOAD_MARGIN : margin;
+    if (rootRect) return rect.bottom > rootRect.top - m && rect.top < rootRect.bottom + m;
     return rect.bottom > -m && rect.top < window.innerHeight + m;
   }
 
@@ -995,8 +1359,7 @@
         delete img.dataset.primaryRetried;
         delete img.dataset.listPrimaryRetried;
       }
-      const cur = img.currentSrc || img.src || '';
-      if (isImgVisuallyLoaded(img) || img.dataset.feedLoadDone === '1' || (isReadySrc(cur, img) && img.complete && img.naturalWidth > 8)) {
+      if (isCurrentSrcLoadedOrPending(img)) {
         observer?.unobserve(img);
         continue;
       }
@@ -1066,8 +1429,7 @@
       if (items.length >= cap) return;
       const ref = img.getAttribute('data-image-ref');
       if (!ref || !ref.startsWith('storage://')) return;
-      const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img)) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       const authorId = img.dataset?.authorId || img.closest('.card')?.dataset?.authorId || '';
       const cardId = cardIdFromImg(img) || '';
       const key = `${ref}|${authorId}|${cardId}`;
@@ -1079,8 +1441,7 @@
       void window.SupabaseSync.prefetchCommunityDisplayUrls(items, 3500).then(() => {
         window.MediaPipeline?.patchContainerFromCache?.(container, { visibleFirst: true, max: 24 });
         feedImagesIn(container).forEach((img) => {
-          const cur = img.currentSrc || img.src || '';
-          if (isReadySrc(cur, img)) return;
+          if (isCurrentSrcLoadedOrPending(img)) return;
           const hit = cachedUrl(img.getAttribute('data-image-ref'), cardIdFromImg(img), img);
           if (hit) applyUrlToImg(img, hit);
         });
@@ -1108,10 +1469,8 @@
       let eager = 0;
       const cap = igFeedPatchMax();
       sortImgsByViewport(imgs).forEach((img) => {
-        if (isImgVisuallyLoaded(img)) return;
+        if (isCurrentSrcLoadedOrPending(img)) return;
         if (eager >= cap) return;
-        const cur = img.currentSrc || img.src || '';
-        if (isReadySrc(cur, img)) return;
         if (isImgNearViewport(img, 480)) {
           eager += 1;
           loadImg(img);
@@ -1121,10 +1480,8 @@
       let eager = 0;
       const eagerCap = cardFirstScreenCap();
       sortImgsByViewport(imgs).forEach((img) => {
-        if (isImgVisuallyLoaded(img)) return;
+        if (isCurrentSrcLoadedOrPending(img)) return;
         if (eager >= eagerCap) return;
-        const cur = img.currentSrc || img.src || '';
-        if (isReadySrc(cur, img)) return;
         const ref = img.getAttribute('data-image-ref');
         const cardId = cardIdFromImg(img);
         const hit = cachedUrl(ref, cardId, img);
@@ -1144,8 +1501,7 @@
       const nearPx = isCommunityContainer(container) ? 960 : 720;
       const ordered = isWh ? sortImgsByViewport(imgs) : imgs;
       ordered.forEach((img) => {
-        const cur = img.currentSrc || img.src || '';
-        if (isReadySrc(cur, img)) return;
+        if (isCurrentSrcLoadedOrPending(img)) return;
         if (eager < firstScreenCap && isImgNearViewport(img, nearPx)) {
           eager += 1;
           loadImg(img);
@@ -1187,34 +1543,44 @@
       });
     }
 
+    // 末段（cache 命中 / near 判定 / observer.observe）同样先读后写：
+    // applyUrlToImg 会改 class、属性并触发样式失效，若循环内继续读 rect，
+    // 每张卡都要一次强制布局。这里预读 rect、统一决策，最后一次性写 DOM。
+    const tailRootRect = rectOfScrollRoot(container);
+    const lazyNearPx = container.id === 'imageGenFeed'
+      ? 720
+      : container.id === 'cardsContainer'
+        ? 640
+        : (window.MobileUI?.isMobileViewport?.() ? 160 : 280);
+    const lazyOnlyNearPx = lazyOnly ? lazyNearPx : VISIBLE_LOAD_MARGIN;
+    const tailActions = [];
     imgs.forEach((img) => {
-      if (isImgVisuallyLoaded(img)) return;
-      const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img)) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       const ref = img.getAttribute('data-image-ref');
       const cardId = cardIdFromImg(img);
       const hit = cachedUrl(ref, cardId, img);
       if (hit) {
-        applyUrlToImg(img, hit);
+        tailActions.push({ img, kind: 'cache', url: hit });
         return;
       }
       if (lazyOnly) {
-        const nearPx = container.id === 'imageGenFeed'
-          ? 720
-          : container.id === 'cardsContainer'
-            ? 640
-            : (window.MobileUI?.isMobileViewport?.() ? 160 : 280);
-        if (isImgNearViewport(img, nearPx)) loadImg(img);
-        observer.observe(img);
-        img.dataset.feedObserverBound = '1';
+        if (isImgNearRect(img, lazyNearPx, tailRootRect)) tailActions.push({ img, kind: 'load' });
+        tailActions.push({ img, kind: 'observe' });
         return;
       }
-      if (isImgNearViewport(img)) {
-        loadImg(img);
+      if (isImgNearRect(img, lazyOnlyNearPx, tailRootRect)) {
+        tailActions.push({ img, kind: 'load' });
         return;
       }
-      observer.observe(img);
-      img.dataset.feedObserverBound = '1';
+      tailActions.push({ img, kind: 'observe' });
+    });
+    tailActions.forEach((a) => {
+      if (a.kind === 'cache') applyUrlToImg(a.img, a.url);
+      else if (a.kind === 'load') loadImg(a.img);
+      else {
+        observer.observe(a.img);
+        a.img.dataset.feedObserverBound = '1';
+      }
     });
   }
 
@@ -1226,9 +1592,7 @@
     }
     feedImagesIn(container).forEach((img) => {
       if (img.dataset.feedObserverBound === '1') return;
-      if (isImgVisuallyLoaded(img)) return;
-      const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img)) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       observer.observe(img);
       img.dataset.feedObserverBound = '1';
     });
@@ -1339,8 +1703,7 @@
     let n = 0;
     sortImgsByViewport(feedImagesIn(container), container).forEach((img) => {
       if (n >= max) return;
-      const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img)) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       const hit = cachedUrl(img.getAttribute('data-image-ref'), cardIdFromImg(img), img);
       if (hit) {
         applyUrlToImg(img, hit);
@@ -1365,9 +1728,7 @@
       const isRecent = isOwnImageGenRecentImg(img);
       if (!isOwnImageGenWarehouseImg(img) && !isRecent) return;
       if (n >= cap) return;
-      if (isImgVisuallyLoaded(img)) return;
-      const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img)) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       const hit = cachedUrl(img.getAttribute('data-image-ref'), cardIdFromImg(img), img);
       if (hit) {
         applyUrlToImg(img, hit);
@@ -1388,9 +1749,7 @@
     sortImgsByViewport(feedImagesIn(container)).forEach((img) => {
       if (!isOwnImageGenRecentImg(img)) return;
       if (n >= cap) return;
-      if (isImgVisuallyLoaded(img)) return;
-      const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img)) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       n += 1;
       loadImg(img);
     });
@@ -1405,21 +1764,30 @@
     let n = 0;
     const nearPx = mobile ? 640 : 720;
     const imgs = sortImgsByViewport(feedImagesIn(container), container);
+    // 先读后写：把所有 rect 测量收进这一轮（sortImgsByViewport 之外每张卡还要
+    // 判一次 near），决策完后统一落 DOM。读写交替会退化为每张卡一次强制布局，
+    // 首屏几十张图连续 boost 时正是滚动掉帧的来源。
+    const rootRect = rectOfScrollRoot(container);
+    const actions = [];
     imgs.forEach((img, idx) => {
       const cur = img.currentSrc || img.src || '';
-      if (isReadySrc(cur, img) && img.complete && img.naturalWidth > 8) return;
+      if (isCurrentSrcLoadedOrPending(img)) return;
       const hit = cachedUrl(img.getAttribute('data-image-ref'), cardIdFromImg(img), img);
       if (hit) {
-        applyUrlToImg(img, hit);
+        actions.push({ img, kind: 'cache', url: hit });
         return;
       }
       const placeholder = !cur || cur.includes('data:image/svg');
-      const inView = isImgNearViewport(img, nearPx, container);
+      const inView = isImgNearRect(img, nearPx, rootRect);
       const shouldLoad = inView || (mobile && (placeholder || idx < cardFirstScreenCap()));
       if (!shouldLoad) return;
       if (n >= cap && !inView) return;
       n += 1;
-      loadImg(img);
+      actions.push({ img, kind: 'load' });
+    });
+    actions.forEach((a) => {
+      if (a.kind === 'cache') applyUrlToImg(a.img, a.url);
+      else loadImg(a.img);
     });
     observeUnboundImages(container);
   }

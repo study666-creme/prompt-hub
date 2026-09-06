@@ -72,22 +72,11 @@ export async function grantUniversalDailyBonus(
   userId: string,
   amount = 5
 ): Promise<Profile> {
-  const today = chinaDateKey();
-  const profile = await getOrCreateProfile(admin, userId);
-  const sameDay = profile.daily_credits_date === today;
-  const nextDaily = sameDay
-    ? Math.max(profile.daily_credits || 0, amount)
-    : amount;
-  const { data, error } = await admin
-    .from('profiles')
-    .update({
-      daily_credits: nextDaily,
-      daily_credits_date: today,
-      credit_grant_mode: profile.credit_grant_mode || 'daily'
-    })
-    .eq('user_id', userId)
-    .select()
-    .single();
+  const { data, error } = await admin.rpc('grant_user_daily_credits', {
+    p_user_id: userId,
+    p_amount: roundCredits(amount),
+    p_mode: 'universal'
+  });
   if (error) throw error;
   return data as Profile;
 }
@@ -102,20 +91,11 @@ export async function refreshDailyCredits(
   ) {
     return profile;
   }
-  const today = chinaDateKey();
-  if (profile.daily_credits_date === today) return profile;
-
   const amount = dailyCreditsForTier(profile.membership_tier);
-
-  const { data, error } = await admin
-    .from('profiles')
-    .update({
-      daily_credits: amount,
-      daily_credits_date: today
-    })
-    .eq('user_id', profile.user_id)
-    .select()
-    .single();
+  const { data, error } = await admin.rpc('refresh_user_daily_credits', {
+    p_user_id: profile.user_id,
+    p_amount: roundCredits(amount)
+  });
 
   if (error) throw error;
   return data as Profile;
@@ -141,11 +121,12 @@ export async function grantBundleForActiveMembership(
   const amount = bundleCreditsForMembershipDays(profile.membership_tier, membershipDays);
   if (amount <= 0) return profile;
 
-  const { error: creditErr } = await admin.rpc('apply_credit_delta', {
+  const { data, error: creditErr } = await admin.rpc('grant_membership_bundle', {
     p_user_id: profile.user_id,
-    p_delta: amount,
+    p_amount: roundCredits(amount),
     p_reason: 'subscription_grant',
     p_ref_id: `bundle:${periodKey}:${membershipDays}d`,
+    p_period_until: profile.membership_until,
     p_meta: {
       tier: profile.membership_tier,
       mode: 'bundle',
@@ -153,15 +134,6 @@ export async function grantBundleForActiveMembership(
     }
   });
   if (creditErr) throw creditErr;
-
-  const { data, error } = await admin
-    .from('profiles')
-    .update({ bundle_granted_until: periodKey })
-    .eq('user_id', profile.user_id)
-    .select()
-    .single();
-
-  if (error) throw error;
   return data as Profile;
 }
 
@@ -185,26 +157,91 @@ export async function claimMemberDailyCredits(
   const amount = dailyCreditsForTier(profile.membership_tier);
   if (amount <= 0) throw new Error('no_daily_credits');
 
-  const today = chinaDateKey();
-  const sameDay = profile.daily_credits_date === today;
-  const nextDaily = sameDay
-    ? Math.max(profile.daily_credits || 0, amount)
-    : amount;
+  const { data, error } = await admin.rpc('grant_user_daily_credits', {
+    p_user_id: profile.user_id,
+    p_amount: roundCredits(amount),
+    p_mode: 'member'
+  });
+  if (error) throw error;
+  return data as Profile;
+}
 
-  const { data, error } = await admin
-    .from('profiles')
-    .update({
-      daily_credits: nextDaily,
-      daily_credits_date: today
-    })
-    .eq('user_id', profile.user_id)
-    .select()
-    .single();
+/** Atomically activate the free trial and initialize its daily allowance. */
+export async function claimTrialMembership(
+  admin: SupabaseClient,
+  userId: string,
+  membershipUntil: string,
+  dailyAmount: number
+): Promise<Profile> {
+  const { data, error } = await admin.rpc('claim_trial_membership', {
+    p_user_id: userId,
+    p_membership_until: membershipUntil,
+    p_daily_amount: roundCredits(dailyAmount)
+  });
+  if (error) throw error;
+  return data as Profile;
+}
+
+/** Atomically switch daily/bundle membership credits under the wallet lock. */
+export async function setMembershipCreditMode(
+  admin: SupabaseClient,
+  userId: string,
+  mode: CreditGrantMode
+): Promise<Profile> {
+  const { data, error } = await admin.rpc('set_membership_credit_mode', {
+    p_user_id: userId,
+    p_mode: mode
+  });
   if (error) throw error;
   return data as Profile;
 }
 
 export type DebitSplit = { fromDaily: number; fromPermanent: number };
+
+type CreditOperationResponse = {
+  profile?: unknown;
+  split?: unknown;
+  replayed?: unknown;
+};
+
+function readCreditOperationResponse(data: unknown): CreditOperationResponse {
+  let value = data;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      value = null;
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('credit_operation_invalid_response');
+  }
+  return value as CreditOperationResponse;
+}
+
+function readOperationNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function readOperationProfile(data: unknown): Profile {
+  const payload = readCreditOperationResponse(data);
+  if (!payload.profile || typeof payload.profile !== 'object' || Array.isArray(payload.profile)) {
+    throw new Error('credit_operation_invalid_response');
+  }
+  return payload.profile as Profile;
+}
+
+function readDebitSplit(data: unknown): DebitSplit {
+  const payload = readCreditOperationResponse(data);
+  const split = payload.split && typeof payload.split === 'object' && !Array.isArray(payload.split)
+    ? payload.split as Record<string, unknown>
+    : {};
+  return {
+    fromDaily: Math.max(0, readOperationNumber(split.fromDaily)),
+    fromPermanent: Math.max(0, readOperationNumber(split.fromPermanent))
+  };
+}
 
 export async function deductUserCredits(
   admin: SupabaseClient,
@@ -213,67 +250,31 @@ export async function deductUserCredits(
   reason: string,
   refId: string,
   meta: Record<string, unknown> = {}
-): Promise<{ profile: Profile; split: DebitSplit }> {
-  amount = roundCredits(amount);
+): Promise<{ profile: Profile; split: DebitSplit; replayed?: boolean }> {
+  const rawAmount = Number(amount);
+  if (!Number.isFinite(rawAmount)) {
+    throw new Error('amount_invalid');
+  }
+  amount = roundCredits(rawAmount);
   if (amount <= 0) {
     const profile = await syncMembershipCredits(admin, userId);
     return { profile, split: { fromDaily: 0, fromPermanent: 0 } };
   }
 
-  let profile = await syncMembershipCredits(admin, userId);
-  const total = spendableCredits(profile);
-  if (total < amount) {
-    throw new Error('insufficient');
-  }
-
-  let left = amount;
-  let fromDaily = 0;
-  const today = chinaDateKey();
-  const prevDaily = profile.daily_credits;
-  const prevDailyDate = profile.daily_credits_date;
-
-  if (profile.daily_credits_date === today && profile.daily_credits > 0 && left > 0) {
-    fromDaily = Math.min(profile.daily_credits, left);
-    left -= fromDaily;
-    const { data, error } = await admin
-      .from('profiles')
-      .update({ daily_credits: profile.daily_credits - fromDaily })
-      .eq('user_id', userId)
-      .select()
-      .single();
-    if (error) throw error;
-    profile = data as Profile;
-  }
-
-  if (left > 0) {
-    const { error } = await admin.rpc('apply_credit_delta', {
-      p_user_id: userId,
-      p_delta: -left,
-      p_reason: reason,
-      p_ref_id: refId,
-      p_meta: { ...meta, fromDaily, fromPermanent: left }
-    });
-    if (error) {
-      if (fromDaily > 0) {
-        await admin
-          .from('profiles')
-          .update({
-            daily_credits: prevDaily,
-            daily_credits_date: prevDailyDate
-          })
-          .eq('user_id', userId);
-      }
-      throw error;
-    }
-    profile = await getOrCreateProfile(admin, userId);
-  }
-
-  if (reason === 'image_generation' && amount > 0) {
-    await incrementLifetimeCreditsSpent(admin, userId, amount);
-    profile = await getOrCreateProfile(admin, userId);
-  }
-
-  return { profile, split: { fromDaily, fromPermanent: left } };
+  const { data, error } = await admin.rpc('consume_user_credits', {
+    p_user_id: userId,
+    p_amount: amount,
+    p_reason: reason,
+    p_ref_id: refId,
+    p_meta: meta
+  });
+  if (error) throw error;
+  const payload = readCreditOperationResponse(data);
+  return {
+    profile: readOperationProfile(data),
+    split: readDebitSplit(data),
+    replayed: payload.replayed === true
+  };
 }
 
 export async function refundUserCredits(
@@ -285,37 +286,30 @@ export async function refundUserCredits(
   split: DebitSplit,
   meta: Record<string, unknown> = {}
 ): Promise<void> {
-  if (amount <= 0) return;
+  const rawAmount = Number(amount);
+  if (!Number.isFinite(rawAmount) || rawAmount <= 0) return;
+  const refundAmount = roundCredits(rawAmount);
+  if (refundAmount <= 0) return;
 
-  const { fromDaily, fromPermanent } = split;
-  const dailyRefund = Math.min(fromDaily, amount);
-  const permRefund = Math.min(fromPermanent, amount - dailyRefund);
+  const rawDaily = Number(split?.fromDaily);
+  const rawPermanent = Number(split?.fromPermanent);
+  const requestedDaily = Number.isFinite(rawDaily) ? Math.max(0, roundCredits(rawDaily)) : 0;
+  const requestedPermanent = Number.isFinite(rawPermanent)
+    ? Math.max(0, roundCredits(rawPermanent))
+    : 0;
+  const fromDaily = Math.min(refundAmount, requestedDaily);
+  const fromPermanent = Math.min(refundAmount - fromDaily, requestedPermanent);
 
-  if (dailyRefund > 0) {
-    const profile = await getOrCreateProfile(admin, userId);
-    const today = chinaDateKey();
-    const sameDay = profile.daily_credits_date === today;
-    const nextDaily = (sameDay ? profile.daily_credits : 0) + dailyRefund;
-    await admin
-      .from('profiles')
-      .update({
-        daily_credits: nextDaily,
-        daily_credits_date: today,
-        credit_grant_mode: profile.credit_grant_mode || 'daily'
-      })
-      .eq('user_id', userId);
-  }
-
-  if (permRefund > 0) {
-    const { error } = await admin.rpc('apply_credit_delta', {
-      p_user_id: userId,
-      p_delta: permRefund,
-      p_reason: reason,
-      p_ref_id: refId,
-      p_meta: { ...meta, refundDaily: dailyRefund, refundPermanent: permRefund }
-    });
-    if (error) throw error;
-  }
+  const { error } = await admin.rpc('refund_user_credits', {
+    p_user_id: userId,
+    p_amount: refundAmount,
+    p_reason: reason,
+    p_ref_id: refId,
+    p_from_daily: fromDaily,
+    p_from_permanent: fromPermanent,
+    p_meta: meta
+  });
+  if (error) throw error;
 }
 
 export function membershipCreditsPayload(profile: Profile) {
@@ -339,17 +333,17 @@ export function membershipCreditsPayload(profile: Profile) {
   };
 }
 
+/** Legacy compatibility helper; normal paid operations update this in consume_user_credits. */
 export async function incrementLifetimeCreditsSpent(
   admin: SupabaseClient,
   userId: string,
   amount: number
 ): Promise<void> {
-  if (amount <= 0) return;
-  const profile = await getOrCreateProfile(admin, userId);
-  const next = (profile.lifetime_credits_spent ?? 0) + amount;
-  const { error } = await admin
-    .from('profiles')
-    .update({ lifetime_credits_spent: next })
-    .eq('user_id', userId);
+  const rawAmount = Number(amount);
+  if (!Number.isFinite(rawAmount) || rawAmount <= 0) return;
+  const { error } = await admin.rpc('increment_lifetime_credits_spent', {
+    p_user_id: userId,
+    p_amount: roundCredits(rawAmount)
+  });
   if (error) throw error;
 }

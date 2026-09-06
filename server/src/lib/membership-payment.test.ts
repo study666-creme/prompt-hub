@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { buildMembershipExtensionPatch } from './membership-tasks';
 import type { Profile } from './supabase';
-import { createEpayCheckout, PAYMENT_PRODUCTS } from './epay';
+import { appendPaymentResult, createEpayCheckout, PAYMENT_PRODUCTS, resolvePaymentReturnUrl, safePaymentReturnUrl } from './epay';
 import { isRecoverablePurgedShopCode } from '../routes/v1/redeem';
+import { checkoutSchema } from '../routes/v1/payments';
 
 function profile(overrides: Partial<Profile> = {}): Profile {
   return {
@@ -105,6 +106,50 @@ describe('payment checkout URL', () => {
     expect(url.searchParams.get('type')).toBe('alipay');
     expect(url.searchParams.get('out_trade_no')).toBe('PH123');
     expect(url.searchParams.get('sign')).toMatch(/^[a-f0-9]{32}$/);
+  });
+
+  it('rejects WeChat for a new checkout while retaining the gateway type for historical callbacks', async () => {
+    const parsed = checkoutSchema.safeParse({
+      productId: 'points-10',
+      paymentMethod: 'wxpay',
+      returnTarget: 'canvas',
+      returnPath: '/canvas/project-1'
+    });
+    expect(parsed.success).toBe(false);
+    expect(() => checkoutSchema.parse({
+      productId: 'points-10',
+      paymentMethod: 'wxpay',
+      returnTarget: 'canvas',
+      returnPath: 'https://invalid.example'
+    })).toThrow();
+
+    const checkout = await createEpayCheckout({
+      EPAY_MERCHANT_ID: '1000',
+      EPAY_MERCHANT_KEY: 'secret',
+      EPAY_API_BASE_URL: 'https://pay.example.com',
+      EPAY_CALLBACK_BASE_URL: 'https://api.example.com'
+    } as never, {
+      orderNo: 'PH-WX-1',
+      method: 'wxpay',
+      amountCents: 1000,
+      name: '站内积分充值'
+    });
+    const url = new URL(checkout);
+    expect(url.searchParams.get('type')).toBe('wxpay');
+    expect(url.searchParams.get('return_url')).toBe('https://api.example.com/api/v1/webhooks/epay/return');
+  });
+
+  it('keeps canvas returns on the reviewed canvas origin', () => {
+    const env = {
+      PUBLIC_SITE_URL: 'https://prompt-hubs.com',
+      EPAY_CANVAS_SITE_URL: 'https://canvas.prompt-hubs.com'
+    } as never;
+    const target = resolvePaymentReturnUrl(env, 'canvas', '/canvas/project-1');
+    expect(target).toBe('https://canvas.prompt-hubs.com/canvas/project-1');
+    expect(appendPaymentResult(target, 'processing')).toBe(
+      'https://canvas.prompt-hubs.com/canvas/project-1?payment=processing'
+    );
+    expect(safePaymentReturnUrl(env, 'https://invalid.example/canvas')).toBe('https://prompt-hubs.com');
   });
 });
 

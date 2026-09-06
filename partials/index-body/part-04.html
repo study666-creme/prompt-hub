@@ -72,7 +72,7 @@
           </div>
           <aside class="imagegen-side">
             <div class="imagegen-feed-tabs" role="tablist">
-              <button type="button" class="imagegen-feed-tab active" data-feed-tab="recent" role="tab">最近</button>
+              <button type="button" class="imagegen-feed-tab active" data-feed-tab="recent" role="tab">仓库</button>
               <button type="button" class="imagegen-feed-tab" data-feed-tab="community" role="tab">获取</button>
             </div>
             <div class="imagegen-community-filters hidden" id="imageGenCommunityFilters">
@@ -118,8 +118,7 @@
         </div>
       </div>
     </div>
-  </div>
-  </div><!-- /app-chrome -->
+  </div><!-- /app-main -->
 
   <!-- 浮动提示词框（须在 app-chrome 外：chrome 带 scale transform，内部 fixed 定位会错位） -->
   <div class="floating-prompt hidden" id="floatingPrompt">
@@ -219,7 +218,7 @@
       <header class="subscribe-panel-head">
         <div>
           <h3 id="subscribePanelTitle">会员与积分</h3>
-          <p class="subscribe-panel-sub" id="subscribePanelSub">积分充值与会员开通 · 支持支付宝支付</p>
+          <p class="subscribe-panel-sub" id="subscribePanelSub">积分充值与会员开通 · 支付宝支付</p>
         </div>
         <button type="button" class="modal-close-btn" id="subscribeCloseBtn" aria-label="关闭"><span aria-hidden="true">×</span></button>
       </header>
@@ -287,7 +286,7 @@
         <button type="button" class="payment-method-close" id="paymentMethodCloseBtn" aria-label="关闭支付方式选择"><span aria-hidden="true">×</span></button>
       </header>
       <div class="payment-method-summary" id="paymentMethodSummary"></div>
-      <div class="payment-method-actions" aria-label="支付方式">
+      <div class="payment-method-actions" aria-label="支付宝支付">
         <button type="button" class="payment-method-option payment-method-option--alipay" data-payment-method="alipay">
           <span class="payment-method-icon">支</span>
           <span><strong>支付宝支付</strong><small>跳转支付宝完成付款</small></span>
@@ -316,15 +315,11 @@
   <nav class="mobile-bottom-nav mobile-only" id="mobileBottomNav" aria-label="手机底部导航">
     <button type="button" class="mobile-tab active" data-mobile-tab="cards" onclick="mobileSwitchTab('cards')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-      <span>卡片</span>
+      <span>卡片库</span>
     </button>
     <button type="button" class="mobile-tab" data-mobile-tab="imagegen" onclick="mobileSwitchTab('imagegen')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
       <span>生图</span>
-    </button>
-    <button type="button" class="mobile-tab" data-mobile-tab="community" onclick="mobileSwitchTab('community')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      <span>社区</span>
     </button>
     <button type="button" class="mobile-tab" data-mobile-tab="me" onclick="mobileSwitchTab('me')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>

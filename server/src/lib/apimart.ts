@@ -5,6 +5,12 @@ import {
 } from './apimart-official-budget';
 import { mapQualityForGptImage, mapResolutionForSeedream } from './pricing';
 
+// 付费提交 / 任务轮询的上限耗时：卡死的 TCP 连接会占满 queue consumer
+// (max_batch_size=5) 的整个执行时限，所以每个上游 fetch 都必须有超时。
+// 提交类给宽上限（正常排队也可能慢），轮询类是轻量 JSON GET，15s 足够。
+const APIMART_SUBMIT_TIMEOUT_MS = 120_000;
+const APIMART_TASK_POLL_TIMEOUT_MS = 15_000;
+
 type SubmitParams = {
   upstreamModel: string;
   prompt: string;
@@ -127,14 +133,21 @@ function collectImageUrls(value: unknown, seen: Set<string>, out: string[]): voi
 export function extractAllImageUrls(payload: unknown): string[] {
   if (!payload || typeof payload !== 'object') return [];
   const p = payload as Record<string, unknown>;
-  const data = p.data;
-  if (!data || typeof data !== 'object') return [];
-  const d = data as Record<string, unknown>;
   const seen = new Set<string>();
   const out: string[] = [];
 
+  // Compatible gateways return `{ data: {...} }`, `{ data: [{...}] }`, or a
+  // direct result object. Accept all forms so terminal status is not mistaken
+  // for a missing image while the result is already present.
+  const roots: unknown[] = [];
+  if (p.data !== undefined) {
+    if (Array.isArray(p.data)) roots.push(...p.data);
+    else roots.push(p.data);
+  }
+  roots.push(p);
+
   /** grid_image_url（MJ 专用）> image_url（四宫格）> image_urls（4 单图）> result.images */
-  for (const key of [
+  const keys = [
     'grid_image_url',
     'gridImageUrl',
     'output_url',
@@ -150,11 +163,16 @@ export function extractAllImageUrls(payload: unknown): string[] {
     'output',
     'outputs',
     'images',
-    'image'
-  ]) {
-    if (key in d) collectImageUrls(d[key], seen, out);
+    'image',
+    'result'
+  ];
+  for (const root of roots) {
+    if (!root || typeof root !== 'object') continue;
+    const d = root as Record<string, unknown>;
+    for (const key of keys) {
+      if (key in d) collectImageUrls(d[key], seen, out);
+    }
   }
-  if (d.result) collectImageUrls(d.result, seen, out);
   return out;
 }
 
@@ -263,7 +281,8 @@ export async function submitApimartImageJob(
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(buildApimartRequestBody(params))
+    body: JSON.stringify(buildApimartRequestBody(params)),
+    signal: AbortSignal.timeout(APIMART_SUBMIT_TIMEOUT_MS)
   });
 
   let json: unknown = {};
@@ -295,7 +314,8 @@ export async function fetchApimartTaskOnce(
   taskId: string
 ): Promise<TaskPollResult> {
   const res = await fetch(`${apiBase(baseUrl)}/v1/tasks/${encodeURIComponent(taskId)}`, {
-    headers: { Authorization: `Bearer ${apiKey}` }
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(APIMART_TASK_POLL_TIMEOUT_MS)
   });
 
   let json: unknown = {};
@@ -309,25 +329,25 @@ export async function fetchApimartTaskOnce(
     return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
   }
 
-  const data =
-    json && typeof json === 'object' && 'data' in json
-      ? (json as { data: Record<string, unknown> }).data
+  const root = json && typeof json === 'object' ? json as Record<string, unknown> : {};
+  const rawData = root.data !== undefined ? root.data : root;
+  const data = Array.isArray(rawData)
+    ? (rawData[0] && typeof rawData[0] === 'object' ? rawData[0] as Record<string, unknown> : null)
+    : rawData && typeof rawData === 'object'
+      ? rawData as Record<string, unknown>
       : null;
   if (!data) {
     return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
   }
 
-  const status = String(data.status || '');
+  const status = String(data.status || root.status || '');
   const imageUrls = extractAllImageUrls(json);
 
   if (status === 'completed' || (status !== 'failed' && imageUrls.length > 0)) {
     if (!imageUrls.length) {
-      return {
-        status: 'failed',
-        imageUrl: null,
-        imageUrls: [],
-        errorMessage: 'upstream_no_image'
-      };
+      // Some gateways publish the terminal status before the result URL is
+      // visible. Keep confirming instead of refunding a successful request.
+      return { status: 'pending', imageUrl: null, imageUrls: [], errorMessage: null };
     }
     return {
       status: 'completed',

@@ -1,51 +1,64 @@
 # Prompt Hub 项目上下文
 
-> 最后核对：2026-07-12。新任务先读本文、`CURRENT-ISSUES.md` 和 `AI-PITFALLS.md`。
+最后核对：2026-08-03
 
-## 当前线上状态
+> 新任务先读本文、`RECONCILE-20260726.md`、`CURRENT-ISSUES.md` 和 `AI-PITFALLS.md`；如果根目录存在 `DO-NOT-DEPLOY.md`，还必须先遵守其中的冻结条件。
 
-| 项 | 当前值 |
+## 仓库与生产状态
+
+| 项 | 当前事实 |
 |---|---|
-| 主站 | <https://prompt-hubs.com> |
-| Pages build | `20260712e`（以 `window.__APP_BUILD__` 为准） |
-| API | <https://api.prompt-hubs.com>，Worker `prompt-hub-api` |
-| 数据库/Auth | MemFire，代码继续使用 Supabase 兼容变量名和 SDK |
-| 图片 | `MEDIA_STORAGE_MODE=r2-first`，R2 优先、MemFire Storage 回源 |
-| 监控 | `admin.html` 运行监控 + Cloudflare Observability/KV |
-| Canvas | <https://infinite-canvas-jay.vercel.app/canvas> |
+| 唯一候选主树 | `D:\prompt-hub` |
+| 历史生产审计树 | `D:\canvas\prompt-hub`，只读，不再开发或部署 |
+| 主站 | `https://prompt-hubs.com` |
+| API | `https://api.prompt-hubs.com`，Worker `prompt-hub-api` |
+| 数据库/Auth | MemFire，保留 Supabase-compatible SDK 和变量名 |
+| 图片 | R2 优先、MemFire Storage 回源 |
+| Canvas | `https://canvas.prompt-hubs.com` 为正式回跳目标；其他域名仅按 CORS/部署记录兼容 |
 
-`prompt-hub.cn` 与 `api.prompt-hub.cn` 仅保留兼容，不是新功能验收主入口。
+双树收编与发布已完成，`20260803a` 已上线。生产运行版本仍必须通过 `/health.buildSha`、Pages build 和线上冒烟取证，不能只凭本地提交或测试通过作结论。
 
-## 已验证基线
+Pages 的准确 build 只从线上 `window.__APP_BUILD__` 读取；Worker 以 `/health.buildSha` 为唯一版本证据，不在本文长期复制提交号。
 
-- 手机卡片库首批 12 张，向下滚动再分页；生产首屏约 1.54 MiB。
-- 手机社区首屏渲染 12 张，滚动一次约 24 张；生产首屏约 1.46 MiB。
-- 列表默认请求 `_grid` 缩略图，详情/下载才请求 full。
-- `/prompts/` 刷新保持卡片库路由，不跳回社区。
-- MemFire、R2、New API、运营监控和 Canvas 生图链路已接入。
-- 运营后台可只读查看卡藏模型到实际 New API 渠道的映射；该目录使用独立双端密钥，不对公开接口暴露。
+## 当前生产已经具备
+
+- 图片和视频的稳定请求幂等、单次付费提交、未知结果退款 SLA 与持久恢复槽。
+- 图片秒级前端轮询、服务端 poll/archive drain、临时结果优先展示和本地归档重试。
+- 视频独立队列、长时 SD processing、同渠道 submit/poll/content、明确计费秒数差价退款。
+- 实时公开模型投影，`quality` 与 `resolution` 分离，香蕉参考图能力保留。
+- 支付回调审计、订单监控、Canvas 席位契约、`/wallet` 兼容入口和首次建点奖励。
+- 正式发布的冻结/脏树守卫和 Git SHA 注入。
+
+以上属于 `20260803a` 生产契约，发布与验收记录见 `DEPLOY-CHECKLIST.md`。
 
 ## 架构约束
 
-1. 根目录 loader 和 `legacy/`、`styles/`、`partials/` 是同一套源码的开发拆分；Pages 部署时会在 staging 合并。
-2. `pack-*.js` 是生产包，脚本顺序是运行时契约；改入口后必须跑 `npm run check:predeploy`。
-3. 卡片真源是 `user_data.data.cards`，本地 IndexedDB 只是快照；不得用空本地数组覆盖云端。
-4. 图片 JSON 应保存 `storage://card-images/...`，签名 URL 只作短期展示缓存。
-5. Worker Secrets 不进入 Git；前端只能保存公开 anon key。
+1. 根目录 loader、`legacy/`、`styles/`、`partials/` 和 `pack-*.js` 共同组成 Pages 运行时；改入口必须跑 `npm run check:predeploy`。
+2. `user_data.data.cards` 是卡片真源，本地 IndexedDB 只是快照；空本地数据不能覆盖云端。
+3. 图片 JSON 保存 `storage://card-images/...`，签名/CDN URL 只用于展示。
+4. Worker Secrets 不进入 Git；公开目录不能暴露真实渠道、密钥或内部上游字段。
+5. 付费生成只能从数据库 `queued` 状态领取一次。未知结果不等于失败，也不授权重新 POST。
+6. Prompt Hub 提交规范化模型参数，provider 特有转换由 New API 能力层承担。
 
-## 近期重点
+## 当前优先级
 
-- 继续观察手机弱网首屏、图片 404 和第三方生图失败率。
-- 会员/积分产品文案应与 `subscription.js`、`membership.js`、服务端规则保持一致。
-- 对外开源前补充明确许可证；Canvas 的 AGPL 与 Prompt Hub 授权边界分开处理。
+1. 持续核对 `/health.buildSha`、Pages build、队列 consumer、DLQ、cron 和仓库首屏资源。
+2. 监控未知生成结果、退款槽、长时 processing 与归档失败，不用重复付费提交做恢复。
+3. 定期生成并校验数据库与 R2 备份，数据库变更继续遵守备份和显式授权要求。
+4. 后续发布只从干净提交执行，Pages 必须明确落到 `main` production 分支。
 
-## 接手入口
+## 接手命令
 
-```text
-项目：D:\prompt-hub
-主站：https://prompt-hubs.com
-API：https://api.prompt-hubs.com
-先读：docs/PROJECT_CONTEXT.md、docs/CURRENT-ISSUES.md、docs/AI-PITFALLS.md、docs/FILE-MAP.md
-验证：npm run check:predeploy；server 运行 npm run typecheck && npm test
-约束：不提交密钥或真实测试账号；不删除用户卡片/图片；改静态资源后再部署 Pages。
+```powershell
+cd D:\prompt-hub
+git status --short --branch
+npm run check:docs
+npm run check:predeploy
+
+cd server
+npm run typecheck
+npm test
+npm run deploy:dry-run
 ```
+
+正式发布必须按 `DEPLOY-CHECKLIST.md` 顺序执行；不删除用户数据，也不使用重复付费生成做验收。

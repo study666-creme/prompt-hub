@@ -123,6 +123,7 @@
 
   async function submitDirectPayment(paymentMethod) {
     const product = pendingPaymentProduct;
+    // 新订单入口只允许支付宝，和服务端 checkoutSchema 保持一致。
     if (!product || paymentMethod !== 'alipay') return;
     const overlay = document.getElementById('paymentMethodOverlay');
     const buttons = Array.from(overlay?.querySelectorAll('[data-payment-method]') || []);
@@ -538,7 +539,7 @@
     if (sub) {
       sub.textContent = currentMainTab === 'credits'
         ? '1 元 = 100 积分 · 支付成功后自动到账'
-        : '轻量特惠 + 三档会员 · 支持支付宝支付';
+        : '轻量特惠 + 三档会员 · 支付宝支付';
     }
     if (currentMainTab === 'credits') renderCreditPacks();
     else renderPlans();
@@ -710,6 +711,21 @@
     paymentOverlay?.querySelectorAll('[data-payment-method]').forEach((button) => {
       button.addEventListener('click', () => void submitDirectPayment(button.dataset.paymentMethod));
     });
+    const paymentResult = typeof URLSearchParams === 'undefined'
+      ? null
+      : new URLSearchParams(window.location.search || '').get('payment');
+    if (paymentResult === 'success') {
+      window.showToast?.('支付成功，已到账');
+      void window.PromptHubApi?.syncMe?.({ silent: true });
+    } else if (paymentResult === 'processing') {
+      window.showToast?.('支付结果处理中，请稍后刷新余额', 5000);
+      void window.PromptHubApi?.syncMe?.({ silent: true });
+    }
+    if ((paymentResult === 'success' || paymentResult === 'processing') && typeof URL !== 'undefined') {
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete('payment');
+      window.history.replaceState(window.history.state, '', cleanUrl.toString());
+    }
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       if (paymentOverlay?.classList.contains('active')) closePaymentMethod();

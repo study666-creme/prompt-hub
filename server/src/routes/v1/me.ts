@@ -9,6 +9,8 @@ import {
 import { normalizeDisplayName, resolveDisplayName } from '../../lib/display-name';
 import { buildCommunityGachaQuota } from '../../lib/community-gacha';
 import { buildInspirationDrawQuota } from '../../lib/inspiration-draw';
+import { IMAGE_MODEL_CATALOG } from '../../lib/image-models-catalog';
+import { MJ_ACTION_LABEL_ZH } from '../../lib/midjourney-models';
 import {
   assertStorageDelta,
   storagePayloadForProfile,
@@ -129,7 +131,9 @@ const REASON_LABELS: Record<string, string> = {
   activation_code: '激活码兑换',
   image_generation: '图片生成',
   image_generation_refund: '生图退款',
-  prompt_reverse: '参考图反推（Gemini）',
+  video_generation: '视频生成',
+  video_generation_refund: '视频退款',
+  prompt_reverse: '参考图反推',
   prompt_fission: '图片裂变分析',
   prompt_optimize: '提示词优化',
   prompt_purify_describe: '画质净化读图',
@@ -139,9 +143,63 @@ const REASON_LABELS: Record<string, string> = {
   like_milestone: '点赞奖励',
   daily_grant: '每日会员积分',
   membership_task: '会员任务奖励',
+  invite_redeem: '邀请奖励',
   checkin_streak_bonus: '连续签到奖励（每 7 天）',
   daily_checkin: '每日签到'
 };
+
+const PUBLIC_LEDGER_MODEL_IDS = new Set([
+  ...IMAGE_MODEL_CATALOG.map(model => model.id),
+  'creative-5-5',
+  'creative-5-6',
+  'deepseek-v4-flash',
+  'deepseek-v4-pro',
+  'motion-video',
+  'motion-video-1-5',
+  'motion-video-1-5-fast'
+]);
+
+const PUBLIC_LEDGER_PHASES: Record<string, string> = {
+  submit: 'submit',
+  submit_error: 'submit',
+  generation: 'generation',
+  upstream_failed: 'generation',
+  payment: 'payment'
+};
+
+export function projectPublicLedgerMeta(value: unknown) {
+  const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const projected: Record<string, string | number> = {};
+  const model = String(source.model || '').trim();
+  if (PUBLIC_LEDGER_MODEL_IDS.has(model)) projected.model = model;
+  const resolution = String(source.resolution || '').trim().toLowerCase();
+  if (/^(?:1k|2k|4k|480p|720p|1080p|1440p|2160p)$/.test(resolution)) {
+    projected.resolution = resolution;
+  }
+  const count = Number(source.count);
+  if (Number.isInteger(count) && count > 0 && count <= 100) projected.count = count;
+  const mjAction = String(source.mjAction || '').trim();
+  if (Object.prototype.hasOwnProperty.call(MJ_ACTION_LABEL_ZH, mjAction)) {
+    projected.mjAction = mjAction;
+  }
+  const phase = PUBLIC_LEDGER_PHASES[String(source.phase || '').trim()];
+  if (phase) projected.phase = phase;
+  return projected;
+}
+
+export function projectPublicLedgerItem(row: Record<string, unknown>) {
+  const rawReason = String(row.reason || '');
+  const knownReason = Object.prototype.hasOwnProperty.call(REASON_LABELS, rawReason);
+  return {
+    id: row.id,
+    delta: row.delta,
+    balanceAfter: row.balance_after,
+    reason: knownReason ? rawReason : 'other',
+    reasonLabel: knownReason ? REASON_LABELS[rawReason] : '积分变动',
+    meta: projectPublicLedgerMeta(row.meta),
+    createdAt: row.created_at
+  };
+}
 
 meRoutes.get('/ledger', async c => {
   const user = c.get('user');
@@ -161,16 +219,7 @@ meRoutes.get('/ledger', async c => {
   return c.json({
     ok: true,
     data: {
-      items: (data ?? []).map(row => ({
-        id: row.id,
-        delta: row.delta,
-        balanceAfter: row.balance_after,
-        reason: row.reason,
-        reasonLabel: REASON_LABELS[row.reason] || row.reason,
-        refId: row.ref_id,
-        meta: row.meta,
-        createdAt: row.created_at
-      }))
+      items: (data ?? []).map(row => projectPublicLedgerItem(row))
     }
   });
 });

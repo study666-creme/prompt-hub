@@ -8,13 +8,11 @@ function isGrsaiLikeBase(baseUrl?: string): boolean {
   return /grsai\.|dakka\.com\.cn/i.test(String(baseUrl || ''));
 }
 
-/** Gemini 视觉只走 Apimart/Chat，不复用历史生图密钥。 */
+/** Gemini 视觉只走 Apimart，不复用文字或历史生图密钥。 */
 export function resolveVisionApiBindings(env: {
   APIMART_API_KEY?: string;
   APIMART_API_BASE_URL?: string;
-  CHAT_API_KEY?: string;
-  CHAT_API_BASE_URL?: string;
-}): { apiKey: string; baseUrl?: string; provider: 'apimart' | 'chat' } {
+}): { apiKey: string; baseUrl?: string; provider: 'apimart' } {
   if (env.APIMART_API_KEY) {
     if (isGrsaiLikeBase(env.APIMART_API_BASE_URL)) {
       throw new ApiError(
@@ -27,14 +25,6 @@ export function resolveVisionApiBindings(env: {
       apiKey: env.APIMART_API_KEY,
       baseUrl: env.APIMART_API_BASE_URL,
       provider: 'apimart'
-    };
-  }
-  const chatBase = String(env.CHAT_API_BASE_URL || '').toLowerCase();
-  if (env.CHAT_API_KEY && !/grsai\.|dakka\.com\.cn/.test(chatBase)) {
-    return {
-      apiKey: env.CHAT_API_KEY,
-      baseUrl: env.CHAT_API_BASE_URL,
-      provider: 'chat'
     };
   }
   throw new ApiError(

@@ -1,10 +1,7 @@
     const hint = document.getElementById('studioChatCostHint');
     if (!hint) return;
-    const { model, thinking } = getStudioChatOptions();
-    const table = CHAT_COST_HINTS[model] || CHAT_COST_HINTS['deepseek-v4-flash'];
-    const outKey = thinking ? table.outputThink : table.output;
-    const modelLabel = model === 'deepseek-v4-pro' ? 'Pro' : 'Flash';
-    hint.textContent = `${modelLabel}${thinking ? ' · 思考模式' : ''} · 1000 积分约输入 ${table.input} / 输出 ${outKey} token · 按实际用量计费`;
+    const { model } = getStudioChatOptions();
+    hint.textContent = `${model} · 正在获取实时价格`;
     void refreshStudioChatCostFromApi();
   }
 
@@ -16,9 +13,10 @@
       const quote = await window.PromptHubApi.studioChatQuote({ model, thinking });
       if (!quote?.ok || !quote.data) return;
       const d = quote.data;
-      const disc = d.discountLabel ? ` · 会员${d.discountLabel}` : '';
-      hint.textContent = `${d.modelLabel || model}${thinking ? ' · 思考' : ''} · 预估单次约 ${d.final} 积分${disc} · 按实际 token 计费`;
-    } catch (e) { /* 保留本地提示 */ }
+      hint.textContent = `${d.modelLabel || model} · ${d.final} 积分/次 · 实时目录价格`;
+    } catch (e) {
+      hint.textContent = `${model} · 暂时无法获取实时价格`;
+    }
   }
 
   async function onStudioChatSend() {
@@ -213,9 +211,11 @@
       if (hint) {
         hint.textContent = saved.ok
           ? `已生成并保存到主站卡片库 · 消耗约 ${gen.data?.creditsCharged ?? cost} 积分`
-          : `生成完成 · 消耗约 ${gen.data?.creditsCharged ?? cost} 积分`;
+          : `生成完成 · ${saved.error || '保存失败，请重试'}`;
       }
-      setStatus(saved.ok ? '已保存到主站卡片库，返回主站刷新即可看到' : '生图完成，但写入主站卡片库失败');
+      setStatus(saved.ok
+        ? '已保存到主站卡片库，返回主站刷新即可看到'
+        : (saved.error || '生图完成，但写入主站卡片库失败'));
     } catch (e) {
       setStudioImageGenPending(false);
       document.getElementById('studioImageIdle')?.classList.remove('hidden');
@@ -282,7 +282,7 @@
         addBtn.textContent = '已保存到主站卡片库';
         addBtn.disabled = true;
       }
-      setStatus(saved.ok ? '已保存到主站卡片库' : '保存失败，请重试');
+      setStatus(saved.ok ? '已保存到主站卡片库' : (saved.error || '保存失败，请重试'));
     })();
   }
 
