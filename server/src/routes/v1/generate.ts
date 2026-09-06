@@ -190,7 +190,11 @@ export function normalizeGenerationBodyAliases(raw: unknown): unknown {
     const protocol = input as unknown as Partial<ImageProtocolRequest>;
     body.model = protocol.model;
     body.prompt = protocol.prompt;
-    if (protocol.resolution !== undefined) body.resolution = protocol.resolution;
+    if (protocol.resolution !== undefined) {
+      // image.v1 的调用方（画布等）可能透传目录里的大写 1K/2K；
+      // 本服务契约统一小写。
+      body.resolution = String(protocol.resolution).trim().toLowerCase();
+    }
     if (protocol.quality !== undefined) body.quality = protocol.quality;
     if (protocol.aspect_ratio !== undefined) body.size = protocol.aspect_ratio;
     if (protocol.count !== undefined) body.count = protocol.count;

@@ -28,6 +28,7 @@ export type NewApiVideoTask = {
 };
 
 const CONTENT_RETRY_DELAYS_MS = [500, 1_500, 3_500, 7_000] as const;
+const STATUS_RETRY_DELAYS_MS = [500, 1_500, 3_500] as const;
 
 function apiBase(value?: string): string {
   return (value || 'https://newapi.prompt-hubs.com').replace(/\/+$/, '');
@@ -46,7 +47,10 @@ function record(value: unknown): Record<string, unknown> | null {
 function errorMessage(value: unknown, status: number): string {
   const payload = record(value);
   const error = record(payload?.error);
-  return text(error?.message) || text(payload?.message) || text(payload?.msg) || text(payload?.error) || `视频接口失败 (${status})`;
+  const nested = record(payload?.data);
+  return text(error?.message) || text(payload?.message) || text(payload?.msg) || text(payload?.error)
+    || text(nested?.fail_reason) || text(nested?.failure_reason) || text(nested?.message)
+    || `视频接口失败 (${status})`;
 }
 
 function findString(value: unknown, keys: Set<string>): string {
@@ -79,9 +83,18 @@ function findString(value: unknown, keys: Set<string>): string {
 function normalizeStatus(value: unknown): NewApiVideoTask['status'] {
   const status = text(value).toLowerCase();
   if (['completed', 'succeeded', 'success', 'done'].includes(status)) return 'completed';
-  if (['failed', 'cancelled', 'canceled', 'expired', 'error'].includes(status)) return 'failed';
+  if (['failed', 'failure', 'cancelled', 'canceled', 'expired', 'error'].includes(status)) return 'failed';
   if (['processing', 'running', 'in_progress', 'generating'].includes(status)) return 'processing';
   return 'queued';
+}
+
+/** 兼容 OpenAI 格式的数字进度与通用 TaskDto 的百分比字符串（"30%"）。 */
+function parseProgress(value: unknown): number | null {
+  if (value == null) return null;
+  const numeric = typeof value === 'number'
+    ? value
+    : Number(String(value).replace(/[^\d.]/g, ''));
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(100, numeric)) : null;
 }
 
 function parseTask(payload: unknown, fallbackId = ''): NewApiVideoTask {
@@ -89,9 +102,8 @@ function parseTask(payload: unknown, fallbackId = ''): NewApiVideoTask {
   const nested = record(object?.data) || object;
   const id = findString(payload, new Set(['id', 'task_id', 'request_id'])) || fallbackId;
   const status = normalizeStatus(nested?.status ?? nested?.state ?? object?.status ?? object?.state);
-  const rawProgress = Number(nested?.progress ?? object?.progress);
-  const progress = Number.isFinite(rawProgress) ? Math.max(0, Math.min(100, rawProgress)) : null;
-  const videoUrl = findString(payload, new Set(['video_url', 'url', 'download_url', 'content_url'])) || null;
+  const progress = parseProgress(nested?.progress ?? object?.progress);
+  const videoUrl = findString(payload, new Set(['video_url', 'url', 'download_url', 'content_url', 'result_url'])) || null;
   const failure = status === 'failed' ? errorMessage(payload, 502) : null;
   return { id, status, progress, errorMessage: failure, videoUrl };
 }
@@ -299,12 +311,54 @@ export async function submitNewApiVideo(
   return task;
 }
 
+function isTransientStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+/**
+ * A status read that definitively means the upstream no longer knows the task.
+ * 404/410 and the New API `task_not_exist` rejection cannot be waited out: the
+ * job must settle instead of spinning as "generating" forever.
+ */
+export function isVideoTaskLostError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  if (error.status === 404 || error.status === 410) return true;
+  if (error.status !== 400) return false;
+  return /task[\s_-]?(?:not[\s_-]?(?:exist|found)|not[\s_-]?found)|not[\s_-]?(?:exist|found)|任务(?:不存在|已被|已过期)/i.test(error.message);
+}
+
 export async function fetchNewApiVideoTask(
   apiKey: string,
   baseUrl: string | undefined,
   taskId: string
 ): Promise<NewApiVideoTask> {
-  const response = await fetch(`${apiBase(baseUrl)}/v1/videos/${encodeURIComponent(taskId)}`, {
+  for (let attempt = 0; attempt <= STATUS_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await fetchNewApiVideoTaskOnce(apiKey, baseUrl, taskId);
+    } catch (error) {
+      // A transient 5xx/429 or a network-level failure must never become a
+      // definitive rejection: the relay keeps the last truthful snapshot and
+      // the next poll (or the cron settle) retries.
+      const transient = !(error instanceof ApiError) || isTransientStatus(error.status);
+      if (!transient) throw error;
+      if (attempt >= STATUS_RETRY_DELAYS_MS.length) break;
+      await new Promise<void>(resolve => setTimeout(resolve, STATUS_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+  throw new ApiError(502, 'UPSTREAM_ERROR', '视频状态暂时无法获取');
+}
+
+async function fetchNewApiVideoTaskOnce(
+  apiKey: string,
+  baseUrl: string | undefined,
+  taskId: string
+): Promise<NewApiVideoTask> {
+  // `/v1/video/generations/{id}` is the provider-agnostic status channel: it
+  // serves every task platform (Kling included) without going through the
+  // OpenAI video converter, which some platforms do not implement and which
+  // makes `/v1/videos/{id}` answer 501 and keep otherwise finished tasks
+  // looking like they are still generating.
+  const response = await fetch(`${apiBase(baseUrl)}/v1/video/generations/${encodeURIComponent(taskId)}`, {
     headers: { Authorization: `Bearer ${apiKey}` }
   });
   const payload = await jsonResponse(response);

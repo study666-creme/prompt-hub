@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { newApiVideoKey, type Env } from '../../env';
+import { ensureCanvasVideoKey } from '../../lib/canvas-video-token';
 import { roundCredits } from '../../lib/credit-math';
 import { ApiError } from '../../lib/errors';
 import { isAcceptedRefImageInput, resolveGenerationRefUrls } from '../../lib/generation-ref-images';
@@ -16,7 +17,7 @@ import {
   type NewApiResolvedCatalogModel,
   type NewApiCatalogParameter
 } from '../../lib/newapi';
-import { fetchNewApiVideoContent, fetchNewApiVideoTask, submitNewApiVideo } from '../../lib/newapi-video';
+import { fetchNewApiVideoContent, fetchNewApiVideoTask, isVideoTaskLostError, submitNewApiVideo, type NewApiVideoTask } from '../../lib/newapi-video';
 import {
   deductUserCredits,
   refundUserCredits,
@@ -276,6 +277,118 @@ function videoPayload(row: Record<string, unknown>, creditsRemaining?: number) {
   };
 }
 
+async function settleVideoJobToCompleted(
+  admin: ReturnType<typeof createAdminClient>,
+  row: Record<string, unknown>,
+  meta: VideoMeta,
+  task: NewApiVideoTask
+): Promise<Record<string, unknown>> {
+  const nextMeta = { ...meta, progress: 100, resultUrl: task.videoUrl };
+  const { data: updated } = await admin
+    .from('generation_requests')
+    .update({
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      meta: nextMeta
+    })
+    .eq('id', row.id)
+    .eq('status', 'processing')
+    .select('*')
+    .maybeSingle();
+  return updated || { ...row, status: 'completed', meta: nextMeta };
+}
+
+async function settleVideoJobToFailed(
+  admin: ReturnType<typeof createAdminClient>,
+  row: Record<string, unknown>,
+  meta: VideoMeta,
+  message: string
+): Promise<Record<string, unknown>> {
+  const nextMeta = { ...meta, progress: 0, refundState: 'claiming' };
+  const { data: claimed } = await admin
+    .from('generation_requests')
+    .update({
+      status: 'failed',
+      error_message: message.slice(0, 300),
+      completed_at: new Date().toISOString(),
+      meta: nextMeta
+    })
+    .eq('id', row.id)
+    .eq('status', 'processing')
+    .select('*')
+    .maybeSingle();
+  if (claimed) {
+    await refundUserCredits(
+      admin,
+      String(claimed.user_id),
+      Number(meta.credits) || Number(claimed.credits_charged) || 0,
+      'video_generation_refund',
+      String(claimed.id),
+      parseDebitSplit(meta.debitSplit),
+      { model: meta.model, phase: 'upstream_failed' }
+    );
+    nextMeta.refundState = 'refunded';
+    await admin.from('generation_requests').update({ meta: nextMeta }).eq('id', row.id);
+  }
+  return claimed || { ...row, status: 'failed', error_message: message.slice(0, 300), meta: nextMeta };
+}
+
+/**
+ * Sweep all video rows still `processing` and settle the ones whose upstream
+ * task has reached a terminal state, so status sync never depends on a client
+ * poll. Runs from the Worker cron; transient upstream errors keep the row so
+ * the next cycle retries, and a definitively lost upstream task fails with a
+ * refund instead of spinning forever.
+ */
+export async function settlePendingVideoJobs(
+  env: Env,
+  options: { minAgeMs?: number; limit?: number } = {}
+): Promise<number> {
+  if (!newApiVideoKey(env)) return 0;
+  const admin = createAdminClient(env);
+  const cursor = new Date(Date.now() - (options.minAgeMs ?? 90_000)).toISOString();
+  const { data: rows, error } = await admin
+    .from('generation_requests')
+    .select('*')
+    .eq('status', 'processing')
+    .filter('meta->>mediaType', 'eq', 'video')
+    .lt('created_at', cursor)
+    .order('created_at', { ascending: true })
+    .limit(options.limit ?? 20);
+  if (error) throw error;
+  let settled = 0;
+  for (const raw of rows || []) {
+    const row = raw as unknown as Record<string, unknown>;
+    const meta = (row.meta && typeof row.meta === 'object' ? row.meta : {}) as VideoMeta;
+    if (meta.mediaType !== 'video') continue;
+    const upstreamTaskId = String(meta.upstreamTaskId || '');
+    if (!upstreamTaskId) continue;
+    const routeChannelId = Number(meta.routeChannelId) || 0;
+    const route = routeChannelId ? { channelId: routeChannelId } : null;
+    const apiKey = await ensureCanvasVideoKey(env, row.user_id as string | undefined);
+    if (!apiKey) continue;
+    let task: NewApiVideoTask;
+    try {
+      task = await fetchNewApiVideoTask(newApiKeyForRoute(apiKey, route), env.NEWAPI_API_BASE_URL, upstreamTaskId);
+    } catch (error) {
+      if (isVideoTaskLostError(error)) {
+        const message = error instanceof ApiError ? error.message : '上游任务已过期或不存在';
+        await settleVideoJobToFailed(admin, row, meta, message);
+        settled += 1;
+      }
+      continue;
+    }
+    if (task.status === 'completed') {
+      await settleVideoJobToCompleted(admin, row, meta, task);
+      settled += 1;
+    } else if (task.status === 'failed') {
+      await settleVideoJobToFailed(admin, row, meta, task.errorMessage || '视频生成失败');
+      settled += 1;
+    }
+  }
+  return settled;
+}
+
 async function resolveMediaReferences(
   c: Parameters<typeof buildPrivateMediaCdnUrl>[0],
   userId: string,
@@ -397,7 +510,7 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   const user = c.get('user');
   const input = parseVideoRequestBody(await c.req.json().catch(() => ({})));
 
-  const apiKey = newApiVideoKey(c.env);
+  const apiKey = await ensureCanvasVideoKey(c.env, user.id);
   if (!apiKey) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频服务暂未配置');
   const admin = createAdminClient(c.env);
   if (input.clientRequestId) {
@@ -593,45 +706,38 @@ videoRoutes.get('/jobs/:jobId', async c => {
     return c.json({ ok: true, data: videoPayload(row, spendableCredits(profile)) });
   }
 
-  const apiKey = newApiVideoKey(c.env);
+  const apiKey = await ensureCanvasVideoKey(c.env, row.user_id);
   const upstreamTaskId = String(meta.upstreamTaskId || '');
   if (!apiKey || !upstreamTaskId) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频任务尚未完成提交');
   const routeChannelId = Number(meta.routeChannelId) || 0;
   const route = routeChannelId ? { channelId: routeChannelId } : null;
-  const task = await fetchNewApiVideoTask(newApiKeyForRoute(apiKey, route), c.env.NEWAPI_API_BASE_URL, upstreamTaskId);
-  if (task.status === 'completed') {
-    const nextMeta = { ...meta, progress: 100, resultUrl: task.videoUrl };
-    const { data: updated } = await admin.from('generation_requests').update({
-      status: 'completed',
-      completed_at: new Date().toISOString(),
-      meta: nextMeta
-    }).eq('id', row.id).eq('status', 'processing').select('*').maybeSingle();
+  let task: NewApiVideoTask;
+  try {
+    task = await fetchNewApiVideoTask(newApiKeyForRoute(apiKey, route), c.env.NEWAPI_API_BASE_URL, upstreamTaskId);
+  } catch (error) {
+    if (isVideoTaskLostError(error)) {
+      // The upstream no longer knows the task; it can never complete. Settle
+      // truthfully instead of leaving an eternal "generating" row.
+      const message = error instanceof ApiError ? error.message : '上游任务已过期或不存在';
+      const settled = await settleVideoJobToFailed(admin, row, meta, message);
+      const profile = await syncMembershipCredits(admin, user.id);
+      return c.json({ ok: true, data: videoPayload(settled, spendableCredits(profile)) });
+    }
+    // A transient upstream read failure keeps the last truthful snapshot with a
+    // 200 so observation never mistakes a flaky gateway for a definitive
+    // rejection and stops polling.
     const profile = await syncMembershipCredits(admin, user.id);
-    return c.json({ ok: true, data: videoPayload(updated || { ...row, status: 'completed', meta: nextMeta }, spendableCredits(profile)) });
+    return c.json({ ok: true, data: videoPayload(row, spendableCredits(profile)) });
+  }
+  if (task.status === 'completed') {
+    const updated = await settleVideoJobToCompleted(admin, row, meta, task);
+    const profile = await syncMembershipCredits(admin, user.id);
+    return c.json({ ok: true, data: videoPayload(updated, spendableCredits(profile)) });
   }
   if (task.status === 'failed') {
-    const nextMeta = { ...meta, progress: task.progress || 0, refundState: 'claiming' };
-    const { data: claimed } = await admin.from('generation_requests').update({
-      status: 'failed',
-      error_message: task.errorMessage || '视频生成失败',
-      completed_at: new Date().toISOString(),
-      meta: nextMeta
-    }).eq('id', row.id).eq('status', 'processing').select('*').maybeSingle();
-    if (claimed) {
-      await refundUserCredits(
-        admin,
-        user.id,
-        Number(meta.credits) || Number(row.credits_charged) || 0,
-        'video_generation_refund',
-        row.id,
-        parseDebitSplit(meta.debitSplit),
-        { model: meta.model, phase: 'upstream_failed' }
-      );
-      nextMeta.refundState = 'refunded';
-      await admin.from('generation_requests').update({ meta: nextMeta }).eq('id', row.id);
-    }
+    const settled = await settleVideoJobToFailed(admin, row, meta, task.errorMessage || '视频生成失败');
     const profile = await syncMembershipCredits(admin, user.id);
-    return c.json({ ok: true, data: videoPayload(claimed || { ...row, status: 'failed', error_message: task.errorMessage, meta: nextMeta }, spendableCredits(profile)) });
+    return c.json({ ok: true, data: videoPayload(settled, spendableCredits(profile)) });
   }
   const nextMeta = { ...meta, progress: task.progress || Number(meta.progress) || 0 };
   await admin.from('generation_requests').update({ meta: nextMeta }).eq('id', row.id).eq('status', 'processing');
@@ -650,7 +756,7 @@ videoRoutes.get('/jobs/:jobId/content', async c => {
     .maybeSingle();
   const meta = (row?.meta && typeof row.meta === 'object' ? row.meta : {}) as VideoMeta;
   if (!row || row.status !== 'completed' || meta.mediaType !== 'video') throw new ApiError(404, 'NOT_FOUND', '视频尚未完成');
-  const apiKey = newApiVideoKey(c.env);
+  const apiKey = await ensureCanvasVideoKey(c.env, row.user_id);
   const upstreamTaskId = String(meta.upstreamTaskId || '');
   if (!apiKey || !upstreamTaskId) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频内容暂不可用');
   const routeChannelId = Number(meta.routeChannelId) || 0;

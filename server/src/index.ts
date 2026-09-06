@@ -7,6 +7,7 @@ import { drainFastProviderPendingSubmits } from './lib/fast-provider-drain';
 import { processFastProviderQueueMessage } from './lib/fast-provider-queue';
 import { createCorsMiddleware } from './middleware/cors';
 import { adminRoutes } from './routes/admin';
+import { settlePendingVideoJobs } from './routes/v1/video';
 import { supabaseProxyHandler } from './routes/supabase-proxy';
 import { v1 } from './routes/v1';
 import { webhookRoutes } from './routes/webhooks/payment';
@@ -160,5 +161,10 @@ export default {
   },
   async scheduled(_controller: ScheduledController, env: Env) {
     await drainFastProviderPendingSubmits(env, { awaitSubmit: true, maxSubmit: 2 });
+    // Video rows settle server-side so an upstream terminal state is recorded
+    // even when no client is currently polling the job.
+    await settlePendingVideoJobs(env).catch(error =>
+      console.error('[video-settle] sweep failed', error)
+    );
   }
 };

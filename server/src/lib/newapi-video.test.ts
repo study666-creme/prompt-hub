@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildNewApiVideoRequestBody, fetchNewApiVideoContent, fetchNewApiVideoTask, submitNewApiVideo } from './newapi-video';
+import { ApiError } from './errors';
+import { buildNewApiVideoRequestBody, fetchNewApiVideoContent, fetchNewApiVideoTask, isVideoTaskLostError, submitNewApiVideo } from './newapi-video';
 import type { NewApiCatalogParameter } from './newapi';
 
 function json(body: unknown, status = 200) {
@@ -99,6 +100,112 @@ describe('newapi video upstream', () => {
     expect(response.status).toBe(200);
     await expect(response.text()).resolves.toBe('video-bytes');
     vi.useRealTimers();
+  });
+
+  it('retries transient status reads instead of failing the poll', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1;
+      if (calls < 3) return json({ error: { message: 'upstream busy' } }, 503);
+      return json({ id: 'task_status', status: 'in_progress', progress: 40 });
+    }));
+
+    const pending = fetchNewApiVideoTask('secret', 'https://newapi.test', 'task_status');
+    await vi.runAllTimersAsync();
+    const task = await pending;
+
+    expect(calls).toBe(3);
+    expect(task).toMatchObject({ id: 'task_status', status: 'processing', progress: 40 });
+    vi.useRealTimers();
+  });
+
+  it('treats network failures as transient and surfaces a retryable status read error', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => { throw new Error('connection reset'); });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = fetchNewApiVideoTask('secret', 'https://newapi.test', 'task_flaky');
+    const failurePromise = pending.then(() => null, (error: unknown) => error);
+    await vi.runAllTimersAsync();
+    const failure = await failurePromise;
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(failure).toMatchObject({ status: 502, code: 'UPSTREAM_ERROR' });
+    vi.useRealTimers();
+  });
+
+  it('keeps throwing definitive task reads without retrying them', async () => {
+    const fetchMock = vi.fn(async () => json({ error: { code: 'task_not_exist', message: '任务不存在' } }, 400));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(fetchNewApiVideoTask('secret', 'https://newapi.test', 'task_gone')).rejects.toMatchObject({ status: 400 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('classifies lost task reads from a task-not-exist rejection', () => {
+    expect(isVideoTaskLostError(new Error('boom'))).toBe(false);
+    const lost = new ApiError(404, 'UPSTREAM_ERROR', 'task_not_exist');
+    expect(isVideoTaskLostError(lost)).toBe(true);
+    const lostMessage = new ApiError(400, 'UPSTREAM_ERROR', '任务不存在或已被清理');
+    expect(isVideoTaskLostError(lostMessage)).toBe(true);
+    const transient = new ApiError(502, 'UPSTREAM_ERROR', '视频接口失败 (502)');
+    expect(isVideoTaskLostError(transient)).toBe(false);
+    const rateLimited = new ApiError(429, 'UPSTREAM_ERROR', 'rate limited');
+    expect(isVideoTaskLostError(rateLimited)).toBe(false);
+  });
+
+  it('reads status through the provider-agnostic generations channel', async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      expect(String(url)).toBe('https://newapi.test/v1/video/generations/task_132Wpv7UUJh9uzrpCvfG3kFmYTHLEegP');
+      return json({
+        code: 'success',
+        data: {
+          task_id: 'task_132Wpv7UUJh9uzrpCvfG3kFmYTHLEegP',
+          status: 'SUCCESS',
+          result_url: 'https://console.prompt-hubs.com/v1/videos/task_132Wpv/content?expires=1788144917&signature=x',
+          progress: '100%',
+          billing_state: 'settled'
+        }
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const task = await fetchNewApiVideoTask('secret', 'https://newapi.test', 'task_132Wpv7UUJh9uzrpCvfG3kFmYTHLEegP');
+
+    expect(task).toMatchObject({
+      id: 'task_132Wpv7UUJh9uzrpCvfG3kFmYTHLEegP',
+      status: 'completed',
+      progress: 100,
+      videoUrl: 'https://console.prompt-hubs.com/v1/videos/task_132Wpv/content?expires=1788144917&signature=x'
+    });
+  });
+
+  it('surfaces a generic-channel failure with its fail_reason', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      code: 'success',
+      data: {
+        task_id: 'task_bFLseEDOrSvccRlNa0yfu9RQVm19hF1m',
+        status: 'FAILURE',
+        fail_reason: 'Your prompt or reference image was blocked by the content safety policy.',
+        progress: '100%',
+        billing_state: 'refunded'
+      }
+    })));
+
+    const task = await fetchNewApiVideoTask('secret', 'https://newapi.test', 'task_bFLseEDOrSvccRlNa0yfu9RQVm19hF1m');
+
+    expect(task).toMatchObject({
+      id: 'task_bFLseEDOrSvccRlNa0yfu9RQVm19hF1m',
+      status: 'failed',
+      progress: 100
+    });
+    expect(String(task.errorMessage)).toContain('blocked by the content safety policy');
+  });
+
+  it('maps an upstream unknown status to queued instead of inventing a terminal state', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ id: 'task_weird', status: 'transcoded' })));
+    const task = await fetchNewApiVideoTask('secret', undefined, 'task_weird');
+    expect(task).toMatchObject({ id: 'task_weird', status: 'queued', progress: null, videoUrl: null });
   });
 
   it('submits MiniMax H3 with native fields and preserves reference images', async () => {

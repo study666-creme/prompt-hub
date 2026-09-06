@@ -8,7 +8,7 @@ import {
   buildPrivateMediaCdnUrl,
   resolveStoragePath
 } from './media-cdn';
-import { downloadCardImage, hasR2, mediaStorageMode, uploadCardImage } from './r2-storage';
+import { cardImageExists, downloadCardImage, hasR2, mediaStorageMode, uploadCardImage } from './r2-storage';
 
 const BUCKET = 'card-images';
 const MAX_REF_BYTES = 8 * 1024 * 1024;
@@ -149,13 +149,51 @@ async function uploadDataUrlRef(
   return ensureUpstreamRefUrl(c, admin, userId, path);
 }
 
+/**
+ * storage:// 与自有 CDN 引用在对象已存在时直接签原路径，跳过“下载→重传”链路。
+ * Canvas 视频参考图在提交前刚上传过，对象必然已在桶内；7–9 张参考图串行
+ * 下载重传会让单次视频提交远超上游调用方超时，且 Worker 无响应导致画布侧
+ * 标记 submission_unknown、中转站收不到任务。
+ */
+async function signExistingRefUrl(
+  c: Context<{ Bindings: Env }>,
+  admin: SupabaseClient,
+  userId: string,
+  clean: string
+): Promise<string | null> {
+  assertUserOwnsPath(userId, clean);
+  try {
+    const exists = await withTimeout(
+      cardImageExists(c.env, clean, admin),
+      5_000,
+      () => false
+    );
+    if (!exists) return null;
+    return buildPrivateMediaCdnUrl(c, clean);
+  } catch {
+    return null;
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: () => T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback()), timeoutMs))
+  ]);
+}
+
 async function resolvePathToUpstreamUrl(
   c: Context<{ Bindings: Env }>,
   admin: SupabaseClient,
   userId: string,
   path: string
 ): Promise<string> {
-  return ensureUpstreamRefUrl(c, admin, userId, path);
+  const clean = path.replace(/^\//, '');
+  // Fast path: already-stored objects are signed in place (R2 head check),
+  // avoiding a serial download+re-upload per reference inside one request.
+  const signed = await signExistingRefUrl(c, admin, userId, clean);
+  if (signed) return signed;
+  return ensureUpstreamRefUrl(c, admin, userId, clean);
 }
 
 /** 将客户端参考图（https / storage:// / data:）转为上游可拉取的 URL */
