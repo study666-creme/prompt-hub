@@ -14,6 +14,7 @@ $allowedDirs = @(
   'vendor/',
   'functions/',
   'extension/',
+  'admin/',
   'legacy/',
   'partials/',
   'styles/'
