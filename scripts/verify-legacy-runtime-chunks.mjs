@@ -13,8 +13,7 @@ const entries = [
   { entry: 'supabase-sync.js', dir: 'legacy/supabase-sync' },
   { entry: 'imagegen-prompt-kit.js', dir: 'legacy/imagegen-prompt-kit' },
   { entry: 'features-assets.js', dir: 'legacy/features-assets' },
-  { entry: 'asset-studio.js', dir: 'legacy/asset-studio' },
-  { entry: 'admin.js', dir: 'legacy/admin' }
+  { entry: 'asset-studio.js', dir: 'legacy/asset-studio' }
 ];
 
 let checked = 0;

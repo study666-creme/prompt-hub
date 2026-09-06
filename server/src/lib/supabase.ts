@@ -19,6 +19,8 @@ export type Profile = {
   trial_free_used: boolean;
   lifetime_credits_spent?: number;
   membership_task_flags?: Record<string, unknown>;
+  banned_at?: string | null;
+  ban_reason?: string | null;
   display_name?: string | null;
 };
 

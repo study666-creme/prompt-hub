@@ -106,7 +106,7 @@ const packs = [
 const standaloneScripts = [
   ['/edit-panel-gallery.js', 'EditPanelGallery', 'global.EditPanelGallery'],
   ['/ripple-grid.js', 'RippleGrid module', 'export function initRippleGrid'],
-  ['/admin.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
+  ['/admin.js', 'admin module shim', '__PROMPT_HUB_ADMIN_MODULE__'],
   ['/asset-studio.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
   ['/features-assets.js', 'legacy split loader', '__PROMPT_HUB_LEGACY_SPLIT_LOADER__'],
   ['/supabase-sync.js', 'split loader or deployment bundle', /__PROMPT_HUB_(?:LEGACY_SPLIT_LOADER|DEPLOY_BUNDLE)__/],
@@ -115,7 +115,7 @@ const standaloneScripts = [
 ];
 
 const legacyChunks = [
-  ['/legacy/admin/part-01.js', 'admin chunk', 'adminFetch'],
+  ['/admin/main.js', 'admin module entry', 'adminNav'],
   ['/legacy/asset-studio/part-01.js', 'asset-studio chunk', 'buildStudioPresetProject'],
   ['/legacy/features-assets/part-01.js', 'features-assets chunk', 'getDemoPackages'],
   ['/legacy/supabase-sync/part-01.js', 'supabase-sync chunk', 'STORAGE_PREFIX'],

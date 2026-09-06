@@ -1,18 +1,14 @@
 import { Hono } from 'hono';
 import type { Env } from '../../env';
-import { deleteStoragePaths, invalidateOrphanScanCache, listBucketOrphanFiles, restoreCardFromOrphanGroup } from '../../lib/admin-media-refs';
+import { writeAudit } from '../../middleware/admin-audit';
 import {
   adminDeleteCommunityPost,
   adminUnpublishCommunityPost,
-  batchDeleteCommunityPosts,
-  batchRestoreCommunityPosts,
-  batchUnpublishCommunityPosts,
   getCommunityAdminStats,
   listCommunityPostsForAdmin,
-  repairMisattributedCommunityAuthors,
   previewPurgeGhosts,
+  repairMisattributedCommunityAuthors,
   restoreCommunityPostToUserLibrary,
-  restoreOrphanCommunityPosts,
   unpublishDuplicateCommunityPosts,
   unpublishGhostCommunityPosts,
   unpublishOrphanSourceCardPosts
@@ -65,101 +61,17 @@ adminCommunityRoutes.get('/posts', async (c) => {
   return c.json({ ok: true, data });
 });
 
-adminCommunityRoutes.get('/bucket-orphans', async (c) => {
-  const limit = Number(c.req.query('limit') || 40);
-  const offset = Number(c.req.query('offset') || 0);
-  const riskQ = String(c.req.query('risk') || '').trim();
-  const refresh = c.req.query('refresh') === '1';
-  let risk: 'safe' | 'recoverable' | 'relink' | 'all' | undefined;
-  if (riskQ === 'safe' || riskQ === 'recoverable' || riskQ === 'relink' || riskQ === 'all') {
-    risk = riskQ;
-  }
-  const admin = createAdminClient(c.env);
-  const data = await listBucketOrphanFiles(admin, c.env, apiOriginFromRequest(c), {
-    limit,
-    offset,
-    risk,
-    refresh,
-    executionCtx: c.executionCtx
-  });
-  return c.json({ ok: true, data });
-});
-
-adminCommunityRoutes.post('/bucket-orphans/restore-card', async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as {
-    primaryPath?: string;
-    risk?: string;
-    recoverPostId?: string | null;
-    recoverCardId?: string | null;
-    recoverUserId?: string | null;
-  };
-  const primaryPath = String(body.primaryPath || '').trim();
-  const risk = String(body.risk || '').trim();
-  if (!primaryPath) throw new ApiError(400, 'VALIDATION_ERROR', '请提供 primaryPath');
-  if (risk !== 'recoverable' && risk !== 'relink') {
-    throw new ApiError(400, 'VALIDATION_ERROR', '仅支持 recoverable 或 relink');
-  }
-  const admin = createAdminClient(c.env);
-  const result = await restoreCardFromOrphanGroup(admin, {
-    primaryPath,
-    risk,
-    recoverPostId: body.recoverPostId,
-    recoverCardId: body.recoverCardId,
-    recoverUserId: body.recoverUserId
-  });
-  await invalidateOrphanScanCache();
-  return c.json({ ok: true, data: result });
-});
-
-adminCommunityRoutes.post('/bucket-orphans/delete', async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { paths?: string[] };
-  const paths = Array.isArray(body.paths) ? body.paths.map(String).filter(Boolean) : [];
-  if (!paths.length) throw new ApiError(400, 'VALIDATION_ERROR', '请提供 paths');
-  if (paths.length > 50) throw new ApiError(400, 'VALIDATION_ERROR', '单次最多删除 50 个文件');
-  const admin = createAdminClient(c.env);
-  const result = await deleteStoragePaths(admin, c.env, paths);
-  return c.json({ ok: true, data: result });
-});
-
-adminCommunityRoutes.post('/posts/batch-restore', async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { ids?: string[] };
-  const admin = createAdminClient(c.env);
-  const result = await batchRestoreCommunityPosts(admin, body.ids);
-  return c.json({ ok: true, data: result });
-});
-
-adminCommunityRoutes.post('/posts/batch-unpublish', async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { ids?: string[] };
-  const admin = createAdminClient(c.env);
-  const result = await batchUnpublishCommunityPosts(admin, body.ids);
-  return c.json({ ok: true, data: result });
-});
-
-adminCommunityRoutes.post('/posts/batch-delete', async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as {
-    ids?: string[];
-    deleteStorage?: boolean;
-  };
-  const admin = createAdminClient(c.env);
-  const result = await batchDeleteCommunityPosts(admin, c.env, body.ids, {
-    deleteStorage: body.deleteStorage !== false
-  });
-  return c.json({ ok: true, data: result });
-});
-
 adminCommunityRoutes.post('/posts/:id/restore', async (c) => {
   const postId = String(c.req.param('id') || '').trim();
   if (!postId) throw new ApiError(400, 'VALIDATION_ERROR', '缺少帖子 ID');
   const admin = createAdminClient(c.env);
   const result = await restoreCommunityPostToUserLibrary(admin, postId);
-  return c.json({ ok: true, data: result });
-});
-
-adminCommunityRoutes.post('/restore-orphans', async (c) => {
-  const limit = Number(c.req.query('limit') || 50);
-  const authorId = c.req.query('authorId') || undefined;
-  const admin = createAdminClient(c.env);
-  const result = await restoreOrphanCommunityPosts(admin, { limit, authorId });
+  await writeAudit(c, {
+    action: 'community.post_restore',
+    targetType: 'community_post',
+    targetId: postId,
+    after: result
+  });
   return c.json({ ok: true, data: result });
 });
 
@@ -168,6 +80,12 @@ adminCommunityRoutes.post('/posts/:id/unpublish', async (c) => {
   if (!postId) throw new ApiError(400, 'VALIDATION_ERROR', '缺少帖子 ID');
   const admin = createAdminClient(c.env);
   await adminUnpublishCommunityPost(admin, postId);
+  await writeAudit(c, {
+    action: 'community.post_unpublish',
+    targetType: 'community_post',
+    targetId: postId,
+    after: { published: false }
+  });
   return c.json({ ok: true, data: { id: postId, published: false } });
 });
 
@@ -179,10 +97,16 @@ adminCommunityRoutes.post('/posts/:id/delete', async (c) => {
   const result = await adminDeleteCommunityPost(admin, c.env, postId, {
     deleteStorage: body.deleteStorage !== false
   });
+  await writeAudit(c, {
+    action: 'community.post_delete',
+    targetType: 'community_post',
+    targetId: postId,
+    detail: { deleteStorage: body.deleteStorage !== false, ...result }
+  });
   return c.json({ ok: true, data: result });
 });
 
-/** 下架 Storage 无文件、无效作者、重复 source_card_id、卡片库已删的社区帖 */
+/** 下架 Storage 无文件、无效作者、重复 source_card_id、卡片库已删的社区帖（预览不落库） */
 adminCommunityRoutes.get('/purge-ghosts/preview', async (c) => {
   const admin = createAdminClient(c.env);
   const data = await previewPurgeGhosts(admin, c.env);
@@ -202,6 +126,12 @@ adminCommunityRoutes.post('/purge-ghosts', async (c) => {
   const unpublishedDuplicates = await unpublishDuplicateCommunityPosts(admin);
 
   const stats = await getCommunityAdminStats(admin);
+
+  await writeAudit(c, {
+    action: 'community.purge_ghosts',
+    targetType: 'community_batch',
+    detail: { repairedAuthors, unpublishedOrphans, unpublishedMissing, unpublishedDuplicates }
+  });
 
   return c.json({
     ok: true,

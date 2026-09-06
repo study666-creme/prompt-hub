@@ -46,6 +46,43 @@ export function decodePaymentOrderNote(note: unknown): StoredPaymentOrder | null
   }
 }
 
+/**
+ * payment_orders 双写（迁移窗口期）。表不存在时静默跳过：note 副本仍是
+ * 唯一事实来源，订单后台此时不可用但不影响支付主流程。
+ */
+export async function mirrorOrderToPaymentOrders(
+  admin: SupabaseClient,
+  orderNo: string,
+  order: StoredPaymentOrder
+): Promise<void> {
+  try {
+    const row = {
+      order_no: orderNo,
+      user_id: order.user_id,
+      product_kind: order.product_kind,
+      product_id: order.product_id,
+      amount_cents: order.amount_cents,
+      credits: Number(order.credits) || 0,
+      membership_tier: order.membership_tier ?? null,
+      membership_days: order.membership_days ?? null,
+      credit_grant_mode: order.credit_grant_mode ?? null,
+      payment_method: order.payment_method,
+      state: order.state || 'pending',
+      provider_trade_no: order.provider_trade_no ?? null,
+      paid_at: order.paid_at ?? null,
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await admin
+      .from('payment_orders')
+      .upsert(row, { onConflict: 'order_no' });
+    if (error && !/does not exist|Could not find the table/i.test(String(error.message))) {
+      console.warn('[payment-orders] mirror failed:', error.message);
+    }
+  } catch (e) {
+    console.warn('[payment-orders] mirror threw:', e instanceof Error ? e.message : String(e));
+  }
+}
+
 const CREDIT_PRODUCTS: CreditProduct[] = [
   { kind: 'credits', id: 'points-10', amountCents: 1000, credits: 1000 },
   { kind: 'credits', id: 'points-20', amountCents: 3000, credits: 3000 },
@@ -146,6 +183,7 @@ export async function completeEpayOrder(admin: SupabaseClient, params: Record<st
     throw new ApiError(409, 'ORDER_PROCESSING', '订单正在处理');
   }
   let claimed = decodePaymentOrderNote(claimedEvent.note) || processingOrder;
+  void mirrorOrderToPaymentOrders(admin, orderNo, claimed);
 
   try {
     if (claimed.product_kind === 'credits') {
@@ -195,8 +233,10 @@ export async function completeEpayOrder(admin: SupabaseClient, params: Record<st
       note: encodePaymentOrderNote(paidOrder)
     }).eq('code', orderNo).eq('used_count', 1);
     if (paidError) throw paidError;
+    void mirrorOrderToPaymentOrders(admin, orderNo, paidOrder);
   } catch (error) {
     await admin.from('activation_codes').update({ used_count: 0, note: encodePaymentOrderNote({ ...claimed, state: 'pending' }) }).eq('code', orderNo).eq('used_count', 1);
+    void mirrorOrderToPaymentOrders(admin, orderNo, { ...claimed, state: 'failed' });
     throw error;
   }
 }
