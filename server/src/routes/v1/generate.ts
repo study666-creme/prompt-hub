@@ -4,6 +4,7 @@ import type { Env } from '../../env';
 import { roundCredits } from '../../lib/credit-math';
 import { ApiError } from '../../lib/errors';
 import { extractErrorMessage } from '../../lib/cors-headers';
+import { assertCanvasGenerationEnabled } from '../../lib/canvas-generation-switch';
 import {
   hasAnyImageUpstream,
   isProviderConfigured,
@@ -1174,6 +1175,8 @@ generateRoutes.post('/', rateLimit(600, 60_000), async c => {
       return c.json({ ok: true, data: imageSubmissionReplayPayload(existing.row) });
     }
   }
+  // 紧急开关在幂等重放之后、计价与扣费之前生效：已受理任务保持可查询。
+  assertCanvasGenerationEnabled(c.env, parsed.data.product);
   let profile = await syncMembershipCredits(admin, user.id);
   const memberActive = isMembershipActive(profile);
   const [settings, cachedNewApiCatalog] = await Promise.all([

@@ -65,6 +65,8 @@ export type Env = {
   EPAY_CANVAS_SITE_URL?: string;
   /** Publish and accept the Canvas collaboration-seat product only after its database migration is verified. */
   CANVAS_COLLABORATION_SEAT_PRODUCT_ENABLED?: string;
+  /** 设为 "true" 时拒绝画布（product=canvas）的新生成提交；已受理任务的查询/重放不受影响。 */
+  CANVAS_GENERATION_DISABLED?: string;
   /** 运营批量造激活码：wrangler secret put ADMIN_API_SECRET */
   ADMIN_API_SECRET?: string;
   /** 本地开发：图片走线上 R2/CDN（本地 Miniflare R2 为空时必填，默认 api.prompt-hubs.com） */
