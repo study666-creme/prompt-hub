@@ -398,7 +398,7 @@ extensionRoutes.post('/quick-card', async c => {
 
   try {
 
-    const result = await appendQuickCard(admin, user.id, profile, parsed.data);
+    const result = await appendQuickCard(admin, user.id, profile, parsed.data, c.env);
 
     void mergeTaskFlags(admin, user.id, { extension_card_saved: true }).catch((err) => {
 

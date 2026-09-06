@@ -1,9 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isStorageRef, storagePathFromRef, toStorageRef } from './image-archive';
+import { downloadCardImage, uploadCardImage } from './r2-storage';
 import { ApiError } from './errors';
 import { encodeStoragePath, isAllowedCommunityMediaPath } from './media-cdn';
 import { assertStorageDelta } from './storage-quota';
 import type { Profile } from './supabase';
+import type { Env } from '../env';
 
 const BUCKET = 'card-images';
 const MEDIA_CDN_ORIGIN = 'https://api.prompt-hub.cn';
@@ -46,6 +48,7 @@ function normalizePackCards(raw: unknown): PackCard[] {
 
 async function copyStorageImage(
   admin: SupabaseClient,
+  env: Env | undefined,
   srcRef: string | null | undefined,
   destUserId: string,
   destCardId: string
@@ -54,22 +57,21 @@ async function copyStorageImage(
   if (!srcPath) return typeof srcRef === 'string' && /^https?:\/\//i.test(srcRef) ? srcRef : null;
   const ext = srcPath.includes('.png') ? 'png' : srcPath.includes('.webp') ? 'webp' : 'jpg';
   const destPath = `${destUserId}/${destCardId}.${ext}`;
-
-  const { error: copyErr } = await admin.storage.from(BUCKET).copy(srcPath, destPath);
-  if (!copyErr) return toStorageRef(destPath);
-
-  const { data: sign } = await admin.storage.from(BUCKET).createSignedUrl(srcPath, 120);
-  if (!sign?.signedUrl) return null;
-  const res = await fetch(sign.signedUrl);
-  if (!res.ok) return null;
-  const buf = new Uint8Array(await res.arrayBuffer());
-  if (!buf.length) return null;
   const contentType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
-  const { error: upErr } = await admin.storage.from(BUCKET).upload(destPath, buf, {
-    upsert: true,
-    contentType
-  });
-  if (upErr) return null;
+
+  // 统一存储入口复制：downloadCardImage 按 MEDIA_STORAGE_MODE 回源（r2 模式
+  // 只读 R2），uploadCardImage 按模式写入。旧实现的 storage.copy/upload 直写
+  // MemFire，是 r2-only 切换后桶配额悄悄涨回去的路径之一。env 缺失时跳过复制。
+  if (!env) return null;
+  const blob = await downloadCardImage(env, srcPath);
+  if (!blob) return null;
+  const buf = await blob.arrayBuffer();
+  if (!buf.byteLength) return null;
+  try {
+    await uploadCardImage(env, destPath, buf, contentType);
+  } catch {
+    return null;
+  }
   return toStorageRef(destPath);
 }
 
@@ -113,7 +115,8 @@ export async function importAssetPackageToWarehouse(
   packageId: string,
   warehouseId: string,
   folders?: string[] | null,
-  cardIds?: string[] | null
+  cardIds?: string[] | null,
+  env?: Env
 ): Promise<{ imported: number; cardIds: string[]; groups: string[] }> {
   const { cards, title } = await getPackageCardsPayload(admin, userId, packageId);
   const folderFilter =
@@ -164,7 +167,7 @@ export async function importAssetPackageToWarehouse(
     const newId = generateCardId();
     let image: string | null = src.image || null;
     if (image && isStorageRef(image)) {
-      image = await copyStorageImage(admin, image, userId, newId);
+      image = await copyStorageImage(admin, env, image, userId, newId);
     }
     importedCards.push({
       id: newId,

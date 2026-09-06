@@ -854,7 +854,8 @@ export async function importExtraJobImagesToWarehouse(
       const archiveId = `${jobId}_ex_${i}`;
       try {
         const imageRef = await archiveRemoteImage(admin, userId, archiveId, url, {
-          maxAttempts: 2
+          maxAttempts: 2,
+          env: opts.env
         });
         if (!imageRef) {
           failures.push({ jobId, reason: 'extra_archive_failed' });

@@ -14,7 +14,7 @@ IMAGE_API_BASE_URL = "https://api.grsai.ai"
 REVERSE_VISION_MODEL = "gemini-2.5-flash-lite"
 FISSION_VISION_MODEL = "gemini-2.5-flash"
 FISSION_CHAT_MODEL = "deepseek-v4-pro"
-MEDIA_STORAGE_MODE = "r2-first"
+MEDIA_STORAGE_MODE = "r2"
 
 # 敏感项请用 wrangler secret put：
 # SUPABASE_URL（生产填 MemFire Supabase-compatible API URL；变量名为兼容保留）

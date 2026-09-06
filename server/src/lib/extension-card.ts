@@ -1,7 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { MIN_COMMUNITY_PROMPT_LEN, upsertCommunityPost } from './community-feed';
+import { uploadCardImage as uploadCardImageViaStorage } from './r2-storage';
 import { assertStorageDelta } from './storage-quota';
 import type { Profile } from './supabase';
+import type { Env } from '../env';
 
 const BUCKET = 'card-images';
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
@@ -245,27 +247,12 @@ function decodeBase64Image(raw: string): Uint8Array {
   return bytes;
 }
 
-async function uploadCardImage(
-  admin: SupabaseClient,
-  userId: string,
-  cardId: string,
-  imageBase64: string
-): Promise<string> {
-  const path = cardStoragePath(userId, cardId);
-  const bytes = decodeBase64Image(imageBase64);
-  const { error } = await admin.storage.from(BUCKET).upload(path, bytes, {
-    contentType: 'image/jpeg',
-    upsert: true
-  });
-  if (error) throw error;
-  return `storage://${BUCKET}/${path}`;
-}
-
 export async function appendQuickCard(
   admin: SupabaseClient,
   userId: string,
   profile: Profile,
-  input: QuickCardInput
+  input: QuickCardInput,
+  env?: Env
 ): Promise<QuickCardResult> {
   const prompt = String(input.prompt || '').trim();
   if (!prompt && !input.imageBase64) {
@@ -291,7 +278,11 @@ export async function appendQuickCard(
   if (input.imageBase64) {
     const bytes = decodeBase64Image(input.imageBase64);
     assertStorageDelta(profile, bytes.length);
-    image = await uploadCardImage(admin, userId, cardId, input.imageBase64);
+    // 统一存储入口：MEDIA_STORAGE_MODE=r2 时只写 R2，不再落 MemFire。
+    if (!env) throw new Error('storage_unavailable');
+    const path = cardStoragePath(userId, cardId);
+    await uploadCardImageViaStorage(env, path, bytes.buffer as ArrayBuffer, 'image/jpeg');
+    image = `storage://${BUCKET}/${path}`;
     const usedBytes = Math.max(0, Number(profile.storage_bytes) || 0) + bytes.length;
     const { error: stErr } = await admin
       .from('profiles')

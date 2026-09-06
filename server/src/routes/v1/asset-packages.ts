@@ -230,7 +230,8 @@ assetPackagesRoutes.post('/:id/import', rateLimit(30, 60_000), async c => {
     id,
     parsed.data.warehouseId,
     parsed.data.folders,
-    parsed.data.cardIds
+    parsed.data.cardIds,
+    c.env
   );
   return c.json({ ok: true, data: result });
 });

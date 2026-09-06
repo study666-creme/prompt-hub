@@ -277,16 +277,10 @@ export async function archiveRemoteImage(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      if (env) {
-        await uploadCardImage(env, path, buf, mime);
-      } else {
-        const { error } = await admin.storage.from(BUCKET).upload(path, buf, {
-          contentType: mime,
-          upsert: true,
-          cacheControl: '3600'
-        });
-        if (error) throw error;
-      }
+      // 统一存储入口：MEDIA_STORAGE_MODE=r2 时只写 R2。env 缺失直接报错，
+      // 不再回落到直写 MemFire（旧降级路径是桶配额悄悄涨回去的原因之一）。
+      if (!env) throw new Error('storage_env_unavailable');
+      await uploadCardImage(env, path, buf, mime);
 
       if (await verifyStoredObject(admin, path, env)) {
         return toStorageRef(path);
