@@ -1588,3 +1588,73 @@ describe('newapi image upstream', () => {
     expect(resolveNewApiCatalogModel(snapshot, 'glm-5.1', 'text')).toBeNull();
   });
 });
+
+describe('per-second video billing with catalog quantity_parameter', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Mirrors the live catalog shape (kling-3.0): pricing declares
+  // quantity_parameter: 'duration_seconds' while the video route's billing
+  // params use the relay key 'duration'. Before the fix this billed exactly
+  // one second (quantity fell back to 1) for every requested duration.
+  it('bills every requested second when the catalog declares duration_seconds', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      success: true,
+      version: 'video-qty-1',
+      pricing_version: 'video-qty-p1',
+      models: [
+        {
+          id: 'kling-3.0',
+          label: 'Kling 3.0',
+          public: { id: 'motion-video-3', label: '可灵3.0', description: '按秒计费。' },
+          modality: 'video',
+          operation: 'generate',
+          selectable: true,
+          tags: 'video',
+          parameters: [
+            { name: 'model', path: 'model', type: 'string', required: true, fixed: 'kling-3.0' },
+            { name: 'prompt', path: 'prompt', type: 'string', required: true },
+            { name: 'duration_seconds', path: 'duration_seconds', label: '时长（秒）', type: 'integer', required: false, default: 5, options: [3, 5, 10, 15] },
+            { name: 'resolution', path: 'resolution', label: '分辨率', type: 'string', required: false, options: ['720p', '1080p'] }
+          ],
+          pricing: {
+            mode: 'tiered',
+            unit: 'second',
+            yuan: 0.13,
+            credits: 13,
+            quantity_parameter: 'duration_seconds',
+            tiers: [
+              { when: { resolution: '720p' }, yuan: 0.13, credits: 13 },
+              { when: { resolution: '1080p' }, yuan: 0.17, credits: 17 }
+            ]
+          }
+        }
+      ]
+    })));
+
+    const snapshot = await fetchNewApiModelCatalog('https://video-qty.test/v1', { force: true });
+    const model = snapshot.models.find(candidate => candidate.modality === 'video');
+    expect(model?.pricing.quantityParameter).toBe('duration_seconds');
+
+    // Exactly the params object the video route passes (routes/v1/video.ts).
+    expect(newApiFixedCreditsForRequest(model!, { duration: 15, resolution: '720p', generate_audio: false, ratio: '16:9' })).toBe(195);
+    expect(newApiFixedCreditsForRequest(model!, { duration: 5, resolution: '1080p', generate_audio: false, ratio: '16:9' })).toBe(85);
+    expect(newApiFixedCreditsForRequest(model!, { duration: 3, resolution: '720p' })).toBe(39);
+  });
+
+  it('still honors an explicit relay quantity key the catalog does not remap', () => {
+    const model = {
+      id: 'per-request-video',
+      upstreamModel: 'per-request-video',
+      label: 'per request',
+      description: '',
+      modality: 'video' as const,
+      operation: 'generate' as const,
+      order: 1,
+      endpoint: { method: 'POST' as const, path: '/api/v1/video', contentType: 'application/json' as const },
+      parameters: [],
+      pricing: { mode: 'fixed' as const, unit: 'request' as const, yuan: 1, credits: 100, quantityParameter: 'n' }
+    };
+    expect(newApiFixedCreditsForRequest(model, { n: 3 })).toBe(300);
+    expect(newApiFixedCreditsForRequest(model, {})).toBe(100);
+  });
+});

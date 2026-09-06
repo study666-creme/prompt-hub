@@ -1254,10 +1254,25 @@ export function newApiFixedCreditsForRequest(
     )
   );
   const unitCredits = tier?.credits ?? model.pricing.credits;
-  const quantityKey = model.pricing.quantityParameter
+  const quantityKey = quantityParameterKey(model.pricing)
     || (model.pricing.unit === 'second' ? 'duration' : model.pricing.unit === 'image' ? 'n' : '');
   const quantity = quantityKey ? Math.max(1, Number(params[quantityKey]) || 1) : 1;
   return rounded(unitCredits * quantity);
+}
+
+/**
+ * 目录下发的 quantity_parameter 用公开契约名（如 duration_seconds），而计价调用方
+ * （video 路由等）传的是中转参数名（duration/seconds/n）。这里把目录声明的数量键
+ * 归一到调用方实际传入的键：second 单位映射 duration/seconds，其余原样。
+ * 归一失败时返回 null，让调用方退回 unit 推断键，绝不能把数量静默按 1 计。
+ */
+function quantityParameterKey(pricing: NewApiCatalogPricing): string | null {
+  const declared = pricing.quantityParameter?.trim();
+  if (!declared) return null;
+  if (pricing.unit === 'second' && ['duration_seconds', 'durationSeconds', 'seconds', 'duration'].includes(declared)) {
+    return 'duration';
+  }
+  return declared;
 }
 
 export function newApiTextCreditsForUsage(
