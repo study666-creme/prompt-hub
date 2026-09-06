@@ -1,12 +1,15 @@
 import { Hono } from 'hono';
 import type { Env } from '../../env';
 import { applyCorsHeaders } from '../../lib/cors-headers';
+import { adminAuditRoutes } from './audit';
 import { adminCardRoutes } from './cards';
 import { adminCanvasRoutes } from './canvas';
 import { adminCodeRoutes } from './codes';
 import { adminCommunityRoutes } from './community';
 import { adminDashboardRoutes } from './dashboard';
 import { adminImageModelRoutes } from './image-models';
+import { adminLedgerRoutes } from './ledger';
+import { adminOrderRoutes } from './orders';
 import { adminUserRoutes } from './users';
 
 export const adminRoutes = new Hono<{ Bindings: Env }>();
@@ -27,3 +30,6 @@ adminRoutes.route('/community', adminCommunityRoutes);
 adminRoutes.route('/users', adminUserRoutes);
 adminRoutes.route('/codes', adminCodeRoutes);
 adminRoutes.route('/image-models', adminImageModelRoutes);
+adminRoutes.route('/orders', adminOrderRoutes);
+adminRoutes.route('/ledger', adminLedgerRoutes);
+adminRoutes.route('/audit', adminAuditRoutes);

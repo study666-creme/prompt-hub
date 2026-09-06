@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__ADMIN_BUILD__ = '20260805f';
+    window.__ADMIN_BUILD__ = '20260907a';
     (function () {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function (regs) {
@@ -23,7 +23,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Prompt Hub 运营控制台</title>
-  <link rel="stylesheet" href="styles-admin.css?v=20260805f">
+  <link rel="stylesheet" href="styles-admin.css?v=20260907a">
 </head>
 <body class="admin-console-page" data-admin-page="console">
   <div class="admin-app" id="adminApp" hidden>
@@ -31,17 +31,9 @@
       <aside class="admin-sidebar">
         <div class="admin-brand">
           <h1>Prompt Hub</h1>
-          <p>运营控制台 · <code id="adminSidebarBuild">20260707v</code></p>
+          <p>运营控制台 · <code id="adminSidebarBuild">20260907a</code></p>
         </div>
-        <nav class="admin-nav admin-tabs" aria-label="管理导航">
-          <button type="button" class="admin-tab is-active" data-tab="overview"><span class="admin-tab-icon admin-tab-icon--overview" aria-hidden="true"></span>概览</button>
-          <button type="button" class="admin-tab" data-tab="users"><span class="admin-tab-icon admin-tab-icon--users" aria-hidden="true"></span>用户</button>
-          <button type="button" class="admin-tab" data-tab="cards"><span class="admin-tab-icon admin-tab-icon--cards" aria-hidden="true"></span>卡片库</button>
-          <button type="button" class="admin-tab" data-tab="community"><span class="admin-tab-icon admin-tab-icon--community" aria-hidden="true"></span>社区</button>
-          <button type="button" class="admin-tab" data-tab="codes"><span class="admin-tab-icon admin-tab-icon--codes" aria-hidden="true"></span>激活码</button>
-          <button type="button" class="admin-tab" data-tab="models"><span class="admin-tab-icon admin-tab-icon--models" aria-hidden="true"></span>生图模型</button>
-          <button type="button" class="admin-tab" data-tab="canvas"><span class="admin-tab-icon admin-tab-icon--canvas" aria-hidden="true"></span>画布调用</button>
-        </nav>
+        <nav class="admin-nav admin-tabs" id="adminNav" aria-label="管理导航"></nav>
         <div class="admin-sidebar-foot">
           <button type="button" class="admin-btn admin-btn--ghost-light admin-logout-btn" id="logoutBtn">退出登录</button>
         </div>
@@ -126,6 +118,117 @@
       </div>
     </section>
 
+    <section class="admin-panel" id="panel-orders" hidden>
+      <div class="admin-card" style="margin-bottom:12px">
+        <div class="admin-card-head">
+          <h2 style="margin:0;font-size:16px">人工补单</h2>
+        </div>
+        <p class="admin-hint">通过 apply_credit_delta 发放，写入流水（reason=admin_manual），可在「操作审计」追溯。</p>
+        <div class="admin-row">
+          <div class="admin-field" style="flex:2;min-width:200px;margin:0">
+            <label for="manualGrantUserId">用户 ID（UUID）</label>
+            <input type="text" id="manualGrantUserId" placeholder="从用户管理页复制">
+          </div>
+          <div class="admin-field" style="width:120px;margin:0">
+            <label for="manualGrantCredits">积分</label>
+            <input type="number" id="manualGrantCredits" min="1" step="1" value="100">
+          </div>
+          <div class="admin-field" style="flex:1;min-width:160px;margin:0">
+            <label for="manualGrantReason">原因（必填）</label>
+            <input type="text" id="manualGrantReason" maxlength="200" placeholder="如：epay 回调丢失，补 6/1 订单">
+          </div>
+          <button type="button" class="admin-btn admin-btn--primary" id="manualGrantBtn" style="align-self:flex-end">补发积分</button>
+        </div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <h2 style="margin:0;font-size:16px">支付订单</h2>
+          <div class="admin-row">
+            <select id="orderStateFilter" class="admin-input-sm" aria-label="订单状态">
+              <option value="">全部状态</option>
+              <option value="paid">已支付</option>
+              <option value="pending">待支付</option>
+              <option value="processing">处理中</option>
+              <option value="failed">失败</option>
+            </select>
+            <select id="orderKindFilter" class="admin-input-sm" aria-label="商品类型">
+              <option value="">全部商品</option>
+              <option value="credits">积分</option>
+              <option value="membership">会员</option>
+            </select>
+            <button type="button" class="admin-btn admin-btn--sm" id="orderLoadLegacy" title="扫描 activation_codes.note 中的迁移前订单">加载迁移前订单</button>
+            <button type="button" class="admin-btn admin-btn--sm" id="orderRefresh">刷新</button>
+          </div>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>订单号 / 时间</th>
+                <th>用户</th>
+                <th>商品</th>
+                <th>金额</th>
+                <th>渠道</th>
+                <th>状态</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="ordersTableBody"></tbody>
+          </table>
+        </div>
+        <div class="admin-pagination">
+          <button type="button" class="admin-btn" id="orderPrev">上一页</button>
+          <span id="orderPageInfo" class="admin-hint"></span>
+          <button type="button" class="admin-btn" id="orderNext">下一页</button>
+        </div>
+        <div id="legacyOrdersBox" hidden></div>
+        <p class="admin-msg" id="ordersMsg" hidden></p>
+      </div>
+    </section>
+
+    <section class="admin-panel" id="panel-ledger" hidden>
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <h2 style="margin:0;font-size:16px">积分流水（credit_ledger）</h2>
+          <div class="admin-row">
+            <button type="button" class="admin-btn admin-btn--sm" id="ledgerExportBtn" title="导出最近 5000 条 CSV">导出 CSV</button>
+          </div>
+        </div>
+        <div class="admin-search-bar">
+          <div class="admin-field">
+            <label for="ledgerUserSearch">用户 ID</label>
+            <input type="search" id="ledgerUserSearch" autocomplete="off" spellcheck="false" placeholder="UUID，可从用户管理复制">
+          </div>
+          <div class="admin-field admin-field--sm">
+            <label for="ledgerReasonFilter">原因</label>
+            <select id="ledgerReasonFilter"></select>
+          </div>
+          <button type="button" class="admin-btn admin-btn--primary" id="ledgerSearchBtn">查询</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>用户</th>
+                <th>变动 / 余额</th>
+                <th>原因</th>
+                <th>关联 ID</th>
+                <th>备注</th>
+              </tr>
+            </thead>
+            <tbody id="ledgerTableBody"></tbody>
+          </table>
+        </div>
+        <div class="admin-pagination">
+          <button type="button" class="admin-btn" id="ledgerPrev">上一页</button>
+          <span id="ledgerPageInfo" class="admin-hint"></span>
+          <button type="button" class="admin-btn" id="ledgerNext">下一页</button>
+        </div>
+        <p class="admin-msg" id="ledgerMsg" hidden></p>
+      </div>
+    </section>
+
     <section class="admin-panel" id="panel-cards" hidden>
       <div class="admin-stats" id="cardAdminStats"></div>
       <div class="admin-card">
@@ -183,20 +286,16 @@
     <section class="admin-panel" id="panel-community" hidden>
       <div class="admin-stats" id="communityStats"></div>
       <div class="admin-card" style="margin-bottom:12px">
-        <div class="admin-view-tabs" id="communityViewTabs">
-          <button type="button" class="admin-view-tab is-active" data-community-view="published">在线帖</button>
-          <button type="button" class="admin-view-tab" data-community-view="bucket-orphans">桶内孤儿</button>
-        </div>
-        <p class="admin-hint" id="communityViewHint">在线社区帖，可下架或删除（含 Storage/R2 配图）。</p>
         <div class="admin-action-guide" id="communityActionGuide">
           <strong>操作说明</strong>
           <ul>
-            <li><strong>仅从社区隐藏</strong>：社区不再展示，图片与卡片库记录保留（不是改用户卡片库「是否公开」）。</li>
-            <li><strong>永久删除</strong>：删社区记录，并尝试删 Storage/R2 配图（不可恢复）。</li>
-            <li><strong>清理无效帖</strong>：批量隐藏无图、无效作者、重复帖等；不会动用户卡片库开关。</li>
+            <li><strong>写回</strong>：帖子所引卡片已从作者库删除时，把卡片写回作者云端卡片库。</li>
+            <li><strong>仅从社区隐藏</strong>：社区不再展示，图片与卡片库记录保留。</li>
+            <li><strong>永久删除</strong>：删社区记录并尝试删 Storage/R2 配图（不可恢复）。</li>
+            <li><strong>清理无效帖</strong>：批量下架无图、无效作者、删卡孤儿、重复帖。</li>
           </ul>
         </div>
-        <div class="admin-search-bar" id="communityPostTools">
+        <div class="admin-search-bar">
           <div class="admin-field">
             <label for="communitySearch">搜索帖子</label>
             <input type="search" id="communitySearch" autocomplete="off" spellcheck="false"
@@ -207,38 +306,17 @@
           <button type="button" class="admin-btn" id="communityPurgePreviewBtn" title="扫描将下架多少帖，不修改数据">预览清理</button>
           <button type="button" class="admin-btn admin-btn--primary" id="communityPurgeBtn" title="下架无图/无效/重复/删卡孤儿帖">清理无效帖</button>
         </div>
-        <div class="admin-batch-bar hidden" id="communityBatchBar">
-          <label class="admin-check admin-batch-select-all">
-            <input type="checkbox" id="communitySelectAll"> 全选本页
-          </label>
-          <span class="admin-hint" id="communitySelectedCount">已选 0 条</span>
-          <button type="button" class="admin-btn admin-btn--sm" id="communityBatchUnpublishBtn" disabled title="仅从社区隐藏">批量隐藏</button>
-          <button type="button" class="admin-btn admin-btn--sm admin-btn--danger" id="communityBatchDeleteBtn" disabled>批量删除</button>
-        </div>
-        <div class="admin-task-progress" id="communityTaskProgress" hidden>
-          <div class="admin-progress" aria-hidden="true"><div class="admin-progress__bar is-indeterminate" id="communityTaskProgressBar"></div></div>
-          <p class="admin-hint" id="communityTaskProgressText"></p>
-        </div>
-        <div class="admin-batch-bar hidden" id="communityBucketBatchBar">
-          <div class="admin-view-tabs admin-view-tabs--inline" id="communityBucketRiskTabs">
-            <button type="button" class="admin-view-tab is-active" data-bucket-risk="all">全部</button>
-            <button type="button" class="admin-view-tab" data-bucket-risk="safe">仅普通路径</button>
-            <button type="button" class="admin-view-tab" data-bucket-risk="recoverable">可写回</button>
-            <button type="button" class="admin-view-tab" data-bucket-risk="relink">需核对/可关联</button>
-          </div>
-          <button type="button" class="admin-btn admin-btn--sm" id="communityBucketRescanBtn" title="重新扫描 R2（约 1～3 分钟）">重新扫描</button>
-          <span class="admin-hint" id="communityBucketMeta"></span>
-        </div>
       </div>
       <div class="admin-card">
         <div class="admin-table-wrap">
           <table class="admin-table admin-table--community">
-            <thead id="communityTableHead">
+            <thead>
               <tr>
                 <th>缩略图</th>
                 <th>作者</th>
                 <th>提示词</th>
                 <th>卡片库</th>
+                <th>图态</th>
                 <th>赞</th>
                 <th>时间</th>
                 <th></th>
@@ -247,25 +325,9 @@
             <tbody id="communityTableBody"></tbody>
           </table>
         </div>
-        <div class="admin-pagination" id="communityPagination">
+        <div class="admin-pagination">
           <button type="button" class="admin-btn" id="communityPrev">上一页</button>
           <span id="communityPageInfo" class="admin-hint"></span>
-          <div class="admin-pagination-extra hidden" id="communityBucketPageTools">
-            <label class="admin-pagination-jump" for="communityBucketPageInput">
-              第
-              <input type="number" id="communityBucketPageInput" min="1" step="1" inputmode="numeric" aria-label="页码">
-              / <span id="communityBucketPageTotal">1</span> 页
-            </label>
-            <button type="button" class="admin-btn admin-btn--sm" id="communityBucketPageGoBtn">跳转</button>
-            <label class="admin-pagination-size" for="communityBucketPageSize">
-              每页
-              <select id="communityBucketPageSize">
-                <option value="20">20</option>
-                <option value="50" selected>50</option>
-                <option value="100">100</option>
-              </select>
-            </label>
-          </div>
           <button type="button" class="admin-btn" id="communityNext">下一页</button>
         </div>
         <p class="admin-msg" id="communityMsg" hidden></p>
@@ -363,7 +425,7 @@
     <section class="admin-panel" id="panel-models" hidden>
       <div class="admin-card">
         <h2 style="margin:0 0 8px;font-size:16px">当前生图模型</h2>
-        <p class="admin-hint">全能模型2与香蕉的模型、参数和价格由卡藏 API 自动同步，按 1 元 = 100 积分换算，不接受手动改价。“调用链路”仅管理员可见，会列出 API 模型、真实渠道与当前启停状态。MJ 保留 Relax / Fast / Turbo 分档配置。</p>
+        <p class="admin-hint">全能模型2与香蕉的模型、参数和价格由卡藏 API 自动同步，按 1 元 = 100 积分换算，不接受手动改价。MJ 保留 Relax / Fast / Turbo 分档配置。上游渠道排障请到卡藏控制台。</p>
         <p class="admin-msg admin-msg--err" id="modelsPersistWarn" hidden></p>
         <div class="admin-view-tabs admin-view-tabs--inline" id="modelFamilyTabs" style="margin-bottom:12px">
           <button type="button" class="admin-view-tab is-active" data-model-family="all">全部</button>
@@ -386,17 +448,14 @@
               <tr>
                 <th>排序</th>
                 <th>分类</th>
-                <th>调用链路</th>
                 <th>模型 ID</th>
                 <th>显示名称</th>
                 <th>状态</th>
-                <th>服务成本</th>
                 <th>违规返还</th>
                 <th>分辨率</th>
                 <th>售价积分</th>
-                <th title="仅 MJ 可配置">MJ 活动价</th>
-                <th title="全能模型2与香蕉显示实时价">有效价格</th>
-                <th>固定价</th>
+                <th>MJ 活动价</th>
+                <th>有效价格</th>
               </tr>
             </thead>
             <tbody id="modelsTableBody"></tbody>
@@ -414,6 +473,7 @@
             <h2>模型映射</h2>
             <p class="admin-hint" id="canvasCatalogMeta">正在读取实时目录…</p>
           </div>
+          <a class="admin-btn admin-btn--sm" href="https://console.prompt-hubs.com/usage-logs/task" target="_blank" rel="noopener">打开生成服务日志</a>
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table admin-table--compact">
@@ -425,32 +485,96 @@
       <div class="admin-card">
         <div class="admin-card-head">
           <div>
-            <h2>最近画布任务</h2>
-            <p class="admin-hint">可判断请求停在创建、等待服务、生成、保存结果还是完成阶段。</p>
+            <h2>视频模型</h2>
+            <p class="admin-hint">目录与价格由卡藏 API 同步；上下架跟随卡藏渠道可用性，无可用渠道的模型自动对前端隐藏。</p>
           </div>
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table admin-table--compact">
-            <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>参数</th><th>状态</th><th>积分</th><th>服务任务</th><th>错误</th></tr></thead>
-            <tbody id="canvasJobsBody"></tbody>
+            <thead><tr><th>视频名称</th><th>公开 ID</th><th>实际模型</th><th>实时价格</th><th>参数</th></tr></thead>
+            <tbody id="canvasVideoModelBody"></tbody>
           </table>
         </div>
       </div>
       <div class="admin-card">
         <div class="admin-card-head">
           <div>
-            <h2>生成服务日志</h2>
-            <p class="admin-hint" id="canvasServiceLogMeta">核对服务是否收到请求及实际耗时。</p>
+            <h2>按模型统计</h2>
+            <p class="admin-hint" id="canvasModelStatsMeta">近 7 天 · 按模型聚合（图片+视频）</p>
           </div>
-          <a class="admin-btn admin-btn--sm" id="canvasServiceConsoleLink" href="https://console.prompt-hubs.com/usage-logs/task" target="_blank" rel="noopener">打开完整日志</a>
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table admin-table--compact">
-            <thead><tr><th>时间</th><th>模型</th><th>渠道</th><th>状态</th><th>耗时</th><th>请求 ID</th><th>明细</th></tr></thead>
-            <tbody id="canvasServiceLogsBody"></tbody>
+            <thead><tr><th>类型</th><th>模型</th><th>总量</th><th>成功</th><th>失败</th><th>成功率</th><th>用户数</th><th>净积分</th><th>进行中</th></tr></thead>
+            <tbody id="canvasModelStatsBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <div>
+            <h2>错误日志</h2>
+            <p class="admin-hint" id="canvasErrorLogsMeta">近 7 天失败任务（图片 + 视频，画布与卡片库入口合并）</p>
+          </div>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-table--compact">
+            <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>入口</th><th>错误</th><th>积分</th><th>退款</th></tr></thead>
+            <tbody id="canvasErrorLogsBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <div>
+            <h2>最近生图任务</h2>
+            <p class="admin-hint">画布与卡片库共用 generation_requests。可判断请求停在创建、等待服务、生成、保存结果还是完成阶段。</p>
+          </div>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-table--compact">
+            <thead><tr><th>时间</th><th>类型</th><th>用户</th><th>模型</th><th>参数</th><th>状态</th><th>积分</th><th>服务任务</th><th>错误</th></tr></thead>
+            <tbody id="canvasJobsBody"></tbody>
           </table>
         </div>
         <p class="admin-msg" id="canvasOpsMsg" hidden></p>
+      </div>
+    </section>
+
+    <section class="admin-panel" id="panel-audit" hidden>
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <h2 style="margin:0;font-size:16px">操作审计</h2>
+        </div>
+        <p class="admin-hint">所有后台写操作（用户/订单/社区/激活码/模型定价）自动记录：操作密钥指纹、变更前后值、IP。只读查询。</p>
+        <div class="admin-search-bar">
+          <div class="admin-field">
+            <label for="auditActionSearch">按动作筛选</label>
+            <input type="search" id="auditActionSearch" autocomplete="off" spellcheck="false" placeholder="如 user / order / community / code">
+          </div>
+          <button type="button" class="admin-btn admin-btn--primary" id="auditSearchBtn">查询</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>时间 / IP</th>
+                <th>操作人</th>
+                <th>动作</th>
+                <th>目标</th>
+                <th>变更前</th>
+                <th>变更后</th>
+              </tr>
+            </thead>
+            <tbody id="auditTableBody"></tbody>
+          </table>
+        </div>
+        <div class="admin-pagination">
+          <button type="button" class="admin-btn" id="auditPrev">上一页</button>
+          <span id="auditPageInfo" class="admin-hint"></span>
+          <button type="button" class="admin-btn" id="auditNext">下一页</button>
+        </div>
+        <p class="admin-msg" id="auditMsg" hidden></p>
       </div>
     </section>
       </main>
@@ -488,6 +612,6 @@
 
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script src="admin.js?v=20260805f"></script>
+  <script type="module" src="admin/main.js?v=20260907a"></script>
 </body>
 </html>

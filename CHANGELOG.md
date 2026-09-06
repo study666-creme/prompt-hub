@@ -2,6 +2,24 @@
 
 本文件只记录用户可感知或架构级变化；完整细节以 Git 提交历史为准。
 
+## 2026-09-07（后台重构补齐：视频模型 + 统计 + 错误日志）
+
+- 生图任务页新增**视频模型映射**：卡藏目录中的全部视频模型（公开 ID/实际模型/实时价格/参数），补齐此前只展示生图模型的缺口；视频上下架跟随卡藏渠道可用性。
+- 生图任务页新增**按模型统计**：近 7 天每个模型（图片+视频合并）的任务总量、成功数、失败次数、成功率、用户数、净积分消耗。
+- 生图任务页新增**错误日志**：近 7 天失败任务（图片+视频、画布与卡片库入口合并），含错误消息、扣费与退款状态——错误溯源直接在 API 侧后台完成，不依赖各前端入口各自记日志。
+- 最近任务列表区分视频/生图类型（视频带时长与进度阶段）。
+
+## 2026-09-06（后台重构）
+
+- 前端从 3075 行同步 XHR+eval 单 IIFE 重写为原生 ES modules（`admin/modules` + `admin/views` + `admin/main.js`），hash 路由（`#/users` 等），导航重组为 10 个分组；旧 `legacy/admin` 分片归档至 `legacy/_retired-admin/`。
+- 新增**订单管理页**：`payment_orders` 表（订单迁出 `activation_codes.note`，下单/回调双写），人工补单（apply_credit_delta 幂等写流水），迁移前历史订单只读查询。
+- 新增**积分流水页**：credit_ledger 按用户/原因筛选、CSV 导出、用户详情直链。
+- 新增**操作审计**：admin_audit_logs + 中间件，所有后台写操作记录密钥指纹、前后值、IP。
+- 新增**用户封禁/解封**（profiles 封禁列 + Auth 同步 ban）。
+- 修复后台改积分不写流水的账目缺口（改走 apply_credit_delta RPC）。
+- 下线桶内孤儿视图、生成服务日志代理、调用链路列与 5 个死接口。
+- 数据库迁移：`supabase/migrations/20260906200000_admin_console_rework.sql`（建 payment_orders / admin_audit_logs、profiles 封禁列、credit_ledger 幂等索引）。
+
 ## 2026-08-31
 
 - 画布以新目录公开 ID（`gpt-image-2-ext`）提交生图时不再报“所选模型不可用”：Worker 生图目录补齐该 ID 到内部 `image2-pro` 线路的别名（`image-models-catalog.ts` 的 LEGACY_MODEL_MAP），并新增回归测试覆盖“live 目录快照 → 解析到 image2-pro → 提交 New API”链路。

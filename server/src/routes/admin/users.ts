@@ -11,6 +11,7 @@ import {
 import { deleteUserStorageFiles } from '../../lib/admin-storage';
 import { createAdminClient, isMembershipActive, type Profile } from '../../lib/supabase';
 import { roundCredits } from '../../lib/credit-math';
+import { writeAudit } from '../../middleware/admin-audit';
 import { requireAdminSecret } from '../../middleware/admin';
 import { rateLimit } from '../../middleware/rate-limit';
 
@@ -32,6 +33,11 @@ const patchUserSchema = z.object({
   membershipUntil: z.string().datetime().nullable().optional(),
   clearMembership: z.boolean().optional(),
   clearQueuedMembership: z.boolean().optional()
+});
+
+const banSchema = z.object({
+  banned: z.boolean(),
+  reason: z.string().max(300).optional()
 });
 
 async function enrichProfileRow(
@@ -65,6 +71,9 @@ async function enrichProfileRow(
     membershipUntil: profile.membership_until,
     membershipQueuedTier: profile.membership_queued_tier,
     membershipQueuedUntil: profile.membership_queued_until,
+    banned: !!(profile as Profile & { banned_at?: string | null }).banned_at,
+    bannedAt: (profile as Profile & { banned_at?: string | null }).banned_at ?? null,
+    banReason: (profile as Profile & { ban_reason?: string | null }).ban_reason ?? null,
     storageBytes: profile.storage_bytes ?? 0,
     storageLabel: formatBytes(profile.storage_bytes ?? 0),
     storageQuota: storage,
@@ -105,13 +114,13 @@ async function findProfilesByEmailQuery(
   const { data: rows, error: profErr } = await admin
     .from('profiles')
     .select(
-      'user_id, display_name, credits, daily_credits, daily_credits_date, membership_tier, membership_until, membership_queued_tier, membership_queued_until, storage_bytes, credit_grant_mode, lifetime_credits_spent'
+      'user_id, display_name, credits, daily_credits, daily_credits_date, membership_tier, membership_until, membership_queued_tier, membership_queued_until, banned_at, ban_reason, storage_bytes, credit_grant_mode, lifetime_credits_spent'
     )
     .in('user_id', slice);
 
   if (profErr) throw profErr;
 
-  const byId = new Map((rows ?? []).map(r => [r.user_id, r as Profile]));
+  const byId = new Map((rows ?? []).map(r => [r.user_id, r as unknown as Profile]));
   const ordered = slice.map(id => byId.get(id)).filter(Boolean) as Profile[];
   return { items: ordered, total: matchedIds.length };
 }
@@ -134,7 +143,7 @@ adminUserRoutes.get('/', async c => {
     let query = admin
       .from('profiles')
       .select(
-        'user_id, display_name, credits, daily_credits, daily_credits_date, membership_tier, membership_until, membership_queued_tier, membership_queued_until, storage_bytes, credit_grant_mode, lifetime_credits_spent',
+        'user_id, display_name, credits, daily_credits, daily_credits_date, membership_tier, membership_until, membership_queued_tier, membership_queued_until, banned_at, ban_reason, storage_bytes, credit_grant_mode, lifetime_credits_spent',
         { count: 'exact' }
       )
       .order('credits', { ascending: false });
@@ -146,7 +155,7 @@ adminUserRoutes.get('/', async c => {
 
     const { data: rows, error, count } = await query.range(offset, offset + limit - 1);
     if (error) throw error;
-    profiles = (rows ?? []) as Profile[];
+    profiles = (rows ?? []) as unknown as Profile[];
     total = count ?? profiles.length;
   }
 
@@ -203,6 +212,9 @@ adminUserRoutes.get('/:userId', async c => {
     .order('redeemed_at', { ascending: false })
     .limit(20);
 
+  const bannedAt = (p as Profile & { banned_at?: string | null }).banned_at ?? null;
+  const banReason = (p as Profile & { ban_reason?: string | null }).ban_reason ?? null;
+
   return c.json({
     ok: true,
     data: {
@@ -219,6 +231,9 @@ adminUserRoutes.get('/:userId', async c => {
       membershipUntil: p.membership_until,
       membershipQueuedTier: p.membership_queued_tier,
       membershipQueuedUntil: p.membership_queued_until,
+      banned: !!bannedAt,
+      bannedAt,
+      banReason,
       storageBytes: p.storage_bytes ?? 0,
       storageLabel: formatBytes(p.storage_bytes ?? 0),
       storageQuota,
@@ -243,14 +258,30 @@ adminUserRoutes.patch('/:userId', async c => {
 
   const { data: existing, error: loadErr } = await admin
     .from('profiles')
-    .select('user_id')
+    .select('user_id, credits, daily_credits, membership_tier, membership_until, membership_queued_tier, membership_queued_until')
     .eq('user_id', userId)
     .maybeSingle();
   if (loadErr) throw loadErr;
   if (!existing) throw new ApiError(404, 'NOT_FOUND', '用户不存在');
 
+  // 积分变更走 apply_credit_delta RPC：与支付/兑换同一入口，必写 credit_ledger
+  if (body.credits !== undefined) {
+    const target = roundCredits(body.credits);
+    const current = roundCredits(Number(existing.credits) || 0);
+    if (target !== current) {
+      const delta = roundCredits(target - current);
+      const { error: rpcErr } = await admin.rpc('apply_credit_delta', {
+        p_user_id: userId,
+        p_delta: delta,
+        p_reason: 'admin_manual',
+        p_ref_id: `admin-set-${Date.now()}`,
+        p_meta: { note: `后台改永久积分 ${current} → ${target}`, by: 'admin-console' }
+      });
+      if (rpcErr) throw rpcErr;
+    }
+  }
+
   const updates: Record<string, unknown> = {};
-  if (body.credits !== undefined) updates.credits = body.credits;
   if (body.dailyCredits !== undefined) updates.daily_credits = body.dailyCredits;
   if (body.membershipTier !== undefined) updates.membership_tier = body.membershipTier;
   if (body.membershipUntil !== undefined) updates.membership_until = body.membershipUntil;
@@ -263,17 +294,38 @@ adminUserRoutes.patch('/:userId', async c => {
     updates.membership_queued_until = null;
   }
 
-  if (!Object.keys(updates).length) {
-    throw new ApiError(400, 'INVALID_BODY', '没有可更新的字段');
+  let updated: Record<string, unknown>;
+  if (Object.keys(updates).length) {
+    const res = await admin
+      .from('profiles')
+      .update(updates)
+      .eq('user_id', userId)
+      .select('*')
+      .maybeSingle();
+    if (res.error) throw res.error;
+    updated = res.data ?? (existing as Record<string, unknown>);
+  } else {
+    updated = existing as Record<string, unknown>;
   }
 
-  const { data: updated, error } = await admin
-    .from('profiles')
-    .update(updates)
-    .eq('user_id', userId)
-    .select('*')
-    .single();
-  if (error) throw error;
+  await writeAudit(c, {
+    action: 'user.update',
+    targetType: 'user',
+    targetId: userId,
+    before: {
+      credits: Number(existing.credits) || 0,
+      dailyCredits: Number(existing.daily_credits) || 0,
+      membershipTier: existing.membership_tier ?? null,
+      membershipUntil: existing.membership_until ?? null
+    },
+    after: {
+      credits: Number(updated.credits) || 0,
+      dailyCredits: Number(updated.daily_credits) || 0,
+      membershipTier: updated.membership_tier ?? null,
+      membershipUntil: updated.membership_until ?? null
+    },
+    detail: { fields: Object.keys(updates) }
+  });
 
   return c.json({
     ok: true,
@@ -288,6 +340,51 @@ adminUserRoutes.patch('/:userId', async c => {
       membershipActive: isMembershipActive(updated as Profile)
     }
   });
+});
+
+/** 封禁 / 解封（不删数据） */
+adminUserRoutes.post('/:userId/ban', async c => {
+  const userId = c.req.param('userId');
+  const parsed = banSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    throw new ApiError(400, 'INVALID_BODY', '参数无效：banned (boolean) 必填');
+  }
+  const { banned, reason } = parsed.data;
+  const admin = createAdminClient(c.env);
+
+  const { data: existing, error: loadErr } = await admin
+    .from('profiles')
+    .select('user_id, banned_at, ban_reason, display_name')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (loadErr) throw loadErr;
+  if (!existing) throw new ApiError(404, 'NOT_FOUND', '用户不存在');
+
+  const patch = banned
+    ? { banned_at: new Date().toISOString(), ban_reason: reason ?? null }
+    : { banned_at: null, ban_reason: null };
+
+  const { error } = await admin.from('profiles').update(patch).eq('user_id', userId);
+  if (error) throw error;
+
+  // 同步 Auth 侧 ban，立即阻断登录
+  try {
+    const { error: authErr } = await admin.auth.admin.updateUserById(userId, { ban_duration: banned ? '876000h' : 'none' });
+    if (authErr) console.warn('[admin-ban] auth ban sync failed:', authErr.message);
+  } catch (e) {
+    console.warn('[admin-ban] auth ban sync threw:', e instanceof Error ? e.message : String(e));
+  }
+
+  await writeAudit(c, {
+    action: banned ? 'user.ban' : 'user.unban',
+    targetType: 'user',
+    targetId: userId,
+    before: { bannedAt: existing.banned_at ?? null, banReason: existing.ban_reason ?? null },
+    after: { bannedAt: patch.banned_at, banReason: patch.ban_reason },
+    detail: { displayName: existing.display_name ?? null }
+  });
+
+  return c.json({ ok: true, data: { userId, banned, reason: patch.ban_reason } });
 });
 
 adminUserRoutes.delete('/:userId', async c => {
@@ -326,6 +423,14 @@ adminUserRoutes.delete('/:userId', async c => {
   if (delErr) {
     throw new ApiError(500, 'DELETE_FAILED', delErr.message || '删除用户失败');
   }
+
+  await writeAudit(c, {
+    action: 'user.delete',
+    targetType: 'user',
+    targetId: userId,
+    before: { email, displayName: existing.display_name ?? null },
+    detail: { storageFilesRemoved, r2FilesRemoved, memfireFilesRemoved }
+  });
 
   return c.json({
     ok: true,

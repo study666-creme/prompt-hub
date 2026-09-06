@@ -1442,6 +1442,43 @@ body {
   border-radius: 3px;
 }
 
+.admin-tab-icon--orders::before {
+  inset: 4px 2px;
+  border-radius: 4px;
+}
+
+.admin-tab-icon--orders::after {
+  inset: 4px 9px 4px 2px;
+  border-left: 0;
+  border-radius: 0 4px 4px 0;
+}
+
+.admin-tab-icon--ledger::before {
+  inset: 3px 7px 6px;
+  border-radius: 3px;
+}
+
+.admin-tab-icon--ledger::after {
+  inset: 9px 3px 3px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.admin-tab-icon--audit::before {
+  inset: 6px 3px 3px;
+  border-radius: 999px 999px 4px 4px;
+}
+
+.admin-tab-icon--audit::after {
+  inset: 2px 3px auto;
+  height: 5px;
+  border-radius: 2px;
+}
+
+.admin-tab-icon--audit {
+  transform: rotate(-8deg);
+}
+
 #panel-canvas .admin-card + .admin-card {
   margin-top: 16px;
 }

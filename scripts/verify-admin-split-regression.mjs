@@ -1,3 +1,6 @@
+/* Verifies the admin console module graph: every view exports the contract
+ * (title/init/load), admin.html has a panel for each view, the login page and
+ * admin.js point at the module entry, and core admin session state survived. */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,15 +11,36 @@ const read = (rel) => readFileSync(join(root, rel), 'utf8');
 const admin = read('admin.html');
 const login = read('admin-login.html');
 const css = read('styles-admin.css');
-const state = read('legacy/admin/part-02.js');
+const adminJs = read('admin.js');
+const mainJs = read('admin/main.js');
+const apiJs = read('admin/modules/api.js');
+
+const views = [
+  'overview', 'users', 'orders', 'ledger', 'audit',
+  'cards', 'community', 'codes', 'models', 'canvas'
+];
 
 requireTokens('admin.html', admin, [
   'data-admin-page="console"',
   'id="adminApp"',
   'Prompt Hub 运营控制台',
-  'admin-tab-icon--overview',
-  'admin-logout-btn'
+  'admin-logout-btn',
+  'admin/main.js',
+  'id="adminNav"',
+  'id="canvasVideoModelBody"',
+  'id="canvasModelStatsBody"',
+  'id="canvasErrorLogsBody"'
 ]);
+
+for (const name of views) {
+  requireTokens('admin.html', admin, [`id="panel-${name}"`]);
+  const view = read(`admin/views/${name}.js`);
+  requireTokens(`admin/views/${name}.js`, view, [
+    'export const title = [',
+    'export function init(',
+    'export function load('
+  ]);
+}
 
 requireTokens('admin-login.html', login, [
   'data-admin-page="login"',
@@ -24,7 +48,27 @@ requireTokens('admin-login.html', login, [
   'id="loginBtn"',
   'Prompt Hub 管理登录',
   'admin-login-shell',
-  'admin-login-card'
+  'admin-login-card',
+  'admin/main.js'
+]);
+
+requireTokens('admin.js', adminJs, [
+  '__PROMPT_HUB_ADMIN_MODULE__',
+  'admin/main.js'
+]);
+
+requireTokens('admin/main.js', mainJs, [
+  'function showApp(loggedIn)',
+  'admin-login.html',
+  'hashchange',
+  'validateStoredSession'
+]);
+
+requireTokens('admin/modules/api.js', apiJs, [
+  'export async function adminFetch(',
+  'export function friendlyFetchError(',
+  'export function resolveApiBase(',
+  'ph_admin_session_v1'
 ]);
 
 requireTokens('styles-admin.css', css, [
@@ -32,21 +76,15 @@ requireTokens('styles-admin.css', css, [
   '.admin-login-card',
   '.admin-sidebar',
   '.admin-tab-icon--overview',
-  '--admin-bg: #f5f5f7',
-  'backdrop-filter: blur'
-]);
-
-requireTokens('legacy/admin/part-02.js', state, [
-  'function adminPageMode()',
-  'function adminConsoleHref()',
-  'function adminLoginHref()',
-  'function redirectAdminTo(href)',
-  "if (mode === 'console' && !loggedIn) redirectAdminTo(adminLoginHref());",
-  "if (mode === 'login' && loggedIn) redirectAdminTo(adminConsoleHref());"
+  '.admin-tab-icon--orders',
+  '.admin-tab-icon--ledger',
+  '.admin-tab-icon--audit',
+  '.admin-btn--danger'
 ]);
 
 forbid('admin.html', admin, [
   'id="adminLogin"',
+  'legacy/admin',
   '📊',
   '👤',
   '🖼',
@@ -56,10 +94,11 @@ forbid('admin.html', admin, [
 
 forbid('admin-login.html', login, [
   'id="adminApp"',
-  'data-tab="overview"'
+  'data-tab="overview"',
+  'legacy/admin'
 ]);
 
-console.log('verify-admin-split-regression OK');
+console.log('verify-admin-split-regression OK: 10 views + module graph + panels');
 
 function requireTokens(label, text, tokens) {
   const missing = tokens.filter((token) => !text.includes(token));

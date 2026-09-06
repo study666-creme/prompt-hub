@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Env } from '../../env';
 import { ApiError } from '../../lib/errors';
-import { createEpayCheckout, decodePaymentOrderNote, encodePaymentOrderNote, findPaymentProduct, PAYMENT_PRODUCTS, type StoredPaymentOrder } from '../../lib/epay';
+import { createEpayCheckout, decodePaymentOrderNote, encodePaymentOrderNote, findPaymentProduct, mirrorOrderToPaymentOrders, PAYMENT_PRODUCTS, type StoredPaymentOrder } from '../../lib/epay';
 import { createAdminClient } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
 
@@ -56,6 +56,8 @@ paymentRoutes.post('/checkout', async c => {
     note: encodePaymentOrderNote(orderPayload)
   });
   if (insertError) throw insertError;
+  // 迁移窗口期双写 payment_orders；表缺失时由 mirror 内部静默降级
+  void mirrorOrderToPaymentOrders(admin, orderNo, orderPayload);
 
   try {
     const checkoutUrl = await createEpayCheckout(c.env, {
@@ -71,6 +73,7 @@ paymentRoutes.post('/checkout', async c => {
       used_count: 1,
       note: encodePaymentOrderNote({ ...orderPayload, state: 'failed' })
     }).eq('code', orderNo);
+    void mirrorOrderToPaymentOrders(admin, orderNo, { ...orderPayload, state: 'failed' });
     throw error;
   }
 });
