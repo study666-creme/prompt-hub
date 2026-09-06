@@ -43,12 +43,7 @@ export const paymentProductsHandler = (c: any) => c.json({
   data: PAYMENT_PRODUCTS
     .filter(product => product.kind !== 'collaboration_seat' || collaborationSeatProductEnabled(c.env))
     .map(publicPaymentProduct),
-  customCreditTopUp: {
-    productId: CUSTOM_CREDIT_PRODUCT_ID,
-    minAmount: MIN_CUSTOM_TOP_UP_CENTS / 100,
-    maxAmount: MAX_CUSTOM_TOP_UP_CENTS / 100,
-    creditsPerYuan: 100
-  }
+  customCreditTopUp: null
 });
 
 paymentRoutes.post('/checkout', async c => {

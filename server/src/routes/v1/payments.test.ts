@@ -69,19 +69,14 @@ describe('payment routes', () => {
     createEpayCheckoutMock.mockReset();
   });
 
-  it('publishes credit packages from CNY 10 and custom top-ups from CNY 5', async () => {
+  it('publishes credit packages from CNY 10 without a custom top-up entry', async () => {
     const response = await productsApp().request('http://localhost/products', {}, env);
 
     expect(response.status).toBe(200);
     const body = await response.json() as {
       ok: true;
       data: Array<{ kind: string; id: string; amount: number; credits?: number }>;
-      customCreditTopUp: {
-        productId: string;
-        minAmount: number;
-        maxAmount: number;
-        creditsPerYuan: number;
-      };
+      customCreditTopUp: unknown;
     };
     const creditProducts = body.data.filter(product => product.kind === 'credits');
 
@@ -93,11 +88,7 @@ describe('payment routes', () => {
       amount: 10,
       credits: 1000
     });
-    expect(body.customCreditTopUp).toMatchObject({
-      productId: CUSTOM_CREDIT_PRODUCT_ID,
-      minAmount: 5,
-      creditsPerYuan: 100
-    });
+    expect(body.customCreditTopUp).toBeNull();
   });
 
   it('keeps the Canvas seat product hidden until its database grant path is enabled', async () => {
