@@ -638,10 +638,8 @@ export async function serveCachedStorageImage(
       ...(isGrid ? { 'X-PH-Grid-Ok': '1' } : {}),
       'Cache-Control': `public, max-age=${CDN_CACHE_SEC}, s-maxage=${CDN_CACHE_SEC}, immutable`,
       'CDN-Cache-Control': `max-age=${CDN_CACHE_SEC}`,
-      // Access-Control-* 由全局 CORS 中间件统一补充（cors-headers 会回显
-      // Origin + Access-Control-Allow-Credentials: true）；此处仅确保缓存键
-      // 按 Origin 区分，避免把某个来源的 ACAO 误配给共享缓存的其他客户端。
-      'Vary': 'Origin, Accept',
+      // CORS 头与 Vary 由全局中间件（applyCorsHeaders + hono/cors）统一
+      // 附加，此处不重复设置（重复 Vary 会变成 "Origin, Origin"）。
       ...(c.req.query('dl') === '1'
         ? {
             'Content-Disposition': `attachment; filename="prompt-hub-${Date.now()}.png"`
