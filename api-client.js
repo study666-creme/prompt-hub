@@ -949,14 +949,16 @@
       if (!token) return null;
       const q = encodeURIComponent(remoteUrl);
       let res = await fetch(`${baseUrl()}/api/v1/media/fetch?url=${q}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'omit'
       });
       if (res.status === 401) {
         await recoverSessionForApi();
         token = await getAccessToken();
         if (token) {
           res = await fetch(`${baseUrl()}/api/v1/media/fetch?url=${q}`, {
-            headers: { Authorization: `Bearer ${token}` }
+            headers: { Authorization: `Bearer ${token}` },
+            credentials: 'omit'
           });
         }
       }
