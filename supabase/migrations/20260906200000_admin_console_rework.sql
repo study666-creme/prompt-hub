@@ -1,10 +1,15 @@
--- Admin console rework 2026-09: payment orders leave activation_codes.note,
--- admin writes get an audit trail, and profiles gain ban columns so the
--- console can suspend an account without deleting it.
+-- Admin console rework 2026-09 (corrected 2026-09-07).
+-- payment_orders leaves activation_codes.note; admin writes get an audit trail;
+-- profiles gain ban columns.
+--
+-- 修正说明：
+--  1) 早期遗留了一张空的 payment_orders（列名 status、无消费者），先 drop 再按 state 建。
+--  2) 去掉 credit_ledger (reason, ref_id) 唯一索引——现网存在合法的多次退款/发放重复，
+--     加了会失败且破坏数据；幂等由应用层唯一 refId 保证。
 
--- 1) Real payment order table. Epay flow writes here first and keeps the
---    activation_codes.note copy for one compatibility window.
-create table if not exists public.payment_orders (
+-- 1) 真实订单表（替换 note-JSON 方案）。
+drop table if exists public.payment_orders;
+create table public.payment_orders (
   order_no text primary key,
   user_id uuid not null,
   product_kind text not null check (product_kind in ('credits', 'membership')),
@@ -22,16 +27,13 @@ create table if not exists public.payment_orders (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
-create index if not exists payment_orders_user_created_idx
+create index payment_orders_user_created_idx
   on public.payment_orders (user_id, created_at desc);
-create index if not exists payment_orders_state_created_idx
+create index payment_orders_state_created_idx
   on public.payment_orders (state, created_at desc);
-
 grant select, insert, update, delete on public.payment_orders to service_role;
 
--- 2) Audit trail for every admin write. The console has no per-admin
---    accounts yet, so actor is the fingerprint of whichever secret was used.
+-- 2) 后台写操作审计。
 create table if not exists public.admin_audit_logs (
   id bigint generated always as identity primary key,
   actor_fingerprint text not null default 'unknown',
@@ -45,21 +47,13 @@ create table if not exists public.admin_audit_logs (
   user_agent text,
   created_at timestamptz not null default now()
 );
-
 create index if not exists admin_audit_logs_created_idx
   on public.admin_audit_logs (created_at desc);
 create index if not exists admin_audit_logs_target_idx
   on public.admin_audit_logs (target_type, target_id);
-
 grant select, insert on public.admin_audit_logs to service_role;
 
--- 3) Suspend without delete.
+-- 3) 封禁（不删数据）。
 alter table public.profiles
   add column if not exists banned_at timestamptz,
   add column if not exists ban_reason text;
-
--- 4) Ledger idempotency: refunds and manual grants key on ref_id so a retry
---    can never double-credit.
-create unique index if not exists credit_ledger_reason_ref_uidx
-  on public.credit_ledger (reason, ref_id)
-  where ref_id is not null;
