@@ -21,8 +21,11 @@
 - 2026-09-07 后台重构上线：订单/流水/审计页、用户封禁、积分 RPC 修正、
   视频模型映射 + 按模型统计 + 错误日志、admin 前端 ES module 化（admin/ 目录）。
 - Pages staging allowlist 新增 admin/（stage-pages.ps1）。
-- 待办：MemFire 执行 supabase/migrations/20260906200000_admin_console_rework.sql
-  （未执行前订单/审计页提示表不可用，支付不受影响）。
+- Migration 已于 2026-09-07 通过 MemFire /pg/query 执行完成（admin_audit_logs、
+  profiles 封禁列、payment_orders 后台列均已就位）。
+- ⚠ 支付 schema 冲突：现网另有会话建的 payment_orders(status)+payment_events 完整模型，
+  与后台重构这套 payment_orders(state) 并存（当前两表皆空）。后台 migration 已改为
+  非破坏式（只加列不删表）。两套支付实现的正式合并需单独决策，勿再各自 drop 重建。
 
 ### 旧基线（deploy-base-20260906 = 线上 Worker 6f65fb31）
 
