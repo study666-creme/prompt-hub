@@ -632,14 +632,16 @@ export async function serveCachedStorageImage(
     throw new ApiError(404, 'NOT_FOUND', '图片不存在');
   }
 
+  const origin = c.req.header('Origin');
   const response = new Response(body, {
     headers: {
       'Content-Type': contentType,
       ...(isGrid ? { 'X-PH-Grid-Ok': '1' } : {}),
       'Cache-Control': `public, max-age=${CDN_CACHE_SEC}, s-maxage=${CDN_CACHE_SEC}, immutable`,
       'CDN-Cache-Control': `max-age=${CDN_CACHE_SEC}`,
-      'Vary': 'Accept',
-      'Access-Control-Allow-Origin': '*',
+      'Vary': 'Origin, Accept',
+      'Access-Control-Allow-Origin': origin || '*',
+      'Access-Control-Allow-Credentials': 'true',
       ...(c.req.query('dl') === '1'
         ? {
             'Content-Disposition': `attachment; filename="prompt-hub-${Date.now()}.png"`
