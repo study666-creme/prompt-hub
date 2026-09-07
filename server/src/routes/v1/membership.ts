@@ -7,7 +7,8 @@ import {
   dailyCreditsForTier,
   type CreditGrantMode,
   membershipCreditsPayload,
-  syncMembershipCredits
+  syncMembershipCredits,
+  writeDailyGrantLedger
 } from '../../lib/membership-credits';
 import {
   createAdminClient,
@@ -70,6 +71,20 @@ membershipRoutes.post('/trial-free', async c => {
   if (error) throw error;
   profile = (await syncMembershipCredits(admin, user.id)) || (data as typeof profile);
 
+  // 试用发放的每日积分同样留痕（此前只在明细外静默入账）
+  const trialToday = chinaDateKey();
+  await writeDailyGrantLedger(admin, {
+    userId: user.id,
+    today: trialToday,
+    permanent: Number(profile.credits) || 0,
+    expiredStale: 0,
+    granted: dailyCreditsForTier('basic'),
+    dailyAfter: Number(profile.daily_credits) || 0,
+    reason: 'daily_grant',
+    refId: `daily-grant:${user.id}:${trialToday}:trial`,
+    extraMeta: { tier: 'basic', note: '3 天免费试用开通' }
+  });
+
   return c.json({
     ok: true,
     data: {
@@ -115,6 +130,10 @@ membershipRoutes.post('/credit-mode', async c => {
     });
   }
 
+  const staleDaily =
+    profile.daily_credits_date === chinaDateKey()
+      ? Number(profile.daily_credits) || 0
+      : 0;
   const { data, error } = await admin
     .from('profiles')
     .update({
@@ -129,6 +148,21 @@ membershipRoutes.post('/credit-mode', async c => {
 
   if (error) throw error;
   const synced = await syncMembershipCredits(admin, user.id);
+
+  // 切到一次性模式会把剩余每日积分作废，留一条过期清零流水便于对账
+  if (mode === 'bundle' && staleDaily > 0) {
+    await writeDailyGrantLedger(admin, {
+      userId: user.id,
+      today: chinaDateKey(),
+      permanent: Number((synced || (data as typeof profile)).credits) || 0,
+      expiredStale: staleDaily,
+      granted: 0,
+      dailyAfter: 0,
+      reason: 'daily_expire',
+      refId: `daily-mode-switch:${user.id}:${chinaDateKey()}`,
+      extraMeta: { note: '切换为一次性积分模式，剩余每日积分作废' }
+    });
+  }
 
   return c.json({
     ok: true,

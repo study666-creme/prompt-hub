@@ -66,6 +66,89 @@ export function spendableCredits(profile: Profile): number {
   return Number(profile.credits) + daily;
 }
 
+/**
+ * 写一条积分流水；写失败不抛（扣费/发放主流程优先），仅记录日志供排查。
+ * 所有每日积分（daily_credits）的发放、扣减、退款、过期清零都必须经过这里，
+ * 否则积分明细（credit_ledger）里看不到对应的余额变动。
+ */
+async function insertLedgerRow(
+  admin: SupabaseClient,
+  row: {
+    user_id: string;
+    delta: number;
+    balance_after: number;
+    reason: string;
+    ref_id: string;
+    meta: Record<string, unknown>;
+  }
+): Promise<void> {
+  const { error } = await admin.from('credit_ledger').insert(row);
+  if (error) {
+    console.error('[credits] ledger insert failed:', error, {
+      userId: row.user_id,
+      reason: row.reason,
+      refId: row.ref_id,
+      delta: row.delta
+    });
+  }
+}
+
+/**
+ * 每日积分日切留痕：上一日剩余记一条过期清零流水（如有），实际入账记一条
+ * 发放流水。balance_after 统一用可花总额（永久 + 当日剩余），与钱包顶栏一致。
+ */
+export async function writeDailyGrantLedger(
+  admin: SupabaseClient,
+  args: {
+    userId: string;
+    today: string;
+    /** 发放前永久积分余额（发放只动 daily 池，可直接取更新后 credits） */
+    permanent: number;
+    /** 上一日剩余被作废的数额（sameDay 重复领取时为 0） */
+    expiredStale: number;
+    /** 实际新增入账（同日重复领取取大不叠加时可能为 0） */
+    granted: number;
+    /** 发放后当日剩余 */
+    dailyAfter: number;
+    reason: string;
+    refId: string;
+    extraMeta?: Record<string, unknown>;
+  }
+): Promise<void> {
+  if (args.expiredStale > 0) {
+    await insertLedgerRow(admin, {
+      user_id: args.userId,
+      delta: -args.expiredStale,
+      balance_after: roundCredits(args.permanent),
+      reason: 'daily_expire',
+      ref_id: `${args.refId}:expire`,
+      meta: {
+        pool: 'daily',
+        expired: args.expiredStale,
+        date: args.today,
+        note: '上一日剩余每日积分过期清零',
+        ...(args.extraMeta ?? {})
+      }
+    });
+  }
+  if (args.granted > 0) {
+    await insertLedgerRow(admin, {
+      user_id: args.userId,
+      delta: args.granted,
+      balance_after: roundCredits(args.permanent + args.dailyAfter),
+      reason: args.reason,
+      ref_id: args.refId,
+      meta: {
+        pool: 'daily',
+        dailyAfter: args.dailyAfter,
+        permanentAfter: args.permanent,
+        date: args.today,
+        ...(args.extraMeta ?? {})
+      }
+    });
+  }
+}
+
 /** 任务中心每日 5 积分：写入当日有效额度（可与会员日积分叠加取较大值） */
 export async function grantUniversalDailyBonus(
   admin: SupabaseClient,
@@ -75,9 +158,11 @@ export async function grantUniversalDailyBonus(
   const today = chinaDateKey();
   const profile = await getOrCreateProfile(admin, userId);
   const sameDay = profile.daily_credits_date === today;
-  const nextDaily = sameDay
-    ? Math.max(profile.daily_credits || 0, amount)
-    : amount;
+  const storedDaily = Number(profile.daily_credits) || 0;
+  const prevUsable = sameDay ? storedDaily : 0;
+  const nextDaily = sameDay ? Math.max(prevUsable, amount) : amount;
+  const granted = nextDaily - prevUsable;
+  const expiredStale = sameDay ? 0 : storedDaily;
   const { data, error } = await admin
     .from('profiles')
     .update({
@@ -89,7 +174,18 @@ export async function grantUniversalDailyBonus(
     .select()
     .single();
   if (error) throw error;
-  return data as Profile;
+  const updated = data as Profile;
+  await writeDailyGrantLedger(admin, {
+    userId,
+    today,
+    permanent: Number(updated.credits) || 0,
+    expiredStale,
+    granted,
+    dailyAfter: Number(updated.daily_credits) || 0,
+    reason: 'daily_checkin',
+    refId: `daily-bonus:${userId}:${today}`
+  });
+  return updated;
 }
 
 export async function refreshDailyCredits(
@@ -187,9 +283,11 @@ export async function claimMemberDailyCredits(
 
   const today = chinaDateKey();
   const sameDay = profile.daily_credits_date === today;
-  const nextDaily = sameDay
-    ? Math.max(profile.daily_credits || 0, amount)
-    : amount;
+  const storedDaily = Number(profile.daily_credits) || 0;
+  const prevUsable = sameDay ? storedDaily : 0;
+  const nextDaily = sameDay ? Math.max(prevUsable, amount) : amount;
+  const granted = nextDaily - prevUsable;
+  const expiredStale = sameDay ? 0 : storedDaily;
 
   const { data, error } = await admin
     .from('profiles')
@@ -201,7 +299,19 @@ export async function claimMemberDailyCredits(
     .select()
     .single();
   if (error) throw error;
-  return data as Profile;
+  const updated = data as Profile;
+  await writeDailyGrantLedger(admin, {
+    userId: profile.user_id,
+    today,
+    permanent: Number(updated.credits) || 0,
+    expiredStale,
+    granted,
+    dailyAfter: Number(updated.daily_credits) || 0,
+    reason: 'daily_grant',
+    refId: `daily-grant:${profile.user_id}:${today}`,
+    extraMeta: { tier: profile.membership_tier ?? null }
+  });
+  return updated;
 }
 
 export type DebitSplit = { fromDaily: number; fromPermanent: number };
@@ -273,6 +383,23 @@ export async function deductUserCredits(
     profile = await getOrCreateProfile(admin, userId);
   }
 
+  if (fromDaily > 0) {
+    // 每日积分扣减也必须留痕：此前只 update profiles.daily_credits、不写
+    // credit_ledger，导致积分明细里完全看不到这笔扣费（用户视角 =
+    // “扣了钱但没有记录”）。写失败不阻断扣费主链路，仅记录日志。
+    const dailyAfter =
+      profile.daily_credits_date === today ? Number(profile.daily_credits) || 0 : 0;
+    const permanentAfter = Number(profile.credits) || 0;
+    await insertLedgerRow(admin, {
+      user_id: userId,
+      delta: -fromDaily,
+      balance_after: roundCredits(permanentAfter + dailyAfter),
+      reason,
+      ref_id: `${refId}:daily`,
+      meta: { ...meta, pool: 'daily', dailyAfter, permanentAfter }
+    });
+  }
+
   return { profile, split: { fromDaily, fromPermanent: left } };
 }
 
@@ -304,6 +431,22 @@ export async function refundUserCredits(
         credit_grant_mode: profile.credit_grant_mode || 'daily'
       })
       .eq('user_id', userId);
+    // 与扣费对称：退回每日积分的部分也写流水，否则明细里“少扣了”对不上。
+    const permanentAfter = Number(profile.credits) || 0;
+    await insertLedgerRow(admin, {
+      user_id: userId,
+      delta: dailyRefund,
+      balance_after: roundCredits(permanentAfter + nextDaily),
+      reason,
+      ref_id: `${refId}:daily-refund`,
+      meta: {
+        ...meta,
+        pool: 'daily',
+        refund: true,
+        dailyAfter: nextDaily,
+        permanentAfter
+      }
+    });
   }
 
   if (permRefund > 0) {
