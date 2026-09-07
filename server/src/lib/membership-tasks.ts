@@ -22,6 +22,7 @@ export function assertPhoneVerified(phoneVerified: boolean) {
   if (!phoneVerified) throw new PhoneRequiredError();
 }
 export type TaskKey =
+  | 'canvas_create_node'
   | 'login_desktop'
   | 'login_mobile'
   | 'pwa_install'
@@ -43,6 +44,7 @@ export type TaskKey =
   | `spend_${number}`;
 
 export type TaskFlags = {
+  canvas_node_created?: boolean;
   login_desktop?: boolean;
   login_mobile?: boolean;
   pwa_installed?: boolean;
@@ -146,6 +148,12 @@ export function taskRewardForKey(
       tier?: NonNullable<Profile['membership_tier']>;
     }
   > = {
+    canvas_create_node: {
+      days: 1,
+      credits: 0,
+      title: '在画布创建一个节点',
+      description: '登录卡藏画布并创建任意一个节点，奖励自动到账且每个账号仅限一次'
+    },
     login_desktop: {
       days: 1,
       credits: 0,
@@ -345,6 +353,8 @@ export function isTaskProgressMet(
   }
   const spent = profile.lifetime_credits_spent ?? 0;
   switch (key) {
+    case 'canvas_create_node':
+      return !!flags.canvas_node_created;
     case 'login_desktop':
       return !!flags.login_desktop;
     case 'login_mobile':
@@ -456,6 +466,21 @@ export async function extendMembershipDays(
     throw new Error(pgMsg);
   }
   return data as Profile;
+}
+
+export async function recordCanvasNodeCreated(
+  admin: SupabaseClient,
+  userId: string
+): Promise<{ granted: boolean; profile: Profile }> {
+  const { data, error } = await admin.rpc('grant_canvas_create_node_reward', {
+    p_user_id: userId
+  });
+  if (error) throw error;
+  const result = data && typeof data === 'object' && !Array.isArray(data)
+    ? data as Record<string, unknown>
+    : {};
+  const profile = await syncMembershipCredits(admin, userId);
+  return { granted: result.granted === true, profile };
 }
 
 export function buildMembershipExtensionPatch(
@@ -692,7 +717,7 @@ export async function claimMembershipTask(
   if (isMemberDailyTaskKey(taskKey)) {
     profile = await claimMemberDailyCredits(admin, profile);
   } else if (isDailyBonusTaskKey(taskKey)) {
-    profile = await grantUniversalDailyBonus(admin, userId, reward.credits || 5);
+    profile = await grantUniversalDailyBonus(admin, userId, reward.credits || 5, profile);
     const flagsAfter = parseTaskFlags(profile);
     const claimedAfter = await listClaimedKeys(admin, userId);
     const sign = await applySignStreakForToday(admin, userId, flagsAfter, claimedAfter);
@@ -849,13 +874,17 @@ export function buildTaskList(
   flags: TaskFlags,
   claimed: Set<string>,
   phoneVerified: boolean,
-  opts?: { mini99Redeemed?: boolean; includeDailyInList?: boolean }
+  opts?: { includeDailyInList?: boolean }
 ) {
   const spent = profile.lifetime_credits_spent ?? 0;
   const dailyKey = dailyBonusTaskKey();
   const communityKey = nextCommunityPublishKey(claimed);
   const spendKey = nextSpendTaskKey(spent, claimed);
+  // extension_save_card / asset_studio_chat / asset_studio_link_card 与 mini_99
+  // 体验包 promo 已按要求从任务中心下线（2026-09-06）：这里不再下发。reward/claim
+  // 与 flags 同步链路保留，存量已达标但未领取的用户仍可通过 claim 接口领取。
   const keys = [
+    'canvas_create_node',
     'login_desktop',
     'login_mobile',
     'pwa_install',
@@ -863,9 +892,6 @@ export function buildTaskList(
     communityKey,
     'warehouse_quick_preview_fav',
     'community_quick_preview_fav',
-    'extension_save_card',
-    'asset_studio_chat',
-    'asset_studio_link_card',
     'inspiration_draw',
     'community_gacha_collect',
     'cards_count_10',
@@ -941,20 +967,8 @@ export function buildTaskList(
     }
   }
 
-  if (!opts?.mini99Redeemed) {
-    items.push({
-      key: 'mini_99_membership',
-      title: '¥0.99 体验三天基础会员',
-      description: '微信购买后，在「兑换」输入激活码（一人一码）',
-      rewardDays: 3,
-      rewardCredits: 0,
-      claimed: false,
-      ready: false,
-      progress: null,
-      kind: 'promo' as const
-    });
-  }
-
+  // mini_99 体验包 promo 已从任务中心下线（2026-09-06）：
+  // 兑换入口改由生图页「兑换」承载，这里不再下发任务卡片。
   const nextSpend = nextSpendMilestone(spent);
   return { items, lifetimeCreditsSpent: spent, nextSpendMilestone: nextSpend };
 }

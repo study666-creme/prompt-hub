@@ -5,6 +5,7 @@ import {
   BANANA2_EXTRA_RATIOS,
   BANANA_ASPECT_RATIOS,
   IMAGE2_ASPECT_RATIOS,
+  MJ_ASPECT_RATIOS,
   MOOKO_PRO_ASPECT_RATIOS,
   mapGptImage2PixelSize
 } from './image-size-options';
@@ -19,6 +20,11 @@ describe('aspectRatiosForModel', () => {
       ...BANANA_ASPECT_RATIOS,
       ...BANANA2_EXTRA_RATIOS
     ]);
+    expect(aspectRatiosForModel('mj-v81')).toEqual([...MJ_ASPECT_RATIOS]);
+  });
+
+  it('keeps legacy MJ ids compatible without exposing them as catalog ids', () => {
+    expect(aspectRatiosForModel('apimart-mj-v81')).toEqual([...MJ_ASPECT_RATIOS]);
   });
 
   it('budget line only exposes priced ratios without 1:1', () => {

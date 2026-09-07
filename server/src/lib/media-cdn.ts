@@ -1,10 +1,11 @@
 import type { Context } from 'hono';
 import type { Env } from '../env';
 import { ApiError } from './errors';
+import { blobImageMime } from './image-content';
 import { storagePathFromRef } from './image-archive';
 import { resolveImageRefForJob } from './recover-generation-warehouse';
 import { createAdminClient } from './supabase';
-import { deleteFromR2, downloadCardImage, uploadCardImage, cardImageExists } from './r2-storage';
+import { deleteFromR2, downloadCardImage, existsInR2, uploadCardImage, cardImageExists } from './r2-storage';
 
 export const CARD_IMAGES_BUCKET = 'card-images';
 const CDN_CACHE_SEC = 60 * 60 * 24 * 30;
@@ -272,28 +273,10 @@ const GRID_MIN_BYTES = 2048;
 /** 列表 grid 单张上限（约 220KB）；超过视为误存原图，CDN 现场重缩 */
 const GRID_SERVE_MAX_BYTES = 220 * 1024;
 
-function sniffImageMime(head: Uint8Array): string | null {
-  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'image/jpeg';
-  if (head.length >= 8 && head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) {
-    return 'image/png';
-  }
-  if (head.length >= 12 && head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46
-    && head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50) {
-    return 'image/webp';
-  }
-  return null;
-}
-
-async function blobHasValidImageMagic(blob: Blob): Promise<string | null> {
-  if (!blob || (blob.size || 0) < 512) return null;
-  const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
-  return sniffImageMime(head);
-}
-
 async function isAcceptableGridBlob(blob: Blob | null | undefined): Promise<boolean> {
   const n = blob?.size || 0;
   if (n < GRID_MIN_BYTES || n > GRID_SERVE_MAX_BYTES) return false;
-  return !!(await blobHasValidImageMagic(blob!));
+  return !!(await blobImageMime(blob));
 }
 
 async function downloadGridBlob(
@@ -313,6 +296,32 @@ async function rebuildGridAtPath(
   if (!(await isAcceptableGridBlob(gridBlob))) return null;
   await uploadCardImage(env, gridClean, gridBlob!, 'image/jpeg');
   return gridBlob;
+}
+
+/**
+ * 有预算的 grid 物化：3 秒内完成则返回 grid 路径；超时则后台继续物化并返回 null，
+ * 调用方降级到原图路径。避免列表首屏被单张 16–22s 的现场缩放阻塞——这正是
+ * 「列表只出文字、点进卡片才有图」的原因（列表等不到 URL，详情走原图立即可见）。
+ */
+const GRID_MATERIALIZE_BUDGET_MS = 3000;
+
+async function materializeGridWithinBudget(
+  c: Context<{ Bindings: Env }>,
+  admin: ReturnType<typeof createAdminClient>,
+  primaryPath: string
+): Promise<string | null> {
+  const task = materializeGridForPrimaryPath(c.env, admin, primaryPath);
+  const result = await Promise.race([
+    task.then((path) => ({ path }), () => ({ path: null })),
+    new Promise<{ path: null }>((resolve) => setTimeout(() => resolve({ path: null }), GRID_MATERIALIZE_BUDGET_MS))
+  ]);
+  if (result.path) return result.path;
+  // 超时：交给 waitUntil 继续物化（把 grid 落到 R2，下一轮直接命中），
+  // 不在请求内等待，避免列表首屏被 16–22s 现场缩放卡住。
+  if (c.executionCtx) {
+    c.executionCtx.waitUntil(task.catch(() => {}));
+  }
+  return null;
 }
 
 /** 确保 primary 对应 _grid 已写入 R2；返回 grid 路径（不含 leading /） */
@@ -347,7 +356,8 @@ async function fetchSupabaseGridBytes(env: Env, primaryPath: string): Promise<Bl
     `?width=${GRID_SERVE_MAX_SIDE}&quality=78&resize=contain`;
   try {
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${key}`, apikey: key }
+      headers: { Authorization: `Bearer ${key}`, apikey: key },
+      signal: AbortSignal.timeout(45_000)
     });
     if (!res.ok) return null;
     const buf = await res.arrayBuffer();
@@ -400,7 +410,16 @@ export async function materializeCommunityGridIfMissing(
   const primary = await findFirstExistingStoragePath(admin, primaryCandidates, CARD_IMAGES_BUCKET, c.env);
   if (!primary) return;
 
-  await rebuildGridAtPath(c.env, admin, gridClean, primary);
+  // 有预算的物化：3s 内完成则立即就绪；超时交给 waitUntil 继续落 R2，
+  // /media/i 命中该 grid 时会回源原图兜底，签名不必等 16–22s 现场缩放。
+  const rebuild = rebuildGridAtPath(c.env, admin, gridClean, primary);
+  const done = await Promise.race([
+    rebuild.then(() => true, () => false),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), GRID_MATERIALIZE_BUDGET_MS))
+  ]);
+  if (!done && c.executionCtx) {
+    c.executionCtx.waitUntil(rebuild.catch(() => {}));
+  }
 }
 
 async function resizeImageToGridJpeg(source: Blob): Promise<Blob | null> {
@@ -561,6 +580,26 @@ async function tryRecoverGeneratedGridBlob(
   return gridBlob;
 }
 
+/** R2 缺失、Supabase 回源命中时把对象回传 R2，让后续请求走 R2/CDN 缓存 */
+function scheduleR2Backfill(
+  c: Context<{ Bindings: Env }>,
+  key: string,
+  blob?: Blob | null
+): void {
+  if (!c.executionCtx) return;
+  c.executionCtx.waitUntil((async () => {
+    if (blob) {
+      const mime = (await blobImageMime(blob)) || 'image/jpeg';
+      await uploadCardImage(c.env, key, blob, mime);
+      return;
+    }
+    const fetched = await downloadCardImage(c.env, key);
+    if (!fetched) return;
+    const mime = (await blobImageMime(fetched)) || 'image/jpeg';
+    await uploadCardImage(c.env, key, fetched, mime);
+  })().catch(() => {}));
+}
+
 export async function serveCachedStorageImage(
   c: Context<{ Bindings: Env }>,
   path: string
@@ -573,34 +612,69 @@ export async function serveCachedStorageImage(
   const cache = caches.default;
   const cached = await cache.match(cacheKey);
   if (cached) {
-    if (!isGrid) return cached;
-    if (cached.headers.get('X-PH-Grid-Ok') === '1') {
-      const len = Number(cached.headers.get('content-length') || 0);
-      if (len >= GRID_MIN_BYTES && len <= GRID_SERVE_MAX_BYTES) return cached;
+    if (isGrid) {
+      if (cached.headers.get('X-PH-Grid-Ok') === '1') {
+        const len = Number(cached.headers.get('content-length') || 0);
+        if (len >= GRID_MIN_BYTES && len <= GRID_SERVE_MAX_BYTES) return cached;
+      }
+      c.executionCtx.waitUntil(cache.delete(cacheKey));
+    } else if (cached.headers.get('X-PH-Image-Ok') === '1') {
+      return cached;
+    } else {
+      const cachedBlob = await cached.clone().blob();
+      const cachedMime = await blobImageMime(cachedBlob);
+      if (cachedMime) {
+        const headers = new Headers(cached.headers);
+        headers.set('Content-Type', cachedMime);
+        headers.set('X-PH-Image-Ok', '1');
+        const validated = new Response(cachedBlob, {
+          status: cached.status,
+          statusText: cached.statusText,
+          headers
+        });
+        c.executionCtx.waitUntil(cache.put(cacheKey, validated.clone()));
+        return validated;
+      }
+      c.executionCtx.waitUntil(cache.delete(cacheKey));
     }
-    c.executionCtx.waitUntil(cache.delete(cacheKey));
   }
 
   const admin = createAdminClient(c.env);
   let body: Blob | null = null;
   let contentType = contentTypeForPath(clean);
 
-  const stored = isGrid ? await downloadGridBlob(c.env, clean) : null;
+  const stored = isGrid ? await downloadCardImage(c.env, clean) : null;
   if (stored && (await isAcceptableGridBlob(stored))) {
     body = stored;
-    const sniffed = await blobHasValidImageMagic(stored);
+    const sniffed = await blobImageMime(stored);
     if (sniffed) contentType = sniffed;
+    // Supabase 回源命中但 R2 缺失（迁移未完成）时回传 R2，之后走 R2/CDN
+    if (!(await existsInR2(c.env, clean))) scheduleR2Backfill(c, clean, stored);
   } else if (stored && isGrid) {
     c.executionCtx.waitUntil(deleteFromR2(c.env, clean).catch(() => {}));
   } else if (!isGrid) {
     for (const candidate of fullPathServeCandidates(clean)) {
       const blob = await downloadCardImage(c.env, candidate);
       if (blob) {
-        const bytes = blob.size || 0;
-        if (bytes >= 512) {
+        const sniffed = await blobImageMime(blob);
+        if (sniffed) {
           body = blob;
-          contentType = contentTypeForPath(candidate);
+          contentType = sniffed;
+          if (!(await existsInR2(c.env, candidate))) scheduleR2Backfill(c, candidate, blob);
           break;
+        }
+        const deleted = await deleteFromR2(c.env, candidate).catch(() => false);
+        if (deleted) {
+          const fallback = await downloadCardImage(c.env, candidate);
+          const fallbackMime = await blobImageMime(fallback);
+          if (fallback && fallbackMime) {
+            body = fallback;
+            contentType = fallbackMime;
+            c.executionCtx.waitUntil(
+              uploadCardImage(c.env, candidate, fallback, fallbackMime).catch(() => {})
+            );
+            break;
+          }
         }
       }
     }
@@ -608,13 +682,25 @@ export async function serveCachedStorageImage(
 
   if (!body && isGrid) {
     for (const primary of primaryCandidatesFromGridPath(clean)) {
-      const gridBlob = await buildGridBlobFromPrimary(c.env, admin, primary);
-      if (await isAcceptableGridBlob(gridBlob)) {
-        body = gridBlob;
-        contentType = 'image/jpeg';
-        c.executionCtx.waitUntil(
-          uploadCardImage(c.env, clean, gridBlob!, 'image/jpeg').catch(() => {})
-        );
+      // 有预算的物化：3s 内生成 grid（内部已落 R2）就直接返回缩略图
+      const gridPath = await materializeGridWithinBudget(c, admin, primary);
+      if (gridPath) {
+        const blob = await downloadGridBlob(c.env, gridPath);
+        if (await isAcceptableGridBlob(blob)) {
+          body = blob;
+          contentType = 'image/jpeg';
+          break;
+        }
+      }
+      // 预算超时或生成失败：直接回源原图提供可看内容（grid 已由后台继续物化），
+      // 避免列表卡片卡在占位/文字状态直到 16–22s 的缩放完成。
+      const fullBlob = await downloadCardImage(c.env, primary, (key, blob) => {
+        scheduleR2Backfill(c, key, blob);
+      });
+      const fullMime = await blobImageMime(fullBlob);
+      if (fullBlob && fullMime) {
+        body = fullBlob;
+        contentType = fullMime;
         break;
       }
     }
@@ -635,7 +721,7 @@ export async function serveCachedStorageImage(
   const response = new Response(body, {
     headers: {
       'Content-Type': contentType,
-      ...(isGrid ? { 'X-PH-Grid-Ok': '1' } : {}),
+      ...(isGrid ? { 'X-PH-Grid-Ok': '1' } : { 'X-PH-Image-Ok': '1' }),
       'Cache-Control': `public, max-age=${CDN_CACHE_SEC}, s-maxage=${CDN_CACHE_SEC}, immutable`,
       'CDN-Cache-Control': `max-age=${CDN_CACHE_SEC}`,
       // CORS 头与 Vary 由全局中间件（applyCorsHeaders + hono/cors）统一
@@ -655,31 +741,67 @@ export async function serveCachedStorageImage(
 export async function ensureGridPathForSigning(
   c: Context<{ Bindings: Env }>,
   rawPath: string,
-  variant: string
+  variant: string,
+  opts: { requireExistingPrimary?: boolean; strictStorageCheck?: boolean } = {}
 ): Promise<string> {
   const admin = createAdminClient(c.env);
   const clean = rawPath.replace(/^\//, '');
   const signPath = signingPathForVariant(clean, variant).replace(/^\//, '');
-  if (variant === 'full') return signPath;
+  let requiredPrimary: string | null = null;
+  /* A stored grid is already a safe list asset. Check it before requiring the
+   * original so grid-only MJ records do not 404 or trigger a 4K lookup. */
+  if (variant !== 'full' && await cardImageExists(c.env, signPath, admin)) {
+    // 对象只存在于 Supabase（R2 未回填）时异步回传 R2，避免签名后每次
+    // media/i 都走慢速回源（实测单张 4-8s，批量 8-10s）。
+    if (!(await existsInR2(c.env, signPath))) scheduleR2Backfill(c, signPath);
+    return signPath;
+  }
+  if (opts.requireExistingPrimary) {
+    const primaryCandidates = /_grid\.(jpe?g|webp|png)$/i.test(clean)
+      ? primaryCandidatesFromGridPath(clean)
+      : [clean];
+    if (opts.strictStorageCheck) {
+      for (const candidate of primaryCandidates) {
+        if (await cardImageExists(c.env, candidate, admin)) {
+          requiredPrimary = candidate;
+          break;
+        }
+      }
+    } else {
+      requiredPrimary = await findFirstExistingStoragePath(
+        admin,
+        primaryCandidates,
+        CARD_IMAGES_BUCKET,
+        c.env
+      );
+    }
+    if (!requiredPrimary) {
+      throw new ApiError(404, 'NOT_FOUND', '图片不存在');
+    }
+  }
+  if (variant === 'full') return requiredPrimary || signPath;
   if (await cardImageExists(c.env, signPath, admin)) return signPath;
 
-  const primaryCandidates: string[] = [];
-  if (/_grid\.(jpe?g|webp|png)$/i.test(signPath)) {
-    primaryCandidates.push(...primaryCandidatesFromGridPath(signPath));
-  } else {
-    primaryCandidates.push(clean);
-  }
-  const primary = await findFirstExistingStoragePath(
-    admin,
-    primaryCandidates,
-    CARD_IMAGES_BUCKET,
-    c.env
-  );
+  const primaryCandidates = /_grid\.(jpe?g|webp|png)$/i.test(signPath)
+    ? primaryCandidatesFromGridPath(signPath)
+    : [clean];
+  const primary = requiredPrimary || await findFirstExistingStoragePath(
+      admin,
+      primaryCandidates,
+      CARD_IMAGES_BUCKET,
+      c.env
+    );
   if (primary) {
-    const materialized = await materializeGridForPrimaryPath(c.env, admin, primary);
+    const materialized = await materializeGridWithinBudget(c, admin, primary);
     if (materialized) return materialized;
   }
-  return signPath;
+  /* 缩略图 3s 内未就绪（原图在慢速库或现场缩放超时）时一律降级到已确认存在的
+     原图路径：列表签名必须拿到可下载 URL，不能让卡片停在占位/文字状态。 */
+  const fallbackPath = requiredPrimary || primary || null;
+  if (!fallbackPath && opts.requireExistingPrimary) {
+    throw new ApiError(503, 'GRID_UNAVAILABLE', '缩略图暂时不可用');
+  }
+  return fallbackPath || signPath;
 }
 
 export { TOKEN_TTL_SEC as MEDIA_CDN_TOKEN_TTL_SEC };

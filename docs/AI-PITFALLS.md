@@ -16,6 +16,14 @@
 3. `storage://` 是持久引用，短时 CDN/签名 URL 不是。不要把过期 URL回写到卡片 JSON。
 4. 删除卡片涉及 tombstone、社区副本和图片引用计数；没有显式需求时不要执行 purge 或批量删除。
 
+## 会导致重复付费或错账
+
+1. `running`、`outcome_unknown`、task `not_found` 和队列重投都可能代表上游已收单，禁止改回 `queued` 或重新 POST。
+2. 状态查询 GET 只能 poll 或对仍为 `queued` 的 outbox 补发队列消息，不能把用户刷新变成付费重试。
+3. 退款必须使用原扣费 split 和唯一 ref；视频时长差价使用独立 `<jobId>:duration-adjustment` ref。
+4. SD 有 task ID 后可以 processing 数百或数千秒，不能用固定 120 秒或 10 分钟 lease 判定生成失败。
+5. 不直接 fetch 数据库保存的任意结果 URL；视频内容根据已认证任务 ID走配置好的上游 `/content`。
+
 ## 会导致图片慢或流量暴涨
 
 1. 列表只请求 `_grid`；full 仅用于详情、画布插入和下载。
@@ -45,6 +53,7 @@ node scripts/audit-production-mobile-first-screen.mjs
 cd server
 npm run typecheck
 npm test
+npm run deploy:dry-run
 ```
 
 生产验收要记录 build、页面、设备宽度、初始 DOM 数、传输体积和失败 URL；“刷新后好了”不算根因修复。

@@ -11,16 +11,18 @@ export function isAllowedCorsOrigin(
   try {
     const u = new URL(origin);
     const host = u.hostname.toLowerCase();
-    if (host === 'prompt-hubs.com' || host === 'www.prompt-hubs.com') return true;
-    if (host === 'prompt-hub.cn' || host === 'www.prompt-hub.cn') return true;
     if (host === 'localhost' || host === '127.0.0.1') {
       return u.protocol === 'http:' || u.protocol === 'https:';
     }
     if (u.protocol !== 'https:') return false;
+    if (host === 'prompt-hubs.com' || host === 'www.prompt-hubs.com') return true;
+    if (host === 'prompt-hub.cn' || host === 'www.prompt-hub.cn') return true;
     if (host.endsWith('.prompt-hub-hub.pages.dev')) return true;
     if (host.endsWith('.prompt-hub-web.pages.dev')) return true;
-    if (host.endsWith('.vercel.app')) return true;
-    if (origin.startsWith('chrome-extension://')) return true;
+    // vercel.app / chrome-extension:// 不做通配放行：任何人在 vercel.app 部署
+    // 页面、或发布任意扩展，都能借这两个后缀发起带凭据跨域请求。具体白名单
+    // 域名（见 CORS_ORIGINS）走上方 allowlist.includes 精确匹配；官方浏览器
+    // 扩展的 background 请求持 host_permissions，本身不受 CORS 约束。
   } catch {
     return false;
   }

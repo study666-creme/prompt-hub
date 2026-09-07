@@ -1,5 +1,7 @@
 # 认证与云同步
 
+最后核对：2026-07-27。
+
 ## 当前实现
 
 生产认证和数据库使用 MemFire，但前端 SDK、环境变量和部分函数仍沿用 `Supabase` 命名。浏览器不直连数据库域名，而是通过 `https://api.prompt-hubs.com/supabase` 反代 Auth/REST/Storage。
@@ -62,7 +64,7 @@ authSignIn
 
 ## 验收
 
-1. 本地 Worker `/health` 返回 `supabase: ok`。
+1. 本地 Worker `/health` 返回 `ok: true`、`status: ready`；正式发布还必须有与提交一致的 `buildSha`。
 2. 登录后创建一张不公开测试卡，等待同步完成。
 3. 无痕窗口登录同账号，确认卡片出现且图片可加载。
 4. 删除测试卡后再次跨窗口确认 tombstone 生效。

@@ -4,6 +4,7 @@ import { newApiVideoKey, type Env } from '../../env';
 import { roundCredits } from '../../lib/credit-math';
 import { ApiError } from '../../lib/errors';
 import { isAcceptedRefImageInput, resolveGenerationRefUrls } from '../../lib/generation-ref-images';
+import { assertRequestBodySizeLimit } from '../../lib/request-guards';
 import { isStorageRef, storagePathFromRef } from '../../lib/image-archive';
 import { buildPrivateMediaCdnUrl } from '../../lib/media-cdn';
 import {
@@ -395,8 +396,10 @@ function replaceResolvedAliases(
 
 videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   const user = c.get('user');
+  // 视频参考图/参考媒体最多 14 张，每张 schema 上限 6M 字符：64MB 容纳满额
+  // 合法请求；超限在 JSON.parse 前拒绝（防内存墙，与 generate 路由同构）。
+  assertRequestBodySizeLimit(c, 64 * 1024 * 1024);
   const input = parseVideoRequestBody(await c.req.json().catch(() => ({})));
-
   const apiKey = newApiVideoKey(c.env);
   if (!apiKey) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '视频服务暂未配置');
   const admin = createAdminClient(c.env);

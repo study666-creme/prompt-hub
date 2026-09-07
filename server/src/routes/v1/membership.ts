@@ -4,7 +4,9 @@ import type { Env } from '../../env';
 import { ApiError } from '../../lib/errors';
 import {
   chinaDateKey,
+  claimTrialMembership,
   dailyCreditsForTier,
+  setMembershipCreditMode,
   type CreditGrantMode,
   membershipCreditsPayload,
   syncMembershipCredits,
@@ -52,24 +54,25 @@ membershipRoutes.post('/trial-free', async c => {
   }
 
   const until = new Date(Date.now() + 3 * 86400000).toISOString();
-
-  const { data, error } = await admin
-    .from('profiles')
-    .update({
-      membership_tier: 'basic',
-      membership_until: until,
-      credit_grant_mode: 'daily',
-      daily_credits: dailyCreditsForTier('basic'),
-      daily_credits_date: chinaDateKey(),
-      bundle_granted_until: null,
-      trial_free_used: true
-    })
-    .eq('user_id', user.id)
-    .select()
-    .single();
-
-  if (error) throw error;
-  profile = (await syncMembershipCredits(admin, user.id)) || (data as typeof profile);
+  let activated: typeof profile;
+  try {
+    activated = await claimTrialMembership(
+      admin,
+      user.id,
+      until,
+      dailyCreditsForTier('basic')
+    );
+  } catch (error) {
+    const message = String((error as { message?: unknown })?.message || error);
+    if (message.includes('trial_used')) {
+      throw new ApiError(400, 'TRIAL_USED', '\u60a8\u5df2\u9886\u53d6\u8fc7 3 \u5929\u514d\u8d39\u8bd5\u7528');
+    }
+    if (message.includes('already_member')) {
+      throw new ApiError(400, 'ALREADY_MEMBER', '\u5f53\u524d\u5df2\u662f\u4f1a\u5458\uff0c\u65e0\u9700\u91cd\u590d\u9886\u53d6\u8bd5\u7528');
+    }
+    throw error;
+  }
+  profile = (await syncMembershipCredits(admin, user.id)) || activated;
 
   // 试用发放的每日积分同样留痕（此前只在明细外静默入账）
   const trialToday = chinaDateKey();
@@ -130,23 +133,24 @@ membershipRoutes.post('/credit-mode', async c => {
     });
   }
 
+  // 切到 bundle 模式时剩余每日积分会被 RPC 作废，切换前先记下当日剩余用于过期流水
   const staleDaily =
     profile.daily_credits_date === chinaDateKey()
       ? Number(profile.daily_credits) || 0
       : 0;
-  const { data, error } = await admin
-    .from('profiles')
-    .update({
-      credit_grant_mode: mode,
-      ...(mode === 'daily'
-        ? { bundle_granted_until: null }
-        : { daily_credits: 0, daily_credits_date: null })
-    })
-    .eq('user_id', user.id)
-    .select()
-    .single();
-
-  if (error) throw error;
+  let updated: typeof profile;
+  try {
+    updated = await setMembershipCreditMode(admin, user.id, mode);
+  } catch (error) {
+    const message = String((error as { message?: unknown })?.message || error);
+    if (message.includes('membership_inactive')) {
+      throw new ApiError(400, 'NOT_MEMBER', '开通会员后可选择积分方式');
+    }
+    if (message.includes('lite_daily_only')) {
+      throw new ApiError(400, 'LITE_DAILY_ONLY', '轻量会员仅支持每日领取积分');
+    }
+    throw error;
+  }
   const synced = await syncMembershipCredits(admin, user.id);
 
   // 切到一次性模式会把剩余每日积分作废，留一条过期清零流水便于对账
@@ -154,7 +158,7 @@ membershipRoutes.post('/credit-mode', async c => {
     await writeDailyGrantLedger(admin, {
       userId: user.id,
       today: chinaDateKey(),
-      permanent: Number((synced || (data as typeof profile)).credits) || 0,
+      permanent: Number((synced || updated).credits) || 0,
       expiredStale: staleDaily,
       granted: 0,
       dailyAfter: 0,
@@ -171,7 +175,7 @@ membershipRoutes.post('/credit-mode', async c => {
         mode === 'daily'
           ? `已切换为每日 ${dailyCreditsForTier(profile.membership_tier)} 积分（当日有效）`
           : '已切换为一次性到账积分（永久有效，用完为止）',
-      ...membershipCreditsPayload(synced || (data as typeof profile))
+      ...membershipCreditsPayload(synced || updated)
     }
   });
 });

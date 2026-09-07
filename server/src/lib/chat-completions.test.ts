@@ -52,6 +52,7 @@ describe('chat completions tool messages', () => {
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
 
     const result = await submitChatCompletions('server-secret', 'https://newapi.example.com', {
+      model: 'deepseek-v4-flash',
       messages: [{ role: 'user', content: 'create a note' }]
     });
 
@@ -82,5 +83,54 @@ describe('chat completions tool messages', () => {
     });
 
     expect(result.toolCalls[0]?.function.arguments).toBe('{"includeViewport":true}');
+  });
+
+  it('refuses to guess an upstream base URL', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(submitChatCompletions('server-secret', undefined, {
+      model: 'deepseek-v4-flash',
+      messages: [{ role: 'user', content: 'hello' }]
+    })).rejects.toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('chat completions idempotency key', () => {
+  it('forwards clientRequestId as upstream idempotency headers when provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 5, completion_tokens: 1 }
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await submitChatCompletions('server-secret', 'https://newapi.example.com', {
+      model: 'deepseek-v4-flash',
+      messages: [{ role: 'user', content: 'hi' }],
+      idempotencyKey: 'client-req-123'
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Idempotency-Key']).toBe('client-req-123');
+    expect(headers['X-Client-Request-Id']).toBe('client-req-123');
+  });
+
+  it('omits idempotency headers when no key is provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 5, completion_tokens: 1 }
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await submitChatCompletions('server-secret', 'https://newapi.example.com', {
+      model: 'deepseek-v4-flash',
+      messages: [{ role: 'user', content: 'hi' }]
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Idempotency-Key']).toBeUndefined();
   });
 });

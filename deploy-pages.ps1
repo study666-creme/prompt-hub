@@ -43,6 +43,22 @@ foreach ($item in $localDeployExclude) {
   $localDeployBak += @{ Path = $item.Path; Bak = $bak }
 }
 
+# --- deploy guard: block stale/divergent trees (root cause of the 20260907 Pages rollback) ---
+Write-Host "Deploy guard: fetching origin/main and verifying HEAD matches ..." -ForegroundColor Cyan
+& git -C $root fetch origin main 2>$null
+if ($LASTEXITCODE -ne 0) { Write-Host "BLOCKED: git fetch origin main failed (offline?) - refusing to deploy blind." -ForegroundColor Red; exit 1 }
+$dgHead = (& git -C $root rev-parse HEAD).Trim()
+$dgOrigin = (& git -C $root rev-parse origin/main).Trim()
+$dgBranch = (& git -C $root rev-parse --abbrev-ref HEAD).Trim()
+if ($dgHead -ne $dgOrigin) {
+  $dgBehind = (& git -C $root rev-list --count HEAD..origin/main).Trim()
+  $dgAhead  = (& git -C $root rev-list --count origin/main..HEAD).Trim()
+  Write-Host "BLOCKED: branch $dgBranch HEAD does not equal origin/main (ahead $dgAhead, behind $dgBehind)." -ForegroundColor Red
+  Write-Host "  This is the exact failure mode of the 20260907 Pages rollback (a stale local main was deployed)." -ForegroundColor Yellow
+  Write-Host "  Push your work to origin/main (or merge into the canonical deploy branch) so HEAD == origin/main, then redeploy." -ForegroundColor Yellow
+  exit 1
+}
+Write-Host "Deploy guard OK: HEAD == origin/main ($($dgHead.Substring(0,7))) on $dgBranch" -ForegroundColor Green
 Write-Host "Pages project: $project"
 & (Join-Path $root "scripts\run-predeploy-smoke.ps1")
 if ($LASTEXITCODE -ne 0) { exit 1 }
