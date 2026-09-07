@@ -632,16 +632,16 @@ export async function serveCachedStorageImage(
     throw new ApiError(404, 'NOT_FOUND', '图片不存在');
   }
 
-  const origin = c.req.header('Origin');
   const response = new Response(body, {
     headers: {
       'Content-Type': contentType,
       ...(isGrid ? { 'X-PH-Grid-Ok': '1' } : {}),
       'Cache-Control': `public, max-age=${CDN_CACHE_SEC}, s-maxage=${CDN_CACHE_SEC}, immutable`,
       'CDN-Cache-Control': `max-age=${CDN_CACHE_SEC}`,
+      // Access-Control-* 由全局 CORS 中间件统一补充（cors-headers 会回显
+      // Origin + Access-Control-Allow-Credentials: true）；此处仅确保缓存键
+      // 按 Origin 区分，避免把某个来源的 ACAO 误配给共享缓存的其他客户端。
       'Vary': 'Origin, Accept',
-      'Access-Control-Allow-Origin': origin || '*',
-      'Access-Control-Allow-Credentials': 'true',
       ...(c.req.query('dl') === '1'
         ? {
             'Content-Disposition': `attachment; filename="prompt-hub-${Date.now()}.png"`
