@@ -833,6 +833,7 @@
         return;
       }
       loginFlowPromise = handleCloudAfterLogin(opts).finally(() => {
+      try { window.dispatchEvent(new CustomEvent('ph-auth-complete')); } catch (e) { /* notice.js 监听 */ }
         loginFlowPromise = null;
       });
       await loginFlowPromise;

@@ -8,6 +8,8 @@ import * as users from './views/users.js';
 import * as orders from './views/orders.js';
 import * as ledger from './views/ledger.js';
 import * as audit from './views/audit.js';
+import * as announcements from './views/announcements.js';
+import * as videoCatalog from './views/video-catalog.js';
 import * as cards from './views/cards.js';
 import * as community from './views/community.js';
 import * as codes from './views/codes.js';
@@ -24,10 +26,12 @@ const VIEWS = {
   community,
   codes,
   models,
-  canvas
+  canvas,
+  announcements,
+  videoCatalog
 };
 
-const NAV_ORDER = ['overview', 'users', 'orders', 'ledger', 'cards', 'community', 'codes', 'models', 'canvas', 'audit'];
+const NAV_ORDER = ['overview', 'users', 'orders', 'ledger', 'cards', 'community', 'codes', 'models', 'canvas', 'announcements', 'videoCatalog', 'audit'];
 const NAV_LABELS = {
   overview: '概览',
   users: '用户',
@@ -38,6 +42,8 @@ const NAV_LABELS = {
   codes: '激活码',
   models: '生图模型',
   canvas: '生图任务',
+  announcements: '公告管理',
+  videoCatalog: '视频目录',
   audit: '操作审计'
 };
 

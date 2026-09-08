@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import type { Env } from '../../env';
 import { applyCorsHeaders } from '../../lib/cors-headers';
+import { adminAnnouncementRoutes } from './announcements';
+import { adminVideoCatalogRoutes } from './video-catalog';
 import { adminAuditRoutes } from './audit';
 import { adminCardRoutes } from './cards';
 import { adminCanvasRoutes } from './canvas';
@@ -33,3 +35,5 @@ adminRoutes.route('/image-models', adminImageModelRoutes);
 adminRoutes.route('/orders', adminOrderRoutes);
 adminRoutes.route('/ledger', adminLedgerRoutes);
 adminRoutes.route('/audit', adminAuditRoutes);
+adminRoutes.route('/announcements', adminAnnouncementRoutes);
+adminRoutes.route('/video-catalog', adminVideoCatalogRoutes);

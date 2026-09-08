@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../../env';
 import { requireAuth } from '../../middleware/auth';
 import { meRoutes } from './me';
+import { announcementRoutes } from './announcements';
 import { redeemRoutes } from './redeem';
 import { generateRoutes, publicGenerationModelsHandler } from './generate';
 import { communityFeedHandler, communityRoutes } from './community';
@@ -44,6 +45,7 @@ v1.use('*', requireAuth);
 v1.route('/asset-packages', assetPackagesRoutes);
 
 v1.route('/me', meRoutes);
+v1.route('/announcements', announcementRoutes);
 v1.route('/membership', membershipRoutes);
 v1.route('/membership/tasks', membershipTaskRoutes);
 v1.route('/media', mediaRoutes);

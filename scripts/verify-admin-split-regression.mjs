@@ -16,8 +16,8 @@ const mainJs = read('admin/main.js');
 const apiJs = read('admin/modules/api.js');
 
 const views = [
-  'overview', 'users', 'orders', 'ledger', 'audit',
-  'cards', 'community', 'codes', 'models', 'canvas'
+  'overview', 'users', 'orders', 'ledger', 'audit', 'announcements',
+  'cards', 'community', 'codes', 'models', 'canvas', 'video-catalog'
 ];
 
 requireTokens('admin.html', admin, [
@@ -33,7 +33,8 @@ requireTokens('admin.html', admin, [
 ]);
 
 for (const name of views) {
-  requireTokens('admin.html', admin, [`id="panel-${name}"`]);
+  const panelKey = name.replace(/-(\w)/g, (m, ch) => ch.toUpperCase());
+    requireTokens('admin.html', admin, [`id="panel-${panelKey}"`]);
   const view = read(`admin/views/${name}.js`);
   requireTokens(`admin/views/${name}.js`, view, [
     'export const title = [',

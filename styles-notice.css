@@ -1,0 +1,82 @@
+/* 站点公告弹窗（notice.js）——贴合主站风格：柔光覆盖层 + 渐变品牌卡 */
+.notice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(12, 14, 22, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  animation: notice-fade 0.18s ease;
+}
+@keyframes notice-fade { from { opacity: 0; } to { opacity: 1; } }
+.notice-card {
+  position: relative;
+  width: min(420px, calc(100vw - 32px));
+  border-radius: 18px;
+  padding: 26px 24px 22px;
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(124, 108, 255, 0.14) 0%, transparent 55%),
+    radial-gradient(120% 100% at 0% 100%, rgba(0, 200, 180, 0.10) 0%, transparent 50%),
+    #161a24;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: #eef1f6;
+  animation: notice-pop 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  text-align: center;
+}
+@keyframes notice-pop { from { transform: translateY(10px) scale(0.97); opacity: 0; } to { transform: none; opacity: 1; } }
+.notice-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+  color: #c7cdda;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.notice-close:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+.notice-mark {
+  font-size: 30px;
+  margin-bottom: 8px;
+}
+.notice-card h3 {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.notice-text {
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: #d4dae5;
+  margin-bottom: 18px;
+  word-break: break-word;
+}
+.notice-ok {
+  min-width: 132px;
+  padding: 10px 22px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 14.5px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(135deg, #7c6cff, #5aa7ff);
+  box-shadow: 0 6px 18px rgba(124, 108, 255, 0.35);
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.notice-ok:hover { transform: translateY(-1px); box-shadow: 0 9px 24px rgba(124, 108, 255, 0.5); }
+body.notice-open { overflow: hidden; }
+@media (max-width: 480px) {
+  .notice-card { padding: 22px 18px 18px; }
+  .notice-text { font-size: 14px; }
+}

@@ -541,6 +541,50 @@
       </div>
     </section>
 
+    <section class="admin-panel" id="panel-announcements" hidden>
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <h2 style="margin:0;font-size:16px">公告管理</h2>
+          <button type="button" class="admin-btn admin-btn--sm" id="annNewBtn">＋ 新增公告</button>
+        </div>
+        <p class="admin-hint">公告在用户登录后弹窗展示，同一公告每个自然日最多弹一次（点「我知道了」后当日不再弹）。发布即生效。</p>
+        <div id="annEditor" class="admin-ann-editor" hidden>
+          <div class="admin-field">
+            <label for="annText">公告内容</label>
+            <textarea id="annText" rows="4" maxlength="2000" placeholder="写点什么…"></textarea>
+          </div>
+          <div class="admin-row">
+            <div class="admin-field" style="width:220px;margin:0">
+              <label for="annStart">生效时间</label>
+              <input type="datetime-local" id="annStart">
+            </div>
+            <label class="admin-check" style="align-self:flex-end;margin:0 0 4px"><input type="checkbox" id="annActive" checked> 立即发布</label>
+          </div>
+          <div class="admin-form-actions">
+            <button type="button" class="admin-btn admin-btn--primary" id="annSaveBtn">保存公告</button>
+            <button type="button" class="admin-btn" id="annCancelBtn">取消</button>
+          </div>
+        </div>
+        <div id="annList" class="admin-ann-list"></div>
+        <p class="admin-msg" id="annMsg" hidden></p>
+      </div>
+    </section>
+    <section class="admin-panel" id="panel-videoCatalog" hidden>
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <h2 style="margin:0;font-size:16px">视频目录控制</h2>
+        </div>
+        <p class="admin-hint">卡藏实时目录 + 后台覆盖。覆盖优先：把计价方式改为按秒/按次、调整价格或按档位覆盖、直接下架，都在这里改，保存后 30 秒内全站生效；清除覆盖即恢复卡藏目录原值。20260909 计费事故的防复发面板。</p>
+        <div id="vcEditor" hidden></div>
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-table--compact">
+            <thead><tr><th>状态</th><th>模型</th><th>计价方式</th><th>价格（档位）</th><th>线路</th><th></th></tr></thead>
+            <tbody id="vcList"></tbody>
+          </table>
+        </div>
+        <p class="admin-msg" id="vcMsg" hidden></p>
+      </div>
+    </section>
     <section class="admin-panel" id="panel-audit" hidden>
       <div class="admin-card">
         <div class="admin-card-head">

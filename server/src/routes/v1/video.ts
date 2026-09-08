@@ -25,6 +25,7 @@ import {
   syncMembershipCredits,
   type DebitSplit
 } from '../../lib/membership-credits';
+import { applyVideoOverride, loadVideoCatalogOverrides } from '../../lib/video-catalog-settings';
 import { createAdminClient } from '../../lib/supabase';
 import { rateLimit } from '../../middleware/rate-limit';
 
@@ -418,7 +419,14 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
     }
   }
   const resolved = await freshVideoModel(c.env, input.model);
-  const { model, route } = resolved;
+  const { model: resolvedModel, route } = resolved;
+  // 后台目录覆盖：运营在后台纠正计价单位/价格/下架（site_settings），覆盖优先于卡藏目录
+  const overrides = await loadVideoCatalogOverrides(admin);
+  const overridden = applyVideoOverride(overrides, { id: resolvedModel.id, upstreamModel: resolvedModel.upstreamModel }, resolvedModel.pricing as never);
+  if (!overridden.enabled) {
+    throw new ApiError(400, 'MODEL_UNAVAILABLE', '该模型已下架，请刷新模型列表');
+  }
+  const model = { ...resolvedModel, pricing: overridden.pricing } as typeof resolvedModel;
   validateVideoRequest(model, input);
   // 目录已知会把这些模型错误标成 unit=request（实际按秒收）。当目录本身是
   // second 时 newApiFixedCreditsForRequest 已经乘了时长；若标成 request（乘了1），
