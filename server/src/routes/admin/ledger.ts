@@ -21,6 +21,35 @@ type LedgerRow = {
   created_at: string;
 };
 
+/** 给流水行补上用户名+邮箱，让运营能直接定位是谁。display_name 批量查，email 逐个 auth 查（限去重后数量）。 */
+async function attachUsers(
+  admin: ReturnType<typeof createAdminClient>,
+  rows: LedgerRow[]
+): Promise<Array<LedgerRow & { userName: string; userEmail: string }>> {
+  const ids = [...new Set(rows.map(r => String(r.user_id || '')).filter(Boolean))];
+  const names = new Map<string, string>();
+  const emails = new Map<string, string>();
+  if (ids.length) {
+    const { data: profiles } = await admin
+      .from('profiles')
+      .select('user_id, display_name')
+      .in('user_id', ids);
+    for (const p of profiles ?? []) names.set(String(p.user_id), String(p.display_name || ''));
+    // 邮箱只在 auth 侧，逐个查（去重后最多 50 个，够一屏）
+    for (const id of ids.slice(0, 50)) {
+      try {
+        const { data: u } = await admin.auth.admin.getUserById(id);
+        if (u?.user?.email) emails.set(id, String(u.user.email));
+      } catch { /* 邮箱缺失不阻断 */ }
+    }
+  }
+  return rows.map(r => ({
+    ...r,
+    userName: names.get(String(r.user_id)) || '',
+    userEmail: emails.get(String(r.user_id)) || ''
+  }));
+}
+
 const REASONS = [
   'payment_topup',
   'admin_manual',
@@ -57,11 +86,12 @@ adminLedgerRoutes.get('/', async c => {
   const { data, error, count } = await query.range(offset, offset + limit - 1);
   if (error) throw error;
   const rows = (data ?? []) as LedgerRow[];
+  const enriched = await attachUsers(admin, rows);
 
   return c.json({
     ok: true,
     data: {
-      items: rows,
+      items: enriched,
       total: count ?? 0,
       limit,
       offset,
@@ -95,13 +125,22 @@ adminLedgerRoutes.get('/export', async c => {
     .limit(5000);
   if (error) throw error;
 
+  // 用户名批量关联（去重 id 一次查 profiles），便于导出后直接看是谁
+  const rows = (data ?? []) as LedgerRow[];
+  const ids = [...new Set(rows.map(r => String(r.user_id || '')).filter(Boolean))];
+  const names = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const { data: ps } = await admin.from('profiles').select('user_id, display_name').in('user_id', ids.slice(i, i + 500));
+    for (const p of ps ?? []) names.set(String(p.user_id), String(p.display_name || ''));
+  }
+
   const esc = (v: unknown) => {
     const s = String(v ?? '');
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  const header = 'id,user_id,delta,balance_after,reason,ref_id,created_at';
-  const lines = (data ?? []).map((row: Record<string, unknown>) =>
-    [row.id, row.user_id, row.delta, row.balance_after, esc(row.reason), esc(row.ref_id), row.created_at].join(',')
+  const header = 'id,user_id,user_name,delta,balance_after,reason,ref_id,created_at';
+  const lines = rows.map((row) =>
+    [row.id, row.user_id, esc(names.get(String(row.user_id)) || ''), row.delta, row.balance_after, esc(row.reason), esc(row.ref_id), row.created_at].join(',')
   );
 
   return new Response([header, ...lines].join('\n'), {

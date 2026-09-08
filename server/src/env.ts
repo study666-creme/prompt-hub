@@ -25,6 +25,8 @@ export type Env = {
   NEWAPI_API_KEY?: string;
   /** 可选的视频专用 New API 令牌；未配置时兼容回退到全能令牌。 */
   NEWAPI_VIDEO_API_KEY?: string;
+  /** 临时维护开关：=1 时视频生成拒绝新任务（2026-09-09 定价排查） */
+  VIDEO_MAINTENANCE?: string;
   NEWAPI_API_BASE_URL?: string;
   /** 仅后台读取卡藏 API 的模型渠道映射，不得返回给公开模型接口。 */
   NEWAPI_CATALOG_ADMIN_SECRET?: string;

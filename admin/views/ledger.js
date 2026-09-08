@@ -2,11 +2,34 @@
 
 import { $, esc, fullTime, showMsg, toast } from '../modules/ui.js';
 import { adminFetch, adminFetchRaw, friendlyFetchError } from '../modules/api.js';
+import { showUserDetail } from './users.js';
 
 export const title = ['积分流水', 'credit_ledger 对账：发放、消耗、退款全记录'];
 
 const PAGE = 20;
 let offset = 0;
+
+/** 把流水 meta 拼成人能看懂的扣费明细：模型 · 时长 · 分辨率 · 每日池/永久拆分 */
+function describeLedgerMeta(meta, reason) {
+  if (!meta || typeof meta !== 'object') return '—';
+  const parts = [];
+  const model = meta.modelLabel || meta.model;
+  if (model) parts.push(String(model));
+  if (meta.duration) parts.push(meta.duration + 's');
+  if (meta.resolution) parts.push(String(meta.resolution));
+  if (meta.ratio) parts.push(String(meta.ratio));
+  if (meta.pool) parts.push('池:' + meta.pool);
+  if (meta.fromDaily != null || meta.fromPermanent != null) {
+    const d = Number(meta.fromDaily) || 0;
+    const p = Number(meta.fromPermanent) || 0;
+    if (d || p) parts.push(`每日${d}+永久${p}`);
+  }
+  if (meta.note) parts.push(String(meta.note));
+  if (meta.productId) parts.push(String(meta.productId));
+  if (meta.by) parts.push(String(meta.by));
+  if (meta.code) parts.push(String(meta.code));
+  return parts.length ? parts.join(' · ') : '—';
+}
 
 export function init() {
   $('ledgerReasonFilter')?.addEventListener('change', () => void load(true));
@@ -60,17 +83,37 @@ export function load(reset = true, params) {
         .map((row) => {
           const delta = Number(row.delta) || 0;
           const cls = delta >= 0 ? 'admin-badge--ok' : 'admin-badge--off';
-          const meta = row.meta && typeof row.meta === 'object' ? row.meta : {};
+          const uid = String(row.user_id || '');
+          const name = row.userName || '（无昵称）';
+          const email = row.userEmail || '';
+          const userCell = `
+            <div class="admin-ledger-user">
+              <button type="button" class="admin-btn admin-btn--link" data-ledger-user="${esc(uid)}" title="查看该用户">${esc(name)}</button>
+              ${email ? `<br><span class="admin-hint">${esc(email)}</span>` : ''}
+              <br><code class="admin-ledger-uid" title="点击复制完整用户 ID">${esc(uid)}</code>
+            </div>`;
           return `<tr>
             <td>${esc(fullTime(row.created_at))}</td>
-            <td><code title="${esc(row.user_id)}">${esc(String(row.user_id || '').slice(0, 8))}…</code></td>
+            <td>${userCell}</td>
             <td><span class="admin-badge ${cls}">${delta >= 0 ? '+' : ''}${delta}</span><br><span class="admin-hint">余额 ${esc(row.balance_after ?? '—')}</span></td>
             <td><code>${esc(row.reason || '—')}</code></td>
             <td><code>${esc(row.ref_id || '—')}</code></td>
-            <td class="admin-monitor-detail">${esc(meta.note || meta.productId || meta.by || '—')}</td>
+            <td class="admin-monitor-detail">${esc(describeLedgerMeta(row.meta, row.reason))}</td>
           </tr>`;
         })
         .join('');
+      tbody.querySelectorAll('[data-ledger-user]').forEach((btn) => {
+        btn.addEventListener('click', () => void showUserDetail(btn.getAttribute('data-ledger-user')));
+      });
+      tbody.querySelectorAll('.admin-ledger-uid').forEach((code) => {
+        code.style.cursor = 'copy';
+        code.addEventListener('click', () => {
+          const v = code.textContent;
+          if (navigator.clipboard && v) {
+            navigator.clipboard.writeText(v).then(() => toast('已复制完整用户 ID', true, 1800)).catch(() => toast('复制失败', false));
+          }
+        });
+      });
       showMsg($('ledgerMsg'), '', true);
     } catch (e) {
       tbody.innerHTML = '';

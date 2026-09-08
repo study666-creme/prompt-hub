@@ -896,11 +896,35 @@ export function newApiFixedCreditsForRequest(
       )
     );
   const unitCredits = tier?.credits ?? model.pricing.credits;
-  const quantityKey = model.pricing.quantityParameter
+  const quantityKey = quantityParameterKey(model.pricing)
     || (model.pricing.unit === 'second' ? 'duration' : model.pricing.unit === 'image' ? 'n' : '');
   const quantity = quantityKey ? Math.max(1, Number(params[quantityKey]) || 1) : 1;
   return rounded(unitCredits * quantity);
 }
+
+/**
+ * 目录下发的 quantity_parameter 用公开契约名（如 duration_seconds），而计价调用方
+ * （video 路由等）传的是中转参数名（duration/seconds/n）。把目录声明的数量键归一
+ * 到调用方实际传入的键；归一失败时返回 null，让调用方退回 unit 推断键，绝不把
+ * 数量静默按 1 计。（还原自 513b3c5，该修复当年只进了 release 分支、从未进 main。）
+ */
+function quantityParameterKey(pricing: NewApiCatalogPricing): string | null {
+  const declared = pricing.quantityParameter?.trim();
+  if (!declared) return null;
+  const normalized = SECOND_QUANTITY_ALIASES[declared] ?? declared;
+  return normalized === 'duration' || normalized === 'n' ? normalized : declared;
+}
+
+/** 数量参数别名：目录公开契约名 → 中继计价参数名 */
+export const SECOND_QUANTITY_ALIASES: Record<string, string> = {
+  duration_seconds: 'duration',
+  durationSeconds: 'duration',
+  seconds: 'duration',
+  duration: 'duration',
+  count: 'n',
+  generations: 'n',
+  images: 'n'
+};
 
 export function newApiTextCreditsForUsage(
   model: NewApiCatalogModel,

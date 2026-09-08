@@ -31,6 +31,13 @@ import { rateLimit } from '../../middleware/rate-limit';
 const mediaRef = z.string().refine(value => /^https?:\/\//i.test(value) || isStorageRef(value), '仅支持媒体 URL');
 const imageRef = z.string().refine(isAcceptedRefImageInput);
 const clientRequestId = z.string().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/);
+/**
+ * 目录误配兜底：这些视频模型运营确认按秒计费，但目录曾把 unit 标成 request
+ * （导致只乘 1 秒）。目录修正为 second 后 newApiFixedCreditsForRequest 已按
+ * 时长计费，本表自然失效；请不要在这里新增未经确认的模型——按秒/按次以
+ * API 站模型广场的展示为准。
+ */
+const VIDEO_PER_SECOND_MODELS = new Set(['minimax_h3']);
 const bodySchema = z.object({
   model: z.string().min(1).max(100),
   prompt: z.string().min(1).max(12000),
@@ -413,6 +420,9 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
   const resolved = await freshVideoModel(c.env, input.model);
   const { model, route } = resolved;
   validateVideoRequest(model, input);
+  // 目录已知会把这些模型错误标成 unit=request（实际按秒收）。当目录本身是
+  // second 时 newApiFixedCreditsForRequest 已经乘了时长；若标成 request（乘了1），
+  // 这里按已知按秒模型补乘时长。目录修正后（unit=second）这段自动失效。
   const credits = newApiFixedCreditsForRequest(model, {
     duration: input.duration,
     seconds: input.duration,
@@ -421,10 +431,13 @@ videoRoutes.post('/', rateLimit(120, 60_000), async c => {
     ratio: input.ratio,
     aspect_ratio: input.ratio
   });
-  if (credits == null || credits <= 0) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认该模型实时价格');
+  const finalCredits = credits != null && model.pricing?.unit !== 'second' && VIDEO_PER_SECOND_MODELS.has(model.upstreamModel)
+    ? credits * Math.max(1, Number(input.duration) || 1)
+    : credits;
+  if (finalCredits == null || finalCredits <= 0) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '暂时无法确认该模型实时价格');
 
   let profile = await syncMembershipCredits(admin, user.id);
-  const final = roundCredits(credits);
+  const final = roundCredits(finalCredits);
   if (spendableCredits(profile) < final) {
     throw new ApiError(402, 'INSUFFICIENT_CREDITS', `积分不足（需要 ${final}，当前 ${spendableCredits(profile)}）`);
   }

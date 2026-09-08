@@ -1183,3 +1183,33 @@ describe('newapi image upstream', () => {
     expect(newApiFixedCreditsForRequest(model, { duration: 8, seconds: 8 })).toBe(80);
   });
 });
+
+describe('video second/request billing normalization (recovered 513b3c5)', () => {
+  const mkModel = (pricing: Record<string, unknown>) => ({
+    id: 'x', upstreamModel: 'x', label: 'X', description: '',
+    modality: 'video', operation: 'generate', order: 1,
+    endpoint: { method: 'POST', path: '/v1', contentType: 'application/json' },
+    parameters: [], pricing
+  } as unknown as import('./newapi').NewApiCatalogModel);
+
+  it('treats quantity_parameter duration_seconds as the relay duration key', () => {
+    // 目录标 second + quantity_parameter=duration_seconds（公开契约名）时，
+    // 不能再拿 duration_seconds 去 params 里找——必须归一成 duration
+    const model = mkModel({ mode: 'fixed', unit: 'second', yuan: 0.1, credits: 10, quantityParameter: 'duration_seconds' });
+    expect(newApiFixedCreditsForRequest(model, { duration: 8, seconds: 8 })).toBe(80);
+  });
+
+  it('keeps per-request models flat regardless of duration', () => {
+    // 按次模型（unit=request）：费用不随时长变化
+    const model = mkModel({ mode: 'fixed', unit: 'request', yuan: 0.2, credits: 20 });
+    expect(newApiFixedCreditsForRequest(model, { duration: 8, seconds: 8 })).toBe(20);
+    expect(newApiFixedCreditsForRequest(model, { duration: 30 })).toBe(20);
+  });
+
+  it('normalizes legacy seconds alias when params only carry duration', () => {
+    // 目录 quantity_parameter=seconds 但调用方只传 duration
+    const model = mkModel({ mode: 'fixed', unit: 'second', yuan: 0.1, credits: 10, quantityParameter: 'seconds' });
+    expect(newApiFixedCreditsForRequest(model, { duration: 8 })).toBe(80);
+  });
+});
+
