@@ -57,7 +57,7 @@ function normalize(value: unknown): VideoCatalogOverrides {
     if (o.credits != null && Number.isFinite(Number(o.credits))) override.credits = Number(o.credits);
     if (o.creditsByTier && typeof o.creditsByTier === 'object') {
       const tiers: Record<string, number> = {};
-      for (const [name, credits] of Object.entries(o.creditsByTier)) {
+      for (const [name, credits] of Object.entries(o.creditsByTier ?? {})) {
         const n = Number(credits);
         if (Number.isFinite(n) && n > 0) tiers[name] = n;
       }
@@ -123,15 +123,22 @@ export function applyVideoOverride(
     const source = Array.isArray(pricing.tiers)
       ? (pricing.tiers as Array<Record<string, unknown>>)
       : [];
-    const merged = source.map(t => {
-      const name = String(t?.name ?? '');
-      const hit = o.creditsByTier![name];
+    // tier 匹配键：name，退而求其次 when.resolution（卡藏投影可能丢 name）。
+    // 只替换已有 tier 的 credits，不追加——防止同档位出现两行重复价。
+    const tierKey = (t: Record<string, unknown>) => {
+      const name = String(t?.name ?? '').trim();
+      if (name) return name;
+      const when = t?.when as Record<string, unknown> | undefined;
+      return String(when?.resolution ?? '').trim();
+    };
+    const merged = source.map((t: Record<string, unknown>) => {
+      const hit = (o.creditsByTier ?? {})[tierKey(t)];
       return hit != null ? { ...t, credits: hit } : t;
     });
-    for (const [name, credits] of Object.entries(o.creditsByTier!)) {
-      if (!merged.some(t => String(t?.name ?? '') === name)) {
-        merged.push({ name, when: { resolution: name }, credits });
-      }
+    const covered = new Set(merged.map(tierKey).filter(Boolean));
+    // 目录完全没有的档位才追加（带 when，便于计费匹配）
+    for (const [name, credits] of Object.entries(o.creditsByTier)) {
+      if (!covered.has(name)) merged.push({ name, when: { resolution: name }, credits });
     }
     next.tiers = merged;
   } else if (o.credits != null) {
