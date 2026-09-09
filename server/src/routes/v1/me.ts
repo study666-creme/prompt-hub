@@ -168,11 +168,11 @@ const PUBLIC_LEDGER_PHASES: Record<string, string> = {
   payment: 'payment'
 };
 
-export function projectPublicLedgerMeta(value: unknown) {
+export function projectPublicLedgerMeta(value: unknown, opts?: { allowAnyModel?: boolean }) {
   const source = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const projected: Record<string, string | number> = {};
   const model = String(source.model || '').trim();
-  if (PUBLIC_LEDGER_MODEL_IDS.has(model)) projected.model = model;
+  if (model && (opts?.allowAnyModel || PUBLIC_LEDGER_MODEL_IDS.has(model))) projected.model = model;
   const resolution = String(source.resolution || '').trim().toLowerCase();
   if (/^(?:1k|2k|4k|480p|720p|1080p|1440p|2160p)$/.test(resolution)) {
     projected.resolution = resolution;
@@ -183,6 +183,8 @@ export function projectPublicLedgerMeta(value: unknown) {
   if (Object.prototype.hasOwnProperty.call(MJ_ACTION_LABEL_ZH, mjAction)) {
     projected.mjAction = mjAction;
   }
+  const duration = Number(source.duration);
+  if (Number.isFinite(duration) && duration > 0 && duration <= 3600) projected.duration = duration;
   const phase = PUBLIC_LEDGER_PHASES[String(source.phase || '').trim()];
   if (phase) projected.phase = phase;
   return projected;
@@ -191,14 +193,18 @@ export function projectPublicLedgerMeta(value: unknown) {
 export function projectPublicLedgerItem(row: Record<string, unknown>) {
   const rawReason = String(row.reason || '');
   const knownReason = Object.prototype.hasOwnProperty.call(REASON_LABELS, rawReason);
+  // 生成类扣费透传模型名/时长，并用 refId 关联 generation_requests 任务，便于前端对照
+  const isGeneration = /^(?:image|video)_generation(?:_.*)?$/.test(rawReason);
+  const refId = typeof row.ref_id === 'string' && row.ref_id.trim() ? row.ref_id : null;
   return {
     id: row.id,
     delta: row.delta,
     balanceAfter: row.balance_after,
     reason: knownReason ? rawReason : 'other',
     reasonLabel: knownReason ? REASON_LABELS[rawReason] : '积分变动',
-    meta: projectPublicLedgerMeta(row.meta),
-    createdAt: row.created_at
+    refId,
+    meta: projectPublicLedgerMeta(row.meta, { allowAnyModel: isGeneration }),
+    createdAt: row.created_at,
   };
 }
 
