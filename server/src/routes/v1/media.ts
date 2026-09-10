@@ -15,6 +15,7 @@ import {
   resolveCommunityGridPath,
   materializeCommunityGridIfMissing,
   serveCachedStorageImage,
+  serveCachedStorageMedia,
   verifyMediaAccessToken,
   signingPathForVariant,
   ensureGridPathForSigning
@@ -59,6 +60,21 @@ export async function privateCachedMediaHandler(c: Context<{ Bindings: Env }>) {
   const ok = await verifyMediaAccessToken(c.env, path, exp, sig);
   if (!ok) throw new ApiError(401, 'UNAUTHORIZED', '图片链接无效或已过期');
   return serveCachedStorageImage(c, path);
+}
+
+/**
+ * 带 token 的参考视频/音频直链。图片代理只服务可识别的图片，媒体素材必须
+ * 原样回源，否则上游拉取参考视频会拿到 404 并拒绝整条视频任务。
+ */
+export async function privateStoredMediaHandler(c: Context<{ Bindings: Env }>) {
+  const enc = c.req.param('enc') || '';
+  const path = decodeStoragePath(enc);
+  if (!path) throw new ApiError(404, 'NOT_FOUND', '无效路径');
+  const exp = Number(c.req.query('e') || 0);
+  const sig = String(c.req.query('s') || '');
+  const ok = await verifyMediaAccessToken(c.env, path, exp, sig);
+  if (!ok) throw new ApiError(401, 'UNAUTHORIZED', '媒体链接无效或已过期');
+  return serveCachedStorageMedia(c, path);
 }
 
 /** 游客/未登录：返回 CDN 代理 URL（不再返回 supabase.co 直链） */

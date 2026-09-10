@@ -10,6 +10,8 @@ import { deleteFromR2, downloadCardImage, existsInR2, uploadCardImage, cardImage
 export const CARD_IMAGES_BUCKET = 'card-images';
 const CDN_CACHE_SEC = 60 * 60 * 24 * 30;
 const TOKEN_TTL_SEC = 60 * 60 * 24 * 7;
+/** 参考视频/音频直链的边缘缓存时长：短于图片，素材可能被重新上传覆盖 */
+const MEDIA_FILE_MAX_AGE_SEC = 60 * 60;
 
 /** 社区公开浏览：用户目录下任意层级图片 */
 export function isAllowedCommunityMediaPath(path: string): boolean {
@@ -47,7 +49,7 @@ export function resolveStoragePath(ref: string | null | undefined): string | nul
   if (!raw) return null;
   const fromRef = storagePathFromRef(raw);
   if (fromRef) return fromRef.replace(/^\//, '');
-  const cdnMarkers = ['/api/v1/media/c/', '/api/v1/media/i/'];
+  const cdnMarkers = ['/api/v1/media/c/', '/api/v1/media/i/', '/api/v1/media/m/'];
   for (const marker of cdnMarkers) {
     const i = raw.indexOf(marker);
     if (i !== -1) {
@@ -157,6 +159,41 @@ export async function buildPrivateMediaCdnUrl(
   const { exp, sig } = await createMediaAccessToken(c.env as Env, clean);
   const origin = apiOriginFromRequest(c);
   return `${origin}/api/v1/media/i/${encodeStoragePath(clean)}?e=${exp}&s=${sig}`;
+}
+
+/** 参考视频/音频扩展名 → 响应 Content-Type；非媒体扩展名返回 null */
+const PRIVATE_MEDIA_CONTENT_TYPES: Record<string, string> = {
+  mp4: 'video/mp4',
+  m4v: 'video/x-m4v',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  m4a: 'audio/mp4',
+  aac: 'audio/aac',
+  ogg: 'audio/ogg',
+  oga: 'audio/ogg',
+  flac: 'audio/flac'
+};
+
+export function privateMediaContentType(path: string): string | null {
+  const match = /\.([a-z0-9]+)$/i.exec(path.replace(/^\//, ''));
+  if (!match) return null;
+  return PRIVATE_MEDIA_CONTENT_TYPES[match[1].toLowerCase()] || null;
+}
+
+/**
+ * 参考视频/音频的私有直链。图片代理只回源可识别的图片，视频/音频对象会被
+ * 判成「图片不存在」返回 404，因此媒体素材必须走 /media/m/ 原样回源。
+ */
+export async function buildPrivateMediaFileUrl(
+  c: Context,
+  path: string
+): Promise<string> {
+  const clean = path.replace(/^\//, '');
+  const { exp, sig } = await createMediaAccessToken(c.env as Env, clean);
+  const origin = apiOriginFromRequest(c);
+  return `${origin}/api/v1/media/m/${encodeStoragePath(clean)}?e=${exp}&s=${sig}`;
 }
 
 export function sanitizeCardFileBase(cardId: string): string {
@@ -735,6 +772,34 @@ export async function serveCachedStorageImage(
   });
   c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
   return response;
+}
+
+/**
+ * 参考视频/音频的私有直链响应：按扩展名给出 Content-Type 后原样回源对象存储。
+ * 这里刻意不做图片嗅探——参考视频不是图片，走图片代理会被 404，上游随后以
+ * 「素材地址无法访问（HTTP 404）」拒绝整条视频任务。
+ */
+export async function serveCachedStorageMedia(
+  c: Context<{ Bindings: Env }>,
+  path: string
+): Promise<Response> {
+  const clean = path.replace(/^\//, '');
+  const contentType = privateMediaContentType(clean);
+  if (!contentType) throw new ApiError(404, 'NOT_FOUND', '不支持的媒体类型');
+  const blob = await downloadCardImage(c.env, clean);
+  if (!blob || blob.size === 0) throw new ApiError(404, 'NOT_FOUND', '媒体文件不存在');
+  const extension = (/\.([a-z0-9]+)$/i.exec(clean)?.[1] || 'bin').toLowerCase();
+  return new Response(blob, {
+    headers: {
+      'Content-Type': contentType,
+      'Content-Length': String(blob.size),
+      'Cache-Control': `public, max-age=${MEDIA_FILE_MAX_AGE_SEC}, s-maxage=${MEDIA_FILE_MAX_AGE_SEC}`,
+      'X-PH-Media-Ok': '1',
+      ...(c.req.query('dl') === '1'
+        ? { 'Content-Disposition': `attachment; filename="prompt-hub-${Date.now()}.${extension}"` }
+        : {})
+    }
+  });
 }
 
 /** 签名 grid 前先确保 R2 有 _grid 文件，避免 /media/i/ 返回 JSON 404 */

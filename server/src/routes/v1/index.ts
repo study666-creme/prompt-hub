@@ -8,7 +8,7 @@ import { generateRoutes, publicGenerationModelsHandler } from './generate';
 import { communityFeedHandler, communityRoutes } from './community';
 import { membershipRoutes } from './membership';
 import { membershipTaskRoutes } from './membership-tasks';
-import { communityMediaSignBatchHandler, communityMediaSignHandler, mediaRoutes, privateCachedMediaHandler, publicCachedMediaHandler } from './media';
+import { communityMediaSignBatchHandler, communityMediaSignHandler, mediaRoutes, privateCachedMediaHandler, privateStoredMediaHandler, publicCachedMediaHandler } from './media';
 import { extensionRoutes } from './extension';
 import { chatRoutes } from './chat';
 import { promptToolsRoutes } from './prompt-tools';
@@ -24,6 +24,8 @@ export const v1 = new Hono<{ Bindings: Env }>();
 v1.get('/media/c/:enc', rateLimit(1200, 60_000), publicCachedMediaHandler);
 /** 私有图：带 token 的 CDN 缓存代理 */
 v1.get('/media/i/:enc', rateLimit(1200, 60_000), privateCachedMediaHandler);
+/** 私有参考视频/音频：带 token 原样回源（图片代理不服务非图片对象） */
+v1.get('/media/m/:enc', rateLimit(1200, 60_000), privateStoredMediaHandler);
 /** 社区 sign：返回 CDN URL */
 v1.get('/media/community/sign', rateLimit(400, 60_000), communityMediaSignHandler);
 /** 社区 Feed 批量 sign（游客可用，首屏一次签多张） */

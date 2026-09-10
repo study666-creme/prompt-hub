@@ -23,10 +23,14 @@ vi.mock('./r2-storage', () => ({
   uploadCardImage: mocks.uploadCardImage
 }));
 
-import { ensureGridPathForSigning, serveCachedStorageImage } from './media-cdn';
+import { buildPrivateMediaFileUrl, decodeStoragePath, ensureGridPathForSigning, privateMediaContentType, serveCachedStorageImage, serveCachedStorageMedia } from './media-cdn';
 
 function context(env: Env): Context<{ Bindings: Env }> {
   return { env } as Context<{ Bindings: Env }>;
+}
+
+function bytes(size = 4096): Uint8Array {
+  return new Uint8Array(size);
 }
 
 function jpegBytes(size = 4096): Uint8Array {
@@ -276,5 +280,81 @@ describe('full image CDN validation', () => {
     )).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
 
     expect(cache.put).not.toHaveBeenCalled();
+  });
+});
+
+describe('private media file CDN (reference videos and audios)', () => {
+  const env = {
+    ENVIRONMENT: 'production',
+    MEDIA_STORAGE_MODE: 'r2-first',
+    ADMIN_API_SECRET: 'test-media-signing-secret'
+  } as Env;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+    mocks.createAdminClient.mockReturnValue({});
+    mocks.downloadCardImage.mockResolvedValue(null);
+    mocks.uploadCardImage.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('maps media extensions to their content type and rejects image paths', () => {
+    expect(privateMediaContentType('user-1/canvas/video/a.mp4')).toBe('video/mp4');
+    expect(privateMediaContentType('user-1/canvas/video/a.MOV')).toBe('video/quicktime');
+    expect(privateMediaContentType('user-1/canvas/audio/a.m4a')).toBe('audio/mp4');
+    expect(privateMediaContentType('user-1/canvas/audio/a.mp3')).toBe('audio/mpeg');
+    expect(privateMediaContentType('user-1/generated/a.jpg')).toBeNull();
+    expect(privateMediaContentType('user-1/canvas/video/no-extension')).toBeNull();
+  });
+
+  it('serves a stored reference video without image sniffing', async () => {
+    const video = blob(bytes(8192), 'application/octet-stream');
+    mocks.downloadCardImage.mockResolvedValue(video);
+
+    const response = await serveCachedStorageMedia(
+      mediaContext(env),
+      'user-1/canvas/video/reference.mp4'
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('video/mp4');
+    expect(response.headers.get('content-length')).toBe('8192');
+    expect(response.headers.get('x-ph-media-ok')).toBe('1');
+  });
+
+  it('refuses non-media objects so the route cannot proxy arbitrary storage keys', async () => {
+    await expect(serveCachedStorageMedia(
+      mediaContext(env),
+      'user-1/generated/job-1.jpg'
+    )).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+    expect(mocks.downloadCardImage).not.toHaveBeenCalled();
+  });
+
+  it('reports a missing media object as not found', async () => {
+    mocks.downloadCardImage.mockResolvedValue(null);
+
+    await expect(serveCachedStorageMedia(
+      mediaContext(env),
+      'user-1/canvas/video/gone.mp4'
+    )).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+  });
+
+  it('signs a stored video reference onto the media route', async () => {
+    const url = await buildPrivateMediaFileUrl(
+      mediaContext(env),
+      'user-1/canvas/video/reference.mp4'
+    );
+    const parsed = new URL(url);
+
+    expect(parsed.origin).toBe('https://api.example.test');
+    expect(parsed.pathname.startsWith('/api/v1/media/m/')).toBe(true);
+    expect(parsed.searchParams.get('e')).toBeTruthy();
+    expect(parsed.searchParams.get('s')).toBeTruthy();
+    expect(decodeStoragePath(parsed.pathname.slice('/api/v1/media/m/'.length)))
+      .toBe('user-1/canvas/video/reference.mp4');
   });
 });

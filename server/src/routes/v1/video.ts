@@ -6,7 +6,7 @@ import { ApiError } from '../../lib/errors';
 import { isAcceptedRefImageInput, resolveGenerationRefUrls } from '../../lib/generation-ref-images';
 import { assertRequestBodySizeLimit } from '../../lib/request-guards';
 import { isStorageRef, storagePathFromRef } from '../../lib/image-archive';
-import { buildPrivateMediaCdnUrl } from '../../lib/media-cdn';
+import { buildPrivateMediaCdnUrl, buildPrivateMediaFileUrl } from '../../lib/media-cdn';
 import {
   fetchNewApiAdminRoutes,
   fetchNewApiModelCatalog,
@@ -285,6 +285,11 @@ function videoPayload(row: Record<string, unknown>, creditsRemaining?: number) {
   };
 }
 
+/**
+ * 参考素材（视频/音频）→ 上游可直接拉取的 URL。站内 ref 必须签成媒体直链
+ * （/media/m/）：图片代理只回源可识别的图片，视频/音频走图片代理会 404，
+ * 上游随后以「素材地址无法访问（HTTP 404）」拒绝整条视频任务。
+ */
 async function resolveMediaReferences(
   c: Parameters<typeof buildPrivateMediaCdnUrl>[0],
   userId: string,
@@ -301,7 +306,7 @@ async function resolveMediaReferences(
     if (!path || !path.replace(/^\//, '').startsWith(`${userId}/`)) {
       throw new ApiError(403, 'FORBIDDEN', '无权使用该媒体素材');
     }
-    urls.push(await buildPrivateMediaCdnUrl(c, path));
+    urls.push(await buildPrivateMediaFileUrl(c, path));
   }
   return urls;
 }
