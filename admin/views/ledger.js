@@ -2,6 +2,7 @@
 
 import { $, esc, fullTime, showMsg, toast } from '../modules/ui.js';
 import { adminFetch, adminFetchRaw, friendlyFetchError } from '../modules/api.js';
+import { reasonLabel, reasonOptionLabel, mergeReasonOptions } from '../modules/reasons.js';
 import { showUserDetail } from './users.js';
 
 export const title = ['积分流水', 'credit_ledger 对账：发放、消耗、退款全记录'];
@@ -70,14 +71,18 @@ export function load(reset = true, params) {
       const next = $('ledgerNext');
       if (prev) prev.disabled = offset <= 0;
       if (next) next.disabled = offset + data.items.length >= data.total;
+      // 先填筛选下拉，再处理空结果：否则「某用户无流水」时下拉永远填不上。
+      // 选项以本地全集为底再合并服务端列表，旧服务端那份错枚举也不会误导。
+      const reasonSelect = $('ledgerReasonFilter');
+      if (reasonSelect) {
+        const currentReason = reasonSelect.value;
+        reasonSelect.innerHTML = '<option value="">全部原因</option>' +
+          mergeReasonOptions(data.reasons).map((r) => `<option value="${esc(r)}">${esc(reasonOptionLabel(r))}</option>`).join('');
+        if (currentReason) reasonSelect.value = currentReason;
+      }
       if (!data.items.length) {
         tbody.innerHTML = '<tr><td colspan="6" class="admin-hint">暂无流水</td></tr>';
         return;
-      }
-      const reasonSelect = $('ledgerReasonFilter');
-      if (reasonSelect && !reasonSelect.options.length && Array.isArray(data.reasons)) {
-        reasonSelect.innerHTML = '<option value="">全部原因</option>' +
-          data.reasons.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join('');
       }
       tbody.innerHTML = data.items
         .map((row) => {
@@ -96,7 +101,7 @@ export function load(reset = true, params) {
             <td>${esc(fullTime(row.created_at))}</td>
             <td>${userCell}</td>
             <td><span class="admin-badge ${cls}">${delta >= 0 ? '+' : ''}${delta}</span><br><span class="admin-hint">余额 ${esc(row.balance_after ?? '—')}</span></td>
-            <td><code>${esc(row.reason || '—')}</code></td>
+            <td>${row.reason ? `<span>${esc(reasonLabel(row.reason))}</span><br><code class="admin-hint">${esc(row.reason)}</code>` : '—'}</td>
             <td><code>${esc(row.ref_id || '—')}</code></td>
             <td class="admin-monitor-detail">${esc(describeLedgerMeta(row.meta, row.reason))}</td>
           </tr>`;

@@ -6,7 +6,7 @@ import { adminFetch, apiBase, clearSession, friendlyFetchError, resolveApiBase, 
 import * as overview from './views/overview.js';
 import * as users from './views/users.js';
 import * as orders from './views/orders.js';
-import * as ledger from './views/ledger.js';
+import * as ledger from './views/ledger.js?v=20260910a';
 import * as audit from './views/audit.js';
 import * as announcements from './views/announcements.js';
 import * as videoCatalog from './views/video-catalog.js';
