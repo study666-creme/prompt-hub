@@ -84,18 +84,22 @@ export function reasonOptionLabel(code) {
 }
 
 /**
+ * 旧后台列表里从未落库的枚举：即使服务端仍返回，也不要出现在下拉里误导运营。
+ */
+const LEGACY_UNUSED_REASONS = new Set(['generation_charge', 'generation_refund']);
+
+/**
  * 合并服务端返回的原因列表：以本地全集为底，再补上服务端/历史数据里出现的
- * 新枚举，保证「实际有数据的 reason 一定能筛」。
+ * 新枚举，保证「实际有数据的 reason 一定能筛」。旧枚举与空值直接丢弃。
  */
 export function mergeReasonOptions(serverReasons) {
   const merged = [...KNOWN_REASONS];
   const seen = new Set(merged);
   for (const value of Array.isArray(serverReasons) ? serverReasons : []) {
     const key = String(value || '');
-    if (key && !seen.has(key)) {
-      seen.add(key);
-      merged.push(key);
-    }
+    if (!key || seen.has(key) || LEGACY_UNUSED_REASONS.has(key)) continue;
+    seen.add(key);
+    merged.push(key);
   }
   return merged;
 }
