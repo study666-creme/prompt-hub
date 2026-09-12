@@ -35,17 +35,38 @@
     }
   }
 
+  // 与服务端一致的 UTC 日期键；本地已读兜底解决网络失败/同步覆盖导致的当天重复弹出
+  function todayKey() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function localSeenToday(id) {
+    try {
+      return localStorage.getItem('ph_notice_seen_' + id) === todayKey();
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function markLocalSeen(id) {
+    try {
+      localStorage.setItem('ph_notice_seen_' + id, todayKey());
+    } catch (e) { /* 存储不可用时忽略 */ }
+  }
+
   async function markSeen(id) {
+    markLocalSeen(id);
     const base = apiBase();
     const token = getToken();
     if (!base || !token) return;
     try {
-      await fetch(base + '/api/v1/announcements/' + encodeURIComponent(id) + '/seen', {
+      const res = await fetch(base + '/api/v1/announcements/' + encodeURIComponent(id) + '/seen', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token },
         cache: 'no-store'
       });
-    } catch (e) { /* 标记失败不阻断 */ }
+      if (!res.ok) console.warn('[notice] seen mark rejected', res.status);
+    } catch (e) { /* 标记失败不阻断：本地已兜底 */ }
   }
 
   function esc(s) {
@@ -87,7 +108,10 @@
     const data = await fetchAnnouncements();
     if (!data?.items || data.hasUnread === false) return;
     const unread = data.items.find(i => !i.readToday);
-    if (unread) showAnnouncement(unread);
+    if (!unread) return;
+    // 服务端已读可能被同步覆盖或网络失败丢失；本地兜底保证当天不再弹
+    if (localSeenToday(unread.id)) return;
+    showAnnouncement(unread);
   }
 
   function tryCheck() {

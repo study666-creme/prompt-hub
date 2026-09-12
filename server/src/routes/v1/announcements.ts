@@ -14,13 +14,48 @@ type Announcement = {
   active?: boolean;
 };
 
-type UserDataRow = { user_id: string; data: Record<string, unknown> | null };
-
 function asObject(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
 
-/** 返回当前生效的通知 + 调用者今日是否已读。已读按 id+日期记在 user_data。 */
+function todayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * 已读记录放 KV（ann_seen:{userId}），不再写 user_data.data：
+ * 客户端整包上传 user_data.data 时会把服务端写入的 announcements_seen 抹掉，
+ * 导致公告当天反复弹出并遮挡全站（2026-09-13 生产实测）。KV 缺失时回退旧行为。
+ */
+function annSeenKvKey(userId: string): string {
+  return `ann_seen:${userId}`;
+}
+
+async function readSeenMap(
+  env: Env,
+  userId: string,
+  admin: ReturnType<typeof createAdminClient>
+): Promise<Record<string, string>> {
+  if (env.PROMPT_HUB_METRICS) {
+    try {
+      const raw = await env.PROMPT_HUB_METRICS.get(annSeenKvKey(userId));
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return asObject(parsed) as Record<string, string>;
+      }
+    } catch {
+      // KV 读取失败时回退 user_data 旧记录，不让公告接口整体失败
+    }
+  }
+  const { data: ud } = await admin
+    .from('user_data')
+    .select('data')
+    .eq('user_id', userId)
+    .maybeSingle();
+  return asObject(asObject(ud?.data).announcements_seen) as Record<string, string>;
+}
+
+/** 返回当前生效的通知 + 调用者今日是否已读。已读按 id+日期记在 KV，兼容读取旧 user_data 记录。 */
 announcementRoutes.get('/', rateLimit(120, 60_000), async c => {
   const user = c.get('user');
   const admin = createAdminClient(c.env);
@@ -36,14 +71,8 @@ announcementRoutes.get('/', rateLimit(120, 60_000), async c => {
   const now = Date.now();
   const active = list.filter(a => a.active !== false && (!a.startAt || new Date(a.startAt).getTime() <= now) && (!a.endAt || new Date(a.endAt).getTime() >= now));
 
-  const { data: ud } = await admin
-    .from('user_data')
-    .select('data')
-    .eq('user_id', user.id)
-    .maybeSingle();
-  const data = asObject(ud?.data);
-  const seen = asObject(data.announcements_seen);
-  const today = new Date().toISOString().slice(0, 10);
+  const seen = await readSeenMap(c.env, user.id, admin);
+  const today = todayKey();
 
   const items = active.map(a => {
     const lastSeen = String(seen[a.id] || '');
@@ -59,7 +88,15 @@ announcementRoutes.post('/:id/seen', rateLimit(120, 60_000), async c => {
   const user = c.get('user');
   const id = c.req.param('id');
   const admin = createAdminClient(c.env);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayKey();
+
+  if (c.env.PROMPT_HUB_METRICS) {
+    const seen = await readSeenMap(c.env, user.id, admin);
+    seen[id] = today;
+    // 已读记录 40 天过期：服务端只关心"今天"，过期后自然重新计算
+    await c.env.PROMPT_HUB_METRICS.put(annSeenKvKey(user.id), JSON.stringify(seen), { expirationTtl: 40 * 24 * 3600 });
+    return c.json({ ok: true, data: { id, readToday: true } });
+  }
 
   const { data: ud } = await admin
     .from('user_data')
