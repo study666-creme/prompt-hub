@@ -191,21 +191,18 @@ function isSlowSubmitProvider(provider: ReturnType<typeof readJobProvider>): boo
   return provider === 'mooko' || provider === 'ithink';
 }
 
-function jobStaleMs(
-  provider: ReturnType<typeof readJobProvider>,
-  upstreamModel: string,
-  resolution?: string | null
-): number {
-  const res = String(resolution || '1k').toLowerCase();
-  if (provider === 'mooko') return 35 * 60 * 1000;
-  if (provider === 'ithink') return 25 * 60 * 1000;
-  if (res === '4k') return 55 * 60 * 1000;
-  if (res === '2k' || upstreamModel.includes('vip') || upstreamModel.includes('-pro')) {
-    return 45 * 60 * 1000;
-  }
-  const slowUpstream =
-    upstreamModel.includes('nano-banana') || upstreamModel.includes('jimeng');
-  return slowUpstream ? 45 * 60 * 1000 : 28 * 60 * 1000;
+/**
+ * 图片任务的结果等待窗口。上游长期停在 running 且进度不动（例如 48%）时，
+ * 不能把用户积分挂住半小时以上；默认 3 分钟，慢速专线按其固有耗时保留。
+ */
+const IMAGE_JOB_STALE_MS = 3 * 60 * 1000;
+const SLOW_PROVIDER_STALE_MS: Partial<Record<ReturnType<typeof readJobProvider>, number>> = {
+  mooko: 35 * 60 * 1000,
+  ithink: 25 * 60 * 1000
+};
+
+function jobStaleMs(provider: ReturnType<typeof readJobProvider>): number {
+  return SLOW_PROVIDER_STALE_MS[provider] ?? IMAGE_JOB_STALE_MS;
 }
 
 export function slowProviderProgressNote(
@@ -406,8 +403,7 @@ export async function pollAndUpdateJob(
   }
 
   const createdMs = new Date(job.created_at).getTime();
-  const upstreamModel = String(meta.upstreamModel || meta.model || '').toLowerCase();
-  const staleMs = jobStaleMs(provider, upstreamModel, job.resolution);
+  const staleMs = jobStaleMs(provider);
 
   if (!upstream.grsaiKey && !upstream.apimartKey && !upstream.newapiKey) {
     await admin
