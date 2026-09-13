@@ -12,6 +12,12 @@ function escAttr(s) {
   return esc(s);
 }
 
+const SCOPE_LABEL = { all: '卡片库 + 画布', warehouse: '仅卡片库', canvas: '仅画布' };
+
+function scopeLabel(a) {
+  return SCOPE_LABEL[a.scope] || SCOPE_LABEL.all;
+}
+
 function renderList() {
   const box = $('annList');
   if (!box) return;
@@ -24,6 +30,7 @@ function renderList() {
       <div class="admin-ann-main">
         <div class="admin-ann-status">
           <span class="admin-badge ${a.active === false ? 'admin-badge--off' : 'admin-badge--ok'}">${a.active === false ? '已下线' : '发布中'}</span>
+          <span class="admin-badge">${esc(scopeLabel(a))}</span>
           <span class="admin-hint">${esc(a.startAt ? fullTime(a.startAt) : '—')}${a.endAt ? ' ~ ' + esc(fullTime(a.endAt)) : ''}</span>
         </div>
         <p class="admin-ann-text">${esc(a.text)}</p>
@@ -42,6 +49,7 @@ function renderList() {
 function setEditor(item) {
   $('annText').value = item?.text || '';
   $('annStart').value = item?.startAt ? String(item.startAt).slice(0, 16) : '';
+  $('annScope').value = SCOPE_LABEL[item?.scope] ? item.scope : 'all';
   $('annActive').checked = item?.active !== false;
 }
 
@@ -52,6 +60,7 @@ function readEditor() {
   return {
     text,
     startAt: startRaw ? new Date(startRaw).toISOString() : new Date().toISOString(),
+    scope: SCOPE_LABEL[$('annScope')?.value] ? $('annScope').value : 'all',
     active: $('annActive')?.checked !== false
   };
 }
@@ -128,7 +137,9 @@ async function save(silent) {
       const edited = readEditor();
       if (!edited) return;
       items[editingIndex] = { ...items[editingIndex], ...edited };
-    } else {
+    } else if (!silent) {
+      // 静默保存（下线/发布/删除）不经过编辑器：编辑器隐藏时 readEditor 会因空文本提前
+      // return，导致操作看似"没反应"、刷新后改动回滚（2026-09-13 管理端实测）。
       const created = readEditor();
       if (!created) return;
       items.push({ id: 'ann-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), ...created });

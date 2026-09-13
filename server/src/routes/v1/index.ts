@@ -42,12 +42,14 @@ v1.get('/model-catalog', rateLimit(120, 60_000), publicModelCatalogHandler);
 /** 卡片资产包市场：游客可浏览列表 */
 v1.route('/asset-packages', assetPackagesPublicRoutes);
 
+/** 公告公开只读（画布端未登录拉 scope=canvas），seen 标记在路由内自行鉴权 */
+v1.route('/announcements', announcementRoutes);
+
 v1.use('*', requireAuth);
 
 v1.route('/asset-packages', assetPackagesRoutes);
 
 v1.route('/me', meRoutes);
-v1.route('/announcements', announcementRoutes);
 v1.route('/membership', membershipRoutes);
 v1.route('/membership/tasks', membershipTaskRoutes);
 v1.route('/media', mediaRoutes);

@@ -16,7 +16,15 @@ type Announcement = {
   startAt?: string | null;
   endAt?: string | null;
   active?: boolean;
+  /** 受众：all=站点+画布，warehouse=仅卡片库，canvas=仅画布；缺省按 all 兼容旧数据 */
+  scope?: 'all' | 'warehouse' | 'canvas';
 };
+
+const VALID_SCOPES = new Set(['all', 'warehouse', 'canvas']);
+
+function normalizeScope(v: unknown): 'all' | 'warehouse' | 'canvas' {
+  return VALID_SCOPES.has(String(v)) ? (v as 'all' | 'warehouse' | 'canvas') : 'all';
+}
 
 function asArray(v: unknown): Announcement[] {
   return Array.isArray(v) ? (v as Announcement[]) : [];
@@ -40,7 +48,8 @@ adminAnnouncementRoutes.put('/', async c => {
         text: String(a.text || '').slice(0, 2000),
         startAt: a.startAt || new Date().toISOString(),
         endAt: a.endAt || null,
-        active: a.active !== false
+        active: a.active !== false,
+        scope: normalizeScope(a.scope)
       }))
     : [];
   const { error } = await admin

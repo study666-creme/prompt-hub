@@ -22,7 +22,7 @@
     const token = getToken();
     if (!base || !token) return null;
     try {
-      const res = await fetch(base + '/api/v1/announcements', {
+      const res = await fetch(base + '/api/v1/announcements?scope=warehouse', {
         headers: { Authorization: 'Bearer ' + token },
         cache: 'no-store'
       });

@@ -547,7 +547,7 @@
           <h2 style="margin:0;font-size:16px">公告管理</h2>
           <button type="button" class="admin-btn admin-btn--sm" id="annNewBtn">＋ 新增公告</button>
         </div>
-        <p class="admin-hint">公告在用户登录后弹窗展示，同一公告每个自然日最多弹一次（点「我知道了」后当日不再弹）。发布即生效。</p>
+        <p class="admin-hint">公告在用户登录后弹窗展示，同一公告每个自然日最多弹一次（点「我知道了」后当日不再弹）。受众可选仅卡片库、仅画布或两边都展示；发布即生效。</p>
         <div id="annEditor" class="admin-ann-editor" hidden>
           <div class="admin-field">
             <label for="annText">公告内容</label>
@@ -557,6 +557,14 @@
             <div class="admin-field" style="width:220px;margin:0">
               <label for="annStart">生效时间</label>
               <input type="datetime-local" id="annStart">
+            </div>
+            <div class="admin-field" style="width:180px;margin:0">
+              <label for="annScope">受众</label>
+              <select id="annScope">
+                <option value="all">卡片库 + 画布</option>
+                <option value="warehouse">仅卡片库</option>
+                <option value="canvas">仅画布</option>
+              </select>
             </div>
             <label class="admin-check" style="align-self:flex-end;margin:0 0 4px"><input type="checkbox" id="annActive" checked> 立即发布</label>
           </div>

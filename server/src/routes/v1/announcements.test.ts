@@ -3,16 +3,11 @@ import { Hono } from 'hono';
 import type { Env } from '../../env';
 
 const mocks = vi.hoisted(() => ({
-  admin: null as Record<string, ReturnType<typeof vi.fn>> | null,
-  requireAuth: vi.fn()
+  admin: null as Record<string, ReturnType<typeof vi.fn>> | null
 }));
 
 vi.mock('../../lib/supabase', () => ({
   createAdminClient: vi.fn(() => mocks.admin)
-}));
-
-vi.mock('../../middleware/auth', () => ({
-  requireAuth: mocks.requireAuth
 }));
 
 import { announcementRoutes } from './announcements';
@@ -30,12 +25,14 @@ function makeKv(store: KVStore) {
 
 const USER = { id: 'user-1', phoneVerified: false };
 
-function buildApp(env: Partial<Env>) {
+function buildApp(opts: { withUser?: boolean } = {}) {
   const app = new Hono<{ Bindings: Env }>();
-  app.use('*', async (c, next) => {
-    c.set('user', USER as never);
-    await next();
-  });
+  if (opts.withUser !== false) {
+    app.use('*', async (c, next) => {
+      c.set('user', USER as never);
+      await next();
+    });
+  }
   app.route('/api/v1/announcements', announcementRoutes);
   return app;
 }
@@ -69,21 +66,64 @@ function makeAdmin(opts: { announcements?: unknown[]; userData?: Record<string, 
   return { admin, upsert };
 }
 
-const ANN = [{ id: 'ann-1', text: '测试公告', active: true }];
+const TODAY = new Date().toISOString().slice(0, 10);
+const ANN = [
+  { id: 'ann-all', text: '全站公告', active: true, scope: 'all' },
+  { id: 'ann-wh', text: '仅卡片库', active: true, scope: 'warehouse' },
+  { id: 'ann-cv', text: '仅画布', active: true, scope: 'canvas' },
+  // 旧数据没有 scope 字段，应按 all 处理
+  { id: 'ann-legacy', text: '旧公告', active: true }
+];
+
+describe('announcements scope filtering', () => {
+  beforeEach(() => {
+    const { admin } = makeAdmin({ announcements: ANN });
+    mocks.admin = admin as never;
+  });
+
+  it('returns warehouse + all items for scope=warehouse', async () => {
+    const app = buildApp();
+    const res = await app.request('https://api.test/api/v1/announcements?scope=warehouse', undefined, {} as Env);
+    const body = (await res.json()) as { data: { items: { id: string }[] } };
+    const ids = body.data.items.map(i => i.id).sort();
+    expect(ids).toEqual(['ann-all', 'ann-legacy', 'ann-wh']);
+  });
+
+  it('returns canvas + all items for scope=canvas', async () => {
+    const app = buildApp({ withUser: false });
+    const res = await app.request('https://api.test/api/v1/announcements?scope=canvas', undefined, {} as Env);
+    const body = (await res.json()) as { data: { items: { id: string; readToday: boolean }[] } };
+    const ids = body.data.items.map(i => i.id).sort();
+    expect(ids).toEqual(['ann-all', 'ann-cv', 'ann-legacy']);
+    // 匿名访问：readToday 恒为 false，由客户端本地兜底
+    expect(body.data.items.every(i => i.readToday === false)).toBe(true);
+  });
+
+  it('returns all items without a scope param (backward compatible)', async () => {
+    const app = buildApp();
+    const res = await app.request('https://api.test/api/v1/announcements', undefined, {} as Env);
+    const body = (await res.json()) as { data: { items: { id: string }[] } };
+    expect(body.data.items).toHaveLength(4);
+  });
+});
 
 describe('announcements seen records', () => {
   beforeEach(() => {
-    mocks.requireAuth.mockReset();
+    const { admin } = makeAdmin({ announcements: ANN, userData: { cards: [] } });
+    mocks.admin = admin as never;
   });
 
   it('marks seen into KV and reports readToday from KV, not user_data', async () => {
     const store: KVStore = new Map();
     const kv = makeKv(store);
-    const { admin, upsert } = makeAdmin({ announcements: ANN, userData: { cards: [] } });
-    mocks.admin = admin as never;
+    const { upsert } = (() => {
+      const r = makeAdmin({ announcements: ANN, userData: { cards: [] } });
+      mocks.admin = r.admin as never;
+      return r;
+    })();
 
-    const app = buildApp({});
-    const post = await app.request('https://api.test/api/v1/announcements/ann-1/seen', { method: 'POST' }, {
+    const app = buildApp();
+    const post = await app.request('https://api.test/api/v1/announcements/ann-all/seen', { method: 'POST' }, {
       PROMPT_HUB_METRICS: kv
     } as unknown as Env);
     expect(post.status).toBe(200);
@@ -93,47 +133,56 @@ describe('announcements seen records', () => {
     expect(kv.put).toHaveBeenCalledTimes(1);
     const [key, value] = kv.put.mock.calls[0] as [string, string];
     expect(key).toBe('ann_seen:user-1');
-    expect(JSON.parse(value)).toMatchObject({ 'ann-1': expect.any(String) });
+    expect(JSON.parse(value)).toMatchObject({ 'ann-all': expect.any(String) });
     expect(upsert).not.toHaveBeenCalled();
 
     const get = await app.request('https://api.test/api/v1/announcements', undefined, {
       PROMPT_HUB_METRICS: kv
     } as unknown as Env);
-    const body = (await get.json()) as { data: { items: { readToday: boolean }[]; hasUnread: boolean } };
-    expect(body.data.items[0].readToday).toBe(true);
-    expect(body.data.hasUnread).toBe(false);
+    const body = (await get.json()) as { data: { items: { id: string; readToday: boolean }[]; hasUnread: boolean } };
+    const seenItem = body.data.items.find(i => i.id === 'ann-all');
+    expect(seenItem?.readToday).toBe(true);
+    // 其余公告仍未读 → hasUnread 保持 true
+    expect(body.data.hasUnread).toBe(true);
+  });
+
+  it('rejects seen marking from anonymous callers', async () => {
+    const kv = makeKv(new Map());
+    const app = buildApp({ withUser: false });
+    const res = await app.request('https://api.test/api/v1/announcements/ann-all/seen', { method: 'POST' }, {
+      PROMPT_HUB_METRICS: kv
+    } as unknown as Env);
+    expect(res.status).toBe(401);
+    expect(kv.put).not.toHaveBeenCalled();
   });
 
   it('falls back to legacy user_data seen records when KV has no entry', async () => {
-    const store: KVStore = new Map();
-    const kv = makeKv(store);
-    const today = new Date().toISOString().slice(0, 10);
+    const kv = makeKv(new Map());
     const { admin } = makeAdmin({
       announcements: ANN,
-      userData: { cards: [], announcements_seen: { 'ann-1': today } }
+      userData: { cards: [], announcements_seen: { 'ann-all': TODAY } }
     });
     mocks.admin = admin as never;
 
-    const app = buildApp({});
+    const app = buildApp();
     const get = await app.request('https://api.test/api/v1/announcements', undefined, {
       PROMPT_HUB_METRICS: kv
     } as unknown as Env);
-    const body = (await get.json()) as { data: { items: { readToday: boolean }[] } };
-    expect(body.data.items[0].readToday).toBe(true);
+    const body = (await get.json()) as { data: { items: { id: string; readToday: boolean }[] } };
+    const annAll = body.data.items.find(i => i.id === 'ann-all');
+    expect(annAll?.readToday).toBe(true);
   });
 
   it('still works without the KV binding via the legacy user_data path', async () => {
     const { admin, upsert } = makeAdmin({ announcements: ANN, userData: { cards: [] } });
     mocks.admin = admin as never;
 
-    const app = buildApp({});
-    const post = await app.request('https://api.test/api/v1/announcements/ann-1/seen', { method: 'POST' }, {} as Env);
+    const app = buildApp();
+    const post = await app.request('https://api.test/api/v1/announcements/ann-all/seen', { method: 'POST' }, {} as Env);
     expect(post.status).toBe(200);
     expect(upsert).toHaveBeenCalledTimes(1);
     const calls = upsert.mock.calls as unknown as [Record<string, unknown>][];
     const arg = calls[0][0] as { data: Record<string, unknown> };
-    expect((arg.data.announcements_seen as Record<string, string>)['ann-1']).toBe(
-      new Date().toISOString().slice(0, 10)
-    );
+    expect((arg.data.announcements_seen as Record<string, string>)['ann-all']).toBe(TODAY);
   });
 });

@@ -74,6 +74,52 @@ export const requireAuth = createMiddleware<{ Bindings: Env }>(async (c, next) =
   await next();
 });
 
+/** 可选鉴权：带有效 token 时识别身份，否则匿名放行（公告等公开读接口用）。 */
+export const optionalAuth = createMiddleware<{ Bindings: Env }>(async (c, next) => {
+  if (c.req.method === 'OPTIONS') {
+    await next();
+    return;
+  }
+  const header = c.req.header('Authorization');
+  const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  if (!token) {
+    await next();
+    return;
+  }
+  try {
+    const verified = await verifySupabaseAccessToken(c.env, token);
+    const user = verified || readCachedAuthUser(token);
+    if (user) {
+      c.set('user', user);
+      await next();
+      return;
+    }
+    const fallback = await fetchAuthUserFromSupabase(c.env, token);
+    if (fallback) c.set('user', fallback);
+  } catch {
+    // 无效/过期 token 按匿名放行，公开读接口不应因坏 token 整体失败
+  }
+  await next();
+});
+
+async function fetchAuthUserFromSupabase(env: Env, token: string): Promise<AuthUser | null> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return null;
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: fetchSupabaseAuthWithTimeout }
+  });
+  const { data, error } = await getUserWithRetry(supabase, token);
+  if (error || !data.user) return null;
+  const user: AuthUser = {
+    id: data.user.id,
+    email: data.user.email,
+    phone: data.user.phone ?? undefined,
+    phoneVerified: !!data.user.phone_confirmed_at
+  };
+  writeCachedAuthUser(token, user);
+  return user;
+}
+
 function readCachedAuthUser(token: string): AuthUser | null {
   const entry = authUserCache.get(token);
   if (!entry) return null;
