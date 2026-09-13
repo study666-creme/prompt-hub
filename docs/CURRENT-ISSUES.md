@@ -11,6 +11,14 @@
   notice.js 补 `res.ok` 校验与本地当天已读兜底（`ph_notice_seen_{id}`）。
   新增 `server/src/routes/v1/announcements.test.ts` 3 项单测；线上复验：云推送后
   `readToday=true` 保持，公告不再重现。
+- **公告按受众拆分 + 管理端修复（20260913b）**：公告新增 `scope`
+  （`all` 默认 / `warehouse` 仅卡片库 / `canvas` 仅画布），管理后台编辑器可选受众、
+  列表展示受众徽标；公开读接口支持 `?scope=` 过滤并匿名可读（`optionalAuth`：
+  带有效 token 识别身份读已读，匿名 `readToday` 恒 false 由客户端本地兜底），
+  主站 `notice.js` 拉 `scope=warehouse`。同批修复管理端「下线/删除/发布」静默保存
+  被隐藏编辑器空文本校验提前 return、实际未保存的问题。画布侧公告组件已提交
+  （canvas-next `64fdbcb3`，`scope=canvas` 右下角非阻塞卡片），**画布生产发布需按其
+  RUNBOOK 另行走授权发布流程**。
 - 生图链路实测（新注册账号，免费额度）：`image2-economy` 提交 → 扣费 2.2 积分 →
   服务端约 1 分钟内完成 → 归档 → 「最近」页签出图（`media/i` 正常）→ 自动入库 →
   卡片库缩略图正常。`/generate/cost` 报价、积分余额（5→2.8）、明细一致。
