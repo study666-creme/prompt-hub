@@ -27,6 +27,12 @@
   const layoutImageBatch = {};
   const layoutCooldown = {};
   const flexRebalanceTimers = {};
+  const measuredRebalanceTimers = {};
+  const measuredRebalanceLastAt = {};
+  const measuredRebalanceBudget = {};
+  const MEASURED_REBALANCE_MIN_GAP = 1500;
+  const MEASURED_REBALANCE_BUDGET = 10;
+  const MEASURED_REBALANCE_DEFER_LIMIT = 8;
   const feedGridImageRelayoutBound = {};
   const resizeRelayoutBound = {};
   const visibilityWaitTimers = {};
@@ -258,6 +264,68 @@
     }
   }
 
+  /** 列高极差：判断图片真实高度落地后，列是否已经明显失衡 */
+  function measureColumnImbalance(container) {
+    const colEls = [...(container?.querySelectorAll(':scope > .community-feed-col') || [])];
+    if (colEls.length < 2) return { cols: colEls.length, tallest: 0, spread: 0 };
+    let min = Infinity;
+    let tallest = 0;
+    colEls.forEach((col) => {
+      const h = col.offsetHeight;
+      if (h < min) min = h;
+      if (h > tallest) tallest = h;
+    });
+    if (!Number.isFinite(min)) min = 0;
+    return { cols: colEls.length, tallest, spread: tallest - min };
+  }
+
+  function needsMeasuredRebalance(container) {
+    const { spread } = measureColumnImbalance(container);
+    if (!spread) return false;
+    const heights = [...container.querySelectorAll('.community-feed-col > .card')]
+      .map((card) => card.offsetHeight)
+      .filter((h) => h > 0)
+      .sort((a, b) => a - b);
+    if (!heights.length) return false;
+    const median = heights[Math.floor(heights.length / 2)];
+    // 一列比另一列多出两张卡的高度才值得重排；正常高度抖动不搬运
+    return spread > Math.max(360, median * 2);
+  }
+
+  function runMeasuredRebalance(containerId, deferCount = 0) {
+    const container = document.getElementById(containerId);
+    if (!container || !useFlexColumns(containerId)) return;
+    if (!isFeedPageVisible(container)) return;
+    if (container.dataset.feedDistributed !== '1') return;
+    if (!container.querySelector(':scope > .community-feed-col')) return;
+    // 用户正在滚动时先让位，等惯性停下再重排，避免卡片在指尖下换列
+    if (deferCount < MEASURED_REBALANCE_DEFER_LIMIT && d().feedUserScrollingActive?.()) {
+      measuredRebalanceTimers[containerId] = setTimeout(
+        () => runMeasuredRebalance(containerId, deferCount + 1),
+        260
+      );
+      return;
+    }
+    if ((measuredRebalanceBudget[containerId] ?? MEASURED_REBALANCE_BUDGET) <= 0) return;
+    const lastAt = measuredRebalanceLastAt[containerId] || 0;
+    if (Date.now() - lastAt < MEASURED_REBALANCE_MIN_GAP) return;
+    if (!needsMeasuredRebalance(container)) return;
+    measuredRebalanceLastAt[containerId] = Date.now();
+    measuredRebalanceBudget[containerId] = (measuredRebalanceBudget[containerId] ?? MEASURED_REBALANCE_BUDGET) - 1;
+    redistributeByHeight(container, Math.max(2, getColumnCount(container)));
+  }
+
+  /**
+   * 追加批次是按「图片还没加载出来的占位高度」分配的列，图片落地后真实高度
+   * 差得远（一百多到四百多像素），列会越走越歪，底部就会出现整列空白。
+   * 等图片批量加载完且用户停手后，按真实高度再平衡一次。
+   */
+  function scheduleMeasuredRebalance(containerId) {
+    if (!useFlexColumns(containerId)) return;
+    clearTimeout(measuredRebalanceTimers[containerId]);
+    measuredRebalanceTimers[containerId] = setTimeout(() => runMeasuredRebalance(containerId), 320);
+  }
+
   function redistributeByHeight(container, cols) {
     if (!container || cols < 1) return;
     container.classList.add('community-feed-rebalancing');
@@ -267,6 +335,10 @@
     const cards = collectCards(container).sort(compareFeedCardsForDistribution);
     const scrollRoot = d().getFeedScrollRoot?.(container) || container;
     const scrollTop = scrollRoot.scrollTop;
+    // 只有确实可滚动（社区网格）时才做锚点还原；我的主页是整页滚动，容器本身不动
+    const anchor = scrollRoot.scrollHeight > scrollRoot.clientHeight + 1
+      ? (d().captureFeedScrollAnchor?.(container) || null)
+      : null;
     colEls.forEach((col) => { col.innerHTML = ''; });
     cards.forEach((card) => {
       clearCardInline(card);
@@ -287,7 +359,9 @@
     container.dataset.feedCols = String(cols);
     d().ensureFeedPageSentinel?.(container);
     requestAnimationFrame(() => {
-      applyScrollAfterLayout(scrollRoot, scrollTop, container.id);
+      // 优先把视口里那张卡钉回原位，否则重排会让正在看的卡片跳到别处
+      if (anchor) d().restoreFeedScrollAnchor?.(container, anchor, { force: true });
+      else applyScrollAfterLayout(scrollRoot, scrollTop, container.id);
       setTimeout(() => container.classList.remove('community-feed-rebalancing'), 320);
     });
   }
@@ -364,6 +438,8 @@
       [120, 420, 900].forEach((delay) => {
         setTimeout(() => scheduleFlexColumnRebalance(containerId, { delay: 0 }), delay);
       });
+      // 图片真实高度落地后按实际高度再平衡一次（见 scheduleMeasuredRebalance）
+      scheduleMeasuredRebalance(containerId);
       return;
     }
     if (useMobileGrid(containerId)) return;
@@ -877,6 +953,8 @@
   function appendCards(containerId, appendedCards) {
     const container = document.getElementById(containerId);
     if (!container || !appendedCards?.length) return;
+    // 新一批内容到来 → 重新给一次按真实高度再平衡的额度
+    measuredRebalanceBudget[containerId] = MEASURED_REBALANCE_BUDGET;
     if (useFlexColumns(containerId)) {
       ensureColumnLayout(containerId);
       const cols = Math.max(
@@ -914,13 +992,21 @@
     container.addEventListener('load', (e) => {
       if (!e.target?.classList?.contains('card-img')) return;
       if (typeof global.isPlaceholderCardImg === 'function' && global.isPlaceholderCardImg(e.target)) return;
-      if (useFlexColumns(containerId)) scheduleFlexColumnRebalance(containerId, { delay: 80 });
-      else scheduleMasonryRelayout(containerId);
+      if (useFlexColumns(containerId)) {
+        scheduleFlexColumnRebalance(containerId, { delay: 80 });
+        scheduleMeasuredRebalance(containerId);
+      } else {
+        scheduleMasonryRelayout(containerId);
+      }
     }, true);
     container.addEventListener('error', (e) => {
       if (!e.target?.classList?.contains('card-img')) return;
-      if (useFlexColumns(containerId)) scheduleFlexColumnRebalance(containerId, { delay: 80 });
-      else scheduleMasonryRelayout(containerId);
+      if (useFlexColumns(containerId)) {
+        scheduleFlexColumnRebalance(containerId, { delay: 80 });
+        scheduleMeasuredRebalance(containerId);
+      } else {
+        scheduleMasonryRelayout(containerId);
+      }
     }, true);
   }
 
@@ -1021,6 +1107,8 @@
     schedule,
     scheduleMasonryRelayout,
     scheduleFlexColumnRebalance,
+    scheduleMeasuredRebalance,
+    measureColumnImbalance,
     relayoutAll,
     repairCreations,
     repairCommunityMasonry,

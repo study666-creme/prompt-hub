@@ -16,18 +16,20 @@
     function pauseRippleBackground() {
       window.__rippleGridBg?.setPaused?.(true);
     }
+    // 社区/生图/我的主页/画布首屏内容重：给背景降频而不是整帧停住，
+    // 否则画布上会留一张静止的网格，看起来像卡死。
+    const RIPPLE_HEAVY_APP_FPS = 18;
     function isRippleHeavyApp(app) {
-      return app === 'community' || app === 'creations' || app === 'imagegen';
+      return app === 'community' || app === 'creations' || app === 'imagegen' || app === 'canvas';
+    }
+    function rippleFrameRateFor(app) {
+      return isRippleHeavyApp(app) ? RIPPLE_HEAVY_APP_FPS : 0;
     }
 
     function resumeRippleBackground(app) {
       if (settings.efficiencyMode) return;
       if (!backgroundBootReady) return;
       const activeApp = app || document.querySelector('.app-nav-item.active')?.dataset?.app || 'warehouse';
-      if (isRippleHeavyApp(activeApp)) {
-        pauseRippleBackground();
-        return;
-      }
       const bg = document.getElementById('rippleGridBg');
       if (!bg) return;
       bg.style.display = '';
@@ -35,7 +37,10 @@
         void initBackgroundEffect();
         return;
       }
-      window.__rippleGridBg?.setPaused?.(false);
+      const engine = window.__rippleGridBg;
+      if (!engine) return;
+      engine.setFrameRate?.(rippleFrameRateFor(activeApp));
+      engine.setPaused?.(false);
     }
     window.resumeRippleBackground = resumeRippleBackground;
 
@@ -253,6 +258,30 @@
       });
     }
 
+    // 无限画布内嵌页：首次切到该页时才挂 iframe src，避免首屏就加载第三方画布。
+    // 「在新标签页打开」保留为独立入口。
+    function initCanvasPage() {
+      const page = document.getElementById('pageCanvas');
+      const frame = document.getElementById('canvasPageFrame');
+      const openExternal = document.getElementById('canvasOpenExternalBtn');
+      if (!page || !frame || page.dataset.bound === '1') return;
+      page.dataset.bound = '1';
+      const defaultUrl = 'https://infinite-canvas-jay.vercel.app/canvas';
+      const load = () => {
+        if (!page.classList.contains('active')) return;
+        if (frame.getAttribute('src')) return;
+        frame.setAttribute('src', typeof window.getPromptCanvasUrl === 'function' ? window.getPromptCanvasUrl() : defaultUrl);
+      };
+      openExternal?.addEventListener('click', () => {
+        if (typeof window.openPromptCanvas === 'function') window.openPromptCanvas();
+        else window.open(defaultUrl, '_blank', 'noopener,noreferrer');
+      });
+      if (typeof MutationObserver !== 'undefined') {
+        new MutationObserver(load).observe(page, { attributes: true, attributeFilter: ['class'] });
+      }
+      load();
+    }
+
     function initAppNavCollapse() {
       const btn = document.getElementById('appNavCollapseBtn');
       if (!btn) return;
@@ -387,6 +416,9 @@
         const build = window.__APP_BUILD__ || '1';
         const mod = await import(`./ripple-grid.js?v=${encodeURIComponent(build)}`);
         window.__rippleGridBg = mod.initRippleGrid(bg, RIPPLE_BG_OPTS);
+        window.__rippleGridBg.setFrameRate?.(rippleFrameRateFor(
+          document.querySelector('.app-nav-item.active')?.dataset?.app || 'warehouse'
+        ));
         document.addEventListener('visibilitychange', () => {
           if (document.hidden) pauseRippleBackground();
           else resumeRippleBackground();

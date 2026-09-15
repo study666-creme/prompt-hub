@@ -35,6 +35,8 @@ export function initRippleGrid(container, options = {}) {
   let rafId = 0;
   let destroyed = false;
   let paused = false;
+  let minFrameMs = 0;
+  let lastFrameAt = 0;
 
   const renderer = new Renderer({
     dpr: Math.min(window.devicePixelRatio, 2),
@@ -187,17 +189,16 @@ void main() {
 
   const render = (t) => {
     if (destroyed) return;
-    if (paused || document.hidden) {
-      rafId = requestAnimationFrame(render);
-      return;
-    }
+    rafId = requestAnimationFrame(render);
+    if (paused || document.hidden) return;
+    if (minFrameMs > 0 && t - lastFrameAt < minFrameMs - 1) return;
+    lastFrameAt = t;
     uniforms.iTime.value = t * 0.001;
     mousePosition.x += (targetMouse.x - mousePosition.x) * 0.14;
     mousePosition.y += (targetMouse.y - mousePosition.y) * 0.14;
     uniforms.mouseInfluence.value += (mouseInfluence - uniforms.mouseInfluence.value) * 0.05;
     uniforms.mousePosition.value = [mousePosition.x, mousePosition.y];
     renderer.render({ scene: mesh });
-    rafId = requestAnimationFrame(render);
   };
 
   window.addEventListener('resize', resize);
@@ -207,9 +208,20 @@ void main() {
 
   return {
     setPaused(value) {
-      paused = !!value;
-      if (paused) cancelAnimationFrame(rafId);
-      else if (!destroyed) rafId = requestAnimationFrame(render);
+      const next = !!value;
+      if (next === paused) return;
+      paused = next;
+      if (paused) {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
+      } else if (!destroyed && !rafId) {
+        rafId = requestAnimationFrame(render);
+      }
+    },
+    /** 限帧（fps<=0 表示不限帧）。与 setPaused 不同，动画继续走，只是降频。 */
+    setFrameRate(fps) {
+      const value = Number(fps);
+      minFrameMs = Number.isFinite(value) && value > 0 ? 1000 / value : 0;
     },
     destroy() {
       destroyed = true;

@@ -925,7 +925,8 @@
       devlab: 'pageDevLab',
       community: 'pageCommunity',
       creations: 'pageCreations',
-      imagegen: 'pageImageGen'
+      imagegen: 'pageImageGen',
+      canvas: 'pageCanvas'
     };
 
     const DEVLAB_PANEL_KEY = 'promptrepo_devlab_panel';

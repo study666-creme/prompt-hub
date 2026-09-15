@@ -1,6 +1,46 @@
 # 当前问题与回归基线
 
-最后核对：2026-09-13
+最后核对：2026-09-15
+
+## 2026-09-15 用户报四类界面问题（主树候选，未发布）
+
+用户在生产实测后报：生图页白天看不清「最近/获取」等文字、提示词社区往下滚出现大面积
+留白、我的主页背景卡死不动、内嵌无限画布被某版本覆盖。
+
+- **内嵌画布被覆盖（确认属实）**：`git merge-base --is-ancestor` 核实内嵌页存在于
+  `89c452c`（2026-09-06 的 `20260906a/b` 发布点），2026-09-06 的架构合并 `e875103`
+  （"port M2/M4/M5/M6 stability fixes onto live catalog architecture"）把它整块删掉：
+  `partials/index-body/part-03.html` 的 `#pageCanvas`、`app-router.js` 的 `canvas` 路由、
+  `legacy/script/part-03.js` 的 `APP_PAGE_IDS.canvas`、`warehouse-composer.js` 的
+  `initCanvasPage()`、`styles-warehouse.css` 的 `.app-page-canvas` 规则全部消失，
+  侧栏退化成 `openPromptCanvas()` 外链按钮。该合并同时用「live catalog 架构」的
+  卡片库/生图实现替掉了旧的 `warehouse-composer` 工作区（模型/比例/清晰度/参考图
+  内联生图 composer 等），后者属有意替换，未回滚。
+  按页面 id、导航项、可见文案三项对比 89c452c 与 HEAD：除 `pageCanvas` 外没有其他
+  用户可见功能缺失（`themeToggleBtn` 只是搬进了设置面板，`theme.js` 里对它的事件
+  绑定是死代码）。**结论：用户的怀疑成立，但只此一项，不是"很多"。**
+- **修复**：恢复内嵌页（路由 `/canvas/`、侧栏站内入口、页头「在新标签页打开」保留），
+  并把「内嵌画布 + 日光 token + 瀑布流再平衡 + 背景降频」写进
+  `scripts/verify-ui-regression-guards.mjs`（已接入 `run-predeploy-smoke`）。
+- **生图日光对比度（确认属实）**：`styles/features/part-10.css`、`part-11.css` 给
+  `#pageImageGen .imagegen-side` 写死了 `--imagegen-segment-text(-active)` 为半透明白，
+  浅色面板下「最近 / 获取」与社区筛选标签整排不可见；`part-11.css` 的
+  `#pageImageGen .imagegen-feed-hint` 也是写死 `rgba(245,245,247,0.56)`，压过
+  `styles-theme.css` 的 `[data-theme="light"]` 深色覆盖（ID 选择器特异性更高）。
+  Chromium 实测：浅色下 active tab `rgb(28,28,30)`、inactive `rgba(60,60,67,0.74)`、
+  提示行 `rgba(60,60,67,0.72)`；深色下仍是白字，未回归。
+- **社区瀑布流整列留白（确认属实，非回归）**：列分配用「图片未加载时的占位高度」，
+  图片真实高度落地后列高失衡。生产 5 列 48 卡实测列高
+  3966/2491/3926/4581/3033（极差 2090）→ 底部/中部大块空白。修法：图片加载与追加
+  批次后按真实高度做一次测量驱动再平衡（见 CHANGELOG 2026-09-15）。
+  本地对生产 API 实测 5 列 96 卡：极差 446，`FeedLayout.diagnose` 无 orphan card、
+  无列内间隙。89c452c 的 `feed-layout.js` 同样没有这段逻辑，所以是长期存在的问题，
+  不是 9-06 合并覆盖掉的修复。
+- **我的主页背景卡死（确认属实，非回归）**：`legacy/script/part-04.js` 的
+  `isRippleHeavyApp()` 对 community/creations/imagegen 直接 `setPaused(true)`，
+  整帧停住但背景仍显示 → 一张静止网格。改为 `setFrameRate(18)` 降频继续跑
+  （`ripple-grid.js` 新增 `setFrameRate`）；`hide` 只在 `document.hidden` 与省电模式用。
+  Chromium 实测 1.2s 两帧截图不同（动画在跑），引擎为真实 WebGL 非 2D fallback。
 
 ## 2026-09-13 发布前全量实测（生产，登录态，build 20260910b → 20260913a）
 

@@ -13,6 +13,8 @@
 /profile/*    /index.html   200
 /home         /profile/     301
 /creations    /profile/     301
+/canvas       /canvas/      301
+/canvas/*     /index.html   200
 /dev          /dev/         301
 /dev/*        /index.html   200
 /devlab       /dev/         301

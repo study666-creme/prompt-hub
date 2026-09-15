@@ -9,6 +9,7 @@
       initAppNav();
       initDevLabNav();
       initAppNavCollapse();
+      initCanvasPage();
       initWarehouseHero();
       if (window.AppRouter?.resolveBootApp?.() === 'devlab') {
         void ensureFeatureAssets().then(() => switchDevLabPanel(getDevLabPanel())).catch((e) => {

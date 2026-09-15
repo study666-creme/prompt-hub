@@ -1,12 +1,26 @@
 # 无限画布集成
 
-最后核对：2026-07-30。生成与奖励条目描述 `20260730a` Prompt Hub 侧受控发布契约；生产是否已切换以 `/health.buildSha` 为准。
+最后核对：2026-09-15。生成与奖励条目描述 `20260730a` Prompt Hub 侧受控发布契约；生产是否已切换以 `/health.buildSha` 为准。
 
 - Canvas 仓库: <https://github.com/study666-creme/infinite-canvas-jay>
 - 正式地址: <https://canvas.prompt-hubs.com>
 - 兼容预览地址: <https://infinite-canvas-jay.vercel.app/canvas>
 - Prompt Hub: <https://prompt-hubs.com>
 - API: <https://api.prompt-hubs.com>
+
+## 站内入口（2026-09-15 恢复）
+
+侧栏「无限画布」是站内页面 `#pageCanvas`（路由 `/canvas/`，标题「卡藏 · 无限画布」），
+里面用 `#canvasPageFrame` 内嵌 <https://infinite-canvas-jay.vercel.app/canvas>，
+页头保留 `#canvasOpenExternalBtn`「在新标签页打开」作为独立入口。
+iframe 只在切到该页时才挂 `src`，不占首屏。
+
+2026-09-06 的架构合并 `e875103` 曾把这整块页面删除（`app-router` 的 `canvas` 路由、
+`APP_PAGE_IDS.canvas`、`warehouse-composer.js` 里的 `initCanvasPage` 一并消失），
+侧栏退化成纯外链按钮。回归护栏见 `scripts/verify-ui-regression-guards.mjs`。
+
+嵌入不依赖 CSP：Prompt Hub 无 CSP，Canvas 侧也不发 `X-Frame-Options` /
+`frame-ancestors`。注意第三方 iframe 的存储分区会各自独立，画布内仍需自行登录。
 
 ## 能力
 
@@ -57,7 +71,8 @@ https://canvas.prompt-hubs.com/canvas?phSource=prompt-hub&phVersion=1&phIntent=i
 
 - `phSource` 固定为 `prompt-hub`，`phVersion` 固定为 `1`，`phIntent` 固定为 `insert-card`；Canvas 只消费它明确支持的组合。
 - URL 只携带卡片 ID 和路由元数据，不携带提示词、图片 URL、用户 Token 或任何上游凭据。Canvas 用自己的现有 Prompt Hub 会话调用 `GET /api/v1/extension/cards/:cardId`，服务端再次校验卡片归属。
-- Prompt Hub 以新窗口和 `noopener,noreferrer` 打开 Canvas。卡片 ID 最长 200 字符，客户端拒绝控制字符，拼入路径时仍须 URL 编码。
+- Prompt Hub 以新窗口和 `noopener,noreferrer` 打开 Canvas（插卡深链始终走新窗口，
+  不复用侧栏的站内内嵌页，因为插卡 URL 需要带 `phCardId` 参数）。卡片 ID 最长 200 字符，客户端拒绝控制字符，拼入路径时仍须 URL 编码。
 - 打开 Canvas 时 Prompt Hub 写入最长 4 小时的一次性返回标记；页面重新可见后消费该标记并立即强制静默拉取一次云端，以接收 Canvas 新回仓的卡片。
 
 ## Canvas 生图结果回仓

@@ -423,6 +423,11 @@
     feedUserScrollUntil = Date.now() + 900;
   }
 
+  /** 用户刚滚过（含惯性期）→ 排版模块应暂缓重排，避免卡片在指尖下换列 */
+  function isFeedUserScrolling() {
+    return Date.now() < feedUserScrollUntil;
+  }
+
   function shouldSkipFeedScrollRestore(scrollEl, capturedTop) {
     if (!scrollEl || !Number.isFinite(capturedTop)) return true;
     if (Date.now() < feedUserScrollUntil) return true;
