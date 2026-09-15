@@ -50,6 +50,7 @@ runNode('verify-image-delivery-regression', 'verify-image-delivery-regression.mj
 runNode('verify-imagegen-job-recovery-regression', 'verify-imagegen-job-recovery-regression.mjs');
 runNode('verify-reference-assets-regression', 'verify-reference-assets-regression.mjs');
 runNode('verify-admin-split-regression', 'verify-admin-split-regression.mjs');
+runNode('verify-ui-regression-guards', 'verify-ui-regression-guards.mjs');
 
 if (!existsSync(join(root, 'node_modules', 'esbuild'))) {
   console.log('Installing root npm deps (esbuild) ...');
