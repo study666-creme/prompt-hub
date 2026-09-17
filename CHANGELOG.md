@@ -2,6 +2,16 @@
 
 本文件只记录用户可感知或架构级变化；完整细节以 Git 提交历史为准。
 
+## 2026-09-17（质量档位：最高/超高/自动档恢复可用）
+
+- **修复「选最高档生图必失败」**：提交校验的 quality 枚举停在
+  low/medium/standard/high/ultra，比 API 站目录实际下发的档位旧两代——
+  `gpt-image-2.5` / `gpt-image-2.5-sunburst` 支持 low/medium/high/xhigh/max，
+  `grok-imagine-image-2.0` 带 auto。选「最高」提交会直接返回
+  「质量参数仅支持 low、medium、standard、high 或 ultra」，生图发不出去。
+  现在枚举由 `GENERATION_QUALITY_TIERS` 统一提供，并覆盖全部实际档位；
+  提交校验、模型列表价格预览、`/cost` 报价三处共用同一份清单，不会再各自漂移。
+
 ## 2026-09-15（界面回归：内嵌画布恢复 + 日光对比度 + 瀑布流铺满 + 背景降频）
 
 - **恢复站内内嵌无限画布**：2026-09-06 的架构合并 `e875103` 把内嵌页 `pageCanvas`

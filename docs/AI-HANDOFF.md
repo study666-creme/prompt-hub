@@ -1,5 +1,30 @@
 # AI 接手说明
 
+## 2026-09-17 质量档位修复生产发布（Worker `a3043b4f`）
+
+- **问题**：客户端选「最高」(quality `max`) 提交生图会被 `bodySchema` 拒掉，返回
+  「质量参数仅支持 low、medium、standard、high 或 ultra」。API 站目录给
+  `gpt-image-2.5` / `gpt-image-2.5-sunburst` 下发的是 `low/medium/high/xhigh/max`
+  （模型说明里也写明这五档），给 `grok-imagine-image-2.0` 下发 `low/medium/auto`；
+  prompt-hub 的枚举停在这两代之前，于是比它新的档位全部提交不了。画布点最高档
+  生图失败即此（画布侧刻意保留站点档位，`image-quality-tiers` 注释里说明过改回
+  legacy 词表会「removed the real top tiers」，所以该修的是这一侧）。
+- **改动**：`server/src/routes/v1/generate.ts` 新增单一来源
+  `GENERATION_QUALITY_TIERS`（low/medium/standard/high/xhigh/max/ultra/auto）。
+  提交校验、模型列表价格预览（`creditsByResolutionQuality`）、`/cost` 查询三处
+  原本各写一份清单，现在共用这一份；校验文案由该常量生成，不再写死。
+  数据库遗留 `quality` 列仍由 `databaseGenerationQuality` 兜底为 `standard`
+  （既有行为，未改），`meta.requestedQuality` 保留原值。
+- **验证**：server 302 项测试、`tsc --noEmit` 全过；Worker 已发布版本
+  `a3043b4f-8668-47f0-9d85-d64edbe7ec02`（R2/KV/Queues/cron 绑定与 secrets 原样保留）。
+  无费用验收：公开 `GET /api/v1/generate/models` 的
+  `creditsByResolutionQuality` 档位键由 `low,medium,standard,high,ultra` 变为
+  `low,medium,standard,high,xhigh,max,ultra,auto`；`/health` 返回
+  `supabase: ok` 且两个上游 provider configured。**未做真实生成提交**（需用户会话，
+  不拿生产账号花积分），最高档端到端仍需一次人工点击确认。
+- 说明：本次只发布 Worker；`origin/main` 上 2026-09-15 的两个前端提交
+  （`1a87fbc`/`2a9881e`）不在 Worker 产物内，未随之发布，也未回退。
+
 ## 2026-08-28 MJ 多图归档与 Canvas 索引代理发布候选
 
 - MJ 完成结果会将完整四图画廊归档到持久存储；兼容已有封面加四张单图的
