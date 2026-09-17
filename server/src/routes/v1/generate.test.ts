@@ -1,10 +1,44 @@
 import { describe, expect, it } from 'vitest';
 import {
+  GENERATION_QUALITY_TIERS,
   generationJobImageRefAtIndex,
   parseGenerationRequestBody,
   publicGenerationErrorDetail,
   publicGenerationFailureCode
 } from './generate';
+
+/**
+ * API 站目录给 gpt-image-2.5 家族发 low/medium/high/xhigh/max、给 grok 家族发
+ * low/medium/auto。提交校验必须原样接受这些档位：此前枚举停在
+ * low/medium/standard/high/ultra，客户端选「最高」(max) 会在提交时被 schema 拒掉。
+ */
+describe('quality tiers published by the API station', () => {
+  it.each(['low', 'medium', 'standard', 'high', 'xhigh', 'max', 'ultra', 'auto'])(
+    'accepts the %s tier on a gpt-image-2.5 request',
+    (quality) => {
+      const parsed = parseGenerationRequestBody({
+        model: 'gpt-image-2.5',
+        prompt: 'a red apple on marble',
+        quality
+      });
+      expect(parsed.quality).toBe(quality);
+    }
+  );
+
+  it('keeps the higher 2.5 tiers instead of collapsing them to the legacy set', () => {
+    expect(GENERATION_QUALITY_TIERS).toEqual(
+      expect.arrayContaining(['xhigh', 'max', 'auto'])
+    );
+  });
+
+  it('still rejects a tier the station never publishes', () => {
+    expect(() => parseGenerationRequestBody({
+      model: 'gpt-image-2.5',
+      prompt: 'a red apple on marble',
+      quality: 'insane'
+    })).toThrow();
+  });
+});
 
 describe('generation image gallery indexing', () => {
   const four = [0, 1, 2, 3].map((index) => 'storage://card-images/user/generated/four-' + index + '.png');

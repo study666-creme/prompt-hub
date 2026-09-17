@@ -167,6 +167,24 @@ const mjParamsSchema = z
   })
   .optional();
 
+/**
+ * 客户端可以提交的质量档位。这份清单必须覆盖 API 站目录实际下发的档位
+ * （gpt-image-2.5 家族发 low/medium/high/xhigh/max，grok 家族带 auto），
+ * 否则客户端选了更高档会被 bodySchema 直接拒掉——画布点「最高」提交失败
+ * 就是这个原因。提交校验、模型列表的价格预览、/cost 查询三处共用这一份，
+ * 免得再次各写各的而漂移。
+ */
+export const GENERATION_QUALITY_TIERS = [
+  'low',
+  'medium',
+  'standard',
+  'high',
+  'xhigh',
+  'max',
+  'ultra',
+  'auto'
+] as const;
+
 const bodySchema = z.object({
   prompt: z.string().min(1).max(8000),
   model: z
@@ -176,7 +194,7 @@ const bodySchema = z.object({
     .transform((s) => s.trim())
     .default('image2'),
   resolution: z.enum(['1k', '2k', '4k']).default('1k'),
-  quality: z.enum(['low', 'medium', 'standard', 'high', 'ultra']).default('standard'),
+  quality: z.enum(GENERATION_QUALITY_TIERS).default('standard'),
   size: z.string().max(32).optional(),
   count: z.number().int().min(1).max(8).default(1),
   refImageUrl: refImageInputSchema.optional().nullable(),
@@ -275,7 +293,7 @@ function generationValidationMessage(error: z.ZodError): string {
   if (field === 'prompt') return '提示词不能为空，且不能超过 8000 字';
   if (field === 'model') return '模型 ID 无效';
   if (field === 'resolution') return '分辨率仅支持 1K、2K 或 4K';
-  if (field === 'quality') return '质量参数仅支持 low、medium、standard、high 或 ultra';
+  if (field === 'quality') return `质量参数仅支持 ${GENERATION_QUALITY_TIERS.join('、')}`;
   if (field === 'refImageUrl' || field === 'refImageUrls') return '参考图参数格式无效或数量超限';
   if (field === 'count') return '生成张数参数无效';
   return `请求参数无效（${field}）`;
@@ -778,7 +796,7 @@ function publicModelPayload(
           resolutions.map((res) => [
             res,
             Object.fromEntries(
-              ['low', 'medium', 'standard', 'high', 'ultra'].map((quality) => [
+              GENERATION_QUALITY_TIERS.map((quality) => [
                 quality,
                 newApiCreditsForModel(newApiRules, m.upstream, res, quality)
                   ?? finalCreditsByResolution?.[res]
@@ -998,7 +1016,7 @@ generateRoutes.get('/cost', async c => {
   if (!['1k', '2k', '4k'].includes(resolution)) {
     throw new ApiError(400, 'VALIDATION_ERROR', '无效的分辨率');
   }
-  if (!['low', 'medium', 'standard', 'high', 'ultra'].includes(quality)) {
+  if (!(GENERATION_QUALITY_TIERS as readonly string[]).includes(quality)) {
     throw new ApiError(400, 'VALIDATION_ERROR', '无效的质量参数');
   }
   const user = c.get('user');
