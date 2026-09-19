@@ -45,7 +45,7 @@ foreach ($item in $localDeployExclude) {
 
 # --- deploy guard: block stale/divergent trees (root cause of the 20260907 Pages rollback) ---
 Write-Host "Deploy guard: fetching origin/main and verifying HEAD matches ..." -ForegroundColor Cyan
-& git -C $root fetch origin main 2>$null
+& git -C $root fetch --quiet origin main 2>$null
 if ($LASTEXITCODE -ne 0) { Write-Host "BLOCKED: git fetch origin main failed (offline?) - refusing to deploy blind." -ForegroundColor Red; exit 1 }
 $dgHead = (& git -C $root rev-parse HEAD).Trim()
 $dgOrigin = (& git -C $root rev-parse origin/main).Trim()
