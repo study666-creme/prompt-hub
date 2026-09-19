@@ -1736,3 +1736,13 @@ body {
     padding: 16px;
   }
 }
+
+/* 画布模型管理：内嵌 Canvas 后台的 iframe，方形、占满内容区 */
+.admin-canvas-models-frame {
+  display: block;
+  width: 100%;
+  height: min(72vh, 860px);
+  border: 1px solid var(--admin-border, #2a2e32);
+  border-radius: 0;
+  background: #0f1113;
+}

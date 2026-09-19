@@ -15,6 +15,7 @@ import * as community from './views/community.js';
 import * as codes from './views/codes.js';
 import * as models from './views/models.js';
 import * as canvas from './views/canvas.js';
+import * as canvasModels from './views/canvas-models.js';
 
 const VIEWS = {
   overview,
@@ -27,11 +28,12 @@ const VIEWS = {
   codes,
   models,
   canvas,
+  canvasModels,
   announcements,
   videoCatalog
 };
 
-const NAV_ORDER = ['overview', 'users', 'orders', 'ledger', 'cards', 'community', 'codes', 'models', 'canvas', 'announcements', 'videoCatalog', 'audit'];
+const NAV_ORDER = ['overview', 'users', 'orders', 'ledger', 'cards', 'community', 'codes', 'models', 'canvas', 'canvasModels', 'announcements', 'videoCatalog', 'audit'];
 const NAV_LABELS = {
   overview: '概览',
   users: '用户',
@@ -42,6 +44,7 @@ const NAV_LABELS = {
   codes: '激活码',
   models: '生图模型',
   canvas: '生图任务',
+  canvasModels: '画布模型',
   announcements: '公告管理',
   videoCatalog: '视频目录',
   audit: '操作审计'

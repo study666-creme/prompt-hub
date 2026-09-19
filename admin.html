@@ -23,7 +23,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Prompt Hub 运营控制台</title>
-  <link rel="stylesheet" href="styles-admin.css?v=20260918b">
+  <link rel="stylesheet" href="styles-admin.css?v=20260919a">
 </head>
 <body class="admin-console-page" data-admin-page="console">
   <div class="admin-app" id="adminApp" hidden>
@@ -540,6 +540,18 @@
         <p class="admin-msg" id="canvasOpsMsg" hidden></p>
       </div>
     </section>
+    <section class="admin-panel" id="panel-canvas-models" hidden>
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <div>
+            <h2>画布模型上架与定价</h2>
+            <p class="admin-hint">内嵌画布侧模型后台：上架/下架、稳定与特惠分区、对外显示名、价格。管理密钥只保存在本浏览器；改动保存即生效，无需重新部署。</p>
+          </div>
+          <a class="admin-btn admin-btn--sm" href="https://canvas-api.prompt-hubs.com/admin/model-overrides" target="_blank" rel="noreferrer">新窗口打开</a>
+        </div>
+        <iframe id="canvasModelsFrame" class="admin-canvas-models-frame" title="画布模型管理" referrerpolicy="no-referrer"></iframe>
+      </div>
+    </section>
 
     <section class="admin-panel" id="panel-announcements" hidden>
       <div class="admin-card">
@@ -664,6 +676,6 @@
 
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script type="module" src="admin/main.js?v=20260910b"></script>
+  <script type="module" src="admin/main.js?v=20260919a"></script>
 </body>
 </html>
