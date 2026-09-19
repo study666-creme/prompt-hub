@@ -14,8 +14,8 @@ import * as cards from './views/cards.js';
 import * as community from './views/community.js';
 import * as codes from './views/codes.js';
 import * as models from './views/models.js';
-import * as canvas from './views/canvas.js';
-import * as canvasModels from './views/canvas-models.js';
+import * as canvas from './views/canvas.js?v=20260920a';
+import * as canvasModels from './views/canvas-models.js?v=20260920a';
 
 const VIEWS = {
   overview,
@@ -33,7 +33,15 @@ const VIEWS = {
   videoCatalog
 };
 
-const NAV_ORDER = ['overview', 'users', 'orders', 'ledger', 'cards', 'community', 'codes', 'models', 'canvas', 'canvasModels', 'announcements', 'videoCatalog', 'audit'];
+/* 侧栏导航：按业务域分组，13 项平铺太长了，卡片库/画布这类容易看串。 */
+const NAV_GROUPS = [
+  { title: '', tabs: ['overview'] },
+  { title: '运营', tabs: ['users', 'orders', 'ledger', 'codes'] },
+  { title: '内容', tabs: ['cards', 'community'] },
+  { title: '生成', tabs: ['models', 'canvas', 'canvasModels', 'videoCatalog'] },
+  { title: '系统', tabs: ['announcements', 'audit'] }
+];
+const NAV_ORDER = NAV_GROUPS.flatMap((group) => group.tabs);
 const NAV_LABELS = {
   overview: '概览',
   users: '用户',
@@ -62,6 +70,12 @@ function updateApiChip() {
   chip.title = base;
 }
 
+/** 侧栏版本号跟随构建标记，避免 HTML 里写死的旧值误导排障。 */
+function updateBuildTag() {
+  const el = $('adminSidebarBuild');
+  if (el) el.textContent = window.__ADMIN_BUILD__ || 'dev';
+}
+
 function setPageTitle(tab) {
   const meta = VIEWS[tab]?.title || VIEWS.overview.title;
   const t = $('adminPageTitle');
@@ -73,8 +87,14 @@ function setPageTitle(tab) {
 function renderNav(activeTab) {
   const nav = $('adminNav');
   if (!nav) return;
-  nav.innerHTML = NAV_ORDER
-    .map((tab) => `<button type="button" class="admin-tab${tab === activeTab ? ' is-active' : ''}" data-tab="${tab}"><span class="admin-tab-icon admin-tab-icon--${tab}" aria-hidden="true"></span>${NAV_LABELS[tab]}</button>`)
+  nav.innerHTML = NAV_GROUPS
+    .map((group) => {
+      const buttons = group.tabs
+        .map((tab) => `<button type="button" class="admin-tab${tab === activeTab ? ' is-active' : ''}" data-tab="${tab}"><span class="admin-tab-icon admin-tab-icon--${tab}" aria-hidden="true"></span>${NAV_LABELS[tab]}</button>`)
+        .join('');
+      const label = group.title ? `<p class="admin-nav-group-title">${group.title}</p>` : '';
+      return `<div class="admin-nav-group">${label}${buttons}</div>`;
+    })
     .join('');
   nav.querySelectorAll('.admin-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -85,11 +105,16 @@ function renderNav(activeTab) {
 }
 
 function showTab(tab, params) {
+  // 面板 id 与路由 key 必须严格对应（panel-<tab>）。一旦对不上，
+  // 原来的实现会把所有面板都隐藏且不报错，表现就是整页空白 —— 这里先纠偏并留痕。
+  if (!$(`panel-${tab}`)) {
+    console.warn('[admin] 找不到面板 panel-' + tab + '，已回退到概览');
+    tab = 'overview';
+  }
   const view = VIEWS[tab] || VIEWS.overview;
   renderNav(tab);
   setPageTitle(tab);
   document.querySelectorAll('.admin-panel').forEach((p) => (p.hidden = p.id !== `panel-${tab}`));
-  if (!$(`panel-${tab}`)) tab = 'overview';
   view.load(params);
 }
 
@@ -156,6 +181,7 @@ function showApp(loggedIn) {
   if (app) app.hidden = !loggedIn;
   document.title = loggedIn ? 'Prompt Hub 运营控制台' : 'Prompt Hub 管理登录';
   updateApiChip();
+  updateBuildTag();
   if (mode === 'login' && loggedIn) window.location.replace('admin.html');
   if (mode === 'console' && !loggedIn) window.location.replace('admin-login.html');
 }

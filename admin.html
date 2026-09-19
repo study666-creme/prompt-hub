@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script>
-    window.__ADMIN_BUILD__ = '20260918b';
+    window.__ADMIN_BUILD__ = '20260920a';
     (function () {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function (regs) {
@@ -23,7 +23,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Prompt Hub 运营控制台</title>
-  <link rel="stylesheet" href="styles-admin.css?v=20260919a">
+  <link rel="stylesheet" href="styles-admin.css?v=20260920a">
 </head>
 <body class="admin-console-page" data-admin-page="console">
   <div class="admin-app" id="adminApp" hidden>
@@ -467,89 +467,123 @@
 
     <section class="admin-panel" id="panel-canvas" hidden>
       <div class="admin-stats" id="canvasOpsStats"></div>
-      <div class="admin-card">
-        <div class="admin-card-head">
-          <div>
-            <h2>模型映射</h2>
-            <p class="admin-hint" id="canvasCatalogMeta">正在读取实时目录…</p>
+      <p class="admin-msg" id="canvasOpsMsg" hidden></p>
+      <div class="admin-view-tabs admin-view-tabs--inline" id="canvasOpsTabs" role="tablist">
+        <button type="button" class="admin-view-tab is-active" data-canvas-pane="jobs">最近任务</button>
+        <button type="button" class="admin-view-tab" data-canvas-pane="catalog">模型目录</button>
+        <button type="button" class="admin-view-tab" data-canvas-pane="stats">模型统计</button>
+        <button type="button" class="admin-view-tab" data-canvas-pane="errors">错误日志</button>
+      </div>
+
+      <div class="admin-canvas-pane" data-canvas-pane="jobs">
+        <div class="admin-card">
+          <div class="admin-card-head">
+            <div>
+              <h2>最近生图任务</h2>
+              <p class="admin-hint">画布与卡片库共用 generation_requests。可判断请求停在创建、等待服务、生成、保存结果还是完成阶段。</p>
+            </div>
           </div>
-          <a class="admin-btn admin-btn--sm" href="https://console.prompt-hubs.com/usage-logs/task" target="_blank" rel="noopener">打开生成服务日志</a>
-        </div>
-        <div class="admin-table-wrap">
-          <table class="admin-table admin-table--compact">
-            <thead><tr><th>画布名称</th><th>公开 ID</th><th>实际模型</th><th>端点</th><th>实时价格</th><th>可选参数</th></tr></thead>
-            <tbody id="canvasModelMapBody"></tbody>
-          </table>
+          <div class="admin-table-wrap">
+            <table class="admin-table admin-table--compact">
+              <thead><tr><th>时间</th><th>类型</th><th>用户</th><th>模型</th><th>参数</th><th>状态</th><th>积分</th><th>服务任务</th><th>错误</th></tr></thead>
+              <tbody id="canvasJobsBody"></tbody>
+            </table>
+          </div>
         </div>
       </div>
-      <div class="admin-card">
-        <div class="admin-card-head">
-          <div>
-            <h2>视频模型</h2>
-            <p class="admin-hint">目录与价格由卡藏 API 同步；上下架跟随卡藏渠道可用性，无可用渠道的模型自动对前端隐藏。</p>
+
+      <div class="admin-canvas-pane" data-canvas-pane="catalog" hidden>
+        <div class="admin-card">
+          <div class="admin-card-head">
+            <div>
+              <h2>模型映射</h2>
+              <p class="admin-hint" id="canvasCatalogMeta">正在读取实时目录…</p>
+            </div>
+            <a class="admin-btn admin-btn--sm" href="https://console.prompt-hubs.com/usage-logs/task" target="_blank" rel="noopener">打开生成服务日志</a>
+          </div>
+          <div class="admin-table-wrap">
+            <table class="admin-table admin-table--compact">
+              <thead><tr><th>画布名称</th><th>公开 ID</th><th>实际模型</th><th>端点</th><th>实时价格</th><th>可选参数</th></tr></thead>
+              <tbody id="canvasModelMapBody"></tbody>
+            </table>
           </div>
         </div>
-        <div class="admin-table-wrap">
-          <table class="admin-table admin-table--compact">
-            <thead><tr><th>视频名称</th><th>公开 ID</th><th>实际模型</th><th>实时价格</th><th>参数</th></tr></thead>
-            <tbody id="canvasVideoModelBody"></tbody>
-          </table>
+        <div class="admin-card">
+          <div class="admin-card-head">
+            <div>
+              <h2>视频模型</h2>
+              <p class="admin-hint">目录与价格由卡藏 API 同步；上下架跟随卡藏渠道可用性，无可用渠道的模型自动对前端隐藏。</p>
+            </div>
+          </div>
+          <div class="admin-table-wrap">
+            <table class="admin-table admin-table--compact">
+              <thead><tr><th>视频名称</th><th>公开 ID</th><th>实际模型</th><th>实时价格</th><th>参数</th></tr></thead>
+              <tbody id="canvasVideoModelBody"></tbody>
+            </table>
+          </div>
         </div>
       </div>
-      <div class="admin-card">
-        <div class="admin-card-head">
-          <div>
-            <h2>按模型统计</h2>
-            <p class="admin-hint" id="canvasModelStatsMeta">近 7 天 · 按模型聚合（图片+视频）</p>
+
+      <div class="admin-canvas-pane" data-canvas-pane="stats" hidden>
+        <div class="admin-card">
+          <div class="admin-card-head">
+            <div>
+              <h2>按模型统计</h2>
+              <p class="admin-hint" id="canvasModelStatsMeta">近 7 天 · 按模型聚合（图片+视频）</p>
+            </div>
           </div>
-        </div>
-        <div class="admin-table-wrap">
-          <table class="admin-table admin-table--compact">
-            <thead><tr><th>类型</th><th>模型</th><th>总量</th><th>成功</th><th>失败</th><th>成功率</th><th>用户数</th><th>净积分</th><th>进行中</th></tr></thead>
-            <tbody id="canvasModelStatsBody"></tbody>
-          </table>
+          <div class="admin-table-wrap">
+            <table class="admin-table admin-table--compact">
+              <thead><tr><th>类型</th><th>模型</th><th>总量</th><th>成功</th><th>失败</th><th>成功率</th><th>用户数</th><th>净积分</th><th>进行中</th></tr></thead>
+              <tbody id="canvasModelStatsBody"></tbody>
+            </table>
+          </div>
         </div>
       </div>
-      <div class="admin-card">
-        <div class="admin-card-head">
-          <div>
-            <h2>错误日志</h2>
-            <p class="admin-hint" id="canvasErrorLogsMeta">近 7 天失败任务（图片 + 视频，画布与卡片库入口合并）</p>
+
+      <div class="admin-canvas-pane" data-canvas-pane="errors" hidden>
+        <div class="admin-card">
+          <div class="admin-card-head">
+            <div>
+              <h2>错误日志</h2>
+              <p class="admin-hint" id="canvasErrorLogsMeta">近 7 天失败任务（图片 + 视频，画布与卡片库入口合并）</p>
+            </div>
+          </div>
+          <div class="admin-table-wrap">
+            <table class="admin-table admin-table--compact">
+              <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>入口</th><th>错误</th><th>积分</th><th>退款</th></tr></thead>
+              <tbody id="canvasErrorLogsBody"></tbody>
+            </table>
           </div>
         </div>
-        <div class="admin-table-wrap">
-          <table class="admin-table admin-table--compact">
-            <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>入口</th><th>错误</th><th>积分</th><th>退款</th></tr></thead>
-            <tbody id="canvasErrorLogsBody"></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="admin-card">
-        <div class="admin-card-head">
-          <div>
-            <h2>最近生图任务</h2>
-            <p class="admin-hint">画布与卡片库共用 generation_requests。可判断请求停在创建、等待服务、生成、保存结果还是完成阶段。</p>
-          </div>
-        </div>
-        <div class="admin-table-wrap">
-          <table class="admin-table admin-table--compact">
-            <thead><tr><th>时间</th><th>类型</th><th>用户</th><th>模型</th><th>参数</th><th>状态</th><th>积分</th><th>服务任务</th><th>错误</th></tr></thead>
-            <tbody id="canvasJobsBody"></tbody>
-          </table>
-        </div>
-        <p class="admin-msg" id="canvasOpsMsg" hidden></p>
       </div>
     </section>
-    <section class="admin-panel" id="panel-canvas-models" hidden>
+    <section class="admin-panel" id="panel-canvasModels" hidden>
       <div class="admin-card">
         <div class="admin-card-head">
           <div>
             <h2>画布模型上架与定价</h2>
-            <p class="admin-hint">内嵌画布侧模型后台：上架/下架、稳定与特惠分区、对外显示名、价格。管理密钥只保存在本浏览器；改动保存即生效，无需重新部署。</p>
+            <p class="admin-hint">内嵌画布侧模型后台：上架/下架、稳定与特惠分区、对外显示名、价格。密钥只保存在本浏览器会话；改动保存即生效，无需重新部署。</p>
           </div>
-          <a class="admin-btn admin-btn--sm" href="https://canvas-api.prompt-hubs.com/admin/model-overrides" target="_blank" rel="noreferrer">新窗口打开</a>
+          <div class="admin-row">
+            <button type="button" class="admin-btn admin-btn--sm" id="canvasModelsReloadBtn" title="清空内嵌页面并重新加载">重新载入</button>
+            <a class="admin-btn admin-btn--sm" id="canvasModelsOpenLink" href="https://canvas-api.prompt-hubs.com/admin/model-overrides" target="_blank" rel="noreferrer">新窗口打开</a>
+          </div>
         </div>
-        <iframe id="canvasModelsFrame" class="admin-canvas-models-frame" title="画布模型管理" referrerpolicy="no-referrer"></iframe>
+        <div class="admin-canvas-models-bar">
+          <div class="admin-field admin-field--sm">
+            <label for="canvasModelsSecret">画布管理密钥</label>
+            <input type="password" id="canvasModelsSecret" autocomplete="off" spellcheck="false"
+              data-lpignore="true" data-1p-ignore="true" data-bwignore="true"
+              placeholder="只存在本浏览器会话">
+          </div>
+          <button type="button" class="admin-btn admin-btn--primary" id="canvasModelsConnectBtn">连接并载入</button>
+          <span class="admin-hint" id="canvasModelsStatus">未连接</span>
+        </div>
+        <div class="admin-canvas-models-stage">
+          <iframe id="canvasModelsFrame" class="admin-canvas-models-frame" title="画布模型管理" referrerpolicy="no-referrer"></iframe>
+          <p class="admin-canvas-models-fallback" id="canvasModelsFallback" hidden></p>
+        </div>
       </div>
     </section>
 
@@ -676,6 +710,6 @@
 
   <script src="api-domain.config.js"></script>
   <script src="api-config.js"></script>
-  <script type="module" src="admin/main.js?v=20260919a"></script>
+  <script type="module" src="admin/main.js?v=20260920a"></script>
 </body>
 </html>

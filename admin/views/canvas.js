@@ -1,4 +1,9 @@
-/* 生图/视频任务：模型映射（图+视频）+ 最近任务 + 按模型统计 + 错误日志 */
+/* 生图/视频任务：最近任务 + 模型映射（图+视频）+ 按模型统计 + 错误日志
+ *
+ * 四块内容体量都很大，平铺会让页面长得没法看，所以拆成二级标签：
+ * 顶部统计卡常驻，下面按 pane 切换（最近任务 / 模型目录 / 模型统计 / 错误日志）。
+ * 数据仍是一次性拉全量，切标签只是显隐，不再多发请求。
+ */
 
 import { $, esc, monitorNumber, monitorTime, showMsg } from '../modules/ui.js';
 import { adminFetch, friendlyFetchError } from '../modules/api.js';
@@ -6,6 +11,19 @@ import { adminFetch, friendlyFetchError } from '../modules/api.js';
 export const title = ['生图任务', '画布与卡片库共用的生成任务、视频模型、统计与错误日志'];
 
 const STATS_DAYS = 7;
+const PANES = ['jobs', 'catalog', 'stats', 'errors'];
+let panesBound = false;
+
+/** 切换生图任务页内的二级标签。 */
+function showPane(name) {
+  const target = PANES.includes(name) ? name : 'jobs';
+  document.querySelectorAll('#canvasOpsTabs .admin-view-tab').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.canvasPane === target);
+  });
+  document.querySelectorAll('#panel-canvas .admin-canvas-pane').forEach((pane) => {
+    pane.hidden = pane.dataset.canvasPane !== target;
+  });
+}
 
 function canvasStageBadge(stage) {
   const map = {
@@ -87,7 +105,13 @@ function renderErrorLogRows(logs) {
   </tr>`).join('');
 }
 
-export function init() {}
+export function init() {
+  if (panesBound) return;
+  panesBound = true;
+  document.querySelectorAll('#canvasOpsTabs .admin-view-tab').forEach((btn) => {
+    btn.addEventListener('click', () => showPane(btn.dataset.canvasPane));
+  });
+}
 
 export function load() {
   const modelBody = $('canvasModelMapBody');
@@ -175,9 +199,14 @@ export function load() {
       `;
       showMsg($('canvasOpsMsg'), '', true);
     } catch (e) {
-      if (modelBody) modelBody.innerHTML = '';
-      if (videoBody) videoBody.innerHTML = '';
-      if (jobsBody) jobsBody.innerHTML = '';
+      const fail = (cols) => `<tr><td colspan="${cols}" class="admin-hint">加载失败，见上方提示</td></tr>`;
+      if (modelBody) modelBody.innerHTML = fail(6);
+      if (videoBody) videoBody.innerHTML = fail(5);
+      if (jobsBody) jobsBody.innerHTML = fail(9);
+      const statsBody = $('canvasModelStatsBody');
+      if (statsBody) statsBody.innerHTML = fail(9);
+      const errBody = $('canvasErrorLogsBody');
+      if (errBody) errBody.innerHTML = fail(7);
       showMsg($('canvasOpsMsg'), friendlyFetchError(e), false);
     }
   })();

@@ -1737,12 +1737,106 @@ body {
   }
 }
 
-/* 画布模型管理：内嵌 Canvas 后台的 iframe，方形、占满内容区 */
+/* 画布模型管理：内嵌 Canvas 后台的 iframe（走 _worker.js 的同源反代） */
 .admin-canvas-models-frame {
   display: block;
   width: 100%;
-  height: min(72vh, 860px);
+  height: min(76vh, 900px);
   border: 1px solid var(--admin-border, #2a2e32);
-  border-radius: 0;
+  border-radius: var(--admin-radius);
   background: #0f1113;
+}
+
+/* ---------- 侧栏导航：按业务域分组，13 项平铺太长 ---------- */
+.admin-nav {
+  gap: 2px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.admin-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.admin-nav-group + .admin-nav-group {
+  margin-top: 10px;
+}
+
+.admin-nav-group-title {
+  margin: 0 0 4px;
+  padding: 0 12px;
+  color: var(--admin-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.admin-nav .admin-tab {
+  min-height: 36px;
+  padding: 8px 12px;
+}
+
+/* ---------- 生图任务：二级标签，避免 5 个大卡片平铺 ---------- */
+#canvasOpsTabs {
+  margin: 4px 0 16px;
+}
+
+.admin-canvas-pane[hidden] {
+  display: none !important;
+}
+
+/* ---------- 画布模型：密钥条 + 状态 + 兜底提示 ---------- */
+.admin-canvas-models-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 4px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+  background: var(--admin-surface-muted);
+}
+
+.admin-canvas-models-bar .admin-field {
+  margin: 0;
+  width: min(320px, 100%);
+}
+
+.admin-canvas-models-bar .admin-hint {
+  padding-bottom: 9px;
+}
+
+#canvasModelsStatus.is-ok {
+  color: var(--admin-ok);
+}
+
+#canvasModelsStatus.is-error {
+  color: var(--admin-danger);
+}
+
+.admin-canvas-models-fallback {
+  margin: 12px 0 0;
+  padding: 14px;
+  border: 1px dashed var(--admin-border);
+  border-radius: var(--admin-radius);
+  background: var(--admin-surface-muted);
+  color: var(--admin-muted);
+}
+
+@media (max-width: 860px) {
+  .admin-nav-group {
+    display: contents;
+  }
+
+  .admin-nav-group-title {
+    display: none;
+  }
+
+  .admin-canvas-models-frame {
+    height: 70vh;
+  }
 }
