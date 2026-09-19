@@ -11,6 +11,7 @@ $files = @(
 )
 
 $failed = @()
+$ErrorActionPreference = "Continue"
 foreach ($rel in $files) {
   $path = Join-Path $root $rel
   if (-not (Test-Path $path)) { continue }
