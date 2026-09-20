@@ -253,7 +253,10 @@ async function freshVideoModel(env: Env, modelId: string): Promise<NewApiResolve
     throw new ApiError(503, 'ROUTING_UNAVAILABLE', '暂时无法确认视频模型可用渠道，请稍后重试');
   }
   const resolved = await resolveNewApiRoutedCatalogModel(snapshot, routes, modelId, 'video');
-  if (!resolved) throw new ApiError(400, 'MODEL_UNAVAILABLE', '所选视频模型或线路已不可用，请刷新后重选');
+  // 文案里不要出现「线路/渠道」这类内部词：publicErrorMessage 检测到就会把
+  // 整条消息替换成「请求参数无效」，用户看到的是"参数填错了"，实际是模型当前
+  // 没有可用通道——2026-09-20 排查 seedance 全量提交失败就被这句误导过。
+  if (!resolved) throw new ApiError(400, 'MODEL_UNAVAILABLE', '所选视频模型暂不可用，请刷新模型列表后重选');
   return resolved;
 }
 
