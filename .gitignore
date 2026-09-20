@@ -51,3 +51,6 @@ bilibili-sub-web/
 
 # SillyTavern / 酒馆本地资料（与 Prompt Hub 无关，勿提交、勿部署）
 themes/
+
+# 本地会话工作区（记忆/预览截图），不入库
+.workbuddy/
