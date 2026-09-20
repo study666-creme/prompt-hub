@@ -41,6 +41,12 @@ function buildCode(prefix: string): string {
   return `${prefix.toUpperCase()}-${randomSuffix(12)}`;
 }
 
+/** 一批激活码的短指纹：能把审计记录与激活码页的某一批次对应上，但不泄露码本身。 */
+async function batchFingerprint(codes: string[]): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode([...codes].sort().join('\n')));
+  return [...new Uint8Array(digest)].slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 export const adminCodeRoutes = new Hono<{ Bindings: Env }>();
 
 adminCodeRoutes.use('*', requireAdminSecret);
@@ -190,17 +196,22 @@ adminCodeRoutes.post('/', async c => {
   }
 
   // 激活码是变现物，生成/发卡必须可追溯：否则事后对不上账。
+  // 但审计表是只增不减的取证记录，把明文码写进去等于给每一把有审计读取权限的
+  // 密钥额外存了一份全量码单（含已兑换的）。改为记录批次指纹：数量、前缀、
+  // 权益与整批码的短哈希——足够把审计记录和激活码页面对上，又不复制码本身。
+  const createdCodes = (data ?? rows).map(r => r.code);
   await writeAudit(c, {
     action: 'code.create',
     targetType: 'activation_code',
     detail: {
-      count: data?.length ?? rows.length,
+      count: createdCodes.length,
       credits,
       membershipTier: membershipTier ?? null,
       membershipDays: membershipDays && membershipDays > 0 ? membershipDays : null,
       maxUses,
       note: note ?? null,
-      ids: (data ?? rows).map(r => r.code)
+      prefix: prefix.toUpperCase(),
+      batchFingerprint: createdCodes.length ? batchFingerprint(createdCodes) : null
     }
   });
 
