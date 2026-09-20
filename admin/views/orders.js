@@ -13,6 +13,7 @@ export function init() {
   $('orderStateFilter')?.addEventListener('change', () => void load(true));
   $('orderKindFilter')?.addEventListener('change', () => void load(true));
   $('orderRefresh')?.addEventListener('click', () => void load(true));
+  $('orderHealthBtn')?.addEventListener('click', () => void runHealthCheck());
   $('orderPrev')?.addEventListener('click', () => {
     offset = Math.max(0, offset - PAGE);
     void load(false);
@@ -23,6 +24,29 @@ export function init() {
   });
   $('orderLoadLegacy')?.addEventListener('click', () => void loadLegacy());
   $('manualGrantBtn')?.addEventListener('click', () => void manualGrant());
+}
+
+/** 手动自检：把表状态、订单数、支付配置一次讲清楚。 */
+async function runHealthCheck() {
+  const btn = $('orderHealthBtn');
+  setButtonBusy(btn, true, '检查中…');
+  try {
+    const h = await adminFetch('/api/admin/orders/health', { timeoutMs: 20000 });
+    const lines = [
+      `订单表：${h.tableReady ? '就绪' : '未就绪（' + (h.tableError || 'unknown') + '）'}`,
+      `订单总数：${h.orderCount}${h.latestOrderAt ? `（最新 ${fullTime(h.latestOrderAt)}）` : ''}`,
+      `迁移前订单：${h.legacyOrderCount} 笔`,
+      `在线支付：${h.epayConfigured ? '已配置' : '未配置完整'}`
+    ];
+    for (const item of h.paymentChecklist || []) {
+      lines.push(`  ${item.ok ? '✓' : '✗'} ${item.label}`);
+    }
+    showMsg($('ordersMsg'), lines.join('\n'), h.tableReady && h.epayConfigured);
+  } catch (e) {
+    showMsg($('ordersMsg'), friendlyFetchError(e), false);
+  } finally {
+    setButtonBusy(btn, false);
+  }
 }
 
 export function load(reset = true) {
@@ -43,7 +67,8 @@ export function load(reset = true) {
       if (prev) prev.disabled = offset <= 0;
       if (next) next.disabled = offset + data.items.length >= data.total;
       if (!data.items.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="admin-hint">暂无订单（新订单将实时入表；历史订单请点「加载迁移前订单」）</td></tr>';
+        // 空表不可怕，可怕的是不知道为什么空：自检结论直接写进空态。
+        tbody.innerHTML = `<tr><td colspan="7" class="admin-hint">暂无订单（新订单将实时入表）。${esc(await emptyStateExplanation())}</td></tr>`;
         return;
       }
       const stateBadge = (s) => {
@@ -77,6 +102,24 @@ export function load(reset = true) {
       showMsg($('ordersMsg'), friendlyFetchError(e), false);
     }
   })();
+}
+
+/**
+ * 订单表为空时给出可执行的原因。支付链路任一环没配好，表就永远是空的——
+ * 这时候该补的是配置，不是刷新页面。
+ */
+async function emptyStateExplanation() {
+  try {
+    const h = await adminFetch('/api/admin/orders/health', { timeoutMs: 15000 });
+    if (!h.tableReady) return `订单表还没建好（${h.tableError || 'unknown'}），请先执行迁移。`;
+    if (h.orderCount > 0) return '当前筛选条件下没有订单，换个状态/商品看看。';
+    const missing = (h.paymentChecklist || []).filter(item => !item.ok).map(item => item.label);
+    if (missing.length) return `在线支付未配置完整：${missing.join('、')}。配好之前不会有新订单入表。`;
+    const legacy = h.legacyOrderCount > 0 ? `另有 ${h.legacyOrderCount} 笔迁移前订单，可点「加载迁移前订单」查看。` : '';
+    return `支付配置完好，确实是还没有新订单。${legacy}`;
+  } catch (e) {
+    return `（自检失败：${friendlyFetchError(e)}）`;
+  }
 }
 
 async function loadLegacy() {

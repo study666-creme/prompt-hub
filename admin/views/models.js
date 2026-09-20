@@ -1,15 +1,32 @@
-/* 生图模型：定价 / 上架状态 / 排序 / MJ 分档（调用链路列已下线） */
+/* 生图模型：定价 / 上架状态 / 排序 / MJ 分档（调用链路列已下线）
+ *
+ * 卡藏同步模型（pricingSource=upstream_realtime）的价格与名称默认跟随卡藏 API，
+ * 但运营可以显式覆盖：填了值就以后台为准，清空输入即恢复同步值。行内会同时
+ * 显示「目录值」作对照，被覆盖的行带标记和「恢复目录」按钮。
+ */
 
-import { $, esc, showMsg, toast, setButtonBusy } from '../modules/ui.js';
+import { $, adminConfirm, esc, showMsg, toast, setButtonBusy } from '../modules/ui.js';
 import { adminFetch, friendlyFetchError } from '../modules/api.js';
 
-export const title = ['生图模型', '定价、排序与上下架配置'];
+export const title = ['生图模型', '定价、排序与上下架配置（改名/改价对同步模型同样生效）'];
 
 let rows = [];
 let familyFilter = 'all';
 let statusFilter = 'all';
 
 const FAMILY_LABEL = { gim2: '全能模型2', banana: '香蕉', midjourney: 'MJ' };
+
+function isRealtimeRow(row) {
+  return row.pricingSource === 'upstream_realtime';
+}
+
+/** 该行是否被运营显式改过价/名（卡藏行才有这个区分）。 */
+function isOverriddenRow(row) {
+  if (!isRealtimeRow(row)) return true;
+  const name = String(row.displayName || '').trim();
+  const renamed = !!name && name !== String(row.catalogLabel || row.label || '').trim();
+  return !!row.operatorOverride || renamed;
+}
 
 function isMjPricingRow(row) {
   return row.pricingBySpeed === true || String(row.id || '').startsWith('apimart-mj-');
@@ -35,6 +52,10 @@ function normalizeModelRow(row, index) {
       : row.enabled === false ? 'offline' : 'active';
   return {
     ...row,
+    catalogLabel: row.catalogLabel || row.label || '',
+    catalogCreditsPerCall: row.catalogCreditsPerCall ?? row.creditsPerCall,
+    catalogCreditsByResolution: row.catalogCreditsByResolution || null,
+    operatorOverride: row.operatorOverride !== false,
     displayName: row.displayName || row.displayLabel || row.label || '',
     status,
     sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : (index + 1) * 10,
@@ -70,6 +91,17 @@ function formatCredits(n) {
   return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
 
+/** 卡藏目录当前同步值：改价输入框的 placeholder 与「恢复目录」都读它。 */
+function catalogCreditsFor(row, resolution) {
+  if (row.pricingBySpeed) return row.catalogCreditsPerCall;
+  if (row.pricingByResolution) {
+    const map = row.catalogCreditsByResolution || {};
+    const key = resolution || (row.resolutions || ['1k'])[0] || '1k';
+    return map[key];
+  }
+  return row.catalogCreditsPerCall;
+}
+
 function effectiveModelPromo(row, resolution, speed) {
   if (row.fixedPrice) return null;
   if (isMjPricingRow(row)) {
@@ -86,16 +118,21 @@ function effectiveModelPromo(row, resolution, speed) {
   return v != null && v !== '' ? Number(v) : null;
 }
 
+/** 用户实付价：有活动价用活动价，否则用当前售价（运营价 ?? 目录同步价）。 */
+function effectivePriceOf(row, resolution, speed) {
+  const promo = effectiveModelPromo(row, resolution, speed);
+  if (promo != null) return promo;
+  if (isMjPricingRow(row)) return Number(row.creditsBySpeed?.[speed || 'relax']) || null;
+  if (row.pricingByResolution) {
+    const res = resolution || (row.resolutions || ['1k'])[0] || '1k';
+    return Number(row.creditsByResolution?.[res]) || null;
+  }
+  const base = Number(row.creditsPerCall);
+  return Number.isFinite(base) && base > 0 ? base : null;
+}
+
 function renderCreditsInputs(row) {
   ensureMjCreditsBySpeed(row);
-  if (row.pricingSource === 'upstream_realtime') {
-    if (row.pricingByResolution) {
-      return (row.resolutions || [])
-        .map((res) => `<strong>${res.toUpperCase()} ${formatCredits(row.creditsByResolution?.[res])}</strong>`)
-        .join('<br>');
-    }
-    return `<strong>${formatCredits(row.creditsPerCall)}</strong><br><span class="admin-hint">自动同步</span>`;
-  }
   if (isMjPricingRow(row)) {
     if (!row.creditsBySpeed) row.creditsBySpeed = {};
     return ['relax', 'fast', 'turbo']
@@ -106,15 +143,14 @@ function renderCreditsInputs(row) {
     const resList = (row.resolutions || ['1k', '2k', '4k']).filter((r) => ['1k', '2k', '4k'].includes(r));
     if (!row.creditsByResolution) row.creditsByResolution = {};
     return resList
-      .map((res) => `<label class="admin-res-price"><span>${res.toUpperCase()}</span><input type="number" class="admin-input-sm" data-field="credits-${res}" min="0.1" max="99999" step="0.1" value="${row.creditsByResolution[res] ?? ''}"></label>`)
+      .map((res) => `<label class="admin-res-price"><span>${res.toUpperCase()}</span><input type="number" class="admin-input-sm" data-field="credits-${res}" min="0.1" max="99999" step="0.1" value="${row.creditsByResolution[res] ?? ''}" placeholder="目录:${esc(String(catalogCreditsFor(row, res) ?? '—'))}"></label>`)
       .join('');
   }
-  return `<input type="number" class="admin-input-sm" data-field="credits" min="0.1" max="99999" step="0.1" value="${row.creditsPerCall}">`;
+  return `<input type="number" class="admin-input-sm" data-field="credits" min="0.1" max="99999" step="0.1" value="${row.creditsPerCall ?? ''}" placeholder="目录:${esc(String(catalogCreditsFor(row) ?? '—'))}">`;
 }
 
 function renderPromoInputs(row) {
   ensureMjCreditsBySpeed(row);
-  if (row.pricingSource === 'upstream_realtime') return '<span class="admin-hint">不手动优惠</span>';
   if (isMjPricingRow(row)) {
     if (!row.promoBySpeed) row.promoBySpeed = {};
     return ['relax', 'fast', 'turbo']
@@ -133,26 +169,30 @@ function renderPromoInputs(row) {
 
 function renderEffectiveCell(row) {
   ensureMjCreditsBySpeed(row);
-  if (row.pricingSource === 'upstream_realtime') return renderCreditsInputs(row);
+  // 有效价 = 运营价 ?? 目录同步价；被覆盖时标出来，避免「改了没生效」的误判。
+  const overridden = isOverriddenRow(row);
+  const badge = overridden && isRealtimeRow(row)
+    ? ' <span class="admin-badge admin-badge--warn" title="价格/名称已按后台值生效，清空即恢复卡藏目录值">覆盖</span>'
+    : '';
   if (isMjPricingRow(row)) {
     return ['relax', 'fast', 'turbo']
       .map((s) => {
-        const promo = effectiveModelPromo(row, '1k', s);
-        return promo != null ? `${s} ${formatCredits(promo)}` : `${s} —`;
+        const price = effectivePriceOf(row, '1k', s);
+        return price != null ? `${s} ${formatCredits(price)}` : `${s} —`;
       })
-      .join('<br>');
+      .join('<br>') + badge;
   }
   if (row.pricingByResolution) {
     const resList = (row.resolutions || ['1k', '2k', '4k']).filter((r) => ['1k', '2k', '4k'].includes(r));
     return resList
       .map((res) => {
-        const promo = effectiveModelPromo(row, res);
-        return promo != null ? `${res.toUpperCase()} ${formatCredits(promo)}` : `${res.toUpperCase()} —`;
+        const price = effectivePriceOf(row, res);
+        return price != null ? `${res.toUpperCase()} ${formatCredits(price)}` : `${res.toUpperCase()} —`;
       })
-      .join('<br>');
+      .join('<br>') + badge;
   }
-  const promo = effectiveModelPromo(row);
-  return promo != null ? formatCredits(promo) : '—';
+  const price = effectivePriceOf(row);
+  return (price != null ? formatCredits(price) : '—') + badge;
 }
 
 function syncRowsFromDom() {
@@ -217,6 +257,12 @@ function renderTable() {
         ['active', '上架'], ['maintenance', '维护中'], ['offline', '下架']
       ].map(([v, l]) => `<option value="${v}"${row.status === v ? ' selected' : ''}>${l}</option>`).join('');
       const refundCell = `<label class="admin-check" title="取消勾选=违规不返还积分"><input type="checkbox" data-field="refundOnViolation" ${row.refundOnViolation !== false ? 'checked' : ''}> 返还</label>`;
+      // 名称：所有模型都可改；留空=用目录名。同步行把目录名写进 placeholder。
+      const nameCell = `<input type="text" class="admin-input-sm" data-field="displayName" maxlength="48" value="${esc(row.displayName || '')}" placeholder="${esc(row.catalogLabel || row.label)}">
+        ${isRealtimeRow(row) ? `<span class="admin-hint">目录名：${esc(row.catalogLabel || row.label)}</span>` : ''}`;
+      const resetCell = isOverriddenRow(row) && isRealtimeRow(row)
+        ? `<button type="button" class="admin-btn admin-btn--sm" data-reset-model="${esc(row.id)}" title="清空改名与改价，恢复卡藏目录值">恢复目录</button>`
+        : '';
       return `<tr data-model-id="${esc(row.id)}">
         <td class="admin-model-sort">
           <div class="admin-model-sort__btns">
@@ -227,15 +273,13 @@ function renderTable() {
         </td>
         <td>${esc(familyLabel)}</td>
         <td><code>${esc(row.id)}</code><br><span class="admin-hint">${esc(row.label)} · ${esc(row.description || '')}</span></td>
-        <td>${row.pricingSource === 'upstream_realtime'
-          ? `<strong>${esc(row.label)}</strong><br><span class="admin-hint">名称自动同步</span>`
-          : `<input type="text" class="admin-input-sm" data-field="displayName" maxlength="48" value="${esc(row.displayName)}" placeholder="${esc(row.label)}">`}</td>
+        <td>${nameCell}</td>
         <td><select class="admin-input-sm" data-field="status">${statusOpts}</select></td>
         <td>${refundCell}</td>
         <td>${esc((row.resolutions || []).join(' / ') || '—')}</td>
         <td>${renderCreditsInputs(row)}</td>
         <td>${renderPromoInputs(row)}</td>
-        <td class="model-effective">${renderEffectiveCell(row)}</td>
+        <td class="model-effective">${renderEffectiveCell(row)}<div class="admin-row" style="margin-top:4px">${resetCell}</div></td>
       </tr>`;
     })
     .join('');
@@ -282,6 +326,8 @@ function moveRow(modelId, delta) {
 export function init() {
   $('modelsSaveBtn')?.addEventListener('click', () => void save());
   $('panel-models')?.addEventListener('click', (e) => {
+    const reset = e.target.closest('[data-reset-model]');
+    if (reset) return void resetModelRow(reset.getAttribute('data-reset-model'));
     const up = e.target.closest('[data-move-up]');
     if (up) return moveRow(up.getAttribute('data-move-up'), -1);
     const down = e.target.closest('[data-move-down]');
@@ -343,11 +389,11 @@ async function save() {
       status: row.status || 'active',
       sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : (index + 1) * 10
     };
-    if (row.pricingSource === 'upstream_realtime') {
-      // 实时模型只保存上下架、排序与退款策略，价格和名称始终跟随卡藏 API。
-    } else if (row.pricingByResolution && row.creditsByResolution) {
+    // 所有模型（含卡藏同步模型）都保存名称与价格：留空 = 跟随卡藏目录，
+    // 填了值 = 后台覆盖优先。清空输入即恢复目录值。
+    if (row.pricingByResolution) {
       patch.creditsByResolution = {};
-      for (const [res, val] of Object.entries(row.creditsByResolution)) {
+      for (const [res, val] of Object.entries(row.creditsByResolution || {})) {
         if (val != null && val !== '') patch.creditsByResolution[res] = Number(val) || 0;
       }
       if (row.promoByResolution && Object.keys(row.promoByResolution).length) {
@@ -371,13 +417,14 @@ async function save() {
         }
       }
     } else {
-      patch.creditsPerCall = Number(row.creditsPerCall) || 10;
+      // 同步模型清空输入时不能回写默认价，否则「恢复目录」会固化成当前同步值。
+      if (row.creditsPerCall != null && row.creditsPerCall !== '') {
+        patch.creditsPerCall = Number(row.creditsPerCall) || 0;
+      }
       if (row.promoPrice != null && row.promoPrice !== '') patch.promoPrice = Number(row.promoPrice);
     }
-    if (row.pricingSource !== 'upstream_realtime') {
-      patch.fixedPrice = !!row.fixedPrice;
-      if (displayName) patch.displayName = displayName;
-    }
+    patch.fixedPrice = !!row.fixedPrice;
+    if (displayName) patch.displayName = displayName;
     patch.refundOnViolation = row.refundOnViolation !== false;
     models[row.id] = patch;
   });
@@ -394,5 +441,51 @@ async function save() {
     toast(friendlyFetchError(e), false);
   } finally {
     setButtonBusy(btn, false, '保存上架与 MJ 定价');
+  }
+}
+
+/** 恢复目录值：清掉该行的改名与改价覆盖，保存后价格名称回到卡藏同步值。 */
+async function resetModelRow(modelId) {
+  const row = rows.find((r) => r.id === modelId);
+  if (!row) return;
+  const ok = await adminConfirm({
+    title: '恢复目录值',
+    message: `清空「${row.catalogLabel || row.label}」的后台改名与改价，恢复卡藏目录值？`,
+    confirmLabel: '恢复'
+  });
+  if (!ok) return;
+  row.displayName = '';
+  row.creditsPerCall = row.catalogCreditsPerCall ?? row.creditsPerCall;
+  if (row.pricingByResolution && row.catalogCreditsByResolution) {
+    row.creditsByResolution = { ...row.catalogCreditsByResolution };
+  }
+  row.promoPrice = null;
+  row.promoByResolution = null;
+  row.promoBySpeed = null;
+  const models = {};
+  rows.forEach((r, index) => {
+    const patch = {
+      status: r.status || 'active',
+      sortOrder: Number.isFinite(Number(r.sortOrder)) ? Number(r.sortOrder) : (index + 1) * 10,
+      refundOnViolation: r.refundOnViolation !== false
+    };
+    if (r.id === modelId) {
+      patch.displayName = '';
+      patch.creditsPerCall = 0;
+      patch.creditsByResolution = {};
+      patch.promoPrice = 0;
+      patch.promoByResolution = {};
+      patch.promoBySpeed = {};
+    }
+    models[r.id] = patch;
+  });
+  try {
+    const data = await adminFetch('/api/admin/image-models', { method: 'PUT', body: { models } });
+    rows = (data.models || rows).map((r, i) => ensureMjCreditsBySpeed(normalizeModelRow(r, i)));
+    sortRows();
+    renderTable();
+    toast('已恢复卡藏目录值', true);
+  } catch (e) {
+    toast(friendlyFetchError(e), false);
   }
 }

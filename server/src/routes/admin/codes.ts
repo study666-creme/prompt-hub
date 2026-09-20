@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Env } from '../../env';
 import { ApiError } from '../../lib/errors';
 import { createAdminClient } from '../../lib/supabase';
+import { writeAudit } from '../../middleware/admin-audit';
 import { requireAdminSecret } from '../../middleware/admin';
 import { rateLimit } from '../../middleware/rate-limit';
 
@@ -105,6 +106,13 @@ adminCodeRoutes.patch('/:code', async c => {
   }
 
   const admin = createAdminClient(c.env);
+  const { data: before } = await admin
+    .from('activation_codes')
+    .select('code, active, note')
+    .eq('code', code)
+    .maybeSingle();
+  if (!before) throw new ApiError(404, 'NOT_FOUND', '激活码不存在');
+
   const { data, error } = await admin
     .from('activation_codes')
     .update(patch)
@@ -114,6 +122,16 @@ adminCodeRoutes.patch('/:code', async c => {
 
   if (error) throw error;
   if (!data) throw new ApiError(404, 'NOT_FOUND', '激活码不存在');
+
+  await writeAudit(c, {
+    action: parsed.data.active !== undefined
+      ? (parsed.data.active ? 'code.enable' : 'code.disable')
+      : 'code.update_note',
+    targetType: 'activation_code',
+    targetId: code,
+    before: { active: before.active, note: before.note },
+    after: { active: data.active, note: data.note }
+  });
 
   return c.json({ ok: true, data });
 });
@@ -170,6 +188,21 @@ adminCodeRoutes.post('/', async c => {
     }
     throw error;
   }
+
+  // 激活码是变现物，生成/发卡必须可追溯：否则事后对不上账。
+  await writeAudit(c, {
+    action: 'code.create',
+    targetType: 'activation_code',
+    detail: {
+      count: data?.length ?? rows.length,
+      credits,
+      membershipTier: membershipTier ?? null,
+      membershipDays: membershipDays && membershipDays > 0 ? membershipDays : null,
+      maxUses,
+      note: note ?? null,
+      ids: (data ?? rows).map(r => r.code)
+    }
+  });
 
   return c.json({
     ok: true,

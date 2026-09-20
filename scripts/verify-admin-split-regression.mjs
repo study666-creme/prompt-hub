@@ -17,7 +17,7 @@ const apiJs = read('admin/modules/api.js');
 
 const views = [
   'overview', 'users', 'orders', 'ledger', 'audit', 'announcements',
-  'cards', 'community', 'codes', 'models', 'canvas', 'video-catalog'
+  'cards', 'community', 'codes', 'models', 'canvas', 'canvas-models', 'video-catalog'
 ];
 
 requireTokens('admin.html', admin, [
@@ -99,7 +99,7 @@ forbid('admin-login.html', login, [
   'legacy/admin'
 ]);
 
-console.log('verify-admin-split-regression OK: 10 views + module graph + panels');
+console.log(`verify-admin-split-regression OK: ${views.length} views + module graph + panels`);
 
 function requireTokens(label, text, tokens) {
   const missing = tokens.filter((token) => !text.includes(token));

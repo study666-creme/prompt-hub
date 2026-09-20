@@ -49,6 +49,7 @@ import {
 } from '../../lib/recover-generation-warehouse';
 import {
   computeImageGenerationCost,
+  explicitOperatorCredits,
   resolveImageModelConfig,
   loadImageModelSettings,
   listResolvedImageModels,
@@ -708,6 +709,13 @@ function publicModelPayload(
     modelDiscountLabel: null,
     modelLabel
   });
+  /**
+   * 卡藏同步价只是默认价。运营在后台显式改过价时，展示与扣费都以运营价为准；
+   * 没改过才回退到卡藏实时价。运营价的优先级必须高于同步价，否则后台改价
+   * 对用户侧完全不生效（2026-09-20 前就是这样，运营只能改排序和上下架）。
+   */
+  const operatorCredits = (m: Parameters<typeof explicitOperatorCredits>[1], resolution?: string) =>
+    explicitOperatorCredits(settings, m, resolution);
 
   return listResolvedImageModels(settings, { publicList: true, catalogEntries })
     .filter(isRetainedImageModel)
@@ -753,16 +761,22 @@ function publicModelPayload(
       costBySpeed?.relax
       ?? costByResolution?.[defaultRes]
       ?? computeImageGenerationCost(settings, m.id, defaultRes, tier, memberActive, { catalogEntries });
-    const finalCost = remoteNewApiCredits != null
-      ? withFixedCredits(cost, remoteNewApiCredits, m.label)
-      : cost;
+    // 运营改价优先于卡藏同步价；同步价只在运营没填时兜底。非卡藏模型的售价
+    // 已经由 computeImageGenerationCost 按会员/活动价算好，不在此改写。
+    const operatorFlat = m.provider === 'newapi' ? operatorCredits(m, defaultRes) : null;
+    const finalCost = operatorFlat != null
+      ? withFixedCredits(cost, operatorFlat, m.displayLabel)
+      : remoteNewApiCredits != null
+        ? withFixedCredits(cost, remoteNewApiCredits, m.label)
+        : cost;
     const finalCostByResolution = m.provider === 'newapi' && costByResolution
       ? Object.fromEntries(
           Object.entries(costByResolution).map(([res, resCost]) => {
-            const credits = newApiCreditsForModel(newApiRules, m.upstream, res);
+            const operator = operatorCredits(m, res);
+            const credits = operator ?? newApiCreditsForModel(newApiRules, m.upstream, res);
             return [
               res,
-              credits != null ? withFixedCredits(resCost, credits, m.label) : resCost
+              credits != null ? withFixedCredits(resCost, credits, m.displayLabel) : resCost
             ];
           })
         )
@@ -772,9 +786,10 @@ function publicModelPayload(
         ? Object.fromEntries(
             resolutions.map((res) => [
               res,
-              newApiCreditsForModel(newApiRules, m.upstream, res)
-                ?? m.creditsByResolution?.[res]
-                ?? m.defaultCredits
+              operatorCredits(m, res)
+              ?? newApiCreditsForModel(newApiRules, m.upstream, res)
+              ?? m.creditsByResolution?.[res]
+              ?? m.defaultCredits
             ])
           )
         : m.pricingByResolution
@@ -784,7 +799,8 @@ function publicModelPayload(
       m.provider === 'newapi' && m.pricingByResolution
         ? Object.fromEntries(
             resolutions.map((res) => {
-              const credits = newApiCreditsForModel(newApiRules, m.upstream, res);
+              const credits = operatorCredits(m, res)
+                ?? newApiCreditsForModel(newApiRules, m.upstream, res);
               return [res, credits ?? m.promoByResolution?.[res] ?? m.defaultCredits];
             })
           )
@@ -809,7 +825,9 @@ function publicModelPayload(
     const newApiRule = newApiRuleForModel(m, opts.newApiCatalog);
     return {
       id: m.id,
-      label: m.provider === 'newapi' ? m.label : m.displayLabel,
+      // displayLabel = 运营改名 ?? 目录名，卡藏模型同样遵循（以前写死 m.label，
+      // 后台改了名前台不显示）。
+      label: m.displayLabel,
       catalogLabel: m.label,
       description: sanitizePublicModelDescription(m.description) || null,
       group: m.group,
@@ -882,7 +900,9 @@ async function computeGenerationCostForRequest(
     { mjSpeed: opts?.mjSpeed, catalogEntries }
   );
   if (resolved.provider !== 'newapi') return baseCost;
-  const credits = newApiCreditsForModel(
+  // 后台显式改价优先于卡藏同步价，扣费与前台展示必须一致。
+  const operatorCredits = explicitOperatorCredits(settings, resolved, resolution, opts?.mjSpeed);
+  const credits = operatorCredits ?? newApiCreditsForModel(
     snapshot.rules,
     resolved.upstream,
     resolution,

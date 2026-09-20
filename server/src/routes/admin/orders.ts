@@ -88,6 +88,48 @@ adminOrderRoutes.get('/', async c => {
   });
 });
 
+/**
+ * 订单页自检。空表格有太多种原因（表没建、支付没配、真没订单），页面必须
+ * 自己说清楚是哪种，否则运营看到「暂无订单」只会以为功能是坏的。
+ */
+adminOrderRoutes.get('/health', async c => {
+  const admin = createAdminClient(c.env);
+  const table = await admin
+    .from('payment_orders')
+    .select('order_no, state, created_at', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .limit(1);
+  const tableReady = !table.error;
+  const legacy = await admin
+    .from('activation_codes')
+    .select('code', { count: 'exact', head: true })
+    .like('note', 'payment-order:%');
+
+  const env = c.env;
+  const epayConfigured = Boolean(
+    env.EPAY_MERCHANT_ID?.trim() && env.EPAY_MERCHANT_KEY?.trim()
+      && env.EPAY_API_BASE_URL?.trim() && env.EPAY_CALLBACK_BASE_URL?.trim()
+  );
+
+  return c.json({
+    ok: true,
+    data: {
+      tableReady,
+      tableError: table.error?.message ?? null,
+      orderCount: table.count ?? 0,
+      latestOrderAt: table.data?.[0]?.created_at ?? null,
+      legacyOrderCount: legacy.count ?? 0,
+      epayConfigured,
+      // 支付链路是否完整：缺任一项都无法完成下单，订单表自然一直是空的。
+      paymentChecklist: [
+        { key: 'merchant', label: '易支付商户 ID / 密钥', ok: Boolean(env.EPAY_MERCHANT_ID?.trim() && env.EPAY_MERCHANT_KEY?.trim()) },
+        { key: 'endpoint', label: '易支付接口地址', ok: Boolean(env.EPAY_API_BASE_URL?.trim()) },
+        { key: 'callback', label: '回调地址（回调丢失会导致订单停在待支付）', ok: Boolean(env.EPAY_CALLBACK_BASE_URL?.trim()) }
+      ]
+    }
+  });
+});
+
 /** 历史订单：从 activation_codes.note 里捞出迁移前的订单（只读，不迁移） */
 adminOrderRoutes.get('/legacy-notes', async c => {
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit')) || 100));

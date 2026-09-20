@@ -3,6 +3,7 @@ import type { Env } from '../../env';
 import { jsonError } from '../../lib/errors';
 import {
   adminModelRows,
+  hasExplicitPriceOverride,
   loadImageModelSettingsWithMeta,
   mergeImageModelSettings,
   saveImageModelSettings,
@@ -114,15 +115,39 @@ async function saveImageModelsHandler(c: import('hono').Context<{ Bindings: Env 
   const admin = createAdminClient(c.env);
   const body = (await c.req.json().catch(() => ({}))) as Partial<ImageModelPricingSettings>;
   const { settings: current } = await loadImageModelSettingsWithMeta(admin);
+  // 用当前生效目录（卡藏实时 + 静态兜底）合并：只认静态目录会丢掉实时新增
+  // 模型的覆盖，运营保存后回头看价格没变。
+  const catalogEntries = imageCatalogForNewApiSnapshot(
+    await fetchNewApiModelCatalog(c.env.NEWAPI_API_BASE_URL)
+  );
   const next = mergeImageModelSettings({
     globalDiscountPercent: body.globalDiscountPercent ?? current.globalDiscountPercent,
     models:
       body.models && typeof body.models === 'object' ? body.models : current.models
-  });
+  }, catalogEntries);
   const saved = await saveImageModelSettings(admin, next);
   invalidateImageModelSettingsCache();
   const { persisted, tableReady } = await loadImageModelSettingsWithMeta(admin);
   const currentRows = await currentAdminModelRows(c.env, saved);
+  await writeAudit(c, {
+    action: 'image_models.save',
+    targetType: 'image_models',
+    detail: {
+      count: Object.keys(saved.models).length,
+      renamed: Object.entries(saved.models)
+        .filter(([, override]) => !!override.displayName)
+        .map(([id]) => id),
+      priced: Object.entries(saved.models)
+        .filter(([id, override]) => {
+          const entry = catalogEntries.find(e => e.id === id);
+          return !!entry && hasExplicitPriceOverride(override, entry);
+        })
+        .map(([id]) => id),
+      offline: Object.entries(saved.models)
+        .filter(([, override]) => override.status === 'offline')
+        .map(([id]) => id)
+    }
+  });
   return c.json({
     ok: true,
     data: {

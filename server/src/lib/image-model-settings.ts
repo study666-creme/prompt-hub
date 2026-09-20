@@ -153,8 +153,11 @@ function sanitizeCreditsBySpeed(
   const out: Partial<Record<MjSpeedKey, number>> = {};
   for (const speed of speeds) {
     if (src[speed] == null) continue;
+    // 0 / 空 = 清除该档覆盖，回退目录价；非法值同样忽略。
+    const n = Number(src[speed]);
+    if (!Number.isFinite(n) || n <= 0) continue;
     const def = catalog.defaultCreditsBySpeed?.[speed] ?? catalog.defaultCredits;
-    out[speed] = clampCredits(src[speed], def);
+    out[speed] = clampCredits(n, def);
   }
   return Object.keys(out).length ? out : undefined;
 }
@@ -168,8 +171,11 @@ function sanitizeCreditsByResolution(
   const out: Partial<Record<ImageResolutionKey, number>> = {};
   for (const res of catalog.resolutions) {
     if (src[res] == null) continue;
+    // 0 / 空 = 清除该档覆盖，回退目录价。
+    const n = Number(src[res]);
+    if (!Number.isFinite(n) || n <= 0) continue;
     const def = catalog.defaultCreditsByResolution?.[res] ?? catalog.defaultCredits;
-    out[res] = clampCredits(src[res], def);
+    out[res] = clampCredits(n, def);
   }
   return Object.keys(out).length ? out : undefined;
 }
@@ -232,14 +238,22 @@ export function resolveModelStatus(override: ImageModelOverride): ImageModelStat
   return 'active';
 }
 
+/**
+ * 合并后台提交的定价配置。catalogEntries 必须传「当前生效目录」（卡藏实时快照
+ * + 静态兜底）：只认静态目录时，实时目录里新增的模型（如 gpt-image-2.5 系列）
+ * 的覆盖会被静默丢弃，运营改了价保存后回头看还是原价。
+ */
 export function mergeImageModelSettings(
-  raw: Partial<ImageModelPricingSettings> | null | undefined
+  raw: Partial<ImageModelPricingSettings> | null | undefined,
+  catalogEntries: readonly ImageModelCatalogEntry[] = IMAGE_MODEL_CATALOG
 ): ImageModelPricingSettings {
   const models: Record<string, ImageModelOverride> = {};
   const src = raw?.models && typeof raw.models === 'object' ? raw.models : {};
+  const lookup = new Map(catalogEntries.map(entry => [entry.id.toLowerCase(), entry]));
   for (const [id, patch] of Object.entries(src)) {
     if (!patch || typeof patch !== 'object') continue;
-    if (!getCatalogEntry(id)) continue;
+    const catalog = lookup.get(id.toLowerCase());
+    if (!catalog) continue;
     const status =
       patch.status === 'active' ||
       patch.status === 'maintenance' ||
@@ -251,23 +265,20 @@ export function mergeImageModelSettings(
       status,
       enabled: patch.enabled === false ? false : patch.enabled === true ? true : undefined,
       creditsPerCall:
-        patch.creditsPerCall != null ? clampCredits(patch.creditsPerCall, 10) : undefined,
-      creditsByResolution: (() => {
-        const catalog = getCatalogEntry(id);
-        if (!catalog || !patch.creditsByResolution) return undefined;
-        return sanitizeCreditsByResolution(patch.creditsByResolution, catalog);
-      })(),
-      creditsBySpeed: (() => {
-        const catalog = getCatalogEntry(id);
-        if (!catalog || !patch.creditsBySpeed) return undefined;
-        return sanitizeCreditsBySpeed(patch.creditsBySpeed, catalog);
-      })(),
+        // 0 / 空 = 清除覆盖，回退目录价（卡藏同步模型的恢复入口）。
+        patch.creditsPerCall != null && Number(patch.creditsPerCall) > 0
+          ? clampCredits(patch.creditsPerCall, catalog.defaultCredits)
+          : undefined,
+      creditsByResolution: patch.creditsByResolution
+        ? sanitizeCreditsByResolution(patch.creditsByResolution, catalog)
+        : undefined,
+      creditsBySpeed: patch.creditsBySpeed
+        ? sanitizeCreditsBySpeed(patch.creditsBySpeed, catalog)
+        : undefined,
       promoPrice: sanitizeOptionalPromoCredits(patch.promoPrice),
-      promoByResolution: (() => {
-        const catalog = getCatalogEntry(id);
-        if (!catalog || !patch.promoByResolution) return undefined;
-        return sanitizePromoByResolution(patch.promoByResolution, catalog);
-      })(),
+      promoByResolution: patch.promoByResolution
+        ? sanitizePromoByResolution(patch.promoByResolution, catalog)
+        : undefined,
       promoBySpeed: patch.promoBySpeed ? sanitizePromoBySpeed(patch.promoBySpeed) : undefined,
       sortOrder:
         patch.sortOrder != null && Number.isFinite(Number(patch.sortOrder))
@@ -735,6 +746,53 @@ function computeFromResolved(
   };
 }
 
+/**
+ * 运营是否对该模型显式改过价（卡藏同步模型同样可改价：同步值只是默认值，
+ * 后台填了值就以后台为准，清空即恢复同步）。按模型计价形态取对应字段。
+ */
+export function hasExplicitPriceOverride(
+  override: ImageModelOverride | undefined,
+  catalog: ImageModelCatalogEntry
+): boolean {
+  if (!override) return false;
+  if (catalog.pricingBySpeed) {
+    return Object.values(override.creditsBySpeed ?? {}).some(v => Number.isFinite(Number(v)) && Number(v) > 0);
+  }
+  if (catalog.pricingByResolution) {
+    return Object.values(override.creditsByResolution ?? {}).some(v => Number.isFinite(Number(v)) && Number(v) > 0);
+  }
+  return Number.isFinite(Number(override.creditsPerCall)) && Number(override.creditsPerCall) > 0;
+}
+
+/**
+ * 取运营显式设定的售价。卡藏同步模型默认用同步价；这里只在运营真的填了值时
+ * 返回值，让调用方用运营价覆盖同步价。未填（或填 0/非法）返回 null。
+ */
+export function explicitOperatorCredits(
+  settings: ImageModelPricingSettings,
+  model: {
+    id: string;
+    pricingByResolution: boolean;
+    pricingBySpeed: boolean;
+  },
+  resolution?: string | null,
+  speed?: string | null
+): number | null {
+  const override = settings.models[model.id];
+  if (!override) return null;
+  const pick = (value: unknown): number | null => {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  if (model.pricingBySpeed) {
+    return pick(override.creditsBySpeed?.[(speed || 'relax') as MjSpeedKey]);
+  }
+  if (model.pricingByResolution) {
+    return pick(override.creditsByResolution?.[(resolution || '1k') as ImageResolutionKey]);
+  }
+  return pick(override.creditsPerCall);
+}
+
 export function adminModelRows(
   settings: ImageModelPricingSettings,
   catalogEntries: ImageModelCatalogEntry[] = IMAGE_MODEL_CATALOG
@@ -745,6 +803,9 @@ export function adminModelRows(
     const costLines = buildUpstreamCostLines(catalog);
     const realtimePricing = catalog.provider === 'newapi';
     const realtimeCreditsByResolution = catalog.defaultCreditsByResolution || {};
+    // 卡藏模型：同步值是默认值；运营显式改价后以运营值为准，并保留同步值供对比/恢复。
+    const operatorPrice = hasExplicitPriceOverride(override, catalog);
+    const catalogCreditsByResolution: Partial<Record<ImageResolutionKey, number>> = { ...realtimeCreditsByResolution };
     return {
       id: catalog.id,
       provider: catalog.provider,
@@ -752,8 +813,8 @@ export function adminModelRows(
       uiFamily: catalog.uiFamily,
       upstream: catalog.upstream,
       label: catalog.label,
-      displayName: realtimePricing ? catalog.label : resolved.displayLabel,
-      displayLabel: realtimePricing ? catalog.label : resolved.displayLabel,
+      displayName: resolved.displayLabel,
+      displayLabel: resolved.displayLabel,
       status: resolved.status,
       statusNotice: resolved.statusNotice,
       group: catalog.group,
@@ -765,22 +826,26 @@ export function adminModelRows(
       resolutions: catalog.resolutions,
       enabled: resolved.enabled,
       visible: resolved.visible,
-      creditsPerCall: realtimePricing ? catalog.defaultCredits : resolved.creditsPerCall,
-      creditsByResolution: realtimePricing ? realtimeCreditsByResolution : resolved.creditsByResolution,
-      effectiveCreditsByResolution: realtimePricing
-        ? realtimeCreditsByResolution
-        : resolved.effectiveCreditsByResolution,
+      creditsPerCall: resolved.creditsPerCall,
+      creditsByResolution: resolved.creditsByResolution,
+      effectiveCreditsByResolution: resolved.effectiveCreditsByResolution,
       pricingByResolution: resolved.pricingByResolution,
       creditsBySpeed: resolved.creditsBySpeed,
       effectiveCreditsBySpeed: resolved.effectiveCreditsBySpeed,
       pricingBySpeed: resolved.pricingBySpeed,
-      promoPrice: realtimePricing ? null : resolved.promoPrice,
-      promoByResolution: realtimePricing ? {} : resolved.promoByResolution,
-      promoBySpeed: realtimePricing ? {} : resolved.promoBySpeed,
-      effectiveBaseCredits: realtimePricing ? catalog.defaultCredits : resolved.effectiveBaseCredits,
+      // 活动价对卡藏同步模型同样开放：留空=无活动价，填了以后台为准。
+      promoPrice: resolved.promoPrice,
+      promoByResolution: resolved.promoByResolution,
+      promoBySpeed: resolved.promoBySpeed,
+      effectiveBaseCredits: resolved.effectiveBaseCredits,
       fixedPrice: realtimePricing || resolved.fixedPrice,
       memberDiscountCapPercent: realtimePricing ? null : resolved.memberDiscountCapPercent,
       pricingSource: realtimePricing ? 'upstream_realtime' : 'manual',
+      // 同步模型是否已被运营显式改价（false=价格/名称仍跟随卡藏）。
+      operatorOverride: realtimePricing ? operatorPrice : true,
+      // 卡藏当前同步值：改价后用于对比，「恢复目录值」也靠它定位。
+      catalogCreditsPerCall: realtimePricing ? catalog.defaultCredits : resolved.creditsPerCall,
+      catalogCreditsByResolution: realtimePricing ? catalogCreditsByResolution : resolved.creditsByResolution,
       sortOrder: override.sortOrder ?? catalog.sortOrder
     };
   }).sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, 'zh-CN'));

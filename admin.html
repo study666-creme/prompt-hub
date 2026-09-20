@@ -144,6 +144,7 @@
         <div class="admin-card-head">
           <h2 style="margin:0;font-size:16px">支付订单</h2>
           <div class="admin-row">
+            <button type="button" class="admin-btn admin-btn--sm" id="orderHealthBtn" title="检查订单表与支付配置是否就绪">自检</button>
             <select id="orderStateFilter" class="admin-input-sm" aria-label="订单状态">
               <option value="">全部状态</option>
               <option value="paid">已支付</option>
@@ -425,7 +426,7 @@
     <section class="admin-panel" id="panel-models" hidden>
       <div class="admin-card">
         <h2 style="margin:0 0 8px;font-size:16px">当前生图模型</h2>
-        <p class="admin-hint">全能模型2与香蕉的模型、参数和价格由卡藏 API 自动同步，按 1 元 = 100 积分换算，不接受手动改价。MJ 保留 Relax / Fast / Turbo 分档配置。上游渠道排障请到卡藏控制台。</p>
+        <p class="admin-hint">模型、参数与价格默认由卡藏 API 自动同步（1 元 = 100 积分）。<strong>名称与价格可以自己改</strong>：填了值就以后台为准并标「覆盖」，清空输入或点「恢复目录」即回到卡藏同步值。MJ 保留 Relax / Fast / Turbo 分档配置。上游渠道排障请到卡藏控制台。</p>
         <p class="admin-msg admin-msg--err" id="modelsPersistWarn" hidden></p>
         <div class="admin-view-tabs admin-view-tabs--inline" id="modelFamilyTabs" style="margin-bottom:12px">
           <button type="button" class="admin-view-tab is-active" data-model-family="all">全部</button>
@@ -628,7 +629,7 @@
         <div class="admin-card-head">
           <h2 style="margin:0;font-size:16px">视频目录控制</h2>
         </div>
-        <p class="admin-hint">卡藏实时目录 + 后台覆盖。覆盖优先：把计价方式改为按秒/按次、调整价格或按档位覆盖、直接下架，都在这里改，保存后 30 秒内全站生效；清除覆盖即恢复卡藏目录原值。20260909 计费事故的防复发面板。</p>
+        <p class="admin-hint">卡藏实时目录 + 后台覆盖。覆盖优先：把计价方式改为按秒/按次、调整价格或按档位覆盖、直接下架，都在这里改，保存后 30 秒内全站生效；清除覆盖即恢复卡藏目录原值。列表包含目录里全部视频模型（在售 / 无线路 / 已下架），以及已从目录移除但覆盖仍挂着的「已失效」条目——后者只在后台可见，可随时删除。20260909 计费事故的防复发面板。</p>
         <div id="vcEditor" hidden></div>
         <div class="admin-table-wrap">
           <table class="admin-table admin-table--compact">
@@ -644,11 +645,11 @@
         <div class="admin-card-head">
           <h2 style="margin:0;font-size:16px">操作审计</h2>
         </div>
-        <p class="admin-hint">所有后台写操作（用户/订单/社区/激活码/模型定价）自动记录：操作密钥指纹、变更前后值、IP。只读查询。</p>
+        <p class="admin-hint">所有后台写操作自动记录：哪把管理密钥（只存指纹，不存密钥本身）、对谁、改了什么、从什么改成什么、来自哪个 IP。只读、删不掉也改不掉——出事时用它倒查。用户 / 积分 / 订单 / 社区 / 激活码 / 模型定价 / 公告 / 视频目录均已接入。</p>
         <div class="admin-search-bar">
           <div class="admin-field">
             <label for="auditActionSearch">按动作筛选</label>
-            <input type="search" id="auditActionSearch" autocomplete="off" spellcheck="false" placeholder="如 user / order / community / code">
+            <input type="search" id="auditActionSearch" autocomplete="off" spellcheck="false" placeholder="如 user / order / community / code / image_models">
           </div>
           <button type="button" class="admin-btn admin-btn--primary" id="auditSearchBtn">查询</button>
         </div>
@@ -660,8 +661,8 @@
                 <th>操作人</th>
                 <th>动作</th>
                 <th>目标</th>
-                <th>变更前</th>
-                <th>变更后</th>
+                <th>明细</th>
+                <th>变更前 → 变更后</th>
               </tr>
             </thead>
             <tbody id="auditTableBody"></tbody>

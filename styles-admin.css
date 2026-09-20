@@ -660,6 +660,8 @@ table.admin-table {
   padding: 10px 12px;
   border-radius: 8px;
   font-size: 13px;
+  /* 自检结论是多行文本，靠 white-space: pre-line 保留换行 */
+  white-space: pre-line;
 }
 
 .admin-msg--err {

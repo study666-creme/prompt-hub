@@ -47,12 +47,20 @@ adminVideoCatalogRoutes.get('/', async c => {
       routes: routes.map(r => ({ channelId: r.channelId, channelName: r.channelName || `渠道${r.channelId}` }))
     };
   });
+  // 目录里已经不存在、但覆盖还挂着的模型。面板以前只遍历目录，这些条目
+  // 既看不见也删不掉，却仍在计费时生效（或一直占着「已下架」状态）。
+  const liveIds = new Set(videos.map(m => m.id));
+  const liveUpstreams = new Set(videos.map(m => m.upstreamModel));
+  const orphans = Object.values(overrides.models)
+    .filter(o => !liveIds.has(o.id) && !liveUpstreams.has(o.id))
+    .map(o => ({ id: o.id, override: o }));
   return c.json({
     ok: true,
     data: {
       catalogAvailable: snapshot.available,
       routeSnapshotAvailable: routeSnapshot.available,
       items,
+      orphans,
       overrides: overrides.models
     }
   });
