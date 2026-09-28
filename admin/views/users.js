@@ -155,6 +155,17 @@ export async function showUserDetail(userId) {
         <button type="button" class="admin-btn admin-btn--primary" id="saveUserBtn">保存修改</button>
         <button type="button" class="admin-btn" id="extend30Btn">会员 +30 天</button>
       </div>
+      <h3 style="margin:20px 0 10px;font-size:15px">重置登录密码</h3>
+      <p class="admin-hint">卡藏画布（画布 / 卡片库）与 Prompt Hub 共用这套账号，这里改的就是画布侧的登录密码，改完立即生效；已登录的设备不会掉线，但要改密码就得用新的。</p>
+      <div class="admin-field">
+        <label for="newPasswordInput">新密码（8–72 位）</label>
+        <input type="password" id="newPasswordInput" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false" maxlength="72" placeholder="至少 8 位，建议 12 位以上">
+      </div>
+      <label class="admin-check"><input type="checkbox" id="newPasswordShow"> 显示明文，便于核对与转达</label>
+      <div class="admin-form-actions">
+        <button type="button" class="admin-btn admin-btn--primary" id="savePasswordBtn">修改密码</button>
+        <button type="button" class="admin-btn" id="genPasswordBtn">生成随机密码</button>
+      </div>
       ${banBlock}
       <h3 style="margin:20px 0 10px;font-size:15px;color:var(--danger)">删除账号</h3>
       <p class="admin-hint">会删除 Auth 账号、数据库资料及存储文件，不可恢复。优先考虑封禁。</p>
@@ -182,6 +193,19 @@ export async function showUserDetail(userId) {
     $('banBtn')?.addEventListener('click', () => void toggleBan(u, true));
     $('unbanBtn')?.addEventListener('click', () => void toggleBan(u, false));
     $('deleteUserBtn')?.addEventListener('click', () => void deleteUser(u));
+    $('newPasswordShow')?.addEventListener('change', (e) => {
+      const input = $('newPasswordInput');
+      if (input) input.type = e.target.checked ? 'text' : 'password';
+    });
+    $('genPasswordBtn')?.addEventListener('click', () => {
+      const input = $('newPasswordInput');
+      if (!input) return;
+      input.value = randomPassword();
+      input.type = 'text';
+      const show = $('newPasswordShow');
+      if (show) show.checked = true;
+    });
+    $('savePasswordBtn')?.addEventListener('click', () => void savePassword(u));
   } catch (e) {
     box.innerHTML = '<p class="admin-msg admin-msg--err">' + esc(friendlyFetchError(e)) + '</p>';
   }
@@ -272,6 +296,55 @@ async function deleteUser(u) {
     void load(true);
   } catch (e) {
     toast(friendlyFetchError(e), false);
+    setButtonBusy(btn, false);
+  }
+}
+
+/** 便于口述/手抄的随机密码：排除易混字符，用拒绝采样避免取模偏置。 */
+function randomPassword(length = 14) {
+  const alphabet = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const limit = Math.floor(256 / alphabet.length) * alphabet.length;
+  const bytes = new Uint8Array(length);
+  const chars = [];
+  while (chars.length < length) {
+    crypto.getRandomValues(bytes);
+    for (const byte of bytes) {
+      if (chars.length >= length) break;
+      if (byte < limit) chars.push(alphabet[byte % alphabet.length]);
+    }
+  }
+  return chars.join('');
+}
+
+async function savePassword(u) {
+  const input = $('newPasswordInput');
+  const password = (input?.value || '').trim();
+  if (password.length < 8 || password.length > 72) {
+    toast('新密码需 8–72 位', false);
+    return;
+  }
+  const ok = await adminConfirm({
+    title: '重置登录密码',
+    message: `把 ${u.email || u.displayName || u.userId} 的登录密码改成填写的这串？\n\n改完立即生效，旧密码随即失效，已登录的设备不受影响。`,
+    confirmLabel: '确认修改'
+  });
+  if (!ok) return;
+
+  const btn = $('savePasswordBtn');
+  setButtonBusy(btn, true, '提交中…');
+  try {
+    await adminFetch(`/api/admin/users/${encodeURIComponent(u.userId)}/password`, {
+      method: 'POST',
+      body: { password }
+    });
+    // 保持明文可见，方便复制转达；清空反而要重新输入一遍。
+    if (input) input.type = 'text';
+    const show = $('newPasswordShow');
+    if (show) show.checked = true;
+    toast('密码已更新，请把新密码发给用户', true, 6000);
+  } catch (e) {
+    toast('修改失败：' + friendlyFetchError(e), false);
+  } finally {
     setButtonBusy(btn, false);
   }
 }

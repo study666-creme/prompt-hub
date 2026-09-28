@@ -40,6 +40,14 @@ const banSchema = z.object({
   reason: z.string().max(300).optional()
 });
 
+// 上限 72 位是 bcrypt 的输入上限，超出部分会被上游截断，不如直接拒绝。
+const passwordSchema = z.object({
+  password: z
+    .string()
+    .min(8, '密码至少 8 位')
+    .max(72, '密码最长 72 位')
+});
+
 async function enrichProfileRow(
   admin: ReturnType<typeof createAdminClient>,
   profile: Profile,
@@ -385,6 +393,51 @@ adminUserRoutes.post('/:userId/ban', async c => {
   });
 
   return c.json({ ok: true, data: { userId, banned, reason: patch.ban_reason } });
+});
+
+/**
+ * 重置登录密码。卡藏画布（画布 / 卡片库）与 Prompt Hub 共用同一套
+ * Supabase Auth 账号，所以这里改的就是用户在画布侧的登录密码。
+ */
+adminUserRoutes.post('/:userId/password', async c => {
+  const userId = c.req.param('userId');
+  const parsed = passwordSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    throw new ApiError(400, 'INVALID_BODY', parsed.error.issues[0]?.message || '参数无效');
+  }
+  const admin = createAdminClient(c.env);
+
+  const { data: authUser, error: loadErr } = await admin.auth.admin.getUserById(userId);
+  if (loadErr || !authUser?.user) throw new ApiError(404, 'NOT_FOUND', '用户不存在');
+
+  const { error: updateErr } = await admin.auth.admin.updateUserById(userId, {
+    password: parsed.data.password
+  });
+  if (updateErr) {
+    throw new ApiError(502, 'PASSWORD_UPDATE_FAILED', updateErr.message || '修改密码失败');
+  }
+
+  // 审计只落邮箱与长度，明文密码绝不进库、不进日志。
+  await writeAudit(c, {
+    action: 'user.password',
+    targetType: 'user',
+    targetId: userId,
+    before: null,
+    after: null,
+    detail: {
+      email: authUser.user.email ?? null,
+      passwordLength: parsed.data.password.length
+    }
+  });
+
+  return c.json({
+    ok: true,
+    data: {
+      userId,
+      email: authUser.user.email ?? null,
+      passwordChanged: true
+    }
+  });
 });
 
 adminUserRoutes.delete('/:userId', async c => {

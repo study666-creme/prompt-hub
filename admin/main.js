@@ -4,7 +4,7 @@ import { $, adminConfirm, closeAdminConfirm, closeUserModal, esc, setupConfirmMo
 import { adminFetch, apiBase, clearSession, friendlyFetchError, resolveApiBase, saveSession, session } from './modules/api.js';
 
 import * as overview from './views/overview.js';
-import * as users from './views/users.js';
+import * as users from './views/users.js?v=20260928a';
 import * as orders from './views/orders.js';
 import * as ledger from './views/ledger.js?v=20260910b';
 import * as audit from './views/audit.js';
