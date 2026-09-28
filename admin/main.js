@@ -7,7 +7,7 @@ import * as overview from './views/overview.js';
 import * as users from './views/users.js?v=20260928a';
 import * as orders from './views/orders.js';
 import * as ledger from './views/ledger.js?v=20260910b';
-import * as audit from './views/audit.js';
+import * as audit from './views/audit.js?v=20260928b';
 import * as announcements from './views/announcements.js';
 import * as videoCatalog from './views/video-catalog.js';
 import * as cards from './views/cards.js';

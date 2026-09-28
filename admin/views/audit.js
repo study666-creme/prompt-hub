@@ -18,6 +18,7 @@ const ACTION_LABELS = {
   'user.credits': '调整用户积分',
   'user.ban': '封禁用户',
   'user.unban': '解封用户',
+  'user.password': '重置用户登录密码',
   'order.manual_grant': '人工补发积分',
   'community.hide': '隐藏社区帖子',
   'community.delete': '删除社区帖子',
